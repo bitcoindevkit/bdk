@@ -1,0 +1,8 @@
+[package]
+name = "magical-bitcoin-wallet"
+version = "0.1.0"
+authors = ["Riccardo Casatta <riccardo@casatta.it>", "Alekos Filini <alekos.filini@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+"electrum_client" = { version = "^0.1", path = "../electrum_client" }
