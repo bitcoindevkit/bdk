@@ -2,8 +2,21 @@
 name = "electrum_client"
 version = "0.1.0"
 authors = ["Alekos Filini <alekos.filini@gmail.com>"]
-edition = "2018"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+# loosely based on https://github.com/evgeniy-scherbina/rust-electrumx-client
 
 [dependencies]
+log = "^0.4"
+serde = { version = "^1.0", features = ["derive"] }
+serde_json = { version = "^1.0" }
+socks = { version = "^0.3", optional = true }
+openssl = { version = "^0.10", optional = true }
+
+[dependencies.bitcoin]
+version = "0.23"
+features = ["use-serde"]
+
+[features]
+debug-calls = []
+proxy = ["socks"]
+ssl = ["openssl"]
