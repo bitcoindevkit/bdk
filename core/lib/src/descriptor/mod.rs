@@ -11,7 +11,7 @@ use bitcoin::secp256k1::{All, Secp256k1};
 use bitcoin::util::bip32::{DerivationPath, ExtendedPrivKey, Fingerprint};
 use bitcoin::PublicKey;
 
-use miniscript::descriptor::Descriptor;
+pub use miniscript::descriptor::Descriptor;
 
 use serde::{Deserialize, Serialize};
 
@@ -107,9 +107,14 @@ impl ExtendedDescriptor {
         &self,
         xpub: &str,
     ) -> Result<impl Deref<Target = DescriptorExtendedKey> + '_, Error> {
-        if let None = self.cache.borrow().get(xpub) {
-            let parsed = DescriptorExtendedKey::from_str(xpub)?;
-            self.cache.borrow_mut().insert(xpub.to_string(), parsed);
+        // TODO: this sucks, there's got to be a better way
+        {
+            let mut cache = self.cache.borrow_mut();
+
+            if let None = cache.get(xpub) {
+                let parsed = DescriptorExtendedKey::from_str(xpub)?;
+                cache.insert(xpub.to_string(), parsed);
+            }
         }
 
         Ok(Ref::map(self.cache.borrow(), |map| map.get(xpub).unwrap()))
@@ -119,9 +124,10 @@ impl ExtendedDescriptor {
         // `string` could be either an xpub/xprv or a raw pubkey. try both, fail if none of them
         // worked out.
 
+        // TODO: parse WIF keys
         match self.parse_xpub(string) {
             Ok(xpub) => Ok(xpub.derive(&self.ctx, index)?),
-            Err(Error::InvalidPrefix(_)) => Ok(PublicKey::from_str(string)?),
+            Err(Error::Base58(_)) => Ok(PublicKey::from_str(string)?),
             Err(e) => Err(e),
         }
     }

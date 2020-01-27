@@ -1,6 +1,6 @@
-extern crate bitcoin;
+pub extern crate bitcoin;
 extern crate log;
-extern crate miniscript;
+pub extern crate miniscript;
 extern crate serde;
 extern crate serde_json;
 
