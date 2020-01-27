@@ -1,3 +1,4 @@
+#[derive(Debug)]
 pub enum Error {
     InternalError,
     InvalidPrefix(Vec<u8>),
