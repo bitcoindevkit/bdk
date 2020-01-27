@@ -3,8 +3,11 @@ rust:
   - stable
 #  - 1.31.0
 #  - 1.22.0
+before_script:
+  - rustup component add rustfmt
 script:
   - cd $TRAVIS_BUILD_DIR/core/lib/
+  - cargo fmt -- --check --verbose
   - cargo build --verbose --all
   - cargo test --verbose --all
 
