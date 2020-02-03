@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::convert::{Into, TryFrom};
 use std::fmt;
@@ -222,30 +223,40 @@ impl std::clone::Clone for ExtendedDescriptor {
 }
 
 impl ExtendedDescriptor {
+    fn parse_string(string: &str) -> Result<(String, Box<dyn Key>), Error> {
+        if let Ok(pk) = PublicKey::from_str(string) {
+            return Ok((string.to_string(), Box::new(pk)));
+        } else if let Ok(sk) = PrivateKey::from_wif(string) {
+            return Ok((string.to_string(), Box::new(sk)));
+        } else if let Ok(ext_key) = DescriptorExtendedKey::from_str(string) {
+            return Ok((string.to_string(), Box::new(ext_key)));
+        }
+
+        return Err(Error::KeyParsingError(string.to_string()));
+    }
+
     fn new(sd: StringDescriptor) -> Result<Self, Error> {
         let ctx = Secp256k1::gen_new();
-        let mut keys: BTreeMap<String, Box<dyn Key>> = BTreeMap::new();
+        let keys: RefCell<BTreeMap<String, Box<dyn Key>>> = RefCell::new(BTreeMap::new());
 
         let translatefpk = |string: &String| -> Result<_, Error> {
-            if let Ok(pk) = PublicKey::from_str(string) {
-                keys.insert(string.to_string(), Box::new(pk));
-            } else if let Ok(sk) = PrivateKey::from_wif(string) {
-                keys.insert(string.to_string(), Box::new(sk));
-            } else if let Ok(ext_key) = DescriptorExtendedKey::from_str(string) {
-                keys.insert(string.to_string(), Box::new(ext_key));
-            } else {
-                return Err(Error::KeyParsingError(string.clone()));
-            }
+            let (key, parsed) = Self::parse_string(string)?;
+            keys.borrow_mut().insert(key, parsed);
 
             Ok(DummyKey::default())
         };
-        let translatefpkh = |_: &String| -> Result<_, Error> { Ok(DummyKey::default()) };
+        let translatefpkh = |string: &String| -> Result<_, Error> {
+            let (key, parsed) = Self::parse_string(string)?;
+            keys.borrow_mut().insert(key, parsed);
+
+            Ok(DummyKey::default())
+        };
 
         sd.translate_pk(translatefpk, translatefpkh)?;
 
         Ok(ExtendedDescriptor {
             internal: sd,
-            keys,
+            keys: keys.into_inner(),
             ctx,
         })
     }
