@@ -4,10 +4,18 @@ pub enum Error {
     InvalidPrefix(Vec<u8>),
     HardenedDerivationOnXpub,
     MissingClosingBracket,
+    KeyParsingError(String),
 
     BIP32(bitcoin::util::bip32::Error),
     Base58(bitcoin::util::base58::Error),
     PK(bitcoin::util::key::Error),
+    Miniscript(miniscript::Error),
+}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
 }
 
 impl From<bitcoin::util::bip32::Error> for Error {
@@ -25,5 +33,11 @@ impl From<bitcoin::util::base58::Error> for Error {
 impl From<bitcoin::util::key::Error> for Error {
     fn from(err: bitcoin::util::key::Error) -> Self {
         Error::PK(err)
+    }
+}
+
+impl From<miniscript::Error> for Error {
+    fn from(err: miniscript::Error) -> Self {
+        Error::Miniscript(err)
     }
 }

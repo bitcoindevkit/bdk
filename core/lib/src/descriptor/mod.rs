@@ -1,15 +1,13 @@
-use std::cell::{Ref, RefCell};
 use std::collections::BTreeMap;
 use std::convert::{Into, TryFrom};
 use std::fmt;
-use std::ops::Deref;
 use std::str::FromStr;
 
 use bitcoin::blockdata::script::Script;
 use bitcoin::hashes::{hash160, Hash};
 use bitcoin::secp256k1::{All, Secp256k1};
 use bitcoin::util::bip32::{DerivationPath, ExtendedPrivKey, Fingerprint};
-use bitcoin::PublicKey;
+use bitcoin::{PrivateKey, PublicKey};
 
 pub use miniscript::descriptor::Descriptor;
 
@@ -92,49 +90,173 @@ where
     }
 }
 
+trait Key: std::fmt::Debug {
+    fn fingerprint(&self, secp: &Secp256k1<All>) -> Option<Fingerprint>;
+    fn as_public_key(&self, secp: &Secp256k1<All>, index: Option<u32>) -> Result<PublicKey, Error>;
+    fn as_secret_key(
+        &self,
+        secp: &Secp256k1<All>,
+        index: Option<u32>,
+    ) -> Result<Option<PrivateKey>, Error>;
+    fn xprv(&self) -> Option<ExtendedPrivKey>;
+    fn full_path(&self, index: u32) -> Option<DerivationPath>;
+}
+
+impl Key for PublicKey {
+    fn fingerprint(&self, _secp: &Secp256k1<All>) -> Option<Fingerprint> {
+        None
+    }
+
+    fn as_public_key(
+        &self,
+        _secp: &Secp256k1<All>,
+        _index: Option<u32>,
+    ) -> Result<PublicKey, Error> {
+        Ok(PublicKey::clone(self))
+    }
+
+    fn as_secret_key(
+        &self,
+        _secp: &Secp256k1<All>,
+        _index: Option<u32>,
+    ) -> Result<Option<PrivateKey>, Error> {
+        Ok(None)
+    }
+
+    fn xprv(&self) -> Option<ExtendedPrivKey> {
+        None
+    }
+
+    fn full_path(&self, _index: u32) -> Option<DerivationPath> {
+        None
+    }
+}
+
+impl Key for PrivateKey {
+    fn fingerprint(&self, _secp: &Secp256k1<All>) -> Option<Fingerprint> {
+        None
+    }
+
+    fn as_public_key(
+        &self,
+        secp: &Secp256k1<All>,
+        _index: Option<u32>,
+    ) -> Result<PublicKey, Error> {
+        Ok(self.public_key(secp))
+    }
+
+    fn as_secret_key(
+        &self,
+        _secp: &Secp256k1<All>,
+        _index: Option<u32>,
+    ) -> Result<Option<PrivateKey>, Error> {
+        Ok(Some(PrivateKey::clone(self)))
+    }
+
+    fn xprv(&self) -> Option<ExtendedPrivKey> {
+        None
+    }
+
+    fn full_path(&self, _index: u32) -> Option<DerivationPath> {
+        None
+    }
+}
+
+impl Key for DescriptorExtendedKey {
+    fn fingerprint(&self, secp: &Secp256k1<All>) -> Option<Fingerprint> {
+        Some(self.root_xpub(secp).fingerprint())
+    }
+
+    fn as_public_key(&self, secp: &Secp256k1<All>, index: Option<u32>) -> Result<PublicKey, Error> {
+        Ok(self.derive_xpub(secp, index.unwrap_or(0))?.public_key)
+    }
+
+    fn as_secret_key(
+        &self,
+        secp: &Secp256k1<All>,
+        index: Option<u32>,
+    ) -> Result<Option<PrivateKey>, Error> {
+        if self.secret.is_none() {
+            return Ok(None);
+        }
+
+        let derivation_path = self.full_path(index.unwrap_or(0));
+        Ok(Some(
+            self.secret
+                .unwrap()
+                .derive_priv(secp, &derivation_path)?
+                .private_key,
+        ))
+    }
+
+    fn xprv(&self) -> Option<ExtendedPrivKey> {
+        self.secret
+    }
+
+    fn full_path(&self, index: u32) -> Option<DerivationPath> {
+        Some(self.full_path(index))
+    }
+}
+
 #[serde(try_from = "&str", into = "String")]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ExtendedDescriptor {
+    #[serde(flatten)]
     internal: StringDescriptor,
+
     #[serde(skip)]
-    cache: RefCell<BTreeMap<String, DescriptorExtendedKey>>,
+    keys: BTreeMap<String, Box<dyn Key>>,
+
     #[serde(skip)]
     ctx: Secp256k1<All>,
 }
 
-impl ExtendedDescriptor {
-    fn parse_xpub(
-        &self,
-        xpub: &str,
-    ) -> Result<impl Deref<Target = DescriptorExtendedKey> + '_, Error> {
-        // TODO: this sucks, there's got to be a better way
-        {
-            let mut cache = self.cache.borrow_mut();
-
-            if let None = cache.get(xpub) {
-                let parsed = DescriptorExtendedKey::from_str(xpub)?;
-                cache.insert(xpub.to_string(), parsed);
-            }
+impl std::clone::Clone for ExtendedDescriptor {
+    fn clone(&self) -> Self {
+        Self {
+            internal: self.internal.clone(),
+            ctx: self.ctx.clone(),
+            keys: BTreeMap::new(),
         }
-
-        Ok(Ref::map(self.cache.borrow(), |map| map.get(xpub).unwrap()))
     }
+}
 
-    fn get_pubkey(&self, string: &str, index: u32) -> Result<PublicKey, Error> {
-        // `string` could be either an xpub/xprv or a raw pubkey. try both, fail if none of them
-        // worked out.
+impl ExtendedDescriptor {
+    fn new(sd: StringDescriptor) -> Result<Self, Error> {
+        let ctx = Secp256k1::gen_new();
+        let mut keys: BTreeMap<String, Box<dyn Key>> = BTreeMap::new();
 
-        // TODO: parse WIF keys
-        match self.parse_xpub(string) {
-            Ok(xpub) => Ok(xpub.derive(&self.ctx, index)?),
-            Err(Error::Base58(_)) => Ok(PublicKey::from_str(string)?),
-            Err(e) => Err(e),
-        }
+        let translatefpk = |string: &String| -> Result<_, Error> {
+            if let Ok(pk) = PublicKey::from_str(string) {
+                keys.insert(string.to_string(), Box::new(pk));
+            } else if let Ok(sk) = PrivateKey::from_wif(string) {
+                keys.insert(string.to_string(), Box::new(sk));
+            } else if let Ok(ext_key) = DescriptorExtendedKey::from_str(string) {
+                keys.insert(string.to_string(), Box::new(ext_key));
+            } else {
+                return Err(Error::KeyParsingError(string.clone()));
+            }
+
+            Ok(DummyKey::default())
+        };
+        let translatefpkh = |_: &String| -> Result<_, Error> { Ok(DummyKey::default()) };
+
+        sd.translate_pk(translatefpk, translatefpkh)?;
+
+        Ok(ExtendedDescriptor {
+            internal: sd,
+            keys,
+            ctx,
+        })
     }
 
     pub fn derive(&self, index: u32) -> Result<DerivedDescriptor, Error> {
-        let translatefpk =
-            |xpub: &String| -> Result<_, Error> { Ok(self.get_pubkey(xpub, index)?) };
+        let translatefpk = |xpub: &String| {
+            self.keys
+                .get(xpub)
+                .unwrap()
+                .as_public_key(&self.ctx, Some(index))
+        };
         let translatefpkh =
             |xpub: &String| Ok(hash160::Hash::hash(&translatefpk(xpub)?.to_bytes()));
 
@@ -142,30 +264,11 @@ impl ExtendedDescriptor {
     }
 
     pub fn get_xprv(&self) -> Vec<ExtendedPrivKey> {
-        // TODO: parse WIF keys
-
-        let mut answer = Vec::new();
-
-        let translatefpk = |string: &String| -> Result<_, ()> {
-            let extended_key = match self.parse_xpub(string) {
-                Err(_) => return Ok(DummyKey::default()),
-                Ok(ek) => ek,
-            };
-
-            if let Some(xprv) = extended_key.secret {
-                answer.push(xprv.clone());
-            }
-
-            Ok(DummyKey::default())
-        };
-        let translatefpkh = |_: &String| -> Result<_, ()> { Ok(DummyKey::default()) };
-
-        // should never fail. if we can't parse an xpub, we just skip it
-        self.internal
-            .translate_pk(translatefpk, translatefpkh)
-            .unwrap();
-
-        answer
+        self.keys
+            .iter()
+            .filter(|(_, v)| v.xprv().is_some())
+            .map(|(_, v)| v.xprv().unwrap())
+            .collect()
     }
 
     pub fn get_hd_keypaths(
@@ -174,24 +277,14 @@ impl ExtendedDescriptor {
     ) -> Result<BTreeMap<PublicKey, (Fingerprint, DerivationPath)>, Error> {
         let mut answer = BTreeMap::new();
 
-        let translatefpk = |string: &String| -> Result<_, Error> {
-            let extended_key = match self.parse_xpub(string) {
-                Err(_) => return Ok(DummyKey::default()),
-                Ok(ek) => ek,
-            };
+        for (_, key) in &self.keys {
+            if let Some(fingerprint) = key.fingerprint(&self.ctx) {
+                let derivation_path = key.full_path(index).unwrap();
+                let pubkey = key.as_public_key(&self.ctx, Some(index))?;
 
-            let fingerprint = extended_key.root_xpub(&self.ctx).fingerprint();
-
-            let derivation_path = extended_key.full_path(index);
-            let pubkey = extended_key.derive_xpub(&self.ctx, index)?.public_key;
-
-            answer.insert(pubkey, (fingerprint, derivation_path));
-
-            Ok(DummyKey::default())
-        };
-        let translatefpkh = |_: &String| -> Result<_, Error> { Ok(DummyKey::default()) };
-
-        self.internal.translate_pk(translatefpk, translatefpkh)?;
+                answer.insert(pubkey, (fingerprint, derivation_path));
+            }
+        }
 
         Ok(answer)
     }
@@ -215,19 +308,24 @@ impl ExtendedDescriptor {
 }
 
 impl TryFrom<&str> for ExtendedDescriptor {
-    type Error = miniscript::Error;
+    type Error = Error;
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
-        Ok(ExtendedDescriptor {
-            internal: StringDescriptor::from_str(value)?,
-            cache: RefCell::new(BTreeMap::new()),
-            ctx: Secp256k1::gen_new(),
-        })
+        let internal = StringDescriptor::from_str(value)?;
+        ExtendedDescriptor::new(internal)
+    }
+}
+
+impl TryFrom<StringDescriptor> for ExtendedDescriptor {
+    type Error = Error;
+
+    fn try_from(other: StringDescriptor) -> Result<Self, Self::Error> {
+        ExtendedDescriptor::new(other)
     }
 }
 
 impl FromStr for ExtendedDescriptor {
-    type Err = miniscript::Error;
+    type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Self::try_from(s)
