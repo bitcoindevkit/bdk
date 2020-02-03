@@ -1,3 +1,5 @@
+extern crate magical_bitcoin_wallet;
+
 use std::str::FromStr;
 
 use magical_bitcoin_wallet::bitcoin::*;
