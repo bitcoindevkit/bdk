@@ -1,0 +1,16 @@
+language: rust
+rust:
+  - stable
+#  - 1.31.0
+#  - 1.22.0
+script:
+  - cd $TRAVIS_BUILD_DIR/core/lib/
+  - cargo build --verbose --all
+  - cargo test --verbose --all
+
+notifications:
+  email: false
+
+# before_cache:
+#  - rm -rf "$TRAVIS_HOME/.cargo/registry/src"
+#cache: cargo
