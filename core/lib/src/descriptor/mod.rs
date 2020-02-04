@@ -94,11 +94,7 @@ where
 trait Key: std::fmt::Debug {
     fn fingerprint(&self, secp: &Secp256k1<All>) -> Option<Fingerprint>;
     fn as_public_key(&self, secp: &Secp256k1<All>, index: Option<u32>) -> Result<PublicKey, Error>;
-    fn as_secret_key(
-        &self,
-        secp: &Secp256k1<All>,
-        index: Option<u32>,
-    ) -> Result<Option<PrivateKey>, Error>;
+    fn as_secret_key(&self) -> Option<PrivateKey>;
     fn xprv(&self) -> Option<ExtendedPrivKey>;
     fn full_path(&self, index: u32) -> Option<DerivationPath>;
 }
@@ -116,12 +112,8 @@ impl Key for PublicKey {
         Ok(PublicKey::clone(self))
     }
 
-    fn as_secret_key(
-        &self,
-        _secp: &Secp256k1<All>,
-        _index: Option<u32>,
-    ) -> Result<Option<PrivateKey>, Error> {
-        Ok(None)
+    fn as_secret_key(&self) -> Option<PrivateKey> {
+        None
     }
 
     fn xprv(&self) -> Option<ExtendedPrivKey> {
@@ -146,12 +138,8 @@ impl Key for PrivateKey {
         Ok(self.public_key(secp))
     }
 
-    fn as_secret_key(
-        &self,
-        _secp: &Secp256k1<All>,
-        _index: Option<u32>,
-    ) -> Result<Option<PrivateKey>, Error> {
-        Ok(Some(PrivateKey::clone(self)))
+    fn as_secret_key(&self) -> Option<PrivateKey> {
+        Some(PrivateKey::clone(self))
     }
 
     fn xprv(&self) -> Option<ExtendedPrivKey> {
@@ -172,22 +160,8 @@ impl Key for DescriptorExtendedKey {
         Ok(self.derive_xpub(secp, index.unwrap_or(0))?.public_key)
     }
 
-    fn as_secret_key(
-        &self,
-        secp: &Secp256k1<All>,
-        index: Option<u32>,
-    ) -> Result<Option<PrivateKey>, Error> {
-        if self.secret.is_none() {
-            return Ok(None);
-        }
-
-        let derivation_path = self.full_path(index.unwrap_or(0));
-        Ok(Some(
-            self.secret
-                .unwrap()
-                .derive_priv(secp, &derivation_path)?
-                .private_key,
-        ))
+    fn as_secret_key(&self) -> Option<PrivateKey> {
+        None
     }
 
     fn xprv(&self) -> Option<ExtendedPrivKey> {
@@ -279,6 +253,14 @@ impl ExtendedDescriptor {
             .iter()
             .filter(|(_, v)| v.xprv().is_some())
             .map(|(_, v)| v.xprv().unwrap())
+            .collect()
+    }
+
+    pub fn get_secret_keys(&self) -> Vec<PrivateKey> {
+        self.keys
+            .iter()
+            .filter(|(_, v)| v.as_secret_key().is_some())
+            .map(|(_, v)| v.as_secret_key().unwrap())
             .collect()
     }
 

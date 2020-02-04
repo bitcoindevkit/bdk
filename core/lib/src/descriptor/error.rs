@@ -18,26 +18,7 @@ impl std::fmt::Display for Error {
     }
 }
 
-impl From<bitcoin::util::bip32::Error> for Error {
-    fn from(err: bitcoin::util::bip32::Error) -> Self {
-        Error::BIP32(err)
-    }
-}
-
-impl From<bitcoin::util::base58::Error> for Error {
-    fn from(err: bitcoin::util::base58::Error) -> Self {
-        Error::Base58(err)
-    }
-}
-
-impl From<bitcoin::util::key::Error> for Error {
-    fn from(err: bitcoin::util::key::Error) -> Self {
-        Error::PK(err)
-    }
-}
-
-impl From<miniscript::Error> for Error {
-    fn from(err: miniscript::Error) -> Self {
-        Error::Miniscript(err)
-    }
-}
+impl_error!(bitcoin::util::bip32::Error, BIP32);
+impl_error!(bitcoin::util::base58::Error, Base58);
+impl_error!(bitcoin::util::key::Error, PK);
+impl_error!(miniscript::Error, Miniscript);
