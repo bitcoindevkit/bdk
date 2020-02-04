@@ -4,5 +4,8 @@ pub extern crate miniscript;
 extern crate serde;
 extern crate serde_json;
 
-pub mod descriptor;
+#[macro_use]
 pub mod error;
+pub mod descriptor;
+pub mod psbt;
+pub mod signer;
