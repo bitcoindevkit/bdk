@@ -52,12 +52,12 @@ impl<'a> Satisfier<bitcoin::PublicKey> for PSBTSatisfier<'a> {
     }
 
     fn check_older(&self, height: u32) -> bool {
+        // TODO: test >= / >
         self.current_height.unwrap_or(0) >= self.create_height.unwrap_or(0) + height
     }
 
     fn check_after(&self, height: u32) -> bool {
-        // TODO: gt or gte ?
-        self.current_height.unwrap_or(0) >= height
+        self.current_height.unwrap_or(0) > height
     }
 }
 
