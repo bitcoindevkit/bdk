@@ -231,3 +231,56 @@ macro_rules! process_delete_batch {
 impl BatchOperations for Batch {
     impl_batch_operations!({}, process_delete_batch);
 }
+
+impl Database for Tree {
+    fn iter_script_pubkeys(&self, script_type: Option<ScriptType>) -> Vec<Result<Script, Error>> {
+        let key = SledKey::Path((script_type, None)).as_sled_key();
+        self.scan_prefix(key)
+            .map(|x| {
+                x.map_err(Error::Sled)
+                    .and_then(|(_, v)| deserialize(&v).map_err(Error::Encode))
+            })
+            .collect()
+    }
+
+    fn iter_utxos(&self) -> Vec<Result<(OutPoint, TxOut), Error>> {
+        vec![]
+    }
+    fn iter_raw_txs(&self) -> Vec<Result<Transaction, Error>> {
+        vec![]
+    }
+    fn iter_txs(&self, include_raw: bool) -> Vec<Result<TransactionDetails, Error>> {
+        vec![]
+    }
+
+    fn get_script_pubkey_from_path<P: AsRef<[ChildNumber]>>(
+        &self,
+        script_type: ScriptType,
+        path: P,
+    ) -> Result<Option<Script>, Error> {
+        Err(Error::Generic("".to_string()))
+    }
+    fn get_path_from_script_pubkey(
+        &self,
+        script: &Script,
+    ) -> Result<Option<(ScriptType, Script)>, Error> {
+        Err(Error::Generic("".to_string()))
+    }
+    fn get_utxo(&self, outpoint: &OutPoint) -> Result<Option<UTXO>, Error> {
+        Err(Error::Generic("".to_string()))
+    }
+    fn get_raw_tx(&self, txid: &Txid) -> Result<Option<Transaction>, Error> {
+        Err(Error::Generic("".to_string()))
+    }
+    fn get_tx(&self, txid: &Txid, include_raw: bool) -> Result<Option<TransactionDetails>, Error> {
+        Err(Error::Generic("".to_string()))
+    }
+    fn get_last_index(&self, script_type: ScriptType) -> Result<Option<u32>, Error> {
+        Err(Error::Generic("".to_string()))
+    }
+
+    // inserts 0 if not present
+    fn increment_last_index(&mut self, script_type: ScriptType) -> Result<u32, Error> {
+        Err(Error::Generic("".to_string()))
+    }
+}
