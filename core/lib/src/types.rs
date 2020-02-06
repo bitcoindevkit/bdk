@@ -30,13 +30,13 @@ impl AsRef<[u8]> for ScriptType {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct UTXO {
     pub outpoint: OutPoint,
     pub txout: TxOut,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct TransactionDetails {
     pub transaction: Option<Transaction>,
     pub txid: Txid,
