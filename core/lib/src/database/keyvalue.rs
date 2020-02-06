@@ -13,10 +13,10 @@ use crate::types::*;
 
 // path -> script       p{i,e}<path> -> script
 // script -> path       s<script> -> {i,e}<path>
-// outpoint ->          u -> utxo
-// txhash ->            r -> tx
-// txhash ->            t -> tx details
-// change indexes       c{i,e} -> u32
+// outpoint             u<outpoint> -> txout
+// rawtx                r<txid> -> tx
+// transactions         t<txid> -> tx details
+// deriv indexes        c{i,e} -> u32
 
 enum SledKey<'a> {
     Path((Option<ScriptType>, Option<&'a DerivationPath>)),
@@ -393,7 +393,7 @@ impl BatchDatabase for Tree {
 mod test {
     use std::str::FromStr;
     use std::sync::{Arc, Condvar, Mutex, Once};
-    use std::time::Instant;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     use sled::{Db, Tree};
 
@@ -418,9 +418,9 @@ mod test {
             INIT.call_once(|| {
                 let mut db = mutex.lock().unwrap();
 
-                let start = Instant::now();
+                let time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
                 let mut dir = std::env::temp_dir();
-                dir.push(format!("{:?}", start));
+                dir.push(format!("mbw_{}", time.as_nanos()));
 
                 *db = Some(sled::open(dir).unwrap());
                 cvar.notify_all();
