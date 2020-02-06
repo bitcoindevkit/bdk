@@ -13,13 +13,23 @@ use bitcoin::consensus::encode::{deserialize, serialize};
 use bitcoin::hashes::hex::{FromHex, ToHex};
 use bitcoin::{Script, Txid};
 
-#[cfg(feature = "ssl")]
+#[cfg(feature = "use-openssl")]
 use openssl::ssl::{SslConnector, SslMethod, SslStream, SslVerifyMode};
+#[cfg(all(
+    any(feature = "default", feature = "use-rustls"),
+    not(feature = "use-openssl")
+))]
+use rustls::{ClientConfig, ClientSession, StreamOwned};
 
-#[cfg(feature = "socks")]
+#[cfg(any(feature = "default", feature = "proxy"))]
 use socks::{Socks5Stream, ToTargetAddr};
 
-#[cfg(any(feature = "socks", feature = "proxy"))]
+#[cfg(any(
+    feature = "default",
+    feature = "use-rustls",
+    feature = "use-openssl",
+    feature = "proxy"
+))]
 use stream::ClonableStream;
 
 use batch::Batch;
@@ -76,7 +86,7 @@ impl Client<TcpStream> {
     }
 }
 
-#[cfg(feature = "ssl")]
+#[cfg(feature = "use-openssl")]
 impl Client<ClonableStream<SslStream<TcpStream>>> {
     pub fn new_ssl<A: ToSocketAddrs>(socket_addr: A, domain: Option<&str>) -> Result<Self, Error> {
         let mut builder =
@@ -107,7 +117,71 @@ impl Client<ClonableStream<SslStream<TcpStream>>> {
     }
 }
 
-#[cfg(feature = "proxy")]
+#[cfg(all(
+    any(feature = "default", feature = "use-rustls"),
+    not(feature = "use-openssl")
+))]
+mod danger {
+    use rustls;
+    use webpki;
+
+    pub struct NoCertificateVerification {}
+
+    impl rustls::ServerCertVerifier for NoCertificateVerification {
+        fn verify_server_cert(
+            &self,
+            _roots: &rustls::RootCertStore,
+            _presented_certs: &[rustls::Certificate],
+            _dns_name: webpki::DNSNameRef<'_>,
+            _ocsp: &[u8],
+        ) -> Result<rustls::ServerCertVerified, rustls::TLSError> {
+            Ok(rustls::ServerCertVerified::assertion())
+        }
+    }
+}
+
+#[cfg(all(
+    any(feature = "default", feature = "use-rustls"),
+    not(feature = "use-openssl")
+))]
+impl Client<ClonableStream<StreamOwned<ClientSession, TcpStream>>> {
+    pub fn new_ssl<A: ToSocketAddrs>(socket_addr: A, domain: Option<&str>) -> Result<Self, Error> {
+        let mut config = ClientConfig::new();
+        if domain.is_none() {
+            config
+                .dangerous()
+                .set_certificate_verifier(std::sync::Arc::new(danger::NoCertificateVerification {}))
+        } else {
+            // TODO: cert pinning
+            config
+                .root_store
+                .add_server_trust_anchors(&webpki_roots::TLS_SERVER_ROOTS);
+        }
+
+        let tcp_stream = TcpStream::connect(socket_addr)?;
+        let session = ClientSession::new(
+            &std::sync::Arc::new(config),
+            webpki::DNSNameRef::try_from_ascii_str(domain.unwrap_or("not.validated"))
+                .map_err(|_| Error::InvalidDNSNameError(domain.unwrap_or("<NONE>").to_string()))?,
+        );
+        let stream = StreamOwned::new(session, tcp_stream);
+        let stream: ClonableStream<_> = stream.into();
+
+        let buf_reader = BufReader::new(stream.clone());
+
+        Ok(Self {
+            stream,
+            buf_reader,
+            headers: VecDeque::new(),
+            script_notifications: BTreeMap::new(),
+
+            #[cfg(feature = "debug-calls")]
+            calls: 0,
+        })
+    }
+}
+
+#[cfg(any(feature = "default", feature = "proxy"))]
 impl Client<ClonableStream<Socks5Stream>> {
     pub fn new_proxy<A: ToSocketAddrs, T: ToTargetAddr>(
         target_addr: T,
@@ -478,7 +552,7 @@ impl<S: Read + Write> Client<S> {
     }
 
     #[cfg(feature = "debug-calls")]
-    pub fn calls_made(&self) -> u32 {
+    pub fn calls_made(&self) -> usize {
         self.calls
     }
 

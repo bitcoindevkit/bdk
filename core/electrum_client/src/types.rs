@@ -167,10 +167,11 @@ pub enum Error {
     NotSubscribed(ScriptHash),
     InvalidResponse(serde_json::Value),
     Message(String),
+    InvalidDNSNameError(String),
 
-    #[cfg(feature = "ssl")]
+    #[cfg(feature = "use-openssl")]
     InvalidSslMethod(openssl::error::ErrorStack),
-    #[cfg(feature = "ssl")]
+    #[cfg(feature = "use-openssl")]
     SslHandshakeError(openssl::ssl::HandshakeError<std::net::TcpStream>),
 }
 

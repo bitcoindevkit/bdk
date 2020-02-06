@@ -7,16 +7,21 @@ authors = ["Alekos Filini <alekos.filini@gmail.com>"]
 
 [dependencies]
 log = "^0.4"
+bitcoin = { version = "0.23", features = ["use-serde"] }
 serde = { version = "^1.0", features = ["derive"] }
 serde_json = { version = "^1.0" }
+
+# Optional dependencies
 socks = { version = "^0.3", optional = true }
 openssl = { version = "^0.10", optional = true }
-
-[dependencies.bitcoin]
-version = "0.23"
-features = ["use-serde"]
+rustls = { version = "0.16.0", optional = true, features = ["dangerous_configuration"] }
+webpki = { version = "0.21.0", optional = true }
+webpki-roots = { version = "^0.19", optional = true }
 
 [features]
+default = ["socks", "webpki", "webpki-roots", "rustls"]
+minimal = []
 debug-calls = []
 proxy = ["socks"]
-ssl = ["openssl"]
+use-rustls = ["webpki", "webpki-roots", "rustls"]
+use-openssl = ["openssl"]
