@@ -41,6 +41,7 @@ pub trait Signer {
     ) -> Result<Option<BitcoinSig>, Error>;
 }
 
+#[allow(dead_code)]
 impl dyn Signer {
     fn sig_legacy_from_fingerprint(
         &self,

@@ -1,6 +1,6 @@
 use bitcoin::hash_types::Txid;
 use bitcoin::util::bip32::{ChildNumber, DerivationPath};
-use bitcoin::{OutPoint, Script, Transaction, TxOut};
+use bitcoin::{OutPoint, Script, Transaction};
 
 use crate::error::Error;
 use crate::types::*;
@@ -66,6 +66,6 @@ pub trait Database: BatchOperations {
 pub trait BatchDatabase: Database {
     type Batch: BatchOperations;
 
-    fn start_batch(&self) -> Self::Batch;
-    fn apply_batch(&mut self, batch: Self::Batch) -> Result<(), Error>;
+    fn begin_batch(&self) -> Self::Batch;
+    fn commit_batch(&mut self, batch: Self::Batch) -> Result<(), Error>;
 }

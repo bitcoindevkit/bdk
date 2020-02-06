@@ -1,18 +1,15 @@
-use std::borrow::Borrow;
 use std::convert::{From, TryInto};
 
-use sled::{Batch, Db, IVec, Tree};
+use sled::{Batch, Tree};
 
 use bitcoin::consensus::encode::{deserialize, serialize};
 use bitcoin::hash_types::Txid;
 use bitcoin::util::bip32::{ChildNumber, DerivationPath};
-use bitcoin::{OutPoint, Script, Transaction, TxOut};
+use bitcoin::{OutPoint, Script, Transaction};
 
 use crate::database::{BatchDatabase, BatchOperations, Database};
 use crate::error::Error;
 use crate::types::*;
-
-// TODO: rename mod to Sled?
 
 // path -> script       p{i,e}<path> -> script
 // script -> path       s<script> -> {i,e}<path>
@@ -226,6 +223,7 @@ macro_rules! process_delete_batch {
         None as Option<sled::IVec>
     };
 }
+#[allow(unused_variables)]
 impl BatchOperations for Batch {
     impl_batch_operations!({}, process_delete_batch);
 }
@@ -382,11 +380,159 @@ impl Database for Tree {
 impl BatchDatabase for Tree {
     type Batch = sled::Batch;
 
-    fn start_batch(&self) -> Self::Batch {
+    fn begin_batch(&self) -> Self::Batch {
         sled::Batch::default()
     }
 
-    fn apply_batch(&mut self, batch: Self::Batch) -> Result<(), Error> {
+    fn commit_batch(&mut self, batch: Self::Batch) -> Result<(), Error> {
         Ok(self.apply_batch(batch)?)
     }
+}
+
+#[cfg(test)]
+mod test {
+    use std::str::FromStr;
+    use std::sync::{Arc, Condvar, Mutex, Once};
+    use std::time::Instant;
+
+    use sled::{Db, Tree};
+
+    use bitcoin::hashes::hex::*;
+    use bitcoin::*;
+
+    use crate::database::*;
+
+    static mut COUNT: usize = 0;
+
+    lazy_static! {
+        static ref DB: Arc<(Mutex<Option<Db>>, Condvar)> =
+            Arc::new((Mutex::new(None), Condvar::new()));
+        static ref INIT: Once = Once::new();
+    }
+
+    fn get_tree() -> Tree {
+        unsafe {
+            let cloned = DB.clone();
+            let (mutex, cvar) = &*cloned;
+
+            INIT.call_once(|| {
+                let mut db = mutex.lock().unwrap();
+
+                let start = Instant::now();
+                let mut dir = std::env::temp_dir();
+                dir.push(format!("{:?}", start));
+
+                *db = Some(sled::open(dir).unwrap());
+                cvar.notify_all();
+            });
+
+            let mut db = mutex.lock().unwrap();
+            while !db.is_some() {
+                db = cvar.wait(db).unwrap();
+            }
+
+            COUNT += 1;
+
+            db.as_ref()
+                .unwrap()
+                .open_tree(format!("tree_{}", COUNT))
+                .unwrap()
+        }
+    }
+
+    #[test]
+    fn test_script_pubkey() {
+        let mut tree = get_tree();
+
+        let script = Script::from(
+            Vec::<u8>::from_hex("76a91402306a7c23f3e8010de41e9e591348bb83f11daa88ac").unwrap(),
+        );
+        let path = DerivationPath::from_str("m/0/1/2/3").unwrap();
+        let script_type = ScriptType::External;
+
+        tree.set_script_pubkey(script.clone(), script_type, path.clone())
+            .unwrap();
+
+        assert_eq!(
+            tree.get_script_pubkey_from_path(script_type, &path)
+                .unwrap(),
+            Some(script.clone())
+        );
+        assert_eq!(
+            tree.get_path_from_script_pubkey(&script).unwrap(),
+            Some((script_type, path.clone()))
+        );
+    }
+
+    #[test]
+    fn test_batch_script_pubkey() {
+        let mut tree = get_tree();
+        let mut batch = tree.begin_batch();
+
+        let script = Script::from(
+            Vec::<u8>::from_hex("76a91402306a7c23f3e8010de41e9e591348bb83f11daa88ac").unwrap(),
+        );
+        let path = DerivationPath::from_str("m/0/1/2/3").unwrap();
+        let script_type = ScriptType::External;
+
+        batch
+            .set_script_pubkey(script.clone(), script_type, path.clone())
+            .unwrap();
+
+        assert_eq!(
+            tree.get_script_pubkey_from_path(script_type, &path)
+                .unwrap(),
+            None
+        );
+        assert_eq!(tree.get_path_from_script_pubkey(&script).unwrap(), None);
+
+        tree.commit_batch(batch).unwrap();
+
+        assert_eq!(
+            tree.get_script_pubkey_from_path(script_type, &path)
+                .unwrap(),
+            Some(script.clone())
+        );
+        assert_eq!(
+            tree.get_path_from_script_pubkey(&script).unwrap(),
+            Some((script_type, path.clone()))
+        );
+    }
+
+    #[test]
+    fn test_iter_script_pubkey() {
+        let mut tree = get_tree();
+
+        let script = Script::from(
+            Vec::<u8>::from_hex("76a91402306a7c23f3e8010de41e9e591348bb83f11daa88ac").unwrap(),
+        );
+        let path = DerivationPath::from_str("m/0/1/2/3").unwrap();
+        let script_type = ScriptType::External;
+
+        tree.set_script_pubkey(script.clone(), script_type, path.clone())
+            .unwrap();
+
+        assert_eq!(tree.iter_script_pubkeys(None).len(), 1);
+    }
+
+    #[test]
+    fn test_del_script_pubkey() {
+        let mut tree = get_tree();
+
+        let script = Script::from(
+            Vec::<u8>::from_hex("76a91402306a7c23f3e8010de41e9e591348bb83f11daa88ac").unwrap(),
+        );
+        let path = DerivationPath::from_str("m/0/1/2/3").unwrap();
+        let script_type = ScriptType::External;
+
+        tree.set_script_pubkey(script.clone(), script_type, path.clone())
+            .unwrap();
+        assert_eq!(tree.iter_script_pubkeys(None).len(), 1);
+
+        tree.del_script_pubkey_from_path(script_type, &path)
+            .unwrap();
+        assert_eq!(tree.iter_script_pubkeys(None).len(), 0);
+    }
+
+    // TODO: more tests...
 }

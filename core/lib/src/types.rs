@@ -6,7 +6,7 @@ use bitcoin::hash_types::Txid;
 use serde::{Deserialize, Serialize};
 
 // TODO serde flatten?
-#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScriptType {
     External = 0,
     Internal = 1,
