@@ -1,1 +1,0 @@
-{"jsonrpc":"2.0","id":0,"method":"blockchain.transaction.get_merkle","params":["2d64851151550e8c4d337f335ee28874401d55b358a66f1bafab2c3e9f48773d",1234]}

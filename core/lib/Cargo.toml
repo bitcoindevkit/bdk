@@ -5,4 +5,4 @@ authors = ["Riccardo Casatta <riccardo@casatta.it>", "Alekos Filini <alekos.fili
 edition = "2018"
 
 [dependencies]
-"electrum_client" = { version = "^0.1", path = "../electrum_client" }
+"electrum-client" = { version = "0.1.0-beta.1", optional = true }

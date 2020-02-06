@@ -1,2 +1,0 @@
-{"id":1,"jsonrpc":"2.0","result":[{"height":0,"tx_hash":"83f5de2e6d7dfd5b582a5b2a3de4a5adb32c9cdca91473cf1fbcba76d56e4486","tx_pos":1,"value":100000000}]}
-{"id":0,"jsonrpc":"2.0","result":[{"height":0,"tx_hash":"eb07e5d67565bad5231fd5aeeb16d0c2c53371265690642b943aa24c83ecae1d","tx_pos":0,"value":300000000},{"height":0,"tx_hash":"824f9a426d4b6a9b23c52901754a01017f3113ffdf3ed20c02747db85b161a40","tx_pos":0,"value":100000000}]}
