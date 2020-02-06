@@ -5,6 +5,10 @@ extern crate serde;
 #[macro_use]
 extern crate serde_json;
 
+#[cfg(test)]
+#[macro_use]
+extern crate lazy_static;
+
 #[cfg(any(feature = "key-value-db", feature = "default"))]
 extern crate sled;
 

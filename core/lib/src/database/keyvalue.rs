@@ -1,25 +1,22 @@
-use std::borrow::Borrow;
 use std::convert::{From, TryInto};
 
-use sled::{Batch, Db, IVec, Tree};
+use sled::{Batch, Tree};
 
 use bitcoin::consensus::encode::{deserialize, serialize};
 use bitcoin::hash_types::Txid;
 use bitcoin::util::bip32::{ChildNumber, DerivationPath};
-use bitcoin::{OutPoint, Script, Transaction, TxOut};
+use bitcoin::{OutPoint, Script, Transaction};
 
 use crate::database::{BatchDatabase, BatchOperations, Database};
 use crate::error::Error;
 use crate::types::*;
 
-// TODO: rename mod to Sled?
-
 // path -> script       p{i,e}<path> -> script
 // script -> path       s<script> -> {i,e}<path>
-// outpoint ->          u -> utxo
-// txhash ->            r -> tx
-// txhash ->            t -> tx details
-// change indexes       c{i,e} -> u32
+// outpoint             u<outpoint> -> txout
+// rawtx                r<txid> -> tx
+// transactions         t<txid> -> tx details
+// deriv indexes        c{i,e} -> u32
 
 enum SledKey<'a> {
     Path((Option<ScriptType>, Option<&'a DerivationPath>)),
@@ -75,12 +72,12 @@ impl SledKey<'_> {
 
 macro_rules! impl_batch_operations {
     ( { $($after_insert:tt)* }, $process_delete:ident ) => {
-        fn set_script_pubkey<P: AsRef<[ChildNumber]>>(&mut self, script: Script, script_type: ScriptType, path: P) -> Result<(), Error> {
+        fn set_script_pubkey<P: AsRef<[ChildNumber]>>(&mut self, script: &Script, script_type: ScriptType, path: &P) -> Result<(), Error> {
             let deriv_path = DerivationPath::from(path.as_ref());
             let key = SledKey::Path((Some(script_type), Some(&deriv_path))).as_sled_key();
-            self.insert(key, serialize(&script))$($after_insert)*;
+            self.insert(key, serialize(script))$($after_insert)*;
 
-            let key = SledKey::Script(Some(&script)).as_sled_key();
+            let key = SledKey::Script(Some(script)).as_sled_key();
             let value = json!({
                 "t": script_type,
                 "p": deriv_path,
@@ -90,7 +87,7 @@ macro_rules! impl_batch_operations {
             Ok(())
         }
 
-        fn set_utxo(&mut self, utxo: UTXO) -> Result<(), Error> {
+        fn set_utxo(&mut self, utxo: &UTXO) -> Result<(), Error> {
             let key = SledKey::UTXO(Some(&utxo.outpoint)).as_sled_key();
             let value = serialize(&utxo.txout);
             self.insert(key, value)$($after_insert)*;
@@ -98,20 +95,28 @@ macro_rules! impl_batch_operations {
             Ok(())
         }
 
-        fn set_raw_tx(&mut self, transaction: Transaction) -> Result<(), Error> {
+        fn set_raw_tx(&mut self, transaction: &Transaction) -> Result<(), Error> {
             let key = SledKey::RawTx(Some(&transaction.txid())).as_sled_key();
-            let value = serialize(&transaction);
+            let value = serialize(transaction);
             self.insert(key, value)$($after_insert)*;
 
             Ok(())
         }
 
-        fn set_tx(&mut self, mut transaction: TransactionDetails) -> Result<(), Error> {
+        fn set_tx(&mut self, transaction: &TransactionDetails) -> Result<(), Error> {
             let key = SledKey::Transaction(Some(&transaction.txid)).as_sled_key();
-            // remove the raw tx
-            transaction.transaction = None;
-            let value = serde_json::to_vec(&transaction)?;
+
+            // remove the raw tx from the serialized version
+            let mut value = serde_json::to_value(transaction)?;
+            value["transaction"] = serde_json::Value::Null;
+            let value = serde_json::to_vec(&value)?;
+
             self.insert(key, value)$($after_insert)*;
+
+            // insert the raw_tx if present
+            if let Some(ref tx) = transaction.transaction {
+                self.set_raw_tx(tx)?;
+            }
 
             Ok(())
         }
@@ -224,6 +229,7 @@ macro_rules! process_delete_batch {
         None as Option<sled::IVec>
     };
 }
+#[allow(unused_variables)]
 impl BatchOperations for Batch {
     impl_batch_operations!({}, process_delete_batch);
 }
@@ -280,7 +286,7 @@ impl Database for Tree {
     fn get_script_pubkey_from_path<P: AsRef<[ChildNumber]>>(
         &self,
         script_type: ScriptType,
-        path: P,
+        path: &P,
     ) -> Result<Option<Script>, Error> {
         let deriv_path = DerivationPath::from(path.as_ref());
         let key = SledKey::Path((Some(script_type), Some(&deriv_path))).as_sled_key();
@@ -350,7 +356,7 @@ impl Database for Tree {
     }
 
     // inserts 0 if not present
-    fn increment_last_index(&mut self, script_type: ScriptType) -> Result<Option<u32>, Error> {
+    fn increment_last_index(&mut self, script_type: ScriptType) -> Result<u32, Error> {
         let key = SledKey::LastIndex(script_type).as_sled_key();
         self.fetch_and_update(key, |prev| {
             let new = match prev {
@@ -360,12 +366,12 @@ impl Database for Tree {
 
                     val + 1
                 }
-                None => 0,
+                None => 1, // start from 1, we return 0 when the prev value was None
             };
 
             Some(new.to_be_bytes().to_vec())
         })?
-        .map(|b| -> Result<_, Error> {
+        .map_or(Ok(0), |b| -> Result<_, Error> {
             let array: [u8; 4] = b
                 .as_ref()
                 .try_into()
@@ -373,18 +379,260 @@ impl Database for Tree {
             let val = u32::from_be_bytes(array);
             Ok(val)
         })
-        .transpose()
     }
 }
 
 impl BatchDatabase for Tree {
     type Batch = sled::Batch;
 
-    fn start_batch(&self) -> Self::Batch {
+    fn begin_batch(&self) -> Self::Batch {
         sled::Batch::default()
     }
 
-    fn apply_batch(&mut self, batch: Self::Batch) -> Result<(), Error> {
+    fn commit_batch(&mut self, batch: Self::Batch) -> Result<(), Error> {
         Ok(self.apply_batch(batch)?)
     }
+}
+
+#[cfg(test)]
+mod test {
+    use std::str::FromStr;
+    use std::sync::{Arc, Condvar, Mutex, Once};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use sled::{Db, Tree};
+
+    use bitcoin::consensus::encode::deserialize;
+    use bitcoin::hashes::hex::*;
+    use bitcoin::*;
+
+    use crate::database::*;
+
+    static mut COUNT: usize = 0;
+
+    lazy_static! {
+        static ref DB: Arc<(Mutex<Option<Db>>, Condvar)> =
+            Arc::new((Mutex::new(None), Condvar::new()));
+        static ref INIT: Once = Once::new();
+    }
+
+    fn get_tree() -> Tree {
+        unsafe {
+            let cloned = DB.clone();
+            let (mutex, cvar) = &*cloned;
+
+            INIT.call_once(|| {
+                let mut db = mutex.lock().unwrap();
+
+                let time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
+                let mut dir = std::env::temp_dir();
+                dir.push(format!("mbw_{}", time.as_nanos()));
+
+                *db = Some(sled::open(dir).unwrap());
+                cvar.notify_all();
+            });
+
+            let mut db = mutex.lock().unwrap();
+            while !db.is_some() {
+                db = cvar.wait(db).unwrap();
+            }
+
+            COUNT += 1;
+
+            db.as_ref()
+                .unwrap()
+                .open_tree(format!("tree_{}", COUNT))
+                .unwrap()
+        }
+    }
+
+    #[test]
+    fn test_script_pubkey() {
+        let mut tree = get_tree();
+
+        let script = Script::from(
+            Vec::<u8>::from_hex("76a91402306a7c23f3e8010de41e9e591348bb83f11daa88ac").unwrap(),
+        );
+        let path = DerivationPath::from_str("m/0/1/2/3").unwrap();
+        let script_type = ScriptType::External;
+
+        tree.set_script_pubkey(&script, script_type, &path).unwrap();
+
+        assert_eq!(
+            tree.get_script_pubkey_from_path(script_type, &path)
+                .unwrap(),
+            Some(script.clone())
+        );
+        assert_eq!(
+            tree.get_path_from_script_pubkey(&script).unwrap(),
+            Some((script_type, path.clone()))
+        );
+    }
+
+    #[test]
+    fn test_batch_script_pubkey() {
+        let mut tree = get_tree();
+        let mut batch = tree.begin_batch();
+
+        let script = Script::from(
+            Vec::<u8>::from_hex("76a91402306a7c23f3e8010de41e9e591348bb83f11daa88ac").unwrap(),
+        );
+        let path = DerivationPath::from_str("m/0/1/2/3").unwrap();
+        let script_type = ScriptType::External;
+
+        batch
+            .set_script_pubkey(&script, script_type, &path)
+            .unwrap();
+
+        assert_eq!(
+            tree.get_script_pubkey_from_path(script_type, &path)
+                .unwrap(),
+            None
+        );
+        assert_eq!(tree.get_path_from_script_pubkey(&script).unwrap(), None);
+
+        tree.commit_batch(batch).unwrap();
+
+        assert_eq!(
+            tree.get_script_pubkey_from_path(script_type, &path)
+                .unwrap(),
+            Some(script.clone())
+        );
+        assert_eq!(
+            tree.get_path_from_script_pubkey(&script).unwrap(),
+            Some((script_type, path.clone()))
+        );
+    }
+
+    #[test]
+    fn test_iter_script_pubkey() {
+        let mut tree = get_tree();
+
+        let script = Script::from(
+            Vec::<u8>::from_hex("76a91402306a7c23f3e8010de41e9e591348bb83f11daa88ac").unwrap(),
+        );
+        let path = DerivationPath::from_str("m/0/1/2/3").unwrap();
+        let script_type = ScriptType::External;
+
+        tree.set_script_pubkey(&script, script_type, &path).unwrap();
+
+        assert_eq!(tree.iter_script_pubkeys(None).len(), 1);
+    }
+
+    #[test]
+    fn test_del_script_pubkey() {
+        let mut tree = get_tree();
+
+        let script = Script::from(
+            Vec::<u8>::from_hex("76a91402306a7c23f3e8010de41e9e591348bb83f11daa88ac").unwrap(),
+        );
+        let path = DerivationPath::from_str("m/0/1/2/3").unwrap();
+        let script_type = ScriptType::External;
+
+        tree.set_script_pubkey(&script, script_type, &path).unwrap();
+        assert_eq!(tree.iter_script_pubkeys(None).len(), 1);
+
+        tree.del_script_pubkey_from_path(script_type, &path)
+            .unwrap();
+        assert_eq!(tree.iter_script_pubkeys(None).len(), 0);
+    }
+
+    #[test]
+    fn test_utxo() {
+        let mut tree = get_tree();
+
+        let outpoint = OutPoint::from_str(
+            "5df6e0e2761359d30a8275058e299fcc0381534545f55cf43e41983f5d4c9456:0",
+        )
+        .unwrap();
+        let script = Script::from(
+            Vec::<u8>::from_hex("76a91402306a7c23f3e8010de41e9e591348bb83f11daa88ac").unwrap(),
+        );
+        let txout = TxOut {
+            value: 133742,
+            script_pubkey: script,
+        };
+        let utxo = UTXO { txout, outpoint };
+
+        tree.set_utxo(&utxo).unwrap();
+
+        assert_eq!(tree.get_utxo(&outpoint).unwrap(), Some(utxo));
+    }
+
+    #[test]
+    fn test_raw_tx() {
+        let mut tree = get_tree();
+
+        let hex_tx = Vec::<u8>::from_hex("0100000001a15d57094aa7a21a28cb20b59aab8fc7d1149a3bdbcddba9c622e4f5f6a99ece010000006c493046022100f93bb0e7d8db7bd46e40132d1f8242026e045f03a0efe71bbb8e3f475e970d790221009337cd7f1f929f00cc6ff01f03729b069a7c21b59b1736ddfee5db5946c5da8c0121033b9b137ee87d5a812d6f506efdd37f0affa7ffc310711c06c7f3e097c9447c52ffffffff0100e1f505000000001976a9140389035a9225b3839e2bbf32d826a1e222031fd888ac00000000").unwrap();
+        let tx: Transaction = deserialize(&hex_tx).unwrap();
+
+        tree.set_raw_tx(&tx).unwrap();
+
+        let txid = tx.txid();
+
+        assert_eq!(tree.get_raw_tx(&txid).unwrap(), Some(tx));
+    }
+
+    #[test]
+    fn test_tx() {
+        let mut tree = get_tree();
+
+        let hex_tx = Vec::<u8>::from_hex("0100000001a15d57094aa7a21a28cb20b59aab8fc7d1149a3bdbcddba9c622e4f5f6a99ece010000006c493046022100f93bb0e7d8db7bd46e40132d1f8242026e045f03a0efe71bbb8e3f475e970d790221009337cd7f1f929f00cc6ff01f03729b069a7c21b59b1736ddfee5db5946c5da8c0121033b9b137ee87d5a812d6f506efdd37f0affa7ffc310711c06c7f3e097c9447c52ffffffff0100e1f505000000001976a9140389035a9225b3839e2bbf32d826a1e222031fd888ac00000000").unwrap();
+        let tx: Transaction = deserialize(&hex_tx).unwrap();
+        let txid = tx.txid();
+        let mut tx_details = TransactionDetails {
+            transaction: Some(tx),
+            txid,
+            timestamp: 123456,
+            received: 1337,
+            sent: 420420,
+            height: Some(1000),
+        };
+
+        tree.set_tx(&tx_details).unwrap();
+
+        // get with raw tx too
+        assert_eq!(
+            tree.get_tx(&tx_details.txid, true).unwrap(),
+            Some(tx_details.clone())
+        );
+        // get only raw_tx
+        assert_eq!(
+            tree.get_raw_tx(&tx_details.txid).unwrap(),
+            tx_details.transaction
+        );
+
+        // now get without raw_tx
+        tx_details.transaction = None;
+        assert_eq!(
+            tree.get_tx(&tx_details.txid, false).unwrap(),
+            Some(tx_details)
+        );
+    }
+
+    #[test]
+    fn test_last_index() {
+        let mut tree = get_tree();
+
+        tree.set_last_index(ScriptType::External, 1337).unwrap();
+
+        assert_eq!(
+            tree.get_last_index(ScriptType::External).unwrap(),
+            Some(1337)
+        );
+        assert_eq!(tree.get_last_index(ScriptType::Internal).unwrap(), None);
+
+        let res = tree.increment_last_index(ScriptType::External).unwrap();
+        assert_eq!(res, 1337);
+        let res = tree.increment_last_index(ScriptType::Internal).unwrap();
+        assert_eq!(res, 0);
+
+        assert_eq!(
+            tree.get_last_index(ScriptType::External).unwrap(),
+            Some(1338)
+        );
+        assert_eq!(tree.get_last_index(ScriptType::Internal).unwrap(), Some(1));
+    }
+
+    // TODO: more tests...
 }

@@ -6,7 +6,7 @@ use bitcoin::hash_types::Txid;
 use serde::{Deserialize, Serialize};
 
 // TODO serde flatten?
-#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScriptType {
     External = 0,
     Internal = 1,
@@ -30,13 +30,13 @@ impl AsRef<[u8]> for ScriptType {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct UTXO {
     pub outpoint: OutPoint,
     pub txout: TxOut,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct TransactionDetails {
     pub transaction: Option<Transaction>,
     pub txid: Txid,

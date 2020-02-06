@@ -1,6 +1,6 @@
 use bitcoin::hash_types::Txid;
 use bitcoin::util::bip32::{ChildNumber, DerivationPath};
-use bitcoin::{OutPoint, Script, Transaction, TxOut};
+use bitcoin::{OutPoint, Script, Transaction};
 
 use crate::error::Error;
 use crate::types::*;
@@ -11,19 +11,19 @@ pub mod keyvalue;
 pub trait BatchOperations {
     fn set_script_pubkey<P: AsRef<[ChildNumber]>>(
         &mut self,
-        script: Script,
+        script: &Script,
         script_type: ScriptType,
-        path: P,
+        path: &P,
     ) -> Result<(), Error>;
-    fn set_utxo(&mut self, utxo: UTXO) -> Result<(), Error>;
-    fn set_raw_tx(&mut self, transaction: Transaction) -> Result<(), Error>;
-    fn set_tx(&mut self, transaction: TransactionDetails) -> Result<(), Error>;
+    fn set_utxo(&mut self, utxo: &UTXO) -> Result<(), Error>;
+    fn set_raw_tx(&mut self, transaction: &Transaction) -> Result<(), Error>;
+    fn set_tx(&mut self, transaction: &TransactionDetails) -> Result<(), Error>;
     fn set_last_index(&mut self, script_type: ScriptType, value: u32) -> Result<(), Error>;
 
     fn del_script_pubkey_from_path<P: AsRef<[ChildNumber]>>(
         &mut self,
         script_type: ScriptType,
-        path: P,
+        path: &P,
     ) -> Result<Option<Script>, Error>;
     fn del_path_from_script_pubkey(
         &mut self,
@@ -48,7 +48,7 @@ pub trait Database: BatchOperations {
     fn get_script_pubkey_from_path<P: AsRef<[ChildNumber]>>(
         &self,
         script_type: ScriptType,
-        path: P,
+        path: &P,
     ) -> Result<Option<Script>, Error>;
     fn get_path_from_script_pubkey(
         &self,
@@ -60,12 +60,12 @@ pub trait Database: BatchOperations {
     fn get_last_index(&self, script_type: ScriptType) -> Result<Option<u32>, Error>;
 
     // inserts 0 if not present
-    fn increment_last_index(&mut self, script_type: ScriptType) -> Result<Option<u32>, Error>;
+    fn increment_last_index(&mut self, script_type: ScriptType) -> Result<u32, Error>;
 }
 
 pub trait BatchDatabase: Database {
     type Batch: BatchOperations;
 
-    fn start_batch(&self) -> Self::Batch;
-    fn apply_batch(&mut self, batch: Self::Batch) -> Result<(), Error>;
+    fn begin_batch(&self) -> Self::Batch;
+    fn commit_batch(&mut self, batch: Self::Batch) -> Result<(), Error>;
 }
