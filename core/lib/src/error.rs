@@ -2,6 +2,7 @@
 pub enum Error {
     KeyMismatch(bitcoin::secp256k1::PublicKey, bitcoin::secp256k1::PublicKey),
     MissingInputUTXO(usize),
+    InvalidU32Bytes(Vec<u8>),
     Generic(String),
 
     Encode(bitcoin::consensus::encode::Error),

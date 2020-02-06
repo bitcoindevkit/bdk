@@ -90,9 +90,9 @@ macro_rules! impl_batch_operations {
             Ok(())
         }
 
-        fn set_utxo(&mut self, outpoint: OutPoint, txout: TxOut) -> Result<(), Error> {
-            let key = SledKey::UTXO(Some(&outpoint)).as_sled_key();
-            let value = serialize(&txout);
+        fn set_utxo(&mut self, utxo: UTXO) -> Result<(), Error> {
+            let key = SledKey::UTXO(Some(&utxo.outpoint)).as_sled_key();
+            let value = serialize(&utxo.txout);
             self.insert(key, value)$($after_insert)*;
 
             Ok(())
@@ -106,8 +106,10 @@ macro_rules! impl_batch_operations {
             Ok(())
         }
 
-        fn set_tx(&mut self, transaction: TransactionDetails) -> Result<(), Error> {
+        fn set_tx(&mut self, mut transaction: TransactionDetails) -> Result<(), Error> {
             let key = SledKey::Transaction(Some(&transaction.txid)).as_sled_key();
+            // remove the raw tx
+            transaction.transaction = None;
             let value = serde_json::to_vec(&transaction)?;
             self.insert(key, value)$($after_insert)*;
 
@@ -201,12 +203,8 @@ macro_rules! impl_batch_operations {
             match res {
                 None => Ok(None),
                 Some(b) => {
-                    if b.len() < 4 {
-                        return Err(Error::Generic("Can't create a u32".to_string()));
-                    }
-
-                    let bytes: &[u8] = b.borrow();
-                    let val = u32::from_be_bytes(bytes.try_into().unwrap());
+                    let array: [u8; 4] = b.as_ref().try_into().map_err(|_| Error::InvalidU32Bytes(b.to_vec()))?;
+                    let val = u32::from_be_bytes(array);
                     Ok(Some(val))
                 }
             }
@@ -236,21 +234,49 @@ impl Database for Tree {
     fn iter_script_pubkeys(&self, script_type: Option<ScriptType>) -> Vec<Result<Script, Error>> {
         let key = SledKey::Path((script_type, None)).as_sled_key();
         self.scan_prefix(key)
-            .map(|x| {
-                x.map_err(Error::Sled)
-                    .and_then(|(_, v)| deserialize(&v).map_err(Error::Encode))
+            .map(|x| -> Result<_, Error> {
+                let (_, v) = x?;
+                Ok(deserialize(&v)?)
             })
             .collect()
     }
 
-    fn iter_utxos(&self) -> Vec<Result<(OutPoint, TxOut), Error>> {
-        vec![]
+    fn iter_utxos(&self) -> Vec<Result<UTXO, Error>> {
+        let key = SledKey::UTXO(None).as_sled_key();
+        self.scan_prefix(key)
+            .map(|x| -> Result<_, Error> {
+                let (k, v) = x?;
+                let outpoint = deserialize(&k[1..])?;
+                let txout = deserialize(&v)?;
+                Ok(UTXO { outpoint, txout })
+            })
+            .collect()
     }
+
     fn iter_raw_txs(&self) -> Vec<Result<Transaction, Error>> {
-        vec![]
+        let key = SledKey::RawTx(None).as_sled_key();
+        self.scan_prefix(key)
+            .map(|x| -> Result<_, Error> {
+                let (_, v) = x?;
+                Ok(deserialize(&v)?)
+            })
+            .collect()
     }
+
     fn iter_txs(&self, include_raw: bool) -> Vec<Result<TransactionDetails, Error>> {
-        vec![]
+        let key = SledKey::RawTx(None).as_sled_key();
+        self.scan_prefix(key)
+            .map(|x| -> Result<_, Error> {
+                let (k, v) = x?;
+                let mut txdetails: TransactionDetails = serde_json::from_slice(&v)?;
+                if include_raw {
+                    let txid = deserialize(&k[1..])?;
+                    txdetails.transaction = self.get_raw_tx(&txid)?;
+                }
+
+                Ok(txdetails)
+            })
+            .collect()
     }
 
     fn get_script_pubkey_from_path<P: AsRef<[ChildNumber]>>(
@@ -258,29 +284,109 @@ impl Database for Tree {
         script_type: ScriptType,
         path: P,
     ) -> Result<Option<Script>, Error> {
-        Err(Error::Generic("".to_string()))
+        let deriv_path = DerivationPath::from(path.as_ref());
+        let key = SledKey::Path((Some(script_type), Some(&deriv_path))).as_sled_key();
+        Ok(self.get(key)?.map(|b| deserialize(&b)).transpose()?)
     }
+
     fn get_path_from_script_pubkey(
         &self,
         script: &Script,
-    ) -> Result<Option<(ScriptType, Script)>, Error> {
-        Err(Error::Generic("".to_string()))
+    ) -> Result<Option<(ScriptType, DerivationPath)>, Error> {
+        let key = SledKey::Script(Some(script)).as_sled_key();
+        self.get(key)?
+            .map(|b| -> Result<_, Error> {
+                let mut val: serde_json::Value = serde_json::from_slice(&b)?;
+                let st = serde_json::from_value(val["t"].take())?;
+                let path = serde_json::from_value(val["p"].take())?;
+
+                Ok((st, path))
+            })
+            .transpose()
     }
+
     fn get_utxo(&self, outpoint: &OutPoint) -> Result<Option<UTXO>, Error> {
-        Err(Error::Generic("".to_string()))
+        let key = SledKey::UTXO(Some(outpoint)).as_sled_key();
+        self.get(key)?
+            .map(|b| -> Result<_, Error> {
+                let txout = deserialize(&b)?;
+                Ok(UTXO {
+                    outpoint: outpoint.clone(),
+                    txout,
+                })
+            })
+            .transpose()
     }
+
     fn get_raw_tx(&self, txid: &Txid) -> Result<Option<Transaction>, Error> {
-        Err(Error::Generic("".to_string()))
+        let key = SledKey::RawTx(Some(txid)).as_sled_key();
+        Ok(self.get(key)?.map(|b| deserialize(&b)).transpose()?)
     }
+
     fn get_tx(&self, txid: &Txid, include_raw: bool) -> Result<Option<TransactionDetails>, Error> {
-        Err(Error::Generic("".to_string()))
+        let key = SledKey::Transaction(Some(txid)).as_sled_key();
+        self.get(key)?
+            .map(|b| -> Result<_, Error> {
+                let mut txdetails: TransactionDetails = serde_json::from_slice(&b)?;
+                if include_raw {
+                    txdetails.transaction = self.get_raw_tx(&txid)?;
+                }
+
+                Ok(txdetails)
+            })
+            .transpose()
     }
+
     fn get_last_index(&self, script_type: ScriptType) -> Result<Option<u32>, Error> {
-        Err(Error::Generic("".to_string()))
+        let key = SledKey::LastIndex(script_type).as_sled_key();
+        self.get(key)?
+            .map(|b| -> Result<_, Error> {
+                let array: [u8; 4] = b
+                    .as_ref()
+                    .try_into()
+                    .map_err(|_| Error::InvalidU32Bytes(b.to_vec()))?;
+                let val = u32::from_be_bytes(array);
+                Ok(val)
+            })
+            .transpose()
     }
 
     // inserts 0 if not present
-    fn increment_last_index(&mut self, script_type: ScriptType) -> Result<u32, Error> {
-        Err(Error::Generic("".to_string()))
+    fn increment_last_index(&mut self, script_type: ScriptType) -> Result<Option<u32>, Error> {
+        let key = SledKey::LastIndex(script_type).as_sled_key();
+        self.fetch_and_update(key, |prev| {
+            let new = match prev {
+                Some(b) => {
+                    let array: [u8; 4] = b.try_into().unwrap_or([0; 4]);
+                    let val = u32::from_be_bytes(array);
+
+                    val + 1
+                }
+                None => 0,
+            };
+
+            Some(new.to_be_bytes().to_vec())
+        })?
+        .map(|b| -> Result<_, Error> {
+            let array: [u8; 4] = b
+                .as_ref()
+                .try_into()
+                .map_err(|_| Error::InvalidU32Bytes(b.to_vec()))?;
+            let val = u32::from_be_bytes(array);
+            Ok(val)
+        })
+        .transpose()
+    }
+}
+
+impl BatchDatabase for Tree {
+    type Batch = sled::Batch;
+
+    fn start_batch(&self) -> Self::Batch {
+        sled::Batch::default()
+    }
+
+    fn apply_batch(&mut self, batch: Self::Batch) -> Result<(), Error> {
+        Ok(self.apply_batch(batch)?)
     }
 }
