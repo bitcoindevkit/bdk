@@ -6,7 +6,6 @@ rust:
 before_script:
   - rustup component add rustfmt
 script:
-  - cd $TRAVIS_BUILD_DIR/core/lib/
   - cargo fmt -- --check --verbose
   - cargo build --verbose --all
   - cargo test --verbose --all
@@ -14,6 +13,6 @@ script:
 notifications:
   email: false
 
-# before_cache:
-#  - rm -rf "$TRAVIS_HOME/.cargo/registry/src"
-#cache: cargo
+before_cache:
+  - rm -rf "$TRAVIS_HOME/.cargo/registry/src"
+cache: cargo
