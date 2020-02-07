@@ -40,10 +40,10 @@ pub trait BatchOperations {
 }
 
 pub trait Database: BatchOperations {
-    fn iter_script_pubkeys(&self, script_type: Option<ScriptType>) -> Vec<Result<Script, Error>>;
-    fn iter_utxos(&self) -> Vec<Result<UTXO, Error>>;
-    fn iter_raw_txs(&self) -> Vec<Result<Transaction, Error>>;
-    fn iter_txs(&self, include_raw: bool) -> Vec<Result<TransactionDetails, Error>>;
+    fn iter_script_pubkeys(&self, script_type: Option<ScriptType>) -> Result<Vec<Script>, Error>;
+    fn iter_utxos(&self) -> Result<Vec<UTXO>, Error>;
+    fn iter_raw_txs(&self) -> Result<Vec<Transaction>, Error>;
+    fn iter_txs(&self, include_raw: bool) -> Result<Vec<TransactionDetails>, Error>;
 
     fn get_script_pubkey_from_path<P: AsRef<[ChildNumber]>>(
         &self,

@@ -235,7 +235,7 @@ impl BatchOperations for Batch {
 }
 
 impl Database for Tree {
-    fn iter_script_pubkeys(&self, script_type: Option<ScriptType>) -> Vec<Result<Script, Error>> {
+    fn iter_script_pubkeys(&self, script_type: Option<ScriptType>) -> Result<Vec<Script>, Error> {
         let key = SledKey::Path((script_type, None)).as_sled_key();
         self.scan_prefix(key)
             .map(|x| -> Result<_, Error> {
@@ -245,7 +245,7 @@ impl Database for Tree {
             .collect()
     }
 
-    fn iter_utxos(&self) -> Vec<Result<UTXO, Error>> {
+    fn iter_utxos(&self) -> Result<Vec<UTXO>, Error> {
         let key = SledKey::UTXO(None).as_sled_key();
         self.scan_prefix(key)
             .map(|x| -> Result<_, Error> {
@@ -257,7 +257,7 @@ impl Database for Tree {
             .collect()
     }
 
-    fn iter_raw_txs(&self) -> Vec<Result<Transaction, Error>> {
+    fn iter_raw_txs(&self) -> Result<Vec<Transaction>, Error> {
         let key = SledKey::RawTx(None).as_sled_key();
         self.scan_prefix(key)
             .map(|x| -> Result<_, Error> {
@@ -267,8 +267,8 @@ impl Database for Tree {
             .collect()
     }
 
-    fn iter_txs(&self, include_raw: bool) -> Vec<Result<TransactionDetails, Error>> {
-        let key = SledKey::RawTx(None).as_sled_key();
+    fn iter_txs(&self, include_raw: bool) -> Result<Vec<TransactionDetails>, Error> {
+        let key = SledKey::Transaction(None).as_sled_key();
         self.scan_prefix(key)
             .map(|x| -> Result<_, Error> {
                 let (k, v) = x?;
@@ -516,7 +516,7 @@ mod test {
 
         tree.set_script_pubkey(&script, script_type, &path).unwrap();
 
-        assert_eq!(tree.iter_script_pubkeys(None).len(), 1);
+        assert_eq!(tree.iter_script_pubkeys(None).unwrap().len(), 1);
     }
 
     #[test]
@@ -530,11 +530,11 @@ mod test {
         let script_type = ScriptType::External;
 
         tree.set_script_pubkey(&script, script_type, &path).unwrap();
-        assert_eq!(tree.iter_script_pubkeys(None).len(), 1);
+        assert_eq!(tree.iter_script_pubkeys(None).unwrap().len(), 1);
 
         tree.del_script_pubkey_from_path(script_type, &path)
             .unwrap();
-        assert_eq!(tree.iter_script_pubkeys(None).len(), 0);
+        assert_eq!(tree.iter_script_pubkeys(None).unwrap().len(), 0);
     }
 
     #[test]

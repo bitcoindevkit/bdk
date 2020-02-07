@@ -16,9 +16,15 @@ use serde::{Deserialize, Serialize};
 
 pub mod error;
 pub mod extended_key;
+pub mod policy;
 
 pub use self::error::Error;
 pub use self::extended_key::{DerivationIndex, DescriptorExtendedKey};
+pub use self::policy::{ExtractPolicy, Policy};
+
+trait MiniscriptExtractPolicy {
+    fn extract_policy(&self, lookup_map: &BTreeMap<String, Box<dyn Key>>) -> Option<Policy>;
+}
 
 #[derive(Debug, Clone, Hash, PartialEq, PartialOrd, Eq, Ord, Default)]
 struct DummyKey();
@@ -86,6 +92,7 @@ where
     fn psbt_witness_script(&self) -> Option<Script> {
         match self {
             Descriptor::Wsh(ref script) => Some(script.encode()),
+            Descriptor::ShWsh(ref script) => Some(script.encode()),
             _ => None,
         }
     }
@@ -261,20 +268,18 @@ impl ExtendedDescriptor {
         Ok(self.internal.translate_pk(translatefpk, translatefpkh)?)
     }
 
-    pub fn get_xprv(&self) -> Vec<ExtendedPrivKey> {
+    pub fn get_xprv(&self) -> impl IntoIterator<Item = ExtendedPrivKey> + '_ {
         self.keys
             .iter()
             .filter(|(_, v)| v.xprv().is_some())
             .map(|(_, v)| v.xprv().unwrap())
-            .collect()
     }
 
-    pub fn get_secret_keys(&self) -> Vec<PrivateKey> {
+    pub fn get_secret_keys(&self) -> impl IntoIterator<Item = PrivateKey> + '_ {
         self.keys
             .iter()
             .filter(|(_, v)| v.as_secret_key().is_some())
             .map(|(_, v)| v.as_secret_key().unwrap())
-            .collect()
     }
 
     pub fn get_hd_keypaths(
@@ -314,6 +319,12 @@ impl ExtendedDescriptor {
 
     pub fn is_fixed(&self) -> bool {
         self.keys.iter().all(|(_, key)| key.is_fixed())
+    }
+}
+
+impl ExtractPolicy for ExtendedDescriptor {
+    fn extract_policy(&self) -> Option<Policy> {
+        self.internal.extract_policy(&self.keys)
     }
 }
 

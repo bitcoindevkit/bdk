@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use bitcoin::hashes::Hash;
+use bitcoin::hashes::{hash160, Hash};
 use bitcoin::util::bip143::SighashComponents;
 use bitcoin::util::bip32::{DerivationPath, ExtendedPrivKey, Fingerprint};
 use bitcoin::util::psbt;
@@ -8,7 +8,10 @@ use bitcoin::{PrivateKey, PublicKey, Script, SigHashType, Transaction};
 
 use bitcoin::secp256k1::{self, All, Message, Secp256k1};
 
-use miniscript::{BitcoinSig, Satisfier};
+#[allow(unused_imports)]
+use log::{debug, error, info, trace};
+
+use miniscript::{BitcoinSig, MiniscriptKey, Satisfier};
 
 use crate::descriptor::ExtendedDescriptor;
 use crate::error::Error;
@@ -34,29 +37,70 @@ impl<'a> PSBTSatisfier<'a> {
     }
 }
 
+impl<'a> PSBTSatisfier<'a> {
+    fn parse_sig(rawsig: &Vec<u8>) -> Option<BitcoinSig> {
+        let (flag, sig) = rawsig.split_last().unwrap();
+        let flag = bitcoin::SigHashType::from_u32(*flag as u32);
+        let sig = match secp256k1::Signature::from_der(sig) {
+            Ok(sig) => sig,
+            Err(..) => return None,
+        };
+        Some((sig, flag))
+    }
+}
+
 // TODO: also support hash preimages through the "unknown" section of PSBT
 impl<'a> Satisfier<bitcoin::PublicKey> for PSBTSatisfier<'a> {
     // from https://docs.rs/miniscript/0.12.0/src/miniscript/psbt/mod.rs.html#96
     fn lookup_sig(&self, pk: &bitcoin::PublicKey) -> Option<BitcoinSig> {
+        debug!("lookup_sig: {}", pk);
+
         if let Some(rawsig) = self.input.partial_sigs.get(pk) {
-            let (flag, sig) = rawsig.split_last().unwrap();
-            let flag = bitcoin::SigHashType::from_u32(*flag as u32);
-            let sig = match secp256k1::Signature::from_der(sig) {
-                Ok(sig) => sig,
-                Err(..) => return None,
-            };
-            Some((sig, flag))
+            Self::parse_sig(&rawsig)
         } else {
             None
         }
     }
 
+    fn lookup_pkh_pk(&self, hash: &hash160::Hash) -> Option<bitcoin::PublicKey> {
+        debug!("lookup_pkh_pk: {}", hash);
+
+        for (pk, _) in &self.input.partial_sigs {
+            if &pk.to_pubkeyhash() == hash {
+                return Some(*pk);
+            }
+        }
+
+        None
+    }
+
+    fn lookup_pkh_sig(&self, hash: &hash160::Hash) -> Option<(bitcoin::PublicKey, BitcoinSig)> {
+        debug!("lookup_pkh_sig: {}", hash);
+
+        for (pk, sig) in &self.input.partial_sigs {
+            if &pk.to_pubkeyhash() == hash {
+                return match Self::parse_sig(&sig) {
+                    Some(bitcoinsig) => Some((*pk, bitcoinsig)),
+                    None => None,
+                };
+            }
+        }
+
+        None
+    }
+
     fn check_older(&self, height: u32) -> bool {
+        // TODO: also check if `nSequence` right
+        debug!("check_older: {}", height);
+
         // TODO: test >= / >
         self.current_height.unwrap_or(0) >= self.create_height.unwrap_or(0) + height
     }
 
     fn check_after(&self, height: u32) -> bool {
+        // TODO: also check if `nLockTime` is right
+        debug!("check_older: {}", height);
+
         self.current_height.unwrap_or(0) > height
     }
 }
@@ -93,6 +137,22 @@ impl<'a> PSBTSigner<'a> {
             extended_keys,
             private_keys,
         })
+    }
+
+    pub fn extend(&mut self, mut other: PSBTSigner) -> Result<(), Error> {
+        if self.tx.txid() != other.tx.txid() {
+            return Err(Error::DifferentTransactions);
+        }
+
+        self.extended_keys.append(&mut other.extended_keys);
+        self.private_keys.append(&mut other.private_keys);
+
+        Ok(())
+    }
+
+    // TODO: temporary
+    pub fn all_public_keys(&self) -> impl IntoIterator<Item = &PublicKey> {
+        self.private_keys.keys()
     }
 }
 

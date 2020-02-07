@@ -36,7 +36,7 @@ pub struct UTXO {
     pub txout: TxOut,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default)]
 pub struct TransactionDetails {
     pub transaction: Option<Transaction>,
     pub txid: Txid,

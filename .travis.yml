@@ -7,8 +7,11 @@ before_script:
   - rustup component add rustfmt
 script:
   - cargo fmt -- --check --verbose
-  - cargo build --verbose --all
   - cargo test --verbose --all
+  - cargo build --verbose --all
+  - cargo build --verbose --no-default-features --features=minimal
+  - cargo build --verbose --no-default-features --features=key-value-db
+  - cargo build --verbose --no-default-features --features=electrum
 
 notifications:
   email: false
