@@ -1,10 +1,11 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 use serde::Serialize;
 
 use bitcoin::hashes::*;
 use bitcoin::secp256k1::Secp256k1;
 use bitcoin::util::bip32::Fingerprint;
+use bitcoin::util::psbt;
 use bitcoin::PublicKey;
 
 use miniscript::{Descriptor, Miniscript, Terminal};
@@ -23,6 +24,7 @@ impl PKOrF {
     fn from_key(k: &Box<dyn Key>) -> Self {
         let secp = Secp256k1::gen_new();
 
+        let pubkey = k.as_public_key(&secp, None).unwrap();
         if let Some(fing) = k.fingerprint(&secp) {
             PKOrF {
                 fingerprint: Some(fing),
@@ -31,7 +33,7 @@ impl PKOrF {
         } else {
             PKOrF {
                 fingerprint: None,
-                pubkey: Some(k.as_public_key(&secp, None).unwrap()),
+                pubkey: Some(pubkey),
             }
         }
     }
@@ -61,10 +63,10 @@ pub enum SatisfiableItem {
         hash: hash160::Hash,
     },
     AbsoluteTimelock {
-        height: u32,
+        value: u32,
     },
     RelativeTimelock {
-        blocks: u32,
+        value: u32,
     },
 
     // Complex item
@@ -88,26 +90,107 @@ impl SatisfiableItem {
             _ => true,
         }
     }
+
+    fn satisfy(&self, _input: &psbt::Input) -> Satisfaction {
+        Satisfaction::None
+    }
 }
 
-#[derive(Debug, Serialize)]
-pub enum ItemSatisfier {
-    Us,
-    Other(Option<Fingerprint>),
-    Timelock(Option<u32>), // remaining blocks. TODO: time-based timelocks
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "type", rename_all = "UPPERCASE")]
+pub enum Satisfaction {
+    Complete {
+        #[serde(skip_serializing_if = "PathRequirements::is_null")]
+        condition: PathRequirements,
+    },
+    Partial {
+        m: usize,
+        n: usize,
+        completed: HashSet<usize>,
+    },
+    None,
+}
+
+impl Satisfaction {
+    fn from_items_threshold(items: HashSet<usize>, threshold: usize) -> Satisfaction {
+        Satisfaction::Partial {
+            m: items.len(),
+            n: threshold,
+            completed: items,
+        }
+    }
+}
+
+impl<'a> std::ops::Add<&'a Satisfaction> for Satisfaction {
+    type Output = Satisfaction;
+
+    fn add(self, other: &'a Satisfaction) -> Satisfaction {
+        &self + other
+    }
+}
+
+impl<'a, 'b> std::ops::Add<&'b Satisfaction> for &'a Satisfaction {
+    type Output = Satisfaction;
+
+    fn add(self, other: &'b Satisfaction) -> Satisfaction {
+        match (self, other) {
+            // complete-complete
+            (
+                Satisfaction::Complete { condition: mut a },
+                Satisfaction::Complete { condition: b },
+            ) => {
+                a.merge(&b).unwrap();
+                Satisfaction::Complete { condition: a }
+            }
+            // complete-<any>
+            (Satisfaction::Complete { condition }, _) => Satisfaction::Complete {
+                condition: *condition,
+            },
+            (_, Satisfaction::Complete { condition }) => Satisfaction::Complete {
+                condition: *condition,
+            },
+
+            // none-<any>
+            (Satisfaction::None, any) => any.clone(),
+            (any, Satisfaction::None) => any.clone(),
+
+            // partial-partial
+            (
+                Satisfaction::Partial {
+                    m: _,
+                    n: a_n,
+                    completed: a_items,
+                },
+                Satisfaction::Partial {
+                    m: _,
+                    n: _,
+                    completed: b_items,
+                },
+            ) => {
+                let union: HashSet<_> = a_items.union(&b_items).cloned().collect();
+                Satisfaction::Partial {
+                    m: union.len(),
+                    n: *a_n,
+                    completed: union,
+                }
+            }
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]
 pub struct Policy {
     #[serde(flatten)]
     item: SatisfiableItem,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    satisfier: Option<ItemSatisfier>,
+    satisfaction: Satisfaction,
+    contribution: Satisfaction,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Eq, PartialEq, Clone, Copy, Serialize)]
 pub struct PathRequirements {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub csv: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub timelock: Option<u32>,
 }
 
@@ -126,6 +209,8 @@ impl PathRequirements {
         }?;
 
         match (self.timelock, other.timelock) {
+            // TODO: we could actually set the timelock to the highest of the two, but we would
+            // have to first check that they are both in the same "unit" (blocks vs time)
             (Some(old), Some(new)) if old != new => Err(PolicyError::DifferentTimelock(old, new)),
             _ => {
                 self.timelock = self.timelock.or(other.timelock);
@@ -154,7 +239,8 @@ impl Policy {
     pub fn new(item: SatisfiableItem) -> Self {
         Policy {
             item,
-            satisfier: None,
+            satisfaction: Satisfaction::None,
+            contribution: Satisfaction::None,
         }
     }
 
@@ -162,13 +248,7 @@ impl Policy {
         match (a, b) {
             (None, None) => None,
             (Some(x), None) | (None, Some(x)) => Some(x),
-            (Some(a), Some(b)) => Some(
-                SatisfiableItem::Thresh {
-                    items: vec![a, b],
-                    threshold: 2,
-                }
-                .into(),
-            ),
+            (Some(a), Some(b)) => Self::make_thresh(vec![a, b], 2),
         }
     }
 
@@ -176,33 +256,49 @@ impl Policy {
         match (a, b) {
             (None, None) => None,
             (Some(x), None) | (None, Some(x)) => Some(x),
-            (Some(a), Some(b)) => Some(
-                SatisfiableItem::Thresh {
-                    items: vec![a, b],
-                    threshold: 1,
-                }
-                .into(),
-            ),
+            (Some(a), Some(b)) => Self::make_thresh(vec![a, b], 1),
         }
     }
 
-    pub fn make_thresh(items: Vec<Policy>, mut threshold: usize) -> Option<Policy> {
+    pub fn make_thresh(items: Vec<Policy>, threshold: usize) -> Option<Policy> {
         if threshold == 0 {
             return None;
         }
-        if threshold > items.len() {
-            threshold = items.len();
-        }
 
-        Some(SatisfiableItem::Thresh { items, threshold }.into())
+        let contribution = items.iter().fold(
+            Satisfaction::Partial {
+                m: 0,
+                n: threshold,
+                completed: HashSet::new(),
+            },
+            |acc, x| acc + &x.contribution,
+        );
+        let mut policy: Policy = SatisfiableItem::Thresh { items, threshold }.into();
+        policy.contribution = contribution;
+
+        Some(policy)
     }
 
-    fn make_multisig(pubkeys: Vec<Option<&Box<dyn Key>>>, threshold: usize) -> Option<Policy> {
-        let keys = pubkeys
-            .into_iter()
-            .map(|k| PKOrF::from_key(k.unwrap()))
+    fn make_multisig(keys: Vec<Option<&Box<dyn Key>>>, threshold: usize) -> Option<Policy> {
+        let parsed_keys = keys.iter().map(|k| PKOrF::from_key(k.unwrap())).collect();
+        let mut policy: Policy = SatisfiableItem::Multisig {
+            keys: parsed_keys,
+            threshold,
+        }
+        .into();
+        let our_keys = keys
+            .iter()
+            .enumerate()
+            .filter(|(_, x)| x.is_some() && x.unwrap().has_secret())
+            .map(|(k, _)| k)
             .collect();
-        Some(SatisfiableItem::Multisig { keys, threshold }.into())
+        policy.contribution = Satisfaction::from_items_threshold(our_keys, threshold);
+
+        Some(policy)
+    }
+
+    pub fn satisfy(&mut self, input: &psbt::Input) {
+        self.satisfaction = self.item.satisfy(input);
     }
 
     pub fn requires_path(&self) -> bool {
@@ -267,12 +363,12 @@ impl Policy {
                 Ok(requirements)
             }
             _ if !selected.is_empty() => Err(PolicyError::TooManyItemsSelected(index)),
-            SatisfiableItem::AbsoluteTimelock { height } => Ok(PathRequirements {
+            SatisfiableItem::AbsoluteTimelock { value } => Ok(PathRequirements {
                 csv: None,
-                timelock: Some(*height),
+                timelock: Some(*value),
             }),
-            SatisfiableItem::RelativeTimelock { blocks } => Ok(PathRequirements {
-                csv: Some(*blocks),
+            SatisfiableItem::RelativeTimelock { value } => Ok(PathRequirements {
+                csv: Some(*value),
                 timelock: None,
             }),
             _ => Ok(PathRequirements::default()),
@@ -286,19 +382,27 @@ impl From<SatisfiableItem> for Policy {
     }
 }
 
-pub trait ExtractPolicy {
-    fn extract_policy(&self) -> Option<Policy>;
-}
-
 fn signature_from_string(key: Option<&Box<dyn Key>>) -> Option<Policy> {
-    key.map(|k| SatisfiableItem::Signature(PKOrF::from_key(k)).into())
+    key.map(|k| {
+        let mut policy: Policy = SatisfiableItem::Signature(PKOrF::from_key(k)).into();
+        policy.contribution = if k.has_secret() {
+            Satisfaction::Complete {
+                condition: Default::default(),
+            }
+        } else {
+            Satisfaction::None
+        };
+
+        policy
+    })
 }
 
 fn signature_key_from_string(key: Option<&Box<dyn Key>>) -> Option<Policy> {
     let secp = Secp256k1::gen_new();
 
     key.map(|k| {
-        if let Some(fing) = k.fingerprint(&secp) {
+        let pubkey = k.as_public_key(&secp, None).unwrap();
+        let mut policy: Policy = if let Some(fing) = k.fingerprint(&secp) {
             SatisfiableItem::SignatureKey {
                 fingerprint: Some(fing),
                 pubkey_hash: None,
@@ -306,12 +410,19 @@ fn signature_key_from_string(key: Option<&Box<dyn Key>>) -> Option<Policy> {
         } else {
             SatisfiableItem::SignatureKey {
                 fingerprint: None,
-                pubkey_hash: Some(hash160::Hash::hash(
-                    &k.as_public_key(&secp, None).unwrap().to_bytes(),
-                )),
+                pubkey_hash: Some(hash160::Hash::hash(&pubkey.to_bytes())),
             }
         }
-        .into()
+        .into();
+        policy.contribution = if k.has_secret() {
+            Satisfaction::Complete {
+                condition: Default::default(),
+            }
+        } else {
+            Satisfaction::None
+        };
+
+        policy
     })
 }
 
@@ -322,11 +433,27 @@ impl MiniscriptExtractPolicy for Miniscript<String> {
             Terminal::True | Terminal::False => None,
             Terminal::Pk(pubkey) => signature_from_string(lookup_map.get(pubkey)),
             Terminal::PkH(pubkey_hash) => signature_key_from_string(lookup_map.get(pubkey_hash)),
-            Terminal::After(height) => {
-                Some(SatisfiableItem::AbsoluteTimelock { height: *height }.into())
+            Terminal::After(value) => {
+                let mut policy: Policy = SatisfiableItem::AbsoluteTimelock { value: *value }.into();
+                policy.contribution = Satisfaction::Complete {
+                    condition: PathRequirements {
+                        csv: None,
+                        timelock: Some(*value),
+                    },
+                };
+
+                Some(policy)
             }
-            Terminal::Older(blocks) => {
-                Some(SatisfiableItem::RelativeTimelock { blocks: *blocks }.into())
+            Terminal::Older(value) => {
+                let mut policy: Policy = SatisfiableItem::RelativeTimelock { value: *value }.into();
+                policy.contribution = Satisfaction::Complete {
+                    condition: PathRequirements {
+                        csv: Some(*value),
+                        timelock: None,
+                    },
+                };
+
+                Some(policy)
             }
             Terminal::Sha256(hash) => Some(SatisfiableItem::SHA256Preimage { hash: *hash }.into()),
             Terminal::Hash256(hash) => {
@@ -337,6 +464,9 @@ impl MiniscriptExtractPolicy for Miniscript<String> {
             }
             Terminal::Hash160(hash) => {
                 Some(SatisfiableItem::HASH160Preimage { hash: *hash }.into())
+            }
+            Terminal::ThreshM(k, pks) => {
+                Policy::make_multisig(pks.iter().map(|s| lookup_map.get(s)).collect(), *k)
             }
             // Identities
             Terminal::Alt(inner)
@@ -375,9 +505,6 @@ impl MiniscriptExtractPolicy for Miniscript<String> {
                 }
 
                 Policy::make_thresh(mapped, threshold)
-            }
-            Terminal::ThreshM(k, pks) => {
-                Policy::make_multisig(pks.iter().map(|s| lookup_map.get(s)).collect(), *k)
             }
         }
     }

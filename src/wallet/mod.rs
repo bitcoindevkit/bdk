@@ -3,6 +3,7 @@ use std::cmp;
 use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::convert::TryFrom;
 use std::io::{Read, Write};
+use std::str::FromStr;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use bitcoin::blockdata::opcodes;
@@ -25,11 +26,9 @@ pub mod utils;
 
 use self::utils::{ChunksIterator, IsDust};
 use crate::database::{BatchDatabase, BatchOperations};
-use crate::descriptor::{
-    DerivedDescriptor, DescriptorMeta, ExtendedDescriptor, ExtractPolicy, Policy,
-};
+use crate::descriptor::{get_checksum, DescriptorMeta, ExtendedDescriptor, ExtractPolicy, Policy};
 use crate::error::Error;
-use crate::psbt::{PSBTSatisfier, PSBTSigner};
+use crate::psbt::{utils::PSBTUtils, PSBTSatisfier, PSBTSigner};
 use crate::signer::Signer;
 use crate::types::*;
 
@@ -40,7 +39,6 @@ use electrum_client::Client;
 #[cfg(not(any(feature = "electrum", feature = "default")))]
 use std::marker::PhantomData as Client;
 
-// TODO: force descriptor and change_descriptor to have the same policies?
 pub struct Wallet<S: Read + Write, D: BatchDatabase> {
     descriptor: ExtendedDescriptor,
     change_descriptor: Option<ExtendedDescriptor>,
@@ -58,12 +56,30 @@ where
     D: BatchDatabase,
 {
     pub fn new_offline(
-        descriptor: ExtendedDescriptor,
-        change_descriptor: Option<ExtendedDescriptor>,
+        descriptor: &str,
+        change_descriptor: Option<&str>,
         network: Network,
-        database: D,
-    ) -> Self {
-        Wallet {
+        mut database: D,
+    ) -> Result<Self, Error> {
+        database.check_descriptor_checksum(
+            ScriptType::External,
+            get_checksum(descriptor)?.as_bytes(),
+        )?;
+        let descriptor = ExtendedDescriptor::from_str(descriptor)?;
+        let change_descriptor = match change_descriptor {
+            Some(desc) => {
+                database.check_descriptor_checksum(
+                    ScriptType::Internal,
+                    get_checksum(desc)?.as_bytes(),
+                )?;
+                Some(ExtendedDescriptor::from_str(desc)?)
+            }
+            None => None,
+        };
+
+        // TODO: make sure that both descriptor have the same structure
+
+        Ok(Wallet {
             descriptor,
             change_descriptor,
             network,
@@ -71,7 +87,7 @@ where
             client: None,
             database: RefCell::new(database),
             _secp: Secp256k1::gen_new(),
-        }
+        })
     }
 
     pub fn get_new_address(&self) -> Result<Address, Error> {
@@ -116,7 +132,6 @@ where
         utxos: Option<Vec<OutPoint>>,
         unspendable: Option<Vec<OutPoint>>,
     ) -> Result<(PSBT, TransactionDetails), Error> {
-        // TODO: run before deriving the descriptor
         let policy = self.descriptor.extract_policy().unwrap();
         if policy.requires_path() && policy_path.is_none() {
             return Err(Error::SpendingPolicyRequired);
@@ -287,22 +302,14 @@ where
 
     // TODO: define an enum for signing errors
     pub fn sign(&self, mut psbt: PSBT) -> Result<(PSBT, bool), Error> {
-        let mut derived_descriptors = BTreeMap::new();
-
         let tx = &psbt.global.unsigned_tx;
+        let mut input_utxos = Vec::with_capacity(psbt.inputs.len());
+        for n in 0..psbt.inputs.len() {
+            input_utxos.push(psbt.get_utxo_for(n).clone());
+        }
 
         // try to add hd_keypaths if we've already seen the output
-        for (n, psbt_input) in psbt.inputs.iter_mut().enumerate() {
-            let out = match (&psbt_input.witness_utxo, &psbt_input.non_witness_utxo) {
-                (Some(wit_out), _) => Some(wit_out),
-                (_, Some(in_tx))
-                    if (tx.input[n].previous_output.vout as usize) < in_tx.output.len() =>
-                {
-                    Some(&in_tx.output[tx.input[n].previous_output.vout as usize])
-                }
-                _ => None,
-            };
-
+        for (psbt_input, out) in psbt.inputs.iter_mut().zip(input_utxos.iter()) {
             debug!("searching hd_keypaths for out: {:?}", out);
 
             if let Some(out) = out {
@@ -325,11 +332,8 @@ where
                     None => 0,
                 };
 
-                let desc = self.get_descriptor_for(script_type);
-                let derived_descriptor = desc.derive(index)?;
-                derived_descriptors.insert(n, derived_descriptor);
-
                 // merge hd_keypaths
+                let desc = self.get_descriptor_for(script_type);
                 let mut hd_keypaths = desc.get_hd_keypaths(index)?;
                 psbt_input.hd_keypaths.append(&mut hd_keypaths);
             }
@@ -469,7 +473,7 @@ where
         }
 
         // attempt to finalize
-        let finalized = self.finalize_psbt(tx.clone(), &mut psbt, derived_descriptors);
+        let finalized = self.finalize_psbt(tx.clone(), &mut psbt);
 
         Ok((psbt, finalized))
     }
@@ -626,18 +630,16 @@ where
         Ok((answer, paths, selected_amount, fee_val))
     }
 
-    fn finalize_psbt(
-        &self,
-        mut tx: Transaction,
-        psbt: &mut PSBT,
-        derived_descriptors: BTreeMap<usize, DerivedDescriptor>,
-    ) -> bool {
+    fn finalize_psbt(&self, mut tx: Transaction, psbt: &mut PSBT) -> bool {
         for (n, input) in tx.input.iter_mut().enumerate() {
-            debug!("getting descriptor for {}", n);
+            // safe to run only on the descriptor because we assume the change descriptor also has
+            // the same structure
+            let desc = self.descriptor.derive_from_psbt_input(psbt, n);
+            debug!("reconstructed descriptor is {:?}", desc);
 
-            let desc = match derived_descriptors.get(&n) {
-                None => return false,
-                Some(desc) => desc,
+            let desc = match desc {
+                Err(_) => return false,
+                Ok(desc) => desc,
             };
 
             // TODO: use height once we sync headers
@@ -669,13 +671,31 @@ where
     D: BatchDatabase,
 {
     pub fn new(
-        descriptor: ExtendedDescriptor,
-        change_descriptor: Option<ExtendedDescriptor>,
+        descriptor: &str,
+        change_descriptor: Option<&str>,
         network: Network,
-        database: D,
+        mut database: D,
         client: Client<S>,
-    ) -> Self {
-        Wallet {
+    ) -> Result<Self, Error> {
+        database.check_descriptor_checksum(
+            ScriptType::External,
+            get_checksum(descriptor)?.as_bytes(),
+        )?;
+        let descriptor = ExtendedDescriptor::from_str(descriptor)?;
+        let change_descriptor = match change_descriptor {
+            Some(desc) => {
+                database.check_descriptor_checksum(
+                    ScriptType::Internal,
+                    get_checksum(desc)?.as_bytes(),
+                )?;
+                Some(ExtendedDescriptor::from_str(desc)?)
+            }
+            None => None,
+        };
+
+        // TODO: make sure that both descriptor have the same structure
+
+        Ok(Wallet {
             descriptor,
             change_descriptor,
             network,
@@ -683,7 +703,7 @@ where
             client: Some(RefCell::new(client)),
             database: RefCell::new(database),
             _secp: Secp256k1::gen_new(),
-        }
+        })
     }
 
     fn get_previous_output(&self, outpoint: &OutPoint) -> Option<TxOut> {

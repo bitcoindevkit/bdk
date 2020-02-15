@@ -25,7 +25,7 @@ use bitcoin::{Address, Network, OutPoint};
 use magical_bitcoin_wallet::bitcoin;
 use magical_bitcoin_wallet::sled;
 use magical_bitcoin_wallet::types::ScriptType;
-use magical_bitcoin_wallet::{Client, ExtendedDescriptor, Wallet};
+use magical_bitcoin_wallet::{Client, Wallet};
 
 fn prepare_home_dir() -> PathBuf {
     let mut dir = PathBuf::new();
@@ -232,13 +232,8 @@ fn main() {
         Some("testnet") | _ => Network::Testnet,
     };
 
-    let descriptor = matches
-        .value_of("descriptor")
-        .map(|x| ExtendedDescriptor::from_str(x).unwrap())
-        .unwrap();
-    let change_descriptor = matches
-        .value_of("change_descriptor")
-        .map(|x| ExtendedDescriptor::from_str(x).unwrap());
+    let descriptor = matches.value_of("descriptor").unwrap();
+    let change_descriptor = matches.value_of("change_descriptor");
     debug!("descriptors: {:?} {:?}", descriptor, change_descriptor);
 
     let database = sled::open(prepare_home_dir().to_str().unwrap()).unwrap();
@@ -248,7 +243,7 @@ fn main() {
     debug!("database opened successfully");
 
     let client = Client::new(matches.value_of("server").unwrap()).unwrap();
-    let wallet = Wallet::new(descriptor, change_descriptor, network, tree, client);
+    let wallet = Wallet::new(descriptor, change_descriptor, network, tree, client).unwrap();
 
     // TODO: print errors in a nice way
     let handle_matches = |matches: ArgMatches<'_>| {

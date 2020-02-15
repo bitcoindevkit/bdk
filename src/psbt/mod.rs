@@ -17,6 +17,8 @@ use crate::descriptor::ExtendedDescriptor;
 use crate::error::Error;
 use crate::signer::Signer;
 
+pub mod utils;
+
 pub struct PSBTSatisfier<'a> {
     input: &'a psbt::Input,
     create_height: Option<u32>,
@@ -99,7 +101,7 @@ impl<'a> Satisfier<bitcoin::PublicKey> for PSBTSatisfier<'a> {
 
     fn check_after(&self, height: u32) -> bool {
         // TODO: also check if `nLockTime` is right
-        debug!("check_older: {}", height);
+        debug!("check_after: {}", height);
 
         self.current_height.unwrap_or(0) > height
     }

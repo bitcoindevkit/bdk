@@ -17,6 +17,7 @@ use crate::types::*;
 // rawtx                r<txid> -> tx
 // transactions         t<txid> -> tx details
 // deriv indexes        c{i,e} -> u32
+// descriptor checksum  d{i,e} -> vec<u8>
 
 enum SledKey<'a> {
     Path((Option<ScriptType>, Option<&'a DerivationPath>)),
@@ -25,6 +26,7 @@ enum SledKey<'a> {
     RawTx(Option<&'a Txid>),
     Transaction(Option<&'a Txid>),
     LastIndex(ScriptType),
+    DescriptorChecksum(ScriptType),
 }
 
 impl SledKey<'_> {
@@ -42,6 +44,7 @@ impl SledKey<'_> {
             SledKey::RawTx(_) => b"r".to_vec(),
             SledKey::Transaction(_) => b"t".to_vec(),
             SledKey::LastIndex(st) => [b"c", st.as_ref()].concat(),
+            SledKey::DescriptorChecksum(st) => [b"d", st.as_ref()].concat(),
         }
     }
 
@@ -235,6 +238,26 @@ impl BatchOperations for Batch {
 }
 
 impl Database for Tree {
+    fn check_descriptor_checksum<B: AsRef<[u8]>>(
+        &mut self,
+        script_type: ScriptType,
+        bytes: B,
+    ) -> Result<(), Error> {
+        let key = SledKey::DescriptorChecksum(script_type).as_sled_key();
+
+        let prev = self.get(&key)?.map(|x| x.to_vec());
+        if let Some(val) = prev {
+            if val == bytes.as_ref() {
+                Ok(())
+            } else {
+                Err(Error::ChecksumMismatch)
+            }
+        } else {
+            self.insert(&key, bytes.as_ref())?;
+            Ok(())
+        }
+    }
+
     fn iter_script_pubkeys(&self, script_type: Option<ScriptType>) -> Result<Vec<Script>, Error> {
         let key = SledKey::Path((script_type, None)).as_sled_key();
         self.scan_prefix(key)
@@ -358,7 +381,7 @@ impl Database for Tree {
     // inserts 0 if not present
     fn increment_last_index(&mut self, script_type: ScriptType) -> Result<u32, Error> {
         let key = SledKey::LastIndex(script_type).as_sled_key();
-        self.fetch_and_update(key, |prev| {
+        self.update_and_fetch(key, |prev| {
             let new = match prev {
                 Some(b) => {
                     let array: [u8; 4] = b.try_into().unwrap_or([0; 4]);
@@ -366,7 +389,7 @@ impl Database for Tree {
 
                     val + 1
                 }
-                None => 1, // start from 1, we return 0 when the prev value was None
+                None => 0,
             };
 
             Some(new.to_be_bytes().to_vec())

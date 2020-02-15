@@ -40,6 +40,12 @@ pub trait BatchOperations {
 }
 
 pub trait Database: BatchOperations {
+    fn check_descriptor_checksum<B: AsRef<[u8]>>(
+        &mut self,
+        script_type: ScriptType,
+        bytes: B,
+    ) -> Result<(), Error>;
+
     fn iter_script_pubkeys(&self, script_type: Option<ScriptType>) -> Result<Vec<Script>, Error>;
     fn iter_utxos(&self) -> Result<Vec<UTXO>, Error>;
     fn iter_raw_txs(&self) -> Result<Vec<Transaction>, Error>;

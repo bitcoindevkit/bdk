@@ -54,7 +54,13 @@ pub struct DescriptorExtendedKey {
 
 impl DescriptorExtendedKey {
     pub fn full_path(&self, index: u32) -> DerivationPath {
-        let mut final_path: Vec<ChildNumber> = self.path.clone().into();
+        let mut final_path: Vec<ChildNumber> = Vec::new();
+        if let Some(path) = &self.master_derivation {
+            let path_as_vec: Vec<ChildNumber> = path.clone().into();
+            final_path.extend_from_slice(&path_as_vec);
+        }
+        let our_path: Vec<ChildNumber> = self.path.clone().into();
+        final_path.extend_from_slice(&our_path);
         let other_path: Vec<ChildNumber> = self.final_index.as_path(index).into();
         final_path.extend_from_slice(&other_path);
 

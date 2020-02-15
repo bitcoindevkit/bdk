@@ -13,6 +13,8 @@ pub enum Error {
     UnknownUTXO,
     DifferentTransactions,
 
+    ChecksumMismatch,
+
     SpendingPolicyRequired,
     InvalidPolicyPathError(crate::descriptor::policy::PolicyError),
 

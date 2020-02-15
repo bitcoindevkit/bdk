@@ -4,26 +4,34 @@ use std::convert::{Into, TryFrom};
 use std::fmt;
 use std::str::FromStr;
 
-use bitcoin::blockdata::script::Script;
 use bitcoin::hashes::{hash160, Hash};
 use bitcoin::secp256k1::{All, Secp256k1};
 use bitcoin::util::bip32::{DerivationPath, ExtendedPrivKey, Fingerprint};
-use bitcoin::{PrivateKey, PublicKey};
+use bitcoin::util::psbt::PartiallySignedTransaction as PSBT;
+use bitcoin::{PrivateKey, PublicKey, Script};
 
-pub use miniscript::descriptor::Descriptor;
+pub use miniscript::{descriptor::Descriptor, Miniscript};
 
 use serde::{Deserialize, Serialize};
 
+use crate::psbt::utils::PSBTUtils;
+
+pub mod checksum;
 pub mod error;
 pub mod extended_key;
 pub mod policy;
 
+pub use self::checksum::get_checksum;
 pub use self::error::Error;
 pub use self::extended_key::{DerivationIndex, DescriptorExtendedKey};
-pub use self::policy::{ExtractPolicy, Policy};
+pub use self::policy::Policy;
 
 trait MiniscriptExtractPolicy {
     fn extract_policy(&self, lookup_map: &BTreeMap<String, Box<dyn Key>>) -> Option<Policy>;
+}
+
+pub trait ExtractPolicy {
+    fn extract_policy(&self) -> Option<Policy>;
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, PartialOrd, Eq, Ord, Default)]
@@ -78,11 +86,7 @@ where
 
     fn psbt_redeem_script(&self) -> Option<Script> {
         match self {
-            Descriptor::ShWpkh(ref pk) => {
-                let addr =
-                    bitcoin::Address::p2shwpkh(&pk.to_public_key(), bitcoin::Network::Bitcoin);
-                Some(addr.script_pubkey())
-            }
+            Descriptor::ShWpkh(_) => Some(self.witness_script()),
             Descriptor::ShWsh(ref script) => Some(script.encode().to_v0_p2wsh()),
             Descriptor::Sh(ref script) => Some(script.encode()),
             _ => None,
@@ -105,6 +109,10 @@ trait Key: std::fmt::Debug {
     fn xprv(&self) -> Option<ExtendedPrivKey>;
     fn full_path(&self, index: u32) -> Option<DerivationPath>;
     fn is_fixed(&self) -> bool;
+
+    fn has_secret(&self) -> bool {
+        self.xprv().is_some() || self.as_secret_key().is_some()
+    }
 }
 
 impl Key for PublicKey {
@@ -169,7 +177,11 @@ impl Key for PrivateKey {
 
 impl Key for DescriptorExtendedKey {
     fn fingerprint(&self, secp: &Secp256k1<All>) -> Option<Fingerprint> {
-        Some(self.root_xpub(secp).fingerprint())
+        if let Some(fing) = self.master_fingerprint {
+            Some(fing.clone())
+        } else {
+            Some(self.root_xpub(secp).fingerprint())
+        }
     }
 
     fn as_public_key(&self, secp: &Secp256k1<All>, index: Option<u32>) -> Result<PublicKey, Error> {
@@ -253,6 +265,62 @@ impl ExtendedDescriptor {
             keys: keys.into_inner(),
             ctx,
         })
+    }
+
+    pub fn derive_with_miniscript(
+        &self,
+        miniscript: Miniscript<PublicKey>,
+    ) -> Result<DerivedDescriptor, Error> {
+        // TODO: make sure they are "equivalent"
+        match self.internal {
+            Descriptor::Bare(_) => Ok(Descriptor::Bare(miniscript)),
+            Descriptor::Sh(_) => Ok(Descriptor::Sh(miniscript)),
+            Descriptor::Wsh(_) => Ok(Descriptor::Wsh(miniscript)),
+            Descriptor::ShWsh(_) => Ok(Descriptor::ShWsh(miniscript)),
+            _ => Err(Error::CantDeriveWithMiniscript),
+        }
+    }
+
+    pub fn derive_from_psbt_input(
+        &self,
+        psbt: &PSBT,
+        input_index: usize,
+    ) -> Result<DerivedDescriptor, Error> {
+        let get_pk_from_partial_sigs = || {
+            // here we need the public key.. since it's a single sig, there are only two
+            // options: we can either find it in the `partial_sigs`, or we can't. if we
+            // can't, it means that we can't even satisfy the input, so we can exit knowing
+            // that we did our best to try to find it.
+            psbt.inputs[input_index]
+                .partial_sigs
+                .keys()
+                .nth(0)
+                .ok_or(Error::MissingPublicKey)
+        };
+
+        if let Some(wit_script) = &psbt.inputs[input_index].witness_script {
+            self.derive_with_miniscript(Miniscript::parse(wit_script)?)
+        } else if let Some(p2sh_script) = &psbt.inputs[input_index].redeem_script {
+            if p2sh_script.is_v0_p2wpkh() {
+                // wrapped p2wpkh
+                get_pk_from_partial_sigs().map(|pk| Descriptor::ShWpkh(*pk))
+            } else {
+                self.derive_with_miniscript(Miniscript::parse(p2sh_script)?)
+            }
+        } else if let Some(utxo) = psbt.get_utxo_for(input_index) {
+            if utxo.script_pubkey.is_p2pkh() {
+                get_pk_from_partial_sigs().map(|pk| Descriptor::Pkh(*pk))
+            } else if utxo.script_pubkey.is_p2pk() {
+                get_pk_from_partial_sigs().map(|pk| Descriptor::Pk(*pk))
+            } else if utxo.script_pubkey.is_v0_p2wpkh() {
+                get_pk_from_partial_sigs().map(|pk| Descriptor::Wpkh(*pk))
+            } else {
+                // try as bare script
+                self.derive_with_miniscript(Miniscript::parse(&utxo.script_pubkey)?)
+            }
+        } else {
+            Err(Error::MissingDetails)
+        }
     }
 
     pub fn derive(&self, index: u32) -> Result<DerivedDescriptor, Error> {
