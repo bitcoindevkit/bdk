@@ -924,7 +924,7 @@ where
                 .as_ref()
                 .unwrap()
                 .borrow_mut()
-                .batch_script_get_history(chunk.iter().collect())?; // TODO: fix electrum client
+                .batch_script_get_history(chunk.iter().collect::<Vec<_>>())?; // TODO: fix electrum client
 
             for (script, history) in chunk.into_iter().zip(call_result.into_iter()) {
                 trace!("received history for {:?}, size {}", script, history.len());
