@@ -10,7 +10,7 @@ use bitcoin::util::bip32::{DerivationPath, ExtendedPrivKey, Fingerprint};
 use bitcoin::util::psbt::PartiallySignedTransaction as PSBT;
 use bitcoin::{PrivateKey, PublicKey, Script};
 
-pub use miniscript::{descriptor::Descriptor, Miniscript};
+pub use miniscript::{Descriptor, Miniscript, MiniscriptKey, Terminal};
 
 use serde::{Deserialize, Serialize};
 
@@ -27,11 +27,14 @@ pub use self::extended_key::{DerivationIndex, DescriptorExtendedKey};
 pub use self::policy::Policy;
 
 trait MiniscriptExtractPolicy {
-    fn extract_policy(&self, lookup_map: &BTreeMap<String, Box<dyn Key>>) -> Option<Policy>;
+    fn extract_policy(
+        &self,
+        lookup_map: &BTreeMap<String, Box<dyn Key>>,
+    ) -> Result<Option<Policy>, Error>;
 }
 
 pub trait ExtractPolicy {
-    fn extract_policy(&self) -> Option<Policy>;
+    fn extract_policy(&self) -> Result<Option<Policy>, Error>;
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, PartialOrd, Eq, Ord, Default)]
@@ -228,6 +231,12 @@ impl std::clone::Clone for ExtendedDescriptor {
     }
 }
 
+impl std::convert::AsRef<StringDescriptor> for ExtendedDescriptor {
+    fn as_ref(&self) -> &StringDescriptor {
+        &self.internal
+    }
+}
+
 impl ExtendedDescriptor {
     fn parse_string(string: &str) -> Result<(String, Box<dyn Key>), Error> {
         if let Ok(pk) = PublicKey::from_str(string) {
@@ -271,13 +280,18 @@ impl ExtendedDescriptor {
         &self,
         miniscript: Miniscript<PublicKey>,
     ) -> Result<DerivedDescriptor, Error> {
-        // TODO: make sure they are "equivalent"
-        match self.internal {
-            Descriptor::Bare(_) => Ok(Descriptor::Bare(miniscript)),
-            Descriptor::Sh(_) => Ok(Descriptor::Sh(miniscript)),
-            Descriptor::Wsh(_) => Ok(Descriptor::Wsh(miniscript)),
-            Descriptor::ShWsh(_) => Ok(Descriptor::ShWsh(miniscript)),
-            _ => Err(Error::CantDeriveWithMiniscript),
+        let derived_desc = match self.internal {
+            Descriptor::Bare(_) => Descriptor::Bare(miniscript),
+            Descriptor::Sh(_) => Descriptor::Sh(miniscript),
+            Descriptor::Wsh(_) => Descriptor::Wsh(miniscript),
+            Descriptor::ShWsh(_) => Descriptor::ShWsh(miniscript),
+            _ => return Err(Error::CantDeriveWithMiniscript),
+        };
+
+        if !self.same_structure(&derived_desc) {
+            Err(Error::CantDeriveWithMiniscript)
+        } else {
+            Ok(derived_desc)
         }
     }
 
@@ -388,10 +402,29 @@ impl ExtendedDescriptor {
     pub fn is_fixed(&self) -> bool {
         self.keys.iter().all(|(_, key)| key.is_fixed())
     }
+
+    pub fn same_structure<K: MiniscriptKey>(&self, other: &Descriptor<K>) -> bool {
+        // Translate all the public keys to () and then check if the two descriptors are equal.
+        // TODO: translate hashes to their default value before checking for ==
+
+        let func_string = |_string: &String| -> Result<_, Error> { Ok(DummyKey::default()) };
+
+        let func_generic_pk = |_data: &K| -> Result<_, Error> { Ok(DummyKey::default()) };
+        let func_generic_pkh =
+            |_data: &<K as MiniscriptKey>::Hash| -> Result<_, Error> { Ok(DummyKey::default()) };
+
+        let translated_a = self.internal.translate_pk(func_string, func_string);
+        let translated_b = other.translate_pk(func_generic_pk, func_generic_pkh);
+
+        match (translated_a, translated_b) {
+            (Ok(a), Ok(b)) => a == b,
+            _ => false,
+        }
+    }
 }
 
 impl ExtractPolicy for ExtendedDescriptor {
-    fn extract_policy(&self) -> Option<Policy> {
+    fn extract_policy(&self) -> Result<Option<Policy>, Error> {
         self.internal.extract_policy(&self.keys)
     }
 }
@@ -479,7 +512,10 @@ mod test {
                 .to_string(),
             "mqwpxxvfv3QbM8PU8uBx2jaNt9btQqvQNx"
         );
-        assert_eq!(desc.get_secret_keys().into_iter().collect::<Vec<_>>().len(), 1);
+        assert_eq!(
+            desc.get_secret_keys().into_iter().collect::<Vec<_>>().len(),
+            1
+        );
     }
 
     #[test]
@@ -503,7 +539,10 @@ mod test {
                 .to_string(),
             "mqwpxxvfv3QbM8PU8uBx2jaNt9btQqvQNx"
         );
-        assert_eq!(desc.get_secret_keys().into_iter().collect::<Vec<_>>().len(), 0);
+        assert_eq!(
+            desc.get_secret_keys().into_iter().collect::<Vec<_>>().len(),
+            0
+        );
     }
 
     #[test]

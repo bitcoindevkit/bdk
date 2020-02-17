@@ -9,7 +9,6 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use bitcoin::blockdata::opcodes;
 use bitcoin::blockdata::script::Builder;
 use bitcoin::consensus::encode::serialize;
-use bitcoin::secp256k1::{All, Secp256k1};
 use bitcoin::util::bip32::{ChildNumber, DerivationPath};
 use bitcoin::util::psbt::PartiallySignedTransaction as PSBT;
 use bitcoin::{
@@ -45,8 +44,7 @@ pub struct Wallet<S: Read + Write, D: BatchDatabase> {
     network: Network,
 
     client: Option<RefCell<Client<S>>>,
-    database: RefCell<D>, // TODO: save descriptor checksum and check when loading
-    _secp: Secp256k1<All>,
+    database: RefCell<D>,
 }
 
 // offline actions, always available
@@ -72,12 +70,16 @@ where
                     ScriptType::Internal,
                     get_checksum(desc)?.as_bytes(),
                 )?;
-                Some(ExtendedDescriptor::from_str(desc)?)
+
+                let parsed = ExtendedDescriptor::from_str(desc)?;
+                if !parsed.same_structure(descriptor.as_ref()) {
+                    return Err(Error::DifferentDescriptorStructure);
+                }
+
+                Some(parsed)
             }
             None => None,
         };
-
-        // TODO: make sure that both descriptor have the same structure
 
         Ok(Wallet {
             descriptor,
@@ -86,7 +88,6 @@ where
 
             client: None,
             database: RefCell::new(database),
-            _secp: Secp256k1::gen_new(),
         })
     }
 
@@ -132,13 +133,11 @@ where
         utxos: Option<Vec<OutPoint>>,
         unspendable: Option<Vec<OutPoint>>,
     ) -> Result<(PSBT, TransactionDetails), Error> {
-        let policy = self.descriptor.extract_policy().unwrap();
+        let policy = self.descriptor.extract_policy()?.unwrap();
         if policy.requires_path() && policy_path.is_none() {
             return Err(Error::SpendingPolicyRequired);
         }
-        let requirements = policy_path.map_or(Ok(Default::default()), |path| {
-            policy.get_requirements(&path)
-        })?;
+        let requirements = policy.get_requirements(&policy_path.unwrap_or(vec![]))?;
         debug!("requirements: {:?}", requirements);
 
         let mut tx = Transaction {
@@ -197,9 +196,14 @@ where
             input_witness_weight,
             fee_val,
         )?;
-        inputs
-            .iter_mut()
-            .for_each(|i| i.sequence = requirements.csv.unwrap_or(0xFFFFFFFF));
+        let n_sequence = if let Some(csv) = requirements.csv {
+            csv
+        } else if requirements.timelock.is_some() {
+            0xFFFFFFFE
+        } else {
+            0xFFFFFFFF
+        };
+        inputs.iter_mut().for_each(|i| i.sequence = n_sequence);
         tx.input.append(&mut inputs);
 
         // prepare the change output
@@ -300,9 +304,8 @@ where
         Ok((psbt, transaction_details))
     }
 
-    // TODO: define an enum for signing errors
-    pub fn sign(&self, mut psbt: PSBT) -> Result<(PSBT, bool), Error> {
-        let tx = &psbt.global.unsigned_tx;
+    // TODO: move down to the "internals"
+    fn add_hd_keypaths(&self, psbt: &mut PSBT) -> Result<(), Error> {
         let mut input_utxos = Vec::with_capacity(psbt.inputs.len());
         for n in 0..psbt.inputs.len() {
             input_utxos.push(psbt.get_utxo_for(n).clone());
@@ -338,6 +341,16 @@ where
                 psbt_input.hd_keypaths.append(&mut hd_keypaths);
             }
         }
+
+        Ok(())
+    }
+
+    // TODO: define an enum for signing errors
+    pub fn sign(&self, mut psbt: PSBT) -> Result<(PSBT, bool), Error> {
+        // this helps us doing our job later
+        self.add_hd_keypaths(&mut psbt)?;
+
+        let tx = &psbt.global.unsigned_tx;
 
         let mut signer = PSBTSigner::from_descriptor(&psbt.global.unsigned_tx, &self.descriptor)?;
         if let Some(desc) = &self.change_descriptor {
@@ -480,9 +493,9 @@ where
 
     pub fn policies(&self, script_type: ScriptType) -> Result<Option<Policy>, Error> {
         match (script_type, self.change_descriptor.as_ref()) {
-            (ScriptType::External, _) => Ok(self.descriptor.extract_policy()),
+            (ScriptType::External, _) => Ok(self.descriptor.extract_policy()?),
             (ScriptType::Internal, None) => Ok(None),
-            (ScriptType::Internal, Some(desc)) => Ok(desc.extract_policy()),
+            (ScriptType::Internal, Some(desc)) => Ok(desc.extract_policy()?),
         }
     }
 
@@ -688,12 +701,16 @@ where
                     ScriptType::Internal,
                     get_checksum(desc)?.as_bytes(),
                 )?;
-                Some(ExtendedDescriptor::from_str(desc)?)
+
+                let parsed = ExtendedDescriptor::from_str(desc)?;
+                if !parsed.same_structure(descriptor.as_ref()) {
+                    return Err(Error::DifferentDescriptorStructure);
+                }
+
+                Some(parsed)
             }
             None => None,
         };
-
-        // TODO: make sure that both descriptor have the same structure
 
         Ok(Wallet {
             descriptor,
@@ -702,7 +719,6 @@ where
 
             client: Some(RefCell::new(client)),
             database: RefCell::new(database),
-            _secp: Secp256k1::gen_new(),
         })
     }
 
@@ -944,7 +960,7 @@ where
                 .as_ref()
                 .unwrap()
                 .borrow_mut()
-                .batch_script_get_history(chunk.iter().collect::<Vec<_>>())?; // TODO: fix electrum client
+                .batch_script_get_history(chunk.iter())?;
 
             for (script, history) in chunk.into_iter().zip(call_result.into_iter()) {
                 trace!("received history for {:?}, size {}", script, history.len());

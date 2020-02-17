@@ -6,6 +6,8 @@ pub enum Error {
     MalformedInput,
     KeyParsingError(String),
 
+    Policy(crate::descriptor::policy::PolicyError),
+
     InputIndexDoesntExist,
     MissingPublicKey,
     MissingDetails,
@@ -32,3 +34,4 @@ impl_error!(bitcoin::util::base58::Error, Base58);
 impl_error!(bitcoin::util::key::Error, PK);
 impl_error!(miniscript::Error, Miniscript);
 impl_error!(bitcoin::hashes::hex::Error, Hex);
+impl_error!(crate::descriptor::policy::PolicyError, Policy);

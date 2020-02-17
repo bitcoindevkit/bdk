@@ -75,7 +75,6 @@ impl DescriptorExtendedKey {
         final_path.into()
     }
 
-
     pub fn derive<C: secp256k1::Verification + secp256k1::Signing>(
         &self,
         ctx: &secp256k1::Secp256k1<C>,

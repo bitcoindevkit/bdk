@@ -304,11 +304,10 @@ fn main() {
             let psbt: PartiallySignedTransaction = deserialize(&psbt).unwrap();
             let (psbt, finalized) = wallet.sign(psbt).unwrap();
 
+            println!("PSBT: {}", base64::encode(&serialize(&psbt)));
             println!("Finalized: {}", finalized);
             if finalized {
                 println!("Extracted: {}", serialize_hex(&psbt.extract_tx()));
-            } else {
-                println!("PSBT: {}", base64::encode(&serialize(&psbt)));
             }
         }
     };

@@ -14,6 +14,7 @@ pub enum Error {
     DifferentTransactions,
 
     ChecksumMismatch,
+    DifferentDescriptorStructure,
 
     SpendingPolicyRequired,
     InvalidPolicyPathError(crate::descriptor::policy::PolicyError),

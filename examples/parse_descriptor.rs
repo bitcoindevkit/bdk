@@ -17,12 +17,11 @@ fn main() {
     let extended_desc = ExtendedDescriptor::from_str(desc).unwrap();
     println!("{:?}", extended_desc);
 
+    let policy = extended_desc.extract_policy().unwrap();
+    println!("policy: {}", serde_json::to_string(&policy).unwrap());
+
     let derived_desc = extended_desc.derive(42).unwrap();
     println!("{:?}", derived_desc);
-
-    if let Descriptor::Wsh(x) = &derived_desc {
-        println!("{}", serde_json::to_string(&x.extract_policy()).unwrap());
-    }
 
     let addr = derived_desc.address(Network::Testnet).unwrap();
     println!("{}", addr);
