@@ -479,7 +479,7 @@ mod test {
                 .to_string(),
             "mqwpxxvfv3QbM8PU8uBx2jaNt9btQqvQNx"
         );
-        assert_eq!(desc.get_secret_keys().len(), 1);
+        assert_eq!(desc.get_secret_keys().into_iter().collect::<Vec<_>>().len(), 1);
     }
 
     #[test]
@@ -503,7 +503,7 @@ mod test {
                 .to_string(),
             "mqwpxxvfv3QbM8PU8uBx2jaNt9btQqvQNx"
         );
-        assert_eq!(desc.get_secret_keys().len(), 0);
+        assert_eq!(desc.get_secret_keys().into_iter().collect::<Vec<_>>().len(), 0);
     }
 
     #[test]
@@ -527,7 +527,7 @@ mod test {
                 .to_string(),
             "mhtuS1QaEV4HPcK4bWk4Wvpd64SUjiC5Zt"
         );
-        assert_eq!(desc.get_xprv().len(), 0);
+        assert_eq!(desc.get_xprv().into_iter().collect::<Vec<_>>().len(), 0);
     }
 
     #[test]

@@ -59,6 +59,14 @@ impl DescriptorExtendedKey {
             let path_as_vec: Vec<ChildNumber> = path.clone().into();
             final_path.extend_from_slice(&path_as_vec);
         }
+        let our_path: Vec<ChildNumber> = self.path_with_index(index).into();
+        final_path.extend_from_slice(&our_path);
+
+        final_path.into()
+    }
+
+    pub fn path_with_index(&self, index: u32) -> DerivationPath {
+        let mut final_path: Vec<ChildNumber> = Vec::new();
         let our_path: Vec<ChildNumber> = self.path.clone().into();
         final_path.extend_from_slice(&our_path);
         let other_path: Vec<ChildNumber> = self.final_index.as_path(index).into();
@@ -66,6 +74,7 @@ impl DescriptorExtendedKey {
 
         final_path.into()
     }
+
 
     pub fn derive<C: secp256k1::Verification + secp256k1::Signing>(
         &self,
@@ -81,10 +90,10 @@ impl DescriptorExtendedKey {
         index: u32,
     ) -> Result<ExtendedPubKey, super::Error> {
         if let Some(xprv) = self.secret {
-            let derive_priv = xprv.derive_priv(ctx, &self.full_path(index))?;
+            let derive_priv = xprv.derive_priv(ctx, &self.path_with_index(index))?;
             Ok(ExtendedPubKey::from_private(ctx, &derive_priv))
         } else {
-            Ok(self.pubkey.derive_pub(ctx, &self.full_path(index))?)
+            Ok(self.pubkey.derive_pub(ctx, &self.path_with_index(index))?)
         }
     }
 

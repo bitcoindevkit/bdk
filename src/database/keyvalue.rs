@@ -646,7 +646,7 @@ mod test {
         assert_eq!(tree.get_last_index(ScriptType::Internal).unwrap(), None);
 
         let res = tree.increment_last_index(ScriptType::External).unwrap();
-        assert_eq!(res, 1337);
+        assert_eq!(res, 1338);
         let res = tree.increment_last_index(ScriptType::Internal).unwrap();
         assert_eq!(res, 0);
 
@@ -654,7 +654,7 @@ mod test {
             tree.get_last_index(ScriptType::External).unwrap(),
             Some(1338)
         );
-        assert_eq!(tree.get_last_index(ScriptType::Internal).unwrap(), Some(1));
+        assert_eq!(tree.get_last_index(ScriptType::Internal).unwrap(), Some(0));
     }
 
     // TODO: more tests...
