@@ -1062,7 +1062,7 @@ where
         Ok(())
     }
 
-    pub fn broadcast(&mut self, psbt: PSBT) -> Result<Transaction, Error> {
+    pub fn broadcast(&self, psbt: PSBT) -> Result<(Txid, Transaction), Error> {
         let extracted = psbt.extract_tx();
         self.client
             .as_ref()
@@ -1070,6 +1070,6 @@ where
             .borrow_mut()
             .transaction_broadcast(&extracted)?;
 
-        Ok(extracted)
+        Ok((extracted.txid(), extracted))
     }
 }

@@ -160,6 +160,18 @@ fn main() {
                         .takes_value(true)
                         .number_of_values(1)
                         .required(true),
+                ))
+        .subcommand(
+            SubCommand::with_name("broadcast")
+                .about("Extracts the finalized transaction from a PSBT and broadcasts it to the network")
+                .arg(
+                    Arg::with_name("psbt")
+                        .long("psbt")
+                        .value_name("BASE64_PSBT")
+                        .help("Sets the PSBT to broadcast")
+                        .takes_value(true)
+                        .number_of_values(1)
+                        .required(true),
                 ));
 
     let mut repl_app = app.clone().setting(AppSettings::NoBinaryName);
@@ -309,6 +321,12 @@ fn main() {
             if finalized {
                 println!("Extracted: {}", serialize_hex(&psbt.extract_tx()));
             }
+        } else if let Some(sub_matches) = matches.subcommand_matches("broadcast") {
+            let psbt = base64::decode(sub_matches.value_of("psbt").unwrap()).unwrap();
+            let psbt: PartiallySignedTransaction = deserialize(&psbt).unwrap();
+            let (txid, _) = wallet.broadcast(psbt).unwrap();
+
+            println!("TXID: {}", txid);
         }
     };
 
