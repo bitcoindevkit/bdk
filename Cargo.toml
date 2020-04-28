@@ -27,3 +27,16 @@ rustyline = "5.0" # newer version requires 2018 edition
 clap = "2.33"
 dirs = "2.0"
 env_logger = "0.7"
+
+[[example]]
+name = "repl"
+[[example]]
+name = "psbt"
+[[example]]
+name = "parse_descriptor"
+
+# Provide a more user-friendly alias for the REPL
+[[example]]
+name = "magic"
+path = "examples/repl.rs"
+
