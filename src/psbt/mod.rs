@@ -21,6 +21,7 @@ pub mod utils;
 
 pub struct PSBTSatisfier<'a> {
     input: &'a psbt::Input,
+    assume_height_reached: bool,
     create_height: Option<u32>,
     current_height: Option<u32>,
 }
@@ -28,11 +29,13 @@ pub struct PSBTSatisfier<'a> {
 impl<'a> PSBTSatisfier<'a> {
     pub fn new(
         input: &'a psbt::Input,
+        assume_height_reached: bool,
         create_height: Option<u32>,
         current_height: Option<u32>,
     ) -> Self {
         PSBTSatisfier {
             input,
+            assume_height_reached,
             create_height,
             current_height,
         }
@@ -95,15 +98,23 @@ impl<'a> Satisfier<bitcoin::PublicKey> for PSBTSatisfier<'a> {
         // TODO: also check if `nSequence` right
         debug!("check_older: {}", height);
 
-        // TODO: test >= / >
-        self.current_height.unwrap_or(0) >= self.create_height.unwrap_or(0) + height
+        if let Some(current_height) = self.current_height {
+            // TODO: test >= / >
+            current_height >= self.create_height.unwrap_or(0) + height
+        } else {
+            self.assume_height_reached
+        }
     }
 
     fn check_after(&self, height: u32) -> bool {
         // TODO: also check if `nLockTime` is right
         debug!("check_after: {}", height);
 
-        self.current_height.unwrap_or(0) > height
+        if let Some(current_height) = self.current_height {
+            current_height > height
+        } else {
+            self.assume_height_reached
+        }
     }
 }
 

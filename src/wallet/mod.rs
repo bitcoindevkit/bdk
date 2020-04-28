@@ -656,7 +656,7 @@ where
             };
 
             // TODO: use height once we sync headers
-            let satisfier = PSBTSatisfier::new(&psbt.inputs[n], None, None);
+            let satisfier = PSBTSatisfier::new(&psbt.inputs[n], true, None, None);
 
             match desc.satisfy(input, satisfier) {
                 Ok(_) => continue,
