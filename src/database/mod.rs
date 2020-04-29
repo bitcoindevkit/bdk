@@ -7,6 +7,7 @@ use crate::types::*;
 
 #[cfg(any(feature = "key-value-db", feature = "default"))]
 pub mod keyvalue;
+pub mod memory;
 
 pub trait BatchOperations {
     fn set_script_pubkey<P: AsRef<[ChildNumber]>>(
