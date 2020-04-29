@@ -23,6 +23,8 @@ use log::{debug, error, info, trace};
 pub mod offline_stream;
 pub mod utils;
 
+pub type OfflineWallet<D> = Wallet<offline_stream::OfflineStream, D>;
+
 use self::utils::{ChunksIterator, IsDust};
 use crate::database::{BatchDatabase, BatchOperations};
 use crate::descriptor::{get_checksum, DescriptorMeta, ExtendedDescriptor, ExtractPolicy, Policy};
