@@ -1,6 +1,6 @@
 use bitcoin::hash_types::Txid;
 use bitcoin::util::bip32::{ChildNumber, DerivationPath};
-use bitcoin::{OutPoint, Script, Transaction};
+use bitcoin::{OutPoint, Script, Transaction, TxOut};
 
 use crate::error::Error;
 use crate::types::*;
@@ -76,3 +76,34 @@ pub trait BatchDatabase: Database {
     fn begin_batch(&self) -> Self::Batch;
     fn commit_batch(&mut self, batch: Self::Batch) -> Result<(), Error>;
 }
+
+pub trait DatabaseUtils: Database {
+    fn is_mine(&self, script: &Script) -> Result<bool, Error> {
+        self.get_path_from_script_pubkey(script)
+            .map(|o| o.is_some())
+    }
+
+    fn get_raw_tx_or<F>(&self, txid: &Txid, f: F) -> Result<Option<Transaction>, Error>
+    where
+        F: FnOnce() -> Result<Option<Transaction>, Error>,
+    {
+        self.get_tx(txid, true)?
+            .map(|t| t.transaction)
+            .flatten()
+            .map_or_else(f, |t| Ok(Some(t)))
+    }
+
+    fn get_previous_output(&self, outpoint: &OutPoint) -> Result<Option<TxOut>, Error> {
+        self.get_raw_tx(&outpoint.txid)?
+            .and_then(|previous_tx| {
+                if outpoint.vout as usize >= previous_tx.output.len() {
+                    Some(Err(Error::InvalidOutpoint(outpoint.clone())))
+                } else {
+                    Some(Ok(previous_tx.output[outpoint.vout as usize].clone()))
+                }
+            })
+            .transpose()
+    }
+}
+
+impl<T: Database> DatabaseUtils for T {}

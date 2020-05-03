@@ -1,7 +1,7 @@
 use std::io::{self, Error, ErrorKind, Read, Write};
 
 #[derive(Clone, Debug)]
-pub struct OfflineStream {}
+pub struct OfflineStream;
 
 impl Read for OfflineStream {
     fn read(&mut self, _buf: &mut [u8]) -> io::Result<usize> {

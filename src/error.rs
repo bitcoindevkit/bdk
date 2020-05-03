@@ -27,6 +27,13 @@ pub enum Error {
     InputMissingWitnessScript(usize),
     MissingUTXO,
 
+    // Blockchain interface errors
+    Uncapable(crate::blockchain::Capability),
+    InvalidProgressValue(f32),
+    ProgressUpdateError,
+    MissingCachedAddresses,
+    InvalidOutpoint(OutPoint),
+
     Descriptor(crate::descriptor::error::Error),
 
     Encode(bitcoin::consensus::encode::Error),

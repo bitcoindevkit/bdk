@@ -23,6 +23,7 @@ use bitcoin::util::psbt::PartiallySignedTransaction;
 use bitcoin::{Address, Network, OutPoint};
 
 use magical_bitcoin_wallet::bitcoin;
+use magical_bitcoin_wallet::blockchain::ElectrumBlockchain;
 use magical_bitcoin_wallet::sled;
 use magical_bitcoin_wallet::types::ScriptType;
 use magical_bitcoin_wallet::{Client, Wallet};
@@ -255,7 +256,14 @@ fn main() {
     debug!("database opened successfully");
 
     let client = Client::new(matches.value_of("server").unwrap()).unwrap();
-    let wallet = Wallet::new(descriptor, change_descriptor, network, tree, client).unwrap();
+    let wallet = Wallet::new(
+        descriptor,
+        change_descriptor,
+        network,
+        tree,
+        ElectrumBlockchain::from(client),
+    )
+    .unwrap();
 
     // TODO: print errors in a nice way
     let handle_matches = |matches: ArgMatches<'_>| {

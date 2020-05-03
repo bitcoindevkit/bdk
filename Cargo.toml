@@ -18,7 +18,7 @@ electrum-client = { version = "0.1.0-beta.5", optional = true }
 [features]
 minimal = []
 compiler = ["miniscript/compiler"]
-default = ["sled", "electrum-client"]
+default = ["key-value-db", "electrum"]
 electrum = ["electrum-client"]
 key-value-db = ["sled"]
 

@@ -1,8 +1,5 @@
 use std::collections::BTreeMap;
-use std::convert::{From, TryInto};
 use std::ops::Bound::{Excluded, Included};
-
-use serde::Serialize;
 
 use bitcoin::consensus::encode::{deserialize, serialize};
 use bitcoin::hash_types::Txid;

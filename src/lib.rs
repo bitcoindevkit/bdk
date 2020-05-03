@@ -18,6 +18,7 @@ pub extern crate sled;
 
 #[macro_use]
 pub mod error;
+pub mod blockchain;
 pub mod database;
 pub mod descriptor;
 pub mod psbt;
