@@ -1,3 +1,7 @@
 # Magical Bitcoin Wallet
 
-A modern, lightweight, generic multisig wallet written in Rust!
+A modern, lightweight, descriptor-based wallet written in Rust!
+
+## Getting Started
+
+See the documentation at [magicalbitcoin.org](https://magicalbitcoin.org)
