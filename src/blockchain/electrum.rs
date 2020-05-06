@@ -84,7 +84,7 @@ impl<T: Read + Write> OnlineBlockchain for ElectrumBlockchain<T> {
             let call_result = self
                 .0
                 .as_mut()
-                .unwrap()
+                .ok_or(Error::OfflineClient)?
                 .batch_script_get_history(chunk.iter())?;
 
             for (script, history) in chunk.into_iter().zip(call_result.into_iter()) {
@@ -127,7 +127,7 @@ impl<T: Read + Write> OnlineBlockchain for ElectrumBlockchain<T> {
             let call_result = self
                 .0
                 .as_mut()
-                .unwrap()
+                .ok_or(Error::OfflineClient)?
                 .batch_script_list_unspent(scripts)?;
 
             // check which utxos are actually still unspent
@@ -175,7 +175,7 @@ impl<T: Read + Write> OnlineBlockchain for ElectrumBlockchain<T> {
         Ok(self
             .0
             .as_mut()
-            .unwrap()
+            .ok_or(Error::OfflineClient)?
             .transaction_get(txid)
             .map(Option::Some)?)
     }
@@ -184,7 +184,7 @@ impl<T: Read + Write> OnlineBlockchain for ElectrumBlockchain<T> {
         Ok(self
             .0
             .as_mut()
-            .unwrap()
+            .ok_or(Error::OfflineClient)?
             .transaction_broadcast(tx)
             .map(|_| ())?)
     }
@@ -193,7 +193,7 @@ impl<T: Read + Write> OnlineBlockchain for ElectrumBlockchain<T> {
         Ok(self
             .0
             .as_mut()
-            .unwrap()
+            .ok_or(Error::OfflineClient)?
             .block_headers_subscribe()
             .map(|data| data.height)?)
     }
@@ -232,7 +232,11 @@ impl<T: Read + Write> ElectrumBlockchain<T> {
                 // went wrong
                 saved_tx.transaction.unwrap()
             }
-            None => self.0.as_mut().unwrap().transaction_get(&txid)?,
+            None => self
+                .0
+                .as_mut()
+                .ok_or(Error::OfflineClient)?
+                .transaction_get(&txid)?,
         };
 
         let mut incoming: u64 = 0;

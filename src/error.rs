@@ -29,6 +29,7 @@ pub enum Error {
 
     // Blockchain interface errors
     Uncapable(crate::blockchain::Capability),
+    OfflineClient,
     InvalidProgressValue(f32),
     ProgressUpdateError,
     MissingCachedAddresses,
