@@ -29,6 +29,10 @@ impl<T: Read + Write> Blockchain for ElectrumBlockchain<T> {
     fn offline() -> Self {
         ElectrumBlockchain(None)
     }
+
+    fn is_online(&self) -> bool {
+        self.0.is_some()
+    }
 }
 
 impl<T: Read + Write> OnlineBlockchain for ElectrumBlockchain<T> {
@@ -190,6 +194,8 @@ impl<T: Read + Write> OnlineBlockchain for ElectrumBlockchain<T> {
     }
 
     fn get_height(&mut self) -> Result<usize, Error> {
+        // TODO: unsubscribe when added to the client, or is there a better call to use here?
+
         Ok(self
             .0
             .as_mut()

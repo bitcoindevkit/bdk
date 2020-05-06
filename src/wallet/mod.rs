@@ -31,13 +31,12 @@ use crate::types::*;
 
 pub type OfflineWallet<D> = Wallet<OfflineBlockchain, D>;
 
-//#[cfg(feature = "electrum")]
-//pub type ElectrumWallet<S, D> = Wallet<crate::blockchain::ElectrumBlockchain<electrum_client::Client<S>>, D>;
-
 pub struct Wallet<B: Blockchain, D: BatchDatabase> {
     descriptor: ExtendedDescriptor,
     change_descriptor: Option<ExtendedDescriptor>,
     network: Network,
+
+    current_height: Option<u32>,
 
     client: RefCell<B>,
     database: RefCell<D>,
@@ -81,6 +80,8 @@ where
             descriptor,
             change_descriptor,
             network,
+
+            current_height: None,
 
             client: RefCell::new(B::offline()),
             database: RefCell::new(database),
@@ -342,7 +343,7 @@ where
     }
 
     // TODO: define an enum for signing errors
-    pub fn sign(&self, mut psbt: PSBT) -> Result<(PSBT, bool), Error> {
+    pub fn sign(&self, mut psbt: PSBT, assume_height: Option<u32>) -> Result<(PSBT, bool), Error> {
         // this helps us doing our job later
         self.add_hd_keypaths(&mut psbt)?;
 
@@ -482,7 +483,7 @@ where
         }
 
         // attempt to finalize
-        let finalized = self.finalize_psbt(tx.clone(), &mut psbt);
+        let finalized = self.finalize_psbt(tx.clone(), &mut psbt, assume_height)?;
 
         Ok((psbt, finalized))
     }
@@ -635,7 +636,12 @@ where
         Ok((answer, paths, selected_amount, fee_val))
     }
 
-    fn finalize_psbt(&self, mut tx: Transaction, psbt: &mut PSBT) -> bool {
+    fn finalize_psbt(
+        &self,
+        mut tx: Transaction,
+        psbt: &mut PSBT,
+        assume_height: Option<u32>,
+    ) -> Result<bool, Error> {
         for (n, input) in tx.input.iter_mut().enumerate() {
             // safe to run only on the descriptor because we assume the change descriptor also has
             // the same structure
@@ -643,18 +649,33 @@ where
             debug!("reconstructed descriptor is {:?}", desc);
 
             let desc = match desc {
-                Err(_) => return false,
+                Err(_) => return Ok(false),
                 Ok(desc) => desc,
             };
 
+            // if the height is None in the database it means it's still unconfirmed, so consider
+            // that as a very high value
+            let create_height = self
+                .database
+                .borrow()
+                .get_tx(&input.previous_output.txid, false)?
+                .and_then(|tx| Some(tx.height.unwrap_or(std::u32::MAX)));
+            let current_height = assume_height.or(self.current_height);
+
+            debug!(
+                "Input #{} - {}, using `create_height` = {:?}, `current_height` = {:?}",
+                n, input.previous_output, create_height, current_height
+            );
+
             // TODO: use height once we sync headers
-            let satisfier = PSBTSatisfier::new(&psbt.inputs[n], true, None, None);
+            let satisfier =
+                PSBTSatisfier::new(&psbt.inputs[n], false, create_height, current_height);
 
             match desc.satisfy(input, satisfier) {
                 Ok(_) => continue,
                 Err(e) => {
                     debug!("satisfy error {:?} for input {}", e, n);
-                    return false;
+                    return Ok(false);
                 }
             }
         }
@@ -665,7 +686,7 @@ where
             psbt_input.final_script_witness = Some(input.witness);
         }
 
-        true
+        Ok(true)
     }
 }
 
@@ -679,7 +700,7 @@ where
         change_descriptor: Option<&str>,
         network: Network,
         mut database: D,
-        client: B,
+        mut client: B,
     ) -> Result<Self, Error> {
         database.check_descriptor_checksum(
             ScriptType::External,
@@ -703,10 +724,14 @@ where
             None => None,
         };
 
+        let current_height = Some(client.get_height()? as u32);
+
         Ok(Wallet {
             descriptor,
             change_descriptor,
             network,
+
+            current_height,
 
             client: RefCell::new(client),
             database: RefCell::new(database),

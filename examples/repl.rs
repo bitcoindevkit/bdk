@@ -161,6 +161,15 @@ fn main() {
                         .takes_value(true)
                         .number_of_values(1)
                         .required(true),
+                )
+                .arg(
+                    Arg::with_name("assume_height")
+                        .long("assume_height")
+                        .value_name("HEIGHT")
+                        .help("Assume the blockchain has reached a specific height. This affects the transaction finalization, if there are timelocks in the descriptor")
+                        .takes_value(true)
+                        .number_of_values(1)
+                        .required(false),
                 ))
         .subcommand(
             SubCommand::with_name("broadcast")
@@ -322,7 +331,10 @@ fn main() {
         } else if let Some(sub_matches) = matches.subcommand_matches("sign") {
             let psbt = base64::decode(sub_matches.value_of("psbt").unwrap()).unwrap();
             let psbt: PartiallySignedTransaction = deserialize(&psbt).unwrap();
-            let (psbt, finalized) = wallet.sign(psbt).unwrap();
+            let assume_height = sub_matches
+                .value_of("assume_height")
+                .and_then(|s| Some(s.parse().unwrap()));
+            let (psbt, finalized) = wallet.sign(psbt, assume_height).unwrap();
 
             println!("PSBT: {}", base64::encode(&serialize(&psbt)));
             println!("Finalized: {}", finalized);

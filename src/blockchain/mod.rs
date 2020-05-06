@@ -18,6 +18,8 @@ pub enum Capability {
 }
 
 pub trait Blockchain {
+    fn is_online(&self) -> bool;
+
     fn offline() -> Self;
 }
 
@@ -25,6 +27,10 @@ pub struct OfflineBlockchain;
 impl Blockchain for OfflineBlockchain {
     fn offline() -> Self {
         OfflineBlockchain
+    }
+
+    fn is_online(&self) -> bool {
+        false
     }
 }
 
