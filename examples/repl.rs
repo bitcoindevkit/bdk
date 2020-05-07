@@ -9,6 +9,7 @@ extern crate rustyline;
 use std::fs;
 use std::path::PathBuf;
 use std::str::FromStr;
+use std::sync::Arc;
 
 use clap::{App, AppSettings, Arg, ArgMatches, SubCommand};
 
@@ -72,7 +73,8 @@ fn outpoint_validator(s: String) -> Result<(), String> {
     parse_outpoint(&s).map(|_| ())
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     env_logger::init();
 
     let app = App::new("Magical Bitcoin Wallet")
@@ -264,7 +266,9 @@ fn main() {
         .unwrap();
     debug!("database opened successfully");
 
-    let client = Client::new(matches.value_of("server").unwrap()).unwrap();
+    let client = Client::new(matches.value_of("server").unwrap())
+        .await
+        .unwrap();
     let wallet = Wallet::new(
         descriptor,
         change_descriptor,
@@ -272,14 +276,20 @@ fn main() {
         tree,
         ElectrumBlockchain::from(client),
     )
+    .await
     .unwrap();
+    let wallet = Arc::new(wallet);
 
     // TODO: print errors in a nice way
-    let handle_matches = |matches: ArgMatches<'_>| {
+    async fn handle_matches<C, D>(wallet: Arc<Wallet<C, D>>, matches: ArgMatches<'_>)
+    where
+        C: magical_bitcoin_wallet::blockchain::OnlineBlockchain,
+        D: magical_bitcoin_wallet::database::BatchDatabase,
+    {
         if let Some(_sub_matches) = matches.subcommand_matches("get_new_address") {
             println!("{}", wallet.get_new_address().unwrap().to_string());
         } else if let Some(_sub_matches) = matches.subcommand_matches("sync") {
-            wallet.sync(None, None).unwrap();
+            wallet.sync(None, None).await.unwrap();
         } else if let Some(_sub_matches) = matches.subcommand_matches("list_unspent") {
             for utxo in wallet.list_unspent().unwrap() {
                 println!("{} value {} SAT", utxo.outpoint, utxo.txout.value);
@@ -344,7 +354,7 @@ fn main() {
         } else if let Some(sub_matches) = matches.subcommand_matches("broadcast") {
             let psbt = base64::decode(sub_matches.value_of("psbt").unwrap()).unwrap();
             let psbt: PartiallySignedTransaction = deserialize(&psbt).unwrap();
-            let (txid, _) = wallet.broadcast(psbt).unwrap();
+            let (txid, _) = wallet.broadcast(psbt).await.unwrap();
 
             println!("TXID: {}", txid);
         }
@@ -372,7 +382,7 @@ fn main() {
                         continue;
                     }
 
-                    handle_matches(matches.unwrap());
+                    handle_matches(Arc::clone(&wallet), matches.unwrap()).await;
                 }
                 Err(ReadlineError::Interrupted) => continue,
                 Err(ReadlineError::Eof) => break,
@@ -385,6 +395,6 @@ fn main() {
 
     // rl.save_history("history.txt").unwrap();
     } else {
-        handle_matches(matches);
+        handle_matches(wallet, matches).await;
     }
 }

@@ -9,6 +9,9 @@ extern crate serde_json;
 #[macro_use]
 extern crate lazy_static;
 
+#[macro_use]
+extern crate async_trait;
+
 #[cfg(feature = "electrum")]
 pub extern crate electrum_client;
 #[cfg(feature = "electrum")]

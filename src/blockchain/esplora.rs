@@ -1,11 +1,13 @@
 use std::collections::HashSet;
 
+use futures::stream::{self, StreamExt, TryStreamExt};
+
 #[allow(unused_imports)]
 use log::{debug, error, info, trace};
 
 use serde::Deserialize;
 
-use reqwest::blocking::Client;
+use reqwest::Client;
 use reqwest::StatusCode;
 
 use bitcoin::consensus::{deserialize, serialize};
@@ -52,14 +54,15 @@ impl Blockchain for EsploraBlockchain {
     }
 }
 
+#[async_trait(?Send)]
 impl OnlineBlockchain for EsploraBlockchain {
-    fn get_capabilities(&self) -> HashSet<Capability> {
+    async fn get_capabilities(&self) -> HashSet<Capability> {
         vec![Capability::FullHistory, Capability::GetAnyTx]
             .into_iter()
             .collect()
     }
 
-    fn setup<D: BatchDatabase + DatabaseUtils, P: Progress>(
+    async fn setup<D: BatchDatabase + DatabaseUtils, P: Progress>(
         &mut self,
         stop_gap: Option<usize>,
         database: &mut D,
@@ -69,22 +72,34 @@ impl OnlineBlockchain for EsploraBlockchain {
             .as_mut()
             .ok_or(Error::OfflineClient)?
             .electrum_like_setup(stop_gap, database, progress_update)
+            .await
     }
 
-    fn get_tx(&mut self, txid: &Txid) -> Result<Option<Transaction>, Error> {
-        Ok(self.0.as_mut().ok_or(Error::OfflineClient)?._get_tx(txid)?)
-    }
-
-    fn broadcast(&mut self, tx: &Transaction) -> Result<(), Error> {
+    async fn get_tx(&mut self, txid: &Txid) -> Result<Option<Transaction>, Error> {
         Ok(self
             .0
             .as_mut()
             .ok_or(Error::OfflineClient)?
-            ._broadcast(tx)?)
+            ._get_tx(txid)
+            .await?)
     }
 
-    fn get_height(&mut self) -> Result<usize, Error> {
-        Ok(self.0.as_mut().ok_or(Error::OfflineClient)?._get_height()?)
+    async fn broadcast(&mut self, tx: &Transaction) -> Result<(), Error> {
+        Ok(self
+            .0
+            .as_mut()
+            .ok_or(Error::OfflineClient)?
+            ._broadcast(tx)
+            .await?)
+    }
+
+    async fn get_height(&mut self) -> Result<usize, Error> {
+        Ok(self
+            .0
+            .as_mut()
+            .ok_or(Error::OfflineClient)?
+            ._get_height()
+            .await?)
     }
 }
 
@@ -93,40 +108,47 @@ impl UrlClient {
         sha256::Hash::hash(script.as_bytes()).into_inner().to_hex()
     }
 
-    fn _get_tx(&self, txid: &Txid) -> Result<Option<Transaction>, EsploraError> {
+    async fn _get_tx(&self, txid: &Txid) -> Result<Option<Transaction>, EsploraError> {
         let resp = self
             .client
             .get(&format!("{}/api/tx/{}/raw", self.url, txid))
-            .send()?;
+            .send()
+            .await?;
 
         if let StatusCode::NOT_FOUND = resp.status() {
             return Ok(None);
         }
 
-        Ok(Some(deserialize(&resp.error_for_status()?.bytes()?)?))
+        Ok(Some(deserialize(&resp.error_for_status()?.bytes().await?)?))
     }
 
-    fn _broadcast(&self, transaction: &Transaction) -> Result<(), EsploraError> {
+    async fn _broadcast(&self, transaction: &Transaction) -> Result<(), EsploraError> {
         self.client
             .post(&format!("{}/api/tx", self.url))
             .body(serialize(transaction).to_hex())
-            .send()?
+            .send()
+            .await?
             .error_for_status()?;
 
         Ok(())
     }
 
-    fn _get_height(&self) -> Result<usize, EsploraError> {
+    async fn _get_height(&self) -> Result<usize, EsploraError> {
         Ok(self
             .client
             .get(&format!("{}/api/blocks/tip/height", self.url))
-            .send()?
+            .send()
+            .await?
             .error_for_status()?
-            .text()?
+            .text()
+            .await?
             .parse()?)
     }
 
-    fn _script_get_history(&self, script: &Script) -> Result<Vec<ELSGetHistoryRes>, EsploraError> {
+    async fn _script_get_history(
+        &self,
+        script: &Script,
+    ) -> Result<Vec<ELSGetHistoryRes>, EsploraError> {
         let mut result = Vec::new();
         let scripthash = Self::script_to_scripthash(script);
 
@@ -137,9 +159,11 @@ impl UrlClient {
                     "{}/api/scripthash/{}/txs/mempool",
                     self.url, scripthash
                 ))
-                .send()?
+                .send()
+                .await?
                 .error_for_status()?
-                .json::<Vec<EsploraGetHistory>>()?
+                .json::<Vec<EsploraGetHistory>>()
+                .await?
                 .into_iter()
                 .map(|x| ELSGetHistoryRes {
                     tx_hash: x.txid,
@@ -163,9 +187,11 @@ impl UrlClient {
                     "{}/api/scripthash/{}/txs/chain/{}",
                     self.url, scripthash, last_txid
                 ))
-                .send()?
+                .send()
+                .await?
                 .error_for_status()?
-                .json::<Vec<EsploraGetHistory>>()?;
+                .json::<Vec<EsploraGetHistory>>()
+                .await?;
             let len = response.len();
             if let Some(elem) = response.last() {
                 last_txid = elem.txid.to_hex();
@@ -186,7 +212,7 @@ impl UrlClient {
         Ok(result)
     }
 
-    fn _script_list_unspent(
+    async fn _script_list_unspent(
         &self,
         script: &Script,
     ) -> Result<Vec<ELSListUnspentRes>, EsploraError> {
@@ -197,9 +223,11 @@ impl UrlClient {
                 self.url,
                 Self::script_to_scripthash(script)
             ))
-            .send()?
+            .send()
+            .await?
             .error_for_status()?
-            .json::<Vec<EsploraListUnspent>>()?
+            .json::<Vec<EsploraListUnspent>>()
+            .await?
             .into_iter()
             .map(|x| ELSListUnspentRes {
                 tx_hash: x.txid,
@@ -210,30 +238,32 @@ impl UrlClient {
     }
 }
 
+#[async_trait(?Send)]
 impl ElectrumLikeSync for UrlClient {
-    fn els_batch_script_get_history<'s, I: IntoIterator<Item = &'s Script>>(
+    async fn els_batch_script_get_history<'s, I: IntoIterator<Item = &'s Script>>(
         &mut self,
         scripts: I,
     ) -> Result<Vec<Vec<ELSGetHistoryRes>>, Error> {
-        Ok(scripts
-            .into_iter()
-            .map(|script| self._script_get_history(script))
-            .collect::<Result<Vec<_>, _>>()?)
+        Ok(stream::iter(scripts)
+            .then(|script| self._script_get_history(&script))
+            .try_collect()
+            .await?)
     }
 
-    fn els_batch_script_list_unspent<'s, I: IntoIterator<Item = &'s Script>>(
+    async fn els_batch_script_list_unspent<'s, I: IntoIterator<Item = &'s Script>>(
         &mut self,
         scripts: I,
     ) -> Result<Vec<Vec<ELSListUnspentRes>>, Error> {
-        Ok(scripts
-            .into_iter()
-            .map(|script| self._script_list_unspent(script))
-            .collect::<Result<Vec<_>, _>>()?)
+        Ok(stream::iter(scripts)
+            .then(|script| self._script_list_unspent(&script))
+            .try_collect()
+            .await?)
     }
 
-    fn els_transaction_get(&mut self, txid: &Txid) -> Result<Transaction, Error> {
+    async fn els_transaction_get(&mut self, txid: &Txid) -> Result<Transaction, Error> {
         Ok(self
-            ._get_tx(txid)?
+            ._get_tx(txid)
+            .await?
             .ok_or_else(|| EsploraError::TransactionNotFound(*txid))?)
     }
 }

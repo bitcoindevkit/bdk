@@ -27,22 +27,23 @@ pub struct ELSListUnspentRes {
 }
 
 /// Implements the synchronization logic for an Electrum-like client.
+#[async_trait(?Send)]
 pub trait ElectrumLikeSync {
-    fn els_batch_script_get_history<'s, I: IntoIterator<Item = &'s Script>>(
+    async fn els_batch_script_get_history<'s, I: IntoIterator<Item = &'s Script>>(
         &mut self,
         scripts: I,
     ) -> Result<Vec<Vec<ELSGetHistoryRes>>, Error>;
 
-    fn els_batch_script_list_unspent<'s, I: IntoIterator<Item = &'s Script>>(
+    async fn els_batch_script_list_unspent<'s, I: IntoIterator<Item = &'s Script>>(
         &mut self,
         scripts: I,
     ) -> Result<Vec<Vec<ELSListUnspentRes>>, Error>;
 
-    fn els_transaction_get(&mut self, txid: &Txid) -> Result<Transaction, Error>;
+    async fn els_transaction_get(&mut self, txid: &Txid) -> Result<Transaction, Error>;
 
     // Provided methods down here...
 
-    fn electrum_like_setup<D: BatchDatabase + DatabaseUtils, P: Progress>(
+    async fn electrum_like_setup<D: BatchDatabase + DatabaseUtils, P: Progress>(
         &mut self,
         stop_gap: Option<usize>,
         database: &mut D,
@@ -85,7 +86,7 @@ pub trait ElectrumLikeSync {
 
             let until = cmp::min(to_check_later.len(), batch_query_size);
             let chunk: Vec<Script> = to_check_later.drain(..until).collect();
-            let call_result = self.els_batch_script_get_history(chunk.iter())?;
+            let call_result = self.els_batch_script_get_history(chunk.iter()).await?;
 
             for (script, history) in chunk.into_iter().zip(call_result.into_iter()) {
                 trace!("received history for {:?}, size {}", script, history.len());
@@ -94,7 +95,8 @@ pub trait ElectrumLikeSync {
                     last_found = index;
 
                     let mut check_later_scripts = self
-                        .check_history(database, script, history, &mut change_max_deriv)?
+                        .check_history(database, script, history, &mut change_max_deriv)
+                        .await?
                         .into_iter()
                         .filter(|x| already_checked.insert(x.clone()))
                         .collect();
@@ -124,7 +126,7 @@ pub trait ElectrumLikeSync {
         let mut batch = database.begin_batch();
         for chunk in ChunksIterator::new(database.iter_utxos()?.into_iter(), batch_query_size) {
             let scripts: Vec<_> = chunk.iter().map(|u| &u.txout.script_pubkey).collect();
-            let call_result = self.els_batch_script_list_unspent(scripts)?;
+            let call_result = self.els_batch_script_list_unspent(scripts).await?;
 
             // check which utxos are actually still unspent
             for (utxo, list_unspent) in chunk.into_iter().zip(call_result.iter()) {
@@ -167,7 +169,7 @@ pub trait ElectrumLikeSync {
         Ok(())
     }
 
-    fn check_tx_and_descendant<D: DatabaseUtils + BatchDatabase>(
+    async fn check_tx_and_descendant<D: DatabaseUtils + BatchDatabase>(
         &mut self,
         database: &mut D,
         txid: &Txid,
@@ -199,7 +201,7 @@ pub trait ElectrumLikeSync {
                 // went wrong
                 saved_tx.transaction.unwrap()
             }
-            None => self.els_transaction_get(&txid)?,
+            None => self.els_transaction_get(&txid).await?,
         };
 
         let mut incoming: u64 = 0;
@@ -264,7 +266,7 @@ pub trait ElectrumLikeSync {
         Ok(to_check_later)
     }
 
-    fn check_history<D: DatabaseUtils + BatchDatabase>(
+    async fn check_history<D: DatabaseUtils + BatchDatabase>(
         &mut self,
         database: &mut D,
         script_pubkey: Script,
@@ -286,13 +288,17 @@ pub trait ElectrumLikeSync {
                 x => u32::try_from(x).ok(),
             };
 
-            to_check_later.extend_from_slice(&self.check_tx_and_descendant(
-                database,
-                &tx.tx_hash,
-                height,
-                &script_pubkey,
-                change_max_deriv,
-            )?);
+            to_check_later.extend_from_slice(
+                &self
+                    .check_tx_and_descendant(
+                        database,
+                        &tx.tx_hash,
+                        height,
+                        &script_pubkey,
+                        change_max_deriv,
+                    )
+                    .await?,
+            );
         }
 
         Ok(to_check_later)
