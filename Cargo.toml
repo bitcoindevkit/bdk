@@ -14,12 +14,14 @@ base64 = "^0.11"
 # Optional dependencies
 sled = { version = "0.31.0", optional = true }
 electrum-client = { version = "0.1.0-beta.5", optional = true }
+reqwest = { version = "0.10", optional = true, features = ["blocking", "json"] }
 
 [features]
 minimal = []
 compiler = ["miniscript/compiler"]
 default = ["key-value-db", "electrum"]
 electrum = ["electrum-client"]
+esplora = ["reqwest"]
 key-value-db = ["sled"]
 
 [dev-dependencies]

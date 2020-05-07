@@ -10,6 +10,7 @@ script:
   - cargo test --verbose --all
   - cargo build --verbose --all
   - cargo build --verbose --no-default-features --features=minimal
+  - cargo build --verbose --no-default-features --features=minimal,esplora
   - cargo build --verbose --no-default-features --features=key-value-db
   - cargo build --verbose --no-default-features --features=electrum
 

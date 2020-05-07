@@ -9,11 +9,17 @@ extern crate serde_json;
 #[macro_use]
 extern crate lazy_static;
 
-#[cfg(any(feature = "electrum", feature = "default"))]
+#[cfg(feature = "electrum")]
 pub extern crate electrum_client;
-#[cfg(any(feature = "electrum", feature = "default"))]
+#[cfg(feature = "electrum")]
 pub use electrum_client::client::Client;
-#[cfg(any(feature = "key-value-db", feature = "default"))]
+
+#[cfg(feature = "esplora")]
+pub extern crate reqwest;
+#[cfg(feature = "esplora")]
+pub use blockchain::esplora::EsploraBlockchain;
+
+#[cfg(feature = "key-value-db")]
 pub extern crate sled;
 
 #[macro_use]

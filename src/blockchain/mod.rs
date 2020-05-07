@@ -6,10 +6,17 @@ use bitcoin::{Transaction, Txid};
 use crate::database::{BatchDatabase, DatabaseUtils};
 use crate::error::Error;
 
+pub mod utils;
+
 #[cfg(feature = "electrum")]
 pub mod electrum;
 #[cfg(feature = "electrum")]
 pub use self::electrum::ElectrumBlockchain;
+
+#[cfg(feature = "esplora")]
+pub mod esplora;
+#[cfg(feature = "esplora")]
+pub use self::esplora::EsploraBlockchain;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Capability {

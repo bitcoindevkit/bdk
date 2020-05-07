@@ -44,9 +44,11 @@ pub enum Error {
     Hex(bitcoin::hashes::hex::Error),
     PSBT(bitcoin::util::psbt::Error),
 
-    #[cfg(any(feature = "electrum", feature = "default"))]
+    #[cfg(feature = "electrum")]
     Electrum(electrum_client::Error),
-    #[cfg(any(feature = "key-value-db", feature = "default"))]
+    #[cfg(feature = "esplora")]
+    Esplora(crate::blockchain::esplora::EsploraError),
+    #[cfg(feature = "key-value-db")]
     Sled(sled::Error),
 }
 
@@ -73,7 +75,9 @@ impl_error!(serde_json::Error, JSON);
 impl_error!(bitcoin::hashes::hex::Error, Hex);
 impl_error!(bitcoin::util::psbt::Error, PSBT);
 
-#[cfg(any(feature = "electrum", feature = "default"))]
+#[cfg(feature = "electrum")]
 impl_error!(electrum_client::Error, Electrum);
-#[cfg(any(feature = "key-value-db", feature = "default"))]
+#[cfg(feature = "esplora")]
+impl_error!(crate::blockchain::esplora::EsploraError, Esplora);
+#[cfg(feature = "key-value-db")]
 impl_error!(sled::Error, Sled);
