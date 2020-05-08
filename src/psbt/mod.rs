@@ -100,7 +100,7 @@ impl<'a> Satisfier<bitcoin::PublicKey> for PSBTSatisfier<'a> {
 
         if let Some(current_height) = self.current_height {
             // TODO: test >= / >
-            current_height >= self.create_height.unwrap_or(0) + height
+            current_height as u64 >= self.create_height.unwrap_or(0) as u64 + height as u64
         } else {
             self.assume_height_reached
         }
