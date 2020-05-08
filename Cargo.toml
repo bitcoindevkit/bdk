@@ -18,6 +18,7 @@ sled = { version = "0.31.0", optional = true }
 electrum-client = { git = "https://github.com/MagicalBitcoin/rust-electrum-client.git", optional = true }
 reqwest = { version = "0.10", optional = true, features = ["json"] }
 futures = { version = "0.3", optional = true }
+clap = { version = "2.33", optional = true }
 
 [features]
 minimal = []
@@ -26,18 +27,19 @@ default = ["key-value-db", "electrum"]
 electrum = ["electrum-client"]
 esplora = ["reqwest", "futures"]
 key-value-db = ["sled"]
+cli-utils = ["clap"]
 
 [dev-dependencies]
 tokio = { version = "0.2", features = ["macros"] }
 lazy_static = "1.4"
-rustyline = "5.0" # newer version requires 2018 edition
-clap = "2.33"
+rustyline = "6.0"
 dirs = "2.0"
 env_logger = "0.7"
 rand = "0.7"
 
 [[example]]
 name = "repl"
+required-features = ["cli-utils"]
 [[example]]
 name = "psbt"
 [[example]]
@@ -52,4 +54,5 @@ required-features = ["compiler"]
 [[example]]
 name = "magic"
 path = "examples/repl.rs"
+required-features = ["cli-utils"]
 

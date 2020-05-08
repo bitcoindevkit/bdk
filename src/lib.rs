@@ -25,6 +25,9 @@ pub use blockchain::esplora::EsploraBlockchain;
 #[cfg(feature = "key-value-db")]
 pub extern crate sled;
 
+#[cfg(feature = "cli-utils")]
+pub mod cli;
+
 #[macro_use]
 pub mod error;
 pub mod blockchain;

@@ -498,11 +498,17 @@ where
 
     // Internals
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn get_timestamp() -> u64 {
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs()
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn get_timestamp() -> u64 {
+        0
     }
 
     fn get_descriptor_for(&self, script_type: ScriptType) -> &ExtendedDescriptor {
@@ -646,6 +652,7 @@ where
             // safe to run only on the descriptor because we assume the change descriptor also has
             // the same structure
             let desc = self.descriptor.derive_from_psbt_input(psbt, n);
+            debug!("{:?}", psbt.inputs[n].hd_keypaths);
             debug!("reconstructed descriptor is {:?}", desc);
 
             let desc = match desc {
@@ -765,6 +772,7 @@ where
         // cache a few of our addresses
         if last_addr.is_none() {
             let mut address_batch = self.database.borrow().begin_batch();
+            #[cfg(not(target_arch = "wasm32"))]
             let start = Instant::now();
 
             for i in 0..=max_address {
@@ -790,6 +798,7 @@ where
                 }
             }
 
+            #[cfg(not(target_arch = "wasm32"))]
             info!(
                 "derivation of {} addresses, took {} ms",
                 max_address,
