@@ -496,6 +496,17 @@ where
         }
     }
 
+    pub fn public_descriptor(
+        &self,
+        script_type: ScriptType,
+    ) -> Result<Option<ExtendedDescriptor>, Error> {
+        match (script_type, self.change_descriptor.as_ref()) {
+            (ScriptType::External, _) => Ok(Some(self.descriptor.as_public_version()?)),
+            (ScriptType::Internal, None) => Ok(None),
+            (ScriptType::Internal, Some(desc)) => Ok(Some(desc.as_public_version()?)),
+        }
+    }
+
     // Internals
 
     #[cfg(not(target_arch = "wasm32"))]

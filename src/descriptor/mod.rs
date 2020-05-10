@@ -19,12 +19,15 @@ use crate::psbt::utils::PSBTUtils;
 pub mod checksum;
 pub mod error;
 pub mod extended_key;
+mod keys;
 pub mod policy;
 
 pub use self::checksum::get_checksum;
-pub use self::error::Error;
+use self::error::Error;
 pub use self::extended_key::{DerivationIndex, DescriptorExtendedKey};
 pub use self::policy::Policy;
+
+use self::keys::Key;
 
 trait MiniscriptExtractPolicy {
     fn extract_policy(
@@ -105,109 +108,6 @@ where
     }
 }
 
-trait Key: std::fmt::Debug {
-    fn fingerprint(&self, secp: &Secp256k1<All>) -> Option<Fingerprint>;
-    fn as_public_key(&self, secp: &Secp256k1<All>, index: Option<u32>) -> Result<PublicKey, Error>;
-    fn as_secret_key(&self) -> Option<PrivateKey>;
-    fn xprv(&self) -> Option<ExtendedPrivKey>;
-    fn full_path(&self, index: u32) -> Option<DerivationPath>;
-    fn is_fixed(&self) -> bool;
-
-    fn has_secret(&self) -> bool {
-        self.xprv().is_some() || self.as_secret_key().is_some()
-    }
-}
-
-impl Key for PublicKey {
-    fn fingerprint(&self, _secp: &Secp256k1<All>) -> Option<Fingerprint> {
-        None
-    }
-
-    fn as_public_key(
-        &self,
-        _secp: &Secp256k1<All>,
-        _index: Option<u32>,
-    ) -> Result<PublicKey, Error> {
-        Ok(PublicKey::clone(self))
-    }
-
-    fn as_secret_key(&self) -> Option<PrivateKey> {
-        None
-    }
-
-    fn xprv(&self) -> Option<ExtendedPrivKey> {
-        None
-    }
-
-    fn full_path(&self, _index: u32) -> Option<DerivationPath> {
-        None
-    }
-
-    fn is_fixed(&self) -> bool {
-        true
-    }
-}
-
-impl Key for PrivateKey {
-    fn fingerprint(&self, _secp: &Secp256k1<All>) -> Option<Fingerprint> {
-        None
-    }
-
-    fn as_public_key(
-        &self,
-        secp: &Secp256k1<All>,
-        _index: Option<u32>,
-    ) -> Result<PublicKey, Error> {
-        Ok(self.public_key(secp))
-    }
-
-    fn as_secret_key(&self) -> Option<PrivateKey> {
-        Some(PrivateKey::clone(self))
-    }
-
-    fn xprv(&self) -> Option<ExtendedPrivKey> {
-        None
-    }
-
-    fn full_path(&self, _index: u32) -> Option<DerivationPath> {
-        None
-    }
-
-    fn is_fixed(&self) -> bool {
-        true
-    }
-}
-
-impl Key for DescriptorExtendedKey {
-    fn fingerprint(&self, secp: &Secp256k1<All>) -> Option<Fingerprint> {
-        if let Some(fing) = self.master_fingerprint {
-            Some(fing.clone())
-        } else {
-            Some(self.root_xpub(secp).fingerprint())
-        }
-    }
-
-    fn as_public_key(&self, secp: &Secp256k1<All>, index: Option<u32>) -> Result<PublicKey, Error> {
-        Ok(self.derive_xpub(secp, index.unwrap_or(0))?.public_key)
-    }
-
-    fn as_secret_key(&self) -> Option<PrivateKey> {
-        None
-    }
-
-    fn xprv(&self) -> Option<ExtendedPrivKey> {
-        self.secret
-    }
-
-    fn full_path(&self, index: u32) -> Option<DerivationPath> {
-        Some(self.full_path(index))
-    }
-
-    fn is_fixed(&self) -> bool {
-        self.final_index == DerivationIndex::Fixed
-    }
-}
-
 #[serde(try_from = "&str", into = "String")]
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ExtendedDescriptor {
@@ -219,6 +119,12 @@ pub struct ExtendedDescriptor {
 
     #[serde(skip)]
     ctx: Secp256k1<All>,
+}
+
+impl fmt::Display for ExtendedDescriptor {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.internal)
+    }
 }
 
 impl std::clone::Clone for ExtendedDescriptor {
@@ -420,6 +326,35 @@ impl ExtendedDescriptor {
             (Ok(a), Ok(b)) => a == b,
             _ => false,
         }
+    }
+
+    pub fn as_public_version(&self) -> Result<ExtendedDescriptor, Error> {
+        let keys: RefCell<BTreeMap<String, Box<dyn Key>>> = RefCell::new(BTreeMap::new());
+
+        let translatefpk = |string: &String| -> Result<_, Error> {
+            let public = self.keys.get(string).unwrap().public(&self.ctx)?;
+
+            let result = format!("{}", public);
+            keys.borrow_mut().insert(string.clone(), public);
+
+            Ok(result)
+        };
+        let translatefpkh = |string: &String| -> Result<_, Error> {
+            let public = self.keys.get(string).unwrap().public(&self.ctx)?;
+
+            let result = format!("{}", public);
+            keys.borrow_mut().insert(string.clone(), public);
+
+            Ok(result)
+        };
+
+        let internal = self.internal.translate_pk(translatefpk, translatefpkh)?;
+
+        Ok(ExtendedDescriptor {
+            internal,
+            keys: keys.into_inner(),
+            ctx: self.ctx.clone(),
+        })
     }
 }
 

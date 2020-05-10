@@ -199,6 +199,15 @@ impl FromStr for DescriptorExtendedKey {
             }
         };
 
+        if secret.is_none()
+            && path.into_iter().any(|child| match child {
+                ChildNumber::Hardened { .. } => true,
+                _ => false,
+            })
+        {
+            return Err(super::Error::HardenedDerivationOnXpub);
+        }
+
         Ok(DescriptorExtendedKey {
             master_fingerprint,
             master_derivation,

@@ -120,6 +120,10 @@ pub fn make_cli_subcommands<'a, 'b>() -> App<'a, 'b> {
                 .about("Returns the available spending policies for the descriptor")
             )
         .subcommand(
+            SubCommand::with_name("public_descriptor")
+                .about("Returns the public version of the wallet's descriptor(s)")
+            )
+        .subcommand(
             SubCommand::with_name("sign")
                 .about("Signs and tries to finalize a PSBT")
                 .arg(
@@ -270,6 +274,20 @@ where
             "External: {}\nInternal:{}",
             serde_json::to_string(&wallet.policies(ScriptType::External)?).unwrap(),
             serde_json::to_string(&wallet.policies(ScriptType::Internal)?).unwrap(),
+        )))
+    } else if let Some(_sub_matches) = matches.subcommand_matches("public_descriptor") {
+        let external = match wallet.public_descriptor(ScriptType::External)? {
+            Some(desc) => format!("{}", desc),
+            None => "<NONE>".into(),
+        };
+        let internal = match wallet.public_descriptor(ScriptType::Internal)? {
+            Some(desc) => format!("{}", desc),
+            None => "<NONE>".into(),
+        };
+
+        Ok(Some(format!(
+            "External: {}\nInternal:{}",
+            external, internal
         )))
     } else if let Some(sub_matches) = matches.subcommand_matches("sign") {
         let psbt = base64::decode(sub_matches.value_of("psbt").unwrap()).unwrap();

@@ -101,7 +101,12 @@ async fn main() {
                         continue;
                     }
 
-                    cli::handle_matches(&Arc::clone(&wallet), matches.unwrap()).await;
+                    if let Some(s) = cli::handle_matches(&Arc::clone(&wallet), matches.unwrap())
+                        .await
+                        .unwrap()
+                    {
+                        println!("{}", s);
+                    }
                 }
                 Err(ReadlineError::Interrupted) => continue,
                 Err(ReadlineError::Eof) => break,
@@ -114,6 +119,8 @@ async fn main() {
 
     // rl.save_history("history.txt").unwrap();
     } else {
-        cli::handle_matches(&wallet, matches).await;
+        if let Some(s) = cli::handle_matches(&wallet, matches).await.unwrap() {
+            println!("{}", s);
+        }
     }
 }
