@@ -126,7 +126,7 @@ where
         addressees: Vec<(Address, u64)>,
         send_all: bool,
         fee_perkb: f32,
-        policy_path: Option<Vec<Vec<usize>>>,
+        policy_path: Option<BTreeMap<String, Vec<usize>>>,
         utxos: Option<Vec<OutPoint>>,
         unspendable: Option<Vec<OutPoint>>,
     ) -> Result<(PSBT, TransactionDetails), Error> {
@@ -134,7 +134,7 @@ where
         if policy.requires_path() && policy_path.is_none() {
             return Err(Error::SpendingPolicyRequired);
         }
-        let requirements = policy.get_requirements(&policy_path.unwrap_or(vec![]))?;
+        let requirements = policy.get_requirements(&policy_path.unwrap_or(BTreeMap::new()))?;
         debug!("requirements: {:?}", requirements);
 
         let mut tx = Transaction {

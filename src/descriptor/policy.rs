@@ -14,6 +14,7 @@ use miniscript::{Descriptor, Miniscript, Terminal};
 #[allow(unused_imports)]
 use log::{debug, error, info, trace};
 
+use super::checksum::get_checksum;
 use super::error::Error;
 use crate::descriptor::{Key, MiniscriptExtractPolicy};
 use crate::psbt::PSBTSatisfier;
@@ -92,6 +93,11 @@ impl SatisfiableItem {
             } => false,
             _ => true,
         }
+    }
+
+    pub fn id(&self) -> String {
+        get_checksum(&serde_json::to_string(self).expect("Failed to serialize a SatisfiableItem"))
+            .expect("Failed to compute a SatisfiableItem id")
     }
 }
 
@@ -328,6 +334,8 @@ impl From<bool> for Satisfaction {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Policy {
+    id: String,
+
     #[serde(flatten)]
     item: SatisfiableItem,
     satisfaction: Satisfaction,
@@ -376,8 +384,8 @@ impl Condition {
 
 #[derive(Debug)]
 pub enum PolicyError {
-    NotEnoughItemsSelected(usize),
-    TooManyItemsSelected(usize),
+    NotEnoughItemsSelected(String),
+    TooManyItemsSelected(String),
     IndexOutOfRange(usize),
     AddOnLeaf,
     AddOnPartialComplete,
@@ -388,6 +396,7 @@ pub enum PolicyError {
 impl Policy {
     pub fn new(item: SatisfiableItem) -> Self {
         Policy {
+            id: item.id(),
             item,
             satisfaction: Satisfaction::None,
             contribution: Satisfaction::None,
@@ -479,17 +488,12 @@ impl Policy {
     }
 
     pub fn requires_path(&self) -> bool {
-        self.get_requirements(&vec![]).is_err()
+        self.get_requirements(&BTreeMap::new()).is_err()
     }
 
-    pub fn get_requirements(&self, path: &Vec<Vec<usize>>) -> Result<Condition, PolicyError> {
-        self.recursive_get_requirements(path, 0)
-    }
-
-    fn recursive_get_requirements(
+    pub fn get_requirements(
         &self,
-        path: &Vec<Vec<usize>>,
-        index: usize,
+        path: &BTreeMap<String, Vec<usize>>,
     ) -> Result<Condition, PolicyError> {
         // if items.len() == threshold, selected can be omitted and we take all of them by default
         let default = match &self.item {
@@ -498,7 +502,7 @@ impl Policy {
             }
             _ => vec![],
         };
-        let selected = match path.get(index) {
+        let selected = match path.get(&self.id) {
             _ if !default.is_empty() => &default,
             Some(arr) => arr,
             _ => &default,
@@ -508,7 +512,7 @@ impl Policy {
             SatisfiableItem::Thresh { items, threshold } => {
                 let mapped_req = items
                     .iter()
-                    .map(|i| i.recursive_get_requirements(path, index + 1))
+                    .map(|i| i.get_requirements(path))
                     .collect::<Result<Vec<_>, _>>()?;
 
                 // if all the requirements are null we don't care about `selected` because there
@@ -521,7 +525,9 @@ impl Policy {
                 // an empty value for this step in case of n-of-n, because `selected` is set to all
                 // the elements above
                 if selected.len() < *threshold {
-                    return Err(PolicyError::NotEnoughItemsSelected(index));
+                    return Err(PolicyError::NotEnoughItemsSelected(self.id.clone()));
+                } else if selected.len() > *threshold {
+                    return Err(PolicyError::TooManyItemsSelected(self.id.clone()));
                 }
 
                 // check the selected items, see if there are conflicting requirements
@@ -536,7 +542,7 @@ impl Policy {
 
                 Ok(requirements)
             }
-            _ if !selected.is_empty() => Err(PolicyError::TooManyItemsSelected(index)),
+            _ if !selected.is_empty() => Err(PolicyError::TooManyItemsSelected(self.id.clone())),
             SatisfiableItem::AbsoluteTimelock { value } => Ok(Condition {
                 csv: None,
                 timelock: Some(*value),

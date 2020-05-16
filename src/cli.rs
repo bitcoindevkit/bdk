@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::str::FromStr;
 
 use clap::{App, Arg, ArgMatches, SubCommand};
@@ -110,7 +111,7 @@ pub fn make_cli_subcommands<'a, 'b>() -> App<'a, 'b> {
                     Arg::with_name("policy")
                         .long("policy")
                         .value_name("POLICY")
-                        .help("Selects which policy will be used to satisfy the descriptor")
+                        .help("Selects which policy should be used to satisfy the descriptor")
                         .takes_value(true)
                         .number_of_values(1),
                 ),
@@ -252,9 +253,9 @@ where
         let unspendable = sub_matches
             .values_of("unspendable")
             .map(|s| s.map(|i| parse_outpoint(i).unwrap()).collect());
-        let policy: Option<Vec<_>> = sub_matches
+        let policy: Option<_> = sub_matches
             .value_of("policy")
-            .map(|s| serde_json::from_str::<Vec<Vec<usize>>>(&s).unwrap());
+            .map(|s| serde_json::from_str::<BTreeMap<String, Vec<usize>>>(&s).unwrap());
 
         let result = wallet.create_tx(
             addressees,
