@@ -7,6 +7,7 @@ use clap::{App, Arg, ArgMatches, SubCommand};
 use log::{debug, error, info, trace, LevelFilter};
 
 use bitcoin::consensus::encode::{deserialize, serialize, serialize_hex};
+use bitcoin::hashes::hex::{FromHex, ToHex};
 use bitcoin::util::psbt::PartiallySignedTransaction;
 use bitcoin::{Address, OutPoint};
 
@@ -147,16 +148,69 @@ pub fn make_cli_subcommands<'a, 'b>() -> App<'a, 'b> {
                 ))
         .subcommand(
             SubCommand::with_name("broadcast")
-                .about("Extracts the finalized transaction from a PSBT and broadcasts it to the network")
+                .about("Broadcasts a transaction to the network. Takes either a raw transaction or a PSBT to extract")
                 .arg(
                     Arg::with_name("psbt")
                         .long("psbt")
                         .value_name("BASE64_PSBT")
-                        .help("Sets the PSBT to broadcast")
+                        .help("Sets the PSBT to extract and broadcast")
+                        .takes_value(true)
+                        .required_unless("tx")
+                        .number_of_values(1))
+                .arg(
+                    Arg::with_name("tx")
+                        .long("tx")
+                        .value_name("RAWTX")
+                        .help("Sets the raw transaction to broadcast")
+                        .takes_value(true)
+                        .required_unless("psbt")
+                        .number_of_values(1))
+                )
+        .subcommand(
+            SubCommand::with_name("extract_psbt")
+                .about("Extracts a raw transaction from a PSBT")
+                .arg(
+                    Arg::with_name("psbt")
+                        .long("psbt")
+                        .value_name("BASE64_PSBT")
+                        .help("Sets the PSBT to extract")
+                        .takes_value(true)
+                        .required(true)
+                        .number_of_values(1))
+                )
+        .subcommand(
+            SubCommand::with_name("finalize_psbt")
+                .about("Finalizes a psbt")
+                .arg(
+                    Arg::with_name("psbt")
+                        .long("psbt")
+                        .value_name("BASE64_PSBT")
+                        .help("Sets the PSBT to finalize")
+                        .takes_value(true)
+                        .required(true)
+                        .number_of_values(1))
+                .arg(
+                    Arg::with_name("assume_height")
+                        .long("assume_height")
+                        .value_name("HEIGHT")
+                        .help("Assume the blockchain has reached a specific height")
                         .takes_value(true)
                         .number_of_values(1)
-                        .required(true),
-                ))
+                        .required(false))
+                )
+        .subcommand(
+            SubCommand::with_name("combine_psbt")
+                .about("Combines multiple PSBTs into one")
+                .arg(
+                    Arg::with_name("psbt")
+                        .long("psbt")
+                        .value_name("BASE64_PSBT")
+                        .help("Add one PSBT to comine. This option can be repeated multiple times, one for each PSBT")
+                        .takes_value(true)
+                        .number_of_values(1)
+                        .required(true)
+                        .multiple(true))
+                )
 }
 
 pub fn add_global_flags<'a, 'b>(app: App<'a, 'b>) -> App<'a, 'b> {
@@ -240,8 +294,9 @@ where
         let addressees = sub_matches
             .values_of("to")
             .unwrap()
-            .map(|s| parse_addressee(s).unwrap())
-            .collect();
+            .map(|s| parse_addressee(s))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|s| Error::Generic(s))?;
         let send_all = sub_matches.is_present("send_all");
         let fee_rate = sub_matches
             .value_of("fee_rate")
@@ -308,11 +363,73 @@ where
 
         Ok(Some(res))
     } else if let Some(sub_matches) = matches.subcommand_matches("broadcast") {
-        let psbt = base64::decode(sub_matches.value_of("psbt").unwrap()).unwrap();
-        let psbt: PartiallySignedTransaction = deserialize(&psbt).unwrap();
-        let (txid, _) = wallet.broadcast(psbt).await?;
+        let tx = if sub_matches.value_of("psbt").is_some() {
+            let psbt = base64::decode(&sub_matches.value_of("psbt").unwrap()).unwrap();
+            let psbt: PartiallySignedTransaction = deserialize(&psbt).unwrap();
+            psbt.extract_tx()
+        } else if sub_matches.value_of("tx").is_some() {
+            deserialize(&Vec::<u8>::from_hex(&sub_matches.value_of("tx").unwrap()).unwrap())
+                .unwrap()
+        } else {
+            panic!("Missing `psbt` and `tx` option");
+        };
+
+        let txid = wallet.broadcast(tx).await?;
 
         Ok(Some(format!("TXID: {}", txid)))
+    } else if let Some(sub_matches) = matches.subcommand_matches("extract_psbt") {
+        let psbt = base64::decode(&sub_matches.value_of("psbt").unwrap()).unwrap();
+        let psbt: PartiallySignedTransaction = deserialize(&psbt).unwrap();
+
+        Ok(Some(format!(
+            "TX: {}",
+            serialize(&psbt.extract_tx()).to_hex()
+        )))
+    } else if let Some(sub_matches) = matches.subcommand_matches("finalize_psbt") {
+        let psbt = base64::decode(&sub_matches.value_of("psbt").unwrap()).unwrap();
+        let mut psbt: PartiallySignedTransaction = deserialize(&psbt).unwrap();
+
+        let assume_height = sub_matches
+            .value_of("assume_height")
+            .and_then(|s| Some(s.parse().unwrap()));
+
+        let finalized = wallet.finalize_psbt(&mut psbt, assume_height)?;
+
+        let mut res = String::new();
+        res += &format!("PSBT: {}\n", base64::encode(&serialize(&psbt)));
+        res += &format!("Finalized: {}", finalized);
+        if finalized {
+            res += &format!("\nExtracted: {}", serialize_hex(&psbt.extract_tx()));
+        }
+
+        Ok(Some(res))
+    } else if let Some(sub_matches) = matches.subcommand_matches("combine_psbt") {
+        let mut psbts = sub_matches
+            .values_of("psbt")
+            .unwrap()
+            .map(|s| {
+                let psbt = base64::decode(&s).unwrap();
+                let psbt: PartiallySignedTransaction = deserialize(&psbt).unwrap();
+
+                psbt
+            })
+            .collect::<Vec<_>>();
+
+        let init_psbt = psbts.pop().unwrap();
+        let final_psbt = psbts
+            .into_iter()
+            .try_fold::<_, _, Result<PartiallySignedTransaction, Error>>(
+                init_psbt,
+                |mut acc, x| {
+                    acc.merge(x)?;
+                    Ok(acc)
+                },
+            )?;
+
+        Ok(Some(format!(
+            "PSBT: {}",
+            base64::encode(&serialize(&final_psbt))
+        )))
     } else {
         Ok(None)
     }

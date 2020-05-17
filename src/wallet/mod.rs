@@ -483,7 +483,7 @@ where
         }
 
         // attempt to finalize
-        let finalized = self.finalize_psbt(tx.clone(), &mut psbt, assume_height)?;
+        let finalized = self.finalize_psbt(&mut psbt, assume_height)?;
 
         Ok((psbt, finalized))
     }
@@ -505,6 +505,61 @@ where
             (ScriptType::Internal, None) => Ok(None),
             (ScriptType::Internal, Some(desc)) => Ok(Some(desc.as_public_version()?)),
         }
+    }
+
+    pub fn finalize_psbt(
+        &self,
+        psbt: &mut PSBT,
+        assume_height: Option<u32>,
+    ) -> Result<bool, Error> {
+        let mut tx = psbt.global.unsigned_tx.clone();
+
+        for (n, input) in tx.input.iter_mut().enumerate() {
+            // safe to run only on the descriptor because we assume the change descriptor also has
+            // the same structure
+            let desc = self.descriptor.derive_from_psbt_input(psbt, n);
+            debug!("{:?}", psbt.inputs[n].hd_keypaths);
+            debug!("reconstructed descriptor is {:?}", desc);
+
+            let desc = match desc {
+                Err(_) => return Ok(false),
+                Ok(desc) => desc,
+            };
+
+            // if the height is None in the database it means it's still unconfirmed, so consider
+            // that as a very high value
+            let create_height = self
+                .database
+                .borrow()
+                .get_tx(&input.previous_output.txid, false)?
+                .and_then(|tx| Some(tx.height.unwrap_or(std::u32::MAX)));
+            let current_height = assume_height.or(self.current_height);
+
+            debug!(
+                "Input #{} - {}, using `create_height` = {:?}, `current_height` = {:?}",
+                n, input.previous_output, create_height, current_height
+            );
+
+            // TODO: use height once we sync headers
+            let satisfier =
+                PSBTSatisfier::new(&psbt.inputs[n], false, create_height, current_height);
+
+            match desc.satisfy(input, satisfier) {
+                Ok(_) => continue,
+                Err(e) => {
+                    debug!("satisfy error {:?} for input {}", e, n);
+                    return Ok(false);
+                }
+            }
+        }
+
+        // consume tx to extract its input's script_sig and witnesses and move them into the psbt
+        for (input, psbt_input) in tx.input.into_iter().zip(psbt.inputs.iter_mut()) {
+            psbt_input.final_script_sig = Some(input.script_sig);
+            psbt_input.final_script_witness = Some(input.witness);
+        }
+
+        Ok(true)
     }
 
     // Internals
@@ -652,60 +707,6 @@ where
 
         Ok((answer, paths, selected_amount, fee_val))
     }
-
-    fn finalize_psbt(
-        &self,
-        mut tx: Transaction,
-        psbt: &mut PSBT,
-        assume_height: Option<u32>,
-    ) -> Result<bool, Error> {
-        for (n, input) in tx.input.iter_mut().enumerate() {
-            // safe to run only on the descriptor because we assume the change descriptor also has
-            // the same structure
-            let desc = self.descriptor.derive_from_psbt_input(psbt, n);
-            debug!("{:?}", psbt.inputs[n].hd_keypaths);
-            debug!("reconstructed descriptor is {:?}", desc);
-
-            let desc = match desc {
-                Err(_) => return Ok(false),
-                Ok(desc) => desc,
-            };
-
-            // if the height is None in the database it means it's still unconfirmed, so consider
-            // that as a very high value
-            let create_height = self
-                .database
-                .borrow()
-                .get_tx(&input.previous_output.txid, false)?
-                .and_then(|tx| Some(tx.height.unwrap_or(std::u32::MAX)));
-            let current_height = assume_height.or(self.current_height);
-
-            debug!(
-                "Input #{} - {}, using `create_height` = {:?}, `current_height` = {:?}",
-                n, input.previous_output, create_height, current_height
-            );
-
-            // TODO: use height once we sync headers
-            let satisfier =
-                PSBTSatisfier::new(&psbt.inputs[n], false, create_height, current_height);
-
-            match desc.satisfy(input, satisfier) {
-                Ok(_) => continue,
-                Err(e) => {
-                    debug!("satisfy error {:?} for input {}", e, n);
-                    return Ok(false);
-                }
-            }
-        }
-
-        // consume tx to extract its input's script_sig and witnesses and move them into the psbt
-        for (input, psbt_input) in tx.input.into_iter().zip(psbt.inputs.iter_mut()) {
-            psbt_input.final_script_sig = Some(input.script_sig);
-            psbt_input.final_script_witness = Some(input.witness);
-        }
-
-        Ok(true)
-    }
 }
 
 impl<B, D> Wallet<B, D>
@@ -828,10 +829,9 @@ where
             .await
     }
 
-    pub async fn broadcast(&self, psbt: PSBT) -> Result<(Txid, Transaction), Error> {
-        let extracted = psbt.extract_tx();
-        self.client.borrow_mut().broadcast(&extracted).await?;
+    pub async fn broadcast(&self, tx: Transaction) -> Result<Txid, Error> {
+        self.client.borrow_mut().broadcast(&tx).await?;
 
-        Ok((extracted.txid(), extracted))
+        Ok(tx.txid())
     }
 }

@@ -194,11 +194,11 @@ impl ExtendedDescriptor {
             _ => return Err(Error::CantDeriveWithMiniscript),
         };
 
-        if !self.same_structure(&derived_desc) {
-            Err(Error::CantDeriveWithMiniscript)
-        } else {
-            Ok(derived_desc)
-        }
+        // if !self.same_structure(&derived_desc) {
+        //     Err(Error::CantDeriveWithMiniscript)
+        // } else {
+        Ok(derived_desc)
+        // }
     }
 
     pub fn derive_from_psbt_input(
