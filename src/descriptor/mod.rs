@@ -19,7 +19,7 @@ use crate::psbt::utils::PSBTUtils;
 pub mod checksum;
 pub mod error;
 pub mod extended_key;
-mod keys;
+pub mod keys;
 pub mod policy;
 
 pub use self::checksum::get_checksum;
@@ -27,9 +27,9 @@ use self::error::Error;
 pub use self::extended_key::{DerivationIndex, DescriptorExtendedKey};
 pub use self::policy::Policy;
 
-use self::keys::Key;
+use self::keys::{parse_key, DummyKey, Key, RealKey};
 
-trait MiniscriptExtractPolicy {
+pub(crate) trait MiniscriptExtractPolicy {
     fn extract_policy(
         &self,
         lookup_map: &BTreeMap<String, Box<dyn Key>>,
@@ -38,31 +38,6 @@ trait MiniscriptExtractPolicy {
 
 pub trait ExtractPolicy {
     fn extract_policy(&self) -> Result<Option<Policy>, Error>;
-}
-
-#[derive(Debug, Clone, Hash, PartialEq, PartialOrd, Eq, Ord, Default)]
-struct DummyKey();
-
-impl fmt::Display for DummyKey {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "DummyKey")
-    }
-}
-
-impl std::str::FromStr for DummyKey {
-    type Err = ();
-
-    fn from_str(_: &str) -> Result<Self, Self::Err> {
-        Ok(DummyKey::default())
-    }
-}
-
-impl miniscript::MiniscriptKey for DummyKey {
-    type Hash = DummyKey;
-
-    fn to_pubkeyhash(&self) -> DummyKey {
-        DummyKey::default()
-    }
 }
 
 pub type DerivedDescriptor = Descriptor<PublicKey>;
@@ -112,13 +87,13 @@ where
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ExtendedDescriptor {
     #[serde(flatten)]
-    internal: StringDescriptor,
+    pub(crate) internal: StringDescriptor,
 
     #[serde(skip)]
-    keys: BTreeMap<String, Box<dyn Key>>,
+    pub(crate) keys: BTreeMap<String, Box<dyn RealKey>>,
 
     #[serde(skip)]
-    ctx: Secp256k1<All>,
+    pub(crate) ctx: Secp256k1<All>,
 }
 
 impl fmt::Display for ExtendedDescriptor {
@@ -144,30 +119,18 @@ impl std::convert::AsRef<StringDescriptor> for ExtendedDescriptor {
 }
 
 impl ExtendedDescriptor {
-    fn parse_string(string: &str) -> Result<(String, Box<dyn Key>), Error> {
-        if let Ok(pk) = PublicKey::from_str(string) {
-            return Ok((string.to_string(), Box::new(pk)));
-        } else if let Ok(sk) = PrivateKey::from_wif(string) {
-            return Ok((string.to_string(), Box::new(sk)));
-        } else if let Ok(ext_key) = DescriptorExtendedKey::from_str(string) {
-            return Ok((string.to_string(), Box::new(ext_key)));
-        }
-
-        return Err(Error::KeyParsingError(string.to_string()));
-    }
-
     fn new(sd: StringDescriptor) -> Result<Self, Error> {
         let ctx = Secp256k1::gen_new();
-        let keys: RefCell<BTreeMap<String, Box<dyn Key>>> = RefCell::new(BTreeMap::new());
+        let keys: RefCell<BTreeMap<String, Box<dyn RealKey>>> = RefCell::new(BTreeMap::new());
 
         let translatefpk = |string: &String| -> Result<_, Error> {
-            let (key, parsed) = Self::parse_string(string)?;
+            let (key, parsed) = parse_key(string)?;
             keys.borrow_mut().insert(key, parsed);
 
             Ok(DummyKey::default())
         };
         let translatefpkh = |string: &String| -> Result<_, Error> {
-            let (key, parsed) = Self::parse_string(string)?;
+            let (key, parsed) = parse_key(string)?;
             keys.borrow_mut().insert(key, parsed);
 
             Ok(DummyKey::default())
@@ -329,7 +292,7 @@ impl ExtendedDescriptor {
     }
 
     pub fn as_public_version(&self) -> Result<ExtendedDescriptor, Error> {
-        let keys: RefCell<BTreeMap<String, Box<dyn Key>>> = RefCell::new(BTreeMap::new());
+        let keys: RefCell<BTreeMap<String, Box<dyn RealKey>>> = RefCell::new(BTreeMap::new());
 
         let translatefpk = |string: &String| -> Result<_, Error> {
             let public = self.keys.get(string).unwrap().public(&self.ctx)?;
@@ -360,7 +323,13 @@ impl ExtendedDescriptor {
 
 impl ExtractPolicy for ExtendedDescriptor {
     fn extract_policy(&self) -> Result<Option<Policy>, Error> {
-        self.internal.extract_policy(&self.keys)
+        self.internal.extract_policy(
+            &self
+                .keys
+                .iter()
+                .map(|(k, v)| (k.into(), v.into_key()))
+                .collect(),
+        )
     }
 }
 

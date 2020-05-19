@@ -6,6 +6,12 @@ pub enum Error {
     MalformedInput,
     KeyParsingError(String),
 
+    AliasAsPublicKey,
+    KeyHasSecret,
+    Incomplete,
+    MissingAlias(String),
+    InvalidAlias(String),
+
     Policy(crate::descriptor::policy::PolicyError),
 
     InputIndexDoesntExist,

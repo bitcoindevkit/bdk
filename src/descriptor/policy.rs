@@ -27,19 +27,27 @@ pub struct PKOrF {
     pubkey_hash: Option<hash160::Hash>,
     #[serde(skip_serializing_if = "Option::is_none")]
     fingerprint: Option<Fingerprint>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    alias: Option<String>,
 }
 
 impl PKOrF {
     fn from_key(k: &Box<dyn Key>) -> Self {
         let secp = Secp256k1::gen_new();
 
-        let pubkey = k.as_public_key(&secp, None).unwrap();
-        if let Some(fing) = k.fingerprint(&secp) {
+        if let Some(alias) = k.alias() {
+            PKOrF {
+                alias: Some(alias.into()),
+                ..Default::default()
+            }
+        } else if let Some(fing) = k.fingerprint(&secp) {
             PKOrF {
                 fingerprint: Some(fing),
                 ..Default::default()
             }
         } else {
+            let pubkey = k.as_public_key(&secp, None).unwrap();
             PKOrF {
                 pubkey: Some(pubkey),
                 ..Default::default()

@@ -33,6 +33,8 @@ pub mod error;
 pub mod blockchain;
 pub mod database;
 pub mod descriptor;
+#[cfg(feature = "multiparty")]
+pub mod multiparty;
 pub mod psbt;
 pub mod signer;
 pub mod types;

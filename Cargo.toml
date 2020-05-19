@@ -28,6 +28,7 @@ electrum = ["electrum-client"]
 esplora = ["reqwest", "futures"]
 key-value-db = ["sled"]
 cli-utils = ["clap"]
+multiparty = []
 
 [dev-dependencies]
 tokio = { version = "0.2", features = ["macros"] }
@@ -49,6 +50,10 @@ name = "parse_descriptor"
 name = "miniscriptc"
 path = "examples/compiler.rs"
 required-features = ["compiler"]
+
+[[example]]
+name = "multiparty"
+required-features = ["multiparty","compiler"]
 
 # Provide a more user-friendly alias for the REPL
 [[example]]
