@@ -18,6 +18,9 @@ pub mod esplora;
 #[cfg(feature = "esplora")]
 pub use self::esplora::EsploraBlockchain;
 
+pub mod bitcoin_rpc;
+pub use self::bitcoin_rpc::BitcoinRpcBlockchain;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Capability {
     FullHistory,
