@@ -285,9 +285,27 @@ where
             psbt_input.sighash_type = Some(SigHashType::All);
         }
 
-        // TODO: add metadata for the outputs, like derivation paths for change addrs
-        /*for psbt_output in psbt.outputs.iter_mut().zip(psbt.global.unsigned_tx.output.iter()) {
-        }*/
+        for (psbt_output, tx_output) in psbt
+            .outputs
+            .iter_mut()
+            .zip(psbt.global.unsigned_tx.output.iter())
+        {
+            if let Some((script_type, derivation_path)) = self
+                .database
+                .borrow()
+                .get_path_from_script_pubkey(&tx_output.script_pubkey)?
+            {
+                let derivation_path: Vec<ChildNumber> = derivation_path.into();
+                let index = match derivation_path.last() {
+                    Some(ChildNumber::Normal { index }) => *index,
+                    Some(ChildNumber::Hardened { index }) => *index,
+                    None => 0,
+                };
+
+                let desc = self.get_descriptor_for(script_type);
+                psbt_output.hd_keypaths = desc.get_hd_keypaths(index)?;
+            }
+        }
 
         let transaction_details = TransactionDetails {
             transaction: None,
@@ -299,47 +317,6 @@ where
         };
 
         Ok((psbt, transaction_details))
-    }
-
-    // TODO: move down to the "internals"
-    fn add_hd_keypaths(&self, psbt: &mut PSBT) -> Result<(), Error> {
-        let mut input_utxos = Vec::with_capacity(psbt.inputs.len());
-        for n in 0..psbt.inputs.len() {
-            input_utxos.push(psbt.get_utxo_for(n).clone());
-        }
-
-        // try to add hd_keypaths if we've already seen the output
-        for (psbt_input, out) in psbt.inputs.iter_mut().zip(input_utxos.iter()) {
-            debug!("searching hd_keypaths for out: {:?}", out);
-
-            if let Some(out) = out {
-                let option_path = self
-                    .database
-                    .borrow()
-                    .get_path_from_script_pubkey(&out.script_pubkey)?;
-
-                debug!("found descriptor path {:?}", option_path);
-
-                let (script_type, path) = match option_path {
-                    None => continue,
-                    Some((script_type, path)) => (script_type, path),
-                };
-
-                // TODO: this is duplicated code
-                let index = match path.into_iter().last() {
-                    Some(ChildNumber::Normal { index }) => *index,
-                    Some(ChildNumber::Hardened { index }) => *index,
-                    None => 0,
-                };
-
-                // merge hd_keypaths
-                let desc = self.get_descriptor_for(script_type);
-                let mut hd_keypaths = desc.get_hd_keypaths(index)?;
-                psbt_input.hd_keypaths.append(&mut hd_keypaths);
-            }
-        }
-
-        Ok(())
     }
 
     // TODO: define an enum for signing errors
@@ -706,6 +683,46 @@ where
         }
 
         Ok((answer, paths, selected_amount, fee_val))
+    }
+
+    fn add_hd_keypaths(&self, psbt: &mut PSBT) -> Result<(), Error> {
+        let mut input_utxos = Vec::with_capacity(psbt.inputs.len());
+        for n in 0..psbt.inputs.len() {
+            input_utxos.push(psbt.get_utxo_for(n).clone());
+        }
+
+        // try to add hd_keypaths if we've already seen the output
+        for (psbt_input, out) in psbt.inputs.iter_mut().zip(input_utxos.iter()) {
+            debug!("searching hd_keypaths for out: {:?}", out);
+
+            if let Some(out) = out {
+                let option_path = self
+                    .database
+                    .borrow()
+                    .get_path_from_script_pubkey(&out.script_pubkey)?;
+
+                debug!("found descriptor path {:?}", option_path);
+
+                let (script_type, path) = match option_path {
+                    None => continue,
+                    Some((script_type, path)) => (script_type, path),
+                };
+
+                // TODO: this is duplicated code
+                let index = match path.into_iter().last() {
+                    Some(ChildNumber::Normal { index }) => *index,
+                    Some(ChildNumber::Hardened { index }) => *index,
+                    None => 0,
+                };
+
+                // merge hd_keypaths
+                let desc = self.get_descriptor_for(script_type);
+                let mut hd_keypaths = desc.get_hd_keypaths(index)?;
+                psbt_input.hd_keypaths.append(&mut hd_keypaths);
+            }
+        }
+
+        Ok(())
     }
 }
 
