@@ -1,5 +1,4 @@
 use bitcoin::hash_types::Txid;
-use bitcoin::util::bip32::{ChildNumber, DerivationPath};
 use bitcoin::{OutPoint, Script, Transaction, TxOut};
 
 use crate::error::Error;
@@ -10,26 +9,26 @@ pub mod keyvalue;
 pub mod memory;
 
 pub trait BatchOperations {
-    fn set_script_pubkey<P: AsRef<[ChildNumber]>>(
+    fn set_script_pubkey(
         &mut self,
         script: &Script,
         script_type: ScriptType,
-        path: &P,
+        child: u32,
     ) -> Result<(), Error>;
     fn set_utxo(&mut self, utxo: &UTXO) -> Result<(), Error>;
     fn set_raw_tx(&mut self, transaction: &Transaction) -> Result<(), Error>;
     fn set_tx(&mut self, transaction: &TransactionDetails) -> Result<(), Error>;
     fn set_last_index(&mut self, script_type: ScriptType, value: u32) -> Result<(), Error>;
 
-    fn del_script_pubkey_from_path<P: AsRef<[ChildNumber]>>(
+    fn del_script_pubkey_from_path(
         &mut self,
         script_type: ScriptType,
-        path: &P,
+        child: u32,
     ) -> Result<Option<Script>, Error>;
     fn del_path_from_script_pubkey(
         &mut self,
         script: &Script,
-    ) -> Result<Option<(ScriptType, DerivationPath)>, Error>;
+    ) -> Result<Option<(ScriptType, u32)>, Error>;
     fn del_utxo(&mut self, outpoint: &OutPoint) -> Result<Option<UTXO>, Error>;
     fn del_raw_tx(&mut self, txid: &Txid) -> Result<Option<Transaction>, Error>;
     fn del_tx(
@@ -52,15 +51,15 @@ pub trait Database: BatchOperations {
     fn iter_raw_txs(&self) -> Result<Vec<Transaction>, Error>;
     fn iter_txs(&self, include_raw: bool) -> Result<Vec<TransactionDetails>, Error>;
 
-    fn get_script_pubkey_from_path<P: AsRef<[ChildNumber]>>(
+    fn get_script_pubkey_from_path(
         &self,
         script_type: ScriptType,
-        path: &P,
+        child: u32,
     ) -> Result<Option<Script>, Error>;
     fn get_path_from_script_pubkey(
         &self,
         script: &Script,
-    ) -> Result<Option<(ScriptType, DerivationPath)>, Error>;
+    ) -> Result<Option<(ScriptType, u32)>, Error>;
     fn get_utxo(&self, outpoint: &OutPoint) -> Result<Option<UTXO>, Error>;
     fn get_raw_tx(&self, txid: &Txid) -> Result<Option<Transaction>, Error>;
     fn get_tx(&self, txid: &Txid, include_raw: bool) -> Result<Option<TransactionDetails>, Error>;

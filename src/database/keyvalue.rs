@@ -1,10 +1,9 @@
-use std::convert::{From, TryInto};
+use std::convert::TryInto;
 
 use sled::{Batch, Tree};
 
 use bitcoin::consensus::encode::{deserialize, serialize};
 use bitcoin::hash_types::Txid;
-use bitcoin::util::bip32::{ChildNumber, DerivationPath};
 use bitcoin::{OutPoint, Script, Transaction};
 
 use crate::database::memory::MapKey;
@@ -14,15 +13,14 @@ use crate::types::*;
 
 macro_rules! impl_batch_operations {
     ( { $($after_insert:tt)* }, $process_delete:ident ) => {
-        fn set_script_pubkey<P: AsRef<[ChildNumber]>>(&mut self, script: &Script, script_type: ScriptType, path: &P) -> Result<(), Error> {
-            let deriv_path = DerivationPath::from(path.as_ref());
-            let key = MapKey::Path((Some(script_type), Some(&deriv_path))).as_map_key();
+        fn set_script_pubkey(&mut self, script: &Script, script_type: ScriptType, path: u32) -> Result<(), Error> {
+            let key = MapKey::Path((Some(script_type), Some(path))).as_map_key();
             self.insert(key, serialize(script))$($after_insert)*;
 
             let key = MapKey::Script(Some(script)).as_map_key();
             let value = json!({
                 "t": script_type,
-                "p": deriv_path,
+                "p": path,
             });
             self.insert(key, serde_json::to_vec(&value)?)$($after_insert)*;
 
@@ -70,16 +68,15 @@ macro_rules! impl_batch_operations {
             Ok(())
         }
 
-        fn del_script_pubkey_from_path<P: AsRef<[ChildNumber]>>(&mut self, script_type: ScriptType, path: &P) -> Result<Option<Script>, Error> {
-            let deriv_path = DerivationPath::from(path.as_ref());
-            let key = MapKey::Path((Some(script_type), Some(&deriv_path))).as_map_key();
+        fn del_script_pubkey_from_path(&mut self, script_type: ScriptType, path: u32) -> Result<Option<Script>, Error> {
+            let key = MapKey::Path((Some(script_type), Some(path))).as_map_key();
             let res = self.remove(key);
             let res = $process_delete!(res);
 
             Ok(res.map_or(Ok(None), |x| Some(deserialize(&x)).transpose())?)
         }
 
-        fn del_path_from_script_pubkey(&mut self, script: &Script) -> Result<Option<(ScriptType, DerivationPath)>, Error> {
+        fn del_path_from_script_pubkey(&mut self, script: &Script) -> Result<Option<(ScriptType, u32)>, Error> {
             let key = MapKey::Script(Some(script)).as_map_key();
             let res = self.remove(key);
             let res = $process_delete!(res);
@@ -245,20 +242,19 @@ impl Database for Tree {
             .collect()
     }
 
-    fn get_script_pubkey_from_path<P: AsRef<[ChildNumber]>>(
+    fn get_script_pubkey_from_path(
         &self,
         script_type: ScriptType,
-        path: &P,
+        path: u32,
     ) -> Result<Option<Script>, Error> {
-        let deriv_path = DerivationPath::from(path.as_ref());
-        let key = MapKey::Path((Some(script_type), Some(&deriv_path))).as_map_key();
+        let key = MapKey::Path((Some(script_type), Some(path))).as_map_key();
         Ok(self.get(key)?.map(|b| deserialize(&b)).transpose()?)
     }
 
     fn get_path_from_script_pubkey(
         &self,
         script: &Script,
-    ) -> Result<Option<(ScriptType, DerivationPath)>, Error> {
+    ) -> Result<Option<(ScriptType, u32)>, Error> {
         let key = MapKey::Script(Some(script)).as_map_key();
         self.get(key)?
             .map(|b| -> Result<_, Error> {
@@ -415,14 +411,13 @@ mod test {
         let script = Script::from(
             Vec::<u8>::from_hex("76a91402306a7c23f3e8010de41e9e591348bb83f11daa88ac").unwrap(),
         );
-        let path = DerivationPath::from_str("m/0/1/2/3").unwrap();
+        let path = 42;
         let script_type = ScriptType::External;
 
-        tree.set_script_pubkey(&script, script_type, &path).unwrap();
+        tree.set_script_pubkey(&script, script_type, path).unwrap();
 
         assert_eq!(
-            tree.get_script_pubkey_from_path(script_type, &path)
-                .unwrap(),
+            tree.get_script_pubkey_from_path(script_type, path).unwrap(),
             Some(script.clone())
         );
         assert_eq!(
@@ -439,16 +434,13 @@ mod test {
         let script = Script::from(
             Vec::<u8>::from_hex("76a91402306a7c23f3e8010de41e9e591348bb83f11daa88ac").unwrap(),
         );
-        let path = DerivationPath::from_str("m/0/1/2/3").unwrap();
+        let path = 42;
         let script_type = ScriptType::External;
 
-        batch
-            .set_script_pubkey(&script, script_type, &path)
-            .unwrap();
+        batch.set_script_pubkey(&script, script_type, path).unwrap();
 
         assert_eq!(
-            tree.get_script_pubkey_from_path(script_type, &path)
-                .unwrap(),
+            tree.get_script_pubkey_from_path(script_type, path).unwrap(),
             None
         );
         assert_eq!(tree.get_path_from_script_pubkey(&script).unwrap(), None);
@@ -456,8 +448,7 @@ mod test {
         tree.commit_batch(batch).unwrap();
 
         assert_eq!(
-            tree.get_script_pubkey_from_path(script_type, &path)
-                .unwrap(),
+            tree.get_script_pubkey_from_path(script_type, path).unwrap(),
             Some(script.clone())
         );
         assert_eq!(
@@ -473,10 +464,10 @@ mod test {
         let script = Script::from(
             Vec::<u8>::from_hex("76a91402306a7c23f3e8010de41e9e591348bb83f11daa88ac").unwrap(),
         );
-        let path = DerivationPath::from_str("m/0/1/2/3").unwrap();
+        let path = 42;
         let script_type = ScriptType::External;
 
-        tree.set_script_pubkey(&script, script_type, &path).unwrap();
+        tree.set_script_pubkey(&script, script_type, path).unwrap();
 
         assert_eq!(tree.iter_script_pubkeys(None).unwrap().len(), 1);
     }
@@ -488,14 +479,13 @@ mod test {
         let script = Script::from(
             Vec::<u8>::from_hex("76a91402306a7c23f3e8010de41e9e591348bb83f11daa88ac").unwrap(),
         );
-        let path = DerivationPath::from_str("m/0/1/2/3").unwrap();
+        let path = 42;
         let script_type = ScriptType::External;
 
-        tree.set_script_pubkey(&script, script_type, &path).unwrap();
+        tree.set_script_pubkey(&script, script_type, path).unwrap();
         assert_eq!(tree.iter_script_pubkeys(None).unwrap().len(), 1);
 
-        tree.del_script_pubkey_from_path(script_type, &path)
-            .unwrap();
+        tree.del_script_pubkey_from_path(script_type, path).unwrap();
         assert_eq!(tree.iter_script_pubkeys(None).unwrap().len(), 0);
     }
 

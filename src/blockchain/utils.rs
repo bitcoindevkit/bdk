@@ -226,7 +226,7 @@ pub trait ElectrumLikeSync {
         let mut to_check_later = vec![];
         for (i, output) in tx.output.iter().enumerate() {
             // this output is ours, we have a path to derive it
-            if let Some((script_type, path)) =
+            if let Some((script_type, child)) =
                 database.get_path_from_script_pubkey(&output.script_pubkey)?
             {
                 debug!("{} output #{} is mine, adding utxo", txid, i);
@@ -242,10 +242,8 @@ pub trait ElectrumLikeSync {
                 }
 
                 // derive as many change addrs as external addresses that we've seen
-                if script_type == ScriptType::Internal
-                    && u32::from(path.as_ref()[0]) > *change_max_deriv
-                {
-                    *change_max_deriv = u32::from(path.as_ref()[0]);
+                if script_type == ScriptType::Internal && child > *change_max_deriv {
+                    *change_max_deriv = child;
                 }
             }
         }
