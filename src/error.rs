@@ -15,6 +15,7 @@ pub enum Error {
 
     ChecksumMismatch,
     DifferentDescriptorStructure,
+    MissingScriptPubkey,
 
     SpendingPolicyRequired,
     InvalidPolicyPathError(crate::descriptor::policy::PolicyError),
@@ -48,9 +49,10 @@ pub enum Error {
     Electrum(electrum_client::Error),
     #[cfg(feature = "esplora")]
     Esplora(crate::blockchain::esplora::EsploraError),
+    #[cfg(feature = "rpc")]
+    BitcoinRpc(bitcoincore_rpc::Error),
     #[cfg(feature = "key-value-db")]
     Sled(sled::Error),
-    BitcoinRpc(bitcoincore_rpc::Error),
 }
 
 macro_rules! impl_error {
@@ -75,11 +77,12 @@ impl_error!(bitcoin::secp256k1::Error, Secp256k1);
 impl_error!(serde_json::Error, JSON);
 impl_error!(bitcoin::hashes::hex::Error, Hex);
 impl_error!(bitcoin::util::psbt::Error, PSBT);
-impl_error!(bitcoincore_rpc::Error, BitcoinRpc);
 
 #[cfg(feature = "electrum")]
 impl_error!(electrum_client::Error, Electrum);
 #[cfg(feature = "esplora")]
 impl_error!(crate::blockchain::esplora::EsploraError, Esplora);
+#[cfg(feature = "rpc")]
+impl_error!(bitcoincore_rpc::Error, BitcoinRpc);
 #[cfg(feature = "key-value-db")]
 impl_error!(sled::Error, Sled);
