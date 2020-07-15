@@ -11,12 +11,12 @@ miniscript = { version = "0.12" }
 serde = { version = "^1.0", features = ["derive"] }
 serde_json = { version = "^1.0" }
 base64 = "^0.11"
-async-trait = "0.1"
 
 # Optional dependencies
 sled = { version = "0.31.0", optional = true }
-electrum-client = { git = "https://github.com/MagicalBitcoin/rust-electrum-client.git", optional = true }
+electrum-client = { version = "0.2.0-beta.1", optional = true }
 reqwest = { version = "0.10", optional = true, features = ["json"] }
+tokio = { version = "0.2", optional = true, features = ["rt-core"] }
 futures = { version = "0.3", optional = true }
 clap = { version = "2.33", optional = true }
 
@@ -25,12 +25,11 @@ minimal = []
 compiler = ["miniscript/compiler"]
 default = ["key-value-db", "electrum"]
 electrum = ["electrum-client"]
-esplora = ["reqwest", "futures"]
+esplora = ["reqwest", "futures", "tokio"]
 key-value-db = ["sled"]
 cli-utils = ["clap"]
 
 [dev-dependencies]
-tokio = { version = "0.2", features = ["macros"] }
 lazy_static = "1.4"
 rustyline = "6.0"
 dirs = "2.0"

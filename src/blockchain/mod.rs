@@ -41,29 +41,28 @@ impl Blockchain for OfflineBlockchain {
     }
 }
 
-#[async_trait(?Send)]
 pub trait OnlineBlockchain: Blockchain {
-    async fn get_capabilities(&self) -> HashSet<Capability>;
+    fn get_capabilities(&self) -> HashSet<Capability>;
 
-    async fn setup<D: BatchDatabase + DatabaseUtils, P: Progress>(
+    fn setup<D: BatchDatabase + DatabaseUtils, P: Progress>(
         &mut self,
         stop_gap: Option<usize>,
         database: &mut D,
         progress_update: P,
     ) -> Result<(), Error>;
-    async fn sync<D: BatchDatabase + DatabaseUtils, P: Progress>(
+    fn sync<D: BatchDatabase + DatabaseUtils, P: Progress>(
         &mut self,
         stop_gap: Option<usize>,
         database: &mut D,
         progress_update: P,
     ) -> Result<(), Error> {
-        self.setup(stop_gap, database, progress_update).await
+        self.setup(stop_gap, database, progress_update)
     }
 
-    async fn get_tx(&mut self, txid: &Txid) -> Result<Option<Transaction>, Error>;
-    async fn broadcast(&mut self, tx: &Transaction) -> Result<(), Error>;
+    fn get_tx(&mut self, txid: &Txid) -> Result<Option<Transaction>, Error>;
+    fn broadcast(&mut self, tx: &Transaction) -> Result<(), Error>;
 
-    async fn get_height(&mut self) -> Result<usize, Error>;
+    fn get_height(&mut self) -> Result<usize, Error>;
 }
 
 pub type ProgressData = (f32, Option<String>);

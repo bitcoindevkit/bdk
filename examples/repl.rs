@@ -32,8 +32,7 @@ fn prepare_home_dir() -> PathBuf {
     dir
 }
 
-#[tokio::main]
-async fn main() {
+fn main() {
     env_logger::init();
 
     let app = cli::make_cli_subcommands();
@@ -65,9 +64,11 @@ async fn main() {
         .unwrap();
     debug!("database opened successfully");
 
-    let client = Client::new(matches.value_of("server").unwrap())
-        .await
-        .unwrap();
+    let client = Client::new(
+        matches.value_of("server").unwrap(),
+        matches.value_of("proxy"),
+    )
+    .unwrap();
     let wallet = Wallet::new(
         descriptor,
         change_descriptor,
@@ -75,7 +76,6 @@ async fn main() {
         tree,
         ElectrumBlockchain::from(client),
     )
-    .await
     .unwrap();
     let wallet = Arc::new(wallet);
 
@@ -101,9 +101,8 @@ async fn main() {
                         continue;
                     }
 
-                    if let Some(s) = cli::handle_matches(&Arc::clone(&wallet), matches.unwrap())
-                        .await
-                        .unwrap()
+                    if let Some(s) =
+                        cli::handle_matches(&Arc::clone(&wallet), matches.unwrap()).unwrap()
                     {
                         println!("{}", s);
                     }
@@ -119,7 +118,7 @@ async fn main() {
 
     // rl.save_history("history.txt").unwrap();
     } else {
-        if let Some(s) = cli::handle_matches(&wallet, matches).await.unwrap() {
+        if let Some(s) = cli::handle_matches(&wallet, matches).unwrap() {
             println!("{}", s);
         }
     }

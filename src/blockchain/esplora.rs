@@ -1,14 +1,16 @@
 use std::collections::HashSet;
+use std::sync::Mutex;
 
 use futures::stream::{self, StreamExt, TryStreamExt};
+
+use tokio::runtime::Runtime;
 
 #[allow(unused_imports)]
 use log::{debug, error, info, trace};
 
 use serde::Deserialize;
 
-use reqwest::Client;
-use reqwest::StatusCode;
+use reqwest::{Client, StatusCode};
 
 use bitcoin::consensus::{deserialize, serialize};
 use bitcoin::hashes::hex::ToHex;
@@ -23,7 +25,12 @@ use crate::error::Error;
 #[derive(Debug)]
 pub struct UrlClient {
     url: String,
+    // We use the async client instead of the blocking one because it automatically uses `fetch`
+    // when the target platform is wasm32. For some reason the blocking client doesn't, so we are
+    // stuck with this
     client: Client,
+
+    runtime: Mutex<Runtime>,
 }
 
 #[derive(Debug)]
@@ -40,6 +47,8 @@ impl EsploraBlockchain {
         EsploraBlockchain(Some(UrlClient {
             url: base_url.to_string(),
             client: Client::new(),
+
+            runtime: Mutex::new(Runtime::new().unwrap()),
         }))
     }
 }
@@ -54,15 +63,14 @@ impl Blockchain for EsploraBlockchain {
     }
 }
 
-#[async_trait(?Send)]
 impl OnlineBlockchain for EsploraBlockchain {
-    async fn get_capabilities(&self) -> HashSet<Capability> {
+    fn get_capabilities(&self) -> HashSet<Capability> {
         vec![Capability::FullHistory, Capability::GetAnyTx]
             .into_iter()
             .collect()
     }
 
-    async fn setup<D: BatchDatabase + DatabaseUtils, P: Progress>(
+    fn setup<D: BatchDatabase + DatabaseUtils, P: Progress>(
         &mut self,
         stop_gap: Option<usize>,
         database: &mut D,
@@ -72,34 +80,22 @@ impl OnlineBlockchain for EsploraBlockchain {
             .as_mut()
             .ok_or(Error::OfflineClient)?
             .electrum_like_setup(stop_gap, database, progress_update)
-            .await
     }
 
-    async fn get_tx(&mut self, txid: &Txid) -> Result<Option<Transaction>, Error> {
+    fn get_tx(&mut self, txid: &Txid) -> Result<Option<Transaction>, Error> {
+        Ok(self.0.as_mut().ok_or(Error::OfflineClient)?._get_tx(txid)?)
+    }
+
+    fn broadcast(&mut self, tx: &Transaction) -> Result<(), Error> {
         Ok(self
             .0
             .as_mut()
             .ok_or(Error::OfflineClient)?
-            ._get_tx(txid)
-            .await?)
+            ._broadcast(tx)?)
     }
 
-    async fn broadcast(&mut self, tx: &Transaction) -> Result<(), Error> {
-        Ok(self
-            .0
-            .as_mut()
-            .ok_or(Error::OfflineClient)?
-            ._broadcast(tx)
-            .await?)
-    }
-
-    async fn get_height(&mut self) -> Result<usize, Error> {
-        Ok(self
-            .0
-            .as_mut()
-            .ok_or(Error::OfflineClient)?
-            ._get_height()
-            .await?)
+    fn get_height(&mut self) -> Result<usize, Error> {
+        Ok(self.0.as_mut().ok_or(Error::OfflineClient)?._get_height()?)
     }
 }
 
@@ -108,40 +104,53 @@ impl UrlClient {
         sha256::Hash::hash(script.as_bytes()).into_inner().to_hex()
     }
 
-    async fn _get_tx(&self, txid: &Txid) -> Result<Option<Transaction>, EsploraError> {
-        let resp = self
-            .client
-            .get(&format!("{}/api/tx/{}/raw", self.url, txid))
-            .send()
-            .await?;
+    fn _get_tx(&self, txid: &Txid) -> Result<Option<Transaction>, EsploraError> {
+        let resp = self.runtime.lock().unwrap().block_on(
+            self.client
+                .get(&format!("{}/api/tx/{}/raw", self.url, txid))
+                .send(),
+        )?;
 
         if let StatusCode::NOT_FOUND = resp.status() {
             return Ok(None);
         }
 
-        Ok(Some(deserialize(&resp.error_for_status()?.bytes().await?)?))
+        Ok(Some(deserialize(
+            &self
+                .runtime
+                .lock()
+                .unwrap()
+                .block_on(resp.error_for_status()?.bytes())?,
+        )?))
     }
 
-    async fn _broadcast(&self, transaction: &Transaction) -> Result<(), EsploraError> {
-        self.client
-            .post(&format!("{}/api/tx", self.url))
-            .body(serialize(transaction).to_hex())
-            .send()
-            .await?
+    fn _broadcast(&self, transaction: &Transaction) -> Result<(), EsploraError> {
+        self.runtime
+            .lock()
+            .unwrap()
+            .block_on(
+                self.client
+                    .post(&format!("{}/api/tx", self.url))
+                    .body(serialize(transaction).to_hex())
+                    .send(),
+            )?
             .error_for_status()?;
 
         Ok(())
     }
 
-    async fn _get_height(&self) -> Result<usize, EsploraError> {
+    fn _get_height(&self) -> Result<usize, EsploraError> {
+        let req = self.runtime.lock().unwrap().block_on(
+            self.client
+                .get(&format!("{}/api/blocks/tip/height", self.url))
+                .send(),
+        )?;
+
         Ok(self
-            .client
-            .get(&format!("{}/api/blocks/tip/height", self.url))
-            .send()
-            .await?
-            .error_for_status()?
-            .text()
-            .await?
+            .runtime
+            .lock()
+            .unwrap()
+            .block_on(req.error_for_status()?.text())?
             .parse()?)
     }
 
@@ -238,32 +247,34 @@ impl UrlClient {
     }
 }
 
-#[async_trait(?Send)]
 impl ElectrumLikeSync for UrlClient {
-    async fn els_batch_script_get_history<'s, I: IntoIterator<Item = &'s Script>>(
+    fn els_batch_script_get_history<'s, I: IntoIterator<Item = &'s Script>>(
         &mut self,
         scripts: I,
     ) -> Result<Vec<Vec<ELSGetHistoryRes>>, Error> {
-        Ok(stream::iter(scripts)
-            .then(|script| self._script_get_history(&script))
-            .try_collect()
-            .await?)
+        self.runtime.lock().unwrap().block_on(async {
+            Ok(stream::iter(scripts)
+                .then(|script| self._script_get_history(&script))
+                .try_collect()
+                .await?)
+        })
     }
 
-    async fn els_batch_script_list_unspent<'s, I: IntoIterator<Item = &'s Script>>(
+    fn els_batch_script_list_unspent<'s, I: IntoIterator<Item = &'s Script>>(
         &mut self,
         scripts: I,
     ) -> Result<Vec<Vec<ELSListUnspentRes>>, Error> {
-        Ok(stream::iter(scripts)
-            .then(|script| self._script_list_unspent(&script))
-            .try_collect()
-            .await?)
+        self.runtime.lock().unwrap().block_on(async {
+            Ok(stream::iter(scripts)
+                .then(|script| self._script_list_unspent(&script))
+                .try_collect()
+                .await?)
+        })
     }
 
-    async fn els_transaction_get(&mut self, txid: &Txid) -> Result<Transaction, Error> {
+    fn els_transaction_get(&mut self, txid: &Txid) -> Result<Transaction, Error> {
         Ok(self
-            ._get_tx(txid)
-            .await?
+            ._get_tx(txid)?
             .ok_or_else(|| EsploraError::TransactionNotFound(*txid))?)
     }
 }

@@ -243,6 +243,14 @@ pub fn add_global_flags<'a, 'b>(app: App<'a, 'b>) -> App<'a, 'b> {
             .default_value("tn.not.fyi:55001"),
     )
     .arg(
+        Arg::with_name("proxy")
+            .short("p")
+            .long("proxy")
+            .value_name("SERVER:PORT")
+            .help("Sets the SOCKS5 proxy for the Electrum client")
+            .takes_value(true),
+    )
+    .arg(
         Arg::with_name("descriptor")
             .short("d")
             .long("descriptor")
@@ -268,7 +276,7 @@ pub fn add_global_flags<'a, 'b>(app: App<'a, 'b>) -> App<'a, 'b> {
     .subcommand(SubCommand::with_name("repl").about("Opens an interactive shell"))
 }
 
-pub async fn handle_matches<C, D>(
+pub fn handle_matches<C, D>(
     wallet: &Wallet<C, D>,
     matches: ArgMatches<'_>,
 ) -> Result<Option<String>, Error>
@@ -279,7 +287,7 @@ where
     if let Some(_sub_matches) = matches.subcommand_matches("get_new_address") {
         Ok(Some(format!("{}", wallet.get_new_address()?)))
     } else if let Some(_sub_matches) = matches.subcommand_matches("sync") {
-        wallet.sync(None, None).await?;
+        wallet.sync(None, None)?;
         Ok(None)
     } else if let Some(_sub_matches) = matches.subcommand_matches("list_unspent") {
         let mut res = String::new();
@@ -374,7 +382,7 @@ where
             panic!("Missing `psbt` and `tx` option");
         };
 
-        let txid = wallet.broadcast(tx).await?;
+        let txid = wallet.broadcast(tx)?;
 
         Ok(Some(format!("TXID: {}", txid)))
     } else if let Some(sub_matches) = matches.subcommand_matches("extract_psbt") {
