@@ -9,7 +9,7 @@ use bitcoin::secp256k1::Secp256k1;
 use bitcoin::util::bip32::Fingerprint;
 use bitcoin::PublicKey;
 
-use miniscript::{Descriptor, Miniscript, Terminal};
+use miniscript::{Descriptor, Miniscript, ScriptContext, Terminal};
 
 #[allow(unused_imports)]
 use log::{debug, error, info, trace};
@@ -482,7 +482,11 @@ impl Policy {
         Ok(Some(policy))
     }
 
-    pub fn satisfy(&mut self, _satisfier: &PSBTSatisfier, _desc_node: &Terminal<PublicKey>) {
+    pub fn satisfy<Ctx: ScriptContext>(
+        &mut self,
+        _satisfier: &PSBTSatisfier,
+        _desc_node: &Terminal<PublicKey, Ctx>,
+    ) {
         //self.satisfaction = self.item.satisfy(satisfier, desc_node);
         //self.contribution += &self.satisfaction;
     }
@@ -606,7 +610,7 @@ fn signature_key_from_string(key: Option<&Box<dyn Key>>) -> Option<Policy> {
     })
 }
 
-impl MiniscriptExtractPolicy for Miniscript<String> {
+impl<Ctx: ScriptContext> MiniscriptExtractPolicy for Miniscript<String, Ctx> {
     fn extract_policy(
         &self,
         lookup_map: &BTreeMap<String, Box<dyn Key>>,
@@ -614,7 +618,7 @@ impl MiniscriptExtractPolicy for Miniscript<String> {
         Ok(match &self.node {
             // Leaves
             Terminal::True | Terminal::False => None,
-            Terminal::Pk(pubkey) => signature_from_string(lookup_map.get(pubkey)),
+            Terminal::PkK(pubkey) => signature_from_string(lookup_map.get(pubkey)),
             Terminal::PkH(pubkey_hash) => signature_key_from_string(lookup_map.get(pubkey_hash)),
             Terminal::After(value) => {
                 let mut policy: Policy = SatisfiableItem::AbsoluteTimelock { value: *value }.into();
@@ -648,7 +652,7 @@ impl MiniscriptExtractPolicy for Miniscript<String> {
             Terminal::Hash160(hash) => {
                 Some(SatisfiableItem::HASH160Preimage { hash: *hash }.into())
             }
-            Terminal::ThreshM(k, pks) => {
+            Terminal::Multi(k, pks) => {
                 Policy::make_multisig(pks.iter().map(|s| lookup_map.get(s)).collect(), *k)?
             }
             // Identities
@@ -706,10 +710,12 @@ impl MiniscriptExtractPolicy for Descriptor<String> {
             | Descriptor::Pkh(pubkey)
             | Descriptor::Wpkh(pubkey)
             | Descriptor::ShWpkh(pubkey) => Ok(signature_from_string(lookup_map.get(pubkey))),
-            Descriptor::Bare(inner)
-            | Descriptor::Sh(inner)
-            | Descriptor::Wsh(inner)
-            | Descriptor::ShWsh(inner) => Ok(inner.extract_policy(lookup_map)?),
+            Descriptor::Bare(inner) | Descriptor::Sh(inner) => {
+                Ok(inner.extract_policy(lookup_map)?)
+            }
+            Descriptor::Wsh(inner) | Descriptor::ShWsh(inner) => {
+                Ok(inner.extract_policy(lookup_map)?)
+            }
         }
     }
 }

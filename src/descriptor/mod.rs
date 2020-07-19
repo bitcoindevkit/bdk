@@ -10,7 +10,9 @@ use bitcoin::util::bip32::{DerivationPath, ExtendedPrivKey, Fingerprint};
 use bitcoin::util::psbt::PartiallySignedTransaction as PSBT;
 use bitcoin::{PrivateKey, PublicKey, Script};
 
-pub use miniscript::{Descriptor, Miniscript, MiniscriptKey, Terminal};
+pub use miniscript::{
+    Descriptor, Legacy, Miniscript, MiniscriptKey, ScriptContext, Segwitv0, Terminal,
+};
 
 use serde::{Deserialize, Serialize};
 
@@ -182,13 +184,28 @@ impl ExtendedDescriptor {
         })
     }
 
-    pub fn derive_with_miniscript(
+    pub fn derive_with_miniscript_legacy(
         &self,
-        miniscript: Miniscript<PublicKey>,
+        miniscript: Miniscript<PublicKey, Legacy>,
     ) -> Result<DerivedDescriptor, Error> {
         let derived_desc = match self.internal {
             Descriptor::Bare(_) => Descriptor::Bare(miniscript),
             Descriptor::Sh(_) => Descriptor::Sh(miniscript),
+            _ => return Err(Error::CantDeriveWithMiniscript),
+        };
+
+        // if !self.same_structure(&derived_desc) {
+        //     Err(Error::CantDeriveWithMiniscript)
+        // } else {
+        Ok(derived_desc)
+        // }
+    }
+
+    pub fn derive_with_miniscript_segwit_v0(
+        &self,
+        miniscript: Miniscript<PublicKey, Segwitv0>,
+    ) -> Result<DerivedDescriptor, Error> {
+        let derived_desc = match self.internal {
             Descriptor::Wsh(_) => Descriptor::Wsh(miniscript),
             Descriptor::ShWsh(_) => Descriptor::ShWsh(miniscript),
             _ => return Err(Error::CantDeriveWithMiniscript),
@@ -219,13 +236,13 @@ impl ExtendedDescriptor {
         };
 
         if let Some(wit_script) = &psbt.inputs[input_index].witness_script {
-            self.derive_with_miniscript(Miniscript::parse(wit_script)?)
+            self.derive_with_miniscript_segwit_v0(Miniscript::parse(wit_script)?)
         } else if let Some(p2sh_script) = &psbt.inputs[input_index].redeem_script {
             if p2sh_script.is_v0_p2wpkh() {
                 // wrapped p2wpkh
                 get_pk_from_partial_sigs().map(|pk| Descriptor::ShWpkh(*pk))
             } else {
-                self.derive_with_miniscript(Miniscript::parse(p2sh_script)?)
+                self.derive_with_miniscript_legacy(Miniscript::parse(p2sh_script)?)
             }
         } else if let Some(utxo) = psbt.get_utxo_for(input_index) {
             if utxo.script_pubkey.is_p2pkh() {
@@ -236,7 +253,7 @@ impl ExtendedDescriptor {
                 get_pk_from_partial_sigs().map(|pk| Descriptor::Wpkh(*pk))
             } else {
                 // try as bare script
-                self.derive_with_miniscript(Miniscript::parse(&utxo.script_pubkey)?)
+                self.derive_with_miniscript_legacy(Miniscript::parse(&utxo.script_pubkey)?)
             }
         } else {
             Err(Error::MissingDetails)

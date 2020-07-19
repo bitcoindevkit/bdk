@@ -7,10 +7,9 @@ authors = ["Riccardo Casatta <riccardo@casatta.it>", "Alekos Filini <alekos.fili
 [dependencies]
 log = "^0.4"
 bitcoin = { version = "0.23", features = ["use-serde"] }
-miniscript = { version = "0.12" }
+miniscript = { version = "1.0" }
 serde = { version = "^1.0", features = ["derive"] }
 serde_json = { version = "^1.0" }
-base64 = "^0.11"
 
 # Optional dependencies
 sled = { version = "0.31.0", optional = true }
@@ -19,6 +18,7 @@ reqwest = { version = "0.10", optional = true, features = ["json"] }
 tokio = { version = "0.2", optional = true, features = ["rt-core"] }
 futures = { version = "0.3", optional = true }
 clap = { version = "2.33", optional = true }
+base64 = { version = "^0.11", optional = true }
 
 [features]
 minimal = []
@@ -27,7 +27,7 @@ default = ["key-value-db", "electrum"]
 electrum = ["electrum-client"]
 esplora = ["reqwest", "futures", "tokio"]
 key-value-db = ["sled"]
-cli-utils = ["clap"]
+cli-utils = ["clap", "base64"]
 
 [dev-dependencies]
 lazy_static = "1.4"
@@ -41,6 +41,7 @@ name = "repl"
 required-features = ["cli-utils"]
 [[example]]
 name = "psbt"
+required-features = ["cli-utils"]
 [[example]]
 name = "parse_descriptor"
 

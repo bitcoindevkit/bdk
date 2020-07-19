@@ -240,7 +240,7 @@ pub fn add_global_flags<'a, 'b>(app: App<'a, 'b>) -> App<'a, 'b> {
             .value_name("SERVER:PORT")
             .help("Sets the Electrum server to use")
             .takes_value(true)
-            .default_value("tn.not.fyi:55001"),
+            .default_value("ssl://electrum.blockstream.info:60002"),
     )
     .arg(
         Arg::with_name("proxy")
