@@ -5,6 +5,12 @@ extern crate serde;
 #[macro_use]
 extern crate serde_json;
 
+#[cfg(target_arch = "wasm32")]
+#[macro_use]
+extern crate async_trait;
+#[macro_use]
+extern crate magical_macros;
+
 #[cfg(test)]
 #[macro_use]
 extern crate lazy_static;

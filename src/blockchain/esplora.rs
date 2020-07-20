@@ -1,9 +1,6 @@
 use std::collections::HashSet;
-use std::sync::Mutex;
 
 use futures::stream::{self, StreamExt, TryStreamExt};
-
-use tokio::runtime::Runtime;
 
 #[allow(unused_imports)]
 use log::{debug, error, info, trace};
@@ -26,11 +23,8 @@ use crate::error::Error;
 pub struct UrlClient {
     url: String,
     // We use the async client instead of the blocking one because it automatically uses `fetch`
-    // when the target platform is wasm32. For some reason the blocking client doesn't, so we are
-    // stuck with this
+    // when the target platform is wasm32.
     client: Client,
-
-    runtime: Mutex<Runtime>,
 }
 
 #[derive(Debug)]
@@ -47,8 +41,6 @@ impl EsploraBlockchain {
         EsploraBlockchain(Some(UrlClient {
             url: base_url.to_string(),
             client: Client::new(),
-
-            runtime: Mutex::new(Runtime::new().unwrap()),
         }))
     }
 }
@@ -63,6 +55,7 @@ impl Blockchain for EsploraBlockchain {
     }
 }
 
+#[maybe_async]
 impl OnlineBlockchain for EsploraBlockchain {
     fn get_capabilities(&self) -> HashSet<Capability> {
         vec![Capability::FullHistory, Capability::GetAnyTx]
@@ -76,26 +69,35 @@ impl OnlineBlockchain for EsploraBlockchain {
         database: &mut D,
         progress_update: P,
     ) -> Result<(), Error> {
-        self.0
-            .as_mut()
-            .ok_or(Error::OfflineClient)?
-            .electrum_like_setup(stop_gap, database, progress_update)
-    }
-
-    fn get_tx(&mut self, txid: &Txid) -> Result<Option<Transaction>, Error> {
-        Ok(self.0.as_mut().ok_or(Error::OfflineClient)?._get_tx(txid)?)
-    }
-
-    fn broadcast(&mut self, tx: &Transaction) -> Result<(), Error> {
-        Ok(self
+        maybe_await!(self
             .0
             .as_mut()
             .ok_or(Error::OfflineClient)?
-            ._broadcast(tx)?)
+            .electrum_like_setup(stop_gap, database, progress_update))
+    }
+
+    fn get_tx(&mut self, txid: &Txid) -> Result<Option<Transaction>, Error> {
+        Ok(await_or_block!(self
+            .0
+            .as_mut()
+            .ok_or(Error::OfflineClient)?
+            ._get_tx(txid))?)
+    }
+
+    fn broadcast(&mut self, tx: &Transaction) -> Result<(), Error> {
+        Ok(await_or_block!(self
+            .0
+            .as_mut()
+            .ok_or(Error::OfflineClient)?
+            ._broadcast(tx))?)
     }
 
     fn get_height(&mut self) -> Result<usize, Error> {
-        Ok(self.0.as_mut().ok_or(Error::OfflineClient)?._get_height()?)
+        Ok(await_or_block!(self
+            .0
+            .as_mut()
+            .ok_or(Error::OfflineClient)?
+            ._get_height())?)
     }
 }
 
@@ -104,54 +106,39 @@ impl UrlClient {
         sha256::Hash::hash(script.as_bytes()).into_inner().to_hex()
     }
 
-    fn _get_tx(&self, txid: &Txid) -> Result<Option<Transaction>, EsploraError> {
-        let resp = self.runtime.lock().unwrap().block_on(
-            self.client
-                .get(&format!("{}/api/tx/{}/raw", self.url, txid))
-                .send(),
-        )?;
+    async fn _get_tx(&self, txid: &Txid) -> Result<Option<Transaction>, EsploraError> {
+        let resp = self
+            .client
+            .get(&format!("{}/api/tx/{}/raw", self.url, txid))
+            .send()
+            .await?;
 
         if let StatusCode::NOT_FOUND = resp.status() {
             return Ok(None);
         }
 
-        Ok(Some(deserialize(
-            &self
-                .runtime
-                .lock()
-                .unwrap()
-                .block_on(resp.error_for_status()?.bytes())?,
-        )?))
+        Ok(Some(deserialize(&resp.error_for_status()?.bytes().await?)?))
     }
 
-    fn _broadcast(&self, transaction: &Transaction) -> Result<(), EsploraError> {
-        self.runtime
-            .lock()
-            .unwrap()
-            .block_on(
-                self.client
-                    .post(&format!("{}/api/tx", self.url))
-                    .body(serialize(transaction).to_hex())
-                    .send(),
-            )?
+    async fn _broadcast(&self, transaction: &Transaction) -> Result<(), EsploraError> {
+        self.client
+            .post(&format!("{}/api/tx", self.url))
+            .body(serialize(transaction).to_hex())
+            .send()
+            .await?
             .error_for_status()?;
 
         Ok(())
     }
 
-    fn _get_height(&self) -> Result<usize, EsploraError> {
-        let req = self.runtime.lock().unwrap().block_on(
-            self.client
-                .get(&format!("{}/api/blocks/tip/height", self.url))
-                .send(),
-        )?;
+    async fn _get_height(&self) -> Result<usize, EsploraError> {
+        let req = self
+            .client
+            .get(&format!("{}/api/blocks/tip/height", self.url))
+            .send()
+            .await?;
 
-        Ok(self
-            .runtime
-            .lock()
-            .unwrap()
-            .block_on(req.error_for_status()?.text())?
-            .parse()?)
+        Ok(req.error_for_status()?.text().await?.parse()?)
     }
 
     async fn _script_get_history(
@@ -247,34 +234,38 @@ impl UrlClient {
     }
 }
 
+#[maybe_async]
 impl ElectrumLikeSync for UrlClient {
     fn els_batch_script_get_history<'s, I: IntoIterator<Item = &'s Script>>(
         &mut self,
         scripts: I,
     ) -> Result<Vec<Vec<ELSGetHistoryRes>>, Error> {
-        self.runtime.lock().unwrap().block_on(async {
+        let future = async {
             Ok(stream::iter(scripts)
                 .then(|script| self._script_get_history(&script))
                 .try_collect()
                 .await?)
-        })
+        };
+
+        await_or_block!(future)
     }
 
     fn els_batch_script_list_unspent<'s, I: IntoIterator<Item = &'s Script>>(
         &mut self,
         scripts: I,
     ) -> Result<Vec<Vec<ELSListUnspentRes>>, Error> {
-        self.runtime.lock().unwrap().block_on(async {
+        let future = async {
             Ok(stream::iter(scripts)
                 .then(|script| self._script_list_unspent(&script))
                 .try_collect()
                 .await?)
-        })
+        };
+
+        await_or_block!(future)
     }
 
     fn els_transaction_get(&mut self, txid: &Txid) -> Result<Transaction, Error> {
-        Ok(self
-            ._get_tx(txid)?
+        Ok(await_or_block!(self._get_tx(txid))?
             .ok_or_else(|| EsploraError::TransactionNotFound(*txid))?)
     }
 }

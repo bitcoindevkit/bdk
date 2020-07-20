@@ -1,10 +1,15 @@
 language: rust
 rust:
   - stable
-#  - 1.31.0
-#  - 1.22.0
 before_script:
+  # Install a recent version of clang that supports wasm32
+  - wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
+  - sudo apt-add-repository "deb http://apt.llvm.org/xenial/ llvm-toolchain-xenial-10 main"
+  - sudo apt-get update
+  - sudo apt-get install -y clang-10 libc6-dev-i386
+  # Install the required components and targets
   - rustup component add rustfmt
+  - rustup target add wasm32-unknown-unknown
 script:
   - cargo fmt -- --check --verbose
   - cargo test --verbose --all
@@ -13,6 +18,7 @@ script:
   - cargo build --verbose --no-default-features --features=minimal,esplora
   - cargo build --verbose --no-default-features --features=key-value-db
   - cargo build --verbose --no-default-features --features=electrum
+  - CC="clang-10" CFLAGS="-I/usr/include" cargo build --verbose --no-default-features --features=cli-utils,esplora --target=wasm32-unknown-unknown
 
 notifications:
   email: false

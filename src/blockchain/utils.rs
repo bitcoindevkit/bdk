@@ -27,6 +27,7 @@ pub struct ELSListUnspentRes {
 }
 
 /// Implements the synchronization logic for an Electrum-like client.
+#[maybe_async]
 pub trait ElectrumLikeSync {
     fn els_batch_script_get_history<'s, I: IntoIterator<Item = &'s Script>>(
         &mut self,
@@ -85,7 +86,7 @@ pub trait ElectrumLikeSync {
 
             let until = cmp::min(to_check_later.len(), batch_query_size);
             let chunk: Vec<Script> = to_check_later.drain(..until).collect();
-            let call_result = self.els_batch_script_get_history(chunk.iter())?;
+            let call_result = maybe_await!(self.els_batch_script_get_history(chunk.iter()))?;
 
             for (script, history) in chunk.into_iter().zip(call_result.into_iter()) {
                 trace!("received history for {:?}, size {}", script, history.len());
@@ -93,11 +94,15 @@ pub trait ElectrumLikeSync {
                 if !history.is_empty() {
                     last_found = index;
 
-                    let mut check_later_scripts = self
-                        .check_history(database, script, history, &mut change_max_deriv)?
-                        .into_iter()
-                        .filter(|x| already_checked.insert(x.clone()))
-                        .collect();
+                    let mut check_later_scripts = maybe_await!(self.check_history(
+                        database,
+                        script,
+                        history,
+                        &mut change_max_deriv
+                    ))?
+                    .into_iter()
+                    .filter(|x| already_checked.insert(x.clone()))
+                    .collect();
                     to_check_later.append(&mut check_later_scripts);
                 }
 
@@ -124,7 +129,7 @@ pub trait ElectrumLikeSync {
         let mut batch = database.begin_batch();
         for chunk in ChunksIterator::new(database.iter_utxos()?.into_iter(), batch_query_size) {
             let scripts: Vec<_> = chunk.iter().map(|u| &u.txout.script_pubkey).collect();
-            let call_result = self.els_batch_script_list_unspent(scripts)?;
+            let call_result = maybe_await!(self.els_batch_script_list_unspent(scripts))?;
 
             // check which utxos are actually still unspent
             for (utxo, list_unspent) in chunk.into_iter().zip(call_result.iter()) {
@@ -199,7 +204,7 @@ pub trait ElectrumLikeSync {
                 // went wrong
                 saved_tx.transaction.unwrap()
             }
-            None => self.els_transaction_get(&txid)?,
+            None => maybe_await!(self.els_transaction_get(&txid))?,
         };
 
         let mut incoming: u64 = 0;
@@ -284,13 +289,13 @@ pub trait ElectrumLikeSync {
                 x => u32::try_from(x).ok(),
             };
 
-            to_check_later.extend_from_slice(&self.check_tx_and_descendant(
+            to_check_later.extend_from_slice(&maybe_await!(self.check_tx_and_descendant(
                 database,
                 &tx.tx_hash,
                 height,
                 &script_pubkey,
                 change_max_deriv,
-            )?);
+            ))?);
         }
 
         Ok(to_check_later)

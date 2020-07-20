@@ -709,6 +709,7 @@ where
     B: OnlineBlockchain,
     D: BatchDatabase,
 {
+    #[maybe_async]
     pub fn new(
         descriptor: &str,
         change_descriptor: Option<&str>,
@@ -738,7 +739,7 @@ where
             None => None,
         };
 
-        let current_height = Some(client.get_height()? as u32);
+        let current_height = Some(maybe_await!(client.get_height())? as u32);
 
         Ok(Wallet {
             descriptor,
@@ -752,6 +753,7 @@ where
         })
     }
 
+    #[maybe_async]
     pub fn sync(
         &self,
         max_address: Option<u32>,
@@ -811,15 +813,16 @@ where
             self.database.borrow_mut().commit_batch(address_batch)?;
         }
 
-        self.client.borrow_mut().sync(
+        maybe_await!(self.client.borrow_mut().sync(
             None,
             self.database.borrow_mut().deref_mut(),
             noop_progress(),
-        )
+        ))
     }
 
+    #[maybe_async]
     pub fn broadcast(&self, tx: Transaction) -> Result<Txid, Error> {
-        self.client.borrow_mut().broadcast(&tx)?;
+        maybe_await!(self.client.borrow_mut().broadcast(&tx))?;
 
         Ok(tx.txid())
     }

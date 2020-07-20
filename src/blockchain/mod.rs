@@ -41,6 +41,7 @@ impl Blockchain for OfflineBlockchain {
     }
 }
 
+#[maybe_async]
 pub trait OnlineBlockchain: Blockchain {
     fn get_capabilities(&self) -> HashSet<Capability>;
 
@@ -56,7 +57,7 @@ pub trait OnlineBlockchain: Blockchain {
         database: &mut D,
         progress_update: P,
     ) -> Result<(), Error> {
-        self.setup(stop_gap, database, progress_update)
+        maybe_await!(self.setup(stop_gap, database, progress_update))
     }
 
     fn get_tx(&mut self, txid: &Txid) -> Result<Option<Transaction>, Error>;

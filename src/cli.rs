@@ -276,6 +276,7 @@ pub fn add_global_flags<'a, 'b>(app: App<'a, 'b>) -> App<'a, 'b> {
     .subcommand(SubCommand::with_name("repl").about("Opens an interactive shell"))
 }
 
+#[maybe_async]
 pub fn handle_matches<C, D>(
     wallet: &Wallet<C, D>,
     matches: ArgMatches<'_>,
@@ -287,7 +288,7 @@ where
     if let Some(_sub_matches) = matches.subcommand_matches("get_new_address") {
         Ok(Some(format!("{}", wallet.get_new_address()?)))
     } else if let Some(_sub_matches) = matches.subcommand_matches("sync") {
-        wallet.sync(None, None)?;
+        maybe_await!(wallet.sync(None, None))?;
         Ok(None)
     } else if let Some(_sub_matches) = matches.subcommand_matches("list_unspent") {
         let mut res = String::new();
@@ -382,7 +383,7 @@ where
             panic!("Missing `psbt` and `tx` option");
         };
 
-        let txid = wallet.broadcast(tx)?;
+        let txid = maybe_await!(wallet.broadcast(tx))?;
 
         Ok(Some(format!("TXID: {}", txid)))
     } else if let Some(sub_matches) = matches.subcommand_matches("extract_psbt") {
