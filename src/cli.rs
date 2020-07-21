@@ -58,6 +58,9 @@ pub fn make_cli_subcommands<'a, 'b>() -> App<'a, 'b> {
             SubCommand::with_name("list_unspent").about("Lists the available spendable UTXOs"),
         )
         .subcommand(
+            SubCommand::with_name("list_transactions").about("Lists all the incoming and outgoing transactions of the wallet"),
+        )
+        .subcommand(
             SubCommand::with_name("get_balance").about("Returns the current wallet balance"),
         )
         .subcommand(
@@ -294,6 +297,23 @@ where
         let mut res = String::new();
         for utxo in wallet.list_unspent()? {
             res += &format!("{} value {} SAT\n", utxo.outpoint, utxo.txout.value);
+        }
+
+        Ok(Some(res))
+    } else if let Some(_sub_matches) = matches.subcommand_matches("list_transactions") {
+        let mut res = String::new();
+        for crate::types::TransactionDetails {
+            txid,
+            sent,
+            received,
+            height,
+            ..
+        } in wallet.list_transactions(false)?
+        {
+            res += &format!(
+                "{} - sent {}, received {} - height: {:?}\n",
+                txid, sent, received, height
+            );
         }
 
         Ok(Some(res))
