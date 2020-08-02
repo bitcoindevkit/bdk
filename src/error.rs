@@ -51,6 +51,7 @@ pub enum Error {
     Esplora(crate::blockchain::esplora::EsploraError),
     #[cfg(feature = "rpc")]
     BitcoinRpc(bitcoincore_rpc::Error),
+    BitcoinRpcUnsupportedVersion,
     #[cfg(feature = "key-value-db")]
     Sled(sled::Error),
 }

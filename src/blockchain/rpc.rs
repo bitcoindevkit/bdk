@@ -223,9 +223,16 @@ impl OnlineBlockchain for RpcBlockchain {
         _database: &mut D,
         _progress_update: P,
     ) -> Result<(), Error> {
+        let config = self.0.as_mut().ok_or(Error::OfflineClient)?;
+
+        // Check we support their node (rust-bitcoincore-rpc supports 0.18.0 and up)
+        let version = config.client.version()?;
+        if version < 180000 {
+            return Err(Error::BitcoinRpcUnsupportedVersion);
+        }
+
         // Attempt to load watch-only wallet
         // FIXME: use listwallets once rust-bitcoincore-rpc supports it
-        let config = self.0.as_mut().ok_or(Error::OfflineClient)?;
         match config.client.load_wallet(&config.wallet_name) {
             Ok(_) => info!("Loaded watch-only wallet: \"{}\"", &config.wallet_name),
             Err(load_wallet_err) => {
