@@ -30,21 +30,21 @@ pub struct ELSListUnspentRes {
 #[maybe_async]
 pub trait ElectrumLikeSync {
     fn els_batch_script_get_history<'s, I: IntoIterator<Item = &'s Script>>(
-        &mut self,
+        &self,
         scripts: I,
     ) -> Result<Vec<Vec<ELSGetHistoryRes>>, Error>;
 
     fn els_batch_script_list_unspent<'s, I: IntoIterator<Item = &'s Script>>(
-        &mut self,
+        &self,
         scripts: I,
     ) -> Result<Vec<Vec<ELSListUnspentRes>>, Error>;
 
-    fn els_transaction_get(&mut self, txid: &Txid) -> Result<Transaction, Error>;
+    fn els_transaction_get(&self, txid: &Txid) -> Result<Transaction, Error>;
 
     // Provided methods down here...
 
     fn electrum_like_setup<D: BatchDatabase + DatabaseUtils, P: Progress>(
-        &mut self,
+        &self,
         stop_gap: Option<usize>,
         database: &mut D,
         _progress_update: P,
@@ -173,7 +173,7 @@ pub trait ElectrumLikeSync {
     }
 
     fn check_tx_and_descendant<D: DatabaseUtils + BatchDatabase>(
-        &mut self,
+        &self,
         database: &mut D,
         txid: &Txid,
         height: Option<u32>,
@@ -268,7 +268,7 @@ pub trait ElectrumLikeSync {
     }
 
     fn check_history<D: DatabaseUtils + BatchDatabase>(
-        &mut self,
+        &self,
         database: &mut D,
         script_pubkey: Script,
         txs: Vec<ELSGetHistoryRes>,

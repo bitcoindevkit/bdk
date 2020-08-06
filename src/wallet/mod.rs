@@ -37,7 +37,7 @@ pub struct Wallet<B: Blockchain, D: BatchDatabase> {
 
     current_height: Option<u32>,
 
-    client: RefCell<B>,
+    client: B,
     database: RefCell<D>,
 }
 
@@ -82,7 +82,7 @@ where
 
             current_height: None,
 
-            client: RefCell::new(B::offline()),
+            client: B::offline(),
             database: RefCell::new(database),
         })
     }
@@ -714,43 +714,15 @@ where
         descriptor: &str,
         change_descriptor: Option<&str>,
         network: Network,
-        mut database: D,
-        mut client: B,
+        database: D,
+        client: B,
     ) -> Result<Self, Error> {
-        database.check_descriptor_checksum(
-            ScriptType::External,
-            get_checksum(descriptor)?.as_bytes(),
-        )?;
-        let descriptor = ExtendedDescriptor::from_str(descriptor)?;
-        let change_descriptor = match change_descriptor {
-            Some(desc) => {
-                database.check_descriptor_checksum(
-                    ScriptType::Internal,
-                    get_checksum(desc)?.as_bytes(),
-                )?;
+        let mut wallet = Self::new_offline(descriptor, change_descriptor, network, database)?;
 
-                let parsed = ExtendedDescriptor::from_str(desc)?;
-                if !parsed.same_structure(descriptor.as_ref()) {
-                    return Err(Error::DifferentDescriptorStructure);
-                }
+        wallet.current_height = Some(maybe_await!(client.get_height())? as u32);
+        wallet.client = client;
 
-                Some(parsed)
-            }
-            None => None,
-        };
-
-        let current_height = Some(maybe_await!(client.get_height())? as u32);
-
-        Ok(Wallet {
-            descriptor,
-            change_descriptor,
-            network,
-
-            current_height,
-
-            client: RefCell::new(client),
-            database: RefCell::new(database),
-        })
+        Ok(wallet)
     }
 
     #[maybe_async]
@@ -813,7 +785,7 @@ where
             self.database.borrow_mut().commit_batch(address_batch)?;
         }
 
-        maybe_await!(self.client.borrow_mut().sync(
+        maybe_await!(self.client.sync(
             None,
             self.database.borrow_mut().deref_mut(),
             noop_progress(),
@@ -822,7 +794,7 @@ where
 
     #[maybe_async]
     pub fn broadcast(&self, tx: Transaction) -> Result<Txid, Error> {
-        maybe_await!(self.client.borrow_mut().broadcast(&tx))?;
+        maybe_await!(self.client.broadcast(&tx))?;
 
         Ok(tx.txid())
     }

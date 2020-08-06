@@ -64,38 +64,38 @@ impl OnlineBlockchain for EsploraBlockchain {
     }
 
     fn setup<D: BatchDatabase + DatabaseUtils, P: Progress>(
-        &mut self,
+        &self,
         stop_gap: Option<usize>,
         database: &mut D,
         progress_update: P,
     ) -> Result<(), Error> {
         maybe_await!(self
             .0
-            .as_mut()
+            .as_ref()
             .ok_or(Error::OfflineClient)?
             .electrum_like_setup(stop_gap, database, progress_update))
     }
 
-    fn get_tx(&mut self, txid: &Txid) -> Result<Option<Transaction>, Error> {
+    fn get_tx(&self, txid: &Txid) -> Result<Option<Transaction>, Error> {
         Ok(await_or_block!(self
             .0
-            .as_mut()
+            .as_ref()
             .ok_or(Error::OfflineClient)?
             ._get_tx(txid))?)
     }
 
-    fn broadcast(&mut self, tx: &Transaction) -> Result<(), Error> {
+    fn broadcast(&self, tx: &Transaction) -> Result<(), Error> {
         Ok(await_or_block!(self
             .0
-            .as_mut()
+            .as_ref()
             .ok_or(Error::OfflineClient)?
             ._broadcast(tx))?)
     }
 
-    fn get_height(&mut self) -> Result<usize, Error> {
+    fn get_height(&self) -> Result<usize, Error> {
         Ok(await_or_block!(self
             .0
-            .as_mut()
+            .as_ref()
             .ok_or(Error::OfflineClient)?
             ._get_height())?)
     }
@@ -237,7 +237,7 @@ impl UrlClient {
 #[maybe_async]
 impl ElectrumLikeSync for UrlClient {
     fn els_batch_script_get_history<'s, I: IntoIterator<Item = &'s Script>>(
-        &mut self,
+        &self,
         scripts: I,
     ) -> Result<Vec<Vec<ELSGetHistoryRes>>, Error> {
         let future = async {
@@ -251,7 +251,7 @@ impl ElectrumLikeSync for UrlClient {
     }
 
     fn els_batch_script_list_unspent<'s, I: IntoIterator<Item = &'s Script>>(
-        &mut self,
+        &self,
         scripts: I,
     ) -> Result<Vec<Vec<ELSListUnspentRes>>, Error> {
         let future = async {
@@ -264,7 +264,7 @@ impl ElectrumLikeSync for UrlClient {
         await_or_block!(future)
     }
 
-    fn els_transaction_get(&mut self, txid: &Txid) -> Result<Transaction, Error> {
+    fn els_transaction_get(&self, txid: &Txid) -> Result<Transaction, Error> {
         Ok(await_or_block!(self._get_tx(txid))?
             .ok_or_else(|| EsploraError::TransactionNotFound(*txid))?)
     }

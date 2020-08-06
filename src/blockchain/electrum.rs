@@ -38,41 +38,41 @@ impl OnlineBlockchain for ElectrumBlockchain {
     }
 
     fn setup<D: BatchDatabase + DatabaseUtils, P: Progress>(
-        &mut self,
+        &self,
         stop_gap: Option<usize>,
         database: &mut D,
         progress_update: P,
     ) -> Result<(), Error> {
         self.0
-            .as_mut()
+            .as_ref()
             .ok_or(Error::OfflineClient)?
             .electrum_like_setup(stop_gap, database, progress_update)
     }
 
-    fn get_tx(&mut self, txid: &Txid) -> Result<Option<Transaction>, Error> {
+    fn get_tx(&self, txid: &Txid) -> Result<Option<Transaction>, Error> {
         Ok(self
             .0
-            .as_mut()
+            .as_ref()
             .ok_or(Error::OfflineClient)?
             .transaction_get(txid)
             .map(Option::Some)?)
     }
 
-    fn broadcast(&mut self, tx: &Transaction) -> Result<(), Error> {
+    fn broadcast(&self, tx: &Transaction) -> Result<(), Error> {
         Ok(self
             .0
-            .as_mut()
+            .as_ref()
             .ok_or(Error::OfflineClient)?
             .transaction_broadcast(tx)
             .map(|_| ())?)
     }
 
-    fn get_height(&mut self) -> Result<usize, Error> {
+    fn get_height(&self) -> Result<usize, Error> {
         // TODO: unsubscribe when added to the client, or is there a better call to use here?
 
         Ok(self
             .0
-            .as_mut()
+            .as_ref()
             .ok_or(Error::OfflineClient)?
             .block_headers_subscribe()
             .map(|data| data.height)?)
@@ -81,7 +81,7 @@ impl OnlineBlockchain for ElectrumBlockchain {
 
 impl ElectrumLikeSync for Client {
     fn els_batch_script_get_history<'s, I: IntoIterator<Item = &'s Script>>(
-        &mut self,
+        &self,
         scripts: I,
     ) -> Result<Vec<Vec<ELSGetHistoryRes>>, Error> {
         self.batch_script_get_history(scripts)
@@ -105,7 +105,7 @@ impl ElectrumLikeSync for Client {
     }
 
     fn els_batch_script_list_unspent<'s, I: IntoIterator<Item = &'s Script>>(
-        &mut self,
+        &self,
         scripts: I,
     ) -> Result<Vec<Vec<ELSListUnspentRes>>, Error> {
         self.batch_script_list_unspent(scripts)
@@ -132,7 +132,7 @@ impl ElectrumLikeSync for Client {
             .map_err(Error::Electrum)
     }
 
-    fn els_transaction_get(&mut self, txid: &Txid) -> Result<Transaction, Error> {
+    fn els_transaction_get(&self, txid: &Txid) -> Result<Transaction, Error> {
         self.transaction_get(txid).map_err(Error::Electrum)
     }
 }
