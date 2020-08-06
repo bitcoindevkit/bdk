@@ -26,6 +26,7 @@ tokio = { version = "0.2", features = ["rt-core"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 async-trait = "0.1"
+js-sys = "0.3"
 
 [features]
 minimal = []

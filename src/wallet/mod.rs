@@ -2,7 +2,6 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, HashSet};
 use std::ops::DerefMut;
 use std::str::FromStr;
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use bitcoin::blockdata::opcodes;
 use bitcoin::blockdata::script::Builder;
@@ -17,9 +16,11 @@ use miniscript::BitcoinSig;
 #[allow(unused_imports)]
 use log::{debug, error, info, trace};
 
+pub mod time;
 pub mod utils;
 
 use self::utils::IsDust;
+
 use crate::blockchain::{noop_progress, Blockchain, OfflineBlockchain, OnlineBlockchain};
 use crate::database::{BatchDatabase, BatchOperations, DatabaseUtils};
 use crate::descriptor::{get_checksum, DescriptorMeta, ExtendedDescriptor, ExtractPolicy, Policy};
@@ -295,7 +296,7 @@ where
         let transaction_details = TransactionDetails {
             transaction: None,
             txid: txid,
-            timestamp: Self::get_timestamp(),
+            timestamp: time::get_timestamp(),
             received,
             sent: outgoing,
             height: None,
@@ -526,19 +527,6 @@ where
 
     // Internals
 
-    #[cfg(not(target_arch = "wasm32"))]
-    fn get_timestamp() -> u64 {
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs()
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    fn get_timestamp() -> u64 {
-        0
-    }
-
     fn get_descriptor_for(&self, script_type: ScriptType) -> &ExtendedDescriptor {
         let desc = match script_type {
             ScriptType::External => &self.descriptor,
@@ -752,8 +740,7 @@ where
         // cache a few of our addresses
         if last_addr.is_none() {
             let mut address_batch = self.database.borrow().begin_batch();
-            #[cfg(not(target_arch = "wasm32"))]
-            let start = Instant::now();
+            let start = time::Instant::new();
 
             for i in 0..=max_address {
                 let derived = self.descriptor.derive(i).unwrap();
@@ -776,7 +763,6 @@ where
                 }
             }
 
-            #[cfg(not(target_arch = "wasm32"))]
             info!(
                 "derivation of {} addresses, took {} ms",
                 max_address,
