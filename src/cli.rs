@@ -291,7 +291,7 @@ where
     if let Some(_sub_matches) = matches.subcommand_matches("get_new_address") {
         Ok(Some(format!("{}", wallet.get_new_address()?)))
     } else if let Some(_sub_matches) = matches.subcommand_matches("sync") {
-        maybe_await!(wallet.sync(None, None))?;
+        maybe_await!(wallet.sync(None))?;
         Ok(None)
     } else if let Some(_sub_matches) = matches.subcommand_matches("list_unspent") {
         let mut res = String::new();
