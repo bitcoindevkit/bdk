@@ -326,21 +326,19 @@ where
             .map(|s| parse_addressee(s))
             .collect::<Result<Vec<_>, _>>()
             .map_err(|s| Error::Generic(s))?;
-        let mut tx_builder = TxBuilder::from_addressees(addressees);
+        let mut tx_builder =
+            TxBuilder::from_addressees(addressees).send_all(sub_matches.is_present("send_all"));
 
-        if sub_matches.is_present("send_all") {
-            tx_builder.send_all();
-        }
         if let Some(fee_rate) = sub_matches.value_of("fee_rate") {
             let fee_rate = f32::from_str(fee_rate).map_err(|s| Error::Generic(s.to_string()))?;
-            tx_builder.fee_rate(fee_rate);
+            tx_builder = tx_builder.fee_rate(fee_rate);
         }
         if let Some(utxos) = sub_matches.values_of("utxos") {
             let utxos = utxos
                 .map(|i| parse_outpoint(i))
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|s| Error::Generic(s.to_string()))?;
-            tx_builder.utxos(utxos);
+            tx_builder = tx_builder.utxos(utxos);
         }
 
         if let Some(unspendable) = sub_matches.values_of("unspendable") {
@@ -348,15 +346,15 @@ where
                 .map(|i| parse_outpoint(i))
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|s| Error::Generic(s.to_string()))?;
-            tx_builder.unspendable(unspendable);
+            tx_builder = tx_builder.unspendable(unspendable);
         }
         if let Some(policy) = sub_matches.value_of("policy") {
             let policy = serde_json::from_str::<BTreeMap<String, Vec<usize>>>(&policy)
                 .map_err(|s| Error::Generic(s.to_string()))?;
-            tx_builder.policy_path(policy);
+            tx_builder = tx_builder.policy_path(policy);
         }
 
-        let result = wallet.create_tx(&tx_builder)?;
+        let result = wallet.create_tx(tx_builder)?;
         Ok(Some(format!(
             "{:#?}\nPSBT: {}",
             result.1,
