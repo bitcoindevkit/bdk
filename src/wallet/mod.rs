@@ -17,7 +17,10 @@ use miniscript::BitcoinSig;
 use log::{debug, error, info, trace};
 
 pub mod time;
+pub mod tx_builder;
 pub mod utils;
+
+pub use tx_builder::TxBuilder;
 
 use self::utils::IsDust;
 
@@ -121,20 +124,13 @@ where
     }
 
     // TODO: add a flag to ignore change in coin selection
-    pub fn create_tx(
-        &self,
-        addressees: Vec<(Address, u64)>,
-        send_all: bool,
-        fee_perkb: f32,
-        policy_path: Option<BTreeMap<String, Vec<usize>>>,
-        utxos: Option<Vec<OutPoint>>,
-        unspendable: Option<Vec<OutPoint>>,
-    ) -> Result<(PSBT, TransactionDetails), Error> {
+    pub fn create_tx(&self, builder: &TxBuilder) -> Result<(PSBT, TransactionDetails), Error> {
         let policy = self.descriptor.extract_policy()?.unwrap();
-        if policy.requires_path() && policy_path.is_none() {
+        if policy.requires_path() && builder.policy_path.is_none() {
             return Err(Error::SpendingPolicyRequired);
         }
-        let requirements = policy.get_requirements(&policy_path.unwrap_or(BTreeMap::new()))?;
+        let requirements =
+            policy.get_requirements(builder.policy_path.as_ref().unwrap_or(&BTreeMap::new()))?;
         debug!("requirements: {:?}", requirements);
 
         let mut tx = Transaction {
@@ -144,8 +140,8 @@ where
             output: vec![],
         };
 
-        let fee_rate = fee_perkb * 100_000.0;
-        if send_all && addressees.len() != 1 {
+        let fee_rate = builder.fee_perkb.unwrap_or(1e3) * 100_000.0;
+        if builder.send_all && builder.addressees.len() != 1 {
             return Err(Error::SendAllMultipleOutputs);
         }
 
@@ -157,15 +153,16 @@ where
         let calc_fee_bytes = |wu| (wu as f32) * fee_rate / 4.0;
         fee_val += calc_fee_bytes(tx.get_weight());
 
-        for (index, (address, satoshi)) in addressees.iter().enumerate() {
-            let value = match send_all {
+        for (index, (address, satoshi)) in builder.addressees.iter().enumerate() {
+            let value = match builder.send_all {
                 true => 0,
                 false if satoshi.is_dust() => return Err(Error::OutputBelowDustLimit(index)),
                 false => *satoshi,
             };
 
-            // TODO: check address network
-            if self.is_mine(&address.script_pubkey())? {
+            if address.network != self.network {
+                return Err(Error::InvalidAddressNetork(address.clone()));
+            } else if self.is_mine(&address.script_pubkey())? {
                 received += value;
             }
 
@@ -184,7 +181,7 @@ where
         let input_witness_weight = self.descriptor.max_satisfaction_weight();
 
         let (available_utxos, use_all_utxos) =
-            self.get_available_utxos(&utxos, &unspendable, send_all)?;
+            self.get_available_utxos(&builder.utxos, &builder.unspendable, builder.send_all)?;
         let (mut inputs, paths, selected_amount, mut fee_val) = self.coin_select(
             available_utxos,
             use_all_utxos,
@@ -204,7 +201,7 @@ where
         tx.input.append(&mut inputs);
 
         // prepare the change output
-        let change_output = match send_all {
+        let change_output = match builder.send_all {
             true => None,
             false => {
                 let change_script = self.get_change_address()?;
@@ -220,13 +217,13 @@ where
         };
 
         let change_val = selected_amount - outgoing - (fee_val.ceil() as u64);
-        if !send_all && !change_val.is_dust() {
+        if !builder.send_all && !change_val.is_dust() {
             let mut change_output = change_output.unwrap();
             change_output.value = change_val;
             received += change_val;
 
             tx.output.push(change_output);
-        } else if send_all && !change_val.is_dust() {
+        } else if builder.send_all && !change_val.is_dust() {
             // set the outgoing value to whatever we've put in
             outgoing = selected_amount;
             // there's only one output, send everything to it
@@ -236,7 +233,7 @@ where
             if self.is_mine(&tx.output[0].script_pubkey)? {
                 received = change_val;
             }
-        } else if send_all {
+        } else if builder.send_all {
             // send_all but the only output would be below dust limit
             return Err(Error::InsufficientFunds); // TODO: or OutputBelowDustLimit?
         }
@@ -295,7 +292,7 @@ where
 
         let transaction_details = TransactionDetails {
             transaction: None,
-            txid: txid,
+            txid,
             timestamp: time::get_timestamp(),
             received,
             sent: outgoing,

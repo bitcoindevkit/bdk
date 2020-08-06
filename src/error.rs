@@ -1,4 +1,4 @@
-use bitcoin::{OutPoint, Script, Txid};
+use bitcoin::{Address, OutPoint, Script, Txid};
 
 #[derive(Debug)]
 pub enum Error {
@@ -10,6 +10,7 @@ pub enum Error {
     SendAllMultipleOutputs,
     OutputBelowDustLimit(usize),
     InsufficientFunds,
+    InvalidAddressNetork(Address),
     UnknownUTXO,
     DifferentTransactions,
 
