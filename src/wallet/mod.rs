@@ -252,12 +252,8 @@ where
             return Err(Error::InsufficientFunds); // TODO: or OutputBelowDustLimit?
         }
 
-        if builder.shuffle_outputs.unwrap_or(true) {
-            use rand::seq::SliceRandom;
-
-            let mut rng = rand::thread_rng();
-            tx.output.shuffle(&mut rng);
-        }
+        // sort input/outputs according to the chosen algorithm
+        builder.ordering.modify_tx(&mut tx);
 
         let txid = tx.txid();
         let mut psbt = PSBT::from_unsigned_tx(tx)?;
