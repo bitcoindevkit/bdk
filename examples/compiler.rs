@@ -63,12 +63,11 @@ fn main() {
     info!("Compiling policy: {}", policy_str);
 
     let policy = Concrete::<String>::from_str(&policy_str).unwrap();
-    let compiled = policy.compile().unwrap();
 
     let descriptor = match matches.value_of("TYPE").unwrap() {
-        "sh" => Descriptor::Sh(compiled),
-        "wsh" => Descriptor::Wsh(compiled),
-        "sh-wsh" => Descriptor::ShWsh(compiled),
+        "sh" => Descriptor::Sh(policy.compile().unwrap()),
+        "wsh" => Descriptor::Wsh(policy.compile().unwrap()),
+        "sh-wsh" => Descriptor::ShWsh(policy.compile().unwrap()),
         _ => panic!("Invalid type"),
     };
 
