@@ -17,6 +17,7 @@ use miniscript::BitcoinSig;
 use log::{debug, error, info, trace};
 
 pub mod coin_selection;
+pub mod export;
 pub mod time;
 pub mod tx_builder;
 pub mod utils;
