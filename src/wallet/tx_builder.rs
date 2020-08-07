@@ -5,6 +5,7 @@ use bitcoin::{Address, OutPoint, SigHashType, Transaction};
 
 use super::coin_selection::{CoinSelectionAlgorithm, DefaultCoinSelectionAlgorithm};
 use super::utils::FeeRate;
+use crate::types::UTXO;
 
 // TODO: add a flag to ignore change outputs (make them unspendable)
 #[derive(Debug, Default)]
@@ -20,6 +21,7 @@ pub struct TxBuilder<Cs: CoinSelectionAlgorithm> {
     pub(crate) locktime: Option<u32>,
     pub(crate) rbf: Option<u32>,
     pub(crate) version: Version,
+    pub(crate) change_policy: ChangeSpendPolicy,
     pub(crate) coin_selection: Cs,
 }
 
@@ -59,11 +61,13 @@ impl<Cs: CoinSelectionAlgorithm> TxBuilder<Cs> {
         self
     }
 
+    /// These have priority over the "unspendable" utxos
     pub fn utxos(mut self, utxos: Vec<OutPoint>) -> Self {
         self.utxos = Some(utxos);
         self
     }
 
+    /// This has priority over the "unspendable" utxos
     pub fn add_utxo(mut self, utxo: OutPoint) -> Self {
         self.utxos.get_or_insert(vec![]).push(utxo);
         self
@@ -108,6 +112,16 @@ impl<Cs: CoinSelectionAlgorithm> TxBuilder<Cs> {
         self
     }
 
+    pub fn do_not_spend_change(mut self) -> Self {
+        self.change_policy = ChangeSpendPolicy::ChangeForbidden;
+        self
+    }
+
+    pub fn only_spend_change(mut self) -> Self {
+        self.change_policy = ChangeSpendPolicy::OnlyChange;
+        self
+    }
+
     pub fn coin_selection<P: CoinSelectionAlgorithm>(self, coin_selection: P) -> TxBuilder<P> {
         TxBuilder {
             addressees: self.addressees,
@@ -121,6 +135,7 @@ impl<Cs: CoinSelectionAlgorithm> TxBuilder<Cs> {
             locktime: self.locktime,
             rbf: self.rbf,
             version: self.version,
+            change_policy: self.change_policy,
             coin_selection,
         }
     }
@@ -173,6 +188,29 @@ pub(crate) struct Version(pub(crate) u32);
 impl Default for Version {
     fn default() -> Self {
         Version(1)
+    }
+}
+
+#[derive(Debug)]
+pub enum ChangeSpendPolicy {
+    ChangeAllowed,
+    OnlyChange,
+    ChangeForbidden,
+}
+
+impl Default for ChangeSpendPolicy {
+    fn default() -> Self {
+        ChangeSpendPolicy::ChangeAllowed
+    }
+}
+
+impl ChangeSpendPolicy {
+    pub(crate) fn filter_utxos<I: Iterator<Item = UTXO>>(&self, iter: I) -> Vec<UTXO> {
+        match self {
+            ChangeSpendPolicy::ChangeAllowed => iter.collect(),
+            ChangeSpendPolicy::OnlyChange => iter.filter(|utxo| utxo.is_internal).collect(),
+            ChangeSpendPolicy::ChangeForbidden => iter.filter(|utxo| !utxo.is_internal).collect(),
+        }
     }
 }
 

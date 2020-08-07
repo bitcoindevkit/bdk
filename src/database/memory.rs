@@ -113,7 +113,8 @@ impl BatchOperations for MemoryDatabase {
 
     fn set_utxo(&mut self, utxo: &UTXO) -> Result<(), Error> {
         let key = MapKey::UTXO(Some(&utxo.outpoint)).as_map_key();
-        self.map.insert(key, Box::new(utxo.txout.clone()));
+        self.map
+            .insert(key, Box::new((utxo.txout.clone(), utxo.is_internal)));
 
         Ok(())
     }
@@ -184,10 +185,11 @@ impl BatchOperations for MemoryDatabase {
         match res {
             None => Ok(None),
             Some(b) => {
-                let txout = b.downcast_ref().cloned().unwrap();
+                let (txout, is_internal) = b.downcast_ref().cloned().unwrap();
                 Ok(Some(UTXO {
                     outpoint: outpoint.clone(),
                     txout,
+                    is_internal,
                 }))
             }
         }
@@ -274,8 +276,12 @@ impl Database for MemoryDatabase {
             .range::<Vec<u8>, _>((Included(&key), Excluded(&after(&key))))
             .map(|(k, v)| {
                 let outpoint = deserialize(&k[1..]).unwrap();
-                let txout = v.downcast_ref().cloned().unwrap();
-                Ok(UTXO { outpoint, txout })
+                let (txout, is_internal) = v.downcast_ref().cloned().unwrap();
+                Ok(UTXO {
+                    outpoint,
+                    txout,
+                    is_internal,
+                })
             })
             .collect()
     }
@@ -333,10 +339,11 @@ impl Database for MemoryDatabase {
     fn get_utxo(&self, outpoint: &OutPoint) -> Result<Option<UTXO>, Error> {
         let key = MapKey::UTXO(Some(outpoint)).as_map_key();
         Ok(self.map.get(&key).map(|b| {
-            let txout = b.downcast_ref().cloned().unwrap();
+            let (txout, is_internal) = b.downcast_ref().cloned().unwrap();
             UTXO {
                 outpoint: outpoint.clone(),
                 txout,
+                is_internal,
             }
         }))
     }
@@ -399,14 +406,7 @@ impl BatchDatabase for MemoryDatabase {
 
 #[cfg(test)]
 mod test {
-    use std::str::FromStr;
-
-    use bitcoin::consensus::encode::deserialize;
-    use bitcoin::hashes::hex::*;
-    use bitcoin::*;
-
-    use super::*;
-    use crate::database::*;
+    use super::MemoryDatabase;
 
     fn get_tree() -> MemoryDatabase {
         MemoryDatabase::new()
@@ -414,209 +414,41 @@ mod test {
 
     #[test]
     fn test_script_pubkey() {
-        let mut tree = get_tree();
-
-        let script = Script::from(
-            Vec::<u8>::from_hex("76a91402306a7c23f3e8010de41e9e591348bb83f11daa88ac").unwrap(),
-        );
-        let path = 42;
-        let script_type = ScriptType::External;
-
-        tree.set_script_pubkey(&script, script_type, path).unwrap();
-
-        assert_eq!(
-            tree.get_script_pubkey_from_path(script_type, path).unwrap(),
-            Some(script.clone())
-        );
-        assert_eq!(
-            tree.get_path_from_script_pubkey(&script).unwrap(),
-            Some((script_type, path.clone()))
-        );
+        crate::database::test::test_script_pubkey(get_tree());
     }
 
     #[test]
     fn test_batch_script_pubkey() {
-        let mut tree = get_tree();
-        let mut batch = tree.begin_batch();
-
-        let script = Script::from(
-            Vec::<u8>::from_hex("76a91402306a7c23f3e8010de41e9e591348bb83f11daa88ac").unwrap(),
-        );
-        let path = 42;
-        let script_type = ScriptType::External;
-
-        batch.set_script_pubkey(&script, script_type, path).unwrap();
-
-        assert_eq!(
-            tree.get_script_pubkey_from_path(script_type, path).unwrap(),
-            None
-        );
-        assert_eq!(tree.get_path_from_script_pubkey(&script).unwrap(), None);
-
-        tree.commit_batch(batch).unwrap();
-
-        assert_eq!(
-            tree.get_script_pubkey_from_path(script_type, path).unwrap(),
-            Some(script.clone())
-        );
-        assert_eq!(
-            tree.get_path_from_script_pubkey(&script).unwrap(),
-            Some((script_type, path))
-        );
+        crate::database::test::test_batch_script_pubkey(get_tree());
     }
 
     #[test]
     fn test_iter_script_pubkey() {
-        let mut tree = get_tree();
-
-        let script = Script::from(
-            Vec::<u8>::from_hex("76a91402306a7c23f3e8010de41e9e591348bb83f11daa88ac").unwrap(),
-        );
-        let path = 42;
-        let script_type = ScriptType::External;
-
-        tree.set_script_pubkey(&script, script_type, path).unwrap();
-
-        assert_eq!(tree.iter_script_pubkeys(None).unwrap().len(), 1);
+        crate::database::test::test_iter_script_pubkey(get_tree());
     }
 
     #[test]
     fn test_del_script_pubkey() {
-        let mut tree = get_tree();
-
-        let script = Script::from(
-            Vec::<u8>::from_hex("76a91402306a7c23f3e8010de41e9e591348bb83f11daa88ac").unwrap(),
-        );
-        let path = 42;
-        let script_type = ScriptType::External;
-
-        tree.set_script_pubkey(&script, script_type, path).unwrap();
-        assert_eq!(tree.iter_script_pubkeys(None).unwrap().len(), 1);
-
-        tree.del_script_pubkey_from_path(script_type, path).unwrap();
-        assert_eq!(tree.iter_script_pubkeys(None).unwrap().len(), 0);
-    }
-
-    #[test]
-    fn test_del_script_pubkey_batch() {
-        let mut tree = get_tree();
-
-        let script = Script::from(
-            Vec::<u8>::from_hex("76a91402306a7c23f3e8010de41e9e591348bb83f11daa88ac").unwrap(),
-        );
-        let path = 42;
-        let script_type = ScriptType::External;
-
-        tree.set_script_pubkey(&script, script_type, path).unwrap();
-        assert_eq!(tree.iter_script_pubkeys(None).unwrap().len(), 1);
-
-        let mut batch = tree.begin_batch();
-        batch
-            .del_script_pubkey_from_path(script_type, path)
-            .unwrap();
-
-        assert_eq!(tree.iter_script_pubkeys(None).unwrap().len(), 1);
-
-        tree.commit_batch(batch).unwrap();
-        assert_eq!(tree.iter_script_pubkeys(None).unwrap().len(), 0);
+        crate::database::test::test_del_script_pubkey(get_tree());
     }
 
     #[test]
     fn test_utxo() {
-        let mut tree = get_tree();
-
-        let outpoint = OutPoint::from_str(
-            "5df6e0e2761359d30a8275058e299fcc0381534545f55cf43e41983f5d4c9456:0",
-        )
-        .unwrap();
-        let script = Script::from(
-            Vec::<u8>::from_hex("76a91402306a7c23f3e8010de41e9e591348bb83f11daa88ac").unwrap(),
-        );
-        let txout = TxOut {
-            value: 133742,
-            script_pubkey: script,
-        };
-        let utxo = UTXO { txout, outpoint };
-
-        tree.set_utxo(&utxo).unwrap();
-
-        assert_eq!(tree.get_utxo(&outpoint).unwrap(), Some(utxo));
+        crate::database::test::test_utxo(get_tree());
     }
 
     #[test]
     fn test_raw_tx() {
-        let mut tree = get_tree();
-
-        let hex_tx = Vec::<u8>::from_hex("0100000001a15d57094aa7a21a28cb20b59aab8fc7d1149a3bdbcddba9c622e4f5f6a99ece010000006c493046022100f93bb0e7d8db7bd46e40132d1f8242026e045f03a0efe71bbb8e3f475e970d790221009337cd7f1f929f00cc6ff01f03729b069a7c21b59b1736ddfee5db5946c5da8c0121033b9b137ee87d5a812d6f506efdd37f0affa7ffc310711c06c7f3e097c9447c52ffffffff0100e1f505000000001976a9140389035a9225b3839e2bbf32d826a1e222031fd888ac00000000").unwrap();
-        let tx: Transaction = deserialize(&hex_tx).unwrap();
-
-        tree.set_raw_tx(&tx).unwrap();
-
-        let txid = tx.txid();
-
-        assert_eq!(tree.get_raw_tx(&txid).unwrap(), Some(tx));
+        crate::database::test::test_raw_tx(get_tree());
     }
 
     #[test]
     fn test_tx() {
-        let mut tree = get_tree();
-
-        let hex_tx = Vec::<u8>::from_hex("0100000001a15d57094aa7a21a28cb20b59aab8fc7d1149a3bdbcddba9c622e4f5f6a99ece010000006c493046022100f93bb0e7d8db7bd46e40132d1f8242026e045f03a0efe71bbb8e3f475e970d790221009337cd7f1f929f00cc6ff01f03729b069a7c21b59b1736ddfee5db5946c5da8c0121033b9b137ee87d5a812d6f506efdd37f0affa7ffc310711c06c7f3e097c9447c52ffffffff0100e1f505000000001976a9140389035a9225b3839e2bbf32d826a1e222031fd888ac00000000").unwrap();
-        let tx: Transaction = deserialize(&hex_tx).unwrap();
-        let txid = tx.txid();
-        let mut tx_details = TransactionDetails {
-            transaction: Some(tx),
-            txid,
-            timestamp: 123456,
-            received: 1337,
-            sent: 420420,
-            height: Some(1000),
-        };
-
-        tree.set_tx(&tx_details).unwrap();
-
-        // get with raw tx too
-        assert_eq!(
-            tree.get_tx(&tx_details.txid, true).unwrap(),
-            Some(tx_details.clone())
-        );
-        // get only raw_tx
-        assert_eq!(
-            tree.get_raw_tx(&tx_details.txid).unwrap(),
-            tx_details.transaction
-        );
-
-        // now get without raw_tx
-        tx_details.transaction = None;
-        assert_eq!(
-            tree.get_tx(&tx_details.txid, false).unwrap(),
-            Some(tx_details)
-        );
+        crate::database::test::test_tx(get_tree());
     }
 
     #[test]
     fn test_last_index() {
-        let mut tree = get_tree();
-
-        tree.set_last_index(ScriptType::External, 1337).unwrap();
-
-        assert_eq!(
-            tree.get_last_index(ScriptType::External).unwrap(),
-            Some(1337)
-        );
-        assert_eq!(tree.get_last_index(ScriptType::Internal).unwrap(), None);
-
-        let res = tree.increment_last_index(ScriptType::External).unwrap();
-        assert_eq!(res, 1338);
-        let res = tree.increment_last_index(ScriptType::Internal).unwrap();
-        assert_eq!(res, 0);
-
-        assert_eq!(
-            tree.get_last_index(ScriptType::External).unwrap(),
-            Some(1338)
-        );
-        assert_eq!(tree.get_last_index(ScriptType::Internal).unwrap(), Some(0));
+        crate::database::test::test_last_index(get_tree());
     }
-
-    // TODO: more tests...
 }

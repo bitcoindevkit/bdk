@@ -217,8 +217,12 @@ where
                 .max_satisfaction_weight(),
         );
 
-        let (available_utxos, use_all_utxos) =
-            self.get_available_utxos(&builder.utxos, &builder.unspendable, builder.send_all)?;
+        let (available_utxos, use_all_utxos) = self.get_available_utxos(
+            builder.change_policy,
+            &builder.utxos,
+            &builder.unspendable,
+            builder.send_all,
+        )?;
         let coin_selection::CoinSelectionResult {
             txin,
             total_amount,
@@ -646,11 +650,11 @@ where
 
     fn get_available_utxos(
         &self,
+        change_policy: tx_builder::ChangeSpendPolicy,
         utxo: &Option<Vec<OutPoint>>,
         unspendable: &Option<Vec<OutPoint>>,
         send_all: bool,
     ) -> Result<(Vec<UTXO>, bool), Error> {
-        // TODO: should we consider unconfirmed received rbf txs as "unspendable" too by default?
         let unspendable_set = match unspendable {
             None => HashSet::new(),
             Some(vec) => vec.into_iter().collect(),
@@ -660,25 +664,28 @@ where
             // with manual coin selection we always want to spend all the selected utxos, no matter
             // what (even if they are marked as unspendable)
             Some(raw_utxos) => {
-                // TODO: unwrap to remove
-                let full_utxos: Vec<_> = raw_utxos
+                let full_utxos = raw_utxos
                     .iter()
-                    .map(|u| self.database.borrow().get_utxo(&u).unwrap())
-                    .collect();
+                    .map(|u| self.database.borrow().get_utxo(&u))
+                    .collect::<Result<Vec<_>, _>>()?;
                 if !full_utxos.iter().all(|u| u.is_some()) {
                     return Err(Error::UnknownUTXO);
                 }
 
                 Ok((full_utxos.into_iter().map(|x| x.unwrap()).collect(), true))
             }
-            // otherwise limit ourselves to the spendable utxos and the `send_all` setting
-            None => Ok((
-                self.list_unspent()?
-                    .into_iter()
-                    .filter(|u| !unspendable_set.contains(&u.outpoint))
-                    .collect(),
-                send_all,
-            )),
+            // otherwise limit ourselves to the spendable utxos for the selected policy, and the `send_all` setting
+            None => {
+                let utxos = self.list_unspent()?.into_iter();
+                let utxos = change_policy.filter_utxos(utxos).into_iter();
+
+                Ok((
+                    utxos
+                        .filter(|u| !unspendable_set.contains(&u.outpoint))
+                        .collect(),
+                    send_all,
+                ))
+            }
         }
     }
 

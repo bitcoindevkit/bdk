@@ -19,6 +19,10 @@ impl ScriptType {
             ScriptType::Internal => 'i' as u8,
         }
     }
+
+    pub fn is_internal(&self) -> bool {
+        self == &ScriptType::Internal
+    }
 }
 
 impl AsRef<[u8]> for ScriptType {
@@ -34,6 +38,7 @@ impl AsRef<[u8]> for ScriptType {
 pub struct UTXO {
     pub outpoint: OutPoint,
     pub txout: TxOut,
+    pub is_internal: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default)]

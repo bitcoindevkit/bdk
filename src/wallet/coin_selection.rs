@@ -109,6 +109,7 @@ mod test {
                     value: 100_000,
                     script_pubkey: Script::new(),
                 },
+                is_internal: false,
             },
             UTXO {
                 outpoint: OutPoint::from_str(
@@ -119,6 +120,7 @@ mod test {
                     value: 200_000,
                     script_pubkey: Script::new(),
                 },
+                is_internal: true,
             },
         ]
     }

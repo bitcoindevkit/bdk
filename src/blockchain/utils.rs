@@ -236,6 +236,7 @@ pub trait ElectrumLikeSync {
                 updates.set_utxo(&UTXO {
                     outpoint: OutPoint::new(tx.txid(), i as u32),
                     txout: output.clone(),
+                    is_internal: script_type.is_internal(),
                 })?;
                 incoming += output.value;
 
