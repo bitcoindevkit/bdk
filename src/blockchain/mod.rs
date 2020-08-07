@@ -5,6 +5,7 @@ use bitcoin::{Transaction, Txid};
 
 use crate::database::{BatchDatabase, DatabaseUtils};
 use crate::error::Error;
+use crate::FeeRate;
 
 pub mod utils;
 
@@ -64,6 +65,7 @@ pub trait OnlineBlockchain: Blockchain {
     fn broadcast(&self, tx: &Transaction) -> Result<(), Error>;
 
     fn get_height(&self) -> Result<usize, Error>;
+    fn estimate_fee(&self, target: usize) -> Result<FeeRate, Error>;
 }
 
 pub type ProgressData = (f32, Option<String>);

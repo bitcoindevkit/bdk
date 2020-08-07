@@ -11,6 +11,7 @@ use self::utils::{ELSGetHistoryRes, ELSListUnspentRes, ElectrumLikeSync};
 use super::*;
 use crate::database::{BatchDatabase, DatabaseUtils};
 use crate::error::Error;
+use crate::FeeRate;
 
 pub struct ElectrumBlockchain(Option<Client>);
 
@@ -76,6 +77,15 @@ impl OnlineBlockchain for ElectrumBlockchain {
             .ok_or(Error::OfflineClient)?
             .block_headers_subscribe()
             .map(|data| data.height)?)
+    }
+
+    fn estimate_fee(&self, target: usize) -> Result<FeeRate, Error> {
+        Ok(FeeRate::from_btc_per_kvb(
+            self.0
+                .as_ref()
+                .ok_or(Error::OfflineClient)?
+                .estimate_fee(target)? as f32,
+        ))
     }
 }
 

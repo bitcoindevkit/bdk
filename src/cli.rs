@@ -13,7 +13,7 @@ use bitcoin::{Address, OutPoint};
 
 use crate::error::Error;
 use crate::types::ScriptType;
-use crate::{TxBuilder, Wallet};
+use crate::{FeeRate, TxBuilder, Wallet};
 
 fn parse_addressee(s: &str) -> Result<(Address, u64), String> {
     let parts: Vec<_> = s.split(":").collect();
@@ -331,7 +331,7 @@ where
 
         if let Some(fee_rate) = sub_matches.value_of("fee_rate") {
             let fee_rate = f32::from_str(fee_rate).map_err(|s| Error::Generic(s.to_string()))?;
-            tx_builder = tx_builder.fee_rate(fee_rate);
+            tx_builder = tx_builder.fee_rate(FeeRate::from_sat_per_vb(fee_rate));
         }
         if let Some(utxos) = sub_matches.values_of("utxos") {
             let utxos = utxos

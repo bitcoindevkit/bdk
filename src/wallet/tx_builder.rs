@@ -3,13 +3,14 @@ use std::collections::BTreeMap;
 use bitcoin::{Address, OutPoint, SigHashType};
 
 use super::coin_selection::{CoinSelectionAlgorithm, DefaultCoinSelectionAlgorithm};
+use super::utils::FeeRate;
 
 // TODO: add a flag to ignore change outputs (make them unspendable)
 #[derive(Debug, Default)]
 pub struct TxBuilder<Cs: CoinSelectionAlgorithm> {
     pub(crate) addressees: Vec<(Address, u64)>,
     pub(crate) send_all: bool,
-    pub(crate) fee_perkb: Option<f32>,
+    pub(crate) fee_rate: Option<FeeRate>,
     pub(crate) policy_path: Option<BTreeMap<String, Vec<usize>>>,
     pub(crate) utxos: Option<Vec<OutPoint>>,
     pub(crate) unspendable: Option<Vec<OutPoint>>,
@@ -44,13 +45,8 @@ impl<Cs: CoinSelectionAlgorithm> TxBuilder<Cs> {
         self
     }
 
-    pub fn fee_rate(mut self, satoshi_per_vbyte: f32) -> Self {
-        self.fee_perkb = Some(satoshi_per_vbyte * 1e3);
-        self
-    }
-
-    pub fn fee_rate_perkb(mut self, satoshi_per_kb: f32) -> Self {
-        self.fee_perkb = Some(satoshi_per_kb);
+    pub fn fee_rate(mut self, fee_rate: FeeRate) -> Self {
+        self.fee_rate = Some(fee_rate);
         self
     }
 
@@ -93,7 +89,7 @@ impl<Cs: CoinSelectionAlgorithm> TxBuilder<Cs> {
         TxBuilder {
             addressees: self.addressees,
             send_all: self.send_all,
-            fee_perkb: self.fee_perkb,
+            fee_rate: self.fee_rate,
             policy_path: self.policy_path,
             utxos: self.utxos,
             unspendable: self.unspendable,

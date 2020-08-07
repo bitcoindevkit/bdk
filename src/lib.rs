@@ -42,4 +42,6 @@ pub mod types;
 pub mod wallet;
 
 pub use descriptor::ExtendedDescriptor;
-pub use wallet::{OfflineWallet, TxBuilder, Wallet};
+pub use wallet::tx_builder::TxBuilder;
+pub use wallet::utils::FeeRate;
+pub use wallet::{OfflineWallet, Wallet};

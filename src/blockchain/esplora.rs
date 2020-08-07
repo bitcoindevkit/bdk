@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use futures::stream::{self, StreamExt, TryStreamExt};
 
@@ -18,6 +18,7 @@ use self::utils::{ELSGetHistoryRes, ELSListUnspentRes, ElectrumLikeSync};
 use super::*;
 use crate::database::{BatchDatabase, DatabaseUtils};
 use crate::error::Error;
+use crate::FeeRate;
 
 #[derive(Debug)]
 pub struct UrlClient {
@@ -98,6 +99,27 @@ impl OnlineBlockchain for EsploraBlockchain {
             .as_ref()
             .ok_or(Error::OfflineClient)?
             ._get_height())?)
+    }
+
+    fn estimate_fee(&self, target: usize) -> Result<FeeRate, Error> {
+        let estimates = await_or_block!(self
+            .0
+            .as_ref()
+            .ok_or(Error::OfflineClient)?
+            ._get_fee_estimates())?;
+
+        let fee_val = estimates
+            .into_iter()
+            .map(|(k, v)| Ok::<_, std::num::ParseIntError>((k.parse::<usize>()?, v)))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| Error::Generic(e.to_string()))?
+            .into_iter()
+            .take_while(|(k, _)| k <= &target)
+            .map(|(_, v)| v)
+            .last()
+            .unwrap_or(1.0);
+
+        Ok(FeeRate::from_sat_per_vb(fee_val as f32))
     }
 }
 
@@ -231,6 +253,17 @@ impl UrlClient {
                 tx_pos: x.vout,
             })
             .collect())
+    }
+
+    async fn _get_fee_estimates(&self) -> Result<HashMap<String, f64>, EsploraError> {
+        Ok(self
+            .client
+            .get(&format!("{}/api/fee-estimates", self.url,))
+            .send()
+            .await?
+            .error_for_status()?
+            .json::<HashMap<String, f64>>()
+            .await?)
     }
 }
 

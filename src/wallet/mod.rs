@@ -22,8 +22,8 @@ pub mod time;
 pub mod tx_builder;
 pub mod utils;
 
-pub use tx_builder::TxBuilder;
-use utils::IsDust;
+use tx_builder::TxBuilder;
+use utils::{FeeRate, IsDust};
 
 use crate::blockchain::{noop_progress, Blockchain, OfflineBlockchain, OnlineBlockchain};
 use crate::database::{BatchDatabase, BatchOperations, DatabaseUtils};
@@ -142,7 +142,7 @@ where
             output: vec![],
         };
 
-        let fee_rate = builder.fee_perkb.unwrap_or(1e3) * 100_000.0;
+        let fee_rate = builder.fee_rate.unwrap_or_default().as_sat_vb();
         if builder.send_all && builder.addressees.len() != 1 {
             return Err(Error::SendAllMultipleOutputs);
         }
@@ -758,6 +758,11 @@ where
         maybe_await!(self.client.broadcast(&tx))?;
 
         Ok(tx.txid())
+    }
+
+    #[maybe_async]
+    pub fn estimate_fee(&self, target: usize) -> Result<FeeRate, Error> {
+        Ok(maybe_await!(self.client.estimate_fee(target))?)
     }
 }
 

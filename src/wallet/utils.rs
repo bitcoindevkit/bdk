@@ -14,6 +14,34 @@ impl IsDust for u64 {
     }
 }
 
+#[derive(Debug, Copy, Clone)]
+// Internally stored as satoshi/vbyte
+pub struct FeeRate(f32);
+
+impl FeeRate {
+    pub fn from_btc_per_kvb(btc_per_kvb: f32) -> Self {
+        FeeRate(btc_per_kvb * 1e5)
+    }
+
+    pub fn from_sat_per_vb(sat_per_vb: f32) -> Self {
+        FeeRate(sat_per_vb)
+    }
+
+    pub fn default_min_relay_fee() -> Self {
+        FeeRate(1.0)
+    }
+
+    pub fn as_sat_vb(&self) -> f32 {
+        self.0
+    }
+}
+
+impl std::default::Default for FeeRate {
+    fn default() -> Self {
+        FeeRate::default_min_relay_fee()
+    }
+}
+
 pub struct ChunksIterator<I: Iterator> {
     iter: I,
     size: usize,
@@ -44,5 +72,28 @@ impl<I: Iterator> Iterator for ChunksIterator<I> {
         }
 
         Some(v)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_fee_from_btc_per_kb() {
+        let fee = FeeRate::from_btc_per_kvb(1e-5);
+        assert!((fee.as_sat_vb() - 1.0).abs() < 0.0001);
+    }
+
+    #[test]
+    fn test_fee_from_sats_vbyte() {
+        let fee = FeeRate::from_sat_per_vb(1.0);
+        assert!((fee.as_sat_vb() - 1.0).abs() < 0.0001);
+    }
+
+    #[test]
+    fn test_fee_default_min_relay_fee() {
+        let fee = FeeRate::default_min_relay_fee();
+        assert!((fee.as_sat_vb() - 1.0).abs() < 0.0001);
     }
 }
