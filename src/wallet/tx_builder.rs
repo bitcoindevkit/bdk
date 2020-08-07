@@ -18,6 +18,8 @@ pub struct TxBuilder<Cs: CoinSelectionAlgorithm> {
     pub(crate) sighash: Option<SigHashType>,
     pub(crate) ordering: TxOrdering,
     pub(crate) locktime: Option<u32>,
+    pub(crate) rbf: Option<u32>,
+    pub(crate) version: Version,
     pub(crate) coin_selection: Cs,
 }
 
@@ -92,6 +94,20 @@ impl<Cs: CoinSelectionAlgorithm> TxBuilder<Cs> {
         self
     }
 
+    pub fn enable_rbf(self) -> Self {
+        self.enable_rbf_with_sequence(0xFFFFFFFD)
+    }
+
+    pub fn enable_rbf_with_sequence(mut self, nsequence: u32) -> Self {
+        self.rbf = Some(nsequence);
+        self
+    }
+
+    pub fn version(mut self, version: u32) -> Self {
+        self.version = Version(version);
+        self
+    }
+
     pub fn coin_selection<P: CoinSelectionAlgorithm>(self, coin_selection: P) -> TxBuilder<P> {
         TxBuilder {
             addressees: self.addressees,
@@ -103,6 +119,8 @@ impl<Cs: CoinSelectionAlgorithm> TxBuilder<Cs> {
             sighash: self.sighash,
             ordering: self.ordering,
             locktime: self.locktime,
+            rbf: self.rbf,
+            version: self.version,
             coin_selection,
         }
     }
@@ -145,6 +163,16 @@ impl TxOrdering {
                     .sort_unstable_by_key(|txout| (txout.value, txout.script_pubkey.clone()));
             }
         }
+    }
+}
+
+// Helper type that wraps u32 and has a default value of 1
+#[derive(Debug)]
+pub(crate) struct Version(pub(crate) u32);
+
+impl Default for Version {
+    fn default() -> Self {
+        Version(1)
     }
 }
 

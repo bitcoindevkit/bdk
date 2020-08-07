@@ -135,9 +135,36 @@ where
             policy.get_requirements(builder.policy_path.as_ref().unwrap_or(&BTreeMap::new()))?;
         debug!("requirements: {:?}", requirements);
 
+        let version = match builder.version {
+            tx_builder::Version(0) => return Err(Error::Generic("Invalid version `0`".into())),
+            tx_builder::Version(1) if requirements.csv.is_some() => {
+                return Err(Error::Generic(
+                    "TxBuilder requested version `1`, but at least `2` is needed to use OP_CSV"
+                        .into(),
+                ))
+            }
+            tx_builder::Version(x) => x,
+        };
+
+        let lock_time = match builder.locktime {
+            None => requirements.timelock.unwrap_or(0),
+            Some(x) if requirements.timelock.is_none() => x,
+            Some(x) if requirements.timelock.unwrap() <= x => x,
+            Some(x) => return Err(Error::Generic(format!("TxBuilder requested timelock of `{}`, but at least `{}` is required to spend from this script", x, requirements.timelock.unwrap())))
+        };
+
+        let n_sequence = match (builder.rbf, requirements.csv) {
+            (None, Some(csv)) => csv,
+            (Some(rbf), Some(csv)) if rbf < csv => return Err(Error::Generic(format!("Cannot enable RBF with nSequence `{}`, since at least `{}` is required to spend with OP_CSV", rbf, csv))),
+            (None, _) if requirements.timelock.is_some() => 0xFFFFFFFE,
+            (Some(rbf), _) if rbf >= 0xFFFFFFFE => return Err(Error::Generic("Cannot enable RBF with anumber >= 0xFFFFFFFE".into())),
+            (Some(rbf), _) => rbf,
+            (None, _) => 0xFFFFFFFF,
+        };
+
         let mut tx = Transaction {
-            version: 2,
-            lock_time: requirements.timelock.unwrap_or(0),
+            version,
+            lock_time,
             input: vec![],
             output: vec![],
         };
@@ -206,11 +233,6 @@ where
         )?;
         let (mut txin, prev_script_pubkeys): (Vec<_>, Vec<_>) = txin.into_iter().unzip();
 
-        let n_sequence = match requirements.csv {
-            Some(csv) => csv,
-            _ if requirements.timelock.is_some() => 0xFFFFFFFE,
-            _ => 0xFFFFFFFF,
-        };
         txin.iter_mut().for_each(|i| i.sequence = n_sequence);
         tx.input = txin;
 
