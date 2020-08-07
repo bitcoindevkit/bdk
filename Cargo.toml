@@ -31,7 +31,7 @@ js-sys = "0.3"
 
 [features]
 minimal = []
-compiler = ["miniscript/compiler"]
+compiler = ["clap", "miniscript/compiler"]
 default = ["key-value-db", "electrum"]
 electrum = ["electrum-client"]
 esplora = ["reqwest", "futures"]
