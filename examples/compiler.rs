@@ -3,16 +3,11 @@ extern crate clap;
 extern crate log;
 extern crate magical_bitcoin_wallet;
 extern crate miniscript;
-extern crate rand;
 extern crate serde_json;
-extern crate sled;
 
 use std::str::FromStr;
 
 use log::info;
-
-use rand::distributions::Alphanumeric;
-use rand::{thread_rng, Rng};
 
 use clap::{App, Arg};
 
@@ -20,6 +15,7 @@ use bitcoin::Network;
 use miniscript::policy::Concrete;
 use miniscript::Descriptor;
 
+use magical_bitcoin_wallet::database::memory::MemoryDatabase;
 use magical_bitcoin_wallet::types::ScriptType;
 use magical_bitcoin_wallet::{OfflineWallet, Wallet};
 
@@ -73,37 +69,22 @@ fn main() {
 
     info!("... Descriptor: {}", descriptor);
 
-    let temp_db = {
-        let mut temp_db = std::env::temp_dir();
-        let rand_string: String = thread_rng().sample_iter(&Alphanumeric).take(15).collect();
-        temp_db.push(rand_string);
+    let database = MemoryDatabase::new();
 
-        let database = sled::open(&temp_db).unwrap();
-
-        let network = match matches.value_of("network") {
-            Some("regtest") => Network::Regtest,
-            Some("testnet") | _ => Network::Testnet,
-        };
-        let wallet: OfflineWallet<_> = Wallet::new_offline(
-            &format!("{}", descriptor),
-            None,
-            network,
-            database.open_tree("").unwrap(),
-        )
-        .unwrap();
-
-        info!("... First address: {}", wallet.get_new_address().unwrap());
-
-        if matches.is_present("parsed_policy") {
-            let spending_policy = wallet.policies(ScriptType::External).unwrap();
-            info!(
-                "... Spending policy:\n{}",
-                serde_json::to_string_pretty(&spending_policy).unwrap()
-            );
-        }
-
-        temp_db
+    let network = match matches.value_of("network") {
+        Some("regtest") => Network::Regtest,
+        Some("testnet") | _ => Network::Testnet,
     };
+    let wallet: OfflineWallet<_> =
+        Wallet::new_offline(&format!("{}", descriptor), None, network, database).unwrap();
 
-    std::fs::remove_dir_all(temp_db).unwrap();
+    info!("... First address: {}", wallet.get_new_address().unwrap());
+
+    if matches.is_present("parsed_policy") {
+        let spending_policy = wallet.policies(ScriptType::External).unwrap();
+        info!(
+            "... Spending policy:\n{}",
+            serde_json::to_string_pretty(&spending_policy).unwrap()
+        );
+    }
 }
