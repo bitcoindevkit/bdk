@@ -68,7 +68,7 @@ impl OnlineBlockchain for ElectrumBlockchain {
             .map(|_| ())?)
     }
 
-    fn get_height(&self) -> Result<usize, Error> {
+    fn get_height(&self) -> Result<u32, Error> {
         // TODO: unsubscribe when added to the client, or is there a better call to use here?
 
         Ok(self
@@ -76,7 +76,7 @@ impl OnlineBlockchain for ElectrumBlockchain {
             .as_ref()
             .ok_or(Error::OfflineClient)?
             .block_headers_subscribe()
-            .map(|data| data.height)?)
+            .map(|data| data.height as u32)?)
     }
 
     fn estimate_fee(&self, target: usize) -> Result<FeeRate, Error> {

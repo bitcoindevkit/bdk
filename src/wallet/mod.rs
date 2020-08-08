@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::collections::{BTreeMap, HashSet};
 use std::ops::DerefMut;
 use std::str::FromStr;
@@ -236,6 +237,12 @@ where
             fee_amount,
         )?;
         let (mut txin, prev_script_pubkeys): (Vec<_>, Vec<_>) = txin.into_iter().unzip();
+        // map that allows us to lookup the prev_script_pubkey for a given previous_output
+        let prev_script_pubkeys = txin
+            .iter()
+            .zip(prev_script_pubkeys.into_iter())
+            .map(|(txin, script)| (txin.previous_output, script))
+            .collect::<HashMap<_, _>>();
 
         txin.iter_mut().for_each(|i| i.sequence = n_sequence);
         tx.input = txin;
@@ -285,12 +292,13 @@ where
         let mut psbt = PSBT::from_unsigned_tx(tx)?;
 
         // add metadata for the inputs
-        for ((psbt_input, prev_script), input) in psbt
+        for (psbt_input, input) in psbt
             .inputs
             .iter_mut()
-            .zip(prev_script_pubkeys.into_iter())
             .zip(psbt.global.unsigned_tx.input.iter())
         {
+            let prev_script = prev_script_pubkeys.get(&input.previous_output).unwrap();
+
             // Add sighash, default is obviously "ALL"
             psbt_input.sighash_type = builder.sighash.or(Some(SigHashType::All));
 
@@ -317,7 +325,8 @@ where
                 if derived_descriptor.is_witness() {
                     psbt_input.witness_utxo =
                         Some(prev_tx.output[prev_output.vout as usize].clone());
-                } else {
+                }
+                if !derived_descriptor.is_witness() || builder.force_non_witness_utxo {
                     psbt_input.non_witness_utxo = Some(prev_tx);
                 }
             }
@@ -535,7 +544,6 @@ where
                 n, input.previous_output, create_height, current_height
             );
 
-            // TODO: use height once we sync headers
             let satisfier =
                 PSBTSatisfier::new(&psbt.inputs[n], false, create_height, current_height);
 
@@ -778,16 +786,15 @@ where
         ))
     }
 
+    pub fn client(&self) -> &B {
+        &self.client
+    }
+
     #[maybe_async]
     pub fn broadcast(&self, tx: Transaction) -> Result<Txid, Error> {
         maybe_await!(self.client.broadcast(&tx))?;
 
         Ok(tx.txid())
-    }
-
-    #[maybe_async]
-    pub fn estimate_fee(&self, target: usize) -> Result<FeeRate, Error> {
-        Ok(maybe_await!(self.client.estimate_fee(target))?)
     }
 }
 

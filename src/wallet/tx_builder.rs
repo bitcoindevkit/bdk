@@ -7,7 +7,6 @@ use super::coin_selection::{CoinSelectionAlgorithm, DefaultCoinSelectionAlgorith
 use super::utils::FeeRate;
 use crate::types::UTXO;
 
-// TODO: add a flag to ignore change outputs (make them unspendable)
 #[derive(Debug, Default)]
 pub struct TxBuilder<Cs: CoinSelectionAlgorithm> {
     pub(crate) addressees: Vec<(Address, u64)>,
@@ -22,6 +21,7 @@ pub struct TxBuilder<Cs: CoinSelectionAlgorithm> {
     pub(crate) rbf: Option<u32>,
     pub(crate) version: Version,
     pub(crate) change_policy: ChangeSpendPolicy,
+    pub(crate) force_non_witness_utxo: bool,
     pub(crate) coin_selection: Cs,
 }
 
@@ -46,8 +46,8 @@ impl<Cs: CoinSelectionAlgorithm> TxBuilder<Cs> {
         self
     }
 
-    pub fn send_all(mut self, send_all: bool) -> Self {
-        self.send_all = send_all;
+    pub fn send_all(mut self) -> Self {
+        self.send_all = true;
         self
     }
 
@@ -122,6 +122,16 @@ impl<Cs: CoinSelectionAlgorithm> TxBuilder<Cs> {
         self
     }
 
+    pub fn change_policy(mut self, change_policy: ChangeSpendPolicy) -> Self {
+        self.change_policy = change_policy;
+        self
+    }
+
+    pub fn force_non_witness_utxo(mut self) -> Self {
+        self.force_non_witness_utxo = true;
+        self
+    }
+
     pub fn coin_selection<P: CoinSelectionAlgorithm>(self, coin_selection: P) -> TxBuilder<P> {
         TxBuilder {
             addressees: self.addressees,
@@ -136,6 +146,7 @@ impl<Cs: CoinSelectionAlgorithm> TxBuilder<Cs> {
             rbf: self.rbf,
             version: self.version,
             change_policy: self.change_policy,
+            force_non_witness_utxo: self.force_non_witness_utxo,
             coin_selection,
         }
     }

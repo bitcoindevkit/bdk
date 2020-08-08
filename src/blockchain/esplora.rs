@@ -93,7 +93,7 @@ impl OnlineBlockchain for EsploraBlockchain {
             ._broadcast(tx))?)
     }
 
-    fn get_height(&self) -> Result<usize, Error> {
+    fn get_height(&self) -> Result<u32, Error> {
         Ok(await_or_block!(self
             .0
             .as_ref()
@@ -153,7 +153,7 @@ impl UrlClient {
         Ok(())
     }
 
-    async fn _get_height(&self) -> Result<usize, EsploraError> {
+    async fn _get_height(&self) -> Result<u32, EsploraError> {
         let req = self
             .client
             .get(&format!("{}/api/blocks/tip/height", self.url))

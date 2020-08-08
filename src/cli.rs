@@ -326,8 +326,11 @@ where
             .map(|s| parse_addressee(s))
             .collect::<Result<Vec<_>, _>>()
             .map_err(|s| Error::Generic(s))?;
-        let mut tx_builder =
-            TxBuilder::from_addressees(addressees).send_all(sub_matches.is_present("send_all"));
+        let mut tx_builder = TxBuilder::from_addressees(addressees);
+
+        if sub_matches.is_present("send_all") {
+            tx_builder = tx_builder.send_all();
+        }
 
         if let Some(fee_rate) = sub_matches.value_of("fee_rate") {
             let fee_rate = f32::from_str(fee_rate).map_err(|s| Error::Generic(s.to_string()))?;

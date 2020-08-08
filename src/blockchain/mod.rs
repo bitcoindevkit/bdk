@@ -64,7 +64,7 @@ pub trait OnlineBlockchain: Blockchain {
     fn get_tx(&self, txid: &Txid) -> Result<Option<Transaction>, Error>;
     fn broadcast(&self, tx: &Transaction) -> Result<(), Error>;
 
-    fn get_height(&self) -> Result<usize, Error>;
+    fn get_height(&self) -> Result<u32, Error>;
     fn estimate_fee(&self, target: usize) -> Result<FeeRate, Error>;
 }
 
