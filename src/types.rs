@@ -6,7 +6,7 @@ use bitcoin::hash_types::Txid;
 use serde::{Deserialize, Serialize};
 
 // TODO serde flatten?
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ScriptType {
     External = 0,
     Internal = 1,
@@ -48,5 +48,6 @@ pub struct TransactionDetails {
     pub timestamp: u64,
     pub received: u64,
     pub sent: u64,
+    pub fees: u64,
     pub height: Option<u32>,
 }

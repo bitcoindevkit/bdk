@@ -186,7 +186,6 @@ pub trait ElectrumLikeSync {
         );
         let mut updates = database.begin_batch();
         let tx = match database.get_tx(&txid, true)? {
-            // TODO: do we need the raw?
             Some(mut saved_tx) => {
                 // update the height if it's different (in case of reorg)
                 if saved_tx.height != height {
@@ -204,11 +203,19 @@ pub trait ElectrumLikeSync {
                 // went wrong
                 saved_tx.transaction.unwrap()
             }
-            None => maybe_await!(self.els_transaction_get(&txid))?,
+            None => {
+                let fetched_tx = maybe_await!(self.els_transaction_get(&txid))?;
+                database.set_raw_tx(&fetched_tx)?;
+
+                fetched_tx
+            }
         };
 
         let mut incoming: u64 = 0;
         let mut outgoing: u64 = 0;
+
+        let mut inputs_sum: u64 = 0;
+        let mut outputs_sum: u64 = 0;
 
         // look for our own inputs
         for (i, input) in tx.input.iter().enumerate() {
@@ -217,17 +224,37 @@ pub trait ElectrumLikeSync {
             // the transactions at a lower depth have already been indexed, so if an outpoint is ours
             // we are guaranteed to have it in the db).
             if let Some(previous_output) = database.get_previous_output(&input.previous_output)? {
+                inputs_sum += previous_output.value;
+
                 if database.is_mine(&previous_output.script_pubkey)? {
                     outgoing += previous_output.value;
 
                     debug!("{} input #{} is mine, removing from utxo", txid, i);
                     updates.del_utxo(&input.previous_output)?;
                 }
+            } else {
+                // The input is not ours, but we still need to count it for the fees. so fetch the
+                // tx (from the database or from network) and check it
+                let tx = match database.get_tx(&input.previous_output.txid, true)? {
+                    Some(saved_tx) => saved_tx.transaction.unwrap(),
+                    None => {
+                        let fetched_tx =
+                            maybe_await!(self.els_transaction_get(&input.previous_output.txid))?;
+                        database.set_raw_tx(&fetched_tx)?;
+
+                        fetched_tx
+                    }
+                };
+
+                inputs_sum += tx.output[input.previous_output.vout as usize].value;
             }
         }
 
         let mut to_check_later = vec![];
         for (i, output) in tx.output.iter().enumerate() {
+            // to compute the fees later
+            outputs_sum += output.value;
+
             // this output is ours, we have a path to derive it
             if let Some((script_type, child)) =
                 database.get_path_from_script_pubkey(&output.script_pubkey)?
@@ -259,6 +286,7 @@ pub trait ElectrumLikeSync {
             sent: outgoing,
             height,
             timestamp: 0,
+            fees: inputs_sum - outputs_sum,
         };
         info!("Saving tx {}", txid);
         updates.set_tx(&tx)?;

@@ -85,7 +85,8 @@ pub fn maybe_async(_attr: TokenStream, item: TokenStream) -> TokenStream {
     } else {
         (quote! {
             compile_error!("#[maybe_async] can only be used on methods, trait or trait impl blocks")
-        }).into()
+        })
+        .into()
     }
 }
 

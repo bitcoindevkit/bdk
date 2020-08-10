@@ -8,6 +8,8 @@ use crate::types::*;
 pub mod keyvalue;
 pub mod memory;
 
+pub use memory::MemoryDatabase;
+
 pub trait BatchOperations {
     fn set_script_pubkey(
         &mut self,
@@ -235,6 +237,7 @@ pub mod test {
             timestamp: 123456,
             received: 1337,
             sent: 420420,
+            fees: 140,
             height: Some(1000),
         };
 

@@ -129,6 +129,7 @@ mod test {
             timestamp: 12345678,
             received: 100_000,
             sent: 0,
+            fees: 500,
             height: Some(5000),
         })
         .unwrap();

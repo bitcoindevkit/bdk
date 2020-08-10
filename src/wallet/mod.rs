@@ -24,7 +24,7 @@ pub mod tx_builder;
 pub mod utils;
 
 use tx_builder::TxBuilder;
-use utils::{FeeRate, IsDust};
+use utils::IsDust;
 
 use crate::blockchain::{noop_progress, Blockchain, OfflineBlockchain, OnlineBlockchain};
 use crate::database::{BatchDatabase, BatchOperations, DatabaseUtils};
@@ -190,8 +190,9 @@ where
                 false => *satoshi,
             };
 
-            if address.network != self.network {
-                return Err(Error::InvalidAddressNetork(address.clone()));
+            // TODO: proper checks for testnet/regtest p2sh/p2pkh
+            if address.network != self.network && self.network != Network::Regtest {
+                return Err(Error::InvalidAddressNetwork(address.clone()));
             } else if self.is_mine(&address.script_pubkey())? {
                 received += value;
             }
@@ -263,7 +264,8 @@ where
             }
         };
 
-        let change_val = total_amount - outgoing - (fee_amount.ceil() as u64);
+        let mut fee_amount = fee_amount.ceil() as u64;
+        let change_val = total_amount - outgoing - fee_amount;
         if !builder.send_all && !change_val.is_dust() {
             let mut change_output = change_output.unwrap();
             change_output.value = change_val;
@@ -271,8 +273,6 @@ where
 
             tx.output.push(change_output);
         } else if builder.send_all && !change_val.is_dust() {
-            // set the outgoing value to whatever we've put in
-            outgoing = total_amount;
             // there's only one output, send everything to it
             tx.output[0].value = change_val;
 
@@ -280,6 +280,9 @@ where
             if self.is_mine(&tx.output[0].script_pubkey)? {
                 received = change_val;
             }
+        } else if !builder.send_all && change_val.is_dust() {
+            // skip the change output because it's dust, this adds up to the fees
+            fee_amount += change_val;
         } else if builder.send_all {
             // send_all but the only output would be below dust limit
             return Err(Error::InsufficientFunds); // TODO: or OutputBelowDustLimit?
@@ -339,7 +342,8 @@ where
             txid,
             timestamp: time::get_timestamp(),
             received,
-            sent: outgoing,
+            sent: total_amount,
+            fees: fee_amount,
             height: None,
         };
 
@@ -750,6 +754,8 @@ where
     pub fn sync(&self, max_address_param: Option<u32>) -> Result<(), Error> {
         debug!("Begin sync...");
 
+        let mut run_setup = false;
+
         let max_address = match self.descriptor.is_fixed() {
             true => 0,
             false => max_address_param.unwrap_or(CACHE_ADDR_BATCH_SIZE),
@@ -760,6 +766,7 @@ where
             .get_script_pubkey_from_path(ScriptType::External, max_address)?
             .is_none()
         {
+            run_setup = true;
             self.cache_addresses(ScriptType::External, 0, max_address)?;
         }
 
@@ -775,15 +782,24 @@ where
                 .get_script_pubkey_from_path(ScriptType::Internal, max_address)?
                 .is_none()
             {
+                run_setup = true;
                 self.cache_addresses(ScriptType::Internal, 0, max_address)?;
             }
         }
 
-        maybe_await!(self.client.sync(
-            None,
-            self.database.borrow_mut().deref_mut(),
-            noop_progress(),
-        ))
+        if run_setup {
+            maybe_await!(self.client.setup(
+                None,
+                self.database.borrow_mut().deref_mut(),
+                noop_progress(),
+            ))
+        } else {
+            maybe_await!(self.client.sync(
+                None,
+                self.database.borrow_mut().deref_mut(),
+                noop_progress(),
+            ))
+        }
     }
 
     pub fn client(&self) -> &B {

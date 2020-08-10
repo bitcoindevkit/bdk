@@ -31,6 +31,16 @@ pub extern crate sled;
 #[cfg(feature = "cli-utils")]
 pub mod cli;
 
+#[cfg(test)]
+#[macro_use]
+extern crate testutils;
+#[cfg(test)]
+#[macro_use]
+extern crate testutils_macros;
+#[cfg(test)]
+#[macro_use]
+extern crate serial_test;
+
 #[macro_use]
 pub mod error;
 pub mod blockchain;

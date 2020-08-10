@@ -10,7 +10,7 @@ pub enum Error {
     SendAllMultipleOutputs,
     OutputBelowDustLimit(usize),
     InsufficientFunds,
-    InvalidAddressNetork(Address),
+    InvalidAddressNetwork(Address),
     UnknownUTXO,
     DifferentTransactions,
 

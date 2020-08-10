@@ -15,6 +15,13 @@ use crate::FeeRate;
 
 pub struct ElectrumBlockchain(Option<Client>);
 
+#[cfg(test)]
+#[cfg(feature = "test-electrum")]
+#[magical_blockchain_tests(crate)]
+fn local_electrs() -> ElectrumBlockchain {
+    ElectrumBlockchain::from(Client::new(&testutils::get_electrum_url(), None).unwrap())
+}
+
 impl std::convert::From<Client> for ElectrumBlockchain {
     fn from(client: Client) -> Self {
         ElectrumBlockchain(Some(client))

@@ -1,5 +1,5 @@
 [package]
-name = "magical-macros"
+name = "testutils-macros"
 version = "0.1.0"
 authors = ["Alekos Filini <alekos.filini@gmail.com>"]
 edition = "2018"

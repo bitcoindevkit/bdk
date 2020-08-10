@@ -40,7 +40,14 @@ key-value-db = ["sled"]
 cli-utils = ["clap", "base64"]
 async-interface = ["async-trait"]
 
+# Debug/Test features
+debug-proc-macros = ["magical-macros/debug", "testutils-macros/debug"]
+test-electrum = ["electrum"]
+
 [dev-dependencies]
+testutils = { path = "./testutils" }
+testutils-macros = { path = "./testutils-macros" }
+serial_test = "0.4"
 lazy_static = "1.4"
 rustyline = "6.0"
 dirs = "2.0"
@@ -67,3 +74,5 @@ name = "magic"
 path = "examples/repl.rs"
 required-features = ["cli-utils"]
 
+[workspace]
+members = ["macros", "testutils", "testutils-macros"]
