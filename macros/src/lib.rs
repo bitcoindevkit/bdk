@@ -8,7 +8,7 @@ use syn::{parse, ImplItemMethod, ItemImpl, ItemTrait, Token};
 
 fn add_async_trait(mut parsed: ItemTrait) -> TokenStream {
     let output = quote! {
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(all(not(target_arch = "wasm32"), not(feature = "async-interface")))]
         #parsed
     };
 
@@ -21,7 +21,7 @@ fn add_async_trait(mut parsed: ItemTrait) -> TokenStream {
     let output = quote! {
         #output
 
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(any(target_arch = "wasm32", feature = "async-interface"))]
         #[async_trait(?Send)]
         #parsed
     };
@@ -31,7 +31,7 @@ fn add_async_trait(mut parsed: ItemTrait) -> TokenStream {
 
 fn add_async_method(mut parsed: ImplItemMethod) -> TokenStream {
     let output = quote! {
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(all(not(target_arch = "wasm32"), not(feature = "async-interface")))]
         #parsed
     };
 
@@ -40,7 +40,7 @@ fn add_async_method(mut parsed: ImplItemMethod) -> TokenStream {
     let output = quote! {
         #output
 
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(any(target_arch = "wasm32", feature = "async-interface"))]
         #parsed
     };
 
@@ -49,7 +49,7 @@ fn add_async_method(mut parsed: ImplItemMethod) -> TokenStream {
 
 fn add_async_impl_trait(mut parsed: ItemImpl) -> TokenStream {
     let output = quote! {
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(all(not(target_arch = "wasm32"), not(feature = "async-interface")))]
         #parsed
     };
 
@@ -62,7 +62,7 @@ fn add_async_impl_trait(mut parsed: ItemImpl) -> TokenStream {
     let output = quote! {
         #output
 
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(any(target_arch = "wasm32", feature = "async-interface"))]
         #[async_trait(?Send)]
         #parsed
     };
@@ -95,12 +95,12 @@ pub fn maybe_await(expr: TokenStream) -> TokenStream {
     let expr: proc_macro2::TokenStream = expr.into();
     let quoted = quote! {
         {
-            #[cfg(not(target_arch = "wasm32"))]
+            #[cfg(all(not(target_arch = "wasm32"), not(feature = "async-interface")))]
             {
                 #expr
             }
 
-            #[cfg(target_arch = "wasm32")]
+            #[cfg(any(target_arch = "wasm32", feature = "async-interface"))]
             {
                 #expr.await
             }
@@ -110,7 +110,7 @@ pub fn maybe_await(expr: TokenStream) -> TokenStream {
     quoted.into()
 }
 
-/// Awaits if target_arch is "wasm32", uses `futures::executor::block_on()` otherwise
+/// Awaits if target_arch is "wasm32", uses `tokio::Runtime::block_on()` otherwise
 ///
 /// Requires the `tokio` crate as a dependecy with `rt-core` or `rt-threaded` to build on non-wasm32 platforms.
 #[proc_macro]
@@ -118,12 +118,12 @@ pub fn await_or_block(expr: TokenStream) -> TokenStream {
     let expr: proc_macro2::TokenStream = expr.into();
     let quoted = quote! {
         {
-            #[cfg(not(target_arch = "wasm32"))]
+            #[cfg(all(not(target_arch = "wasm32"), not(feature = "async-interface")))]
             {
                 tokio::runtime::Runtime::new().unwrap().block_on(#expr)
             }
 
-            #[cfg(target_arch = "wasm32")]
+            #[cfg(any(target_arch = "wasm32", feature = "async-interface"))]
             {
                 #expr.await
             }

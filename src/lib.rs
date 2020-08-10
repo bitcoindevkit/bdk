@@ -5,7 +5,7 @@ extern crate serde;
 #[macro_use]
 extern crate serde_json;
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", feature = "async-interface"))]
 #[macro_use]
 extern crate async_trait;
 #[macro_use]

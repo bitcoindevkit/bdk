@@ -20,6 +20,7 @@ reqwest = { version = "0.10", optional = true, features = ["json"] }
 futures = { version = "0.3", optional = true }
 clap = { version = "2.33", optional = true }
 base64 = { version = "^0.11", optional = true }
+async-trait = { version = "0.1", optional = true }
 
 # Platform-specific dependencies
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
@@ -37,6 +38,7 @@ electrum = ["electrum-client"]
 esplora = ["reqwest", "futures"]
 key-value-db = ["sled"]
 cli-utils = ["clap", "base64"]
+async-interface = ["async-trait"]
 
 [dev-dependencies]
 lazy_static = "1.4"
