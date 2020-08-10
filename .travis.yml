@@ -4,6 +4,8 @@ rust:
 
 env:
   global:
+    - MAGICAL_RPC_COOKIEFILE=/home/travis/.bitcoin/regtest/.cookie
+    - MAGICAL_ELECTRUM_URL=tcp://127.0.0.1:60401
   jobs:
     - TARGET=x86_64-unknown-linux-gnu    CHECK_FMT=1
     - TARGET=x86_64-unknown-linux-gnu    RUN_TESTS=1
@@ -13,8 +15,8 @@ env:
     - TARGET=x86_64-unknown-linux-gnu    FEATURES=electrum           NO_DEFAULT_FEATURES=1
     - TARGET=x86_64-unknown-linux-gnu    FEATURES=cli-utils,esplora  NO_DEFAULT_FEATURES=1
     - TARGET=x86_64-unknown-linux-gnu    FEATURES=compiler           NO_DEFAULT_FEATURES=1    RUN_TESTS=1 # Test the `miniscriptc` example
+    - TARGET=x86_64-unknown-linux-gnu    FEATURES=test-electrum      NO_DEFAULT_FEATURES=1    RUN_TESTS=1    RUN_CORE=1
     - TARGET=wasm32-unknown-unknown      FEATURES=cli-utils,esplora  NO_DEFAULT_FEATURES=1
-
 before_script:
   - |
     if [[ "$TARGET" = "wasm32-unknown-unknown" ]]; then
@@ -42,15 +44,11 @@ script:
     else
         CMD=build
     fi
+  - |
+    if [[ $RUN_CORE -eq 1 ]]; then
+        ./ci/start-core.sh || exit 1
+    fi
   - cargo $CMD --verbose --target=$TARGET --features=$FEATURES $( (( NO_DEFAULT_FEATURES == 1 )) && printf %s '--no-default-features' )
-    #  - cargo fmt -- --check --verbose
-    #  - cargo test --verbose --all
-    #  - cargo build --verbose --all
-    #  - cargo build --verbose --no-default-features --features=minimal
-    #  - cargo build --verbose --no-default-features --features=minimal,esplora
-    #  - cargo build --verbose --no-default-features --features=key-value-db
-    #  - cargo build --verbose --no-default-features --features=electrum
-    #  - CC="clang-10" CFLAGS="-I/usr/include" cargo build --verbose --no-default-features --features=cli-utils,esplora --target=wasm32-unknown-unknown
 
 notifications:
   email: false
