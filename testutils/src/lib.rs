@@ -10,7 +10,6 @@ use std::env;
 use std::ops::Deref;
 use std::path::PathBuf;
 use std::str::FromStr;
-use std::sync::Mutex;
 use std::time::Duration;
 
 #[allow(unused_imports)]
@@ -25,12 +24,6 @@ pub use bitcoincore_rpc::bitcoincore_rpc_json::AddressType;
 pub use bitcoincore_rpc::{Auth, Client as RpcClient, RpcApi};
 
 pub use electrum_client::{Client as ElectrumClient, ElectrumApi};
-
-lazy_static! {
-    static ref SYNC_TESTS_MUTEX: Mutex<()> = Mutex::new(());
-}
-
-pub fn test_init() {}
 
 // TODO: we currently only support env vars, we could also parse a toml file
 fn get_auth() -> Auth {
@@ -217,7 +210,6 @@ macro_rules! testutils {
 
             }).unwrap();
             internal = Some(string_internal.try_into().unwrap());
-
         )*
 
         (external, internal)

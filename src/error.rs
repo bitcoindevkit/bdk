@@ -8,6 +8,7 @@ pub enum Error {
     Generic(String),
     ScriptDoesntHaveAddressForm,
     SendAllMultipleOutputs,
+    NoAddressees,
     OutputBelowDustLimit(usize),
     InsufficientFunds,
     InvalidAddressNetwork(Address),

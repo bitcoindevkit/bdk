@@ -127,6 +127,10 @@ where
         &self,
         builder: TxBuilder<Cs>,
     ) -> Result<(PSBT, TransactionDetails), Error> {
+        if builder.addressees.is_empty() {
+            return Err(Error::NoAddressees);
+        }
+
         // TODO: fetch both internal and external policies
         let policy = self.descriptor.extract_policy()?.unwrap();
         if policy.requires_path() && builder.policy_path.is_none() {
@@ -137,14 +141,18 @@ where
         debug!("requirements: {:?}", requirements);
 
         let version = match builder.version {
-            tx_builder::Version(0) => return Err(Error::Generic("Invalid version `0`".into())),
-            tx_builder::Version(1) if requirements.csv.is_some() => {
+            Some(tx_builder::Version(0)) => {
+                return Err(Error::Generic("Invalid version `0`".into()))
+            }
+            Some(tx_builder::Version(1)) if requirements.csv.is_some() => {
                 return Err(Error::Generic(
                     "TxBuilder requested version `1`, but at least `2` is needed to use OP_CSV"
                         .into(),
                 ))
             }
-            tx_builder::Version(x) => x,
+            Some(tx_builder::Version(x)) => x,
+            None if requirements.csv.is_some() => 2,
+            _ => 1,
         };
 
         let lock_time = match builder.locktime {
@@ -218,6 +226,14 @@ where
                 .0
                 .max_satisfaction_weight(),
         );
+
+        if builder.change_policy != tx_builder::ChangeSpendPolicy::ChangeAllowed
+            && self.change_descriptor.is_none()
+        {
+            return Err(Error::Generic(
+                "The `change_policy` can be set only if the wallet has a change_descriptor".into(),
+            ));
+        }
 
         let (available_utxos, use_all_utxos) = self.get_available_utxos(
             builder.change_policy,
@@ -335,7 +351,24 @@ where
             }
         }
 
-        self.add_hd_keypaths(&mut psbt)?;
+        // probably redundant but it doesn't hurt...
+        self.add_input_hd_keypaths(&mut psbt)?;
+
+        // add metadata for the outputs
+        for (psbt_output, tx_output) in psbt
+            .outputs
+            .iter_mut()
+            .zip(psbt.global.unsigned_tx.output.iter())
+        {
+            if let Some((script_type, child)) = self
+                .database
+                .borrow()
+                .get_path_from_script_pubkey(&tx_output.script_pubkey)?
+            {
+                let (desc, _) = self.get_descriptor_for(script_type);
+                psbt_output.hd_keypaths = desc.get_hd_keypaths(child)?;
+            }
+        }
 
         let transaction_details = TransactionDetails {
             transaction: None,
@@ -353,7 +386,7 @@ where
     // TODO: define an enum for signing errors
     pub fn sign(&self, mut psbt: PSBT, assume_height: Option<u32>) -> Result<(PSBT, bool), Error> {
         // this helps us doing our job later
-        self.add_hd_keypaths(&mut psbt)?;
+        self.add_input_hd_keypaths(&mut psbt)?;
 
         let tx = &psbt.global.unsigned_tx;
 
@@ -701,7 +734,7 @@ where
         }
     }
 
-    fn add_hd_keypaths(&self, psbt: &mut PSBT) -> Result<(), Error> {
+    fn add_input_hd_keypaths(&self, psbt: &mut PSBT) -> Result<(), Error> {
         let mut input_utxos = Vec::with_capacity(psbt.inputs.len());
         for n in 0..psbt.inputs.len() {
             input_utxos.push(psbt.get_utxo_for(n).clone());
@@ -787,6 +820,8 @@ where
             }
         }
 
+        // TODO: what if i generate an address first and cache some addresses?
+        // TODO: we should sync if generating an address triggers a new batch to be stored
         if run_setup {
             maybe_await!(self.client.setup(
                 None,
@@ -818,8 +853,11 @@ where
 mod test {
     use bitcoin::Network;
 
+    use miniscript::Descriptor;
+
     use crate::database::memory::MemoryDatabase;
     use crate::database::Database;
+    use crate::descriptor::ExtendedDescriptor;
     use crate::types::ScriptType;
 
     use super::*;
@@ -912,5 +950,519 @@ mod test {
             .get_script_pubkey_from_path(ScriptType::External, CACHE_ADDR_BATCH_SIZE * 2 - 1)
             .unwrap()
             .is_some());
+    }
+
+    fn get_test_wpkh() -> &'static str {
+        "wpkh(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW)"
+    }
+
+    fn get_test_single_sig_csv() -> &'static str {
+        // and(pk(Alice),older(6))
+        "wsh(and_v(v:pk(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW),older(6)))"
+    }
+
+    fn get_test_single_sig_cltv() -> &'static str {
+        // and(pk(Alice),after(100000))
+        "wsh(and_v(v:pk(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW),after(100000)))"
+    }
+
+    fn get_funded_wallet(
+        descriptor: &str,
+    ) -> (
+        OfflineWallet<MemoryDatabase>,
+        (ExtendedDescriptor, Option<ExtendedDescriptor>),
+        bitcoin::Txid,
+    ) {
+        let descriptors = testutils!(@descriptors (descriptor));
+        let wallet: OfflineWallet<_> = Wallet::new_offline(
+            &descriptors.0.to_string(),
+            None,
+            Network::Regtest,
+            MemoryDatabase::new(),
+        )
+        .unwrap();
+
+        let txid = wallet.database.borrow_mut().received_tx(
+            testutils! {
+                @tx ( (@external descriptors, 0) => 50_000 )
+            },
+            None,
+        );
+
+        (wallet, descriptors, txid)
+    }
+
+    #[test]
+    #[should_panic(expected = "NoAddressees")]
+    fn test_create_tx_empty_addressees() {
+        let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
+        wallet
+            .create_tx(TxBuilder::from_addressees(vec![]).version(0))
+            .unwrap();
+    }
+
+    #[test]
+    #[should_panic(expected = "Invalid version `0`")]
+    fn test_create_tx_version_0() {
+        let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
+        let addr = wallet.get_new_address().unwrap();
+        wallet
+            .create_tx(TxBuilder::from_addressees(vec![(addr, 25_000)]).version(0))
+            .unwrap();
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "TxBuilder requested version `1`, but at least `2` is needed to use OP_CSV"
+    )]
+    fn test_create_tx_version_1_csv() {
+        let (wallet, _, _) = get_funded_wallet(get_test_single_sig_csv());
+        let addr = wallet.get_new_address().unwrap();
+        wallet
+            .create_tx(TxBuilder::from_addressees(vec![(addr, 25_000)]).version(1))
+            .unwrap();
+    }
+
+    #[test]
+    fn test_create_tx_custom_version() {
+        let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
+        let addr = wallet.get_new_address().unwrap();
+        let (psbt, _) = wallet
+            .create_tx(TxBuilder::from_addressees(vec![(addr, 25_000)]).version(42))
+            .unwrap();
+
+        assert_eq!(psbt.global.unsigned_tx.version, 42);
+    }
+
+    #[test]
+    fn test_create_tx_default_locktime() {
+        let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
+        let addr = wallet.get_new_address().unwrap();
+        let (psbt, _) = wallet
+            .create_tx(TxBuilder::from_addressees(vec![(addr, 25_000)]))
+            .unwrap();
+
+        assert_eq!(psbt.global.unsigned_tx.lock_time, 0);
+    }
+
+    #[test]
+    fn test_create_tx_default_locktime_cltv() {
+        let (wallet, _, _) = get_funded_wallet(get_test_single_sig_cltv());
+        let addr = wallet.get_new_address().unwrap();
+        let (psbt, _) = wallet
+            .create_tx(TxBuilder::from_addressees(vec![(addr, 25_000)]))
+            .unwrap();
+
+        assert_eq!(psbt.global.unsigned_tx.lock_time, 100_000);
+    }
+
+    #[test]
+    fn test_create_tx_custom_locktime() {
+        let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
+        let addr = wallet.get_new_address().unwrap();
+        let (psbt, _) = wallet
+            .create_tx(TxBuilder::from_addressees(vec![(addr, 25_000)]).nlocktime(630_000))
+            .unwrap();
+
+        assert_eq!(psbt.global.unsigned_tx.lock_time, 630_000);
+    }
+
+    #[test]
+    fn test_create_tx_custom_locktime_compatible_with_cltv() {
+        let (wallet, _, _) = get_funded_wallet(get_test_single_sig_cltv());
+        let addr = wallet.get_new_address().unwrap();
+        let (psbt, _) = wallet
+            .create_tx(TxBuilder::from_addressees(vec![(addr, 25_000)]).nlocktime(630_000))
+            .unwrap();
+
+        assert_eq!(psbt.global.unsigned_tx.lock_time, 630_000);
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "TxBuilder requested timelock of `50000`, but at least `100000` is required to spend from this script"
+    )]
+    fn test_create_tx_custom_locktime_incompatible_with_cltv() {
+        let (wallet, _, _) = get_funded_wallet(get_test_single_sig_cltv());
+        let addr = wallet.get_new_address().unwrap();
+        wallet
+            .create_tx(TxBuilder::from_addressees(vec![(addr, 25_000)]).nlocktime(50000))
+            .unwrap();
+    }
+
+    #[test]
+    fn test_create_tx_no_rbf_csv() {
+        let (wallet, _, _) = get_funded_wallet(get_test_single_sig_csv());
+        let addr = wallet.get_new_address().unwrap();
+        let (psbt, _) = wallet
+            .create_tx(TxBuilder::from_addressees(vec![(addr, 25_000)]))
+            .unwrap();
+
+        assert_eq!(psbt.global.unsigned_tx.input[0].sequence, 6);
+    }
+
+    #[test]
+    fn test_create_tx_with_default_rbf_csv() {
+        let (wallet, _, _) = get_funded_wallet(get_test_single_sig_csv());
+        let addr = wallet.get_new_address().unwrap();
+        let (psbt, _) = wallet
+            .create_tx(TxBuilder::from_addressees(vec![(addr, 25_000)]).enable_rbf())
+            .unwrap();
+
+        assert_eq!(psbt.global.unsigned_tx.input[0].sequence, 0xFFFFFFFD);
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "Cannot enable RBF with nSequence `3`, since at least `6` is required to spend with OP_CSV"
+    )]
+    fn test_create_tx_with_custom_rbf_csv() {
+        let (wallet, _, _) = get_funded_wallet(get_test_single_sig_csv());
+        let addr = wallet.get_new_address().unwrap();
+        wallet
+            .create_tx(TxBuilder::from_addressees(vec![(addr, 25_000)]).enable_rbf_with_sequence(3))
+            .unwrap();
+    }
+
+    #[test]
+    fn test_create_tx_no_rbf_cltv() {
+        let (wallet, _, _) = get_funded_wallet(get_test_single_sig_cltv());
+        let addr = wallet.get_new_address().unwrap();
+        let (psbt, _) = wallet
+            .create_tx(TxBuilder::from_addressees(vec![(addr, 25_000)]))
+            .unwrap();
+
+        assert_eq!(psbt.global.unsigned_tx.input[0].sequence, 0xFFFFFFFE);
+    }
+
+    #[test]
+    #[should_panic(expected = "Cannot enable RBF with anumber >= 0xFFFFFFFE")]
+    fn test_create_tx_invalid_rbf_sequence() {
+        let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
+        let addr = wallet.get_new_address().unwrap();
+        wallet
+            .create_tx(
+                TxBuilder::from_addressees(vec![(addr, 25_000)])
+                    .enable_rbf_with_sequence(0xFFFFFFFE),
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn test_create_tx_custom_rbf_sequence() {
+        let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
+        let addr = wallet.get_new_address().unwrap();
+        let (psbt, _) = wallet
+            .create_tx(
+                TxBuilder::from_addressees(vec![(addr, 25_000)])
+                    .enable_rbf_with_sequence(0xDEADBEEF),
+            )
+            .unwrap();
+
+        assert_eq!(psbt.global.unsigned_tx.input[0].sequence, 0xDEADBEEF);
+    }
+
+    #[test]
+    fn test_create_tx_default_sequence() {
+        let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
+        let addr = wallet.get_new_address().unwrap();
+        let (psbt, _) = wallet
+            .create_tx(TxBuilder::from_addressees(vec![(addr, 25_000)]))
+            .unwrap();
+
+        assert_eq!(psbt.global.unsigned_tx.input[0].sequence, 0xFFFFFFFF);
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "The `change_policy` can be set only if the wallet has a change_descriptor"
+    )]
+    fn test_create_tx_change_policy_no_internal() {
+        let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
+        let addr = wallet.get_new_address().unwrap();
+        wallet
+            .create_tx(
+                TxBuilder::from_addressees(vec![(addr.clone(), 25_000)]).do_not_spend_change(),
+            )
+            .unwrap();
+    }
+
+    #[test]
+    #[should_panic(expected = "SendAllMultipleOutputs")]
+    fn test_create_tx_send_all_multiple_outputs() {
+        let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
+        let addr = wallet.get_new_address().unwrap();
+        wallet
+            .create_tx(
+                TxBuilder::from_addressees(vec![(addr.clone(), 25_000), (addr, 10_000)]).send_all(),
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn test_create_tx_send_all() {
+        let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
+        let addr = wallet.get_new_address().unwrap();
+        let (psbt, details) = wallet
+            .create_tx(TxBuilder::from_addressees(vec![(addr.clone(), 0)]).send_all())
+            .unwrap();
+
+        assert_eq!(psbt.global.unsigned_tx.output.len(), 1);
+        assert_eq!(
+            psbt.global.unsigned_tx.output[0].value,
+            50_000 - details.fees
+        );
+    }
+
+    #[test]
+    fn test_create_tx_add_change() {
+        use super::tx_builder::TxOrdering;
+
+        let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
+        let addr = wallet.get_new_address().unwrap();
+        let (psbt, details) = wallet
+            .create_tx(
+                TxBuilder::from_addressees(vec![(addr.clone(), 25_000)])
+                    .ordering(TxOrdering::Untouched),
+            )
+            .unwrap();
+
+        assert_eq!(psbt.global.unsigned_tx.output.len(), 2);
+        assert_eq!(psbt.global.unsigned_tx.output[0].value, 25_000);
+        assert_eq!(
+            psbt.global.unsigned_tx.output[1].value,
+            25_000 - details.fees
+        );
+    }
+
+    #[test]
+    fn test_create_tx_skip_change_dust() {
+        let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
+        let addr = wallet.get_new_address().unwrap();
+        let (psbt, _) = wallet
+            .create_tx(TxBuilder::from_addressees(vec![(addr.clone(), 49_800)]))
+            .unwrap();
+
+        assert_eq!(psbt.global.unsigned_tx.output.len(), 1);
+        assert_eq!(psbt.global.unsigned_tx.output[0].value, 49_800);
+    }
+
+    #[test]
+    #[should_panic(expected = "InsufficientFunds")]
+    fn test_create_tx_send_all_dust_amount() {
+        let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
+        let addr = wallet.get_new_address().unwrap();
+        // very high fee rate, so that the only output would be below dust
+        wallet
+            .create_tx(
+                TxBuilder::from_addressees(vec![(addr.clone(), 0)])
+                    .send_all()
+                    .fee_rate(super::utils::FeeRate::from_sat_per_vb(453.0)),
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn test_create_tx_ordering_respected() {
+        let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
+        let addr = wallet.get_new_address().unwrap();
+        let (psbt, details) = wallet
+            .create_tx(
+                TxBuilder::from_addressees(vec![(addr.clone(), 30_000), (addr.clone(), 10_000)])
+                    .ordering(super::tx_builder::TxOrdering::BIP69Lexicographic),
+            )
+            .unwrap();
+
+        assert_eq!(psbt.global.unsigned_tx.output.len(), 3);
+        assert_eq!(
+            psbt.global.unsigned_tx.output[0].value,
+            10_000 - details.fees
+        );
+        assert_eq!(psbt.global.unsigned_tx.output[1].value, 10_000);
+        assert_eq!(psbt.global.unsigned_tx.output[2].value, 30_000);
+    }
+
+    #[test]
+    fn test_create_tx_default_sighash() {
+        let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
+        let addr = wallet.get_new_address().unwrap();
+        let (psbt, _) = wallet
+            .create_tx(TxBuilder::from_addressees(vec![(addr.clone(), 30_000)]))
+            .unwrap();
+
+        assert_eq!(psbt.inputs[0].sighash_type, Some(bitcoin::SigHashType::All));
+    }
+
+    #[test]
+    fn test_create_tx_custom_sighash() {
+        let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
+        let addr = wallet.get_new_address().unwrap();
+        let (psbt, _) = wallet
+            .create_tx(
+                TxBuilder::from_addressees(vec![(addr.clone(), 30_000)])
+                    .sighash(bitcoin::SigHashType::Single),
+            )
+            .unwrap();
+
+        assert_eq!(
+            psbt.inputs[0].sighash_type,
+            Some(bitcoin::SigHashType::Single)
+        );
+    }
+
+    #[test]
+    fn test_create_tx_input_hd_keypaths() {
+        use bitcoin::util::bip32::{DerivationPath, Fingerprint};
+        use std::str::FromStr;
+
+        let (wallet, _, _) = get_funded_wallet("wpkh([d34db33f/44'/0'/0']xpub6ERApfZwUNrhLCkDtcHTcxd75RbzS1ed54G1LkBUHQVHQKqhMkhgbmJbZRkrgZw4koxb5JaHWkY4ALHY2grBGRjaDMzQLcgJvLJuZZvRcEL/0/*)");
+        let addr = wallet.get_new_address().unwrap();
+        let (psbt, _) = wallet
+            .create_tx(TxBuilder::from_addressees(vec![(addr.clone(), 0)]).send_all())
+            .unwrap();
+
+        assert_eq!(psbt.inputs[0].hd_keypaths.len(), 1);
+        assert_eq!(
+            psbt.inputs[0].hd_keypaths.values().nth(0).unwrap(),
+            &(
+                Fingerprint::from_str("d34db33f").unwrap(),
+                DerivationPath::from_str("m/44'/0'/0'/0/0").unwrap()
+            )
+        );
+    }
+
+    #[test]
+    fn test_create_tx_output_hd_keypaths() {
+        use bitcoin::util::bip32::{DerivationPath, Fingerprint};
+        use std::str::FromStr;
+
+        let (wallet, descriptors, _) = get_funded_wallet("wpkh([d34db33f/44'/0'/0']xpub6ERApfZwUNrhLCkDtcHTcxd75RbzS1ed54G1LkBUHQVHQKqhMkhgbmJbZRkrgZw4koxb5JaHWkY4ALHY2grBGRjaDMzQLcgJvLJuZZvRcEL/0/*)");
+        // cache some addresses
+        wallet.get_new_address().unwrap();
+
+        let addr = testutils!(@external descriptors, 5);
+        let (psbt, _) = wallet
+            .create_tx(TxBuilder::from_addressees(vec![(addr.clone(), 0)]).send_all())
+            .unwrap();
+
+        assert_eq!(psbt.outputs[0].hd_keypaths.len(), 1);
+        assert_eq!(
+            psbt.outputs[0].hd_keypaths.values().nth(0).unwrap(),
+            &(
+                Fingerprint::from_str("d34db33f").unwrap(),
+                DerivationPath::from_str("m/44'/0'/0'/0/5").unwrap()
+            )
+        );
+    }
+
+    #[test]
+    fn test_create_tx_set_redeem_script_p2sh() {
+        use bitcoin::hashes::hex::FromHex;
+
+        let (wallet, _, _) =
+            get_funded_wallet("sh(pk(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW))");
+        let addr = wallet.get_new_address().unwrap();
+        let (psbt, _) = wallet
+            .create_tx(TxBuilder::from_addressees(vec![(addr.clone(), 0)]).send_all())
+            .unwrap();
+
+        assert_eq!(
+            psbt.inputs[0].redeem_script,
+            Some(Script::from(
+                Vec::<u8>::from_hex(
+                    "21032b0558078bec38694a84933d659303e2575dae7e91685911454115bfd64487e3ac"
+                )
+                .unwrap()
+            ))
+        );
+        assert_eq!(psbt.inputs[0].witness_script, None);
+    }
+
+    #[test]
+    fn test_create_tx_set_witness_script_p2wsh() {
+        use bitcoin::hashes::hex::FromHex;
+
+        let (wallet, _, _) =
+            get_funded_wallet("wsh(pk(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW))");
+        let addr = wallet.get_new_address().unwrap();
+        let (psbt, _) = wallet
+            .create_tx(TxBuilder::from_addressees(vec![(addr.clone(), 0)]).send_all())
+            .unwrap();
+
+        assert_eq!(psbt.inputs[0].redeem_script, None);
+        assert_eq!(
+            psbt.inputs[0].witness_script,
+            Some(Script::from(
+                Vec::<u8>::from_hex(
+                    "21032b0558078bec38694a84933d659303e2575dae7e91685911454115bfd64487e3ac"
+                )
+                .unwrap()
+            ))
+        );
+    }
+
+    #[test]
+    fn test_create_tx_set_redeem_witness_script_p2wsh_p2sh() {
+        use bitcoin::hashes::hex::FromHex;
+
+        let (wallet, _, _) =
+            get_funded_wallet("sh(wsh(pk(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW)))");
+        let addr = wallet.get_new_address().unwrap();
+        let (psbt, _) = wallet
+            .create_tx(TxBuilder::from_addressees(vec![(addr.clone(), 0)]).send_all())
+            .unwrap();
+
+        let script = Script::from(
+            Vec::<u8>::from_hex(
+                "21032b0558078bec38694a84933d659303e2575dae7e91685911454115bfd64487e3ac",
+            )
+            .unwrap(),
+        );
+
+        assert_eq!(psbt.inputs[0].redeem_script, Some(script.to_v0_p2wsh()));
+        assert_eq!(psbt.inputs[0].witness_script, Some(script));
+    }
+
+    #[test]
+    fn test_create_tx_non_witness_utxo() {
+        let (wallet, _, _) =
+            get_funded_wallet("sh(pk(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW))");
+        let addr = wallet.get_new_address().unwrap();
+        let (psbt, _) = wallet
+            .create_tx(TxBuilder::from_addressees(vec![(addr.clone(), 0)]).send_all())
+            .unwrap();
+
+        assert!(psbt.inputs[0].non_witness_utxo.is_some());
+        assert!(psbt.inputs[0].witness_utxo.is_none());
+    }
+
+    #[test]
+    fn test_create_tx_only_witness_utxo() {
+        let (wallet, _, _) =
+            get_funded_wallet("wsh(pk(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW))");
+        let addr = wallet.get_new_address().unwrap();
+        let (psbt, _) = wallet
+            .create_tx(TxBuilder::from_addressees(vec![(addr.clone(), 0)]).send_all())
+            .unwrap();
+
+        assert!(psbt.inputs[0].non_witness_utxo.is_none());
+        assert!(psbt.inputs[0].witness_utxo.is_some());
+    }
+
+    #[test]
+    fn test_create_tx_both_non_witness_utxo_and_witness_utxo() {
+        let (wallet, _, _) =
+            get_funded_wallet("wsh(pk(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW))");
+        let addr = wallet.get_new_address().unwrap();
+        let (psbt, _) = wallet
+            .create_tx(
+                TxBuilder::from_addressees(vec![(addr.clone(), 0)])
+                    .force_non_witness_utxo()
+                    .send_all(),
+            )
+            .unwrap();
+
+        assert!(psbt.inputs[0].non_witness_utxo.is_some());
+        assert!(psbt.inputs[0].witness_utxo.is_some());
     }
 }

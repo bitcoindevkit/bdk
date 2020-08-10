@@ -19,7 +19,7 @@ pub struct TxBuilder<Cs: CoinSelectionAlgorithm> {
     pub(crate) ordering: TxOrdering,
     pub(crate) locktime: Option<u32>,
     pub(crate) rbf: Option<u32>,
-    pub(crate) version: Version,
+    pub(crate) version: Option<Version>,
     pub(crate) change_policy: ChangeSpendPolicy,
     pub(crate) force_non_witness_utxo: bool,
     pub(crate) coin_selection: Cs,
@@ -108,7 +108,7 @@ impl<Cs: CoinSelectionAlgorithm> TxBuilder<Cs> {
     }
 
     pub fn version(mut self, version: u32) -> Self {
-        self.version = Version(version);
+        self.version = Some(Version(version));
         self
     }
 
@@ -152,7 +152,7 @@ impl<Cs: CoinSelectionAlgorithm> TxBuilder<Cs> {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Hash, Clone, Copy)]
 pub enum TxOrdering {
     Shuffle,
     Untouched,
@@ -193,7 +193,7 @@ impl TxOrdering {
 }
 
 // Helper type that wraps u32 and has a default value of 1
-#[derive(Debug)]
+#[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Hash, Clone, Copy)]
 pub(crate) struct Version(pub(crate) u32);
 
 impl Default for Version {
@@ -202,7 +202,7 @@ impl Default for Version {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Hash, Clone, Copy)]
 pub enum ChangeSpendPolicy {
     ChangeAllowed,
     OnlyChange,
@@ -244,6 +244,11 @@ mod test {
     use bitcoin::hashes::hex::FromHex;
 
     use super::*;
+
+    #[test]
+    fn test_output_ordering_default_shuffle() {
+        assert_eq!(TxOrdering::default(), TxOrdering::Shuffle);
+    }
 
     #[test]
     fn test_output_ordering_untouched() {
@@ -300,5 +305,58 @@ mod test {
         assert_eq!(tx.output[0].value, 800);
         assert_eq!(tx.output[1].script_pubkey, From::from(vec![0xAA]));
         assert_eq!(tx.output[2].script_pubkey, From::from(vec![0xAA, 0xEE]));
+    }
+
+    fn get_test_utxos() -> Vec<UTXO> {
+        vec![
+            UTXO {
+                outpoint: OutPoint {
+                    txid: Default::default(),
+                    vout: 0,
+                },
+                txout: Default::default(),
+                is_internal: false,
+            },
+            UTXO {
+                outpoint: OutPoint {
+                    txid: Default::default(),
+                    vout: 1,
+                },
+                txout: Default::default(),
+                is_internal: true,
+            },
+        ]
+    }
+
+    #[test]
+    fn test_change_spend_policy_default() {
+        let change_spend_policy = ChangeSpendPolicy::default();
+        let filtered = change_spend_policy.filter_utxos(get_test_utxos().into_iter());
+
+        assert_eq!(filtered.len(), 2);
+    }
+
+    #[test]
+    fn test_change_spend_policy_no_internal() {
+        let change_spend_policy = ChangeSpendPolicy::ChangeForbidden;
+        let filtered = change_spend_policy.filter_utxos(get_test_utxos().into_iter());
+
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].is_internal, false);
+    }
+
+    #[test]
+    fn test_change_spend_policy_only_internal() {
+        let change_spend_policy = ChangeSpendPolicy::OnlyChange;
+        let filtered = change_spend_policy.filter_utxos(get_test_utxos().into_iter());
+
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].is_internal, true);
+    }
+
+    #[test]
+    fn test_default_tx_version_1() {
+        let version = Version::default();
+        assert_eq!(version.0, 1);
     }
 }

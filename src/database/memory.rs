@@ -405,6 +405,64 @@ impl BatchDatabase for MemoryDatabase {
 }
 
 #[cfg(test)]
+impl MemoryDatabase {
+    // Artificially insert a tx in the database, as if we had found it with a `sync`
+    pub fn received_tx(
+        &mut self,
+        tx_meta: testutils::TestIncomingTx,
+        current_height: Option<u32>,
+    ) -> bitcoin::Txid {
+        use std::str::FromStr;
+
+        let tx = Transaction {
+            version: 1,
+            lock_time: 0,
+            input: vec![],
+            output: tx_meta
+                .output
+                .iter()
+                .map(|out_meta| bitcoin::TxOut {
+                    value: out_meta.value,
+                    script_pubkey: bitcoin::Address::from_str(&out_meta.to_address)
+                        .unwrap()
+                        .script_pubkey(),
+                })
+                .collect(),
+        };
+
+        let txid = tx.txid();
+        let height = tx_meta
+            .min_confirmations
+            .map(|conf| current_height.unwrap().checked_sub(conf as u32).unwrap());
+
+        let tx_details = TransactionDetails {
+            transaction: Some(tx.clone()),
+            txid,
+            timestamp: 0,
+            height,
+            received: 0,
+            sent: 0,
+            fees: 0,
+        };
+
+        self.set_tx(&tx_details).unwrap();
+        for (vout, out) in tx.output.iter().enumerate() {
+            self.set_utxo(&UTXO {
+                txout: out.clone(),
+                outpoint: OutPoint {
+                    txid,
+                    vout: vout as u32,
+                },
+                is_internal: false,
+            })
+            .unwrap();
+        }
+
+        txid
+    }
+}
+
+#[cfg(test)]
 mod test {
     use super::MemoryDatabase;
 
