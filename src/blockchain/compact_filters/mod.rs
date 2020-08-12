@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use log::{debug, error, info, trace};
 
 use bitcoin::network::message_blockdata::Inventory;
-use bitcoin::{BitcoinHash, OutPoint, Transaction, Txid};
+use bitcoin::{OutPoint, Transaction, Txid};
 
 use rocksdb::{Options, SliceTransform, DB};
 
@@ -274,7 +274,7 @@ impl OnlineBlockchain for CompactFiltersBlockchain {
 
                         let block_height = headers.get_height_for(block_hash)?.unwrap_or(0);
                         let saved_correct_block = match headers.get_full_block(block_height)? {
-                            Some(block) if &block.bitcoin_hash() == block_hash => true,
+                            Some(block) if &block.block_hash() == block_hash => true,
                             _ => false,
                         };
 

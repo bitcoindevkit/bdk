@@ -2,7 +2,7 @@
 name = "magical-bitcoin-wallet"
 version = "0.1.0"
 edition = "2018"
-authors = ["Riccardo Casatta <riccardo@casatta.it>", "Alekos Filini <alekos.filini@gmail.com>"]
+authors = ["Alekos Filini <alekos.filini@gmail.com>", "Riccardo Casatta <riccardo@casatta.it>"]
 
 [dependencies]
 magical-macros = { path = "./macros" }
@@ -24,6 +24,10 @@ async-trait = { version = "0.1", optional = true }
 rocksdb = { version = "0.14", optional = true }
 socks = { version = "0.3", optional = true }
 lazy_static = { version = "1.4", optional = true }
+
+[patch.crates-io]
+bitcoin = { git = "https://github.com/rust-bitcoin/rust-bitcoin/", rev = "478e091" }
+miniscript = { git = "https://github.com/MagicalBitcoin/rust-miniscript", branch = "descriptor-public-key" }
 
 # Platform-specific dependencies
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

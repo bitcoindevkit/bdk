@@ -1,4 +1,4 @@
-use bitcoin::{Address, OutPoint, Script, Txid};
+use bitcoin::{Address, OutPoint};
 
 #[derive(Debug)]
 pub enum Error {
@@ -25,13 +25,7 @@ pub enum Error {
     SpendingPolicyRequired,
     InvalidPolicyPathError(crate::descriptor::policy::PolicyError),
 
-    // Signing errors (expected, received)
-    InputTxidMismatch((Txid, OutPoint)),
-    InputRedeemScriptMismatch((Script, Script)), // scriptPubKey, redeemScript
-    InputWitnessScriptMismatch((Script, Script)), // scriptPubKey, redeemScript
-    InputUnknownSegwitScript(Script),
-    InputMissingWitnessScript(usize),
-    MissingUTXO,
+    Signer(crate::wallet::signer::SignerError),
 
     // Blockchain interface errors
     Uncapable(crate::blockchain::Capability),
@@ -44,6 +38,7 @@ pub enum Error {
     Descriptor(crate::descriptor::error::Error),
 
     Encode(bitcoin::consensus::encode::Error),
+    Miniscript(miniscript::Error),
     BIP32(bitcoin::util::bip32::Error),
     Secp256k1(bitcoin::secp256k1::Error),
     JSON(serde_json::Error),
@@ -75,8 +70,10 @@ impl_error!(
     crate::descriptor::policy::PolicyError,
     InvalidPolicyPathError
 );
+impl_error!(crate::wallet::signer::SignerError, Signer);
 
 impl_error!(bitcoin::consensus::encode::Error, Encode);
+impl_error!(miniscript::Error, Miniscript);
 impl_error!(bitcoin::util::bip32::Error, BIP32);
 impl_error!(bitcoin::secp256k1::Error, Secp256k1);
 impl_error!(serde_json::Error, JSON);

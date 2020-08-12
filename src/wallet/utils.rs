@@ -1,3 +1,5 @@
+use miniscript::{MiniscriptKey, Satisfier};
+
 // De-facto standard "dust limit" (even though it should change based on the output type)
 const DUST_LIMIT_SATOSHI: u64 = 546;
 
@@ -39,6 +41,61 @@ impl FeeRate {
 impl std::default::Default for FeeRate {
     fn default() -> Self {
         FeeRate::default_min_relay_fee()
+    }
+}
+
+pub struct After {
+    pub current_height: Option<u32>,
+    pub assume_height_reached: bool,
+}
+
+impl After {
+    pub(crate) fn new(current_height: Option<u32>, assume_height_reached: bool) -> After {
+        After {
+            current_height,
+            assume_height_reached,
+        }
+    }
+}
+
+impl<Pk: MiniscriptKey> Satisfier<Pk> for After {
+    fn check_after(&self, n: u32) -> bool {
+        if let Some(current_height) = self.current_height {
+            current_height >= n
+        } else {
+            self.assume_height_reached
+        }
+    }
+}
+
+pub struct Older {
+    pub current_height: Option<u32>,
+    pub create_height: Option<u32>,
+    pub assume_height_reached: bool,
+}
+
+impl Older {
+    pub(crate) fn new(
+        current_height: Option<u32>,
+        create_height: Option<u32>,
+        assume_height_reached: bool,
+    ) -> Older {
+        Older {
+            current_height,
+            create_height,
+            assume_height_reached,
+        }
+    }
+}
+
+impl<Pk: MiniscriptKey> Satisfier<Pk> for Older {
+    fn check_older(&self, n: u32) -> bool {
+        if let Some(current_height) = self.current_height {
+            // TODO: test >= / >
+            current_height as u64 >= self.create_height.unwrap_or(0) as u64 + n as u64
+        } else {
+            self.assume_height_reached
+        }
     }
 }
 

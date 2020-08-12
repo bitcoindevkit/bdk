@@ -16,7 +16,6 @@ use bitcoin::hash_types::FilterHash;
 use bitcoin::hashes::hex::FromHex;
 use bitcoin::hashes::{sha256d, Hash};
 use bitcoin::util::bip158::BlockFilter;
-use bitcoin::util::hash::BitcoinHash;
 use bitcoin::util::uint::Uint256;
 use bitcoin::Block;
 use bitcoin::BlockHash;
@@ -257,7 +256,7 @@ impl ChainStore<Full> {
             );
             batch.put_cf(
                 cf_handle,
-                StoreEntry::BlockHeaderIndex(Some(genesis.bitcoin_hash())).get_key(),
+                StoreEntry::BlockHeaderIndex(Some(genesis.block_hash())).get_key(),
                 &0usize.to_be_bytes(),
             );
             store.write(batch)?;
@@ -290,7 +289,7 @@ impl ChainStore<Full> {
                     .get_pinned_cf(cf_handle, StoreEntry::BlockHeader(Some(index)).get_key())?
                     .unwrap(),
             )?;
-            answer.push((header.bitcoin_hash(), index));
+            answer.push((header.block_hash(), index));
 
             if let Some(new_index) = index.checked_sub(step) {
                 index = new_index;
@@ -322,7 +321,7 @@ impl ChainStore<Full> {
         let mut batch = WriteBatch::default();
         batch.put_cf(
             new_cf_handle,
-            StoreEntry::BlockHeaderIndex(Some(header.bitcoin_hash())).get_key(),
+            StoreEntry::BlockHeaderIndex(Some(header.block_hash())).get_key(),
             &from.to_be_bytes(),
         );
         batch.put_cf(
@@ -406,7 +405,7 @@ impl ChainStore<Full> {
 
             batch.delete_cf(
                 cf_handle,
-                StoreEntry::BlockHeaderIndex(Some(header.bitcoin_hash())).get_key(),
+                StoreEntry::BlockHeaderIndex(Some(header.block_hash())).get_key(),
             );
         }
 
@@ -461,7 +460,7 @@ impl ChainStore<Full> {
             .map(|data| {
                 let (header, _): (BlockHeader, Uint256) =
                     deserialize(&data).map_err(|_| CompactFiltersError::DataCorruption)?;
-                Ok::<_, CompactFiltersError>(header.bitcoin_hash())
+                Ok::<_, CompactFiltersError>(header.block_hash())
             })
             .transpose()?)
     }
@@ -574,7 +573,7 @@ impl<T: StoreType> ChainStore<T> {
             .map(|(_, v)| -> Result<_, CompactFiltersError> {
                 let (header, _): (BlockHeader, Uint256) = SerializeDb::deserialize(&v)?;
 
-                Ok(header.bitcoin_hash())
+                Ok(header.block_hash())
             })
             .transpose()?)
     }
@@ -593,7 +592,7 @@ impl<T: StoreType> ChainStore<T> {
             .get_pinned_cf(cf_handle, StoreEntry::BlockHeader(Some(from)).get_key())?
             .map(|result| {
                 let (header, work): (BlockHeader, Uint256) = SerializeDb::deserialize(&result)?;
-                Ok::<_, CompactFiltersError>((header.bitcoin_hash(), work))
+                Ok::<_, CompactFiltersError>((header.block_hash(), work))
             })
             .transpose()?
             .ok_or(CompactFiltersError::DataCorruption)?;
@@ -603,13 +602,13 @@ impl<T: StoreType> ChainStore<T> {
                 return Err(CompactFiltersError::InvalidHeaders);
             }
 
-            last_hash = header.bitcoin_hash();
+            last_hash = header.block_hash();
             accumulated_work = accumulated_work + header.work();
 
             let height = from + index + 1;
             batch.put_cf(
                 cf_handle,
-                StoreEntry::BlockHeaderIndex(Some(header.bitcoin_hash())).get_key(),
+                StoreEntry::BlockHeaderIndex(Some(header.block_hash())).get_key(),
                 &(height).to_be_bytes(),
             );
             batch.put_cf(
@@ -647,8 +646,8 @@ pub struct FilterHeader {
     filter_hash: FilterHash,
 }
 
-impl BitcoinHash<FilterHeaderHash> for FilterHeader {
-    fn bitcoin_hash(&self) -> FilterHeaderHash {
+impl FilterHeader {
+    fn header_hash(&self) -> FilterHeaderHash {
         let mut hash_data = self.filter_hash.into_inner().to_vec();
         hash_data.extend_from_slice(&self.prev_header_hash);
         sha256d::Hash::hash(&hash_data).into()
@@ -794,7 +793,7 @@ impl CFStore {
                     prev_header_hash: last_hash,
                     filter_hash,
                 };
-                last_hash = filter_header.bitcoin_hash();
+                last_hash = filter_header.header_hash();
 
                 filter_header
             })

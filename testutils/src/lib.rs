@@ -94,10 +94,16 @@ impl TestIncomingTx {
 #[macro_export]
 macro_rules! testutils {
     ( @external $descriptors:expr, $child:expr ) => ({
-        $descriptors.0.derive($child).expect("Derivation error").address(bitcoin::Network::Regtest).expect("No address form")
+        use miniscript::descriptor::{Descriptor, DescriptorPublicKey};
+
+        let parsed = Descriptor::<DescriptorPublicKey>::parse_secret(&$descriptors.0).expect("Failed to parse descriptor in `testutils!(@external)`").0;
+        parsed.derive(&[bitcoin::util::bip32::ChildNumber::from_normal_idx($child).unwrap()]).address(bitcoin::Network::Regtest).expect("No address form")
     });
     ( @internal $descriptors:expr, $child:expr ) => ({
-        $descriptors.1.expect("Missing internal descriptor").derive($child).expect("Derivation error").address(bitcoin::Network::Regtest).expect("No address form")
+        use miniscript::descriptor::{Descriptor, DescriptorPublicKey};
+
+        let parsed = Descriptor::<DescriptorPublicKey>::parse_secret(&$descriptors.1.expect("Missing internal descriptor")).expect("Failed to parse descriptor in `testutils!(@internal)`").0;
+        parsed.derive(&[bitcoin::util::bip32::ChildNumber::from_normal_idx($child).unwrap()]).address(bitcoin::Network::Regtest).expect("No address form")
     });
     ( @e $descriptors:expr, $child:expr ) => ({ testutils!(@external $descriptors, $child) });
     ( @i $descriptors:expr, $child:expr ) => ({ testutils!(@internal $descriptors, $child) });
@@ -169,6 +175,8 @@ macro_rules! testutils {
         use std::collections::HashMap;
         use std::convert::TryInto;
 
+        use miniscript::descriptor::{Descriptor, DescriptorPublicKey};
+
         let mut keys: HashMap<&'static str, (String, Option<String>, Option<String>)> = HashMap::new();
         $(
             keys = testutils!{ @keys $( $keys )* };
@@ -189,9 +197,9 @@ macro_rules! testutils {
             }
 
         }).unwrap();
-        let external: ExtendedDescriptor = external.try_into().unwrap();
+        let external = external.to_string();
 
-        let mut internal = None::<ExtendedDescriptor>;
+        let mut internal = None::<String>;
         $(
             let string_internal: Descriptor<String> = FromStr::from_str($internal_descriptor).unwrap();
 
@@ -209,7 +217,7 @@ macro_rules! testutils {
                 }
 
             }).unwrap();
-            internal = Some(string_internal.try_into().unwrap());
+            internal = Some(string_internal.to_string());
         )*
 
         (external, internal)
@@ -349,7 +357,6 @@ impl TestClient {
         use bitcoin::blockdata::script::Builder;
         use bitcoin::blockdata::transaction::{OutPoint, TxIn, TxOut};
         use bitcoin::hash_types::{BlockHash, TxMerkleNode};
-        use bitcoin::util::hash::BitcoinHash;
 
         let block_template: serde_json::Value = self
             .call("getblocktemplate", &[json!({"rules": ["segwit"]})])
@@ -432,7 +439,7 @@ impl TestClient {
 
         self.wait_for_block(height as usize);
 
-        block.header.bitcoin_hash().to_hex()
+        block.header.block_hash().to_hex()
     }
 
     pub fn generate(&mut self, num_blocks: u64) {

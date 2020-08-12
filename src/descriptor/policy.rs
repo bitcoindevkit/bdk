@@ -1,23 +1,26 @@
 use std::cmp::max;
 use std::collections::{BTreeMap, HashSet, VecDeque};
+use std::sync::Arc;
 
 use serde::ser::SerializeMap;
 use serde::{Serialize, Serializer};
 
 use bitcoin::hashes::*;
-use bitcoin::secp256k1::Secp256k1;
 use bitcoin::util::bip32::Fingerprint;
 use bitcoin::PublicKey;
 
-use miniscript::{Descriptor, Miniscript, ScriptContext, Terminal};
+use miniscript::descriptor::DescriptorPublicKey;
+use miniscript::{Descriptor, Miniscript, MiniscriptKey, ScriptContext, Terminal};
 
 #[allow(unused_imports)]
 use log::{debug, error, info, trace};
 
+use crate::descriptor::ExtractPolicy;
+use crate::wallet::signer::{SignerId, SignersContainer};
+
 use super::checksum::get_checksum;
 use super::error::Error;
-use crate::descriptor::{Key, MiniscriptExtractPolicy};
-use crate::psbt::PSBTSatisfier;
+use super::XKeyUtils;
 
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct PKOrF {
@@ -30,20 +33,23 @@ pub struct PKOrF {
 }
 
 impl PKOrF {
-    fn from_key(k: &Box<dyn Key>) -> Self {
-        let secp = Secp256k1::gen_new();
+    fn from_key(k: &DescriptorPublicKey) -> Self {
+        match k {
+            DescriptorPublicKey::PubKey(pubkey) => PKOrF {
+                pubkey: Some(*pubkey),
+                ..Default::default()
+            },
+            DescriptorPublicKey::XPub(xpub) => PKOrF {
+                fingerprint: Some(xpub.root_fingerprint()),
+                ..Default::default()
+            },
+        }
+    }
 
-        let pubkey = k.as_public_key(&secp, None).unwrap();
-        if let Some(fing) = k.fingerprint(&secp) {
-            PKOrF {
-                fingerprint: Some(fing),
-                ..Default::default()
-            }
-        } else {
-            PKOrF {
-                pubkey: Some(pubkey),
-                ..Default::default()
-            }
+    fn from_key_hash(k: hash160::Hash) -> Self {
+        PKOrF {
+            pubkey_hash: Some(k),
+            ..Default::default()
         }
     }
 }
@@ -445,14 +451,15 @@ impl Policy {
     }
 
     fn make_multisig(
-        keys: Vec<Option<&Box<dyn Key>>>,
+        keys: &Vec<DescriptorPublicKey>,
+        signers: Arc<SignersContainer<DescriptorPublicKey>>,
         threshold: usize,
     ) -> Result<Option<Policy>, PolicyError> {
         if threshold == 0 {
             return Ok(None);
         }
 
-        let parsed_keys = keys.iter().map(|k| PKOrF::from_key(k.unwrap())).collect();
+        let parsed_keys = keys.iter().map(|k| PKOrF::from_key(k)).collect();
 
         let mut contribution = Satisfaction::Partial {
             n: keys.len(),
@@ -461,14 +468,14 @@ impl Policy {
             conditions: Default::default(),
         };
         for (index, key) in keys.iter().enumerate() {
-            let val = if key.is_some() && key.unwrap().has_secret() {
-                Satisfaction::Complete {
-                    condition: Default::default(),
-                }
-            } else {
-                Satisfaction::None
-            };
-            contribution.add(&val, index)?;
+            if let Some(_) = signers.find(signer_id(key)) {
+                contribution.add(
+                    &Satisfaction::Complete {
+                        condition: Default::default(),
+                    },
+                    index,
+                )?;
+            }
         }
         contribution.finalize()?;
 
@@ -480,15 +487,6 @@ impl Policy {
         policy.contribution = contribution;
 
         Ok(Some(policy))
-    }
-
-    pub fn satisfy<Ctx: ScriptContext>(
-        &mut self,
-        _satisfier: &PSBTSatisfier,
-        _desc_node: &Terminal<PublicKey, Ctx>,
-    ) {
-        //self.satisfaction = self.item.satisfy(satisfier, desc_node);
-        //self.contribution += &self.satisfaction;
     }
 
     pub fn requires_path(&self) -> bool {
@@ -566,60 +564,55 @@ impl From<SatisfiableItem> for Policy {
     }
 }
 
-fn signature_from_string(key: Option<&Box<dyn Key>>) -> Option<Policy> {
-    key.map(|k| {
-        let mut policy: Policy = SatisfiableItem::Signature(PKOrF::from_key(k)).into();
-        policy.contribution = if k.has_secret() {
-            Satisfaction::Complete {
-                condition: Default::default(),
-            }
-        } else {
-            Satisfaction::None
-        };
-
-        policy
-    })
+fn signer_id(key: &DescriptorPublicKey) -> SignerId<DescriptorPublicKey> {
+    match key {
+        DescriptorPublicKey::PubKey(pubkey) => pubkey.to_pubkeyhash().into(),
+        DescriptorPublicKey::XPub(xpub) => xpub.root_fingerprint().into(),
+    }
 }
 
-fn signature_key_from_string(key: Option<&Box<dyn Key>>) -> Option<Policy> {
-    let secp = Secp256k1::gen_new();
+fn signature(
+    key: &DescriptorPublicKey,
+    signers: Arc<SignersContainer<DescriptorPublicKey>>,
+) -> Policy {
+    let mut policy: Policy = SatisfiableItem::Signature(PKOrF::from_key(key)).into();
 
-    key.map(|k| {
-        let pubkey = k.as_public_key(&secp, None).unwrap();
-        let mut policy: Policy = if let Some(fing) = k.fingerprint(&secp) {
-            SatisfiableItem::SignatureKey(PKOrF {
-                fingerprint: Some(fing),
-                ..Default::default()
-            })
-        } else {
-            SatisfiableItem::SignatureKey(PKOrF {
-                pubkey_hash: Some(hash160::Hash::hash(&pubkey.to_bytes())),
-                ..Default::default()
-            })
+    policy.contribution = if signers.find(signer_id(key)).is_some() {
+        Satisfaction::Complete {
+            condition: Default::default(),
         }
-        .into();
-        policy.contribution = if k.has_secret() {
-            Satisfaction::Complete {
-                condition: Default::default(),
-            }
-        } else {
-            Satisfaction::None
-        };
+    } else {
+        Satisfaction::None
+    };
 
-        policy
-    })
+    policy
 }
 
-impl<Ctx: ScriptContext> MiniscriptExtractPolicy for Miniscript<String, Ctx> {
+fn signature_key(
+    key_hash: &<DescriptorPublicKey as MiniscriptKey>::Hash,
+    signers: Arc<SignersContainer<DescriptorPublicKey>>,
+) -> Policy {
+    let mut policy: Policy = SatisfiableItem::Signature(PKOrF::from_key_hash(*key_hash)).into();
+
+    if let Some(_) = signers.find(SignerId::PkHash(*key_hash)) {
+        policy.contribution = Satisfaction::Complete {
+            condition: Default::default(),
+        }
+    }
+
+    policy
+}
+
+impl<Ctx: ScriptContext> ExtractPolicy for Miniscript<DescriptorPublicKey, Ctx> {
     fn extract_policy(
         &self,
-        lookup_map: &BTreeMap<String, Box<dyn Key>>,
+        signers: Arc<SignersContainer<DescriptorPublicKey>>,
     ) -> Result<Option<Policy>, Error> {
         Ok(match &self.node {
             // Leaves
             Terminal::True | Terminal::False => None,
-            Terminal::PkK(pubkey) => signature_from_string(lookup_map.get(pubkey)),
-            Terminal::PkH(pubkey_hash) => signature_key_from_string(lookup_map.get(pubkey_hash)),
+            Terminal::PkK(pubkey) => Some(signature(pubkey, Arc::clone(&signers))),
+            Terminal::PkH(pubkey_hash) => Some(signature_key(pubkey_hash, Arc::clone(&signers))),
             Terminal::After(value) => {
                 let mut policy: Policy = SatisfiableItem::AbsoluteTimelock { value: *value }.into();
                 policy.contribution = Satisfaction::Complete {
@@ -652,9 +645,7 @@ impl<Ctx: ScriptContext> MiniscriptExtractPolicy for Miniscript<String, Ctx> {
             Terminal::Hash160(hash) => {
                 Some(SatisfiableItem::HASH160Preimage { hash: *hash }.into())
             }
-            Terminal::Multi(k, pks) => {
-                Policy::make_multisig(pks.iter().map(|s| lookup_map.get(s)).collect(), *k)?
-            }
+            Terminal::Multi(k, pks) => Policy::make_multisig(pks, Arc::clone(&signers), *k)?,
             // Identities
             Terminal::Alt(inner)
             | Terminal::Swap(inner)
@@ -662,26 +653,31 @@ impl<Ctx: ScriptContext> MiniscriptExtractPolicy for Miniscript<String, Ctx> {
             | Terminal::DupIf(inner)
             | Terminal::Verify(inner)
             | Terminal::NonZero(inner)
-            | Terminal::ZeroNotEqual(inner) => inner.extract_policy(lookup_map)?,
+            | Terminal::ZeroNotEqual(inner) => inner.extract_policy(Arc::clone(&signers))?,
             // Complex policies
-            Terminal::AndV(a, b) | Terminal::AndB(a, b) => {
-                Policy::make_and(a.extract_policy(lookup_map)?, b.extract_policy(lookup_map)?)?
-            }
+            Terminal::AndV(a, b) | Terminal::AndB(a, b) => Policy::make_and(
+                a.extract_policy(Arc::clone(&signers))?,
+                b.extract_policy(Arc::clone(&signers))?,
+            )?,
             Terminal::AndOr(x, y, z) => Policy::make_or(
-                Policy::make_and(x.extract_policy(lookup_map)?, y.extract_policy(lookup_map)?)?,
-                z.extract_policy(lookup_map)?,
+                Policy::make_and(
+                    x.extract_policy(Arc::clone(&signers))?,
+                    y.extract_policy(Arc::clone(&signers))?,
+                )?,
+                z.extract_policy(Arc::clone(&signers))?,
             )?,
             Terminal::OrB(a, b)
             | Terminal::OrD(a, b)
             | Terminal::OrC(a, b)
-            | Terminal::OrI(a, b) => {
-                Policy::make_or(a.extract_policy(lookup_map)?, b.extract_policy(lookup_map)?)?
-            }
+            | Terminal::OrI(a, b) => Policy::make_or(
+                a.extract_policy(Arc::clone(&signers))?,
+                b.extract_policy(Arc::clone(&signers))?,
+            )?,
             Terminal::Thresh(k, nodes) => {
                 let mut threshold = *k;
                 let mapped: Vec<_> = nodes
                     .iter()
-                    .map(|n| n.extract_policy(lookup_map))
+                    .map(|n| n.extract_policy(Arc::clone(&signers)))
                     .collect::<Result<Vec<_>, _>>()?
                     .into_iter()
                     .filter_map(|x| x)
@@ -700,22 +696,18 @@ impl<Ctx: ScriptContext> MiniscriptExtractPolicy for Miniscript<String, Ctx> {
     }
 }
 
-impl MiniscriptExtractPolicy for Descriptor<String> {
+impl ExtractPolicy for Descriptor<DescriptorPublicKey> {
     fn extract_policy(
         &self,
-        lookup_map: &BTreeMap<String, Box<dyn Key>>,
+        signers: Arc<SignersContainer<DescriptorPublicKey>>,
     ) -> Result<Option<Policy>, Error> {
         match self {
             Descriptor::Pk(pubkey)
             | Descriptor::Pkh(pubkey)
             | Descriptor::Wpkh(pubkey)
-            | Descriptor::ShWpkh(pubkey) => Ok(signature_from_string(lookup_map.get(pubkey))),
-            Descriptor::Bare(inner) | Descriptor::Sh(inner) => {
-                Ok(inner.extract_policy(lookup_map)?)
-            }
-            Descriptor::Wsh(inner) | Descriptor::ShWsh(inner) => {
-                Ok(inner.extract_policy(lookup_map)?)
-            }
+            | Descriptor::ShWpkh(pubkey) => Ok(Some(signature(pubkey, signers))),
+            Descriptor::Bare(inner) | Descriptor::Sh(inner) => Ok(inner.extract_policy(signers)?),
+            Descriptor::Wsh(inner) | Descriptor::ShWsh(inner) => Ok(inner.extract_policy(signers)?),
         }
     }
 }

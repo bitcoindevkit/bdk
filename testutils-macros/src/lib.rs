@@ -67,11 +67,11 @@ pub fn magical_blockchain_tests(attr: TokenStream, item: TokenStream) -> TokenSt
                     #parsed_sig_ident()
                 }
 
-                fn get_wallet_from_descriptors(descriptors: &(ExtendedDescriptor, Option<ExtendedDescriptor>)) -> Wallet<#return_type, MemoryDatabase> {
-                    Wallet::new(&descriptors.0.to_string(), descriptors.1.as_ref().map(|d| d.to_string()).as_deref(), Network::Regtest, MemoryDatabase::new(), get_blockchain()).unwrap()
+                fn get_wallet_from_descriptors(descriptors: &(String, Option<String>)) -> Wallet<#return_type, MemoryDatabase> {
+                    Wallet::new(&descriptors.0.to_string(), descriptors.1.as_deref(), Network::Regtest, MemoryDatabase::new(), get_blockchain()).unwrap()
                 }
 
-                fn init_single_sig() -> (Wallet<#return_type, MemoryDatabase>, (ExtendedDescriptor, Option<ExtendedDescriptor>), TestClient) {
+                fn init_single_sig() -> (Wallet<#return_type, MemoryDatabase>, (String, Option<String>), TestClient) {
                     let descriptors = testutils! {
                         @descriptors ( "wpkh(Alice)" ) ( "wpkh(Alice)" ) ( @keys ( "Alice" => (@generate_xprv "/44'/0'/0'/0/*", "/44'/0'/0'/1/*") ) )
                     };
@@ -90,6 +90,7 @@ pub fn magical_blockchain_tests(attr: TokenStream, item: TokenStream) -> TokenSt
                     let tx = testutils! {
                         @tx ( (@external descriptors, 0) => 50_000 )
                     };
+                    println!("{:?}", tx);
                     let txid = test_client.receive(tx);
 
                     wallet.sync(noop_progress(), None).unwrap();
@@ -272,6 +273,7 @@ pub fn magical_blockchain_tests(attr: TokenStream, item: TokenStream) -> TokenSt
                 #[serial]
                 fn test_sync_after_send() {
                     let (wallet, descriptors, mut test_client) = init_single_sig();
+                    println!("{}", descriptors.0);
                     let node_addr = test_client.get_node_address(None);
 
                     test_client.receive(testutils! {
@@ -284,7 +286,9 @@ pub fn magical_blockchain_tests(attr: TokenStream, item: TokenStream) -> TokenSt
                     let (psbt, details) = wallet.create_tx(TxBuilder::from_addressees(vec![(node_addr, 25_000)])).unwrap();
                     let (psbt, finalized) = wallet.sign(psbt, None).unwrap();
                     assert!(finalized, "Cannot finalize transaction");
-                    wallet.broadcast(psbt.extract_tx()).unwrap();
+                    let tx = psbt.extract_tx();
+                    println!("{}", bitcoin::consensus::encode::serialize_hex(&tx));
+                    wallet.broadcast(tx).unwrap();
 
                     wallet.sync(noop_progress(), None).unwrap();
                     assert_eq!(wallet.get_balance().unwrap(), details.received);

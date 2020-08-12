@@ -1,8 +1,9 @@
 extern crate magical_bitcoin_wallet;
 extern crate serde_json;
 
-use std::str::FromStr;
+use std::sync::Arc;
 
+use magical_bitcoin_wallet::bitcoin::util::bip32::ChildNumber;
 use magical_bitcoin_wallet::bitcoin::*;
 use magical_bitcoin_wallet::descriptor::*;
 
@@ -14,13 +15,14 @@ fn main() {
                     and_v(vc:pk_h(cVt4o7BGAig1UXywgGSmARhxMdzP5qvQsxKkSsc1XEkw3tDTQFpy),older(1000))\
                    ))";
 
-    let extended_desc = ExtendedDescriptor::from_str(desc).unwrap();
+    let (extended_desc, key_map) = ExtendedDescriptor::parse_secret(desc).unwrap();
     println!("{:?}", extended_desc);
 
-    let policy = extended_desc.extract_policy().unwrap();
+    let signers = Arc::new(key_map.into());
+    let policy = extended_desc.extract_policy(signers).unwrap();
     println!("policy: {}", serde_json::to_string(&policy).unwrap());
 
-    let derived_desc = extended_desc.derive(42).unwrap();
+    let derived_desc = extended_desc.derive(&[ChildNumber::from_normal_idx(42).unwrap()]);
     println!("{:?}", derived_desc);
 
     let addr = derived_desc.address(Network::Testnet).unwrap();
