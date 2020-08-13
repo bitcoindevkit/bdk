@@ -363,6 +363,135 @@ pub fn magical_blockchain_tests(attr: TokenStream, item: TokenStream) -> TokenSt
                     wallet.sync(None).unwrap();
                     assert_eq!(wallet.get_balance().unwrap(), 50_000 - total_sent);
                 }
+
+                #[test]
+                #[serial]
+                fn test_sync_bump_fee() {
+                    let (wallet, descriptors, mut test_client) = init_single_sig();
+                    let node_addr = test_client.get_node_address(None);
+
+                    test_client.receive(testutils! {
+                        @tx ( (@external descriptors, 0) => 50_000 ) (@confirmations 1)
+                    });
+
+                    wallet.sync(None).unwrap();
+                    assert_eq!(wallet.get_balance().unwrap(), 50_000);
+
+                    let (psbt, details) = wallet.create_tx(TxBuilder::from_addressees(vec![(node_addr.clone(), 5_000)]).enable_rbf()).unwrap();
+                    let (psbt, finalized) = wallet.sign(psbt, None).unwrap();
+                    assert!(finalized, "Cannot finalize transaction");
+                    wallet.broadcast(psbt.extract_tx()).unwrap();
+                    wallet.sync(None).unwrap();
+                    assert_eq!(wallet.get_balance().unwrap(), 50_000 - details.fees - 5_000);
+                    assert_eq!(wallet.get_balance().unwrap(), details.received);
+
+                    let (new_psbt, new_details) = wallet.bump_fee(&details.txid, TxBuilder::new().fee_rate(FeeRate::from_sat_per_vb(2.1))).unwrap();
+                    let (new_psbt, finalized) = wallet.sign(new_psbt, None).unwrap();
+                    assert!(finalized, "Cannot finalize transaction");
+                    wallet.broadcast(new_psbt.extract_tx()).unwrap();
+                    wallet.sync(None).unwrap();
+                    assert_eq!(wallet.get_balance().unwrap(), 50_000 - new_details.fees - 5_000);
+                    assert_eq!(wallet.get_balance().unwrap(), new_details.received);
+
+                    assert!(new_details.fees > details.fees);
+                }
+
+                #[test]
+                #[serial]
+                fn test_sync_bump_fee_remove_change() {
+                    let (wallet, descriptors, mut test_client) = init_single_sig();
+                    let node_addr = test_client.get_node_address(None);
+
+                    test_client.receive(testutils! {
+                        @tx ( (@external descriptors, 0) => 50_000 ) (@confirmations 1)
+                    });
+
+                    wallet.sync(None).unwrap();
+                    assert_eq!(wallet.get_balance().unwrap(), 50_000);
+
+                    let (psbt, details) = wallet.create_tx(TxBuilder::from_addressees(vec![(node_addr.clone(), 49_000)]).enable_rbf()).unwrap();
+                    let (psbt, finalized) = wallet.sign(psbt, None).unwrap();
+                    assert!(finalized, "Cannot finalize transaction");
+                    wallet.broadcast(psbt.extract_tx()).unwrap();
+                    wallet.sync(None).unwrap();
+                    assert_eq!(wallet.get_balance().unwrap(), 1_000 - details.fees);
+                    assert_eq!(wallet.get_balance().unwrap(), details.received);
+
+                    let (new_psbt, new_details) = wallet.bump_fee(&details.txid, TxBuilder::new().fee_rate(FeeRate::from_sat_per_vb(5.0))).unwrap();
+
+                    let (new_psbt, finalized) = wallet.sign(new_psbt, None).unwrap();
+                    assert!(finalized, "Cannot finalize transaction");
+                    wallet.broadcast(new_psbt.extract_tx()).unwrap();
+                    wallet.sync(None).unwrap();
+                    assert_eq!(wallet.get_balance().unwrap(), 0);
+                    assert_eq!(new_details.received, 0);
+
+                    assert!(new_details.fees > details.fees);
+                }
+
+                #[test]
+                #[serial]
+                fn test_sync_bump_fee_add_input() {
+                    let (wallet, descriptors, mut test_client) = init_single_sig();
+                    let node_addr = test_client.get_node_address(None);
+
+                    test_client.receive(testutils! {
+                        @tx ( (@external descriptors, 0) => 50_000, (@external descriptors, 1) => 25_000 ) (@confirmations 1)
+                    });
+
+                    wallet.sync(None).unwrap();
+                    assert_eq!(wallet.get_balance().unwrap(), 75_000);
+
+                    let (psbt, details) = wallet.create_tx(TxBuilder::from_addressees(vec![(node_addr.clone(), 49_000)]).enable_rbf()).unwrap();
+                    let (psbt, finalized) = wallet.sign(psbt, None).unwrap();
+                    assert!(finalized, "Cannot finalize transaction");
+                    wallet.broadcast(psbt.extract_tx()).unwrap();
+                    wallet.sync(None).unwrap();
+                    assert_eq!(wallet.get_balance().unwrap(), 26_000 - details.fees);
+                    assert_eq!(details.received, 1_000 - details.fees);
+
+                    let (new_psbt, new_details) = wallet.bump_fee(&details.txid, TxBuilder::new().fee_rate(FeeRate::from_sat_per_vb(10.0))).unwrap();
+
+                    let (new_psbt, finalized) = wallet.sign(new_psbt, None).unwrap();
+                    assert!(finalized, "Cannot finalize transaction");
+                    wallet.broadcast(new_psbt.extract_tx()).unwrap();
+                    wallet.sync(None).unwrap();
+                    assert_eq!(new_details.sent, 75_000);
+                    assert_eq!(wallet.get_balance().unwrap(), new_details.received);
+                }
+
+                #[test]
+                #[serial]
+                fn test_sync_bump_fee_add_input_no_change() {
+                    let (wallet, descriptors, mut test_client) = init_single_sig();
+                    let node_addr = test_client.get_node_address(None);
+
+                    test_client.receive(testutils! {
+                        @tx ( (@external descriptors, 0) => 50_000, (@external descriptors, 1) => 25_000 ) (@confirmations 1)
+                    });
+
+                    wallet.sync(None).unwrap();
+                    assert_eq!(wallet.get_balance().unwrap(), 75_000);
+
+                    let (psbt, details) = wallet.create_tx(TxBuilder::from_addressees(vec![(node_addr.clone(), 49_000)]).enable_rbf()).unwrap();
+                    let (psbt, finalized) = wallet.sign(psbt, None).unwrap();
+                    assert!(finalized, "Cannot finalize transaction");
+                    wallet.broadcast(psbt.extract_tx()).unwrap();
+                    wallet.sync(None).unwrap();
+                    assert_eq!(wallet.get_balance().unwrap(), 26_000 - details.fees);
+                    assert_eq!(details.received, 1_000 - details.fees);
+
+                    let (new_psbt, new_details) = wallet.bump_fee(&details.txid, TxBuilder::new().fee_rate(FeeRate::from_sat_per_vb(123.0))).unwrap();
+                    println!("{:#?}", new_details);
+
+                    let (new_psbt, finalized) = wallet.sign(new_psbt, None).unwrap();
+                    assert!(finalized, "Cannot finalize transaction");
+                    wallet.broadcast(new_psbt.extract_tx()).unwrap();
+                    wallet.sync(None).unwrap();
+                    assert_eq!(new_details.sent, 75_000);
+                    assert_eq!(wallet.get_balance().unwrap(), 0);
+                    assert_eq!(new_details.received, 0);
+                }
             }
 
                         };

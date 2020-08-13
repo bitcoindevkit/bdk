@@ -9,7 +9,7 @@ use log::{debug, error, info, trace, LevelFilter};
 use bitcoin::consensus::encode::{deserialize, serialize, serialize_hex};
 use bitcoin::hashes::hex::{FromHex, ToHex};
 use bitcoin::util::psbt::PartiallySignedTransaction;
-use bitcoin::{Address, OutPoint};
+use bitcoin::{Address, OutPoint, Txid};
 
 use crate::error::Error;
 use crate::types::ScriptType;
@@ -84,6 +84,12 @@ pub fn make_cli_subcommands<'a, 'b>() -> App<'a, 'b> {
                         .help("Sends all the funds (or all the selected utxos). Requires only one addressees of value 0"),
                 )
                 .arg(
+                    Arg::with_name("enable_rbf")
+                        .short("rbf")
+                        .long("enable_rbf")
+                        .help("Enables Replace-By-Fee (BIP125)"),
+                )
+                .arg(
                     Arg::with_name("utxos")
                         .long("utxos")
                         .value_name("TXID:VOUT")
@@ -118,6 +124,53 @@ pub fn make_cli_subcommands<'a, 'b>() -> App<'a, 'b> {
                         .help("Selects which policy should be used to satisfy the descriptor")
                         .takes_value(true)
                         .number_of_values(1),
+                ),
+        )
+        .subcommand(
+            SubCommand::with_name("bump_fee")
+                .about("Bumps the fees of an RBF transaction")
+                .arg(
+                    Arg::with_name("txid")
+                        .required(true)
+                        .takes_value(true)
+                        .short("txid")
+                        .long("txid")
+                        .help("TXID of the transaction to update"),
+                )
+                .arg(
+                    Arg::with_name("send_all")
+                        .short("all")
+                        .long("send_all")
+                        .help("Allows the wallet to reduce the amount of the only output in order to increase fees. This is generally the expected behavior for transactions originally created with `send_all`"),
+                )
+                .arg(
+                    Arg::with_name("utxos")
+                        .long("utxos")
+                        .value_name("TXID:VOUT")
+                        .help("Selects which utxos *must* be added to the tx. Unconfirmed utxos cannot be used")
+                        .takes_value(true)
+                        .number_of_values(1)
+                        .multiple(true)
+                        .validator(outpoint_validator),
+                )
+                .arg(
+                    Arg::with_name("unspendable")
+                        .long("unspendable")
+                        .value_name("TXID:VOUT")
+                        .help("Marks an utxo as unspendable, in case more inputs are needed to cover the extra fees")
+                        .takes_value(true)
+                        .number_of_values(1)
+                        .multiple(true)
+                        .validator(outpoint_validator),
+                )
+                .arg(
+                    Arg::with_name("fee_rate")
+                        .required(true)
+                        .short("fee")
+                        .long("fee_rate")
+                        .value_name("SATS_VBYTE")
+                        .help("The new targeted fee rate in sat/vbyte")
+                        .takes_value(true),
                 ),
         )
         .subcommand(
@@ -331,6 +384,9 @@ where
         if sub_matches.is_present("send_all") {
             tx_builder = tx_builder.send_all();
         }
+        if sub_matches.is_present("enable_rbf") {
+            tx_builder = tx_builder.enable_rbf();
+        }
 
         if let Some(fee_rate) = sub_matches.value_of("fee_rate") {
             let fee_rate = f32::from_str(fee_rate).map_err(|s| Error::Generic(s.to_string()))?;
@@ -358,6 +414,40 @@ where
         }
 
         let result = wallet.create_tx(tx_builder)?;
+        Ok(Some(format!(
+            "{:#?}\nPSBT: {}",
+            result.1,
+            base64::encode(&serialize(&result.0))
+        )))
+    } else if let Some(sub_matches) = matches.subcommand_matches("bump_fee") {
+        let txid = Txid::from_str(sub_matches.value_of("txid").unwrap())
+            .map_err(|s| Error::Generic(s.to_string()))?;
+
+        let fee_rate = f32::from_str(sub_matches.value_of("fee_rate").unwrap())
+            .map_err(|s| Error::Generic(s.to_string()))?;
+        let mut tx_builder = TxBuilder::new().fee_rate(FeeRate::from_sat_per_vb(fee_rate));
+
+        if sub_matches.is_present("send_all") {
+            tx_builder = tx_builder.send_all();
+        }
+
+        if let Some(utxos) = sub_matches.values_of("utxos") {
+            let utxos = utxos
+                .map(|i| parse_outpoint(i))
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|s| Error::Generic(s.to_string()))?;
+            tx_builder = tx_builder.utxos(utxos);
+        }
+
+        if let Some(unspendable) = sub_matches.values_of("unspendable") {
+            let unspendable = unspendable
+                .map(|i| parse_outpoint(i))
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|s| Error::Generic(s.to_string()))?;
+            tx_builder = tx_builder.unspendable(unspendable);
+        }
+
+        let result = wallet.bump_fee(&txid, tx_builder)?;
         Ok(Some(format!(
             "{:#?}\nPSBT: {}",
             result.1,

@@ -14,7 +14,7 @@ impl IsDust for u64 {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
 // Internally stored as satoshi/vbyte
 pub struct FeeRate(f32);
 

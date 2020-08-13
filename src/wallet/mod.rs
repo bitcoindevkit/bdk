@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::collections::{BTreeMap, HashSet};
-use std::ops::DerefMut;
+use std::ops::{Deref, DerefMut};
 use std::str::FromStr;
 
 use bitcoin::blockdata::opcodes;
@@ -19,12 +19,13 @@ use log::{debug, error, info, trace};
 
 pub mod coin_selection;
 pub mod export;
+mod rbf;
 pub mod time;
 pub mod tx_builder;
 pub mod utils;
 
 use tx_builder::TxBuilder;
-use utils::IsDust;
+use utils::{FeeRate, IsDust};
 
 use crate::blockchain::{noop_progress, Blockchain, OfflineBlockchain, OnlineBlockchain};
 use crate::database::{BatchDatabase, BatchOperations, DatabaseUtils};
@@ -308,67 +309,7 @@ where
         builder.ordering.modify_tx(&mut tx);
 
         let txid = tx.txid();
-        let mut psbt = PSBT::from_unsigned_tx(tx)?;
-
-        // add metadata for the inputs
-        for (psbt_input, input) in psbt
-            .inputs
-            .iter_mut()
-            .zip(psbt.global.unsigned_tx.input.iter())
-        {
-            let prev_script = prev_script_pubkeys.get(&input.previous_output).unwrap();
-
-            // Add sighash, default is obviously "ALL"
-            psbt_input.sighash_type = builder.sighash.or(Some(SigHashType::All));
-
-            // Try to find the prev_script in our db to figure out if this is internal or external,
-            // and the derivation index
-            let (script_type, child) = match self
-                .database
-                .borrow()
-                .get_path_from_script_pubkey(&prev_script)?
-            {
-                Some(x) => x,
-                None => continue,
-            };
-
-            let (desc, _) = self.get_descriptor_for(script_type);
-            psbt_input.hd_keypaths = desc.get_hd_keypaths(child)?;
-            let derived_descriptor = desc.derive(child)?;
-
-            psbt_input.redeem_script = derived_descriptor.psbt_redeem_script();
-            psbt_input.witness_script = derived_descriptor.psbt_witness_script();
-
-            let prev_output = input.previous_output;
-            if let Some(prev_tx) = self.database.borrow().get_raw_tx(&prev_output.txid)? {
-                if derived_descriptor.is_witness() {
-                    psbt_input.witness_utxo =
-                        Some(prev_tx.output[prev_output.vout as usize].clone());
-                }
-                if !derived_descriptor.is_witness() || builder.force_non_witness_utxo {
-                    psbt_input.non_witness_utxo = Some(prev_tx);
-                }
-            }
-        }
-
-        // probably redundant but it doesn't hurt...
-        self.add_input_hd_keypaths(&mut psbt)?;
-
-        // add metadata for the outputs
-        for (psbt_output, tx_output) in psbt
-            .outputs
-            .iter_mut()
-            .zip(psbt.global.unsigned_tx.output.iter())
-        {
-            if let Some((script_type, child)) = self
-                .database
-                .borrow()
-                .get_path_from_script_pubkey(&tx_output.script_pubkey)?
-            {
-                let (desc, _) = self.get_descriptor_for(script_type);
-                psbt_output.hd_keypaths = desc.get_hd_keypaths(child)?;
-            }
-        }
+        let psbt = self.complete_transaction(tx, prev_script_pubkeys, builder)?;
 
         let transaction_details = TransactionDetails {
             transaction: None,
@@ -381,6 +322,222 @@ where
         };
 
         Ok((psbt, transaction_details))
+    }
+
+    // TODO: support for merging multiple transactions while bumping the fees
+    // TODO: option to force addition of an extra output? seems bad for privacy to update the
+    // change
+    pub fn bump_fee<Cs: coin_selection::CoinSelectionAlgorithm>(
+        &self,
+        txid: &Txid,
+        builder: TxBuilder<Cs>,
+    ) -> Result<(PSBT, TransactionDetails), Error> {
+        let mut details = match self.database.borrow().get_tx(&txid, true)? {
+            None => return Err(Error::TransactionNotFound),
+            Some(tx) if tx.transaction.is_none() => return Err(Error::TransactionNotFound),
+            Some(tx) if tx.height.is_some() => return Err(Error::TransactionConfirmed),
+            Some(tx) => tx,
+        };
+        let mut tx = details.transaction.take().unwrap();
+        if !tx.input.iter().any(|txin| txin.sequence <= 0xFFFFFFFD) {
+            return Err(Error::IrreplaceableTransaction);
+        }
+
+        // the new tx must "pay for its bandwidth"
+        let vbytes = tx.get_weight() as f32 / 4.0;
+        let required_feerate = FeeRate::from_sat_per_vb(details.fees as f32 / vbytes + 1.0);
+        let new_feerate = builder.fee_rate.unwrap_or_default();
+
+        if new_feerate < required_feerate {
+            return Err(Error::FeeRateTooLow(required_feerate));
+        }
+        let mut fee_difference =
+            (new_feerate.as_sat_vb() * tx.get_weight() as f32 / 4.0).ceil() as u64 - details.fees;
+
+        if builder.send_all && tx.output.len() > 1 {
+            return Err(Error::SendAllMultipleOutputs);
+        }
+
+        // find the index of the output that we can update. either the change or the only one if
+        // it's `send_all`
+        let updatable_output = if builder.send_all {
+            0
+        } else {
+            let mut change_output = None;
+            for (index, txout) in tx.output.iter().enumerate() {
+                // look for an output that we know and that has the right ScriptType. We use
+                // `get_deget_descriptor_for` to find what's the ScriptType for `Internal`
+                // addresses really is, because if there's no change_descriptor it's actually equal
+                // to "External"
+                let (_, change_type) = self.get_descriptor_for(ScriptType::Internal);
+                match self
+                    .database
+                    .borrow()
+                    .get_path_from_script_pubkey(&txout.script_pubkey)?
+                {
+                    Some((script_type, _)) if script_type == change_type => {
+                        change_output = Some(index);
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+
+            // we need a change output, add one here and take into account the extra fees for it
+            if change_output.is_none() {
+                let change_script = self.get_change_address()?;
+                let change_txout = TxOut {
+                    script_pubkey: change_script,
+                    value: 0,
+                };
+                fee_difference +=
+                    (serialize(&change_txout).len() as f32 * new_feerate.as_sat_vb()).ceil() as u64;
+                tx.output.push(change_txout);
+
+                change_output = Some(tx.output.len() - 1);
+            }
+
+            change_output.unwrap()
+        };
+
+        // if `builder.utxos` is Some(_) we have to add inputs and we skip down to the last branch
+        match tx.output[updatable_output]
+            .value
+            .checked_sub(fee_difference)
+        {
+            Some(new_value) if !new_value.is_dust() && builder.utxos.is_none() => {
+                // try to reduce the "updatable output" amount
+                tx.output[updatable_output].value = new_value;
+                if self.is_mine(&tx.output[updatable_output].script_pubkey)? {
+                    details.received -= fee_difference;
+                }
+
+                details.fees += fee_difference;
+            }
+            _ if builder.send_all && builder.utxos.is_none() => {
+                // if the tx is "send_all" it doesn't make sense to either remove the only output
+                // or add more inputs
+                return Err(Error::InsufficientFunds);
+            }
+            _ => {
+                // initially always remove the change output
+                let mut removed_change_output = tx.output.remove(updatable_output);
+                if self.is_mine(&removed_change_output.script_pubkey)? {
+                    details.received -= removed_change_output.value;
+                }
+
+                // we want to add more inputs if:
+                // - builder.utxos tells us to do so
+                // - the removed change value is lower than the fee_difference we want to add
+                let needs_more_inputs =
+                    builder.utxos.is_some() || removed_change_output.value <= fee_difference;
+                let added_amount = if needs_more_inputs {
+                    // TODO: use the right weight instead of the maximum, and only fall-back to it if the
+                    // script is unknown in the database
+                    let input_witness_weight = std::cmp::max(
+                        self.get_descriptor_for(ScriptType::Internal)
+                            .0
+                            .max_satisfaction_weight(),
+                        self.get_descriptor_for(ScriptType::External)
+                            .0
+                            .max_satisfaction_weight(),
+                    );
+
+                    let (available_utxos, use_all_utxos) = self.get_available_utxos(
+                        builder.change_policy,
+                        &builder.utxos,
+                        &builder.unspendable,
+                        false,
+                    )?;
+                    let available_utxos = rbf::filter_available(
+                        self.database.borrow().deref(),
+                        available_utxos.into_iter(),
+                    )?;
+                    let coin_selection::CoinSelectionResult {
+                        txin,
+                        total_amount,
+                        fee_amount,
+                    } = builder.coin_selection.coin_select(
+                        available_utxos,
+                        use_all_utxos,
+                        new_feerate.as_sat_vb(),
+                        fee_difference
+                            .checked_sub(removed_change_output.value)
+                            .unwrap_or(0),
+                        input_witness_weight,
+                        0.0,
+                    )?;
+                    fee_difference += fee_amount.ceil() as u64;
+
+                    // add the new inputs
+                    let (mut txin, _): (Vec<_>, Vec<_>) = txin.into_iter().unzip();
+
+                    // TODO: use tx_builder.sequence ??
+                    // copy the n_sequence from the inputs that were already in the transaction
+                    txin.iter_mut()
+                        .for_each(|i| i.sequence = tx.input[0].sequence);
+                    tx.input.extend_from_slice(&mut txin);
+
+                    details.sent += total_amount;
+                    total_amount
+                } else {
+                    // otherwise just remove the output and add 0 new coins
+                    0
+                };
+
+                match (removed_change_output.value + added_amount).checked_sub(fee_difference) {
+                    None => return Err(Error::InsufficientFunds),
+                    Some(new_value) if new_value.is_dust() => {
+                        // the change would be dust, add that to fees
+                        details.fees += fee_difference + new_value;
+                    }
+                    Some(new_value) => {
+                        // add the change back
+                        removed_change_output.value = new_value;
+                        tx.output.push(removed_change_output);
+
+                        details.received += new_value;
+                        details.fees += fee_difference;
+                    }
+                }
+            }
+        };
+
+        // clear witnesses
+        for input in &mut tx.input {
+            input.script_sig = Script::default();
+            input.witness = vec![];
+        }
+
+        // sort input/outputs according to the chosen algorithm
+        builder.ordering.modify_tx(&mut tx);
+
+        // TODO: check that we are not replacing more than 100 txs from mempool
+
+        details.txid = tx.txid();
+        details.timestamp = time::get_timestamp();
+
+        let prev_script_pubkeys = tx
+            .input
+            .iter()
+            .map(|txin| {
+                Ok((
+                    txin.previous_output.clone(),
+                    self.database
+                        .borrow()
+                        .get_previous_output(&txin.previous_output)?,
+                ))
+            })
+            .collect::<Result<Vec<_>, Error>>()?
+            .into_iter()
+            .filter_map(|(outpoint, txout)| match txout {
+                Some(txout) => Some((outpoint, txout.script_pubkey)),
+                None => None,
+            })
+            .collect();
+        let psbt = self.complete_transaction(tx, prev_script_pubkeys, builder)?;
+
+        Ok((psbt, details))
     }
 
     // TODO: define an enum for signing errors
@@ -734,6 +891,80 @@ where
         }
     }
 
+    fn complete_transaction<Cs: coin_selection::CoinSelectionAlgorithm>(
+        &self,
+        tx: Transaction,
+        prev_script_pubkeys: HashMap<OutPoint, Script>,
+        builder: TxBuilder<Cs>,
+    ) -> Result<PSBT, Error> {
+        let mut psbt = PSBT::from_unsigned_tx(tx)?;
+
+        // add metadata for the inputs
+        for (psbt_input, input) in psbt
+            .inputs
+            .iter_mut()
+            .zip(psbt.global.unsigned_tx.input.iter())
+        {
+            let prev_script = match prev_script_pubkeys.get(&input.previous_output) {
+                Some(prev_script) => prev_script,
+                None => continue,
+            };
+
+            // Add sighash, default is obviously "ALL"
+            psbt_input.sighash_type = builder.sighash.or(Some(SigHashType::All));
+
+            // Try to find the prev_script in our db to figure out if this is internal or external,
+            // and the derivation index
+            let (script_type, child) = match self
+                .database
+                .borrow()
+                .get_path_from_script_pubkey(&prev_script)?
+            {
+                Some(x) => x,
+                None => continue,
+            };
+
+            let (desc, _) = self.get_descriptor_for(script_type);
+            psbt_input.hd_keypaths = desc.get_hd_keypaths(child)?;
+            let derived_descriptor = desc.derive(child)?;
+
+            psbt_input.redeem_script = derived_descriptor.psbt_redeem_script();
+            psbt_input.witness_script = derived_descriptor.psbt_witness_script();
+
+            let prev_output = input.previous_output;
+            if let Some(prev_tx) = self.database.borrow().get_raw_tx(&prev_output.txid)? {
+                if derived_descriptor.is_witness() {
+                    psbt_input.witness_utxo =
+                        Some(prev_tx.output[prev_output.vout as usize].clone());
+                }
+                if !derived_descriptor.is_witness() || builder.force_non_witness_utxo {
+                    psbt_input.non_witness_utxo = Some(prev_tx);
+                }
+            }
+        }
+
+        // probably redundant but it doesn't hurt...
+        self.add_input_hd_keypaths(&mut psbt)?;
+
+        // add metadata for the outputs
+        for (psbt_output, tx_output) in psbt
+            .outputs
+            .iter_mut()
+            .zip(psbt.global.unsigned_tx.output.iter())
+        {
+            if let Some((script_type, child)) = self
+                .database
+                .borrow()
+                .get_path_from_script_pubkey(&tx_output.script_pubkey)?
+            {
+                let (desc, _) = self.get_descriptor_for(script_type);
+                psbt_output.hd_keypaths = desc.get_hd_keypaths(child)?;
+            }
+        }
+
+        Ok(psbt)
+    }
+
     fn add_input_hd_keypaths(&self, psbt: &mut PSBT) -> Result<(), Error> {
         let mut input_utxos = Vec::with_capacity(psbt.inputs.len());
         for n in 0..psbt.inputs.len() {
@@ -984,12 +1215,41 @@ mod test {
 
         let txid = wallet.database.borrow_mut().received_tx(
             testutils! {
-                @tx ( (@external descriptors, 0) => 50_000 )
+                @tx ( (@external descriptors, 0) => 50_000 ) (@confirmations 1)
             },
-            None,
+            Some(100),
         );
 
         (wallet, descriptors, txid)
+    }
+
+    macro_rules! assert_fee_rate {
+        ($tx:expr, $fees:expr, $fee_rate:expr $( ,@dust_change $( $dust_change:expr )* )* $( ,@add_signature $( $add_signature:expr )* )* ) => ({
+            let mut tx = $tx.clone();
+            $(
+                $( $add_signature )*
+                for txin in &mut tx.input {
+                    txin.witness.push([0x00; 108].to_vec()); // fake signature
+                }
+            )*
+
+            #[allow(unused_mut)]
+            #[allow(unused_assignments)]
+            let mut dust_change = false;
+            $(
+                $( $dust_change )*
+                dust_change = true;
+            )*
+
+            let tx_fee_rate = $fees as f32 / (tx.get_weight() as f32 / 4.0);
+            let fee_rate = $fee_rate.as_sat_vb();
+
+            if !dust_change {
+                assert!((tx_fee_rate - fee_rate).abs() < 0.5, format!("Expected fee rate of {}, the tx has {}", fee_rate, tx_fee_rate));
+            } else {
+                assert!(tx_fee_rate >= fee_rate, format!("Expected fee rate of at least {}, the tx has {}", fee_rate, tx_fee_rate));
+            }
+        });
     }
 
     #[test]
@@ -1212,6 +1472,32 @@ mod test {
             psbt.global.unsigned_tx.output[0].value,
             50_000 - details.fees
         );
+    }
+
+    #[test]
+    fn test_create_tx_default_fee_rate() {
+        let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
+        let addr = wallet.get_new_address().unwrap();
+        let (psbt, details) = wallet
+            .create_tx(TxBuilder::from_addressees(vec![(addr.clone(), 0)]).send_all())
+            .unwrap();
+
+        assert_fee_rate!(psbt.extract_tx(), details.fees, FeeRate::default(), @add_signature);
+    }
+
+    #[test]
+    fn test_create_tx_custom_fee_rate() {
+        let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
+        let addr = wallet.get_new_address().unwrap();
+        let (psbt, details) = wallet
+            .create_tx(
+                TxBuilder::from_addressees(vec![(addr.clone(), 0)])
+                    .fee_rate(FeeRate::from_sat_per_vb(5.0))
+                    .send_all(),
+            )
+            .unwrap();
+
+        assert_fee_rate!(psbt.extract_tx(), details.fees, FeeRate::from_sat_per_vb(5.0), @add_signature);
     }
 
     #[test]
@@ -1464,5 +1750,490 @@ mod test {
 
         assert!(psbt.inputs[0].non_witness_utxo.is_some());
         assert!(psbt.inputs[0].witness_utxo.is_some());
+    }
+
+    #[test]
+    #[should_panic(expected = "IrreplaceableTransaction")]
+    fn test_bump_fee_irreplaceable_tx() {
+        let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
+        let addr = wallet.get_new_address().unwrap();
+        let (psbt, mut details) = wallet
+            .create_tx(TxBuilder::from_addressees(vec![(addr, 25_000)]))
+            .unwrap();
+        let tx = psbt.extract_tx();
+        let txid = tx.txid();
+        // skip saving the utxos, we know they can't be used anyways
+        details.transaction = Some(tx);
+        wallet.database.borrow_mut().set_tx(&details).unwrap();
+
+        wallet.bump_fee(&txid, TxBuilder::new()).unwrap();
+    }
+
+    #[test]
+    #[should_panic(expected = "TransactionConfirmed")]
+    fn test_bump_fee_confirmed_tx() {
+        let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
+        let addr = wallet.get_new_address().unwrap();
+        let (psbt, mut details) = wallet
+            .create_tx(TxBuilder::from_addressees(vec![(addr, 25_000)]))
+            .unwrap();
+        let tx = psbt.extract_tx();
+        let txid = tx.txid();
+        // skip saving the utxos, we know they can't be used anyways
+        details.transaction = Some(tx);
+        details.height = Some(42);
+        wallet.database.borrow_mut().set_tx(&details).unwrap();
+
+        wallet.bump_fee(&txid, TxBuilder::new()).unwrap();
+    }
+
+    #[test]
+    #[should_panic(expected = "FeeRateTooLow")]
+    fn test_bump_fee_low_fee_rate() {
+        let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
+        let addr = wallet.get_new_address().unwrap();
+        let (psbt, mut details) = wallet
+            .create_tx(TxBuilder::from_addressees(vec![(addr, 25_000)]).enable_rbf())
+            .unwrap();
+        let tx = psbt.extract_tx();
+        let txid = tx.txid();
+        // skip saving the utxos, we know they can't be used anyways
+        details.transaction = Some(tx);
+        wallet.database.borrow_mut().set_tx(&details).unwrap();
+
+        wallet
+            .bump_fee(
+                &txid,
+                TxBuilder::new().fee_rate(FeeRate::from_sat_per_vb(1.0)),
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn test_bump_fee_reduce_change() {
+        let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
+        let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
+        let (psbt, mut original_details) = wallet
+            .create_tx(TxBuilder::from_addressees(vec![(addr.clone(), 25_000)]).enable_rbf())
+            .unwrap();
+        let mut tx = psbt.extract_tx();
+        let txid = tx.txid();
+        // skip saving the new utxos, we know they can't be used anyways
+        for txin in &mut tx.input {
+            txin.witness.push([0x00; 108].to_vec()); // fake signature
+            wallet
+                .database
+                .borrow_mut()
+                .del_utxo(&txin.previous_output)
+                .unwrap();
+        }
+        original_details.transaction = Some(tx);
+        wallet
+            .database
+            .borrow_mut()
+            .set_tx(&original_details)
+            .unwrap();
+
+        let (psbt, details) = wallet
+            .bump_fee(
+                &txid,
+                TxBuilder::new().fee_rate(FeeRate::from_sat_per_vb(2.5)),
+            )
+            .unwrap();
+
+        assert_eq!(details.sent, original_details.sent);
+        assert_eq!(
+            details.received + details.fees,
+            original_details.received + original_details.fees
+        );
+        assert!(details.fees > original_details.fees);
+
+        let tx = &psbt.global.unsigned_tx;
+        assert_eq!(tx.output.len(), 2);
+        assert_eq!(
+            tx.output
+                .iter()
+                .find(|txout| txout.script_pubkey == addr.script_pubkey())
+                .unwrap()
+                .value,
+            25_000
+        );
+        assert_eq!(
+            tx.output
+                .iter()
+                .find(|txout| txout.script_pubkey != addr.script_pubkey())
+                .unwrap()
+                .value,
+            details.received
+        );
+
+        assert_fee_rate!(psbt.extract_tx(), details.fees, FeeRate::from_sat_per_vb(2.5), @add_signature);
+    }
+
+    #[test]
+    fn test_bump_fee_reduce_send_all() {
+        let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
+        let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
+        let (psbt, mut original_details) = wallet
+            .create_tx(
+                TxBuilder::from_addressees(vec![(addr.clone(), 0)])
+                    .send_all()
+                    .enable_rbf(),
+            )
+            .unwrap();
+        let mut tx = psbt.extract_tx();
+        let txid = tx.txid();
+        for txin in &mut tx.input {
+            txin.witness.push([0x00; 108].to_vec()); // fake signature
+            wallet
+                .database
+                .borrow_mut()
+                .del_utxo(&txin.previous_output)
+                .unwrap();
+        }
+        original_details.transaction = Some(tx);
+        wallet
+            .database
+            .borrow_mut()
+            .set_tx(&original_details)
+            .unwrap();
+
+        let (psbt, details) = wallet
+            .bump_fee(
+                &txid,
+                TxBuilder::new()
+                    .send_all()
+                    .fee_rate(FeeRate::from_sat_per_vb(2.5)),
+            )
+            .unwrap();
+
+        assert_eq!(details.sent, original_details.sent);
+        assert!(details.fees > original_details.fees);
+
+        let tx = &psbt.global.unsigned_tx;
+        assert_eq!(tx.output.len(), 1);
+        assert_eq!(tx.output[0].value + details.fees, details.sent);
+
+        assert_fee_rate!(psbt.extract_tx(), details.fees, FeeRate::from_sat_per_vb(2.5), @add_signature);
+    }
+
+    #[test]
+    #[should_panic(expected = "InsufficientFunds")]
+    fn test_bump_fee_remove_send_all_output() {
+        let (wallet, descriptors, _) = get_funded_wallet(get_test_wpkh());
+        // receive an extra tx, to make sure that in case of "send_all" we get an error and it
+        // doesn't try to pick more inputs
+        let incoming_txid = wallet.database.borrow_mut().received_tx(
+            testutils! (@tx ( (@external descriptors, 0) => 25_000 ) (@confirmations 1)),
+            Some(100),
+        );
+        let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
+        let (psbt, mut original_details) = wallet
+            .create_tx(
+                TxBuilder::from_addressees(vec![(addr.clone(), 0)])
+                    .utxos(vec![OutPoint {
+                        txid: incoming_txid,
+                        vout: 0,
+                    }])
+                    .send_all()
+                    .enable_rbf(),
+            )
+            .unwrap();
+        let mut tx = psbt.extract_tx();
+        let txid = tx.txid();
+        for txin in &mut tx.input {
+            txin.witness.push([0x00; 108].to_vec()); // fake signature
+            wallet
+                .database
+                .borrow_mut()
+                .del_utxo(&txin.previous_output)
+                .unwrap();
+        }
+        original_details.transaction = Some(tx);
+        wallet
+            .database
+            .borrow_mut()
+            .set_tx(&original_details)
+            .unwrap();
+        assert_eq!(original_details.sent, 25_000);
+
+        wallet
+            .bump_fee(
+                &txid,
+                TxBuilder::new()
+                    .send_all()
+                    .fee_rate(FeeRate::from_sat_per_vb(225.0)),
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn test_bump_fee_add_input() {
+        let (wallet, descriptors, _) = get_funded_wallet(get_test_wpkh());
+        wallet.database.borrow_mut().received_tx(
+            testutils! (@tx ( (@external descriptors, 0) => 25_000 ) (@confirmations 1)),
+            Some(100),
+        );
+
+        let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
+        let (psbt, mut original_details) = wallet
+            .create_tx(TxBuilder::from_addressees(vec![(addr.clone(), 45_000)]).enable_rbf())
+            .unwrap();
+        let mut tx = psbt.extract_tx();
+        let txid = tx.txid();
+        // skip saving the new utxos, we know they can't be used anyways
+        for txin in &mut tx.input {
+            txin.witness.push([0x00; 108].to_vec()); // fake signature
+            wallet
+                .database
+                .borrow_mut()
+                .del_utxo(&txin.previous_output)
+                .unwrap();
+        }
+        original_details.transaction = Some(tx);
+        wallet
+            .database
+            .borrow_mut()
+            .set_tx(&original_details)
+            .unwrap();
+
+        let (psbt, details) = wallet
+            .bump_fee(
+                &txid,
+                TxBuilder::new().fee_rate(FeeRate::from_sat_per_vb(50.0)),
+            )
+            .unwrap();
+
+        assert_eq!(details.sent, original_details.sent + 25_000);
+        assert_eq!(details.fees + details.received, 30_000);
+
+        let tx = &psbt.global.unsigned_tx;
+        assert_eq!(tx.input.len(), 2);
+        assert_eq!(tx.output.len(), 2);
+        assert_eq!(
+            tx.output
+                .iter()
+                .find(|txout| txout.script_pubkey == addr.script_pubkey())
+                .unwrap()
+                .value,
+            45_000
+        );
+        assert_eq!(
+            tx.output
+                .iter()
+                .find(|txout| txout.script_pubkey != addr.script_pubkey())
+                .unwrap()
+                .value,
+            details.received
+        );
+
+        assert_fee_rate!(psbt.extract_tx(), details.fees, FeeRate::from_sat_per_vb(50.0), @add_signature);
+    }
+
+    #[test]
+    fn test_bump_fee_no_change_add_input_and_change() {
+        let (wallet, descriptors, _) = get_funded_wallet(get_test_wpkh());
+        let incoming_txid = wallet.database.borrow_mut().received_tx(
+            testutils! (@tx ( (@external descriptors, 0) => 25_000 ) (@confirmations 1)),
+            Some(100),
+        );
+
+        let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
+        let (psbt, mut original_details) = wallet
+            .create_tx(
+                TxBuilder::from_addressees(vec![(addr.clone(), 0)])
+                    .send_all()
+                    .add_utxo(OutPoint {
+                        txid: incoming_txid,
+                        vout: 0,
+                    })
+                    .enable_rbf(),
+            )
+            .unwrap();
+        let mut tx = psbt.extract_tx();
+        let txid = tx.txid();
+        // skip saving the new utxos, we know they can't be used anyways
+        for txin in &mut tx.input {
+            txin.witness.push([0x00; 108].to_vec()); // fake signature
+            wallet
+                .database
+                .borrow_mut()
+                .del_utxo(&txin.previous_output)
+                .unwrap();
+        }
+        original_details.transaction = Some(tx);
+        wallet
+            .database
+            .borrow_mut()
+            .set_tx(&original_details)
+            .unwrap();
+
+        // NOTE: we don't set "send_all" here. so we have a transaction with only one input, but
+        // here we are allowed to add more, and we will also have to add a change
+        let (psbt, details) = wallet
+            .bump_fee(
+                &txid,
+                TxBuilder::new().fee_rate(FeeRate::from_sat_per_vb(50.0)),
+            )
+            .unwrap();
+
+        let original_send_all_amount = original_details.sent - original_details.fees;
+        assert_eq!(details.sent, original_details.sent + 50_000);
+        assert_eq!(
+            details.received,
+            75_000 - original_send_all_amount - details.fees
+        );
+
+        let tx = &psbt.global.unsigned_tx;
+        assert_eq!(tx.input.len(), 2);
+        assert_eq!(tx.output.len(), 2);
+        assert_eq!(
+            tx.output
+                .iter()
+                .find(|txout| txout.script_pubkey == addr.script_pubkey())
+                .unwrap()
+                .value,
+            original_send_all_amount
+        );
+        assert_eq!(
+            tx.output
+                .iter()
+                .find(|txout| txout.script_pubkey != addr.script_pubkey())
+                .unwrap()
+                .value,
+            75_000 - original_send_all_amount - details.fees
+        );
+
+        assert_fee_rate!(psbt.extract_tx(), details.fees, FeeRate::from_sat_per_vb(50.0), @add_signature);
+    }
+
+    #[test]
+    fn test_bump_fee_add_input_change_dust() {
+        let (wallet, descriptors, _) = get_funded_wallet(get_test_wpkh());
+        wallet.database.borrow_mut().received_tx(
+            testutils! (@tx ( (@external descriptors, 0) => 25_000 ) (@confirmations 1)),
+            Some(100),
+        );
+
+        let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
+        let (psbt, mut original_details) = wallet
+            .create_tx(TxBuilder::from_addressees(vec![(addr.clone(), 45_000)]).enable_rbf())
+            .unwrap();
+        let mut tx = psbt.extract_tx();
+        assert_eq!(tx.input.len(), 1);
+        assert_eq!(tx.output.len(), 2);
+        let txid = tx.txid();
+        // skip saving the new utxos, we know they can't be used anyways
+        for txin in &mut tx.input {
+            txin.witness.push([0x00; 108].to_vec()); // fake signature
+            wallet
+                .database
+                .borrow_mut()
+                .del_utxo(&txin.previous_output)
+                .unwrap();
+        }
+        original_details.transaction = Some(tx);
+        wallet
+            .database
+            .borrow_mut()
+            .set_tx(&original_details)
+            .unwrap();
+
+        let (psbt, details) = wallet
+            .bump_fee(
+                &txid,
+                TxBuilder::new().fee_rate(FeeRate::from_sat_per_vb(140.0)),
+            )
+            .unwrap();
+
+        assert_eq!(original_details.received, 5_000 - original_details.fees);
+
+        assert_eq!(details.sent, original_details.sent + 25_000);
+        assert_eq!(details.fees, 30_000);
+        assert_eq!(details.received, 0);
+
+        let tx = &psbt.global.unsigned_tx;
+        assert_eq!(tx.input.len(), 2);
+        assert_eq!(tx.output.len(), 1);
+        assert_eq!(
+            tx.output
+                .iter()
+                .find(|txout| txout.script_pubkey == addr.script_pubkey())
+                .unwrap()
+                .value,
+            45_000
+        );
+
+        assert_fee_rate!(psbt.extract_tx(), details.fees, FeeRate::from_sat_per_vb(140.0), @dust_change, @add_signature);
+    }
+
+    #[test]
+    fn test_bump_fee_force_add_input() {
+        let (wallet, descriptors, _) = get_funded_wallet(get_test_wpkh());
+        let incoming_txid = wallet.database.borrow_mut().received_tx(
+            testutils! (@tx ( (@external descriptors, 0) => 25_000 ) (@confirmations 1)),
+            Some(100),
+        );
+
+        let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
+        let (psbt, mut original_details) = wallet
+            .create_tx(TxBuilder::from_addressees(vec![(addr.clone(), 45_000)]).enable_rbf())
+            .unwrap();
+        let mut tx = psbt.extract_tx();
+        let txid = tx.txid();
+        // skip saving the new utxos, we know they can't be used anyways
+        for txin in &mut tx.input {
+            txin.witness.push([0x00; 108].to_vec()); // fake signature
+            wallet
+                .database
+                .borrow_mut()
+                .del_utxo(&txin.previous_output)
+                .unwrap();
+        }
+        original_details.transaction = Some(tx);
+        wallet
+            .database
+            .borrow_mut()
+            .set_tx(&original_details)
+            .unwrap();
+
+        // the new fee_rate is low enough that just reducing the change would be fine, but we force
+        // the addition of an extra input with `add_utxo()`
+        let (psbt, details) = wallet
+            .bump_fee(
+                &txid,
+                TxBuilder::new()
+                    .add_utxo(OutPoint {
+                        txid: incoming_txid,
+                        vout: 0,
+                    })
+                    .fee_rate(FeeRate::from_sat_per_vb(5.0)),
+            )
+            .unwrap();
+
+        assert_eq!(details.sent, original_details.sent + 25_000);
+        assert_eq!(details.fees + details.received, 30_000);
+
+        let tx = &psbt.global.unsigned_tx;
+        assert_eq!(tx.input.len(), 2);
+        assert_eq!(tx.output.len(), 2);
+        assert_eq!(
+            tx.output
+                .iter()
+                .find(|txout| txout.script_pubkey == addr.script_pubkey())
+                .unwrap()
+                .value,
+            45_000
+        );
+        assert_eq!(
+            tx.output
+                .iter()
+                .find(|txout| txout.script_pubkey != addr.script_pubkey())
+                .unwrap()
+                .value,
+            details.received
+        );
+
+        assert_fee_rate!(psbt.extract_tx(), details.fees, FeeRate::from_sat_per_vb(5.0), @add_signature);
     }
 }

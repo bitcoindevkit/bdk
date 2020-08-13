@@ -96,11 +96,11 @@ pub trait DatabaseUtils: Database {
 
     fn get_previous_output(&self, outpoint: &OutPoint) -> Result<Option<TxOut>, Error> {
         self.get_raw_tx(&outpoint.txid)?
-            .and_then(|previous_tx| {
+            .map(|previous_tx| {
                 if outpoint.vout as usize >= previous_tx.output.len() {
-                    Some(Err(Error::InvalidOutpoint(outpoint.clone())))
+                    Err(Error::InvalidOutpoint(outpoint.clone()))
                 } else {
-                    Some(Ok(previous_tx.output[outpoint.vout as usize].clone()))
+                    Ok(previous_tx.output[outpoint.vout as usize].clone())
                 }
             })
             .transpose()

@@ -14,6 +14,10 @@ pub enum Error {
     InvalidAddressNetwork(Address),
     UnknownUTXO,
     DifferentTransactions,
+    TransactionNotFound,
+    TransactionConfirmed,
+    IrreplaceableTransaction,
+    FeeRateTooLow(crate::wallet::utils::FeeRate),
 
     ChecksumMismatch,
     DifferentDescriptorStructure,
