@@ -101,11 +101,9 @@ fn main() {
                         continue;
                     }
 
-                    if let Some(s) =
-                        cli::handle_matches(&Arc::clone(&wallet), matches.unwrap()).unwrap()
-                    {
-                        println!("{}", s);
-                    }
+                    let result =
+                        cli::handle_matches(&Arc::clone(&wallet), matches.unwrap()).unwrap();
+                    println!("{}", serde_json::to_string_pretty(&result).unwrap());
                 }
                 Err(ReadlineError::Interrupted) => continue,
                 Err(ReadlineError::Eof) => break,
@@ -118,8 +116,7 @@ fn main() {
 
     // rl.save_history("history.txt").unwrap();
     } else {
-        if let Some(s) = cli::handle_matches(&wallet, matches).unwrap() {
-            println!("{}", s);
-        }
+        let result = cli::handle_matches(&wallet, matches).unwrap();
+        println!("{}", serde_json::to_string_pretty(&result).unwrap());
     }
 }

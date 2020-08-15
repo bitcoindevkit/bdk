@@ -7,7 +7,7 @@ use clap::{App, Arg, ArgMatches, SubCommand};
 use log::{debug, error, info, trace, LevelFilter};
 
 use bitcoin::consensus::encode::{deserialize, serialize, serialize_hex};
-use bitcoin::hashes::hex::{FromHex, ToHex};
+use bitcoin::hashes::hex::FromHex;
 use bitcoin::util::psbt::PartiallySignedTransaction;
 use bitcoin::{Address, OutPoint, Txid};
 
@@ -337,42 +337,26 @@ pub fn add_global_flags<'a, 'b>(app: App<'a, 'b>) -> App<'a, 'b> {
 pub fn handle_matches<C, D>(
     wallet: &Wallet<C, D>,
     matches: ArgMatches<'_>,
-) -> Result<Option<String>, Error>
+) -> Result<serde_json::Value, Error>
 where
     C: crate::blockchain::OnlineBlockchain,
     D: crate::database::BatchDatabase,
 {
     if let Some(_sub_matches) = matches.subcommand_matches("get_new_address") {
-        Ok(Some(format!("{}", wallet.get_new_address()?)))
+        Ok(json!({
+            "address": wallet.get_new_address()?
+        }))
     } else if let Some(_sub_matches) = matches.subcommand_matches("sync") {
         maybe_await!(wallet.sync(log_progress(), None))?;
-        Ok(None)
+        Ok(json!({}))
     } else if let Some(_sub_matches) = matches.subcommand_matches("list_unspent") {
-        let mut res = String::new();
-        for utxo in wallet.list_unspent()? {
-            res += &format!("{} value {} SAT\n", utxo.outpoint, utxo.txout.value);
-        }
-
-        Ok(Some(res))
+        Ok(serde_json::to_value(&wallet.list_unspent()?)?)
     } else if let Some(_sub_matches) = matches.subcommand_matches("list_transactions") {
-        let mut res = String::new();
-        for crate::types::TransactionDetails {
-            txid,
-            sent,
-            received,
-            height,
-            ..
-        } in wallet.list_transactions(false)?
-        {
-            res += &format!(
-                "{} - sent {}, received {} - height: {:?}\n",
-                txid, sent, received, height
-            );
-        }
-
-        Ok(Some(res))
+        Ok(serde_json::to_value(&wallet.list_transactions(false)?)?)
     } else if let Some(_sub_matches) = matches.subcommand_matches("get_balance") {
-        Ok(Some(format!("{} SAT", wallet.get_balance()?)))
+        Ok(json!({
+            "satoshi": wallet.get_balance()?
+        }))
     } else if let Some(sub_matches) = matches.subcommand_matches("create_tx") {
         let addressees = sub_matches
             .values_of("to")
@@ -414,12 +398,11 @@ where
             tx_builder = tx_builder.policy_path(policy);
         }
 
-        let result = wallet.create_tx(tx_builder)?;
-        Ok(Some(format!(
-            "{:#?}\nPSBT: {}",
-            result.1,
-            base64::encode(&serialize(&result.0))
-        )))
+        let (psbt, details) = wallet.create_tx(tx_builder)?;
+        Ok(json!({
+            "psbt": base64::encode(&serialize(&psbt)),
+            "details": details,
+        }))
     } else if let Some(sub_matches) = matches.subcommand_matches("bump_fee") {
         let txid = Txid::from_str(sub_matches.value_of("txid").unwrap())
             .map_err(|s| Error::Generic(s.to_string()))?;
@@ -448,32 +431,21 @@ where
             tx_builder = tx_builder.unspendable(unspendable);
         }
 
-        let result = wallet.bump_fee(&txid, tx_builder)?;
-        Ok(Some(format!(
-            "{:#?}\nPSBT: {}",
-            result.1,
-            base64::encode(&serialize(&result.0))
-        )))
+        let (psbt, details) = wallet.bump_fee(&txid, tx_builder)?;
+        Ok(json!({
+            "psbt": base64::encode(&serialize(&psbt)),
+            "details": details,
+        }))
     } else if let Some(_sub_matches) = matches.subcommand_matches("policies") {
-        Ok(Some(format!(
-            "External: {}\nInternal:{}",
-            serde_json::to_string(&wallet.policies(ScriptType::External)?).unwrap(),
-            serde_json::to_string(&wallet.policies(ScriptType::Internal)?).unwrap(),
-        )))
+        Ok(json!({
+            "external": wallet.policies(ScriptType::External)?,
+            "internal": wallet.policies(ScriptType::Internal)?,
+        }))
     } else if let Some(_sub_matches) = matches.subcommand_matches("public_descriptor") {
-        let external = match wallet.public_descriptor(ScriptType::External)? {
-            Some(desc) => format!("{}", desc),
-            None => "<NONE>".into(),
-        };
-        let internal = match wallet.public_descriptor(ScriptType::Internal)? {
-            Some(desc) => format!("{}", desc),
-            None => "<NONE>".into(),
-        };
-
-        Ok(Some(format!(
-            "External: {}\nInternal:{}",
-            external, internal
-        )))
+        Ok(json!({
+            "external": wallet.public_descriptor(ScriptType::External)?.map(|d| d.to_string()),
+            "internal": wallet.public_descriptor(ScriptType::Internal)?.map(|d| d.to_string()),
+        }))
     } else if let Some(sub_matches) = matches.subcommand_matches("sign") {
         let psbt = base64::decode(sub_matches.value_of("psbt").unwrap()).unwrap();
         let psbt: PartiallySignedTransaction = deserialize(&psbt).unwrap();
@@ -481,16 +453,10 @@ where
             .value_of("assume_height")
             .and_then(|s| Some(s.parse().unwrap()));
         let (psbt, finalized) = wallet.sign(psbt, assume_height)?;
-
-        let mut res = String::new();
-
-        res += &format!("PSBT: {}\n", base64::encode(&serialize(&psbt)));
-        res += &format!("Finalized: {}", finalized);
-        if finalized {
-            res += &format!("\nExtracted: {}", serialize_hex(&psbt.extract_tx()));
-        }
-
-        Ok(Some(res))
+        Ok(json!({
+            "psbt": base64::encode(&serialize(&psbt)),
+            "is_finalized": finalized,
+        }))
     } else if let Some(sub_matches) = matches.subcommand_matches("broadcast") {
         let tx = if sub_matches.value_of("psbt").is_some() {
             let psbt = base64::decode(&sub_matches.value_of("psbt").unwrap()).unwrap();
@@ -504,16 +470,13 @@ where
         };
 
         let txid = maybe_await!(wallet.broadcast(tx))?;
-
-        Ok(Some(format!("TXID: {}", txid)))
+        Ok(json!({ "txid": txid }))
     } else if let Some(sub_matches) = matches.subcommand_matches("extract_psbt") {
         let psbt = base64::decode(&sub_matches.value_of("psbt").unwrap()).unwrap();
         let psbt: PartiallySignedTransaction = deserialize(&psbt).unwrap();
-
-        Ok(Some(format!(
-            "TX: {}",
-            serialize(&psbt.extract_tx()).to_hex()
-        )))
+        Ok(json!({
+            "raw_tx": serialize_hex(&psbt.extract_tx()),
+        }))
     } else if let Some(sub_matches) = matches.subcommand_matches("finalize_psbt") {
         let psbt = base64::decode(&sub_matches.value_of("psbt").unwrap()).unwrap();
         let mut psbt: PartiallySignedTransaction = deserialize(&psbt).unwrap();
@@ -523,15 +486,10 @@ where
             .and_then(|s| Some(s.parse().unwrap()));
 
         let finalized = wallet.finalize_psbt(&mut psbt, assume_height)?;
-
-        let mut res = String::new();
-        res += &format!("PSBT: {}\n", base64::encode(&serialize(&psbt)));
-        res += &format!("Finalized: {}", finalized);
-        if finalized {
-            res += &format!("\nExtracted: {}", serialize_hex(&psbt.extract_tx()));
-        }
-
-        Ok(Some(res))
+        Ok(json!({
+            "psbt": base64::encode(&serialize(&psbt)),
+            "is_finalized": finalized,
+        }))
     } else if let Some(sub_matches) = matches.subcommand_matches("combine_psbt") {
         let mut psbts = sub_matches
             .values_of("psbt")
@@ -555,11 +513,8 @@ where
                 },
             )?;
 
-        Ok(Some(format!(
-            "PSBT: {}",
-            base64::encode(&serialize(&final_psbt))
-        )))
+        Ok(json!({ "psbt": base64::encode(&serialize(&final_psbt)) }))
     } else {
-        Ok(None)
+        Ok(serde_json::Value::Null)
     }
 }
