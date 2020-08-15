@@ -1,6 +1,7 @@
 use std::any::Any;
 use std::collections::HashMap;
 use std::fmt;
+use std::sync::Arc;
 
 use bitcoin::blockdata::opcodes;
 use bitcoin::blockdata::script::Builder as ScriptBuilder;
@@ -17,7 +18,7 @@ use crate::descriptor::XKeyUtils;
 
 /// Identifier of a signer in the `SignersContainers`. Used as a key to find the right signer among
 /// many of them
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum SignerId<Pk: MiniscriptKey> {
     PkHash(<Pk as MiniscriptKey>::Hash),
     Fingerprint(Fingerprint),
@@ -150,8 +151,8 @@ impl Signer for PrivateKey {
 }
 
 /// Container for multiple signers
-#[derive(Debug, Default)]
-pub struct SignersContainer<Pk: MiniscriptKey>(HashMap<SignerId<Pk>, Box<dyn Signer>>);
+#[derive(Debug, Default, Clone)]
+pub struct SignersContainer<Pk: MiniscriptKey>(HashMap<SignerId<Pk>, Arc<Box<dyn Signer>>>);
 
 impl SignersContainer<DescriptorPublicKey> {
     pub fn as_key_map(&self) -> KeyMap {
@@ -189,11 +190,12 @@ impl From<KeyMap> for SignersContainer<DescriptorPublicKey> {
                             .public_key(&Secp256k1::signing_only())
                             .to_pubkeyhash(),
                     ),
-                    Box::new(private_key),
+                    Arc::new(Box::new(private_key)),
                 ),
-                DescriptorSecretKey::XPrv(xprv) => {
-                    container.add_external(SignerId::from(xprv.root_fingerprint()), Box::new(xprv))
-                }
+                DescriptorSecretKey::XPrv(xprv) => container.add_external(
+                    SignerId::from(xprv.root_fingerprint()),
+                    Arc::new(Box::new(xprv)),
+                ),
             };
         }
 
@@ -212,13 +214,13 @@ impl<Pk: MiniscriptKey> SignersContainer<Pk> {
     pub fn add_external(
         &mut self,
         id: SignerId<Pk>,
-        signer: Box<dyn Signer>,
-    ) -> Option<Box<dyn Signer>> {
+        signer: Arc<Box<dyn Signer>>,
+    ) -> Option<Arc<Box<dyn Signer>>> {
         self.0.insert(id, signer)
     }
 
     /// Removes a signer from the container and returns it
-    pub fn remove(&mut self, id: SignerId<Pk>) -> Option<Box<dyn Signer>> {
+    pub fn remove(&mut self, id: SignerId<Pk>) -> Option<Arc<Box<dyn Signer>>> {
         self.0.remove(&id)
     }
 
@@ -228,7 +230,7 @@ impl<Pk: MiniscriptKey> SignersContainer<Pk> {
     }
 
     /// Finds the signer with a given id in the container
-    pub fn find(&self, id: SignerId<Pk>) -> Option<&Box<dyn Signer>> {
+    pub fn find(&self, id: SignerId<Pk>) -> Option<&Arc<Box<dyn Signer>>> {
         self.0.get(&id)
     }
 }

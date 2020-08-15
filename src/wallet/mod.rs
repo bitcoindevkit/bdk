@@ -14,6 +14,7 @@ use miniscript::descriptor::DescriptorPublicKey;
 #[allow(unused_imports)]
 use log::{debug, error, info, trace};
 
+pub mod address_validator;
 pub mod coin_selection;
 pub mod export;
 mod rbf;
@@ -22,7 +23,8 @@ pub mod time;
 pub mod tx_builder;
 pub mod utils;
 
-use signer::{Signer, SignersContainer};
+use address_validator::AddressValidator;
+use signer::{Signer, SignerId, SignersContainer};
 use tx_builder::TxBuilder;
 use utils::{After, FeeRate, IsDust, Older};
 
@@ -33,7 +35,6 @@ use crate::descriptor::{
 };
 use crate::error::Error;
 use crate::psbt::PSBTUtils;
-// use crate::psbt::{utils::PSBTUtils, PSBTSatisfier, PSBTSigner};
 use crate::types::*;
 
 const CACHE_ADDR_BATCH_SIZE: u32 = 100;
@@ -46,6 +47,8 @@ pub struct Wallet<B: Blockchain, D: BatchDatabase> {
 
     signers: Arc<SignersContainer<DescriptorPublicKey>>,
     change_signers: Arc<SignersContainer<DescriptorPublicKey>>,
+
+    address_validators: Vec<Arc<Box<dyn AddressValidator>>>,
 
     network: Network,
 
@@ -96,6 +99,7 @@ where
             change_descriptor,
             signers,
             change_signers,
+            address_validators: Vec::new(),
 
             network,
 
@@ -132,6 +136,24 @@ where
             .list_unspent()?
             .iter()
             .fold(0, |sum, i| sum + i.txout.value))
+    }
+
+    pub fn add_signer(
+        &mut self,
+        script_type: ScriptType,
+        id: SignerId<DescriptorPublicKey>,
+        signer: Arc<Box<dyn Signer>>,
+    ) {
+        let signers = match script_type {
+            ScriptType::External => Arc::make_mut(&mut self.signers),
+            ScriptType::Internal => Arc::make_mut(&mut self.change_signers),
+        };
+
+        signers.add_external(id, signer);
+    }
+
+    pub fn add_address_validator(&mut self, validator: Arc<Box<dyn AddressValidator>>) {
+        self.address_validators.push(validator);
     }
 
     pub fn create_tx<Cs: coin_selection::CoinSelectionAlgorithm>(
@@ -724,6 +746,14 @@ where
             self.cache_addresses(script_type, index, CACHE_ADDR_BATCH_SIZE)?;
         }
 
+        let hd_keypaths = descriptor.get_hd_keypaths(index)?;
+        let script = descriptor
+            .derive(&[ChildNumber::from_normal_idx(index).unwrap()])
+            .script_pubkey();
+        for validator in &self.address_validators {
+            validator.validate(script_type, &hd_keypaths, &script)?;
+        }
+
         Ok(index)
     }
 
@@ -1103,21 +1133,21 @@ mod test {
             .is_some());
     }
 
-    fn get_test_wpkh() -> &'static str {
+    pub(crate) fn get_test_wpkh() -> &'static str {
         "wpkh(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW)"
     }
 
-    fn get_test_single_sig_csv() -> &'static str {
+    pub(crate) fn get_test_single_sig_csv() -> &'static str {
         // and(pk(Alice),older(6))
         "wsh(and_v(v:pk(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW),older(6)))"
     }
 
-    fn get_test_single_sig_cltv() -> &'static str {
+    pub(crate) fn get_test_single_sig_cltv() -> &'static str {
         // and(pk(Alice),after(100000))
         "wsh(and_v(v:pk(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW),after(100000)))"
     }
 
-    fn get_funded_wallet(
+    pub(crate) fn get_funded_wallet(
         descriptor: &str,
     ) -> (
         OfflineWallet<MemoryDatabase>,

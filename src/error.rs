@@ -36,6 +36,7 @@ pub enum Error {
     InvalidOutpoint(OutPoint),
 
     Descriptor(crate::descriptor::error::Error),
+    AddressValidator(crate::wallet::address_validator::AddressValidatorError),
 
     Encode(bitcoin::consensus::encode::Error),
     Miniscript(miniscript::Error),
@@ -66,6 +67,10 @@ macro_rules! impl_error {
 }
 
 impl_error!(crate::descriptor::error::Error, Descriptor);
+impl_error!(
+    crate::wallet::address_validator::AddressValidatorError,
+    AddressValidator
+);
 impl_error!(
     crate::descriptor::policy::PolicyError,
     InvalidPolicyPathError

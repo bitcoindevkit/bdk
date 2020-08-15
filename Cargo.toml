@@ -66,10 +66,9 @@ rand = "0.7"
 name = "repl"
 required-features = ["cli-utils"]
 [[example]]
-name = "psbt"
-required-features = ["cli-utils"]
-[[example]]
 name = "parse_descriptor"
+[[example]]
+name = "address_validator"
 
 [[example]]
 name = "miniscriptc"

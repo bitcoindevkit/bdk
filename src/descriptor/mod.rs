@@ -17,15 +17,13 @@ pub mod checksum;
 pub mod error;
 pub mod policy;
 
-// use crate::wallet::utils::AddressType;
-use crate::wallet::signer::SignersContainer;
-
 pub use self::checksum::get_checksum;
 use self::error::Error;
 pub use self::policy::Policy;
+use crate::wallet::signer::SignersContainer;
 
 pub type ExtendedDescriptor = Descriptor<DescriptorPublicKey>;
-type HDKeyPaths = BTreeMap<PublicKey, (Fingerprint, DerivationPath)>;
+pub type HDKeyPaths = BTreeMap<PublicKey, (Fingerprint, DerivationPath)>;
 
 pub trait ExtractPolicy {
     fn extract_policy(
@@ -76,7 +74,6 @@ pub trait DescriptorMeta: Sized {
     fn derive_from_hd_keypaths(&self, hd_keypaths: &HDKeyPaths) -> Option<Self>;
     fn derive_from_psbt_input(&self, psbt_input: &psbt::Input, utxo: Option<TxOut>)
         -> Option<Self>;
-    // fn address_type(&self) -> Option<AddressType>;
 }
 
 pub trait DescriptorScripts {
@@ -258,18 +255,6 @@ impl DescriptorMeta for Descriptor<DescriptorPublicKey> {
             _ => None,
         }
     }
-
-    // fn address_type(&self) -> Option<AddressType> {
-    //     match self {
-    //         Descriptor::Pkh(_) => Some(AddressType::Pkh),
-    //         Descriptor::Wpkh(_) => Some(AddressType::Wpkh),
-    //         Descriptor::ShWpkh(_) => Some(AddressType::ShWpkh),
-    //         Descriptor::Sh(_) => Some(AddressType::Sh),
-    //         Descriptor::Wsh(_) => Some(AddressType::Wsh),
-    //         Descriptor::ShWsh(_) => Some(AddressType::ShWsh),
-    //         _ => None,
-    //     }
-    // }
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, PartialOrd, Eq, Ord, Default)]
