@@ -309,15 +309,110 @@ mod test {
     use crate::psbt::PSBTUtils;
 
     #[test]
-    fn test_derive_from_psbt_input_wpkh() {
-        let psbt: psbt::PartiallySignedTransaction = deserialize(&Vec::<u8>::from_hex("70736274ff010052010000000162307be8e431fbaff807cdf9cdc3fde44d740211bc8342c31ffd6ec11fe35bcc0100000000ffffffff01328601000000000016001493ce48570b55c42c2af816aeaba06cfee1224fae000000000001011fa08601000000000016001493ce48570b55c42c2af816aeaba06cfee1224fae010304010000000000").unwrap()).unwrap();
-
+    fn test_derive_from_psbt_input_wpkh_wif() {
         let descriptor = Descriptor::<DescriptorPublicKey>::from_str(
             "wpkh(02b4632d08485ff1df2db55b9dafd23347d1c47a457072a1e87be26896549a8737)",
         )
         .unwrap();
+        let psbt: psbt::PartiallySignedTransaction = deserialize(
+            &Vec::<u8>::from_hex(
+                "70736274ff010052010000000162307be8e431fbaff807cdf9cdc3fde44d7402\
+                 11bc8342c31ffd6ec11fe35bcc0100000000ffffffff01328601000000000016\
+                 001493ce48570b55c42c2af816aeaba06cfee1224fae000000000001011fa086\
+                 01000000000016001493ce48570b55c42c2af816aeaba06cfee1224fae010304\
+                 010000000000",
+            )
+            .unwrap(),
+        )
+        .unwrap();
 
-        let result = descriptor.derive_from_psbt_input(&psbt.inputs[0], psbt.get_utxo_for(0));
-        println!("{:?}", result);
+        assert!(descriptor
+            .derive_from_psbt_input(&psbt.inputs[0], psbt.get_utxo_for(0))
+            .is_some());
+    }
+
+    #[test]
+    fn test_derive_from_psbt_input_pkh_tpub() {
+        let descriptor = Descriptor::<DescriptorPublicKey>::from_str(
+            "pkh([0f056943/44h/0h/0h]tpubDDpWvmUrPZrhSPmUzCMBHffvC3HyMAPnWDSAQNBTnj1iZeJa7BZQEttFiP4DS4GCcXQHezdXhn86Hj6LHX5EDstXPWrMaSneRWM8yUf6NFd/10/*)",
+        )
+        .unwrap();
+        let psbt: psbt::PartiallySignedTransaction = deserialize(
+            &Vec::<u8>::from_hex(
+                "70736274ff010053010000000145843b86be54a3cd8c9e38444e1162676c00df\
+                 e7964122a70df491ea12fd67090100000000ffffffff01c19598000000000017\
+                 a91432bb94283282f72b2e034709e348c44d5a4db0ef8700000000000100f902\
+                 0000000001010167e99c0eb67640f3a1b6805f2d8be8238c947f8aaf49eb0a9c\
+                 bee6a42c984200000000171600142b29a22019cca05b9c2b2d283a4c4489e1cf\
+                 9f8ffeffffff02a01dced06100000017a914e2abf033cadbd74f0f4c74946201\
+                 decd20d5c43c8780969800000000001976a9148b0fce5fb1264e599a65387313\
+                 3c95478b902eb288ac02473044022015d9211576163fa5b001e84dfa3d44efd9\
+                 86b8f3a0d3d2174369288b2b750906022048dacc0e5d73ae42512fd2b97e2071\
+                 a8d0bce443b390b1fe0b8128fe70ec919e01210232dad1c5a67dcb0116d407e2\
+                 52584228ab7ec00e8b9779d0c3ffe8114fc1a7d2c80600000103040100000022\
+                 0603433b83583f8c4879b329dd08bbc7da935e4cc02f637ff746e05f0466ffb2\
+                 a6a2180f0569432c00008000000080000000800a000000000000000000",
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        assert!(descriptor
+            .derive_from_psbt_input(&psbt.inputs[0], psbt.get_utxo_for(0))
+            .is_some());
+    }
+
+    #[test]
+    fn test_derive_from_psbt_input_wsh() {
+        let descriptor = Descriptor::<DescriptorPublicKey>::from_str(
+            "wsh(and_v(v:pk(03b6633fef2397a0a9de9d7b6f23aef8368a6e362b0581f0f0af70d5ecfd254b14),older(6)))",
+        )
+        .unwrap();
+        let psbt: psbt::PartiallySignedTransaction = deserialize(
+            &Vec::<u8>::from_hex(
+                "70736274ff01005302000000011c8116eea34408ab6529223c9a176606742207\
+                 67a1ff1d46a6e3c4a88243ea6e01000000000600000001109698000000000017\
+                 a914ad105f61102e0d01d7af40d06d6a5c3ae2f7fde387000000000001012b80\
+                 969800000000002200203ca72f106a72234754890ca7640c43f65d2174e44d33\
+                 336030f9059345091044010304010000000105252103b6633fef2397a0a9de9d\
+                 7b6f23aef8368a6e362b0581f0f0af70d5ecfd254b14ad56b20000",
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        assert!(descriptor
+            .derive_from_psbt_input(&psbt.inputs[0], psbt.get_utxo_for(0))
+            .is_some());
+    }
+
+    #[test]
+    fn test_derive_from_psbt_input_sh() {
+        let descriptor = Descriptor::<DescriptorPublicKey>::from_str(
+            "sh(and_v(v:pk(021403881a5587297818fcaf17d239cefca22fce84a45b3b1d23e836c4af671dbb),after(630000)))",
+        )
+        .unwrap();
+        let psbt: psbt::PartiallySignedTransaction = deserialize(
+            &Vec::<u8>::from_hex(
+                "70736274ff0100530100000001bc8c13df445dfadcc42afa6dc841f85d22b01d\
+                 a6270ebf981740f4b7b1d800390000000000feffffff01ba9598000000000017\
+                 a91457b148ba4d3e5fa8608a8657875124e3d1c9390887f09c0900000100e002\
+                 0000000001016ba1bbe05cc93574a0d611ec7d93ad0ab6685b28d0cd80e8a82d\
+                 debb326643c90100000000feffffff02809698000000000017a914d9a6e8c455\
+                 8e16c8253afe53ce37ad61cf4c38c487403504cf6100000017a9144044fb6e0b\
+                 757dfc1b34886b6a95aef4d3db137e870247304402202a9b72d939bcde8ba2a1\
+                 e0980597e47af4f5c152a78499143c3d0a78ac2286a602207a45b1df9e93b8c9\
+                 6f09f5c025fe3e413ca4b905fe65ee55d32a3276439a9b8f012102dc1fcc2636\
+                 4da1aa718f03d8d9bd6f2ff410ed2cf1245a168aa3bcc995ac18e0a806000001\
+                 03040100000001042821021403881a5587297818fcaf17d239cefca22fce84a4\
+                 5b3b1d23e836c4af671dbbad03f09c09b10000",
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        assert!(descriptor
+            .derive_from_psbt_input(&psbt.inputs[0], psbt.get_utxo_for(0))
+            .is_some());
     }
 }
