@@ -1,4 +1,3 @@
-use std::any::Any;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::fmt;
@@ -66,8 +65,12 @@ pub trait Signer: fmt::Debug {
     fn sign(
         &self,
         psbt: &mut psbt::PartiallySignedTransaction,
-        input_index: usize,
+        input_index: Option<usize>,
     ) -> Result<(), SignerError>;
+
+    fn sign_whole_tx(&self) -> bool {
+        false
+    }
 
     fn descriptor_secret_key(&self) -> Option<DescriptorSecretKey> {
         None
@@ -78,8 +81,9 @@ impl Signer for DescriptorXKey<ExtendedPrivKey> {
     fn sign(
         &self,
         psbt: &mut psbt::PartiallySignedTransaction,
-        input_index: usize,
+        input_index: Option<usize>,
     ) -> Result<(), SignerError> {
+        let input_index = input_index.unwrap();
         if input_index >= psbt.inputs.len() {
             return Err(SignerError::InputIndexOutOfRange);
         }
@@ -97,7 +101,7 @@ impl Signer for DescriptorXKey<ExtendedPrivKey> {
         let ctx = Secp256k1::signing_only();
 
         let derived_key = self.xkey.derive_priv(&ctx, &deriv_path).unwrap();
-        derived_key.private_key.sign(psbt, input_index)
+        derived_key.private_key.sign(psbt, Some(input_index))
     }
 
     fn descriptor_secret_key(&self) -> Option<DescriptorSecretKey> {
@@ -109,8 +113,9 @@ impl Signer for PrivateKey {
     fn sign(
         &self,
         psbt: &mut psbt::PartiallySignedTransaction,
-        input_index: usize,
+        input_index: Option<usize>,
     ) -> Result<(), SignerError> {
+        let input_index = input_index.unwrap();
         if input_index >= psbt.inputs.len() {
             return Err(SignerError::InputIndexOutOfRange);
         }
@@ -189,20 +194,6 @@ impl SignersContainer<DescriptorPublicKey> {
             .filter_map(|signer| signer.descriptor_secret_key())
             .filter_map(|secret| secret.as_public().ok().map(|public| (public, secret)))
             .collect()
-    }
-}
-
-impl<Pk: MiniscriptKey + Any> Signer for SignersContainer<Pk> {
-    fn sign(
-        &self,
-        psbt: &mut psbt::PartiallySignedTransaction,
-        input_index: usize,
-    ) -> Result<(), SignerError> {
-        for signer in self.0.values() {
-            signer.sign(psbt, input_index)?;
-        }
-
-        Ok(())
     }
 }
 

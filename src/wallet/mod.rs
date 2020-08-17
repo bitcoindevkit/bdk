@@ -586,8 +586,12 @@ where
             .iter()
             .chain(self.change_signers.signers().iter())
         {
-            for index in 0..psbt.inputs.len() {
-                signer.sign(&mut psbt, index)?;
+            if signer.sign_whole_tx() {
+                signer.sign(&mut psbt, None)?;
+            } else {
+                for index in 0..psbt.inputs.len() {
+                    signer.sign(&mut psbt, Some(index))?;
+                }
             }
         }
 
