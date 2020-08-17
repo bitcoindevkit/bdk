@@ -24,7 +24,7 @@ pub mod tx_builder;
 pub mod utils;
 
 use address_validator::AddressValidator;
-use signer::{Signer, SignerId, SignersContainer};
+use signer::{Signer, SignerId, SignerOrdering, SignersContainer};
 use tx_builder::TxBuilder;
 use utils::{After, FeeRate, IsDust, Older};
 
@@ -142,6 +142,7 @@ where
         &mut self,
         script_type: ScriptType,
         id: SignerId<DescriptorPublicKey>,
+        ordering: SignerOrdering,
         signer: Arc<Box<dyn Signer>>,
     ) {
         let signers = match script_type {
@@ -149,7 +150,7 @@ where
             ScriptType::Internal => Arc::make_mut(&mut self.change_signers),
         };
 
-        signers.add_external(id, signer);
+        signers.add_external(id, ordering, signer);
     }
 
     pub fn add_address_validator(&mut self, validator: Arc<Box<dyn AddressValidator>>) {
@@ -575,15 +576,18 @@ where
         Ok((psbt, details))
     }
 
-    // TODO: define an enum for signing errors
     pub fn sign(&self, mut psbt: PSBT, assume_height: Option<u32>) -> Result<(PSBT, bool), Error> {
         // this helps us doing our job later
         self.add_input_hd_keypaths(&mut psbt)?;
 
-        for index in 0..psbt.inputs.len() {
-            self.signers.sign(&mut psbt, index)?;
-            if self.change_descriptor.is_some() {
-                self.change_signers.sign(&mut psbt, index)?;
+        for signer in self
+            .signers
+            .signers()
+            .iter()
+            .chain(self.change_signers.signers().iter())
+        {
+            for index in 0..psbt.inputs.len() {
+                signer.sign(&mut psbt, index)?;
             }
         }
 
