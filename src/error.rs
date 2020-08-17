@@ -1,3 +1,5 @@
+use std::fmt;
+
 use bitcoin::{Address, OutPoint};
 
 #[derive(Debug)]
@@ -55,6 +57,14 @@ pub enum Error {
     #[cfg(feature = "key-value-db")]
     Sled(sled::Error),
 }
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+impl std::error::Error for Error {}
 
 macro_rules! impl_error {
     ( $from:ty, $to:ident ) => {
