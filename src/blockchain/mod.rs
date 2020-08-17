@@ -1,5 +1,7 @@
 use std::collections::HashSet;
+use std::ops::Deref;
 use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::Arc;
 
 use bitcoin::{Transaction, Txid};
 
@@ -118,5 +120,54 @@ impl Progress for LogProgress {
         log::info!("Sync {:.3}%: `{}`", progress, message.unwrap_or("".into()));
 
         Ok(())
+    }
+}
+
+impl<T: Blockchain> Blockchain for Arc<T> {
+    fn is_online(&self) -> bool {
+        self.deref().is_online()
+    }
+
+    fn offline() -> Self {
+        Arc::new(T::offline())
+    }
+}
+
+#[maybe_async]
+impl<T: OnlineBlockchain> OnlineBlockchain for Arc<T> {
+    fn get_capabilities(&self) -> HashSet<Capability> {
+        maybe_await!(self.deref().get_capabilities())
+    }
+
+    fn setup<D: BatchDatabase + DatabaseUtils, P: 'static + Progress>(
+        &self,
+        stop_gap: Option<usize>,
+        database: &mut D,
+        progress_update: P,
+    ) -> Result<(), Error> {
+        maybe_await!(self.deref().setup(stop_gap, database, progress_update))
+    }
+
+    fn sync<D: BatchDatabase + DatabaseUtils, P: 'static + Progress>(
+        &self,
+        stop_gap: Option<usize>,
+        database: &mut D,
+        progress_update: P,
+    ) -> Result<(), Error> {
+        maybe_await!(self.deref().sync(stop_gap, database, progress_update))
+    }
+
+    fn get_tx(&self, txid: &Txid) -> Result<Option<Transaction>, Error> {
+        maybe_await!(self.deref().get_tx(txid))
+    }
+    fn broadcast(&self, tx: &Transaction) -> Result<(), Error> {
+        maybe_await!(self.deref().broadcast(tx))
+    }
+
+    fn get_height(&self) -> Result<u32, Error> {
+        maybe_await!(self.deref().get_height())
+    }
+    fn estimate_fee(&self, target: usize) -> Result<FeeRate, Error> {
+        maybe_await!(self.deref().estimate_fee(target))
     }
 }
