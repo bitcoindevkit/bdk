@@ -27,7 +27,7 @@ pub mod utils;
 use tx_builder::TxBuilder;
 use utils::{FeeRate, IsDust};
 
-use crate::blockchain::{noop_progress, Blockchain, OfflineBlockchain, OnlineBlockchain};
+use crate::blockchain::{Blockchain, OfflineBlockchain, OnlineBlockchain, Progress};
 use crate::database::{BatchDatabase, BatchOperations, DatabaseUtils};
 use crate::descriptor::{get_checksum, DescriptorMeta, ExtendedDescriptor, ExtractPolicy, Policy};
 use crate::error::Error;
@@ -1015,7 +1015,11 @@ where
     }
 
     #[maybe_async]
-    pub fn sync(&self, max_address_param: Option<u32>) -> Result<(), Error> {
+    pub fn sync<P: 'static + Progress>(
+        &self,
+        progress_update: P,
+        max_address_param: Option<u32>,
+    ) -> Result<(), Error> {
         debug!("Begin sync...");
 
         let mut run_setup = false;
@@ -1057,13 +1061,13 @@ where
             maybe_await!(self.client.setup(
                 None,
                 self.database.borrow_mut().deref_mut(),
-                noop_progress(),
+                progress_update,
             ))
         } else {
             maybe_await!(self.client.sync(
                 None,
                 self.database.borrow_mut().deref_mut(),
-                noop_progress(),
+                progress_update,
             ))
         }
     }

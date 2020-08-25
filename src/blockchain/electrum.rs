@@ -40,9 +40,13 @@ impl Blockchain for ElectrumBlockchain {
 
 impl OnlineBlockchain for ElectrumBlockchain {
     fn get_capabilities(&self) -> HashSet<Capability> {
-        vec![Capability::FullHistory, Capability::GetAnyTx]
-            .into_iter()
-            .collect()
+        vec![
+            Capability::FullHistory,
+            Capability::GetAnyTx,
+            Capability::AccurateFees,
+        ]
+        .into_iter()
+        .collect()
     }
 
     fn setup<D: BatchDatabase + DatabaseUtils, P: Progress>(

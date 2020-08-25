@@ -54,6 +54,8 @@ pub enum Error {
     Electrum(electrum_client::Error),
     #[cfg(feature = "esplora")]
     Esplora(crate::blockchain::esplora::EsploraError),
+    #[cfg(feature = "compact_filters")]
+    CompactFilters(crate::blockchain::compact_filters::CompactFiltersError),
     #[cfg(feature = "key-value-db")]
     Sled(sled::Error),
 }
@@ -87,3 +89,13 @@ impl_error!(electrum_client::Error, Electrum);
 impl_error!(crate::blockchain::esplora::EsploraError, Esplora);
 #[cfg(feature = "key-value-db")]
 impl_error!(sled::Error, Sled);
+
+#[cfg(feature = "compact_filters")]
+impl From<crate::blockchain::compact_filters::CompactFiltersError> for Error {
+    fn from(other: crate::blockchain::compact_filters::CompactFiltersError) -> Self {
+        match other {
+            crate::blockchain::compact_filters::CompactFiltersError::Global(e) => *e,
+            err @ _ => Error::CompactFilters(err),
+        }
+    }
+}

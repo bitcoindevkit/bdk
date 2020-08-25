@@ -11,7 +11,7 @@ extern crate async_trait;
 #[macro_use]
 extern crate magical_macros;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "compact_filters"))]
 #[macro_use]
 extern crate lazy_static;
 

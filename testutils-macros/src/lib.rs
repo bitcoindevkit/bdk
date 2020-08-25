@@ -55,7 +55,7 @@ pub fn magical_blockchain_tests(attr: TokenStream, item: TokenStream) -> TokenSt
 
                 use testutils::{TestClient, serial};
 
-                use #root_ident::blockchain::OnlineBlockchain;
+                use #root_ident::blockchain::{OnlineBlockchain, noop_progress};
                 use #root_ident::descriptor::ExtendedDescriptor;
                 use #root_ident::database::MemoryDatabase;
                 use #root_ident::types::ScriptType;
@@ -92,7 +92,7 @@ pub fn magical_blockchain_tests(attr: TokenStream, item: TokenStream) -> TokenSt
                     };
                     let txid = test_client.receive(tx);
 
-                    wallet.sync(None).unwrap();
+                    wallet.sync(noop_progress(), None).unwrap();
 
                     assert_eq!(wallet.get_balance().unwrap(), 50_000);
                     assert_eq!(wallet.list_unspent().unwrap()[0].is_internal, false);
@@ -116,7 +116,7 @@ pub fn magical_blockchain_tests(attr: TokenStream, item: TokenStream) -> TokenSt
                         @tx ( (@external descriptors, 25) => 50_000 )
                     });
 
-                    wallet.sync(None).unwrap();
+                    wallet.sync(noop_progress(), None).unwrap();
 
                     assert_eq!(wallet.get_balance().unwrap(), 100_000);
                     assert_eq!(wallet.list_transactions(false).unwrap().len(), 2);
@@ -127,14 +127,14 @@ pub fn magical_blockchain_tests(attr: TokenStream, item: TokenStream) -> TokenSt
                 fn test_sync_before_and_after_receive() {
                     let (wallet, descriptors, mut test_client) = init_single_sig();
 
-                    wallet.sync(None).unwrap();
+                    wallet.sync(noop_progress(), None).unwrap();
                     assert_eq!(wallet.get_balance().unwrap(), 0);
 
                     test_client.receive(testutils! {
                         @tx ( (@external descriptors, 0) => 50_000 )
                     });
 
-                    wallet.sync(None).unwrap();
+                    wallet.sync(noop_progress(), None).unwrap();
 
                     assert_eq!(wallet.get_balance().unwrap(), 50_000);
                     assert_eq!(wallet.list_transactions(false).unwrap().len(), 1);
@@ -149,7 +149,7 @@ pub fn magical_blockchain_tests(attr: TokenStream, item: TokenStream) -> TokenSt
                         @tx ( (@external descriptors, 0) => 50_000, (@external descriptors, 1) => 25_000, (@external descriptors, 5) => 30_000 )
                     });
 
-                    wallet.sync(None).unwrap();
+                    wallet.sync(noop_progress(), None).unwrap();
 
                     assert_eq!(wallet.get_balance().unwrap(), 105_000);
                     assert_eq!(wallet.list_transactions(false).unwrap().len(), 1);
@@ -174,7 +174,7 @@ pub fn magical_blockchain_tests(attr: TokenStream, item: TokenStream) -> TokenSt
                         @tx ( (@external descriptors, 5) => 25_000 )
                     });
 
-                    wallet.sync(None).unwrap();
+                    wallet.sync(noop_progress(), None).unwrap();
 
                     assert_eq!(wallet.get_balance().unwrap(), 75_000);
                     assert_eq!(wallet.list_transactions(false).unwrap().len(), 2);
@@ -190,14 +190,14 @@ pub fn magical_blockchain_tests(attr: TokenStream, item: TokenStream) -> TokenSt
                         @tx ( (@external descriptors, 0) => 50_000 )
                     });
 
-                    wallet.sync(None).unwrap();
+                    wallet.sync(noop_progress(), None).unwrap();
                     assert_eq!(wallet.get_balance().unwrap(), 50_000);
 
                     test_client.receive(testutils! {
                         @tx ( (@external descriptors, 0) => 25_000 )
                     });
 
-                    wallet.sync(None).unwrap();
+                    wallet.sync(noop_progress(), None).unwrap();
                     assert_eq!(wallet.get_balance().unwrap(), 75_000);
                 }
 
@@ -210,7 +210,7 @@ pub fn magical_blockchain_tests(attr: TokenStream, item: TokenStream) -> TokenSt
                         @tx ( (@external descriptors, 0) => 50_000 ) ( @replaceable true )
                     });
 
-                    wallet.sync(None).unwrap();
+                    wallet.sync(noop_progress(), None).unwrap();
 
                     assert_eq!(wallet.get_balance().unwrap(), 50_000);
                     assert_eq!(wallet.list_transactions(false).unwrap().len(), 1);
@@ -224,7 +224,7 @@ pub fn magical_blockchain_tests(attr: TokenStream, item: TokenStream) -> TokenSt
 
                     let new_txid = test_client.bump_fee(&txid);
 
-                    wallet.sync(None).unwrap();
+                    wallet.sync(noop_progress(), None).unwrap();
 
                     assert_eq!(wallet.get_balance().unwrap(), 50_000);
                     assert_eq!(wallet.list_transactions(false).unwrap().len(), 1);
@@ -246,7 +246,7 @@ pub fn magical_blockchain_tests(attr: TokenStream, item: TokenStream) -> TokenSt
                         @tx ( (@external descriptors, 0) => 50_000 ) ( @confirmations 1 ) ( @replaceable true )
                     });
 
-                    wallet.sync(None).unwrap();
+                    wallet.sync(noop_progress(), None).unwrap();
 
                     assert_eq!(wallet.get_balance().unwrap(), 50_000);
                     assert_eq!(wallet.list_transactions(false).unwrap().len(), 1);
@@ -259,7 +259,7 @@ pub fn magical_blockchain_tests(attr: TokenStream, item: TokenStream) -> TokenSt
                     // Invalidate 1 block
                     test_client.invalidate(1);
 
-                    wallet.sync(None).unwrap();
+                    wallet.sync(noop_progress(), None).unwrap();
 
                     assert_eq!(wallet.get_balance().unwrap(), 50_000);
 
@@ -278,7 +278,7 @@ pub fn magical_blockchain_tests(attr: TokenStream, item: TokenStream) -> TokenSt
                         @tx ( (@external descriptors, 0) => 50_000 )
                     });
 
-                    wallet.sync(None).unwrap();
+                    wallet.sync(noop_progress(), None).unwrap();
                     assert_eq!(wallet.get_balance().unwrap(), 50_000);
 
                     let (psbt, details) = wallet.create_tx(TxBuilder::from_addressees(vec![(node_addr, 25_000)])).unwrap();
@@ -286,7 +286,7 @@ pub fn magical_blockchain_tests(attr: TokenStream, item: TokenStream) -> TokenSt
                     assert!(finalized, "Cannot finalize transaction");
                     wallet.broadcast(psbt.extract_tx()).unwrap();
 
-                    wallet.sync(None).unwrap();
+                    wallet.sync(noop_progress(), None).unwrap();
                     assert_eq!(wallet.get_balance().unwrap(), details.received);
 
                     assert_eq!(wallet.list_transactions(false).unwrap().len(), 2);
@@ -303,7 +303,7 @@ pub fn magical_blockchain_tests(attr: TokenStream, item: TokenStream) -> TokenSt
                         @tx ( (@external descriptors, 0) => 50_000 )
                     });
 
-                    wallet.sync(None).unwrap();
+                    wallet.sync(noop_progress(), None).unwrap();
                     assert_eq!(wallet.get_balance().unwrap(), 50_000);
 
                     let (psbt, details) = wallet.create_tx(TxBuilder::from_addressees(vec![(node_addr, 25_000)])).unwrap();
@@ -311,12 +311,12 @@ pub fn magical_blockchain_tests(attr: TokenStream, item: TokenStream) -> TokenSt
                     assert!(finalized, "Cannot finalize transaction");
                     let sent_txid = wallet.broadcast(psbt.extract_tx()).unwrap();
 
-                    wallet.sync(None).unwrap();
+                    wallet.sync(noop_progress(), None).unwrap();
                     assert_eq!(wallet.get_balance().unwrap(), details.received);
 
                     // empty wallet
                     let wallet = get_wallet_from_descriptors(&descriptors);
-                    wallet.sync(None).unwrap();
+                    wallet.sync(noop_progress(), None).unwrap();
 
                     let tx_map = wallet.list_transactions(false).unwrap().into_iter().map(|tx| (tx.txid, tx)).collect::<std::collections::HashMap<_, _>>();
 
@@ -340,7 +340,7 @@ pub fn magical_blockchain_tests(attr: TokenStream, item: TokenStream) -> TokenSt
                         @tx ( (@external descriptors, 0) => 50_000 )
                     });
 
-                    wallet.sync(None).unwrap();
+                    wallet.sync(noop_progress(), None).unwrap();
                     assert_eq!(wallet.get_balance().unwrap(), 50_000);
 
                     let mut total_sent = 0;
@@ -350,17 +350,17 @@ pub fn magical_blockchain_tests(attr: TokenStream, item: TokenStream) -> TokenSt
                         assert!(finalized, "Cannot finalize transaction");
                         wallet.broadcast(psbt.extract_tx()).unwrap();
 
-                        wallet.sync(None).unwrap();
+                        wallet.sync(noop_progress(), None).unwrap();
 
                         total_sent += 5_000 + details.fees;
                     }
 
-                    wallet.sync(None).unwrap();
+                    wallet.sync(noop_progress(), None).unwrap();
                     assert_eq!(wallet.get_balance().unwrap(), 50_000 - total_sent);
 
                     // empty wallet
                     let wallet = get_wallet_from_descriptors(&descriptors);
-                    wallet.sync(None).unwrap();
+                    wallet.sync(noop_progress(), None).unwrap();
                     assert_eq!(wallet.get_balance().unwrap(), 50_000 - total_sent);
                 }
 
@@ -374,14 +374,14 @@ pub fn magical_blockchain_tests(attr: TokenStream, item: TokenStream) -> TokenSt
                         @tx ( (@external descriptors, 0) => 50_000 ) (@confirmations 1)
                     });
 
-                    wallet.sync(None).unwrap();
+                    wallet.sync(noop_progress(), None).unwrap();
                     assert_eq!(wallet.get_balance().unwrap(), 50_000);
 
                     let (psbt, details) = wallet.create_tx(TxBuilder::from_addressees(vec![(node_addr.clone(), 5_000)]).enable_rbf()).unwrap();
                     let (psbt, finalized) = wallet.sign(psbt, None).unwrap();
                     assert!(finalized, "Cannot finalize transaction");
                     wallet.broadcast(psbt.extract_tx()).unwrap();
-                    wallet.sync(None).unwrap();
+                    wallet.sync(noop_progress(), None).unwrap();
                     assert_eq!(wallet.get_balance().unwrap(), 50_000 - details.fees - 5_000);
                     assert_eq!(wallet.get_balance().unwrap(), details.received);
 
@@ -389,7 +389,7 @@ pub fn magical_blockchain_tests(attr: TokenStream, item: TokenStream) -> TokenSt
                     let (new_psbt, finalized) = wallet.sign(new_psbt, None).unwrap();
                     assert!(finalized, "Cannot finalize transaction");
                     wallet.broadcast(new_psbt.extract_tx()).unwrap();
-                    wallet.sync(None).unwrap();
+                    wallet.sync(noop_progress(), None).unwrap();
                     assert_eq!(wallet.get_balance().unwrap(), 50_000 - new_details.fees - 5_000);
                     assert_eq!(wallet.get_balance().unwrap(), new_details.received);
 
@@ -406,14 +406,14 @@ pub fn magical_blockchain_tests(attr: TokenStream, item: TokenStream) -> TokenSt
                         @tx ( (@external descriptors, 0) => 50_000 ) (@confirmations 1)
                     });
 
-                    wallet.sync(None).unwrap();
+                    wallet.sync(noop_progress(), None).unwrap();
                     assert_eq!(wallet.get_balance().unwrap(), 50_000);
 
                     let (psbt, details) = wallet.create_tx(TxBuilder::from_addressees(vec![(node_addr.clone(), 49_000)]).enable_rbf()).unwrap();
                     let (psbt, finalized) = wallet.sign(psbt, None).unwrap();
                     assert!(finalized, "Cannot finalize transaction");
                     wallet.broadcast(psbt.extract_tx()).unwrap();
-                    wallet.sync(None).unwrap();
+                    wallet.sync(noop_progress(), None).unwrap();
                     assert_eq!(wallet.get_balance().unwrap(), 1_000 - details.fees);
                     assert_eq!(wallet.get_balance().unwrap(), details.received);
 
@@ -422,7 +422,7 @@ pub fn magical_blockchain_tests(attr: TokenStream, item: TokenStream) -> TokenSt
                     let (new_psbt, finalized) = wallet.sign(new_psbt, None).unwrap();
                     assert!(finalized, "Cannot finalize transaction");
                     wallet.broadcast(new_psbt.extract_tx()).unwrap();
-                    wallet.sync(None).unwrap();
+                    wallet.sync(noop_progress(), None).unwrap();
                     assert_eq!(wallet.get_balance().unwrap(), 0);
                     assert_eq!(new_details.received, 0);
 
@@ -439,14 +439,14 @@ pub fn magical_blockchain_tests(attr: TokenStream, item: TokenStream) -> TokenSt
                         @tx ( (@external descriptors, 0) => 50_000, (@external descriptors, 1) => 25_000 ) (@confirmations 1)
                     });
 
-                    wallet.sync(None).unwrap();
+                    wallet.sync(noop_progress(), None).unwrap();
                     assert_eq!(wallet.get_balance().unwrap(), 75_000);
 
                     let (psbt, details) = wallet.create_tx(TxBuilder::from_addressees(vec![(node_addr.clone(), 49_000)]).enable_rbf()).unwrap();
                     let (psbt, finalized) = wallet.sign(psbt, None).unwrap();
                     assert!(finalized, "Cannot finalize transaction");
                     wallet.broadcast(psbt.extract_tx()).unwrap();
-                    wallet.sync(None).unwrap();
+                    wallet.sync(noop_progress(), None).unwrap();
                     assert_eq!(wallet.get_balance().unwrap(), 26_000 - details.fees);
                     assert_eq!(details.received, 1_000 - details.fees);
 
@@ -455,7 +455,7 @@ pub fn magical_blockchain_tests(attr: TokenStream, item: TokenStream) -> TokenSt
                     let (new_psbt, finalized) = wallet.sign(new_psbt, None).unwrap();
                     assert!(finalized, "Cannot finalize transaction");
                     wallet.broadcast(new_psbt.extract_tx()).unwrap();
-                    wallet.sync(None).unwrap();
+                    wallet.sync(noop_progress(), None).unwrap();
                     assert_eq!(new_details.sent, 75_000);
                     assert_eq!(wallet.get_balance().unwrap(), new_details.received);
                 }
@@ -470,14 +470,14 @@ pub fn magical_blockchain_tests(attr: TokenStream, item: TokenStream) -> TokenSt
                         @tx ( (@external descriptors, 0) => 50_000, (@external descriptors, 1) => 25_000 ) (@confirmations 1)
                     });
 
-                    wallet.sync(None).unwrap();
+                    wallet.sync(noop_progress(), None).unwrap();
                     assert_eq!(wallet.get_balance().unwrap(), 75_000);
 
                     let (psbt, details) = wallet.create_tx(TxBuilder::from_addressees(vec![(node_addr.clone(), 49_000)]).enable_rbf()).unwrap();
                     let (psbt, finalized) = wallet.sign(psbt, None).unwrap();
                     assert!(finalized, "Cannot finalize transaction");
                     wallet.broadcast(psbt.extract_tx()).unwrap();
-                    wallet.sync(None).unwrap();
+                    wallet.sync(noop_progress(), None).unwrap();
                     assert_eq!(wallet.get_balance().unwrap(), 26_000 - details.fees);
                     assert_eq!(details.received, 1_000 - details.fees);
 
@@ -487,7 +487,7 @@ pub fn magical_blockchain_tests(attr: TokenStream, item: TokenStream) -> TokenSt
                     let (new_psbt, finalized) = wallet.sign(new_psbt, None).unwrap();
                     assert!(finalized, "Cannot finalize transaction");
                     wallet.broadcast(new_psbt.extract_tx()).unwrap();
-                    wallet.sync(None).unwrap();
+                    wallet.sync(noop_progress(), None).unwrap();
                     assert_eq!(new_details.sent, 75_000);
                     assert_eq!(wallet.get_balance().unwrap(), 0);
                     assert_eq!(new_details.received, 0);

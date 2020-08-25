@@ -19,10 +19,14 @@ pub mod esplora;
 #[cfg(feature = "esplora")]
 pub use self::esplora::EsploraBlockchain;
 
+#[cfg(feature = "compact_filters")]
+pub mod compact_filters;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Capability {
     FullHistory,
     GetAnyTx,
+    AccurateFees,
 }
 
 pub trait Blockchain {
@@ -46,13 +50,13 @@ impl Blockchain for OfflineBlockchain {
 pub trait OnlineBlockchain: Blockchain {
     fn get_capabilities(&self) -> HashSet<Capability>;
 
-    fn setup<D: BatchDatabase + DatabaseUtils, P: Progress>(
+    fn setup<D: BatchDatabase + DatabaseUtils, P: 'static + Progress>(
         &self,
         stop_gap: Option<usize>,
         database: &mut D,
         progress_update: P,
     ) -> Result<(), Error>;
-    fn sync<D: BatchDatabase + DatabaseUtils, P: Progress>(
+    fn sync<D: BatchDatabase + DatabaseUtils, P: 'static + Progress>(
         &self,
         stop_gap: Option<usize>,
         database: &mut D,
@@ -70,7 +74,7 @@ pub trait OnlineBlockchain: Blockchain {
 
 pub type ProgressData = (f32, Option<String>);
 
-pub trait Progress {
+pub trait Progress: Send {
     fn update(&self, progress: f32, message: Option<String>) -> Result<(), Error>;
 }
 
@@ -89,6 +93,7 @@ impl Progress for Sender<ProgressData> {
     }
 }
 
+#[derive(Clone)]
 pub struct NoopProgress;
 
 pub fn noop_progress() -> NoopProgress {
@@ -97,6 +102,21 @@ pub fn noop_progress() -> NoopProgress {
 
 impl Progress for NoopProgress {
     fn update(&self, _progress: f32, _message: Option<String>) -> Result<(), Error> {
+        Ok(())
+    }
+}
+
+#[derive(Clone)]
+pub struct LogProgress;
+
+pub fn log_progress() -> LogProgress {
+    LogProgress
+}
+
+impl Progress for LogProgress {
+    fn update(&self, progress: f32, message: Option<String>) -> Result<(), Error> {
+        log::info!("Sync {:.3}%: `{}`", progress, message.unwrap_or("".into()));
+
         Ok(())
     }
 }
