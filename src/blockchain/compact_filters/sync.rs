@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use bitcoin::hash_types::{BlockHash, FilterHash};
 use bitcoin::network::message::NetworkMessage;
@@ -9,11 +10,12 @@ use bitcoin::util::bip158::BlockFilter;
 use super::peer::*;
 use super::store::*;
 use super::CompactFiltersError;
+use crate::error::Error;
 
 pub(crate) const BURIED_CONFIRMATIONS: usize = 100;
 
 pub struct CFSync {
-    headers_store: Arc<HeadersStore<Full>>,
+    headers_store: Arc<ChainStore<Full>>,
     cf_store: Arc<CFStore>,
     skip_blocks: usize,
     bundles: Mutex<VecDeque<(BundleStatus, FilterHash, usize)>>,
@@ -21,7 +23,7 @@ pub struct CFSync {
 
 impl CFSync {
     pub fn new(
-        headers_store: Arc<HeadersStore<Full>>,
+        headers_store: Arc<ChainStore<Full>>,
         skip_blocks: usize,
         filter_type: u8,
     ) -> Result<Self, CompactFiltersError> {
@@ -72,7 +74,7 @@ impl CFSync {
     ) -> Result<(), CompactFiltersError>
     where
         F: Fn(&BlockHash, &BlockFilter) -> Result<bool, CompactFiltersError>,
-        Q: Fn(usize) -> Result<(), crate::error::Error>,
+        Q: Fn(usize) -> Result<(), Error>,
     {
         let current_height = self.headers_store.get_height()?; // TODO: we should update it in case headers_store is also updated
 
@@ -230,11 +232,11 @@ impl CFSync {
 
 pub fn sync_headers<F>(
     peer: Arc<Peer>,
-    store: Arc<HeadersStore<Full>>,
+    store: Arc<ChainStore<Full>>,
     sync_fn: F,
-) -> Result<Option<HeadersStore<Snapshot>>, CompactFiltersError>
+) -> Result<Option<ChainStore<Snapshot>>, CompactFiltersError>
 where
-    F: Fn(usize) -> Result<(), crate::error::Error>,
+    F: Fn(usize) -> Result<(), Error>,
 {
     let locators = store.get_locators()?;
     let locators_vec = locators.iter().map(|(hash, _)| hash).cloned().collect();
@@ -244,22 +246,24 @@ where
         locators_vec,
         Default::default(),
     )))?;
-    let (mut snapshot, mut last_hash) =
-        if let Some(NetworkMessage::Headers(headers)) = peer.recv("headers", None)? {
-            if headers.is_empty() {
-                return Ok(None);
-            }
+    let (mut snapshot, mut last_hash) = if let NetworkMessage::Headers(headers) = peer
+        .recv("headers", Some(Duration::from_secs(TIMEOUT_SECS)))?
+        .ok_or(CompactFiltersError::Timeout)?
+    {
+        if headers.is_empty() {
+            return Ok(None);
+        }
 
-            match locators_map.get(&headers[0].prev_blockhash) {
-                None => return Err(CompactFiltersError::InvalidHeaders),
-                Some(from) => (
-                    store.start_snapshot(*from)?,
-                    headers[0].prev_blockhash.clone(),
-                ),
-            }
-        } else {
-            return Err(CompactFiltersError::InvalidResponse);
-        };
+        match locators_map.get(&headers[0].prev_blockhash) {
+            None => return Err(CompactFiltersError::InvalidHeaders),
+            Some(from) => (
+                store.start_snapshot(*from)?,
+                headers[0].prev_blockhash.clone(),
+            ),
+        }
+    } else {
+        return Err(CompactFiltersError::InvalidResponse);
+    };
 
     let mut sync_height = store.get_height()?;
     while sync_height < peer.get_version().start_height as usize {
@@ -267,7 +271,10 @@ where
             vec![last_hash],
             Default::default(),
         )))?;
-        if let Some(NetworkMessage::Headers(headers)) = peer.recv("headers", None)? {
+        if let NetworkMessage::Headers(headers) = peer
+            .recv("headers", Some(Duration::from_secs(TIMEOUT_SECS)))?
+            .ok_or(CompactFiltersError::Timeout)?
+        {
             let batch_len = headers.len();
             last_hash = snapshot.apply(sync_height, headers)?;
 

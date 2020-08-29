@@ -22,6 +22,7 @@ clap = { version = "2.33", optional = true }
 base64 = { version = "^0.11", optional = true }
 async-trait = { version = "0.1", optional = true }
 rocksdb = { version = "0.14", optional = true }
+socks = { version = "0.3", optional = true }
 lazy_static = { version = "1.4", optional = true }
 
 # Platform-specific dependencies
@@ -38,7 +39,7 @@ compiler = ["clap", "miniscript/compiler"]
 default = ["key-value-db", "electrum"]
 electrum = ["electrum-client"]
 esplora = ["reqwest", "futures"]
-compact_filters = ["rocksdb", "lazy_static"]
+compact_filters = ["rocksdb", "socks", "lazy_static"]
 key-value-db = ["sled"]
 cli-utils = ["clap", "base64"]
 async-interface = ["async-trait"]

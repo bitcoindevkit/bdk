@@ -1,6 +1,4 @@
 use std::collections::HashSet;
-use std::fmt;
-use std::net::ToSocketAddrs;
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -9,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use log::{debug, error, info, trace};
 
 use bitcoin::network::message_blockdata::Inventory;
-use bitcoin::{BitcoinHash, Network, OutPoint, Transaction, Txid};
+use bitcoin::{BitcoinHash, OutPoint, Transaction, Txid};
 
 use rocksdb::{Options, SliceTransform, DB};
 
@@ -27,6 +25,8 @@ use peer::*;
 use store::*;
 use sync::*;
 
+pub use peer::{Mempool, Peer};
+
 const SYNC_HEADERS_COST: f32 = 1.0;
 const SYNC_FILTERS_COST: f32 = 11.6 * 1_000.0;
 const PROCESS_BLOCKS_COST: f32 = 20_000.0;
@@ -35,45 +35,45 @@ const PROCESS_BLOCKS_COST: f32 = 20_000.0;
 pub struct CompactFiltersBlockchain(Option<CompactFilters>);
 
 impl CompactFiltersBlockchain {
-    pub fn new<A: ToSocketAddrs, P: AsRef<Path>>(
-        address: A,
+    pub fn new<P: AsRef<Path>>(
+        peers: Vec<Peer>,
         storage_dir: P,
-        num_threads: usize,
-        skip_blocks: usize,
-        network: Network,
+        skip_blocks: Option<usize>,
     ) -> Result<Self, CompactFiltersError> {
         Ok(CompactFiltersBlockchain(Some(CompactFilters::new(
-            address,
+            peers,
             storage_dir,
-            num_threads,
             skip_blocks,
-            network,
         )?)))
     }
 }
 
+#[derive(Debug)]
 struct CompactFilters {
-    peer: Arc<Peer>,
-    headers: Arc<HeadersStore<Full>>,
-    skip_blocks: usize,
-    num_threads: usize,
+    peers: Vec<Arc<Peer>>,
+    headers: Arc<ChainStore<Full>>,
+    skip_blocks: Option<usize>,
 }
 
 impl CompactFilters {
-    pub fn new<A: ToSocketAddrs, P: AsRef<Path>>(
-        address: A,
+    pub fn new<P: AsRef<Path>>(
+        peers: Vec<Peer>,
         storage_dir: P,
-        num_threads: usize,
-        skip_blocks: usize,
-        network: Network,
+        skip_blocks: Option<usize>,
     ) -> Result<Self, CompactFiltersError> {
+        if peers.is_empty() {
+            return Err(CompactFiltersError::NoPeers);
+        }
+
         let mut opts = Options::default();
         opts.create_if_missing(true);
         opts.set_prefix_extractor(SliceTransform::create_fixed_prefix(16));
 
+        let network = peers[0].get_network();
+
         let cfs = DB::list_cf(&opts, &storage_dir).unwrap_or(vec!["default".to_string()]);
         let db = DB::open_cf(&opts, &storage_dir, &cfs)?;
-        let headers = Arc::new(HeadersStore::new(db, network)?);
+        let headers = Arc::new(ChainStore::new(db, network)?);
 
         // try to recover partial snapshots
         for cf_name in &cfs {
@@ -86,8 +86,7 @@ impl CompactFilters {
         }
 
         Ok(CompactFilters {
-            peer: Arc::new(Peer::new(address, Arc::new(Mempool::default()), network)?),
-            num_threads,
+            peers: peers.into_iter().map(Arc::new).collect(),
             headers,
             skip_blocks,
         })
@@ -191,16 +190,15 @@ impl OnlineBlockchain for CompactFiltersBlockchain {
         progress_update: P,
     ) -> Result<(), Error> {
         let inner = self.0.as_ref().ok_or(Error::OfflineClient)?;
+        let first_peer = &inner.peers[0];
 
-        let cf_sync = Arc::new(CFSync::new(
-            Arc::clone(&inner.headers),
-            inner.skip_blocks,
-            0x00,
-        )?);
+        let skip_blocks = inner.skip_blocks.unwrap_or(0);
+
+        let cf_sync = Arc::new(CFSync::new(Arc::clone(&inner.headers), skip_blocks, 0x00)?);
 
         let initial_height = inner.headers.get_height()?;
-        let total_bundles = (inner.peer.get_version().start_height as usize)
-            .checked_sub(inner.skip_blocks)
+        let total_bundles = (first_peer.get_version().start_height as usize)
+            .checked_sub(skip_blocks)
             .map(|x| x / 1000)
             .unwrap_or(0)
             + 1;
@@ -208,7 +206,7 @@ impl OnlineBlockchain for CompactFiltersBlockchain {
             .checked_sub(cf_sync.pruned_bundles()?)
             .unwrap_or(0);
 
-        let headers_cost = (inner.peer.get_version().start_height as usize)
+        let headers_cost = (first_peer.get_version().start_height as usize)
             .checked_sub(initial_height)
             .unwrap_or(0) as f32
             * SYNC_HEADERS_COST;
@@ -217,7 +215,7 @@ impl OnlineBlockchain for CompactFiltersBlockchain {
         let total_cost = headers_cost + filters_cost + PROCESS_BLOCKS_COST;
 
         if let Some(snapshot) = sync::sync_headers(
-            Arc::clone(&inner.peer),
+            Arc::clone(&first_peer),
             Arc::clone(&inner.headers),
             |new_height| {
                 let local_headers_cost =
@@ -240,7 +238,7 @@ impl OnlineBlockchain for CompactFiltersBlockchain {
             .unwrap_or(0);
         info!("Synced headers to height: {}", synced_height);
 
-        cf_sync.prepare_sync(Arc::clone(&inner.peer))?;
+        cf_sync.prepare_sync(Arc::clone(&first_peer))?;
 
         let all_scripts = Arc::new(
             database
@@ -254,10 +252,10 @@ impl OnlineBlockchain for CompactFiltersBlockchain {
         let synced_bundles = Arc::new(AtomicUsize::new(0));
         let progress_update = Arc::new(Mutex::new(progress_update));
 
-        let mut threads = Vec::with_capacity(inner.num_threads);
-        for _ in 0..inner.num_threads {
+        let mut threads = Vec::with_capacity(inner.peers.len());
+        for peer in &inner.peers {
             let cf_sync = Arc::clone(&cf_sync);
-            let peer = Arc::new(inner.peer.new_connection()?);
+            let peer = Arc::clone(&peer);
             let headers = Arc::clone(&inner.headers);
             let all_scripts = Arc::clone(&all_scripts);
             let last_synced_block = Arc::clone(&last_synced_block);
@@ -336,7 +334,7 @@ impl OnlineBlockchain for CompactFiltersBlockchain {
         }
         database.commit_batch(updates)?;
 
-        inner.peer.ask_for_mempool()?;
+        first_peer.ask_for_mempool()?;
 
         let mut internal_max_deriv = 0;
         let mut external_max_deriv = 0;
@@ -353,7 +351,7 @@ impl OnlineBlockchain for CompactFiltersBlockchain {
                 )?;
             }
         }
-        for tx in inner.peer.get_mempool().iter_txs().iter() {
+        for tx in first_peer.get_mempool().iter_txs().iter() {
             inner.process_tx(
                 database,
                 tx,
@@ -392,15 +390,14 @@ impl OnlineBlockchain for CompactFiltersBlockchain {
     fn get_tx(&self, txid: &Txid) -> Result<Option<Transaction>, Error> {
         let inner = self.0.as_ref().ok_or(Error::OfflineClient)?;
 
-        Ok(inner
-            .peer
+        Ok(inner.peers[0]
             .get_mempool()
             .get_tx(&Inventory::Transaction(*txid)))
     }
 
     fn broadcast(&self, tx: &Transaction) -> Result<(), Error> {
         let inner = self.0.as_ref().ok_or(Error::OfflineClient)?;
-        inner.peer.broadcast_tx(tx.clone())?;
+        inner.peers[0].broadcast_tx(tx.clone())?;
 
         Ok(())
     }
@@ -417,14 +414,6 @@ impl OnlineBlockchain for CompactFiltersBlockchain {
     }
 }
 
-impl fmt::Debug for CompactFilters {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("CompactFilters")
-            .field("peer", &self.peer)
-            .finish()
-    }
-}
-
 #[derive(Debug)]
 pub enum CompactFiltersError {
     InvalidResponse,
@@ -433,7 +422,11 @@ pub enum CompactFiltersError {
     InvalidFilter,
     MissingBlock,
     DataCorruption,
+
+    NotConnected,
     Timeout,
+
+    NoPeers,
 
     DB(rocksdb::Error),
     IO(std::io::Error),

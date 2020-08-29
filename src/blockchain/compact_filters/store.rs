@@ -1,4 +1,5 @@
 use std::convert::TryInto;
+use std::fmt;
 use std::io::{Read, Write};
 use std::marker::PhantomData;
 use std::ops::Deref;
@@ -30,12 +31,12 @@ lazy_static! {
     static ref REGTEST_GENESIS: Block = deserialize(&Vec::<u8>::from_hex("0100000000000000000000000000000000000000000000000000000000000000000000003BA3EDFD7A7B12B27AC72C3E67768F617FC81BC3888A51323A9FB8AA4B1E5E4ADAE5494DFFFF7F20020000000101000000010000000000000000000000000000000000000000000000000000000000000000FFFFFFFF4D04FFFF001D0104455468652054696D65732030332F4A616E2F32303039204368616E63656C6C6F72206F6E206272696E6B206F66207365636F6E64206261696C6F757420666F722062616E6B73FFFFFFFF0100F2052A01000000434104678AFDB0FE5548271967F1A67130B7105CD6A828E03909A67962E0EA1F61DEB649F6BC3F4CEF38C4F35504E51EC112DE5C384DF7BA0B8D578A4C702B6BF11D5FAC00000000").unwrap()).unwrap();
 }
 
-pub trait StoreType: Default {}
+pub trait StoreType: Default + fmt::Debug {}
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct Full;
 impl StoreType for Full {}
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct Snapshot;
 impl StoreType for Snapshot {}
 
@@ -226,7 +227,7 @@ impl Decodable for BundleStatus {
     }
 }
 
-pub struct HeadersStore<T: StoreType> {
+pub struct ChainStore<T: StoreType> {
     store: Arc<RwLock<DB>>,
     cf_name: String,
     min_height: usize,
@@ -234,7 +235,7 @@ pub struct HeadersStore<T: StoreType> {
     phantom: PhantomData<T>,
 }
 
-impl HeadersStore<Full> {
+impl ChainStore<Full> {
     pub fn new(store: DB, network: Network) -> Result<Self, CompactFiltersError> {
         let genesis = match network {
             Network::Bitcoin => MAINNET_GENESIS.deref(),
@@ -262,7 +263,7 @@ impl HeadersStore<Full> {
             store.write(batch)?;
         }
 
-        Ok(HeadersStore {
+        Ok(ChainStore {
             store: Arc::new(RwLock::new(store)),
             cf_name,
             min_height: 0,
@@ -301,10 +302,7 @@ impl HeadersStore<Full> {
         Ok(answer)
     }
 
-    pub fn start_snapshot(
-        &self,
-        from: usize,
-    ) -> Result<HeadersStore<Snapshot>, CompactFiltersError> {
+    pub fn start_snapshot(&self, from: usize) -> Result<ChainStore<Snapshot>, CompactFiltersError> {
         let new_cf_name: String = thread_rng().sample_iter(&Alphanumeric).take(16).collect();
         let new_cf_name = format!("_headers:{}", new_cf_name);
 
@@ -335,7 +333,7 @@ impl HeadersStore<Full> {
         write_store.write(batch)?;
 
         let store = Arc::clone(&self.store);
-        Ok(HeadersStore {
+        Ok(ChainStore {
             store,
             cf_name: new_cf_name,
             min_height: from,
@@ -367,7 +365,7 @@ impl HeadersStore<Full> {
         std::mem::drop(iterator);
         std::mem::drop(write_store);
 
-        let snapshot = HeadersStore {
+        let snapshot = ChainStore {
             store: Arc::clone(&self.store),
             cf_name: cf_name.into(),
             min_height,
@@ -383,7 +381,7 @@ impl HeadersStore<Full> {
 
     pub fn apply_snapshot(
         &self,
-        snaphost: HeadersStore<Snapshot>,
+        snaphost: ChainStore<Snapshot>,
     ) -> Result<(), CompactFiltersError> {
         let mut batch = WriteBatch::default();
 
@@ -523,7 +521,7 @@ impl HeadersStore<Full> {
     }
 }
 
-impl<T: StoreType> HeadersStore<T> {
+impl<T: StoreType> ChainStore<T> {
     pub fn work(&self) -> Result<Uint256, CompactFiltersError> {
         let read_store = self.store.read().unwrap();
         let cf_handle = read_store.cf_handle(&self.cf_name).unwrap();
@@ -629,6 +627,18 @@ impl<T: StoreType> HeadersStore<T> {
     }
 }
 
+impl<T: StoreType> fmt::Debug for ChainStore<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct(&format!("ChainStore<{:?}>", T::default()))
+            .field("cf_name", &self.cf_name)
+            .field("min_height", &self.min_height)
+            .field("network", &self.network)
+            .field("headers_height", &self.get_height())
+            .field("tip_hash", &self.get_tip_hash())
+            .finish()
+    }
+}
+
 pub type FilterHeaderHash = FilterHash;
 
 #[derive(Debug, Clone)]
@@ -663,7 +673,7 @@ type BundleEntry = (BundleStatus, FilterHeaderHash);
 
 impl CFStore {
     pub fn new(
-        headers_store: &HeadersStore<Full>,
+        headers_store: &ChainStore<Full>,
         filter_type: u8,
     ) -> Result<Self, CompactFiltersError> {
         let cf_store = CFStore {

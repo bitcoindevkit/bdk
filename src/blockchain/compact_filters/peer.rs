@@ -4,6 +4,8 @@ use std::sync::{Arc, Condvar, Mutex, RwLock};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use socks::{Socks5Stream, ToTargetAddr};
+
 use rand::{thread_rng, Rng};
 
 use bitcoin::consensus::Encodable;
@@ -21,6 +23,8 @@ use bitcoin::{Block, Network, Transaction, Txid};
 use super::CompactFiltersError;
 
 type ResponsesMap = HashMap<&'static str, Arc<(Mutex<Vec<NetworkMessage>>, Condvar)>>;
+
+pub(crate) const TIMEOUT_SECS: u64 = 10;
 
 #[derive(Debug, Default)]
 pub struct Mempool {
@@ -70,9 +74,33 @@ impl Peer {
         mempool: Arc<Mempool>,
         network: Network,
     ) -> Result<Self, CompactFiltersError> {
-        let connection = TcpStream::connect(address)?;
+        let stream = TcpStream::connect(address)?;
 
-        let writer = Arc::new(Mutex::new(connection.try_clone()?));
+        Peer::from_stream(stream, mempool, network)
+    }
+
+    pub fn new_proxy<T: ToTargetAddr, P: ToSocketAddrs>(
+        target: T,
+        proxy: P,
+        credentials: Option<(&str, &str)>,
+        mempool: Arc<Mempool>,
+        network: Network,
+    ) -> Result<Self, CompactFiltersError> {
+        let socks_stream = if let Some((username, password)) = credentials {
+            Socks5Stream::connect_with_password(proxy, target, username, password)?
+        } else {
+            Socks5Stream::connect(proxy, target)?
+        };
+
+        Peer::from_stream(socks_stream.into_inner(), mempool, network)
+    }
+
+    fn from_stream(
+        stream: TcpStream,
+        mempool: Arc<Mempool>,
+        network: Network,
+    ) -> Result<Self, CompactFiltersError> {
+        let writer = Arc::new(Mutex::new(stream.try_clone()?));
         let responses: Arc<RwLock<ResponsesMap>> = Arc::new(RwLock::new(HashMap::new()));
         let connected = Arc::new(RwLock::new(true));
 
@@ -85,7 +113,7 @@ impl Peer {
         let reader_thread = thread::spawn(move || {
             Self::reader_thread(
                 network,
-                connection,
+                stream,
                 reader_thread_responses,
                 reader_thread_writer,
                 reader_thread_mempool,
@@ -142,11 +170,6 @@ impl Peer {
         })
     }
 
-    pub fn new_connection(&self) -> Result<Self, CompactFiltersError> {
-        let socket_addr = self.writer.lock().unwrap().peer_addr()?;
-        Self::new(socket_addr, Arc::clone(&self.mempool), self.network)
-    }
-
     fn _send(
         writer: &mut TcpStream,
         magic: u32,
@@ -196,6 +219,10 @@ impl Peer {
 
     pub fn get_version(&self) -> &VersionMessage {
         &self.version
+    }
+
+    pub fn get_network(&self) -> Network {
+        self.network
     }
 
     pub fn get_mempool(&self) -> Arc<Mempool> {
@@ -337,7 +364,7 @@ impl CompactFiltersPeer for Peer {
         }))?;
 
         let response = self
-            .recv("cfcheckpt", Some(Duration::from_secs(10)))?
+            .recv("cfcheckpt", Some(Duration::from_secs(TIMEOUT_SECS)))?
             .ok_or(CompactFiltersError::Timeout)?;
         let response = match response {
             NetworkMessage::CFCheckpt(response) => response,
@@ -364,7 +391,7 @@ impl CompactFiltersPeer for Peer {
         }))?;
 
         let response = self
-            .recv("cfheaders", Some(Duration::from_secs(10)))?
+            .recv("cfheaders", Some(Duration::from_secs(TIMEOUT_SECS)))?
             .ok_or(CompactFiltersError::Timeout)?;
         let response = match response {
             NetworkMessage::CFHeaders(response) => response,
@@ -380,7 +407,7 @@ impl CompactFiltersPeer for Peer {
 
     fn pop_cf_filter_resp(&self) -> Result<CFilter, CompactFiltersError> {
         let response = self
-            .recv("cfilter", Some(Duration::from_secs(10)))?
+            .recv("cfilter", Some(Duration::from_secs(TIMEOUT_SECS)))?
             .ok_or(CompactFiltersError::Timeout)?;
         let response = match response {
             NetworkMessage::CFilter(response) => response,
@@ -418,7 +445,7 @@ impl InvPeer for Peer {
             block_hash,
         )]))?;
 
-        match self.recv("block", Some(Duration::from_secs(10)))? {
+        match self.recv("block", Some(Duration::from_secs(TIMEOUT_SECS)))? {
             None => Ok(None),
             Some(NetworkMessage::Block(response)) => Ok(Some(response)),
             _ => Err(CompactFiltersError::InvalidResponse),
@@ -446,7 +473,7 @@ impl InvPeer for Peer {
 
         for _ in 0..num_txs {
             let tx = self
-                .recv("tx", Some(Duration::from_secs(10)))?
+                .recv("tx", Some(Duration::from_secs(TIMEOUT_SECS)))?
                 .ok_or(CompactFiltersError::Timeout)?;
             let tx = match tx {
                 NetworkMessage::Tx(tx) => tx,
