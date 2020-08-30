@@ -2194,4 +2194,53 @@ mod test {
 
         assert_fee_rate!(psbt.extract_tx(), details.fees, FeeRate::from_sat_per_vb(5.0), @add_signature);
     }
+
+    #[test]
+    fn test_sign_single_xprv() {
+        let (wallet, _, _) = get_funded_wallet("wpkh(tprv8ZgxMBicQKsPd3EupYiPRhaMooHKUHJxNsTfYuScep13go8QFfHdtkG9nRkFGb7busX4isf6X9dURGCoKgitaApQ6MupRhZMcELAxTBRJgS/*)");
+        let addr = wallet.get_new_address().unwrap();
+        let (psbt, _) = wallet
+            .create_tx(TxBuilder::from_addressees(vec![(addr.clone(), 0)]).send_all())
+            .unwrap();
+
+        let (signed_psbt, finalized) = wallet.sign(psbt, None).unwrap();
+        assert_eq!(finalized, true);
+
+        let extracted = signed_psbt.extract_tx();
+        assert_eq!(extracted.input[0].witness.len(), 2);
+    }
+
+    #[test]
+    fn test_sign_single_wif() {
+        let (wallet, _, _) =
+            get_funded_wallet("wpkh(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW)");
+        let addr = wallet.get_new_address().unwrap();
+        let (psbt, _) = wallet
+            .create_tx(TxBuilder::from_addressees(vec![(addr.clone(), 0)]).send_all())
+            .unwrap();
+
+        let (signed_psbt, finalized) = wallet.sign(psbt, None).unwrap();
+        assert_eq!(finalized, true);
+
+        let extracted = signed_psbt.extract_tx();
+        assert_eq!(extracted.input[0].witness.len(), 2);
+    }
+
+    #[test]
+    fn test_sign_single_xprv_no_hd_keypaths() {
+        let (wallet, _, _) = get_funded_wallet("wpkh(tprv8ZgxMBicQKsPd3EupYiPRhaMooHKUHJxNsTfYuScep13go8QFfHdtkG9nRkFGb7busX4isf6X9dURGCoKgitaApQ6MupRhZMcELAxTBRJgS/*)");
+        let addr = wallet.get_new_address().unwrap();
+        let (mut psbt, _) = wallet
+            .create_tx(TxBuilder::from_addressees(vec![(addr.clone(), 0)]).send_all())
+            .unwrap();
+
+        psbt.inputs[0].hd_keypaths.clear();
+        assert_eq!(psbt.inputs[0].hd_keypaths.len(), 0);
+
+        let (signed_psbt, finalized) = wallet.sign(psbt, None).unwrap();
+        assert_eq!(finalized, true);
+
+        let extracted = signed_psbt.extract_tx();
+        assert_eq!(extracted.input[0].witness.len(), 2);
+    }
 }
