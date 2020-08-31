@@ -28,12 +28,11 @@ use std::default::Default;
 use bitcoin::{Address, OutPoint, SigHashType, Transaction};
 
 use super::coin_selection::{CoinSelectionAlgorithm, DefaultCoinSelectionAlgorithm};
-use super::utils::FeeRate;
-use crate::types::UTXO;
+use crate::types::{FeeRate, UTXO};
 
 #[derive(Debug, Default)]
 pub struct TxBuilder<Cs: CoinSelectionAlgorithm> {
-    pub(crate) addressees: Vec<(Address, u64)>,
+    pub(crate) recipients: Vec<(Address, u64)>,
     pub(crate) send_all: bool,
     pub(crate) fee_rate: Option<FeeRate>,
     pub(crate) policy_path: Option<BTreeMap<String, Vec<usize>>>,
@@ -54,19 +53,19 @@ impl TxBuilder<DefaultCoinSelectionAlgorithm> {
         Self::default()
     }
 
-    pub fn from_addressees(addressees: Vec<(Address, u64)>) -> Self {
-        Self::default().set_addressees(addressees)
+    pub fn with_recipients(recipients: Vec<(Address, u64)>) -> Self {
+        Self::default().set_recipients(recipients)
     }
 }
 
 impl<Cs: CoinSelectionAlgorithm> TxBuilder<Cs> {
-    pub fn set_addressees(mut self, addressees: Vec<(Address, u64)>) -> Self {
-        self.addressees = addressees;
+    pub fn set_recipients(mut self, recipients: Vec<(Address, u64)>) -> Self {
+        self.recipients = recipients;
         self
     }
 
-    pub fn add_addressee(mut self, address: Address, amount: u64) -> Self {
-        self.addressees.push((address, amount));
+    pub fn add_recipient(mut self, address: Address, amount: u64) -> Self {
+        self.recipients.push((address, amount));
         self
     }
 
@@ -158,7 +157,7 @@ impl<Cs: CoinSelectionAlgorithm> TxBuilder<Cs> {
 
     pub fn coin_selection<P: CoinSelectionAlgorithm>(self, coin_selection: P) -> TxBuilder<P> {
         TxBuilder {
-            addressees: self.addressees,
+            recipients: self.recipients,
             send_all: self.send_all,
             fee_rate: self.fee_rate,
             policy_path: self.policy_path,
@@ -190,7 +189,7 @@ impl Default for TxOrdering {
 }
 
 impl TxOrdering {
-    pub fn modify_tx(&self, tx: &mut Transaction) {
+    pub fn sort_tx(&self, tx: &mut Transaction) {
         match self {
             TxOrdering::Untouched => {}
             TxOrdering::Shuffle => {
@@ -279,7 +278,7 @@ mod test {
         let original_tx = ordering_test_tx!();
         let mut tx = original_tx.clone();
 
-        TxOrdering::Untouched.modify_tx(&mut tx);
+        TxOrdering::Untouched.sort_tx(&mut tx);
 
         assert_eq!(original_tx, tx);
     }
@@ -289,7 +288,7 @@ mod test {
         let original_tx = ordering_test_tx!();
         let mut tx = original_tx.clone();
 
-        TxOrdering::Shuffle.modify_tx(&mut tx);
+        TxOrdering::Shuffle.sort_tx(&mut tx);
 
         assert_eq!(original_tx.input, tx.input);
         assert_ne!(original_tx.output, tx.output);
@@ -302,7 +301,7 @@ mod test {
         let original_tx = ordering_test_tx!();
         let mut tx = original_tx.clone();
 
-        TxOrdering::BIP69Lexicographic.modify_tx(&mut tx);
+        TxOrdering::BIP69Lexicographic.sort_tx(&mut tx);
 
         assert_eq!(
             tx.input[0].previous_output,

@@ -84,6 +84,14 @@ pub enum SignerError {
     MissingHDKeypath,
 }
 
+impl fmt::Display for SignerError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+impl std::error::Error for SignerError {}
+
 /// Trait for signers
 pub trait Signer: fmt::Debug {
     fn sign(
@@ -92,9 +100,7 @@ pub trait Signer: fmt::Debug {
         input_index: Option<usize>,
     ) -> Result<(), SignerError>;
 
-    fn sign_whole_tx(&self) -> bool {
-        false
-    }
+    fn sign_whole_tx(&self) -> bool;
 
     fn descriptor_secret_key(&self) -> Option<DescriptorSecretKey> {
         None
@@ -126,6 +132,10 @@ impl Signer for DescriptorXKey<ExtendedPrivKey> {
 
         let derived_key = self.xkey.derive_priv(&ctx, &deriv_path).unwrap();
         derived_key.private_key.sign(psbt, Some(input_index))
+    }
+
+    fn sign_whole_tx(&self) -> bool {
+        false
     }
 
     fn descriptor_secret_key(&self) -> Option<DescriptorSecretKey> {
@@ -174,6 +184,10 @@ impl Signer for PrivateKey {
             .insert(pubkey, final_signature);
 
         Ok(())
+    }
+
+    fn sign_whole_tx(&self) -> bool {
+        false
     }
 
     fn descriptor_secret_key(&self) -> Option<DescriptorSecretKey> {
@@ -299,7 +313,7 @@ impl<Pk: MiniscriptKey> SignersContainer<Pk> {
     }
 }
 
-pub trait ComputeSighash {
+pub(crate) trait ComputeSighash {
     fn sighash(
         psbt: &psbt::PartiallySignedTransaction,
         input_index: usize,

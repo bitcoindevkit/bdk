@@ -44,9 +44,9 @@ pub fn get_timestamp() -> u64 {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub struct Instant(SystemInstant);
+pub(crate) struct Instant(SystemInstant);
 #[cfg(target_arch = "wasm32")]
-pub struct Instant(Duration);
+pub(crate) struct Instant(Duration);
 
 impl Instant {
     #[cfg(not(target_arch = "wasm32"))]

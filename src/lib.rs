@@ -24,7 +24,7 @@
 
 // only enables the `doc_cfg` feature when
 // the `docsrs` configuration attribute is defined
-#[cfg_attr(docsrs, feature(doc_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 pub extern crate bitcoin;
 extern crate log;
@@ -45,13 +45,9 @@ extern crate lazy_static;
 
 #[cfg(feature = "electrum")]
 pub extern crate electrum_client;
-#[cfg(feature = "electrum")]
-pub use electrum_client::client::Client;
 
 #[cfg(feature = "esplora")]
 pub extern crate reqwest;
-#[cfg(feature = "esplora")]
-pub use blockchain::esplora::EsploraBlockchain;
 
 #[cfg(feature = "key-value-db")]
 pub extern crate sled;
@@ -74,11 +70,19 @@ pub mod error;
 pub mod blockchain;
 pub mod database;
 pub mod descriptor;
-pub mod psbt;
-pub mod types;
+pub(crate) mod psbt;
+pub(crate) mod types;
 pub mod wallet;
 
-pub use descriptor::ExtendedDescriptor;
+pub use error::Error;
+pub use types::*;
+pub use wallet::address_validator;
+pub use wallet::signer;
 pub use wallet::tx_builder::TxBuilder;
-pub use wallet::utils::FeeRate;
 pub use wallet::{OfflineWallet, Wallet};
+
+#[cfg(feature = "esplora")]
+pub use blockchain::esplora::EsploraBlockchain;
+
+#[cfg(feature = "electrum")]
+pub use blockchain::electrum::ElectrumBlockchain;

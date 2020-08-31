@@ -257,7 +257,7 @@ impl Peer {
         *self.connected.read().unwrap()
     }
 
-    pub fn reader_thread(
+    fn reader_thread(
         network: Network,
         connection: TcpStream,
         reader_thread_responses: Arc<RwLock<ResponsesMap>>,

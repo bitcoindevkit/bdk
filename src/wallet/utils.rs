@@ -40,34 +40,6 @@ impl IsDust for u64 {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
-// Internally stored as satoshi/vbyte
-pub struct FeeRate(f32);
-
-impl FeeRate {
-    pub fn from_btc_per_kvb(btc_per_kvb: f32) -> Self {
-        FeeRate(btc_per_kvb * 1e5)
-    }
-
-    pub fn from_sat_per_vb(sat_per_vb: f32) -> Self {
-        FeeRate(sat_per_vb)
-    }
-
-    pub fn default_min_relay_fee() -> Self {
-        FeeRate(1.0)
-    }
-
-    pub fn as_sat_vb(&self) -> f32 {
-        self.0
-    }
-}
-
-impl std::default::Default for FeeRate {
-    fn default() -> Self {
-        FeeRate::default_min_relay_fee()
-    }
-}
-
 pub struct After {
     pub current_height: Option<u32>,
     pub assume_height_reached: bool,
@@ -158,7 +130,7 @@ impl<I: Iterator> Iterator for ChunksIterator<I> {
 
 #[cfg(test)]
 mod test {
-    use super::*;
+    use crate::types::FeeRate;
 
     #[test]
     fn test_fee_from_btc_per_kb() {

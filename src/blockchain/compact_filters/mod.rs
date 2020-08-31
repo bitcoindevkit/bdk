@@ -23,6 +23,7 @@
 // SOFTWARE.
 
 use std::collections::HashSet;
+use std::fmt;
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -116,7 +117,7 @@ impl CompactFilters {
         })
     }
 
-    fn process_tx<D: BatchDatabase + DatabaseUtils>(
+    fn process_tx<D: BatchDatabase>(
         &self,
         database: &mut D,
         tx: &Transaction,
@@ -207,7 +208,7 @@ impl OnlineBlockchain for CompactFiltersBlockchain {
         vec![Capability::FullHistory].into_iter().collect()
     }
 
-    fn setup<D: BatchDatabase + DatabaseUtils, P: 'static + Progress>(
+    fn setup<D: BatchDatabase, P: 'static + Progress>(
         &self,
         _stop_gap: Option<usize>, // TODO: move to electrum and esplora only
         database: &mut D,
@@ -459,6 +460,14 @@ pub enum CompactFiltersError {
 
     Global(Box<crate::error::Error>),
 }
+
+impl fmt::Display for CompactFiltersError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+impl std::error::Error for CompactFiltersError {}
 
 macro_rules! impl_error {
     ( $from:ty, $to:ident ) => {

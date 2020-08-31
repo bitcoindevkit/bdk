@@ -27,8 +27,8 @@ use std::sync::Arc;
 use magical_bitcoin_wallet::bitcoin;
 use magical_bitcoin_wallet::database::MemoryDatabase;
 use magical_bitcoin_wallet::descriptor::HDKeyPaths;
-use magical_bitcoin_wallet::types::ScriptType;
 use magical_bitcoin_wallet::wallet::address_validator::{AddressValidator, AddressValidatorError};
+use magical_bitcoin_wallet::ScriptType;
 use magical_bitcoin_wallet::{OfflineWallet, Wallet};
 
 use bitcoin::hashes::hex::FromHex;

@@ -23,6 +23,7 @@
 // SOFTWARE.
 
 use std::collections::{HashMap, HashSet};
+use std::fmt;
 
 use futures::stream::{self, StreamExt, TryStreamExt};
 
@@ -92,7 +93,7 @@ impl OnlineBlockchain for EsploraBlockchain {
         .collect()
     }
 
-    fn setup<D: BatchDatabase + DatabaseUtils, P: Progress>(
+    fn setup<D: BatchDatabase, P: Progress>(
         &self,
         stop_gap: Option<usize>,
         database: &mut D,
@@ -357,6 +358,14 @@ pub enum EsploraError {
 
     TransactionNotFound(Txid),
 }
+
+impl fmt::Display for EsploraError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+impl std::error::Error for EsploraError {}
 
 impl From<reqwest::Error> for EsploraError {
     fn from(other: reqwest::Error) -> Self {

@@ -43,7 +43,9 @@ pub enum Error {
     TransactionNotFound,
     TransactionConfirmed,
     IrreplaceableTransaction,
-    FeeRateTooLow(crate::wallet::utils::FeeRate),
+    FeeRateTooLow {
+        required: crate::types::FeeRate,
+    },
 
     ChecksumMismatch,
     DifferentDescriptorStructure,

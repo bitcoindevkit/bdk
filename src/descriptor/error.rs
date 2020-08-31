@@ -53,6 +53,8 @@ impl std::fmt::Display for Error {
     }
 }
 
+impl std::error::Error for Error {}
+
 impl_error!(bitcoin::util::bip32::Error, BIP32);
 impl_error!(bitcoin::util::base58::Error, Base58);
 impl_error!(bitcoin::util::key::Error, PK);

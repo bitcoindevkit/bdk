@@ -22,6 +22,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+use std::fmt;
+
 use bitcoin::Script;
 
 use crate::descriptor::HDKeyPaths;
@@ -34,6 +36,14 @@ pub enum AddressValidatorError {
     TimeoutError,
     InvalidScript,
 }
+
+impl fmt::Display for AddressValidatorError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+impl std::error::Error for AddressValidatorError {}
 
 pub trait AddressValidator {
     fn validate(
@@ -81,7 +91,7 @@ mod test {
 
         let addr = testutils!(@external descriptors, 10);
         wallet
-            .create_tx(TxBuilder::from_addressees(vec![(addr, 25_000)]))
+            .create_tx(TxBuilder::with_recipients(vec![(addr, 25_000)]))
             .unwrap();
     }
 }

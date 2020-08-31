@@ -28,10 +28,10 @@ use bitcoin::{OutPoint, Script, Transaction, TxOut};
 use crate::error::Error;
 use crate::types::*;
 
-#[cfg(any(feature = "key-value-db", feature = "default"))]
-pub mod keyvalue;
-pub mod memory;
+#[cfg(feature = "key-value-db")]
+pub(crate) mod keyvalue;
 
+pub mod memory;
 pub use memory::MemoryDatabase;
 
 pub trait BatchOperations {
@@ -102,7 +102,7 @@ pub trait BatchDatabase: Database {
     fn commit_batch(&mut self, batch: Self::Batch) -> Result<(), Error>;
 }
 
-pub trait DatabaseUtils: Database {
+pub(crate) trait DatabaseUtils: Database {
     fn is_mine(&self, script: &Script) -> Result<bool, Error> {
         self.get_path_from_script_pubkey(script)
             .map(|o| o.is_some())

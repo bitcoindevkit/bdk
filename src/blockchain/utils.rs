@@ -67,7 +67,7 @@ pub trait ElectrumLikeSync {
 
     // Provided methods down here...
 
-    fn electrum_like_setup<D: BatchDatabase + DatabaseUtils, P: Progress>(
+    fn electrum_like_setup<D: BatchDatabase, P: Progress>(
         &self,
         stop_gap: Option<usize>,
         database: &mut D,
@@ -196,7 +196,7 @@ pub trait ElectrumLikeSync {
         Ok(())
     }
 
-    fn check_tx_and_descendant<D: DatabaseUtils + BatchDatabase>(
+    fn check_tx_and_descendant<D: BatchDatabase>(
         &self,
         database: &mut D,
         txid: &Txid,
@@ -320,7 +320,7 @@ pub trait ElectrumLikeSync {
         Ok(to_check_later)
     }
 
-    fn check_history<D: DatabaseUtils + BatchDatabase>(
+    fn check_history<D: BatchDatabase>(
         &self,
         database: &mut D,
         script_pubkey: Script,

@@ -26,14 +26,14 @@ use bitcoin::consensus::encode::serialize;
 use bitcoin::{Script, TxIn};
 
 use crate::error::Error;
-use crate::types::UTXO;
+use crate::types::{FeeRate, UTXO};
 
 pub type DefaultCoinSelectionAlgorithm = DumbCoinSelection;
 
 #[derive(Debug)]
 pub struct CoinSelectionResult {
     pub txin: Vec<(TxIn, Script)>,
-    pub total_amount: u64,
+    pub selected_amount: u64,
     pub fee_amount: f32,
 }
 
@@ -42,8 +42,8 @@ pub trait CoinSelectionAlgorithm: std::fmt::Debug {
         &self,
         utxos: Vec<UTXO>,
         use_all_utxos: bool,
-        fee_rate: f32,
-        outgoing_amount: u64,
+        fee_rate: FeeRate,
+        amount_needed: u64,
         input_witness_weight: usize,
         fee_amount: f32,
     ) -> Result<CoinSelectionResult, Error>;
@@ -57,16 +57,16 @@ impl CoinSelectionAlgorithm for DumbCoinSelection {
         &self,
         mut utxos: Vec<UTXO>,
         use_all_utxos: bool,
-        fee_rate: f32,
+        fee_rate: FeeRate,
         outgoing_amount: u64,
         input_witness_weight: usize,
         mut fee_amount: f32,
     ) -> Result<CoinSelectionResult, Error> {
         let mut txin = Vec::new();
-        let calc_fee_bytes = |wu| (wu as f32) * fee_rate / 4.0;
+        let calc_fee_bytes = |wu| (wu as f32) * fee_rate.as_sat_vb() / 4.0;
 
         log::debug!(
-            "outgoing_amount = `{}`, fee_amount = `{}`, fee_rate = `{}`",
+            "outgoing_amount = `{}`, fee_amount = `{}`, fee_rate = `{:?}`",
             outgoing_amount,
             fee_amount,
             fee_rate
@@ -75,11 +75,11 @@ impl CoinSelectionAlgorithm for DumbCoinSelection {
         // sort so that we pick them starting from the larger.
         utxos.sort_by(|a, b| a.txout.value.partial_cmp(&b.txout.value).unwrap());
 
-        let mut total_amount: u64 = 0;
-        while use_all_utxos || total_amount < outgoing_amount + (fee_amount.ceil() as u64) {
+        let mut selected_amount: u64 = 0;
+        while use_all_utxos || selected_amount < outgoing_amount + (fee_amount.ceil() as u64) {
             let utxo = match utxos.pop() {
                 Some(utxo) => utxo,
-                None if total_amount < outgoing_amount + (fee_amount.ceil() as u64) => {
+                None if selected_amount < outgoing_amount + (fee_amount.ceil() as u64) => {
                     return Err(Error::InsufficientFunds)
                 }
                 None if use_all_utxos => break,
@@ -100,13 +100,13 @@ impl CoinSelectionAlgorithm for DumbCoinSelection {
             );
 
             txin.push((new_in, utxo.txout.script_pubkey));
-            total_amount += utxo.txout.value;
+            selected_amount += utxo.txout.value;
         }
 
         Ok(CoinSelectionResult {
             txin,
             fee_amount,
-            total_amount,
+            selected_amount,
         })
     }
 }
@@ -154,11 +154,18 @@ mod test {
         let utxos = get_test_utxos();
 
         let result = DumbCoinSelection
-            .coin_select(utxos, false, 1.0, 250_000, P2WPKH_WITNESS_SIZE, 50.0)
+            .coin_select(
+                utxos,
+                false,
+                FeeRate::from_sat_per_vb(1.0),
+                250_000,
+                P2WPKH_WITNESS_SIZE,
+                50.0,
+            )
             .unwrap();
 
         assert_eq!(result.txin.len(), 2);
-        assert_eq!(result.total_amount, 300_000);
+        assert_eq!(result.selected_amount, 300_000);
         assert_eq!(result.fee_amount, 186.0);
     }
 
@@ -167,11 +174,18 @@ mod test {
         let utxos = get_test_utxos();
 
         let result = DumbCoinSelection
-            .coin_select(utxos, true, 1.0, 20_000, P2WPKH_WITNESS_SIZE, 50.0)
+            .coin_select(
+                utxos,
+                true,
+                FeeRate::from_sat_per_vb(1.0),
+                20_000,
+                P2WPKH_WITNESS_SIZE,
+                50.0,
+            )
             .unwrap();
 
         assert_eq!(result.txin.len(), 2);
-        assert_eq!(result.total_amount, 300_000);
+        assert_eq!(result.selected_amount, 300_000);
         assert_eq!(result.fee_amount, 186.0);
     }
 
@@ -180,11 +194,18 @@ mod test {
         let utxos = get_test_utxos();
 
         let result = DumbCoinSelection
-            .coin_select(utxos, false, 1.0, 20_000, P2WPKH_WITNESS_SIZE, 50.0)
+            .coin_select(
+                utxos,
+                false,
+                FeeRate::from_sat_per_vb(1.0),
+                20_000,
+                P2WPKH_WITNESS_SIZE,
+                50.0,
+            )
             .unwrap();
 
         assert_eq!(result.txin.len(), 1);
-        assert_eq!(result.total_amount, 200_000);
+        assert_eq!(result.selected_amount, 200_000);
         assert_eq!(result.fee_amount, 118.0);
     }
 
@@ -194,7 +215,14 @@ mod test {
         let utxos = get_test_utxos();
 
         DumbCoinSelection
-            .coin_select(utxos, false, 1.0, 500_000, P2WPKH_WITNESS_SIZE, 50.0)
+            .coin_select(
+                utxos,
+                false,
+                FeeRate::from_sat_per_vb(1.0),
+                500_000,
+                P2WPKH_WITNESS_SIZE,
+                50.0,
+            )
             .unwrap();
     }
 
@@ -204,7 +232,14 @@ mod test {
         let utxos = get_test_utxos();
 
         DumbCoinSelection
-            .coin_select(utxos, false, 1000.0, 250_000, P2WPKH_WITNESS_SIZE, 50.0)
+            .coin_select(
+                utxos,
+                false,
+                FeeRate::from_sat_per_vb(1000.0),
+                250_000,
+                P2WPKH_WITNESS_SIZE,
+                50.0,
+            )
             .unwrap();
     }
 }

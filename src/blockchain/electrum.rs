@@ -33,7 +33,7 @@ use electrum_client::{Client, ElectrumApi};
 
 use self::utils::{ELSGetHistoryRes, ELSListUnspentRes, ElectrumLikeSync};
 use super::*;
-use crate::database::{BatchDatabase, DatabaseUtils};
+use crate::database::BatchDatabase;
 use crate::error::Error;
 use crate::FeeRate;
 
@@ -73,7 +73,7 @@ impl OnlineBlockchain for ElectrumBlockchain {
         .collect()
     }
 
-    fn setup<D: BatchDatabase + DatabaseUtils, P: Progress>(
+    fn setup<D: BatchDatabase, P: Progress>(
         &self,
         stop_gap: Option<usize>,
         database: &mut D,

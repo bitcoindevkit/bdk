@@ -29,24 +29,29 @@ use std::sync::Arc;
 
 use bitcoin::{Transaction, Txid};
 
-use crate::database::{BatchDatabase, DatabaseUtils};
+use crate::database::BatchDatabase;
 use crate::error::Error;
 use crate::FeeRate;
 
-pub mod utils;
+pub(crate) mod utils;
 
 #[cfg(feature = "electrum")]
+#[cfg_attr(docsrs, doc(cfg(feature = "electrum")))]
 pub mod electrum;
 #[cfg(feature = "electrum")]
 pub use self::electrum::ElectrumBlockchain;
 
 #[cfg(feature = "esplora")]
+#[cfg_attr(docsrs, doc(cfg(feature = "esplora")))]
 pub mod esplora;
 #[cfg(feature = "esplora")]
 pub use self::esplora::EsploraBlockchain;
 
 #[cfg(feature = "compact_filters")]
+#[cfg_attr(docsrs, doc(cfg(feature = "compact_filters")))]
 pub mod compact_filters;
+#[cfg(feature = "compact_filters")]
+pub use self::compact_filters::CompactFiltersBlockchain;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Capability {
@@ -76,13 +81,13 @@ impl Blockchain for OfflineBlockchain {
 pub trait OnlineBlockchain: Blockchain {
     fn get_capabilities(&self) -> HashSet<Capability>;
 
-    fn setup<D: BatchDatabase + DatabaseUtils, P: 'static + Progress>(
+    fn setup<D: BatchDatabase, P: 'static + Progress>(
         &self,
         stop_gap: Option<usize>,
         database: &mut D,
         progress_update: P,
     ) -> Result<(), Error>;
-    fn sync<D: BatchDatabase + DatabaseUtils, P: 'static + Progress>(
+    fn sync<D: BatchDatabase, P: 'static + Progress>(
         &self,
         stop_gap: Option<usize>,
         database: &mut D,
@@ -163,7 +168,7 @@ impl<T: OnlineBlockchain> OnlineBlockchain for Arc<T> {
         maybe_await!(self.deref().get_capabilities())
     }
 
-    fn setup<D: BatchDatabase + DatabaseUtils, P: 'static + Progress>(
+    fn setup<D: BatchDatabase, P: 'static + Progress>(
         &self,
         stop_gap: Option<usize>,
         database: &mut D,
@@ -172,7 +177,7 @@ impl<T: OnlineBlockchain> OnlineBlockchain for Arc<T> {
         maybe_await!(self.deref().setup(stop_gap, database, progress_update))
     }
 
-    fn sync<D: BatchDatabase + DatabaseUtils, P: 'static + Progress>(
+    fn sync<D: BatchDatabase, P: 'static + Progress>(
         &self,
         stop_gap: Option<usize>,
         database: &mut D,

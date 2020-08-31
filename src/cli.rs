@@ -40,7 +40,7 @@ use crate::error::Error;
 use crate::types::ScriptType;
 use crate::{FeeRate, TxBuilder, Wallet};
 
-fn parse_addressee(s: &str) -> Result<(Address, u64), String> {
+fn parse_recipient(s: &str) -> Result<(Address, u64), String> {
     let parts: Vec<_> = s.split(":").collect();
     if parts.len() != 2 {
         return Err("Invalid format".to_string());
@@ -62,8 +62,8 @@ fn parse_outpoint(s: &str) -> Result<OutPoint, String> {
     OutPoint::from_str(s).map_err(|e| format!("{:?}", e))
 }
 
-fn addressee_validator(s: String) -> Result<(), String> {
-    parse_addressee(&s).map(|_| ())
+fn recipient_validator(s: String) -> Result<(), String> {
+    parse_recipient(&s).map(|_| ())
 }
 
 fn outpoint_validator(s: String) -> Result<(), String> {
@@ -95,18 +95,18 @@ pub fn make_cli_subcommands<'a, 'b>() -> App<'a, 'b> {
                     Arg::with_name("to")
                         .long("to")
                         .value_name("ADDRESS:SAT")
-                        .help("Adds an addressee to the transaction")
+                        .help("Adds a recipient to the transaction")
                         .takes_value(true)
                         .number_of_values(1)
                         .required(true)
                         .multiple(true)
-                        .validator(addressee_validator),
+                        .validator(recipient_validator),
                 )
                 .arg(
                     Arg::with_name("send_all")
                         .short("all")
                         .long("send_all")
-                        .help("Sends all the funds (or all the selected utxos). Requires only one addressees of value 0"),
+                        .help("Sends all the funds (or all the selected utxos). Requires only one recipients of value 0"),
                 )
                 .arg(
                     Arg::with_name("enable_rbf")
@@ -382,13 +382,13 @@ where
             "satoshi": wallet.get_balance()?
         }))
     } else if let Some(sub_matches) = matches.subcommand_matches("create_tx") {
-        let addressees = sub_matches
+        let recipients = sub_matches
             .values_of("to")
             .unwrap()
-            .map(|s| parse_addressee(s))
+            .map(|s| parse_recipient(s))
             .collect::<Result<Vec<_>, _>>()
             .map_err(|s| Error::Generic(s))?;
-        let mut tx_builder = TxBuilder::from_addressees(addressees);
+        let mut tx_builder = TxBuilder::with_recipients(recipients);
 
         if sub_matches.is_present("send_all") {
             tx_builder = tx_builder.send_all();
@@ -503,13 +503,13 @@ where
         }))
     } else if let Some(sub_matches) = matches.subcommand_matches("finalize_psbt") {
         let psbt = base64::decode(&sub_matches.value_of("psbt").unwrap()).unwrap();
-        let mut psbt: PartiallySignedTransaction = deserialize(&psbt).unwrap();
+        let psbt: PartiallySignedTransaction = deserialize(&psbt).unwrap();
 
         let assume_height = sub_matches
             .value_of("assume_height")
             .and_then(|s| Some(s.parse().unwrap()));
 
-        let finalized = wallet.finalize_psbt(&mut psbt, assume_height)?;
+        let (psbt, finalized) = wallet.finalize_psbt(psbt, assume_height)?;
         Ok(json!({
             "psbt": base64::encode(&serialize(&psbt)),
             "is_finalized": finalized,

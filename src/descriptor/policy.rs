@@ -24,6 +24,7 @@
 
 use std::cmp::max;
 use std::collections::{BTreeMap, HashSet, VecDeque};
+use std::fmt;
 use std::sync::Arc;
 
 use serde::ser::SerializeMap;
@@ -423,8 +424,16 @@ pub enum PolicyError {
     IncompatibleConditions,
 }
 
+impl fmt::Display for PolicyError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+impl std::error::Error for PolicyError {}
+
 impl Policy {
-    pub fn new(item: SatisfiableItem) -> Self {
+    fn new(item: SatisfiableItem) -> Self {
         Policy {
             id: item.id(),
             item,
@@ -433,7 +442,7 @@ impl Policy {
         }
     }
 
-    pub fn make_and(a: Option<Policy>, b: Option<Policy>) -> Result<Option<Policy>, PolicyError> {
+    fn make_and(a: Option<Policy>, b: Option<Policy>) -> Result<Option<Policy>, PolicyError> {
         match (a, b) {
             (None, None) => Ok(None),
             (Some(x), None) | (None, Some(x)) => Ok(Some(x)),
@@ -441,7 +450,7 @@ impl Policy {
         }
     }
 
-    pub fn make_or(a: Option<Policy>, b: Option<Policy>) -> Result<Option<Policy>, PolicyError> {
+    fn make_or(a: Option<Policy>, b: Option<Policy>) -> Result<Option<Policy>, PolicyError> {
         match (a, b) {
             (None, None) => Ok(None),
             (Some(x), None) | (None, Some(x)) => Ok(Some(x)),
@@ -449,10 +458,7 @@ impl Policy {
         }
     }
 
-    pub fn make_thresh(
-        items: Vec<Policy>,
-        threshold: usize,
-    ) -> Result<Option<Policy>, PolicyError> {
+    fn make_thresh(items: Vec<Policy>, threshold: usize) -> Result<Option<Policy>, PolicyError> {
         if threshold == 0 {
             return Ok(None);
         }
