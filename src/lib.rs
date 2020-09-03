@@ -80,9 +80,3 @@ pub use wallet::address_validator;
 pub use wallet::signer;
 pub use wallet::tx_builder::TxBuilder;
 pub use wallet::{OfflineWallet, Wallet};
-
-#[cfg(feature = "esplora")]
-pub use blockchain::esplora::EsploraBlockchain;
-
-#[cfg(feature = "electrum")]
-pub use blockchain::electrum::ElectrumBlockchain;

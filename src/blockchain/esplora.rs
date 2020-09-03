@@ -22,6 +22,19 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+//! Esplora
+//!
+//! This module defines an [`OnlineBlockchain`] struct that can query an Esplora backend
+//! populate the wallet's [database](crate::database::Database) by
+//!
+//! ## Example
+//!
+//! ```no_run
+//! # use magical_bitcoin_wallet::blockchain::esplora::EsploraBlockchain;
+//! let blockchain = EsploraBlockchain::new("https://blockstream.info/testnet/");
+//! # Ok::<(), magical_bitcoin_wallet::error::Error>(())
+//! ```
+
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 
@@ -41,18 +54,22 @@ use bitcoin::{Script, Transaction, Txid};
 
 use self::utils::{ELSGetHistoryRes, ELSListUnspentRes, ElectrumLikeSync};
 use super::*;
-use crate::database::{BatchDatabase, DatabaseUtils};
+use crate::database::BatchDatabase;
 use crate::error::Error;
 use crate::FeeRate;
 
 #[derive(Debug)]
-pub struct UrlClient {
+struct UrlClient {
     url: String,
     // We use the async client instead of the blocking one because it automatically uses `fetch`
     // when the target platform is wasm32.
     client: Client,
 }
 
+/// Structure that implements the logic to sync with Esplora
+///
+/// ## Example
+/// See the [`blockchain::esplora`](crate::blockchain::esplora) module for a usage example.
 #[derive(Debug)]
 pub struct EsploraBlockchain(Option<UrlClient>);
 
@@ -63,6 +80,9 @@ impl std::convert::From<UrlClient> for EsploraBlockchain {
 }
 
 impl EsploraBlockchain {
+    /// Create a new instance of the client from a base URL
+    ///
+    /// The client internally adds the `/api` prefix to `base_url` before making any requests
     pub fn new(base_url: &str) -> Self {
         EsploraBlockchain(Some(UrlClient {
             url: base_url.to_string(),
@@ -350,12 +370,17 @@ struct EsploraListUnspent {
     status: EsploraGetHistoryStatus,
 }
 
+/// Errors that can happen during a sync with [`EsploraBlockchain`]
 #[derive(Debug)]
 pub enum EsploraError {
+    /// Error with the HTTP call
     Reqwest(reqwest::Error),
+    /// Invalid number returned
     Parsing(std::num::ParseIntError),
+    /// Invalid Bitcoin data returned
     BitcoinEncoding(bitcoin::consensus::encode::Error),
 
+    /// Transaction not found
     TransactionNotFound(Txid),
 }
 

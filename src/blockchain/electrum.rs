@@ -22,6 +22,21 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+//! Electrum
+//!
+//! This module defines an [`OnlineBlockchain`] struct that wraps an [`electrum_client::Client`]
+//! and implements the logic required to populate the wallet's [database](crate::database::Database) by
+//! querying the inner client.
+//!
+//! ## Example
+//!
+//! ```no_run
+//! # use magical_bitcoin_wallet::blockchain::electrum::ElectrumBlockchain;
+//! let client = electrum_client::Client::new("ssl://electrum.blockstream.info:50002", None)?;
+//! let blockchain = ElectrumBlockchain::from(client);
+//! # Ok::<(), magical_bitcoin_wallet::error::Error>(())
+//! ```
+
 use std::collections::HashSet;
 
 #[allow(unused_imports)]
@@ -37,6 +52,10 @@ use crate::database::BatchDatabase;
 use crate::error::Error;
 use crate::FeeRate;
 
+/// Wrapper over an Electrum Client that implements the required blockchain traits
+///
+/// ## Example
+/// See the [`blockchain::electrum`](crate::blockchain::electrum) module for a usage example.
 pub struct ElectrumBlockchain(Option<Client>);
 
 #[cfg(test)]

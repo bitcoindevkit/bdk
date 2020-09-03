@@ -22,6 +22,42 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+//! Compact Filters
+//!
+//! This module contains a multithreaded implementation of an [`OnlineBlockchain`] backend that
+//! uses BIP157 (aka "Neutrino") to populate the wallet's [database](crate::database::Database)
+//! by downloading compact filters from the P2P network.
+//!
+//! Since there are currently very few peers "in the wild" that advertise the required service
+//! flag, this implementation requires that one or more known peers are provided by the user.
+//! No dns or other kinds of peer discovery are done internally.
+//!
+//! Moreover, this module doesn't currently support detecting and resolving conflicts between
+//! messages received by different peers. Thus, it's recommended to use this module by only
+//! connecting to a single peer at a time, optionally by opening multiple connections if it's
+//! desirable to use multiple threads at once to sync in parallel.
+//!
+//! ## Example
+//!
+//! ```no_run
+//! # use std::sync::Arc;
+//! # use bitcoin::*;
+//! # use magical_bitcoin_wallet::*;
+//! # use magical_bitcoin_wallet::blockchain::compact_filters::*;
+//! let num_threads = 4;
+//!
+//! let mempool = Arc::new(Mempool::default());
+//! let peers = (0..num_threads)
+//!     .map(|_| Peer::connect(
+//!         "btcd-mainnet.lightning.computer:8333",
+//!         Arc::clone(&mempool),
+//!         Network::Bitcoin,
+//!     ))
+//!     .collect::<Result<_, _>>()?;
+//! let blockchain = CompactFiltersBlockchain::new(peers, "./wallet-filters", Some(500_000))?;
+//! # Ok::<(), magical_bitcoin_wallet::error::Error>(())
+//! ```
+
 use std::collections::HashSet;
 use std::fmt;
 use std::path::Path;
@@ -56,10 +92,22 @@ const SYNC_HEADERS_COST: f32 = 1.0;
 const SYNC_FILTERS_COST: f32 = 11.6 * 1_000.0;
 const PROCESS_BLOCKS_COST: f32 = 20_000.0;
 
+/// Structure implementing the required blockchain traits
+///
+/// ## Example
+/// See the [`blockchain::compact_filters`](crate::blockchain::compact_filters) module for a usage example.
 #[derive(Debug)]
 pub struct CompactFiltersBlockchain(Option<CompactFilters>);
 
 impl CompactFiltersBlockchain {
+    /// Construct a new instance given a list of peers, a path to store headers and block
+    /// filters downloaded during the sync and optionally a number of blocks to ignore starting
+    /// from the genesis while scanning for the wallet's outputs.
+    ///
+    /// For each [`Peer`] specified a new thread will be spawned to download and verify the filters
+    /// in parallel. It's currently recommended to only connect to a single peer to avoid
+    /// inconsistencies in the data returned, optionally with multiple connections in parallel to
+    /// speed-up the sync process.
     pub fn new<P: AsRef<Path>>(
         peers: Vec<Peer>,
         storage_dir: P,
@@ -73,6 +121,7 @@ impl CompactFiltersBlockchain {
     }
 }
 
+/// Internal struct that contains the state of a [`CompactFiltersBlockchain`]
 #[derive(Debug)]
 struct CompactFilters {
     peers: Vec<Arc<Peer>>,
@@ -81,6 +130,7 @@ struct CompactFilters {
 }
 
 impl CompactFilters {
+    /// Constructor, see [`CompactFiltersBlockchain::new`] for the documentation
     pub fn new<P: AsRef<Path>>(
         peers: Vec<Peer>,
         storage_dir: P,
@@ -117,6 +167,8 @@ impl CompactFilters {
         })
     }
 
+    /// Process a transaction by looking for inputs that spend from a UTXO in the database or
+    /// outputs that send funds to a know script_pubkey.
     fn process_tx<D: BatchDatabase>(
         &self,
         database: &mut D,
@@ -439,25 +491,40 @@ impl OnlineBlockchain for CompactFiltersBlockchain {
     }
 }
 
+/// An error that can occur during sync with a [`CompactFiltersBlockchain`]
 #[derive(Debug)]
 pub enum CompactFiltersError {
+    /// A peer sent an invalid or unexpected response
     InvalidResponse,
+    /// The headers returned are invalid
     InvalidHeaders,
+    /// The compact filter headers returned are invalid
     InvalidFilterHeader,
+    /// The compact filter returned is invalid
     InvalidFilter,
+    /// The peer is missing a block in the valid chain
     MissingBlock,
+    /// The data stored in the block filters storage are corrupted
     DataCorruption,
 
+    /// A peer is not connected
     NotConnected,
+    /// A peer took too long to reply to one of our messages
     Timeout,
 
+    /// No peers have been specified
     NoPeers,
 
+    /// Internal database error
     DB(rocksdb::Error),
+    /// Internal I/O error
     IO(std::io::Error),
+    /// Invalid BIP158 filter
     BIP158(bitcoin::util::bip158::Error),
+    /// Internal system time error
     Time(std::time::SystemTimeError),
 
+    /// Wrapper for [`crate::error::Error`]
     Global(Box<crate::error::Error>),
 }
 

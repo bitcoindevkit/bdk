@@ -48,18 +48,27 @@ use super::CompactFiltersError;
 
 type ResponsesMap = HashMap<&'static str, Arc<(Mutex<Vec<NetworkMessage>>, Condvar)>>;
 
-pub(crate) const TIMEOUT_SECS: u64 = 10;
+pub(crate) const TIMEOUT_SECS: u64 = 30;
 
+/// Container for unconfirmed, but valid Bitcoin transactions
+///
+/// It is normally shared between [`Peer`]s with the use of [`Arc`], so that transactions are not
+/// duplicated in memory.
 #[derive(Debug, Default)]
 pub struct Mempool {
     txs: RwLock<HashMap<Txid, Transaction>>,
 }
 
 impl Mempool {
+    /// Add a transaction to the mempool
+    ///
+    /// Note that this doesn't propagate the transaction to other
+    /// peers. To do that, [`broadcast`](crate::blockchain::OnlineBlockchain::broadcast) should be used.
     pub fn add_tx(&self, tx: Transaction) {
         self.txs.write().unwrap().insert(tx.txid(), tx);
     }
 
+    /// Look-up a transaction in the mempool given an [`Inventory`] request
     pub fn get_tx(&self, inventory: &Inventory) -> Option<Transaction> {
         let txid = match inventory {
             Inventory::Error | Inventory::Block(_) | Inventory::WitnessBlock(_) => return None,
@@ -69,15 +78,18 @@ impl Mempool {
         self.txs.read().unwrap().get(&txid).cloned()
     }
 
+    /// Return whether or not the mempool contains a transaction with a given txid
     pub fn has_tx(&self, txid: &Txid) -> bool {
         self.txs.read().unwrap().contains_key(txid)
     }
 
+    /// Return the list of transactions contained in the mempool
     pub fn iter_txs(&self) -> Vec<Transaction> {
         self.txs.read().unwrap().values().cloned().collect()
     }
 }
 
+/// A Bitcoin peer
 #[derive(Debug)]
 pub struct Peer {
     writer: Arc<Mutex<TcpStream>>,
@@ -93,7 +105,11 @@ pub struct Peer {
 }
 
 impl Peer {
-    pub fn new<A: ToSocketAddrs>(
+    /// Connect to a peer over a plaintext TCP connection
+    ///
+    /// This function internally spawns a new thread that will monitor incoming messages from the
+    /// peer, and optionally reply to some of them transparently, like [pings](NetworkMessage::Ping)
+    pub fn connect<A: ToSocketAddrs>(
         address: A,
         mempool: Arc<Mempool>,
         network: Network,
@@ -103,7 +119,12 @@ impl Peer {
         Peer::from_stream(stream, mempool, network)
     }
 
-    pub fn new_proxy<T: ToTargetAddr, P: ToSocketAddrs>(
+    /// Connect to a peer through a SOCKS5 proxy, optionally by using some credentials, specified
+    /// as a tuple of `(username, password)`
+    ///
+    /// This function internally spawns a new thread that will monitor incoming messages from the
+    /// peer, and optionally reply to some of them transparently, like [pings](NetworkMessage::Ping)
+    pub fn connect_proxy<T: ToTargetAddr, P: ToSocketAddrs>(
         target: T,
         proxy: P,
         credentials: Option<(&str, &str)>,
@@ -119,6 +140,7 @@ impl Peer {
         Peer::from_stream(socks_stream.into_inner(), mempool, network)
     }
 
+    /// Create a [`Peer`] from an already connected TcpStream
     fn from_stream(
         stream: TcpStream,
         mempool: Arc<Mempool>,
@@ -194,6 +216,7 @@ impl Peer {
         })
     }
 
+    /// Send a Bitcoin network message
     fn _send(
         writer: &mut TcpStream,
         magic: u32,
@@ -210,6 +233,7 @@ impl Peer {
         Ok(())
     }
 
+    /// Wait for a specific incoming Bitcoin message, optionally with a timeout
     fn _recv(
         responses: &Arc<RwLock<ResponsesMap>>,
         wait_for: &'static str,
@@ -241,22 +265,27 @@ impl Peer {
         Ok(messages.pop())
     }
 
+    /// Return the [`VersionMessage`] sent by the peer
     pub fn get_version(&self) -> &VersionMessage {
         &self.version
     }
 
+    /// Return the Bitcoin [`Network`] in use
     pub fn get_network(&self) -> Network {
         self.network
     }
 
+    /// Return the mempool used by this peer
     pub fn get_mempool(&self) -> Arc<Mempool> {
         Arc::clone(&self.mempool)
     }
 
+    /// Return whether or not the peer is still connected
     pub fn is_connected(&self) -> bool {
         *self.connected.read().unwrap()
     }
 
+    /// Internal function called once the `reader_thread` is spawned
     fn reader_thread(
         network: Network,
         connection: TcpStream,
@@ -341,11 +370,13 @@ impl Peer {
         }
     }
 
+    /// Send a raw Bitcoin message to the peer
     pub fn send(&self, payload: NetworkMessage) -> Result<(), CompactFiltersError> {
         let mut writer = self.writer.lock().unwrap();
         Self::_send(&mut writer, self.network.magic(), payload)
     }
 
+    /// Waits for a specific incoming Bitcoin message, optionally with a timeout
     pub fn recv(
         &self,
         wait_for: &'static str,
