@@ -55,9 +55,9 @@
 //!         script: &Script
 //!     ) -> Result<(), AddressValidatorError> {
 //!         let address = Address::from_script(script, Network::Testnet)
-//!                           .as_ref()
-//!                           .map(Address::to_string)
-//!                           .unwrap_or(script.to_string());
+//!             .as_ref()
+//!             .map(Address::to_string)
+//!             .unwrap_or(script.to_string());
 //!         println!("New address of type {:?}: {}", script_type, address);
 //!         println!("HD keypaths: {:#?}", hd_keypaths);
 //!

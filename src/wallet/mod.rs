@@ -22,6 +22,10 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+//! Wallet
+//!
+//! This module defines the [`Wallet`] structure.
+
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::collections::{BTreeMap, HashSet};
@@ -65,8 +69,19 @@ use crate::types::*;
 
 const CACHE_ADDR_BATCH_SIZE: u32 = 100;
 
+/// Type alias for a [`Wallet`] that uses [`OfflineBlockchain`]
 pub type OfflineWallet<D> = Wallet<OfflineBlockchain, D>;
 
+/// A Bitcoin wallet
+///
+/// A wallet takes descriptors, a [`database`](crate::database) and a
+/// [`blockchain`](crate::blockchain) and implements the basic functions that a Bitcoin wallets
+/// needs to operate, like [generating addresses](Wallet::get_new_address), [returning the balance](Wallet::get_balance),
+/// [creating transactions](Wallet::create_tx), etc.
+///
+/// A wallet can be either "online" if the [`blockchain`](crate::blockchain) type provided
+/// implements [`OnlineBlockchain`], or "offline" if it doesn't. Offline wallets only expose
+/// methods that don't need any interaction with the blockchain to work.
 pub struct Wallet<B: Blockchain, D: BatchDatabase> {
     descriptor: ExtendedDescriptor,
     change_descriptor: Option<ExtendedDescriptor>,
@@ -90,6 +105,7 @@ where
     B: Blockchain,
     D: BatchDatabase,
 {
+    /// Create a new "offline" wallet
     pub fn new_offline(
         descriptor: &str,
         change_descriptor: Option<&str>,
@@ -136,6 +152,7 @@ where
         })
     }
 
+    /// Return a newly generated address using the external descriptor
     pub fn get_new_address(&self) -> Result<Address, Error> {
         let index = self.fetch_and_increment_index(ScriptType::External)?;
 
@@ -145,18 +162,34 @@ where
             .ok_or(Error::ScriptDoesntHaveAddressForm)
     }
 
+    /// Return whether or not a `script` is part of this wallet (either internal or external)
     pub fn is_mine(&self, script: &Script) -> Result<bool, Error> {
         self.database.borrow().is_mine(script)
     }
 
+    /// Return the list of unspent outputs of this wallet
+    ///
+    /// Note that this methods only operate on the internal database, which first needs to be
+    /// [`Wallet::sync`] manually.
     pub fn list_unspent(&self) -> Result<Vec<UTXO>, Error> {
         self.database.borrow().iter_utxos()
     }
 
+    /// Return the list of transactions made and received by the wallet
+    ///
+    /// Optionally fill the [`TransactionDetails::transaction`] field with the raw transaction if
+    /// `include_raw` is `true`.
+    ///
+    /// Note that this methods only operate on the internal database, which first needs to be
+    /// [`Wallet::sync`] manually.
     pub fn list_transactions(&self, include_raw: bool) -> Result<Vec<TransactionDetails>, Error> {
         self.database.borrow().iter_txs(include_raw)
     }
 
+    /// Return the balance, meaning the sum of this wallet's unspent outputs' values
+    ///
+    /// Note that this methods only operate on the internal database, which first needs to be
+    /// [`Wallet::sync`] manually.
     pub fn get_balance(&self) -> Result<u64, Error> {
         Ok(self
             .list_unspent()?
@@ -164,6 +197,9 @@ where
             .fold(0, |sum, i| sum + i.txout.value))
     }
 
+    /// Add an external signer
+    ///
+    /// See [the `signer` module](signer) for an example.
     pub fn add_signer(
         &mut self,
         script_type: ScriptType,
@@ -179,10 +215,31 @@ where
         signers.add_external(id, ordering, signer);
     }
 
+    /// Add an address validator
+    ///
+    /// See [the `address_validator` module](address_validator) for an example.
     pub fn add_address_validator(&mut self, validator: Arc<Box<dyn AddressValidator>>) {
         self.address_validators.push(validator);
     }
 
+    /// Create a new transaction following the options specified in the `builder`
+    ///
+    /// ## Example
+    ///
+    /// ```no_run
+    /// # use std::str::FromStr;
+    /// # use bitcoin::*;
+    /// # use magical_bitcoin_wallet::*;
+    /// # use magical_bitcoin_wallet::database::*;
+    /// # let descriptor = "wpkh(tpubD6NzVbkrYhZ4Xferm7Pz4VnjdcDPFyjVu5K4iZXQ4pVN8Cks4pHVowTBXBKRhX64pkRyJZJN5xAKj4UDNnLPb5p2sSKXhewoYx5GbTdUFWq/*)";
+    /// # let wallet: OfflineWallet<_> = Wallet::new_offline(descriptor, None, Network::Testnet, MemoryDatabase::default())?;
+    /// # let to_address = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap();
+    /// let (psbt, details) = wallet.create_tx(
+    ///     TxBuilder::with_recipients(vec![(to_address.script_pubkey(), 50_000)])
+    /// )?;
+    /// // sign and broadcast ...
+    /// # Ok::<(), magical_bitcoin_wallet::Error>(())
+    /// ```
     pub fn create_tx<Cs: coin_selection::CoinSelectionAlgorithm>(
         &self,
         builder: TxBuilder<Cs>,
@@ -383,6 +440,31 @@ where
         Ok((psbt, transaction_details))
     }
 
+    /// Bump the fee of a transaction following the options specified in the `builder`
+    ///
+    /// Return an error if the transaction is already confirmed or doesn't explicitly signal RBF.
+    ///
+    /// **NOTE**: if the original transaction was made with [`TxBuilder::send_all`], the same
+    /// option must be enabled when bumping its fees to correctly reduce the only output's value to
+    /// increase the fees.
+    ///
+    /// ## Example
+    ///
+    /// ```no_run
+    /// # use std::str::FromStr;
+    /// # use bitcoin::*;
+    /// # use magical_bitcoin_wallet::*;
+    /// # use magical_bitcoin_wallet::database::*;
+    /// # let descriptor = "wpkh(tpubD6NzVbkrYhZ4Xferm7Pz4VnjdcDPFyjVu5K4iZXQ4pVN8Cks4pHVowTBXBKRhX64pkRyJZJN5xAKj4UDNnLPb5p2sSKXhewoYx5GbTdUFWq/*)";
+    /// # let wallet: OfflineWallet<_> = Wallet::new_offline(descriptor, None, Network::Testnet, MemoryDatabase::default())?;
+    /// let txid = Txid::from_str("faff0a466b70f5d5f92bd757a92c1371d4838bdd5bc53a06764e2488e51ce8f8").unwrap();
+    /// let (psbt, details) = wallet.bump_fee(
+    ///     &txid,
+    ///     TxBuilder::new().fee_rate(FeeRate::from_sat_per_vb(5.0)),
+    /// )?;
+    /// // sign and broadcast ...
+    /// # Ok::<(), magical_bitcoin_wallet::Error>(())
+    /// ```
     // TODO: support for merging multiple transactions while bumping the fees
     // TODO: option to force addition of an extra output? seems bad for privacy to update the
     // change
@@ -601,6 +683,21 @@ where
         Ok((psbt, details))
     }
 
+    /// Sign a transaction with all the wallet's signers, in the order specified by every signer's
+    /// [`SignerOrdering`]
+    ///
+    /// ## Example
+    ///
+    /// ```no_run
+    /// # use std::str::FromStr;
+    /// # use bitcoin::*;
+    /// # use magical_bitcoin_wallet::*;
+    /// # use magical_bitcoin_wallet::database::*;
+    /// # let descriptor = "wpkh(tpubD6NzVbkrYhZ4Xferm7Pz4VnjdcDPFyjVu5K4iZXQ4pVN8Cks4pHVowTBXBKRhX64pkRyJZJN5xAKj4UDNnLPb5p2sSKXhewoYx5GbTdUFWq/*)";
+    /// # let wallet: OfflineWallet<_> = Wallet::new_offline(descriptor, None, Network::Testnet, MemoryDatabase::default())?;
+    /// # let (psbt, _) = wallet.create_tx(TxBuilder::new())?;
+    /// let (signed_psbt, finalized) = wallet.sign(psbt, None)?;
+    /// # Ok::<(), magical_bitcoin_wallet::Error>(())
     pub fn sign(&self, mut psbt: PSBT, assume_height: Option<u32>) -> Result<(PSBT, bool), Error> {
         // this helps us doing our job later
         self.add_input_hd_keypaths(&mut psbt)?;
@@ -624,6 +721,7 @@ where
         self.finalize_psbt(psbt, assume_height)
     }
 
+    /// Return the spending policies for the wallet's descriptor
     pub fn policies(&self, script_type: ScriptType) -> Result<Option<Policy>, Error> {
         match (script_type, self.change_descriptor.as_ref()) {
             (ScriptType::External, _) => {
@@ -636,6 +734,10 @@ where
         }
     }
 
+    /// Return the "public" version of the wallet's descriptor, meaning a new descriptor that has
+    /// the same structure but with every secret key removed
+    ///
+    /// This can be used to build a watch-only version of a wallet
     pub fn public_descriptor(
         &self,
         script_type: ScriptType,
@@ -647,6 +749,7 @@ where
         }
     }
 
+    /// Try to finalize a PSBT
     pub fn finalize_psbt(
         &self,
         mut psbt: PSBT,
@@ -976,6 +1079,7 @@ where
     B: OnlineBlockchain,
     D: BatchDatabase,
 {
+    /// Create a new "online" wallet
     #[maybe_async]
     pub fn new(
         descriptor: &str,
@@ -992,6 +1096,7 @@ where
         Ok(wallet)
     }
 
+    /// Sync the internal database with the blockchain
     #[maybe_async]
     pub fn sync<P: 'static + Progress>(
         &self,
@@ -1025,7 +1130,10 @@ where
             if self
                 .database
                 .borrow()
-                .get_script_pubkey_from_path(ScriptType::Internal, max_address)?
+                .get_script_pubkey_from_path(
+                    ScriptType::Internal,
+                    max_address.checked_sub(1).unwrap_or(0),
+                )?
                 .is_none()
             {
                 run_setup = true;
@@ -1050,10 +1158,12 @@ where
         }
     }
 
+    /// Return a reference to the internal blockchain client
     pub fn client(&self) -> &B {
         &self.client
     }
 
+    /// Broadcast a transaction to the network
     #[maybe_async]
     pub fn broadcast(&self, tx: Transaction) -> Result<Txid, Error> {
         maybe_await!(self.client.broadcast(&tx))?;

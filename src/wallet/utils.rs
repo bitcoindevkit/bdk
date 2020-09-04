@@ -27,10 +27,12 @@ use miniscript::{MiniscriptKey, Satisfier};
 // De-facto standard "dust limit" (even though it should change based on the output type)
 const DUST_LIMIT_SATOSHI: u64 = 546;
 
+/// Trait to check if a value is below the dust limit
 // we implement this trait to make sure we don't mess up the comparison with off-by-one like a <
 // instead of a <= etc. The constant value for the dust limit is not public on purpose, to
 // encourage the usage of this trait.
 pub trait IsDust {
+    /// Check whether or not a value is below dust limit
     fn is_dust(&self) -> bool;
 }
 
