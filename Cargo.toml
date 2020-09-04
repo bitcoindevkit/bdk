@@ -1,5 +1,5 @@
 [package]
-name = "magical-bitcoin-wallet"
+name = "magical"
 version = "0.1.0"
 edition = "2018"
 authors = ["Alekos Filini <alekos.filini@gmail.com>", "Riccardo Casatta <riccardo@casatta.it>"]

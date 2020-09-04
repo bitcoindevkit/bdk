@@ -25,7 +25,7 @@
 extern crate bitcoin;
 extern crate clap;
 extern crate log;
-extern crate magical_bitcoin_wallet;
+extern crate magical;
 extern crate miniscript;
 extern crate serde_json;
 
@@ -39,8 +39,8 @@ use bitcoin::Network;
 use miniscript::policy::Concrete;
 use miniscript::Descriptor;
 
-use magical_bitcoin_wallet::database::memory::MemoryDatabase;
-use magical_bitcoin_wallet::{OfflineWallet, ScriptType, Wallet};
+use magical::database::memory::MemoryDatabase;
+use magical::{OfflineWallet, ScriptType, Wallet};
 
 fn main() {
     env_logger::init_from_env(

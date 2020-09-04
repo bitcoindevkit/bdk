@@ -30,9 +30,9 @@
 //! ## Example
 //!
 //! ```no_run
-//! # use magical_bitcoin_wallet::blockchain::esplora::EsploraBlockchain;
+//! # use magical::blockchain::esplora::EsploraBlockchain;
 //! let blockchain = EsploraBlockchain::new("https://blockstream.info/testnet/");
-//! # Ok::<(), magical_bitcoin_wallet::Error>(())
+//! # Ok::<(), magical::Error>(())
 //! ```
 
 use std::collections::{HashMap, HashSet};

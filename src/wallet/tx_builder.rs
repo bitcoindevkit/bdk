@@ -29,7 +29,7 @@
 //! ```
 //! # use std::str::FromStr;
 //! # use bitcoin::*;
-//! # use magical_bitcoin_wallet::*;
+//! # use magical::*;
 //! # let to_address = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap();
 //! // Create a transaction with one output to `to_address` of 50_000 satoshi, with a custom fee rate
 //! // of 5.0 satoshi/vbyte, only spending non-change outputs and with RBF signaling

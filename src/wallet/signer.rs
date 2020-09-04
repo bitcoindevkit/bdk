@@ -33,9 +33,9 @@
 //! # use bitcoin::*;
 //! # use bitcoin::util::psbt;
 //! # use bitcoin::util::bip32::Fingerprint;
-//! # use magical_bitcoin_wallet::signer::*;
-//! # use magical_bitcoin_wallet::database::*;
-//! # use magical_bitcoin_wallet::*;
+//! # use magical::signer::*;
+//! # use magical::database::*;
+//! # use magical::*;
 //! # #[derive(Debug)]
 //! # struct CustomHSM;
 //! # impl CustomHSM {
@@ -85,7 +85,7 @@
 //!     Arc::new(Box::new(custom_signer))
 //! );
 //!
-//! # Ok::<_, magical_bitcoin_wallet::Error>(())
+//! # Ok::<_, magical::Error>(())
 //! ```
 
 use std::cmp::Ordering;

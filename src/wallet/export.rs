@@ -33,9 +33,9 @@
 //! ```
 //! # use std::str::FromStr;
 //! # use bitcoin::*;
-//! # use magical_bitcoin_wallet::database::*;
-//! # use magical_bitcoin_wallet::wallet::export::*;
-//! # use magical_bitcoin_wallet::*;
+//! # use magical::database::*;
+//! # use magical::wallet::export::*;
+//! # use magical::*;
 //! let import = r#"{
 //!     "descriptor": "wpkh([c258d2e4\/84h\/1h\/0h]tpubDD3ynpHgJQW8VvWRzQ5WFDCrs4jqVFGHB3vLC3r49XHJSqP8bHKdK4AriuUKLccK68zfzowx7YhmDN8SiSkgCDENUFx9qVw65YyqM78vyVe\/0\/*)",
 //!     "blockheight":1782088,
@@ -44,15 +44,15 @@
 //!
 //! let import = WalletExport::from_str(import)?;
 //! let wallet: OfflineWallet<_> = Wallet::new_offline(&import.descriptor(), import.change_descriptor().as_deref(), Network::Testnet, MemoryDatabase::default())?;
-//! # Ok::<_, magical_bitcoin_wallet::Error>(())
+//! # Ok::<_, magical::Error>(())
 //! ```
 //!
 //! ### Export a `Wallet`
 //! ```
 //! # use bitcoin::*;
-//! # use magical_bitcoin_wallet::database::*;
-//! # use magical_bitcoin_wallet::wallet::export::*;
-//! # use magical_bitcoin_wallet::*;
+//! # use magical::database::*;
+//! # use magical::wallet::export::*;
+//! # use magical::*;
 //! let wallet: OfflineWallet<_> = Wallet::new_offline(
 //!     "wpkh([c258d2e4/84h/1h/0h]tpubDD3ynpHgJQW8VvWRzQ5WFDCrs4jqVFGHB3vLC3r49XHJSqP8bHKdK4AriuUKLccK68zfzowx7YhmDN8SiSkgCDENUFx9qVw65YyqM78vyVe/0/*)",
 //!     Some("wpkh([c258d2e4/84h/1h/0h]tpubDD3ynpHgJQW8VvWRzQ5WFDCrs4jqVFGHB3vLC3r49XHJSqP8bHKdK4AriuUKLccK68zfzowx7YhmDN8SiSkgCDENUFx9qVw65YyqM78vyVe/1/*)"),
@@ -61,10 +61,10 @@
 //! )?;
 //! let export = WalletExport::export_wallet(&wallet, "exported wallet", true)
 //!     .map_err(ToString::to_string)
-//!     .map_err(magical_bitcoin_wallet::Error::Generic)?;
+//!     .map_err(magical::Error::Generic)?;
 //!
 //! println!("Exported: {}", export.to_string());
-//! # Ok::<_, magical_bitcoin_wallet::Error>(())
+//! # Ok::<_, magical::Error>(())
 //! ```
 
 use std::str::FromStr;

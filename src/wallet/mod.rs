@@ -229,8 +229,8 @@ where
     /// ```no_run
     /// # use std::str::FromStr;
     /// # use bitcoin::*;
-    /// # use magical_bitcoin_wallet::*;
-    /// # use magical_bitcoin_wallet::database::*;
+    /// # use magical::*;
+    /// # use magical::database::*;
     /// # let descriptor = "wpkh(tpubD6NzVbkrYhZ4Xferm7Pz4VnjdcDPFyjVu5K4iZXQ4pVN8Cks4pHVowTBXBKRhX64pkRyJZJN5xAKj4UDNnLPb5p2sSKXhewoYx5GbTdUFWq/*)";
     /// # let wallet: OfflineWallet<_> = Wallet::new_offline(descriptor, None, Network::Testnet, MemoryDatabase::default())?;
     /// # let to_address = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap();
@@ -238,7 +238,7 @@ where
     ///     TxBuilder::with_recipients(vec![(to_address.script_pubkey(), 50_000)])
     /// )?;
     /// // sign and broadcast ...
-    /// # Ok::<(), magical_bitcoin_wallet::Error>(())
+    /// # Ok::<(), magical::Error>(())
     /// ```
     pub fn create_tx<Cs: coin_selection::CoinSelectionAlgorithm>(
         &self,
@@ -453,8 +453,8 @@ where
     /// ```no_run
     /// # use std::str::FromStr;
     /// # use bitcoin::*;
-    /// # use magical_bitcoin_wallet::*;
-    /// # use magical_bitcoin_wallet::database::*;
+    /// # use magical::*;
+    /// # use magical::database::*;
     /// # let descriptor = "wpkh(tpubD6NzVbkrYhZ4Xferm7Pz4VnjdcDPFyjVu5K4iZXQ4pVN8Cks4pHVowTBXBKRhX64pkRyJZJN5xAKj4UDNnLPb5p2sSKXhewoYx5GbTdUFWq/*)";
     /// # let wallet: OfflineWallet<_> = Wallet::new_offline(descriptor, None, Network::Testnet, MemoryDatabase::default())?;
     /// let txid = Txid::from_str("faff0a466b70f5d5f92bd757a92c1371d4838bdd5bc53a06764e2488e51ce8f8").unwrap();
@@ -463,7 +463,7 @@ where
     ///     TxBuilder::new().fee_rate(FeeRate::from_sat_per_vb(5.0)),
     /// )?;
     /// // sign and broadcast ...
-    /// # Ok::<(), magical_bitcoin_wallet::Error>(())
+    /// # Ok::<(), magical::Error>(())
     /// ```
     // TODO: support for merging multiple transactions while bumping the fees
     // TODO: option to force addition of an extra output? seems bad for privacy to update the
@@ -691,13 +691,13 @@ where
     /// ```no_run
     /// # use std::str::FromStr;
     /// # use bitcoin::*;
-    /// # use magical_bitcoin_wallet::*;
-    /// # use magical_bitcoin_wallet::database::*;
+    /// # use magical::*;
+    /// # use magical::database::*;
     /// # let descriptor = "wpkh(tpubD6NzVbkrYhZ4Xferm7Pz4VnjdcDPFyjVu5K4iZXQ4pVN8Cks4pHVowTBXBKRhX64pkRyJZJN5xAKj4UDNnLPb5p2sSKXhewoYx5GbTdUFWq/*)";
     /// # let wallet: OfflineWallet<_> = Wallet::new_offline(descriptor, None, Network::Testnet, MemoryDatabase::default())?;
     /// # let (psbt, _) = wallet.create_tx(TxBuilder::new())?;
     /// let (signed_psbt, finalized) = wallet.sign(psbt, None)?;
-    /// # Ok::<(), magical_bitcoin_wallet::Error>(())
+    /// # Ok::<(), magical::Error>(())
     pub fn sign(&self, mut psbt: PSBT, assume_height: Option<u32>) -> Result<(PSBT, bool), Error> {
         // this helps us doing our job later
         self.add_input_hd_keypaths(&mut psbt)?;

@@ -36,11 +36,11 @@ use log::{debug, error, info, trace, LevelFilter};
 
 use bitcoin::Network;
 
-use magical_bitcoin_wallet::bitcoin;
-use magical_bitcoin_wallet::blockchain::compact_filters::*;
-use magical_bitcoin_wallet::cli;
-use magical_bitcoin_wallet::sled;
-use magical_bitcoin_wallet::Wallet;
+use magical::bitcoin;
+use magical::blockchain::compact_filters::*;
+use magical::cli;
+use magical::sled;
+use magical::Wallet;
 
 fn prepare_home_dir() -> PathBuf {
     let mut dir = PathBuf::new();

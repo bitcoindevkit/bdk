@@ -31,10 +31,10 @@
 //! ## Example
 //!
 //! ```no_run
-//! # use magical_bitcoin_wallet::blockchain::electrum::ElectrumBlockchain;
+//! # use magical::blockchain::electrum::ElectrumBlockchain;
 //! let client = electrum_client::Client::new("ssl://electrum.blockstream.info:50002", None)?;
 //! let blockchain = ElectrumBlockchain::from(client);
-//! # Ok::<(), magical_bitcoin_wallet::Error>(())
+//! # Ok::<(), magical::Error>(())
 //! ```
 
 use std::collections::HashSet;

@@ -24,12 +24,12 @@
 
 use std::sync::Arc;
 
-use magical_bitcoin_wallet::bitcoin;
-use magical_bitcoin_wallet::database::MemoryDatabase;
-use magical_bitcoin_wallet::descriptor::HDKeyPaths;
-use magical_bitcoin_wallet::wallet::address_validator::{AddressValidator, AddressValidatorError};
-use magical_bitcoin_wallet::ScriptType;
-use magical_bitcoin_wallet::{OfflineWallet, Wallet};
+use magical::bitcoin;
+use magical::database::MemoryDatabase;
+use magical::descriptor::HDKeyPaths;
+use magical::wallet::address_validator::{AddressValidator, AddressValidatorError};
+use magical::ScriptType;
+use magical::{OfflineWallet, Wallet};
 
 use bitcoin::hashes::hex::FromHex;
 use bitcoin::util::bip32::Fingerprint;
@@ -57,7 +57,7 @@ impl AddressValidator for DummyValidator {
     }
 }
 
-fn main() -> Result<(), magical_bitcoin_wallet::Error> {
+fn main() -> Result<(), magical::Error> {
     let descriptor = "sh(and_v(v:pk(tpubDDpWvmUrPZrhSPmUzCMBHffvC3HyMAPnWDSAQNBTnj1iZeJa7BZQEttFiP4DS4GCcXQHezdXhn86Hj6LHX5EDstXPWrMaSneRWM8yUf6NFd/*),after(630000)))";
     let mut wallet: OfflineWallet<_> =
         Wallet::new_offline(descriptor, None, Network::Regtest, MemoryDatabase::new())?;

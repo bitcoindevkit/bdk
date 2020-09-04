@@ -44,7 +44,7 @@ pub fn magical_blockchain_tests(attr: TokenStream, item: TokenStream) -> TokenSt
             }
         }
     } else {
-        parse2::<syn::ExprPath>(quote! { magical_bitcoin_wallet }).unwrap()
+        parse2::<syn::ExprPath>(quote! { magical }).unwrap()
     };
 
     match parse::<syn::ItemFn>(item) {

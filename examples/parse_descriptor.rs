@@ -22,14 +22,14 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-extern crate magical_bitcoin_wallet;
+extern crate magical;
 extern crate serde_json;
 
 use std::sync::Arc;
 
-use magical_bitcoin_wallet::bitcoin::util::bip32::ChildNumber;
-use magical_bitcoin_wallet::bitcoin::*;
-use magical_bitcoin_wallet::descriptor::*;
+use magical::bitcoin::util::bip32::ChildNumber;
+use magical::bitcoin::*;
+use magical::descriptor::*;
 
 fn main() {
     let desc = "wsh(or_d(\
