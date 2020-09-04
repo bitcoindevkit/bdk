@@ -40,8 +40,7 @@ use miniscript::policy::Concrete;
 use miniscript::Descriptor;
 
 use magical_bitcoin_wallet::database::memory::MemoryDatabase;
-use magical_bitcoin_wallet::types::ScriptType;
-use magical_bitcoin_wallet::{OfflineWallet, Wallet};
+use magical_bitcoin_wallet::{OfflineWallet, Wallet, ScriptType};
 
 fn main() {
     env_logger::init_from_env(

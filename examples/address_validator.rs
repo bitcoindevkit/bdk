@@ -57,7 +57,7 @@ impl AddressValidator for DummyValidator {
     }
 }
 
-fn main() -> Result<(), magical_bitcoin_wallet::error::Error> {
+fn main() -> Result<(), magical_bitcoin_wallet::Error> {
     let descriptor = "sh(and_v(v:pk(tpubDDpWvmUrPZrhSPmUzCMBHffvC3HyMAPnWDSAQNBTnj1iZeJa7BZQEttFiP4DS4GCcXQHezdXhn86Hj6LHX5EDstXPWrMaSneRWM8yUf6NFd/*),after(630000)))";
     let mut wallet: OfflineWallet<_> =
         Wallet::new_offline(descriptor, None, Network::Regtest, MemoryDatabase::new())?;

@@ -153,7 +153,10 @@ mod test {
 
         let addr = testutils!(@external descriptors, 10);
         wallet
-            .create_tx(TxBuilder::with_recipients(vec![(addr, 25_000)]))
+            .create_tx(TxBuilder::with_recipients(vec![(
+                addr.script_pubkey(),
+                25_000,
+            )]))
             .unwrap();
     }
 }

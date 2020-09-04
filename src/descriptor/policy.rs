@@ -403,12 +403,16 @@ impl From<bool> for Satisfaction {
 /// Descriptor spending policy
 #[derive(Debug, Clone, Serialize)]
 pub struct Policy {
-    id: String,
+    /// Identifier for this policy node
+    pub id: String,
 
+    /// Type of this policy node
     #[serde(flatten)]
-    item: SatisfiableItem,
-    satisfaction: Satisfaction,
-    contribution: Satisfaction,
+    pub item: SatisfiableItem,
+    /// How a much given PSBT already satisfies this polcy node **(currently unused)**
+    pub satisfaction: Satisfaction,
+    /// How the wallet's descriptor can satisfy this policy node
+    pub contribution: Satisfaction,
 }
 
 /// An extra condition that must be satisfied but that is out of control of the user

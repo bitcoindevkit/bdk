@@ -33,14 +33,14 @@ use log::{debug, error, info, trace, LevelFilter};
 use bitcoin::consensus::encode::{deserialize, serialize, serialize_hex};
 use bitcoin::hashes::hex::FromHex;
 use bitcoin::util::psbt::PartiallySignedTransaction;
-use bitcoin::{Address, OutPoint, Txid};
+use bitcoin::{Address, OutPoint, Script, Txid};
 
 use crate::blockchain::log_progress;
 use crate::error::Error;
 use crate::types::ScriptType;
 use crate::{FeeRate, TxBuilder, Wallet};
 
-fn parse_recipient(s: &str) -> Result<(Address, u64), String> {
+fn parse_recipient(s: &str) -> Result<(Script, u64), String> {
     let parts: Vec<_> = s.split(":").collect();
     if parts.len() != 2 {
         return Err("Invalid format".to_string());
@@ -55,7 +55,7 @@ fn parse_recipient(s: &str) -> Result<(Address, u64), String> {
         return Err(format!("{:?}", e));
     }
 
-    Ok((addr.unwrap(), val.unwrap()))
+    Ok((addr.unwrap().script_pubkey(), val.unwrap()))
 }
 
 fn parse_outpoint(s: &str) -> Result<OutPoint, String> {

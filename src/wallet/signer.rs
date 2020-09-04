@@ -22,6 +22,72 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+//! Generalized signers
+//!
+//! This module provides the ability to add customized signers to a [`Wallet`](super::Wallet)
+//! through the [`Wallet::add_signer`](super::Wallet::add_signer) function.
+//!
+//! ```
+//! # use std::sync::Arc;
+//! # use std::str::FromStr;
+//! # use bitcoin::*;
+//! # use bitcoin::util::psbt;
+//! # use bitcoin::util::bip32::Fingerprint;
+//! # use magical_bitcoin_wallet::signer::*;
+//! # use magical_bitcoin_wallet::database::*;
+//! # use magical_bitcoin_wallet::*;
+//! # #[derive(Debug)]
+//! # struct CustomHSM;
+//! # impl CustomHSM {
+//! #     fn sign_input(&self, _psbt: &mut psbt::PartiallySignedTransaction, _input: usize) -> Result<(), SignerError> {
+//! #         Ok(())
+//! #     }
+//! #     fn connect() -> Self {
+//! #         CustomHSM
+//! #     }
+//! # }
+//! #[derive(Debug)]
+//! struct CustomSigner {
+//!     device: CustomHSM,
+//! }
+//!
+//! impl CustomSigner {
+//!     fn connect() -> Self {
+//!         CustomSigner { device: CustomHSM::connect() }
+//!     }
+//! }
+//!
+//! impl Signer for CustomSigner {
+//!     fn sign(
+//!         &self,
+//!         psbt: &mut psbt::PartiallySignedTransaction,
+//!         input_index: Option<usize>,
+//!     ) -> Result<(), SignerError> {
+//!         let input_index = input_index.ok_or(SignerError::InputIndexOutOfRange)?;
+//!         self.device.sign_input(psbt, input_index)?;
+//!
+//!         Ok(())
+//!     }
+//!
+//!     fn sign_whole_tx(&self) -> bool {
+//!         false
+//!     }
+//! }
+//!
+//! let custom_signer = CustomSigner::connect();
+//!
+//! let descriptor = "wpkh(tpubD6NzVbkrYhZ4Xferm7Pz4VnjdcDPFyjVu5K4iZXQ4pVN8Cks4pHVowTBXBKRhX64pkRyJZJN5xAKj4UDNnLPb5p2sSKXhewoYx5GbTdUFWq/*)";
+//! let mut wallet: OfflineWallet<_> = Wallet::new_offline(descriptor, None, Network::Testnet, MemoryDatabase::default())?;
+//! wallet.add_signer(
+//!     ScriptType::External,
+//!     Fingerprint::from_str("e30f11b8").unwrap().into(),
+//!     SignerOrdering(200),
+//!     Arc::new(Box::new(custom_signer))
+//! );
+//!
+//! # Ok::<_, magical_bitcoin_wallet::Error>(())
+//! ```
+
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::fmt;
@@ -42,7 +108,7 @@ use miniscript::{Legacy, MiniscriptKey, Segwitv0};
 use crate::descriptor::XKeyUtils;
 
 /// Identifier of a signer in the `SignersContainers`. Used as a key to find the right signer among
-/// many of them
+/// multiple of them
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum SignerId<Pk: MiniscriptKey> {
     PkHash(<Pk as MiniscriptKey>::Hash),
@@ -93,15 +159,30 @@ impl fmt::Display for SignerError {
 impl std::error::Error for SignerError {}
 
 /// Trait for signers
+///
+/// This trait can be implemented to provide customized signers to the wallet. For an example see
+/// [`this module`](crate::wallet::signer)'s documentation.
 pub trait Signer: fmt::Debug {
+    /// Sign a PSBT
+    ///
+    /// The `input_index` argument is only provided if the wallet doesn't declare to sign the whole
+    /// transaction in one go (see [`Signer::sign_whole_tx`]). Otherwise its value is `None` and
+    /// can be ignored.
     fn sign(
         &self,
         psbt: &mut psbt::PartiallySignedTransaction,
         input_index: Option<usize>,
     ) -> Result<(), SignerError>;
 
+    /// Return whether or not the signer signs the whole transaction in one go instead of every
+    /// input individually
     fn sign_whole_tx(&self) -> bool;
 
+    /// Return the secret key for the signer
+    ///
+    /// This is used internally to reconstruct the original descriptor that may contain secrets.
+    /// External signers that are meant to keep key isolated should just return `None` here (which
+    /// is the default for this method, if not overridden).
     fn descriptor_secret_key(&self) -> Option<DescriptorSecretKey> {
         None
     }
@@ -195,6 +276,11 @@ impl Signer for PrivateKey {
     }
 }
 
+/// Defines the order in which signers are called
+///
+/// The default value is `100`. Signers with an ordering above that will be called later,
+/// and they will thus see the partial signatures added to the transaction once they get to sign
+/// themselves.
 #[derive(Debug, Clone, PartialOrd, PartialEq, Ord, Eq)]
 pub struct SignerOrdering(pub usize);
 

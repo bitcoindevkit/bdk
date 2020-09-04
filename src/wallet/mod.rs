@@ -229,7 +229,7 @@ where
             (None, Some(csv)) => csv,
             (Some(rbf), Some(csv)) if rbf < csv => return Err(Error::Generic(format!("Cannot enable RBF with nSequence `{}`, since at least `{}` is required to spend with OP_CSV", rbf, csv))),
             (None, _) if requirements.timelock.is_some() => 0xFFFFFFFE,
-            (Some(rbf), _) if rbf >= 0xFFFFFFFE => return Err(Error::Generic("Cannot enable RBF with anumber >= 0xFFFFFFFE".into())),
+            (Some(rbf), _) if rbf >= 0xFFFFFFFE => return Err(Error::Generic("Cannot enable RBF with a nSequence >= 0xFFFFFFFE".into())),
             (Some(rbf), _) => rbf,
             (None, _) => 0xFFFFFFFF,
         };
@@ -254,22 +254,19 @@ where
         let calc_fee_bytes = |wu| (wu as f32) * fee_rate.as_sat_vb() / 4.0;
         fee_amount += calc_fee_bytes(tx.get_weight());
 
-        for (index, (address, satoshi)) in builder.recipients.iter().enumerate() {
+        for (index, (script_pubkey, satoshi)) in builder.recipients.iter().enumerate() {
             let value = match builder.send_all {
                 true => 0,
                 false if satoshi.is_dust() => return Err(Error::OutputBelowDustLimit(index)),
                 false => *satoshi,
             };
 
-            // TODO: proper checks for testnet/regtest p2sh/p2pkh
-            if address.network != self.network && self.network != Network::Regtest {
-                return Err(Error::InvalidAddressNetwork(address.clone()));
-            } else if self.is_mine(&address.script_pubkey())? {
+            if self.is_mine(script_pubkey)? {
                 received += value;
             }
 
             let new_out = TxOut {
-                script_pubkey: address.script_pubkey(),
+                script_pubkey: script_pubkey.clone(),
                 value,
             };
             fee_amount += calc_fee_bytes(serialize(&new_out).len() * 4);
@@ -1251,7 +1248,7 @@ mod test {
         let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
         let addr = wallet.get_new_address().unwrap();
         wallet
-            .create_tx(TxBuilder::with_recipients(vec![(addr, 25_000)]).version(0))
+            .create_tx(TxBuilder::with_recipients(vec![(addr.script_pubkey(), 25_000)]).version(0))
             .unwrap();
     }
 
@@ -1263,7 +1260,7 @@ mod test {
         let (wallet, _, _) = get_funded_wallet(get_test_single_sig_csv());
         let addr = wallet.get_new_address().unwrap();
         wallet
-            .create_tx(TxBuilder::with_recipients(vec![(addr, 25_000)]).version(1))
+            .create_tx(TxBuilder::with_recipients(vec![(addr.script_pubkey(), 25_000)]).version(1))
             .unwrap();
     }
 
@@ -1272,7 +1269,7 @@ mod test {
         let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
         let addr = wallet.get_new_address().unwrap();
         let (psbt, _) = wallet
-            .create_tx(TxBuilder::with_recipients(vec![(addr, 25_000)]).version(42))
+            .create_tx(TxBuilder::with_recipients(vec![(addr.script_pubkey(), 25_000)]).version(42))
             .unwrap();
 
         assert_eq!(psbt.global.unsigned_tx.version, 42);
@@ -1283,7 +1280,10 @@ mod test {
         let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
         let addr = wallet.get_new_address().unwrap();
         let (psbt, _) = wallet
-            .create_tx(TxBuilder::with_recipients(vec![(addr, 25_000)]))
+            .create_tx(TxBuilder::with_recipients(vec![(
+                addr.script_pubkey(),
+                25_000,
+            )]))
             .unwrap();
 
         assert_eq!(psbt.global.unsigned_tx.lock_time, 0);
@@ -1294,7 +1294,10 @@ mod test {
         let (wallet, _, _) = get_funded_wallet(get_test_single_sig_cltv());
         let addr = wallet.get_new_address().unwrap();
         let (psbt, _) = wallet
-            .create_tx(TxBuilder::with_recipients(vec![(addr, 25_000)]))
+            .create_tx(TxBuilder::with_recipients(vec![(
+                addr.script_pubkey(),
+                25_000,
+            )]))
             .unwrap();
 
         assert_eq!(psbt.global.unsigned_tx.lock_time, 100_000);
@@ -1305,7 +1308,9 @@ mod test {
         let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
         let addr = wallet.get_new_address().unwrap();
         let (psbt, _) = wallet
-            .create_tx(TxBuilder::with_recipients(vec![(addr, 25_000)]).nlocktime(630_000))
+            .create_tx(
+                TxBuilder::with_recipients(vec![(addr.script_pubkey(), 25_000)]).nlocktime(630_000),
+            )
             .unwrap();
 
         assert_eq!(psbt.global.unsigned_tx.lock_time, 630_000);
@@ -1316,7 +1321,9 @@ mod test {
         let (wallet, _, _) = get_funded_wallet(get_test_single_sig_cltv());
         let addr = wallet.get_new_address().unwrap();
         let (psbt, _) = wallet
-            .create_tx(TxBuilder::with_recipients(vec![(addr, 25_000)]).nlocktime(630_000))
+            .create_tx(
+                TxBuilder::with_recipients(vec![(addr.script_pubkey(), 25_000)]).nlocktime(630_000),
+            )
             .unwrap();
 
         assert_eq!(psbt.global.unsigned_tx.lock_time, 630_000);
@@ -1330,7 +1337,9 @@ mod test {
         let (wallet, _, _) = get_funded_wallet(get_test_single_sig_cltv());
         let addr = wallet.get_new_address().unwrap();
         wallet
-            .create_tx(TxBuilder::with_recipients(vec![(addr, 25_000)]).nlocktime(50000))
+            .create_tx(
+                TxBuilder::with_recipients(vec![(addr.script_pubkey(), 25_000)]).nlocktime(50000),
+            )
             .unwrap();
     }
 
@@ -1339,7 +1348,10 @@ mod test {
         let (wallet, _, _) = get_funded_wallet(get_test_single_sig_csv());
         let addr = wallet.get_new_address().unwrap();
         let (psbt, _) = wallet
-            .create_tx(TxBuilder::with_recipients(vec![(addr, 25_000)]))
+            .create_tx(TxBuilder::with_recipients(vec![(
+                addr.script_pubkey(),
+                25_000,
+            )]))
             .unwrap();
 
         assert_eq!(psbt.global.unsigned_tx.input[0].sequence, 6);
@@ -1350,7 +1362,9 @@ mod test {
         let (wallet, _, _) = get_funded_wallet(get_test_single_sig_csv());
         let addr = wallet.get_new_address().unwrap();
         let (psbt, _) = wallet
-            .create_tx(TxBuilder::with_recipients(vec![(addr, 25_000)]).enable_rbf())
+            .create_tx(
+                TxBuilder::with_recipients(vec![(addr.script_pubkey(), 25_000)]).enable_rbf(),
+            )
             .unwrap();
 
         assert_eq!(psbt.global.unsigned_tx.input[0].sequence, 0xFFFFFFFD);
@@ -1364,7 +1378,10 @@ mod test {
         let (wallet, _, _) = get_funded_wallet(get_test_single_sig_csv());
         let addr = wallet.get_new_address().unwrap();
         wallet
-            .create_tx(TxBuilder::with_recipients(vec![(addr, 25_000)]).enable_rbf_with_sequence(3))
+            .create_tx(
+                TxBuilder::with_recipients(vec![(addr.script_pubkey(), 25_000)])
+                    .enable_rbf_with_sequence(3),
+            )
             .unwrap();
     }
 
@@ -1373,20 +1390,23 @@ mod test {
         let (wallet, _, _) = get_funded_wallet(get_test_single_sig_cltv());
         let addr = wallet.get_new_address().unwrap();
         let (psbt, _) = wallet
-            .create_tx(TxBuilder::with_recipients(vec![(addr, 25_000)]))
+            .create_tx(TxBuilder::with_recipients(vec![(
+                addr.script_pubkey(),
+                25_000,
+            )]))
             .unwrap();
 
         assert_eq!(psbt.global.unsigned_tx.input[0].sequence, 0xFFFFFFFE);
     }
 
     #[test]
-    #[should_panic(expected = "Cannot enable RBF with anumber >= 0xFFFFFFFE")]
+    #[should_panic(expected = "Cannot enable RBF with a nSequence >= 0xFFFFFFFE")]
     fn test_create_tx_invalid_rbf_sequence() {
         let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
         let addr = wallet.get_new_address().unwrap();
         wallet
             .create_tx(
-                TxBuilder::with_recipients(vec![(addr, 25_000)])
+                TxBuilder::with_recipients(vec![(addr.script_pubkey(), 25_000)])
                     .enable_rbf_with_sequence(0xFFFFFFFE),
             )
             .unwrap();
@@ -1398,7 +1418,7 @@ mod test {
         let addr = wallet.get_new_address().unwrap();
         let (psbt, _) = wallet
             .create_tx(
-                TxBuilder::with_recipients(vec![(addr, 25_000)])
+                TxBuilder::with_recipients(vec![(addr.script_pubkey(), 25_000)])
                     .enable_rbf_with_sequence(0xDEADBEEF),
             )
             .unwrap();
@@ -1411,7 +1431,10 @@ mod test {
         let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
         let addr = wallet.get_new_address().unwrap();
         let (psbt, _) = wallet
-            .create_tx(TxBuilder::with_recipients(vec![(addr, 25_000)]))
+            .create_tx(TxBuilder::with_recipients(vec![(
+                addr.script_pubkey(),
+                25_000,
+            )]))
             .unwrap();
 
         assert_eq!(psbt.global.unsigned_tx.input[0].sequence, 0xFFFFFFFF);
@@ -1426,7 +1449,8 @@ mod test {
         let addr = wallet.get_new_address().unwrap();
         wallet
             .create_tx(
-                TxBuilder::with_recipients(vec![(addr.clone(), 25_000)]).do_not_spend_change(),
+                TxBuilder::with_recipients(vec![(addr.script_pubkey(), 25_000)])
+                    .do_not_spend_change(),
             )
             .unwrap();
     }
@@ -1438,7 +1462,11 @@ mod test {
         let addr = wallet.get_new_address().unwrap();
         wallet
             .create_tx(
-                TxBuilder::with_recipients(vec![(addr.clone(), 25_000), (addr, 10_000)]).send_all(),
+                TxBuilder::with_recipients(vec![
+                    (addr.script_pubkey(), 25_000),
+                    (addr.script_pubkey(), 10_000),
+                ])
+                .send_all(),
             )
             .unwrap();
     }
@@ -1448,7 +1476,7 @@ mod test {
         let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
         let addr = wallet.get_new_address().unwrap();
         let (psbt, details) = wallet
-            .create_tx(TxBuilder::with_recipients(vec![(addr.clone(), 0)]).send_all())
+            .create_tx(TxBuilder::with_recipients(vec![(addr.script_pubkey(), 0)]).send_all())
             .unwrap();
 
         assert_eq!(psbt.global.unsigned_tx.output.len(), 1);
@@ -1463,7 +1491,7 @@ mod test {
         let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
         let addr = wallet.get_new_address().unwrap();
         let (psbt, details) = wallet
-            .create_tx(TxBuilder::with_recipients(vec![(addr.clone(), 0)]).send_all())
+            .create_tx(TxBuilder::with_recipients(vec![(addr.script_pubkey(), 0)]).send_all())
             .unwrap();
 
         assert_fee_rate!(psbt.extract_tx(), details.fees, FeeRate::default(), @add_signature);
@@ -1475,7 +1503,7 @@ mod test {
         let addr = wallet.get_new_address().unwrap();
         let (psbt, details) = wallet
             .create_tx(
-                TxBuilder::with_recipients(vec![(addr.clone(), 0)])
+                TxBuilder::with_recipients(vec![(addr.script_pubkey(), 0)])
                     .fee_rate(FeeRate::from_sat_per_vb(5.0))
                     .send_all(),
             )
@@ -1492,7 +1520,7 @@ mod test {
         let addr = wallet.get_new_address().unwrap();
         let (psbt, details) = wallet
             .create_tx(
-                TxBuilder::with_recipients(vec![(addr.clone(), 25_000)])
+                TxBuilder::with_recipients(vec![(addr.script_pubkey(), 25_000)])
                     .ordering(TxOrdering::Untouched),
             )
             .unwrap();
@@ -1510,7 +1538,10 @@ mod test {
         let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
         let addr = wallet.get_new_address().unwrap();
         let (psbt, _) = wallet
-            .create_tx(TxBuilder::with_recipients(vec![(addr.clone(), 49_800)]))
+            .create_tx(TxBuilder::with_recipients(vec![(
+                addr.script_pubkey(),
+                49_800,
+            )]))
             .unwrap();
 
         assert_eq!(psbt.global.unsigned_tx.output.len(), 1);
@@ -1525,7 +1556,7 @@ mod test {
         // very high fee rate, so that the only output would be below dust
         wallet
             .create_tx(
-                TxBuilder::with_recipients(vec![(addr.clone(), 0)])
+                TxBuilder::with_recipients(vec![(addr.script_pubkey(), 0)])
                     .send_all()
                     .fee_rate(crate::FeeRate::from_sat_per_vb(453.0)),
             )
@@ -1538,8 +1569,11 @@ mod test {
         let addr = wallet.get_new_address().unwrap();
         let (psbt, details) = wallet
             .create_tx(
-                TxBuilder::with_recipients(vec![(addr.clone(), 30_000), (addr.clone(), 10_000)])
-                    .ordering(super::tx_builder::TxOrdering::BIP69Lexicographic),
+                TxBuilder::with_recipients(vec![
+                    (addr.script_pubkey(), 30_000),
+                    (addr.script_pubkey(), 10_000),
+                ])
+                .ordering(super::tx_builder::TxOrdering::BIP69Lexicographic),
             )
             .unwrap();
 
@@ -1557,7 +1591,10 @@ mod test {
         let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
         let addr = wallet.get_new_address().unwrap();
         let (psbt, _) = wallet
-            .create_tx(TxBuilder::with_recipients(vec![(addr.clone(), 30_000)]))
+            .create_tx(TxBuilder::with_recipients(vec![(
+                addr.script_pubkey(),
+                30_000,
+            )]))
             .unwrap();
 
         assert_eq!(psbt.inputs[0].sighash_type, Some(bitcoin::SigHashType::All));
@@ -1569,7 +1606,7 @@ mod test {
         let addr = wallet.get_new_address().unwrap();
         let (psbt, _) = wallet
             .create_tx(
-                TxBuilder::with_recipients(vec![(addr.clone(), 30_000)])
+                TxBuilder::with_recipients(vec![(addr.script_pubkey(), 30_000)])
                     .sighash(bitcoin::SigHashType::Single),
             )
             .unwrap();
@@ -1588,7 +1625,7 @@ mod test {
         let (wallet, _, _) = get_funded_wallet("wpkh([d34db33f/44'/0'/0']xpub6ERApfZwUNrhLCkDtcHTcxd75RbzS1ed54G1LkBUHQVHQKqhMkhgbmJbZRkrgZw4koxb5JaHWkY4ALHY2grBGRjaDMzQLcgJvLJuZZvRcEL/0/*)");
         let addr = wallet.get_new_address().unwrap();
         let (psbt, _) = wallet
-            .create_tx(TxBuilder::with_recipients(vec![(addr.clone(), 0)]).send_all())
+            .create_tx(TxBuilder::with_recipients(vec![(addr.script_pubkey(), 0)]).send_all())
             .unwrap();
 
         assert_eq!(psbt.inputs[0].hd_keypaths.len(), 1);
@@ -1612,7 +1649,7 @@ mod test {
 
         let addr = testutils!(@external descriptors, 5);
         let (psbt, _) = wallet
-            .create_tx(TxBuilder::with_recipients(vec![(addr.clone(), 0)]).send_all())
+            .create_tx(TxBuilder::with_recipients(vec![(addr.script_pubkey(), 0)]).send_all())
             .unwrap();
 
         assert_eq!(psbt.outputs[0].hd_keypaths.len(), 1);
@@ -1633,7 +1670,7 @@ mod test {
             get_funded_wallet("sh(pk(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW))");
         let addr = wallet.get_new_address().unwrap();
         let (psbt, _) = wallet
-            .create_tx(TxBuilder::with_recipients(vec![(addr.clone(), 0)]).send_all())
+            .create_tx(TxBuilder::with_recipients(vec![(addr.script_pubkey(), 0)]).send_all())
             .unwrap();
 
         assert_eq!(
@@ -1656,7 +1693,7 @@ mod test {
             get_funded_wallet("wsh(pk(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW))");
         let addr = wallet.get_new_address().unwrap();
         let (psbt, _) = wallet
-            .create_tx(TxBuilder::with_recipients(vec![(addr.clone(), 0)]).send_all())
+            .create_tx(TxBuilder::with_recipients(vec![(addr.script_pubkey(), 0)]).send_all())
             .unwrap();
 
         assert_eq!(psbt.inputs[0].redeem_script, None);
@@ -1679,7 +1716,7 @@ mod test {
             get_funded_wallet("sh(wsh(pk(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW)))");
         let addr = wallet.get_new_address().unwrap();
         let (psbt, _) = wallet
-            .create_tx(TxBuilder::with_recipients(vec![(addr.clone(), 0)]).send_all())
+            .create_tx(TxBuilder::with_recipients(vec![(addr.script_pubkey(), 0)]).send_all())
             .unwrap();
 
         let script = Script::from(
@@ -1699,7 +1736,7 @@ mod test {
             get_funded_wallet("sh(pk(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW))");
         let addr = wallet.get_new_address().unwrap();
         let (psbt, _) = wallet
-            .create_tx(TxBuilder::with_recipients(vec![(addr.clone(), 0)]).send_all())
+            .create_tx(TxBuilder::with_recipients(vec![(addr.script_pubkey(), 0)]).send_all())
             .unwrap();
 
         assert!(psbt.inputs[0].non_witness_utxo.is_some());
@@ -1712,7 +1749,7 @@ mod test {
             get_funded_wallet("wsh(pk(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW))");
         let addr = wallet.get_new_address().unwrap();
         let (psbt, _) = wallet
-            .create_tx(TxBuilder::with_recipients(vec![(addr.clone(), 0)]).send_all())
+            .create_tx(TxBuilder::with_recipients(vec![(addr.script_pubkey(), 0)]).send_all())
             .unwrap();
 
         assert!(psbt.inputs[0].non_witness_utxo.is_none());
@@ -1726,7 +1763,7 @@ mod test {
         let addr = wallet.get_new_address().unwrap();
         let (psbt, _) = wallet
             .create_tx(
-                TxBuilder::with_recipients(vec![(addr.clone(), 0)])
+                TxBuilder::with_recipients(vec![(addr.script_pubkey(), 0)])
                     .force_non_witness_utxo()
                     .send_all(),
             )
@@ -1742,7 +1779,10 @@ mod test {
         let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
         let addr = wallet.get_new_address().unwrap();
         let (psbt, mut details) = wallet
-            .create_tx(TxBuilder::with_recipients(vec![(addr, 25_000)]))
+            .create_tx(TxBuilder::with_recipients(vec![(
+                addr.script_pubkey(),
+                25_000,
+            )]))
             .unwrap();
         let tx = psbt.extract_tx();
         let txid = tx.txid();
@@ -1759,7 +1799,10 @@ mod test {
         let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
         let addr = wallet.get_new_address().unwrap();
         let (psbt, mut details) = wallet
-            .create_tx(TxBuilder::with_recipients(vec![(addr, 25_000)]))
+            .create_tx(TxBuilder::with_recipients(vec![(
+                addr.script_pubkey(),
+                25_000,
+            )]))
             .unwrap();
         let tx = psbt.extract_tx();
         let txid = tx.txid();
@@ -1777,7 +1820,9 @@ mod test {
         let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
         let addr = wallet.get_new_address().unwrap();
         let (psbt, mut details) = wallet
-            .create_tx(TxBuilder::with_recipients(vec![(addr, 25_000)]).enable_rbf())
+            .create_tx(
+                TxBuilder::with_recipients(vec![(addr.script_pubkey(), 25_000)]).enable_rbf(),
+            )
             .unwrap();
         let tx = psbt.extract_tx();
         let txid = tx.txid();
@@ -1798,7 +1843,9 @@ mod test {
         let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
         let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
         let (psbt, mut original_details) = wallet
-            .create_tx(TxBuilder::with_recipients(vec![(addr.clone(), 25_000)]).enable_rbf())
+            .create_tx(
+                TxBuilder::with_recipients(vec![(addr.script_pubkey(), 25_000)]).enable_rbf(),
+            )
             .unwrap();
         let mut tx = psbt.extract_tx();
         let txid = tx.txid();
@@ -1860,7 +1907,7 @@ mod test {
         let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
         let (psbt, mut original_details) = wallet
             .create_tx(
-                TxBuilder::with_recipients(vec![(addr.clone(), 0)])
+                TxBuilder::with_recipients(vec![(addr.script_pubkey(), 0)])
                     .send_all()
                     .enable_rbf(),
             )
@@ -1914,7 +1961,7 @@ mod test {
         let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
         let (psbt, mut original_details) = wallet
             .create_tx(
-                TxBuilder::with_recipients(vec![(addr.clone(), 0)])
+                TxBuilder::with_recipients(vec![(addr.script_pubkey(), 0)])
                     .utxos(vec![OutPoint {
                         txid: incoming_txid,
                         vout: 0,
@@ -1961,7 +2008,9 @@ mod test {
 
         let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
         let (psbt, mut original_details) = wallet
-            .create_tx(TxBuilder::with_recipients(vec![(addr.clone(), 45_000)]).enable_rbf())
+            .create_tx(
+                TxBuilder::with_recipients(vec![(addr.script_pubkey(), 45_000)]).enable_rbf(),
+            )
             .unwrap();
         let mut tx = psbt.extract_tx();
         let txid = tx.txid();
@@ -2025,7 +2074,7 @@ mod test {
         let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
         let (psbt, mut original_details) = wallet
             .create_tx(
-                TxBuilder::with_recipients(vec![(addr.clone(), 0)])
+                TxBuilder::with_recipients(vec![(addr.script_pubkey(), 0)])
                     .send_all()
                     .add_utxo(OutPoint {
                         txid: incoming_txid,
@@ -2101,7 +2150,9 @@ mod test {
 
         let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
         let (psbt, mut original_details) = wallet
-            .create_tx(TxBuilder::with_recipients(vec![(addr.clone(), 45_000)]).enable_rbf())
+            .create_tx(
+                TxBuilder::with_recipients(vec![(addr.script_pubkey(), 45_000)]).enable_rbf(),
+            )
             .unwrap();
         let mut tx = psbt.extract_tx();
         assert_eq!(tx.input.len(), 1);
@@ -2161,7 +2212,9 @@ mod test {
 
         let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
         let (psbt, mut original_details) = wallet
-            .create_tx(TxBuilder::with_recipients(vec![(addr.clone(), 45_000)]).enable_rbf())
+            .create_tx(
+                TxBuilder::with_recipients(vec![(addr.script_pubkey(), 45_000)]).enable_rbf(),
+            )
             .unwrap();
         let mut tx = psbt.extract_tx();
         let txid = tx.txid();
@@ -2226,7 +2279,7 @@ mod test {
         let (wallet, _, _) = get_funded_wallet("wpkh(tprv8ZgxMBicQKsPd3EupYiPRhaMooHKUHJxNsTfYuScep13go8QFfHdtkG9nRkFGb7busX4isf6X9dURGCoKgitaApQ6MupRhZMcELAxTBRJgS/*)");
         let addr = wallet.get_new_address().unwrap();
         let (psbt, _) = wallet
-            .create_tx(TxBuilder::with_recipients(vec![(addr.clone(), 0)]).send_all())
+            .create_tx(TxBuilder::with_recipients(vec![(addr.script_pubkey(), 0)]).send_all())
             .unwrap();
 
         let (signed_psbt, finalized) = wallet.sign(psbt, None).unwrap();
@@ -2242,7 +2295,7 @@ mod test {
             get_funded_wallet("wpkh(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW)");
         let addr = wallet.get_new_address().unwrap();
         let (psbt, _) = wallet
-            .create_tx(TxBuilder::with_recipients(vec![(addr.clone(), 0)]).send_all())
+            .create_tx(TxBuilder::with_recipients(vec![(addr.script_pubkey(), 0)]).send_all())
             .unwrap();
 
         let (signed_psbt, finalized) = wallet.sign(psbt, None).unwrap();
@@ -2257,7 +2310,7 @@ mod test {
         let (wallet, _, _) = get_funded_wallet("wpkh(tprv8ZgxMBicQKsPd3EupYiPRhaMooHKUHJxNsTfYuScep13go8QFfHdtkG9nRkFGb7busX4isf6X9dURGCoKgitaApQ6MupRhZMcELAxTBRJgS/*)");
         let addr = wallet.get_new_address().unwrap();
         let (mut psbt, _) = wallet
-            .create_tx(TxBuilder::with_recipients(vec![(addr.clone(), 0)]).send_all())
+            .create_tx(TxBuilder::with_recipients(vec![(addr.script_pubkey(), 0)]).send_all())
             .unwrap();
 
         psbt.inputs[0].hd_keypaths.clear();

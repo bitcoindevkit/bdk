@@ -22,6 +22,14 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+//! Cross-platform time
+//!
+//! This module provides a function to get the current timestamp that works on all the platforms
+//! supported by the library.
+//!
+//! It can be useful to compare it with the timestamps found in
+//! [`TransactionDetails`](crate::types::TransactionDetails).
+
 use std::time::Duration;
 
 #[cfg(target_arch = "wasm32")]
@@ -29,6 +37,7 @@ use js_sys::Date;
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::{Instant as SystemInstant, SystemTime, UNIX_EPOCH};
 
+/// Return the current timestamp in seconds
 #[cfg(not(target_arch = "wasm32"))]
 pub fn get_timestamp() -> u64 {
     SystemTime::now()
@@ -36,6 +45,7 @@ pub fn get_timestamp() -> u64 {
         .unwrap()
         .as_secs()
 }
+/// Return the current timestamp in seconds
 #[cfg(target_arch = "wasm32")]
 pub fn get_timestamp() -> u64 {
     let millis = Date::now();

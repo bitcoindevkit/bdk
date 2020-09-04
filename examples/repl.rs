@@ -37,10 +37,10 @@ use log::{debug, error, info, trace, LevelFilter};
 use bitcoin::Network;
 
 use magical_bitcoin_wallet::bitcoin;
-use magical_bitcoin_wallet::blockchain::ElectrumBlockchain;
+use magical_bitcoin_wallet::blockchain::compact_filters::*;
 use magical_bitcoin_wallet::cli;
 use magical_bitcoin_wallet::sled;
-use magical_bitcoin_wallet::{Client, Wallet};
+use magical_bitcoin_wallet::Wallet;
 
 fn prepare_home_dir() -> PathBuf {
     let mut dir = PathBuf::new();
@@ -88,19 +88,17 @@ fn main() {
         .unwrap();
     debug!("database opened successfully");
 
-    let client = Client::new(
-        matches.value_of("server").unwrap(),
-        matches.value_of("proxy"),
-    )
-    .unwrap();
-    let wallet = Wallet::new(
-        descriptor,
-        change_descriptor,
-        network,
-        tree,
-        ElectrumBlockchain::from(client),
-    )
-    .unwrap();
+    let num_threads = 1;
+
+    let mempool = Arc::new(Mempool::default());
+    let peers = (0..num_threads)
+        .map(|_| Peer::connect("192.168.1.136:8333", Arc::clone(&mempool), Network::Bitcoin))
+        .collect::<Result<_, _>>()
+        .unwrap();
+    let blockchain =
+        CompactFiltersBlockchain::new(peers, "./wallet-filters", Some(500_000)).unwrap();
+
+    let wallet = Wallet::new(descriptor, change_descriptor, network, tree, blockchain).unwrap();
     let wallet = Arc::new(wallet);
 
     if let Some(_sub_matches) = matches.subcommand_matches("repl") {

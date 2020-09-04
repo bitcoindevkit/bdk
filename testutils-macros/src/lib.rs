@@ -307,7 +307,7 @@ pub fn magical_blockchain_tests(attr: TokenStream, item: TokenStream) -> TokenSt
                     wallet.sync(noop_progress(), None).unwrap();
                     assert_eq!(wallet.get_balance().unwrap(), 50_000);
 
-                    let (psbt, details) = wallet.create_tx(TxBuilder::with_recipients(vec![(node_addr, 25_000)])).unwrap();
+                    let (psbt, details) = wallet.create_tx(TxBuilder::with_recipients(vec![(node_addr.script_pubkey(), 25_000)])).unwrap();
                     let (psbt, finalized) = wallet.sign(psbt, None).unwrap();
                     assert!(finalized, "Cannot finalize transaction");
                     let tx = psbt.extract_tx();
@@ -334,7 +334,7 @@ pub fn magical_blockchain_tests(attr: TokenStream, item: TokenStream) -> TokenSt
                     wallet.sync(noop_progress(), None).unwrap();
                     assert_eq!(wallet.get_balance().unwrap(), 50_000);
 
-                    let (psbt, details) = wallet.create_tx(TxBuilder::with_recipients(vec![(node_addr, 25_000)])).unwrap();
+                    let (psbt, details) = wallet.create_tx(TxBuilder::with_recipients(vec![(node_addr.script_pubkey(), 25_000)])).unwrap();
                     let (psbt, finalized) = wallet.sign(psbt, None).unwrap();
                     assert!(finalized, "Cannot finalize transaction");
                     let sent_txid = wallet.broadcast(psbt.extract_tx()).unwrap();
@@ -373,7 +373,7 @@ pub fn magical_blockchain_tests(attr: TokenStream, item: TokenStream) -> TokenSt
 
                     let mut total_sent = 0;
                     for _ in 0..5 {
-                        let (psbt, details) = wallet.create_tx(TxBuilder::with_recipients(vec![(node_addr.clone(), 5_000)])).unwrap();
+                        let (psbt, details) = wallet.create_tx(TxBuilder::with_recipients(vec![(node_addr.script_pubkey().clone(), 5_000)])).unwrap();
                         let (psbt, finalized) = wallet.sign(psbt, None).unwrap();
                         assert!(finalized, "Cannot finalize transaction");
                         wallet.broadcast(psbt.extract_tx()).unwrap();
@@ -405,7 +405,7 @@ pub fn magical_blockchain_tests(attr: TokenStream, item: TokenStream) -> TokenSt
                     wallet.sync(noop_progress(), None).unwrap();
                     assert_eq!(wallet.get_balance().unwrap(), 50_000);
 
-                    let (psbt, details) = wallet.create_tx(TxBuilder::with_recipients(vec![(node_addr.clone(), 5_000)]).enable_rbf()).unwrap();
+                    let (psbt, details) = wallet.create_tx(TxBuilder::with_recipients(vec![(node_addr.script_pubkey().clone(), 5_000)]).enable_rbf()).unwrap();
                     let (psbt, finalized) = wallet.sign(psbt, None).unwrap();
                     assert!(finalized, "Cannot finalize transaction");
                     wallet.broadcast(psbt.extract_tx()).unwrap();
@@ -437,7 +437,7 @@ pub fn magical_blockchain_tests(attr: TokenStream, item: TokenStream) -> TokenSt
                     wallet.sync(noop_progress(), None).unwrap();
                     assert_eq!(wallet.get_balance().unwrap(), 50_000);
 
-                    let (psbt, details) = wallet.create_tx(TxBuilder::with_recipients(vec![(node_addr.clone(), 49_000)]).enable_rbf()).unwrap();
+                    let (psbt, details) = wallet.create_tx(TxBuilder::with_recipients(vec![(node_addr.script_pubkey().clone(), 49_000)]).enable_rbf()).unwrap();
                     let (psbt, finalized) = wallet.sign(psbt, None).unwrap();
                     assert!(finalized, "Cannot finalize transaction");
                     wallet.broadcast(psbt.extract_tx()).unwrap();
@@ -470,7 +470,7 @@ pub fn magical_blockchain_tests(attr: TokenStream, item: TokenStream) -> TokenSt
                     wallet.sync(noop_progress(), None).unwrap();
                     assert_eq!(wallet.get_balance().unwrap(), 75_000);
 
-                    let (psbt, details) = wallet.create_tx(TxBuilder::with_recipients(vec![(node_addr.clone(), 49_000)]).enable_rbf()).unwrap();
+                    let (psbt, details) = wallet.create_tx(TxBuilder::with_recipients(vec![(node_addr.script_pubkey().clone(), 49_000)]).enable_rbf()).unwrap();
                     let (psbt, finalized) = wallet.sign(psbt, None).unwrap();
                     assert!(finalized, "Cannot finalize transaction");
                     wallet.broadcast(psbt.extract_tx()).unwrap();
@@ -501,7 +501,7 @@ pub fn magical_blockchain_tests(attr: TokenStream, item: TokenStream) -> TokenSt
                     wallet.sync(noop_progress(), None).unwrap();
                     assert_eq!(wallet.get_balance().unwrap(), 75_000);
 
-                    let (psbt, details) = wallet.create_tx(TxBuilder::with_recipients(vec![(node_addr.clone(), 49_000)]).enable_rbf()).unwrap();
+                    let (psbt, details) = wallet.create_tx(TxBuilder::with_recipients(vec![(node_addr.script_pubkey().clone(), 49_000)]).enable_rbf()).unwrap();
                     let (psbt, finalized) = wallet.sign(psbt, None).unwrap();
                     assert!(finalized, "Cannot finalize transaction");
                     wallet.broadcast(psbt.extract_tx()).unwrap();

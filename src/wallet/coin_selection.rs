@@ -93,7 +93,7 @@
 //!
 //! let to_address = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap();
 //! let (psbt, details) = wallet.create_tx(
-//!     TxBuilder::with_recipients(vec![(to_address, 50_000)])
+//!     TxBuilder::with_recipients(vec![(to_address.script_pubkey(), 50_000)])
 //!         .coin_selection(AlwaysSpendEverything),
 //! )?;
 //!

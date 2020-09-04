@@ -22,6 +22,51 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+//! Wallet export
+//!
+//! This modules implements the wallet export format used by [FullyNoded](https://github.com/Fonta1n3/FullyNoded/blob/10b7808c8b929b171cca537fb50522d015168ac9/Docs/Wallets/Wallet-Export-Spec.md).
+//!
+//! ## Examples
+//!
+//! ### Import from JSON
+//!
+//! ```
+//! # use std::str::FromStr;
+//! # use bitcoin::*;
+//! # use magical_bitcoin_wallet::database::*;
+//! # use magical_bitcoin_wallet::wallet::export::*;
+//! # use magical_bitcoin_wallet::*;
+//! let import = r#"{
+//!     "descriptor": "wpkh([c258d2e4\/84h\/1h\/0h]tpubDD3ynpHgJQW8VvWRzQ5WFDCrs4jqVFGHB3vLC3r49XHJSqP8bHKdK4AriuUKLccK68zfzowx7YhmDN8SiSkgCDENUFx9qVw65YyqM78vyVe\/0\/*)",
+//!     "blockheight":1782088,
+//!     "label":"testnet"
+//! }"#;
+//!
+//! let import = WalletExport::from_str(import)?;
+//! let wallet: OfflineWallet<_> = Wallet::new_offline(&import.descriptor(), import.change_descriptor().as_deref(), Network::Testnet, MemoryDatabase::default())?;
+//! # Ok::<_, magical_bitcoin_wallet::Error>(())
+//! ```
+//!
+//! ### Export a `Wallet`
+//! ```
+//! # use bitcoin::*;
+//! # use magical_bitcoin_wallet::database::*;
+//! # use magical_bitcoin_wallet::wallet::export::*;
+//! # use magical_bitcoin_wallet::*;
+//! let wallet: OfflineWallet<_> = Wallet::new_offline(
+//!     "wpkh([c258d2e4/84h/1h/0h]tpubDD3ynpHgJQW8VvWRzQ5WFDCrs4jqVFGHB3vLC3r49XHJSqP8bHKdK4AriuUKLccK68zfzowx7YhmDN8SiSkgCDENUFx9qVw65YyqM78vyVe/0/*)",
+//!     Some("wpkh([c258d2e4/84h/1h/0h]tpubDD3ynpHgJQW8VvWRzQ5WFDCrs4jqVFGHB3vLC3r49XHJSqP8bHKdK4AriuUKLccK68zfzowx7YhmDN8SiSkgCDENUFx9qVw65YyqM78vyVe/1/*)"),
+//!     Network::Testnet,
+//!     MemoryDatabase::default()
+//! )?;
+//! let export = WalletExport::export_wallet(&wallet, "exported wallet", true)
+//!     .map_err(ToString::to_string)
+//!     .map_err(magical_bitcoin_wallet::Error::Generic)?;
+//!
+//! println!("Exported: {}", export.to_string());
+//! # Ok::<_, magical_bitcoin_wallet::Error>(())
+//! ```
+
 use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
@@ -32,10 +77,15 @@ use crate::blockchain::Blockchain;
 use crate::database::BatchDatabase;
 use crate::wallet::Wallet;
 
+/// Structure that contains the export of a wallet
+///
+/// For a usage example see [this module](crate::wallet::export)'s documentation.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct WalletExport {
     descriptor: String,
+    /// Earliest block to rescan when looking for the wallet's transactions
     pub blockheight: u32,
+    /// Arbitrary label for the wallet
     pub label: String,
 }
 
@@ -54,6 +104,17 @@ impl FromStr for WalletExport {
 }
 
 impl WalletExport {
+    /// Export a wallet
+    ///
+    /// This function returns an error if it determines that the `wallet`'s descriptor(s) are not
+    /// supported by Bitcoin Core or don't follow the standard derivation paths defined by BIP44
+    /// and others.
+    ///
+    /// If `include_blockheight` is `true`, this function will look into the `wallet`'s database
+    /// for the oldest transaction it knows and use that as the earliest block to rescan.
+    ///
+    /// If the database is empty or `include_blockheight` is false, the `blockheight` field
+    /// returned will be `0`.
     pub fn export_wallet<B: Blockchain, D: BatchDatabase>(
         wallet: &Wallet<B, D>,
         label: &str,
@@ -118,10 +179,12 @@ impl WalletExport {
         }
     }
 
+    /// Return the external descriptor
     pub fn descriptor(&self) -> String {
         self.descriptor.clone()
     }
 
+    /// Return the internal descriptor, if present
     pub fn change_descriptor(&self) -> Option<String> {
         let replaced = self.descriptor.replace("/0/*", "/1/*");
 
