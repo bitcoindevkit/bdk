@@ -22,6 +22,21 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+//! Database types
+//!
+//! This module provides the implementation of some defaults database types, along with traits that
+//! can be implemented externally to let [`Wallet`]s use customized databases.
+//!
+//! It's important to note that the databases defined here only contains "blockchain-related" data.
+//! They can be seen more as a cache than a critical piece of storage that contains secrets and
+//! keys.
+//!
+//! The currently recommended database is [`sled`], which is a pretty simple key-value embedded
+//! database written in Rust. If the `key-value-db` feature is enabled (which by default is),
+//! this library automatically implements all the required traits for [`sled::Tree`].
+//!
+//! [`Wallet`]: crate::wallet::Wallet
+
 use bitcoin::hash_types::Txid;
 use bitcoin::{OutPoint, Script, Transaction, TxOut};
 
@@ -34,71 +49,113 @@ pub(crate) mod keyvalue;
 pub mod memory;
 pub use memory::MemoryDatabase;
 
+/// Trait for operations that can be batched
+///
+/// This trait defines the list of operations that must be implemented on the [`Database`] type and
+/// the [`BatchDatabase::Batch`] type.
 pub trait BatchOperations {
+    /// Store a script_pubkey along with its script type and child number
     fn set_script_pubkey(
         &mut self,
         script: &Script,
         script_type: ScriptType,
         child: u32,
     ) -> Result<(), Error>;
+    /// Store a [`UTXO`]
     fn set_utxo(&mut self, utxo: &UTXO) -> Result<(), Error>;
+    /// Store a raw transaction
     fn set_raw_tx(&mut self, transaction: &Transaction) -> Result<(), Error>;
+    /// Store the metadata of a transaction
     fn set_tx(&mut self, transaction: &TransactionDetails) -> Result<(), Error>;
+    /// Store the last derivation index for a given script type
     fn set_last_index(&mut self, script_type: ScriptType, value: u32) -> Result<(), Error>;
 
+    /// Delete a script_pubkey given the script type and its child number
     fn del_script_pubkey_from_path(
         &mut self,
         script_type: ScriptType,
         child: u32,
     ) -> Result<Option<Script>, Error>;
+    /// Delete the data related to a specific script_pubkey, meaning the script type and the child
+    /// number
     fn del_path_from_script_pubkey(
         &mut self,
         script: &Script,
     ) -> Result<Option<(ScriptType, u32)>, Error>;
+    /// Delete a [`UTXO`] given its [`OutPoint`]
     fn del_utxo(&mut self, outpoint: &OutPoint) -> Result<Option<UTXO>, Error>;
+    /// Delete a raw transaction given its [`Txid`]
     fn del_raw_tx(&mut self, txid: &Txid) -> Result<Option<Transaction>, Error>;
+    /// Delete the metadata of a transaction and optionally the raw transaction itself
     fn del_tx(
         &mut self,
         txid: &Txid,
         include_raw: bool,
     ) -> Result<Option<TransactionDetails>, Error>;
+    /// Delete the last derivation index for a script type
     fn del_last_index(&mut self, script_type: ScriptType) -> Result<Option<u32>, Error>;
 }
 
+/// Trait for reading data from a database
+///
+/// This traits defines the operations that can be used to read data out of a database
 pub trait Database: BatchOperations {
+    /// Read and checks the descriptor checksum for a given script type
+    ///
+    /// Should return [`Error::ChecksumMismatch`](crate::error::Error::ChecksumMismatch) if the
+    /// checksum doesn't match. If there's no checksum in the database, simply store it for the
+    /// next time.
     fn check_descriptor_checksum<B: AsRef<[u8]>>(
         &mut self,
         script_type: ScriptType,
         bytes: B,
     ) -> Result<(), Error>;
 
+    /// Return the list of script_pubkeys
     fn iter_script_pubkeys(&self, script_type: Option<ScriptType>) -> Result<Vec<Script>, Error>;
+    /// Return the list of [`UTXO`]s
     fn iter_utxos(&self) -> Result<Vec<UTXO>, Error>;
+    /// Return the list of raw transactions
     fn iter_raw_txs(&self) -> Result<Vec<Transaction>, Error>;
+    /// Return the list of transactions metadata
     fn iter_txs(&self, include_raw: bool) -> Result<Vec<TransactionDetails>, Error>;
 
+    /// Fetch a script_pubkey given the script type and child number
     fn get_script_pubkey_from_path(
         &self,
         script_type: ScriptType,
         child: u32,
     ) -> Result<Option<Script>, Error>;
+    /// Fetch the script type and child number of a given script_pubkey
     fn get_path_from_script_pubkey(
         &self,
         script: &Script,
     ) -> Result<Option<(ScriptType, u32)>, Error>;
+    /// Fetch a [`UTXO`] given its [`OutPoint`]
     fn get_utxo(&self, outpoint: &OutPoint) -> Result<Option<UTXO>, Error>;
+    /// Fetch a raw transaction given its [`Txid`]
     fn get_raw_tx(&self, txid: &Txid) -> Result<Option<Transaction>, Error>;
+    /// Fetch the transaction metadata and optionally also the raw transaction
     fn get_tx(&self, txid: &Txid, include_raw: bool) -> Result<Option<TransactionDetails>, Error>;
+    /// Return the last defivation index for a script type
     fn get_last_index(&self, script_type: ScriptType) -> Result<Option<u32>, Error>;
 
-    // inserts 0 if not present
+    /// Increment the last derivation index for a script type and returns it
+    ///
+    /// It should insert and return `0` if not present in the database
     fn increment_last_index(&mut self, script_type: ScriptType) -> Result<u32, Error>;
 }
 
+/// Trait for a database that supports batch operations
+///
+/// This trait defines the methods to start and apply a batch of operations.
 pub trait BatchDatabase: Database {
+    /// Container for the operations
     type Batch: BatchOperations;
 
+    /// Create a new batch container
     fn begin_batch(&self) -> Self::Batch;
+    /// Consume and apply a batch of operations
     fn commit_batch(&mut self, batch: Self::Batch) -> Result<(), Error>;
 }
 

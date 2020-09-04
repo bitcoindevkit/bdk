@@ -200,7 +200,7 @@ where
             return Err(Error::SpendingPolicyRequired);
         }
         let requirements =
-            policy.get_requirements(builder.policy_path.as_ref().unwrap_or(&BTreeMap::new()))?;
+            policy.get_condition(builder.policy_path.as_ref().unwrap_or(&BTreeMap::new()))?;
         debug!("requirements: {:?}", requirements);
 
         let version = match builder.version {

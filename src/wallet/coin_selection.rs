@@ -22,22 +22,122 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+//! Coin selection
+//!
+//! This module provides the trait [`CoinSelectionAlgorithm`] that can be implemented to
+//! define custom coin selection algorithms.
+//!
+//! The coin selection algorithm is not globally part of a [`Wallet`](super::Wallet), instead it
+//! is selected whenever a [`Wallet::create_tx`](super::Wallet::create_tx) call is made, through
+//! the use of the [`TxBuilder`] structure, specifically with
+//! [`TxBuilder::coin_selection`](super::tx_builder::TxBuilder::coin_selection) method.
+//!
+//! The [`DefaultCoinSelectionAlgorithm`] selects the default coin selection algorithm that
+//! [`TxBuilder`] uses, if it's not explicitly overridden.
+//!
+//! [`TxBuilder`]: super::tx_builder::TxBuilder
+//!
+//! ## Example
+//!
+//! ```no_run
+//! # use std::str::FromStr;
+//! # use bitcoin::*;
+//! # use bitcoin::consensus::serialize;
+//! # use magical_bitcoin_wallet::wallet::coin_selection::*;
+//! # use magical_bitcoin_wallet::*;
+//! #[derive(Debug)]
+//! struct AlwaysSpendEverything;
+//!
+//! impl CoinSelectionAlgorithm for AlwaysSpendEverything {
+//!     fn coin_select(
+//!         &self,
+//!         utxos: Vec<UTXO>,
+//!         _use_all_utxos: bool,
+//!         fee_rate: FeeRate,
+//!         amount_needed: u64,
+//!         input_witness_weight: usize,
+//!         fee_amount: f32,
+//!     ) -> Result<CoinSelectionResult, magical_bitcoin_wallet::Error> {
+//!         let selected_amount = utxos.iter().fold(0, |acc, utxo| acc + utxo.txout.value);
+//!         let all_utxos_selected = utxos
+//!             .into_iter()
+//!             .map(|utxo| {
+//!                 (
+//!                     TxIn {
+//!                         previous_output: utxo.outpoint,
+//!                         ..Default::default()
+//!                     },
+//!                     utxo.txout.script_pubkey,
+//!                 )
+//!             })
+//!             .collect::<Vec<_>>();
+//!         let additional_weight = all_utxos_selected.iter().fold(0, |acc, (txin, _)| {
+//!             acc + serialize(txin).len() * 4 + input_witness_weight
+//!         });
+//!         let additional_fees = additional_weight as f32 * fee_rate.as_sat_vb() / 4.0;
+//!
+//!         if (fee_amount + additional_fees).ceil() as u64 + amount_needed > selected_amount {
+//!             return Err(magical_bitcoin_wallet::Error::InsufficientFunds);
+//!         }
+//!
+//!         Ok(CoinSelectionResult {
+//!             txin: all_utxos_selected,
+//!             selected_amount,
+//!             fee_amount: fee_amount + additional_fees,
+//!         })
+//!     }
+//! }
+//!
+//! # let wallet: OfflineWallet<_> = Wallet::new_offline("", None, Network::Testnet, magical_bitcoin_wallet::database::MemoryDatabase::default())?;
+//! // create wallet, sync, ...
+//!
+//! let to_address = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap();
+//! let (psbt, details) = wallet.create_tx(
+//!     TxBuilder::with_recipients(vec![(to_address, 50_000)])
+//!         .coin_selection(AlwaysSpendEverything),
+//! )?;
+//!
+//! // inspect, sign, broadcast, ...
+//!
+//! # Ok::<(), magical_bitcoin_wallet::Error>(())
+//! ```
+
 use bitcoin::consensus::encode::serialize;
 use bitcoin::{Script, TxIn};
 
 use crate::error::Error;
 use crate::types::{FeeRate, UTXO};
 
+/// Default coin selection algorithm used by [`TxBuilder`](super::tx_builder::TxBuilder) if not
+/// overridden
 pub type DefaultCoinSelectionAlgorithm = DumbCoinSelection;
 
+/// Result of a successful coin selection
 #[derive(Debug)]
 pub struct CoinSelectionResult {
+    /// List of inputs to use, with the respective previous script_pubkey
     pub txin: Vec<(TxIn, Script)>,
+    /// Sum of the selected inputs' value
     pub selected_amount: u64,
+    /// Total fee amount in satoshi
     pub fee_amount: f32,
 }
 
+/// Trait for generalized coin selection algorithms
+///
+/// This trait can be implemented to make the [`Wallet`](super::Wallet) use a customized coin
+/// selection algorithm when it creates transactions.
+///
+/// For an example see [this module](crate::wallet::coin_selection)'s documentation.
 pub trait CoinSelectionAlgorithm: std::fmt::Debug {
+    /// Perform the coin selection
+    ///
+    /// - `utxos`: the list of spendable UTXOs
+    /// - `use_all_utxos`: if true all utxos should be spent unconditionally
+    /// - `fee_rate`: fee rate to use
+    /// - `amount_needed`: the amount in satoshi to select
+    /// - `input_witness_weight`: the weight of an input's witness to keep into account for the fees
+    /// - `fee_amount`: the amount of fees in satoshi already accumulated from adding outputs
     fn coin_select(
         &self,
         utxos: Vec<UTXO>,
@@ -49,6 +149,10 @@ pub trait CoinSelectionAlgorithm: std::fmt::Debug {
     ) -> Result<CoinSelectionResult, Error>;
 }
 
+/// Simple and dumb coin selection
+///
+/// This coin selection algorithm sorts the available UTXOs by value and then picks them starting
+/// from the largest ones until the required amount is reached.
 #[derive(Debug, Default)]
 pub struct DumbCoinSelection;
 

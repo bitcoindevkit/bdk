@@ -26,6 +26,7 @@ use std::fmt;
 
 use bitcoin::{Address, OutPoint};
 
+/// Errors that can be thrown by the [`Wallet`](crate::wallet::Wallet)
 #[derive(Debug)]
 pub enum Error {
     KeyMismatch(bitcoin::secp256k1::PublicKey, bitcoin::secp256k1::PublicKey),

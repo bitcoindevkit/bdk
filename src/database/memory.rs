@@ -22,6 +22,11 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+//! In-memory ephemeral database
+//!
+//! This module defines an in-memory database type called [`MemoryDatabase`] that is based on a
+//! [`BTreeMap`].
+
 use std::collections::BTreeMap;
 use std::ops::Bound::{Excluded, Included};
 
@@ -91,22 +96,39 @@ impl MapKey<'_> {
 
 fn after(key: &Vec<u8>) -> Vec<u8> {
     let mut key = key.clone();
-    let len = key.len();
-    if len > 0 {
-        // TODO i guess it could break if the value is 0xFF, but it's fine for now
-        key[len - 1] += 1;
+    let mut idx = key.len();
+    while idx > 0 {
+        if key[idx - 1] == 0xFF {
+            idx -= 1;
+            continue;
+        } else {
+            key[idx - 1] += 1;
+            break;
+        }
     }
 
     key
 }
 
-#[derive(Debug)]
+/// In-memory ephemeral database
+///
+/// This database can be used as a temporary storage for wallets that are not kept permanently on
+/// a device, or on platforms that don't provide a filesystem, like `wasm32`.
+///
+/// Once it's dropped its content will be lost.
+///
+/// If you are looking for a permanent storage solution, you can try with the default key-value
+/// database called [`sled`]. See the [`database`] module documentation for more defailts.
+///
+/// [`database`]: crate::database
+#[derive(Debug, Default)]
 pub struct MemoryDatabase {
     map: BTreeMap<Vec<u8>, Box<dyn std::any::Any>>,
     deleted_keys: Vec<Vec<u8>>,
 }
 
 impl MemoryDatabase {
+    /// Create a new empty database
     pub fn new() -> Self {
         MemoryDatabase {
             map: BTreeMap::new(),

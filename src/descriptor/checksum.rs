@@ -22,6 +22,11 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+//! Descriptor checksum
+//!
+//! This module contains a re-implementation of the function used by Bitcoin Core to calculate the
+//! checksum of a descriptor
+
 use std::iter::FromIterator;
 
 use crate::descriptor::Error;
@@ -51,6 +56,7 @@ fn poly_mod(mut c: u64, val: u64) -> u64 {
     c
 }
 
+/// Compute the checksum of a descriptor
 pub fn get_checksum(desc: &str) -> Result<String, Error> {
     let mut c = 1;
     let mut cls = 0;

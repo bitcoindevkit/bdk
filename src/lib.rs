@@ -66,7 +66,7 @@ extern crate testutils_macros;
 extern crate serial_test;
 
 #[macro_use]
-pub mod error;
+pub(crate) mod error;
 pub mod blockchain;
 pub mod database;
 pub mod descriptor;
@@ -74,6 +74,7 @@ pub(crate) mod psbt;
 pub(crate) mod types;
 pub mod wallet;
 
+pub use descriptor::HDKeyPaths;
 pub use error::Error;
 pub use types::*;
 pub use wallet::address_validator;

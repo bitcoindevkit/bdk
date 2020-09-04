@@ -34,7 +34,7 @@
 //! # use magical_bitcoin_wallet::blockchain::electrum::ElectrumBlockchain;
 //! let client = electrum_client::Client::new("ssl://electrum.blockstream.info:50002", None)?;
 //! let blockchain = ElectrumBlockchain::from(client);
-//! # Ok::<(), magical_bitcoin_wallet::error::Error>(())
+//! # Ok::<(), magical_bitcoin_wallet::Error>(())
 //! ```
 
 use std::collections::HashSet;

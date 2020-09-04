@@ -29,7 +29,7 @@ use bitcoin::hash_types::Txid;
 
 use serde::{Deserialize, Serialize};
 
-// TODO serde flatten?
+/// Types of script
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ScriptType {
     External = 0,
@@ -58,23 +58,28 @@ impl AsRef<[u8]> for ScriptType {
     }
 }
 
+/// Fee rate
 #[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
 // Internally stored as satoshi/vbyte
 pub struct FeeRate(f32);
 
 impl FeeRate {
+    /// Create a new instance of [`FeeRate`] given a float fee rate in btc/kvbytes
     pub fn from_btc_per_kvb(btc_per_kvb: f32) -> Self {
         FeeRate(btc_per_kvb * 1e5)
     }
 
+    /// Create a new instance of [`FeeRate`] given a float fee rate in satoshi/vbyte
     pub fn from_sat_per_vb(sat_per_vb: f32) -> Self {
         FeeRate(sat_per_vb)
     }
 
+    /// Create a new [`FeeRate`] with the default min relay fee value
     pub fn default_min_relay_fee() -> Self {
         FeeRate(1.0)
     }
 
+    /// Return the value as satoshi/vbyte
     pub fn as_sat_vb(&self) -> f32 {
         self.0
     }
@@ -86,6 +91,7 @@ impl std::default::Default for FeeRate {
     }
 }
 
+/// A wallet unspent output
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct UTXO {
     pub outpoint: OutPoint,
@@ -93,6 +99,7 @@ pub struct UTXO {
     pub is_internal: bool,
 }
 
+/// A wallet transaction
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default)]
 pub struct TransactionDetails {
     pub transaction: Option<Transaction>,

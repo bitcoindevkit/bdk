@@ -22,6 +22,27 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+//! Descriptor policy
+//!
+//! This module implements the logic to extract and represent the spending policies of a descriptor
+//! in a more human-readable format.
+//!
+//! ## Example
+//!
+//! ```
+//! # use std::sync::Arc;
+//! # use magical_bitcoin_wallet::descriptor::*;
+//! let desc = "wsh(and_v(v:pk(cV3oCth6zxZ1UVsHLnGothsWNsaoxRhC6aeNi5VbSdFpwUkgkEci),or_d(pk(cVMTy7uebJgvFaSBwcgvwk8qn8xSLc97dKow4MBetjrrahZoimm2),older(12960))))";
+//!
+//! let (extended_desc, key_map) = ExtendedDescriptor::parse_secret(desc)?;
+//! println!("{:?}", extended_desc);
+//!
+//! let signers = Arc::new(key_map.into());
+//! let policy = extended_desc.extract_policy(signers)?;
+//! println!("policy: {}", serde_json::to_string(&policy)?);
+//! # Ok::<(), magical_bitcoin_wallet::Error>(())
+//! ```
+
 use std::cmp::max;
 use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::fmt;
@@ -47,6 +68,7 @@ use super::checksum::get_checksum;
 use super::error::Error;
 use super::XKeyUtils;
 
+/// Raw public key or extended key fingerprint
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct PKOrF {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -79,6 +101,7 @@ impl PKOrF {
     }
 }
 
+/// An item that need to be satisfied
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all = "UPPERCASE")]
 pub enum SatisfiableItem {
@@ -208,30 +231,44 @@ where
     map.end()
 }
 
+/// Represent if and how much a policy item is satisfied by the wallet's descriptor
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all = "UPPERCASE")]
 pub enum Satisfaction {
+    /// Only a partial satisfaction of some kind of threshold policy
     Partial {
+        /// Total number of items
         n: usize,
+        /// Threshold
         m: usize,
+        /// The items that can be satisfied by the descriptor
         items: Vec<usize>,
         #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+        /// Extra conditions that also need to be satisfied
         conditions: ConditionMap,
     },
+    /// Can reach the threshold of some kind of threshold policy
     PartialComplete {
+        /// Total number of items
         n: usize,
+        /// Threshold
         m: usize,
+        /// The items that can be satisfied by the descriptor
         items: Vec<usize>,
         #[serde(
             serialize_with = "serialize_folded_cond_map",
             skip_serializing_if = "BTreeMap::is_empty"
         )]
+        /// Extra conditions that also need to be satisfied
         conditions: FoldedConditionMap,
     },
 
+    /// Can satisfy the policy item
     Complete {
+        /// Extra conditions that also need to be satisfied
         condition: Condition,
     },
+    /// Cannot satisfy or contribute to the policy item
     None,
 }
 
@@ -363,6 +400,7 @@ impl From<bool> for Satisfaction {
     }
 }
 
+/// Descriptor spending policy
 #[derive(Debug, Clone, Serialize)]
 pub struct Policy {
     id: String,
@@ -373,6 +411,7 @@ pub struct Policy {
     contribution: Satisfaction,
 }
 
+/// An extra condition that must be satisfied but that is out of control of the user
 #[derive(Hash, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Default, Serialize)]
 pub struct Condition {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -413,6 +452,7 @@ impl Condition {
     }
 }
 
+/// Errors that can happen while extracting and manipulating policies
 #[derive(Debug)]
 pub enum PolicyError {
     NotEnoughItemsSelected(String),
@@ -519,11 +559,19 @@ impl Policy {
         Ok(Some(policy))
     }
 
+    /// Return whether or not a specific path in the policy tree is required to unambiguously
+    /// create a transaction
+    ///
+    /// What this means is that for some spending policies the user should select which paths in
+    /// the tree it intends to satisfy while signing, because the transaction must be created differently based
+    /// on that.
     pub fn requires_path(&self) -> bool {
-        self.get_requirements(&BTreeMap::new()).is_err()
+        self.get_condition(&BTreeMap::new()).is_err()
     }
 
-    pub fn get_requirements(
+    /// Return the conditions that are set by the spending policy for a given path in the
+    /// policy tree
+    pub fn get_condition(
         &self,
         path: &BTreeMap<String, Vec<usize>>,
     ) -> Result<Condition, PolicyError> {
@@ -544,7 +592,7 @@ impl Policy {
             SatisfiableItem::Thresh { items, threshold } => {
                 let mapped_req = items
                     .iter()
-                    .map(|i| i.get_requirements(path))
+                    .map(|i| i.get_condition(path))
                     .collect::<Result<Vec<_>, _>>()?;
 
                 // if all the requirements are null we don't care about `selected` because there

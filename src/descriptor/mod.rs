@@ -22,6 +22,11 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+//! Descriptors
+//!
+//! This module contains generic utilities to work with descriptors, plus some re-exported types
+//! from [`miniscript`].
+
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::sync::Arc;
@@ -46,9 +51,17 @@ use self::error::Error;
 pub use self::policy::Policy;
 use crate::wallet::signer::SignersContainer;
 
+/// Alias for a [`Descriptor`] that can contain extended keys using [`DescriptorPublicKey`]
 pub type ExtendedDescriptor = Descriptor<DescriptorPublicKey>;
+
+/// Alias for the type of maps that represent derivation paths in a [`psbt::Input`] or
+/// [`psbt::Output`]
+///
+/// [`psbt::Input`]: bitcoin::util::psbt::Input
+/// [`psbt::Output`]: bitcoin::util::psbt::Output
 pub type HDKeyPaths = BTreeMap<PublicKey, (Fingerprint, DerivationPath)>;
 
+/// Trait implemented on [`Descriptor`]s to add a method to extract the spending [`policy`]
 pub trait ExtractPolicy {
     fn extract_policy(
         &self,
@@ -56,7 +69,7 @@ pub trait ExtractPolicy {
     ) -> Result<Option<Policy>, Error>;
 }
 
-pub trait XKeyUtils {
+pub(crate) trait XKeyUtils {
     fn full_path(&self, append: &[ChildNumber]) -> DerivationPath;
     fn root_fingerprint(&self) -> Fingerprint;
 }
@@ -91,7 +104,7 @@ impl<K: InnerXKey> XKeyUtils for DescriptorXKey<K> {
     }
 }
 
-pub trait DescriptorMeta: Sized {
+pub(crate) trait DescriptorMeta: Sized {
     fn is_witness(&self) -> bool;
     fn get_hd_keypaths(&self, index: u32) -> Result<HDKeyPaths, Error>;
     fn is_fixed(&self) -> bool;
@@ -100,7 +113,7 @@ pub trait DescriptorMeta: Sized {
         -> Option<Self>;
 }
 
-pub trait DescriptorScripts {
+pub(crate) trait DescriptorScripts {
     fn psbt_redeem_script(&self) -> Option<Script>;
     fn psbt_witness_script(&self) -> Option<Script>;
 }

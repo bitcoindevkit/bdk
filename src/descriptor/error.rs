@@ -22,6 +22,9 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+//! Descriptor errors
+
+/// Errors related to the parsing and usage of descriptors
 #[derive(Debug)]
 pub enum Error {
     InternalError,

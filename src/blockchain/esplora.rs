@@ -32,7 +32,7 @@
 //! ```no_run
 //! # use magical_bitcoin_wallet::blockchain::esplora::EsploraBlockchain;
 //! let blockchain = EsploraBlockchain::new("https://blockstream.info/testnet/");
-//! # Ok::<(), magical_bitcoin_wallet::error::Error>(())
+//! # Ok::<(), magical_bitcoin_wallet::Error>(())
 //! ```
 
 use std::collections::{HashMap, HashSet};
