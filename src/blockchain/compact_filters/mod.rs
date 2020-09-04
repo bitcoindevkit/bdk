@@ -175,8 +175,8 @@ impl CompactFilters {
         tx: &Transaction,
         height: Option<u32>,
         timestamp: u64,
-        internal_max_deriv: &mut u32,
-        external_max_deriv: &mut u32,
+        internal_max_deriv: &mut Option<u32>,
+        external_max_deriv: &mut Option<u32>,
     ) -> Result<(), Error> {
         let mut updates = database.begin_batch();
 
@@ -216,10 +216,14 @@ impl CompactFilters {
                 })?;
                 incoming += output.value;
 
-                if script_type == ScriptType::Internal && child > *internal_max_deriv {
-                    *internal_max_deriv = child;
-                } else if script_type == ScriptType::External && child > *external_max_deriv {
-                    *external_max_deriv = child;
+                if script_type == ScriptType::Internal
+                    && (internal_max_deriv.is_none() || child > internal_max_deriv.unwrap_or(0))
+                {
+                    *internal_max_deriv = Some(child);
+                } else if script_type == ScriptType::External
+                    && (external_max_deriv.is_none() || child > external_max_deriv.unwrap_or(0))
+                {
+                    *external_max_deriv = Some(child);
                 }
             }
         }
@@ -413,8 +417,8 @@ impl OnlineBlockchain for CompactFiltersBlockchain {
 
         first_peer.ask_for_mempool()?;
 
-        let mut internal_max_deriv = 0;
-        let mut external_max_deriv = 0;
+        let mut internal_max_deriv = None;
+        let mut external_max_deriv = None;
 
         for (height, block) in inner.headers.iter_full_blocks()? {
             for tx in &block.txdata {
@@ -440,14 +444,14 @@ impl OnlineBlockchain for CompactFiltersBlockchain {
         }
 
         let current_ext = database.get_last_index(ScriptType::External)?.unwrap_or(0);
-        let first_ext_new = external_max_deriv as u32 + 1;
+        let first_ext_new = external_max_deriv.map(|x| x + 1).unwrap_or(0);
         if first_ext_new > current_ext {
             info!("Setting external index to {}", first_ext_new);
             database.set_last_index(ScriptType::External, first_ext_new)?;
         }
 
         let current_int = database.get_last_index(ScriptType::Internal)?.unwrap_or(0);
-        let first_int_new = internal_max_deriv + 1;
+        let first_int_new = internal_max_deriv.map(|x| x + 1).unwrap_or(0);
         if first_int_new > current_int {
             info!("Setting internal index to {}", first_int_new);
             database.set_last_index(ScriptType::Internal, first_int_new)?;

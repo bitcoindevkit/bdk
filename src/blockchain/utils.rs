@@ -88,7 +88,7 @@ pub trait ElectrumLikeSync {
         database.commit_batch(del_batch)?;
 
         // maximum derivation index for a change address that we've seen during sync
-        let mut change_max_deriv = 0;
+        let mut change_max_deriv = None;
 
         let mut already_checked: HashSet<Script> = HashSet::new();
         let mut to_check_later = VecDeque::with_capacity(batch_query_size);
@@ -104,7 +104,7 @@ pub trait ElectrumLikeSync {
 
         let mut iterating_external = true;
         let mut index = 0;
-        let mut last_found = 0;
+        let mut last_found = None;
         while !to_check_later.is_empty() {
             trace!("to_check_later size {}", to_check_later.len());
 
@@ -116,7 +116,7 @@ pub trait ElectrumLikeSync {
                 trace!("received history for {:?}, size {}", script, history.len());
 
                 if !history.is_empty() {
-                    last_found = index;
+                    last_found = Some(index);
 
                     let mut check_later_scripts = maybe_await!(self.check_history(
                         database,
@@ -134,9 +134,9 @@ pub trait ElectrumLikeSync {
             }
 
             match iterating_external {
-                true if index - last_found >= stop_gap => iterating_external = false,
+                true if index - last_found.unwrap_or(0) >= stop_gap => iterating_external = false,
                 true => {
-                    trace!("pushing one more batch from `iter_scriptpubkeys`. index = {}, last_found = {}, stop_gap = {}", index, last_found, stop_gap);
+                    trace!("pushing one more batch from `iter_scriptpubkeys`. index = {}, last_found = {:?}, stop_gap = {}", index, last_found, stop_gap);
 
                     let chunk: Vec<Script> =
                         iter_scriptpubkeys.by_ref().take(batch_query_size).collect();
@@ -178,14 +178,14 @@ pub trait ElectrumLikeSync {
         }
 
         let current_ext = database.get_last_index(ScriptType::External)?.unwrap_or(0);
-        let first_ext_new = last_found as u32 + 1;
+        let first_ext_new = last_found.map(|x| x + 1).unwrap_or(0) as u32;
         if first_ext_new > current_ext {
             info!("Setting external index to {}", first_ext_new);
             database.set_last_index(ScriptType::External, first_ext_new)?;
         }
 
         let current_int = database.get_last_index(ScriptType::Internal)?.unwrap_or(0);
-        let first_int_new = change_max_deriv + 1;
+        let first_int_new = change_max_deriv.map(|x| x + 1).unwrap_or(0);
         if first_int_new > current_int {
             info!("Setting internal index to {}", first_int_new);
             database.set_last_index(ScriptType::Internal, first_int_new)?;
@@ -202,7 +202,7 @@ pub trait ElectrumLikeSync {
         txid: &Txid,
         height: Option<u32>,
         cur_script: &Script,
-        change_max_deriv: &mut u32,
+        change_max_deriv: &mut Option<u32>,
     ) -> Result<Vec<Script>, Error> {
         debug!(
             "check_tx_and_descendant of {}, height: {:?}, script: {}",
@@ -297,8 +297,10 @@ pub trait ElectrumLikeSync {
                 }
 
                 // derive as many change addrs as external addresses that we've seen
-                if script_type == ScriptType::Internal && child > *change_max_deriv {
-                    *change_max_deriv = child;
+                if script_type == ScriptType::Internal
+                    && (change_max_deriv.is_none() || child > change_max_deriv.unwrap_or(0))
+                {
+                    *change_max_deriv = Some(child);
                 }
             }
         }
@@ -325,7 +327,7 @@ pub trait ElectrumLikeSync {
         database: &mut D,
         script_pubkey: Script,
         txs: Vec<ELSGetHistoryRes>,
-        change_max_deriv: &mut u32,
+        change_max_deriv: &mut Option<u32>,
     ) -> Result<Vec<Script>, Error> {
         let mut to_check_later = Vec::new();
 
