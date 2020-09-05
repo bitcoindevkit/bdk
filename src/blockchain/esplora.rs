@@ -31,7 +31,7 @@
 //!
 //! ```no_run
 //! # use magical::blockchain::esplora::EsploraBlockchain;
-//! let blockchain = EsploraBlockchain::new("https://blockstream.info/testnet/");
+//! let blockchain = EsploraBlockchain::new("https://blockstream.info/testnet/api");
 //! # Ok::<(), magical::Error>(())
 //! ```
 
@@ -81,8 +81,6 @@ impl std::convert::From<UrlClient> for EsploraBlockchain {
 
 impl EsploraBlockchain {
     /// Create a new instance of the client from a base URL
-    ///
-    /// The client internally adds the `/api` prefix to `base_url` before making any requests
     pub fn new(base_url: &str) -> Self {
         EsploraBlockchain(Some(UrlClient {
             url: base_url.to_string(),
@@ -180,7 +178,7 @@ impl UrlClient {
     async fn _get_tx(&self, txid: &Txid) -> Result<Option<Transaction>, EsploraError> {
         let resp = self
             .client
-            .get(&format!("{}/api/tx/{}/raw", self.url, txid))
+            .get(&format!("{}/tx/{}/raw", self.url, txid))
             .send()
             .await?;
 
@@ -193,7 +191,7 @@ impl UrlClient {
 
     async fn _broadcast(&self, transaction: &Transaction) -> Result<(), EsploraError> {
         self.client
-            .post(&format!("{}/api/tx", self.url))
+            .post(&format!("{}/tx", self.url))
             .body(serialize(transaction).to_hex())
             .send()
             .await?
@@ -205,7 +203,7 @@ impl UrlClient {
     async fn _get_height(&self) -> Result<u32, EsploraError> {
         let req = self
             .client
-            .get(&format!("{}/api/blocks/tip/height", self.url))
+            .get(&format!("{}/blocks/tip/height", self.url))
             .send()
             .await?;
 
@@ -223,7 +221,7 @@ impl UrlClient {
         result.extend(
             self.client
                 .get(&format!(
-                    "{}/api/scripthash/{}/txs/mempool",
+                    "{}/scripthash/{}/txs/mempool",
                     self.url, scripthash
                 ))
                 .send()
@@ -251,7 +249,7 @@ impl UrlClient {
             let response = self
                 .client
                 .get(&format!(
-                    "{}/api/scripthash/{}/txs/chain/{}",
+                    "{}/scripthash/{}/txs/chain/{}",
                     self.url, scripthash, last_txid
                 ))
                 .send()
@@ -286,7 +284,7 @@ impl UrlClient {
         Ok(self
             .client
             .get(&format!(
-                "{}/api/scripthash/{}/utxo",
+                "{}/scripthash/{}/utxo",
                 self.url,
                 Self::script_to_scripthash(script)
             ))
@@ -307,7 +305,7 @@ impl UrlClient {
     async fn _get_fee_estimates(&self) -> Result<HashMap<String, f64>, EsploraError> {
         Ok(self
             .client
-            .get(&format!("{}/api/fee-estimates", self.url,))
+            .get(&format!("{}/fee-estimates", self.url,))
             .send()
             .await?
             .error_for_status()?
