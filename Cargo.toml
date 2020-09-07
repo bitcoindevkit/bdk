@@ -51,6 +51,7 @@ async-interface = ["async-trait"]
 # Debug/Test features
 debug-proc-macros = ["magical-macros/debug", "testutils-macros/debug"]
 test-electrum = ["electrum"]
+test-md-docs = ["base64", "electrum"]
 
 [dev-dependencies]
 testutils = { path = "./testutils" }

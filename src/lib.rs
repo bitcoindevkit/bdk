@@ -25,6 +25,9 @@
 // only enables the `doc_cfg` feature when
 // the `docsrs` configuration attribute is defined
 #![cfg_attr(docsrs, feature(doc_cfg))]
+// only enables the nightly `external_doc` feature when
+// `test-md-docs` is enabled
+#![cfg_attr(feature = "test-md-docs", feature(external_doc))]
 
 pub extern crate bitcoin;
 extern crate log;
@@ -70,6 +73,8 @@ pub(crate) mod error;
 pub mod blockchain;
 pub mod database;
 pub mod descriptor;
+#[cfg(feature = "test-md-docs")]
+mod doctest;
 pub(crate) mod psbt;
 pub(crate) mod types;
 pub mod wallet;
