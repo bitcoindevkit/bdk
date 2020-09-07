@@ -1,8 +1,12 @@
 [package]
-name = "testutils-macros"
-version = "0.1.0"
+name = "magical-testutils-macros"
+version = "0.1.0-beta.1"
 authors = ["Alekos Filini <alekos.filini@gmail.com>"]
 edition = "2018"
+
+[lib]
+proc-macro = true
+name = "testutils_macros"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -13,6 +17,3 @@ quote = "1.0"
 
 [features]
 debug = ["syn/extra-traits"]
-
-[lib]
-proc-macro = true

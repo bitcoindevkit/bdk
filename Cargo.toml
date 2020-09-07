@@ -5,7 +5,7 @@ edition = "2018"
 authors = ["Alekos Filini <alekos.filini@gmail.com>", "Riccardo Casatta <riccardo@casatta.it>"]
 
 [dependencies]
-magical-macros = { path = "./macros" }
+magical-macros = { version = "0.1.0-beta.1", path = "./macros" }
 log = "^0.4"
 bitcoin = { version = "0.23", features = ["use-serde"] }
 miniscript = { version = "1.0" }
@@ -49,13 +49,13 @@ cli-utils = ["clap", "base64"]
 async-interface = ["async-trait"]
 
 # Debug/Test features
-debug-proc-macros = ["magical-macros/debug", "testutils-macros/debug"]
+debug-proc-macros = ["magical-macros/debug", "magical-testutils-macros/debug"]
 test-electrum = ["electrum"]
 test-md-docs = ["base64", "electrum"]
 
 [dev-dependencies]
-testutils = { path = "./testutils" }
-testutils-macros = { path = "./testutils-macros" }
+magical-testutils = { version = "0.1.0-beta.1", path = "./testutils" }
+magical-testutils-macros = { version = "0.1.0-beta.1", path = "./testutils-macros" }
 serial_test = "0.4"
 lazy_static = "1.4"
 rustyline = "6.0"
