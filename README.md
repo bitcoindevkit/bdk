@@ -8,15 +8,16 @@
   </p>
 
   <p>
-    <a href="https://crates.io/crates/magical"><img alt="Crate Info" src="https://img.shields.io/crates/v/magical.svg"/></a>
-    <a href="https://docs.rs/magical/"><img alt="API Docs" src="https://img.shields.io/badge/docs.rs-magical-green"/></a>
+    <!-- <a href="https://crates.io/crates/magical"><img alt="Crate Info" src="https://img.shields.io/crates/v/magical.svg"/></a> -->
+    <a href="https://travis-ci.org/MagicalBitcoin/magical-bitcoin-wallet"><img alt="Traivs Status" src="https://travis-ci.org/MagicalBitcoin/magical-bitcoin-wallet.svg?branch=master"></a>
+    <a href="https://magicalbitcoin.org/docs-rs/magical"><img alt="API Docs" src="https://img.shields.io/badge/docs.rs-magical-green"/></a>
     <a href="https://blog.rust-lang.org/2020/07/16/Rust-1.45.0.html"><img alt="Rustc Version 1.45+" src="https://img.shields.io/badge/rustc-1.45%2B-lightgrey.svg"/></a>
   </p>
 
   <h4>
     <a href="https://magicalbitcoin.org">Project Homepage</a>
     <span> | </span>
-    <a href="https://docs.rs/magical">Documentation</a>
+    <a href="https://magicalbitcoin.org/docs-rs/magical">Documentation</a>
   </h4>
 </div>
 
