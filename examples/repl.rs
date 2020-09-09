@@ -37,8 +37,9 @@ use log::{debug, error, info, trace, LevelFilter};
 use bitcoin::Network;
 
 use magical::bitcoin;
-use magical::blockchain::compact_filters::*;
+use magical::blockchain::ElectrumBlockchain;
 use magical::cli;
+use magical::electrum_client::Client;
 use magical::sled;
 use magical::Wallet;
 
@@ -88,17 +89,19 @@ fn main() {
         .unwrap();
     debug!("database opened successfully");
 
-    let num_threads = 1;
-
-    let mempool = Arc::new(Mempool::default());
-    let peers = (0..num_threads)
-        .map(|_| Peer::connect("192.168.1.136:8333", Arc::clone(&mempool), Network::Bitcoin))
-        .collect::<Result<_, _>>()
-        .unwrap();
-    let blockchain =
-        CompactFiltersBlockchain::new(peers, "./wallet-filters", Some(500_000)).unwrap();
-
-    let wallet = Wallet::new(descriptor, change_descriptor, network, tree, blockchain).unwrap();
+    let client = Client::new(
+        matches.value_of("server").unwrap(),
+        matches.value_of("proxy"),
+    )
+    .unwrap();
+    let wallet = Wallet::new(
+        descriptor,
+        change_descriptor,
+        network,
+        tree,
+        ElectrumBlockchain::from(client),
+    )
+    .unwrap();
     let wallet = Arc::new(wallet);
 
     if let Some(_sub_matches) = matches.subcommand_matches("repl") {
