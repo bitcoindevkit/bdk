@@ -73,7 +73,7 @@ use serde::{Deserialize, Serialize};
 
 use miniscript::{Descriptor, ScriptContext, Terminal};
 
-use crate::blockchain::Blockchain;
+use crate::blockchain::BlockchainMarker;
 use crate::database::BatchDatabase;
 use crate::wallet::Wallet;
 
@@ -115,7 +115,7 @@ impl WalletExport {
     ///
     /// If the database is empty or `include_blockheight` is false, the `blockheight` field
     /// returned will be `0`.
-    pub fn export_wallet<B: Blockchain, D: BatchDatabase>(
+    pub fn export_wallet<B: BlockchainMarker, D: BatchDatabase>(
         wallet: &Wallet<B, D>,
         label: &str,
         include_blockheight: bool,

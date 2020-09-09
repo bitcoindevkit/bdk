@@ -24,7 +24,7 @@
 
 //! Compact Filters
 //!
-//! This module contains a multithreaded implementation of an [`OnlineBlockchain`] backend that
+//! This module contains a multithreaded implementation of an [`Blockchain`] backend that
 //! uses BIP157 (aka "Neutrino") to populate the wallet's [database](crate::database::Database)
 //! by downloading compact filters from the P2P network.
 //!
@@ -76,7 +76,7 @@ mod peer;
 mod store;
 mod sync;
 
-use super::{Blockchain, Capability, OnlineBlockchain, Progress};
+use super::{Blockchain, Capability, Progress};
 use crate::database::{BatchDatabase, BatchOperations, DatabaseUtils};
 use crate::error::Error;
 use crate::types::{ScriptType, TransactionDetails, UTXO};
@@ -97,7 +97,11 @@ const PROCESS_BLOCKS_COST: f32 = 20_000.0;
 /// ## Example
 /// See the [`blockchain::compact_filters`](crate::blockchain::compact_filters) module for a usage example.
 #[derive(Debug)]
-pub struct CompactFiltersBlockchain(Option<CompactFilters>);
+pub struct CompactFiltersBlockchain {
+    peers: Vec<Arc<Peer>>,
+    headers: Arc<ChainStore<Full>>,
+    skip_blocks: Option<usize>,
+}
 
 impl CompactFiltersBlockchain {
     /// Construct a new instance given a list of peers, a path to store headers and block
@@ -108,29 +112,6 @@ impl CompactFiltersBlockchain {
     /// in parallel. It's currently recommended to only connect to a single peer to avoid
     /// inconsistencies in the data returned, optionally with multiple connections in parallel to
     /// speed-up the sync process.
-    pub fn new<P: AsRef<Path>>(
-        peers: Vec<Peer>,
-        storage_dir: P,
-        skip_blocks: Option<usize>,
-    ) -> Result<Self, CompactFiltersError> {
-        Ok(CompactFiltersBlockchain(Some(CompactFilters::new(
-            peers,
-            storage_dir,
-            skip_blocks,
-        )?)))
-    }
-}
-
-/// Internal struct that contains the state of a [`CompactFiltersBlockchain`]
-#[derive(Debug)]
-struct CompactFilters {
-    peers: Vec<Arc<Peer>>,
-    headers: Arc<ChainStore<Full>>,
-    skip_blocks: Option<usize>,
-}
-
-impl CompactFilters {
-    /// Constructor, see [`CompactFiltersBlockchain::new`] for the documentation
     pub fn new<P: AsRef<Path>>(
         peers: Vec<Peer>,
         storage_dir: P,
@@ -160,7 +141,7 @@ impl CompactFilters {
             headers.recover_snapshot(cf_name)?;
         }
 
-        Ok(CompactFilters {
+        Ok(CompactFiltersBlockchain {
             peers: peers.into_iter().map(Arc::new).collect(),
             headers,
             skip_blocks,
@@ -250,16 +231,6 @@ impl CompactFilters {
 }
 
 impl Blockchain for CompactFiltersBlockchain {
-    fn offline() -> Self {
-        CompactFiltersBlockchain(None)
-    }
-
-    fn is_online(&self) -> bool {
-        self.0.is_some()
-    }
-}
-
-impl OnlineBlockchain for CompactFiltersBlockchain {
     fn get_capabilities(&self) -> HashSet<Capability> {
         vec![Capability::FullHistory].into_iter().collect()
     }
@@ -270,14 +241,13 @@ impl OnlineBlockchain for CompactFiltersBlockchain {
         database: &mut D,
         progress_update: P,
     ) -> Result<(), Error> {
-        let inner = self.0.as_ref().ok_or(Error::OfflineClient)?;
-        let first_peer = &inner.peers[0];
+        let first_peer = &self.peers[0];
 
-        let skip_blocks = inner.skip_blocks.unwrap_or(0);
+        let skip_blocks = self.skip_blocks.unwrap_or(0);
 
-        let cf_sync = Arc::new(CFSync::new(Arc::clone(&inner.headers), skip_blocks, 0x00)?);
+        let cf_sync = Arc::new(CFSync::new(Arc::clone(&self.headers), skip_blocks, 0x00)?);
 
-        let initial_height = inner.headers.get_height()?;
+        let initial_height = self.headers.get_height()?;
         let total_bundles = (first_peer.get_version().start_height as usize)
             .checked_sub(skip_blocks)
             .map(|x| x / 1000)
@@ -297,7 +267,7 @@ impl OnlineBlockchain for CompactFiltersBlockchain {
 
         if let Some(snapshot) = sync::sync_headers(
             Arc::clone(&first_peer),
-            Arc::clone(&inner.headers),
+            Arc::clone(&self.headers),
             |new_height| {
                 let local_headers_cost =
                     new_height.checked_sub(initial_height).unwrap_or(0) as f32 * SYNC_HEADERS_COST;
@@ -307,13 +277,13 @@ impl OnlineBlockchain for CompactFiltersBlockchain {
                 )
             },
         )? {
-            if snapshot.work()? > inner.headers.work()? {
+            if snapshot.work()? > self.headers.work()? {
                 info!("Applying snapshot with work: {}", snapshot.work()?);
-                inner.headers.apply_snapshot(snapshot)?;
+                self.headers.apply_snapshot(snapshot)?;
             }
         }
 
-        let synced_height = inner.headers.get_height()?;
+        let synced_height = self.headers.get_height()?;
         let buried_height = synced_height
             .checked_sub(sync::BURIED_CONFIRMATIONS)
             .unwrap_or(0);
@@ -333,11 +303,11 @@ impl OnlineBlockchain for CompactFiltersBlockchain {
         let synced_bundles = Arc::new(AtomicUsize::new(0));
         let progress_update = Arc::new(Mutex::new(progress_update));
 
-        let mut threads = Vec::with_capacity(inner.peers.len());
-        for peer in &inner.peers {
+        let mut threads = Vec::with_capacity(self.peers.len());
+        for peer in &self.peers {
             let cf_sync = Arc::clone(&cf_sync);
             let peer = Arc::clone(&peer);
-            let headers = Arc::clone(&inner.headers);
+            let headers = Arc::clone(&self.headers);
             let all_scripts = Arc::clone(&all_scripts);
             let last_synced_block = Arc::clone(&last_synced_block);
             let progress_update = Arc::clone(&progress_update);
@@ -420,9 +390,9 @@ impl OnlineBlockchain for CompactFiltersBlockchain {
         let mut internal_max_deriv = None;
         let mut external_max_deriv = None;
 
-        for (height, block) in inner.headers.iter_full_blocks()? {
+        for (height, block) in self.headers.iter_full_blocks()? {
             for tx in &block.txdata {
-                inner.process_tx(
+                self.process_tx(
                     database,
                     tx,
                     Some(height as u32),
@@ -433,7 +403,7 @@ impl OnlineBlockchain for CompactFiltersBlockchain {
             }
         }
         for tx in first_peer.get_mempool().iter_txs().iter() {
-            inner.process_tx(
+            self.process_tx(
                 database,
                 tx,
                 None,
@@ -458,7 +428,7 @@ impl OnlineBlockchain for CompactFiltersBlockchain {
         }
 
         info!("Dropping blocks until {}", buried_height);
-        inner.headers.delete_blocks_until(buried_height)?;
+        self.headers.delete_blocks_until(buried_height)?;
 
         progress_update
             .lock()
@@ -469,24 +439,19 @@ impl OnlineBlockchain for CompactFiltersBlockchain {
     }
 
     fn get_tx(&self, txid: &Txid) -> Result<Option<Transaction>, Error> {
-        let inner = self.0.as_ref().ok_or(Error::OfflineClient)?;
-
-        Ok(inner.peers[0]
+        Ok(self.peers[0]
             .get_mempool()
             .get_tx(&Inventory::Transaction(*txid)))
     }
 
     fn broadcast(&self, tx: &Transaction) -> Result<(), Error> {
-        let inner = self.0.as_ref().ok_or(Error::OfflineClient)?;
-        inner.peers[0].broadcast_tx(tx.clone())?;
+        self.peers[0].broadcast_tx(tx.clone())?;
 
         Ok(())
     }
 
     fn get_height(&self) -> Result<u32, Error> {
-        let inner = self.0.as_ref().ok_or(Error::OfflineClient)?;
-
-        Ok(inner.headers.get_height()? as u32)
+        Ok(self.headers.get_height()? as u32)
     }
 
     fn estimate_fee(&self, _target: usize) -> Result<FeeRate, Error> {

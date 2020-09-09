@@ -63,7 +63,7 @@ pub fn magical_blockchain_tests(attr: TokenStream, item: TokenStream) -> TokenSt
                 ReturnType::Type(_, ref t) => t.clone(),
                 ReturnType::Default => {
                     return (quote! {
-                        compile_error!("The tagged function must return a type that impl `OnlineBlockchain`")
+                        compile_error!("The tagged function must return a type that impl `Blockchain`")
                     }).into();
                 }
             };
@@ -79,7 +79,7 @@ pub fn magical_blockchain_tests(attr: TokenStream, item: TokenStream) -> TokenSt
 
                 use testutils::{TestClient, serial};
 
-                use #root_ident::blockchain::{OnlineBlockchain, noop_progress};
+                use #root_ident::blockchain::{Blockchain, noop_progress};
                 use #root_ident::descriptor::ExtendedDescriptor;
                 use #root_ident::database::MemoryDatabase;
                 use #root_ident::types::ScriptType;

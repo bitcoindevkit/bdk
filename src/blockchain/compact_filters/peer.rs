@@ -63,7 +63,7 @@ impl Mempool {
     /// Add a transaction to the mempool
     ///
     /// Note that this doesn't propagate the transaction to other
-    /// peers. To do that, [`broadcast`](crate::blockchain::OnlineBlockchain::broadcast) should be used.
+    /// peers. To do that, [`broadcast`](crate::blockchain::Blockchain::broadcast) should be used.
     pub fn add_tx(&self, tx: Transaction) {
         self.txs.write().unwrap().insert(tx.txid(), tx);
     }

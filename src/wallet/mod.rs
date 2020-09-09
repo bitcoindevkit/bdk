@@ -58,7 +58,7 @@ use signer::{Signer, SignerId, SignerOrdering, SignersContainer};
 use tx_builder::TxBuilder;
 use utils::{After, Older};
 
-use crate::blockchain::{Blockchain, OfflineBlockchain, OnlineBlockchain, Progress};
+use crate::blockchain::{Blockchain, BlockchainMarker, OfflineBlockchain, Progress};
 use crate::database::{BatchDatabase, BatchOperations, DatabaseUtils};
 use crate::descriptor::{
     get_checksum, DescriptorMeta, DescriptorScripts, ExtendedDescriptor, ExtractPolicy, Policy,
@@ -80,9 +80,9 @@ pub type OfflineWallet<D> = Wallet<OfflineBlockchain, D>;
 /// [creating transactions](Wallet::create_tx), etc.
 ///
 /// A wallet can be either "online" if the [`blockchain`](crate::blockchain) type provided
-/// implements [`OnlineBlockchain`], or "offline" if it doesn't. Offline wallets only expose
+/// implements [`Blockchain`], or "offline" [`OfflineBlockchain`] is used. Offline wallets only expose
 /// methods that don't need any interaction with the blockchain to work.
-pub struct Wallet<B: Blockchain, D: BatchDatabase> {
+pub struct Wallet<B: BlockchainMarker, D: BatchDatabase> {
     descriptor: ExtendedDescriptor,
     change_descriptor: Option<ExtendedDescriptor>,
 
@@ -95,14 +95,14 @@ pub struct Wallet<B: Blockchain, D: BatchDatabase> {
 
     current_height: Option<u32>,
 
-    client: B,
+    client: Option<B>,
     database: RefCell<D>,
 }
 
 // offline actions, always available
 impl<B, D> Wallet<B, D>
 where
-    B: Blockchain,
+    B: BlockchainMarker,
     D: BatchDatabase,
 {
     /// Create a new "offline" wallet
@@ -147,7 +147,7 @@ where
 
             current_height: None,
 
-            client: B::offline(),
+            client: None,
             database: RefCell::new(database),
         })
     }
@@ -1076,7 +1076,7 @@ where
 
 impl<B, D> Wallet<B, D>
 where
-    B: OnlineBlockchain,
+    B: Blockchain,
     D: BatchDatabase,
 {
     /// Create a new "online" wallet
@@ -1091,7 +1091,7 @@ where
         let mut wallet = Self::new_offline(descriptor, change_descriptor, network, database)?;
 
         wallet.current_height = Some(maybe_await!(client.get_height())? as u32);
-        wallet.client = client;
+        wallet.client = Some(client);
 
         Ok(wallet)
     }
@@ -1144,13 +1144,13 @@ where
         // TODO: what if i generate an address first and cache some addresses?
         // TODO: we should sync if generating an address triggers a new batch to be stored
         if run_setup {
-            maybe_await!(self.client.setup(
+            maybe_await!(self.client.as_ref().ok_or(Error::OfflineClient)?.setup(
                 None,
                 self.database.borrow_mut().deref_mut(),
                 progress_update,
             ))
         } else {
-            maybe_await!(self.client.sync(
+            maybe_await!(self.client.as_ref().ok_or(Error::OfflineClient)?.sync(
                 None,
                 self.database.borrow_mut().deref_mut(),
                 progress_update,
@@ -1159,14 +1159,18 @@ where
     }
 
     /// Return a reference to the internal blockchain client
-    pub fn client(&self) -> &B {
-        &self.client
+    pub fn client(&self) -> Option<&B> {
+        self.client.as_ref()
     }
 
     /// Broadcast a transaction to the network
     #[maybe_async]
     pub fn broadcast(&self, tx: Transaction) -> Result<Txid, Error> {
-        maybe_await!(self.client.broadcast(&tx))?;
+        maybe_await!(self
+            .client
+            .as_ref()
+            .ok_or(Error::OfflineClient)?
+            .broadcast(&tx))?;
 
         Ok(tx.txid())
     }

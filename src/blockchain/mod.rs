@@ -26,17 +26,8 @@
 //!
 //! This module provides the implementation of a few commonly-used backends like
 //! [Electrum](crate::blockchain::electrum), [Esplora](crate::blockchain::esplora) and
-//! [Compact Filters/Neutrino](crate::blockchain::compact_filters), along with two generalized
-//! traits [`Blockchain`] and [`OnlineBlockchain`] that can be implemented to build customized
-//! backends.
-//!
-//! Types that only implement the [`Blockchain`] trait can be used as backends for [`Wallet`](crate::wallet::Wallet)s, but any
-//! action that requires interacting with the blockchain won't be available ([`Wallet::sync`](crate::wallet::Wallet::sync) and
-//! [`Wallet::broadcast`](crate::wallet::Wallet::broadcast)). This allows the creation of physically air-gapped wallets, that have no
-//! ability to contact the outside world. An example of an offline-only client is [`OfflineBlockchain`].
-//!
-//! Types that also implement [`OnlineBlockchain`] will make the two aforementioned actions
-//! available.
+//! [Compact Filters/Neutrino](crate::blockchain::compact_filters), along with a generalized trait
+//! [`Blockchain`] that can be implemented to build customized backends.
 
 use std::collections::HashSet;
 use std::ops::Deref;
@@ -69,7 +60,7 @@ pub mod compact_filters;
 #[cfg(feature = "compact_filters")]
 pub use self::compact_filters::CompactFiltersBlockchain;
 
-/// Capabilities that can be supported by an [`OnlineBlockchain`] backend
+/// Capabilities that can be supported by a [`Blockchain`] backend
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Capability {
     /// Can recover the full history of a wallet and not only the set of currently spendable UTXOs
@@ -80,56 +71,42 @@ pub enum Capability {
     AccurateFees,
 }
 
-/// Base trait for a blockchain backend
+/// Marker trait for a blockchain backend
 ///
-/// This trait is always required, even for "air-gapped" backends that don't actually make any
-/// external call. Clients that have the ability to make external calls must also implement `OnlineBlockchain`.
-pub trait Blockchain {
-    /// Return whether or not the client has the ability to fullfill requests
-    ///
-    /// This should always be `false` for offline-only types, and can be true for types that also
-    /// implement [`OnlineBlockchain`], if they have the ability to fullfill requests.
-    fn is_online(&self) -> bool;
+/// This is a marker trait for blockchain types. It is automatically implemented for types that
+/// implement [`Blockchain`], so as a user of the library you won't have to implement this
+/// manually.
+///
+/// Users of the library will probably never have to implement this trait manually, but they
+/// could still need to import it to define types and structs with generics;
+/// Implementing only the marker trait is pointless, since [`OfflineBlockchain`]
+/// already does that, and whenever [`Blockchain`] is implemented, the marker trait is also
+/// automatically implemented by the library.
+pub trait BlockchainMarker {}
 
-    /// Create a new instance of the client that is offline-only
-    ///
-    /// For types that also implement [`OnlineBlockchain`], this means creating an instance that
-    /// returns [`Error::OfflineClient`](crate::error::Error::OfflineClient) if any of the "online"
-    /// methods are called.
-    ///
-    /// This is generally implemented by wrapping the client in an [`Option`] that has [`Option::None`] value
-    /// when created with this method, and is [`Option::Some`] if properly instantiated.
-    fn offline() -> Self;
-}
+/// The [`BlockchainMarker`] marker trait is automatically implemented for [`Blockchain`] types
+impl<T: Blockchain> BlockchainMarker for T {}
 
-/// Type that only implements [`Blockchain`] and is always offline
+/// Type that only implements [`Blockchain`] and is always "offline"
 pub struct OfflineBlockchain;
-impl Blockchain for OfflineBlockchain {
-    fn offline() -> Self {
-        OfflineBlockchain
-    }
+impl BlockchainMarker for OfflineBlockchain {}
 
-    fn is_online(&self) -> bool {
-        false
-    }
-}
-
-/// Trait that defines the actions that must be supported by an online [`Blockchain`]
+/// Trait that defines the actions that must be supported by a blockchain backend
 #[maybe_async]
-pub trait OnlineBlockchain: Blockchain {
+pub trait Blockchain: BlockchainMarker {
     /// Return the set of [`Capability`] supported by this backend
     fn get_capabilities(&self) -> HashSet<Capability>;
 
     /// Setup the backend and populate the internal database for the first time
     ///
-    /// This method is the equivalent of [`OnlineBlockchain::sync`], but it's guaranteed to only be
+    /// This method is the equivalent of [`Blockchain::sync`], but it's guaranteed to only be
     /// called once, at the first [`Wallet::sync`](crate::wallet::Wallet::sync).
     ///
     /// The rationale behind the distinction between `sync` and `setup` is that some custom backends
     /// might need to perform specific actions only the first time they are synced.
     ///
     /// For types that do not have that distinction, only this method can be implemented, since
-    /// [`OnlineBlockchain::sync`] defaults to calling this internally if not overridden.
+    /// [`Blockchain::sync`] defaults to calling this internally if not overridden.
     fn setup<D: BatchDatabase, P: 'static + Progress>(
         &self,
         stop_gap: Option<usize>,
@@ -138,7 +115,7 @@ pub trait OnlineBlockchain: Blockchain {
     ) -> Result<(), Error>;
     /// Populate the internal database with transactions and UTXOs
     ///
-    /// If not overridden, it defaults to calling [`OnlineBlockchain::setup`] internally.
+    /// If not overridden, it defaults to calling [`Blockchain::setup`] internally.
     ///
     /// This method should implement the logic required to iterate over the list of the wallet's
     /// script_pubkeys using [`Database::iter_script_pubkeys`] and look for relevant transactions
@@ -178,8 +155,8 @@ pub trait OnlineBlockchain: Blockchain {
 /// Data sent with a progress update over a [`channel`]
 pub type ProgressData = (f32, Option<String>);
 
-/// Trait for types that can receive and process progress updates during [`OnlineBlockchain::sync`] and
-/// [`OnlineBlockchain::setup`]
+/// Trait for types that can receive and process progress updates during [`Blockchain::sync`] and
+/// [`Blockchain::setup`]
 pub trait Progress: Send {
     /// Send a new progress update
     ///
@@ -236,18 +213,8 @@ impl Progress for LogProgress {
     }
 }
 
-impl<T: Blockchain> Blockchain for Arc<T> {
-    fn is_online(&self) -> bool {
-        self.deref().is_online()
-    }
-
-    fn offline() -> Self {
-        Arc::new(T::offline())
-    }
-}
-
 #[maybe_async]
-impl<T: OnlineBlockchain> OnlineBlockchain for Arc<T> {
+impl<T: Blockchain> Blockchain for Arc<T> {
     fn get_capabilities(&self) -> HashSet<Capability> {
         maybe_await!(self.deref().get_capabilities())
     }

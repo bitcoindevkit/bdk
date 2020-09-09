@@ -24,7 +24,7 @@
 
 //! Esplora
 //!
-//! This module defines an [`OnlineBlockchain`] struct that can query an Esplora backend
+//! This module defines a [`Blockchain`] struct that can query an Esplora backend
 //! populate the wallet's [database](crate::database::Database) by
 //!
 //! ## Example
@@ -71,36 +71,26 @@ struct UrlClient {
 /// ## Example
 /// See the [`blockchain::esplora`](crate::blockchain::esplora) module for a usage example.
 #[derive(Debug)]
-pub struct EsploraBlockchain(Option<UrlClient>);
+pub struct EsploraBlockchain(UrlClient);
 
 impl std::convert::From<UrlClient> for EsploraBlockchain {
     fn from(url_client: UrlClient) -> Self {
-        EsploraBlockchain(Some(url_client))
+        EsploraBlockchain(url_client)
     }
 }
 
 impl EsploraBlockchain {
     /// Create a new instance of the client from a base URL
     pub fn new(base_url: &str) -> Self {
-        EsploraBlockchain(Some(UrlClient {
+        EsploraBlockchain(UrlClient {
             url: base_url.to_string(),
             client: Client::new(),
-        }))
-    }
-}
-
-impl Blockchain for EsploraBlockchain {
-    fn offline() -> Self {
-        EsploraBlockchain(None)
-    }
-
-    fn is_online(&self) -> bool {
-        self.0.is_some()
+        })
     }
 }
 
 #[maybe_async]
-impl OnlineBlockchain for EsploraBlockchain {
+impl Blockchain for EsploraBlockchain {
     fn get_capabilities(&self) -> HashSet<Capability> {
         vec![
             Capability::FullHistory,
@@ -119,41 +109,23 @@ impl OnlineBlockchain for EsploraBlockchain {
     ) -> Result<(), Error> {
         maybe_await!(self
             .0
-            .as_ref()
-            .ok_or(Error::OfflineClient)?
             .electrum_like_setup(stop_gap, database, progress_update))
     }
 
     fn get_tx(&self, txid: &Txid) -> Result<Option<Transaction>, Error> {
-        Ok(await_or_block!(self
-            .0
-            .as_ref()
-            .ok_or(Error::OfflineClient)?
-            ._get_tx(txid))?)
+        Ok(await_or_block!(self.0._get_tx(txid))?)
     }
 
     fn broadcast(&self, tx: &Transaction) -> Result<(), Error> {
-        Ok(await_or_block!(self
-            .0
-            .as_ref()
-            .ok_or(Error::OfflineClient)?
-            ._broadcast(tx))?)
+        Ok(await_or_block!(self.0._broadcast(tx))?)
     }
 
     fn get_height(&self) -> Result<u32, Error> {
-        Ok(await_or_block!(self
-            .0
-            .as_ref()
-            .ok_or(Error::OfflineClient)?
-            ._get_height())?)
+        Ok(await_or_block!(self.0._get_height())?)
     }
 
     fn estimate_fee(&self, target: usize) -> Result<FeeRate, Error> {
-        let estimates = await_or_block!(self
-            .0
-            .as_ref()
-            .ok_or(Error::OfflineClient)?
-            ._get_fee_estimates())?;
+        let estimates = await_or_block!(self.0._get_fee_estimates())?;
 
         let fee_val = estimates
             .into_iter()

@@ -363,7 +363,7 @@ pub fn handle_matches<C, D>(
     matches: ArgMatches<'_>,
 ) -> Result<serde_json::Value, Error>
 where
-    C: crate::blockchain::OnlineBlockchain,
+    C: crate::blockchain::Blockchain,
     D: crate::database::BatchDatabase,
 {
     if let Some(_sub_matches) = matches.subcommand_matches("get_new_address") {
