@@ -42,6 +42,11 @@ use crate::FeeRate;
 
 pub(crate) mod utils;
 
+#[cfg(any(feature = "electrum", feature = "esplora", feature = "compact_filters"))]
+pub mod any;
+#[cfg(any(feature = "electrum", feature = "esplora", feature = "compact_filters"))]
+pub use any::{AnyBlockchain, AnyBlockchainConfig};
+
 #[cfg(feature = "electrum")]
 #[cfg_attr(docsrs, doc(cfg(feature = "electrum")))]
 pub mod electrum;
