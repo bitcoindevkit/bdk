@@ -37,9 +37,9 @@ use log::{debug, error, info, trace, LevelFilter};
 use bitcoin::Network;
 
 use bdk::bitcoin;
-use bdk::blockchain::ElectrumBlockchain;
+use bdk::blockchain::electrum::{ElectrumBlockchain, ElectrumBlockchainConfig};
+use bdk::blockchain::ConfigurableBlockchain;
 use bdk::cli;
-use bdk::electrum_client::Client;
 use bdk::sled;
 use bdk::Wallet;
 
@@ -89,17 +89,16 @@ fn main() {
         .unwrap();
     debug!("database opened successfully");
 
-    let client = Client::new(
-        matches.value_of("server").unwrap(),
-        matches.value_of("proxy"),
-    )
-    .unwrap();
+    let blockchain_config = ElectrumBlockchainConfig {
+        url: matches.value_of("server").unwrap().to_string(),
+        socks5: matches.value_of("proxy").map(ToString::to_string),
+    };
     let wallet = Wallet::new(
         descriptor,
         change_descriptor,
         network,
         tree,
-        ElectrumBlockchain::from(client),
+        ElectrumBlockchain::from_config(&blockchain_config).unwrap(),
     )
     .unwrap();
     let wallet = Arc::new(wallet);

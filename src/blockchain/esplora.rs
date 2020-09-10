@@ -340,6 +340,20 @@ struct EsploraListUnspent {
     status: EsploraGetHistoryStatus,
 }
 
+/// Configuration for an [`EsploraBlockchain`]
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
+pub struct EsploraBlockchainConfig {
+    pub base_url: String,
+}
+
+impl ConfigurableBlockchain for EsploraBlockchain {
+    type Config = EsploraBlockchainConfig;
+
+    fn from_config(config: &Self::Config) -> Result<Self, Error> {
+        Ok(EsploraBlockchain::new(config.base_url.as_str()))
+    }
+}
+
 /// Errors that can happen during a sync with [`EsploraBlockchain`]
 #[derive(Debug)]
 pub enum EsploraError {

@@ -173,3 +173,21 @@ impl ElectrumLikeSync for Client {
         self.transaction_get(txid).map_err(Error::Electrum)
     }
 }
+
+/// Configuration for an [`ElectrumBlockchain`]
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
+pub struct ElectrumBlockchainConfig {
+    pub url: String,
+    pub socks5: Option<String>,
+}
+
+impl ConfigurableBlockchain for ElectrumBlockchain {
+    type Config = ElectrumBlockchainConfig;
+
+    fn from_config(config: &Self::Config) -> Result<Self, Error> {
+        Ok(ElectrumBlockchain(Client::new(
+            config.url.as_str(),
+            config.socks5.as_deref(),
+        )?))
+    }
+}

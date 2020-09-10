@@ -152,6 +152,15 @@ pub trait Blockchain: BlockchainMarker {
     fn estimate_fee(&self, target: usize) -> Result<FeeRate, Error>;
 }
 
+/// Trait for [`Blockchain`] types that can be created given a configuration
+pub trait ConfigurableBlockchain: Blockchain + Sized {
+    /// Type that contains the configuration
+    type Config: std::fmt::Debug;
+
+    /// Create a new instance given a configuration
+    fn from_config(config: &Self::Config) -> Result<Self, Error>;
+}
+
 /// Data sent with a progress update over a [`channel`]
 pub type ProgressData = (f32, Option<String>);
 

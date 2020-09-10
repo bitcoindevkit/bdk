@@ -68,7 +68,7 @@ use std::sync::{Arc, Mutex};
 use log::{debug, error, info, trace};
 
 use bitcoin::network::message_blockdata::Inventory;
-use bitcoin::{OutPoint, Transaction, Txid};
+use bitcoin::{Network, OutPoint, Transaction, Txid};
 
 use rocksdb::{Options, SliceTransform, DB};
 
@@ -76,7 +76,7 @@ mod peer;
 mod store;
 mod sync;
 
-use super::{Blockchain, Capability, Progress};
+use super::{Blockchain, Capability, ConfigurableBlockchain, Progress};
 use crate::database::{BatchDatabase, BatchOperations, DatabaseUtils};
 use crate::error::Error;
 use crate::types::{ScriptType, TransactionDetails, UTXO};
@@ -457,6 +457,54 @@ impl Blockchain for CompactFiltersBlockchain {
     fn estimate_fee(&self, _target: usize) -> Result<FeeRate, Error> {
         // TODO
         Ok(FeeRate::default())
+    }
+}
+
+/// Data to connect to a Bitcoin P2P peer
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
+pub struct BitcoinPeerConfig {
+    pub address: String,
+    pub socks5: Option<String>,
+    pub socks5_credentials: Option<(String, String)>,
+}
+
+/// Configuration for a [`CompactFiltersBlockchain`]
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
+pub struct CompactFiltersBlockchainConfig {
+    pub peers: Vec<BitcoinPeerConfig>,
+    pub network: Network,
+    pub storage_dir: String,
+    pub skip_blocks: Option<usize>,
+}
+
+impl ConfigurableBlockchain for CompactFiltersBlockchain {
+    type Config = CompactFiltersBlockchainConfig;
+
+    fn from_config(config: &Self::Config) -> Result<Self, Error> {
+        let mempool = Arc::new(Mempool::default());
+        let peers = config
+            .peers
+            .iter()
+            .map(|peer_conf| match &peer_conf.socks5 {
+                None => Peer::connect(&peer_conf.address, Arc::clone(&mempool), config.network),
+                Some(proxy) => Peer::connect_proxy(
+                    peer_conf.address.as_str(),
+                    proxy,
+                    peer_conf
+                        .socks5_credentials
+                        .as_ref()
+                        .map(|(a, b)| (a.as_str(), b.as_str())),
+                    Arc::clone(&mempool),
+                    config.network,
+                ),
+            })
+            .collect::<Result<_, _>>()?;
+
+        Ok(CompactFiltersBlockchain::new(
+            peers,
+            &config.storage_dir,
+            config.skip_blocks,
+        )?)
     }
 }
 
