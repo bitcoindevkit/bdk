@@ -33,9 +33,9 @@
 //! # use bitcoin::*;
 //! # use bitcoin::util::psbt;
 //! # use bitcoin::util::bip32::Fingerprint;
-//! # use magical::signer::*;
-//! # use magical::database::*;
-//! # use magical::*;
+//! # use bdk::signer::*;
+//! # use bdk::database::*;
+//! # use bdk::*;
 //! # #[derive(Debug)]
 //! # struct CustomHSM;
 //! # impl CustomHSM {
@@ -85,7 +85,7 @@
 //!     Arc::new(Box::new(custom_signer))
 //! );
 //!
-//! # Ok::<_, magical::Error>(())
+//! # Ok::<_, bdk::Error>(())
 //! ```
 
 use std::cmp::Ordering;

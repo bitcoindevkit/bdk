@@ -22,10 +22,10 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+extern crate bdk;
 extern crate bitcoin;
 extern crate clap;
 extern crate log;
-extern crate magical;
 extern crate miniscript;
 extern crate serde_json;
 
@@ -39,8 +39,8 @@ use bitcoin::Network;
 use miniscript::policy::Concrete;
 use miniscript::Descriptor;
 
-use magical::database::memory::MemoryDatabase;
-use magical::{OfflineWallet, ScriptType, Wallet};
+use bdk::database::memory::MemoryDatabase;
+use bdk::{OfflineWallet, ScriptType, Wallet};
 
 fn main() {
     env_logger::init_from_env(

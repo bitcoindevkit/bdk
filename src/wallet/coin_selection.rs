@@ -43,8 +43,8 @@
 //! # use std::str::FromStr;
 //! # use bitcoin::*;
 //! # use bitcoin::consensus::serialize;
-//! # use magical::wallet::coin_selection::*;
-//! # use magical::*;
+//! # use bdk::wallet::coin_selection::*;
+//! # use bdk::*;
 //! #[derive(Debug)]
 //! struct AlwaysSpendEverything;
 //!
@@ -57,7 +57,7 @@
 //!         amount_needed: u64,
 //!         input_witness_weight: usize,
 //!         fee_amount: f32,
-//!     ) -> Result<CoinSelectionResult, magical::Error> {
+//!     ) -> Result<CoinSelectionResult, bdk::Error> {
 //!         let selected_amount = utxos.iter().fold(0, |acc, utxo| acc + utxo.txout.value);
 //!         let all_utxos_selected = utxos
 //!             .into_iter()
@@ -77,7 +77,7 @@
 //!         let additional_fees = additional_weight as f32 * fee_rate.as_sat_vb() / 4.0;
 //!
 //!         if (fee_amount + additional_fees).ceil() as u64 + amount_needed > selected_amount {
-//!             return Err(magical::Error::InsufficientFunds);
+//!             return Err(bdk::Error::InsufficientFunds);
 //!         }
 //!
 //!         Ok(CoinSelectionResult {
@@ -88,7 +88,7 @@
 //!     }
 //! }
 //!
-//! # let wallet: OfflineWallet<_> = Wallet::new_offline("", None, Network::Testnet, magical::database::MemoryDatabase::default())?;
+//! # let wallet: OfflineWallet<_> = Wallet::new_offline("", None, Network::Testnet, bdk::database::MemoryDatabase::default())?;
 //! // create wallet, sync, ...
 //!
 //! let to_address = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap();
@@ -99,7 +99,7 @@
 //!
 //! // inspect, sign, broadcast, ...
 //!
-//! # Ok::<(), magical::Error>(())
+//! # Ok::<(), bdk::Error>(())
 //! ```
 
 use bitcoin::consensus::encode::serialize;

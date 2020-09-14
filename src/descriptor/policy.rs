@@ -31,7 +31,7 @@
 //!
 //! ```
 //! # use std::sync::Arc;
-//! # use magical::descriptor::*;
+//! # use bdk::descriptor::*;
 //! let desc = "wsh(and_v(v:pk(cV3oCth6zxZ1UVsHLnGothsWNsaoxRhC6aeNi5VbSdFpwUkgkEci),or_d(pk(cVMTy7uebJgvFaSBwcgvwk8qn8xSLc97dKow4MBetjrrahZoimm2),older(12960))))";
 //!
 //! let (extended_desc, key_map) = ExtendedDescriptor::parse_secret(desc)?;
@@ -40,7 +40,7 @@
 //! let signers = Arc::new(key_map.into());
 //! let policy = extended_desc.extract_policy(signers)?;
 //! println!("policy: {}", serde_json::to_string(&policy)?);
-//! # Ok::<(), magical::Error>(())
+//! # Ok::<(), bdk::Error>(())
 //! ```
 
 use std::cmp::max;

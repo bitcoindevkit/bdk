@@ -36,17 +36,17 @@ use log::{debug, error, info, trace, LevelFilter};
 
 use bitcoin::Network;
 
-use magical::bitcoin;
-use magical::blockchain::ElectrumBlockchain;
-use magical::cli;
-use magical::electrum_client::Client;
-use magical::sled;
-use magical::Wallet;
+use bdk::bitcoin;
+use bdk::blockchain::ElectrumBlockchain;
+use bdk::cli;
+use bdk::electrum_client::Client;
+use bdk::sled;
+use bdk::Wallet;
 
 fn prepare_home_dir() -> PathBuf {
     let mut dir = PathBuf::new();
     dir.push(&dirs::home_dir().unwrap());
-    dir.push(".magical-bitcoin");
+    dir.push(".bdk-bitcoin");
 
     if !dir.exists() {
         info!("Creating home directory {}", dir.as_path().display());

@@ -31,7 +31,7 @@ use syn::spanned::Spanned;
 use syn::{parse, parse2, Ident, ReturnType};
 
 #[proc_macro_attribute]
-pub fn magical_blockchain_tests(attr: TokenStream, item: TokenStream) -> TokenStream {
+pub fn bdk_blockchain_tests(attr: TokenStream, item: TokenStream) -> TokenStream {
     let root_ident = if !attr.is_empty() {
         match parse::<syn::ExprPath>(attr) {
             Ok(parsed) => parsed,
@@ -44,12 +44,12 @@ pub fn magical_blockchain_tests(attr: TokenStream, item: TokenStream) -> TokenSt
             }
         }
     } else {
-        parse2::<syn::ExprPath>(quote! { magical }).unwrap()
+        parse2::<syn::ExprPath>(quote! { bdk }).unwrap()
     };
 
     match parse::<syn::ItemFn>(item) {
         Err(_) => (quote! {
-            compile_error!("#[magical_blockchain_tests] can only be used on `fn`s")
+            compile_error!("#[bdk_blockchain_tests] can only be used on `fn`s")
         })
         .into(),
         Ok(parsed) => {
