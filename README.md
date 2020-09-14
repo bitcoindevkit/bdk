@@ -1,7 +1,7 @@
 <div align="center">
-  <h1>Magical Bitcoin Library</h1>
+  <h1>BDK</h1>
 
-  <img src="./static/wizard.svg" width="220" />
+  <img src="./static/bdk.svg" width="220" />
 
   <p>
     <strong>A modern, lightweight, descriptor-based wallet library written in Rust!</strong>
@@ -9,21 +9,21 @@
 
   <p>
     <!-- <a href="https://crates.io/crates/magical"><img alt="Crate Info" src="https://img.shields.io/crates/v/magical.svg"/></a> -->
-    <a href="https://travis-ci.org/MagicalBitcoin/magical-bitcoin-wallet"><img alt="Traivs Status" src="https://travis-ci.org/MagicalBitcoin/magical-bitcoin-wallet.svg?branch=master"></a>
-    <a href="https://magicalbitcoin.org/docs-rs/magical"><img alt="API Docs" src="https://img.shields.io/badge/docs.rs-magical-green"/></a>
+    <a href="https://travis-ci.org/bitcoindevkit/bdk"><img alt="Traivs Status" src="https://travis-ci.org/bitcoindevkit/bdk.svg?branch=master"></a>
+    <a href="https://bitcoindevkit.org/docs-rs/bdk"><img alt="API Docs" src="https://img.shields.io/badge/docs.rs-bdk-green"/></a>
     <a href="https://blog.rust-lang.org/2020/07/16/Rust-1.45.0.html"><img alt="Rustc Version 1.45+" src="https://img.shields.io/badge/rustc-1.45%2B-lightgrey.svg"/></a>
   </p>
 
   <h4>
-    <a href="https://magicalbitcoin.org">Project Homepage</a>
+    <a href="https://bitcoindevkit.org">Project Homepage</a>
     <span> | </span>
-    <a href="https://magicalbitcoin.org/docs-rs/magical">Documentation</a>
+    <a href="https://bitcoindevkit.org/docs-rs/bdk">Documentation</a>
   </h4>
 </div>
 
 ## About
 
-The `magical` library aims to be the core building block for Bitcoin wallets of any kind.
+The `bdk` library aims to be the core building block for Bitcoin wallets of any kind.
 
 * It uses [Miniscript](https://github.com/rust-bitcoin/rust-miniscript) to support descriptors with generalized conditions. This exact same library can be used to build
   single-sig wallets, multisigs, timelocked contracts and more.
