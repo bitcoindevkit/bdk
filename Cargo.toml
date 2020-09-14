@@ -76,12 +76,6 @@ name = "miniscriptc"
 path = "examples/compiler.rs"
 required-features = ["compiler"]
 
-# Provide a more user-friendly alias for the REPL
-[[example]]
-name = "magic"
-path = "examples/repl.rs"
-required-features = ["cli-utils"]
-
 [workspace]
 members = ["macros", "testutils", "testutils-macros"]
 
