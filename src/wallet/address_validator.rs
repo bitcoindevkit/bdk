@@ -42,9 +42,9 @@
 //! ```
 //! # use std::sync::Arc;
 //! # use bitcoin::*;
-//! # use magical::address_validator::*;
-//! # use magical::database::*;
-//! # use magical::*;
+//! # use bdk::address_validator::*;
+//! # use bdk::database::*;
+//! # use bdk::*;
 //! struct PrintAddressAndContinue;
 //!
 //! impl AddressValidator for PrintAddressAndContinue {
@@ -71,7 +71,7 @@
 //!
 //! let address = wallet.get_new_address()?;
 //! println!("Address: {}", address);
-//! # Ok::<(), magical::Error>(())
+//! # Ok::<(), bdk::Error>(())
 //! ```
 
 use std::fmt;

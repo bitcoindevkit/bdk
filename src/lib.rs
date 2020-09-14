@@ -40,7 +40,7 @@ extern crate serde_json;
 #[macro_use]
 extern crate async_trait;
 #[macro_use]
-extern crate magical_macros;
+extern crate bdk_macros;
 
 #[cfg(any(test, feature = "compact_filters"))]
 #[macro_use]

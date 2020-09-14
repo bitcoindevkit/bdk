@@ -31,10 +31,10 @@
 //! ## Example
 //!
 //! ```no_run
-//! # use magical::blockchain::electrum::ElectrumBlockchain;
+//! # use bdk::blockchain::electrum::ElectrumBlockchain;
 //! let client = electrum_client::Client::new("ssl://electrum.blockstream.info:50002", None)?;
 //! let blockchain = ElectrumBlockchain::from(client);
-//! # Ok::<(), magical::Error>(())
+//! # Ok::<(), bdk::Error>(())
 //! ```
 
 use std::collections::HashSet;
@@ -60,7 +60,7 @@ pub struct ElectrumBlockchain(Client);
 
 #[cfg(test)]
 #[cfg(feature = "test-electrum")]
-#[magical_blockchain_tests(crate)]
+#[bdk_blockchain_tests(crate)]
 fn local_electrs() -> ElectrumBlockchain {
     ElectrumBlockchain::from(Client::new(&testutils::get_electrum_url(), None).unwrap())
 }
