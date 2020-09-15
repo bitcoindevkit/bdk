@@ -26,6 +26,58 @@
 //!
 //! This module provides the implementation of [`AnyBlockchain`] which allows switching the
 //! inner [`Blockchain`] type at runtime.
+//!
+//! ## Example
+//!
+//! In this example both `wallet_electrum` and `wallet_esplora` have the same type of
+//! `Wallet<AnyBlockchain, MemoryDatabase>`. This means that they could both, for instance, be
+//! assigned to a struct member.
+//!
+//! ```no_run
+//! # use bitcoin::Network;
+//! # use bdk::blockchain::*;
+//! # use bdk::database::MemoryDatabase;
+//! # use bdk::Wallet;
+//! # #[cfg(feature = "electrum")]
+//! # {
+//! let electrum_blockchain = ElectrumBlockchain::from(electrum_client::Client::new("...", None)?);
+//! let wallet_electrum: Wallet<AnyBlockchain, _> = Wallet::new(
+//!     "...",
+//!     None,
+//!     Network::Testnet,
+//!     MemoryDatabase::default(),
+//!     electrum_blockchain.into(),
+//! )?;
+//! # }
+//!
+//! # #[cfg(feature = "esplora")]
+//! # {
+//! let esplora_blockchain = EsploraBlockchain::new("...");
+//! let wallet_esplora: Wallet<AnyBlockchain, _> = Wallet::new(
+//!     "...",
+//!     None,
+//!     Network::Testnet,
+//!     MemoryDatabase::default(),
+//!     esplora_blockchain.into(),
+//! )?;
+//! # }
+//!
+//! # Ok::<(), bdk::Error>(())
+//! ```
+//!
+//! When paired with the use of [`ConfigurableBlockchain`], it allows creating wallets with any
+//! blockchain type supported using a single line of code:
+//!
+//! ```no_run
+//! # use bitcoin::Network;
+//! # use bdk::blockchain::*;
+//! # use bdk::database::MemoryDatabase;
+//! # use bdk::Wallet;
+//! let config = serde_json::from_str("...")?;
+//! let blockchain = AnyBlockchain::from_config(&config)?;
+//! let wallet = Wallet::new("...", None, Network::Testnet, MemoryDatabase::default(), blockchain)?;
+//! # Ok::<(), bdk::Error>(())
+//! ```
 
 use super::*;
 
@@ -56,6 +108,8 @@ macro_rules! impl_inner_method {
 /// Type that can contain any of the [`Blockchain`] types defined by the library
 ///
 /// It allows switching backend at runtime
+///
+/// See [this module](crate::blockchain::any)'s documentation for a usage example.
 pub enum AnyBlockchain {
     #[cfg(feature = "electrum")]
     #[cfg_attr(docsrs, doc(cfg(feature = "electrum")))]
