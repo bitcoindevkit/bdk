@@ -43,6 +43,9 @@ use bitcoin::{OutPoint, Script, Transaction, TxOut};
 use crate::error::Error;
 use crate::types::*;
 
+pub mod any;
+pub use any::{AnyDatabase, AnyDatabaseConfig};
+
 #[cfg(feature = "key-value-db")]
 pub(crate) mod keyvalue;
 
@@ -157,6 +160,15 @@ pub trait BatchDatabase: Database {
     fn begin_batch(&self) -> Self::Batch;
     /// Consume and apply a batch of operations
     fn commit_batch(&mut self, batch: Self::Batch) -> Result<(), Error>;
+}
+
+/// Trait for [`Database`] types that can be created given a configuration
+pub trait ConfigurableDatabase: Database + Sized {
+    /// Type that contains the configuration
+    type Config: std::fmt::Debug;
+
+    /// Create a new instance given a configuration
+    fn from_config(config: &Self::Config) -> Result<Self, Error>;
 }
 
 pub(crate) trait DatabaseUtils: Database {

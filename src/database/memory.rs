@@ -34,7 +34,7 @@ use bitcoin::consensus::encode::{deserialize, serialize};
 use bitcoin::hash_types::Txid;
 use bitcoin::{OutPoint, Script, Transaction};
 
-use crate::database::{BatchDatabase, BatchOperations, Database};
+use crate::database::{BatchDatabase, BatchOperations, ConfigurableDatabase, Database};
 use crate::error::Error;
 use crate::types::*;
 
@@ -447,6 +447,14 @@ impl BatchDatabase for MemoryDatabase {
         }
 
         Ok(self.map.append(&mut batch.map))
+    }
+}
+
+impl ConfigurableDatabase for MemoryDatabase {
+    type Config = ();
+
+    fn from_config(_config: &Self::Config) -> Result<Self, Error> {
+        Ok(MemoryDatabase::default())
     }
 }
 
