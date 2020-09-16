@@ -36,6 +36,7 @@ tokio = { version = "0.2", features = ["rt-core"] }
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 async-trait = "0.1"
 js-sys = "0.3"
+rand = { version = "^0.7", features = ["wasm-bindgen"] }
 
 [features]
 minimal = []
@@ -61,7 +62,6 @@ lazy_static = "1.4"
 rustyline = "6.0"
 dirs = "2.0"
 env_logger = "0.7"
-rand = "0.7"
 
 [[example]]
 name = "repl"
