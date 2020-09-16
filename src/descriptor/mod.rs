@@ -43,6 +43,7 @@ pub use miniscript::{
 };
 
 pub mod checksum;
+mod dsl;
 pub mod error;
 pub mod policy;
 
