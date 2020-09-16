@@ -100,7 +100,7 @@ use bitcoin::hashes::{hash160, Hash};
 use bitcoin::secp256k1::{Message, Secp256k1};
 use bitcoin::util::bip32::{ExtendedPrivKey, Fingerprint};
 use bitcoin::util::{bip143, psbt};
-use bitcoin::{PrivateKey, SigHash, SigHashType};
+use bitcoin::{PrivateKey, Script, SigHash, SigHashType};
 
 use miniscript::descriptor::{DescriptorPublicKey, DescriptorSecretKey, DescriptorXKey, KeyMap};
 use miniscript::{Legacy, MiniscriptKey, Segwitv0};
@@ -444,6 +444,16 @@ impl ComputeSighash for Legacy {
     }
 }
 
+fn p2wpkh_script_code(script: &Script) -> Script {
+    ScriptBuilder::new()
+        .push_opcode(opcodes::all::OP_DUP)
+        .push_opcode(opcodes::all::OP_HASH160)
+        .push_slice(&script[2..])
+        .push_opcode(opcodes::all::OP_EQUALVERIFY)
+        .push_opcode(opcodes::all::OP_CHECKSIG)
+        .into_script()
+}
+
 impl ComputeSighash for Segwitv0 {
     fn sighash(
         psbt: &psbt::PartiallySignedTransaction,
@@ -467,13 +477,14 @@ impl ComputeSighash for Segwitv0 {
             &Some(ref witness_script) => witness_script.clone(),
             &None => {
                 if witness_utxo.script_pubkey.is_v0_p2wpkh() {
-                    ScriptBuilder::new()
-                        .push_opcode(opcodes::all::OP_DUP)
-                        .push_opcode(opcodes::all::OP_HASH160)
-                        .push_slice(&witness_utxo.script_pubkey[2..])
-                        .push_opcode(opcodes::all::OP_EQUALVERIFY)
-                        .push_opcode(opcodes::all::OP_CHECKSIG)
-                        .into_script()
+                    p2wpkh_script_code(&witness_utxo.script_pubkey)
+                } else if psbt_input
+                    .redeem_script
+                    .as_ref()
+                    .map(Script::is_v0_p2wpkh)
+                    .unwrap_or(false)
+                {
+                    p2wpkh_script_code(&psbt_input.redeem_script.as_ref().unwrap())
                 } else {
                     return Err(SignerError::MissingWitnessScript);
                 }

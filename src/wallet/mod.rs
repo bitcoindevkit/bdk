@@ -2404,6 +2404,21 @@ mod test {
     }
 
     #[test]
+    fn test_sign_single_xprv_sh_wpkh() {
+        let (wallet, _, _) = get_funded_wallet("sh(wpkh(tprv8ZgxMBicQKsPd3EupYiPRhaMooHKUHJxNsTfYuScep13go8QFfHdtkG9nRkFGb7busX4isf6X9dURGCoKgitaApQ6MupRhZMcELAxTBRJgS/*))");
+        let addr = wallet.get_new_address().unwrap();
+        let (psbt, _) = wallet
+            .create_tx(TxBuilder::with_recipients(vec![(addr.script_pubkey(), 0)]).send_all())
+            .unwrap();
+
+        let (signed_psbt, finalized) = wallet.sign(psbt, None).unwrap();
+        assert_eq!(finalized, true);
+
+        let extracted = signed_psbt.extract_tx();
+        assert_eq!(extracted.input[0].witness.len(), 2);
+    }
+
+    #[test]
     fn test_sign_single_wif() {
         let (wallet, _, _) =
             get_funded_wallet("wpkh(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW)");
