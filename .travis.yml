@@ -10,6 +10,7 @@ env:
     - TARGET=x86_64-unknown-linux-gnu    CHECK_FMT=1
     - TARGET=x86_64-unknown-linux-gnu    RUN_TESTS=1
     - TARGET=x86_64-unknown-linux-gnu    FEATURES=minimal            NO_DEFAULT_FEATURES=1
+    - TARGET=x86_64-unknown-linux-gnu    FEATURES=all-keys           NO_DEFAULT_FEATURES=1
     - TARGET=x86_64-unknown-linux-gnu    FEATURES=minimal,esplora    NO_DEFAULT_FEATURES=1
     - TARGET=x86_64-unknown-linux-gnu    FEATURES=key-value-db       NO_DEFAULT_FEATURES=1
     - TARGET=x86_64-unknown-linux-gnu    FEATURES=electrum           NO_DEFAULT_FEATURES=1

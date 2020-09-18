@@ -31,6 +31,11 @@ use miniscript::descriptor::{DescriptorPublicKey, DescriptorSecretKey, Descripto
 
 use crate::Error;
 
+#[cfg(feature = "keys-bip39")]
+#[cfg_attr(docsrs, doc(cfg(feature = "keys-bip39")))]
+pub mod bip39;
+
+/// Container for public or secret keys
 pub enum DescriptorKey {
     Public(DescriptorPublicKey),
     Secret(DescriptorSecretKey),
@@ -55,52 +60,64 @@ impl DescriptorKey {
     }
 }
 
+/// Trait for objects that can be turned into a public or secret [`DescriptorKey`]
 pub trait ToDescriptorKey {
-    fn to_descriptor_key(self) -> DescriptorKey;
+    fn to_descriptor_key(self) -> Result<DescriptorKey, Error>;
+}
+
+/// Identity conversion. This is used internally by [`bdk::fragment`]
+impl ToDescriptorKey for DescriptorKey {
+    fn to_descriptor_key(self) -> Result<DescriptorKey, Error> {
+        Ok(self)
+    }
 }
 
 impl ToDescriptorKey for DescriptorPublicKey {
-    fn to_descriptor_key(self) -> DescriptorKey {
-        DescriptorKey::Public(self)
+    fn to_descriptor_key(self) -> Result<DescriptorKey, Error> {
+        Ok(DescriptorKey::Public(self))
     }
 }
 
 impl ToDescriptorKey for PublicKey {
-    fn to_descriptor_key(self) -> DescriptorKey {
-        DescriptorKey::Public(DescriptorPublicKey::PubKey(self))
+    fn to_descriptor_key(self) -> Result<DescriptorKey, Error> {
+        Ok(DescriptorKey::Public(DescriptorPublicKey::PubKey(self)))
     }
 }
 
-impl ToDescriptorKey for (bip32::ExtendedPubKey, bip32::DerivationPath, bool) {
-    fn to_descriptor_key(self) -> DescriptorKey {
-        DescriptorKey::Public(DescriptorPublicKey::XPub(DescriptorXKey {
-            source: None,
-            xkey: self.0,
-            derivation_path: self.1,
-            is_wildcard: self.2,
-        }))
+impl ToDescriptorKey for (bip32::ExtendedPubKey, bip32::DerivationPath) {
+    fn to_descriptor_key(self) -> Result<DescriptorKey, Error> {
+        Ok(DescriptorKey::Public(DescriptorPublicKey::XPub(
+            DescriptorXKey {
+                source: None,
+                xkey: self.0,
+                derivation_path: self.1,
+                is_wildcard: true,
+            },
+        )))
     }
 }
 
 impl ToDescriptorKey for DescriptorSecretKey {
-    fn to_descriptor_key(self) -> DescriptorKey {
-        DescriptorKey::Secret(self)
+    fn to_descriptor_key(self) -> Result<DescriptorKey, Error> {
+        Ok(DescriptorKey::Secret(self))
     }
 }
 
 impl ToDescriptorKey for PrivateKey {
-    fn to_descriptor_key(self) -> DescriptorKey {
-        DescriptorKey::Secret(DescriptorSecretKey::PrivKey(self))
+    fn to_descriptor_key(self) -> Result<DescriptorKey, Error> {
+        Ok(DescriptorKey::Secret(DescriptorSecretKey::PrivKey(self)))
     }
 }
 
-impl ToDescriptorKey for (bip32::ExtendedPrivKey, bip32::DerivationPath, bool) {
-    fn to_descriptor_key(self) -> DescriptorKey {
-        DescriptorKey::Secret(DescriptorSecretKey::XPrv(DescriptorXKey {
-            source: None,
-            xkey: self.0,
-            derivation_path: self.1,
-            is_wildcard: self.2,
-        }))
+impl ToDescriptorKey for (bip32::ExtendedPrivKey, bip32::DerivationPath) {
+    fn to_descriptor_key(self) -> Result<DescriptorKey, Error> {
+        Ok(DescriptorKey::Secret(DescriptorSecretKey::XPrv(
+            DescriptorXKey {
+                source: None,
+                xkey: self.0,
+                derivation_path: self.1,
+                is_wildcard: true,
+            },
+        )))
     }
 }
