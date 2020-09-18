@@ -22,15 +22,121 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-//! Descriptor DSL
+//! Descriptors DSL
 
-/// Domain specific language to write descriptors with code
+#[doc(hidden)]
+#[macro_export]
+macro_rules! impl_top_level_sh {
+    ( $descriptor_variant:ident, $( $minisc:tt )* ) => {
+        $crate::fragment!($( $minisc )*)
+            .map(|(minisc, keymap)|($crate::miniscript::Descriptor::<$crate::miniscript::descriptor::DescriptorPublicKey>::$descriptor_variant(minisc), keymap))
+    };
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! impl_top_level_pk {
+    ( $descriptor_variant:ident, $key:expr ) => {{
+        use $crate::keys::ToDescriptorKey;
+        $key.to_descriptor_key()
+            .into_key_and_secret()
+            .map(|(pk, key_map)| {
+                (
+                    $crate::miniscript::Descriptor::<
+                        $crate::miniscript::descriptor::DescriptorPublicKey,
+                    >::$descriptor_variant(pk),
+                    key_map,
+                )
+            })
+    }};
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! impl_modifier {
+    ( $terminal_variant:ident, $( $inner:tt )* ) => {
+        $crate::fragment!($( $inner )*)
+            .and_then(|(minisc, keymap)| Ok(($crate::miniscript::Miniscript::from_ast($crate::miniscript::miniscript::decode::Terminal::$terminal_variant(std::sync::Arc::new(minisc)))?, keymap)))
+    };
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! impl_leaf_opcode {
+    ( $terminal_variant:ident ) => {
+        $crate::miniscript::Miniscript::from_ast(
+            $crate::miniscript::miniscript::decode::Terminal::$terminal_variant,
+        )
+        .map_err($crate::Error::Miniscript)
+        .map(|minisc| (minisc, $crate::miniscript::descriptor::KeyMap::default()))
+    };
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! impl_leaf_opcode_value {
+    ( $terminal_variant:ident, $value:expr ) => {
+        $crate::miniscript::Miniscript::from_ast(
+            $crate::miniscript::miniscript::decode::Terminal::$terminal_variant($value),
+        )
+        .map_err($crate::Error::Miniscript)
+        .map(|minisc| (minisc, $crate::miniscript::descriptor::KeyMap::default()))
+    };
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! impl_leaf_opcode_value_two {
+    ( $terminal_variant:ident, $one:expr, $two:expr ) => {
+        $crate::miniscript::Miniscript::from_ast(
+            $crate::miniscript::miniscript::decode::Terminal::$terminal_variant($one, $two),
+        )
+        .map_err($crate::Error::Miniscript)
+        .map(|minisc| (minisc, $crate::miniscript::descriptor::KeyMap::default()))
+    };
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! impl_node_opcode_two {
+    ( $terminal_variant:ident, ( $( $a:tt )* ), ( $( $b:tt )* ) ) => {
+        $crate::fragment!($( $a )*)
+            .and_then(|a| Ok((a, $crate::fragment!($( $b )*)?)))
+            .and_then(|((a_minisc, mut a_keymap), (b_minisc, b_keymap))| {
+                // join key_maps
+                a_keymap.extend(b_keymap.into_iter());
+
+                Ok(($crate::miniscript::Miniscript::from_ast($crate::miniscript::miniscript::decode::Terminal::$terminal_variant(
+                    std::sync::Arc::new(a_minisc),
+                    std::sync::Arc::new(b_minisc),
+                ))?, a_keymap))
+            })
+    };
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! impl_node_opcode_three {
+    ( $terminal_variant:ident, ( $( $a:tt )* ), ( $( $b:tt )* ), ( $( $c:tt )* ) ) => {
+        $crate::fragment!($( $a )*)
+            .and_then(|a| Ok((a, $crate::fragment!($( $b )*)?, $crate::fragment!($( $c )*)?)))
+            .and_then(|((a_minisc, mut a_keymap), (b_minisc, b_keymap), (c_minisc, c_keymap))| {
+                // join key_maps
+                a_keymap.extend(b_keymap.into_iter());
+                a_keymap.extend(c_keymap.into_iter());
+
+                Ok(($crate::miniscript::Miniscript::from_ast($crate::miniscript::miniscript::decode::Terminal::$terminal_variant(
+                    std::sync::Arc::new(a_minisc),
+                    std::sync::Arc::new(b_minisc),
+                    std::sync::Arc::new(c_minisc),
+                ))?, a_keymap))
+            })
+    };
+}
+
+/// Macro to write full descriptors with code
 ///
-/// This macro must be called in a function that returns a `Result<_, E: From<miniscript::Error>>`.
-///
-/// The `pk()` descriptor type (single sig with a bare public key) is not available, since it could
-/// cause conflicts with the equally-named `pk()` descriptor opcode. It has been replaced by `pkr()`,
-/// which stands for "public key root".
+/// This macro expands to an object of type `Result<(Descriptor<DescriptorPublicKey>, KeyMap), Error>`.
 ///
 /// ## Example
 ///
@@ -38,12 +144,13 @@
 ///
 /// ```
 /// # use std::str::FromStr;
-/// # use miniscript::descriptor::DescriptorPublicKey;
-/// let my_key = DescriptorPublicKey::from_str("02e96fe52ef0e22d2f131dd425ce1893073a3c6ad20e8cac36726393dfb4856a4c").unwrap();
+/// let my_key = bitcoin::PublicKey::from_str("02e96fe52ef0e22d2f131dd425ce1893073a3c6ad20e8cac36726393dfb4856a4c")?;
 /// let my_timelock = 50;
-/// let my_descriptor = bdk::desc!(sh ( wsh ( and_v (+v pk my_key), ( older my_timelock ))));
-/// # Ok::<(), bdk::Error>(())
+/// let (my_descriptor, my_keys_map) = bdk::descriptor!(sh ( wsh ( and_v (+v pk my_key), ( older my_timelock ))))?;
+/// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
+///
+/// -------
 ///
 /// 2-of-3 that becomes a 1-of-3 after a timelock has expired. Both `descriptor_a` and `descriptor_b` are equivalent: the first
 /// syntax is more suitable for a fixed number of items known at compile time, while the other accepts a
@@ -53,182 +160,203 @@
 ///
 /// ```
 /// # use std::str::FromStr;
-/// # use miniscript::descriptor::DescriptorPublicKey;
-/// let my_key = DescriptorPublicKey::from_str("02e96fe52ef0e22d2f131dd425ce1893073a3c6ad20e8cac36726393dfb4856a4c").unwrap();
+/// let my_key_1 = bitcoin::PublicKey::from_str("02e96fe52ef0e22d2f131dd425ce1893073a3c6ad20e8cac36726393dfb4856a4c")?;
+/// let my_key_2 = bitcoin::PrivateKey::from_wif("cVt4o7BGAig1UXywgGSmARhxMdzP5qvQsxKkSsc1XEkw3tDTQFpy")?;
 /// let my_timelock = 50;
 ///
-/// let descriptor_a = bdk::desc! {
+/// let (descriptor_a, key_map_a) = bdk::descriptor! {
 ///     wsh (
-///         thresh 2, (pk my_key.clone()), (+s pk my_key.clone()), (+s+d+v older my_timelock)
+///         thresh 2, (pk my_key_1), (+s pk my_key_2), (+s+d+v older my_timelock)
 ///     )
-/// };
+/// }?;
 ///
 /// let b_items = vec![
-///     bdk::desc!(pk my_key.clone()),
-///     bdk::desc!(+s pk my_key.clone()),
-///     bdk::desc!(+s+d+v older my_timelock),
+///     bdk::fragment!(pk my_key_1)?,
+///     bdk::fragment!(+s pk my_key_2)?,
+///     bdk::fragment!(+s+d+v older my_timelock)?,
 /// ];
-/// let descriptor_b = bdk::desc!( wsh ( thresh_vec 2, b_items ) );
+/// let (descriptor_b, mut key_map_b) = bdk::descriptor!( wsh ( thresh_vec 2, b_items ) )?;
 ///
 /// assert_eq!(descriptor_a, descriptor_b);
-/// # Ok::<(), bdk::Error>(())
+/// assert_eq!(key_map_a.len(), key_map_b.len());
+/// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 #[macro_export]
-macro_rules! desc {
-    // Descriptor
+macro_rules! descriptor {
     ( bare ( $( $minisc:tt )* ) ) => ({
-        $crate::miniscript::Descriptor::<$crate::miniscript::descriptor::DescriptorPublicKey>::Bare($crate::desc!($( $minisc )*))
+        $crate::impl_top_level_sh!(Bare, $( $minisc )*)
     });
     ( sh ( wsh ( $( $minisc:tt )* ) ) ) => ({
-        $crate::desc!(shwsh ($( $minisc )*))
+        $crate::descriptor!(shwsh ($( $minisc )*))
     });
     ( shwsh ( $( $minisc:tt )* ) ) => ({
-        $crate::miniscript::Descriptor::<$crate::miniscript::descriptor::DescriptorPublicKey>::ShWsh($crate::desc!($( $minisc )*))
+        $crate::impl_top_level_sh!(ShWsh, $( $minisc )*)
     });
-    ( pkr $key:expr ) => ({
-        $crate::miniscript::Descriptor::<$crate::miniscript::descriptor::DescriptorPublicKey>::Pk($key)
+    ( pk $key:expr ) => ({
+        $crate::impl_top_level_pk!(Pk, $key)
     });
     ( pkh $key:expr ) => ({
-        $crate::miniscript::Descriptor::<$crate::miniscript::descriptor::DescriptorPublicKey>::Pkh($key)
+        $crate::impl_top_level_pk!(Pkh, $key)
     });
     ( wpkh $key:expr ) => ({
-        $crate::miniscript::Descriptor::<$crate::miniscript::descriptor::DescriptorPublicKey>::Wpkh($key)
+        $crate::impl_top_level_pk!(Wpkh, $key)
     });
     ( sh ( wpkh ( $key:expr ) ) ) => ({
-        $crate::desc!(shwpkh ($( $minisc )*))
+        $crate::descriptor!(shwpkh ($( $minisc )*))
     });
     ( shwpkh ( $key:expr ) ) => ({
-        $crate::miniscript::Descriptor::<$crate::miniscript::descriptor::DescriptorPublicKey>::ShWpkh($key)
+        $crate::impl_top_level_pk!(ShWpkh, $key)
     });
     ( sh ( $( $minisc:tt )* ) ) => ({
-        $crate::miniscript::Descriptor::<$crate::miniscript::descriptor::DescriptorPublicKey>::Sh($crate::desc!($( $minisc )*))
+        $crate::impl_top_level_sh!(Sh, $( $minisc )*)
     });
     ( wsh ( $( $minisc:tt )* ) ) => ({
-        $crate::miniscript::Descriptor::<$crate::miniscript::descriptor::DescriptorPublicKey>::Wsh($crate::desc!($( $minisc )*))
+        $crate::impl_top_level_sh!(Wsh, $( $minisc )*)
     });
+}
 
+/// Macro to write descriptor fragments with code
+///
+/// This macro will be expanded to an object of type `Result<(Miniscript<DescriptorPublicKey, _>, KeyMap), Error>`. It allows writing
+/// fragments of larger descriptors that can be pieced together using `fragment!(thresh_vec ...)`.
+#[macro_export]
+macro_rules! fragment {
     // Modifiers
     ( +a $( $inner:tt )* ) => ({
-        $crate::miniscript::Miniscript::from_ast($crate::miniscript::miniscript::decode::Terminal::Alt(std::sync::Arc::new($crate::desc!($( $inner )*))))?
+        $crate::impl_modifier!(Alt, $( $inner )*)
     });
     ( +s $( $inner:tt )* ) => ({
-        $crate::miniscript::Miniscript::from_ast($crate::miniscript::miniscript::decode::Terminal::Swap(std::sync::Arc::new($crate::desc!($( $inner )*))))?
+        $crate::impl_modifier!(Swap, $( $inner )*)
     });
     ( +c $( $inner:tt )* ) => ({
-        $crate::miniscript::Miniscript::from_ast($crate::miniscript::miniscript::decode::Terminal::Check(std::sync::Arc::new($crate::desc!($( $inner )*))))?
+        $crate::impl_modifier!(Check, $( $inner )*)
     });
     ( +d $( $inner:tt )* ) => ({
-        $crate::miniscript::Miniscript::from_ast($crate::miniscript::miniscript::decode::Terminal::DupIf(std::sync::Arc::new($crate::desc!($( $inner )*))))?
+        $crate::impl_modifier!(DupIf, $( $inner )*)
     });
     ( +v $( $inner:tt )* ) => ({
-        $crate::miniscript::Miniscript::from_ast($crate::miniscript::miniscript::decode::Terminal::Verify(std::sync::Arc::new($crate::desc!($( $inner )*))))?
+        $crate::impl_modifier!(Verify, $( $inner )*)
     });
     ( +j $( $inner:tt )* ) => ({
-        $crate::miniscript::Miniscript::from_ast($crate::miniscript::miniscript::decode::Terminal::NonZero(std::sync::Arc::new($crate::desc!($( $inner )*))))?
+        $crate::impl_modifier!(NonZero, $( $inner )*)
     });
     ( +n $( $inner:tt )* ) => ({
-        $crate::miniscript::Miniscript::from_ast($crate::miniscript::miniscript::decode::Terminal::ZeroNotEqual(std::sync::Arc::new($crate::desc!($( $inner )*))))?
+        $crate::impl_modifier!(ZeroNotEqual, $( $inner )*)
     });
     ( +t $( $inner:tt )* ) => ({
-        $crate::desc!(and_v ( $( $inner )* ), ( true ) )
+        $crate::fragment!(and_v ( $( $inner )* ), ( true ) )
     });
     ( +l $( $inner:tt )* ) => ({
-        $crate::desc!(or_i ( false ), ( $( $inner )* ) )
+        $crate::fragment!(or_i ( false ), ( $( $inner )* ) )
     });
     ( +u $( $inner:tt )* ) => ({
-        $crate::desc!(or_i ( $( $inner )* ), ( false ) )
+        $crate::fragment!(or_i ( $( $inner )* ), ( false ) )
     });
 
     // Miniscript
     ( true ) => ({
-        $crate::miniscript::Miniscript::from_ast($crate::miniscript::miniscript::decode::Terminal::True)?
+        $crate::impl_leaf_opcode!(True)
     });
     ( false ) => ({
-        $crate::miniscript::Miniscript::from_ast($crate::miniscript::miniscript::decode::Terminal::False)?
+        $crate::impl_leaf_opcode!(False)
     });
     ( pk_k $key:expr ) => ({
-        $crate::miniscript::Miniscript::from_ast($crate::miniscript::miniscript::decode::Terminal::PkK($key))?
+        use $crate::keys::ToDescriptorKey;
+        $key.to_descriptor_key().into_key_and_secret()
+            .and_then(|(pk, key_map)| Ok(($crate::impl_leaf_opcode_value!(PkK, pk)?.0, key_map)))
     });
     ( pk $key:expr ) => ({
-        $crate::desc!(+c pk_k $key)
+        $crate::fragment!(+c pk_k $key)
     });
     ( pk_h $key_hash:expr ) => ({
-        $crate::miniscript::Miniscript::from_ast($crate::miniscript::miniscript::decode::Terminal::PkH($key_hash))?
+        $crate::impl_leaf_opcode_value!(PkH, $key_hash)
     });
     ( after $value:expr ) => ({
-        $crate::miniscript::Miniscript::from_ast($crate::miniscript::miniscript::decode::Terminal::After($value))?
+        $crate::impl_leaf_opcode_value!(After, $value)
     });
     ( older $value:expr ) => ({
-        $crate::miniscript::Miniscript::from_ast($crate::miniscript::miniscript::decode::Terminal::Older($value))?
+        $crate::impl_leaf_opcode_value!(Older, $value)
     });
     ( sha256 $hash:expr ) => ({
-        $crate::miniscript::Miniscript::from_ast($crate::miniscript::miniscript::decode::Terminal::Sha256($hash))?
+        $crate::impl_leaf_opcode_value!(Sha256, $hash)
     });
     ( hash256 $hash:expr ) => ({
-        $crate::miniscript::Miniscript::from_ast($crate::miniscript::miniscript::decode::Terminal::Hash256($hash))?
+        $crate::impl_leaf_opcode_value!(Hash256, $hash)
     });
     ( ripemd160 $hash:expr ) => ({
-        $crate::miniscript::Miniscript::from_ast($crate::miniscript::miniscript::decode::Terminal::Ripemd160($hash))?
+        $crate::impl_leaf_opcode_value!(Ripemd160, $hash)
     });
     ( hash160 $hash:expr ) => ({
-        $crate::miniscript::Miniscript::from_ast($crate::miniscript::miniscript::decode::Terminal::Hash160($hash))?
+        $crate::impl_leaf_opcode_value!(Hash160, $hash)
     });
     ( and_v ( $( $a:tt )* ), ( $( $b:tt )* ) ) => ({
-        $crate::miniscript::Miniscript::from_ast($crate::miniscript::miniscript::decode::Terminal::AndV(
-            std::sync::Arc::new($crate::desc!($( $a )*)),
-            std::sync::Arc::new($crate::desc!($( $b )*)),
-        ))?
+        $crate::impl_node_opcode_two!(AndV, ( $( $a )* ), ( $( $b )* ))
     });
     ( and_b ( $( $a:tt )* ), ( $( $b:tt )* ) ) => ({
-        $crate::miniscript::Miniscript::from_ast($crate::miniscript::miniscript::decode::Terminal::AndB(
-            std::sync::Arc::new($crate::desc!($( $a )*)),
-            std::sync::Arc::new($crate::desc!($( $b )*))),
-        )?
+        $crate::impl_node_opcode_two!(AndB, ( $( $a )* ), ( $( $b )* ))
     });
     ( and_or ( $( $a:tt )* ), ( $( $b:tt )* ), ( $( $c:tt )* ) ) => ({
-        $crate::miniscript::Miniscript::from_ast($crate::miniscript::miniscript::decode::Terminal::AndOr(
-            std::sync::Arc::new($crate::desc!($( $a )*)),
-            std::sync::Arc::new($crate::desc!($( $b )*)),
-            std::sync::Arc::new($crate::desc!($( $c )*)),
-        ))?
+        $crate::impl_node_opcode_three!(AndOr, ( $( $a )* ), ( $( $b )* ), ( $( $c )* ))
     });
     ( or_b ( $( $a:tt )* ), ( $( $b:tt )* ) ) => ({
-        $crate::miniscript::Miniscript::from_ast($crate::miniscript::miniscript::decode::Terminal::OrB(
-            std::sync::Arc::new($crate::desc!($( $a )*)),
-            std::sync::Arc::new($crate::desc!($( $b )*)),
-        ))?
+        $crate::impl_node_opcode_two!(OrB, ( $( $a )* ), ( $( $b )* ))
     });
     ( or_d ( $( $a:tt )* ), ( $( $b:tt )* ) ) => ({
-        $crate::miniscript::Miniscript::from_ast($crate::miniscript::miniscript::decode::Terminal::OrD(
-            std::sync::Arc::new($crate::desc!($( $a )*)),
-            std::sync::Arc::new($crate::desc!($( $b )*)),
-        ))?
+        $crate::impl_node_opcode_two!(OrD, ( $( $a )* ), ( $( $b )* ))
     });
     ( or_c ( $( $a:tt )* ), ( $( $b:tt )* ) ) => ({
-        $crate::miniscript::Miniscript::from_ast($crate::miniscript::miniscript::decode::Terminal::OrC(
-            std::sync::Arc::new($crate::desc!($( $a )*)),
-            std::sync::Arc::new($crate::desc!($( $b )*)),
-        ))?
+        $crate::impl_node_opcode_two!(OrC, ( $( $a )* ), ( $( $b )* ))
     });
     ( or_i ( $( $a:tt )* ), ( $( $b:tt )* ) ) => ({
-        $crate::miniscript::Miniscript::from_ast($crate::miniscript::miniscript::decode::Terminal::OrI(
-            std::sync::Arc::new($crate::desc!($( $a )*)),
-            std::sync::Arc::new($crate::desc!($( $b )*)),
-        ))?
+        $crate::impl_node_opcode_two!(OrI, ( $( $a )* ), ( $( $b )* ))
     });
     ( thresh_vec $thresh:expr, $items:expr ) => ({
-        let items = $items.into_iter().map(std::sync::Arc::new).collect();
-        $crate::miniscript::Miniscript::from_ast($crate::miniscript::miniscript::decode::Terminal::Thresh($thresh, items))?
+        use $crate::miniscript::descriptor::KeyMap;
+
+        let (items, key_maps): (Vec<_>, Vec<_>) = $items.into_iter().unzip();
+        let items = items.into_iter().map(std::sync::Arc::new).collect();
+        let key_maps = key_maps.into_iter().fold(KeyMap::default(), |mut acc, map| {
+            acc.extend(map.into_iter());
+            acc
+        });
+
+        $crate::impl_leaf_opcode_value_two!(Thresh, $thresh, items)
+            .map(|(minisc, _)| (minisc, key_maps))
     });
     ( thresh $thresh:expr $(, ( $( $item:tt )* ) )+ ) => ({
         let mut items = vec![];
         $(
-            items.push(std::sync::Arc::new($crate::desc!($( $item )*)));
+            items.push($crate::fragment!($( $item )*));
         )*
 
-        $crate::miniscript::Miniscript::from_ast($crate::miniscript::miniscript::decode::Terminal::Thresh($thresh, items))?
+        items.into_iter().collect::<Result<Vec<_>, _>>()
+            .and_then(|items| $crate::fragment!(thresh_vec $thresh, items))
     });
-    ( multi $thresh:expr, $keys:expr ) => ({
-        $crate::miniscript::Miniscript::from_ast($crate::miniscript::miniscript::decode::Terminal::Multi($thresh, $keys))?
+    ( multi_vec $thresh:expr, $keys:expr ) => ({
+        use $crate::miniscript::descriptor::KeyMap;
+        use $crate::keys::{ToDescriptorKey, DescriptorKey};
+
+        $keys.into_iter()
+            .map(ToDescriptorKey::to_descriptor_key)
+            .map(DescriptorKey::into_key_and_secret)
+            .collect::<Result<Vec<_>, _>>()
+            .map(|items| items.into_iter().unzip())
+            .and_then(|(keys, key_maps): (Vec<_>, Vec<_>)| {
+                let key_maps = key_maps.into_iter().fold(KeyMap::default(), |mut acc, map| {
+                    acc.extend(map.into_iter());
+                    acc
+                });
+
+                Ok(($crate::impl_leaf_opcode_value_two!(Multi, $thresh, keys)?.0, key_maps))
+            })
     });
+    ( multi $thresh:expr $(, $key:expr )+ ) => ({
+        let mut keys = vec![];
+        $(
+            keys.push($key);
+        )*
+
+        $crate::fragment!(multi_vec $thresh, keys)
+    });
+
 }

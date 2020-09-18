@@ -62,6 +62,7 @@ use crate::blockchain::{Blockchain, BlockchainMarker, OfflineBlockchain, Progres
 use crate::database::{BatchDatabase, BatchOperations, DatabaseUtils};
 use crate::descriptor::{
     get_checksum, DescriptorMeta, DescriptorScripts, ExtendedDescriptor, ExtractPolicy, Policy,
+    ToWalletDescriptor,
 };
 use crate::error::Error;
 use crate::psbt::PSBTUtils;
@@ -106,26 +107,26 @@ where
     D: BatchDatabase,
 {
     /// Create a new "offline" wallet
-    pub fn new_offline(
-        descriptor: &str,
-        change_descriptor: Option<&str>,
+    pub fn new_offline<E: ToWalletDescriptor>(
+        descriptor: E,
+        change_descriptor: Option<E>,
         network: Network,
         mut database: D,
     ) -> Result<Self, Error> {
+        let (descriptor, keymap) = descriptor.to_wallet_descriptor()?;
         database.check_descriptor_checksum(
             ScriptType::External,
-            get_checksum(descriptor)?.as_bytes(),
+            get_checksum(&descriptor.to_string())?.as_bytes(),
         )?;
-        let (descriptor, keymap) = ExtendedDescriptor::parse_secret(descriptor)?;
         let signers = Arc::new(SignersContainer::from(keymap));
         let (change_descriptor, change_signers) = match change_descriptor {
             Some(desc) => {
+                let (change_descriptor, change_keymap) = desc.to_wallet_descriptor()?;
                 database.check_descriptor_checksum(
                     ScriptType::Internal,
-                    get_checksum(desc)?.as_bytes(),
+                    get_checksum(&change_descriptor.to_string())?.as_bytes(),
                 )?;
 
-                let (change_descriptor, change_keymap) = ExtendedDescriptor::parse_secret(desc)?;
                 let change_signers = Arc::new(SignersContainer::from(change_keymap));
                 // if !parsed.same_structure(descriptor.as_ref()) {
                 //     return Err(Error::DifferentDescriptorStructure);
@@ -1081,9 +1082,9 @@ where
 {
     /// Create a new "online" wallet
     #[maybe_async]
-    pub fn new(
-        descriptor: &str,
-        change_descriptor: Option<&str>,
+    pub fn new<E: ToWalletDescriptor>(
+        descriptor: E,
+        change_descriptor: Option<E>,
         network: Network,
         database: D,
         client: B,

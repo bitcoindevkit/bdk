@@ -92,7 +92,7 @@ pub fn bdk_blockchain_tests(attr: TokenStream, item: TokenStream) -> TokenStream
                 }
 
                 fn get_wallet_from_descriptors(descriptors: &(String, Option<String>)) -> Wallet<#return_type, MemoryDatabase> {
-                    Wallet::new(&descriptors.0.to_string(), descriptors.1.as_deref(), Network::Regtest, MemoryDatabase::new(), get_blockchain()).unwrap()
+                    Wallet::new(&descriptors.0.to_string(), descriptors.1.as_ref(), Network::Regtest, MemoryDatabase::new(), get_blockchain()).unwrap()
                 }
 
                 fn init_single_sig() -> (Wallet<#return_type, MemoryDatabase>, (String, Option<String>), TestClient) {

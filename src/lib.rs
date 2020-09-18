@@ -75,6 +75,7 @@ pub mod database;
 pub mod descriptor;
 #[cfg(feature = "test-md-docs")]
 mod doctest;
+pub mod keys;
 pub(crate) mod psbt;
 pub(crate) mod types;
 pub mod wallet;

@@ -37,7 +37,7 @@ use bitcoin::util::bip32::{ChildNumber, DerivationPath, Fingerprint};
 use bitcoin::util::psbt;
 use bitcoin::{PublicKey, Script, TxOut};
 
-use miniscript::descriptor::{DescriptorPublicKey, DescriptorXKey, InnerXKey};
+use miniscript::descriptor::{DescriptorPublicKey, DescriptorXKey, InnerXKey, KeyMap};
 pub use miniscript::{
     Descriptor, Legacy, Miniscript, MiniscriptKey, ScriptContext, Segwitv0, Terminal, ToPublicKey,
 };
@@ -61,6 +61,35 @@ pub type ExtendedDescriptor = Descriptor<DescriptorPublicKey>;
 /// [`psbt::Input`]: bitcoin::util::psbt::Input
 /// [`psbt::Output`]: bitcoin::util::psbt::Output
 pub type HDKeyPaths = BTreeMap<PublicKey, (Fingerprint, DerivationPath)>;
+
+/// Trait for types which can be converted into an [`ExtendedDescriptor`] and a [`KeyMap`] usable by a wallet
+pub trait ToWalletDescriptor {
+    fn to_wallet_descriptor(self) -> Result<(ExtendedDescriptor, KeyMap), Error>;
+}
+
+impl ToWalletDescriptor for &str {
+    fn to_wallet_descriptor(self) -> Result<(ExtendedDescriptor, KeyMap), Error> {
+        Ok(ExtendedDescriptor::parse_secret(self)?)
+    }
+}
+
+impl ToWalletDescriptor for &String {
+    fn to_wallet_descriptor(self) -> Result<(ExtendedDescriptor, KeyMap), Error> {
+        self.as_str().to_wallet_descriptor()
+    }
+}
+
+impl ToWalletDescriptor for (ExtendedDescriptor, KeyMap) {
+    fn to_wallet_descriptor(self) -> Result<(ExtendedDescriptor, KeyMap), Error> {
+        Ok(self)
+    }
+}
+
+impl ToWalletDescriptor for ExtendedDescriptor {
+    fn to_wallet_descriptor(self) -> Result<(ExtendedDescriptor, KeyMap), Error> {
+        (self, KeyMap::default()).to_wallet_descriptor()
+    }
+}
 
 /// Trait implemented on [`Descriptor`]s to add a method to extract the spending [`policy`]
 pub trait ExtractPolicy {
