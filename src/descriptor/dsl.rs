@@ -36,10 +36,11 @@ macro_rules! impl_top_level_sh {
 #[doc(hidden)]
 #[macro_export]
 macro_rules! impl_top_level_pk {
-    ( $descriptor_variant:ident, $key:expr ) => {{
-        use $crate::keys::ToDescriptorKey;
+    ( $descriptor_variant:ident, $ctx:ty, $key:expr ) => {{
+        use $crate::keys::{DescriptorKey, ToDescriptorKey};
+
         $key.to_descriptor_key()
-            .and_then(|key| key.into_key_and_secret())
+            .and_then(|key: DescriptorKey<$ctx>| key.into_key_and_secret())
             .map(|(pk, key_map)| {
                 (
                     $crate::miniscript::Descriptor::<
@@ -198,6 +199,18 @@ macro_rules! impl_node_opcode_three {
 /// }?;
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
+///
+/// ------
+///
+/// Native-Segwit single-sig, equivalent to: `wpkh(...)`
+///
+/// ```
+/// # use std::str::FromStr;
+/// let my_key = bitcoin::PrivateKey::from_wif("cVt4o7BGAig1UXywgGSmARhxMdzP5qvQsxKkSsc1XEkw3tDTQFpy")?;
+///
+/// let (descriptor, key_map) = bdk::descriptor!(wpkh ( my_key ) )?;
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
 #[macro_export]
 macro_rules! descriptor {
     ( bare ( $( $minisc:tt )* ) ) => ({
@@ -210,19 +223,19 @@ macro_rules! descriptor {
         $crate::impl_top_level_sh!(ShWsh, $( $minisc )*)
     });
     ( pk $key:expr ) => ({
-        $crate::impl_top_level_pk!(Pk, $key)
+        $crate::impl_top_level_pk!(Pk, $crate::miniscript::Legacy, $key)
     });
     ( pkh $key:expr ) => ({
-        $crate::impl_top_level_pk!(Pkh, $key)
+        $crate::impl_top_level_pk!(Pkh,$crate::miniscript::Legacy, $key)
     });
     ( wpkh $key:expr ) => ({
-        $crate::impl_top_level_pk!(Wpkh, $key)
+        $crate::impl_top_level_pk!(Wpkh, $crate::miniscript::Segwitv0, $key)
     });
     ( sh ( wpkh ( $key:expr ) ) ) => ({
         $crate::descriptor!(shwpkh ($( $minisc )*))
     });
     ( shwpkh ( $key:expr ) ) => ({
-        $crate::impl_top_level_pk!(ShWpkh, $key)
+        $crate::impl_top_level_pk!(ShWpkh, $crate::miniscript::Segwitv0, $key)
     });
     ( sh ( $( $minisc:tt )* ) ) => ({
         $crate::impl_top_level_sh!(Sh, $( $minisc )*)
@@ -279,9 +292,7 @@ macro_rules! fragment {
     });
     ( pk_k $key:expr ) => ({
         use $crate::keys::ToDescriptorKey;
-        $key.to_descriptor_key()
-            .and_then(|key| key.into_key_and_secret())
-            .and_then(|(pk, key_map)| Ok(($crate::impl_leaf_opcode_value!(PkK, pk)?.0, key_map)))
+        $key.into_miniscript_and_secret()
     });
     ( pk $key:expr ) => ({
         $crate::fragment!(+c pk_k $key)
@@ -351,21 +362,7 @@ macro_rules! fragment {
             .and_then(|items| $crate::fragment!(thresh_vec $thresh, items))
     });
     ( multi_vec $thresh:expr, $keys:expr ) => ({
-        use $crate::miniscript::descriptor::KeyMap;
-        use $crate::keys::{ToDescriptorKey, DescriptorKey};
-
-        $keys.into_iter()
-            .map(|key| key.to_descriptor_key().and_then(DescriptorKey::into_key_and_secret))
-            .collect::<Result<Vec<_>, _>>()
-            .map(|items| items.into_iter().unzip())
-            .and_then(|(keys, key_maps): (Vec<_>, Vec<_>)| {
-                let key_maps = key_maps.into_iter().fold(KeyMap::default(), |mut acc, map| {
-                    acc.extend(map.into_iter());
-                    acc
-                });
-
-                Ok(($crate::impl_leaf_opcode_value_two!(Multi, $thresh, keys)?.0, key_maps))
-            })
+        $crate::keys::make_multi($thresh, $keys)
     });
     ( multi $thresh:expr $(, $key:expr )+ ) => ({
         use $crate::keys::ToDescriptorKey;
@@ -376,7 +373,7 @@ macro_rules! fragment {
         )*
 
         keys.into_iter().collect::<Result<Vec<_>, _>>()
-            .and_then(|keys| $crate::fragment!(multi_vec $thresh, keys))
+            .and_then(|keys| $crate::keys::make_multi($thresh, keys))
     });
 
 }
