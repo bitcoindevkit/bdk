@@ -35,7 +35,7 @@ The `bdk` library aims to be the core building block for Bitcoin wallets of any 
 
 ### Sync the balance of a descriptor
 
-```no_run
+```rust,no_run
 use bdk::Wallet;
 use bdk::database::MemoryDatabase;
 use bdk::blockchain::{noop_progress, ElectrumBlockchain};
@@ -62,7 +62,7 @@ fn main() -> Result<(), bdk::Error> {
 
 ### Generate a few addresses
 
-```
+```rust
 use bdk::{Wallet, OfflineWallet};
 use bdk::database::MemoryDatabase;
 
@@ -84,7 +84,7 @@ fn main() -> Result<(), bdk::Error> {
 
 ### Create a transaction
 
-```no_run
+```rust,no_run
 use bdk::{FeeRate, TxBuilder, Wallet};
 use bdk::database::MemoryDatabase;
 use bdk::blockchain::{noop_progress, ElectrumBlockchain};
@@ -122,7 +122,7 @@ fn main() -> Result<(), bdk::Error> {
 
 ### Sign a transaction
 
-```no_run
+```rust,no_run
 use bdk::{Wallet, OfflineWallet};
 use bdk::database::MemoryDatabase;
 
