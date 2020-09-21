@@ -31,7 +31,9 @@ pub enum Error {
     InvalidPrefix(Vec<u8>),
     HardenedDerivationOnXpub,
     MalformedInput,
+
     KeyParsingError(String),
+    Key(crate::keys::KeyError),
 
     Policy(crate::descriptor::policy::PolicyError),
 
@@ -48,6 +50,16 @@ pub enum Error {
     PK(bitcoin::util::key::Error),
     Miniscript(miniscript::Error),
     Hex(bitcoin::hashes::hex::Error),
+}
+
+impl From<crate::keys::KeyError> for Error {
+    fn from(key_error: crate::keys::KeyError) -> Error {
+        match key_error {
+            crate::keys::KeyError::Miniscript(inner) => Error::Miniscript(inner),
+            crate::keys::KeyError::BIP32(inner) => Error::BIP32(inner),
+            e @ _ => Error::Key(e),
+        }
+    }
 }
 
 impl std::fmt::Display for Error {

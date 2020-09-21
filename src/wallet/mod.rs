@@ -113,7 +113,7 @@ where
         network: Network,
         mut database: D,
     ) -> Result<Self, Error> {
-        let (descriptor, keymap) = descriptor.to_wallet_descriptor()?;
+        let (descriptor, keymap) = descriptor.to_wallet_descriptor(network)?;
         database.check_descriptor_checksum(
             ScriptType::External,
             get_checksum(&descriptor.to_string())?.as_bytes(),
@@ -121,7 +121,7 @@ where
         let signers = Arc::new(SignersContainer::from(keymap));
         let (change_descriptor, change_signers) = match change_descriptor {
             Some(desc) => {
-                let (change_descriptor, change_keymap) = desc.to_wallet_descriptor()?;
+                let (change_descriptor, change_keymap) = desc.to_wallet_descriptor(network)?;
                 database.check_descriptor_checksum(
                     ScriptType::Internal,
                     get_checksum(&change_descriptor.to_string())?.as_bytes(),
@@ -1737,7 +1737,7 @@ mod test {
         use bitcoin::util::bip32::{DerivationPath, Fingerprint};
         use std::str::FromStr;
 
-        let (wallet, _, _) = get_funded_wallet("wpkh([d34db33f/44'/0'/0']xpub6ERApfZwUNrhLCkDtcHTcxd75RbzS1ed54G1LkBUHQVHQKqhMkhgbmJbZRkrgZw4koxb5JaHWkY4ALHY2grBGRjaDMzQLcgJvLJuZZvRcEL/0/*)");
+        let (wallet, _, _) = get_funded_wallet("wpkh([d34db33f/44'/0'/0']tpubDEnoLuPdBep9bzw5LoGYpsxUQYheRQ9gcgrJhJEcdKFB9cWQRyYmkCyRoTqeD4tJYiVVgt6A3rN6rWn9RYhR9sBsGxji29LYWHuKKbdb1ev/0/*)");
         let addr = wallet.get_new_address().unwrap();
         let (psbt, _) = wallet
             .create_tx(TxBuilder::with_recipients(vec![(addr.script_pubkey(), 0)]).send_all())
@@ -1758,7 +1758,7 @@ mod test {
         use bitcoin::util::bip32::{DerivationPath, Fingerprint};
         use std::str::FromStr;
 
-        let (wallet, descriptors, _) = get_funded_wallet("wpkh([d34db33f/44'/0'/0']xpub6ERApfZwUNrhLCkDtcHTcxd75RbzS1ed54G1LkBUHQVHQKqhMkhgbmJbZRkrgZw4koxb5JaHWkY4ALHY2grBGRjaDMzQLcgJvLJuZZvRcEL/0/*)");
+        let (wallet, descriptors, _) = get_funded_wallet("wpkh([d34db33f/44'/0'/0']tpubDEnoLuPdBep9bzw5LoGYpsxUQYheRQ9gcgrJhJEcdKFB9cWQRyYmkCyRoTqeD4tJYiVVgt6A3rN6rWn9RYhR9sBsGxji29LYWHuKKbdb1ev/0/*)");
         // cache some addresses
         wallet.get_new_address().unwrap();
 

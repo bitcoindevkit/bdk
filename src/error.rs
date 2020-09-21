@@ -48,6 +48,8 @@ pub enum Error {
         required: crate::types::FeeRate,
     },
 
+    Key(crate::keys::KeyError),
+
     ChecksumMismatch,
     DifferentDescriptorStructure,
 
@@ -113,6 +115,17 @@ impl_error!(
     InvalidPolicyPathError
 );
 impl_error!(crate::wallet::signer::SignerError, Signer);
+
+impl From<crate::keys::KeyError> for Error {
+    fn from(key_error: crate::keys::KeyError) -> Error {
+        match key_error {
+            crate::keys::KeyError::Miniscript(inner) => Error::Miniscript(inner),
+            crate::keys::KeyError::BIP32(inner) => Error::BIP32(inner),
+            crate::keys::KeyError::InvalidChecksum => Error::ChecksumMismatch,
+            e @ _ => Error::Key(e),
+        }
+    }
+}
 
 impl_error!(bitcoin::consensus::encode::Error, Encode);
 impl_error!(miniscript::Error, Miniscript);

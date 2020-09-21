@@ -234,7 +234,7 @@ mod test {
         let wallet: OfflineWallet<_> = Wallet::new_offline(
             descriptor,
             Some(change_descriptor),
-            Network::Testnet,
+            Network::Bitcoin,
             get_test_db(),
         )
         .unwrap();
@@ -256,7 +256,7 @@ mod test {
         let descriptor = "wpkh(xprv9s21ZrQH143K4CTb63EaMxja1YiTnSEWKMbn23uoEnAzxjdUJRQkazCAtzxGm4LSoTSVTptoV9RbchnKPW9HxKtZumdyxyikZFDLhogJ5Uj/44'/0'/0'/0/*)";
 
         let wallet: OfflineWallet<_> =
-            Wallet::new_offline(descriptor, None, Network::Testnet, get_test_db()).unwrap();
+            Wallet::new_offline(descriptor, None, Network::Bitcoin, get_test_db()).unwrap();
         WalletExport::export_wallet(&wallet, "Test Label", true).unwrap();
     }
 
@@ -272,7 +272,7 @@ mod test {
         let wallet: OfflineWallet<_> = Wallet::new_offline(
             descriptor,
             Some(change_descriptor),
-            Network::Testnet,
+            Network::Bitcoin,
             get_test_db(),
         )
         .unwrap();
@@ -315,7 +315,7 @@ mod test {
         let wallet: OfflineWallet<_> = Wallet::new_offline(
             descriptor,
             Some(change_descriptor),
-            Network::Testnet,
+            Network::Bitcoin,
             get_test_db(),
         )
         .unwrap();

@@ -30,30 +30,36 @@
 use bitcoin::util::bip32;
 use bitcoin::Network;
 
+use miniscript::ScriptContext;
+
 use bip39::{Mnemonic, Seed};
 
-use super::{DescriptorKey, ToDescriptorKey};
-use crate::Error;
+use super::{any_network, DescriptorKey, KeyError, ToDescriptorKey};
 
 pub type MnemonicWithPassphrase = (Mnemonic, Option<String>);
 
-impl ToDescriptorKey for (Seed, bip32::DerivationPath) {
-    fn to_descriptor_key(self) -> Result<DescriptorKey, Error> {
+impl<Ctx: ScriptContext> ToDescriptorKey<Ctx> for (Seed, bip32::DerivationPath) {
+    fn to_descriptor_key(self) -> Result<DescriptorKey<Ctx>, KeyError> {
         let xprv = bip32::ExtendedPrivKey::new_master(Network::Bitcoin, &self.0.as_bytes())?;
-        (xprv, self.1).to_descriptor_key()
+        let descriptor_key = (xprv, self.1).to_descriptor_key()?;
+
+        // here we must choose one network to build the xpub, but since the bip39 standard doesn't
+        // encode the network the xpub we create is actually valid everywhere. so we override the
+        // valid networks with `any_network()`.
+        Ok(descriptor_key.override_valid_networks(any_network()))
     }
 }
 
-impl ToDescriptorKey for (MnemonicWithPassphrase, bip32::DerivationPath) {
-    fn to_descriptor_key(self) -> Result<DescriptorKey, Error> {
+impl<Ctx: ScriptContext> ToDescriptorKey<Ctx> for (MnemonicWithPassphrase, bip32::DerivationPath) {
+    fn to_descriptor_key(self) -> Result<DescriptorKey<Ctx>, KeyError> {
         let (mnemonic, passphrase) = self.0;
         let seed = Seed::new(&mnemonic, passphrase.as_deref().unwrap_or(""));
         (seed, self.1).to_descriptor_key()
     }
 }
 
-impl ToDescriptorKey for (Mnemonic, bip32::DerivationPath) {
-    fn to_descriptor_key(self) -> Result<DescriptorKey, Error> {
+impl<Ctx: ScriptContext> ToDescriptorKey<Ctx> for (Mnemonic, bip32::DerivationPath) {
+    fn to_descriptor_key(self) -> Result<DescriptorKey<Ctx>, KeyError> {
         ((self.0, None), self.1).to_descriptor_key()
     }
 }
@@ -74,9 +80,10 @@ mod test {
         let path = bip32::DerivationPath::from_str("m/44'/0'/0'/0").unwrap();
 
         let key = (mnemonic, path);
-        let (desc, keys) = crate::descriptor!(wpkh(key)).unwrap();
+        let (desc, keys, networks) = crate::descriptor!(wpkh(key)).unwrap();
         assert_eq!(desc.to_string(), "wpkh([be83839f/44'/0'/0']xpub6DCQ1YcqvZtSwGWMrwHELPehjWV3f2MGZ69yBADTxFEUAoLwb5Mp5GniQK6tTp3AgbngVz9zEFbBJUPVnkG7LFYt8QMTfbrNqs6FNEwAPKA/0/*)");
         assert_eq!(keys.len(), 1);
+        assert_eq!(networks.len(), 3);
     }
 
     #[test]
@@ -87,8 +94,9 @@ mod test {
         let path = bip32::DerivationPath::from_str("m/44'/0'/0'/0").unwrap();
 
         let key = ((mnemonic, Some("passphrase".into())), path);
-        let (desc, keys) = crate::descriptor!(wpkh(key)).unwrap();
+        let (desc, keys, networks) = crate::descriptor!(wpkh(key)).unwrap();
         assert_eq!(desc.to_string(), "wpkh([8f6cb80c/44'/0'/0']xpub6DWYS8bbihFevy29M4cbw4ZR3P5E12jB8R88gBDWCTCNpYiDHhYWNywrCF9VZQYagzPmsZpxXpytzSoxynyeFr4ZyzheVjnpLKuse4fiwZw/0/*)");
         assert_eq!(keys.len(), 1);
+        assert_eq!(networks.len(), 3);
     }
 }
