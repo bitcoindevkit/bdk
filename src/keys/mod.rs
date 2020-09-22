@@ -31,7 +31,8 @@ use std::marker::PhantomData;
 use bitcoin::util::bip32;
 use bitcoin::{Network, PrivateKey, PublicKey};
 
-use miniscript::descriptor::{DescriptorPublicKey, DescriptorSecretKey, DescriptorXKey, KeyMap};
+pub use miniscript::descriptor::{DescriptorPublicKey, DescriptorSecretKey};
+use miniscript::descriptor::{DescriptorXKey, KeyMap};
 pub use miniscript::ScriptContext;
 use miniscript::{Miniscript, Terminal};
 
@@ -167,6 +168,10 @@ impl<Ctx: ScriptContext + 'static> ExtScriptContext for Ctx {
 /// single `Ctx`), the "specialized" trait can be implemented to make the compiler handle the type
 /// checking.
 ///
+/// Keys also have control over the networks they support: constructing the return object with
+/// [`DescriptorKey::from_public`] or [`DescriptorKey::from_secret`] allows to specify a set of
+/// [`ValidNetworks`].
+///
 /// ## Examples
 ///
 /// Key type valid in any context:
@@ -183,6 +188,24 @@ impl<Ctx: ScriptContext + 'static> ExtScriptContext for Ctx {
 /// impl<Ctx: ScriptContext> ToDescriptorKey<Ctx> for MyKeyType {
 ///     fn to_descriptor_key(self) -> Result<DescriptorKey<Ctx>, KeyError> {
 ///         self.pubkey.to_descriptor_key()
+///     }
+/// }
+/// ```
+///
+/// Key type that is only valid on mainnet:
+///
+/// ```
+/// use bdk::bitcoin::PublicKey;
+///
+/// use bdk::keys::{mainnet_network, ScriptContext, ToDescriptorKey, DescriptorKey, DescriptorPublicKey, KeyError};
+///
+/// pub struct MyKeyType {
+///     pubkey: PublicKey,
+/// }
+///
+/// impl<Ctx: ScriptContext> ToDescriptorKey<Ctx> for MyKeyType {
+///     fn to_descriptor_key(self) -> Result<DescriptorKey<Ctx>, KeyError> {
+///         Ok(DescriptorKey::from_public(DescriptorPublicKey::PubKey(self.pubkey), mainnet_network()))
 ///     }
 /// }
 /// ```
@@ -244,6 +267,77 @@ impl<Ctx: ScriptContext + 'static> ExtScriptContext for Ctx {
 pub trait ToDescriptorKey<Ctx: ScriptContext>: Sized {
     /// Turn the key into a [`DescriptorKey`] within the requested [`ScriptContext`]
     fn to_descriptor_key(self) -> Result<DescriptorKey<Ctx>, KeyError>;
+}
+
+/// Trait for keys that can be derived.
+///
+/// When extra metadata are provided, a [`DerivableKey`] can be transofrmed into a
+/// [`DescriptorKey`]: the trait [`ToDescriptorKey`] is automatically implemented
+/// for `(DerivableKey, DerivationPath)` and
+/// `(DerivableKey, (Fingerprint, DerivationPath), DerivationPath)` tuples.
+///
+/// For key types that don't encode any indication about the path to use (like bip39), it's
+/// generally recommended to implemented this trait instead of [`ToDescriptorKey`]. The same
+/// rules regarding script context and valid networks apply.
+///
+/// [`DerivationPath`]: (bip32::DerivationPath)
+pub trait DerivableKey<Ctx: ScriptContext> {
+    /// Add a extra metadata, consume `self` and turn it into a [`DescriptorKey`]
+    fn add_metadata(
+        self,
+        source: Option<(bip32::Fingerprint, bip32::DerivationPath)>,
+        derivation_path: bip32::DerivationPath,
+    ) -> Result<DescriptorKey<Ctx>, KeyError>;
+}
+
+impl<Ctx: ScriptContext> DerivableKey<Ctx> for bip32::ExtendedPubKey {
+    fn add_metadata(
+        self,
+        source: Option<(bip32::Fingerprint, bip32::DerivationPath)>,
+        derivation_path: bip32::DerivationPath,
+    ) -> Result<DescriptorKey<Ctx>, KeyError> {
+        DescriptorPublicKey::XPub(DescriptorXKey {
+            source,
+            xkey: self,
+            derivation_path,
+            is_wildcard: true,
+        })
+        .to_descriptor_key()
+    }
+}
+
+impl<Ctx: ScriptContext> DerivableKey<Ctx> for bip32::ExtendedPrivKey {
+    fn add_metadata(
+        self,
+        source: Option<(bip32::Fingerprint, bip32::DerivationPath)>,
+        derivation_path: bip32::DerivationPath,
+    ) -> Result<DescriptorKey<Ctx>, KeyError> {
+        DescriptorSecretKey::XPrv(DescriptorXKey {
+            source,
+            xkey: self,
+            derivation_path,
+            is_wildcard: true,
+        })
+        .to_descriptor_key()
+    }
+}
+
+impl<Ctx: ScriptContext, T: DerivableKey<Ctx>> ToDescriptorKey<Ctx> for (T, bip32::DerivationPath) {
+    fn to_descriptor_key(self) -> Result<DescriptorKey<Ctx>, KeyError> {
+        self.0.add_metadata(None, self.1)
+    }
+}
+
+impl<Ctx: ScriptContext, T: DerivableKey<Ctx>> ToDescriptorKey<Ctx>
+    for (
+        T,
+        (bip32::Fingerprint, bip32::DerivationPath),
+        bip32::DerivationPath,
+    )
+{
+    fn to_descriptor_key(self) -> Result<DescriptorKey<Ctx>, KeyError> {
+        self.0.add_metadata(Some(self.1), self.2)
+    }
 }
 
 // Used internally by `bdk::fragment!` to build `pk_k()` fragments
@@ -320,19 +414,6 @@ impl<Ctx: ScriptContext> ToDescriptorKey<Ctx> for PublicKey {
     }
 }
 
-/// This assumes that "is_wildcard" is true, since this is generally the way extended keys are used
-impl<Ctx: ScriptContext> ToDescriptorKey<Ctx> for (bip32::ExtendedPubKey, bip32::DerivationPath) {
-    fn to_descriptor_key(self) -> Result<DescriptorKey<Ctx>, KeyError> {
-        DescriptorPublicKey::XPub(DescriptorXKey {
-            source: None,
-            xkey: self.0,
-            derivation_path: self.1,
-            is_wildcard: true,
-        })
-        .to_descriptor_key()
-    }
-}
-
 impl<Ctx: ScriptContext> ToDescriptorKey<Ctx> for DescriptorSecretKey {
     fn to_descriptor_key(self) -> Result<DescriptorKey<Ctx>, KeyError> {
         let networks = match self {
@@ -355,19 +436,7 @@ impl<Ctx: ScriptContext> ToDescriptorKey<Ctx> for PrivateKey {
     }
 }
 
-/// This assumes that "is_wildcard" is true, since this is generally the way extended keys are used
-impl<Ctx: ScriptContext> ToDescriptorKey<Ctx> for (bip32::ExtendedPrivKey, bip32::DerivationPath) {
-    fn to_descriptor_key(self) -> Result<DescriptorKey<Ctx>, KeyError> {
-        DescriptorSecretKey::XPrv(DescriptorXKey {
-            source: None,
-            xkey: self.0,
-            derivation_path: self.1,
-            is_wildcard: true,
-        })
-        .to_descriptor_key()
-    }
-}
-
+/// Errors thrown while working with [`keys`](crate::keys)
 #[derive(Debug)]
 pub enum KeyError {
     InvalidScriptContext,

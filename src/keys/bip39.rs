@@ -34,33 +34,45 @@ use miniscript::ScriptContext;
 
 use bip39::{Mnemonic, Seed};
 
-use super::{any_network, DescriptorKey, KeyError, ToDescriptorKey};
+use super::{any_network, DerivableKey, DescriptorKey, KeyError};
 
 pub type MnemonicWithPassphrase = (Mnemonic, Option<String>);
 
-impl<Ctx: ScriptContext> ToDescriptorKey<Ctx> for (Seed, bip32::DerivationPath) {
-    fn to_descriptor_key(self) -> Result<DescriptorKey<Ctx>, KeyError> {
-        let xprv = bip32::ExtendedPrivKey::new_master(Network::Bitcoin, &self.0.as_bytes())?;
-        let descriptor_key = (xprv, self.1).to_descriptor_key()?;
+impl<Ctx: ScriptContext> DerivableKey<Ctx> for Seed {
+    fn add_metadata(
+        self,
+        source: Option<(bip32::Fingerprint, bip32::DerivationPath)>,
+        derivation_path: bip32::DerivationPath,
+    ) -> Result<DescriptorKey<Ctx>, KeyError> {
+        let xprv = bip32::ExtendedPrivKey::new_master(Network::Bitcoin, &self.as_bytes())?;
+        let descriptor_key = xprv.add_metadata(source, derivation_path)?;
 
         // here we must choose one network to build the xpub, but since the bip39 standard doesn't
-        // encode the network the xpub we create is actually valid everywhere. so we override the
+        // encode the network, the xpub we create is actually valid everywhere. so we override the
         // valid networks with `any_network()`.
         Ok(descriptor_key.override_valid_networks(any_network()))
     }
 }
 
-impl<Ctx: ScriptContext> ToDescriptorKey<Ctx> for (MnemonicWithPassphrase, bip32::DerivationPath) {
-    fn to_descriptor_key(self) -> Result<DescriptorKey<Ctx>, KeyError> {
-        let (mnemonic, passphrase) = self.0;
+impl<Ctx: ScriptContext> DerivableKey<Ctx> for MnemonicWithPassphrase {
+    fn add_metadata(
+        self,
+        source: Option<(bip32::Fingerprint, bip32::DerivationPath)>,
+        derivation_path: bip32::DerivationPath,
+    ) -> Result<DescriptorKey<Ctx>, KeyError> {
+        let (mnemonic, passphrase) = self;
         let seed = Seed::new(&mnemonic, passphrase.as_deref().unwrap_or(""));
-        (seed, self.1).to_descriptor_key()
+        seed.add_metadata(source, derivation_path)
     }
 }
 
-impl<Ctx: ScriptContext> ToDescriptorKey<Ctx> for (Mnemonic, bip32::DerivationPath) {
-    fn to_descriptor_key(self) -> Result<DescriptorKey<Ctx>, KeyError> {
-        ((self.0, None), self.1).to_descriptor_key()
+impl<Ctx: ScriptContext> DerivableKey<Ctx> for Mnemonic {
+    fn add_metadata(
+        self,
+        source: Option<(bip32::Fingerprint, bip32::DerivationPath)>,
+        derivation_path: bip32::DerivationPath,
+    ) -> Result<DescriptorKey<Ctx>, KeyError> {
+        (self, None).add_metadata(source, derivation_path)
     }
 }
 

@@ -37,15 +37,17 @@ use bitcoin::util::bip32::{ChildNumber, DerivationPath, Fingerprint};
 use bitcoin::util::psbt;
 use bitcoin::{Network, PublicKey, Script, TxOut};
 
-use miniscript::descriptor::{DescriptorPublicKey, DescriptorXKey, InnerXKey, KeyMap};
+use miniscript::descriptor::{DescriptorPublicKey, DescriptorXKey, InnerXKey};
 pub use miniscript::{
-    Descriptor, Legacy, Miniscript, MiniscriptKey, ScriptContext, Segwitv0, Terminal, ToPublicKey,
+    descriptor::KeyMap, Descriptor, Legacy, Miniscript, MiniscriptKey, ScriptContext, Segwitv0,
+    Terminal, ToPublicKey,
 };
 
 pub mod checksum;
 mod dsl;
 pub mod error;
 pub mod policy;
+pub mod template;
 
 pub use self::checksum::get_checksum;
 use self::error::Error;

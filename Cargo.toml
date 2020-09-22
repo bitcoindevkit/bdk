@@ -85,6 +85,6 @@ members = ["macros", "testutils", "testutils-macros"]
 # Generate docs with nightly to add the "features required" badge
 # https://stackoverflow.com/questions/61417452/how-to-get-a-feature-requirement-tag-in-the-documentation-generated-by-cargo-do
 [package.metadata.docs.rs]
-features = ["compiler", "electrum", "esplora", "compact_filters", "key-value-db"]
+features = ["compiler", "electrum", "esplora", "compact_filters", "key-value-db", "all-keys"]
 # defines the configuration attribute `docsrs`
 rustdoc-args = ["--cfg", "docsrs"]

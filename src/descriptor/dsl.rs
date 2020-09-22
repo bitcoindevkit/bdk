@@ -37,6 +37,7 @@ macro_rules! impl_top_level_sh {
 #[macro_export]
 macro_rules! impl_top_level_pk {
     ( $descriptor_variant:ident, $ctx:ty, $key:expr ) => {{
+        #[allow(unused_imports)]
         use $crate::keys::{DescriptorKey, ToDescriptorKey};
 
         $key.to_descriptor_key()
@@ -254,7 +255,7 @@ macro_rules! descriptor {
         $crate::impl_top_level_pk!(Wpkh, $crate::miniscript::Segwitv0, $key)
     });
     ( sh ( wpkh ( $key:expr ) ) ) => ({
-        $crate::descriptor!(shwpkh ($( $minisc )*))
+        $crate::descriptor!(shwpkh ( $key ))
     });
     ( shwpkh ( $key:expr ) ) => ({
         $crate::impl_top_level_pk!(ShWpkh, $crate::miniscript::Segwitv0, $key)
