@@ -154,4 +154,15 @@ mod test {
         assert_eq!(generated_mnemonic.valid_networks, any_network());
         assert_eq!(generated_mnemonic.to_string(), "primary fetch primary fetch primary fetch primary fetch primary fetch primary fetch primary fetch primary fetch primary fetch primary fetch primary fetch primary foster");
     }
+
+    #[test]
+    fn test_keys_generate_bip39_random() {
+        let generated_mnemonic: GeneratedKey<_, miniscript::Segwitv0> =
+            Mnemonic::generate((MnemonicType::Words12, Language::English)).unwrap();
+        assert_eq!(generated_mnemonic.valid_networks, any_network());
+
+        let generated_mnemonic: GeneratedKey<_, miniscript::Segwitv0> =
+            Mnemonic::generate((MnemonicType::Words24, Language::English)).unwrap();
+        assert_eq!(generated_mnemonic.valid_networks, any_network());
+    }
 }

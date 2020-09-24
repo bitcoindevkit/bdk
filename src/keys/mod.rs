@@ -389,7 +389,11 @@ pub trait GeneratableKey<Ctx: ScriptContext>: Sized {
         use rand::{thread_rng, Rng};
 
         let mut entropy = Vec::<u8>::with_capacity(Self::ENTROPY_LENGTH);
-        thread_rng().fill(&mut entropy[..]);
+        for _ in 0..Self::ENTROPY_LENGTH {
+            entropy.push(0x00);
+        }
+
+        thread_rng().fill(&mut entropy[..Self::ENTROPY_LENGTH]);
 
         Self::generate_with_entropy(options, &entropy)
     }
