@@ -32,9 +32,9 @@ use bitcoin::Network;
 
 use miniscript::ScriptContext;
 
-use bip39::{Mnemonic, Seed};
+use bip39::{Language, Mnemonic, MnemonicType, Seed};
 
-use super::{any_network, DerivableKey, DescriptorKey, KeyError};
+use super::{any_network, DerivableKey, DescriptorKey, GeneratableKey, GeneratedKey, KeyError};
 
 pub type MnemonicWithPassphrase = (Mnemonic, Option<String>);
 
@@ -76,13 +76,32 @@ impl<Ctx: ScriptContext> DerivableKey<Ctx> for Mnemonic {
     }
 }
 
+impl<Ctx: ScriptContext> GeneratableKey<Ctx> for Mnemonic {
+    const ENTROPY_LENGTH: usize = 32;
+
+    type Options = (MnemonicType, Language);
+    type Error = Option<bip39::ErrorKind>;
+
+    fn generate_with_entropy<E: AsRef<[u8]>>(
+        (mnemonic_type, language): Self::Options,
+        entropy: E,
+    ) -> Result<GeneratedKey<Self, Ctx>, Self::Error> {
+        let entropy = &entropy.as_ref()[..(mnemonic_type.entropy_bits() / 8)];
+        let mnemonic = Mnemonic::from_entropy(entropy, language).map_err(|e| e.downcast().ok())?;
+
+        Ok(GeneratedKey::new(mnemonic, any_network()))
+    }
+}
+
 #[cfg(test)]
 mod test {
     use std::str::FromStr;
 
     use bitcoin::util::bip32;
 
-    use bip39::{Language, Mnemonic};
+    use bip39::{Language, Mnemonic, MnemonicType};
+
+    use crate::keys::{any_network, GeneratableKey, GeneratedKey};
 
     #[test]
     fn test_keys_bip39_mnemonic() {
@@ -110,5 +129,29 @@ mod test {
         assert_eq!(desc.to_string(), "wpkh([8f6cb80c/44'/0'/0']xpub6DWYS8bbihFevy29M4cbw4ZR3P5E12jB8R88gBDWCTCNpYiDHhYWNywrCF9VZQYagzPmsZpxXpytzSoxynyeFr4ZyzheVjnpLKuse4fiwZw/0/*)");
         assert_eq!(keys.len(), 1);
         assert_eq!(networks.len(), 3);
+    }
+
+    #[test]
+    fn test_keys_generate_bip39() {
+        let generated_mnemonic: GeneratedKey<_, miniscript::Segwitv0> =
+            Mnemonic::generate_with_entropy(
+                (MnemonicType::Words12, Language::English),
+                crate::keys::test::get_test_entropy(),
+            )
+            .unwrap();
+        assert_eq!(generated_mnemonic.valid_networks, any_network());
+        assert_eq!(
+            generated_mnemonic.to_string(),
+            "primary fetch primary fetch primary fetch primary fetch primary fetch primary fever"
+        );
+
+        let generated_mnemonic: GeneratedKey<_, miniscript::Segwitv0> =
+            Mnemonic::generate_with_entropy(
+                (MnemonicType::Words24, Language::English),
+                crate::keys::test::get_test_entropy(),
+            )
+            .unwrap();
+        assert_eq!(generated_mnemonic.valid_networks, any_network());
+        assert_eq!(generated_mnemonic.to_string(), "primary fetch primary fetch primary fetch primary fetch primary fetch primary fetch primary fetch primary fetch primary fetch primary fetch primary fetch primary foster");
     }
 }

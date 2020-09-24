@@ -27,6 +27,7 @@
 use std::any::TypeId;
 use std::collections::HashSet;
 use std::marker::PhantomData;
+use std::ops::Deref;
 
 use bitcoin::util::bip32;
 use bitcoin::{Network, PrivateKey, PublicKey};
@@ -322,6 +323,94 @@ impl<Ctx: ScriptContext> DerivableKey<Ctx> for bip32::ExtendedPrivKey {
     }
 }
 
+/// Output of a [`GeneratableKey`] key generation
+pub struct GeneratedKey<K, Ctx: ScriptContext> {
+    key: K,
+    valid_networks: ValidNetworks,
+    phantom: PhantomData<Ctx>,
+}
+
+impl<K, Ctx: ScriptContext> GeneratedKey<K, Ctx> {
+    pub fn new(key: K, valid_networks: ValidNetworks) -> Self {
+        GeneratedKey {
+            key,
+            valid_networks,
+            phantom: PhantomData,
+        }
+    }
+}
+
+impl<K, Ctx: ScriptContext> Deref for GeneratedKey<K, Ctx> {
+    type Target = K;
+
+    fn deref(&self) -> &Self::Target {
+        &self.key
+    }
+}
+
+impl<Ctx, K> DerivableKey<Ctx> for GeneratedKey<K, Ctx>
+where
+    Ctx: ScriptContext,
+    K: GeneratableKey<Ctx> + DerivableKey<Ctx>,
+{
+    fn add_metadata(
+        self,
+        source: Option<(bip32::Fingerprint, bip32::DerivationPath)>,
+        derivation_path: bip32::DerivationPath,
+    ) -> Result<DescriptorKey<Ctx>, KeyError> {
+        let descriptor_key = self.key.add_metadata(source, derivation_path)?;
+        Ok(descriptor_key.override_valid_networks(self.valid_networks))
+    }
+}
+
+/// Trait for keys that can be generated
+///
+/// The same rules about [`ScriptContext`] and [`ValidNetworks`] from [`ToDescriptorKey`] apply.
+///
+/// This trait is particularly useful when combined with [`DerivableKey`]: if `Self`
+/// implements it, the returned [`GeneratedKey`] will also implement it.
+pub trait GeneratableKey<Ctx: ScriptContext>: Sized {
+    /// Lenght in bytes of the required entropy
+    const ENTROPY_LENGTH: usize;
+
+    /// Extra options required by the `generate_with_entropy`
+    type Options;
+    /// Returned error in case of failure
+    type Error: std::fmt::Debug;
+
+    /// Generate a key given the extra options and the entropy
+    fn generate_with_entropy<E: AsRef<[u8]>>(
+        options: Self::Options,
+        entropy: E,
+    ) -> Result<GeneratedKey<Self, Ctx>, Self::Error>;
+
+    /// Generate a key given the options with a random entropy
+    fn generate(options: Self::Options) -> Result<GeneratedKey<Self, Ctx>, Self::Error> {
+        use rand::{thread_rng, Rng};
+
+        let mut entropy = Vec::<u8>::with_capacity(Self::ENTROPY_LENGTH);
+        thread_rng().fill(&mut entropy[..]);
+
+        Self::generate_with_entropy(options, &entropy)
+    }
+}
+
+impl<Ctx: ScriptContext> GeneratableKey<Ctx> for bip32::ExtendedPrivKey {
+    const ENTROPY_LENGTH: usize = 32;
+
+    type Options = ();
+    type Error = bip32::Error;
+
+    fn generate_with_entropy<E: AsRef<[u8]>>(
+        _: Self::Options,
+        entropy: E,
+    ) -> Result<GeneratedKey<Self, Ctx>, Self::Error> {
+        // pick a random network here, but say that we support all of them
+        let xprv = bip32::ExtendedPrivKey::new_master(Network::Bitcoin, entropy.as_ref())?;
+        Ok(GeneratedKey::new(xprv, any_network()))
+    }
+}
+
 impl<Ctx: ScriptContext, T: DerivableKey<Ctx>> ToDescriptorKey<Ctx> for (T, bip32::DerivationPath) {
     fn to_descriptor_key(self) -> Result<DescriptorKey<Ctx>, KeyError> {
         self.0.add_metadata(None, self.1)
@@ -467,3 +556,23 @@ impl std::fmt::Display for KeyError {
 }
 
 impl std::error::Error for KeyError {}
+
+#[cfg(test)]
+pub mod test {
+    use bitcoin::util::bip32;
+
+    use super::*;
+
+    pub fn get_test_entropy() -> Vec<u8> {
+        [0xAA; 32].to_vec()
+    }
+
+    #[test]
+    fn test_keys_generate_xprv() {
+        let generated_xprv: GeneratedKey<_, miniscript::Segwitv0> =
+            bip32::ExtendedPrivKey::generate_with_entropy((), get_test_entropy()).unwrap();
+
+        assert_eq!(generated_xprv.valid_networks, any_network());
+        assert_eq!(generated_xprv.to_string(), "xprv9s21ZrQH143K4Xr1cJyqTvuL2FWR8eicgY9boWqMBv8MDVUZ65AXHnzBrK1nyomu6wdcabRgmGTaAKawvhAno1V5FowGpTLVx3jxzE5uk3Q");
+    }
+}
