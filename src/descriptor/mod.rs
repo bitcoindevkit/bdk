@@ -357,17 +357,7 @@ impl DescriptorMeta for Descriptor<DescriptorPublicKey> {
                 let root_fingerprint = xpub.root_fingerprint();
                 derive_path = index
                     .get_key_value(&root_fingerprint)
-                    .and_then(|(fingerprint, path)| xpub.matches(*fingerprint, path))
-                    .map(|prefix_path| prefix_path.into_iter().cloned().collect::<Vec<_>>())
-                    .map(|prefix| {
-                        index
-                            .get(&xpub.root_fingerprint())
-                            .unwrap()
-                            .into_iter()
-                            .skip(prefix.len())
-                            .cloned()
-                            .collect()
-                    });
+                    .and_then(|(fingerprint, path)| xpub.matches(*fingerprint, path));
             }
 
             Ok(DummyKey::default())
