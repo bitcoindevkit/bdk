@@ -77,14 +77,14 @@ impl<Ctx: ScriptContext> DerivableKey<Ctx> for Mnemonic {
 }
 
 impl<Ctx: ScriptContext> GeneratableKey<Ctx> for Mnemonic {
-    const ENTROPY_LENGTH: usize = 32;
+    type Entropy = [u8; 32];
 
     type Options = (MnemonicType, Language);
     type Error = Option<bip39::ErrorKind>;
 
-    fn generate_with_entropy<E: AsRef<[u8]>>(
+    fn generate_with_entropy(
         (mnemonic_type, language): Self::Options,
-        entropy: E,
+        entropy: Self::Entropy,
     ) -> Result<GeneratedKey<Self, Ctx>, Self::Error> {
         let entropy = &entropy.as_ref()[..(mnemonic_type.entropy_bits() / 8)];
         let mnemonic = Mnemonic::from_entropy(entropy, language).map_err(|e| e.downcast().ok())?;

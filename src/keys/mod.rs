@@ -370,8 +370,8 @@ where
 /// This trait is particularly useful when combined with [`DerivableKey`]: if `Self`
 /// implements it, the returned [`GeneratedKey`] will also implement it.
 pub trait GeneratableKey<Ctx: ScriptContext>: Sized {
-    /// Lenght in bytes of the required entropy
-    const ENTROPY_LENGTH: usize;
+    /// Type specifying the amount of entropy required e.g. [u8;32]
+    type Entropy: AsMut<[u8]> + Default;
 
     /// Extra options required by the `generate_with_entropy`
     type Options;
@@ -379,37 +379,32 @@ pub trait GeneratableKey<Ctx: ScriptContext>: Sized {
     type Error: std::fmt::Debug;
 
     /// Generate a key given the extra options and the entropy
-    fn generate_with_entropy<E: AsRef<[u8]>>(
+    fn generate_with_entropy(
         options: Self::Options,
-        entropy: E,
+        entropy: Self::Entropy,
     ) -> Result<GeneratedKey<Self, Ctx>, Self::Error>;
 
     /// Generate a key given the options with a random entropy
     fn generate(options: Self::Options) -> Result<GeneratedKey<Self, Ctx>, Self::Error> {
         use rand::{thread_rng, Rng};
 
-        let mut entropy = Vec::<u8>::with_capacity(Self::ENTROPY_LENGTH);
-        for _ in 0..Self::ENTROPY_LENGTH {
-            entropy.push(0x00);
-        }
-
-        thread_rng().fill(&mut entropy[..Self::ENTROPY_LENGTH]);
-
-        Self::generate_with_entropy(options, &entropy)
+        let mut entropy = Self::Entropy::default();
+        thread_rng().fill(entropy.as_mut());
+        Self::generate_with_entropy(options, entropy)
     }
 }
 
 impl<Ctx: ScriptContext> GeneratableKey<Ctx> for bip32::ExtendedPrivKey {
-    const ENTROPY_LENGTH: usize = 32;
+    type Entropy = [u8; 32];
 
     type Options = ();
     type Error = bip32::Error;
 
-    fn generate_with_entropy<E: AsRef<[u8]>>(
+    fn generate_with_entropy(
         _: Self::Options,
-        entropy: E,
+        entropy: Self::Entropy,
     ) -> Result<GeneratedKey<Self, Ctx>, Self::Error> {
-        // pick a random network here, but say that we support all of them
+        // pick a arbitrary network here, but say that we support all of them
         let xprv = bip32::ExtendedPrivKey::new_master(Network::Bitcoin, entropy.as_ref())?;
         Ok(GeneratedKey::new(xprv, any_network()))
     }
@@ -567,14 +562,12 @@ pub mod test {
 
     use super::*;
 
-    pub fn get_test_entropy() -> Vec<u8> {
-        [0xAA; 32].to_vec()
-    }
+    const test_entropy: [u8; 32] = [0xAA; 32];
 
     #[test]
     fn test_keys_generate_xprv() {
         let generated_xprv: GeneratedKey<_, miniscript::Segwitv0> =
-            bip32::ExtendedPrivKey::generate_with_entropy((), get_test_entropy()).unwrap();
+            bip32::ExtendedPrivKey::generate_with_entropy((), test_entropy).unwrap();
 
         assert_eq!(generated_xprv.valid_networks, any_network());
         assert_eq!(generated_xprv.to_string(), "xprv9s21ZrQH143K4Xr1cJyqTvuL2FWR8eicgY9boWqMBv8MDVUZ65AXHnzBrK1nyomu6wdcabRgmGTaAKawvhAno1V5FowGpTLVx3jxzE5uk3Q");
