@@ -28,7 +28,7 @@ tiny-bip39 = { version = "^0.7", optional = true }
 
 [patch.crates-io]
 bitcoin = { git = "https://github.com/rust-bitcoin/rust-bitcoin/", rev = "478e091" }
-miniscript = { git = "https://github.com/MagicalBitcoin/rust-miniscript", branch = "descriptor-public-key" }
+miniscript = { git = "https://github.com/MagicalBitcoin/rust-miniscript", rev = "d0322ac" }
 
 # Platform-specific dependencies
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

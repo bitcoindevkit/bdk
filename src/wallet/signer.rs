@@ -132,6 +132,8 @@ impl From<Fingerprint> for SignerId<DescriptorPublicKey> {
 pub enum SignerError {
     /// The private key is missing for the required public key
     MissingKey,
+    /// The private key in use has the right fingerprint but derives differently than expected
+    InvalidKey,
     /// The user canceled the operation
     UserCanceled,
     /// The sighash is missing in the PSBT input
@@ -199,20 +201,30 @@ impl Signer for DescriptorXKey<ExtendedPrivKey> {
             return Err(SignerError::InputIndexOutOfRange);
         }
 
-        let deriv_path = match psbt.inputs[input_index]
+        let (public_key, deriv_path) = match psbt.inputs[input_index]
             .hd_keypaths
             .iter()
-            .filter_map(|(_, &(fingerprint, ref path))| self.matches(fingerprint.clone(), &path))
+            .filter_map(|(pk, &(fingerprint, ref path))| {
+                if self.matches(fingerprint.clone(), &path).is_some() {
+                    Some((pk, path))
+                } else {
+                    None
+                }
+            })
             .next()
         {
-            Some(deriv_path) => deriv_path,
-            None => return Ok(()), // TODO: should report an error maybe?
+            Some((pk, full_path)) => (pk, full_path.clone()),
+            None => return Ok(()),
         };
 
         let ctx = Secp256k1::signing_only();
 
         let derived_key = self.xkey.derive_priv(&ctx, &deriv_path).unwrap();
-        derived_key.private_key.sign(psbt, Some(input_index))
+        if &derived_key.private_key.public_key(&ctx) != public_key {
+            Err(SignerError::InvalidKey)
+        } else {
+            derived_key.private_key.sign(psbt, Some(input_index))
+        }
     }
 
     fn sign_whole_tx(&self) -> bool {

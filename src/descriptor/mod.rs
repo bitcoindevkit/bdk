@@ -358,13 +358,12 @@ impl DescriptorMeta for Descriptor<DescriptorPublicKey> {
                 derive_path = index
                     .get_key_value(&root_fingerprint)
                     .and_then(|(fingerprint, path)| xpub.matches(*fingerprint, path))
-                    .map(|prefix_path| prefix_path.into_iter().cloned().collect::<Vec<_>>())
                     .map(|prefix| {
                         index
                             .get(&xpub.root_fingerprint())
                             .unwrap()
                             .into_iter()
-                            .skip(prefix.len())
+                            .skip(prefix.into_iter().count())
                             .cloned()
                             .collect()
                     });
