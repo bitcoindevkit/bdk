@@ -402,3 +402,10 @@ macro_rules! fragment {
     });
 
 }
+
+// test the descriptor!() macro
+// - at least one of each "type" of operator; ie. one modifier, one leaf_opcode, one leaf_opcode_value, etc.
+// - mixing up key types that implement ToDescriptorKey in multi() or thresh()
+// - verify the valid_networks returned is correctly computed based on the keys present in the descriptor
+// - verify the key_maps are correctly merged together
+// - verify the ScriptContext is correctly validated (i.e. passing a type that only impl ToDescriptorKey<Segwitv0> to a pkh() descriptor should throw a compilation error

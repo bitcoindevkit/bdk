@@ -422,3 +422,5 @@ macro_rules! expand_make_bipxx {
 
 expand_make_bipxx!(legacy, Legacy);
 expand_make_bipxx!(segwit_v0, Segwitv0);
+
+// test existing descriptor templates, make sure they are expanded to the right descriptors
