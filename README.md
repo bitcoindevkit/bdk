@@ -9,7 +9,7 @@
 
   <p>
     <!-- <a href="https://crates.io/crates/magical"><img alt="Crate Info" src="https://img.shields.io/crates/v/magical.svg"/></a> -->
-    <a href="https://travis-ci.org/bitcoindevkit/bdk"><img alt="Traivs Status" src="https://travis-ci.org/bitcoindevkit/bdk.svg?branch=master"></a>
+    <a href="https://github.com/bitcoindevkit/bdk/actions?query=workflow%3A%22Continuous+integration%22"><img alt="Continuous integration Status" src="https://github.com/bitcoindevkit/bdk/workflows/Continuous%20integration/badge.svg"></a>
     <a href="https://bitcoindevkit.org/docs-rs/bdk"><img alt="API Docs" src="https://img.shields.io/badge/docs.rs-bdk-green"/></a>
     <a href="https://blog.rust-lang.org/2020/07/16/Rust-1.45.0.html"><img alt="Rustc Version 1.45+" src="https://img.shields.io/badge/rustc-1.45%2B-lightgrey.svg"/></a>
   </p>
