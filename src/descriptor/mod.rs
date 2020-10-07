@@ -78,8 +78,8 @@ impl ToWalletDescriptor for &str {
         self,
         network: Network,
     ) -> Result<(ExtendedDescriptor, KeyMap), KeyError> {
-        let descriptor = if self.contains("#") {
-            let parts: Vec<&str> = self.splitn(2, "#").collect();
+        let descriptor = if self.contains('#') {
+            let parts: Vec<&str> = self.splitn(2, '#').collect();
             if !get_checksum(parts[0])
                 .ok()
                 .map(|computed| computed == parts[1])
@@ -171,7 +171,7 @@ impl ToWalletDescriptor for (ExtendedDescriptor, KeyMap, ValidNetworks) {
 
                             DescriptorPublicKey::XPub(xpub)
                         }
-                        other @ _ => other.clone(),
+                        other => other.clone(),
                     };
 
                     Ok(pk)
@@ -201,19 +201,19 @@ pub(crate) trait XKeyUtils {
 
 impl<K: InnerXKey> XKeyUtils for DescriptorXKey<K> {
     fn full_path(&self, append: &[ChildNumber]) -> DerivationPath {
-        let full_path = match &self.source {
-            &Some((_, ref path)) => path
+        let full_path = match self.source {
+            Some((_, ref path)) => path
                 .into_iter()
                 .chain(self.derivation_path.into_iter())
                 .cloned()
                 .collect(),
-            &None => self.derivation_path.clone(),
+            None => self.derivation_path.clone(),
         };
 
         if self.is_wildcard {
             full_path
                 .into_iter()
-                .chain(append.into_iter())
+                .chain(append.iter())
                 .cloned()
                 .collect()
         } else {
@@ -222,9 +222,9 @@ impl<K: InnerXKey> XKeyUtils for DescriptorXKey<K> {
     }
 
     fn root_fingerprint(&self) -> Fingerprint {
-        match &self.source {
-            &Some((fingerprint, _)) => fingerprint.clone(),
-            &None => self.xkey.xkey_fingerprint(),
+        match self.source {
+            Some((fingerprint, _)) => fingerprint,
+            None => self.xkey.xkey_fingerprint(),
         }
     }
 }

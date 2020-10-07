@@ -77,7 +77,7 @@ impl MapKey<'_> {
 
     fn serialize_content(&self) -> Vec<u8> {
         match self {
-            MapKey::Path((_, Some(child))) => u32::from(*child).to_be_bytes().to_vec(),
+            MapKey::Path((_, Some(child))) => child.to_be_bytes().to_vec(),
             MapKey::Script(Some(s)) => serialize(*s),
             MapKey::UTXO(Some(s)) => serialize(*s),
             MapKey::RawTx(Some(s)) => serialize(*s),
@@ -94,8 +94,8 @@ impl MapKey<'_> {
     }
 }
 
-fn after(key: &Vec<u8>) -> Vec<u8> {
-    let mut key = key.clone();
+fn after(key: &[u8]) -> Vec<u8> {
+    let mut key = key.to_owned();
     let mut idx = key.len();
     while idx > 0 {
         if key[idx - 1] == 0xFF {
@@ -233,7 +233,7 @@ impl BatchOperations for MemoryDatabase {
             Some(b) => {
                 let (txout, is_internal) = b.downcast_ref().cloned().unwrap();
                 Ok(Some(UTXO {
-                    outpoint: outpoint.clone(),
+                    outpoint: *outpoint,
                     txout,
                     is_internal,
                 }))
@@ -387,7 +387,7 @@ impl Database for MemoryDatabase {
         Ok(self.map.get(&key).map(|b| {
             let (txout, is_internal) = b.downcast_ref().cloned().unwrap();
             UTXO {
-                outpoint: outpoint.clone(),
+                outpoint: *outpoint,
                 txout,
                 is_internal,
             }
@@ -424,9 +424,9 @@ impl Database for MemoryDatabase {
         let key = MapKey::LastIndex(script_type).as_map_key();
         let value = self
             .map
-            .entry(key.clone())
+            .entry(key)
             .and_modify(|x| *x.downcast_mut::<u32>().unwrap() += 1)
-            .or_insert(Box::<u32>::new(0))
+            .or_insert_with(|| Box::<u32>::new(0))
             .downcast_mut()
             .unwrap();
 
@@ -445,8 +445,8 @@ impl BatchDatabase for MemoryDatabase {
         for key in batch.deleted_keys {
             self.map.remove(&key);
         }
-
-        Ok(self.map.append(&mut batch.map))
+        self.map.append(&mut batch.map);
+        Ok(())
     }
 }
 

@@ -562,12 +562,12 @@ pub mod test {
 
     use super::*;
 
-    const test_entropy: [u8; 32] = [0xAA; 32];
+    const TEST_ENTROPY: [u8; 32] = [0xAA; 32];
 
     #[test]
     fn test_keys_generate_xprv() {
         let generated_xprv: GeneratedKey<_, miniscript::Segwitv0> =
-            bip32::ExtendedPrivKey::generate_with_entropy((), test_entropy).unwrap();
+            bip32::ExtendedPrivKey::generate_with_entropy((), TEST_ENTROPY).unwrap();
 
         assert_eq!(generated_xprv.valid_networks, any_network());
         assert_eq!(generated_xprv.to_string(), "xprv9s21ZrQH143K4Xr1cJyqTvuL2FWR8eicgY9boWqMBv8MDVUZ65AXHnzBrK1nyomu6wdcabRgmGTaAKawvhAno1V5FowGpTLVx3jxzE5uk3Q");

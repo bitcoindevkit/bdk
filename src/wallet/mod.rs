@@ -605,9 +605,7 @@ where
                         available_utxos,
                         use_all_utxos,
                         new_feerate,
-                        fee_difference
-                            .checked_sub(removed_change_output.value)
-                            .unwrap_or(0),
+                        fee_difference.saturating_sub(removed_change_output.value),
                         input_witness_weight,
                         0.0,
                     )?;
@@ -620,7 +618,7 @@ where
                     // copy the n_sequence from the inputs that were already in the transaction
                     txin.iter_mut()
                         .for_each(|i| i.sequence = tx.input[0].sequence);
-                    tx.input.extend_from_slice(&mut txin);
+                    tx.input.extend_from_slice(&txin);
 
                     details.sent += selected_amount;
                     selected_amount
@@ -666,7 +664,7 @@ where
             .iter()
             .map(|txin| {
                 Ok((
-                    txin.previous_output.clone(),
+                    txin.previous_output,
                     self.database
                         .borrow()
                         .get_previous_output(&txin.previous_output)?,
@@ -765,7 +763,7 @@ where
                 .database
                 .borrow()
                 .get_tx(&input.previous_output.txid, false)?
-                .and_then(|tx| Some(tx.height.unwrap_or(std::u32::MAX)));
+                .map(|tx| tx.height.unwrap_or(std::u32::MAX));
             let current_height = assume_height.or(self.current_height);
 
             debug!(
@@ -833,15 +831,13 @@ where
         &self,
         script_type: ScriptType,
     ) -> (&ExtendedDescriptor, ScriptType) {
-        let desc = match script_type {
+        match script_type {
             ScriptType::Internal if self.change_descriptor.is_some() => (
                 self.change_descriptor.as_ref().unwrap(),
                 ScriptType::Internal,
             ),
             _ => (&self.descriptor, ScriptType::External),
-        };
-
-        desc
+        }
     }
 
     fn get_descriptor_for_txout(&self, txout: &TxOut) -> Result<Option<ExtendedDescriptor>, Error> {
@@ -941,7 +937,7 @@ where
     ) -> Result<(Vec<UTXO>, bool), Error> {
         let unspendable_set = match unspendable {
             None => HashSet::new(),
-            Some(vec) => vec.into_iter().collect(),
+            Some(vec) => vec.iter().collect(),
         };
 
         match utxo {
@@ -1131,10 +1127,7 @@ where
             if self
                 .database
                 .borrow()
-                .get_script_pubkey_from_path(
-                    ScriptType::Internal,
-                    max_address.checked_sub(1).unwrap_or(0),
-                )?
+                .get_script_pubkey_from_path(ScriptType::Internal, max_address.saturating_sub(1))?
                 .is_none()
             {
                 run_setup = true;

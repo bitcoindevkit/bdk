@@ -39,8 +39,8 @@ pub enum ScriptType {
 impl ScriptType {
     pub fn as_byte(&self) -> u8 {
         match self {
-            ScriptType::External => 'e' as u8,
-            ScriptType::Internal => 'i' as u8,
+            ScriptType::External => b'e',
+            ScriptType::Internal => b'i',
         }
     }
 

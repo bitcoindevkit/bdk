@@ -205,7 +205,7 @@ impl Signer for DescriptorXKey<ExtendedPrivKey> {
             .hd_keypaths
             .iter()
             .filter_map(|(pk, &(fingerprint, ref path))| {
-                if self.matches(fingerprint.clone(), &path).is_some() {
+                if self.matches(fingerprint, &path).is_some() {
                     Some((pk, path))
                 } else {
                     None
@@ -284,7 +284,7 @@ impl Signer for PrivateKey {
     }
 
     fn descriptor_secret_key(&self) -> Option<DescriptorSecretKey> {
-        Some(DescriptorSecretKey::PrivKey(self.clone()))
+        Some(DescriptorSecretKey::PrivKey(*self))
     }
 }
 
@@ -407,7 +407,7 @@ impl<Pk: MiniscriptKey> SignersContainer<Pk> {
                 Included(&(id, SignerOrdering(usize::MAX)).into()),
             ))
             .map(|(_, v)| v)
-            .nth(0)
+            .next()
     }
 }
 
@@ -431,9 +431,9 @@ impl ComputeSighash for Legacy {
         let tx_input = &psbt.global.unsigned_tx.input[input_index];
 
         let sighash = psbt_input.sighash_type.ok_or(SignerError::MissingSighash)?;
-        let script = match &psbt_input.redeem_script {
-            &Some(ref redeem_script) => redeem_script.clone(),
-            &None => {
+        let script = match psbt_input.redeem_script {
+            Some(ref redeem_script) => redeem_script.clone(),
+            None => {
                 let non_witness_utxo = psbt_input
                     .non_witness_utxo
                     .as_ref()
@@ -485,9 +485,9 @@ impl ComputeSighash for Segwitv0 {
             .ok_or(SignerError::MissingNonWitnessUtxo)?;
         let value = witness_utxo.value;
 
-        let script = match &psbt_input.witness_script {
-            &Some(ref witness_script) => witness_script.clone(),
-            &None => {
+        let script = match psbt_input.witness_script {
+            Some(ref witness_script) => witness_script.clone(),
+            None => {
                 if witness_utxo.script_pubkey.is_v0_p2wpkh() {
                     p2wpkh_script_code(&witness_utxo.script_pubkey)
                 } else if psbt_input

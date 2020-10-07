@@ -221,7 +221,11 @@ pub fn log_progress() -> LogProgress {
 
 impl Progress for LogProgress {
     fn update(&self, progress: f32, message: Option<String>) -> Result<(), Error> {
-        log::info!("Sync {:.3}%: `{}`", progress, message.unwrap_or("".into()));
+        log::info!(
+            "Sync {:.3}%: `{}`",
+            progress,
+            message.unwrap_or_else(|| "".into())
+        );
 
         Ok(())
     }

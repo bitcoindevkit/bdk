@@ -314,7 +314,7 @@ impl Database for Tree {
                 let is_internal = serde_json::from_value(val["i"].take())?;
 
                 Ok(UTXO {
-                    outpoint: outpoint.clone(),
+                    outpoint: *outpoint,
                     txout,
                     is_internal,
                 })

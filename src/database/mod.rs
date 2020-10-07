@@ -191,7 +191,7 @@ pub(crate) trait DatabaseUtils: Database {
         self.get_raw_tx(&outpoint.txid)?
             .map(|previous_tx| {
                 if outpoint.vout as usize >= previous_tx.output.len() {
-                    Err(Error::InvalidOutpoint(outpoint.clone()))
+                    Err(Error::InvalidOutpoint(*outpoint))
                 } else {
                     Ok(previous_tx.output[outpoint.vout as usize].clone())
                 }

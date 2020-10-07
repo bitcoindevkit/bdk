@@ -24,10 +24,11 @@ jobs:
         include:
           - rust: stable
             features: default
-            clippy: false
+            clippy: true
             test: true
           - rust: 1.45.0
             features: default
+            clippy: true
             test: true
           - rust: nightly
             features: test-md-docs
@@ -55,6 +56,7 @@ jobs:
           profile: minimal
           toolchain: ${{ matrix.rust }}
           override: true
+          components: clippy
       - name: build
         uses: actions-rs/cargo@v1
         with:

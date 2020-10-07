@@ -122,7 +122,7 @@ impl From<crate::keys::KeyError> for Error {
             crate::keys::KeyError::Miniscript(inner) => Error::Miniscript(inner),
             crate::keys::KeyError::BIP32(inner) => Error::BIP32(inner),
             crate::keys::KeyError::InvalidChecksum => Error::ChecksumMismatch,
-            e @ _ => Error::Key(e),
+            e => Error::Key(e),
         }
     }
 }

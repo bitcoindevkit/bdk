@@ -43,7 +43,7 @@
 //! # Ok::<(), bdk::Error>(())
 //! ```
 
-use std::cmp::max;
+use std::cmp::{max, Ordering};
 use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::fmt;
 use std::sync::Arc;
@@ -155,7 +155,7 @@ impl SatisfiableItem {
     }
 }
 
-fn combinations(vec: &Vec<usize>, size: usize) -> Vec<Vec<usize>> {
+fn combinations(vec: &[usize], size: usize) -> Vec<Vec<usize>> {
     assert!(vec.len() >= size);
 
     let mut answer = Vec::new();
@@ -344,8 +344,8 @@ impl Satisfaction {
                             .map(|i| {
                                 conditions
                                     .get(i)
-                                    .and_then(|set| Some(set.clone().into_iter().collect()))
-                                    .unwrap_or(vec![])
+                                    .map(|set| set.clone().into_iter().collect())
+                                    .unwrap_or_default()
                             })
                             .collect())
                         .into_iter()
@@ -525,7 +525,7 @@ impl Policy {
     }
 
     fn make_multisig(
-        keys: &Vec<DescriptorPublicKey>,
+        keys: &[DescriptorPublicKey],
         signers: Arc<SignersContainer<DescriptorPublicKey>>,
         threshold: usize,
     ) -> Result<Option<Policy>, PolicyError> {
@@ -542,7 +542,7 @@ impl Policy {
             conditions: Default::default(),
         };
         for (index, key) in keys.iter().enumerate() {
-            if let Some(_) = signers.find(signer_id(key)) {
+            if signers.find(signer_id(key)).is_some() {
                 contribution.add(
                     &Satisfaction::Complete {
                         condition: Default::default(),
@@ -582,7 +582,7 @@ impl Policy {
         // if items.len() == threshold, selected can be omitted and we take all of them by default
         let default = match &self.item {
             SatisfiableItem::Thresh { items, threshold } if items.len() == *threshold => {
-                (0..*threshold).into_iter().collect()
+                (0..*threshold).collect()
             }
             _ => vec![],
         };
@@ -608,10 +608,14 @@ impl Policy {
                 // if we have something, make sure we have enough items. note that the user can set
                 // an empty value for this step in case of n-of-n, because `selected` is set to all
                 // the elements above
-                if selected.len() < *threshold {
-                    return Err(PolicyError::NotEnoughItemsSelected(self.id.clone()));
-                } else if selected.len() > *threshold {
-                    return Err(PolicyError::TooManyItemsSelected(self.id.clone()));
+                match selected.len().cmp(threshold) {
+                    Ordering::Less => {
+                        return Err(PolicyError::NotEnoughItemsSelected(self.id.clone()))
+                    }
+                    Ordering::Greater => {
+                        return Err(PolicyError::TooManyItemsSelected(self.id.clone()))
+                    }
+                    Ordering::Equal => (),
                 }
 
                 // check the selected items, see if there are conflicting requirements
@@ -676,7 +680,7 @@ fn signature_key(
 ) -> Policy {
     let mut policy: Policy = SatisfiableItem::Signature(PKOrF::from_key_hash(*key_hash)).into();
 
-    if let Some(_) = signers.find(SignerId::PkHash(*key_hash)) {
+    if signers.find(SignerId::PkHash(*key_hash)).is_some() {
         policy.contribution = Satisfaction::Complete {
             condition: Default::default(),
         }
