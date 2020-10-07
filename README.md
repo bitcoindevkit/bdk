@@ -12,6 +12,7 @@
     <a href="https://github.com/bitcoindevkit/bdk/actions?query=workflow%3A%22Continuous+integration%22"><img alt="Continuous integration Status" src="https://github.com/bitcoindevkit/bdk/workflows/Continuous%20integration/badge.svg"></a>
     <a href="https://bitcoindevkit.org/docs-rs/bdk"><img alt="API Docs" src="https://img.shields.io/badge/docs.rs-bdk-green"/></a>
     <a href="https://blog.rust-lang.org/2020/07/16/Rust-1.45.0.html"><img alt="Rustc Version 1.45+" src="https://img.shields.io/badge/rustc-1.45%2B-lightgrey.svg"/></a>
+    <a href="https://discord.gg/d7NkDKm"><img alt="Chat on Discord" src="https://img.shields.io/discord/753336465005608961?logo=discord"></a>
   </p>
 
   <h4>
