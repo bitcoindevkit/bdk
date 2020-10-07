@@ -4,40 +4,14 @@ name: Continuous integration
 
 jobs:
 
-  test:
-    name: Test Default
+  build-test:
+    name: Build and Test
     runs-on: ubuntu-latest
     strategy:
       matrix:
         rust:
           - stable
           - 1.45.0 # MSRV
-    steps:
-      - uses: actions/checkout@v2
-      - uses: actions/cache@v2
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml','**/Cargo.lock') }}
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: ${{ matrix.rust }}
-          override: true
-      - uses: actions-rs/cargo@v1
-        with:
-          command: check
-      - uses: actions-rs/cargo@v1
-        with:
-          command: test
-
-  check-features:
-    name: Check Features
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
         features:
           - minimal
           - all-keys
@@ -46,46 +20,58 @@ jobs:
           - electrum
           - compact_filters
           - cli-utils,esplora
+          - compiler
+        include:
+          - rust: stable
+            features: default
+            clippy: false
+            test: true
+          - rust: 1.45.0
+            features: default
+            test: true
+          - rust: nightly
+            features: test-md-docs
+            test: true
+          - rust: stable
+            features: compiler
+            test: true
+          - rust: 1.45.0
+            features: compiler
+            test: true
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions/cache@v2
+      - name: checkout
+        uses: actions/checkout@v2
+      - name: cache
+        uses: actions/cache@v2
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml','**/Cargo.lock') }}
-      - uses: actions-rs/toolchain@v1
+      - name: toolchain
+        uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: 1.45.0 # MSRV
+          toolchain: ${{ matrix.rust }}
           override: true
-      - uses: actions-rs/cargo@v1
+      - name: build
+        uses: actions-rs/cargo@v1
         with:
-          command: check
+          command: build
           args: --features ${{ matrix.features }} --no-default-features
-
-  test-compiler:
-    name: Test Compiler
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v2
-      - uses: actions/cache@v2
+      - name: clippy
+        if: ${{ matrix.clippy == true }}
+        uses: actions-rs/cargo@v1
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml','**/Cargo.lock') }}
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: 1.45.0 # MSRV
-          override: true
-      - uses: actions-rs/cargo@v1
+          command: clippy
+          args: -- -D warnings
+      - name: test
+        if: ${{ matrix.test == true }}
+        uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --features compiler --no-default-features
+          args: --features ${{ matrix.features }} --no-default-features
 
   test-electrum:
     name: Test Electrum
@@ -94,47 +80,30 @@ jobs:
       MAGICAL_RPC_COOKIEFILE: /home/runner/.bitcoin/regtest/.cookie
       MAGICAL_ELECTRUM_URL: tcp://127.0.0.1:60401
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions/cache@v2
+      - name: checkout
+        uses: actions/checkout@v2
+      - name: cache
+        uses: actions/cache@v2
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml','**/Cargo.lock') }}
-      - uses: actions-rs/toolchain@v1
+      - name: toolchain
+        uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: 1.45.0 # MSRV
+          toolchain: stable
           override: true
-      - run: ./ci/start-core.sh || exit 1
-      - uses: actions-rs/cargo@v1
+      - name: start core
+        run: ./ci/start-core.sh || exit 1
+      - name: test
+        uses: actions-rs/cargo@v1
         with:
           command: test
           args: --features test-electrum --no-default-features
 
-  test-md-docs:
-    name: Test MD Docs
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v2
-      - uses: actions/cache@v2
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml','**/Cargo.lock') }}
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: nightly
-          override: true
-      - uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --features test-md-docs --no-default-features
-        
   check-wasm:
     name: Check WASM
     runs-on: ubuntu-16.04
@@ -142,8 +111,10 @@ jobs:
       CC: clang-10
       CFLAGS: -I/usr/include
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions/cache@v2
+      - name: checkout
+        uses: actions/checkout@v2
+      - name: cache
+        uses: actions/cache@v2
         with:
           path: |
             ~/.cargo/registry
@@ -155,46 +126,34 @@ jobs:
       - run: sudo apt-add-repository "deb http://apt.llvm.org/xenial/ llvm-toolchain-xenial-10 main" || exit 1
       - run: sudo apt-get update || exit 1
       - run: sudo apt-get install -y clang-10 libc6-dev-i386 || exit 1
-      - uses: actions-rs/toolchain@v1
+      - name: toolchain
+        uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: 1.45.0 # MSRV
+          toolchain: stable
           target: wasm32-unknown-unknown
           override: true
-      - uses: actions-rs/cargo@v1
+      - name: check
+        uses: actions-rs/cargo@v1
         with:
           command: check
           args: --target wasm32-unknown-unknown --features cli-utils,esplora --no-default-features
 
   fmt:
-    name: Rustfmt
+    name: Rust fmt
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
+      - name: checkout
+        uses: actions/checkout@v2
+      - name: toolchain
+        uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: 1.45.0 # MSRV
+          toolchain: stable
           override: true
           components: rustfmt
-      - uses: actions-rs/cargo@v1
+      - name: fmt check
+        uses: actions-rs/cargo@v1
         with:
           command: fmt
           args: --all -- --check
-
-# TODO enable this after existing clippy warnings are fixed
-#  clippy:
-#    name: Clippy
-#    runs-on: ubuntu-latest
-#    steps:
-#      - uses: actions/checkout@v2
-#      - uses: actions-rs/toolchain@v1
-#        with:
-#          profile: minimal
-#          toolchain: 1.45.0 # MSRV
-#          override: true
-#          components: clippy
-#      - uses: actions-rs/cargo@v1
-#        with:
-#          command: clippy
-#          args: -- -D warnings
