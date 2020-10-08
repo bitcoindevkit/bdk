@@ -140,13 +140,11 @@ pub enum SatisfiableItem {
 
 impl SatisfiableItem {
     pub fn is_leaf(&self) -> bool {
-        match self {
-            SatisfiableItem::Thresh {
-                items: _,
-                threshold: _,
-            } => false,
-            _ => true,
-        }
+        !matches!(self,
+        SatisfiableItem::Thresh {
+            items: _,
+            threshold: _,
+        })
     }
 
     pub fn id(&self) -> String {

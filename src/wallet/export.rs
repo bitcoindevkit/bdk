@@ -133,7 +133,7 @@ impl WalletExport {
                     .into_iter()
                     .map(|tx| tx.height.unwrap_or(0))
                     .collect::<Vec<_>>();
-                heights.sort();
+                heights.sort_unstable();
 
                 *heights.last().unwrap_or(&0)
             }
