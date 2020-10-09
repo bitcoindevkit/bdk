@@ -119,13 +119,13 @@ macro_rules! testutils {
         use miniscript::descriptor::{Descriptor, DescriptorPublicKey};
 
         let parsed = Descriptor::<DescriptorPublicKey>::parse_secret(&$descriptors.0).expect("Failed to parse descriptor in `testutils!(@external)`").0;
-        parsed.derive(&[bitcoin::util::bip32::ChildNumber::from_normal_idx($child).unwrap()]).address(bitcoin::Network::Regtest).expect("No address form")
+        parsed.derive(bitcoin::util::bip32::ChildNumber::from_normal_idx($child).unwrap()).address(bitcoin::Network::Regtest).expect("No address form")
     });
     ( @internal $descriptors:expr, $child:expr ) => ({
         use miniscript::descriptor::{Descriptor, DescriptorPublicKey};
 
         let parsed = Descriptor::<DescriptorPublicKey>::parse_secret(&$descriptors.1.expect("Missing internal descriptor")).expect("Failed to parse descriptor in `testutils!(@internal)`").0;
-        parsed.derive(&[bitcoin::util::bip32::ChildNumber::from_normal_idx($child).unwrap()]).address(bitcoin::Network::Regtest).expect("No address form")
+        parsed.derive(bitcoin::util::bip32::ChildNumber::from_normal_idx($child).unwrap()).address(bitcoin::Network::Regtest).expect("No address form")
     });
     ( @e $descriptors:expr, $child:expr ) => ({ testutils!(@external $descriptors, $child) });
     ( @i $descriptors:expr, $child:expr ) => ({ testutils!(@internal $descriptors, $child) });
@@ -386,7 +386,7 @@ impl TestClient {
         trace!("getblocktemplate: {:#?}", block_template);
 
         let header = BlockHeader {
-            version: block_template["version"].as_u64().unwrap() as u32,
+            version: block_template["version"].as_i64().unwrap() as i32,
             prev_blockhash: BlockHash::from_hex(
                 block_template["previousblockhash"].as_str().unwrap(),
             )

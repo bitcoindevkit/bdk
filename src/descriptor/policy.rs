@@ -56,7 +56,7 @@ use bitcoin::util::bip32::Fingerprint;
 use bitcoin::PublicKey;
 
 use miniscript::descriptor::DescriptorPublicKey;
-use miniscript::{Descriptor, Miniscript, MiniscriptKey, ScriptContext, Terminal};
+use miniscript::{Descriptor, Miniscript, MiniscriptKey, ScriptContext, Terminal, ToPublicKey};
 
 #[allow(unused_imports)]
 use log::{debug, error, info, trace};
@@ -82,8 +82,8 @@ pub struct PKOrF {
 impl PKOrF {
     fn from_key(k: &DescriptorPublicKey) -> Self {
         match k {
-            DescriptorPublicKey::PubKey(pubkey) => PKOrF {
-                pubkey: Some(*pubkey),
+            DescriptorPublicKey::SinglePub(pubkey) => PKOrF {
+                pubkey: Some(pubkey.key),
                 ..Default::default()
             },
             DescriptorPublicKey::XPub(xpub) => PKOrF {
@@ -524,7 +524,7 @@ impl Policy {
 
     fn make_multisig(
         keys: &[DescriptorPublicKey],
-        signers: Arc<SignersContainer<DescriptorPublicKey>>,
+        signers: Arc<SignersContainer>,
         threshold: usize,
     ) -> Result<Option<Policy>, PolicyError> {
         if threshold == 0 {
@@ -648,17 +648,14 @@ impl From<SatisfiableItem> for Policy {
     }
 }
 
-fn signer_id(key: &DescriptorPublicKey) -> SignerId<DescriptorPublicKey> {
+fn signer_id(key: &DescriptorPublicKey) -> SignerId {
     match key {
-        DescriptorPublicKey::PubKey(pubkey) => pubkey.to_pubkeyhash().into(),
+        DescriptorPublicKey::SinglePub(pubkey) => pubkey.key.to_pubkeyhash().into(),
         DescriptorPublicKey::XPub(xpub) => xpub.root_fingerprint().into(),
     }
 }
 
-fn signature(
-    key: &DescriptorPublicKey,
-    signers: Arc<SignersContainer<DescriptorPublicKey>>,
-) -> Policy {
+fn signature(key: &DescriptorPublicKey, signers: Arc<SignersContainer>) -> Policy {
     let mut policy: Policy = SatisfiableItem::Signature(PKOrF::from_key(key)).into();
 
     policy.contribution = if signers.find(signer_id(key)).is_some() {
@@ -673,12 +670,13 @@ fn signature(
 }
 
 fn signature_key(
-    key_hash: &<DescriptorPublicKey as MiniscriptKey>::Hash,
-    signers: Arc<SignersContainer<DescriptorPublicKey>>,
+    key: &<DescriptorPublicKey as MiniscriptKey>::Hash,
+    signers: Arc<SignersContainer>,
 ) -> Policy {
-    let mut policy: Policy = SatisfiableItem::Signature(PKOrF::from_key_hash(*key_hash)).into();
+    let key_hash = key.to_public_key().to_pubkeyhash();
+    let mut policy: Policy = SatisfiableItem::Signature(PKOrF::from_key_hash(key_hash)).into();
 
-    if signers.find(SignerId::PkHash(*key_hash)).is_some() {
+    if signers.find(SignerId::PkHash(key_hash)).is_some() {
         policy.contribution = Satisfaction::Complete {
             condition: Default::default(),
         }
@@ -688,10 +686,7 @@ fn signature_key(
 }
 
 impl<Ctx: ScriptContext> ExtractPolicy for Miniscript<DescriptorPublicKey, Ctx> {
-    fn extract_policy(
-        &self,
-        signers: Arc<SignersContainer<DescriptorPublicKey>>,
-    ) -> Result<Option<Policy>, Error> {
+    fn extract_policy(&self, signers: Arc<SignersContainer>) -> Result<Option<Policy>, Error> {
         Ok(match &self.node {
             // Leaves
             Terminal::True | Terminal::False => None,
@@ -781,10 +776,7 @@ impl<Ctx: ScriptContext> ExtractPolicy for Miniscript<DescriptorPublicKey, Ctx> 
 }
 
 impl ExtractPolicy for Descriptor<DescriptorPublicKey> {
-    fn extract_policy(
-        &self,
-        signers: Arc<SignersContainer<DescriptorPublicKey>>,
-    ) -> Result<Option<Policy>, Error> {
+    fn extract_policy(&self, signers: Arc<SignersContainer>) -> Result<Option<Policy>, Error> {
         match self {
             Descriptor::Pk(pubkey)
             | Descriptor::Pkh(pubkey)

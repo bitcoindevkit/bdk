@@ -46,7 +46,7 @@ fn main() {
     let policy = extended_desc.extract_policy(signers).unwrap();
     println!("policy: {}", serde_json::to_string(&policy).unwrap());
 
-    let derived_desc = extended_desc.derive(&[ChildNumber::from_normal_idx(42).unwrap()]);
+    let derived_desc = extended_desc.derive(ChildNumber::from_normal_idx(42).unwrap());
     println!("{:?}", derived_desc);
 
     let addr = derived_desc.address(Network::Testnet).unwrap();

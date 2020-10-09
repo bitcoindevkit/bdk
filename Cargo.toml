@@ -7,15 +7,15 @@ authors = ["Alekos Filini <alekos.filini@gmail.com>", "Riccardo Casatta <riccard
 [dependencies]
 bdk-macros = { version = "0.1.0-beta.1", path = "./macros" }
 log = "^0.4"
-bitcoin = { version = "0.23", features = ["use-serde"] }
-miniscript = { version = "1.0" }
+bitcoin = { version = "0.25", features = ["use-serde"] }
+miniscript = { git = "https://github.com/MagicalBitcoin/rust-miniscript", rev = "dfc53201aa5796b6bf3b5a40581d192abaa84133" }
 serde = { version = "^1.0", features = ["derive"] }
 serde_json = { version = "^1.0" }
 rand = "^0.7"
 
 # Optional dependencies
 sled = { version = "0.34", optional = true }
-electrum-client = { version = "0.2.0-beta.1", optional = true }
+electrum-client = { version = "0.3.0-beta.1", optional = true }
 reqwest = { version = "0.10", optional = true, features = ["json"] }
 futures = { version = "0.3", optional = true }
 clap = { version = "2.33", optional = true }
@@ -25,10 +25,6 @@ rocksdb = { version = "0.14", optional = true }
 socks = { version = "0.3", optional = true }
 lazy_static = { version = "1.4", optional = true }
 tiny-bip39 = { version = "^0.7", optional = true }
-
-[patch.crates-io]
-bitcoin = { git = "https://github.com/rust-bitcoin/rust-bitcoin/", rev = "478e091" }
-miniscript = { git = "https://github.com/MagicalBitcoin/rust-miniscript", rev = "d0322ac" }
 
 # Platform-specific dependencies
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

@@ -31,6 +31,7 @@ pub enum Error {
     InvalidPrefix(Vec<u8>),
     HardenedDerivationOnXpub,
     MalformedInput,
+    InvalidHDKeyPath,
 
     KeyParsingError(String),
     Key(crate::keys::KeyError),

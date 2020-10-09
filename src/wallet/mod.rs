@@ -37,7 +37,7 @@ use bitcoin::util::bip32::ChildNumber;
 use bitcoin::util::psbt::PartiallySignedTransaction as PSBT;
 use bitcoin::{Address, Network, OutPoint, Script, SigHashType, Transaction, TxOut, Txid};
 
-use miniscript::descriptor::DescriptorPublicKey;
+use miniscript::psbt::PsbtInputSatisfier;
 
 #[allow(unused_imports)]
 use log::{debug, error, info, trace};
@@ -87,8 +87,8 @@ pub struct Wallet<B: BlockchainMarker, D: BatchDatabase> {
     descriptor: ExtendedDescriptor,
     change_descriptor: Option<ExtendedDescriptor>,
 
-    signers: Arc<SignersContainer<DescriptorPublicKey>>,
-    change_signers: Arc<SignersContainer<DescriptorPublicKey>>,
+    signers: Arc<SignersContainer>,
+    change_signers: Arc<SignersContainer>,
 
     address_validators: Vec<Arc<Box<dyn AddressValidator>>>,
 
@@ -158,7 +158,7 @@ where
         let index = self.fetch_and_increment_index(ScriptType::External)?;
 
         self.descriptor
-            .derive(&[ChildNumber::from_normal_idx(index).unwrap()])
+            .derive(ChildNumber::from_normal_idx(index)?)
             .address(self.network)
             .ok_or(Error::ScriptDoesntHaveAddressForm)
     }
@@ -204,7 +204,7 @@ where
     pub fn add_signer(
         &mut self,
         script_type: ScriptType,
-        id: SignerId<DescriptorPublicKey>,
+        id: SignerId,
         ordering: SignerOrdering,
         signer: Arc<Box<dyn Signer>>,
     ) {
@@ -803,7 +803,7 @@ where
             match desc.satisfy(
                 input,
                 (
-                    psbt_input.clone(),
+                    PsbtInputSatisfier::new(&psbt, n),
                     After::new(current_height, false),
                     Older::new(current_height, create_height, false),
                 ),
@@ -846,7 +846,7 @@ where
             .borrow()
             .get_path_from_script_pubkey(&txout.script_pubkey)?
             .map(|(script_type, child)| (self.get_descriptor_for_script_type(script_type).0, child))
-            .map(|(desc, child)| desc.derive(&[ChildNumber::from_normal_idx(child).unwrap()])))
+            .map(|(desc, child)| desc.derive(ChildNumber::from_normal_idx(child).unwrap())))
     }
 
     fn get_change_address(&self) -> Result<Script, Error> {
@@ -854,7 +854,7 @@ where
         let index = self.fetch_and_increment_index(script_type)?;
 
         Ok(desc
-            .derive(&[ChildNumber::from_normal_idx(index).unwrap()])
+            .derive(ChildNumber::from_normal_idx(index)?)
             .script_pubkey())
     }
 
@@ -879,7 +879,7 @@ where
 
         let hd_keypaths = descriptor.get_hd_keypaths(index)?;
         let script = descriptor
-            .derive(&[ChildNumber::from_normal_idx(index).unwrap()])
+            .derive(ChildNumber::from_normal_idx(index)?)
             .script_pubkey();
         for validator in &self.address_validators {
             validator.validate(script_type, &hd_keypaths, &script)?;
@@ -909,7 +909,7 @@ where
         for i in from..(from + count) {
             address_batch.set_script_pubkey(
                 &descriptor
-                    .derive(&[ChildNumber::from_normal_idx(i).unwrap()])
+                    .derive(ChildNumber::from_normal_idx(i)?)
                     .script_pubkey(),
                 script_type,
                 i,
@@ -1004,7 +1004,7 @@ where
 
             let (desc, _) = self.get_descriptor_for_script_type(script_type);
             psbt_input.hd_keypaths = desc.get_hd_keypaths(child)?;
-            let derived_descriptor = desc.derive(&[ChildNumber::from_normal_idx(child).unwrap()]);
+            let derived_descriptor = desc.derive(ChildNumber::from_normal_idx(child)?);
 
             psbt_input.redeem_script = derived_descriptor.psbt_redeem_script();
             psbt_input.witness_script = derived_descriptor.psbt_witness_script();

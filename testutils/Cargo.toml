@@ -9,17 +9,11 @@ name = "testutils"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-# The latest bitcoincore-rpc depends on an older version of bitcoin, which in turns depends on an
-# older version of secp256k1, which causes conflicts during linking. Use my fork right now, we can
-# switch back to crates.io as soon as rust-bitcoin is updated in rust-bitcoincore-rpc.
-#
-# Tracking issue: https://github.com/rust-bitcoin/rust-bitcoincore-rpc/pull/80
-
 [dependencies]
 log = "0.4.8"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serial_test = "0.4"
-bitcoin = "0.23"
-bitcoincore-rpc = "0.11"
-electrum-client = "0.2.0-beta.1"
+bitcoin = "0.25"
+bitcoincore-rpc = "0.12"
+electrum-client = "0.3.0-beta.1"

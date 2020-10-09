@@ -102,7 +102,7 @@ use bitcoin::util::bip32::{ExtendedPrivKey, Fingerprint};
 use bitcoin::util::{bip143, psbt};
 use bitcoin::{PrivateKey, Script, SigHash, SigHashType};
 
-use miniscript::descriptor::{DescriptorPublicKey, DescriptorSecretKey, DescriptorXKey, KeyMap};
+use miniscript::descriptor::{DescriptorSecretKey, DescriptorSinglePriv, DescriptorXKey, KeyMap};
 use miniscript::{Legacy, MiniscriptKey, Segwitv0};
 
 use crate::descriptor::XKeyUtils;
@@ -110,19 +110,19 @@ use crate::descriptor::XKeyUtils;
 /// Identifier of a signer in the `SignersContainers`. Used as a key to find the right signer among
 /// multiple of them
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum SignerId<Pk: MiniscriptKey> {
-    PkHash(<Pk as MiniscriptKey>::Hash),
+pub enum SignerId {
+    PkHash(hash160::Hash),
     Fingerprint(Fingerprint),
 }
 
-impl From<hash160::Hash> for SignerId<DescriptorPublicKey> {
-    fn from(hash: hash160::Hash) -> SignerId<DescriptorPublicKey> {
+impl From<hash160::Hash> for SignerId {
+    fn from(hash: hash160::Hash) -> SignerId {
         SignerId::PkHash(hash)
     }
 }
 
-impl From<Fingerprint> for SignerId<DescriptorPublicKey> {
-    fn from(fing: Fingerprint) -> SignerId<DescriptorPublicKey> {
+impl From<Fingerprint> for SignerId {
+    fn from(fing: Fingerprint) -> SignerId {
         SignerId::Fingerprint(fing)
     }
 }
@@ -284,7 +284,10 @@ impl Signer for PrivateKey {
     }
 
     fn descriptor_secret_key(&self) -> Option<DescriptorSecretKey> {
-        Some(DescriptorSecretKey::PrivKey(*self))
+        Some(DescriptorSecretKey::SinglePriv(DescriptorSinglePriv {
+            key: *self,
+            origin: None,
+        }))
     }
 }
 
@@ -303,13 +306,13 @@ impl std::default::Default for SignerOrdering {
 }
 
 #[derive(Debug, Clone)]
-struct SignersContainerKey<Pk: MiniscriptKey> {
-    id: SignerId<Pk>,
+struct SignersContainerKey {
+    id: SignerId,
     ordering: SignerOrdering,
 }
 
-impl<Pk: MiniscriptKey> From<(SignerId<Pk>, SignerOrdering)> for SignersContainerKey<Pk> {
-    fn from(tuple: (SignerId<Pk>, SignerOrdering)) -> Self {
+impl From<(SignerId, SignerOrdering)> for SignersContainerKey {
+    fn from(tuple: (SignerId, SignerOrdering)) -> Self {
         SignersContainerKey {
             id: tuple.0,
             ordering: tuple.1,
@@ -319,11 +322,9 @@ impl<Pk: MiniscriptKey> From<(SignerId<Pk>, SignerOrdering)> for SignersContaine
 
 /// Container for multiple signers
 #[derive(Debug, Default, Clone)]
-pub struct SignersContainer<Pk: MiniscriptKey>(
-    BTreeMap<SignersContainerKey<Pk>, Arc<Box<dyn Signer>>>,
-);
+pub struct SignersContainer(BTreeMap<SignersContainerKey, Arc<Box<dyn Signer>>>);
 
-impl SignersContainer<DescriptorPublicKey> {
+impl SignersContainer {
     pub fn as_key_map(&self) -> KeyMap {
         self.0
             .values()
@@ -333,20 +334,21 @@ impl SignersContainer<DescriptorPublicKey> {
     }
 }
 
-impl From<KeyMap> for SignersContainer<DescriptorPublicKey> {
-    fn from(keymap: KeyMap) -> SignersContainer<DescriptorPublicKey> {
+impl From<KeyMap> for SignersContainer {
+    fn from(keymap: KeyMap) -> SignersContainer {
         let mut container = SignersContainer::new();
 
         for (_, secret) in keymap {
             match secret {
-                DescriptorSecretKey::PrivKey(private_key) => container.add_external(
+                DescriptorSecretKey::SinglePriv(private_key) => container.add_external(
                     SignerId::from(
                         private_key
+                            .key
                             .public_key(&Secp256k1::signing_only())
                             .to_pubkeyhash(),
                     ),
                     SignerOrdering::default(),
-                    Arc::new(Box::new(private_key)),
+                    Arc::new(Box::new(private_key.key)),
                 ),
                 DescriptorSecretKey::XPrv(xprv) => container.add_external(
                     SignerId::from(xprv.root_fingerprint()),
@@ -360,7 +362,7 @@ impl From<KeyMap> for SignersContainer<DescriptorPublicKey> {
     }
 }
 
-impl<Pk: MiniscriptKey> SignersContainer<Pk> {
+impl SignersContainer {
     /// Default constructor
     pub fn new() -> Self {
         SignersContainer(Default::default())
@@ -370,7 +372,7 @@ impl<Pk: MiniscriptKey> SignersContainer<Pk> {
     /// signer that was previosuly in the container, if any
     pub fn add_external(
         &mut self,
-        id: SignerId<Pk>,
+        id: SignerId,
         ordering: SignerOrdering,
         signer: Arc<Box<dyn Signer>>,
     ) -> Option<Arc<Box<dyn Signer>>> {
@@ -380,14 +382,14 @@ impl<Pk: MiniscriptKey> SignersContainer<Pk> {
     /// Removes a signer from the container and returns it
     pub fn remove(
         &mut self,
-        id: SignerId<Pk>,
+        id: SignerId,
         ordering: SignerOrdering,
     ) -> Option<Arc<Box<dyn Signer>>> {
         self.0.remove(&(id, ordering).into())
     }
 
     /// Returns the list of identifiers of all the signers in the container
-    pub fn ids(&self) -> Vec<&SignerId<Pk>> {
+    pub fn ids(&self) -> Vec<&SignerId> {
         self.0
             .keys()
             .map(|SignersContainerKey { id, .. }| id)
@@ -400,7 +402,7 @@ impl<Pk: MiniscriptKey> SignersContainer<Pk> {
     }
 
     /// Finds the signer with lowest ordering for a given id in the container.
-    pub fn find(&self, id: SignerId<Pk>) -> Option<&Arc<Box<dyn Signer>>> {
+    pub fn find(&self, id: SignerId) -> Option<&Arc<Box<dyn Signer>>> {
         self.0
             .range((
                 Included(&(id.clone(), SignerOrdering(0)).into()),
@@ -515,22 +517,22 @@ impl ComputeSighash for Segwitv0 {
     }
 }
 
-impl<Pk: MiniscriptKey> PartialOrd for SignersContainerKey<Pk> {
+impl PartialOrd for SignersContainerKey {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl<Pk: MiniscriptKey> Ord for SignersContainerKey<Pk> {
+impl Ord for SignersContainerKey {
     fn cmp(&self, other: &Self) -> Ordering {
         self.ordering.cmp(&other.ordering)
     }
 }
 
-impl<Pk: MiniscriptKey> PartialEq for SignersContainerKey<Pk> {
+impl PartialEq for SignersContainerKey {
     fn eq(&self, other: &Self) -> bool {
         self.ordering == other.ordering
     }
 }
 
-impl<Pk: MiniscriptKey> Eq for SignersContainerKey<Pk> {}
+impl Eq for SignersContainerKey {}

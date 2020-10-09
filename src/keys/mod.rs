@@ -32,7 +32,9 @@ use std::ops::Deref;
 use bitcoin::util::bip32;
 use bitcoin::{Network, PrivateKey, PublicKey};
 
-pub use miniscript::descriptor::{DescriptorPublicKey, DescriptorSecretKey};
+pub use miniscript::descriptor::{
+    DescriptorPublicKey, DescriptorSecretKey, DescriptorSinglePriv, DescriptorSinglePub,
+};
 use miniscript::descriptor::{DescriptorXKey, KeyMap};
 pub use miniscript::ScriptContext;
 use miniscript::{Miniscript, Terminal};
@@ -198,7 +200,7 @@ impl<Ctx: ScriptContext + 'static> ExtScriptContext for Ctx {
 /// ```
 /// use bdk::bitcoin::PublicKey;
 ///
-/// use bdk::keys::{mainnet_network, ScriptContext, ToDescriptorKey, DescriptorKey, DescriptorPublicKey, KeyError};
+/// use bdk::keys::{mainnet_network, ScriptContext, ToDescriptorKey, DescriptorKey, DescriptorPublicKey, DescriptorSinglePub, KeyError};
 ///
 /// pub struct MyKeyType {
 ///     pubkey: PublicKey,
@@ -206,7 +208,10 @@ impl<Ctx: ScriptContext + 'static> ExtScriptContext for Ctx {
 ///
 /// impl<Ctx: ScriptContext> ToDescriptorKey<Ctx> for MyKeyType {
 ///     fn to_descriptor_key(self) -> Result<DescriptorKey<Ctx>, KeyError> {
-///         Ok(DescriptorKey::from_public(DescriptorPublicKey::PubKey(self.pubkey), mainnet_network()))
+///         Ok(DescriptorKey::from_public(DescriptorPublicKey::SinglePub(DescriptorSinglePub {
+///             origin: None,
+///             key: self.pubkey
+///         }), mainnet_network()))
 ///     }
 /// }
 /// ```
@@ -286,7 +291,7 @@ pub trait DerivableKey<Ctx: ScriptContext> {
     /// Add a extra metadata, consume `self` and turn it into a [`DescriptorKey`]
     fn add_metadata(
         self,
-        source: Option<(bip32::Fingerprint, bip32::DerivationPath)>,
+        origin: Option<(bip32::Fingerprint, bip32::DerivationPath)>,
         derivation_path: bip32::DerivationPath,
     ) -> Result<DescriptorKey<Ctx>, KeyError>;
 }
@@ -294,11 +299,11 @@ pub trait DerivableKey<Ctx: ScriptContext> {
 impl<Ctx: ScriptContext> DerivableKey<Ctx> for bip32::ExtendedPubKey {
     fn add_metadata(
         self,
-        source: Option<(bip32::Fingerprint, bip32::DerivationPath)>,
+        origin: Option<(bip32::Fingerprint, bip32::DerivationPath)>,
         derivation_path: bip32::DerivationPath,
     ) -> Result<DescriptorKey<Ctx>, KeyError> {
         DescriptorPublicKey::XPub(DescriptorXKey {
-            source,
+            origin,
             xkey: self,
             derivation_path,
             is_wildcard: true,
@@ -310,11 +315,11 @@ impl<Ctx: ScriptContext> DerivableKey<Ctx> for bip32::ExtendedPubKey {
 impl<Ctx: ScriptContext> DerivableKey<Ctx> for bip32::ExtendedPrivKey {
     fn add_metadata(
         self,
-        source: Option<(bip32::Fingerprint, bip32::DerivationPath)>,
+        origin: Option<(bip32::Fingerprint, bip32::DerivationPath)>,
         derivation_path: bip32::DerivationPath,
     ) -> Result<DescriptorKey<Ctx>, KeyError> {
         DescriptorSecretKey::XPrv(DescriptorXKey {
-            source,
+            origin,
             xkey: self,
             derivation_path,
             is_wildcard: true,
@@ -355,10 +360,10 @@ where
 {
     fn add_metadata(
         self,
-        source: Option<(bip32::Fingerprint, bip32::DerivationPath)>,
+        origin: Option<(bip32::Fingerprint, bip32::DerivationPath)>,
         derivation_path: bip32::DerivationPath,
     ) -> Result<DescriptorKey<Ctx>, KeyError> {
-        let descriptor_key = self.key.add_metadata(source, derivation_path)?;
+        let descriptor_key = self.key.add_metadata(origin, derivation_path)?;
         Ok(descriptor_key.override_valid_networks(self.valid_networks))
     }
 }
@@ -483,7 +488,7 @@ impl<Ctx: ScriptContext> ToDescriptorKey<Ctx> for DescriptorKey<Ctx> {
 impl<Ctx: ScriptContext> ToDescriptorKey<Ctx> for DescriptorPublicKey {
     fn to_descriptor_key(self) -> Result<DescriptorKey<Ctx>, KeyError> {
         let networks = match self {
-            DescriptorPublicKey::PubKey(_) => any_network(),
+            DescriptorPublicKey::SinglePub(_) => any_network(),
             DescriptorPublicKey::XPub(DescriptorXKey { xkey, .. })
                 if xkey.network == Network::Bitcoin =>
             {
@@ -498,14 +503,20 @@ impl<Ctx: ScriptContext> ToDescriptorKey<Ctx> for DescriptorPublicKey {
 
 impl<Ctx: ScriptContext> ToDescriptorKey<Ctx> for PublicKey {
     fn to_descriptor_key(self) -> Result<DescriptorKey<Ctx>, KeyError> {
-        DescriptorPublicKey::PubKey(self).to_descriptor_key()
+        DescriptorPublicKey::SinglePub(DescriptorSinglePub {
+            key: self,
+            origin: None,
+        })
+        .to_descriptor_key()
     }
 }
 
 impl<Ctx: ScriptContext> ToDescriptorKey<Ctx> for DescriptorSecretKey {
     fn to_descriptor_key(self) -> Result<DescriptorKey<Ctx>, KeyError> {
-        let networks = match self {
-            DescriptorSecretKey::PrivKey(sk) if sk.network == Network::Bitcoin => mainnet_network(),
+        let networks = match &self {
+            DescriptorSecretKey::SinglePriv(sk) if sk.key.network == Network::Bitcoin => {
+                mainnet_network()
+            }
             DescriptorSecretKey::XPrv(DescriptorXKey { xkey, .. })
                 if xkey.network == Network::Bitcoin =>
             {
@@ -520,7 +531,11 @@ impl<Ctx: ScriptContext> ToDescriptorKey<Ctx> for DescriptorSecretKey {
 
 impl<Ctx: ScriptContext> ToDescriptorKey<Ctx> for PrivateKey {
     fn to_descriptor_key(self) -> Result<DescriptorKey<Ctx>, KeyError> {
-        DescriptorSecretKey::PrivKey(self).to_descriptor_key()
+        DescriptorSecretKey::SinglePriv(DescriptorSinglePriv {
+            key: self,
+            origin: None,
+        })
+        .to_descriptor_key()
     }
 }
 

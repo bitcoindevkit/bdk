@@ -206,7 +206,7 @@ impl<Cs: CoinSelectionAlgorithm> TxBuilder<Cs> {
     ///
     /// The `version` should always be greater than `0` and greater than `1` if the wallet's
     /// descriptors contain an "older" (OP_CSV) operator.
-    pub fn version(mut self, version: u32) -> Self {
+    pub fn version(mut self, version: i32) -> Self {
         self.version = Some(Version(version));
         self
     }
@@ -316,7 +316,7 @@ impl TxOrdering {
 ///
 /// Has a default value of `1`
 #[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Hash, Clone, Copy)]
-pub(crate) struct Version(pub(crate) u32);
+pub(crate) struct Version(pub(crate) i32);
 
 impl Default for Version {
     fn default() -> Self {
