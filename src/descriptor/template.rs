@@ -423,4 +423,272 @@ macro_rules! expand_make_bipxx {
 expand_make_bipxx!(legacy, Legacy);
 expand_make_bipxx!(segwit_v0, Segwitv0);
 
-// test existing descriptor templates, make sure they are expanded to the right descriptors
+#[cfg(test)]
+mod test {
+    // test existing descriptor templates, make sure they are expanded to the right descriptors
+
+    use super::*;
+    use crate::descriptor::DescriptorMeta;
+    use crate::keys::{KeyError, ValidNetworks};
+    use bitcoin::hashes::core::str::FromStr;
+    use bitcoin::network::constants::Network::Regtest;
+    use bitcoin::util::bip32::ChildNumber;
+    use miniscript::descriptor::{DescriptorPublicKey, KeyMap};
+    use miniscript::Descriptor;
+
+    // verify template descriptor generates expected address(es)
+    fn check(
+        desc: Result<(Descriptor<DescriptorPublicKey>, KeyMap, ValidNetworks), KeyError>,
+        is_witness: bool,
+        is_fixed: bool,
+        expected: &[&str],
+    ) {
+        let (desc, _key_map, _networks) = desc.unwrap();
+        assert_eq!(desc.is_witness(), is_witness);
+        assert_eq!(desc.is_fixed(), is_fixed);
+        for i in 0..expected.len() {
+            let index = i as u32;
+            let child_desc = if desc.is_fixed() {
+                desc.clone()
+            } else {
+                desc.derive(&[ChildNumber::from_normal_idx(index).unwrap()])
+            };
+            let address = child_desc.address(Regtest).unwrap();
+            assert_eq!(address.to_string(), *expected.get(i).unwrap());
+        }
+    }
+
+    // P2PKH
+    #[test]
+    fn test_p2ph_template() {
+        let prvkey =
+            bitcoin::PrivateKey::from_wif("cTc4vURSzdx6QE6KVynWGomDbLaA75dNALMNyfjh3p8DRRar84Um")
+                .unwrap();
+        check(
+            P2PKH(prvkey).build(),
+            false,
+            true,
+            &["mwJ8hxFYW19JLuc65RCTaP4v1rzVU8cVMT"],
+        );
+
+        let pubkey = bitcoin::PublicKey::from_str(
+            "03a34b99f22c790c4e36b2b3c2c35a36db06226e41c692fc82b8b56ac1c540c5bd",
+        )
+        .unwrap();
+        check(
+            P2PKH(pubkey).build(),
+            false,
+            true,
+            &["muZpTpBYhxmRFuCjLc7C6BBDF32C8XVJUi"],
+        );
+    }
+
+    // P2WPKH-P2SH `sh(wpkh(key))`
+    #[test]
+    fn test_p2wphp2sh_template() {
+        let prvkey =
+            bitcoin::PrivateKey::from_wif("cTc4vURSzdx6QE6KVynWGomDbLaA75dNALMNyfjh3p8DRRar84Um")
+                .unwrap();
+        check(
+            P2WPKH_P2SH(prvkey).build(),
+            true,
+            true,
+            &["2NB4ox5VDRw1ecUv6SnT3VQHPXveYztRqk5"],
+        );
+
+        let pubkey = bitcoin::PublicKey::from_str(
+            "03a34b99f22c790c4e36b2b3c2c35a36db06226e41c692fc82b8b56ac1c540c5bd",
+        )
+        .unwrap();
+        check(
+            P2WPKH_P2SH(pubkey).build(),
+            true,
+            true,
+            &["2N5LiC3CqzxDamRTPG1kiNv1FpNJQ7x28sb"],
+        );
+    }
+
+    // P2WPKH `wpkh(key)`
+    #[test]
+    fn test_p2wph_template() {
+        let prvkey =
+            bitcoin::PrivateKey::from_wif("cTc4vURSzdx6QE6KVynWGomDbLaA75dNALMNyfjh3p8DRRar84Um")
+                .unwrap();
+        check(
+            P2WPKH(prvkey).build(),
+            true,
+            true,
+            &["bcrt1q4525hmgw265tl3drrl8jjta7ayffu6jfcwxx9y"],
+        );
+
+        let pubkey = bitcoin::PublicKey::from_str(
+            "03a34b99f22c790c4e36b2b3c2c35a36db06226e41c692fc82b8b56ac1c540c5bd",
+        )
+        .unwrap();
+        check(
+            P2WPKH(pubkey).build(),
+            true,
+            true,
+            &["bcrt1qngw83fg8dz0k749cg7k3emc7v98wy0c7azaa6h"],
+        );
+    }
+
+    // BIP44 `pkh(key/44'/0'/0'/{0,1}/*)`
+    #[test]
+    fn test_bip44_template() {
+        let prvkey = bitcoin::util::bip32::ExtendedPrivKey::from_str("tprv8ZgxMBicQKsPcx5nBGsR63Pe8KnRUqmbJNENAfGftF3yuXoMMoVJJcYeUw5eVkm9WBPjWYt6HMWYJNesB5HaNVBaFc1M6dRjWSYnmewUMYy").unwrap();
+        check(
+            BIP44(prvkey, ScriptType::External).build(),
+            false,
+            false,
+            &[
+                "n453VtnjDHPyDt2fDstKSu7A3YCJoHZ5g5",
+                "mvfrrumXgTtwFPWDNUecBBgzuMXhYM7KRP",
+                "mzYvhRAuQqbdSKMVVzXNYyqihgNdRadAUQ",
+            ],
+        );
+        check(
+            BIP44(prvkey, ScriptType::Internal).build(),
+            false,
+            false,
+            &[
+                "muHF98X9KxEzdKrnFAX85KeHv96eXopaip",
+                "n4hpyLJE5ub6B5Bymv4eqFxS5KjrewSmYR",
+                "mgvkdv1ffmsXd2B1sRKQ5dByK3SzpG42rA",
+            ],
+        );
+    }
+
+    // BIP44 public `pkh(key/{0,1}/*)`
+    #[test]
+    fn test_bip44_public_template() {
+        let pubkey = bitcoin::util::bip32::ExtendedPubKey::from_str("tpubDDDzQ31JkZB7VxUr9bjvBivDdqoFLrDPyLWtLapArAi51ftfmCb2DPxwLQzX65iNcXz1DGaVvyvo6JQ6rTU73r2gqdEo8uov9QKRb7nKCSU").unwrap();
+        let fingerprint = bitcoin::util::bip32::Fingerprint::from_str("c55b303f").unwrap();
+        check(
+            BIP44Public(pubkey, fingerprint, ScriptType::External).build(),
+            false,
+            false,
+            &[
+                "miNG7dJTzJqNbFS19svRdTCisC65dsubtR",
+                "n2UqaDbCjWSFJvpC84m3FjUk5UaeibCzYg",
+                "muCPpS6Ue7nkzeJMWDViw7Lkwr92Yc4K8g",
+            ],
+        );
+        check(
+            BIP44Public(pubkey, fingerprint, ScriptType::Internal).build(),
+            false,
+            false,
+            &[
+                "moDr3vJ8wpt5nNxSK55MPq797nXJb2Ru9H",
+                "ms7A1Yt4uTezT2XkefW12AvLoko8WfNJMG",
+                "mhYiyat2rtEnV77cFfQsW32y1m2ceCGHPo",
+            ],
+        );
+    }
+
+    // BIP49 `sh(wpkh(key/49'/0'/0'/{0,1}/*))`
+    #[test]
+    fn test_bip49_template() {
+        let prvkey = bitcoin::util::bip32::ExtendedPrivKey::from_str("tprv8ZgxMBicQKsPcx5nBGsR63Pe8KnRUqmbJNENAfGftF3yuXoMMoVJJcYeUw5eVkm9WBPjWYt6HMWYJNesB5HaNVBaFc1M6dRjWSYnmewUMYy").unwrap();
+        check(
+            BIP49(prvkey, ScriptType::External).build(),
+            true,
+            false,
+            &[
+                "2N9bCAJXGm168MjVwpkBdNt6ucka3PKVoUV",
+                "2NDckYkqrYyDMtttEav5hB3Bfw9EGAW5HtS",
+                "2NAFTVtksF9T4a97M7nyCjwUBD24QevZ5Z4",
+            ],
+        );
+        check(
+            BIP49(prvkey, ScriptType::Internal).build(),
+            true,
+            false,
+            &[
+                "2NB3pA8PnzJLGV8YEKNDFpbViZv3Bm1K6CG",
+                "2NBiX2Wzxngb5rPiWpUiJQ2uLVB4HBjFD4p",
+                "2NA8ek4CdQ6aMkveYF6AYuEYNrftB47QGTn",
+            ],
+        );
+    }
+
+    // BIP49 public `sh(wpkh(key/{0,1}/*))`
+    #[test]
+    fn test_bip49_public_template() {
+        let pubkey = bitcoin::util::bip32::ExtendedPubKey::from_str("tpubDC49r947KGK52X5rBWS4BLs5m9SRY3pYHnvRrm7HcybZ3BfdEsGFyzCMzayi1u58eT82ZeyFZwH7DD6Q83E3fM9CpfMtmnTygnLfP59jL9L").unwrap();
+        let fingerprint = bitcoin::util::bip32::Fingerprint::from_str("c55b303f").unwrap();
+        check(
+            BIP49Public(pubkey, fingerprint, ScriptType::External).build(),
+            true,
+            false,
+            &[
+                "2N3K4xbVAHoiTQSwxkZjWDfKoNC27pLkYnt",
+                "2NCTQfJ1sZa3wQ3pPseYRHbaNEpC3AquEfX",
+                "2MveFxAuC8BYPzTybx7FxSzW8HSd8ATT4z7",
+            ],
+        );
+        check(
+            BIP49Public(pubkey, fingerprint, ScriptType::Internal).build(),
+            true,
+            false,
+            &[
+                "2NF2vttKibwyxigxtx95Zw8K7JhDbo5zPVJ",
+                "2Mtmyd8taksxNVWCJ4wVvaiss7QPZGcAJuH",
+                "2NBs3CTVYPr1HCzjB4YFsnWCPCtNg8uMEfp",
+            ],
+        );
+    }
+
+    // BIP84 `wpkh(key/84'/0'/0'/{0,1}/*)`
+    #[test]
+    fn test_bip84_template() {
+        let prvkey = bitcoin::util::bip32::ExtendedPrivKey::from_str("tprv8ZgxMBicQKsPcx5nBGsR63Pe8KnRUqmbJNENAfGftF3yuXoMMoVJJcYeUw5eVkm9WBPjWYt6HMWYJNesB5HaNVBaFc1M6dRjWSYnmewUMYy").unwrap();
+        check(
+            BIP84(prvkey, ScriptType::External).build(),
+            true,
+            false,
+            &[
+                "bcrt1qkmvk2nadgplmd57ztld8nf8v2yxkzmdvwtjf8s",
+                "bcrt1qx0v6zgfwe50m4kqc58cqzcyem7ay2sfl3gvqhp",
+                "bcrt1q4h7fq9zhxst6e69p3n882nfj649l7w9g3zccfp",
+            ],
+        );
+        check(
+            BIP84(prvkey, ScriptType::Internal).build(),
+            true,
+            false,
+            &[
+                "bcrt1qtrwtz00wxl69e5xex7amy4xzlxkaefg3gfdkxa",
+                "bcrt1qqqasfhxpkkf7zrxqnkr2sfhn74dgsrc3e3ky45",
+                "bcrt1qpks7n0gq74hsgsz3phn5vuazjjq0f5eqhsgyce",
+            ],
+        );
+    }
+
+    // BIP84 public `wpkh(key/{0,1}/*)`
+    #[test]
+    fn test_bip84_public_template() {
+        let pubkey = bitcoin::util::bip32::ExtendedPubKey::from_str("tpubDC2Qwo2TFsaNC4ju8nrUJ9mqVT3eSgdmy1yPqhgkjwmke3PRXutNGRYAUo6RCHTcVQaDR3ohNU9we59brGHuEKPvH1ags2nevW5opEE9Z5Q").unwrap();
+        let fingerprint = bitcoin::util::bip32::Fingerprint::from_str("c55b303f").unwrap();
+        check(
+            BIP84Public(pubkey, fingerprint, ScriptType::External).build(),
+            true,
+            false,
+            &[
+                "bcrt1qedg9fdlf8cnnqfd5mks6uz5w4kgpk2prcdvd0h",
+                "bcrt1q3lncdlwq3lgcaaeyruynjnlccr0ve0kakh6ana",
+                "bcrt1qt9800y6xl3922jy3uyl0z33jh5wfpycyhcylr9",
+            ],
+        );
+        check(
+            BIP84Public(pubkey, fingerprint, ScriptType::Internal).build(),
+            true,
+            false,
+            &[
+                "bcrt1qm6wqukenh7guu792lj2njgw9n78cmwsy8xy3z2",
+                "bcrt1q694twxtjn4nnrvnyvra769j0a23rllj5c6cgwp",
+                "bcrt1qhlac3c5ranv5w5emlnqs7wxhkxt8maelylcarp",
+            ],
+        );
+    }
+}
