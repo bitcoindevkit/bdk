@@ -36,6 +36,9 @@ extern crate serde;
 #[macro_use]
 extern crate serde_json;
 
+#[cfg(feature = "keys-bip39")]
+extern crate bip39;
+
 #[cfg(any(target_arch = "wasm32", feature = "async-interface"))]
 #[macro_use]
 extern crate async_trait;
