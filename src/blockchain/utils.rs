@@ -243,6 +243,11 @@ pub trait ElectrumLikeSync {
 
         // look for our own inputs
         for (i, input) in tx.input.iter().enumerate() {
+            // skip coinbase inputs
+            if input.previous_output.is_null() {
+                continue;
+            }
+
             // the fact that we visit addresses in a BFS fashion starting from the external addresses
             // should ensure that this query is always consistent (i.e. when we get to call this all
             // the transactions at a lower depth have already been indexed, so if an outpoint is ours
@@ -312,7 +317,7 @@ pub trait ElectrumLikeSync {
             sent: outgoing,
             height,
             timestamp: 0,
-            fees: inputs_sum - outputs_sum,
+            fees: inputs_sum.saturating_sub(outputs_sum), // if the tx is a coinbase, fees would be negative
         };
         info!("Saving tx {}", txid);
         updates.set_tx(&tx)?;

@@ -341,7 +341,7 @@ impl TestClient {
             .unwrap();
 
         if let Some(num) = meta_tx.min_confirmations {
-            self.generate(num);
+            self.generate(num, None);
         }
 
         let monitor_script = Address::from_str(&meta_tx.output[0].to_address)
@@ -464,9 +464,9 @@ impl TestClient {
         block.header.block_hash().to_hex()
     }
 
-    pub fn generate(&mut self, num_blocks: u64) {
-        let our_addr = self.get_new_address(None, None).unwrap();
-        let hashes = self.generate_to_address(num_blocks, &our_addr).unwrap();
+    pub fn generate(&mut self, num_blocks: u64, address: Option<Address>) {
+        let address = address.unwrap_or_else(|| self.get_new_address(None, None).unwrap());
+        let hashes = self.generate_to_address(num_blocks, &address).unwrap();
         let best_hash = hashes.last().unwrap();
         let height = self.get_block_info(best_hash).unwrap().height;
 
@@ -505,7 +505,7 @@ impl TestClient {
 
     pub fn reorg(&mut self, num_blocks: u64) {
         self.invalidate(num_blocks);
-        self.generate(num_blocks);
+        self.generate(num_blocks, None);
     }
 
     pub fn get_node_address(&self, address_type: Option<AddressType>) -> Address {
