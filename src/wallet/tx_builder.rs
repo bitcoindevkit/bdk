@@ -38,14 +38,17 @@
 //!     .fee_rate(FeeRate::from_sat_per_vb(5.0))
 //!     .do_not_spend_change()
 //!     .enable_rbf();
+//! # let builder: TxBuilder<bdk::database::MemoryDatabase, _> = builder;
 //! ```
 
 use std::collections::BTreeMap;
 use std::default::Default;
+use std::marker::PhantomData;
 
 use bitcoin::{OutPoint, Script, SigHashType, Transaction};
 
 use super::coin_selection::{CoinSelectionAlgorithm, DefaultCoinSelectionAlgorithm};
+use crate::database::Database;
 use crate::types::{FeeRate, UTXO};
 
 /// A transaction builder
@@ -53,8 +56,8 @@ use crate::types::{FeeRate, UTXO};
 /// This structure contains the configuration that the wallet must follow to build a transaction.
 ///
 /// For an example see [this module](super::tx_builder)'s documentation;
-#[derive(Debug, Default)]
-pub struct TxBuilder<Cs: CoinSelectionAlgorithm> {
+#[derive(Debug)]
+pub struct TxBuilder<D: Database, Cs: CoinSelectionAlgorithm<D>> {
     pub(crate) recipients: Vec<(Script, u64)>,
     pub(crate) send_all: bool,
     pub(crate) fee_rate: Option<FeeRate>,
@@ -69,9 +72,38 @@ pub struct TxBuilder<Cs: CoinSelectionAlgorithm> {
     pub(crate) change_policy: ChangeSpendPolicy,
     pub(crate) force_non_witness_utxo: bool,
     pub(crate) coin_selection: Cs,
+
+    phantom: PhantomData<D>,
 }
 
-impl TxBuilder<DefaultCoinSelectionAlgorithm> {
+// Unfortunately derive doesn't work with `PhantomData`: https://github.com/rust-lang/rust/issues/26925
+impl<D: Database, Cs: CoinSelectionAlgorithm<D>> Default for TxBuilder<D, Cs>
+where
+    Cs: Default,
+{
+    fn default() -> Self {
+        TxBuilder {
+            recipients: Default::default(),
+            send_all: Default::default(),
+            fee_rate: Default::default(),
+            policy_path: Default::default(),
+            utxos: Default::default(),
+            unspendable: Default::default(),
+            sighash: Default::default(),
+            ordering: Default::default(),
+            locktime: Default::default(),
+            rbf: Default::default(),
+            version: Default::default(),
+            change_policy: Default::default(),
+            force_non_witness_utxo: Default::default(),
+            coin_selection: Default::default(),
+
+            phantom: PhantomData,
+        }
+    }
+}
+
+impl<D: Database> TxBuilder<D, DefaultCoinSelectionAlgorithm> {
     /// Create an empty builder
     pub fn new() -> Self {
         Self::default()
@@ -83,7 +115,7 @@ impl TxBuilder<DefaultCoinSelectionAlgorithm> {
     }
 }
 
-impl<Cs: CoinSelectionAlgorithm> TxBuilder<Cs> {
+impl<D: Database, Cs: CoinSelectionAlgorithm<D>> TxBuilder<D, Cs> {
     /// Replace the recipients already added with a new list
     pub fn set_recipients(mut self, recipients: Vec<(Script, u64)>) -> Self {
         self.recipients = recipients;
@@ -248,7 +280,10 @@ impl<Cs: CoinSelectionAlgorithm> TxBuilder<Cs> {
     /// Choose the coin selection algorithm
     ///
     /// Overrides the [`DefaultCoinSelectionAlgorithm`](super::coin_selection::DefaultCoinSelectionAlgorithm).
-    pub fn coin_selection<P: CoinSelectionAlgorithm>(self, coin_selection: P) -> TxBuilder<P> {
+    pub fn coin_selection<P: CoinSelectionAlgorithm<D>>(
+        self,
+        coin_selection: P,
+    ) -> TxBuilder<D, P> {
         TxBuilder {
             recipients: self.recipients,
             send_all: self.send_all,
@@ -264,6 +299,8 @@ impl<Cs: CoinSelectionAlgorithm> TxBuilder<Cs> {
             change_policy: self.change_policy,
             force_non_witness_utxo: self.force_non_witness_utxo,
             coin_selection,
+
+            phantom: PhantomData,
         }
     }
 }

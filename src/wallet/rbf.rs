@@ -27,16 +27,16 @@ use crate::error::Error;
 use crate::types::*;
 
 /// Filters unspent utxos
-pub(super) fn filter_available<I: Iterator<Item = UTXO>, D: Database>(
+pub(super) fn filter_available<I: Iterator<Item = (UTXO, usize)>, D: Database>(
     database: &D,
     iter: I,
-) -> Result<Vec<UTXO>, Error> {
+) -> Result<Vec<(UTXO, usize)>, Error> {
     Ok(iter
-        .map(|utxo| {
+        .map(|(utxo, weight)| {
             Ok(match database.get_tx(&utxo.outpoint.txid, true)? {
                 None => None,
                 Some(tx) if tx.height.is_none() => None,
-                Some(_) => Some(utxo),
+                Some(_) => Some((utxo, weight)),
             })
         })
         .collect::<Result<Vec<_>, Error>>()?
@@ -120,8 +120,15 @@ mod test {
             vec![50_000],
         );
 
-        let filtered =
-            filter_available(&database, database.iter_utxos().unwrap().into_iter()).unwrap();
+        let filtered = filter_available(
+            &database,
+            database
+                .iter_utxos()
+                .unwrap()
+                .into_iter()
+                .map(|utxo| (utxo, 0)),
+        )
+        .unwrap();
         assert_eq!(filtered, &[]);
     }
 }

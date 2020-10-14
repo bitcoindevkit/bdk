@@ -87,6 +87,7 @@ macro_rules! impl_inner_method {
 /// It allows switching database type at runtime.
 ///
 /// See [this module](crate::database::any)'s documentation for a usage example.
+#[derive(Debug)]
 pub enum AnyDatabase {
     Memory(memory::MemoryDatabase),
     #[cfg(feature = "key-value-db")]

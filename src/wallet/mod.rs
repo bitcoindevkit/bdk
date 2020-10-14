@@ -241,9 +241,9 @@ where
     /// // sign and broadcast ...
     /// # Ok::<(), bdk::Error>(())
     /// ```
-    pub fn create_tx<Cs: coin_selection::CoinSelectionAlgorithm>(
+    pub fn create_tx<Cs: coin_selection::CoinSelectionAlgorithm<D>>(
         &self,
-        builder: TxBuilder<Cs>,
+        builder: TxBuilder<D, Cs>,
     ) -> Result<(PSBT, TransactionDetails), Error> {
         if builder.recipients.is_empty() {
             return Err(Error::NoAddressees);
@@ -334,17 +334,6 @@ where
             outgoing += value;
         }
 
-        // TODO: use the right weight instead of the maximum, and only fall-back to it if the
-        // script is unknown in the database
-        let input_witness_weight = std::cmp::max(
-            self.get_descriptor_for_script_type(ScriptType::Internal)
-                .0
-                .max_satisfaction_weight(),
-            self.get_descriptor_for_script_type(ScriptType::External)
-                .0
-                .max_satisfaction_weight(),
-        );
-
         if builder.change_policy != tx_builder::ChangeSpendPolicy::ChangeAllowed
             && self.change_descriptor.is_none()
         {
@@ -369,11 +358,11 @@ where
             selected_amount,
             mut fee_amount,
         } = builder.coin_selection.coin_select(
+            self.database.borrow().deref(),
             must_use_utxos,
             may_use_utxos,
             fee_rate,
             outgoing,
-            input_witness_weight,
             fee_amount,
         )?;
         let (mut txin, prev_script_pubkeys): (Vec<_>, Vec<_>) = txin.into_iter().unzip();
@@ -474,10 +463,10 @@ where
     // TODO: support for merging multiple transactions while bumping the fees
     // TODO: option to force addition of an extra output? seems bad for privacy to update the
     // change
-    pub fn bump_fee<Cs: coin_selection::CoinSelectionAlgorithm>(
+    pub fn bump_fee<Cs: coin_selection::CoinSelectionAlgorithm<D>>(
         &self,
         txid: &Txid,
-        builder: TxBuilder<Cs>,
+        builder: TxBuilder<D, Cs>,
     ) -> Result<(PSBT, TransactionDetails), Error> {
         let mut details = match self.database.borrow().get_tx(&txid, true)? {
             None => return Err(Error::TransactionNotFound),
@@ -515,7 +504,7 @@ where
             let mut change_output = None;
             for (index, txout) in tx.output.iter().enumerate() {
                 // look for an output that we know and that has the right ScriptType. We use
-                // `get_deget_descriptor_for` to find what's the ScriptType for `Internal`
+                // `get_descriptor_for` to find what's the ScriptType for `Internal`
                 // addresses really is, because if there's no change_descriptor it's actually equal
                 // to "External"
                 let (_, change_type) = self.get_descriptor_for_script_type(ScriptType::Internal);
@@ -533,8 +522,8 @@ where
             }
 
             // we need a change output, add one here and take into account the extra fees for it
-            if change_output.is_none() {
-                let change_script = self.get_change_address()?;
+            let change_script = self.get_change_address()?;
+            change_output.unwrap_or_else(|| {
                 let change_txout = TxOut {
                     script_pubkey: change_script,
                     value: 0,
@@ -543,10 +532,8 @@ where
                     (serialize(&change_txout).len() as f32 * new_feerate.as_sat_vb()).ceil() as u64;
                 tx.output.push(change_txout);
 
-                change_output = Some(tx.output.len() - 1);
-            }
-
-            change_output.unwrap()
+                tx.output.len() - 1
+            })
         };
 
         // if `builder.utxos` is Some(_) we have to add inputs and we skip down to the last branch
@@ -581,17 +568,6 @@ where
                 let needs_more_inputs =
                     builder.utxos.is_some() || removed_change_output.value <= fee_difference;
                 let added_amount = if needs_more_inputs {
-                    // TODO: use the right weight instead of the maximum, and only fall-back to it if the
-                    // script is unknown in the database
-                    let input_witness_weight = std::cmp::max(
-                        self.get_descriptor_for_script_type(ScriptType::Internal)
-                            .0
-                            .max_satisfaction_weight(),
-                        self.get_descriptor_for_script_type(ScriptType::External)
-                            .0
-                            .max_satisfaction_weight(),
-                    );
-
                     let (available_utxos, use_all_utxos) = self.get_available_utxos(
                         builder.change_policy,
                         &builder.utxos,
@@ -613,11 +589,11 @@ where
                         selected_amount,
                         fee_amount,
                     } = builder.coin_selection.coin_select(
+                        self.database.borrow().deref(),
                         must_use_utxos,
                         may_use_utxos,
                         new_feerate,
                         fee_difference.saturating_sub(removed_change_output.value),
-                        input_witness_weight,
                         0.0,
                     )?;
                     fee_difference += fee_amount.ceil() as u64;
@@ -945,10 +921,28 @@ where
         utxo: &Option<Vec<OutPoint>>,
         unspendable: &Option<Vec<OutPoint>>,
         send_all: bool,
-    ) -> Result<(Vec<UTXO>, bool), Error> {
+    ) -> Result<(Vec<(UTXO, usize)>, bool), Error> {
         let unspendable_set = match unspendable {
             None => HashSet::new(),
             Some(vec) => vec.iter().collect(),
+        };
+
+        let external_weight = self
+            .get_descriptor_for_script_type(ScriptType::External)
+            .0
+            .max_satisfaction_weight();
+        let internal_weight = self
+            .get_descriptor_for_script_type(ScriptType::Internal)
+            .0
+            .max_satisfaction_weight();
+
+        let add_weight = |utxo: UTXO| {
+            let weight = match utxo.is_internal {
+                true => internal_weight,
+                false => external_weight,
+            };
+
+            (utxo, weight)
         };
 
         match utxo {
@@ -957,9 +951,15 @@ where
             Some(raw_utxos) => {
                 let full_utxos = raw_utxos
                     .iter()
-                    .map(|u| self.database.borrow().get_utxo(&u))
-                    .collect::<Result<Option<Vec<_>>, _>>()?
-                    .ok_or(Error::UnknownUTXO)?;
+                    .map(|u| {
+                        Ok(add_weight(
+                            self.database
+                                .borrow()
+                                .get_utxo(&u)?
+                                .ok_or(Error::UnknownUTXO)?,
+                        ))
+                    })
+                    .collect::<Result<Vec<_>, Error>>()?;
 
                 Ok((full_utxos, true))
             }
@@ -971,6 +971,7 @@ where
                 Ok((
                     utxos
                         .filter(|u| !unspendable_set.contains(&u.outpoint))
+                        .map(add_weight)
                         .collect(),
                     send_all,
                 ))
@@ -978,11 +979,11 @@ where
         }
     }
 
-    fn complete_transaction<Cs: coin_selection::CoinSelectionAlgorithm>(
+    fn complete_transaction<Cs: coin_selection::CoinSelectionAlgorithm<D>>(
         &self,
         tx: Transaction,
         prev_script_pubkeys: HashMap<OutPoint, Script>,
-        builder: TxBuilder<Cs>,
+        builder: TxBuilder<D, Cs>,
     ) -> Result<PSBT, Error> {
         let mut psbt = PSBT::from_unsigned_tx(tx)?;
 
