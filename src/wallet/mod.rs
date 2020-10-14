@@ -947,12 +947,10 @@ where
                 let full_utxos = raw_utxos
                     .iter()
                     .map(|u| self.database.borrow().get_utxo(&u))
-                    .collect::<Result<Vec<_>, _>>()?;
-                if !full_utxos.iter().all(|u| u.is_some()) {
-                    return Err(Error::UnknownUTXO);
-                }
+                    .collect::<Result<Option<Vec<_>>, _>>()?
+                    .ok_or(Error::UnknownUTXO)?;
 
-                Ok((full_utxos.into_iter().map(|x| x.unwrap()).collect(), true))
+                Ok((full_utxos, true))
             }
             // otherwise limit ourselves to the spendable utxos for the selected policy, and the `send_all` setting
             None => {
