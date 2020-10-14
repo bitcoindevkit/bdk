@@ -51,24 +51,25 @@
 //! impl CoinSelectionAlgorithm for AlwaysSpendEverything {
 //!     fn coin_select(
 //!         &self,
-//!         utxos: Vec<UTXO>,
-//!         _use_all_utxos: bool,
+//!         must_use_utxos: Vec<UTXO>,
+//!         may_use_utxos: Vec<UTXO>,
 //!         fee_rate: FeeRate,
 //!         amount_needed: u64,
 //!         input_witness_weight: usize,
 //!         fee_amount: f32,
 //!     ) -> Result<CoinSelectionResult, bdk::Error> {
-//!         let selected_amount = utxos.iter().fold(0, |acc, utxo| acc + utxo.txout.value);
-//!         let all_utxos_selected = utxos
-//!             .into_iter()
-//!             .map(|utxo| {
-//!                 (
+//!         let mut selected_amount = 0;
+//!         let all_utxos_selected = must_use_utxos
+//!             .into_iter().chain(may_use_utxos)
+//!             .scan(&mut selected_amount, |selected_amount, utxo| {
+//!                 **selected_amount += utxo.txout.value;
+//!                 Some((
 //!                     TxIn {
 //!                         previous_output: utxo.outpoint,
 //!                         ..Default::default()
 //!                     },
 //!                     utxo.txout.script_pubkey,
-//!                 )
+//!                 ))
 //!             })
 //!             .collect::<Vec<_>>();
 //!         let additional_weight = all_utxos_selected.iter().fold(0, |acc, (txin, _)| {
@@ -132,16 +133,16 @@ pub struct CoinSelectionResult {
 pub trait CoinSelectionAlgorithm: std::fmt::Debug {
     /// Perform the coin selection
     ///
-    /// - `utxos`: the list of spendable UTXOs
-    /// - `use_all_utxos`: if true all utxos should be spent unconditionally
+    /// - `must_use_utxos`: the utxos that must be spent regardless of `amount_needed`
+    /// - `may_be_spent`: the utxos that may be spent to satisfy `amount_needed`
     /// - `fee_rate`: fee rate to use
     /// - `amount_needed`: the amount in satoshi to select
     /// - `input_witness_weight`: the weight of an input's witness to keep into account for the fees
     /// - `fee_amount`: the amount of fees in satoshi already accumulated from adding outputs
     fn coin_select(
         &self,
-        utxos: Vec<UTXO>,
-        use_all_utxos: bool,
+        must_use_utxos: Vec<UTXO>,
+        may_use_utxos: Vec<UTXO>,
         fee_rate: FeeRate,
         amount_needed: u64,
         input_witness_weight: usize,
@@ -159,14 +160,13 @@ pub struct DumbCoinSelection;
 impl CoinSelectionAlgorithm for DumbCoinSelection {
     fn coin_select(
         &self,
-        mut utxos: Vec<UTXO>,
-        use_all_utxos: bool,
+        must_use_utxos: Vec<UTXO>,
+        mut may_use_utxos: Vec<UTXO>,
         fee_rate: FeeRate,
         outgoing_amount: u64,
         input_witness_weight: usize,
         mut fee_amount: f32,
     ) -> Result<CoinSelectionResult, Error> {
-        let mut txin = Vec::new();
         let calc_fee_bytes = |wu| (wu as f32) * fee_rate.as_sat_vb() / 4.0;
 
         log::debug!(
@@ -176,35 +176,51 @@ impl CoinSelectionAlgorithm for DumbCoinSelection {
             fee_rate
         );
 
-        // sort so that we pick them starting from the larger.
-        utxos.sort_by(|a, b| a.txout.value.partial_cmp(&b.txout.value).unwrap());
+        // We put the "must_use" UTXOs first and make sure the "may_use" are sorted largest to smallest
+        let utxos = {
+            may_use_utxos.sort_by(|a, b| b.txout.value.partial_cmp(&a.txout.value).unwrap());
+            must_use_utxos
+                .into_iter()
+                .map(|utxo| (true, utxo))
+                .chain(may_use_utxos.into_iter().map(|utxo| (false, utxo)))
+        };
 
-        let mut selected_amount: u64 = 0;
-        while use_all_utxos || selected_amount < outgoing_amount + (fee_amount.ceil() as u64) {
-            let utxo = match utxos.pop() {
-                Some(utxo) => utxo,
-                None if selected_amount < outgoing_amount + (fee_amount.ceil() as u64) => {
-                    return Err(Error::InsufficientFunds)
-                }
-                None if use_all_utxos => break,
-                None => return Err(Error::InsufficientFunds),
-            };
+        // Keep including inputs until we've got enough.
+        // Store the total input value in selected_amount and the total fee being paid in fee_amount
+        let mut selected_amount = 0;
+        let txin = utxos
+            .scan(
+                (&mut selected_amount, &mut fee_amount),
+                |(selected_amount, fee_amount), (must_use, utxo)| {
+                    if must_use || **selected_amount < outgoing_amount + (fee_amount.ceil() as u64)
+                    {
+                        let new_in = TxIn {
+                            previous_output: utxo.outpoint,
+                            script_sig: Script::default(),
+                            sequence: 0, // Let the caller choose the right nSequence
+                            witness: vec![],
+                        };
 
-            let new_in = TxIn {
-                previous_output: utxo.outpoint,
-                script_sig: Script::default(),
-                sequence: 0, // Let the caller choose the right nSequence
-                witness: vec![],
-            };
-            fee_amount += calc_fee_bytes(serialize(&new_in).len() * 4 + input_witness_weight);
-            log::debug!(
-                "Selected {}, updated fee_amount = `{}`",
-                new_in.previous_output,
-                fee_amount
-            );
+                        **fee_amount +=
+                            calc_fee_bytes(serialize(&new_in).len() * 4 + input_witness_weight);
+                        **selected_amount += utxo.txout.value;
 
-            txin.push((new_in, utxo.txout.script_pubkey));
-            selected_amount += utxo.txout.value;
+                        log::debug!(
+                            "Selected {}, updated fee_amount = `{}`",
+                            new_in.previous_output,
+                            fee_amount
+                        );
+
+                        Some((new_in, utxo.txout.script_pubkey))
+                    } else {
+                        None
+                    }
+                },
+            )
+            .collect::<Vec<_>>();
+
+        if selected_amount < outgoing_amount + (fee_amount.ceil() as u64) {
+            return Err(Error::InsufficientFunds);
         }
 
         Ok(CoinSelectionResult {
@@ -259,8 +275,8 @@ mod test {
 
         let result = DumbCoinSelection
             .coin_select(
+                vec![],
                 utxos,
-                false,
                 FeeRate::from_sat_per_vb(1.0),
                 250_000,
                 P2WPKH_WITNESS_SIZE,
@@ -280,7 +296,7 @@ mod test {
         let result = DumbCoinSelection
             .coin_select(
                 utxos,
-                true,
+                vec![],
                 FeeRate::from_sat_per_vb(1.0),
                 20_000,
                 P2WPKH_WITNESS_SIZE,
@@ -299,8 +315,8 @@ mod test {
 
         let result = DumbCoinSelection
             .coin_select(
+                vec![],
                 utxos,
-                false,
                 FeeRate::from_sat_per_vb(1.0),
                 20_000,
                 P2WPKH_WITNESS_SIZE,
@@ -320,8 +336,8 @@ mod test {
 
         DumbCoinSelection
             .coin_select(
+                vec![],
                 utxos,
-                false,
                 FeeRate::from_sat_per_vb(1.0),
                 500_000,
                 P2WPKH_WITNESS_SIZE,
@@ -337,8 +353,8 @@ mod test {
 
         DumbCoinSelection
             .coin_select(
+                vec![],
                 utxos,
-                false,
                 FeeRate::from_sat_per_vb(1000.0),
                 250_000,
                 P2WPKH_WITNESS_SIZE,

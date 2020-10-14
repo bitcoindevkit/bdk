@@ -359,13 +359,18 @@ where
             &builder.unspendable,
             builder.send_all,
         )?;
+
+        let (must_use_utxos, may_use_utxos) = match use_all_utxos {
+            true => (available_utxos, vec![]),
+            false => (vec![], available_utxos),
+        };
         let coin_selection::CoinSelectionResult {
             txin,
             selected_amount,
             mut fee_amount,
         } = builder.coin_selection.coin_select(
-            available_utxos,
-            use_all_utxos,
+            must_use_utxos,
+            may_use_utxos,
             fee_rate,
             outgoing,
             input_witness_weight,
@@ -597,13 +602,19 @@ where
                         self.database.borrow().deref(),
                         available_utxos.into_iter(),
                     )?;
+
+                    let (must_use_utxos, may_use_utxos) = match use_all_utxos {
+                        true => (available_utxos, vec![]),
+                        false => (vec![], available_utxos),
+                    };
+
                     let coin_selection::CoinSelectionResult {
                         txin,
                         selected_amount,
                         fee_amount,
                     } = builder.coin_selection.coin_select(
-                        available_utxos,
-                        use_all_utxos,
+                        must_use_utxos,
+                        may_use_utxos,
                         new_feerate,
                         fee_difference.saturating_sub(removed_change_output.value),
                         input_witness_weight,
