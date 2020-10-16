@@ -393,7 +393,7 @@ where
         };
 
         let mut fee_amount = fee_amount.ceil() as u64;
-        let change_val = selected_amount - outgoing - fee_amount;
+        let change_val = (selected_amount - outgoing).saturating_sub(fee_amount);
         if !builder.send_all && !change_val.is_dust() {
             let mut change_output = change_output.unwrap();
             change_output.value = change_val;
@@ -410,7 +410,7 @@ where
             }
         } else if !builder.send_all && change_val.is_dust() {
             // skip the change output because it's dust, this adds up to the fees
-            fee_amount += change_val;
+            fee_amount += selected_amount - outgoing;
         } else if builder.send_all {
             // send_all but the only output would be below dust limit
             return Err(Error::InsufficientFunds); // TODO: or OutputBelowDustLimit?
@@ -442,6 +442,9 @@ where
     /// **NOTE**: if the original transaction was made with [`TxBuilder::send_all`], the same
     /// option must be enabled when bumping its fees to correctly reduce the only output's value to
     /// increase the fees.
+    ///
+    /// If the `builder` specifies some `utxos` that must be spent, they will be added to the
+    /// transaction regardless of whether they are necessary or not to cover additional fees.
     ///
     /// ## Example
     ///
@@ -489,8 +492,6 @@ where
                 required: required_feerate,
             });
         }
-        let mut fee_difference =
-            (new_feerate.as_sat_vb() * tx.get_weight() as f32 / 4.0).ceil() as u64 - details.fees;
 
         if builder.send_all && tx.output.len() > 1 {
             return Err(Error::SendAllMultipleOutputs);
@@ -498,144 +499,187 @@ where
 
         // find the index of the output that we can update. either the change or the only one if
         // it's `send_all`
-        let updatable_output = if builder.send_all {
-            0
-        } else {
-            let mut change_output = None;
-            for (index, txout) in tx.output.iter().enumerate() {
-                // look for an output that we know and that has the right ScriptType. We use
-                // `get_descriptor_for` to find what's the ScriptType for `Internal`
-                // addresses really is, because if there's no change_descriptor it's actually equal
-                // to "External"
-                let (_, change_type) = self.get_descriptor_for_script_type(ScriptType::Internal);
-                match self
-                    .database
-                    .borrow()
-                    .get_path_from_script_pubkey(&txout.script_pubkey)?
-                {
-                    Some((script_type, _)) if script_type == change_type => {
-                        change_output = Some(index);
-                        break;
+        let updatable_output = match builder.send_all {
+            true => Some(0),
+            false => {
+                let mut change_output = None;
+                for (index, txout) in tx.output.iter().enumerate() {
+                    // look for an output that we know and that has the right ScriptType. We use
+                    // `get_descriptor_for` to find what's the ScriptType for `Internal`
+                    // addresses really is, because if there's no change_descriptor it's actually equal
+                    // to "External"
+                    let (_, change_type) =
+                        self.get_descriptor_for_script_type(ScriptType::Internal);
+                    match self
+                        .database
+                        .borrow()
+                        .get_path_from_script_pubkey(&txout.script_pubkey)?
+                    {
+                        Some((script_type, _)) if script_type == change_type => {
+                            change_output = Some(index);
+                            break;
+                        }
+                        _ => {}
                     }
-                    _ => {}
                 }
-            }
 
-            // we need a change output, add one here and take into account the extra fees for it
-            let change_script = self.get_change_address()?;
-            change_output.unwrap_or_else(|| {
+                change_output
+            }
+        };
+        let updatable_output = match updatable_output {
+            Some(updatable_output) => updatable_output,
+            None => {
+                // we need a change output, add one here and take into account the extra fees for it
+                let change_script = self.get_change_address()?;
                 let change_txout = TxOut {
                     script_pubkey: change_script,
                     value: 0,
                 };
-                fee_difference +=
-                    (serialize(&change_txout).len() as f32 * new_feerate.as_sat_vb()).ceil() as u64;
                 tx.output.push(change_txout);
 
                 tx.output.len() - 1
-            })
+            }
         };
 
-        // if `builder.utxos` is Some(_) we have to add inputs and we skip down to the last branch
-        match tx.output[updatable_output]
-            .value
-            .checked_sub(fee_difference)
-        {
-            Some(new_value) if !new_value.is_dust() && builder.utxos.is_none() => {
-                // try to reduce the "updatable output" amount
-                tx.output[updatable_output].value = new_value;
-                if self.is_mine(&tx.output[updatable_output].script_pubkey)? {
-                    details.received -= fee_difference;
-                }
+        // initially always remove the output we can change
+        let mut removed_updatable_output = tx.output.remove(updatable_output);
+        if self.is_mine(&removed_updatable_output.script_pubkey)? {
+            details.received -= removed_updatable_output.value;
+        }
 
-                details.fees += fee_difference;
-            }
-            _ if builder.send_all && builder.utxos.is_none() => {
-                // if the tx is "send_all" it doesn't make sense to either remove the only output
-                // or add more inputs
-                return Err(Error::InsufficientFunds);
-            }
-            _ => {
-                // initially always remove the change output
-                let mut removed_change_output = tx.output.remove(updatable_output);
-                if self.is_mine(&removed_change_output.script_pubkey)? {
-                    details.received -= removed_change_output.value;
-                }
+        let external_weight = self
+            .get_descriptor_for_script_type(ScriptType::External)
+            .0
+            .max_satisfaction_weight();
+        let internal_weight = self
+            .get_descriptor_for_script_type(ScriptType::Internal)
+            .0
+            .max_satisfaction_weight();
 
-                // we want to add more inputs if:
-                // - builder.utxos tells us to do so
-                // - the removed change value is lower than the fee_difference we want to add
-                let needs_more_inputs =
-                    builder.utxos.is_some() || removed_change_output.value <= fee_difference;
-                let added_amount = if needs_more_inputs {
-                    let (available_utxos, use_all_utxos) = self.get_available_utxos(
-                        builder.change_policy,
-                        &builder.utxos,
-                        &builder.unspendable,
-                        false,
-                    )?;
-                    let available_utxos = rbf::filter_available(
-                        self.database.borrow().deref(),
-                        available_utxos.into_iter(),
-                    )?;
+        let original_sequence = tx.input[0].sequence;
 
-                    let (must_use_utxos, may_use_utxos) = match use_all_utxos {
-                        true => (available_utxos, vec![]),
-                        false => (vec![], available_utxos),
-                    };
+        // remove the inputs from the tx and process them
+        let original_txin = tx.input.drain(..).collect::<Vec<_>>();
+        let mut original_utxos = original_txin
+            .iter()
+            .map(|txin| -> Result<(UTXO, usize), Error> {
+                let txout = self
+                    .database
+                    .borrow()
+                    .get_previous_output(&txin.previous_output)?
+                    .ok_or(Error::UnknownUTXO)?;
 
-                    let coin_selection::CoinSelectionResult {
-                        txin,
-                        selected_amount,
-                        fee_amount,
-                    } = builder.coin_selection.coin_select(
-                        self.database.borrow().deref(),
-                        must_use_utxos,
-                        may_use_utxos,
-                        new_feerate,
-                        fee_difference.saturating_sub(removed_change_output.value),
-                        0.0,
-                    )?;
-                    fee_difference += fee_amount.ceil() as u64;
-
-                    // add the new inputs
-                    let (mut txin, _): (Vec<_>, Vec<_>) = txin.into_iter().unzip();
-
-                    // TODO: use tx_builder.sequence ??
-                    // copy the n_sequence from the inputs that were already in the transaction
-                    txin.iter_mut()
-                        .for_each(|i| i.sequence = tx.input[0].sequence);
-                    tx.input.extend_from_slice(&txin);
-
-                    details.sent += selected_amount;
-                    selected_amount
-                } else {
-                    // otherwise just remove the output and add 0 new coins
-                    0
+                let (weight, is_internal) = match self
+                    .database
+                    .borrow()
+                    .get_path_from_script_pubkey(&txout.script_pubkey)?
+                {
+                    Some((ScriptType::Internal, _)) => (internal_weight, true),
+                    Some((ScriptType::External, _)) => (external_weight, false),
+                    None => {
+                        // estimate the weight based on the scriptsig/witness size present in the
+                        // original transaction
+                        let weight =
+                            serialize(&txin.script_sig).len() * 4 + serialize(&txin.witness).len();
+                        (weight, false)
+                    }
                 };
 
-                match (removed_change_output.value + added_amount).checked_sub(fee_difference) {
-                    None => return Err(Error::InsufficientFunds),
-                    Some(new_value) if new_value.is_dust() => {
-                        // the change would be dust, add that to fees
-                        details.fees += fee_difference + new_value;
-                    }
-                    Some(new_value) => {
-                        // add the change back
-                        removed_change_output.value = new_value;
-                        tx.output.push(removed_change_output);
+                let utxo = UTXO {
+                    outpoint: txin.previous_output,
+                    txout,
+                    is_internal,
+                };
 
-                        details.received += new_value;
-                        details.fees += fee_difference;
-                    }
-                }
-            }
+                Ok((utxo, weight))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let builder_extra_utxos = builder.utxos.as_ref().map(|utxos| {
+            utxos
+                .iter()
+                .filter(|utxo| {
+                    !original_txin
+                        .iter()
+                        .any(|txin| &&txin.previous_output == utxo)
+                })
+                .cloned()
+                .collect()
+        });
+        let (available_utxos, use_all_utxos) = self.get_available_utxos(
+            builder.change_policy,
+            &builder_extra_utxos,
+            &builder.unspendable,
+            false,
+        )?;
+        let available_utxos =
+            rbf::filter_available(self.database.borrow().deref(), available_utxos.into_iter())?;
+
+        let (mut must_use_utxos, may_use_utxos) = match use_all_utxos {
+            true => (available_utxos, vec![]),
+            false => (vec![], available_utxos),
         };
+        must_use_utxos.append(&mut original_utxos);
 
-        // clear witnesses
-        for input in &mut tx.input {
-            input.script_sig = Script::default();
-            input.witness = vec![];
+        let amount_needed = tx.output.iter().fold(0, |acc, out| acc + out.value);
+        let initial_fee = tx.get_weight() as f32 / 4.0 * new_feerate.as_sat_vb();
+        let coin_selection::CoinSelectionResult {
+            txin,
+            selected_amount,
+            fee_amount,
+        } = builder.coin_selection.coin_select(
+            self.database.borrow().deref(),
+            must_use_utxos,
+            may_use_utxos,
+            new_feerate,
+            amount_needed,
+            initial_fee,
+        )?;
+
+        let (mut txin, prev_script_pubkeys): (Vec<_>, Vec<_>) = txin.into_iter().unzip();
+        // map that allows us to lookup the prev_script_pubkey for a given previous_output
+        let prev_script_pubkeys = txin
+            .iter()
+            .zip(prev_script_pubkeys.into_iter())
+            .map(|(txin, script)| (txin.previous_output, script))
+            .collect::<HashMap<_, _>>();
+
+        // TODO: use builder.n_sequence??
+        // use the same n_sequence
+        txin.iter_mut().for_each(|i| i.sequence = original_sequence);
+        tx.input = txin;
+
+        details.sent = selected_amount;
+
+        let mut fee_amount = fee_amount.ceil() as u64;
+        let removed_output_fee_cost = (serialize(&removed_updatable_output).len() as f32
+            * new_feerate.as_sat_vb())
+        .ceil() as u64;
+
+        let change_val = selected_amount - amount_needed - fee_amount;
+        let change_val_after_add = change_val.saturating_sub(removed_output_fee_cost);
+        if !builder.send_all && !change_val_after_add.is_dust() {
+            removed_updatable_output.value = change_val_after_add;
+            fee_amount += removed_output_fee_cost;
+            details.received += change_val_after_add;
+
+            tx.output.push(removed_updatable_output);
+        } else if builder.send_all && !change_val_after_add.is_dust() {
+            removed_updatable_output.value = change_val_after_add;
+            fee_amount += removed_output_fee_cost;
+
+            // send_all to our address
+            if self.is_mine(&removed_updatable_output.script_pubkey)? {
+                details.received = change_val_after_add;
+            }
+
+            tx.output.push(removed_updatable_output);
+        } else if !builder.send_all && change_val_after_add.is_dust() {
+            // skip the change output because it's dust, this adds up to the fees
+            fee_amount += change_val;
+        } else if builder.send_all {
+            // send_all but the only output would be below dust limit
+            return Err(Error::InsufficientFunds); // TODO: or OutputBelowDustLimit?
         }
 
         // sort input/outputs according to the chosen algorithm
@@ -644,26 +688,9 @@ where
         // TODO: check that we are not replacing more than 100 txs from mempool
 
         details.txid = tx.txid();
+        details.fees = fee_amount;
         details.timestamp = time::get_timestamp();
 
-        let prev_script_pubkeys = tx
-            .input
-            .iter()
-            .map(|txin| {
-                Ok((
-                    txin.previous_output,
-                    self.database
-                        .borrow()
-                        .get_previous_output(&txin.previous_output)?,
-                ))
-            })
-            .collect::<Result<Vec<_>, Error>>()?
-            .into_iter()
-            .filter_map(|(outpoint, txout)| match txout {
-                Some(txout) => Some((outpoint, txout.script_pubkey)),
-                None => None,
-            })
-            .collect();
         let psbt = self.complete_transaction(tx, prev_script_pubkeys, builder)?;
 
         Ok((psbt, details))
