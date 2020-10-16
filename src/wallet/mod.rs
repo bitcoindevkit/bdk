@@ -35,7 +35,7 @@ use std::sync::Arc;
 use bitcoin::consensus::encode::serialize;
 use bitcoin::util::bip32::ChildNumber;
 use bitcoin::util::psbt::PartiallySignedTransaction as PSBT;
-use bitcoin::{Address, Network, OutPoint, Script, SigHashType, Transaction, TxOut, Txid};
+use bitcoin::{Address, Network, OutPoint, Script, Transaction, TxOut, Txid};
 
 use miniscript::psbt::PsbtInputSatisfier;
 
@@ -1025,8 +1025,11 @@ where
                 None => continue,
             };
 
-            // Add sighash, default is obviously "ALL"
-            psbt_input.sighash_type = builder.sighash.or(Some(SigHashType::All));
+            // Only set it if the builder has a custom one, otherwise leave blank which defaults to
+            // SIGHASH_ALL
+            if let Some(sighash_type) = builder.sighash {
+                psbt_input.sighash_type = Some(sighash_type);
+            }
 
             // Try to find the prev_script in our db to figure out if this is internal or external,
             // and the derivation index
@@ -1742,7 +1745,7 @@ mod test {
             )]))
             .unwrap();
 
-        assert_eq!(psbt.inputs[0].sighash_type, Some(bitcoin::SigHashType::All));
+        assert_eq!(psbt.inputs[0].sighash_type, None);
     }
 
     #[test]

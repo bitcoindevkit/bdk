@@ -136,8 +136,6 @@ pub enum SignerError {
     InvalidKey,
     /// The user canceled the operation
     UserCanceled,
-    /// The sighash is missing in the PSBT input
-    MissingSighash,
     /// Input index is out of range
     InputIndexOutOfRange,
     /// The `non_witness_utxo` field of the transaction is required to sign this input
@@ -432,7 +430,7 @@ impl ComputeSighash for Legacy {
         let psbt_input = &psbt.inputs[input_index];
         let tx_input = &psbt.global.unsigned_tx.input[input_index];
 
-        let sighash = psbt_input.sighash_type.ok_or(SignerError::MissingSighash)?;
+        let sighash = psbt_input.sighash_type.unwrap_or(SigHashType::All);
         let script = match psbt_input.redeem_script {
             Some(ref redeem_script) => redeem_script.clone(),
             None => {
@@ -479,7 +477,7 @@ impl ComputeSighash for Segwitv0 {
 
         let psbt_input = &psbt.inputs[input_index];
 
-        let sighash = psbt_input.sighash_type.ok_or(SignerError::MissingSighash)?;
+        let sighash = psbt_input.sighash_type.unwrap_or(SigHashType::All);
 
         let witness_utxo = psbt_input
             .witness_utxo
