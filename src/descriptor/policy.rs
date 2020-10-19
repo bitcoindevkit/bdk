@@ -980,7 +980,7 @@ mod test {
         let (prvkey, pubkey, fingerprint) = setup_keys(TPRV0_STR);
         let desc = descriptor!(wpkh(pubkey)).unwrap();
         let (wallet_desc, keymap) = desc.to_wallet_descriptor(Network::Testnet).unwrap();
-        let single_key = wallet_desc.derive(&[ChildNumber::from_normal_idx(0).unwrap()]);
+        let single_key = wallet_desc.derive(ChildNumber::from_normal_idx(0).unwrap());
         let signers_container = Arc::new(SignersContainer::from(keymap));
         let policy = single_key
             .extract_policy(signers_container)
@@ -994,7 +994,7 @@ mod test {
 
         let desc = descriptor!(wpkh(prvkey)).unwrap();
         let (wallet_desc, keymap) = desc.to_wallet_descriptor(Network::Testnet).unwrap();
-        let single_key = wallet_desc.derive(&[ChildNumber::from_normal_idx(0).unwrap()]);
+        let single_key = wallet_desc.derive(ChildNumber::from_normal_idx(0).unwrap());
         let signers_container = Arc::new(SignersContainer::from(keymap));
         let policy = single_key
             .extract_policy(signers_container)
@@ -1016,7 +1016,7 @@ mod test {
         let (prvkey1, _pubkey1, fingerprint1) = setup_keys(TPRV1_STR);
         let desc = descriptor!(sh(multi 1, pubkey0, prvkey1)).unwrap();
         let (wallet_desc, keymap) = desc.to_wallet_descriptor(Network::Testnet).unwrap();
-        let single_key = wallet_desc.derive(&[ChildNumber::from_normal_idx(0).unwrap()]);
+        let single_key = wallet_desc.derive(ChildNumber::from_normal_idx(0).unwrap());
         let signers_container = Arc::new(SignersContainer::from(keymap));
         let policy = single_key
             .extract_policy(signers_container)

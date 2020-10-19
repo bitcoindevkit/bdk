@@ -451,7 +451,7 @@ mod test {
             let child_desc = if desc.is_fixed() {
                 desc.clone()
             } else {
-                desc.derive(&[ChildNumber::from_normal_idx(index).unwrap()])
+                desc.derive(ChildNumber::from_normal_idx(index).unwrap())
             };
             let address = child_desc.address(Regtest).unwrap();
             assert_eq!(address.to_string(), *expected.get(i).unwrap());
