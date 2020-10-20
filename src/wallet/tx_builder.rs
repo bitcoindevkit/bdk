@@ -321,10 +321,7 @@ impl<D: Database, Cs: CoinSelectionAlgorithm<D>> TxBuilder<D, Cs> {
         if self.fee_policy.is_none() {
             return false;
         };
-        match self.fee_policy.as_ref().unwrap() {
-            FeePolicy::FeeAmount(_) => true,
-            _ => false,
-        }
+        matches!(self.fee_policy.as_ref().unwrap(), FeePolicy::FeeAmount(_))
     }
 }
 
