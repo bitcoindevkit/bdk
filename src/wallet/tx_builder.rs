@@ -57,7 +57,7 @@ use crate::types::{FeeRate, UTXO};
 pub struct TxBuilder<Cs: CoinSelectionAlgorithm> {
     pub(crate) recipients: Vec<(Script, u64)>,
     pub(crate) send_all: bool,
-    pub(crate) fee_rate: Option<FeeRate>,
+    pub(crate) fee_policy: Option<FeePolicy>,
     pub(crate) policy_path: Option<BTreeMap<String, Vec<usize>>>,
     pub(crate) utxos: Option<Vec<OutPoint>>,
     pub(crate) unspendable: Option<Vec<OutPoint>>,
@@ -69,6 +69,12 @@ pub struct TxBuilder<Cs: CoinSelectionAlgorithm> {
     pub(crate) change_policy: ChangeSpendPolicy,
     pub(crate) force_non_witness_utxo: bool,
     pub(crate) coin_selection: Cs,
+}
+
+#[derive(Debug)]
+pub enum FeePolicy {
+    FeeRate(FeeRate),
+    FeeAmount(u64),
 }
 
 impl TxBuilder<DefaultCoinSelectionAlgorithm> {
@@ -108,7 +114,13 @@ impl<Cs: CoinSelectionAlgorithm> TxBuilder<Cs> {
 
     /// Set a custom fee rate
     pub fn fee_rate(mut self, fee_rate: FeeRate) -> Self {
-        self.fee_rate = Some(fee_rate);
+        self.fee_policy = Some(FeePolicy::FeeRate(fee_rate));
+        self
+    }
+
+    /// Set an absolute fee
+    pub fn fee_absolute(mut self, fee_amount: u64) -> Self {
+        self.fee_policy = Some(FeePolicy::FeeAmount(fee_amount));
         self
     }
 
@@ -252,7 +264,7 @@ impl<Cs: CoinSelectionAlgorithm> TxBuilder<Cs> {
         TxBuilder {
             recipients: self.recipients,
             send_all: self.send_all,
-            fee_rate: self.fee_rate,
+            fee_policy: self.fee_policy,
             policy_path: self.policy_path,
             utxos: self.utxos,
             unspendable: self.unspendable,
@@ -264,6 +276,17 @@ impl<Cs: CoinSelectionAlgorithm> TxBuilder<Cs> {
             change_policy: self.change_policy,
             force_non_witness_utxo: self.force_non_witness_utxo,
             coin_selection,
+        }
+    }
+
+    /// Returns true if an absolute fee was specified
+    pub fn has_absolute_fee(&self) -> bool {
+        if self.fee_policy.is_none() {
+            return false;
+        };
+        match self.fee_policy.as_ref().unwrap() {
+            FeePolicy::FeeAmount(_) => true,
+            _ => false,
         }
     }
 }
