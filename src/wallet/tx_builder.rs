@@ -60,7 +60,7 @@ use crate::types::{FeeRate, UTXO};
 pub struct TxBuilder<D: Database, Cs: CoinSelectionAlgorithm<D>> {
     pub(crate) recipients: Vec<(Script, u64)>,
     pub(crate) send_all: bool,
-    pub(crate) fee_rate: Option<FeeRate>,
+    pub(crate) fee_policy: Option<FeePolicy>,
     pub(crate) policy_path: Option<BTreeMap<String, Vec<usize>>>,
     pub(crate) utxos: Option<Vec<OutPoint>>,
     pub(crate) unspendable: Option<Vec<OutPoint>>,
@@ -76,6 +76,12 @@ pub struct TxBuilder<D: Database, Cs: CoinSelectionAlgorithm<D>> {
     phantom: PhantomData<D>,
 }
 
+#[derive(Debug)]
+pub enum FeePolicy {
+    FeeRate(FeeRate),
+    FeeAmount(u64),
+}
+
 // Unfortunately derive doesn't work with `PhantomData`: https://github.com/rust-lang/rust/issues/26925
 impl<D: Database, Cs: CoinSelectionAlgorithm<D>> Default for TxBuilder<D, Cs>
 where
@@ -85,7 +91,7 @@ where
         TxBuilder {
             recipients: Default::default(),
             send_all: Default::default(),
-            fee_rate: Default::default(),
+            fee_policy: Default::default(),
             policy_path: Default::default(),
             utxos: Default::default(),
             unspendable: Default::default(),
@@ -140,7 +146,13 @@ impl<D: Database, Cs: CoinSelectionAlgorithm<D>> TxBuilder<D, Cs> {
 
     /// Set a custom fee rate
     pub fn fee_rate(mut self, fee_rate: FeeRate) -> Self {
-        self.fee_rate = Some(fee_rate);
+        self.fee_policy = Some(FeePolicy::FeeRate(fee_rate));
+        self
+    }
+
+    /// Set an absolute fee
+    pub fn fee_absolute(mut self, fee_amount: u64) -> Self {
+        self.fee_policy = Some(FeePolicy::FeeAmount(fee_amount));
         self
     }
 
@@ -287,7 +299,7 @@ impl<D: Database, Cs: CoinSelectionAlgorithm<D>> TxBuilder<D, Cs> {
         TxBuilder {
             recipients: self.recipients,
             send_all: self.send_all,
-            fee_rate: self.fee_rate,
+            fee_policy: self.fee_policy,
             policy_path: self.policy_path,
             utxos: self.utxos,
             unspendable: self.unspendable,
@@ -301,6 +313,17 @@ impl<D: Database, Cs: CoinSelectionAlgorithm<D>> TxBuilder<D, Cs> {
             coin_selection,
 
             phantom: PhantomData,
+        }
+    }
+
+    /// Returns true if an absolute fee was specified
+    pub fn has_absolute_fee(&self) -> bool {
+        if self.fee_policy.is_none() {
+            return false;
+        };
+        match self.fee_policy.as_ref().unwrap() {
+            FeePolicy::FeeAmount(_) => true,
+            _ => false,
         }
     }
 }

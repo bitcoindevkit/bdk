@@ -55,7 +55,7 @@ pub use utils::IsDust;
 
 use address_validator::AddressValidator;
 use signer::{Signer, SignerId, SignerOrdering, SignersContainer};
-use tx_builder::TxBuilder;
+use tx_builder::{FeePolicy, TxBuilder};
 use utils::{After, Older};
 
 use crate::blockchain::{Blockchain, BlockchainMarker, OfflineBlockchain, Progress};
@@ -299,7 +299,7 @@ where
             output: vec![],
         };
 
-        let fee_rate = builder.fee_rate.unwrap_or_default();
+        let fee_rate = get_fee_rate(&builder.fee_policy);
         if builder.send_all && builder.recipients.len() != 1 {
             return Err(Error::SendAllMultipleOutputs);
         }
@@ -393,6 +393,14 @@ where
         };
 
         let mut fee_amount = fee_amount.ceil() as u64;
+
+        if builder.has_absolute_fee() {
+            fee_amount = match builder.fee_policy.as_ref().unwrap() {
+                FeePolicy::FeeAmount(amount) => *amount,
+                _ => fee_amount,
+            }
+        };
+
         let change_val = (selected_amount - outgoing).saturating_sub(fee_amount);
         if !builder.send_all && !change_val.is_dust() {
             let mut change_output = change_output.unwrap();
@@ -485,9 +493,9 @@ where
         // the new tx must "pay for its bandwidth"
         let vbytes = tx.get_weight() as f32 / 4.0;
         let required_feerate = FeeRate::from_sat_per_vb(details.fees as f32 / vbytes + 1.0);
-        let new_feerate = builder.fee_rate.unwrap_or_default();
+        let new_feerate = get_fee_rate(&builder.fee_policy);
 
-        if new_feerate < required_feerate {
+        if new_feerate < required_feerate && !builder.has_absolute_fee() {
             return Err(Error::FeeRateTooLow {
                 required: required_feerate,
             });
@@ -623,6 +631,15 @@ where
 
         let amount_needed = tx.output.iter().fold(0, |acc, out| acc + out.value);
         let initial_fee = tx.get_weight() as f32 / 4.0 * new_feerate.as_sat_vb();
+        let initial_fee = if builder.has_absolute_fee() {
+            match builder.fee_policy.as_ref().unwrap() {
+                FeePolicy::FeeAmount(amount) => *amount as f32,
+                _ => initial_fee,
+            }
+        } else {
+            initial_fee
+        };
+
         let coin_selection::CoinSelectionResult {
             txin,
             selected_amount,
@@ -652,6 +669,12 @@ where
         details.sent = selected_amount;
 
         let mut fee_amount = fee_amount.ceil() as u64;
+        if builder.has_absolute_fee() {
+            fee_amount = match builder.fee_policy.as_ref().unwrap() {
+                FeePolicy::FeeAmount(amount) => *amount,
+                _ => fee_amount,
+            }
+        };
         let removed_output_fee_cost = (serialize(&removed_updatable_output).len() as f32
             * new_feerate.as_sat_vb())
         .ceil() as u64;
@@ -659,14 +682,23 @@ where
         let change_val = selected_amount - amount_needed - fee_amount;
         let change_val_after_add = change_val.saturating_sub(removed_output_fee_cost);
         if !builder.send_all && !change_val_after_add.is_dust() {
-            removed_updatable_output.value = change_val_after_add;
-            fee_amount += removed_output_fee_cost;
-            details.received += change_val_after_add;
+            if builder.has_absolute_fee() {
+                removed_updatable_output.value = change_val_after_add + removed_output_fee_cost;
+                details.received += change_val_after_add + removed_output_fee_cost;
+            } else {
+                removed_updatable_output.value = change_val_after_add;
+                fee_amount += removed_output_fee_cost;
+                details.received += change_val_after_add;
+            }
 
             tx.output.push(removed_updatable_output);
         } else if builder.send_all && !change_val_after_add.is_dust() {
-            removed_updatable_output.value = change_val_after_add;
-            fee_amount += removed_output_fee_cost;
+            if builder.has_absolute_fee() {
+                removed_updatable_output.value = change_val_after_add + removed_output_fee_cost;
+            } else {
+                removed_updatable_output.value = change_val_after_add;
+                fee_amount += removed_output_fee_cost;
+            }
 
             // send_all to our address
             if self.is_mine(&removed_updatable_output.script_pubkey)? {
@@ -1210,6 +1242,17 @@ where
     }
 }
 
+/// get the fee rate if specified or a default
+fn get_fee_rate(fee_policy: &Option<FeePolicy>) -> FeeRate {
+    if fee_policy.is_none() {
+        return FeeRate::default();
+    }
+    match fee_policy.as_ref().unwrap() {
+        FeePolicy::FeeRate(fr) => *fr,
+        _ => FeeRate::default(),
+    }
+}
+
 #[cfg(test)]
 mod test {
     use std::str::FromStr;
@@ -1661,6 +1704,21 @@ mod test {
     }
 
     #[test]
+    fn test_create_tx_absolute_fee() {
+        let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
+        let addr = wallet.get_new_address().unwrap();
+        let (psbt, details) = wallet
+            .create_tx(
+                TxBuilder::with_recipients(vec![(addr.script_pubkey(), 0)])
+                    .fee_absolute(100)
+                    .send_all(),
+            )
+            .unwrap();
+
+        assert_eq!(details.fees, 100);
+    }
+
+    #[test]
     fn test_create_tx_add_change() {
         use super::tx_builder::TxOrdering;
 
@@ -2050,6 +2108,71 @@ mod test {
     }
 
     #[test]
+    fn test_bump_fee_absolute_reduce_change() {
+        let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
+        let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
+        let (psbt, mut original_details) = wallet
+            .create_tx(
+                TxBuilder::with_recipients(vec![(addr.script_pubkey(), 25_000)]).enable_rbf(),
+            )
+            .unwrap();
+        let mut tx = psbt.extract_tx();
+        let txid = tx.txid();
+        // skip saving the new utxos, we know they can't be used anyways
+        for txin in &mut tx.input {
+            txin.witness.push([0x00; 108].to_vec()); // fake signature
+            wallet
+                .database
+                .borrow_mut()
+                .del_utxo(&txin.previous_output)
+                .unwrap();
+        }
+        original_details.transaction = Some(tx);
+        wallet
+            .database
+            .borrow_mut()
+            .set_tx(&original_details)
+            .unwrap();
+
+        let (psbt, details) = wallet
+            .bump_fee(&txid, TxBuilder::new().fee_absolute(200))
+            .unwrap();
+
+        assert_eq!(details.sent, original_details.sent);
+        assert_eq!(
+            details.received + details.fees,
+            original_details.received + original_details.fees
+        );
+        assert!(
+            details.fees > original_details.fees,
+            "{} > {}",
+            details.fees,
+            original_details.fees
+        );
+
+        let tx = &psbt.global.unsigned_tx;
+        assert_eq!(tx.output.len(), 2);
+        assert_eq!(
+            tx.output
+                .iter()
+                .find(|txout| txout.script_pubkey == addr.script_pubkey())
+                .unwrap()
+                .value,
+            25_000
+        );
+        assert_eq!(
+            tx.output
+                .iter()
+                .find(|txout| txout.script_pubkey != addr.script_pubkey())
+                .unwrap()
+                .value,
+            details.received
+        );
+
+        assert_eq!(details.fees, 200);
+    }
+
+    #[test]
     fn test_bump_fee_reduce_send_all() {
         let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
         let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
@@ -2094,6 +2217,48 @@ mod test {
         assert_eq!(tx.output[0].value + details.fees, details.sent);
 
         assert_fee_rate!(psbt.extract_tx(), details.fees, FeeRate::from_sat_per_vb(2.5), @add_signature);
+    }
+
+    #[test]
+    fn test_bump_fee_absolute_reduce_send_all() {
+        let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
+        let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
+        let (psbt, mut original_details) = wallet
+            .create_tx(
+                TxBuilder::with_recipients(vec![(addr.script_pubkey(), 0)])
+                    .send_all()
+                    .enable_rbf(),
+            )
+            .unwrap();
+        let mut tx = psbt.extract_tx();
+        let txid = tx.txid();
+        for txin in &mut tx.input {
+            txin.witness.push([0x00; 108].to_vec()); // fake signature
+            wallet
+                .database
+                .borrow_mut()
+                .del_utxo(&txin.previous_output)
+                .unwrap();
+        }
+        original_details.transaction = Some(tx);
+        wallet
+            .database
+            .borrow_mut()
+            .set_tx(&original_details)
+            .unwrap();
+
+        let (psbt, details) = wallet
+            .bump_fee(&txid, TxBuilder::new().send_all().fee_absolute(300))
+            .unwrap();
+
+        assert_eq!(details.sent, original_details.sent);
+        assert!(details.fees > original_details.fees);
+
+        let tx = &psbt.global.unsigned_tx;
+        assert_eq!(tx.output.len(), 1);
+        assert_eq!(tx.output[0].value + details.fees, details.sent);
+
+        assert_eq!(details.fees, 300);
     }
 
     #[test]
@@ -2209,6 +2374,68 @@ mod test {
         );
 
         assert_fee_rate!(psbt.extract_tx(), details.fees, FeeRate::from_sat_per_vb(50.0), @add_signature);
+    }
+
+    #[test]
+    fn test_bump_fee_absolute_add_input() {
+        let (wallet, descriptors, _) = get_funded_wallet(get_test_wpkh());
+        wallet.database.borrow_mut().received_tx(
+            testutils! (@tx ( (@external descriptors, 0) => 25_000 ) (@confirmations 1)),
+            Some(100),
+        );
+
+        let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
+        let (psbt, mut original_details) = wallet
+            .create_tx(
+                TxBuilder::with_recipients(vec![(addr.script_pubkey(), 45_000)]).enable_rbf(),
+            )
+            .unwrap();
+        let mut tx = psbt.extract_tx();
+        let txid = tx.txid();
+        // skip saving the new utxos, we know they can't be used anyways
+        for txin in &mut tx.input {
+            txin.witness.push([0x00; 108].to_vec()); // fake signature
+            wallet
+                .database
+                .borrow_mut()
+                .del_utxo(&txin.previous_output)
+                .unwrap();
+        }
+        original_details.transaction = Some(tx);
+        wallet
+            .database
+            .borrow_mut()
+            .set_tx(&original_details)
+            .unwrap();
+
+        let (psbt, details) = wallet
+            .bump_fee(&txid, TxBuilder::new().fee_absolute(6_000))
+            .unwrap();
+
+        assert_eq!(details.sent, original_details.sent + 25_000);
+        assert_eq!(details.fees + details.received, 30_000);
+
+        let tx = &psbt.global.unsigned_tx;
+        assert_eq!(tx.input.len(), 2);
+        assert_eq!(tx.output.len(), 2);
+        assert_eq!(
+            tx.output
+                .iter()
+                .find(|txout| txout.script_pubkey == addr.script_pubkey())
+                .unwrap()
+                .value,
+            45_000
+        );
+        assert_eq!(
+            tx.output
+                .iter()
+                .find(|txout| txout.script_pubkey != addr.script_pubkey())
+                .unwrap()
+                .value,
+            details.received
+        );
+
+        assert_eq!(details.fees, 6_000);
     }
 
     #[test]
@@ -2420,6 +2647,78 @@ mod test {
         );
 
         assert_fee_rate!(psbt.extract_tx(), details.fees, FeeRate::from_sat_per_vb(5.0), @add_signature);
+    }
+
+    #[test]
+    fn test_bump_fee_absolute_force_add_input() {
+        let (wallet, descriptors, _) = get_funded_wallet(get_test_wpkh());
+        let incoming_txid = wallet.database.borrow_mut().received_tx(
+            testutils! (@tx ( (@external descriptors, 0) => 25_000 ) (@confirmations 1)),
+            Some(100),
+        );
+
+        let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
+        let (psbt, mut original_details) = wallet
+            .create_tx(
+                TxBuilder::with_recipients(vec![(addr.script_pubkey(), 45_000)]).enable_rbf(),
+            )
+            .unwrap();
+        let mut tx = psbt.extract_tx();
+        let txid = tx.txid();
+        // skip saving the new utxos, we know they can't be used anyways
+        for txin in &mut tx.input {
+            txin.witness.push([0x00; 108].to_vec()); // fake signature
+            wallet
+                .database
+                .borrow_mut()
+                .del_utxo(&txin.previous_output)
+                .unwrap();
+        }
+        original_details.transaction = Some(tx);
+        wallet
+            .database
+            .borrow_mut()
+            .set_tx(&original_details)
+            .unwrap();
+
+        // the new fee_rate is low enough that just reducing the change would be fine, but we force
+        // the addition of an extra input with `add_utxo()`
+        let (psbt, details) = wallet
+            .bump_fee(
+                &txid,
+                TxBuilder::new()
+                    .add_utxo(OutPoint {
+                        txid: incoming_txid,
+                        vout: 0,
+                    })
+                    .fee_absolute(250),
+            )
+            .unwrap();
+
+        assert_eq!(details.sent, original_details.sent + 25_000);
+        assert_eq!(details.fees + details.received, 30_000);
+
+        let tx = &psbt.global.unsigned_tx;
+        assert_eq!(tx.input.len(), 2);
+        assert_eq!(tx.output.len(), 2);
+        assert_eq!(
+            tx.output
+                .iter()
+                .find(|txout| txout.script_pubkey == addr.script_pubkey())
+                .unwrap()
+                .value,
+            45_000
+        );
+        assert_eq!(
+            tx.output
+                .iter()
+                .find(|txout| txout.script_pubkey != addr.script_pubkey())
+                .unwrap()
+                .value,
+            details.received
+        );
+
+        assert_eq!(details.fees, 250);
     }
 
     #[test]
