@@ -551,8 +551,9 @@ where
                     value: 0,
                 };
                 if !builder.has_absolute_fee() {
-                    fee_difference +=
-                        (serialize(&change_txout).len() as f32 * new_feerate.as_sat_vb()).ceil() as u64;
+                    fee_difference += (serialize(&change_txout).len() as f32
+                        * new_feerate.as_sat_vb())
+                    .ceil() as u64;
                 }
                 tx.output.push(change_txout);
 
@@ -2089,10 +2090,7 @@ mod test {
             .unwrap();
 
         let (psbt, details) = wallet
-            .bump_fee(
-                &txid,
-                TxBuilder::new().fee_absolute(200),
-            )
+            .bump_fee(&txid, TxBuilder::new().fee_absolute(200))
             .unwrap();
 
         assert_eq!(details.sent, original_details.sent);
@@ -2100,7 +2098,12 @@ mod test {
             details.received + details.fees,
             original_details.received + original_details.fees
         );
-        assert!(details.fees > original_details.fees, "{} > {}", details.fees, original_details.fees);
+        assert!(
+            details.fees > original_details.fees,
+            "{} > {}",
+            details.fees,
+            original_details.fees
+        );
 
         let tx = &psbt.global.unsigned_tx;
         assert_eq!(tx.output.len(), 2);
@@ -2200,12 +2203,7 @@ mod test {
             .unwrap();
 
         let (psbt, details) = wallet
-            .bump_fee(
-                &txid,
-                TxBuilder::new()
-                    .send_all()
-                    .fee_absolute(300),
-            )
+            .bump_fee(&txid, TxBuilder::new().send_all().fee_absolute(300))
             .unwrap();
 
         assert_eq!(details.sent, original_details.sent);
@@ -2366,10 +2364,7 @@ mod test {
             .unwrap();
 
         let (psbt, details) = wallet
-            .bump_fee(
-                &txid,
-                TxBuilder::new().fee_absolute(6_000),
-            )
+            .bump_fee(&txid, TxBuilder::new().fee_absolute(6_000))
             .unwrap();
 
         assert_eq!(details.sent, original_details.sent + 25_000);
