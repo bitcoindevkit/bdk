@@ -397,11 +397,11 @@ impl Default for ChangeSpendPolicy {
 }
 
 impl ChangeSpendPolicy {
-    pub(crate) fn filter_utxos<I: Iterator<Item = UTXO>>(&self, iter: I) -> Vec<UTXO> {
+    pub(crate) fn is_satisfied_by(&self, utxo: &UTXO) -> bool {
         match self {
-            ChangeSpendPolicy::ChangeAllowed => iter.collect(),
-            ChangeSpendPolicy::OnlyChange => iter.filter(|utxo| utxo.is_internal).collect(),
-            ChangeSpendPolicy::ChangeForbidden => iter.filter(|utxo| !utxo.is_internal).collect(),
+            ChangeSpendPolicy::ChangeAllowed => true,
+            ChangeSpendPolicy::OnlyChange => utxo.is_internal,
+            ChangeSpendPolicy::ChangeForbidden => !utxo.is_internal,
         }
     }
 }
@@ -512,7 +512,10 @@ mod test {
     #[test]
     fn test_change_spend_policy_default() {
         let change_spend_policy = ChangeSpendPolicy::default();
-        let filtered = change_spend_policy.filter_utxos(get_test_utxos().into_iter());
+        let filtered = get_test_utxos()
+            .into_iter()
+            .filter(|u| change_spend_policy.is_satisfied_by(u))
+            .collect::<Vec<_>>();
 
         assert_eq!(filtered.len(), 2);
     }
@@ -520,7 +523,10 @@ mod test {
     #[test]
     fn test_change_spend_policy_no_internal() {
         let change_spend_policy = ChangeSpendPolicy::ChangeForbidden;
-        let filtered = change_spend_policy.filter_utxos(get_test_utxos().into_iter());
+        let filtered = get_test_utxos()
+            .into_iter()
+            .filter(|u| change_spend_policy.is_satisfied_by(u))
+            .collect::<Vec<_>>();
 
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].is_internal, false);
@@ -529,7 +535,10 @@ mod test {
     #[test]
     fn test_change_spend_policy_only_internal() {
         let change_spend_policy = ChangeSpendPolicy::OnlyChange;
-        let filtered = change_spend_policy.filter_utxos(get_test_utxos().into_iter());
+        let filtered = get_test_utxos()
+            .into_iter()
+            .filter(|u| change_spend_policy.is_satisfied_by(u))
+            .collect::<Vec<_>>();
 
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].is_internal, true);

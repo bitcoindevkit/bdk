@@ -1015,16 +1015,11 @@ where
             }
             // otherwise limit ourselves to the spendable utxos for the selected policy, and the `send_all` setting
             None => {
-                let utxos = self.list_unspent()?.into_iter();
-                let utxos = change_policy.filter_utxos(utxos).into_iter();
+                let utxos = self.list_unspent()?.into_iter().filter(|u| {
+                    change_policy.is_satisfied_by(u) && !unspendable_set.contains(&u.outpoint)
+                });
 
-                Ok((
-                    utxos
-                        .filter(|u| !unspendable_set.contains(&u.outpoint))
-                        .map(add_weight)
-                        .collect(),
-                    send_all,
-                ))
+                Ok((utxos.map(add_weight).collect(), send_all))
             }
         }
     }
