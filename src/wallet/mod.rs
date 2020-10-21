@@ -969,14 +969,9 @@ where
         &self,
         change_policy: tx_builder::ChangeSpendPolicy,
         utxo: &Option<Vec<OutPoint>>,
-        unspendable: &Option<Vec<OutPoint>>,
+        unspendable: &HashSet<OutPoint>,
         send_all: bool,
     ) -> Result<(Vec<(UTXO, usize)>, bool), Error> {
-        let unspendable_set = match unspendable {
-            None => HashSet::new(),
-            Some(vec) => vec.iter().collect(),
-        };
-
         let external_weight = self
             .get_descriptor_for_script_type(ScriptType::External)
             .0
@@ -1016,7 +1011,7 @@ where
             // otherwise limit ourselves to the spendable utxos for the selected policy, and the `send_all` setting
             None => {
                 let utxos = self.list_unspent()?.into_iter().filter(|u| {
-                    change_policy.is_satisfied_by(u) && !unspendable_set.contains(&u.outpoint)
+                    change_policy.is_satisfied_by(u) && !unspendable.contains(&u.outpoint)
                 });
 
                 Ok((utxos.map(add_weight).collect(), send_all))

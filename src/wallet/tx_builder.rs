@@ -42,6 +42,7 @@
 //! ```
 
 use std::collections::BTreeMap;
+use std::collections::HashSet;
 use std::default::Default;
 use std::marker::PhantomData;
 
@@ -63,7 +64,7 @@ pub struct TxBuilder<D: Database, Cs: CoinSelectionAlgorithm<D>> {
     pub(crate) fee_policy: Option<FeePolicy>,
     pub(crate) policy_path: Option<BTreeMap<String, Vec<usize>>>,
     pub(crate) utxos: Option<Vec<OutPoint>>,
-    pub(crate) unspendable: Option<Vec<OutPoint>>,
+    pub(crate) unspendable: HashSet<OutPoint>,
     pub(crate) sighash: Option<SigHashType>,
     pub(crate) ordering: TxOrdering,
     pub(crate) locktime: Option<u32>,
@@ -197,7 +198,7 @@ impl<D: Database, Cs: CoinSelectionAlgorithm<D>> TxBuilder<D, Cs> {
     /// [`TxBuilder::add_utxo`] have priority over these. See the docs of the two linked methods
     /// for more details.
     pub fn unspendable(mut self, unspendable: Vec<OutPoint>) -> Self {
-        self.unspendable = Some(unspendable);
+        self.unspendable = unspendable.into_iter().collect();
         self
     }
 
@@ -207,7 +208,7 @@ impl<D: Database, Cs: CoinSelectionAlgorithm<D>> TxBuilder<D, Cs> {
     /// [`TxBuilder::add_utxo`] have priority over this. See the docs of the two linked methods
     /// for more details.
     pub fn add_unspendable(mut self, unspendable: OutPoint) -> Self {
-        self.unspendable.get_or_insert(vec![]).push(unspendable);
+        self.unspendable.insert(unspendable);
         self
     }
 
