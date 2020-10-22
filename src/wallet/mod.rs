@@ -493,28 +493,6 @@ where
         // the new tx must "pay for its bandwidth"
         let vbytes = tx.get_weight() as f32 / 4.0;
         let required_feerate = FeeRate::from_sat_per_vb(details.fees as f32 / vbytes + 1.0);
-        let new_feerate = match builder
-            .fee_policy
-            .as_ref()
-            .unwrap_or(&FeePolicy::FeeRate(FeeRate::default()))
-        {
-            FeePolicy::FeeAmount(amount) => {
-                if *amount < details.fees {
-                    return Err(Error::FeeTooLow {
-                        required: details.fees,
-                    });
-                }
-                FeeRate::from_sat_per_vb(0.0)
-            }
-            FeePolicy::FeeRate(rate) => {
-                if *rate < required_feerate {
-                    return Err(Error::FeeRateTooLow {
-                        required: required_feerate,
-                    });
-                }
-                *rate
-            }
-        };
 
         if builder.send_all && tx.output.len() > 1 {
             return Err(Error::SendAllMultipleOutputs);
@@ -645,13 +623,27 @@ where
         must_use_utxos.append(&mut original_utxos);
 
         let amount_needed = tx.output.iter().fold(0, |acc, out| acc + out.value);
-        let initial_fee = match builder
+        let (new_feerate, initial_fee) = match builder
             .fee_policy
             .as_ref()
             .unwrap_or(&FeePolicy::FeeRate(FeeRate::default()))
         {
-            FeePolicy::FeeAmount(amount) => *amount as f32,
-            FeePolicy::FeeRate(_) => tx.get_weight() as f32 / 4.0 * new_feerate.as_sat_vb(),
+            FeePolicy::FeeAmount(amount) => {
+                if *amount < details.fees {
+                    return Err(Error::FeeTooLow {
+                        required: details.fees,
+                    });
+                }
+                (FeeRate::from_sat_per_vb(0.0), *amount as f32)
+            }
+            FeePolicy::FeeRate(rate) => {
+                if *rate < required_feerate {
+                    return Err(Error::FeeRateTooLow {
+                        required: required_feerate,
+                    });
+                }
+                (*rate, tx.get_weight() as f32 / 4.0 * rate.as_sat_vb())
+            }
         };
 
         let coin_selection::CoinSelectionResult {
@@ -1743,13 +1735,6 @@ mod test {
                     .send_all(),
             )
             .unwrap();
-
-        assert_eq!(details.fees, 0);
-        assert_eq!(psbt.global.unsigned_tx.output.len(), 1);
-        assert_eq!(
-            psbt.global.unsigned_tx.output[0].value,
-            50_000 - details.fees
-        );
     }
 
     #[test]
@@ -2080,7 +2065,7 @@ mod test {
 
     #[test]
     #[should_panic(expected = "FeeTooLow")]
-    fn test_bump_fee_low_fee() {
+    fn test_bump_fee_low_abs() {
         let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
         let addr = wallet.get_new_address().unwrap();
         let (psbt, mut details) = wallet
