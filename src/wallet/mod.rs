@@ -349,17 +349,14 @@ where
             ));
         }
 
-        let (available_utxos, use_all_utxos) = self.get_available_utxos(
+        let (must_use_utxos, may_use_utxos) = self.get_must_may_use_utxos(
             builder.change_policy,
-            &builder.utxos,
             &builder.unspendable,
+            &builder.utxos,
             builder.send_all,
+            builder.manually_selected_only,
         )?;
 
-        let (must_use_utxos, may_use_utxos) = match use_all_utxos {
-            true => (available_utxos, vec![]),
-            false => (vec![], available_utxos),
-        };
         let coin_selection::CoinSelectionResult {
             txin,
             selected_amount,
@@ -596,30 +593,29 @@ where
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        let builder_extra_utxos = builder.utxos.as_ref().map(|utxos| {
-            utxos
-                .iter()
-                .filter(|utxo| {
-                    !original_txin
-                        .iter()
-                        .any(|txin| &&txin.previous_output == utxo)
-                })
-                .cloned()
-                .collect()
-        });
-        let (available_utxos, use_all_utxos) = self.get_available_utxos(
-            builder.change_policy,
-            &builder_extra_utxos,
-            &builder.unspendable,
-            false,
-        )?;
-        let available_utxos =
-            rbf::filter_available(self.database.borrow().deref(), available_utxos.into_iter())?;
+        let builder_extra_utxos = builder
+            .utxos
+            .iter()
+            .filter(|utxo| {
+                !original_txin
+                    .iter()
+                    .any(|txin| &&txin.previous_output == utxo)
+            })
+            .cloned()
+            .collect::<Vec<_>>();
 
-        let (mut must_use_utxos, may_use_utxos) = match use_all_utxos {
-            true => (available_utxos, vec![]),
-            false => (vec![], available_utxos),
-        };
+        let (must_use_utxos, may_use_utxos) = self.get_must_may_use_utxos(
+            builder.change_policy,
+            &builder.unspendable,
+            &builder_extra_utxos[..],
+            false, // when doing bump_fee `send_all` does not mean use all available utxos
+            builder.manually_selected_only,
+        )?;
+
+        let mut must_use_utxos =
+            rbf::filter_available(self.database.borrow().deref(), must_use_utxos.into_iter())?;
+        let may_use_utxos =
+            rbf::filter_available(self.database.borrow().deref(), may_use_utxos.into_iter())?;
         must_use_utxos.append(&mut original_utxos);
 
         let amount_needed = tx.output.iter().fold(0, |acc, out| acc + out.value);
@@ -965,13 +961,7 @@ where
         Ok(())
     }
 
-    fn get_available_utxos(
-        &self,
-        change_policy: tx_builder::ChangeSpendPolicy,
-        utxo: &Option<Vec<OutPoint>>,
-        unspendable: &HashSet<OutPoint>,
-        send_all: bool,
-    ) -> Result<(Vec<(UTXO, usize)>, bool), Error> {
+    fn get_available_utxos(&self) -> Result<Vec<(UTXO, usize)>, Error> {
         let external_weight = self
             .get_descriptor_for_script_type(ScriptType::External)
             .0
@@ -990,33 +980,57 @@ where
             (utxo, weight)
         };
 
-        match utxo {
-            // with manual coin selection we always want to spend all the selected utxos, no matter
-            // what (even if they are marked as unspendable)
-            Some(raw_utxos) => {
-                let full_utxos = raw_utxos
-                    .iter()
-                    .map(|u| {
-                        Ok(add_weight(
-                            self.database
-                                .borrow()
-                                .get_utxo(&u)?
-                                .ok_or(Error::UnknownUTXO)?,
-                        ))
-                    })
-                    .collect::<Result<Vec<_>, Error>>()?;
+        let utxos = self.list_unspent()?.into_iter().map(add_weight).collect();
 
-                Ok((full_utxos, true))
-            }
-            // otherwise limit ourselves to the spendable utxos for the selected policy, and the `send_all` setting
-            None => {
-                let utxos = self.list_unspent()?.into_iter().filter(|u| {
-                    change_policy.is_satisfied_by(u) && !unspendable.contains(&u.outpoint)
-                });
+        Ok(utxos)
+    }
 
-                Ok((utxos.map(add_weight).collect(), send_all))
-            }
+    /// Given the options returns the list of utxos that must be used to form the
+    /// transaction and any further that may be used if needed.
+    #[allow(clippy::type_complexity)]
+    fn get_must_may_use_utxos(
+        &self,
+        change_policy: tx_builder::ChangeSpendPolicy,
+        unspendable: &HashSet<OutPoint>,
+        manually_selected: &[OutPoint],
+        must_use_all_available: bool,
+        manual_only: bool,
+    ) -> Result<(Vec<(UTXO, usize)>, Vec<(UTXO, usize)>), Error> {
+        //    must_spend <- manually selected utxos
+        //    may_spend  <- all other available utxos
+        let mut may_spend = self.get_available_utxos()?;
+        let mut must_spend = {
+            let must_spend_idx = manually_selected
+                .iter()
+                .map(|manually_selected| {
+                    may_spend
+                        .iter()
+                        .position(|available| available.0.outpoint == *manually_selected)
+                        .ok_or(Error::UnknownUTXO)
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+
+            must_spend_idx
+                .into_iter()
+                .map(|i| may_spend.remove(i))
+                .collect()
+        };
+
+        // NOTE: we are intentionally ignoring `unspendable` here. i.e manual
+        // selection overrides unspendable.
+        if manual_only {
+            return Ok((must_spend, vec![]));
         }
+
+        may_spend.retain(|u| {
+            change_policy.is_satisfied_by(&u.0) && !unspendable.contains(&u.0.outpoint)
+        });
+
+        if must_use_all_available {
+            must_spend.append(&mut may_spend);
+        }
+
+        Ok((must_spend, may_spend))
     }
 
     fn complete_transaction<Cs: coin_selection::CoinSelectionAlgorithm<D>>(
@@ -1989,6 +2003,56 @@ mod test {
     }
 
     #[test]
+    fn test_create_tx_add_utxo() {
+        let (wallet, descriptors, _) = get_funded_wallet(get_test_wpkh());
+        let small_output_txid = wallet.database.borrow_mut().received_tx(
+            testutils! (@tx ( (@external descriptors, 0) => 25_000 ) (@confirmations 1)),
+            Some(100),
+        );
+
+        let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
+        let (psbt, details) = wallet
+            .create_tx(
+                TxBuilder::with_recipients(vec![(addr.script_pubkey(), 30_000)]).add_utxo(
+                    OutPoint {
+                        txid: small_output_txid,
+                        vout: 0,
+                    },
+                ),
+            )
+            .unwrap();
+
+        assert_eq!(
+            psbt.global.unsigned_tx.input.len(),
+            2,
+            "should add an additional input since 25_000 < 30_000"
+        );
+        assert_eq!(details.sent, 75_000, "total should be sum of both inputs");
+    }
+
+    #[test]
+    #[should_panic(expected = "InsufficientFunds")]
+    fn test_create_tx_manually_selected_insufficient() {
+        let (wallet, descriptors, _) = get_funded_wallet(get_test_wpkh());
+        let small_output_txid = wallet.database.borrow_mut().received_tx(
+            testutils! (@tx ( (@external descriptors, 0) => 25_000 ) (@confirmations 1)),
+            Some(100),
+        );
+
+        let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
+        wallet
+            .create_tx(
+                TxBuilder::with_recipients(vec![(addr.script_pubkey(), 30_000)])
+                    .add_utxo(OutPoint {
+                        txid: small_output_txid,
+                        vout: 0,
+                    })
+                    .manually_selected_only(),
+            )
+            .unwrap();
+    }
+
+    #[test]
     #[should_panic(expected = "IrreplaceableTransaction")]
     fn test_bump_fee_irreplaceable_tx() {
         let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
@@ -2330,6 +2394,7 @@ mod test {
                         txid: incoming_txid,
                         vout: 0,
                     }])
+                    .manually_selected_only()
                     .send_all()
                     .enable_rbf(),
             )
@@ -2506,6 +2571,7 @@ mod test {
                         txid: incoming_txid,
                         vout: 0,
                     })
+                    .manually_selected_only()
                     .enable_rbf(),
             )
             .unwrap();

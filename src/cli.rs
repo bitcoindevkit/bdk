@@ -406,7 +406,7 @@ where
                 .map(|i| parse_outpoint(i))
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|s| Error::Generic(s.to_string()))?;
-            tx_builder = tx_builder.utxos(utxos);
+            tx_builder = tx_builder.utxos(utxos).manually_selected_only();
         }
 
         if let Some(unspendable) = sub_matches.values_of("unspendable") {

@@ -63,8 +63,9 @@ pub struct TxBuilder<D: Database, Cs: CoinSelectionAlgorithm<D>> {
     pub(crate) send_all: bool,
     pub(crate) fee_policy: Option<FeePolicy>,
     pub(crate) policy_path: Option<BTreeMap<String, Vec<usize>>>,
-    pub(crate) utxos: Option<Vec<OutPoint>>,
+    pub(crate) utxos: Vec<OutPoint>,
     pub(crate) unspendable: HashSet<OutPoint>,
+    pub(crate) manually_selected_only: bool,
     pub(crate) sighash: Option<SigHashType>,
     pub(crate) ordering: TxOrdering,
     pub(crate) locktime: Option<u32>,
@@ -102,6 +103,7 @@ where
             policy_path: Default::default(),
             utxos: Default::default(),
             unspendable: Default::default(),
+            manually_selected_only: Default::default(),
             sighash: Default::default(),
             ordering: Default::default(),
             locktime: Default::default(),
@@ -141,11 +143,19 @@ impl<D: Database, Cs: CoinSelectionAlgorithm<D>> TxBuilder<D, Cs> {
         self
     }
 
-    /// Send all the selected utxos to a single output
+    /// Send all inputs to a single output.
+    ///
+    /// The semantics of `send_all` depend on whether you are using [`create_tx`] or [`bump_fee`].
+    /// In `create_tx` it (by default) **selects all the wallets inputs** and sends them to a single
+    /// output. In `bump_fee` it means to send the original inputs and any additional manually
+    /// selected intputs to a single output.
     ///
     /// Adding more than one recipients with this option enabled will result in an error.
     ///
     /// The value associated with the only recipient is irrelevant and will be replaced by the wallet.
+    ///
+    /// [`bump_fee`]: crate::wallet::Wallet::bump_fee
+    /// [`create_tx`]: crate::wallet::Wallet::create_tx
     pub fn send_all(mut self) -> Self {
         self.send_all = true;
         self
@@ -179,7 +189,7 @@ impl<D: Database, Cs: CoinSelectionAlgorithm<D>> TxBuilder<D, Cs> {
     /// These have priority over the "unspendable" utxos, meaning that if a utxo is present both in
     /// the "utxos" and the "unspendable" list, it will be spent.
     pub fn utxos(mut self, utxos: Vec<OutPoint>) -> Self {
-        self.utxos = Some(utxos);
+        self.utxos = utxos;
         self
     }
 
@@ -188,7 +198,19 @@ impl<D: Database, Cs: CoinSelectionAlgorithm<D>> TxBuilder<D, Cs> {
     /// These have priority over the "unspendable" utxos, meaning that if a utxo is present both in
     /// the "utxos" and the "unspendable" list, it will be spent.
     pub fn add_utxo(mut self, utxo: OutPoint) -> Self {
-        self.utxos.get_or_insert(vec![]).push(utxo);
+        self.utxos.push(utxo);
+        self
+    }
+
+    /// Only spend utxos added by [`add_utxo`] and [`utxos`].
+    ///
+    /// The wallet will **not** add additional utxos to the transaction even if they are needed to
+    /// make the transaction valid.
+    ///
+    /// [`add_utxo`]: Self::add_utxo
+    /// [`utxos`]: Self::utxos
+    pub fn manually_selected_only(mut self) -> Self {
+        self.manually_selected_only = true;
         self
     }
 
@@ -310,6 +332,7 @@ impl<D: Database, Cs: CoinSelectionAlgorithm<D>> TxBuilder<D, Cs> {
             policy_path: self.policy_path,
             utxos: self.utxos,
             unspendable: self.unspendable,
+            manually_selected_only: self.manually_selected_only,
             sighash: self.sighash,
             ordering: self.ordering,
             locktime: self.locktime,
