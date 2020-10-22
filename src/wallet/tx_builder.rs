@@ -82,6 +82,12 @@ pub enum FeePolicy {
     FeeAmount(u64),
 }
 
+impl std::default::Default for FeePolicy {
+    fn default() -> Self {
+        FeePolicy::FeeRate(FeeRate::default_min_relay_fee())
+    }
+}
+
 // Unfortunately derive doesn't work with `PhantomData`: https://github.com/rust-lang/rust/issues/26925
 impl<D: Database, Cs: CoinSelectionAlgorithm<D>> Default for TxBuilder<D, Cs>
 where
@@ -314,14 +320,6 @@ impl<D: Database, Cs: CoinSelectionAlgorithm<D>> TxBuilder<D, Cs> {
 
             phantom: PhantomData,
         }
-    }
-
-    /// Returns true if an absolute fee was specified
-    pub fn has_absolute_fee(&self) -> bool {
-        if self.fee_policy.is_none() {
-            return false;
-        };
-        matches!(self.fee_policy.as_ref().unwrap(), FeePolicy::FeeAmount(_))
     }
 }
 

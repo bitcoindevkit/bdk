@@ -47,6 +47,9 @@ pub enum Error {
     FeeRateTooLow {
         required: crate::types::FeeRate,
     },
+    FeeTooLow {
+        required: u64,
+    },
 
     Key(crate::keys::KeyError),
 
