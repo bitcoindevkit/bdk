@@ -45,7 +45,6 @@ use log::{debug, error, info, trace};
 pub mod address_validator;
 pub mod coin_selection;
 pub mod export;
-mod rbf;
 pub mod signer;
 pub mod time;
 pub mod tx_builder;
@@ -355,6 +354,7 @@ where
             &builder.utxos,
             builder.send_all,
             builder.manually_selected_only,
+            false, // we don't mind using unconfirmed outputs here, hopefully coin selection will sort this out?
         )?;
 
         let coin_selection::CoinSelectionResult {
@@ -604,18 +604,15 @@ where
             .cloned()
             .collect::<Vec<_>>();
 
-        let (must_use_utxos, may_use_utxos) = self.get_must_may_use_utxos(
+        let (mut must_use_utxos, may_use_utxos) = self.get_must_may_use_utxos(
             builder.change_policy,
             &builder.unspendable,
             &builder_extra_utxos[..],
             false, // when doing bump_fee `send_all` does not mean use all available utxos
             builder.manually_selected_only,
+            true, // we only want confirmed transactions for RBF
         )?;
 
-        let mut must_use_utxos =
-            rbf::filter_available(self.database.borrow().deref(), must_use_utxos.into_iter())?;
-        let may_use_utxos =
-            rbf::filter_available(self.database.borrow().deref(), may_use_utxos.into_iter())?;
         must_use_utxos.append(&mut original_utxos);
 
         let amount_needed = tx.output.iter().fold(0, |acc, out| acc + out.value);
@@ -995,6 +992,7 @@ where
         manually_selected: &[OutPoint],
         must_use_all_available: bool,
         manual_only: bool,
+        must_only_use_confirmed_tx: bool,
     ) -> Result<(Vec<(UTXO, usize)>, Vec<(UTXO, usize)>), Error> {
         //    must_spend <- manually selected utxos
         //    may_spend  <- all other available utxos
@@ -1022,8 +1020,31 @@ where
             return Ok((must_spend, vec![]));
         }
 
+        let satisfies_confirmed = match must_only_use_confirmed_tx {
+            true => {
+                let database = self.database.borrow_mut();
+                may_spend
+                    .iter()
+                    .map(|u| {
+                        database
+                            .get_tx(&u.0.outpoint.txid, true)
+                            .map(|tx| match tx {
+                                None => false,
+                                Some(tx) => tx.height.is_some(),
+                            })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?
+            }
+            false => vec![true; may_spend.len()],
+        };
+
+        let mut i = 0;
         may_spend.retain(|u| {
-            change_policy.is_satisfied_by(&u.0) && !unspendable.contains(&u.0.outpoint)
+            let retain = change_policy.is_satisfied_by(&u.0)
+                && !unspendable.contains(&u.0.outpoint)
+                && satisfies_confirmed[i];
+            i += 1;
+            retain
         });
 
         if must_use_all_available {
