@@ -53,7 +53,7 @@
 //!     fn coin_select(
 //!         &self,
 //!         database: &D,
-//!         must_use_utxos: Vec<(UTXO, usize)>,
+//!         required_utxos: Vec<(UTXO, usize)>,
 //!         may_use_utxos: Vec<(UTXO, usize)>,
 //!         fee_rate: FeeRate,
 //!         amount_needed: u64,
@@ -61,7 +61,7 @@
 //!     ) -> Result<CoinSelectionResult, bdk::Error> {
 //!         let mut selected_amount = 0;
 //!         let mut additional_weight = 0;
-//!         let all_utxos_selected = must_use_utxos
+//!         let all_utxos_selected = required_utxos
 //!             .into_iter().chain(may_use_utxos)
 //!             .scan((&mut selected_amount, &mut additional_weight), |(selected_amount, additional_weight), (utxo, weight)| {
 //!                 let txin = TxIn {
@@ -139,7 +139,7 @@ pub trait CoinSelectionAlgorithm<D: Database>: std::fmt::Debug {
     ///
     /// - `database`: a reference to the wallet's database that can be used to lookup additional
     ///               details for a specific UTXO
-    /// - `must_use_utxos`: the utxos that must be spent regardless of `amount_needed` with their
+    /// - `required_utxos`: the utxos that must be spent regardless of `amount_needed` with their
     ///                     weight cost
     /// - `may_be_spent`: the utxos that may be spent to satisfy `amount_needed` with their weight
     ///                   cost
@@ -150,7 +150,7 @@ pub trait CoinSelectionAlgorithm<D: Database>: std::fmt::Debug {
     fn coin_select(
         &self,
         database: &D,
-        must_use_utxos: Vec<(UTXO, usize)>,
+        required_utxos: Vec<(UTXO, usize)>,
         may_use_utxos: Vec<(UTXO, usize)>,
         fee_rate: FeeRate,
         amount_needed: u64,
@@ -169,7 +169,7 @@ impl<D: Database> CoinSelectionAlgorithm<D> for DumbCoinSelection {
     fn coin_select(
         &self,
         _database: &D,
-        must_use_utxos: Vec<(UTXO, usize)>,
+        required_utxos: Vec<(UTXO, usize)>,
         mut may_use_utxos: Vec<(UTXO, usize)>,
         fee_rate: FeeRate,
         amount_needed: u64,
@@ -188,7 +188,7 @@ impl<D: Database> CoinSelectionAlgorithm<D> for DumbCoinSelection {
         // smallest to largest, before being reversed with `.rev()`.
         let utxos = {
             may_use_utxos.sort_unstable_by_key(|(utxo, _)| utxo.txout.value);
-            must_use_utxos
+            required_utxos
                 .into_iter()
                 .map(|utxo| (true, utxo))
                 .chain(may_use_utxos.into_iter().rev().map(|utxo| (false, utxo)))
