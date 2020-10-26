@@ -348,7 +348,7 @@ where
             ));
         }
 
-        let (required_utxos, may_use_utxos) = self.get_must_may_use_utxos(
+        let (required_utxos, optional_utxos) = self.get_must_may_use_utxos(
             builder.change_policy,
             &builder.unspendable,
             &builder.utxos,
@@ -364,7 +364,7 @@ where
         } = builder.coin_selection.coin_select(
             self.database.borrow().deref(),
             required_utxos,
-            may_use_utxos,
+            optional_utxos,
             fee_rate,
             outgoing,
             fee_amount,
@@ -604,7 +604,7 @@ where
             .cloned()
             .collect::<Vec<_>>();
 
-        let (mut required_utxos, may_use_utxos) = self.get_must_may_use_utxos(
+        let (mut required_utxos, optional_utxos) = self.get_must_may_use_utxos(
             builder.change_policy,
             &builder.unspendable,
             &builder_extra_utxos[..],
@@ -646,7 +646,7 @@ where
         } = builder.coin_selection.coin_select(
             self.database.borrow().deref(),
             required_utxos,
-            may_use_utxos,
+            optional_utxos,
             new_feerate,
             amount_needed,
             initial_fee,
