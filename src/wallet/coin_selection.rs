@@ -115,7 +115,7 @@ use crate::types::{FeeRate, UTXO};
 
 /// Default coin selection algorithm used by [`TxBuilder`](super::tx_builder::TxBuilder) if not
 /// overridden
-pub type DefaultCoinSelectionAlgorithm = DumbCoinSelection;
+pub type DefaultCoinSelectionAlgorithm = LargestFirstCoinSelection;
 
 /// Result of a successful coin selection
 #[derive(Debug)]
@@ -163,9 +163,9 @@ pub trait CoinSelectionAlgorithm<D: Database>: std::fmt::Debug {
 /// This coin selection algorithm sorts the available UTXOs by value and then picks them starting
 /// from the largest ones until the required amount is reached.
 #[derive(Debug, Default)]
-pub struct DumbCoinSelection;
+pub struct LargestFirstCoinSelection;
 
-impl<D: Database> CoinSelectionAlgorithm<D> for DumbCoinSelection {
+impl<D: Database> CoinSelectionAlgorithm<D> for LargestFirstCoinSelection {
     fn coin_select(
         &self,
         _database: &D,
@@ -284,11 +284,11 @@ mod test {
     }
 
     #[test]
-    fn test_dumb_coin_selection_success() {
+    fn test_largest_first_coin_selection_success() {
         let utxos = get_test_utxos();
         let database = MemoryDatabase::default();
 
-        let result = DumbCoinSelection::default()
+        let result = LargestFirstCoinSelection::default()
             .coin_select(
                 &database,
                 utxos,
@@ -305,11 +305,11 @@ mod test {
     }
 
     #[test]
-    fn test_dumb_coin_selection_use_all() {
+    fn test_largest_first_coin_selection_use_all() {
         let utxos = get_test_utxos();
         let database = MemoryDatabase::default();
 
-        let result = DumbCoinSelection::default()
+        let result = LargestFirstCoinSelection::default()
             .coin_select(
                 &database,
                 utxos,
@@ -326,11 +326,11 @@ mod test {
     }
 
     #[test]
-    fn test_dumb_coin_selection_use_only_necessary() {
+    fn test_largest_first_coin_selection_use_only_necessary() {
         let utxos = get_test_utxos();
         let database = MemoryDatabase::default();
 
-        let result = DumbCoinSelection::default()
+        let result = LargestFirstCoinSelection::default()
             .coin_select(
                 &database,
                 vec![],
@@ -348,11 +348,11 @@ mod test {
 
     #[test]
     #[should_panic(expected = "InsufficientFunds")]
-    fn test_dumb_coin_selection_insufficient_funds() {
+    fn test_largest_first_coin_selection_insufficient_funds() {
         let utxos = get_test_utxos();
         let database = MemoryDatabase::default();
 
-        DumbCoinSelection::default()
+        LargestFirstCoinSelection::default()
             .coin_select(
                 &database,
                 vec![],
@@ -366,11 +366,11 @@ mod test {
 
     #[test]
     #[should_panic(expected = "InsufficientFunds")]
-    fn test_dumb_coin_selection_insufficient_funds_high_fees() {
+    fn test_largest_first_coin_selection_insufficient_funds_high_fees() {
         let utxos = get_test_utxos();
         let database = MemoryDatabase::default();
 
-        DumbCoinSelection::default()
+        LargestFirstCoinSelection::default()
             .coin_select(
                 &database,
                 vec![],
