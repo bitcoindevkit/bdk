@@ -348,7 +348,7 @@ where
             ));
         }
 
-        let (required_utxos, optional_utxos) = self.get_must_may_use_utxos(
+        let (required_utxos, optional_utxos) = self.preselect_utxos(
             builder.change_policy,
             &builder.unspendable,
             &builder.utxos,
@@ -604,7 +604,7 @@ where
             .cloned()
             .collect::<Vec<_>>();
 
-        let (mut required_utxos, optional_utxos) = self.get_must_may_use_utxos(
+        let (mut required_utxos, optional_utxos) = self.preselect_utxos(
             builder.change_policy,
             &builder.unspendable,
             &builder_extra_utxos[..],
@@ -985,7 +985,7 @@ where
     /// Given the options returns the list of utxos that must be used to form the
     /// transaction and any further that may be used if needed.
     #[allow(clippy::type_complexity)]
-    fn get_must_may_use_utxos(
+    fn preselect_utxos(
         &self,
         change_policy: tx_builder::ChangeSpendPolicy,
         unspendable: &HashSet<OutPoint>,
