@@ -1,0 +1,29 @@
+on: [push]
+
+name: Code Coverage
+
+jobs:
+  tarpaulin-codecov:
+    name: Tarpaulin to codecov.io
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@v2
+
+      - name: toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+          override: true
+
+      - name: tarpaulin
+        uses: actions-rs/tarpaulin@v0.1.2
+        with:
+          version: '0.15.0'
+          args: '-- --test-threads 1'
+
+      - name: codecov.io
+        uses: codecov/codecov-action@v1.0.14
+        with:
+          token: ${{secrets.CODECOV_TOKEN}}
+          fail_ci_if_error: true

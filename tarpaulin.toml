@@ -1,0 +1,52 @@
+[feature_default_coverage]
+features = "default"
+exclude-files = ["testutils/*"]
+run-types = ["Tests", "Doctests"]
+
+[feature_minimal_coverage]
+features = "minimal"
+no-default-features = true
+exclude-files = ["testutils/*"]
+run-types = ["Tests", "Doctests"]
+
+[feature_all-keys_coverage]
+features = "all-keys"
+no-default-features = true
+exclude-files = ["testutils/*"]
+run-types = ["Tests", "Doctests"]
+
+[feature_minimal_and_esplora_coverage]
+features = "minimal esplora"
+no-default-features = true
+exclude-files = ["testutils/*"]
+run-types = ["Tests", "Doctests"]
+
+[feature_key-value-db_coverage]
+features = "key-value-db"
+no-default-features = true
+exclude-files = ["testutils/*"]
+run-types = ["Tests", "Doctests"]
+
+[feature_electrum_coverage]
+features = "electrum"
+no-default-features = true
+exclude-files = ["testutils/*"]
+run-types = ["Tests", "Doctests"]
+
+[feature_compact_filters_coverage]
+features = "compact_filters"
+no-default-features = true
+exclude-files = ["testutils/*"]
+run-types = ["Tests", "Doctests"]
+
+[feature_cli-utils_coverage]
+features = "cli-utils esplora key-value-db electrum"
+no-default-features = true
+exclude-files = ["testutils/*"]
+run-types = ["Tests", "Doctests"]
+
+[feature_compiler_coverage]
+features = "compiler"
+no-default-features = true
+exclude-files = ["testutils/*"]
+run-types = ["Tests", "Doctests"]
