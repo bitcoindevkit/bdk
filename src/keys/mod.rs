@@ -68,6 +68,7 @@ pub fn merge_networks(a: &ValidNetworks, b: &ValidNetworks) -> ValidNetworks {
 }
 
 /// Container for public or secret keys
+#[derive(Debug)]
 pub enum DescriptorKey<Ctx: ScriptContext> {
     #[doc(hidden)]
     Public(DescriptorPublicKey, ValidNetworks, PhantomData<Ctx>),

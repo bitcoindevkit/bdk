@@ -92,3 +92,35 @@ pub fn get_checksum(desc: &str) -> Result<String, Error> {
 
     Ok(String::from_iter(chars))
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::descriptor::get_checksum;
+
+    // test get_checksum() function; it should return the same value as Bitcoin Core
+    #[test]
+    fn test_get_checksum() {
+        let desc = "wpkh(tprv8ZgxMBicQKsPdpkqS7Eair4YxjcuuvDPNYmKX3sCniCf16tHEVrjjiSXEkFRnUH77yXc6ZcwHHcLNfjdi5qUvw3VDfgYiH5mNsj5izuiu2N/1/2/*)";
+        assert_eq!(get_checksum(desc).unwrap(), "tqz0nc62");
+
+        let desc = "pkh(tpubD6NzVbkrYhZ4XHndKkuB8FifXm8r5FQHwrN6oZuWCz13qb93rtgKvD4PQsqC4HP4yhV3tA2fqr2RbY5mNXfM7RxXUoeABoDtsFUq2zJq6YK/44'/1'/0'/0/*)";
+        assert_eq!(get_checksum(desc).unwrap(), "lasegmfs");
+    }
+
+    #[test]
+    fn test_get_checksum_invalid_character() {
+        let sparkle_heart = vec![240, 159, 146, 150];
+        let sparkle_heart = std::str::from_utf8(&sparkle_heart)
+            .unwrap()
+            .chars()
+            .next()
+            .unwrap();
+        let invalid_desc = format!("wpkh(tprv8ZgxMBicQKsPdpkqS7Eair4YxjcuuvDPNYmKX3sCniCf16tHEVrjjiSXEkFRnUH77yXc6ZcwHHcL{}fjdi5qUvw3VDfgYiH5mNsj5izuiu2N/1/2/*)", sparkle_heart);
+
+        assert!(matches!(
+            get_checksum(&invalid_desc).err(),
+            Some(Error::InvalidDescriptorCharacter(invalid_char)) if invalid_char == sparkle_heart
+        ));
+    }
+}
