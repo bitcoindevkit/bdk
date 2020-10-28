@@ -397,11 +397,16 @@ where
             .map(|s| parse_recipient(s))
             .collect::<Result<Vec<_>, _>>()
             .map_err(Error::Generic)?;
-        let mut tx_builder = TxBuilder::with_recipients(recipients);
+        let mut tx_builder = TxBuilder::new();
 
         if sub_matches.is_present("send_all") {
-            tx_builder = tx_builder.send_all();
+            tx_builder = tx_builder
+                .drain_wallet()
+                .set_single_recipient(recipients[0].0.clone());
+        } else {
+            tx_builder = tx_builder.set_recipients(recipients);
         }
+
         if sub_matches.is_present("enable_rbf") {
             tx_builder = tx_builder.enable_rbf();
         }
@@ -445,7 +450,7 @@ where
         let mut tx_builder = TxBuilder::new().fee_rate(FeeRate::from_sat_per_vb(fee_rate));
 
         if sub_matches.is_present("send_all") {
-            tx_builder = tx_builder.send_all();
+            tx_builder = tx_builder.maintain_single_recipient();
         }
 
         if let Some(utxos) = sub_matches.values_of("utxos") {

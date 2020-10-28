@@ -30,6 +30,7 @@
 //! # use std::str::FromStr;
 //! # use bitcoin::*;
 //! # use bdk::*;
+//! # use bdk::wallet::tx_builder::CreateTx;
 //! # let to_address = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap();
 //! // Create a transaction with one output to `to_address` of 50_000 satoshi, with a custom fee rate
 //! // of 5.0 satoshi/vbyte, only spending non-change outputs and with RBF signaling
@@ -38,7 +39,7 @@
 //!     .fee_rate(FeeRate::from_sat_per_vb(5.0))
 //!     .do_not_spend_change()
 //!     .enable_rbf();
-//! # let builder: TxBuilder<bdk::database::MemoryDatabase, _> = builder;
+//! # let builder: TxBuilder<bdk::database::MemoryDatabase, _, CreateTx> = builder;
 //! ```
 
 use std::collections::BTreeMap;
@@ -52,15 +53,29 @@ use super::coin_selection::{CoinSelectionAlgorithm, DefaultCoinSelectionAlgorith
 use crate::database::Database;
 use crate::types::{FeeRate, UTXO};
 
+/// Context in which the [`TxBuilder`] is valid
+pub trait TxBuilderContext: std::fmt::Debug + Default + Clone {}
+
+/// [`Wallet::create_tx`](super::Wallet::create_tx) context
+#[derive(Debug, Default, Clone)]
+pub struct CreateTx;
+impl TxBuilderContext for CreateTx {}
+
+/// [`Wallet::bump_fee`](super::Wallet::bump_fee) context
+#[derive(Debug, Default, Clone)]
+pub struct BumpFee;
+impl TxBuilderContext for BumpFee {}
+
 /// A transaction builder
 ///
 /// This structure contains the configuration that the wallet must follow to build a transaction.
 ///
 /// For an example see [this module](super::tx_builder)'s documentation;
 #[derive(Debug)]
-pub struct TxBuilder<D: Database, Cs: CoinSelectionAlgorithm<D>> {
+pub struct TxBuilder<D: Database, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderContext> {
     pub(crate) recipients: Vec<(Script, u64)>,
-    pub(crate) send_all: bool,
+    pub(crate) drain_wallet: bool,
+    pub(crate) single_recipient: Option<Script>,
     pub(crate) fee_policy: Option<FeePolicy>,
     pub(crate) policy_path: Option<BTreeMap<String, Vec<usize>>>,
     pub(crate) utxos: Vec<OutPoint>,
@@ -75,11 +90,11 @@ pub struct TxBuilder<D: Database, Cs: CoinSelectionAlgorithm<D>> {
     pub(crate) force_non_witness_utxo: bool,
     pub(crate) coin_selection: Cs,
 
-    phantom: PhantomData<D>,
+    phantom: PhantomData<(D, Ctx)>,
 }
 
 #[derive(Debug)]
-pub enum FeePolicy {
+pub(crate) enum FeePolicy {
     FeeRate(FeeRate),
     FeeAmount(u64),
 }
@@ -91,14 +106,16 @@ impl std::default::Default for FeePolicy {
 }
 
 // Unfortunately derive doesn't work with `PhantomData`: https://github.com/rust-lang/rust/issues/26925
-impl<D: Database, Cs: CoinSelectionAlgorithm<D>> Default for TxBuilder<D, Cs>
+impl<D: Database, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderContext> Default
+    for TxBuilder<D, Cs, Ctx>
 where
     Cs: Default,
 {
     fn default() -> Self {
         TxBuilder {
             recipients: Default::default(),
-            send_all: Default::default(),
+            drain_wallet: Default::default(),
+            single_recipient: Default::default(),
             fee_policy: Default::default(),
             policy_path: Default::default(),
             utxos: Default::default(),
@@ -118,49 +135,16 @@ where
     }
 }
 
-impl<D: Database> TxBuilder<D, DefaultCoinSelectionAlgorithm> {
+// methods supported by both contexts, but only for `DefaultCoinSelectionAlgorithm`
+impl<D: Database, Ctx: TxBuilderContext> TxBuilder<D, DefaultCoinSelectionAlgorithm, Ctx> {
     /// Create an empty builder
     pub fn new() -> Self {
         Self::default()
     }
-
-    /// Create a builder starting from a list of recipients
-    pub fn with_recipients(recipients: Vec<(Script, u64)>) -> Self {
-        Self::default().set_recipients(recipients)
-    }
 }
 
-impl<D: Database, Cs: CoinSelectionAlgorithm<D>> TxBuilder<D, Cs> {
-    /// Replace the recipients already added with a new list
-    pub fn set_recipients(mut self, recipients: Vec<(Script, u64)>) -> Self {
-        self.recipients = recipients;
-        self
-    }
-
-    /// Add a recipient to the internal list
-    pub fn add_recipient(mut self, script_pubkey: Script, amount: u64) -> Self {
-        self.recipients.push((script_pubkey, amount));
-        self
-    }
-
-    /// Send all inputs to a single output.
-    ///
-    /// The semantics of `send_all` depend on whether you are using [`create_tx`] or [`bump_fee`].
-    /// In `create_tx` it (by default) **selects all the wallets inputs** and sends them to a single
-    /// output. In `bump_fee` it means to send the original inputs and any additional manually
-    /// selected intputs to a single output.
-    ///
-    /// Adding more than one recipients with this option enabled will result in an error.
-    ///
-    /// The value associated with the only recipient is irrelevant and will be replaced by the wallet.
-    ///
-    /// [`bump_fee`]: crate::wallet::Wallet::bump_fee
-    /// [`create_tx`]: crate::wallet::Wallet::create_tx
-    pub fn send_all(mut self) -> Self {
-        self.send_all = true;
-        self
-    }
-
+// methods supported by both contexts, for any CoinSelectionAlgorithm
+impl<D: Database, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderContext> TxBuilder<D, Cs, Ctx> {
     /// Set a custom fee rate
     pub fn fee_rate(mut self, fee_rate: FeeRate) -> Self {
         self.fee_policy = Some(FeePolicy::FeeRate(fee_rate));
@@ -256,25 +240,6 @@ impl<D: Database, Cs: CoinSelectionAlgorithm<D>> TxBuilder<D, Cs> {
         self
     }
 
-    /// Enable signaling RBF
-    ///
-    /// This will use the default nSequence value of `0xFFFFFFFD`.
-    pub fn enable_rbf(self) -> Self {
-        self.enable_rbf_with_sequence(0xFFFFFFFD)
-    }
-
-    /// Enable signaling RBF with a specific nSequence value
-    ///
-    /// This can cause conflicts if the wallet's descriptors contain an "older" (OP_CSV) operator
-    /// and the given `nsequence` is lower than the CSV value.
-    ///
-    /// If the `nsequence` is higher than `0xFFFFFFFD` an error will be thrown, since it would not
-    /// be a valid nSequence to signal RBF.
-    pub fn enable_rbf_with_sequence(mut self, nsequence: u32) -> Self {
-        self.rbf = Some(nsequence);
-        self
-    }
-
     /// Build a transaction with a specific version
     ///
     /// The `version` should always be greater than `0` and greater than `1` if the wallet's
@@ -318,16 +283,23 @@ impl<D: Database, Cs: CoinSelectionAlgorithm<D>> TxBuilder<D, Cs> {
         self
     }
 
+    /// Spend all the available inputs. This respects filters like [`unspendable`] and the change policy.
+    pub fn drain_wallet(mut self) -> Self {
+        self.drain_wallet = true;
+        self
+    }
+
     /// Choose the coin selection algorithm
     ///
     /// Overrides the [`DefaultCoinSelectionAlgorithm`](super::coin_selection::DefaultCoinSelectionAlgorithm).
     pub fn coin_selection<P: CoinSelectionAlgorithm<D>>(
         self,
         coin_selection: P,
-    ) -> TxBuilder<D, P> {
+    ) -> TxBuilder<D, P, Ctx> {
         TxBuilder {
             recipients: self.recipients,
-            send_all: self.send_all,
+            drain_wallet: self.drain_wallet,
+            single_recipient: self.single_recipient,
             fee_policy: self.fee_policy,
             policy_path: self.policy_path,
             utxos: self.utxos,
@@ -344,6 +316,90 @@ impl<D: Database, Cs: CoinSelectionAlgorithm<D>> TxBuilder<D, Cs> {
 
             phantom: PhantomData,
         }
+    }
+}
+
+// methods supported only by create_tx, and only for `DefaultCoinSelectionAlgorithm`
+impl<D: Database> TxBuilder<D, DefaultCoinSelectionAlgorithm, CreateTx> {
+    /// Create a builder starting from a list of recipients
+    pub fn with_recipients(recipients: Vec<(Script, u64)>) -> Self {
+        Self::default().set_recipients(recipients)
+    }
+}
+
+// methods supported only by create_tx, for any `CoinSelectionAlgorithm`
+impl<D: Database, Cs: CoinSelectionAlgorithm<D>> TxBuilder<D, Cs, CreateTx> {
+    /// Replace the recipients already added with a new list
+    pub fn set_recipients(mut self, recipients: Vec<(Script, u64)>) -> Self {
+        self.recipients = recipients;
+        self
+    }
+
+    /// Add a recipient to the internal list
+    pub fn add_recipient(mut self, script_pubkey: Script, amount: u64) -> Self {
+        self.recipients.push((script_pubkey, amount));
+        self
+    }
+
+    /// Set a single recipient that will get all the selected funds minus the fee. No change will
+    /// be created
+    ///
+    /// This method overrides any recipient set with [`set_recipients`](Self::set_recipients) or
+    /// [`add_recipient`](Self::add_recipient).
+    ///
+    /// It can only be used in conjunction with [`drain_wallet`](Self::drain_wallet) to send the
+    /// entire content of the wallet (minus filters) to a single recipient or with a
+    /// list of manually selected UTXOs by enabling [`manually_selected_only`](Self::manually_selected_only)
+    /// and selecting them with [`utxos`](Self::utxos) or [`add_utxo`](Self::add_utxo).
+    ///
+    /// When bumping the fees of a transaction made with this option, the user should remeber to
+    /// add [`maintain_single_recipient`](Self::maintain_single_recipient) to correctly update the
+    /// single output instead of adding one more for the change.
+    pub fn set_single_recipient(mut self, recipient: Script) -> Self {
+        self.single_recipient = Some(recipient);
+        self.recipients.clear();
+
+        self
+    }
+
+    /// Enable signaling RBF
+    ///
+    /// This will use the default nSequence value of `0xFFFFFFFD`.
+    pub fn enable_rbf(self) -> Self {
+        self.enable_rbf_with_sequence(0xFFFFFFFD)
+    }
+
+    /// Enable signaling RBF with a specific nSequence value
+    ///
+    /// This can cause conflicts if the wallet's descriptors contain an "older" (OP_CSV) operator
+    /// and the given `nsequence` is lower than the CSV value.
+    ///
+    /// If the `nsequence` is higher than `0xFFFFFFFD` an error will be thrown, since it would not
+    /// be a valid nSequence to signal RBF.
+    pub fn enable_rbf_with_sequence(mut self, nsequence: u32) -> Self {
+        self.rbf = Some(nsequence);
+        self
+    }
+}
+
+// methods supported only by bump_fee
+impl<D: Database> TxBuilder<D, DefaultCoinSelectionAlgorithm, BumpFee> {
+    /// Bump the fees of a transaction made with [`set_single_recipient`](Self::set_single_recipient)
+    ///
+    /// Unless extra inputs are specified with [`add_utxo`] or [`utxos`], this flag will make
+    /// `bump_fee` reduce the value of the existing output, or fail if it would be consumed
+    /// entirely given the higher new fee rate.
+    ///
+    /// If extra inputs are added and they are not entirely consumed in fees, a change output will not
+    /// be added; the existing output will simply grow in value.
+    ///
+    /// Fails if the transaction has more than one outputs.
+    ///
+    /// [`add_utxo`]: Self::add_utxo
+    /// [`utxos`]: Self::utxos
+    pub fn maintain_single_recipient(mut self) -> Self {
+        self.single_recipient = Some(Script::default());
+        self
     }
 }
 
