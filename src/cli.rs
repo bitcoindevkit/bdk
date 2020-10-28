@@ -41,7 +41,7 @@ use crate::types::ScriptType;
 use crate::{FeeRate, TxBuilder, Wallet};
 
 fn parse_recipient(s: &str) -> Result<(Script, u64), String> {
-    let parts: Vec<_> = s.split(":").collect();
+    let parts: Vec<_> = s.split(':').collect();
     if parts.len() != 2 {
         return Err("Invalid format".to_string());
     }
@@ -387,7 +387,7 @@ where
             .unwrap()
             .map(|s| parse_recipient(s))
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|s| Error::Generic(s))?;
+            .map_err(Error::Generic)?;
         let mut tx_builder = TxBuilder::with_recipients(recipients);
 
         if sub_matches.is_present("send_all") {
@@ -405,7 +405,7 @@ where
             let utxos = utxos
                 .map(|i| parse_outpoint(i))
                 .collect::<Result<Vec<_>, _>>()
-                .map_err(|s| Error::Generic(s.to_string()))?;
+                .map_err(Error::Generic)?;
             tx_builder = tx_builder.utxos(utxos).manually_selected_only();
         }
 
@@ -413,7 +413,7 @@ where
             let unspendable = unspendable
                 .map(|i| parse_outpoint(i))
                 .collect::<Result<Vec<_>, _>>()
-                .map_err(|s| Error::Generic(s.to_string()))?;
+                .map_err(Error::Generic)?;
             tx_builder = tx_builder.unspendable(unspendable);
         }
         if let Some(policy) = sub_matches.value_of("policy") {
@@ -443,7 +443,7 @@ where
             let utxos = utxos
                 .map(|i| parse_outpoint(i))
                 .collect::<Result<Vec<_>, _>>()
-                .map_err(|s| Error::Generic(s.to_string()))?;
+                .map_err(Error::Generic)?;
             tx_builder = tx_builder.utxos(utxos);
         }
 
@@ -451,7 +451,7 @@ where
             let unspendable = unspendable
                 .map(|i| parse_outpoint(i))
                 .collect::<Result<Vec<_>, _>>()
-                .map_err(|s| Error::Generic(s.to_string()))?;
+                .map_err(Error::Generic)?;
             tx_builder = tx_builder.unspendable(unspendable);
         }
 
@@ -475,7 +475,7 @@ where
         let psbt: PartiallySignedTransaction = deserialize(&psbt).unwrap();
         let assume_height = sub_matches
             .value_of("assume_height")
-            .and_then(|s| Some(s.parse().unwrap()));
+            .map(|s| s.parse().unwrap());
         let (psbt, finalized) = wallet.sign(psbt, assume_height)?;
         Ok(json!({
             "psbt": base64::encode(&serialize(&psbt)),
@@ -507,7 +507,7 @@ where
 
         let assume_height = sub_matches
             .value_of("assume_height")
-            .and_then(|s| Some(s.parse().unwrap()));
+            .map(|s| s.parse().unwrap());
 
         let (psbt, finalized) = wallet.finalize_psbt(psbt, assume_height)?;
         Ok(json!({

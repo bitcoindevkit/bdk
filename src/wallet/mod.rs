@@ -1753,7 +1753,7 @@ mod test {
     fn test_create_tx_absolute_high_fee() {
         let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
         let addr = wallet.get_new_address().unwrap();
-        let (psbt, details) = wallet
+        let (_psbt, _details) = wallet
             .create_tx(
                 TxBuilder::with_recipients(vec![(addr.script_pubkey(), 0)])
                     .fee_absolute(60_000)

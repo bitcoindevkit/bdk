@@ -103,6 +103,7 @@ pub struct ChunksIterator<I: Iterator> {
 }
 
 impl<I: Iterator> ChunksIterator<I> {
+    #[allow(dead_code)]
     pub fn new(iter: I, size: usize) -> Self {
         ChunksIterator { iter, size }
     }

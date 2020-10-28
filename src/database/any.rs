@@ -322,7 +322,7 @@ impl BatchDatabase for AnyDatabase {
     }
     fn commit_batch(&mut self, batch: Self::Batch) -> Result<(), Error> {
         // TODO: refactor once `move_ref_pattern` is stable
-
+        #[allow(irrefutable_let_patterns)]
         match self {
             AnyDatabase::Memory(db) => {
                 if let AnyBatch::Memory(batch) = batch {

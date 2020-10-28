@@ -61,12 +61,15 @@ pub extern crate sled;
 #[cfg(feature = "cli-utils")]
 pub mod cli;
 
+#[allow(unused_imports)]
 #[cfg(test)]
 #[macro_use]
 extern crate testutils;
+#[allow(unused_imports)]
 #[cfg(test)]
 #[macro_use]
 extern crate testutils_macros;
+#[allow(unused_imports)]
 #[cfg(test)]
 #[macro_use]
 extern crate serial_test;
