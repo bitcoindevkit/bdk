@@ -21,6 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added Bitcoin core RPC added as blockchain backend
 - Added a `verify` feature that can be enable to verify the unconfirmed txs we download against the consensus rules
 
+### Proof of reserves
+- Added a separate module to construct "proof of reserve" PSBTs, and verify them.
+
 ## [v0.8.0] - [v0.7.0]
 
 ### Wallet
