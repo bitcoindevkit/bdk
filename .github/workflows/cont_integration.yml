@@ -13,6 +13,7 @@ jobs:
           - stable
           - 1.45.0 # MSRV
         features:
+          - default
           - minimal
           - all-keys
           - minimal,esplora
@@ -23,22 +24,11 @@ jobs:
           - compiler
         include:
           - rust: stable
-            features: default
-            clippy: true
-            test: true
+            features: compact_filters
+            clippy: false
           - rust: 1.45.0
-            features: default
-            clippy: true
-            test: true
-          - rust: nightly
-            features: test-md-docs
-            test: true
-          - rust: stable
-            features: compiler
-            test: true
-          - rust: 1.45.0
-            features: compiler
-            test: true
+            features: compact_filters
+            clippy: false
     steps:
       - name: checkout
         uses: actions/checkout@v2
@@ -69,7 +59,6 @@ jobs:
           command: clippy
           args: -- -D warnings
       - name: test
-        if: ${{ matrix.test == true }}
         uses: actions-rs/cargo@v1
         with:
           command: test
