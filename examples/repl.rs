@@ -37,8 +37,9 @@ use log::{debug, error, info, trace, LevelFilter};
 use bitcoin::Network;
 
 use bdk::bitcoin;
-use bdk::blockchain::electrum::{ElectrumBlockchain, ElectrumBlockchainConfig};
 use bdk::blockchain::ConfigurableBlockchain;
+use bdk::blockchain::ElectrumBlockchain;
+use bdk::blockchain::ElectrumBlockchainConfig;
 use bdk::cli;
 use bdk::sled;
 use bdk::Wallet;

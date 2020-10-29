@@ -52,6 +52,8 @@ pub use any::{AnyBlockchain, AnyBlockchainConfig};
 pub mod electrum;
 #[cfg(feature = "electrum")]
 pub use self::electrum::ElectrumBlockchain;
+#[cfg(feature = "electrum")]
+pub use self::electrum::ElectrumBlockchainConfig;
 
 #[cfg(feature = "esplora")]
 #[cfg_attr(docsrs, doc(cfg(feature = "esplora")))]

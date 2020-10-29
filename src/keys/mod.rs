@@ -578,7 +578,7 @@ pub mod test {
 
     use super::*;
 
-    const TEST_ENTROPY: [u8; 32] = [0xAA; 32];
+    pub const TEST_ENTROPY: [u8; 32] = [0xAA; 32];
 
     #[test]
     fn test_keys_generate_xprv() {

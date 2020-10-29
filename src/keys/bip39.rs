@@ -136,7 +136,7 @@ mod test {
         let generated_mnemonic: GeneratedKey<_, miniscript::Segwitv0> =
             Mnemonic::generate_with_entropy(
                 (MnemonicType::Words12, Language::English),
-                crate::keys::test::get_test_entropy(),
+                crate::keys::test::TEST_ENTROPY,
             )
             .unwrap();
         assert_eq!(generated_mnemonic.valid_networks, any_network());
@@ -148,7 +148,7 @@ mod test {
         let generated_mnemonic: GeneratedKey<_, miniscript::Segwitv0> =
             Mnemonic::generate_with_entropy(
                 (MnemonicType::Words24, Language::English),
-                crate::keys::test::get_test_entropy(),
+                crate::keys::test::TEST_ENTROPY,
             )
             .unwrap();
         assert_eq!(generated_mnemonic.valid_networks, any_network());

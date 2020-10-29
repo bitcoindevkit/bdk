@@ -55,7 +55,7 @@
 //!     ))
 //!     .collect::<Result<_, _>>()?;
 //! let blockchain = CompactFiltersBlockchain::new(peers, "./wallet-filters", Some(500_000))?;
-//! # Ok::<(), bdk::error::Error>(())
+//! # Ok::<(), CompactFiltersError>(())
 //! ```
 
 use std::collections::HashSet;
