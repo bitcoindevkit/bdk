@@ -348,7 +348,7 @@ where
             ));
         }
 
-        let (must_use_utxos, may_use_utxos) = self.get_must_may_use_utxos(
+        let (required_utxos, optional_utxos) = self.preselect_utxos(
             builder.change_policy,
             &builder.unspendable,
             &builder.utxos,
@@ -363,8 +363,8 @@ where
             mut fee_amount,
         } = builder.coin_selection.coin_select(
             self.database.borrow().deref(),
-            must_use_utxos,
-            may_use_utxos,
+            required_utxos,
+            optional_utxos,
             fee_rate,
             outgoing,
             fee_amount,
@@ -604,7 +604,7 @@ where
             .cloned()
             .collect::<Vec<_>>();
 
-        let (mut must_use_utxos, may_use_utxos) = self.get_must_may_use_utxos(
+        let (mut required_utxos, optional_utxos) = self.preselect_utxos(
             builder.change_policy,
             &builder.unspendable,
             &builder_extra_utxos[..],
@@ -613,7 +613,7 @@ where
             true, // we only want confirmed transactions for RBF
         )?;
 
-        must_use_utxos.append(&mut original_utxos);
+        required_utxos.append(&mut original_utxos);
 
         let amount_needed = tx.output.iter().fold(0, |acc, out| acc + out.value);
         let (new_feerate, initial_fee) = match builder
@@ -645,8 +645,8 @@ where
             fee_amount,
         } = builder.coin_selection.coin_select(
             self.database.borrow().deref(),
-            must_use_utxos,
-            may_use_utxos,
+            required_utxos,
+            optional_utxos,
             new_feerate,
             amount_needed,
             initial_fee,
@@ -985,7 +985,7 @@ where
     /// Given the options returns the list of utxos that must be used to form the
     /// transaction and any further that may be used if needed.
     #[allow(clippy::type_complexity)]
-    fn get_must_may_use_utxos(
+    fn preselect_utxos(
         &self,
         change_policy: tx_builder::ChangeSpendPolicy,
         unspendable: &HashSet<OutPoint>,
