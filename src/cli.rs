@@ -78,7 +78,13 @@ pub fn make_cli_subcommands<'a, 'b>() -> App<'a, 'b> {
         .subcommand(
             SubCommand::with_name("get_new_address").about("Generates a new external address"),
         )
-        .subcommand(SubCommand::with_name("sync").about("Syncs with the chosen Electrum server"))
+        .subcommand(SubCommand::with_name("sync").about("Syncs with the chosen Electrum server").arg(
+            Arg::with_name("max_addresses")
+                .required(false)
+                .takes_value(true)
+                .long("max_addresses")
+                .help("max addresses to consider"),
+        ))
         .subcommand(
             SubCommand::with_name("list_unspent").about("Lists the available spendable UTXOs"),
         )
@@ -370,8 +376,11 @@ where
         Ok(json!({
             "address": wallet.get_new_address()?
         }))
-    } else if let Some(_sub_matches) = matches.subcommand_matches("sync") {
-        maybe_await!(wallet.sync(log_progress(), None))?;
+    } else if let Some(sub_matches) = matches.subcommand_matches("sync") {
+        let max_addresses: Option<u32> = sub_matches
+            .value_of("max_addresses")
+            .and_then(|m| m.parse().ok());
+        maybe_await!(wallet.sync(log_progress(), max_addresses))?;
         Ok(json!({}))
     } else if let Some(_sub_matches) = matches.subcommand_matches("list_unspent") {
         Ok(serde_json::to_value(&wallet.list_unspent()?)?)
