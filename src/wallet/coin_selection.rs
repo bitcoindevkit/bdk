@@ -63,18 +63,10 @@
 //!         let all_utxos_selected = required_utxos
 //!             .into_iter().chain(optional_utxos)
 //!             .scan((&mut selected_amount, &mut additional_weight), |(selected_amount, additional_weight), (utxo, weight)| {
-//!                 let txin = TxIn {
-//!                     previous_output: utxo.outpoint,
-//!                     ..Default::default()
-//!                 };
-//!
 //!                 **selected_amount += utxo.txout.value;
 //!                 **additional_weight += TXIN_BASE_WEIGHT + weight;
 //!
-//!                 Some((
-//!                     txin,
-//!                     utxo.txout.script_pubkey,
-//!                 ))
+//!                 Some(utxo)
 //!             })
 //!             .collect::<Vec<_>>();
 //!         let additional_fees = additional_weight as f32 * fee_rate.as_sat_vb() / 4.0;
@@ -84,7 +76,7 @@
 //!         }
 //!
 //!         Ok(CoinSelectionResult {
-//!             txin: all_utxos_selected,
+//!             selected: all_utxos_selected,
 //!             selected_amount,
 //!             fee_amount: fee_amount + additional_fees,
 //!         })
@@ -105,8 +97,6 @@
 //! # Ok::<(), bdk::Error>(())
 //! ```
 
-use bitcoin::{Script, TxIn};
-
 use crate::database::Database;
 use crate::error::Error;
 use crate::types::{FeeRate, UTXO};
@@ -124,11 +114,15 @@ pub type DefaultCoinSelectionAlgorithm = BranchAndBoundCoinSelection;
 #[cfg(test)]
 pub type DefaultCoinSelectionAlgorithm = LargestFirstCoinSelection; // make the tests more predictable
 
+// Base weight of a Txin, not counting the weight needed for satisfaying it.
+// prev_txid (32 bytes) + prev_vout (4 bytes) + sequence (4 bytes) + script_len (1 bytes)
+pub const TXIN_BASE_WEIGHT: usize = (32 + 4 + 4 + 1) * 4;
+
 /// Result of a successful coin selection
 #[derive(Debug)]
 pub struct CoinSelectionResult {
-    /// List of inputs to use, with the respective previous script_pubkey
-    pub txin: Vec<(TxIn, Script)>,
+    /// List of outputs selected for use as inputs
+    pub selected: Vec<UTXO>,
     /// Sum of the selected inputs' value
     pub selected_amount: u64,
     /// Total fee amount in satoshi
@@ -204,28 +198,21 @@ impl<D: Database> CoinSelectionAlgorithm<D> for LargestFirstCoinSelection {
         // Keep including inputs until we've got enough.
         // Store the total input value in selected_amount and the total fee being paid in fee_amount
         let mut selected_amount = 0;
-        let txin = utxos
+        let selected = utxos
             .scan(
                 (&mut selected_amount, &mut fee_amount),
-                |(selected_amount, fee_amount), (required, (utxo, weight))| {
-                    if required || **selected_amount < amount_needed + (fee_amount.ceil() as u64) {
-                        let new_in = TxIn {
-                            previous_output: utxo.outpoint,
-                            script_sig: Script::default(),
-                            sequence: 0, // Let the caller choose the right nSequence
-                            witness: vec![],
-                        };
-
+                |(selected_amount, fee_amount), (must_use, (utxo, weight))| {
+                    if must_use || **selected_amount < amount_needed + (fee_amount.ceil() as u64) {
                         **fee_amount += calc_fee_bytes(TXIN_BASE_WEIGHT + weight);
                         **selected_amount += utxo.txout.value;
 
                         log::debug!(
                             "Selected {}, updated fee_amount = `{}`",
-                            new_in.previous_output,
+                            utxo.outpoint,
                             fee_amount
                         );
 
-                        Some((new_in, utxo.txout.script_pubkey))
+                        Some(utxo)
                     } else {
                         None
                     }
@@ -238,16 +225,12 @@ impl<D: Database> CoinSelectionAlgorithm<D> for LargestFirstCoinSelection {
         }
 
         Ok(CoinSelectionResult {
-            txin,
+            selected,
             fee_amount,
             selected_amount,
         })
     }
 }
-
-// Base weight of a Txin, not counting the weight needed for satisfaying it.
-// prev_txid (32 bytes) + prev_vout (4 bytes) + sequence (4 bytes) + script_len (1 bytes)
-pub const TXIN_BASE_WEIGHT: usize = (32 + 4 + 4 + 1) * 4;
 
 #[derive(Debug, Clone)]
 // Adds fee information to an UTXO.
@@ -507,28 +490,20 @@ impl BranchAndBoundCoinSelection {
     }
 
     fn calculate_cs_result(
-        selected_utxos: Vec<OutputGroup>,
-        required_utxos: Vec<OutputGroup>,
-        fee_amount: f32,
+        mut selected_utxos: Vec<OutputGroup>,
+        mut required_utxos: Vec<OutputGroup>,
+        mut fee_amount: f32,
     ) -> CoinSelectionResult {
-        let (txin, fee_amount, selected_amount) =
-            selected_utxos.into_iter().chain(required_utxos).fold(
-                (vec![], fee_amount, 0),
-                |(mut txin, mut fee_amount, mut selected_amount), output_group| {
-                    selected_amount += output_group.utxo.txout.value;
-                    fee_amount += output_group.fee;
-                    txin.push((
-                        TxIn {
-                            previous_output: output_group.utxo.outpoint,
-                            ..Default::default()
-                        },
-                        output_group.utxo.txout.script_pubkey,
-                    ));
-                    (txin, fee_amount, selected_amount)
-                },
-            );
+        selected_utxos.append(&mut required_utxos);
+        fee_amount += selected_utxos.iter().map(|u| u.fee).sum::<f32>();
+        let selected = selected_utxos
+            .into_iter()
+            .map(|u| u.utxo)
+            .collect::<Vec<_>>();
+        let selected_amount = selected.iter().map(|u| u.txout.value).sum();
+
         CoinSelectionResult {
-            txin,
+            selected,
             fee_amount,
             selected_amount,
         }
@@ -539,7 +514,6 @@ impl BranchAndBoundCoinSelection {
 mod test {
     use std::str::FromStr;
 
-    use bitcoin::consensus::encode::serialize;
     use bitcoin::{OutPoint, Script, TxOut};
 
     use super::*;
@@ -648,7 +622,7 @@ mod test {
             )
             .unwrap();
 
-        assert_eq!(result.txin.len(), 2);
+        assert_eq!(result.selected.len(), 2);
         assert_eq!(result.selected_amount, 300_000);
         assert_eq!(result.fee_amount, 186.0);
     }
@@ -669,7 +643,7 @@ mod test {
             )
             .unwrap();
 
-        assert_eq!(result.txin.len(), 2);
+        assert_eq!(result.selected.len(), 2);
         assert_eq!(result.selected_amount, 300_000);
         assert_eq!(result.fee_amount, 186.0);
     }
@@ -690,7 +664,7 @@ mod test {
             )
             .unwrap();
 
-        assert_eq!(result.txin.len(), 1);
+        assert_eq!(result.selected.len(), 1);
         assert_eq!(result.selected_amount, 200_000);
         assert_eq!(result.fee_amount, 118.0);
     }
@@ -750,7 +724,7 @@ mod test {
             )
             .unwrap();
 
-        assert_eq!(result.txin.len(), 3);
+        assert_eq!(result.selected.len(), 3);
         assert_eq!(result.selected_amount, 300_000);
         assert_eq!(result.fee_amount, 254.0);
     }
@@ -771,7 +745,7 @@ mod test {
             )
             .unwrap();
 
-        assert_eq!(result.txin.len(), 2);
+        assert_eq!(result.selected.len(), 2);
         assert_eq!(result.selected_amount, 300_000);
         assert_eq!(result.fee_amount, 186.0);
     }
@@ -828,12 +802,11 @@ mod test {
             )
             .unwrap();
 
-        assert_eq!(result.txin.len(), 1);
+        assert_eq!(result.selected.len(), 1);
         assert_eq!(result.selected_amount, 100_000);
-        let result_size =
-            serialize(result.txin.first().unwrap()).len() as f32 + P2WPKH_WITNESS_SIZE as f32 / 4.0;
+        let input_size = (TXIN_BASE_WEIGHT as f32) / 4.0 + P2WPKH_WITNESS_SIZE as f32 / 4.0;
         let epsilon = 0.5;
-        assert!((1.0 - (result.fee_amount / result_size)).abs() < epsilon);
+        assert!((1.0 - (result.fee_amount / input_size)).abs() < epsilon);
     }
 
     #[test]
@@ -1013,6 +986,9 @@ mod test {
         );
 
         assert!(result.selected_amount > target_amount);
-        assert_eq!(result.fee_amount, 50.0 + result.txin.len() as f32 * 68.0);
+        assert_eq!(
+            result.fee_amount,
+            50.0 + result.selected.len() as f32 * 68.0
+        );
     }
 }

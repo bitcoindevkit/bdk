@@ -414,7 +414,7 @@ where
         )?;
 
         let coin_selection::CoinSelectionResult {
-            txin,
+            selected,
             selected_amount,
             mut fee_amount,
         } = builder.coin_selection.coin_select(
@@ -425,16 +425,15 @@ where
             outgoing,
             fee_amount,
         )?;
-        let (mut txin, prev_script_pubkeys): (Vec<_>, Vec<_>) = txin.into_iter().unzip();
-        // map that allows us to lookup the prev_script_pubkey for a given previous_output
-        let prev_script_pubkeys = txin
+        tx.input = selected
             .iter()
-            .zip(prev_script_pubkeys.into_iter())
-            .map(|(txin, script)| (txin.previous_output, script))
-            .collect::<HashMap<_, _>>();
-
-        txin.iter_mut().for_each(|i| i.sequence = n_sequence);
-        tx.input = txin;
+            .map(|u| bitcoin::TxIn {
+                previous_output: u.outpoint,
+                script_sig: Script::default(),
+                sequence: n_sequence,
+                witness: vec![],
+            })
+            .collect();
 
         // prepare the change output
         let change_output = match builder.single_recipient {
@@ -485,7 +484,11 @@ where
         builder.ordering.sort_tx(&mut tx);
 
         let txid = tx.txid();
-        let psbt = self.complete_transaction(tx, prev_script_pubkeys, builder)?;
+        let lookup_output = selected
+            .into_iter()
+            .map(|utxo| (utxo.outpoint, utxo))
+            .collect();
+        let psbt = self.complete_transaction(tx, lookup_output, builder)?;
 
         let transaction_details = TransactionDetails {
             transaction: None,
@@ -701,7 +704,7 @@ where
         };
 
         let coin_selection::CoinSelectionResult {
-            txin,
+            selected,
             selected_amount,
             fee_amount,
         } = builder.coin_selection.coin_select(
@@ -713,18 +716,16 @@ where
             initial_fee,
         )?;
 
-        let (mut txin, prev_script_pubkeys): (Vec<_>, Vec<_>) = txin.into_iter().unzip();
-        // map that allows us to lookup the prev_script_pubkey for a given previous_output
-        let prev_script_pubkeys = txin
+        tx.input = selected
             .iter()
-            .zip(prev_script_pubkeys.into_iter())
-            .map(|(txin, script)| (txin.previous_output, script))
-            .collect::<HashMap<_, _>>();
-
-        // TODO: use builder.n_sequence??
-        // use the same n_sequence
-        txin.iter_mut().for_each(|i| i.sequence = original_sequence);
-        tx.input = txin;
+            .map(|u| bitcoin::TxIn {
+                previous_output: u.outpoint,
+                script_sig: Script::default(),
+                // TODO: use builder.n_sequence??
+                sequence: original_sequence,
+                witness: vec![],
+            })
+            .collect();
 
         details.sent = selected_amount;
 
@@ -770,10 +771,14 @@ where
         // TODO: check that we are not replacing more than 100 txs from mempool
 
         details.txid = tx.txid();
+        let lookup_output = selected
+            .into_iter()
+            .map(|utxo| (utxo.outpoint, utxo))
+            .collect();
         details.fees = fee_amount;
         details.timestamp = time::get_timestamp();
 
-        let psbt = self.complete_transaction(tx, prev_script_pubkeys, builder)?;
+        let psbt = self.complete_transaction(tx, lookup_output, builder)?;
 
         Ok((psbt, details))
     }
@@ -1126,7 +1131,7 @@ where
     >(
         &self,
         tx: Transaction,
-        prev_script_pubkeys: HashMap<OutPoint, Script>,
+        lookup_output: HashMap<OutPoint, UTXO>,
         builder: TxBuilder<D, Cs, Ctx>,
     ) -> Result<PSBT, Error> {
         let mut psbt = PSBT::from_unsigned_tx(tx)?;
@@ -1137,8 +1142,8 @@ where
             .iter_mut()
             .zip(psbt.global.unsigned_tx.input.iter())
         {
-            let prev_script = match prev_script_pubkeys.get(&input.previous_output) {
-                Some(prev_script) => prev_script,
+            let utxo = match lookup_output.get(&input.previous_output) {
+                Some(utxo) => utxo,
                 None => continue,
             };
 
@@ -1153,7 +1158,7 @@ where
             let (script_type, child) = match self
                 .database
                 .borrow()
-                .get_path_from_script_pubkey(&prev_script)?
+                .get_path_from_script_pubkey(&utxo.txout.script_pubkey)?
             {
                 Some(x) => x,
                 None => continue,
