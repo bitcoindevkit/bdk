@@ -112,6 +112,10 @@ use crate::error::Error;
 use crate::types::{FeeRate, UTXO};
 
 use rand::seq::SliceRandom;
+#[cfg(not(test))]
+use rand::thread_rng;
+#[cfg(test)]
+use rand::{rngs::StdRng, SeedableRng};
 
 /// Default coin selection algorithm used by [`TxBuilder`](super::tx_builder::TxBuilder) if not
 /// overridden
@@ -532,11 +536,16 @@ impl BranchAndBoundCoinSelection {
 mod test {
     use std::str::FromStr;
 
+    use bitcoin::consensus::encode::serialize;
     use bitcoin::{OutPoint, Script, TxOut};
 
     use super::*;
     use crate::database::MemoryDatabase;
     use crate::types::*;
+
+    use rand::rngs::StdRng;
+    use rand::seq::SliceRandom;
+    use rand::{Rng, SeedableRng};
 
     const P2WPKH_WITNESS_SIZE: usize = 73 + 33 + 2;
 
@@ -571,6 +580,53 @@ mod test {
                 P2WPKH_WITNESS_SIZE,
             ),
         ]
+    }
+
+    fn generate_random_utxos(rng: &mut StdRng, utxos_number: usize) -> Vec<(UTXO, usize)> {
+        let mut res = Vec::new();
+        for _ in 0..utxos_number {
+            res.push((
+                UTXO {
+                    outpoint: OutPoint::from_str(
+                        "ebd9813ecebc57ff8f30797de7c205e3c7498ca950ea4341ee51a685ff2fa30a:0",
+                    )
+                    .unwrap(),
+                    txout: TxOut {
+                        value: rng.gen_range(0, 200000000),
+                        script_pubkey: Script::new(),
+                    },
+                    is_internal: false,
+                },
+                P2WPKH_WITNESS_SIZE,
+            ));
+        }
+        res
+    }
+
+    fn generate_same_value_utxos(utxos_value: u64, utxos_number: usize) -> Vec<(UTXO, usize)> {
+        let utxo = (
+            UTXO {
+                outpoint: OutPoint::from_str(
+                    "ebd9813ecebc57ff8f30797de7c205e3c7498ca950ea4341ee51a685ff2fa30a:0",
+                )
+                .unwrap(),
+                txout: TxOut {
+                    value: utxos_value,
+                    script_pubkey: Script::new(),
+                },
+                is_internal: false,
+            },
+            P2WPKH_WITNESS_SIZE,
+        );
+        vec![utxo; utxos_number]
+    }
+
+    fn sum_random_utxos(mut rng: &mut StdRng, utxos: &mut Vec<(UTXO, usize)>) -> u64 {
+        let utxos_picked_len = rng.gen_range(2, utxos.len() / 2);
+        utxos.shuffle(&mut rng);
+        utxos[..utxos_picked_len]
+            .iter()
+            .fold(0, |acc, x| acc + x.0.txout.value)
     }
 
     #[test]
@@ -671,4 +727,133 @@ mod test {
             )
             .unwrap();
     }
+
+    #[test]
+    fn test_bnb_coin_selection_success() {
+        // In this case bnb won't find a suitable match and single random draw will
+        // select three outputs
+        let utxos = generate_same_value_utxos(100_000, 20);
+
+        let database = MemoryDatabase::default();
+
+        let result = BranchAndBoundCoinSelection::default()
+            .coin_select(
+                &database,
+                vec![],
+                utxos,
+                FeeRate::from_sat_per_vb(1.0),
+                250_000,
+                50.0,
+            )
+            .unwrap();
+
+        assert_eq!(result.txin.len(), 3);
+        assert_eq!(result.selected_amount, 300_000);
+        assert_eq!(result.fee_amount, 254.0);
+    }
+
+    #[test]
+    fn test_bnb_coin_selection_required_are_enough() {
+        let utxos = get_test_utxos();
+        let database = MemoryDatabase::default();
+
+        let result = BranchAndBoundCoinSelection::default()
+            .coin_select(
+                &database,
+                utxos.clone(),
+                utxos,
+                FeeRate::from_sat_per_vb(1.0),
+                20_000,
+                50.0,
+            )
+            .unwrap();
+
+        assert_eq!(result.txin.len(), 2);
+        assert_eq!(result.selected_amount, 300_000);
+        assert_eq!(result.fee_amount, 186.0);
+    }
+
+    #[test]
+    #[should_panic(expected = "InsufficientFunds")]
+    fn test_bnb_coin_selection_insufficient_funds() {
+        let utxos = get_test_utxos();
+        let database = MemoryDatabase::default();
+
+        BranchAndBoundCoinSelection::default()
+            .coin_select(
+                &database,
+                vec![],
+                utxos,
+                FeeRate::from_sat_per_vb(1.0),
+                500_000,
+                50.0,
+            )
+            .unwrap();
+    }
+
+    #[test]
+    #[should_panic(expected = "InsufficientFunds")]
+    fn test_bnb_coin_selection_insufficient_funds_high_fees() {
+        let utxos = get_test_utxos();
+        let database = MemoryDatabase::default();
+
+        BranchAndBoundCoinSelection::default()
+            .coin_select(
+                &database,
+                vec![],
+                utxos,
+                FeeRate::from_sat_per_vb(1000.0),
+                250_000,
+                50.0,
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn test_bnb_coin_selection_check_fee_rate() {
+        let utxos = get_test_utxos();
+        let database = MemoryDatabase::default();
+
+        let result = BranchAndBoundCoinSelection::new(0)
+            .coin_select(
+                &database,
+                vec![],
+                utxos.clone(),
+                FeeRate::from_sat_per_vb(1.0),
+                99932, // first utxo's effective value
+                0.0,
+            )
+            .unwrap();
+
+        assert_eq!(result.txin.len(), 1);
+        assert_eq!(result.selected_amount, 100_000);
+        let result_size =
+            serialize(result.txin.first().unwrap()).len() as f32 + P2WPKH_WITNESS_SIZE as f32 / 4.0;
+        let epsilon = 0.5;
+        assert!((1.0 - (result.fee_amount / result_size)).abs() < epsilon);
+    }
+
+    #[test]
+    fn test_bnb_coin_selection_exact_match() {
+        let seed = [0; 32];
+        let mut rng: StdRng = SeedableRng::from_seed(seed);
+        let database = MemoryDatabase::default();
+
+        for _i in 0..200 {
+            let mut optional_utxos = generate_random_utxos(&mut rng, 16);
+            let target_amount = sum_random_utxos(&mut rng, &mut optional_utxos);
+            let result = BranchAndBoundCoinSelection::new(0)
+                .coin_select(
+                    &database,
+                    vec![],
+                    optional_utxos,
+                    FeeRate::from_sat_per_vb(0.0),
+                    target_amount,
+                    0.0,
+                )
+                .unwrap();
+            assert_eq!(result.selected_amount, target_amount);
+        }
+    }
+
 }
