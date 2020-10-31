@@ -111,6 +111,8 @@ use crate::database::Database;
 use crate::error::Error;
 use crate::types::{FeeRate, UTXO};
 
+use rand::seq::SliceRandom;
+
 /// Default coin selection algorithm used by [`TxBuilder`](super::tx_builder::TxBuilder) if not
 /// overridden
 pub type DefaultCoinSelectionAlgorithm = LargestFirstCoinSelection;
@@ -239,6 +241,292 @@ impl<D: Database> CoinSelectionAlgorithm<D> for LargestFirstCoinSelection {
 // Base weight of a Txin, not counting the weight needed for satisfaying it.
 // prev_txid (32 bytes) + prev_vout (4 bytes) + sequence (4 bytes) + script_len (1 bytes)
 pub const TXIN_BASE_WEIGHT: usize = (32 + 4 + 4 + 1) * 4;
+
+#[derive(Debug, Clone)]
+// Adds fee information to an UTXO.
+struct OutputGroup {
+    utxo: UTXO,
+    // weight needed to satisfy the UTXO, as described in `Descriptor::max_satisfaction_weight`
+    satisfaction_weight: usize,
+    // Amount of fees for spending a certain utxo, calculated using a certain FeeRate
+    fee: f32,
+    // The effective value of the UTXO, i.e., the utxo value minus the fee for spending it
+    effective_value: i64,
+}
+
+impl OutputGroup {
+    fn new(utxo: UTXO, satisfaction_weight: usize, fee_rate: FeeRate) -> Self {
+        let fee = (TXIN_BASE_WEIGHT + satisfaction_weight) as f32 / 4.0 * fee_rate.as_sat_vb();
+        let effective_value = utxo.txout.value as i64 - fee.ceil() as i64;
+        OutputGroup {
+            utxo,
+            satisfaction_weight,
+            effective_value,
+            fee,
+        }
+    }
+}
+
+/// Branch and bound coin selection. Code adapted from Bitcoin Core's implementation and from Mark
+/// Erhardt Master's Thesis (http://murch.one/wp-content/uploads/2016/11/erhardt2016coinselection.pdf)
+#[derive(Debug)]
+pub struct BranchAndBoundCoinSelection {
+    size_of_change: u64,
+}
+
+impl Default for BranchAndBoundCoinSelection {
+    fn default() -> Self {
+        Self {
+            // P2WPKH cost of change -> value (8 bytes) + script len (1 bytes) + script (22 bytes)
+            size_of_change: 8 + 1 + 22,
+        }
+    }
+}
+
+impl BranchAndBoundCoinSelection {
+    pub fn new(size_of_change: u64) -> Self {
+        Self { size_of_change }
+    }
+}
+
+const BNB_TOTAL_TRIES: usize = 100_000;
+
+impl<D: Database> CoinSelectionAlgorithm<D> for BranchAndBoundCoinSelection {
+    fn coin_select(
+        &self,
+        _database: &D,
+        required_utxos: Vec<(UTXO, usize)>,
+        optional_utxos: Vec<(UTXO, usize)>,
+        fee_rate: FeeRate,
+        amount_needed: u64,
+        fee_amount: f32,
+    ) -> Result<CoinSelectionResult, Error> {
+        // Mapping every (UTXO, usize) to an output group
+        let required_utxos: Vec<OutputGroup> = required_utxos
+            .into_iter()
+            .map(|u| OutputGroup::new(u.0, u.1, fee_rate))
+            .collect();
+
+        // Mapping every (UTXO, usize) to an output group.
+        // Filtering UTXOs with an effective_value < 0, as the fee paid for
+        // adding them is more than their value
+        let optional_utxos: Vec<OutputGroup> = optional_utxos
+            .into_iter()
+            .map(|u| OutputGroup::new(u.0, u.1, fee_rate))
+            .filter(|u| u.effective_value > 0)
+            .collect();
+
+        let curr_value = required_utxos
+            .iter()
+            .fold(0, |acc, x| acc + x.effective_value as u64);
+
+        let curr_available_value = optional_utxos
+            .iter()
+            .fold(0, |acc, x| acc + x.effective_value as u64);
+
+        let actual_target = fee_amount.ceil() as u64 + amount_needed;
+        let cost_of_change = self.size_of_change as f32 * fee_rate.as_sat_vb();
+
+        if curr_available_value + curr_value < actual_target {
+            return Err(Error::InsufficientFunds);
+        }
+
+        Ok(self
+            .bnb(
+                required_utxos.clone(),
+                optional_utxos.clone(),
+                curr_value,
+                curr_available_value,
+                actual_target,
+                fee_amount,
+                cost_of_change,
+            )
+            .unwrap_or_else(|_| {
+                self.single_random_draw(
+                    required_utxos,
+                    optional_utxos,
+                    curr_value,
+                    actual_target,
+                    fee_amount,
+                )
+            }))
+    }
+}
+
+impl BranchAndBoundCoinSelection {
+    // TODO: make this more Rust-onic :)
+    // (And perhpaps refactor with less arguments?)
+    #[allow(clippy::too_many_arguments)]
+    fn bnb(
+        &self,
+        required_utxos: Vec<OutputGroup>,
+        mut optional_utxos: Vec<OutputGroup>,
+        mut curr_value: u64,
+        mut curr_available_value: u64,
+        actual_target: u64,
+        fee_amount: f32,
+        cost_of_change: f32,
+    ) -> Result<CoinSelectionResult, Error> {
+        // current_selection[i] will contain true if we are using optional_utxos[i],
+        // false otherwise. Note that current_selection.len() could be less than
+        // optional_utxos.len(), it just means that we still haven't decided if we should keep
+        // certain optional_utxos or not.
+        let mut current_selection: Vec<bool> = Vec::with_capacity(optional_utxos.len());
+
+        // Sort the utxo_pool
+        optional_utxos.sort_unstable_by_key(|a| a.effective_value);
+        optional_utxos.reverse();
+
+        // Contains the best selection we found
+        let mut best_selection = Vec::new();
+        let mut best_selection_value = None;
+
+        // Depth First search loop for choosing the UTXOs
+        for _ in 0..BNB_TOTAL_TRIES {
+            // Conditions for starting a backtrack
+            let mut backtrack = false;
+            // Cannot possibly reach target with the amount remaining in the curr_available_value,
+            // or the selected value is out of range.
+            // Go back and try other branch
+            if curr_value + curr_available_value < actual_target
+                || curr_value > actual_target + cost_of_change as u64
+            {
+                backtrack = true;
+            } else if curr_value >= actual_target {
+                // Selected value is within range, there's no point in going forward. Start
+                // backtracking
+                backtrack = true;
+
+                // If we found a solution better than the previous one, or if there wasn't previous
+                // solution, update the best solution
+                if best_selection_value.is_none() || curr_value < best_selection_value.unwrap() {
+                    best_selection = current_selection.clone();
+                    best_selection_value = Some(curr_value);
+                }
+
+                // If we found a perfect match, break here
+                if curr_value == actual_target {
+                    break;
+                }
+            }
+
+            // Backtracking, moving backwards
+            if backtrack {
+                // Walk backwards to find the last included UTXO that still needs to have its omission branch traversed.
+                while let Some(false) = current_selection.last() {
+                    current_selection.pop();
+                    curr_available_value +=
+                        optional_utxos[current_selection.len()].effective_value as u64;
+                }
+
+                if current_selection.last_mut().is_none() {
+                    // We have walked back to the first utxo and no branch is untraversed. All solutions searched
+                    // If best selection is empty, then there's no exact match
+                    if best_selection.is_empty() {
+                        return Err(Error::BnBNoExactMatch);
+                    }
+                    break;
+                }
+
+                if let Some(c) = current_selection.last_mut() {
+                    // Output was included on previous iterations, try excluding now.
+                    *c = false;
+                }
+
+                let utxo = &optional_utxos[current_selection.len() - 1];
+                curr_value -= utxo.effective_value as u64;
+            } else {
+                // Moving forwards, continuing down this branch
+                let utxo = &optional_utxos[current_selection.len()];
+
+                // Remove this utxo from the curr_available_value utxo amount
+                curr_available_value -= utxo.effective_value as u64;
+
+                // Inclusion branch first (Largest First Exploration)
+                current_selection.push(true);
+                curr_value += utxo.effective_value as u64;
+            }
+        }
+
+        // Check for solution
+        if best_selection.is_empty() {
+            return Err(Error::BnBTotalTriesExceeded);
+        }
+
+        // Set output set
+        let selected_utxos = optional_utxos
+            .into_iter()
+            .zip(best_selection)
+            .filter_map(|(optional, is_in_best)| if is_in_best { Some(optional) } else { None })
+            .collect();
+
+        Ok(BranchAndBoundCoinSelection::calculate_cs_result(
+            selected_utxos,
+            required_utxos,
+            fee_amount,
+        ))
+    }
+
+    fn single_random_draw(
+        &self,
+        required_utxos: Vec<OutputGroup>,
+        mut optional_utxos: Vec<OutputGroup>,
+        curr_value: u64,
+        actual_target: u64,
+        fee_amount: f32,
+    ) -> CoinSelectionResult {
+        #[cfg(not(test))]
+        optional_utxos.shuffle(&mut thread_rng());
+        #[cfg(test)]
+        {
+            let seed = [0; 32];
+            let mut rng: StdRng = SeedableRng::from_seed(seed);
+            optional_utxos.shuffle(&mut rng);
+        }
+
+        let selected_utxos = optional_utxos
+            .into_iter()
+            .scan(curr_value, |curr_value, utxo| {
+                if *curr_value >= actual_target {
+                    None
+                } else {
+                    *curr_value += utxo.effective_value as u64;
+                    Some(utxo)
+                }
+            })
+            .collect::<Vec<_>>();
+
+        BranchAndBoundCoinSelection::calculate_cs_result(selected_utxos, required_utxos, fee_amount)
+    }
+
+    fn calculate_cs_result(
+        selected_utxos: Vec<OutputGroup>,
+        required_utxos: Vec<OutputGroup>,
+        fee_amount: f32,
+    ) -> CoinSelectionResult {
+        let (txin, fee_amount, selected_amount) =
+            selected_utxos.into_iter().chain(required_utxos).fold(
+                (vec![], fee_amount, 0),
+                |(mut txin, mut fee_amount, mut selected_amount), output_group| {
+                    selected_amount += output_group.utxo.txout.value;
+                    fee_amount += output_group.fee;
+                    txin.push((
+                        TxIn {
+                            previous_output: output_group.utxo.outpoint,
+                            ..Default::default()
+                        },
+                        output_group.utxo.txout.script_pubkey,
+                    ));
+                    (txin, fee_amount, selected_amount)
+                },
+            );
+        CoinSelectionResult {
+            txin,
+            fee_amount,
+            selected_amount,
+        }
+    }
+}
 
 #[cfg(test)]
 mod test {

@@ -40,6 +40,8 @@ pub enum Error {
     NoUtxosSelected,
     OutputBelowDustLimit(usize),
     InsufficientFunds,
+    BnBTotalTriesExceeded,
+    BnBNoExactMatch,
     InvalidAddressNetwork(Address),
     UnknownUTXO,
     DifferentTransactions,
