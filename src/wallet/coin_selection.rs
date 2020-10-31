@@ -204,8 +204,8 @@ impl<D: Database> CoinSelectionAlgorithm<D> for LargestFirstCoinSelection {
         let txin = utxos
             .scan(
                 (&mut selected_amount, &mut fee_amount),
-                |(selected_amount, fee_amount), (must_use, (utxo, weight))| {
-                    if must_use || **selected_amount < amount_needed + (fee_amount.ceil() as u64) {
+                |(selected_amount, fee_amount), (required, (utxo, weight))| {
+                    if required || **selected_amount < amount_needed + (fee_amount.ceil() as u64) {
                         let new_in = TxIn {
                             previous_output: utxo.outpoint,
                             script_sig: Script::default(),
