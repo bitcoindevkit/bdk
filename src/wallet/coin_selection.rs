@@ -987,4 +987,29 @@ mod test {
             assert_eq!(result.selected_amount, target_amount);
         }
     }
+
+    #[test]
+    fn test_single_random_draw_function_success() {
+        let seed = [0; 32];
+        let mut rng: StdRng = SeedableRng::from_seed(seed);
+        let mut utxos = generate_random_utxos(&mut rng, 300);
+        let target_amount = sum_random_utxos(&mut rng, &mut utxos);
+
+        let fee_rate = FeeRate::from_sat_per_vb(1.0);
+        let utxos: Vec<OutputGroup> = utxos
+            .into_iter()
+            .map(|u| OutputGroup::new(u.0, u.1, fee_rate))
+            .collect();
+
+        let result = BranchAndBoundCoinSelection::default().single_random_draw(
+            vec![],
+            utxos,
+            0,
+            target_amount,
+            50.0,
+        );
+
+        assert!(result.selected_amount > target_amount);
+        assert_eq!(result.fee_amount, 50.0 + result.txin.len() as f32 * 68.0);
+    }
 }
