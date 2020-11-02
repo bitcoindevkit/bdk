@@ -20,7 +20,7 @@ jobs:
         uses: actions-rs/tarpaulin@v0.1.2
         with:
           version: '0.15.0'
-          args: '-- --test-threads 1'
+          args: --features all-keys,cli-utils,compiler,esplora,compact_filters --run-types Tests,Doctests --exclude-files "testutils/*"
 
       - name: codecov.io
         uses: codecov/codecov-action@v1.0.14
