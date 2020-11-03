@@ -205,7 +205,7 @@ where
         script_type: ScriptType,
         id: SignerId,
         ordering: SignerOrdering,
-        signer: Arc<Box<dyn Signer>>,
+        signer: Arc<dyn Signer>,
     ) {
         let signers = match script_type {
             ScriptType::External => Arc::make_mut(&mut self.signers),
