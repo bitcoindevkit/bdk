@@ -106,7 +106,7 @@ impl std::error::Error for AddressValidatorError {}
 /// validator will be propagated up to the original caller that triggered the address generation.
 ///
 /// For a usage example see [this module](crate::address_validator)'s documentation.
-pub trait AddressValidator {
+pub trait AddressValidator: Send + Sync {
     /// Validate or inspect an address
     fn validate(
         &self,

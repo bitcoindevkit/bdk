@@ -162,7 +162,7 @@ impl std::error::Error for SignerError {}
 ///
 /// This trait can be implemented to provide customized signers to the wallet. For an example see
 /// [`this module`](crate::wallet::signer)'s documentation.
-pub trait Signer: fmt::Debug {
+pub trait Signer: fmt::Debug + Send + Sync {
     /// Sign a PSBT
     ///
     /// The `input_index` argument is only provided if the wallet doesn't declare to sign the whole
