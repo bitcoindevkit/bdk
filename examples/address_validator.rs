@@ -62,7 +62,7 @@ fn main() -> Result<(), bdk::Error> {
     let mut wallet: OfflineWallet<_> =
         Wallet::new_offline(descriptor, None, Network::Regtest, MemoryDatabase::new())?;
 
-    wallet.add_address_validator(Arc::new(Box::new(DummyValidator)));
+    wallet.add_address_validator(Arc::new(DummyValidator));
 
     wallet.get_new_address()?;
     wallet.get_new_address()?;

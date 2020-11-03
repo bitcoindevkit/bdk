@@ -89,7 +89,7 @@ pub struct Wallet<B: BlockchainMarker, D: BatchDatabase> {
     signers: Arc<SignersContainer>,
     change_signers: Arc<SignersContainer>,
 
-    address_validators: Vec<Arc<Box<dyn AddressValidator>>>,
+    address_validators: Vec<Arc<dyn AddressValidator>>,
 
     network: Network,
 
@@ -218,7 +218,7 @@ where
     /// Add an address validator
     ///
     /// See [the `address_validator` module](address_validator) for an example.
-    pub fn add_address_validator(&mut self, validator: Arc<Box<dyn AddressValidator>>) {
+    pub fn add_address_validator(&mut self, validator: Arc<dyn AddressValidator>) {
         self.address_validators.push(validator);
     }
 
