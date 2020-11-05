@@ -67,7 +67,7 @@
 //!
 //! let descriptor = "wpkh(tpubD6NzVbkrYhZ4Xferm7Pz4VnjdcDPFyjVu5K4iZXQ4pVN8Cks4pHVowTBXBKRhX64pkRyJZJN5xAKj4UDNnLPb5p2sSKXhewoYx5GbTdUFWq/*)";
 //! let mut wallet: OfflineWallet<_> = Wallet::new_offline(descriptor, None, Network::Testnet, MemoryDatabase::default())?;
-//! wallet.add_address_validator(Arc::new(Box::new(PrintAddressAndContinue)));
+//! wallet.add_address_validator(Arc::new(PrintAddressAndContinue));
 //!
 //! let address = wallet.get_new_address()?;
 //! println!("Address: {}", address);
@@ -106,7 +106,7 @@ impl std::error::Error for AddressValidatorError {}
 /// validator will be propagated up to the original caller that triggered the address generation.
 ///
 /// For a usage example see [this module](crate::address_validator)'s documentation.
-pub trait AddressValidator {
+pub trait AddressValidator: Send + Sync {
     /// Validate or inspect an address
     fn validate(
         &self,
@@ -140,7 +140,7 @@ mod test {
     #[should_panic(expected = "InvalidScript")]
     fn test_address_validator_external() {
         let (mut wallet, _, _) = get_funded_wallet(get_test_wpkh());
-        wallet.add_address_validator(Arc::new(Box::new(TestValidator)));
+        wallet.add_address_validator(Arc::new(TestValidator));
 
         wallet.get_new_address().unwrap();
     }
@@ -149,7 +149,7 @@ mod test {
     #[should_panic(expected = "InvalidScript")]
     fn test_address_validator_internal() {
         let (mut wallet, descriptors, _) = get_funded_wallet(get_test_wpkh());
-        wallet.add_address_validator(Arc::new(Box::new(TestValidator)));
+        wallet.add_address_validator(Arc::new(TestValidator));
 
         let addr = testutils!(@external descriptors, 10);
         wallet

@@ -82,7 +82,7 @@
 //!     ScriptType::External,
 //!     Fingerprint::from_str("e30f11b8").unwrap().into(),
 //!     SignerOrdering(200),
-//!     Arc::new(Box::new(custom_signer))
+//!     Arc::new(custom_signer)
 //! );
 //!
 //! # Ok::<_, bdk::Error>(())
@@ -162,7 +162,7 @@ impl std::error::Error for SignerError {}
 ///
 /// This trait can be implemented to provide customized signers to the wallet. For an example see
 /// [`this module`](crate::wallet::signer)'s documentation.
-pub trait Signer: fmt::Debug {
+pub trait Signer: fmt::Debug + Send + Sync {
     /// Sign a PSBT
     ///
     /// The `input_index` argument is only provided if the wallet doesn't declare to sign the whole
@@ -320,7 +320,7 @@ impl From<(SignerId, SignerOrdering)> for SignersContainerKey {
 
 /// Container for multiple signers
 #[derive(Debug, Default, Clone)]
-pub struct SignersContainer(BTreeMap<SignersContainerKey, Arc<Box<dyn Signer>>>);
+pub struct SignersContainer(BTreeMap<SignersContainerKey, Arc<dyn Signer>>);
 
 impl SignersContainer {
     pub fn as_key_map(&self) -> KeyMap {
@@ -346,12 +346,12 @@ impl From<KeyMap> for SignersContainer {
                             .to_pubkeyhash(),
                     ),
                     SignerOrdering::default(),
-                    Arc::new(Box::new(private_key.key)),
+                    Arc::new(private_key.key),
                 ),
                 DescriptorSecretKey::XPrv(xprv) => container.add_external(
                     SignerId::from(xprv.root_fingerprint()),
                     SignerOrdering::default(),
-                    Arc::new(Box::new(xprv)),
+                    Arc::new(xprv),
                 ),
             };
         }
@@ -372,17 +372,13 @@ impl SignersContainer {
         &mut self,
         id: SignerId,
         ordering: SignerOrdering,
-        signer: Arc<Box<dyn Signer>>,
-    ) -> Option<Arc<Box<dyn Signer>>> {
+        signer: Arc<dyn Signer>,
+    ) -> Option<Arc<dyn Signer>> {
         self.0.insert((id, ordering).into(), signer)
     }
 
     /// Removes a signer from the container and returns it
-    pub fn remove(
-        &mut self,
-        id: SignerId,
-        ordering: SignerOrdering,
-    ) -> Option<Arc<Box<dyn Signer>>> {
+    pub fn remove(&mut self, id: SignerId, ordering: SignerOrdering) -> Option<Arc<dyn Signer>> {
         self.0.remove(&(id, ordering).into())
     }
 
@@ -395,12 +391,12 @@ impl SignersContainer {
     }
 
     /// Returns the list of signers in the container, sorted by lowest to highest `ordering`
-    pub fn signers(&self) -> Vec<&Arc<Box<dyn Signer>>> {
+    pub fn signers(&self) -> Vec<&Arc<dyn Signer>> {
         self.0.values().collect()
     }
 
     /// Finds the signer with lowest ordering for a given id in the container.
-    pub fn find(&self, id: SignerId) -> Option<&Arc<Box<dyn Signer>>> {
+    pub fn find(&self, id: SignerId) -> Option<&Arc<dyn Signer>> {
         self.0
             .range((
                 Included(&(id.clone(), SignerOrdering(0)).into()),
