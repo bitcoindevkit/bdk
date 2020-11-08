@@ -42,7 +42,6 @@
 //! ```no_run
 //! # use std::str::FromStr;
 //! # use bitcoin::*;
-//! # use bitcoin::consensus::serialize;
 //! # use bdk::wallet::coin_selection::*;
 //! # use bdk::database::Database;
 //! # use bdk::*;
@@ -70,7 +69,7 @@
 //!                 };
 //!
 //!                 **selected_amount += utxo.txout.value;
-//!                 **additional_weight += serialize(&txin).len() * 4 + weight;
+//!                 **additional_weight += TXIN_BASE_WEIGHT + weight;
 //!
 //!                 Some((
 //!                     txin,
@@ -106,7 +105,6 @@
 //! # Ok::<(), bdk::Error>(())
 //! ```
 
-use bitcoin::consensus::encode::serialize;
 use bitcoin::{Script, TxIn};
 
 use crate::database::Database;
@@ -209,7 +207,7 @@ impl<D: Database> CoinSelectionAlgorithm<D> for LargestFirstCoinSelection {
                             witness: vec![],
                         };
 
-                        **fee_amount += calc_fee_bytes(serialize(&new_in).len() * 4 + weight);
+                        **fee_amount += calc_fee_bytes(TXIN_BASE_WEIGHT + weight);
                         **selected_amount += utxo.txout.value;
 
                         log::debug!(
@@ -237,6 +235,10 @@ impl<D: Database> CoinSelectionAlgorithm<D> for LargestFirstCoinSelection {
         })
     }
 }
+
+// Base weight of a Txin, not counting the weight needed for satisfaying it.
+// prev_txid (32 bytes) + prev_vout (4 bytes) + sequence (4 bytes) + script_len (1 bytes)
+pub const TXIN_BASE_WEIGHT: usize = (32 + 4 + 4 + 1) * 4;
 
 #[cfg(test)]
 mod test {
