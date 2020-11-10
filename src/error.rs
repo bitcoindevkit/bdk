@@ -60,7 +60,7 @@ pub enum Error {
     ChecksumMismatch,
     DifferentDescriptorStructure,
 
-    SpendingPolicyRequired,
+    SpendingPolicyRequired(crate::types::ScriptType),
     InvalidPolicyPathError(crate::descriptor::policy::PolicyError),
 
     Signer(crate::wallet::signer::SignerError),

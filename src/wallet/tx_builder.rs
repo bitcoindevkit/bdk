@@ -51,7 +51,7 @@ use bitcoin::{OutPoint, Script, SigHashType, Transaction};
 
 use super::coin_selection::{CoinSelectionAlgorithm, DefaultCoinSelectionAlgorithm};
 use crate::database::Database;
-use crate::types::{FeeRate, UTXO};
+use crate::types::{FeeRate, ScriptType, UTXO};
 
 /// Context in which the [`TxBuilder`] is valid
 pub trait TxBuilderContext: std::fmt::Debug + Default + Clone {}
@@ -77,7 +77,8 @@ pub struct TxBuilder<D: Database, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderC
     pub(crate) drain_wallet: bool,
     pub(crate) single_recipient: Option<Script>,
     pub(crate) fee_policy: Option<FeePolicy>,
-    pub(crate) policy_path: Option<BTreeMap<String, Vec<usize>>>,
+    pub(crate) internal_policy_path: Option<BTreeMap<String, Vec<usize>>>,
+    pub(crate) external_policy_path: Option<BTreeMap<String, Vec<usize>>>,
     pub(crate) utxos: Vec<OutPoint>,
     pub(crate) unspendable: HashSet<OutPoint>,
     pub(crate) manually_selected_only: bool,
@@ -117,7 +118,8 @@ where
             drain_wallet: Default::default(),
             single_recipient: Default::default(),
             fee_policy: Default::default(),
-            policy_path: Default::default(),
+            internal_policy_path: Default::default(),
+            external_policy_path: Default::default(),
             utxos: Default::default(),
             unspendable: Default::default(),
             manually_selected_only: Default::default(),
@@ -157,14 +159,72 @@ impl<D: Database, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderContext> TxBuilde
         self
     }
 
-    /// Set the policy path to use while creating the transaction
+    /// Set the policy path to use while creating the transaction for a given script type
     ///
     /// This method accepts a map where the key is the policy node id (see
     /// [`Policy::id`](crate::descriptor::Policy::id)) and the value is the list of the indexes of
     /// the items that are intended to be satisfied from the policy node (see
     /// [`SatisfiableItem::Thresh::items`](crate::descriptor::policy::SatisfiableItem::Thresh::items)).
-    pub fn policy_path(mut self, policy_path: BTreeMap<String, Vec<usize>>) -> Self {
-        self.policy_path = Some(policy_path);
+    ///
+    /// ## Example
+    ///
+    /// An example of when the policy path is needed is the following descriptor:
+    /// `wsh(thresh(2,pk(A),sj:and_v(v:pk(B),n:older(6)),snj:and_v(v:pk(C),after(630000))))`,
+    /// derived from the miniscript policy `thresh(2,pk(A),and(pk(B),older(6)),and(pk(C),after(630000)))`.
+    /// It declares three descriptor fragments, and at the top level it uses `thresh()` to
+    /// ensure that at least two of them are satisfied. The individual fragments are:
+    ///
+    /// 1. `pk(A)`
+    /// 2. `and(pk(B),older(6))`
+    /// 3. `and(pk(C),after(630000))`
+    ///
+    /// When those conditions are combined in pairs, it's clear that the transaction needs to be created
+    /// differently depending on how the user intends to satisfy the policy afterwards:
+    ///
+    /// * If fragments `1` and `2` are used, the transaction will need to use a specific
+    ///   `n_sequence` in order to spend an `OP_CSV` branch.
+    /// * If fragments `1` and `3` are used, the transaction will need to use a specific `locktime`
+    ///   in order to spend an `OP_CLTV` branch.
+    /// * If fragments `2` and `3` are used, the transaction will need both.
+    ///
+    /// When the spending policy is represented as a tree (see
+    /// [`Wallet::policies`](super::Wallet::policies)), every node
+    /// is assigned a unique identifier that can be used in the policy path to specify which of
+    /// the node's children the user intends to satisfy: for instance, assuming the `thresh()`
+    /// root node of this example has an id of `aabbccdd`, the policy path map would look like:
+    ///
+    /// `{ "aabbccdd" => [0, 1] }`
+    ///
+    /// where the key is the node's id, and the value is a list of the children that should be
+    /// used, in no particular order.
+    ///
+    /// If a particularly complex descriptor has multiple ambiguous thresholds in its structure,
+    /// multiple entries can be added to the map, one for each node that requires an explicit path.
+    ///
+    /// ```
+    /// # use std::str::FromStr;
+    /// # use std::collections::BTreeMap;
+    /// # use bitcoin::*;
+    /// # use bdk::*;
+    /// # let to_address = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap();
+    /// let mut path = BTreeMap::new();
+    /// path.insert("aabbccdd".to_string(), vec![0, 1]);
+    ///
+    /// let builder = TxBuilder::with_recipients(vec![(to_address.script_pubkey(), 50_000)])
+    ///     .policy_path(path, ScriptType::External);
+    /// # let builder: TxBuilder<bdk::database::MemoryDatabase, _, _> = builder;
+    /// ```
+    pub fn policy_path(
+        mut self,
+        policy_path: BTreeMap<String, Vec<usize>>,
+        script_type: ScriptType,
+    ) -> Self {
+        let to_update = match script_type {
+            ScriptType::Internal => &mut self.internal_policy_path,
+            ScriptType::External => &mut self.external_policy_path,
+        };
+
+        *to_update = Some(policy_path);
         self
     }
 
@@ -301,7 +361,8 @@ impl<D: Database, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderContext> TxBuilde
             drain_wallet: self.drain_wallet,
             single_recipient: self.single_recipient,
             fee_policy: self.fee_policy,
-            policy_path: self.policy_path,
+            internal_policy_path: self.internal_policy_path,
+            external_policy_path: self.external_policy_path,
             utxos: self.utxos,
             unspendable: self.unspendable,
             manually_selected_only: self.manually_selected_only,

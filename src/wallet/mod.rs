@@ -244,17 +244,62 @@ where
         &self,
         builder: TxBuilder<D, Cs, CreateTx>,
     ) -> Result<(PSBT, TransactionDetails), Error> {
-        // TODO: fetch both internal and external policies
-        let policy = self
+        let external_policy = self
             .descriptor
             .extract_policy(Arc::clone(&self.signers))?
             .unwrap();
-        if policy.requires_path() && builder.policy_path.is_none() {
-            return Err(Error::SpendingPolicyRequired);
+        let internal_policy = self
+            .change_descriptor
+            .as_ref()
+            .map(|desc| {
+                Ok::<_, Error>(
+                    desc.extract_policy(Arc::clone(&self.change_signers))?
+                        .unwrap(),
+                )
+            })
+            .transpose()?;
+
+        // The policy allows spending external outputs, but it requires a policy path that hasn't been
+        // provided
+        if builder.change_policy != tx_builder::ChangeSpendPolicy::OnlyChange
+            && external_policy.requires_path()
+            && builder.external_policy_path.is_none()
+        {
+            return Err(Error::SpendingPolicyRequired(ScriptType::External));
+        };
+        // Same for the internal_policy path, if present
+        if let Some(internal_policy) = &internal_policy {
+            if builder.change_policy != tx_builder::ChangeSpendPolicy::ChangeForbidden
+                && internal_policy.requires_path()
+                && builder.internal_policy_path.is_none()
+            {
+                return Err(Error::SpendingPolicyRequired(ScriptType::Internal));
+            };
         }
-        let requirements =
-            policy.get_condition(builder.policy_path.as_ref().unwrap_or(&BTreeMap::new()))?;
-        debug!("requirements: {:?}", requirements);
+
+        let external_requirements = external_policy.get_condition(
+            builder
+                .external_policy_path
+                .as_ref()
+                .unwrap_or(&BTreeMap::new()),
+        )?;
+        let internal_requirements = internal_policy
+            .map(|policy| {
+                Ok::<_, Error>(
+                    policy.get_condition(
+                        builder
+                            .internal_policy_path
+                            .as_ref()
+                            .unwrap_or(&BTreeMap::new()),
+                    )?,
+                )
+            })
+            .transpose()?;
+
+        let requirements = external_requirements
+            .clone()
+            .merge(&internal_requirements.unwrap_or_default())?;
+        debug!("Policy requirements: {:?}", requirements);
 
         let version = match builder.version {
             Some(tx_builder::Version(0)) => {
@@ -1393,6 +1438,11 @@ mod test {
         "wsh(and_v(v:pk(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW),older(6)))"
     }
 
+    pub(crate) fn get_test_a_or_b_plus_csv() -> &'static str {
+        // or(pk(Alice),and(pk(Bob),older(144)))
+        "wsh(or_d(pk(cRjo6jqfVNP33HhSS76UhXETZsGTZYx8FMFvR9kpbtCSV1PmdZdu),and_v(v:pk(cMnkdebixpXMPfkcNEjjGin7s94hiehAH4mLbYkZoh9KSiNNmqC8),older(144))))"
+    }
+
     pub(crate) fn get_test_single_sig_cltv() -> &'static str {
         // and(pk(Alice),after(100000))
         "wsh(and_v(v:pk(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW),after(100000)))"
@@ -2132,6 +2182,60 @@ mod test {
                     .manually_selected_only(),
             )
             .unwrap();
+    }
+
+    #[test]
+    #[should_panic(expected = "SpendingPolicyRequired(External)")]
+    fn test_create_tx_policy_path_required() {
+        let (wallet, _, _) = get_funded_wallet(get_test_a_or_b_plus_csv());
+
+        let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
+        wallet
+            .create_tx(TxBuilder::with_recipients(vec![(
+                addr.script_pubkey(),
+                30_000,
+            )]))
+            .unwrap();
+    }
+
+    #[test]
+    fn test_create_tx_policy_path_no_csv() {
+        let (wallet, _, _) = get_funded_wallet(get_test_a_or_b_plus_csv());
+
+        let external_policy = wallet.policies(ScriptType::External).unwrap().unwrap();
+        let root_id = external_policy.id;
+        // child #0 is just the key "A"
+        let path = vec![(root_id, vec![0])].into_iter().collect();
+
+        let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
+        let (psbt, _) = wallet
+            .create_tx(
+                TxBuilder::with_recipients(vec![(addr.script_pubkey(), 30_000)])
+                    .policy_path(path, ScriptType::External),
+            )
+            .unwrap();
+
+        assert_eq!(psbt.global.unsigned_tx.input[0].sequence, 0xFFFFFFFF);
+    }
+
+    #[test]
+    fn test_create_tx_policy_path_use_csv() {
+        let (wallet, _, _) = get_funded_wallet(get_test_a_or_b_plus_csv());
+
+        let external_policy = wallet.policies(ScriptType::External).unwrap().unwrap();
+        let root_id = external_policy.id;
+        // child #1 is or(pk(B),older(144))
+        let path = vec![(root_id, vec![1])].into_iter().collect();
+
+        let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
+        let (psbt, _) = wallet
+            .create_tx(
+                TxBuilder::with_recipients(vec![(addr.script_pubkey(), 30_000)])
+                    .policy_path(path, ScriptType::External),
+            )
+            .unwrap();
+
+        assert_eq!(psbt.global.unsigned_tx.input[0].sequence, 144);
     }
 
     #[test]

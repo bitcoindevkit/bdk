@@ -433,7 +433,7 @@ impl Condition {
         }
     }
 
-    fn merge(mut self, other: &Condition) -> Result<Self, PolicyError> {
+    pub(crate) fn merge(mut self, other: &Condition) -> Result<Self, PolicyError> {
         match (self.csv, other.csv) {
             (Some(a), Some(b)) => self.csv = Some(Self::merge_timelock(a, b)?),
             (None, any) => self.csv = any,
