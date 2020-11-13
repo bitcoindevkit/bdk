@@ -29,6 +29,8 @@ use std::collections::HashSet;
 use std::marker::PhantomData;
 use std::ops::Deref;
 
+use bitcoin::secp256k1;
+
 use bitcoin::util::bip32;
 use bitcoin::{Network, PrivateKey, PublicKey};
 
@@ -416,6 +418,28 @@ impl<Ctx: ScriptContext> GeneratableKey<Ctx> for bip32::ExtendedPrivKey {
     }
 }
 
+impl<Ctx: ScriptContext> GeneratableKey<Ctx> for PrivateKey {
+    type Entropy = [u8; secp256k1::constants::SECRET_KEY_SIZE];
+
+    type Options = ();
+    type Error = bip32::Error;
+
+    fn generate_with_entropy(
+        _: Self::Options,
+        entropy: Self::Entropy,
+    ) -> Result<GeneratedKey<Self, Ctx>, Self::Error> {
+        // pick a arbitrary network here, but say that we support all of them
+        let key = secp256k1::SecretKey::from_slice(&entropy)?;
+        let private_key = PrivateKey {
+            compressed: true,
+            network: Network::Bitcoin,
+            key,
+        };
+
+        Ok(GeneratedKey::new(private_key, any_network()))
+    }
+}
+
 impl<Ctx: ScriptContext, T: DerivableKey<Ctx>> ToDescriptorKey<Ctx> for (T, bip32::DerivationPath) {
     fn to_descriptor_key(self) -> Result<DescriptorKey<Ctx>, KeyError> {
         self.0.add_metadata(None, self.1)
@@ -587,5 +611,17 @@ pub mod test {
 
         assert_eq!(generated_xprv.valid_networks, any_network());
         assert_eq!(generated_xprv.to_string(), "xprv9s21ZrQH143K4Xr1cJyqTvuL2FWR8eicgY9boWqMBv8MDVUZ65AXHnzBrK1nyomu6wdcabRgmGTaAKawvhAno1V5FowGpTLVx3jxzE5uk3Q");
+    }
+
+    #[test]
+    fn test_keys_generate_wif() {
+        let generated_wif: GeneratedKey<_, miniscript::Segwitv0> =
+            bitcoin::PrivateKey::generate_with_entropy((), TEST_ENTROPY).unwrap();
+
+        assert_eq!(generated_wif.valid_networks, any_network());
+        assert_eq!(
+            generated_wif.to_string(),
+            "L2wTu6hQrnDMiFNWA5na6jB12ErGQqtXwqpSL7aWquJaZG8Ai3ch"
+        );
     }
 }
