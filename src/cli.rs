@@ -149,10 +149,18 @@ pub fn make_cli_subcommands<'a, 'b>() -> App<'a, 'b> {
                         .takes_value(true),
                 )
                 .arg(
-                    Arg::with_name("policy")
-                        .long("policy")
+                    Arg::with_name("external_policy")
+                        .long("external_policy")
                         .value_name("POLICY")
-                        .help("Selects which policy should be used to satisfy the descriptor")
+                        .help("Selects which policy should be used to satisfy the external descriptor")
+                        .takes_value(true)
+                        .number_of_values(1),
+                )
+                .arg(
+                    Arg::with_name("internal_policy")
+                        .long("internal_policy")
+                        .value_name("POLICY")
+                        .help("Selects which policy should be used to satisfy the internal descriptor")
                         .takes_value(true)
                         .number_of_values(1),
                 ),
@@ -430,10 +438,19 @@ where
                 .map_err(Error::Generic)?;
             tx_builder = tx_builder.unspendable(unspendable);
         }
-        if let Some(policy) = sub_matches.value_of("policy") {
+
+        let policies = vec![
+            sub_matches
+                .value_of("external_policy")
+                .map(|p| (p, ScriptType::External)),
+            sub_matches
+                .value_of("internal_policy")
+                .map(|p| (p, ScriptType::Internal)),
+        ];
+        for (policy, script_type) in policies.into_iter().filter_map(|x| x) {
             let policy = serde_json::from_str::<BTreeMap<String, Vec<usize>>>(&policy)
                 .map_err(|s| Error::Generic(s.to_string()))?;
-            tx_builder = tx_builder.policy_path(policy);
+            tx_builder = tx_builder.policy_path(policy, script_type);
         }
 
         let (psbt, details) = wallet.create_tx(tx_builder)?;
