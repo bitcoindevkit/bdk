@@ -346,6 +346,11 @@ impl<K, Ctx: ScriptContext> GeneratedKey<K, Ctx> {
             phantom: PhantomData,
         }
     }
+
+    /// Consumes `self` and returns the key
+    pub fn into_key(self) -> K {
+        self.key
+    }
 }
 
 impl<K, Ctx: ScriptContext> Deref for GeneratedKey<K, Ctx> {
@@ -356,10 +361,12 @@ impl<K, Ctx: ScriptContext> Deref for GeneratedKey<K, Ctx> {
     }
 }
 
+// Make generated "derivable" keys themselves "derivable". Also make sure they are assigned the
+// right `valid_networks`.
 impl<Ctx, K> DerivableKey<Ctx> for GeneratedKey<K, Ctx>
 where
     Ctx: ScriptContext,
-    K: GeneratableKey<Ctx> + DerivableKey<Ctx>,
+    K: DerivableKey<Ctx>,
 {
     fn add_metadata(
         self,
@@ -371,12 +378,27 @@ where
     }
 }
 
+// Make generated keys directly usable in descriptors, and make sure they get assigned the right
+// `valid_networks`.
+impl<Ctx, K> ToDescriptorKey<Ctx> for GeneratedKey<K, Ctx>
+where
+    Ctx: ScriptContext,
+    K: ToDescriptorKey<Ctx>,
+{
+    fn to_descriptor_key(self) -> Result<DescriptorKey<Ctx>, KeyError> {
+        let desc_key = self.key.to_descriptor_key()?;
+        Ok(desc_key.override_valid_networks(self.valid_networks))
+    }
+}
+
 /// Trait for keys that can be generated
 ///
 /// The same rules about [`ScriptContext`] and [`ValidNetworks`] from [`ToDescriptorKey`] apply.
 ///
 /// This trait is particularly useful when combined with [`DerivableKey`]: if `Self`
-/// implements it, the returned [`GeneratedKey`] will also implement it.
+/// implements it, the returned [`GeneratedKey`] will also implement it. The same is true for
+/// [`ToDescriptorKey`]: the generated keys can be directly used in descriptors if `Self` is also
+/// [`ToDescriptorKey`].
 pub trait GeneratableKey<Ctx: ScriptContext>: Sized {
     /// Type specifying the amount of entropy required e.g. [u8;32]
     type Entropy: AsMut<[u8]> + Default;
