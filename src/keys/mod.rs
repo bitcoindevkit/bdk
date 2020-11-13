@@ -424,6 +424,37 @@ pub trait GeneratableKey<Ctx: ScriptContext>: Sized {
     }
 }
 
+/// Trait that allows generating a key with the default options
+///
+/// This trait is automatically implemented if the [`GeneratableKey::Options`] implements [`Default`].
+pub trait GeneratableDefaultOptions<Ctx>: GeneratableKey<Ctx>
+where
+    Ctx: ScriptContext,
+    <Self as GeneratableKey<Ctx>>::Options: Default,
+{
+    /// Generate a key with the default options and a given entropy
+    fn generate_with_entropy_default(
+        entropy: Self::Entropy,
+    ) -> Result<GeneratedKey<Self, Ctx>, Self::Error> {
+        Self::generate_with_entropy(Default::default(), entropy)
+    }
+
+    /// Generate a key with the default options and a random entropy
+    fn generate_default() -> Result<GeneratedKey<Self, Ctx>, Self::Error> {
+        Self::generate(Default::default())
+    }
+}
+
+/// Automatic implementation of [`GeneratableDefaultOptions`] for [`GeneratableKey`]s where
+/// `Options` implements `Default`
+impl<Ctx, K> GeneratableDefaultOptions<Ctx> for K
+where
+    Ctx: ScriptContext,
+    K: GeneratableKey<Ctx>,
+    <K as GeneratableKey<Ctx>>::Options: Default,
+{
+}
+
 impl<Ctx: ScriptContext> GeneratableKey<Ctx> for bip32::ExtendedPrivKey {
     type Entropy = [u8; 32];
 
@@ -440,20 +471,34 @@ impl<Ctx: ScriptContext> GeneratableKey<Ctx> for bip32::ExtendedPrivKey {
     }
 }
 
+/// Options for generating a [`PrivateKey`]
+///
+/// Defaults to creating compressed keys, which save on-chain bytes and fees
+#[derive(Debug, Copy, Clone)]
+pub struct PrivateKeyGenerateOptions {
+    pub compressed: bool,
+}
+
+impl Default for PrivateKeyGenerateOptions {
+    fn default() -> Self {
+        PrivateKeyGenerateOptions { compressed: true }
+    }
+}
+
 impl<Ctx: ScriptContext> GeneratableKey<Ctx> for PrivateKey {
     type Entropy = [u8; secp256k1::constants::SECRET_KEY_SIZE];
 
-    type Options = ();
+    type Options = PrivateKeyGenerateOptions;
     type Error = bip32::Error;
 
     fn generate_with_entropy(
-        _: Self::Options,
+        options: Self::Options,
         entropy: Self::Entropy,
     ) -> Result<GeneratedKey<Self, Ctx>, Self::Error> {
         // pick a arbitrary network here, but say that we support all of them
         let key = secp256k1::SecretKey::from_slice(&entropy)?;
         let private_key = PrivateKey {
-            compressed: true,
+            compressed: options.compressed,
             network: Network::Bitcoin,
             key,
         };
@@ -629,7 +674,7 @@ pub mod test {
     #[test]
     fn test_keys_generate_xprv() {
         let generated_xprv: GeneratedKey<_, miniscript::Segwitv0> =
-            bip32::ExtendedPrivKey::generate_with_entropy((), TEST_ENTROPY).unwrap();
+            bip32::ExtendedPrivKey::generate_with_entropy_default(TEST_ENTROPY).unwrap();
 
         assert_eq!(generated_xprv.valid_networks, any_network());
         assert_eq!(generated_xprv.to_string(), "xprv9s21ZrQH143K4Xr1cJyqTvuL2FWR8eicgY9boWqMBv8MDVUZ65AXHnzBrK1nyomu6wdcabRgmGTaAKawvhAno1V5FowGpTLVx3jxzE5uk3Q");
@@ -638,7 +683,7 @@ pub mod test {
     #[test]
     fn test_keys_generate_wif() {
         let generated_wif: GeneratedKey<_, miniscript::Segwitv0> =
-            bitcoin::PrivateKey::generate_with_entropy((), TEST_ENTROPY).unwrap();
+            bitcoin::PrivateKey::generate_with_entropy_default(TEST_ENTROPY).unwrap();
 
         assert_eq!(generated_wif.valid_networks, any_network());
         assert_eq!(
