@@ -119,7 +119,10 @@ use rand::{rngs::StdRng, SeedableRng};
 
 /// Default coin selection algorithm used by [`TxBuilder`](super::tx_builder::TxBuilder) if not
 /// overridden
-pub type DefaultCoinSelectionAlgorithm = LargestFirstCoinSelection;
+#[cfg(not(test))]
+pub type DefaultCoinSelectionAlgorithm = BranchAndBoundCoinSelection;
+#[cfg(test)]
+pub type DefaultCoinSelectionAlgorithm = LargestFirstCoinSelection; // make the tests more predictable
 
 /// Result of a successful coin selection
 #[derive(Debug)]
