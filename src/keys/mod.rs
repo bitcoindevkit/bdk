@@ -41,6 +41,8 @@ use miniscript::descriptor::{DescriptorXKey, KeyMap};
 pub use miniscript::ScriptContext;
 use miniscript::{Miniscript, Terminal};
 
+use crate::wallet::utils::SecpCtx;
+
 #[cfg(feature = "keys-bip39")]
 #[cfg_attr(docsrs, doc(cfg(feature = "keys-bip39")))]
 pub mod bip39;
@@ -101,7 +103,10 @@ impl<Ctx: ScriptContext> DescriptorKey<Ctx> {
     // public because it is effectively called by external crates, once the macros are expanded,
     // but since it is not meant to be part of the public api we hide it from the docs.
     #[doc(hidden)]
-    pub fn extract(self) -> Result<(DescriptorPublicKey, KeyMap, ValidNetworks), KeyError> {
+    pub fn extract(
+        self,
+        secp: &SecpCtx,
+    ) -> Result<(DescriptorPublicKey, KeyMap, ValidNetworks), KeyError> {
         match self {
             DescriptorKey::Public(public, valid_networks, _) => {
                 Ok((public, KeyMap::default(), valid_networks))
@@ -110,7 +115,7 @@ impl<Ctx: ScriptContext> DescriptorKey<Ctx> {
                 let mut key_map = KeyMap::with_capacity(1);
 
                 let public = secret
-                    .as_public()
+                    .as_public(secp)
                     .map_err(|e| miniscript::Error::Unexpected(e.to_string()))?;
                 key_map.insert(public.clone(), secret);
 
@@ -529,8 +534,9 @@ impl<Ctx: ScriptContext, T: DerivableKey<Ctx>> ToDescriptorKey<Ctx>
 #[doc(hidden)]
 pub fn make_pk<Pk: ToDescriptorKey<Ctx>, Ctx: ScriptContext>(
     descriptor_key: Pk,
+    secp: &SecpCtx,
 ) -> Result<(Miniscript<DescriptorPublicKey, Ctx>, KeyMap, ValidNetworks), KeyError> {
-    let (key, key_map, valid_networks) = descriptor_key.to_descriptor_key()?.extract()?;
+    let (key, key_map, valid_networks) = descriptor_key.to_descriptor_key()?.extract(secp)?;
 
     Ok((
         Miniscript::from_ast(Terminal::PkK(key))?,
@@ -544,10 +550,11 @@ pub fn make_pk<Pk: ToDescriptorKey<Ctx>, Ctx: ScriptContext>(
 pub fn make_multi<Pk: ToDescriptorKey<Ctx>, Ctx: ScriptContext>(
     thresh: usize,
     pks: Vec<Pk>,
+    secp: &SecpCtx,
 ) -> Result<(Miniscript<DescriptorPublicKey, Ctx>, KeyMap, ValidNetworks), KeyError> {
     let (pks, key_maps_networks): (Vec<_>, Vec<_>) = pks
         .into_iter()
-        .map(|key| Ok::<_, KeyError>(key.to_descriptor_key()?.extract()?))
+        .map(|key| Ok::<_, KeyError>(key.to_descriptor_key()?.extract(secp)?))
         .collect::<Result<Vec<_>, _>>()?
         .into_iter()
         .map(|(a, b, c)| (a, (b, c)))

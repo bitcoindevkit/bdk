@@ -27,11 +27,15 @@ extern crate serde_json;
 
 use std::sync::Arc;
 
+use bdk::bitcoin::secp256k1::Secp256k1;
 use bdk::bitcoin::util::bip32::ChildNumber;
 use bdk::bitcoin::*;
 use bdk::descriptor::*;
+use bdk::miniscript::DescriptorPublicKeyCtx;
 
 fn main() {
+    let secp = Secp256k1::new();
+
     let desc = "wsh(or_d(\
                     multi(\
                       2,[d34db33f/44'/0'/0']xpub6ERApfZwUNrhLCkDtcHTcxd75RbzS1ed54G1LkBUHQVHQKqhMkhgbmJbZRkrgZw4koxb5JaHWkY4ALHY2grBGRjaDMzQLcgJvLJuZZvRcEL/1/*,tprv8ZgxMBicQKsPduL5QnGihpprdHyypMGi4DhimjtzYemu7se5YQNcZfAPLqXRuGHb5ZX2eTQj62oNqMnyxJ7B7wz54Uzswqw8fFqMVdcmVF7/1/*\
@@ -39,19 +43,18 @@ fn main() {
                     and_v(vc:pk_h(cVt4o7BGAig1UXywgGSmARhxMdzP5qvQsxKkSsc1XEkw3tDTQFpy),older(1000))\
                    ))";
 
-    let (extended_desc, key_map) = ExtendedDescriptor::parse_secret(desc).unwrap();
+    let (extended_desc, key_map) = ExtendedDescriptor::parse_descriptor(desc).unwrap();
     println!("{:?}", extended_desc);
 
+    let deriv_ctx = DescriptorPublicKeyCtx::new(&secp, ChildNumber::from_normal_idx(42).unwrap());
+
     let signers = Arc::new(key_map.into());
-    let policy = extended_desc.extract_policy(signers).unwrap();
+    let policy = extended_desc.extract_policy(signers, &secp).unwrap();
     println!("policy: {}", serde_json::to_string(&policy).unwrap());
 
-    let derived_desc = extended_desc.derive(ChildNumber::from_normal_idx(42).unwrap());
-    println!("{:?}", derived_desc);
-
-    let addr = derived_desc.address(Network::Testnet).unwrap();
+    let addr = extended_desc.address(Network::Testnet, deriv_ctx).unwrap();
     println!("{}", addr);
 
-    let script = derived_desc.witness_script();
+    let script = extended_desc.witness_script(deriv_ctx);
     println!("{:?}", script);
 }

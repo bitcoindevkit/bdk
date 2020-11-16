@@ -71,7 +71,7 @@ use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
-use miniscript::{Descriptor, ScriptContext, Terminal};
+use miniscript::{Descriptor, DescriptorPublicKey, ScriptContext, Terminal};
 
 use crate::blockchain::BlockchainMarker;
 use crate::database::BatchDatabase;
@@ -122,7 +122,7 @@ impl WalletExport {
     ) -> Result<Self, &'static str> {
         let descriptor = wallet
             .descriptor
-            .to_string_with_secret(&wallet.signers.as_key_map());
+            .to_string_with_secret(&wallet.signers.as_key_map(wallet.secp_ctx()));
         Self::is_compatible_with_core(&descriptor)?;
 
         let blockheight = match wallet.database.borrow().iter_txs(false) {
@@ -145,12 +145,10 @@ impl WalletExport {
             blockheight,
         };
 
-        if export.change_descriptor()
-            != wallet
-                .change_descriptor
-                .as_ref()
-                .map(|d| d.to_string_with_secret(&wallet.change_signers.as_key_map()))
-        {
+        let desc_to_string = |d: &Descriptor<DescriptorPublicKey>| {
+            d.to_string_with_secret(&wallet.change_signers.as_key_map(wallet.secp_ctx()))
+        };
+        if export.change_descriptor() != wallet.change_descriptor.as_ref().map(desc_to_string) {
             return Err("Incompatible change descriptor");
         }
 

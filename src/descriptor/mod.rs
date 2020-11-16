@@ -53,6 +53,7 @@ use self::error::Error;
 pub use self::policy::Policy;
 use crate::keys::{KeyError, ToDescriptorKey, ValidNetworks};
 use crate::wallet::signer::SignersContainer;
+use crate::wallet::utils::{descriptor_to_pk_ctx, SecpCtx};
 
 /// Alias for a [`Descriptor`] that can contain extended keys using [`DescriptorPublicKey`]
 pub type ExtendedDescriptor = Descriptor<DescriptorPublicKey>;
@@ -92,7 +93,7 @@ impl ToWalletDescriptor for &str {
             self
         };
 
-        ExtendedDescriptor::parse_secret(descriptor)?.to_wallet_descriptor(network)
+        ExtendedDescriptor::parse_descriptor(descriptor)?.to_wallet_descriptor(network)
     }
 }
 
@@ -121,15 +122,17 @@ impl ToWalletDescriptor for (ExtendedDescriptor, KeyMap) {
     ) -> Result<(ExtendedDescriptor, KeyMap), KeyError> {
         use crate::keys::DescriptorKey;
 
+        let secp = Secp256k1::new();
+
         let check_key = |pk: &DescriptorPublicKey| {
             let (pk, _, networks) = if self.0.is_witness() {
                 let desciptor_key: DescriptorKey<miniscript::Segwitv0> =
                     pk.clone().to_descriptor_key()?;
-                desciptor_key.extract()?
+                desciptor_key.extract(&secp)?
             } else {
                 let desciptor_key: DescriptorKey<miniscript::Legacy> =
                     pk.clone().to_descriptor_key()?;
-                desciptor_key.extract()?
+                desciptor_key.extract(&secp)?
             };
 
             if networks.contains(&network) {
@@ -185,12 +188,16 @@ impl ToWalletDescriptor for (ExtendedDescriptor, KeyMap, ValidNetworks) {
 
 /// Trait implemented on [`Descriptor`]s to add a method to extract the spending [`policy`]
 pub trait ExtractPolicy {
-    fn extract_policy(&self, signers: Arc<SignersContainer>) -> Result<Option<Policy>, Error>;
+    fn extract_policy(
+        &self,
+        signers: Arc<SignersContainer>,
+        secp: &SecpCtx,
+    ) -> Result<Option<Policy>, Error>;
 }
 
 pub(crate) trait XKeyUtils {
     fn full_path(&self, append: &[ChildNumber]) -> DerivationPath;
-    fn root_fingerprint(&self) -> Fingerprint;
+    fn root_fingerprint(&self, secp: &SecpCtx) -> Fingerprint;
 }
 
 impl<K: InnerXKey> XKeyUtils for DescriptorXKey<K> {
@@ -215,46 +222,55 @@ impl<K: InnerXKey> XKeyUtils for DescriptorXKey<K> {
         }
     }
 
-    fn root_fingerprint(&self) -> Fingerprint {
+    fn root_fingerprint(&self, secp: &SecpCtx) -> Fingerprint {
         match self.origin {
             Some((fingerprint, _)) => fingerprint,
-            None => self.xkey.xkey_fingerprint(),
+            None => self.xkey.xkey_fingerprint(secp),
         }
     }
 }
 
 pub(crate) trait DescriptorMeta: Sized {
     fn is_witness(&self) -> bool;
-    fn get_hd_keypaths(&self, index: u32) -> Result<HDKeyPaths, Error>;
+    fn get_hd_keypaths(&self, index: u32, secp: &SecpCtx) -> Result<HDKeyPaths, Error>;
     fn is_fixed(&self) -> bool;
-    fn derive_from_hd_keypaths(&self, hd_keypaths: &HDKeyPaths) -> Option<Self>;
-    fn derive_from_psbt_input(&self, psbt_input: &psbt::Input, utxo: Option<TxOut>)
-        -> Option<Self>;
+    fn derive_from_hd_keypaths(&self, hd_keypaths: &HDKeyPaths, secp: &SecpCtx) -> Option<Self>;
+    fn derive_from_psbt_input(
+        &self,
+        psbt_input: &psbt::Input,
+        utxo: Option<TxOut>,
+        secp: &SecpCtx,
+    ) -> Option<Self>;
 }
 
 pub(crate) trait DescriptorScripts {
-    fn psbt_redeem_script(&self) -> Option<Script>;
-    fn psbt_witness_script(&self) -> Option<Script>;
+    fn psbt_redeem_script(&self, secp: &SecpCtx) -> Option<Script>;
+    fn psbt_witness_script(&self, secp: &SecpCtx) -> Option<Script>;
 }
 
-impl<T> DescriptorScripts for Descriptor<T>
-where
-    T: miniscript::MiniscriptKey + miniscript::ToPublicKey,
-{
-    fn psbt_redeem_script(&self) -> Option<Script> {
+impl DescriptorScripts for Descriptor<DescriptorPublicKey> {
+    fn psbt_redeem_script(&self, secp: &SecpCtx) -> Option<Script> {
+        let deriv_ctx = descriptor_to_pk_ctx(secp);
+
         match self {
-            Descriptor::ShWpkh(_) => Some(self.witness_script()),
-            Descriptor::ShWsh(ref script) => Some(script.encode().to_v0_p2wsh()),
-            Descriptor::Sh(ref script) => Some(script.encode()),
-            Descriptor::Bare(ref script) => Some(script.encode()),
+            Descriptor::ShWpkh(_) => Some(self.witness_script(deriv_ctx)),
+            Descriptor::ShWsh(ref script) => Some(script.encode(deriv_ctx).to_v0_p2wsh()),
+            Descriptor::Sh(ref script) => Some(script.encode(deriv_ctx)),
+            Descriptor::Bare(ref script) => Some(script.encode(deriv_ctx)),
+            Descriptor::ShSortedMulti(ref keys) => Some(keys.encode(deriv_ctx)),
             _ => None,
         }
     }
 
-    fn psbt_witness_script(&self) -> Option<Script> {
+    fn psbt_witness_script(&self, secp: &SecpCtx) -> Option<Script> {
+        let deriv_ctx = descriptor_to_pk_ctx(secp);
+
         match self {
-            Descriptor::Wsh(ref script) => Some(script.encode()),
-            Descriptor::ShWsh(ref script) => Some(script.encode()),
+            Descriptor::Wsh(ref script) => Some(script.encode(deriv_ctx)),
+            Descriptor::ShWsh(ref script) => Some(script.encode(deriv_ctx)),
+            Descriptor::WshSortedMulti(ref keys) | Descriptor::ShWshSortedMulti(ref keys) => {
+                Some(keys.encode(deriv_ctx))
+            }
             _ => None,
         }
     }
@@ -263,22 +279,25 @@ where
 impl DescriptorMeta for Descriptor<DescriptorPublicKey> {
     fn is_witness(&self) -> bool {
         match self {
-            Descriptor::Bare(_) | Descriptor::Pk(_) | Descriptor::Pkh(_) | Descriptor::Sh(_) => {
-                false
-            }
+            Descriptor::Bare(_)
+            | Descriptor::Pk(_)
+            | Descriptor::Pkh(_)
+            | Descriptor::Sh(_)
+            | Descriptor::ShSortedMulti(_) => false,
             Descriptor::Wpkh(_)
             | Descriptor::ShWpkh(_)
             | Descriptor::Wsh(_)
-            | Descriptor::ShWsh(_) => true,
+            | Descriptor::ShWsh(_)
+            | Descriptor::ShWshSortedMulti(_)
+            | Descriptor::WshSortedMulti(_) => true,
         }
     }
 
-    fn get_hd_keypaths(&self, index: u32) -> Result<HDKeyPaths, Error> {
-        fn translate_key(
-            key: &DescriptorPublicKey,
-            index: u32,
-            paths: &mut HDKeyPaths,
-        ) -> Result<DummyKey, Error> {
+    fn get_hd_keypaths(&self, index: u32, secp: &SecpCtx) -> Result<HDKeyPaths, Error> {
+        let translate_key = |key: &DescriptorPublicKey,
+                             index: u32,
+                             paths: &mut HDKeyPaths|
+         -> Result<DummyKey, Error> {
             match key {
                 DescriptorPublicKey::SinglePub(_) => {}
                 DescriptorPublicKey::XPub(xpub) => {
@@ -298,7 +317,7 @@ impl DescriptorMeta for Descriptor<DescriptorPublicKey> {
                     paths.insert(
                         derived_pubkey.public_key,
                         (
-                            xpub.root_fingerprint(),
+                            xpub.root_fingerprint(secp),
                             xpub.full_path(&[ChildNumber::from_normal_idx(index)?]),
                         ),
                     );
@@ -306,7 +325,7 @@ impl DescriptorMeta for Descriptor<DescriptorPublicKey> {
             }
 
             Ok(DummyKey::default())
-        }
+        };
 
         let mut answer_pk = BTreeMap::new();
         let mut answer_pkh = BTreeMap::new();
@@ -347,12 +366,11 @@ impl DescriptorMeta for Descriptor<DescriptorPublicKey> {
         !found_wildcard_pk && !found_wildcard_pkh
     }
 
-    fn derive_from_hd_keypaths(&self, hd_keypaths: &HDKeyPaths) -> Option<Self> {
-        fn try_key(
-            key: &DescriptorPublicKey,
-            index: &HashMap<Fingerprint, DerivationPath>,
-            found_path: &mut Option<ChildNumber>,
-        ) -> Result<DummyKey, Error> {
+    fn derive_from_hd_keypaths(&self, hd_keypaths: &HDKeyPaths, secp: &SecpCtx) -> Option<Self> {
+        let try_key = |key: &DescriptorPublicKey,
+                       index: &HashMap<Fingerprint, DerivationPath>,
+                       found_path: &mut Option<ChildNumber>|
+         -> Result<DummyKey, Error> {
             if found_path.is_some() {
                 // already found a matching path, we are done
                 return Ok(DummyKey::default());
@@ -363,13 +381,15 @@ impl DescriptorMeta for Descriptor<DescriptorPublicKey> {
                 // return the "prefix" that matched, so we remove that prefix from the full path
                 // found in `index` and save it in `derive_path`. We expect this to be a derivation
                 // path of length 1 if the key `is_wildcard` and an empty path otherwise.
-                let root_fingerprint = xpub.root_fingerprint();
+                let root_fingerprint = xpub.root_fingerprint(secp);
                 let derivation_path: Option<Vec<ChildNumber>> = index
                     .get_key_value(&root_fingerprint)
-                    .and_then(|(fingerprint, path)| xpub.matches(*fingerprint, path))
+                    .and_then(|(fingerprint, path)| {
+                        xpub.matches(&(*fingerprint, path.clone()), secp)
+                    })
                     .map(|prefix| {
                         index
-                            .get(&xpub.root_fingerprint())
+                            .get(&xpub.root_fingerprint(secp))
                             .unwrap()
                             .into_iter()
                             .skip(prefix.into_iter().count())
@@ -422,8 +442,9 @@ impl DescriptorMeta for Descriptor<DescriptorPublicKey> {
         &self,
         psbt_input: &psbt::Input,
         utxo: Option<TxOut>,
+        secp: &SecpCtx,
     ) -> Option<Self> {
-        if let Some(derived) = self.derive_from_hd_keypaths(&psbt_input.hd_keypaths) {
+        if let Some(derived) = self.derive_from_hd_keypaths(&psbt_input.hd_keypaths, secp) {
             return Some(derived);
         } else if !self.is_fixed() {
             // If the descriptor is not fixed we can't brute-force the derivation address, so just
@@ -431,25 +452,38 @@ impl DescriptorMeta for Descriptor<DescriptorPublicKey> {
             return None;
         }
 
+        let deriv_ctx = descriptor_to_pk_ctx(secp);
         match self {
             Descriptor::Pk(_)
             | Descriptor::Pkh(_)
             | Descriptor::Wpkh(_)
             | Descriptor::ShWpkh(_)
                 if utxo.is_some()
-                    && self.script_pubkey() == utxo.as_ref().unwrap().script_pubkey =>
+                    && self.script_pubkey(deriv_ctx) == utxo.as_ref().unwrap().script_pubkey =>
             {
                 Some(self.clone())
             }
             Descriptor::Bare(ms) | Descriptor::Sh(ms)
                 if psbt_input.redeem_script.is_some()
-                    && &ms.encode() == psbt_input.redeem_script.as_ref().unwrap() =>
+                    && &ms.encode(deriv_ctx) == psbt_input.redeem_script.as_ref().unwrap() =>
             {
                 Some(self.clone())
             }
             Descriptor::Wsh(ms) | Descriptor::ShWsh(ms)
                 if psbt_input.witness_script.is_some()
-                    && &ms.encode() == psbt_input.witness_script.as_ref().unwrap() =>
+                    && &ms.encode(deriv_ctx) == psbt_input.witness_script.as_ref().unwrap() =>
+            {
+                Some(self.clone())
+            }
+            Descriptor::ShSortedMulti(keys)
+                if psbt_input.redeem_script.is_some()
+                    && &keys.encode(deriv_ctx) == psbt_input.redeem_script.as_ref().unwrap() =>
+            {
+                Some(self.clone())
+            }
+            Descriptor::WshSortedMulti(keys) | Descriptor::ShWshSortedMulti(keys)
+                if psbt_input.witness_script.is_some()
+                    && &keys.encode(deriv_ctx) == psbt_input.witness_script.as_ref().unwrap() =>
             {
                 Some(self.clone())
             }
@@ -489,6 +523,7 @@ mod test {
 
     use bitcoin::consensus::encode::deserialize;
     use bitcoin::hashes::hex::FromHex;
+    use bitcoin::secp256k1::Secp256k1;
     use bitcoin::util::{bip32, psbt};
 
     use super::*;
@@ -513,7 +548,7 @@ mod test {
         .unwrap();
 
         assert!(descriptor
-            .derive_from_psbt_input(&psbt.inputs[0], psbt.get_utxo_for(0))
+            .derive_from_psbt_input(&psbt.inputs[0], psbt.get_utxo_for(0), &Secp256k1::new())
             .is_some());
     }
 
@@ -544,7 +579,7 @@ mod test {
         .unwrap();
 
         assert!(descriptor
-            .derive_from_psbt_input(&psbt.inputs[0], psbt.get_utxo_for(0))
+            .derive_from_psbt_input(&psbt.inputs[0], psbt.get_utxo_for(0), &Secp256k1::new())
             .is_some());
     }
 
@@ -568,7 +603,7 @@ mod test {
         .unwrap();
 
         assert!(descriptor
-            .derive_from_psbt_input(&psbt.inputs[0], psbt.get_utxo_for(0))
+            .derive_from_psbt_input(&psbt.inputs[0], psbt.get_utxo_for(0), &Secp256k1::new())
             .is_some());
     }
 
@@ -598,7 +633,7 @@ mod test {
         .unwrap();
 
         assert!(descriptor
-            .derive_from_psbt_input(&psbt.inputs[0], psbt.get_utxo_for(0))
+            .derive_from_psbt_input(&psbt.inputs[0], psbt.get_utxo_for(0), &Secp256k1::new())
             .is_some());
     }
 

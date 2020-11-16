@@ -39,9 +39,10 @@ macro_rules! impl_top_level_pk {
     ( $descriptor_variant:ident, $ctx:ty, $key:expr ) => {{
         #[allow(unused_imports)]
         use $crate::keys::{DescriptorKey, ToDescriptorKey};
+        let secp = $crate::bitcoin::secp256k1::Secp256k1::new();
 
         $key.to_descriptor_key()
-            .and_then(|key: DescriptorKey<$ctx>| key.extract())
+            .and_then(|key: DescriptorKey<$ctx>| key.extract(&secp))
             .map(|(pk, key_map, valid_networks)| {
                 (
                     $crate::miniscript::Descriptor::<
@@ -314,7 +315,8 @@ macro_rules! fragment {
         $crate::impl_leaf_opcode!(False)
     });
     ( pk_k $key:expr ) => ({
-        $crate::keys::make_pk($key)
+        let secp = $crate::bitcoin::secp256k1::Secp256k1::new();
+        $crate::keys::make_pk($key, &secp)
     });
     ( pk $key:expr ) => ({
         $crate::fragment!(+c pk_k $key)
@@ -391,6 +393,7 @@ macro_rules! fragment {
     });
     ( multi $thresh:expr $(, $key:expr )+ ) => ({
         use $crate::keys::ToDescriptorKey;
+        let secp = $crate::bitcoin::secp256k1::Secp256k1::new();
 
         let mut keys = vec![];
         $(
@@ -398,7 +401,7 @@ macro_rules! fragment {
         )*
 
         keys.into_iter().collect::<Result<Vec<_>, _>>()
-            .and_then(|keys| $crate::keys::make_multi($thresh, keys))
+            .and_then(|keys| $crate::keys::make_multi($thresh, keys, &secp))
     });
 
 }
@@ -406,7 +409,8 @@ macro_rules! fragment {
 #[cfg(test)]
 mod test {
     use bitcoin::hashes::hex::ToHex;
-    use miniscript::descriptor::{DescriptorPublicKey, KeyMap};
+    use bitcoin::secp256k1::Secp256k1;
+    use miniscript::descriptor::{DescriptorPublicKey, DescriptorPublicKeyCtx, KeyMap};
     use miniscript::{Descriptor, Legacy, Segwitv0};
 
     use std::str::FromStr;
@@ -426,6 +430,9 @@ mod test {
         is_fixed: bool,
         expected: &[&str],
     ) {
+        let secp = Secp256k1::new();
+        let deriv_ctx = DescriptorPublicKeyCtx::new(&secp, ChildNumber::Normal { index: 0 });
+
         let (desc, _key_map, _networks) = desc.unwrap();
         assert_eq!(desc.is_witness(), is_witness);
         assert_eq!(desc.is_fixed(), is_fixed);
@@ -436,11 +443,11 @@ mod test {
             } else {
                 desc.derive(ChildNumber::from_normal_idx(index).unwrap())
             };
-            let address = child_desc.address(Regtest);
+            let address = child_desc.address(Regtest, deriv_ctx);
             if address.is_some() {
                 assert_eq!(address.unwrap().to_string(), *expected.get(i).unwrap());
             } else {
-                let script = child_desc.script_pubkey();
+                let script = child_desc.script_pubkey(deriv_ctx);
                 assert_eq!(script.to_hex().as_str(), *expected.get(i).unwrap());
             }
         }
@@ -649,6 +656,8 @@ mod test {
     // - verify the key_maps are correctly merged together
     #[test]
     fn test_key_maps_merged() {
+        let secp = Secp256k1::new();
+
         let xprv1 = bip32::ExtendedPrivKey::from_str("tprv8ZgxMBicQKsPcx5nBGsR63Pe8KnRUqmbJNENAfGftF3yuXoMMoVJJcYeUw5eVkm9WBPjWYt6HMWYJNesB5HaNVBaFc1M6dRjWSYnmewUMYy").unwrap();
         let path1 = bip32::DerivationPath::from_str("m/0").unwrap();
         let desc_key1 = (xprv1, path1.clone()).to_descriptor_key().unwrap();
@@ -672,9 +681,9 @@ mod test {
         let desc_key3: DescriptorKey<Segwitv0> =
             (xprv3, path3.clone()).to_descriptor_key().unwrap();
 
-        let (key1, _key_map, _valid_networks) = desc_key1.extract().unwrap();
-        let (key2, _key_map, _valid_networks) = desc_key2.extract().unwrap();
-        let (key3, _key_map, _valid_networks) = desc_key3.extract().unwrap();
+        let (key1, _key_map, _valid_networks) = desc_key1.extract(&secp).unwrap();
+        let (key2, _key_map, _valid_networks) = desc_key2.extract(&secp).unwrap();
+        let (key3, _key_map, _valid_networks) = desc_key3.extract(&secp).unwrap();
         assert_eq!(key_map.get(&key1).unwrap().to_string(), "tprv8ZgxMBicQKsPcx5nBGsR63Pe8KnRUqmbJNENAfGftF3yuXoMMoVJJcYeUw5eVkm9WBPjWYt6HMWYJNesB5HaNVBaFc1M6dRjWSYnmewUMYy/0/*");
         assert_eq!(key_map.get(&key2).unwrap().to_string(), "tprv8ZgxMBicQKsPegBHHnq7YEgM815dG24M2Jk5RVqipgDxF1HJ1tsnT815X5Fd5FRfMVUs8NZs9XCb6y9an8hRPThnhfwfXJ36intaekySHGF/2147483647'/0/*");
         assert_eq!(key_map.get(&key3).unwrap().to_string(), "tprv8ZgxMBicQKsPdZXrcHNLf5JAJWFAoJ2TrstMRdSKtEggz6PddbuSkvHKM9oKJyFgZV1B7rw8oChspxyYbtmEXYyg1AjfWbL3ho3XHDpHRZf/10/20/30/40/*");

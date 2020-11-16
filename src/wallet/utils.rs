@@ -22,7 +22,11 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use miniscript::{MiniscriptKey, Satisfier};
+use bitcoin::secp256k1::{All, Secp256k1};
+use bitcoin::util::bip32;
+
+use miniscript::descriptor::DescriptorPublicKeyCtx;
+use miniscript::{MiniscriptKey, Satisfier, ToPublicKey};
 
 // De-facto standard "dust limit" (even though it should change based on the output type)
 const DUST_LIMIT_SATOSHI: u64 = 546;
@@ -56,7 +60,7 @@ impl After {
     }
 }
 
-impl<Pk: MiniscriptKey> Satisfier<Pk> for After {
+impl<ToPkCtx: Copy, Pk: MiniscriptKey + ToPublicKey<ToPkCtx>> Satisfier<ToPkCtx, Pk> for After {
     fn check_after(&self, n: u32) -> bool {
         if let Some(current_height) = self.current_height {
             current_height >= n
@@ -86,7 +90,7 @@ impl Older {
     }
 }
 
-impl<Pk: MiniscriptKey> Satisfier<Pk> for Older {
+impl<ToPkCtx: Copy, Pk: MiniscriptKey + ToPublicKey<ToPkCtx>> Satisfier<ToPkCtx, Pk> for Older {
     fn check_older(&self, n: u32) -> bool {
         if let Some(current_height) = self.current_height {
             // TODO: test >= / >
@@ -95,6 +99,14 @@ impl<Pk: MiniscriptKey> Satisfier<Pk> for Older {
             self.assume_height_reached
         }
     }
+}
+
+pub(crate) type SecpCtx = Secp256k1<All>;
+pub(crate) fn descriptor_to_pk_ctx(secp: &SecpCtx) -> DescriptorPublicKeyCtx<'_, All> {
+    // Create a `to_pk_ctx` with a dummy derivation index, since we always use this on descriptor
+    // that have already been derived with `Descriptor::derive()`, so the child number added here
+    // is ignored.
+    DescriptorPublicKeyCtx::new(secp, bip32::ChildNumber::Normal { index: 0 })
 }
 
 pub struct ChunksIterator<I: Iterator> {
