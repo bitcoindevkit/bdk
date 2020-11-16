@@ -48,15 +48,16 @@ use serde::Deserialize;
 use reqwest::{Client, StatusCode};
 
 use bitcoin::consensus::{deserialize, serialize};
-use bitcoin::hashes::hex::ToHex;
+use bitcoin::hashes::hex::{FromHex, ToHex};
 use bitcoin::hashes::{sha256, Hash};
-use bitcoin::{Script, Transaction, Txid};
+use bitcoin::{BlockHash, BlockHeader, Script, Transaction, TxMerkleNode, Txid};
 
-use self::utils::{ELSGetHistoryRes, ELSListUnspentRes, ElectrumLikeSync};
+use self::utils::{ELSGetHistoryRes, ElectrumLikeSync};
 use super::*;
 use crate::database::BatchDatabase;
 use crate::error::Error;
 use crate::FeeRate;
+use std::convert::TryInto;
 
 #[derive(Debug)]
 struct UrlClient {
@@ -161,6 +162,39 @@ impl UrlClient {
         Ok(Some(deserialize(&resp.error_for_status()?.bytes().await?)?))
     }
 
+    async fn _get_tx_no_opt(&self, txid: &Txid) -> Result<Transaction, EsploraError> {
+        match self._get_tx(txid).await {
+            Ok(Some(tx)) => Ok(tx),
+            Ok(None) => Err(EsploraError::TransactionNotFound(*txid)),
+            Err(e) => Err(e),
+        }
+    }
+
+    async fn _get_header(&self, block_height: u32) -> Result<BlockHeader, EsploraError> {
+        let resp = self
+            .client
+            .get(&format!("{}/block-height/{}", self.url, block_height))
+            .send()
+            .await?;
+
+        if let StatusCode::NOT_FOUND = resp.status() {
+            return Err(EsploraError::HeaderHeightNotFound(block_height));
+        }
+        let bytes = resp.bytes().await?;
+        let hash = std::str::from_utf8(&bytes)
+            .map_err(|_| EsploraError::HeaderHeightNotFound(block_height))?;
+
+        let resp = self
+            .client
+            .get(&format!("{}/block/{}", self.url, hash))
+            .send()
+            .await?;
+
+        let esplora_header = resp.json::<EsploraHeader>().await?;
+
+        Ok(esplora_header.try_into()?)
+    }
+
     async fn _broadcast(&self, transaction: &Transaction) -> Result<(), EsploraError> {
         self.client
             .post(&format!("{}/tx", self.url))
@@ -249,31 +283,6 @@ impl UrlClient {
         Ok(result)
     }
 
-    async fn _script_list_unspent(
-        &self,
-        script: &Script,
-    ) -> Result<Vec<ELSListUnspentRes>, EsploraError> {
-        Ok(self
-            .client
-            .get(&format!(
-                "{}/scripthash/{}/utxo",
-                self.url,
-                Self::script_to_scripthash(script)
-            ))
-            .send()
-            .await?
-            .error_for_status()?
-            .json::<Vec<EsploraListUnspent>>()
-            .await?
-            .into_iter()
-            .map(|x| ELSListUnspentRes {
-                tx_hash: x.txid,
-                height: x.status.block_height.unwrap_or(0),
-                tx_pos: x.vout,
-            })
-            .collect())
-    }
-
     async fn _get_fee_estimates(&self) -> Result<HashMap<String, f64>, EsploraError> {
         Ok(self
             .client
@@ -302,13 +311,13 @@ impl ElectrumLikeSync for UrlClient {
         await_or_block!(future)
     }
 
-    fn els_batch_script_list_unspent<'s, I: IntoIterator<Item = &'s Script>>(
+    fn els_batch_transaction_get<'s, I: IntoIterator<Item = &'s Txid>>(
         &self,
-        scripts: I,
-    ) -> Result<Vec<Vec<ELSListUnspentRes>>, Error> {
+        txids: I,
+    ) -> Result<Vec<Transaction>, Error> {
         let future = async {
-            Ok(stream::iter(scripts)
-                .then(|script| self._script_list_unspent(&script))
+            Ok(stream::iter(txids)
+                .then(|txid| self._get_tx_no_opt(&txid))
                 .try_collect()
                 .await?)
         };
@@ -316,9 +325,18 @@ impl ElectrumLikeSync for UrlClient {
         await_or_block!(future)
     }
 
-    fn els_transaction_get(&self, txid: &Txid) -> Result<Transaction, Error> {
-        Ok(await_or_block!(self._get_tx(txid))?
-            .ok_or_else(|| EsploraError::TransactionNotFound(*txid))?)
+    fn els_batch_block_header<I: IntoIterator<Item = u32>>(
+        &self,
+        heights: I,
+    ) -> Result<Vec<BlockHeader>, Error> {
+        let future = async {
+            Ok(stream::iter(heights)
+                .then(|h| self._get_header(h))
+                .try_collect()
+                .await?)
+        };
+
+        await_or_block!(future)
     }
 }
 
@@ -333,11 +351,37 @@ struct EsploraGetHistory {
     status: EsploraGetHistoryStatus,
 }
 
-#[derive(Deserialize)]
-struct EsploraListUnspent {
-    txid: Txid,
-    vout: usize,
-    status: EsploraGetHistoryStatus,
+#[derive(Default, Debug, Clone, PartialEq, Deserialize)]
+pub struct EsploraHeader {
+    pub id: String,
+    pub height: u32,
+    pub version: i32,
+    pub timestamp: u32,
+    pub tx_count: u32,
+    pub size: u32,
+    pub weight: u32,
+    pub merkle_root: String,
+    pub previousblockhash: String,
+    pub nonce: u32,
+    pub bits: u32,
+    pub difficulty: u32,
+}
+
+impl TryInto<BlockHeader> for EsploraHeader {
+    type Error = EsploraError;
+
+    fn try_into(self) -> Result<BlockHeader, esplora::EsploraError> {
+        Ok(BlockHeader {
+            version: self.version,
+            prev_blockhash: BlockHash::from_hex(&self.previousblockhash)
+                .map_err(|_| EsploraError::HeaderParseFail)?,
+            merkle_root: TxMerkleNode::from_hex(&self.merkle_root)
+                .map_err(|_| EsploraError::HeaderParseFail)?,
+            time: self.timestamp,
+            bits: self.bits,
+            nonce: self.nonce,
+        })
+    }
 }
 
 /// Configuration for an [`EsploraBlockchain`]
@@ -366,6 +410,12 @@ pub enum EsploraError {
 
     /// Transaction not found
     TransactionNotFound(Txid),
+    /// Header height not found
+    HeaderHeightNotFound(u32),
+    /// Header hash not found
+    HeaderHashNotFound(BlockHash),
+    /// EsploraHeader cannot be converted in BlockHeader
+    HeaderParseFail,
 }
 
 impl fmt::Display for EsploraError {
@@ -391,5 +441,25 @@ impl From<std::num::ParseIntError> for EsploraError {
 impl From<bitcoin::consensus::encode::Error> for EsploraError {
     fn from(other: bitcoin::consensus::encode::Error) -> Self {
         EsploraError::BitcoinEncoding(other)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::blockchain::esplora::EsploraHeader;
+    use bitcoin::hashes::hex::FromHex;
+    use bitcoin::{BlockHash, BlockHeader};
+    use std::convert::TryInto;
+
+    #[test]
+    fn test_esplora_header() {
+        let json_str = r#"{"id":"00000000b873e79784647a6c82962c70d228557d24a747ea4d1b8bbe878e1206","height":1,"version":1,"timestamp":1296688928,"tx_count":1,"size":190,"weight":760,"merkle_root":"f0315ffc38709d70ad5647e22048358dd3745f3ce3874223c80a7c92fab0c8ba","previousblockhash":"000000000933ea01ad0ee984209779baaec3ced90fa3f408719526f8d77f4943","nonce":1924588547,"bits":486604799,"difficulty":1}"#;
+        let json: EsploraHeader = serde_json::from_str(&json_str).unwrap();
+        let header: BlockHeader = json.try_into().unwrap();
+        assert_eq!(
+            header.block_hash(),
+            BlockHash::from_hex("00000000b873e79784647a6c82962c70d228557d24a747ea4d1b8bbe878e1206")
+                .unwrap()
+        );
     }
 }
