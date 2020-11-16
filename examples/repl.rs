@@ -37,12 +37,14 @@ use log::{debug, error, info, trace, LevelFilter};
 use bitcoin::Network;
 
 use bdk::bitcoin;
-use bdk::blockchain::ConfigurableBlockchain;
-use bdk::blockchain::ElectrumBlockchain;
-use bdk::blockchain::ElectrumBlockchainConfig;
+use bdk::blockchain::{
+    AnyBlockchain, AnyBlockchainConfig, ConfigurableBlockchain, ElectrumBlockchainConfig,
+};
 use bdk::cli;
 use bdk::sled;
 use bdk::Wallet;
+
+use bdk::blockchain::esplora::EsploraBlockchainConfig;
 
 fn prepare_home_dir() -> PathBuf {
     let mut dir = PathBuf::new();
@@ -90,19 +92,25 @@ fn main() {
         .unwrap();
     debug!("database opened successfully");
 
-    let blockchain_config = ElectrumBlockchainConfig {
-        url: matches.value_of("server").unwrap().to_string(),
-        socks5: matches.value_of("proxy").map(ToString::to_string),
+    let config = match matches.value_of("esplora") {
+        Some(base_url) => AnyBlockchainConfig::Esplora(EsploraBlockchainConfig {
+            base_url: base_url.to_string(),
+        }),
+        None => AnyBlockchainConfig::Electrum(ElectrumBlockchainConfig {
+            url: matches.value_of("server").unwrap().to_string(),
+            socks5: matches.value_of("proxy").map(ToString::to_string),
+        }),
     };
-    let wallet = Wallet::new(
-        descriptor,
-        change_descriptor,
-        network,
-        tree,
-        ElectrumBlockchain::from_config(&blockchain_config).unwrap(),
-    )
-    .unwrap();
-    let wallet = Arc::new(wallet);
+    let wallet = Arc::new(
+        Wallet::new(
+            descriptor,
+            change_descriptor,
+            network,
+            tree,
+            AnyBlockchain::from_config(&config).unwrap(),
+        )
+        .unwrap(),
+    );
 
     if let Some(_sub_matches) = matches.subcommand_matches("repl") {
         let mut rl = Editor::<()>::new();

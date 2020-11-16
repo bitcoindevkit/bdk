@@ -338,6 +338,14 @@ pub fn add_global_flags<'a, 'b>(app: App<'a, 'b>) -> App<'a, 'b> {
             .default_value("ssl://electrum.blockstream.info:60002"),
     )
     .arg(
+        Arg::with_name("esplora")
+            .short("e")
+            .long("esplora")
+            .value_name("ESPLORA")
+            .help("Use the esplora server if given as parameter")
+            .takes_value(true),
+    )
+    .arg(
         Arg::with_name("proxy")
             .short("p")
             .long("proxy")
