@@ -90,6 +90,7 @@ pub struct TxBuilder<D: Database, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderC
     pub(crate) change_policy: ChangeSpendPolicy,
     pub(crate) force_non_witness_utxo: bool,
     pub(crate) coin_selection: Cs,
+    pub(crate) include_output_redeem_witness_script: bool,
 
     phantom: PhantomData<(D, Ctx)>,
 }
@@ -131,6 +132,7 @@ where
             change_policy: Default::default(),
             force_non_witness_utxo: Default::default(),
             coin_selection: Default::default(),
+            include_output_redeem_witness_script: Default::default(),
 
             phantom: PhantomData,
         }
@@ -374,9 +376,19 @@ impl<D: Database, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderContext> TxBuilde
             change_policy: self.change_policy,
             force_non_witness_utxo: self.force_non_witness_utxo,
             coin_selection,
+            include_output_redeem_witness_script: self.include_output_redeem_witness_script,
 
             phantom: PhantomData,
         }
+    }
+
+    /// Fill-in the [`psbt::Output::redeem_script`](bitcoin::util::psbt::Output::redeem_script) and
+    /// [`psbt::Output::witness_script`](bitcoin::util::psbt::Output::witness_script) fields.
+    ///
+    /// This is useful for signers which always require it, like ColdCard hardware wallets.
+    pub fn include_output_redeem_witness_script(mut self) -> Self {
+        self.include_output_redeem_witness_script = true;
+        self
     }
 }
 
