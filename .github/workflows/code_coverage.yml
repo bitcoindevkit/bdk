@@ -7,22 +7,20 @@ jobs:
     name: Tarpaulin to codecov.io
     runs-on: ubuntu-latest
     steps:
-      - name: checkout
+      - name: Checkout
         uses: actions/checkout@v2
 
-      - name: toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: nightly
-          override: true
+      - name: Set default toolchain
+        run: rustup default nightly
+      - name: Set profile
+        run: rustup set profile minimal
 
-      - name: tarpaulin
-        uses: actions-rs/tarpaulin@v0.1.2
-        with:
-          version: '0.15.0'
-          args: --features all-keys,cli-utils,compiler,esplora,compact_filters --run-types Tests,Doctests --exclude-files "testutils/*"
+      - name: Install tarpaulin
+        run: cargo install cargo-tarpaulin
+      - name: Tarpaulin
+        run: cargo tarpaulin --features all-keys,cli-utils,compiler,esplora,compact_filters --run-types Tests,Doctests --exclude-files "testutils/*"
 
-      - name: codecov.io
+      - name: Publish to codecov.io
         uses: codecov/codecov-action@v1.0.14
         with:
           token: ${{secrets.CODECOV_TOKEN}}

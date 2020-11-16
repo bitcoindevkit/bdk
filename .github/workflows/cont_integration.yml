@@ -1,11 +1,11 @@
 on: [push, pull_request]
 
-name: Continuous integration
+name: CI
 
 jobs:
 
   build-test:
-    name: Build and Test
+    name: Build and test
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -40,33 +40,23 @@ jobs:
             ~/.cargo/git
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml','**/Cargo.lock') }}
-      - name: toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: ${{ matrix.rust }}
-          override: true
-          components: clippy
-      - name: build
-        uses: actions-rs/cargo@v1
-        with:
-          command: build
-          args: --features ${{ matrix.features }} --no-default-features
-      - name: clippy
+      - name: Set default toolchain
+        run: rustup default ${{ matrix.rust }}
+      - name: Set profile
+        run: rustup set profile minimal
+      - name: Add clippy
+        run: rustup component add clippy
+      - name: Build
+        run: cargo build --features ${{ matrix.features }} --no-default-features
+      - name: Clippy
         if: ${{ matrix.rust == 'stable' && matrix.clippy != 'skip' }}
-        uses: actions-rs/cargo@v1
-        with:
-          command: clippy
-          args: -- -D warnings
-      - name: test
+        run: cargo clippy -- -D warnings
+      - name: Test
         if: ${{ matrix.test != 'skip' }}
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --features ${{ matrix.features }} --no-default-features
+        run: cargo test --features ${{ matrix.features }} --no-default-features
 
   test-electrum:
-    name: Test Electrum
+    name: Test electrum
     runs-on: ubuntu-16.04
     container: bitcoindevkit/electrs
     env:
@@ -76,9 +66,9 @@ jobs:
       MAGICAL_RPC_URL: 127.0.0.1:18443
       MAGICAL_ELECTRUM_URL: tcp://127.0.0.1:60401
     steps:
-      - name: checkout
+      - name: Checkout
         uses: actions/checkout@v2
-      - name: cache
+      - name: Cache
         uses: actions/cache@v2
         with:
           path: |
@@ -86,19 +76,16 @@ jobs:
             ~/.cargo/git
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml','**/Cargo.lock') }}
-      - name: toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: stable
-          override: true
-      - name: start core
+      - name: Install rustup
+        run: curl https://sh.rustup.rs -sSf | sh -s -- -y
+      - name: Set default toolchain
+        run: $HOME/.cargo/bin/rustup default stable
+      - name: Set profile
+        run: $HOME/.cargo/bin/rustup set profile minimal
+      - name: Start core
         run: ./ci/start-core.sh
-      - name: test
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --features test-electrum --no-default-features
+      - name: Test
+        run: $HOME/.cargo/bin/cargo test --features test-electrum --no-default-features
 
   check-wasm:
     name: Check WASM
@@ -107,9 +94,9 @@ jobs:
       CC: clang-10
       CFLAGS: -I/usr/include
     steps:
-      - name: checkout
+      - name: Checkout
         uses: actions/checkout@v2
-      - name: cache
+      - name: Cache
         uses: actions/cache@v2
         with:
           path: |
@@ -122,34 +109,26 @@ jobs:
       - run: sudo apt-add-repository "deb http://apt.llvm.org/xenial/ llvm-toolchain-xenial-10 main" || exit 1
       - run: sudo apt-get update || exit 1
       - run: sudo apt-get install -y clang-10 libc6-dev-i386 || exit 1
-      - name: toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: stable
-          target: wasm32-unknown-unknown
-          override: true
-      - name: check
-        uses: actions-rs/cargo@v1
-        with:
-          command: check
-          args: --target wasm32-unknown-unknown --features cli-utils,esplora --no-default-features
+      - name: Set default toolchain
+        run: rustup default stable
+      - name: Set profile
+        run: rustup set profile minimal
+      - name: Add target wasm32
+        run: rustup target add wasm32-unknown-unknown
+      - name: Check
+        run: cargo check --target wasm32-unknown-unknown --features cli-utils,esplora --no-default-features
 
   fmt:
     name: Rust fmt
     runs-on: ubuntu-latest
     steps:
-      - name: checkout
+      - name: Checkout
         uses: actions/checkout@v2
-      - name: toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: stable
-          override: true
-          components: rustfmt
-      - name: fmt check
-        uses: actions-rs/cargo@v1
-        with:
-          command: fmt
-          args: --all -- --check
+      - name: Set default toolchain
+        run: rustup default stable
+      - name: Set profile
+        run: rustup set profile minimal
+      - name: Add clippy
+        run: rustup component add rustfmt
+      - name: Check fmt
+        run: cargo fmt --all -- --check
