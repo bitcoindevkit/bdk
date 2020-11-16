@@ -1268,7 +1268,7 @@ where
         if self
             .database
             .borrow()
-            .get_script_pubkey_from_path(ScriptType::External, max_address)?
+            .get_script_pubkey_from_path(ScriptType::External, max_address.saturating_sub(1))?
             .is_none()
         {
             run_setup = true;
