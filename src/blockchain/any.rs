@@ -52,7 +52,7 @@
 //!
 //! # #[cfg(feature = "esplora")]
 //! # {
-//! let esplora_blockchain = EsploraBlockchain::new("...");
+//! let esplora_blockchain = EsploraBlockchain::new("...", None);
 //! let wallet_esplora: Wallet<AnyBlockchain, _> = Wallet::new(
 //!     "...",
 //!     None,

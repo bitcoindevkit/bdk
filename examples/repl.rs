@@ -95,6 +95,9 @@ fn main() {
     let config = match matches.value_of("esplora") {
         Some(base_url) => AnyBlockchainConfig::Esplora(EsploraBlockchainConfig {
             base_url: base_url.to_string(),
+            concurrency: matches
+                .value_of("esplora_concurrency")
+                .and_then(|v| v.parse::<u8>().ok()),
         }),
         None => AnyBlockchainConfig::Electrum(ElectrumBlockchainConfig {
             url: matches.value_of("server").unwrap().to_string(),

@@ -362,14 +362,23 @@ pub fn add_global_flags<'a, 'b>(app: App<'a, 'b>) -> App<'a, 'b> {
         );
 
     if cfg!(feature = "esplora") {
-        app = app.arg(
-            Arg::with_name("esplora")
-                .short("e")
-                .long("esplora")
-                .value_name("ESPLORA")
-                .help("Use the esplora server if given as parameter")
-                .takes_value(true),
-        );
+        app = app
+            .arg(
+                Arg::with_name("esplora")
+                    .short("e")
+                    .long("esplora")
+                    .value_name("ESPLORA")
+                    .help("Use the esplora server if given as parameter")
+                    .takes_value(true),
+            )
+            .arg(
+                Arg::with_name("esplora_concurrency")
+                    .long("esplora_concurrency")
+                    .value_name("ESPLORA_CONCURRENCY")
+                    .help("Concurrency of requests made to the esplora server")
+                    .default_value("4")
+                    .takes_value(true),
+            )
     }
 
     if cfg!(feature = "electrum") {

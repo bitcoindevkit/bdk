@@ -31,7 +31,7 @@
 //!
 //! ```no_run
 //! # use bdk::blockchain::esplora::EsploraBlockchain;
-//! let blockchain = EsploraBlockchain::new("https://blockstream.info/testnet/api");
+//! let blockchain = EsploraBlockchain::new("https://blockstream.info/testnet/api", None);
 //! # Ok::<(), bdk::Error>(())
 //! ```
 
@@ -59,7 +59,7 @@ use crate::error::Error;
 use crate::wallet::utils::ChunksIterator;
 use crate::FeeRate;
 
-const CONCURRENT: usize = 4;
+const DEFAULT_CONCURRENT_REQUESTS: u8 = 4;
 
 #[derive(Debug)]
 struct UrlClient {
@@ -67,6 +67,7 @@ struct UrlClient {
     // We use the async client instead of the blocking one because it automatically uses `fetch`
     // when the target platform is wasm32.
     client: Client,
+    concurrency: u8,
 }
 
 /// Structure that implements the logic to sync with Esplora
@@ -84,10 +85,11 @@ impl std::convert::From<UrlClient> for EsploraBlockchain {
 
 impl EsploraBlockchain {
     /// Create a new instance of the client from a base URL
-    pub fn new(base_url: &str) -> Self {
+    pub fn new(base_url: &str, concurrency: Option<u8>) -> Self {
         EsploraBlockchain(UrlClient {
             url: base_url.to_string(),
             client: Client::new(),
+            concurrency: concurrency.unwrap_or(DEFAULT_CONCURRENT_REQUESTS),
         })
     }
 }
@@ -305,7 +307,7 @@ impl ElectrumLikeSync for UrlClient {
     ) -> Result<Vec<Vec<ELSGetHistoryRes>>, Error> {
         let future = async {
             let mut results = vec![];
-            for chunk in ChunksIterator::new(scripts.into_iter(), CONCURRENT) {
+            for chunk in ChunksIterator::new(scripts.into_iter(), self.concurrency as usize) {
                 let mut futs = FuturesOrdered::new();
                 for script in chunk {
                     futs.push(self._script_get_history(&script));
@@ -325,7 +327,7 @@ impl ElectrumLikeSync for UrlClient {
     ) -> Result<Vec<Transaction>, Error> {
         let future = async {
             let mut results = vec![];
-            for chunk in ChunksIterator::new(txids.into_iter(), CONCURRENT) {
+            for chunk in ChunksIterator::new(txids.into_iter(), self.concurrency as usize) {
                 let mut futs = FuturesOrdered::new();
                 for txid in chunk {
                     futs.push(self._get_tx_no_opt(&txid));
@@ -345,7 +347,7 @@ impl ElectrumLikeSync for UrlClient {
     ) -> Result<Vec<BlockHeader>, Error> {
         let future = async {
             let mut results = vec![];
-            for chunk in ChunksIterator::new(heights.into_iter(), CONCURRENT) {
+            for chunk in ChunksIterator::new(heights.into_iter(), self.concurrency as usize) {
                 let mut futs = FuturesOrdered::new();
                 for height in chunk {
                     futs.push(self._get_header(height));
@@ -404,13 +406,17 @@ impl Into<BlockHeader> for EsploraHeader {
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
 pub struct EsploraBlockchainConfig {
     pub base_url: String,
+    pub concurrency: Option<u8>,
 }
 
 impl ConfigurableBlockchain for EsploraBlockchain {
     type Config = EsploraBlockchainConfig;
 
     fn from_config(config: &Self::Config) -> Result<Self, Error> {
-        Ok(EsploraBlockchain::new(config.base_url.as_str()))
+        Ok(EsploraBlockchain::new(
+            config.base_url.as_str(),
+            config.concurrency,
+        ))
     }
 }
 
