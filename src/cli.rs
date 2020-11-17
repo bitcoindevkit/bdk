@@ -309,56 +309,57 @@ pub fn make_cli_subcommands<'a, 'b>() -> App<'a, 'b> {
 }
 
 pub fn add_global_flags<'a, 'b>(app: App<'a, 'b>) -> App<'a, 'b> {
-    let mut app = app.arg(
-        Arg::with_name("network")
-            .short("n")
-            .long("network")
-            .value_name("NETWORK")
-            .help("Sets the network")
-            .takes_value(true)
-            .default_value("testnet")
-            .possible_values(&["testnet", "regtest"]),
-    )
-    .arg(
-        Arg::with_name("wallet")
-            .short("w")
-            .long("wallet")
-            .value_name("WALLET_NAME")
-            .help("Selects the wallet to use")
-            .takes_value(true)
-            .default_value("main"),
-    )
-    .arg(
-        Arg::with_name("proxy")
-            .short("p")
-            .long("proxy")
-            .value_name("SERVER:PORT")
-            .help("Sets the SOCKS5 proxy for the Electrum client")
-            .takes_value(true),
-    )
-    .arg(
-        Arg::with_name("descriptor")
-            .short("d")
-            .long("descriptor")
-            .value_name("DESCRIPTOR")
-            .help("Sets the descriptor to use for the external addresses")
-            .required(true)
-            .takes_value(true),
-    )
-    .arg(
-        Arg::with_name("change_descriptor")
-            .short("c")
-            .long("change_descriptor")
-            .value_name("DESCRIPTOR")
-            .help("Sets the descriptor to use for internal addresses")
-            .takes_value(true),
-    )
-    .arg(
-        Arg::with_name("v")
-            .short("v")
-            .multiple(true)
-            .help("Sets the level of verbosity"),
-    );
+    let mut app = app
+        .arg(
+            Arg::with_name("network")
+                .short("n")
+                .long("network")
+                .value_name("NETWORK")
+                .help("Sets the network")
+                .takes_value(true)
+                .default_value("testnet")
+                .possible_values(&["testnet", "regtest"]),
+        )
+        .arg(
+            Arg::with_name("wallet")
+                .short("w")
+                .long("wallet")
+                .value_name("WALLET_NAME")
+                .help("Selects the wallet to use")
+                .takes_value(true)
+                .default_value("main"),
+        )
+        .arg(
+            Arg::with_name("proxy")
+                .short("p")
+                .long("proxy")
+                .value_name("SERVER:PORT")
+                .help("Sets the SOCKS5 proxy for the Electrum client")
+                .takes_value(true),
+        )
+        .arg(
+            Arg::with_name("descriptor")
+                .short("d")
+                .long("descriptor")
+                .value_name("DESCRIPTOR")
+                .help("Sets the descriptor to use for the external addresses")
+                .required(true)
+                .takes_value(true),
+        )
+        .arg(
+            Arg::with_name("change_descriptor")
+                .short("c")
+                .long("change_descriptor")
+                .value_name("DESCRIPTOR")
+                .help("Sets the descriptor to use for internal addresses")
+                .takes_value(true),
+        )
+        .arg(
+            Arg::with_name("v")
+                .short("v")
+                .multiple(true)
+                .help("Sets the level of verbosity"),
+        );
 
     if cfg!(feature = "esplora") {
         app = app.arg(

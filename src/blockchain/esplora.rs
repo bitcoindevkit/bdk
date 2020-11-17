@@ -48,7 +48,7 @@ use serde::Deserialize;
 use reqwest::{Client, StatusCode};
 
 use bitcoin::consensus::{deserialize, serialize};
-use bitcoin::hashes::hex::{FromHex, ToHex};
+use bitcoin::hashes::hex::ToHex;
 use bitcoin::hashes::{sha256, Hash};
 use bitcoin::{BlockHash, BlockHeader, Script, Transaction, TxMerkleNode, Txid};
 
@@ -57,7 +57,6 @@ use super::*;
 use crate::database::BatchDatabase;
 use crate::error::Error;
 use crate::FeeRate;
-use std::convert::TryInto;
 
 #[derive(Debug)]
 struct UrlClient {
@@ -192,7 +191,7 @@ impl UrlClient {
 
         let esplora_header = resp.json::<EsploraHeader>().await?;
 
-        Ok(esplora_header.try_into()?)
+        Ok(esplora_header.into())
     }
 
     async fn _broadcast(&self, transaction: &Transaction) -> Result<(), EsploraError> {
@@ -360,27 +359,23 @@ pub struct EsploraHeader {
     pub tx_count: u32,
     pub size: u32,
     pub weight: u32,
-    pub merkle_root: String,
-    pub previousblockhash: String,
+    pub merkle_root: TxMerkleNode,
+    pub previousblockhash: BlockHash,
     pub nonce: u32,
     pub bits: u32,
     pub difficulty: u32,
 }
 
-impl TryInto<BlockHeader> for EsploraHeader {
-    type Error = EsploraError;
-
-    fn try_into(self) -> Result<BlockHeader, esplora::EsploraError> {
-        Ok(BlockHeader {
+impl Into<BlockHeader> for EsploraHeader {
+    fn into(self) -> BlockHeader {
+        BlockHeader {
             version: self.version,
-            prev_blockhash: BlockHash::from_hex(&self.previousblockhash)
-                .map_err(|_| EsploraError::HeaderParseFail)?,
-            merkle_root: TxMerkleNode::from_hex(&self.merkle_root)
-                .map_err(|_| EsploraError::HeaderParseFail)?,
+            prev_blockhash: self.previousblockhash,
+            merkle_root: self.merkle_root,
             time: self.timestamp,
             bits: self.bits,
             nonce: self.nonce,
-        })
+        }
     }
 }
 
@@ -449,13 +444,12 @@ mod test {
     use crate::blockchain::esplora::EsploraHeader;
     use bitcoin::hashes::hex::FromHex;
     use bitcoin::{BlockHash, BlockHeader};
-    use std::convert::TryInto;
 
     #[test]
     fn test_esplora_header() {
         let json_str = r#"{"id":"00000000b873e79784647a6c82962c70d228557d24a747ea4d1b8bbe878e1206","height":1,"version":1,"timestamp":1296688928,"tx_count":1,"size":190,"weight":760,"merkle_root":"f0315ffc38709d70ad5647e22048358dd3745f3ce3874223c80a7c92fab0c8ba","previousblockhash":"000000000933ea01ad0ee984209779baaec3ced90fa3f408719526f8d77f4943","nonce":1924588547,"bits":486604799,"difficulty":1}"#;
         let json: EsploraHeader = serde_json::from_str(&json_str).unwrap();
-        let header: BlockHeader = json.try_into().unwrap();
+        let header: BlockHeader = json.into();
         assert_eq!(
             header.block_hash(),
             BlockHash::from_hex("00000000b873e79784647a6c82962c70d228557d24a747ea4d1b8bbe878e1206")
