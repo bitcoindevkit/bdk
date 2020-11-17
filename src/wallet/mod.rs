@@ -858,9 +858,14 @@ where
         mut psbt: PSBT,
         assume_height: Option<u32>,
     ) -> Result<(PSBT, bool), Error> {
-        let mut tx = psbt.global.unsigned_tx.clone();
+        let tx = &psbt.global.unsigned_tx;
+        let mut finished = true;
 
-        for (n, (input, psbt_input)) in tx.input.iter_mut().zip(psbt.inputs.iter()).enumerate() {
+        for (n, input) in tx.input.iter().enumerate() {
+            let psbt_input = &psbt.inputs[n];
+            if psbt_input.final_script_sig.is_some() || psbt_input.final_script_witness.is_some() {
+                continue;
+            }
             // if the height is None in the database it means it's still unconfirmed, so consider
             // that as a very high value
             let create_height = self
@@ -881,52 +886,53 @@ where
             //   is in `src/descriptor/mod.rs`, but it will basically look at `hd_keypaths`,
             //   `redeem_script` and `witness_script` to determine the right derivation
             // - If that also fails, it will try it on the internal descriptor, if present
-            let desc = if let Some(desc) = psbt
+            let desc = psbt
                 .get_utxo_for(n)
                 .map(|txout| self.get_descriptor_for_txout(&txout))
                 .transpose()?
                 .flatten()
-            {
-                desc
-            } else if let Some(desc) =
-                self.descriptor
-                    .derive_from_psbt_input(psbt_input, psbt.get_utxo_for(n), &self.secp)
-            {
-                desc
-            } else if let Some(desc) = self.change_descriptor.as_ref().and_then(|desc| {
-                desc.derive_from_psbt_input(psbt_input, psbt.get_utxo_for(n), &self.secp)
-            }) {
-                desc
-            } else {
-                debug!("Couldn't find the right derived descriptor for input {}", n);
-                return Ok((psbt, false));
-            };
+                .or_else(|| {
+                    self.descriptor.derive_from_psbt_input(
+                        psbt_input,
+                        psbt.get_utxo_for(n),
+                        &self.secp,
+                    )
+                })
+                .or_else(|| {
+                    self.change_descriptor.as_ref().and_then(|desc| {
+                        desc.derive_from_psbt_input(psbt_input, psbt.get_utxo_for(n), &self.secp)
+                    })
+                });
 
-            let deriv_ctx = descriptor_to_pk_ctx(&self.secp);
-            match desc.satisfy(
-                input,
-                (
-                    PsbtInputSatisfier::new(&psbt, n),
-                    After::new(current_height, false),
-                    Older::new(current_height, create_height, false),
-                ),
-                deriv_ctx,
-            ) {
-                Ok(_) => continue,
-                Err(e) => {
-                    debug!("satisfy error {:?} for input {}", e, n);
-                    return Ok((psbt, false));
+            match desc {
+                Some(desc) => {
+                    let mut tmp_input = bitcoin::TxIn::default();
+                    let deriv_ctx = descriptor_to_pk_ctx(&self.secp);
+                    match desc.satisfy(
+                        &mut tmp_input,
+                        (
+                            PsbtInputSatisfier::new(&psbt, n),
+                            After::new(current_height, false),
+                            Older::new(current_height, create_height, false),
+                        ),
+                        deriv_ctx,
+                    ) {
+                        Ok(_) => {
+                            let psbt_input = &mut psbt.inputs[n];
+                            psbt_input.final_script_sig = Some(tmp_input.script_sig);
+                            psbt_input.final_script_witness = Some(tmp_input.witness);
+                        }
+                        Err(e) => {
+                            debug!("satisfy error {:?} for input {}", e, n);
+                            finished = false
+                        }
+                    }
                 }
+                None => finished = false,
             }
         }
 
-        // consume tx to extract its input's script_sig and witnesses and move them into the psbt
-        for (input, psbt_input) in tx.input.into_iter().zip(psbt.inputs.iter_mut()) {
-            psbt_input.final_script_sig = Some(input.script_sig);
-            psbt_input.final_script_witness = Some(input.witness);
-        }
-
-        Ok((psbt, true))
+        Ok((psbt, finished))
     }
 
     pub fn secp_ctx(&self) -> &SecpCtx {
@@ -3253,5 +3259,39 @@ mod test {
             .outputs
             .iter()
             .any(|output| output.redeem_script.is_some() && output.witness_script.is_some()));
+    }
+
+    #[test]
+    fn test_signing_only_one_of_multiple_inputs() {
+        let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
+        let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
+        let (mut psbt, _) = wallet
+            .create_tx(
+                TxBuilder::with_recipients(vec![(addr.script_pubkey(), 45_000)])
+                    .include_output_redeem_witness_script(),
+            )
+            .unwrap();
+
+        // add another input to the psbt that is at least passable.
+        let mut dud_input = bitcoin::util::psbt::Input::default();
+        dud_input.witness_utxo = Some(TxOut {
+            value: 100_000,
+            script_pubkey: miniscript::Descriptor::<bitcoin::PublicKey>::from_str(
+                "wpkh(025476c2e83188368da1ff3e292e7acafcdb3566bb0ad253f62fc70f07aeee6357)",
+            )
+            .unwrap()
+            .script_pubkey(miniscript::NullCtx),
+        });
+        psbt.inputs.push(dud_input);
+        psbt.global.unsigned_tx.input.push(bitcoin::TxIn::default());
+        let (psbt, is_final) = wallet.sign(psbt, None).unwrap();
+        assert!(
+            !is_final,
+            "shouldn't be final since we can't sign one of the inputs"
+        );
+        assert!(
+            psbt.inputs[0].final_script_witness.is_some(),
+            "should finalized input it signed"
+        )
     }
 }
