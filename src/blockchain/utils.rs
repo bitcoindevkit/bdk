@@ -251,31 +251,29 @@ pub trait ElectrumLikeSync {
         chunk_size: usize,
     ) -> Result<HashMap<Txid, u64>, Error> {
         let mut txid_timestamp = HashMap::new();
-        let needed_txid_height: HashMap<&Txid, &Option<u32>> = txid_height
+        let needed_txid_height: HashMap<&Txid, u32> = txid_height
             .iter()
-            .filter(|(txid, _)| txs_details_in_db.get(*txid).is_none())
+            .filter(|(t, _)| txs_details_in_db.get(*t).is_none())
+            .filter_map(|(t, o)| o.map(|h| (t, h)))
             .collect();
-        let needed_heights: HashSet<u32> =
-            needed_txid_height.iter().filter_map(|(_, b)| **b).collect();
+        let needed_heights: HashSet<u32> = needed_txid_height.values().cloned().collect();
         if !needed_heights.is_empty() {
             info!("{} headers to download for timestamp", needed_heights.len());
             let mut height_timestamp: HashMap<u32, u64> = HashMap::new();
             for chunk in ChunksIterator::new(needed_heights.into_iter(), chunk_size) {
                 let call_result: Vec<BlockHeader> =
                     maybe_await!(self.els_batch_block_header(chunk.clone()))?;
-                let vec: Vec<(u32, u64)> = chunk
-                    .into_iter()
-                    .zip(call_result.iter().map(|h| h.time as u64))
-                    .collect();
-                height_timestamp.extend(vec);
+                height_timestamp.extend(
+                    chunk
+                        .into_iter()
+                        .zip(call_result.iter().map(|h| h.time as u64)),
+                );
             }
-            for (txid, height_opt) in needed_txid_height {
-                if let Some(height) = height_opt {
-                    let timestamp = height_timestamp
-                        .get(height)
-                        .ok_or_else(|| Error::Generic("timestamp missing".to_string()))?;
-                    txid_timestamp.insert(*txid, *timestamp);
-                }
+            for (txid, height) in needed_txid_height {
+                let timestamp = height_timestamp
+                    .get(&height)
+                    .ok_or_else(|| Error::Generic("timestamp missing".to_string()))?;
+                txid_timestamp.insert(*txid, *timestamp);
             }
         }
 
