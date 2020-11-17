@@ -27,7 +27,24 @@
 #[doc(hidden)]
 #[macro_export]
 macro_rules! impl_top_level_sh {
-    ( $descriptor_variant:ident, $( $minisc:tt )* ) => {
+    // disallow `sortedmulti` in `bare()`
+    ( Bare, Bare, sortedmulti $( $inner:tt )* ) => {
+        compile_error!("`bare()` descriptors can't contain any `sortedmulti` operands");
+    };
+    ( Bare, Bare, sortedmulti_vec $( $inner:tt )* ) => {
+        compile_error!("`bare()` descriptors can't contain any `sortedmulti_vec` operands");
+    };
+
+    ( $descriptor_variant:ident, $sortedmulti_variant:ident, sortedmulti $( $inner:tt )* ) => {
+        $crate::impl_sortedmulti!(sortedmulti $( $inner )*)
+            .and_then(|(inner, key_map, valid_networks)| Ok(($crate::miniscript::Descriptor::$sortedmulti_variant(inner), key_map, valid_networks)))
+    };
+    ( $descriptor_variant:ident, $sortedmulti_variant:ident, sortedmulti_vec $( $inner:tt )* ) => {
+        $crate::impl_sortedmulti!(sortedmulti_vec $( $inner )*)
+            .and_then(|(inner, key_map, valid_networks)| Ok(($crate::miniscript::Descriptor::$sortedmulti_variant(inner), key_map, valid_networks)))
+    };
+
+    ( $descriptor_variant:ident, $sortedmulti_variant:ident, $( $minisc:tt )* ) => {
         $crate::fragment!($( $minisc )*)
             .map(|(minisc, keymap, networks)|($crate::miniscript::Descriptor::<$crate::miniscript::descriptor::DescriptorPublicKey>::$descriptor_variant(minisc), keymap, networks))
     };
@@ -160,6 +177,28 @@ macro_rules! impl_node_opcode_three {
     };
 }
 
+#[doc(hidden)]
+#[macro_export]
+macro_rules! impl_sortedmulti {
+    ( sortedmulti_vec $thresh:expr, $keys:expr ) => ({
+        let secp = $crate::bitcoin::secp256k1::Secp256k1::new();
+        $crate::keys::make_sortedmulti_inner($thresh, $keys, &secp)
+    });
+    ( sortedmulti $thresh:expr $(, $key:expr )+ ) => ({
+        use $crate::keys::ToDescriptorKey;
+        let secp = $crate::bitcoin::secp256k1::Secp256k1::new();
+
+        let mut keys = vec![];
+        $(
+            keys.push($key.to_descriptor_key());
+        )*
+
+        keys.into_iter().collect::<Result<Vec<_>, _>>()
+            .and_then(|keys| $crate::keys::make_sortedmulti_inner($thresh, keys, &secp))
+    });
+
+}
+
 /// Macro to write full descriptors with code
 ///
 /// This macro expands to an object of type `Result<(Descriptor<DescriptorPublicKey>, KeyMap, ValidNetworks), Error>`.
@@ -238,13 +277,13 @@ macro_rules! impl_node_opcode_three {
 #[macro_export]
 macro_rules! descriptor {
     ( bare ( $( $minisc:tt )* ) ) => ({
-        $crate::impl_top_level_sh!(Bare, $( $minisc )*)
+        $crate::impl_top_level_sh!(Bare, Bare, $( $minisc )*)
     });
     ( sh ( wsh ( $( $minisc:tt )* ) ) ) => ({
         $crate::descriptor!(shwsh ($( $minisc )*))
     });
     ( shwsh ( $( $minisc:tt )* ) ) => ({
-        $crate::impl_top_level_sh!(ShWsh, $( $minisc )*)
+        $crate::impl_top_level_sh!(ShWsh, ShWshSortedMulti, $( $minisc )*)
     });
     ( pk $key:expr ) => ({
         $crate::impl_top_level_pk!(Pk, $crate::miniscript::Legacy, $key)
@@ -262,10 +301,10 @@ macro_rules! descriptor {
         $crate::impl_top_level_pk!(ShWpkh, $crate::miniscript::Segwitv0, $key)
     });
     ( sh ( $( $minisc:tt )* ) ) => ({
-        $crate::impl_top_level_sh!(Sh, $( $minisc )*)
+        $crate::impl_top_level_sh!(Sh, ShSortedMulti, $( $minisc )*)
     });
     ( wsh ( $( $minisc:tt )* ) ) => ({
-        $crate::impl_top_level_sh!(Wsh, $( $minisc )*)
+        $crate::impl_top_level_sh!(Wsh, WshSortedMulti, $( $minisc )*)
     });
 }
 
@@ -404,6 +443,13 @@ macro_rules! fragment {
             .and_then(|keys| $crate::keys::make_multi($thresh, keys, &secp))
     });
 
+    // `sortedmulti()` is handled separately
+    ( sortedmulti $( $inner:tt )* ) => ({
+        compile_error!("`sortedmulti` can only be used as the root operand of a descriptor");
+    });
+    ( sortedmulti_vec $( $inner:tt )* ) => ({
+        compile_error!("`sortedmulti_vec` can only be used as the root operand of a descriptor");
+    });
 }
 
 #[cfg(test)]
@@ -444,8 +490,8 @@ mod test {
                 desc.derive(ChildNumber::from_normal_idx(index).unwrap())
             };
             let address = child_desc.address(Regtest, deriv_ctx);
-            if address.is_some() {
-                assert_eq!(address.unwrap().to_string(), *expected.get(i).unwrap());
+            if let Some(address) = address {
+                assert_eq!(address.to_string(), *expected.get(i).unwrap());
             } else {
                 let script = child_desc.script_pubkey(deriv_ctx);
                 assert_eq!(script.to_hex().as_str(), *expected.get(i).unwrap());
@@ -631,6 +677,60 @@ mod test {
                 "2NFCtXvx9q4ci2kvKub17iSTgvRXGctCGhz",
                 "2NB2PrFPv5NxWCpygas8tPrGJG2ZFgeuwJw",
                 "2N79ZAGo5cMi5Jt7Wo9L5YmF5GkEw7sjWdC",
+            ],
+        );
+    }
+
+    #[test]
+    fn test_dsl_sortedmulti() {
+        let key_1 = bip32::ExtendedPrivKey::from_str("tprv8ZgxMBicQKsPcx5nBGsR63Pe8KnRUqmbJNENAfGftF3yuXoMMoVJJcYeUw5eVkm9WBPjWYt6HMWYJNesB5HaNVBaFc1M6dRjWSYnmewUMYy").unwrap();
+        let path_1 = bip32::DerivationPath::from_str("m/0").unwrap();
+
+        let key_2 = bip32::ExtendedPrivKey::from_str("tprv8ZgxMBicQKsPegBHHnq7YEgM815dG24M2Jk5RVqipgDxF1HJ1tsnT815X5Fd5FRfMVUs8NZs9XCb6y9an8hRPThnhfwfXJ36intaekySHGF").unwrap();
+        let path_2 = bip32::DerivationPath::from_str("m/1").unwrap();
+
+        let desc_key1 = (key_1, path_1);
+        let desc_key2 = (key_2, path_2);
+
+        check(
+            descriptor!(sh(sortedmulti 1, desc_key1.clone(), desc_key2.clone())),
+            false,
+            false,
+            &[
+                "2MsxzPEJDBzpGffJXPaDpfXZAUNnZhaMh2N",
+                "2My3x3DLPK3UbGWGpxrXr1RnbD8MNC4FpgS",
+                "2NByEuiQT7YLqHCTNxL5KwYjvtuCYcXNBSC",
+                "2N1TGbP81kj2VUKTSWgrwxoMfuWjvfUdyu7",
+                "2N3Bomq2fpAcLRNfZnD3bCWK9quan28CxCR",
+                "2N9nrZaEzEFDqEAU9RPvDnXGT6AVwBDKAQb",
+            ],
+        );
+
+        check(
+            descriptor!(sh(wsh(sortedmulti 1, desc_key1.clone(), desc_key2.clone()))),
+            true,
+            false,
+            &[
+                "2NCogc5YyM4N6ruv1hUa7WLMW1BPeCK7N9B",
+                "2N6mkSAKi1V2oaBXby7XHdvBMKEDRQcFpNe",
+                "2NFmTSttm9v6bXeoWaBvpMcgfPQcZhNn3Eh",
+                "2Mvib87RBPUHXNEpX5S5Kv1qqrhBfgBGsJM",
+                "2MtMv5mcK2EjcLsH8Txpx2JxLLzHr4ttczL",
+                "2MsWCB56rb4T6yPv8QudZGHERTwNgesE4f6",
+            ],
+        );
+
+        check(
+            descriptor!(wsh(sortedmulti_vec 1, vec![desc_key1, desc_key2])),
+            true,
+            false,
+            &[
+                "bcrt1qcvq0lg8q7a47ytrd7zk5y7uls7mulrenjgvflwylpppgwf8029es4vhpnj",
+                "bcrt1q80yn8sdt6l7pjvkz25lglyaqctlmsq9ugk80rmxt8yu0npdsj97sc7l4de",
+                "bcrt1qrvf6024v9s50qhffe3t2fr2q9ckdhx2g6jz32chm2pp24ymgtr5qfrdmct",
+                "bcrt1q6srfmra0ynypym35c7jvsxt2u4yrugeajq95kg2ps7lk6h2gaunsq9lzxn",
+                "bcrt1qhl8rrzzcdpu7tcup3lcg7tge52sqvwy5fcv4k78v6kxtwmqf3v6qpvyjza",
+                "bcrt1ql2elz9mhm9ll27ddpewhxs732xyl2fk2kpkqz9gdyh33wgcun4vstrd49k",
             ],
         );
     }

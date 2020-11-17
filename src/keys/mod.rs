@@ -36,6 +36,7 @@ use bitcoin::{Network, PrivateKey, PublicKey};
 
 pub use miniscript::descriptor::{
     DescriptorPublicKey, DescriptorSecretKey, DescriptorSinglePriv, DescriptorSinglePub,
+    SortedMultiVec,
 };
 use miniscript::descriptor::{DescriptorXKey, KeyMap};
 pub use miniscript::ScriptContext;
@@ -530,6 +531,31 @@ impl<Ctx: ScriptContext, T: DerivableKey<Ctx>> ToDescriptorKey<Ctx>
     }
 }
 
+fn expand_multi_keys<Pk: ToDescriptorKey<Ctx>, Ctx: ScriptContext>(
+    pks: Vec<Pk>,
+    secp: &SecpCtx,
+) -> Result<(Vec<DescriptorPublicKey>, KeyMap, ValidNetworks), KeyError> {
+    let (pks, key_maps_networks): (Vec<_>, Vec<_>) = pks
+        .into_iter()
+        .map(|key| Ok::<_, KeyError>(key.to_descriptor_key()?.extract(secp)?))
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .map(|(a, b, c)| (a, (b, c)))
+        .unzip();
+
+    let (key_map, valid_networks) = key_maps_networks.into_iter().fold(
+        (KeyMap::default(), any_network()),
+        |(mut keys_acc, net_acc), (key, net)| {
+            keys_acc.extend(key.into_iter());
+            let net_acc = merge_networks(&net_acc, &net);
+
+            (keys_acc, net_acc)
+        },
+    );
+
+    Ok((pks, key_map, valid_networks))
+}
+
 // Used internally by `bdk::fragment!` to build `pk_k()` fragments
 #[doc(hidden)]
 pub fn make_pk<Pk: ToDescriptorKey<Ctx>, Ctx: ScriptContext>(
@@ -552,29 +578,32 @@ pub fn make_multi<Pk: ToDescriptorKey<Ctx>, Ctx: ScriptContext>(
     pks: Vec<Pk>,
     secp: &SecpCtx,
 ) -> Result<(Miniscript<DescriptorPublicKey, Ctx>, KeyMap, ValidNetworks), KeyError> {
-    let (pks, key_maps_networks): (Vec<_>, Vec<_>) = pks
-        .into_iter()
-        .map(|key| Ok::<_, KeyError>(key.to_descriptor_key()?.extract(secp)?))
-        .collect::<Result<Vec<_>, _>>()?
-        .into_iter()
-        .map(|(a, b, c)| (a, (b, c)))
-        .unzip();
-
-    let (key_map, valid_networks) = key_maps_networks.into_iter().fold(
-        (KeyMap::default(), any_network()),
-        |(mut keys_acc, net_acc), (key, net)| {
-            keys_acc.extend(key.into_iter());
-            let net_acc = merge_networks(&net_acc, &net);
-
-            (keys_acc, net_acc)
-        },
-    );
+    let (pks, key_map, valid_networks) = expand_multi_keys(pks, secp)?;
 
     Ok((
         Miniscript::from_ast(Terminal::Multi(thresh, pks))?,
         key_map,
         valid_networks,
     ))
+}
+
+// Used internally by `bdk::descriptor!` to build `sortedmulti()` fragments
+#[doc(hidden)]
+pub fn make_sortedmulti_inner<Pk: ToDescriptorKey<Ctx>, Ctx: ScriptContext>(
+    thresh: usize,
+    pks: Vec<Pk>,
+    secp: &SecpCtx,
+) -> Result<
+    (
+        SortedMultiVec<DescriptorPublicKey, Ctx>,
+        KeyMap,
+        ValidNetworks,
+    ),
+    KeyError,
+> {
+    let (pks, key_map, valid_networks) = expand_multi_keys(pks, secp)?;
+
+    Ok((SortedMultiVec::new(thresh, pks)?, key_map, valid_networks))
 }
 
 /// The "identity" conversion is used internally by some `bdk::fragment`s
