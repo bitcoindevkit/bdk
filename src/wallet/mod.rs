@@ -484,11 +484,7 @@ where
         builder.ordering.sort_tx(&mut tx);
 
         let txid = tx.txid();
-        let lookup_output = selected
-            .into_iter()
-            .map(|utxo| (utxo.outpoint, utxo))
-            .collect();
-        let psbt = self.complete_transaction(tx, lookup_output, builder)?;
+        let psbt = self.complete_transaction(tx, selected, builder)?;
 
         let transaction_details = TransactionDetails {
             transaction: None,
@@ -771,14 +767,10 @@ where
         // TODO: check that we are not replacing more than 100 txs from mempool
 
         details.txid = tx.txid();
-        let lookup_output = selected
-            .into_iter()
-            .map(|utxo| (utxo.outpoint, utxo))
-            .collect();
         details.fees = fee_amount;
         details.timestamp = time::get_timestamp();
 
-        let psbt = self.complete_transaction(tx, lookup_output, builder)?;
+        let psbt = self.complete_transaction(tx, selected, builder)?;
 
         Ok((psbt, details))
     }
@@ -1131,10 +1123,14 @@ where
     >(
         &self,
         tx: Transaction,
-        lookup_output: HashMap<OutPoint, UTXO>,
+        selected: Vec<UTXO>,
         builder: TxBuilder<D, Cs, Ctx>,
     ) -> Result<PSBT, Error> {
         let mut psbt = PSBT::from_unsigned_tx(tx)?;
+        let lookup_output = selected
+            .into_iter()
+            .map(|utxo| (utxo.outpoint, utxo))
+            .collect::<HashMap<_, _>>();
 
         // add metadata for the inputs
         for (psbt_input, input) in psbt
