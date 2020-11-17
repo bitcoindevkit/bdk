@@ -2122,6 +2122,23 @@ mod test {
     }
 
     #[test]
+    fn test_create_tx_shwpkh_has_witness_utxo() {
+        let (wallet, _, _) =
+            get_funded_wallet("sh(wpkh(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW))");
+        let addr = wallet.get_new_address().unwrap();
+        let (psbt, _) = wallet
+            .create_tx(
+                TxBuilder::new()
+                    .set_single_recipient(addr.script_pubkey())
+                    .drain_wallet(),
+            )
+            .unwrap();
+
+        assert!(psbt.inputs[0].non_witness_utxo.is_none());
+        assert!(psbt.inputs[0].witness_utxo.is_some());
+    }
+
+    #[test]
     fn test_create_tx_both_non_witness_utxo_and_witness_utxo() {
         let (wallet, _, _) =
             get_funded_wallet("wsh(pk(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW))");
