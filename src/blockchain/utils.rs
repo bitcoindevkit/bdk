@@ -26,6 +26,8 @@ use std::collections::{HashMap, HashSet};
 
 #[allow(unused_imports)]
 use log::{debug, error, info, trace};
+use rand::seq::SliceRandom;
+use rand::thread_rng;
 
 use bitcoin::{BlockHeader, OutPoint, Script, Transaction, Txid};
 
@@ -33,10 +35,8 @@ use super::*;
 use crate::database::{BatchDatabase, BatchOperations, DatabaseUtils};
 use crate::error::Error;
 use crate::types::{ScriptType, TransactionDetails, UTXO};
+use crate::wallet::time::Instant;
 use crate::wallet::utils::ChunksIterator;
-use rand::seq::SliceRandom;
-use rand::thread_rng;
-use std::time::Instant;
 
 #[derive(Debug)]
 pub struct ELSGetHistoryRes {
@@ -71,7 +71,7 @@ pub trait ElectrumLikeSync {
         _progress_update: P,
     ) -> Result<(), Error> {
         // TODO: progress
-        let start = Instant::now();
+        let start = Instant::new();
         debug!("start setup");
 
         let stop_gap = stop_gap.unwrap_or(20);
