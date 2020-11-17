@@ -309,7 +309,7 @@ pub fn make_cli_subcommands<'a, 'b>() -> App<'a, 'b> {
 }
 
 pub fn add_global_flags<'a, 'b>(app: App<'a, 'b>) -> App<'a, 'b> {
-    app.arg(
+    let mut app = app.arg(
         Arg::with_name("network")
             .short("n")
             .long("network")
@@ -327,23 +327,6 @@ pub fn add_global_flags<'a, 'b>(app: App<'a, 'b>) -> App<'a, 'b> {
             .help("Selects the wallet to use")
             .takes_value(true)
             .default_value("main"),
-    )
-    .arg(
-        Arg::with_name("server")
-            .short("s")
-            .long("server")
-            .value_name("SERVER:PORT")
-            .help("Sets the Electrum server to use")
-            .takes_value(true)
-            .default_value("ssl://electrum.blockstream.info:60002"),
-    )
-    .arg(
-        Arg::with_name("esplora")
-            .short("e")
-            .long("esplora")
-            .value_name("ESPLORA")
-            .help("Use the esplora server if given as parameter")
-            .takes_value(true),
     )
     .arg(
         Arg::with_name("proxy")
@@ -375,8 +358,32 @@ pub fn add_global_flags<'a, 'b>(app: App<'a, 'b>) -> App<'a, 'b> {
             .short("v")
             .multiple(true)
             .help("Sets the level of verbosity"),
-    )
-    .subcommand(SubCommand::with_name("repl").about("Opens an interactive shell"))
+    );
+
+    if cfg!(feature = "esplora") {
+        app = app.arg(
+            Arg::with_name("esplora")
+                .short("e")
+                .long("esplora")
+                .value_name("ESPLORA")
+                .help("Use the esplora server if given as parameter")
+                .takes_value(true),
+        );
+    }
+
+    if cfg!(feature = "electrum") {
+        app = app.arg(
+            Arg::with_name("server")
+                .short("s")
+                .long("server")
+                .value_name("SERVER:PORT")
+                .help("Sets the Electrum server to use")
+                .takes_value(true)
+                .default_value("ssl://electrum.blockstream.info:60002"),
+        );
+    }
+
+    app.subcommand(SubCommand::with_name("repl").about("Opens an interactive shell"))
 }
 
 #[maybe_async]
