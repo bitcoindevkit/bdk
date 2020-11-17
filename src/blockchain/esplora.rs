@@ -409,8 +409,6 @@ pub enum EsploraError {
     HeaderHeightNotFound(u32),
     /// Header hash not found
     HeaderHashNotFound(BlockHash),
-    /// EsploraHeader cannot be converted in BlockHeader
-    HeaderParseFail,
 }
 
 impl fmt::Display for EsploraError {
