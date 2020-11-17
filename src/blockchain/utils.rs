@@ -308,7 +308,7 @@ fn save_transaction_details_and_utxos<D: BatchDatabase>(
     timestamp: u64,
     height: Option<u32>,
     updates: &mut dyn BatchOperations,
-    utxo_deps: &HashMap<OutPoint, UTXO>,
+    utxo_deps: &HashMap<OutPoint, OutPoint>,
 ) -> Result<(), Error> {
     let tx = db
         .get_raw_tx(txid)?
@@ -343,8 +343,8 @@ fn save_transaction_details_and_utxos<D: BatchDatabase>(
         }
 
         // removes conflicting UTXO if any (generated from same inputs, like for example RBF)
-        if let Some(utxo) = utxo_deps.get(&input.previous_output) {
-            updates.del_utxo(&utxo.outpoint)?;
+        if let Some(outpoint) = utxo_deps.get(&input.previous_output) {
+            updates.del_utxo(&outpoint)?;
         }
     }
 
@@ -386,7 +386,7 @@ fn save_transaction_details_and_utxos<D: BatchDatabase>(
 fn utxos_deps<D: BatchDatabase>(
     db: &mut D,
     tx_raw_in_db: &HashMap<Txid, Transaction>,
-) -> Result<HashMap<OutPoint, UTXO>, Error> {
+) -> Result<HashMap<OutPoint, OutPoint>, Error> {
     let utxos = db.iter_utxos()?;
     let mut utxos_deps = HashMap::new();
     for utxo in utxos {
@@ -394,7 +394,7 @@ fn utxos_deps<D: BatchDatabase>(
             .get(&utxo.outpoint.txid)
             .ok_or_else(|| Error::TransactionNotFound)?;
         for input in from_tx.input.iter() {
-            utxos_deps.insert(input.previous_output, utxo.clone());
+            utxos_deps.insert(input.previous_output, utxo.outpoint);
         }
     }
     Ok(utxos_deps)
