@@ -159,7 +159,7 @@ pub trait ElectrumLikeSync {
 
         // save any tx details not in db but in history_txs_id or with different height/timestamp
         for txid in history_txs_id.iter() {
-            let height = *txid_height.get(txid).unwrap_or(&None);
+            let height = txid_height.get(txid).cloned().flatten();
             let timestamp = *new_timestamps.get(txid).unwrap_or(&0u64);
             if let Some(tx_details) = txs_details_in_db.get(txid) {
                 // check if height matches, otherwise updates it
