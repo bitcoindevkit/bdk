@@ -111,11 +111,10 @@ pub trait ElectrumLikeSync {
                     // el.height = -1 means unconfirmed with unconfirmed parents
                     // el.height =  0 means unconfirmed with confirmed parents
                     // but we threat those tx the same
-                    let height = el.height.max(0);
-                    if height == 0 {
+                    if el.height <= 0 {
                         txid_height.insert(el.tx_hash, None);
                     } else {
-                        txid_height.insert(el.tx_hash, Some(height as u32));
+                        txid_height.insert(el.tx_hash, Some(el.height as u32));
                     }
                     history_txs_id.insert(el.tx_hash);
                 }
