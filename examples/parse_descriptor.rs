@@ -49,7 +49,7 @@ fn main() {
     let deriv_ctx = DescriptorPublicKeyCtx::new(&secp, ChildNumber::from_normal_idx(42).unwrap());
 
     let signers = Arc::new(key_map.into());
-    let policy = extended_desc.extract_policy(signers, &secp).unwrap();
+    let policy = extended_desc.extract_policy(&signers, &secp).unwrap();
     println!("policy: {}", serde_json::to_string(&policy).unwrap());
 
     let addr = extended_desc.address(Network::Testnet, deriv_ctx).unwrap();

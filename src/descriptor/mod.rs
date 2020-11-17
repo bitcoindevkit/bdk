@@ -29,7 +29,6 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
-use std::sync::Arc;
 
 use bitcoin::secp256k1::Secp256k1;
 use bitcoin::util::bip32::{ChildNumber, DerivationPath, Fingerprint};
@@ -190,7 +189,7 @@ impl ToWalletDescriptor for (ExtendedDescriptor, KeyMap, ValidNetworks) {
 pub trait ExtractPolicy {
     fn extract_policy(
         &self,
-        signers: Arc<SignersContainer>,
+        signers: &SignersContainer,
         secp: &SecpCtx,
     ) -> Result<Option<Policy>, Error>;
 }

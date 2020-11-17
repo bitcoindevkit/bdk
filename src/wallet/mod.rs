@@ -253,14 +253,14 @@ where
     ) -> Result<(PSBT, TransactionDetails), Error> {
         let external_policy = self
             .descriptor
-            .extract_policy(Arc::clone(&self.signers), &self.secp)?
+            .extract_policy(&self.signers, &self.secp)?
             .unwrap();
         let internal_policy = self
             .change_descriptor
             .as_ref()
             .map(|desc| {
                 Ok::<_, Error>(
-                    desc.extract_policy(Arc::clone(&self.change_signers), &self.secp)?
+                    desc.extract_policy(&self.change_signers, &self.secp)?
                         .unwrap(),
                 )
             })
@@ -827,12 +827,12 @@ where
     /// Return the spending policies for the wallet's descriptor
     pub fn policies(&self, script_type: ScriptType) -> Result<Option<Policy>, Error> {
         match (script_type, self.change_descriptor.as_ref()) {
-            (ScriptType::External, _) => Ok(self
-                .descriptor
-                .extract_policy(Arc::clone(&self.signers), &self.secp)?),
+            (ScriptType::External, _) => {
+                Ok(self.descriptor.extract_policy(&self.signers, &self.secp)?)
+            }
             (ScriptType::Internal, None) => Ok(None),
             (ScriptType::Internal, Some(desc)) => {
-                Ok(desc.extract_policy(Arc::clone(&self.change_signers), &self.secp)?)
+                Ok(desc.extract_policy(&self.change_signers, &self.secp)?)
             }
         }
     }
