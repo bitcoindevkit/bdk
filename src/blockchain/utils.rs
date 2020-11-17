@@ -95,8 +95,7 @@ pub trait ElectrumLikeSync {
                 let max_index = call_result
                     .iter()
                     .enumerate()
-                    .filter(|(_, v)| !v.is_empty())
-                    .map(|(i, _)| i as u32)
+                    .filter_map(|(i, v)| v.first().map(|_| i as u32))
                     .max();
                 if let Some(max) = max_index {
                     max_indexes.insert(script_type, max + (i * chunk_size) as u32);
