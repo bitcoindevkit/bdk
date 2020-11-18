@@ -110,7 +110,7 @@ pub trait ElectrumLikeSync {
                 for el in flattened {
                     // el.height = -1 means unconfirmed with unconfirmed parents
                     // el.height =  0 means unconfirmed with confirmed parents
-                    // but we threat those tx the same
+                    // but we treat those tx the same
                     if el.height <= 0 {
                         txid_height.insert(el.tx_hash, None);
                     } else {
