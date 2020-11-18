@@ -71,9 +71,9 @@
 //!             })
 //!             .collect::<Vec<_>>();
 //!         let additional_fees = additional_weight as f32 * fee_rate.as_sat_vb() / 4.0;
-//!
-//!         if (fee_amount + additional_fees).ceil() as u64 + amount_needed > selected_amount {
-//!             return Err(bdk::Error::InsufficientFunds);
+//!         let amount_needed_with_fees = (fee_amount + additional_fees).ceil() as u64 + amount_needed;
+//!         if  amount_needed_with_fees > selected_amount {
+//!             return Err(bdk::Error::InsufficientFunds{ needed: amount_needed_with_fees, available: selected_amount });
 //!         }
 //!
 //!         Ok(CoinSelectionResult {
@@ -221,8 +221,12 @@ impl<D: Database> CoinSelectionAlgorithm<D> for LargestFirstCoinSelection {
             )
             .collect::<Vec<_>>();
 
-        if selected_amount < amount_needed + (fee_amount.ceil() as u64) {
-            return Err(Error::InsufficientFunds);
+        let amount_needed_with_fees = amount_needed + (fee_amount.ceil() as u64);
+        if selected_amount < amount_needed_with_fees {
+            return Err(Error::InsufficientFunds {
+                needed: amount_needed_with_fees,
+                available: selected_amount,
+            });
         }
 
         Ok(CoinSelectionResult {
@@ -321,7 +325,10 @@ impl<D: Database> CoinSelectionAlgorithm<D> for BranchAndBoundCoinSelection {
         let cost_of_change = self.size_of_change as f32 * fee_rate.as_sat_vb();
 
         if curr_available_value + curr_value < actual_target {
-            return Err(Error::InsufficientFunds);
+            return Err(Error::InsufficientFunds {
+                needed: actual_target,
+                available: curr_available_value + curr_value,
+            });
         }
 
         Ok(self

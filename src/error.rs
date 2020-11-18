@@ -47,7 +47,12 @@ pub enum Error {
     /// Output created is under the dust limit, 546 satoshis
     OutputBelowDustLimit(usize),
     /// Wallet's UTXO set is not enough to cover recipient's requested plus fee
-    InsufficientFunds,
+    InsufficientFunds {
+        /// Sats needed for some transaction
+        needed: u64,
+        /// Sats available for spending
+        available: u64,
+    },
     /// Branch and bound coin selection possible attempts with sufficiently big UTXO set could grow
     /// exponentially, thus a limit is set, and when hit, this error is thrown
     BnBTotalTriesExceeded,
