@@ -57,7 +57,7 @@ pub(crate) enum MapKey<'a> {
 }
 
 impl MapKey<'_> {
-    pub fn as_prefix(&self) -> Vec<u8> {
+    fn as_prefix(&self) -> Vec<u8> {
         match self {
             MapKey::Path((st, _)) => {
                 let mut v = b"p".to_vec();

@@ -42,11 +42,11 @@ use std::collections::HashSet;
 #[allow(unused_imports)]
 use log::{debug, error, info, trace};
 
-use bitcoin::{Script, Transaction, Txid};
+use bitcoin::{BlockHeader, Script, Transaction, Txid};
 
 use electrum_client::{Client, ElectrumApi};
 
-use self::utils::{ELSGetHistoryRes, ELSListUnspentRes, ElectrumLikeSync};
+use self::utils::{ELSGetHistoryRes, ElectrumLikeSync};
 use super::*;
 use crate::database::BatchDatabase;
 use crate::error::Error;
@@ -141,36 +141,18 @@ impl ElectrumLikeSync for Client {
             .map_err(Error::Electrum)
     }
 
-    fn els_batch_script_list_unspent<'s, I: IntoIterator<Item = &'s Script>>(
+    fn els_batch_transaction_get<'s, I: IntoIterator<Item = &'s Txid>>(
         &self,
-        scripts: I,
-    ) -> Result<Vec<Vec<ELSListUnspentRes>>, Error> {
-        self.batch_script_list_unspent(scripts)
-            .map(|v| {
-                v.into_iter()
-                    .map(|v| {
-                        v.into_iter()
-                            .map(
-                                |electrum_client::ListUnspentRes {
-                                     height,
-                                     tx_hash,
-                                     tx_pos,
-                                     ..
-                                 }| ELSListUnspentRes {
-                                    height,
-                                    tx_hash,
-                                    tx_pos,
-                                },
-                            )
-                            .collect()
-                    })
-                    .collect()
-            })
-            .map_err(Error::Electrum)
+        txids: I,
+    ) -> Result<Vec<Transaction>, Error> {
+        self.batch_transaction_get(txids).map_err(Error::Electrum)
     }
 
-    fn els_transaction_get(&self, txid: &Txid) -> Result<Transaction, Error> {
-        self.transaction_get(txid).map_err(Error::Electrum)
+    fn els_batch_block_header<I: IntoIterator<Item = u32>>(
+        &self,
+        heights: I,
+    ) -> Result<Vec<BlockHeader>, Error> {
+        self.batch_block_header(heights).map_err(Error::Electrum)
     }
 }
 
