@@ -32,6 +32,8 @@ use std::collections::{BTreeMap, HashSet};
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
+use bitcoin::secp256k1::Secp256k1;
+
 use bitcoin::consensus::encode::serialize;
 use bitcoin::util::bip32::ChildNumber;
 use bitcoin::util::psbt::PartiallySignedTransaction as PSBT;
@@ -55,7 +57,7 @@ pub use utils::IsDust;
 use address_validator::AddressValidator;
 use signer::{Signer, SignerId, SignerOrdering, SignersContainer};
 use tx_builder::{BumpFee, CreateTx, FeePolicy, TxBuilder, TxBuilderContext};
-use utils::{After, Older};
+use utils::{descriptor_to_pk_ctx, After, Older, SecpCtx};
 
 use crate::blockchain::{Blockchain, BlockchainMarker, OfflineBlockchain, Progress};
 use crate::database::{BatchDatabase, BatchOperations, DatabaseUtils};
@@ -97,6 +99,8 @@ pub struct Wallet<B: BlockchainMarker, D: BatchDatabase> {
 
     client: Option<B>,
     database: RefCell<D>,
+
+    secp: SecpCtx,
 }
 
 // offline actions, always available
@@ -149,16 +153,19 @@ where
 
             client: None,
             database: RefCell::new(database),
+
+            secp: Secp256k1::new(),
         })
     }
 
     /// Return a newly generated address using the external descriptor
     pub fn get_new_address(&self) -> Result<Address, Error> {
         let index = self.fetch_and_increment_index(ScriptType::External)?;
+        let deriv_ctx = descriptor_to_pk_ctx(&self.secp);
 
         self.descriptor
             .derive(ChildNumber::from_normal_idx(index)?)
-            .address(self.network)
+            .address(self.network, deriv_ctx)
             .ok_or(Error::ScriptDoesntHaveAddressForm)
     }
 
@@ -246,14 +253,14 @@ where
     ) -> Result<(PSBT, TransactionDetails), Error> {
         let external_policy = self
             .descriptor
-            .extract_policy(Arc::clone(&self.signers))?
+            .extract_policy(Arc::clone(&self.signers), &self.secp)?
             .unwrap();
         let internal_policy = self
             .change_descriptor
             .as_ref()
             .map(|desc| {
                 Ok::<_, Error>(
-                    desc.extract_policy(Arc::clone(&self.change_signers))?
+                    desc.extract_policy(Arc::clone(&self.change_signers), &self.secp)?
                         .unwrap(),
                 )
             })
@@ -601,14 +608,18 @@ where
             details.received -= removed_updatable_output.value;
         }
 
+        let deriv_ctx = descriptor_to_pk_ctx(&self.secp);
+
         let external_weight = self
             .get_descriptor_for_script_type(ScriptType::External)
             .0
-            .max_satisfaction_weight();
+            .max_satisfaction_weight(deriv_ctx)
+            .unwrap();
         let internal_weight = self
             .get_descriptor_for_script_type(ScriptType::Internal)
             .0
-            .max_satisfaction_weight();
+            .max_satisfaction_weight(deriv_ctx)
+            .unwrap();
 
         let original_sequence = tx.input[0].sequence;
 
@@ -801,10 +812,10 @@ where
             .chain(self.change_signers.signers().iter())
         {
             if signer.sign_whole_tx() {
-                signer.sign(&mut psbt, None)?;
+                signer.sign(&mut psbt, None, &self.secp)?;
             } else {
                 for index in 0..psbt.inputs.len() {
-                    signer.sign(&mut psbt, Some(index))?;
+                    signer.sign(&mut psbt, Some(index), &self.secp)?;
                 }
             }
         }
@@ -816,12 +827,12 @@ where
     /// Return the spending policies for the wallet's descriptor
     pub fn policies(&self, script_type: ScriptType) -> Result<Option<Policy>, Error> {
         match (script_type, self.change_descriptor.as_ref()) {
-            (ScriptType::External, _) => {
-                Ok(self.descriptor.extract_policy(Arc::clone(&self.signers))?)
-            }
+            (ScriptType::External, _) => Ok(self
+                .descriptor
+                .extract_policy(Arc::clone(&self.signers), &self.secp)?),
             (ScriptType::Internal, None) => Ok(None),
             (ScriptType::Internal, Some(desc)) => {
-                Ok(desc.extract_policy(Arc::clone(&self.change_signers))?)
+                Ok(desc.extract_policy(Arc::clone(&self.change_signers), &self.secp)?)
             }
         }
     }
@@ -877,22 +888,21 @@ where
                 .flatten()
             {
                 desc
-            } else if let Some(desc) = self
-                .descriptor
-                .derive_from_psbt_input(psbt_input, psbt.get_utxo_for(n))
+            } else if let Some(desc) =
+                self.descriptor
+                    .derive_from_psbt_input(psbt_input, psbt.get_utxo_for(n), &self.secp)
             {
                 desc
-            } else if let Some(desc) = self
-                .change_descriptor
-                .as_ref()
-                .and_then(|desc| desc.derive_from_psbt_input(psbt_input, psbt.get_utxo_for(n)))
-            {
+            } else if let Some(desc) = self.change_descriptor.as_ref().and_then(|desc| {
+                desc.derive_from_psbt_input(psbt_input, psbt.get_utxo_for(n), &self.secp)
+            }) {
                 desc
             } else {
                 debug!("Couldn't find the right derived descriptor for input {}", n);
                 return Ok((psbt, false));
             };
 
+            let deriv_ctx = descriptor_to_pk_ctx(&self.secp);
             match desc.satisfy(
                 input,
                 (
@@ -900,6 +910,7 @@ where
                     After::new(current_height, false),
                     Older::new(current_height, create_height, false),
                 ),
+                deriv_ctx,
             ) {
                 Ok(_) => continue,
                 Err(e) => {
@@ -916,6 +927,10 @@ where
         }
 
         Ok((psbt, true))
+    }
+
+    pub fn secp_ctx(&self) -> &SecpCtx {
+        &self.secp
     }
 
     // Internals
@@ -943,12 +958,14 @@ where
     }
 
     fn get_change_address(&self) -> Result<Script, Error> {
+        let deriv_ctx = descriptor_to_pk_ctx(&self.secp);
+
         let (desc, script_type) = self.get_descriptor_for_script_type(ScriptType::Internal);
         let index = self.fetch_and_increment_index(script_type)?;
 
         Ok(desc
             .derive(ChildNumber::from_normal_idx(index)?)
-            .script_pubkey())
+            .script_pubkey(deriv_ctx))
     }
 
     fn fetch_and_increment_index(&self, script_type: ScriptType) -> Result<u32, Error> {
@@ -970,10 +987,12 @@ where
             self.cache_addresses(script_type, index, CACHE_ADDR_BATCH_SIZE)?;
         }
 
-        let hd_keypaths = descriptor.get_hd_keypaths(index)?;
+        let deriv_ctx = descriptor_to_pk_ctx(&self.secp);
+
+        let hd_keypaths = descriptor.get_hd_keypaths(index, &self.secp)?;
         let script = descriptor
             .derive(ChildNumber::from_normal_idx(index)?)
-            .script_pubkey();
+            .script_pubkey(deriv_ctx);
         for validator in &self.address_validators {
             validator.validate(script_type, &hd_keypaths, &script)?;
         }
@@ -996,6 +1015,8 @@ where
             count = 1;
         }
 
+        let deriv_ctx = descriptor_to_pk_ctx(&self.secp);
+
         let mut address_batch = self.database.borrow().begin_batch();
 
         let start_time = time::Instant::new();
@@ -1003,7 +1024,7 @@ where
             address_batch.set_script_pubkey(
                 &descriptor
                     .derive(ChildNumber::from_normal_idx(i)?)
-                    .script_pubkey(),
+                    .script_pubkey(deriv_ctx),
                 script_type,
                 i,
             )?;
@@ -1022,14 +1043,18 @@ where
     }
 
     fn get_available_utxos(&self) -> Result<Vec<(UTXO, usize)>, Error> {
+        let deriv_ctx = descriptor_to_pk_ctx(&self.secp);
+
         let external_weight = self
             .get_descriptor_for_script_type(ScriptType::External)
             .0
-            .max_satisfaction_weight();
+            .max_satisfaction_weight(deriv_ctx)
+            .unwrap();
         let internal_weight = self
             .get_descriptor_for_script_type(ScriptType::Internal)
             .0
-            .max_satisfaction_weight();
+            .max_satisfaction_weight(deriv_ctx)
+            .unwrap();
 
         let add_weight = |utxo: UTXO| {
             let weight = match utxo.is_internal {
@@ -1161,11 +1186,11 @@ where
             };
 
             let (desc, _) = self.get_descriptor_for_script_type(script_type);
-            psbt_input.hd_keypaths = desc.get_hd_keypaths(child)?;
+            psbt_input.hd_keypaths = desc.get_hd_keypaths(child, &self.secp)?;
             let derived_descriptor = desc.derive(ChildNumber::from_normal_idx(child)?);
 
-            psbt_input.redeem_script = derived_descriptor.psbt_redeem_script();
-            psbt_input.witness_script = derived_descriptor.psbt_witness_script();
+            psbt_input.redeem_script = derived_descriptor.psbt_redeem_script(&self.secp);
+            psbt_input.witness_script = derived_descriptor.psbt_witness_script(&self.secp);
 
             let prev_output = input.previous_output;
             if let Some(prev_tx) = self.database.borrow().get_raw_tx(&prev_output.txid)? {
@@ -1194,7 +1219,7 @@ where
                 .get_path_from_script_pubkey(&tx_output.script_pubkey)?
             {
                 let (desc, _) = self.get_descriptor_for_script_type(script_type);
-                psbt_output.hd_keypaths = desc.get_hd_keypaths(child)?;
+                psbt_output.hd_keypaths = desc.get_hd_keypaths(child, &self.secp)?;
             }
         }
 
@@ -1219,7 +1244,7 @@ where
 
                     // merge hd_keypaths
                     let (desc, _) = self.get_descriptor_for_script_type(script_type);
-                    let mut hd_keypaths = desc.get_hd_keypaths(child)?;
+                    let mut hd_keypaths = desc.get_hd_keypaths(child, &self.secp)?;
                     psbt_input.hd_keypaths.append(&mut hd_keypaths);
                 }
             }

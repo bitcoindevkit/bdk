@@ -32,13 +32,15 @@
 //! ```
 //! # use std::sync::Arc;
 //! # use bdk::descriptor::*;
+//! # use bdk::bitcoin::secp256k1::Secp256k1;
+//! let secp = Secp256k1::new();
 //! let desc = "wsh(and_v(v:pk(cV3oCth6zxZ1UVsHLnGothsWNsaoxRhC6aeNi5VbSdFpwUkgkEci),or_d(pk(cVMTy7uebJgvFaSBwcgvwk8qn8xSLc97dKow4MBetjrrahZoimm2),older(12960))))";
 //!
-//! let (extended_desc, key_map) = ExtendedDescriptor::parse_secret(desc)?;
+//! let (extended_desc, key_map) = ExtendedDescriptor::parse_descriptor(desc)?;
 //! println!("{:?}", extended_desc);
 //!
 //! let signers = Arc::new(key_map.into());
-//! let policy = extended_desc.extract_policy(signers)?;
+//! let policy = extended_desc.extract_policy(signers, &secp)?;
 //! println!("policy: {}", serde_json::to_string(&policy)?);
 //! # Ok::<(), bdk::Error>(())
 //! ```
@@ -55,7 +57,7 @@ use bitcoin::hashes::*;
 use bitcoin::util::bip32::Fingerprint;
 use bitcoin::PublicKey;
 
-use miniscript::descriptor::DescriptorPublicKey;
+use miniscript::descriptor::{DescriptorPublicKey, SortedMultiVec};
 use miniscript::{Descriptor, Miniscript, MiniscriptKey, ScriptContext, Terminal, ToPublicKey};
 
 #[allow(unused_imports)]
@@ -63,6 +65,7 @@ use log::{debug, error, info, trace};
 
 use crate::descriptor::ExtractPolicy;
 use crate::wallet::signer::{SignerId, SignersContainer};
+use crate::wallet::utils::{descriptor_to_pk_ctx, SecpCtx};
 
 use super::checksum::get_checksum;
 use super::error::Error;
@@ -80,14 +83,14 @@ pub struct PKOrF {
 }
 
 impl PKOrF {
-    fn from_key(k: &DescriptorPublicKey) -> Self {
+    fn from_key(k: &DescriptorPublicKey, secp: &SecpCtx) -> Self {
         match k {
             DescriptorPublicKey::SinglePub(pubkey) => PKOrF {
                 pubkey: Some(pubkey.key),
                 ..Default::default()
             },
             DescriptorPublicKey::XPub(xpub) => PKOrF {
-                fingerprint: Some(xpub.root_fingerprint()),
+                fingerprint: Some(xpub.root_fingerprint(secp)),
                 ..Default::default()
             },
         }
@@ -241,6 +244,9 @@ pub enum Satisfaction {
         m: usize,
         /// The items that can be satisfied by the descriptor
         items: Vec<usize>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        /// Whether the items are sorted in lexicographic order (used by `sortedmulti`)
+        sorted: Option<bool>,
         #[serde(skip_serializing_if = "BTreeMap::is_empty")]
         /// Extra conditions that also need to be satisfied
         conditions: ConditionMap,
@@ -253,6 +259,9 @@ pub enum Satisfaction {
         m: usize,
         /// The items that can be satisfied by the descriptor
         items: Vec<usize>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        /// Whether the items are sorted in lexicographic order (used by `sortedmulti`)
+        sorted: Option<bool>,
         #[serde(
             serialize_with = "serialize_folded_cond_map",
             skip_serializing_if = "BTreeMap::is_empty"
@@ -324,6 +333,7 @@ impl Satisfaction {
             m,
             items,
             conditions,
+            sorted,
         } = self
         {
             if items.len() >= *m {
@@ -378,6 +388,7 @@ impl Satisfaction {
                     m: *m,
                     items: items.clone(),
                     conditions: map,
+                    sorted: *sorted,
                 };
             }
         }
@@ -510,6 +521,7 @@ impl Policy {
             m: threshold,
             items: vec![],
             conditions: Default::default(),
+            sorted: None,
         };
         for (index, item) in items.iter().enumerate() {
             contribution.add(&item.contribution, index)?;
@@ -526,21 +538,24 @@ impl Policy {
         keys: &[DescriptorPublicKey],
         signers: Arc<SignersContainer>,
         threshold: usize,
+        sorted: bool,
+        secp: &SecpCtx,
     ) -> Result<Option<Policy>, PolicyError> {
         if threshold == 0 {
             return Ok(None);
         }
 
-        let parsed_keys = keys.iter().map(|k| PKOrF::from_key(k)).collect();
+        let parsed_keys = keys.iter().map(|k| PKOrF::from_key(k, secp)).collect();
 
         let mut contribution = Satisfaction::Partial {
             n: keys.len(),
             m: threshold,
             items: vec![],
             conditions: Default::default(),
+            sorted: Some(sorted),
         };
         for (index, key) in keys.iter().enumerate() {
-            if signers.find(signer_id(key)).is_some() {
+            if signers.find(signer_id(key, secp)).is_some() {
                 contribution.add(
                     &Satisfaction::Complete {
                         condition: Default::default(),
@@ -648,17 +663,17 @@ impl From<SatisfiableItem> for Policy {
     }
 }
 
-fn signer_id(key: &DescriptorPublicKey) -> SignerId {
+fn signer_id(key: &DescriptorPublicKey, secp: &SecpCtx) -> SignerId {
     match key {
         DescriptorPublicKey::SinglePub(pubkey) => pubkey.key.to_pubkeyhash().into(),
-        DescriptorPublicKey::XPub(xpub) => xpub.root_fingerprint().into(),
+        DescriptorPublicKey::XPub(xpub) => xpub.root_fingerprint(secp).into(),
     }
 }
 
-fn signature(key: &DescriptorPublicKey, signers: Arc<SignersContainer>) -> Policy {
-    let mut policy: Policy = SatisfiableItem::Signature(PKOrF::from_key(key)).into();
+fn signature(key: &DescriptorPublicKey, signers: Arc<SignersContainer>, secp: &SecpCtx) -> Policy {
+    let mut policy: Policy = SatisfiableItem::Signature(PKOrF::from_key(key, secp)).into();
 
-    policy.contribution = if signers.find(signer_id(key)).is_some() {
+    policy.contribution = if signers.find(signer_id(key, secp)).is_some() {
         Satisfaction::Complete {
             condition: Default::default(),
         }
@@ -672,8 +687,10 @@ fn signature(key: &DescriptorPublicKey, signers: Arc<SignersContainer>) -> Polic
 fn signature_key(
     key: &<DescriptorPublicKey as MiniscriptKey>::Hash,
     signers: Arc<SignersContainer>,
+    secp: &SecpCtx,
 ) -> Policy {
-    let key_hash = key.to_public_key().to_pubkeyhash();
+    let deriv_ctx = descriptor_to_pk_ctx(secp);
+    let key_hash = key.to_public_key(deriv_ctx).to_pubkeyhash();
     let mut policy: Policy = SatisfiableItem::Signature(PKOrF::from_key_hash(key_hash)).into();
 
     if signers.find(SignerId::PkHash(key_hash)).is_some() {
@@ -686,12 +703,18 @@ fn signature_key(
 }
 
 impl<Ctx: ScriptContext> ExtractPolicy for Miniscript<DescriptorPublicKey, Ctx> {
-    fn extract_policy(&self, signers: Arc<SignersContainer>) -> Result<Option<Policy>, Error> {
+    fn extract_policy(
+        &self,
+        signers: Arc<SignersContainer>,
+        secp: &SecpCtx,
+    ) -> Result<Option<Policy>, Error> {
         Ok(match &self.node {
             // Leaves
             Terminal::True | Terminal::False => None,
-            Terminal::PkK(pubkey) => Some(signature(pubkey, Arc::clone(&signers))),
-            Terminal::PkH(pubkey_hash) => Some(signature_key(pubkey_hash, Arc::clone(&signers))),
+            Terminal::PkK(pubkey) => Some(signature(pubkey, Arc::clone(&signers), secp)),
+            Terminal::PkH(pubkey_hash) => {
+                Some(signature_key(pubkey_hash, Arc::clone(&signers), secp))
+            }
             Terminal::After(value) => {
                 let mut policy: Policy = SatisfiableItem::AbsoluteTimelock { value: *value }.into();
                 policy.contribution = Satisfaction::Complete {
@@ -724,7 +747,9 @@ impl<Ctx: ScriptContext> ExtractPolicy for Miniscript<DescriptorPublicKey, Ctx> 
             Terminal::Hash160(hash) => {
                 Some(SatisfiableItem::HASH160Preimage { hash: *hash }.into())
             }
-            Terminal::Multi(k, pks) => Policy::make_multisig(pks, Arc::clone(&signers), *k)?,
+            Terminal::Multi(k, pks) => {
+                Policy::make_multisig(pks, Arc::clone(&signers), *k, false, secp)?
+            }
             // Identities
             Terminal::Alt(inner)
             | Terminal::Swap(inner)
@@ -732,31 +757,31 @@ impl<Ctx: ScriptContext> ExtractPolicy for Miniscript<DescriptorPublicKey, Ctx> 
             | Terminal::DupIf(inner)
             | Terminal::Verify(inner)
             | Terminal::NonZero(inner)
-            | Terminal::ZeroNotEqual(inner) => inner.extract_policy(Arc::clone(&signers))?,
+            | Terminal::ZeroNotEqual(inner) => inner.extract_policy(Arc::clone(&signers), secp)?,
             // Complex policies
             Terminal::AndV(a, b) | Terminal::AndB(a, b) => Policy::make_and(
-                a.extract_policy(Arc::clone(&signers))?,
-                b.extract_policy(Arc::clone(&signers))?,
+                a.extract_policy(Arc::clone(&signers), secp)?,
+                b.extract_policy(Arc::clone(&signers), secp)?,
             )?,
             Terminal::AndOr(x, y, z) => Policy::make_or(
                 Policy::make_and(
-                    x.extract_policy(Arc::clone(&signers))?,
-                    y.extract_policy(Arc::clone(&signers))?,
+                    x.extract_policy(Arc::clone(&signers), secp)?,
+                    y.extract_policy(Arc::clone(&signers), secp)?,
                 )?,
-                z.extract_policy(Arc::clone(&signers))?,
+                z.extract_policy(Arc::clone(&signers), secp)?,
             )?,
             Terminal::OrB(a, b)
             | Terminal::OrD(a, b)
             | Terminal::OrC(a, b)
             | Terminal::OrI(a, b) => Policy::make_or(
-                a.extract_policy(Arc::clone(&signers))?,
-                b.extract_policy(Arc::clone(&signers))?,
+                a.extract_policy(Arc::clone(&signers), secp)?,
+                b.extract_policy(Arc::clone(&signers), secp)?,
             )?,
             Terminal::Thresh(k, nodes) => {
                 let mut threshold = *k;
                 let mapped: Vec<_> = nodes
                     .iter()
-                    .map(|n| n.extract_policy(Arc::clone(&signers)))
+                    .map(|n| n.extract_policy(Arc::clone(&signers), secp))
                     .collect::<Result<Vec<_>, _>>()?
                     .into_iter()
                     .filter_map(|x| x)
@@ -776,14 +801,42 @@ impl<Ctx: ScriptContext> ExtractPolicy for Miniscript<DescriptorPublicKey, Ctx> 
 }
 
 impl ExtractPolicy for Descriptor<DescriptorPublicKey> {
-    fn extract_policy(&self, signers: Arc<SignersContainer>) -> Result<Option<Policy>, Error> {
+    fn extract_policy(
+        &self,
+        signers: Arc<SignersContainer>,
+        secp: &SecpCtx,
+    ) -> Result<Option<Policy>, Error> {
+        fn make_sortedmulti<Ctx: ScriptContext>(
+            keys: &SortedMultiVec<DescriptorPublicKey, Ctx>,
+            signers: Arc<SignersContainer>,
+            secp: &SecpCtx,
+        ) -> Result<Option<Policy>, Error> {
+            Ok(Policy::make_multisig(
+                keys.pks.as_ref(),
+                signers,
+                keys.k,
+                true,
+                secp,
+            )?)
+        }
+
         match self {
             Descriptor::Pk(pubkey)
             | Descriptor::Pkh(pubkey)
             | Descriptor::Wpkh(pubkey)
-            | Descriptor::ShWpkh(pubkey) => Ok(Some(signature(pubkey, signers))),
-            Descriptor::Bare(inner) | Descriptor::Sh(inner) => Ok(inner.extract_policy(signers)?),
-            Descriptor::Wsh(inner) | Descriptor::ShWsh(inner) => Ok(inner.extract_policy(signers)?),
+            | Descriptor::ShWpkh(pubkey) => Ok(Some(signature(pubkey, signers, secp))),
+            Descriptor::Bare(inner) | Descriptor::Sh(inner) => {
+                Ok(inner.extract_policy(signers, secp)?)
+            }
+            Descriptor::Wsh(inner) | Descriptor::ShWsh(inner) => {
+                Ok(inner.extract_policy(signers, secp)?)
+            }
+
+            // `sortedmulti()` is handled separately
+            Descriptor::ShSortedMulti(keys) => make_sortedmulti(&keys, signers, secp),
+            Descriptor::ShWshSortedMulti(keys) | Descriptor::WshSortedMulti(keys) => {
+                make_sortedmulti(&keys, signers, secp)
+            }
         }
     }
 }
@@ -833,7 +886,7 @@ mod test {
         let (wallet_desc, keymap) = desc.to_wallet_descriptor(Network::Testnet).unwrap();
         let signers_container = Arc::new(SignersContainer::from(keymap));
         let policy = wallet_desc
-            .extract_policy(signers_container)
+            .extract_policy(signers_container, &Secp256k1::new())
             .unwrap()
             .unwrap();
 
@@ -846,7 +899,7 @@ mod test {
         let (wallet_desc, keymap) = desc.to_wallet_descriptor(Network::Testnet).unwrap();
         let signers_container = Arc::new(SignersContainer::from(keymap));
         let policy = wallet_desc
-            .extract_policy(signers_container)
+            .extract_policy(signers_container, &Secp256k1::new())
             .unwrap()
             .unwrap();
 
@@ -926,7 +979,7 @@ mod test {
         let (wallet_desc, keymap) = desc.to_wallet_descriptor(Network::Testnet).unwrap();
         let signers_container = Arc::new(SignersContainer::from(keymap));
         let policy = wallet_desc
-            .extract_policy(signers_container)
+            .extract_policy(signers_container, &Secp256k1::new())
             .unwrap()
             .unwrap();
 
@@ -936,7 +989,7 @@ mod test {
             && &keys[1].fingerprint.unwrap() == &fingerprint1)
         );
         assert!(
-            matches!(&policy.contribution, Satisfaction::PartialComplete { n, m, items, conditions} if n == &2
+            matches!(&policy.contribution, Satisfaction::PartialComplete { n, m, items, conditions, .. } if n == &2
              && m == &1
              && items.len() == 2
              && conditions.contains_key(&vec![0])
@@ -954,7 +1007,7 @@ mod test {
         let (wallet_desc, keymap) = desc.to_wallet_descriptor(Network::Testnet).unwrap();
         let signers_container = Arc::new(SignersContainer::from(keymap));
         let policy = wallet_desc
-            .extract_policy(signers_container)
+            .extract_policy(signers_container, &Secp256k1::new())
             .unwrap()
             .unwrap();
 
@@ -965,7 +1018,7 @@ mod test {
         );
 
         assert!(
-            matches!(&policy.contribution, Satisfaction::PartialComplete { n, m, items, conditions} if n == &2
+            matches!(&policy.contribution, Satisfaction::PartialComplete { n, m, items, conditions, .. } if n == &2
              && m == &2
              && items.len() == 2
              && conditions.contains_key(&vec![0,1])
@@ -983,7 +1036,7 @@ mod test {
         let single_key = wallet_desc.derive(ChildNumber::from_normal_idx(0).unwrap());
         let signers_container = Arc::new(SignersContainer::from(keymap));
         let policy = single_key
-            .extract_policy(signers_container)
+            .extract_policy(signers_container, &Secp256k1::new())
             .unwrap()
             .unwrap();
 
@@ -997,7 +1050,7 @@ mod test {
         let single_key = wallet_desc.derive(ChildNumber::from_normal_idx(0).unwrap());
         let signers_container = Arc::new(SignersContainer::from(keymap));
         let policy = single_key
-            .extract_policy(signers_container)
+            .extract_policy(signers_container, &Secp256k1::new())
             .unwrap()
             .unwrap();
 
@@ -1019,7 +1072,7 @@ mod test {
         let single_key = wallet_desc.derive(ChildNumber::from_normal_idx(0).unwrap());
         let signers_container = Arc::new(SignersContainer::from(keymap));
         let policy = single_key
-            .extract_policy(signers_container)
+            .extract_policy(signers_container, &Secp256k1::new())
             .unwrap()
             .unwrap();
 
@@ -1029,7 +1082,7 @@ mod test {
             && &keys[1].fingerprint.unwrap() == &fingerprint1)
         );
         assert!(
-            matches!(&policy.contribution, Satisfaction::PartialComplete { n, m, items, conditions } if n == &2
+            matches!(&policy.contribution, Satisfaction::PartialComplete { n, m, items, conditions, .. } if n == &2
              && m == &1
              && items.len() == 2
              && conditions.contains_key(&vec![0])
@@ -1053,7 +1106,7 @@ mod test {
         let (wallet_desc, keymap) = desc.to_wallet_descriptor(Network::Testnet).unwrap();
         let signers_container = Arc::new(SignersContainer::from(keymap));
         let policy = wallet_desc
-            .extract_policy(signers_container)
+            .extract_policy(signers_container, &Secp256k1::new())
             .unwrap()
             .unwrap();
 
@@ -1062,7 +1115,7 @@ mod test {
         );
 
         assert!(
-            matches!(&policy.contribution, Satisfaction::PartialComplete { n, m, items, conditions } if n == &3
+            matches!(&policy.contribution, Satisfaction::PartialComplete { n, m, items, conditions, .. } if n == &3
              && m == &2
              && items.len() == 3
              && conditions.get(&vec![0,1]).unwrap().iter().next().unwrap().csv.is_none()

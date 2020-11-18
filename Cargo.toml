@@ -8,7 +8,7 @@ authors = ["Alekos Filini <alekos.filini@gmail.com>", "Riccardo Casatta <riccard
 bdk-macros = { version = "0.1.0-beta.1", path = "./macros" }
 log = "^0.4"
 bitcoin = { version = "0.25", features = ["use-serde"] }
-miniscript = { git = "https://github.com/MagicalBitcoin/rust-miniscript", rev = "dfc53201aa5796b6bf3b5a40581d192abaa84133" }
+miniscript = { git = "https://github.com/rust-bitcoin/rust-miniscript.git", rev = "ca60da2" }
 serde = { version = "^1.0", features = ["derive"] }
 serde_json = { version = "^1.0" }
 rand = "^0.7"

@@ -432,8 +432,9 @@ mod test {
     use crate::keys::{KeyError, ValidNetworks};
     use bitcoin::hashes::core::str::FromStr;
     use bitcoin::network::constants::Network::Regtest;
+    use bitcoin::secp256k1::Secp256k1;
     use bitcoin::util::bip32::ChildNumber;
-    use miniscript::descriptor::{DescriptorPublicKey, KeyMap};
+    use miniscript::descriptor::{DescriptorPublicKey, DescriptorPublicKeyCtx, KeyMap};
     use miniscript::Descriptor;
 
     // verify template descriptor generates expected address(es)
@@ -443,6 +444,10 @@ mod test {
         is_fixed: bool,
         expected: &[&str],
     ) {
+        let secp = Secp256k1::new();
+        let deriv_ctx =
+            DescriptorPublicKeyCtx::new(&secp, ChildNumber::from_normal_idx(0).unwrap());
+
         let (desc, _key_map, _networks) = desc.unwrap();
         assert_eq!(desc.is_witness(), is_witness);
         assert_eq!(desc.is_fixed(), is_fixed);
@@ -453,7 +458,7 @@ mod test {
             } else {
                 desc.derive(ChildNumber::from_normal_idx(index).unwrap())
             };
-            let address = child_desc.address(Regtest).unwrap();
+            let address = child_desc.address(Regtest, deriv_ctx).unwrap();
             assert_eq!(address.to_string(), *expected.get(i).unwrap());
         }
     }

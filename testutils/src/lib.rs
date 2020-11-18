@@ -116,15 +116,19 @@ impl TestIncomingTx {
 #[macro_export]
 macro_rules! testutils {
     ( @external $descriptors:expr, $child:expr ) => ({
-        use miniscript::descriptor::{Descriptor, DescriptorPublicKey};
+        use bitcoin::secp256k1::Secp256k1;
+        use miniscript::descriptor::{Descriptor, DescriptorPublicKey, DescriptorPublicKeyCtx};
 
-        let parsed = Descriptor::<DescriptorPublicKey>::parse_secret(&$descriptors.0).expect("Failed to parse descriptor in `testutils!(@external)`").0;
-        parsed.derive(bitcoin::util::bip32::ChildNumber::from_normal_idx($child).unwrap()).address(bitcoin::Network::Regtest).expect("No address form")
+        let secp = Secp256k1::new();
+        let deriv_ctx = DescriptorPublicKeyCtx::new(&secp, bitcoin::util::bip32::ChildNumber::from_normal_idx(0).unwrap());
+
+        let parsed = Descriptor::<DescriptorPublicKey>::parse_descriptor(&$descriptors.0).expect("Failed to parse descriptor in `testutils!(@external)`").0;
+        parsed.derive(bitcoin::util::bip32::ChildNumber::from_normal_idx($child).unwrap()).address(bitcoin::Network::Regtest, deriv_ctx).expect("No address form")
     });
     ( @internal $descriptors:expr, $child:expr ) => ({
         use miniscript::descriptor::{Descriptor, DescriptorPublicKey};
 
-        let parsed = Descriptor::<DescriptorPublicKey>::parse_secret(&$descriptors.1.expect("Missing internal descriptor")).expect("Failed to parse descriptor in `testutils!(@internal)`").0;
+        let parsed = Descriptor::<DescriptorPublicKey>::parse_descriptor(&$descriptors.1.expect("Missing internal descriptor")).expect("Failed to parse descriptor in `testutils!(@internal)`").0;
         parsed.derive(bitcoin::util::bip32::ChildNumber::from_normal_idx($child).unwrap()).address(bitcoin::Network::Regtest).expect("No address form")
     });
     ( @e $descriptors:expr, $child:expr ) => ({ testutils!(@external $descriptors, $child) });
