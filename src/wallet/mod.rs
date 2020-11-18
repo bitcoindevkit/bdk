@@ -59,7 +59,10 @@ pub use utils::IsDust;
 use address_validator::AddressValidator;
 use signer::{Signer, SignerId, SignerOrdering, SignersContainer};
 use tx_builder::{BumpFee, CreateTx, FeePolicy, TxBuilder, TxBuilderContext};
-use utils::{check_nlocktime, check_nsequence_rbf, descriptor_to_pk_ctx, After, Older, SecpCtx};
+use utils::{
+    check_nlocktime, check_nsequence_rbf, descriptor_to_pk_ctx, After, Older, SecpCtx,
+    DUST_LIMIT_SATOSHI,
+};
 
 use crate::blockchain::{Blockchain, Progress};
 use crate::database::{BatchDatabase, BatchOperations, DatabaseUtils};
@@ -508,7 +511,11 @@ where
         match change_output {
             None if change_val.is_dust() => {
                 // single recipient, but the only output would be below dust limit
-                return Err(Error::InsufficientFunds); // TODO: or OutputBelowDustLimit?
+                // TODO: or OutputBelowDustLimit?
+                return Err(Error::InsufficientFunds {
+                    needed: DUST_LIMIT_SATOSHI,
+                    available: change_val,
+                });
             }
             Some(_) if change_val.is_dust() => {
                 // skip the change output because it's dust -- just include it in the fee.
@@ -786,7 +793,11 @@ where
             }
             Some(_) if change_val_after_add.is_dust() => {
                 // single_recipient but the only output would be below dust limit
-                return Err(Error::InsufficientFunds); // TODO: or OutputBelowDustLimit?
+                // TODO: or OutputBelowDustLimit?
+                return Err(Error::InsufficientFunds {
+                    needed: DUST_LIMIT_SATOSHI,
+                    available: change_val_after_add,
+                });
             }
             None => {
                 removed_updatable_output.value = change_val_after_add;

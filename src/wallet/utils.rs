@@ -29,7 +29,7 @@ use miniscript::descriptor::DescriptorPublicKeyCtx;
 use miniscript::{MiniscriptKey, Satisfier, ToPublicKey};
 
 // De-facto standard "dust limit" (even though it should change based on the output type)
-const DUST_LIMIT_SATOSHI: u64 = 546;
+pub const DUST_LIMIT_SATOSHI: u64 = 546;
 
 // MSB of the nSequence. If set there's no consensus-constraint, so it must be disabled when
 // spending using CSV in order to enforce CSV rules
