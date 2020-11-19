@@ -710,8 +710,8 @@ impl<Ctx: ScriptContext> ExtractPolicy for Miniscript<DescriptorPublicKey, Ctx> 
         Ok(match &self.node {
             // Leaves
             Terminal::True | Terminal::False => None,
-            Terminal::PkK(pubkey) => Some(signature(pubkey, &signers, secp)),
-            Terminal::PkH(pubkey_hash) => Some(signature_key(pubkey_hash, &signers, secp)),
+            Terminal::PkK(pubkey) => Some(signature(pubkey, signers, secp)),
+            Terminal::PkH(pubkey_hash) => Some(signature_key(pubkey_hash, signers, secp)),
             Terminal::After(value) => {
                 let mut policy: Policy = SatisfiableItem::AbsoluteTimelock { value: *value }.into();
                 policy.contribution = Satisfaction::Complete {
@@ -776,7 +776,7 @@ impl<Ctx: ScriptContext> ExtractPolicy for Miniscript<DescriptorPublicKey, Ctx> 
                 let mut threshold = *k;
                 let mapped: Vec<_> = nodes
                     .iter()
-                    .map(|n| n.extract_policy(&signers, secp))
+                    .map(|n| n.extract_policy(signers, secp))
                     .collect::<Result<Vec<_>, _>>()?
                     .into_iter()
                     .filter_map(|x| x)
