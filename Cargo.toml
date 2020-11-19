@@ -61,7 +61,7 @@ bdk-testutils-macros = { version = "0.1.0-beta.1", path = "./testutils-macros" }
 serial_test = "0.4"
 lazy_static = "1.4"
 rustyline = "6.0"
-dirs = "2.0"
+dirs-next = "2.0"
 env_logger = "0.7"
 
 [[example]]
