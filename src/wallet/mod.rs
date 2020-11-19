@@ -1220,6 +1220,11 @@ where
             {
                 let (desc, _) = self.get_descriptor_for_script_type(script_type);
                 psbt_output.hd_keypaths = desc.get_hd_keypaths(child, &self.secp)?;
+                if builder.include_output_redeem_witness_script {
+                    let derived_descriptor = desc.derive(ChildNumber::from_normal_idx(child)?);
+                    psbt_output.witness_script = derived_descriptor.psbt_witness_script(&self.secp);
+                    psbt_output.redeem_script = derived_descriptor.psbt_redeem_script(&self.secp);
+                };
             }
         }
 
@@ -3230,5 +3235,23 @@ mod test {
 
         let extracted = signed_psbt.extract_tx();
         assert_eq!(extracted.input[0].witness.len(), 2);
+    }
+
+    #[test]
+    fn test_include_output_redeem_witness_script() {
+        let (wallet, _, _) = get_funded_wallet("sh(wsh(multi(1,cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW,cRjo6jqfVNP33HhSS76UhXETZsGTZYx8FMFvR9kpbtCSV1PmdZdu)))");
+        let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
+        let (psbt, _) = wallet
+            .create_tx(
+                TxBuilder::with_recipients(vec![(addr.script_pubkey(), 45_000)])
+                    .include_output_redeem_witness_script(),
+            )
+            .unwrap();
+
+        // p2sh-p2wsh transaction should contain both witness and redeem scripts
+        assert!(psbt
+            .outputs
+            .iter()
+            .any(|output| output.redeem_script.is_some() && output.witness_script.is_some()));
     }
 }
