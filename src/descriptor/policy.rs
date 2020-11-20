@@ -40,7 +40,7 @@
 //! println!("{:?}", extended_desc);
 //!
 //! let signers = Arc::new(key_map.into());
-//! let policy = extended_desc.extract_policy(signers, &secp)?;
+//! let policy = extended_desc.extract_policy(&signers, &secp)?;
 //! println!("policy: {}", serde_json::to_string(&policy)?);
 //! # Ok::<(), bdk::Error>(())
 //! ```
@@ -48,7 +48,6 @@
 use std::cmp::{max, Ordering};
 use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::fmt;
-use std::sync::Arc;
 
 use serde::ser::SerializeMap;
 use serde::{Serialize, Serializer};
@@ -536,7 +535,7 @@ impl Policy {
 
     fn make_multisig(
         keys: &[DescriptorPublicKey],
-        signers: Arc<SignersContainer>,
+        signers: &SignersContainer,
         threshold: usize,
         sorted: bool,
         secp: &SecpCtx,
@@ -670,7 +669,7 @@ fn signer_id(key: &DescriptorPublicKey, secp: &SecpCtx) -> SignerId {
     }
 }
 
-fn signature(key: &DescriptorPublicKey, signers: Arc<SignersContainer>, secp: &SecpCtx) -> Policy {
+fn signature(key: &DescriptorPublicKey, signers: &SignersContainer, secp: &SecpCtx) -> Policy {
     let mut policy: Policy = SatisfiableItem::Signature(PKOrF::from_key(key, secp)).into();
 
     policy.contribution = if signers.find(signer_id(key, secp)).is_some() {
@@ -686,7 +685,7 @@ fn signature(key: &DescriptorPublicKey, signers: Arc<SignersContainer>, secp: &S
 
 fn signature_key(
     key: &<DescriptorPublicKey as MiniscriptKey>::Hash,
-    signers: Arc<SignersContainer>,
+    signers: &SignersContainer,
     secp: &SecpCtx,
 ) -> Policy {
     let deriv_ctx = descriptor_to_pk_ctx(secp);
@@ -705,16 +704,14 @@ fn signature_key(
 impl<Ctx: ScriptContext> ExtractPolicy for Miniscript<DescriptorPublicKey, Ctx> {
     fn extract_policy(
         &self,
-        signers: Arc<SignersContainer>,
+        signers: &SignersContainer,
         secp: &SecpCtx,
     ) -> Result<Option<Policy>, Error> {
         Ok(match &self.node {
             // Leaves
             Terminal::True | Terminal::False => None,
-            Terminal::PkK(pubkey) => Some(signature(pubkey, Arc::clone(&signers), secp)),
-            Terminal::PkH(pubkey_hash) => {
-                Some(signature_key(pubkey_hash, Arc::clone(&signers), secp))
-            }
+            Terminal::PkK(pubkey) => Some(signature(pubkey, signers, secp)),
+            Terminal::PkH(pubkey_hash) => Some(signature_key(pubkey_hash, signers, secp)),
             Terminal::After(value) => {
                 let mut policy: Policy = SatisfiableItem::AbsoluteTimelock { value: *value }.into();
                 policy.contribution = Satisfaction::Complete {
@@ -747,9 +744,7 @@ impl<Ctx: ScriptContext> ExtractPolicy for Miniscript<DescriptorPublicKey, Ctx> 
             Terminal::Hash160(hash) => {
                 Some(SatisfiableItem::HASH160Preimage { hash: *hash }.into())
             }
-            Terminal::Multi(k, pks) => {
-                Policy::make_multisig(pks, Arc::clone(&signers), *k, false, secp)?
-            }
+            Terminal::Multi(k, pks) => Policy::make_multisig(pks, signers, *k, false, secp)?,
             // Identities
             Terminal::Alt(inner)
             | Terminal::Swap(inner)
@@ -757,31 +752,31 @@ impl<Ctx: ScriptContext> ExtractPolicy for Miniscript<DescriptorPublicKey, Ctx> 
             | Terminal::DupIf(inner)
             | Terminal::Verify(inner)
             | Terminal::NonZero(inner)
-            | Terminal::ZeroNotEqual(inner) => inner.extract_policy(Arc::clone(&signers), secp)?,
+            | Terminal::ZeroNotEqual(inner) => inner.extract_policy(signers, secp)?,
             // Complex policies
             Terminal::AndV(a, b) | Terminal::AndB(a, b) => Policy::make_and(
-                a.extract_policy(Arc::clone(&signers), secp)?,
-                b.extract_policy(Arc::clone(&signers), secp)?,
+                a.extract_policy(signers, secp)?,
+                b.extract_policy(signers, secp)?,
             )?,
             Terminal::AndOr(x, y, z) => Policy::make_or(
                 Policy::make_and(
-                    x.extract_policy(Arc::clone(&signers), secp)?,
-                    y.extract_policy(Arc::clone(&signers), secp)?,
+                    x.extract_policy(signers, secp)?,
+                    y.extract_policy(signers, secp)?,
                 )?,
-                z.extract_policy(Arc::clone(&signers), secp)?,
+                z.extract_policy(signers, secp)?,
             )?,
             Terminal::OrB(a, b)
             | Terminal::OrD(a, b)
             | Terminal::OrC(a, b)
             | Terminal::OrI(a, b) => Policy::make_or(
-                a.extract_policy(Arc::clone(&signers), secp)?,
-                b.extract_policy(Arc::clone(&signers), secp)?,
+                a.extract_policy(signers, secp)?,
+                b.extract_policy(signers, secp)?,
             )?,
             Terminal::Thresh(k, nodes) => {
                 let mut threshold = *k;
                 let mapped: Vec<_> = nodes
                     .iter()
-                    .map(|n| n.extract_policy(Arc::clone(&signers), secp))
+                    .map(|n| n.extract_policy(signers, secp))
                     .collect::<Result<Vec<_>, _>>()?
                     .into_iter()
                     .filter_map(|x| x)
@@ -803,12 +798,12 @@ impl<Ctx: ScriptContext> ExtractPolicy for Miniscript<DescriptorPublicKey, Ctx> 
 impl ExtractPolicy for Descriptor<DescriptorPublicKey> {
     fn extract_policy(
         &self,
-        signers: Arc<SignersContainer>,
+        signers: &SignersContainer,
         secp: &SecpCtx,
     ) -> Result<Option<Policy>, Error> {
         fn make_sortedmulti<Ctx: ScriptContext>(
             keys: &SortedMultiVec<DescriptorPublicKey, Ctx>,
-            signers: Arc<SignersContainer>,
+            signers: &SignersContainer,
             secp: &SecpCtx,
         ) -> Result<Option<Policy>, Error> {
             Ok(Policy::make_multisig(
@@ -886,7 +881,7 @@ mod test {
         let (wallet_desc, keymap) = desc.to_wallet_descriptor(Network::Testnet).unwrap();
         let signers_container = Arc::new(SignersContainer::from(keymap));
         let policy = wallet_desc
-            .extract_policy(signers_container, &Secp256k1::new())
+            .extract_policy(&signers_container, &Secp256k1::new())
             .unwrap()
             .unwrap();
 
@@ -899,7 +894,7 @@ mod test {
         let (wallet_desc, keymap) = desc.to_wallet_descriptor(Network::Testnet).unwrap();
         let signers_container = Arc::new(SignersContainer::from(keymap));
         let policy = wallet_desc
-            .extract_policy(signers_container, &Secp256k1::new())
+            .extract_policy(&signers_container, &Secp256k1::new())
             .unwrap()
             .unwrap();
 
@@ -979,7 +974,7 @@ mod test {
         let (wallet_desc, keymap) = desc.to_wallet_descriptor(Network::Testnet).unwrap();
         let signers_container = Arc::new(SignersContainer::from(keymap));
         let policy = wallet_desc
-            .extract_policy(signers_container, &Secp256k1::new())
+            .extract_policy(&signers_container, &Secp256k1::new())
             .unwrap()
             .unwrap();
 
@@ -1007,7 +1002,7 @@ mod test {
         let (wallet_desc, keymap) = desc.to_wallet_descriptor(Network::Testnet).unwrap();
         let signers_container = Arc::new(SignersContainer::from(keymap));
         let policy = wallet_desc
-            .extract_policy(signers_container, &Secp256k1::new())
+            .extract_policy(&signers_container, &Secp256k1::new())
             .unwrap()
             .unwrap();
 
@@ -1036,7 +1031,7 @@ mod test {
         let single_key = wallet_desc.derive(ChildNumber::from_normal_idx(0).unwrap());
         let signers_container = Arc::new(SignersContainer::from(keymap));
         let policy = single_key
-            .extract_policy(signers_container, &Secp256k1::new())
+            .extract_policy(&signers_container, &Secp256k1::new())
             .unwrap()
             .unwrap();
 
@@ -1050,7 +1045,7 @@ mod test {
         let single_key = wallet_desc.derive(ChildNumber::from_normal_idx(0).unwrap());
         let signers_container = Arc::new(SignersContainer::from(keymap));
         let policy = single_key
-            .extract_policy(signers_container, &Secp256k1::new())
+            .extract_policy(&signers_container, &Secp256k1::new())
             .unwrap()
             .unwrap();
 
@@ -1072,7 +1067,7 @@ mod test {
         let single_key = wallet_desc.derive(ChildNumber::from_normal_idx(0).unwrap());
         let signers_container = Arc::new(SignersContainer::from(keymap));
         let policy = single_key
-            .extract_policy(signers_container, &Secp256k1::new())
+            .extract_policy(&signers_container, &Secp256k1::new())
             .unwrap()
             .unwrap();
 
@@ -1106,7 +1101,7 @@ mod test {
         let (wallet_desc, keymap) = desc.to_wallet_descriptor(Network::Testnet).unwrap();
         let signers_container = Arc::new(SignersContainer::from(keymap));
         let policy = wallet_desc
-            .extract_policy(signers_container, &Secp256k1::new())
+            .extract_policy(&signers_container, &Secp256k1::new())
             .unwrap()
             .unwrap();
 
