@@ -48,7 +48,7 @@ use bdk::blockchain::esplora::EsploraBlockchainConfig;
 
 fn prepare_home_dir() -> PathBuf {
     let mut dir = PathBuf::new();
-    dir.push(&dirs::home_dir().unwrap());
+    dir.push(&dirs_next::home_dir().unwrap());
     dir.push(".bdk-bitcoin");
 
     if !dir.exists() {
