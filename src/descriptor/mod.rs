@@ -462,7 +462,13 @@ impl DescriptorMeta for Descriptor<DescriptorPublicKey> {
             {
                 Some(self.clone())
             }
-            Descriptor::Bare(ms) | Descriptor::Sh(ms)
+            Descriptor::Bare(ms)
+                if psbt_input.redeem_script.is_some()
+                    && &ms.encode(deriv_ctx) == psbt_input.redeem_script.as_ref().unwrap() =>
+            {
+                Some(self.clone())
+            }
+            Descriptor::Sh(ms)
                 if psbt_input.redeem_script.is_some()
                     && &ms.encode(deriv_ctx) == psbt_input.redeem_script.as_ref().unwrap() =>
             {

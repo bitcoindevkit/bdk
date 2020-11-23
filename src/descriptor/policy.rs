@@ -820,9 +820,8 @@ impl ExtractPolicy for Descriptor<DescriptorPublicKey> {
             | Descriptor::Pkh(pubkey)
             | Descriptor::Wpkh(pubkey)
             | Descriptor::ShWpkh(pubkey) => Ok(Some(signature(pubkey, signers, secp))),
-            Descriptor::Bare(inner) | Descriptor::Sh(inner) => {
-                Ok(inner.extract_policy(signers, secp)?)
-            }
+            Descriptor::Bare(inner) => Ok(inner.extract_policy(signers, secp)?),
+            Descriptor::Sh(inner) => Ok(inner.extract_policy(signers, secp)?),
             Descriptor::Wsh(inner) | Descriptor::ShWsh(inner) => {
                 Ok(inner.extract_policy(signers, secp)?)
             }
