@@ -22,6 +22,7 @@ jobs:
           - compact_filters
           - cli-utils,esplora,key-value-db,electrum
           - compiler
+          - experimental
         include:
           - rust: stable
             features: compact_filters

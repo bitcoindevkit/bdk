@@ -52,6 +52,11 @@ pub mod time;
 pub mod tx_builder;
 pub(crate) mod utils;
 
+#[cfg(feature = "experimental")]
+mod foreign_utxo;
+#[cfg(feature = "experimental")]
+pub use foreign_utxo::*;
+
 pub use utils::IsDust;
 
 use address_validator::AddressValidator;
@@ -415,6 +420,7 @@ where
             builder.change_policy,
             &builder.unspendable,
             &builder.utxos,
+            &builder.foreign_utxos,
             builder.drain_wallet,
             builder.manually_selected_only,
             false, // we don't mind using unconfirmed outputs here, hopefully coin selection will sort this out?
@@ -441,6 +447,15 @@ where
                 witness: vec![],
             })
             .collect();
+
+        let foreign_sent = builder.foreign_utxos.iter().fold(0, |sum, (futxo, _)| {
+            sum + if selected.contains(futxo) {
+                futxo.txout.value
+            } else {
+                0
+            }
+        });
+        let sent = selected_amount - foreign_sent;
 
         // prepare the change output
         let change_output = match builder.single_recipient {
@@ -498,7 +513,7 @@ where
             txid,
             timestamp: time::get_timestamp(),
             received,
-            sent: selected_amount,
+            sent,
             fees: fee_amount,
             height: None,
         };
@@ -679,6 +694,7 @@ where
             builder.change_policy,
             &builder.unspendable,
             &builder_extra_utxos[..],
+            &builder.foreign_utxos,
             builder.drain_wallet,
             builder.manually_selected_only,
             true, // we only want confirmed transactions for RBF
@@ -1084,6 +1100,7 @@ where
         change_policy: tx_builder::ChangeSpendPolicy,
         unspendable: &HashSet<OutPoint>,
         manually_selected: &[OutPoint],
+        foreign_utxos: &[(UTXO, usize)],
         must_use_all_available: bool,
         manual_only: bool,
         must_only_use_confirmed_tx: bool,
@@ -1091,7 +1108,7 @@ where
         //    must_spend <- manually selected utxos
         //    may_spend  <- all other available utxos
         let mut may_spend = self.get_available_utxos()?;
-        let mut must_spend = {
+        let mut must_spend: Vec<(UTXO, usize)> = {
             let must_spend_idx = manually_selected
                 .iter()
                 .map(|manually_selected| {
@@ -1107,6 +1124,8 @@ where
                 .map(|i| may_spend.remove(i))
                 .collect()
         };
+
+        must_spend.extend(foreign_utxos.to_vec());
 
         // NOTE: we are intentionally ignoring `unspendable` here. i.e manual
         // selection overrides unspendable.
@@ -1178,6 +1197,12 @@ where
             // SIGHASH_ALL
             if let Some(sighash_type) = builder.sighash {
                 psbt_input.sighash_type = Some(sighash_type);
+            }
+
+            // Try setting the witness_utxo as early as possible so foreign utxos will have it populated.
+            // This is suboptimal see https://github.com/bitcoindevkit/bdk/issues/114.
+            if utxo.txout.script_pubkey.is_witness_program() {
+                psbt_input.witness_utxo = Some(utxo.txout.clone())
             }
 
             // Try to find the prev_script in our db to figure out if this is internal or external,
@@ -2290,6 +2315,61 @@ mod test {
             .unwrap();
 
         assert_eq!(psbt.global.unsigned_tx.input[0].sequence, 144);
+    }
+
+    #[cfg(feature = "experimental")]
+    #[test]
+    fn test_create_tx_add_foreign_utxo() {
+        let (wallet1, _, _) = get_funded_wallet(get_test_wpkh());
+        let (wallet2, _, _) =
+            get_funded_wallet("wpkh(cVbZ8ovhye9AoAHFsqobCf7LxbXDAECy9Kb8TZdfsDYMZGBUyCnm)");
+        let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
+        let foreign_utxo = wallet2.list_unspent().unwrap().remove(0);
+
+        let deriv_ctx = descriptor_to_pk_ctx(&wallet2.secp_ctx());
+
+        let foreign_utxo = ForeignUtxo {
+            txout: foreign_utxo.txout,
+            outpoint: foreign_utxo.outpoint,
+            satisfaction_weight: wallet2
+                .get_descriptor_for_script_type(ScriptType::External)
+                .0
+                .max_satisfaction_weight(deriv_ctx)
+                .unwrap(),
+        };
+
+        let (psbt, details) = wallet1
+            .create_tx(
+                TxBuilder::with_recipients(vec![(addr.script_pubkey(), 60_000)])
+                    .add_foreign_utxo(foreign_utxo.clone()),
+            )
+            .unwrap();
+
+        assert_eq!(
+            details.sent - details.received,
+            10_000 + details.fees,
+            "we should have only net spent ~10_000"
+        );
+
+        assert!(
+            psbt.global
+                .unsigned_tx
+                .input
+                .iter()
+                .find(|input| input.previous_output == foreign_utxo.outpoint)
+                .is_some(),
+            "foreign_utxo should be in there"
+        );
+
+        let (psbt, finished) = wallet1.sign(psbt, None).unwrap();
+
+        assert!(
+            !finished,
+            "only one of the inputs should have been signed so far"
+        );
+
+        let (_, finished) = wallet2.sign(psbt, None).unwrap();
+        assert!(finished, "all the inputs should have been signed now");
     }
 
     #[test]

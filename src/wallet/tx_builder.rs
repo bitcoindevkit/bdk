@@ -80,6 +80,7 @@ pub struct TxBuilder<D: Database, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderC
     pub(crate) internal_policy_path: Option<BTreeMap<String, Vec<usize>>>,
     pub(crate) external_policy_path: Option<BTreeMap<String, Vec<usize>>>,
     pub(crate) utxos: Vec<OutPoint>,
+    pub(crate) foreign_utxos: Vec<(UTXO, usize)>,
     pub(crate) unspendable: HashSet<OutPoint>,
     pub(crate) manually_selected_only: bool,
     pub(crate) sighash: Option<SigHashType>,
@@ -122,6 +123,7 @@ where
             internal_policy_path: Default::default(),
             external_policy_path: Default::default(),
             utxos: Default::default(),
+            foreign_utxos: Default::default(),
             unspendable: Default::default(),
             manually_selected_only: Default::default(),
             sighash: Default::default(),
@@ -260,6 +262,29 @@ impl<D: Database, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderContext> TxBuilde
         self
     }
 
+    /// Replace the internal list of foreign utxos with a new list.
+    ///
+    /// Foreign utxos do not have other filters applied to them.
+    /// They will always be included in the transaction if present.
+    #[cfg(feature = "experimental")]
+    pub fn foreign_utxos(mut self, foreign_utxos: Vec<crate::wallet::ForeignUtxo>) -> Self {
+        self.foreign_utxos = foreign_utxos
+            .into_iter()
+            .map(crate::wallet::ForeignUtxo::into_utxo_and_weight)
+            .collect();
+        self
+    }
+
+    /// Add a utxo that is not owned by this wallet that **must** be spent.
+    ///
+    /// Foreign utxos do not have other filters applied to them.
+    /// They will always be included in the transaction if present.
+    #[cfg(feature = "experimental")]
+    pub fn add_foreign_utxo(mut self, foreign_utxo: crate::wallet::ForeignUtxo) -> Self {
+        self.foreign_utxos.push(foreign_utxo.into_utxo_and_weight());
+        self
+    }
+
     /// Replace the internal list of unspendable utxos with a new list
     ///
     /// It's important to note that the "must-be-spent" utxos added with [`TxBuilder::utxos`] and
@@ -369,6 +394,7 @@ impl<D: Database, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderContext> TxBuilde
             unspendable: self.unspendable,
             manually_selected_only: self.manually_selected_only,
             sighash: self.sighash,
+            foreign_utxos: self.foreign_utxos,
             ordering: self.ordering,
             locktime: self.locktime,
             rbf: self.rbf,
