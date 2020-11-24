@@ -84,7 +84,7 @@ pub type OfflineWallet<D> = Wallet<OfflineBlockchain, D>;
 /// A wallet can be either "online" if the [`blockchain`](crate::blockchain) type provided
 /// implements [`Blockchain`], or "offline" [`OfflineBlockchain`] is used. Offline wallets only expose
 /// methods that don't need any interaction with the blockchain to work.
-pub struct Wallet<B: BlockchainMarker, D: BatchDatabase> {
+pub struct Wallet<B, D> {
     descriptor: ExtendedDescriptor,
     change_descriptor: Option<ExtendedDescriptor>,
 
