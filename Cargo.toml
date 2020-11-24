@@ -26,7 +26,7 @@ rocksdb = { version = "0.14", optional = true }
 cc = { version = "=1.0.62", optional = true }
 socks = { version = "0.3", optional = true }
 lazy_static = { version = "1.4", optional = true }
-tiny-bip39 = { version = "^0.7", optional = true }
+tiny-bip39 = { version = "^0.8", optional = true }
 
 # Platform-specific dependencies
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
