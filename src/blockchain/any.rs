@@ -40,7 +40,7 @@
 //! # use bdk::Wallet;
 //! # #[cfg(feature = "electrum")]
 //! # {
-//! let electrum_blockchain = ElectrumBlockchain::from(electrum_client::Client::new("...", None)?);
+//! let electrum_blockchain = ElectrumBlockchain::from(electrum_client::Client::new("...")?);
 //! let wallet_electrum: Wallet<AnyBlockchain, _> = Wallet::new(
 //!     "...",
 //!     None,

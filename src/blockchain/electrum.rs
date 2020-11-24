@@ -32,7 +32,7 @@
 //!
 //! ```no_run
 //! # use bdk::blockchain::electrum::ElectrumBlockchain;
-//! let client = electrum_client::Client::new("ssl://electrum.blockstream.info:50002", None)?;
+//! let client = electrum_client::Client::new("ssl://electrum.blockstream.info:50002")?;
 //! let blockchain = ElectrumBlockchain::from(client);
 //! # Ok::<(), bdk::Error>(())
 //! ```
@@ -44,7 +44,7 @@ use log::{debug, error, info, trace};
 
 use bitcoin::{BlockHeader, Script, Transaction, Txid};
 
-use electrum_client::{Client, ElectrumApi};
+use electrum_client::{Client, ConfigBuilder, ElectrumApi, Socks5Config};
 
 use self::utils::{ELSGetHistoryRes, ElectrumLikeSync};
 use super::*;
@@ -62,7 +62,7 @@ pub struct ElectrumBlockchain(Client);
 #[cfg(feature = "test-electrum")]
 #[bdk_blockchain_tests(crate)]
 fn local_electrs() -> ElectrumBlockchain {
-    ElectrumBlockchain::from(Client::new(&testutils::get_electrum_url(), None).unwrap())
+    ElectrumBlockchain::from(Client::new(&testutils::get_electrum_url()).unwrap())
 }
 
 impl std::convert::From<Client> for ElectrumBlockchain {
@@ -117,7 +117,7 @@ impl Blockchain for ElectrumBlockchain {
 }
 
 impl ElectrumLikeSync for Client {
-    fn els_batch_script_get_history<'s, I: IntoIterator<Item = &'s Script>>(
+    fn els_batch_script_get_history<'s, I: IntoIterator<Item = &'s Script> + Clone>(
         &self,
         scripts: I,
     ) -> Result<Vec<Vec<ELSGetHistoryRes>>, Error> {
@@ -141,14 +141,14 @@ impl ElectrumLikeSync for Client {
             .map_err(Error::Electrum)
     }
 
-    fn els_batch_transaction_get<'s, I: IntoIterator<Item = &'s Txid>>(
+    fn els_batch_transaction_get<'s, I: IntoIterator<Item = &'s Txid> + Clone>(
         &self,
         txids: I,
     ) -> Result<Vec<Transaction>, Error> {
         self.batch_transaction_get(txids).map_err(Error::Electrum)
     }
 
-    fn els_batch_block_header<I: IntoIterator<Item = u32>>(
+    fn els_batch_block_header<I: IntoIterator<Item = u32> + Clone>(
         &self,
         heights: I,
     ) -> Result<Vec<BlockHeader>, Error> {
@@ -161,15 +161,24 @@ impl ElectrumLikeSync for Client {
 pub struct ElectrumBlockchainConfig {
     pub url: String,
     pub socks5: Option<String>,
+    pub retry: u8,
+    pub timeout: u8,
 }
 
 impl ConfigurableBlockchain for ElectrumBlockchain {
     type Config = ElectrumBlockchainConfig;
 
     fn from_config(config: &Self::Config) -> Result<Self, Error> {
-        Ok(ElectrumBlockchain(Client::new(
+        let socks5 = config.socks5.as_ref().map(Socks5Config::new);
+        let electrum_config = ConfigBuilder::new()
+            .retry(config.retry)
+            .socks5(socks5)?
+            .timeout(config.timeout)?
+            .build();
+
+        Ok(ElectrumBlockchain(Client::from_config(
             config.url.as_str(),
-            config.socks5.as_deref(),
+            electrum_config,
         )?))
     }
 }

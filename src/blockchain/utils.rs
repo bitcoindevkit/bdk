@@ -47,17 +47,17 @@ pub struct ELSGetHistoryRes {
 /// Implements the synchronization logic for an Electrum-like client.
 #[maybe_async]
 pub trait ElectrumLikeSync {
-    fn els_batch_script_get_history<'s, I: IntoIterator<Item = &'s Script>>(
+    fn els_batch_script_get_history<'s, I: IntoIterator<Item = &'s Script> + Clone>(
         &self,
         scripts: I,
     ) -> Result<Vec<Vec<ELSGetHistoryRes>>, Error>;
 
-    fn els_batch_transaction_get<'s, I: IntoIterator<Item = &'s Txid>>(
+    fn els_batch_transaction_get<'s, I: IntoIterator<Item = &'s Txid> + Clone>(
         &self,
         txids: I,
     ) -> Result<Vec<Transaction>, Error>;
 
-    fn els_batch_block_header<I: IntoIterator<Item = u32>>(
+    fn els_batch_block_header<I: IntoIterator<Item = u32> + Clone>(
         &self,
         heights: I,
     ) -> Result<Vec<BlockHeader>, Error>;

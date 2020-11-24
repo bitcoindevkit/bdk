@@ -102,6 +102,8 @@ fn main() {
         None => AnyBlockchainConfig::Electrum(ElectrumBlockchainConfig {
             url: matches.value_of("server").unwrap().to_string(),
             socks5: matches.value_of("proxy").map(ToString::to_string),
+            retry: 10,
+            timeout: 10,
         }),
     };
     let wallet = Arc::new(
