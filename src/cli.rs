@@ -22,6 +22,70 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+//! Command line interface
+//!
+//! This module provides a [clap](https://docs.rs/clap/) `App` pre-configured to parse the command
+//! line subcommands and global flags needed for basic wallet functionality.
+//!
+//! See the `repl.rs` example for how to use this module to create a simple command line wallet
+//! application.
+//!
+//! See [`make_cli_subcommands()`] for list of sub-commands, and [`add_global_flags()`] for list of global flags.
+//!
+//! # Example
+//!
+//! ```no_run
+//! # use bdk::blockchain::esplora::EsploraBlockchainConfig;
+//! # use bdk::blockchain::{
+//! #    AnyBlockchain, AnyBlockchainConfig, ConfigurableBlockchain, ElectrumBlockchainConfig,
+//! # };
+//! # use bdk::database::MemoryDatabase;
+//! # use bdk::{cli, Wallet};
+//! # use bitcoin::Network;
+//! # use std::sync::Arc;
+//!
+//! let app = cli::make_cli_subcommands();
+//! let app = cli::add_global_flags(app);
+//!
+//! let matches = app.get_matches();
+//! let network = match matches.value_of("network") {
+//!     Some("regtest") => Network::Regtest,
+//!     Some("testnet") | _ => Network::Testnet,
+//! };
+//!
+//! let descriptor = matches.value_of("descriptor").unwrap();
+//! let change_descriptor = matches.value_of("change_descriptor");
+//!
+//! let database = MemoryDatabase::new();
+//!
+//! let config = match matches.value_of("esplora") {
+//!     Some(base_url) => AnyBlockchainConfig::Esplora(EsploraBlockchainConfig {
+//!         base_url: base_url.to_string(),
+//!         concurrency: matches
+//!             .value_of("esplora_concurrency")
+//!             .and_then(|v| v.parse::<u8>().ok()),
+//!     }),
+//!     None => AnyBlockchainConfig::Electrum(ElectrumBlockchainConfig {
+//!         url: matches.value_of("server").unwrap().to_string(),
+//!         socks5: matches.value_of("proxy").map(ToString::to_string),
+//!     }),
+//! };
+//!
+//! let wallet = Arc::new(
+//!     Wallet::new(
+//!         descriptor,
+//!         change_descriptor,
+//!         network,
+//!         database,
+//!         AnyBlockchain::from_config(&config).unwrap(),
+//!     )
+//!     .unwrap(),
+//! );
+//!
+//! let result = cli::handle_matches(&wallet, matches).unwrap();
+//! println!("{}", serde_json::to_string_pretty(&result).unwrap());
+//! ```
+
 use std::collections::BTreeMap;
 use std::str::FromStr;
 
@@ -69,6 +133,50 @@ fn recipient_validator(s: String) -> Result<(), String> {
 fn outpoint_validator(s: String) -> Result<(), String> {
     parse_outpoint(&s).map(|_| ())
 }
+
+/// Create new [clap](https://docs.rs/clap/) `App` with wallet sub-commands
+///
+/// Configuration such as name, version, author, about can be overridden. Additional sub-commands
+/// sub-commands can also be added. See [clap](https://docs.rs/clap/) for more information on how
+/// to customize an `App`.
+///
+/// # Wallet sub-commands
+///
+/// | Sub-command        | Description                                    |
+/// |--------------------|----------------------------------------------- |
+/// |  broadcast         |   Broadcasts a transaction to the network. Takes either a raw transaction or a PSBT to extract |
+/// |  bump_fee          |   Bumps the fees of an RBF transaction |
+/// |  combine_psbt      |   Combines multiple PSBTs into one |
+/// |  create_tx         |   Creates a new unsigned tranasaction |
+/// |  extract_psbt      |   Extracts a raw transaction from a PSBT |
+/// |  finalize_psbt     |   Finalizes a psbt |
+/// |  get_balance       |   Returns the current wallet balance |
+/// |  get_new_address   |   Generates a new external address |
+/// |  help              |   Prints this message or the help of the given subcommand(s) |
+/// |  list_transactions |   Lists all the incoming and outgoing transactions of the wallet |
+/// |  list_unspent      |   Lists the available spendable UTXOs |
+/// |  policies          |   Returns the available spending policies for the descriptor |
+/// |  public_descriptor |   Returns the public version of the wallet's descriptor(s) |
+/// |  repl              |   Opens an interactive shell |
+/// |  sign              |   Signs and tries to finalize a PSBT |
+/// |  sync              |   Syncs with the chosen Electrum server |
+///
+/// # Example
+///
+/// ```
+/// # use bdk::cli;
+/// # use clap::SubCommand;
+///
+/// let app = cli::make_cli_subcommands();
+/// let app = app
+///     .name("Demo App")
+///     .version("0.1.0")
+///     .author("Demo Author")
+///     .about("A demo cli wallet based on the bdk library.");
+///
+/// let app = app
+///     .subcommand(SubCommand::with_name("do_something").about("Do something else with your app"));
+/// ```
 
 pub fn make_cli_subcommands<'a, 'b>() -> App<'a, 'b> {
     App::new("Magical Bitcoin Wallet")
@@ -215,11 +323,11 @@ pub fn make_cli_subcommands<'a, 'b>() -> App<'a, 'b> {
         .subcommand(
             SubCommand::with_name("policies")
                 .about("Returns the available spending policies for the descriptor")
-            )
+        )
         .subcommand(
             SubCommand::with_name("public_descriptor")
                 .about("Returns the public version of the wallet's descriptor(s)")
-            )
+        )
         .subcommand(
             SubCommand::with_name("sign")
                 .about("Signs and tries to finalize a PSBT")
@@ -260,7 +368,7 @@ pub fn make_cli_subcommands<'a, 'b>() -> App<'a, 'b> {
                         .takes_value(true)
                         .required_unless("psbt")
                         .number_of_values(1))
-                )
+        )
         .subcommand(
             SubCommand::with_name("extract_psbt")
                 .about("Extracts a raw transaction from a PSBT")
@@ -272,7 +380,7 @@ pub fn make_cli_subcommands<'a, 'b>() -> App<'a, 'b> {
                         .takes_value(true)
                         .required(true)
                         .number_of_values(1))
-                )
+        )
         .subcommand(
             SubCommand::with_name("finalize_psbt")
                 .about("Finalizes a psbt")
@@ -292,7 +400,7 @@ pub fn make_cli_subcommands<'a, 'b>() -> App<'a, 'b> {
                         .takes_value(true)
                         .number_of_values(1)
                         .required(false))
-                )
+        )
         .subcommand(
             SubCommand::with_name("combine_psbt")
                 .about("Combines multiple PSBTs into one")
@@ -305,8 +413,47 @@ pub fn make_cli_subcommands<'a, 'b>() -> App<'a, 'b> {
                         .number_of_values(1)
                         .required(true)
                         .multiple(true))
-                )
+        )
 }
+
+/// Add [clap](https://docs.rs/clap/) global wallet options to an `App`
+///
+/// Additional app specific options can be added. See [clap](https://docs.rs/clap/) for more
+/// information on how to customize the global flags for an `App`.
+///
+/// # Wallet global flags
+///
+/// | Short | Long  | Description |
+/// |-------|-------|-------------|
+/// | -c | --change_descriptor <DESCRIPTOR>            | Sets the descriptor to use for internal addresses |
+/// | -d | --descriptor <DESCRIPTOR>                   | Sets the descriptor to use for the external addresses |
+/// | -e | --esplora <ESPLORA>                         | Use the esplora server if given as parameter |
+/// |    | --esplora_concurrency <ESPLORA_CONCURRENCY> | Concurrency of requests made to the esplora server [default: 4] |
+/// | -n | --network <NETWORK>                         | Sets the network [default: testnet]  [possible values: testnet, regtest] |
+/// | -p | --proxy <SERVER\:PORT>                      | Sets the SOCKS5 proxy for the Electrum client |
+/// | -s | --server <SERVER\:PORT>                     | Sets the Electrum server to use [default: ssl://electrum.blockstream.info:60002] |
+/// | -w | --wallet <WALLET_NAME>                      | Selects the wallet to use [default: main] |
+///
+/// # Example
+///
+/// ```
+/// # use bdk::cli;
+/// # use clap::Arg;
+///
+/// let app = cli::make_cli_subcommands();
+/// let app = cli::add_global_flags(app);
+///
+/// let app = app.arg(
+///     Arg::with_name("extra")
+///         .short("x")
+///         .long("extra")
+///         .value_name("EXTRA")
+///         .help("Sets the extra option")
+///         .takes_value(true)
+///         .default_value("extra-stuff")
+///         .possible_values(&["extra1", "extra2"]),
+/// );
+/// ```
 
 pub fn add_global_flags<'a, 'b>(app: App<'a, 'b>) -> App<'a, 'b> {
     let mut app = app
@@ -395,6 +542,12 @@ pub fn add_global_flags<'a, 'b>(app: App<'a, 'b>) -> App<'a, 'b> {
 
     app.subcommand(SubCommand::with_name("repl").about("Opens an interactive shell"))
 }
+
+/// Execute wallet sub-commands given to an `App`
+///
+/// Wallet sub-command with global flags are given by the user to the [clap](https://docs.rs/clap/)
+/// `App`. Wallet sub-commands are described in [`make_cli_subcommands()`] with global flags as
+/// described in [`add_global_flags()`]. See [`super::cli`] for example usage.
 
 #[maybe_async]
 pub fn handle_matches<C, D>(
