@@ -185,7 +185,7 @@ impl Peer {
                 receiver,
                 sender,
                 nonce,
-                "MagicalBitcoinWallet".into(),
+                "BDK".into(),
                 0,
             )),
         )?;
