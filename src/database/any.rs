@@ -36,12 +36,14 @@
 //! # use bdk::database::{AnyDatabase, MemoryDatabase};
 //! # use bdk::{Wallet, OfflineWallet};
 //! let memory = MemoryDatabase::default().into();
-//! let wallet_memory: OfflineWallet<AnyDatabase> = Wallet::new_offline("...", None, Network::Testnet, memory)?;
+//! let wallet_memory: OfflineWallet<AnyDatabase> =
+//!     Wallet::new_offline("...", None, Network::Testnet, memory)?;
 //!
 //! # #[cfg(feature = "key-value-db")]
 //! # {
 //! let sled = sled::open("my-database")?.open_tree("default_tree")?.into();
-//! let wallet_sled: OfflineWallet<AnyDatabase> = Wallet::new_offline("...", None, Network::Testnet, sled)?;
+//! let wallet_sled: OfflineWallet<AnyDatabase> =
+//!     Wallet::new_offline("...", None, Network::Testnet, sled)?;
 //! # }
 //! # Ok::<(), bdk::Error>(())
 //! ```

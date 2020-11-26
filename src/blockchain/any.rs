@@ -75,7 +75,13 @@
 //! # use bdk::Wallet;
 //! let config = serde_json::from_str("...")?;
 //! let blockchain = AnyBlockchain::from_config(&config)?;
-//! let wallet = Wallet::new("...", None, Network::Testnet, MemoryDatabase::default(), blockchain)?;
+//! let wallet = Wallet::new(
+//!     "...",
+//!     None,
+//!     Network::Testnet,
+//!     MemoryDatabase::default(),
+//!     blockchain,
+//! )?;
 //! # Ok::<(), bdk::Error>(())
 //! ```
 

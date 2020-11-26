@@ -43,7 +43,12 @@
 //! }"#;
 //!
 //! let import = WalletExport::from_str(import)?;
-//! let wallet: OfflineWallet<_> = Wallet::new_offline(&import.descriptor(), import.change_descriptor().as_ref(), Network::Testnet, MemoryDatabase::default())?;
+//! let wallet: OfflineWallet<_> = Wallet::new_offline(
+//!     &import.descriptor(),
+//!     import.change_descriptor().as_ref(),
+//!     Network::Testnet,
+//!     MemoryDatabase::default(),
+//! )?;
 //! # Ok::<_, bdk::Error>(())
 //! ```
 //!

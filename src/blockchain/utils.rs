@@ -374,7 +374,7 @@ fn save_transaction_details_and_utxos<D: BatchDatabase>(
         sent: outgoing,
         height,
         timestamp,
-        fees: inputs_sum.saturating_sub(outputs_sum), // if the tx is a coinbase, fees would be negative
+        fees: inputs_sum.saturating_sub(outputs_sum), /* if the tx is a coinbase, fees would be negative */
     };
     updates.set_tx(&tx_details)?;
 

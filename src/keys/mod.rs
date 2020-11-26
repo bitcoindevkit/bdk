@@ -191,7 +191,7 @@ impl<Ctx: ScriptContext + 'static> ExtScriptContext for Ctx {
 /// ```
 /// use bdk::bitcoin::PublicKey;
 ///
-/// use bdk::keys::{ScriptContext, ToDescriptorKey, DescriptorKey, KeyError};
+/// use bdk::keys::{DescriptorKey, KeyError, ScriptContext, ToDescriptorKey};
 ///
 /// pub struct MyKeyType {
 ///     pubkey: PublicKey,
@@ -209,7 +209,10 @@ impl<Ctx: ScriptContext + 'static> ExtScriptContext for Ctx {
 /// ```
 /// use bdk::bitcoin::PublicKey;
 ///
-/// use bdk::keys::{mainnet_network, ScriptContext, ToDescriptorKey, DescriptorKey, DescriptorPublicKey, DescriptorSinglePub, KeyError};
+/// use bdk::keys::{
+///     mainnet_network, DescriptorKey, DescriptorPublicKey, DescriptorSinglePub, KeyError,
+///     ScriptContext, ToDescriptorKey,
+/// };
 ///
 /// pub struct MyKeyType {
 ///     pubkey: PublicKey,
@@ -217,10 +220,13 @@ impl<Ctx: ScriptContext + 'static> ExtScriptContext for Ctx {
 ///
 /// impl<Ctx: ScriptContext> ToDescriptorKey<Ctx> for MyKeyType {
 ///     fn to_descriptor_key(self) -> Result<DescriptorKey<Ctx>, KeyError> {
-///         Ok(DescriptorKey::from_public(DescriptorPublicKey::SinglePub(DescriptorSinglePub {
-///             origin: None,
-///             key: self.pubkey
-///         }), mainnet_network()))
+///         Ok(DescriptorKey::from_public(
+///             DescriptorPublicKey::SinglePub(DescriptorSinglePub {
+///                 origin: None,
+///                 key: self.pubkey,
+///             }),
+///             mainnet_network(),
+///         ))
 ///     }
 /// }
 /// ```
@@ -230,7 +236,7 @@ impl<Ctx: ScriptContext + 'static> ExtScriptContext for Ctx {
 /// ```
 /// use bdk::bitcoin::PublicKey;
 ///
-/// use bdk::keys::{ExtScriptContext, ScriptContext, ToDescriptorKey, DescriptorKey, KeyError};
+/// use bdk::keys::{DescriptorKey, ExtScriptContext, KeyError, ScriptContext, ToDescriptorKey};
 ///
 /// pub struct MyKeyType {
 ///     is_legacy: bool,
@@ -256,10 +262,10 @@ impl<Ctx: ScriptContext + 'static> ExtScriptContext for Ctx {
 /// makes the compiler (correctly) fail.
 ///
 /// ```compile_fail
-/// use std::str::FromStr;
 /// use bdk::bitcoin::PublicKey;
+/// use std::str::FromStr;
 ///
-/// use bdk::keys::{ToDescriptorKey, DescriptorKey, KeyError};
+/// use bdk::keys::{DescriptorKey, KeyError, ToDescriptorKey};
 ///
 /// pub struct MySegwitOnlyKeyType {
 ///     pubkey: PublicKey,
@@ -274,7 +280,7 @@ impl<Ctx: ScriptContext + 'static> ExtScriptContext for Ctx {
 /// let key = MySegwitOnlyKeyType {
 ///     pubkey: PublicKey::from_str("...")?,
 /// };
-/// let (descriptor, _, _) = bdk::descriptor!(pkh ( key ) )?;
+/// let (descriptor, _, _) = bdk::descriptor!(pkh(key))?;
 /// //                                       ^^^^^ changing this to `wpkh` would make it compile
 ///
 /// # Ok::<_, Box<dyn std::error::Error>>(())
