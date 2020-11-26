@@ -47,15 +47,15 @@ pub type DescriptorTemplateOut = (ExtendedDescriptor, KeyMap, ValidNetworks);
 /// ## Example
 ///
 /// ```
-/// use bdk::keys::{ToDescriptorKey, KeyError};
-/// use bdk::template::{DescriptorTemplate, DescriptorTemplateOut};
+/// use bdk::keys::{KeyError, ToDescriptorKey};
 /// use bdk::miniscript::Legacy;
+/// use bdk::template::{DescriptorTemplate, DescriptorTemplateOut};
 ///
 /// struct MyP2PKH<K: ToDescriptorKey<Legacy>>(K);
 ///
 /// impl<K: ToDescriptorKey<Legacy>> DescriptorTemplate for MyP2PKH<K> {
 ///     fn build(self) -> Result<DescriptorTemplateOut, KeyError> {
-///         Ok(bdk::descriptor!(pkh ( self.0 ) )?)
+///         Ok(bdk::descriptor!(pkh(self.0))?)
 ///     }
 /// }
 /// ```
@@ -84,10 +84,19 @@ impl<T: DescriptorTemplate> ToWalletDescriptor for T {
 /// # use bdk::database::MemoryDatabase;
 /// use bdk::template::P2PKH;
 ///
-/// let key = bitcoin::PrivateKey::from_wif("cTc4vURSzdx6QE6KVynWGomDbLaA75dNALMNyfjh3p8DRRar84Um")?;
-/// let wallet: OfflineWallet<_> = Wallet::new_offline(P2PKH(key), None, Network::Testnet, MemoryDatabase::default())?;
+/// let key =
+///     bitcoin::PrivateKey::from_wif("cTc4vURSzdx6QE6KVynWGomDbLaA75dNALMNyfjh3p8DRRar84Um")?;
+/// let wallet: OfflineWallet<_> = Wallet::new_offline(
+///     P2PKH(key),
+///     None,
+///     Network::Testnet,
+///     MemoryDatabase::default(),
+/// )?;
 ///
-/// assert_eq!(wallet.get_new_address()?.to_string(), "mwJ8hxFYW19JLuc65RCTaP4v1rzVU8cVMT");
+/// assert_eq!(
+///     wallet.get_new_address()?.to_string(),
+///     "mwJ8hxFYW19JLuc65RCTaP4v1rzVU8cVMT"
+/// );
 /// # Ok::<_, Box<dyn std::error::Error>>(())
 /// ```
 pub struct P2PKH<K: ToDescriptorKey<Legacy>>(pub K);
@@ -108,10 +117,19 @@ impl<K: ToDescriptorKey<Legacy>> DescriptorTemplate for P2PKH<K> {
 /// # use bdk::database::MemoryDatabase;
 /// use bdk::template::P2WPKH_P2SH;
 ///
-/// let key = bitcoin::PrivateKey::from_wif("cTc4vURSzdx6QE6KVynWGomDbLaA75dNALMNyfjh3p8DRRar84Um")?;
-/// let wallet: OfflineWallet<_> = Wallet::new_offline(P2WPKH_P2SH(key), None, Network::Testnet, MemoryDatabase::default())?;
+/// let key =
+///     bitcoin::PrivateKey::from_wif("cTc4vURSzdx6QE6KVynWGomDbLaA75dNALMNyfjh3p8DRRar84Um")?;
+/// let wallet: OfflineWallet<_> = Wallet::new_offline(
+///     P2WPKH_P2SH(key),
+///     None,
+///     Network::Testnet,
+///     MemoryDatabase::default(),
+/// )?;
 ///
-/// assert_eq!(wallet.get_new_address()?.to_string(), "2NB4ox5VDRw1ecUv6SnT3VQHPXveYztRqk5");
+/// assert_eq!(
+///     wallet.get_new_address()?.to_string(),
+///     "2NB4ox5VDRw1ecUv6SnT3VQHPXveYztRqk5"
+/// );
 /// # Ok::<_, Box<dyn std::error::Error>>(())
 /// ```
 #[allow(non_camel_case_types)]
@@ -133,10 +151,19 @@ impl<K: ToDescriptorKey<Segwitv0>> DescriptorTemplate for P2WPKH_P2SH<K> {
 /// # use bdk::database::MemoryDatabase;
 /// use bdk::template::P2WPKH;
 ///
-/// let key = bitcoin::PrivateKey::from_wif("cTc4vURSzdx6QE6KVynWGomDbLaA75dNALMNyfjh3p8DRRar84Um")?;
-/// let wallet: OfflineWallet<_> = Wallet::new_offline(P2WPKH(key), None, Network::Testnet, MemoryDatabase::default())?;
+/// let key =
+///     bitcoin::PrivateKey::from_wif("cTc4vURSzdx6QE6KVynWGomDbLaA75dNALMNyfjh3p8DRRar84Um")?;
+/// let wallet: OfflineWallet<_> = Wallet::new_offline(
+///     P2WPKH(key),
+///     None,
+///     Network::Testnet,
+///     MemoryDatabase::default(),
+/// )?;
 ///
-/// assert_eq!(wallet.get_new_address()?.to_string(), "tb1q4525hmgw265tl3drrl8jjta7ayffu6jf68ltjd");
+/// assert_eq!(
+///     wallet.get_new_address()?.to_string(),
+///     "tb1q4525hmgw265tl3drrl8jjta7ayffu6jf68ltjd"
+/// );
 /// # Ok::<_, Box<dyn std::error::Error>>(())
 /// ```
 pub struct P2WPKH<K: ToDescriptorKey<Segwitv0>>(pub K);

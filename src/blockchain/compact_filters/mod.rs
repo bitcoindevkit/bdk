@@ -48,11 +48,13 @@
 //!
 //! let mempool = Arc::new(Mempool::default());
 //! let peers = (0..num_threads)
-//!     .map(|_| Peer::connect(
-//!         "btcd-mainnet.lightning.computer:8333",
-//!         Arc::clone(&mempool),
-//!         Network::Bitcoin,
-//!     ))
+//!     .map(|_| {
+//!         Peer::connect(
+//!             "btcd-mainnet.lightning.computer:8333",
+//!             Arc::clone(&mempool),
+//!             Network::Bitcoin,
+//!         )
+//!     })
 //!     .collect::<Result<_, _>>()?;
 //! let blockchain = CompactFiltersBlockchain::new(peers, "./wallet-filters", Some(500_000))?;
 //! # Ok::<(), CompactFiltersError>(())
