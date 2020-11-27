@@ -159,7 +159,11 @@ impl ElectrumLikeSync for Client {
 /// Configuration for an [`ElectrumBlockchain`]
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
 pub struct ElectrumBlockchainConfig {
+    /// URL of the Electrum server (such as ElectrumX, Esplora, BWT) may start with `ssl://` or `tcp://` and include a port
+    ///
+    /// eg. `ssl://electrum.blockstream.info:60002`
     pub url: String,
+    /// URL of the socks5 proxy server or a Tor service
     pub socks5: Option<String>,
 }
 
