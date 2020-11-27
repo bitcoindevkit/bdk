@@ -373,20 +373,22 @@ struct EsploraGetHistory {
     status: EsploraGetHistoryStatus,
 }
 
+/// `EsploraHeader` maps the json returned from esplora endpoint `GET /block/:hash`
+/// It will be removed when `GET /block/:hash/header` will be deployed
 #[derive(Default, Debug, Clone, PartialEq, Deserialize)]
-pub struct EsploraHeader {
-    pub id: String,
-    pub height: u32,
-    pub version: i32,
-    pub timestamp: u32,
-    pub tx_count: u32,
-    pub size: u32,
-    pub weight: u32,
-    pub merkle_root: TxMerkleNode,
-    pub previousblockhash: BlockHash,
-    pub nonce: u32,
-    pub bits: u32,
-    pub difficulty: u32,
+struct EsploraHeader {
+    id: String,
+    height: u32,
+    version: i32,
+    timestamp: u32,
+    tx_count: u32,
+    size: u32,
+    weight: u32,
+    merkle_root: TxMerkleNode,
+    previousblockhash: BlockHash,
+    nonce: u32,
+    bits: u32,
+    difficulty: u32,
 }
 
 impl Into<BlockHeader> for EsploraHeader {
@@ -405,7 +407,11 @@ impl Into<BlockHeader> for EsploraHeader {
 /// Configuration for an [`EsploraBlockchain`]
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
 pub struct EsploraBlockchainConfig {
+    /// Base URL of the esplora service
+    ///
+    /// eg. `https://blockstream.info/api/`
     pub base_url: String,
+    /// Number of parallel requests sent to the esplora service (default: 4)
     pub concurrency: Option<u8>,
 }
 
