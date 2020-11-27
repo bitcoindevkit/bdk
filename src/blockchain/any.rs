@@ -119,12 +119,15 @@ macro_rules! impl_inner_method {
 pub enum AnyBlockchain {
     #[cfg(feature = "electrum")]
     #[cfg_attr(docsrs, doc(cfg(feature = "electrum")))]
+    #[allow(missing_docs)]
     Electrum(electrum::ElectrumBlockchain),
     #[cfg(feature = "esplora")]
     #[cfg_attr(docsrs, doc(cfg(feature = "esplora")))]
+    #[allow(missing_docs)]
     Esplora(esplora::EsploraBlockchain),
     #[cfg(feature = "compact_filters")]
     #[cfg_attr(docsrs, doc(cfg(feature = "compact_filters")))]
+    #[allow(missing_docs)]
     CompactFilters(compact_filters::CompactFiltersBlockchain),
 }
 
@@ -191,12 +194,15 @@ impl_from!(compact_filters::CompactFiltersBlockchain, AnyBlockchain, CompactFilt
 pub enum AnyBlockchainConfig {
     #[cfg(feature = "electrum")]
     #[cfg_attr(docsrs, doc(cfg(feature = "electrum")))]
+    #[allow(missing_docs)]
     Electrum(electrum::ElectrumBlockchainConfig),
     #[cfg(feature = "esplora")]
     #[cfg_attr(docsrs, doc(cfg(feature = "esplora")))]
+    #[allow(missing_docs)]
     Esplora(esplora::EsploraBlockchainConfig),
     #[cfg(feature = "compact_filters")]
     #[cfg_attr(docsrs, doc(cfg(feature = "compact_filters")))]
+    #[allow(missing_docs)]
     CompactFilters(compact_filters::CompactFiltersBlockchainConfig),
 }
 
