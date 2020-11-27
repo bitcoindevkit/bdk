@@ -69,6 +69,9 @@ clap = "2.33"
 
 [[example]]
 name = "address_validator"
+[[example]]
+name = "compact_filters_balance"
+required-features = ["compact_filters"]
 
 [[example]]
 name = "miniscriptc"
