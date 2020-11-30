@@ -270,7 +270,7 @@ impl TestClient {
     pub fn new() -> Self {
         let url = env::var("MAGICAL_RPC_URL").unwrap_or("127.0.0.1:18443".to_string());
         let client = RpcClient::new(format!("http://{}", url), get_auth()).unwrap();
-        let electrum = ElectrumClient::new(&get_electrum_url(), None).unwrap();
+        let electrum = ElectrumClient::new(&get_electrum_url()).unwrap();
 
         TestClient { client, electrum }
     }
