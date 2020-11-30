@@ -35,7 +35,9 @@ use std::sync::Arc;
 use bitcoin::secp256k1::Secp256k1;
 
 use bitcoin::consensus::encode::serialize;
+use bitcoin::util::base58;
 use bitcoin::util::bip32::ChildNumber;
+use bitcoin::util::psbt::raw::Key as PSBTKey;
 use bitcoin::util::psbt::PartiallySignedTransaction as PSBT;
 use bitcoin::{Address, Network, OutPoint, Script, Transaction, TxOut, Txid};
 
@@ -63,7 +65,7 @@ use crate::blockchain::{Blockchain, BlockchainMarker, OfflineBlockchain, Progres
 use crate::database::{BatchDatabase, BatchOperations, DatabaseUtils};
 use crate::descriptor::{
     get_checksum, DescriptorMeta, DescriptorScripts, ExtendedDescriptor, ExtractPolicy, Policy,
-    ToWalletDescriptor,
+    ToWalletDescriptor, XKeyUtils,
 };
 use crate::error::Error;
 use crate::psbt::PSBTUtils;
@@ -1157,7 +1159,36 @@ where
         selected: Vec<UTXO>,
         builder: TxBuilder<D, Cs, Ctx>,
     ) -> Result<PSBT, Error> {
+        use bitcoin::util::psbt::serialize::Serialize;
+
         let mut psbt = PSBT::from_unsigned_tx(tx)?;
+
+        if builder.add_global_xpubs {
+            let mut all_xpubs = self.descriptor.get_extended_keys()?;
+            if let Some(change_descriptor) = &self.change_descriptor {
+                all_xpubs.extend(change_descriptor.get_extended_keys()?);
+            }
+
+            for xpub in all_xpubs {
+                let serialized_xpub = base58::from_check(&xpub.xkey.to_string())
+                    .expect("Internal serialization error");
+                let key = PSBTKey {
+                    type_value: 0x01,
+                    key: serialized_xpub,
+                };
+
+                let origin = match xpub.origin {
+                    Some(origin) => origin,
+                    None if xpub.xkey.depth == 0 => {
+                        (xpub.root_fingerprint(&self.secp), vec![].into())
+                    }
+                    _ => return Err(Error::MissingKeyOrigin(xpub.xkey.to_string())),
+                };
+
+                psbt.global.unknown.insert(key, origin.serialize());
+            }
+        }
+
         let lookup_output = selected
             .into_iter()
             .map(|utxo| (utxo.outpoint, utxo))

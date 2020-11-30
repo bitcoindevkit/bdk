@@ -31,7 +31,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 
 use bitcoin::secp256k1::Secp256k1;
-use bitcoin::util::bip32::{ChildNumber, DerivationPath, Fingerprint};
+use bitcoin::util::bip32::{ChildNumber, DerivationPath, ExtendedPubKey, Fingerprint};
 use bitcoin::util::psbt;
 use bitcoin::{Network, PublicKey, Script, TxOut};
 
@@ -232,6 +232,7 @@ impl<K: InnerXKey> XKeyUtils for DescriptorXKey<K> {
 pub(crate) trait DescriptorMeta: Sized {
     fn is_witness(&self) -> bool;
     fn get_hd_keypaths(&self, index: u32, secp: &SecpCtx) -> Result<HDKeyPaths, Error>;
+    fn get_extended_keys(&self) -> Result<Vec<DescriptorXKey<ExtendedPubKey>>, Error>;
     fn is_fixed(&self) -> bool;
     fn derive_from_hd_keypaths(&self, hd_keypaths: &HDKeyPaths, secp: &SecpCtx) -> Option<Self>;
     fn derive_from_psbt_input(
@@ -332,6 +333,30 @@ impl DescriptorMeta for Descriptor<DescriptorPublicKey> {
         self.translate_pk(
             |pk| translate_key(pk, index, &mut answer_pk),
             |pkh| translate_key(pkh, index, &mut answer_pkh),
+        )?;
+
+        answer_pk.append(&mut answer_pkh);
+
+        Ok(answer_pk)
+    }
+
+    fn get_extended_keys(&self) -> Result<Vec<DescriptorXKey<ExtendedPubKey>>, Error> {
+        let get_key = |key: &DescriptorPublicKey,
+                       keys: &mut Vec<DescriptorXKey<ExtendedPubKey>>|
+         -> Result<DummyKey, Error> {
+            if let DescriptorPublicKey::XPub(xpub) = key {
+                keys.push(xpub.clone())
+            }
+
+            Ok(DummyKey::default())
+        };
+
+        let mut answer_pk = Vec::new();
+        let mut answer_pkh = Vec::new();
+
+        self.translate_pk(
+            |pk| get_key(pk, &mut answer_pk),
+            |pkh| get_key(pkh, &mut answer_pkh),
         )?;
 
         answer_pk.append(&mut answer_pkh);

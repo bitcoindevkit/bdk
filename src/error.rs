@@ -54,6 +54,12 @@ pub enum Error {
     FeeTooLow {
         required: u64,
     },
+    /// In order to use the [`TxBuilder::add_global_xpubs`] option every extended
+    /// key in the descriptor must either be a master key itself (having depth = 0) or have an
+    /// explicit origin provided
+    ///
+    /// [`TxBuilder::add_global_xpubs`]: crate::wallet::tx_builder::TxBuilder::add_global_xpubs
+    MissingKeyOrigin(String),
 
     Key(crate::keys::KeyError),
 

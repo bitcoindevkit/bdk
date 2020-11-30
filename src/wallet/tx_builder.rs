@@ -89,6 +89,7 @@ pub struct TxBuilder<D: Database, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderC
     pub(crate) version: Option<Version>,
     pub(crate) change_policy: ChangeSpendPolicy,
     pub(crate) force_non_witness_utxo: bool,
+    pub(crate) add_global_xpubs: bool,
     pub(crate) coin_selection: Cs,
     pub(crate) include_output_redeem_witness_script: bool,
 
@@ -131,6 +132,7 @@ where
             version: Default::default(),
             change_policy: Default::default(),
             force_non_witness_utxo: Default::default(),
+            add_global_xpubs: Default::default(),
             coin_selection: Default::default(),
             include_output_redeem_witness_script: Default::default(),
 
@@ -345,6 +347,25 @@ impl<D: Database, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderContext> TxBuilde
         self
     }
 
+    /// Fill-in the [`psbt::Output::redeem_script`](bitcoin::util::psbt::Output::redeem_script) and
+    /// [`psbt::Output::witness_script`](bitcoin::util::psbt::Output::witness_script) fields.
+    ///
+    /// This is useful for signers which always require it, like ColdCard hardware wallets.
+    pub fn include_output_redeem_witness_script(mut self) -> Self {
+        self.include_output_redeem_witness_script = true;
+        self
+    }
+
+    /// Fill-in the `PSBT_GLOBAL_XPUB` field with the extended keys contained in both the external
+    /// and internal descriptors
+    ///
+    /// This is useful for offline signers that take part to a multisig. Some hardware wallets like
+    /// BitBox and ColdCard are known to require this.
+    pub fn add_global_xpubs(mut self) -> Self {
+        self.add_global_xpubs = true;
+        self
+    }
+
     /// Spend all the available inputs. This respects filters like [`unspendable`] and the change policy.
     pub fn drain_wallet(mut self) -> Self {
         self.drain_wallet = true;
@@ -375,20 +396,12 @@ impl<D: Database, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderContext> TxBuilde
             version: self.version,
             change_policy: self.change_policy,
             force_non_witness_utxo: self.force_non_witness_utxo,
-            coin_selection,
+            add_global_xpubs: self.add_global_xpubs,
             include_output_redeem_witness_script: self.include_output_redeem_witness_script,
+            coin_selection,
 
             phantom: PhantomData,
         }
-    }
-
-    /// Fill-in the [`psbt::Output::redeem_script`](bitcoin::util::psbt::Output::redeem_script) and
-    /// [`psbt::Output::witness_script`](bitcoin::util::psbt::Output::witness_script) fields.
-    ///
-    /// This is useful for signers which always require it, like ColdCard hardware wallets.
-    pub fn include_output_redeem_witness_script(mut self) -> Self {
-        self.include_output_redeem_witness_script = true;
-        self
     }
 }
 

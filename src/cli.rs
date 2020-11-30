@@ -458,6 +458,7 @@ where
 
         if sub_matches.is_present("offline_signer") {
             tx_builder = tx_builder
+                .add_global_xpubs()
                 .force_non_witness_utxo()
                 .include_output_redeem_witness_script();
         }
@@ -515,6 +516,7 @@ where
 
         if sub_matches.is_present("offline_signer") {
             tx_builder = tx_builder
+                .add_global_xpubs()
                 .force_non_witness_utxo()
                 .include_output_redeem_witness_script();
         }
