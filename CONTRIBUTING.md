@@ -44,7 +44,7 @@ debt.
 Every new feature should be covered by functional tests where possible.
 
 When refactoring, structure your PR to make it easy to review and don't
-hestitate to split it into multiple small, focused PRs.
+hesitate to split it into multiple small, focused PRs.
 
 The Minimal Supported Rust Version is 1.45 (enforced by our CI).
 
