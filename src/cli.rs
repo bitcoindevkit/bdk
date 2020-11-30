@@ -163,6 +163,12 @@ pub fn make_cli_subcommands<'a, 'b>() -> App<'a, 'b> {
                         .help("Selects which policy should be used to satisfy the internal descriptor")
                         .takes_value(true)
                         .number_of_values(1),
+                )
+                .arg(
+                    Arg::with_name("offline_signer")
+                        .long("offline_signer")
+                        .help("Make a PSBT that can be signed by offline signers and hardware wallets. Forces the addition of `non_witness_utxo` and more details to let the signer identify the change output.")
+                        .takes_value(false),
                 ),
         )
         .subcommand(
@@ -210,6 +216,12 @@ pub fn make_cli_subcommands<'a, 'b>() -> App<'a, 'b> {
                         .value_name("SATS_VBYTE")
                         .help("The new targeted fee rate in sat/vbyte")
                         .takes_value(true),
+                )
+                .arg(
+                    Arg::with_name("offline_signer")
+                        .long("offline_signer")
+                        .help("Make a PSBT that can be signed by offline signers and hardware wallets. Forces the addition of `non_witness_utxo` and more details to let the signer identify the change output.")
+                        .takes_value(false),
                 ),
         )
         .subcommand(
@@ -444,6 +456,12 @@ where
             tx_builder = tx_builder.enable_rbf();
         }
 
+        if sub_matches.is_present("offline_signer") {
+            tx_builder = tx_builder
+                .force_non_witness_utxo()
+                .include_output_redeem_witness_script();
+        }
+
         if let Some(fee_rate) = sub_matches.value_of("fee_rate") {
             let fee_rate = f32::from_str(fee_rate).map_err(|s| Error::Generic(s.to_string()))?;
             tx_builder = tx_builder.fee_rate(FeeRate::from_sat_per_vb(fee_rate));
@@ -493,6 +511,12 @@ where
 
         if sub_matches.is_present("send_all") {
             tx_builder = tx_builder.maintain_single_recipient();
+        }
+
+        if sub_matches.is_present("offline_signer") {
+            tx_builder = tx_builder
+                .force_non_witness_utxo()
+                .include_output_redeem_witness_script();
         }
 
         if let Some(utxos) = sub_matches.values_of("utxos") {
