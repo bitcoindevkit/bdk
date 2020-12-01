@@ -35,18 +35,18 @@
 //!
 //! # Example
 //!
-//! ```
-//! use bdk::bitcoin::Network;
-//! use bdk::blockchain::esplora::EsploraBlockchainConfig;
-//! use bdk::blockchain::{AnyBlockchain, ConfigurableBlockchain};
-//! use bdk::blockchain::{AnyBlockchainConfig, ElectrumBlockchainConfig};
-//! use bdk::cli;
-//! use bdk::cli::{WalletOpt, WalletSubCommand};
-//! use bdk::database::MemoryDatabase;
-//! use bdk::Wallet;
-//! use bitcoin::hashes::core::str::FromStr;
-//! use std::sync::Arc;
-//! use structopt::StructOpt;
+//! ```no_run
+//! # use bdk::bitcoin::Network;
+//! # use bdk::blockchain::esplora::EsploraBlockchainConfig;
+//! # use bdk::blockchain::{AnyBlockchain, ConfigurableBlockchain};
+//! # use bdk::blockchain::{AnyBlockchainConfig, ElectrumBlockchainConfig};
+//! # use bdk::cli;
+//! # use bdk::cli::{WalletOpt, WalletSubCommand};
+//! # use bdk::database::MemoryDatabase;
+//! # use bdk::Wallet;
+//! # use bitcoin::hashes::core::str::FromStr;
+//! # use std::sync::Arc;
+//! # use structopt::StructOpt;
 //!
 //! // to get args from cli use:
 //! // let cli_opt = WalletOpt::from_args();
@@ -71,6 +71,8 @@
 //!         None => AnyBlockchainConfig::Electrum(ElectrumBlockchainConfig {
 //!         url: cli_opt.electrum,
 //!         socks5: cli_opt.proxy,
+//!         retry: 10,
+//!         timeout: 10,
 //!     }),
 //! };
 //!

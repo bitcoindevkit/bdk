@@ -310,9 +310,7 @@ fn save_transaction_details_and_utxos<D: BatchDatabase>(
     updates: &mut dyn BatchOperations,
     utxo_deps: &HashMap<OutPoint, OutPoint>,
 ) -> Result<(), Error> {
-    let tx = db
-        .get_raw_tx(txid)?
-        .ok_or_else(|| Error::TransactionNotFound)?;
+    let tx = db.get_raw_tx(txid)?.ok_or(Error::TransactionNotFound)?;
 
     let mut incoming: u64 = 0;
     let mut outgoing: u64 = 0;
@@ -338,7 +336,7 @@ fn save_transaction_details_and_utxos<D: BatchDatabase>(
             // The input is not ours, but we still need to count it for the fees
             let tx = db
                 .get_raw_tx(&input.previous_output.txid)?
-                .ok_or_else(|| Error::TransactionNotFound)?;
+                .ok_or(Error::TransactionNotFound)?;
             inputs_sum += tx.output[input.previous_output.vout as usize].value;
         }
 
@@ -392,7 +390,7 @@ fn utxos_deps<D: BatchDatabase>(
     for utxo in utxos {
         let from_tx = tx_raw_in_db
             .get(&utxo.outpoint.txid)
-            .ok_or_else(|| Error::TransactionNotFound)?;
+            .ok_or(Error::TransactionNotFound)?;
         for input in from_tx.input.iter() {
             utxos_deps.insert(input.previous_output, utxo.outpoint);
         }
