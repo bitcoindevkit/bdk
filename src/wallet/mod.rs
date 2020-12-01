@@ -1351,6 +1351,11 @@ where
         self.client.as_ref()
     }
 
+    /// Get the Bitcoin network the wallet is using.
+    pub fn network(&self) -> Network {
+        self.network
+    }
+
     /// Broadcast a transaction to the network
     #[maybe_async]
     pub fn broadcast(&self, tx: Transaction) -> Result<Txid, Error> {
