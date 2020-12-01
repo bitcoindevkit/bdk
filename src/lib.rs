@@ -23,7 +23,7 @@
 // SOFTWARE.
 
 // rustdoc will warn if there are missing docs
-#![warn(missing_docs)]
+// TODO #![warn(missing_docs)]
 // only enables the `doc_cfg` feature when
 // the `docsrs` configuration attribute is defined
 #![cfg_attr(docsrs, feature(doc_cfg))]
