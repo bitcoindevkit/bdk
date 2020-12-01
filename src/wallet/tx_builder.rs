@@ -21,6 +21,7 @@
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
+#![allow(missing_docs)] // TODO remove after docs are added
 
 //! Transaction builder
 //!
@@ -345,7 +346,7 @@ impl<D: Database, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderContext> TxBuilde
         self
     }
 
-    /// Spend all the available inputs. This respects filters like [`unspendable`] and the change policy.
+    /// Spend all the available inputs. This respects filters like [`TxBuilder::unspendable`] and the change policy.
     pub fn drain_wallet(mut self) -> Self {
         self.drain_wallet = true;
         self
