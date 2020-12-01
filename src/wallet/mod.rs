@@ -2329,6 +2329,73 @@ mod test {
     }
 
     #[test]
+    fn test_create_tx_global_xpubs_with_origin() {
+        use bitcoin::hashes::hex::FromHex;
+        use bitcoin::util::base58;
+        use bitcoin::util::psbt::raw::Key;
+
+        let (wallet, _, _) = get_funded_wallet("wpkh([73756c7f/48'/0'/0'/2']tpubDCKxNyM3bLgbEX13Mcd8mYxbVg9ajDkWXMh29hMWBurKfVmBfWAM96QVP3zaUcN51HvkZ3ar4VwP82kC8JZhhux8vFQoJintSpVBwpFvyU3/0/*)");
+        let addr = wallet.get_new_address().unwrap();
+        let (psbt, _) = wallet
+            .create_tx(
+                TxBuilder::with_recipients(vec![(addr.script_pubkey(), 25_000)]).add_global_xpubs(),
+            )
+            .unwrap();
+
+        let type_value = 0x01;
+        let key = base58::from_check("tpubDCKxNyM3bLgbEX13Mcd8mYxbVg9ajDkWXMh29hMWBurKfVmBfWAM96QVP3zaUcN51HvkZ3ar4VwP82kC8JZhhux8vFQoJintSpVBwpFvyU3").unwrap();
+
+        let psbt_key = Key { type_value, key };
+
+        // This key has an explicit origin, so it will be encoded here
+        let value_bytes = Vec::<u8>::from_hex("73756c7f30000080000000800000008002000080").unwrap();
+
+        assert_eq!(psbt.global.unknown.len(), 1);
+        assert_eq!(psbt.global.unknown.get(&psbt_key), Some(&value_bytes));
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "MissingKeyOrigin(\"tpubDCKxNyM3bLgbEX13Mcd8mYxbVg9ajDkWXMh29hMWBurKfVmBfWAM96QVP3zaUcN51HvkZ3ar4VwP82kC8JZhhux8vFQoJintSpVBwpFvyU3\")"
+    )]
+    fn test_create_tx_global_xpubs_origin_missing() {
+        let (wallet, _, _) = get_funded_wallet("wpkh(tpubDCKxNyM3bLgbEX13Mcd8mYxbVg9ajDkWXMh29hMWBurKfVmBfWAM96QVP3zaUcN51HvkZ3ar4VwP82kC8JZhhux8vFQoJintSpVBwpFvyU3/0/*)");
+        let addr = wallet.get_new_address().unwrap();
+        wallet
+            .create_tx(
+                TxBuilder::with_recipients(vec![(addr.script_pubkey(), 25_000)]).add_global_xpubs(),
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn test_create_tx_global_xpubs_master_without_origin() {
+        use bitcoin::hashes::hex::FromHex;
+        use bitcoin::util::base58;
+        use bitcoin::util::psbt::raw::Key;
+
+        let (wallet, _, _) = get_funded_wallet("wpkh(tpubD6NzVbkrYhZ4Y55A58Gv9RSNF5hy84b5AJqYy7sCcjFrkcLpPre8kmgfit6kY1Zs3BLgeypTDBZJM222guPpdz7Cup5yzaMu62u7mYGbwFL/0/*)");
+        let addr = wallet.get_new_address().unwrap();
+        let (psbt, _) = wallet
+            .create_tx(
+                TxBuilder::with_recipients(vec![(addr.script_pubkey(), 25_000)]).add_global_xpubs(),
+            )
+            .unwrap();
+
+        let type_value = 0x01;
+        let key = base58::from_check("tpubD6NzVbkrYhZ4Y55A58Gv9RSNF5hy84b5AJqYy7sCcjFrkcLpPre8kmgfit6kY1Zs3BLgeypTDBZJM222guPpdz7Cup5yzaMu62u7mYGbwFL").unwrap();
+
+        let psbt_key = Key { type_value, key };
+
+        // This key doesn't have an explicit origin, but it's a master key (depth = 0). So we encode
+        // its fingerprint directly and an empty path
+        let value_bytes = Vec::<u8>::from_hex("997a323b").unwrap();
+
+        assert_eq!(psbt.global.unknown.len(), 1);
+        assert_eq!(psbt.global.unknown.get(&psbt_key), Some(&value_bytes));
+    }
+
+    #[test]
     #[should_panic(expected = "IrreplaceableTransaction")]
     fn test_bump_fee_irreplaceable_tx() {
         let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
