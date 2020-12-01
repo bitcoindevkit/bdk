@@ -102,6 +102,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add tests for BranchAndBoundCoinSelection::single_random_draw
 - Add test that shwpkh populates witness_utxo
 - Add witness and redeem scripts to PSBT outputs
+- Add an option to include `PSBT_GLOBAL_XPUB`s in PSBTs
 - Eagerly finalize inputs
 
 #### Changed
