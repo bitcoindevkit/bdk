@@ -29,8 +29,6 @@ use std::sync::Arc;
 use rustyline::error::ReadlineError;
 use rustyline::Editor;
 
-use clap::AppSettings;
-
 #[allow(unused_imports)]
 use log::{debug, error, info, trace, LevelFilter};
 
@@ -45,6 +43,10 @@ use bdk::sled;
 use bdk::Wallet;
 
 use bdk::blockchain::esplora::EsploraBlockchainConfig;
+use bdk::cli::{WalletOpt, WalletSubCommand};
+use bitcoin::hashes::core::str::FromStr;
+
+use structopt::StructOpt;
 
 fn prepare_home_dir() -> PathBuf {
     let mut dir = PathBuf::new();
@@ -63,96 +65,95 @@ fn prepare_home_dir() -> PathBuf {
 fn main() {
     env_logger::init();
 
-    let app = cli::make_cli_subcommands();
-    let mut repl_app = app.clone().setting(AppSettings::NoBinaryName);
-
-    let app = cli::add_global_flags(app);
-
-    let matches = app.get_matches();
+    let cli_opt: WalletOpt = WalletOpt::from_args();
 
     // TODO
-    // let level = match matches.occurrences_of("v") {
-    //     0 => LevelFilter::Info,
-    //     1 => LevelFilter::Debug,
+    // let level = match cli_opt.verbosity.map(|v| v.len()) {
+    //     Some(0) => LevelFilter::Info,
+    //     Some(1) => LevelFilter::Debug,
     //     _ => LevelFilter::Trace,
     // };
 
-    let network = match matches.value_of("network") {
-        Some("regtest") => Network::Regtest,
-        Some("testnet") | _ => Network::Testnet,
-    };
+    let network = Network::from_str(cli_opt.network.as_str()).unwrap_or(Network::Testnet);
+    debug!("network: {:?}", network);
 
-    let descriptor = matches.value_of("descriptor").unwrap();
-    let change_descriptor = matches.value_of("change_descriptor");
+    let descriptor = cli_opt.descriptor.as_str();
+    let change_descriptor = cli_opt.change_descriptor.as_deref();
     debug!("descriptors: {:?} {:?}", descriptor, change_descriptor);
 
     let database = sled::open(prepare_home_dir().to_str().unwrap()).unwrap();
-    let tree = database
-        .open_tree(matches.value_of("wallet").unwrap())
-        .unwrap();
+    let tree = database.open_tree(cli_opt.wallet).unwrap();
     debug!("database opened successfully");
 
-    let config = match matches.value_of("esplora") {
+    let config = match cli_opt.esplora {
         Some(base_url) => AnyBlockchainConfig::Esplora(EsploraBlockchainConfig {
             base_url: base_url.to_string(),
-            concurrency: matches
-                .value_of("esplora_concurrency")
-                .and_then(|v| v.parse::<u8>().ok()),
+            concurrency: Some(cli_opt.esplora_concurrency),
         }),
         None => AnyBlockchainConfig::Electrum(ElectrumBlockchainConfig {
-            url: matches.value_of("server").unwrap().to_string(),
-            socks5: matches.value_of("proxy").map(ToString::to_string),
+            url: cli_opt.electrum,
+            socks5: cli_opt.proxy,
         }),
     };
-    let wallet = Arc::new(
-        Wallet::new(
-            descriptor,
-            change_descriptor,
-            network,
-            tree,
-            AnyBlockchain::from_config(&config).unwrap(),
-        )
-        .unwrap(),
-    );
 
-    if let Some(_sub_matches) = matches.subcommand_matches("repl") {
-        let mut rl = Editor::<()>::new();
+    let wallet = Wallet::new(
+        descriptor,
+        change_descriptor,
+        network,
+        tree,
+        AnyBlockchain::from_config(&config).unwrap(),
+    )
+    .unwrap();
 
-        // if rl.load_history("history.txt").is_err() {
-        //     println!("No previous history.");
-        // }
+    let wallet = Arc::new(wallet);
 
-        loop {
-            let readline = rl.readline(">> ");
-            match readline {
-                Ok(line) => {
-                    if line.trim() == "" {
-                        continue;
+    match cli_opt.subcommand {
+        WalletSubCommand::Other(external) if external.contains(&"repl".to_string()) => {
+            let mut rl = Editor::<()>::new();
+
+            // if rl.load_history("history.txt").is_err() {
+            //     println!("No previous history.");
+            // }
+
+            loop {
+                let readline = rl.readline(">> ");
+                match readline {
+                    Ok(line) => {
+                        if line.trim() == "" {
+                            continue;
+                        }
+                        rl.add_history_entry(line.as_str());
+                        let mut repl_args: Vec<&str> = vec![" "];
+                        let split_line: Vec<&str> = line.split(" ").collect();
+                        repl_args.extend(&split_line);
+                        let repl_subcommand: Result<WalletSubCommand, clap::Error> =
+                            WalletSubCommand::from_iter_safe(repl_args);
+                        if let Err(err) = repl_subcommand {
+                            println!("{}", err.message);
+                            continue;
+                        }
+
+                        let result = cli::handle_wallet_subcommand(
+                            &Arc::clone(&wallet),
+                            repl_subcommand.unwrap(),
+                        )
+                        .unwrap();
+                        println!("{}", serde_json::to_string_pretty(&result).unwrap());
                     }
-
-                    rl.add_history_entry(line.as_str());
-                    let matches = repl_app.get_matches_from_safe_borrow(line.split(" "));
-                    if let Err(err) = matches {
-                        println!("{}", err.message);
-                        continue;
+                    Err(ReadlineError::Interrupted) => continue,
+                    Err(ReadlineError::Eof) => break,
+                    Err(err) => {
+                        println!("{:?}", err);
+                        break;
                     }
-
-                    let result =
-                        cli::handle_matches(&Arc::clone(&wallet), matches.unwrap()).unwrap();
-                    println!("{}", serde_json::to_string_pretty(&result).unwrap());
-                }
-                Err(ReadlineError::Interrupted) => continue,
-                Err(ReadlineError::Eof) => break,
-                Err(err) => {
-                    println!("{:?}", err);
-                    break;
                 }
             }
-        }
 
-    // rl.save_history("history.txt").unwrap();
-    } else {
-        let result = cli::handle_matches(&wallet, matches).unwrap();
-        println!("{}", serde_json::to_string_pretty(&result).unwrap());
+            // rl.save_history("history.txt").unwrap();
+        }
+        _ => {
+            let result = cli::handle_wallet_subcommand(&wallet, cli_opt.subcommand).unwrap();
+            println!("{}", serde_json::to_string_pretty(&result).unwrap());
+        }
     }
 }

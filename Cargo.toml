@@ -27,6 +27,7 @@ cc = { version = "=1.0.62", optional = true }
 socks = { version = "0.3", optional = true }
 lazy_static = { version = "1.4", optional = true }
 tiny-bip39 = { version = "^0.8", optional = true }
+structopt = { version = "^0.3", optional = true }
 
 # Platform-specific dependencies
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
@@ -45,7 +46,7 @@ electrum = ["electrum-client"]
 esplora = ["reqwest", "futures"]
 compact_filters = ["rocksdb", "socks", "lazy_static", "cc"]
 key-value-db = ["sled"]
-cli-utils = ["clap", "base64"]
+cli-utils = ["clap", "base64", "structopt"]
 async-interface = ["async-trait"]
 all-keys = ["keys-bip39"]
 keys-bip39 = ["tiny-bip39"]
