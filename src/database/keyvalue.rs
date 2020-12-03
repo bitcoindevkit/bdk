@@ -51,11 +51,11 @@ macro_rules! impl_batch_operations {
             Ok(())
         }
 
-        fn set_utxo(&mut self, utxo: &UTXO) -> Result<(), Error> {
+        fn set_utxo(&mut self, utxo: &LocalUtxo) -> Result<(), Error> {
             let key = MapKey::UTXO(Some(&utxo.outpoint)).as_map_key();
             let value = json!({
                 "t": utxo.txout,
-                "i": utxo.is_internal,
+                "i": utxo.script_type,
             });
             self.insert(key, serde_json::to_vec(&value)?)$($after_insert)*;
 
@@ -120,7 +120,7 @@ macro_rules! impl_batch_operations {
             }
         }
 
-        fn del_utxo(&mut self, outpoint: &OutPoint) -> Result<Option<UTXO>, Error> {
+        fn del_utxo(&mut self, outpoint: &OutPoint) -> Result<Option<LocalUtxo>, Error> {
             let key = MapKey::UTXO(Some(outpoint)).as_map_key();
             let res = self.remove(key);
             let res = $process_delete!(res);
@@ -130,9 +130,9 @@ macro_rules! impl_batch_operations {
                 Some(b) => {
                     let mut val: serde_json::Value = serde_json::from_slice(&b)?;
                     let txout = serde_json::from_value(val["t"].take())?;
-                    let is_internal = serde_json::from_value(val["i"].take())?;
+                    let script_type = serde_json::from_value(val["i"].take())?;
 
-                    Ok(Some(UTXO { outpoint: outpoint.clone(), txout, is_internal }))
+                    Ok(Some(LocalUtxo { outpoint: outpoint.clone(), txout, script_type }))
                 }
             }
         }
@@ -234,7 +234,7 @@ impl Database for Tree {
             .collect()
     }
 
-    fn iter_utxos(&self) -> Result<Vec<UTXO>, Error> {
+    fn iter_utxos(&self) -> Result<Vec<LocalUtxo>, Error> {
         let key = MapKey::UTXO(None).as_map_key();
         self.scan_prefix(key)
             .map(|x| -> Result<_, Error> {
@@ -243,12 +243,12 @@ impl Database for Tree {
 
                 let mut val: serde_json::Value = serde_json::from_slice(&v)?;
                 let txout = serde_json::from_value(val["t"].take())?;
-                let is_internal = serde_json::from_value(val["i"].take())?;
+                let script_type = serde_json::from_value(val["i"].take())?;
 
-                Ok(UTXO {
+                Ok(LocalUtxo {
                     outpoint,
                     txout,
-                    is_internal,
+                    script_type,
                 })
             })
             .collect()
@@ -305,18 +305,18 @@ impl Database for Tree {
             .transpose()
     }
 
-    fn get_utxo(&self, outpoint: &OutPoint) -> Result<Option<UTXO>, Error> {
+    fn get_utxo(&self, outpoint: &OutPoint) -> Result<Option<LocalUtxo>, Error> {
         let key = MapKey::UTXO(Some(outpoint)).as_map_key();
         self.get(key)?
             .map(|b| -> Result<_, Error> {
                 let mut val: serde_json::Value = serde_json::from_slice(&b)?;
                 let txout = serde_json::from_value(val["t"].take())?;
-                let is_internal = serde_json::from_value(val["i"].take())?;
+                let script_type = serde_json::from_value(val["i"].take())?;
 
-                Ok(UTXO {
+                Ok(LocalUtxo {
                     outpoint: *outpoint,
                     txout,
-                    is_internal,
+                    script_type,
                 })
             })
             .transpose()

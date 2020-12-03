@@ -180,7 +180,7 @@ where
     ///
     /// Note that this methods only operate on the internal database, which first needs to be
     /// [`Wallet::sync`] manually.
-    pub fn list_unspent(&self) -> Result<Vec<UTXO>, Error> {
+    pub fn list_unspent(&self) -> Result<Vec<LocalUtxo>, Error> {
         self.database.borrow().iter_utxos()
     }
 
@@ -611,51 +611,44 @@ where
         }
 
         let deriv_ctx = descriptor_to_pk_ctx(&self.secp);
-
-        let external_weight = self
-            .get_descriptor_for_script_type(ScriptType::External)
-            .0
-            .max_satisfaction_weight(deriv_ctx)
-            .unwrap();
-        let internal_weight = self
-            .get_descriptor_for_script_type(ScriptType::Internal)
-            .0
-            .max_satisfaction_weight(deriv_ctx)
-            .unwrap();
-
         let original_sequence = tx.input[0].sequence;
 
         // remove the inputs from the tx and process them
         let original_txin = tx.input.drain(..).collect::<Vec<_>>();
         let mut original_utxos = original_txin
             .iter()
-            .map(|txin| -> Result<(UTXO, usize), Error> {
+            .map(|txin| -> Result<(LocalUtxo, usize), Error> {
                 let txout = self
                     .database
                     .borrow()
                     .get_previous_output(&txin.previous_output)?
                     .ok_or(Error::UnknownUTXO)?;
 
-                let (weight, is_internal) = match self
+                let (weight, script_type) = match self
                     .database
                     .borrow()
                     .get_path_from_script_pubkey(&txout.script_pubkey)?
                 {
-                    Some((ScriptType::Internal, _)) => (internal_weight, true),
-                    Some((ScriptType::External, _)) => (external_weight, false),
+                    Some((script_type, _)) => (
+                        self.get_descriptor_for_script_type(ScriptType::External)
+                            .0
+                            .max_satisfaction_weight(deriv_ctx)
+                            .unwrap(),
+                        script_type,
+                    ),
                     None => {
                         // estimate the weight based on the scriptsig/witness size present in the
                         // original transaction
                         let weight =
                             serialize(&txin.script_sig).len() * 4 + serialize(&txin.witness).len();
-                        (weight, false)
+                        (weight, ScriptType::External)
                     }
                 };
 
-                let utxo = UTXO {
+                let utxo = LocalUtxo {
                     outpoint: txin.previous_output,
                     txout,
-                    is_internal,
+                    script_type,
                 };
 
                 Ok((utxo, weight))
@@ -1050,30 +1043,22 @@ where
         Ok(())
     }
 
-    fn get_available_utxos(&self) -> Result<Vec<(UTXO, usize)>, Error> {
+    fn get_available_utxos(&self) -> Result<Vec<(LocalUtxo, usize)>, Error> {
         let deriv_ctx = descriptor_to_pk_ctx(&self.secp);
 
-        let external_weight = self
-            .get_descriptor_for_script_type(ScriptType::External)
-            .0
-            .max_satisfaction_weight(deriv_ctx)
-            .unwrap();
-        let internal_weight = self
-            .get_descriptor_for_script_type(ScriptType::Internal)
-            .0
-            .max_satisfaction_weight(deriv_ctx)
-            .unwrap();
-
-        let add_weight = |utxo: UTXO| {
-            let weight = match utxo.is_internal {
-                true => internal_weight,
-                false => external_weight,
-            };
-
-            (utxo, weight)
-        };
-
-        let utxos = self.list_unspent()?.into_iter().map(add_weight).collect();
+        let utxos = self
+            .list_unspent()?
+            .into_iter()
+            .map(|utxo| {
+                (
+                    utxo,
+                    self.get_descriptor_for_script_type(ScriptType::Internal)
+                        .0
+                        .max_satisfaction_weight(deriv_ctx)
+                        .unwrap(),
+                )
+            })
+            .collect();
 
         Ok(utxos)
     }
@@ -1089,7 +1074,7 @@ where
         must_use_all_available: bool,
         manual_only: bool,
         must_only_use_confirmed_tx: bool,
-    ) -> Result<(Vec<(UTXO, usize)>, Vec<(UTXO, usize)>), Error> {
+    ) -> Result<(Vec<(LocalUtxo, usize)>, Vec<(LocalUtxo, usize)>), Error> {
         //    must_spend <- manually selected utxos
         //    may_spend  <- all other available utxos
         let mut may_spend = self.get_available_utxos()?;
@@ -1156,7 +1141,7 @@ where
     >(
         &self,
         tx: Transaction,
-        selected: Vec<UTXO>,
+        selected: Vec<LocalUtxo>,
         builder: TxBuilder<D, Cs, Ctx>,
     ) -> Result<PSBT, Error> {
         use bitcoin::util::psbt::serialize::Serialize;

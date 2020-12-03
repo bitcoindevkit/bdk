@@ -31,9 +31,25 @@ use serde::{Deserialize, Serialize};
 
 /// Types of script
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[serde(try_from = "bool", into = "bool")]
 pub enum ScriptType {
     External = 0,
     Internal = 1,
+}
+
+impl From<bool> for ScriptType {
+    fn from(from: bool) -> Self {
+        match from {
+            false => ScriptType::External,
+            true => ScriptType::Internal,
+        }
+    }
+}
+
+impl From<ScriptType> for bool {
+    fn from(from: ScriptType) -> Self {
+        (from as u8) == 1
+    }
 }
 
 impl ScriptType {
@@ -42,10 +58,6 @@ impl ScriptType {
             ScriptType::External => b'e',
             ScriptType::Internal => b'i',
         }
-    }
-
-    pub fn is_internal(&self) -> bool {
-        self == &ScriptType::Internal
     }
 }
 
@@ -93,10 +105,10 @@ impl std::default::Default for FeeRate {
 
 /// A wallet unspent output
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub struct UTXO {
+pub struct LocalUtxo {
     pub outpoint: OutPoint,
     pub txout: TxOut,
-    pub is_internal: bool,
+    pub script_type: ScriptType,
 }
 
 /// A wallet transaction

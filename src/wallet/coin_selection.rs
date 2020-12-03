@@ -52,8 +52,8 @@
 //!     fn coin_select(
 //!         &self,
 //!         database: &D,
-//!         required_utxos: Vec<(UTXO, usize)>,
-//!         optional_utxos: Vec<(UTXO, usize)>,
+//!         required_utxos: Vec<(LocalUtxo, usize)>,
+//!         optional_utxos: Vec<(LocalUtxo, usize)>,
 //!         fee_rate: FeeRate,
 //!         amount_needed: u64,
 //!         fee_amount: f32,
@@ -99,7 +99,7 @@
 
 use crate::database::Database;
 use crate::error::Error;
-use crate::types::{FeeRate, UTXO};
+use crate::types::{FeeRate, LocalUtxo};
 
 use rand::seq::SliceRandom;
 #[cfg(not(test))]
@@ -122,7 +122,7 @@ pub const TXIN_BASE_WEIGHT: usize = (32 + 4 + 4 + 1) * 4;
 #[derive(Debug)]
 pub struct CoinSelectionResult {
     /// List of outputs selected for use as inputs
-    pub selected: Vec<UTXO>,
+    pub selected: Vec<LocalUtxo>,
     /// Sum of the selected inputs' value
     pub selected_amount: u64,
     /// Total fee amount in satoshi
@@ -139,7 +139,7 @@ pub trait CoinSelectionAlgorithm<D: Database>: std::fmt::Debug {
     /// Perform the coin selection
     ///
     /// - `database`: a reference to the wallet's database that can be used to lookup additional
-    ///               details for a specific UTXO
+    ///               details for a specific LocalUtxo
     /// - `required_utxos`: the utxos that must be spent regardless of `amount_needed` with their
     ///                     weight cost
     /// - `optional_utxos`: the remaining available utxos to satisfy `amount_needed` with their
@@ -151,8 +151,8 @@ pub trait CoinSelectionAlgorithm<D: Database>: std::fmt::Debug {
     fn coin_select(
         &self,
         database: &D,
-        required_utxos: Vec<(UTXO, usize)>,
-        optional_utxos: Vec<(UTXO, usize)>,
+        required_utxos: Vec<(LocalUtxo, usize)>,
+        optional_utxos: Vec<(LocalUtxo, usize)>,
         fee_rate: FeeRate,
         amount_needed: u64,
         fee_amount: f32,
@@ -170,8 +170,8 @@ impl<D: Database> CoinSelectionAlgorithm<D> for LargestFirstCoinSelection {
     fn coin_select(
         &self,
         _database: &D,
-        required_utxos: Vec<(UTXO, usize)>,
-        mut optional_utxos: Vec<(UTXO, usize)>,
+        required_utxos: Vec<(LocalUtxo, usize)>,
+        mut optional_utxos: Vec<(LocalUtxo, usize)>,
         fee_rate: FeeRate,
         amount_needed: u64,
         mut fee_amount: f32,
@@ -233,19 +233,19 @@ impl<D: Database> CoinSelectionAlgorithm<D> for LargestFirstCoinSelection {
 }
 
 #[derive(Debug, Clone)]
-// Adds fee information to an UTXO.
+// Adds fee information to an LocalUtxo.
 struct OutputGroup {
-    utxo: UTXO,
-    // weight needed to satisfy the UTXO, as described in `Descriptor::max_satisfaction_weight`
+    utxo: LocalUtxo,
+    // weight needed to satisfy the LocalUtxo, as described in `Descriptor::max_satisfaction_weight`
     satisfaction_weight: usize,
     // Amount of fees for spending a certain utxo, calculated using a certain FeeRate
     fee: f32,
-    // The effective value of the UTXO, i.e., the utxo value minus the fee for spending it
+    // The effective value of the LocalUtxo, i.e., the utxo value minus the fee for spending it
     effective_value: i64,
 }
 
 impl OutputGroup {
-    fn new(utxo: UTXO, satisfaction_weight: usize, fee_rate: FeeRate) -> Self {
+    fn new(utxo: LocalUtxo, satisfaction_weight: usize, fee_rate: FeeRate) -> Self {
         let fee = (TXIN_BASE_WEIGHT + satisfaction_weight) as f32 / 4.0 * fee_rate.as_sat_vb();
         let effective_value = utxo.txout.value as i64 - fee.ceil() as i64;
         OutputGroup {
@@ -285,19 +285,19 @@ impl<D: Database> CoinSelectionAlgorithm<D> for BranchAndBoundCoinSelection {
     fn coin_select(
         &self,
         _database: &D,
-        required_utxos: Vec<(UTXO, usize)>,
-        optional_utxos: Vec<(UTXO, usize)>,
+        required_utxos: Vec<(LocalUtxo, usize)>,
+        optional_utxos: Vec<(LocalUtxo, usize)>,
         fee_rate: FeeRate,
         amount_needed: u64,
         fee_amount: f32,
     ) -> Result<CoinSelectionResult, Error> {
-        // Mapping every (UTXO, usize) to an output group
+        // Mapping every (LocalUtxo, usize) to an output group
         let required_utxos: Vec<OutputGroup> = required_utxos
             .into_iter()
             .map(|u| OutputGroup::new(u.0, u.1, fee_rate))
             .collect();
 
-        // Mapping every (UTXO, usize) to an output group.
+        // Mapping every (LocalUtxo, usize) to an output group.
         // Filtering UTXOs with an effective_value < 0, as the fee paid for
         // adding them is more than their value
         let optional_utxos: Vec<OutputGroup> = optional_utxos
@@ -402,7 +402,7 @@ impl BranchAndBoundCoinSelection {
 
             // Backtracking, moving backwards
             if backtrack {
-                // Walk backwards to find the last included UTXO that still needs to have its omission branch traversed.
+                // Walk backwards to find the last included LocalUtxo that still needs to have its omission branch traversed.
                 while let Some(false) = current_selection.last() {
                     current_selection.pop();
                     curr_available_value +=
@@ -526,10 +526,10 @@ mod test {
 
     const P2WPKH_WITNESS_SIZE: usize = 73 + 33 + 2;
 
-    fn get_test_utxos() -> Vec<(UTXO, usize)> {
+    fn get_test_utxos() -> Vec<(LocalUtxo, usize)> {
         vec![
             (
-                UTXO {
+                LocalUtxo {
                     outpoint: OutPoint::from_str(
                         "ebd9813ecebc57ff8f30797de7c205e3c7498ca950ea4341ee51a685ff2fa30a:0",
                     )
@@ -538,12 +538,12 @@ mod test {
                         value: 100_000,
                         script_pubkey: Script::new(),
                     },
-                    is_internal: false,
+                    script_type: ScriptType::External,
                 },
                 P2WPKH_WITNESS_SIZE,
             ),
             (
-                UTXO {
+                LocalUtxo {
                     outpoint: OutPoint::from_str(
                         "65d92ddff6b6dc72c89624a6491997714b90f6004f928d875bc0fd53f264fa85:0",
                     )
@@ -552,18 +552,18 @@ mod test {
                         value: 200_000,
                         script_pubkey: Script::new(),
                     },
-                    is_internal: true,
+                    script_type: ScriptType::External,
                 },
                 P2WPKH_WITNESS_SIZE,
             ),
         ]
     }
 
-    fn generate_random_utxos(rng: &mut StdRng, utxos_number: usize) -> Vec<(UTXO, usize)> {
+    fn generate_random_utxos(rng: &mut StdRng, utxos_number: usize) -> Vec<(LocalUtxo, usize)> {
         let mut res = Vec::new();
         for _ in 0..utxos_number {
             res.push((
-                UTXO {
+                LocalUtxo {
                     outpoint: OutPoint::from_str(
                         "ebd9813ecebc57ff8f30797de7c205e3c7498ca950ea4341ee51a685ff2fa30a:0",
                     )
@@ -572,7 +572,7 @@ mod test {
                         value: rng.gen_range(0, 200000000),
                         script_pubkey: Script::new(),
                     },
-                    is_internal: false,
+                    script_type: ScriptType::External,
                 },
                 P2WPKH_WITNESS_SIZE,
             ));
@@ -580,9 +580,9 @@ mod test {
         res
     }
 
-    fn generate_same_value_utxos(utxos_value: u64, utxos_number: usize) -> Vec<(UTXO, usize)> {
+    fn generate_same_value_utxos(utxos_value: u64, utxos_number: usize) -> Vec<(LocalUtxo, usize)> {
         let utxo = (
-            UTXO {
+            LocalUtxo {
                 outpoint: OutPoint::from_str(
                     "ebd9813ecebc57ff8f30797de7c205e3c7498ca950ea4341ee51a685ff2fa30a:0",
                 )
@@ -591,14 +591,14 @@ mod test {
                     value: utxos_value,
                     script_pubkey: Script::new(),
                 },
-                is_internal: false,
+                script_type: ScriptType::External,
             },
             P2WPKH_WITNESS_SIZE,
         );
         vec![utxo; utxos_number]
     }
 
-    fn sum_random_utxos(mut rng: &mut StdRng, utxos: &mut Vec<(UTXO, usize)>) -> u64 {
+    fn sum_random_utxos(mut rng: &mut StdRng, utxos: &mut Vec<(LocalUtxo, usize)>) -> u64 {
         let utxos_picked_len = rng.gen_range(2, utxos.len() / 2);
         utxos.shuffle(&mut rng);
         utxos[..utxos_picked_len]

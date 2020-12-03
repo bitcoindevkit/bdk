@@ -51,7 +51,7 @@ use bitcoin::{OutPoint, Script, SigHashType, Transaction};
 
 use super::coin_selection::{CoinSelectionAlgorithm, DefaultCoinSelectionAlgorithm};
 use crate::database::Database;
-use crate::types::{FeeRate, ScriptType, UTXO};
+use crate::types::{FeeRate, LocalUtxo, ScriptType};
 
 /// Context in which the [`TxBuilder`] is valid
 pub trait TxBuilderContext: std::fmt::Debug + Default + Clone {}
@@ -563,11 +563,11 @@ impl Default for ChangeSpendPolicy {
 }
 
 impl ChangeSpendPolicy {
-    pub(crate) fn is_satisfied_by(&self, utxo: &UTXO) -> bool {
+    pub(crate) fn is_satisfied_by(&self, utxo: &LocalUtxo) -> bool {
         match self {
             ChangeSpendPolicy::ChangeAllowed => true,
-            ChangeSpendPolicy::OnlyChange => utxo.is_internal,
-            ChangeSpendPolicy::ChangeForbidden => !utxo.is_internal,
+            ChangeSpendPolicy::OnlyChange => utxo.script_type == ScriptType::Internal,
+            ChangeSpendPolicy::ChangeForbidden => utxo.script_type == ScriptType::External,
         }
     }
 }
@@ -654,23 +654,23 @@ mod test {
         assert_eq!(tx.output[2].script_pubkey, From::from(vec![0xAA, 0xEE]));
     }
 
-    fn get_test_utxos() -> Vec<UTXO> {
+    fn get_test_utxos() -> Vec<LocalUtxo> {
         vec![
-            UTXO {
+            LocalUtxo {
                 outpoint: OutPoint {
                     txid: Default::default(),
                     vout: 0,
                 },
                 txout: Default::default(),
-                is_internal: false,
+                script_type: ScriptType::External,
             },
-            UTXO {
+            LocalUtxo {
                 outpoint: OutPoint {
                     txid: Default::default(),
                     vout: 1,
                 },
                 txout: Default::default(),
-                is_internal: true,
+                script_type: ScriptType::Internal,
             },
         ]
     }
@@ -695,7 +695,7 @@ mod test {
             .collect::<Vec<_>>();
 
         assert_eq!(filtered.len(), 1);
-        assert_eq!(filtered[0].is_internal, false);
+        assert_eq!(filtered[0].script_type, ScriptType::External);
     }
 
     #[test]
@@ -707,7 +707,7 @@ mod test {
             .collect::<Vec<_>>();
 
         assert_eq!(filtered.len(), 1);
-        assert_eq!(filtered[0].is_internal, true);
+        assert_eq!(filtered[0].script_type, ScriptType::Internal);
     }
 
     #[test]
