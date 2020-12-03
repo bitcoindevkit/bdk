@@ -160,7 +160,7 @@ impl BatchOperations for MemoryDatabase {
     fn set_utxo(&mut self, utxo: &UTXO) -> Result<(), Error> {
         let key = MapKey::UTXO(Some(&utxo.outpoint)).as_map_key();
         self.map
-            .insert(key, Box::new((utxo.txout.clone(), utxo.is_internal)));
+            .insert(key, Box::new((utxo.txout.clone(), utxo.script_type)));
 
         Ok(())
     }
@@ -231,11 +231,11 @@ impl BatchOperations for MemoryDatabase {
         match res {
             None => Ok(None),
             Some(b) => {
-                let (txout, is_internal) = b.downcast_ref().cloned().unwrap();
+                let (txout, script_type) = b.downcast_ref().cloned().unwrap();
                 Ok(Some(UTXO {
                     outpoint: *outpoint,
                     txout,
-                    is_internal,
+                    script_type,
                 }))
             }
         }
@@ -322,11 +322,11 @@ impl Database for MemoryDatabase {
             .range::<Vec<u8>, _>((Included(&key), Excluded(&after(&key))))
             .map(|(k, v)| {
                 let outpoint = deserialize(&k[1..]).unwrap();
-                let (txout, is_internal) = v.downcast_ref().cloned().unwrap();
+                let (txout, script_type) = v.downcast_ref().cloned().unwrap();
                 Ok(UTXO {
                     outpoint,
                     txout,
-                    is_internal,
+                    script_type,
                 })
             })
             .collect()
@@ -385,11 +385,11 @@ impl Database for MemoryDatabase {
     fn get_utxo(&self, outpoint: &OutPoint) -> Result<Option<UTXO>, Error> {
         let key = MapKey::UTXO(Some(outpoint)).as_map_key();
         Ok(self.map.get(&key).map(|b| {
-            let (txout, is_internal) = b.downcast_ref().cloned().unwrap();
+            let (txout, script_type) = b.downcast_ref().cloned().unwrap();
             UTXO {
                 outpoint: *outpoint,
                 txout,
-                is_internal,
+                script_type,
             }
         }))
     }
@@ -507,7 +507,7 @@ impl MemoryDatabase {
                     txid,
                     vout: vout as u32,
                 },
-                is_internal: false,
+                script_type: ScriptType::External,
             })
             .unwrap();
         }

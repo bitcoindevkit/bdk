@@ -301,7 +301,7 @@ pub mod test {
         let utxo = UTXO {
             txout,
             outpoint,
-            is_internal: false,
+            script_type: ScriptType::External,
         };
 
         tree.set_utxo(&utxo).unwrap();

@@ -43,10 +43,6 @@ impl ScriptType {
             ScriptType::Internal => b'i',
         }
     }
-
-    pub fn is_internal(&self) -> bool {
-        self == &ScriptType::Internal
-    }
 }
 
 impl AsRef<[u8]> for ScriptType {
@@ -96,7 +92,7 @@ impl std::default::Default for FeeRate {
 pub struct UTXO {
     pub outpoint: OutPoint,
     pub txout: TxOut,
-    pub is_internal: bool,
+    pub script_type: ScriptType,
 }
 
 /// A wallet transaction

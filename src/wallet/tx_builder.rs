@@ -566,8 +566,8 @@ impl ChangeSpendPolicy {
     pub(crate) fn is_satisfied_by(&self, utxo: &UTXO) -> bool {
         match self {
             ChangeSpendPolicy::ChangeAllowed => true,
-            ChangeSpendPolicy::OnlyChange => utxo.is_internal,
-            ChangeSpendPolicy::ChangeForbidden => !utxo.is_internal,
+            ChangeSpendPolicy::OnlyChange => utxo.script_type == ScriptType::Internal,
+            ChangeSpendPolicy::ChangeForbidden => utxo.script_type == ScriptType::External,
         }
     }
 }
@@ -662,7 +662,7 @@ mod test {
                     vout: 0,
                 },
                 txout: Default::default(),
-                is_internal: false,
+                script_type: ScriptType::External,
             },
             UTXO {
                 outpoint: OutPoint {
@@ -670,7 +670,7 @@ mod test {
                     vout: 1,
                 },
                 txout: Default::default(),
-                is_internal: true,
+                script_type: ScriptType::Internal,
             },
         ]
     }
@@ -695,7 +695,7 @@ mod test {
             .collect::<Vec<_>>();
 
         assert_eq!(filtered.len(), 1);
-        assert_eq!(filtered[0].is_internal, false);
+        assert_eq!(filtered[0].script_type, ScriptType::External);
     }
 
     #[test]
@@ -707,7 +707,7 @@ mod test {
             .collect::<Vec<_>>();
 
         assert_eq!(filtered.len(), 1);
-        assert_eq!(filtered[0].is_internal, true);
+        assert_eq!(filtered[0].script_type, ScriptType::Internal);
     }
 
     #[test]
