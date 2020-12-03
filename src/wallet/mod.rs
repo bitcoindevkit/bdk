@@ -78,8 +78,8 @@ pub type OfflineWallet<D> = Wallet<OfflineBlockchain, D>;
 
 /// A Bitcoin wallet
 ///
-/// A wallet takes descriptors, a [`database`](crate::database) and a
-/// [`blockchain`](crate::blockchain) and implements the basic functions that a Bitcoin wallets
+/// A wallet takes descriptors, a [`database`](trait@crate::database::Database) and a
+/// [`blockchain`](trait@crate::blockchain::Blockchain) and implements the basic functions that a Bitcoin wallets
 /// needs to operate, like [generating addresses](Wallet::get_new_address), [returning the balance](Wallet::get_balance),
 /// [creating transactions](Wallet::create_tx), etc.
 ///
