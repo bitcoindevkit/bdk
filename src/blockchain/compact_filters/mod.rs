@@ -553,20 +553,10 @@ impl fmt::Display for CompactFiltersError {
 
 impl std::error::Error for CompactFiltersError {}
 
-macro_rules! impl_error {
-    ( $from:ty, $to:ident ) => {
-        impl std::convert::From<$from> for CompactFiltersError {
-            fn from(err: $from) -> Self {
-                CompactFiltersError::$to(err)
-            }
-        }
-    };
-}
-
-impl_error!(rocksdb::Error, DB);
-impl_error!(std::io::Error, IO);
-impl_error!(bitcoin::util::bip158::Error, BIP158);
-impl_error!(std::time::SystemTimeError, Time);
+impl_error!(rocksdb::Error, DB, CompactFiltersError);
+impl_error!(std::io::Error, IO, CompactFiltersError);
+impl_error!(bitcoin::util::bip158::Error, BIP158, CompactFiltersError);
+impl_error!(std::time::SystemTimeError, Time, CompactFiltersError);
 
 impl From<crate::error::Error> for CompactFiltersError {
     fn from(err: crate::error::Error) -> Self {

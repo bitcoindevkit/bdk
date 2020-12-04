@@ -47,7 +47,7 @@ use serde::Deserialize;
 
 use reqwest::{Client, StatusCode};
 
-use bitcoin::consensus::{deserialize, serialize};
+use bitcoin::consensus::{self, deserialize, serialize};
 use bitcoin::hashes::hex::{FromHex, ToHex};
 use bitcoin::hashes::{sha256, Hash};
 use bitcoin::{BlockHash, BlockHeader, Script, Transaction, Txid};
@@ -423,26 +423,7 @@ impl fmt::Display for EsploraError {
 
 impl std::error::Error for EsploraError {}
 
-impl From<reqwest::Error> for EsploraError {
-    fn from(other: reqwest::Error) -> Self {
-        EsploraError::Reqwest(other)
-    }
-}
-
-impl From<std::num::ParseIntError> for EsploraError {
-    fn from(other: std::num::ParseIntError) -> Self {
-        EsploraError::Parsing(other)
-    }
-}
-
-impl From<bitcoin::consensus::encode::Error> for EsploraError {
-    fn from(other: bitcoin::consensus::encode::Error) -> Self {
-        EsploraError::BitcoinEncoding(other)
-    }
-}
-
-impl From<bitcoin::hashes::hex::Error> for EsploraError {
-    fn from(other: bitcoin::hashes::hex::Error) -> Self {
-        EsploraError::Hex(other)
-    }
-}
+impl_error!(reqwest::Error, Reqwest, EsploraError);
+impl_error!(std::num::ParseIntError, Parsing, EsploraError);
+impl_error!(consensus::encode::Error, BitcoinEncoding, EsploraError);
+impl_error!(bitcoin::hashes::hex::Error, Hex, EsploraError);
