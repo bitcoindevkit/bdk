@@ -27,29 +27,35 @@
 /// Errors related to the parsing and usage of descriptors
 #[derive(Debug)]
 pub enum Error {
-    InternalError,
-    InvalidPrefix(Vec<u8>),
-    HardenedDerivationOnXpub,
-    MalformedInput,
+    //InternalError,
+    //InvalidPrefix(Vec<u8>),
+    //HardenedDerivationOnXpub,
+    //MalformedInput,
+    /// Invalid HD Key path, such as having a wildcard but a length != 1
     InvalidHDKeyPath,
 
-    KeyParsingError(String),
+    //KeyParsingError(String),
+    #[allow(missing_docs)]
     Key(crate::keys::KeyError),
-
+    #[allow(missing_docs)]
     Policy(crate::descriptor::policy::PolicyError),
 
-    InputIndexDoesntExist,
-    MissingPublicKey,
-    MissingDetails,
-
+    //InputIndexDoesntExist,
+    //MissingPublicKey,
+    //MissingDetails,
+    /// Invalid character found in the descriptor checksum
     InvalidDescriptorCharacter(char),
 
-    CantDeriveWithMiniscript,
-
+    //CantDeriveWithMiniscript,
+    #[allow(missing_docs)]
     BIP32(bitcoin::util::bip32::Error),
+    #[allow(missing_docs)]
     Base58(bitcoin::util::base58::Error),
+    #[allow(missing_docs)]
     PK(bitcoin::util::key::Error),
+    #[allow(missing_docs)]
     Miniscript(miniscript::Error),
+    #[allow(missing_docs)]
     Hex(bitcoin::hashes::hex::Error),
 }
 
