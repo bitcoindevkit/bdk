@@ -32,7 +32,9 @@ use serde::{Deserialize, Serialize};
 /// Types of script
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ScriptType {
+    /// External
     External = 0,
+    /// Internal, usually used for change outputs
     Internal = 1,
 }
 
