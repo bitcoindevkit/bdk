@@ -89,9 +89,11 @@ macro_rules! impl_inner_method {
 /// See [this module](crate::database::any)'s documentation for a usage example.
 #[derive(Debug)]
 pub enum AnyDatabase {
+    #[allow(missing_docs)]
     Memory(memory::MemoryDatabase),
     #[cfg(feature = "key-value-db")]
     #[cfg_attr(docsrs, doc(cfg(feature = "key-value-db")))]
+    #[allow(missing_docs)]
     Sled(sled::Tree),
 }
 
@@ -100,9 +102,11 @@ impl_from!(sled::Tree, AnyDatabase, Sled, #[cfg(feature = "key-value-db")]);
 
 /// Type that contains any of the [`BatchDatabase::Batch`] types defined by the library
 pub enum AnyBatch {
+    #[allow(missing_docs)]
     Memory(<memory::MemoryDatabase as BatchDatabase>::Batch),
     #[cfg(feature = "key-value-db")]
     #[cfg_attr(docsrs, doc(cfg(feature = "key-value-db")))]
+    #[allow(missing_docs)]
     Sled(<sled::Tree as BatchDatabase>::Batch),
 }
 
@@ -347,7 +351,9 @@ impl BatchDatabase for AnyDatabase {
 #[cfg(feature = "key-value-db")]
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct SledDbConfiguration {
+    /// Main directory of the db
     pub path: String,
+    /// Name of the database tree, a separated namespace for the data
     pub tree_name: String,
 }
 
@@ -367,9 +373,11 @@ impl ConfigurableDatabase for sled::Tree {
 /// will find this particularly useful.
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub enum AnyDatabaseConfig {
+    /// Memory database has no config
     Memory(()),
     #[cfg(feature = "key-value-db")]
     #[cfg_attr(docsrs, doc(cfg(feature = "key-value-db")))]
+    #[allow(missing_docs)]
     Sled(SledDbConfiguration),
 }
 
