@@ -611,18 +611,6 @@ where
         }
 
         let deriv_ctx = descriptor_to_pk_ctx(&self.secp);
-
-        let external_weight = self
-            .get_descriptor_for_script_type(ScriptType::External)
-            .0
-            .max_satisfaction_weight(deriv_ctx)
-            .unwrap();
-        let internal_weight = self
-            .get_descriptor_for_script_type(ScriptType::Internal)
-            .0
-            .max_satisfaction_weight(deriv_ctx)
-            .unwrap();
-
         let original_sequence = tx.input[0].sequence;
 
         // remove the inputs from the tx and process them
@@ -636,26 +624,31 @@ where
                     .get_previous_output(&txin.previous_output)?
                     .ok_or(Error::UnknownUTXO)?;
 
-                let (weight, is_internal) = match self
+                let (weight, script_type) = match self
                     .database
                     .borrow()
                     .get_path_from_script_pubkey(&txout.script_pubkey)?
                 {
-                    Some((ScriptType::Internal, _)) => (internal_weight, true),
-                    Some((ScriptType::External, _)) => (external_weight, false),
+                    Some((script_type, _)) => (
+                        self.get_descriptor_for_script_type(script_type)
+                            .0
+                            .max_satisfaction_weight(deriv_ctx)
+                            .unwrap(),
+                        script_type,
+                    ),
                     None => {
                         // estimate the weight based on the scriptsig/witness size present in the
                         // original transaction
                         let weight =
                             serialize(&txin.script_sig).len() * 4 + serialize(&txin.witness).len();
-                        (weight, false)
+                        (weight, ScriptType::External)
                     }
                 };
 
                 let utxo = UTXO {
                     outpoint: txin.previous_output,
                     txout,
-                    is_internal,
+                    script_type,
                 };
 
                 Ok((utxo, weight))
@@ -1052,30 +1045,20 @@ where
 
     fn get_available_utxos(&self) -> Result<Vec<(UTXO, usize)>, Error> {
         let deriv_ctx = descriptor_to_pk_ctx(&self.secp);
-
-        let external_weight = self
-            .get_descriptor_for_script_type(ScriptType::External)
-            .0
-            .max_satisfaction_weight(deriv_ctx)
-            .unwrap();
-        let internal_weight = self
-            .get_descriptor_for_script_type(ScriptType::Internal)
-            .0
-            .max_satisfaction_weight(deriv_ctx)
-            .unwrap();
-
-        let add_weight = |utxo: UTXO| {
-            let weight = match utxo.is_internal {
-                true => internal_weight,
-                false => external_weight,
-            };
-
-            (utxo, weight)
-        };
-
-        let utxos = self.list_unspent()?.into_iter().map(add_weight).collect();
-
-        Ok(utxos)
+        Ok(self
+            .list_unspent()?
+            .into_iter()
+            .map(|utxo| {
+                let script_type = utxo.script_type;
+                (
+                    utxo,
+                    self.get_descriptor_for_script_type(script_type)
+                        .0
+                        .max_satisfaction_weight(deriv_ctx)
+                        .unwrap(),
+                )
+            })
+            .collect())
     }
 
     /// Given the options returns the list of utxos that must be used to form the

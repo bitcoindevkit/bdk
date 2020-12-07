@@ -120,7 +120,7 @@ pub fn bdk_blockchain_tests(attr: TokenStream, item: TokenStream) -> TokenStream
                     wallet.sync(noop_progress(), None).unwrap();
 
                     assert_eq!(wallet.get_balance().unwrap(), 50_000);
-                    assert_eq!(wallet.list_unspent().unwrap()[0].is_internal, false);
+                    assert_eq!(wallet.list_unspent().unwrap()[0].script_type, ScriptType::External);
 
                     let list_tx_item = &wallet.list_transactions(false).unwrap()[0];
                     assert_eq!(list_tx_item.txid, txid);

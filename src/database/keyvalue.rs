@@ -55,7 +55,7 @@ macro_rules! impl_batch_operations {
             let key = MapKey::UTXO(Some(&utxo.outpoint)).as_map_key();
             let value = json!({
                 "t": utxo.txout,
-                "i": utxo.is_internal,
+                "i": utxo.script_type,
             });
             self.insert(key, serde_json::to_vec(&value)?)$($after_insert)*;
 
@@ -130,9 +130,9 @@ macro_rules! impl_batch_operations {
                 Some(b) => {
                     let mut val: serde_json::Value = serde_json::from_slice(&b)?;
                     let txout = serde_json::from_value(val["t"].take())?;
-                    let is_internal = serde_json::from_value(val["i"].take())?;
+                    let script_type = serde_json::from_value(val["i"].take())?;
 
-                    Ok(Some(UTXO { outpoint: outpoint.clone(), txout, is_internal }))
+                    Ok(Some(UTXO { outpoint: outpoint.clone(), txout, script_type }))
                 }
             }
         }
@@ -243,12 +243,12 @@ impl Database for Tree {
 
                 let mut val: serde_json::Value = serde_json::from_slice(&v)?;
                 let txout = serde_json::from_value(val["t"].take())?;
-                let is_internal = serde_json::from_value(val["i"].take())?;
+                let script_type = serde_json::from_value(val["i"].take())?;
 
                 Ok(UTXO {
                     outpoint,
                     txout,
-                    is_internal,
+                    script_type,
                 })
             })
             .collect()
@@ -311,12 +311,12 @@ impl Database for Tree {
             .map(|b| -> Result<_, Error> {
                 let mut val: serde_json::Value = serde_json::from_slice(&b)?;
                 let txout = serde_json::from_value(val["t"].take())?;
-                let is_internal = serde_json::from_value(val["i"].take())?;
+                let script_type = serde_json::from_value(val["i"].take())?;
 
                 Ok(UTXO {
                     outpoint: *outpoint,
                     txout,
-                    is_internal,
+                    script_type,
                 })
             })
             .transpose()
