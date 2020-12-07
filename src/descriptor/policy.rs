@@ -66,7 +66,7 @@ use log::{debug, error, info, trace};
 
 use crate::descriptor::ExtractPolicy;
 use crate::wallet::signer::{SignerId, SignersContainer};
-use crate::wallet::utils::{descriptor_to_pk_ctx, SecpCtx};
+use crate::wallet::utils::{self, descriptor_to_pk_ctx, SecpCtx};
 
 use super::checksum::get_checksum;
 use super::error::Error;
@@ -462,10 +462,21 @@ pub struct Condition {
 }
 
 impl Condition {
-    fn merge_timelock(a: u32, b: u32) -> Result<u32, PolicyError> {
-        const BLOCKS_TIMELOCK_THRESHOLD: u32 = 500000000;
+    fn merge_nlocktime(a: u32, b: u32) -> Result<u32, PolicyError> {
+        if (a < utils::BLOCKS_TIMELOCK_THRESHOLD) != (b < utils::BLOCKS_TIMELOCK_THRESHOLD) {
+            Err(PolicyError::MixedTimelockUnits)
+        } else {
+            Ok(max(a, b))
+        }
+    }
 
-        if (a < BLOCKS_TIMELOCK_THRESHOLD) != (b < BLOCKS_TIMELOCK_THRESHOLD) {
+    fn merge_nsequence(a: u32, b: u32) -> Result<u32, PolicyError> {
+        let mask = utils::SEQUENCE_LOCKTIME_TYPE_FLAG | utils::SEQUENCE_LOCKTIME_MASK;
+
+        let a = a & mask;
+        let b = b & mask;
+
+        if (a < utils::SEQUENCE_LOCKTIME_TYPE_FLAG) != (b < utils::SEQUENCE_LOCKTIME_TYPE_FLAG) {
             Err(PolicyError::MixedTimelockUnits)
         } else {
             Ok(max(a, b))
@@ -474,13 +485,13 @@ impl Condition {
 
     pub(crate) fn merge(mut self, other: &Condition) -> Result<Self, PolicyError> {
         match (self.csv, other.csv) {
-            (Some(a), Some(b)) => self.csv = Some(Self::merge_timelock(a, b)?),
+            (Some(a), Some(b)) => self.csv = Some(Self::merge_nsequence(a, b)?),
             (None, any) => self.csv = any,
             _ => {}
         }
 
         match (self.timelock, other.timelock) {
-            (Some(a), Some(b)) => self.timelock = Some(Self::merge_timelock(a, b)?),
+            (Some(a), Some(b)) => self.timelock = Some(Self::merge_nlocktime(a, b)?),
             (None, any) => self.timelock = any,
             _ => {}
         }

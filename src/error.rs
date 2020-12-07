@@ -60,7 +60,7 @@ pub enum Error {
     TransactionNotFound,
     /// Happens when trying to bump a transaction that is already confirmed
     TransactionConfirmed,
-    /// Trying to replace a tx that has a sequence = `0xFFFFFFFF`
+    /// Trying to replace a tx that has a sequence >= `0xFFFFFFFE`
     IrreplaceableTransaction,
     /// When bumping a tx the fee rate requested is lower than required
     FeeRateTooLow {

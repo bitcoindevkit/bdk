@@ -85,7 +85,7 @@ pub struct TxBuilder<D: Database, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderC
     pub(crate) sighash: Option<SigHashType>,
     pub(crate) ordering: TxOrdering,
     pub(crate) locktime: Option<u32>,
-    pub(crate) rbf: Option<u32>,
+    pub(crate) rbf: Option<RBFValue>,
     pub(crate) version: Option<Version>,
     pub(crate) change_policy: ChangeSpendPolicy,
     pub(crate) force_non_witness_utxo: bool,
@@ -451,8 +451,9 @@ impl<D: Database, Cs: CoinSelectionAlgorithm<D>> TxBuilder<D, Cs, CreateTx> {
     /// Enable signaling RBF
     ///
     /// This will use the default nSequence value of `0xFFFFFFFD`.
-    pub fn enable_rbf(self) -> Self {
-        self.enable_rbf_with_sequence(0xFFFFFFFD)
+    pub fn enable_rbf(mut self) -> Self {
+        self.rbf = Some(RBFValue::Default);
+        self
     }
 
     /// Enable signaling RBF with a specific nSequence value
@@ -463,7 +464,7 @@ impl<D: Database, Cs: CoinSelectionAlgorithm<D>> TxBuilder<D, Cs, CreateTx> {
     /// If the `nsequence` is higher than `0xFFFFFFFD` an error will be thrown, since it would not
     /// be a valid nSequence to signal RBF.
     pub fn enable_rbf_with_sequence(mut self, nsequence: u32) -> Self {
-        self.rbf = Some(nsequence);
+        self.rbf = Some(RBFValue::Value(nsequence));
         self
     }
 }
@@ -542,6 +543,24 @@ pub(crate) struct Version(pub(crate) i32);
 impl Default for Version {
     fn default() -> Self {
         Version(1)
+    }
+}
+
+/// RBF nSequence value
+///
+/// Has a default value of `0xFFFFFFFD`
+#[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Hash, Clone, Copy)]
+pub(crate) enum RBFValue {
+    Default,
+    Value(u32),
+}
+
+impl RBFValue {
+    pub(crate) fn get_value(&self) -> u32 {
+        match self {
+            RBFValue::Default => 0xFFFFFFFD,
+            RBFValue::Value(v) => *v,
+        }
     }
 }
 

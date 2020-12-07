@@ -31,6 +31,18 @@ use miniscript::{MiniscriptKey, Satisfier, ToPublicKey};
 // De-facto standard "dust limit" (even though it should change based on the output type)
 const DUST_LIMIT_SATOSHI: u64 = 546;
 
+// MSB of the nSequence. If set there's no consensus-constraint, so it must be disabled when
+// spending using CSV in order to enforce CSV rules
+pub(crate) const SEQUENCE_LOCKTIME_DISABLE_FLAG: u32 = 1 << 31;
+// When nSequence is lower than this flag the timelock is interpreted as block-height-based,
+// otherwise it's time-based
+pub(crate) const SEQUENCE_LOCKTIME_TYPE_FLAG: u32 = 1 << 22;
+// Mask for the bits used to express the timelock
+pub(crate) const SEQUENCE_LOCKTIME_MASK: u32 = 0x0000FFFF;
+
+// Threshold for nLockTime to be considered a block-height-based timelock rather than time-based
+pub(crate) const BLOCKS_TIMELOCK_THRESHOLD: u32 = 500000000;
+
 /// Trait to check if a value is below the dust limit
 // we implement this trait to make sure we don't mess up the comparison with off-by-one like a <
 // instead of a <= etc. The constant value for the dust limit is not public on purpose, to
@@ -58,6 +70,49 @@ impl After {
             assume_height_reached,
         }
     }
+}
+
+pub(crate) fn check_nsequence_rbf(rbf: u32, csv: u32) -> bool {
+    // This flag cannot be set in the nSequence when spending using OP_CSV
+    if rbf & SEQUENCE_LOCKTIME_DISABLE_FLAG != 0 {
+        return false;
+    }
+
+    // The nSequence value must be >= the O_CSV
+    if rbf < csv {
+        return false;
+    }
+
+    let mask = SEQUENCE_LOCKTIME_TYPE_FLAG | SEQUENCE_LOCKTIME_MASK;
+    let rbf = rbf & mask;
+    let csv = csv & mask;
+
+    // Both values should be represented in the same unit (either time-based or
+    // block-height based)
+    if (rbf < SEQUENCE_LOCKTIME_TYPE_FLAG) != (csv < SEQUENCE_LOCKTIME_TYPE_FLAG) {
+        return false;
+    }
+
+    // The value should be at least `csv`
+    if rbf < csv {
+        return false;
+    }
+
+    true
+}
+
+pub(crate) fn check_nlocktime(nlocktime: u32, required: u32) -> bool {
+    // Both values should be expressed in the same unit
+    if (nlocktime < BLOCKS_TIMELOCK_THRESHOLD) != (required < BLOCKS_TIMELOCK_THRESHOLD) {
+        return false;
+    }
+
+    // The value should be at least `required`
+    if nlocktime < required {
+        return false;
+    }
+
+    true
 }
 
 impl<ToPkCtx: Copy, Pk: MiniscriptKey + ToPublicKey<ToPkCtx>> Satisfier<ToPkCtx, Pk> for After {

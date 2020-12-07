@@ -63,7 +63,7 @@ pub use utils::IsDust;
 use address_validator::AddressValidator;
 use signer::{Signer, SignerId, SignerOrdering, SignersContainer};
 use tx_builder::{BumpFee, CreateTx, FeePolicy, TxBuilder, TxBuilderContext};
-use utils::{descriptor_to_pk_ctx, After, Older, SecpCtx};
+use utils::{check_nlocktime, check_nsequence_rbf, descriptor_to_pk_ctx, After, Older, SecpCtx};
 
 use crate::blockchain::{Blockchain, BlockchainMarker, OfflineBlockchain, Progress};
 use crate::database::{BatchDatabase, BatchOperations, DatabaseUtils};
@@ -330,19 +330,48 @@ where
         };
 
         let lock_time = match builder.locktime {
+            // No nLockTime, default to 0
             None => requirements.timelock.unwrap_or(0),
+            // Specific nLockTime required and we have no constraints, so just set to that value
             Some(x) if requirements.timelock.is_none() => x,
-            Some(x) if requirements.timelock.unwrap() <= x => x,
+            // Specific nLockTime required and it's compatible with the constraints
+            Some(x) if check_nlocktime(x, requirements.timelock.unwrap()) => x,
+            // Invalid nLockTime required
             Some(x) => return Err(Error::Generic(format!("TxBuilder requested timelock of `{}`, but at least `{}` is required to spend from this script", x, requirements.timelock.unwrap())))
         };
 
         let n_sequence = match (builder.rbf, requirements.csv) {
+            // No RBF or CSV but there's an nLockTime, so the nSequence cannot be final
+            (None, None) if lock_time != 0 => 0xFFFFFFFE,
+            // No RBF, CSV or nLockTime, make the transaction final
+            (None, None) => 0xFFFFFFFF,
+
+            // No RBF requested, use the value from CSV. Note that this value is by definition
+            // non-final, so even if a timelock is enabled this nSequence is fine, hence why we
+            // don't bother checking for it here. The same is true for all the other branches below
             (None, Some(csv)) => csv,
-            (Some(rbf), Some(csv)) if rbf < csv => return Err(Error::Generic(format!("Cannot enable RBF with nSequence `{}`, since at least `{}` is required to spend with OP_CSV", rbf, csv))),
-            (None, _) if requirements.timelock.is_some() => 0xFFFFFFFE,
-            (Some(rbf), _) if rbf >= 0xFFFFFFFE => return Err(Error::Generic("Cannot enable RBF with a nSequence >= 0xFFFFFFFE".into())),
-            (Some(rbf), _) => rbf,
-            (None, _) => 0xFFFFFFFF,
+
+            // RBF with a specific value but that value is too high
+            (Some(tx_builder::RBFValue::Value(rbf)), _) if rbf >= 0xFFFFFFFE => {
+                return Err(Error::Generic(
+                    "Cannot enable RBF with a nSequence >= 0xFFFFFFFE".into(),
+                ))
+            }
+            // RBF with a specific value requested, but the value is incompatible with CSV
+            (Some(tx_builder::RBFValue::Value(rbf)), Some(csv))
+                if !check_nsequence_rbf(rbf, csv) =>
+            {
+                return Err(Error::Generic(format!(
+                    "Cannot enable RBF with nSequence `{}` given a required OP_CSV of `{}`",
+                    rbf, csv
+                )))
+            }
+
+            // RBF enabled with the default value with CSV also enabled. CSV takes precedence
+            (Some(tx_builder::RBFValue::Default), Some(csv)) => csv,
+            // Valid RBF, either default or with a specific value. We ignore the `CSV` value
+            // because we've already checked it before
+            (Some(rbf), _) => rbf.get_value(),
         };
 
         let mut tx = Transaction {
@@ -1712,12 +1741,14 @@ mod test {
             )
             .unwrap();
 
-        assert_eq!(psbt.global.unsigned_tx.input[0].sequence, 0xFFFFFFFD);
+        // When CSV is enabled it takes precedence over the rbf value (unless forced by the user).
+        // It will be set to the OP_CSV value, in this case 6
+        assert_eq!(psbt.global.unsigned_tx.input[0].sequence, 6);
     }
 
     #[test]
     #[should_panic(
-        expected = "Cannot enable RBF with nSequence `3`, since at least `6` is required to spend with OP_CSV"
+        expected = "Cannot enable RBF with nSequence `3` given a required OP_CSV of `6`"
     )]
     fn test_create_tx_with_custom_rbf_csv() {
         let (wallet, _, _) = get_funded_wallet(get_test_single_sig_csv());
