@@ -29,7 +29,7 @@ use std::sync::Arc;
 
 use bitcoin::Network;
 use clap::AppSettings;
-use log::{debug, error, info, trace, warn, LevelFilter};
+use log::{debug, info, warn, LevelFilter};
 use rustyline::error::ReadlineError;
 use rustyline::Editor;
 use structopt::StructOpt;

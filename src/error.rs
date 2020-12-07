@@ -82,7 +82,7 @@ pub enum Error {
     Key(crate::keys::KeyError),
     /// Descriptor checksum mismatch
     ChecksumMismatch,
-    /// Spending policy is not compatible with this [ScriptType]
+    /// Spending policy is not compatible with this [`ScriptType`](crate::types::ScriptType)
     SpendingPolicyRequired(crate::types::ScriptType),
     #[allow(missing_docs)]
     InvalidPolicyPathError(crate::descriptor::policy::PolicyError),
@@ -90,7 +90,7 @@ pub enum Error {
     Signer(crate::wallet::signer::SignerError),
 
     // Blockchain interface errors
-    /// Thrown when trying to call a method that requires a network connection, [Wallet::sync] and [Wallet::broadcast]
+    /// Thrown when trying to call a method that requires a network connection, [`Wallet::sync`](crate::Wallet::sync) and [`Wallet::broadcast`](crate::Wallet::broadcast)
     /// This error is thrown when creating the Client for the first time, while recovery attempts are tried
     /// during the sync
     OfflineClient,
