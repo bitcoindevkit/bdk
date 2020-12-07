@@ -110,9 +110,12 @@ impl std::error::Error for Error {}
 
 macro_rules! impl_error {
     ( $from:ty, $to:ident ) => {
-        impl std::convert::From<$from> for Error {
+        impl_error!($from, $to, Error);
+    };
+    ( $from:ty, $to:ident, $impl_for:ty ) => {
+        impl std::convert::From<$from> for $impl_for {
             fn from(err: $from) -> Self {
-                Error::$to(err)
+                <$impl_for>::$to(err)
             }
         }
     };

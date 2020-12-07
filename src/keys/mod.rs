@@ -679,17 +679,8 @@ pub enum KeyError {
     Miniscript(miniscript::Error),
 }
 
-impl From<miniscript::Error> for KeyError {
-    fn from(inner: miniscript::Error) -> Self {
-        KeyError::Miniscript(inner)
-    }
-}
-
-impl From<bitcoin::util::bip32::Error> for KeyError {
-    fn from(inner: bitcoin::util::bip32::Error) -> Self {
-        KeyError::BIP32(inner)
-    }
-}
+impl_error!(miniscript::Error, Miniscript, KeyError);
+impl_error!(bitcoin::util::bip32::Error, BIP32, KeyError);
 
 impl std::fmt::Display for KeyError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
