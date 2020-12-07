@@ -24,34 +24,52 @@
 
 use std::fmt;
 
-use bitcoin::{Address, OutPoint};
+use crate::{descriptor, wallet, wallet::address_validator};
+use bitcoin::OutPoint;
 
 /// Errors that can be thrown by the [`Wallet`](crate::wallet::Wallet)
 #[derive(Debug)]
 pub enum Error {
-    KeyMismatch(bitcoin::secp256k1::PublicKey, bitcoin::secp256k1::PublicKey),
-    MissingInputUTXO(usize),
+    /// Wrong number of bytes found when trying to convert to u32
     InvalidU32Bytes(Vec<u8>),
+    /// Generic error
     Generic(String),
+    /// This error is thrown when trying to convert Bare and Public key script to address
     ScriptDoesntHaveAddressForm,
+    /// Found multiple outputs when `single_recipient` option has been specified
     SingleRecipientMultipleOutputs,
+    /// `single_recipient` option is selected but neither `drain_wallet` nor `manually_selected_only` are
     SingleRecipientNoInputs,
+    /// Cannot build a tx without recipients
     NoRecipients,
+    /// `manually_selected_only` option is selected but no utxo has been passed
     NoUtxosSelected,
+    /// Output created is under the dust limit, 546 satoshis
     OutputBelowDustLimit(usize),
+    /// Wallet's UTXO set is not enough to cover recipient's requested plus fee
     InsufficientFunds,
+    /// Branch and bound coin selection possible attempts with sufficiently big UTXO set could grow
+    /// exponentially, thus a limit is set, and when hit, this error is thrown
     BnBTotalTriesExceeded,
+    /// Branch and bound coin selection tries to avoid needing a change by finding the right inputs for
+    /// the desired outputs plus fee, if there is not such combination this error is thrown
     BnBNoExactMatch,
-    InvalidAddressNetwork(Address),
+    /// Happens when trying to spend an UTXO that is not in the internal database
     UnknownUTXO,
-    DifferentTransactions,
+    /// Thrown when a tx is not found in the internal database
     TransactionNotFound,
+    /// Happens when trying to bump a transaction that is already confirmed
     TransactionConfirmed,
+    /// Trying to replace a tx that has a sequence = `0xFFFFFFFF`
     IrreplaceableTransaction,
+    /// When bumping a tx the fee rate requested is lower than required
     FeeRateTooLow {
+        /// Required fee rate (satoshi/vbyte)
         required: crate::types::FeeRate,
     },
+    /// When bumping a tx the absolute fee requested is lower than replaced tx absolute fee
     FeeTooLow {
+        /// Required fee absolute value (satoshi)
         required: u64,
     },
     /// In order to use the [`TxBuilder::add_global_xpubs`] option every extended
@@ -60,43 +78,66 @@ pub enum Error {
     ///
     /// [`TxBuilder::add_global_xpubs`]: crate::wallet::tx_builder::TxBuilder::add_global_xpubs
     MissingKeyOrigin(String),
-
+    #[allow(missing_docs)]
     Key(crate::keys::KeyError),
-
+    /// Descriptor checksum mismatch
     ChecksumMismatch,
-    DifferentDescriptorStructure,
-
+    /// Spending policy is not compatible with this [ScriptType]
     SpendingPolicyRequired(crate::types::ScriptType),
+    #[allow(missing_docs)]
     InvalidPolicyPathError(crate::descriptor::policy::PolicyError),
-
+    #[allow(missing_docs)]
     Signer(crate::wallet::signer::SignerError),
 
     // Blockchain interface errors
-    Uncapable(crate::blockchain::Capability),
+    /// Thrown when trying to call a method that requires a network connection, [Wallet::sync] and [Wallet::broadcast]
+    /// This error is thrown when creating the Client for the first time, while recovery attempts are tried
+    /// during the sync
     OfflineClient,
+    /// Progress value must be between `0.0` (included) and `100.0` (included)
     InvalidProgressValue(f32),
+    /// Progress update error (maybe the channel has been closed)
     ProgressUpdateError,
-    MissingCachedAddresses,
+    /// Requested outpoint doesn't exist in the tx (vout greater than available outputs)
     InvalidOutpoint(OutPoint),
 
+    #[allow(missing_docs)]
     Descriptor(crate::descriptor::error::Error),
+    #[allow(missing_docs)]
     AddressValidator(crate::wallet::address_validator::AddressValidatorError),
-
+    #[allow(missing_docs)]
     Encode(bitcoin::consensus::encode::Error),
+    #[allow(missing_docs)]
     Miniscript(miniscript::Error),
+    #[allow(missing_docs)]
     BIP32(bitcoin::util::bip32::Error),
+    #[allow(missing_docs)]
     Secp256k1(bitcoin::secp256k1::Error),
+    #[allow(missing_docs)]
     JSON(serde_json::Error),
+    #[allow(missing_docs)]
     Hex(bitcoin::hashes::hex::Error),
+    #[allow(missing_docs)]
     PSBT(bitcoin::util::psbt::Error),
 
+    //KeyMismatch(bitcoin::secp256k1::PublicKey, bitcoin::secp256k1::PublicKey),
+    //MissingInputUTXO(usize),
+    //InvalidAddressNetwork(Address),
+    //DifferentTransactions,
+    //DifferentDescriptorStructure,
+    //Uncapable(crate::blockchain::Capability),
+    //MissingCachedAddresses,
     #[cfg(feature = "electrum")]
+    #[allow(missing_docs)]
     Electrum(electrum_client::Error),
     #[cfg(feature = "esplora")]
+    #[allow(missing_docs)]
     Esplora(crate::blockchain::esplora::EsploraError),
+    #[allow(missing_docs)]
     #[cfg(feature = "compact_filters")]
     CompactFilters(crate::blockchain::compact_filters::CompactFiltersError),
     #[cfg(feature = "key-value-db")]
+    #[allow(missing_docs)]
     Sled(sled::Error),
 }
 
@@ -121,16 +162,10 @@ macro_rules! impl_error {
     };
 }
 
-impl_error!(crate::descriptor::error::Error, Descriptor);
-impl_error!(
-    crate::wallet::address_validator::AddressValidatorError,
-    AddressValidator
-);
-impl_error!(
-    crate::descriptor::policy::PolicyError,
-    InvalidPolicyPathError
-);
-impl_error!(crate::wallet::signer::SignerError, Signer);
+impl_error!(descriptor::error::Error, Descriptor);
+impl_error!(address_validator::AddressValidatorError, AddressValidator);
+impl_error!(descriptor::policy::PolicyError, InvalidPolicyPathError);
+impl_error!(wallet::signer::SignerError, Signer);
 
 impl From<crate::keys::KeyError> for Error {
     fn from(key_error: crate::keys::KeyError) -> Error {

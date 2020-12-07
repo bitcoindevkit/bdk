@@ -463,17 +463,24 @@ impl Blockchain for CompactFiltersBlockchain {
 /// Data to connect to a Bitcoin P2P peer
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
 pub struct BitcoinPeerConfig {
+    /// Peer address such as 127.0.0.1:18333
     pub address: String,
+    /// Optional socks5 proxy
     pub socks5: Option<String>,
+    /// Optional socks5 proxy credentials
     pub socks5_credentials: Option<(String, String)>,
 }
 
 /// Configuration for a [`CompactFiltersBlockchain`]
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
 pub struct CompactFiltersBlockchainConfig {
+    /// List of peers to try to connect to for asking headers and filters
     pub peers: Vec<BitcoinPeerConfig>,
+    /// Network used
     pub network: Network,
+    /// Storage dir to save partially downloaded headers and full blocks
     pub storage_dir: String,
+    /// Optionally skip initial `skip_blocks` blocks (default: 0)
     pub skip_blocks: Option<usize>,
 }
 
