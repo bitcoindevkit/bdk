@@ -366,7 +366,7 @@ impl<D: Database, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderContext> TxBuilde
         self
     }
 
-    /// Spend all the available inputs. This respects filters like [`unspendable`] and the change policy.
+    /// Spend all the available inputs. This respects filters like [`TxBuilder::unspendable`] and the change policy.
     pub fn drain_wallet(mut self) -> Self {
         self.drain_wallet = true;
         self

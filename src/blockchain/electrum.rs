@@ -165,7 +165,9 @@ pub struct ElectrumBlockchainConfig {
     pub url: String,
     /// URL of the socks5 proxy server or a Tor service
     pub socks5: Option<String>,
+    /// Request retry count
     pub retry: u8,
+    /// Request timeout (seconds)
     pub timeout: u8,
 }
 
