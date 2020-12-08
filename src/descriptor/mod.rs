@@ -44,7 +44,9 @@ pub use miniscript::{
 pub mod checksum;
 mod dsl;
 pub mod error;
+#[allow(missing_docs)] // TODO add missing docs and remove this allow
 pub mod policy;
+#[allow(missing_docs)] // TODO add missing docs and remove this allow
 pub mod template;
 
 pub use self::checksum::get_checksum;
@@ -64,6 +66,7 @@ pub type ExtendedDescriptor = Descriptor<DescriptorPublicKey>;
 /// [`psbt::Output`]: bitcoin::util::psbt::Output
 pub type HDKeyPaths = BTreeMap<PublicKey, (Fingerprint, DerivationPath)>;
 
+#[allow(missing_docs)] // TODO add missing docs and remove this allow
 /// Trait for types which can be converted into an [`ExtendedDescriptor`] and a [`KeyMap`] usable by a wallet in a specific [`Network`]
 pub trait ToWalletDescriptor {
     fn to_wallet_descriptor(
@@ -185,6 +188,7 @@ impl ToWalletDescriptor for (ExtendedDescriptor, KeyMap, ValidNetworks) {
     }
 }
 
+#[allow(missing_docs)] // TODO add missing docs and remove this allow
 /// Trait implemented on [`Descriptor`]s to add a method to extract the spending [`policy`]
 pub trait ExtractPolicy {
     fn extract_policy(

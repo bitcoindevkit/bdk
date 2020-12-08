@@ -46,11 +46,15 @@ use miniscript::psbt::PsbtInputSatisfier;
 #[allow(unused_imports)]
 use log::{debug, error, info, trace};
 
+#[allow(missing_docs)] // TODO add missing docs and remove this allow
 pub mod address_validator;
+#[allow(missing_docs)] // TODO add missing docs and remove this allow
 pub mod coin_selection;
 pub mod export;
+#[allow(missing_docs)] // TODO add missing docs and remove this allow
 pub mod signer;
 pub mod time;
+#[allow(missing_docs)] // TODO add missing docs and remove this allow
 pub mod tx_builder;
 pub(crate) mod utils;
 
@@ -930,6 +934,7 @@ where
         Ok((psbt, finished))
     }
 
+    #[allow(missing_docs)] // TODO add missing docs and remove this allow
     pub fn secp_ctx(&self) -> &SecpCtx {
         &self.secp
     }
