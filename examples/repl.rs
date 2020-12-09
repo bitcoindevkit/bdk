@@ -35,6 +35,7 @@ use rustyline::Editor;
 use structopt::StructOpt;
 
 use bdk::bitcoin;
+#[cfg(feature = "esplora")]
 use bdk::blockchain::esplora::EsploraBlockchainConfig;
 use bdk::blockchain::{
     AnyBlockchain, AnyBlockchainConfig, ConfigurableBlockchain, ElectrumBlockchainConfig,
@@ -87,18 +88,28 @@ fn main() {
     let tree = database.open_tree(cli_opt.wallet).unwrap();
     debug!("database opened successfully");
 
-    let config = match cli_opt.esplora {
-        Some(base_url) => AnyBlockchainConfig::Esplora(EsploraBlockchainConfig {
-            base_url: base_url.to_string(),
-            concurrency: Some(cli_opt.esplora_concurrency),
-        }),
-        None => AnyBlockchainConfig::Electrum(ElectrumBlockchainConfig {
+    // Try to use Esplora config if "esplora" feature is enabled
+    #[cfg(feature = "esplora")]
+    let config_esplora: Option<AnyBlockchainConfig> = {
+        let esplora_concurrency = cli_opt.esplora_concurrency;
+        cli_opt.esplora.map(|base_url| {
+            AnyBlockchainConfig::Esplora(EsploraBlockchainConfig {
+                base_url: base_url.to_string(),
+                concurrency: Some(esplora_concurrency),
+            })
+        })
+    };
+    #[cfg(not(feature = "esplora"))]
+    let config_esplora = None;
+
+    // Fall back to Electrum config if Esplora config isn't provided
+    let config =
+        config_esplora.unwrap_or(AnyBlockchainConfig::Electrum(ElectrumBlockchainConfig {
             url: cli_opt.electrum,
             socks5: cli_opt.proxy,
             retry: 10,
             timeout: 10,
-        }),
-    };
+        }));
 
     let wallet = Wallet::new(
         descriptor,
