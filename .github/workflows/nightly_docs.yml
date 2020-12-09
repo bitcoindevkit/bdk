@@ -30,7 +30,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: rustdoc
-          args: --verbose --features=compiler,electrum,esplora,compact_filters,key-value-db,all-keys -- --cfg docsrs
+          args: --verbose --features=compiler,electrum,esplora,experimental-compact-filters,key-value-db,all-keys -- --cfg docsrs
       - name: Upload artifact
         uses: actions/upload-artifact@v2
         with:

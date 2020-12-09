@@ -45,7 +45,7 @@ extern crate async_trait;
 #[macro_use]
 extern crate bdk_macros;
 
-#[cfg(feature = "compact_filters")]
+#[cfg(feature = "experimental-compact-filters")]
 #[macro_use]
 extern crate lazy_static;
 

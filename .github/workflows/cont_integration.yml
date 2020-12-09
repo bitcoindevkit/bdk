@@ -19,15 +19,15 @@ jobs:
           - minimal,esplora
           - key-value-db
           - electrum
-          - compact_filters
+          - experimental-compact-filters
           - cli-utils,esplora,key-value-db,electrum
           - compiler
         include:
           - rust: stable
-            features: compact_filters
+            features: experimental-compact-filters
             clippy: skip
           - rust: 1.45.0
-            features: compact_filters
+            features: experimental-compact-filters
             clippy: skip
     steps:
       - name: checkout

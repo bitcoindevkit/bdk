@@ -99,7 +99,7 @@ macro_rules! impl_inner_method {
             AnyBlockchain::Electrum(inner) => inner.$name( $($args, )* ),
             #[cfg(feature = "esplora")]
             AnyBlockchain::Esplora(inner) => inner.$name( $($args, )* ),
-            #[cfg(feature = "compact_filters")]
+            #[cfg(feature = "experimental-compact-filters")]
             AnyBlockchain::CompactFilters(inner) => inner.$name( $($args, )* ),
         }
     }
@@ -119,8 +119,8 @@ pub enum AnyBlockchain {
     #[cfg_attr(docsrs, doc(cfg(feature = "esplora")))]
     #[allow(missing_docs)]
     Esplora(esplora::EsploraBlockchain),
-    #[cfg(feature = "compact_filters")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "compact_filters")))]
+    #[cfg(feature = "experimental-compact-filters")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "experimental-compact-filters")))]
     #[allow(missing_docs)]
     CompactFilters(compact_filters::CompactFiltersBlockchain),
 }
@@ -177,7 +177,7 @@ impl Blockchain for AnyBlockchain {
 
 impl_from!(electrum::ElectrumBlockchain, AnyBlockchain, Electrum, #[cfg(feature = "electrum")]);
 impl_from!(esplora::EsploraBlockchain, AnyBlockchain, Esplora, #[cfg(feature = "esplora")]);
-impl_from!(compact_filters::CompactFiltersBlockchain, AnyBlockchain, CompactFilters, #[cfg(feature = "compact_filters")]);
+impl_from!(compact_filters::CompactFiltersBlockchain, AnyBlockchain, CompactFilters, #[cfg(feature = "experimental-compact-filters")]);
 
 /// Type that can contain any of the blockchain configurations defined by the library
 ///
@@ -194,8 +194,8 @@ pub enum AnyBlockchainConfig {
     #[cfg_attr(docsrs, doc(cfg(feature = "esplora")))]
     #[allow(missing_docs)]
     Esplora(esplora::EsploraBlockchainConfig),
-    #[cfg(feature = "compact_filters")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "compact_filters")))]
+    #[cfg(feature = "experimental-compact-filters")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "experimental-compact-filters")))]
     #[allow(missing_docs)]
     CompactFilters(compact_filters::CompactFiltersBlockchainConfig),
 }
@@ -213,7 +213,7 @@ impl ConfigurableBlockchain for AnyBlockchain {
             AnyBlockchainConfig::Esplora(inner) => {
                 AnyBlockchain::Esplora(esplora::EsploraBlockchain::from_config(inner)?)
             }
-            #[cfg(feature = "compact_filters")]
+            #[cfg(feature = "experimental-compact-filters")]
             AnyBlockchainConfig::CompactFilters(inner) => AnyBlockchain::CompactFilters(
                 compact_filters::CompactFiltersBlockchain::from_config(inner)?,
             ),
@@ -223,4 +223,4 @@ impl ConfigurableBlockchain for AnyBlockchain {
 
 impl_from!(electrum::ElectrumBlockchainConfig, AnyBlockchainConfig, Electrum, #[cfg(feature = "electrum")]);
 impl_from!(esplora::EsploraBlockchainConfig, AnyBlockchainConfig, Esplora, #[cfg(feature = "esplora")]);
-impl_from!(compact_filters::CompactFiltersBlockchainConfig, AnyBlockchainConfig, CompactFilters, #[cfg(feature = "compact_filters")]);
+impl_from!(compact_filters::CompactFiltersBlockchainConfig, AnyBlockchainConfig, CompactFilters, #[cfg(feature = "experimental-compact-filters")]);

@@ -44,7 +44,7 @@ compiler = ["clap", "miniscript/compiler"]
 default = ["key-value-db", "electrum"]
 electrum = ["electrum-client"]
 esplora = ["reqwest", "futures"]
-compact_filters = ["rocksdb", "socks", "lazy_static", "cc"]
+experimental-compact-filters = ["rocksdb", "socks", "lazy_static", "cc"]
 key-value-db = ["sled"]
 cli-utils = ["clap", "base64", "structopt"]
 async-interface = ["async-trait"]
@@ -84,6 +84,6 @@ members = ["macros", "testutils", "testutils-macros"]
 # Generate docs with nightly to add the "features required" badge
 # https://stackoverflow.com/questions/61417452/how-to-get-a-feature-requirement-tag-in-the-documentation-generated-by-cargo-do
 [package.metadata.docs.rs]
-features = ["compiler", "electrum", "esplora", "compact_filters", "key-value-db", "all-keys"]
+features = ["compiler", "electrum", "esplora", "experimental-compact-filters", "key-value-db", "all-keys"]
 # defines the configuration attribute `docsrs`
 rustdoc-args = ["--cfg", "docsrs"]

@@ -43,9 +43,17 @@ use crate::FeeRate;
 #[cfg(any(feature = "electrum", feature = "esplora"))]
 pub(crate) mod utils;
 
-#[cfg(any(feature = "electrum", feature = "esplora", feature = "compact_filters"))]
+#[cfg(any(
+    feature = "electrum",
+    feature = "esplora",
+    feature = "experimental-compact-filters"
+))]
 pub mod any;
-#[cfg(any(feature = "electrum", feature = "esplora", feature = "compact_filters"))]
+#[cfg(any(
+    feature = "electrum",
+    feature = "esplora",
+    feature = "experimental-compact-filters"
+))]
 pub use any::{AnyBlockchain, AnyBlockchainConfig};
 
 #[cfg(feature = "electrum")]
@@ -62,10 +70,10 @@ pub mod esplora;
 #[cfg(feature = "esplora")]
 pub use self::esplora::EsploraBlockchain;
 
-#[cfg(feature = "compact_filters")]
-#[cfg_attr(docsrs, doc(cfg(feature = "compact_filters")))]
+#[cfg(feature = "experimental-compact-filters")]
+#[cfg_attr(docsrs, doc(cfg(feature = "experimental-compact-filters")))]
 pub mod compact_filters;
-#[cfg(feature = "compact_filters")]
+#[cfg(feature = "experimental-compact-filters")]
 pub use self::compact_filters::CompactFiltersBlockchain;
 
 /// Capabilities that can be supported by a [`Blockchain`] backend

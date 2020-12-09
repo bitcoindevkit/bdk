@@ -134,7 +134,7 @@ pub enum Error {
     #[allow(missing_docs)]
     Esplora(crate::blockchain::esplora::EsploraError),
     #[allow(missing_docs)]
-    #[cfg(feature = "compact_filters")]
+    #[cfg(feature = "experimental-compact-filters")]
     CompactFilters(crate::blockchain::compact_filters::CompactFiltersError),
     #[cfg(feature = "key-value-db")]
     #[allow(missing_docs)]
@@ -193,7 +193,7 @@ impl_error!(crate::blockchain::esplora::EsploraError, Esplora);
 #[cfg(feature = "key-value-db")]
 impl_error!(sled::Error, Sled);
 
-#[cfg(feature = "compact_filters")]
+#[cfg(feature = "experimental-compact-filters")]
 impl From<crate::blockchain::compact_filters::CompactFiltersError> for Error {
     fn from(other: crate::blockchain::compact_filters::CompactFiltersError) -> Self {
         match other {
