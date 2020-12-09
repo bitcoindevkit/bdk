@@ -18,7 +18,7 @@ jobs:
       - name: Install tarpaulin
         run: cargo install cargo-tarpaulin
       - name: Tarpaulin
-        run: cargo tarpaulin --features all-keys,cli-utils,compiler,esplora,experimental-compact-filters --run-types Tests,Doctests --exclude-files "testutils/*"
+        run: cargo tarpaulin --features all-keys,experimental-cli-utils,compiler,esplora,experimental-compact-filters --run-types Tests,Doctests --exclude-files "testutils/*"
 
       - name: Publish to codecov.io
         uses: codecov/codecov-action@v1.0.14

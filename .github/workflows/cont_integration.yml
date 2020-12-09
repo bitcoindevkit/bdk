@@ -20,7 +20,7 @@ jobs:
           - key-value-db
           - electrum
           - experimental-compact-filters
-          - cli-utils,esplora,key-value-db,electrum
+          - experimental-cli-utils,esplora,key-value-db,electrum
           - compiler
         include:
           - rust: stable
@@ -118,7 +118,7 @@ jobs:
       - name: Add target wasm32
         run: rustup target add wasm32-unknown-unknown
       - name: Check
-        run: cargo check --target wasm32-unknown-unknown --features cli-utils,esplora --no-default-features
+        run: cargo check --target wasm32-unknown-unknown --features experimental-cli-utils,esplora --no-default-features
 
   fmt:
     name: Rust fmt

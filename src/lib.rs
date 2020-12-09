@@ -58,7 +58,7 @@ pub extern crate reqwest;
 #[cfg(feature = "key-value-db")]
 pub extern crate sled;
 
-#[cfg(feature = "cli-utils")]
+#[cfg(feature = "experimental-cli-utils")]
 pub mod cli;
 
 #[allow(unused_imports)]

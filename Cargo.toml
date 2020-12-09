@@ -44,12 +44,14 @@ compiler = ["clap", "miniscript/compiler"]
 default = ["key-value-db", "electrum"]
 electrum = ["electrum-client"]
 esplora = ["reqwest", "futures"]
-experimental-compact-filters = ["rocksdb", "socks", "lazy_static", "cc"]
 key-value-db = ["sled"]
-cli-utils = ["clap", "base64", "structopt"]
 async-interface = ["async-trait"]
 all-keys = ["keys-bip39"]
 keys-bip39 = ["tiny-bip39"]
+
+# experimental features, less ready to be used
+experimental-compact-filters = ["rocksdb", "socks", "lazy_static", "cc"]
+experimental-cli-utils = ["clap", "base64", "structopt"]
 
 # Debug/Test features
 debug-proc-macros = ["bdk-macros/debug", "bdk-testutils-macros/debug"]
@@ -67,7 +69,7 @@ env_logger = "0.7"
 
 [[example]]
 name = "repl"
-required-features = ["cli-utils", "esplora"]
+required-features = ["experimental-cli-utils", "esplora"]
 [[example]]
 name = "parse_descriptor"
 [[example]]
