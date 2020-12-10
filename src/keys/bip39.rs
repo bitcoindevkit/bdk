@@ -36,8 +36,10 @@ use bip39::{Language, Mnemonic, MnemonicType, Seed};
 
 use super::{any_network, DerivableKey, DescriptorKey, GeneratableKey, GeneratedKey, KeyError};
 
+/// Type for a BIP39 mnemonic with an optional passphrase
 pub type MnemonicWithPassphrase = (Mnemonic, Option<String>);
 
+#[cfg_attr(docsrs, doc(cfg(feature = "keys-bip39")))]
 impl<Ctx: ScriptContext> DerivableKey<Ctx> for Seed {
     fn add_metadata(
         self,
@@ -54,6 +56,7 @@ impl<Ctx: ScriptContext> DerivableKey<Ctx> for Seed {
     }
 }
 
+#[cfg_attr(docsrs, doc(cfg(feature = "keys-bip39")))]
 impl<Ctx: ScriptContext> DerivableKey<Ctx> for MnemonicWithPassphrase {
     fn add_metadata(
         self,
@@ -66,6 +69,7 @@ impl<Ctx: ScriptContext> DerivableKey<Ctx> for MnemonicWithPassphrase {
     }
 }
 
+#[cfg_attr(docsrs, doc(cfg(feature = "keys-bip39")))]
 impl<Ctx: ScriptContext> DerivableKey<Ctx> for Mnemonic {
     fn add_metadata(
         self,
@@ -76,6 +80,7 @@ impl<Ctx: ScriptContext> DerivableKey<Ctx> for Mnemonic {
     }
 }
 
+#[cfg_attr(docsrs, doc(cfg(feature = "keys-bip39")))]
 impl<Ctx: ScriptContext> GeneratableKey<Ctx> for Mnemonic {
     type Entropy = [u8; 32];
 

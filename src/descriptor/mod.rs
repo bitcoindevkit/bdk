@@ -52,7 +52,8 @@ pub mod template;
 pub use self::checksum::get_checksum;
 use self::error::Error;
 pub use self::policy::Policy;
-use crate::keys::{KeyError, ToDescriptorKey, ValidNetworks};
+use self::template::DescriptorTemplateOut;
+use crate::keys::{KeyError, ToDescriptorKey};
 use crate::wallet::signer::SignersContainer;
 use crate::wallet::utils::{descriptor_to_pk_ctx, SecpCtx};
 
@@ -151,7 +152,7 @@ impl ToWalletDescriptor for (ExtendedDescriptor, KeyMap) {
     }
 }
 
-impl ToWalletDescriptor for (ExtendedDescriptor, KeyMap, ValidNetworks) {
+impl ToWalletDescriptor for DescriptorTemplateOut {
     fn to_wallet_descriptor(
         self,
         network: Network,

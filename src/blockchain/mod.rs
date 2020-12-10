@@ -95,7 +95,7 @@ pub trait BlockchainMarker {}
 /// The [`BlockchainMarker`] marker trait is automatically implemented for [`Blockchain`] types
 impl<T: Blockchain> BlockchainMarker for T {}
 
-/// Type that only implements [`Blockchain`] and is always "offline"
+/// Type that only implements [`BlockchainMarker`] and is always "offline"
 pub struct OfflineBlockchain;
 impl BlockchainMarker for OfflineBlockchain {}
 

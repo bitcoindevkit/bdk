@@ -201,7 +201,8 @@ macro_rules! impl_sortedmulti {
 
 /// Macro to write full descriptors with code
 ///
-/// This macro expands to an object of type `Result<(Descriptor<DescriptorPublicKey>, KeyMap, ValidNetworks), Error>`.
+/// This macro expands to a `Result` of
+/// [`DescriptorTemplateOut`](super::template::DescriptorTemplateOut) and [`Error`](crate::Error)
 ///
 /// ## Example
 ///
