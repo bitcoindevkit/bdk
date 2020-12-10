@@ -129,15 +129,19 @@ impl<Ctx: ScriptContext> DescriptorKey<Ctx> {
 /// Enum representation of the known valid [`ScriptContext`]s
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
 pub enum ScriptContextEnum {
+    /// Legacy scripts
     Legacy,
+    /// Segwitv0 scripts
     Segwitv0,
 }
 
 impl ScriptContextEnum {
+    /// Returns whether the script context is [`ScriptContextEnum::Legacy`]
     pub fn is_legacy(&self) -> bool {
         self == &ScriptContextEnum::Legacy
     }
 
+    /// Returns whether the script context is [`ScriptContextEnum::Segwitv0`]
     pub fn is_segwit_v0(&self) -> bool {
         self == &ScriptContextEnum::Segwitv0
     }
@@ -145,12 +149,15 @@ impl ScriptContextEnum {
 
 /// Trait that adds extra useful methods to [`ScriptContext`]s
 pub trait ExtScriptContext: ScriptContext {
+    /// Returns the [`ScriptContext`] as a [`ScriptContextEnum`]
     fn as_enum() -> ScriptContextEnum;
 
+    /// Returns whether the script context is [`Legacy`](miniscript::Legacy)
     fn is_legacy() -> bool {
         Self::as_enum().is_legacy()
     }
 
+    /// Returns whether the script context is [`Segwitv0`](miniscript::Segwitv0)
     fn is_segwit_v0() -> bool {
         Self::as_enum().is_segwit_v0()
     }
@@ -345,7 +352,7 @@ pub struct GeneratedKey<K, Ctx: ScriptContext> {
 }
 
 impl<K, Ctx: ScriptContext> GeneratedKey<K, Ctx> {
-    pub fn new(key: K, valid_networks: ValidNetworks) -> Self {
+    fn new(key: K, valid_networks: ValidNetworks) -> Self {
         GeneratedKey {
             key,
             valid_networks,
@@ -482,6 +489,7 @@ impl<Ctx: ScriptContext> GeneratableKey<Ctx> for bip32::ExtendedPrivKey {
 /// Defaults to creating compressed keys, which save on-chain bytes and fees
 #[derive(Debug, Copy, Clone)]
 pub struct PrivateKeyGenerateOptions {
+    /// Whether the generated key should be "compressed" or not
     pub compressed: bool,
 }
 
@@ -670,12 +678,19 @@ impl<Ctx: ScriptContext> ToDescriptorKey<Ctx> for PrivateKey {
 /// Errors thrown while working with [`keys`](crate::keys)
 #[derive(Debug)]
 pub enum KeyError {
+    /// The key cannot exist in the given script context
     InvalidScriptContext,
+    /// The key is not valid for the given network
     InvalidNetwork,
+    /// The key has an invalid checksum
     InvalidChecksum,
+
+    /// Custom error message
     Message(String),
 
+    #[allow(missing_docs)]
     BIP32(bitcoin::util::bip32::Error),
+    #[allow(missing_docs)]
     Miniscript(miniscript::Error),
 }
 

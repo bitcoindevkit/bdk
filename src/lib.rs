@@ -256,7 +256,6 @@ pub mod database;
 pub mod descriptor;
 #[cfg(feature = "test-md-docs")]
 mod doctest;
-#[allow(missing_docs)] // TODO add missing docs and remove this allow
 pub mod keys;
 pub(crate) mod psbt;
 #[allow(missing_docs)] // TODO add missing docs and remove this allow
