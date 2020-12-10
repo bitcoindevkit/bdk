@@ -57,6 +57,27 @@ jobs:
         if: ${{ matrix.test != 'skip' }}
         run: cargo test --features ${{ matrix.features }} --no-default-features
 
+  test-readme-examples:
+    name: Test README.md examples
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@v2
+      - name: cache
+        uses: actions/cache@v2
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-test-md-docs-${{ hashFiles('**/Cargo.toml','**/Cargo.lock') }}
+      - name: Set default toolchain
+        run: rustup default nightly
+      - name: Set profile
+        run: rustup set profile minimal
+      - name: Test
+        run: cargo test --features test-md-docs --no-default-features -- doctest::ReadmeDoctests
+
   test-electrum:
     name: Test electrum
     runs-on: ubuntu-16.04
