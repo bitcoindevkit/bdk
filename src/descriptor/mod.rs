@@ -44,7 +44,6 @@ pub use miniscript::{
 pub mod checksum;
 mod dsl;
 pub mod error;
-#[allow(missing_docs)] // TODO add missing docs and remove this allow
 pub mod policy;
 #[allow(missing_docs)] // TODO add missing docs and remove this allow
 pub mod template;
