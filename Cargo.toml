@@ -67,7 +67,7 @@ env_logger = "0.7"
 
 [[example]]
 name = "repl"
-required-features = ["cli-utils", "esplora"]
+required-features = ["cli-utils"]
 [[example]]
 name = "parse_descriptor"
 [[example]]
