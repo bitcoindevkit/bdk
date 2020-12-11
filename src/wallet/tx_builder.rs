@@ -508,6 +508,7 @@ impl Default for TxOrdering {
 }
 
 impl TxOrdering {
+    /// Sort transaction inputs and outputs by [`TxOrdering`] variant
     pub fn sort_tx(&self, tx: &mut Transaction) {
         match self {
             TxOrdering::Untouched => {}

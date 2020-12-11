@@ -113,7 +113,9 @@ use crate::descriptor::XKeyUtils;
 /// multiple of them
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum SignerId {
+    /// Bitcoin HASH160 (RIPEMD160 after SHA256) hash of an ECDSA public key
     PkHash(hash160::Hash),
+    /// The fingerprint of a BIP32 extended key
     Fingerprint(Fingerprint),
 }
 
@@ -324,6 +326,7 @@ impl From<(SignerId, SignerOrdering)> for SignersContainerKey {
 pub struct SignersContainer(HashMap<SignersContainerKey, Arc<dyn Signer>>);
 
 impl SignersContainer {
+    /// Create a map of public keys to secret keys
     pub fn as_key_map(&self, secp: &SecpCtx) -> KeyMap {
         self.0
             .values()
