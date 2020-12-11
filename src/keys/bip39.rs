@@ -43,7 +43,7 @@ pub type MnemonicWithPassphrase = (Mnemonic, Option<String>);
 impl<Ctx: ScriptContext> DerivableKey<Ctx> for Seed {
     fn add_metadata(
         self,
-        source: Option<(bip32::Fingerprint, bip32::DerivationPath)>,
+        source: Option<bip32::KeySource>,
         derivation_path: bip32::DerivationPath,
     ) -> Result<DescriptorKey<Ctx>, KeyError> {
         let xprv = bip32::ExtendedPrivKey::new_master(Network::Bitcoin, &self.as_bytes())?;
@@ -60,7 +60,7 @@ impl<Ctx: ScriptContext> DerivableKey<Ctx> for Seed {
 impl<Ctx: ScriptContext> DerivableKey<Ctx> for MnemonicWithPassphrase {
     fn add_metadata(
         self,
-        source: Option<(bip32::Fingerprint, bip32::DerivationPath)>,
+        source: Option<bip32::KeySource>,
         derivation_path: bip32::DerivationPath,
     ) -> Result<DescriptorKey<Ctx>, KeyError> {
         let (mnemonic, passphrase) = self;
@@ -73,7 +73,7 @@ impl<Ctx: ScriptContext> DerivableKey<Ctx> for MnemonicWithPassphrase {
 impl<Ctx: ScriptContext> DerivableKey<Ctx> for Mnemonic {
     fn add_metadata(
         self,
-        source: Option<(bip32::Fingerprint, bip32::DerivationPath)>,
+        source: Option<bip32::KeySource>,
         derivation_path: bip32::DerivationPath,
     ) -> Result<DescriptorKey<Ctx>, KeyError> {
         (self, None).add_metadata(source, derivation_path)

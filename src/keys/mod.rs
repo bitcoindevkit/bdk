@@ -296,7 +296,7 @@ pub trait ToDescriptorKey<Ctx: ScriptContext>: Sized {
 /// When extra metadata are provided, a [`DerivableKey`] can be transofrmed into a
 /// [`DescriptorKey`]: the trait [`ToDescriptorKey`] is automatically implemented
 /// for `(DerivableKey, DerivationPath)` and
-/// `(DerivableKey, (Fingerprint, DerivationPath), DerivationPath)` tuples.
+/// `(DerivableKey, KeySource, DerivationPath)` tuples.
 ///
 /// For key types that don't encode any indication about the path to use (like bip39), it's
 /// generally recommended to implemented this trait instead of [`ToDescriptorKey`]. The same
@@ -307,7 +307,7 @@ pub trait DerivableKey<Ctx: ScriptContext> {
     /// Add a extra metadata, consume `self` and turn it into a [`DescriptorKey`]
     fn add_metadata(
         self,
-        origin: Option<(bip32::Fingerprint, bip32::DerivationPath)>,
+        origin: Option<bip32::KeySource>,
         derivation_path: bip32::DerivationPath,
     ) -> Result<DescriptorKey<Ctx>, KeyError>;
 }
@@ -315,7 +315,7 @@ pub trait DerivableKey<Ctx: ScriptContext> {
 impl<Ctx: ScriptContext> DerivableKey<Ctx> for bip32::ExtendedPubKey {
     fn add_metadata(
         self,
-        origin: Option<(bip32::Fingerprint, bip32::DerivationPath)>,
+        origin: Option<bip32::KeySource>,
         derivation_path: bip32::DerivationPath,
     ) -> Result<DescriptorKey<Ctx>, KeyError> {
         DescriptorPublicKey::XPub(DescriptorXKey {
@@ -331,7 +331,7 @@ impl<Ctx: ScriptContext> DerivableKey<Ctx> for bip32::ExtendedPubKey {
 impl<Ctx: ScriptContext> DerivableKey<Ctx> for bip32::ExtendedPrivKey {
     fn add_metadata(
         self,
-        origin: Option<(bip32::Fingerprint, bip32::DerivationPath)>,
+        origin: Option<bip32::KeySource>,
         derivation_path: bip32::DerivationPath,
     ) -> Result<DescriptorKey<Ctx>, KeyError> {
         DescriptorSecretKey::XPrv(DescriptorXKey {
@@ -383,7 +383,7 @@ where
 {
     fn add_metadata(
         self,
-        origin: Option<(bip32::Fingerprint, bip32::DerivationPath)>,
+        origin: Option<bip32::KeySource>,
         derivation_path: bip32::DerivationPath,
     ) -> Result<DescriptorKey<Ctx>, KeyError> {
         let descriptor_key = self.key.add_metadata(origin, derivation_path)?;
@@ -528,11 +528,7 @@ impl<Ctx: ScriptContext, T: DerivableKey<Ctx>> ToDescriptorKey<Ctx> for (T, bip3
 }
 
 impl<Ctx: ScriptContext, T: DerivableKey<Ctx>> ToDescriptorKey<Ctx>
-    for (
-        T,
-        (bip32::Fingerprint, bip32::DerivationPath),
-        bip32::DerivationPath,
-    )
+    for (T, bip32::KeySource, bip32::DerivationPath)
 {
     fn to_descriptor_key(self) -> Result<DescriptorKey<Ctx>, KeyError> {
         self.0.add_metadata(Some(self.1), self.2)

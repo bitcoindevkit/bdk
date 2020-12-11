@@ -31,7 +31,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 
 use bitcoin::secp256k1::Secp256k1;
-use bitcoin::util::bip32::{ChildNumber, DerivationPath, ExtendedPubKey, Fingerprint};
+use bitcoin::util::bip32::{ChildNumber, DerivationPath, ExtendedPubKey, Fingerprint, KeySource};
 use bitcoin::util::psbt;
 use bitcoin::{Network, PublicKey, Script, TxOut};
 
@@ -65,7 +65,7 @@ pub type ExtendedDescriptor = Descriptor<DescriptorPublicKey>;
 ///
 /// [`psbt::Input`]: bitcoin::util::psbt::Input
 /// [`psbt::Output`]: bitcoin::util::psbt::Output
-pub type HDKeyPaths = BTreeMap<PublicKey, (Fingerprint, DerivationPath)>;
+pub type HDKeyPaths = BTreeMap<PublicKey, KeySource>;
 
 #[allow(missing_docs)] // TODO add missing docs and remove this allow
 /// Trait for types which can be converted into an [`ExtendedDescriptor`] and a [`KeyMap`] usable by a wallet in a specific [`Network`]
