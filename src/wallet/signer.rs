@@ -91,9 +91,8 @@
 //! ```
 
 use std::cmp::Ordering;
-use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::fmt;
-use std::ops::Bound::Included;
 use std::sync::Arc;
 
 use bitcoin::blockdata::opcodes;
@@ -249,6 +248,8 @@ impl Signer for PrivateKey {
             return Err(SignerError::InputIndexOutOfRange);
         }
 
+        println!("Partial sigs: {:?}", psbt.inputs[input_index].partial_sigs);
+
         let pubkey = self.public_key(&secp);
         if psbt.inputs[input_index].partial_sigs.contains_key(&pubkey) {
             return Ok(());
@@ -296,7 +297,7 @@ impl Signer for PrivateKey {
 /// The default value is `100`. Signers with an ordering above that will be called later,
 /// and they will thus see the partial signatures added to the transaction once they get to sign
 /// themselves.
-#[derive(Debug, Clone, PartialOrd, PartialEq, Ord, Eq)]
+#[derive(Debug, Clone, Hash, PartialOrd, PartialEq, Ord, Eq)]
 pub struct SignerOrdering(pub usize);
 
 impl std::default::Default for SignerOrdering {
@@ -305,7 +306,7 @@ impl std::default::Default for SignerOrdering {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash, Eq, PartialEq)]
 struct SignersContainerKey {
     id: SignerId,
     ordering: SignerOrdering,
@@ -322,7 +323,7 @@ impl From<(SignerId, SignerOrdering)> for SignersContainerKey {
 
 /// Container for multiple signers
 #[derive(Debug, Default, Clone)]
-pub struct SignersContainer(BTreeMap<SignersContainerKey, Arc<dyn Signer>>);
+pub struct SignersContainer(HashMap<SignersContainerKey, Arc<dyn Signer>>);
 
 impl SignersContainer {
     pub fn as_key_map(&self, secp: &SecpCtx) -> KeyMap {
@@ -340,7 +341,7 @@ impl From<KeyMap> for SignersContainer {
         let mut container = SignersContainer::new();
 
         for (_, secret) in keymap {
-            match secret {
+            let previous = match secret {
                 DescriptorSecretKey::SinglePriv(private_key) => container.add_external(
                     SignerId::from(
                         private_key
@@ -357,6 +358,10 @@ impl From<KeyMap> for SignersContainer {
                     Arc::new(xprv),
                 ),
             };
+
+            if let Some(previous) = previous {
+                println!("This signer was replaced: {:?}", previous)
+            }
         }
 
         container
@@ -377,7 +382,13 @@ impl SignersContainer {
         ordering: SignerOrdering,
         signer: Arc<dyn Signer>,
     ) -> Option<Arc<dyn Signer>> {
-        self.0.insert((id, ordering).into(), signer)
+
+        println!("Adding external signer ID = {:?}", id);
+        let key = (id, ordering).into();
+        println!("With a key: {:?}", key);
+        let res = self.0.insert(key, signer);
+        println!("After insertion, len = {}", self.0.values().len());
+        res
     }
 
     /// Removes a signer from the container and returns it
@@ -395,18 +406,20 @@ impl SignersContainer {
 
     /// Returns the list of signers in the container, sorted by lowest to highest `ordering`
     pub fn signers(&self) -> Vec<&Arc<dyn Signer>> {
-        self.0.values().collect()
+        let mut items = self.0.iter().collect::<Vec<_>>();
+        items.sort_by(|(a, _), (b, _)| (*a).cmp(*b));
+
+        items.into_iter().map(|(_, v)| v).collect()
     }
 
     /// Finds the signer with lowest ordering for a given id in the container.
     pub fn find(&self, id: SignerId) -> Option<&Arc<dyn Signer>> {
-        self.0
-            .range((
-                Included(&(id.clone(), SignerOrdering(0)).into()),
-                Included(&(id, SignerOrdering(usize::MAX)).into()),
-            ))
+        self.0.iter()
+            .filter(|(key, _)| key.id == id)
+            .min_by(|(k_a, _), (k_b, _)| {
+                k_a.cmp(k_b)
+            })
             .map(|(_, v)| v)
-            .next()
     }
 }
 
@@ -525,11 +538,3 @@ impl Ord for SignersContainerKey {
         self.ordering.cmp(&other.ordering)
     }
 }
-
-impl PartialEq for SignersContainerKey {
-    fn eq(&self, other: &Self) -> bool {
-        self.ordering == other.ordering
-    }
-}
-
-impl Eq for SignersContainerKey {}
