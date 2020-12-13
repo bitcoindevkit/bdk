@@ -248,8 +248,6 @@ impl Signer for PrivateKey {
             return Err(SignerError::InputIndexOutOfRange);
         }
 
-        println!("Partial sigs: {:?}", psbt.inputs[input_index].partial_sigs);
-
         let pubkey = self.public_key(&secp);
         if psbt.inputs[input_index].partial_sigs.contains_key(&pubkey) {
             return Ok(());
@@ -341,7 +339,7 @@ impl From<KeyMap> for SignersContainer {
         let mut container = SignersContainer::new();
 
         for (_, secret) in keymap {
-            let previous = match secret {
+            match secret {
                 DescriptorSecretKey::SinglePriv(private_key) => container.add_external(
                     SignerId::from(
                         private_key
@@ -358,10 +356,6 @@ impl From<KeyMap> for SignersContainer {
                     Arc::new(xprv),
                 ),
             };
-
-            if let Some(previous) = previous {
-                println!("This signer was replaced: {:?}", previous)
-            }
         }
 
         container
@@ -375,20 +369,14 @@ impl SignersContainer {
     }
 
     /// Adds an external signer to the container for the specified id. Optionally returns the
-    /// signer that was previosuly in the container, if any
+    /// signer that was previously in the container, if any
     pub fn add_external(
         &mut self,
         id: SignerId,
         ordering: SignerOrdering,
         signer: Arc<dyn Signer>,
     ) -> Option<Arc<dyn Signer>> {
-
-        println!("Adding external signer ID = {:?}", id);
-        let key = (id, ordering).into();
-        println!("With a key: {:?}", key);
-        let res = self.0.insert(key, signer);
-        println!("After insertion, len = {}", self.0.values().len());
-        res
+        self.0.insert((id, ordering).into(), signer)
     }
 
     /// Removes a signer from the container and returns it
@@ -408,7 +396,6 @@ impl SignersContainer {
     pub fn signers(&self) -> Vec<&Arc<dyn Signer>> {
         let mut items = self.0.iter().collect::<Vec<_>>();
         items.sort_by(|(a, _), (b, _)| (*a).cmp(*b));
-
         items.into_iter().map(|(_, v)| v).collect()
     }
 
