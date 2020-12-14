@@ -139,7 +139,7 @@ pub enum SatisfiableItem {
     },
     /// Relative timelock locktime
     RelativeTimelock {
-        /// The timelock value
+        /// The locktime value
         value: u32,
     },
     /// Multi-signature public keys with threshold count
