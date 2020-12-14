@@ -60,6 +60,7 @@ pub type DescriptorTemplateOut = (ExtendedDescriptor, KeyMap, ValidNetworks);
 /// }
 /// ```
 pub trait DescriptorTemplate {
+    /// Build the complete descriptor
     fn build(self) -> Result<DescriptorTemplateOut, KeyError>;
 }
 

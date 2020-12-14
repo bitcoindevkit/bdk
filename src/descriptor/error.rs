@@ -35,9 +35,9 @@ pub enum Error {
     InvalidHDKeyPath,
 
     //KeyParsingError(String),
-    #[allow(missing_docs)]
+    /// Error thrown while working with [`keys`](crate::keys)
     Key(crate::keys::KeyError),
-    #[allow(missing_docs)]
+    /// Error while extracting and manipulating policies
     Policy(crate::descriptor::policy::PolicyError),
 
     //InputIndexDoesntExist,
@@ -47,15 +47,15 @@ pub enum Error {
     InvalidDescriptorCharacter(char),
 
     //CantDeriveWithMiniscript,
-    #[allow(missing_docs)]
+    /// BIP32 error
     BIP32(bitcoin::util::bip32::Error),
-    #[allow(missing_docs)]
+    /// Error during base58 decoding
     Base58(bitcoin::util::base58::Error),
-    #[allow(missing_docs)]
+    /// Key-related error
     PK(bitcoin::util::key::Error),
-    #[allow(missing_docs)]
+    /// Miniscript error
     Miniscript(miniscript::Error),
-    #[allow(missing_docs)]
+    /// Hex decoding error
     Hex(bitcoin::hashes::hex::Error),
 }
 

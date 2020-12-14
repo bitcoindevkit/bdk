@@ -37,6 +37,8 @@
 //! connecting to a single peer at a time, optionally by opening multiple connections if it's
 //! desirable to use multiple threads at once to sync in parallel.
 //!
+//! This is an **EXPERIMENTAL** feature, API and other major changes are expected.
+//!
 //! ## Example
 //!
 //! ```no_run

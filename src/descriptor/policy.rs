@@ -27,6 +27,8 @@
 //! This module implements the logic to extract and represent the spending policies of a descriptor
 //! in a more human-readable format.
 //!
+//! This is an **EXPERIMENTAL** feature, API and other major changes are expected.
+//!
 //! ## Example
 //!
 //! ```
@@ -103,44 +105,65 @@ impl PKOrF {
     }
 }
 
-/// An item that need to be satisfied
+/// An item that needs to be satisfied
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all = "UPPERCASE")]
 pub enum SatisfiableItem {
     // Leaves
+    /// Signature for a raw public key
     Signature(PKOrF),
+    /// Signature for an extended key fingerprint
     SignatureKey(PKOrF),
+    /// SHA256 preimage hash
     SHA256Preimage {
+        /// The digest value
         hash: sha256::Hash,
     },
+    /// Double SHA256 preimage hash
     HASH256Preimage {
+        /// The digest value
         hash: sha256d::Hash,
     },
+    /// RIPEMD160 preimage hash
     RIPEMD160Preimage {
+        /// The digest value
         hash: ripemd160::Hash,
     },
+    /// SHA256 then RIPEMD160 preimage hash
     HASH160Preimage {
+        /// The digest value
         hash: hash160::Hash,
     },
+    /// Absolute timeclock timestamp
     AbsoluteTimelock {
+        /// The timestamp value
         value: u32,
     },
+    /// Relative timelock locktime
     RelativeTimelock {
+        /// The locktime value
         value: u32,
+    },
+    /// Multi-signature public keys with threshold count
+    Multisig {
+        /// The raw public key or extended key fingerprint
+        keys: Vec<PKOrF>,
+        /// The required threshold count
+        threshold: usize,
     },
 
     // Complex item
+    /// Threshold items with threshold count
     Thresh {
+        /// The policy items
         items: Vec<Policy>,
-        threshold: usize,
-    },
-    Multisig {
-        keys: Vec<PKOrF>,
+        /// The required threshold count
         threshold: usize,
     },
 }
 
 impl SatisfiableItem {
+    /// Returns whether the [`SatisfiableItem`] is a leaf item
     pub fn is_leaf(&self) -> bool {
         !matches!(self,
         SatisfiableItem::Thresh {
@@ -149,6 +172,7 @@ impl SatisfiableItem {
         })
     }
 
+    /// Returns a unique id for the [`SatisfiableItem`]
     pub fn id(&self) -> String {
         get_checksum(&serde_json::to_string(self).expect("Failed to serialize a SatisfiableItem"))
             .expect("Failed to compute a SatisfiableItem id")
@@ -213,7 +237,9 @@ fn mix<T: Clone>(vec: Vec<Vec<T>>) -> Vec<Vec<T>> {
     answer
 }
 
+/// Type for a map of sets of [`Condition`] items keyed by each set's index
 pub type ConditionMap = BTreeMap<usize, HashSet<Condition>>;
+/// Type for a map of folded sets of [`Condition`] items keyed by a vector of the combined set's indexes
 pub type FoldedConditionMap = BTreeMap<Vec<usize>, HashSet<Condition>>;
 
 fn serialize_folded_cond_map<S>(
@@ -279,6 +305,7 @@ pub enum Satisfaction {
 }
 
 impl Satisfaction {
+    /// Returns whether the [`Satisfaction`] is a leaf item
     pub fn is_leaf(&self) -> bool {
         match self {
             Satisfaction::None | Satisfaction::Complete { .. } => true,
@@ -363,7 +390,7 @@ impl Satisfaction {
                     // since the previous step can turn one item of the iterator into multiple ones, we call flatten to expand them out
                     .flatten()
                     // .inspect(|x| println!("flat {:?}", x))
-                    // try to fold all the conditions for this specific combination of indexes/options. if they are not compatibile, try_fold will be Err
+                    // try to fold all the conditions for this specific combination of indexes/options. if they are not compatible, try_fold will be Err
                     .map(|(key, val)| {
                         (
                             key,
@@ -426,8 +453,10 @@ pub struct Policy {
 /// An extra condition that must be satisfied but that is out of control of the user
 #[derive(Hash, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Default, Serialize)]
 pub struct Condition {
+    /// Optional CheckSequenceVerify condition
     #[serde(skip_serializing_if = "Option::is_none")]
     pub csv: Option<u32>,
+    /// Optional timelock condition
     #[serde(skip_serializing_if = "Option::is_none")]
     pub timelock: Option<u32>,
 }
@@ -459,6 +488,7 @@ impl Condition {
         Ok(self)
     }
 
+    /// Returns `true` if there are no extra conditions to verify
     pub fn is_null(&self) -> bool {
         self.csv.is_none() && self.timelock.is_none()
     }
@@ -467,12 +497,19 @@ impl Condition {
 /// Errors that can happen while extracting and manipulating policies
 #[derive(Debug)]
 pub enum PolicyError {
+    /// Not enough items are selected to satisfy a [`SatisfiableItem::Thresh`]
     NotEnoughItemsSelected(String),
+    /// Too many items are selected to satisfy a [`SatisfiableItem::Thresh`]
     TooManyItemsSelected(String),
+    /// Index out of range for an item to satisfy a [`SatisfiableItem::Thresh`]
     IndexOutOfRange(usize),
+    /// Can not add to an item that is [`Satisfaction::None`] or [`Satisfaction::Complete`]
     AddOnLeaf,
+    /// Can not add to an item that is [`Satisfaction::PartialComplete`]
     AddOnPartialComplete,
+    /// Can not merge CSV or timelock values unless both are less than or both are equal or greater than 500_000_000
     MixedTimelockUnits,
+    /// Incompatible conditions (not currently used)
     IncompatibleConditions,
 }
 
