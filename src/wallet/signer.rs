@@ -91,9 +91,8 @@
 //! ```
 
 use std::cmp::Ordering;
-use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::fmt;
-use std::ops::Bound::Included;
 use std::sync::Arc;
 
 use bitcoin::blockdata::opcodes;
@@ -296,7 +295,7 @@ impl Signer for PrivateKey {
 /// The default value is `100`. Signers with an ordering above that will be called later,
 /// and they will thus see the partial signatures added to the transaction once they get to sign
 /// themselves.
-#[derive(Debug, Clone, PartialOrd, PartialEq, Ord, Eq)]
+#[derive(Debug, Clone, Hash, PartialOrd, PartialEq, Ord, Eq)]
 pub struct SignerOrdering(pub usize);
 
 impl std::default::Default for SignerOrdering {
@@ -305,7 +304,7 @@ impl std::default::Default for SignerOrdering {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash, Eq, PartialEq)]
 struct SignersContainerKey {
     id: SignerId,
     ordering: SignerOrdering,
@@ -322,7 +321,7 @@ impl From<(SignerId, SignerOrdering)> for SignersContainerKey {
 
 /// Container for multiple signers
 #[derive(Debug, Default, Clone)]
-pub struct SignersContainer(BTreeMap<SignersContainerKey, Arc<dyn Signer>>);
+pub struct SignersContainer(HashMap<SignersContainerKey, Arc<dyn Signer>>);
 
 impl SignersContainer {
     pub fn as_key_map(&self, secp: &SecpCtx) -> KeyMap {
@@ -370,7 +369,7 @@ impl SignersContainer {
     }
 
     /// Adds an external signer to the container for the specified id. Optionally returns the
-    /// signer that was previosuly in the container, if any
+    /// signer that was previously in the container, if any
     pub fn add_external(
         &mut self,
         id: SignerId,
@@ -395,18 +394,18 @@ impl SignersContainer {
 
     /// Returns the list of signers in the container, sorted by lowest to highest `ordering`
     pub fn signers(&self) -> Vec<&Arc<dyn Signer>> {
-        self.0.values().collect()
+        let mut items = self.0.iter().collect::<Vec<_>>();
+        items.sort_unstable_by_key(|(key, _)| *key);
+        items.into_iter().map(|(_, v)| v).collect()
     }
 
     /// Finds the signer with lowest ordering for a given id in the container.
     pub fn find(&self, id: SignerId) -> Option<&Arc<dyn Signer>> {
         self.0
-            .range((
-                Included(&(id.clone(), SignerOrdering(0)).into()),
-                Included(&(id, SignerOrdering(usize::MAX)).into()),
-            ))
+            .iter()
+            .filter(|(key, _)| key.id == id)
+            .min_by(|(k_a, _), (k_b, _)| k_a.cmp(k_b))
             .map(|(_, v)| v)
-            .next()
     }
 }
 
@@ -526,10 +525,137 @@ impl Ord for SignersContainerKey {
     }
 }
 
-impl PartialEq for SignersContainerKey {
-    fn eq(&self, other: &Self) -> bool {
-        self.ordering == other.ordering
+#[cfg(test)]
+mod signers_container_tests {
+    use super::*;
+    use crate::descriptor;
+    use crate::descriptor::ToWalletDescriptor;
+    use crate::keys::{DescriptorKey, ToDescriptorKey};
+    use bitcoin::secp256k1::All;
+    use bitcoin::util::bip32;
+    use bitcoin::util::psbt::PartiallySignedTransaction;
+    use bitcoin::Network;
+    use miniscript::ScriptContext;
+    use std::str::FromStr;
+
+    // Signers added with the same ordering (like `Ordering::default`) created from `KeyMap`
+    // should be preserved and not overwritten.
+    // This happens usually when a set of signers is created from a descriptor with private keys.
+    #[test]
+    fn signers_with_same_ordering() {
+        let (prvkey1, _, _) = setup_keys(TPRV0_STR);
+        let (prvkey2, _, _) = setup_keys(TPRV1_STR);
+        let desc = descriptor!(sh(multi 2, prvkey1, prvkey2)).unwrap();
+        let (_, keymap) = desc.to_wallet_descriptor(Network::Testnet).unwrap();
+
+        let signers = SignersContainer::from(keymap);
+        assert_eq!(signers.ids().len(), 2);
+
+        let signers = signers.signers();
+        assert_eq!(signers.len(), 2);
+    }
+
+    #[test]
+    fn signers_sorted_by_ordering() {
+        let mut signers = SignersContainer::new();
+        let signer1 = Arc::new(DummySigner);
+        let signer2 = Arc::new(DummySigner);
+        let signer3 = Arc::new(DummySigner);
+
+        signers.add_external(
+            SignerId::Fingerprint(b"cafe"[..].into()),
+            SignerOrdering(1),
+            signer1.clone(),
+        );
+        signers.add_external(
+            SignerId::Fingerprint(b"babe"[..].into()),
+            SignerOrdering(2),
+            signer2.clone(),
+        );
+        signers.add_external(
+            SignerId::Fingerprint(b"feed"[..].into()),
+            SignerOrdering(3),
+            signer3.clone(),
+        );
+
+        // Check that signers are sorted from lowest to highest ordering
+        let signers = signers.signers();
+        assert_eq!(Arc::as_ptr(signers[0]), Arc::as_ptr(&signer1));
+        assert_eq!(Arc::as_ptr(signers[1]), Arc::as_ptr(&signer2));
+        assert_eq!(Arc::as_ptr(signers[2]), Arc::as_ptr(&signer3));
+    }
+
+    #[test]
+    fn find_signer_by_id() {
+        let mut signers = SignersContainer::new();
+        let signer1: Arc<dyn Signer> = Arc::new(DummySigner);
+        let signer2: Arc<dyn Signer> = Arc::new(DummySigner);
+        let signer3: Arc<dyn Signer> = Arc::new(DummySigner);
+        let signer4: Arc<dyn Signer> = Arc::new(DummySigner);
+
+        let id1 = SignerId::Fingerprint(b"cafe"[..].into());
+        let id2 = SignerId::Fingerprint(b"babe"[..].into());
+        let id3 = SignerId::Fingerprint(b"feed"[..].into());
+        let id_nonexistent = SignerId::Fingerprint(b"fefe"[..].into());
+
+        signers.add_external(id1.clone(), SignerOrdering(1), signer1.clone());
+        signers.add_external(id2.clone(), SignerOrdering(2), signer2.clone());
+        signers.add_external(id3.clone(), SignerOrdering(3), signer3.clone());
+
+        assert!(
+            matches!(signers.find(id1), Some(signer) if Arc::as_ptr(&signer1) == Arc::as_ptr(signer))
+        );
+        assert!(
+            matches!(signers.find(id2), Some(signer) if Arc::as_ptr(&signer2) == Arc::as_ptr(signer))
+        );
+        assert!(
+            matches!(signers.find(id3.clone()), Some(signer) if Arc::as_ptr(&signer3) == Arc::as_ptr(signer))
+        );
+
+        // The `signer4` has the same ID as `signer3` but lower ordering.
+        // It should be found by `id3` instead of `signer3`.
+        signers.add_external(id3.clone(), SignerOrdering(2), signer4.clone());
+        assert!(
+            matches!(signers.find(id3), Some(signer) if Arc::as_ptr(&signer4) == Arc::as_ptr(signer))
+        );
+
+        // Can't find anything with ID that doesn't exist
+        assert!(matches!(signers.find(id_nonexistent), None));
+    }
+
+    #[derive(Debug)]
+    struct DummySigner;
+    impl Signer for DummySigner {
+        fn sign(
+            &self,
+            _psbt: &mut PartiallySignedTransaction,
+            _input_index: Option<usize>,
+            _secp: &SecpCtx,
+        ) -> Result<(), SignerError> {
+            Ok(())
+        }
+
+        fn sign_whole_tx(&self) -> bool {
+            true
+        }
+    }
+
+    const TPRV0_STR:&str = "tprv8ZgxMBicQKsPdZXrcHNLf5JAJWFAoJ2TrstMRdSKtEggz6PddbuSkvHKM9oKJyFgZV1B7rw8oChspxyYbtmEXYyg1AjfWbL3ho3XHDpHRZf";
+    const TPRV1_STR:&str = "tprv8ZgxMBicQKsPdpkqS7Eair4YxjcuuvDPNYmKX3sCniCf16tHEVrjjiSXEkFRnUH77yXc6ZcwHHcLNfjdi5qUvw3VDfgYiH5mNsj5izuiu2N";
+
+    const PATH: &str = "m/44'/1'/0'/0";
+
+    fn setup_keys<Ctx: ScriptContext>(
+        tprv: &str,
+    ) -> (DescriptorKey<Ctx>, DescriptorKey<Ctx>, Fingerprint) {
+        let secp: Secp256k1<All> = Secp256k1::new();
+        let path = bip32::DerivationPath::from_str(PATH).unwrap();
+        let tprv = bip32::ExtendedPrivKey::from_str(tprv).unwrap();
+        let tpub = bip32::ExtendedPubKey::from_private(&secp, &tprv);
+        let fingerprint = tprv.fingerprint(&secp);
+        let prvkey = (tprv, path.clone()).to_descriptor_key().unwrap();
+        let pubkey = (tpub, path).to_descriptor_key().unwrap();
+
+        (prvkey, pubkey, fingerprint)
     }
 }
-
-impl Eq for SignersContainerKey {}
