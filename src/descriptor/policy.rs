@@ -966,6 +966,7 @@ mod test {
 
     // 1 prv and 1 pub key descriptor, required 1 prv keys
     #[test]
+    #[ignore] // see https://github.com/bitcoindevkit/bdk/issues/225
     fn test_extract_policy_for_sh_multi_complete_1of2() {
         let (_prvkey0, pubkey0, fingerprint0) = setup_keys(TPRV0_STR);
         let (prvkey1, _pubkey1, fingerprint1) = setup_keys(TPRV1_STR);
@@ -1058,6 +1059,7 @@ mod test {
 
     // single key, 1 prv and 1 pub key descriptor, required 1 prv keys
     #[test]
+    #[ignore] // see https://github.com/bitcoindevkit/bdk/issues/225
     fn test_extract_policy_for_single_wsh_multi_complete_1of2() {
         let (_prvkey0, pubkey0, fingerprint0) = setup_keys(TPRV0_STR);
         let (prvkey1, _pubkey1, fingerprint1) = setup_keys(TPRV1_STR);
@@ -1088,6 +1090,7 @@ mod test {
     // test ExtractPolicy trait with descriptors containing timelocks in a thresh()
 
     #[test]
+    #[ignore] // see https://github.com/bitcoindevkit/bdk/issues/225
     fn test_extract_policy_for_wsh_multi_timelock() {
         let (prvkey0, _pubkey0, _fingerprint0) = setup_keys(TPRV0_STR);
         let (_prvkey1, pubkey1, _fingerprint1) = setup_keys(TPRV1_STR);
