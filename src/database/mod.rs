@@ -57,7 +57,7 @@ pub use memory::MemoryDatabase;
 /// This trait defines the list of operations that must be implemented on the [`Database`] type and
 /// the [`BatchDatabase::Batch`] type.
 pub trait BatchOperations {
-    /// Store a script_pubkey along with its script type and child number
+    /// Store a script_pubkey along with its keychain and child number.
     fn set_script_pubkey(
         &mut self,
         script: &Script,
@@ -70,17 +70,17 @@ pub trait BatchOperations {
     fn set_raw_tx(&mut self, transaction: &Transaction) -> Result<(), Error>;
     /// Store the metadata of a transaction
     fn set_tx(&mut self, transaction: &TransactionDetails) -> Result<(), Error>;
-    /// Store the last derivation index for a given script type
+    /// Store the last derivation index for a given keychain.
     fn set_last_index(&mut self, keychain: KeychainKind, value: u32) -> Result<(), Error>;
 
-    /// Delete a script_pubkey given the script type and its child number
+    /// Delete a script_pubkey given the keychain and its child number.
     fn del_script_pubkey_from_path(
         &mut self,
         keychain: KeychainKind,
         child: u32,
     ) -> Result<Option<Script>, Error>;
-    /// Delete the data related to a specific script_pubkey, meaning the script type and the child
-    /// number
+    /// Delete the data related to a specific script_pubkey, meaning the keychain and the child
+    /// number.
     fn del_path_from_script_pubkey(
         &mut self,
         script: &Script,
@@ -95,7 +95,7 @@ pub trait BatchOperations {
         txid: &Txid,
         include_raw: bool,
     ) -> Result<Option<TransactionDetails>, Error>;
-    /// Delete the last derivation index for a script type
+    /// Delete the last derivation index for a keychain.
     fn del_last_index(&mut self, keychain: KeychainKind) -> Result<Option<u32>, Error>;
 }
 
@@ -103,7 +103,7 @@ pub trait BatchOperations {
 ///
 /// This traits defines the operations that can be used to read data out of a database
 pub trait Database: BatchOperations {
-    /// Read and checks the descriptor checksum for a given script type
+    /// Read and checks the descriptor checksum for a given keychain.
     ///
     /// Should return [`Error::ChecksumMismatch`](crate::error::Error::ChecksumMismatch) if the
     /// checksum doesn't match. If there's no checksum in the database, simply store it for the
@@ -123,13 +123,13 @@ pub trait Database: BatchOperations {
     /// Return the list of transactions metadata
     fn iter_txs(&self, include_raw: bool) -> Result<Vec<TransactionDetails>, Error>;
 
-    /// Fetch a script_pubkey given the script type and child number
+    /// Fetch a script_pubkey given the child number of a keychain.
     fn get_script_pubkey_from_path(
         &self,
         keychain: KeychainKind,
         child: u32,
     ) -> Result<Option<Script>, Error>;
-    /// Fetch the script type and child number of a given script_pubkey
+    /// Fetch the keychain and child number of a given script_pubkey
     fn get_path_from_script_pubkey(
         &self,
         script: &Script,
@@ -140,10 +140,10 @@ pub trait Database: BatchOperations {
     fn get_raw_tx(&self, txid: &Txid) -> Result<Option<Transaction>, Error>;
     /// Fetch the transaction metadata and optionally also the raw transaction
     fn get_tx(&self, txid: &Txid, include_raw: bool) -> Result<Option<TransactionDetails>, Error>;
-    /// Return the last defivation index for a script type
+    /// Return the last defivation index for a keychain.
     fn get_last_index(&self, keychain: KeychainKind) -> Result<Option<u32>, Error>;
 
-    /// Increment the last derivation index for a script type and returns it
+    /// Increment the last derivation index for a keychain and return it
     ///
     /// It should insert and return `0` if not present in the database
     fn increment_last_index(&mut self, keychain: KeychainKind) -> Result<u32, Error>;

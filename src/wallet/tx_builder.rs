@@ -163,7 +163,7 @@ impl<D: Database, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderContext> TxBuilde
         self
     }
 
-    /// Set the policy path to use while creating the transaction for a given script type
+    /// Set the policy path to use while creating the transaction for a given keychain.
     ///
     /// This method accepts a map where the key is the policy node id (see
     /// [`Policy::id`](crate::descriptor::Policy::id)) and the value is the list of the indexes of
