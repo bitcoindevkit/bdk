@@ -395,7 +395,7 @@ impl SignersContainer {
     /// Returns the list of signers in the container, sorted by lowest to highest `ordering`
     pub fn signers(&self) -> Vec<&Arc<dyn Signer>> {
         let mut items = self.0.iter().collect::<Vec<_>>();
-        items.sort_by(|(a, _), (b, _)| (*a).cmp(*b));
+        items.sort_unstable_by_key(|(key, _)| *key);
         items.into_iter().map(|(_, v)| v).collect()
     }
 
