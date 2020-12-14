@@ -78,11 +78,6 @@ pub(crate) fn check_nsequence_rbf(rbf: u32, csv: u32) -> bool {
         return false;
     }
 
-    // The nSequence value must be >= the O_CSV
-    if rbf < csv {
-        return false;
-    }
-
     let mask = SEQUENCE_LOCKTIME_TYPE_FLAG | SEQUENCE_LOCKTIME_MASK;
     let rbf = rbf & mask;
     let csv = csv & mask;
@@ -200,6 +195,10 @@ impl<I: Iterator> Iterator for ChunksIterator<I> {
 
 #[cfg(test)]
 mod test {
+    use super::{
+        check_nlocktime, check_nsequence_rbf, BLOCKS_TIMELOCK_THRESHOLD,
+        SEQUENCE_LOCKTIME_TYPE_FLAG,
+    };
     use crate::types::FeeRate;
 
     #[test]
@@ -218,5 +217,71 @@ mod test {
     fn test_fee_default_min_relay_fee() {
         let fee = FeeRate::default_min_relay_fee();
         assert!((fee.as_sat_vb() - 1.0).abs() < 0.0001);
+    }
+
+    #[test]
+    fn test_check_nsequence_rbf_msb_set() {
+        let result = check_nsequence_rbf(0x80000000, 5000);
+        assert_eq!(result, false);
+    }
+
+    #[test]
+    fn test_check_nsequence_rbf_lt_csv() {
+        let result = check_nsequence_rbf(4000, 5000);
+        assert_eq!(result, false);
+    }
+
+    #[test]
+    fn test_check_nsequence_rbf_different_unit() {
+        let result = check_nsequence_rbf(SEQUENCE_LOCKTIME_TYPE_FLAG + 5000, 5000);
+        assert_eq!(result, false);
+    }
+
+    #[test]
+    fn test_check_nsequence_rbf_mask() {
+        let result = check_nsequence_rbf(0x3f + 10_000, 5000);
+        assert_eq!(result, true);
+    }
+
+    #[test]
+    fn test_check_nsequence_rbf_same_unit_blocks() {
+        let result = check_nsequence_rbf(10_000, 5000);
+        assert_eq!(result, true);
+    }
+
+    #[test]
+    fn test_check_nsequence_rbf_same_unit_time() {
+        let result = check_nsequence_rbf(
+            SEQUENCE_LOCKTIME_TYPE_FLAG + 10_000,
+            SEQUENCE_LOCKTIME_TYPE_FLAG + 5000,
+        );
+        assert_eq!(result, true);
+    }
+
+    #[test]
+    fn test_check_nlocktime_lt_cltv() {
+        let result = check_nlocktime(4000, 5000);
+        assert_eq!(result, false);
+    }
+
+    #[test]
+    fn test_check_nlocktime_different_unit() {
+        let result = check_nlocktime(BLOCKS_TIMELOCK_THRESHOLD + 5000, 5000);
+        assert_eq!(result, false);
+    }
+
+    #[test]
+    fn test_check_nlocktime_same_unit_blocks() {
+        let result = check_nlocktime(10_000, 5000);
+        assert_eq!(result, true);
+    }
+
+    #[test]
+    fn test_check_nlocktime_same_unit_time() {
+        let result = check_nlocktime(
+            BLOCKS_TIMELOCK_THRESHOLD + 10_000,
+            BLOCKS_TIMELOCK_THRESHOLD + 5000,
+        );
+        assert_eq!(result, true);
     }
 }
