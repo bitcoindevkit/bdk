@@ -27,6 +27,8 @@
 //! This module implements the logic to extract and represent the spending policies of a descriptor
 //! in a more human-readable format.
 //!
+//! This is an **EXPERIMENTAL** feature, API and other major changes are expected.
+//!
 //! ## Example
 //!
 //! ```
