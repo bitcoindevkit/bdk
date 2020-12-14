@@ -51,7 +51,7 @@ use bitcoin::{OutPoint, Script, SigHashType, Transaction};
 
 use super::coin_selection::{CoinSelectionAlgorithm, DefaultCoinSelectionAlgorithm};
 use crate::database::Database;
-use crate::types::{FeeRate, ScriptType, UTXO};
+use crate::types::{FeeRate, KeychainKind, UTXO};
 
 /// Context in which the [`TxBuilder`] is valid
 pub trait TxBuilderContext: std::fmt::Debug + Default + Clone {}
@@ -215,17 +215,17 @@ impl<D: Database, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderContext> TxBuilde
     /// path.insert("aabbccdd".to_string(), vec![0, 1]);
     ///
     /// let builder = TxBuilder::with_recipients(vec![(to_address.script_pubkey(), 50_000)])
-    ///     .policy_path(path, ScriptType::External);
+    ///     .policy_path(path, KeychainKind::External);
     /// # let builder: TxBuilder<bdk::database::MemoryDatabase, _, _> = builder;
     /// ```
     pub fn policy_path(
         mut self,
         policy_path: BTreeMap<String, Vec<usize>>,
-        script_type: ScriptType,
+        keychain: KeychainKind,
     ) -> Self {
-        let to_update = match script_type {
-            ScriptType::Internal => &mut self.internal_policy_path,
-            ScriptType::External => &mut self.external_policy_path,
+        let to_update = match keychain {
+            KeychainKind::Internal => &mut self.internal_policy_path,
+            KeychainKind::External => &mut self.external_policy_path,
         };
 
         *to_update = Some(policy_path);
@@ -566,8 +566,8 @@ impl ChangeSpendPolicy {
     pub(crate) fn is_satisfied_by(&self, utxo: &UTXO) -> bool {
         match self {
             ChangeSpendPolicy::ChangeAllowed => true,
-            ChangeSpendPolicy::OnlyChange => utxo.script_type == ScriptType::Internal,
-            ChangeSpendPolicy::ChangeForbidden => utxo.script_type == ScriptType::External,
+            ChangeSpendPolicy::OnlyChange => utxo.keychain == KeychainKind::Internal,
+            ChangeSpendPolicy::ChangeForbidden => utxo.keychain == KeychainKind::External,
         }
     }
 }
@@ -662,7 +662,7 @@ mod test {
                     vout: 0,
                 },
                 txout: Default::default(),
-                script_type: ScriptType::External,
+                keychain: KeychainKind::External,
             },
             UTXO {
                 outpoint: OutPoint {
@@ -670,7 +670,7 @@ mod test {
                     vout: 1,
                 },
                 txout: Default::default(),
-                script_type: ScriptType::Internal,
+                keychain: KeychainKind::Internal,
             },
         ]
     }
@@ -695,7 +695,7 @@ mod test {
             .collect::<Vec<_>>();
 
         assert_eq!(filtered.len(), 1);
-        assert_eq!(filtered[0].script_type, ScriptType::External);
+        assert_eq!(filtered[0].keychain, KeychainKind::External);
     }
 
     #[test]
@@ -707,7 +707,7 @@ mod test {
             .collect::<Vec<_>>();
 
         assert_eq!(filtered.len(), 1);
-        assert_eq!(filtered[0].script_type, ScriptType::Internal);
+        assert_eq!(filtered[0].keychain, KeychainKind::Internal);
     }
 
     #[test]

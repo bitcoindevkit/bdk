@@ -61,7 +61,7 @@ pub trait BatchOperations {
     fn set_script_pubkey(
         &mut self,
         script: &Script,
-        script_type: ScriptType,
+        keychain: KeychainKind,
         child: u32,
     ) -> Result<(), Error>;
     /// Store a [`UTXO`]
@@ -71,12 +71,12 @@ pub trait BatchOperations {
     /// Store the metadata of a transaction
     fn set_tx(&mut self, transaction: &TransactionDetails) -> Result<(), Error>;
     /// Store the last derivation index for a given script type
-    fn set_last_index(&mut self, script_type: ScriptType, value: u32) -> Result<(), Error>;
+    fn set_last_index(&mut self, keychain: KeychainKind, value: u32) -> Result<(), Error>;
 
     /// Delete a script_pubkey given the script type and its child number
     fn del_script_pubkey_from_path(
         &mut self,
-        script_type: ScriptType,
+        keychain: KeychainKind,
         child: u32,
     ) -> Result<Option<Script>, Error>;
     /// Delete the data related to a specific script_pubkey, meaning the script type and the child
@@ -84,7 +84,7 @@ pub trait BatchOperations {
     fn del_path_from_script_pubkey(
         &mut self,
         script: &Script,
-    ) -> Result<Option<(ScriptType, u32)>, Error>;
+    ) -> Result<Option<(KeychainKind, u32)>, Error>;
     /// Delete a [`UTXO`] given its [`OutPoint`]
     fn del_utxo(&mut self, outpoint: &OutPoint) -> Result<Option<UTXO>, Error>;
     /// Delete a raw transaction given its [`Txid`]
@@ -96,7 +96,7 @@ pub trait BatchOperations {
         include_raw: bool,
     ) -> Result<Option<TransactionDetails>, Error>;
     /// Delete the last derivation index for a script type
-    fn del_last_index(&mut self, script_type: ScriptType) -> Result<Option<u32>, Error>;
+    fn del_last_index(&mut self, keychain: KeychainKind) -> Result<Option<u32>, Error>;
 }
 
 /// Trait for reading data from a database
@@ -110,12 +110,12 @@ pub trait Database: BatchOperations {
     /// next time.
     fn check_descriptor_checksum<B: AsRef<[u8]>>(
         &mut self,
-        script_type: ScriptType,
+        keychain: KeychainKind,
         bytes: B,
     ) -> Result<(), Error>;
 
     /// Return the list of script_pubkeys
-    fn iter_script_pubkeys(&self, script_type: Option<ScriptType>) -> Result<Vec<Script>, Error>;
+    fn iter_script_pubkeys(&self, keychain: Option<KeychainKind>) -> Result<Vec<Script>, Error>;
     /// Return the list of [`UTXO`]s
     fn iter_utxos(&self) -> Result<Vec<UTXO>, Error>;
     /// Return the list of raw transactions
@@ -126,14 +126,14 @@ pub trait Database: BatchOperations {
     /// Fetch a script_pubkey given the script type and child number
     fn get_script_pubkey_from_path(
         &self,
-        script_type: ScriptType,
+        keychain: KeychainKind,
         child: u32,
     ) -> Result<Option<Script>, Error>;
     /// Fetch the script type and child number of a given script_pubkey
     fn get_path_from_script_pubkey(
         &self,
         script: &Script,
-    ) -> Result<Option<(ScriptType, u32)>, Error>;
+    ) -> Result<Option<(KeychainKind, u32)>, Error>;
     /// Fetch a [`UTXO`] given its [`OutPoint`]
     fn get_utxo(&self, outpoint: &OutPoint) -> Result<Option<UTXO>, Error>;
     /// Fetch a raw transaction given its [`Txid`]
@@ -141,12 +141,12 @@ pub trait Database: BatchOperations {
     /// Fetch the transaction metadata and optionally also the raw transaction
     fn get_tx(&self, txid: &Txid, include_raw: bool) -> Result<Option<TransactionDetails>, Error>;
     /// Return the last defivation index for a script type
-    fn get_last_index(&self, script_type: ScriptType) -> Result<Option<u32>, Error>;
+    fn get_last_index(&self, keychain: KeychainKind) -> Result<Option<u32>, Error>;
 
     /// Increment the last derivation index for a script type and returns it
     ///
     /// It should insert and return `0` if not present in the database
-    fn increment_last_index(&mut self, script_type: ScriptType) -> Result<u32, Error>;
+    fn increment_last_index(&mut self, keychain: KeychainKind) -> Result<u32, Error>;
 }
 
 /// Trait for a database that supports batch operations
@@ -217,17 +217,17 @@ pub mod test {
             Vec::<u8>::from_hex("76a91402306a7c23f3e8010de41e9e591348bb83f11daa88ac").unwrap(),
         );
         let path = 42;
-        let script_type = ScriptType::External;
+        let keychain = KeychainKind::External;
 
-        tree.set_script_pubkey(&script, script_type, path).unwrap();
+        tree.set_script_pubkey(&script, keychain, path).unwrap();
 
         assert_eq!(
-            tree.get_script_pubkey_from_path(script_type, path).unwrap(),
+            tree.get_script_pubkey_from_path(keychain, path).unwrap(),
             Some(script.clone())
         );
         assert_eq!(
             tree.get_path_from_script_pubkey(&script).unwrap(),
-            Some((script_type, path.clone()))
+            Some((keychain, path.clone()))
         );
     }
 
@@ -238,12 +238,12 @@ pub mod test {
             Vec::<u8>::from_hex("76a91402306a7c23f3e8010de41e9e591348bb83f11daa88ac").unwrap(),
         );
         let path = 42;
-        let script_type = ScriptType::External;
+        let keychain = KeychainKind::External;
 
-        batch.set_script_pubkey(&script, script_type, path).unwrap();
+        batch.set_script_pubkey(&script, keychain, path).unwrap();
 
         assert_eq!(
-            tree.get_script_pubkey_from_path(script_type, path).unwrap(),
+            tree.get_script_pubkey_from_path(keychain, path).unwrap(),
             None
         );
         assert_eq!(tree.get_path_from_script_pubkey(&script).unwrap(), None);
@@ -251,12 +251,12 @@ pub mod test {
         tree.commit_batch(batch).unwrap();
 
         assert_eq!(
-            tree.get_script_pubkey_from_path(script_type, path).unwrap(),
+            tree.get_script_pubkey_from_path(keychain, path).unwrap(),
             Some(script.clone())
         );
         assert_eq!(
             tree.get_path_from_script_pubkey(&script).unwrap(),
-            Some((script_type, path.clone()))
+            Some((keychain, path.clone()))
         );
     }
 
@@ -265,9 +265,9 @@ pub mod test {
             Vec::<u8>::from_hex("76a91402306a7c23f3e8010de41e9e591348bb83f11daa88ac").unwrap(),
         );
         let path = 42;
-        let script_type = ScriptType::External;
+        let keychain = KeychainKind::External;
 
-        tree.set_script_pubkey(&script, script_type, path).unwrap();
+        tree.set_script_pubkey(&script, keychain, path).unwrap();
 
         assert_eq!(tree.iter_script_pubkeys(None).unwrap().len(), 1);
     }
@@ -277,12 +277,12 @@ pub mod test {
             Vec::<u8>::from_hex("76a91402306a7c23f3e8010de41e9e591348bb83f11daa88ac").unwrap(),
         );
         let path = 42;
-        let script_type = ScriptType::External;
+        let keychain = KeychainKind::External;
 
-        tree.set_script_pubkey(&script, script_type, path).unwrap();
+        tree.set_script_pubkey(&script, keychain, path).unwrap();
         assert_eq!(tree.iter_script_pubkeys(None).unwrap().len(), 1);
 
-        tree.del_script_pubkey_from_path(script_type, path).unwrap();
+        tree.del_script_pubkey_from_path(keychain, path).unwrap();
         assert_eq!(tree.iter_script_pubkeys(None).unwrap().len(), 0);
     }
 
@@ -301,7 +301,7 @@ pub mod test {
         let utxo = UTXO {
             txout,
             outpoint,
-            script_type: ScriptType::External,
+            keychain: KeychainKind::External,
         };
 
         tree.set_utxo(&utxo).unwrap();
@@ -356,24 +356,27 @@ pub mod test {
     }
 
     pub fn test_last_index<D: Database>(mut tree: D) {
-        tree.set_last_index(ScriptType::External, 1337).unwrap();
+        tree.set_last_index(KeychainKind::External, 1337).unwrap();
 
         assert_eq!(
-            tree.get_last_index(ScriptType::External).unwrap(),
+            tree.get_last_index(KeychainKind::External).unwrap(),
             Some(1337)
         );
-        assert_eq!(tree.get_last_index(ScriptType::Internal).unwrap(), None);
+        assert_eq!(tree.get_last_index(KeychainKind::Internal).unwrap(), None);
 
-        let res = tree.increment_last_index(ScriptType::External).unwrap();
+        let res = tree.increment_last_index(KeychainKind::External).unwrap();
         assert_eq!(res, 1338);
-        let res = tree.increment_last_index(ScriptType::Internal).unwrap();
+        let res = tree.increment_last_index(KeychainKind::Internal).unwrap();
         assert_eq!(res, 0);
 
         assert_eq!(
-            tree.get_last_index(ScriptType::External).unwrap(),
+            tree.get_last_index(KeychainKind::External).unwrap(),
             Some(1338)
         );
-        assert_eq!(tree.get_last_index(ScriptType::Internal).unwrap(), Some(0));
+        assert_eq!(
+            tree.get_last_index(KeychainKind::Internal).unwrap(),
+            Some(0)
+        );
     }
 
     // TODO: more tests...

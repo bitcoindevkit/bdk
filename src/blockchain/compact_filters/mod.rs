@@ -81,7 +81,7 @@ mod sync;
 use super::{Blockchain, Capability, ConfigurableBlockchain, Progress};
 use crate::database::{BatchDatabase, BatchOperations, DatabaseUtils};
 use crate::error::Error;
-use crate::types::{ScriptType, TransactionDetails, UTXO};
+use crate::types::{KeychainKind, TransactionDetails, UTXO};
 use crate::FeeRate;
 
 use peer::*;
@@ -188,22 +188,22 @@ impl CompactFiltersBlockchain {
             outputs_sum += output.value;
 
             // this output is ours, we have a path to derive it
-            if let Some((script_type, child)) =
+            if let Some((keychain, child)) =
                 database.get_path_from_script_pubkey(&output.script_pubkey)?
             {
                 debug!("{} output #{} is mine, adding utxo", tx.txid(), i);
                 updates.set_utxo(&UTXO {
                     outpoint: OutPoint::new(tx.txid(), i as u32),
                     txout: output.clone(),
-                    script_type,
+                    keychain,
                 })?;
                 incoming += output.value;
 
-                if script_type == ScriptType::Internal
+                if keychain == KeychainKind::Internal
                     && (internal_max_deriv.is_none() || child > internal_max_deriv.unwrap_or(0))
                 {
                     *internal_max_deriv = Some(child);
-                } else if script_type == ScriptType::External
+                } else if keychain == KeychainKind::External
                     && (external_max_deriv.is_none() || child > external_max_deriv.unwrap_or(0))
                 {
                     *external_max_deriv = Some(child);
@@ -415,18 +415,22 @@ impl Blockchain for CompactFiltersBlockchain {
             )?;
         }
 
-        let current_ext = database.get_last_index(ScriptType::External)?.unwrap_or(0);
+        let current_ext = database
+            .get_last_index(KeychainKind::External)?
+            .unwrap_or(0);
         let first_ext_new = external_max_deriv.map(|x| x + 1).unwrap_or(0);
         if first_ext_new > current_ext {
             info!("Setting external index to {}", first_ext_new);
-            database.set_last_index(ScriptType::External, first_ext_new)?;
+            database.set_last_index(KeychainKind::External, first_ext_new)?;
         }
 
-        let current_int = database.get_last_index(ScriptType::Internal)?.unwrap_or(0);
+        let current_int = database
+            .get_last_index(KeychainKind::Internal)?
+            .unwrap_or(0);
         let first_int_new = internal_max_deriv.map(|x| x + 1).unwrap_or(0);
         if first_int_new > current_int {
             info!("Setting internal index to {}", first_int_new);
-            database.set_last_index(ScriptType::Internal, first_int_new)?;
+            database.set_last_index(KeychainKind::Internal, first_int_new)?;
         }
 
         info!("Dropping blocks until {}", buried_height);

@@ -28,7 +28,7 @@ use bdk::bitcoin;
 use bdk::database::MemoryDatabase;
 use bdk::descriptor::HDKeyPaths;
 use bdk::wallet::address_validator::{AddressValidator, AddressValidatorError};
-use bdk::ScriptType;
+use bdk::KeychainKind;
 use bdk::{OfflineWallet, Wallet};
 
 use bitcoin::hashes::hex::FromHex;
@@ -39,7 +39,7 @@ struct DummyValidator;
 impl AddressValidator for DummyValidator {
     fn validate(
         &self,
-        script_type: ScriptType,
+        keychain: KeychainKind,
         hd_keypaths: &HDKeyPaths,
         script: &Script,
     ) -> Result<(), AddressValidatorError> {
@@ -50,7 +50,7 @@ impl AddressValidator for DummyValidator {
 
         println!(
             "Validating `{:?}` {} address, script: {}",
-            script_type, path, script
+            keychain, path, script
         );
 
         Ok(())

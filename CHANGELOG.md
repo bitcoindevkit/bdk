@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Changed
 - Rename the library to `bdk`
+- Rename `ScriptType` to `KeychainKind`
 - Prettify README examples on github
 - Change CI to github actions
 - Bump rust-bitcoin to 0.25, fix Cargo dependencies

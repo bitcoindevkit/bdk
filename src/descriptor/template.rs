@@ -34,7 +34,7 @@ use miniscript::{Legacy, Segwitv0};
 
 use super::{ExtendedDescriptor, KeyMap, ToWalletDescriptor};
 use crate::keys::{DerivableKey, KeyError, ToDescriptorKey, ValidNetworks};
-use crate::{descriptor, ScriptType};
+use crate::{descriptor, KeychainKind};
 
 /// Type alias for the return type of [`DescriptorTemplate`], [`descriptor!`](crate::descriptor!) and others
 pub type DescriptorTemplateOut = (ExtendedDescriptor, KeyMap, ValidNetworks);
@@ -159,23 +159,23 @@ impl<K: ToDescriptorKey<Segwitv0>> DescriptorTemplate for P2WPKH<K> {
 /// ```
 /// # use std::str::FromStr;
 /// # use bdk::bitcoin::{PrivateKey, Network};
-/// # use bdk::{Wallet, OfflineWallet, ScriptType};
+/// # use bdk::{Wallet, OfflineWallet, KeychainKind};
 /// # use bdk::database::MemoryDatabase;
 /// use bdk::template::BIP44;
 ///
 /// let key = bitcoin::util::bip32::ExtendedPrivKey::from_str("tprv8ZgxMBicQKsPeZRHk4rTG6orPS2CRNFX3njhUXx5vj9qGog5ZMH4uGReDWN5kCkY3jmWEtWause41CDvBRXD1shKknAMKxT99o9qUTRVC6m")?;
 /// let wallet: OfflineWallet<_> = Wallet::new_offline(
-///     BIP44(key.clone(), ScriptType::External),
-///     Some(BIP44(key, ScriptType::Internal)),
+///     BIP44(key.clone(), KeychainKind::External),
+///     Some(BIP44(key, KeychainKind::Internal)),
 ///     Network::Testnet,
 ///     MemoryDatabase::default()
 /// )?;
 ///
 /// assert_eq!(wallet.get_new_address()?.to_string(), "miNG7dJTzJqNbFS19svRdTCisC65dsubtR");
-/// assert_eq!(wallet.public_descriptor(ScriptType::External)?.unwrap().to_string(), "pkh([c55b303f/44'/0'/0']tpubDDDzQ31JkZB7VxUr9bjvBivDdqoFLrDPyLWtLapArAi51ftfmCb2DPxwLQzX65iNcXz1DGaVvyvo6JQ6rTU73r2gqdEo8uov9QKRb7nKCSU/0/*)");
+/// assert_eq!(wallet.public_descriptor(KeychainKind::External)?.unwrap().to_string(), "pkh([c55b303f/44'/0'/0']tpubDDDzQ31JkZB7VxUr9bjvBivDdqoFLrDPyLWtLapArAi51ftfmCb2DPxwLQzX65iNcXz1DGaVvyvo6JQ6rTU73r2gqdEo8uov9QKRb7nKCSU/0/*)");
 /// # Ok::<_, Box<dyn std::error::Error>>(())
 /// ```
-pub struct BIP44<K: DerivableKey<Legacy>>(pub K, pub ScriptType);
+pub struct BIP44<K: DerivableKey<Legacy>>(pub K, pub KeychainKind);
 
 impl<K: DerivableKey<Legacy>> DescriptorTemplate for BIP44<K> {
     fn build(self) -> Result<DescriptorTemplateOut, KeyError> {
@@ -197,24 +197,24 @@ impl<K: DerivableKey<Legacy>> DescriptorTemplate for BIP44<K> {
 /// ```
 /// # use std::str::FromStr;
 /// # use bdk::bitcoin::{PrivateKey, Network};
-/// # use bdk::{Wallet, OfflineWallet, ScriptType};
+/// # use bdk::{Wallet, OfflineWallet, KeychainKind};
 /// # use bdk::database::MemoryDatabase;
 /// use bdk::template::BIP44Public;
 ///
 /// let key = bitcoin::util::bip32::ExtendedPubKey::from_str("tpubDDDzQ31JkZB7VxUr9bjvBivDdqoFLrDPyLWtLapArAi51ftfmCb2DPxwLQzX65iNcXz1DGaVvyvo6JQ6rTU73r2gqdEo8uov9QKRb7nKCSU")?;
 /// let fingerprint = bitcoin::util::bip32::Fingerprint::from_str("c55b303f")?;
 /// let wallet: OfflineWallet<_> = Wallet::new_offline(
-///     BIP44Public(key.clone(), fingerprint, ScriptType::External),
-///     Some(BIP44Public(key, fingerprint, ScriptType::Internal)),
+///     BIP44Public(key.clone(), fingerprint, KeychainKind::External),
+///     Some(BIP44Public(key, fingerprint, KeychainKind::Internal)),
 ///     Network::Testnet,
 ///     MemoryDatabase::default()
 /// )?;
 ///
 /// assert_eq!(wallet.get_new_address()?.to_string(), "miNG7dJTzJqNbFS19svRdTCisC65dsubtR");
-/// assert_eq!(wallet.public_descriptor(ScriptType::External)?.unwrap().to_string(), "pkh([c55b303f/44'/0'/0']tpubDDDzQ31JkZB7VxUr9bjvBivDdqoFLrDPyLWtLapArAi51ftfmCb2DPxwLQzX65iNcXz1DGaVvyvo6JQ6rTU73r2gqdEo8uov9QKRb7nKCSU/0/*)");
+/// assert_eq!(wallet.public_descriptor(KeychainKind::External)?.unwrap().to_string(), "pkh([c55b303f/44'/0'/0']tpubDDDzQ31JkZB7VxUr9bjvBivDdqoFLrDPyLWtLapArAi51ftfmCb2DPxwLQzX65iNcXz1DGaVvyvo6JQ6rTU73r2gqdEo8uov9QKRb7nKCSU/0/*)");
 /// # Ok::<_, Box<dyn std::error::Error>>(())
 /// ```
-pub struct BIP44Public<K: DerivableKey<Legacy>>(pub K, pub bip32::Fingerprint, pub ScriptType);
+pub struct BIP44Public<K: DerivableKey<Legacy>>(pub K, pub bip32::Fingerprint, pub KeychainKind);
 
 impl<K: DerivableKey<Legacy>> DescriptorTemplate for BIP44Public<K> {
     fn build(self) -> Result<DescriptorTemplateOut, KeyError> {
@@ -233,23 +233,23 @@ impl<K: DerivableKey<Legacy>> DescriptorTemplate for BIP44Public<K> {
 /// ```
 /// # use std::str::FromStr;
 /// # use bdk::bitcoin::{PrivateKey, Network};
-/// # use bdk::{Wallet, OfflineWallet, ScriptType};
+/// # use bdk::{Wallet, OfflineWallet, KeychainKind};
 /// # use bdk::database::MemoryDatabase;
 /// use bdk::template::BIP49;
 ///
 /// let key = bitcoin::util::bip32::ExtendedPrivKey::from_str("tprv8ZgxMBicQKsPeZRHk4rTG6orPS2CRNFX3njhUXx5vj9qGog5ZMH4uGReDWN5kCkY3jmWEtWause41CDvBRXD1shKknAMKxT99o9qUTRVC6m")?;
 /// let wallet: OfflineWallet<_> = Wallet::new_offline(
-///     BIP49(key.clone(), ScriptType::External),
-///     Some(BIP49(key, ScriptType::Internal)),
+///     BIP49(key.clone(), KeychainKind::External),
+///     Some(BIP49(key, KeychainKind::Internal)),
 ///     Network::Testnet,
 ///     MemoryDatabase::default()
 /// )?;
 ///
 /// assert_eq!(wallet.get_new_address()?.to_string(), "2N3K4xbVAHoiTQSwxkZjWDfKoNC27pLkYnt");
-/// assert_eq!(wallet.public_descriptor(ScriptType::External)?.unwrap().to_string(), "sh(wpkh([c55b303f/49\'/0\'/0\']tpubDC49r947KGK52X5rBWS4BLs5m9SRY3pYHnvRrm7HcybZ3BfdEsGFyzCMzayi1u58eT82ZeyFZwH7DD6Q83E3fM9CpfMtmnTygnLfP59jL9L/0/*))");
+/// assert_eq!(wallet.public_descriptor(KeychainKind::External)?.unwrap().to_string(), "sh(wpkh([c55b303f/49\'/0\'/0\']tpubDC49r947KGK52X5rBWS4BLs5m9SRY3pYHnvRrm7HcybZ3BfdEsGFyzCMzayi1u58eT82ZeyFZwH7DD6Q83E3fM9CpfMtmnTygnLfP59jL9L/0/*))");
 /// # Ok::<_, Box<dyn std::error::Error>>(())
 /// ```
-pub struct BIP49<K: DerivableKey<Segwitv0>>(pub K, pub ScriptType);
+pub struct BIP49<K: DerivableKey<Segwitv0>>(pub K, pub KeychainKind);
 
 impl<K: DerivableKey<Segwitv0>> DescriptorTemplate for BIP49<K> {
     fn build(self) -> Result<DescriptorTemplateOut, KeyError> {
@@ -271,24 +271,24 @@ impl<K: DerivableKey<Segwitv0>> DescriptorTemplate for BIP49<K> {
 /// ```
 /// # use std::str::FromStr;
 /// # use bdk::bitcoin::{PrivateKey, Network};
-/// # use bdk::{Wallet, OfflineWallet, ScriptType};
+/// # use bdk::{Wallet, OfflineWallet, KeychainKind};
 /// # use bdk::database::MemoryDatabase;
 /// use bdk::template::BIP49Public;
 ///
 /// let key = bitcoin::util::bip32::ExtendedPubKey::from_str("tpubDC49r947KGK52X5rBWS4BLs5m9SRY3pYHnvRrm7HcybZ3BfdEsGFyzCMzayi1u58eT82ZeyFZwH7DD6Q83E3fM9CpfMtmnTygnLfP59jL9L")?;
 /// let fingerprint = bitcoin::util::bip32::Fingerprint::from_str("c55b303f")?;
 /// let wallet: OfflineWallet<_> = Wallet::new_offline(
-///     BIP49Public(key.clone(), fingerprint, ScriptType::External),
-///     Some(BIP49Public(key, fingerprint, ScriptType::Internal)),
+///     BIP49Public(key.clone(), fingerprint, KeychainKind::External),
+///     Some(BIP49Public(key, fingerprint, KeychainKind::Internal)),
 ///     Network::Testnet,
 ///     MemoryDatabase::default()
 /// )?;
 ///
 /// assert_eq!(wallet.get_new_address()?.to_string(), "2N3K4xbVAHoiTQSwxkZjWDfKoNC27pLkYnt");
-/// assert_eq!(wallet.public_descriptor(ScriptType::External)?.unwrap().to_string(), "sh(wpkh([c55b303f/49\'/0\'/0\']tpubDC49r947KGK52X5rBWS4BLs5m9SRY3pYHnvRrm7HcybZ3BfdEsGFyzCMzayi1u58eT82ZeyFZwH7DD6Q83E3fM9CpfMtmnTygnLfP59jL9L/0/*))");
+/// assert_eq!(wallet.public_descriptor(KeychainKind::External)?.unwrap().to_string(), "sh(wpkh([c55b303f/49\'/0\'/0\']tpubDC49r947KGK52X5rBWS4BLs5m9SRY3pYHnvRrm7HcybZ3BfdEsGFyzCMzayi1u58eT82ZeyFZwH7DD6Q83E3fM9CpfMtmnTygnLfP59jL9L/0/*))");
 /// # Ok::<_, Box<dyn std::error::Error>>(())
 /// ```
-pub struct BIP49Public<K: DerivableKey<Segwitv0>>(pub K, pub bip32::Fingerprint, pub ScriptType);
+pub struct BIP49Public<K: DerivableKey<Segwitv0>>(pub K, pub bip32::Fingerprint, pub KeychainKind);
 
 impl<K: DerivableKey<Segwitv0>> DescriptorTemplate for BIP49Public<K> {
     fn build(self) -> Result<DescriptorTemplateOut, KeyError> {
@@ -307,23 +307,23 @@ impl<K: DerivableKey<Segwitv0>> DescriptorTemplate for BIP49Public<K> {
 /// ```
 /// # use std::str::FromStr;
 /// # use bdk::bitcoin::{PrivateKey, Network};
-/// # use bdk::{Wallet, OfflineWallet, ScriptType};
+/// # use bdk::{Wallet, OfflineWallet, KeychainKind};
 /// # use bdk::database::MemoryDatabase;
 /// use bdk::template::BIP84;
 ///
 /// let key = bitcoin::util::bip32::ExtendedPrivKey::from_str("tprv8ZgxMBicQKsPeZRHk4rTG6orPS2CRNFX3njhUXx5vj9qGog5ZMH4uGReDWN5kCkY3jmWEtWause41CDvBRXD1shKknAMKxT99o9qUTRVC6m")?;
 /// let wallet: OfflineWallet<_> = Wallet::new_offline(
-///     BIP84(key.clone(), ScriptType::External),
-///     Some(BIP84(key, ScriptType::Internal)),
+///     BIP84(key.clone(), KeychainKind::External),
+///     Some(BIP84(key, KeychainKind::Internal)),
 ///     Network::Testnet,
 ///     MemoryDatabase::default()
 /// )?;
 ///
 /// assert_eq!(wallet.get_new_address()?.to_string(), "tb1qedg9fdlf8cnnqfd5mks6uz5w4kgpk2pr6y4qc7");
-/// assert_eq!(wallet.public_descriptor(ScriptType::External)?.unwrap().to_string(), "wpkh([c55b303f/84\'/0\'/0\']tpubDC2Qwo2TFsaNC4ju8nrUJ9mqVT3eSgdmy1yPqhgkjwmke3PRXutNGRYAUo6RCHTcVQaDR3ohNU9we59brGHuEKPvH1ags2nevW5opEE9Z5Q/0/*)");
+/// assert_eq!(wallet.public_descriptor(KeychainKind::External)?.unwrap().to_string(), "wpkh([c55b303f/84\'/0\'/0\']tpubDC2Qwo2TFsaNC4ju8nrUJ9mqVT3eSgdmy1yPqhgkjwmke3PRXutNGRYAUo6RCHTcVQaDR3ohNU9we59brGHuEKPvH1ags2nevW5opEE9Z5Q/0/*)");
 /// # Ok::<_, Box<dyn std::error::Error>>(())
 /// ```
-pub struct BIP84<K: DerivableKey<Segwitv0>>(pub K, pub ScriptType);
+pub struct BIP84<K: DerivableKey<Segwitv0>>(pub K, pub KeychainKind);
 
 impl<K: DerivableKey<Segwitv0>> DescriptorTemplate for BIP84<K> {
     fn build(self) -> Result<DescriptorTemplateOut, KeyError> {
@@ -345,24 +345,24 @@ impl<K: DerivableKey<Segwitv0>> DescriptorTemplate for BIP84<K> {
 /// ```
 /// # use std::str::FromStr;
 /// # use bdk::bitcoin::{PrivateKey, Network};
-/// # use bdk::{Wallet, OfflineWallet, ScriptType};
+/// # use bdk::{Wallet, OfflineWallet, KeychainKind};
 /// # use bdk::database::MemoryDatabase;
 /// use bdk::template::BIP84Public;
 ///
 /// let key = bitcoin::util::bip32::ExtendedPubKey::from_str("tpubDC2Qwo2TFsaNC4ju8nrUJ9mqVT3eSgdmy1yPqhgkjwmke3PRXutNGRYAUo6RCHTcVQaDR3ohNU9we59brGHuEKPvH1ags2nevW5opEE9Z5Q")?;
 /// let fingerprint = bitcoin::util::bip32::Fingerprint::from_str("c55b303f")?;
 /// let wallet: OfflineWallet<_> = Wallet::new_offline(
-///     BIP84Public(key.clone(), fingerprint, ScriptType::External),
-///     Some(BIP84Public(key, fingerprint, ScriptType::Internal)),
+///     BIP84Public(key.clone(), fingerprint, KeychainKind::External),
+///     Some(BIP84Public(key, fingerprint, KeychainKind::Internal)),
 ///     Network::Testnet,
 ///     MemoryDatabase::default()
 /// )?;
 ///
 /// assert_eq!(wallet.get_new_address()?.to_string(), "tb1qedg9fdlf8cnnqfd5mks6uz5w4kgpk2pr6y4qc7");
-/// assert_eq!(wallet.public_descriptor(ScriptType::External)?.unwrap().to_string(), "wpkh([c55b303f/84\'/0\'/0\']tpubDC2Qwo2TFsaNC4ju8nrUJ9mqVT3eSgdmy1yPqhgkjwmke3PRXutNGRYAUo6RCHTcVQaDR3ohNU9we59brGHuEKPvH1ags2nevW5opEE9Z5Q/0/*)");
+/// assert_eq!(wallet.public_descriptor(KeychainKind::External)?.unwrap().to_string(), "wpkh([c55b303f/84\'/0\'/0\']tpubDC2Qwo2TFsaNC4ju8nrUJ9mqVT3eSgdmy1yPqhgkjwmke3PRXutNGRYAUo6RCHTcVQaDR3ohNU9we59brGHuEKPvH1ags2nevW5opEE9Z5Q/0/*)");
 /// # Ok::<_, Box<dyn std::error::Error>>(())
 /// ```
-pub struct BIP84Public<K: DerivableKey<Segwitv0>>(pub K, pub bip32::Fingerprint, pub ScriptType);
+pub struct BIP84Public<K: DerivableKey<Segwitv0>>(pub K, pub bip32::Fingerprint, pub KeychainKind);
 
 impl<K: DerivableKey<Segwitv0>> DescriptorTemplate for BIP84Public<K> {
     fn build(self) -> Result<DescriptorTemplateOut, KeyError> {
@@ -378,18 +378,18 @@ macro_rules! expand_make_bipxx {
             pub(super) fn make_bipxx_private<K: DerivableKey<$ctx>>(
                 bip: u32,
                 key: K,
-                script_type: ScriptType,
+                keychain: KeychainKind,
             ) -> Result<impl ToDescriptorKey<$ctx>, KeyError> {
                 let mut derivation_path = Vec::with_capacity(4);
                 derivation_path.push(bip32::ChildNumber::from_hardened_idx(bip)?);
                 derivation_path.push(bip32::ChildNumber::from_hardened_idx(0)?);
                 derivation_path.push(bip32::ChildNumber::from_hardened_idx(0)?);
 
-                match script_type {
-                    ScriptType::External => {
+                match keychain {
+                    KeychainKind::External => {
                         derivation_path.push(bip32::ChildNumber::from_normal_idx(0)?)
                     }
-                    ScriptType::Internal => {
+                    KeychainKind::Internal => {
                         derivation_path.push(bip32::ChildNumber::from_normal_idx(1)?)
                     }
                 };
@@ -402,11 +402,11 @@ macro_rules! expand_make_bipxx {
                 bip: u32,
                 key: K,
                 parent_fingerprint: bip32::Fingerprint,
-                script_type: ScriptType,
+                keychain: KeychainKind,
             ) -> Result<impl ToDescriptorKey<$ctx>, KeyError> {
-                let derivation_path: bip32::DerivationPath = match script_type {
-                    ScriptType::External => vec![bip32::ChildNumber::from_normal_idx(0)?].into(),
-                    ScriptType::Internal => vec![bip32::ChildNumber::from_normal_idx(1)?].into(),
+                let derivation_path: bip32::DerivationPath = match keychain {
+                    KeychainKind::External => vec![bip32::ChildNumber::from_normal_idx(0)?].into(),
+                    KeychainKind::Internal => vec![bip32::ChildNumber::from_normal_idx(1)?].into(),
                 };
 
                 let mut source_path = Vec::with_capacity(3);
@@ -544,7 +544,7 @@ mod test {
     fn test_bip44_template() {
         let prvkey = bitcoin::util::bip32::ExtendedPrivKey::from_str("tprv8ZgxMBicQKsPcx5nBGsR63Pe8KnRUqmbJNENAfGftF3yuXoMMoVJJcYeUw5eVkm9WBPjWYt6HMWYJNesB5HaNVBaFc1M6dRjWSYnmewUMYy").unwrap();
         check(
-            BIP44(prvkey, ScriptType::External).build(),
+            BIP44(prvkey, KeychainKind::External).build(),
             false,
             false,
             &[
@@ -554,7 +554,7 @@ mod test {
             ],
         );
         check(
-            BIP44(prvkey, ScriptType::Internal).build(),
+            BIP44(prvkey, KeychainKind::Internal).build(),
             false,
             false,
             &[
@@ -571,7 +571,7 @@ mod test {
         let pubkey = bitcoin::util::bip32::ExtendedPubKey::from_str("tpubDDDzQ31JkZB7VxUr9bjvBivDdqoFLrDPyLWtLapArAi51ftfmCb2DPxwLQzX65iNcXz1DGaVvyvo6JQ6rTU73r2gqdEo8uov9QKRb7nKCSU").unwrap();
         let fingerprint = bitcoin::util::bip32::Fingerprint::from_str("c55b303f").unwrap();
         check(
-            BIP44Public(pubkey, fingerprint, ScriptType::External).build(),
+            BIP44Public(pubkey, fingerprint, KeychainKind::External).build(),
             false,
             false,
             &[
@@ -581,7 +581,7 @@ mod test {
             ],
         );
         check(
-            BIP44Public(pubkey, fingerprint, ScriptType::Internal).build(),
+            BIP44Public(pubkey, fingerprint, KeychainKind::Internal).build(),
             false,
             false,
             &[
@@ -597,7 +597,7 @@ mod test {
     fn test_bip49_template() {
         let prvkey = bitcoin::util::bip32::ExtendedPrivKey::from_str("tprv8ZgxMBicQKsPcx5nBGsR63Pe8KnRUqmbJNENAfGftF3yuXoMMoVJJcYeUw5eVkm9WBPjWYt6HMWYJNesB5HaNVBaFc1M6dRjWSYnmewUMYy").unwrap();
         check(
-            BIP49(prvkey, ScriptType::External).build(),
+            BIP49(prvkey, KeychainKind::External).build(),
             true,
             false,
             &[
@@ -607,7 +607,7 @@ mod test {
             ],
         );
         check(
-            BIP49(prvkey, ScriptType::Internal).build(),
+            BIP49(prvkey, KeychainKind::Internal).build(),
             true,
             false,
             &[
@@ -624,7 +624,7 @@ mod test {
         let pubkey = bitcoin::util::bip32::ExtendedPubKey::from_str("tpubDC49r947KGK52X5rBWS4BLs5m9SRY3pYHnvRrm7HcybZ3BfdEsGFyzCMzayi1u58eT82ZeyFZwH7DD6Q83E3fM9CpfMtmnTygnLfP59jL9L").unwrap();
         let fingerprint = bitcoin::util::bip32::Fingerprint::from_str("c55b303f").unwrap();
         check(
-            BIP49Public(pubkey, fingerprint, ScriptType::External).build(),
+            BIP49Public(pubkey, fingerprint, KeychainKind::External).build(),
             true,
             false,
             &[
@@ -634,7 +634,7 @@ mod test {
             ],
         );
         check(
-            BIP49Public(pubkey, fingerprint, ScriptType::Internal).build(),
+            BIP49Public(pubkey, fingerprint, KeychainKind::Internal).build(),
             true,
             false,
             &[
@@ -650,7 +650,7 @@ mod test {
     fn test_bip84_template() {
         let prvkey = bitcoin::util::bip32::ExtendedPrivKey::from_str("tprv8ZgxMBicQKsPcx5nBGsR63Pe8KnRUqmbJNENAfGftF3yuXoMMoVJJcYeUw5eVkm9WBPjWYt6HMWYJNesB5HaNVBaFc1M6dRjWSYnmewUMYy").unwrap();
         check(
-            BIP84(prvkey, ScriptType::External).build(),
+            BIP84(prvkey, KeychainKind::External).build(),
             true,
             false,
             &[
@@ -660,7 +660,7 @@ mod test {
             ],
         );
         check(
-            BIP84(prvkey, ScriptType::Internal).build(),
+            BIP84(prvkey, KeychainKind::Internal).build(),
             true,
             false,
             &[
@@ -677,7 +677,7 @@ mod test {
         let pubkey = bitcoin::util::bip32::ExtendedPubKey::from_str("tpubDC2Qwo2TFsaNC4ju8nrUJ9mqVT3eSgdmy1yPqhgkjwmke3PRXutNGRYAUo6RCHTcVQaDR3ohNU9we59brGHuEKPvH1ags2nevW5opEE9Z5Q").unwrap();
         let fingerprint = bitcoin::util::bip32::Fingerprint::from_str("c55b303f").unwrap();
         check(
-            BIP84Public(pubkey, fingerprint, ScriptType::External).build(),
+            BIP84Public(pubkey, fingerprint, KeychainKind::External).build(),
             true,
             false,
             &[
@@ -687,7 +687,7 @@ mod test {
             ],
         );
         check(
-            BIP84Public(pubkey, fingerprint, ScriptType::Internal).build(),
+            BIP84Public(pubkey, fingerprint, KeychainKind::Internal).build(),
             true,
             false,
             &[

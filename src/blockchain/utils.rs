@@ -34,7 +34,7 @@ use bitcoin::{BlockHeader, OutPoint, Script, Transaction, Txid};
 use super::*;
 use crate::database::{BatchDatabase, BatchOperations, DatabaseUtils};
 use crate::error::Error;
-use crate::types::{ScriptType, TransactionDetails, UTXO};
+use crate::types::{KeychainKind, TransactionDetails, UTXO};
 use crate::wallet::time::Instant;
 use crate::wallet::utils::ChunksIterator;
 
@@ -81,12 +81,12 @@ pub trait ElectrumLikeSync {
         let mut txid_height = HashMap::new();
         let mut max_indexes = HashMap::new();
 
-        let mut wallet_chains = vec![ScriptType::Internal, ScriptType::External];
+        let mut wallet_chains = vec![KeychainKind::Internal, KeychainKind::External];
         // shuffling improve privacy, the server doesn't know my first request is from my internal or external addresses
         wallet_chains.shuffle(&mut thread_rng());
         // download history of our internal and external script_pubkeys
-        for script_type in wallet_chains.iter() {
-            let script_iter = db.iter_script_pubkeys(Some(*script_type))?.into_iter();
+        for keychain in wallet_chains.iter() {
+            let script_iter = db.iter_script_pubkeys(Some(*keychain))?.into_iter();
 
             for (i, chunk) in ChunksIterator::new(script_iter, stop_gap).enumerate() {
                 // TODO if i == last, should create another chunk of addresses in db
@@ -98,10 +98,10 @@ pub trait ElectrumLikeSync {
                     .filter_map(|(i, v)| v.first().map(|_| i as u32))
                     .max();
                 if let Some(max) = max_index {
-                    max_indexes.insert(script_type, max + (i * chunk_size) as u32);
+                    max_indexes.insert(keychain, max + (i * chunk_size) as u32);
                 }
                 let flattened: Vec<ELSGetHistoryRes> = call_result.into_iter().flatten().collect();
-                debug!("#{} of {:?} results:{}", i, script_type, flattened.len());
+                debug!("#{} of {:?} results:{}", i, keychain, flattened.len());
                 if flattened.is_empty() {
                     // Didn't find anything in the last `stop_gap` script_pubkeys, breaking
                     break;
@@ -123,9 +123,9 @@ pub trait ElectrumLikeSync {
 
         // saving max indexes
         info!("max indexes are: {:?}", max_indexes);
-        for script_type in wallet_chains.iter() {
-            if let Some(index) = max_indexes.get(script_type) {
-                db.set_last_index(*script_type, *index)?;
+        for keychain in wallet_chains.iter() {
+            if let Some(index) = max_indexes.get(keychain) {
+                db.set_last_index(*keychain, *index)?;
             }
         }
 
@@ -351,14 +351,12 @@ fn save_transaction_details_and_utxos<D: BatchDatabase>(
         outputs_sum += output.value;
 
         // this output is ours, we have a path to derive it
-        if let Some((script_type, _child)) =
-            db.get_path_from_script_pubkey(&output.script_pubkey)?
-        {
+        if let Some((keychain, _child)) = db.get_path_from_script_pubkey(&output.script_pubkey)? {
             debug!("{} output #{} is mine, adding utxo", txid, i);
             updates.set_utxo(&UTXO {
                 outpoint: OutPoint::new(tx.txid(), i as u32),
                 txout: output.clone(),
-                script_type,
+                keychain,
             })?;
 
             incoming += output.value;

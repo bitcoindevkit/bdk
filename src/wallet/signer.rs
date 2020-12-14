@@ -81,7 +81,7 @@
 //! let descriptor = "wpkh(tpubD6NzVbkrYhZ4Xferm7Pz4VnjdcDPFyjVu5K4iZXQ4pVN8Cks4pHVowTBXBKRhX64pkRyJZJN5xAKj4UDNnLPb5p2sSKXhewoYx5GbTdUFWq/*)";
 //! let mut wallet: OfflineWallet<_> = Wallet::new_offline(descriptor, None, Network::Testnet, MemoryDatabase::default())?;
 //! wallet.add_signer(
-//!     ScriptType::External,
+//!     KeychainKind::External,
 //!     Fingerprint::from_str("e30f11b8").unwrap().into(),
 //!     SignerOrdering(200),
 //!     Arc::new(custom_signer)

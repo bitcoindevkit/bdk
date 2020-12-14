@@ -82,7 +82,7 @@ pub fn bdk_blockchain_tests(attr: TokenStream, item: TokenStream) -> TokenStream
                 use #root_ident::blockchain::{Blockchain, noop_progress};
                 use #root_ident::descriptor::ExtendedDescriptor;
                 use #root_ident::database::MemoryDatabase;
-                use #root_ident::types::ScriptType;
+                use #root_ident::types::KeychainKind;
                 use #root_ident::{Wallet, TxBuilder, FeeRate};
 
                 use super::*;
@@ -120,7 +120,7 @@ pub fn bdk_blockchain_tests(attr: TokenStream, item: TokenStream) -> TokenStream
                     wallet.sync(noop_progress(), None).unwrap();
 
                     assert_eq!(wallet.get_balance().unwrap(), 50_000);
-                    assert_eq!(wallet.list_unspent().unwrap()[0].script_type, ScriptType::External);
+                    assert_eq!(wallet.list_unspent().unwrap()[0].keychain, KeychainKind::External);
 
                     let list_tx_item = &wallet.list_transactions(false).unwrap()[0];
                     assert_eq!(list_tx_item.txid, txid);

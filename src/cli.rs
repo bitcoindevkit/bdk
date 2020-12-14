@@ -104,7 +104,7 @@ use bitcoin::{Address, OutPoint, Script, Txid};
 
 use crate::blockchain::log_progress;
 use crate::error::Error;
-use crate::types::ScriptType;
+use crate::types::KeychainKind;
 use crate::{FeeRate, TxBuilder, Wallet};
 
 /// Wallet global options and sub-command
@@ -479,14 +479,14 @@ where
             }
 
             let policies = vec![
-                external_policy.map(|p| (p, ScriptType::External)),
-                internal_policy.map(|p| (p, ScriptType::Internal)),
+                external_policy.map(|p| (p, KeychainKind::External)),
+                internal_policy.map(|p| (p, KeychainKind::Internal)),
             ];
 
-            for (policy, script_type) in policies.into_iter().filter_map(|x| x) {
+            for (policy, keychain) in policies.into_iter().filter_map(|x| x) {
                 let policy = serde_json::from_str::<BTreeMap<String, Vec<usize>>>(&policy)
                     .map_err(|s| Error::Generic(s.to_string()))?;
-                tx_builder = tx_builder.policy_path(policy, script_type);
+                tx_builder = tx_builder.policy_path(policy, keychain);
             }
 
             let (psbt, details) = wallet.create_tx(tx_builder)?;
@@ -526,12 +526,12 @@ where
             Ok(json!({"psbt": base64::encode(&serialize(&psbt)),"details": details,}))
         }
         WalletSubCommand::Policies => Ok(json!({
-            "external": wallet.policies(ScriptType::External)?,
-            "internal": wallet.policies(ScriptType::Internal)?,
+            "external": wallet.policies(KeychainKind::External)?,
+            "internal": wallet.policies(KeychainKind::Internal)?,
         })),
         WalletSubCommand::PublicDescriptor => Ok(json!({
-            "external": wallet.public_descriptor(ScriptType::External)?.map(|d| d.to_string()),
-            "internal": wallet.public_descriptor(ScriptType::Internal)?.map(|d| d.to_string()),
+            "external": wallet.public_descriptor(KeychainKind::External)?.map(|d| d.to_string()),
+            "internal": wallet.public_descriptor(KeychainKind::Internal)?.map(|d| d.to_string()),
         })),
         WalletSubCommand::Sign {
             psbt,
