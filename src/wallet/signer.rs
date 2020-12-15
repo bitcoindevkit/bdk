@@ -403,8 +403,9 @@ impl SignersContainer {
         self.0
             .range((
                 Included(&(id.clone(), SignerOrdering(0)).into()),
-                Included(&(id, SignerOrdering(usize::MAX)).into()),
+                Included(&(id.clone(), SignerOrdering(usize::MAX)).into()),
             ))
+            .filter(|(k, _)| k.id == id)
             .map(|(_, v)| v)
             .next()
     }
