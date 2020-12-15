@@ -523,7 +523,9 @@ impl PartialOrd for SignersContainerKey {
 
 impl Ord for SignersContainerKey {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.ordering.cmp(&other.ordering).then(self.id.cmp(&other.id))
+        self.ordering
+            .cmp(&other.ordering)
+            .then(self.id.cmp(&other.id))
     }
 }
 
@@ -539,14 +541,14 @@ impl Eq for SignersContainerKey {}
 mod signers_container_tests {
     use super::*;
     use crate::descriptor;
-    use miniscript::ScriptContext;
-    use crate::keys::{DescriptorKey, ToDescriptorKey};
-    use bitcoin::util::bip32;
-    use bitcoin::secp256k1::All;
-    use std::str::FromStr;
     use crate::descriptor::ToWalletDescriptor;
-    use bitcoin::Network;
+    use crate::keys::{DescriptorKey, ToDescriptorKey};
+    use bitcoin::secp256k1::All;
+    use bitcoin::util::bip32;
     use bitcoin::util::psbt::PartiallySignedTransaction;
+    use bitcoin::Network;
+    use miniscript::ScriptContext;
+    use std::str::FromStr;
 
     // Signers added with the same ordering (like `Ordering::default`) created from `KeyMap`
     // should be preserved and not overwritten.
@@ -572,9 +574,21 @@ mod signers_container_tests {
         let signer2 = Arc::new(DummySigner);
         let signer3 = Arc::new(DummySigner);
 
-        signers.add_external(SignerId::Fingerprint(b"cafe"[..].into()), SignerOrdering(1), signer1.clone());
-        signers.add_external(SignerId::Fingerprint(b"babe"[..].into()), SignerOrdering(2), signer2.clone());
-        signers.add_external(SignerId::Fingerprint(b"feed"[..].into()), SignerOrdering(3), signer3.clone());
+        signers.add_external(
+            SignerId::Fingerprint(b"cafe"[..].into()),
+            SignerOrdering(1),
+            signer1.clone(),
+        );
+        signers.add_external(
+            SignerId::Fingerprint(b"babe"[..].into()),
+            SignerOrdering(2),
+            signer2.clone(),
+        );
+        signers.add_external(
+            SignerId::Fingerprint(b"feed"[..].into()),
+            SignerOrdering(3),
+            signer3.clone(),
+        );
 
         // Check that signers are sorted from lowest to highest ordering
         let signers = signers.signers();
@@ -600,14 +614,22 @@ mod signers_container_tests {
         signers.add_external(id2.clone(), SignerOrdering(2), signer2.clone());
         signers.add_external(id3.clone(), SignerOrdering(3), signer3.clone());
 
-        assert!(matches!(signers.find(id1), Some(signer) if Arc::as_ptr(&signer1) == Arc::as_ptr(signer)));
-        assert!(matches!(signers.find(id2), Some(signer) if Arc::as_ptr(&signer2) == Arc::as_ptr(signer)));
-        assert!(matches!(signers.find(id3.clone()), Some(signer) if Arc::as_ptr(&signer3) == Arc::as_ptr(signer)));
+        assert!(
+            matches!(signers.find(id1), Some(signer) if Arc::as_ptr(&signer1) == Arc::as_ptr(signer))
+        );
+        assert!(
+            matches!(signers.find(id2), Some(signer) if Arc::as_ptr(&signer2) == Arc::as_ptr(signer))
+        );
+        assert!(
+            matches!(signers.find(id3.clone()), Some(signer) if Arc::as_ptr(&signer3) == Arc::as_ptr(signer))
+        );
 
         // The `signer4` has the same ID as `signer3` but lower ordering.
         // It should be found by `id3` instead of `signer3`.
         signers.add_external(id3.clone(), SignerOrdering(2), signer4.clone());
-        assert!(matches!(signers.find(id3), Some(signer) if Arc::as_ptr(&signer4) == Arc::as_ptr(signer)));
+        assert!(
+            matches!(signers.find(id3), Some(signer) if Arc::as_ptr(&signer4) == Arc::as_ptr(signer))
+        );
 
         // Can't find anything with ID that doesn't exist
         assert!(matches!(signers.find(id_nonexistent), None));
@@ -616,7 +638,12 @@ mod signers_container_tests {
     #[derive(Debug)]
     struct DummySigner;
     impl Signer for DummySigner {
-        fn sign(&self, _psbt: &mut PartiallySignedTransaction, _input_index: Option<usize>, _secp: &SecpCtx) -> Result<(), SignerError> {
+        fn sign(
+            &self,
+            _psbt: &mut PartiallySignedTransaction,
+            _input_index: Option<usize>,
+            _secp: &SecpCtx,
+        ) -> Result<(), SignerError> {
             Ok(())
         }
 
