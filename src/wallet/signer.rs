@@ -531,7 +531,7 @@ impl Ord for SignersContainerKey {
 
 impl PartialEq for SignersContainerKey {
     fn eq(&self, other: &Self) -> bool {
-        self.ordering == other.ordering
+        self.id == other.id && self.ordering == other.ordering
     }
 }
 
