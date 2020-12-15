@@ -18,10 +18,10 @@ jobs:
       - name: Install tarpaulin
         run: cargo install cargo-tarpaulin
       - name: Tarpaulin
-        run: cargo tarpaulin --features all-keys,cli-utils,compiler,esplora,compact_filters --run-types Tests,Doctests --exclude-files "testutils/*"
+        run: cargo tarpaulin --features all-keys,cli-utils,compiler,esplora,compact_filters --run-types Tests,Doctests --exclude-files "testutils/*" --out Xml
 
       - name: Publish to codecov.io
-        uses: codecov/codecov-action@v1.0.14
+        uses: codecov/codecov-action@v1.0.15
         with:
-          token: ${{secrets.CODECOV_TOKEN}}
           fail_ci_if_error: true
+          file: ./cobertura.xml
