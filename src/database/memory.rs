@@ -47,13 +47,13 @@ use crate::types::*;
 // descriptor checksum  d{i,e} -> vec<u8>
 
 pub(crate) enum MapKey<'a> {
-    Path((Option<ScriptType>, Option<u32>)),
+    Path((Option<KeychainKind>, Option<u32>)),
     Script(Option<&'a Script>),
     UTXO(Option<&'a OutPoint>),
     RawTx(Option<&'a Txid>),
     Transaction(Option<&'a Txid>),
-    LastIndex(ScriptType),
-    DescriptorChecksum(ScriptType),
+    LastIndex(KeychainKind),
+    DescriptorChecksum(KeychainKind),
 }
 
 impl MapKey<'_> {
@@ -141,15 +141,15 @@ impl BatchOperations for MemoryDatabase {
     fn set_script_pubkey(
         &mut self,
         script: &Script,
-        script_type: ScriptType,
+        keychain: KeychainKind,
         path: u32,
     ) -> Result<(), Error> {
-        let key = MapKey::Path((Some(script_type), Some(path))).as_map_key();
+        let key = MapKey::Path((Some(keychain), Some(path))).as_map_key();
         self.map.insert(key, Box::new(script.clone()));
 
         let key = MapKey::Script(Some(script)).as_map_key();
         let value = json!({
-            "t": script_type,
+            "t": keychain,
             "p": path,
         });
         self.map.insert(key, Box::new(value));
@@ -160,7 +160,7 @@ impl BatchOperations for MemoryDatabase {
     fn set_utxo(&mut self, utxo: &UTXO) -> Result<(), Error> {
         let key = MapKey::UTXO(Some(&utxo.outpoint)).as_map_key();
         self.map
-            .insert(key, Box::new((utxo.txout.clone(), utxo.script_type)));
+            .insert(key, Box::new((utxo.txout.clone(), utxo.keychain)));
 
         Ok(())
     }
@@ -186,8 +186,8 @@ impl BatchOperations for MemoryDatabase {
 
         Ok(())
     }
-    fn set_last_index(&mut self, script_type: ScriptType, value: u32) -> Result<(), Error> {
-        let key = MapKey::LastIndex(script_type).as_map_key();
+    fn set_last_index(&mut self, keychain: KeychainKind, value: u32) -> Result<(), Error> {
+        let key = MapKey::LastIndex(keychain).as_map_key();
         self.map.insert(key, Box::new(value));
 
         Ok(())
@@ -195,10 +195,10 @@ impl BatchOperations for MemoryDatabase {
 
     fn del_script_pubkey_from_path(
         &mut self,
-        script_type: ScriptType,
+        keychain: KeychainKind,
         path: u32,
     ) -> Result<Option<Script>, Error> {
-        let key = MapKey::Path((Some(script_type), Some(path))).as_map_key();
+        let key = MapKey::Path((Some(keychain), Some(path))).as_map_key();
         let res = self.map.remove(&key);
         self.deleted_keys.push(key);
 
@@ -207,7 +207,7 @@ impl BatchOperations for MemoryDatabase {
     fn del_path_from_script_pubkey(
         &mut self,
         script: &Script,
-    ) -> Result<Option<(ScriptType, u32)>, Error> {
+    ) -> Result<Option<(KeychainKind, u32)>, Error> {
         let key = MapKey::Script(Some(script)).as_map_key();
         let res = self.map.remove(&key);
         self.deleted_keys.push(key);
@@ -231,11 +231,11 @@ impl BatchOperations for MemoryDatabase {
         match res {
             None => Ok(None),
             Some(b) => {
-                let (txout, script_type) = b.downcast_ref().cloned().unwrap();
+                let (txout, keychain) = b.downcast_ref().cloned().unwrap();
                 Ok(Some(UTXO {
                     outpoint: *outpoint,
                     txout,
-                    script_type,
+                    keychain,
                 }))
             }
         }
@@ -272,8 +272,8 @@ impl BatchOperations for MemoryDatabase {
             }
         }
     }
-    fn del_last_index(&mut self, script_type: ScriptType) -> Result<Option<u32>, Error> {
-        let key = MapKey::LastIndex(script_type).as_map_key();
+    fn del_last_index(&mut self, keychain: KeychainKind) -> Result<Option<u32>, Error> {
+        let key = MapKey::LastIndex(keychain).as_map_key();
         let res = self.map.remove(&key);
         self.deleted_keys.push(key);
 
@@ -287,10 +287,10 @@ impl BatchOperations for MemoryDatabase {
 impl Database for MemoryDatabase {
     fn check_descriptor_checksum<B: AsRef<[u8]>>(
         &mut self,
-        script_type: ScriptType,
+        keychain: KeychainKind,
         bytes: B,
     ) -> Result<(), Error> {
-        let key = MapKey::DescriptorChecksum(script_type).as_map_key();
+        let key = MapKey::DescriptorChecksum(keychain).as_map_key();
 
         let prev = self
             .map
@@ -308,8 +308,8 @@ impl Database for MemoryDatabase {
         }
     }
 
-    fn iter_script_pubkeys(&self, script_type: Option<ScriptType>) -> Result<Vec<Script>, Error> {
-        let key = MapKey::Path((script_type, None)).as_map_key();
+    fn iter_script_pubkeys(&self, keychain: Option<KeychainKind>) -> Result<Vec<Script>, Error> {
+        let key = MapKey::Path((keychain, None)).as_map_key();
         self.map
             .range::<Vec<u8>, _>((Included(&key), Excluded(&after(&key))))
             .map(|(_, v)| Ok(v.downcast_ref().cloned().unwrap()))
@@ -322,11 +322,11 @@ impl Database for MemoryDatabase {
             .range::<Vec<u8>, _>((Included(&key), Excluded(&after(&key))))
             .map(|(k, v)| {
                 let outpoint = deserialize(&k[1..]).unwrap();
-                let (txout, script_type) = v.downcast_ref().cloned().unwrap();
+                let (txout, keychain) = v.downcast_ref().cloned().unwrap();
                 Ok(UTXO {
                     outpoint,
                     txout,
-                    script_type,
+                    keychain,
                 })
             })
             .collect()
@@ -358,10 +358,10 @@ impl Database for MemoryDatabase {
 
     fn get_script_pubkey_from_path(
         &self,
-        script_type: ScriptType,
+        keychain: KeychainKind,
         path: u32,
     ) -> Result<Option<Script>, Error> {
-        let key = MapKey::Path((Some(script_type), Some(path))).as_map_key();
+        let key = MapKey::Path((Some(keychain), Some(path))).as_map_key();
         Ok(self
             .map
             .get(&key)
@@ -371,7 +371,7 @@ impl Database for MemoryDatabase {
     fn get_path_from_script_pubkey(
         &self,
         script: &Script,
-    ) -> Result<Option<(ScriptType, u32)>, Error> {
+    ) -> Result<Option<(KeychainKind, u32)>, Error> {
         let key = MapKey::Script(Some(script)).as_map_key();
         Ok(self.map.get(&key).map(|b| {
             let mut val: serde_json::Value = b.downcast_ref().cloned().unwrap();
@@ -385,11 +385,11 @@ impl Database for MemoryDatabase {
     fn get_utxo(&self, outpoint: &OutPoint) -> Result<Option<UTXO>, Error> {
         let key = MapKey::UTXO(Some(outpoint)).as_map_key();
         Ok(self.map.get(&key).map(|b| {
-            let (txout, script_type) = b.downcast_ref().cloned().unwrap();
+            let (txout, keychain) = b.downcast_ref().cloned().unwrap();
             UTXO {
                 outpoint: *outpoint,
                 txout,
-                script_type,
+                keychain,
             }
         }))
     }
@@ -414,14 +414,14 @@ impl Database for MemoryDatabase {
         }))
     }
 
-    fn get_last_index(&self, script_type: ScriptType) -> Result<Option<u32>, Error> {
-        let key = MapKey::LastIndex(script_type).as_map_key();
+    fn get_last_index(&self, keychain: KeychainKind) -> Result<Option<u32>, Error> {
+        let key = MapKey::LastIndex(keychain).as_map_key();
         Ok(self.map.get(&key).map(|b| *b.downcast_ref().unwrap()))
     }
 
     // inserts 0 if not present
-    fn increment_last_index(&mut self, script_type: ScriptType) -> Result<u32, Error> {
-        let key = MapKey::LastIndex(script_type).as_map_key();
+    fn increment_last_index(&mut self, keychain: KeychainKind) -> Result<u32, Error> {
+        let key = MapKey::LastIndex(keychain).as_map_key();
         let value = self
             .map
             .entry(key)
@@ -507,7 +507,7 @@ impl MemoryDatabase {
                     txid,
                     vout: vout as u32,
                 },
-                script_type: ScriptType::External,
+                keychain: KeychainKind::External,
             })
             .unwrap();
         }

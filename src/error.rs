@@ -82,8 +82,8 @@ pub enum Error {
     Key(crate::keys::KeyError),
     /// Descriptor checksum mismatch
     ChecksumMismatch,
-    /// Spending policy is not compatible with this [`ScriptType`](crate::types::ScriptType)
-    SpendingPolicyRequired(crate::types::ScriptType),
+    /// Spending policy is not compatible with this [`KeychainKind`](crate::types::KeychainKind)
+    SpendingPolicyRequired(crate::types::KeychainKind),
     #[allow(missing_docs)]
     InvalidPolicyPathError(crate::descriptor::policy::PolicyError),
     #[allow(missing_docs)]

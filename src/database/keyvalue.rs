@@ -37,13 +37,13 @@ use crate::types::*;
 
 macro_rules! impl_batch_operations {
     ( { $($after_insert:tt)* }, $process_delete:ident ) => {
-        fn set_script_pubkey(&mut self, script: &Script, script_type: ScriptType, path: u32) -> Result<(), Error> {
-            let key = MapKey::Path((Some(script_type), Some(path))).as_map_key();
+        fn set_script_pubkey(&mut self, script: &Script, keychain: KeychainKind, path: u32) -> Result<(), Error> {
+            let key = MapKey::Path((Some(keychain), Some(path))).as_map_key();
             self.insert(key, serialize(script))$($after_insert)*;
 
             let key = MapKey::Script(Some(script)).as_map_key();
             let value = json!({
-                "t": script_type,
+                "t": keychain,
                 "p": path,
             });
             self.insert(key, serde_json::to_vec(&value)?)$($after_insert)*;
@@ -55,7 +55,7 @@ macro_rules! impl_batch_operations {
             let key = MapKey::UTXO(Some(&utxo.outpoint)).as_map_key();
             let value = json!({
                 "t": utxo.txout,
-                "i": utxo.script_type,
+                "i": utxo.keychain,
             });
             self.insert(key, serde_json::to_vec(&value)?)$($after_insert)*;
 
@@ -88,22 +88,22 @@ macro_rules! impl_batch_operations {
             Ok(())
         }
 
-        fn set_last_index(&mut self, script_type: ScriptType, value: u32) -> Result<(), Error> {
-            let key = MapKey::LastIndex(script_type).as_map_key();
+        fn set_last_index(&mut self, keychain: KeychainKind, value: u32) -> Result<(), Error> {
+            let key = MapKey::LastIndex(keychain).as_map_key();
             self.insert(key, &value.to_be_bytes())$($after_insert)*;
 
             Ok(())
         }
 
-        fn del_script_pubkey_from_path(&mut self, script_type: ScriptType, path: u32) -> Result<Option<Script>, Error> {
-            let key = MapKey::Path((Some(script_type), Some(path))).as_map_key();
+        fn del_script_pubkey_from_path(&mut self, keychain: KeychainKind, path: u32) -> Result<Option<Script>, Error> {
+            let key = MapKey::Path((Some(keychain), Some(path))).as_map_key();
             let res = self.remove(key);
             let res = $process_delete!(res);
 
             Ok(res.map_or(Ok(None), |x| Some(deserialize(&x)).transpose())?)
         }
 
-        fn del_path_from_script_pubkey(&mut self, script: &Script) -> Result<Option<(ScriptType, u32)>, Error> {
+        fn del_path_from_script_pubkey(&mut self, script: &Script) -> Result<Option<(KeychainKind, u32)>, Error> {
             let key = MapKey::Script(Some(script)).as_map_key();
             let res = self.remove(key);
             let res = $process_delete!(res);
@@ -130,9 +130,9 @@ macro_rules! impl_batch_operations {
                 Some(b) => {
                     let mut val: serde_json::Value = serde_json::from_slice(&b)?;
                     let txout = serde_json::from_value(val["t"].take())?;
-                    let script_type = serde_json::from_value(val["i"].take())?;
+                    let keychain = serde_json::from_value(val["i"].take())?;
 
-                    Ok(Some(UTXO { outpoint: outpoint.clone(), txout, script_type }))
+                    Ok(Some(UTXO { outpoint: outpoint.clone(), txout, keychain }))
                 }
             }
         }
@@ -167,8 +167,8 @@ macro_rules! impl_batch_operations {
             }
         }
 
-        fn del_last_index(&mut self, script_type: ScriptType) -> Result<Option<u32>, Error> {
-            let key = MapKey::LastIndex(script_type).as_map_key();
+        fn del_last_index(&mut self, keychain: KeychainKind) -> Result<Option<u32>, Error> {
+            let key = MapKey::LastIndex(keychain).as_map_key();
             let res = self.remove(key);
             let res = $process_delete!(res);
 
@@ -206,10 +206,10 @@ impl BatchOperations for Batch {
 impl Database for Tree {
     fn check_descriptor_checksum<B: AsRef<[u8]>>(
         &mut self,
-        script_type: ScriptType,
+        keychain: KeychainKind,
         bytes: B,
     ) -> Result<(), Error> {
-        let key = MapKey::DescriptorChecksum(script_type).as_map_key();
+        let key = MapKey::DescriptorChecksum(keychain).as_map_key();
 
         let prev = self.get(&key)?.map(|x| x.to_vec());
         if let Some(val) = prev {
@@ -224,8 +224,8 @@ impl Database for Tree {
         }
     }
 
-    fn iter_script_pubkeys(&self, script_type: Option<ScriptType>) -> Result<Vec<Script>, Error> {
-        let key = MapKey::Path((script_type, None)).as_map_key();
+    fn iter_script_pubkeys(&self, keychain: Option<KeychainKind>) -> Result<Vec<Script>, Error> {
+        let key = MapKey::Path((keychain, None)).as_map_key();
         self.scan_prefix(key)
             .map(|x| -> Result<_, Error> {
                 let (_, v) = x?;
@@ -243,12 +243,12 @@ impl Database for Tree {
 
                 let mut val: serde_json::Value = serde_json::from_slice(&v)?;
                 let txout = serde_json::from_value(val["t"].take())?;
-                let script_type = serde_json::from_value(val["i"].take())?;
+                let keychain = serde_json::from_value(val["i"].take())?;
 
                 Ok(UTXO {
                     outpoint,
                     txout,
-                    script_type,
+                    keychain,
                 })
             })
             .collect()
@@ -282,17 +282,17 @@ impl Database for Tree {
 
     fn get_script_pubkey_from_path(
         &self,
-        script_type: ScriptType,
+        keychain: KeychainKind,
         path: u32,
     ) -> Result<Option<Script>, Error> {
-        let key = MapKey::Path((Some(script_type), Some(path))).as_map_key();
+        let key = MapKey::Path((Some(keychain), Some(path))).as_map_key();
         Ok(self.get(key)?.map(|b| deserialize(&b)).transpose()?)
     }
 
     fn get_path_from_script_pubkey(
         &self,
         script: &Script,
-    ) -> Result<Option<(ScriptType, u32)>, Error> {
+    ) -> Result<Option<(KeychainKind, u32)>, Error> {
         let key = MapKey::Script(Some(script)).as_map_key();
         self.get(key)?
             .map(|b| -> Result<_, Error> {
@@ -311,12 +311,12 @@ impl Database for Tree {
             .map(|b| -> Result<_, Error> {
                 let mut val: serde_json::Value = serde_json::from_slice(&b)?;
                 let txout = serde_json::from_value(val["t"].take())?;
-                let script_type = serde_json::from_value(val["i"].take())?;
+                let keychain = serde_json::from_value(val["i"].take())?;
 
                 Ok(UTXO {
                     outpoint: *outpoint,
                     txout,
-                    script_type,
+                    keychain,
                 })
             })
             .transpose()
@@ -341,8 +341,8 @@ impl Database for Tree {
             .transpose()
     }
 
-    fn get_last_index(&self, script_type: ScriptType) -> Result<Option<u32>, Error> {
-        let key = MapKey::LastIndex(script_type).as_map_key();
+    fn get_last_index(&self, keychain: KeychainKind) -> Result<Option<u32>, Error> {
+        let key = MapKey::LastIndex(keychain).as_map_key();
         self.get(key)?
             .map(|b| -> Result<_, Error> {
                 let array: [u8; 4] = b
@@ -356,8 +356,8 @@ impl Database for Tree {
     }
 
     // inserts 0 if not present
-    fn increment_last_index(&mut self, script_type: ScriptType) -> Result<u32, Error> {
-        let key = MapKey::LastIndex(script_type).as_map_key();
+    fn increment_last_index(&mut self, keychain: KeychainKind) -> Result<u32, Error> {
+        let key = MapKey::LastIndex(keychain).as_map_key();
         self.update_and_fetch(key, |prev| {
             let new = match prev {
                 Some(b) => {

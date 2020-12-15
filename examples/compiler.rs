@@ -40,7 +40,7 @@ use miniscript::policy::Concrete;
 use miniscript::Descriptor;
 
 use bdk::database::memory::MemoryDatabase;
-use bdk::{OfflineWallet, ScriptType, Wallet};
+use bdk::{KeychainKind, OfflineWallet, Wallet};
 
 fn main() {
     env_logger::init_from_env(
@@ -104,7 +104,7 @@ fn main() {
     info!("... First address: {}", wallet.get_new_address().unwrap());
 
     if matches.is_present("parsed_policy") {
-        let spending_policy = wallet.policies(ScriptType::External).unwrap();
+        let spending_policy = wallet.policies(KeychainKind::External).unwrap();
         info!(
             "... Spending policy:\n{}",
             serde_json::to_string_pretty(&spending_policy).unwrap()

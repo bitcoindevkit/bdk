@@ -31,27 +31,27 @@ use serde::{Deserialize, Serialize};
 
 /// Types of script
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ScriptType {
+pub enum KeychainKind {
     /// External
     External = 0,
     /// Internal, usually used for change outputs
     Internal = 1,
 }
 
-impl ScriptType {
+impl KeychainKind {
     pub fn as_byte(&self) -> u8 {
         match self {
-            ScriptType::External => b'e',
-            ScriptType::Internal => b'i',
+            KeychainKind::External => b'e',
+            KeychainKind::Internal => b'i',
         }
     }
 }
 
-impl AsRef<[u8]> for ScriptType {
+impl AsRef<[u8]> for KeychainKind {
     fn as_ref(&self) -> &[u8] {
         match self {
-            ScriptType::External => b"e",
-            ScriptType::Internal => b"i",
+            KeychainKind::External => b"e",
+            KeychainKind::Internal => b"i",
         }
     }
 }
@@ -94,7 +94,7 @@ impl std::default::Default for FeeRate {
 pub struct UTXO {
     pub outpoint: OutPoint,
     pub txout: TxOut,
-    pub script_type: ScriptType,
+    pub keychain: KeychainKind,
 }
 
 /// A wallet transaction

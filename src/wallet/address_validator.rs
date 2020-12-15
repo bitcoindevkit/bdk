@@ -50,7 +50,7 @@
 //! impl AddressValidator for PrintAddressAndContinue {
 //!     fn validate(
 //!         &self,
-//!         script_type: ScriptType,
+//!         keychain: KeychainKind,
 //!         hd_keypaths: &HDKeyPaths,
 //!         script: &Script
 //!     ) -> Result<(), AddressValidatorError> {
@@ -58,7 +58,7 @@
 //!             .as_ref()
 //!             .map(Address::to_string)
 //!             .unwrap_or(script.to_string());
-//!         println!("New address of type {:?}: {}", script_type, address);
+//!         println!("New address of type {:?}: {}", keychain, address);
 //!         println!("HD keypaths: {:#?}", hd_keypaths);
 //!
 //!         Ok(())
@@ -79,7 +79,7 @@ use std::fmt;
 use bitcoin::Script;
 
 use crate::descriptor::HDKeyPaths;
-use crate::types::ScriptType;
+use crate::types::KeychainKind;
 
 /// Errors that can be returned to fail the validation of an address
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -110,7 +110,7 @@ pub trait AddressValidator: Send + Sync {
     /// Validate or inspect an address
     fn validate(
         &self,
-        script_type: ScriptType,
+        keychain: KeychainKind,
         hd_keypaths: &HDKeyPaths,
         script: &Script,
     ) -> Result<(), AddressValidatorError>;
@@ -128,7 +128,7 @@ mod test {
     impl AddressValidator for TestValidator {
         fn validate(
             &self,
-            _script_type: ScriptType,
+            _keychain: KeychainKind,
             _hd_keypaths: &HDKeyPaths,
             _script: &bitcoin::Script,
         ) -> Result<(), AddressValidatorError> {
