@@ -112,7 +112,7 @@ use crate::descriptor::XKeyUtils;
 
 /// Identifier of a signer in the `SignersContainers`. Used as a key to find the right signer among
 /// multiple of them
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Ord, PartialOrd, PartialEq, Eq, Hash)]
 pub enum SignerId {
     PkHash(hash160::Hash),
     Fingerprint(Fingerprint),
@@ -522,7 +522,7 @@ impl PartialOrd for SignersContainerKey {
 
 impl Ord for SignersContainerKey {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.ordering.cmp(&other.ordering)
+        self.ordering.cmp(&other.ordering).then(self.id.cmp(&other.id))
     }
 }
 
