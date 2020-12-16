@@ -45,6 +45,7 @@
 //! # use bdk::wallet::coin_selection::*;
 //! # use bdk::database::Database;
 //! # use bdk::*;
+//! # const TXIN_BASE_WEIGHT: usize = (32 + 4 + 4 + 1) * 4;
 //! #[derive(Debug)]
 //! struct AlwaysSpendEverything;
 //!
@@ -114,9 +115,9 @@ pub type DefaultCoinSelectionAlgorithm = BranchAndBoundCoinSelection;
 #[cfg(test)]
 pub type DefaultCoinSelectionAlgorithm = LargestFirstCoinSelection; // make the tests more predictable
 
-// Base weight of a Txin, not counting the weight needed for satisfaying it.
+// Base weight of a Txin, not counting the weight needed for satisfying it.
 // prev_txid (32 bytes) + prev_vout (4 bytes) + sequence (4 bytes) + script_len (1 bytes)
-pub const TXIN_BASE_WEIGHT: usize = (32 + 4 + 4 + 1) * 4;
+pub(crate) const TXIN_BASE_WEIGHT: usize = (32 + 4 + 4 + 1) * 4;
 
 /// Result of a successful coin selection
 #[derive(Debug)]
@@ -275,6 +276,7 @@ impl Default for BranchAndBoundCoinSelection {
 }
 
 impl BranchAndBoundCoinSelection {
+    /// Create new instance with target size for change output
     pub fn new(size_of_change: u64) -> Self {
         Self { size_of_change }
     }

@@ -84,10 +84,15 @@ use crate::types::KeychainKind;
 /// Errors that can be returned to fail the validation of an address
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AddressValidatorError {
+    /// User rejected the address
     UserRejected,
+    /// Network connection error
     ConnectionError,
+    /// Network request timeout error
     TimeoutError,
+    /// Invalid script
     InvalidScript,
+    /// A custom error message
     Message(String),
 }
 
