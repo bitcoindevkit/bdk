@@ -1,9 +1,6 @@
 name: Publish Nightly Docs
 
-on:
-  push:
-    branches:
-      - master
+on: [push, pull_request]
 
 jobs:
   build_docs:
@@ -39,6 +36,7 @@ jobs:
 
   publish_docs:
     name: 'Publish docs'
+    if: github.ref == 'refs/heads/master'
     needs: [build_docs]
     runs-on: ubuntu-latest
     steps:
