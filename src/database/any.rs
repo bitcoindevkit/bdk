@@ -89,11 +89,11 @@ macro_rules! impl_inner_method {
 /// See [this module](crate::database::any)'s documentation for a usage example.
 #[derive(Debug)]
 pub enum AnyDatabase {
-    #[allow(missing_docs)]
+    /// In-memory ephemeral database
     Memory(memory::MemoryDatabase),
     #[cfg(feature = "key-value-db")]
     #[cfg_attr(docsrs, doc(cfg(feature = "key-value-db")))]
-    #[allow(missing_docs)]
+    /// Simple key-value embedded database based on [`sled`]
     Sled(sled::Tree),
 }
 
@@ -102,11 +102,11 @@ impl_from!(sled::Tree, AnyDatabase, Sled, #[cfg(feature = "key-value-db")]);
 
 /// Type that contains any of the [`BatchDatabase::Batch`] types defined by the library
 pub enum AnyBatch {
-    #[allow(missing_docs)]
+    /// In-memory ephemeral database
     Memory(<memory::MemoryDatabase as BatchDatabase>::Batch),
     #[cfg(feature = "key-value-db")]
     #[cfg_attr(docsrs, doc(cfg(feature = "key-value-db")))]
-    #[allow(missing_docs)]
+    /// Simple key-value embedded database based on [`sled`]
     Sled(<sled::Tree as BatchDatabase>::Batch),
 }
 
@@ -364,7 +364,7 @@ pub enum AnyDatabaseConfig {
     Memory(()),
     #[cfg(feature = "key-value-db")]
     #[cfg_attr(docsrs, doc(cfg(feature = "key-value-db")))]
-    #[allow(missing_docs)]
+    /// Simple key-value embedded database based on [`sled`]
     Sled(SledDbConfiguration),
 }
 

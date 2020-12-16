@@ -78,15 +78,15 @@ pub enum Error {
     ///
     /// [`TxBuilder::add_global_xpubs`]: crate::wallet::tx_builder::TxBuilder::add_global_xpubs
     MissingKeyOrigin(String),
-    #[allow(missing_docs)]
+    /// Error while working with [`keys`](crate::keys)
     Key(crate::keys::KeyError),
     /// Descriptor checksum mismatch
     ChecksumMismatch,
     /// Spending policy is not compatible with this [`KeychainKind`](crate::types::KeychainKind)
     SpendingPolicyRequired(crate::types::KeychainKind),
-    #[allow(missing_docs)]
+    /// Error while extracting and manipulating policies
     InvalidPolicyPathError(crate::descriptor::policy::PolicyError),
-    #[allow(missing_docs)]
+    /// Signing error
     Signer(crate::wallet::signer::SignerError),
 
     // Blockchain interface errors
@@ -101,23 +101,23 @@ pub enum Error {
     /// Requested outpoint doesn't exist in the tx (vout greater than available outputs)
     InvalidOutpoint(OutPoint),
 
-    #[allow(missing_docs)]
+    /// Error related to the parsing and usage of descriptors
     Descriptor(crate::descriptor::error::Error),
-    #[allow(missing_docs)]
+    /// Error that can be returned to fail the validation of an address
     AddressValidator(crate::wallet::address_validator::AddressValidatorError),
-    #[allow(missing_docs)]
+    /// Encoding error
     Encode(bitcoin::consensus::encode::Error),
-    #[allow(missing_docs)]
+    /// Miniscript error
     Miniscript(miniscript::Error),
-    #[allow(missing_docs)]
+    /// BIP32 error
     BIP32(bitcoin::util::bip32::Error),
-    #[allow(missing_docs)]
+    /// An ECDSA error
     Secp256k1(bitcoin::secp256k1::Error),
-    #[allow(missing_docs)]
+    /// Error serializing or deserializing JSON data
     JSON(serde_json::Error),
-    #[allow(missing_docs)]
+    /// Hex decoding error
     Hex(bitcoin::hashes::hex::Error),
-    #[allow(missing_docs)]
+    /// Partially signed bitcoin transaction error
     PSBT(bitcoin::util::psbt::Error),
 
     //KeyMismatch(bitcoin::secp256k1::PublicKey, bitcoin::secp256k1::PublicKey),
@@ -128,16 +128,16 @@ pub enum Error {
     //Uncapable(crate::blockchain::Capability),
     //MissingCachedAddresses,
     #[cfg(feature = "electrum")]
-    #[allow(missing_docs)]
+    /// Electrum client error
     Electrum(electrum_client::Error),
     #[cfg(feature = "esplora")]
-    #[allow(missing_docs)]
+    /// Esplora client error
     Esplora(crate::blockchain::esplora::EsploraError),
-    #[allow(missing_docs)]
     #[cfg(feature = "compact_filters")]
+    /// Compact filters client error)
     CompactFilters(crate::blockchain::compact_filters::CompactFiltersError),
     #[cfg(feature = "key-value-db")]
-    #[allow(missing_docs)]
+    /// Sled database error
     Sled(sled::Error),
 }
 

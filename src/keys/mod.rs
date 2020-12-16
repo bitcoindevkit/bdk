@@ -684,9 +684,9 @@ pub enum KeyError {
     /// Custom error message
     Message(String),
 
-    #[allow(missing_docs)]
+    /// BIP32 error
     BIP32(bitcoin::util::bip32::Error),
-    #[allow(missing_docs)]
+    /// Miniscript error
     Miniscript(miniscript::Error),
 }
 
