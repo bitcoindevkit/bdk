@@ -51,7 +51,7 @@
 //! their uses.
 //!
 //! The easiest way to get started is to add bdk to your dependencies with the default features.
-//! The default features include a simple key-value database ([`sled`](crate::sled)) to cache
+//! The default features include a simple key-value database ([`sled`](sled)) to cache
 //! blockchain data and an [electrum](https://docs.rs/electrum-client/) blockchain client to
 //! interact with the bitcoin P2P network.
 //!
