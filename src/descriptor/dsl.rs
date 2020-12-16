@@ -278,15 +278,20 @@ macro_rules! apply_modifier {
 /// cannot be grouped together. For instance, a descriptor fragment like `sdv:older(144)` has to be
 /// broken up to `s:d:v:older(144)`.
 ///
+/// The `pk()`, `pk_k()` and `pk_h()` operands can take as argument any type that implements
+/// [`ToDescriptorKey`]. This means that keys can also be written inline as strings, but in that
+/// case they must be wrapped in quotes, which is another difference compared to the standard
+/// descriptor syntax.
+///
+/// [`ToDescriptorKey`]: crate::keys::ToDescriptorKey
+///
 /// ## Example
 ///
-/// Signature plus timelock, equivalent to: `sh(wsh(and_v(v:pk(...), older(...))))`
+/// Signature plus timelock descriptor:
 ///
 /// ```
 /// # use std::str::FromStr;
-/// let my_key = bitcoin::PublicKey::from_str("02e96fe52ef0e22d2f131dd425ce1893073a3c6ad20e8cac36726393dfb4856a4c")?;
-/// let my_timelock = 50;
-/// let (my_descriptor, my_keys_map, networks) = bdk::descriptor!(sh(wsh(and_v(v:pk(my_key),older(my_timelock)))))?;
+/// let (my_descriptor, my_keys_map, networks) = bdk::descriptor!(sh(wsh(and_v(v:pk("cVt4o7BGAig1UXywgGSmARhxMdzP5qvQsxKkSsc1XEkw3tDTQFpy"),older(50)))))?;
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 ///
