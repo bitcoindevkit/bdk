@@ -22,13 +22,6 @@ jobs:
           - compact_filters
           - cli-utils,esplora,key-value-db,electrum
           - compiler
-        include:
-          - rust: stable
-            features: compact_filters
-            clippy: skip
-          - rust: 1.45.0
-            features: compact_filters
-            clippy: skip
     steps:
       - name: checkout
         uses: actions/checkout@v2
@@ -51,10 +44,8 @@ jobs:
       - name: Build
         run: cargo build --features ${{ matrix.features }} --no-default-features
       - name: Clippy
-        if: ${{ matrix.rust == 'stable' && matrix.clippy != 'skip' }}
         run: cargo clippy -- -D warnings
       - name: Test
-        if: ${{ matrix.test != 'skip' }}
         run: cargo test --features ${{ matrix.features }} --no-default-features
 
   test-readme-examples:
