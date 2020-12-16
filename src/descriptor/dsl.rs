@@ -254,8 +254,11 @@ macro_rules! impl_sortedmulti {
 ///
 /// ```
 /// # use std::str::FromStr;
-/// let my_key_1 = bitcoin::PublicKey::from_str("02e96fe52ef0e22d2f131dd425ce1893073a3c6ad20e8cac36726393dfb4856a4c")?;
-/// let my_key_2 = bitcoin::PrivateKey::from_wif("cVt4o7BGAig1UXywgGSmARhxMdzP5qvQsxKkSsc1XEkw3tDTQFpy")?;
+/// let my_key_1 = bitcoin::PublicKey::from_str(
+///     "02e96fe52ef0e22d2f131dd425ce1893073a3c6ad20e8cac36726393dfb4856a4c",
+/// )?;
+/// let my_key_2 =
+///     bitcoin::PrivateKey::from_wif("cVt4o7BGAig1UXywgGSmARhxMdzP5qvQsxKkSsc1XEkw3tDTQFpy")?;
 ///
 /// let (descriptor, key_map, networks) = bdk::descriptor! {
 ///     wsh (
@@ -270,9 +273,10 @@ macro_rules! impl_sortedmulti {
 /// Native-Segwit single-sig, equivalent to: `wpkh(...)`
 ///
 /// ```
-/// let my_key = bitcoin::PrivateKey::from_wif("cVt4o7BGAig1UXywgGSmARhxMdzP5qvQsxKkSsc1XEkw3tDTQFpy")?;
+/// let my_key =
+///     bitcoin::PrivateKey::from_wif("cVt4o7BGAig1UXywgGSmARhxMdzP5qvQsxKkSsc1XEkw3tDTQFpy")?;
 ///
-/// let (descriptor, key_map, networks) = bdk::descriptor!(wpkh ( my_key ) )?;
+/// let (descriptor, key_map, networks) = bdk::descriptor!(wpkh(my_key))?;
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 #[macro_export]
