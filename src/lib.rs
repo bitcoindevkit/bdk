@@ -258,7 +258,6 @@ pub mod descriptor;
 mod doctest;
 pub mod keys;
 pub(crate) mod psbt;
-#[allow(missing_docs)] // TODO add missing docs and remove this allow
 pub(crate) mod types;
 pub mod wallet;
 
