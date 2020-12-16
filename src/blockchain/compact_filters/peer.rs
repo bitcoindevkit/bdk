@@ -108,7 +108,7 @@ impl Peer {
     /// Connect to a peer over a plaintext TCP connection
     ///
     /// This function internally spawns a new thread that will monitor incoming messages from the
-    /// peer, and optionally reply to some of them transparently, like [pings](NetworkMessage::Ping)
+    /// peer, and optionally reply to some of them transparently, like [pings](bitcoin::network::message::NetworkMessage::Ping)
     pub fn connect<A: ToSocketAddrs>(
         address: A,
         mempool: Arc<Mempool>,
