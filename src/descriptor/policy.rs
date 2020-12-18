@@ -1018,7 +1018,7 @@ mod test {
     fn test_extract_policy_for_sh_multi_complete_1of2() {
         let (_prvkey0, pubkey0, fingerprint0) = setup_keys(TPRV0_STR);
         let (prvkey1, _pubkey1, fingerprint1) = setup_keys(TPRV1_STR);
-        let desc = descriptor!(sh(multi 1, pubkey0, prvkey1)).unwrap();
+        let desc = descriptor!(sh(multi(1, pubkey0, prvkey1))).unwrap();
         let (wallet_desc, keymap) = desc.to_wallet_descriptor(Network::Testnet).unwrap();
         let signers_container = Arc::new(SignersContainer::from(keymap));
         let policy = wallet_desc
@@ -1046,7 +1046,7 @@ mod test {
     fn test_extract_policy_for_sh_multi_complete_2of2() {
         let (prvkey0, _pubkey0, fingerprint0) = setup_keys(TPRV0_STR);
         let (prvkey1, _pubkey1, fingerprint1) = setup_keys(TPRV1_STR);
-        let desc = descriptor!(sh(multi 2, prvkey0, prvkey1)).unwrap();
+        let desc = descriptor!(sh(multi(2, prvkey0, prvkey1))).unwrap();
         let (wallet_desc, keymap) = desc.to_wallet_descriptor(Network::Testnet).unwrap();
         let signers_container = Arc::new(SignersContainer::from(keymap));
         let policy = wallet_desc
@@ -1111,7 +1111,7 @@ mod test {
     fn test_extract_policy_for_single_wsh_multi_complete_1of2() {
         let (_prvkey0, pubkey0, fingerprint0) = setup_keys(TPRV0_STR);
         let (prvkey1, _pubkey1, fingerprint1) = setup_keys(TPRV1_STR);
-        let desc = descriptor!(sh(multi 1, pubkey0, prvkey1)).unwrap();
+        let desc = descriptor!(sh(multi(1, pubkey0, prvkey1))).unwrap();
         let (wallet_desc, keymap) = desc.to_wallet_descriptor(Network::Testnet).unwrap();
         let single_key = wallet_desc.derive(ChildNumber::from_normal_idx(0).unwrap());
         let signers_container = Arc::new(SignersContainer::from(keymap));
@@ -1143,9 +1143,12 @@ mod test {
         let (prvkey0, _pubkey0, _fingerprint0) = setup_keys(TPRV0_STR);
         let (_prvkey1, pubkey1, _fingerprint1) = setup_keys(TPRV1_STR);
         let sequence = 50;
-        let desc = descriptor!(wsh (
-            thresh 2, (pk prvkey0), (+s pk pubkey1), (+s+d+v older sequence)
-        ))
+        let desc = descriptor!(wsh(thresh(
+            2,
+            pk(prvkey0),
+            s: pk(pubkey1),
+            s: d: v: older(sequence)
+        )))
         .unwrap();
 
         let (wallet_desc, keymap) = desc.to_wallet_descriptor(Network::Testnet).unwrap();

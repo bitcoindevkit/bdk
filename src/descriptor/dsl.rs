@@ -29,10 +29,10 @@
 macro_rules! impl_top_level_sh {
     // disallow `sortedmulti` in `bare()`
     ( Bare, Bare, sortedmulti $( $inner:tt )* ) => {
-        compile_error!("`bare()` descriptors can't contain any `sortedmulti` operands");
+        compile_error!("`bare()` descriptors can't contain any `sortedmulti()` operands");
     };
     ( Bare, Bare, sortedmulti_vec $( $inner:tt )* ) => {
-        compile_error!("`bare()` descriptors can't contain any `sortedmulti_vec` operands");
+        compile_error!("`bare()` descriptors can't contain any `sortedmulti_vec()` operands");
     };
 
     ( $descriptor_variant:ident, $sortedmulti_variant:ident, sortedmulti $( $inner:tt )* ) => {
@@ -70,16 +70,6 @@ macro_rules! impl_top_level_pk {
                 )
             })
     }};
-}
-
-#[doc(hidden)]
-#[macro_export]
-macro_rules! impl_modifier {
-    ( $terminal_variant:ident, $( $inner:tt )* ) => {
-        $crate::fragment!($( $inner )*)
-            .map_err(|e| -> $crate::Error { e.into() })
-            .and_then(|(minisc, keymap, networks)| Ok(($crate::miniscript::Miniscript::from_ast($crate::miniscript::miniscript::decode::Terminal::$terminal_variant(std::sync::Arc::new(minisc)))?, keymap, networks)))
-    };
 }
 
 #[doc(hidden)]
@@ -139,9 +129,12 @@ macro_rules! impl_leaf_opcode_value_two {
 #[doc(hidden)]
 #[macro_export]
 macro_rules! impl_node_opcode_two {
-    ( $terminal_variant:ident, ( $( $a:tt )* ), ( $( $b:tt )* ) ) => {
-        $crate::fragment!($( $a )*)
-            .and_then(|a| Ok((a, $crate::fragment!($( $b )*)?)))
+    ( $terminal_variant:ident, $( $inner:tt )* ) => ({
+        let inner = $crate::fragment_internal!( @t $( $inner )* );
+        let (a, b) = $crate::descriptor::dsl::TupleTwo::from(inner).flattened();
+
+        a
+            .and_then(|a| Ok((a, b?)))
             .and_then(|((a_minisc, mut a_keymap, a_networks), (b_minisc, b_keymap, b_networks))| {
                 // join key_maps
                 a_keymap.extend(b_keymap.into_iter());
@@ -151,15 +144,18 @@ macro_rules! impl_node_opcode_two {
                     std::sync::Arc::new(b_minisc),
                 ))?, a_keymap, $crate::keys::merge_networks(&a_networks, &b_networks)))
             })
-    };
+    });
 }
 
 #[doc(hidden)]
 #[macro_export]
 macro_rules! impl_node_opcode_three {
-    ( $terminal_variant:ident, ( $( $a:tt )* ), ( $( $b:tt )* ), ( $( $c:tt )* ) ) => {
-        $crate::fragment!($( $a )*)
-            .and_then(|a| Ok((a, $crate::fragment!($( $b )*)?, $crate::fragment!($( $c )*)?)))
+    ( $terminal_variant:ident, $( $inner:tt )* ) => {
+        let inner = $crate::fragment_internal!( @t $( $inner )* );
+        let (a, b, c) = $crate::descriptor::dsl::TupleThree::from(inner).flattened();
+
+        a
+            .and_then(|a| Ok((a, b?, c?)))
             .and_then(|((a_minisc, mut a_keymap, a_networks), (b_minisc, b_keymap, b_networks), (c_minisc, c_keymap, c_networks))| {
                 // join key_maps
                 a_keymap.extend(b_keymap.into_iter());
@@ -180,11 +176,11 @@ macro_rules! impl_node_opcode_three {
 #[doc(hidden)]
 #[macro_export]
 macro_rules! impl_sortedmulti {
-    ( sortedmulti_vec $thresh:expr, $keys:expr ) => ({
+    ( sortedmulti_vec ( $thresh:expr, $keys:expr ) ) => ({
         let secp = $crate::bitcoin::secp256k1::Secp256k1::new();
         $crate::keys::make_sortedmulti_inner($thresh, $keys, &secp)
     });
-    ( sortedmulti $thresh:expr $(, $key:expr )+ ) => ({
+    ( sortedmulti ( $thresh:expr $(, $key:expr )+ ) ) => ({
         use $crate::keys::ToDescriptorKey;
         let secp = $crate::bitcoin::secp256k1::Secp256k1::new();
 
@@ -199,20 +195,103 @@ macro_rules! impl_sortedmulti {
 
 }
 
+#[doc(hidden)]
+#[macro_export]
+macro_rules! apply_modifier {
+    ( $terminal_variant:ident, $inner:expr ) => {{
+        $inner
+            .map_err(|e| -> $crate::Error { e.into() })
+            .and_then(|(minisc, keymap, networks)| {
+                Ok((
+                    $crate::miniscript::Miniscript::from_ast(
+                        $crate::miniscript::miniscript::decode::Terminal::$terminal_variant(
+                            std::sync::Arc::new(minisc),
+                        ),
+                    )?,
+                    keymap,
+                    networks,
+                ))
+            })
+    }};
+
+    ( a: $inner:expr ) => {{
+        $crate::apply_modifier!(Alt, $inner)
+    }};
+    ( s: $inner:expr ) => {{
+        $crate::apply_modifier!(Swap, $inner)
+    }};
+    ( c: $inner:expr ) => {{
+        $crate::apply_modifier!(Check, $inner)
+    }};
+    ( d: $inner:expr ) => {{
+        $crate::apply_modifier!(DupIf, $inner)
+    }};
+    ( v: $inner:expr ) => {{
+        $crate::apply_modifier!(Verify, $inner)
+    }};
+    ( j: $inner:expr ) => {{
+        $crate::apply_modifier!(NonZero, $inner)
+    }};
+    ( n: $inner:expr ) => {{
+        $crate::apply_modifier!(ZeroNotEqual, $inner)
+    }};
+
+    // Modifiers expanded to other operators
+    ( t: $inner:expr ) => {{
+        $inner.and_then(|(a_minisc, a_keymap, a_networks)| {
+            $crate::impl_leaf_opcode_value_two!(
+                AndV,
+                std::sync::Arc::new(a_minisc),
+                std::sync::Arc::new($crate::fragment!(true).unwrap().0)
+            )
+            .map(|(minisc, _, _)| (minisc, a_keymap, a_networks))
+        })
+    }};
+    ( l: $inner:expr ) => {{
+        $inner.and_then(|(a_minisc, a_keymap, a_networks)| {
+            $crate::impl_leaf_opcode_value_two!(
+                OrI,
+                std::sync::Arc::new($crate::fragment!(false).unwrap().0),
+                std::sync::Arc::new(a_minisc)
+            )
+            .map(|(minisc, _, _)| (minisc, a_keymap, a_networks))
+        })
+    }};
+    ( u: $inner:expr ) => {{
+        $inner.and_then(|(a_minisc, a_keymap, a_networks)| {
+            $crate::impl_leaf_opcode_value_two!(
+                OrI,
+                std::sync::Arc::new(a_minisc),
+                std::sync::Arc::new($crate::fragment!(false).unwrap().0)
+            )
+            .map(|(minisc, _, _)| (minisc, a_keymap, a_networks))
+        })
+    }};
+}
+
 /// Macro to write full descriptors with code
 ///
 /// This macro expands to a `Result` of
 /// [`DescriptorTemplateOut`](super::template::DescriptorTemplateOut) and [`Error`](crate::Error)
 ///
+/// The syntax is very similar to the normal descriptor syntax, with the exception that modifiers
+/// cannot be grouped together. For instance, a descriptor fragment like `sdv:older(144)` has to be
+/// broken up to `s:d:v:older(144)`.
+///
+/// The `pk()`, `pk_k()` and `pk_h()` operands can take as argument any type that implements
+/// [`ToDescriptorKey`]. This means that keys can also be written inline as strings, but in that
+/// case they must be wrapped in quotes, which is another difference compared to the standard
+/// descriptor syntax.
+///
+/// [`ToDescriptorKey`]: crate::keys::ToDescriptorKey
+///
 /// ## Example
 ///
-/// Signature plus timelock, equivalent to: `sh(wsh(and_v(v:pk(...), older(...))))`
+/// Signature plus timelock descriptor:
 ///
 /// ```
 /// # use std::str::FromStr;
-/// let my_key = bitcoin::PublicKey::from_str("02e96fe52ef0e22d2f131dd425ce1893073a3c6ad20e8cac36726393dfb4856a4c")?;
-/// let my_timelock = 50;
-/// let (my_descriptor, my_keys_map, networks) = bdk::descriptor!(sh ( wsh ( and_v (+v pk my_key), ( older my_timelock ))))?;
+/// let (my_descriptor, my_keys_map, networks) = bdk::descriptor!(sh(wsh(and_v(v:pk("cVt4o7BGAig1UXywgGSmARhxMdzP5qvQsxKkSsc1XEkw3tDTQFpy"),older(50)))))?;
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 ///
@@ -232,16 +311,16 @@ macro_rules! impl_sortedmulti {
 ///
 /// let (descriptor_a, key_map_a, networks) = bdk::descriptor! {
 ///     wsh (
-///         thresh 2, (pk my_key_1), (+s pk my_key_2), (+s+d+v older my_timelock)
+///         thresh(2, pk(my_key_1), s:pk(my_key_2), s:d:v:older(my_timelock))
 ///     )
 /// }?;
 ///
 /// let b_items = vec![
-///     bdk::fragment!(pk my_key_1)?,
-///     bdk::fragment!(+s pk my_key_2)?,
-///     bdk::fragment!(+s+d+v older my_timelock)?,
+///     bdk::fragment!(pk(my_key_1))?,
+///     bdk::fragment!(s:pk(my_key_2))?,
+///     bdk::fragment!(s:d:v:older(my_timelock))?,
 /// ];
-/// let (descriptor_b, mut key_map_b, networks) = bdk::descriptor!( wsh ( thresh_vec 2, b_items ) )?;
+/// let (descriptor_b, mut key_map_b, networks) = bdk::descriptor!(wsh(thresh_vec(2,b_items)))?;
 ///
 /// assert_eq!(descriptor_a, descriptor_b);
 /// assert_eq!(key_map_a.len(), key_map_b.len());
@@ -262,7 +341,7 @@ macro_rules! impl_sortedmulti {
 ///
 /// let (descriptor, key_map, networks) = bdk::descriptor! {
 ///     wsh (
-///         multi 2, my_key_1, my_key_2
+///         multi(2, my_key_1, my_key_2)
 ///     )
 /// }?;
 /// # Ok::<(), Box<dyn std::error::Error>>(())
@@ -290,13 +369,13 @@ macro_rules! descriptor {
     ( shwsh ( $( $minisc:tt )* ) ) => ({
         $crate::impl_top_level_sh!(ShWsh, ShWshSortedMulti, $( $minisc )*)
     });
-    ( pk $key:expr ) => ({
+    ( pk ( $key:expr ) ) => ({
         $crate::impl_top_level_pk!(Pk, $crate::miniscript::Legacy, $key)
     });
-    ( pkh $key:expr ) => ({
+    ( pkh ( $key:expr ) ) => ({
         $crate::impl_top_level_pk!(Pkh,$crate::miniscript::Legacy, $key)
     });
-    ( wpkh $key:expr ) => ({
+    ( wpkh ( $key:expr ) ) => ({
         $crate::impl_top_level_pk!(Wpkh, $crate::miniscript::Segwitv0, $key)
     });
     ( sh ( wpkh ( $key:expr ) ) ) => ({
@@ -313,42 +392,120 @@ macro_rules! descriptor {
     });
 }
 
+#[doc(hidden)]
+pub struct TupleTwo<A, B> {
+    pub a: A,
+    pub b: B,
+}
+
+impl<A, B> TupleTwo<A, B> {
+    pub fn flattened(self) -> (A, B) {
+        (self.a, self.b)
+    }
+}
+
+impl<A, B> From<(A, (B, ()))> for TupleTwo<A, B> {
+    fn from((a, (b, _)): (A, (B, ()))) -> Self {
+        TupleTwo { a, b }
+    }
+}
+
+#[doc(hidden)]
+pub struct TupleThree<A, B, C> {
+    pub a: A,
+    pub b: B,
+    pub c: C,
+}
+
+impl<A, B, C> TupleThree<A, B, C> {
+    pub fn flattened(self) -> (A, B, C) {
+        (self.a, self.b, self.c)
+    }
+}
+
+impl<A, B, C> From<(A, (B, (C, ())))> for TupleThree<A, B, C> {
+    fn from((a, (b, (c, _))): (A, (B, (C, ())))) -> Self {
+        TupleThree { a, b, c }
+    }
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! fragment_internal {
+    // The @v prefix is used to parse a sequence of operands and return them in a vector. This is
+    // used by operands that take a variable number of arguments, like `thresh()` and `multi()`.
+    ( @v $op:ident ( $( $args:tt )* ) $( $tail:tt )* ) => ({
+        let mut v = vec![$crate::fragment!( $op ( $( $args )* ) )];
+        v.append(&mut $crate::fragment_internal!( @v $( $tail )* ));
+
+        v
+    });
+    // Match modifiers
+    ( @v $modif:tt : $( $tail:tt )* ) => ({
+        let mut v = $crate::fragment_internal!( @v $( $tail )* );
+        let first = v.drain(..1).next().unwrap();
+
+        let first = $crate::apply_modifier!($modif:first);
+
+        let mut v_final = vec![first];
+        v_final.append(&mut v);
+
+        v_final
+    });
+    // Remove commas between operands
+    ( @v , $( $tail:tt )* ) => ({
+        $crate::fragment_internal!( @v $( $tail )* )
+    });
+    ( @v ) => ({
+        vec![]
+    });
+
+    // The @t prefix is used to parse a sequence of operands and return them in a tuple. This
+    // allows checking at compile-time the number of arguments passed to an operand. For this
+    // reason it's used by `and_*()`, `or_*()`, etc.
+    //
+    // Unfortunately, due to the fact that concatenating tuples is pretty hard, the final result
+    // adds in the first spot the parsed operand and in the second spot the result of parsing
+    // all the following ones. For two operands the type then corresponds to: (X, (X, ())). For
+    // three operands it's (X, (X, (X, ()))), etc.
+    //
+    // To check that the right number of arguments has been passed we can "cast" those tuples to
+    // more convenient structures like `TupleTwo`. If the conversion succedes, the right number of
+    // args was passed. Otherwise the compilation fails entirely.
+    ( @t $op:ident ( $( $args:tt )* ) $( $tail:tt )* ) => ({
+        ($crate::fragment!( $op ( $( $args )* ) ), $crate::fragment_internal!( @t $( $tail )* ))
+    });
+    // Match modifiers
+    ( @t $modif:tt : $( $tail:tt )* ) => ({
+        let (first, tail) = $crate::fragment_internal!( @t $( $tail )* );
+        ($crate::apply_modifier!($modif:first), tail)
+    });
+    // Remove commas between operands
+    ( @t , $( $tail:tt )* ) => ({
+        $crate::fragment_internal!( @t $( $tail )* )
+    });
+    ( @t ) => ({
+        ()
+    });
+
+    // Fallback to calling `fragment!()`
+    ( $( $tokens:tt )* ) => ({
+        $crate::fragment!($( $tokens )*)
+    });
+}
+
 /// Macro to write descriptor fragments with code
 ///
 /// This macro will be expanded to an object of type `Result<(Miniscript<DescriptorPublicKey, _>, KeyMap, ValidNetworks), Error>`. It allows writing
-/// fragments of larger descriptors that can be pieced together using `fragment!(thresh_vec ...)`.
+/// fragments of larger descriptors that can be pieced together using `fragment!(thresh_vec(m, ...))`.
+///
+/// The syntax to write macro fragment is the same as documented for the [`descriptor`] macro.
 #[macro_export]
 macro_rules! fragment {
     // Modifiers
-    ( +a $( $inner:tt )* ) => ({
-        $crate::impl_modifier!(Alt, $( $inner )*)
-    });
-    ( +s $( $inner:tt )* ) => ({
-        $crate::impl_modifier!(Swap, $( $inner )*)
-    });
-    ( +c $( $inner:tt )* ) => ({
-        $crate::impl_modifier!(Check, $( $inner )*)
-    });
-    ( +d $( $inner:tt )* ) => ({
-        $crate::impl_modifier!(DupIf, $( $inner )*)
-    });
-    ( +v $( $inner:tt )* ) => ({
-        $crate::impl_modifier!(Verify, $( $inner )*)
-    });
-    ( +j $( $inner:tt )* ) => ({
-        $crate::impl_modifier!(NonZero, $( $inner )*)
-    });
-    ( +n $( $inner:tt )* ) => ({
-        $crate::impl_modifier!(ZeroNotEqual, $( $inner )*)
-    });
-    ( +t $( $inner:tt )* ) => ({
-        $crate::fragment!(and_v ( $( $inner )* ), ( true ) )
-    });
-    ( +l $( $inner:tt )* ) => ({
-        $crate::fragment!(or_i ( false ), ( $( $inner )* ) )
-    });
-    ( +u $( $inner:tt )* ) => ({
-        $crate::fragment!(or_i ( $( $inner )* ), ( false ) )
+    ( $modif:tt : $( $tail:tt )* ) => ({
+        let op = $crate::fragment!( $( $tail )* );
+        $crate::apply_modifier!($modif:op)
     });
 
     // Miniscript
@@ -358,56 +515,56 @@ macro_rules! fragment {
     ( false ) => ({
         $crate::impl_leaf_opcode!(False)
     });
-    ( pk_k $key:expr ) => ({
+    ( pk_k ( $key:expr ) ) => ({
         let secp = $crate::bitcoin::secp256k1::Secp256k1::new();
         $crate::keys::make_pk($key, &secp)
     });
-    ( pk $key:expr ) => ({
-        $crate::fragment!(+c pk_k $key)
+    ( pk ( $key:expr ) ) => ({
+        $crate::fragment!(c:pk_k ( $key ))
     });
-    ( pk_h $key_hash:expr ) => ({
+    ( pk_h ( $key_hash:expr ) ) => ({
         $crate::impl_leaf_opcode_value!(PkH, $key_hash)
     });
-    ( after $value:expr ) => ({
+    ( after ( $value:expr ) ) => ({
         $crate::impl_leaf_opcode_value!(After, $value)
     });
-    ( older $value:expr ) => ({
+    ( older ( $value:expr ) ) => ({
         $crate::impl_leaf_opcode_value!(Older, $value)
     });
-    ( sha256 $hash:expr ) => ({
+    ( sha256 ( $hash:expr ) ) => ({
         $crate::impl_leaf_opcode_value!(Sha256, $hash)
     });
-    ( hash256 $hash:expr ) => ({
+    ( hash256 ( $hash:expr ) ) => ({
         $crate::impl_leaf_opcode_value!(Hash256, $hash)
     });
-    ( ripemd160 $hash:expr ) => ({
+    ( ripemd160 ( $hash:expr ) ) => ({
         $crate::impl_leaf_opcode_value!(Ripemd160, $hash)
     });
-    ( hash160 $hash:expr ) => ({
+    ( hash160 ( $hash:expr ) ) => ({
         $crate::impl_leaf_opcode_value!(Hash160, $hash)
     });
-    ( and_v ( $( $a:tt )* ), ( $( $b:tt )* ) ) => ({
-        $crate::impl_node_opcode_two!(AndV, ( $( $a )* ), ( $( $b )* ))
+    ( and_v ( $( $inner:tt )* ) ) => ({
+        $crate::impl_node_opcode_two!(AndV, $( $inner )*)
     });
-    ( and_b ( $( $a:tt )* ), ( $( $b:tt )* ) ) => ({
-        $crate::impl_node_opcode_two!(AndB, ( $( $a )* ), ( $( $b )* ))
+    ( and_b ( $( $inner:tt )* ) ) => ({
+        $crate::impl_node_opcode_two!(AndB, $( $inner )*)
     });
-    ( and_or ( $( $a:tt )* ), ( $( $b:tt )* ), ( $( $c:tt )* ) ) => ({
-        $crate::impl_node_opcode_three!(AndOr, ( $( $a )* ), ( $( $b )* ), ( $( $c )* ))
+    ( and_or ( $( $inner:tt )* ) ) => ({
+        $crate::impl_node_opcode_three!(AndOr, $( $inner )*)
     });
-    ( or_b ( $( $a:tt )* ), ( $( $b:tt )* ) ) => ({
-        $crate::impl_node_opcode_two!(OrB, ( $( $a )* ), ( $( $b )* ))
+    ( or_b ( $( $inner:tt )* ) ) => ({
+        $crate::impl_node_opcode_two!(OrB, $( $inner )*)
     });
-    ( or_d ( $( $a:tt )* ), ( $( $b:tt )* ) ) => ({
-        $crate::impl_node_opcode_two!(OrD, ( $( $a )* ), ( $( $b )* ))
+    ( or_d ( $( $inner:tt )* ) ) => ({
+        $crate::impl_node_opcode_two!(OrD, $( $inner )*)
     });
-    ( or_c ( $( $a:tt )* ), ( $( $b:tt )* ) ) => ({
-        $crate::impl_node_opcode_two!(OrC, ( $( $a )* ), ( $( $b )* ))
+    ( or_c ( $( $inner:tt )* ) ) => ({
+        $crate::impl_node_opcode_two!(OrC, $( $inner )*)
     });
-    ( or_i ( $( $a:tt )* ), ( $( $b:tt )* ) ) => ({
-        $crate::impl_node_opcode_two!(OrI, ( $( $a )* ), ( $( $b )* ))
+    ( or_i ( $( $inner:tt )* ) ) => ({
+        $crate::impl_node_opcode_two!(OrI, $( $inner )*)
     });
-    ( thresh_vec $thresh:expr, $items:expr ) => ({
+    ( thresh_vec ( $thresh:expr, $items:expr ) ) => ({
         use $crate::miniscript::descriptor::KeyMap;
 
         let (items, key_maps_networks): (Vec<_>, Vec<_>) = $items.into_iter().map(|(a, b, c)| (a, (b, c))).unzip();
@@ -423,19 +580,16 @@ macro_rules! fragment {
         $crate::impl_leaf_opcode_value_two!(Thresh, $thresh, items)
             .map(|(minisc, _, _)| (minisc, key_maps, valid_networks))
     });
-    ( thresh $thresh:expr $(, ( $( $item:tt )* ) )+ ) => ({
-        let mut items = vec![];
-        $(
-            items.push($crate::fragment!($( $item )*));
-        )*
+    ( thresh ( $thresh:expr, $( $inner:tt )* ) ) => ({
+        let items = $crate::fragment_internal!( @v $( $inner )* );
 
         items.into_iter().collect::<Result<Vec<_>, _>>()
-            .and_then(|items| $crate::fragment!(thresh_vec $thresh, items))
+            .and_then(|items| $crate::fragment!(thresh_vec($thresh, items)))
     });
-    ( multi_vec $thresh:expr, $keys:expr ) => ({
+    ( multi_vec ( $thresh:expr, $keys:expr ) ) => ({
         $crate::keys::make_multi($thresh, $keys)
     });
-    ( multi $thresh:expr $(, $key:expr )+ ) => ({
+    ( multi ( $thresh:expr $(, $key:expr )+ ) ) => ({
         use $crate::keys::ToDescriptorKey;
         let secp = $crate::bitcoin::secp256k1::Secp256k1::new();
 
@@ -449,10 +603,10 @@ macro_rules! fragment {
     });
 
     // `sortedmulti()` is handled separately
-    ( sortedmulti $( $inner:tt )* ) => ({
+    ( sortedmulti ( $( $inner:tt )* ) ) => ({
         compile_error!("`sortedmulti` can only be used as the root operand of a descriptor");
     });
-    ( sortedmulti_vec $( $inner:tt )* ) => ({
+    ( sortedmulti_vec ( $( $inner:tt )* ) ) => ({
         compile_error!("`sortedmulti_vec` can only be used as the root operand of a descriptor");
     });
 }
@@ -471,6 +625,7 @@ mod test {
     use bitcoin::network::constants::Network::{Bitcoin, Regtest, Testnet};
     use bitcoin::util::bip32;
     use bitcoin::util::bip32::ChildNumber;
+    use bitcoin::PrivateKey;
 
     // test the descriptor!() macro
 
@@ -522,7 +677,7 @@ mod test {
         .unwrap();
 
         check(
-            descriptor!(bare(multi 1,pubkey1,pubkey2)),
+            descriptor!(bare(multi(1,pubkey1,pubkey2))),
             false,
             true,
             &["512103a34b99f22c790c4e36b2b3c2c35a36db06226e41c692fc82b8b56ac1c540c5bd21032e58afe51f9ed8ad3cc7897f634d881fdbe49a81564629ded8156bebd2ffd1af52ae"],
@@ -540,7 +695,7 @@ mod test {
             &["muZpTpBYhxmRFuCjLc7C6BBDF32C8XVJUi"],
         );
         check(
-            descriptor!(sh(multi 1,pubkey1,pubkey2)),
+            descriptor!(sh(multi(1, pubkey1, pubkey2))),
             false,
             true,
             &["2MymURoV1bzuMnWMGiXzyomDkeuxXY7Suey"],
@@ -571,13 +726,13 @@ mod test {
             &["2N5LiC3CqzxDamRTPG1kiNv1FpNJQ7x28sb"],
         );
         check(
-            descriptor!(wsh(multi 1,pubkey1,pubkey2)),
+            descriptor!(wsh(multi(1, pubkey1, pubkey2))),
             true,
             true,
             &["bcrt1qgw8jvv2hsrvjfa6q66rk6har7d32lrqm5unnf5cl63q9phxfvgps5fyfqe"],
         );
         check(
-            descriptor!(sh(wsh(multi 1,pubkey1,pubkey2))),
+            descriptor!(sh(wsh(multi(1, pubkey1, pubkey2)))),
             true,
             true,
             &["2NCidRJysy7apkmE6JF5mLLaJFkrN3Ub9iy"],
@@ -618,7 +773,7 @@ mod test {
         let desc_key2 = (xprv, path2).to_descriptor_key().unwrap();
 
         check(
-            descriptor!(sh(multi 1,desc_key1,desc_key2)),
+            descriptor!(sh(multi(1, desc_key1, desc_key2))),
             false,
             false,
             &[
@@ -662,7 +817,7 @@ mod test {
         let desc_key1 = (xprv, path.clone()).to_descriptor_key().unwrap();
         let desc_key2 = (xprv, path2.clone()).to_descriptor_key().unwrap();
         check(
-            descriptor!(wsh(multi 1,desc_key1,desc_key2)),
+            descriptor!(wsh(multi(1, desc_key1, desc_key2))),
             true,
             false,
             &[
@@ -675,7 +830,7 @@ mod test {
         let desc_key1 = (xprv, path).to_descriptor_key().unwrap();
         let desc_key2 = (xprv, path2).to_descriptor_key().unwrap();
         check(
-            descriptor!(sh(wsh(multi 1,desc_key1,desc_key2))),
+            descriptor!(sh(wsh(multi(1, desc_key1, desc_key2)))),
             true,
             false,
             &[
@@ -698,7 +853,7 @@ mod test {
         let desc_key2 = (key_2, path_2);
 
         check(
-            descriptor!(sh(sortedmulti 1, desc_key1.clone(), desc_key2.clone())),
+            descriptor!(sh(sortedmulti(1, desc_key1.clone(), desc_key2.clone()))),
             false,
             false,
             &[
@@ -712,7 +867,11 @@ mod test {
         );
 
         check(
-            descriptor!(sh(wsh(sortedmulti 1, desc_key1.clone(), desc_key2.clone()))),
+            descriptor!(sh(wsh(sortedmulti(
+                1,
+                desc_key1.clone(),
+                desc_key2.clone()
+            )))),
             true,
             false,
             &[
@@ -726,7 +885,7 @@ mod test {
         );
 
         check(
-            descriptor!(wsh(sortedmulti_vec 1, vec![desc_key1, desc_key2])),
+            descriptor!(wsh(sortedmulti_vec(1, vec![desc_key1, desc_key2]))),
             true,
             false,
             &[
@@ -776,7 +935,7 @@ mod test {
         let desc_key3 = (xprv3, path3.clone()).to_descriptor_key().unwrap();
 
         let (_desc, key_map, _valid_networks) =
-            descriptor!(sh(wsh(multi 2,desc_key1,desc_key2,desc_key3))).unwrap();
+            descriptor!(sh(wsh(multi(2, desc_key1, desc_key2, desc_key3)))).unwrap();
         assert_eq!(key_map.len(), 3);
 
         let desc_key1: DescriptorKey<Segwitv0> =
@@ -808,5 +967,15 @@ mod test {
         // as expected this does not compile due to invalid context
         //let desc_key:DescriptorKey<Segwitv0> = (xprv, path.clone()).to_descriptor_key().unwrap();
         //let (desc, _key_map, _valid_networks) = descriptor!(pkh(desc_key)).unwrap();
+    }
+
+    #[test]
+    fn test_dsl_modifiers() {
+        let private_key =
+            PrivateKey::from_wif("cSQPHDBwXGjVzWRqAHm6zfvQhaTuj1f2bFH58h55ghbjtFwvmeXR").unwrap();
+        let (descriptor, _, _) =
+            descriptor!(wsh(thresh(2,d:v:older(1),s:pk(private_key),s:pk(private_key)))).unwrap();
+
+        assert_eq!(descriptor.to_string(), "wsh(thresh(2,dv:older(1),s:pk(02e96fe52ef0e22d2f131dd425ce1893073a3c6ad20e8cac36726393dfb4856a4c),s:pk(02e96fe52ef0e22d2f131dd425ce1893073a3c6ad20e8cac36726393dfb4856a4c)))")
     }
 }

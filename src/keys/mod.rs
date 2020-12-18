@@ -28,6 +28,7 @@ use std::any::TypeId;
 use std::collections::HashSet;
 use std::marker::PhantomData;
 use std::ops::Deref;
+use std::str::FromStr;
 
 use bitcoin::secp256k1;
 
@@ -664,6 +665,14 @@ impl<Ctx: ScriptContext> ToDescriptorKey<Ctx> for DescriptorSecretKey {
         };
 
         Ok(DescriptorKey::from_secret(self, networks))
+    }
+}
+
+impl<Ctx: ScriptContext> ToDescriptorKey<Ctx> for &'_ str {
+    fn to_descriptor_key(self) -> Result<DescriptorKey<Ctx>, KeyError> {
+        DescriptorSecretKey::from_str(self)
+            .map_err(|e| KeyError::Message(e.to_string()))?
+            .to_descriptor_key()
     }
 }
 

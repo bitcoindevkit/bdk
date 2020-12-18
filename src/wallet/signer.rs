@@ -560,7 +560,7 @@ mod signers_container_tests {
     fn signers_with_same_ordering() {
         let (prvkey1, _, _) = setup_keys(TPRV0_STR);
         let (prvkey2, _, _) = setup_keys(TPRV1_STR);
-        let desc = descriptor!(sh(multi 2, prvkey1, prvkey2)).unwrap();
+        let desc = descriptor!(sh(multi(2, prvkey1, prvkey2))).unwrap();
         let (_, keymap) = desc.to_wallet_descriptor(Network::Testnet).unwrap();
 
         let signers = SignersContainer::from(keymap);

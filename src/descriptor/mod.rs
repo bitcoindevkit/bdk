@@ -42,7 +42,8 @@ pub use miniscript::{
 };
 
 pub mod checksum;
-mod dsl;
+#[doc(hidden)]
+pub mod dsl;
 pub mod error;
 pub mod policy;
 pub mod template;
