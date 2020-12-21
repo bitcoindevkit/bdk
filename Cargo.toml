@@ -5,7 +5,7 @@ edition = "2018"
 authors = ["Alekos Filini <alekos.filini@gmail.com>", "Riccardo Casatta <riccardo@casatta.it>"]
 
 [dependencies]
-bdk-macros = { version = "0.1.0-beta.1", path = "./macros" }
+bdk-macros = { version = "0.2.0", path = "./macros" }
 log = "^0.4"
 miniscript = "4.0"
 bitcoin = { version = "^0.25.2", features = ["use-serde"] }
