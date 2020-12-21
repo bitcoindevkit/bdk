@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.2.0] - [0.1.0-beta.1]
+
 ### Project
 #### Added
 - Add CONTRIBUTING.md
@@ -209,5 +211,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Use `MemoryDatabase` in the compiler example
 - Make the REPL return JSON
 
-[unreleased]: https://github.com/bitcoindevkit/bdk/compare/0.1.0-beta.1...HEAD
+[unreleased]: https://github.com/bitcoindevkit/bdk/compare/v0.2.0...HEAD
 [0.1.0-beta.1]: https://github.com/bitcoindevkit/bdk/compare/96c87ea5...0.1.0-beta.1
+[v0.2.0]: https://github.com/bitcoindevkit/bdk/compare/0.1.0-beta.1...v0.2.0
