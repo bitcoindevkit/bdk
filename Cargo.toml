@@ -3,9 +3,16 @@ name = "bdk"
 version = "0.2.0-rc.1"
 edition = "2018"
 authors = ["Alekos Filini <alekos.filini@gmail.com>", "Riccardo Casatta <riccardo@casatta.it>"]
+homepage = "https://bitcoindevkit.org"
+repository = "https://github.com/bitcoindevkit/bdk"
+documentation = "https://docs.rs/bdk"
+description = "A modern, lightweight, descriptor-based wallet library"
+keywords = ["bitcoin", "wallet", "descriptor", "psbt"]
+readme = "README.md"
+license-file = "LICENSE"
 
 [dependencies]
-bdk-macros = { version = "0.2.0", path = "./macros" }
+bdk-macros = "0.2"
 log = "^0.4"
 miniscript = "4.0"
 bitcoin = { version = "^0.25.2", features = ["use-serde"] }
@@ -57,8 +64,8 @@ test-electrum = ["electrum"]
 test-md-docs = ["base64", "electrum"]
 
 [dev-dependencies]
-bdk-testutils = { version = "0.2.0", path = "./testutils" }
-bdk-testutils-macros = { version = "0.2.0", path = "./testutils-macros" }
+bdk-testutils = "0.2"
+bdk-testutils-macros = "0.2"
 serial_test = "0.4"
 lazy_static = "1.4"
 rustyline = "6.0"
