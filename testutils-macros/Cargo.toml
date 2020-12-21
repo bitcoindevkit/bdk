@@ -11,7 +11,7 @@ name = "testutils_macros"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-syn = { version = "1.0", features = ["parsing"] }
+syn = { version = "1.0", features = ["parsing", "full"] }
 proc-macro2 = "1.0"
 quote = "1.0"
 
