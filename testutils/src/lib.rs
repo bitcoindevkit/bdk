@@ -56,13 +56,13 @@ fn get_auth() -> Auth {
         ),
         _ => Auth::CookieFile(PathBuf::from(
             env::var("MAGICAL_RPC_COOKIEFILE")
-                .unwrap_or("/home/user/.bitcoin/regtest/.cookie".to_string()),
+                .unwrap_or_else(|_| "/home/user/.bitcoin/regtest/.cookie".to_string()),
         )),
     }
 }
 
 pub fn get_electrum_url() -> String {
-    env::var("MAGICAL_ELECTRUM_URL").unwrap_or("tcp://127.0.0.1:50001".to_string())
+    env::var("MAGICAL_ELECTRUM_URL").unwrap_or_else(|_| "tcp://127.0.0.1:50001".to_string())
 }
 
 pub struct TestClient {
@@ -268,7 +268,7 @@ where
 
 impl TestClient {
     pub fn new() -> Self {
-        let url = env::var("MAGICAL_RPC_URL").unwrap_or("127.0.0.1:18443".to_string());
+        let url = env::var("MAGICAL_RPC_URL").unwrap_or_else(|_| "127.0.0.1:18443".to_string());
         let client = RpcClient::new(format!("http://{}", url), get_auth()).unwrap();
         let electrum = ElectrumClient::new(&get_electrum_url()).unwrap();
 
