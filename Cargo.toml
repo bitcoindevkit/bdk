@@ -57,8 +57,8 @@ test-electrum = ["electrum"]
 test-md-docs = ["base64", "electrum"]
 
 [dev-dependencies]
-bdk-testutils = { version = "0.1.0-beta.1", path = "./testutils" }
-bdk-testutils-macros = { version = "0.1.0-beta.1", path = "./testutils-macros" }
+bdk-testutils = { version = "0.2.0", path = "./testutils" }
+bdk-testutils-macros = { version = "0.2.0", path = "./testutils-macros" }
 serial_test = "0.4"
 lazy_static = "1.4"
 rustyline = "6.0"

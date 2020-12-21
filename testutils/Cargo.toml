@@ -1,8 +1,14 @@
 [package]
 name = "bdk-testutils"
-version = "0.1.0-beta.1"
+version = "0.2.0"
 authors = ["Alekos Filini <alekos.filini@gmail.com>"]
 edition = "2018"
+homepage = "https://bitcoindevkit.org"
+repository = "https://github.com/bitcoindevkit/bdk"
+documentation = "https://docs.rs/bdk-testutils"
+description = "Supporting testing utilities for `bdk`"
+keywords = ["bdk"]
+license-file = "../LICENSE"
 
 [lib]
 name = "testutils"
