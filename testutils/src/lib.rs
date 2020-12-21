@@ -267,14 +267,6 @@ where
 }
 
 impl TestClient {
-    pub fn new() -> Self {
-        let url = env::var("MAGICAL_RPC_URL").unwrap_or_else(|_| "127.0.0.1:18443".to_string());
-        let client = RpcClient::new(format!("http://{}", url), get_auth()).unwrap();
-        let electrum = ElectrumClient::new(&get_electrum_url()).unwrap();
-
-        TestClient { client, electrum }
-    }
-
     fn wait_for_tx(&mut self, txid: Txid, monitor_script: &Script) {
         // wait for electrs to index the tx
         exponential_backoff_poll(|| {
@@ -520,6 +512,16 @@ impl TestClient {
                 .to_string(),
         )
         .unwrap()
+    }
+}
+
+impl Default for TestClient {
+    fn default() -> Self {
+        let url = env::var("MAGICAL_RPC_URL").unwrap_or_else(|_| "127.0.0.1:18443".to_string());
+        let client = RpcClient::new(format!("http://{}", url), get_auth()).unwrap();
+        let electrum = ElectrumClient::new(&get_electrum_url()).unwrap();
+
+        TestClient { client, electrum }
     }
 }
 
