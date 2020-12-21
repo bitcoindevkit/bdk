@@ -8,10 +8,11 @@
   </p>
 
   <p>
-    <!-- <a href="https://crates.io/crates/magical"><img alt="Crate Info" src="https://img.shields.io/crates/v/magical.svg"/></a> -->
+    <a href="https://crates.io/crates/bdk"><img alt="Crate Info" src="https://img.shields.io/crates/v/bdk.svg"/></a>
+    <a href="https://github.com/bitcoindevkit/bdk/blob/master/LICENSE"><img alt="MIT Licensed" src="https://img.shields.io/badge/license-MIT-blue.svg"/></a>
     <a href="https://github.com/bitcoindevkit/bdk/actions?query=workflow%3ACI"><img alt="CI Status" src="https://github.com/bitcoindevkit/bdk/workflows/CI/badge.svg"></a>
     <a href="https://codecov.io/gh/bitcoindevkit/bdk"><img src="https://codecov.io/gh/bitcoindevkit/bdk/branch/master/graph/badge.svg"/></a>
-    <a href="https://bitcoindevkit.org/docs-rs/bdk"><img alt="API Docs" src="https://img.shields.io/badge/docs.rs-bdk-green"/></a>
+    <a href="https://docs.rs/bdk"><img alt="API Docs" src="https://img.shields.io/badge/docs.rs-bdk-green"/></a>
     <a href="https://blog.rust-lang.org/2020/07/16/Rust-1.45.0.html"><img alt="Rustc Version 1.45+" src="https://img.shields.io/badge/rustc-1.45%2B-lightgrey.svg"/></a>
     <a href="https://discord.gg/d7NkDKm"><img alt="Chat on Discord" src="https://img.shields.io/discord/753336465005608961?logo=discord"></a>
   </p>
@@ -19,7 +20,7 @@
   <h4>
     <a href="https://bitcoindevkit.org">Project Homepage</a>
     <span> | </span>
-    <a href="https://bitcoindevkit.org/docs-rs/bdk">Documentation</a>
+    <a href="https://docs.rs/bdk">Documentation</a>
   </h4>
 </div>
 
