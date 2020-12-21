@@ -304,7 +304,7 @@ impl TestClient {
 
     pub fn receive(&mut self, meta_tx: TestIncomingTx) -> Txid {
         assert!(
-            meta_tx.output.len() > 0,
+            !meta_tx.output.is_empty(),
             "can't create a transaction with no outputs"
         );
 
