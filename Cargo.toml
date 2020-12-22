@@ -25,8 +25,6 @@ sled = { version = "0.34", optional = true }
 electrum-client = { version = "0.4.0-beta.1", optional = true }
 reqwest = { version = "0.10", optional = true, features = ["json"] }
 futures = { version = "0.3", optional = true }
-clap = { version = "2.33", optional = true }
-base64 = { version = "^0.11", optional = true }
 async-trait = { version = "0.1", optional = true }
 rocksdb = { version = "0.14", optional = true }
 # pin cc version to 1.0.62 because 1.0.63 break rocksdb build
@@ -34,7 +32,6 @@ cc = { version = "=1.0.62", optional = true }
 socks = { version = "0.3", optional = true }
 lazy_static = { version = "1.4", optional = true }
 tiny-bip39 = { version = "^0.8", optional = true }
-structopt = { version = "^0.3", optional = true }
 
 # Platform-specific dependencies
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
@@ -47,13 +44,12 @@ rand = { version = "^0.7", features = ["wasm-bindgen"] }
 
 [features]
 minimal = []
-compiler = ["clap", "miniscript/compiler"]
+compiler = ["miniscript/compiler"]
 default = ["key-value-db", "electrum"]
 electrum = ["electrum-client"]
 esplora = ["reqwest", "futures"]
 compact_filters = ["rocksdb", "socks", "lazy_static", "cc"]
 key-value-db = ["sled"]
-cli-utils = ["clap", "base64", "structopt"]
 async-interface = ["async-trait"]
 all-keys = ["keys-bip39"]
 keys-bip39 = ["tiny-bip39"]
@@ -61,20 +57,17 @@ keys-bip39 = ["tiny-bip39"]
 # Debug/Test features
 debug-proc-macros = ["bdk-macros/debug", "bdk-testutils-macros/debug"]
 test-electrum = ["electrum"]
-test-md-docs = ["base64", "electrum"]
+test-md-docs = ["electrum"]
 
 [dev-dependencies]
 bdk-testutils = "0.2"
 bdk-testutils-macros = "0.2"
 serial_test = "0.4"
 lazy_static = "1.4"
-rustyline = "6.0"
-dirs-next = "2.0"
 env_logger = "0.7"
+base64 = "^0.11"
+clap = "2.33"
 
-[[example]]
-name = "repl"
-required-features = ["cli-utils"]
 [[example]]
 name = "parse_descriptor"
 [[example]]
