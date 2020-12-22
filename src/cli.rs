@@ -33,6 +33,10 @@
 //!
 //! See [`WalletOpt`] for global wallet options and [`WalletSubCommand`] for supported sub-commands.
 //!
+// we need esplora feature for this example to work
+#[cfg_attr(
+    feature = "esplora",
+    doc = r##"
 //! # Example
 //!
 //! ```
@@ -88,7 +92,8 @@
 //! let result = cli::handle_wallet_subcommand(&wallet, cli_opt.subcommand).unwrap();
 //! println!("{}", serde_json::to_string_pretty(&result).unwrap());
 //! ```
-
+"##
+)]
 use std::collections::BTreeMap;
 use std::str::FromStr;
 
@@ -607,6 +612,7 @@ mod test {
     use structopt::StructOpt;
 
     #[test]
+    #[cfg(feature = "esplora")]
     fn test_get_new_address() {
         let cli_args = vec!["repl", "--network", "bitcoin",
                             "--descriptor", "wpkh(xpubDEnoLuPdBep9bzw5LoGYpsxUQYheRQ9gcgrJhJEcdKFB9cWQRyYmkCyRoTqeD4tJYiVVgt6A3rN6rWn9RYhR9sBsGxji29LYWHuKKbdb1ev/0/*)",
@@ -624,9 +630,7 @@ mod test {
             descriptor: "wpkh(xpubDEnoLuPdBep9bzw5LoGYpsxUQYheRQ9gcgrJhJEcdKFB9cWQRyYmkCyRoTqeD4tJYiVVgt6A3rN6rWn9RYhR9sBsGxji29LYWHuKKbdb1ev/0/*)".to_string(),
             change_descriptor: Some("wpkh(xpubDEnoLuPdBep9bzw5LoGYpsxUQYheRQ9gcgrJhJEcdKFB9cWQRyYmkCyRoTqeD4tJYiVVgt6A3rN6rWn9RYhR9sBsGxji29LYWHuKKbdb1ev/1/*)".to_string()),
             log_level: "info".to_string(),
-            #[cfg(feature = "esplora")]
             esplora: Some("https://blockstream.info/api/".to_string()),
-            #[cfg(feature = "esplora")]
             esplora_concurrency: 5,
             electrum: "ssl://electrum.blockstream.info:60002".to_string(),
             subcommand: WalletSubCommand::GetNewAddress,
