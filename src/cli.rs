@@ -92,6 +92,7 @@
 use std::collections::BTreeMap;
 use std::str::FromStr;
 
+pub use structopt;
 use structopt::StructOpt;
 
 #[allow(unused_imports)]
@@ -116,8 +117,7 @@ use crate::{FeeRate, TxBuilder, Wallet};
 /// # Example
 ///
 /// ```
-/// # use bdk::cli::{WalletOpt, WalletSubCommand};
-/// # use structopt::StructOpt;
+/// # use bdk::cli::{WalletOpt, WalletSubCommand, structopt::StructOpt};
 ///
 /// let cli_args = vec!["repl", "--network", "testnet",
 ///                     "--descriptor", "wpkh(tpubEBr4i6yk5nf5DAaJpsi9N2pPYBeJ7fZ5Z9rmN4977iYLCGco1VyjB9tvvuvYtfZzjD5A8igzgw3HeWeeKFmanHYqksqZXYXGsw5zjnj7KM9/44'/1'/0'/0/*)",
