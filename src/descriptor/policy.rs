@@ -165,11 +165,13 @@ pub enum SatisfiableItem {
 impl SatisfiableItem {
     /// Returns whether the [`SatisfiableItem`] is a leaf item
     pub fn is_leaf(&self) -> bool {
-        !matches!(self,
-        SatisfiableItem::Thresh {
-            items: _,
-            threshold: _,
-        })
+        !matches!(
+            self,
+            SatisfiableItem::Thresh {
+                items: _,
+                threshold: _,
+            }
+        )
     }
 
     /// Returns a unique id for the [`SatisfiableItem`]
