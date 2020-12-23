@@ -333,7 +333,7 @@ impl Peer {
                 NetworkMessage::Alert(_) => continue,
                 NetworkMessage::GetData(ref inv) => {
                     let (found, not_found): (Vec<_>, Vec<_>) = inv
-                        .into_iter()
+                        .iter()
                         .map(|item| (*item, reader_thread_mempool.get_tx(item)))
                         .partition(|(_, d)| d.is_some());
                     for (_, found_tx) in found {
