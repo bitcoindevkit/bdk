@@ -131,7 +131,7 @@ impl CompactFiltersBlockchain {
 
         let network = peers[0].get_network();
 
-        let cfs = DB::list_cf(&opts, &storage_dir).unwrap_or(vec!["default".to_string()]);
+        let cfs = DB::list_cf(&opts, &storage_dir).unwrap_or_else(|_| vec!["default".to_string()]);
         let db = DB::open_cf(&opts, &storage_dir, &cfs)?;
         let headers = Arc::new(ChainStore::new(db, network)?);
 
