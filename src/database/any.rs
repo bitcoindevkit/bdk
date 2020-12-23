@@ -312,24 +312,17 @@ impl BatchDatabase for AnyDatabase {
         }
     }
     fn commit_batch(&mut self, batch: Self::Batch) -> Result<(), Error> {
-        // TODO: refactor once `move_ref_pattern` is stable
-        #[allow(irrefutable_let_patterns)]
         match self {
-            AnyDatabase::Memory(db) => {
-                if let AnyBatch::Memory(batch) = batch {
-                    db.commit_batch(batch)
-                } else {
-                    unimplemented!()
-                }
-            }
+            AnyDatabase::Memory(db) => match batch {
+                AnyBatch::Memory(batch) => db.commit_batch(batch),
+                #[cfg(feature = "key-value-db")]
+                _ => unimplemented!("Sled batch shouldn't be used with Memory db."),
+            },
             #[cfg(feature = "key-value-db")]
-            AnyDatabase::Sled(db) => {
-                if let AnyBatch::Sled(batch) = batch {
-                    db.commit_batch(batch)
-                } else {
-                    unimplemented!()
-                }
-            }
+            AnyDatabase::Sled(db) => match batch {
+                AnyBatch::Sled(batch) => db.commit_batch(batch),
+                _ => unimplemented!("Memory batch shouldn't be used with Sled db."),
+            },
         }
     }
 }
