@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- Remove `BlockchainMarker`, `OfflineClient` and `OfflineWallet` in favor of just using the unit
+  type to mark for a missing client.
+
 ## [v0.2.0] - [0.1.0-beta.1]
 
 ### Project

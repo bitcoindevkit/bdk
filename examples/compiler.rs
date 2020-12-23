@@ -40,7 +40,7 @@ use miniscript::policy::Concrete;
 use miniscript::Descriptor;
 
 use bdk::database::memory::MemoryDatabase;
-use bdk::{KeychainKind, OfflineWallet, Wallet};
+use bdk::{KeychainKind, Wallet};
 
 fn main() {
     env_logger::init_from_env(
@@ -98,8 +98,7 @@ fn main() {
         Some("regtest") => Network::Regtest,
         Some("testnet") | _ => Network::Testnet,
     };
-    let wallet: OfflineWallet<_> =
-        Wallet::new_offline(&format!("{}", descriptor), None, network, database).unwrap();
+    let wallet = Wallet::new_offline(&format!("{}", descriptor), None, network, database).unwrap();
 
     info!("... First address: {}", wallet.get_new_address().unwrap());
 
