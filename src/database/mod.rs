@@ -227,7 +227,7 @@ pub mod test {
         );
         assert_eq!(
             tree.get_path_from_script_pubkey(&script).unwrap(),
-            Some((keychain, path.clone()))
+            Some((keychain, path))
         );
     }
 
@@ -256,7 +256,7 @@ pub mod test {
         );
         assert_eq!(
             tree.get_path_from_script_pubkey(&script).unwrap(),
-            Some((keychain, path.clone()))
+            Some((keychain, path))
         );
     }
 
