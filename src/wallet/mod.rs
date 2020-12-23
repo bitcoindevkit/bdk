@@ -2062,7 +2062,7 @@ mod test {
 
         assert_eq!(psbt.inputs[0].hd_keypaths.len(), 1);
         assert_eq!(
-            psbt.inputs[0].hd_keypaths.values().nth(0).unwrap(),
+            psbt.inputs[0].hd_keypaths.values().next().unwrap(),
             &(
                 Fingerprint::from_str("d34db33f").unwrap(),
                 DerivationPath::from_str("m/44'/0'/0'/0/0").unwrap()
@@ -2090,7 +2090,7 @@ mod test {
 
         assert_eq!(psbt.outputs[0].hd_keypaths.len(), 1);
         assert_eq!(
-            psbt.outputs[0].hd_keypaths.values().nth(0).unwrap(),
+            psbt.outputs[0].hd_keypaths.values().next().unwrap(),
             &(
                 Fingerprint::from_str("d34db33f").unwrap(),
                 DerivationPath::from_str("m/44'/0'/0'/0/5").unwrap()
