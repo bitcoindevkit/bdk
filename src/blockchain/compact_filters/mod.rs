@@ -221,7 +221,7 @@ impl CompactFiltersBlockchain {
                 sent: outgoing,
                 height,
                 timestamp,
-                fees: inputs_sum.checked_sub(outputs_sum).unwrap_or(0),
+                fees: inputs_sum.saturating_sub(outputs_sum),
             };
 
             info!("Saving tx {}", tx.txid);
@@ -257,13 +257,10 @@ impl Blockchain for CompactFiltersBlockchain {
             .map(|x| x / 1000)
             .unwrap_or(0)
             + 1;
-        let expected_bundles_to_sync = total_bundles
-            .checked_sub(cf_sync.pruned_bundles()?)
-            .unwrap_or(0);
+        let expected_bundles_to_sync = total_bundles.saturating_sub(cf_sync.pruned_bundles()?);
 
         let headers_cost = (first_peer.get_version().start_height as usize)
-            .checked_sub(initial_height)
-            .unwrap_or(0) as f32
+            .saturating_sub(initial_height) as f32
             * SYNC_HEADERS_COST;
         let filters_cost = expected_bundles_to_sync as f32 * SYNC_FILTERS_COST;
 
@@ -274,7 +271,7 @@ impl Blockchain for CompactFiltersBlockchain {
             Arc::clone(&self.headers),
             |new_height| {
                 let local_headers_cost =
-                    new_height.checked_sub(initial_height).unwrap_or(0) as f32 * SYNC_HEADERS_COST;
+                    new_height.saturating_sub(initial_height) as f32 * SYNC_HEADERS_COST;
                 progress_update.update(
                     local_headers_cost / total_cost * 100.0,
                     Some(format!("Synced headers to {}", new_height)),
@@ -288,9 +285,7 @@ impl Blockchain for CompactFiltersBlockchain {
         }
 
         let synced_height = self.headers.get_height()?;
-        let buried_height = synced_height
-            .checked_sub(sync::BURIED_CONFIRMATIONS)
-            .unwrap_or(0);
+        let buried_height = synced_height.saturating_sub(sync::BURIED_CONFIRMATIONS);
         info!("Synced headers to height: {}", synced_height);
 
         cf_sync.prepare_sync(Arc::clone(&first_peer))?;

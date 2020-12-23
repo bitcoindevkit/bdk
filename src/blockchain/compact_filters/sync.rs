@@ -204,9 +204,8 @@ impl CFSync {
             if let BundleStatus::CFilters { cf_filters } = status {
                 log::trace!("status: CFilters");
 
-                let last_sync_buried_height = (start_height + already_processed)
-                    .checked_sub(BURIED_CONFIRMATIONS)
-                    .unwrap_or(0);
+                let last_sync_buried_height =
+                    (start_height + already_processed).saturating_sub(BURIED_CONFIRMATIONS);
 
                 for (filter_index, filter) in cf_filters.iter().enumerate() {
                     let height = filter_index + start_height;
