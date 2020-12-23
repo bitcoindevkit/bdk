@@ -239,6 +239,7 @@ impl Blockchain for CompactFiltersBlockchain {
         vec![Capability::FullHistory].into_iter().collect()
     }
 
+    #[allow(clippy::mutex_atomic)] // Mutex is easier to understand than a CAS loop.
     fn setup<D: BatchDatabase, P: 'static + Progress>(
         &self,
         _stop_gap: Option<usize>, // TODO: move to electrum and esplora only
