@@ -354,7 +354,7 @@ impl Satisfaction {
         }
     }
 
-    fn finalize(&mut self) -> Result<(), PolicyError> {
+    fn finalize(&mut self) {
         // if partial try to bump it to a partialcomplete
         if let Satisfaction::Partial {
             n,
@@ -420,8 +420,6 @@ impl Satisfaction {
                 };
             }
         }
-
-        Ok(())
     }
 }
 
@@ -575,7 +573,7 @@ impl Policy {
         for (index, item) in items.iter().enumerate() {
             contribution.add(&item.contribution, index)?;
         }
-        contribution.finalize()?;
+        contribution.finalize();
 
         let mut policy: Policy = SatisfiableItem::Thresh { items, threshold }.into();
         policy.contribution = contribution;
@@ -613,7 +611,7 @@ impl Policy {
                 )?;
             }
         }
-        contribution.finalize()?;
+        contribution.finalize();
 
         let mut policy: Policy = SatisfiableItem::Multisig {
             keys: parsed_keys,

@@ -369,6 +369,7 @@ impl DescriptorMeta for Descriptor<DescriptorPublicKey> {
     }
 
     fn is_fixed(&self) -> bool {
+        #[allow(clippy::unnecessary_wraps)]
         fn check_key(key: &DescriptorPublicKey, flag: &mut bool) -> Result<DummyKey, Error> {
             match key {
                 DescriptorPublicKey::SinglePub(_) => {}
