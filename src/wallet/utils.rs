@@ -156,8 +156,8 @@ pub struct ChunksIterator<I: Iterator> {
     size: usize,
 }
 
+#[cfg(any(feature = "electrum", feature = "esplora"))]
 impl<I: Iterator> ChunksIterator<I> {
-    #[allow(dead_code)]
     pub fn new(iter: I, size: usize) -> Self {
         ChunksIterator { iter, size }
     }
