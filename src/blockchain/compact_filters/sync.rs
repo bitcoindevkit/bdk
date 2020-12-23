@@ -271,7 +271,7 @@ where
         Default::default(),
     )))?;
     let (mut snapshot, mut last_hash) = if let NetworkMessage::Headers(headers) = peer
-        .recv("headers", Some(Duration::from_secs(TIMEOUT_SECS)))?
+        .recv("headers", Some(Duration::from_secs(TIMEOUT_SECS)))
         .ok_or(CompactFiltersError::Timeout)?
     {
         if headers.is_empty() {
@@ -293,7 +293,7 @@ where
             Default::default(),
         )))?;
         if let NetworkMessage::Headers(headers) = peer
-            .recv("headers", Some(Duration::from_secs(TIMEOUT_SECS)))?
+            .recv("headers", Some(Duration::from_secs(TIMEOUT_SECS)))
             .ok_or(CompactFiltersError::Timeout)?
         {
             let batch_len = headers.len();

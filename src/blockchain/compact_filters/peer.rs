@@ -190,14 +190,14 @@ impl Peer {
             )),
         )?;
         let version = if let NetworkMessage::Version(version) =
-            Self::_recv(&responses, "version", None)?.unwrap()
+            Self::_recv(&responses, "version", None).unwrap()
         {
             version
         } else {
             return Err(CompactFiltersError::InvalidResponse);
         };
 
-        if let NetworkMessage::Verack = Self::_recv(&responses, "verack", None)?.unwrap() {
+        if let NetworkMessage::Verack = Self::_recv(&responses, "verack", None).unwrap() {
             Self::_send(&mut locked_writer, network.magic(), NetworkMessage::Verack)?;
         } else {
             return Err(CompactFiltersError::InvalidResponse);
@@ -238,7 +238,7 @@ impl Peer {
         responses: &Arc<RwLock<ResponsesMap>>,
         wait_for: &'static str,
         timeout: Option<Duration>,
-    ) -> Result<Option<NetworkMessage>, CompactFiltersError> {
+    ) -> Option<NetworkMessage> {
         let message_resp = {
             let mut lock = responses.write().unwrap();
             let message_resp = lock.entry(wait_for).or_default();
@@ -254,7 +254,7 @@ impl Peer {
                 Some(t) => {
                     let result = cvar.wait_timeout(messages, t).unwrap();
                     if result.1.timed_out() {
-                        return Ok(None);
+                        return None;
                     }
 
                     messages = result.0;
@@ -262,7 +262,7 @@ impl Peer {
             }
         }
 
-        Ok(messages.pop())
+        messages.pop()
     }
 
     /// Return the [`VersionMessage`] sent by the peer
@@ -381,7 +381,7 @@ impl Peer {
         &self,
         wait_for: &'static str,
         timeout: Option<Duration>,
-    ) -> Result<Option<NetworkMessage>, CompactFiltersError> {
+    ) -> Option<NetworkMessage> {
         Self::_recv(&self.responses, wait_for, timeout)
     }
 }
@@ -419,7 +419,7 @@ impl CompactFiltersPeer for Peer {
         }))?;
 
         let response = self
-            .recv("cfcheckpt", Some(Duration::from_secs(TIMEOUT_SECS)))?
+            .recv("cfcheckpt", Some(Duration::from_secs(TIMEOUT_SECS)))
             .ok_or(CompactFiltersError::Timeout)?;
         let response = match response {
             NetworkMessage::CFCheckpt(response) => response,
@@ -446,7 +446,7 @@ impl CompactFiltersPeer for Peer {
         }))?;
 
         let response = self
-            .recv("cfheaders", Some(Duration::from_secs(TIMEOUT_SECS)))?
+            .recv("cfheaders", Some(Duration::from_secs(TIMEOUT_SECS)))
             .ok_or(CompactFiltersError::Timeout)?;
         let response = match response {
             NetworkMessage::CFHeaders(response) => response,
@@ -462,7 +462,7 @@ impl CompactFiltersPeer for Peer {
 
     fn pop_cf_filter_resp(&self) -> Result<CFilter, CompactFiltersError> {
         let response = self
-            .recv("cfilter", Some(Duration::from_secs(TIMEOUT_SECS)))?
+            .recv("cfilter", Some(Duration::from_secs(TIMEOUT_SECS)))
             .ok_or(CompactFiltersError::Timeout)?;
         let response = match response {
             NetworkMessage::CFilter(response) => response,
@@ -500,7 +500,7 @@ impl InvPeer for Peer {
             block_hash,
         )]))?;
 
-        match self.recv("block", Some(Duration::from_secs(TIMEOUT_SECS)))? {
+        match self.recv("block", Some(Duration::from_secs(TIMEOUT_SECS))) {
             None => Ok(None),
             Some(NetworkMessage::Block(response)) => Ok(Some(response)),
             _ => Err(CompactFiltersError::InvalidResponse),
@@ -509,7 +509,7 @@ impl InvPeer for Peer {
 
     fn ask_for_mempool(&self) -> Result<(), CompactFiltersError> {
         self.send(NetworkMessage::MemPool)?;
-        let inv = match self.recv("inv", Some(Duration::from_secs(5)))? {
+        let inv = match self.recv("inv", Some(Duration::from_secs(5))) {
             None => return Ok(()), // empty mempool
             Some(NetworkMessage::Inv(inv)) => inv,
             _ => return Err(CompactFiltersError::InvalidResponse),
@@ -528,7 +528,7 @@ impl InvPeer for Peer {
 
         for _ in 0..num_txs {
             let tx = self
-                .recv("tx", Some(Duration::from_secs(TIMEOUT_SECS)))?
+                .recv("tx", Some(Duration::from_secs(TIMEOUT_SECS)))
                 .ok_or(CompactFiltersError::Timeout)?;
             let tx = match tx {
                 NetworkMessage::Tx(tx) => tx,
