@@ -643,7 +643,7 @@ mod test {
         use std::str::FromStr;
 
         let original_tx = ordering_test_tx!();
-        let mut tx = original_tx.clone();
+        let mut tx = original_tx;
 
         TxOrdering::BIP69Lexicographic.sort_tx(&mut tx);
 

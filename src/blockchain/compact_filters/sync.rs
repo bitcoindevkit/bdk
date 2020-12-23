@@ -280,10 +280,7 @@ where
 
         match locators_map.get(&headers[0].prev_blockhash) {
             None => return Err(CompactFiltersError::InvalidHeaders),
-            Some(from) => (
-                store.start_snapshot(*from)?,
-                headers[0].prev_blockhash.clone(),
-            ),
+            Some(from) => (store.start_snapshot(*from)?, headers[0].prev_blockhash),
         }
     } else {
         return Err(CompactFiltersError::InvalidResponse);

@@ -461,7 +461,7 @@ impl ChainStore<Full> {
         let read_store = self.store.read().unwrap();
         let cf_handle = read_store.cf_handle(&self.cf_name).unwrap();
 
-        let key = StoreEntry::BlockHeaderIndex(Some(block_hash.clone())).get_key();
+        let key = StoreEntry::BlockHeaderIndex(Some(*block_hash)).get_key();
         let data = read_store.get_pinned_cf(cf_handle, key)?;
         Ok(data
             .map(|data| {
