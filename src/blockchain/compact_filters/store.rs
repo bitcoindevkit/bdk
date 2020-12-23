@@ -375,7 +375,7 @@ impl ChainStore<Full> {
         let min_height = match iterator
             .next()
             .and_then(|(k, _)| k[1..].try_into().ok())
-            .map(|bytes| usize::from_be_bytes(bytes))
+            .map(usize::from_be_bytes)
         {
             None => {
                 std::mem::drop(iterator);
