@@ -61,7 +61,7 @@ use signer::{Signer, SignerId, SignerOrdering, SignersContainer};
 use tx_builder::{BumpFee, CreateTx, FeePolicy, TxBuilder, TxBuilderContext};
 use utils::{check_nlocktime, check_nsequence_rbf, descriptor_to_pk_ctx, After, Older, SecpCtx};
 
-use crate::blockchain::{Blockchain, BlockchainMarker, OfflineBlockchain, Progress};
+use crate::blockchain::{Blockchain, Progress};
 use crate::database::{BatchDatabase, BatchOperations, DatabaseUtils};
 use crate::descriptor::{
     get_checksum, DescriptorMeta, DescriptorScripts, ExtendedDescriptor, ExtractPolicy, Policy,
@@ -73,9 +73,6 @@ use crate::types::*;
 
 const CACHE_ADDR_BATCH_SIZE: u32 = 100;
 
-/// Type alias for a [`Wallet`] that uses [`OfflineBlockchain`]
-pub type OfflineWallet<D> = Wallet<OfflineBlockchain, D>;
-
 /// A Bitcoin wallet
 ///
 /// A wallet takes descriptors, a [`database`](trait@crate::database::Database) and a
@@ -84,7 +81,7 @@ pub type OfflineWallet<D> = Wallet<OfflineBlockchain, D>;
 /// [creating transactions](Wallet::create_tx), etc.
 ///
 /// A wallet can be either "online" if the [`blockchain`](crate::blockchain) type provided
-/// implements [`Blockchain`], or "offline" [`OfflineBlockchain`] is used. Offline wallets only expose
+/// implements [`Blockchain`], or "offline" if it is the unit type `()`. Offline wallets only expose
 /// methods that don't need any interaction with the blockchain to work.
 pub struct Wallet<B, D> {
     descriptor: ExtendedDescriptor,
@@ -99,16 +96,14 @@ pub struct Wallet<B, D> {
 
     current_height: Option<u32>,
 
-    client: Option<B>,
+    client: B,
     database: RefCell<D>,
 
     secp: SecpCtx,
 }
 
-// offline actions, always available
-impl<B, D> Wallet<B, D>
+impl<D> Wallet<(), D>
 where
-    B: BlockchainMarker,
     D: BatchDatabase,
 {
     /// Create a new "offline" wallet
@@ -116,7 +111,23 @@ where
         descriptor: E,
         change_descriptor: Option<E>,
         network: Network,
+        database: D,
+    ) -> Result<Self, Error> {
+        Self::_new(descriptor, change_descriptor, network, database, (), None)
+    }
+}
+
+impl<B, D> Wallet<B, D>
+where
+    D: BatchDatabase,
+{
+    fn _new<E: ToWalletDescriptor>(
+        descriptor: E,
+        change_descriptor: Option<E>,
+        network: Network,
         mut database: D,
+        client: B,
+        current_height: Option<u32>,
     ) -> Result<Self, Error> {
         let (descriptor, keymap) = descriptor.to_wallet_descriptor(network)?;
         database.check_descriptor_checksum(
@@ -148,18 +159,20 @@ where
             signers,
             change_signers,
             address_validators: Vec::new(),
-
             network,
-
-            current_height: None,
-
-            client: None,
+            current_height,
+            client,
             database: RefCell::new(database),
-
             secp: Secp256k1::new(),
         })
     }
+}
 
+// offline actions, always available
+impl<B, D> Wallet<B, D>
+where
+    D: BatchDatabase,
+{
     /// Return a newly generated address using the external descriptor
     pub fn get_new_address(&self) -> Result<Address, Error> {
         let index = self.fetch_and_increment_index(KeychainKind::External)?;
@@ -241,7 +254,7 @@ where
     /// # use bdk::*;
     /// # use bdk::database::*;
     /// # let descriptor = "wpkh(tpubD6NzVbkrYhZ4Xferm7Pz4VnjdcDPFyjVu5K4iZXQ4pVN8Cks4pHVowTBXBKRhX64pkRyJZJN5xAKj4UDNnLPb5p2sSKXhewoYx5GbTdUFWq/*)";
-    /// # let wallet: OfflineWallet<_> = Wallet::new_offline(descriptor, None, Network::Testnet, MemoryDatabase::default())?;
+    /// # let wallet = Wallet::new_offline(descriptor, None, Network::Testnet, MemoryDatabase::default())?;
     /// # let to_address = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap();
     /// let (psbt, details) = wallet.create_tx(
     ///     TxBuilder::with_recipients(vec![(to_address.script_pubkey(), 50_000)])
@@ -556,7 +569,7 @@ where
     /// # use bdk::*;
     /// # use bdk::database::*;
     /// # let descriptor = "wpkh(tpubD6NzVbkrYhZ4Xferm7Pz4VnjdcDPFyjVu5K4iZXQ4pVN8Cks4pHVowTBXBKRhX64pkRyJZJN5xAKj4UDNnLPb5p2sSKXhewoYx5GbTdUFWq/*)";
-    /// # let wallet: OfflineWallet<_> = Wallet::new_offline(descriptor, None, Network::Testnet, MemoryDatabase::default())?;
+    /// # let wallet = Wallet::new_offline(descriptor, None, Network::Testnet, MemoryDatabase::default())?;
     /// let txid = Txid::from_str("faff0a466b70f5d5f92bd757a92c1371d4838bdd5bc53a06764e2488e51ce8f8").unwrap();
     /// let (psbt, details) = wallet.bump_fee(
     ///     &txid,
@@ -820,7 +833,7 @@ where
     /// # use bdk::*;
     /// # use bdk::database::*;
     /// # let descriptor = "wpkh(tpubD6NzVbkrYhZ4Xferm7Pz4VnjdcDPFyjVu5K4iZXQ4pVN8Cks4pHVowTBXBKRhX64pkRyJZJN5xAKj4UDNnLPb5p2sSKXhewoYx5GbTdUFWq/*)";
-    /// # let wallet: OfflineWallet<_> = Wallet::new_offline(descriptor, None, Network::Testnet, MemoryDatabase::default())?;
+    /// # let wallet = Wallet::new_offline(descriptor, None, Network::Testnet, MemoryDatabase::default())?;
     /// # let (psbt, _) = wallet.create_tx(TxBuilder::new())?;
     /// let (signed_psbt, finalized) = wallet.sign(psbt, None)?;
     /// # Ok::<(), bdk::Error>(())
@@ -1319,12 +1332,15 @@ where
         database: D,
         client: B,
     ) -> Result<Self, Error> {
-        let mut wallet = Self::new_offline(descriptor, change_descriptor, network, database)?;
-
-        wallet.current_height = Some(maybe_await!(client.get_height())? as u32);
-        wallet.client = Some(client);
-
-        Ok(wallet)
+        let current_height = Some(maybe_await!(client.get_height())? as u32);
+        Self::_new(
+            descriptor,
+            change_descriptor,
+            network,
+            database,
+            client,
+            current_height,
+        )
     }
 
     /// Sync the internal database with the blockchain
@@ -1372,13 +1388,13 @@ where
         // TODO: what if i generate an address first and cache some addresses?
         // TODO: we should sync if generating an address triggers a new batch to be stored
         if run_setup {
-            maybe_await!(self.client.as_ref().ok_or(Error::OfflineClient)?.setup(
+            maybe_await!(self.client.setup(
                 None,
                 self.database.borrow_mut().deref_mut(),
                 progress_update,
             ))
         } else {
-            maybe_await!(self.client.as_ref().ok_or(Error::OfflineClient)?.sync(
+            maybe_await!(self.client.sync(
                 None,
                 self.database.borrow_mut().deref_mut(),
                 progress_update,
@@ -1387,8 +1403,8 @@ where
     }
 
     /// Return a reference to the internal blockchain client
-    pub fn client(&self) -> Option<&B> {
-        self.client.as_ref()
+    pub fn client(&self) -> &B {
+        &self.client
     }
 
     /// Get the Bitcoin network the wallet is using.
@@ -1399,11 +1415,7 @@ where
     /// Broadcast a transaction to the network
     #[maybe_async]
     pub fn broadcast(&self, tx: Transaction) -> Result<Txid, Error> {
-        maybe_await!(self
-            .client
-            .as_ref()
-            .ok_or(Error::OfflineClient)?
-            .broadcast(&tx))?;
+        maybe_await!(self.client.broadcast(&tx))?;
 
         Ok(tx.txid())
     }
@@ -1424,7 +1436,7 @@ mod test {
     #[test]
     fn test_cache_addresses_fixed() {
         let db = MemoryDatabase::new();
-        let wallet: OfflineWallet<_> = Wallet::new_offline(
+        let wallet = Wallet::new_offline(
             "wpkh(L5EZftvrYaSudiozVRzTqLcHLNDoVn7H5HSfM9BAN6tMJX8oTWz6)",
             None,
             Network::Testnet,
@@ -1458,7 +1470,7 @@ mod test {
     #[test]
     fn test_cache_addresses() {
         let db = MemoryDatabase::new();
-        let wallet: OfflineWallet<_> = Wallet::new_offline("wpkh(tpubEBr4i6yk5nf5DAaJpsi9N2pPYBeJ7fZ5Z9rmN4977iYLCGco1VyjB9tvvuvYtfZzjD5A8igzgw3HeWeeKFmanHYqksqZXYXGsw5zjnj7KM9/*)", None, Network::Testnet, db).unwrap();
+        let wallet = Wallet::new_offline("wpkh(tpubEBr4i6yk5nf5DAaJpsi9N2pPYBeJ7fZ5Z9rmN4977iYLCGco1VyjB9tvvuvYtfZzjD5A8igzgw3HeWeeKFmanHYqksqZXYXGsw5zjnj7KM9/*)", None, Network::Testnet, db).unwrap();
 
         assert_eq!(
             wallet.get_new_address().unwrap().to_string(),
@@ -1486,7 +1498,7 @@ mod test {
     #[test]
     fn test_cache_addresses_refill() {
         let db = MemoryDatabase::new();
-        let wallet: OfflineWallet<_> = Wallet::new_offline("wpkh(tpubEBr4i6yk5nf5DAaJpsi9N2pPYBeJ7fZ5Z9rmN4977iYLCGco1VyjB9tvvuvYtfZzjD5A8igzgw3HeWeeKFmanHYqksqZXYXGsw5zjnj7KM9/*)", None, Network::Testnet, db).unwrap();
+        let wallet = Wallet::new_offline("wpkh(tpubEBr4i6yk5nf5DAaJpsi9N2pPYBeJ7fZ5Z9rmN4977iYLCGco1VyjB9tvvuvYtfZzjD5A8igzgw3HeWeeKFmanHYqksqZXYXGsw5zjnj7KM9/*)", None, Network::Testnet, db).unwrap();
 
         assert_eq!(
             wallet.get_new_address().unwrap().to_string(),
@@ -1533,12 +1545,12 @@ mod test {
     pub(crate) fn get_funded_wallet(
         descriptor: &str,
     ) -> (
-        OfflineWallet<MemoryDatabase>,
+        Wallet<(), MemoryDatabase>,
         (String, Option<String>),
         bitcoin::Txid,
     ) {
         let descriptors = testutils!(@descriptors (descriptor));
-        let wallet: OfflineWallet<_> = Wallet::new_offline(
+        let wallet = Wallet::new_offline(
             &descriptors.0,
             None,
             Network::Regtest,

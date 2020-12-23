@@ -89,11 +89,6 @@ pub enum Error {
     /// Signing error
     Signer(crate::wallet::signer::SignerError),
 
-    // Blockchain interface errors
-    /// Thrown when trying to call a method that requires a network connection, [`Wallet::sync`](crate::Wallet::sync) and [`Wallet::broadcast`](crate::Wallet::broadcast)
-    /// This error is thrown when creating the Client for the first time, while recovery attempts are tried
-    /// during the sync
-    OfflineClient,
     /// Progress value must be between `0.0` (included) and `100.0` (included)
     InvalidProgressValue(f32),
     /// Progress update error (maybe the channel has been closed)

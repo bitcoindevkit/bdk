@@ -29,7 +29,7 @@ use bdk::database::MemoryDatabase;
 use bdk::descriptor::HDKeyPaths;
 use bdk::wallet::address_validator::{AddressValidator, AddressValidatorError};
 use bdk::KeychainKind;
-use bdk::{OfflineWallet, Wallet};
+use bdk::Wallet;
 
 use bitcoin::hashes::hex::FromHex;
 use bitcoin::util::bip32::Fingerprint;
@@ -59,7 +59,7 @@ impl AddressValidator for DummyValidator {
 
 fn main() -> Result<(), bdk::Error> {
     let descriptor = "sh(and_v(v:pk(tpubDDpWvmUrPZrhSPmUzCMBHffvC3HyMAPnWDSAQNBTnj1iZeJa7BZQEttFiP4DS4GCcXQHezdXhn86Hj6LHX5EDstXPWrMaSneRWM8yUf6NFd/*),after(630000)))";
-    let mut wallet: OfflineWallet<_> =
+    let mut wallet =
         Wallet::new_offline(descriptor, None, Network::Regtest, MemoryDatabase::new())?;
 
     wallet.add_address_validator(Arc::new(DummyValidator));

@@ -91,11 +91,11 @@
 //!
 //! ### Example
 //! ```
-//! use bdk::{Wallet, OfflineWallet};
+//! use bdk::{Wallet};
 //! use bdk::database::MemoryDatabase;
 //!
 //! fn main() -> Result<(), bdk::Error> {
-//!     let wallet: OfflineWallet<_> = Wallet::new_offline(
+//!     let wallet = Wallet::new_offline(
 //!         "wpkh([c258d2e4/84h/1h/0h]tpubDDYkZojQFQjht8Tm4jsS3iuEmKjTiEGjG6KnuFNKKJb5A6ZUCUZKdvLdSDWofKi4ToRCwb9poe1XdqfUnP4jaJjCB2Zwv11ZLgSbnZSNecE/0/*)",
 //!         Some("wpkh([c258d2e4/84h/1h/0h]tpubDDYkZojQFQjht8Tm4jsS3iuEmKjTiEGjG6KnuFNKKJb5A6ZUCUZKdvLdSDWofKi4ToRCwb9poe1XdqfUnP4jaJjCB2Zwv11ZLgSbnZSNecE/1/*)"),
 //!         bitcoin::Network::Testnet,
@@ -155,13 +155,13 @@
 //! ### Example
 //! ```ignore
 //! use base64::decode;
-//! use bdk::{Wallet, OfflineWallet};
+//! use bdk::{Wallet};
 //! use bdk::database::MemoryDatabase;
 //!
 //! use bitcoin::consensus::deserialize;
 //!
 //! fn main() -> Result<(), bdk::Error> {
-//!     let wallet: OfflineWallet<_> = Wallet::new_offline(
+//!     let wallet = Wallet::new_offline(
 //!         "wpkh([c258d2e4/84h/1h/0h]tprv8griRPhA7342zfRyB6CqeKF8CJDXYu5pgnj1cjL1u2ngKcJha5jjTRimG82ABzJQ4MQe71CV54xfn25BbhCNfEGGJZnxvCDQCd6JkbvxW6h/0/*)",
 //!         Some("wpkh([c258d2e4/84h/1h/0h]tprv8griRPhA7342zfRyB6CqeKF8CJDXYu5pgnj1cjL1u2ngKcJha5jjTRimG82ABzJQ4MQe71CV54xfn25BbhCNfEGGJZnxvCDQCd6JkbvxW6h/1/*)"),
 //!         bitcoin::Network::Testnet,
@@ -268,4 +268,4 @@ pub use types::*;
 pub use wallet::address_validator;
 pub use wallet::signer;
 pub use wallet::tx_builder::TxBuilder;
-pub use wallet::{OfflineWallet, Wallet};
+pub use wallet::Wallet;

@@ -84,7 +84,7 @@
 //!     }
 //! }
 //!
-//! # let wallet: OfflineWallet<_> = Wallet::new_offline("", None, Network::Testnet, bdk::database::MemoryDatabase::default())?;
+//! # let wallet = Wallet::new_offline("", None, Network::Testnet, bdk::database::MemoryDatabase::default())?;
 //! // create wallet, sync, ...
 //!
 //! let to_address = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap();

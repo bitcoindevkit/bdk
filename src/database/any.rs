@@ -29,20 +29,20 @@
 //!
 //! ## Example
 //!
-//! In this example, `wallet_memory` and `wallet_sled` have the same type of `Wallet<OfflineBlockchain, AnyDatabase>`.
+//! In this example, `wallet_memory` and `wallet_sled` have the same type of `Wallet<(), AnyDatabase>`.
 //!
 //! ```no_run
 //! # use bitcoin::Network;
 //! # use bdk::database::{AnyDatabase, MemoryDatabase};
-//! # use bdk::{Wallet, OfflineWallet};
-//! let memory = MemoryDatabase::default().into();
-//! let wallet_memory: OfflineWallet<AnyDatabase> =
+//! # use bdk::{Wallet};
+//! let memory = MemoryDatabase::default();
+//! let wallet_memory =
 //!     Wallet::new_offline("...", None, Network::Testnet, memory)?;
 //!
 //! # #[cfg(feature = "key-value-db")]
 //! # {
-//! let sled = sled::open("my-database")?.open_tree("default_tree")?.into();
-//! let wallet_sled: OfflineWallet<AnyDatabase> =
+//! let sled = sled::open("my-database")?.open_tree("default_tree")?;
+//! let wallet_sled =
 //!     Wallet::new_offline("...", None, Network::Testnet, sled)?;
 //! # }
 //! # Ok::<(), bdk::Error>(())
@@ -54,10 +54,10 @@
 //! ```no_run
 //! # use bitcoin::Network;
 //! # use bdk::database::*;
-//! # use bdk::{Wallet, OfflineWallet};
+//! # use bdk::{Wallet};
 //! let config = serde_json::from_str("...")?;
 //! let database = AnyDatabase::from_config(&config)?;
-//! let wallet: OfflineWallet<_> = Wallet::new_offline("...", None, Network::Testnet, database)?;
+//! let wallet = Wallet::new_offline("...", None, Network::Testnet, database)?;
 //! # Ok::<(), bdk::Error>(())
 //! ```
 
