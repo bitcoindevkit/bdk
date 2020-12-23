@@ -701,9 +701,9 @@ mod test {
         let filtered = get_test_utxos()
             .into_iter()
             .filter(|u| change_spend_policy.is_satisfied_by(u))
-            .collect::<Vec<_>>();
+            .count();
 
-        assert_eq!(filtered.len(), 2);
+        assert_eq!(filtered, 2);
     }
 
     #[test]
