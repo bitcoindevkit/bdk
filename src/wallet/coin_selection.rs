@@ -627,7 +627,7 @@ mod test {
 
         assert_eq!(result.selected.len(), 2);
         assert_eq!(result.selected_amount, 300_000);
-        assert_eq!(result.fee_amount, 186.0);
+        assert_eq!(result.fee_amount as u32, 186);
     }
 
     #[test]
@@ -648,7 +648,7 @@ mod test {
 
         assert_eq!(result.selected.len(), 2);
         assert_eq!(result.selected_amount, 300_000);
-        assert_eq!(result.fee_amount, 186.0);
+        assert_eq!(result.fee_amount as u32, 186);
     }
 
     #[test]
@@ -669,7 +669,7 @@ mod test {
 
         assert_eq!(result.selected.len(), 1);
         assert_eq!(result.selected_amount, 200_000);
-        assert_eq!(result.fee_amount, 118.0);
+        assert_eq!(result.fee_amount as u32, 118);
     }
 
     #[test]
@@ -729,7 +729,7 @@ mod test {
 
         assert_eq!(result.selected.len(), 3);
         assert_eq!(result.selected_amount, 300_000);
-        assert_eq!(result.fee_amount, 254.0);
+        assert_eq!(result.fee_amount as u32, 254);
     }
 
     #[test]
@@ -750,7 +750,7 @@ mod test {
 
         assert_eq!(result.selected.len(), 2);
         assert_eq!(result.selected_amount, 300_000);
-        assert_eq!(result.fee_amount, 186.0);
+        assert_eq!(result.fee_amount as u32, 186);
     }
 
     #[test]
@@ -926,7 +926,7 @@ mod test {
                 cost_of_change,
             )
             .unwrap();
-        assert_eq!(result.fee_amount, 186.0);
+        assert_eq!(result.fee_amount as u32, 186);
         assert_eq!(result.selected_amount, 100_000);
     }
 
@@ -989,9 +989,6 @@ mod test {
         );
 
         assert!(result.selected_amount > target_amount);
-        assert_eq!(
-            result.fee_amount,
-            50.0 + result.selected.len() as f32 * 68.0
-        );
+        assert_eq!(result.fee_amount as usize, 50 + result.selected.len() * 68);
     }
 }
