@@ -518,10 +518,9 @@ impl InvPeer for Peer {
         let getdata = inv
             .iter()
             .cloned()
-            .filter(|item| match item {
-                Inventory::Transaction(txid) if !self.mempool.has_tx(txid) => true,
-                _ => false,
-            })
+            .filter(
+                |item| matches!(item, Inventory::Transaction(txid) if !self.mempool.has_tx(txid)),
+            )
             .collect::<Vec<_>>();
         let num_txs = getdata.len();
         self.send(NetworkMessage::GetData(getdata))?;

@@ -328,10 +328,8 @@ impl Blockchain for CompactFiltersBlockchain {
                         }
 
                         let block_height = headers.get_height_for(block_hash)?.unwrap_or(0);
-                        let saved_correct_block = match headers.get_full_block(block_height)? {
-                            Some(block) if &block.block_hash() == block_hash => true,
-                            _ => false,
-                        };
+
+                        let saved_correct_block = matches!(headers.get_full_block(block_height)?, Some(block) if &block.block_hash() == block_hash);
 
                         if saved_correct_block {
                             Ok(false)
