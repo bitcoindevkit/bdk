@@ -933,7 +933,7 @@ mod test {
             .unwrap();
 
         assert!(
-            matches!(&policy.item, Signature(pk_or_f) if &pk_or_f.fingerprint.unwrap() == &fingerprint)
+            matches!(&policy.item, Signature(pk_or_f) if pk_or_f.fingerprint.unwrap() == fingerprint)
         );
         assert!(matches!(&policy.contribution, Satisfaction::None));
 
@@ -946,7 +946,7 @@ mod test {
             .unwrap();
 
         assert!(
-            matches!(&policy.item, Signature(pk_or_f) if &pk_or_f.fingerprint.unwrap() == &fingerprint)
+            matches!(&policy.item, Signature(pk_or_f) if pk_or_f.fingerprint.unwrap() == fingerprint)
         );
         assert!(
             matches!(&policy.contribution, Satisfaction::Complete {condition} if condition.csv == None && condition.timelock == None)
@@ -1028,8 +1028,8 @@ mod test {
 
         assert!(
             matches!(&policy.item, Multisig { keys, threshold } if threshold == &1
-            && &keys[0].fingerprint.unwrap() == &fingerprint0
-            && &keys[1].fingerprint.unwrap() == &fingerprint1)
+            && keys[0].fingerprint.unwrap() == fingerprint0
+            && keys[1].fingerprint.unwrap() == fingerprint1)
         );
         assert!(
             matches!(&policy.contribution, Satisfaction::PartialComplete { n, m, items, conditions, .. } if n == &2
@@ -1056,8 +1056,8 @@ mod test {
 
         assert!(
             matches!(&policy.item, Multisig { keys, threshold } if threshold == &2
-            && &keys[0].fingerprint.unwrap() == &fingerprint0
-            && &keys[1].fingerprint.unwrap() == &fingerprint1)
+            && keys[0].fingerprint.unwrap() == fingerprint0
+            && keys[1].fingerprint.unwrap() == fingerprint1)
         );
 
         assert!(
@@ -1084,7 +1084,7 @@ mod test {
             .unwrap();
 
         assert!(
-            matches!(&policy.item, Signature(pk_or_f) if &pk_or_f.fingerprint.unwrap() == &fingerprint)
+            matches!(&policy.item, Signature(pk_or_f) if pk_or_f.fingerprint.unwrap() == fingerprint)
         );
         assert!(matches!(&policy.contribution, Satisfaction::None));
 
@@ -1098,7 +1098,7 @@ mod test {
             .unwrap();
 
         assert!(
-            matches!(&policy.item, Signature(pk_or_f) if &pk_or_f.fingerprint.unwrap() == &fingerprint)
+            matches!(&policy.item, Signature(pk_or_f) if pk_or_f.fingerprint.unwrap() == fingerprint)
         );
         assert!(
             matches!(&policy.contribution, Satisfaction::Complete {condition} if condition.csv == None && condition.timelock == None)
@@ -1122,8 +1122,8 @@ mod test {
 
         assert!(
             matches!(&policy.item, Multisig { keys, threshold } if threshold == &1
-            && &keys[0].fingerprint.unwrap() == &fingerprint0
-            && &keys[1].fingerprint.unwrap() == &fingerprint1)
+            && keys[0].fingerprint.unwrap() == fingerprint0
+            && keys[1].fingerprint.unwrap() == fingerprint1)
         );
         assert!(
             matches!(&policy.contribution, Satisfaction::PartialComplete { n, m, items, conditions, .. } if n == &2
