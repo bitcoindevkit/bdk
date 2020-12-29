@@ -511,8 +511,8 @@ where
                 return Err(Error::InsufficientFunds); // TODO: or OutputBelowDustLimit?
             }
             Some(_) if change_val.is_dust() => {
-                // skip the change output because it's dust, this adds up to the fees
-                fee_amount += selected_amount - outgoing;
+                // skip the change output because it's dust -- just include it in the fee.
+                fee_amount += change_val;
             }
             Some(mut change_output) => {
                 change_output.value = change_val;
@@ -1964,7 +1964,7 @@ mod test {
     fn test_create_tx_skip_change_dust() {
         let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
         let addr = wallet.get_new_address().unwrap();
-        let (psbt, _) = wallet
+        let (psbt, details) = wallet
             .create_tx(TxBuilder::with_recipients(vec![(
                 addr.script_pubkey(),
                 49_800,
@@ -1973,6 +1973,7 @@ mod test {
 
         assert_eq!(psbt.global.unsigned_tx.output.len(), 1);
         assert_eq!(psbt.global.unsigned_tx.output[0].value, 49_800);
+        assert_eq!(details.fees, 200);
     }
 
     #[test]
