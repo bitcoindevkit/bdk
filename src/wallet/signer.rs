@@ -569,6 +569,21 @@ mod signers_container_tests {
     use miniscript::ScriptContext;
     use std::str::FromStr;
 
+    // Return true if data field of `fat` pointer is the same address as `thin` pointer.
+    fn is_equal(fat: &Arc<dyn Signer>, thin: &Arc<DummySigner>) -> bool {
+        let (left, right) = raw_pointers(fat, thin);
+        left == right
+    }
+
+    // Make pointer values out of `fat` and `thin` that can be compared.
+    fn raw_pointers(fat: &Arc<dyn Signer>, thin: &Arc<DummySigner>) -> (*const u8, *const u8) {
+        let (left, _vtable): (*const u8, *const u8) =
+            unsafe { std::mem::transmute(Arc::as_ptr(fat)) };
+        let right = Arc::as_ptr(thin) as *const u8;
+
+        (left, right)
+    }
+
     // Signers added with the same ordering (like `Ordering::default`) created from `KeyMap`
     // should be preserved and not overwritten.
     // This happens usually when a set of signers is created from a descriptor with private keys.
@@ -615,18 +630,22 @@ mod signers_container_tests {
 
         // Check that signers are sorted from lowest to highest ordering
         let signers = signers.signers();
-        assert_eq!(Arc::as_ptr(signers[0]), Arc::as_ptr(&signer1));
-        assert_eq!(Arc::as_ptr(signers[1]), Arc::as_ptr(&signer2));
-        assert_eq!(Arc::as_ptr(signers[2]), Arc::as_ptr(&signer3));
+
+        let (left, right) = raw_pointers(signers[0], &signer1);
+        assert_eq!(left, right);
+        let (left, right) = raw_pointers(signers[1], &signer2);
+        assert_eq!(left, right);
+        let (left, right) = raw_pointers(signers[2], &signer3);
+        assert_eq!(left, right);
     }
 
     #[test]
     fn find_signer_by_id() {
         let mut signers = SignersContainer::new();
-        let signer1: Arc<dyn Signer> = Arc::new(DummySigner);
-        let signer2: Arc<dyn Signer> = Arc::new(DummySigner);
-        let signer3: Arc<dyn Signer> = Arc::new(DummySigner);
-        let signer4: Arc<dyn Signer> = Arc::new(DummySigner);
+        let signer1 = Arc::new(DummySigner);
+        let signer2 = Arc::new(DummySigner);
+        let signer3 = Arc::new(DummySigner);
+        let signer4 = Arc::new(DummySigner);
 
         let id1 = SignerId::Fingerprint(b"cafe"[..].into());
         let id2 = SignerId::Fingerprint(b"babe"[..].into());
@@ -637,22 +656,14 @@ mod signers_container_tests {
         signers.add_external(id2.clone(), SignerOrdering(2), signer2.clone());
         signers.add_external(id3.clone(), SignerOrdering(3), signer3.clone());
 
-        assert!(
-            matches!(signers.find(id1), Some(signer) if Arc::as_ptr(&signer1) == Arc::as_ptr(signer))
-        );
-        assert!(
-            matches!(signers.find(id2), Some(signer) if Arc::as_ptr(&signer2) == Arc::as_ptr(signer))
-        );
-        assert!(
-            matches!(signers.find(id3.clone()), Some(signer) if Arc::as_ptr(&signer3) == Arc::as_ptr(signer))
-        );
+        assert!(matches!(signers.find(id1), Some(signer) if is_equal(signer, &signer1)));
+        assert!(matches!(signers.find(id2), Some(signer) if is_equal(signer, &signer2)));
+        assert!(matches!(signers.find(id3.clone()), Some(signer) if is_equal(signer, &signer3)));
 
         // The `signer4` has the same ID as `signer3` but lower ordering.
         // It should be found by `id3` instead of `signer3`.
         signers.add_external(id3.clone(), SignerOrdering(2), signer4.clone());
-        assert!(
-            matches!(signers.find(id3), Some(signer) if Arc::as_ptr(&signer4) == Arc::as_ptr(signer))
-        );
+        assert!(matches!(signers.find(id3), Some(signer) if is_equal(signer, &signer4)));
 
         // Can't find anything with ID that doesn't exist
         assert!(matches!(signers.find(id_nonexistent), None));
