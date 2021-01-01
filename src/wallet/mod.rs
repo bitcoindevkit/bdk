@@ -260,13 +260,13 @@ where
     ///
     /// ## Example
     ///
-    /// ```no_run
+    /// ```
     /// # use std::str::FromStr;
     /// # use bitcoin::*;
     /// # use bdk::*;
     /// # use bdk::database::*;
     /// # let descriptor = "wpkh(tpubD6NzVbkrYhZ4Xferm7Pz4VnjdcDPFyjVu5K4iZXQ4pVN8Cks4pHVowTBXBKRhX64pkRyJZJN5xAKj4UDNnLPb5p2sSKXhewoYx5GbTdUFWq/*)";
-    /// # let wallet = Wallet::new_offline(descriptor, None, Network::Testnet, MemoryDatabase::default())?;
+    /// # let wallet = doctest_wallet!();
     /// # let to_address = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap();
     /// let (psbt, details) = wallet.build_tx()
     ///     .add_recipient(to_address.script_pubkey(), 50_000)
@@ -613,17 +613,28 @@ where
     /// ## Example
     ///
     /// ```no_run
+    /// # // TODO: remove norun -- bumping fee seems to need the tx in the wallet database first.
     /// # use std::str::FromStr;
     /// # use bitcoin::*;
     /// # use bdk::*;
     /// # use bdk::database::*;
     /// # let descriptor = "wpkh(tpubD6NzVbkrYhZ4Xferm7Pz4VnjdcDPFyjVu5K4iZXQ4pVN8Cks4pHVowTBXBKRhX64pkRyJZJN5xAKj4UDNnLPb5p2sSKXhewoYx5GbTdUFWq/*)";
-    /// # let wallet = Wallet::new_offline(descriptor, None, Network::Testnet, MemoryDatabase::default())?;
-    /// let txid = Txid::from_str("faff0a466b70f5d5f92bd757a92c1371d4838bdd5bc53a06764e2488e51ce8f8").unwrap();
-    /// let (psbt, details) = wallet.build_fee_bump(txid)?
+    /// # let wallet = doctest_wallet!();
+    /// # let to_address = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap();
+    /// let (psbt, _) = wallet.build_tx()
+    ///     .add_recipient(to_address.script_pubkey(), 50_000)
+    ///     .enable_rbf()
+    ///     .finish()?;
+    /// let (psbt, _) = wallet.sign(psbt, None)?;
+    /// let tx = psbt.extract_tx();
+    /// // broadcast tx but it's taking too long to confirm so we want to bump the fee
+    /// let (psbt, details) = wallet.build_fee_bump(tx.txid())?
     ///     .fee_rate(FeeRate::from_sat_per_vb(5.0))
     ///     .finish()?;
-    /// // sign and broadcast ...
+    ///
+    /// let (psbt, _) = wallet.sign(psbt, None)?;
+    /// let fee_bumped_tx = psbt.extract_tx();
+    /// // broadcast fee_bumped_tx to replace original
     /// # Ok::<(), bdk::Error>(())
     /// ```
     // TODO: support for merging multiple transactions while bumping the fees
@@ -738,15 +749,17 @@ where
     ///
     /// ## Example
     ///
-    /// ```no_run
+    /// ```
     /// # use std::str::FromStr;
     /// # use bitcoin::*;
     /// # use bdk::*;
     /// # use bdk::database::*;
     /// # let descriptor = "wpkh(tpubD6NzVbkrYhZ4Xferm7Pz4VnjdcDPFyjVu5K4iZXQ4pVN8Cks4pHVowTBXBKRhX64pkRyJZJN5xAKj4UDNnLPb5p2sSKXhewoYx5GbTdUFWq/*)";
-    /// # let wallet = Wallet::new_offline(descriptor, None, Network::Testnet, MemoryDatabase::default())?;
-    /// # let (psbt, _) = wallet.build_tx().finish()?;
+    /// # let wallet = doctest_wallet!();
+    /// # let to_address = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap();
+    /// let (psbt, _) = wallet.build_tx().add_recipient(to_address.script_pubkey(), 50_000).finish()?;
     /// let (signed_psbt, finalized) = wallet.sign(psbt, None)?;
+    /// assert!(finalized, "we should have signed all the inputs");
     /// # Ok::<(), bdk::Error>(())
     pub fn sign(&self, mut psbt: PSBT, assume_height: Option<u32>) -> Result<(PSBT, bool), Error> {
         // this helps us doing our job later

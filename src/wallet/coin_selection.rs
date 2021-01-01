@@ -36,7 +36,7 @@
 //!
 //! ## Example
 //!
-//! ```no_run
+//! ```
 //! # use std::str::FromStr;
 //! # use bitcoin::*;
 //! # use bdk::wallet::coin_selection::*;
@@ -81,7 +81,7 @@
 //!     }
 //! }
 //!
-//! # let wallet = Wallet::new_offline("", None, Network::Testnet, bdk::database::MemoryDatabase::default())?;
+//! # let wallet = doctest_wallet!();
 //! // create wallet, sync, ...
 //!
 //! let to_address = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap();
