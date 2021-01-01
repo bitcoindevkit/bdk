@@ -1569,11 +1569,12 @@ mod test {
         )
         .unwrap();
 
-        let txid = wallet.database.borrow_mut().received_tx(
+        let txid = crate::populate_test_db!(
+            wallet.database.borrow_mut(),
             testutils! {
                 @tx ( (@external descriptors, 0) => 50_000 ) (@confirmations 1)
             },
-            Some(100),
+            Some(100)
         );
 
         (wallet, descriptors, txid)
@@ -2262,7 +2263,8 @@ mod test {
     #[test]
     fn test_create_tx_add_utxo() {
         let (wallet, descriptors, _) = get_funded_wallet(get_test_wpkh());
-        let small_output_txid = wallet.database.borrow_mut().received_tx(
+        let small_output_txid = crate::populate_test_db!(
+            wallet.database.borrow_mut(),
             testutils! (@tx ( (@external descriptors, 0) => 25_000 ) (@confirmations 1)),
             Some(100),
         );
@@ -2291,7 +2293,8 @@ mod test {
     #[should_panic(expected = "InsufficientFunds")]
     fn test_create_tx_manually_selected_insufficient() {
         let (wallet, descriptors, _) = get_funded_wallet(get_test_wpkh());
-        let small_output_txid = wallet.database.borrow_mut().received_tx(
+        let small_output_txid = crate::populate_test_db!(
+            wallet.database.borrow_mut(),
             testutils! (@tx ( (@external descriptors, 0) => 25_000 ) (@confirmations 1)),
             Some(100),
         );
@@ -2765,7 +2768,8 @@ mod test {
     fn test_bump_fee_drain_wallet() {
         let (wallet, descriptors, _) = get_funded_wallet(get_test_wpkh());
         // receive an extra tx so that our wallet has two utxos.
-        let incoming_txid = wallet.database.borrow_mut().received_tx(
+        let incoming_txid = crate::populate_test_db!(
+            wallet.database.borrow_mut(),
             testutils! (@tx ( (@external descriptors, 0) => 25_000 ) (@confirmations 1)),
             Some(100),
         );
@@ -2823,7 +2827,8 @@ mod test {
         // them, and make sure that `bump_fee` doesn't try to add more. eventually, it should fail
         // because the fee rate is too high and the single utxo isn't enough to create a non-dust
         // output
-        let incoming_txid = wallet.database.borrow_mut().received_tx(
+        let incoming_txid = crate::populate_test_db!(
+            wallet.database.borrow_mut(),
             testutils! (@tx ( (@external descriptors, 0) => 25_000 ) (@confirmations 1)),
             Some(100),
         );
@@ -2873,7 +2878,8 @@ mod test {
     #[test]
     fn test_bump_fee_add_input() {
         let (wallet, descriptors, _) = get_funded_wallet(get_test_wpkh());
-        wallet.database.borrow_mut().received_tx(
+        crate::populate_test_db!(
+            wallet.database.borrow_mut(),
             testutils! (@tx ( (@external descriptors, 0) => 25_000 ) (@confirmations 1)),
             Some(100),
         );
@@ -2938,7 +2944,8 @@ mod test {
     #[test]
     fn test_bump_fee_absolute_add_input() {
         let (wallet, descriptors, _) = get_funded_wallet(get_test_wpkh());
-        wallet.database.borrow_mut().received_tx(
+        crate::populate_test_db!(
+            wallet.database.borrow_mut(),
             testutils! (@tx ( (@external descriptors, 0) => 25_000 ) (@confirmations 1)),
             Some(100),
         );
@@ -3000,7 +3007,8 @@ mod test {
     #[test]
     fn test_bump_fee_no_change_add_input_and_change() {
         let (wallet, descriptors, _) = get_funded_wallet(get_test_wpkh());
-        let incoming_txid = wallet.database.borrow_mut().received_tx(
+        let incoming_txid = crate::populate_test_db!(
+            wallet.database.borrow_mut(),
             testutils! (@tx ( (@external descriptors, 0) => 25_000 ) (@confirmations 1)),
             Some(100),
         );
@@ -3079,7 +3087,8 @@ mod test {
     #[test]
     fn test_bump_fee_add_input_change_dust() {
         let (wallet, descriptors, _) = get_funded_wallet(get_test_wpkh());
-        wallet.database.borrow_mut().received_tx(
+        crate::populate_test_db!(
+            wallet.database.borrow_mut(),
             testutils! (@tx ( (@external descriptors, 0) => 25_000 ) (@confirmations 1)),
             Some(100),
         );
@@ -3141,7 +3150,8 @@ mod test {
     #[test]
     fn test_bump_fee_force_add_input() {
         let (wallet, descriptors, _) = get_funded_wallet(get_test_wpkh());
-        let incoming_txid = wallet.database.borrow_mut().received_tx(
+        let incoming_txid = crate::populate_test_db!(
+            wallet.database.borrow_mut(),
             testutils! (@tx ( (@external descriptors, 0) => 25_000 ) (@confirmations 1)),
             Some(100),
         );
@@ -3213,7 +3223,8 @@ mod test {
     #[test]
     fn test_bump_fee_absolute_force_add_input() {
         let (wallet, descriptors, _) = get_funded_wallet(get_test_wpkh());
-        let incoming_txid = wallet.database.borrow_mut().received_tx(
+        let incoming_txid = crate::populate_test_db!(
+            wallet.database.borrow_mut(),
             testutils! (@tx ( (@external descriptors, 0) => 25_000 ) (@confirmations 1)),
             Some(100),
         );

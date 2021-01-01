@@ -458,16 +458,17 @@ impl ConfigurableDatabase for MemoryDatabase {
     }
 }
 
-#[cfg(test)]
-impl MemoryDatabase {
-    // Artificially insert a tx in the database, as if we had found it with a `sync`
-    pub fn received_tx(
-        &mut self,
-        tx_meta: testutils::TestIncomingTx,
-        current_height: Option<u32>,
-    ) -> bitcoin::Txid {
-        use std::str::FromStr;
-
+#[macro_export]
+#[doc(hidden)]
+/// Artificially insert a tx in the database, as if we had found it with a `sync`. This is a hidden
+/// macro and not a `[cfg(test)]` function so it can be called within the context of doctests which
+/// don't have `test` set.
+macro_rules! populate_test_db {
+    ($db:expr, $tx_meta:expr, $current_height:expr$(,)?) => {{
+        use $crate::database::BatchOperations;
+        let mut db = $db;
+        let tx_meta = $tx_meta;
+        let current_height: Option<u32> = $current_height;
         let tx = Transaction {
             version: 1,
             lock_time: 0,
@@ -499,9 +500,9 @@ impl MemoryDatabase {
             fees: 0,
         };
 
-        self.set_tx(&tx_details).unwrap();
+        db.set_tx(&tx_details).unwrap();
         for (vout, out) in tx.output.iter().enumerate() {
-            self.set_utxo(&UTXO {
+            db.set_utxo(&UTXO {
                 txout: out.clone(),
                 outpoint: OutPoint {
                     txid,
@@ -513,7 +514,37 @@ impl MemoryDatabase {
         }
 
         txid
-    }
+    }};
+}
+
+#[macro_export]
+#[doc(hidden)]
+/// Macro for getting a wallet for use in a doctest
+macro_rules! doctest_wallet {
+    () => {{
+        use $crate::bitcoin::Network;
+        use $crate::database::MemoryDatabase;
+        use testutils::testutils;
+        let descriptor = "wpkh(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW)";
+        let descriptors = testutils!(@descriptors (descriptor) (descriptor));
+
+        let mut db = MemoryDatabase::new();
+        let txid = populate_test_db!(
+            &mut db,
+            testutils! {
+                @tx ( (@external descriptors, 0) => 500_000 ) (@confirmations 1)
+            },
+            Some(100),
+        );
+
+        $crate::Wallet::new_offline(
+            &descriptors.0,
+            descriptors.1.as_ref(),
+            Network::Regtest,
+            db
+        )
+        .unwrap()
+    }}
 }
 
 #[cfg(test)]
