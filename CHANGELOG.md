@@ -19,6 +19,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### Changed
 - Remove `BlockchainMarker`, `OfflineClient` and `OfflineWallet` in favor of just using the unit
   type to mark for a missing client.
+  
+#### Transaction Creation Overhaul
+
+The `TxBuilder` is now created from the `build_tx` or `build_fee_bump` functions on wallet and the
+final transaction is created by calling `finish` on the builder.
+
+- Removed `TxBuilder::utxos` in favor of repeatedly calling `add_utxo`
+- Added `Wallet::build_tx` to replace `Wallet::create_tx`
+- Added `Wallet::build_fee_bump` to replace `Wallet::bump_fee`
+- Added `Wallet::get_utxo`
+- Added `Wallet::get_descriptor_for_keychain`
 
 ### CLI
 #### Changed
