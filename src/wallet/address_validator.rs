@@ -127,7 +127,6 @@ mod test {
 
     use super::*;
     use crate::wallet::test::{get_funded_wallet, get_test_wpkh};
-    use crate::wallet::TxBuilder;
 
     struct TestValidator;
     impl AddressValidator for TestValidator {
@@ -158,10 +157,9 @@ mod test {
 
         let addr = testutils!(@external descriptors, 10);
         wallet
-            .create_tx(TxBuilder::with_recipients(vec![(
-                addr.script_pubkey(),
-                25_000,
-            )]))
+            .build_tx()
+            .add_recipient(addr.script_pubkey(), 25_000)
+            .finish()
             .unwrap();
     }
 }

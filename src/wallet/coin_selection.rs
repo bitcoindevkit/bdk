@@ -27,15 +27,12 @@
 //! This module provides the trait [`CoinSelectionAlgorithm`] that can be implemented to
 //! define custom coin selection algorithms.
 //!
-//! The coin selection algorithm is not globally part of a [`Wallet`](super::Wallet), instead it
-//! is selected whenever a [`Wallet::create_tx`](super::Wallet::create_tx) call is made, through
-//! the use of the [`TxBuilder`] structure, specifically with
-//! [`TxBuilder::coin_selection`](super::tx_builder::TxBuilder::coin_selection) method.
-//!
-//! The [`DefaultCoinSelectionAlgorithm`] selects the default coin selection algorithm that
-//! [`TxBuilder`] uses, if it's not explicitly overridden.
+//! You can specify a custom coin selection algorithm through the [`coin_selection`] method on
+//! [`TxBuilder`]. [`DefaultCoinSelectionAlgorithm`] aliases the coin selection algorithm that will
+//! be used if it is not explicitly set.
 //!
 //! [`TxBuilder`]: super::tx_builder::TxBuilder
+//! [`coin_selection`]: super::tx_builder::coin_selection
 //!
 //! ## Example
 //!
@@ -88,10 +85,9 @@
 //! // create wallet, sync, ...
 //!
 //! let to_address = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap();
-//! let (psbt, details) = wallet.create_tx(
-//!     TxBuilder::with_recipients(vec![(to_address.script_pubkey(), 50_000)])
-//!         .coin_selection(AlwaysSpendEverything),
-//! )?;
+//! let (psbt, details) = wallet.build_tx().coin_selection(AlwaysSpendEverything)
+//!     .add_recipient(to_address.script_pubkey(), 50_000)
+//!     .finish()?;
 //!
 //! // inspect, sign, broadcast, ...
 //!

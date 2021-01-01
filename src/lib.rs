@@ -115,7 +115,7 @@
 //! ### Example
 //! ```ignore
 //! use base64::decode;
-//! use bdk::{FeeRate, TxBuilder, Wallet};
+//! use bdk::{FeeRate, Wallet};
 //! use bdk::database::MemoryDatabase;
 //! use bdk::blockchain::{noop_progress, ElectrumBlockchain};
 //!
@@ -136,12 +136,12 @@
 //!     wallet.sync(noop_progress(), None)?;
 //!
 //!     let send_to = wallet.get_new_address()?;
-//!     let (psbt, details) = wallet.create_tx(
-//!         TxBuilder::with_recipients(vec![(send_to.script_pubkey(), 50_000)])
-//!             .enable_rbf()
-//!             .do_not_spend_change()
-//!             .fee_rate(FeeRate::from_sat_per_vb(5.0))
-//!     )?;
+//!     let (psbt, details) = wallet.build_tx()
+//!         .add_recipient(send_to.script_pubkey(), 50_000)
+//!         .enable_rbf()
+//!         .do_not_spend_change()
+//!         .fee_rate(FeeRate::from_sat_per_vb(5.0))
+//!         .finish()?;
 //!
 //!     println!("Transaction details: {:#?}", details);
 //!     println!("Unsigned PSBT: {}", base64::encode(&serialize(&psbt)));
