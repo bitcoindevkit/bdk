@@ -32,7 +32,7 @@
 //! be used if it is not explicitly set.
 //!
 //! [`TxBuilder`]: super::tx_builder::TxBuilder
-//! [`coin_selection`]: super::tx_builder::coin_selection
+//! [`coin_selection`]: super::tx_builder::TxBuilder::coin_selection
 //!
 //! ## Example
 //!

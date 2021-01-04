@@ -119,8 +119,8 @@ impl TxBuilderContext for BumpFee {}
 ///
 /// For further examples see [this module](super::tx_builder)'s documentation;
 ///
-/// [`build_tx`]: Self::build_tx
-/// [`build_fee_bump`]: Self::build_fee_bump
+/// [`build_tx`]: Wallet::build_tx
+/// [`build_fee_bump`]: Wallet::build_fee_bump
 /// [`finish`]: Self::finish
 /// [`coin_selection`]: Self::coin_selection
 pub struct TxBuilder<'a, B, D, Cs, Ctx> {
