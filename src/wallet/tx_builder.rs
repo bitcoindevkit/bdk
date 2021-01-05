@@ -124,8 +124,11 @@ impl TxBuilderContext for BumpFee {}
 /// [`finish`]: Self::finish
 /// [`coin_selection`]: Self::coin_selection
 pub struct TxBuilder<'a, B, D, Cs, Ctx> {
-    pub(crate) params: Option<TxParams>,
     pub(crate) wallet: &'a Wallet<B, D>,
+    // params and coin_selection are Options not becasue they are optionally set (they are always
+    // there) but because `.finish()` uses `Option::take` to get an owned value from a &mut self.
+    // They are only `None` after `.finish()` is called.
+    pub(crate) params: Option<TxParams>,
     pub(crate) coin_selection: Option<Cs>,
     pub(crate) phantom: PhantomData<Ctx>,
 }
