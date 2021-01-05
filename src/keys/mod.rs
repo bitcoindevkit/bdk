@@ -301,7 +301,7 @@ pub trait ToDescriptorKey<Ctx: ScriptContext>: Sized {
 
 /// Trait for keys that can be derived.
 ///
-/// When extra metadata are provided, a [`DerivableKey`] can be transofrmed into a
+/// When extra metadata are provided, a [`DerivableKey`] can be transformed into a
 /// [`DescriptorKey`]: the trait [`ToDescriptorKey`] is automatically implemented
 /// for `(DerivableKey, DerivationPath)` and
 /// `(DerivableKey, KeySource, DerivationPath)` tuples.

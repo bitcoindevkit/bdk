@@ -32,9 +32,10 @@ use bitcoin::Network;
 
 use miniscript::ScriptContext;
 
-use bip39::{Language, Mnemonic, MnemonicType, Seed};
+pub use bip39::{Language, Mnemonic, MnemonicType, Seed};
 
 use super::{any_network, DerivableKey, DescriptorKey, GeneratableKey, GeneratedKey, KeyError};
+use bitcoin::util::bip32::{Error, ExtendedPrivKey};
 
 /// Type for a BIP39 mnemonic with an optional passphrase
 pub type MnemonicWithPassphrase = (Mnemonic, Option<String>);
@@ -98,6 +99,19 @@ impl<Ctx: ScriptContext> GeneratableKey<Ctx> for Mnemonic {
     }
 }
 
+#[cfg_attr(docsrs, doc(cfg(feature = "keys-bip39")))]
+/// Helper function to transform a network, [`Mnemonic`], and optional password in to a BIP32
+/// master extended private key.
+pub fn mnemonic_to_master(
+    network: Network,
+    mnemonic: &Mnemonic,
+    password: Option<String>,
+) -> Result<ExtendedPrivKey, Error> {
+    let password = password.as_deref().unwrap_or_default();
+    let seed = Seed::new(mnemonic, &password);
+    bip32::ExtendedPrivKey::new_master(network, &seed.as_bytes())
+}
+
 #[cfg(test)]
 mod test {
     use std::str::FromStr;
@@ -106,7 +120,10 @@ mod test {
 
     use bip39::{Language, Mnemonic, MnemonicType};
 
+    use crate::keys::bip39::mnemonic_to_master;
+    use crate::keys::test::TEST_ENTROPY;
     use crate::keys::{any_network, GeneratableKey, GeneratedKey};
+    use bitcoin::network::constants::Network::Testnet;
 
     #[test]
     fn test_keys_bip39_mnemonic() {
@@ -169,5 +186,30 @@ mod test {
         let generated_mnemonic: GeneratedKey<_, miniscript::Segwitv0> =
             Mnemonic::generate((MnemonicType::Words24, Language::English)).unwrap();
         assert_eq!(generated_mnemonic.valid_networks, any_network());
+    }
+
+    #[test]
+    fn test_mnemonic_with_passphrase_to_master() {
+        let mnemonic = Mnemonic::from_phrase(
+            "primary fetch primary fetch primary fetch primary fetch primary fetch primary fetch primary fetch primary fetch primary fetch primary fetch primary fetch primary foster",
+            Language::English,
+        )
+        .unwrap();
+        let password = "test passphrase".to_string();
+
+        let master_xprv = mnemonic_to_master(Testnet, &mnemonic, Some(password)).unwrap();
+        assert_eq!(master_xprv.to_string(), "tprv8ZgxMBicQKsPeAjvacX7P84ZY7fadSJVJQUpQL9kRUsJZ8fjnEqbvcrHU9d4zymaATuhbZDHPghkPkgRhAKV3KqsEYAqhfts176CcTyvzg5");
+    }
+
+    #[test]
+    fn test_mnemonic_to_master() {
+        let mnemonic = Mnemonic::from_phrase(
+            "ghost gas high mesh convince outer grape acid dawn shaft bracket patient",
+            Language::English,
+        )
+        .unwrap();
+
+        let master_xprv = mnemonic_to_master(Testnet, &mnemonic, None).unwrap();
+        assert_eq!(master_xprv.to_string(), "tprv8ZgxMBicQKsPfR6jUzE8LsdUuuX2qvL1W5TA3yy3pFU25G5vtiomR17tyHUYtGjSj7ryUHeWpqzpJPHVKhYM1hPVcsDzQixkaPY5PXJ7c8V");
     }
 }
