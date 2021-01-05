@@ -420,7 +420,7 @@ where
 /// [`ToDescriptorKey`]: the generated keys can be directly used in descriptors if `Self` is also
 /// [`ToDescriptorKey`].
 pub trait GeneratableKey<Ctx: ScriptContext>: Sized {
-    /// Type specifying the amount of entropy required e.g. [u8;32]
+    /// Type specifying the amount of entropy required e.g. `[u8;32]`
     type Entropy: AsMut<[u8]> + Default;
 
     /// Extra options required by the `generate_with_entropy`
