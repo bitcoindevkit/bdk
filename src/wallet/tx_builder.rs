@@ -414,6 +414,10 @@ impl<'a, B, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderConte
         self,
         coin_selection: P,
     ) -> TxBuilder<'a, B, D, P, Ctx> {
+        assert!(
+            self.coin_selection.is_some(),
+            "can't set coin_selection after finish() has been called"
+        );
         TxBuilder {
             wallet: self.wallet,
             params: self.params,
