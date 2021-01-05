@@ -375,7 +375,7 @@ impl ChainStore<Full> {
         let min_height = match iterator
             .next()
             .and_then(|(k, _)| k[1..].try_into().ok())
-            .map(|bytes| usize::from_be_bytes(bytes))
+            .map(usize::from_be_bytes)
         {
             None => {
                 std::mem::drop(iterator);
@@ -444,9 +444,6 @@ impl ChainStore<Full> {
         }
 
         read_store.write(batch)?;
-
-        std::mem::drop(snapshot_cf_handle);
-        std::mem::drop(cf_handle);
         std::mem::drop(read_store);
 
         self.store.write().unwrap().drop_cf(&snaphost.cf_name)?;
@@ -461,7 +458,7 @@ impl ChainStore<Full> {
         let read_store = self.store.read().unwrap();
         let cf_handle = read_store.cf_handle(&self.cf_name).unwrap();
 
-        let key = StoreEntry::BlockHeaderIndex(Some(block_hash.clone())).get_key();
+        let key = StoreEntry::BlockHeaderIndex(Some(*block_hash)).get_key();
         let data = read_store.get_pinned_cf(cf_handle, key)?;
         Ok(data
             .map(|data| {
@@ -642,7 +639,6 @@ impl<T: StoreType> ChainStore<T> {
             );
         }
 
-        std::mem::drop(cf_handle);
         std::mem::drop(read_store);
 
         self.store.write().unwrap().write(batch)?;

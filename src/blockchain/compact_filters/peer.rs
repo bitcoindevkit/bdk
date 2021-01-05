@@ -333,7 +333,7 @@ impl Peer {
                 NetworkMessage::Alert(_) => continue,
                 NetworkMessage::GetData(ref inv) => {
                     let (found, not_found): (Vec<_>, Vec<_>) = inv
-                        .into_iter()
+                        .iter()
                         .map(|item| (*item, reader_thread_mempool.get_tx(item)))
                         .partition(|(_, d)| d.is_some());
                     for (_, found_tx) in found {
@@ -518,10 +518,9 @@ impl InvPeer for Peer {
         let getdata = inv
             .iter()
             .cloned()
-            .filter(|item| match item {
-                Inventory::Transaction(txid) if !self.mempool.has_tx(txid) => true,
-                _ => false,
-            })
+            .filter(
+                |item| matches!(item, Inventory::Transaction(txid) if !self.mempool.has_tx(txid)),
+            )
             .collect::<Vec<_>>();
         let num_txs = getdata.len();
         self.send(NetworkMessage::GetData(getdata))?;

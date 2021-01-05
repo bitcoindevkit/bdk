@@ -193,7 +193,7 @@ impl From<crate::blockchain::compact_filters::CompactFiltersError> for Error {
     fn from(other: crate::blockchain::compact_filters::CompactFiltersError) -> Self {
         match other {
             crate::blockchain::compact_filters::CompactFiltersError::Global(e) => *e,
-            err @ _ => Error::CompactFilters(err),
+            err => Error::CompactFilters(err),
         }
     }
 }

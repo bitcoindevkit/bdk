@@ -44,7 +44,7 @@ jobs:
       - name: Build
         run: cargo build --features ${{ matrix.features }} --no-default-features
       - name: Clippy
-        run: cargo clippy -- -D warnings
+        run: cargo clippy --features ${{ matrix.features }} --no-default-features -- -D warnings
       - name: Test
         run: cargo test --features ${{ matrix.features }} --no-default-features
 
