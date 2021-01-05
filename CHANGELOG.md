@@ -6,8 +6,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Blockchain
+#### Changed
 - Remove `BlockchainMarker`, `OfflineClient` and `OfflineWallet` in favor of just using the unit
   type to mark for a missing client.
+
+### CLI
+#### Changed
+- Remove `cli.rs` module, `cli-utils` feature and `repl.rs` example; moved to new [`bdk-cli`](https://github.com/bitcoindevkit/bdk-cli) repository
 
 ## [v0.2.0] - [0.1.0-beta.1]
 
