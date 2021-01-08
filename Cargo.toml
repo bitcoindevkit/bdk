@@ -9,7 +9,7 @@ documentation = "https://docs.rs/bdk"
 description = "A modern, lightweight, descriptor-based wallet library"
 keywords = ["bitcoin", "wallet", "descriptor", "psbt"]
 readme = "README.md"
-license-file = "LICENSE"
+license = "MIT"
 
 [dependencies]
 bdk-macros = "0.2"

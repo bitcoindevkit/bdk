@@ -8,7 +8,7 @@ repository = "https://github.com/bitcoindevkit/bdk"
 documentation = "https://docs.rs/bdk-testutils"
 description = "Supporting testing utilities for `bdk`"
 keywords = ["bdk"]
-license-file = "../LICENSE"
+license = "MIT"
 
 [lib]
 name = "testutils"
