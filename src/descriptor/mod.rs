@@ -49,7 +49,7 @@ pub mod policy;
 pub mod template;
 
 pub use self::checksum::get_checksum;
-use self::error::Error;
+pub use self::error::Error as DescriptorError;
 pub use self::policy::Policy;
 use self::template::DescriptorTemplateOut;
 use crate::keys::{KeyError, ToDescriptorKey};
@@ -72,14 +72,14 @@ pub trait ToWalletDescriptor {
     fn to_wallet_descriptor(
         self,
         network: Network,
-    ) -> Result<(ExtendedDescriptor, KeyMap), KeyError>;
+    ) -> Result<(ExtendedDescriptor, KeyMap), DescriptorError>;
 }
 
 impl ToWalletDescriptor for &str {
     fn to_wallet_descriptor(
         self,
         network: Network,
-    ) -> Result<(ExtendedDescriptor, KeyMap), KeyError> {
+    ) -> Result<(ExtendedDescriptor, KeyMap), DescriptorError> {
         let descriptor = if self.contains('#') {
             let parts: Vec<&str> = self.splitn(2, '#').collect();
             if !get_checksum(parts[0])
@@ -87,7 +87,7 @@ impl ToWalletDescriptor for &str {
                 .map(|computed| computed == parts[1])
                 .unwrap_or(false)
             {
-                return Err(KeyError::InvalidChecksum);
+                return Err(DescriptorError::InvalidDescriptorChecksum);
             }
 
             parts[0]
@@ -103,7 +103,7 @@ impl ToWalletDescriptor for &String {
     fn to_wallet_descriptor(
         self,
         network: Network,
-    ) -> Result<(ExtendedDescriptor, KeyMap), KeyError> {
+    ) -> Result<(ExtendedDescriptor, KeyMap), DescriptorError> {
         self.as_str().to_wallet_descriptor(network)
     }
 }
@@ -112,7 +112,7 @@ impl ToWalletDescriptor for ExtendedDescriptor {
     fn to_wallet_descriptor(
         self,
         network: Network,
-    ) -> Result<(ExtendedDescriptor, KeyMap), KeyError> {
+    ) -> Result<(ExtendedDescriptor, KeyMap), DescriptorError> {
         (self, KeyMap::default()).to_wallet_descriptor(network)
     }
 }
@@ -121,7 +121,7 @@ impl ToWalletDescriptor for (ExtendedDescriptor, KeyMap) {
     fn to_wallet_descriptor(
         self,
         network: Network,
-    ) -> Result<(ExtendedDescriptor, KeyMap), KeyError> {
+    ) -> Result<(ExtendedDescriptor, KeyMap), DescriptorError> {
         use crate::keys::DescriptorKey;
 
         let secp = Secp256k1::new();
@@ -140,7 +140,7 @@ impl ToWalletDescriptor for (ExtendedDescriptor, KeyMap) {
             if networks.contains(&network) {
                 Ok(pk)
             } else {
-                Err(KeyError::InvalidNetwork)
+                Err(DescriptorError::Key(KeyError::InvalidNetwork))
             }
         };
 
@@ -155,7 +155,7 @@ impl ToWalletDescriptor for DescriptorTemplateOut {
     fn to_wallet_descriptor(
         self,
         network: Network,
-    ) -> Result<(ExtendedDescriptor, KeyMap), KeyError> {
+    ) -> Result<(ExtendedDescriptor, KeyMap), DescriptorError> {
         let valid_networks = &self.2;
 
         let fix_key = |pk: &DescriptorPublicKey| {
@@ -177,7 +177,7 @@ impl ToWalletDescriptor for DescriptorTemplateOut {
 
                 Ok(pk)
             } else {
-                Err(KeyError::InvalidNetwork)
+                Err(DescriptorError::Key(KeyError::InvalidNetwork))
             }
         };
 
@@ -188,6 +188,22 @@ impl ToWalletDescriptor for DescriptorTemplateOut {
     }
 }
 
+#[doc(hidden)]
+/// Used internally mainly by the `descriptor!()` and `fragment!()` macros
+pub trait CheckMiniscript<Ctx: miniscript::ScriptContext> {
+    fn check_minsicript(&self) -> Result<(), miniscript::Error>;
+}
+
+impl<Ctx: miniscript::ScriptContext, Pk: miniscript::MiniscriptKey> CheckMiniscript<Ctx>
+    for miniscript::Miniscript<Pk, Ctx>
+{
+    fn check_minsicript(&self) -> Result<(), miniscript::Error> {
+        Ctx::check_global_validity(self)?;
+
+        Ok(())
+    }
+}
+
 /// Trait implemented on [`Descriptor`]s to add a method to extract the spending [`policy`]
 pub trait ExtractPolicy {
     /// Extract the spending [`policy`]
@@ -195,7 +211,7 @@ pub trait ExtractPolicy {
         &self,
         signers: &SignersContainer,
         secp: &SecpCtx,
-    ) -> Result<Option<Policy>, Error>;
+    ) -> Result<Option<Policy>, DescriptorError>;
 }
 
 pub(crate) trait XKeyUtils {
@@ -235,8 +251,8 @@ impl<K: InnerXKey> XKeyUtils for DescriptorXKey<K> {
 
 pub(crate) trait DescriptorMeta: Sized {
     fn is_witness(&self) -> bool;
-    fn get_hd_keypaths(&self, index: u32, secp: &SecpCtx) -> Result<HDKeyPaths, Error>;
-    fn get_extended_keys(&self) -> Result<Vec<DescriptorXKey<ExtendedPubKey>>, Error>;
+    fn get_hd_keypaths(&self, index: u32, secp: &SecpCtx) -> Result<HDKeyPaths, DescriptorError>;
+    fn get_extended_keys(&self) -> Result<Vec<DescriptorXKey<ExtendedPubKey>>, DescriptorError>;
     fn is_fixed(&self) -> bool;
     fn derive_from_hd_keypaths(&self, hd_keypaths: &HDKeyPaths, secp: &SecpCtx) -> Option<Self>;
     fn derive_from_psbt_input(
@@ -297,11 +313,11 @@ impl DescriptorMeta for Descriptor<DescriptorPublicKey> {
         }
     }
 
-    fn get_hd_keypaths(&self, index: u32, secp: &SecpCtx) -> Result<HDKeyPaths, Error> {
+    fn get_hd_keypaths(&self, index: u32, secp: &SecpCtx) -> Result<HDKeyPaths, DescriptorError> {
         let translate_key = |key: &DescriptorPublicKey,
                              index: u32,
                              paths: &mut HDKeyPaths|
-         -> Result<DummyKey, Error> {
+         -> Result<DummyKey, DescriptorError> {
             match key {
                 DescriptorPublicKey::SinglePub(_) => {}
                 DescriptorPublicKey::XPub(xpub) => {
@@ -344,10 +360,10 @@ impl DescriptorMeta for Descriptor<DescriptorPublicKey> {
         Ok(answer_pk)
     }
 
-    fn get_extended_keys(&self) -> Result<Vec<DescriptorXKey<ExtendedPubKey>>, Error> {
+    fn get_extended_keys(&self) -> Result<Vec<DescriptorXKey<ExtendedPubKey>>, DescriptorError> {
         let get_key = |key: &DescriptorPublicKey,
                        keys: &mut Vec<DescriptorXKey<ExtendedPubKey>>|
-         -> Result<DummyKey, Error> {
+         -> Result<DummyKey, DescriptorError> {
             if let DescriptorPublicKey::XPub(xpub) = key {
                 keys.push(xpub.clone())
             }
@@ -369,7 +385,10 @@ impl DescriptorMeta for Descriptor<DescriptorPublicKey> {
     }
 
     fn is_fixed(&self) -> bool {
-        fn check_key(key: &DescriptorPublicKey, flag: &mut bool) -> Result<DummyKey, Error> {
+        fn check_key(
+            key: &DescriptorPublicKey,
+            flag: &mut bool,
+        ) -> Result<DummyKey, DescriptorError> {
             match key {
                 DescriptorPublicKey::SinglePub(_) => {}
                 DescriptorPublicKey::XPub(xpub) => {
@@ -398,7 +417,7 @@ impl DescriptorMeta for Descriptor<DescriptorPublicKey> {
         let try_key = |key: &DescriptorPublicKey,
                        index: &HashMap<Fingerprint, DerivationPath>,
                        found_path: &mut Option<ChildNumber>|
-         -> Result<DummyKey, Error> {
+         -> Result<DummyKey, DescriptorError> {
             if found_path.is_some() {
                 // already found a matching path, we are done
                 return Ok(DummyKey::default());
@@ -432,7 +451,7 @@ impl DescriptorMeta for Descriptor<DescriptorPublicKey> {
                     Some(path) if !xpub.is_wildcard && path.is_empty() => {
                         *found_path = Some(ChildNumber::Normal { index: 0 })
                     }
-                    Some(_) => return Err(Error::InvalidHDKeyPath),
+                    Some(_) => return Err(DescriptorError::InvalidHDKeyPath),
                     _ => {}
                 }
             }
@@ -713,11 +732,17 @@ mod test {
 
         let desc = "wpkh(tprv8ZgxMBicQKsPdpkqS7Eair4YxjcuuvDPNYmKX3sCniCf16tHEVrjjiSXEkFRnUH77yXc6ZcwHHcLNfjdi5qUvw3VDfgYiH5mNsj5izuiu2N/1/2/*)#67ju93jw"
             .to_wallet_descriptor(Network::Testnet);
-        assert!(matches!(desc.err(), Some(KeyError::InvalidChecksum)));
+        assert!(matches!(
+            desc.err(),
+            Some(DescriptorError::InvalidDescriptorChecksum)
+        ));
 
         let desc = "wpkh(tprv8ZgxMBicQKsPdpkqS7Eair4YxjcuuvDPNYmKX3sCniCf16tHEVrjjiSXEkFRnUH77yXc6ZcwHHcLNfjdi5qUvw3VDfgYiH5mNsj5izuiu2N/1/2/*)#67ju93jw"
             .to_wallet_descriptor(Network::Testnet);
-        assert!(matches!(desc.err(), Some(KeyError::InvalidChecksum)));
+        assert!(matches!(
+            desc.err(),
+            Some(DescriptorError::InvalidDescriptorChecksum)
+        ));
     }
 
     // test ToWalletDescriptor trait from &str with keys from right and wrong network
@@ -749,11 +774,17 @@ mod test {
 
         let desc = "wpkh(tprv8ZgxMBicQKsPdpkqS7Eair4YxjcuuvDPNYmKX3sCniCf16tHEVrjjiSXEkFRnUH77yXc6ZcwHHcLNfjdi5qUvw3VDfgYiH5mNsj5izuiu2N/1/2/*)"
             .to_wallet_descriptor(Network::Bitcoin);
-        assert!(matches!(desc.err(), Some(KeyError::InvalidNetwork)));
+        assert!(matches!(
+            desc.err(),
+            Some(DescriptorError::Key(KeyError::InvalidNetwork))
+        ));
 
         let desc = "wpkh(tpubD6NzVbkrYhZ4XHndKkuB8FifXm8r5FQHwrN6oZuWCz13qb93rtgKvD4PQsqC4HP4yhV3tA2fqr2RbY5mNXfM7RxXUoeABoDtsFUq2zJq6YK/1/2/*)"
             .to_wallet_descriptor(Network::Bitcoin);
-        assert!(matches!(desc.err(), Some(KeyError::InvalidNetwork)));
+        assert!(matches!(
+            desc.err(),
+            Some(DescriptorError::Key(KeyError::InvalidNetwork))
+        ));
     }
 
     // test ToWalletDescriptor trait from the output of the descriptor!() macro

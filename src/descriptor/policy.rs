@@ -1145,11 +1145,12 @@ mod test {
         let (prvkey0, _pubkey0, _fingerprint0) = setup_keys(TPRV0_STR);
         let (_prvkey1, pubkey1, _fingerprint1) = setup_keys(TPRV1_STR);
         let sequence = 50;
+        #[rustfmt::skip]
         let desc = descriptor!(wsh(thresh(
             2,
             pk(prvkey0),
-            s: pk(pubkey1),
-            s: d: v: older(sequence)
+            s:pk(pubkey1),
+            s:d:v:older(sequence)
         )))
         .unwrap();
 

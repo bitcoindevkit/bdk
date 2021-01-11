@@ -6,6 +6,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Descriptor
+#### Changed
+- Added an alias `DescriptorError` for `descriptor::error::Error`
+- Changed the error returned by `descriptor!()` and `fragment!()` to `DescriptorError`
+- Changed the error type in `ToWalletDescriptor` to `DescriptorError`
+- Improved checks on descriptors built using the macros
+
 ### Blockchain
 #### Changed
 - Remove `BlockchainMarker`, `OfflineClient` and `OfflineWallet` in favor of just using the unit

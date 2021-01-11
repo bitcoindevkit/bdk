@@ -33,7 +33,8 @@ use bitcoin::Network;
 use miniscript::{Legacy, Segwitv0};
 
 use super::{ExtendedDescriptor, KeyMap, ToWalletDescriptor};
-use crate::keys::{DerivableKey, KeyError, ToDescriptorKey, ValidNetworks};
+use crate::descriptor::DescriptorError;
+use crate::keys::{DerivableKey, ToDescriptorKey, ValidNetworks};
 use crate::{descriptor, KeychainKind};
 
 /// Type alias for the return type of [`DescriptorTemplate`], [`descriptor!`](crate::descriptor!) and others
@@ -47,6 +48,7 @@ pub type DescriptorTemplateOut = (ExtendedDescriptor, KeyMap, ValidNetworks);
 /// ## Example
 ///
 /// ```
+/// use bdk::descriptor::error::Error as DescriptorError;
 /// use bdk::keys::{KeyError, ToDescriptorKey};
 /// use bdk::miniscript::Legacy;
 /// use bdk::template::{DescriptorTemplate, DescriptorTemplateOut};
@@ -54,14 +56,14 @@ pub type DescriptorTemplateOut = (ExtendedDescriptor, KeyMap, ValidNetworks);
 /// struct MyP2PKH<K: ToDescriptorKey<Legacy>>(K);
 ///
 /// impl<K: ToDescriptorKey<Legacy>> DescriptorTemplate for MyP2PKH<K> {
-///     fn build(self) -> Result<DescriptorTemplateOut, KeyError> {
+///     fn build(self) -> Result<DescriptorTemplateOut, DescriptorError> {
 ///         Ok(bdk::descriptor!(pkh(self.0))?)
 ///     }
 /// }
 /// ```
 pub trait DescriptorTemplate {
     /// Build the complete descriptor
-    fn build(self) -> Result<DescriptorTemplateOut, KeyError>;
+    fn build(self) -> Result<DescriptorTemplateOut, DescriptorError>;
 }
 
 /// Turns a [`DescriptorTemplate`] into a valid wallet descriptor by calling its
@@ -70,7 +72,7 @@ impl<T: DescriptorTemplate> ToWalletDescriptor for T {
     fn to_wallet_descriptor(
         self,
         network: Network,
-    ) -> Result<(ExtendedDescriptor, KeyMap), KeyError> {
+    ) -> Result<(ExtendedDescriptor, KeyMap), DescriptorError> {
         Ok(self.build()?.to_wallet_descriptor(network)?)
     }
 }
@@ -103,7 +105,7 @@ impl<T: DescriptorTemplate> ToWalletDescriptor for T {
 pub struct P2PKH<K: ToDescriptorKey<Legacy>>(pub K);
 
 impl<K: ToDescriptorKey<Legacy>> DescriptorTemplate for P2PKH<K> {
-    fn build(self) -> Result<DescriptorTemplateOut, KeyError> {
+    fn build(self) -> Result<DescriptorTemplateOut, DescriptorError> {
         Ok(descriptor!(pkh(self.0))?)
     }
 }
@@ -137,7 +139,7 @@ impl<K: ToDescriptorKey<Legacy>> DescriptorTemplate for P2PKH<K> {
 pub struct P2WPKH_P2SH<K: ToDescriptorKey<Segwitv0>>(pub K);
 
 impl<K: ToDescriptorKey<Segwitv0>> DescriptorTemplate for P2WPKH_P2SH<K> {
-    fn build(self) -> Result<DescriptorTemplateOut, KeyError> {
+    fn build(self) -> Result<DescriptorTemplateOut, DescriptorError> {
         Ok(descriptor!(sh(wpkh(self.0)))?)
     }
 }
@@ -170,7 +172,7 @@ impl<K: ToDescriptorKey<Segwitv0>> DescriptorTemplate for P2WPKH_P2SH<K> {
 pub struct P2WPKH<K: ToDescriptorKey<Segwitv0>>(pub K);
 
 impl<K: ToDescriptorKey<Segwitv0>> DescriptorTemplate for P2WPKH<K> {
-    fn build(self) -> Result<DescriptorTemplateOut, KeyError> {
+    fn build(self) -> Result<DescriptorTemplateOut, DescriptorError> {
         Ok(descriptor!(wpkh(self.0))?)
     }
 }
@@ -205,7 +207,7 @@ impl<K: ToDescriptorKey<Segwitv0>> DescriptorTemplate for P2WPKH<K> {
 pub struct BIP44<K: DerivableKey<Legacy>>(pub K, pub KeychainKind);
 
 impl<K: DerivableKey<Legacy>> DescriptorTemplate for BIP44<K> {
-    fn build(self) -> Result<DescriptorTemplateOut, KeyError> {
+    fn build(self) -> Result<DescriptorTemplateOut, DescriptorError> {
         Ok(P2PKH(legacy::make_bipxx_private(44, self.0, self.1)?).build()?)
     }
 }
@@ -244,7 +246,7 @@ impl<K: DerivableKey<Legacy>> DescriptorTemplate for BIP44<K> {
 pub struct BIP44Public<K: DerivableKey<Legacy>>(pub K, pub bip32::Fingerprint, pub KeychainKind);
 
 impl<K: DerivableKey<Legacy>> DescriptorTemplate for BIP44Public<K> {
-    fn build(self) -> Result<DescriptorTemplateOut, KeyError> {
+    fn build(self) -> Result<DescriptorTemplateOut, DescriptorError> {
         Ok(P2PKH(legacy::make_bipxx_public(44, self.0, self.1, self.2)?).build()?)
     }
 }
@@ -279,7 +281,7 @@ impl<K: DerivableKey<Legacy>> DescriptorTemplate for BIP44Public<K> {
 pub struct BIP49<K: DerivableKey<Segwitv0>>(pub K, pub KeychainKind);
 
 impl<K: DerivableKey<Segwitv0>> DescriptorTemplate for BIP49<K> {
-    fn build(self) -> Result<DescriptorTemplateOut, KeyError> {
+    fn build(self) -> Result<DescriptorTemplateOut, DescriptorError> {
         Ok(P2WPKH_P2SH(segwit_v0::make_bipxx_private(49, self.0, self.1)?).build()?)
     }
 }
@@ -318,7 +320,7 @@ impl<K: DerivableKey<Segwitv0>> DescriptorTemplate for BIP49<K> {
 pub struct BIP49Public<K: DerivableKey<Segwitv0>>(pub K, pub bip32::Fingerprint, pub KeychainKind);
 
 impl<K: DerivableKey<Segwitv0>> DescriptorTemplate for BIP49Public<K> {
-    fn build(self) -> Result<DescriptorTemplateOut, KeyError> {
+    fn build(self) -> Result<DescriptorTemplateOut, DescriptorError> {
         Ok(P2WPKH_P2SH(segwit_v0::make_bipxx_public(49, self.0, self.1, self.2)?).build()?)
     }
 }
@@ -353,7 +355,7 @@ impl<K: DerivableKey<Segwitv0>> DescriptorTemplate for BIP49Public<K> {
 pub struct BIP84<K: DerivableKey<Segwitv0>>(pub K, pub KeychainKind);
 
 impl<K: DerivableKey<Segwitv0>> DescriptorTemplate for BIP84<K> {
-    fn build(self) -> Result<DescriptorTemplateOut, KeyError> {
+    fn build(self) -> Result<DescriptorTemplateOut, DescriptorError> {
         Ok(P2WPKH(segwit_v0::make_bipxx_private(84, self.0, self.1)?).build()?)
     }
 }
@@ -392,7 +394,7 @@ impl<K: DerivableKey<Segwitv0>> DescriptorTemplate for BIP84<K> {
 pub struct BIP84Public<K: DerivableKey<Segwitv0>>(pub K, pub bip32::Fingerprint, pub KeychainKind);
 
 impl<K: DerivableKey<Segwitv0>> DescriptorTemplate for BIP84Public<K> {
-    fn build(self) -> Result<DescriptorTemplateOut, KeyError> {
+    fn build(self) -> Result<DescriptorTemplateOut, DescriptorError> {
         Ok(P2WPKH(segwit_v0::make_bipxx_public(84, self.0, self.1, self.2)?).build()?)
     }
 }
@@ -406,7 +408,7 @@ macro_rules! expand_make_bipxx {
                 bip: u32,
                 key: K,
                 keychain: KeychainKind,
-            ) -> Result<impl ToDescriptorKey<$ctx>, KeyError> {
+            ) -> Result<impl ToDescriptorKey<$ctx>, DescriptorError> {
                 let mut derivation_path = Vec::with_capacity(4);
                 derivation_path.push(bip32::ChildNumber::from_hardened_idx(bip)?);
                 derivation_path.push(bip32::ChildNumber::from_hardened_idx(0)?);
@@ -430,7 +432,7 @@ macro_rules! expand_make_bipxx {
                 key: K,
                 parent_fingerprint: bip32::Fingerprint,
                 keychain: KeychainKind,
-            ) -> Result<impl ToDescriptorKey<$ctx>, KeyError> {
+            ) -> Result<impl ToDescriptorKey<$ctx>, DescriptorError> {
                 let derivation_path: bip32::DerivationPath = match keychain {
                     KeychainKind::External => vec![bip32::ChildNumber::from_normal_idx(0)?].into(),
                     KeychainKind::Internal => vec![bip32::ChildNumber::from_normal_idx(1)?].into(),
@@ -456,8 +458,8 @@ mod test {
     // test existing descriptor templates, make sure they are expanded to the right descriptors
 
     use super::*;
-    use crate::descriptor::DescriptorMeta;
-    use crate::keys::{KeyError, ValidNetworks};
+    use crate::descriptor::{DescriptorError, DescriptorMeta};
+    use crate::keys::ValidNetworks;
     use bitcoin::hashes::core::str::FromStr;
     use bitcoin::network::constants::Network::Regtest;
     use bitcoin::secp256k1::Secp256k1;
@@ -467,7 +469,7 @@ mod test {
 
     // verify template descriptor generates expected address(es)
     fn check(
-        desc: Result<(Descriptor<DescriptorPublicKey>, KeyMap, ValidNetworks), KeyError>,
+        desc: Result<(Descriptor<DescriptorPublicKey>, KeyMap, ValidNetworks), DescriptorError>,
         is_witness: bool,
         is_fixed: bool,
         expected: &[&str],
