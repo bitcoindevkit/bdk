@@ -36,7 +36,7 @@
 //! // create a TxBuilder from a wallet
 //! let mut tx_builder = wallet.build_tx();
 //!
-//! let (psbt, tx_details) = tx_builder
+//! tx_builder
 //!     // Create a transaction with one output to `to_address` of 50_000 satoshi
 //!     .add_recipient(to_address.script_pubkey(), 50_000)
 //!     // With a custom fee rate of 5.0 satoshi/vbyte
@@ -44,9 +44,8 @@
 //!     // Only spend non-change outputs
 //!     .do_not_spend_change()
 //!     // Turn on RBF signaling
-//!     .enable_rbf()
-//!     .finish()?;
-//!
+//!     .enable_rbf();
+//! let (psbt, tx_details) = tx_builder.finish()?;
 //! # Ok::<(), bdk::Error>(())
 //! ```
 
@@ -80,11 +79,12 @@ impl TxBuilderContext for BumpFee {}
 
 /// A transaction builder
 ///
-/// A `TxBuilder` is initially created by calling [`build_tx`] or [`build_fee_bump`] on a wallet.
-/// From there you set sepcific options on the builder until finally calling [`finish`] to get the transaction.
+/// A `TxBuilder` is created by calling [`build_tx`] or [`build_fee_bump`] on a wallet. After
+/// assigning it, you set options on it until finally calling [`finish`] to consume the builder and
+/// generate the transaction.
 ///
-/// Each method on TxBuilder takes and returns `&mut self` so you can use either use a chaining call
-/// or assign the builder and call normally as in the following example:
+/// Each option setting method on `TxBuilder` takes and returns `&mut self` so you can chain calls
+/// as in the following example:
 ///
 /// ```
 /// # use bdk::*;
@@ -95,27 +95,31 @@ impl TxBuilderContext for BumpFee {}
 /// # let addr1 = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap();
 /// # let addr2 = addr1.clone();
 /// // chaining
-/// let (psbt1, details) =  wallet.build_tx()
+/// let (psbt1, details) = {
+///     let mut builder = wallet.build_tx();
+///     builder
 ///        .ordering(TxOrdering::Untouched)
 ///        .add_recipient(addr1.script_pubkey(), 50_000)
-///        .add_recipient(addr2.script_pubkey(), 50_000)
-///        .finish()?;
+///        .add_recipient(addr2.script_pubkey(), 50_000);
+///     builder.finish()?
+/// };
 ///
 /// // non-chaining
-/// let mut builder = wallet.build_tx();
-/// for addr in &[addr1, addr2] {
-///     builder.add_recipient(addr.script_pubkey(), 50_000);
-/// }
-/// let (psbt2, details) = builder.ordering(TxOrdering::Untouched).finish()?;
-/// //
+/// let (psbt2, details) = {
+///     let mut builder = wallet.build_tx();
+///     builder.ordering(TxOrdering::Untouched);
+///     for addr in &[addr1, addr2] {
+///         builder.add_recipient(addr.script_pubkey(), 50_000);
+///     }
+///     builder.finish()?
+/// };
+///
 /// assert_eq!(psbt1.global.unsigned_tx.output[..2], psbt2.global.unsigned_tx.output[..2]);
 /// # Ok::<(), bdk::Error>(())
 /// ```
 ///
-/// At the moment [`coin_selection`] is an exception - it consumes `self`.
-/// This means it is usually best to call [`coin_selection`] first before calling other methods.
-///
-/// Note that calling methods on the builder after calling [`finish`] will result in a panic.
+/// At the moment [`coin_selection`] is an exception to the rule as it consumes `self`.
+/// This means it is usually best to call [`coin_selection`] on the return value of `build_tx` before assigning it.
 ///
 /// For further examples see [this module](super::tx_builder)'s documentation;
 ///
@@ -128,8 +132,8 @@ pub struct TxBuilder<'a, B, D, Cs, Ctx> {
     // params and coin_selection are Options not becasue they are optionally set (they are always
     // there) but because `.finish()` uses `Option::take` to get an owned value from a &mut self.
     // They are only `None` after `.finish()` is called.
-    pub(crate) params: Option<TxParams>,
-    pub(crate) coin_selection: Option<Cs>,
+    pub(crate) params: TxParams,
+    pub(crate) coin_selection: Cs,
     pub(crate) phantom: PhantomData<Ctx>,
 }
 
@@ -180,20 +184,15 @@ impl std::default::Default for FeePolicy {
 impl<'a, B, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderContext>
     TxBuilder<'a, B, D, Cs, Ctx>
 {
-    fn params(&mut self) -> &mut TxParams {
-        self.params
-            .as_mut()
-            .expect("method called on transaction builder after it was finalized")
-    }
     /// Set a custom fee rate
     pub fn fee_rate(&mut self, fee_rate: FeeRate) -> &mut Self {
-        self.params().fee_policy = Some(FeePolicy::FeeRate(fee_rate));
+        self.params.fee_policy = Some(FeePolicy::FeeRate(fee_rate));
         self
     }
 
     /// Set an absolute fee
     pub fn fee_absolute(&mut self, fee_amount: u64) -> &mut Self {
-        self.params().fee_policy = Some(FeePolicy::FeeAmount(fee_amount));
+        self.params.fee_policy = Some(FeePolicy::FeeAmount(fee_amount));
         self
     }
 
@@ -261,8 +260,8 @@ impl<'a, B, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderConte
         keychain: KeychainKind,
     ) -> &mut Self {
         let to_update = match keychain {
-            KeychainKind::Internal => &mut self.params().internal_policy_path,
-            KeychainKind::External => &mut self.params().external_policy_path,
+            KeychainKind::Internal => &mut self.params.internal_policy_path,
+            KeychainKind::External => &mut self.params.external_policy_path,
         };
 
         *to_update = Some(policy_path);
@@ -274,12 +273,12 @@ impl<'a, B, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderConte
     /// These have priority over the "unspendable" utxos, meaning that if a utxo is present both in
     /// the "utxos" and the "unspendable" list, it will be spent.
     pub fn add_utxo(&mut self, outpoint: OutPoint) -> Result<&mut Self, Error> {
-        if self.params().utxos.get(&outpoint).is_none() {
+        if self.params.utxos.get(&outpoint).is_none() {
             let deriv_ctx = crate::wallet::descriptor_to_pk_ctx(self.wallet.secp_ctx());
             let utxo = self.wallet.get_utxo(outpoint)?.ok_or(Error::UnknownUTXO)?;
             let descriptor = self.wallet.get_descriptor_for_keychain(utxo.keychain);
             let satisfaction_weight = descriptor.max_satisfaction_weight(deriv_ctx).unwrap();
-            self.params()
+            self.params
                 .utxos
                 .insert(outpoint, (utxo, satisfaction_weight));
         }
@@ -293,7 +292,7 @@ impl<'a, B, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderConte
     ///
     /// [`add_utxo`]: Self::add_utxo
     pub fn manually_selected_only(&mut self) -> &mut Self {
-        self.params().manually_selected_only = true;
+        self.params.manually_selected_only = true;
         self
     }
 
@@ -302,7 +301,7 @@ impl<'a, B, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderConte
     /// It's important to note that the "must-be-spent" utxos added with [`TxBuilder::add_utxo`]
     /// have priority over these. See the docs of the two linked methods for more details.
     pub fn unspendable(&mut self, unspendable: Vec<OutPoint>) -> &mut Self {
-        self.params().unspendable = unspendable.into_iter().collect();
+        self.params.unspendable = unspendable.into_iter().collect();
         self
     }
 
@@ -311,7 +310,7 @@ impl<'a, B, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderConte
     /// It's important to note that the "must-be-spent" utxos added with [`TxBuilder::add_utxo`]
     /// have priority over this. See the docs of the two linked methods for more details.
     pub fn add_unspendable(&mut self, unspendable: OutPoint) -> &mut Self {
-        self.params().unspendable.insert(unspendable);
+        self.params.unspendable.insert(unspendable);
         self
     }
 
@@ -319,13 +318,13 @@ impl<'a, B, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderConte
     ///
     /// **Use this option very carefully**
     pub fn sighash(&mut self, sighash: SigHashType) -> &mut Self {
-        self.params().sighash = Some(sighash);
+        self.params.sighash = Some(sighash);
         self
     }
 
     /// Choose the ordering for inputs and outputs of the transaction
     pub fn ordering(&mut self, ordering: TxOrdering) -> &mut Self {
-        self.params().ordering = ordering;
+        self.params.ordering = ordering;
         self
     }
 
@@ -333,7 +332,7 @@ impl<'a, B, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderConte
     ///
     /// This can cause conflicts if the wallet's descriptors contain an "after" (OP_CLTV) operator.
     pub fn nlocktime(&mut self, locktime: u32) -> &mut Self {
-        self.params().locktime = Some(locktime);
+        self.params.locktime = Some(locktime);
         self
     }
 
@@ -342,7 +341,7 @@ impl<'a, B, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderConte
     /// The `version` should always be greater than `0` and greater than `1` if the wallet's
     /// descriptors contain an "older" (OP_CSV) operator.
     pub fn version(&mut self, version: i32) -> &mut Self {
-        self.params().version = Some(Version(version));
+        self.params.version = Some(Version(version));
         self
     }
 
@@ -351,7 +350,7 @@ impl<'a, B, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderConte
     /// This effectively adds all the change outputs to the "unspendable" list. See
     /// [`TxBuilder::unspendable`].
     pub fn do_not_spend_change(&mut self) -> &mut Self {
-        self.params().change_policy = ChangeSpendPolicy::ChangeForbidden;
+        self.params.change_policy = ChangeSpendPolicy::ChangeForbidden;
         self
     }
 
@@ -360,14 +359,14 @@ impl<'a, B, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderConte
     /// This effectively adds all the non-change outputs to the "unspendable" list. See
     /// [`TxBuilder::unspendable`].
     pub fn only_spend_change(&mut self) -> &mut Self {
-        self.params().change_policy = ChangeSpendPolicy::OnlyChange;
+        self.params.change_policy = ChangeSpendPolicy::OnlyChange;
         self
     }
 
     /// Set a specific [`ChangeSpendPolicy`]. See [`TxBuilder::do_not_spend_change`] and
     /// [`TxBuilder::only_spend_change`] for some shortcuts.
     pub fn change_policy(&mut self, change_policy: ChangeSpendPolicy) -> &mut Self {
-        self.params().change_policy = change_policy;
+        self.params.change_policy = change_policy;
         self
     }
 
@@ -376,7 +375,7 @@ impl<'a, B, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderConte
     ///
     /// This is useful for signers which always require it, like Trezor hardware wallets.
     pub fn force_non_witness_utxo(&mut self) -> &mut Self {
-        self.params().force_non_witness_utxo = true;
+        self.params.force_non_witness_utxo = true;
         self
     }
 
@@ -385,7 +384,7 @@ impl<'a, B, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderConte
     ///
     /// This is useful for signers which always require it, like ColdCard hardware wallets.
     pub fn include_output_redeem_witness_script(&mut self) -> &mut Self {
-        self.params().include_output_redeem_witness_script = true;
+        self.params.include_output_redeem_witness_script = true;
         self
     }
 
@@ -395,13 +394,13 @@ impl<'a, B, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderConte
     /// This is useful for offline signers that take part to a multisig. Some hardware wallets like
     /// BitBox and ColdCard are known to require this.
     pub fn add_global_xpubs(&mut self) -> &mut Self {
-        self.params().add_global_xpubs = true;
+        self.params.add_global_xpubs = true;
         self
     }
 
     /// Spend all the available inputs. This respects filters like [`TxBuilder::unspendable`] and the change policy.
     pub fn drain_wallet(&mut self) -> &mut Self {
-        self.params().drain_wallet = true;
+        self.params.drain_wallet = true;
         self
     }
 
@@ -414,14 +413,10 @@ impl<'a, B, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderConte
         self,
         coin_selection: P,
     ) -> TxBuilder<'a, B, D, P, Ctx> {
-        assert!(
-            self.coin_selection.is_some(),
-            "can't set coin_selection after finish() has been called"
-        );
         TxBuilder {
             wallet: self.wallet,
             params: self.params,
-            coin_selection: Some(coin_selection),
+            coin_selection,
             phantom: PhantomData,
         }
     }
@@ -431,24 +426,21 @@ impl<'a, B, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderConte
     /// Returns the [`BIP174`] "PSBT" and summary details about the transaction.
     ///
     /// [`BIP174`]: https://github.com/bitcoin/bips/blob/master/bip-0174.mediawiki
-    pub fn finish(&mut self) -> Result<(PSBT, TransactionDetails), Error> {
-        self.wallet.create_tx(
-            self.coin_selection.take().unwrap(),
-            self.params.take().unwrap(),
-        )
+    pub fn finish(self) -> Result<(PSBT, TransactionDetails), Error> {
+        self.wallet.create_tx(self.coin_selection, self.params)
     }
 }
 
 impl<'a, B, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>> TxBuilder<'a, B, D, Cs, CreateTx> {
     /// Replace the recipients already added with a new list
     pub fn set_recipients(&mut self, recipients: Vec<(Script, u64)>) -> &mut Self {
-        self.params().recipients = recipients;
+        self.params.recipients = recipients;
         self
     }
 
     /// Add a recipient to the internal list
     pub fn add_recipient(&mut self, script_pubkey: Script, amount: u64) -> &mut Self {
-        self.params().recipients.push((script_pubkey, amount));
+        self.params.recipients.push((script_pubkey, amount));
         self
     }
 
@@ -467,8 +459,8 @@ impl<'a, B, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>> TxBuilder<'a, B, D,
     /// add [`maintain_single_recipient`](Self::maintain_single_recipient) to correctly update the
     /// single output instead of adding one more for the change.
     pub fn set_single_recipient(&mut self, recipient: Script) -> &mut Self {
-        self.params().single_recipient = Some(recipient);
-        self.params().recipients.clear();
+        self.params.single_recipient = Some(recipient);
+        self.params.recipients.clear();
 
         self
     }
@@ -477,7 +469,7 @@ impl<'a, B, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>> TxBuilder<'a, B, D,
     ///
     /// This will use the default nSequence value of `0xFFFFFFFD`.
     pub fn enable_rbf(&mut self) -> &mut Self {
-        self.params().rbf = Some(RBFValue::Default);
+        self.params.rbf = Some(RBFValue::Default);
         self
     }
 
@@ -489,7 +481,7 @@ impl<'a, B, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>> TxBuilder<'a, B, D,
     /// If the `nsequence` is higher than `0xFFFFFFFD` an error will be thrown, since it would not
     /// be a valid nSequence to signal RBF.
     pub fn enable_rbf_with_sequence(&mut self, nsequence: u32) -> &mut Self {
-        self.params().rbf = Some(RBFValue::Value(nsequence));
+        self.params.rbf = Some(RBFValue::Value(nsequence));
         self
     }
 }
@@ -509,9 +501,9 @@ impl<'a, B, D: BatchDatabase> TxBuilder<'a, B, D, DefaultCoinSelectionAlgorithm,
     ///
     /// [`add_utxo`]: Self::add_utxo
     pub fn maintain_single_recipient(&mut self) -> &mut Self {
-        let mut recipients = self.params().recipients.drain(..).collect::<Vec<_>>();
+        let mut recipients = self.params.recipients.drain(..).collect::<Vec<_>>();
         assert_eq!(recipients.len(), 1, "maintain_single_recipient must not be called while bumping a transactions with more than one output");
-        self.params().single_recipient = Some(recipients.pop().unwrap().0);
+        self.params.single_recipient = Some(recipients.pop().unwrap().0);
         // Since we are fee bumping and maintaining a single recipient we never want to add any more non-manual inputs.
         self
     }

@@ -156,10 +156,8 @@ mod test {
         wallet.add_address_validator(Arc::new(TestValidator));
 
         let addr = testutils!(@external descriptors, 10);
-        wallet
-            .build_tx()
-            .add_recipient(addr.script_pubkey(), 25_000)
-            .finish()
-            .unwrap();
+        let mut builder = wallet.build_tx();
+        builder.add_recipient(addr.script_pubkey(), 25_000);
+        builder.finish().unwrap();
     }
 }

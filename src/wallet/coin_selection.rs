@@ -85,9 +85,12 @@
 //! // create wallet, sync, ...
 //!
 //! let to_address = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap();
-//! let (psbt, details) = wallet.build_tx().coin_selection(AlwaysSpendEverything)
-//!     .add_recipient(to_address.script_pubkey(), 50_000)
-//!     .finish()?;
+//! let (psbt, details) = {
+//!     let mut builder = wallet.build_tx().coin_selection(AlwaysSpendEverything);
+//!     builder
+//!         .add_recipient(to_address.script_pubkey(), 50_000);
+//!     builder.finish()?
+//! };
 //!
 //! // inspect, sign, broadcast, ...
 //!
