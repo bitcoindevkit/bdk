@@ -168,7 +168,7 @@ pub struct ElectrumBlockchainConfig {
     /// Request retry count
     pub retry: u8,
     /// Request timeout (seconds)
-    pub timeout: u8,
+    pub timeout: Option<u8>,
 }
 
 impl ConfigurableBlockchain for ElectrumBlockchain {
@@ -178,8 +178,8 @@ impl ConfigurableBlockchain for ElectrumBlockchain {
         let socks5 = config.socks5.as_ref().map(Socks5Config::new);
         let electrum_config = ConfigBuilder::new()
             .retry(config.retry)
-            .socks5(socks5)?
             .timeout(config.timeout)?
+            .socks5(socks5)?
             .build();
 
         Ok(ElectrumBlockchain(Client::from_config(
