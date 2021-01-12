@@ -43,6 +43,7 @@ use miniscript::descriptor::{DescriptorXKey, KeyMap};
 pub use miniscript::ScriptContext;
 use miniscript::{Miniscript, Terminal};
 
+use crate::descriptor::{CheckMiniscript, DescriptorError};
 use crate::wallet::utils::SecpCtx;
 
 #[cfg(feature = "keys-bip39")]
@@ -572,14 +573,13 @@ fn expand_multi_keys<Pk: ToDescriptorKey<Ctx>, Ctx: ScriptContext>(
 pub fn make_pk<Pk: ToDescriptorKey<Ctx>, Ctx: ScriptContext>(
     descriptor_key: Pk,
     secp: &SecpCtx,
-) -> Result<(Miniscript<DescriptorPublicKey, Ctx>, KeyMap, ValidNetworks), KeyError> {
+) -> Result<(Miniscript<DescriptorPublicKey, Ctx>, KeyMap, ValidNetworks), DescriptorError> {
     let (key, key_map, valid_networks) = descriptor_key.to_descriptor_key()?.extract(secp)?;
+    let minisc = Miniscript::from_ast(Terminal::PkK(key))?;
 
-    Ok((
-        Miniscript::from_ast(Terminal::PkK(key))?,
-        key_map,
-        valid_networks,
-    ))
+    minisc.check_minsicript()?;
+
+    Ok((minisc, key_map, valid_networks))
 }
 
 // Used internally by `bdk::fragment!` to build `multi()` fragments
@@ -588,14 +588,13 @@ pub fn make_multi<Pk: ToDescriptorKey<Ctx>, Ctx: ScriptContext>(
     thresh: usize,
     pks: Vec<Pk>,
     secp: &SecpCtx,
-) -> Result<(Miniscript<DescriptorPublicKey, Ctx>, KeyMap, ValidNetworks), KeyError> {
+) -> Result<(Miniscript<DescriptorPublicKey, Ctx>, KeyMap, ValidNetworks), DescriptorError> {
     let (pks, key_map, valid_networks) = expand_multi_keys(pks, secp)?;
+    let minisc = Miniscript::from_ast(Terminal::Multi(thresh, pks))?;
 
-    Ok((
-        Miniscript::from_ast(Terminal::Multi(thresh, pks))?,
-        key_map,
-        valid_networks,
-    ))
+    minisc.check_minsicript()?;
+
+    Ok((minisc, key_map, valid_networks))
 }
 
 // Used internally by `bdk::descriptor!` to build `sortedmulti()` fragments
@@ -610,11 +609,14 @@ pub fn make_sortedmulti_inner<Pk: ToDescriptorKey<Ctx>, Ctx: ScriptContext>(
         KeyMap,
         ValidNetworks,
     ),
-    KeyError,
+    DescriptorError,
 > {
     let (pks, key_map, valid_networks) = expand_multi_keys(pks, secp)?;
+    let minisc = SortedMultiVec::new(thresh, pks)?;
 
-    Ok((SortedMultiVec::new(thresh, pks)?, key_map, valid_networks))
+    // TODO: should we apply the checks here as well?
+
+    Ok((minisc, key_map, valid_networks))
 }
 
 /// The "identity" conversion is used internally by some `bdk::fragment`s

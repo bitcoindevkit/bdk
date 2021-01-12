@@ -29,7 +29,7 @@
 
 use std::iter::FromIterator;
 
-use crate::descriptor::Error;
+use crate::descriptor::DescriptorError;
 
 const INPUT_CHARSET: &str =  "0123456789()[],'/*abcdefgh@:$%{}IJKLMNOPQRSTUVWXYZ&+-.;<=>?!^_|~ijklmnopqrstuvwxyzABCDEFGH`#\"\\ ";
 const CHECKSUM_CHARSET: &str = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
@@ -57,14 +57,14 @@ fn poly_mod(mut c: u64, val: u64) -> u64 {
 }
 
 /// Compute the checksum of a descriptor
-pub fn get_checksum(desc: &str) -> Result<String, Error> {
+pub fn get_checksum(desc: &str) -> Result<String, DescriptorError> {
     let mut c = 1;
     let mut cls = 0;
     let mut clscount = 0;
     for ch in desc.chars() {
         let pos = INPUT_CHARSET
             .find(ch)
-            .ok_or(Error::InvalidDescriptorCharacter(ch))? as u64;
+            .ok_or(DescriptorError::InvalidDescriptorCharacter(ch))? as u64;
         c = poly_mod(c, pos & 31);
         cls = cls * 3 + (pos >> 5);
         clscount += 1;
@@ -120,7 +120,7 @@ mod test {
 
         assert!(matches!(
             get_checksum(&invalid_desc).err(),
-            Some(Error::InvalidDescriptorCharacter(invalid_char)) if invalid_char == sparkle_heart
+            Some(DescriptorError::InvalidDescriptorCharacter(invalid_char)) if invalid_char == sparkle_heart
         ));
     }
 }
