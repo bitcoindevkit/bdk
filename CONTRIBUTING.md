@@ -10,7 +10,7 @@ Anyone is invited to contribute without regard to technical experience,
 cryptocurrencies demands a high-level of rigor, adversarial thinking, thorough
 testing and risk-minimization.
 Any bug may cost users real money. That being said, we deeply welcome people
-contributing for the first time to an open source project or pick up Rust while
+contributing for the first time to an open source project or picking up Rust while
 contributing. Don't be shy, you'll learn.
 
 Communications Channels
