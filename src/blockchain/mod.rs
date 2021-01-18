@@ -169,7 +169,7 @@ pub fn progress() -> (Sender<ProgressData>, Receiver<ProgressData>) {
 
 impl Progress for Sender<ProgressData> {
     fn update(&self, progress: f32, message: Option<String>) -> Result<(), Error> {
-        if progress < 0.0 || progress > 100.0 {
+        if !(0.0..=100.0).contains(&progress) {
             return Err(Error::InvalidProgressValue(progress));
         }
 
