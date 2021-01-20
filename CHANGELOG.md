@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.3.0] - [v0.2.0]
+
 ### Descriptor
 #### Changed
 - Added an alias `DescriptorError` for `descriptor::error::Error`
@@ -230,3 +232,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [unreleased]: https://github.com/bitcoindevkit/bdk/compare/v0.2.0...HEAD
 [0.1.0-beta.1]: https://github.com/bitcoindevkit/bdk/compare/96c87ea5...0.1.0-beta.1
 [v0.2.0]: https://github.com/bitcoindevkit/bdk/compare/0.1.0-beta.1...v0.2.0
+[v0.3.0]: https://github.com/bitcoindevkit/bdk/compare/v0.2.0...v0.3.0
