@@ -145,7 +145,7 @@ pub fn await_or_block(expr: TokenStream) -> TokenStream {
         {
             #[cfg(all(not(target_arch = "wasm32"), not(feature = "async-interface")))]
             {
-                tokio::runtime::Runtime::new().unwrap().block_on(#expr)
+                tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(#expr)
             }
 
             #[cfg(any(target_arch = "wasm32", feature = "async-interface"))]

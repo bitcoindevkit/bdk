@@ -12,7 +12,7 @@ readme = "README.md"
 license = "MIT"
 
 [dependencies]
-bdk-macros = "0.2"
+bdk-macros = { path = "./macros" }
 log = "^0.4"
 miniscript = "4.0"
 bitcoin = { version = "^0.25.2", features = ["use-serde"] }
@@ -23,7 +23,7 @@ rand = "^0.7"
 # Optional dependencies
 sled = { version = "0.34", optional = true }
 electrum-client = { version = "0.5.0-beta.1", optional = true }
-reqwest = { version = "0.10", optional = true, features = ["json"] }
+reqwest = { version = "0.11", optional = true, features = ["json"] }
 futures = { version = "0.3", optional = true }
 async-trait = { version = "0.1", optional = true }
 rocksdb = { version = "0.14", optional = true }
@@ -35,7 +35,7 @@ tiny-bip39 = { version = "^0.8", optional = true }
 
 # Platform-specific dependencies
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-tokio = { version = "0.2", features = ["rt-core"] }
+tokio = { version = "1.0", features = ["rt"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 async-trait = "0.1"
