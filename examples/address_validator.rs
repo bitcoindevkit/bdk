@@ -35,6 +35,7 @@ use bitcoin::hashes::hex::FromHex;
 use bitcoin::util::bip32::Fingerprint;
 use bitcoin::{Network, Script};
 
+#[derive(Debug)]
 struct DummyValidator;
 impl AddressValidator for DummyValidator {
     fn validate(

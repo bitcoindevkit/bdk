@@ -127,6 +127,7 @@ impl TxBuilderContext for BumpFee {}
 /// [`build_fee_bump`]: Wallet::build_fee_bump
 /// [`finish`]: Self::finish
 /// [`coin_selection`]: Self::coin_selection
+#[derive(Clone, Debug)]
 pub struct TxBuilder<'a, B, D, Cs, Ctx> {
     pub(crate) wallet: &'a Wallet<B, D>,
     // params and coin_selection are Options not becasue they are optionally set (they are always
@@ -139,7 +140,7 @@ pub struct TxBuilder<'a, B, D, Cs, Ctx> {
 
 /// The parameters for transaction creation sans coin selection algorithm.
 //TODO: TxParams should eventually be exposed publicly.
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub(crate) struct TxParams {
     pub(crate) recipients: Vec<(Script, u64)>,
     pub(crate) drain_wallet: bool,
@@ -168,7 +169,7 @@ pub(crate) struct PreviousFee {
     pub rate: f32,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub(crate) enum FeePolicy {
     FeeRate(FeeRate),
     FeeAmount(u64),

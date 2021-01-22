@@ -45,6 +45,7 @@
 //! # use bdk::address_validator::*;
 //! # use bdk::database::*;
 //! # use bdk::*;
+//! #[derive(Debug)]
 //! struct PrintAddressAndContinue;
 //!
 //! impl AddressValidator for PrintAddressAndContinue {
@@ -111,7 +112,7 @@ impl std::error::Error for AddressValidatorError {}
 /// validator will be propagated up to the original caller that triggered the address generation.
 ///
 /// For a usage example see [this module](crate::address_validator)'s documentation.
-pub trait AddressValidator: Send + Sync {
+pub trait AddressValidator: Send + Sync + fmt::Debug {
     /// Validate or inspect an address
     fn validate(
         &self,
@@ -128,6 +129,7 @@ mod test {
     use super::*;
     use crate::wallet::test::{get_funded_wallet, get_test_wpkh};
 
+    #[derive(Debug)]
     struct TestValidator;
     impl AddressValidator for TestValidator {
         fn validate(
