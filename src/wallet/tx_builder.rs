@@ -147,7 +147,7 @@ pub(crate) struct TxParams {
     pub(crate) fee_policy: Option<FeePolicy>,
     pub(crate) internal_policy_path: Option<BTreeMap<String, Vec<usize>>>,
     pub(crate) external_policy_path: Option<BTreeMap<String, Vec<usize>>>,
-    pub(crate) utxos: BTreeMap<OutPoint, (UTXO, usize)>,
+    pub(crate) utxos: Vec<(UTXO, usize)>,
     pub(crate) unspendable: HashSet<OutPoint>,
     pub(crate) manually_selected_only: bool,
     pub(crate) sighash: Option<SigHashType>,
@@ -273,15 +273,11 @@ impl<'a, B, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderConte
     /// These have priority over the "unspendable" utxos, meaning that if a utxo is present both in
     /// the "utxos" and the "unspendable" list, it will be spent.
     pub fn add_utxo(&mut self, outpoint: OutPoint) -> Result<&mut Self, Error> {
-        if self.params.utxos.get(&outpoint).is_none() {
-            let deriv_ctx = crate::wallet::descriptor_to_pk_ctx(self.wallet.secp_ctx());
-            let utxo = self.wallet.get_utxo(outpoint)?.ok_or(Error::UnknownUTXO)?;
-            let descriptor = self.wallet.get_descriptor_for_keychain(utxo.keychain);
-            let satisfaction_weight = descriptor.max_satisfaction_weight(deriv_ctx).unwrap();
-            self.params
-                .utxos
-                .insert(outpoint, (utxo, satisfaction_weight));
-        }
+        let deriv_ctx = crate::wallet::descriptor_to_pk_ctx(self.wallet.secp_ctx());
+        let utxo = self.wallet.get_utxo(outpoint)?.ok_or(Error::UnknownUTXO)?;
+        let descriptor = self.wallet.get_descriptor_for_keychain(utxo.keychain);
+        let satisfaction_weight = descriptor.max_satisfaction_weight(deriv_ctx).unwrap();
+        self.params.utxos.push((utxo, satisfaction_weight));
         Ok(self)
     }
 

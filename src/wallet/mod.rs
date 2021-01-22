@@ -507,7 +507,7 @@ where
         let (required_utxos, optional_utxos) = self.preselect_utxos(
             params.change_policy,
             &params.unspendable,
-            params.utxos.values().cloned().collect(),
+            params.utxos.clone(),
             params.drain_wallet,
             params.manually_selected_only,
             params.bumping_fee.is_some(), // we mandate confirmed transactions if we're bumping the fee
@@ -672,7 +672,7 @@ where
         let original_txin = tx.input.drain(..).collect::<Vec<_>>();
         let original_utxos = original_txin
             .iter()
-            .map(|txin| -> Result<(OutPoint, (UTXO, usize)), Error> {
+            .map(|txin| -> Result<_, Error> {
                 let txout = self
                     .database
                     .borrow()
@@ -706,9 +706,9 @@ where
                     keychain,
                 };
 
-                Ok((utxo.outpoint, (utxo, weight)))
+                Ok((utxo, weight))
             })
-            .collect::<Result<BTreeMap<OutPoint, (UTXO, usize)>, _>>()?;
+            .collect::<Result<Vec<_>, _>>()?;
 
         if tx.output.len() > 1 {
             let mut change_index = None;
@@ -2653,9 +2653,10 @@ mod test {
     fn test_bump_fee_remove_output_manually_selected_only() {
         let (wallet, descriptors, _) = get_funded_wallet(get_test_wpkh());
         // receive an extra tx so that our wallet has two utxos. then we manually pick only one of
-        // them, and make sure that `bump_fee` doesn't try to add more. eventually, it should fail
-        // because the fee rate is too high and the single utxo isn't enough to create a non-dust
-        // output
+        // them, and make sure that `bump_fee` doesn't try to add more. This fails because we've
+        // told the wallet it's not allowed to add more inputs AND it can't reduce the value of the
+        // existing output. In other words, bump_fee + manually_selected_only is always an error
+        // unless you've also set "maintain_single_recipient".
         let incoming_txid = crate::populate_test_db!(
             wallet.database.borrow_mut(),
             testutils! (@tx ( (@external descriptors, 0) => 25_000 ) (@confirmations 1)),
@@ -2694,8 +2695,6 @@ mod test {
 
         let mut builder = wallet.build_fee_bump(txid).unwrap();
         builder
-            .add_utxo(outpoint)
-            .unwrap()
             .manually_selected_only()
             .fee_rate(FeeRate::from_sat_per_vb(255.0));
         builder.finish().unwrap();
