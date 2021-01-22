@@ -448,7 +448,6 @@ where
             output: vec![],
         };
 
-        // try not to move from `params` because we still need to use it later.
         let recipients = match &params.single_recipient {
             Some(recipient) => vec![(recipient, 0)],
             None => params.recipients.iter().map(|(r, v)| (r, *v)).collect(),
