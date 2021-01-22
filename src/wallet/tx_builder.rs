@@ -269,17 +269,34 @@ impl<'a, B, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderConte
         self
     }
 
+    /// Add the list of outpoints to the internal list of UTXOs that **must** be spent.
+    ///
+    /// If an error occurs while adding any of the UTXOs then none of them are added and the error is returned.
+    ///
+    /// These have priority over the "unspendable" utxos, meaning that if a utxo is present both in
+    /// the "utxos" and the "unspendable" list, it will be spent.
+    pub fn add_utxos(&mut self, outpoints: &[OutPoint]) -> Result<&mut Self, Error> {
+        let deriv_ctx = crate::wallet::descriptor_to_pk_ctx(self.wallet.secp_ctx());
+        let utxos = outpoints
+            .iter()
+            .map(|outpoint| self.wallet.get_utxo(*outpoint)?.ok_or(Error::UnknownUTXO))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        for utxo in utxos {
+            let descriptor = self.wallet.get_descriptor_for_keychain(utxo.keychain);
+            let satisfaction_weight = descriptor.max_satisfaction_weight(deriv_ctx).unwrap();
+            self.params.utxos.push((utxo, satisfaction_weight));
+        }
+
+        Ok(self)
+    }
+
     /// Add a utxo to the internal list of utxos that **must** be spent
     ///
     /// These have priority over the "unspendable" utxos, meaning that if a utxo is present both in
     /// the "utxos" and the "unspendable" list, it will be spent.
     pub fn add_utxo(&mut self, outpoint: OutPoint) -> Result<&mut Self, Error> {
-        let deriv_ctx = crate::wallet::descriptor_to_pk_ctx(self.wallet.secp_ctx());
-        let utxo = self.wallet.get_utxo(outpoint)?.ok_or(Error::UnknownUTXO)?;
-        let descriptor = self.wallet.get_descriptor_for_keychain(utxo.keychain);
-        let satisfaction_weight = descriptor.max_satisfaction_weight(deriv_ctx).unwrap();
-        self.params.utxos.push((utxo, satisfaction_weight));
-        Ok(self)
+        self.add_utxos(&[outpoint])
     }
 
     /// Only spend utxos added by [`add_utxo`].
