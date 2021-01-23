@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### Changed
 - Remove `BlockchainMarker`, `OfflineClient` and `OfflineWallet` in favor of just using the unit
   type to mark for a missing client.
+- Upgrade `tokio` to `1.0`.
   
 #### Transaction Creation Overhaul
 
