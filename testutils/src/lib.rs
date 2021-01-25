@@ -360,7 +360,7 @@ impl TestClient {
         }
 
         if self.get_balance(None, None).unwrap() < Amount::from_sat(required_balance) {
-            panic!("Insufficient funds in bitcoind. Plase generate a few blocks with: `bitcoin-cli generatetoaddress 10 {}`", self.get_new_address(None, None).unwrap());
+            panic!("Insufficient funds in bitcoind. Please generate a few blocks with: `bitcoin-cli generatetoaddress 10 {}`", self.get_new_address(None, None).unwrap());
         }
 
         // FIXME: core can't create a tx with two outputs to the same address
