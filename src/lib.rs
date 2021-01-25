@@ -265,3 +265,8 @@ pub use wallet::address_validator;
 pub use wallet::signer;
 pub use wallet::tx_builder::TxBuilder;
 pub use wallet::Wallet;
+
+/// Get the version of BDK at runtime
+pub fn version() -> &'static str {
+    env!("CARGO_PKG_VERSION", "unknown")
+}

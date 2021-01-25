@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Misc
+#### Added
+- Added a function to get the version of BDK at runtime
+
 ## [v0.3.0] - [v0.2.0]
 
 ### Descriptor
