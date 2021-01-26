@@ -32,51 +32,81 @@ use bitcoin::Network;
 
 use miniscript::ScriptContext;
 
-use bip39::{Language, Mnemonic, MnemonicType, Seed};
+pub use bip39::{Language, Mnemonic, MnemonicType, Seed};
 
-use super::{any_network, DerivableKey, DescriptorKey, GeneratableKey, GeneratedKey, KeyError};
+use super::{
+    any_network, DerivableKey, DescriptorKey, ExtendedKey, GeneratableKey, GeneratedKey, KeyError,
+};
+
+fn set_valid_on_any_network<Ctx: ScriptContext>(
+    descriptor_key: DescriptorKey<Ctx>,
+) -> DescriptorKey<Ctx> {
+    // We have to pick one network to build the xprv, but since the bip39 standard doesn't
+    // encode the network, the xprv we create is actually valid everywhere. So we override the
+    // valid networks with `any_network()`.
+    descriptor_key.override_valid_networks(any_network())
+}
 
 /// Type for a BIP39 mnemonic with an optional passphrase
 pub type MnemonicWithPassphrase = (Mnemonic, Option<String>);
 
 #[cfg_attr(docsrs, doc(cfg(feature = "keys-bip39")))]
 impl<Ctx: ScriptContext> DerivableKey<Ctx> for Seed {
-    fn add_metadata(
+    fn into_extended_key(self) -> Result<ExtendedKey<Ctx>, KeyError> {
+        Ok(bip32::ExtendedPrivKey::new_master(Network::Bitcoin, &self.as_bytes())?.into())
+    }
+
+    fn into_descriptor_key(
         self,
         source: Option<bip32::KeySource>,
         derivation_path: bip32::DerivationPath,
     ) -> Result<DescriptorKey<Ctx>, KeyError> {
-        let xprv = bip32::ExtendedPrivKey::new_master(Network::Bitcoin, &self.as_bytes())?;
-        let descriptor_key = xprv.add_metadata(source, derivation_path)?;
+        let descriptor_key = self
+            .into_extended_key()?
+            .into_descriptor_key(source, derivation_path)?;
 
-        // here we must choose one network to build the xpub, but since the bip39 standard doesn't
-        // encode the network, the xpub we create is actually valid everywhere. so we override the
-        // valid networks with `any_network()`.
-        Ok(descriptor_key.override_valid_networks(any_network()))
+        Ok(set_valid_on_any_network(descriptor_key))
     }
 }
 
 #[cfg_attr(docsrs, doc(cfg(feature = "keys-bip39")))]
 impl<Ctx: ScriptContext> DerivableKey<Ctx> for MnemonicWithPassphrase {
-    fn add_metadata(
+    fn into_extended_key(self) -> Result<ExtendedKey<Ctx>, KeyError> {
+        let (mnemonic, passphrase) = self;
+        let seed = Seed::new(&mnemonic, passphrase.as_deref().unwrap_or(""));
+
+        seed.into_extended_key()
+    }
+
+    fn into_descriptor_key(
         self,
         source: Option<bip32::KeySource>,
         derivation_path: bip32::DerivationPath,
     ) -> Result<DescriptorKey<Ctx>, KeyError> {
-        let (mnemonic, passphrase) = self;
-        let seed = Seed::new(&mnemonic, passphrase.as_deref().unwrap_or(""));
-        seed.add_metadata(source, derivation_path)
+        let descriptor_key = self
+            .into_extended_key()?
+            .into_descriptor_key(source, derivation_path)?;
+
+        Ok(set_valid_on_any_network(descriptor_key))
     }
 }
 
 #[cfg_attr(docsrs, doc(cfg(feature = "keys-bip39")))]
 impl<Ctx: ScriptContext> DerivableKey<Ctx> for Mnemonic {
-    fn add_metadata(
+    fn into_extended_key(self) -> Result<ExtendedKey<Ctx>, KeyError> {
+        (self, None).into_extended_key()
+    }
+
+    fn into_descriptor_key(
         self,
         source: Option<bip32::KeySource>,
         derivation_path: bip32::DerivationPath,
     ) -> Result<DescriptorKey<Ctx>, KeyError> {
-        (self, None).add_metadata(source, derivation_path)
+        let descriptor_key = self
+            .into_extended_key()?
+            .into_descriptor_key(source, derivation_path)?;
+
+        Ok(set_valid_on_any_network(descriptor_key))
     }
 }
 
