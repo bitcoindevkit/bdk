@@ -56,7 +56,7 @@
 //! interact with the bitcoin P2P network.
 //!
 //! ```toml
-//! bdk = "0.2.0"
+//! bdk = "0.3.0"
 //! ```
 //!
 //! ## Sync the balance of a descriptor
