@@ -25,6 +25,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### Changed
 - Remove `cli.rs` module, `cli-utils` feature and `repl.rs` example; moved to new [`bdk-cli`](https://github.com/bitcoindevkit/bdk-cli) repository
 
+### Keys
+#### Changed
+- Added function to create master extended private key from a network, mnemonic words, and optional password
+- Re-export BIP-39 enums and structures: Language, Mnemonic, MnemonicType, Seed
+
 ## [v0.2.0] - [0.1.0-beta.1]
 
 ### Project
