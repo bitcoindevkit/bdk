@@ -514,12 +514,13 @@ impl<'a, B, D: BatchDatabase> TxBuilder<'a, B, D, DefaultCoinSelectionAlgorithm,
     /// Fails if the transaction has more than one outputs.
     ///
     /// [`add_utxo`]: Self::add_utxo
-    pub fn maintain_single_recipient(&mut self) -> &mut Self {
+    pub fn maintain_single_recipient(&mut self) -> Result<&mut Self, Error> {
         let mut recipients = self.params.recipients.drain(..).collect::<Vec<_>>();
-        assert_eq!(recipients.len(), 1, "maintain_single_recipient must not be called while bumping a transactions with more than one output");
+        if recipients.len() != 1 {
+            return Err(Error::SingleRecipientMultipleOutputs);
+        }
         self.params.single_recipient = Some(recipients.pop().unwrap().0);
-        // Since we are fee bumping and maintaining a single recipient we never want to add any more non-manual inputs.
-        self
+        Ok(self)
     }
 }
 

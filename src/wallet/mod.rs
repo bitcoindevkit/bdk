@@ -2543,7 +2543,8 @@ mod test {
         let mut builder = wallet.build_fee_bump(txid).unwrap();
         builder
             .fee_rate(FeeRate::from_sat_per_vb(2.5))
-            .maintain_single_recipient();
+            .maintain_single_recipient()
+            .unwrap();
         let (psbt, details) = builder.finish().unwrap();
 
         assert_eq!(details.sent, original_details.sent);
@@ -2584,7 +2585,10 @@ mod test {
             .unwrap();
 
         let mut builder = wallet.build_fee_bump(txid).unwrap();
-        builder.maintain_single_recipient().fee_absolute(300);
+        builder
+            .maintain_single_recipient()
+            .unwrap()
+            .fee_absolute(300);
         let (psbt, details) = builder.finish().unwrap();
 
         assert_eq!(details.sent, original_details.sent);
@@ -2643,6 +2647,7 @@ mod test {
         builder
             .drain_wallet()
             .maintain_single_recipient()
+            .unwrap()
             .fee_rate(FeeRate::from_sat_per_vb(5.0));
         let (_, details) = builder.finish().unwrap();
         assert_eq!(details.sent, 75_000);
