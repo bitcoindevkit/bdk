@@ -108,7 +108,7 @@ fn main() -> Result<(), bdk::Error> {
     wallet.sync(noop_progress(), None)?;
 
     let send_to = wallet.get_new_address()?;
-    let (psbt, details) = { 
+    let (psbt, details) = {
         let mut builder = wallet.build_tx();
         builder
             .add_recipient(send_to.script_pubkey(), 50_000)
