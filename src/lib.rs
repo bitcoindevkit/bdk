@@ -56,7 +56,7 @@
 //! interact with the bitcoin P2P network.
 //!
 //! ```toml
-//! bdk = "0.2.0"
+//! bdk = "0.3.0"
 //! ```
 //!
 //! ## Sync the balance of a descriptor
@@ -265,3 +265,8 @@ pub use wallet::address_validator;
 pub use wallet::signer;
 pub use wallet::tx_builder::TxBuilder;
 pub use wallet::Wallet;
+
+/// Get the version of BDK at runtime
+pub fn version() -> &'static str {
+    env!("CARGO_PKG_VERSION", "unknown")
+}

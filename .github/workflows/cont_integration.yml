@@ -41,6 +41,8 @@ jobs:
         run: rustup set profile minimal
       - name: Add clippy
         run: rustup component add clippy
+      - name: Update toolchain
+        run: rustup update
       - name: Build
         run: cargo build --features ${{ matrix.features }} --no-default-features
       - name: Clippy
@@ -66,6 +68,8 @@ jobs:
         run: rustup default nightly
       - name: Set profile
         run: rustup set profile minimal
+      - name: Update toolchain
+        run: rustup update
       - name: Test
         run: cargo test --features test-md-docs --no-default-features -- doctest::ReadmeDoctests
 
@@ -96,6 +100,8 @@ jobs:
         run: $HOME/.cargo/bin/rustup default stable
       - name: Set profile
         run: $HOME/.cargo/bin/rustup set profile minimal
+      - name: Update toolchain
+        run: $HOME/.cargo/bin/rustup update
       - name: Start core
         run: ./ci/start-core.sh
       - name: Test
@@ -129,6 +135,8 @@ jobs:
         run: rustup set profile minimal
       - name: Add target wasm32
         run: rustup target add wasm32-unknown-unknown
+      - name: Update toolchain
+        run: rustup update
       - name: Check
         run: cargo check --target wasm32-unknown-unknown --features esplora --no-default-features
 
@@ -144,5 +152,7 @@ jobs:
         run: rustup set profile minimal
       - name: Add clippy
         run: rustup component add rustfmt
+      - name: Update toolchain
+        run: rustup update
       - name: Check fmt
         run: cargo fmt --all -- --check

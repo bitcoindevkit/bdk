@@ -58,7 +58,7 @@ pub use utils::IsDust;
 
 use address_validator::AddressValidator;
 use coin_selection::DefaultCoinSelectionAlgorithm;
-use signer::{Signer, SignerId, SignerOrdering, SignersContainer};
+use signer::{Signer, SignerOrdering, SignersContainer};
 use tx_builder::{BumpFee, CreateTx, FeePolicy, TxBuilder, TxParams};
 use utils::{
     check_nlocktime, check_nsequence_rbf, descriptor_to_pk_ctx, After, Older, SecpCtx,
@@ -236,7 +236,6 @@ where
     pub fn add_signer(
         &mut self,
         keychain: KeychainKind,
-        id: SignerId,
         ordering: SignerOrdering,
         signer: Arc<dyn Signer>,
     ) {
@@ -245,7 +244,7 @@ where
             KeychainKind::Internal => Arc::make_mut(&mut self.change_signers),
         };
 
-        signers.add_external(id, ordering, signer);
+        signers.add_external(signer.id(&self.secp), ordering, signer);
     }
 
     /// Add an address validator

@@ -6,6 +6,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Misc
+#### Added
+- Added a function to get the version of BDK at runtime
+
+### Wallet
+#### Changed
+- Removed the explicit `id` argument from `Wallet::add_signer()` since that's now part of `Signer` itself
+
 ## [v0.3.0] - [v0.2.0]
 
 ### Descriptor

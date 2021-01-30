@@ -33,7 +33,6 @@
 //! # use bitcoin::secp256k1::{Secp256k1, All};
 //! # use bitcoin::*;
 //! # use bitcoin::util::psbt;
-//! # use bitcoin::util::bip32::Fingerprint;
 //! # use bdk::signer::*;
 //! # use bdk::database::*;
 //! # use bdk::*;
@@ -45,6 +44,9 @@
 //! #     }
 //! #     fn connect() -> Self {
 //! #         CustomHSM
+//! #     }
+//! #     fn get_id(&self) -> SignerId {
+//! #         SignerId::Dummy(0)
 //! #     }
 //! # }
 //! #[derive(Debug)]
@@ -71,6 +73,10 @@
 //!         Ok(())
 //!     }
 //!
+//!     fn id(&self, _secp: &Secp256k1<All>) -> SignerId {
+//!         self.device.get_id()
+//!     }
+//!
 //!     fn sign_whole_tx(&self) -> bool {
 //!         false
 //!     }
@@ -82,7 +88,6 @@
 //! let mut wallet = Wallet::new_offline(descriptor, None, Network::Testnet, MemoryDatabase::default())?;
 //! wallet.add_signer(
 //!     KeychainKind::External,
-//!     Fingerprint::from_str("e30f11b8").unwrap().into(),
 //!     SignerOrdering(200),
 //!     Arc::new(custom_signer)
 //! );
@@ -118,6 +123,8 @@ pub enum SignerId {
     PkHash(hash160::Hash),
     /// The fingerprint of a BIP32 extended key
     Fingerprint(Fingerprint),
+    /// Dummy identifier
+    Dummy(u64),
 }
 
 impl From<hash160::Hash> for SignerId {
@@ -184,6 +191,12 @@ pub trait Signer: fmt::Debug + Send + Sync {
     /// input individually
     fn sign_whole_tx(&self) -> bool;
 
+    /// Return the [`SignerId`] for this signer
+    ///
+    /// The [`SignerId`] can be used to lookup a signer in the [`Wallet`](crate::Wallet)'s signers map or to
+    /// compare two signers.
+    fn id(&self, secp: &SecpCtx) -> SignerId;
+
     /// Return the secret key for the signer
     ///
     /// This is used internally to reconstruct the original descriptor that may contain secrets.
@@ -232,6 +245,10 @@ impl Signer for DescriptorXKey<ExtendedPrivKey> {
 
     fn sign_whole_tx(&self) -> bool {
         false
+    }
+
+    fn id(&self, secp: &SecpCtx) -> SignerId {
+        SignerId::from(self.root_fingerprint(&secp))
     }
 
     fn descriptor_secret_key(&self) -> Option<DescriptorSecretKey> {
@@ -283,6 +300,10 @@ impl Signer for PrivateKey {
 
     fn sign_whole_tx(&self) -> bool {
         false
+    }
+
+    fn id(&self, secp: &SecpCtx) -> SignerId {
+        SignerId::from(self.public_key(secp).to_pubkeyhash())
     }
 
     fn descriptor_secret_key(&self) -> Option<DescriptorSecretKey> {
@@ -345,12 +366,7 @@ impl From<KeyMap> for SignersContainer {
         for (_, secret) in keymap {
             match secret {
                 DescriptorSecretKey::SinglePriv(private_key) => container.add_external(
-                    SignerId::from(
-                        private_key
-                            .key
-                            .public_key(&Secp256k1::signing_only())
-                            .to_pubkeyhash(),
-                    ),
+                    SignerId::from(private_key.key.public_key(&secp).to_pubkeyhash()),
                     SignerOrdering::default(),
                     Arc::new(private_key.key),
                 ),
@@ -648,6 +664,10 @@ mod signers_container_tests {
             _secp: &SecpCtx,
         ) -> Result<(), SignerError> {
             Ok(())
+        }
+
+        fn id(&self, _secp: &SecpCtx) -> SignerId {
+            SignerId::Dummy(42)
         }
 
         fn sign_whole_tx(&self) -> bool {
