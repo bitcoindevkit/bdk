@@ -14,15 +14,15 @@ license = "MIT"
 [dependencies]
 bdk-macros = { path = "./macros" }
 log = "^0.4"
-miniscript = "4.0"
-bitcoin = { version = "^0.25.2", features = ["use-serde"] }
+miniscript = "5.1"
+bitcoin = { version = "^0.26", features = ["use-serde"] }
 serde = { version = "^1.0", features = ["derive"] }
 serde_json = { version = "^1.0" }
 rand = "^0.7"
 
 # Optional dependencies
 sled = { version = "0.34", optional = true }
-electrum-client = { version = "0.5.0-beta.1", optional = true }
+electrum-client = { version = "0.6", optional = true }
 reqwest = { version = "0.11", optional = true, features = ["json"] }
 futures = { version = "0.3", optional = true }
 async-trait = { version = "0.1", optional = true }
@@ -68,8 +68,8 @@ env_logger = "0.7"
 base64 = "^0.11"
 clap = "2.33"
 
-[[example]]
-name = "parse_descriptor"
+# [[example]]
+# name = "parse_descriptor"
 [[example]]
 name = "address_validator"
 

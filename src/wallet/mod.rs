@@ -36,11 +36,11 @@ use bitcoin::secp256k1::Secp256k1;
 
 use bitcoin::consensus::encode::serialize;
 use bitcoin::util::base58;
-use bitcoin::util::bip32::ChildNumber;
 use bitcoin::util::psbt::raw::Key as PSBTKey;
 use bitcoin::util::psbt::PartiallySignedTransaction as PSBT;
 use bitcoin::{Address, Network, OutPoint, Script, Transaction, TxOut, Txid};
 
+use miniscript::descriptor::DescriptorTrait;
 use miniscript::psbt::PsbtInputSatisfier;
 
 #[allow(unused_imports)]
@@ -60,16 +60,14 @@ use address_validator::AddressValidator;
 use coin_selection::DefaultCoinSelectionAlgorithm;
 use signer::{Signer, SignerOrdering, SignersContainer};
 use tx_builder::{BumpFee, CreateTx, FeePolicy, TxBuilder, TxParams};
-use utils::{
-    check_nlocktime, check_nsequence_rbf, descriptor_to_pk_ctx, After, Older, SecpCtx,
-    DUST_LIMIT_SATOSHI,
-};
+use utils::{check_nlocktime, check_nsequence_rbf, After, Older, SecpCtx, DUST_LIMIT_SATOSHI};
 
 use crate::blockchain::{Blockchain, Progress};
 use crate::database::{BatchDatabase, BatchOperations, DatabaseUtils};
+use crate::descriptor::derived::AsDerived;
 use crate::descriptor::{
-    get_checksum, DescriptorMeta, DescriptorScripts, ExtendedDescriptor, ExtractPolicy, Policy,
-    ToWalletDescriptor, XKeyUtils,
+    get_checksum, DerivedDescriptor, DerivedDescriptorMeta, DescriptorMeta, DescriptorScripts,
+    ExtendedDescriptor, ExtractPolicy, Policy, ToWalletDescriptor, XKeyUtils,
 };
 use crate::error::Error;
 use crate::psbt::PSBTUtils;
@@ -134,7 +132,9 @@ where
         client: B,
         current_height: Option<u32>,
     ) -> Result<Self, Error> {
-        let (descriptor, keymap) = descriptor.to_wallet_descriptor(network)?;
+        let secp = Secp256k1::new();
+
+        let (descriptor, keymap) = descriptor.to_wallet_descriptor(&secp, network)?;
         database.check_descriptor_checksum(
             KeychainKind::External,
             get_checksum(&descriptor.to_string())?.as_bytes(),
@@ -142,7 +142,8 @@ where
         let signers = Arc::new(SignersContainer::from(keymap));
         let (change_descriptor, change_signers) = match change_descriptor {
             Some(desc) => {
-                let (change_descriptor, change_keymap) = desc.to_wallet_descriptor(network)?;
+                let (change_descriptor, change_keymap) =
+                    desc.to_wallet_descriptor(&secp, network)?;
                 database.check_descriptor_checksum(
                     KeychainKind::Internal,
                     get_checksum(&change_descriptor.to_string())?.as_bytes(),
@@ -168,7 +169,7 @@ where
             current_height,
             client,
             database: RefCell::new(database),
-            secp: Secp256k1::new(),
+            secp,
         })
     }
 }
@@ -181,12 +182,11 @@ where
     /// Return a newly generated address using the external descriptor
     pub fn get_new_address(&self) -> Result<Address, Error> {
         let index = self.fetch_and_increment_index(KeychainKind::External)?;
-        let deriv_ctx = descriptor_to_pk_ctx(&self.secp);
 
         self.descriptor
-            .derive(ChildNumber::from_normal_idx(index)?)
-            .address(self.network, deriv_ctx)
-            .ok_or(Error::ScriptDoesntHaveAddressForm)
+            .as_derived(index, &self.secp)
+            .address(self.network)
+            .map_err(|_| Error::ScriptDoesntHaveAddressForm)
     }
 
     /// Return whether or not a `script` is part of this wallet (either internal or external)
@@ -666,7 +666,6 @@ where
         let vbytes = tx.get_weight() as f32 / 4.0;
         let feerate = details.fees as f32 / vbytes;
 
-        let deriv_ctx = descriptor_to_pk_ctx(&self.secp);
         // remove the inputs from the tx and process them
         let original_txin = tx.input.drain(..).collect::<Vec<_>>();
         let original_utxos = original_txin
@@ -686,7 +685,7 @@ where
                     Some((keychain, _)) => (
                         self._get_descriptor_for_keychain(keychain)
                             .0
-                            .max_satisfaction_weight(deriv_ctx)
+                            .max_satisfaction_weight()
                             .unwrap(),
                         keychain,
                     ),
@@ -855,7 +854,7 @@ where
             // - Try to derive the descriptor by looking at the txout. If it's in our database, we
             //   know exactly which `keychain` to use, and which derivation index it is
             // - If that fails, try to derive it by looking at the psbt input: the complete logic
-            //   is in `src/descriptor/mod.rs`, but it will basically look at `hd_keypaths`,
+            //   is in `src/descriptor/mod.rs`, but it will basically look at `bip32_derivation`,
             //   `redeem_script` and `witness_script` to determine the right derivation
             // - If that also fails, it will try it on the internal descriptor, if present
             let desc = psbt
@@ -879,7 +878,6 @@ where
             match desc {
                 Some(desc) => {
                     let mut tmp_input = bitcoin::TxIn::default();
-                    let deriv_ctx = descriptor_to_pk_ctx(&self.secp);
                     match desc.satisfy(
                         &mut tmp_input,
                         (
@@ -887,7 +885,6 @@ where
                             After::new(current_height, false),
                             Older::new(current_height, create_height, false),
                         ),
-                        deriv_ctx,
                     ) {
                         Ok(_) => {
                             let psbt_input = &mut psbt.inputs[n];
@@ -933,31 +930,30 @@ where
         }
     }
 
-    fn get_descriptor_for_txout(&self, txout: &TxOut) -> Result<Option<ExtendedDescriptor>, Error> {
+    fn get_descriptor_for_txout(
+        &self,
+        txout: &TxOut,
+    ) -> Result<Option<DerivedDescriptor<'_>>, Error> {
         Ok(self
             .database
             .borrow()
             .get_path_from_script_pubkey(&txout.script_pubkey)?
             .map(|(keychain, child)| (self.get_descriptor_for_keychain(keychain), child))
-            .map(|(desc, child)| desc.derive(ChildNumber::from_normal_idx(child).unwrap())))
+            .map(|(desc, child)| desc.as_derived(child, &self.secp)))
     }
 
     fn get_change_address(&self) -> Result<Script, Error> {
-        let deriv_ctx = descriptor_to_pk_ctx(&self.secp);
-
         let (desc, keychain) = self._get_descriptor_for_keychain(KeychainKind::Internal);
         let index = self.fetch_and_increment_index(keychain)?;
 
-        Ok(desc
-            .derive(ChildNumber::from_normal_idx(index)?)
-            .script_pubkey(deriv_ctx))
+        Ok(desc.as_derived(index, &self.secp).script_pubkey())
     }
 
     fn fetch_and_increment_index(&self, keychain: KeychainKind) -> Result<u32, Error> {
         let (descriptor, keychain) = self._get_descriptor_for_keychain(keychain);
-        let index = match descriptor.is_fixed() {
-            true => 0,
-            false => self.database.borrow_mut().increment_last_index(keychain)?,
+        let index = match descriptor.is_deriveable() {
+            false => 0,
+            true => self.database.borrow_mut().increment_last_index(keychain)?,
         };
 
         if self
@@ -969,12 +965,11 @@ where
             self.cache_addresses(keychain, index, CACHE_ADDR_BATCH_SIZE)?;
         }
 
-        let deriv_ctx = descriptor_to_pk_ctx(&self.secp);
+        let derived_descriptor = descriptor.as_derived(index, &self.secp);
 
-        let hd_keypaths = descriptor.get_hd_keypaths(index, &self.secp)?;
-        let script = descriptor
-            .derive(ChildNumber::from_normal_idx(index)?)
-            .script_pubkey(deriv_ctx);
+        let hd_keypaths = derived_descriptor.get_hd_keypaths(&self.secp)?;
+        let script = derived_descriptor.script_pubkey();
+
         for validator in &self.address_validators {
             validator.validate(keychain, &hd_keypaths, &script)?;
         }
@@ -989,7 +984,7 @@ where
         mut count: u32,
     ) -> Result<(), Error> {
         let (descriptor, keychain) = self._get_descriptor_for_keychain(keychain);
-        if descriptor.is_fixed() {
+        if !descriptor.is_deriveable() {
             if from > 0 {
                 return Ok(());
             }
@@ -997,16 +992,12 @@ where
             count = 1;
         }
 
-        let deriv_ctx = descriptor_to_pk_ctx(&self.secp);
-
         let mut address_batch = self.database.borrow().begin_batch();
 
         let start_time = time::Instant::new();
         for i in from..(from + count) {
             address_batch.set_script_pubkey(
-                &descriptor
-                    .derive(ChildNumber::from_normal_idx(i)?)
-                    .script_pubkey(deriv_ctx),
+                &descriptor.as_derived(i, &self.secp).script_pubkey(),
                 keychain,
                 i,
             )?;
@@ -1025,7 +1016,6 @@ where
     }
 
     fn get_available_utxos(&self) -> Result<Vec<(UTXO, usize)>, Error> {
-        let deriv_ctx = descriptor_to_pk_ctx(&self.secp);
         Ok(self
             .list_unspent()?
             .into_iter()
@@ -1034,7 +1024,7 @@ where
                 (
                     utxo,
                     self.get_descriptor_for_keychain(keychain)
-                        .max_satisfaction_weight(deriv_ctx)
+                        .max_satisfaction_weight()
                         .unwrap(),
                 )
             })
@@ -1174,19 +1164,19 @@ where
             };
 
             let (desc, _) = self._get_descriptor_for_keychain(keychain);
-            psbt_input.hd_keypaths = desc.get_hd_keypaths(child, &self.secp)?;
-            let derived_descriptor = desc.derive(ChildNumber::from_normal_idx(child)?);
+            let derived_descriptor = desc.as_derived(child, &self.secp);
+            psbt_input.bip32_derivation = derived_descriptor.get_hd_keypaths(&self.secp)?;
 
-            psbt_input.redeem_script = derived_descriptor.psbt_redeem_script(&self.secp);
-            psbt_input.witness_script = derived_descriptor.psbt_witness_script(&self.secp);
+            psbt_input.redeem_script = derived_descriptor.psbt_redeem_script();
+            psbt_input.witness_script = derived_descriptor.psbt_witness_script();
 
             let prev_output = input.previous_output;
             if let Some(prev_tx) = self.database.borrow().get_raw_tx(&prev_output.txid)? {
-                if derived_descriptor.is_witness() {
+                if desc.is_witness() {
                     psbt_input.witness_utxo =
                         Some(prev_tx.output[prev_output.vout as usize].clone());
                 }
-                if !derived_descriptor.is_witness() || params.force_non_witness_utxo {
+                if !desc.is_witness() || params.force_non_witness_utxo {
                     psbt_input.non_witness_utxo = Some(prev_tx);
                 }
             }
@@ -1207,11 +1197,12 @@ where
                 .get_path_from_script_pubkey(&tx_output.script_pubkey)?
             {
                 let (desc, _) = self._get_descriptor_for_keychain(keychain);
-                psbt_output.hd_keypaths = desc.get_hd_keypaths(child, &self.secp)?;
+                let derived_descriptor = desc.as_derived(child, &self.secp);
+
+                psbt_output.bip32_derivation = derived_descriptor.get_hd_keypaths(&self.secp)?;
                 if params.include_output_redeem_witness_script {
-                    let derived_descriptor = desc.derive(ChildNumber::from_normal_idx(child)?);
-                    psbt_output.witness_script = derived_descriptor.psbt_witness_script(&self.secp);
-                    psbt_output.redeem_script = derived_descriptor.psbt_redeem_script(&self.secp);
+                    psbt_output.witness_script = derived_descriptor.psbt_witness_script();
+                    psbt_output.redeem_script = derived_descriptor.psbt_redeem_script();
                 };
             }
         }
@@ -1237,8 +1228,10 @@ where
 
                     // merge hd_keypaths
                     let desc = self.get_descriptor_for_keychain(keychain);
-                    let mut hd_keypaths = desc.get_hd_keypaths(child, &self.secp)?;
-                    psbt_input.hd_keypaths.append(&mut hd_keypaths);
+                    let mut hd_keypaths = desc
+                        .as_derived(child, &self.secp)
+                        .get_hd_keypaths(&self.secp)?;
+                    psbt_input.bip32_derivation.append(&mut hd_keypaths);
                 }
             }
         }
@@ -1283,9 +1276,9 @@ where
 
         let mut run_setup = false;
 
-        let max_address = match self.descriptor.is_fixed() {
-            true => 0,
-            false => max_address_param.unwrap_or(CACHE_ADDR_BATCH_SIZE),
+        let max_address = match self.descriptor.is_deriveable() {
+            false => 0,
+            true => max_address_param.unwrap_or(CACHE_ADDR_BATCH_SIZE),
         };
         if self
             .database
@@ -1298,9 +1291,9 @@ where
         }
 
         if let Some(change_descriptor) = &self.change_descriptor {
-            let max_address = match change_descriptor.is_fixed() {
-                true => 0,
-                false => max_address_param.unwrap_or(CACHE_ADDR_BATCH_SIZE),
+            let max_address = match change_descriptor.is_deriveable() {
+                false => 0,
+                true => max_address_param.unwrap_or(CACHE_ADDR_BATCH_SIZE),
             };
 
             if self
@@ -1946,9 +1939,9 @@ mod test {
             .drain_wallet();
         let (psbt, _) = builder.finish().unwrap();
 
-        assert_eq!(psbt.inputs[0].hd_keypaths.len(), 1);
+        assert_eq!(psbt.inputs[0].bip32_derivation.len(), 1);
         assert_eq!(
-            psbt.inputs[0].hd_keypaths.values().nth(0).unwrap(),
+            psbt.inputs[0].bip32_derivation.values().nth(0).unwrap(),
             &(
                 Fingerprint::from_str("d34db33f").unwrap(),
                 DerivationPath::from_str("m/44'/0'/0'/0/0").unwrap()
@@ -1972,9 +1965,9 @@ mod test {
             .drain_wallet();
         let (psbt, _) = builder.finish().unwrap();
 
-        assert_eq!(psbt.outputs[0].hd_keypaths.len(), 1);
+        assert_eq!(psbt.outputs[0].bip32_derivation.len(), 1);
         assert_eq!(
-            psbt.outputs[0].hd_keypaths.values().nth(0).unwrap(),
+            psbt.outputs[0].bip32_derivation.values().nth(0).unwrap(),
             &(
                 Fingerprint::from_str("d34db33f").unwrap(),
                 DerivationPath::from_str("m/44'/0'/0'/0/5").unwrap()
@@ -3188,8 +3181,8 @@ mod test {
             .drain_wallet();
         let (mut psbt, _) = builder.finish().unwrap();
 
-        psbt.inputs[0].hd_keypaths.clear();
-        assert_eq!(psbt.inputs[0].hd_keypaths.len(), 0);
+        psbt.inputs[0].bip32_derivation.clear();
+        assert_eq!(psbt.inputs[0].bip32_derivation.len(), 0);
 
         let (signed_psbt, finalized) = wallet.sign(psbt, None).unwrap();
         assert_eq!(finalized, true);
@@ -3233,7 +3226,7 @@ mod test {
                 "wpkh(025476c2e83188368da1ff3e292e7acafcdb3566bb0ad253f62fc70f07aeee6357)",
             )
             .unwrap()
-            .script_pubkey(miniscript::NullCtx),
+            .script_pubkey(),
         });
         psbt.inputs.push(dud_input);
         psbt.global.unsigned_tx.input.push(bitcoin::TxIn::default());

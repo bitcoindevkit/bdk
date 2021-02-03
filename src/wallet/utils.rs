@@ -23,9 +23,7 @@
 // SOFTWARE.
 
 use bitcoin::secp256k1::{All, Secp256k1};
-use bitcoin::util::bip32;
 
-use miniscript::descriptor::DescriptorPublicKeyCtx;
 use miniscript::{MiniscriptKey, Satisfier, ToPublicKey};
 
 // De-facto standard "dust limit" (even though it should change based on the output type)
@@ -110,7 +108,7 @@ pub(crate) fn check_nlocktime(nlocktime: u32, required: u32) -> bool {
     true
 }
 
-impl<ToPkCtx: Copy, Pk: MiniscriptKey + ToPublicKey<ToPkCtx>> Satisfier<ToPkCtx, Pk> for After {
+impl<Pk: MiniscriptKey + ToPublicKey> Satisfier<Pk> for After {
     fn check_after(&self, n: u32) -> bool {
         if let Some(current_height) = self.current_height {
             current_height >= n
@@ -140,7 +138,7 @@ impl Older {
     }
 }
 
-impl<ToPkCtx: Copy, Pk: MiniscriptKey + ToPublicKey<ToPkCtx>> Satisfier<ToPkCtx, Pk> for Older {
+impl<Pk: MiniscriptKey + ToPublicKey> Satisfier<Pk> for Older {
     fn check_older(&self, n: u32) -> bool {
         if let Some(current_height) = self.current_height {
             // TODO: test >= / >
@@ -152,12 +150,6 @@ impl<ToPkCtx: Copy, Pk: MiniscriptKey + ToPublicKey<ToPkCtx>> Satisfier<ToPkCtx,
 }
 
 pub(crate) type SecpCtx = Secp256k1<All>;
-pub(crate) fn descriptor_to_pk_ctx(secp: &SecpCtx) -> DescriptorPublicKeyCtx<'_, All> {
-    // Create a `to_pk_ctx` with a dummy derivation index, since we always use this on descriptor
-    // that have already been derived with `Descriptor::derive()`, so the child number added here
-    // is ignored.
-    DescriptorPublicKeyCtx::new(secp, bip32::ChildNumber::Normal { index: 0 })
-}
 
 pub struct ChunksIterator<I: Iterator> {
     iter: I,

@@ -57,6 +57,8 @@ use std::marker::PhantomData;
 use bitcoin::util::psbt::PartiallySignedTransaction as PSBT;
 use bitcoin::{OutPoint, Script, SigHashType, Transaction};
 
+use miniscript::descriptor::DescriptorTrait;
+
 use super::coin_selection::{CoinSelectionAlgorithm, DefaultCoinSelectionAlgorithm};
 use crate::{database::BatchDatabase, Error, Wallet};
 use crate::{
@@ -276,7 +278,6 @@ impl<'a, B, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderConte
     /// These have priority over the "unspendable" utxos, meaning that if a utxo is present both in
     /// the "utxos" and the "unspendable" list, it will be spent.
     pub fn add_utxos(&mut self, outpoints: &[OutPoint]) -> Result<&mut Self, Error> {
-        let deriv_ctx = crate::wallet::descriptor_to_pk_ctx(self.wallet.secp_ctx());
         let utxos = outpoints
             .iter()
             .map(|outpoint| self.wallet.get_utxo(*outpoint)?.ok_or(Error::UnknownUTXO))
@@ -284,7 +285,7 @@ impl<'a, B, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderConte
 
         for utxo in utxos {
             let descriptor = self.wallet.get_descriptor_for_keychain(utxo.keychain);
-            let satisfaction_weight = descriptor.max_satisfaction_weight(deriv_ctx).unwrap();
+            let satisfaction_weight = descriptor.max_satisfaction_weight().unwrap();
             self.params.utxos.push((utxo, satisfaction_weight));
         }
 

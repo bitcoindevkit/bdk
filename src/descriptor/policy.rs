@@ -38,7 +38,7 @@
 //! let secp = Secp256k1::new();
 //! let desc = "wsh(and_v(v:pk(cV3oCth6zxZ1UVsHLnGothsWNsaoxRhC6aeNi5VbSdFpwUkgkEci),or_d(pk(cVMTy7uebJgvFaSBwcgvwk8qn8xSLc97dKow4MBetjrrahZoimm2),older(12960))))";
 //!
-//! let (extended_desc, key_map) = ExtendedDescriptor::parse_descriptor(desc)?;
+//! let (extended_desc, key_map) = ExtendedDescriptor::parse_descriptor(&secp, desc)?;
 //! println!("{:?}", extended_desc);
 //!
 //! let signers = Arc::new(key_map.into());
@@ -58,15 +58,15 @@ use bitcoin::hashes::*;
 use bitcoin::util::bip32::Fingerprint;
 use bitcoin::PublicKey;
 
-use miniscript::descriptor::{DescriptorPublicKey, SortedMultiVec};
+use miniscript::descriptor::{DescriptorPublicKey, ShInner, SortedMultiVec, WshInner};
 use miniscript::{Descriptor, Miniscript, MiniscriptKey, ScriptContext, Terminal, ToPublicKey};
 
 #[allow(unused_imports)]
 use log::{debug, error, info, trace};
 
-use crate::descriptor::ExtractPolicy;
+use crate::descriptor::{DerivedDescriptorKey, ExtractPolicy};
 use crate::wallet::signer::{SignerId, SignersContainer};
-use crate::wallet::utils::{self, descriptor_to_pk_ctx, SecpCtx};
+use crate::wallet::utils::{self, SecpCtx};
 
 use super::checksum::get_checksum;
 use super::error::Error;
@@ -738,8 +738,9 @@ fn signature_key(
     signers: &SignersContainer,
     secp: &SecpCtx,
 ) -> Policy {
-    let deriv_ctx = descriptor_to_pk_ctx(secp);
-    let key_hash = key.to_public_key(deriv_ctx).to_pubkeyhash();
+    let key_hash = DerivedDescriptorKey::new(key.clone(), secp)
+        .to_public_key()
+        .to_pubkeyhash();
     let mut policy: Policy = SatisfiableItem::Signature(PKOrF::from_key_hash(key_hash)).into();
 
     if signers.find(SignerId::PkHash(key_hash)).is_some() {
@@ -866,28 +867,28 @@ impl ExtractPolicy for Descriptor<DescriptorPublicKey> {
         }
 
         match self {
-            Descriptor::Pk(pubkey)
-            | Descriptor::Pkh(pubkey)
-            | Descriptor::Wpkh(pubkey)
-            | Descriptor::ShWpkh(pubkey) => Ok(Some(signature(pubkey, signers, secp))),
-            Descriptor::Bare(inner) => Ok(inner.extract_policy(signers, secp)?),
-            Descriptor::Sh(inner) => Ok(inner.extract_policy(signers, secp)?),
-            Descriptor::Wsh(inner) | Descriptor::ShWsh(inner) => {
-                Ok(inner.extract_policy(signers, secp)?)
-            }
-
-            // `sortedmulti()` is handled separately
-            Descriptor::ShSortedMulti(keys) => make_sortedmulti(&keys, signers, secp),
-            Descriptor::ShWshSortedMulti(keys) | Descriptor::WshSortedMulti(keys) => {
-                make_sortedmulti(&keys, signers, secp)
-            }
+            Descriptor::Pkh(pk) => Ok(Some(signature(pk.as_inner(), signers, secp))),
+            Descriptor::Wpkh(pk) => Ok(Some(signature(pk.as_inner(), signers, secp))),
+            Descriptor::Sh(sh) => match sh.as_inner() {
+                ShInner::Wpkh(pk) => Ok(Some(signature(pk.as_inner(), signers, secp))),
+                ShInner::Ms(ms) => Ok(ms.extract_policy(signers, secp)?),
+                ShInner::SortedMulti(ref keys) => make_sortedmulti(keys, signers, secp),
+                ShInner::Wsh(wsh) => match wsh.as_inner() {
+                    WshInner::Ms(ms) => Ok(ms.extract_policy(signers, secp)?),
+                    WshInner::SortedMulti(ref keys) => make_sortedmulti(keys, signers, secp),
+                },
+            },
+            Descriptor::Wsh(wsh) => match wsh.as_inner() {
+                WshInner::Ms(ms) => Ok(ms.extract_policy(signers, secp)?),
+                WshInner::SortedMulti(ref keys) => make_sortedmulti(keys, signers, secp),
+            },
+            Descriptor::Bare(ms) => Ok(ms.as_inner().extract_policy(signers, secp)?),
         }
     }
 }
 
 #[cfg(test)]
 mod test {
-
     use crate::descriptor;
     use crate::descriptor::{ExtractPolicy, ToWalletDescriptor};
 
@@ -897,7 +898,6 @@ mod test {
     use crate::wallet::signer::SignersContainer;
     use bitcoin::secp256k1::{All, Secp256k1};
     use bitcoin::util::bip32;
-    use bitcoin::util::bip32::ChildNumber;
     use bitcoin::Network;
     use std::str::FromStr;
     use std::sync::Arc;
@@ -925,9 +925,11 @@ mod test {
 
     #[test]
     fn test_extract_policy_for_wpkh() {
+        let secp = Secp256k1::new();
+
         let (prvkey, pubkey, fingerprint) = setup_keys(TPRV0_STR);
         let desc = descriptor!(wpkh(pubkey)).unwrap();
-        let (wallet_desc, keymap) = desc.to_wallet_descriptor(Network::Testnet).unwrap();
+        let (wallet_desc, keymap) = desc.to_wallet_descriptor(&secp, Network::Testnet).unwrap();
         let signers_container = Arc::new(SignersContainer::from(keymap));
         let policy = wallet_desc
             .extract_policy(&signers_container, &Secp256k1::new())
@@ -940,7 +942,7 @@ mod test {
         assert!(matches!(&policy.contribution, Satisfaction::None));
 
         let desc = descriptor!(wpkh(prvkey)).unwrap();
-        let (wallet_desc, keymap) = desc.to_wallet_descriptor(Network::Testnet).unwrap();
+        let (wallet_desc, keymap) = desc.to_wallet_descriptor(&secp, Network::Testnet).unwrap();
         let signers_container = Arc::new(SignersContainer::from(keymap));
         let policy = wallet_desc
             .extract_policy(&signers_container, &Secp256k1::new())
@@ -1018,10 +1020,12 @@ mod test {
     #[test]
     #[ignore] // see https://github.com/bitcoindevkit/bdk/issues/225
     fn test_extract_policy_for_sh_multi_complete_1of2() {
+        let secp = Secp256k1::new();
+
         let (_prvkey0, pubkey0, fingerprint0) = setup_keys(TPRV0_STR);
         let (prvkey1, _pubkey1, fingerprint1) = setup_keys(TPRV1_STR);
         let desc = descriptor!(sh(multi(1, pubkey0, prvkey1))).unwrap();
-        let (wallet_desc, keymap) = desc.to_wallet_descriptor(Network::Testnet).unwrap();
+        let (wallet_desc, keymap) = desc.to_wallet_descriptor(&secp, Network::Testnet).unwrap();
         let signers_container = Arc::new(SignersContainer::from(keymap));
         let policy = wallet_desc
             .extract_policy(&signers_container, &Secp256k1::new())
@@ -1046,10 +1050,12 @@ mod test {
     // 2 prv keys descriptor, required 2 prv keys
     #[test]
     fn test_extract_policy_for_sh_multi_complete_2of2() {
+        let secp = Secp256k1::new();
+
         let (prvkey0, _pubkey0, fingerprint0) = setup_keys(TPRV0_STR);
         let (prvkey1, _pubkey1, fingerprint1) = setup_keys(TPRV1_STR);
         let desc = descriptor!(sh(multi(2, prvkey0, prvkey1))).unwrap();
-        let (wallet_desc, keymap) = desc.to_wallet_descriptor(Network::Testnet).unwrap();
+        let (wallet_desc, keymap) = desc.to_wallet_descriptor(&secp, Network::Testnet).unwrap();
         let signers_container = Arc::new(SignersContainer::from(keymap));
         let policy = wallet_desc
             .extract_policy(&signers_container, &Secp256k1::new())
@@ -1075,10 +1081,12 @@ mod test {
 
     #[test]
     fn test_extract_policy_for_single_wpkh() {
+        let secp = Secp256k1::new();
+
         let (prvkey, pubkey, fingerprint) = setup_keys(TPRV0_STR);
         let desc = descriptor!(wpkh(pubkey)).unwrap();
-        let (wallet_desc, keymap) = desc.to_wallet_descriptor(Network::Testnet).unwrap();
-        let single_key = wallet_desc.derive(ChildNumber::from_normal_idx(0).unwrap());
+        let (wallet_desc, keymap) = desc.to_wallet_descriptor(&secp, Network::Testnet).unwrap();
+        let single_key = wallet_desc.derive(0);
         let signers_container = Arc::new(SignersContainer::from(keymap));
         let policy = single_key
             .extract_policy(&signers_container, &Secp256k1::new())
@@ -1091,8 +1099,8 @@ mod test {
         assert!(matches!(&policy.contribution, Satisfaction::None));
 
         let desc = descriptor!(wpkh(prvkey)).unwrap();
-        let (wallet_desc, keymap) = desc.to_wallet_descriptor(Network::Testnet).unwrap();
-        let single_key = wallet_desc.derive(ChildNumber::from_normal_idx(0).unwrap());
+        let (wallet_desc, keymap) = desc.to_wallet_descriptor(&secp, Network::Testnet).unwrap();
+        let single_key = wallet_desc.derive(0);
         let signers_container = Arc::new(SignersContainer::from(keymap));
         let policy = single_key
             .extract_policy(&signers_container, &Secp256k1::new())
@@ -1111,11 +1119,13 @@ mod test {
     #[test]
     #[ignore] // see https://github.com/bitcoindevkit/bdk/issues/225
     fn test_extract_policy_for_single_wsh_multi_complete_1of2() {
+        let secp = Secp256k1::new();
+
         let (_prvkey0, pubkey0, fingerprint0) = setup_keys(TPRV0_STR);
         let (prvkey1, _pubkey1, fingerprint1) = setup_keys(TPRV1_STR);
         let desc = descriptor!(sh(multi(1, pubkey0, prvkey1))).unwrap();
-        let (wallet_desc, keymap) = desc.to_wallet_descriptor(Network::Testnet).unwrap();
-        let single_key = wallet_desc.derive(ChildNumber::from_normal_idx(0).unwrap());
+        let (wallet_desc, keymap) = desc.to_wallet_descriptor(&secp, Network::Testnet).unwrap();
+        let single_key = wallet_desc.derive(0);
         let signers_container = Arc::new(SignersContainer::from(keymap));
         let policy = single_key
             .extract_policy(&signers_container, &Secp256k1::new())
@@ -1142,6 +1152,8 @@ mod test {
     #[test]
     #[ignore] // see https://github.com/bitcoindevkit/bdk/issues/225
     fn test_extract_policy_for_wsh_multi_timelock() {
+        let secp = Secp256k1::new();
+
         let (prvkey0, _pubkey0, _fingerprint0) = setup_keys(TPRV0_STR);
         let (_prvkey1, pubkey1, _fingerprint1) = setup_keys(TPRV1_STR);
         let sequence = 50;
@@ -1154,7 +1166,7 @@ mod test {
         )))
         .unwrap();
 
-        let (wallet_desc, keymap) = desc.to_wallet_descriptor(Network::Testnet).unwrap();
+        let (wallet_desc, keymap) = desc.to_wallet_descriptor(&secp, Network::Testnet).unwrap();
         let signers_container = Arc::new(SignersContainer::from(keymap));
         let policy = wallet_desc
             .extract_policy(&signers_container, &Secp256k1::new())

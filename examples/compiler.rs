@@ -29,6 +29,7 @@ extern crate log;
 extern crate miniscript;
 extern crate serde_json;
 
+use std::error::Error;
 use std::str::FromStr;
 
 use log::info;
@@ -42,7 +43,7 @@ use miniscript::Descriptor;
 use bdk::database::memory::MemoryDatabase;
 use bdk::{KeychainKind, Wallet};
 
-fn main() {
+fn main() -> Result<(), Box<dyn Error>> {
     env_logger::init_from_env(
         env_logger::Env::default().filter_or(env_logger::DEFAULT_FILTER_ENV, "info"),
     );
@@ -81,12 +82,12 @@ fn main() {
     let policy_str = matches.value_of("POLICY").unwrap();
     info!("Compiling policy: {}", policy_str);
 
-    let policy = Concrete::<String>::from_str(&policy_str).unwrap();
+    let policy = Concrete::<String>::from_str(&policy_str)?;
 
     let descriptor = match matches.value_of("TYPE").unwrap() {
-        "sh" => Descriptor::Sh(policy.compile().unwrap()),
-        "wsh" => Descriptor::Wsh(policy.compile().unwrap()),
-        "sh-wsh" => Descriptor::ShWsh(policy.compile().unwrap()),
+        "sh" => Descriptor::new_sh(policy.compile()?)?,
+        "wsh" => Descriptor::new_wsh(policy.compile()?)?,
+        "sh-wsh" => Descriptor::new_sh_wsh(policy.compile()?)?,
         _ => panic!("Invalid type"),
     };
 
@@ -98,15 +99,17 @@ fn main() {
         Some("regtest") => Network::Regtest,
         Some("testnet") | _ => Network::Testnet,
     };
-    let wallet = Wallet::new_offline(&format!("{}", descriptor), None, network, database).unwrap();
+    let wallet = Wallet::new_offline(&format!("{}", descriptor), None, network, database)?;
 
-    info!("... First address: {}", wallet.get_new_address().unwrap());
+    info!("... First address: {}", wallet.get_new_address()?);
 
     if matches.is_present("parsed_policy") {
-        let spending_policy = wallet.policies(KeychainKind::External).unwrap();
+        let spending_policy = wallet.policies(KeychainKind::External)?;
         info!(
             "... Spending policy:\n{}",
-            serde_json::to_string_pretty(&spending_policy).unwrap()
+            serde_json::to_string_pretty(&spending_policy)?
         );
     }
+
+    Ok(())
 }

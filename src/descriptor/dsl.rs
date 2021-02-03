@@ -28,32 +28,53 @@
 #[macro_export]
 macro_rules! impl_top_level_sh {
     // disallow `sortedmulti` in `bare()`
-    ( Bare, Bare, sortedmulti $( $inner:tt )* ) => {
+    ( Bare, new, new, Legacy, sortedmulti $( $inner:tt )* ) => {
         compile_error!("`bare()` descriptors can't contain any `sortedmulti()` operands");
     };
-    ( Bare, Bare, sortedmulti_vec $( $inner:tt )* ) => {
+    ( Bare, new, new, Legacy, sortedmulti_vec $( $inner:tt )* ) => {
         compile_error!("`bare()` descriptors can't contain any `sortedmulti_vec()` operands");
     };
 
-    ( $descriptor_variant:ident, $sortedmulti_variant:ident, sortedmulti $( $inner:tt )* ) => {
-        $crate::impl_sortedmulti!(sortedmulti $( $inner )*)
-            .and_then(|(inner, key_map, valid_networks)| Ok(($crate::miniscript::Descriptor::$sortedmulti_variant(inner), key_map, valid_networks)))
-    };
-    ( $descriptor_variant:ident, $sortedmulti_variant:ident, sortedmulti_vec $( $inner:tt )* ) => {
-        $crate::impl_sortedmulti!(sortedmulti_vec $( $inner )*)
-            .and_then(|(inner, key_map, valid_networks)| Ok(($crate::miniscript::Descriptor::$sortedmulti_variant(inner), key_map, valid_networks)))
-    };
+    ( $inner_struct:ident, $constructor:ident, $sortedmulti_constructor:ident, $ctx:ident, sortedmulti $( $inner:tt )* ) => {{
+        use std::marker::PhantomData;
 
-    ( $descriptor_variant:ident, $sortedmulti_variant:ident, $( $minisc:tt )* ) => {
+        use $crate::miniscript::descriptor::{$inner_struct, Descriptor, DescriptorPublicKey};
+        use $crate::miniscript::$ctx;
+
+        let build_desc = |k, pks| {
+            Ok((Descriptor::<DescriptorPublicKey>::$inner_struct($inner_struct::$sortedmulti_constructor(k, pks)?), PhantomData::<$ctx>))
+        };
+
+        $crate::impl_sortedmulti!(build_desc, sortedmulti $( $inner )*)
+    }};
+    ( $inner_struct:ident, $constructor:ident, $sortedmulti_constructor:ident, $ctx:ident, sortedmulti_vec $( $inner:tt )* ) => {{
+        use std::marker::PhantomData;
+
+        use $crate::miniscript::descriptor::{$inner_struct, Descriptor, DescriptorPublicKey};
+        use $crate::miniscript::$ctx;
+
+        let build_desc = |k, pks| {
+            Ok((Descriptor::<DescriptorPublicKey>::$inner_struct($inner_struct::$sortedmulti_constructor(k, pks)?), PhantomData::<$ctx>))
+        };
+
+        $crate::impl_sortedmulti!(build_desc, sortedmulti_vec $( $inner )*)
+    }};
+
+    ( $inner_struct:ident, $constructor:ident, $sortedmulti_constructor:ident, $ctx:ident, $( $minisc:tt )* ) => {{
+        use $crate::miniscript::descriptor::{$inner_struct, Descriptor, DescriptorPublicKey};
+
         $crate::fragment!($( $minisc )*)
-            .map(|(minisc, keymap, networks)|($crate::miniscript::Descriptor::<$crate::miniscript::descriptor::DescriptorPublicKey>::$descriptor_variant(minisc), keymap, networks))
-    };
+            .and_then(|(minisc, keymap, networks)| Ok(($inner_struct::$constructor(minisc)?, keymap, networks)))
+            .and_then(|(inner, key_map, valid_networks)| Ok((Descriptor::<DescriptorPublicKey>::$inner_struct(inner), key_map, valid_networks)))
+    }};
 }
 
 #[doc(hidden)]
 #[macro_export]
 macro_rules! impl_top_level_pk {
-    ( $descriptor_variant:ident, $ctx:ty, $key:expr ) => {{
+    ( $inner_type:ident, $ctx:ty, $key:expr ) => {{
+        use $crate::miniscript::descriptor::$inner_type;
+
         #[allow(unused_imports)]
         use $crate::keys::{DescriptorKey, ToDescriptorKey};
         let secp = $crate::bitcoin::secp256k1::Secp256k1::new();
@@ -61,15 +82,7 @@ macro_rules! impl_top_level_pk {
         $key.to_descriptor_key()
             .and_then(|key: DescriptorKey<$ctx>| key.extract(&secp))
             .map_err($crate::descriptor::DescriptorError::Key)
-            .map(|(pk, key_map, valid_networks)| {
-                (
-                    $crate::miniscript::Descriptor::<
-                        $crate::miniscript::descriptor::DescriptorPublicKey,
-                    >::$descriptor_variant(pk),
-                    key_map,
-                    valid_networks,
-                )
-            })
+            .map(|(pk, key_map, valid_networks)| ($inner_type::new(pk), key_map, valid_networks))
     }};
 }
 
@@ -207,11 +220,11 @@ macro_rules! impl_node_opcode_three {
 #[doc(hidden)]
 #[macro_export]
 macro_rules! impl_sortedmulti {
-    ( sortedmulti_vec ( $thresh:expr, $keys:expr ) ) => ({
+    ( $build_desc:expr, sortedmulti_vec ( $thresh:expr, $keys:expr ) ) => ({
         let secp = $crate::bitcoin::secp256k1::Secp256k1::new();
-        $crate::keys::make_sortedmulti_inner($thresh, $keys, &secp)
+        $crate::keys::make_sortedmulti($thresh, $keys, $build_desc, &secp)
     });
-    ( sortedmulti ( $thresh:expr $(, $key:expr )+ ) ) => ({
+    ( $build_desc:expr, sortedmulti ( $thresh:expr $(, $key:expr )+ ) ) => ({
         use $crate::keys::ToDescriptorKey;
         let secp = $crate::bitcoin::secp256k1::Secp256k1::new();
 
@@ -222,7 +235,7 @@ macro_rules! impl_sortedmulti {
 
         keys.into_iter().collect::<Result<Vec<_>, _>>()
             .map_err($crate::descriptor::DescriptorError::Key)
-            .and_then(|keys| $crate::keys::make_sortedmulti_inner($thresh, keys, &secp))
+            .and_then(|keys| $crate::keys::make_sortedmulti($thresh, keys, $build_desc, &secp))
     });
 
 }
@@ -399,34 +412,46 @@ macro_rules! apply_modifier {
 #[macro_export]
 macro_rules! descriptor {
     ( bare ( $( $minisc:tt )* ) ) => ({
-        $crate::impl_top_level_sh!(Bare, Bare, $( $minisc )*)
+        $crate::impl_top_level_sh!(Bare, new, new, Legacy, $( $minisc )*)
     });
     ( sh ( wsh ( $( $minisc:tt )* ) ) ) => ({
         $crate::descriptor!(shwsh ($( $minisc )*))
     });
     ( shwsh ( $( $minisc:tt )* ) ) => ({
-        $crate::impl_top_level_sh!(ShWsh, ShWshSortedMulti, $( $minisc )*)
+        $crate::impl_top_level_sh!(Sh, new_wsh, new_wsh_sortedmulti, Segwitv0, $( $minisc )*)
     });
     ( pk ( $key:expr ) ) => ({
-        $crate::impl_top_level_pk!(Pk, $crate::miniscript::Legacy, $key)
+        // `pk()` is actually implemented as `bare(pk())`
+        $crate::descriptor!( bare ( pk ( $key ) ) )
     });
     ( pkh ( $key:expr ) ) => ({
-        $crate::impl_top_level_pk!(Pkh,$crate::miniscript::Legacy, $key)
+        use $crate::miniscript::descriptor::{Descriptor, DescriptorPublicKey};
+
+        $crate::impl_top_level_pk!(Pkh, $crate::miniscript::Legacy, $key)
+            .map(|(a, b, c)| (Descriptor::<DescriptorPublicKey>::Pkh(a), b, c))
     });
     ( wpkh ( $key:expr ) ) => ({
+        use $crate::miniscript::descriptor::{Descriptor, DescriptorPublicKey};
+
         $crate::impl_top_level_pk!(Wpkh, $crate::miniscript::Segwitv0, $key)
+            .and_then(|(a, b, c)| Ok((a?, b, c)))
+            .map(|(a, b, c)| (Descriptor::<DescriptorPublicKey>::Wpkh(a), b, c))
     });
     ( sh ( wpkh ( $key:expr ) ) ) => ({
         $crate::descriptor!(shwpkh ( $key ))
     });
     ( shwpkh ( $key:expr ) ) => ({
-        $crate::impl_top_level_pk!(ShWpkh, $crate::miniscript::Segwitv0, $key)
+        use $crate::miniscript::descriptor::{Descriptor, DescriptorPublicKey, Sh};
+
+        $crate::impl_top_level_pk!(Wpkh, $crate::miniscript::Segwitv0, $key)
+            .and_then(|(a, b, c)| Ok((a?, b, c)))
+            .and_then(|(a, b, c)| Ok((Descriptor::<DescriptorPublicKey>::Sh(Sh::new_wpkh(a.into_inner())?), b, c)))
     });
     ( sh ( $( $minisc:tt )* ) ) => ({
-        $crate::impl_top_level_sh!(Sh, ShSortedMulti, $( $minisc )*)
+        $crate::impl_top_level_sh!(Sh, new, new_sortedmulti, Legacy, $( $minisc )*)
     });
     ( wsh ( $( $minisc:tt )* ) ) => ({
-        $crate::impl_top_level_sh!(Wsh, WshSortedMulti, $( $minisc )*)
+        $crate::impl_top_level_sh!(Wsh, new, new_sortedmulti, Segwitv0, $( $minisc )*)
     });
 }
 
@@ -654,7 +679,7 @@ macro_rules! fragment {
 mod test {
     use bitcoin::hashes::hex::ToHex;
     use bitcoin::secp256k1::Secp256k1;
-    use miniscript::descriptor::{DescriptorPublicKey, DescriptorPublicKeyCtx, KeyMap};
+    use miniscript::descriptor::{DescriptorPublicKey, DescriptorTrait, KeyMap};
     use miniscript::{Descriptor, Legacy, Segwitv0};
 
     use std::str::FromStr;
@@ -663,8 +688,9 @@ mod test {
     use crate::keys::{DescriptorKey, ToDescriptorKey, ValidNetworks};
     use bitcoin::network::constants::Network::{Bitcoin, Regtest, Testnet};
     use bitcoin::util::bip32;
-    use bitcoin::util::bip32::ChildNumber;
     use bitcoin::PrivateKey;
+
+    use crate::descriptor::derived::AsDerived;
 
     // test the descriptor!() macro
 
@@ -676,23 +702,22 @@ mod test {
         expected: &[&str],
     ) {
         let secp = Secp256k1::new();
-        let deriv_ctx = DescriptorPublicKeyCtx::new(&secp, ChildNumber::Normal { index: 0 });
 
         let (desc, _key_map, _networks) = desc.unwrap();
         assert_eq!(desc.is_witness(), is_witness);
-        assert_eq!(desc.is_fixed(), is_fixed);
+        assert_eq!(!desc.is_deriveable(), is_fixed);
         for i in 0..expected.len() {
             let index = i as u32;
-            let child_desc = if desc.is_fixed() {
-                desc.clone()
+            let child_desc = if !desc.is_deriveable() {
+                desc.as_derived_fixed(&secp)
             } else {
-                desc.derive(ChildNumber::from_normal_idx(index).unwrap())
+                desc.as_derived(index, &secp)
             };
-            let address = child_desc.address(Regtest, deriv_ctx);
-            if let Some(address) = address {
+            let address = child_desc.address(Regtest);
+            if let Ok(address) = address {
                 assert_eq!(address.to_string(), *expected.get(i).unwrap());
             } else {
-                let script = child_desc.script_pubkey(deriv_ctx);
+                let script = child_desc.script_pubkey();
                 assert_eq!(script.to_hex().as_str(), *expected.get(i).unwrap());
             }
         }
@@ -1001,7 +1026,7 @@ mod test {
         let desc_key: DescriptorKey<Legacy> = (xprv, path.clone()).to_descriptor_key().unwrap();
 
         let (desc, _key_map, _valid_networks) = descriptor!(pkh(desc_key)).unwrap();
-        assert_eq!(desc.to_string(), "pkh(tpubD6NzVbkrYhZ4WR7a4vY1VT3khMJMeAxVsfq9TBJyJWrNk247zCJtV7AWf6UJP7rAVsn8NNKdJi3gFyKPTmWZS9iukb91xbn2HbFSMQm2igY/0/*)");
+        assert_eq!(desc.to_string(), "pkh(tpubD6NzVbkrYhZ4WR7a4vY1VT3khMJMeAxVsfq9TBJyJWrNk247zCJtV7AWf6UJP7rAVsn8NNKdJi3gFyKPTmWZS9iukb91xbn2HbFSMQm2igY/0/*)#yrnz9pp2");
 
         // as expected this does not compile due to invalid context
         //let desc_key:DescriptorKey<Segwitv0> = (xprv, path.clone()).to_descriptor_key().unwrap();
@@ -1015,17 +1040,16 @@ mod test {
         let (descriptor, _, _) =
             descriptor!(wsh(thresh(2,d:v:older(1),s:pk(private_key),s:pk(private_key)))).unwrap();
 
-        assert_eq!(descriptor.to_string(), "wsh(thresh(2,dv:older(1),s:pk(02e96fe52ef0e22d2f131dd425ce1893073a3c6ad20e8cac36726393dfb4856a4c),s:pk(02e96fe52ef0e22d2f131dd425ce1893073a3c6ad20e8cac36726393dfb4856a4c)))")
+        assert_eq!(descriptor.to_string(), "wsh(thresh(2,dv:older(1),s:pk(02e96fe52ef0e22d2f131dd425ce1893073a3c6ad20e8cac36726393dfb4856a4c),s:pk(02e96fe52ef0e22d2f131dd425ce1893073a3c6ad20e8cac36726393dfb4856a4c)))#cfdcqs3s")
     }
 
-    // TODO: uncomment once https://github.com/rust-bitcoin/rust-miniscript/pull/221 is released
-    //
-    // #[test]
-    // #[should_panic(expected = "Miniscript(ContextError(CompressedOnly))")]
-    // fn test_dsl_miniscript_checks() {
-    //     let mut uncompressed_pk = PrivateKey::from_wif("L5EZftvrYaSudiozVRzTqLcHLNDoVn7H5HSfM9BAN6tMJX8oTWz6").unwrap();
-    //     uncompressed_pk.compressed = false;
+    #[test]
+    #[should_panic(expected = "Miniscript(ContextError(CompressedOnly))")]
+    fn test_dsl_miniscript_checks() {
+        let mut uncompressed_pk =
+            PrivateKey::from_wif("L5EZftvrYaSudiozVRzTqLcHLNDoVn7H5HSfM9BAN6tMJX8oTWz6").unwrap();
+        uncompressed_pk.compressed = false;
 
-    //     descriptor!(wsh(v:pk(uncompressed_pk))).unwrap();
-    // }
+        descriptor!(wsh(v: pk(uncompressed_pk))).unwrap();
+    }
 }

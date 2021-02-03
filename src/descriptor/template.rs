@@ -35,6 +35,7 @@ use miniscript::{Legacy, Segwitv0};
 use super::{ExtendedDescriptor, KeyMap, ToWalletDescriptor};
 use crate::descriptor::DescriptorError;
 use crate::keys::{DerivableKey, ToDescriptorKey, ValidNetworks};
+use crate::wallet::utils::SecpCtx;
 use crate::{descriptor, KeychainKind};
 
 /// Type alias for the return type of [`DescriptorTemplate`], [`descriptor!`](crate::descriptor!) and others
@@ -71,9 +72,10 @@ pub trait DescriptorTemplate {
 impl<T: DescriptorTemplate> ToWalletDescriptor for T {
     fn to_wallet_descriptor(
         self,
+        secp: &SecpCtx,
         network: Network,
     ) -> Result<(ExtendedDescriptor, KeyMap), DescriptorError> {
-        Ok(self.build()?.to_wallet_descriptor(network)?)
+        Ok(self.build()?.to_wallet_descriptor(secp, network)?)
     }
 }
 
@@ -201,7 +203,7 @@ impl<K: ToDescriptorKey<Segwitv0>> DescriptorTemplate for P2WPKH<K> {
 /// )?;
 ///
 /// assert_eq!(wallet.get_new_address()?.to_string(), "miNG7dJTzJqNbFS19svRdTCisC65dsubtR");
-/// assert_eq!(wallet.public_descriptor(KeychainKind::External)?.unwrap().to_string(), "pkh([c55b303f/44'/0'/0']tpubDDDzQ31JkZB7VxUr9bjvBivDdqoFLrDPyLWtLapArAi51ftfmCb2DPxwLQzX65iNcXz1DGaVvyvo6JQ6rTU73r2gqdEo8uov9QKRb7nKCSU/0/*)");
+/// assert_eq!(wallet.public_descriptor(KeychainKind::External)?.unwrap().to_string(), "pkh([c55b303f/44'/0'/0']tpubDDDzQ31JkZB7VxUr9bjvBivDdqoFLrDPyLWtLapArAi51ftfmCb2DPxwLQzX65iNcXz1DGaVvyvo6JQ6rTU73r2gqdEo8uov9QKRb7nKCSU/0/*)#xgaaevjx");
 /// # Ok::<_, Box<dyn std::error::Error>>(())
 /// ```
 pub struct BIP44<K: DerivableKey<Legacy>>(pub K, pub KeychainKind);
@@ -240,7 +242,7 @@ impl<K: DerivableKey<Legacy>> DescriptorTemplate for BIP44<K> {
 /// )?;
 ///
 /// assert_eq!(wallet.get_new_address()?.to_string(), "miNG7dJTzJqNbFS19svRdTCisC65dsubtR");
-/// assert_eq!(wallet.public_descriptor(KeychainKind::External)?.unwrap().to_string(), "pkh([c55b303f/44'/0'/0']tpubDDDzQ31JkZB7VxUr9bjvBivDdqoFLrDPyLWtLapArAi51ftfmCb2DPxwLQzX65iNcXz1DGaVvyvo6JQ6rTU73r2gqdEo8uov9QKRb7nKCSU/0/*)");
+/// assert_eq!(wallet.public_descriptor(KeychainKind::External)?.unwrap().to_string(), "pkh([c55b303f/44'/0'/0']tpubDDDzQ31JkZB7VxUr9bjvBivDdqoFLrDPyLWtLapArAi51ftfmCb2DPxwLQzX65iNcXz1DGaVvyvo6JQ6rTU73r2gqdEo8uov9QKRb7nKCSU/0/*)#xgaaevjx");
 /// # Ok::<_, Box<dyn std::error::Error>>(())
 /// ```
 pub struct BIP44Public<K: DerivableKey<Legacy>>(pub K, pub bip32::Fingerprint, pub KeychainKind);
@@ -275,7 +277,7 @@ impl<K: DerivableKey<Legacy>> DescriptorTemplate for BIP44Public<K> {
 /// )?;
 ///
 /// assert_eq!(wallet.get_new_address()?.to_string(), "2N3K4xbVAHoiTQSwxkZjWDfKoNC27pLkYnt");
-/// assert_eq!(wallet.public_descriptor(KeychainKind::External)?.unwrap().to_string(), "sh(wpkh([c55b303f/49\'/0\'/0\']tpubDC49r947KGK52X5rBWS4BLs5m9SRY3pYHnvRrm7HcybZ3BfdEsGFyzCMzayi1u58eT82ZeyFZwH7DD6Q83E3fM9CpfMtmnTygnLfP59jL9L/0/*))");
+/// assert_eq!(wallet.public_descriptor(KeychainKind::External)?.unwrap().to_string(), "sh(wpkh([c55b303f/49\'/0\'/0\']tpubDC49r947KGK52X5rBWS4BLs5m9SRY3pYHnvRrm7HcybZ3BfdEsGFyzCMzayi1u58eT82ZeyFZwH7DD6Q83E3fM9CpfMtmnTygnLfP59jL9L/0/*))#gsmdv4xr");
 /// # Ok::<_, Box<dyn std::error::Error>>(())
 /// ```
 pub struct BIP49<K: DerivableKey<Segwitv0>>(pub K, pub KeychainKind);
@@ -314,7 +316,7 @@ impl<K: DerivableKey<Segwitv0>> DescriptorTemplate for BIP49<K> {
 /// )?;
 ///
 /// assert_eq!(wallet.get_new_address()?.to_string(), "2N3K4xbVAHoiTQSwxkZjWDfKoNC27pLkYnt");
-/// assert_eq!(wallet.public_descriptor(KeychainKind::External)?.unwrap().to_string(), "sh(wpkh([c55b303f/49\'/0\'/0\']tpubDC49r947KGK52X5rBWS4BLs5m9SRY3pYHnvRrm7HcybZ3BfdEsGFyzCMzayi1u58eT82ZeyFZwH7DD6Q83E3fM9CpfMtmnTygnLfP59jL9L/0/*))");
+/// assert_eq!(wallet.public_descriptor(KeychainKind::External)?.unwrap().to_string(), "sh(wpkh([c55b303f/49\'/0\'/0\']tpubDC49r947KGK52X5rBWS4BLs5m9SRY3pYHnvRrm7HcybZ3BfdEsGFyzCMzayi1u58eT82ZeyFZwH7DD6Q83E3fM9CpfMtmnTygnLfP59jL9L/0/*))#gsmdv4xr");
 /// # Ok::<_, Box<dyn std::error::Error>>(())
 /// ```
 pub struct BIP49Public<K: DerivableKey<Segwitv0>>(pub K, pub bip32::Fingerprint, pub KeychainKind);
@@ -349,7 +351,7 @@ impl<K: DerivableKey<Segwitv0>> DescriptorTemplate for BIP49Public<K> {
 /// )?;
 ///
 /// assert_eq!(wallet.get_new_address()?.to_string(), "tb1qedg9fdlf8cnnqfd5mks6uz5w4kgpk2pr6y4qc7");
-/// assert_eq!(wallet.public_descriptor(KeychainKind::External)?.unwrap().to_string(), "wpkh([c55b303f/84\'/0\'/0\']tpubDC2Qwo2TFsaNC4ju8nrUJ9mqVT3eSgdmy1yPqhgkjwmke3PRXutNGRYAUo6RCHTcVQaDR3ohNU9we59brGHuEKPvH1ags2nevW5opEE9Z5Q/0/*)");
+/// assert_eq!(wallet.public_descriptor(KeychainKind::External)?.unwrap().to_string(), "wpkh([c55b303f/84\'/0\'/0\']tpubDC2Qwo2TFsaNC4ju8nrUJ9mqVT3eSgdmy1yPqhgkjwmke3PRXutNGRYAUo6RCHTcVQaDR3ohNU9we59brGHuEKPvH1ags2nevW5opEE9Z5Q/0/*)#nkk5dtkg");
 /// # Ok::<_, Box<dyn std::error::Error>>(())
 /// ```
 pub struct BIP84<K: DerivableKey<Segwitv0>>(pub K, pub KeychainKind);
@@ -388,7 +390,7 @@ impl<K: DerivableKey<Segwitv0>> DescriptorTemplate for BIP84<K> {
 /// )?;
 ///
 /// assert_eq!(wallet.get_new_address()?.to_string(), "tb1qedg9fdlf8cnnqfd5mks6uz5w4kgpk2pr6y4qc7");
-/// assert_eq!(wallet.public_descriptor(KeychainKind::External)?.unwrap().to_string(), "wpkh([c55b303f/84\'/0\'/0\']tpubDC2Qwo2TFsaNC4ju8nrUJ9mqVT3eSgdmy1yPqhgkjwmke3PRXutNGRYAUo6RCHTcVQaDR3ohNU9we59brGHuEKPvH1ags2nevW5opEE9Z5Q/0/*)");
+/// assert_eq!(wallet.public_descriptor(KeychainKind::External)?.unwrap().to_string(), "wpkh([c55b303f/84\'/0\'/0\']tpubDC2Qwo2TFsaNC4ju8nrUJ9mqVT3eSgdmy1yPqhgkjwmke3PRXutNGRYAUo6RCHTcVQaDR3ohNU9we59brGHuEKPvH1ags2nevW5opEE9Z5Q/0/*)#nkk5dtkg");
 /// # Ok::<_, Box<dyn std::error::Error>>(())
 /// ```
 pub struct BIP84Public<K: DerivableKey<Segwitv0>>(pub K, pub bip32::Fingerprint, pub KeychainKind);
@@ -458,13 +460,13 @@ mod test {
     // test existing descriptor templates, make sure they are expanded to the right descriptors
 
     use super::*;
+    use crate::descriptor::derived::AsDerived;
     use crate::descriptor::{DescriptorError, DescriptorMeta};
     use crate::keys::ValidNetworks;
     use bitcoin::hashes::core::str::FromStr;
     use bitcoin::network::constants::Network::Regtest;
     use bitcoin::secp256k1::Secp256k1;
-    use bitcoin::util::bip32::ChildNumber;
-    use miniscript::descriptor::{DescriptorPublicKey, DescriptorPublicKeyCtx, KeyMap};
+    use miniscript::descriptor::{DescriptorPublicKey, DescriptorTrait, KeyMap};
     use miniscript::Descriptor;
 
     // verify template descriptor generates expected address(es)
@@ -475,20 +477,18 @@ mod test {
         expected: &[&str],
     ) {
         let secp = Secp256k1::new();
-        let deriv_ctx =
-            DescriptorPublicKeyCtx::new(&secp, ChildNumber::from_normal_idx(0).unwrap());
 
         let (desc, _key_map, _networks) = desc.unwrap();
         assert_eq!(desc.is_witness(), is_witness);
-        assert_eq!(desc.is_fixed(), is_fixed);
+        assert_eq!(!desc.is_deriveable(), is_fixed);
         for i in 0..expected.len() {
             let index = i as u32;
-            let child_desc = if desc.is_fixed() {
-                desc.clone()
+            let child_desc = if !desc.is_deriveable() {
+                desc.as_derived_fixed(&secp)
             } else {
-                desc.derive(ChildNumber::from_normal_idx(index).unwrap())
+                desc.as_derived(index, &secp)
             };
-            let address = child_desc.address(Regtest, deriv_ctx).unwrap();
+            let address = child_desc.address(Regtest).unwrap();
             assert_eq!(address.to_string(), *expected.get(i).unwrap());
         }
     }

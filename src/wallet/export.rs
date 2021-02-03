@@ -76,6 +76,7 @@ use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
+use miniscript::descriptor::{ShInner, WshInner};
 use miniscript::{Descriptor, DescriptorPublicKey, ScriptContext, Terminal};
 
 use crate::database::BatchDatabase;
@@ -107,6 +108,10 @@ impl FromStr for WalletExport {
     }
 }
 
+fn remove_checksum(s: String) -> String {
+    s.splitn(2, '#').next().map(String::from).unwrap()
+}
+
 impl WalletExport {
     /// Export a wallet
     ///
@@ -127,6 +132,7 @@ impl WalletExport {
         let descriptor = wallet
             .descriptor
             .to_string_with_secret(&wallet.signers.as_key_map(wallet.secp_ctx()));
+        let descriptor = remove_checksum(descriptor);
         Self::is_compatible_with_core(&descriptor)?;
 
         let blockheight = match wallet.database.borrow().iter_txs(false) {
@@ -150,7 +156,9 @@ impl WalletExport {
         };
 
         let desc_to_string = |d: &Descriptor<DescriptorPublicKey>| {
-            d.to_string_with_secret(&wallet.change_signers.as_key_map(wallet.secp_ctx()))
+            let descriptor =
+                d.to_string_with_secret(&wallet.change_signers.as_key_map(wallet.secp_ctx()));
+            remove_checksum(descriptor)
         };
         if export.change_descriptor() != wallet.change_descriptor.as_ref().map(desc_to_string) {
             return Err("Incompatible change descriptor");
@@ -161,7 +169,7 @@ impl WalletExport {
 
     fn is_compatible_with_core(descriptor: &str) -> Result<(), &'static str> {
         fn check_ms<Ctx: ScriptContext>(
-            terminal: Terminal<String, Ctx>,
+            terminal: &Terminal<String, Ctx>,
         ) -> Result<(), &'static str> {
             if let Terminal::Multi(_, _) = terminal {
                 Ok(())
@@ -170,13 +178,22 @@ impl WalletExport {
             }
         }
 
+        // pkh(), wpkh(), sh(wpkh()) are always fine, as well as multi() and sortedmulti()
         match Descriptor::<String>::from_str(descriptor).map_err(|_| "Invalid descriptor")? {
-            Descriptor::Pk(_)
-            | Descriptor::Pkh(_)
-            | Descriptor::Wpkh(_)
-            | Descriptor::ShWpkh(_) => Ok(()),
-            Descriptor::Sh(ms) => check_ms(ms.node),
-            Descriptor::Wsh(ms) | Descriptor::ShWsh(ms) => check_ms(ms.node),
+            Descriptor::Pkh(_) | Descriptor::Wpkh(_) => Ok(()),
+            Descriptor::Sh(sh) => match sh.as_inner() {
+                ShInner::Wpkh(_) => Ok(()),
+                ShInner::SortedMulti(_) => Ok(()),
+                ShInner::Wsh(wsh) => match wsh.as_inner() {
+                    WshInner::SortedMulti(_) => Ok(()),
+                    WshInner::Ms(ms) => check_ms(&ms.node),
+                },
+                ShInner::Ms(ms) => check_ms(&ms.node),
+            },
+            Descriptor::Wsh(wsh) => match wsh.as_inner() {
+                WshInner::SortedMulti(_) => Ok(()),
+                WshInner::Ms(ms) => check_ms(&ms.node),
+            },
             _ => Err("The descriptor is not compatible with Bitcoin Core"),
         }
     }

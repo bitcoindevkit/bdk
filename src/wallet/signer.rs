@@ -220,7 +220,7 @@ impl Signer for DescriptorXKey<ExtendedPrivKey> {
         }
 
         let (public_key, deriv_path) = match psbt.inputs[input_index]
-            .hd_keypaths
+            .bip32_derivation
             .iter()
             .filter_map(|(pk, &(fingerprint, ref path))| {
                 if self.matches(&(fingerprint, path.clone()), &secp).is_some() {
@@ -562,7 +562,7 @@ mod signers_container_tests {
     use crate::descriptor;
     use crate::descriptor::ToWalletDescriptor;
     use crate::keys::{DescriptorKey, ToDescriptorKey};
-    use bitcoin::secp256k1::All;
+    use bitcoin::secp256k1::{All, Secp256k1};
     use bitcoin::util::bip32;
     use bitcoin::util::psbt::PartiallySignedTransaction;
     use bitcoin::Network;
@@ -574,10 +574,12 @@ mod signers_container_tests {
     // This happens usually when a set of signers is created from a descriptor with private keys.
     #[test]
     fn signers_with_same_ordering() {
+        let secp = Secp256k1::new();
+
         let (prvkey1, _, _) = setup_keys(TPRV0_STR);
         let (prvkey2, _, _) = setup_keys(TPRV1_STR);
         let desc = descriptor!(sh(multi(2, prvkey1, prvkey2))).unwrap();
-        let (_, keymap) = desc.to_wallet_descriptor(Network::Testnet).unwrap();
+        let (_, keymap) = desc.to_wallet_descriptor(&secp, Network::Testnet).unwrap();
 
         let signers = SignersContainer::from(keymap);
         assert_eq!(signers.ids().len(), 2);

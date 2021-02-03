@@ -35,11 +35,11 @@ use bitcoin::secp256k1::{self, Secp256k1, Signing};
 use bitcoin::util::bip32;
 use bitcoin::{Network, PrivateKey, PublicKey};
 
+use miniscript::descriptor::{Descriptor, DescriptorXKey, Wildcard};
 pub use miniscript::descriptor::{
-    DescriptorPublicKey, DescriptorSecretKey, DescriptorSinglePriv, DescriptorSinglePub,
+    DescriptorPublicKey, DescriptorSecretKey, DescriptorSinglePriv, DescriptorSinglePub, KeyMap,
     SortedMultiVec,
 };
-use miniscript::descriptor::{DescriptorXKey, KeyMap};
 pub use miniscript::ScriptContext;
 use miniscript::{Miniscript, Terminal};
 
@@ -492,14 +492,14 @@ let xprv = xkey.into_xprv(Network::Bitcoin).unwrap();
                 origin,
                 xkey: xprv,
                 derivation_path,
-                is_wildcard: true,
+                wildcard: Wildcard::Unhardened,
             })
             .to_descriptor_key(),
             ExtendedKey::Public((xpub, _)) => DescriptorPublicKey::XPub(DescriptorXKey {
                 origin,
                 xkey: xpub,
                 derivation_path,
-                is_wildcard: true,
+                wildcard: Wildcard::Unhardened,
             })
             .to_descriptor_key(),
         }
@@ -776,24 +776,24 @@ pub fn make_multi<Pk: ToDescriptorKey<Ctx>, Ctx: ScriptContext>(
 
 // Used internally by `bdk::descriptor!` to build `sortedmulti()` fragments
 #[doc(hidden)]
-pub fn make_sortedmulti_inner<Pk: ToDescriptorKey<Ctx>, Ctx: ScriptContext>(
+pub fn make_sortedmulti<Pk, Ctx, F>(
     thresh: usize,
     pks: Vec<Pk>,
+    build_desc: F,
     secp: &SecpCtx,
-) -> Result<
-    (
-        SortedMultiVec<DescriptorPublicKey, Ctx>,
-        KeyMap,
-        ValidNetworks,
-    ),
-    DescriptorError,
-> {
+) -> Result<(Descriptor<DescriptorPublicKey>, KeyMap, ValidNetworks), DescriptorError>
+where
+    Pk: ToDescriptorKey<Ctx>,
+    Ctx: ScriptContext,
+    F: Fn(
+        usize,
+        Vec<DescriptorPublicKey>,
+    ) -> Result<(Descriptor<DescriptorPublicKey>, PhantomData<Ctx>), DescriptorError>,
+{
     let (pks, key_map, valid_networks) = expand_multi_keys(pks, secp)?;
-    let minisc = SortedMultiVec::new(thresh, pks)?;
+    let descriptor = build_desc(thresh, pks)?.0;
 
-    // TODO: should we apply the checks here as well?
-
-    Ok((minisc, key_map, valid_networks))
+    Ok((descriptor, key_map, valid_networks))
 }
 
 /// The "identity" conversion is used internally by some `bdk::fragment`s
