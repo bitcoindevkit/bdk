@@ -34,7 +34,6 @@ use rand::{thread_rng, Rng};
 
 use bitcoin::consensus::Encodable;
 use bitcoin::hash_types::BlockHash;
-use bitcoin::hashes::Hash;
 use bitcoin::network::constants::ServiceFlags;
 use bitcoin::network::message::{NetworkMessage, RawNetworkMessage};
 use bitcoin::network::message_blockdata::*;
@@ -42,7 +41,7 @@ use bitcoin::network::message_filter::*;
 use bitcoin::network::message_network::VersionMessage;
 use bitcoin::network::stream_reader::StreamReader;
 use bitcoin::network::Address;
-use bitcoin::{Block, Network, Transaction, Txid};
+use bitcoin::{Block, Network, Transaction, Txid, Wtxid};
 
 use super::CompactFiltersError;
 
@@ -55,37 +54,71 @@ pub(crate) const TIMEOUT_SECS: u64 = 30;
 /// It is normally shared between [`Peer`]s with the use of [`Arc`], so that transactions are not
 /// duplicated in memory.
 #[derive(Debug, Default)]
-pub struct Mempool {
-    txs: RwLock<HashMap<Txid, Transaction>>,
+pub struct Mempool(RwLock<InnerMempool>);
+
+#[derive(Debug, Default)]
+struct InnerMempool {
+    txs: HashMap<Txid, Transaction>,
+    wtxids: HashMap<Wtxid, Txid>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum TxIdentifier {
+    Wtxid(Wtxid),
+    Txid(Txid),
 }
 
 impl Mempool {
+    /// Create a new empty mempool
+    pub fn new() -> Self {
+        Self::default()
+    }
+
     /// Add a transaction to the mempool
     ///
     /// Note that this doesn't propagate the transaction to other
     /// peers. To do that, [`broadcast`](crate::blockchain::Blockchain::broadcast) should be used.
     pub fn add_tx(&self, tx: Transaction) {
-        self.txs.write().unwrap().insert(tx.txid(), tx);
+        let mut guard = self.0.write().unwrap();
+
+        guard.wtxids.insert(tx.wtxid(), tx.txid());
+        guard.txs.insert(tx.txid(), tx);
     }
 
     /// Look-up a transaction in the mempool given an [`Inventory`] request
     pub fn get_tx(&self, inventory: &Inventory) -> Option<Transaction> {
-        let txid = match inventory {
+        let identifer = match inventory {
             Inventory::Error | Inventory::Block(_) | Inventory::WitnessBlock(_) => return None,
-            Inventory::Transaction(txid) => *txid,
-            Inventory::WitnessTransaction(wtxid) => Txid::from_inner(wtxid.into_inner()),
+            Inventory::Transaction(txid) => TxIdentifier::Txid(*txid),
+            Inventory::WitnessTransaction(txid) => TxIdentifier::Txid(*txid),
+            Inventory::WTx(wtxid) => TxIdentifier::Wtxid(*wtxid),
+            Inventory::Unknown { inv_type, hash } => {
+                log::warn!(
+                    "Unknown inventory request type `{}`, hash `{:?}`",
+                    inv_type,
+                    hash
+                );
+                return None;
+            }
         };
-        self.txs.read().unwrap().get(&txid).cloned()
+
+        let txid = match identifer {
+            TxIdentifier::Txid(txid) => Some(txid),
+            TxIdentifier::Wtxid(wtxid) => self.0.read().unwrap().wtxids.get(&wtxid).cloned(),
+        };
+
+        txid.map(|txid| self.0.read().unwrap().txs.get(&txid).cloned())
+            .flatten()
     }
 
     /// Return whether or not the mempool contains a transaction with a given txid
     pub fn has_tx(&self, txid: &Txid) -> bool {
-        self.txs.read().unwrap().contains_key(txid)
+        self.0.read().unwrap().txs.contains_key(txid)
     }
 
     /// Return the list of transactions contained in the mempool
     pub fn iter_txs(&self) -> Vec<Transaction> {
-        self.txs.read().unwrap().values().cloned().collect()
+        self.0.read().unwrap().txs.values().cloned().collect()
     }
 }
 
@@ -508,6 +541,10 @@ impl InvPeer for Peer {
     }
 
     fn ask_for_mempool(&self) -> Result<(), CompactFiltersError> {
+        if !self.version.services.has(ServiceFlags::BLOOM) {
+            return Err(CompactFiltersError::PeerBloomDisabled);
+        }
+
         self.send(NetworkMessage::MemPool)?;
         let inv = match self.recv("inv", Some(Duration::from_secs(5)))? {
             None => return Ok(()), // empty mempool

@@ -383,7 +383,12 @@ impl Blockchain for CompactFiltersBlockchain {
         }
         database.commit_batch(updates)?;
 
-        first_peer.ask_for_mempool()?;
+        match first_peer.ask_for_mempool() {
+            Err(CompactFiltersError::PeerBloomDisabled) => {
+                log::warn!("Peer has BLOOM disabled, we can't ask for the mempool")
+            }
+            e => e?,
+        };
 
         let mut internal_max_deriv = None;
         let mut external_max_deriv = None;
@@ -537,6 +542,8 @@ pub enum CompactFiltersError {
     NotConnected,
     /// A peer took too long to reply to one of our messages
     Timeout,
+    /// The peer doesn't advertise the [`BLOOM`](bitcoin::network::constants::ServiceFlags::BLOOM) service flag
+    PeerBloomDisabled,
 
     /// No peers have been specified
     NoPeers,
