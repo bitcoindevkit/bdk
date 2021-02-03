@@ -14,6 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `DerivableKey::into_extended_key()` as the only method that needs to be implemented
 
 ### Misc
+#### Removed
+- Removed the `parse_descriptor` example, since it wasn't demostrating any bdk-specific API anymore.
+#### Changed
+- Updated `bitcoin` to `0.26`, `miniscript` to `5.1` and `electrum-client` to `0.6`
+
 #### Added
 - Added a function to get the version of BDK at runtime
 
