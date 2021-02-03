@@ -30,7 +30,7 @@ use std::marker::PhantomData;
 use std::ops::Deref;
 use std::str::FromStr;
 
-use bitcoin::secp256k1;
+use bitcoin::secp256k1::{self, Secp256k1, Signing};
 
 use bitcoin::util::bip32;
 use bitcoin::{Network, PrivateKey, PublicKey};
@@ -299,6 +299,69 @@ pub trait ToDescriptorKey<Ctx: ScriptContext>: Sized {
     fn to_descriptor_key(self) -> Result<DescriptorKey<Ctx>, KeyError>;
 }
 
+/// Enum for extended keys that can be either `xprv` or `xpub`
+///
+/// An instance of [`ExtendedKey`] can be constructed from an [`ExtendedPrivKey`](bip32::ExtendedPrivKey)
+/// or an [`ExtendedPubKey`](bip32::ExtendedPubKey) by using the `From` trait.
+///
+/// Defaults to the [`Legacy`](miniscript::Legacy) context.
+pub enum ExtendedKey<Ctx: ScriptContext = miniscript::Legacy> {
+    /// A private extended key, aka an `xprv`
+    Private((bip32::ExtendedPrivKey, PhantomData<Ctx>)),
+    /// A public extended key, aka an `xpub`
+    Public((bip32::ExtendedPubKey, PhantomData<Ctx>)),
+}
+
+impl<Ctx: ScriptContext> ExtendedKey<Ctx> {
+    /// Return whether or not the key contains the private data
+    pub fn has_secret(&self) -> bool {
+        match self {
+            ExtendedKey::Private(_) => true,
+            ExtendedKey::Public(_) => false,
+        }
+    }
+
+    /// Transform the [`ExtendedKey`] into an [`ExtendedPrivKey`](bip32::ExtendedPrivKey) for the
+    /// given [`Network`], if the key contains the private data
+    pub fn into_xprv(self, network: Network) -> Option<bip32::ExtendedPrivKey> {
+        match self {
+            ExtendedKey::Private((mut xprv, _)) => {
+                xprv.network = network;
+                Some(xprv)
+            }
+            ExtendedKey::Public(_) => None,
+        }
+    }
+
+    /// Transform the [`ExtendedKey`] into an [`ExtendedPubKey`](bip32::ExtendedPubKey) for the
+    /// given [`Network`]
+    pub fn into_xpub<C: Signing>(
+        self,
+        network: bitcoin::Network,
+        secp: &Secp256k1<C>,
+    ) -> bip32::ExtendedPubKey {
+        let mut xpub = match self {
+            ExtendedKey::Private((xprv, _)) => bip32::ExtendedPubKey::from_private(secp, &xprv),
+            ExtendedKey::Public((xpub, _)) => xpub,
+        };
+
+        xpub.network = network;
+        xpub
+    }
+}
+
+impl<Ctx: ScriptContext> From<bip32::ExtendedPubKey> for ExtendedKey<Ctx> {
+    fn from(xpub: bip32::ExtendedPubKey) -> Self {
+        ExtendedKey::Public((xpub, PhantomData))
+    }
+}
+
+impl<Ctx: ScriptContext> From<bip32::ExtendedPrivKey> for ExtendedKey<Ctx> {
+    fn from(xprv: bip32::ExtendedPrivKey) -> Self {
+        ExtendedKey::Private((xprv, PhantomData))
+    }
+}
+
 /// Trait for keys that can be derived.
 ///
 /// When extra metadata are provided, a [`DerivableKey`] can be transofrmed into a
@@ -310,45 +373,155 @@ pub trait ToDescriptorKey<Ctx: ScriptContext>: Sized {
 /// generally recommended to implemented this trait instead of [`ToDescriptorKey`]. The same
 /// rules regarding script context and valid networks apply.
 ///
+/// ## Examples
+///
+/// Key types that can be directly converted into an [`ExtendedPrivKey`] or
+/// an [`ExtendedPubKey`] can implement only the required `into_extended_key()` method.
+///
+/// ```
+/// use bdk::bitcoin;
+/// use bdk::bitcoin::util::bip32;
+/// use bdk::keys::{DerivableKey, ExtendedKey, KeyError, ScriptContext};
+///
+/// struct MyCustomKeyType {
+///     key_data: bitcoin::PrivateKey,
+///     chain_code: Vec<u8>,
+///     network: bitcoin::Network,
+/// }
+///
+/// impl<Ctx: ScriptContext> DerivableKey<Ctx> for MyCustomKeyType {
+///     fn into_extended_key(self) -> Result<ExtendedKey<Ctx>, KeyError> {
+///         let xprv = bip32::ExtendedPrivKey {
+///             network: self.network,
+///             depth: 0,
+///             parent_fingerprint: bip32::Fingerprint::default(),
+///             private_key: self.key_data,
+///             chain_code: bip32::ChainCode::from(self.chain_code.as_ref()),
+///             child_number: bip32::ChildNumber::Normal { index: 0 },
+///         };
+///
+///         xprv.into_extended_key()
+///     }
+/// }
+/// ```
+///
+/// Types that don't internally encode the [`Network`](bitcoin::Network) in which they are valid need some extra
+/// steps to override the set of valid networks, otherwise only the network specified in the
+/// [`ExtendedPrivKey`] or [`ExtendedPubKey`] will be considered valid.
+///
+/// ```
+/// use bdk::bitcoin;
+/// use bdk::bitcoin::util::bip32;
+/// use bdk::keys::{
+///     any_network, DerivableKey, DescriptorKey, ExtendedKey, KeyError, ScriptContext,
+/// };
+///
+/// struct MyCustomKeyType {
+///     key_data: bitcoin::PrivateKey,
+///     chain_code: Vec<u8>,
+/// }
+///
+/// impl<Ctx: ScriptContext> DerivableKey<Ctx> for MyCustomKeyType {
+///     fn into_extended_key(self) -> Result<ExtendedKey<Ctx>, KeyError> {
+///         let xprv = bip32::ExtendedPrivKey {
+///             network: bitcoin::Network::Bitcoin, // pick an arbitrary network here
+///             depth: 0,
+///             parent_fingerprint: bip32::Fingerprint::default(),
+///             private_key: self.key_data,
+///             chain_code: bip32::ChainCode::from(self.chain_code.as_ref()),
+///             child_number: bip32::ChildNumber::Normal { index: 0 },
+///         };
+///
+///         xprv.into_extended_key()
+///     }
+///
+///     fn into_descriptor_key(
+///         self,
+///         source: Option<bip32::KeySource>,
+///         derivation_path: bip32::DerivationPath,
+///     ) -> Result<DescriptorKey<Ctx>, KeyError> {
+///         let descriptor_key = self
+///             .into_extended_key()?
+///             .into_descriptor_key(source, derivation_path)?;
+///
+///         // Override the set of valid networks here
+///         Ok(descriptor_key.override_valid_networks(any_network()))
+///     }
+/// }
+/// ```
+///
 /// [`DerivationPath`]: (bip32::DerivationPath)
-pub trait DerivableKey<Ctx: ScriptContext> {
-    /// Add a extra metadata, consume `self` and turn it into a [`DescriptorKey`]
-    fn add_metadata(
-        self,
-        origin: Option<bip32::KeySource>,
-        derivation_path: bip32::DerivationPath,
-    ) -> Result<DescriptorKey<Ctx>, KeyError>;
-}
+/// [`ExtendedPrivKey`]: (bip32::ExtendedPrivKey)
+/// [`ExtendedPubKey`]: (bip32::ExtendedPubKey)
+pub trait DerivableKey<Ctx: ScriptContext = miniscript::Legacy>: Sized {
+    /// Consume `self` and turn it into an [`ExtendedKey`]
+    ///
+    /// This can be used to get direct access to `xprv`s and `xpub`s for types that implement this trait,
+    /// like [`Mnemonic`](bip39::Mnemonic) when the `keys-bip39` feature is enabled.
+    #[cfg_attr(
+        feature = "keys-bip39",
+        doc = r##"
+```rust
+use bdk::bitcoin::Network;
+use bdk::keys::{DerivableKey, ExtendedKey};
+use bdk::keys::bip39::{Mnemonic, Language};
 
-impl<Ctx: ScriptContext> DerivableKey<Ctx> for bip32::ExtendedPubKey {
-    fn add_metadata(
+# fn main() -> Result<(), Box<dyn std::error::Error>> {
+let xkey: ExtendedKey =
+    Mnemonic::from_phrase(
+        "jelly crash boy whisper mouse ecology tuna soccer memory million news short",
+        Language::English
+    )?
+    .into_extended_key()?;
+let xprv = xkey.into_xprv(Network::Bitcoin).unwrap();
+# Ok(()) }
+```
+"##
+    )]
+    fn into_extended_key(self) -> Result<ExtendedKey<Ctx>, KeyError>;
+
+    /// Consume `self` and turn it into a [`DescriptorKey`] by adding the extra metadata, such as
+    /// key origin and derivation path
+    fn into_descriptor_key(
         self,
         origin: Option<bip32::KeySource>,
         derivation_path: bip32::DerivationPath,
     ) -> Result<DescriptorKey<Ctx>, KeyError> {
-        DescriptorPublicKey::XPub(DescriptorXKey {
-            origin,
-            xkey: self,
-            derivation_path,
-            is_wildcard: true,
-        })
-        .to_descriptor_key()
+        match self.into_extended_key()? {
+            ExtendedKey::Private((xprv, _)) => DescriptorSecretKey::XPrv(DescriptorXKey {
+                origin,
+                xkey: xprv,
+                derivation_path,
+                is_wildcard: true,
+            })
+            .to_descriptor_key(),
+            ExtendedKey::Public((xpub, _)) => DescriptorPublicKey::XPub(DescriptorXKey {
+                origin,
+                xkey: xpub,
+                derivation_path,
+                is_wildcard: true,
+            })
+            .to_descriptor_key(),
+        }
+    }
+}
+
+/// Identity conversion
+impl<Ctx: ScriptContext> DerivableKey<Ctx> for ExtendedKey<Ctx> {
+    fn into_extended_key(self) -> Result<ExtendedKey<Ctx>, KeyError> {
+        Ok(self)
+    }
+}
+
+impl<Ctx: ScriptContext> DerivableKey<Ctx> for bip32::ExtendedPubKey {
+    fn into_extended_key(self) -> Result<ExtendedKey<Ctx>, KeyError> {
+        Ok(self.into())
     }
 }
 
 impl<Ctx: ScriptContext> DerivableKey<Ctx> for bip32::ExtendedPrivKey {
-    fn add_metadata(
-        self,
-        origin: Option<bip32::KeySource>,
-        derivation_path: bip32::DerivationPath,
-    ) -> Result<DescriptorKey<Ctx>, KeyError> {
-        DescriptorSecretKey::XPrv(DescriptorXKey {
-            origin,
-            xkey: self,
-            derivation_path,
-            is_wildcard: true,
-        })
-        .to_descriptor_key()
+    fn into_extended_key(self) -> Result<ExtendedKey<Ctx>, KeyError> {
+        Ok(self.into())
     }
 }
 
@@ -389,12 +562,16 @@ where
     Ctx: ScriptContext,
     K: DerivableKey<Ctx>,
 {
-    fn add_metadata(
+    fn into_extended_key(self) -> Result<ExtendedKey<Ctx>, KeyError> {
+        self.key.into_extended_key()
+    }
+
+    fn into_descriptor_key(
         self,
         origin: Option<bip32::KeySource>,
         derivation_path: bip32::DerivationPath,
     ) -> Result<DescriptorKey<Ctx>, KeyError> {
-        let descriptor_key = self.key.add_metadata(origin, derivation_path)?;
+        let descriptor_key = self.key.into_descriptor_key(origin, derivation_path)?;
         Ok(descriptor_key.override_valid_networks(self.valid_networks))
     }
 }
@@ -531,7 +708,7 @@ impl<Ctx: ScriptContext> GeneratableKey<Ctx> for PrivateKey {
 
 impl<Ctx: ScriptContext, T: DerivableKey<Ctx>> ToDescriptorKey<Ctx> for (T, bip32::DerivationPath) {
     fn to_descriptor_key(self) -> Result<DescriptorKey<Ctx>, KeyError> {
-        self.0.add_metadata(None, self.1)
+        self.0.into_descriptor_key(None, self.1)
     }
 }
 
@@ -539,7 +716,7 @@ impl<Ctx: ScriptContext, T: DerivableKey<Ctx>> ToDescriptorKey<Ctx>
     for (T, bip32::KeySource, bip32::DerivationPath)
 {
     fn to_descriptor_key(self) -> Result<DescriptorKey<Ctx>, KeyError> {
-        self.0.add_metadata(Some(self.1), self.2)
+        self.0.into_descriptor_key(Some(self.1), self.2)
     }
 }
 

@@ -6,6 +6,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Keys
+#### Changed
+- Renamed `DerivableKey::add_metadata()` to `DerivableKey::into_descriptor_key()`
+#### Added
+- Added an `ExtendedKey` type that is an enum of `bip32::ExtendedPubKey` and `bip32::ExtendedPrivKey`
+- Added `DerivableKey::into_extended_key()` as the only method that needs to be implemented
+
 ### Misc
 #### Added
 - Added a function to get the version of BDK at runtime
