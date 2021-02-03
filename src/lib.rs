@@ -210,6 +210,11 @@ extern crate serde;
 #[macro_use]
 extern crate serde_json;
 
+#[cfg(all(feature = "async-interface", feature = "electrum"))]
+compile_error!(
+    "Features async-interface and electrum are mutually exclusive and cannot be enabled together"
+);
+
 #[cfg(feature = "keys-bip39")]
 extern crate bip39;
 
