@@ -133,7 +133,7 @@ impl BatchOperations for AnyDatabase {
             child
         )
     }
-    fn set_utxo(&mut self, utxo: &UTXO) -> Result<(), Error> {
+    fn set_utxo(&mut self, utxo: &LocalUtxo) -> Result<(), Error> {
         impl_inner_method!(AnyDatabase, self, set_utxo, utxo)
     }
     fn set_raw_tx(&mut self, transaction: &Transaction) -> Result<(), Error> {
@@ -165,7 +165,7 @@ impl BatchOperations for AnyDatabase {
     ) -> Result<Option<(KeychainKind, u32)>, Error> {
         impl_inner_method!(AnyDatabase, self, del_path_from_script_pubkey, script)
     }
-    fn del_utxo(&mut self, outpoint: &OutPoint) -> Result<Option<UTXO>, Error> {
+    fn del_utxo(&mut self, outpoint: &OutPoint) -> Result<Option<LocalUtxo>, Error> {
         impl_inner_method!(AnyDatabase, self, del_utxo, outpoint)
     }
     fn del_raw_tx(&mut self, txid: &Txid) -> Result<Option<Transaction>, Error> {
@@ -201,7 +201,7 @@ impl Database for AnyDatabase {
     fn iter_script_pubkeys(&self, keychain: Option<KeychainKind>) -> Result<Vec<Script>, Error> {
         impl_inner_method!(AnyDatabase, self, iter_script_pubkeys, keychain)
     }
-    fn iter_utxos(&self) -> Result<Vec<UTXO>, Error> {
+    fn iter_utxos(&self) -> Result<Vec<LocalUtxo>, Error> {
         impl_inner_method!(AnyDatabase, self, iter_utxos)
     }
     fn iter_raw_txs(&self) -> Result<Vec<Transaction>, Error> {
@@ -230,7 +230,7 @@ impl Database for AnyDatabase {
     ) -> Result<Option<(KeychainKind, u32)>, Error> {
         impl_inner_method!(AnyDatabase, self, get_path_from_script_pubkey, script)
     }
-    fn get_utxo(&self, outpoint: &OutPoint) -> Result<Option<UTXO>, Error> {
+    fn get_utxo(&self, outpoint: &OutPoint) -> Result<Option<LocalUtxo>, Error> {
         impl_inner_method!(AnyDatabase, self, get_utxo, outpoint)
     }
     fn get_raw_tx(&self, txid: &Txid) -> Result<Option<Transaction>, Error> {
@@ -257,7 +257,7 @@ impl BatchOperations for AnyBatch {
     ) -> Result<(), Error> {
         impl_inner_method!(AnyBatch, self, set_script_pubkey, script, keychain, child)
     }
-    fn set_utxo(&mut self, utxo: &UTXO) -> Result<(), Error> {
+    fn set_utxo(&mut self, utxo: &LocalUtxo) -> Result<(), Error> {
         impl_inner_method!(AnyBatch, self, set_utxo, utxo)
     }
     fn set_raw_tx(&mut self, transaction: &Transaction) -> Result<(), Error> {
@@ -283,7 +283,7 @@ impl BatchOperations for AnyBatch {
     ) -> Result<Option<(KeychainKind, u32)>, Error> {
         impl_inner_method!(AnyBatch, self, del_path_from_script_pubkey, script)
     }
-    fn del_utxo(&mut self, outpoint: &OutPoint) -> Result<Option<UTXO>, Error> {
+    fn del_utxo(&mut self, outpoint: &OutPoint) -> Result<Option<LocalUtxo>, Error> {
         impl_inner_method!(AnyBatch, self, del_utxo, outpoint)
     }
     fn del_raw_tx(&mut self, txid: &Txid) -> Result<Option<Transaction>, Error> {

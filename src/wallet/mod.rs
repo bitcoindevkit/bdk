@@ -199,13 +199,13 @@ where
     ///
     /// Note that this methods only operate on the internal database, which first needs to be
     /// [`Wallet::sync`] manually.
-    pub fn list_unspent(&self) -> Result<Vec<UTXO>, Error> {
+    pub fn list_unspent(&self) -> Result<Vec<LocalUtxo>, Error> {
         self.database.borrow().iter_utxos()
     }
 
     /// Returns the `UTXO` owned by this wallet corresponding to `outpoint` if it exists in the
     /// wallet's database.
-    pub fn get_utxo(&self, outpoint: OutPoint) -> Result<Option<UTXO>, Error> {
+    pub fn get_utxo(&self, outpoint: OutPoint) -> Result<Option<LocalUtxo>, Error> {
         self.database.borrow().get_utxo(&outpoint)
     }
 
@@ -699,7 +699,7 @@ where
                     }
                 };
 
-                let utxo = UTXO {
+                let utxo = LocalUtxo {
                     outpoint: txin.previous_output,
                     txout,
                     keychain,
@@ -1016,7 +1016,7 @@ where
         Ok(())
     }
 
-    fn get_available_utxos(&self) -> Result<Vec<(UTXO, usize)>, Error> {
+    fn get_available_utxos(&self) -> Result<Vec<(LocalUtxo, usize)>, Error> {
         Ok(self
             .list_unspent()?
             .into_iter()
@@ -1039,11 +1039,11 @@ where
         &self,
         change_policy: tx_builder::ChangeSpendPolicy,
         unspendable: &HashSet<OutPoint>,
-        manually_selected: Vec<(UTXO, usize)>,
+        manually_selected: Vec<(LocalUtxo, usize)>,
         must_use_all_available: bool,
         manual_only: bool,
         must_only_use_confirmed_tx: bool,
-    ) -> Result<(Vec<(UTXO, usize)>, Vec<(UTXO, usize)>), Error> {
+    ) -> Result<(Vec<(LocalUtxo, usize)>, Vec<(LocalUtxo, usize)>), Error> {
         //    must_spend <- manually selected utxos
         //    may_spend  <- all other available utxos
         let mut may_spend = self.get_available_utxos()?;
@@ -1098,7 +1098,7 @@ where
     fn complete_transaction(
         &self,
         tx: Transaction,
-        selected: Vec<UTXO>,
+        selected: Vec<LocalUtxo>,
         params: TxParams,
     ) -> Result<PSBT, Error> {
         use bitcoin::util::psbt::serialize::Serialize;

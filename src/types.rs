@@ -92,7 +92,7 @@ impl std::default::Default for FeeRate {
 
 /// A wallet unspent output
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub struct UTXO {
+pub struct LocalUtxo {
     /// Reference to a transaction output
     pub outpoint: OutPoint,
     /// Transaction output

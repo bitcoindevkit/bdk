@@ -62,7 +62,7 @@ use miniscript::descriptor::DescriptorTrait;
 use super::coin_selection::{CoinSelectionAlgorithm, DefaultCoinSelectionAlgorithm};
 use crate::{database::BatchDatabase, Error, Wallet};
 use crate::{
-    types::{FeeRate, KeychainKind, UTXO},
+    types::{FeeRate, KeychainKind, LocalUtxo},
     TransactionDetails,
 };
 /// Context in which the [`TxBuilder`] is valid
@@ -150,7 +150,7 @@ pub(crate) struct TxParams {
     pub(crate) fee_policy: Option<FeePolicy>,
     pub(crate) internal_policy_path: Option<BTreeMap<String, Vec<usize>>>,
     pub(crate) external_policy_path: Option<BTreeMap<String, Vec<usize>>>,
-    pub(crate) utxos: Vec<(UTXO, usize)>,
+    pub(crate) utxos: Vec<(LocalUtxo, usize)>,
     pub(crate) unspendable: HashSet<OutPoint>,
     pub(crate) manually_selected_only: bool,
     pub(crate) sighash: Option<SigHashType>,
@@ -618,7 +618,7 @@ impl Default for ChangeSpendPolicy {
 }
 
 impl ChangeSpendPolicy {
-    pub(crate) fn is_satisfied_by(&self, utxo: &UTXO) -> bool {
+    pub(crate) fn is_satisfied_by(&self, utxo: &LocalUtxo) -> bool {
         match self {
             ChangeSpendPolicy::ChangeAllowed => true,
             ChangeSpendPolicy::OnlyChange => utxo.keychain == KeychainKind::Internal,
@@ -709,9 +709,9 @@ mod test {
         assert_eq!(tx.output[2].script_pubkey, From::from(vec![0xAA, 0xEE]));
     }
 
-    fn get_test_utxos() -> Vec<UTXO> {
+    fn get_test_utxos() -> Vec<LocalUtxo> {
         vec![
-            UTXO {
+            LocalUtxo {
                 outpoint: OutPoint {
                     txid: Default::default(),
                     vout: 0,
@@ -719,7 +719,7 @@ mod test {
                 txout: Default::default(),
                 keychain: KeychainKind::External,
             },
-            UTXO {
+            LocalUtxo {
                 outpoint: OutPoint {
                     txid: Default::default(),
                     vout: 1,
