@@ -68,8 +68,6 @@ env_logger = "0.7"
 base64 = "^0.11"
 clap = "2.33"
 
-# [[example]]
-# name = "parse_descriptor"
 [[example]]
 name = "address_validator"
 
