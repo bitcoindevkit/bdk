@@ -55,9 +55,14 @@ pub type ValidNetworks = HashSet<Network>;
 
 /// Create a set containing mainnet, testnet and regtest
 pub fn any_network() -> ValidNetworks {
-    vec![Network::Bitcoin, Network::Testnet, Network::Regtest]
-        .into_iter()
-        .collect()
+    vec![
+        Network::Bitcoin,
+        Network::Testnet,
+        Network::Regtest,
+        Network::Signet,
+    ]
+    .into_iter()
+    .collect()
 }
 /// Create a set only containing mainnet
 pub fn mainnet_network() -> ValidNetworks {
@@ -65,7 +70,7 @@ pub fn mainnet_network() -> ValidNetworks {
 }
 /// Create a set containing testnet and regtest
 pub fn test_networks() -> ValidNetworks {
-    vec![Network::Testnet, Network::Regtest]
+    vec![Network::Testnet, Network::Regtest, Network::Signet]
         .into_iter()
         .collect()
 }

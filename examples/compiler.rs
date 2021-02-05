@@ -75,7 +75,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 .help("Sets the network")
                 .takes_value(true)
                 .default_value("testnet")
-                .possible_values(&["testnet", "regtest"]),
+                .possible_values(&["testnet", "regtest", "bitcoin", "signet"]),
         )
         .get_matches();
 
@@ -95,10 +95,12 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let database = MemoryDatabase::new();
 
-    let network = match matches.value_of("network") {
-        Some("regtest") => Network::Regtest,
-        Some("testnet") | _ => Network::Testnet,
-    };
+    let network = matches
+        .value_of("network")
+        .and_then(|n| Some(Network::from_str(n)))
+        .transpose()
+        .unwrap()
+        .unwrap_or(Network::Testnet);
     let wallet = Wallet::new_offline(&format!("{}", descriptor), None, network, database)?;
 
     info!("... First address: {}", wallet.get_new_address()?);
