@@ -163,7 +163,7 @@ pub trait CoinSelectionAlgorithm<D: Database>: std::fmt::Debug {
 ///
 /// This coin selection algorithm sorts the available UTXOs by value and then picks them starting
 /// from the largest ones until the required amount is reached.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone, Copy)]
 pub struct LargestFirstCoinSelection;
 
 impl<D: Database> CoinSelectionAlgorithm<D> for LargestFirstCoinSelection {

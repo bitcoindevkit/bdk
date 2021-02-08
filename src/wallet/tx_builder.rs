@@ -129,7 +129,7 @@ impl TxBuilderContext for BumpFee {}
 /// [`build_fee_bump`]: Wallet::build_fee_bump
 /// [`finish`]: Self::finish
 /// [`coin_selection`]: Self::coin_selection
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct TxBuilder<'a, B, D, Cs, Ctx> {
     pub(crate) wallet: &'a Wallet<B, D>,
     // params and coin_selection are Options not becasue they are optionally set (they are always
@@ -180,6 +180,17 @@ pub(crate) enum FeePolicy {
 impl std::default::Default for FeePolicy {
     fn default() -> Self {
         FeePolicy::FeeRate(FeeRate::default_min_relay_fee())
+    }
+}
+
+impl<'a, Cs: Clone, Ctx, B, D> Clone for TxBuilder<'a, B, D, Cs, Ctx> {
+    fn clone(&self) -> Self {
+        TxBuilder {
+            wallet: self.wallet,
+            params: self.params.clone(),
+            coin_selection: self.coin_selection.clone(),
+            phantom: PhantomData,
+        }
     }
 }
 
