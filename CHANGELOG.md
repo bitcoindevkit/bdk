@@ -50,7 +50,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   type to mark for a missing client.
 - Upgrade `tokio` to `1.0`.
 
-#### Transaction Creation Overhaul
+### Transaction Creation Overhaul
 
 The `TxBuilder` is now created from the `build_tx` or `build_fee_bump` functions on wallet and the
 final transaction is created by calling `finish` on the builder.
@@ -60,6 +60,13 @@ final transaction is created by calling `finish` on the builder.
 - Added `Wallet::build_fee_bump` to replace `Wallet::bump_fee`
 - Added `Wallet::get_utxo`
 - Added `Wallet::get_descriptor_for_keychain`
+
+### `add_foreign_utxo`
+
+- Renamed `UTXO` to `LocalUtxo`
+- Added `WeightedUtxo` to replace floating `(UTXO, usize)`.
+- Added `Utxo` enum to incorporate both local utxos and foreign utxos
+- Added `TxBuilder::add_foreign_utxo` which allows adding a utxo external to the wallet.
 
 ### CLI
 #### Changed
