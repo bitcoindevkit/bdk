@@ -440,11 +440,11 @@ macro_rules! expand_make_bipxx {
                     KeychainKind::Internal => vec![bip32::ChildNumber::from_normal_idx(1)?].into(),
                 };
 
-                let mut source_path = Vec::with_capacity(3);
-                source_path.push(bip32::ChildNumber::from_hardened_idx(bip)?);
-                source_path.push(bip32::ChildNumber::from_hardened_idx(0)?);
-                source_path.push(bip32::ChildNumber::from_hardened_idx(0)?);
-                let source_path: bip32::DerivationPath = source_path.into();
+                let source_path = bip32::DerivationPath::from(vec![
+                    bip32::ChildNumber::from_hardened_idx(bip)?,
+                    bip32::ChildNumber::from_hardened_idx(0)?,
+                    bip32::ChildNumber::from_hardened_idx(0)?,
+                ]);
 
                 Ok((key, (parent_fingerprint, source_path), derivation_path))
             }

@@ -228,10 +228,11 @@ macro_rules! impl_sortedmulti {
         use $crate::keys::IntoDescriptorKey;
         let secp = $crate::bitcoin::secp256k1::Secp256k1::new();
 
-        let mut keys = vec![];
-        $(
-            keys.push($key.into_descriptor_key());
-        )*
+        let keys = vec![
+            $(
+                $key.into_descriptor_key(),
+            )*
+        ];
 
         keys.into_iter().collect::<Result<Vec<_>, _>>()
             .map_err($crate::descriptor::DescriptorError::Key)
@@ -656,10 +657,11 @@ macro_rules! fragment {
         use $crate::keys::IntoDescriptorKey;
         let secp = $crate::bitcoin::secp256k1::Secp256k1::new();
 
-        let mut keys = vec![];
-        $(
-            keys.push($key.into_descriptor_key());
-        )*
+        let keys = vec![
+            $(
+                $key.into_descriptor_key(),
+            )*
+        ];
 
         keys.into_iter().collect::<Result<Vec<_>, _>>()
             .map_err($crate::descriptor::DescriptorError::Key)
