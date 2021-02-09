@@ -733,7 +733,7 @@ fn expand_multi_keys<Pk: IntoDescriptorKey<Ctx>, Ctx: ScriptContext>(
 ) -> Result<(Vec<DescriptorPublicKey>, KeyMap, ValidNetworks), KeyError> {
     let (pks, key_maps_networks): (Vec<_>, Vec<_>) = pks
         .into_iter()
-        .map(|key| Ok::<_, KeyError>(key.into_descriptor_key()?.extract(secp)?))
+        .map(|key| key.into_descriptor_key()?.extract(secp))
         .collect::<Result<Vec<_>, _>>()?
         .into_iter()
         .map(|(a, b, c)| (a, (b, c)))

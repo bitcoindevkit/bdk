@@ -75,7 +75,7 @@ impl<T: DescriptorTemplate> IntoWalletDescriptor for T {
         secp: &SecpCtx,
         network: Network,
     ) -> Result<(ExtendedDescriptor, KeyMap), DescriptorError> {
-        Ok(self.build()?.into_wallet_descriptor(secp, network)?)
+        self.build()?.into_wallet_descriptor(secp, network)
     }
 }
 
@@ -108,7 +108,7 @@ pub struct P2PKH<K: IntoDescriptorKey<Legacy>>(pub K);
 
 impl<K: IntoDescriptorKey<Legacy>> DescriptorTemplate for P2PKH<K> {
     fn build(self) -> Result<DescriptorTemplateOut, DescriptorError> {
-        Ok(descriptor!(pkh(self.0))?)
+        descriptor!(pkh(self.0))
     }
 }
 
@@ -142,7 +142,7 @@ pub struct P2WPKH_P2SH<K: IntoDescriptorKey<Segwitv0>>(pub K);
 
 impl<K: IntoDescriptorKey<Segwitv0>> DescriptorTemplate for P2WPKH_P2SH<K> {
     fn build(self) -> Result<DescriptorTemplateOut, DescriptorError> {
-        Ok(descriptor!(sh(wpkh(self.0)))?)
+        descriptor!(sh(wpkh(self.0)))
     }
 }
 
@@ -175,7 +175,7 @@ pub struct P2WPKH<K: IntoDescriptorKey<Segwitv0>>(pub K);
 
 impl<K: IntoDescriptorKey<Segwitv0>> DescriptorTemplate for P2WPKH<K> {
     fn build(self) -> Result<DescriptorTemplateOut, DescriptorError> {
-        Ok(descriptor!(wpkh(self.0))?)
+        descriptor!(wpkh(self.0))
     }
 }
 
@@ -210,7 +210,7 @@ pub struct BIP44<K: DerivableKey<Legacy>>(pub K, pub KeychainKind);
 
 impl<K: DerivableKey<Legacy>> DescriptorTemplate for BIP44<K> {
     fn build(self) -> Result<DescriptorTemplateOut, DescriptorError> {
-        Ok(P2PKH(legacy::make_bipxx_private(44, self.0, self.1)?).build()?)
+        P2PKH(legacy::make_bipxx_private(44, self.0, self.1)?).build()
     }
 }
 
@@ -249,7 +249,7 @@ pub struct BIP44Public<K: DerivableKey<Legacy>>(pub K, pub bip32::Fingerprint, p
 
 impl<K: DerivableKey<Legacy>> DescriptorTemplate for BIP44Public<K> {
     fn build(self) -> Result<DescriptorTemplateOut, DescriptorError> {
-        Ok(P2PKH(legacy::make_bipxx_public(44, self.0, self.1, self.2)?).build()?)
+        P2PKH(legacy::make_bipxx_public(44, self.0, self.1, self.2)?).build()
     }
 }
 
@@ -284,7 +284,7 @@ pub struct BIP49<K: DerivableKey<Segwitv0>>(pub K, pub KeychainKind);
 
 impl<K: DerivableKey<Segwitv0>> DescriptorTemplate for BIP49<K> {
     fn build(self) -> Result<DescriptorTemplateOut, DescriptorError> {
-        Ok(P2WPKH_P2SH(segwit_v0::make_bipxx_private(49, self.0, self.1)?).build()?)
+        P2WPKH_P2SH(segwit_v0::make_bipxx_private(49, self.0, self.1)?).build()
     }
 }
 
@@ -323,7 +323,7 @@ pub struct BIP49Public<K: DerivableKey<Segwitv0>>(pub K, pub bip32::Fingerprint,
 
 impl<K: DerivableKey<Segwitv0>> DescriptorTemplate for BIP49Public<K> {
     fn build(self) -> Result<DescriptorTemplateOut, DescriptorError> {
-        Ok(P2WPKH_P2SH(segwit_v0::make_bipxx_public(49, self.0, self.1, self.2)?).build()?)
+        P2WPKH_P2SH(segwit_v0::make_bipxx_public(49, self.0, self.1, self.2)?).build()
     }
 }
 
@@ -358,7 +358,7 @@ pub struct BIP84<K: DerivableKey<Segwitv0>>(pub K, pub KeychainKind);
 
 impl<K: DerivableKey<Segwitv0>> DescriptorTemplate for BIP84<K> {
     fn build(self) -> Result<DescriptorTemplateOut, DescriptorError> {
-        Ok(P2WPKH(segwit_v0::make_bipxx_private(84, self.0, self.1)?).build()?)
+        P2WPKH(segwit_v0::make_bipxx_private(84, self.0, self.1)?).build()
     }
 }
 
@@ -397,7 +397,7 @@ pub struct BIP84Public<K: DerivableKey<Segwitv0>>(pub K, pub bip32::Fingerprint,
 
 impl<K: DerivableKey<Segwitv0>> DescriptorTemplate for BIP84Public<K> {
     fn build(self) -> Result<DescriptorTemplateOut, DescriptorError> {
-        Ok(P2WPKH(segwit_v0::make_bipxx_public(84, self.0, self.1, self.2)?).build()?)
+        P2WPKH(segwit_v0::make_bipxx_public(84, self.0, self.1, self.2)?).build()
     }
 }
 
