@@ -46,6 +46,8 @@ use bitcoin::BlockHash;
 use bitcoin::BlockHeader;
 use bitcoin::Network;
 
+use lazy_static::lazy_static;
+
 use super::CompactFiltersError;
 
 lazy_static! {
