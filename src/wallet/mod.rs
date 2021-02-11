@@ -2380,7 +2380,7 @@ mod test {
             builder
                 .add_foreign_utxo(utxo2.outpoint, psbt_input2, satisfaction_weight)
                 .is_ok(),
-            "shoulld be ok when outpoing does match psbt_input"
+            "shoulld be ok when outpoint does match psbt_input"
         );
     }
 

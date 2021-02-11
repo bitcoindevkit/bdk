@@ -314,7 +314,7 @@ impl<'a, B, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderConte
         self.add_utxos(&[outpoint])
     }
 
-    /// Add a foreign UTXO i.e. A UTXO not owned by this wallet.
+    /// Add a foreign UTXO i.e. a UTXO not owned by this wallet.
     ///
     /// At a minimum to add a foreign UTXO we need:
     ///
@@ -325,7 +325,7 @@ impl<'a, B, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderConte
     /// There are several security concerns about adding foregin UTXOs that application
     /// developers should consider. First, how do you know the value of the input is correct? If a
     /// `non_witness_utxo` is provided in the `psbt_input` then this method implicitly verifies the
-    /// value by checking it against the transaction. If only a `wintess_utxo` is provided then this
+    /// value by checking it against the transaction. If only a `witness_utxo` is provided then this
     /// method doesn't verify the value but just takes it as a given -- it is up to you to check
     /// that whoever sent you the `input_psbt` was not lying!
     ///
