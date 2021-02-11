@@ -134,7 +134,7 @@ where
     ) -> Result<Self, Error> {
         let secp = Secp256k1::new();
 
-        let (descriptor, keymap) = descriptor.to_wallet_descriptor(&secp, network)?;
+        let (descriptor, keymap) = descriptor.into_wallet_descriptor(&secp, network)?;
         database.check_descriptor_checksum(
             KeychainKind::External,
             get_checksum(&descriptor.to_string())?.as_bytes(),
@@ -143,7 +143,7 @@ where
         let (change_descriptor, change_signers) = match change_descriptor {
             Some(desc) => {
                 let (change_descriptor, change_keymap) =
-                    desc.to_wallet_descriptor(&secp, network)?;
+                    desc.into_wallet_descriptor(&secp, network)?;
                 database.check_descriptor_checksum(
                     KeychainKind::Internal,
                     get_checksum(&change_descriptor.to_string())?.as_bytes(),

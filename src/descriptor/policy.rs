@@ -913,8 +913,8 @@ mod test {
         let tprv = bip32::ExtendedPrivKey::from_str(tprv).unwrap();
         let tpub = bip32::ExtendedPubKey::from_private(&secp, &tprv);
         let fingerprint = tprv.fingerprint(&secp);
-        let prvkey = (tprv, path.clone()).to_descriptor_key().unwrap();
-        let pubkey = (tpub, path).to_descriptor_key().unwrap();
+        let prvkey = (tprv, path.clone()).into_descriptor_key().unwrap();
+        let pubkey = (tpub, path).into_descriptor_key().unwrap();
 
         (prvkey, pubkey, fingerprint)
     }
@@ -927,7 +927,9 @@ mod test {
 
         let (prvkey, pubkey, fingerprint) = setup_keys(TPRV0_STR);
         let desc = descriptor!(wpkh(pubkey)).unwrap();
-        let (wallet_desc, keymap) = desc.to_wallet_descriptor(&secp, Network::Testnet).unwrap();
+        let (wallet_desc, keymap) = desc
+            .into_wallet_descriptor(&secp, Network::Testnet)
+            .unwrap();
         let signers_container = Arc::new(SignersContainer::from(keymap));
         let policy = wallet_desc
             .extract_policy(&signers_container, &Secp256k1::new())
@@ -940,7 +942,9 @@ mod test {
         assert!(matches!(&policy.contribution, Satisfaction::None));
 
         let desc = descriptor!(wpkh(prvkey)).unwrap();
-        let (wallet_desc, keymap) = desc.to_wallet_descriptor(&secp, Network::Testnet).unwrap();
+        let (wallet_desc, keymap) = desc
+            .into_wallet_descriptor(&secp, Network::Testnet)
+            .unwrap();
         let signers_container = Arc::new(SignersContainer::from(keymap));
         let policy = wallet_desc
             .extract_policy(&signers_container, &Secp256k1::new())
@@ -1023,7 +1027,9 @@ mod test {
         let (_prvkey0, pubkey0, fingerprint0) = setup_keys(TPRV0_STR);
         let (prvkey1, _pubkey1, fingerprint1) = setup_keys(TPRV1_STR);
         let desc = descriptor!(sh(multi(1, pubkey0, prvkey1))).unwrap();
-        let (wallet_desc, keymap) = desc.to_wallet_descriptor(&secp, Network::Testnet).unwrap();
+        let (wallet_desc, keymap) = desc
+            .into_wallet_descriptor(&secp, Network::Testnet)
+            .unwrap();
         let signers_container = Arc::new(SignersContainer::from(keymap));
         let policy = wallet_desc
             .extract_policy(&signers_container, &Secp256k1::new())
@@ -1053,7 +1059,9 @@ mod test {
         let (prvkey0, _pubkey0, fingerprint0) = setup_keys(TPRV0_STR);
         let (prvkey1, _pubkey1, fingerprint1) = setup_keys(TPRV1_STR);
         let desc = descriptor!(sh(multi(2, prvkey0, prvkey1))).unwrap();
-        let (wallet_desc, keymap) = desc.to_wallet_descriptor(&secp, Network::Testnet).unwrap();
+        let (wallet_desc, keymap) = desc
+            .into_wallet_descriptor(&secp, Network::Testnet)
+            .unwrap();
         let signers_container = Arc::new(SignersContainer::from(keymap));
         let policy = wallet_desc
             .extract_policy(&signers_container, &Secp256k1::new())
@@ -1083,7 +1091,9 @@ mod test {
 
         let (prvkey, pubkey, fingerprint) = setup_keys(TPRV0_STR);
         let desc = descriptor!(wpkh(pubkey)).unwrap();
-        let (wallet_desc, keymap) = desc.to_wallet_descriptor(&secp, Network::Testnet).unwrap();
+        let (wallet_desc, keymap) = desc
+            .into_wallet_descriptor(&secp, Network::Testnet)
+            .unwrap();
         let single_key = wallet_desc.derive(0);
         let signers_container = Arc::new(SignersContainer::from(keymap));
         let policy = single_key
@@ -1097,7 +1107,9 @@ mod test {
         assert!(matches!(&policy.contribution, Satisfaction::None));
 
         let desc = descriptor!(wpkh(prvkey)).unwrap();
-        let (wallet_desc, keymap) = desc.to_wallet_descriptor(&secp, Network::Testnet).unwrap();
+        let (wallet_desc, keymap) = desc
+            .into_wallet_descriptor(&secp, Network::Testnet)
+            .unwrap();
         let single_key = wallet_desc.derive(0);
         let signers_container = Arc::new(SignersContainer::from(keymap));
         let policy = single_key
@@ -1122,7 +1134,9 @@ mod test {
         let (_prvkey0, pubkey0, fingerprint0) = setup_keys(TPRV0_STR);
         let (prvkey1, _pubkey1, fingerprint1) = setup_keys(TPRV1_STR);
         let desc = descriptor!(sh(multi(1, pubkey0, prvkey1))).unwrap();
-        let (wallet_desc, keymap) = desc.to_wallet_descriptor(&secp, Network::Testnet).unwrap();
+        let (wallet_desc, keymap) = desc
+            .into_wallet_descriptor(&secp, Network::Testnet)
+            .unwrap();
         let single_key = wallet_desc.derive(0);
         let signers_container = Arc::new(SignersContainer::from(keymap));
         let policy = single_key
@@ -1164,7 +1178,9 @@ mod test {
         )))
         .unwrap();
 
-        let (wallet_desc, keymap) = desc.to_wallet_descriptor(&secp, Network::Testnet).unwrap();
+        let (wallet_desc, keymap) = desc
+            .into_wallet_descriptor(&secp, Network::Testnet)
+            .unwrap();
         let signers_container = Arc::new(SignersContainer::from(keymap));
         let policy = wallet_desc
             .extract_policy(&signers_container, &Secp256k1::new())

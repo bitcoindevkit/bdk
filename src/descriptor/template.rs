@@ -70,12 +70,12 @@ pub trait DescriptorTemplate {
 /// Turns a [`DescriptorTemplate`] into a valid wallet descriptor by calling its
 /// [`build`](DescriptorTemplate::build) method
 impl<T: DescriptorTemplate> ToWalletDescriptor for T {
-    fn to_wallet_descriptor(
+    fn into_wallet_descriptor(
         self,
         secp: &SecpCtx,
         network: Network,
     ) -> Result<(ExtendedDescriptor, KeyMap), DescriptorError> {
-        Ok(self.build()?.to_wallet_descriptor(secp, network)?)
+        Ok(self.build()?.into_wallet_descriptor(secp, network)?)
     }
 }
 
