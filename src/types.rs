@@ -106,8 +106,10 @@ pub struct LocalUtxo {
 /// A [`Utxo`] with its `satisfaction_weight`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct WeightedUtxo {
-    /// The weight of the witness data or `scriptSig`.
-    /// This is used to properly maintain the feerate when doing coin selection.
+    /// The weight of the witness data and `scriptSig` expressed in [weight units]. This is used to
+    /// properly maintain the feerate when adding this input to a transaction during coin selection.
+    ///
+    /// [weight units]: https://en.bitcoin.it/wiki/Weight_units
     pub satisfaction_weight: usize,
     /// The UTXO
     pub utxo: Utxo,
