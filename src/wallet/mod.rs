@@ -2360,25 +2360,30 @@ mod test {
             .max_satisfaction_weight()
             .unwrap();
 
-        let psbt_input1 = psbt::Input {
-            non_witness_utxo: Some(tx1),
-            ..Default::default()
-        };
-        let psbt_input2 = psbt::Input {
-            non_witness_utxo: Some(tx2),
-            ..Default::default()
-        };
-
         let mut builder = wallet1.build_tx();
         assert!(
             builder
-                .add_foreign_utxo(utxo2.outpoint, psbt_input1, satisfaction_weight)
+                .add_foreign_utxo(
+                    utxo2.outpoint,
+                    psbt::Input {
+                        non_witness_utxo: Some(tx1),
+                        ..Default::default()
+                    },
+                    satisfaction_weight
+                )
                 .is_err(),
             "should fail when outpoint doesn't match psbt_input"
         );
         assert!(
             builder
-                .add_foreign_utxo(utxo2.outpoint, psbt_input2, satisfaction_weight)
+                .add_foreign_utxo(
+                    utxo2.outpoint,
+                    psbt::Input {
+                        non_witness_utxo: Some(tx2),
+                        ..Default::default()
+                    },
+                    satisfaction_weight
+                )
                 .is_ok(),
             "shoulld be ok when outpoint does match psbt_input"
         );
@@ -2413,7 +2418,7 @@ mod test {
                 .unwrap();
             assert!(
                 builder.finish().is_err(),
-                "psbt_input with witness_utxo should succeed with witness_utxo"
+                "psbt_input with witness_utxo should fail with only witness_utxo"
             );
         }
 
