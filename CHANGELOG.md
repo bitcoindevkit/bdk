@@ -27,6 +27,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Wallet
 #### Changed
 - Removed the explicit `id` argument from `Wallet::add_signer()` since that's now part of `Signer` itself
+- Renamed `ToWalletDescriptor::to_wallet_descriptor` to `ToWalletDescriptor::into_wallet_descriptor`
+
+### Policy 
+#### Changed
+- Removed unneeded `Result<(), PolicyError>` return type for `Satisfaction::finalize()`
 
 ## [v0.3.0] - [v0.2.0]
 
