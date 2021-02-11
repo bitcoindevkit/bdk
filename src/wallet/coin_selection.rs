@@ -97,9 +97,11 @@
 //! # Ok::<(), bdk::Error>(())
 //! ```
 
-use crate::database::Database;
-use crate::error::Error;
-use crate::types::{FeeRate, UTXO};
+use crate::{
+    database::Database,
+    error::Error,
+    types::{FeeRate, UTXO},
+};
 
 use rand::seq::SliceRandom;
 #[cfg(not(test))]
@@ -526,12 +528,9 @@ mod test {
     use bitcoin::{OutPoint, Script, TxOut};
 
     use super::*;
-    use crate::database::MemoryDatabase;
-    use crate::types::*;
+    use crate::{database::MemoryDatabase, types::*};
 
-    use rand::rngs::StdRng;
-    use rand::seq::SliceRandom;
-    use rand::{Rng, SeedableRng};
+    use rand::{rngs::StdRng, seq::SliceRandom, Rng, SeedableRng};
 
     const P2WPKH_WITNESS_SIZE: usize = 73 + 33 + 2;
 

@@ -27,16 +27,18 @@
 //! This module contains the definition of various common script templates that are ready to be
 //! used. See the documentation of each template for an example.
 
-use bitcoin::util::bip32;
-use bitcoin::Network;
+use bitcoin::{util::bip32, Network};
 
 use miniscript::{Legacy, Segwitv0};
 
 use super::{ExtendedDescriptor, KeyMap, ToWalletDescriptor};
-use crate::descriptor::DescriptorError;
-use crate::keys::{DerivableKey, ToDescriptorKey, ValidNetworks};
-use crate::wallet::utils::SecpCtx;
-use crate::{descriptor, KeychainKind};
+use crate::{
+    descriptor,
+    descriptor::DescriptorError,
+    keys::{DerivableKey, ToDescriptorKey, ValidNetworks},
+    wallet::utils::SecpCtx,
+    KeychainKind,
+};
 
 /// Type alias for the return type of [`DescriptorTemplate`], [`descriptor!`](crate::descriptor!) and others
 pub type DescriptorTemplateOut = (ExtendedDescriptor, KeyMap, ValidNetworks);
@@ -460,14 +462,17 @@ mod test {
     // test existing descriptor templates, make sure they are expanded to the right descriptors
 
     use super::*;
-    use crate::descriptor::derived::AsDerived;
-    use crate::descriptor::{DescriptorError, DescriptorMeta};
-    use crate::keys::ValidNetworks;
-    use bitcoin::hashes::core::str::FromStr;
-    use bitcoin::network::constants::Network::Regtest;
-    use bitcoin::secp256k1::Secp256k1;
-    use miniscript::descriptor::{DescriptorPublicKey, DescriptorTrait, KeyMap};
-    use miniscript::Descriptor;
+    use crate::{
+        descriptor::{derived::AsDerived, DescriptorError, DescriptorMeta},
+        keys::ValidNetworks,
+    };
+    use bitcoin::{
+        hashes::core::str::FromStr, network::constants::Network::Regtest, secp256k1::Secp256k1,
+    };
+    use miniscript::{
+        descriptor::{DescriptorPublicKey, DescriptorTrait, KeyMap},
+        Descriptor,
+    };
 
     // verify template descriptor generates expected address(es)
     fn check(

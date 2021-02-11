@@ -26,22 +26,25 @@
 //!
 //! This module defines the [`Wallet`] structure.
 
-use std::cell::RefCell;
-use std::collections::HashMap;
-use std::collections::{BTreeMap, HashSet};
-use std::ops::{Deref, DerefMut};
-use std::sync::Arc;
+use std::{
+    cell::RefCell,
+    collections::{BTreeMap, HashMap, HashSet},
+    ops::{Deref, DerefMut},
+    sync::Arc,
+};
 
 use bitcoin::secp256k1::Secp256k1;
 
-use bitcoin::consensus::encode::serialize;
-use bitcoin::util::base58;
-use bitcoin::util::psbt::raw::Key as PSBTKey;
-use bitcoin::util::psbt::PartiallySignedTransaction as PSBT;
-use bitcoin::{Address, Network, OutPoint, Script, Transaction, TxOut, Txid};
+use bitcoin::{
+    consensus::encode::serialize,
+    util::{
+        base58,
+        psbt::{raw::Key as PSBTKey, PartiallySignedTransaction as PSBT},
+    },
+    Address, Network, OutPoint, Script, Transaction, TxOut, Txid,
+};
 
-use miniscript::descriptor::DescriptorTrait;
-use miniscript::psbt::PsbtInputSatisfier;
+use miniscript::{descriptor::DescriptorTrait, psbt::PsbtInputSatisfier};
 
 #[allow(unused_imports)]
 use log::{debug, error, info, trace};
@@ -62,16 +65,18 @@ use signer::{Signer, SignerOrdering, SignersContainer};
 use tx_builder::{BumpFee, CreateTx, FeePolicy, TxBuilder, TxParams};
 use utils::{check_nlocktime, check_nsequence_rbf, After, Older, SecpCtx, DUST_LIMIT_SATOSHI};
 
-use crate::blockchain::{Blockchain, Progress};
-use crate::database::{BatchDatabase, BatchOperations, DatabaseUtils};
-use crate::descriptor::derived::AsDerived;
-use crate::descriptor::{
-    get_checksum, DerivedDescriptor, DerivedDescriptorMeta, DescriptorMeta, DescriptorScripts,
-    ExtendedDescriptor, ExtractPolicy, Policy, ToWalletDescriptor, XKeyUtils,
+use crate::{
+    blockchain::{Blockchain, Progress},
+    database::{BatchDatabase, BatchOperations, DatabaseUtils},
+    descriptor::{
+        derived::AsDerived, get_checksum, DerivedDescriptor, DerivedDescriptorMeta, DescriptorMeta,
+        DescriptorScripts, ExtendedDescriptor, ExtractPolicy, Policy, ToWalletDescriptor,
+        XKeyUtils,
+    },
+    error::Error,
+    psbt::PSBTUtils,
+    types::*,
 };
-use crate::error::Error;
-use crate::psbt::PSBTUtils;
-use crate::types::*;
 
 const CACHE_ADDR_BATCH_SIZE: u32 = 100;
 
@@ -1349,9 +1354,10 @@ mod test {
 
     use bitcoin::Network;
 
-    use crate::database::memory::MemoryDatabase;
-    use crate::database::Database;
-    use crate::types::KeychainKind;
+    use crate::{
+        database::{memory::MemoryDatabase, Database},
+        types::KeychainKind,
+    };
 
     use super::*;
 
@@ -2212,9 +2218,10 @@ mod test {
 
     #[test]
     fn test_create_tx_global_xpubs_with_origin() {
-        use bitcoin::hashes::hex::FromHex;
-        use bitcoin::util::base58;
-        use bitcoin::util::psbt::raw::Key;
+        use bitcoin::{
+            hashes::hex::FromHex,
+            util::{base58, psbt::raw::Key},
+        };
 
         let (wallet, _, _) = get_funded_wallet("wpkh([73756c7f/48'/0'/0'/2']tpubDCKxNyM3bLgbEX13Mcd8mYxbVg9ajDkWXMh29hMWBurKfVmBfWAM96QVP3zaUcN51HvkZ3ar4VwP82kC8JZhhux8vFQoJintSpVBwpFvyU3/0/*)");
         let addr = wallet.get_new_address().unwrap();
@@ -2252,9 +2259,10 @@ mod test {
 
     #[test]
     fn test_create_tx_global_xpubs_master_without_origin() {
-        use bitcoin::hashes::hex::FromHex;
-        use bitcoin::util::base58;
-        use bitcoin::util::psbt::raw::Key;
+        use bitcoin::{
+            hashes::hex::FromHex,
+            util::{base58, psbt::raw::Key},
+        };
 
         let (wallet, _, _) = get_funded_wallet("wpkh(tpubD6NzVbkrYhZ4Y55A58Gv9RSNF5hy84b5AJqYy7sCcjFrkcLpPre8kmgfit6kY1Zs3BLgeypTDBZJM222guPpdz7Cup5yzaMu62u7mYGbwFL/0/*)");
         let addr = wallet.get_new_address().unwrap();

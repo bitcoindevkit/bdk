@@ -22,18 +22,19 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use std::collections::{BTreeMap, HashMap, VecDeque};
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::{
+    collections::{BTreeMap, HashMap, VecDeque},
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
-use bitcoin::hash_types::{BlockHash, FilterHeader};
-use bitcoin::network::message::NetworkMessage;
-use bitcoin::network::message_blockdata::GetHeadersMessage;
-use bitcoin::util::bip158::BlockFilter;
+use bitcoin::{
+    hash_types::{BlockHash, FilterHeader},
+    network::{message::NetworkMessage, message_blockdata::GetHeadersMessage},
+    util::bip158::BlockFilter,
+};
 
-use super::peer::*;
-use super::store::*;
-use super::CompactFiltersError;
+use super::{peer::*, store::*, CompactFiltersError};
 use crate::error::Error;
 
 pub(crate) const BURIED_CONFIRMATIONS: usize = 100;

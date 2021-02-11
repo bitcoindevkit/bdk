@@ -22,29 +22,26 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use std::convert::TryInto;
-use std::fmt;
-use std::io::{Read, Write};
-use std::marker::PhantomData;
-use std::ops::Deref;
-use std::sync::Arc;
-use std::sync::RwLock;
+use std::{
+    convert::TryInto,
+    fmt,
+    io::{Read, Write},
+    marker::PhantomData,
+    ops::Deref,
+    sync::{Arc, RwLock},
+};
 
-use rand::distributions::Alphanumeric;
-use rand::{thread_rng, Rng};
+use rand::{distributions::Alphanumeric, thread_rng, Rng};
 
 use rocksdb::{Direction, IteratorMode, ReadOptions, WriteBatch, DB};
 
-use bitcoin::consensus::{deserialize, encode::VarInt, serialize, Decodable, Encodable};
-use bitcoin::hash_types::{FilterHash, FilterHeader};
-use bitcoin::hashes::hex::FromHex;
-use bitcoin::hashes::Hash;
-use bitcoin::util::bip158::BlockFilter;
-use bitcoin::util::uint::Uint256;
-use bitcoin::Block;
-use bitcoin::BlockHash;
-use bitcoin::BlockHeader;
-use bitcoin::Network;
+use bitcoin::{
+    consensus::{deserialize, encode::VarInt, serialize, Decodable, Encodable},
+    hash_types::{FilterHash, FilterHeader},
+    hashes::{hex::FromHex, Hash},
+    util::{bip158::BlockFilter, uint::Uint256},
+    Block, BlockHash, BlockHeader, Network,
+};
 
 use super::CompactFiltersError;
 

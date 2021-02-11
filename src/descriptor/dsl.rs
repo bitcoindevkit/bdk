@@ -677,18 +677,23 @@ macro_rules! fragment {
 
 #[cfg(test)]
 mod test {
-    use bitcoin::hashes::hex::ToHex;
-    use bitcoin::secp256k1::Secp256k1;
-    use miniscript::descriptor::{DescriptorPublicKey, DescriptorTrait, KeyMap};
-    use miniscript::{Descriptor, Legacy, Segwitv0};
+    use bitcoin::{hashes::hex::ToHex, secp256k1::Secp256k1};
+    use miniscript::{
+        descriptor::{DescriptorPublicKey, DescriptorTrait, KeyMap},
+        Descriptor, Legacy, Segwitv0,
+    };
 
     use std::str::FromStr;
 
-    use crate::descriptor::{DescriptorError, DescriptorMeta};
-    use crate::keys::{DescriptorKey, ToDescriptorKey, ValidNetworks};
-    use bitcoin::network::constants::Network::{Bitcoin, Regtest, Signet, Testnet};
-    use bitcoin::util::bip32;
-    use bitcoin::PrivateKey;
+    use crate::{
+        descriptor::{DescriptorError, DescriptorMeta},
+        keys::{DescriptorKey, ToDescriptorKey, ValidNetworks},
+    };
+    use bitcoin::{
+        network::constants::Network::{Bitcoin, Regtest, Signet, Testnet},
+        util::bip32,
+        PrivateKey,
+    };
 
     use crate::descriptor::derived::AsDerived;
 

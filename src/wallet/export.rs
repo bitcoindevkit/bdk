@@ -76,11 +76,12 @@ use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
-use miniscript::descriptor::{ShInner, WshInner};
-use miniscript::{Descriptor, DescriptorPublicKey, ScriptContext, Terminal};
+use miniscript::{
+    descriptor::{ShInner, WshInner},
+    Descriptor, DescriptorPublicKey, ScriptContext, Terminal,
+};
 
-use crate::database::BatchDatabase;
-use crate::wallet::Wallet;
+use crate::{database::BatchDatabase, wallet::Wallet};
 
 /// Structure that contains the export of a wallet
 ///
@@ -222,9 +223,11 @@ mod test {
     use bitcoin::{Network, Txid};
 
     use super::*;
-    use crate::database::{memory::MemoryDatabase, BatchOperations};
-    use crate::types::TransactionDetails;
-    use crate::wallet::Wallet;
+    use crate::{
+        database::{memory::MemoryDatabase, BatchOperations},
+        types::TransactionDetails,
+        wallet::Wallet,
+    };
 
     fn get_test_db() -> MemoryDatabase {
         let mut db = MemoryDatabase::new();

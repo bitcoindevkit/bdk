@@ -24,8 +24,10 @@
 
 use std::convert::AsRef;
 
-use bitcoin::blockdata::transaction::{OutPoint, Transaction, TxOut};
-use bitcoin::hash_types::Txid;
+use bitcoin::{
+    blockdata::transaction::{OutPoint, Transaction, TxOut},
+    hash_types::Txid,
+};
 
 use serde::{Deserialize, Serialize};
 

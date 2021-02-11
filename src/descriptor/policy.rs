@@ -47,30 +47,33 @@
 //! # Ok::<(), bdk::Error>(())
 //! ```
 
-use std::cmp::{max, Ordering};
-use std::collections::{BTreeMap, HashSet, VecDeque};
-use std::fmt;
+use std::{
+    cmp::{max, Ordering},
+    collections::{BTreeMap, HashSet, VecDeque},
+    fmt,
+};
 
-use serde::ser::SerializeMap;
-use serde::{Serialize, Serializer};
+use serde::{ser::SerializeMap, Serialize, Serializer};
 
-use bitcoin::hashes::*;
-use bitcoin::util::bip32::Fingerprint;
-use bitcoin::PublicKey;
+use bitcoin::{hashes::*, util::bip32::Fingerprint, PublicKey};
 
-use miniscript::descriptor::{DescriptorPublicKey, ShInner, SortedMultiVec, WshInner};
-use miniscript::{Descriptor, Miniscript, MiniscriptKey, ScriptContext, Terminal, ToPublicKey};
+use miniscript::{
+    descriptor::{DescriptorPublicKey, ShInner, SortedMultiVec, WshInner},
+    Descriptor, Miniscript, MiniscriptKey, ScriptContext, Terminal, ToPublicKey,
+};
 
 #[allow(unused_imports)]
 use log::{debug, error, info, trace};
 
-use crate::descriptor::{DerivedDescriptorKey, ExtractPolicy};
-use crate::wallet::signer::{SignerId, SignersContainer};
-use crate::wallet::utils::{self, SecpCtx};
+use crate::{
+    descriptor::{DerivedDescriptorKey, ExtractPolicy},
+    wallet::{
+        signer::{SignerId, SignersContainer},
+        utils::{self, SecpCtx},
+    },
+};
 
-use super::checksum::get_checksum;
-use super::error::Error;
-use super::XKeyUtils;
+use super::{checksum::get_checksum, error::Error, XKeyUtils};
 
 /// Raw public key or extended key fingerprint
 #[derive(Debug, Clone, Default, Serialize)]
@@ -889,18 +892,23 @@ impl ExtractPolicy for Descriptor<DescriptorPublicKey> {
 
 #[cfg(test)]
 mod test {
-    use crate::descriptor;
-    use crate::descriptor::{ExtractPolicy, ToWalletDescriptor};
+    use crate::{
+        descriptor,
+        descriptor::{ExtractPolicy, ToWalletDescriptor},
+    };
 
     use super::*;
-    use crate::descriptor::policy::SatisfiableItem::{Multisig, Signature, Thresh};
-    use crate::keys::{DescriptorKey, ToDescriptorKey};
-    use crate::wallet::signer::SignersContainer;
-    use bitcoin::secp256k1::{All, Secp256k1};
-    use bitcoin::util::bip32;
-    use bitcoin::Network;
-    use std::str::FromStr;
-    use std::sync::Arc;
+    use crate::{
+        descriptor::policy::SatisfiableItem::{Multisig, Signature, Thresh},
+        keys::{DescriptorKey, ToDescriptorKey},
+        wallet::signer::SignersContainer,
+    };
+    use bitcoin::{
+        secp256k1::{All, Secp256k1},
+        util::bip32,
+        Network,
+    };
+    use std::{str::FromStr, sync::Arc};
 
     const TPRV0_STR:&str = "tprv8ZgxMBicQKsPdZXrcHNLf5JAJWFAoJ2TrstMRdSKtEggz6PddbuSkvHKM9oKJyFgZV1B7rw8oChspxyYbtmEXYyg1AjfWbL3ho3XHDpHRZf";
     const TPRV1_STR:&str = "tprv8ZgxMBicQKsPdpkqS7Eair4YxjcuuvDPNYmKX3sCniCf16tHEVrjjiSXEkFRnUH77yXc6ZcwHHcLNfjdi5qUvw3VDfgYiH5mNsj5izuiu2N";

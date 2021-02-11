@@ -27,8 +27,7 @@ extern crate quote;
 
 use proc_macro::TokenStream;
 
-use syn::spanned::Spanned;
-use syn::{parse, ImplItemMethod, ItemImpl, ItemTrait, Token};
+use syn::{parse, spanned::Spanned, ImplItemMethod, ItemImpl, ItemTrait, Token};
 
 fn add_async_trait(mut parsed: ItemTrait) -> TokenStream {
     let output = quote! {

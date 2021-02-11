@@ -22,8 +22,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use bitcoin::util::psbt::PartiallySignedTransaction as PSBT;
-use bitcoin::TxOut;
+use bitcoin::{util::psbt::PartiallySignedTransaction as PSBT, TxOut};
 
 pub trait PSBTUtils {
     fn get_utxo_for(&self, input_index: usize) -> Option<TxOut>;

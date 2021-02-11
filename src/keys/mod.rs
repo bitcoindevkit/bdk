@@ -24,27 +24,28 @@
 
 //! Key formats
 
-use std::any::TypeId;
-use std::collections::HashSet;
-use std::marker::PhantomData;
-use std::ops::Deref;
-use std::str::FromStr;
+use std::{any::TypeId, collections::HashSet, marker::PhantomData, ops::Deref, str::FromStr};
 
 use bitcoin::secp256k1::{self, Secp256k1, Signing};
 
-use bitcoin::util::bip32;
-use bitcoin::{Network, PrivateKey, PublicKey};
+use bitcoin::{util::bip32, Network, PrivateKey, PublicKey};
 
-use miniscript::descriptor::{Descriptor, DescriptorXKey, Wildcard};
-pub use miniscript::descriptor::{
-    DescriptorPublicKey, DescriptorSecretKey, DescriptorSinglePriv, DescriptorSinglePub, KeyMap,
-    SortedMultiVec,
+use miniscript::{
+    descriptor::{Descriptor, DescriptorXKey, Wildcard},
+    Miniscript, Terminal,
 };
-pub use miniscript::ScriptContext;
-use miniscript::{Miniscript, Terminal};
+pub use miniscript::{
+    descriptor::{
+        DescriptorPublicKey, DescriptorSecretKey, DescriptorSinglePriv, DescriptorSinglePub,
+        KeyMap, SortedMultiVec,
+    },
+    ScriptContext,
+};
 
-use crate::descriptor::{CheckMiniscript, DescriptorError};
-use crate::wallet::utils::SecpCtx;
+use crate::{
+    descriptor::{CheckMiniscript, DescriptorError},
+    wallet::utils::SecpCtx,
+};
 
 #[cfg(feature = "keys-bip39")]
 #[cfg_attr(docsrs, doc(cfg(feature = "keys-bip39")))]

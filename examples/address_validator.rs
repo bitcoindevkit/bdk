@@ -24,16 +24,15 @@
 
 use std::sync::Arc;
 
-use bdk::bitcoin;
-use bdk::database::MemoryDatabase;
-use bdk::descriptor::HDKeyPaths;
-use bdk::wallet::address_validator::{AddressValidator, AddressValidatorError};
-use bdk::KeychainKind;
-use bdk::Wallet;
+use bdk::{
+    bitcoin,
+    database::MemoryDatabase,
+    descriptor::HDKeyPaths,
+    wallet::address_validator::{AddressValidator, AddressValidatorError},
+    KeychainKind, Wallet,
+};
 
-use bitcoin::hashes::hex::FromHex;
-use bitcoin::util::bip32::Fingerprint;
-use bitcoin::{Network, Script};
+use bitcoin::{hashes::hex::FromHex, util::bip32::Fingerprint, Network, Script};
 
 #[derive(Debug)]
 struct DummyValidator;

@@ -49,21 +49,23 @@
 //! # Ok::<(), bdk::Error>(())
 //! ```
 
-use std::collections::BTreeMap;
-use std::collections::HashSet;
-use std::default::Default;
-use std::marker::PhantomData;
+use std::{
+    collections::{BTreeMap, HashSet},
+    default::Default,
+    marker::PhantomData,
+};
 
-use bitcoin::util::psbt::PartiallySignedTransaction as PSBT;
-use bitcoin::{OutPoint, Script, SigHashType, Transaction};
+use bitcoin::{
+    util::psbt::PartiallySignedTransaction as PSBT, OutPoint, Script, SigHashType, Transaction,
+};
 
 use miniscript::descriptor::DescriptorTrait;
 
 use super::coin_selection::{CoinSelectionAlgorithm, DefaultCoinSelectionAlgorithm};
-use crate::{database::BatchDatabase, Error, Wallet};
 use crate::{
+    database::BatchDatabase,
     types::{FeeRate, KeychainKind, UTXO},
-    TransactionDetails,
+    Error, TransactionDetails, Wallet,
 };
 /// Context in which the [`TxBuilder`] is valid
 pub trait TxBuilderContext: std::fmt::Debug + Default + Clone {}
@@ -642,8 +644,7 @@ mod test {
         };
     }
 
-    use bitcoin::consensus::deserialize;
-    use bitcoin::hashes::hex::FromHex;
+    use bitcoin::{consensus::deserialize, hashes::hex::FromHex};
 
     use super::*;
 

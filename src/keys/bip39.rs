@@ -27,8 +27,7 @@
 // TODO: maybe write our own implementation of bip39? Seems stupid to have an extra dependency for
 // something that should be fairly simple to re-implement.
 
-use bitcoin::util::bip32;
-use bitcoin::Network;
+use bitcoin::{util::bip32, Network};
 
 use miniscript::ScriptContext;
 

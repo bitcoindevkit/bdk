@@ -26,14 +26,17 @@ use std::convert::TryInto;
 
 use sled::{Batch, Tree};
 
-use bitcoin::consensus::encode::{deserialize, serialize};
-use bitcoin::hash_types::Txid;
-use bitcoin::{OutPoint, Script, Transaction};
+use bitcoin::{
+    consensus::encode::{deserialize, serialize},
+    hash_types::Txid,
+    OutPoint, Script, Transaction,
+};
 
-use crate::database::memory::MapKey;
-use crate::database::{BatchDatabase, BatchOperations, Database};
-use crate::error::Error;
-use crate::types::*;
+use crate::{
+    database::{memory::MapKey, BatchDatabase, BatchOperations, Database},
+    error::Error,
+    types::*,
+};
 
 macro_rules! impl_batch_operations {
     ( { $($after_insert:tt)* }, $process_delete:ident ) => {
@@ -396,8 +399,10 @@ impl BatchDatabase for Tree {
 
 #[cfg(test)]
 mod test {
-    use std::sync::{Arc, Condvar, Mutex, Once};
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::{
+        sync::{Arc, Condvar, Mutex, Once},
+        time::{SystemTime, UNIX_EPOCH},
+    };
 
     use sled::{Db, Tree};
 

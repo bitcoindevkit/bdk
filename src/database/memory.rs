@@ -27,16 +27,22 @@
 //! This module defines an in-memory database type called [`MemoryDatabase`] that is based on a
 //! [`BTreeMap`].
 
-use std::collections::BTreeMap;
-use std::ops::Bound::{Excluded, Included};
+use std::{
+    collections::BTreeMap,
+    ops::Bound::{Excluded, Included},
+};
 
-use bitcoin::consensus::encode::{deserialize, serialize};
-use bitcoin::hash_types::Txid;
-use bitcoin::{OutPoint, Script, Transaction};
+use bitcoin::{
+    consensus::encode::{deserialize, serialize},
+    hash_types::Txid,
+    OutPoint, Script, Transaction,
+};
 
-use crate::database::{BatchDatabase, BatchOperations, ConfigurableDatabase, Database};
-use crate::error::Error;
-use crate::types::*;
+use crate::{
+    database::{BatchDatabase, BatchOperations, ConfigurableDatabase, Database},
+    error::Error,
+    types::*,
+};
 
 // path -> script       p{i,e}<path> -> script
 // script -> path       s<script> -> {i,e}<path>

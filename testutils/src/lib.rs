@@ -27,27 +27,24 @@ extern crate serde_json;
 
 pub use serial_test::serial;
 
-use std::collections::HashMap;
-use std::env;
-use std::ops::Deref;
-use std::path::PathBuf;
-use std::str::FromStr;
-use std::time::Duration;
+use std::{collections::HashMap, env, ops::Deref, path::PathBuf, str::FromStr, time::Duration};
 
 #[allow(unused_imports)]
 use log::{debug, error, info, trace};
 
-use bitcoin::consensus::encode::{deserialize, serialize};
-use bitcoin::hashes::hex::{FromHex, ToHex};
-use bitcoin::hashes::sha256d;
-use bitcoin::secp256k1::{Secp256k1, Verification};
-use bitcoin::{Address, Amount, PublicKey, Script, Transaction, Txid};
+use bitcoin::{
+    consensus::encode::{deserialize, serialize},
+    hashes::{
+        hex::{FromHex, ToHex},
+        sha256d,
+    },
+    secp256k1::{Secp256k1, Verification},
+    Address, Amount, PublicKey, Script, Transaction, Txid,
+};
 
-use miniscript::descriptor::DescriptorPublicKey;
-use miniscript::{Descriptor, MiniscriptKey, TranslatePk};
+use miniscript::{descriptor::DescriptorPublicKey, Descriptor, MiniscriptKey, TranslatePk};
 
-pub use bitcoincore_rpc::bitcoincore_rpc_json::AddressType;
-pub use bitcoincore_rpc::{Auth, Client as RpcClient, RpcApi};
+pub use bitcoincore_rpc::{bitcoincore_rpc_json::AddressType, Auth, Client as RpcClient, RpcApi};
 
 pub use electrum_client::{Client as ElectrumClient, ElectrumApi};
 
@@ -422,10 +419,14 @@ impl TestClient {
     }
 
     pub fn generate_manually(&mut self, txs: Vec<Transaction>) -> String {
-        use bitcoin::blockdata::block::{Block, BlockHeader};
-        use bitcoin::blockdata::script::Builder;
-        use bitcoin::blockdata::transaction::{OutPoint, TxIn, TxOut};
-        use bitcoin::hash_types::{BlockHash, TxMerkleNode};
+        use bitcoin::{
+            blockdata::{
+                block::{Block, BlockHeader},
+                script::Builder,
+                transaction::{OutPoint, TxIn, TxOut},
+            },
+            hash_types::{BlockHash, TxMerkleNode},
+        };
 
         let block_template: serde_json::Value = self
             .call("getblocktemplate", &[json!({"rules": ["segwit"]})])

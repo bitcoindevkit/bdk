@@ -48,9 +48,7 @@ use electrum_client::{Client, ConfigBuilder, ElectrumApi, Socks5Config};
 
 use self::utils::{ELSGetHistoryRes, ElectrumLikeSync};
 use super::*;
-use crate::database::BatchDatabase;
-use crate::error::Error;
-use crate::FeeRate;
+use crate::{database::BatchDatabase, error::Error, FeeRate};
 
 /// Wrapper over an Electrum Client that implements the required blockchain traits
 ///

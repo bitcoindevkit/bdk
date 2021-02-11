@@ -26,17 +26,17 @@ use std::collections::{HashMap, HashSet};
 
 #[allow(unused_imports)]
 use log::{debug, error, info, trace};
-use rand::seq::SliceRandom;
-use rand::thread_rng;
+use rand::{seq::SliceRandom, thread_rng};
 
 use bitcoin::{BlockHeader, OutPoint, Script, Transaction, Txid};
 
 use super::*;
-use crate::database::{BatchDatabase, BatchOperations, DatabaseUtils};
-use crate::error::Error;
-use crate::types::{KeychainKind, TransactionDetails, UTXO};
-use crate::wallet::time::Instant;
-use crate::wallet::utils::ChunksIterator;
+use crate::{
+    database::{BatchDatabase, BatchOperations, DatabaseUtils},
+    error::Error,
+    types::{KeychainKind, TransactionDetails, UTXO},
+    wallet::{time::Instant, utils::ChunksIterator},
+};
 
 #[derive(Debug)]
 pub struct ELSGetHistoryRes {

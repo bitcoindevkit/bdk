@@ -79,8 +79,7 @@ use std::fmt;
 
 use bitcoin::Script;
 
-use crate::descriptor::HDKeyPaths;
-use crate::types::KeychainKind;
+use crate::{descriptor::HDKeyPaths, types::KeychainKind};
 
 /// Errors that can be returned to fail the validation of an address
 #[derive(Debug, Clone, PartialEq, Eq)]

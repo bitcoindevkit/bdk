@@ -29,16 +29,18 @@
 //! [Compact Filters/Neutrino](crate::blockchain::compact_filters), along with a generalized trait
 //! [`Blockchain`] that can be implemented to build customized backends.
 
-use std::collections::HashSet;
-use std::ops::Deref;
-use std::sync::mpsc::{channel, Receiver, Sender};
-use std::sync::Arc;
+use std::{
+    collections::HashSet,
+    ops::Deref,
+    sync::{
+        mpsc::{channel, Receiver, Sender},
+        Arc,
+    },
+};
 
 use bitcoin::{Transaction, Txid};
 
-use crate::database::BatchDatabase;
-use crate::error::Error;
-use crate::FeeRate;
+use crate::{database::BatchDatabase, error::Error, FeeRate};
 
 #[cfg(any(feature = "electrum", feature = "esplora"))]
 pub(crate) mod utils;

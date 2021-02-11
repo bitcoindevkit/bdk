@@ -29,19 +29,16 @@ extern crate log;
 extern crate miniscript;
 extern crate serde_json;
 
-use std::error::Error;
-use std::str::FromStr;
+use std::{error::Error, str::FromStr};
 
 use log::info;
 
 use clap::{App, Arg};
 
 use bitcoin::Network;
-use miniscript::policy::Concrete;
-use miniscript::Descriptor;
+use miniscript::{policy::Concrete, Descriptor};
 
-use bdk::database::memory::MemoryDatabase;
-use bdk::{KeychainKind, Wallet};
+use bdk::{database::memory::MemoryDatabase, KeychainKind, Wallet};
 
 fn main() -> Result<(), Box<dyn Error>> {
     env_logger::init_from_env(

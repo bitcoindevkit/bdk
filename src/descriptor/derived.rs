@@ -24,17 +24,18 @@
 
 //! Derived descriptor keys
 
-use std::cmp::Ordering;
-use std::fmt;
-use std::hash::{Hash, Hasher};
-use std::ops::Deref;
+use std::{
+    cmp::Ordering,
+    fmt,
+    hash::{Hash, Hasher},
+    ops::Deref,
+};
 
-use bitcoin::hashes::hash160;
-use bitcoin::PublicKey;
+use bitcoin::{hashes::hash160, PublicKey};
 
 pub use miniscript::{
-    descriptor::KeyMap, descriptor::Wildcard, Descriptor, DescriptorPublicKey, Legacy, Miniscript,
-    ScriptContext, Segwitv0,
+    descriptor::{KeyMap, Wildcard},
+    Descriptor, DescriptorPublicKey, Legacy, Miniscript, ScriptContext, Segwitv0,
 };
 use miniscript::{MiniscriptKey, ToPublicKey, TranslatePk};
 

@@ -27,18 +27,26 @@
 //! This module contains generic utilities to work with descriptors, plus some re-exported types
 //! from [`miniscript`].
 
-use std::collections::{BTreeMap, HashMap};
-use std::ops::Deref;
-
-use bitcoin::util::bip32::{
-    ChildNumber, DerivationPath, ExtendedPrivKey, ExtendedPubKey, Fingerprint, KeySource,
+use std::{
+    collections::{BTreeMap, HashMap},
+    ops::Deref,
 };
-use bitcoin::util::psbt;
-use bitcoin::{Network, PublicKey, Script, TxOut};
 
-use miniscript::descriptor::{DescriptorPublicKey, DescriptorType, DescriptorXKey, Wildcard};
+use bitcoin::{
+    util::{
+        bip32::{
+            ChildNumber, DerivationPath, ExtendedPrivKey, ExtendedPubKey, Fingerprint, KeySource,
+        },
+        psbt,
+    },
+    Network, PublicKey, Script, TxOut,
+};
+
 pub use miniscript::{descriptor::KeyMap, Descriptor, Legacy, Miniscript, ScriptContext, Segwitv0};
-use miniscript::{DescriptorTrait, ForEachKey, TranslatePk};
+use miniscript::{
+    descriptor::{DescriptorPublicKey, DescriptorType, DescriptorXKey, Wildcard},
+    DescriptorTrait, ForEachKey, TranslatePk,
+};
 
 pub mod checksum;
 pub(crate) mod derived;
@@ -48,15 +56,15 @@ pub mod error;
 pub mod policy;
 pub mod template;
 
-pub use self::checksum::get_checksum;
-use self::derived::AsDerived;
-pub use self::derived::DerivedDescriptorKey;
-pub use self::error::Error as DescriptorError;
-pub use self::policy::Policy;
-use self::template::DescriptorTemplateOut;
-use crate::keys::{KeyError, ToDescriptorKey};
-use crate::wallet::signer::SignersContainer;
-use crate::wallet::utils::SecpCtx;
+pub use self::{
+    checksum::get_checksum, derived::DerivedDescriptorKey, error::Error as DescriptorError,
+    policy::Policy,
+};
+use self::{derived::AsDerived, template::DescriptorTemplateOut};
+use crate::{
+    keys::{KeyError, ToDescriptorKey},
+    wallet::{signer::SignersContainer, utils::SecpCtx},
+};
 
 /// Alias for a [`Descriptor`] that can contain extended keys using [`DescriptorPublicKey`]
 pub type ExtendedDescriptor = Descriptor<DescriptorPublicKey>;
@@ -495,10 +503,12 @@ impl<'s> DerivedDescriptorMeta for DerivedDescriptor<'s> {
 mod test {
     use std::str::FromStr;
 
-    use bitcoin::consensus::encode::deserialize;
-    use bitcoin::hashes::hex::FromHex;
-    use bitcoin::secp256k1::Secp256k1;
-    use bitcoin::util::{bip32, psbt};
+    use bitcoin::{
+        consensus::encode::deserialize,
+        hashes::hex::FromHex,
+        secp256k1::Secp256k1,
+        util::{bip32, psbt},
+    };
 
     use super::*;
     use crate::psbt::PSBTUtils;

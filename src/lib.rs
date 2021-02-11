@@ -262,14 +262,10 @@ pub(crate) mod psbt;
 pub(crate) mod types;
 pub mod wallet;
 
-pub use descriptor::template;
-pub use descriptor::HDKeyPaths;
+pub use descriptor::{template, HDKeyPaths};
 pub use error::Error;
 pub use types::*;
-pub use wallet::address_validator;
-pub use wallet::signer;
-pub use wallet::tx_builder::TxBuilder;
-pub use wallet::Wallet;
+pub use wallet::{address_validator, signer, tx_builder::TxBuilder, Wallet};
 
 /// Get the version of BDK at runtime
 pub fn version() -> &'static str {

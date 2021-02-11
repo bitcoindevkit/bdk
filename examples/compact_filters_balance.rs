@@ -1,10 +1,10 @@
-use bdk::blockchain::compact_filters::*;
-use bdk::blockchain::noop_progress;
-use bdk::database::MemoryDatabase;
-use bdk::*;
+use bdk::{
+    blockchain::{compact_filters::*, noop_progress},
+    database::MemoryDatabase,
+    *,
+};
 use bitcoin::*;
-use blockchain::compact_filters::CompactFiltersBlockchain;
-use blockchain::compact_filters::CompactFiltersError;
+use blockchain::compact_filters::{CompactFiltersBlockchain, CompactFiltersError};
 use log::info;
 use std::sync::Arc;
 

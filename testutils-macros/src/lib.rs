@@ -27,8 +27,7 @@ extern crate quote;
 
 use proc_macro::TokenStream;
 
-use syn::spanned::Spanned;
-use syn::{parse, parse2, Ident, ReturnType};
+use syn::{parse, parse2, spanned::Spanned, Ident, ReturnType};
 
 #[proc_macro_attribute]
 pub fn bdk_blockchain_tests(attr: TokenStream, item: TokenStream) -> TokenStream {

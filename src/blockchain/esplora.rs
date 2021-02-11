@@ -35,8 +35,10 @@
 //! # Ok::<(), bdk::Error>(())
 //! ```
 
-use std::collections::{HashMap, HashSet};
-use std::fmt;
+use std::{
+    collections::{HashMap, HashSet},
+    fmt,
+};
 
 use futures::stream::{self, FuturesOrdered, StreamExt, TryStreamExt};
 
@@ -47,17 +49,18 @@ use serde::Deserialize;
 
 use reqwest::{Client, StatusCode};
 
-use bitcoin::consensus::{self, deserialize, serialize};
-use bitcoin::hashes::hex::{FromHex, ToHex};
-use bitcoin::hashes::{sha256, Hash};
-use bitcoin::{BlockHash, BlockHeader, Script, Transaction, Txid};
+use bitcoin::{
+    consensus::{self, deserialize, serialize},
+    hashes::{
+        hex::{FromHex, ToHex},
+        sha256, Hash,
+    },
+    BlockHash, BlockHeader, Script, Transaction, Txid,
+};
 
 use self::utils::{ELSGetHistoryRes, ElectrumLikeSync};
 use super::*;
-use crate::database::BatchDatabase;
-use crate::error::Error;
-use crate::wallet::utils::ChunksIterator;
-use crate::FeeRate;
+use crate::{database::BatchDatabase, error::Error, wallet::utils::ChunksIterator, FeeRate};
 
 const DEFAULT_CONCURRENT_REQUESTS: u8 = 4;
 

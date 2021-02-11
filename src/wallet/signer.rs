@@ -95,22 +95,24 @@
 //! # Ok::<_, bdk::Error>(())
 //! ```
 
-use std::cmp::Ordering;
-use std::collections::BTreeMap;
-use std::fmt;
-use std::ops::Bound::Included;
-use std::sync::Arc;
+use std::{cmp::Ordering, collections::BTreeMap, fmt, ops::Bound::Included, sync::Arc};
 
-use bitcoin::blockdata::opcodes;
-use bitcoin::blockdata::script::Builder as ScriptBuilder;
-use bitcoin::hashes::{hash160, Hash};
-use bitcoin::secp256k1::{Message, Secp256k1};
-use bitcoin::util::bip32::{ExtendedPrivKey, Fingerprint};
-use bitcoin::util::{bip143, psbt};
-use bitcoin::{PrivateKey, Script, SigHash, SigHashType};
+use bitcoin::{
+    blockdata::{opcodes, script::Builder as ScriptBuilder},
+    hashes::{hash160, Hash},
+    secp256k1::{Message, Secp256k1},
+    util::{
+        bip143,
+        bip32::{ExtendedPrivKey, Fingerprint},
+        psbt,
+    },
+    PrivateKey, Script, SigHash, SigHashType,
+};
 
-use miniscript::descriptor::{DescriptorSecretKey, DescriptorSinglePriv, DescriptorXKey, KeyMap};
-use miniscript::{Legacy, MiniscriptKey, Segwitv0};
+use miniscript::{
+    descriptor::{DescriptorSecretKey, DescriptorSinglePriv, DescriptorXKey, KeyMap},
+    Legacy, MiniscriptKey, Segwitv0,
+};
 
 use super::utils::SecpCtx;
 use crate::descriptor::XKeyUtils;
@@ -559,13 +561,16 @@ impl Eq for SignersContainerKey {}
 #[cfg(test)]
 mod signers_container_tests {
     use super::*;
-    use crate::descriptor;
-    use crate::descriptor::ToWalletDescriptor;
-    use crate::keys::{DescriptorKey, ToDescriptorKey};
-    use bitcoin::secp256k1::{All, Secp256k1};
-    use bitcoin::util::bip32;
-    use bitcoin::util::psbt::PartiallySignedTransaction;
-    use bitcoin::Network;
+    use crate::{
+        descriptor,
+        descriptor::ToWalletDescriptor,
+        keys::{DescriptorKey, ToDescriptorKey},
+    };
+    use bitcoin::{
+        secp256k1::{All, Secp256k1},
+        util::{bip32, psbt::PartiallySignedTransaction},
+        Network,
+    };
     use miniscript::ScriptContext;
     use std::str::FromStr;
 

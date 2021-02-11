@@ -22,26 +22,32 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use std::collections::HashMap;
-use std::net::{TcpStream, ToSocketAddrs};
-use std::sync::{Arc, Condvar, Mutex, RwLock};
-use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::{
+    collections::HashMap,
+    net::{TcpStream, ToSocketAddrs},
+    sync::{Arc, Condvar, Mutex, RwLock},
+    thread,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 
 use socks::{Socks5Stream, ToTargetAddr};
 
 use rand::{thread_rng, Rng};
 
-use bitcoin::consensus::Encodable;
-use bitcoin::hash_types::BlockHash;
-use bitcoin::network::constants::ServiceFlags;
-use bitcoin::network::message::{NetworkMessage, RawNetworkMessage};
-use bitcoin::network::message_blockdata::*;
-use bitcoin::network::message_filter::*;
-use bitcoin::network::message_network::VersionMessage;
-use bitcoin::network::stream_reader::StreamReader;
-use bitcoin::network::Address;
-use bitcoin::{Block, Network, Transaction, Txid, Wtxid};
+use bitcoin::{
+    consensus::Encodable,
+    hash_types::BlockHash,
+    network::{
+        constants::ServiceFlags,
+        message::{NetworkMessage, RawNetworkMessage},
+        message_blockdata::*,
+        message_filter::*,
+        message_network::VersionMessage,
+        stream_reader::StreamReader,
+        Address,
+    },
+    Block, Network, Transaction, Txid, Wtxid,
+};
 
 use super::CompactFiltersError;
 

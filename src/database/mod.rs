@@ -37,11 +37,9 @@
 //!
 //! [`Wallet`]: crate::wallet::Wallet
 
-use bitcoin::hash_types::Txid;
-use bitcoin::{OutPoint, Script, Transaction, TxOut};
+use bitcoin::{hash_types::Txid, OutPoint, Script, Transaction, TxOut};
 
-use crate::error::Error;
-use crate::types::*;
+use crate::{error::Error, types::*};
 
 pub mod any;
 pub use any::{AnyDatabase, AnyDatabaseConfig};
@@ -206,9 +204,7 @@ impl<T: Database> DatabaseUtils for T {}
 pub mod test {
     use std::str::FromStr;
 
-    use bitcoin::consensus::encode::deserialize;
-    use bitcoin::hashes::hex::*;
-    use bitcoin::*;
+    use bitcoin::{consensus::encode::deserialize, hashes::hex::*, *};
 
     use super::*;
 

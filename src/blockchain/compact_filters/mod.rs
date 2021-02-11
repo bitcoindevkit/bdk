@@ -62,17 +62,20 @@
 //! # Ok::<(), CompactFiltersError>(())
 //! ```
 
-use std::collections::HashSet;
-use std::fmt;
-use std::path::Path;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::{
+    collections::HashSet,
+    fmt,
+    path::Path,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc, Mutex,
+    },
+};
 
 #[allow(unused_imports)]
 use log::{debug, error, info, trace};
 
-use bitcoin::network::message_blockdata::Inventory;
-use bitcoin::{Network, OutPoint, Transaction, Txid};
+use bitcoin::{network::message_blockdata::Inventory, Network, OutPoint, Transaction, Txid};
 
 use rocksdb::{Options, SliceTransform, DB};
 
@@ -81,10 +84,12 @@ mod store;
 mod sync;
 
 use super::{Blockchain, Capability, ConfigurableBlockchain, Progress};
-use crate::database::{BatchDatabase, BatchOperations, DatabaseUtils};
-use crate::error::Error;
-use crate::types::{KeychainKind, TransactionDetails, UTXO};
-use crate::FeeRate;
+use crate::{
+    database::{BatchDatabase, BatchOperations, DatabaseUtils},
+    error::Error,
+    types::{KeychainKind, TransactionDetails, UTXO},
+    FeeRate,
+};
 
 use peer::*;
 use store::*;
