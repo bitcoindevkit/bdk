@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.4.0] - [v0.3.0]
+
 ### Keys
 #### Changed
 - Renamed `DerivableKey::add_metadata()` to `DerivableKey::into_descriptor_key()`
@@ -267,3 +269,4 @@ final transaction is created by calling `finish` on the builder.
 [0.1.0-beta.1]: https://github.com/bitcoindevkit/bdk/compare/96c87ea5...0.1.0-beta.1
 [v0.2.0]: https://github.com/bitcoindevkit/bdk/compare/0.1.0-beta.1...v0.2.0
 [v0.3.0]: https://github.com/bitcoindevkit/bdk/compare/v0.2.0...v0.3.0
+[v0.4.0]: https://github.com/bitcoindevkit/bdk/compare/v0.3.0...v0.4.0
