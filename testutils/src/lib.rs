@@ -53,20 +53,20 @@ pub use electrum_client::{Client as ElectrumClient, ElectrumApi};
 
 // TODO: we currently only support env vars, we could also parse a toml file
 fn get_auth() -> Auth {
-    match env::var("MAGICAL_RPC_AUTH").as_ref().map(String::as_ref) {
+    match env::var("BDK_RPC_AUTH").as_ref().map(String::as_ref) {
         Ok("USER_PASS") => Auth::UserPass(
-            env::var("MAGICAL_RPC_USER").unwrap(),
-            env::var("MAGICAL_RPC_PASS").unwrap(),
+            env::var("BDK_RPC_USER").unwrap(),
+            env::var("BDK_RPC_PASS").unwrap(),
         ),
         _ => Auth::CookieFile(PathBuf::from(
-            env::var("MAGICAL_RPC_COOKIEFILE")
+            env::var("BDK_RPC_COOKIEFILE")
                 .unwrap_or("/home/user/.bitcoin/regtest/.cookie".to_string()),
         )),
     }
 }
 
 pub fn get_electrum_url() -> String {
-    env::var("MAGICAL_ELECTRUM_URL").unwrap_or("tcp://127.0.0.1:50001".to_string())
+    env::var("BDK_ELECTRUM_URL").unwrap_or("tcp://127.0.0.1:50001".to_string())
 }
 
 pub struct TestClient {
@@ -311,8 +311,10 @@ where
 
 impl TestClient {
     pub fn new() -> Self {
-        let url = env::var("MAGICAL_RPC_URL").unwrap_or("127.0.0.1:18443".to_string());
-        let client = RpcClient::new(format!("http://{}", url), get_auth()).unwrap();
+        let url = env::var("BDK_RPC_URL").unwrap_or("127.0.0.1:18443".to_string());
+        let wallet = env::var("BDK_RPC_WALLET").unwrap_or("bdk-test".to_string());
+        let client =
+            RpcClient::new(format!("http://{}/wallet/{}", url, wallet), get_auth()).unwrap();
         let electrum = ElectrumClient::new(&get_electrum_url()).unwrap();
 
         TestClient { client, electrum }

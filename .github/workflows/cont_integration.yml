@@ -76,13 +76,14 @@ jobs:
   test-electrum:
     name: Test electrum
     runs-on: ubuntu-16.04
-    container: bitcoindevkit/electrs
+    container: bitcoindevkit/electrs:0.2.0
     env:
-      MAGICAL_RPC_AUTH: USER_PASS
-      MAGICAL_RPC_USER: admin
-      MAGICAL_RPC_PASS: passw
-      MAGICAL_RPC_URL: 127.0.0.1:18443
-      MAGICAL_ELECTRUM_URL: tcp://127.0.0.1:60401
+      BDK_RPC_AUTH: USER_PASS
+      BDK_RPC_USER: admin
+      BDK_RPC_PASS: passw
+      BDK_RPC_URL: 127.0.0.1:18443
+      BDK_RPC_WALLET: bdk-test
+      BDK_ELECTRUM_URL: tcp://127.0.0.1:60401
     steps:
       - name: Checkout
         uses: actions/checkout@v2
