@@ -67,7 +67,7 @@ use crate::database::{BatchDatabase, BatchOperations, DatabaseUtils};
 use crate::descriptor::derived::AsDerived;
 use crate::descriptor::{
     get_checksum, DerivedDescriptor, DerivedDescriptorMeta, DescriptorMeta, DescriptorScripts,
-    ExtendedDescriptor, ExtractPolicy, Policy, ToWalletDescriptor, XKeyUtils,
+    ExtendedDescriptor, ExtractPolicy, IntoWalletDescriptor, Policy, XKeyUtils,
 };
 use crate::error::Error;
 use crate::psbt::PSBTUtils;
@@ -110,7 +110,7 @@ where
     D: BatchDatabase,
 {
     /// Create a new "offline" wallet
-    pub fn new_offline<E: ToWalletDescriptor>(
+    pub fn new_offline<E: IntoWalletDescriptor>(
         descriptor: E,
         change_descriptor: Option<E>,
         network: Network,
@@ -124,7 +124,7 @@ impl<B, D> Wallet<B, D>
 where
     D: BatchDatabase,
 {
-    fn _new<E: ToWalletDescriptor>(
+    fn _new<E: IntoWalletDescriptor>(
         descriptor: E,
         change_descriptor: Option<E>,
         network: Network,
@@ -1247,7 +1247,7 @@ where
 {
     /// Create a new "online" wallet
     #[maybe_async]
-    pub fn new<E: ToWalletDescriptor>(
+    pub fn new<E: IntoWalletDescriptor>(
         descriptor: E,
         change_descriptor: Option<E>,
         network: Network,

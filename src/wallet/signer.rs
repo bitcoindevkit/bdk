@@ -560,7 +560,7 @@ impl Eq for SignersContainerKey {}
 mod signers_container_tests {
     use super::*;
     use crate::descriptor;
-    use crate::descriptor::ToWalletDescriptor;
+    use crate::descriptor::IntoWalletDescriptor;
     use crate::keys::{DescriptorKey, ToDescriptorKey};
     use bitcoin::secp256k1::{All, Secp256k1};
     use bitcoin::util::bip32;

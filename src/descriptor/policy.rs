@@ -888,7 +888,7 @@ impl ExtractPolicy for Descriptor<DescriptorPublicKey> {
 #[cfg(test)]
 mod test {
     use crate::descriptor;
-    use crate::descriptor::{ExtractPolicy, ToWalletDescriptor};
+    use crate::descriptor::{ExtractPolicy, IntoWalletDescriptor};
 
     use super::*;
     use crate::descriptor::policy::SatisfiableItem::{Multisig, Signature, Thresh};

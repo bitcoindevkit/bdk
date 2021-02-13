@@ -72,7 +72,7 @@ pub type DerivedDescriptor<'s> = Descriptor<DerivedDescriptorKey<'s>>;
 pub type HDKeyPaths = BTreeMap<PublicKey, KeySource>;
 
 /// Trait for types which can be converted into an [`ExtendedDescriptor`] and a [`KeyMap`] usable by a wallet in a specific [`Network`]
-pub trait ToWalletDescriptor {
+pub trait IntoWalletDescriptor {
     /// Convert to wallet descriptor
     fn into_wallet_descriptor(
         self,
@@ -81,7 +81,7 @@ pub trait ToWalletDescriptor {
     ) -> Result<(ExtendedDescriptor, KeyMap), DescriptorError>;
 }
 
-impl ToWalletDescriptor for &str {
+impl IntoWalletDescriptor for &str {
     fn into_wallet_descriptor(
         self,
         secp: &SecpCtx,
@@ -107,7 +107,7 @@ impl ToWalletDescriptor for &str {
     }
 }
 
-impl ToWalletDescriptor for &String {
+impl IntoWalletDescriptor for &String {
     fn into_wallet_descriptor(
         self,
         secp: &SecpCtx,
@@ -117,7 +117,7 @@ impl ToWalletDescriptor for &String {
     }
 }
 
-impl ToWalletDescriptor for ExtendedDescriptor {
+impl IntoWalletDescriptor for ExtendedDescriptor {
     fn into_wallet_descriptor(
         self,
         secp: &SecpCtx,
@@ -127,7 +127,7 @@ impl ToWalletDescriptor for ExtendedDescriptor {
     }
 }
 
-impl ToWalletDescriptor for (ExtendedDescriptor, KeyMap) {
+impl IntoWalletDescriptor for (ExtendedDescriptor, KeyMap) {
     fn into_wallet_descriptor(
         self,
         secp: &SecpCtx,
@@ -160,7 +160,7 @@ impl ToWalletDescriptor for (ExtendedDescriptor, KeyMap) {
     }
 }
 
-impl ToWalletDescriptor for DescriptorTemplateOut {
+impl IntoWalletDescriptor for DescriptorTemplateOut {
     fn into_wallet_descriptor(
         self,
         _secp: &SecpCtx,
@@ -637,7 +637,7 @@ mod test {
         assert_eq!(wallet_desc.to_string(), "wpkh(tpubDEnoLuPdBep9bzw5LoGYpsxUQYheRQ9gcgrJhJEcdKFB9cWQRyYmkCyRoTqeD4tJYiVVgt6A3rN6rWn9RYhR9sBsGxji29LYWHuKKbdb1ev/0/*)#y8p7e8kk");
     }
 
-    // test ToWalletDescriptor trait from &str with and without checksum appended
+    // test IntoWalletDescriptor trait from &str with and without checksum appended
     #[test]
     fn test_descriptor_from_str_with_checksum() {
         let secp = Secp256k1::new();
@@ -673,7 +673,7 @@ mod test {
         ));
     }
 
-    // test ToWalletDescriptor trait from &str with keys from right and wrong network
+    // test IntoWalletDescriptor trait from &str with keys from right and wrong network
     #[test]
     fn test_descriptor_from_str_with_keys_network() {
         let secp = Secp256k1::new();
@@ -717,7 +717,7 @@ mod test {
         ));
     }
 
-    // test ToWalletDescriptor trait from the output of the descriptor!() macro
+    // test IntoWalletDescriptor trait from the output of the descriptor!() macro
     #[test]
     fn test_descriptor_from_str_from_output_of_macro() {
         let secp = Secp256k1::new();

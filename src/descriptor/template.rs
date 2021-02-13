@@ -32,7 +32,7 @@ use bitcoin::Network;
 
 use miniscript::{Legacy, Segwitv0};
 
-use super::{ExtendedDescriptor, KeyMap, ToWalletDescriptor};
+use super::{ExtendedDescriptor, IntoWalletDescriptor, KeyMap};
 use crate::descriptor::DescriptorError;
 use crate::keys::{DerivableKey, ToDescriptorKey, ValidNetworks};
 use crate::wallet::utils::SecpCtx;
@@ -43,7 +43,7 @@ pub type DescriptorTemplateOut = (ExtendedDescriptor, KeyMap, ValidNetworks);
 
 /// Trait for descriptor templates that can be built into a full descriptor
 ///
-/// Since [`ToWalletDescriptor`] is implemented for any [`DescriptorTemplate`], they can also be
+/// Since [`IntoWalletDescriptor`] is implemented for any [`DescriptorTemplate`], they can also be
 /// passed directly to the [`Wallet`](crate::Wallet) constructor.
 ///
 /// ## Example
@@ -69,7 +69,7 @@ pub trait DescriptorTemplate {
 
 /// Turns a [`DescriptorTemplate`] into a valid wallet descriptor by calling its
 /// [`build`](DescriptorTemplate::build) method
-impl<T: DescriptorTemplate> ToWalletDescriptor for T {
+impl<T: DescriptorTemplate> IntoWalletDescriptor for T {
     fn into_wallet_descriptor(
         self,
         secp: &SecpCtx,
