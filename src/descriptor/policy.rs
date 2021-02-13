@@ -47,7 +47,7 @@
 //! # Ok::<(), bdk::Error>(())
 //! ```
 
-use std::cmp::{max, Ordering};
+use std::cmp::max;
 use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::fmt;
 
@@ -510,8 +510,6 @@ impl Condition {
 pub enum PolicyError {
     /// Not enough items are selected to satisfy a [`SatisfiableItem::Thresh`]
     NotEnoughItemsSelected(String),
-    /// Too many items are selected to satisfy a [`SatisfiableItem::Thresh`]
-    TooManyItemsSelected(String),
     /// Index out of range for an item to satisfy a [`SatisfiableItem::Thresh`]
     IndexOutOfRange(usize),
     /// Can not add to an item that is [`Satisfaction::None`] or [`Satisfaction::Complete`]
@@ -668,14 +666,8 @@ impl Policy {
                 // if we have something, make sure we have enough items. note that the user can set
                 // an empty value for this step in case of n-of-n, because `selected` is set to all
                 // the elements above
-                match selected.len().cmp(threshold) {
-                    Ordering::Less => {
-                        return Err(PolicyError::NotEnoughItemsSelected(self.id.clone()))
-                    }
-                    Ordering::Greater => {
-                        return Err(PolicyError::TooManyItemsSelected(self.id.clone()))
-                    }
-                    Ordering::Equal => (),
+                if selected.len() < *threshold {
+                    return Err(PolicyError::NotEnoughItemsSelected(self.id.clone()));
                 }
 
                 // check the selected items, see if there are conflicting requirements

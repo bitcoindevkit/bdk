@@ -35,6 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Policy
 #### Changed
 - Removed unneeded `Result<(), PolicyError>` return type for `Satisfaction::finalize()`
+- Removed the `TooManyItemsSelected` policy error (see commit message for more details)
 
 ## [v0.3.0] - [v0.2.0]
 
