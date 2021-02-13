@@ -76,10 +76,10 @@ macro_rules! impl_top_level_pk {
         use $crate::miniscript::descriptor::$inner_type;
 
         #[allow(unused_imports)]
-        use $crate::keys::{DescriptorKey, ToDescriptorKey};
+        use $crate::keys::{DescriptorKey, IntoDescriptorKey};
         let secp = $crate::bitcoin::secp256k1::Secp256k1::new();
 
-        $key.to_descriptor_key()
+        $key.into_descriptor_key()
             .and_then(|key: DescriptorKey<$ctx>| key.extract(&secp))
             .map_err($crate::descriptor::DescriptorError::Key)
             .map(|(pk, key_map, valid_networks)| ($inner_type::new(pk), key_map, valid_networks))
@@ -225,12 +225,12 @@ macro_rules! impl_sortedmulti {
         $crate::keys::make_sortedmulti($thresh, $keys, $build_desc, &secp)
     });
     ( $build_desc:expr, sortedmulti ( $thresh:expr $(, $key:expr )+ ) ) => ({
-        use $crate::keys::ToDescriptorKey;
+        use $crate::keys::IntoDescriptorKey;
         let secp = $crate::bitcoin::secp256k1::Secp256k1::new();
 
         let mut keys = vec![];
         $(
-            keys.push($key.to_descriptor_key());
+            keys.push($key.into_descriptor_key());
         )*
 
         keys.into_iter().collect::<Result<Vec<_>, _>>()
@@ -326,11 +326,11 @@ macro_rules! apply_modifier {
 /// broken up to `s:d:v:older(144)`.
 ///
 /// The `pk()`, `pk_k()` and `pk_h()` operands can take as argument any type that implements
-/// [`ToDescriptorKey`]. This means that keys can also be written inline as strings, but in that
+/// [`IntoDescriptorKey`]. This means that keys can also be written inline as strings, but in that
 /// case they must be wrapped in quotes, which is another difference compared to the standard
 /// descriptor syntax.
 ///
-/// [`ToDescriptorKey`]: crate::keys::ToDescriptorKey
+/// [`IntoDescriptorKey`]: crate::keys::IntoDescriptorKey
 ///
 /// ## Example
 ///
@@ -653,12 +653,12 @@ macro_rules! fragment {
         $crate::keys::make_multi($thresh, $keys)
     });
     ( multi ( $thresh:expr $(, $key:expr )+ ) ) => ({
-        use $crate::keys::ToDescriptorKey;
+        use $crate::keys::IntoDescriptorKey;
         let secp = $crate::bitcoin::secp256k1::Secp256k1::new();
 
         let mut keys = vec![];
         $(
-            keys.push($key.to_descriptor_key());
+            keys.push($key.into_descriptor_key());
         )*
 
         keys.into_iter().collect::<Result<Vec<_>, _>>()
@@ -685,7 +685,7 @@ mod test {
     use std::str::FromStr;
 
     use crate::descriptor::{DescriptorError, DescriptorMeta};
-    use crate::keys::{DescriptorKey, ToDescriptorKey, ValidNetworks};
+    use crate::keys::{DescriptorKey, IntoDescriptorKey, ValidNetworks};
     use bitcoin::network::constants::Network::{Bitcoin, Regtest, Signet, Testnet};
     use bitcoin::util::bip32;
     use bitcoin::PrivateKey;
@@ -724,7 +724,7 @@ mod test {
     }
 
     // - at least one of each "type" of operator; ie. one modifier, one leaf_opcode, one leaf_opcode_value, etc.
-    // - mixing up key types that implement ToDescriptorKey in multi() or thresh()
+    // - mixing up key types that implement IntoDescriptorKey in multi() or thresh()
 
     // expected script for pk and bare manually created
     // expected addresses created with `bitcoin-cli getdescriptorinfo` (for hash) and `bitcoin-cli deriveaddresses`
@@ -808,7 +808,7 @@ mod test {
         let xprv = bip32::ExtendedPrivKey::from_str("tprv8ZgxMBicQKsPcx5nBGsR63Pe8KnRUqmbJNENAfGftF3yuXoMMoVJJcYeUw5eVkm9WBPjWYt6HMWYJNesB5HaNVBaFc1M6dRjWSYnmewUMYy").unwrap();
 
         let path = bip32::DerivationPath::from_str("m/0").unwrap();
-        let desc_key = (xprv, path.clone()).to_descriptor_key().unwrap();
+        let desc_key = (xprv, path.clone()).into_descriptor_key().unwrap();
         check(
             descriptor!(pk(desc_key)),
             false,
@@ -820,7 +820,7 @@ mod test {
             ],
         );
 
-        let desc_key = (xprv, path.clone()).to_descriptor_key().unwrap();
+        let desc_key = (xprv, path.clone()).into_descriptor_key().unwrap();
         check(
             descriptor!(pkh(desc_key)),
             false,
@@ -833,8 +833,8 @@ mod test {
         );
 
         let path2 = bip32::DerivationPath::from_str("m/2147483647'/0").unwrap();
-        let desc_key1 = (xprv, path).to_descriptor_key().unwrap();
-        let desc_key2 = (xprv, path2).to_descriptor_key().unwrap();
+        let desc_key1 = (xprv, path).into_descriptor_key().unwrap();
+        let desc_key2 = (xprv, path2).into_descriptor_key().unwrap();
 
         check(
             descriptor!(sh(multi(1, desc_key1, desc_key2))),
@@ -853,7 +853,7 @@ mod test {
         let xprv = bip32::ExtendedPrivKey::from_str("tprv8ZgxMBicQKsPcx5nBGsR63Pe8KnRUqmbJNENAfGftF3yuXoMMoVJJcYeUw5eVkm9WBPjWYt6HMWYJNesB5HaNVBaFc1M6dRjWSYnmewUMYy").unwrap();
 
         let path = bip32::DerivationPath::from_str("m/0").unwrap();
-        let desc_key = (xprv, path.clone()).to_descriptor_key().unwrap();
+        let desc_key = (xprv, path.clone()).into_descriptor_key().unwrap();
         check(
             descriptor!(wpkh(desc_key)),
             true,
@@ -865,7 +865,7 @@ mod test {
             ],
         );
 
-        let desc_key = (xprv, path.clone()).to_descriptor_key().unwrap();
+        let desc_key = (xprv, path.clone()).into_descriptor_key().unwrap();
         check(
             descriptor!(sh(wpkh(desc_key))),
             true,
@@ -878,8 +878,8 @@ mod test {
         );
 
         let path2 = bip32::DerivationPath::from_str("m/2147483647'/0").unwrap();
-        let desc_key1 = (xprv, path.clone()).to_descriptor_key().unwrap();
-        let desc_key2 = (xprv, path2.clone()).to_descriptor_key().unwrap();
+        let desc_key1 = (xprv, path.clone()).into_descriptor_key().unwrap();
+        let desc_key2 = (xprv, path2.clone()).into_descriptor_key().unwrap();
         check(
             descriptor!(wsh(multi(1, desc_key1, desc_key2))),
             true,
@@ -891,8 +891,8 @@ mod test {
             ],
         );
 
-        let desc_key1 = (xprv, path).to_descriptor_key().unwrap();
-        let desc_key2 = (xprv, path2).to_descriptor_key().unwrap();
+        let desc_key1 = (xprv, path).into_descriptor_key().unwrap();
+        let desc_key2 = (xprv, path2).into_descriptor_key().unwrap();
         check(
             descriptor!(sh(wsh(multi(1, desc_key1, desc_key2)))),
             true,
@@ -968,7 +968,7 @@ mod test {
     fn test_valid_networks() {
         let xprv = bip32::ExtendedPrivKey::from_str("tprv8ZgxMBicQKsPcx5nBGsR63Pe8KnRUqmbJNENAfGftF3yuXoMMoVJJcYeUw5eVkm9WBPjWYt6HMWYJNesB5HaNVBaFc1M6dRjWSYnmewUMYy").unwrap();
         let path = bip32::DerivationPath::from_str("m/0").unwrap();
-        let desc_key = (xprv, path.clone()).to_descriptor_key().unwrap();
+        let desc_key = (xprv, path.clone()).into_descriptor_key().unwrap();
 
         let (_desc, _key_map, valid_networks) = descriptor!(pkh(desc_key)).unwrap();
         assert_eq!(
@@ -978,7 +978,7 @@ mod test {
 
         let xprv = bip32::ExtendedPrivKey::from_str("xprv9s21ZrQH143K3QTDL4LXw2F7HEK3wJUD2nW2nRk4stbPy6cq3jPPqjiChkVvvNKmPGJxWUtg6LnF5kejMRNNU3TGtRBeJgk33yuGBxrMPHi").unwrap();
         let path = bip32::DerivationPath::from_str("m/10/20/30/40").unwrap();
-        let desc_key = (xprv, path.clone()).to_descriptor_key().unwrap();
+        let desc_key = (xprv, path.clone()).into_descriptor_key().unwrap();
 
         let (_desc, _key_map, valid_networks) = descriptor!(wpkh(desc_key)).unwrap();
         assert_eq!(valid_networks, [Bitcoin].iter().cloned().collect());
@@ -991,26 +991,26 @@ mod test {
 
         let xprv1 = bip32::ExtendedPrivKey::from_str("tprv8ZgxMBicQKsPcx5nBGsR63Pe8KnRUqmbJNENAfGftF3yuXoMMoVJJcYeUw5eVkm9WBPjWYt6HMWYJNesB5HaNVBaFc1M6dRjWSYnmewUMYy").unwrap();
         let path1 = bip32::DerivationPath::from_str("m/0").unwrap();
-        let desc_key1 = (xprv1, path1.clone()).to_descriptor_key().unwrap();
+        let desc_key1 = (xprv1, path1.clone()).into_descriptor_key().unwrap();
 
         let xprv2 = bip32::ExtendedPrivKey::from_str("tprv8ZgxMBicQKsPegBHHnq7YEgM815dG24M2Jk5RVqipgDxF1HJ1tsnT815X5Fd5FRfMVUs8NZs9XCb6y9an8hRPThnhfwfXJ36intaekySHGF").unwrap();
         let path2 = bip32::DerivationPath::from_str("m/2147483647'/0").unwrap();
-        let desc_key2 = (xprv2, path2.clone()).to_descriptor_key().unwrap();
+        let desc_key2 = (xprv2, path2.clone()).into_descriptor_key().unwrap();
 
         let xprv3 = bip32::ExtendedPrivKey::from_str("tprv8ZgxMBicQKsPdZXrcHNLf5JAJWFAoJ2TrstMRdSKtEggz6PddbuSkvHKM9oKJyFgZV1B7rw8oChspxyYbtmEXYyg1AjfWbL3ho3XHDpHRZf").unwrap();
         let path3 = bip32::DerivationPath::from_str("m/10/20/30/40").unwrap();
-        let desc_key3 = (xprv3, path3.clone()).to_descriptor_key().unwrap();
+        let desc_key3 = (xprv3, path3.clone()).into_descriptor_key().unwrap();
 
         let (_desc, key_map, _valid_networks) =
             descriptor!(sh(wsh(multi(2, desc_key1, desc_key2, desc_key3)))).unwrap();
         assert_eq!(key_map.len(), 3);
 
         let desc_key1: DescriptorKey<Segwitv0> =
-            (xprv1, path1.clone()).to_descriptor_key().unwrap();
+            (xprv1, path1.clone()).into_descriptor_key().unwrap();
         let desc_key2: DescriptorKey<Segwitv0> =
-            (xprv2, path2.clone()).to_descriptor_key().unwrap();
+            (xprv2, path2.clone()).into_descriptor_key().unwrap();
         let desc_key3: DescriptorKey<Segwitv0> =
-            (xprv3, path3.clone()).to_descriptor_key().unwrap();
+            (xprv3, path3.clone()).into_descriptor_key().unwrap();
 
         let (key1, _key_map, _valid_networks) = desc_key1.extract(&secp).unwrap();
         let (key2, _key_map, _valid_networks) = desc_key2.extract(&secp).unwrap();
@@ -1020,19 +1020,19 @@ mod test {
         assert_eq!(key_map.get(&key3).unwrap().to_string(), "tprv8ZgxMBicQKsPdZXrcHNLf5JAJWFAoJ2TrstMRdSKtEggz6PddbuSkvHKM9oKJyFgZV1B7rw8oChspxyYbtmEXYyg1AjfWbL3ho3XHDpHRZf/10/20/30/40/*");
     }
 
-    // - verify the ScriptContext is correctly validated (i.e. passing a type that only impl ToDescriptorKey<Segwitv0> to a pkh() descriptor should throw a compilation error
+    // - verify the ScriptContext is correctly validated (i.e. passing a type that only impl IntoDescriptorKey<Segwitv0> to a pkh() descriptor should throw a compilation error
     #[test]
     fn test_script_context_validation() {
         // this compiles
         let xprv = bip32::ExtendedPrivKey::from_str("tprv8ZgxMBicQKsPcx5nBGsR63Pe8KnRUqmbJNENAfGftF3yuXoMMoVJJcYeUw5eVkm9WBPjWYt6HMWYJNesB5HaNVBaFc1M6dRjWSYnmewUMYy").unwrap();
         let path = bip32::DerivationPath::from_str("m/0").unwrap();
-        let desc_key: DescriptorKey<Legacy> = (xprv, path.clone()).to_descriptor_key().unwrap();
+        let desc_key: DescriptorKey<Legacy> = (xprv, path.clone()).into_descriptor_key().unwrap();
 
         let (desc, _key_map, _valid_networks) = descriptor!(pkh(desc_key)).unwrap();
         assert_eq!(desc.to_string(), "pkh(tpubD6NzVbkrYhZ4WR7a4vY1VT3khMJMeAxVsfq9TBJyJWrNk247zCJtV7AWf6UJP7rAVsn8NNKdJi3gFyKPTmWZS9iukb91xbn2HbFSMQm2igY/0/*)#yrnz9pp2");
 
         // as expected this does not compile due to invalid context
-        //let desc_key:DescriptorKey<Segwitv0> = (xprv, path.clone()).to_descriptor_key().unwrap();
+        //let desc_key:DescriptorKey<Segwitv0> = (xprv, path.clone()).into_descriptor_key().unwrap();
         //let (desc, _key_map, _valid_networks) = descriptor!(pkh(desc_key)).unwrap();
     }
 

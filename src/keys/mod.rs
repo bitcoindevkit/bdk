@@ -205,15 +205,15 @@ impl<Ctx: ScriptContext + 'static> ExtScriptContext for Ctx {
 /// ```
 /// use bdk::bitcoin::PublicKey;
 ///
-/// use bdk::keys::{DescriptorKey, KeyError, ScriptContext, ToDescriptorKey};
+/// use bdk::keys::{DescriptorKey, KeyError, ScriptContext, IntoDescriptorKey};
 ///
 /// pub struct MyKeyType {
 ///     pubkey: PublicKey,
 /// }
 ///
-/// impl<Ctx: ScriptContext> ToDescriptorKey<Ctx> for MyKeyType {
-///     fn to_descriptor_key(self) -> Result<DescriptorKey<Ctx>, KeyError> {
-///         self.pubkey.to_descriptor_key()
+/// impl<Ctx: ScriptContext> IntoDescriptorKey<Ctx> for MyKeyType {
+///     fn into_descriptor_key(self) -> Result<DescriptorKey<Ctx>, KeyError> {
+///         self.pubkey.into_descriptor_key()
 ///     }
 /// }
 /// ```
@@ -225,15 +225,15 @@ impl<Ctx: ScriptContext + 'static> ExtScriptContext for Ctx {
 ///
 /// use bdk::keys::{
 ///     mainnet_network, DescriptorKey, DescriptorPublicKey, DescriptorSinglePub, KeyError,
-///     ScriptContext, ToDescriptorKey,
+///     ScriptContext, IntoDescriptorKey,
 /// };
 ///
 /// pub struct MyKeyType {
 ///     pubkey: PublicKey,
 /// }
 ///
-/// impl<Ctx: ScriptContext> ToDescriptorKey<Ctx> for MyKeyType {
-///     fn to_descriptor_key(self) -> Result<DescriptorKey<Ctx>, KeyError> {
+/// impl<Ctx: ScriptContext> IntoDescriptorKey<Ctx> for MyKeyType {
+///     fn into_descriptor_key(self) -> Result<DescriptorKey<Ctx>, KeyError> {
 ///         Ok(DescriptorKey::from_public(
 ///             DescriptorPublicKey::SinglePub(DescriptorSinglePub {
 ///                 origin: None,
@@ -250,17 +250,17 @@ impl<Ctx: ScriptContext + 'static> ExtScriptContext for Ctx {
 /// ```
 /// use bdk::bitcoin::PublicKey;
 ///
-/// use bdk::keys::{DescriptorKey, ExtScriptContext, KeyError, ScriptContext, ToDescriptorKey};
+/// use bdk::keys::{DescriptorKey, ExtScriptContext, KeyError, ScriptContext, IntoDescriptorKey};
 ///
 /// pub struct MyKeyType {
 ///     is_legacy: bool,
 ///     pubkey: PublicKey,
 /// }
 ///
-/// impl<Ctx: ScriptContext + 'static> ToDescriptorKey<Ctx> for MyKeyType {
-///     fn to_descriptor_key(self) -> Result<DescriptorKey<Ctx>, KeyError> {
+/// impl<Ctx: ScriptContext + 'static> IntoDescriptorKey<Ctx> for MyKeyType {
+///     fn into_descriptor_key(self) -> Result<DescriptorKey<Ctx>, KeyError> {
 ///         if Ctx::is_legacy() == self.is_legacy {
-///             self.pubkey.to_descriptor_key()
+///             self.pubkey.into_descriptor_key()
 ///         } else {
 ///             Err(KeyError::InvalidScriptContext)
 ///         }
@@ -279,15 +279,15 @@ impl<Ctx: ScriptContext + 'static> ExtScriptContext for Ctx {
 /// use bdk::bitcoin::PublicKey;
 /// use std::str::FromStr;
 ///
-/// use bdk::keys::{DescriptorKey, KeyError, ToDescriptorKey};
+/// use bdk::keys::{DescriptorKey, KeyError, IntoDescriptorKey};
 ///
 /// pub struct MySegwitOnlyKeyType {
 ///     pubkey: PublicKey,
 /// }
 ///
-/// impl ToDescriptorKey<bdk::miniscript::Segwitv0> for MySegwitOnlyKeyType {
-///     fn to_descriptor_key(self) -> Result<DescriptorKey<bdk::miniscript::Segwitv0>, KeyError> {
-///         self.pubkey.to_descriptor_key()
+/// impl IntoDescriptorKey<bdk::miniscript::Segwitv0> for MySegwitOnlyKeyType {
+///     fn into_descriptor_key(self) -> Result<DescriptorKey<bdk::miniscript::Segwitv0>, KeyError> {
+///         self.pubkey.into_descriptor_key()
 ///     }
 /// }
 ///
@@ -299,9 +299,9 @@ impl<Ctx: ScriptContext + 'static> ExtScriptContext for Ctx {
 ///
 /// # Ok::<_, Box<dyn std::error::Error>>(())
 /// ```
-pub trait ToDescriptorKey<Ctx: ScriptContext>: Sized {
+pub trait IntoDescriptorKey<Ctx: ScriptContext>: Sized {
     /// Turn the key into a [`DescriptorKey`] within the requested [`ScriptContext`]
-    fn to_descriptor_key(self) -> Result<DescriptorKey<Ctx>, KeyError>;
+    fn into_descriptor_key(self) -> Result<DescriptorKey<Ctx>, KeyError>;
 }
 
 /// Enum for extended keys that can be either `xprv` or `xpub`
@@ -370,12 +370,12 @@ impl<Ctx: ScriptContext> From<bip32::ExtendedPrivKey> for ExtendedKey<Ctx> {
 /// Trait for keys that can be derived.
 ///
 /// When extra metadata are provided, a [`DerivableKey`] can be transofrmed into a
-/// [`DescriptorKey`]: the trait [`ToDescriptorKey`] is automatically implemented
+/// [`DescriptorKey`]: the trait [`IntoDescriptorKey`] is automatically implemented
 /// for `(DerivableKey, DerivationPath)` and
 /// `(DerivableKey, KeySource, DerivationPath)` tuples.
 ///
 /// For key types that don't encode any indication about the path to use (like bip39), it's
-/// generally recommended to implemented this trait instead of [`ToDescriptorKey`]. The same
+/// generally recommended to implemented this trait instead of [`IntoDescriptorKey`]. The same
 /// rules regarding script context and valid networks apply.
 ///
 /// ## Examples
@@ -499,14 +499,14 @@ let xprv = xkey.into_xprv(Network::Bitcoin).unwrap();
                 derivation_path,
                 wildcard: Wildcard::Unhardened,
             })
-            .to_descriptor_key(),
+            .into_descriptor_key(),
             ExtendedKey::Public((xpub, _)) => DescriptorPublicKey::XPub(DescriptorXKey {
                 origin,
                 xkey: xpub,
                 derivation_path,
                 wildcard: Wildcard::Unhardened,
             })
-            .to_descriptor_key(),
+            .into_descriptor_key(),
         }
     }
 }
@@ -583,25 +583,25 @@ where
 
 // Make generated keys directly usable in descriptors, and make sure they get assigned the right
 // `valid_networks`.
-impl<Ctx, K> ToDescriptorKey<Ctx> for GeneratedKey<K, Ctx>
+impl<Ctx, K> IntoDescriptorKey<Ctx> for GeneratedKey<K, Ctx>
 where
     Ctx: ScriptContext,
-    K: ToDescriptorKey<Ctx>,
+    K: IntoDescriptorKey<Ctx>,
 {
-    fn to_descriptor_key(self) -> Result<DescriptorKey<Ctx>, KeyError> {
-        let desc_key = self.key.to_descriptor_key()?;
+    fn into_descriptor_key(self) -> Result<DescriptorKey<Ctx>, KeyError> {
+        let desc_key = self.key.into_descriptor_key()?;
         Ok(desc_key.override_valid_networks(self.valid_networks))
     }
 }
 
 /// Trait for keys that can be generated
 ///
-/// The same rules about [`ScriptContext`] and [`ValidNetworks`] from [`ToDescriptorKey`] apply.
+/// The same rules about [`ScriptContext`] and [`ValidNetworks`] from [`IntoDescriptorKey`] apply.
 ///
 /// This trait is particularly useful when combined with [`DerivableKey`]: if `Self`
 /// implements it, the returned [`GeneratedKey`] will also implement it. The same is true for
-/// [`ToDescriptorKey`]: the generated keys can be directly used in descriptors if `Self` is also
-/// [`ToDescriptorKey`].
+/// [`IntoDescriptorKey`]: the generated keys can be directly used in descriptors if `Self` is also
+/// [`IntoDescriptorKey`].
 pub trait GeneratableKey<Ctx: ScriptContext>: Sized {
     /// Type specifying the amount of entropy required e.g. `[u8;32]`
     type Entropy: AsMut<[u8]> + Default;
@@ -711,27 +711,29 @@ impl<Ctx: ScriptContext> GeneratableKey<Ctx> for PrivateKey {
     }
 }
 
-impl<Ctx: ScriptContext, T: DerivableKey<Ctx>> ToDescriptorKey<Ctx> for (T, bip32::DerivationPath) {
-    fn to_descriptor_key(self) -> Result<DescriptorKey<Ctx>, KeyError> {
+impl<Ctx: ScriptContext, T: DerivableKey<Ctx>> IntoDescriptorKey<Ctx>
+    for (T, bip32::DerivationPath)
+{
+    fn into_descriptor_key(self) -> Result<DescriptorKey<Ctx>, KeyError> {
         self.0.into_descriptor_key(None, self.1)
     }
 }
 
-impl<Ctx: ScriptContext, T: DerivableKey<Ctx>> ToDescriptorKey<Ctx>
+impl<Ctx: ScriptContext, T: DerivableKey<Ctx>> IntoDescriptorKey<Ctx>
     for (T, bip32::KeySource, bip32::DerivationPath)
 {
-    fn to_descriptor_key(self) -> Result<DescriptorKey<Ctx>, KeyError> {
+    fn into_descriptor_key(self) -> Result<DescriptorKey<Ctx>, KeyError> {
         self.0.into_descriptor_key(Some(self.1), self.2)
     }
 }
 
-fn expand_multi_keys<Pk: ToDescriptorKey<Ctx>, Ctx: ScriptContext>(
+fn expand_multi_keys<Pk: IntoDescriptorKey<Ctx>, Ctx: ScriptContext>(
     pks: Vec<Pk>,
     secp: &SecpCtx,
 ) -> Result<(Vec<DescriptorPublicKey>, KeyMap, ValidNetworks), KeyError> {
     let (pks, key_maps_networks): (Vec<_>, Vec<_>) = pks
         .into_iter()
-        .map(|key| Ok::<_, KeyError>(key.to_descriptor_key()?.extract(secp)?))
+        .map(|key| Ok::<_, KeyError>(key.into_descriptor_key()?.extract(secp)?))
         .collect::<Result<Vec<_>, _>>()?
         .into_iter()
         .map(|(a, b, c)| (a, (b, c)))
@@ -752,11 +754,11 @@ fn expand_multi_keys<Pk: ToDescriptorKey<Ctx>, Ctx: ScriptContext>(
 
 // Used internally by `bdk::fragment!` to build `pk_k()` fragments
 #[doc(hidden)]
-pub fn make_pk<Pk: ToDescriptorKey<Ctx>, Ctx: ScriptContext>(
+pub fn make_pk<Pk: IntoDescriptorKey<Ctx>, Ctx: ScriptContext>(
     descriptor_key: Pk,
     secp: &SecpCtx,
 ) -> Result<(Miniscript<DescriptorPublicKey, Ctx>, KeyMap, ValidNetworks), DescriptorError> {
-    let (key, key_map, valid_networks) = descriptor_key.to_descriptor_key()?.extract(secp)?;
+    let (key, key_map, valid_networks) = descriptor_key.into_descriptor_key()?.extract(secp)?;
     let minisc = Miniscript::from_ast(Terminal::PkK(key))?;
 
     minisc.check_minsicript()?;
@@ -766,7 +768,7 @@ pub fn make_pk<Pk: ToDescriptorKey<Ctx>, Ctx: ScriptContext>(
 
 // Used internally by `bdk::fragment!` to build `multi()` fragments
 #[doc(hidden)]
-pub fn make_multi<Pk: ToDescriptorKey<Ctx>, Ctx: ScriptContext>(
+pub fn make_multi<Pk: IntoDescriptorKey<Ctx>, Ctx: ScriptContext>(
     thresh: usize,
     pks: Vec<Pk>,
     secp: &SecpCtx,
@@ -788,7 +790,7 @@ pub fn make_sortedmulti<Pk, Ctx, F>(
     secp: &SecpCtx,
 ) -> Result<(Descriptor<DescriptorPublicKey>, KeyMap, ValidNetworks), DescriptorError>
 where
-    Pk: ToDescriptorKey<Ctx>,
+    Pk: IntoDescriptorKey<Ctx>,
     Ctx: ScriptContext,
     F: Fn(
         usize,
@@ -802,14 +804,14 @@ where
 }
 
 /// The "identity" conversion is used internally by some `bdk::fragment`s
-impl<Ctx: ScriptContext> ToDescriptorKey<Ctx> for DescriptorKey<Ctx> {
-    fn to_descriptor_key(self) -> Result<DescriptorKey<Ctx>, KeyError> {
+impl<Ctx: ScriptContext> IntoDescriptorKey<Ctx> for DescriptorKey<Ctx> {
+    fn into_descriptor_key(self) -> Result<DescriptorKey<Ctx>, KeyError> {
         Ok(self)
     }
 }
 
-impl<Ctx: ScriptContext> ToDescriptorKey<Ctx> for DescriptorPublicKey {
-    fn to_descriptor_key(self) -> Result<DescriptorKey<Ctx>, KeyError> {
+impl<Ctx: ScriptContext> IntoDescriptorKey<Ctx> for DescriptorPublicKey {
+    fn into_descriptor_key(self) -> Result<DescriptorKey<Ctx>, KeyError> {
         let networks = match self {
             DescriptorPublicKey::SinglePub(_) => any_network(),
             DescriptorPublicKey::XPub(DescriptorXKey { xkey, .. })
@@ -824,18 +826,18 @@ impl<Ctx: ScriptContext> ToDescriptorKey<Ctx> for DescriptorPublicKey {
     }
 }
 
-impl<Ctx: ScriptContext> ToDescriptorKey<Ctx> for PublicKey {
-    fn to_descriptor_key(self) -> Result<DescriptorKey<Ctx>, KeyError> {
+impl<Ctx: ScriptContext> IntoDescriptorKey<Ctx> for PublicKey {
+    fn into_descriptor_key(self) -> Result<DescriptorKey<Ctx>, KeyError> {
         DescriptorPublicKey::SinglePub(DescriptorSinglePub {
             key: self,
             origin: None,
         })
-        .to_descriptor_key()
+        .into_descriptor_key()
     }
 }
 
-impl<Ctx: ScriptContext> ToDescriptorKey<Ctx> for DescriptorSecretKey {
-    fn to_descriptor_key(self) -> Result<DescriptorKey<Ctx>, KeyError> {
+impl<Ctx: ScriptContext> IntoDescriptorKey<Ctx> for DescriptorSecretKey {
+    fn into_descriptor_key(self) -> Result<DescriptorKey<Ctx>, KeyError> {
         let networks = match &self {
             DescriptorSecretKey::SinglePriv(sk) if sk.key.network == Network::Bitcoin => {
                 mainnet_network()
@@ -852,21 +854,21 @@ impl<Ctx: ScriptContext> ToDescriptorKey<Ctx> for DescriptorSecretKey {
     }
 }
 
-impl<Ctx: ScriptContext> ToDescriptorKey<Ctx> for &'_ str {
-    fn to_descriptor_key(self) -> Result<DescriptorKey<Ctx>, KeyError> {
+impl<Ctx: ScriptContext> IntoDescriptorKey<Ctx> for &'_ str {
+    fn into_descriptor_key(self) -> Result<DescriptorKey<Ctx>, KeyError> {
         DescriptorSecretKey::from_str(self)
             .map_err(|e| KeyError::Message(e.to_string()))?
-            .to_descriptor_key()
+            .into_descriptor_key()
     }
 }
 
-impl<Ctx: ScriptContext> ToDescriptorKey<Ctx> for PrivateKey {
-    fn to_descriptor_key(self) -> Result<DescriptorKey<Ctx>, KeyError> {
+impl<Ctx: ScriptContext> IntoDescriptorKey<Ctx> for PrivateKey {
+    fn into_descriptor_key(self) -> Result<DescriptorKey<Ctx>, KeyError> {
         DescriptorSecretKey::SinglePriv(DescriptorSinglePriv {
             key: self,
             origin: None,
         })
-        .to_descriptor_key()
+        .into_descriptor_key()
     }
 }
 

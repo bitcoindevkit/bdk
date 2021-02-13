@@ -67,7 +67,7 @@ use crate::database::{BatchDatabase, BatchOperations, DatabaseUtils};
 use crate::descriptor::derived::AsDerived;
 use crate::descriptor::{
     get_checksum, DerivedDescriptor, DerivedDescriptorMeta, DescriptorMeta, DescriptorScripts,
-    ExtendedDescriptor, ExtractPolicy, Policy, ToWalletDescriptor, XKeyUtils,
+    ExtendedDescriptor, ExtractPolicy, IntoWalletDescriptor, Policy, XKeyUtils,
 };
 use crate::error::Error;
 use crate::psbt::PSBTUtils;
@@ -110,7 +110,7 @@ where
     D: BatchDatabase,
 {
     /// Create a new "offline" wallet
-    pub fn new_offline<E: ToWalletDescriptor>(
+    pub fn new_offline<E: IntoWalletDescriptor>(
         descriptor: E,
         change_descriptor: Option<E>,
         network: Network,
@@ -124,7 +124,7 @@ impl<B, D> Wallet<B, D>
 where
     D: BatchDatabase,
 {
-    fn _new<E: ToWalletDescriptor>(
+    fn _new<E: IntoWalletDescriptor>(
         descriptor: E,
         change_descriptor: Option<E>,
         network: Network,
@@ -134,7 +134,7 @@ where
     ) -> Result<Self, Error> {
         let secp = Secp256k1::new();
 
-        let (descriptor, keymap) = descriptor.to_wallet_descriptor(&secp, network)?;
+        let (descriptor, keymap) = descriptor.into_wallet_descriptor(&secp, network)?;
         database.check_descriptor_checksum(
             KeychainKind::External,
             get_checksum(&descriptor.to_string())?.as_bytes(),
@@ -143,7 +143,7 @@ where
         let (change_descriptor, change_signers) = match change_descriptor {
             Some(desc) => {
                 let (change_descriptor, change_keymap) =
-                    desc.to_wallet_descriptor(&secp, network)?;
+                    desc.into_wallet_descriptor(&secp, network)?;
                 database.check_descriptor_checksum(
                     KeychainKind::Internal,
                     get_checksum(&change_descriptor.to_string())?.as_bytes(),
@@ -1247,7 +1247,7 @@ where
 {
     /// Create a new "online" wallet
     #[maybe_async]
-    pub fn new<E: ToWalletDescriptor>(
+    pub fn new<E: IntoWalletDescriptor>(
         descriptor: E,
         change_descriptor: Option<E>,
         network: Network,

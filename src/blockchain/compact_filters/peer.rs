@@ -223,14 +223,14 @@ impl Peer {
             )),
         )?;
         let version = if let NetworkMessage::Version(version) =
-            Self::_recv(&responses, "version", None)?.unwrap()
+            Self::_recv(&responses, "version", None).unwrap()
         {
             version
         } else {
             return Err(CompactFiltersError::InvalidResponse);
         };
 
-        if let NetworkMessage::Verack = Self::_recv(&responses, "verack", None)?.unwrap() {
+        if let NetworkMessage::Verack = Self::_recv(&responses, "verack", None).unwrap() {
             Self::_send(&mut locked_writer, network.magic(), NetworkMessage::Verack)?;
         } else {
             return Err(CompactFiltersError::InvalidResponse);
@@ -271,7 +271,7 @@ impl Peer {
         responses: &Arc<RwLock<ResponsesMap>>,
         wait_for: &'static str,
         timeout: Option<Duration>,
-    ) -> Result<Option<NetworkMessage>, CompactFiltersError> {
+    ) -> Option<NetworkMessage> {
         let message_resp = {
             let mut lock = responses.write().unwrap();
             let message_resp = lock.entry(wait_for).or_default();
@@ -287,15 +287,14 @@ impl Peer {
                 Some(t) => {
                     let result = cvar.wait_timeout(messages, t).unwrap();
                     if result.1.timed_out() {
-                        return Ok(None);
+                        return None;
                     }
-
                     messages = result.0;
                 }
             }
         }
 
-        Ok(messages.pop())
+        messages.pop()
     }
 
     /// Return the [`VersionMessage`] sent by the peer
@@ -415,7 +414,7 @@ impl Peer {
         wait_for: &'static str,
         timeout: Option<Duration>,
     ) -> Result<Option<NetworkMessage>, CompactFiltersError> {
-        Self::_recv(&self.responses, wait_for, timeout)
+        Ok(Self::_recv(&self.responses, wait_for, timeout))
     }
 }
 

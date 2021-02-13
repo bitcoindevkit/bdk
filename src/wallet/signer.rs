@@ -560,8 +560,8 @@ impl Eq for SignersContainerKey {}
 mod signers_container_tests {
     use super::*;
     use crate::descriptor;
-    use crate::descriptor::ToWalletDescriptor;
-    use crate::keys::{DescriptorKey, ToDescriptorKey};
+    use crate::descriptor::IntoWalletDescriptor;
+    use crate::keys::{DescriptorKey, IntoDescriptorKey};
     use bitcoin::secp256k1::{All, Secp256k1};
     use bitcoin::util::bip32;
     use bitcoin::util::psbt::PartiallySignedTransaction;
@@ -579,7 +579,9 @@ mod signers_container_tests {
         let (prvkey1, _, _) = setup_keys(TPRV0_STR);
         let (prvkey2, _, _) = setup_keys(TPRV1_STR);
         let desc = descriptor!(sh(multi(2, prvkey1, prvkey2))).unwrap();
-        let (_, keymap) = desc.to_wallet_descriptor(&secp, Network::Testnet).unwrap();
+        let (_, keymap) = desc
+            .into_wallet_descriptor(&secp, Network::Testnet)
+            .unwrap();
 
         let signers = SignersContainer::from(keymap);
         assert_eq!(signers.ids().len(), 2);
@@ -690,8 +692,8 @@ mod signers_container_tests {
         let tprv = bip32::ExtendedPrivKey::from_str(tprv).unwrap();
         let tpub = bip32::ExtendedPubKey::from_private(&secp, &tprv);
         let fingerprint = tprv.fingerprint(&secp);
-        let prvkey = (tprv, path.clone()).to_descriptor_key().unwrap();
-        let pubkey = (tpub, path).to_descriptor_key().unwrap();
+        let prvkey = (tprv, path.clone()).into_descriptor_key().unwrap();
+        let pubkey = (tpub, path).into_descriptor_key().unwrap();
 
         (prvkey, pubkey, fingerprint)
     }
