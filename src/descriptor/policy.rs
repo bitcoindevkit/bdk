@@ -892,7 +892,7 @@ mod test {
 
     use super::*;
     use crate::descriptor::policy::SatisfiableItem::{Multisig, Signature, Thresh};
-    use crate::keys::{DescriptorKey, ToDescriptorKey};
+    use crate::keys::{DescriptorKey, IntoDescriptorKey};
     use crate::wallet::signer::SignersContainer;
     use bitcoin::secp256k1::{All, Secp256k1};
     use bitcoin::util::bip32;

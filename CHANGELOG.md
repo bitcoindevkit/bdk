@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Keys
 #### Changed
 - Renamed `DerivableKey::add_metadata()` to `DerivableKey::into_descriptor_key()`
+- Renamed `ToDescriptorKey::to_descriptor_key()` to `IntoDescriptorKey::into_descriptor_key()`
 #### Added
 - Added an `ExtendedKey` type that is an enum of `bip32::ExtendedPubKey` and `bip32::ExtendedPrivKey`
 - Added `DerivableKey::into_extended_key()` as the only method that needs to be implemented
@@ -27,9 +28,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Wallet
 #### Changed
 - Removed the explicit `id` argument from `Wallet::add_signer()` since that's now part of `Signer` itself
-- Renamed `ToWalletDescriptor::to_wallet_descriptor` to `IntoWalletDescriptor::into_wallet_descriptor`
+- Renamed `ToWalletDescriptor::to_wallet_descriptor()` to `IntoWalletDescriptor::into_wallet_descriptor()`
 
-### Policy 
+### Policy
 #### Changed
 - Removed unneeded `Result<(), PolicyError>` return type for `Satisfaction::finalize()`
 

@@ -54,7 +54,7 @@ pub use self::derived::DerivedDescriptorKey;
 pub use self::error::Error as DescriptorError;
 pub use self::policy::Policy;
 use self::template::DescriptorTemplateOut;
-use crate::keys::{KeyError, ToDescriptorKey};
+use crate::keys::{IntoDescriptorKey, KeyError};
 use crate::wallet::signer::SignersContainer;
 use crate::wallet::utils::SecpCtx;
 
@@ -614,7 +614,7 @@ mod test {
 
     #[test]
     fn test_to_wallet_descriptor_fixup_networks() {
-        use crate::keys::{any_network, ToDescriptorKey};
+        use crate::keys::{any_network, IntoDescriptorKey};
 
         let secp = Secp256k1::new();
 

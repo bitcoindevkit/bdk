@@ -561,7 +561,7 @@ mod signers_container_tests {
     use super::*;
     use crate::descriptor;
     use crate::descriptor::IntoWalletDescriptor;
-    use crate::keys::{DescriptorKey, ToDescriptorKey};
+    use crate::keys::{DescriptorKey, IntoDescriptorKey};
     use bitcoin::secp256k1::{All, Secp256k1};
     use bitcoin::util::bip32;
     use bitcoin::util::psbt::PartiallySignedTransaction;

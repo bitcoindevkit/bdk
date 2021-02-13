@@ -76,7 +76,7 @@ macro_rules! impl_top_level_pk {
         use $crate::miniscript::descriptor::$inner_type;
 
         #[allow(unused_imports)]
-        use $crate::keys::{DescriptorKey, ToDescriptorKey};
+        use $crate::keys::{DescriptorKey, IntoDescriptorKey};
         let secp = $crate::bitcoin::secp256k1::Secp256k1::new();
 
         $key.into_descriptor_key()
@@ -225,7 +225,7 @@ macro_rules! impl_sortedmulti {
         $crate::keys::make_sortedmulti($thresh, $keys, $build_desc, &secp)
     });
     ( $build_desc:expr, sortedmulti ( $thresh:expr $(, $key:expr )+ ) ) => ({
-        use $crate::keys::ToDescriptorKey;
+        use $crate::keys::IntoDescriptorKey;
         let secp = $crate::bitcoin::secp256k1::Secp256k1::new();
 
         let mut keys = vec![];
@@ -326,11 +326,11 @@ macro_rules! apply_modifier {
 /// broken up to `s:d:v:older(144)`.
 ///
 /// The `pk()`, `pk_k()` and `pk_h()` operands can take as argument any type that implements
-/// [`ToDescriptorKey`]. This means that keys can also be written inline as strings, but in that
+/// [`IntoDescriptorKey`]. This means that keys can also be written inline as strings, but in that
 /// case they must be wrapped in quotes, which is another difference compared to the standard
 /// descriptor syntax.
 ///
-/// [`ToDescriptorKey`]: crate::keys::ToDescriptorKey
+/// [`IntoDescriptorKey`]: crate::keys::IntoDescriptorKey
 ///
 /// ## Example
 ///
@@ -653,7 +653,7 @@ macro_rules! fragment {
         $crate::keys::make_multi($thresh, $keys)
     });
     ( multi ( $thresh:expr $(, $key:expr )+ ) ) => ({
-        use $crate::keys::ToDescriptorKey;
+        use $crate::keys::IntoDescriptorKey;
         let secp = $crate::bitcoin::secp256k1::Secp256k1::new();
 
         let mut keys = vec![];
@@ -685,7 +685,7 @@ mod test {
     use std::str::FromStr;
 
     use crate::descriptor::{DescriptorError, DescriptorMeta};
-    use crate::keys::{DescriptorKey, ToDescriptorKey, ValidNetworks};
+    use crate::keys::{DescriptorKey, IntoDescriptorKey, ValidNetworks};
     use bitcoin::network::constants::Network::{Bitcoin, Regtest, Signet, Testnet};
     use bitcoin::util::bip32;
     use bitcoin::PrivateKey;
@@ -724,7 +724,7 @@ mod test {
     }
 
     // - at least one of each "type" of operator; ie. one modifier, one leaf_opcode, one leaf_opcode_value, etc.
-    // - mixing up key types that implement ToDescriptorKey in multi() or thresh()
+    // - mixing up key types that implement IntoDescriptorKey in multi() or thresh()
 
     // expected script for pk and bare manually created
     // expected addresses created with `bitcoin-cli getdescriptorinfo` (for hash) and `bitcoin-cli deriveaddresses`
@@ -1020,7 +1020,7 @@ mod test {
         assert_eq!(key_map.get(&key3).unwrap().to_string(), "tprv8ZgxMBicQKsPdZXrcHNLf5JAJWFAoJ2TrstMRdSKtEggz6PddbuSkvHKM9oKJyFgZV1B7rw8oChspxyYbtmEXYyg1AjfWbL3ho3XHDpHRZf/10/20/30/40/*");
     }
 
-    // - verify the ScriptContext is correctly validated (i.e. passing a type that only impl ToDescriptorKey<Segwitv0> to a pkh() descriptor should throw a compilation error
+    // - verify the ScriptContext is correctly validated (i.e. passing a type that only impl IntoDescriptorKey<Segwitv0> to a pkh() descriptor should throw a compilation error
     #[test]
     fn test_script_context_validation() {
         // this compiles
