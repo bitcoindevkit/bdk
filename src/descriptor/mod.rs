@@ -198,6 +198,36 @@ impl IntoWalletDescriptor for DescriptorTemplateOut {
     }
 }
 
+/// Wrapper for `IntoWalletDescriptor` that performs additional checks on the keys contained in the
+/// descriptor
+pub(crate) fn into_wallet_descriptor_checked<T: IntoWalletDescriptor>(
+    inner: T,
+    secp: &SecpCtx,
+    network: Network,
+) -> Result<(ExtendedDescriptor, KeyMap), DescriptorError> {
+    let (descriptor, keymap) = inner.into_wallet_descriptor(secp, network)?;
+
+    // Ensure the keys don't contain any hardened derivation steps or hardened wildcards
+    let descriptor_contains_hardened_steps = descriptor.for_any_key(|k| {
+        if let DescriptorPublicKey::XPub(DescriptorXKey {
+            derivation_path,
+            wildcard,
+            ..
+        }) = k.as_key()
+        {
+            return *wildcard == Wildcard::Hardened
+                || derivation_path.into_iter().any(ChildNumber::is_hardened);
+        }
+
+        false
+    });
+    if descriptor_contains_hardened_steps {
+        return Err(DescriptorError::HardenedDerivationXpub);
+    }
+
+    Ok((descriptor, keymap))
+}
+
 #[doc(hidden)]
 /// Used internally mainly by the `descriptor!()` and `fragment!()` macros
 pub trait CheckMiniscript<Ctx: miniscript::ScriptContext> {
@@ -739,5 +769,19 @@ mod test {
             .into_wallet_descriptor(&secp, Network::Testnet)
             .unwrap();
         assert_eq!(wallet_desc, wallet_desc2)
+    }
+
+    #[test]
+    fn test_into_wallet_descriptor_checked() {
+        let secp = Secp256k1::new();
+
+        let descriptor = "wpkh(tpubD6NzVbkrYhZ4XHndKkuB8FifXm8r5FQHwrN6oZuWCz13qb93rtgKvD4PQsqC4HP4yhV3tA2fqr2RbY5mNXfM7RxXUoeABoDtsFUq2zJq6YK/0'/1/2/*)";
+        let result = into_wallet_descriptor_checked(descriptor, &secp, Network::Testnet);
+
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            DescriptorError::HardenedDerivationXpub
+        ));
     }
 }
