@@ -31,6 +31,8 @@ pub enum Error {
     InvalidHDKeyPath,
     /// The provided descriptor doesn't match its checksum
     InvalidDescriptorChecksum,
+    /// The descriptor contains hardened derivation steps on public extended keys
+    HardenedDerivationXpub,
 
     /// Error thrown while working with [`keys`](crate::keys)
     Key(crate::keys::KeyError),

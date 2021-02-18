@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.4.0] - [v0.3.0]
+
 ### Keys
 #### Changed
 - Renamed `DerivableKey::add_metadata()` to `DerivableKey::into_descriptor_key()`
@@ -16,13 +18,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Misc
 #### Removed
-- Removed the `parse_descriptor` example, since it wasn't demostrating any bdk-specific API anymore.
+- Removed the `parse_descriptor` example, since it wasn't demonstrating any bdk-specific API anymore.
 #### Changed
 - Updated `bitcoin` to `0.26`, `miniscript` to `5.1` and `electrum-client` to `0.6`
 #### Added
 - Added support for the `signet` network (issue #62)
-
-#### Added
 - Added a function to get the version of BDK at runtime
 
 ### Wallet
@@ -33,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Policy
 #### Changed
 - Removed unneeded `Result<(), PolicyError>` return type for `Satisfaction::finalize()`
+- Removed the `TooManyItemsSelected` policy error (see commit message for more details)
 
 ## [v0.3.0] - [v0.2.0]
 
@@ -269,7 +270,8 @@ final transaction is created by calling `finish` on the builder.
 - Use `MemoryDatabase` in the compiler example
 - Make the REPL return JSON
 
-[unreleased]: https://github.com/bitcoindevkit/bdk/compare/v0.2.0...HEAD
+[unreleased]: https://github.com/bitcoindevkit/bdk/compare/v0.4.0...HEAD
 [0.1.0-beta.1]: https://github.com/bitcoindevkit/bdk/compare/96c87ea5...0.1.0-beta.1
 [v0.2.0]: https://github.com/bitcoindevkit/bdk/compare/0.1.0-beta.1...v0.2.0
 [v0.3.0]: https://github.com/bitcoindevkit/bdk/compare/v0.2.0...v0.3.0
+[v0.4.0]: https://github.com/bitcoindevkit/bdk/compare/v0.3.0...v0.4.0

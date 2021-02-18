@@ -47,7 +47,7 @@
 //! # Ok::<(), bdk::Error>(())
 //! ```
 
-use std::cmp::{max, Ordering};
+use std::cmp::max;
 use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::fmt;
 
@@ -506,13 +506,11 @@ impl Condition {
 }
 
 /// Errors that can happen while extracting and manipulating policies
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum PolicyError {
-    /// Not enough items are selected to satisfy a [`SatisfiableItem::Thresh`]
+    /// Not enough items are selected to satisfy a [`SatisfiableItem::Thresh`] or a [`SatisfiableItem::Multisig`]
     NotEnoughItemsSelected(String),
-    /// Too many items are selected to satisfy a [`SatisfiableItem::Thresh`]
-    TooManyItemsSelected(String),
-    /// Index out of range for an item to satisfy a [`SatisfiableItem::Thresh`]
+    /// Index out of range for an item to satisfy a [`SatisfiableItem::Thresh`] or a [`SatisfiableItem::Multisig`]
     IndexOutOfRange(usize),
     /// Can not add to an item that is [`Satisfaction::None`] or [`Satisfaction::Complete`]
     AddOnLeaf,
@@ -644,10 +642,10 @@ impl Policy {
             SatisfiableItem::Thresh { items, threshold } if items.len() == *threshold => {
                 (0..*threshold).collect()
             }
+            SatisfiableItem::Multisig { keys, .. } => (0..keys.len()).collect(),
             _ => vec![],
         };
         let selected = match path.get(&self.id) {
-            _ if !default.is_empty() => &default,
             Some(arr) => arr,
             _ => &default,
         };
@@ -668,14 +666,8 @@ impl Policy {
                 // if we have something, make sure we have enough items. note that the user can set
                 // an empty value for this step in case of n-of-n, because `selected` is set to all
                 // the elements above
-                match selected.len().cmp(threshold) {
-                    Ordering::Less => {
-                        return Err(PolicyError::NotEnoughItemsSelected(self.id.clone()))
-                    }
-                    Ordering::Greater => {
-                        return Err(PolicyError::TooManyItemsSelected(self.id.clone()))
-                    }
-                    Ordering::Equal => (),
+                if selected.len() < *threshold {
+                    return Err(PolicyError::NotEnoughItemsSelected(self.id.clone()));
                 }
 
                 // check the selected items, see if there are conflicting requirements
@@ -690,7 +682,16 @@ impl Policy {
 
                 Ok(requirements)
             }
-            _ if !selected.is_empty() => Err(PolicyError::TooManyItemsSelected(self.id.clone())),
+            SatisfiableItem::Multisig { keys, threshold } => {
+                if selected.len() < *threshold {
+                    return Err(PolicyError::NotEnoughItemsSelected(self.id.clone()));
+                }
+                if let Some(item) = selected.iter().find(|i| **i >= keys.len()) {
+                    return Err(PolicyError::IndexOutOfRange(*item));
+                }
+
+                Ok(Condition::default())
+            }
             SatisfiableItem::AbsoluteTimelock { value } => Ok(Condition {
                 csv: None,
                 timelock: Some(*value),
@@ -1257,4 +1258,50 @@ mod test {
     //
     //     // TODO how should this merge timelocks?
     // }
+
+    #[test]
+    fn test_get_condition_multisig() {
+        let secp = Secp256k1::gen_new();
+
+        let (_, pk0, _) = setup_keys(TPRV0_STR);
+        let (_, pk1, _) = setup_keys(TPRV1_STR);
+
+        let desc = descriptor!(wsh(multi(1, pk0, pk1))).unwrap();
+        let (wallet_desc, keymap) = desc
+            .into_wallet_descriptor(&secp, Network::Testnet)
+            .unwrap();
+        let signers = keymap.into();
+
+        let policy = wallet_desc
+            .extract_policy(&signers, &secp)
+            .unwrap()
+            .unwrap();
+
+        // no args, choose the default
+        let no_args = policy.get_condition(&vec![].into_iter().collect());
+        assert_eq!(no_args, Ok(Condition::default()));
+
+        // enough args
+        let eq_thresh =
+            policy.get_condition(&vec![(policy.id.clone(), vec![0])].into_iter().collect());
+        assert_eq!(eq_thresh, Ok(Condition::default()));
+
+        // more args, it doesn't really change anything
+        let gt_thresh =
+            policy.get_condition(&vec![(policy.id.clone(), vec![0, 1])].into_iter().collect());
+        assert_eq!(gt_thresh, Ok(Condition::default()));
+
+        // not enough args, error
+        let lt_thresh =
+            policy.get_condition(&vec![(policy.id.clone(), vec![])].into_iter().collect());
+        assert_eq!(
+            lt_thresh,
+            Err(PolicyError::NotEnoughItemsSelected(policy.id.clone()))
+        );
+
+        // index out of range
+        let out_of_range =
+            policy.get_condition(&vec![(policy.id.clone(), vec![5])].into_iter().collect());
+        assert_eq!(out_of_range, Err(PolicyError::IndexOutOfRange(5)));
+    }
 }
