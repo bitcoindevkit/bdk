@@ -52,6 +52,7 @@ key-value-db = ["sled"]
 async-interface = ["async-trait"]
 all-keys = ["keys-bip39"]
 keys-bip39 = ["tiny-bip39"]
+miniscript-serde = ["miniscript/use-serde"]
 
 # Debug/Test features
 debug-proc-macros = ["bdk-macros/debug", "bdk-testutils-macros/debug"]
