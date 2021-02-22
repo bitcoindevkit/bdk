@@ -703,6 +703,7 @@ impl Policy {
             _ => Ok(Condition::default()),
         }
     }
+
 }
 
 impl From<SatisfiableItem> for Policy {
@@ -908,8 +909,8 @@ mod test {
 
     fn setup_keys<Ctx: ScriptContext>(
         tprv: &str,
+        secp: &SecpCtx,
     ) -> (DescriptorKey<Ctx>, DescriptorKey<Ctx>, Fingerprint) {
-        let secp: Secp256k1<All> = Secp256k1::new();
         let path = bip32::DerivationPath::from_str(PATH).unwrap();
         let tprv = bip32::ExtendedPrivKey::from_str(tprv).unwrap();
         let tpub = bip32::ExtendedPubKey::from_private(&secp, &tprv);
@@ -926,7 +927,7 @@ mod test {
     fn test_extract_policy_for_wpkh() {
         let secp = Secp256k1::new();
 
-        let (prvkey, pubkey, fingerprint) = setup_keys(TPRV0_STR);
+        let (prvkey, pubkey, fingerprint) = setup_keys(TPRV0_STR, &secp);
         let desc = descriptor!(wpkh(pubkey)).unwrap();
         let (wallet_desc, keymap) = desc
             .into_wallet_descriptor(&secp, Network::Testnet)
@@ -1025,8 +1026,8 @@ mod test {
     fn test_extract_policy_for_sh_multi_complete_1of2() {
         let secp = Secp256k1::new();
 
-        let (_prvkey0, pubkey0, fingerprint0) = setup_keys(TPRV0_STR);
-        let (prvkey1, _pubkey1, fingerprint1) = setup_keys(TPRV1_STR);
+        let (_prvkey0, pubkey0, fingerprint0) = setup_keys(TPRV0_STR, &secp);
+        let (prvkey1, _pubkey1, fingerprint1) = setup_keys(TPRV1_STR, &secp);
         let desc = descriptor!(sh(multi(1, pubkey0, prvkey1))).unwrap();
         let (wallet_desc, keymap) = desc
             .into_wallet_descriptor(&secp, Network::Testnet)
@@ -1057,8 +1058,8 @@ mod test {
     fn test_extract_policy_for_sh_multi_complete_2of2() {
         let secp = Secp256k1::new();
 
-        let (prvkey0, _pubkey0, fingerprint0) = setup_keys(TPRV0_STR);
-        let (prvkey1, _pubkey1, fingerprint1) = setup_keys(TPRV1_STR);
+        let (prvkey0, _pubkey0, fingerprint0) = setup_keys(TPRV0_STR, &secp);
+        let (prvkey1, _pubkey1, fingerprint1) = setup_keys(TPRV1_STR, &secp);
         let desc = descriptor!(sh(multi(2, prvkey0, prvkey1))).unwrap();
         let (wallet_desc, keymap) = desc
             .into_wallet_descriptor(&secp, Network::Testnet)
@@ -1090,7 +1091,7 @@ mod test {
     fn test_extract_policy_for_single_wpkh() {
         let secp = Secp256k1::new();
 
-        let (prvkey, pubkey, fingerprint) = setup_keys(TPRV0_STR);
+        let (prvkey, pubkey, fingerprint) = setup_keys(TPRV0_STR, &secp);
         let desc = descriptor!(wpkh(pubkey)).unwrap();
         let (wallet_desc, keymap) = desc
             .into_wallet_descriptor(&secp, Network::Testnet)
@@ -1132,8 +1133,8 @@ mod test {
     fn test_extract_policy_for_single_wsh_multi_complete_1of2() {
         let secp = Secp256k1::new();
 
-        let (_prvkey0, pubkey0, fingerprint0) = setup_keys(TPRV0_STR);
-        let (prvkey1, _pubkey1, fingerprint1) = setup_keys(TPRV1_STR);
+        let (_prvkey0, pubkey0, fingerprint0) = setup_keys(TPRV0_STR, &secp);
+        let (prvkey1, _pubkey1, fingerprint1) = setup_keys(TPRV1_STR, &secp);
         let desc = descriptor!(sh(multi(1, pubkey0, prvkey1))).unwrap();
         let (wallet_desc, keymap) = desc
             .into_wallet_descriptor(&secp, Network::Testnet)
@@ -1167,8 +1168,8 @@ mod test {
     fn test_extract_policy_for_wsh_multi_timelock() {
         let secp = Secp256k1::new();
 
-        let (prvkey0, _pubkey0, _fingerprint0) = setup_keys(TPRV0_STR);
-        let (_prvkey1, pubkey1, _fingerprint1) = setup_keys(TPRV1_STR);
+        let (prvkey0, _pubkey0, _fingerprint0) = setup_keys(TPRV0_STR, &secp);
+        let (_prvkey1, pubkey1, _fingerprint1) = setup_keys(TPRV1_STR, &secp);
         let sequence = 50;
         #[rustfmt::skip]
         let desc = descriptor!(wsh(thresh(
@@ -1261,10 +1262,10 @@ mod test {
 
     #[test]
     fn test_get_condition_multisig() {
-        let secp = Secp256k1::gen_new();
+        let secp = Secp256k1::new();
 
-        let (_, pk0, _) = setup_keys(TPRV0_STR);
-        let (_, pk1, _) = setup_keys(TPRV1_STR);
+        let (_, pk0, _) = setup_keys(TPRV0_STR, &secp);
+        let (_, pk1, _) = setup_keys(TPRV1_STR, &secp);
 
         let desc = descriptor!(wsh(multi(1, pk0, pk1))).unwrap();
         let (wallet_desc, keymap) = desc
