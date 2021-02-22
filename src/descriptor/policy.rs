@@ -934,7 +934,7 @@ mod test {
             .unwrap();
         let signers_container = Arc::new(SignersContainer::from(keymap));
         let policy = wallet_desc
-            .extract_policy(&signers_container, &Secp256k1::new())
+            .extract_policy(&signers_container, &secp)
             .unwrap()
             .unwrap();
 
@@ -949,7 +949,7 @@ mod test {
             .unwrap();
         let signers_container = Arc::new(SignersContainer::from(keymap));
         let policy = wallet_desc
-            .extract_policy(&signers_container, &Secp256k1::new())
+            .extract_policy(&signers_container, &secp)
             .unwrap()
             .unwrap();
 
@@ -1034,7 +1034,7 @@ mod test {
             .unwrap();
         let signers_container = Arc::new(SignersContainer::from(keymap));
         let policy = wallet_desc
-            .extract_policy(&signers_container, &Secp256k1::new())
+            .extract_policy(&signers_container, &secp)
             .unwrap()
             .unwrap();
 
@@ -1066,7 +1066,7 @@ mod test {
             .unwrap();
         let signers_container = Arc::new(SignersContainer::from(keymap));
         let policy = wallet_desc
-            .extract_policy(&signers_container, &Secp256k1::new())
+            .extract_policy(&signers_container, &secp)
             .unwrap()
             .unwrap();
 
@@ -1099,7 +1099,7 @@ mod test {
         let single_key = wallet_desc.derive(0);
         let signers_container = Arc::new(SignersContainer::from(keymap));
         let policy = single_key
-            .extract_policy(&signers_container, &Secp256k1::new())
+            .extract_policy(&signers_container, &secp)
             .unwrap()
             .unwrap();
 
@@ -1115,7 +1115,7 @@ mod test {
         let single_key = wallet_desc.derive(0);
         let signers_container = Arc::new(SignersContainer::from(keymap));
         let policy = single_key
-            .extract_policy(&signers_container, &Secp256k1::new())
+            .extract_policy(&signers_container, &secp)
             .unwrap()
             .unwrap();
 
@@ -1142,7 +1142,7 @@ mod test {
         let single_key = wallet_desc.derive(0);
         let signers_container = Arc::new(SignersContainer::from(keymap));
         let policy = single_key
-            .extract_policy(&signers_container, &Secp256k1::new())
+            .extract_policy(&signers_container, &secp)
             .unwrap()
             .unwrap();
 
@@ -1185,7 +1185,7 @@ mod test {
             .unwrap();
         let signers_container = Arc::new(SignersContainer::from(keymap));
         let policy = wallet_desc
-            .extract_policy(&signers_container, &Secp256k1::new())
+            .extract_policy(&signers_container, &secp)
             .unwrap()
             .unwrap();
 
