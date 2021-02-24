@@ -569,19 +569,9 @@ mod signers_container_tests {
     use miniscript::ScriptContext;
     use std::str::FromStr;
 
-    // Return true if data field of `fat` pointer is the same address as `thin` pointer.
-    fn is_equal(fat: &Arc<dyn Signer>, thin: &Arc<DummySigner>) -> bool {
-        let (left, right) = raw_pointers(fat, thin);
-        left == right
-    }
-
-    // Make pointer values out of `fat` and `thin` that can be compared.
-    fn raw_pointers(fat: &Arc<dyn Signer>, thin: &Arc<DummySigner>) -> (*const u8, *const u8) {
-        let (left, _vtable): (*const u8, *const u8) =
-            unsafe { std::mem::transmute(Arc::as_ptr(fat)) };
-        let right = Arc::as_ptr(thin) as *const u8;
-
-        (left, right)
+    fn is_equal(this: &Arc<dyn Signer>, that: &Arc<DummySigner>) -> bool {
+        let secp = Secp256k1::new();
+        this.id(&secp) == that.id(&secp)
     }
 
     // Signers added with the same ordering (like `Ordering::default`) created from `KeyMap`
@@ -608,49 +598,34 @@ mod signers_container_tests {
     #[test]
     fn signers_sorted_by_ordering() {
         let mut signers = SignersContainer::new();
-        let signer1 = Arc::new(DummySigner);
-        let signer2 = Arc::new(DummySigner);
-        let signer3 = Arc::new(DummySigner);
+        let signer1 = Arc::new(DummySigner { number: 1 });
+        let signer2 = Arc::new(DummySigner { number: 2 });
+        let signer3 = Arc::new(DummySigner { number: 3 });
 
-        signers.add_external(
-            SignerId::Fingerprint(b"cafe"[..].into()),
-            SignerOrdering(1),
-            signer1.clone(),
-        );
-        signers.add_external(
-            SignerId::Fingerprint(b"babe"[..].into()),
-            SignerOrdering(2),
-            signer2.clone(),
-        );
-        signers.add_external(
-            SignerId::Fingerprint(b"feed"[..].into()),
-            SignerOrdering(3),
-            signer3.clone(),
-        );
+        signers.add_external(SignerId::Dummy(1), SignerOrdering(1), signer1.clone());
+        signers.add_external(SignerId::Dummy(2), SignerOrdering(2), signer2.clone());
+        signers.add_external(SignerId::Dummy(3), SignerOrdering(3), signer3.clone());
 
         // Check that signers are sorted from lowest to highest ordering
         let signers = signers.signers();
 
-        let (left, right) = raw_pointers(signers[0], &signer1);
-        assert_eq!(left, right);
-        let (left, right) = raw_pointers(signers[1], &signer2);
-        assert_eq!(left, right);
-        let (left, right) = raw_pointers(signers[2], &signer3);
-        assert_eq!(left, right);
+        assert!(is_equal(signers[0], &signer1));
+        assert!(is_equal(signers[1], &signer2));
+        assert!(is_equal(signers[2], &signer3));
     }
 
     #[test]
     fn find_signer_by_id() {
         let mut signers = SignersContainer::new();
-        let signer1 = Arc::new(DummySigner);
-        let signer2 = Arc::new(DummySigner);
-        let signer3 = Arc::new(DummySigner);
-        let signer4 = Arc::new(DummySigner);
+        let signer1 = Arc::new(DummySigner { number: 1 });
+        let signer2 = Arc::new(DummySigner { number: 2 });
+        let signer3 = Arc::new(DummySigner { number: 3 });
+        let signer4 = Arc::new(DummySigner { number: 3 }); // Same ID as `signer3` but will use lower ordering.
 
-        let id1 = SignerId::Fingerprint(b"cafe"[..].into());
-        let id2 = SignerId::Fingerprint(b"babe"[..].into());
-        let id3 = SignerId::Fingerprint(b"feed"[..].into());
-        let id_nonexistent = SignerId::Fingerprint(b"fefe"[..].into());
+        let id1 = SignerId::Dummy(1);
+        let id2 = SignerId::Dummy(2);
+        let id3 = SignerId::Dummy(3);
+        let id_nonexistent = SignerId::Dummy(999);
 
         signers.add_external(id1.clone(), SignerOrdering(1), signer1.clone());
         signers.add_external(id2.clone(), SignerOrdering(2), signer2.clone());
@@ -669,8 +644,11 @@ mod signers_container_tests {
         assert!(matches!(signers.find(id_nonexistent), None));
     }
 
-    #[derive(Debug)]
-    struct DummySigner;
+    #[derive(Debug, Clone, Copy)]
+    struct DummySigner {
+        number: u64,
+    }
+
     impl Signer for DummySigner {
         fn sign(
             &self,
@@ -682,7 +660,7 @@ mod signers_container_tests {
         }
 
         fn id(&self, _secp: &SecpCtx) -> SignerId {
-            SignerId::Dummy(42)
+            SignerId::Dummy(self.number)
         }
 
         fn sign_whole_tx(&self) -> bool {
