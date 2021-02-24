@@ -602,8 +602,9 @@ mod signers_container_tests {
         let signer2 = Arc::new(DummySigner { number: 2 });
         let signer3 = Arc::new(DummySigner { number: 3 });
 
-        signers.add_external(SignerId::Dummy(1), SignerOrdering(1), signer1.clone());
+        // Mixed order insertions verifies we are not inserting at head or tail.
         signers.add_external(SignerId::Dummy(2), SignerOrdering(2), signer2.clone());
+        signers.add_external(SignerId::Dummy(1), SignerOrdering(1), signer1.clone());
         signers.add_external(SignerId::Dummy(3), SignerOrdering(3), signer3.clone());
 
         // Check that signers are sorted from lowest to highest ordering
