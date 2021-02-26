@@ -569,6 +569,11 @@ mod signers_container_tests {
     use miniscript::ScriptContext;
     use std::str::FromStr;
 
+    fn is_equal(this: &Arc<dyn Signer>, that: &Arc<DummySigner>) -> bool {
+        let secp = Secp256k1::new();
+        this.id(&secp) == that.id(&secp)
+    }
+
     // Signers added with the same ordering (like `Ordering::default`) created from `KeyMap`
     // should be preserved and not overwritten.
     // This happens usually when a set of signers is created from a descriptor with private keys.
@@ -593,73 +598,58 @@ mod signers_container_tests {
     #[test]
     fn signers_sorted_by_ordering() {
         let mut signers = SignersContainer::new();
-        let signer1 = Arc::new(DummySigner);
-        let signer2 = Arc::new(DummySigner);
-        let signer3 = Arc::new(DummySigner);
+        let signer1 = Arc::new(DummySigner { number: 1 });
+        let signer2 = Arc::new(DummySigner { number: 2 });
+        let signer3 = Arc::new(DummySigner { number: 3 });
 
-        signers.add_external(
-            SignerId::Fingerprint(b"cafe"[..].into()),
-            SignerOrdering(1),
-            signer1.clone(),
-        );
-        signers.add_external(
-            SignerId::Fingerprint(b"babe"[..].into()),
-            SignerOrdering(2),
-            signer2.clone(),
-        );
-        signers.add_external(
-            SignerId::Fingerprint(b"feed"[..].into()),
-            SignerOrdering(3),
-            signer3.clone(),
-        );
+        // Mixed order insertions verifies we are not inserting at head or tail.
+        signers.add_external(SignerId::Dummy(2), SignerOrdering(2), signer2.clone());
+        signers.add_external(SignerId::Dummy(1), SignerOrdering(1), signer1.clone());
+        signers.add_external(SignerId::Dummy(3), SignerOrdering(3), signer3.clone());
 
         // Check that signers are sorted from lowest to highest ordering
         let signers = signers.signers();
-        assert_eq!(Arc::as_ptr(signers[0]), Arc::as_ptr(&signer1));
-        assert_eq!(Arc::as_ptr(signers[1]), Arc::as_ptr(&signer2));
-        assert_eq!(Arc::as_ptr(signers[2]), Arc::as_ptr(&signer3));
+
+        assert!(is_equal(signers[0], &signer1));
+        assert!(is_equal(signers[1], &signer2));
+        assert!(is_equal(signers[2], &signer3));
     }
 
     #[test]
     fn find_signer_by_id() {
         let mut signers = SignersContainer::new();
-        let signer1: Arc<dyn Signer> = Arc::new(DummySigner);
-        let signer2: Arc<dyn Signer> = Arc::new(DummySigner);
-        let signer3: Arc<dyn Signer> = Arc::new(DummySigner);
-        let signer4: Arc<dyn Signer> = Arc::new(DummySigner);
+        let signer1 = Arc::new(DummySigner { number: 1 });
+        let signer2 = Arc::new(DummySigner { number: 2 });
+        let signer3 = Arc::new(DummySigner { number: 3 });
+        let signer4 = Arc::new(DummySigner { number: 3 }); // Same ID as `signer3` but will use lower ordering.
 
-        let id1 = SignerId::Fingerprint(b"cafe"[..].into());
-        let id2 = SignerId::Fingerprint(b"babe"[..].into());
-        let id3 = SignerId::Fingerprint(b"feed"[..].into());
-        let id_nonexistent = SignerId::Fingerprint(b"fefe"[..].into());
+        let id1 = SignerId::Dummy(1);
+        let id2 = SignerId::Dummy(2);
+        let id3 = SignerId::Dummy(3);
+        let id_nonexistent = SignerId::Dummy(999);
 
         signers.add_external(id1.clone(), SignerOrdering(1), signer1.clone());
         signers.add_external(id2.clone(), SignerOrdering(2), signer2.clone());
         signers.add_external(id3.clone(), SignerOrdering(3), signer3.clone());
 
-        assert!(
-            matches!(signers.find(id1), Some(signer) if Arc::as_ptr(&signer1) == Arc::as_ptr(signer))
-        );
-        assert!(
-            matches!(signers.find(id2), Some(signer) if Arc::as_ptr(&signer2) == Arc::as_ptr(signer))
-        );
-        assert!(
-            matches!(signers.find(id3.clone()), Some(signer) if Arc::as_ptr(&signer3) == Arc::as_ptr(signer))
-        );
+        assert!(matches!(signers.find(id1), Some(signer) if is_equal(signer, &signer1)));
+        assert!(matches!(signers.find(id2), Some(signer) if is_equal(signer, &signer2)));
+        assert!(matches!(signers.find(id3.clone()), Some(signer) if is_equal(signer, &signer3)));
 
         // The `signer4` has the same ID as `signer3` but lower ordering.
         // It should be found by `id3` instead of `signer3`.
         signers.add_external(id3.clone(), SignerOrdering(2), signer4.clone());
-        assert!(
-            matches!(signers.find(id3), Some(signer) if Arc::as_ptr(&signer4) == Arc::as_ptr(signer))
-        );
+        assert!(matches!(signers.find(id3), Some(signer) if is_equal(signer, &signer4)));
 
         // Can't find anything with ID that doesn't exist
         assert!(matches!(signers.find(id_nonexistent), None));
     }
 
-    #[derive(Debug)]
-    struct DummySigner;
+    #[derive(Debug, Clone, Copy)]
+    struct DummySigner {
+        number: u64,
+    }
+
     impl Signer for DummySigner {
         fn sign(
             &self,
@@ -671,7 +661,7 @@ mod signers_container_tests {
         }
 
         fn id(&self, _secp: &SecpCtx) -> SignerId {
-            SignerId::Dummy(42)
+            SignerId::Dummy(self.number)
         }
 
         fn sign_whole_tx(&self) -> bool {

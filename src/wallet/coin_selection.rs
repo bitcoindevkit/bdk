@@ -815,7 +815,7 @@ mod test {
             .coin_select(
                 &database,
                 vec![],
-                utxos.clone(),
+                utxos,
                 FeeRate::from_sat_per_vb(1.0),
                 99932, // first utxo's effective value
                 0.0,

@@ -1970,7 +1970,7 @@ mod test {
 
         assert_eq!(psbt.inputs[0].bip32_derivation.len(), 1);
         assert_eq!(
-            psbt.inputs[0].bip32_derivation.values().nth(0).unwrap(),
+            psbt.inputs[0].bip32_derivation.values().next().unwrap(),
             &(
                 Fingerprint::from_str("d34db33f").unwrap(),
                 DerivationPath::from_str("m/44'/0'/0'/0/0").unwrap()
@@ -1996,7 +1996,7 @@ mod test {
 
         assert_eq!(psbt.outputs[0].bip32_derivation.len(), 1);
         assert_eq!(
-            psbt.outputs[0].bip32_derivation.values().nth(0).unwrap(),
+            psbt.outputs[0].bip32_derivation.values().next().unwrap(),
             &(
                 Fingerprint::from_str("d34db33f").unwrap(),
                 DerivationPath::from_str("m/44'/0'/0'/0/5").unwrap()
@@ -3429,15 +3429,18 @@ mod test {
         let (mut psbt, _) = builder.finish().unwrap();
 
         // add another input to the psbt that is at least passable.
-        let mut dud_input = bitcoin::util::psbt::Input::default();
-        dud_input.witness_utxo = Some(TxOut {
-            value: 100_000,
-            script_pubkey: miniscript::Descriptor::<bitcoin::PublicKey>::from_str(
-                "wpkh(025476c2e83188368da1ff3e292e7acafcdb3566bb0ad253f62fc70f07aeee6357)",
-            )
-            .unwrap()
-            .script_pubkey(),
-        });
+        let dud_input = bitcoin::util::psbt::Input {
+            witness_utxo: Some(TxOut {
+                value: 100_000,
+                script_pubkey: miniscript::Descriptor::<bitcoin::PublicKey>::from_str(
+                    "wpkh(025476c2e83188368da1ff3e292e7acafcdb3566bb0ad253f62fc70f07aeee6357)",
+                )
+                .unwrap()
+                .script_pubkey(),
+            }),
+            ..Default::default()
+        };
+
         psbt.inputs.push(dud_input);
         psbt.global.unsigned_tx.input.push(bitcoin::TxIn::default());
         let (psbt, is_final) = wallet.sign(psbt, None).unwrap();

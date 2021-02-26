@@ -225,7 +225,6 @@ extern crate async_trait;
 extern crate bdk_macros;
 
 #[cfg(feature = "compact_filters")]
-#[macro_use]
 extern crate lazy_static;
 
 #[cfg(feature = "electrum")]

@@ -46,6 +46,8 @@ use bitcoin::BlockHash;
 use bitcoin::BlockHeader;
 use bitcoin::Network;
 
+use lazy_static::lazy_static;
+
 use super::CompactFiltersError;
 
 lazy_static! {
@@ -119,7 +121,7 @@ where
     }
 
     fn deserialize(data: &[u8]) -> Result<Self, CompactFiltersError> {
-        Ok(deserialize(data).map_err(|_| CompactFiltersError::DataCorruption)?)
+        deserialize(data).map_err(|_| CompactFiltersError::DataCorruption)
     }
 }
 
@@ -436,15 +438,14 @@ impl ChainStore<Full> {
 
         let key = StoreEntry::BlockHeaderIndex(Some(*block_hash)).get_key();
         let data = read_store.get_pinned_cf(cf_handle, key)?;
-        Ok(data
-            .map(|data| {
-                Ok::<_, CompactFiltersError>(usize::from_be_bytes(
-                    data.as_ref()
-                        .try_into()
-                        .map_err(|_| CompactFiltersError::DataCorruption)?,
-                ))
-            })
-            .transpose()?)
+        data.map(|data| {
+            Ok::<_, CompactFiltersError>(usize::from_be_bytes(
+                data.as_ref()
+                    .try_into()
+                    .map_err(|_| CompactFiltersError::DataCorruption)?,
+            ))
+        })
+        .transpose()
     }
 
     pub fn get_block_hash(&self, height: usize) -> Result<Option<BlockHash>, CompactFiltersError> {
@@ -453,13 +454,12 @@ impl ChainStore<Full> {
 
         let key = StoreEntry::BlockHeader(Some(height)).get_key();
         let data = read_store.get_pinned_cf(cf_handle, key)?;
-        Ok(data
-            .map(|data| {
-                let (header, _): (BlockHeader, Uint256) =
-                    deserialize(&data).map_err(|_| CompactFiltersError::DataCorruption)?;
-                Ok::<_, CompactFiltersError>(header.block_hash())
-            })
-            .transpose()?)
+        data.map(|data| {
+            let (header, _): (BlockHeader, Uint256) =
+                deserialize(&data).map_err(|_| CompactFiltersError::DataCorruption)?;
+            Ok::<_, CompactFiltersError>(header.block_hash())
+        })
+        .transpose()
     }
 
     pub fn save_full_block(&self, block: &Block, height: usize) -> Result<(), CompactFiltersError> {
@@ -475,10 +475,10 @@ impl ChainStore<Full> {
         let key = StoreEntry::Block(Some(height)).get_key();
         let opt_block = read_store.get_pinned(key)?;
 
-        Ok(opt_block
+        opt_block
             .map(|data| deserialize(&data))
             .transpose()
-            .map_err(|_| CompactFiltersError::DataCorruption)?)
+            .map_err(|_| CompactFiltersError::DataCorruption)
     }
 
     pub fn delete_blocks_until(&self, height: usize) -> Result<(), CompactFiltersError> {
@@ -565,14 +565,14 @@ impl<T: StoreType> ChainStore<T> {
         let prefix = StoreEntry::BlockHeader(None).get_key();
         let iterator = read_store.prefix_iterator_cf(cf_handle, prefix);
 
-        Ok(iterator
+        iterator
             .last()
             .map(|(_, v)| -> Result<_, CompactFiltersError> {
                 let (header, _): (BlockHeader, Uint256) = SerializeDb::deserialize(&v)?;
 
                 Ok(header.block_hash())
             })
-            .transpose()?)
+            .transpose()
     }
 
     pub fn apply(
@@ -716,11 +716,11 @@ impl CFStore {
 
         // FIXME: we have to filter manually because rocksdb sometimes returns stuff that doesn't
         // have the right prefix
-        Ok(iterator
+        iterator
             .filter(|(k, _)| k.starts_with(&prefix))
             .skip(1)
             .map(|(_, data)| Ok::<_, CompactFiltersError>(BundleEntry::deserialize(&data)?.1))
-            .collect::<Result<_, _>>()?)
+            .collect::<Result<_, _>>()
     }
 
     pub fn replace_checkpoints(

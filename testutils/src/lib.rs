@@ -60,13 +60,13 @@ fn get_auth() -> Auth {
         ),
         _ => Auth::CookieFile(PathBuf::from(
             env::var("BDK_RPC_COOKIEFILE")
-                .unwrap_or("/home/user/.bitcoin/regtest/.cookie".to_string()),
+                .unwrap_or_else(|_| "/home/user/.bitcoin/regtest/.cookie".to_string()),
         )),
     }
 }
 
 pub fn get_electrum_url() -> String {
-    env::var("BDK_ELECTRUM_URL").unwrap_or("tcp://127.0.0.1:50001".to_string())
+    env::var("BDK_ELECTRUM_URL").unwrap_or_else(|_| "tcp://127.0.0.1:50001".to_string())
 }
 
 pub struct TestClient {
@@ -311,8 +311,8 @@ where
 
 impl TestClient {
     pub fn new() -> Self {
-        let url = env::var("BDK_RPC_URL").unwrap_or("127.0.0.1:18443".to_string());
-        let wallet = env::var("BDK_RPC_WALLET").unwrap_or("bdk-test".to_string());
+        let url = env::var("BDK_RPC_URL").unwrap_or_else(|_| "127.0.0.1:18443".to_string());
+        let wallet = env::var("BDK_RPC_WALLET").unwrap_or_else(|_| "bdk-test".to_string());
         let client =
             RpcClient::new(format!("http://{}/wallet/{}", url, wallet), get_auth()).unwrap();
         let electrum = ElectrumClient::new(&get_electrum_url()).unwrap();
@@ -349,7 +349,7 @@ impl TestClient {
 
     pub fn receive(&mut self, meta_tx: TestIncomingTx) -> Txid {
         assert!(
-            meta_tx.output.len() > 0,
+            !meta_tx.output.is_empty(),
             "can't create a transaction with no outputs"
         );
 
