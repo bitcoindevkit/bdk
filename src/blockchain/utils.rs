@@ -34,7 +34,7 @@ use bitcoin::{BlockHeader, OutPoint, Script, Transaction, Txid};
 use super::*;
 use crate::database::{BatchDatabase, BatchOperations, DatabaseUtils};
 use crate::error::Error;
-use crate::types::{KeychainKind, TransactionDetails, UTXO};
+use crate::types::{KeychainKind, LocalUtxo, TransactionDetails};
 use crate::wallet::time::Instant;
 use crate::wallet::utils::ChunksIterator;
 
@@ -353,7 +353,7 @@ fn save_transaction_details_and_utxos<D: BatchDatabase>(
         // this output is ours, we have a path to derive it
         if let Some((keychain, _child)) = db.get_path_from_script_pubkey(&output.script_pubkey)? {
             debug!("{} output #{} is mine, adding utxo", txid, i);
-            updates.set_utxo(&UTXO {
+            updates.set_utxo(&LocalUtxo {
                 outpoint: OutPoint::new(tx.txid(), i as u32),
                 txout: output.clone(),
                 keychain,

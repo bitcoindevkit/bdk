@@ -54,15 +54,15 @@ use std::collections::HashSet;
 use std::default::Default;
 use std::marker::PhantomData;
 
-use bitcoin::util::psbt::PartiallySignedTransaction as PSBT;
+use bitcoin::util::psbt::{self, PartiallySignedTransaction as PSBT};
 use bitcoin::{OutPoint, Script, SigHashType, Transaction};
 
 use miniscript::descriptor::DescriptorTrait;
 
 use super::coin_selection::{CoinSelectionAlgorithm, DefaultCoinSelectionAlgorithm};
-use crate::{database::BatchDatabase, Error, Wallet};
+use crate::{database::BatchDatabase, Error, Utxo, Wallet};
 use crate::{
-    types::{FeeRate, KeychainKind, UTXO},
+    types::{FeeRate, KeychainKind, LocalUtxo, WeightedUtxo},
     TransactionDetails,
 };
 /// Context in which the [`TxBuilder`] is valid
@@ -129,7 +129,7 @@ impl TxBuilderContext for BumpFee {}
 /// [`build_fee_bump`]: Wallet::build_fee_bump
 /// [`finish`]: Self::finish
 /// [`coin_selection`]: Self::coin_selection
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct TxBuilder<'a, B, D, Cs, Ctx> {
     pub(crate) wallet: &'a Wallet<B, D>,
     // params and coin_selection are Options not becasue they are optionally set (they are always
@@ -150,7 +150,7 @@ pub(crate) struct TxParams {
     pub(crate) fee_policy: Option<FeePolicy>,
     pub(crate) internal_policy_path: Option<BTreeMap<String, Vec<usize>>>,
     pub(crate) external_policy_path: Option<BTreeMap<String, Vec<usize>>>,
-    pub(crate) utxos: Vec<(UTXO, usize)>,
+    pub(crate) utxos: Vec<WeightedUtxo>,
     pub(crate) unspendable: HashSet<OutPoint>,
     pub(crate) manually_selected_only: bool,
     pub(crate) sighash: Option<SigHashType>,
@@ -180,6 +180,17 @@ pub(crate) enum FeePolicy {
 impl std::default::Default for FeePolicy {
     fn default() -> Self {
         FeePolicy::FeeRate(FeeRate::default_min_relay_fee())
+    }
+}
+
+impl<'a, Cs: Clone, Ctx, B, D> Clone for TxBuilder<'a, B, D, Cs, Ctx> {
+    fn clone(&self) -> Self {
+        TxBuilder {
+            wallet: self.wallet,
+            params: self.params.clone(),
+            coin_selection: self.coin_selection.clone(),
+            phantom: PhantomData,
+        }
     }
 }
 
@@ -286,7 +297,10 @@ impl<'a, B, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderConte
         for utxo in utxos {
             let descriptor = self.wallet.get_descriptor_for_keychain(utxo.keychain);
             let satisfaction_weight = descriptor.max_satisfaction_weight().unwrap();
-            self.params.utxos.push((utxo, satisfaction_weight));
+            self.params.utxos.push(WeightedUtxo {
+                satisfaction_weight,
+                utxo: Utxo::Local(utxo),
+            });
         }
 
         Ok(self)
@@ -298,6 +312,84 @@ impl<'a, B, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderConte
     /// the "utxos" and the "unspendable" list, it will be spent.
     pub fn add_utxo(&mut self, outpoint: OutPoint) -> Result<&mut Self, Error> {
         self.add_utxos(&[outpoint])
+    }
+
+    /// Add a foreign UTXO i.e. a UTXO not owned by this wallet.
+    ///
+    /// At a minimum to add a foreign UTXO we need:
+    ///
+    /// 1. `outpoint`: To add it to the raw transaction.
+    /// 2. `psbt_input`: To know the value.
+    /// 3. `satisfaction_weight`: To know how much weight/vbytes the input will add to the transaction for fee calculation.
+    ///
+    /// There are several security concerns about adding foregin UTXOs that application
+    /// developers should consider. First, how do you know the value of the input is correct? If a
+    /// `non_witness_utxo` is provided in the `psbt_input` then this method implicitly verifies the
+    /// value by checking it against the transaction. If only a `witness_utxo` is provided then this
+    /// method doesn't verify the value but just takes it as a given -- it is up to you to check
+    /// that whoever sent you the `input_psbt` was not lying!
+    ///
+    /// Secondly, you must somehow provide `satisfaction_weight` of the input. Depending on your
+    /// application it may be important that this be known precisely. If not, a malicious
+    /// counterparty may fool you into putting in a value that is too low, giving the transaction a
+    /// lower than expected feerate. They could also fool you into putting a value that is too high
+    /// causing you to pay a fee that is too high. The party who is broadcasting the transaction can
+    /// of course check the real input weight matches the expected weight prior to broadcasting.
+    ///
+    /// To guarantee the `satisfaction_weight` is correct, you can require the party providing the
+    /// `psbt_input` provide a miniscript descriptor for the input so you can check it against the
+    /// `script_pubkey` and then ask it for the [`max_satisfaction_weight`].
+    ///
+    /// This is an **EXPERIMENTAL** feature, API and other major changes are expected.
+    ///
+    /// # Errors
+    ///
+    /// This method returns errors in the following circumstances:
+    ///
+    /// 1. The `psbt_input` does not contain a `witness_utxo` or `non_witness_utxo`.
+    /// 2. The data in `non_witness_utxo` does not match what is in `outpoint`.
+    ///
+    /// Note if you set [`force_non_witness_utxo`] any `psbt_input` you pass to this method must
+    /// have `non_witness_utxo` set otherwise you will get an error when [`finish`] is called.
+    ///
+    /// [`force_non_witness_utxo`]: Self::force_non_witness_utxo
+    /// [`finish`]: Self::finish
+    /// [`max_satisfaction_weight`]: miniscript::Descriptor::max_satisfaction_weight
+    pub fn add_foreign_utxo(
+        &mut self,
+        outpoint: OutPoint,
+        psbt_input: psbt::Input,
+        satisfaction_weight: usize,
+    ) -> Result<&mut Self, Error> {
+        if psbt_input.witness_utxo.is_none() {
+            match psbt_input.non_witness_utxo.as_ref() {
+                Some(tx) => {
+                    if tx.txid() != outpoint.txid {
+                        return Err(Error::Generic(
+                            "Foreign utxo outpoint does not match PSBT input".into(),
+                        ));
+                    }
+                    if tx.output.len() <= outpoint.vout as usize {
+                        return Err(Error::InvalidOutpoint(outpoint));
+                    }
+                }
+                None => {
+                    return Err(Error::Generic(
+                        "Foreign utxo missing witness_utxo or non_witness_utxo".into(),
+                    ))
+                }
+            }
+        }
+
+        self.params.utxos.push(WeightedUtxo {
+            satisfaction_weight,
+            utxo: Utxo::Foreign {
+                outpoint,
+                psbt_input: Box::new(psbt_input),
+            },
+        });
+
+        Ok(self)
     }
 
     /// Only spend utxos added by [`add_utxo`].
@@ -618,7 +710,7 @@ impl Default for ChangeSpendPolicy {
 }
 
 impl ChangeSpendPolicy {
-    pub(crate) fn is_satisfied_by(&self, utxo: &UTXO) -> bool {
+    pub(crate) fn is_satisfied_by(&self, utxo: &LocalUtxo) -> bool {
         match self {
             ChangeSpendPolicy::ChangeAllowed => true,
             ChangeSpendPolicy::OnlyChange => utxo.keychain == KeychainKind::Internal,
@@ -709,9 +801,9 @@ mod test {
         assert_eq!(tx.output[2].script_pubkey, From::from(vec![0xAA, 0xEE]));
     }
 
-    fn get_test_utxos() -> Vec<UTXO> {
+    fn get_test_utxos() -> Vec<LocalUtxo> {
         vec![
-            UTXO {
+            LocalUtxo {
                 outpoint: OutPoint {
                     txid: Default::default(),
                     vout: 0,
@@ -719,7 +811,7 @@ mod test {
                 txout: Default::default(),
                 keychain: KeychainKind::External,
             },
-            UTXO {
+            LocalUtxo {
                 outpoint: OutPoint {
                     txid: Default::default(),
                     vout: 1,

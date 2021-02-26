@@ -51,7 +51,7 @@ macro_rules! impl_batch_operations {
             Ok(())
         }
 
-        fn set_utxo(&mut self, utxo: &UTXO) -> Result<(), Error> {
+        fn set_utxo(&mut self, utxo: &LocalUtxo) -> Result<(), Error> {
             let key = MapKey::UTXO(Some(&utxo.outpoint)).as_map_key();
             let value = json!({
                 "t": utxo.txout,
@@ -120,7 +120,7 @@ macro_rules! impl_batch_operations {
             }
         }
 
-        fn del_utxo(&mut self, outpoint: &OutPoint) -> Result<Option<UTXO>, Error> {
+        fn del_utxo(&mut self, outpoint: &OutPoint) -> Result<Option<LocalUtxo>, Error> {
             let key = MapKey::UTXO(Some(outpoint)).as_map_key();
             let res = self.remove(key);
             let res = $process_delete!(res);
@@ -132,7 +132,7 @@ macro_rules! impl_batch_operations {
                     let txout = serde_json::from_value(val["t"].take())?;
                     let keychain = serde_json::from_value(val["i"].take())?;
 
-                    Ok(Some(UTXO { outpoint: outpoint.clone(), txout, keychain }))
+                    Ok(Some(LocalUtxo { outpoint: outpoint.clone(), txout, keychain }))
                 }
             }
         }
@@ -234,7 +234,7 @@ impl Database for Tree {
             .collect()
     }
 
-    fn iter_utxos(&self) -> Result<Vec<UTXO>, Error> {
+    fn iter_utxos(&self) -> Result<Vec<LocalUtxo>, Error> {
         let key = MapKey::UTXO(None).as_map_key();
         self.scan_prefix(key)
             .map(|x| -> Result<_, Error> {
@@ -245,7 +245,7 @@ impl Database for Tree {
                 let txout = serde_json::from_value(val["t"].take())?;
                 let keychain = serde_json::from_value(val["i"].take())?;
 
-                Ok(UTXO {
+                Ok(LocalUtxo {
                     outpoint,
                     txout,
                     keychain,
@@ -305,7 +305,7 @@ impl Database for Tree {
             .transpose()
     }
 
-    fn get_utxo(&self, outpoint: &OutPoint) -> Result<Option<UTXO>, Error> {
+    fn get_utxo(&self, outpoint: &OutPoint) -> Result<Option<LocalUtxo>, Error> {
         let key = MapKey::UTXO(Some(outpoint)).as_map_key();
         self.get(key)?
             .map(|b| -> Result<_, Error> {
@@ -313,7 +313,7 @@ impl Database for Tree {
                 let txout = serde_json::from_value(val["t"].take())?;
                 let keychain = serde_json::from_value(val["i"].take())?;
 
-                Ok(UTXO {
+                Ok(LocalUtxo {
                     outpoint: *outpoint,
                     txout,
                     keychain,

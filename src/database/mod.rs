@@ -64,8 +64,8 @@ pub trait BatchOperations {
         keychain: KeychainKind,
         child: u32,
     ) -> Result<(), Error>;
-    /// Store a [`UTXO`]
-    fn set_utxo(&mut self, utxo: &UTXO) -> Result<(), Error>;
+    /// Store a [`LocalUtxo`]
+    fn set_utxo(&mut self, utxo: &LocalUtxo) -> Result<(), Error>;
     /// Store a raw transaction
     fn set_raw_tx(&mut self, transaction: &Transaction) -> Result<(), Error>;
     /// Store the metadata of a transaction
@@ -85,8 +85,8 @@ pub trait BatchOperations {
         &mut self,
         script: &Script,
     ) -> Result<Option<(KeychainKind, u32)>, Error>;
-    /// Delete a [`UTXO`] given its [`OutPoint`]
-    fn del_utxo(&mut self, outpoint: &OutPoint) -> Result<Option<UTXO>, Error>;
+    /// Delete a [`LocalUtxo`] given its [`OutPoint`]
+    fn del_utxo(&mut self, outpoint: &OutPoint) -> Result<Option<LocalUtxo>, Error>;
     /// Delete a raw transaction given its [`Txid`]
     fn del_raw_tx(&mut self, txid: &Txid) -> Result<Option<Transaction>, Error>;
     /// Delete the metadata of a transaction and optionally the raw transaction itself
@@ -116,8 +116,8 @@ pub trait Database: BatchOperations {
 
     /// Return the list of script_pubkeys
     fn iter_script_pubkeys(&self, keychain: Option<KeychainKind>) -> Result<Vec<Script>, Error>;
-    /// Return the list of [`UTXO`]s
-    fn iter_utxos(&self) -> Result<Vec<UTXO>, Error>;
+    /// Return the list of [`LocalUtxo`]s
+    fn iter_utxos(&self) -> Result<Vec<LocalUtxo>, Error>;
     /// Return the list of raw transactions
     fn iter_raw_txs(&self) -> Result<Vec<Transaction>, Error>;
     /// Return the list of transactions metadata
@@ -134,8 +134,8 @@ pub trait Database: BatchOperations {
         &self,
         script: &Script,
     ) -> Result<Option<(KeychainKind, u32)>, Error>;
-    /// Fetch a [`UTXO`] given its [`OutPoint`]
-    fn get_utxo(&self, outpoint: &OutPoint) -> Result<Option<UTXO>, Error>;
+    /// Fetch a [`LocalUtxo`] given its [`OutPoint`]
+    fn get_utxo(&self, outpoint: &OutPoint) -> Result<Option<LocalUtxo>, Error>;
     /// Fetch a raw transaction given its [`Txid`]
     fn get_raw_tx(&self, txid: &Txid) -> Result<Option<Transaction>, Error>;
     /// Fetch the transaction metadata and optionally also the raw transaction
@@ -298,7 +298,7 @@ pub mod test {
             value: 133742,
             script_pubkey: script,
         };
-        let utxo = UTXO {
+        let utxo = LocalUtxo {
             txout,
             outpoint,
             keychain: KeychainKind::External,

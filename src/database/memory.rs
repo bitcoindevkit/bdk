@@ -157,7 +157,7 @@ impl BatchOperations for MemoryDatabase {
         Ok(())
     }
 
-    fn set_utxo(&mut self, utxo: &UTXO) -> Result<(), Error> {
+    fn set_utxo(&mut self, utxo: &LocalUtxo) -> Result<(), Error> {
         let key = MapKey::UTXO(Some(&utxo.outpoint)).as_map_key();
         self.map
             .insert(key, Box::new((utxo.txout.clone(), utxo.keychain)));
@@ -223,7 +223,7 @@ impl BatchOperations for MemoryDatabase {
             }
         }
     }
-    fn del_utxo(&mut self, outpoint: &OutPoint) -> Result<Option<UTXO>, Error> {
+    fn del_utxo(&mut self, outpoint: &OutPoint) -> Result<Option<LocalUtxo>, Error> {
         let key = MapKey::UTXO(Some(outpoint)).as_map_key();
         let res = self.map.remove(&key);
         self.deleted_keys.push(key);
@@ -232,7 +232,7 @@ impl BatchOperations for MemoryDatabase {
             None => Ok(None),
             Some(b) => {
                 let (txout, keychain) = b.downcast_ref().cloned().unwrap();
-                Ok(Some(UTXO {
+                Ok(Some(LocalUtxo {
                     outpoint: *outpoint,
                     txout,
                     keychain,
@@ -316,14 +316,14 @@ impl Database for MemoryDatabase {
             .collect()
     }
 
-    fn iter_utxos(&self) -> Result<Vec<UTXO>, Error> {
+    fn iter_utxos(&self) -> Result<Vec<LocalUtxo>, Error> {
         let key = MapKey::UTXO(None).as_map_key();
         self.map
             .range::<Vec<u8>, _>((Included(&key), Excluded(&after(&key))))
             .map(|(k, v)| {
                 let outpoint = deserialize(&k[1..]).unwrap();
                 let (txout, keychain) = v.downcast_ref().cloned().unwrap();
-                Ok(UTXO {
+                Ok(LocalUtxo {
                     outpoint,
                     txout,
                     keychain,
@@ -382,11 +382,11 @@ impl Database for MemoryDatabase {
         }))
     }
 
-    fn get_utxo(&self, outpoint: &OutPoint) -> Result<Option<UTXO>, Error> {
+    fn get_utxo(&self, outpoint: &OutPoint) -> Result<Option<LocalUtxo>, Error> {
         let key = MapKey::UTXO(Some(outpoint)).as_map_key();
         Ok(self.map.get(&key).map(|b| {
             let (txout, keychain) = b.downcast_ref().cloned().unwrap();
-            UTXO {
+            LocalUtxo {
                 outpoint: *outpoint,
                 txout,
                 keychain,
@@ -502,7 +502,7 @@ macro_rules! populate_test_db {
 
         db.set_tx(&tx_details).unwrap();
         for (vout, out) in tx.output.iter().enumerate() {
-            db.set_utxo(&UTXO {
+            db.set_utxo(&LocalUtxo {
                 txout: out.clone(),
                 outpoint: OutPoint {
                     txid,

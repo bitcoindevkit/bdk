@@ -83,7 +83,7 @@ mod sync;
 use super::{Blockchain, Capability, ConfigurableBlockchain, Progress};
 use crate::database::{BatchDatabase, BatchOperations, DatabaseUtils};
 use crate::error::Error;
-use crate::types::{KeychainKind, TransactionDetails, UTXO};
+use crate::types::{KeychainKind, LocalUtxo, TransactionDetails};
 use crate::FeeRate;
 
 use peer::*;
@@ -194,7 +194,7 @@ impl CompactFiltersBlockchain {
                 database.get_path_from_script_pubkey(&output.script_pubkey)?
             {
                 debug!("{} output #{} is mine, adding utxo", tx.txid(), i);
-                updates.set_utxo(&UTXO {
+                updates.set_utxo(&LocalUtxo {
                     outpoint: OutPoint::new(tx.txid(), i as u32),
                     txout: output.clone(),
                     keychain,

@@ -25,7 +25,7 @@
 use std::convert::AsRef;
 
 use bitcoin::blockdata::transaction::{OutPoint, Transaction, TxOut};
-use bitcoin::hash_types::Txid;
+use bitcoin::{hash_types::Txid, util::psbt};
 
 use serde::{Deserialize, Serialize};
 
@@ -90,15 +90,75 @@ impl std::default::Default for FeeRate {
     }
 }
 
-/// A wallet unspent output
+/// An unspent output owned by a [`Wallet`].
+///
+/// [`Wallet`]: crate::Wallet
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub struct UTXO {
+pub struct LocalUtxo {
     /// Reference to a transaction output
     pub outpoint: OutPoint,
     /// Transaction output
     pub txout: TxOut,
     /// Type of keychain
     pub keychain: KeychainKind,
+}
+
+/// A [`Utxo`] with its `satisfaction_weight`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct WeightedUtxo {
+    /// The weight of the witness data and `scriptSig` expressed in [weight units]. This is used to
+    /// properly maintain the feerate when adding this input to a transaction during coin selection.
+    ///
+    /// [weight units]: https://en.bitcoin.it/wiki/Weight_units
+    pub satisfaction_weight: usize,
+    /// The UTXO
+    pub utxo: Utxo,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+/// An unspent transaction output (UTXO).
+pub enum Utxo {
+    /// A UTXO owned by the local wallet.
+    Local(LocalUtxo),
+    /// A UTXO owned by another wallet.
+    Foreign {
+        /// The location of the output.
+        outpoint: OutPoint,
+        /// The information about the input we require to add it to a PSBT.
+        // Box it to stop the type being too big.
+        psbt_input: Box<psbt::Input>,
+    },
+}
+
+impl Utxo {
+    /// Get the location of the UTXO
+    pub fn outpoint(&self) -> OutPoint {
+        match &self {
+            Utxo::Local(local) => local.outpoint,
+            Utxo::Foreign { outpoint, .. } => *outpoint,
+        }
+    }
+
+    /// Get the `TxOut` of the UTXO
+    pub fn txout(&self) -> &TxOut {
+        match &self {
+            Utxo::Local(local) => &local.txout,
+            Utxo::Foreign {
+                outpoint,
+                psbt_input,
+            } => {
+                if let Some(prev_tx) = &psbt_input.non_witness_utxo {
+                    return &prev_tx.output[outpoint.vout as usize];
+                }
+
+                if let Some(txout) = &psbt_input.witness_utxo {
+                    return &txout;
+                }
+
+                unreachable!("Foreign UTXOs will always have one of these set")
+            }
+        }
+    }
 }
 
 /// A wallet transaction

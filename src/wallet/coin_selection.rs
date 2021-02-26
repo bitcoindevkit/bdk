@@ -50,8 +50,8 @@
 //!     fn coin_select(
 //!         &self,
 //!         database: &D,
-//!         required_utxos: Vec<(UTXO, usize)>,
-//!         optional_utxos: Vec<(UTXO, usize)>,
+//!         required_utxos: Vec<WeightedUtxo>,
+//!         optional_utxos: Vec<WeightedUtxo>,
 //!         fee_rate: FeeRate,
 //!         amount_needed: u64,
 //!         fee_amount: f32,
@@ -60,11 +60,10 @@
 //!         let mut additional_weight = 0;
 //!         let all_utxos_selected = required_utxos
 //!             .into_iter().chain(optional_utxos)
-//!             .scan((&mut selected_amount, &mut additional_weight), |(selected_amount, additional_weight), (utxo, weight)| {
-//!                 **selected_amount += utxo.txout.value;
-//!                 **additional_weight += TXIN_BASE_WEIGHT + weight;
-//!
-//!                 Some(utxo)
+//!             .scan((&mut selected_amount, &mut additional_weight), |(selected_amount, additional_weight), weighted_utxo| {
+//!                 **selected_amount += weighted_utxo.utxo.txout().value;
+//!                 **additional_weight += TXIN_BASE_WEIGHT + weighted_utxo.satisfaction_weight;
+//!                 Some(weighted_utxo.utxo)
 //!             })
 //!             .collect::<Vec<_>>();
 //!         let additional_fees = additional_weight as f32 * fee_rate.as_sat_vb() / 4.0;
@@ -75,7 +74,6 @@
 //!
 //!         Ok(CoinSelectionResult {
 //!             selected: all_utxos_selected,
-//!             selected_amount,
 //!             fee_amount: fee_amount + additional_fees,
 //!         })
 //!     }
@@ -97,9 +95,9 @@
 //! # Ok::<(), bdk::Error>(())
 //! ```
 
-use crate::database::Database;
-use crate::error::Error;
-use crate::types::{FeeRate, UTXO};
+use crate::types::FeeRate;
+use crate::{database::Database, WeightedUtxo};
+use crate::{error::Error, Utxo};
 
 use rand::seq::SliceRandom;
 #[cfg(not(test))]
@@ -122,11 +120,27 @@ pub(crate) const TXIN_BASE_WEIGHT: usize = (32 + 4 + 4 + 1) * 4;
 #[derive(Debug)]
 pub struct CoinSelectionResult {
     /// List of outputs selected for use as inputs
-    pub selected: Vec<UTXO>,
-    /// Sum of the selected inputs' value
-    pub selected_amount: u64,
+    pub selected: Vec<Utxo>,
     /// Total fee amount in satoshi
     pub fee_amount: f32,
+}
+
+impl CoinSelectionResult {
+    /// The total value of the inputs selected.
+    pub fn selected_amount(&self) -> u64 {
+        self.selected.iter().map(|u| u.txout().value).sum()
+    }
+
+    /// The total value of the inputs selected from the local wallet.
+    pub fn local_selected_amount(&self) -> u64 {
+        self.selected
+            .iter()
+            .filter_map(|u| match u {
+                Utxo::Local(_) => Some(u.txout().value),
+                _ => None,
+            })
+            .sum()
+    }
 }
 
 /// Trait for generalized coin selection algorithms
@@ -151,8 +165,8 @@ pub trait CoinSelectionAlgorithm<D: Database>: std::fmt::Debug {
     fn coin_select(
         &self,
         database: &D,
-        required_utxos: Vec<(UTXO, usize)>,
-        optional_utxos: Vec<(UTXO, usize)>,
+        required_utxos: Vec<WeightedUtxo>,
+        optional_utxos: Vec<WeightedUtxo>,
         fee_rate: FeeRate,
         amount_needed: u64,
         fee_amount: f32,
@@ -163,15 +177,15 @@ pub trait CoinSelectionAlgorithm<D: Database>: std::fmt::Debug {
 ///
 /// This coin selection algorithm sorts the available UTXOs by value and then picks them starting
 /// from the largest ones until the required amount is reached.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone, Copy)]
 pub struct LargestFirstCoinSelection;
 
 impl<D: Database> CoinSelectionAlgorithm<D> for LargestFirstCoinSelection {
     fn coin_select(
         &self,
         _database: &D,
-        required_utxos: Vec<(UTXO, usize)>,
-        mut optional_utxos: Vec<(UTXO, usize)>,
+        required_utxos: Vec<WeightedUtxo>,
+        mut optional_utxos: Vec<WeightedUtxo>,
         fee_rate: FeeRate,
         amount_needed: u64,
         mut fee_amount: f32,
@@ -188,7 +202,7 @@ impl<D: Database> CoinSelectionAlgorithm<D> for LargestFirstCoinSelection {
         // We put the "required UTXOs" first and make sure the optional UTXOs are sorted,
         // initially smallest to largest, before being reversed with `.rev()`.
         let utxos = {
-            optional_utxos.sort_unstable_by_key(|(utxo, _)| utxo.txout.value);
+            optional_utxos.sort_unstable_by_key(|wu| wu.utxo.txout().value);
             required_utxos
                 .into_iter()
                 .map(|utxo| (true, utxo))
@@ -201,18 +215,19 @@ impl<D: Database> CoinSelectionAlgorithm<D> for LargestFirstCoinSelection {
         let selected = utxos
             .scan(
                 (&mut selected_amount, &mut fee_amount),
-                |(selected_amount, fee_amount), (must_use, (utxo, weight))| {
+                |(selected_amount, fee_amount), (must_use, weighted_utxo)| {
                     if must_use || **selected_amount < amount_needed + (fee_amount.ceil() as u64) {
-                        **fee_amount += calc_fee_bytes(TXIN_BASE_WEIGHT + weight);
-                        **selected_amount += utxo.txout.value;
+                        **fee_amount +=
+                            calc_fee_bytes(TXIN_BASE_WEIGHT + weighted_utxo.satisfaction_weight);
+                        **selected_amount += weighted_utxo.utxo.txout().value;
 
                         log::debug!(
                             "Selected {}, updated fee_amount = `{}`",
-                            utxo.outpoint,
+                            weighted_utxo.utxo.outpoint(),
                             fee_amount
                         );
 
-                        Some(utxo)
+                        Some(weighted_utxo.utxo)
                     } else {
                         None
                     }
@@ -231,7 +246,6 @@ impl<D: Database> CoinSelectionAlgorithm<D> for LargestFirstCoinSelection {
         Ok(CoinSelectionResult {
             selected,
             fee_amount,
-            selected_amount,
         })
     }
 }
@@ -239,9 +253,7 @@ impl<D: Database> CoinSelectionAlgorithm<D> for LargestFirstCoinSelection {
 #[derive(Debug, Clone)]
 // Adds fee information to an UTXO.
 struct OutputGroup {
-    utxo: UTXO,
-    // weight needed to satisfy the UTXO, as described in `Descriptor::max_satisfaction_weight`
-    satisfaction_weight: usize,
+    weighted_utxo: WeightedUtxo,
     // Amount of fees for spending a certain utxo, calculated using a certain FeeRate
     fee: f32,
     // The effective value of the UTXO, i.e., the utxo value minus the fee for spending it
@@ -249,12 +261,12 @@ struct OutputGroup {
 }
 
 impl OutputGroup {
-    fn new(utxo: UTXO, satisfaction_weight: usize, fee_rate: FeeRate) -> Self {
-        let fee = (TXIN_BASE_WEIGHT + satisfaction_weight) as f32 / 4.0 * fee_rate.as_sat_vb();
-        let effective_value = utxo.txout.value as i64 - fee.ceil() as i64;
+    fn new(weighted_utxo: WeightedUtxo, fee_rate: FeeRate) -> Self {
+        let fee = (TXIN_BASE_WEIGHT + weighted_utxo.satisfaction_weight) as f32 / 4.0
+            * fee_rate.as_sat_vb();
+        let effective_value = weighted_utxo.utxo.txout().value as i64 - fee.ceil() as i64;
         OutputGroup {
-            utxo,
-            satisfaction_weight,
+            weighted_utxo,
             effective_value,
             fee,
         }
@@ -291,8 +303,8 @@ impl<D: Database> CoinSelectionAlgorithm<D> for BranchAndBoundCoinSelection {
     fn coin_select(
         &self,
         _database: &D,
-        required_utxos: Vec<(UTXO, usize)>,
-        optional_utxos: Vec<(UTXO, usize)>,
+        required_utxos: Vec<WeightedUtxo>,
+        optional_utxos: Vec<WeightedUtxo>,
         fee_rate: FeeRate,
         amount_needed: u64,
         fee_amount: f32,
@@ -300,7 +312,7 @@ impl<D: Database> CoinSelectionAlgorithm<D> for BranchAndBoundCoinSelection {
         // Mapping every (UTXO, usize) to an output group
         let required_utxos: Vec<OutputGroup> = required_utxos
             .into_iter()
-            .map(|u| OutputGroup::new(u.0, u.1, fee_rate))
+            .map(|u| OutputGroup::new(u, fee_rate))
             .collect();
 
         // Mapping every (UTXO, usize) to an output group.
@@ -308,7 +320,7 @@ impl<D: Database> CoinSelectionAlgorithm<D> for BranchAndBoundCoinSelection {
         // adding them is more than their value
         let optional_utxos: Vec<OutputGroup> = optional_utxos
             .into_iter()
-            .map(|u| OutputGroup::new(u.0, u.1, fee_rate))
+            .map(|u| OutputGroup::new(u, fee_rate))
             .filter(|u| u.effective_value > 0)
             .collect();
 
@@ -507,14 +519,12 @@ impl BranchAndBoundCoinSelection {
         fee_amount += selected_utxos.iter().map(|u| u.fee).sum::<f32>();
         let selected = selected_utxos
             .into_iter()
-            .map(|u| u.utxo)
+            .map(|u| u.weighted_utxo.utxo)
             .collect::<Vec<_>>();
-        let selected_amount = selected.iter().map(|u| u.txout.value).sum();
 
         CoinSelectionResult {
             selected,
             fee_amount,
-            selected_amount,
         }
     }
 }
@@ -535,10 +545,11 @@ mod test {
 
     const P2WPKH_WITNESS_SIZE: usize = 73 + 33 + 2;
 
-    fn get_test_utxos() -> Vec<(UTXO, usize)> {
+    fn get_test_utxos() -> Vec<WeightedUtxo> {
         vec![
-            (
-                UTXO {
+            WeightedUtxo {
+                satisfaction_weight: P2WPKH_WITNESS_SIZE,
+                utxo: Utxo::Local(LocalUtxo {
                     outpoint: OutPoint::from_str(
                         "ebd9813ecebc57ff8f30797de7c205e3c7498ca950ea4341ee51a685ff2fa30a:0",
                     )
@@ -548,11 +559,11 @@ mod test {
                         script_pubkey: Script::new(),
                     },
                     keychain: KeychainKind::External,
-                },
-                P2WPKH_WITNESS_SIZE,
-            ),
-            (
-                UTXO {
+                }),
+            },
+            WeightedUtxo {
+                satisfaction_weight: P2WPKH_WITNESS_SIZE,
+                utxo: Utxo::Local(LocalUtxo {
                     outpoint: OutPoint::from_str(
                         "65d92ddff6b6dc72c89624a6491997714b90f6004f928d875bc0fd53f264fa85:0",
                     )
@@ -562,17 +573,17 @@ mod test {
                         script_pubkey: Script::new(),
                     },
                     keychain: KeychainKind::Internal,
-                },
-                P2WPKH_WITNESS_SIZE,
-            ),
+                }),
+            },
         ]
     }
 
-    fn generate_random_utxos(rng: &mut StdRng, utxos_number: usize) -> Vec<(UTXO, usize)> {
+    fn generate_random_utxos(rng: &mut StdRng, utxos_number: usize) -> Vec<WeightedUtxo> {
         let mut res = Vec::new();
         for _ in 0..utxos_number {
-            res.push((
-                UTXO {
+            res.push(WeightedUtxo {
+                satisfaction_weight: P2WPKH_WITNESS_SIZE,
+                utxo: Utxo::Local(LocalUtxo {
                     outpoint: OutPoint::from_str(
                         "ebd9813ecebc57ff8f30797de7c205e3c7498ca950ea4341ee51a685ff2fa30a:0",
                     )
@@ -582,16 +593,16 @@ mod test {
                         script_pubkey: Script::new(),
                     },
                     keychain: KeychainKind::External,
-                },
-                P2WPKH_WITNESS_SIZE,
-            ));
+                }),
+            });
         }
         res
     }
 
-    fn generate_same_value_utxos(utxos_value: u64, utxos_number: usize) -> Vec<(UTXO, usize)> {
-        let utxo = (
-            UTXO {
+    fn generate_same_value_utxos(utxos_value: u64, utxos_number: usize) -> Vec<WeightedUtxo> {
+        let utxo = WeightedUtxo {
+            satisfaction_weight: P2WPKH_WITNESS_SIZE,
+            utxo: Utxo::Local(LocalUtxo {
                 outpoint: OutPoint::from_str(
                     "ebd9813ecebc57ff8f30797de7c205e3c7498ca950ea4341ee51a685ff2fa30a:0",
                 )
@@ -601,18 +612,18 @@ mod test {
                     script_pubkey: Script::new(),
                 },
                 keychain: KeychainKind::External,
-            },
-            P2WPKH_WITNESS_SIZE,
-        );
+            }),
+        };
         vec![utxo; utxos_number]
     }
 
-    fn sum_random_utxos(mut rng: &mut StdRng, utxos: &mut Vec<(UTXO, usize)>) -> u64 {
+    fn sum_random_utxos(mut rng: &mut StdRng, utxos: &mut Vec<WeightedUtxo>) -> u64 {
         let utxos_picked_len = rng.gen_range(2, utxos.len() / 2);
         utxos.shuffle(&mut rng);
         utxos[..utxos_picked_len]
             .iter()
-            .fold(0, |acc, x| acc + x.0.txout.value)
+            .map(|u| u.utxo.txout().value)
+            .sum()
     }
 
     #[test]
@@ -632,7 +643,7 @@ mod test {
             .unwrap();
 
         assert_eq!(result.selected.len(), 2);
-        assert_eq!(result.selected_amount, 300_000);
+        assert_eq!(result.selected_amount(), 300_000);
         assert_eq!(result.fee_amount, 186.0);
     }
 
@@ -653,7 +664,7 @@ mod test {
             .unwrap();
 
         assert_eq!(result.selected.len(), 2);
-        assert_eq!(result.selected_amount, 300_000);
+        assert_eq!(result.selected_amount(), 300_000);
         assert_eq!(result.fee_amount, 186.0);
     }
 
@@ -674,7 +685,7 @@ mod test {
             .unwrap();
 
         assert_eq!(result.selected.len(), 1);
-        assert_eq!(result.selected_amount, 200_000);
+        assert_eq!(result.selected_amount(), 200_000);
         assert_eq!(result.fee_amount, 118.0);
     }
 
@@ -734,7 +745,7 @@ mod test {
             .unwrap();
 
         assert_eq!(result.selected.len(), 3);
-        assert_eq!(result.selected_amount, 300_000);
+        assert_eq!(result.selected_amount(), 300_000);
         assert_eq!(result.fee_amount, 254.0);
     }
 
@@ -755,7 +766,7 @@ mod test {
             .unwrap();
 
         assert_eq!(result.selected.len(), 2);
-        assert_eq!(result.selected_amount, 300_000);
+        assert_eq!(result.selected_amount(), 300_000);
         assert_eq!(result.fee_amount, 186.0);
     }
 
@@ -812,7 +823,7 @@ mod test {
             .unwrap();
 
         assert_eq!(result.selected.len(), 1);
-        assert_eq!(result.selected_amount, 100_000);
+        assert_eq!(result.selected_amount(), 100_000);
         let input_size = (TXIN_BASE_WEIGHT as f32) / 4.0 + P2WPKH_WITNESS_SIZE as f32 / 4.0;
         let epsilon = 0.5;
         assert!((1.0 - (result.fee_amount / input_size)).abs() < epsilon);
@@ -837,7 +848,7 @@ mod test {
                     0.0,
                 )
                 .unwrap();
-            assert_eq!(result.selected_amount, target_amount);
+            assert_eq!(result.selected_amount(), target_amount);
         }
     }
 
@@ -847,7 +858,7 @@ mod test {
         let fee_rate = FeeRate::from_sat_per_vb(10.0);
         let utxos: Vec<OutputGroup> = get_test_utxos()
             .into_iter()
-            .map(|u| OutputGroup::new(u.0, u.1, fee_rate))
+            .map(|u| OutputGroup::new(u, fee_rate))
             .collect();
 
         let curr_available_value = utxos
@@ -875,7 +886,7 @@ mod test {
         let fee_rate = FeeRate::from_sat_per_vb(10.0);
         let utxos: Vec<OutputGroup> = generate_same_value_utxos(100_000, 100_000)
             .into_iter()
-            .map(|u| OutputGroup::new(u.0, u.1, fee_rate))
+            .map(|u| OutputGroup::new(u, fee_rate))
             .collect();
 
         let curr_available_value = utxos
@@ -908,7 +919,7 @@ mod test {
 
         let utxos: Vec<_> = generate_same_value_utxos(50_000, 10)
             .into_iter()
-            .map(|u| OutputGroup::new(u.0, u.1, fee_rate))
+            .map(|u| OutputGroup::new(u, fee_rate))
             .collect();
 
         let curr_value = 0;
@@ -933,7 +944,7 @@ mod test {
             )
             .unwrap();
         assert_eq!(result.fee_amount, 186.0);
-        assert_eq!(result.selected_amount, 100_000);
+        assert_eq!(result.selected_amount(), 100_000);
     }
 
     // TODO: bnb() function should be optimized, and this test should be done with more utxos
@@ -946,7 +957,7 @@ mod test {
         for _ in 0..200 {
             let optional_utxos: Vec<_> = generate_random_utxos(&mut rng, 40)
                 .into_iter()
-                .map(|u| OutputGroup::new(u.0, u.1, fee_rate))
+                .map(|u| OutputGroup::new(u, fee_rate))
                 .collect();
 
             let curr_value = 0;
@@ -969,7 +980,7 @@ mod test {
                     0.0,
                 )
                 .unwrap();
-            assert_eq!(result.selected_amount, target_amount);
+            assert_eq!(result.selected_amount(), target_amount);
         }
     }
 
@@ -983,7 +994,7 @@ mod test {
         let fee_rate = FeeRate::from_sat_per_vb(1.0);
         let utxos: Vec<OutputGroup> = utxos
             .into_iter()
-            .map(|u| OutputGroup::new(u.0, u.1, fee_rate))
+            .map(|u| OutputGroup::new(u, fee_rate))
             .collect();
 
         let result = BranchAndBoundCoinSelection::default().single_random_draw(
@@ -994,7 +1005,7 @@ mod test {
             50.0,
         );
 
-        assert!(result.selected_amount > target_amount);
+        assert!(result.selected_amount() > target_amount);
         assert_eq!(
             result.fee_amount,
             50.0 + result.selected.len() as f32 * 68.0
