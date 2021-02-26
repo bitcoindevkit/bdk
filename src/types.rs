@@ -69,12 +69,12 @@ impl FeeRate {
     }
 
     /// Create a new instance of [`FeeRate`] given a float fee rate in satoshi/vbyte
-    pub fn from_sat_per_vb(sat_per_vb: f32) -> Self {
+    pub const fn from_sat_per_vb(sat_per_vb: f32) -> Self {
         FeeRate(sat_per_vb)
     }
 
     /// Create a new [`FeeRate`] with the default min relay fee value
-    pub fn default_min_relay_fee() -> Self {
+    pub const fn default_min_relay_fee() -> Self {
         FeeRate(1.0)
     }
 
@@ -178,4 +178,15 @@ pub struct TransactionDetails {
     pub fees: u64,
     /// Confirmed in block height, `None` means unconfirmed
     pub height: Option<u32>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn can_store_feerate_in_const() {
+        const _MY_RATE: FeeRate = FeeRate::from_sat_per_vb(10.0);
+        const _MIN_RELAY: FeeRate = FeeRate::default_min_relay_fee();
+    }
 }

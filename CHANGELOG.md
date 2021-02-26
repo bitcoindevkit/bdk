@@ -10,6 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### Changed
 - Updated `electrum-client` to version `0.7`
 
+### Wallet
+#### Changed
+- `FeeRate` constructors `from_sat_per_vb` and `default_min_relay_fee` are now `const` functions
+
 ## [v0.4.0] - [v0.3.0]
 
 ### Keys
