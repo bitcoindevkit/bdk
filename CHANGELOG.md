@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Misc
+#### Changed
+- Updated `electrum-client` to version `0.7`
+
 ## [v0.4.0] - [v0.3.0]
 
 ### Keys
