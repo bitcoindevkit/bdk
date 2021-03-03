@@ -8,7 +8,7 @@ repository = "https://github.com/bitcoindevkit/bdk"
 documentation = "https://docs.rs/bdk-testutils-macros"
 description = "Supporting testing macros for `bdk`"
 keywords = ["bdk"]
-license = "MIT"
+license = "MIT OR Apache-2.0"
 
 [lib]
 proc-macro = true
