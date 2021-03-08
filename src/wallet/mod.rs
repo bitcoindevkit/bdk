@@ -967,6 +967,20 @@ where
         Ok(index)
     }
 
+    fn fetch_index(&self, keychain: KeychainKind) -> Result<u32, Error> {
+        let (descriptor, keychain) = self._get_descriptor_for_keychain(keychain);
+        let index = match descriptor.is_deriveable() {
+            false => Some(0),
+            true => self.database.borrow_mut().get_last_index(keychain)?,
+        };
+
+        if let Some(i) = index {
+            Ok(i)
+        } else {
+            self.fetch_and_increment_index(keychain)
+        }
+    }
+
     fn cache_addresses(
         &self,
         keychain: KeychainKind,
