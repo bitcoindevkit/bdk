@@ -177,6 +177,39 @@ where
             .map_err(|_| Error::ScriptDoesntHaveAddressForm)
     }
 
+    /// Return the the last previously generated address if it has not been used in a received
+    /// transaction. Otherwise return a new address using [`Wallet::get_new_address`].
+    ///
+    /// Use with caution, if the wallet has not yet detected an address has been used it could
+    /// return an already used address. This function is primarily meant for situations where the
+    /// caller is untrusted; for example when generating donation addresses on-demand for a public
+    /// web page.
+    ///
+    pub fn get_unused_address(&self) -> Result<Address, Error> {
+        let index = self.fetch_index(KeychainKind::External)?;
+
+        let script = self
+            .descriptor
+            .as_derived(index, &self.secp)
+            .script_pubkey();
+
+        let found_used = self
+            .list_transactions(true)?
+            .iter()
+            .flat_map(|tx_details| tx_details.transaction.as_ref())
+            .flat_map(|tx| tx.output.iter())
+            .any(|o| o.script_pubkey == script);
+
+        if found_used {
+            self.get_new_address()
+        } else {
+            self.descriptor
+                .as_derived(index, &self.secp)
+                .address(self.network)
+                .map_err(|_| Error::ScriptDoesntHaveAddressForm)
+        }
+    }
+
     /// Return whether or not a `script` is part of this wallet (either internal or external)
     pub fn is_mine(&self, script: &Script) -> Result<bool, Error> {
         self.database.borrow().is_mine(script)
@@ -3470,5 +3503,51 @@ mod test {
             psbt.inputs[0].final_script_witness.is_some(),
             "should finalized input it signed"
         )
+    }
+
+    #[test]
+    fn test_unused_address() {
+        let db = MemoryDatabase::new();
+        let wallet = Wallet::new_offline("wpkh(tpubEBr4i6yk5nf5DAaJpsi9N2pPYBeJ7fZ5Z9rmN4977iYLCGco1VyjB9tvvuvYtfZzjD5A8igzgw3HeWeeKFmanHYqksqZXYXGsw5zjnj7KM9/*)", 
+                                         None, Network::Testnet, db).unwrap();
+
+        assert_eq!(
+            wallet.get_unused_address().unwrap().to_string(),
+            "tb1q6yn66vajcctph75pvylgkksgpp6nq04ppwct9a"
+        );
+        assert_eq!(
+            wallet.get_unused_address().unwrap().to_string(),
+            "tb1q6yn66vajcctph75pvylgkksgpp6nq04ppwct9a"
+        );
+    }
+
+    #[test]
+    fn test_next_unused_address() {
+        let descriptor = "wpkh(tpubEBr4i6yk5nf5DAaJpsi9N2pPYBeJ7fZ5Z9rmN4977iYLCGco1VyjB9tvvuvYtfZzjD5A8igzgw3HeWeeKFmanHYqksqZXYXGsw5zjnj7KM9/*)";
+        let descriptors = testutils!(@descriptors (descriptor));
+        let wallet = Wallet::new_offline(
+            &descriptors.0,
+            None,
+            Network::Testnet,
+            MemoryDatabase::new(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            wallet.get_unused_address().unwrap().to_string(),
+            "tb1q6yn66vajcctph75pvylgkksgpp6nq04ppwct9a"
+        );
+
+        // use the above address
+        crate::populate_test_db!(
+            wallet.database.borrow_mut(),
+            testutils! (@tx ( (@external descriptors, 0) => 25_000 ) (@confirmations 1)),
+            Some(100),
+        );
+
+        assert_eq!(
+            wallet.get_unused_address().unwrap().to_string(),
+            "tb1q4er7kxx6sssz3q7qp7zsqsdx4erceahhax77d7"
+        );
     }
 }

@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### Changed
 - `FeeRate` constructors `from_sat_per_vb` and `default_min_relay_fee` are now `const` functions
 
+#### Added
+- Added `get_unused_address()` which returns the last generated address if it has not been used or if used in a received transaction returns a new address
+
 ## [v0.4.0] - [v0.3.0]
 
 ### Keys
