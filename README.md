@@ -67,6 +67,7 @@ fn main() -> Result<(), bdk::Error> {
 
 ```rust
 use bdk::{Wallet, database::MemoryDatabase};
+use bdk::wallet::AddressIndex::New;
 
 fn main() -> Result<(), bdk::Error> {
     let wallet = Wallet::new_offline(
@@ -76,9 +77,9 @@ fn main() -> Result<(), bdk::Error> {
         MemoryDatabase::default(),
     )?;
 
-    println!("Address #0: {}", wallet.get_new_address()?);
-    println!("Address #1: {}", wallet.get_new_address()?);
-    println!("Address #2: {}", wallet.get_new_address()?);
+    println!("Address #0: {}", wallet.get_address(New)?);
+    println!("Address #1: {}", wallet.get_address(New)?);
+    println!("Address #2: {}", wallet.get_address(New)?);
 
     Ok(())
 }
@@ -92,6 +93,7 @@ use bdk::database::MemoryDatabase;
 use bdk::blockchain::{noop_progress, ElectrumBlockchain};
 
 use bdk::electrum_client::Client;
+use bdk::wallet::AddressIndex::New;
 
 use bitcoin::consensus::serialize;
 
@@ -107,7 +109,7 @@ fn main() -> Result<(), bdk::Error> {
 
     wallet.sync(noop_progress(), None)?;
 
-    let send_to = wallet.get_new_address()?;
+    let send_to = wallet.get_address(New)?;
     let (psbt, details) = {
         let mut builder = wallet.build_tx();
         builder

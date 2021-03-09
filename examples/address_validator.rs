@@ -18,6 +18,7 @@ use bdk::wallet::address_validator::{AddressValidator, AddressValidatorError};
 use bdk::KeychainKind;
 use bdk::Wallet;
 
+use bdk::wallet::AddressIndex::New;
 use bitcoin::hashes::hex::FromHex;
 use bitcoin::util::bip32::Fingerprint;
 use bitcoin::{Network, Script};
@@ -52,9 +53,9 @@ fn main() -> Result<(), bdk::Error> {
 
     wallet.add_address_validator(Arc::new(DummyValidator));
 
-    wallet.get_new_address()?;
-    wallet.get_new_address()?;
-    wallet.get_new_address()?;
+    wallet.get_address(New)?;
+    wallet.get_address(New)?;
+    wallet.get_address(New)?;
 
     Ok(())
 }

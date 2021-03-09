@@ -28,6 +28,7 @@ use miniscript::policy::Concrete;
 use miniscript::Descriptor;
 
 use bdk::database::memory::MemoryDatabase;
+use bdk::wallet::AddressIndex::New;
 use bdk::{KeychainKind, Wallet};
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -90,7 +91,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .unwrap_or(Network::Testnet);
     let wallet = Wallet::new_offline(&format!("{}", descriptor), None, network, database)?;
 
-    info!("... First address: {}", wallet.get_new_address()?);
+    info!("... First address: {}", wallet.get_address(New)?);
 
     if matches.is_present("parsed_policy") {
         let spending_policy = wallet.policies(KeychainKind::External)?;

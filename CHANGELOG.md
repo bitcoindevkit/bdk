@@ -13,9 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Wallet
 #### Changed
 - `FeeRate` constructors `from_sat_per_vb` and `default_min_relay_fee` are now `const` functions
+- `get_new_address()` refactored to `get_address(AddressIndex::New)` to support different `get_address()` index selection strategies
 
 #### Added
-- Added `get_unused_address()` which returns the last generated address if it has not been used or if used in a received transaction returns a new address
+- Added `get_address(AddressIndex::LastUnused)` which returns the last derived address if it has not been used or if used in a received transaction returns a new address
+- Added `get_address(AddressIndex::Peek(u32))` which returns a derived address for a specified descriptor index
 
 ## [v0.4.0] - [v0.3.0]
 

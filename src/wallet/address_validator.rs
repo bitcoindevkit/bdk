@@ -20,7 +20,7 @@
 //! An address validator can be attached to a [`Wallet`](super::Wallet) by using the
 //! [`Wallet::add_address_validator`](super::Wallet::add_address_validator) method, and
 //! whenever a new address is generated (either explicitly by the user with
-//! [`Wallet::get_new_address`](super::Wallet::get_new_address) or internally to create a change
+//! [`Wallet::get_address`](super::Wallet::get_address) or internally to create a change
 //! address) all the attached validators will be polled, in sequence. All of them must complete
 //! successfully to continue.
 //!
@@ -32,6 +32,7 @@
 //! # use bdk::address_validator::*;
 //! # use bdk::database::*;
 //! # use bdk::*;
+//! # use bdk::wallet::AddressIndex::New;
 //! #[derive(Debug)]
 //! struct PrintAddressAndContinue;
 //!
@@ -57,7 +58,7 @@
 //! let mut wallet = Wallet::new_offline(descriptor, None, Network::Testnet, MemoryDatabase::default())?;
 //! wallet.add_address_validator(Arc::new(PrintAddressAndContinue));
 //!
-//! let address = wallet.get_new_address()?;
+//! let address = wallet.get_address(New)?;
 //! println!("Address: {}", address);
 //! # Ok::<(), bdk::Error>(())
 //! ```
@@ -115,6 +116,7 @@ mod test {
 
     use super::*;
     use crate::wallet::test::{get_funded_wallet, get_test_wpkh};
+    use crate::wallet::AddressIndex::New;
 
     #[derive(Debug)]
     struct TestValidator;
@@ -135,7 +137,7 @@ mod test {
         let (mut wallet, _, _) = get_funded_wallet(get_test_wpkh());
         wallet.add_address_validator(Arc::new(TestValidator));
 
-        wallet.get_new_address().unwrap();
+        wallet.get_address(New).unwrap();
     }
 
     #[test]

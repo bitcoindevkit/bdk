@@ -71,6 +71,7 @@ pub fn bdk_blockchain_tests(attr: TokenStream, item: TokenStream) -> TokenStream
                 use #root_ident::database::MemoryDatabase;
                 use #root_ident::types::KeychainKind;
                 use #root_ident::{Wallet, TxBuilder, FeeRate};
+                use #root_ident::wallet::AddressIndex::New;
 
                 use super::*;
 
@@ -532,7 +533,7 @@ pub fn bdk_blockchain_tests(attr: TokenStream, item: TokenStream) -> TokenStream
                 #[serial]
                 fn test_sync_receive_coinbase() {
                     let (wallet, descriptors, mut test_client) = init_single_sig();
-                    let wallet_addr = wallet.get_new_address().unwrap();
+                    let wallet_addr = wallet.get_address(New).unwrap();
 
                     wallet.sync(noop_progress(), None).unwrap();
                     assert_eq!(wallet.get_balance().unwrap(), 0);
