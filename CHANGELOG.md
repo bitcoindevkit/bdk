@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Descriptor
+#### Added
+- Added ability to analyze a `PSBT` to check which and how many signatures are already available
+
 ### Misc
 #### Changed
 - Updated `electrum-client` to version `0.7`

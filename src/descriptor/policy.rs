@@ -452,7 +452,7 @@ pub struct Policy {
     /// Type of this policy node
     #[serde(flatten)]
     pub item: SatisfiableItem,
-    /// How a much given PSBT already satisfies this polcy node **(currently unused)**
+    /// How much a given PSBT already satisfies this policy node in terms of signatures
     pub satisfaction: Satisfaction,
     /// How the wallet's descriptor can satisfy this policy node
     pub contribution: Satisfaction,
@@ -712,7 +712,7 @@ impl Policy {
         }
     }
 
-    /// fill self.satisfaction with what we already have in the PSBT
+    /// fill `self.satisfaction` with the signatures we already have in the PSBT
     pub fn fill_satisfactions(
         &mut self,
         psbt: &PSBT,
@@ -744,6 +744,7 @@ impl Policy {
             let mut index = 0;
             derived_desc.for_each_key(|k| {
                 if satisfier.lookup_sig(&k.as_key().to_public_key()).is_some() {
+                    //TODO check signature verifies
                     let _ = self.satisfaction.add(
                         &Satisfaction::Complete {
                             condition: Default::default(),
