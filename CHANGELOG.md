@@ -17,7 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Added
 - Added `get_address(AddressIndex::LastUnused)` which returns the last derived address if it has not been used or if used in a received transaction returns a new address
-- Added `get_address(AddressIndex::Peek(u32))` which returns a derived address for a specified descriptor index
+- Added `get_address(AddressIndex::Peek(u32))` which returns a derived address for a specified descriptor index but does not change the current index
+- Added `get_address(AddressIndex::Reset(u32))` which returns a derived address for a specified descriptor index and resets current index to the given value
 
 ## [v0.4.0] - [v0.3.0]
 

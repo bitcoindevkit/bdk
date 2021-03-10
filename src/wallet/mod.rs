@@ -163,15 +163,9 @@ where
 }
 
 /// The address index selection strategy to use to derived an address from the wallet's external
-/// descriptor. See [`Wallet::get_address`].
+/// descriptor. See [`Wallet::get_address`]. If you're unsure which one to use use `WalletIndex::New`.
 #[derive(Debug)]
 pub enum AddressIndex {
-    /// Return the address for a specific descriptor index. Does not change the current descriptor
-    /// index used by `AddressIndex::New` and `AddressIndex::LastUsed`.
-    ///
-    /// Use with caution, if an index is given that is less than the current descriptor index
-    /// then the returned address may have already been used.
-    Peek(u32),
     /// Return a new address after incrementing the current descriptor index.
     New,
     /// Return the address for the current descriptor index if it has not been used in a received
@@ -182,6 +176,21 @@ pub enum AddressIndex {
     /// caller is untrusted; for example when deriving donation addresses on-demand for a public
     /// web page.
     LastUnused,
+    /// Return the address for a specific descriptor index. Does not change the current descriptor
+    /// index used by `AddressIndex::New` and `AddressIndex::LastUsed`.
+    ///
+    /// Use with caution, if an index is given that is less than the current descriptor index
+    /// then the returned address may have already been used.
+    Peek(u32),
+    /// Return the address for a specific descriptor index and reset the current descriptor index
+    /// used by `AddressIndex::New` and `AddressIndex::LastUsed` to this value.
+    ///
+    /// Use with caution, if an index is given that is less than the current descriptor index
+    /// then the returned address and subsequent addresses returned by calls to `AddressIndex::New`
+    /// and `AddressIndex::LastUsed` may have already been used. Also if the index is reset to a
+    /// value earlier than the [`crate::blockchain::Blockchain`] stop_gap (default is 20) then a
+    /// larger stop_gap should be used to monitor for all possibly used addresses.  
+    Reset(u32),
 }
 
 // offline actions, always available
@@ -189,14 +198,6 @@ impl<B, D> Wallet<B, D>
 where
     D: BatchDatabase,
 {
-    // Return derived address for the external descriptor at a specific index
-    fn peek_address(&self, index: u32) -> Result<Address, Error> {
-        self.descriptor
-            .as_derived(index, &self.secp)
-            .address(self.network)
-            .map_err(|_| Error::ScriptDoesntHaveAddressForm)
-    }
-
     // Return a newly derived address using the external descriptor
     fn get_new_address(&self) -> Result<Address, Error> {
         let incremented_index = self.fetch_and_increment_index(KeychainKind::External)?;
@@ -232,14 +233,34 @@ where
         }
     }
 
+    // Return derived address for the external descriptor at a specific index
+    fn peek_address(&self, index: u32) -> Result<Address, Error> {
+        self.descriptor
+            .as_derived(index, &self.secp)
+            .address(self.network)
+            .map_err(|_| Error::ScriptDoesntHaveAddressForm)
+    }
+
+    // Return derived address for the external descriptor at a specific index and reset current
+    // address index
+    fn reset_address(&self, index: u32) -> Result<Address, Error> {
+        self.set_index(KeychainKind::External, index)?;
+
+        self.descriptor
+            .as_derived(index, &self.secp)
+            .address(self.network)
+            .map_err(|_| Error::ScriptDoesntHaveAddressForm)
+    }
+
     /// Return a derived address using the external descriptor, see [`AddressIndex`] for
-    /// available address index selection strategies. If the wallet descriptor is not derivable
+    /// available address index selection strategies. If none of the keys in the descriptor are derivable
     /// (ie. does not end with /*) then the same address will always be returned for any [`AddressIndex`].
     pub fn get_address(&self, address_index: AddressIndex) -> Result<Address, Error> {
         match address_index {
             AddressIndex::New => self.get_new_address(),
             AddressIndex::LastUnused => self.get_unused_address(),
             AddressIndex::Peek(index) => self.peek_address(index),
+            AddressIndex::Reset(index) => self.reset_address(index),
         }
     }
 
@@ -1047,6 +1068,11 @@ where
         }
     }
 
+    fn set_index(&self, keychain: KeychainKind, index: u32) -> Result<(), Error> {
+        self.database.borrow_mut().set_last_index(keychain, index)?;
+        Ok(())
+    }
+
     fn cache_addresses(
         &self,
         keychain: KeychainKind,
@@ -1450,7 +1476,7 @@ mod test {
     use crate::types::KeychainKind;
 
     use super::*;
-    use crate::wallet::AddressIndex::{LastUnused, New, Peek};
+    use crate::wallet::AddressIndex::{LastUnused, New, Peek, Reset};
 
     #[test]
     fn test_cache_addresses_fixed() {
@@ -3637,6 +3663,43 @@ mod test {
         assert_eq!(
             wallet.get_address(Peek(2)).unwrap().to_string(),
             "tb1q4er7kxx6sssz3q7qp7zsqsdx4erceahhax77d7"
+        );
+    }
+
+    #[test]
+    fn test_reset_address_index() {
+        let db = MemoryDatabase::new();
+        let wallet = Wallet::new_offline("wpkh(tpubEBr4i6yk5nf5DAaJpsi9N2pPYBeJ7fZ5Z9rmN4977iYLCGco1VyjB9tvvuvYtfZzjD5A8igzgw3HeWeeKFmanHYqksqZXYXGsw5zjnj7KM9/*)",
+                                         None, Network::Testnet, db).unwrap();
+
+        // new index 0
+        assert_eq!(
+            wallet.get_address(New).unwrap().to_string(),
+            "tb1q6yn66vajcctph75pvylgkksgpp6nq04ppwct9a"
+        );
+
+        // new index 1
+        assert_eq!(
+            wallet.get_address(New).unwrap().to_string(),
+            "tb1q4er7kxx6sssz3q7qp7zsqsdx4erceahhax77d7"
+        );
+
+        // new index 2
+        assert_eq!(
+            wallet.get_address(New).unwrap().to_string(),
+            "tb1qzntf2mqex4ehwkjlfdyy3ewdlk08qkvkvrz7x2"
+        );
+
+        //  reset index 1 again
+        assert_eq!(
+            wallet.get_address(Reset(1)).unwrap().to_string(),
+            "tb1q4er7kxx6sssz3q7qp7zsqsdx4erceahhax77d7"
+        );
+
+        // new index 2 again
+        assert_eq!(
+            wallet.get_address(New).unwrap().to_string(),
+            "tb1qzntf2mqex4ehwkjlfdyy3ewdlk08qkvkvrz7x2"
         );
     }
 }
