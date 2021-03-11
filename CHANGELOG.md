@@ -75,6 +75,7 @@ final transaction is created by calling `finish` on the builder.
 - Added `WeightedUtxo` to replace floating `(UTXO, usize)`.
 - Added `Utxo` enum to incorporate both local utxos and foreign utxos
 - Added `TxBuilder::add_foreign_utxo` which allows adding a utxo external to the wallet.
+- Added `Wallet::get_psbt_input` for sharing, e.g. for joint transactions
 
 ### CLI
 #### Changed
