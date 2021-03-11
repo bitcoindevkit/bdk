@@ -3317,6 +3317,23 @@ mod test {
     }
 
     #[test]
+    fn test_sign_single_xprv_with_master_fingerprint_and_path() {
+        let (wallet, _, _) = get_funded_wallet("wpkh([d34db33f/84h/1h/0h]tprv8ZgxMBicQKsPd3EupYiPRhaMooHKUHJxNsTfYuScep13go8QFfHdtkG9nRkFGb7busX4isf6X9dURGCoKgitaApQ6MupRhZMcELAxTBRJgS/*)");
+        let addr = wallet.get_new_address().unwrap();
+        let mut builder = wallet.build_tx();
+        builder
+            .set_single_recipient(addr.script_pubkey())
+            .drain_wallet();
+        let (psbt, _) = builder.finish().unwrap();
+
+        let (signed_psbt, finalized) = wallet.sign(psbt, None).unwrap();
+        assert_eq!(finalized, true);
+
+        let extracted = signed_psbt.extract_tx();
+        assert_eq!(extracted.input[0].witness.len(), 2);
+    }
+
+    #[test]
     fn test_sign_single_xprv_bip44_path() {
         let (wallet, _, _) = get_funded_wallet("wpkh(tprv8ZgxMBicQKsPd3EupYiPRhaMooHKUHJxNsTfYuScep13go8QFfHdtkG9nRkFGb7busX4isf6X9dURGCoKgitaApQ6MupRhZMcELAxTBRJgS/44'/0'/0'/0/*)");
         let addr = wallet.get_new_address().unwrap();
