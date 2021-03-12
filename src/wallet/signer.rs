@@ -225,18 +225,8 @@ impl Signer for DescriptorXKey<ExtendedPrivKey> {
         let derived_key = match self.origin.clone() {
             Some((_fingerprint, origin_path)) => {
                 let deriv_path = DerivationPath::from(
-                    full_path
-                        .into_iter()
-                        .enumerate()
-                        .filter_map(|(i, child)| {
-                            if i >= origin_path.len() {
-                                Some(child)
-                            } else {
-                                None
-                            }
-                        })
-                        .cloned()
-                        .collect::<Vec<ChildNumber>>(),
+                    &full_path.into_iter().cloned().collect::<Vec<ChildNumber>>()
+                        [origin_path.len()..],
                 );
                 self.xkey.derive_priv(&secp, &deriv_path).unwrap()
             }
