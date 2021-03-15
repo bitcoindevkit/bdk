@@ -92,7 +92,7 @@ use bitcoin::blockdata::opcodes;
 use bitcoin::blockdata::script::Builder as ScriptBuilder;
 use bitcoin::hashes::{hash160, Hash};
 use bitcoin::secp256k1::{Message, Secp256k1};
-use bitcoin::util::bip32::{ExtendedPrivKey, Fingerprint};
+use bitcoin::util::bip32::{ChildNumber, DerivationPath, ExtendedPrivKey, Fingerprint};
 use bitcoin::util::{bip143, psbt};
 use bitcoin::{PrivateKey, Script, SigHash, SigHashType};
 
@@ -206,7 +206,7 @@ impl Signer for DescriptorXKey<ExtendedPrivKey> {
             return Err(SignerError::InputIndexOutOfRange);
         }
 
-        let (public_key, deriv_path) = match psbt.inputs[input_index]
+        let (public_key, full_path) = match psbt.inputs[input_index]
             .bip32_derivation
             .iter()
             .filter_map(|(pk, &(fingerprint, ref path))| {
@@ -222,7 +222,17 @@ impl Signer for DescriptorXKey<ExtendedPrivKey> {
             None => return Ok(()),
         };
 
-        let derived_key = self.xkey.derive_priv(&secp, &deriv_path).unwrap();
+        let derived_key = match self.origin.clone() {
+            Some((_fingerprint, origin_path)) => {
+                let deriv_path = DerivationPath::from(
+                    &full_path.into_iter().cloned().collect::<Vec<ChildNumber>>()
+                        [origin_path.len()..],
+                );
+                self.xkey.derive_priv(&secp, &deriv_path).unwrap()
+            }
+            None => self.xkey.derive_priv(&secp, &full_path).unwrap(),
+        };
+
         if &derived_key.private_key.public_key(&secp) != public_key {
             Err(SignerError::InvalidKey)
         } else {
