@@ -1322,14 +1322,11 @@ where
     ) -> Result<Input, Error> {
         // Try to find the prev_script in our db to figure out if this is internal or external,
         // and the derivation index
-        let (keychain, child) = match self
+        let (keychain, child) = self
             .database
             .borrow()
             .get_path_from_script_pubkey(&utxo.txout.script_pubkey)?
-        {
-            Some(x) => x,
-            None => return Err(Error::UnknownUTXO),
-        };
+            .ok_or(Error::UnknownUTXO)?;
 
         let mut psbt_input = Input {
             sighash_type,
