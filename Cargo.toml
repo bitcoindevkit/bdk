@@ -1,6 +1,6 @@
 [package]
 name = "bdk"
-version = "0.4.1-dev"
+version = "0.5.1-dev"
 edition = "2018"
 authors = ["Alekos Filini <alekos.filini@gmail.com>", "Riccardo Casatta <riccardo@casatta.it>"]
 homepage = "https://bitcoindevkit.org"
@@ -12,7 +12,7 @@ readme = "README.md"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-bdk-macros = "^0.3"
+bdk-macros = "^0.4"
 log = "^0.4"
 miniscript = "5.1"
 bitcoin = { version = "^0.26", features = ["use-serde"] }
@@ -59,8 +59,8 @@ test-electrum = ["electrum"]
 test-md-docs = ["electrum"]
 
 [dev-dependencies]
-bdk-testutils = { path = "./testutils"}
-bdk-testutils-macros = { path = "./testutils-macros"}
+bdk-testutils = "0.4"
+bdk-testutils-macros = "0.4"
 serial_test = "0.4"
 lazy_static = "1.4"
 env_logger = "0.7"

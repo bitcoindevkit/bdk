@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### Added
 - Added ability to analyze a `PSBT` to check which and how many signatures are already available
 
+## [v0.5.0] - [v0.4.0]
+
 ### Misc
 #### Changed
 - Updated `electrum-client` to version `0.7`
@@ -300,3 +302,4 @@ final transaction is created by calling `finish` on the builder.
 [v0.2.0]: https://github.com/bitcoindevkit/bdk/compare/0.1.0-beta.1...v0.2.0
 [v0.3.0]: https://github.com/bitcoindevkit/bdk/compare/v0.2.0...v0.3.0
 [v0.4.0]: https://github.com/bitcoindevkit/bdk/compare/v0.3.0...v0.4.0
+[v0.5.0]: https://github.com/bitcoindevkit/bdk/compare/v0.4.0...v0.5.0
