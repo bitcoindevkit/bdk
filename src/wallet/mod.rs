@@ -46,7 +46,7 @@ pub use utils::IsDust;
 
 use address_validator::AddressValidator;
 use coin_selection::DefaultCoinSelectionAlgorithm;
-use signer::{Signer, SignerOrdering, SignersContainer};
+use signer::{Signer, SignerDetails, SignerOrdering, SignersContainer};
 use tx_builder::{BumpFee, CreateTx, FeePolicy, TxBuilder, TxParams};
 use utils::{check_nlocktime, check_nsequence_rbf, After, Older, SecpCtx, DUST_LIMIT_SATOSHI};
 
@@ -313,7 +313,7 @@ where
         &mut self,
         keychain: KeychainKind,
         ordering: SignerOrdering,
-        signer: Arc<dyn Signer>,
+        signer: Arc<Signer>,
     ) {
         let signers = match keychain {
             KeychainKind::External => Arc::make_mut(&mut self.signers),
@@ -851,26 +851,21 @@ where
     /// assert!(finalized, "we should have signed all the inputs");
     /// # Ok::<(), bdk::Error>(())
     pub fn sign(&self, mut psbt: PSBT, assume_height: Option<u32>) -> Result<(PSBT, bool), Error> {
-        // this helps us doing our job later
-        self.add_input_hd_keypaths(&mut psbt)?;
-
-        for signer in self
-            .signers
-            .signers()
-            .iter()
-            .chain(self.change_signers.signers().iter())
-        {
-            if signer.sign_whole_tx() {
-                signer.sign(&mut psbt, None, &self.secp)?;
-            } else {
-                for index in 0..psbt.inputs.len() {
-                    signer.sign(&mut psbt, Some(index), &self.secp)?;
-                }
+        for signer in self.all_signers() {
+            match signer.as_ref() {
+                Signer::Input(s) => s.sign_mine(&mut psbt, &self.secp)?,
+                Signer::Transaction(s) => s.sign_tx(&mut psbt, &self.secp)?,
             }
         }
-
-        // attempt to finalize
         self.finalize_psbt(psbt, assume_height)
+    }
+
+    fn all_signers(&self) -> Vec<&Arc<Signer>> {
+        let mut signers = self.signers.signers();
+        signers.extend(self.change_signers.signers());
+        signers.sort_by_key(|signer| signer.id(&self.secp));
+        signers.dedup_by_key(|signer| signer.id(&self.secp));
+        signers
     }
 
     /// Return the spending policies for the wallet's descriptor
@@ -1285,9 +1280,6 @@ where
             }
         }
 
-        // probably redundant but it doesn't hurt...
-        self.add_input_hd_keypaths(&mut psbt)?;
-
         // add metadata for the outputs
         for (psbt_output, tx_output) in psbt
             .outputs
@@ -1350,35 +1342,6 @@ where
             }
         }
         Ok(psbt_input)
-    }
-
-    fn add_input_hd_keypaths(&self, psbt: &mut PSBT) -> Result<(), Error> {
-        let mut input_utxos = Vec::with_capacity(psbt.inputs.len());
-        for n in 0..psbt.inputs.len() {
-            input_utxos.push(psbt.get_utxo_for(n).clone());
-        }
-
-        // try to add hd_keypaths if we've already seen the output
-        for (psbt_input, out) in psbt.inputs.iter_mut().zip(input_utxos.iter()) {
-            if let Some(out) = out {
-                if let Some((keychain, child)) = self
-                    .database
-                    .borrow()
-                    .get_path_from_script_pubkey(&out.script_pubkey)?
-                {
-                    debug!("Found descriptor {:?}/{}", keychain, child);
-
-                    // merge hd_keypaths
-                    let desc = self.get_descriptor_for_keychain(keychain);
-                    let mut hd_keypaths = desc
-                        .as_derived(child, &self.secp)
-                        .get_hd_keypaths(&self.secp)?;
-                    psbt_input.bip32_derivation.append(&mut hd_keypaths);
-                }
-            }
-        }
-
-        Ok(())
     }
 }
 
@@ -3552,11 +3515,8 @@ mod test {
         psbt.inputs[0].bip32_derivation.clear();
         assert_eq!(psbt.inputs[0].bip32_derivation.len(), 0);
 
-        let (signed_psbt, finalized) = wallet.sign(psbt, None).unwrap();
-        assert_eq!(finalized, true);
-
-        let extracted = signed_psbt.extract_tx();
-        assert_eq!(extracted.input[0].witness.len(), 2);
+        let (_unsigned_psbt, finalized) = wallet.sign(psbt, None).unwrap();
+        assert_eq!(finalized, false);
     }
 
     #[test]

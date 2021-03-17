@@ -47,25 +47,22 @@
 //!     }
 //! }
 //!
-//! impl Signer for CustomSigner {
+//! impl InputSigner for CustomSigner {
 //!     fn sign(
 //!         &self,
 //!         psbt: &mut psbt::PartiallySignedTransaction,
-//!         input_index: Option<usize>,
+//!         input_index: usize,
 //!         _secp: &Secp256k1<All>,
 //!     ) -> Result<(), SignerError> {
-//!         let input_index = input_index.ok_or(SignerError::InputIndexOutOfRange)?;
 //!         self.device.sign_input(psbt, input_index)?;
 //!
 //!         Ok(())
 //!     }
+//! }
 //!
+//! impl SignerDetails for CustomSigner {
 //!     fn id(&self, _secp: &Secp256k1<All>) -> SignerId {
 //!         self.device.get_id()
-//!     }
-//!
-//!     fn sign_whole_tx(&self) -> bool {
-//!         false
 //!     }
 //! }
 //!
@@ -76,7 +73,7 @@
 //! wallet.add_signer(
 //!     KeychainKind::External,
 //!     SignerOrdering(200),
-//!     Arc::new(custom_signer)
+//!     Arc::new(Signer::Input(Box::new(custom_signer)))
 //! );
 //!
 //! # Ok::<_, bdk::Error>(())
@@ -147,6 +144,10 @@ pub enum SignerError {
     MissingWitnessScript,
     /// The fingerprint and derivation path are missing from the psbt input
     MissingHDKeypath,
+    /// The derivation path in the input can't be derived
+    InvalidHDKeypath,
+    /// Already signed the specified input
+    InputAlreadySigned,
 }
 
 impl fmt::Display for SignerError {
@@ -157,27 +158,33 @@ impl fmt::Display for SignerError {
 
 impl std::error::Error for SignerError {}
 
-/// Trait for signers
-///
-/// This trait can be implemented to provide customized signers to the wallet. For an example see
-/// [`this module`](crate::wallet::signer)'s documentation.
-pub trait Signer: fmt::Debug + Send + Sync {
-    /// Sign a PSBT
-    ///
-    /// The `input_index` argument is only provided if the wallet doesn't declare to sign the whole
-    /// transaction in one go (see [`Signer::sign_whole_tx`]). Otherwise its value is `None` and
-    /// can be ignored.
-    fn sign(
-        &self,
-        psbt: &mut psbt::PartiallySignedTransaction,
-        input_index: Option<usize>,
-        secp: &SecpCtx,
-    ) -> Result<(), SignerError>;
+#[derive(Debug)]
+/// Accomodate Signers that can only sign entire tx's
+pub enum Signer {
+    /// Signer that can sign a specific input
+    Input(Box<dyn InputSigner>),
+    /// Signer that can only sign an entire tx
+    Transaction(Box<dyn TransactionSigner>),
+}
 
-    /// Return whether or not the signer signs the whole transaction in one go instead of every
-    /// input individually
-    fn sign_whole_tx(&self) -> bool;
+impl SignerDetails for Signer {
+    fn id(&self, secp: &SecpCtx) -> SignerId {
+        match self {
+            Signer::Input(s) => s.id(&secp),
+            Signer::Transaction(s) => s.id(&secp),
+        }
+    }
 
+    fn descriptor_secret_key(&self) -> Option<DescriptorSecretKey> {
+        match self {
+            Signer::Input(s) => s.descriptor_secret_key(),
+            Signer::Transaction(s) => s.descriptor_secret_key(),
+        }
+    }
+}
+
+/// Common funcs for signers
+pub trait SignerDetails {
     /// Return the [`SignerId`] for this signer
     ///
     /// The [`SignerId`] can be used to lookup a signer in the [`Wallet`](crate::Wallet)'s signers map or to
@@ -194,34 +201,82 @@ pub trait Signer: fmt::Debug + Send + Sync {
     }
 }
 
-impl Signer for DescriptorXKey<ExtendedPrivKey> {
+/// Signers which can sign a specific input.
+///
+/// This trait and TransactionSigner can be implemented to provide customized signers to the wallet. For an example see
+/// [`this module`](crate::wallet::signer)'s documentation.
+pub trait InputSigner: SignerDetails + fmt::Debug + Send + Sync {
+    /// Add a signature to a PSBT for an input
     fn sign(
         &self,
         psbt: &mut psbt::PartiallySignedTransaction,
-        input_index: Option<usize>,
+        input_index: usize,
+        secp: &SecpCtx,
+    ) -> Result<(), SignerError>;
+
+    /// Add signatures for all signable inputs
+    fn sign_mine(
+        &self,
+        psbt: &mut psbt::PartiallySignedTransaction,
         secp: &SecpCtx,
     ) -> Result<(), SignerError> {
-        let input_index = input_index.unwrap();
-        if input_index >= psbt.inputs.len() {
-            return Err(SignerError::InputIndexOutOfRange);
+        for i in 0..psbt.inputs.len() {
+            match self.sign(psbt, i, secp) {
+                Ok(())
+                | Err(SignerError::MissingHDKeypath)
+                | Err(SignerError::InvalidHDKeypath) => continue,
+                Err(e) => return Err(e),
+            }
         }
+        Ok(())
+    }
+}
 
-        let (public_key, full_path) = match psbt.inputs[input_index]
+/// Trait for signers that can only sign entire tx's
+pub trait TransactionSigner: SignerDetails + fmt::Debug + Send + Sync {
+    /// sign an entire tx
+    fn sign_tx(
+        &self,
+        psbt: &mut psbt::PartiallySignedTransaction,
+        secp: &SecpCtx,
+    ) -> Result<(), SignerError>;
+}
+
+impl<T> TransactionSigner for T
+where
+    T: InputSigner,
+{
+    fn sign_tx(
+        &self,
+        psbt: &mut psbt::PartiallySignedTransaction,
+        secp: &SecpCtx,
+    ) -> Result<(), SignerError> {
+        self.sign_mine(psbt, secp)
+    }
+}
+
+impl InputSigner for DescriptorXKey<ExtendedPrivKey> {
+    fn sign(
+        &self,
+        psbt: &mut psbt::PartiallySignedTransaction,
+        input_index: usize,
+        secp: &SecpCtx,
+    ) -> Result<(), SignerError> {
+        let input = psbt
+            .inputs
+            .get(input_index)
+            .ok_or(SignerError::InputIndexOutOfRange)?;
+        let (public_key, (fingerprint, full_path)) = input
             .bip32_derivation
             .iter()
-            .filter_map(|(pk, &(fingerprint, ref path))| {
-                if self.matches(&(fingerprint, path.clone()), &secp).is_some() {
-                    Some((pk, path))
-                } else {
-                    None
-                }
-            })
             .next()
+            .ok_or(SignerError::MissingHDKeypath)?;
+        if self
+            .matches(&(*fingerprint, full_path.clone()), &secp)
+            .is_none()
         {
-            Some((pk, full_path)) => (pk, full_path.clone()),
-            None => return Ok(()),
-        };
-
+            return Err(SignerError::InvalidHDKeypath);
+        }
         let derived_key = match self.origin.clone() {
             Some((_fingerprint, origin_path)) => {
                 let deriv_path = DerivationPath::from(
@@ -232,18 +287,14 @@ impl Signer for DescriptorXKey<ExtendedPrivKey> {
             }
             None => self.xkey.derive_priv(&secp, &full_path).unwrap(),
         };
-
-        if &derived_key.private_key.public_key(&secp) != public_key {
-            Err(SignerError::InvalidKey)
-        } else {
-            derived_key.private_key.sign(psbt, Some(input_index), secp)
+        if derived_key.private_key.public_key(&secp) != *public_key {
+            return Err(SignerError::InvalidKey);
         }
+        derived_key.private_key.sign(psbt, input_index, secp)
     }
+}
 
-    fn sign_whole_tx(&self) -> bool {
-        false
-    }
-
+impl SignerDetails for DescriptorXKey<ExtendedPrivKey> {
     fn id(&self, secp: &SecpCtx) -> SignerId {
         SignerId::from(self.root_fingerprint(&secp))
     }
@@ -253,28 +304,26 @@ impl Signer for DescriptorXKey<ExtendedPrivKey> {
     }
 }
 
-impl Signer for PrivateKey {
+impl InputSigner for PrivateKey {
     fn sign(
         &self,
         psbt: &mut psbt::PartiallySignedTransaction,
-        input_index: Option<usize>,
+        input_index: usize,
         secp: &SecpCtx,
     ) -> Result<(), SignerError> {
-        let input_index = input_index.unwrap();
-        if input_index >= psbt.inputs.len() {
-            return Err(SignerError::InputIndexOutOfRange);
-        }
-
+        let input = psbt
+            .inputs
+            .get(input_index)
+            .ok_or(SignerError::InputIndexOutOfRange)?;
         let pubkey = self.public_key(&secp);
-        if psbt.inputs[input_index].partial_sigs.contains_key(&pubkey) {
-            return Ok(());
+        if input.partial_sigs.contains_key(&pubkey) {
+            return Err(SignerError::InputAlreadySigned);
         }
-
         // FIXME: use the presence of `witness_utxo` as an indication that we should make a bip143
         // sig. Does this make sense? Should we add an extra argument to explicitly swith between
         // these? The original idea was to declare sign() as sign<Ctx: ScriptContex>() and use Ctx,
         // but that violates the rules for trait-objects, so we can't do it.
-        let (hash, sighash) = match psbt.inputs[input_index].witness_utxo {
+        let (hash, sighash) = match input.witness_utxo {
             Some(_) => Segwitv0::sighash(psbt, input_index)?,
             None => Legacy::sighash(psbt, input_index)?,
         };
@@ -294,11 +343,9 @@ impl Signer for PrivateKey {
 
         Ok(())
     }
+}
 
-    fn sign_whole_tx(&self) -> bool {
-        false
-    }
-
+impl SignerDetails for PrivateKey {
     fn id(&self, secp: &SecpCtx) -> SignerId {
         SignerId::from(self.public_key(secp).to_pubkeyhash())
     }
@@ -342,7 +389,7 @@ impl From<(SignerId, SignerOrdering)> for SignersContainerKey {
 
 /// Container for multiple signers
 #[derive(Debug, Default, Clone)]
-pub struct SignersContainer(BTreeMap<SignersContainerKey, Arc<dyn Signer>>);
+pub struct SignersContainer(BTreeMap<SignersContainerKey, Arc<Signer>>);
 
 impl SignersContainer {
     /// Create a map of public keys to secret keys
@@ -365,12 +412,12 @@ impl From<KeyMap> for SignersContainer {
                 DescriptorSecretKey::SinglePriv(private_key) => container.add_external(
                     SignerId::from(private_key.key.public_key(&secp).to_pubkeyhash()),
                     SignerOrdering::default(),
-                    Arc::new(private_key.key),
+                    Arc::new(Signer::Input(Box::new(private_key.key))),
                 ),
                 DescriptorSecretKey::XPrv(xprv) => container.add_external(
                     SignerId::from(xprv.root_fingerprint(&secp)),
                     SignerOrdering::default(),
-                    Arc::new(xprv),
+                    Arc::new(Signer::Input(Box::new(xprv))),
                 ),
             };
         }
@@ -391,13 +438,13 @@ impl SignersContainer {
         &mut self,
         id: SignerId,
         ordering: SignerOrdering,
-        signer: Arc<dyn Signer>,
-    ) -> Option<Arc<dyn Signer>> {
+        signer: Arc<Signer>,
+    ) -> Option<Arc<Signer>> {
         self.0.insert((id, ordering).into(), signer)
     }
 
     /// Removes a signer from the container and returns it
-    pub fn remove(&mut self, id: SignerId, ordering: SignerOrdering) -> Option<Arc<dyn Signer>> {
+    pub fn remove(&mut self, id: SignerId, ordering: SignerOrdering) -> Option<Arc<Signer>> {
         self.0.remove(&(id, ordering).into())
     }
 
@@ -410,12 +457,12 @@ impl SignersContainer {
     }
 
     /// Returns the list of signers in the container, sorted by lowest to highest `ordering`
-    pub fn signers(&self) -> Vec<&Arc<dyn Signer>> {
+    pub fn signers(&self) -> Vec<&Arc<Signer>> {
         self.0.values().collect()
     }
 
     /// Finds the signer with lowest ordering for a given id in the container.
-    pub fn find(&self, id: SignerId) -> Option<&Arc<dyn Signer>> {
+    pub fn find(&self, id: SignerId) -> Option<&Arc<Signer>> {
         self.0
             .range((
                 Included(&(id.clone(), SignerOrdering(0)).into()),
@@ -566,7 +613,7 @@ mod signers_container_tests {
     use miniscript::ScriptContext;
     use std::str::FromStr;
 
-    fn is_equal(this: &Arc<dyn Signer>, that: &Arc<DummySigner>) -> bool {
+    fn is_equal(this: &Arc<Signer>, that: &Arc<Signer>) -> bool {
         let secp = Secp256k1::new();
         this.id(&secp) == that.id(&secp)
     }
@@ -595,9 +642,9 @@ mod signers_container_tests {
     #[test]
     fn signers_sorted_by_ordering() {
         let mut signers = SignersContainer::new();
-        let signer1 = Arc::new(DummySigner { number: 1 });
-        let signer2 = Arc::new(DummySigner { number: 2 });
-        let signer3 = Arc::new(DummySigner { number: 3 });
+        let signer1 = Arc::new(Signer::Input(Box::new(DummySigner { number: 1 })));
+        let signer2 = Arc::new(Signer::Input(Box::new(DummySigner { number: 2 })));
+        let signer3 = Arc::new(Signer::Input(Box::new(DummySigner { number: 3 })));
 
         // Mixed order insertions verifies we are not inserting at head or tail.
         signers.add_external(SignerId::Dummy(2), SignerOrdering(2), signer2.clone());
@@ -615,10 +662,10 @@ mod signers_container_tests {
     #[test]
     fn find_signer_by_id() {
         let mut signers = SignersContainer::new();
-        let signer1 = Arc::new(DummySigner { number: 1 });
-        let signer2 = Arc::new(DummySigner { number: 2 });
-        let signer3 = Arc::new(DummySigner { number: 3 });
-        let signer4 = Arc::new(DummySigner { number: 3 }); // Same ID as `signer3` but will use lower ordering.
+        let signer1 = Arc::new(Signer::Input(Box::new(DummySigner { number: 1 })));
+        let signer2 = Arc::new(Signer::Input(Box::new(DummySigner { number: 2 })));
+        let signer3 = Arc::new(Signer::Input(Box::new(DummySigner { number: 3 })));
+        let signer4 = Arc::new(Signer::Input(Box::new(DummySigner { number: 3 }))); // Same ID as `signer3` but will use lower ordering.
 
         let id1 = SignerId::Dummy(1);
         let id2 = SignerId::Dummy(2);
@@ -647,22 +694,20 @@ mod signers_container_tests {
         number: u64,
     }
 
-    impl Signer for DummySigner {
+    impl InputSigner for DummySigner {
         fn sign(
             &self,
             _psbt: &mut PartiallySignedTransaction,
-            _input_index: Option<usize>,
+            _input_index: usize,
             _secp: &SecpCtx,
         ) -> Result<(), SignerError> {
             Ok(())
         }
+    }
 
+    impl SignerDetails for DummySigner {
         fn id(&self, _secp: &SecpCtx) -> SignerId {
             SignerId::Dummy(self.number)
-        }
-
-        fn sign_whole_tx(&self) -> bool {
-            true
         }
     }
 
