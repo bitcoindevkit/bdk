@@ -46,18 +46,26 @@ use bitcoin::util::bip32::Fingerprint;
 use bitcoin::PublicKey;
 
 use miniscript::descriptor::{DescriptorPublicKey, ShInner, SortedMultiVec, WshInner};
-use miniscript::{Descriptor, Miniscript, MiniscriptKey, ScriptContext, Terminal, ToPublicKey};
+use miniscript::{
+    Descriptor, ForEachKey, Miniscript, MiniscriptKey, Satisfier, ScriptContext, Terminal,
+    ToPublicKey,
+};
 
 #[allow(unused_imports)]
 use log::{debug, error, info, trace};
 
-use crate::descriptor::{DerivedDescriptorKey, ExtractPolicy};
+use crate::descriptor::{
+    DerivedDescriptor, DerivedDescriptorKey, DescriptorMeta, ExtendedDescriptor, ExtractPolicy,
+};
+use crate::psbt::PSBTUtils;
 use crate::wallet::signer::{SignerId, SignersContainer};
 use crate::wallet::utils::{self, SecpCtx};
 
 use super::checksum::get_checksum;
 use super::error::Error;
 use super::XKeyUtils;
+use bitcoin::util::psbt::PartiallySignedTransaction as PSBT;
+use miniscript::psbt::PsbtInputSatisfier;
 
 /// Raw public key or extended key fingerprint
 #[derive(Debug, Clone, Default, Serialize)]
@@ -256,7 +264,7 @@ pub enum Satisfaction {
         n: usize,
         /// Threshold
         m: usize,
-        /// The items that can be satisfied by the descriptor
+        /// The items that can be satisfied by the descriptor or are satisfied in the PSBT
         items: Vec<usize>,
         #[serde(skip_serializing_if = "Option::is_none")]
         /// Whether the items are sorted in lexicographic order (used by `sortedmulti`)
@@ -431,7 +439,7 @@ pub struct Policy {
     /// Type of this policy node
     #[serde(flatten)]
     pub item: SatisfiableItem,
-    /// How a much given PSBT already satisfies this polcy node **(currently unused)**
+    /// How much a given PSBT already satisfies this policy node in terms of signatures
     pub satisfaction: Satisfaction,
     /// How the wallet's descriptor can satisfy this policy node
     pub contribution: Satisfaction,
@@ -690,6 +698,52 @@ impl Policy {
             _ => Ok(Condition::default()),
         }
     }
+
+    /// fill `self.satisfaction` with the signatures we already have in the PSBT
+    pub fn fill_satisfactions(
+        &mut self,
+        psbt: &PSBT,
+        desc: &ExtendedDescriptor, // can't put in self because non Serialize
+        secp: &SecpCtx,
+    ) -> Result<(), Error> {
+        // Start from an empty Satisfaction (like a contribution without signers)
+        let policy = desc.extract_policy(&SignersContainer::default(), &secp)?;
+        if let Some(policy) = policy {
+            self.satisfaction = policy.contribution;
+
+            for (i, input) in psbt.inputs.iter().enumerate() {
+                let s = PsbtInputSatisfier::new(psbt, i);
+                let derived_desc = desc.derive_from_psbt_input(input, psbt.get_utxo_for(i), secp);
+                self.add_satisfaction(s, derived_desc);
+            }
+            self.satisfaction.finalize();
+        }
+
+        Ok(())
+    }
+
+    fn add_satisfaction<S: Satisfier<bitcoin::PublicKey>>(
+        &mut self,
+        satisfier: S,
+        derived_desc: Option<DerivedDescriptor>,
+    ) {
+        if let Some(derived_desc) = derived_desc {
+            let mut index = 0;
+            derived_desc.for_each_key(|k| {
+                if satisfier.lookup_sig(&k.as_key().to_public_key()).is_some() {
+                    //TODO check signature verifies
+                    let _ = self.satisfaction.add(
+                        &Satisfaction::Complete {
+                            condition: Default::default(),
+                        },
+                        index,
+                    );
+                }
+                index += 1;
+                true
+            });
+        }
+    }
 }
 
 impl From<SatisfiableItem> for Policy {
@@ -879,12 +933,15 @@ mod test {
     use crate::descriptor::{ExtractPolicy, IntoWalletDescriptor};
 
     use super::*;
+    use crate::bitcoin::consensus::deserialize;
+    use crate::descriptor::derived::AsDerived;
     use crate::descriptor::policy::SatisfiableItem::{Multisig, Signature, Thresh};
     use crate::keys::{DescriptorKey, IntoDescriptorKey};
     use crate::wallet::signer::SignersContainer;
-    use bitcoin::secp256k1::{All, Secp256k1};
+    use bitcoin::secp256k1::Secp256k1;
     use bitcoin::util::bip32;
     use bitcoin::Network;
+    use miniscript::DescriptorTrait;
     use std::str::FromStr;
     use std::sync::Arc;
 
@@ -895,9 +952,10 @@ mod test {
 
     fn setup_keys<Ctx: ScriptContext>(
         tprv: &str,
+        path: &str,
+        secp: &SecpCtx,
     ) -> (DescriptorKey<Ctx>, DescriptorKey<Ctx>, Fingerprint) {
-        let secp: Secp256k1<All> = Secp256k1::new();
-        let path = bip32::DerivationPath::from_str(PATH).unwrap();
+        let path = bip32::DerivationPath::from_str(path).unwrap();
         let tprv = bip32::ExtendedPrivKey::from_str(tprv).unwrap();
         let tpub = bip32::ExtendedPubKey::from_private(&secp, &tprv);
         let fingerprint = tprv.fingerprint(&secp);
@@ -913,14 +971,14 @@ mod test {
     fn test_extract_policy_for_wpkh() {
         let secp = Secp256k1::new();
 
-        let (prvkey, pubkey, fingerprint) = setup_keys(TPRV0_STR);
+        let (prvkey, pubkey, fingerprint) = setup_keys(TPRV0_STR, PATH, &secp);
         let desc = descriptor!(wpkh(pubkey)).unwrap();
         let (wallet_desc, keymap) = desc
             .into_wallet_descriptor(&secp, Network::Testnet)
             .unwrap();
         let signers_container = Arc::new(SignersContainer::from(keymap));
         let policy = wallet_desc
-            .extract_policy(&signers_container, &Secp256k1::new())
+            .extract_policy(&signers_container, &secp)
             .unwrap()
             .unwrap();
 
@@ -935,7 +993,7 @@ mod test {
             .unwrap();
         let signers_container = Arc::new(SignersContainer::from(keymap));
         let policy = wallet_desc
-            .extract_policy(&signers_container, &Secp256k1::new())
+            .extract_policy(&signers_container, &secp)
             .unwrap()
             .unwrap();
 
@@ -948,63 +1006,66 @@ mod test {
     }
 
     // 2 pub keys descriptor, required 2 prv keys
-    // #[test]
-    // fn test_extract_policy_for_sh_multi_partial_0of2() {
-    //     let (_prvkey0, pubkey0, fingerprint0) = setup_keys(TPRV0_STR);
-    //     let (_prvkey1, pubkey1, fingerprint1) = setup_keys(TPRV1_STR);
-    //     let desc = descriptor!(sh(multi 2, pubkey0, pubkey1)).unwrap();
-    //     let (wallet_desc, keymap) = desc.to_wallet_descriptor(Network::Testnet).unwrap();
-    //     let signers_container = Arc::new(SignersContainer::from(keymap));
-    //     let policy = wallet_desc
-    //         .extract_policy(signers_container)
-    //         .unwrap()
-    //         .unwrap();
-    //
-    //     assert!(
-    //         matches!(&policy.item, Multisig { keys, threshold } if threshold == &2
-    //         && &keys[0].fingerprint.unwrap() == &fingerprint0
-    //         && &keys[1].fingerprint.unwrap() == &fingerprint1)
-    //     );
-    //
-    //     // TODO should this be "Satisfaction::None" since we have no prv keys?
-    //     // TODO should items and conditions not be empty?
-    //     assert!(
-    //         matches!(&policy.contribution, Satisfaction::Partial { n, m, items, conditions} if n == &2
-    //         && m == &2
-    //         && items.is_empty()
-    //         && conditions.is_empty()
-    //         )
-    //     );
-    // }
+    #[test]
+    fn test_extract_policy_for_sh_multi_partial_0of2() {
+        let secp = Secp256k1::new();
+        let (_prvkey0, pubkey0, fingerprint0) = setup_keys(TPRV0_STR, PATH, &secp);
+        let (_prvkey1, pubkey1, fingerprint1) = setup_keys(TPRV1_STR, PATH, &secp);
+        let desc = descriptor!(sh(multi(2, pubkey0, pubkey1))).unwrap();
+        let (wallet_desc, keymap) = desc
+            .into_wallet_descriptor(&secp, Network::Testnet)
+            .unwrap();
+        let signers_container = Arc::new(SignersContainer::from(keymap));
+        let policy = wallet_desc
+            .extract_policy(&signers_container, &secp)
+            .unwrap()
+            .unwrap();
+
+        assert!(
+            matches!(&policy.item, Multisig { keys, threshold } if threshold == &2usize
+            && &keys[0].fingerprint.unwrap() == &fingerprint0
+            && &keys[1].fingerprint.unwrap() == &fingerprint1)
+        );
+        // TODO should this be "Satisfaction::None" since we have no prv keys?
+        // TODO should items and conditions not be empty?
+        assert!(
+            matches!(&policy.contribution, Satisfaction::Partial { n, m, items, conditions, ..} if n == &2usize
+            && m == &2usize
+            && items.is_empty()
+            && conditions.is_empty()
+            )
+        );
+    }
 
     // 1 prv and 1 pub key descriptor, required 2 prv keys
-    // #[test]
-    // fn test_extract_policy_for_sh_multi_partial_1of2() {
-    //     let (prvkey0, _pubkey0, fingerprint0) = setup_keys(TPRV0_STR);
-    //     let (_prvkey1, pubkey1, fingerprint1) = setup_keys(TPRV1_STR);
-    //     let desc = descriptor!(sh(multi 2, prvkey0, pubkey1)).unwrap();
-    //     let (wallet_desc, keymap) = desc.to_wallet_descriptor(Network::Testnet).unwrap();
-    //     let signers_container = Arc::new(SignersContainer::from(keymap));
-    //     let policy = wallet_desc
-    //         .extract_policy(signers_container)
-    //         .unwrap()
-    //         .unwrap();
-    //
-    //     assert!(
-    //         matches!(&policy.item, Multisig { keys, threshold } if threshold == &2
-    //         && &keys[0].fingerprint.unwrap() == &fingerprint0
-    //         && &keys[1].fingerprint.unwrap() == &fingerprint1)
-    //     );
-    //
-    //     // TODO should this be "Satisfaction::Partial" since we have only one of two prv keys?
-    //     assert!(
-    //         matches!(&policy.contribution, Satisfaction::PartialComplete { n, m, items, conditions} if n == &2
-    //          && m == &2
-    //          && items.len() == 2
-    //          && conditions.contains_key(&vec![0,1])
-    //         )
-    //     );
-    // }
+    #[test]
+    fn test_extract_policy_for_sh_multi_partial_1of2() {
+        let secp = Secp256k1::new();
+        let (prvkey0, _pubkey0, fingerprint0) = setup_keys(TPRV0_STR, PATH, &secp);
+        let (_prvkey1, pubkey1, fingerprint1) = setup_keys(TPRV1_STR, PATH, &secp);
+        let desc = descriptor!(sh(multi(2, prvkey0, pubkey1))).unwrap();
+        let (wallet_desc, keymap) = desc
+            .into_wallet_descriptor(&secp, Network::Testnet)
+            .unwrap();
+        let signers_container = Arc::new(SignersContainer::from(keymap));
+        let policy = wallet_desc
+            .extract_policy(&signers_container, &secp)
+            .unwrap()
+            .unwrap();
+        assert!(
+            matches!(&policy.item, Multisig { keys, threshold } if threshold == &2usize
+            && &keys[0].fingerprint.unwrap() == &fingerprint0
+            && &keys[1].fingerprint.unwrap() == &fingerprint1)
+        );
+
+        assert!(
+            matches!(&policy.contribution, Satisfaction::Partial { n, m, items, conditions, ..} if n == &2usize
+             && m == &2usize
+             && items.len() == 1
+             && conditions.contains_key(&0)
+            )
+        );
+    }
 
     // 1 prv and 1 pub key descriptor, required 1 prv keys
     #[test]
@@ -1012,15 +1073,15 @@ mod test {
     fn test_extract_policy_for_sh_multi_complete_1of2() {
         let secp = Secp256k1::new();
 
-        let (_prvkey0, pubkey0, fingerprint0) = setup_keys(TPRV0_STR);
-        let (prvkey1, _pubkey1, fingerprint1) = setup_keys(TPRV1_STR);
+        let (_prvkey0, pubkey0, fingerprint0) = setup_keys(TPRV0_STR, PATH, &secp);
+        let (prvkey1, _pubkey1, fingerprint1) = setup_keys(TPRV1_STR, PATH, &secp);
         let desc = descriptor!(sh(multi(1, pubkey0, prvkey1))).unwrap();
         let (wallet_desc, keymap) = desc
             .into_wallet_descriptor(&secp, Network::Testnet)
             .unwrap();
         let signers_container = Arc::new(SignersContainer::from(keymap));
         let policy = wallet_desc
-            .extract_policy(&signers_container, &Secp256k1::new())
+            .extract_policy(&signers_container, &secp)
             .unwrap()
             .unwrap();
 
@@ -1044,15 +1105,15 @@ mod test {
     fn test_extract_policy_for_sh_multi_complete_2of2() {
         let secp = Secp256k1::new();
 
-        let (prvkey0, _pubkey0, fingerprint0) = setup_keys(TPRV0_STR);
-        let (prvkey1, _pubkey1, fingerprint1) = setup_keys(TPRV1_STR);
+        let (prvkey0, _pubkey0, fingerprint0) = setup_keys(TPRV0_STR, PATH, &secp);
+        let (prvkey1, _pubkey1, fingerprint1) = setup_keys(TPRV1_STR, PATH, &secp);
         let desc = descriptor!(sh(multi(2, prvkey0, prvkey1))).unwrap();
         let (wallet_desc, keymap) = desc
             .into_wallet_descriptor(&secp, Network::Testnet)
             .unwrap();
         let signers_container = Arc::new(SignersContainer::from(keymap));
         let policy = wallet_desc
-            .extract_policy(&signers_container, &Secp256k1::new())
+            .extract_policy(&signers_container, &secp)
             .unwrap()
             .unwrap();
 
@@ -1077,7 +1138,7 @@ mod test {
     fn test_extract_policy_for_single_wpkh() {
         let secp = Secp256k1::new();
 
-        let (prvkey, pubkey, fingerprint) = setup_keys(TPRV0_STR);
+        let (prvkey, pubkey, fingerprint) = setup_keys(TPRV0_STR, PATH, &secp);
         let desc = descriptor!(wpkh(pubkey)).unwrap();
         let (wallet_desc, keymap) = desc
             .into_wallet_descriptor(&secp, Network::Testnet)
@@ -1085,7 +1146,7 @@ mod test {
         let single_key = wallet_desc.derive(0);
         let signers_container = Arc::new(SignersContainer::from(keymap));
         let policy = single_key
-            .extract_policy(&signers_container, &Secp256k1::new())
+            .extract_policy(&signers_container, &secp)
             .unwrap()
             .unwrap();
 
@@ -1101,7 +1162,7 @@ mod test {
         let single_key = wallet_desc.derive(0);
         let signers_container = Arc::new(SignersContainer::from(keymap));
         let policy = single_key
-            .extract_policy(&signers_container, &Secp256k1::new())
+            .extract_policy(&signers_container, &secp)
             .unwrap()
             .unwrap();
 
@@ -1119,8 +1180,8 @@ mod test {
     fn test_extract_policy_for_single_wsh_multi_complete_1of2() {
         let secp = Secp256k1::new();
 
-        let (_prvkey0, pubkey0, fingerprint0) = setup_keys(TPRV0_STR);
-        let (prvkey1, _pubkey1, fingerprint1) = setup_keys(TPRV1_STR);
+        let (_prvkey0, pubkey0, fingerprint0) = setup_keys(TPRV0_STR, PATH, &secp);
+        let (prvkey1, _pubkey1, fingerprint1) = setup_keys(TPRV1_STR, PATH, &secp);
         let desc = descriptor!(sh(multi(1, pubkey0, prvkey1))).unwrap();
         let (wallet_desc, keymap) = desc
             .into_wallet_descriptor(&secp, Network::Testnet)
@@ -1128,7 +1189,7 @@ mod test {
         let single_key = wallet_desc.derive(0);
         let signers_container = Arc::new(SignersContainer::from(keymap));
         let policy = single_key
-            .extract_policy(&signers_container, &Secp256k1::new())
+            .extract_policy(&signers_container, &secp)
             .unwrap()
             .unwrap();
 
@@ -1154,8 +1215,8 @@ mod test {
     fn test_extract_policy_for_wsh_multi_timelock() {
         let secp = Secp256k1::new();
 
-        let (prvkey0, _pubkey0, _fingerprint0) = setup_keys(TPRV0_STR);
-        let (_prvkey1, pubkey1, _fingerprint1) = setup_keys(TPRV1_STR);
+        let (prvkey0, _pubkey0, _fingerprint0) = setup_keys(TPRV0_STR, PATH, &secp);
+        let (_prvkey1, pubkey1, _fingerprint1) = setup_keys(TPRV1_STR, PATH, &secp);
         let sequence = 50;
         #[rustfmt::skip]
         let desc = descriptor!(wsh(thresh(
@@ -1171,7 +1232,7 @@ mod test {
             .unwrap();
         let signers_container = Arc::new(SignersContainer::from(keymap));
         let policy = wallet_desc
-            .extract_policy(&signers_container, &Secp256k1::new())
+            .extract_policy(&signers_container, &secp)
             .unwrap()
             .unwrap();
 
@@ -1192,66 +1253,82 @@ mod test {
 
     // - mixed timelocks should fail
 
-    // #[test]
-    // fn test_extract_policy_for_wsh_mixed_timelocks() {
-    //     let (prvkey0, _pubkey0, _fingerprint0) = setup_keys(TPRV0_STR);
-    //     let locktime_threshold = 500000000; // if less than this means block number, else block time in seconds
-    //     let locktime_blocks = 100;
-    //     let locktime_seconds = locktime_blocks + locktime_threshold;
-    //     let desc = descriptor!(sh (and_v (+v pk prvkey0), (and_v (+v after locktime_seconds), (after locktime_blocks)))).unwrap();
-    //     let (wallet_desc, keymap) = desc.to_wallet_descriptor(Network::Testnet).unwrap();
-    //     let signers_container = Arc::new(SignersContainer::from(keymap));
-    //     let policy = wallet_desc
-    //         .extract_policy(signers_container)
-    //         .unwrap()
-    //         .unwrap();
-    //
-    //     println!("desc policy = {:?}", policy); // TODO remove
-    //
-    //     // TODO how should this fail with mixed timelocks?
-    // }
+    #[test]
+    #[ignore]
+    fn test_extract_policy_for_wsh_mixed_timelocks() {
+        let secp = Secp256k1::new();
+        let (prvkey0, _pubkey0, _fingerprint0) = setup_keys(TPRV0_STR, PATH, &secp);
+        let locktime_threshold = 500000000; // if less than this means block number, else block time in seconds
+        let locktime_blocks = 100;
+        let locktime_seconds = locktime_blocks + locktime_threshold;
+        let desc = descriptor!(sh(and_v(
+            v: pk(prvkey0),
+            and_v(v: after(locktime_seconds), after(locktime_blocks))
+        )))
+        .unwrap();
+        let (wallet_desc, keymap) = desc
+            .into_wallet_descriptor(&secp, Network::Testnet)
+            .unwrap();
+        let signers_container = Arc::new(SignersContainer::from(keymap));
+        let policy = wallet_desc
+            .extract_policy(&signers_container, &secp)
+            .unwrap()
+            .unwrap();
+        println!("desc policy = {:?}", policy); // TODO remove
+                                                // TODO how should this fail with mixed timelocks?
+    }
 
     // - multiple timelocks of the same type should be correctly merged together
+    #[test]
+    #[ignore]
+    fn test_extract_policy_for_multiple_same_timelocks() {
+        let secp = Secp256k1::new();
+        let (prvkey0, _pubkey0, _fingerprint0) = setup_keys(TPRV0_STR, PATH, &secp);
+        let locktime_blocks0 = 100;
+        let locktime_blocks1 = 200;
+        let desc = descriptor!(sh(and_v(
+            v: pk(prvkey0),
+            and_v(v: after(locktime_blocks0), after(locktime_blocks1))
+        )))
+        .unwrap();
+        let (wallet_desc, keymap) = desc
+            .into_wallet_descriptor(&secp, Network::Testnet)
+            .unwrap();
+        let signers_container = Arc::new(SignersContainer::from(keymap));
+        let policy = wallet_desc
+            .extract_policy(&signers_container, &secp)
+            .unwrap()
+            .unwrap();
+        println!("desc policy = {:?}", policy); // TODO remove
+                                                // TODO how should this merge timelocks?
+        let (prvkey1, _pubkey1, _fingerprint1) = setup_keys(TPRV0_STR, PATH, &secp);
+        let locktime_seconds0 = 500000100;
+        let locktime_seconds1 = 500000200;
+        let desc = descriptor!(sh(and_v(
+            v: pk(prvkey1),
+            and_v(v: after(locktime_seconds0), after(locktime_seconds1))
+        )))
+        .unwrap();
+        let (wallet_desc, keymap) = desc
+            .into_wallet_descriptor(&secp, Network::Testnet)
+            .unwrap();
+        let signers_container = Arc::new(SignersContainer::from(keymap));
+        let policy = wallet_desc
+            .extract_policy(&signers_container, &secp)
+            .unwrap()
+            .unwrap();
 
-    // #[test]
-    // fn test_extract_policy_for_multiple_same_timelocks() {
-    //     let (prvkey0, _pubkey0, _fingerprint0) = setup_keys(TPRV0_STR);
-    //     let locktime_blocks0 = 100;
-    //     let locktime_blocks1 = 200;
-    //     let desc = descriptor!(sh (and_v (+v pk prvkey0), (and_v (+v after locktime_blocks0), (after locktime_blocks1)))).unwrap();
-    //     let (wallet_desc, keymap) = desc.to_wallet_descriptor(Network::Testnet).unwrap();
-    //     let signers_container = Arc::new(SignersContainer::from(keymap));
-    //     let policy = wallet_desc
-    //         .extract_policy(signers_container)
-    //         .unwrap()
-    //         .unwrap();
-    //
-    //     println!("desc policy = {:?}", policy); // TODO remove
-    //
-    //     // TODO how should this merge timelocks?
-    //
-    //     let (prvkey1, _pubkey1, _fingerprint1) = setup_keys(TPRV0_STR);
-    //     let locktime_seconds0 = 500000100;
-    //     let locktime_seconds1 = 500000200;
-    //     let desc = descriptor!(sh (and_v (+v pk prvkey1), (and_v (+v after locktime_seconds0), (after locktime_seconds1)))).unwrap();
-    //     let (wallet_desc, keymap) = desc.to_wallet_descriptor(Network::Testnet).unwrap();
-    //     let signers_container = Arc::new(SignersContainer::from(keymap));
-    //     let policy = wallet_desc
-    //         .extract_policy(signers_container)
-    //         .unwrap()
-    //         .unwrap();
-    //
-    //     println!("desc policy = {:?}", policy); // TODO remove
-    //
-    //     // TODO how should this merge timelocks?
-    // }
+        println!("desc policy = {:?}", policy); // TODO remove
+
+        // TODO how should this merge timelocks?
+    }
 
     #[test]
     fn test_get_condition_multisig() {
-        let secp = Secp256k1::gen_new();
+        let secp = Secp256k1::new();
 
-        let (_, pk0, _) = setup_keys(TPRV0_STR);
-        let (_, pk1, _) = setup_keys(TPRV1_STR);
+        let (_, pk0, _) = setup_keys(TPRV0_STR, PATH, &secp);
+        let (_, pk1, _) = setup_keys(TPRV1_STR, PATH, &secp);
 
         let desc = descriptor!(wsh(multi(1, pk0, pk1))).unwrap();
         let (wallet_desc, keymap) = desc
@@ -1290,5 +1367,78 @@ mod test {
         let out_of_range =
             policy.get_condition(&vec![(policy.id.clone(), vec![5])].into_iter().collect());
         assert_eq!(out_of_range, Err(PolicyError::IndexOutOfRange(5)));
+    }
+
+    #[test]
+    fn test_extract_satisfaction() {
+        const ALICE_TPRV_STR:&str = "tprv8ZgxMBicQKsPf6T5X327efHnvJDr45Xnb8W4JifNWtEoqXu9MRYS4v1oYe6DFcMVETxy5w3bqpubYRqvcVTqovG1LifFcVUuJcbwJwrhYzP";
+        const BOB_TPRV_STR:&str = "tprv8ZgxMBicQKsPeinZ155cJAn117KYhbaN6MV3WeG6sWhxWzcvX1eg1awd4C9GpUN1ncLEM2rzEvunAg3GizdZD4QPPCkisTz99tXXB4wZArp";
+        const ALICE_BOB_PATH: &str = "m/0'";
+        const ALICE_SIGNED_PSBT: &str = "cHNidP8BAFMBAAAAAZb0njwT2wRS3AumaaP3yb7T4MxOePpSWih4Nq+jWChMAQAAAAD/////Af4lAAAAAAAAF6kUXv2Fn+YemPP4PUpNR1ZbU16/eRCHAAAAAAABASuJJgAAAAAAACIAIERw5kTLo9DUH9QDJSClHQwPpC7VGJ+ZMDpa8U+2fzcYIgIDeAtjYQk/Vfu4db2+68hyMKjc38+kWl5sP5QH8L42ZstHMEQCIBj0jLjUeVYXNQ6cqB+gbtvuKMjV54wSgWlm1cfcgpHVAiBa3DtC9l/1Mt4IDCvR7mmwQd3eAP/m5++81euhJNSrgQEBBUdSIQN4C2NhCT9V+7h1vb7ryHIwqNzfz6RaXmw/lAfwvjZmyyEC+GE/y+LptI8xmiR6sOe998IGzybox0Qfz4+BQl1nmYhSriIGAvhhP8vi6bSPMZokerDnvffCBs8m6MdEH8+PgUJdZ5mIDBwu7j4AAACAAAAAACIGA3gLY2EJP1X7uHW9vuvIcjCo3N/PpFpebD+UB/C+NmbLDMkRfC4AAACAAAAAAAAA";
+        const BOB_SIGNED_PSBT: &str =   "cHNidP8BAFMBAAAAAZb0njwT2wRS3AumaaP3yb7T4MxOePpSWih4Nq+jWChMAQAAAAD/////Af4lAAAAAAAAF6kUXv2Fn+YemPP4PUpNR1ZbU16/eRCHAAAAAAABASuJJgAAAAAAACIAIERw5kTLo9DUH9QDJSClHQwPpC7VGJ+ZMDpa8U+2fzcYIgIC+GE/y+LptI8xmiR6sOe998IGzybox0Qfz4+BQl1nmYhIMEUCIQD5zDtM5MwklurwJ5aW76RsO36Iqyu+6uMdVlhL6ws2GQIgesAiz4dbKS7UmhDsC/c1ezu0o6hp00UUtsCMfUZ4anYBAQVHUiEDeAtjYQk/Vfu4db2+68hyMKjc38+kWl5sP5QH8L42ZsshAvhhP8vi6bSPMZokerDnvffCBs8m6MdEH8+PgUJdZ5mIUq4iBgL4YT/L4um0jzGaJHqw5733wgbPJujHRB/Pj4FCXWeZiAwcLu4+AAAAgAAAAAAiBgN4C2NhCT9V+7h1vb7ryHIwqNzfz6RaXmw/lAfwvjZmywzJEXwuAAAAgAAAAAAAAA==";
+        const ALICE_BOB_SIGNED_PSBT: &str =   "cHNidP8BAFMBAAAAAZb0njwT2wRS3AumaaP3yb7T4MxOePpSWih4Nq+jWChMAQAAAAD/////Af4lAAAAAAAAF6kUXv2Fn+YemPP4PUpNR1ZbU16/eRCHAAAAAAABASuJJgAAAAAAACIAIERw5kTLo9DUH9QDJSClHQwPpC7VGJ+ZMDpa8U+2fzcYIgIC+GE/y+LptI8xmiR6sOe998IGzybox0Qfz4+BQl1nmYhIMEUCIQD5zDtM5MwklurwJ5aW76RsO36Iqyu+6uMdVlhL6ws2GQIgesAiz4dbKS7UmhDsC/c1ezu0o6hp00UUtsCMfUZ4anYBIgIDeAtjYQk/Vfu4db2+68hyMKjc38+kWl5sP5QH8L42ZstHMEQCIBj0jLjUeVYXNQ6cqB+gbtvuKMjV54wSgWlm1cfcgpHVAiBa3DtC9l/1Mt4IDCvR7mmwQd3eAP/m5++81euhJNSrgQEBBUdSIQN4C2NhCT9V+7h1vb7ryHIwqNzfz6RaXmw/lAfwvjZmyyEC+GE/y+LptI8xmiR6sOe998IGzybox0Qfz4+BQl1nmYhSriIGAvhhP8vi6bSPMZokerDnvffCBs8m6MdEH8+PgUJdZ5mIDBwu7j4AAACAAAAAACIGA3gLY2EJP1X7uHW9vuvIcjCo3N/PpFpebD+UB/C+NmbLDMkRfC4AAACAAAAAAAEHAAEI2wQARzBEAiAY9Iy41HlWFzUOnKgfoG7b7ijI1eeMEoFpZtXH3IKR1QIgWtw7QvZf9TLeCAwr0e5psEHd3gD/5ufvvNXroSTUq4EBSDBFAiEA+cw7TOTMJJbq8CeWlu+kbDt+iKsrvurjHVZYS+sLNhkCIHrAIs+HWyku1JoQ7Av3NXs7tKOoadNFFLbAjH1GeGp2AUdSIQN4C2NhCT9V+7h1vb7ryHIwqNzfz6RaXmw/lAfwvjZmyyEC+GE/y+LptI8xmiR6sOe998IGzybox0Qfz4+BQl1nmYhSrgAA";
+
+        let secp = Secp256k1::new();
+
+        let (prvkey_alice, _, _) = setup_keys(ALICE_TPRV_STR, ALICE_BOB_PATH, &secp);
+        let (prvkey_bob, _, _) = setup_keys(BOB_TPRV_STR, ALICE_BOB_PATH, &secp);
+
+        let desc = descriptor!(wsh(multi(2, prvkey_alice, prvkey_bob))).unwrap();
+
+        let (wallet_desc, keymap) = desc
+            .into_wallet_descriptor(&secp, Network::Testnet)
+            .unwrap();
+
+        let addr = wallet_desc
+            .as_derived(0, &secp)
+            .address(Network::Testnet)
+            .unwrap();
+        assert_eq!(
+            "tb1qg3cwv3xt50gdg875qvjjpfgaps86gtk4rz0ejvp6ttc5ldnlxuvqlcn0xk",
+            addr.to_string()
+        );
+
+        let signers_container = Arc::new(SignersContainer::from(keymap));
+
+        let original_policy = wallet_desc
+            .extract_policy(&signers_container, &secp)
+            .unwrap()
+            .unwrap();
+
+        let psbt: PSBT = deserialize(&base64::decode(ALICE_SIGNED_PSBT).unwrap()).unwrap();
+        let mut policy_clone = original_policy.clone();
+        policy_clone
+            .fill_satisfactions(&psbt, &wallet_desc, &secp)
+            .unwrap();
+        assert!(
+            matches!(&policy_clone.satisfaction, Satisfaction::Partial { n, m, items, .. } if n == &2
+             && m == &2
+             && items == &vec![0]
+            )
+        );
+
+        let mut policy_clone = original_policy.clone();
+        let psbt: PSBT = deserialize(&base64::decode(BOB_SIGNED_PSBT).unwrap()).unwrap();
+        policy_clone
+            .fill_satisfactions(&psbt, &wallet_desc, &secp)
+            .unwrap();
+        assert!(
+            matches!(&policy_clone.satisfaction, Satisfaction::Partial { n, m, items, .. } if n == &2
+             && m == &2
+             && items == &vec![1]
+            )
+        );
+
+        let mut policy_clone = original_policy.clone();
+        let psbt: PSBT = deserialize(&base64::decode(ALICE_BOB_SIGNED_PSBT).unwrap()).unwrap();
+        policy_clone
+            .fill_satisfactions(&psbt, &wallet_desc, &secp)
+            .unwrap();
+        assert!(
+            matches!(&policy_clone.satisfaction, Satisfaction::PartialComplete { n, m, items, .. } if n == &2
+             && m == &2
+             && items == &vec![0, 1]
+            )
+        );
     }
 }
