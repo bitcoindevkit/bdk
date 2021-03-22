@@ -3426,7 +3426,7 @@ mod test {
     #[test]
     fn test_sign_single_xprv_with_master_fingerprint_and_path() {
         let (wallet, _, _) = get_funded_wallet("wpkh([d34db33f/84h/1h/0h]tprv8ZgxMBicQKsPd3EupYiPRhaMooHKUHJxNsTfYuScep13go8QFfHdtkG9nRkFGb7busX4isf6X9dURGCoKgitaApQ6MupRhZMcELAxTBRJgS/*)");
-        let addr = wallet.get_new_address().unwrap();
+        let addr = wallet.get_address(New).unwrap();
         let mut builder = wallet.build_tx();
         builder
             .set_single_recipient(addr.script_pubkey())
