@@ -20,7 +20,7 @@ As soon as the release is tagged and published, the `release` branch will be mer
 
 ## Making the Release
 
-What follows are notes and procedures that maintaners can refer to when making releases. All the commits and tags must be signed and, ideally, also [timestamped](https://github.com/opentimestamps/opentimestamps-client/blob/master/doc/git-integration.md).
+What follows are notes and procedures that maintainers can refer to when making releases. All the commits and tags must be signed and, ideally, also [timestamped](https://github.com/opentimestamps/opentimestamps-client/blob/master/doc/git-integration.md).
 
 Pre-`v1.0.0` our "major" releases only affect the "minor" semver value. Accordingly, our "minor" releases will only affect the "patch" value.
 
@@ -39,7 +39,8 @@ Pre-`v1.0.0` our "major" releases only affect the "minor" semver value. Accordin
 11. Publish **all** the updated crates to crates.io.
 12. Make a new commit to bump the version value to `x.y.(z+1)-dev`. The message should be "Bump version to x.y.(z+1)-dev".
 13. Merge the release branch back into `master`.
-14. Create the release on GitHub: go to "tags", click on the dots on the right and select "Create Release". Then set the title to `vx.y.z` and write down some brief release notes.
-15. Make sure the new release shows up on crates.io and that the docs are built correctly on docs.rs.
-16. Announce the release on Twitter, Discord and Telegram.
-17. Celebrate :tada:
+14. If the `master` branch contains any unreleased changes to the `bdk-macros`, `bdk-testutils`, or `bdk-testutils-macros` crates, change the `bdk` Cargo.toml `[dev-dependencies]` to point to the local path (ie. `bdk-testutils-macros = { path = "./testutils-macros"}`)
+15. Create the release on GitHub: go to "tags", click on the dots on the right and select "Create Release". Then set the title to `vx.y.z` and write down some brief release notes.
+16. Make sure the new release shows up on crates.io and that the docs are built correctly on docs.rs.
+17. Announce the release on Twitter, Discord and Telegram.
+18. Celebrate :tada:
