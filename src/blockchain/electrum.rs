@@ -144,7 +144,7 @@ impl ElectrumLikeSync for Client {
 }
 
 /// Configuration for an [`ElectrumBlockchain`]
-#[derive(Debug, serde::Deserialize, serde::Serialize)]
+#[derive(Debug, serde::Deserialize, serde::Serialize, Clone, PartialEq)]
 pub struct ElectrumBlockchainConfig {
     /// URL of the Electrum server (such as ElectrumX, Esplora, BWT) may start with `ssl://` or `tcp://` and include a port
     ///
