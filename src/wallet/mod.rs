@@ -2712,7 +2712,7 @@ mod test {
             .unwrap();
 
         let mut builder = wallet.build_fee_bump(txid).unwrap();
-        builder.fee_rate(FeeRate::from_sat_per_vb(2.5));
+        builder.fee_rate(FeeRate::from_sat_per_vb(2.5)).enable_rbf();
         let (psbt, details) = builder.finish().unwrap();
 
         assert_eq!(details.sent, original_details.sent);
@@ -2773,6 +2773,7 @@ mod test {
 
         let mut builder = wallet.build_fee_bump(txid).unwrap();
         builder.fee_absolute(200);
+        builder.enable_rbf();
         let (psbt, details) = builder.finish().unwrap();
 
         assert_eq!(details.sent, original_details.sent);
