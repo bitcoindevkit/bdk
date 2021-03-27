@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Misc
+#### Changed
+- New minimum supported rust version is 1.46.0
+
 ### Descriptor
 #### Added
 - Added ability to analyze a `PSBT` to check which and how many signatures are already available

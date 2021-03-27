@@ -11,7 +11,7 @@ jobs:
       matrix:
         rust:
           - 1.50.0 # STABLE
-          - 1.45.0 # MSRV
+          - 1.46.0 # MSRV
         features:
           - default
           - minimal

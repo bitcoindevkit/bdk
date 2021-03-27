@@ -3,7 +3,7 @@
 # Run various invocations of cargo check
 
 features=( "default" "compiler" "electrum" "esplora" "compact_filters" "key-value-db" "async-interface" "all-keys" "keys-bip39" )
-toolchains=( "+stable" "+1.45" "+nightly" )
+toolchains=( "+stable" "+1.46" "+nightly" )
 
 main() {
     check_src
