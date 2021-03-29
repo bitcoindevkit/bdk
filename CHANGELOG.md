@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `get_address(AddressIndex::Peek(u32))` which returns a derived address for a specified descriptor index but does not change the current index
 - Added `get_address(AddressIndex::Reset(u32))` which returns a derived address for a specified descriptor index and resets current index to the given value
 
+## [v0.5.1] - [v0.5.0]
+
+### Misc
+#### Changed
+- Pin `hyper` to `=0.14.4` to make it compile on Rust 1.45
+
 ## [v0.5.0] - [v0.4.0]
 
 ### Misc
@@ -306,3 +312,4 @@ final transaction is created by calling `finish` on the builder.
 [v0.3.0]: https://github.com/bitcoindevkit/bdk/compare/v0.2.0...v0.3.0
 [v0.4.0]: https://github.com/bitcoindevkit/bdk/compare/v0.3.0...v0.4.0
 [v0.5.0]: https://github.com/bitcoindevkit/bdk/compare/v0.4.0...v0.5.0
+[v0.5.1]: https://github.com/bitcoindevkit/bdk/compare/v0.5.0...v0.5.1
