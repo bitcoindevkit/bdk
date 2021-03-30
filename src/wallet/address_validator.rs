@@ -40,7 +40,7 @@
 //!     fn validate(
 //!         &self,
 //!         keychain: KeychainKind,
-//!         hd_keypaths: &HDKeyPaths,
+//!         hd_keypaths: &HdKeyPaths,
 //!         script: &Script
 //!     ) -> Result<(), AddressValidatorError> {
 //!         let address = Address::from_script(script, Network::Testnet)
@@ -67,7 +67,7 @@ use std::fmt;
 
 use bitcoin::Script;
 
-use crate::descriptor::HDKeyPaths;
+use crate::descriptor::HdKeyPaths;
 use crate::types::KeychainKind;
 
 /// Errors that can be returned to fail the validation of an address
@@ -105,7 +105,7 @@ pub trait AddressValidator: Send + Sync + fmt::Debug {
     fn validate(
         &self,
         keychain: KeychainKind,
-        hd_keypaths: &HDKeyPaths,
+        hd_keypaths: &HdKeyPaths,
         script: &Script,
     ) -> Result<(), AddressValidatorError>;
 }
@@ -124,7 +124,7 @@ mod test {
         fn validate(
             &self,
             _keychain: KeychainKind,
-            _hd_keypaths: &HDKeyPaths,
+            _hd_keypaths: &HdKeyPaths,
             _script: &bitcoin::Script,
         ) -> Result<(), AddressValidatorError> {
             Err(AddressValidatorError::InvalidScript)

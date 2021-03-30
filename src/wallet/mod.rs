@@ -59,7 +59,7 @@ use crate::descriptor::{
     Policy, XKeyUtils,
 };
 use crate::error::Error;
-use crate::psbt::PSBTUtils;
+use crate::psbt::PsbtUtils;
 use crate::types::*;
 
 const CACHE_ADDR_BATCH_SIZE: u32 = 100;
@@ -465,13 +465,13 @@ where
             (None, Some(csv)) => csv,
 
             // RBF with a specific value but that value is too high
-            (Some(tx_builder::RBFValue::Value(rbf)), _) if rbf >= 0xFFFFFFFE => {
+            (Some(tx_builder::RbfValue::Value(rbf)), _) if rbf >= 0xFFFFFFFE => {
                 return Err(Error::Generic(
                     "Cannot enable RBF with a nSequence >= 0xFFFFFFFE".into(),
                 ))
             }
             // RBF with a specific value requested, but the value is incompatible with CSV
-            (Some(tx_builder::RBFValue::Value(rbf)), Some(csv))
+            (Some(tx_builder::RbfValue::Value(rbf)), Some(csv))
                 if !check_nsequence_rbf(rbf, csv) =>
             {
                 return Err(Error::Generic(format!(
@@ -481,7 +481,7 @@ where
             }
 
             // RBF enabled with the default value with CSV also enabled. CSV takes precedence
-            (Some(tx_builder::RBFValue::Default), Some(csv)) => csv,
+            (Some(tx_builder::RbfValue::Default), Some(csv)) => csv,
             // Valid RBF, either default or with a specific value. We ignore the `CSV` value
             // because we've already checked it before
             (Some(rbf), _) => rbf.get_value(),
@@ -750,7 +750,7 @@ where
                     .database
                     .borrow()
                     .get_previous_output(&txin.previous_output)?
-                    .ok_or(Error::UnknownUTXO)?;
+                    .ok_or(Error::UnknownUtxo)?;
 
                 let (weight, keychain) = match self
                     .database
@@ -1260,7 +1260,7 @@ where
                     ) {
                         Ok(psbt_input) => psbt_input,
                         Err(e) => match e {
-                            Error::UnknownUTXO => Input {
+                            Error::UnknownUtxo => Input {
                                 sighash_type: params.sighash,
                                 ..Input::default()
                             },
@@ -1326,7 +1326,7 @@ where
             .database
             .borrow()
             .get_path_from_script_pubkey(&utxo.txout.script_pubkey)?
-            .ok_or(Error::UnknownUTXO)?;
+            .ok_or(Error::UnknownUtxo)?;
 
         let mut psbt_input = Input {
             sighash_type,
@@ -2047,7 +2047,7 @@ mod test {
         builder
             .add_recipient(addr.script_pubkey(), 30_000)
             .add_recipient(addr.script_pubkey(), 10_000)
-            .ordering(super::tx_builder::TxOrdering::BIP69Lexicographic);
+            .ordering(super::tx_builder::TxOrdering::Bip69Lexicographic);
         let (psbt, details) = builder.finish().unwrap();
 
         assert_eq!(psbt.global.unsigned_tx.output.len(), 3);

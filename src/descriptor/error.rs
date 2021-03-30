@@ -15,7 +15,7 @@
 #[derive(Debug)]
 pub enum Error {
     /// Invalid HD Key path, such as having a wildcard but a length != 1
-    InvalidHDKeyPath,
+    InvalidHdKeyPath,
     /// The provided descriptor doesn't match its checksum
     InvalidDescriptorChecksum,
     /// The descriptor contains hardened derivation steps on public extended keys
@@ -32,11 +32,11 @@ pub enum Error {
     InvalidDescriptorCharacter(char),
 
     /// BIP32 error
-    BIP32(bitcoin::util::bip32::Error),
+    Bip32(bitcoin::util::bip32::Error),
     /// Error during base58 decoding
     Base58(bitcoin::util::base58::Error),
     /// Key-related error
-    PK(bitcoin::util::key::Error),
+    Pk(bitcoin::util::key::Error),
     /// Miniscript error
     Miniscript(miniscript::Error),
     /// Hex decoding error
@@ -47,7 +47,7 @@ impl From<crate::keys::KeyError> for Error {
     fn from(key_error: crate::keys::KeyError) -> Error {
         match key_error {
             crate::keys::KeyError::Miniscript(inner) => Error::Miniscript(inner),
-            crate::keys::KeyError::BIP32(inner) => Error::BIP32(inner),
+            crate::keys::KeyError::Bip32(inner) => Error::Bip32(inner),
             e => Error::Key(e),
         }
     }
@@ -61,9 +61,9 @@ impl std::fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
-impl_error!(bitcoin::util::bip32::Error, BIP32);
+impl_error!(bitcoin::util::bip32::Error, Bip32);
 impl_error!(bitcoin::util::base58::Error, Base58);
-impl_error!(bitcoin::util::key::Error, PK);
+impl_error!(bitcoin::util::key::Error, Pk);
 impl_error!(miniscript::Error, Miniscript);
 impl_error!(bitcoin::hashes::hex::Error, Hex);
 impl_error!(crate::descriptor::policy::PolicyError, Policy);

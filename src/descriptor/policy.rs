@@ -57,7 +57,7 @@ use log::{debug, error, info, trace};
 use crate::descriptor::{
     DerivedDescriptor, DerivedDescriptorKey, DescriptorMeta, ExtendedDescriptor, ExtractPolicy,
 };
-use crate::psbt::PSBTUtils;
+use crate::psbt::PsbtUtils;
 use crate::wallet::signer::{SignerId, SignersContainer};
 use crate::wallet::utils::{self, SecpCtx};
 
@@ -69,7 +69,7 @@ use miniscript::psbt::PsbtInputSatisfier;
 
 /// Raw public key or extended key fingerprint
 #[derive(Debug, Clone, Default, Serialize)]
-pub struct PKOrF {
+pub struct PkOrF {
     #[serde(skip_serializing_if = "Option::is_none")]
     pubkey: Option<PublicKey>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -78,14 +78,14 @@ pub struct PKOrF {
     fingerprint: Option<Fingerprint>,
 }
 
-impl PKOrF {
+impl PkOrF {
     fn from_key(k: &DescriptorPublicKey, secp: &SecpCtx) -> Self {
         match k {
-            DescriptorPublicKey::SinglePub(pubkey) => PKOrF {
+            DescriptorPublicKey::SinglePub(pubkey) => PkOrF {
                 pubkey: Some(pubkey.key),
                 ..Default::default()
             },
-            DescriptorPublicKey::XPub(xpub) => PKOrF {
+            DescriptorPublicKey::XPub(xpub) => PkOrF {
                 fingerprint: Some(xpub.root_fingerprint(secp)),
                 ..Default::default()
             },
@@ -93,7 +93,7 @@ impl PKOrF {
     }
 
     fn from_key_hash(k: hash160::Hash) -> Self {
-        PKOrF {
+        PkOrF {
             pubkey_hash: Some(k),
             ..Default::default()
         }
@@ -106,26 +106,26 @@ impl PKOrF {
 pub enum SatisfiableItem {
     // Leaves
     /// Signature for a raw public key
-    Signature(PKOrF),
+    Signature(PkOrF),
     /// Signature for an extended key fingerprint
-    SignatureKey(PKOrF),
+    SignatureKey(PkOrF),
     /// SHA256 preimage hash
-    SHA256Preimage {
+    Sha256Preimage {
         /// The digest value
         hash: sha256::Hash,
     },
     /// Double SHA256 preimage hash
-    HASH256Preimage {
+    Hash256Preimage {
         /// The digest value
         hash: sha256d::Hash,
     },
     /// RIPEMD160 preimage hash
-    RIPEMD160Preimage {
+    Ripemd160Preimage {
         /// The digest value
         hash: ripemd160::Hash,
     },
     /// SHA256 then RIPEMD160 preimage hash
-    HASH160Preimage {
+    Hash160Preimage {
         /// The digest value
         hash: hash160::Hash,
     },
@@ -142,7 +142,7 @@ pub enum SatisfiableItem {
     /// Multi-signature public keys with threshold count
     Multisig {
         /// The raw public key or extended key fingerprint
-        keys: Vec<PKOrF>,
+        keys: Vec<PkOrF>,
         /// The required threshold count
         threshold: usize,
     },
@@ -585,7 +585,7 @@ impl Policy {
             return Ok(None);
         }
 
-        let parsed_keys = keys.iter().map(|k| PKOrF::from_key(k, secp)).collect();
+        let parsed_keys = keys.iter().map(|k| PkOrF::from_key(k, secp)).collect();
 
         let mut contribution = Satisfaction::Partial {
             n: keys.len(),
@@ -760,7 +760,7 @@ fn signer_id(key: &DescriptorPublicKey, secp: &SecpCtx) -> SignerId {
 }
 
 fn signature(key: &DescriptorPublicKey, signers: &SignersContainer, secp: &SecpCtx) -> Policy {
-    let mut policy: Policy = SatisfiableItem::Signature(PKOrF::from_key(key, secp)).into();
+    let mut policy: Policy = SatisfiableItem::Signature(PkOrF::from_key(key, secp)).into();
 
     policy.contribution = if signers.find(signer_id(key, secp)).is_some() {
         Satisfaction::Complete {
@@ -781,7 +781,7 @@ fn signature_key(
     let key_hash = DerivedDescriptorKey::new(key.clone(), secp)
         .to_public_key()
         .to_pubkeyhash();
-    let mut policy: Policy = SatisfiableItem::Signature(PKOrF::from_key_hash(key_hash)).into();
+    let mut policy: Policy = SatisfiableItem::Signature(PkOrF::from_key_hash(key_hash)).into();
 
     if signers.find(SignerId::PkHash(key_hash)).is_some() {
         policy.contribution = Satisfaction::Complete {
@@ -825,15 +825,15 @@ impl<Ctx: ScriptContext> ExtractPolicy for Miniscript<DescriptorPublicKey, Ctx> 
 
                 Some(policy)
             }
-            Terminal::Sha256(hash) => Some(SatisfiableItem::SHA256Preimage { hash: *hash }.into()),
+            Terminal::Sha256(hash) => Some(SatisfiableItem::Sha256Preimage { hash: *hash }.into()),
             Terminal::Hash256(hash) => {
-                Some(SatisfiableItem::HASH256Preimage { hash: *hash }.into())
+                Some(SatisfiableItem::Hash256Preimage { hash: *hash }.into())
             }
             Terminal::Ripemd160(hash) => {
-                Some(SatisfiableItem::RIPEMD160Preimage { hash: *hash }.into())
+                Some(SatisfiableItem::Ripemd160Preimage { hash: *hash }.into())
             }
             Terminal::Hash160(hash) => {
-                Some(SatisfiableItem::HASH160Preimage { hash: *hash }.into())
+                Some(SatisfiableItem::Hash160Preimage { hash: *hash }.into())
             }
             Terminal::Multi(k, pks) => Policy::make_multisig(pks, signers, *k, false, secp)?,
             // Identities

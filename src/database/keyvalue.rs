@@ -39,7 +39,7 @@ macro_rules! impl_batch_operations {
         }
 
         fn set_utxo(&mut self, utxo: &LocalUtxo) -> Result<(), Error> {
-            let key = MapKey::UTXO(Some(&utxo.outpoint)).as_map_key();
+            let key = MapKey::Utxo(Some(&utxo.outpoint)).as_map_key();
             let value = json!({
                 "t": utxo.txout,
                 "i": utxo.keychain,
@@ -108,7 +108,7 @@ macro_rules! impl_batch_operations {
         }
 
         fn del_utxo(&mut self, outpoint: &OutPoint) -> Result<Option<LocalUtxo>, Error> {
-            let key = MapKey::UTXO(Some(outpoint)).as_map_key();
+            let key = MapKey::Utxo(Some(outpoint)).as_map_key();
             let res = self.remove(key);
             let res = $process_delete!(res);
 
@@ -222,7 +222,7 @@ impl Database for Tree {
     }
 
     fn iter_utxos(&self) -> Result<Vec<LocalUtxo>, Error> {
-        let key = MapKey::UTXO(None).as_map_key();
+        let key = MapKey::Utxo(None).as_map_key();
         self.scan_prefix(key)
             .map(|x| -> Result<_, Error> {
                 let (k, v) = x?;
@@ -293,7 +293,7 @@ impl Database for Tree {
     }
 
     fn get_utxo(&self, outpoint: &OutPoint) -> Result<Option<LocalUtxo>, Error> {
-        let key = MapKey::UTXO(Some(outpoint)).as_map_key();
+        let key = MapKey::Utxo(Some(outpoint)).as_map_key();
         self.get(key)?
             .map(|b| -> Result<_, Error> {
                 let mut val: serde_json::Value = serde_json::from_slice(&b)?;

@@ -33,7 +33,7 @@ use bitcoin::{BlockHeader, Script, Transaction, Txid};
 
 use electrum_client::{Client, ConfigBuilder, ElectrumApi, Socks5Config};
 
-use self::utils::{ELSGetHistoryRes, ElectrumLikeSync};
+use self::utils::{ElectrumLikeSync, ElsGetHistoryRes};
 use super::*;
 use crate::database::BatchDatabase;
 use crate::error::Error;
@@ -107,7 +107,7 @@ impl ElectrumLikeSync for Client {
     fn els_batch_script_get_history<'s, I: IntoIterator<Item = &'s Script> + Clone>(
         &self,
         scripts: I,
-    ) -> Result<Vec<Vec<ELSGetHistoryRes>>, Error> {
+    ) -> Result<Vec<Vec<ElsGetHistoryRes>>, Error> {
         self.batch_script_get_history(scripts)
             .map(|v| {
                 v.into_iter()
@@ -116,7 +116,7 @@ impl ElectrumLikeSync for Client {
                             .map(
                                 |electrum_client::GetHistoryRes {
                                      height, tx_hash, ..
-                                 }| ELSGetHistoryRes {
+                                 }| ElsGetHistoryRes {
                                     height,
                                     tx_hash,
                                 },

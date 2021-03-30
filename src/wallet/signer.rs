@@ -146,7 +146,7 @@ pub enum SignerError {
     /// The `witness_script` field of the transaction is requied to sign this input
     MissingWitnessScript,
     /// The fingerprint and derivation path are missing from the psbt input
-    MissingHDKeypath,
+    MissingHdKeypath,
 }
 
 impl fmt::Display for SignerError {

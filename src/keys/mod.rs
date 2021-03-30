@@ -873,13 +873,13 @@ pub enum KeyError {
     Message(String),
 
     /// BIP32 error
-    BIP32(bitcoin::util::bip32::Error),
+    Bip32(bitcoin::util::bip32::Error),
     /// Miniscript error
     Miniscript(miniscript::Error),
 }
 
 impl_error!(miniscript::Error, Miniscript, KeyError);
-impl_error!(bitcoin::util::bip32::Error, BIP32, KeyError);
+impl_error!(bitcoin::util::bip32::Error, Bip32, KeyError);
 
 impl std::fmt::Display for KeyError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

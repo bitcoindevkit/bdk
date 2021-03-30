@@ -39,7 +39,7 @@ use bitcoin::hashes::hex::{FromHex, ToHex};
 use bitcoin::hashes::{sha256, Hash};
 use bitcoin::{BlockHash, BlockHeader, Script, Transaction, Txid};
 
-use self::utils::{ELSGetHistoryRes, ElectrumLikeSync};
+use self::utils::{ElectrumLikeSync, ElsGetHistoryRes};
 use super::*;
 use crate::database::BatchDatabase;
 use crate::error::Error;
@@ -210,7 +210,7 @@ impl UrlClient {
     async fn _script_get_history(
         &self,
         script: &Script,
-    ) -> Result<Vec<ELSGetHistoryRes>, EsploraError> {
+    ) -> Result<Vec<ElsGetHistoryRes>, EsploraError> {
         let mut result = Vec::new();
         let scripthash = Self::script_to_scripthash(script);
 
@@ -227,7 +227,7 @@ impl UrlClient {
                 .json::<Vec<EsploraGetHistory>>()
                 .await?
                 .into_iter()
-                .map(|x| ELSGetHistoryRes {
+                .map(|x| ElsGetHistoryRes {
                     tx_hash: x.txid,
                     height: x.status.block_height.unwrap_or(0) as i32,
                 }),
@@ -261,7 +261,7 @@ impl UrlClient {
 
             debug!("... adding {} confirmed transactions", len);
 
-            result.extend(response.into_iter().map(|x| ELSGetHistoryRes {
+            result.extend(response.into_iter().map(|x| ElsGetHistoryRes {
                 tx_hash: x.txid,
                 height: x.status.block_height.unwrap_or(0) as i32,
             }));
@@ -291,7 +291,7 @@ impl ElectrumLikeSync for UrlClient {
     fn els_batch_script_get_history<'s, I: IntoIterator<Item = &'s Script>>(
         &self,
         scripts: I,
-    ) -> Result<Vec<Vec<ELSGetHistoryRes>>, Error> {
+    ) -> Result<Vec<Vec<ElsGetHistoryRes>>, Error> {
         let future = async {
             let mut results = vec![];
             for chunk in ChunksIterator::new(scripts.into_iter(), self.concurrency as usize) {
@@ -299,7 +299,7 @@ impl ElectrumLikeSync for UrlClient {
                 for script in chunk {
                     futs.push(self._script_get_history(&script));
                 }
-                let partial_results: Vec<Vec<ELSGetHistoryRes>> = futs.try_collect().await?;
+                let partial_results: Vec<Vec<ElsGetHistoryRes>> = futs.try_collect().await?;
                 results.extend(partial_results);
             }
             Ok(stream::iter(results).collect().await)

@@ -237,7 +237,7 @@ impl Blockchain for CompactFiltersBlockchain {
 
         let skip_blocks = self.skip_blocks.unwrap_or(0);
 
-        let cf_sync = Arc::new(CFSync::new(Arc::clone(&self.headers), skip_blocks, 0x00)?);
+        let cf_sync = Arc::new(CfSync::new(Arc::clone(&self.headers), skip_blocks, 0x00)?);
 
         let initial_height = self.headers.get_height()?;
         let total_bundles = (first_peer.get_version().start_height as usize)
@@ -537,11 +537,11 @@ pub enum CompactFiltersError {
     NoPeers,
 
     /// Internal database error
-    DB(rocksdb::Error),
+    Db(rocksdb::Error),
     /// Internal I/O error
-    IO(std::io::Error),
+    Io(std::io::Error),
     /// Invalid BIP158 filter
-    BIP158(bitcoin::util::bip158::Error),
+    Bip158(bitcoin::util::bip158::Error),
     /// Internal system time error
     Time(std::time::SystemTimeError),
 
@@ -557,9 +557,9 @@ impl fmt::Display for CompactFiltersError {
 
 impl std::error::Error for CompactFiltersError {}
 
-impl_error!(rocksdb::Error, DB, CompactFiltersError);
-impl_error!(std::io::Error, IO, CompactFiltersError);
-impl_error!(bitcoin::util::bip158::Error, BIP158, CompactFiltersError);
+impl_error!(rocksdb::Error, Db, CompactFiltersError);
+impl_error!(std::io::Error, Io, CompactFiltersError);
+impl_error!(bitcoin::util::bip158::Error, Bip158, CompactFiltersError);
 impl_error!(std::time::SystemTimeError, Time, CompactFiltersError);
 
 impl From<crate::error::Error> for CompactFiltersError {

@@ -36,7 +36,7 @@ use crate::types::*;
 pub(crate) enum MapKey<'a> {
     Path((Option<KeychainKind>, Option<u32>)),
     Script(Option<&'a Script>),
-    UTXO(Option<&'a OutPoint>),
+    Utxo(Option<&'a OutPoint>),
     RawTx(Option<&'a Txid>),
     Transaction(Option<&'a Txid>),
     LastIndex(KeychainKind),
@@ -54,7 +54,7 @@ impl MapKey<'_> {
                 v
             }
             MapKey::Script(_) => b"s".to_vec(),
-            MapKey::UTXO(_) => b"u".to_vec(),
+            MapKey::Utxo(_) => b"u".to_vec(),
             MapKey::RawTx(_) => b"r".to_vec(),
             MapKey::Transaction(_) => b"t".to_vec(),
             MapKey::LastIndex(st) => [b"c", st.as_ref()].concat(),
@@ -66,7 +66,7 @@ impl MapKey<'_> {
         match self {
             MapKey::Path((_, Some(child))) => child.to_be_bytes().to_vec(),
             MapKey::Script(Some(s)) => serialize(*s),
-            MapKey::UTXO(Some(s)) => serialize(*s),
+            MapKey::Utxo(Some(s)) => serialize(*s),
             MapKey::RawTx(Some(s)) => serialize(*s),
             MapKey::Transaction(Some(s)) => serialize(*s),
             _ => vec![],
@@ -145,7 +145,7 @@ impl BatchOperations for MemoryDatabase {
     }
 
     fn set_utxo(&mut self, utxo: &LocalUtxo) -> Result<(), Error> {
-        let key = MapKey::UTXO(Some(&utxo.outpoint)).as_map_key();
+        let key = MapKey::Utxo(Some(&utxo.outpoint)).as_map_key();
         self.map
             .insert(key, Box::new((utxo.txout.clone(), utxo.keychain)));
 
@@ -211,7 +211,7 @@ impl BatchOperations for MemoryDatabase {
         }
     }
     fn del_utxo(&mut self, outpoint: &OutPoint) -> Result<Option<LocalUtxo>, Error> {
-        let key = MapKey::UTXO(Some(outpoint)).as_map_key();
+        let key = MapKey::Utxo(Some(outpoint)).as_map_key();
         let res = self.map.remove(&key);
         self.deleted_keys.push(key);
 
@@ -304,7 +304,7 @@ impl Database for MemoryDatabase {
     }
 
     fn iter_utxos(&self) -> Result<Vec<LocalUtxo>, Error> {
-        let key = MapKey::UTXO(None).as_map_key();
+        let key = MapKey::Utxo(None).as_map_key();
         self.map
             .range::<Vec<u8>, _>((Included(&key), Excluded(&after(&key))))
             .map(|(k, v)| {
@@ -370,7 +370,7 @@ impl Database for MemoryDatabase {
     }
 
     fn get_utxo(&self, outpoint: &OutPoint) -> Result<Option<LocalUtxo>, Error> {
-        let key = MapKey::UTXO(Some(outpoint)).as_map_key();
+        let key = MapKey::Utxo(Some(outpoint)).as_map_key();
         Ok(self.map.get(&key).map(|b| {
             let (txout, keychain) = b.downcast_ref().cloned().unwrap();
             LocalUtxo {

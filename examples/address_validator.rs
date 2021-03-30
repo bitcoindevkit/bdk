@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use bdk::bitcoin;
 use bdk::database::MemoryDatabase;
-use bdk::descriptor::HDKeyPaths;
+use bdk::descriptor::HdKeyPaths;
 use bdk::wallet::address_validator::{AddressValidator, AddressValidatorError};
 use bdk::KeychainKind;
 use bdk::Wallet;
@@ -29,7 +29,7 @@ impl AddressValidator for DummyValidator {
     fn validate(
         &self,
         keychain: KeychainKind,
-        hd_keypaths: &HDKeyPaths,
+        hd_keypaths: &HdKeyPaths,
         script: &Script,
     ) -> Result<(), AddressValidatorError> {
         let (_, path) = hd_keypaths

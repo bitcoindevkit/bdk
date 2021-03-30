@@ -12,11 +12,11 @@
 use bitcoin::util::psbt::PartiallySignedTransaction as PSBT;
 use bitcoin::TxOut;
 
-pub trait PSBTUtils {
+pub trait PsbtUtils {
     fn get_utxo_for(&self, input_index: usize) -> Option<TxOut>;
 }
 
-impl PSBTUtils for PSBT {
+impl PsbtUtils for PSBT {
     fn get_utxo_for(&self, input_index: usize) -> Option<TxOut> {
         let tx = &self.global.unsigned_tx;
 
