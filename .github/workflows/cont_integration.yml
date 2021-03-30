@@ -10,7 +10,7 @@ jobs:
     strategy:
       matrix:
         rust:
-          - 1.50.0 # STABLE
+          - 1.51.0 # STABLE
           - 1.46.0 # MSRV
         features:
           - default
@@ -98,7 +98,7 @@ jobs:
       - name: Install rustup
         run: curl https://sh.rustup.rs -sSf | sh -s -- -y
       - name: Set default toolchain
-        run: $HOME/.cargo/bin/rustup default 1.50.0 # STABLE
+        run: $HOME/.cargo/bin/rustup default 1.51.0 # STABLE
       - name: Set profile
         run: $HOME/.cargo/bin/rustup set profile minimal
       - name: Update toolchain
@@ -131,7 +131,7 @@ jobs:
       - run: sudo apt-get update || exit 1
       - run: sudo apt-get install -y libclang-common-10-dev clang-10 libc6-dev-i386 || exit 1
       - name: Set default toolchain
-        run: rustup default 1.50.0 # STABLE
+        run: rustup default 1.51.0 # STABLE
       - name: Set profile
         run: rustup set profile minimal
       - name: Add target wasm32
@@ -148,7 +148,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v2
       - name: Set default toolchain
-        run: rustup default 1.50.0 # STABLE
+        run: rustup default 1.51.0 # STABLE
       - name: Set profile
         run: rustup set profile minimal
       - name: Add clippy
