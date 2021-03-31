@@ -24,8 +24,9 @@ use bitcoin::secp256k1::Secp256k1;
 use bitcoin::consensus::encode::serialize;
 use bitcoin::util::base58;
 use bitcoin::util::psbt::raw::Key as PSBTKey;
+use bitcoin::util::psbt::Input;
 use bitcoin::util::psbt::PartiallySignedTransaction as PSBT;
-use bitcoin::{Address, Network, OutPoint, Script, Transaction, TxOut, Txid};
+use bitcoin::{Address, Network, OutPoint, Script, SigHashType, Transaction, TxOut, Txid};
 
 use miniscript::descriptor::DescriptorTrait;
 use miniscript::psbt::PsbtInputSatisfier;
@@ -1250,41 +1251,21 @@ where
                 None => continue,
             };
 
-            // Only set it if the params has a custom one, otherwise leave blank which defaults to
-            // SIGHASH_ALL
-            if let Some(sighash_type) = params.sighash {
-                psbt_input.sighash_type = Some(sighash_type);
-            }
-
             match utxo {
                 Utxo::Local(utxo) => {
-                    // Try to find the prev_script in our db to figure out if this is internal or external,
-                    // and the derivation index
-                    let (keychain, child) = match self
-                        .database
-                        .borrow()
-                        .get_path_from_script_pubkey(&utxo.txout.script_pubkey)?
-                    {
-                        Some(x) => x,
-                        None => continue,
-                    };
-
-                    let desc = self.get_descriptor_for_keychain(keychain);
-                    let derived_descriptor = desc.as_derived(child, &self.secp);
-                    psbt_input.bip32_derivation = derived_descriptor.get_hd_keypaths(&self.secp)?;
-
-                    psbt_input.redeem_script = derived_descriptor.psbt_redeem_script();
-                    psbt_input.witness_script = derived_descriptor.psbt_witness_script();
-
-                    let prev_output = input.previous_output;
-                    if let Some(prev_tx) = self.database.borrow().get_raw_tx(&prev_output.txid)? {
-                        if desc.is_witness() {
-                            psbt_input.witness_utxo =
-                                Some(prev_tx.output[prev_output.vout as usize].clone());
-                        }
-                        if !desc.is_witness() || params.force_non_witness_utxo {
-                            psbt_input.non_witness_utxo = Some(prev_tx);
-                        }
+                    *psbt_input = match self.get_psbt_input(
+                        utxo,
+                        params.sighash,
+                        params.force_non_witness_utxo,
+                    ) {
+                        Ok(psbt_input) => psbt_input,
+                        Err(e) => match e {
+                            Error::UnknownUTXO => Input {
+                                sighash_type: params.sighash,
+                                ..Input::default()
+                            },
+                            _ => return Err(e),
+                        },
                     }
                 }
                 Utxo::Foreign {
@@ -1330,6 +1311,45 @@ where
         }
 
         Ok(psbt)
+    }
+
+    /// get the corresponding PSBT Input for a LocalUtxo
+    pub fn get_psbt_input(
+        &self,
+        utxo: LocalUtxo,
+        sighash_type: Option<SigHashType>,
+        force_non_witness_utxo: bool,
+    ) -> Result<Input, Error> {
+        // Try to find the prev_script in our db to figure out if this is internal or external,
+        // and the derivation index
+        let (keychain, child) = self
+            .database
+            .borrow()
+            .get_path_from_script_pubkey(&utxo.txout.script_pubkey)?
+            .ok_or(Error::UnknownUTXO)?;
+
+        let mut psbt_input = Input {
+            sighash_type,
+            ..Input::default()
+        };
+
+        let desc = self.get_descriptor_for_keychain(keychain);
+        let derived_descriptor = desc.as_derived(child, &self.secp);
+        psbt_input.bip32_derivation = derived_descriptor.get_hd_keypaths(&self.secp)?;
+
+        psbt_input.redeem_script = derived_descriptor.psbt_redeem_script();
+        psbt_input.witness_script = derived_descriptor.psbt_witness_script();
+
+        let prev_output = utxo.outpoint;
+        if let Some(prev_tx) = self.database.borrow().get_raw_tx(&prev_output.txid)? {
+            if desc.is_witness() {
+                psbt_input.witness_utxo = Some(prev_tx.output[prev_output.vout as usize].clone());
+            }
+            if !desc.is_witness() || force_non_witness_utxo {
+                psbt_input.non_witness_utxo = Some(prev_tx);
+            }
+        }
+        Ok(psbt_input)
     }
 
     fn add_input_hd_keypaths(&self, psbt: &mut PSBT) -> Result<(), Error> {
@@ -1603,13 +1623,30 @@ mod test {
         )
         .unwrap();
 
-        let txid = crate::populate_test_db!(
-            wallet.database.borrow_mut(),
-            testutils! {
-                @tx ( (@external descriptors, 0) => 50_000 ) (@confirmations 1)
-            },
-            Some(100)
-        );
+        let funding_address_kix = 0;
+
+        let tx_meta = testutils! {
+                @tx ( (@external descriptors, funding_address_kix) => 50_000 ) (@confirmations 1)
+        };
+
+        wallet
+            .database
+            .borrow_mut()
+            .set_script_pubkey(
+                &bitcoin::Address::from_str(&tx_meta.output.iter().next().unwrap().to_address)
+                    .unwrap()
+                    .script_pubkey(),
+                KeychainKind::External,
+                funding_address_kix,
+            )
+            .unwrap();
+        wallet
+            .database
+            .borrow_mut()
+            .set_last_index(KeychainKind::External, funding_address_kix)
+            .unwrap();
+
+        let txid = crate::populate_test_db!(wallet.database.borrow_mut(), tx_meta, Some(100));
 
         (wallet, descriptors, txid)
     }
@@ -2537,6 +2574,16 @@ mod test {
                 builder.finish().is_ok(),
                 "psbt_input with non_witness_utxo should succeed with force_non_witness_utxo"
             );
+        }
+    }
+
+    #[test]
+    fn test_get_psbt_input() {
+        // this should grab a known good utxo and set the input
+        let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
+        for utxo in wallet.list_unspent().unwrap() {
+            let psbt_input = wallet.get_psbt_input(utxo, None, false).unwrap();
+            assert!(psbt_input.witness_utxo.is_some() || psbt_input.non_witness_utxo.is_some());
         }
     }
 
