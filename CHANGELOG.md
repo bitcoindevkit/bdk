@@ -24,6 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `get_address(AddressIndex::Reset(u32))` which returns a derived address for a specified descriptor index and resets current index to the given value
 - Added `get_psbt_input` to create the corresponding psbt input for a local utxo.
 
+#### Fixed
+- Fixed `coin_select` calculation for UTXOs where `value < fee` that caused over-/underflow errors.
+
 ## [v0.5.1] - [v0.5.0]
 
 ### Misc
