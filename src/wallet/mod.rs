@@ -53,6 +53,7 @@ use utils::{check_nlocktime, check_nsequence_rbf, After, Older, SecpCtx, DUST_LI
 use crate::blockchain::{Blockchain, Progress};
 use crate::database::{BatchDatabase, BatchOperations, DatabaseUtils};
 use crate::descriptor::derived::AsDerived;
+use crate::descriptor::policy::BuildSatisfaction;
 use crate::descriptor::{
     get_checksum, into_wallet_descriptor_checked, DerivedDescriptor, DerivedDescriptorMeta,
     DescriptorMeta, DescriptorScripts, ExtendedDescriptor, ExtractPolicy, IntoWalletDescriptor,
@@ -372,14 +373,14 @@ where
     ) -> Result<(PSBT, TransactionDetails), Error> {
         let external_policy = self
             .descriptor
-            .extract_policy(&self.signers, &self.secp)?
+            .extract_policy(&self.signers, BuildSatisfaction::None, &self.secp)?
             .unwrap();
         let internal_policy = self
             .change_descriptor
             .as_ref()
             .map(|desc| {
                 Ok::<_, Error>(
-                    desc.extract_policy(&self.change_signers, &self.secp)?
+                    desc.extract_policy(&self.change_signers, BuildSatisfaction::None, &self.secp)?
                         .unwrap(),
                 )
             })
@@ -876,13 +877,17 @@ where
     /// Return the spending policies for the wallet's descriptor
     pub fn policies(&self, keychain: KeychainKind) -> Result<Option<Policy>, Error> {
         match (keychain, self.change_descriptor.as_ref()) {
-            (KeychainKind::External, _) => {
-                Ok(self.descriptor.extract_policy(&self.signers, &self.secp)?)
-            }
+            (KeychainKind::External, _) => Ok(self.descriptor.extract_policy(
+                &self.signers,
+                BuildSatisfaction::None,
+                &self.secp,
+            )?),
             (KeychainKind::Internal, None) => Ok(None),
-            (KeychainKind::Internal, Some(desc)) => {
-                Ok(desc.extract_policy(&self.change_signers, &self.secp)?)
-            }
+            (KeychainKind::Internal, Some(desc)) => Ok(desc.extract_policy(
+                &self.change_signers,
+                BuildSatisfaction::None,
+                &self.secp,
+            )?),
         }
     }
 

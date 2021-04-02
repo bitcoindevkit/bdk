@@ -22,6 +22,7 @@
 //! # use std::sync::Arc;
 //! # use bdk::descriptor::*;
 //! # use bdk::bitcoin::secp256k1::Secp256k1;
+//! use bdk::descriptor::policy::BuildSatisfaction;
 //! let secp = Secp256k1::new();
 //! let desc = "wsh(and_v(v:pk(cV3oCth6zxZ1UVsHLnGothsWNsaoxRhC6aeNi5VbSdFpwUkgkEci),or_d(pk(cVMTy7uebJgvFaSBwcgvwk8qn8xSLc97dKow4MBetjrrahZoimm2),older(12960))))";
 //!
@@ -29,7 +30,7 @@
 //! println!("{:?}", extended_desc);
 //!
 //! let signers = Arc::new(key_map.into());
-//! let policy = extended_desc.extract_policy(&signers, &secp)?;
+//! let policy = extended_desc.extract_policy(&signers, BuildSatisfaction::None, &secp)?;
 //! println!("policy: {}", serde_json::to_string(&policy)?);
 //! # Ok::<(), bdk::Error>(())
 //! ```
@@ -47,25 +48,20 @@ use bitcoin::PublicKey;
 
 use miniscript::descriptor::{DescriptorPublicKey, ShInner, SortedMultiVec, WshInner};
 use miniscript::{
-    Descriptor, ForEachKey, Miniscript, MiniscriptKey, Satisfier, ScriptContext, Terminal,
-    ToPublicKey,
+    Descriptor, Miniscript, MiniscriptKey, Satisfier, ScriptContext, Terminal, ToPublicKey,
 };
 
 #[allow(unused_imports)]
 use log::{debug, error, info, trace};
 
-use crate::descriptor::{
-    DerivedDescriptor, DerivedDescriptorKey, DescriptorMeta, ExtendedDescriptor, ExtractPolicy,
-};
-use crate::psbt::PsbtUtils;
+use crate::descriptor::{DerivedDescriptorKey, ExtractPolicy};
 use crate::wallet::signer::{SignerId, SignersContainer};
-use crate::wallet::utils::{self, SecpCtx};
+use crate::wallet::utils::{self, After, Older, SecpCtx};
 
 use super::checksum::get_checksum;
 use super::error::Error;
 use super::XKeyUtils;
 use bitcoin::util::psbt::PartiallySignedTransaction as PSBT;
-use miniscript::psbt::PsbtInputSatisfier;
 
 /// Raw public key or extended key fingerprint
 #[derive(Debug, Clone, Default, Serialize)]
@@ -563,13 +559,18 @@ impl Policy {
             conditions: Default::default(),
             sorted: None,
         };
+        let mut satisfaction = contribution.clone();
         for (index, item) in items.iter().enumerate() {
             contribution.add(&item.contribution, index)?;
+            satisfaction.add(&item.satisfaction, index)?;
         }
+
         contribution.finalize();
+        satisfaction.finalize();
 
         let mut policy: Policy = SatisfiableItem::Thresh { items, threshold }.into();
         policy.contribution = contribution;
+        policy.satisfaction = satisfaction;
 
         Ok(Some(policy))
     }
@@ -577,6 +578,7 @@ impl Policy {
     fn make_multisig(
         keys: &[DescriptorPublicKey],
         signers: &SignersContainer,
+        build_sat: BuildSatisfaction,
         threshold: usize,
         sorted: bool,
         secp: &SecpCtx,
@@ -594,6 +596,8 @@ impl Policy {
             conditions: Default::default(),
             sorted: Some(sorted),
         };
+        let mut satisfaction = contribution.clone();
+
         for (index, key) in keys.iter().enumerate() {
             if signers.find(signer_id(key, secp)).is_some() {
                 contribution.add(
@@ -603,7 +607,19 @@ impl Policy {
                     index,
                 )?;
             }
+
+            if let Some(psbt) = build_sat.psbt() {
+                if signature_in_psbt(psbt, key, secp) {
+                    satisfaction.add(
+                        &Satisfaction::Complete {
+                            condition: Default::default(),
+                        },
+                        index,
+                    )?;
+                }
+            }
         }
+        satisfaction.finalize();
         contribution.finalize();
 
         let mut policy: Policy = SatisfiableItem::Multisig {
@@ -612,6 +628,7 @@ impl Policy {
         }
         .into();
         policy.contribution = contribution;
+        policy.satisfaction = satisfaction;
 
         Ok(Some(policy))
     }
@@ -698,52 +715,6 @@ impl Policy {
             _ => Ok(Condition::default()),
         }
     }
-
-    /// fill `self.satisfaction` with the signatures we already have in the PSBT
-    pub fn fill_satisfactions(
-        &mut self,
-        psbt: &PSBT,
-        desc: &ExtendedDescriptor, // can't put in self because non Serialize
-        secp: &SecpCtx,
-    ) -> Result<(), Error> {
-        // Start from an empty Satisfaction (like a contribution without signers)
-        let policy = desc.extract_policy(&SignersContainer::default(), &secp)?;
-        if let Some(policy) = policy {
-            self.satisfaction = policy.contribution;
-
-            for (i, input) in psbt.inputs.iter().enumerate() {
-                let s = PsbtInputSatisfier::new(psbt, i);
-                let derived_desc = desc.derive_from_psbt_input(input, psbt.get_utxo_for(i), secp);
-                self.add_satisfaction(s, derived_desc);
-            }
-            self.satisfaction.finalize();
-        }
-
-        Ok(())
-    }
-
-    fn add_satisfaction<S: Satisfier<bitcoin::PublicKey>>(
-        &mut self,
-        satisfier: S,
-        derived_desc: Option<DerivedDescriptor>,
-    ) {
-        if let Some(derived_desc) = derived_desc {
-            let mut index = 0;
-            derived_desc.for_each_key(|k| {
-                if satisfier.lookup_sig(&k.as_key().to_public_key()).is_some() {
-                    //TODO check signature verifies
-                    let _ = self.satisfaction.add(
-                        &Satisfaction::Complete {
-                            condition: Default::default(),
-                        },
-                        index,
-                    );
-                }
-                index += 1;
-                true
-            });
-        }
-    }
 }
 
 impl From<SatisfiableItem> for Policy {
@@ -759,7 +730,12 @@ fn signer_id(key: &DescriptorPublicKey, secp: &SecpCtx) -> SignerId {
     }
 }
 
-fn signature(key: &DescriptorPublicKey, signers: &SignersContainer, secp: &SecpCtx) -> Policy {
+fn signature(
+    key: &DescriptorPublicKey,
+    signers: &SignersContainer,
+    build_sat: BuildSatisfaction,
+    secp: &SecpCtx,
+) -> Policy {
     let mut policy: Policy = SatisfiableItem::Signature(PkOrF::from_key(key, secp)).into();
 
     policy.contribution = if signers.find(signer_id(key, secp)).is_some() {
@@ -770,7 +746,36 @@ fn signature(key: &DescriptorPublicKey, signers: &SignersContainer, secp: &SecpC
         Satisfaction::None
     };
 
+    if let Some(psbt) = build_sat.psbt() {
+        policy.satisfaction = if signature_in_psbt(psbt, key, secp) {
+            Satisfaction::Complete {
+                condition: Default::default(),
+            }
+        } else {
+            Satisfaction::None
+        };
+    }
+
     policy
+}
+
+fn signature_in_psbt(psbt: &PSBT, key: &DescriptorPublicKey, secp: &SecpCtx) -> bool {
+    //TODO check signature validity
+    psbt.inputs.iter().all(|input| match key {
+        DescriptorPublicKey::SinglePub(key) => input.partial_sigs.contains_key(&key.key),
+        DescriptorPublicKey::XPub(xpub) => {
+            let pubkey = input
+                .bip32_derivation
+                .iter()
+                .find(|s| s.1 .0 == xpub.root_fingerprint(secp))
+                .map(|f| f.0);
+            //TODO check actual derivation matches
+            match pubkey {
+                Some(pubkey) => input.partial_sigs.contains_key(pubkey),
+                None => false,
+            }
+        }
+    })
 }
 
 fn signature_key(
@@ -796,12 +801,13 @@ impl<Ctx: ScriptContext> ExtractPolicy for Miniscript<DescriptorPublicKey, Ctx> 
     fn extract_policy(
         &self,
         signers: &SignersContainer,
+        build_sat: BuildSatisfaction,
         secp: &SecpCtx,
     ) -> Result<Option<Policy>, Error> {
         Ok(match &self.node {
             // Leaves
             Terminal::True | Terminal::False => None,
-            Terminal::PkK(pubkey) => Some(signature(pubkey, signers, secp)),
+            Terminal::PkK(pubkey) => Some(signature(pubkey, signers, build_sat, secp)),
             Terminal::PkH(pubkey_hash) => Some(signature_key(pubkey_hash, signers, secp)),
             Terminal::After(value) => {
                 let mut policy: Policy = SatisfiableItem::AbsoluteTimelock { value: *value }.into();
@@ -811,6 +817,12 @@ impl<Ctx: ScriptContext> ExtractPolicy for Miniscript<DescriptorPublicKey, Ctx> 
                         csv: None,
                     },
                 };
+                if let BuildSatisfaction::PsbtTimelocks { current_height, .. } = build_sat {
+                    let after = After::new(Some(current_height), false);
+                    if Satisfier::<bitcoin::PublicKey>::check_after(&after, *value) {
+                        policy.satisfaction = policy.contribution.clone();
+                    }
+                }
 
                 Some(policy)
             }
@@ -822,6 +834,17 @@ impl<Ctx: ScriptContext> ExtractPolicy for Miniscript<DescriptorPublicKey, Ctx> 
                         csv: Some(*value),
                     },
                 };
+                if let BuildSatisfaction::PsbtTimelocks {
+                    current_height,
+                    input_max_height,
+                    ..
+                } = build_sat
+                {
+                    let older = Older::new(Some(current_height), Some(input_max_height), false);
+                    if Satisfier::<bitcoin::PublicKey>::check_older(&older, *value) {
+                        policy.satisfaction = policy.contribution.clone();
+                    }
+                }
 
                 Some(policy)
             }
@@ -835,7 +858,9 @@ impl<Ctx: ScriptContext> ExtractPolicy for Miniscript<DescriptorPublicKey, Ctx> 
             Terminal::Hash160(hash) => {
                 Some(SatisfiableItem::Hash160Preimage { hash: *hash }.into())
             }
-            Terminal::Multi(k, pks) => Policy::make_multisig(pks, signers, *k, false, secp)?,
+            Terminal::Multi(k, pks) => {
+                Policy::make_multisig(pks, signers, build_sat, *k, false, secp)?
+            }
             // Identities
             Terminal::Alt(inner)
             | Terminal::Swap(inner)
@@ -843,31 +868,31 @@ impl<Ctx: ScriptContext> ExtractPolicy for Miniscript<DescriptorPublicKey, Ctx> 
             | Terminal::DupIf(inner)
             | Terminal::Verify(inner)
             | Terminal::NonZero(inner)
-            | Terminal::ZeroNotEqual(inner) => inner.extract_policy(signers, secp)?,
+            | Terminal::ZeroNotEqual(inner) => inner.extract_policy(signers, build_sat, secp)?,
             // Complex policies
             Terminal::AndV(a, b) | Terminal::AndB(a, b) => Policy::make_and(
-                a.extract_policy(signers, secp)?,
-                b.extract_policy(signers, secp)?,
+                a.extract_policy(signers, build_sat, secp)?,
+                b.extract_policy(signers, build_sat, secp)?,
             )?,
             Terminal::AndOr(x, y, z) => Policy::make_or(
                 Policy::make_and(
-                    x.extract_policy(signers, secp)?,
-                    y.extract_policy(signers, secp)?,
+                    x.extract_policy(signers, build_sat, secp)?,
+                    y.extract_policy(signers, build_sat, secp)?,
                 )?,
-                z.extract_policy(signers, secp)?,
+                z.extract_policy(signers, build_sat, secp)?,
             )?,
             Terminal::OrB(a, b)
             | Terminal::OrD(a, b)
             | Terminal::OrC(a, b)
             | Terminal::OrI(a, b) => Policy::make_or(
-                a.extract_policy(signers, secp)?,
-                b.extract_policy(signers, secp)?,
+                a.extract_policy(signers, build_sat, secp)?,
+                b.extract_policy(signers, build_sat, secp)?,
             )?,
             Terminal::Thresh(k, nodes) => {
                 let mut threshold = *k;
                 let mapped: Vec<_> = nodes
                     .iter()
-                    .map(|n| n.extract_policy(signers, secp))
+                    .map(|n| n.extract_policy(signers, build_sat, secp))
                     .collect::<Result<Vec<_>, _>>()?
                     .into_iter()
                     .flatten()
@@ -886,20 +911,51 @@ impl<Ctx: ScriptContext> ExtractPolicy for Miniscript<DescriptorPublicKey, Ctx> 
     }
 }
 
+/// Options to build the satisfaction field in the policy
+#[derive(Debug, Clone, Copy)]
+pub enum BuildSatisfaction<'a> {
+    /// Don't generate `satisfaction` field
+    None,
+    /// Analyze the given PSBT to check for existing signatures
+    Psbt(&'a PSBT),
+    /// Like `Psbt` variant and also check for expired timelocks
+    PsbtTimelocks {
+        /// give PSBT
+        psbt: &'a PSBT,
+        /// Current blockchain height
+        current_height: u32,
+        /// The highest confirmation height between the inputs
+        /// CSV should consider different inputs, but we consider the worst condition for the tx as whole
+        input_max_height: u32,
+    },
+}
+impl<'a> BuildSatisfaction<'a> {
+    fn psbt(&self) -> Option<&'a PSBT> {
+        match self {
+            BuildSatisfaction::None => None,
+            BuildSatisfaction::Psbt(psbt) => Some(psbt),
+            BuildSatisfaction::PsbtTimelocks { psbt, .. } => Some(psbt),
+        }
+    }
+}
+
 impl ExtractPolicy for Descriptor<DescriptorPublicKey> {
     fn extract_policy(
         &self,
         signers: &SignersContainer,
+        build_sat: BuildSatisfaction,
         secp: &SecpCtx,
     ) -> Result<Option<Policy>, Error> {
         fn make_sortedmulti<Ctx: ScriptContext>(
             keys: &SortedMultiVec<DescriptorPublicKey, Ctx>,
             signers: &SignersContainer,
+            build_sat: BuildSatisfaction,
             secp: &SecpCtx,
         ) -> Result<Option<Policy>, Error> {
             Ok(Policy::make_multisig(
                 keys.pks.as_ref(),
                 signers,
+                build_sat,
                 keys.k,
                 true,
                 secp,
@@ -907,22 +963,24 @@ impl ExtractPolicy for Descriptor<DescriptorPublicKey> {
         }
 
         match self {
-            Descriptor::Pkh(pk) => Ok(Some(signature(pk.as_inner(), signers, secp))),
-            Descriptor::Wpkh(pk) => Ok(Some(signature(pk.as_inner(), signers, secp))),
+            Descriptor::Pkh(pk) => Ok(Some(signature(pk.as_inner(), signers, build_sat, secp))),
+            Descriptor::Wpkh(pk) => Ok(Some(signature(pk.as_inner(), signers, build_sat, secp))),
             Descriptor::Sh(sh) => match sh.as_inner() {
-                ShInner::Wpkh(pk) => Ok(Some(signature(pk.as_inner(), signers, secp))),
-                ShInner::Ms(ms) => Ok(ms.extract_policy(signers, secp)?),
-                ShInner::SortedMulti(ref keys) => make_sortedmulti(keys, signers, secp),
+                ShInner::Wpkh(pk) => Ok(Some(signature(pk.as_inner(), signers, build_sat, secp))),
+                ShInner::Ms(ms) => Ok(ms.extract_policy(signers, build_sat, secp)?),
+                ShInner::SortedMulti(ref keys) => make_sortedmulti(keys, signers, build_sat, secp),
                 ShInner::Wsh(wsh) => match wsh.as_inner() {
-                    WshInner::Ms(ms) => Ok(ms.extract_policy(signers, secp)?),
-                    WshInner::SortedMulti(ref keys) => make_sortedmulti(keys, signers, secp),
+                    WshInner::Ms(ms) => Ok(ms.extract_policy(signers, build_sat, secp)?),
+                    WshInner::SortedMulti(ref keys) => {
+                        make_sortedmulti(keys, signers, build_sat, secp)
+                    }
                 },
             },
             Descriptor::Wsh(wsh) => match wsh.as_inner() {
-                WshInner::Ms(ms) => Ok(ms.extract_policy(signers, secp)?),
-                WshInner::SortedMulti(ref keys) => make_sortedmulti(keys, signers, secp),
+                WshInner::Ms(ms) => Ok(ms.extract_policy(signers, build_sat, secp)?),
+                WshInner::SortedMulti(ref keys) => make_sortedmulti(keys, signers, build_sat, secp),
             },
-            Descriptor::Bare(ms) => Ok(ms.as_inner().extract_policy(signers, secp)?),
+            Descriptor::Bare(ms) => Ok(ms.as_inner().extract_policy(signers, build_sat, secp)?),
         }
     }
 }
@@ -978,7 +1036,7 @@ mod test {
             .unwrap();
         let signers_container = Arc::new(SignersContainer::from(keymap));
         let policy = wallet_desc
-            .extract_policy(&signers_container, &secp)
+            .extract_policy(&signers_container, BuildSatisfaction::None, &secp)
             .unwrap()
             .unwrap();
 
@@ -993,7 +1051,7 @@ mod test {
             .unwrap();
         let signers_container = Arc::new(SignersContainer::from(keymap));
         let policy = wallet_desc
-            .extract_policy(&signers_container, &secp)
+            .extract_policy(&signers_container, BuildSatisfaction::None, &secp)
             .unwrap()
             .unwrap();
 
@@ -1017,7 +1075,7 @@ mod test {
             .unwrap();
         let signers_container = Arc::new(SignersContainer::from(keymap));
         let policy = wallet_desc
-            .extract_policy(&signers_container, &secp)
+            .extract_policy(&signers_container, BuildSatisfaction::None, &secp)
             .unwrap()
             .unwrap();
 
@@ -1049,7 +1107,7 @@ mod test {
             .unwrap();
         let signers_container = Arc::new(SignersContainer::from(keymap));
         let policy = wallet_desc
-            .extract_policy(&signers_container, &secp)
+            .extract_policy(&signers_container, BuildSatisfaction::None, &secp)
             .unwrap()
             .unwrap();
         assert!(
@@ -1081,7 +1139,7 @@ mod test {
             .unwrap();
         let signers_container = Arc::new(SignersContainer::from(keymap));
         let policy = wallet_desc
-            .extract_policy(&signers_container, &secp)
+            .extract_policy(&signers_container, BuildSatisfaction::None, &secp)
             .unwrap()
             .unwrap();
 
@@ -1113,7 +1171,7 @@ mod test {
             .unwrap();
         let signers_container = Arc::new(SignersContainer::from(keymap));
         let policy = wallet_desc
-            .extract_policy(&signers_container, &secp)
+            .extract_policy(&signers_container, BuildSatisfaction::None, &secp)
             .unwrap()
             .unwrap();
 
@@ -1146,7 +1204,7 @@ mod test {
         let single_key = wallet_desc.derive(0);
         let signers_container = Arc::new(SignersContainer::from(keymap));
         let policy = single_key
-            .extract_policy(&signers_container, &secp)
+            .extract_policy(&signers_container, BuildSatisfaction::None, &secp)
             .unwrap()
             .unwrap();
 
@@ -1162,7 +1220,7 @@ mod test {
         let single_key = wallet_desc.derive(0);
         let signers_container = Arc::new(SignersContainer::from(keymap));
         let policy = single_key
-            .extract_policy(&signers_container, &secp)
+            .extract_policy(&signers_container, BuildSatisfaction::None, &secp)
             .unwrap()
             .unwrap();
 
@@ -1189,7 +1247,7 @@ mod test {
         let single_key = wallet_desc.derive(0);
         let signers_container = Arc::new(SignersContainer::from(keymap));
         let policy = single_key
-            .extract_policy(&signers_container, &secp)
+            .extract_policy(&signers_container, BuildSatisfaction::None, &secp)
             .unwrap()
             .unwrap();
 
@@ -1232,7 +1290,7 @@ mod test {
             .unwrap();
         let signers_container = Arc::new(SignersContainer::from(keymap));
         let policy = wallet_desc
-            .extract_policy(&signers_container, &secp)
+            .extract_policy(&signers_container, BuildSatisfaction::None, &secp)
             .unwrap()
             .unwrap();
 
@@ -1271,7 +1329,7 @@ mod test {
             .unwrap();
         let signers_container = Arc::new(SignersContainer::from(keymap));
         let policy = wallet_desc
-            .extract_policy(&signers_container, &secp)
+            .extract_policy(&signers_container, BuildSatisfaction::None, &secp)
             .unwrap()
             .unwrap();
         println!("desc policy = {:?}", policy); // TODO remove
@@ -1296,7 +1354,7 @@ mod test {
             .unwrap();
         let signers_container = Arc::new(SignersContainer::from(keymap));
         let policy = wallet_desc
-            .extract_policy(&signers_container, &secp)
+            .extract_policy(&signers_container, BuildSatisfaction::None, &secp)
             .unwrap()
             .unwrap();
         println!("desc policy = {:?}", policy); // TODO remove
@@ -1314,7 +1372,7 @@ mod test {
             .unwrap();
         let signers_container = Arc::new(SignersContainer::from(keymap));
         let policy = wallet_desc
-            .extract_policy(&signers_container, &secp)
+            .extract_policy(&signers_container, BuildSatisfaction::None, &secp)
             .unwrap()
             .unwrap();
 
@@ -1337,7 +1395,7 @@ mod test {
         let signers = keymap.into();
 
         let policy = wallet_desc
-            .extract_policy(&signers, &secp)
+            .extract_policy(&signers, BuildSatisfaction::None, &secp)
             .unwrap()
             .unwrap();
 
@@ -1369,11 +1427,12 @@ mod test {
         assert_eq!(out_of_range, Err(PolicyError::IndexOutOfRange(5)));
     }
 
+    const ALICE_TPRV_STR:&str = "tprv8ZgxMBicQKsPf6T5X327efHnvJDr45Xnb8W4JifNWtEoqXu9MRYS4v1oYe6DFcMVETxy5w3bqpubYRqvcVTqovG1LifFcVUuJcbwJwrhYzP";
+    const BOB_TPRV_STR:&str = "tprv8ZgxMBicQKsPeinZ155cJAn117KYhbaN6MV3WeG6sWhxWzcvX1eg1awd4C9GpUN1ncLEM2rzEvunAg3GizdZD4QPPCkisTz99tXXB4wZArp";
+    const ALICE_BOB_PATH: &str = "m/0'";
+
     #[test]
     fn test_extract_satisfaction() {
-        const ALICE_TPRV_STR:&str = "tprv8ZgxMBicQKsPf6T5X327efHnvJDr45Xnb8W4JifNWtEoqXu9MRYS4v1oYe6DFcMVETxy5w3bqpubYRqvcVTqovG1LifFcVUuJcbwJwrhYzP";
-        const BOB_TPRV_STR:&str = "tprv8ZgxMBicQKsPeinZ155cJAn117KYhbaN6MV3WeG6sWhxWzcvX1eg1awd4C9GpUN1ncLEM2rzEvunAg3GizdZD4QPPCkisTz99tXXB4wZArp";
-        const ALICE_BOB_PATH: &str = "m/0'";
         const ALICE_SIGNED_PSBT: &str = "cHNidP8BAFMBAAAAAZb0njwT2wRS3AumaaP3yb7T4MxOePpSWih4Nq+jWChMAQAAAAD/////Af4lAAAAAAAAF6kUXv2Fn+YemPP4PUpNR1ZbU16/eRCHAAAAAAABASuJJgAAAAAAACIAIERw5kTLo9DUH9QDJSClHQwPpC7VGJ+ZMDpa8U+2fzcYIgIDeAtjYQk/Vfu4db2+68hyMKjc38+kWl5sP5QH8L42ZstHMEQCIBj0jLjUeVYXNQ6cqB+gbtvuKMjV54wSgWlm1cfcgpHVAiBa3DtC9l/1Mt4IDCvR7mmwQd3eAP/m5++81euhJNSrgQEBBUdSIQN4C2NhCT9V+7h1vb7ryHIwqNzfz6RaXmw/lAfwvjZmyyEC+GE/y+LptI8xmiR6sOe998IGzybox0Qfz4+BQl1nmYhSriIGAvhhP8vi6bSPMZokerDnvffCBs8m6MdEH8+PgUJdZ5mIDBwu7j4AAACAAAAAACIGA3gLY2EJP1X7uHW9vuvIcjCo3N/PpFpebD+UB/C+NmbLDMkRfC4AAACAAAAAAAAA";
         const BOB_SIGNED_PSBT: &str =   "cHNidP8BAFMBAAAAAZb0njwT2wRS3AumaaP3yb7T4MxOePpSWih4Nq+jWChMAQAAAAD/////Af4lAAAAAAAAF6kUXv2Fn+YemPP4PUpNR1ZbU16/eRCHAAAAAAABASuJJgAAAAAAACIAIERw5kTLo9DUH9QDJSClHQwPpC7VGJ+ZMDpa8U+2fzcYIgIC+GE/y+LptI8xmiR6sOe998IGzybox0Qfz4+BQl1nmYhIMEUCIQD5zDtM5MwklurwJ5aW76RsO36Iqyu+6uMdVlhL6ws2GQIgesAiz4dbKS7UmhDsC/c1ezu0o6hp00UUtsCMfUZ4anYBAQVHUiEDeAtjYQk/Vfu4db2+68hyMKjc38+kWl5sP5QH8L42ZsshAvhhP8vi6bSPMZokerDnvffCBs8m6MdEH8+PgUJdZ5mIUq4iBgL4YT/L4um0jzGaJHqw5733wgbPJujHRB/Pj4FCXWeZiAwcLu4+AAAAgAAAAAAiBgN4C2NhCT9V+7h1vb7ryHIwqNzfz6RaXmw/lAfwvjZmywzJEXwuAAAAgAAAAAAAAA==";
         const ALICE_BOB_SIGNED_PSBT: &str =   "cHNidP8BAFMBAAAAAZb0njwT2wRS3AumaaP3yb7T4MxOePpSWih4Nq+jWChMAQAAAAD/////Af4lAAAAAAAAF6kUXv2Fn+YemPP4PUpNR1ZbU16/eRCHAAAAAAABASuJJgAAAAAAACIAIERw5kTLo9DUH9QDJSClHQwPpC7VGJ+ZMDpa8U+2fzcYIgIC+GE/y+LptI8xmiR6sOe998IGzybox0Qfz4+BQl1nmYhIMEUCIQD5zDtM5MwklurwJ5aW76RsO36Iqyu+6uMdVlhL6ws2GQIgesAiz4dbKS7UmhDsC/c1ezu0o6hp00UUtsCMfUZ4anYBIgIDeAtjYQk/Vfu4db2+68hyMKjc38+kWl5sP5QH8L42ZstHMEQCIBj0jLjUeVYXNQ6cqB+gbtvuKMjV54wSgWlm1cfcgpHVAiBa3DtC9l/1Mt4IDCvR7mmwQd3eAP/m5++81euhJNSrgQEBBUdSIQN4C2NhCT9V+7h1vb7ryHIwqNzfz6RaXmw/lAfwvjZmyyEC+GE/y+LptI8xmiR6sOe998IGzybox0Qfz4+BQl1nmYhSriIGAvhhP8vi6bSPMZokerDnvffCBs8m6MdEH8+PgUJdZ5mIDBwu7j4AAACAAAAAACIGA3gLY2EJP1X7uHW9vuvIcjCo3N/PpFpebD+UB/C+NmbLDMkRfC4AAACAAAAAAAEHAAEI2wQARzBEAiAY9Iy41HlWFzUOnKgfoG7b7ijI1eeMEoFpZtXH3IKR1QIgWtw7QvZf9TLeCAwr0e5psEHd3gD/5ufvvNXroSTUq4EBSDBFAiEA+cw7TOTMJJbq8CeWlu+kbDt+iKsrvurjHVZYS+sLNhkCIHrAIs+HWyku1JoQ7Av3NXs7tKOoadNFFLbAjH1GeGp2AUdSIQN4C2NhCT9V+7h1vb7ryHIwqNzfz6RaXmw/lAfwvjZmyyEC+GE/y+LptI8xmiR6sOe998IGzybox0Qfz4+BQl1nmYhSrgAA";
@@ -1400,45 +1459,138 @@ mod test {
 
         let signers_container = Arc::new(SignersContainer::from(keymap));
 
-        let original_policy = wallet_desc
-            .extract_policy(&signers_container, &secp)
+        let psbt: PSBT = deserialize(&base64::decode(ALICE_SIGNED_PSBT).unwrap()).unwrap();
+
+        let policy_alice_psbt = wallet_desc
+            .extract_policy(&signers_container, BuildSatisfaction::Psbt(&psbt), &secp)
             .unwrap()
             .unwrap();
+        println!("{}", serde_json::to_string(&policy_alice_psbt).unwrap());
 
-        let psbt: PSBT = deserialize(&base64::decode(ALICE_SIGNED_PSBT).unwrap()).unwrap();
-        let mut policy_clone = original_policy.clone();
-        policy_clone
-            .fill_satisfactions(&psbt, &wallet_desc, &secp)
-            .unwrap();
         assert!(
-            matches!(&policy_clone.satisfaction, Satisfaction::Partial { n, m, items, .. } if n == &2
+            matches!(&policy_alice_psbt.satisfaction, Satisfaction::Partial { n, m, items, .. } if n == &2
              && m == &2
              && items == &vec![0]
             )
         );
 
-        let mut policy_clone = original_policy.clone();
         let psbt: PSBT = deserialize(&base64::decode(BOB_SIGNED_PSBT).unwrap()).unwrap();
-        policy_clone
-            .fill_satisfactions(&psbt, &wallet_desc, &secp)
+        let policy_bob_psbt = wallet_desc
+            .extract_policy(&signers_container, BuildSatisfaction::Psbt(&psbt), &secp)
+            .unwrap()
             .unwrap();
+        //println!("{}", serde_json::to_string(&policy_bob_psbt).unwrap());
+
         assert!(
-            matches!(&policy_clone.satisfaction, Satisfaction::Partial { n, m, items, .. } if n == &2
+            matches!(&policy_bob_psbt.satisfaction, Satisfaction::Partial { n, m, items, .. } if n == &2
              && m == &2
              && items == &vec![1]
             )
         );
 
-        let mut policy_clone = original_policy;
         let psbt: PSBT = deserialize(&base64::decode(ALICE_BOB_SIGNED_PSBT).unwrap()).unwrap();
-        policy_clone
-            .fill_satisfactions(&psbt, &wallet_desc, &secp)
+        let policy_alice_bob_psbt = wallet_desc
+            .extract_policy(&signers_container, BuildSatisfaction::Psbt(&psbt), &secp)
+            .unwrap()
             .unwrap();
         assert!(
-            matches!(&policy_clone.satisfaction, Satisfaction::PartialComplete { n, m, items, .. } if n == &2
+            matches!(&policy_alice_bob_psbt.satisfaction, Satisfaction::PartialComplete { n, m, items, .. } if n == &2
              && m == &2
              && items == &vec![0, 1]
             )
         );
+    }
+
+    #[test]
+    fn test_extract_satisfaction_timelock() {
+        //const PSBT_POLICY_CONSIDER_TIMELOCK_NOT_EXPIRED: &str = "cHNidP8BAFMBAAAAAdld52uJFGT7Yde0YZdSVh2vL020Zm2exadH5R4GSNScAAAAAAD/////ATrcAAAAAAAAF6kUXv2Fn+YemPP4PUpNR1ZbU16/eRCHAAAAAAABASvI3AAAAAAAACIAILhzvvcBzw/Zfnc9ispRK0PCahxn1F6RHXTZAmw5tqNPAQVSdmNSsmlofCEDeAtjYQk/Vfu4db2+68hyMKjc38+kWl5sP5QH8L42Zsusk3whAvhhP8vi6bSPMZokerDnvffCBs8m6MdEH8+PgUJdZ5mIrJNShyIGAvhhP8vi6bSPMZokerDnvffCBs8m6MdEH8+PgUJdZ5mIDBwu7j4AAACAAAAAACIGA3gLY2EJP1X7uHW9vuvIcjCo3N/PpFpebD+UB/C+NmbLDMkRfC4AAACAAAAAAAAA";
+        const PSBT_POLICY_CONSIDER_TIMELOCK_EXPIRED:     &str = "cHNidP8BAFMCAAAAAdld52uJFGT7Yde0YZdSVh2vL020Zm2exadH5R4GSNScAAAAAAACAAAAATrcAAAAAAAAF6kUXv2Fn+YemPP4PUpNR1ZbU16/eRCHAAAAAAABASvI3AAAAAAAACIAILhzvvcBzw/Zfnc9ispRK0PCahxn1F6RHXTZAmw5tqNPAQVSdmNSsmlofCEDeAtjYQk/Vfu4db2+68hyMKjc38+kWl5sP5QH8L42Zsusk3whAvhhP8vi6bSPMZokerDnvffCBs8m6MdEH8+PgUJdZ5mIrJNShyIGAvhhP8vi6bSPMZokerDnvffCBs8m6MdEH8+PgUJdZ5mIDBwu7j4AAACAAAAAACIGA3gLY2EJP1X7uHW9vuvIcjCo3N/PpFpebD+UB/C+NmbLDMkRfC4AAACAAAAAAAAA";
+        const PSBT_POLICY_CONSIDER_TIMELOCK_EXPIRED_SIGNED: &str ="cHNidP8BAFMCAAAAAdld52uJFGT7Yde0YZdSVh2vL020Zm2exadH5R4GSNScAAAAAAACAAAAATrcAAAAAAAAF6kUXv2Fn+YemPP4PUpNR1ZbU16/eRCHAAAAAAABASvI3AAAAAAAACIAILhzvvcBzw/Zfnc9ispRK0PCahxn1F6RHXTZAmw5tqNPIgIDeAtjYQk/Vfu4db2+68hyMKjc38+kWl5sP5QH8L42ZstIMEUCIQCtZxNm6H3Ux3pnc64DSpgohMdBj+57xhFHcURYt2BpPAIgG3OnI7bcj/3GtWX1HHyYGSI7QGa/zq5YnsmK1Cw29NABAQVSdmNSsmlofCEDeAtjYQk/Vfu4db2+68hyMKjc38+kWl5sP5QH8L42Zsusk3whAvhhP8vi6bSPMZokerDnvffCBs8m6MdEH8+PgUJdZ5mIrJNShyIGAvhhP8vi6bSPMZokerDnvffCBs8m6MdEH8+PgUJdZ5mIDBwu7j4AAACAAAAAACIGA3gLY2EJP1X7uHW9vuvIcjCo3N/PpFpebD+UB/C+NmbLDMkRfC4AAACAAAAAAAEHAAEIoAQASDBFAiEArWcTZuh91Md6Z3OuA0qYKITHQY/ue8YRR3FEWLdgaTwCIBtzpyO23I/9xrVl9Rx8mBkiO0Bmv86uWJ7JitQsNvTQAQEBUnZjUrJpaHwhA3gLY2EJP1X7uHW9vuvIcjCo3N/PpFpebD+UB/C+NmbLrJN8IQL4YT/L4um0jzGaJHqw5733wgbPJujHRB/Pj4FCXWeZiKyTUocAAA==";
+
+        let secp = Secp256k1::new();
+
+        let (prvkey_alice, _, _) = setup_keys(ALICE_TPRV_STR, ALICE_BOB_PATH, &secp);
+        let (prvkey_bob, _, _) = setup_keys(BOB_TPRV_STR, ALICE_BOB_PATH, &secp);
+
+        let desc =
+            descriptor!(wsh(thresh(2,d:v:older(2),s:pk(prvkey_alice),s:pk(prvkey_bob)))).unwrap();
+
+        let (wallet_desc, keymap) = desc
+            .into_wallet_descriptor(&secp, Network::Testnet)
+            .unwrap();
+        let signers_container = Arc::new(SignersContainer::from(keymap));
+
+        let addr = wallet_desc
+            .as_derived(0, &secp)
+            .address(Network::Testnet)
+            .unwrap();
+        assert_eq!(
+            "tb1qhpemaacpeu8ajlnh8k9v55ftg0px58r8630fz8t5mypxcwdk5d8sum522g",
+            addr.to_string()
+        );
+
+        let psbt: PSBT =
+            deserialize(&base64::decode(PSBT_POLICY_CONSIDER_TIMELOCK_EXPIRED).unwrap()).unwrap();
+
+        let build_sat = BuildSatisfaction::PsbtTimelocks {
+            psbt: &psbt,
+            current_height: 10,
+            input_max_height: 9,
+        };
+
+        let policy = wallet_desc
+            .extract_policy(&signers_container, build_sat, &secp)
+            .unwrap()
+            .unwrap();
+        assert!(
+            matches!(&policy.satisfaction, Satisfaction::Partial { n, m, items, .. } if n == &3
+             && m == &2
+             && items.is_empty()
+            )
+        );
+
+        println!("{}", serde_json::to_string(&policy).unwrap());
+
+        let build_sat_expired = BuildSatisfaction::PsbtTimelocks {
+            psbt: &psbt,
+            current_height: 12,
+            input_max_height: 9,
+        };
+
+        let policy_expired = wallet_desc
+            .extract_policy(&signers_container, build_sat_expired, &secp)
+            .unwrap()
+            .unwrap();
+        assert!(
+            matches!(&policy_expired.satisfaction, Satisfaction::Partial { n, m, items, .. } if n == &3
+             && m == &2
+             && items == &vec![0]
+            )
+        );
+
+        println!("{}", serde_json::to_string(&policy_expired).unwrap());
+
+        let psbt_signed: PSBT =
+            deserialize(&base64::decode(PSBT_POLICY_CONSIDER_TIMELOCK_EXPIRED_SIGNED).unwrap())
+                .unwrap();
+
+        let build_sat_expired_signed = BuildSatisfaction::PsbtTimelocks {
+            psbt: &psbt_signed,
+            current_height: 12,
+            input_max_height: 9,
+        };
+
+        let policy_expired_signed = wallet_desc
+            .extract_policy(&signers_container, build_sat_expired_signed, &secp)
+            .unwrap()
+            .unwrap();
+        assert!(
+            matches!(&policy_expired_signed.satisfaction, Satisfaction::PartialComplete { n, m, items, .. } if n == &3
+             && m == &2
+             && items == &vec![0, 1]
+            )
+        );
+
+        println!("{}", serde_json::to_string(&policy_expired_signed).unwrap());
     }
 }
