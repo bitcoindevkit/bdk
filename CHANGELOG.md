@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Misc
 #### Changed
 - New minimum supported rust version is 1.46.0
+- Changed `AnyBlockchainConfig` to use serde tagged representation.
 
 ### Descriptor
 #### Added

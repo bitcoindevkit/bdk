@@ -361,7 +361,7 @@ struct EsploraGetHistory {
 }
 
 /// Configuration for an [`EsploraBlockchain`]
-#[derive(Debug, serde::Deserialize, serde::Serialize)]
+#[derive(Debug, serde::Deserialize, serde::Serialize, Clone, PartialEq)]
 pub struct EsploraBlockchainConfig {
     /// Base URL of the esplora service
     ///

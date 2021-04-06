@@ -177,7 +177,34 @@ impl_from!(compact_filters::CompactFiltersBlockchain, AnyBlockchain, CompactFilt
 /// This allows storing a single configuration that can be loaded into an [`AnyBlockchain`]
 /// instance. Wallets that plan to offer users the ability to switch blockchain backend at runtime
 /// will find this particularly useful.
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+///
+/// This type can be serialized from a JSON object like:
+///
+/// ```
+/// # #[cfg(feature = "electrum")]
+/// # {
+/// use bdk::blockchain::{electrum::ElectrumBlockchainConfig, AnyBlockchainConfig};
+/// let config: AnyBlockchainConfig = serde_json::from_str(
+///     r#"{
+///    "type" : "electrum",
+///    "url" : "ssl://electrum.blockstream.info:50002",
+///    "retry": 2
+/// }"#,
+/// )
+/// .unwrap();
+/// assert_eq!(
+///     config,
+///     AnyBlockchainConfig::Electrum(ElectrumBlockchainConfig {
+///         url: "ssl://electrum.blockstream.info:50002".into(),
+///         retry: 2,
+///         socks5: None,
+///         timeout: None
+///     })
+/// );
+/// # }
+/// ```
+#[derive(Debug, serde::Serialize, serde::Deserialize, Clone, PartialEq)]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum AnyBlockchainConfig {
     #[cfg(feature = "electrum")]
     #[cfg_attr(docsrs, doc(cfg(feature = "electrum")))]
