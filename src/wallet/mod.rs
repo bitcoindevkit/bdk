@@ -2431,8 +2431,7 @@ mod test {
                 .unsigned_tx
                 .input
                 .iter()
-                .find(|input| input.previous_output == utxo.outpoint)
-                .is_some(),
+                .any(|input| input.previous_output == utxo.outpoint),
             "foreign_utxo should be in there"
         );
 
