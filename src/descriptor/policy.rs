@@ -870,7 +870,7 @@ impl<Ctx: ScriptContext> ExtractPolicy for Miniscript<DescriptorPublicKey, Ctx> 
                     .map(|n| n.extract_policy(signers, secp))
                     .collect::<Result<Vec<_>, _>>()?
                     .into_iter()
-                    .filter_map(|x| x)
+                    .flatten()
                     .collect();
 
                 if mapped.len() < nodes.len() {
