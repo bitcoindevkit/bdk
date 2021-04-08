@@ -1429,7 +1429,7 @@ mod test {
             )
         );
 
-        let mut policy_clone = original_policy.clone();
+        let mut policy_clone = original_policy;
         let psbt: PSBT = deserialize(&base64::decode(ALICE_BOB_SIGNED_PSBT).unwrap()).unwrap();
         policy_clone
             .fill_satisfactions(&psbt, &wallet_desc, &secp)
