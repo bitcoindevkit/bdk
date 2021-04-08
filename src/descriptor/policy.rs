@@ -1023,8 +1023,8 @@ mod test {
 
         assert!(
             matches!(&policy.item, Multisig { keys, threshold } if threshold == &2usize
-            && &keys[0].fingerprint.unwrap() == &fingerprint0
-            && &keys[1].fingerprint.unwrap() == &fingerprint1)
+            && keys[0].fingerprint.unwrap() == fingerprint0
+            && keys[1].fingerprint.unwrap() == fingerprint1)
         );
         // TODO should this be "Satisfaction::None" since we have no prv keys?
         // TODO should items and conditions not be empty?
@@ -1054,8 +1054,8 @@ mod test {
             .unwrap();
         assert!(
             matches!(&policy.item, Multisig { keys, threshold } if threshold == &2usize
-            && &keys[0].fingerprint.unwrap() == &fingerprint0
-            && &keys[1].fingerprint.unwrap() == &fingerprint1)
+            && keys[0].fingerprint.unwrap() == fingerprint0
+            && keys[1].fingerprint.unwrap() == fingerprint1)
         );
 
         assert!(
