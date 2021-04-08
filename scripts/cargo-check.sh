@@ -3,7 +3,7 @@
 # Run various invocations of cargo check
 
 features=( "default" "compiler" "electrum" "esplora" "compact_filters" "key-value-db" "async-interface" "all-keys" "keys-bip39" )
-toolchains=( "+stable" "+1.46" "+nightly" )
+toolchains=( "+stable" "+1.46" )
 
 main() {
     check_src
@@ -17,6 +17,7 @@ check_src() {
 
         for feature in "${features[@]}"; do
             touch_files
+            echo $cmd --features "$feature"
             $cmd --features "$feature"
         done
     done
