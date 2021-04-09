@@ -528,7 +528,7 @@ impl<'a, B, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderConte
     ///
     /// This will use the default nSequence value of `0xFFFFFFFD`.
     pub fn enable_rbf(&mut self) -> &mut Self {
-        self.params.rbf = Some(RBFValue::Default);
+        self.params.rbf = Some(RbfValue::Default);
         self
     }
 
@@ -540,7 +540,7 @@ impl<'a, B, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderConte
     /// If the `nsequence` is higher than `0xFFFFFFFD` an error will be thrown, since it would not
     /// be a valid nSequence to signal RBF.
     pub fn enable_rbf_with_sequence(&mut self, nsequence: u32) -> &mut Self {
-        self.params.rbf = Some(RBFValue::Value(nsequence));
+        self.params.rbf = Some(RbfValue::Value(nsequence));
         self
     }
 }
