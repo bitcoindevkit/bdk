@@ -26,7 +26,7 @@ use crate::wallet::time::Instant;
 use crate::wallet::utils::ChunksIterator;
 
 #[derive(Debug)]
-pub struct ELSGetHistoryRes {
+pub struct ElsGetHistoryRes {
     pub height: i32,
     pub tx_hash: Txid,
 }
@@ -37,7 +37,7 @@ pub trait ElectrumLikeSync {
     fn els_batch_script_get_history<'s, I: IntoIterator<Item = &'s Script> + Clone>(
         &self,
         scripts: I,
-    ) -> Result<Vec<Vec<ELSGetHistoryRes>>, Error>;
+    ) -> Result<Vec<Vec<ElsGetHistoryRes>>, Error>;
 
     fn els_batch_transaction_get<'s, I: IntoIterator<Item = &'s Txid> + Clone>(
         &self,
@@ -77,7 +77,7 @@ pub trait ElectrumLikeSync {
 
             for (i, chunk) in ChunksIterator::new(script_iter, stop_gap).enumerate() {
                 // TODO if i == last, should create another chunk of addresses in db
-                let call_result: Vec<Vec<ELSGetHistoryRes>> =
+                let call_result: Vec<Vec<ElsGetHistoryRes>> =
                     maybe_await!(self.els_batch_script_get_history(chunk.iter()))?;
                 let max_index = call_result
                     .iter()
@@ -87,7 +87,7 @@ pub trait ElectrumLikeSync {
                 if let Some(max) = max_index {
                     max_indexes.insert(keychain, max + (i * chunk_size) as u32);
                 }
-                let flattened: Vec<ELSGetHistoryRes> = call_result.into_iter().flatten().collect();
+                let flattened: Vec<ElsGetHistoryRes> = call_result.into_iter().flatten().collect();
                 debug!("#{} of {:?} results:{}", i, keychain, flattened.len());
                 if flattened.is_empty() {
                     // Didn't find anything in the last `stop_gap` script_pubkeys, breaking

@@ -25,22 +25,22 @@ use crate::error::Error;
 
 pub(crate) const BURIED_CONFIRMATIONS: usize = 100;
 
-pub struct CFSync {
+pub struct CfSync {
     headers_store: Arc<ChainStore<Full>>,
-    cf_store: Arc<CFStore>,
+    cf_store: Arc<CfStore>,
     skip_blocks: usize,
     bundles: Mutex<VecDeque<(BundleStatus, FilterHeader, usize)>>,
 }
 
-impl CFSync {
+impl CfSync {
     pub fn new(
         headers_store: Arc<ChainStore<Full>>,
         skip_blocks: usize,
         filter_type: u8,
     ) -> Result<Self, CompactFiltersError> {
-        let cf_store = Arc::new(CFStore::new(&headers_store, filter_type)?);
+        let cf_store = Arc::new(CfStore::new(&headers_store, filter_type)?);
 
-        Ok(CFSync {
+        Ok(CfSync {
             headers_store,
             cf_store,
             skip_blocks,
@@ -151,7 +151,7 @@ impl CFSync {
                     checkpoint,
                     headers_resp.filter_hashes,
                 )? {
-                    BundleStatus::CFHeaders { cf_headers } => cf_headers,
+                    BundleStatus::CfHeaders { cf_headers } => cf_headers,
                     _ => return Err(CompactFiltersError::InvalidResponse),
                 };
 
@@ -171,7 +171,7 @@ impl CFSync {
                     .cf_store
                     .advance_to_cf_filters(index, checkpoint, cf_headers, filters)?;
             }
-            if let BundleStatus::CFHeaders { cf_headers } = status {
+            if let BundleStatus::CfHeaders { cf_headers } = status {
                 log::trace!("status: CFHeaders");
 
                 peer.get_cf_filters(

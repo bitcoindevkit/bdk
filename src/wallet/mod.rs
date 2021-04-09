@@ -24,8 +24,9 @@ use bitcoin::secp256k1::Secp256k1;
 use bitcoin::consensus::encode::serialize;
 use bitcoin::util::base58;
 use bitcoin::util::psbt::raw::Key as PSBTKey;
+use bitcoin::util::psbt::Input;
 use bitcoin::util::psbt::PartiallySignedTransaction as PSBT;
-use bitcoin::{Address, Network, OutPoint, Script, Transaction, TxOut, Txid};
+use bitcoin::{Address, Network, OutPoint, Script, SigHashType, Transaction, TxOut, Txid};
 
 use miniscript::descriptor::DescriptorTrait;
 use miniscript::psbt::PsbtInputSatisfier;
@@ -58,7 +59,7 @@ use crate::descriptor::{
     Policy, XKeyUtils,
 };
 use crate::error::Error;
-use crate::psbt::PSBTUtils;
+use crate::psbt::PsbtUtils;
 use crate::types::*;
 
 const CACHE_ADDR_BATCH_SIZE: u32 = 100;
@@ -464,13 +465,13 @@ where
             (None, Some(csv)) => csv,
 
             // RBF with a specific value but that value is too high
-            (Some(tx_builder::RBFValue::Value(rbf)), _) if rbf >= 0xFFFFFFFE => {
+            (Some(tx_builder::RbfValue::Value(rbf)), _) if rbf >= 0xFFFFFFFE => {
                 return Err(Error::Generic(
                     "Cannot enable RBF with a nSequence >= 0xFFFFFFFE".into(),
                 ))
             }
             // RBF with a specific value requested, but the value is incompatible with CSV
-            (Some(tx_builder::RBFValue::Value(rbf)), Some(csv))
+            (Some(tx_builder::RbfValue::Value(rbf)), Some(csv))
                 if !check_nsequence_rbf(rbf, csv) =>
             {
                 return Err(Error::Generic(format!(
@@ -480,7 +481,7 @@ where
             }
 
             // RBF enabled with the default value with CSV also enabled. CSV takes precedence
-            (Some(tx_builder::RBFValue::Default), Some(csv)) => csv,
+            (Some(tx_builder::RbfValue::Default), Some(csv)) => csv,
             // Valid RBF, either default or with a specific value. We ignore the `CSV` value
             // because we've already checked it before
             (Some(rbf), _) => rbf.get_value(),
@@ -749,7 +750,7 @@ where
                     .database
                     .borrow()
                     .get_previous_output(&txin.previous_output)?
-                    .ok_or(Error::UnknownUTXO)?;
+                    .ok_or(Error::UnknownUtxo)?;
 
                 let (weight, keychain) = match self
                     .database
@@ -1250,41 +1251,21 @@ where
                 None => continue,
             };
 
-            // Only set it if the params has a custom one, otherwise leave blank which defaults to
-            // SIGHASH_ALL
-            if let Some(sighash_type) = params.sighash {
-                psbt_input.sighash_type = Some(sighash_type);
-            }
-
             match utxo {
                 Utxo::Local(utxo) => {
-                    // Try to find the prev_script in our db to figure out if this is internal or external,
-                    // and the derivation index
-                    let (keychain, child) = match self
-                        .database
-                        .borrow()
-                        .get_path_from_script_pubkey(&utxo.txout.script_pubkey)?
-                    {
-                        Some(x) => x,
-                        None => continue,
-                    };
-
-                    let desc = self.get_descriptor_for_keychain(keychain);
-                    let derived_descriptor = desc.as_derived(child, &self.secp);
-                    psbt_input.bip32_derivation = derived_descriptor.get_hd_keypaths(&self.secp)?;
-
-                    psbt_input.redeem_script = derived_descriptor.psbt_redeem_script();
-                    psbt_input.witness_script = derived_descriptor.psbt_witness_script();
-
-                    let prev_output = input.previous_output;
-                    if let Some(prev_tx) = self.database.borrow().get_raw_tx(&prev_output.txid)? {
-                        if desc.is_witness() {
-                            psbt_input.witness_utxo =
-                                Some(prev_tx.output[prev_output.vout as usize].clone());
-                        }
-                        if !desc.is_witness() || params.force_non_witness_utxo {
-                            psbt_input.non_witness_utxo = Some(prev_tx);
-                        }
+                    *psbt_input = match self.get_psbt_input(
+                        utxo,
+                        params.sighash,
+                        params.force_non_witness_utxo,
+                    ) {
+                        Ok(psbt_input) => psbt_input,
+                        Err(e) => match e {
+                            Error::UnknownUtxo => Input {
+                                sighash_type: params.sighash,
+                                ..Input::default()
+                            },
+                            _ => return Err(e),
+                        },
                     }
                 }
                 Utxo::Foreign {
@@ -1330,6 +1311,45 @@ where
         }
 
         Ok(psbt)
+    }
+
+    /// get the corresponding PSBT Input for a LocalUtxo
+    pub fn get_psbt_input(
+        &self,
+        utxo: LocalUtxo,
+        sighash_type: Option<SigHashType>,
+        force_non_witness_utxo: bool,
+    ) -> Result<Input, Error> {
+        // Try to find the prev_script in our db to figure out if this is internal or external,
+        // and the derivation index
+        let (keychain, child) = self
+            .database
+            .borrow()
+            .get_path_from_script_pubkey(&utxo.txout.script_pubkey)?
+            .ok_or(Error::UnknownUtxo)?;
+
+        let mut psbt_input = Input {
+            sighash_type,
+            ..Input::default()
+        };
+
+        let desc = self.get_descriptor_for_keychain(keychain);
+        let derived_descriptor = desc.as_derived(child, &self.secp);
+        psbt_input.bip32_derivation = derived_descriptor.get_hd_keypaths(&self.secp)?;
+
+        psbt_input.redeem_script = derived_descriptor.psbt_redeem_script();
+        psbt_input.witness_script = derived_descriptor.psbt_witness_script();
+
+        let prev_output = utxo.outpoint;
+        if let Some(prev_tx) = self.database.borrow().get_raw_tx(&prev_output.txid)? {
+            if desc.is_witness() {
+                psbt_input.witness_utxo = Some(prev_tx.output[prev_output.vout as usize].clone());
+            }
+            if !desc.is_witness() || force_non_witness_utxo {
+                psbt_input.non_witness_utxo = Some(prev_tx);
+            }
+        }
+        Ok(psbt_input)
     }
 
     fn add_input_hd_keypaths(&self, psbt: &mut PSBT) -> Result<(), Error> {
@@ -1603,13 +1623,30 @@ mod test {
         )
         .unwrap();
 
-        let txid = crate::populate_test_db!(
-            wallet.database.borrow_mut(),
-            testutils! {
-                @tx ( (@external descriptors, 0) => 50_000 ) (@confirmations 1)
-            },
-            Some(100)
-        );
+        let funding_address_kix = 0;
+
+        let tx_meta = testutils! {
+                @tx ( (@external descriptors, funding_address_kix) => 50_000 ) (@confirmations 1)
+        };
+
+        wallet
+            .database
+            .borrow_mut()
+            .set_script_pubkey(
+                &bitcoin::Address::from_str(&tx_meta.output.iter().next().unwrap().to_address)
+                    .unwrap()
+                    .script_pubkey(),
+                KeychainKind::External,
+                funding_address_kix,
+            )
+            .unwrap();
+        wallet
+            .database
+            .borrow_mut()
+            .set_last_index(KeychainKind::External, funding_address_kix)
+            .unwrap();
+
+        let txid = crate::populate_test_db!(wallet.database.borrow_mut(), tx_meta, Some(100));
 
         (wallet, descriptors, txid)
     }
@@ -1636,9 +1673,9 @@ mod test {
             let fee_rate = $fee_rate.as_sat_vb();
 
             if !dust_change {
-                assert!((tx_fee_rate - fee_rate).abs() < 0.5, format!("Expected fee rate of {}, the tx has {}", fee_rate, tx_fee_rate));
+                assert!((tx_fee_rate - fee_rate).abs() < 0.5, "Expected fee rate of {}, the tx has {}", fee_rate, tx_fee_rate);
             } else {
-                assert!(tx_fee_rate >= fee_rate, format!("Expected fee rate of at least {}, the tx has {}", fee_rate, tx_fee_rate));
+                assert!(tx_fee_rate >= fee_rate, "Expected fee rate of at least {}, the tx has {}", fee_rate, tx_fee_rate);
             }
         });
     }
@@ -2010,7 +2047,7 @@ mod test {
         builder
             .add_recipient(addr.script_pubkey(), 30_000)
             .add_recipient(addr.script_pubkey(), 10_000)
-            .ordering(super::tx_builder::TxOrdering::BIP69Lexicographic);
+            .ordering(super::tx_builder::TxOrdering::Bip69Lexicographic);
         let (psbt, details) = builder.finish().unwrap();
 
         assert_eq!(psbt.global.unsigned_tx.output.len(), 3);
@@ -2537,6 +2574,16 @@ mod test {
                 builder.finish().is_ok(),
                 "psbt_input with non_witness_utxo should succeed with force_non_witness_utxo"
             );
+        }
+    }
+
+    #[test]
+    fn test_get_psbt_input() {
+        // this should grab a known good utxo and set the input
+        let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
+        for utxo in wallet.list_unspent().unwrap() {
+            let psbt_input = wallet.get_psbt_input(utxo, None, false).unwrap();
+            assert!(psbt_input.witness_utxo.is_some() || psbt_input.non_witness_utxo.is_some());
         }
     }
 
@@ -3427,7 +3474,7 @@ mod test {
     #[test]
     fn test_sign_single_xprv_with_master_fingerprint_and_path() {
         let (wallet, _, _) = get_funded_wallet("wpkh([d34db33f/84h/1h/0h]tprv8ZgxMBicQKsPd3EupYiPRhaMooHKUHJxNsTfYuScep13go8QFfHdtkG9nRkFGb7busX4isf6X9dURGCoKgitaApQ6MupRhZMcELAxTBRJgS/*)");
-        let addr = wallet.get_new_address().unwrap();
+        let addr = wallet.get_address(New).unwrap();
         let mut builder = wallet.build_tx();
         builder
             .set_single_recipient(addr.script_pubkey())

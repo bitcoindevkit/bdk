@@ -47,7 +47,7 @@ pub enum Error {
     /// the desired outputs plus fee, if there is not such combination this error is thrown
     BnBNoExactMatch,
     /// Happens when trying to spend an UTXO that is not in the internal database
-    UnknownUTXO,
+    UnknownUtxo,
     /// Thrown when a tx is not found in the internal database
     TransactionNotFound,
     /// Happens when trying to bump a transaction that is already confirmed
@@ -97,15 +97,15 @@ pub enum Error {
     /// Miniscript error
     Miniscript(miniscript::Error),
     /// BIP32 error
-    BIP32(bitcoin::util::bip32::Error),
+    Bip32(bitcoin::util::bip32::Error),
     /// An ECDSA error
     Secp256k1(bitcoin::secp256k1::Error),
     /// Error serializing or deserializing JSON data
-    JSON(serde_json::Error),
+    Json(serde_json::Error),
     /// Hex decoding error
     Hex(bitcoin::hashes::hex::Error),
     /// Partially signed bitcoin transaction error
-    PSBT(bitcoin::util::psbt::Error),
+    Psbt(bitcoin::util::psbt::Error),
 
     //KeyMismatch(bitcoin::secp256k1::PublicKey, bitcoin::secp256k1::PublicKey),
     //MissingInputUTXO(usize),
@@ -158,7 +158,7 @@ impl From<crate::keys::KeyError> for Error {
     fn from(key_error: crate::keys::KeyError) -> Error {
         match key_error {
             crate::keys::KeyError::Miniscript(inner) => Error::Miniscript(inner),
-            crate::keys::KeyError::BIP32(inner) => Error::BIP32(inner),
+            crate::keys::KeyError::Bip32(inner) => Error::Bip32(inner),
             crate::keys::KeyError::InvalidChecksum => Error::ChecksumMismatch,
             e => Error::Key(e),
         }
@@ -167,11 +167,11 @@ impl From<crate::keys::KeyError> for Error {
 
 impl_error!(bitcoin::consensus::encode::Error, Encode);
 impl_error!(miniscript::Error, Miniscript);
-impl_error!(bitcoin::util::bip32::Error, BIP32);
+impl_error!(bitcoin::util::bip32::Error, Bip32);
 impl_error!(bitcoin::secp256k1::Error, Secp256k1);
-impl_error!(serde_json::Error, JSON);
+impl_error!(serde_json::Error, Json);
 impl_error!(bitcoin::hashes::hex::Error, Hex);
-impl_error!(bitcoin::util::psbt::Error, PSBT);
+impl_error!(bitcoin::util::psbt::Error, Psbt);
 
 #[cfg(feature = "electrum")]
 impl_error!(electrum_client::Error, Electrum);

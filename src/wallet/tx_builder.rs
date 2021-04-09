@@ -143,7 +143,7 @@ pub(crate) struct TxParams {
     pub(crate) sighash: Option<SigHashType>,
     pub(crate) ordering: TxOrdering,
     pub(crate) locktime: Option<u32>,
-    pub(crate) rbf: Option<RBFValue>,
+    pub(crate) rbf: Option<RbfValue>,
     pub(crate) version: Option<Version>,
     pub(crate) change_policy: ChangeSpendPolicy,
     pub(crate) force_non_witness_utxo: bool,
@@ -278,7 +278,7 @@ impl<'a, B, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderConte
     pub fn add_utxos(&mut self, outpoints: &[OutPoint]) -> Result<&mut Self, Error> {
         let utxos = outpoints
             .iter()
-            .map(|outpoint| self.wallet.get_utxo(*outpoint)?.ok_or(Error::UnknownUTXO))
+            .map(|outpoint| self.wallet.get_utxo(*outpoint)?.ok_or(Error::UnknownUtxo))
             .collect::<Result<Vec<_>, _>>()?;
 
         for utxo in utxos {
@@ -612,7 +612,7 @@ pub enum TxOrdering {
     /// Unchanged
     Untouched,
     /// BIP69 / Lexicographic
-    BIP69Lexicographic,
+    Bip69Lexicographic,
 }
 
 impl Default for TxOrdering {
@@ -638,7 +638,7 @@ impl TxOrdering {
 
                 tx.output.shuffle(&mut rng);
             }
-            TxOrdering::BIP69Lexicographic => {
+            TxOrdering::Bip69Lexicographic => {
                 tx.input.sort_unstable_by_key(|txin| {
                     (txin.previous_output.txid, txin.previous_output.vout)
                 });
@@ -665,16 +665,16 @@ impl Default for Version {
 ///
 /// Has a default value of `0xFFFFFFFD`
 #[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Hash, Clone, Copy)]
-pub(crate) enum RBFValue {
+pub(crate) enum RbfValue {
     Default,
     Value(u32),
 }
 
-impl RBFValue {
+impl RbfValue {
     pub(crate) fn get_value(&self) -> u32 {
         match self {
-            RBFValue::Default => 0xFFFFFFFD,
-            RBFValue::Value(v) => *v,
+            RbfValue::Default => 0xFFFFFFFD,
+            RbfValue::Value(v) => *v,
         }
     }
 }
@@ -759,7 +759,7 @@ mod test {
         let original_tx = ordering_test_tx!();
         let mut tx = original_tx;
 
-        TxOrdering::BIP69Lexicographic.sort_tx(&mut tx);
+        TxOrdering::Bip69Lexicographic.sort_tx(&mut tx);
 
         assert_eq!(
             tx.input[0].previous_output,

@@ -56,7 +56,7 @@ pub type DerivedDescriptor<'s> = Descriptor<DerivedDescriptorKey<'s>>;
 ///
 /// [`psbt::Input`]: bitcoin::util::psbt::Input
 /// [`psbt::Output`]: bitcoin::util::psbt::Output
-pub type HDKeyPaths = BTreeMap<PublicKey, KeySource>;
+pub type HdKeyPaths = BTreeMap<PublicKey, KeySource>;
 
 /// Trait for types which can be converted into an [`ExtendedDescriptor`] and a [`KeyMap`] usable by a wallet in a specific [`Network`]
 pub trait IntoWalletDescriptor {
@@ -329,7 +329,7 @@ impl XKeyUtils for DescriptorXKey<ExtendedPrivKey> {
 }
 
 pub(crate) trait DerivedDescriptorMeta {
-    fn get_hd_keypaths(&self, secp: &SecpCtx) -> Result<HDKeyPaths, DescriptorError>;
+    fn get_hd_keypaths(&self, secp: &SecpCtx) -> Result<HdKeyPaths, DescriptorError>;
 }
 
 pub(crate) trait DescriptorMeta {
@@ -337,7 +337,7 @@ pub(crate) trait DescriptorMeta {
     fn get_extended_keys(&self) -> Result<Vec<DescriptorXKey<ExtendedPubKey>>, DescriptorError>;
     fn derive_from_hd_keypaths<'s>(
         &self,
-        hd_keypaths: &HDKeyPaths,
+        hd_keypaths: &HdKeyPaths,
         secp: &'s SecpCtx,
     ) -> Option<DerivedDescriptor<'s>>;
     fn derive_from_psbt_input<'s>(
@@ -406,7 +406,7 @@ impl DescriptorMeta for ExtendedDescriptor {
 
     fn derive_from_hd_keypaths<'s>(
         &self,
-        hd_keypaths: &HDKeyPaths,
+        hd_keypaths: &HdKeyPaths,
         secp: &'s SecpCtx,
     ) -> Option<DerivedDescriptor<'s>> {
         let index: HashMap<_, _> = hd_keypaths.values().map(|(a, b)| (a, b)).collect();
@@ -505,7 +505,7 @@ impl DescriptorMeta for ExtendedDescriptor {
 }
 
 impl<'s> DerivedDescriptorMeta for DerivedDescriptor<'s> {
-    fn get_hd_keypaths(&self, secp: &SecpCtx) -> Result<HDKeyPaths, DescriptorError> {
+    fn get_hd_keypaths(&self, secp: &SecpCtx) -> Result<HdKeyPaths, DescriptorError> {
         let mut answer = BTreeMap::new();
         self.for_each_key(|key| {
             if let DescriptorPublicKey::XPub(xpub) = key.as_key().deref() {
@@ -537,7 +537,7 @@ mod test {
     use bitcoin::util::{bip32, psbt};
 
     use super::*;
-    use crate::psbt::PSBTUtils;
+    use crate::psbt::PsbtUtils;
 
     #[test]
     fn test_derive_from_psbt_input_wpkh_wif() {
