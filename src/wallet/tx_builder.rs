@@ -523,6 +523,26 @@ impl<'a, B, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderConte
     pub fn finish(self) -> Result<(PSBT, TransactionDetails), Error> {
         self.wallet.create_tx(self.coin_selection, self.params)
     }
+
+    /// Enable signaling RBF
+    ///
+    /// This will use the default nSequence value of `0xFFFFFFFD`.
+    pub fn enable_rbf(&mut self) -> &mut Self {
+        self.params.rbf = Some(RbfValue::Default);
+        self
+    }
+
+    /// Enable signaling RBF with a specific nSequence value
+    ///
+    /// This can cause conflicts if the wallet's descriptors contain an "older" (OP_CSV) operator
+    /// and the given `nsequence` is lower than the CSV value.
+    ///
+    /// If the `nsequence` is higher than `0xFFFFFFFD` an error will be thrown, since it would not
+    /// be a valid nSequence to signal RBF.
+    pub fn enable_rbf_with_sequence(&mut self, nsequence: u32) -> &mut Self {
+        self.params.rbf = Some(RbfValue::Value(nsequence));
+        self
+    }
 }
 
 impl<'a, B, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>> TxBuilder<'a, B, D, Cs, CreateTx> {
@@ -556,26 +576,6 @@ impl<'a, B, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>> TxBuilder<'a, B, D,
         self.params.single_recipient = Some(recipient);
         self.params.recipients.clear();
 
-        self
-    }
-
-    /// Enable signaling RBF
-    ///
-    /// This will use the default nSequence value of `0xFFFFFFFD`.
-    pub fn enable_rbf(&mut self) -> &mut Self {
-        self.params.rbf = Some(RbfValue::Default);
-        self
-    }
-
-    /// Enable signaling RBF with a specific nSequence value
-    ///
-    /// This can cause conflicts if the wallet's descriptors contain an "older" (OP_CSV) operator
-    /// and the given `nsequence` is lower than the CSV value.
-    ///
-    /// If the `nsequence` is higher than `0xFFFFFFFD` an error will be thrown, since it would not
-    /// be a valid nSequence to signal RBF.
-    pub fn enable_rbf_with_sequence(&mut self, nsequence: u32) -> &mut Self {
-        self.params.rbf = Some(RbfValue::Value(nsequence));
         self
     }
 }
