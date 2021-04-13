@@ -17,17 +17,14 @@ jobs:
             ~/.cargo/git
             target
           key: nightly-docs-${{ hashFiles('**/Cargo.toml','**/Cargo.lock') }}
-      - name: Install nightly toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: nightly
-          override: true
+      - name: Set default toolchain
+        run: rustup default nightly-2021-03-23
+      - name: Set profile
+        run: rustup set profile minimal
+      - name: Update toolchain
+        run: rustup update
       - name: Build docs
-        uses: actions-rs/cargo@v1
-        with:
-          command: rustdoc
-          args: --verbose --features=compiler,electrum,esplora,compact_filters,key-value-db,all-keys -- --cfg docsrs -Dwarnings
+        run: cargo rustdoc --verbose --features=compiler,electrum,esplora,compact_filters,key-value-db,all-keys -- --cfg docsrs -Dwarnings
       - name: Upload artifact
         uses: actions/upload-artifact@v2
         with:
