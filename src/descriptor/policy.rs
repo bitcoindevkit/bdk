@@ -767,8 +767,8 @@ fn signature_in_psbt(psbt: &PSBT, key: &DescriptorPublicKey, secp: &SecpCtx) -> 
             let pubkey = input
                 .bip32_derivation
                 .iter()
-                .find(|s| s.1 .0 == xpub.root_fingerprint(secp))
-                .map(|f| f.0);
+                .find(|(_, (f, _))| *f == xpub.root_fingerprint(secp))
+                .map(|(p, _)| p);
             //TODO check actual derivation matches
             match pubkey {
                 Some(pubkey) => input.partial_sigs.contains_key(pubkey),
