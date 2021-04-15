@@ -870,7 +870,7 @@ impl<Ctx: ScriptContext> ExtractPolicy for Miniscript<DescriptorPublicKey, Ctx> 
                     .map(|n| n.extract_policy(signers, secp))
                     .collect::<Result<Vec<_>, _>>()?
                     .into_iter()
-                    .filter_map(|x| x)
+                    .flatten()
                     .collect();
 
                 if mapped.len() < nodes.len() {
@@ -1023,8 +1023,8 @@ mod test {
 
         assert!(
             matches!(&policy.item, Multisig { keys, threshold } if threshold == &2usize
-            && &keys[0].fingerprint.unwrap() == &fingerprint0
-            && &keys[1].fingerprint.unwrap() == &fingerprint1)
+            && keys[0].fingerprint.unwrap() == fingerprint0
+            && keys[1].fingerprint.unwrap() == fingerprint1)
         );
         // TODO should this be "Satisfaction::None" since we have no prv keys?
         // TODO should items and conditions not be empty?
@@ -1054,8 +1054,8 @@ mod test {
             .unwrap();
         assert!(
             matches!(&policy.item, Multisig { keys, threshold } if threshold == &2usize
-            && &keys[0].fingerprint.unwrap() == &fingerprint0
-            && &keys[1].fingerprint.unwrap() == &fingerprint1)
+            && keys[0].fingerprint.unwrap() == fingerprint0
+            && keys[1].fingerprint.unwrap() == fingerprint1)
         );
 
         assert!(
@@ -1429,7 +1429,7 @@ mod test {
             )
         );
 
-        let mut policy_clone = original_policy.clone();
+        let mut policy_clone = original_policy;
         let psbt: PSBT = deserialize(&base64::decode(ALICE_BOB_SIGNED_PSBT).unwrap()).unwrap();
         policy_clone
             .fill_satisfactions(&psbt, &wallet_desc, &secp)

@@ -190,7 +190,7 @@ pub enum AddressIndex {
     /// then the returned address and subsequent addresses returned by calls to `AddressIndex::New`
     /// and `AddressIndex::LastUsed` may have already been used. Also if the index is reset to a
     /// value earlier than the [`crate::blockchain::Blockchain`] stop_gap (default is 20) then a
-    /// larger stop_gap should be used to monitor for all possibly used addresses.  
+    /// larger stop_gap should be used to monitor for all possibly used addresses.
     Reset(u32),
 }
 
@@ -1633,7 +1633,7 @@ mod test {
             .database
             .borrow_mut()
             .set_script_pubkey(
-                &bitcoin::Address::from_str(&tx_meta.output.iter().next().unwrap().to_address)
+                &bitcoin::Address::from_str(&tx_meta.output.get(0).unwrap().to_address)
                     .unwrap()
                     .script_pubkey(),
                 KeychainKind::External,
@@ -2431,8 +2431,7 @@ mod test {
                 .unsigned_tx
                 .input
                 .iter()
-                .find(|input| input.previous_output == utxo.outpoint)
-                .is_some(),
+                .any(|input| input.previous_output == utxo.outpoint),
             "foreign_utxo should be in there"
         );
 
@@ -3616,7 +3615,7 @@ mod test {
     #[test]
     fn test_unused_address() {
         let db = MemoryDatabase::new();
-        let wallet = Wallet::new_offline("wpkh(tpubEBr4i6yk5nf5DAaJpsi9N2pPYBeJ7fZ5Z9rmN4977iYLCGco1VyjB9tvvuvYtfZzjD5A8igzgw3HeWeeKFmanHYqksqZXYXGsw5zjnj7KM9/*)", 
+        let wallet = Wallet::new_offline("wpkh(tpubEBr4i6yk5nf5DAaJpsi9N2pPYBeJ7fZ5Z9rmN4977iYLCGco1VyjB9tvvuvYtfZzjD5A8igzgw3HeWeeKFmanHYqksqZXYXGsw5zjnj7KM9/*)",
                                          None, Network::Testnet, db).unwrap();
 
         assert_eq!(

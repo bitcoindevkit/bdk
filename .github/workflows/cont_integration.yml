@@ -46,7 +46,7 @@ jobs:
       - name: Build
         run: cargo build --features ${{ matrix.features }} --no-default-features
       - name: Clippy
-        run: cargo clippy --features ${{ matrix.features }} --no-default-features -- -D warnings
+        run: cargo clippy --all-targets --features ${{ matrix.features }} --no-default-features -- -D warnings
       - name: Test
         run: cargo test --features ${{ matrix.features }} --no-default-features
 
@@ -151,7 +151,7 @@ jobs:
         run: rustup default 1.51.0 # STABLE
       - name: Set profile
         run: rustup set profile minimal
-      - name: Add clippy
+      - name: Add rustfmt
         run: rustup component add rustfmt
       - name: Update toolchain
         run: rustup update
