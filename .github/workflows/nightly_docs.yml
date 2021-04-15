@@ -18,7 +18,7 @@ jobs:
             target
           key: nightly-docs-${{ hashFiles('**/Cargo.toml','**/Cargo.lock') }}
       - name: Set default toolchain
-        run: rustup default nightly-2021-03-23
+        run: rustup default nightly
       - name: Set profile
         run: rustup set profile minimal
       - name: Update toolchain
