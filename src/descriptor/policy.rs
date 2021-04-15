@@ -920,7 +920,7 @@ pub enum BuildSatisfaction<'a> {
     Psbt(&'a PSBT),
     /// Like `Psbt` variant and also check for expired timelocks
     PsbtTimelocks {
-        /// give PSBT
+        /// Given PSBT
         psbt: &'a PSBT,
         /// Current blockchain height
         current_height: u32,
@@ -1465,7 +1465,7 @@ mod test {
             .extract_policy(&signers_container, BuildSatisfaction::Psbt(&psbt), &secp)
             .unwrap()
             .unwrap();
-        println!("{}", serde_json::to_string(&policy_alice_psbt).unwrap());
+        //println!("{}", serde_json::to_string(&policy_alice_psbt).unwrap());
 
         assert!(
             matches!(&policy_alice_psbt.satisfaction, Satisfaction::Partial { n, m, items, .. } if n == &2
@@ -1548,8 +1548,7 @@ mod test {
              && items.is_empty()
             )
         );
-
-        println!("{}", serde_json::to_string(&policy).unwrap());
+        //println!("{}", serde_json::to_string(&policy).unwrap());
 
         let build_sat_expired = BuildSatisfaction::PsbtTimelocks {
             psbt: &psbt,
@@ -1567,8 +1566,7 @@ mod test {
              && items == &vec![0]
             )
         );
-
-        println!("{}", serde_json::to_string(&policy_expired).unwrap());
+        //println!("{}", serde_json::to_string(&policy_expired).unwrap());
 
         let psbt_signed: PSBT =
             deserialize(&base64::decode(PSBT_POLICY_CONSIDER_TIMELOCK_EXPIRED_SIGNED).unwrap())
@@ -1590,7 +1588,6 @@ mod test {
              && items == &vec![0, 1]
             )
         );
-
-        println!("{}", serde_json::to_string(&policy_expired_signed).unwrap());
+        //println!("{}", serde_json::to_string(&policy_expired_signed).unwrap());
     }
 }
