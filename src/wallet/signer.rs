@@ -498,7 +498,7 @@ impl ComputeSighash for Segwitv0 {
         let witness_utxo = psbt_input
             .witness_utxo
             .as_ref()
-            .ok_or(SignerError::MissingNonWitnessUtxo)?;
+            .ok_or(SignerError::MissingWitnessUtxo)?;
         let value = witness_utxo.value;
 
         let script = match psbt_input.witness_script {
