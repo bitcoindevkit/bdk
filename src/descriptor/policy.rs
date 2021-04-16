@@ -62,6 +62,7 @@ use super::checksum::get_checksum;
 use super::error::Error;
 use super::XKeyUtils;
 use bitcoin::util::psbt::PartiallySignedTransaction as PSBT;
+use miniscript::psbt::PsbtInputSatisfier;
 
 /// Raw public key or extended key fingerprint
 #[derive(Debug, Clone, Default, Serialize)]
@@ -817,9 +818,17 @@ impl<Ctx: ScriptContext> ExtractPolicy for Miniscript<DescriptorPublicKey, Ctx> 
                         csv: None,
                     },
                 };
-                if let BuildSatisfaction::PsbtTimelocks { current_height, .. } = build_sat {
+                if let BuildSatisfaction::PsbtTimelocks {
+                    current_height,
+                    psbt,
+                    ..
+                } = build_sat
+                {
                     let after = After::new(Some(current_height), false);
-                    if Satisfier::<bitcoin::PublicKey>::check_after(&after, *value) {
+                    let after_sat = Satisfier::<bitcoin::PublicKey>::check_after(&after, *value);
+                    let inputs_sat = psbt_inputs_sat(psbt)
+                        .all(|sat| Satisfier::<bitcoin::PublicKey>::check_after(&sat, *value));
+                    if after_sat && inputs_sat {
                         policy.satisfaction = policy.contribution.clone();
                     }
                 }
@@ -837,11 +846,14 @@ impl<Ctx: ScriptContext> ExtractPolicy for Miniscript<DescriptorPublicKey, Ctx> 
                 if let BuildSatisfaction::PsbtTimelocks {
                     current_height,
                     input_max_height,
-                    ..
+                    psbt,
                 } = build_sat
                 {
                     let older = Older::new(Some(current_height), Some(input_max_height), false);
-                    if Satisfier::<bitcoin::PublicKey>::check_older(&older, *value) {
+                    let older_sat = Satisfier::<bitcoin::PublicKey>::check_older(&older, *value);
+                    let inputs_sat = psbt_inputs_sat(psbt)
+                        .all(|sat| Satisfier::<bitcoin::PublicKey>::check_older(&sat, *value));
+                    if older_sat && inputs_sat {
                         policy.satisfaction = policy.contribution.clone();
                     }
                 }
@@ -909,6 +921,10 @@ impl<Ctx: ScriptContext> ExtractPolicy for Miniscript<DescriptorPublicKey, Ctx> 
             }
         })
     }
+}
+
+fn psbt_inputs_sat(psbt: &PSBT) -> impl Iterator<Item = PsbtInputSatisfier> {
+    (0..psbt.inputs.len()).map(move |i| PsbtInputSatisfier::new(psbt, i))
 }
 
 /// Options to build the satisfaction field in the policy
