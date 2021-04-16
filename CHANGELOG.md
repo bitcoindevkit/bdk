@@ -6,6 +6,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Policy
+#### Changed
+Removed `fill_satisfaction` method in favor of enum parameter in `extract_policy` method
+
+#### Added
+Timelocks are considered (optionally) in building the `satisfaction` field
+
 ## [v0.6.0] - [v0.5.1]
 
 ### Misc

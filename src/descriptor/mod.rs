@@ -27,6 +27,8 @@ use miniscript::descriptor::{DescriptorPublicKey, DescriptorType, DescriptorXKey
 pub use miniscript::{descriptor::KeyMap, Descriptor, Legacy, Miniscript, ScriptContext, Segwitv0};
 use miniscript::{DescriptorTrait, ForEachKey, TranslatePk};
 
+use crate::descriptor::policy::BuildSatisfaction;
+
 pub mod checksum;
 pub(crate) mod derived;
 #[doc(hidden)]
@@ -255,6 +257,7 @@ pub trait ExtractPolicy {
     fn extract_policy(
         &self,
         signers: &SignersContainer,
+        psbt: BuildSatisfaction,
         secp: &SecpCtx,
     ) -> Result<Option<Policy>, DescriptorError>;
 }
