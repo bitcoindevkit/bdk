@@ -46,7 +46,7 @@ pub use utils::IsDust;
 
 use address_validator::AddressValidator;
 use coin_selection::DefaultCoinSelectionAlgorithm;
-use signer::{Signer, SignerOrdering, SignersContainer};
+use signer::{SignOptions, Signer, SignerOrdering, SignersContainer};
 use tx_builder::{BumpFee, CreateTx, FeePolicy, TxBuilder, TxParams};
 use utils::{check_nlocktime, check_nsequence_rbf, After, Older, SecpCtx, DUST_LIMIT_SATOSHI};
 
@@ -706,7 +706,7 @@ where
     ///         .enable_rbf();
     ///     builder.finish()?
     /// };
-    /// let _ = wallet.sign(&mut psbt, None)?;
+    /// let _ = wallet.sign(&mut psbt, SignOptions::default())?;
     /// let tx = psbt.extract_tx();
     /// // broadcast tx but it's taking too long to confirm so we want to bump the fee
     /// let (mut psbt, _) =  {
@@ -716,7 +716,7 @@ where
     ///     builder.finish()?
     /// };
     ///
-    /// let _ = wallet.sign(&mut psbt, None)?;
+    /// let _ = wallet.sign(&mut psbt, SignOptions::default())?;
     /// let fee_bumped_tx = psbt.extract_tx();
     /// // broadcast fee_bumped_tx to replace original
     /// # Ok::<(), bdk::Error>(())
@@ -833,6 +833,11 @@ where
     /// Sign a transaction with all the wallet's signers, in the order specified by every signer's
     /// [`SignerOrdering`]
     ///
+    /// The [`SignOptions`] can be used to tweak the behavior of the software signers, and the way
+    /// the transaction is finalized at the end. Note that it can't be guaranteed that *every*
+    /// signers will follow the options, but the "software signers" (WIF keys and `xprv`) defined
+    /// in this library will.
+    ///
     /// ## Example
     ///
     /// ```
@@ -848,12 +853,22 @@ where
     ///     builder.add_recipient(to_address.script_pubkey(), 50_000);
     ///     builder.finish()?
     /// };
-    /// let  finalized = wallet.sign(&mut psbt, None)?;
+    /// let  finalized = wallet.sign(&mut psbt, SignOptions::default())?;
     /// assert!(finalized, "we should have signed all the inputs");
     /// # Ok::<(), bdk::Error>(())
-    pub fn sign(&self, psbt: &mut PSBT, assume_height: Option<u32>) -> Result<bool, Error> {
+    pub fn sign(&self, psbt: &mut PSBT, sign_options: SignOptions) -> Result<bool, Error> {
         // this helps us doing our job later
         self.add_input_hd_keypaths(psbt)?;
+
+        // If we aren't allowed to use `witness_utxo`, ensure that every input has the
+        // `non_witness_utxo`
+        if !sign_options.trust_witness_utxo {
+            for input in &psbt.inputs {
+                if input.non_witness_utxo.is_none() {
+                    return Err(Error::Signer(signer::SignerError::MissingNonWitnessUtxo));
+                }
+            }
+        }
 
         for signer in self
             .signers
@@ -871,7 +886,7 @@ where
         }
 
         // attempt to finalize
-        self.finalize_psbt(psbt, assume_height)
+        self.finalize_psbt(psbt, sign_options)
     }
 
     /// Return the spending policies for the wallet's descriptor
@@ -907,11 +922,9 @@ where
     }
 
     /// Try to finalize a PSBT
-    pub fn finalize_psbt(
-        &self,
-        psbt: &mut PSBT,
-        assume_height: Option<u32>,
-    ) -> Result<bool, Error> {
+    ///
+    /// The [`SignOptions`] can be used to tweak the behavior of the finalizer.
+    pub fn finalize_psbt(&self, psbt: &mut PSBT, sign_options: SignOptions) -> Result<bool, Error> {
         let tx = &psbt.global.unsigned_tx;
         let mut finished = true;
 
@@ -927,7 +940,7 @@ where
                 .borrow()
                 .get_tx(&input.previous_output.txid, false)?
                 .map(|tx| tx.height.unwrap_or(std::u32::MAX));
-            let current_height = assume_height.or(self.current_height);
+            let current_height = sign_options.assume_height.or(self.current_height);
 
             debug!(
                 "Input #{} - {}, using `create_height` = {:?}, `current_height` = {:?}",
@@ -2440,14 +2453,14 @@ mod test {
             "foreign_utxo should be in there"
         );
 
-        let finished = wallet1.sign(&mut psbt, None).unwrap();
+        let finished = wallet1.sign(&mut psbt, Default::default()).unwrap();
 
         assert!(
             !finished,
             "only one of the inputs should have been signed so far"
         );
 
-        let finished = wallet2.sign(&mut psbt, None).unwrap();
+        let finished = wallet2.sign(&mut psbt, Default::default()).unwrap();
         assert!(finished, "all the inputs should have been signed now");
     }
 
@@ -3468,7 +3481,7 @@ mod test {
             .drain_wallet();
         let (mut psbt, _) = builder.finish().unwrap();
 
-        let finalized = wallet.sign(&mut psbt, None).unwrap();
+        let finalized = wallet.sign(&mut psbt, Default::default()).unwrap();
         assert_eq!(finalized, true);
 
         let extracted = psbt.extract_tx();
@@ -3485,7 +3498,7 @@ mod test {
             .drain_wallet();
         let (mut psbt, _) = builder.finish().unwrap();
 
-        let finalized = wallet.sign(&mut psbt, None).unwrap();
+        let finalized = wallet.sign(&mut psbt, Default::default()).unwrap();
         assert_eq!(finalized, true);
 
         let extracted = psbt.extract_tx();
@@ -3502,7 +3515,7 @@ mod test {
             .drain_wallet();
         let (mut psbt, _) = builder.finish().unwrap();
 
-        let finalized = wallet.sign(&mut psbt, None).unwrap();
+        let finalized = wallet.sign(&mut psbt, Default::default()).unwrap();
         assert_eq!(finalized, true);
 
         let extracted = psbt.extract_tx();
@@ -3519,7 +3532,7 @@ mod test {
             .drain_wallet();
         let (mut psbt, _) = builder.finish().unwrap();
 
-        let finalized = wallet.sign(&mut psbt, None).unwrap();
+        let finalized = wallet.sign(&mut psbt, Default::default()).unwrap();
         assert_eq!(finalized, true);
 
         let extracted = psbt.extract_tx();
@@ -3537,7 +3550,7 @@ mod test {
             .drain_wallet();
         let (mut psbt, _) = builder.finish().unwrap();
 
-        let finalized = wallet.sign(&mut psbt, None).unwrap();
+        let finalized = wallet.sign(&mut psbt, Default::default()).unwrap();
         assert_eq!(finalized, true);
 
         let extracted = psbt.extract_tx();
@@ -3557,7 +3570,7 @@ mod test {
         psbt.inputs[0].bip32_derivation.clear();
         assert_eq!(psbt.inputs[0].bip32_derivation.len(), 0);
 
-        let finalized = wallet.sign(&mut psbt, None).unwrap();
+        let finalized = wallet.sign(&mut psbt, Default::default()).unwrap();
         assert_eq!(finalized, true);
 
         let extracted = psbt.extract_tx();
@@ -3606,7 +3619,7 @@ mod test {
 
         psbt.inputs.push(dud_input);
         psbt.global.unsigned_tx.input.push(bitcoin::TxIn::default());
-        let is_final = wallet.sign(&mut psbt, None).unwrap();
+        let is_final = wallet.sign(&mut psbt, Default::default()).unwrap();
         assert!(
             !is_final,
             "shouldn't be final since we can't sign one of the inputs"
