@@ -1271,28 +1271,23 @@ where
 
             match utxo {
                 Utxo::Local(utxo) => {
-                    *psbt_input = match self.get_psbt_input(
-                        utxo,
-                        params.sighash,
-                        params.force_non_witness_utxo,
-                    ) {
-                        Ok(psbt_input) => psbt_input,
-                        Err(e) => match e {
-                            Error::UnknownUtxo => Input {
-                                sighash_type: params.sighash,
-                                ..Input::default()
+                    *psbt_input =
+                        match self.get_psbt_input(utxo, params.sighash, params.only_witness_utxo) {
+                            Ok(psbt_input) => psbt_input,
+                            Err(e) => match e {
+                                Error::UnknownUtxo => Input {
+                                    sighash_type: params.sighash,
+                                    ..Input::default()
+                                },
+                                _ => return Err(e),
                             },
-                            _ => return Err(e),
-                        },
-                    }
+                        }
                 }
                 Utxo::Foreign {
                     psbt_input: foreign_psbt_input,
                     outpoint,
                 } => {
-                    if params.force_non_witness_utxo
-                        && foreign_psbt_input.non_witness_utxo.is_none()
-                    {
+                    if !params.only_witness_utxo && foreign_psbt_input.non_witness_utxo.is_none() {
                         return Err(Error::Generic(format!(
                             "Missing non_witness_utxo on foreign utxo {}",
                             outpoint
@@ -1336,7 +1331,7 @@ where
         &self,
         utxo: LocalUtxo,
         sighash_type: Option<SigHashType>,
-        force_non_witness_utxo: bool,
+        only_witness_utxo: bool,
     ) -> Result<Input, Error> {
         // Try to find the prev_script in our db to figure out if this is internal or external,
         // and the derivation index
@@ -1363,7 +1358,7 @@ where
             if desc.is_witness() {
                 psbt_input.witness_utxo = Some(prev_tx.output[prev_output.vout as usize].clone());
             }
-            if !desc.is_witness() || force_non_witness_utxo {
+            if !desc.is_witness() || !only_witness_utxo {
                 psbt_input.non_witness_utxo = Some(prev_tx);
             }
         }
@@ -2250,6 +2245,7 @@ mod test {
         let mut builder = wallet.build_tx();
         builder
             .set_single_recipient(addr.script_pubkey())
+            .only_witness_utxo()
             .drain_wallet();
         let (psbt, _) = builder.finish().unwrap();
 
@@ -2268,20 +2264,18 @@ mod test {
             .drain_wallet();
         let (psbt, _) = builder.finish().unwrap();
 
-        assert!(psbt.inputs[0].non_witness_utxo.is_none());
         assert!(psbt.inputs[0].witness_utxo.is_some());
     }
 
     #[test]
-    fn test_create_tx_both_non_witness_utxo_and_witness_utxo() {
+    fn test_create_tx_both_non_witness_utxo_and_witness_utxo_default() {
         let (wallet, _, _) =
             get_funded_wallet("wsh(pk(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW))");
         let addr = wallet.get_address(New).unwrap();
         let mut builder = wallet.build_tx();
         builder
             .set_single_recipient(addr.script_pubkey())
-            .drain_wallet()
-            .force_non_witness_utxo();
+            .drain_wallet();
         let (psbt, _) = builder.finish().unwrap();
 
         assert!(psbt.inputs[0].non_witness_utxo.is_some());
@@ -2419,6 +2413,7 @@ mod test {
         let (wallet1, _, _) = get_funded_wallet(get_test_wpkh());
         let (wallet2, _, _) =
             get_funded_wallet("wpkh(cVbZ8ovhye9AoAHFsqobCf7LxbXDAECy9Kb8TZdfsDYMZGBUyCnm)");
+
         let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
         let utxo = wallet2.list_unspent().unwrap().remove(0);
         let foreign_utxo_satisfaction = wallet2
@@ -2434,6 +2429,7 @@ mod test {
         let mut builder = wallet1.build_tx();
         builder
             .add_recipient(addr.script_pubkey(), 60_000)
+            .only_witness_utxo()
             .add_foreign_utxo(utxo.outpoint, psbt_input, foreign_utxo_satisfaction)
             .unwrap();
         let (mut psbt, details) = builder.finish().unwrap();
@@ -2453,14 +2449,30 @@ mod test {
             "foreign_utxo should be in there"
         );
 
-        let finished = wallet1.sign(&mut psbt, Default::default()).unwrap();
+        let finished = wallet1
+            .sign(
+                &mut psbt,
+                SignOptions {
+                    trust_witness_utxo: true,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
 
         assert!(
             !finished,
             "only one of the inputs should have been signed so far"
         );
 
-        let finished = wallet2.sign(&mut psbt, Default::default()).unwrap();
+        let finished = wallet2
+            .sign(
+                &mut psbt,
+                SignOptions {
+                    trust_witness_utxo: true,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
         assert!(finished, "all the inputs should have been signed now");
     }
 
@@ -2538,7 +2550,7 @@ mod test {
     }
 
     #[test]
-    fn test_add_foreign_utxo_force_non_witness_utxo() {
+    fn test_add_foreign_utxo_only_witness_utxo() {
         let (wallet1, _, _) = get_funded_wallet(get_test_wpkh());
         let (wallet2, _, txid2) =
             get_funded_wallet("wpkh(cVbZ8ovhye9AoAHFsqobCf7LxbXDAECy9Kb8TZdfsDYMZGBUyCnm)");
@@ -2551,9 +2563,7 @@ mod test {
             .unwrap();
 
         let mut builder = wallet1.build_tx();
-        builder
-            .add_recipient(addr.script_pubkey(), 60_000)
-            .force_non_witness_utxo();
+        builder.add_recipient(addr.script_pubkey(), 60_000);
 
         {
             let mut builder = builder.clone();
@@ -2567,6 +2577,22 @@ mod test {
             assert!(
                 builder.finish().is_err(),
                 "psbt_input with witness_utxo should fail with only witness_utxo"
+            );
+        }
+
+        {
+            let mut builder = builder.clone();
+            let psbt_input = psbt::Input {
+                witness_utxo: Some(utxo2.txout.clone()),
+                ..Default::default()
+            };
+            builder
+                .only_witness_utxo()
+                .add_foreign_utxo(utxo2.outpoint, psbt_input, satisfaction_weight)
+                .unwrap();
+            assert!(
+                builder.finish().is_ok(),
+                "psbt_input with just witness_utxo should succeed when `only_witness_utxo` is enabled"
             );
         }
 
@@ -2589,7 +2615,7 @@ mod test {
                 .unwrap();
             assert!(
                 builder.finish().is_ok(),
-                "psbt_input with non_witness_utxo should succeed with force_non_witness_utxo"
+                "psbt_input with non_witness_utxo should succeed by default"
             );
         }
     }
@@ -3619,7 +3645,15 @@ mod test {
 
         psbt.inputs.push(dud_input);
         psbt.global.unsigned_tx.input.push(bitcoin::TxIn::default());
-        let is_final = wallet.sign(&mut psbt, Default::default()).unwrap();
+        let is_final = wallet
+            .sign(
+                &mut psbt,
+                SignOptions {
+                    trust_witness_utxo: true,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
         assert!(
             !is_final,
             "shouldn't be final since we can't sign one of the inputs"

@@ -17,6 +17,7 @@ Timelocks are considered (optionally) in building the `satisfaction` field
 
 - Changed `Wallet::{sign, finalize_psbt}` now take a `&mut psbt` rather than consuming it.
 - Require and validate `non_witness_utxo` for SegWit signatures by default, can be adjusted with `SignOptions`
+- Replace the opt-in builder option `force_non_witness_utxo` with the opposite `only_witness_utxo`. From now on we will provide the `non_witness_utxo`, unless explicitly asked not to.
 
 ## [v0.6.0] - [v0.5.1]
 

@@ -146,7 +146,7 @@ pub(crate) struct TxParams {
     pub(crate) rbf: Option<RbfValue>,
     pub(crate) version: Option<Version>,
     pub(crate) change_policy: ChangeSpendPolicy,
-    pub(crate) force_non_witness_utxo: bool,
+    pub(crate) only_witness_utxo: bool,
     pub(crate) add_global_xpubs: bool,
     pub(crate) include_output_redeem_witness_script: bool,
     pub(crate) bumping_fee: Option<PreviousFee>,
@@ -336,10 +336,10 @@ impl<'a, B, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderConte
     /// 1. The `psbt_input` does not contain a `witness_utxo` or `non_witness_utxo`.
     /// 2. The data in `non_witness_utxo` does not match what is in `outpoint`.
     ///
-    /// Note if you set [`force_non_witness_utxo`] any `psbt_input` you pass to this method must
+    /// Note unless you set [`only_witness_utxo`] any `psbt_input` you pass to this method must
     /// have `non_witness_utxo` set otherwise you will get an error when [`finish`] is called.
     ///
-    /// [`force_non_witness_utxo`]: Self::force_non_witness_utxo
+    /// [`only_witness_utxo`]: Self::only_witness_utxo
     /// [`finish`]: Self::finish
     /// [`max_satisfaction_weight`]: miniscript::Descriptor::max_satisfaction_weight
     pub fn add_foreign_utxo(
@@ -464,12 +464,13 @@ impl<'a, B, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderConte
         self
     }
 
-    /// Fill-in the [`psbt::Input::non_witness_utxo`](bitcoin::util::psbt::Input::non_witness_utxo) field even if the wallet only has SegWit
-    /// descriptors.
+    /// Only Fill-in the [`psbt::Input::witness_utxo`](bitcoin::util::psbt::Input::witness_utxo) field when spending from
+    /// SegWit descriptors.
     ///
-    /// This is useful for signers which always require it, like Trezor hardware wallets.
-    pub fn force_non_witness_utxo(&mut self) -> &mut Self {
-        self.params.force_non_witness_utxo = true;
+    /// This reduces the size of the PSBT, but some signers might reject them due to the lack of
+    /// the `non_witness_utxo`.
+    pub fn only_witness_utxo(&mut self) -> &mut Self {
+        self.params.only_witness_utxo = true;
         self
     }
 
