@@ -699,24 +699,24 @@ where
     /// # let descriptor = "wpkh(tpubD6NzVbkrYhZ4Xferm7Pz4VnjdcDPFyjVu5K4iZXQ4pVN8Cks4pHVowTBXBKRhX64pkRyJZJN5xAKj4UDNnLPb5p2sSKXhewoYx5GbTdUFWq/*)";
     /// # let wallet = doctest_wallet!();
     /// # let to_address = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap();
-    /// let (psbt, _) = {
+    /// let (mut psbt, _) = {
     ///     let mut builder = wallet.build_tx();
     ///     builder
     ///         .add_recipient(to_address.script_pubkey(), 50_000)
     ///         .enable_rbf();
     ///     builder.finish()?
     /// };
-    /// let (psbt, _) = wallet.sign(psbt, None)?;
+    /// let _ = wallet.sign(&mut psbt, None)?;
     /// let tx = psbt.extract_tx();
     /// // broadcast tx but it's taking too long to confirm so we want to bump the fee
-    /// let (psbt, _) =  {
+    /// let (mut psbt, _) =  {
     ///     let mut builder = wallet.build_fee_bump(tx.txid())?;
     ///     builder
     ///         .fee_rate(FeeRate::from_sat_per_vb(5.0));
     ///     builder.finish()?
     /// };
     ///
-    /// let (psbt, _) = wallet.sign(psbt, None)?;
+    /// let _ = wallet.sign(&mut psbt, None)?;
     /// let fee_bumped_tx = psbt.extract_tx();
     /// // broadcast fee_bumped_tx to replace original
     /// # Ok::<(), bdk::Error>(())
@@ -843,17 +843,17 @@ where
     /// # let descriptor = "wpkh(tpubD6NzVbkrYhZ4Xferm7Pz4VnjdcDPFyjVu5K4iZXQ4pVN8Cks4pHVowTBXBKRhX64pkRyJZJN5xAKj4UDNnLPb5p2sSKXhewoYx5GbTdUFWq/*)";
     /// # let wallet = doctest_wallet!();
     /// # let to_address = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap();
-    /// let (psbt, _) = {
+    /// let (mut psbt, _) = {
     ///     let mut builder = wallet.build_tx();
     ///     builder.add_recipient(to_address.script_pubkey(), 50_000);
     ///     builder.finish()?
     /// };
-    /// let (signed_psbt, finalized) = wallet.sign(psbt, None)?;
+    /// let  finalized = wallet.sign(&mut psbt, None)?;
     /// assert!(finalized, "we should have signed all the inputs");
     /// # Ok::<(), bdk::Error>(())
-    pub fn sign(&self, mut psbt: PSBT, assume_height: Option<u32>) -> Result<(PSBT, bool), Error> {
+    pub fn sign(&self, psbt: &mut PSBT, assume_height: Option<u32>) -> Result<bool, Error> {
         // this helps us doing our job later
-        self.add_input_hd_keypaths(&mut psbt)?;
+        self.add_input_hd_keypaths(psbt)?;
 
         for signer in self
             .signers
@@ -862,10 +862,10 @@ where
             .chain(self.change_signers.signers().iter())
         {
             if signer.sign_whole_tx() {
-                signer.sign(&mut psbt, None, &self.secp)?;
+                signer.sign(psbt, None, &self.secp)?;
             } else {
                 for index in 0..psbt.inputs.len() {
-                    signer.sign(&mut psbt, Some(index), &self.secp)?;
+                    signer.sign(psbt, Some(index), &self.secp)?;
                 }
             }
         }
@@ -909,9 +909,9 @@ where
     /// Try to finalize a PSBT
     pub fn finalize_psbt(
         &self,
-        mut psbt: PSBT,
+        psbt: &mut PSBT,
         assume_height: Option<u32>,
-    ) -> Result<(PSBT, bool), Error> {
+    ) -> Result<bool, Error> {
         let tx = &psbt.global.unsigned_tx;
         let mut finished = true;
 
@@ -984,7 +984,7 @@ where
             }
         }
 
-        Ok((psbt, finished))
+        Ok(finished)
     }
 
     /// Return the secp256k1 context used for all signing operations
@@ -2423,7 +2423,7 @@ mod test {
             .add_recipient(addr.script_pubkey(), 60_000)
             .add_foreign_utxo(utxo.outpoint, psbt_input, foreign_utxo_satisfaction)
             .unwrap();
-        let (psbt, details) = builder.finish().unwrap();
+        let (mut psbt, details) = builder.finish().unwrap();
 
         assert_eq!(
             details.sent - details.received,
@@ -2440,14 +2440,14 @@ mod test {
             "foreign_utxo should be in there"
         );
 
-        let (psbt, finished) = wallet1.sign(psbt, None).unwrap();
+        let finished = wallet1.sign(&mut psbt, None).unwrap();
 
         assert!(
             !finished,
             "only one of the inputs should have been signed so far"
         );
 
-        let (_, finished) = wallet2.sign(psbt, None).unwrap();
+        let finished = wallet2.sign(&mut psbt, None).unwrap();
         assert!(finished, "all the inputs should have been signed now");
     }
 
@@ -3466,12 +3466,12 @@ mod test {
         builder
             .set_single_recipient(addr.script_pubkey())
             .drain_wallet();
-        let (psbt, _) = builder.finish().unwrap();
+        let (mut psbt, _) = builder.finish().unwrap();
 
-        let (signed_psbt, finalized) = wallet.sign(psbt, None).unwrap();
+        let finalized = wallet.sign(&mut psbt, None).unwrap();
         assert_eq!(finalized, true);
 
-        let extracted = signed_psbt.extract_tx();
+        let extracted = psbt.extract_tx();
         assert_eq!(extracted.input[0].witness.len(), 2);
     }
 
@@ -3483,12 +3483,12 @@ mod test {
         builder
             .set_single_recipient(addr.script_pubkey())
             .drain_wallet();
-        let (psbt, _) = builder.finish().unwrap();
+        let (mut psbt, _) = builder.finish().unwrap();
 
-        let (signed_psbt, finalized) = wallet.sign(psbt, None).unwrap();
+        let finalized = wallet.sign(&mut psbt, None).unwrap();
         assert_eq!(finalized, true);
 
-        let extracted = signed_psbt.extract_tx();
+        let extracted = psbt.extract_tx();
         assert_eq!(extracted.input[0].witness.len(), 2);
     }
 
@@ -3500,12 +3500,12 @@ mod test {
         builder
             .set_single_recipient(addr.script_pubkey())
             .drain_wallet();
-        let (psbt, _) = builder.finish().unwrap();
+        let (mut psbt, _) = builder.finish().unwrap();
 
-        let (signed_psbt, finalized) = wallet.sign(psbt, None).unwrap();
+        let finalized = wallet.sign(&mut psbt, None).unwrap();
         assert_eq!(finalized, true);
 
-        let extracted = signed_psbt.extract_tx();
+        let extracted = psbt.extract_tx();
         assert_eq!(extracted.input[0].witness.len(), 2);
     }
 
@@ -3517,12 +3517,12 @@ mod test {
         builder
             .set_single_recipient(addr.script_pubkey())
             .drain_wallet();
-        let (psbt, _) = builder.finish().unwrap();
+        let (mut psbt, _) = builder.finish().unwrap();
 
-        let (signed_psbt, finalized) = wallet.sign(psbt, None).unwrap();
+        let finalized = wallet.sign(&mut psbt, None).unwrap();
         assert_eq!(finalized, true);
 
-        let extracted = signed_psbt.extract_tx();
+        let extracted = psbt.extract_tx();
         assert_eq!(extracted.input[0].witness.len(), 2);
     }
 
@@ -3535,12 +3535,12 @@ mod test {
         builder
             .set_single_recipient(addr.script_pubkey())
             .drain_wallet();
-        let (psbt, _) = builder.finish().unwrap();
+        let (mut psbt, _) = builder.finish().unwrap();
 
-        let (signed_psbt, finalized) = wallet.sign(psbt, None).unwrap();
+        let finalized = wallet.sign(&mut psbt, None).unwrap();
         assert_eq!(finalized, true);
 
-        let extracted = signed_psbt.extract_tx();
+        let extracted = psbt.extract_tx();
         assert_eq!(extracted.input[0].witness.len(), 2);
     }
 
@@ -3557,10 +3557,10 @@ mod test {
         psbt.inputs[0].bip32_derivation.clear();
         assert_eq!(psbt.inputs[0].bip32_derivation.len(), 0);
 
-        let (signed_psbt, finalized) = wallet.sign(psbt, None).unwrap();
+        let finalized = wallet.sign(&mut psbt, None).unwrap();
         assert_eq!(finalized, true);
 
-        let extracted = signed_psbt.extract_tx();
+        let extracted = psbt.extract_tx();
         assert_eq!(extracted.input[0].witness.len(), 2);
     }
 
@@ -3606,7 +3606,7 @@ mod test {
 
         psbt.inputs.push(dud_input);
         psbt.global.unsigned_tx.input.push(bitcoin::TxIn::default());
-        let (psbt, is_final) = wallet.sign(psbt, None).unwrap();
+        let is_final = wallet.sign(&mut psbt, None).unwrap();
         assert!(
             !is_final,
             "shouldn't be final since we can't sign one of the inputs"

@@ -13,6 +13,10 @@ Removed `fill_satisfaction` method in favor of enum parameter in `extract_policy
 #### Added
 Timelocks are considered (optionally) in building the `satisfaction` field
 
+### Wallet
+
+- Changed `Wallet::{sign, finalize_psbt}` now take a `&mut psbt` rather than consuming it.
+
 ## [v0.6.0] - [v0.5.1]
 
 ### Misc
