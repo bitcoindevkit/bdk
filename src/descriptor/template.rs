@@ -455,11 +455,12 @@ expand_make_bipxx!(segwit_v0, Segwitv0);
 mod test {
     // test existing descriptor templates, make sure they are expanded to the right descriptors
 
+    use std::str::FromStr;
+
     use super::*;
     use crate::descriptor::derived::AsDerived;
     use crate::descriptor::{DescriptorError, DescriptorMeta};
     use crate::keys::ValidNetworks;
-    use bitcoin::hashes::core::str::FromStr;
     use bitcoin::network::constants::Network::Regtest;
     use bitcoin::secp256k1::Secp256k1;
     use miniscript::descriptor::{DescriptorPublicKey, DescriptorTrait, KeyMap};
