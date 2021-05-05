@@ -297,8 +297,8 @@ pub fn bdk_blockchain_tests(attr: TokenStream, item: TokenStream) -> TokenStream
 
                     let mut builder = wallet.build_tx();
                     builder.add_recipient(node_addr.script_pubkey(), 25_000);
-                    let (psbt, details) = builder.finish().unwrap();
-                    let (psbt, finalized) = wallet.sign(psbt, None).unwrap();
+                    let (mut psbt, details) = builder.finish().unwrap();
+                    let finalized = wallet.sign(&mut psbt, None).unwrap();
                     assert!(finalized, "Cannot finalize transaction");
                     let tx = psbt.extract_tx();
                     println!("{}", bitcoin::consensus::encode::serialize_hex(&tx));
@@ -326,8 +326,8 @@ pub fn bdk_blockchain_tests(attr: TokenStream, item: TokenStream) -> TokenStream
 
                     let mut builder = wallet.build_tx();
                     builder.add_recipient(node_addr.script_pubkey(), 25_000);
-                    let (psbt, details) = builder.finish().unwrap();
-                    let (psbt, finalized) = wallet.sign(psbt, None).unwrap();
+                    let (mut psbt, details) = builder.finish().unwrap();
+                    let finalized = wallet.sign(&mut psbt, None).unwrap();
                     assert!(finalized, "Cannot finalize transaction");
                     let sent_txid = wallet.broadcast(psbt.extract_tx()).unwrap();
 
@@ -367,8 +367,8 @@ pub fn bdk_blockchain_tests(attr: TokenStream, item: TokenStream) -> TokenStream
                     for _ in 0..5 {
                         let mut builder = wallet.build_tx();
                         builder.add_recipient(node_addr.script_pubkey(), 5_000);
-                        let (psbt, details) = builder.finish().unwrap();
-                        let (psbt, finalized) = wallet.sign(psbt, None).unwrap();
+                        let (mut psbt, details) = builder.finish().unwrap();
+                        let finalized = wallet.sign(&mut psbt, None).unwrap();
                         assert!(finalized, "Cannot finalize transaction");
                         wallet.broadcast(psbt.extract_tx()).unwrap();
 
@@ -401,8 +401,8 @@ pub fn bdk_blockchain_tests(attr: TokenStream, item: TokenStream) -> TokenStream
 
                     let mut builder = wallet.build_tx();
                     builder.add_recipient(node_addr.script_pubkey().clone(), 5_000).enable_rbf();
-                    let (psbt, details) = builder.finish().unwrap();
-                    let (psbt, finalized) = wallet.sign(psbt, None).unwrap();
+                    let (mut psbt, details) = builder.finish().unwrap();
+                    let finalized = wallet.sign(&mut psbt, None).unwrap();
                     assert!(finalized, "Cannot finalize transaction");
                     wallet.broadcast(psbt.extract_tx()).unwrap();
                     wallet.sync(noop_progress(), None).unwrap();
@@ -411,8 +411,8 @@ pub fn bdk_blockchain_tests(attr: TokenStream, item: TokenStream) -> TokenStream
 
                     let mut builder = wallet.build_fee_bump(details.txid).unwrap();
                     builder.fee_rate(FeeRate::from_sat_per_vb(2.1));
-                    let (new_psbt, new_details) = builder.finish().unwrap();
-                    let (new_psbt, finalized) = wallet.sign(new_psbt, None).unwrap();
+                    let (mut new_psbt, new_details) = builder.finish().unwrap();
+                    let finalized = wallet.sign(&mut new_psbt, None).unwrap();
                     assert!(finalized, "Cannot finalize transaction");
                     wallet.broadcast(new_psbt.extract_tx()).unwrap();
                     wallet.sync(noop_progress(), None).unwrap();
@@ -437,8 +437,8 @@ pub fn bdk_blockchain_tests(attr: TokenStream, item: TokenStream) -> TokenStream
 
                     let mut builder = wallet.build_tx();
                     builder.add_recipient(node_addr.script_pubkey().clone(), 49_000).enable_rbf();
-                    let (psbt, details) = builder.finish().unwrap();
-                    let (psbt, finalized) = wallet.sign(psbt, None).unwrap();
+                    let (mut psbt, details) = builder.finish().unwrap();
+                    let finalized = wallet.sign(&mut psbt, None).unwrap();
                     assert!(finalized, "Cannot finalize transaction");
                     wallet.broadcast(psbt.extract_tx()).unwrap();
                     wallet.sync(noop_progress(), None).unwrap();
@@ -447,8 +447,8 @@ pub fn bdk_blockchain_tests(attr: TokenStream, item: TokenStream) -> TokenStream
 
                     let mut builder = wallet.build_fee_bump(details.txid).unwrap();
                     builder.fee_rate(FeeRate::from_sat_per_vb(5.0));
-                    let (new_psbt, new_details) = builder.finish().unwrap();
-                    let (new_psbt, finalized) = wallet.sign(new_psbt, None).unwrap();
+                    let (mut new_psbt, new_details) = builder.finish().unwrap();
+                    let finalized = wallet.sign(&mut new_psbt, None).unwrap();
                     assert!(finalized, "Cannot finalize transaction");
                     wallet.broadcast(new_psbt.extract_tx()).unwrap();
                     wallet.sync(noop_progress(), None).unwrap();
@@ -473,8 +473,8 @@ pub fn bdk_blockchain_tests(attr: TokenStream, item: TokenStream) -> TokenStream
 
                     let mut builder = wallet.build_tx();
                     builder.add_recipient(node_addr.script_pubkey().clone(), 49_000).enable_rbf();
-                    let (psbt, details) = builder.finish().unwrap();
-                    let (psbt, finalized) = wallet.sign(psbt, None).unwrap();
+                    let (mut psbt, details) = builder.finish().unwrap();
+                    let finalized = wallet.sign(&mut psbt, None).unwrap();
                     assert!(finalized, "Cannot finalize transaction");
                     wallet.broadcast(psbt.extract_tx()).unwrap();
                     wallet.sync(noop_progress(), None).unwrap();
@@ -483,8 +483,8 @@ pub fn bdk_blockchain_tests(attr: TokenStream, item: TokenStream) -> TokenStream
 
                     let mut builder = wallet.build_fee_bump(details.txid).unwrap();
                     builder.fee_rate(FeeRate::from_sat_per_vb(10.0));
-                    let (new_psbt, new_details) = builder.finish().unwrap();
-                    let (new_psbt, finalized) = wallet.sign(new_psbt, None).unwrap();
+                    let (mut new_psbt, new_details) = builder.finish().unwrap();
+                    let finalized = wallet.sign(&mut new_psbt, None).unwrap();
                     assert!(finalized, "Cannot finalize transaction");
                     wallet.broadcast(new_psbt.extract_tx()).unwrap();
                     wallet.sync(noop_progress(), None).unwrap();
@@ -507,8 +507,8 @@ pub fn bdk_blockchain_tests(attr: TokenStream, item: TokenStream) -> TokenStream
 
                     let mut builder = wallet.build_tx();
                     builder.add_recipient(node_addr.script_pubkey().clone(), 49_000).enable_rbf();
-                    let (psbt, details) = builder.finish().unwrap();
-                    let (psbt, finalized) = wallet.sign(psbt, None).unwrap();
+                    let (mut psbt, details) = builder.finish().unwrap();
+                    let finalized = wallet.sign(&mut psbt, None).unwrap();
                     assert!(finalized, "Cannot finalize transaction");
                     wallet.broadcast(psbt.extract_tx()).unwrap();
                     wallet.sync(noop_progress(), None).unwrap();
@@ -517,10 +517,10 @@ pub fn bdk_blockchain_tests(attr: TokenStream, item: TokenStream) -> TokenStream
 
                     let mut builder = wallet.build_fee_bump(details.txid).unwrap();
                     builder.fee_rate(FeeRate::from_sat_per_vb(123.0));
-                    let (new_psbt, new_details) = builder.finish().unwrap();
+                    let (mut new_psbt, new_details) = builder.finish().unwrap();
                     println!("{:#?}", new_details);
 
-                    let (new_psbt, finalized) = wallet.sign(new_psbt, None).unwrap();
+                    let finalized = wallet.sign(&mut new_psbt, None).unwrap();
                     assert!(finalized, "Cannot finalize transaction");
                     wallet.broadcast(new_psbt.extract_tx()).unwrap();
                     wallet.sync(noop_progress(), None).unwrap();

@@ -105,7 +105,7 @@ fn after(key: &[u8]) -> Vec<u8> {
 /// Once it's dropped its content will be lost.
 ///
 /// If you are looking for a permanent storage solution, you can try with the default key-value
-/// database called [`sled`]. See the [`database`] module documentation for more defailts.
+/// database called [`sled`]. See the [`database`] module documentation for more details.
 ///
 /// [`database`]: crate::database
 #[derive(Debug, Default)]
