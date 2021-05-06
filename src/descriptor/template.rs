@@ -459,11 +459,11 @@ mod test {
     use crate::descriptor::derived::AsDerived;
     use crate::descriptor::{DescriptorError, DescriptorMeta};
     use crate::keys::ValidNetworks;
-    use bitcoin::hashes::core::str::FromStr;
     use bitcoin::network::constants::Network::Regtest;
     use bitcoin::secp256k1::Secp256k1;
     use miniscript::descriptor::{DescriptorPublicKey, DescriptorTrait, KeyMap};
     use miniscript::Descriptor;
+    use std::str::FromStr;
 
     // verify template descriptor generates expected address(es)
     fn check(
