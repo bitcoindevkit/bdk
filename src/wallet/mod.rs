@@ -1166,11 +1166,11 @@ where
         //    must_spend <- manually selected utxos
         //    may_spend  <- all other available utxos
         let mut may_spend = self.get_available_utxos()?;
+
         may_spend.retain(|may_spend| {
-            manually_selected
+            !manually_selected
                 .iter()
-                .find(|manually_selected| manually_selected.utxo.outpoint() == may_spend.0.outpoint)
-                .is_none()
+                .any(|manually_selected| manually_selected.utxo.outpoint() == may_spend.0.outpoint)
         });
         let mut must_spend = manually_selected;
 
