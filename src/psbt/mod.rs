@@ -99,4 +99,23 @@ mod test {
         };
         let _ = wallet.sign(&mut psbt, options).unwrap();
     }
+
+    #[test]
+    fn test_psbt_sign_with_finalized() {
+        let psbt_bip: PSBT = deserialize(&base64::decode(PSBT_STR).unwrap()).unwrap();
+        let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
+        let send_to = wallet.get_address(AddressIndex::New).unwrap();
+        let mut builder = wallet.build_tx();
+        builder.add_recipient(send_to.script_pubkey(), 10_000);
+        let (mut psbt, _) = builder.finish().unwrap();
+
+        // add a finalized input
+        psbt.inputs.push(psbt_bip.inputs[0].clone());
+        psbt.global
+            .unsigned_tx
+            .input
+            .push(psbt_bip.global.unsigned_tx.input[0].clone());
+
+        let _ = wallet.sign(&mut psbt, SignOptions::default()).unwrap();
+    }
 }

@@ -206,6 +206,12 @@ impl Signer for DescriptorXKey<ExtendedPrivKey> {
             return Err(SignerError::InputIndexOutOfRange);
         }
 
+        if psbt.inputs[input_index].final_script_sig.is_some()
+            || psbt.inputs[input_index].final_script_witness.is_some()
+        {
+            return Ok(());
+        }
+
         let (public_key, full_path) = match psbt.inputs[input_index]
             .bip32_derivation
             .iter()
@@ -261,8 +267,14 @@ impl Signer for PrivateKey {
         secp: &SecpCtx,
     ) -> Result<(), SignerError> {
         let input_index = input_index.unwrap();
-        if input_index >= psbt.inputs.len() {
+        if input_index >= psbt.inputs.len() || input_index >= psbt.global.unsigned_tx.input.len() {
             return Err(SignerError::InputIndexOutOfRange);
+        }
+
+        if psbt.inputs[input_index].final_script_sig.is_some()
+            || psbt.inputs[input_index].final_script_witness.is_some()
+        {
+            return Ok(());
         }
 
         let pubkey = self.public_key(&secp);
