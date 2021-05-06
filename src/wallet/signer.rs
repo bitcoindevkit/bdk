@@ -476,7 +476,7 @@ impl ComputeSighash for Legacy {
         psbt: &psbt::PartiallySignedTransaction,
         input_index: usize,
     ) -> Result<(SigHash, SigHashType), SignerError> {
-        if input_index >= psbt.inputs.len() {
+        if input_index >= psbt.inputs.len() || input_index >= psbt.global.unsigned_tx.input.len() {
             return Err(SignerError::InputIndexOutOfRange);
         }
 
@@ -524,7 +524,7 @@ impl ComputeSighash for Segwitv0 {
         psbt: &psbt::PartiallySignedTransaction,
         input_index: usize,
     ) -> Result<(SigHash, SigHashType), SignerError> {
-        if input_index >= psbt.inputs.len() {
+        if input_index >= psbt.inputs.len() || input_index >= psbt.global.unsigned_tx.input.len() {
             return Err(SignerError::InputIndexOutOfRange);
         }
 

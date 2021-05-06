@@ -37,3 +37,49 @@ impl PsbtUtils for PSBT {
         }
     }
 }
+
+#[cfg(test)]
+mod test {
+    use crate::bitcoin::consensus::deserialize;
+    use crate::psbt::PSBT;
+    use crate::wallet::test::{get_funded_wallet, get_test_wpkh};
+    use crate::wallet::AddressIndex;
+    use crate::SignOptions;
+
+    // from bip 174
+    const PSBT_STR: &str = "cHNidP8BAKACAAAAAqsJSaCMWvfEm4IS9Bfi8Vqz9cM9zxU4IagTn4d6W3vkAAAAAAD+////qwlJoIxa98SbghL0F+LxWrP1wz3PFTghqBOfh3pbe+QBAAAAAP7///8CYDvqCwAAAAAZdqkUdopAu9dAy+gdmI5x3ipNXHE5ax2IrI4kAAAAAAAAGXapFG9GILVT+glechue4O/p+gOcykWXiKwAAAAAAAEHakcwRAIgR1lmF5fAGwNrJZKJSGhiGDR9iYZLcZ4ff89X0eURZYcCIFMJ6r9Wqk2Ikf/REf3xM286KdqGbX+EhtdVRs7tr5MZASEDXNxh/HupccC1AaZGoqg7ECy0OIEhfKaC3Ibi1z+ogpIAAQEgAOH1BQAAAAAXqRQ1RebjO4MsRwUPJNPuuTycA5SLx4cBBBYAFIXRNTfy4mVAWjTbr6nj3aAfuCMIAAAA";
+
+    #[test]
+    #[should_panic(expected = "InputIndexOutOfRange")]
+    fn test_psbt_malformed_legacy() {
+        let psbt_bip: PSBT = deserialize(&base64::decode(PSBT_STR).unwrap()).unwrap();
+        let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
+        let send_to = wallet.get_address(AddressIndex::New).unwrap();
+        let mut builder = wallet.build_tx();
+        builder.add_recipient(send_to.script_pubkey(), 10_000);
+        let (mut psbt, _) = builder.finish().unwrap();
+        psbt.inputs.push(psbt_bip.inputs[0].clone());
+        let options = SignOptions {
+            trust_witness_utxo: true,
+            assume_height: None,
+        };
+        let _ = wallet.sign(&mut psbt, options).unwrap();
+    }
+
+    #[test]
+    #[should_panic(expected = "InputIndexOutOfRange")]
+    fn test_psbt_malformed_segwit() {
+        let psbt_bip: PSBT = deserialize(&base64::decode(PSBT_STR).unwrap()).unwrap();
+        let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
+        let send_to = wallet.get_address(AddressIndex::New).unwrap();
+        let mut builder = wallet.build_tx();
+        builder.add_recipient(send_to.script_pubkey(), 10_000);
+        let (mut psbt, _) = builder.finish().unwrap();
+        psbt.inputs.push(psbt_bip.inputs[1].clone());
+        let options = SignOptions {
+            trust_witness_utxo: true,
+            assume_height: None,
+        };
+        let _ = wallet.sign(&mut psbt, options).unwrap();
+    }
+}

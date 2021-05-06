@@ -1497,7 +1497,7 @@ where
 }
 
 #[cfg(test)]
-mod test {
+pub(crate) mod test {
     use std::str::FromStr;
 
     use bitcoin::{util::psbt, Network};
