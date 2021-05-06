@@ -125,12 +125,15 @@
 //!     wallet.sync(noop_progress(), None)?;
 //!
 //!     let send_to = wallet.get_address(New)?;
-//!     let (psbt, details) = wallet.build_tx()
-//!         .add_recipient(send_to.script_pubkey(), 50_000)
-//!         .enable_rbf()
-//!         .do_not_spend_change()
-//!         .fee_rate(FeeRate::from_sat_per_vb(5.0))
-//!         .finish()?;
+//!     let (psbt, details) = {
+//!         let mut builder =  wallet.build_tx();
+//!         builder
+//!             .add_recipient(send_to.script_pubkey(), 50_000)
+//!             .enable_rbf()
+//!             .do_not_spend_change()
+//!             .fee_rate(FeeRate::from_sat_per_vb(5.0))
+//!         builder.finish()?
+//!     };
 //!
 //!     println!("Transaction details: {:#?}", details);
 //!     println!("Unsigned PSBT: {}", base64::encode(&serialize(&psbt)));
