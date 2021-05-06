@@ -41,6 +41,7 @@ impl PsbtUtils for PSBT {
 #[cfg(test)]
 mod test {
     use crate::bitcoin::consensus::deserialize;
+    use crate::bitcoin::TxIn;
     use crate::psbt::PSBT;
     use crate::wallet::test::{get_funded_wallet, get_test_wpkh};
     use crate::wallet::AddressIndex;
@@ -51,7 +52,7 @@ mod test {
 
     #[test]
     #[should_panic(expected = "InputIndexOutOfRange")]
-    fn test_psbt_malformed_legacy() {
+    fn test_psbt_malformed_psbt_input_legacy() {
         let psbt_bip: PSBT = deserialize(&base64::decode(PSBT_STR).unwrap()).unwrap();
         let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
         let send_to = wallet.get_address(AddressIndex::New).unwrap();
@@ -68,7 +69,7 @@ mod test {
 
     #[test]
     #[should_panic(expected = "InputIndexOutOfRange")]
-    fn test_psbt_malformed_segwit() {
+    fn test_psbt_malformed_psbt_input_segwit() {
         let psbt_bip: PSBT = deserialize(&base64::decode(PSBT_STR).unwrap()).unwrap();
         let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
         let send_to = wallet.get_address(AddressIndex::New).unwrap();
@@ -76,6 +77,22 @@ mod test {
         builder.add_recipient(send_to.script_pubkey(), 10_000);
         let (mut psbt, _) = builder.finish().unwrap();
         psbt.inputs.push(psbt_bip.inputs[1].clone());
+        let options = SignOptions {
+            trust_witness_utxo: true,
+            assume_height: None,
+        };
+        let _ = wallet.sign(&mut psbt, options).unwrap();
+    }
+
+    #[test]
+    #[should_panic(expected = "InputIndexOutOfRange")]
+    fn test_psbt_malformed_tx_input() {
+        let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
+        let send_to = wallet.get_address(AddressIndex::New).unwrap();
+        let mut builder = wallet.build_tx();
+        builder.add_recipient(send_to.script_pubkey(), 10_000);
+        let (mut psbt, _) = builder.finish().unwrap();
+        psbt.global.unsigned_tx.input.push(TxIn::default());
         let options = SignOptions {
             trust_witness_utxo: true,
             assume_height: None,

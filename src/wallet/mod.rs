@@ -61,6 +61,7 @@ use crate::descriptor::{
 };
 use crate::error::Error;
 use crate::psbt::PsbtUtils;
+use crate::signer::SignerError;
 use crate::types::*;
 
 const CACHE_ADDR_BATCH_SIZE: u32 = 100;
@@ -927,7 +928,10 @@ where
         let mut finished = true;
 
         for (n, input) in tx.input.iter().enumerate() {
-            let psbt_input = &psbt.inputs[n];
+            let psbt_input = &psbt
+                .inputs
+                .get(n)
+                .ok_or(Error::Signer(SignerError::InputIndexOutOfRange))?;
             if psbt_input.final_script_sig.is_some() || psbt_input.final_script_witness.is_some() {
                 continue;
             }
