@@ -861,10 +861,14 @@ where
         // this helps us doing our job later
         self.add_input_hd_keypaths(psbt)?;
 
-        // If we aren't allowed to use `witness_utxo`, ensure that every input has the
-        // `non_witness_utxo`
+        // If we aren't allowed to use `witness_utxo`, ensure that every input but finalized one
+        // has the `non_witness_utxo`
         if !sign_options.trust_witness_utxo
-            && psbt.inputs.iter().any(|i| i.non_witness_utxo.is_none())
+            && psbt
+                .inputs
+                .iter()
+                .filter(|i| i.final_script_witness.is_none() && i.final_script_sig.is_none())
+                .any(|i| i.non_witness_utxo.is_none())
         {
             return Err(Error::Signer(signer::SignerError::MissingNonWitnessUtxo));
         }
