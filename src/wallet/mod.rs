@@ -424,9 +424,8 @@ where
             })
             .transpose()?;
 
-        let requirements = external_requirements
-            .clone()
-            .merge(&internal_requirements.unwrap_or_default())?;
+        let requirements =
+            external_requirements.merge(&internal_requirements.unwrap_or_default())?;
         debug!("Policy requirements: {:?}", requirements);
 
         let version = match params.version {
