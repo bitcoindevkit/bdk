@@ -201,31 +201,31 @@ mod test {
     #[test]
     fn test_check_nsequence_rbf_msb_set() {
         let result = check_nsequence_rbf(0x80000000, 5000);
-        assert_eq!(result, false);
+        assert!(!result);
     }
 
     #[test]
     fn test_check_nsequence_rbf_lt_csv() {
         let result = check_nsequence_rbf(4000, 5000);
-        assert_eq!(result, false);
+        assert!(!result);
     }
 
     #[test]
     fn test_check_nsequence_rbf_different_unit() {
         let result = check_nsequence_rbf(SEQUENCE_LOCKTIME_TYPE_FLAG + 5000, 5000);
-        assert_eq!(result, false);
+        assert!(!result);
     }
 
     #[test]
     fn test_check_nsequence_rbf_mask() {
         let result = check_nsequence_rbf(0x3f + 10_000, 5000);
-        assert_eq!(result, true);
+        assert!(result);
     }
 
     #[test]
     fn test_check_nsequence_rbf_same_unit_blocks() {
         let result = check_nsequence_rbf(10_000, 5000);
-        assert_eq!(result, true);
+        assert!(result);
     }
 
     #[test]
@@ -234,25 +234,25 @@ mod test {
             SEQUENCE_LOCKTIME_TYPE_FLAG + 10_000,
             SEQUENCE_LOCKTIME_TYPE_FLAG + 5000,
         );
-        assert_eq!(result, true);
+        assert!(result);
     }
 
     #[test]
     fn test_check_nlocktime_lt_cltv() {
         let result = check_nlocktime(4000, 5000);
-        assert_eq!(result, false);
+        assert!(!result);
     }
 
     #[test]
     fn test_check_nlocktime_different_unit() {
         let result = check_nlocktime(BLOCKS_TIMELOCK_THRESHOLD + 5000, 5000);
-        assert_eq!(result, false);
+        assert!(!result);
     }
 
     #[test]
     fn test_check_nlocktime_same_unit_blocks() {
         let result = check_nlocktime(10_000, 5000);
-        assert_eq!(result, true);
+        assert!(result);
     }
 
     #[test]
@@ -261,6 +261,6 @@ mod test {
             BLOCKS_TIMELOCK_THRESHOLD + 10_000,
             BLOCKS_TIMELOCK_THRESHOLD + 5000,
         );
-        assert_eq!(result, true);
+        assert!(result);
     }
 }

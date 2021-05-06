@@ -3514,7 +3514,7 @@ pub(crate) mod test {
         let (mut psbt, _) = builder.finish().unwrap();
 
         let finalized = wallet.sign(&mut psbt, Default::default()).unwrap();
-        assert_eq!(finalized, true);
+        assert!(finalized);
 
         let extracted = psbt.extract_tx();
         assert_eq!(extracted.input[0].witness.len(), 2);
@@ -3531,7 +3531,7 @@ pub(crate) mod test {
         let (mut psbt, _) = builder.finish().unwrap();
 
         let finalized = wallet.sign(&mut psbt, Default::default()).unwrap();
-        assert_eq!(finalized, true);
+        assert!(finalized);
 
         let extracted = psbt.extract_tx();
         assert_eq!(extracted.input[0].witness.len(), 2);
@@ -3548,7 +3548,7 @@ pub(crate) mod test {
         let (mut psbt, _) = builder.finish().unwrap();
 
         let finalized = wallet.sign(&mut psbt, Default::default()).unwrap();
-        assert_eq!(finalized, true);
+        assert!(finalized);
 
         let extracted = psbt.extract_tx();
         assert_eq!(extracted.input[0].witness.len(), 2);
@@ -3565,7 +3565,7 @@ pub(crate) mod test {
         let (mut psbt, _) = builder.finish().unwrap();
 
         let finalized = wallet.sign(&mut psbt, Default::default()).unwrap();
-        assert_eq!(finalized, true);
+        assert!(finalized);
 
         let extracted = psbt.extract_tx();
         assert_eq!(extracted.input[0].witness.len(), 2);
@@ -3583,7 +3583,7 @@ pub(crate) mod test {
         let (mut psbt, _) = builder.finish().unwrap();
 
         let finalized = wallet.sign(&mut psbt, Default::default()).unwrap();
-        assert_eq!(finalized, true);
+        assert!(finalized);
 
         let extracted = psbt.extract_tx();
         assert_eq!(extracted.input[0].witness.len(), 2);
@@ -3603,7 +3603,7 @@ pub(crate) mod test {
         assert_eq!(psbt.inputs[0].bip32_derivation.len(), 0);
 
         let finalized = wallet.sign(&mut psbt, Default::default()).unwrap();
-        assert_eq!(finalized, true);
+        assert!(finalized);
 
         let extracted = psbt.extract_tx();
         assert_eq!(extracted.input[0].witness.len(), 2);
