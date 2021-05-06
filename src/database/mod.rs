@@ -164,14 +164,14 @@ pub(crate) trait DatabaseUtils: Database {
             .map(|o| o.is_some())
     }
 
-    fn get_raw_tx_or<F>(&self, txid: &Txid, f: F) -> Result<Option<Transaction>, Error>
+    fn get_raw_tx_or<D>(&self, txid: &Txid, default: D) -> Result<Option<Transaction>, Error>
     where
-        F: FnOnce() -> Result<Option<Transaction>, Error>,
+        D: FnOnce() -> Result<Option<Transaction>, Error>,
     {
         self.get_tx(txid, true)?
             .map(|t| t.transaction)
             .flatten()
-            .map_or_else(f, |t| Ok(Some(t)))
+            .map_or_else(default, |t| Ok(Some(t)))
     }
 
     fn get_previous_output(&self, outpoint: &OutPoint) -> Result<Option<TxOut>, Error> {
