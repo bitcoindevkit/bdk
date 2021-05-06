@@ -862,12 +862,10 @@ where
 
         // If we aren't allowed to use `witness_utxo`, ensure that every input has the
         // `non_witness_utxo`
-        if !sign_options.trust_witness_utxo {
-            for input in &psbt.inputs {
-                if input.non_witness_utxo.is_none() {
-                    return Err(Error::Signer(signer::SignerError::MissingNonWitnessUtxo));
-                }
-            }
+        if !sign_options.trust_witness_utxo
+            && psbt.inputs.iter().any(|i| i.non_witness_utxo.is_none())
+        {
+            return Err(Error::Signer(signer::SignerError::MissingNonWitnessUtxo));
         }
 
         for signer in self
