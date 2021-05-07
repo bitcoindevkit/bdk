@@ -23,7 +23,7 @@ use bitcoin::secp256k1::Secp256k1;
 
 use bitcoin::consensus::encode::serialize;
 use bitcoin::util::base58;
-use bitcoin::util::psbt::raw::Key as PSBTKey;
+use bitcoin::util::psbt::raw::Key as PsbtKey;
 use bitcoin::util::psbt::Input;
 use bitcoin::util::psbt::PartiallySignedTransaction as Psbt;
 use bitcoin::{Address, Network, OutPoint, Script, SigHashType, Transaction, TxOut, Txid};
@@ -1242,7 +1242,7 @@ where
             for xpub in all_xpubs {
                 let serialized_xpub = base58::from_check(&xpub.xkey.to_string())
                     .expect("Internal serialization error");
-                let key = PSBTKey {
+                let key = PsbtKey {
                     type_value: 0x01,
                     key: serialized_xpub,
                 };
