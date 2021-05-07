@@ -61,7 +61,7 @@ use crate::wallet::utils::{self, After, Older, SecpCtx};
 use super::checksum::get_checksum;
 use super::error::Error;
 use super::XKeyUtils;
-use bitcoin::util::psbt::PartiallySignedTransaction as PSBT;
+use bitcoin::util::psbt::PartiallySignedTransaction as Psbt;
 use miniscript::psbt::PsbtInputSatisfier;
 
 /// Raw public key or extended key fingerprint
@@ -760,7 +760,7 @@ fn signature(
     policy
 }
 
-fn signature_in_psbt(psbt: &PSBT, key: &DescriptorPublicKey, secp: &SecpCtx) -> bool {
+fn signature_in_psbt(psbt: &Psbt, key: &DescriptorPublicKey, secp: &SecpCtx) -> bool {
     //TODO check signature validity
     psbt.inputs.iter().all(|input| match key {
         DescriptorPublicKey::SinglePub(key) => input.partial_sigs.contains_key(&key.key),
@@ -923,7 +923,7 @@ impl<Ctx: ScriptContext> ExtractPolicy for Miniscript<DescriptorPublicKey, Ctx> 
     }
 }
 
-fn psbt_inputs_sat(psbt: &PSBT) -> impl Iterator<Item = PsbtInputSatisfier> {
+fn psbt_inputs_sat(psbt: &Psbt) -> impl Iterator<Item = PsbtInputSatisfier> {
     (0..psbt.inputs.len()).map(move |i| PsbtInputSatisfier::new(psbt, i))
 }
 
@@ -933,11 +933,11 @@ pub enum BuildSatisfaction<'a> {
     /// Don't generate `satisfaction` field
     None,
     /// Analyze the given PSBT to check for existing signatures
-    Psbt(&'a PSBT),
+    Psbt(&'a Psbt),
     /// Like `Psbt` variant and also check for expired timelocks
     PsbtTimelocks {
         /// Given PSBT
-        psbt: &'a PSBT,
+        psbt: &'a Psbt,
         /// Current blockchain height
         current_height: u32,
         /// The highest confirmation height between the inputs
@@ -946,7 +946,7 @@ pub enum BuildSatisfaction<'a> {
     },
 }
 impl<'a> BuildSatisfaction<'a> {
-    fn psbt(&self) -> Option<&'a PSBT> {
+    fn psbt(&self) -> Option<&'a Psbt> {
         match self {
             BuildSatisfaction::None => None,
             BuildSatisfaction::Psbt(psbt) => Some(psbt),
@@ -1475,7 +1475,7 @@ mod test {
 
         let signers_container = Arc::new(SignersContainer::from(keymap));
 
-        let psbt: PSBT = deserialize(&base64::decode(ALICE_SIGNED_PSBT).unwrap()).unwrap();
+        let psbt: Psbt = deserialize(&base64::decode(ALICE_SIGNED_PSBT).unwrap()).unwrap();
 
         let policy_alice_psbt = wallet_desc
             .extract_policy(&signers_container, BuildSatisfaction::Psbt(&psbt), &secp)
@@ -1490,7 +1490,7 @@ mod test {
             )
         );
 
-        let psbt: PSBT = deserialize(&base64::decode(BOB_SIGNED_PSBT).unwrap()).unwrap();
+        let psbt: Psbt = deserialize(&base64::decode(BOB_SIGNED_PSBT).unwrap()).unwrap();
         let policy_bob_psbt = wallet_desc
             .extract_policy(&signers_container, BuildSatisfaction::Psbt(&psbt), &secp)
             .unwrap()
@@ -1504,7 +1504,7 @@ mod test {
             )
         );
 
-        let psbt: PSBT = deserialize(&base64::decode(ALICE_BOB_SIGNED_PSBT).unwrap()).unwrap();
+        let psbt: Psbt = deserialize(&base64::decode(ALICE_BOB_SIGNED_PSBT).unwrap()).unwrap();
         let policy_alice_bob_psbt = wallet_desc
             .extract_policy(&signers_container, BuildSatisfaction::Psbt(&psbt), &secp)
             .unwrap()
@@ -1545,7 +1545,7 @@ mod test {
             addr.to_string()
         );
 
-        let psbt: PSBT =
+        let psbt: Psbt =
             deserialize(&base64::decode(PSBT_POLICY_CONSIDER_TIMELOCK_EXPIRED).unwrap()).unwrap();
 
         let build_sat = BuildSatisfaction::PsbtTimelocks {
@@ -1584,7 +1584,7 @@ mod test {
         );
         //println!("{}", serde_json::to_string(&policy_expired).unwrap());
 
-        let psbt_signed: PSBT =
+        let psbt_signed: Psbt =
             deserialize(&base64::decode(PSBT_POLICY_CONSIDER_TIMELOCK_EXPIRED_SIGNED).unwrap())
                 .unwrap();
 

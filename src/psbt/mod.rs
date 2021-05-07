@@ -9,14 +9,14 @@
 // You may not use this file except in accordance with one or both of these
 // licenses.
 
-use bitcoin::util::psbt::PartiallySignedTransaction as PSBT;
+use bitcoin::util::psbt::PartiallySignedTransaction as Psbt;
 use bitcoin::TxOut;
 
 pub trait PsbtUtils {
     fn get_utxo_for(&self, input_index: usize) -> Option<TxOut>;
 }
 
-impl PsbtUtils for PSBT {
+impl PsbtUtils for Psbt {
     fn get_utxo_for(&self, input_index: usize) -> Option<TxOut> {
         let tx = &self.global.unsigned_tx;
 
@@ -42,7 +42,7 @@ impl PsbtUtils for PSBT {
 mod test {
     use crate::bitcoin::consensus::deserialize;
     use crate::bitcoin::TxIn;
-    use crate::psbt::PSBT;
+    use crate::psbt::Psbt;
     use crate::wallet::test::{get_funded_wallet, get_test_wpkh};
     use crate::wallet::AddressIndex;
     use crate::SignOptions;
@@ -53,7 +53,7 @@ mod test {
     #[test]
     #[should_panic(expected = "InputIndexOutOfRange")]
     fn test_psbt_malformed_psbt_input_legacy() {
-        let psbt_bip: PSBT = deserialize(&base64::decode(PSBT_STR).unwrap()).unwrap();
+        let psbt_bip: Psbt = deserialize(&base64::decode(PSBT_STR).unwrap()).unwrap();
         let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
         let send_to = wallet.get_address(AddressIndex::New).unwrap();
         let mut builder = wallet.build_tx();
@@ -70,7 +70,7 @@ mod test {
     #[test]
     #[should_panic(expected = "InputIndexOutOfRange")]
     fn test_psbt_malformed_psbt_input_segwit() {
-        let psbt_bip: PSBT = deserialize(&base64::decode(PSBT_STR).unwrap()).unwrap();
+        let psbt_bip: Psbt = deserialize(&base64::decode(PSBT_STR).unwrap()).unwrap();
         let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
         let send_to = wallet.get_address(AddressIndex::New).unwrap();
         let mut builder = wallet.build_tx();
@@ -102,7 +102,7 @@ mod test {
 
     #[test]
     fn test_psbt_sign_with_finalized() {
-        let psbt_bip: PSBT = deserialize(&base64::decode(PSBT_STR).unwrap()).unwrap();
+        let psbt_bip: Psbt = deserialize(&base64::decode(PSBT_STR).unwrap()).unwrap();
         let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
         let send_to = wallet.get_address(AddressIndex::New).unwrap();
         let mut builder = wallet.build_tx();

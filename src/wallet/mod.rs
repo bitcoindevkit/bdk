@@ -25,7 +25,7 @@ use bitcoin::consensus::encode::serialize;
 use bitcoin::util::base58;
 use bitcoin::util::psbt::raw::Key as PSBTKey;
 use bitcoin::util::psbt::Input;
-use bitcoin::util::psbt::PartiallySignedTransaction as PSBT;
+use bitcoin::util::psbt::PartiallySignedTransaction as Psbt;
 use bitcoin::{Address, Network, OutPoint, Script, SigHashType, Transaction, TxOut, Txid};
 
 use miniscript::descriptor::DescriptorTrait;
@@ -371,7 +371,7 @@ where
         &self,
         coin_selection: Cs,
         params: TxParams,
-    ) -> Result<(PSBT, TransactionDetails), Error> {
+    ) -> Result<(Psbt, TransactionDetails), Error> {
         let external_policy = self
             .descriptor
             .extract_policy(&self.signers, BuildSatisfaction::None, &self.secp)?
@@ -857,7 +857,7 @@ where
     /// let  finalized = wallet.sign(&mut psbt, SignOptions::default())?;
     /// assert!(finalized, "we should have signed all the inputs");
     /// # Ok::<(), bdk::Error>(())
-    pub fn sign(&self, psbt: &mut PSBT, sign_options: SignOptions) -> Result<bool, Error> {
+    pub fn sign(&self, psbt: &mut Psbt, sign_options: SignOptions) -> Result<bool, Error> {
         // this helps us doing our job later
         self.add_input_hd_keypaths(psbt)?;
 
@@ -927,7 +927,7 @@ where
     /// Try to finalize a PSBT
     ///
     /// The [`SignOptions`] can be used to tweak the behavior of the finalizer.
-    pub fn finalize_psbt(&self, psbt: &mut PSBT, sign_options: SignOptions) -> Result<bool, Error> {
+    pub fn finalize_psbt(&self, psbt: &mut Psbt, sign_options: SignOptions) -> Result<bool, Error> {
         let tx = &psbt.global.unsigned_tx;
         let mut finished = true;
 
@@ -1228,10 +1228,10 @@ where
         tx: Transaction,
         selected: Vec<Utxo>,
         params: TxParams,
-    ) -> Result<PSBT, Error> {
+    ) -> Result<Psbt, Error> {
         use bitcoin::util::psbt::serialize::Serialize;
 
-        let mut psbt = PSBT::from_unsigned_tx(tx)?;
+        let mut psbt = Psbt::from_unsigned_tx(tx)?;
 
         if params.add_global_xpubs {
             let mut all_xpubs = self.descriptor.get_extended_keys()?;
@@ -1371,7 +1371,7 @@ where
         Ok(psbt_input)
     }
 
-    fn add_input_hd_keypaths(&self, psbt: &mut PSBT) -> Result<(), Error> {
+    fn add_input_hd_keypaths(&self, psbt: &mut Psbt) -> Result<(), Error> {
         let mut input_utxos = Vec::with_capacity(psbt.inputs.len());
         for n in 0..psbt.inputs.len() {
             input_utxos.push(psbt.get_utxo_for(n).clone());

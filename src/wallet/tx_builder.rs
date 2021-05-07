@@ -41,7 +41,7 @@ use std::collections::HashSet;
 use std::default::Default;
 use std::marker::PhantomData;
 
-use bitcoin::util::psbt::{self, PartiallySignedTransaction as PSBT};
+use bitcoin::util::psbt::{self, PartiallySignedTransaction as Psbt};
 use bitcoin::{OutPoint, Script, SigHashType, Transaction};
 
 use miniscript::descriptor::DescriptorTrait;
@@ -521,7 +521,7 @@ impl<'a, B, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderConte
     /// Returns the [`BIP174`] "PSBT" and summary details about the transaction.
     ///
     /// [`BIP174`]: https://github.com/bitcoin/bips/blob/master/bip-0174.mediawiki
-    pub fn finish(self) -> Result<(PSBT, TransactionDetails), Error> {
+    pub fn finish(self) -> Result<(Psbt, TransactionDetails), Error> {
         self.wallet.create_tx(self.coin_selection, self.params)
     }
 
