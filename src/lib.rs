@@ -53,7 +53,6 @@
 //! use bdk::Wallet;
 //! use bdk::database::MemoryDatabase;
 //! use bdk::blockchain::{noop_progress, ElectrumBlockchain};
-//!
 //! use bdk::electrum_client::Client;
 //!
 //! fn main() -> Result<(), bdk::Error> {
@@ -103,10 +102,10 @@
 //! ### Example
 //! ```no_run
 //! use base64::decode;
+//!
 //! use bdk::{FeeRate, Wallet};
 //! use bdk::database::MemoryDatabase;
 //! use bdk::blockchain::{noop_progress, ElectrumBlockchain};
-//!
 //! use bdk::electrum_client::Client;
 //!
 //! use bitcoin::consensus::serialize;
@@ -147,10 +146,10 @@
 //! ### Example
 //! ```no_run
 //! use base64::decode;
+//! use bitcoin::consensus::deserialize;
+//!
 //! use bdk::{Wallet, SignOptions};
 //! use bdk::database::MemoryDatabase;
-//!
-//! use bitcoin::consensus::deserialize;
 //!
 //! fn main() -> Result<(), bdk::Error> {
 //!     let wallet = Wallet::new_offline(
