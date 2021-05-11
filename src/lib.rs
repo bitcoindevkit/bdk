@@ -49,7 +49,7 @@
 //! ## Sync the balance of a descriptor
 //!
 //! ### Example
-//! ```ignore
+//! ```no_run
 //! use bdk::Wallet;
 //! use bdk::database::MemoryDatabase;
 //! use bdk::blockchain::{noop_progress, ElectrumBlockchain};
@@ -101,7 +101,7 @@
 //! ## Create a transaction
 //!
 //! ### Example
-//! ```ignore
+//! ```no_run
 //! use base64::decode;
 //! use bdk::{FeeRate, Wallet};
 //! use bdk::database::MemoryDatabase;
@@ -131,7 +131,7 @@
 //!             .add_recipient(send_to.script_pubkey(), 50_000)
 //!             .enable_rbf()
 //!             .do_not_spend_change()
-//!             .fee_rate(FeeRate::from_sat_per_vb(5.0))
+//!             .fee_rate(FeeRate::from_sat_per_vb(5.0));
 //!         builder.finish()?
 //!     };
 //!
@@ -145,9 +145,9 @@
 //! ## Sign a transaction
 //!
 //! ### Example
-//! ```ignore
+//! ```no_run
 //! use base64::decode;
-//! use bdk::{Wallet};
+//! use bdk::{Wallet, SignOptions};
 //! use bdk::database::MemoryDatabase;
 //!
 //! use bitcoin::consensus::deserialize;
@@ -163,7 +163,7 @@
 //!     let psbt = "...";
 //!     let mut psbt = deserialize(&base64::decode(psbt).unwrap())?;
 //!
-//!     let finalized = wallet.sign(&mut psbt, None)?;
+//!     let finalized = wallet.sign(&mut psbt, SignOptions::default())?;
 //!
 //!     Ok(())
 //! }
