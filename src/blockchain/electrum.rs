@@ -45,13 +45,6 @@ use crate::FeeRate;
 /// See the [`blockchain::electrum`](crate::blockchain::electrum) module for a usage example.
 pub struct ElectrumBlockchain(Client);
 
-#[cfg(test)]
-#[cfg(feature = "test-electrum")]
-#[bdk_blockchain_tests(crate)]
-fn local_electrs() -> ElectrumBlockchain {
-    ElectrumBlockchain::from(Client::new(&testutils::get_electrum_url()).unwrap())
-}
-
 impl std::convert::From<Client> for ElectrumBlockchain {
     fn from(client: Client) -> Self {
         ElectrumBlockchain(client)
@@ -173,5 +166,13 @@ impl ConfigurableBlockchain for ElectrumBlockchain {
             config.url.as_str(),
             electrum_config,
         )?))
+    }
+}
+
+#[cfg(all(feature = "test-electrum", test))]
+testutils::bdk_blockchain_tests! {
+    bdk => crate,
+    fn test_instance() -> ElectrumBlockchain {
+        ElectrumBlockchain::from(Client::new(&testutils::get_electrum_url()).unwrap())
     }
 }

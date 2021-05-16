@@ -11,6 +11,7 @@
 
 #[macro_use]
 extern crate serde_json;
+mod blockchain_tests;
 
 pub use serial_test::serial;
 
@@ -297,11 +298,12 @@ where
 }
 
 impl TestClient {
-    pub fn new() -> Self {
-        let url = env::var("BDK_RPC_URL").unwrap_or_else(|_| "127.0.0.1:18443".to_string());
-        let wallet = env::var("BDK_RPC_WALLET").unwrap_or_else(|_| "bdk-test".to_string());
-        let client =
-            RpcClient::new(format!("http://{}/wallet/{}", url, wallet), get_auth()).unwrap();
+    pub fn new(rpc_host_and_wallet: String, rpc_wallet_name: String) -> Self {
+        let client = RpcClient::new(
+            format!("http://{}/wallet/{}", rpc_host_and_wallet, rpc_wallet_name),
+            get_auth(),
+        )
+        .unwrap();
         let electrum = ElectrumClient::new(&get_electrum_url()).unwrap();
 
         TestClient { client, electrum }
@@ -560,5 +562,14 @@ impl Deref for TestClient {
 
     fn deref(&self) -> &Self::Target {
         &self.client
+    }
+}
+
+impl Default for TestClient {
+    fn default() -> Self {
+        let rpc_host_and_port =
+            env::var("BDK_RPC_URL").unwrap_or_else(|_| "127.0.0.1:18443".to_string());
+        let wallet = env::var("BDK_RPC_WALLET").unwrap_or_else(|_| "bdk-test".to_string());
+        Self::new(rpc_host_and_port, wallet)
     }
 }

@@ -234,8 +234,6 @@ pub extern crate sled;
 extern crate testutils;
 #[allow(unused_imports)]
 #[cfg(test)]
-#[macro_use]
-extern crate testutils_macros;
 #[allow(unused_imports)]
 #[cfg(test)]
 #[macro_use]
