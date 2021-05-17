@@ -16,6 +16,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::collections::{BTreeMap, HashSet};
+use std::fmt;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
@@ -196,24 +197,52 @@ pub enum AddressIndex {
     Reset(u32),
 }
 
+/// A derived address and the index it was found at
+/// For convenience this automatically derefs to `Address`
+#[derive(Debug, PartialEq)]
+pub struct AddressInfo {
+    /// Child index of this address
+    pub index: u32,
+    /// Address
+    pub address: Address,
+}
+
+impl Deref for AddressInfo {
+    type Target = Address;
+
+    fn deref(&self) -> &Self::Target {
+        &self.address
+    }
+}
+
+impl fmt::Display for AddressInfo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.address)
+    }
+}
+
 // offline actions, always available
 impl<B, D> Wallet<B, D>
 where
     D: BatchDatabase,
 {
     // Return a newly derived address using the external descriptor
-    fn get_new_address(&self) -> Result<Address, Error> {
+    fn get_new_address(&self) -> Result<(Address, u32), Error> {
         let incremented_index = self.fetch_and_increment_index(KeychainKind::External)?;
 
-        self.descriptor
+        let address_result = self
+            .descriptor
             .as_derived(incremented_index, &self.secp)
-            .address(self.network)
+            .address(self.network);
+
+        address_result
+            .map(|address| (address, incremented_index))
             .map_err(|_| Error::ScriptDoesntHaveAddressForm)
     }
 
     // Return the the last previously derived address if it has not been used in a received
     // transaction. Otherwise return a new address using [`Wallet::get_new_address`].
-    fn get_unused_address(&self) -> Result<Address, Error> {
+    fn get_unused_address(&self) -> Result<(Address, u32), Error> {
         let current_index = self.fetch_index(KeychainKind::External)?;
 
         let derived_key = self.descriptor.as_derived(current_index, &self.secp);
@@ -232,39 +261,44 @@ where
         } else {
             derived_key
                 .address(self.network)
+                .map(|address| (address, current_index))
                 .map_err(|_| Error::ScriptDoesntHaveAddressForm)
         }
     }
 
     // Return derived address for the external descriptor at a specific index
-    fn peek_address(&self, index: u32) -> Result<Address, Error> {
+    fn peek_address(&self, index: u32) -> Result<(Address, u32), Error> {
         self.descriptor
             .as_derived(index, &self.secp)
             .address(self.network)
+            .map(|address| (address, index))
             .map_err(|_| Error::ScriptDoesntHaveAddressForm)
     }
 
     // Return derived address for the external descriptor at a specific index and reset current
     // address index
-    fn reset_address(&self, index: u32) -> Result<Address, Error> {
+    fn reset_address(&self, index: u32) -> Result<(Address, u32), Error> {
         self.set_index(KeychainKind::External, index)?;
 
         self.descriptor
             .as_derived(index, &self.secp)
             .address(self.network)
+            .map(|address| (address, index))
             .map_err(|_| Error::ScriptDoesntHaveAddressForm)
     }
 
     /// Return a derived address using the external descriptor, see [`AddressIndex`] for
     /// available address index selection strategies. If none of the keys in the descriptor are derivable
     /// (ie. does not end with /*) then the same address will always be returned for any [`AddressIndex`].
-    pub fn get_address(&self, address_index: AddressIndex) -> Result<Address, Error> {
-        match address_index {
+    pub fn get_address(&self, address_index: AddressIndex) -> Result<AddressInfo, Error> {
+        let result = match address_index {
             AddressIndex::New => self.get_new_address(),
             AddressIndex::LastUnused => self.get_unused_address(),
             AddressIndex::Peek(index) => self.peek_address(index),
             AddressIndex::Reset(index) => self.reset_address(index),
-        }
+        };
+
+        result.map(|(address, index)| AddressInfo { index, address })
     }
 
     /// Return whether or not a `script` is part of this wallet (either internal or external)
@@ -3865,6 +3899,67 @@ pub(crate) mod test {
         assert_eq!(
             wallet.get_address(New).unwrap().to_string(),
             "tb1qzntf2mqex4ehwkjlfdyy3ewdlk08qkvkvrz7x2"
+        );
+    }
+
+    #[test]
+    fn test_returns_index_and_address() {
+        let db = MemoryDatabase::new();
+        let wallet = Wallet::new_offline("wpkh(tpubEBr4i6yk5nf5DAaJpsi9N2pPYBeJ7fZ5Z9rmN4977iYLCGco1VyjB9tvvuvYtfZzjD5A8igzgw3HeWeeKFmanHYqksqZXYXGsw5zjnj7KM9/*)",
+                                         None, Network::Testnet, db).unwrap();
+
+        // new index 0
+        assert_eq!(
+            wallet.get_address(New).unwrap(),
+            AddressInfo {
+                index: 0,
+                address: Address::from_str("tb1q6yn66vajcctph75pvylgkksgpp6nq04ppwct9a").unwrap(),
+            }
+        );
+
+        // new index 1
+        assert_eq!(
+            wallet.get_address(New).unwrap(),
+            AddressInfo {
+                index: 1,
+                address: Address::from_str("tb1q4er7kxx6sssz3q7qp7zsqsdx4erceahhax77d7").unwrap()
+            }
+        );
+
+        // peek index 25
+        assert_eq!(
+            wallet.get_address(Peek(25)).unwrap(),
+            AddressInfo {
+                index: 25,
+                address: Address::from_str("tb1qsp7qu0knx3sl6536dzs0703u2w2ag6ppl9d0c2").unwrap()
+            }
+        );
+
+        // new index 2
+        assert_eq!(
+            wallet.get_address(New).unwrap(),
+            AddressInfo {
+                index: 2,
+                address: Address::from_str("tb1qzntf2mqex4ehwkjlfdyy3ewdlk08qkvkvrz7x2").unwrap()
+            }
+        );
+
+        //  reset index 1 again
+        assert_eq!(
+            wallet.get_address(Reset(1)).unwrap(),
+            AddressInfo {
+                index: 1,
+                address: Address::from_str("tb1q4er7kxx6sssz3q7qp7zsqsdx4erceahhax77d7").unwrap()
+            }
+        );
+
+        // new index 2 again
+        assert_eq!(
+            wallet.get_address(New).unwrap(),
+            AddressInfo {
+                index: 2,
+                address: Address::from_str("tb1qzntf2mqex4ehwkjlfdyy3ewdlk08qkvkvrz7x2").unwrap()
+            }
         );
     }
 }

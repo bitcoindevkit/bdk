@@ -815,7 +815,7 @@ macro_rules! bdk_blockchain_tests {
             #[serial]
             fn test_sync_receive_coinbase() {
                 let (wallet, _, mut test_client) = init_single_sig();
-                let wallet_addr = wallet.get_address(New).unwrap();
+                let wallet_addr = wallet.get_address(New).unwrap().address;
 
                 wallet.sync(noop_progress(), None).unwrap();
                 assert_eq!(wallet.get_balance().unwrap(), 0);
