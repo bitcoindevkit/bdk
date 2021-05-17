@@ -22,6 +22,7 @@ jobs:
           - compact_filters
           - esplora,key-value-db,electrum
           - compiler
+          - rpc
     steps:
       - name: checkout
         uses: actions/checkout@v2
@@ -85,6 +86,9 @@ jobs:
           - name: esplora
             container: bitcoindevkit/esplora
             start: /root/electrs --network regtest -vvv --cookie admin:passw --jsonrpc-import --electrum-rpc-addr=0.0.0.0:60401 --http-addr 0.0.0.0:3002
+          - name: rpc
+            container: bitcoindevkit/electrs
+            start: /root/electrs --network regtest --jsonrpc-import
     container: ${{ matrix.blockchain.container }}
     env:
       BDK_RPC_AUTH: USER_PASS

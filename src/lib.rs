@@ -219,6 +219,9 @@ extern crate bdk_macros;
 #[cfg(feature = "compact_filters")]
 extern crate lazy_static;
 
+#[cfg(feature = "rpc")]
+pub extern crate bitcoincore_rpc;
+
 #[cfg(feature = "electrum")]
 pub extern crate electrum_client;
 
