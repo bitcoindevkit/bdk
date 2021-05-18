@@ -227,7 +227,7 @@ where
     D: BatchDatabase,
 {
     // Return a newly derived address using the external descriptor
-    fn get_new_address(&self) -> Result<(Address, u32), Error> {
+    fn get_new_address(&self) -> Result<AddressInfo, Error> {
         let incremented_index = self.fetch_and_increment_index(KeychainKind::External)?;
 
         let address_result = self
@@ -236,13 +236,16 @@ where
             .address(self.network);
 
         address_result
-            .map(|address| (address, incremented_index))
+            .map(|address| AddressInfo {
+                address,
+                index: incremented_index,
+            })
             .map_err(|_| Error::ScriptDoesntHaveAddressForm)
     }
 
     // Return the the last previously derived address if it has not been used in a received
     // transaction. Otherwise return a new address using [`Wallet::get_new_address`].
-    fn get_unused_address(&self) -> Result<(Address, u32), Error> {
+    fn get_unused_address(&self) -> Result<AddressInfo, Error> {
         let current_index = self.fetch_index(KeychainKind::External)?;
 
         let derived_key = self.descriptor.as_derived(current_index, &self.secp);
@@ -261,29 +264,32 @@ where
         } else {
             derived_key
                 .address(self.network)
-                .map(|address| (address, current_index))
+                .map(|address| AddressInfo {
+                    address,
+                    index: current_index,
+                })
                 .map_err(|_| Error::ScriptDoesntHaveAddressForm)
         }
     }
 
     // Return derived address for the external descriptor at a specific index
-    fn peek_address(&self, index: u32) -> Result<(Address, u32), Error> {
+    fn peek_address(&self, index: u32) -> Result<AddressInfo, Error> {
         self.descriptor
             .as_derived(index, &self.secp)
             .address(self.network)
-            .map(|address| (address, index))
+            .map(|address| AddressInfo { address, index })
             .map_err(|_| Error::ScriptDoesntHaveAddressForm)
     }
 
     // Return derived address for the external descriptor at a specific index and reset current
     // address index
-    fn reset_address(&self, index: u32) -> Result<(Address, u32), Error> {
+    fn reset_address(&self, index: u32) -> Result<AddressInfo, Error> {
         self.set_index(KeychainKind::External, index)?;
 
         self.descriptor
             .as_derived(index, &self.secp)
             .address(self.network)
-            .map(|address| (address, index))
+            .map(|address| AddressInfo { address, index })
             .map_err(|_| Error::ScriptDoesntHaveAddressForm)
     }
 
@@ -291,14 +297,12 @@ where
     /// available address index selection strategies. If none of the keys in the descriptor are derivable
     /// (ie. does not end with /*) then the same address will always be returned for any [`AddressIndex`].
     pub fn get_address(&self, address_index: AddressIndex) -> Result<AddressInfo, Error> {
-        let result = match address_index {
+        match address_index {
             AddressIndex::New => self.get_new_address(),
             AddressIndex::LastUnused => self.get_unused_address(),
             AddressIndex::Peek(index) => self.peek_address(index),
             AddressIndex::Reset(index) => self.reset_address(index),
-        };
-
-        result.map(|(address, index)| AddressInfo { index, address })
+        }
     }
 
     /// Return whether or not a `script` is part of this wallet (either internal or external)
