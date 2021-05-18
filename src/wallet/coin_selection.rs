@@ -255,8 +255,8 @@ impl OutputGroup {
         let effective_value = weighted_utxo.utxo.txout().value as i64 - fee.ceil() as i64;
         OutputGroup {
             weighted_utxo,
-            effective_value,
             fee,
+            effective_value,
         }
     }
 }

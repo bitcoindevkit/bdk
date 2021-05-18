@@ -424,9 +424,8 @@ where
             })
             .transpose()?;
 
-        let requirements = external_requirements
-            .clone()
-            .merge(&internal_requirements.unwrap_or_default())?;
+        let requirements =
+            external_requirements.merge(&internal_requirements.unwrap_or_default())?;
         debug!("Policy requirements: {:?}", requirements);
 
         let version = match params.version {
@@ -1167,11 +1166,11 @@ where
         //    must_spend <- manually selected utxos
         //    may_spend  <- all other available utxos
         let mut may_spend = self.get_available_utxos()?;
+
         may_spend.retain(|may_spend| {
-            manually_selected
+            !manually_selected
                 .iter()
-                .find(|manually_selected| manually_selected.utxo.outpoint() == may_spend.0.outpoint)
-                .is_none()
+                .any(|manually_selected| manually_selected.utxo.outpoint() == may_spend.0.outpoint)
         });
         let mut must_spend = manually_selected;
 
@@ -3514,7 +3513,7 @@ pub(crate) mod test {
         let (mut psbt, _) = builder.finish().unwrap();
 
         let finalized = wallet.sign(&mut psbt, Default::default()).unwrap();
-        assert_eq!(finalized, true);
+        assert!(finalized);
 
         let extracted = psbt.extract_tx();
         assert_eq!(extracted.input[0].witness.len(), 2);
@@ -3531,7 +3530,7 @@ pub(crate) mod test {
         let (mut psbt, _) = builder.finish().unwrap();
 
         let finalized = wallet.sign(&mut psbt, Default::default()).unwrap();
-        assert_eq!(finalized, true);
+        assert!(finalized);
 
         let extracted = psbt.extract_tx();
         assert_eq!(extracted.input[0].witness.len(), 2);
@@ -3548,7 +3547,7 @@ pub(crate) mod test {
         let (mut psbt, _) = builder.finish().unwrap();
 
         let finalized = wallet.sign(&mut psbt, Default::default()).unwrap();
-        assert_eq!(finalized, true);
+        assert!(finalized);
 
         let extracted = psbt.extract_tx();
         assert_eq!(extracted.input[0].witness.len(), 2);
@@ -3565,7 +3564,7 @@ pub(crate) mod test {
         let (mut psbt, _) = builder.finish().unwrap();
 
         let finalized = wallet.sign(&mut psbt, Default::default()).unwrap();
-        assert_eq!(finalized, true);
+        assert!(finalized);
 
         let extracted = psbt.extract_tx();
         assert_eq!(extracted.input[0].witness.len(), 2);
@@ -3583,7 +3582,7 @@ pub(crate) mod test {
         let (mut psbt, _) = builder.finish().unwrap();
 
         let finalized = wallet.sign(&mut psbt, Default::default()).unwrap();
-        assert_eq!(finalized, true);
+        assert!(finalized);
 
         let extracted = psbt.extract_tx();
         assert_eq!(extracted.input[0].witness.len(), 2);
@@ -3603,7 +3602,7 @@ pub(crate) mod test {
         assert_eq!(psbt.inputs[0].bip32_derivation.len(), 0);
 
         let finalized = wallet.sign(&mut psbt, Default::default()).unwrap();
-        assert_eq!(finalized, true);
+        assert!(finalized);
 
         let extracted = psbt.extract_tx();
         assert_eq!(extracted.input[0].witness.len(), 2);

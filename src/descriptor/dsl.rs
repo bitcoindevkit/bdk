@@ -535,9 +535,7 @@ macro_rules! fragment_internal {
     ( @t , $( $tail:tt )* ) => ({
         $crate::fragment_internal!( @t $( $tail )* )
     });
-    ( @t ) => ({
-        ()
-    });
+    ( @t ) => ({});
 
     // Fallback to calling `fragment!()`
     ( $( $tokens:tt )* ) => ({
