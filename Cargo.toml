@@ -55,6 +55,7 @@ keys-bip39 = ["tiny-bip39"]
 
 # Debug/Test features
 test-electrum = ["electrum"]
+test-esplora = ["esplora"]
 test-md-docs = ["electrum"]
 
 [dev-dependencies]

@@ -193,6 +193,9 @@ macro_rules! bdk_blockchain_tests {
                 assert_eq!(list_tx_item.height, None);
             }
 
+            // FIXME: I would like this to be cfg_attr(not(feature = "test-esplora"), ignore) but it
+            // doesn't work for some reason.
+            #[cfg(not(feature = "test-esplora"))]
             #[test]
             #[serial]
             fn test_sync_reorg_block() {

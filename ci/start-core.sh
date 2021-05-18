@@ -11,7 +11,3 @@ done
 echo "Generating 150 bitcoin blocks."
 ADDR=$(/root/bitcoin-cli -regtest -rpcuser=$BDK_RPC_USER -rpcpassword=$BDK_RPC_PASS -rpcwallet=$BDK_RPC_WALLET getnewaddress)
 /root/bitcoin-cli -regtest -rpcuser=$BDK_RPC_USER -rpcpassword=$BDK_RPC_PASS generatetoaddress 150 $ADDR
-
-echo "Starting electrs node."
-nohup /root/electrs --network regtest --jsonrpc-import &
-sleep 5
