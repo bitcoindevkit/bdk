@@ -1,3 +1,336 @@
+use crate::testutils::TestIncomingTx;
+use bitcoin::consensus::encode::{deserialize, serialize};
+use bitcoin::hashes::hex::{FromHex, ToHex};
+use bitcoin::hashes::sha256d;
+use bitcoin::{Address, Amount, Script, Transaction, Txid};
+pub use bitcoincore_rpc::bitcoincore_rpc_json::AddressType;
+pub use bitcoincore_rpc::{Auth, Client as RpcClient, RpcApi};
+use core::str::FromStr;
+pub use electrum_client::{Client as ElectrumClient, ElectrumApi};
+#[allow(unused_imports)]
+use log::{debug, error, info, trace};
+use std::collections::HashMap;
+use std::env;
+use std::ops::Deref;
+use std::path::PathBuf;
+use std::time::Duration;
+
+pub struct TestClient {
+    client: RpcClient,
+    electrum: ElectrumClient,
+}
+
+impl TestClient {
+    pub fn new(rpc_host_and_wallet: String, rpc_wallet_name: String) -> Self {
+        let client = RpcClient::new(
+            format!("http://{}/wallet/{}", rpc_host_and_wallet, rpc_wallet_name),
+            get_auth(),
+        )
+        .unwrap();
+        let electrum = ElectrumClient::new(&get_electrum_url()).unwrap();
+
+        TestClient { client, electrum }
+    }
+
+    fn wait_for_tx(&mut self, txid: Txid, monitor_script: &Script) {
+        // wait for electrs to index the tx
+        exponential_backoff_poll(|| {
+            trace!("wait_for_tx {}", txid);
+
+            self.electrum
+                .script_get_history(monitor_script)
+                .unwrap()
+                .iter()
+                .position(|entry| entry.tx_hash == txid)
+        });
+    }
+
+    fn wait_for_block(&mut self, min_height: usize) {
+        self.electrum.block_headers_subscribe().unwrap();
+
+        loop {
+            let header = exponential_backoff_poll(|| {
+                self.electrum.ping().unwrap();
+                self.electrum.block_headers_pop().unwrap()
+            });
+            if header.height >= min_height {
+                break;
+            }
+        }
+    }
+
+    pub fn receive(&mut self, meta_tx: TestIncomingTx) -> Txid {
+        assert!(
+            !meta_tx.output.is_empty(),
+            "can't create a transaction with no outputs"
+        );
+
+        let mut map = HashMap::new();
+
+        let mut required_balance = 0;
+        for out in &meta_tx.output {
+            required_balance += out.value;
+            map.insert(out.to_address.clone(), Amount::from_sat(out.value));
+        }
+
+        if self.get_balance(None, None).unwrap() < Amount::from_sat(required_balance) {
+            panic!("Insufficient funds in bitcoind. Please generate a few blocks with: `bitcoin-cli generatetoaddress 10 {}`", self.get_new_address(None, None).unwrap());
+        }
+
+        // FIXME: core can't create a tx with two outputs to the same address
+        let tx = self
+            .create_raw_transaction_hex(&[], &map, meta_tx.locktime, meta_tx.replaceable)
+            .unwrap();
+        let tx = self.fund_raw_transaction(tx, None, None).unwrap();
+        let mut tx: Transaction = deserialize(&tx.hex).unwrap();
+
+        if let Some(true) = meta_tx.replaceable {
+            // for some reason core doesn't set this field right
+            for input in &mut tx.input {
+                input.sequence = 0xFFFFFFFD;
+            }
+        }
+
+        let tx = self
+            .sign_raw_transaction_with_wallet(&serialize(&tx), None, None)
+            .unwrap();
+
+        // broadcast through electrum so that it caches the tx immediately
+        let txid = self
+            .electrum
+            .transaction_broadcast(&deserialize(&tx.hex).unwrap())
+            .unwrap();
+
+        if let Some(num) = meta_tx.min_confirmations {
+            self.generate(num, None);
+        }
+
+        let monitor_script = Address::from_str(&meta_tx.output[0].to_address)
+            .unwrap()
+            .script_pubkey();
+        self.wait_for_tx(txid, &monitor_script);
+
+        debug!("Sent tx: {}", txid);
+
+        txid
+    }
+
+    pub fn bump_fee(&mut self, txid: &Txid) -> Txid {
+        let tx = self.get_raw_transaction_info(txid, None).unwrap();
+        assert!(
+            tx.confirmations.is_none(),
+            "Can't bump tx {} because it's already confirmed",
+            txid
+        );
+
+        let bumped: serde_json::Value = self.call("bumpfee", &[txid.to_string().into()]).unwrap();
+        let new_txid = Txid::from_str(&bumped["txid"].as_str().unwrap().to_string()).unwrap();
+
+        let monitor_script =
+            tx.vout[0].script_pub_key.addresses.as_ref().unwrap()[0].script_pubkey();
+        self.wait_for_tx(new_txid, &monitor_script);
+
+        debug!("Bumped {}, new txid {}", txid, new_txid);
+
+        new_txid
+    }
+
+    pub fn generate_manually(&mut self, txs: Vec<Transaction>) -> String {
+        use bitcoin::blockdata::block::{Block, BlockHeader};
+        use bitcoin::blockdata::script::Builder;
+        use bitcoin::blockdata::transaction::{OutPoint, TxIn, TxOut};
+        use bitcoin::hash_types::{BlockHash, TxMerkleNode};
+
+        let block_template: serde_json::Value = self
+            .call("getblocktemplate", &[json!({"rules": ["segwit"]})])
+            .unwrap();
+        trace!("getblocktemplate: {:#?}", block_template);
+
+        let header = BlockHeader {
+            version: block_template["version"].as_i64().unwrap() as i32,
+            prev_blockhash: BlockHash::from_hex(
+                block_template["previousblockhash"].as_str().unwrap(),
+            )
+            .unwrap(),
+            merkle_root: TxMerkleNode::default(),
+            time: block_template["curtime"].as_u64().unwrap() as u32,
+            bits: u32::from_str_radix(block_template["bits"].as_str().unwrap(), 16).unwrap(),
+            nonce: 0,
+        };
+        debug!("header: {:#?}", header);
+
+        let height = block_template["height"].as_u64().unwrap() as i64;
+        let witness_reserved_value: Vec<u8> = sha256d::Hash::default().as_ref().into();
+        // burn block subsidy and fees, not a big deal
+        let mut coinbase_tx = Transaction {
+            version: 1,
+            lock_time: 0,
+            input: vec![TxIn {
+                previous_output: OutPoint::null(),
+                script_sig: Builder::new().push_int(height).into_script(),
+                sequence: 0xFFFFFFFF,
+                witness: vec![witness_reserved_value],
+            }],
+            output: vec![],
+        };
+
+        let mut txdata = vec![coinbase_tx.clone()];
+        txdata.extend_from_slice(&txs);
+
+        let mut block = Block { header, txdata };
+
+        let witness_root = block.witness_root();
+        let witness_commitment =
+            Block::compute_witness_commitment(&witness_root, &coinbase_tx.input[0].witness[0]);
+
+        // now update and replace the coinbase tx
+        let mut coinbase_witness_commitment_script = vec![0x6a, 0x24, 0xaa, 0x21, 0xa9, 0xed];
+        coinbase_witness_commitment_script.extend_from_slice(&witness_commitment);
+
+        coinbase_tx.output.push(TxOut {
+            value: 0,
+            script_pubkey: coinbase_witness_commitment_script.into(),
+        });
+        block.txdata[0] = coinbase_tx;
+
+        // set merkle root
+        let merkle_root = block.merkle_root();
+        block.header.merkle_root = merkle_root;
+
+        assert!(block.check_merkle_root());
+        assert!(block.check_witness_commitment());
+
+        // now do PoW :)
+        let target = block.header.target();
+        while block.header.validate_pow(&target).is_err() {
+            block.header.nonce = block.header.nonce.checked_add(1).unwrap(); // panic if we run out of nonces
+        }
+
+        let block_hex: String = serialize(&block).to_hex();
+        debug!("generated block hex: {}", block_hex);
+
+        self.electrum.block_headers_subscribe().unwrap();
+
+        let submit_result: serde_json::Value =
+            self.call("submitblock", &[block_hex.into()]).unwrap();
+        debug!("submitblock: {:?}", submit_result);
+        assert!(
+            submit_result.is_null(),
+            "submitblock error: {:?}",
+            submit_result.as_str()
+        );
+
+        self.wait_for_block(height as usize);
+
+        block.header.block_hash().to_hex()
+    }
+
+    pub fn generate(&mut self, num_blocks: u64, address: Option<Address>) {
+        let address = address.unwrap_or_else(|| self.get_new_address(None, None).unwrap());
+        let hashes = self.generate_to_address(num_blocks, &address).unwrap();
+        let best_hash = hashes.last().unwrap();
+        let height = self.get_block_info(best_hash).unwrap().height;
+
+        self.wait_for_block(height);
+
+        debug!("Generated blocks to new height {}", height);
+    }
+
+    pub fn invalidate(&mut self, num_blocks: u64) {
+        self.electrum.block_headers_subscribe().unwrap();
+
+        let best_hash = self.get_best_block_hash().unwrap();
+        let initial_height = self.get_block_info(&best_hash).unwrap().height;
+
+        let mut to_invalidate = best_hash;
+        for i in 1..=num_blocks {
+            trace!(
+                "Invalidating block {}/{} ({})",
+                i,
+                num_blocks,
+                to_invalidate
+            );
+
+            self.invalidate_block(&to_invalidate).unwrap();
+            to_invalidate = self.get_best_block_hash().unwrap();
+        }
+
+        self.wait_for_block(initial_height - num_blocks as usize);
+
+        debug!(
+            "Invalidated {} blocks to new height of {}",
+            num_blocks,
+            initial_height - num_blocks as usize
+        );
+    }
+
+    pub fn reorg(&mut self, num_blocks: u64) {
+        self.invalidate(num_blocks);
+        self.generate(num_blocks, None);
+    }
+
+    pub fn get_node_address(&self, address_type: Option<AddressType>) -> Address {
+        Address::from_str(
+            &self
+                .get_new_address(None, address_type)
+                .unwrap()
+                .to_string(),
+        )
+        .unwrap()
+    }
+}
+
+pub fn get_electrum_url() -> String {
+    env::var("BDK_ELECTRUM_URL").unwrap_or_else(|_| "tcp://127.0.0.1:50001".to_string())
+}
+
+impl Deref for TestClient {
+    type Target = RpcClient;
+
+    fn deref(&self) -> &Self::Target {
+        &self.client
+    }
+}
+
+impl Default for TestClient {
+    fn default() -> Self {
+        let rpc_host_and_port =
+            env::var("BDK_RPC_URL").unwrap_or_else(|_| "127.0.0.1:18443".to_string());
+        let wallet = env::var("BDK_RPC_WALLET").unwrap_or_else(|_| "bdk-test".to_string());
+        Self::new(rpc_host_and_port, wallet)
+    }
+}
+
+fn exponential_backoff_poll<T, F>(mut poll: F) -> T
+where
+    F: FnMut() -> Option<T>,
+{
+    let mut delay = Duration::from_millis(64);
+    loop {
+        match poll() {
+            Some(data) => break data,
+            None if delay.as_millis() < 512 => delay = delay.mul_f32(2.0),
+            None => {}
+        }
+
+        std::thread::sleep(delay);
+    }
+}
+
+// TODO: we currently only support env vars, we could also parse a toml file
+fn get_auth() -> Auth {
+    match env::var("BDK_RPC_AUTH").as_ref().map(String::as_ref) {
+        Ok("USER_PASS") => Auth::UserPass(
+            env::var("BDK_RPC_USER").unwrap(),
+            env::var("BDK_RPC_PASS").unwrap(),
+        ),
+        _ => Auth::CookieFile(PathBuf::from(
+            env::var("BDK_RPC_COOKIEFILE")
+                .unwrap_or_else(|_| "/home/user/.bitcoin/regtest/.cookie".to_string()),
+        )),
+    }
+}
+
 /// This macro runs blockchain tests against a `Blockchain` implementation. It requires access to a
 /// Bitcoin core wallet via RPC. At the moment you have to dig into the code yourself and look at
 /// the setup required to run the tests yourself.
@@ -8,7 +341,7 @@ macro_rules! bdk_blockchain_tests {
         #[cfg(test)]
         mod bdk_blockchain_tests {
             use $crate::bitcoin::Network;
-            use $crate::testutils::{TestClient};
+            use $crate::testutils::blockchain_tests::TestClient;
             use $crate::blockchain::noop_progress;
             use $crate::database::MemoryDatabase;
             use $crate::types::KeychainKind;
