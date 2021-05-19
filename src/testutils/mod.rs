@@ -123,20 +123,13 @@ macro_rules! testutils {
     ( @e $descriptors:expr, $child:expr ) => ({ testutils!(@external $descriptors, $child) });
     ( @i $descriptors:expr, $child:expr ) => ({ testutils!(@internal $descriptors, $child) });
 
-    ( @tx ( $( ( $( $addr:tt )* ) => $amount:expr ),+ ) $( ( @locktime $locktime:expr ) )* $( ( @confirmations $confirmations:expr ) )* $( ( @replaceable $replaceable:expr ) )* ) => ({
-        let mut outs = Vec::new();
-        $( outs.push($crate::testutils::TestIncomingOutput::new($amount, testutils!( $($addr)* ))); )+
-        #[allow(unused_mut)]
-        let mut locktime = None::<i64>;
-        $( locktime = Some($locktime); )*
+    ( @tx ( $( ( $( $addr:tt )* ) => $amount:expr ),+ ) $( ( @locktime $locktime:expr ) )? $( ( @confirmations $confirmations:expr ) )? $( ( @replaceable $replaceable:expr ) )? ) => ({
+        let outs = vec![$( $crate::testutils::TestIncomingOutput::new($amount, testutils!( $($addr)* ))),+];
 
-        #[allow(unused_assignments, unused_mut)]
-        let mut min_confirmations = None::<u64>;
-        $( min_confirmations = Some($confirmations); )*
+        let locktime = None::<i64>$(.or(Some($locktime)))?;
 
-        #[allow(unused_assignments, unused_mut)]
-        let mut replaceable = None::<bool>;
-        $( replaceable = Some($replaceable); )*
+        let min_confirmations = None::<u64>$(.or(Some($confirmations)))?;
+        let replaceable = None::<bool>$(.or(Some($replaceable)))?;
 
         $crate::testutils::TestIncomingTx::new(outs, min_confirmations, locktime, replaceable)
     });
@@ -156,13 +149,8 @@ macro_rules! testutils {
             &seed,
         );
 
-        #[allow(unused_assignments)]
-        let mut external_path = None::<String>;
-        $( external_path = Some($external_path.to_string()); )?
-
-        #[allow(unused_assignments)]
-        let mut internal_path = None::<String>;
-        $( internal_path = Some($internal_path.to_string()); )?
+        let external_path = None::<String>$(.or(Some($external_path.to_string())))?;
+        let internal_path = None::<String>$(.or(Some($internal_path.to_string())))?;
 
         (key.unwrap().to_string(), external_path, internal_path)
     });
@@ -189,7 +177,7 @@ macro_rules! testutils {
         map
     });
 
-    ( @descriptors ( $external_descriptor:expr ) $( ( $internal_descriptor:expr ) )* $( ( @keys $( $keys:tt )* ) )* ) => ({
+    ( @descriptors ( $external_descriptor:expr ) $( ( $internal_descriptor:expr ) )? $( ( @keys $( $keys:tt )* ) )* ) => ({
         use std::str::FromStr;
         use std::collections::HashMap;
         use miniscript::descriptor::Descriptor;
@@ -218,9 +206,7 @@ macro_rules! testutils {
         });
         let external = external.to_string();
 
-        #[allow(unused_assignments, unused_mut)]
-        let mut internal = None::<String>;
-        $(
+        let internal = None::<String>$(.or({
             let string_internal: Descriptor<String> = FromStr::from_str($internal_descriptor).unwrap();
 
             let string_internal: Descriptor<String> = string_internal.translate_pk_infallible::<_, _>(|k| {
@@ -236,8 +222,8 @@ macro_rules! testutils {
                     kh.clone()
                 }
             });
-            internal = Some(string_internal.to_string());
-        )*
+            Some(string_internal.to_string())
+        }))?;
 
         (external, internal)
     })
