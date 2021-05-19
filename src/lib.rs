@@ -230,14 +230,10 @@ pub extern crate sled;
 
 #[allow(unused_imports)]
 #[cfg(test)]
-#[macro_use]
-extern crate testutils;
-#[allow(unused_imports)]
-#[cfg(test)]
 #[allow(unused_imports)]
 #[cfg(test)]
 #[macro_use]
-extern crate serial_test;
+pub extern crate serial_test;
 
 #[macro_use]
 pub(crate) mod error;
@@ -265,3 +261,6 @@ pub use wallet::Wallet;
 pub fn version() -> &'static str {
     env!("CARGO_PKG_VERSION", "unknown")
 }
+
+#[cfg(any(feature = "testutils", test))]
+pub mod testutils;

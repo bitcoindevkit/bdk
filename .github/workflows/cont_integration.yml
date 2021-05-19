@@ -120,7 +120,7 @@ jobs:
       - name: start ${{ matrix.blockchain.name }}
         run: nohup ${{ matrix.blockchain.start }} & sleep 5
       - name: Test
-        run: $HOME/.cargo/bin/cargo test --features test-${{ matrix.blockchain.name }} --no-default-features ${{ matrix.blockchain.name }}::bdk_blockchain_tests
+        run: $HOME/.cargo/bin/cargo test --features ${{ matrix.blockchain.name }},test-blockchains --no-default-features ${{ matrix.blockchain.name }}::bdk_blockchain_tests
 
   check-wasm:
     name: Check WASM

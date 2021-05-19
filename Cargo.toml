@@ -32,6 +32,10 @@ socks = { version = "0.3", optional = true }
 lazy_static = { version = "1.4", optional = true }
 tiny-bip39 = { version = "^0.8", optional = true }
 
+# Needed by bdk_blockchain_tests macro
+bitcoincore-rpc = {  version = "0.13", optional = true }
+serial_test = { version = "0.4", optional = true }
+
 # Platform-specific dependencies
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { version = "1", features = ["rt"] }
@@ -54,17 +58,16 @@ all-keys = ["keys-bip39"]
 keys-bip39 = ["tiny-bip39"]
 
 # Debug/Test features
-test-electrum = ["electrum"]
-test-esplora = ["esplora"]
+testutils = []
+test-blockchains = ["testutils", "bitcoincore-rpc", "electrum-client"]
 test-md-docs = ["electrum"]
 
 [dev-dependencies]
-bdk-testutils = { path = "./testutils" }
-serial_test = "0.4"
 lazy_static = "1.4"
 env_logger = "0.7"
 base64 = "^0.11"
 clap = "2.33"
+serial_test = "0.4"
 
 [[example]]
 name = "address_validator"
@@ -78,10 +81,7 @@ path = "examples/compiler.rs"
 required-features = ["compiler"]
 
 [workspace]
-members = ["macros", "testutils"]
-
-# Generate docs with nightly to add the "features required" badge
-# https://stackoverflow.com/questions/61417452/how-to-get-a-feature-requirement-tag-in-the-documentation-generated-by-cargo-do
+members = ["macros"]
 [package.metadata.docs.rs]
 features = ["compiler", "electrum", "esplora", "compact_filters", "key-value-db", "all-keys"]
 # defines the configuration attribute `docsrs`

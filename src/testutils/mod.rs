@@ -8,12 +8,11 @@
 // <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your option.
 // You may not use this file except in accordance with one or both of these
 // licenses.
+#![allow(missing_docs)]
 
-#[macro_use]
-extern crate serde_json;
 mod blockchain_tests;
 
-pub use serial_test::serial;
+// pub use serial_test::serial;
 
 use std::collections::HashMap;
 use std::env;
@@ -138,13 +137,14 @@ impl TranslateDescriptor for Descriptor<DescriptorPublicKey> {
     }
 }
 
+#[doc(hidden)]
 #[macro_export]
 macro_rules! testutils {
     ( @external $descriptors:expr, $child:expr ) => ({
         use bitcoin::secp256k1::Secp256k1;
         use miniscript::descriptor::{Descriptor, DescriptorPublicKey, DescriptorTrait};
 
-        use $crate::TranslateDescriptor;
+        use $crate::testutils::TranslateDescriptor;
 
         let secp = Secp256k1::new();
 
@@ -155,7 +155,7 @@ macro_rules! testutils {
         use bitcoin::secp256k1::Secp256k1;
         use miniscript::descriptor::{Descriptor, DescriptorPublicKey, DescriptorTrait};
 
-        use $crate::TranslateDescriptor;
+        use $crate::testutils::TranslateDescriptor;
 
         let secp = Secp256k1::new();
 
@@ -167,25 +167,27 @@ macro_rules! testutils {
 
     ( @tx ( $( ( $( $addr:tt )* ) => $amount:expr ),+ ) $( ( @locktime $locktime:expr ) )* $( ( @confirmations $confirmations:expr ) )* $( ( @replaceable $replaceable:expr ) )* ) => ({
         let mut outs = Vec::new();
-        $( outs.push(testutils::TestIncomingOutput::new($amount, testutils!( $($addr)* ))); )+
-
+        $( outs.push($crate::testutils::TestIncomingOutput::new($amount, testutils!( $($addr)* ))); )+
+        #[allow(unused_mut)]
         let mut locktime = None::<i64>;
         $( locktime = Some($locktime); )*
 
+        #[allow(unused_assignments, unused_mut)]
         let mut min_confirmations = None::<u64>;
         $( min_confirmations = Some($confirmations); )*
 
+        #[allow(unused_assignments, unused_mut)]
         let mut replaceable = None::<bool>;
         $( replaceable = Some($replaceable); )*
 
-        testutils::TestIncomingTx::new(outs, min_confirmations, locktime, replaceable)
+        $crate::testutils::TestIncomingTx::new(outs, min_confirmations, locktime, replaceable)
     });
 
     ( @literal $key:expr ) => ({
         let key = $key.to_string();
         (key, None::<String>, None::<String>)
     });
-    ( @generate_xprv $( $external_path:expr )* $( ,$internal_path:expr )* ) => ({
+    ( @generate_xprv $( $external_path:expr )? $( ,$internal_path:expr )? ) => ({
         use rand::Rng;
 
         let mut seed = [0u8; 32];
@@ -196,11 +198,13 @@ macro_rules! testutils {
             &seed,
         );
 
+        #[allow(unused_assignments)]
         let mut external_path = None::<String>;
-        $( external_path = Some($external_path.to_string()); )*
+        $( external_path = Some($external_path.to_string()); )?
 
+        #[allow(unused_assignments)]
         let mut internal_path = None::<String>;
-        $( internal_path = Some($internal_path.to_string()); )*
+        $( internal_path = Some($internal_path.to_string()); )?
 
         (key.unwrap().to_string(), external_path, internal_path)
     });
@@ -230,11 +234,10 @@ macro_rules! testutils {
     ( @descriptors ( $external_descriptor:expr ) $( ( $internal_descriptor:expr ) )* $( ( @keys $( $keys:tt )* ) )* ) => ({
         use std::str::FromStr;
         use std::collections::HashMap;
-        use std::convert::TryInto;
-
-        use miniscript::descriptor::{Descriptor, DescriptorPublicKey};
+        use miniscript::descriptor::Descriptor;
         use miniscript::TranslatePk;
 
+        #[allow(unused_assignments, unused_mut)]
         let mut keys: HashMap<&'static str, (String, Option<String>, Option<String>)> = HashMap::new();
         $(
             keys = testutils!{ @keys $( $keys )* };
@@ -257,6 +260,7 @@ macro_rules! testutils {
         });
         let external = external.to_string();
 
+        #[allow(unused_assignments, unused_mut)]
         let mut internal = None::<String>;
         $(
             let string_internal: Descriptor<String> = FromStr::from_str($internal_descriptor).unwrap();

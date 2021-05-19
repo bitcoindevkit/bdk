@@ -1515,6 +1515,7 @@ pub(crate) mod test {
     use crate::types::KeychainKind;
 
     use super::*;
+    use crate::testutils;
     use crate::wallet::AddressIndex::{LastUnused, New, Peek, Reset};
 
     #[test]

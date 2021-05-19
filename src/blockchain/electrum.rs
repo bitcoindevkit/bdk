@@ -169,9 +169,8 @@ impl ConfigurableBlockchain for ElectrumBlockchain {
     }
 }
 
-#[cfg(all(feature = "test-electrum", test))]
-testutils::bdk_blockchain_tests! {
-    bdk => crate,
+#[cfg(feature = "test-blockchains")]
+crate::bdk_blockchain_tests! {
     fn test_instance() -> ElectrumBlockchain {
         ElectrumBlockchain::from(Client::new(&testutils::get_electrum_url()).unwrap())
     }

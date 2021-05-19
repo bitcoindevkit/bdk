@@ -3,18 +3,19 @@
 /// the setup required to run the tests yourself.
 #[macro_export]
 macro_rules! bdk_blockchain_tests {
-    (bdk => $bdk:ident,
+    (
      fn test_instance() -> $blockchain:ty $block:block) => {
+        #[cfg(test)]
         mod bdk_blockchain_tests {
-            use $bdk::bitcoin::Network;
-            use $bdk::miniscript::Descriptor;
-            use $crate::{TestClient, serial};
-            use $bdk::blockchain::{Blockchain, noop_progress};
-            use $bdk::descriptor::ExtendedDescriptor;
-            use $bdk::database::MemoryDatabase;
-            use $bdk::types::KeychainKind;
-            use $bdk::{Wallet, TxBuilder, FeeRate};
-            use $bdk::wallet::AddressIndex::New;
+            use $crate::bitcoin::Network;
+            use $crate::testutils::{TestClient};
+            use $crate::blockchain::noop_progress;
+            use $crate::database::MemoryDatabase;
+            use $crate::types::KeychainKind;
+            use $crate::{Wallet, FeeRate};
+            use $crate::wallet::AddressIndex::New;
+            use $crate::testutils;
+            use $crate::serial_test::serial;
 
             use super::*;
 
@@ -195,7 +196,7 @@ macro_rules! bdk_blockchain_tests {
 
             // FIXME: I would like this to be cfg_attr(not(feature = "test-esplora"), ignore) but it
             // doesn't work for some reason.
-            #[cfg(not(feature = "test-esplora"))]
+            #[cfg(not(feature = "esplora"))]
             #[test]
             #[serial]
             fn test_sync_reorg_block() {
@@ -478,7 +479,7 @@ macro_rules! bdk_blockchain_tests {
             #[test]
             #[serial]
             fn test_sync_receive_coinbase() {
-                let (wallet, descriptors, mut test_client) = init_single_sig();
+                let (wallet, _, mut test_client) = init_single_sig();
                 let wallet_addr = wallet.get_address(New).unwrap();
 
                 wallet.sync(noop_progress(), None).unwrap();
