@@ -58,8 +58,7 @@ all-keys = ["keys-bip39"]
 keys-bip39 = ["tiny-bip39"]
 
 # Debug/Test features
-testutils = []
-test-blockchains = ["testutils", "bitcoincore-rpc", "electrum-client"]
+test-blockchains = ["bitcoincore-rpc", "electrum-client"]
 test-md-docs = ["electrum"]
 
 [dev-dependencies]
