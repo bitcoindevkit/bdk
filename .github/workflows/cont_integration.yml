@@ -74,7 +74,7 @@ jobs:
         run: cargo test --features test-md-docs --no-default-features -- doctest::ReadmeDoctests
 
   test-blockchains:
-    name: test ${{ matrix.blockchain.name }}
+    name: Test ${{ matrix.blockchain.name }}
     runs-on: ubuntu-16.04
     strategy:
       matrix:
