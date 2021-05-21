@@ -1,7 +1,13 @@
 #!/bin/sh
-#
-# Script for running the tests for a specific blockchain by starting up the backends in docker.
-# simply run ./run_blockchain_tests [esplora|electrum]
+
+usage() {
+    cat <<'EOF'
+Script for running the bdk blockchain tests for a specific blockchain by starting up the backend in docker.
+
+Usage: ./run_blockchain_tests.sh [esplora|electrum] [test name].
+
+EOF
+}
 
 eprintln(){
     echo "$@" >&2
@@ -10,13 +16,16 @@ eprintln(){
 cleanup() {
     if test "$id"; then
         eprintln "cleaning up $blockchain docker container $id";
-        docker rm -fv "$id";
+        docker rm -fv "$id" > /dev/null;
     fi
+    trap - EXIT INT
 }
 
 # Makes sure we clean up the container at the end or if ^C
 trap 'rc=$?; cleanup; exit $rc' EXIT INT
-blockchain=${1:-electrum}
+
+blockchain="$1"
+test_name="$2"
 
 case "$blockchain" in
     electrum)
@@ -29,8 +38,9 @@ case "$blockchain" in
         export BDK_ESPLORA_URL=http://127.0.0.1:3002
         ;;
     *)
-        echo "'$blockchain' is not a blockchain we can test (electrum,esplora)";
+        usage;
         exit 1;
+        ;;
     esac
 
 # taken from https://github.com/bitcoindevkit/bitcoin-regtest-box
@@ -45,10 +55,10 @@ cli(){
     docker exec -it "$id" /root/bitcoin-cli -regtest -rpcuser=admin -rpcpassword=passw $@
 }
 
-eprintln "running getwalletinfo unitl bitcoind seems to be alive"
+eprintln "running getwalletinfo until bitcoind seems to be alive"
 while ! cli getwalletinfo >/dev/null; do sleep 1; done
 
 # sleep again for good measure!
 sleep 1;
 
-cargo test --features "test-blockchains,$blockchain" --no-default-features "$blockchain::bdk_blockchain_tests"
+cargo test --features "test-blockchains,$blockchain" --no-default-features "$blockchain::bdk_blockchain_tests::$test_name"
