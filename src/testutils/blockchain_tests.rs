@@ -361,6 +361,8 @@ macro_rules! bdk_blockchain_tests {
             }
 
             fn init_single_sig() -> (Wallet<$blockchain, MemoryDatabase>, (String, Option<String>), TestClient) {
+                let _ = env_logger::try_init();
+
                 let descriptors = testutils! {
                     @descriptors ( "wpkh(Alice)" ) ( "wpkh(Alice)" ) ( @keys ( "Alice" => (@generate_xprv "/44'/0'/0'/0/*", "/44'/0'/0'/1/*") ) )
                 };
