@@ -76,7 +76,7 @@ jobs:
   test-electrum:
     name: Test electrum
     runs-on: ubuntu-16.04
-    container: bitcoindevkit/electrs:0.2.0
+    container: bitcoindevkit/electrs:0.3.0
     env:
       BDK_RPC_AUTH: USER_PASS
       BDK_RPC_USER: admin
