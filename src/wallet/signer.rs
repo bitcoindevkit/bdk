@@ -147,6 +147,12 @@ pub enum SignerError {
     MissingWitnessScript,
     /// The fingerprint and derivation path are missing from the psbt input
     MissingHdKeypath,
+    /// The psbt contains a non-`SIGHASH_ALL` sighash in one of its input and the user hasn't
+    /// explicitly allowed them
+    ///
+    /// To enable signing transactions with non-standard sighashes set
+    /// [`SignOptions::allow_all_sighashes`] to `true`.
+    NonStandardSighash,
 }
 
 impl fmt::Display for SignerError {
@@ -465,6 +471,12 @@ pub struct SignOptions {
     /// timelock height has already been reached. This option allows overriding the "current height" to let the
     /// wallet use timelocks in the future to spend a coin.
     pub assume_height: Option<u32>,
+
+    /// Whether the signer should use the `sighash_type` set in the PSBT when signing, no matter
+    /// what its value is
+    ///
+    /// Defaults to `false` which will only allow signing using `SIGHASH_ALL`.
+    pub allow_all_sighashes: bool,
 }
 
 impl Default for SignOptions {
@@ -472,6 +484,7 @@ impl Default for SignOptions {
         SignOptions {
             trust_witness_utxo: false,
             assume_height: None,
+            allow_all_sighashes: false,
         }
     }
 }

@@ -63,7 +63,7 @@ mod test {
         psbt.inputs.push(psbt_bip.inputs[0].clone());
         let options = SignOptions {
             trust_witness_utxo: true,
-            assume_height: None,
+            ..Default::default()
         };
         let _ = wallet.sign(&mut psbt, options).unwrap();
     }
@@ -80,7 +80,7 @@ mod test {
         psbt.inputs.push(psbt_bip.inputs[1].clone());
         let options = SignOptions {
             trust_witness_utxo: true,
-            assume_height: None,
+            ..Default::default()
         };
         let _ = wallet.sign(&mut psbt, options).unwrap();
     }
@@ -96,7 +96,7 @@ mod test {
         psbt.global.unsigned_tx.input.push(TxIn::default());
         let options = SignOptions {
             trust_witness_utxo: true,
-            assume_height: None,
+            ..Default::default()
         };
         let _ = wallet.sign(&mut psbt, options).unwrap();
     }

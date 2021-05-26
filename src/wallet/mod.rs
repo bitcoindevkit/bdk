@@ -872,6 +872,17 @@ where
             return Err(Error::Signer(signer::SignerError::MissingNonWitnessUtxo));
         }
 
+        // If the user hasn't explicitly opted-in, refuse to sign the transaction unless every input
+        // is using `SIGHASH_ALL`
+        if !sign_options.allow_all_sighashes
+            && !psbt
+                .inputs
+                .iter()
+                .all(|i| i.sighash_type.is_none() || i.sighash_type == Some(SigHashType::All))
+        {
+            return Err(Error::Signer(signer::SignerError::NonStandardSighash));
+        }
+
         for signer in self
             .signers
             .signers()
@@ -1514,6 +1525,7 @@ pub(crate) mod test {
     use crate::types::KeychainKind;
 
     use super::*;
+    use crate::signer::{SignOptions, SignerError};
     use crate::testutils;
     use crate::wallet::AddressIndex::{LastUnused, New, Peek, Reset};
 
@@ -3668,6 +3680,54 @@ pub(crate) mod test {
             psbt.inputs[0].final_script_witness.is_some(),
             "should finalized input it signed"
         )
+    }
+
+    #[test]
+    fn test_sign_nonstandard_sighash() {
+        let sighash = SigHashType::NonePlusAnyoneCanPay;
+
+        let (wallet, _, _) = get_funded_wallet("wpkh(tprv8ZgxMBicQKsPd3EupYiPRhaMooHKUHJxNsTfYuScep13go8QFfHdtkG9nRkFGb7busX4isf6X9dURGCoKgitaApQ6MupRhZMcELAxTBRJgS/*)");
+        let addr = wallet.get_address(New).unwrap();
+        let mut builder = wallet.build_tx();
+        builder
+            .set_single_recipient(addr.script_pubkey())
+            .sighash(sighash)
+            .drain_wallet();
+        let (mut psbt, _) = builder.finish().unwrap();
+
+        let result = wallet.sign(&mut psbt, Default::default());
+        assert!(
+            result.is_err(),
+            "Signing should have failed because the TX uses non-standard sighashes"
+        );
+        assert!(
+            matches!(
+                result.unwrap_err(),
+                Error::Signer(SignerError::NonStandardSighash)
+            ),
+            "Signing failed with the wrong error type"
+        );
+
+        // try again after opting-in
+        let result = wallet.sign(
+            &mut psbt,
+            SignOptions {
+                allow_all_sighashes: true,
+                ..Default::default()
+            },
+        );
+        assert!(result.is_ok(), "Signing should have worked");
+        assert!(
+            result.unwrap(),
+            "Should finalize the input since we can produce signatures"
+        );
+
+        let extracted = psbt.extract_tx();
+        assert_eq!(
+            *extracted.input[0].witness[0].last().unwrap(),
+            sighash.as_u32() as u8,
+            "The signature should have been made with the right sighash"
+        );
     }
 
     #[test]
