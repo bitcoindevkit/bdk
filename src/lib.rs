@@ -230,16 +230,10 @@ pub extern crate sled;
 
 #[allow(unused_imports)]
 #[cfg(test)]
-#[macro_use]
-extern crate testutils;
 #[allow(unused_imports)]
 #[cfg(test)]
 #[macro_use]
-extern crate testutils_macros;
-#[allow(unused_imports)]
-#[cfg(test)]
-#[macro_use]
-extern crate serial_test;
+pub extern crate serial_test;
 
 #[macro_use]
 pub(crate) mod error;
@@ -267,3 +261,10 @@ pub use wallet::Wallet;
 pub fn version() -> &'static str {
     env!("CARGO_PKG_VERSION", "unknown")
 }
+
+// We should consider putting this under a feature flag but we need the macro in doctets so we need
+// to wait until https://github.com/rust-lang/rust/issues/67295 is fixed.
+//
+// Stuff in here is too rough to document atm
+#[doc(hidden)]
+pub mod testutils;

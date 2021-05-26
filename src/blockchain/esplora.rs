@@ -414,3 +414,10 @@ impl_error!(reqwest::Error, Reqwest, EsploraError);
 impl_error!(std::num::ParseIntError, Parsing, EsploraError);
 impl_error!(consensus::encode::Error, BitcoinEncoding, EsploraError);
 impl_error!(bitcoin::hashes::hex::Error, Hex, EsploraError);
+
+#[cfg(feature = "test-blockchains")]
+crate::bdk_blockchain_tests! {
+    fn test_instance() -> EsploraBlockchain {
+        EsploraBlockchain::new(std::env::var("BDK_ESPLORA_URL").unwrap_or("127.0.0.1:3002".into()).as_str(), None)
+    }
+}

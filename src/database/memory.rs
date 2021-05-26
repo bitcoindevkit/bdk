@@ -511,7 +511,7 @@ macro_rules! doctest_wallet {
     () => {{
         use $crate::bitcoin::Network;
         use $crate::database::MemoryDatabase;
-        use testutils::testutils;
+        use $crate::testutils;
         let descriptor = "wpkh(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW)";
         let descriptors = testutils!(@descriptors (descriptor) (descriptor));
 

@@ -146,7 +146,7 @@ mod test {
         let (mut wallet, descriptors, _) = get_funded_wallet(get_test_wpkh());
         wallet.add_address_validator(Arc::new(TestValidator));
 
-        let addr = testutils!(@external descriptors, 10);
+        let addr = crate::testutils!(@external descriptors, 10);
         let mut builder = wallet.build_tx();
         builder.add_recipient(addr.script_pubkey(), 25_000);
         builder.finish().unwrap();

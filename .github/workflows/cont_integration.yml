@@ -73,10 +73,19 @@ jobs:
       - name: Test
         run: cargo test --features test-md-docs --no-default-features -- doctest::ReadmeDoctests
 
-  test-electrum:
-    name: Test electrum
+  test-blockchains:
+    name: Test ${{ matrix.blockchain.name }}
     runs-on: ubuntu-16.04
-    container: bitcoindevkit/electrs:0.2.0
+    strategy:
+      matrix:
+        blockchain:
+          - name: electrum
+            container: bitcoindevkit/electrs
+            start: /root/electrs --network regtest --jsonrpc-import
+          - name: esplora
+            container: bitcoindevkit/esplora
+            start: /root/electrs --network regtest -vvv --cookie admin:passw --jsonrpc-import --electrum-rpc-addr=0.0.0.0:60401 --http-addr 0.0.0.0:3002
+    container: ${{ matrix.blockchain.container }}
     env:
       BDK_RPC_AUTH: USER_PASS
       BDK_RPC_USER: admin
@@ -84,6 +93,7 @@ jobs:
       BDK_RPC_URL: 127.0.0.1:18443
       BDK_RPC_WALLET: bdk-test
       BDK_ELECTRUM_URL: tcp://127.0.0.1:60401
+      BDK_ESPLORA_URL: http://127.0.0.1:3002
     steps:
       - name: Checkout
         uses: actions/checkout@v2
@@ -95,6 +105,8 @@ jobs:
             ~/.cargo/git
             target
           key: ${{ runner.os }}-cargo-${{ github.job }}-${{ hashFiles('**/Cargo.toml','**/Cargo.lock') }}
+      - name: get pkg-config # running eslpora tests seems to need this
+        run: apt update && apt install -y --fix-missing pkg-config libssl-dev
       - name: Install rustup
         run: curl https://sh.rustup.rs -sSf | sh -s -- -y
       - name: Set default toolchain
@@ -105,8 +117,10 @@ jobs:
         run: $HOME/.cargo/bin/rustup update
       - name: Start core
         run: ./ci/start-core.sh
+      - name: start ${{ matrix.blockchain.name }}
+        run: nohup ${{ matrix.blockchain.start }} & sleep 5
       - name: Test
-        run: $HOME/.cargo/bin/cargo test --features test-electrum --no-default-features
+        run: $HOME/.cargo/bin/cargo test --features ${{ matrix.blockchain.name }},test-blockchains --no-default-features ${{ matrix.blockchain.name }}::bdk_blockchain_tests
 
   check-wasm:
     name: Check WASM
