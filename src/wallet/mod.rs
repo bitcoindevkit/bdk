@@ -42,6 +42,9 @@ pub mod signer;
 pub mod time;
 pub mod tx_builder;
 pub(crate) mod utils;
+#[cfg(feature = "verify")]
+#[cfg_attr(docsrs, doc(cfg(feature = "verify")))]
+pub mod verify;
 
 pub use utils::IsDust;
 
@@ -710,6 +713,7 @@ where
             received,
             sent,
             fee: Some(fee_amount),
+            verified: true,
         };
 
         Ok((psbt, transaction_details))
@@ -1526,14 +1530,33 @@ where
                 None,
                 self.database.borrow_mut().deref_mut(),
                 progress_update,
-            ))
+            ))?;
         } else {
             maybe_await!(self.client.sync(
                 None,
                 self.database.borrow_mut().deref_mut(),
                 progress_update,
-            ))
+            ))?;
         }
+
+        #[cfg(feature = "verify")]
+        {
+            debug!("Verifying transactions...");
+            for mut tx in self.database.borrow().iter_txs(true)? {
+                if !tx.verified {
+                    verify::verify_tx(
+                        tx.transaction.as_ref().ok_or(Error::TransactionNotFound)?,
+                        self.database.borrow().deref(),
+                        &self.client,
+                    )?;
+
+                    tx.verified = true;
+                    self.database.borrow_mut().set_tx(&tx)?;
+                }
+            }
+        }
+
+        Ok(())
     }
 
     /// Return a reference to the internal blockchain client

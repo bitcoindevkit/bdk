@@ -233,6 +233,7 @@ impl Blockchain for RpcBlockchain {
                     received,
                     sent,
                     fee: tx_result.fee.map(|f| f.as_sat().abs() as u64),
+                    verified: true,
                 };
                 debug!(
                     "saving tx: {} tx_result.fee:{:?} td.fees:{:?}",

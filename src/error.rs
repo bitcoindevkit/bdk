@@ -90,6 +90,10 @@ pub enum Error {
         /// found network, for example the network of the bitcoin node
         found: Network,
     },
+    #[cfg(feature = "verify")]
+    /// Transaction verification error
+    Verification(crate::wallet::verify::VerifyError),
+
     /// Progress value must be between `0.0` (included) and `100.0` (included)
     InvalidProgressValue(f32),
     /// Progress update error (maybe the channel has been closed)
@@ -203,6 +207,16 @@ impl From<crate::blockchain::compact_filters::CompactFiltersError> for Error {
         match other {
             crate::blockchain::compact_filters::CompactFiltersError::Global(e) => *e,
             err => Error::CompactFilters(err),
+        }
+    }
+}
+
+#[cfg(feature = "verify")]
+impl From<crate::wallet::verify::VerifyError> for Error {
+    fn from(other: crate::wallet::verify::VerifyError) -> Self {
+        match other {
+            crate::wallet::verify::VerifyError::Global(inner) => *inner,
+            err => Error::Verification(err),
         }
     }
 }

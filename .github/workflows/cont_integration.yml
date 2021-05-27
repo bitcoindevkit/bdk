@@ -23,6 +23,7 @@ jobs:
           - esplora,key-value-db,electrum
           - compiler
           - rpc
+          - verify
     steps:
       - name: checkout
         uses: actions/checkout@v2

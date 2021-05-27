@@ -362,6 +362,7 @@ fn save_transaction_details_and_utxos<D: BatchDatabase>(
         sent: outgoing,
         confirmation_time: ConfirmationTime::new(height, timestamp),
         fee: Some(inputs_sum.saturating_sub(outputs_sum)), /* if the tx is a coinbase, fees would be negative */
+        verified: height.is_some(),
     };
     updates.set_tx(&tx_details)?;
 

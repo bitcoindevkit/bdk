@@ -485,6 +485,7 @@ macro_rules! populate_test_db {
             received: 0,
             sent: 0,
             confirmation_time,
+            verified: current_height.is_some(),
         };
 
         db.set_tx(&tx_details).unwrap();

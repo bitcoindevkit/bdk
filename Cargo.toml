@@ -31,6 +31,7 @@ cc = { version = ">=1.0.64", optional = true }
 socks = { version = "0.3", optional = true }
 lazy_static = { version = "1.4", optional = true }
 tiny-bip39 = { version = "^0.8", optional = true }
+bitcoinconsensus = { version = "0.19.0-3", optional = true }
 
 # Needed by bdk_blockchain_tests macro
 bitcoincore-rpc = { version = "0.13", optional = true }
@@ -48,6 +49,7 @@ rand = { version = "^0.7", features = ["wasm-bindgen"] }
 [features]
 minimal = []
 compiler = ["miniscript/compiler"]
+verify = ["bitcoinconsensus"]
 default = ["key-value-db", "electrum"]
 electrum = ["electrum-client"]
 esplora = ["reqwest", "futures"]
