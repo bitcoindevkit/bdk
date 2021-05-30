@@ -174,7 +174,7 @@ impl Progress for Sender<ProgressData> {
 }
 
 /// Type that implements [`Progress`] and drops every update received
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct NoopProgress;
 
 /// Create a new instance of [`NoopProgress`]
@@ -189,7 +189,7 @@ impl Progress for NoopProgress {
 }
 
 /// Type that implements [`Progress`] and logs at level `INFO` every update received
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct LogProgress;
 
 /// Create a nwe instance of [`LogProgress`]
