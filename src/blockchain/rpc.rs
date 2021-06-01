@@ -332,6 +332,7 @@ impl ConfigurableBlockchain for RpcBlockchain {
             "main" => Network::Bitcoin,
             "test" => Network::Testnet,
             "regtest" => Network::Regtest,
+            "signet" => Network::Signet,
             _ => return Err(Error::Generic("Invalid network".to_string())),
         };
         if network != config.network {
