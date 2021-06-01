@@ -403,11 +403,11 @@ fn list_wallet_dir(client: &Client) -> Result<Vec<String>, Error> {
         name: String,
     }
     #[derive(Deserialize)]
-    struct Result {
+    struct CallResult {
         wallets: Vec<Name>,
     }
 
-    let result: Result = client.call("listwalletdir", &[])?;
+    let result: CallResult = client.call("listwalletdir", &[])?;
     Ok(result.wallets.into_iter().map(|n| n.name).collect())
 }
 
