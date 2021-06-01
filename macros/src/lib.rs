@@ -121,26 +121,3 @@ pub fn maybe_await(expr: TokenStream) -> TokenStream {
 
     quoted.into()
 }
-
-/// Awaits if target_arch is "wasm32", uses `tokio::Runtime::block_on()` otherwise
-///
-/// Requires the `tokio` crate as a dependecy with `rt-core` or `rt-threaded` to build on non-wasm32 platforms.
-#[proc_macro]
-pub fn await_or_block(expr: TokenStream) -> TokenStream {
-    let expr: proc_macro2::TokenStream = expr.into();
-    let quoted = quote! {
-        {
-            #[cfg(all(not(target_arch = "wasm32"), not(feature = "async-interface")))]
-            {
-                tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(#expr)
-            }
-
-            #[cfg(any(target_arch = "wasm32", feature = "async-interface"))]
-            {
-                #expr.await
-            }
-        }
-    };
-
-    quoted.into()
-}

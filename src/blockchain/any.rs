@@ -37,9 +37,9 @@
 //! )?;
 //! # }
 //!
-//! # #[cfg(feature = "esplora")]
+//! # #[cfg(all(feature = "esplora", feature = "ureq"))]
 //! # {
-//! let esplora_blockchain = EsploraBlockchain::new("...", None, 20);
+//! let esplora_blockchain = EsploraBlockchain::new("...", 20);
 //! let wallet_esplora: Wallet<AnyBlockchain, _> = Wallet::new(
 //!     "...",
 //!     None,
@@ -60,6 +60,8 @@
 //! # use bdk::blockchain::*;
 //! # use bdk::database::MemoryDatabase;
 //! # use bdk::Wallet;
+//! # #[cfg(all(feature = "esplora", feature = "ureq"))]
+//! # {
 //! let config = serde_json::from_str("...")?;
 //! let blockchain = AnyBlockchain::from_config(&config)?;
 //! let wallet = Wallet::new(
@@ -69,6 +71,7 @@
 //!     MemoryDatabase::default(),
 //!     blockchain,
 //! )?;
+//! # }
 //! # Ok::<(), bdk::Error>(())
 //! ```
 

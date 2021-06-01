@@ -24,7 +24,7 @@ jobs:
       - name: Update toolchain
         run: rustup update
       - name: Build docs
-        run: cargo rustdoc --verbose --features=compiler,electrum,esplora,compact_filters,key-value-db,all-keys -- --cfg docsrs -Dwarnings
+        run: cargo rustdoc --verbose --features=compiler,electrum,esplora,ureq,compact_filters,key-value-db,all-keys -- --cfg docsrs -Dwarnings
       - name: Upload artifact
         uses: actions/upload-artifact@v2
         with:

@@ -130,7 +130,7 @@ pub enum Error {
     Electrum(electrum_client::Error),
     #[cfg(feature = "esplora")]
     /// Esplora client error
-    Esplora(crate::blockchain::esplora::EsploraError),
+    Esplora(Box<crate::blockchain::esplora::EsploraError>),
     #[cfg(feature = "compact_filters")]
     /// Compact filters client error)
     CompactFilters(crate::blockchain::compact_filters::CompactFiltersError),
@@ -190,8 +190,6 @@ impl_error!(bitcoin::util::psbt::PsbtParseError, PsbtParse);
 
 #[cfg(feature = "electrum")]
 impl_error!(electrum_client::Error, Electrum);
-#[cfg(feature = "esplora")]
-impl_error!(crate::blockchain::esplora::EsploraError, Esplora);
 #[cfg(feature = "key-value-db")]
 impl_error!(sled::Error, Sled);
 #[cfg(feature = "rpc")]
@@ -214,5 +212,12 @@ impl From<crate::wallet::verify::VerifyError> for Error {
             crate::wallet::verify::VerifyError::Global(inner) => *inner,
             err => Error::Verification(err),
         }
+    }
+}
+
+#[cfg(feature = "esplora")]
+impl From<crate::blockchain::esplora::EsploraError> for Error {
+    fn from(other: crate::blockchain::esplora::EsploraError) -> Self {
+        Error::Esplora(Box::new(other))
     }
 }

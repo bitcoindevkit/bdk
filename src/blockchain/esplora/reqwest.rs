@@ -9,40 +9,29 @@
 // You may not use this file except in accordance with one or both of these
 // licenses.
 
-//! Esplora
-//!
-//! This module defines a [`Blockchain`] struct that can query an Esplora backend
-//! populate the wallet's [database](crate::database::Database) by
-//!
-//! ## Example
-//!
-//! ```no_run
-//! # use bdk::blockchain::esplora::EsploraBlockchain;
-//! let blockchain = EsploraBlockchain::new("https://blockstream.info/testnet/api", None, 20);
-//! # Ok::<(), bdk::Error>(())
-//! ```
+//! Esplora by way of `reqwest` HTTP client.
 
 use std::collections::{HashMap, HashSet};
-use std::fmt;
 
-use bitcoin::consensus::{self, deserialize, serialize};
+use bitcoin::consensus::{deserialize, serialize};
 use bitcoin::hashes::hex::{FromHex, ToHex};
 use bitcoin::hashes::{sha256, Hash};
-use bitcoin::{BlockHash, BlockHeader, Script, Transaction, Txid};
-use futures::stream::{self, FuturesOrdered, StreamExt, TryStreamExt};
+use bitcoin::{BlockHeader, Script, Transaction, Txid};
+
 #[allow(unused_imports)]
 use log::{debug, error, info, trace};
-use reqwest::{Client, StatusCode};
-use serde::Deserialize;
 
+use futures::stream::{self, FuturesOrdered, StreamExt, TryStreamExt};
+
+use ::reqwest::{Client, StatusCode};
+
+use crate::blockchain::esplora::{EsploraError, EsploraGetHistory};
+use crate::blockchain::utils::{ElectrumLikeSync, ElsGetHistoryRes};
+use crate::blockchain::*;
 use crate::database::BatchDatabase;
 use crate::error::Error;
 use crate::wallet::utils::ChunksIterator;
 use crate::FeeRate;
-
-use super::*;
-
-use self::utils::{ElectrumLikeSync, ElsGetHistoryRes};
 
 const DEFAULT_CONCURRENT_REQUESTS: u8 = 4;
 
@@ -75,16 +64,22 @@ impl std::convert::From<UrlClient> for EsploraBlockchain {
 }
 
 impl EsploraBlockchain {
-    /// Create a new instance of the client from a base URL
-    pub fn new(base_url: &str, concurrency: Option<u8>, stop_gap: usize) -> Self {
+    /// Create a new instance of the client from a base URL and `stop_gap`.
+    pub fn new(base_url: &str, stop_gap: usize) -> Self {
         EsploraBlockchain {
             url_client: UrlClient {
                 url: base_url.to_string(),
                 client: Client::new(),
-                concurrency: concurrency.unwrap_or(DEFAULT_CONCURRENT_REQUESTS),
+                concurrency: DEFAULT_CONCURRENT_REQUESTS,
             },
             stop_gap,
         }
+    }
+
+    /// Set the concurrency to use when doing batch queries against the Esplora instance.
+    pub fn with_concurrency(mut self, concurrency: u8) -> Self {
+        self.url_client.concurrency = concurrency;
+        self
     }
 }
 
@@ -111,19 +106,19 @@ impl Blockchain for EsploraBlockchain {
     }
 
     fn get_tx(&self, txid: &Txid) -> Result<Option<Transaction>, Error> {
-        Ok(await_or_block!(self.url_client._get_tx(txid))?)
+        Ok(self.url_client._get_tx(txid).await?)
     }
 
     fn broadcast(&self, tx: &Transaction) -> Result<(), Error> {
-        Ok(await_or_block!(self.url_client._broadcast(tx))?)
+        Ok(self.url_client._broadcast(tx).await?)
     }
 
     fn get_height(&self) -> Result<u32, Error> {
-        Ok(await_or_block!(self.url_client._get_height())?)
+        Ok(self.url_client._get_height().await?)
     }
 
     fn estimate_fee(&self, target: usize) -> Result<FeeRate, Error> {
-        let estimates = await_or_block!(self.url_client._get_fee_estimates())?;
+        let estimates = self.url_client._get_fee_estimates().await?;
 
         let fee_val = estimates
             .into_iter()
@@ -298,72 +293,49 @@ impl ElectrumLikeSync for UrlClient {
         &self,
         scripts: I,
     ) -> Result<Vec<Vec<ElsGetHistoryRes>>, Error> {
-        let future = async {
-            let mut results = vec![];
-            for chunk in ChunksIterator::new(scripts.into_iter(), self.concurrency as usize) {
-                let mut futs = FuturesOrdered::new();
-                for script in chunk {
-                    futs.push(self._script_get_history(&script));
-                }
-                let partial_results: Vec<Vec<ElsGetHistoryRes>> = futs.try_collect().await?;
-                results.extend(partial_results);
+        let mut results = vec![];
+        for chunk in ChunksIterator::new(scripts.into_iter(), self.concurrency as usize) {
+            let mut futs = FuturesOrdered::new();
+            for script in chunk {
+                futs.push(self._script_get_history(script));
             }
-            Ok(stream::iter(results).collect().await)
-        };
-
-        await_or_block!(future)
+            let partial_results: Vec<Vec<ElsGetHistoryRes>> = futs.try_collect().await?;
+            results.extend(partial_results);
+        }
+        Ok(stream::iter(results).collect().await)
     }
 
     fn els_batch_transaction_get<'s, I: IntoIterator<Item = &'s Txid>>(
         &self,
         txids: I,
     ) -> Result<Vec<Transaction>, Error> {
-        let future = async {
-            let mut results = vec![];
-            for chunk in ChunksIterator::new(txids.into_iter(), self.concurrency as usize) {
-                let mut futs = FuturesOrdered::new();
-                for txid in chunk {
-                    futs.push(self._get_tx_no_opt(&txid));
-                }
-                let partial_results: Vec<Transaction> = futs.try_collect().await?;
-                results.extend(partial_results);
+        let mut results = vec![];
+        for chunk in ChunksIterator::new(txids.into_iter(), self.concurrency as usize) {
+            let mut futs = FuturesOrdered::new();
+            for txid in chunk {
+                futs.push(self._get_tx_no_opt(txid));
             }
-            Ok(stream::iter(results).collect().await)
-        };
-
-        await_or_block!(future)
+            let partial_results: Vec<Transaction> = futs.try_collect().await?;
+            results.extend(partial_results);
+        }
+        Ok(stream::iter(results).collect().await)
     }
 
     fn els_batch_block_header<I: IntoIterator<Item = u32>>(
         &self,
         heights: I,
     ) -> Result<Vec<BlockHeader>, Error> {
-        let future = async {
-            let mut results = vec![];
-            for chunk in ChunksIterator::new(heights.into_iter(), self.concurrency as usize) {
-                let mut futs = FuturesOrdered::new();
-                for height in chunk {
-                    futs.push(self._get_header(height));
-                }
-                let partial_results: Vec<BlockHeader> = futs.try_collect().await?;
-                results.extend(partial_results);
+        let mut results = vec![];
+        for chunk in ChunksIterator::new(heights.into_iter(), self.concurrency as usize) {
+            let mut futs = FuturesOrdered::new();
+            for height in chunk {
+                futs.push(self._get_header(height));
             }
-            Ok(stream::iter(results).collect().await)
-        };
-
-        await_or_block!(future)
+            let partial_results: Vec<BlockHeader> = futs.try_collect().await?;
+            results.extend(partial_results);
+        }
+        Ok(stream::iter(results).collect().await)
     }
-}
-
-#[derive(Deserialize)]
-struct EsploraGetHistoryStatus {
-    block_height: Option<usize>,
-}
-
-#[derive(Deserialize)]
-struct EsploraGetHistory {
-    txid: Txid,
-    status: EsploraGetHistoryStatus,
 }
 
 /// Configuration for an [`EsploraBlockchain`]
@@ -375,7 +347,7 @@ pub struct EsploraBlockchainConfig {
     pub base_url: String,
     /// Number of parallel requests sent to the esplora service (default: 4)
     pub concurrency: Option<u8>,
-    /// Stop searching addresses for transactions after finding an unused gap of this length
+    /// Stop searching addresses for transactions after finding an unused gap of this length.
     pub stop_gap: usize,
 }
 
@@ -383,46 +355,13 @@ impl ConfigurableBlockchain for EsploraBlockchain {
     type Config = EsploraBlockchainConfig;
 
     fn from_config(config: &Self::Config) -> Result<Self, Error> {
-        Ok(EsploraBlockchain::new(
-            config.base_url.as_str(),
-            config.concurrency,
-            config.stop_gap,
-        ))
+        let mut blockchain = EsploraBlockchain::new(config.base_url.as_str(), config.stop_gap);
+        if let Some(concurrency) = config.concurrency {
+            blockchain.url_client.concurrency = concurrency;
+        };
+        Ok(blockchain)
     }
 }
-
-/// Errors that can happen during a sync with [`EsploraBlockchain`]
-#[derive(Debug)]
-pub enum EsploraError {
-    /// Error with the HTTP call
-    Reqwest(reqwest::Error),
-    /// Invalid number returned
-    Parsing(std::num::ParseIntError),
-    /// Invalid Bitcoin data returned
-    BitcoinEncoding(bitcoin::consensus::encode::Error),
-    /// Invalid Hex data returned
-    Hex(bitcoin::hashes::hex::Error),
-
-    /// Transaction not found
-    TransactionNotFound(Txid),
-    /// Header height not found
-    HeaderHeightNotFound(u32),
-    /// Header hash not found
-    HeaderHashNotFound(BlockHash),
-}
-
-impl fmt::Display for EsploraError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self)
-    }
-}
-
-impl std::error::Error for EsploraError {}
-
-impl_error!(reqwest::Error, Reqwest, EsploraError);
-impl_error!(std::num::ParseIntError, Parsing, EsploraError);
-impl_error!(consensus::encode::Error, BitcoinEncoding, EsploraError);
-impl_error!(bitcoin::hashes::hex::Error, Hex, EsploraError);
 
 #[cfg(test)]
 #[cfg(feature = "test-esplora")]

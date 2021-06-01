@@ -205,10 +205,26 @@ extern crate serde;
 #[macro_use]
 extern crate serde_json;
 
+#[cfg(all(feature = "reqwest", feature = "ureq"))]
+compile_error!("Features reqwest and ureq are mutually exclusive and cannot be enabled together");
+
 #[cfg(all(feature = "async-interface", feature = "electrum"))]
 compile_error!(
     "Features async-interface and electrum are mutually exclusive and cannot be enabled together"
 );
+
+#[cfg(all(feature = "async-interface", feature = "ureq"))]
+compile_error!(
+    "Features async-interface and ureq are mutually exclusive and cannot be enabled together"
+);
+
+#[cfg(all(feature = "async-interface", feature = "compact_filters"))]
+compile_error!(
+    "Features async-interface and compact_filters are mutually exclusive and cannot be enabled together"
+);
+
+#[cfg(all(feature = "esplora", not(feature = "ureq"), not(feature = "reqwest")))]
+compile_error!("Feature missing: esplora requires either ureq or reqwest to be enabled");
 
 #[cfg(feature = "keys-bip39")]
 extern crate bip39;
@@ -227,9 +243,6 @@ pub extern crate bitcoincore_rpc;
 
 #[cfg(feature = "electrum")]
 pub extern crate electrum_client;
-
-#[cfg(feature = "esplora")]
-pub extern crate reqwest;
 
 #[cfg(feature = "key-value-db")]
 pub extern crate sled;

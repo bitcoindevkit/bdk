@@ -24,7 +24,7 @@ jobs:
       - name: Update toolchain
         run: rustup update
       - name: Test
-        run: cargo test --features all-keys,compiler,esplora,compact_filters --no-default-features
+        run: cargo test --features all-keys,compiler,esplora,ureq,compact_filters --no-default-features
                     
       - id: coverage
         name: Generate coverage

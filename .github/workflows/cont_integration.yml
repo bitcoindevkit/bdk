@@ -16,14 +16,16 @@ jobs:
           - default
           - minimal
           - all-keys
-          - minimal,esplora
+          - minimal,esplora,ureq
           - key-value-db
           - electrum
           - compact_filters
-          - esplora,key-value-db,electrum
+          - esplora,ureq,key-value-db,electrum
           - compiler
           - rpc
           - verify
+          - async-interface
+          - async-interface,esplora,reqwest
     steps:
       - name: checkout
         uses: actions/checkout@v2
@@ -137,7 +139,8 @@ jobs:
       - name: Update toolchain
         run: rustup update
       - name: Check
-        run: cargo check --target wasm32-unknown-unknown --features esplora --no-default-features
+        run: cargo check --target wasm32-unknown-unknown --features esplora,reqwest --no-default-features
+
 
   fmt:
     name: Rust fmt
