@@ -18,10 +18,12 @@
 //! ## Example
 //!
 //! ```no_run
-//! # use bdk::blockchain::{RpcConfig, RpcBlockchain, ConfigurableBlockchain};
+//! # use bdk::blockchain::{RpcConfig, RpcBlockchain, ConfigurableBlockchain, rpc::Auth};
 //! let config = RpcConfig {
 //!     url: "127.0.0.1:18332".to_string(),
-//!     auth: bitcoincore_rpc::Auth::CookieFile("/home/user/.bitcoin/.cookie".into()),
+//!     auth: Auth::Cookie {
+//!         file: "/home/user/.bitcoin/.cookie".into(),
+//!     },
 //!     network: bdk::bitcoin::Network::Testnet,
 //!     wallet_name: "wallet_name".to_string(),
 //!     skip_blocks: None,
@@ -66,7 +68,7 @@ pub struct RpcBlockchain {
 }
 
 /// RpcBlockchain configuration options
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct RpcConfig {
     /// The bitcoin node url
     pub url: String,
@@ -462,7 +464,7 @@ crate::bdk_blockchain_tests! {
     fn test_instance(test_client: &TestClient) -> RpcBlockchain {
         let config = RpcConfig {
             url: test_client.bitcoind.rpc_url(),
-            auth: Auth::CookieFile(test_client.bitcoind.params.cookie_file.clone()),
+            auth: Auth::Cookie { file: test_client.bitcoind.params.cookie_file.clone() },
             network: Network::Regtest,
             wallet_name: format!("client-wallet-test-{:?}", std::time::SystemTime::now() ),
             skip_blocks: None,
