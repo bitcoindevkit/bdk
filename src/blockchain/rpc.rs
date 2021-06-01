@@ -242,17 +242,22 @@ impl Blockchain for RpcBlockchain {
             }
         }
 
-        let current_utxos: HashSet<LocalUtxo> = current_utxo
+        let current_utxos: HashSet<_> = current_utxo
             .into_iter()
-            .map(|u| LocalUtxo {
-                outpoint: OutPoint::new(u.txid, u.vout),
-                txout: TxOut {
-                    value: u.amount.as_sat(),
-                    script_pubkey: u.script_pub_key,
-                },
-                keychain: KeychainKind::External,
+            .map(|u| {
+                Ok(LocalUtxo {
+                    outpoint: OutPoint::new(u.txid, u.vout),
+                    keychain: db
+                        .get_path_from_script_pubkey(&u.script_pub_key)?
+                        .ok_or(Error::TransactionNotFound)?
+                        .0,
+                    txout: TxOut {
+                        value: u.amount.as_sat(),
+                        script_pubkey: u.script_pub_key,
+                    },
+                })
             })
-            .collect();
+            .collect::<Result<_, Error>>()?;
 
         let spent: HashSet<_> = known_utxos.difference(&current_utxos).collect();
         for s in spent {
