@@ -63,10 +63,9 @@ pub enum Error {
     },
     /// Node doesn't have data to estimate a fee rate
     FeeRateUnavailable,
-    /// The proof of reserves is invalid. The reason is given in the string parameter.
-    ProofOfReservesInvalid(String),
-    /// Cannot verify the proof.
-    CannotVerifyProof,
+    /// Proof error
+    #[cfg(feature = "reserves")]
+    Proof(crate::wallet::reserves::ProofError),
     /// In order to use the [`TxBuilder::add_global_xpubs`] option every extended
     /// key in the descriptor must either be a master key itself (having depth = 0) or have an
     /// explicit origin provided

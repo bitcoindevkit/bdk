@@ -1,26 +1,13 @@
-// Magical Bitcoin Library
-// Written in 2020 by
-//     Alekos Filini <alekos.filini@gmail.com>
+// Bitcoin Dev Kit
+// Written in 2020 by Alekos Filini <alekos.filini@gmail.com>
 //
-// Copyright (c) 2020 Magical Bitcoin
+// Copyright (c) 2020-2021 Bitcoin Dev Kit Developers
 //
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// This file is licensed under the Apache License, Version 2.0 <LICENSE-APACHE
+// or http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your option.
+// You may not use this file except in accordance with one or both of these
+// licenses.
 
 //! Proof of reserves
 //!
@@ -31,57 +18,68 @@
 //! https://github.com/bitcoin/bips/blob/master/bip-0127.mediawiki
 //! https://github.com/bitcoin/bips/blob/master/bip-0322.mediawiki
 
-use bitcoin::{
-    blockdata::{
-        opcodes,
-        script::{Builder, Script},
-        transaction::{OutPoint, SigHashType, TxIn, TxOut},
-    },
-    consensus::encode::serialize,
-    hash_types::{PubkeyHash, Txid},
-    util::{
-        address::Payload,
-        psbt::{Input, PartiallySignedTransaction as PSBT},
-    },
-    Network,
-};
-use bitcoin_hashes::{hash160, sha256d, Hash};
-use bitcoinconsensus;
+use bitcoin::blockdata::opcodes;
+use bitcoin::blockdata::script::{Builder, Script};
+use bitcoin::blockdata::transaction::{OutPoint, SigHashType, TxIn, TxOut};
+use bitcoin::consensus::encode::serialize;
+use bitcoin::hash_types::{PubkeyHash, Txid};
+use bitcoin::hashes::{hash160, sha256d, Hash};
+use bitcoin::util::address::Payload;
+use bitcoin::util::psbt::{Input, PartiallySignedTransaction as PSBT};
+use bitcoin::Network;
 
 #[allow(unused_imports)]
 use log::{debug, error, info, trace};
 
 use crate::database::BatchDatabase;
 use crate::error::Error;
+use crate::wallet::tx_builder::TxOrdering;
 use crate::wallet::Wallet;
 
 /// The API for proof of reserves
 pub trait ProofOfReserves {
     /// Create a proof for all spendable UTXOs in a wallet
-    fn create_proof(&self, message: &str) -> Result<PSBT, Error> {
-        self.do_create_proof(message)
-    }
+    fn create_proof(&self, message: &str) -> Result<PSBT, Error>;
+
     /// Make sure this is a proof, and not a spendable transaction.
     /// Make sure the proof is valid.
     /// Currently proofs can only be validated against the tip of the chain.
     /// If some of the UTXOs in the proof were spent in the meantime, the proof will fail.
     /// We can currently not validate whether it was valid at a certain block height.
     /// Returns the spendable amount of the proof.
-    fn verify_proof(&self, psbt: &PSBT, message: &str) -> Result<u64, Error> {
-        self.do_verify_proof(psbt, message)
-    }
+    fn verify_proof(&self, psbt: &PSBT, message: &str) -> Result<u64, Error>;
+}
 
-    /// implementation
-    fn do_create_proof(&self, message: &str) -> Result<PSBT, Error>;
-    /// implementation
-    fn do_verify_proof(&self, psbt: &PSBT, message: &str) -> Result<u64, Error>;
+/// Proof error
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum ProofError {
+    /// Less than two inputs
+    WrongNumberOfInputs,
+    /// Must have exactly 1 output
+    WrongNumberOfOutputs,
+    /// Challenge input does not match
+    ChallengeInputMismatch,
+    /// Found an input other than the challenge which is not spendable. Holds the position of the input.
+    NonSpendableInput(usize),
+    /// Found an input that has no signature at position
+    NotSignedInput(usize),
+    /// Found an input with an unsupported SIGHASH type at position
+    UnsupportedSighashType(usize),
+    /// Found an input that is neither witness nor legacy at position
+    NeitherWitnessNorLegacy(usize),
+    /// Signature validation failed
+    SignatureValidation(usize, String),
+    /// The output is not valid
+    InvalidOutput,
+    /// Input and output values are not equal, implying a miner fee
+    InAndOutValueNotEqual,
 }
 
 impl<B, D> ProofOfReserves for Wallet<B, D>
 where
     D: BatchDatabase,
 {
-    fn do_create_proof(&self, message: &str) -> Result<PSBT, Error> {
+    fn create_proof(&self, message: &str) -> Result<PSBT, Error> {
         let challenge_txin = challenge_txin(message);
         let challenge_psbt_inp = Input {
             witness_utxo: Some(TxOut {
@@ -105,13 +103,14 @@ where
             .add_foreign_utxo(challenge_txin.previous_output, challenge_psbt_inp, 42)?
             .fee_absolute(0)
             .only_witness_utxo()
-            .set_single_recipient(out_script_unspendable);
+            .set_single_recipient(out_script_unspendable)
+            .ordering(TxOrdering::Untouched);
         let (psbt, _details) = builder.finish().unwrap();
 
         Ok(psbt)
     }
 
-    fn do_verify_proof(&self, psbt: &PSBT, message: &str) -> Result<u64, Error> {
+    fn verify_proof(&self, psbt: &PSBT, message: &str) -> Result<u64, Error> {
         // verify the proof UTXOs are still spendable
         let outpoints = self
             .list_unspent()?
@@ -138,71 +137,45 @@ pub fn verify_proof(
     let tx = psbt.clone().extract_tx();
 
     if tx.output.len() != 1 {
-        return Err(Error::ProofOfReservesInvalid(format!(
-            "Wrong number of outputs: {}",
-            tx.output.len()
-        )));
+        return Err(Error::Proof(ProofError::WrongNumberOfOutputs));
     }
     if tx.input.len() <= 1 {
-        return Err(Error::ProofOfReservesInvalid(format!(
-            "Wrong number of inputs: {}",
-            tx.input.len()
-        )));
+        return Err(Error::Proof(ProofError::WrongNumberOfInputs));
     }
 
     // verify the challenge txin
     let challenge_txin = challenge_txin(message);
     if tx.input[0].previous_output != challenge_txin.previous_output {
-        return Err(Error::ProofOfReservesInvalid(
-            "Challenge txin mismatch".to_string(),
-        ));
+        return Err(Error::Proof(ProofError::ChallengeInputMismatch));
     }
 
     // verify the proof UTXOs are still spendable
-    if let Some(inp) = tx
+    if let Some((i, _inp)) = tx
         .input
         .iter()
+        .enumerate()
         .skip(1)
-        .find(|i| outpoints.iter().find(|op| **op == i.previous_output) == None)
+        .find(|(_i, inp)| outpoints.iter().find(|op| **op == inp.previous_output) == None)
     {
-        return Err(Error::ProofOfReservesInvalid(format!(
-            "Found an input that is not spendable: {:?}",
-            inp
-        )));
+        return Err(Error::Proof(ProofError::NonSpendableInput(i)));
     }
 
     // verify that the inputs are signed, except the challenge
-    if let Some((i, inp)) =
-        psbt.inputs.iter().enumerate().skip(1).find(|(_i, inp)| {
-            !inp.final_script_sig.is_some() && !inp.final_script_witness.is_some()
-        })
+    if let Some((i, _inp)) = psbt
+        .inputs
+        .iter()
+        .enumerate()
+        .skip(1)
+        .find(|(_i, inp)| inp.final_script_sig.is_none() && inp.final_script_witness.is_none())
     {
-        return Err(Error::ProofOfReservesInvalid(format!(
-            "Found an input that is not signed at #{} : {:?}",
-            i, inp
-        )));
-    }
-
-    // Make sure each input is either witness or legacy, but not both at the same time.
-    if let Some((i, _psbt_in)) =
-        psbt.inputs.iter().enumerate().find(|(_i, psbt_in)| {
-            psbt_in.witness_utxo.is_some() && psbt_in.non_witness_utxo.is_some()
-        })
-    {
-        return Err(Error::ProofOfReservesInvalid(format!(
-            "Witness and legacy input found at input #{}",
-            i
-        )));
+        return Err(Error::Proof(ProofError::NotSignedInput(i)));
     }
 
     // Verify the SIGHASH
     if let Some((i, _psbt_in)) = psbt.inputs.iter().enumerate().find(|(_i, psbt_in)| {
         psbt_in.sighash_type.is_some() && psbt_in.sighash_type != Some(SigHashType::All)
     }) {
-        return Err(Error::ProofOfReservesInvalid(format!(
-            "Unsupported sighash type at input #{}",
-            i
-        )));
+        return Err(Error::Proof(ProofError::UnsupportedSighashType(i)));
     }
 
     // Verify other inputs against prevouts and calculate the amount.
@@ -214,26 +187,31 @@ pub fn verify_proof(
         .enumerate()
         .map(|(i, (psbt_in, tx_in))| {
             if let Some(utxo) = &psbt_in.witness_utxo {
-                (i, &utxo.script_pubkey, utxo.value)
+                (i, Ok((&utxo.script_pubkey, utxo.value)))
             } else if let Some(nwtx) = &psbt_in.non_witness_utxo {
                 let outp = &nwtx.output[tx_in.previous_output.vout as usize];
-                (i, &outp.script_pubkey, outp.value)
+                (i, Ok((&outp.script_pubkey, outp.value)))
             } else {
-                panic!("must be either witness or legacy");
+                (i, Err(Error::Proof(ProofError::NeitherWitnessNorLegacy(i))))
             }
         })
-        .map(|(i, script, value)| {
-            (
+        .map(|(i, res)| match res {
+            Ok((script, value)) => (
                 i,
-                bitcoinconsensus::verify(script.to_bytes().as_slice(), value, &serialized_tx, i),
-            )
+                Ok(bitcoinconsensus::verify(
+                    script.to_bytes().as_slice(),
+                    value,
+                    &serialized_tx,
+                    i,
+                )),
+            ),
+            Err(err) => (i, Err(err)),
         })
         .find(|(_i, res)| res.is_err())
     {
-        return Err(Error::ProofOfReservesInvalid(format!(
-            "Signature validation error at input #{}: {:?}",
+        return Err(Error::Proof(ProofError::SignatureValidation(
             i,
-            res.err().unwrap()
+            format!("{:?}", res.err().unwrap()),
         )));
     }
 
@@ -251,24 +229,22 @@ pub fn verify_proof(
                 0
             }
         })
-        .fold(0, |acc, val| acc + val);
+        .sum();
 
     // verify the unspendable output
     let pkh = PubkeyHash::from_hash(hash160::Hash::hash(&[0]));
     let out_script_unspendable = bitcoin::Address {
         payload: Payload::PubkeyHash(pkh),
-        network: network,
+        network,
     }
     .script_pubkey();
     if tx.output[0].script_pubkey != out_script_unspendable {
-        return Err(Error::ProofOfReservesInvalid("Invalid output".to_string()));
+        return Err(Error::Proof(ProofError::InvalidOutput));
     }
 
     // inflow and outflow being equal means no miner fee
     if tx.output[0].value != sum {
-        return Err(Error::ProofOfReservesInvalid(
-            "In and out values are not equal".to_string(),
-        ));
+        return Err(Error::Proof(ProofError::InAndOutValueNotEqual));
     }
 
     Ok(sum)
@@ -281,18 +257,15 @@ fn challenge_txin(message: &str) -> TxIn {
     TxIn {
         previous_output: OutPoint::new(Txid::from_hash(message), 0),
         sequence: 0xFFFFFFFF,
-        script_sig: Builder::new().into_script(),
-        witness: Vec::new(),
+        ..Default::default()
     }
 }
 
 #[cfg(test)]
 mod test {
-    use bitcoin::{
-        secp256k1::Secp256k1,
-        util::key::{PrivateKey, PublicKey},
-        Network,
-    };
+    use bitcoin::secp256k1::Secp256k1;
+    use bitcoin::util::key::{PrivateKey, PublicKey};
+    use bitcoin::Network;
     use rstest::rstest;
 
     use super::*;
@@ -332,7 +305,7 @@ mod test {
             .inputs
             .iter()
             .fold(0, |acc, i| acc + i.partial_sigs.len());
-        assert_eq!(num_sigs, (num_inp - 1) * 1);
+        assert_eq!(num_sigs, num_inp - 1);
         assert_eq!(finalized, true);
 
         let spendable = wallet.verify_proof(&psbt, &message)?;
@@ -342,7 +315,7 @@ mod test {
     }
 
     #[test]
-    #[should_panic(expected = "ProofOfReservesInvalid(\"Challenge txin mismatch\")")]
+    #[should_panic(expected = "Proof(ChallengeInputMismatch)")]
     fn tampered_proof_message() {
         let descriptor = "wpkh(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW)";
         let (wallet, _, _) = get_funded_wallet(descriptor);
@@ -355,7 +328,7 @@ mod test {
             trust_witness_utxo: true,
             ..Default::default()
         };
-        let _finalized = wallet.sign(&mut psbt_alice, signopt.clone()).unwrap();
+        let _finalized = wallet.sign(&mut psbt_alice, signopt).unwrap();
 
         let spendable = wallet.verify_proof(&psbt_alice, &message_alice).unwrap();
         assert_eq!(spendable, balance);
@@ -370,43 +343,13 @@ mod test {
         let res_alice = wallet.verify_proof(&psbt_alice, &message_alice);
         let res_bob = wallet.verify_proof(&psbt_alice, &message_bob);
         assert!(res_alice.is_err());
-        assert!(res_bob.is_err());
+        assert!(!res_bob.is_err());
         res_alice.unwrap();
         res_bob.unwrap();
     }
 
     #[test]
-    #[should_panic(expected = "ProofOfReservesInvalid(\"Witness and legacy input found")]
-    fn tampered_proof_witness_and_legacy() {
-        let descriptor = "wpkh(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW)";
-        let (wallet, _, _) = get_funded_wallet(descriptor);
-        let balance = wallet.get_balance().unwrap();
-
-        let message = "This belongs to Alice.";
-        let mut psbt = wallet.create_proof(&message).unwrap();
-
-        let signopt = SignOptions {
-            trust_witness_utxo: true,
-            ..Default::default()
-        };
-        let _finalized = wallet.sign(&mut psbt, signopt.clone()).unwrap();
-
-        let spendable = wallet.verify_proof(&psbt, &message).unwrap();
-        assert_eq!(spendable, balance);
-
-        // add a legacy input to the existing segwit input
-        let descriptor_legacy = "pkh(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW)";
-        let (wallet_legacy, _, _) = get_funded_wallet(descriptor_legacy);
-        let mut psbt_legacy = wallet_legacy.create_proof(&message).unwrap();
-        let _finalized = wallet_legacy.sign(&mut psbt_legacy, signopt).unwrap();
-
-        psbt.inputs[1].non_witness_utxo = psbt_legacy.inputs[1].non_witness_utxo.clone();
-
-        wallet.verify_proof(&psbt, &message).unwrap();
-    }
-
-    #[test]
-    #[should_panic(expected = "ProofOfReservesInvalid(\"Unsupported sighash type")]
+    #[should_panic(expected = "Proof(UnsupportedSighashType(1)")]
     fn tampered_proof_sighash_tx() {
         let descriptor = "wpkh(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW)";
         let (wallet, _, _) = get_funded_wallet(descriptor);
@@ -423,13 +366,13 @@ mod test {
         // set an unsupported sighash
         psbt.inputs[1].sighash_type = Some(SigHashType::Single);
 
-        let _finalized = wallet.sign(&mut psbt, signopt.clone()).unwrap();
+        let _finalized = wallet.sign(&mut psbt, signopt).unwrap();
 
         let _spendable = wallet.verify_proof(&psbt, &message).unwrap();
     }
 
     #[test]
-    #[should_panic(expected = "ProofOfReservesInvalid(\"In and out values are not equal\")")]
+    #[should_panic(expected = "Proof(InAndOutValueNotEqual)")]
     fn tampered_proof_miner_fee() {
         let descriptor = "wpkh(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW)";
         let (wallet, _, _) = get_funded_wallet(descriptor);
@@ -446,7 +389,7 @@ mod test {
         // reduce the output value to grant a miner fee
         psbt.global.unsigned_tx.output[0].value -= 100;
 
-        let _finalized = wallet.sign(&mut psbt, signopt.clone()).unwrap();
+        let _finalized = wallet.sign(&mut psbt, signopt).unwrap();
 
         let _spendable = wallet.verify_proof(&psbt, &message).unwrap();
     }
@@ -459,7 +402,7 @@ mod test {
 
     fn construct_multisig_wallet(
         signer: &PrivateKey,
-        pubkeys: &Vec<PublicKey>,
+        pubkeys: &[PublicKey],
         script_type: &MultisigType,
     ) -> Result<Wallet<ElectrumBlockchain, MemoryDatabase>, Error> {
         let secp = Secp256k1::new();
@@ -535,7 +478,7 @@ mod test {
         assert_eq!(wallet3.get_new_address()?.to_string(), expected_address);
         let balance = wallet1.get_balance()?;
         assert!(
-            balance >= 410000 && balance <= 420000,
+            (410000..=420000).contains(&balance),
             "balance is {} but should be between 410000 and 420000",
             balance
         );
@@ -570,7 +513,7 @@ mod test {
             ..Default::default()
         };
         let finalized = wallet1.sign(&mut psbt, signopts.clone())?;
-        assert_eq!(count_signatures(&psbt), ((num_inp - 1) * 1, 1, 0));
+        assert_eq!(count_signatures(&psbt), (num_inp - 1, 1, 0));
         assert_eq!(finalized, false);
 
         let finalized = wallet2.sign(&mut psbt, signopts.clone())?;
