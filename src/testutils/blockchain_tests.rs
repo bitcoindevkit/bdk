@@ -370,7 +370,7 @@ macro_rules! bdk_blockchain_tests {
                 let wallet = get_wallet_from_descriptors(&descriptors);
 
                 // rpc need to call import_multi before receiving any tx, otherwise will not see tx in the mempool
-                #[cfg(feature = "rpc")]
+                #[cfg(feature = "test-rpc")]
                 wallet.sync(noop_progress(), None).unwrap();
 
                 (wallet, descriptors, test_client)

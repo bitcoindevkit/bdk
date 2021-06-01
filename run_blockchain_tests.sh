@@ -65,4 +65,4 @@ while ! cli getwalletinfo >/dev/null; do sleep 1; done
 # sleep again for good measure!
 sleep 1;
 
-cargo test --features "test-blockchains,$blockchain" --no-default-features "$blockchain::bdk_blockchain_tests::$test_name"
+cargo test --features "test-blockchains,test-$blockchain" --no-default-features "$blockchain::bdk_blockchain_tests::$test_name"

@@ -63,6 +63,7 @@ rpc = ["bitcoincore-rpc"]
 test-blockchains = ["bitcoincore-rpc", "electrum-client"]
 test-electrum = ["electrum"]
 test-rpc = ["rpc"]
+test-esplora = ["esplora"]
 test-md-docs = ["electrum"]
 
 [dev-dependencies]
