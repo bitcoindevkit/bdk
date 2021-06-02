@@ -73,6 +73,8 @@ pub enum ProofError {
     InvalidOutput,
     /// Input and output values are not equal, implying a miner fee
     InAndOutValueNotEqual,
+    /// No matching outpoing found
+    OutpointNotFound(usize),
 }
 
 impl<B, D> ProofOfReserves for Wallet<B, D>
@@ -115,7 +117,7 @@ where
         let outpoints = self
             .list_unspent()?
             .iter()
-            .map(|utxo| utxo.outpoint)
+            .map(|utxo| (utxo.outpoint, utxo.txout.clone()))
             .collect();
 
         verify_proof(psbt, message, outpoints, self.network)
@@ -131,7 +133,7 @@ where
 pub fn verify_proof(
     psbt: &PSBT,
     message: &str,
-    outpoints: Vec<OutPoint>,
+    outpoints: Vec<(OutPoint, TxOut)>,
     network: Network,
 ) -> Result<u64, Error> {
     let tx = psbt.clone().extract_tx();
@@ -155,7 +157,7 @@ pub fn verify_proof(
         .iter()
         .enumerate()
         .skip(1)
-        .find(|(_i, inp)| outpoints.iter().find(|op| **op == inp.previous_output) == None)
+        .find(|(_i, inp)| outpoints.iter().find(|op| op.0 == inp.previous_output) == None)
     {
         return Err(Error::Proof(ProofError::NonSpendableInput(i)));
     }
@@ -178,29 +180,45 @@ pub fn verify_proof(
         return Err(Error::Proof(ProofError::UnsupportedSighashType(i)));
     }
 
-    // Verify other inputs against prevouts and calculate the amount.
     let serialized_tx = serialize(&tx);
-    if let Some((i, res)) = psbt
-        .inputs
+    // Verify the challenge input
+    if let Some(utxo) = &psbt.inputs[0].witness_utxo {
+        if let Err(err) = bitcoinconsensus::verify(
+            utxo.script_pubkey.to_bytes().as_slice(),
+            utxo.value,
+            &serialized_tx,
+            0,
+        ) {
+            return Err(Error::Proof(ProofError::SignatureValidation(
+                0,
+                format!("{:?}", err),
+            )));
+        }
+    } else {
+        return Err(Error::Proof(ProofError::SignatureValidation(
+            0,
+            "witness_utxo not found for challenge input".to_string(),
+        )));
+    }
+    // Verify other inputs against prevouts.
+    if let Some((i, res)) = tx
+        .input
         .iter()
-        .zip(tx.input.iter())
         .enumerate()
-        .map(|(i, (psbt_in, tx_in))| {
-            if let Some(utxo) = &psbt_in.witness_utxo {
-                (i, Ok((&utxo.script_pubkey, utxo.value)))
-            } else if let Some(nwtx) = &psbt_in.non_witness_utxo {
-                let outp = &nwtx.output[tx_in.previous_output.vout as usize];
-                (i, Ok((&outp.script_pubkey, outp.value)))
+        .skip(1)
+        .map(|(i, tx_in)| {
+            if let Some(op) = outpoints.iter().find(|op| op.0 == tx_in.previous_output) {
+                (i, Ok(op.1.clone()))
             } else {
-                (i, Err(Error::Proof(ProofError::NeitherWitnessNorLegacy(i))))
+                (i, Err(Error::Proof(ProofError::OutpointNotFound(i))))
             }
         })
         .map(|(i, res)| match res {
-            Ok((script, value)) => (
+            Ok(txout) => (
                 i,
                 Ok(bitcoinconsensus::verify(
-                    script.to_bytes().as_slice(),
-                    value,
+                    txout.script_pubkey.to_bytes().as_slice(),
+                    txout.value,
                     &serialized_tx,
                     i,
                 )),
@@ -219,12 +237,9 @@ pub fn verify_proof(
     let sum = tx
         .input
         .iter()
-        .zip(psbt.inputs.iter())
-        .map(|(tx_in, psbt_in)| {
-            if let Some(utxo) = &psbt_in.witness_utxo {
-                utxo.value
-            } else if let Some(nwtx) = &psbt_in.non_witness_utxo {
-                nwtx.output[tx_in.previous_output.vout as usize].value
+        .map(|tx_in| {
+            if let Some(op) = outpoints.iter().find(|op| op.0 == tx_in.previous_output) {
+                op.1.value
             } else {
                 0
             }
