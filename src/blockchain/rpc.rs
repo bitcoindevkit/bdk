@@ -280,11 +280,7 @@ impl Blockchain for RpcBlockchain {
     }
 
     fn get_tx(&self, txid: &Txid) -> Result<Option<Transaction>, Error> {
-        if self.capabilities.contains(&Capability::FullHistory) {
-            Ok(Some(self.client.get_raw_transaction(txid, None)?))
-        } else {
-            Ok(None)
-        }
+        Ok(Some(self.client.get_raw_transaction(txid, None)?))
     }
 
     fn broadcast(&self, tx: &Transaction) -> Result<(), Error> {
