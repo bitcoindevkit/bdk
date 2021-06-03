@@ -130,24 +130,11 @@ impl Blockchain for RpcBlockchain {
         // https://bitcoindevkit.org/descriptors/#compatibility-matrix
         //TODO maybe convenient using import_descriptor for compatible descriptor and import_multi as fallback
         self.client.import_multi(&requests, Some(&options))?;
-        self.sync(stop_gap, database, progress_update)
-    }
 
-    fn sync<D: BatchDatabase, P: 'static + Progress>(
-        &self,
-        _stop_gap: Option<usize>,
-        db: &mut D,
-        progress_update: P,
-    ) -> Result<(), Error> {
         let current_height = self.get_height()?;
 
         // min because block invalidate may cause height to go down
         let node_synced = self.get_node_synced_height()?.min(current_height);
-
-        let mut indexes = HashMap::new();
-        for keykind in &[KeychainKind::External, KeychainKind::Internal] {
-            indexes.insert(*keykind, db.get_last_index(*keykind)?.unwrap_or(0));
-        }
 
         //TODO call rescan in chunks (updating node_synced_height) so that in case of
         // interruption work can be partially recovered
@@ -158,6 +145,22 @@ impl Blockchain for RpcBlockchain {
         self.client
             .rescan_blockchain(Some(node_synced as usize), Some(current_height as usize))?;
         progress_update.update(1.0, None)?;
+
+        self.set_node_synced_height(current_height)?;
+
+        self.sync(stop_gap, database, progress_update)
+    }
+
+    fn sync<D: BatchDatabase, P: 'static + Progress>(
+        &self,
+        _stop_gap: Option<usize>,
+        db: &mut D,
+        _progress_update: P,
+    ) -> Result<(), Error> {
+        let mut indexes = HashMap::new();
+        for keykind in &[KeychainKind::External, KeychainKind::Internal] {
+            indexes.insert(*keykind, db.get_last_index(*keykind)?.unwrap_or(0));
+        }
 
         let mut known_txs: HashMap<_, _> = db
             .iter_txs(true)?
@@ -275,7 +278,6 @@ impl Blockchain for RpcBlockchain {
             db.set_last_index(keykind, index)?;
         }
 
-        self.set_node_synced_height(current_height)?;
         Ok(())
     }
 
