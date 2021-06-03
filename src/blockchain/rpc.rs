@@ -58,7 +58,7 @@ pub struct RpcBlockchain {
     skip_blocks: Option<u32>,
 
     /// This is a fixed Address used as a hack key to store information on the node
-    _satoshi_address: Address,
+    _storage_address: Address,
 }
 
 /// RpcBlockchain configuration options
@@ -78,7 +78,7 @@ pub struct RpcConfig {
 
 impl RpcBlockchain {
     fn get_node_synced_height(&self) -> Result<u32, Error> {
-        let info = self.client.get_address_info(&self._satoshi_address)?;
+        let info = self.client.get_address_info(&self._storage_address)?;
         if let Some(GetAddressInfoResultLabel::Simple(label)) = info.labels.first() {
             Ok(label
                 .parse::<u32>()
@@ -93,7 +93,7 @@ impl RpcBlockchain {
     fn set_node_synced_height(&self, height: u32) -> Result<(), Error> {
         Ok(self
             .client
-            .set_label(&self._satoshi_address, &height.to_string())?)
+            .set_label(&self._storage_address, &height.to_string())?)
     }
 }
 
@@ -354,14 +354,15 @@ impl ConfigurableBlockchain for RpcBlockchain {
         }
 
         // this is just a fixed address used only to store a label containing the synced height in the node
-        let mut satoshi_address = Address::from_str("1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa").unwrap();
-        satoshi_address.network = network;
+        let mut storage_address =
+            Address::from_str("bc1qst0rewf0wm4kw6qn6kv0e5tc56nkf9yhcxlhqv").unwrap();
+        storage_address.network = network;
 
         Ok(RpcBlockchain {
             client,
             network,
             capabilities,
-            _satoshi_address: satoshi_address,
+            _storage_address: storage_address,
             skip_blocks: config.skip_blocks,
         })
     }
