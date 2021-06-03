@@ -471,7 +471,7 @@ mod test {
 
         let config = RpcConfig {
             url: bitcoind.rpc_url(),
-            auth: Auth::CookieFile(bitcoind.cookie_file.clone()),
+            auth: Auth::CookieFile(bitcoind.config.cookie_file.clone()),
             network,
             wallet_name,
             skip_blocks: None,
@@ -523,7 +523,7 @@ mod test {
         generate(&bitcoind, 5);
         let config = RpcConfig {
             url: bitcoind.rpc_url(),
-            auth: Auth::CookieFile(bitcoind.cookie_file.clone()),
+            auth: Auth::CookieFile(bitcoind.config.cookie_file.clone()),
             network: Network::Regtest,
             wallet_name: "another-name".to_string(),
             skip_blocks: Some(103),

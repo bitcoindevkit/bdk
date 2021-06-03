@@ -72,7 +72,7 @@ env_logger = "0.7"
 base64 = "^0.11"
 clap = "2.33"
 serial_test = "0.4"
-bitcoind = "0.9.0"
+bitcoind = "0.10.0"
 
 [[example]]
 name = "address_validator"
