@@ -88,7 +88,7 @@ where
                 value: 0,
                 script_pubkey: Builder::new().push_opcode(opcodes::OP_TRUE).into_script(),
             }),
-            final_script_sig: Some(Script::default()), // "finalize" the input with an empty scriptSig
+            final_script_sig: Some(Script::default()), /* "finalize" the input with an empty scriptSig */
             ..Default::default()
         };
 
@@ -174,9 +174,13 @@ pub fn verify_proof(
     }
 
     // Verify the SIGHASH
-    if let Some((i, _psbt_in)) = psbt.inputs.iter().enumerate().find(|(_i, psbt_in)| {
-        psbt_in.sighash_type.is_some() && psbt_in.sighash_type != Some(SigHashType::All)
-    }) {
+    if let Some((i, _inp)) = tx
+        .input
+        .iter()
+        .enumerate()
+        .skip(1)
+        .find(|(_i, inp)| !verify_sighash_type_all(inp))
+    {
         return Err(Error::Proof(ProofError::UnsupportedSighashType(i)));
     }
 
@@ -276,6 +280,39 @@ fn challenge_txin(message: &str) -> TxIn {
     }
 }
 
+/// Verify the SIGHASH type for a TxIn
+fn verify_sighash_type_all(inp: &TxIn) -> bool {
+    if inp.witness.is_empty() {
+        if let Some(sht) = inp.script_sig.as_bytes().last() {
+            #[allow(clippy::if_same_then_else)]
+            #[allow(clippy::needless_bool)]
+            if SigHashType::from_u32(*sht as u32) == SigHashType::All {
+                true
+            } else if *sht == 174 {
+                // ToDo: What is the meaning of this?
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        }
+    } else {
+        for wit in &inp.witness[..inp.witness.len() - 1] {
+            // ToDo: Why do we skip the last element?
+            if wit.last().is_none() {
+                // ToDo: Why are there empty elements?
+                continue;
+            }
+            let sht = SigHashType::from_u32(*wit.last().unwrap() as u32);
+            if SigHashType::All != sht {
+                return false;
+            }
+        }
+        true
+    }
+}
+
 #[cfg(test)]
 mod test {
     use bitcoin::secp256k1::Secp256k1;
@@ -325,6 +362,44 @@ mod test {
 
         let spendable = wallet.verify_proof(&psbt, &message)?;
         assert_eq!(spendable, balance);
+
+        // additional temporary checks
+        match descriptor {
+            "wpkh(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW)" => {
+                let tx = psbt.extract_tx();
+                assert_eq!(tx.input.len(), 2);
+                let txin = &tx.input[1];
+                assert_eq!(txin.witness.len(), 2);
+                assert_eq!(txin.script_sig.len(), 0);
+                assert_eq!(txin.witness[0].len(), 71);
+                assert_eq!(txin.witness[1].len(), 33);
+                assert_eq!(txin.witness[0], vec![48, 68, 2, 32, 38, 53, 34, 73, 249, 21, 56, 117, 41, 128, 169, 39, 62, 213, 31, 44, 155, 35, 92, 72, 115, 7, 109, 71, 51, 146, 206, 98, 39, 232, 190, 209, 2, 32, 79, 16, 232, 251, 225, 31, 117, 45, 146, 104, 183, 113, 208, 209, 6, 209, 219, 58, 137, 157, 116, 6, 242, 34, 255, 179, 182, 18, 6, 148, 142, 127, 1]);
+                assert_eq!(txin.witness[1], vec![3, 43, 5, 88, 7, 139, 236, 56, 105, 74, 132, 147, 61, 101, 147, 3, 226, 87, 93, 174, 126, 145, 104, 89, 17, 69, 65, 21, 191, 214, 68, 135, 227]);
+            }
+            "wsh(and_v(v:pk(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW),older(6)))" => {
+                let tx = psbt.extract_tx();
+                assert_eq!(tx.input.len(), 2);
+                let txin = &tx.input[1];
+                assert_eq!(txin.witness.len(), 2);
+                assert_eq!(txin.script_sig.len(), 0);
+                assert_eq!(txin.witness[0].len(), 71);
+                assert_eq!(txin.witness[1].len(), 37);
+                assert_eq!(txin.witness[0], vec![48, 68, 2, 32, 9, 75, 75, 249, 73, 139, 223, 112, 98, 163, 248, 70, 132, 28, 43, 36, 80, 193, 49, 199, 11, 175, 177, 233, 24, 18, 157, 120, 240, 22, 40, 184, 2, 32, 121, 245, 45, 179, 155, 59, 126, 164, 59, 94, 229, 236, 251, 222, 176, 100, 76, 115, 167, 158, 80, 165, 40, 2, 9, 177, 208, 72, 98, 188, 192, 84, 1]);
+                assert_eq!(txin.witness[1], vec![33, 3, 43, 5, 88, 7, 139, 236, 56, 105, 74, 132, 147, 61, 101, 147, 3, 226, 87, 93, 174, 126, 145, 104, 89, 17, 69, 65, 21, 191, 214, 68, 135, 227, 173, 86, 178]);
+            }
+            "wsh(and_v(v:pk(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW),after(100000)))" => {
+                let tx = psbt.extract_tx();
+                assert_eq!(tx.input.len(), 2);
+                let txin = &tx.input[1];
+                assert_eq!(txin.witness.len(), 2);
+                assert_eq!(txin.script_sig.len(), 0);
+                assert_eq!(txin.witness[0].len(), 72);
+                assert_eq!(txin.witness[1].len(), 40);
+                assert_eq!(txin.witness[0], vec![48, 69, 2, 33, 0, 129, 112, 186, 87, 10, 201, 60, 176, 239, 226, 217, 254, 222, 11, 72, 220, 154, 120, 89, 193, 177, 57, 133, 41, 11, 81, 233, 37, 15, 229, 167, 11, 2, 32, 80, 74, 124, 217, 113, 88, 92, 181, 217, 40, 236, 30, 251, 66, 160, 218, 39, 248, 153, 99, 17, 43, 23, 229, 39, 140, 28, 66, 47, 18, 238, 53, 1]);
+                assert_eq!(txin.witness[1], vec![33, 3, 43, 5, 88, 7, 139, 236, 56, 105, 74, 132, 147, 61, 101, 147, 3, 226, 87, 93, 174, 126, 145, 104, 89, 17, 69, 65, 21, 191, 214, 68, 135, 227, 173, 3, 160, 134, 1, 177]);
+            }
+            _ => panic!("should not happen"),
+        }
 
         Ok(())
     }
@@ -552,6 +627,124 @@ mod test {
             ((num_inp - 1) * 2, num_inp, num_inp - 1)
         );
         assert_eq!(finalized, true);
+
+        // additional temporary checks
+        match script_type {
+            MultisigType::Wsh => {
+                let tx = psbt.clone().extract_tx();
+                assert_eq!(tx.input.len(), 2);
+                let txin = &tx.input[1];
+                assert_eq!(txin.witness.len(), 4);
+                assert_eq!(txin.script_sig.len(), 0);
+                assert_eq!(txin.witness[0].len(), 0);
+                assert_eq!(txin.witness[1].len(), 72);
+                assert_eq!(txin.witness[2].len(), 72);
+                assert_eq!(txin.witness[3].len(), 105);
+                assert_eq!(
+                    txin.witness[1],
+                    vec![
+                        48, 69, 2, 33, 0, 171, 133, 140, 57, 207, 82, 96, 69, 210, 155, 200, 52,
+                        115, 36, 240, 220, 145, 81, 89, 24, 31, 18, 45, 4, 195, 231, 246, 242, 13,
+                        23, 2, 100, 2, 32, 21, 23, 134, 76, 123, 229, 9, 211, 37, 181, 73, 20, 193,
+                        74, 93, 137, 164, 227, 104, 118, 154, 54, 3, 211, 151, 209, 203, 31, 139,
+                        148, 203, 106, 1
+                    ]
+                );
+                assert_eq!(
+                    txin.witness[2],
+                    vec![
+                        48, 69, 2, 33, 0, 130, 9, 233, 255, 114, 175, 169, 62, 234, 225, 138, 107,
+                        35, 134, 82, 77, 131, 189, 240, 164, 49, 213, 53, 111, 51, 79, 91, 51, 10,
+                        204, 4, 180, 2, 32, 88, 21, 142, 187, 197, 167, 24, 105, 77, 116, 189, 136,
+                        5, 18, 202, 145, 19, 139, 75, 180, 185, 46, 129, 129, 201, 225, 123, 5,
+                        182, 47, 148, 185, 1
+                    ]
+                );
+                assert_eq!(
+                    txin.witness[3],
+                    vec![
+                        82, 33, 2, 5, 128, 246, 213, 193, 72, 37, 223, 179, 53, 9, 132, 24, 26,
+                        213, 12, 163, 129, 213, 184, 112, 60, 166, 28, 248, 235, 104, 189, 63, 95,
+                        172, 172, 33, 2, 166, 123, 134, 89, 178, 94, 143, 195, 164, 240, 85, 28,
+                        187, 155, 22, 120, 8, 1, 253, 207, 106, 91, 21, 54, 121, 28, 251, 37, 85,
+                        221, 56, 231, 33, 3, 121, 25, 56, 158, 67, 99, 99, 210, 140, 34, 214, 49,
+                        87, 84, 248, 9, 19, 4, 237, 255, 35, 98, 175, 72, 67, 232, 58, 170, 234,
+                        28, 195, 131, 83, 174
+                    ]
+                );
+            }
+            MultisigType::ShWsh => {
+                let tx = psbt.clone().extract_tx();
+                assert_eq!(tx.input.len(), 2);
+                let txin = &tx.input[1];
+                assert_eq!(txin.witness.len(), 4);
+                assert_eq!(txin.script_sig.len(), 35);
+                assert_eq!(txin.witness[0].len(), 0);
+                assert_eq!(txin.witness[1].len(), 71);
+                assert_eq!(txin.witness[2].len(), 71);
+                assert_eq!(txin.witness[3].len(), 105);
+                assert_eq!(
+                    txin.witness[1],
+                    vec![
+                        48, 68, 2, 32, 115, 178, 228, 102, 102, 178, 180, 26, 84, 63, 216, 60, 247,
+                        251, 114, 236, 96, 119, 54, 228, 5, 236, 26, 199, 189, 105, 70, 241, 208,
+                        133, 153, 189, 2, 32, 126, 101, 10, 179, 132, 249, 156, 159, 169, 194, 53,
+                        34, 52, 85, 97, 29, 23, 35, 238, 18, 170, 130, 10, 184, 157, 104, 55, 115,
+                        133, 14, 92, 78, 1
+                    ]
+                );
+                assert_eq!(
+                    txin.witness[2],
+                    vec![
+                        48, 68, 2, 32, 38, 84, 239, 143, 248, 86, 171, 110, 32, 124, 133, 252, 183,
+                        143, 158, 75, 133, 10, 59, 129, 250, 60, 17, 10, 179, 192, 19, 145, 3, 62,
+                        203, 197, 2, 32, 110, 198, 250, 19, 50, 37, 208, 57, 57, 133, 82, 211, 64,
+                        120, 250, 33, 123, 248, 68, 16, 251, 113, 162, 119, 194, 241, 242, 130,
+                        195, 38, 40, 239, 1
+                    ]
+                );
+                assert_eq!(
+                    txin.witness[3],
+                    vec![
+                        82, 33, 2, 5, 128, 246, 213, 193, 72, 37, 223, 179, 53, 9, 132, 24, 26,
+                        213, 12, 163, 129, 213, 184, 112, 60, 166, 28, 248, 235, 104, 189, 63, 95,
+                        172, 172, 33, 2, 166, 123, 134, 89, 178, 94, 143, 195, 164, 240, 85, 28,
+                        187, 155, 22, 120, 8, 1, 253, 207, 106, 91, 21, 54, 121, 28, 251, 37, 85,
+                        221, 56, 231, 33, 3, 121, 25, 56, 158, 67, 99, 99, 210, 140, 34, 214, 49,
+                        87, 84, 248, 9, 19, 4, 237, 255, 35, 98, 175, 72, 67, 232, 58, 170, 234,
+                        28, 195, 131, 83, 174
+                    ]
+                );
+            }
+            MultisigType::P2sh => {
+                let tx = psbt.clone().extract_tx();
+                assert_eq!(tx.input.len(), 4);
+                let txin = &tx.input[1];
+                assert_eq!(txin.witness.len(), 0);
+                assert_eq!(txin.script_sig.len(), 252);
+                assert_eq!(
+                    txin.script_sig.as_bytes(),
+                    vec![
+                        0, 71, 48, 68, 2, 32, 97, 26, 132, 211, 161, 8, 118, 150, 201, 249, 97,
+                        205, 144, 34, 67, 71, 47, 204, 225, 151, 249, 68, 212, 32, 213, 118, 61,
+                        60, 180, 235, 82, 108, 2, 32, 119, 242, 247, 13, 18, 164, 36, 200, 144,
+                        166, 165, 153, 39, 201, 151, 237, 14, 96, 49, 183, 146, 236, 151, 245, 9,
+                        13, 171, 109, 16, 59, 37, 114, 1, 71, 48, 68, 2, 32, 30, 111, 238, 231,
+                        141, 160, 199, 182, 158, 23, 100, 176, 99, 113, 23, 121, 27, 61, 84, 125,
+                        221, 181, 101, 131, 155, 2, 110, 74, 236, 146, 23, 43, 2, 32, 72, 225, 67,
+                        21, 114, 13, 125, 224, 52, 50, 93, 27, 134, 201, 102, 116, 133, 67, 100,
+                        101, 137, 4, 137, 117, 124, 167, 101, 134, 198, 29, 138, 63, 1, 76, 105,
+                        82, 33, 2, 5, 128, 246, 213, 193, 72, 37, 223, 179, 53, 9, 132, 24, 26,
+                        213, 12, 163, 129, 213, 184, 112, 60, 166, 28, 248, 235, 104, 189, 63, 95,
+                        172, 172, 33, 2, 166, 123, 134, 89, 178, 94, 143, 195, 164, 240, 85, 28,
+                        187, 155, 22, 120, 8, 1, 253, 207, 106, 91, 21, 54, 121, 28, 251, 37, 85,
+                        221, 56, 231, 33, 3, 121, 25, 56, 158, 67, 99, 99, 210, 140, 34, 214, 49,
+                        87, 84, 248, 9, 19, 4, 237, 255, 35, 98, 175, 72, 67, 232, 58, 170, 234,
+                        28, 195, 131, 83, 174
+                    ]
+                );
+            }
+        }
 
         let spendable = wallet1.verify_proof(&psbt, &message)?;
         assert_eq!(spendable, balance);
