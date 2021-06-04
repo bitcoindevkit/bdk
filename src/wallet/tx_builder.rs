@@ -87,9 +87,9 @@ impl TxBuilderContext for BumpFee {}
 /// let (psbt1, details) = {
 ///     let mut builder = wallet.build_tx();
 ///     builder
-///        .ordering(TxOrdering::Untouched)
-///        .add_recipient(addr1.script_pubkey(), 50_000)
-///        .add_recipient(addr2.script_pubkey(), 50_000);
+///         .ordering(TxOrdering::Untouched)
+///         .add_recipient(addr1.script_pubkey(), 50_000)
+///         .add_recipient(addr2.script_pubkey(), 50_000);
 ///     builder.finish()?
 /// };
 ///
@@ -103,7 +103,10 @@ impl TxBuilderContext for BumpFee {}
 ///     builder.finish()?
 /// };
 ///
-/// assert_eq!(psbt1.global.unsigned_tx.output[..2], psbt2.global.unsigned_tx.output[..2]);
+/// assert_eq!(
+///     psbt1.global.unsigned_tx.output[..2],
+///     psbt2.global.unsigned_tx.output[..2]
+/// );
 /// # Ok::<(), bdk::Error>(())
 /// ```
 ///
@@ -246,7 +249,8 @@ impl<'a, B, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderConte
     /// let mut path = BTreeMap::new();
     /// path.insert("aabbccdd".to_string(), vec![0, 1]);
     ///
-    /// let builder = wallet.build_tx()
+    /// let builder = wallet
+    ///     .build_tx()
     ///     .add_recipient(to_address.script_pubkey(), 50_000)
     ///     .policy_path(path, KeychainKind::External);
     ///

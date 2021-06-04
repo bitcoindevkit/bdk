@@ -37,7 +37,7 @@ pub type DescriptorTemplateOut = (ExtendedDescriptor, KeyMap, ValidNetworks);
 ///
 /// ```
 /// use bdk::descriptor::error::Error as DescriptorError;
-/// use bdk::keys::{KeyError, IntoDescriptorKey};
+/// use bdk::keys::{IntoDescriptorKey, KeyError};
 /// use bdk::miniscript::Legacy;
 /// use bdk::template::{DescriptorTemplate, DescriptorTemplateOut};
 ///
