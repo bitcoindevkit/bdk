@@ -18,12 +18,12 @@
 //! ```no_run
 //! # use bdk::blockchain::{RpcConfig, RpcBlockchain, ConfigurableBlockchain};
 //! let config = RpcConfig {
-//!             url: "127.0.0.1:18332".to_string(),
-//!             auth: bitcoincore_rpc::Auth::CookieFile("/home/user/.bitcoin/.cookie".into()),
-//!             network: bdk::bitcoin::Network::Testnet,
-//!             wallet_name: "wallet_name".to_string(),
-//!             skip_blocks: None,
-//!         };
+//!     url: "127.0.0.1:18332".to_string(),
+//!     auth: bitcoincore_rpc::Auth::CookieFile("/home/user/.bitcoin/.cookie".into()),
+//!     network: bdk::bitcoin::Network::Testnet,
+//!     wallet_name: "wallet_name".to_string(),
+//!     skip_blocks: None,
+//! };
 //! let blockchain = RpcBlockchain::from_config(&config);
 //! ```
 
@@ -227,7 +227,9 @@ impl Blockchain for RpcBlockchain {
                     timestamp: tx_result.info.time,
                     received,
                     sent,
-                    fees: tx_result.fee.map(|f| f.as_sat().abs() as u64).unwrap_or(0), //TODO
+                    //TODO it could happen according to the node situation/configuration that the
+                    // fee is not known [TransactionDetails:fee] should be made [Option]
+                    fees: tx_result.fee.map(|f| f.as_sat().abs() as u64).unwrap_or(0),
                     height: tx_result.info.blockheight,
                 };
                 debug!(
