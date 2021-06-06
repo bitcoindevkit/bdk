@@ -66,6 +66,7 @@ use rocksdb::{Options, SliceTransform, DB};
 mod peer;
 mod store;
 mod sync;
+mod p2p;
 
 use super::{Blockchain, Capability, ConfigurableBlockchain, Progress};
 use crate::database::{BatchDatabase, BatchOperations, DatabaseUtils};
@@ -78,6 +79,7 @@ use store::*;
 use sync::*;
 
 pub use peer::{Mempool, Peer};
+pub use p2p::{AddressManager, log_discovery_progress, discovery_progress, noop_discovery_progress};
 
 const SYNC_HEADERS_COST: f32 = 1.0;
 const SYNC_FILTERS_COST: f32 = 11.6 * 1_000.0;

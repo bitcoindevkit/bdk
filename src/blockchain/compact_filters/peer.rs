@@ -139,6 +139,22 @@ impl Peer {
         Peer::from_stream(stream, mempool, network)
     }
 
+    /// Connect to a peer over a plaintext TCP connection with a timeout
+    ///
+    /// This function behaves exactly the same as `connect` except for two differences
+    /// 1) It assumes your ToSocketAddrs will resolve to a single address
+    /// 2) It lets you specify a connection timeout
+    pub fn connect_with_timeout<A: ToSocketAddrs>(
+        address: A,
+        timeout: Duration,
+        mempool: Arc<Mempool>,
+        network: Network,
+    ) -> Result<Self, CompactFiltersError> {
+        let socket_addr = address.to_socket_addrs()?.next().unwrap();
+        let stream = TcpStream::connect_timeout(&socket_addr, timeout)?;
+        Peer::from_stream(stream,mempool,network)
+    }
+
     /// Connect to a peer through a SOCKS5 proxy, optionally by using some credentials, specified
     /// as a tuple of `(username, password)`
     ///
@@ -209,15 +225,13 @@ impl Peer {
                 0,
             )),
         )?;
-        let version = if let NetworkMessage::Version(version) =
-            Self::_recv(&responses, "version", None).unwrap()
-        {
-            version
-        } else {
-            return Err(CompactFiltersError::InvalidResponse);
+        
+        let version = match Self::_recv(&responses, "version", Some(Duration::from_secs(1))) {
+            Some(NetworkMessage::Version(version)) => { version },
+            _ => { return Err(CompactFiltersError::InvalidResponse); }
         };
 
-        if let NetworkMessage::Verack = Self::_recv(&responses, "verack", None).unwrap() {
+        if let Some(NetworkMessage::Verack) = Self::_recv(&responses, "verack", Some(Duration::from_secs(1))) {
             Self::_send(&mut locked_writer, network.magic(), NetworkMessage::Verack)?;
         } else {
             return Err(CompactFiltersError::InvalidResponse);
