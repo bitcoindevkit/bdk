@@ -221,6 +221,7 @@ impl CompactFiltersBlockchain {
     }
 }
 
+#[maybe_async]
 impl Blockchain for CompactFiltersBlockchain {
     fn get_capabilities(&self) -> HashSet<Capability> {
         vec![Capability::FullHistory].into_iter().collect()
