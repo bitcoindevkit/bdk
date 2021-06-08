@@ -336,7 +336,7 @@ impl Satisfaction {
                         items.push(inner_index);
                         let conditions_set = other_conditions
                             .values()
-                            .fold(HashSet::new(), |set, i| set.union(&i).cloned().collect());
+                            .fold(HashSet::new(), |set, i| set.union(i).cloned().collect());
                         conditions.insert(inner_index, conditions_set);
                     }
                 }
@@ -1031,8 +1031,8 @@ mod test {
     ) -> (DescriptorKey<Ctx>, DescriptorKey<Ctx>, Fingerprint) {
         let path = bip32::DerivationPath::from_str(path).unwrap();
         let tprv = bip32::ExtendedPrivKey::from_str(tprv).unwrap();
-        let tpub = bip32::ExtendedPubKey::from_private(&secp, &tprv);
-        let fingerprint = tprv.fingerprint(&secp);
+        let tpub = bip32::ExtendedPubKey::from_private(secp, &tprv);
+        let fingerprint = tprv.fingerprint(secp);
         let prvkey = (tprv, path.clone()).into_descriptor_key().unwrap();
         let pubkey = (tpub, path).into_descriptor_key().unwrap();
 

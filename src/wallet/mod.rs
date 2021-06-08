@@ -398,7 +398,7 @@ where
     /// [`TxBuilder`]: crate::TxBuilder
     pub fn build_tx(&self) -> TxBuilder<'_, B, D, DefaultCoinSelectionAlgorithm, CreateTx> {
         TxBuilder {
-            wallet: &self,
+            wallet: self,
             params: TxParams::default(),
             coin_selection: DefaultCoinSelectionAlgorithm::default(),
             phantom: core::marker::PhantomData,
@@ -861,7 +861,7 @@ where
         };
 
         Ok(TxBuilder {
-            wallet: &self,
+            wallet: self,
             params,
             coin_selection: DefaultCoinSelectionAlgorithm::default(),
             phantom: core::marker::PhantomData,
@@ -1031,7 +1031,7 @@ where
                     match desc.satisfy(
                         &mut tmp_input,
                         (
-                            PsbtInputSatisfier::new(&psbt, n),
+                            PsbtInputSatisfier::new(psbt, n),
                             After::new(current_height, false),
                             Older::new(current_height, create_height, false),
                         ),

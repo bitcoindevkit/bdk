@@ -320,7 +320,7 @@ impl Database for Tree {
             .map(|b| -> Result<_, Error> {
                 let mut txdetails: TransactionDetails = serde_json::from_slice(&b)?;
                 if include_raw {
-                    txdetails.transaction = self.get_raw_tx(&txid)?;
+                    txdetails.transaction = self.get_raw_tx(txid)?;
                 }
 
                 Ok(txdetails)

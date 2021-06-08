@@ -158,7 +158,7 @@ pub trait ElectrumLikeSync {
                 }
             } else {
                 save_transaction_details_and_utxos(
-                    &txid,
+                    txid,
                     db,
                     timestamp,
                     height,
@@ -171,7 +171,7 @@ pub trait ElectrumLikeSync {
         // remove any tx details in db but not in history_txs_id
         for txid in txs_details_in_db.keys() {
             if !history_txs_id.contains(txid) {
-                batch.del_tx(&txid, false)?;
+                batch.del_tx(txid, false)?;
             }
         }
 
@@ -329,7 +329,7 @@ fn save_transaction_details_and_utxos<D: BatchDatabase>(
 
         // removes conflicting UTXO if any (generated from same inputs, like for example RBF)
         if let Some(outpoint) = utxo_deps.get(&input.previous_output) {
-            updates.del_utxo(&outpoint)?;
+            updates.del_utxo(outpoint)?;
         }
     }
 

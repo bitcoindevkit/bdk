@@ -139,7 +139,7 @@ impl Utxo {
                 }
 
                 if let Some(txout) = &psbt_input.witness_utxo {
-                    return &txout;
+                    return txout;
                 }
 
                 unreachable!("Foreign UTXOs will always have one of these set")

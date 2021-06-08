@@ -222,7 +222,7 @@ impl Signer for DescriptorXKey<ExtendedPrivKey> {
             .bip32_derivation
             .iter()
             .filter_map(|(pk, &(fingerprint, ref path))| {
-                if self.matches(&(fingerprint, path.clone()), &secp).is_some() {
+                if self.matches(&(fingerprint, path.clone()), secp).is_some() {
                     Some((pk, path))
                 } else {
                     None
@@ -240,12 +240,12 @@ impl Signer for DescriptorXKey<ExtendedPrivKey> {
                     &full_path.into_iter().cloned().collect::<Vec<ChildNumber>>()
                         [origin_path.len()..],
                 );
-                self.xkey.derive_priv(&secp, &deriv_path).unwrap()
+                self.xkey.derive_priv(secp, &deriv_path).unwrap()
             }
-            None => self.xkey.derive_priv(&secp, &full_path).unwrap(),
+            None => self.xkey.derive_priv(secp, &full_path).unwrap(),
         };
 
-        if &derived_key.private_key.public_key(&secp) != public_key {
+        if &derived_key.private_key.public_key(secp) != public_key {
             Err(SignerError::InvalidKey)
         } else {
             derived_key.private_key.sign(psbt, Some(input_index), secp)
@@ -257,7 +257,7 @@ impl Signer for DescriptorXKey<ExtendedPrivKey> {
     }
 
     fn id(&self, secp: &SecpCtx) -> SignerId {
-        SignerId::from(self.root_fingerprint(&secp))
+        SignerId::from(self.root_fingerprint(secp))
     }
 
     fn descriptor_secret_key(&self) -> Option<DescriptorSecretKey> {
@@ -283,7 +283,7 @@ impl Signer for PrivateKey {
             return Ok(());
         }
 
-        let pubkey = self.public_key(&secp);
+        let pubkey = self.public_key(secp);
         if psbt.inputs[input_index].partial_sigs.contains_key(&pubkey) {
             return Ok(());
         }
@@ -591,7 +591,7 @@ impl ComputeSighash for Segwitv0 {
                     .map(Script::is_v0_p2wpkh)
                     .unwrap_or(false)
                 {
-                    p2wpkh_script_code(&psbt_input.redeem_script.as_ref().unwrap())
+                    p2wpkh_script_code(psbt_input.redeem_script.as_ref().unwrap())
                 } else {
                     return Err(SignerError::MissingWitnessScript);
                 }

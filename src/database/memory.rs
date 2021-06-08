@@ -394,7 +394,7 @@ impl Database for MemoryDatabase {
         Ok(self.map.get(&key).map(|b| {
             let mut txdetails: TransactionDetails = b.downcast_ref().cloned().unwrap();
             if include_raw {
-                txdetails.transaction = self.get_raw_tx(&txid).unwrap();
+                txdetails.transaction = self.get_raw_tx(txid).unwrap();
             }
 
             txdetails
