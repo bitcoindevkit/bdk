@@ -14,9 +14,6 @@
 // only enables the `doc_cfg` feature when
 // the `docsrs` configuration attribute is defined
 #![cfg_attr(docsrs, feature(doc_cfg))]
-// only enables the nightly `external_doc` feature when
-// `test-md-docs` is enabled
-#![cfg_attr(feature = "test-md-docs", feature(external_doc))]
 
 //! A modern, lightweight, descriptor-based wallet library written in Rust.
 //!
