@@ -14,9 +14,6 @@
 // only enables the `doc_cfg` feature when
 // the `docsrs` configuration attribute is defined
 #![cfg_attr(docsrs, feature(doc_cfg))]
-// only enables the nightly `external_doc` feature when
-// `test-md-docs` is enabled
-#![cfg_attr(feature = "test-md-docs", feature(external_doc))]
 
 //! A modern, lightweight, descriptor-based wallet library written in Rust.
 //!
@@ -45,34 +42,37 @@
 //! ```toml
 //! bdk = "0.7.0"
 //! ```
-//!
-//! ## Sync the balance of a descriptor
-//!
-//! ### Example
-//! ```ignore
-//! use bdk::Wallet;
-//! use bdk::database::MemoryDatabase;
-//! use bdk::blockchain::{noop_progress, ElectrumBlockchain};
-//!
-//! use bdk::electrum_client::Client;
-//!
-//! fn main() -> Result<(), bdk::Error> {
-//!     let client = Client::new("ssl://electrum.blockstream.info:60002")?;
-//!     let wallet = Wallet::new(
-//!         "wpkh([c258d2e4/84h/1h/0h]tpubDDYkZojQFQjht8Tm4jsS3iuEmKjTiEGjG6KnuFNKKJb5A6ZUCUZKdvLdSDWofKi4ToRCwb9poe1XdqfUnP4jaJjCB2Zwv11ZLgSbnZSNecE/0/*)",
-//!         Some("wpkh([c258d2e4/84h/1h/0h]tpubDDYkZojQFQjht8Tm4jsS3iuEmKjTiEGjG6KnuFNKKJb5A6ZUCUZKdvLdSDWofKi4ToRCwb9poe1XdqfUnP4jaJjCB2Zwv11ZLgSbnZSNecE/1/*)"),
-//!         bitcoin::Network::Testnet,
-//!         MemoryDatabase::default(),
-//!         ElectrumBlockchain::from(client)
-//!     )?;
-//!
-//!     wallet.sync(noop_progress(), None)?;
-//!
-//!     println!("Descriptor balance: {} SAT", wallet.get_balance()?);
-//!
-//!     Ok(())
-//! }
-//! ```
+#![cfg_attr(
+    feature = "electrum",
+    doc = r##"
+## Sync the balance of a descriptor
+
+### Example
+```no_run
+use bdk::Wallet;
+use bdk::database::MemoryDatabase;
+use bdk::blockchain::{noop_progress, ElectrumBlockchain};
+use bdk::electrum_client::Client;
+
+fn main() -> Result<(), bdk::Error> {
+    let client = Client::new("ssl://electrum.blockstream.info:60002")?;
+    let wallet = Wallet::new(
+        "wpkh([c258d2e4/84h/1h/0h]tpubDDYkZojQFQjht8Tm4jsS3iuEmKjTiEGjG6KnuFNKKJb5A6ZUCUZKdvLdSDWofKi4ToRCwb9poe1XdqfUnP4jaJjCB2Zwv11ZLgSbnZSNecE/0/*)",
+        Some("wpkh([c258d2e4/84h/1h/0h]tpubDDYkZojQFQjht8Tm4jsS3iuEmKjTiEGjG6KnuFNKKJb5A6ZUCUZKdvLdSDWofKi4ToRCwb9poe1XdqfUnP4jaJjCB2Zwv11ZLgSbnZSNecE/1/*)"),
+        bitcoin::Network::Testnet,
+        MemoryDatabase::default(),
+        ElectrumBlockchain::from(client)
+    )?;
+
+    wallet.sync(noop_progress(), None)?;
+
+    println!("Descriptor balance: {} SAT", wallet.get_balance()?);
+
+    Ok(())
+}
+```
+"##
+)]
 //!
 //! ## Generate a few addresses
 //!
@@ -97,60 +97,64 @@
 //!     Ok(())
 //! }
 //! ```
-//!
-//! ## Create a transaction
-//!
-//! ### Example
-//! ```ignore
-//! use base64::decode;
-//! use bdk::{FeeRate, Wallet};
-//! use bdk::database::MemoryDatabase;
-//! use bdk::blockchain::{noop_progress, ElectrumBlockchain};
-//!
-//! use bdk::electrum_client::Client;
-//!
-//! use bitcoin::consensus::serialize;
-//! use bdk::wallet::AddressIndex::New;
-//!
-//! fn main() -> Result<(), bdk::Error> {
-//!     let client = Client::new("ssl://electrum.blockstream.info:60002")?;
-//!     let wallet = Wallet::new(
-//!         "wpkh([c258d2e4/84h/1h/0h]tpubDDYkZojQFQjht8Tm4jsS3iuEmKjTiEGjG6KnuFNKKJb5A6ZUCUZKdvLdSDWofKi4ToRCwb9poe1XdqfUnP4jaJjCB2Zwv11ZLgSbnZSNecE/0/*)",
-//!         Some("wpkh([c258d2e4/84h/1h/0h]tpubDDYkZojQFQjht8Tm4jsS3iuEmKjTiEGjG6KnuFNKKJb5A6ZUCUZKdvLdSDWofKi4ToRCwb9poe1XdqfUnP4jaJjCB2Zwv11ZLgSbnZSNecE/1/*)"),
-//!         bitcoin::Network::Testnet,
-//!         MemoryDatabase::default(),
-//!         ElectrumBlockchain::from(client)
-//!     )?;
-//!
-//!     wallet.sync(noop_progress(), None)?;
-//!
-//!     let send_to = wallet.get_address(New)?;
-//!     let (psbt, details) = {
-//!         let mut builder =  wallet.build_tx();
-//!         builder
-//!             .add_recipient(send_to.script_pubkey(), 50_000)
-//!             .enable_rbf()
-//!             .do_not_spend_change()
-//!             .fee_rate(FeeRate::from_sat_per_vb(5.0))
-//!         builder.finish()?
-//!     };
-//!
-//!     println!("Transaction details: {:#?}", details);
-//!     println!("Unsigned PSBT: {}", base64::encode(&serialize(&psbt)));
-//!
-//!     Ok(())
-//! }
-//! ```
+#![cfg_attr(
+    feature = "electrum",
+    doc = r##"
+## Create a transaction
+
+### Example
+```no_run
+use base64::decode;
+
+use bdk::{FeeRate, Wallet};
+use bdk::database::MemoryDatabase;
+use bdk::blockchain::{noop_progress, ElectrumBlockchain};
+use bdk::electrum_client::Client;
+
+use bitcoin::consensus::serialize;
+use bdk::wallet::AddressIndex::New;
+
+fn main() -> Result<(), bdk::Error> {
+    let client = Client::new("ssl://electrum.blockstream.info:60002")?;
+    let wallet = Wallet::new(
+        "wpkh([c258d2e4/84h/1h/0h]tpubDDYkZojQFQjht8Tm4jsS3iuEmKjTiEGjG6KnuFNKKJb5A6ZUCUZKdvLdSDWofKi4ToRCwb9poe1XdqfUnP4jaJjCB2Zwv11ZLgSbnZSNecE/0/*)",
+        Some("wpkh([c258d2e4/84h/1h/0h]tpubDDYkZojQFQjht8Tm4jsS3iuEmKjTiEGjG6KnuFNKKJb5A6ZUCUZKdvLdSDWofKi4ToRCwb9poe1XdqfUnP4jaJjCB2Zwv11ZLgSbnZSNecE/1/*)"),
+        bitcoin::Network::Testnet,
+        MemoryDatabase::default(),
+        ElectrumBlockchain::from(client)
+    )?;
+
+    wallet.sync(noop_progress(), None)?;
+
+    let send_to = wallet.get_address(New)?;
+    let (psbt, details) = {
+        let mut builder =  wallet.build_tx();
+        builder
+            .add_recipient(send_to.script_pubkey(), 50_000)
+            .enable_rbf()
+            .do_not_spend_change()
+            .fee_rate(FeeRate::from_sat_per_vb(5.0));
+        builder.finish()?
+    };
+
+    println!("Transaction details: {:#?}", details);
+    println!("Unsigned PSBT: {}", base64::encode(&serialize(&psbt)));
+
+    Ok(())
+}
+```
+"##
+)]
 //!
 //! ## Sign a transaction
 //!
 //! ### Example
-//! ```ignore
+//! ```no_run
 //! use base64::decode;
-//! use bdk::{Wallet};
-//! use bdk::database::MemoryDatabase;
-//!
 //! use bitcoin::consensus::deserialize;
+//!
+//! use bdk::{Wallet, SignOptions};
+//! use bdk::database::MemoryDatabase;
 //!
 //! fn main() -> Result<(), bdk::Error> {
 //!     let wallet = Wallet::new_offline(
@@ -163,7 +167,7 @@
 //!     let psbt = "...";
 //!     let mut psbt = deserialize(&base64::decode(psbt).unwrap())?;
 //!
-//!     let finalized = wallet.sign(&mut psbt, None)?;
+//!     let finalized = wallet.sign(&mut psbt, SignOptions::default())?;
 //!
 //!     Ok(())
 //! }

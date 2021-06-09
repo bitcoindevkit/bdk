@@ -192,7 +192,7 @@ impl<Ctx: ScriptContext + 'static> ExtScriptContext for Ctx {
 /// ```
 /// use bdk::bitcoin::PublicKey;
 ///
-/// use bdk::keys::{DescriptorKey, KeyError, ScriptContext, IntoDescriptorKey};
+/// use bdk::keys::{DescriptorKey, IntoDescriptorKey, KeyError, ScriptContext};
 ///
 /// pub struct MyKeyType {
 ///     pubkey: PublicKey,
@@ -211,8 +211,8 @@ impl<Ctx: ScriptContext + 'static> ExtScriptContext for Ctx {
 /// use bdk::bitcoin::PublicKey;
 ///
 /// use bdk::keys::{
-///     mainnet_network, DescriptorKey, DescriptorPublicKey, DescriptorSinglePub, KeyError,
-///     ScriptContext, IntoDescriptorKey,
+///     mainnet_network, DescriptorKey, DescriptorPublicKey, DescriptorSinglePub,
+///     IntoDescriptorKey, KeyError, ScriptContext,
 /// };
 ///
 /// pub struct MyKeyType {
@@ -237,7 +237,7 @@ impl<Ctx: ScriptContext + 'static> ExtScriptContext for Ctx {
 /// ```
 /// use bdk::bitcoin::PublicKey;
 ///
-/// use bdk::keys::{DescriptorKey, ExtScriptContext, KeyError, ScriptContext, IntoDescriptorKey};
+/// use bdk::keys::{DescriptorKey, ExtScriptContext, IntoDescriptorKey, KeyError, ScriptContext};
 ///
 /// pub struct MyKeyType {
 ///     is_legacy: bool,
@@ -266,7 +266,7 @@ impl<Ctx: ScriptContext + 'static> ExtScriptContext for Ctx {
 /// use bdk::bitcoin::PublicKey;
 /// use std::str::FromStr;
 ///
-/// use bdk::keys::{DescriptorKey, KeyError, IntoDescriptorKey};
+/// use bdk::keys::{DescriptorKey, IntoDescriptorKey, KeyError};
 ///
 /// pub struct MySegwitOnlyKeyType {
 ///     pubkey: PublicKey,

@@ -162,7 +162,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v2
       - name: Set default toolchain
-        run: rustup default 1.51.0 # STABLE
+        run: rustup default nightly
       - name: Set profile
         run: rustup set profile minimal
       - name: Add rustfmt
@@ -170,4 +170,4 @@ jobs:
       - name: Update toolchain
         run: rustup update
       - name: Check fmt
-        run: cargo fmt --all -- --check
+        run: cargo fmt --all -- --config format_code_in_doc_comments=true --check

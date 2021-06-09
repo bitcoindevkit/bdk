@@ -46,17 +46,25 @@
 //!         let mut selected_amount = 0;
 //!         let mut additional_weight = 0;
 //!         let all_utxos_selected = required_utxos
-//!             .into_iter().chain(optional_utxos)
-//!             .scan((&mut selected_amount, &mut additional_weight), |(selected_amount, additional_weight), weighted_utxo| {
-//!                 **selected_amount += weighted_utxo.utxo.txout().value;
-//!                 **additional_weight += TXIN_BASE_WEIGHT + weighted_utxo.satisfaction_weight;
-//!                 Some(weighted_utxo.utxo)
-//!             })
+//!             .into_iter()
+//!             .chain(optional_utxos)
+//!             .scan(
+//!                 (&mut selected_amount, &mut additional_weight),
+//!                 |(selected_amount, additional_weight), weighted_utxo| {
+//!                     **selected_amount += weighted_utxo.utxo.txout().value;
+//!                     **additional_weight += TXIN_BASE_WEIGHT + weighted_utxo.satisfaction_weight;
+//!                     Some(weighted_utxo.utxo)
+//!                 },
+//!             )
 //!             .collect::<Vec<_>>();
 //!         let additional_fees = additional_weight as f32 * fee_rate.as_sat_vb() / 4.0;
-//!         let amount_needed_with_fees = (fee_amount + additional_fees).ceil() as u64 + amount_needed;
-//!         if  amount_needed_with_fees > selected_amount {
-//!             return Err(bdk::Error::InsufficientFunds{ needed: amount_needed_with_fees, available: selected_amount });
+//!         let amount_needed_with_fees =
+//!             (fee_amount + additional_fees).ceil() as u64 + amount_needed;
+//!         if amount_needed_with_fees > selected_amount {
+//!             return Err(bdk::Error::InsufficientFunds {
+//!                 needed: amount_needed_with_fees,
+//!                 available: selected_amount,
+//!             });
 //!         }
 //!
 //!         Ok(CoinSelectionResult {
@@ -72,8 +80,7 @@
 //! let to_address = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap();
 //! let (psbt, details) = {
 //!     let mut builder = wallet.build_tx().coin_selection(AlwaysSpendEverything);
-//!     builder
-//!         .add_recipient(to_address.script_pubkey(), 50_000);
+//!     builder.add_recipient(to_address.script_pubkey(), 50_000);
 //!     builder.finish()?
 //! };
 //!
