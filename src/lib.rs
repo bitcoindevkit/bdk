@@ -104,8 +104,6 @@ fn main() -> Result<(), bdk::Error> {
 
 ### Example
 ```no_run
-use base64::decode;
-
 use bdk::{FeeRate, Wallet};
 use bdk::database::MemoryDatabase;
 use bdk::blockchain::{noop_progress, ElectrumBlockchain};
@@ -138,7 +136,7 @@ fn main() -> Result<(), bdk::Error> {
     };
 
     println!("Transaction details: {:#?}", details);
-    println!("Unsigned PSBT: {}", base64::encode(&serialize(&psbt)));
+    println!("Unsigned PSBT: {}", &psbt);
 
     Ok(())
 }
@@ -150,8 +148,9 @@ fn main() -> Result<(), bdk::Error> {
 //!
 //! ### Example
 //! ```no_run
-//! use base64::decode;
-//! use bitcoin::consensus::deserialize;
+//! use std::str::FromStr;
+//!
+//! use bitcoin::util::psbt::PartiallySignedTransaction as Psbt;
 //!
 //! use bdk::{Wallet, SignOptions};
 //! use bdk::database::MemoryDatabase;
@@ -165,7 +164,7 @@ fn main() -> Result<(), bdk::Error> {
 //!     )?;
 //!
 //!     let psbt = "...";
-//!     let mut psbt = deserialize(&base64::decode(psbt).unwrap())?;
+//!     let mut psbt = Psbt::from_str(psbt)?;
 //!
 //!     let finalized = wallet.sign(&mut psbt, SignOptions::default())?;
 //!

@@ -1007,7 +1007,6 @@ mod test {
     use crate::descriptor::{ExtractPolicy, IntoWalletDescriptor};
 
     use super::*;
-    use crate::bitcoin::consensus::deserialize;
     use crate::descriptor::derived::AsDerived;
     use crate::descriptor::policy::SatisfiableItem::{Multisig, Signature, Thresh};
     use crate::keys::{DescriptorKey, IntoDescriptorKey};
@@ -1475,7 +1474,7 @@ mod test {
 
         let signers_container = Arc::new(SignersContainer::from(keymap));
 
-        let psbt: Psbt = deserialize(&base64::decode(ALICE_SIGNED_PSBT).unwrap()).unwrap();
+        let psbt = Psbt::from_str(ALICE_SIGNED_PSBT).unwrap();
 
         let policy_alice_psbt = wallet_desc
             .extract_policy(&signers_container, BuildSatisfaction::Psbt(&psbt), &secp)
@@ -1490,7 +1489,7 @@ mod test {
             )
         );
 
-        let psbt: Psbt = deserialize(&base64::decode(BOB_SIGNED_PSBT).unwrap()).unwrap();
+        let psbt = Psbt::from_str(BOB_SIGNED_PSBT).unwrap();
         let policy_bob_psbt = wallet_desc
             .extract_policy(&signers_container, BuildSatisfaction::Psbt(&psbt), &secp)
             .unwrap()
@@ -1504,7 +1503,7 @@ mod test {
             )
         );
 
-        let psbt: Psbt = deserialize(&base64::decode(ALICE_BOB_SIGNED_PSBT).unwrap()).unwrap();
+        let psbt = Psbt::from_str(ALICE_BOB_SIGNED_PSBT).unwrap();
         let policy_alice_bob_psbt = wallet_desc
             .extract_policy(&signers_container, BuildSatisfaction::Psbt(&psbt), &secp)
             .unwrap()
@@ -1545,8 +1544,7 @@ mod test {
             addr.to_string()
         );
 
-        let psbt: Psbt =
-            deserialize(&base64::decode(PSBT_POLICY_CONSIDER_TIMELOCK_EXPIRED).unwrap()).unwrap();
+        let psbt = Psbt::from_str(PSBT_POLICY_CONSIDER_TIMELOCK_EXPIRED).unwrap();
 
         let build_sat = BuildSatisfaction::PsbtTimelocks {
             psbt: &psbt,
@@ -1584,9 +1582,7 @@ mod test {
         );
         //println!("{}", serde_json::to_string(&policy_expired).unwrap());
 
-        let psbt_signed: Psbt =
-            deserialize(&base64::decode(PSBT_POLICY_CONSIDER_TIMELOCK_EXPIRED_SIGNED).unwrap())
-                .unwrap();
+        let psbt_signed = Psbt::from_str(PSBT_POLICY_CONSIDER_TIMELOCK_EXPIRED_SIGNED).unwrap();
 
         let build_sat_expired_signed = BuildSatisfaction::PsbtTimelocks {
             psbt: &psbt_signed,

@@ -106,6 +106,8 @@ pub enum Error {
     Hex(bitcoin::hashes::hex::Error),
     /// Partially signed bitcoin transaction error
     Psbt(bitcoin::util::psbt::Error),
+    /// Partially signed bitcoin transaction parseerror
+    PsbtParse(bitcoin::util::psbt::PsbtParseError),
 
     //KeyMismatch(bitcoin::secp256k1::PublicKey, bitcoin::secp256k1::PublicKey),
     //MissingInputUTXO(usize),
@@ -172,6 +174,7 @@ impl_error!(bitcoin::secp256k1::Error, Secp256k1);
 impl_error!(serde_json::Error, Json);
 impl_error!(bitcoin::hashes::hex::Error, Hex);
 impl_error!(bitcoin::util::psbt::Error, Psbt);
+impl_error!(bitcoin::util::psbt::PsbtParseError, PsbtParse);
 
 #[cfg(feature = "electrum")]
 impl_error!(electrum_client::Error, Electrum);

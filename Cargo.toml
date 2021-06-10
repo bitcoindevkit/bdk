@@ -15,7 +15,7 @@ license = "MIT OR Apache-2.0"
 bdk-macros = "^0.4"
 log = "^0.4"
 miniscript = "5.1"
-bitcoin = { version = "^0.26", features = ["use-serde"] }
+bitcoin = { version = "~0.26.2", features = ["use-serde", "base64"] }
 serde = { version = "^1.0", features = ["derive"] }
 serde_json = { version = "^1.0" }
 rand = "^0.7"
@@ -64,7 +64,6 @@ test-md-docs = ["electrum"]
 [dev-dependencies]
 lazy_static = "1.4"
 env_logger = "0.7"
-base64 = "^0.11"
 clap = "2.33"
 serial_test = "0.4"
 
