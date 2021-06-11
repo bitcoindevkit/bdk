@@ -283,14 +283,18 @@ fn challenge_txin(message: &str) -> TxIn {
 /// Verify the SIGHASH type for a TxIn
 fn verify_sighash_type_all(inp: &TxIn) -> bool {
     if inp.witness.is_empty() {
-        if let Some(sht) = inp.script_sig.as_bytes().last() {
+        if let Some(sht_int) = inp.script_sig.as_bytes().last() {
             #[allow(clippy::if_same_then_else)]
             #[allow(clippy::needless_bool)]
-            if SigHashType::from_u32(*sht as u32) == SigHashType::All {
-                true
-            } else if *sht == 174 {
+            if *sht_int == 174 {
                 // ToDo: What is the meaning of this?
                 true
+            } else if let Ok(sht) = SigHashType::from_u32_standard(*sht_int as u32) {
+                if sht == SigHashType::All {
+                    true
+                } else {
+                    false
+                }
             } else {
                 false
             }
@@ -304,8 +308,11 @@ fn verify_sighash_type_all(inp: &TxIn) -> bool {
                 // ToDo: Why are there empty elements?
                 continue;
             }
-            let sht = SigHashType::from_u32(*wit.last().unwrap() as u32);
-            if SigHashType::All != sht {
+            if let Ok(sht) = SigHashType::from_u32_standard(*wit.last().unwrap() as u32) {
+                if SigHashType::All != sht {
+                    return false;
+                }
+            } else {
                 return false;
             }
         }
@@ -358,7 +365,7 @@ mod test {
             .iter()
             .fold(0, |acc, i| acc + i.partial_sigs.len());
         assert_eq!(num_sigs, num_inp - 1);
-        assert_eq!(finalized, true);
+        assert!(finalized);
 
         let spendable = wallet.verify_proof(&psbt, &message)?;
         assert_eq!(spendable, balance);
@@ -604,14 +611,14 @@ mod test {
         };
         let finalized = wallet1.sign(&mut psbt, signopts.clone())?;
         assert_eq!(count_signatures(&psbt), (num_inp - 1, 1, 0));
-        assert_eq!(finalized, false);
+        assert!(!finalized);
 
         let finalized = wallet2.sign(&mut psbt, signopts.clone())?;
         assert_eq!(
             count_signatures(&psbt),
             ((num_inp - 1) * 2, num_inp, num_inp - 1)
         );
-        assert_eq!(finalized, true);
+        assert!(finalized);
 
         // 2 signatures are enough. Just checking what happens...
         let finalized = wallet3.sign(&mut psbt, signopts.clone())?;
@@ -619,14 +626,14 @@ mod test {
             count_signatures(&psbt),
             ((num_inp - 1) * 2, num_inp, num_inp - 1)
         );
-        assert_eq!(finalized, true);
+        assert!(finalized);
 
         let finalized = wallet1.finalize_psbt(&mut psbt, signopts)?;
         assert_eq!(
             count_signatures(&psbt),
             ((num_inp - 1) * 2, num_inp, num_inp - 1)
         );
-        assert_eq!(finalized, true);
+        assert!(finalized);
 
         // additional temporary checks
         match script_type {
