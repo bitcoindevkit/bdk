@@ -81,19 +81,18 @@ jobs:
       matrix:
         blockchain:
           - name: electrum
-            container: bitcoindevkit/electrs
-            start: /root/electrs --network regtest --jsonrpc-import
+            container: bitcoindevkit/electrs:0.4.0
+            start: /root/electrs --network regtest --cookie-file $GITHUB_WORKSPACE/.bitcoin/regtest/.cookie --jsonrpc-import
           - name: esplora
-            container: bitcoindevkit/esplora
-            start: /root/electrs --network regtest -vvv --cookie admin:passw --jsonrpc-import --electrum-rpc-addr=0.0.0.0:60401 --http-addr 0.0.0.0:3002
+            container: bitcoindevkit/esplora:0.4.0
+            start: /root/electrs --network regtest -vvv --daemon-dir $GITHUB_WORKSPACE/.bitcoin --jsonrpc-import --electrum-rpc-addr=0.0.0.0:60401 --http-addr 0.0.0.0:3002
           - name: rpc
-            container: bitcoindevkit/electrs
-            start: /root/electrs --network regtest --jsonrpc-import
+            container: bitcoindevkit/electrs:0.4.0
+            start: /root/electrs --network regtest --cookie-file $GITHUB_WORKSPACE/.bitcoin/regtest/.cookie --jsonrpc-import
     container: ${{ matrix.blockchain.container }}
     env:
-      BDK_RPC_AUTH: USER_PASS
-      BDK_RPC_USER: admin
-      BDK_RPC_PASS: passw
+      BDK_RPC_AUTH: COOKIEFILE
+      BDK_RPC_COOKIEFILE: ${{ github.workspace }}/.bitcoin/regtest/.cookie
       BDK_RPC_URL: 127.0.0.1:18443
       BDK_RPC_WALLET: bdk-test
       BDK_ELECTRUM_URL: tcp://127.0.0.1:60401
@@ -109,7 +108,7 @@ jobs:
             ~/.cargo/git
             target
           key: ${{ runner.os }}-cargo-${{ github.job }}-${{ hashFiles('**/Cargo.toml','**/Cargo.lock') }}
-      - name: get pkg-config # running eslpora tests seems to need this
+      - name: get pkg-config # running esplora tests seems to need this
         run: apt update && apt install -y --fix-missing pkg-config libssl-dev
       - name: Install rustup
         run: curl https://sh.rustup.rs -sSf | sh -s -- -y

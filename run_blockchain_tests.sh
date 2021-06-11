@@ -14,10 +14,7 @@ eprintln(){
 }
 
 cleanup() {
-    if test "$id"; then
-        eprintln "cleaning up $blockchain docker container $id";
-        docker rm -fv "$id" > /dev/null;
-    fi
+    docker kill test_container
     trap - EXIT INT
 }
 
@@ -30,16 +27,16 @@ test_name="$2"
 case "$blockchain" in
     electrum)
         eprintln "starting electrs docker container"
-        id="$(docker run -d -p 127.0.0.1:18443-18444:18443-18444/tcp -p 127.0.0.1:60401:60401/tcp bitcoindevkit/electrs)"
+        docker run --detach --rm -p 127.0.0.1:18443-18444:18443-18444/tcp -p 127.0.0.1:60401:60401/tcp --name test_container bitcoindevkit/electrs:0.4.0
         ;;
     esplora)
         eprintln "starting esplora docker container"
-        id="$(docker run -d -p 127.0.0.1:18443-18444:18443-18444/tcp -p 127.0.0.1:60401:60401/tcp -p 127.0.0.1:3002:3002/tcp bitcoindevkit/esplora)"
+        docker run --detach --rm -p 127.0.0.1:18443-18444:18443-18444/tcp -p 127.0.0.1:60401:60401/tcp -p 127.0.0.1:3002:3002/tcp --name test_container bitcoindevkit/esplora:0.4.0
         export BDK_ESPLORA_URL=http://127.0.0.1:3002
         ;;
     rpc)
-        eprintln "starting electrs docker container"
-        id="$(docker run -d -p 127.0.0.1:18443-18444:18443-18444/tcp -p 127.0.0.1:60401:60401/tcp bitcoindevkit/electrs)"
+        eprintln "starting bitcoind docker container (via electrs container)"
+        docker run --detach --rm -p 127.0.0.1:18443-18444:18443-18444/tcp -p 127.0.0.1:60401:60401/tcp --name test_container bitcoindevkit/electrs:0.4.0      
         ;;
     *)
         usage;
@@ -48,21 +45,23 @@ case "$blockchain" in
     esac
 
 # taken from https://github.com/bitcoindevkit/bitcoin-regtest-box
-export BDK_RPC_AUTH=USER_PASS
-export BDK_RPC_USER=admin
-export BDK_RPC_PASS=passw
+export BDK_RPC_AUTH=COOKIEFILE
+export BDK_RPC_COOKIEFILE=/tmp/regtest.cookie
 export BDK_RPC_URL=127.0.0.1:18443
 export BDK_RPC_WALLET=bdk-test
 export BDK_ELECTRUM_URL=tcp://127.0.0.1:60401
 
 cli(){
-    docker exec -it "$id" /root/bitcoin-cli -regtest -rpcuser=admin -rpcpassword=passw $@
+    docker exec -it test_container /root/bitcoin-cli -regtest -datadir=/root/.bitcoin $@
 }
 
-eprintln "running getwalletinfo until bitcoind seems to be alive"
+#eprintln "running getwalletinfo until bitcoind seems to be alive"
 while ! cli getwalletinfo >/dev/null; do sleep 1; done
 
 # sleep again for good measure!
 sleep 1;
+
+# copy bitcoind cookie file to /tmp
+docker cp test_container:/root/.bitcoin/regtest/.cookie /tmp/regtest.cookie
 
 cargo test --features "test-blockchains,test-$blockchain" --no-default-features "$blockchain::bdk_blockchain_tests::$test_name"
