@@ -43,6 +43,13 @@ pub use self::electrum::ElectrumBlockchain;
 #[cfg(feature = "electrum")]
 pub use self::electrum::ElectrumBlockchainConfig;
 
+#[cfg(feature = "rpc")]
+pub mod rpc;
+#[cfg(feature = "rpc")]
+pub use self::rpc::RpcBlockchain;
+#[cfg(feature = "rpc")]
+pub use self::rpc::RpcConfig;
+
 #[cfg(feature = "esplora")]
 #[cfg_attr(docsrs, doc(cfg(feature = "esplora")))]
 pub mod esplora;
@@ -52,6 +59,7 @@ pub use self::esplora::EsploraBlockchain;
 #[cfg(feature = "compact_filters")]
 #[cfg_attr(docsrs, doc(cfg(feature = "compact_filters")))]
 pub mod compact_filters;
+
 #[cfg(feature = "compact_filters")]
 pub use self::compact_filters::CompactFiltersBlockchain;
 

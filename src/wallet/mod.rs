@@ -1489,12 +1489,14 @@ where
             false => 0,
             true => max_address_param.unwrap_or(CACHE_ADDR_BATCH_SIZE),
         };
+        debug!("max_address {}", max_address);
         if self
             .database
             .borrow()
             .get_script_pubkey_from_path(KeychainKind::External, max_address.saturating_sub(1))?
             .is_none()
         {
+            debug!("caching external addresses");
             run_setup = true;
             self.cache_addresses(KeychainKind::External, 0, max_address)?;
         }
@@ -1511,11 +1513,13 @@ where
                 .get_script_pubkey_from_path(KeychainKind::Internal, max_address.saturating_sub(1))?
                 .is_none()
             {
+                debug!("caching internal addresses");
                 run_setup = true;
                 self.cache_addresses(KeychainKind::Internal, 0, max_address)?;
             }
         }
 
+        debug!("run_setup: {}", run_setup);
         // TODO: what if i generate an address first and cache some addresses?
         // TODO: we should sync if generating an address triggers a new batch to be stored
         if run_setup {

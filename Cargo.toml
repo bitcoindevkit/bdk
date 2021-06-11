@@ -33,7 +33,7 @@ lazy_static = { version = "1.4", optional = true }
 tiny-bip39 = { version = "^0.8", optional = true }
 
 # Needed by bdk_blockchain_tests macro
-bitcoincore-rpc = {  version = "0.13", optional = true }
+bitcoincore-rpc = { version = "0.13", optional = true }
 serial_test = { version = "0.4", optional = true }
 
 # Platform-specific dependencies
@@ -56,9 +56,14 @@ key-value-db = ["sled"]
 async-interface = ["async-trait"]
 all-keys = ["keys-bip39"]
 keys-bip39 = ["tiny-bip39"]
+rpc = ["bitcoincore-rpc"]
+
 
 # Debug/Test features
 test-blockchains = ["bitcoincore-rpc", "electrum-client"]
+test-electrum = ["electrum"]
+test-rpc = ["rpc"]
+test-esplora = ["esplora"]
 test-md-docs = ["electrum"]
 
 [dev-dependencies]
@@ -66,6 +71,7 @@ lazy_static = "1.4"
 env_logger = "0.7"
 clap = "2.33"
 serial_test = "0.4"
+bitcoind = "0.10.0"
 
 [[example]]
 name = "address_validator"

@@ -80,7 +80,7 @@ impl std::default::Default for FeeRate {
 /// An unspent output owned by a [`Wallet`].
 ///
 /// [`Wallet`]: crate::Wallet
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LocalUtxo {
     /// Reference to a transaction output
     pub outpoint: OutPoint,

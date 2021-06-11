@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added an option that must be explicitly enabled to allow signing using non-`SIGHASH_ALL` sighashes (#350)
 #### Changed
 `get_address` now returns an `AddressInfo` struct that includes the index and derefs to `Address`.
+#### Added
+- Bitcoin core RPC added as blockchain backend
 
 ## [v0.7.0] - [v0.6.0]
 

@@ -429,8 +429,8 @@ impl BatchDatabase for MemoryDatabase {
     }
 
     fn commit_batch(&mut self, mut batch: Self::Batch) -> Result<(), Error> {
-        for key in batch.deleted_keys {
-            self.map.remove(&key);
+        for key in batch.deleted_keys.iter() {
+            self.map.remove(key);
         }
         self.map.append(&mut batch.map);
         Ok(())

@@ -4,7 +4,7 @@ usage() {
     cat <<'EOF'
 Script for running the bdk blockchain tests for a specific blockchain by starting up the backend in docker.
 
-Usage: ./run_blockchain_tests.sh [esplora|electrum] [test name].
+Usage: ./run_blockchain_tests.sh [esplora|electrum|rpc] [test name].
 
 EOF
 }
@@ -37,6 +37,10 @@ case "$blockchain" in
         id="$(docker run -d -p 127.0.0.1:18443-18444:18443-18444/tcp -p 127.0.0.1:60401:60401/tcp -p 127.0.0.1:3002:3002/tcp bitcoindevkit/esplora)"
         export BDK_ESPLORA_URL=http://127.0.0.1:3002
         ;;
+    rpc)
+        eprintln "starting electrs docker container"
+        id="$(docker run -d -p 127.0.0.1:18443-18444:18443-18444/tcp -p 127.0.0.1:60401:60401/tcp bitcoindevkit/electrs)"
+        ;;
     *)
         usage;
         exit 1;
@@ -61,4 +65,4 @@ while ! cli getwalletinfo >/dev/null; do sleep 1; done
 # sleep again for good measure!
 sleep 1;
 
-cargo test --features "test-blockchains,$blockchain" --no-default-features "$blockchain::bdk_blockchain_tests::$test_name"
+cargo test --features "test-blockchains,test-$blockchain" --no-default-features "$blockchain::bdk_blockchain_tests::$test_name"
