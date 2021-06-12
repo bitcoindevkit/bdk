@@ -314,11 +314,13 @@ pub mod test {
         let mut tx_details = TransactionDetails {
             transaction: Some(tx),
             txid,
-            timestamp: 123456,
             received: 1337,
             sent: 420420,
-            fees: 140,
-            height: Some(1000),
+            fee: Some(140),
+            confirmation_time: Some(ConfirmationTime {
+                timestamp: 123456,
+                height: 1000,
+            }),
         };
 
         tree.set_tx(&tx_details).unwrap();

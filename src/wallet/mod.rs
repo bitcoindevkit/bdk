@@ -706,11 +706,10 @@ where
         let transaction_details = TransactionDetails {
             transaction: None,
             txid,
-            timestamp: time::get_timestamp(),
+            confirmation_time: None,
             received,
             sent,
-            fees: fee_amount,
-            height: None,
+            fee: Some(fee_amount),
         };
 
         Ok((psbt, transaction_details))
@@ -769,7 +768,7 @@ where
         let mut details = match self.database.borrow().get_tx(&txid, true)? {
             None => return Err(Error::TransactionNotFound),
             Some(tx) if tx.transaction.is_none() => return Err(Error::TransactionNotFound),
-            Some(tx) if tx.height.is_some() => return Err(Error::TransactionConfirmed),
+            Some(tx) if tx.confirmation_time.is_some() => return Err(Error::TransactionConfirmed),
             Some(tx) => tx,
         };
         let mut tx = details.transaction.take().unwrap();
@@ -778,7 +777,7 @@ where
         }
 
         let vbytes = tx.get_weight() as f32 / 4.0;
-        let feerate = details.fees as f32 / vbytes;
+        let feerate = details.fee.ok_or(Error::FeeRateUnavailable)? as f32 / vbytes;
 
         // remove the inputs from the tx and process them
         let original_txin = tx.input.drain(..).collect::<Vec<_>>();
@@ -854,7 +853,7 @@ where
                 .collect(),
             utxos: original_utxos,
             bumping_fee: Some(tx_builder::PreviousFee {
-                absolute: details.fees,
+                absolute: details.fee.ok_or(Error::FeeRateUnavailable)?,
                 rate: feerate,
             }),
             ..Default::default()
@@ -993,7 +992,7 @@ where
                 .database
                 .borrow()
                 .get_tx(&input.previous_output.txid, false)?
-                .map(|tx| tx.height.unwrap_or(std::u32::MAX));
+                .map(|tx| tx.confirmation_time.map(|c| c.height).unwrap_or(u32::MAX));
             let current_height = sign_options.assume_height.or(self.current_height);
 
             debug!(
@@ -1231,7 +1230,7 @@ where
 
         let satisfies_confirmed = match must_only_use_confirmed_tx {
             true => {
-                let database = self.database.borrow_mut();
+                let database = self.database.borrow();
                 may_spend
                     .iter()
                     .map(|u| {
@@ -1239,7 +1238,7 @@ where
                             .get_tx(&u.0.outpoint.txid, true)
                             .map(|tx| match tx {
                                 None => false,
-                                Some(tx) => tx.height.is_some(),
+                                Some(tx) => tx.confirmation_time.is_some(),
                             })
                     })
                     .collect::<Result<Vec<_>, _>>()?
@@ -1986,7 +1985,7 @@ pub(crate) mod test {
         assert_eq!(psbt.global.unsigned_tx.output.len(), 1);
         assert_eq!(
             psbt.global.unsigned_tx.output[0].value,
-            50_000 - details.fees
+            50_000 - details.fee.unwrap_or(0)
         );
     }
 
@@ -1998,7 +1997,7 @@ pub(crate) mod test {
         builder.add_recipient(addr.script_pubkey(), 25_000);
         let (psbt, details) = builder.finish().unwrap();
 
-        assert_fee_rate!(psbt.extract_tx(), details.fees, FeeRate::default(), @add_signature);
+        assert_fee_rate!(psbt.extract_tx(), details.fee.unwrap_or(0), FeeRate::default(), @add_signature);
     }
 
     #[test]
@@ -2011,7 +2010,7 @@ pub(crate) mod test {
             .fee_rate(FeeRate::from_sat_per_vb(5.0));
         let (psbt, details) = builder.finish().unwrap();
 
-        assert_fee_rate!(psbt.extract_tx(), details.fees, FeeRate::from_sat_per_vb(5.0), @add_signature);
+        assert_fee_rate!(psbt.extract_tx(), details.fee.unwrap_or(0), FeeRate::from_sat_per_vb(5.0), @add_signature);
     }
 
     #[test]
@@ -2025,11 +2024,11 @@ pub(crate) mod test {
             .fee_absolute(100);
         let (psbt, details) = builder.finish().unwrap();
 
-        assert_eq!(details.fees, 100);
+        assert_eq!(details.fee.unwrap_or(0), 100);
         assert_eq!(psbt.global.unsigned_tx.output.len(), 1);
         assert_eq!(
             psbt.global.unsigned_tx.output[0].value,
-            50_000 - details.fees
+            50_000 - details.fee.unwrap_or(0)
         );
     }
 
@@ -2044,11 +2043,11 @@ pub(crate) mod test {
             .fee_absolute(0);
         let (psbt, details) = builder.finish().unwrap();
 
-        assert_eq!(details.fees, 0);
+        assert_eq!(details.fee.unwrap_or(0), 0);
         assert_eq!(psbt.global.unsigned_tx.output.len(), 1);
         assert_eq!(
             psbt.global.unsigned_tx.output[0].value,
-            50_000 - details.fees
+            50_000 - details.fee.unwrap_or(0)
         );
     }
 
@@ -2081,7 +2080,7 @@ pub(crate) mod test {
         assert_eq!(psbt.global.unsigned_tx.output[0].value, 25_000);
         assert_eq!(
             psbt.global.unsigned_tx.output[1].value,
-            25_000 - details.fees
+            25_000 - details.fee.unwrap_or(0)
         );
     }
 
@@ -2095,7 +2094,7 @@ pub(crate) mod test {
 
         assert_eq!(psbt.global.unsigned_tx.output.len(), 1);
         assert_eq!(psbt.global.unsigned_tx.output[0].value, 49_800);
-        assert_eq!(details.fees, 200);
+        assert_eq!(details.fee.unwrap_or(0), 200);
     }
 
     #[test]
@@ -2126,7 +2125,7 @@ pub(crate) mod test {
         assert_eq!(psbt.global.unsigned_tx.output.len(), 3);
         assert_eq!(
             psbt.global.unsigned_tx.output[0].value,
-            10_000 - details.fees
+            10_000 - details.fee.unwrap_or(0)
         );
         assert_eq!(psbt.global.unsigned_tx.output[1].value, 10_000);
         assert_eq!(psbt.global.unsigned_tx.output[2].value, 30_000);
@@ -2496,7 +2495,7 @@ pub(crate) mod test {
 
         assert_eq!(
             details.sent - details.received,
-            10_000 + details.fees,
+            10_000 + details.fee.unwrap_or(0),
             "we should have only net spent ~10_000"
         );
 
@@ -2762,7 +2761,10 @@ pub(crate) mod test {
         let txid = tx.txid();
         // skip saving the utxos, we know they can't be used anyways
         details.transaction = Some(tx);
-        details.height = Some(42);
+        details.confirmation_time = Some(ConfirmationTime {
+            timestamp: 12345678,
+            height: 42,
+        });
         wallet.database.borrow_mut().set_tx(&details).unwrap();
 
         wallet.build_fee_bump(txid).unwrap().finish().unwrap();
@@ -2867,10 +2869,10 @@ pub(crate) mod test {
 
         assert_eq!(details.sent, original_details.sent);
         assert_eq!(
-            details.received + details.fees,
-            original_details.received + original_details.fees
+            details.received + details.fee.unwrap_or(0),
+            original_details.received + original_details.fee.unwrap_or(0)
         );
-        assert!(details.fees > original_details.fees);
+        assert!(details.fee.unwrap_or(0) > original_details.fee.unwrap_or(0));
 
         let tx = &psbt.global.unsigned_tx;
         assert_eq!(tx.output.len(), 2);
@@ -2891,7 +2893,7 @@ pub(crate) mod test {
             details.received
         );
 
-        assert_fee_rate!(psbt.extract_tx(), details.fees, FeeRate::from_sat_per_vb(2.5), @add_signature);
+        assert_fee_rate!(psbt.extract_tx(), details.fee.unwrap_or(0), FeeRate::from_sat_per_vb(2.5), @add_signature);
     }
 
     #[test]
@@ -2928,14 +2930,14 @@ pub(crate) mod test {
 
         assert_eq!(details.sent, original_details.sent);
         assert_eq!(
-            details.received + details.fees,
-            original_details.received + original_details.fees
+            details.received + details.fee.unwrap_or(0),
+            original_details.received + original_details.fee.unwrap_or(0)
         );
         assert!(
-            details.fees > original_details.fees,
+            details.fee.unwrap_or(0) > original_details.fee.unwrap_or(0),
             "{} > {}",
-            details.fees,
-            original_details.fees
+            details.fee.unwrap_or(0),
+            original_details.fee.unwrap_or(0)
         );
 
         let tx = &psbt.global.unsigned_tx;
@@ -2957,7 +2959,7 @@ pub(crate) mod test {
             details.received
         );
 
-        assert_eq!(details.fees, 200);
+        assert_eq!(details.fee.unwrap_or(0), 200);
     }
 
     #[test]
@@ -2995,13 +2997,13 @@ pub(crate) mod test {
         let (psbt, details) = builder.finish().unwrap();
 
         assert_eq!(details.sent, original_details.sent);
-        assert!(details.fees > original_details.fees);
+        assert!(details.fee.unwrap_or(0) > original_details.fee.unwrap_or(0));
 
         let tx = &psbt.global.unsigned_tx;
         assert_eq!(tx.output.len(), 1);
-        assert_eq!(tx.output[0].value + details.fees, details.sent);
+        assert_eq!(tx.output[0].value + details.fee.unwrap_or(0), details.sent);
 
-        assert_fee_rate!(psbt.extract_tx(), details.fees, FeeRate::from_sat_per_vb(2.5), @add_signature);
+        assert_fee_rate!(psbt.extract_tx(), details.fee.unwrap_or(0), FeeRate::from_sat_per_vb(2.5), @add_signature);
     }
 
     #[test]
@@ -3039,13 +3041,13 @@ pub(crate) mod test {
         let (psbt, details) = builder.finish().unwrap();
 
         assert_eq!(details.sent, original_details.sent);
-        assert!(details.fees > original_details.fees);
+        assert!(details.fee.unwrap_or(0) > original_details.fee.unwrap_or(0));
 
         let tx = &psbt.global.unsigned_tx;
         assert_eq!(tx.output.len(), 1);
-        assert_eq!(tx.output[0].value + details.fees, details.sent);
+        assert_eq!(tx.output[0].value + details.fee.unwrap_or(0), details.sent);
 
-        assert_eq!(details.fees, 300);
+        assert_eq!(details.fee.unwrap_or(0), 300);
     }
 
     #[test]
@@ -3190,7 +3192,7 @@ pub(crate) mod test {
         let (psbt, details) = builder.finish().unwrap();
 
         assert_eq!(details.sent, original_details.sent + 25_000);
-        assert_eq!(details.fees + details.received, 30_000);
+        assert_eq!(details.fee.unwrap_or(0) + details.received, 30_000);
 
         let tx = &psbt.global.unsigned_tx;
         assert_eq!(tx.input.len(), 2);
@@ -3212,7 +3214,7 @@ pub(crate) mod test {
             details.received
         );
 
-        assert_fee_rate!(psbt.extract_tx(), details.fees, FeeRate::from_sat_per_vb(50.0), @add_signature);
+        assert_fee_rate!(psbt.extract_tx(), details.fee.unwrap_or(0), FeeRate::from_sat_per_vb(50.0), @add_signature);
     }
 
     #[test]
@@ -3253,7 +3255,7 @@ pub(crate) mod test {
         let (psbt, details) = builder.finish().unwrap();
 
         assert_eq!(details.sent, original_details.sent + 25_000);
-        assert_eq!(details.fees + details.received, 30_000);
+        assert_eq!(details.fee.unwrap_or(0) + details.received, 30_000);
 
         let tx = &psbt.global.unsigned_tx;
         assert_eq!(tx.input.len(), 2);
@@ -3275,7 +3277,7 @@ pub(crate) mod test {
             details.received
         );
 
-        assert_eq!(details.fees, 6_000);
+        assert_eq!(details.fee.unwrap_or(0), 6_000);
     }
 
     #[test]
@@ -3325,11 +3327,11 @@ pub(crate) mod test {
         builder.fee_rate(FeeRate::from_sat_per_vb(50.0));
         let (psbt, details) = builder.finish().unwrap();
 
-        let original_send_all_amount = original_details.sent - original_details.fees;
+        let original_send_all_amount = original_details.sent - original_details.fee.unwrap_or(0);
         assert_eq!(details.sent, original_details.sent + 50_000);
         assert_eq!(
             details.received,
-            75_000 - original_send_all_amount - details.fees
+            75_000 - original_send_all_amount - details.fee.unwrap_or(0)
         );
 
         let tx = &psbt.global.unsigned_tx;
@@ -3349,10 +3351,10 @@ pub(crate) mod test {
                 .find(|txout| txout.script_pubkey != addr.script_pubkey())
                 .unwrap()
                 .value,
-            75_000 - original_send_all_amount - details.fees
+            75_000 - original_send_all_amount - details.fee.unwrap_or(0)
         );
 
-        assert_fee_rate!(psbt.extract_tx(), details.fees, FeeRate::from_sat_per_vb(50.0), @add_signature);
+        assert_fee_rate!(psbt.extract_tx(), details.fee.unwrap_or(0), FeeRate::from_sat_per_vb(50.0), @add_signature);
     }
 
     #[test]
@@ -3394,10 +3396,13 @@ pub(crate) mod test {
         builder.fee_rate(FeeRate::from_sat_per_vb(140.0));
         let (psbt, details) = builder.finish().unwrap();
 
-        assert_eq!(original_details.received, 5_000 - original_details.fees);
+        assert_eq!(
+            original_details.received,
+            5_000 - original_details.fee.unwrap_or(0)
+        );
 
         assert_eq!(details.sent, original_details.sent + 25_000);
-        assert_eq!(details.fees, 30_000);
+        assert_eq!(details.fee.unwrap_or(0), 30_000);
         assert_eq!(details.received, 0);
 
         let tx = &psbt.global.unsigned_tx;
@@ -3412,7 +3417,7 @@ pub(crate) mod test {
             45_000
         );
 
-        assert_fee_rate!(psbt.extract_tx(), details.fees, FeeRate::from_sat_per_vb(140.0), @dust_change, @add_signature);
+        assert_fee_rate!(psbt.extract_tx(), details.fee.unwrap_or(0), FeeRate::from_sat_per_vb(140.0), @dust_change, @add_signature);
     }
 
     #[test]
@@ -3461,7 +3466,7 @@ pub(crate) mod test {
         let (psbt, details) = builder.finish().unwrap();
 
         assert_eq!(details.sent, original_details.sent + 25_000);
-        assert_eq!(details.fees + details.received, 30_000);
+        assert_eq!(details.fee.unwrap_or(0) + details.received, 30_000);
 
         let tx = &psbt.global.unsigned_tx;
         assert_eq!(tx.input.len(), 2);
@@ -3483,7 +3488,7 @@ pub(crate) mod test {
             details.received
         );
 
-        assert_fee_rate!(psbt.extract_tx(), details.fees, FeeRate::from_sat_per_vb(5.0), @add_signature);
+        assert_fee_rate!(psbt.extract_tx(), details.fee.unwrap_or(0), FeeRate::from_sat_per_vb(5.0), @add_signature);
     }
 
     #[test]
@@ -3532,7 +3537,7 @@ pub(crate) mod test {
         let (psbt, details) = builder.finish().unwrap();
 
         assert_eq!(details.sent, original_details.sent + 25_000);
-        assert_eq!(details.fees + details.received, 30_000);
+        assert_eq!(details.fee.unwrap_or(0) + details.received, 30_000);
 
         let tx = &psbt.global.unsigned_tx;
         assert_eq!(tx.input.len(), 2);
@@ -3554,7 +3559,7 @@ pub(crate) mod test {
             details.received
         );
 
-        assert_eq!(details.fees, 250);
+        assert_eq!(details.fee.unwrap_or(0), 250);
     }
 
     #[test]

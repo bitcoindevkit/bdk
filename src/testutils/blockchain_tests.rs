@@ -396,7 +396,7 @@ macro_rules! bdk_blockchain_tests {
                 assert_eq!(list_tx_item.txid, txid, "incorrect txid");
                 assert_eq!(list_tx_item.received, 50_000, "incorrect received");
                 assert_eq!(list_tx_item.sent, 0, "incorrect sent");
-                assert_eq!(list_tx_item.height, None, "incorrect height");
+                assert_eq!(list_tx_item.confirmation_time, None, "incorrect confirmation time");
             }
 
             #[test]
@@ -454,7 +454,7 @@ macro_rules! bdk_blockchain_tests {
                 assert_eq!(list_tx_item.txid, txid, "incorrect txid");
                 assert_eq!(list_tx_item.received, 105_000, "incorrect received");
                 assert_eq!(list_tx_item.sent, 0, "incorrect sent");
-                assert_eq!(list_tx_item.height, None, "incorrect height");
+                assert_eq!(list_tx_item.confirmation_time, None, "incorrect confirmation_time");
             }
 
             #[test]
@@ -515,7 +515,7 @@ macro_rules! bdk_blockchain_tests {
                 assert_eq!(list_tx_item.txid, txid, "incorrect txid");
                 assert_eq!(list_tx_item.received, 50_000, "incorrect received");
                 assert_eq!(list_tx_item.sent, 0, "incorrect sent");
-                assert_eq!(list_tx_item.height, None, "incorrect height");
+                assert_eq!(list_tx_item.confirmation_time, None, "incorrect confirmation_time");
 
                 let new_txid = test_client.bump_fee(&txid);
 
@@ -529,7 +529,7 @@ macro_rules! bdk_blockchain_tests {
                 assert_eq!(list_tx_item.txid, new_txid, "incorrect txid after bump");
                 assert_eq!(list_tx_item.received, 50_000, "incorrect received after bump");
                 assert_eq!(list_tx_item.sent, 0, "incorrect sent after bump");
-                assert_eq!(list_tx_item.height, None, "incorrect height after bump");
+                assert_eq!(list_tx_item.confirmation_time, None, "incorrect height after bump");
             }
 
             // FIXME: I would like this to be cfg_attr(not(feature = "test-esplora"), ignore) but it
@@ -552,7 +552,7 @@ macro_rules! bdk_blockchain_tests {
 
                 let list_tx_item = &wallet.list_transactions(false).unwrap()[0];
                 assert_eq!(list_tx_item.txid, txid, "incorrect txid");
-                assert!(list_tx_item.height.is_some(), "incorrect height");
+                assert!(list_tx_item.confirmation_time.is_some(), "incorrect confirmation_time");
 
                 // Invalidate 1 block
                 test_client.invalidate(1);
@@ -563,7 +563,7 @@ macro_rules! bdk_blockchain_tests {
 
                 let list_tx_item = &wallet.list_transactions(false).unwrap()[0];
                 assert_eq!(list_tx_item.txid, txid, "incorrect txid after invalidate");
-                assert_eq!(list_tx_item.height, None, "incorrect height after invalidate");
+                assert_eq!(list_tx_item.confirmation_time, None, "incorrect confirmation time after invalidate");
             }
 
             #[test]
@@ -595,6 +595,34 @@ macro_rules! bdk_blockchain_tests {
                 assert_eq!(wallet.list_transactions(false).unwrap().len(), 2, "incorrect number of txs");
                 assert_eq!(wallet.list_unspent().unwrap().len(), 1, "incorrect number of unspents");
             }
+
+            #[test]
+            #[serial]
+            fn test_update_confirmation_time_after_generate() {
+                let (wallet, descriptors, mut test_client) = init_single_sig();
+                println!("{}", descriptors.0);
+                let node_addr = test_client.get_node_address(None);
+
+                let received_txid = test_client.receive(testutils! {
+                    @tx ( (@external descriptors, 0) => 50_000 )
+                });
+
+                wallet.sync(noop_progress(), None).unwrap();
+                assert_eq!(wallet.get_balance().unwrap(), 50_000, "incorrect balance");
+
+                let tx_map = wallet.list_transactions(false).unwrap().into_iter().map(|tx| (tx.txid, tx)).collect::<std::collections::HashMap<_, _>>();
+                let details = tx_map.get(&received_txid).unwrap();
+                assert!(details.confirmation_time.is_none());
+
+                test_client.generate(1, Some(node_addr));
+                wallet.sync(noop_progress(), None).unwrap();
+
+                let tx_map = wallet.list_transactions(false).unwrap().into_iter().map(|tx| (tx.txid, tx)).collect::<std::collections::HashMap<_, _>>();
+                let details = tx_map.get(&received_txid).unwrap();
+                assert!(details.confirmation_time.is_some());
+
+            }
+
 
             #[test]
             #[serial]
@@ -635,7 +663,7 @@ macro_rules! bdk_blockchain_tests {
                 let sent = tx_map.get(&sent_txid).unwrap();
                 assert_eq!(sent.received, details.received, "incorrect received from sender");
                 assert_eq!(sent.sent, details.sent, "incorrect sent from sender");
-                assert_eq!(sent.fees, details.fees, "incorrect fees from sender");
+                assert_eq!(sent.fee.unwrap_or(0), details.fee.unwrap_or(0), "incorrect fees from sender");
             }
 
             #[test]
@@ -662,7 +690,7 @@ macro_rules! bdk_blockchain_tests {
 
                     wallet.sync(noop_progress(), None).unwrap();
 
-                    total_sent += 5_000 + details.fees;
+                    total_sent += 5_000 + details.fee.unwrap_or(0);
                 }
 
                 wallet.sync(noop_progress(), None).unwrap();
@@ -700,7 +728,7 @@ macro_rules! bdk_blockchain_tests {
                 assert!(finalized, "Cannot finalize transaction");
                 wallet.broadcast(psbt.extract_tx()).unwrap();
                 wallet.sync(noop_progress(), None).unwrap();
-                assert_eq!(wallet.get_balance().unwrap(), 50_000 - details.fees - 5_000, "incorrect balance from fees");
+                assert_eq!(wallet.get_balance().unwrap(), 50_000 - details.fee.unwrap_or(0) - 5_000, "incorrect balance from fees");
                 assert_eq!(wallet.get_balance().unwrap(), details.received, "incorrect balance from received");
 
                 let mut builder = wallet.build_fee_bump(details.txid).unwrap();
@@ -710,10 +738,10 @@ macro_rules! bdk_blockchain_tests {
                 assert!(finalized, "Cannot finalize transaction");
                 wallet.broadcast(new_psbt.extract_tx()).unwrap();
                 wallet.sync(noop_progress(), None).unwrap();
-                assert_eq!(wallet.get_balance().unwrap(), 50_000 - new_details.fees - 5_000, "incorrect balance from fees after bump");
+                assert_eq!(wallet.get_balance().unwrap(), 50_000 - new_details.fee.unwrap_or(0) - 5_000, "incorrect balance from fees after bump");
                 assert_eq!(wallet.get_balance().unwrap(), new_details.received, "incorrect balance from received after bump");
 
-                assert!(new_details.fees > details.fees, "incorrect fees");
+                assert!(new_details.fee.unwrap_or(0) > details.fee.unwrap_or(0), "incorrect fees");
             }
 
             #[test]
@@ -736,7 +764,7 @@ macro_rules! bdk_blockchain_tests {
                 assert!(finalized, "Cannot finalize transaction");
                 wallet.broadcast(psbt.extract_tx()).unwrap();
                 wallet.sync(noop_progress(), None).unwrap();
-                assert_eq!(wallet.get_balance().unwrap(), 1_000 - details.fees, "incorrect balance after send");
+                assert_eq!(wallet.get_balance().unwrap(), 1_000 - details.fee.unwrap_or(0), "incorrect balance after send");
                 assert_eq!(wallet.get_balance().unwrap(), details.received, "incorrect received after send");
 
                 let mut builder = wallet.build_fee_bump(details.txid).unwrap();
@@ -749,12 +777,12 @@ macro_rules! bdk_blockchain_tests {
                 assert_eq!(wallet.get_balance().unwrap(), 0, "incorrect balance after change removal");
                 assert_eq!(new_details.received, 0, "incorrect received after change removal");
 
-                assert!(new_details.fees > details.fees, "incorrect fees");
+                assert!(new_details.fee.unwrap_or(0) > details.fee.unwrap_or(0), "incorrect fees");
             }
 
             #[test]
             #[serial]
-            fn test_sync_bump_fee_add_input() {
+            fn test_sync_bump_fee_add_input_simple() {
                 let (wallet, descriptors, mut test_client) = init_single_sig();
                 let node_addr = test_client.get_node_address(None);
 
@@ -772,8 +800,8 @@ macro_rules! bdk_blockchain_tests {
                 assert!(finalized, "Cannot finalize transaction");
                 wallet.broadcast(psbt.extract_tx()).unwrap();
                 wallet.sync(noop_progress(), None).unwrap();
-                assert_eq!(wallet.get_balance().unwrap(), 26_000 - details.fees, "incorrect balance after send");
-                assert_eq!(details.received, 1_000 - details.fees, "incorrect received after send");
+                assert_eq!(wallet.get_balance().unwrap(), 26_000 - details.fee.unwrap_or(0), "incorrect balance after send");
+                assert_eq!(details.received, 1_000 - details.fee.unwrap_or(0), "incorrect received after send");
 
                 let mut builder = wallet.build_fee_bump(details.txid).unwrap();
                 builder.fee_rate(FeeRate::from_sat_per_vb(10.0));
@@ -806,8 +834,8 @@ macro_rules! bdk_blockchain_tests {
                 assert!(finalized, "Cannot finalize transaction");
                 wallet.broadcast(psbt.extract_tx()).unwrap();
                 wallet.sync(noop_progress(), None).unwrap();
-                assert_eq!(wallet.get_balance().unwrap(), 26_000 - details.fees, "incorrect balance after send");
-                assert_eq!(details.received, 1_000 - details.fees, "incorrect received after send");
+                assert_eq!(wallet.get_balance().unwrap(), 26_000 - details.fee.unwrap_or(0), "incorrect balance after send");
+                assert_eq!(details.received, 1_000 - details.fee.unwrap_or(0), "incorrect received after send");
 
                 let mut builder = wallet.build_fee_bump(details.txid).unwrap();
                 builder.fee_rate(FeeRate::from_sat_per_vb(123.0));

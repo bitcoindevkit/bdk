@@ -128,7 +128,7 @@ impl WalletExport {
             Ok(txs) => {
                 let mut heights = txs
                     .into_iter()
-                    .map(|tx| tx.height.unwrap_or(0))
+                    .map(|tx| tx.confirmation_time.map(|c| c.height).unwrap_or(0))
                     .collect::<Vec<_>>();
                 heights.sort_unstable();
 
@@ -212,6 +212,7 @@ mod test {
     use crate::database::{memory::MemoryDatabase, BatchOperations};
     use crate::types::TransactionDetails;
     use crate::wallet::Wallet;
+    use crate::ConfirmationTime;
 
     fn get_test_db() -> MemoryDatabase {
         let mut db = MemoryDatabase::new();
@@ -221,11 +222,14 @@ mod test {
                 "4ddff1fa33af17f377f62b72357b43107c19110a8009b36fb832af505efed98a",
             )
             .unwrap(),
-            timestamp: 12345678,
+
             received: 100_000,
             sent: 0,
-            fees: 500,
-            height: Some(5000),
+            fee: Some(500),
+            confirmation_time: Some(ConfirmationTime {
+                timestamp: 12345678,
+                height: 5000,
+            }),
         })
         .unwrap();
 

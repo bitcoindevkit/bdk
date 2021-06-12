@@ -155,16 +155,35 @@ pub struct TransactionDetails {
     pub transaction: Option<Transaction>,
     /// Transaction id
     pub txid: Txid,
-    /// Timestamp
-    pub timestamp: u64,
+
     /// Received value (sats)
     pub received: u64,
     /// Sent value (sats)
     pub sent: u64,
-    /// Fee value (sats)
-    pub fees: u64,
-    /// Confirmed in block height, `None` means unconfirmed
-    pub height: Option<u32>,
+    /// Fee value (sats) if available
+    pub fee: Option<u64>,
+    /// If the transaction is confirmed, contains height and timestamp of the block containing the
+    /// transaction, unconfirmed transaction contains `None`.
+    pub confirmation_time: Option<ConfirmationTime>,
+}
+
+/// Block height and timestamp of the block containing the confirmed transaction
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default)]
+pub struct ConfirmationTime {
+    /// confirmation block height
+    pub height: u32,
+    /// confirmation block timestamp
+    pub timestamp: u64,
+}
+
+impl ConfirmationTime {
+    /// Returns `Some` `ConfirmationTime` if both `height` and `timestamp` are `Some`
+    pub fn new(height: Option<u32>, timestamp: Option<u64>) -> Option<Self> {
+        match (height, timestamp) {
+            (Some(height), Some(timestamp)) => Some(ConfirmationTime { height, timestamp }),
+            _ => None,
+        }
+    }
 }
 
 #[cfg(test)]
