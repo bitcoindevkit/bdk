@@ -250,6 +250,11 @@ impl Peer {
         })
     }
 
+    pub fn close(&self) {
+        let mut locked_writer = self.writer.lock().unwrap();
+        (*locked_writer).shutdown(std::net::Shutdown::Both);
+    }
+
     /// Send a Bitcoin network message
     fn _send(
         writer: &mut TcpStream,

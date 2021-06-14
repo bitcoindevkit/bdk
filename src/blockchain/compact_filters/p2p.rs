@@ -153,7 +153,8 @@ impl AddressWorker {
                         peer.send(NetworkMessage::GetAddr).unwrap();
                         self.try_receive_addr(&peer);
                         self.try_receive_addr(&peer);
-                        self.sender.send(AddressMessage::NewValid(address, peer.get_version().services));    
+                        self.sender.send(AddressMessage::NewValid(address, peer.get_version().services));
+                        peer.close();
                     }
                 },
                 None => {
@@ -197,14 +198,16 @@ pub struct NodeAddress {
 
 pub struct AddressDirectory {
     cbf_enabled_nodes: VecDeque<NodeAddress>,
-    other_nodes: VecDeque<NodeAddress>
+    other_nodes: VecDeque<NodeAddress>,
+    cache_filename: String
 }
 
 impl AddressDirectory {
-    pub fn new() -> AddressDirectory {
+    pub fn new(cache_filename: String) -> AddressDirectory {
         AddressDirectory {
             cbf_enabled_nodes: VecDeque::new(),
             other_nodes: VecDeque::new(),
+            cache_filename
         }
     }
     
@@ -228,6 +231,7 @@ impl AddressDirectory {
 
         if flag.has(ServiceFlags::COMPACT_FILTERS) {
             self.cbf_enabled_nodes.push_back(node_address);
+            self.cache_to_fs();
         } else {
             self.other_nodes.push_back(node_address);
         }
@@ -240,6 +244,14 @@ impl AddressDirectory {
     pub fn get_other_node(&mut self) -> Option<NodeAddress> {
         self.other_nodes.pop_front()
     }
+
+    pub fn cache_to_fs(&self) {
+        let cache = AddressCache::from(self);
+        let serialized = serde_json::to_string(&cache).unwrap();
+        let path = Path::new(&self.cache_filename);
+        let mut file = File::create(&path).unwrap();
+        file.write_all(serialized.as_bytes()).unwrap();
+    }
 }
 
 
@@ -248,11 +260,12 @@ pub enum AddressMessage {
     NewValid(SocketAddr, ServiceFlags)
 }
 
+#[derive(Clone, Copy)]
 pub struct DiscoveryData {
-    queued: usize,
-    visited: usize,
-    connected: usize,
-    cbf_enabled: usize
+    pub queued: usize,
+    pub visited: usize,
+    pub connected: usize,
+    pub cbf_enabled: usize
 }
 
 pub trait DiscoveryProgress {
@@ -314,6 +327,7 @@ impl AddressManager {
     pub fn new(network: Network, cache_filename: String, threads: usize) -> AddressManager {
         let (sender, receiver) = channel();
 
+        let filename = cache_filename.clone();
         let seeds = match AddressCache::from_file(&cache_filename) {
             Some(cache) => { cache.addresses },
             None => { VecDeque::new() }
@@ -321,7 +335,7 @@ impl AddressManager {
 
         AddressManager {
             cache_filename,
-            directory: AddressDirectory::new(),
+            directory: AddressDirectory::new(filename),
             discovery: Arc::new(Mutex::new(AddressDiscovery::new(network, seeds))),
             sender,
             receiver,
@@ -363,7 +377,7 @@ impl AddressManager {
             let network = self.network.clone();
             let worker_handle = thread::spawn(move || {
                 let mut worker = AddressWorker::new(discovery, sender, network);
-                 worker.work()
+                 worker.work();
             });
             worker_handles.push(worker_handle);
         }
@@ -384,12 +398,6 @@ impl AddressManager {
                     },
                     AddressMessage::NewValid(addr,flag) => {
                         self.directory.add_node(addr, flag);
-
-                        let cache = AddressCache::from(&self.directory);
-                        let serialized = serde_json::to_string(&cache).unwrap();
-                        let path = Path::new(&self.cache_filename);
-                        let mut file = File::create(&path).unwrap();
-                        file.write_all(serialized.as_bytes()).unwrap();
                     }
                 }
 
