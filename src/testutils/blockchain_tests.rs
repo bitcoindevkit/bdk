@@ -337,7 +337,7 @@ fn get_auth() -> Auth {
 #[macro_export]
 macro_rules! bdk_blockchain_tests {
     (
-     fn test_instance() -> $blockchain:ty $block:block) => {
+     fn $_fn_name:ident ( $( $test_client:ident : &TestClient )? $(,)? ) -> $blockchain:ty $block:block) => {
         #[cfg(test)]
         mod bdk_blockchain_tests {
             use $crate::bitcoin::Network;
@@ -351,12 +351,14 @@ macro_rules! bdk_blockchain_tests {
 
             use super::*;
 
-            fn get_blockchain() -> $blockchain {
+            #[allow(unused_variables)]
+            fn get_blockchain(test_client: &TestClient) -> $blockchain {
+                $( let $test_client = test_client; )?
                 $block
             }
 
-            fn get_wallet_from_descriptors(descriptors: &(String, Option<String>)) -> Wallet<$blockchain, MemoryDatabase> {
-                Wallet::new(&descriptors.0.to_string(), descriptors.1.as_ref(), Network::Regtest, MemoryDatabase::new(), get_blockchain()).unwrap()
+            fn get_wallet_from_descriptors(descriptors: &(String, Option<String>), test_client: &TestClient) -> Wallet<$blockchain, MemoryDatabase> {
+                Wallet::new(&descriptors.0.to_string(), descriptors.1.as_ref(), Network::Regtest, MemoryDatabase::new(), get_blockchain(test_client)).unwrap()
             }
 
             fn init_single_sig() -> (Wallet<$blockchain, MemoryDatabase>, (String, Option<String>), TestClient) {
@@ -367,7 +369,7 @@ macro_rules! bdk_blockchain_tests {
                 };
 
                 let test_client = TestClient::default();
-                let wallet = get_wallet_from_descriptors(&descriptors);
+                let wallet = get_wallet_from_descriptors(&descriptors, &test_client);
 
                 // rpc need to call import_multi before receiving any tx, otherwise will not see tx in the mempool
                 #[cfg(feature = "test-rpc")]
@@ -648,7 +650,7 @@ macro_rules! bdk_blockchain_tests {
                 assert_eq!(wallet.get_balance().unwrap(), details.received, "incorrect balance after receive");
 
                 // empty wallet
-                let wallet = get_wallet_from_descriptors(&descriptors);
+                let wallet = get_wallet_from_descriptors(&descriptors, &test_client);
 
                 #[cfg(feature = "rpc")]  // rpc cannot see mempool tx before importmulti
                 test_client.generate(1, Some(node_addr));
@@ -698,7 +700,7 @@ macro_rules! bdk_blockchain_tests {
 
                 // empty wallet
 
-                let wallet = get_wallet_from_descriptors(&descriptors);
+                let wallet = get_wallet_from_descriptors(&descriptors, &test_client);
 
                 #[cfg(feature = "rpc")]  // rpc cannot see mempool tx before importmulti
                 test_client.generate(1, Some(node_addr));
@@ -875,5 +877,10 @@ macro_rules! bdk_blockchain_tests {
                 assert!(wallet.get_balance().unwrap() > 0, "incorrect balance after receiving coinbase");
             }
         }
-    }
+    };
+
+    ( fn $fn_name:ident ($( $tt:tt )+) -> $blockchain:ty $block:block) => {
+        compile_error!(concat!("Invalid arguments `", stringify!($($tt)*), "` in the blockchain tests fn."));
+        compile_error!("Only the exact `&TestClient` type is supported, **without** any leading path items.");
+    };
 }
