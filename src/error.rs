@@ -24,10 +24,6 @@ pub enum Error {
     Generic(String),
     /// This error is thrown when trying to convert Bare and Public key script to address
     ScriptDoesntHaveAddressForm,
-    /// Found multiple outputs when `single_recipient` option has been specified
-    SingleRecipientMultipleOutputs,
-    /// `single_recipient` option is selected but neither `drain_wallet` nor `manually_selected_only` are
-    SingleRecipientNoInputs,
     /// Cannot build a tx without recipients
     NoRecipients,
     /// `manually_selected_only` option is selected but no utxo has been passed
