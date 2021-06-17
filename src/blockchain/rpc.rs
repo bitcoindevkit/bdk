@@ -464,7 +464,7 @@ mod test {
     use bitcoincore_rpc::json::CreateRawTransactionInput;
     use bitcoincore_rpc::RawTx;
     use bitcoincore_rpc::{Auth, RpcApi};
-    use bitcoind::BitcoinD;
+    use bitcoind::{BitcoinD, Conf};
     use std::collections::HashMap;
 
     fn create_rpc(
@@ -477,16 +477,20 @@ mod test {
 
         let config = RpcConfig {
             url: bitcoind.rpc_url(),
-            auth: Auth::CookieFile(bitcoind.config.cookie_file.clone()),
+            auth: Auth::CookieFile(bitcoind.params.cookie_file.clone()),
             network,
             wallet_name,
             skip_blocks: None,
         };
         RpcBlockchain::from_config(&config)
     }
-    fn create_bitcoind(args: Vec<String>) -> BitcoinD {
+    fn create_bitcoind(args: Vec<&str>) -> BitcoinD {
         let exe = std::env::var("BITCOIND_EXE").unwrap();
-        bitcoind::BitcoinD::with_args(exe, args, false, bitcoind::P2P::No).unwrap()
+        let conf = Conf {
+            args,
+            ..Default::default()
+        };
+        bitcoind::BitcoinD::with_conf(exe, &conf).unwrap()
     }
 
     const DESCRIPTOR_PUB: &'static str = "wpkh(tpubD6NzVbkrYhZ4X2yy78HWrr1M9NT8dKeWfzNiQqDdMqqa9UmmGztGGz6TaLFGsLfdft5iu32gxq1T4eMNxExNNWzVCpf9Y6JZi5TnqoC9wJq/*)";
@@ -529,7 +533,7 @@ mod test {
         generate(&bitcoind, 5);
         let config = RpcConfig {
             url: bitcoind.rpc_url(),
-            auth: Auth::CookieFile(bitcoind.config.cookie_file.clone()),
+            auth: Auth::CookieFile(bitcoind.params.cookie_file.clone()),
             network: Network::Regtest,
             wallet_name: "another-name".to_string(),
             skip_blocks: Some(103),
@@ -559,7 +563,7 @@ mod test {
         let rpc = create_rpc(&bitcoind, DESCRIPTOR_PUB, Network::Regtest).unwrap();
         let capabilities = rpc.get_capabilities();
         assert!(capabilities.contains(&Capability::FullHistory) && capabilities.len() == 1);
-        let bitcoind_indexed = create_bitcoind(vec!["-txindex".to_string()]);
+        let bitcoind_indexed = create_bitcoind(vec!["-txindex"]);
         let rpc_indexed = create_rpc(&bitcoind_indexed, DESCRIPTOR_PUB, Network::Regtest).unwrap();
         assert_eq!(rpc_indexed.get_capabilities().len(), 3);
         let address = generate(&bitcoind_indexed, 101);
