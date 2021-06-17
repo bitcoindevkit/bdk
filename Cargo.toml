@@ -70,7 +70,7 @@ lazy_static = "1.4"
 env_logger = "0.7"
 clap = "2.33"
 bitcoind = "0.11.0"
-electrsd = "0.3.0"
+electrsd = { version="0.3.0", features = ["trigger"] }
 
 [[example]]
 name = "address_validator"

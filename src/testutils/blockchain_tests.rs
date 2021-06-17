@@ -41,6 +41,7 @@ impl TestClient {
     fn wait_for_tx(&mut self, txid: Txid, monitor_script: &Script) {
         // wait for electrs to index the tx
         exponential_backoff_poll(|| {
+            self.electrsd.trigger().unwrap();
             trace!("wait_for_tx {}", txid);
 
             self.electrsd
@@ -57,6 +58,7 @@ impl TestClient {
 
         loop {
             let header = exponential_backoff_poll(|| {
+                self.electrsd.trigger().unwrap();
                 self.electrsd.client.ping().unwrap();
                 self.electrsd.client.block_headers_pop().unwrap()
             });

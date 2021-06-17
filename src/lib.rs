@@ -234,6 +234,7 @@ pub extern crate reqwest;
 #[cfg(feature = "key-value-db")]
 pub extern crate sled;
 
+#[allow(unused_imports)]
 #[macro_use]
 pub(crate) mod error;
 pub mod blockchain;
