@@ -385,6 +385,7 @@ impl BatchDatabase for Tree {
 mod test {
     use std::sync::{Arc, Condvar, Mutex, Once};
     use std::time::{SystemTime, UNIX_EPOCH};
+    use lazy_static::lazy_static;
 
     use sled::{Db, Tree};
 
