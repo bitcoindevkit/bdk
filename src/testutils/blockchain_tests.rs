@@ -5,31 +5,37 @@ use bitcoin::hashes::sha256d;
 use bitcoin::{Address, Amount, Script, Transaction, Txid};
 pub use bitcoincore_rpc::bitcoincore_rpc_json::AddressType;
 pub use bitcoincore_rpc::{Auth, Client as RpcClient, RpcApi};
+use bitcoind::BitcoinD;
 use core::str::FromStr;
+use electrsd::ElectrsD;
 pub use electrum_client::{Client as ElectrumClient, ElectrumApi};
 #[allow(unused_imports)]
 use log::{debug, error, info, trace};
 use std::collections::HashMap;
 use std::env;
 use std::ops::Deref;
-use std::path::PathBuf;
 use std::time::Duration;
 
 pub struct TestClient {
-    client: RpcClient,
-    electrum: ElectrumClient,
+    pub bitcoind: BitcoinD,
+    pub electrsd: ElectrsD,
 }
 
 impl TestClient {
-    pub fn new(rpc_host_and_wallet: String, rpc_wallet_name: String) -> Self {
-        let client = RpcClient::new(
-            format!("http://{}/wallet/{}", rpc_host_and_wallet, rpc_wallet_name),
-            get_auth(),
-        )
-        .unwrap();
-        let electrum = ElectrumClient::new(&get_electrum_url()).unwrap();
+    pub fn new(bitcoind_exe: String, electrs_exe: String) -> Self {
+        debug!("launching {} and {}", &bitcoind_exe, &electrs_exe);
+        let bitcoind = BitcoinD::new(bitcoind_exe).unwrap();
+        let electrsd = ElectrsD::new(electrs_exe, &bitcoind, false, false).unwrap(); // TODO http_enabled should be true only for esplora
 
-        TestClient { client, electrum }
+        let node_address = bitcoind.client.get_new_address(None, None).unwrap();
+        bitcoind
+            .client
+            .generate_to_address(101, &node_address)
+            .unwrap();
+
+        let mut test_client = TestClient { bitcoind, electrsd };
+        TestClient::wait_for_block(&mut test_client, 101);
+        test_client
     }
 
     fn wait_for_tx(&mut self, txid: Txid, monitor_script: &Script) {
@@ -37,7 +43,8 @@ impl TestClient {
         exponential_backoff_poll(|| {
             trace!("wait_for_tx {}", txid);
 
-            self.electrum
+            self.electrsd
+                .client
                 .script_get_history(monitor_script)
                 .unwrap()
                 .iter()
@@ -46,12 +53,12 @@ impl TestClient {
     }
 
     fn wait_for_block(&mut self, min_height: usize) {
-        self.electrum.block_headers_subscribe().unwrap();
+        self.electrsd.client.block_headers_subscribe().unwrap();
 
         loop {
             let header = exponential_backoff_poll(|| {
-                self.electrum.ping().unwrap();
-                self.electrum.block_headers_pop().unwrap()
+                self.electrsd.client.ping().unwrap();
+                self.electrsd.client.block_headers_pop().unwrap()
             });
             if header.height >= min_height {
                 break;
@@ -96,10 +103,13 @@ impl TestClient {
             .unwrap();
 
         // broadcast through electrum so that it caches the tx immediately
+
         let txid = self
-            .electrum
+            .electrsd
+            .client
             .transaction_broadcast(&deserialize(&tx.hex).unwrap())
             .unwrap();
+        debug!("broadcasted to electrum {}", txid);
 
         if let Some(num) = meta_tx.min_confirmations {
             self.generate(num, None);
@@ -209,7 +219,7 @@ impl TestClient {
         let block_hex: String = serialize(&block).to_hex();
         debug!("generated block hex: {}", block_hex);
 
-        self.electrum.block_headers_subscribe().unwrap();
+        self.electrsd.client.block_headers_subscribe().unwrap();
 
         let submit_result: serde_json::Value =
             self.call("submitblock", &[block_hex.into()]).unwrap();
@@ -237,7 +247,7 @@ impl TestClient {
     }
 
     pub fn invalidate(&mut self, num_blocks: u64) {
-        self.electrum.block_headers_subscribe().unwrap();
+        self.electrsd.client.block_headers_subscribe().unwrap();
 
         let best_hash = self.get_best_block_hash().unwrap();
         let initial_height = self.get_block_info(&best_hash).unwrap().height;
@@ -288,16 +298,16 @@ impl Deref for TestClient {
     type Target = RpcClient;
 
     fn deref(&self) -> &Self::Target {
-        &self.client
+        &self.bitcoind.client
     }
 }
 
 impl Default for TestClient {
     fn default() -> Self {
-        let rpc_host_and_port =
-            env::var("BDK_RPC_URL").unwrap_or_else(|_| "127.0.0.1:18443".to_string());
-        let wallet = env::var("BDK_RPC_WALLET").unwrap_or_else(|_| "bdk-test".to_string());
-        Self::new(rpc_host_and_port, wallet)
+        let bitcoind_exe =
+            env::var("BITCOIND_EXE").unwrap_or_else(|_| "/root/bitcoind".to_string());
+        let electrs_exe = env::var("ELECTRS_EXE").unwrap_or_else(|_| "/root/electrs".to_string());
+        Self::new(bitcoind_exe, electrs_exe)
     }
 }
 
@@ -314,20 +324,6 @@ where
         }
 
         std::thread::sleep(delay);
-    }
-}
-
-// TODO: we currently only support env vars, we could also parse a toml file
-fn get_auth() -> Auth {
-    match env::var("BDK_RPC_AUTH").as_ref().map(String::as_ref) {
-        Ok("USER_PASS") => Auth::UserPass(
-            env::var("BDK_RPC_USER").unwrap(),
-            env::var("BDK_RPC_PASS").unwrap(),
-        ),
-        _ => Auth::CookieFile(PathBuf::from(
-            env::var("BDK_RPC_COOKIEFILE")
-                .unwrap_or_else(|_| "/home/user/.bitcoin/regtest/.cookie".to_string()),
-        )),
     }
 }
 
@@ -590,7 +586,6 @@ macro_rules! bdk_blockchain_tests {
                 let tx = psbt.extract_tx();
                 println!("{}", bitcoin::consensus::encode::serialize_hex(&tx));
                 wallet.broadcast(tx).unwrap();
-
                 wallet.sync(noop_progress(), None).unwrap();
                 assert_eq!(wallet.get_balance().unwrap(), details.received, "incorrect balance after send");
 

@@ -419,27 +419,14 @@ fn list_wallet_dir(client: &Client) -> Result<Vec<String>, Error> {
     Ok(result.wallets.into_iter().map(|n| n.name).collect())
 }
 
+#[cfg(test)]
 #[cfg(feature = "test-blockchains")]
 crate::bdk_blockchain_tests! {
 
-    fn test_instance() -> RpcBlockchain {
-        let url = std::env::var("BDK_RPC_URL").unwrap_or_else(|_| "127.0.0.1:18443".to_string());
-        let url = format!("http://{}", url);
-
-        // TODO same code in `fn get_auth` in testutils, make it public there
-        let auth = match std::env::var("BDK_RPC_AUTH").as_ref().map(String::as_ref) {
-            Ok("USER_PASS") => Auth::UserPass(
-                std::env::var("BDK_RPC_USER").unwrap(),
-                std::env::var("BDK_RPC_PASS").unwrap(),
-            ),
-            _ => Auth::CookieFile(std::path::PathBuf::from(
-                std::env::var("BDK_RPC_COOKIEFILE")
-                    .unwrap_or_else(|_| "/home/user/.bitcoin/regtest/.cookie".to_string()),
-            )),
-        };
+    fn test_instance(test_client: &TestClient) -> RpcBlockchain {
         let config = RpcConfig {
-            url,
-            auth,
+            url: test_client.bitcoind.rpc_url(),
+            auth: Auth::CookieFile(test_client.bitcoind.params.cookie_file.clone()),
             network: Network::Regtest,
             wallet_name: format!("client-wallet-test-{:?}", std::time::SystemTime::now() ),
             skip_blocks: None,
@@ -486,10 +473,8 @@ mod test {
     }
     fn create_bitcoind(args: Vec<&str>) -> BitcoinD {
         let exe = std::env::var("BITCOIND_EXE").unwrap();
-        let conf = Conf {
-            args,
-            ..Default::default()
-        };
+        let mut conf = Conf::default();
+        conf.args.extend(args);
         bitcoind::BitcoinD::with_conf(exe, &conf).unwrap()
     }
 
@@ -498,7 +483,7 @@ mod test {
 
     #[test]
     fn test_rpc_wallet_setup() {
-        env_logger::try_init().unwrap();
+        let _ = env_logger::try_init();
         let bitcoind = create_bitcoind(vec![]);
         let node_address = bitcoind.client.get_new_address(None, None).unwrap();
         let blockchain = create_rpc(&bitcoind, DESCRIPTOR_PUB, Network::Regtest).unwrap();
