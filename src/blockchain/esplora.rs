@@ -419,6 +419,6 @@ impl_error!(bitcoin::hashes::hex::Error, Hex, EsploraError);
 #[cfg(feature = "test-blockchains")]
 crate::bdk_blockchain_tests! {
     fn test_instance(test_client: &TestClient) -> EsploraBlockchain {
-        EsploraBlockchain::new(test_client.electrsd.esplora_url.as_ref().unwrap(), None)
+        EsploraBlockchain::new(&format!("http://{}",test_client.electrsd.esplora_url.as_ref().unwrap()), None)
     }
 }

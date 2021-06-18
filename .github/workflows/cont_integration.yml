@@ -76,19 +76,19 @@ jobs:
 
   test-blockchains:
     name: Test ${{ matrix.blockchain.name }}
-    runs-on: ubuntu-16.04
+    runs-on: ubuntu-20.04
     strategy:
       fail-fast: false
       matrix:
         blockchain:
           - name: electrum
-            container: bitcoindevkit/electrs
           - name: rpc
-            container: bitcoindevkit/electrs
-    container: ${{ matrix.blockchain.container }}
+          - name: esplora
     env:
-      ELECTRS_EXE: /root/electrs
-      BITCOIND_EXE: /root/bitcoind
+      BITCOIN_VER: 0.21.0
+      ELECTRS_RELEASE_URL: https://github.com/RCasatta/electrsd/releases/download/release_0.3.0
+      ELECTRS_VER: electrs_ubuntu-20.04_v0.8.10.zip
+      ELECTRS_ESPLORA_VER: electrs_esplora_ubuntu-20.04_a33e97e1a1fc63fa9c20a116bb92579bbf43b254.zip
     steps:
       - name: Checkout
         uses: actions/checkout@v2
@@ -100,16 +100,25 @@ jobs:
             ~/.cargo/git
             target
           key: ${{ runner.os }}-cargo-${{ github.job }}-${{ hashFiles('**/Cargo.toml','**/Cargo.lock') }}
-      - name: get pkg-config # running esplora tests seems to need this
-        run: apt update && apt install -y --fix-missing pkg-config libssl-dev
-      - name: Install rustup
-        run: curl https://sh.rustup.rs -sSf | sh -s -- -y
-      - name: Set default toolchain
-        run: $HOME/.cargo/bin/rustup default 1.53.0 # STABLE
-      - name: Set profile
-        run: $HOME/.cargo/bin/rustup set profile minimal
-      - name: Update toolchain
-        run: $HOME/.cargo/bin/rustup update
+      - name: Setup rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+      - name: Download electrs
+        run: wget ${{ env.ELECTRS_RELEASE_URL }}/${{ env.ELECTRS_VER }} && unzip ${{ env.ELECTRS_VER }} && chmod +x ./electrs
+        if: ${{ matrix.blockchain.name != 'esplora' }}
+      - name: Download electrs esplora
+        run: wget ${{ env.ELECTRS_RELEASE_URL }}/${{ env.ELECTRS_ESPLORA_VER }} && unzip ${{ env.ELECTRS_ESPLORA_VER }} && chmod +x ./electrs
+        if: ${{ matrix.blockchain.name == 'esplora' }}
+      - name: Set ELECTRS_EXE env
+        run: echo "ELECTRS_EXE=${{ github.workspace }}/electrs" >> $GITHUB_ENV
+      - name: Show electrs options
+        run: ${{ env.ELECTRS_EXE }} --help
+      - name: Set BITCOIND_EXE env
+        run: echo "BITCOIND_EXE=${{ github.workspace }}/bitcoin-${{ env.BITCOIN_VER }}/bin/bitcoind" >> $GITHUB_ENV
+      - name: Install bitcoind
+        run: curl https://bitcoincore.org/bin/bitcoin-core-$BITCOIN_VER/bitcoin-$BITCOIN_VER-x86_64-linux-gnu.tar.gz | tar -xvz bitcoin-$BITCOIN_VER/bin/bitcoind
       - name: Test
         run: $HOME/.cargo/bin/cargo test --features test-${{ matrix.blockchain.name }},test-blockchains --no-default-features ${{ matrix.blockchain.name }}::bdk_blockchain_tests
 

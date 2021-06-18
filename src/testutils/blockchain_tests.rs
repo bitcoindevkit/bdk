@@ -5,8 +5,8 @@ use bitcoin::hashes::sha256d;
 use bitcoin::{Address, Amount, Script, Transaction, Txid};
 pub use bitcoincore_rpc::bitcoincore_rpc_json::AddressType;
 pub use bitcoincore_rpc::{Auth, Client as RpcClient, RpcApi};
-use bitcoind::BitcoinD;
 use core::str::FromStr;
+use electrsd::bitcoind::BitcoinD;
 use electrsd::ElectrsD;
 pub use electrum_client::{Client as ElectrumClient, ElectrumApi};
 #[allow(unused_imports)]
@@ -25,7 +25,13 @@ impl TestClient {
     pub fn new(bitcoind_exe: String, electrs_exe: String) -> Self {
         debug!("launching {} and {}", &bitcoind_exe, &electrs_exe);
         let bitcoind = BitcoinD::new(bitcoind_exe).unwrap();
-        let electrsd = ElectrsD::new(electrs_exe, &bitcoind, false, false).unwrap(); // TODO http_enabled should be true only for esplora
+
+        #[cfg(feature = "test-esplora")]
+        let http_enabled = true;
+        #[cfg(not(feature = "test-esplora"))]
+        let http_enabled = false;
+
+        let electrsd = ElectrsD::new(electrs_exe, &bitcoind, false, http_enabled).unwrap();
 
         let node_address = bitcoind.client.get_new_address(None, None).unwrap();
         bitcoind
