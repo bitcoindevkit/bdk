@@ -100,11 +100,7 @@ impl From<Error> for VerifyError {
         VerifyError::Global(Box::new(other))
     }
 }
-impl From<bitcoinconsensus::Error> for VerifyError {
-    fn from(other: bitcoinconsensus::Error) -> Self {
-        VerifyError::Consensus(other)
-    }
-}
+impl_error!(bitcoinconsensus::Error, Consensus, VerifyError);
 
 #[cfg(test)]
 mod test {
