@@ -9,6 +9,8 @@
 // You may not use this file except in accordance with one or both of these
 // licenses.
 
+//! Verify transactions against the consensus rules
+
 use std::collections::HashMap;
 use std::fmt;
 
@@ -68,13 +70,20 @@ pub fn verify_tx<D: Database, B: Blockchain>(
     Ok(())
 }
 
+/// Error during validation of a tx agains the consensus rules
 #[derive(Debug)]
 pub enum VerifyError {
+    /// The transaction being spent is not available in the database or the blockchain client
     MissingInputTx(Txid),
+    /// The transaction being spent doesn't have the requested output
     InvalidInput(OutPoint),
 
+    /// Consensus error
     Consensus(bitcoinconsensus::Error),
 
+    /// Generic error
+    ///
+    /// It has to be wrapped in a `Box` since `Error` has a variant that contains this enum
     Global(Box<Error>),
 }
 
