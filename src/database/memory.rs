@@ -473,18 +473,18 @@ macro_rules! populate_test_db {
         };
 
         let txid = tx.txid();
-        let height = tx_meta
-            .min_confirmations
-            .map(|conf| current_height.unwrap().checked_sub(conf as u32).unwrap());
+        let confirmation_time = tx_meta.min_confirmations.map(|conf| ConfirmationTime {
+            height: current_height.unwrap().checked_sub(conf as u32).unwrap(),
+            timestamp: 0,
+        });
 
         let tx_details = TransactionDetails {
             transaction: Some(tx.clone()),
             txid,
-            timestamp: 0,
-            height,
+            fee: Some(0),
             received: 0,
             sent: 0,
-            fees: 0,
+            confirmation_time,
         };
 
         db.set_tx(&tx_details).unwrap();

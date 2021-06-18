@@ -71,7 +71,7 @@ use super::{Blockchain, Capability, ConfigurableBlockchain, Progress};
 use crate::database::{BatchDatabase, BatchOperations, DatabaseUtils};
 use crate::error::Error;
 use crate::types::{KeychainKind, LocalUtxo, TransactionDetails};
-use crate::FeeRate;
+use crate::{ConfirmationTime, FeeRate};
 
 use peer::*;
 use store::*;
@@ -146,7 +146,7 @@ impl CompactFiltersBlockchain {
         database: &mut D,
         tx: &Transaction,
         height: Option<u32>,
-        timestamp: u64,
+        timestamp: Option<u64>,
         internal_max_deriv: &mut Option<u32>,
         external_max_deriv: &mut Option<u32>,
     ) -> Result<(), Error> {
@@ -206,9 +206,8 @@ impl CompactFiltersBlockchain {
                 transaction: Some(tx.clone()),
                 received: incoming,
                 sent: outgoing,
-                height,
-                timestamp,
-                fees: inputs_sum.saturating_sub(outputs_sum),
+                confirmation_time: ConfirmationTime::new(height, timestamp),
+                fee: Some(inputs_sum.saturating_sub(outputs_sum)),
             };
 
             info!("Saving tx {}", tx.txid);
@@ -364,8 +363,8 @@ impl Blockchain for CompactFiltersBlockchain {
         );
         let mut updates = database.begin_batch();
         for details in database.iter_txs(false)? {
-            match details.height {
-                Some(height) if (height as usize) < last_synced_block => continue,
+            match details.confirmation_time {
+                Some(c) if (c.height as usize) < last_synced_block => continue,
                 _ => updates.del_tx(&details.txid, false)?,
             };
         }
@@ -387,7 +386,7 @@ impl Blockchain for CompactFiltersBlockchain {
                     database,
                     tx,
                     Some(height as u32),
-                    0,
+                    None,
                     &mut internal_max_deriv,
                     &mut external_max_deriv,
                 )?;
@@ -398,7 +397,7 @@ impl Blockchain for CompactFiltersBlockchain {
                 database,
                 tx,
                 None,
-                0,
+                None,
                 &mut internal_max_deriv,
                 &mut external_max_deriv,
             )?;

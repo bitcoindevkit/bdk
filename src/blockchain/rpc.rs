@@ -33,7 +33,7 @@ use crate::blockchain::{Blockchain, Capability, ConfigurableBlockchain, Progress
 use crate::database::{BatchDatabase, DatabaseUtils};
 use crate::descriptor::{get_checksum, IntoWalletDescriptor};
 use crate::wallet::utils::SecpCtx;
-use crate::{Error, FeeRate, KeychainKind, LocalUtxo, TransactionDetails};
+use crate::{ConfirmationTime, Error, FeeRate, KeychainKind, LocalUtxo, TransactionDetails};
 use bitcoincore_rpc::json::{
     GetAddressInfoResultLabel, ImportMultiOptions, ImportMultiRequest,
     ImportMultiRequestScriptPubkey, ImportMultiRescanSince,
@@ -189,13 +189,15 @@ impl Blockchain for RpcBlockchain {
             let txid = tx_result.info.txid;
             list_txs_ids.insert(txid);
             if let Some(mut known_tx) = known_txs.get_mut(&txid) {
-                if tx_result.info.blockheight != known_tx.height {
+                let confirmation_time =
+                    ConfirmationTime::new(tx_result.info.blockheight, tx_result.info.blocktime);
+                if confirmation_time != known_tx.confirmation_time {
                     // reorg may change tx height
                     debug!(
-                        "updating tx({}) height to: {:?}",
-                        txid, tx_result.info.blockheight
+                        "updating tx({}) confirmation time to: {:?}",
+                        txid, confirmation_time
                     );
-                    known_tx.height = tx_result.info.blockheight;
+                    known_tx.confirmation_time = confirmation_time;
                     db.set_tx(&known_tx)?;
                 }
             } else {
@@ -224,17 +226,17 @@ impl Blockchain for RpcBlockchain {
                 let td = TransactionDetails {
                     transaction: Some(tx),
                     txid: tx_result.info.txid,
-                    timestamp: tx_result.info.time,
+                    confirmation_time: ConfirmationTime::new(
+                        tx_result.info.blockheight,
+                        tx_result.info.blocktime,
+                    ),
                     received,
                     sent,
-                    //TODO it could happen according to the node situation/configuration that the
-                    // fee is not known [TransactionDetails:fee] should be made [Option]
-                    fees: tx_result.fee.map(|f| f.as_sat().abs() as u64).unwrap_or(0),
-                    height: tx_result.info.blockheight,
+                    fee: tx_result.fee.map(|f| f.as_sat().abs() as u64),
                 };
                 debug!(
                     "saving tx: {} tx_result.fee:{:?} td.fees:{:?}",
-                    td.txid, tx_result.fee, td.fees
+                    td.txid, tx_result.fee, td.fee
                 );
                 db.set_tx(&td)?;
             }
@@ -519,7 +521,7 @@ mod test {
         wallet.sync(noop_progress(), None).unwrap();
         assert_eq!(
             wallet.get_balance().unwrap(),
-            100_000 - 50_000 - details.fees
+            100_000 - 50_000 - details.fee.unwrap_or(0)
         );
         drop(wallet);
 

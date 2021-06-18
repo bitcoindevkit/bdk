@@ -21,7 +21,7 @@ use bitcoin::{BlockHeader, OutPoint, Script, Transaction, Txid};
 use super::*;
 use crate::database::{BatchDatabase, BatchOperations, DatabaseUtils};
 use crate::error::Error;
-use crate::types::{KeychainKind, LocalUtxo, TransactionDetails};
+use crate::types::{ConfirmationTime, KeychainKind, LocalUtxo, TransactionDetails};
 use crate::wallet::time::Instant;
 use crate::wallet::utils::ChunksIterator;
 
@@ -147,13 +147,14 @@ pub trait ElectrumLikeSync {
         // save any tx details not in db but in history_txs_id or with different height/timestamp
         for txid in history_txs_id.iter() {
             let height = txid_height.get(txid).cloned().flatten();
-            let timestamp = *new_timestamps.get(txid).unwrap_or(&0u64);
+            let timestamp = new_timestamps.get(txid).cloned();
             if let Some(tx_details) = txs_details_in_db.get(txid) {
-                // check if height matches, otherwise updates it
-                if tx_details.height != height {
+                // check if tx height matches, otherwise updates it. timestamp is not in the if clause
+                // because we are not asking headers for confirmed tx we know about
+                if tx_details.confirmation_time.as_ref().map(|c| c.height) != height {
+                    let confirmation_time = ConfirmationTime::new(height, timestamp);
                     let mut new_tx_details = tx_details.clone();
-                    new_tx_details.height = height;
-                    new_tx_details.timestamp = timestamp;
+                    new_tx_details.confirmation_time = confirmation_time;
                     batch.set_tx(&new_tx_details)?;
                 }
             } else {
@@ -238,9 +239,13 @@ pub trait ElectrumLikeSync {
         chunk_size: usize,
     ) -> Result<HashMap<Txid, u64>, Error> {
         let mut txid_timestamp = HashMap::new();
+        let txid_in_db_with_conf: HashSet<_> = txs_details_in_db
+            .values()
+            .filter_map(|details| details.confirmation_time.as_ref().map(|_| details.txid))
+            .collect();
         let needed_txid_height: HashMap<&Txid, u32> = txid_height
             .iter()
-            .filter(|(t, _)| txs_details_in_db.get(*t).is_none())
+            .filter(|(t, _)| !txid_in_db_with_conf.contains(*t))
             .filter_map(|(t, o)| o.map(|h| (t, h)))
             .collect();
         let needed_heights: HashSet<u32> = needed_txid_height.values().cloned().collect();
@@ -292,7 +297,7 @@ pub trait ElectrumLikeSync {
 fn save_transaction_details_and_utxos<D: BatchDatabase>(
     txid: &Txid,
     db: &mut D,
-    timestamp: u64,
+    timestamp: Option<u64>,
     height: Option<u32>,
     updates: &mut dyn BatchOperations,
     utxo_deps: &HashMap<OutPoint, OutPoint>,
@@ -355,9 +360,8 @@ fn save_transaction_details_and_utxos<D: BatchDatabase>(
         transaction: Some(tx),
         received: incoming,
         sent: outgoing,
-        height,
-        timestamp,
-        fees: inputs_sum.saturating_sub(outputs_sum), /* if the tx is a coinbase, fees would be negative */
+        confirmation_time: ConfirmationTime::new(height, timestamp),
+        fee: Some(inputs_sum.saturating_sub(outputs_sum)), /* if the tx is a coinbase, fees would be negative */
     };
     updates.set_tx(&tx_details)?;
 
