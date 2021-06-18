@@ -9,6 +9,7 @@
 // You may not use this file except in accordance with one or both of these
 // licenses.
 
+use std::collections::HashMap;
 use std::fmt;
 
 use bitcoin::consensus::serialize;
@@ -34,9 +35,12 @@ pub fn verify_tx<D: Database, B: Blockchain>(
     log::debug!("Verifying {}", tx.txid());
 
     let serialized_tx = serialize(tx);
+    let mut tx_cache = HashMap::<_, Transaction>::new();
 
     for (index, input) in tx.input.iter().enumerate() {
-        let prev_tx = if let Some(prev_tx) = database.get_raw_tx(&input.previous_output.txid)? {
+        let prev_tx = if let Some(prev_tx) = tx_cache.get(&input.previous_output.txid) {
+            prev_tx.clone()
+        } else if let Some(prev_tx) = database.get_raw_tx(&input.previous_output.txid)? {
             prev_tx
         } else if let Some(prev_tx) = blockchain.get_tx(&input.previous_output.txid)? {
             prev_tx
@@ -55,6 +59,10 @@ pub fn verify_tx<D: Database, B: Blockchain>(
             &serialized_tx,
             index,
         )?;
+
+        // Since we have a local cache we might as well cache stuff from the db, as it will very
+        // likely decrease latency compared to reading from disk or performing an SQL query.
+        tx_cache.insert(prev_tx.txid(), prev_tx);
     }
 
     Ok(())
