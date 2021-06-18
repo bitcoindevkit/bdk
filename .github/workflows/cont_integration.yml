@@ -26,6 +26,7 @@ jobs:
           - verify
           - async-interface
           - use-esplora-reqwest
+          - sqlite
     steps:
       - name: checkout
         uses: actions/checkout@v2

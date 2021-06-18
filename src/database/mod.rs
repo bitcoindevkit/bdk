@@ -36,6 +36,11 @@ pub use any::{AnyDatabase, AnyDatabaseConfig};
 #[cfg(feature = "key-value-db")]
 pub(crate) mod keyvalue;
 
+#[cfg(feature = "sqlite")]
+pub(crate) mod sqlite;
+#[cfg(feature = "sqlite")]
+pub use sqlite::SqliteDatabase;
+
 pub mod memory;
 pub use memory::MemoryDatabase;
 

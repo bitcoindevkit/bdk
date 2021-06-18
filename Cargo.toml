@@ -23,6 +23,7 @@ rand = "^0.7"
 # Optional dependencies
 sled = { version = "0.34", optional = true }
 electrum-client = { version = "0.8", optional = true }
+rusqlite = { version = "0.25.3", optional = true }
 reqwest = { version = "0.11", optional = true, features = ["json"] }
 ureq = { version = "2.1", features = ["json"], optional = true }
 futures = { version = "0.3", optional = true }
@@ -55,6 +56,7 @@ minimal = []
 compiler = ["miniscript/compiler"]
 verify = ["bitcoinconsensus"]
 default = ["key-value-db", "electrum"]
+sqlite = ["rusqlite"]
 compact_filters = ["rocksdb", "socks", "lazy_static", "cc"]
 key-value-db = ["sled"]
 all-keys = ["keys-bip39"]

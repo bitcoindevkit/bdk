@@ -65,6 +65,8 @@ macro_rules! impl_inner_method {
             $enum_name::Memory(inner) => inner.$name( $($args, )* ),
             #[cfg(feature = "key-value-db")]
             $enum_name::Sled(inner) => inner.$name( $($args, )* ),
+            #[cfg(feature = "sqlite")]
+            $enum_name::Sqlite(inner) => inner.$name( $($args, )* ),
         }
     }
 }
@@ -82,10 +84,15 @@ pub enum AnyDatabase {
     #[cfg_attr(docsrs, doc(cfg(feature = "key-value-db")))]
     /// Simple key-value embedded database based on [`sled`]
     Sled(sled::Tree),
+    #[cfg(feature = "sqlite")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "sqlite")))]
+    /// Sqlite embedded database using [`rusqlite`]
+    Sqlite(sqlite::SqliteDatabase),
 }
 
 impl_from!(memory::MemoryDatabase, AnyDatabase, Memory,);
 impl_from!(sled::Tree, AnyDatabase, Sled, #[cfg(feature = "key-value-db")]);
+impl_from!(sqlite::SqliteDatabase, AnyDatabase, Sqlite, #[cfg(feature = "sqlite")]);
 
 /// Type that contains any of the [`BatchDatabase::Batch`] types defined by the library
 pub enum AnyBatch {
@@ -95,6 +102,10 @@ pub enum AnyBatch {
     #[cfg_attr(docsrs, doc(cfg(feature = "key-value-db")))]
     /// Simple key-value embedded database based on [`sled`]
     Sled(<sled::Tree as BatchDatabase>::Batch),
+    #[cfg(feature = "sqlite")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "sqlite")))]
+    /// Sqlite embedded database using [`rusqlite`]
+    Sqlite(<sqlite::SqliteDatabase as BatchDatabase>::Batch),
 }
 
 impl_from!(
@@ -103,6 +114,7 @@ impl_from!(
     Memory,
 );
 impl_from!(<sled::Tree as BatchDatabase>::Batch, AnyBatch, Sled, #[cfg(feature = "key-value-db")]);
+impl_from!(<sqlite::SqliteDatabase as BatchDatabase>::Batch, AnyBatch, Sqlite, #[cfg(feature = "sqlite")]);
 
 impl BatchOperations for AnyDatabase {
     fn set_script_pubkey(
@@ -300,19 +312,25 @@ impl BatchDatabase for AnyDatabase {
             AnyDatabase::Memory(inner) => inner.begin_batch().into(),
             #[cfg(feature = "key-value-db")]
             AnyDatabase::Sled(inner) => inner.begin_batch().into(),
+            #[cfg(feature = "sqlite")]
+            AnyDatabase::Sqlite(inner) => inner.begin_batch().into(),
         }
     }
     fn commit_batch(&mut self, batch: Self::Batch) -> Result<(), Error> {
         match self {
             AnyDatabase::Memory(db) => match batch {
                 AnyBatch::Memory(batch) => db.commit_batch(batch),
-                #[cfg(feature = "key-value-db")]
-                _ => unimplemented!("Sled batch shouldn't be used with Memory db."),
+                _ => unimplemented!("Other batch shouldn't be used with Memory db."),
             },
             #[cfg(feature = "key-value-db")]
             AnyDatabase::Sled(db) => match batch {
                 AnyBatch::Sled(batch) => db.commit_batch(batch),
-                _ => unimplemented!("Memory batch shouldn't be used with Sled db."),
+                _ => unimplemented!("Other batch shouldn't be used with Sled db."),
+            },
+            #[cfg(feature = "sqlite")]
+            AnyDatabase::Sqlite(db) => match batch {
+                AnyBatch::Sqlite(batch) => db.commit_batch(batch),
+                _ => unimplemented!("Other batch shouldn't be used with Sqlite db."),
             },
         }
     }
@@ -337,6 +355,23 @@ impl ConfigurableDatabase for sled::Tree {
     }
 }
 
+/// Configuration type for a [`sqlite::SqliteDatabase`] database
+#[cfg(feature = "sqlite")]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct SqliteDbConfiguration {
+    /// Main directory of the db
+    pub path: String,
+}
+
+#[cfg(feature = "sqlite")]
+impl ConfigurableDatabase for sqlite::SqliteDatabase {
+    type Config = SqliteDbConfiguration;
+
+    fn from_config(config: &Self::Config) -> Result<Self, Error> {
+        Ok(sqlite::SqliteDatabase::new(config.path.clone()))
+    }
+}
+
 /// Type that can contain any of the database configurations defined by the library
 ///
 /// This allows storing a single configuration that can be loaded into an [`AnyDatabase`]
@@ -350,6 +385,10 @@ pub enum AnyDatabaseConfig {
     #[cfg_attr(docsrs, doc(cfg(feature = "key-value-db")))]
     /// Simple key-value embedded database based on [`sled`]
     Sled(SledDbConfiguration),
+    #[cfg(feature = "sqlite")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "sqlite")))]
+    /// Sqlite embedded database using [`rusqlite`]
+    Sqlite(SqliteDbConfiguration),
 }
 
 impl ConfigurableDatabase for AnyDatabase {
@@ -362,9 +401,14 @@ impl ConfigurableDatabase for AnyDatabase {
             }
             #[cfg(feature = "key-value-db")]
             AnyDatabaseConfig::Sled(inner) => AnyDatabase::Sled(sled::Tree::from_config(inner)?),
+            #[cfg(feature = "sqlite")]
+            AnyDatabaseConfig::Sqlite(inner) => {
+                AnyDatabase::Sqlite(sqlite::SqliteDatabase::from_config(inner)?)
+            }
         })
     }
 }
 
 impl_from!((), AnyDatabaseConfig, Memory,);
 impl_from!(SledDbConfiguration, AnyDatabaseConfig, Sled, #[cfg(feature = "key-value-db")]);
+impl_from!(SqliteDbConfiguration, AnyDatabaseConfig, Sqlite, #[cfg(feature = "sqlite")]);
