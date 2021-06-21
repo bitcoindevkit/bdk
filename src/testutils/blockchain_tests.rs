@@ -26,10 +26,7 @@ impl TestClient {
         debug!("launching {} and {}", &bitcoind_exe, &electrs_exe);
         let bitcoind = BitcoinD::new(bitcoind_exe).unwrap();
 
-        #[cfg(feature = "test-esplora")]
-        let http_enabled = true;
-        #[cfg(not(feature = "test-esplora"))]
-        let http_enabled = false;
+        let http_enabled = cfg!(feature = "test-esplora");
 
         let electrsd = ElectrsD::new(electrs_exe, &bitcoind, false, http_enabled).unwrap();
 

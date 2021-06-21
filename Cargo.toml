@@ -69,7 +69,7 @@ test-md-docs = ["electrum"]
 lazy_static = "1.4"
 env_logger = "0.7"
 clap = "2.33"
-electrsd = { version="0.4.0", features = ["trigger"] }
+electrsd = { version="0.4", features = ["trigger"] }
 
 [[example]]
 name = "address_validator"
