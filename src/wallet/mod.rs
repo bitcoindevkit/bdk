@@ -277,7 +277,7 @@ where
         self.descriptor
             .as_derived(index, &self.secp)
             .address(self.network)
-            .map(|address| AddressInfo { address, index })
+            .map(|address| AddressInfo { index, address })
             .map_err(|_| Error::ScriptDoesntHaveAddressForm)
     }
 
@@ -289,7 +289,7 @@ where
         self.descriptor
             .as_derived(index, &self.secp)
             .address(self.network)
-            .map(|address| AddressInfo { address, index })
+            .map(|address| AddressInfo { index, address })
             .map_err(|_| Error::ScriptDoesntHaveAddressForm)
     }
 

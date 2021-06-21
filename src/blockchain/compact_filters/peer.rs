@@ -227,12 +227,12 @@ impl Peer {
 
         Ok(Peer {
             writer,
-            reader_thread,
             responses,
+            reader_thread,
             connected,
             mempool,
-            network,
             version,
+            network,
         })
     }
 
