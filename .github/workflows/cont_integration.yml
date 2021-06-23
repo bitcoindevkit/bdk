@@ -85,7 +85,6 @@ jobs:
           - name: rpc
           - name: esplora
     env:
-      BITCOIN_VER: 0.21.0
       ELECTRS_RELEASE_URL: https://github.com/RCasatta/electrsd/releases/download/release_0.3.0
       ELECTRS_VER: electrs_ubuntu-20.04_v0.8.10.zip
       ELECTRS_ESPLORA_VER: electrs_esplora_ubuntu-20.04_a33e97e1a1fc63fa9c20a116bb92579bbf43b254.zip
@@ -115,10 +114,6 @@ jobs:
         run: echo "ELECTRS_EXE=${{ github.workspace }}/electrs" >> $GITHUB_ENV
       - name: Show electrs options
         run: ${{ env.ELECTRS_EXE }} --help
-      - name: Set BITCOIND_EXE env
-        run: echo "BITCOIND_EXE=${{ github.workspace }}/bitcoin-${{ env.BITCOIN_VER }}/bin/bitcoind" >> $GITHUB_ENV
-      - name: Install bitcoind
-        run: curl https://bitcoincore.org/bin/bitcoin-core-$BITCOIN_VER/bitcoin-$BITCOIN_VER-x86_64-linux-gnu.tar.gz | tar -xvz bitcoin-$BITCOIN_VER/bin/bitcoind
       - name: Test
         run: $HOME/.cargo/bin/cargo test --features test-${{ matrix.blockchain.name }},test-blockchains --no-default-features ${{ matrix.blockchain.name }}::bdk_blockchain_tests
 

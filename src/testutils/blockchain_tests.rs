@@ -6,7 +6,7 @@ use bitcoin::{Address, Amount, Script, Transaction, Txid};
 pub use bitcoincore_rpc::bitcoincore_rpc_json::AddressType;
 pub use bitcoincore_rpc::{Auth, Client as RpcClient, RpcApi};
 use core::str::FromStr;
-use electrsd::bitcoind::BitcoinD;
+use electrsd::bitcoind::{downloaded_exe_path, BitcoinD};
 use electrsd::ElectrsD;
 pub use electrum_client::{Client as ElectrumClient, ElectrumApi};
 #[allow(unused_imports)]
@@ -309,8 +309,12 @@ impl Deref for TestClient {
 
 impl Default for TestClient {
     fn default() -> Self {
-        let bitcoind_exe =
-            env::var("BITCOIND_EXE").unwrap_or_else(|_| "/root/bitcoind".to_string());
+        let bitcoind_exe = env::var("BITCOIND_EXE")
+            .ok()
+            .or(downloaded_exe_path())
+            .expect(
+                "you should provide env var BITCOIND_EXE or specifiy a bitcoind version feature",
+            );
         let electrs_exe = env::var("ELECTRS_EXE").unwrap_or_else(|_| "/root/electrs".to_string());
         Self::new(bitcoind_exe, electrs_exe)
     }
