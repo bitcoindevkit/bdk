@@ -11,10 +11,10 @@
 use anyhow::Result;
 use bitcoin::Network;
 
-use bdk::blockchain::{ElectrumBlockchain, NoopProgress};
+use bdk::blockchain::ElectrumBlockchain;
 use bdk::database::MemoryDatabase;
 use bdk::electrum_client::Client;
-use bdk::Wallet;
+use bdk::InitWallet;
 
 const ELECTRUM_URL: &str = "ssl://electrum.blockstream.info:60002";
 const DESC: &str = "wpkh(tprv8ZgxMBicQKsPdT8dRdm7Ae7ZxLTCKNPaZwt7aBWNRyxUCMvY7xhjRG4iBLerk2FTBv6zrzMMw18M3LwJEvn9QhbzsiYJefwUmzcUXcAPDmt/0/*)";
@@ -22,20 +22,16 @@ const CHANGE_DESC: &str = "wpkh(tprv8ZgxMBicQKsPdT8dRdm7Ae7ZxLTCKNPaZwt7aBWNRyxU
 
 /// This demonstrates simple initialisation of an online wallet.
 fn main() -> Result<()> {
-    let wallet = wallet()?;
-    wallet.sync(NoopProgress, None)?;
-    Ok(())
-}
-
-fn wallet() -> Result<Wallet<ElectrumBlockchain, MemoryDatabase>> {
     let client = Client::new(ELECTRUM_URL)?;
-    let wallet = Wallet::new(
+    let wallet = InitWallet::new(
         DESC,
         Some(CHANGE_DESC),
         Network::Testnet,
         MemoryDatabase::default(),
         ElectrumBlockchain::from(client),
     )?;
+    // Equivalent to `wallet.sync(NoopProgress, None)`.
+    let _wallet = wallet.init()?;
 
-    Ok(wallet)
+    Ok(())
 }

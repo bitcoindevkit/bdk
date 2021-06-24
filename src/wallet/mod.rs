@@ -51,7 +51,7 @@ use signer::{SignOptions, Signer, SignerOrdering, SignersContainer};
 use tx_builder::{BumpFee, CreateTx, FeePolicy, TxBuilder, TxParams};
 use utils::{check_nlocktime, check_nsequence_rbf, After, Older, SecpCtx, DUST_LIMIT_SATOSHI};
 
-use crate::blockchain::{Blockchain, Progress};
+use crate::blockchain::{Blockchain, NoopProgress, Progress};
 use crate::database::{BatchDatabase, BatchOperations, DatabaseUtils};
 use crate::descriptor::derived::AsDerived;
 use crate::descriptor::policy::BuildSatisfaction;
@@ -66,6 +66,48 @@ use crate::signer::SignerError;
 use crate::types::*;
 
 const CACHE_ADDR_BATCH_SIZE: u32 = 100;
+
+/// A wallet that has been created but not initialised.
+#[derive(Debug)]
+pub struct InitWallet<B, D> {
+    inner: Wallet<B, D>,
+}
+
+impl<B, D> InitWallet<B, D>
+where
+    B: Blockchain,
+    D: BatchDatabase,
+{
+    /// Create a new uninitialised "online" wallet
+    #[maybe_async]
+    pub fn new<E: IntoWalletDescriptor>(
+        descriptor: E,
+        change_descriptor: Option<E>,
+        network: Network,
+        database: D,
+        client: B,
+    ) -> Result<Self, Error> {
+        let inner = Wallet::new(descriptor, change_descriptor, network, database, client)?;
+        Ok(InitWallet { inner })
+    }
+
+    /// Sync the internal database with the blockchain and return an "initialised" wallet.
+    #[maybe_async]
+    pub fn sync<P: 'static + Progress>(
+        self,
+        progress_update: P,
+        max_address_param: Option<u32>,
+    ) -> Result<Wallet<B, D>, Error> {
+        self.inner.sync(progress_update, max_address_param)?;
+        Ok(self.inner)
+    }
+
+    /// Initialise wallet with no progress update. `max_address_param` gets set to [`CACHE_ADDR_BATCH_SIZE`].
+    #[maybe_async]
+    pub fn init(self) -> Result<Wallet<B, D>, Error> {
+        self.sync(NoopProgress, None)
+    }
+}
 
 /// A Bitcoin wallet
 ///
@@ -1455,7 +1497,7 @@ where
 {
     /// Create a new "online" wallet
     #[maybe_async]
-    pub fn new<E: IntoWalletDescriptor>(
+    fn new<E: IntoWalletDescriptor>(
         descriptor: E,
         change_descriptor: Option<E>,
         network: Network,
@@ -1475,7 +1517,7 @@ where
 
     /// Sync the internal database with the blockchain
     #[maybe_async]
-    pub fn sync<P: 'static + Progress>(
+    fn sync<P: 'static + Progress>(
         &self,
         progress_update: P,
         max_address_param: Option<u32>,

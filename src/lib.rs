@@ -261,7 +261,7 @@ pub use wallet::address_validator;
 pub use wallet::signer;
 pub use wallet::signer::SignOptions;
 pub use wallet::tx_builder::TxBuilder;
-pub use wallet::Wallet;
+pub use wallet::{InitWallet, Wallet};
 
 /// Get the version of BDK at runtime
 pub fn version() -> &'static str {
