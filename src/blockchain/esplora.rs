@@ -416,7 +416,7 @@ impl_error!(consensus::encode::Error, BitcoinEncoding, EsploraError);
 impl_error!(bitcoin::hashes::hex::Error, Hex, EsploraError);
 
 #[cfg(test)]
-#[cfg(feature = "test-blockchains")]
+#[cfg(feature = "test-esplora")]
 crate::bdk_blockchain_tests! {
     fn test_instance(test_client: &TestClient) -> EsploraBlockchain {
         EsploraBlockchain::new(&format!("http://{}",test_client.electrsd.esplora_url.as_ref().unwrap()), None)

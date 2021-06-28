@@ -420,7 +420,7 @@ fn list_wallet_dir(client: &Client) -> Result<Vec<String>, Error> {
 }
 
 #[cfg(test)]
-#[cfg(feature = "test-blockchains")]
+#[cfg(feature = "test-rpc")]
 crate::bdk_blockchain_tests! {
 
     fn test_instance(test_client: &TestClient) -> RpcBlockchain {
