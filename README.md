@@ -168,7 +168,7 @@ cargo test --features test-electrum
 ```
 
 The other options are `test-esplora` or `test-rpc`.
-Note that `electrs` and `bitcoind` binaries are automatically downloaded (on mac and linux), to specify your own one must use `--no-default-features` and provide `BITCOIND_EXE` and `ELECTRS_EXE` as environment variables.
+Note that `electrs` and `bitcoind` binaries are automatically downloaded (on mac and linux), to specify you already have installed binaries you must use `--no-default-features` and provide `BITCOIND_EXE` and `ELECTRS_EXE` as environment variables.
 
 ## License
 
