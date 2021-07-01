@@ -1,6 +1,6 @@
 // Bitcoin Dev Kit
 // Written in 2021 by Rajarshi Maitra <rajarshi149@gmail.com>
-//                    John Cantrell <johncantrell97@protonmail.com> 
+//                    John Cantrell <johncantrell97@protonmail.com>
 //
 // Copyright (c) 2020-2021 Bitcoin Dev Kit Developers
 //

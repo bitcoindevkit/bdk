@@ -63,6 +63,7 @@ use bitcoin::{Network, OutPoint, Transaction, Txid};
 
 use rocksdb::{Options, SliceTransform, DB};
 
+mod address_manager;
 mod peer;
 mod store;
 mod sync;
@@ -77,8 +78,11 @@ use peer::*;
 use store::*;
 use sync::*;
 
+// Only added to avoid unused warnings in addrsmngr module
+pub use address_manager::{
+    AddressManager, DiscoveryProgress, LogDiscoveryProgress, NoDiscoveryProgress,
+};
 pub use peer::{Mempool, Peer};
-
 const SYNC_HEADERS_COST: f32 = 1.0;
 const SYNC_FILTERS_COST: f32 = 11.6 * 1_000.0;
 const PROCESS_BLOCKS_COST: f32 = 20_000.0;
@@ -371,10 +375,10 @@ impl Blockchain for CompactFiltersBlockchain {
         database.commit_batch(updates)?;
 
         match first_peer.ask_for_mempool() {
-            Err(CompactFiltersError::PeerBloomDisabled) => {
+            Err(PeerError::PeerBloomDisabled(_)) => {
                 log::warn!("Peer has BLOOM disabled, we can't ask for the mempool")
             }
-            e => e?,
+            e => e.map_err(CompactFiltersError::from)?,
         };
 
         let mut internal_max_deriv = None;
@@ -392,7 +396,12 @@ impl Blockchain for CompactFiltersBlockchain {
                 )?;
             }
         }
-        for tx in first_peer.get_mempool().iter_txs().iter() {
+        for tx in first_peer
+            .get_mempool()
+            .iter_txs()
+            .map_err(CompactFiltersError::from)?
+            .iter()
+        {
             self.process_tx(
                 database,
                 tx,
@@ -435,11 +444,14 @@ impl Blockchain for CompactFiltersBlockchain {
     fn get_tx(&self, txid: &Txid) -> Result<Option<Transaction>, Error> {
         Ok(self.peers[0]
             .get_mempool()
-            .get_tx(&Inventory::Transaction(*txid)))
+            .get_tx(&Inventory::Transaction(*txid))
+            .map_err(CompactFiltersError::from)?)
     }
 
     fn broadcast(&self, tx: &Transaction) -> Result<(), Error> {
-        self.peers[0].broadcast_tx(tx.clone())?;
+        self.peers[0]
+            .broadcast_tx(tx.clone())
+            .map_err(CompactFiltersError::from)?;
 
         Ok(())
     }
@@ -487,7 +499,8 @@ impl ConfigurableBlockchain for CompactFiltersBlockchain {
             .peers
             .iter()
             .map(|peer_conf| match &peer_conf.socks5 {
-                None => Peer::connect(&peer_conf.address, Arc::clone(&mempool), config.network),
+                None => Peer::connect(&peer_conf.address, Arc::clone(&mempool), config.network)
+                    .map_err(CompactFiltersError::from),
                 Some(proxy) => Peer::connect_proxy(
                     peer_conf.address.as_str(),
                     proxy,
@@ -497,7 +510,8 @@ impl ConfigurableBlockchain for CompactFiltersBlockchain {
                         .map(|(a, b)| (a.as_str(), b.as_str())),
                     Arc::clone(&mempool),
                     config.network,
-                ),
+                )
+                .map_err(CompactFiltersError::from),
             })
             .collect::<Result<_, _>>()?;
 
@@ -546,6 +560,9 @@ pub enum CompactFiltersError {
 
     /// Wrapper for [`crate::error::Error`]
     Global(Box<crate::error::Error>),
+
+    /// Internal Peer Error
+    Peer(PeerError),
 }
 
 impl fmt::Display for CompactFiltersError {
@@ -560,6 +577,7 @@ impl_error!(rocksdb::Error, Db, CompactFiltersError);
 impl_error!(std::io::Error, Io, CompactFiltersError);
 impl_error!(bitcoin::util::bip158::Error, Bip158, CompactFiltersError);
 impl_error!(std::time::SystemTimeError, Time, CompactFiltersError);
+impl_error!(PeerError, Peer, CompactFiltersError);
 
 impl From<crate::error::Error> for CompactFiltersError {
     fn from(err: crate::error::Error) -> Self {
