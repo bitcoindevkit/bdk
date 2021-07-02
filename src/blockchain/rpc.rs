@@ -13,6 +13,8 @@
 //!
 //! Backend that gets blockchain data from Bitcoin Core RPC
 //!
+//! This is an **EXPERIMENTAL** feature, API and other major changes are expected.
+//!
 //! ## Example
 //!
 //! ```no_run
