@@ -175,7 +175,7 @@ macro_rules! impl_node_opcode_two {
 #[doc(hidden)]
 #[macro_export]
 macro_rules! impl_node_opcode_three {
-    ( $terminal_variant:ident, $( $inner:tt )* ) => {
+    ( $terminal_variant:ident, $( $inner:tt )* ) => ({
         use $crate::descriptor::CheckMiniscript;
 
         let inner = $crate::fragment_internal!( @t $( $inner )* );
@@ -201,7 +201,7 @@ macro_rules! impl_node_opcode_three {
 
                 Ok((minisc, a_keymap, networks))
             })
-    };
+    });
 }
 
 #[doc(hidden)]
