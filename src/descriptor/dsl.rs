@@ -791,6 +791,25 @@ mod test {
     }
 
     #[test]
+    fn test_fixed_threeop_descriptors() {
+        let redeem_key = bitcoin::PublicKey::from_str(
+            "03a34b99f22c790c4e36b2b3c2c35a36db06226e41c692fc82b8b56ac1c540c5bd",
+        )
+            .unwrap();
+        let move_key = bitcoin::PublicKey::from_str(
+            "032e58afe51f9ed8ad3cc7897f634d881fdbe49a81564629ded8156bebd2ffd1af",
+        )
+            .unwrap();
+
+        check(
+            descriptor!(sh(wsh(and_or(pk(redeem_key), older(1000), pk(move_key))))),
+            true,
+            true,
+            &["2MypGwr5eQWAWWJtiJgUEToVxc4zuokjQRe"],
+        );
+    }
+
+    #[test]
     fn test_bip32_legacy_descriptors() {
         let xprv = bip32::ExtendedPrivKey::from_str("tprv8ZgxMBicQKsPcx5nBGsR63Pe8KnRUqmbJNENAfGftF3yuXoMMoVJJcYeUw5eVkm9WBPjWYt6HMWYJNesB5HaNVBaFc1M6dRjWSYnmewUMYy").unwrap();
 
