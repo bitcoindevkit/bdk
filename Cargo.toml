@@ -89,6 +89,6 @@ required-features = ["compiler"]
 [workspace]
 members = ["macros"]
 [package.metadata.docs.rs]
-features = ["compiler", "electrum", "esplora", "compact_filters", "key-value-db", "all-keys", "verify"]
+features = ["compiler", "electrum", "esplora", "compact_filters", "rpc", "key-value-db", "all-keys", "verify"]
 # defines the configuration attribute `docsrs`
 rustdoc-args = ["--cfg", "docsrs"]
