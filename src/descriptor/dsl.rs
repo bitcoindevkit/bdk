@@ -175,7 +175,7 @@ macro_rules! impl_node_opcode_two {
 #[doc(hidden)]
 #[macro_export]
 macro_rules! impl_node_opcode_three {
-    ( $terminal_variant:ident, $( $inner:tt )* ) => {
+    ( $terminal_variant:ident, $( $inner:tt )* ) => ({
         use $crate::descriptor::CheckMiniscript;
 
         let inner = $crate::fragment_internal!( @t $( $inner )* );
@@ -201,7 +201,7 @@ macro_rules! impl_node_opcode_three {
 
                 Ok((minisc, a_keymap, networks))
             })
-    };
+    });
 }
 
 #[doc(hidden)]
@@ -787,6 +787,25 @@ mod test {
             true,
             true,
             &["2NCidRJysy7apkmE6JF5mLLaJFkrN3Ub9iy"],
+        );
+    }
+
+    #[test]
+    fn test_fixed_threeop_descriptors() {
+        let redeem_key = bitcoin::PublicKey::from_str(
+            "03a34b99f22c790c4e36b2b3c2c35a36db06226e41c692fc82b8b56ac1c540c5bd",
+        )
+        .unwrap();
+        let move_key = bitcoin::PublicKey::from_str(
+            "032e58afe51f9ed8ad3cc7897f634d881fdbe49a81564629ded8156bebd2ffd1af",
+        )
+        .unwrap();
+
+        check(
+            descriptor!(sh(wsh(and_or(pk(redeem_key), older(1000), pk(move_key))))),
+            true,
+            true,
+            &["2MypGwr5eQWAWWJtiJgUEToVxc4zuokjQRe"],
         );
     }
 
