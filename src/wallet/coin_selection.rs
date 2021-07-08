@@ -90,6 +90,7 @@
 //! ```
 
 use crate::types::FeeRate;
+use crate::wallet::Vbytes;
 use crate::{database::Database, WeightedUtxo};
 use crate::{error::Error, Utxo};
 
@@ -257,8 +258,8 @@ struct OutputGroup {
 
 impl OutputGroup {
     fn new(weighted_utxo: WeightedUtxo, fee_rate: FeeRate) -> Self {
-        let fee = (TXIN_BASE_WEIGHT + weighted_utxo.satisfaction_weight) as f32 / 4.0
-            * fee_rate.as_sat_vb();
+        let fee =
+            (TXIN_BASE_WEIGHT + weighted_utxo.satisfaction_weight).vbytes() * fee_rate.as_sat_vb();
         let effective_value = weighted_utxo.utxo.txout().value as i64 - fee.ceil() as i64;
         OutputGroup {
             weighted_utxo,
@@ -862,7 +863,7 @@ mod test {
 
         assert_eq!(result.selected.len(), 1);
         assert_eq!(result.selected_amount(), 100_000);
-        let input_size = (TXIN_BASE_WEIGHT as f32) / 4.0 + P2WPKH_WITNESS_SIZE as f32 / 4.0;
+        let input_size = (TXIN_BASE_WEIGHT + P2WPKH_WITNESS_SIZE).vbytes();
         let epsilon = 0.5;
         assert!((1.0 - (result.fee_amount / input_size)).abs() < epsilon);
     }

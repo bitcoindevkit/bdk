@@ -780,7 +780,7 @@ where
             return Err(Error::IrreplaceableTransaction);
         }
 
-        let vbytes = tx.get_weight() as f32 / 4.0;
+        let vbytes = tx.get_weight().vbytes();
         let feerate = details.fee.ok_or(Error::FeeRateUnavailable)? as f32 / vbytes;
 
         // remove the inputs from the tx and process them
@@ -1578,6 +1578,18 @@ where
     }
 }
 
+/// Trait implemented by types that can be used to measure weight units.
+pub trait Vbytes {
+    /// Convert weight units to virtual bytes.
+    fn vbytes(self) -> f32;
+}
+
+impl Vbytes for usize {
+    fn vbytes(self) -> f32 {
+        self as f32 / 4.0
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod test {
     use std::str::FromStr;
@@ -1764,7 +1776,7 @@ pub(crate) mod test {
                 dust_change = true;
             )*
 
-            let tx_fee_rate = $fees as f32 / (tx.get_weight() as f32 / 4.0);
+            let tx_fee_rate = $fees as f32 / (tx.get_weight().vbytes());
             let fee_rate = $fee_rate.as_sat_vb();
 
             if !dust_change {
