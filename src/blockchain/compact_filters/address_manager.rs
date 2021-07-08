@@ -571,18 +571,48 @@ impl<P: DiscoveryProgress> AddressManager<P> {
     }
 
     /// Get all the known CBF addresses
-    pub fn get_known_cbfs(&self) -> Vec<SocketAddr> {
-        self.directory.cbf_nodes.iter().copied().collect()
+    pub fn get_known_cbfs(&self) -> Option<Vec<SocketAddr>> {
+        let addresses = self
+            .directory
+            .cbf_nodes
+            .iter()
+            .copied()
+            .collect::<Vec<SocketAddr>>();
+
+        match addresses.len() {
+            0 => None,
+            _ => Some(addresses),
+        }
     }
 
     /// Get all the known regular addresses
-    pub fn get_known_non_cbfs(&self) -> Vec<SocketAddr> {
-        self.directory.non_cbf_nodes.iter().copied().collect()
+    pub fn get_known_non_cbfs(&self) -> Option<Vec<SocketAddr>> {
+        let addresses = self
+            .directory
+            .non_cbf_nodes
+            .iter()
+            .copied()
+            .collect::<Vec<SocketAddr>>();
+
+        match addresses.len() {
+            0 => None,
+            _ => Some(addresses),
+        }
     }
 
     /// Get previously tried addresses
-    pub fn get_previously_tried(&self) -> Vec<SocketAddr> {
-        self.directory.previously_sent.iter().copied().collect()
+    pub fn get_previously_tried(&self) -> Option<Vec<SocketAddr>> {
+        let addresses = self
+            .directory
+            .previously_sent
+            .iter()
+            .copied()
+            .collect::<Vec<SocketAddr>>();
+
+        match addresses.len() {
+            0 => None,
+            _ => Some(addresses),
+        }
     }
 }
 
