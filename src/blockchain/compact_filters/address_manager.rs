@@ -690,7 +690,7 @@ mod test {
     use super::*;
 
     #[test]
-    fn test_crawl_times() {
+    fn test_address_manager() {
         // Initiate a manager with an non existent cache file name.
         // It will create a new cache file
         let mut manager = AddressManager::new(
@@ -704,9 +704,11 @@ mod test {
         .unwrap();
 
         // start the crawlers and time them
+        println!("Starting manager and initial fetch");
         let start = std::time::Instant::now();
         manager.fetch().unwrap();
         let duration1 = start.elapsed();
+        println!("Completed Initial fetch");
 
         // Create a new manager from existing cache and fetch again
         let mut manager = AddressManager::new(
@@ -720,31 +722,18 @@ mod test {
         .unwrap();
 
         // start the crawlers and time them
+        println!("Starting new fetch with previous cache");
         let start = std::time::Instant::now();
         manager.fetch().unwrap();
         let duration2 = start.elapsed();
+        println!("Completed new fetch()");
 
         println!("Time taken for initial crawl: {:#?}", duration1);
         println!("Time taken for next crawl {:#?}", duration2);
-    }
 
-    #[test]
-    fn test_buffer_management() {
-        // Initiate a manager with an non existent cache file name.
-        // It will create a new cache file
-        let mut manager = AddressManager::new(
-            Network::Bitcoin,
-            "addr_cache".to_string(),
-            20,
-            None,
-            None,
-            LogDiscoveryProgress,
-        )
-        .unwrap();
+        // Check Buffer Management
 
-        // Start the first fetch()
-        manager.fetch().unwrap();
-
+        println!("Checking buffer management");
         // Fetch few new address and ensure buffer goes to zero
         let mut addrs_list = Vec::new();
         for _ in 0..5 {
@@ -763,9 +752,12 @@ mod test {
 
         // Calling fetch again should start crawlers until buffer
         // requirements are matched.
+        println!("Address buffer exhausted, starting new fetch");
         manager.fetch().unwrap();
-
+        println!("Fetch Complete");
         // It should again have a cbf buffer of 5
         assert_eq!(manager.directory.get_cbf_buffer(), 5);
+
+        println!("Buffer management passed");
     }
 }
