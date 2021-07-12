@@ -44,6 +44,7 @@ pub use self::electrum::ElectrumBlockchain;
 pub use self::electrum::ElectrumBlockchainConfig;
 
 #[cfg(feature = "rpc")]
+#[cfg_attr(docsrs, doc(cfg(feature = "rpc")))]
 pub mod rpc;
 #[cfg(feature = "rpc")]
 pub use self::rpc::RpcBlockchain;
