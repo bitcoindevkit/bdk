@@ -569,9 +569,8 @@ impl<'a, B, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>> TxBuilder<'a, B, D,
     /// difference is that it is valid to use `drain_to` without setting any ordinary recipients
     /// with [`add_recipient`] (but it is perfectly find to add recipients as well).
     ///
-    /// When bumping the fees of a transaction made with this option, the user should remeber to
-    /// add [`allow_shrinking`] to correctly update the
-    /// single output instead of adding one more for the change.
+    /// When bumping the fees of a transaction made with this option, you probably want to
+    /// use [`allow_shrinking`] to allow this output to be reduced to pay for the extra fees.
     ///
     /// # Example
     ///

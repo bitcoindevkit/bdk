@@ -3128,7 +3128,7 @@ pub(crate) mod test {
         // them, and make sure that `bump_fee` doesn't try to add more. This fails because we've
         // told the wallet it's not allowed to add more inputs AND it can't reduce the value of the
         // existing output. In other words, bump_fee + manually_selected_only is always an error
-        // unless you've also set "allow_shrinking OR there is a change output".
+        // unless you've also set "allow_shrinking" OR there is a change output.
         let incoming_txid = crate::populate_test_db!(
             wallet.database.borrow_mut(),
             testutils! (@tx ( (@external descriptors, 0) => 25_000 ) (@confirmations 1)),
@@ -3307,7 +3307,7 @@ pub(crate) mod test {
             Some(100),
         );
 
-        // initially make a tx without change by using `set_drain_recipient`
+        // initially make a tx without change by using `drain_to`
         let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
         let mut builder = wallet.build_tx();
         builder
