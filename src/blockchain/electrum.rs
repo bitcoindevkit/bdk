@@ -169,9 +169,10 @@ impl ConfigurableBlockchain for ElectrumBlockchain {
     }
 }
 
-#[cfg(feature = "test-blockchains")]
+#[cfg(test)]
+#[cfg(feature = "test-electrum")]
 crate::bdk_blockchain_tests! {
-    fn test_instance() -> ElectrumBlockchain {
-        ElectrumBlockchain::from(Client::new(&testutils::blockchain_tests::get_electrum_url()).unwrap())
+    fn test_instance(test_client: &TestClient) -> ElectrumBlockchain {
+        ElectrumBlockchain::from(Client::new(&test_client.electrsd.electrum_url).unwrap())
     }
 }

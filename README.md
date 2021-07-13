@@ -151,6 +151,25 @@ fn main() -> Result<(), bdk::Error> {
 }
 ```
 
+## Testing
+
+### Unit testing
+
+```
+cargo test
+```
+
+### Integration testing
+
+Integration testing require testing features, for example:
+
+```
+cargo test --features test-electrum
+```
+
+The other options are `test-esplora` or `test-rpc`.
+Note that `electrs` and `bitcoind` binaries are automatically downloaded (on mac and linux), to specify you already have installed binaries you must use `--no-default-features` and provide `BITCOIND_EXE` and `ELECTRS_EXE` as environment variables.
+
 ## License
 
 Licensed under either of

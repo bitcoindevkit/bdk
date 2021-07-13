@@ -77,28 +77,14 @@ jobs:
 
   test-blockchains:
     name: Test ${{ matrix.blockchain.name }}
-    runs-on: ubuntu-16.04
+    runs-on: ubuntu-20.04
     strategy:
       fail-fast: false
       matrix:
         blockchain:
           - name: electrum
-            container: bitcoindevkit/electrs:0.4.0
-            start: /root/electrs --network regtest --cookie-file $GITHUB_WORKSPACE/.bitcoin/regtest/.cookie --jsonrpc-import
-          - name: esplora
-            container: bitcoindevkit/esplora:0.4.0
-            start: /root/electrs --network regtest -vvv --daemon-dir $GITHUB_WORKSPACE/.bitcoin --jsonrpc-import --electrum-rpc-addr=0.0.0.0:60401 --http-addr 0.0.0.0:3002
           - name: rpc
-            container: bitcoindevkit/electrs:0.4.0
-            start: /root/electrs --network regtest --cookie-file $GITHUB_WORKSPACE/.bitcoin/regtest/.cookie --jsonrpc-import
-    container: ${{ matrix.blockchain.container }}
-    env:
-      BDK_RPC_AUTH: COOKIEFILE
-      BDK_RPC_COOKIEFILE: ${{ github.workspace }}/.bitcoin/regtest/.cookie
-      BDK_RPC_URL: 127.0.0.1:18443
-      BDK_RPC_WALLET: bdk-test
-      BDK_ELECTRUM_URL: tcp://127.0.0.1:60401
-      BDK_ESPLORA_URL: http://127.0.0.1:3002
+          - name: esplora
     steps:
       - name: Checkout
         uses: actions/checkout@v2
@@ -107,25 +93,18 @@ jobs:
         with:
           path: |
             ~/.cargo/registry
+            ~/.cargo/bitcoin
+            ~/.cargo/electrs
             ~/.cargo/git
             target
           key: ${{ runner.os }}-cargo-${{ github.job }}-${{ hashFiles('**/Cargo.toml','**/Cargo.lock') }}
-      - name: get pkg-config # running esplora tests seems to need this
-        run: apt update && apt install -y --fix-missing pkg-config libssl-dev
-      - name: Install rustup
-        run: curl https://sh.rustup.rs -sSf | sh -s -- -y
-      - name: Set default toolchain
-        run: $HOME/.cargo/bin/rustup default 1.53.0 # STABLE
-      - name: Set profile
-        run: $HOME/.cargo/bin/rustup set profile minimal
-      - name: Update toolchain
-        run: $HOME/.cargo/bin/rustup update
-      - name: Start core
-        run: ./ci/start-core.sh
-      - name: start ${{ matrix.blockchain.name }}
-        run: nohup ${{ matrix.blockchain.start }} & sleep 5
+      - name: Setup rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
       - name: Test
-        run: $HOME/.cargo/bin/cargo test --features test-${{ matrix.blockchain.name }},test-blockchains --no-default-features ${{ matrix.blockchain.name }}::bdk_blockchain_tests
+        run: cargo test --features test-${{ matrix.blockchain.name }} ${{ matrix.blockchain.name }}::bdk_blockchain_tests
 
   check-wasm:
     name: Check WASM
