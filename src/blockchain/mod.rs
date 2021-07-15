@@ -93,7 +93,6 @@ pub trait Blockchain {
     /// [`Blockchain::sync`] defaults to calling this internally if not overridden.
     fn setup<D: BatchDatabase, P: 'static + Progress>(
         &self,
-        stop_gap: Option<usize>,
         database: &mut D,
         progress_update: P,
     ) -> Result<(), Error>;
@@ -118,11 +117,10 @@ pub trait Blockchain {
     /// [`BatchOperations::del_utxo`]: crate::database::BatchOperations::del_utxo
     fn sync<D: BatchDatabase, P: 'static + Progress>(
         &self,
-        stop_gap: Option<usize>,
         database: &mut D,
         progress_update: P,
     ) -> Result<(), Error> {
-        maybe_await!(self.setup(stop_gap, database, progress_update))
+        maybe_await!(self.setup(database, progress_update))
     }
 
     /// Fetch a transaction from the blockchain given its txid
@@ -218,20 +216,18 @@ impl<T: Blockchain> Blockchain for Arc<T> {
 
     fn setup<D: BatchDatabase, P: 'static + Progress>(
         &self,
-        stop_gap: Option<usize>,
         database: &mut D,
         progress_update: P,
     ) -> Result<(), Error> {
-        maybe_await!(self.deref().setup(stop_gap, database, progress_update))
+        maybe_await!(self.deref().setup(database, progress_update))
     }
 
     fn sync<D: BatchDatabase, P: 'static + Progress>(
         &self,
-        stop_gap: Option<usize>,
         database: &mut D,
         progress_update: P,
     ) -> Result<(), Error> {
-        maybe_await!(self.deref().sync(stop_gap, database, progress_update))
+        maybe_await!(self.deref().sync(database, progress_update))
     }
 
     fn get_tx(&self, txid: &Txid) -> Result<Option<Transaction>, Error> {

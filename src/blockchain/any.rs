@@ -39,7 +39,7 @@
 //!
 //! # #[cfg(feature = "esplora")]
 //! # {
-//! let esplora_blockchain = EsploraBlockchain::new("...", None);
+//! let esplora_blockchain = EsploraBlockchain::new("...", None, 20);
 //! let wallet_esplora: Wallet<AnyBlockchain, _> = Wallet::new(
 //!     "...",
 //!     None,
@@ -126,31 +126,17 @@ impl Blockchain for AnyBlockchain {
 
     fn setup<D: BatchDatabase, P: 'static + Progress>(
         &self,
-        stop_gap: Option<usize>,
         database: &mut D,
         progress_update: P,
     ) -> Result<(), Error> {
-        maybe_await!(impl_inner_method!(
-            self,
-            setup,
-            stop_gap,
-            database,
-            progress_update
-        ))
+        maybe_await!(impl_inner_method!(self, setup, database, progress_update))
     }
     fn sync<D: BatchDatabase, P: 'static + Progress>(
         &self,
-        stop_gap: Option<usize>,
         database: &mut D,
         progress_update: P,
     ) -> Result<(), Error> {
-        maybe_await!(impl_inner_method!(
-            self,
-            sync,
-            stop_gap,
-            database,
-            progress_update
-        ))
+        maybe_await!(impl_inner_method!(self, sync, database, progress_update))
     }
 
     fn get_tx(&self, txid: &Txid) -> Result<Option<Transaction>, Error> {

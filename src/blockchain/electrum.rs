@@ -70,12 +70,11 @@ impl Blockchain for ElectrumBlockchain {
 
     fn setup<D: BatchDatabase, P: Progress>(
         &self,
-        _stop_gap: Option<usize>,
         database: &mut D,
         progress_update: P,
     ) -> Result<(), Error> {
         self.client
-            .electrum_like_setup(Some(self.stop_gap), database, progress_update)
+            .electrum_like_setup(self.stop_gap, database, progress_update)
     }
 
     fn get_tx(&self, txid: &Txid) -> Result<Option<Transaction>, Error> {

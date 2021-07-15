@@ -1500,17 +1500,13 @@ where
         // TODO: what if i generate an address first and cache some addresses?
         // TODO: we should sync if generating an address triggers a new batch to be stored
         if run_setup {
-            maybe_await!(self.client.setup(
-                None,
-                self.database.borrow_mut().deref_mut(),
-                progress_update,
-            ))?;
+            maybe_await!(self
+                .client
+                .setup(self.database.borrow_mut().deref_mut(), progress_update,))?;
         } else {
-            maybe_await!(self.client.sync(
-                None,
-                self.database.borrow_mut().deref_mut(),
-                progress_update,
-            ))?;
+            maybe_await!(self
+                .client
+                .sync(self.database.borrow_mut().deref_mut(), progress_update,))?;
         }
 
         #[cfg(feature = "verify")]

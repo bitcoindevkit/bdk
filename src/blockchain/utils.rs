@@ -53,7 +53,7 @@ pub trait ElectrumLikeSync {
 
     fn electrum_like_setup<D: BatchDatabase, P: Progress>(
         &self,
-        stop_gap: Option<usize>,
+        stop_gap: usize,
         db: &mut D,
         _progress_update: P,
     ) -> Result<(), Error> {
@@ -61,7 +61,6 @@ pub trait ElectrumLikeSync {
         let start = Instant::new();
         debug!("start setup");
 
-        let stop_gap = stop_gap.unwrap_or(20);
         let chunk_size = stop_gap;
 
         let mut history_txs_id = HashSet::new();

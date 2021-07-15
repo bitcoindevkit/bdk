@@ -106,7 +106,6 @@ impl Blockchain for RpcBlockchain {
 
     fn setup<D: BatchDatabase, P: 'static + Progress>(
         &self,
-        stop_gap: Option<usize>,
         database: &mut D,
         progress_update: P,
     ) -> Result<(), Error> {
@@ -150,12 +149,11 @@ impl Blockchain for RpcBlockchain {
 
         self.set_node_synced_height(current_height)?;
 
-        self.sync(stop_gap, database, progress_update)
+        self.sync(database, progress_update)
     }
 
     fn sync<D: BatchDatabase, P: 'static + Progress>(
         &self,
-        _stop_gap: Option<usize>,
         db: &mut D,
         _progress_update: P,
     ) -> Result<(), Error> {

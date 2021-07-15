@@ -18,7 +18,7 @@
 //!
 //! ```no_run
 //! # use bdk::blockchain::esplora::EsploraBlockchain;
-//! let blockchain = EsploraBlockchain::new("https://blockstream.info/testnet/api", None);
+//! let blockchain = EsploraBlockchain::new("https://blockstream.info/testnet/api", None, 20);
 //! # Ok::<(), bdk::Error>(())
 //! ```
 
@@ -102,13 +102,12 @@ impl Blockchain for EsploraBlockchain {
 
     fn setup<D: BatchDatabase, P: Progress>(
         &self,
-        stop_gap: Option<usize>,
         database: &mut D,
         progress_update: P,
     ) -> Result<(), Error> {
         maybe_await!(self
             .url_client
-            .electrum_like_setup(stop_gap, database, progress_update))
+            .electrum_like_setup(self.stop_gap, database, progress_update))
     }
 
     fn get_tx(&self, txid: &Txid) -> Result<Option<Transaction>, Error> {
@@ -429,6 +428,6 @@ impl_error!(bitcoin::hashes::hex::Error, Hex, EsploraError);
 #[cfg(feature = "test-esplora")]
 crate::bdk_blockchain_tests! {
     fn test_instance(test_client: &TestClient) -> EsploraBlockchain {
-        EsploraBlockchain::new(&format!("http://{}",test_client.electrsd.esplora_url.as_ref().unwrap()), None)
+        EsploraBlockchain::new(&format!("http://{}",test_client.electrsd.esplora_url.as_ref().unwrap()), None, 20)
     }
 }
