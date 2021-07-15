@@ -43,11 +43,17 @@ use crate::FeeRate;
 ///
 /// ## Example
 /// See the [`blockchain::electrum`](crate::blockchain::electrum) module for a usage example.
-pub struct ElectrumBlockchain(Client);
+pub struct ElectrumBlockchain {
+    client: Client,
+    stop_gap: usize,
+}
 
 impl std::convert::From<Client> for ElectrumBlockchain {
     fn from(client: Client) -> Self {
-        ElectrumBlockchain(client)
+        ElectrumBlockchain {
+            client,
+            stop_gap: 20,
+        }
     }
 }
 
@@ -64,34 +70,34 @@ impl Blockchain for ElectrumBlockchain {
 
     fn setup<D: BatchDatabase, P: Progress>(
         &self,
-        stop_gap: Option<usize>,
+        _stop_gap: Option<usize>,
         database: &mut D,
         progress_update: P,
     ) -> Result<(), Error> {
-        self.0
-            .electrum_like_setup(stop_gap, database, progress_update)
+        self.client
+            .electrum_like_setup(Some(self.stop_gap), database, progress_update)
     }
 
     fn get_tx(&self, txid: &Txid) -> Result<Option<Transaction>, Error> {
-        Ok(self.0.transaction_get(txid).map(Option::Some)?)
+        Ok(self.client.transaction_get(txid).map(Option::Some)?)
     }
 
     fn broadcast(&self, tx: &Transaction) -> Result<(), Error> {
-        Ok(self.0.transaction_broadcast(tx).map(|_| ())?)
+        Ok(self.client.transaction_broadcast(tx).map(|_| ())?)
     }
 
     fn get_height(&self) -> Result<u32, Error> {
         // TODO: unsubscribe when added to the client, or is there a better call to use here?
 
         Ok(self
-            .0
+            .client
             .block_headers_subscribe()
             .map(|data| data.height as u32)?)
     }
 
     fn estimate_fee(&self, target: usize) -> Result<FeeRate, Error> {
         Ok(FeeRate::from_btc_per_kvb(
-            self.0.estimate_fee(target)? as f32
+            self.client.estimate_fee(target)? as f32
         ))
     }
 }
@@ -149,6 +155,8 @@ pub struct ElectrumBlockchainConfig {
     pub retry: u8,
     /// Request timeout (seconds)
     pub timeout: Option<u8>,
+    /// Stop searching addresses for transactions after finding an unused gap of this length
+    pub stop_gap: usize,
 }
 
 impl ConfigurableBlockchain for ElectrumBlockchain {
@@ -162,10 +170,10 @@ impl ConfigurableBlockchain for ElectrumBlockchain {
             .socks5(socks5)?
             .build();
 
-        Ok(ElectrumBlockchain(Client::from_config(
-            config.url.as_str(),
-            electrum_config,
-        )?))
+        Ok(ElectrumBlockchain {
+            client: Client::from_config(config.url.as_str(), electrum_config)?,
+            stop_gap: config.stop_gap,
+        })
     }
 }
 

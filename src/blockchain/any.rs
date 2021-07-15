@@ -188,7 +188,8 @@ impl_from!(compact_filters::CompactFiltersBlockchain, AnyBlockchain, CompactFilt
 ///     r#"{
 ///    "type" : "electrum",
 ///    "url" : "ssl://electrum.blockstream.info:50002",
-///    "retry": 2
+///    "retry": 2,
+///    "stop_gap": 20
 /// }"#,
 /// )
 /// .unwrap();
@@ -198,7 +199,8 @@ impl_from!(compact_filters::CompactFiltersBlockchain, AnyBlockchain, CompactFilt
 ///         url: "ssl://electrum.blockstream.info:50002".into(),
 ///         retry: 2,
 ///         socks5: None,
-///         timeout: None
+///         timeout: None,
+///         stop_gap: 20,
 ///     })
 /// );
 /// # }
