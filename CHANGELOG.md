@@ -6,12 +6,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Wallet
+
+- Removed and replaced `set_single_recipient` with more general `drain_to` and replaced `maintain_single_recipient` with `allow_shrinking`.
+
 ## [v0.9.0] - [v0.8.0]
 
 ### Wallet
-#### Added
-- Bitcoin core RPC added as blockchain backend
-- Add a `verify` feature that can be enable to verify the unconfirmed txs we download against the consensus rules
+
+- Added Bitcoin core RPC added as blockchain backend
+- Added a `verify` feature that can be enable to verify the unconfirmed txs we download against the consensus rules
 
 ## [v0.8.0] - [v0.7.0]
 
