@@ -543,7 +543,7 @@ where
                         });
                     }
                 }
-                (FeeRate::from_sat_per_vb(0.0), *fee as f32)
+                (FeeRate::from_sat_per_vb(0.0), *fee)
             }
             FeePolicy::FeeRate(rate) => {
                 if let Some(previous_fee) = params.bumping_fee {
@@ -554,7 +554,7 @@ where
                         });
                     }
                 }
-                (*rate, 0.0)
+                (*rate, 0)
             }
         };
 
@@ -588,8 +588,7 @@ where
         let mut outgoing: u64 = 0;
         let mut received: u64 = 0;
 
-        let calc_fee_bytes = |wu| (wu as f32) * fee_rate.as_sat_vb() / 4.0;
-        fee_amount += calc_fee_bytes(tx.get_weight());
+        fee_amount += fee_wu(fee_rate, tx.get_weight());
 
         for (index, (script_pubkey, satoshi)) in recipients.into_iter().enumerate() {
             let value = match params.single_recipient {
@@ -606,7 +605,7 @@ where
                 script_pubkey: script_pubkey.clone(),
                 value,
             };
-            fee_amount += calc_fee_bytes(serialize(&new_out).len() * 4);
+            fee_amount += fee_vbytes(fee_rate, serialize(&new_out).len());
 
             tx.output.push(new_out);
 
@@ -662,11 +661,10 @@ where
                 };
 
                 // take the change into account for fees
-                fee_amount += calc_fee_bytes(serialize(&change_output).len() * 4);
+                fee_amount += fee_vbytes(fee_rate, serialize(&change_output).len());
                 Some(change_output)
             }
         };
-        let mut fee_amount = fee_amount.ceil() as u64;
         let change_val = (coin_selection.selected_amount() - outgoing).saturating_sub(fee_amount);
 
         match change_output {
@@ -780,8 +778,10 @@ where
             return Err(Error::IrreplaceableTransaction);
         }
 
-        let vbytes = tx.get_weight().vbytes();
-        let feerate = details.fee.ok_or(Error::FeeRateUnavailable)? as f32 / vbytes;
+        let feerate = fee_rate_wu(
+            details.fee.ok_or(Error::FeeRateUnavailable)?,
+            tx.get_weight(),
+        );
 
         // remove the inputs from the tx and process them
         let original_txin = tx.input.drain(..).collect::<Vec<_>>();
@@ -858,7 +858,7 @@ where
             utxos: original_utxos,
             bumping_fee: Some(tx_builder::PreviousFee {
                 absolute: details.fee.ok_or(Error::FeeRateUnavailable)?,
-                rate: feerate,
+                rate: feerate.as_sat_vb(),
             }),
             ..Default::default()
         };
@@ -1581,13 +1581,35 @@ where
 /// Trait implemented by types that can be used to measure weight units.
 pub trait Vbytes {
     /// Convert weight units to virtual bytes.
-    fn vbytes(self) -> f32;
+    fn vbytes(self) -> usize;
 }
 
 impl Vbytes for usize {
-    fn vbytes(self) -> f32 {
-        self as f32 / 4.0
+    fn vbytes(self) -> usize {
+        // ref: https://github.com/bitcoin/bips/blob/master/bip-0141.mediawiki#transaction-size-calculations
+        (self as f32 / 4.0).ceil() as usize
     }
+}
+
+/// Calculate fee rate by weight units.
+pub fn fee_rate_wu(fee: u64, wu: usize) -> FeeRate {
+    fee_rate_vbytes(fee, wu.vbytes())
+}
+
+/// Calculate fee rate by virtual bytes.
+pub fn fee_rate_vbytes(fee: u64, vbytes: usize) -> FeeRate {
+    let rate = fee as f32 / vbytes as f32;
+    FeeRate::from_sat_per_vb(rate)
+}
+
+/// Calculate absolute fee in Satoshis from fee rate and weight unit size.
+pub fn fee_wu(fee_rate: FeeRate, wu: usize) -> u64 {
+    fee_vbytes(fee_rate, wu.vbytes())
+}
+
+/// Calculate absolute fee in Satoshis from fee rate and virtual byte size.
+pub fn fee_vbytes(fee_rate: FeeRate, vbytes: usize) -> u64 {
+    (fee_rate.as_sat_vb() * vbytes as f32).ceil() as u64
 }
 
 #[cfg(test)]
@@ -1776,13 +1798,13 @@ pub(crate) mod test {
                 dust_change = true;
             )*
 
-            let tx_fee_rate = $fees as f32 / (tx.get_weight().vbytes());
-            let fee_rate = $fee_rate.as_sat_vb();
+            let tx_fee_rate = fee_rate_wu($fees, tx.get_weight());
+            let fee_rate = $fee_rate;
 
             if !dust_change {
-                assert!((tx_fee_rate - fee_rate).abs() < 0.5, "Expected fee rate of {}, the tx has {}", fee_rate, tx_fee_rate);
+                assert!((tx_fee_rate - fee_rate).as_sat_vb().abs() < 0.5, "Expected fee rate of {:?}, the tx has {:?}", fee_rate, tx_fee_rate);
             } else {
-                assert!(tx_fee_rate >= fee_rate, "Expected fee rate of at least {}, the tx has {}", fee_rate, tx_fee_rate);
+                assert!(tx_fee_rate >= fee_rate, "Expected fee rate of at least {:?}, the tx has {:?}", fee_rate, tx_fee_rate);
             }
         });
     }

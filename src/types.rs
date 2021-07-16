@@ -10,6 +10,7 @@
 // licenses.
 
 use std::convert::AsRef;
+use std::ops::Sub;
 
 use bitcoin::blockdata::transaction::{OutPoint, Transaction, TxOut};
 use bitcoin::{hash_types::Txid, util::psbt};
@@ -74,6 +75,14 @@ impl FeeRate {
 impl std::default::Default for FeeRate {
     fn default() -> Self {
         FeeRate::default_min_relay_fee()
+    }
+}
+
+impl Sub for FeeRate {
+    type Output = Self;
+
+    fn sub(self, other: FeeRate) -> Self::Output {
+        FeeRate(self.0 - other.0)
     }
 }
 
