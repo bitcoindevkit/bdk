@@ -54,12 +54,12 @@ keys-bip39 = ["tiny-bip39"]
 rpc = ["bitcoincore-rpc"]
 
 # We currently provide mulitple implementations of `Blockchain`, all are
-# non-async except for the `EsploraBlockchain` which can be either async or
-# non-async depending on the HTTP client in use.
+# blocking except for the `EsploraBlockchain` which can be either async or
+# blocking depending on the HTTP client in use.
 #
 # - Users wanting asynchronous HTTP calls should enable `async-interface` to get
 #   access to the async `EsploraBlockchain`.
-# - Users wanting non-async HTTP calls users should enable `esplora` AND `ureq`
+# - Users wanting blocking HTTP calls users should enable `esplora` AND `ureq`
 #   to get access to the blocking version of `EsploraBlockchain`.
 async-interface = ["async-trait", "esplora", "reqwest"]
 electrum = ["electrum-client"]
