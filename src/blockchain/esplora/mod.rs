@@ -15,28 +15,38 @@
 //! depending on your needs (blocking or async respectively).
 //!
 //! Please note, to configure the Esplora HTTP client correctly use one of:
-//! Blocking:  --features esplora,ureq
-//! Async:     --features async-features
+//! Blocking:  --features='esplora,ureq'
+//! Async:     --features='async-interface,esplora,reqwest' --no-default-features
 #[cfg(all(
     feature = "esplora",
+    feature = "reqwest",
     any(feature = "async-interface", target_arch = "wasm32"),
 ))]
 mod reqwest;
 
 #[cfg(all(
     feature = "esplora",
+    feature = "reqwest",
     any(feature = "async-interface", target_arch = "wasm32"),
 ))]
 pub use self::reqwest::*;
 
 #[cfg(all(
     feature = "esplora",
-    not(any(feature = "async-interface", target_arch = "wasm32")),
+    not(any(
+        feature = "async-interface",
+        feature = "reqwest",
+        target_arch = "wasm32"
+    )),
 ))]
 mod ureq;
 
 #[cfg(all(
     feature = "esplora",
-    not(any(feature = "async-interface", target_arch = "wasm32")),
+    not(any(
+        feature = "async-interface",
+        feature = "reqwest",
+        target_arch = "wasm32"
+    )),
 ))]
 pub use self::ureq::*;

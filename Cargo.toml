@@ -24,6 +24,7 @@ rand = "^0.7"
 sled = { version = "0.34", optional = true }
 electrum-client = { version = "0.7", optional = true }
 reqwest = { version = "0.11", optional = true, features = ["json"] }
+ureq = { version = "2.1", default-features = false, features = ["json"], optional = true }
 futures = { version = "0.3", optional = true }
 async-trait = { version = "0.1", optional = true }
 rocksdb = { version = "0.14", optional = true }
@@ -32,7 +33,6 @@ socks = { version = "0.3", optional = true }
 lazy_static = { version = "1.4", optional = true }
 tiny-bip39 = { version = "^0.8", optional = true }
 bitcoinconsensus = { version = "0.19.0-3", optional = true }
-ureq = { version = "2.1", default-features = false, features = ["json"], optional = true }
 
 # Needed by bdk_blockchain_tests macro
 bitcoincore-rpc = { version = "0.13", optional = true }
@@ -58,10 +58,12 @@ rpc = ["bitcoincore-rpc"]
 # blocking depending on the HTTP client in use.
 #
 # - Users wanting asynchronous HTTP calls should enable `async-interface` to get
-#   access to the async `EsploraBlockchain`.
-# - Users wanting blocking HTTP calls users should enable `esplora` AND `ureq`
-#   to get access to the blocking version of `EsploraBlockchain`.
-async-interface = ["async-trait", "esplora", "reqwest"]
+#   access to the asynchronous method implementations. Then, if Esplora is wanted,
+#   enable `esplora` AND `reqwest`.
+# - Users wanting blocking HTTP calls can use any of the other blockchain
+#   implementations (`compact_filters`, `electrum`, or `esplora`). Users wanting to
+#   use Esplora should enable `esplora` AND `ureq`.
+async-interface = ["async-trait"]
 electrum = ["electrum-client"]
 esplora = ["futures"]           # Requires one of: `ureq` or `reqwest`.
 

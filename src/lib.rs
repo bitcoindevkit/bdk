@@ -218,6 +218,11 @@ compile_error!(
     "Features async-interface and ureq are mutually exclusive and cannot be enabled together"
 );
 
+#[cfg(all(feature = "async-interface", feature = "compact_filters"))]
+compile_error!(
+    "Features async-interface and compact_filters are mutually exclusive and cannot be enabled together"
+);
+
 #[cfg(all(feature = "esplora", not(feature = "ureq"), not(feature = "reqwest")))]
 compile_error!("Feature missing: esplora requires either ureq or reqwest to be enabled");
 
