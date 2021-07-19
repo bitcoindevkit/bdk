@@ -89,7 +89,6 @@
 //! ```
 
 use crate::types::FeeRate;
-use crate::wallet;
 use crate::{database::Database, WeightedUtxo};
 use crate::{error::Error, Utxo};
 
@@ -185,7 +184,7 @@ impl<D: Database> CoinSelectionAlgorithm<D> for LargestFirstCoinSelection {
         amount_needed: u64,
         mut fee_amount: u64,
     ) -> Result<CoinSelectionResult, Error> {
-        let calc_fee_bytes = |wu| wallet::fee_wu(fee_rate, wu);
+        let calc_fee_bytes = |wu| fee_rate.fee_wu(wu);
 
         log::debug!(
             "amount_needed = `{}`, fee_amount = `{}`, fee_rate = `{:?}`",
@@ -257,10 +256,7 @@ struct OutputGroup {
 
 impl OutputGroup {
     fn new(weighted_utxo: WeightedUtxo, fee_rate: FeeRate) -> Self {
-        let fee = wallet::fee_wu(
-            fee_rate,
-            TXIN_BASE_WEIGHT + weighted_utxo.satisfaction_weight,
-        );
+        let fee = fee_rate.fee_wu(TXIN_BASE_WEIGHT + weighted_utxo.satisfaction_weight);
         let effective_value = weighted_utxo.utxo.txout().value as i64 - fee as i64;
         OutputGroup {
             weighted_utxo,

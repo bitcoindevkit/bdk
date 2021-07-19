@@ -66,9 +66,30 @@ impl FeeRate {
         FeeRate(1.0)
     }
 
+    /// Calculate fee rate from `fee` and weight units (`wu`).
+    pub fn from_wu(fee: u64, wu: usize) -> FeeRate {
+        Self::from_vb(fee, wu.vbytes())
+    }
+
+    /// Calculate fee rate from `fee` and `vbytes`.
+    pub fn from_vb(fee: u64, vbytes: usize) -> FeeRate {
+        let rate = fee as f32 / vbytes as f32;
+        Self::from_sat_per_vb(rate)
+    }
+
     /// Return the value as satoshi/vbyte
     pub fn as_sat_vb(&self) -> f32 {
         self.0
+    }
+
+    /// Calculate absolute fee in Satoshis using size in weight units.
+    pub fn fee_wu(&self, wu: usize) -> u64 {
+        self.fee_vb(wu.vbytes())
+    }
+
+    /// Calculate absolute fee in Satoshis using size in virtual bytes.
+    pub fn fee_vb(&self, vbytes: usize) -> u64 {
+        (self.as_sat_vb() * vbytes as f32).ceil() as u64
     }
 }
 
@@ -83,6 +104,19 @@ impl Sub for FeeRate {
 
     fn sub(self, other: FeeRate) -> Self::Output {
         FeeRate(self.0 - other.0)
+    }
+}
+
+/// Trait implemented by types that can be used to measure weight units.
+pub trait Vbytes {
+    /// Convert weight units to virtual bytes.
+    fn vbytes(self) -> usize;
+}
+
+impl Vbytes for usize {
+    fn vbytes(self) -> usize {
+        // ref: https://github.com/bitcoin/bips/blob/master/bip-0141.mediawiki#transaction-size-calculations
+        (self as f32 / 4.0).ceil() as usize
     }
 }
 

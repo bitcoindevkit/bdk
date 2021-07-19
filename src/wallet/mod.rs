@@ -588,7 +588,7 @@ where
         let mut outgoing: u64 = 0;
         let mut received: u64 = 0;
 
-        fee_amount += fee_wu(fee_rate, tx.get_weight());
+        fee_amount += fee_rate.fee_wu(tx.get_weight());
 
         for (index, (script_pubkey, satoshi)) in recipients.into_iter().enumerate() {
             let value = match params.single_recipient {
@@ -605,7 +605,7 @@ where
                 script_pubkey: script_pubkey.clone(),
                 value,
             };
-            fee_amount += fee_vbytes(fee_rate, serialize(&new_out).len());
+            fee_amount += fee_rate.fee_vb(serialize(&new_out).len());
 
             tx.output.push(new_out);
 
@@ -661,7 +661,7 @@ where
                 };
 
                 // take the change into account for fees
-                fee_amount += fee_vbytes(fee_rate, serialize(&change_output).len());
+                fee_amount += fee_rate.fee_vb(serialize(&change_output).len());
                 Some(change_output)
             }
         };
@@ -778,7 +778,7 @@ where
             return Err(Error::IrreplaceableTransaction);
         }
 
-        let feerate = fee_rate_wu(
+        let feerate = FeeRate::from_wu(
             details.fee.ok_or(Error::FeeRateUnavailable)?,
             tx.get_weight(),
         );
@@ -1578,40 +1578,6 @@ where
     }
 }
 
-/// Trait implemented by types that can be used to measure weight units.
-pub trait Vbytes {
-    /// Convert weight units to virtual bytes.
-    fn vbytes(self) -> usize;
-}
-
-impl Vbytes for usize {
-    fn vbytes(self) -> usize {
-        // ref: https://github.com/bitcoin/bips/blob/master/bip-0141.mediawiki#transaction-size-calculations
-        (self as f32 / 4.0).ceil() as usize
-    }
-}
-
-/// Calculate fee rate by weight units.
-pub fn fee_rate_wu(fee: u64, wu: usize) -> FeeRate {
-    fee_rate_vbytes(fee, wu.vbytes())
-}
-
-/// Calculate fee rate by virtual bytes.
-pub fn fee_rate_vbytes(fee: u64, vbytes: usize) -> FeeRate {
-    let rate = fee as f32 / vbytes as f32;
-    FeeRate::from_sat_per_vb(rate)
-}
-
-/// Calculate absolute fee in Satoshis from fee rate and weight unit size.
-pub fn fee_wu(fee_rate: FeeRate, wu: usize) -> u64 {
-    fee_vbytes(fee_rate, wu.vbytes())
-}
-
-/// Calculate absolute fee in Satoshis from fee rate and virtual byte size.
-pub fn fee_vbytes(fee_rate: FeeRate, vbytes: usize) -> u64 {
-    (fee_rate.as_sat_vb() * vbytes as f32).ceil() as u64
-}
-
 #[cfg(test)]
 pub(crate) mod test {
     use std::str::FromStr;
@@ -1798,7 +1764,7 @@ pub(crate) mod test {
                 dust_change = true;
             )*
 
-            let tx_fee_rate = fee_rate_wu($fees, tx.get_weight());
+            let tx_fee_rate = FeeRate::from_wu($fees, tx.get_weight());
             let fee_rate = $fee_rate;
 
             if !dust_change {
