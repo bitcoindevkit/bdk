@@ -690,6 +690,7 @@ mod test {
     use super::*;
 
     #[test]
+    #[ignore]
     fn test_address_manager() {
         // Initiate a manager with an non existent cache file name.
         // It will create a new cache file
