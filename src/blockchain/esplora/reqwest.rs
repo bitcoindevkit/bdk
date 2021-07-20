@@ -12,22 +12,20 @@
 //! Esplora by way of `reqwest` HTTP client.
 
 use std::collections::{HashMap, HashSet};
-use std::fmt;
 
 use futures::stream::{self, FuturesOrdered, StreamExt, TryStreamExt};
 
 #[allow(unused_imports)]
 use log::{debug, error, info, trace};
 
-use serde::Deserialize;
-
 use reqwest::{Client, StatusCode};
 
-use bitcoin::consensus::{self, deserialize, serialize};
+use bitcoin::consensus::{deserialize, serialize};
 use bitcoin::hashes::hex::{FromHex, ToHex};
 use bitcoin::hashes::{sha256, Hash};
-use bitcoin::{BlockHash, BlockHeader, Script, Transaction, Txid};
+use bitcoin::{BlockHeader, Script, Transaction, Txid};
 
+use crate::blockchain::esplora::{EsploraError, EsploraGetHistory};
 use crate::blockchain::utils::{ElectrumLikeSync, ElsGetHistoryRes};
 use crate::blockchain::*;
 use crate::database::BatchDatabase;
@@ -332,17 +330,6 @@ impl ElectrumLikeSync for UrlClient {
     }
 }
 
-#[derive(Deserialize)]
-struct EsploraGetHistoryStatus {
-    block_height: Option<usize>,
-}
-
-#[derive(Deserialize)]
-struct EsploraGetHistory {
-    txid: Txid,
-    status: EsploraGetHistoryStatus,
-}
-
 /// Configuration for an [`EsploraBlockchain`]
 #[derive(Debug, serde::Deserialize, serde::Serialize, Clone, PartialEq)]
 pub struct EsploraBlockchainConfig {
@@ -365,39 +352,6 @@ impl ConfigurableBlockchain for EsploraBlockchain {
         Ok(blockchain)
     }
 }
-
-/// Errors that can happen during a sync with [`EsploraBlockchain`]
-#[derive(Debug)]
-pub enum EsploraError {
-    /// Error with the HTTP call
-    Reqwest(reqwest::Error),
-    /// Invalid number returned
-    Parsing(std::num::ParseIntError),
-    /// Invalid Bitcoin data returned
-    BitcoinEncoding(bitcoin::consensus::encode::Error),
-    /// Invalid Hex data returned
-    Hex(bitcoin::hashes::hex::Error),
-
-    /// Transaction not found
-    TransactionNotFound(Txid),
-    /// Header height not found
-    HeaderHeightNotFound(u32),
-    /// Header hash not found
-    HeaderHashNotFound(BlockHash),
-}
-
-impl fmt::Display for EsploraError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self)
-    }
-}
-
-impl std::error::Error for EsploraError {}
-
-impl_error!(reqwest::Error, Reqwest, EsploraError);
-impl_error!(std::num::ParseIntError, Parsing, EsploraError);
-impl_error!(consensus::encode::Error, BitcoinEncoding, EsploraError);
-impl_error!(bitcoin::hashes::hex::Error, Hex, EsploraError);
 
 #[cfg(test)]
 #[cfg(feature = "test-esplora")]

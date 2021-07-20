@@ -17,6 +17,14 @@
 //! Please note, to configure the Esplora HTTP client correctly use one of:
 //! Blocking:  --features='esplora,ureq'
 //! Async:     --features='async-interface,esplora,reqwest' --no-default-features
+use std::fmt;
+use std::io;
+
+use serde::Deserialize;
+
+use bitcoin::consensus;
+use bitcoin::{BlockHash, Txid};
+
 #[cfg(all(
     feature = "esplora",
     feature = "reqwest",
@@ -50,3 +58,67 @@ mod ureq;
     )),
 ))]
 pub use self::ureq::*;
+
+/// Data type used when fetching transaction history from Esplora.
+#[derive(Deserialize)]
+pub struct EsploraGetHistory {
+    txid: Txid,
+    status: EsploraGetHistoryStatus,
+}
+
+#[derive(Deserialize)]
+struct EsploraGetHistoryStatus {
+    block_height: Option<usize>,
+}
+
+/// Errors that can happen during a sync with [`EsploraBlockchain`]
+#[derive(Debug)]
+pub enum EsploraError {
+    /// Error during ureq HTTP request
+    #[cfg(feature = "ureq")]
+    Ureq(::ureq::Error),
+    /// Transport error during the ureq HTTP call
+    #[cfg(feature = "ureq")]
+    UreqTransport(::ureq::Transport),
+    /// Error during reqwest HTTP request
+    #[cfg(feature = "reqwest")]
+    Reqwest(::reqwest::Error),
+    /// HTTP response error
+    HttpResponse(u16),
+    /// IO error during ureq response read
+    Io(io::Error),
+    /// No header found in ureq response
+    NoHeader,
+    /// Invalid number returned
+    Parsing(std::num::ParseIntError),
+    /// Invalid Bitcoin data returned
+    BitcoinEncoding(bitcoin::consensus::encode::Error),
+    /// Invalid Hex data returned
+    Hex(bitcoin::hashes::hex::Error),
+
+    /// Transaction not found
+    TransactionNotFound(Txid),
+    /// Header height not found
+    HeaderHeightNotFound(u32),
+    /// Header hash not found
+    HeaderHashNotFound(BlockHash),
+}
+
+impl fmt::Display for EsploraError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+impl std::error::Error for EsploraError {}
+
+#[cfg(feature = "ureq")]
+impl_error!(::ureq::Error, Ureq, EsploraError);
+#[cfg(feature = "ureq")]
+impl_error!(::ureq::Transport, UreqTransport, EsploraError);
+#[cfg(feature = "reqwest")]
+impl_error!(::reqwest::Error, Reqwest, EsploraError);
+impl_error!(io::Error, Io, EsploraError);
+impl_error!(std::num::ParseIntError, Parsing, EsploraError);
+impl_error!(consensus::encode::Error, BitcoinEncoding, EsploraError);
+impl_error!(bitcoin::hashes::hex::Error, Hex, EsploraError);
