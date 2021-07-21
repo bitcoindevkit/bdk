@@ -65,6 +65,7 @@ use rocksdb::{Options, SliceTransform, DB};
 
 mod address_manager;
 mod peer;
+mod peermngr;
 mod store;
 mod sync;
 
