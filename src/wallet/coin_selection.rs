@@ -345,6 +345,14 @@ impl<D: Database> CoinSelectionAlgorithm<D> for BranchAndBoundCoinSelection {
             .try_into()
             .expect("Bitcoin amount to fit into i64");
 
+        if curr_value > actual_target {
+            return Ok(BranchAndBoundCoinSelection::calculate_cs_result(
+                vec![],
+                required_utxos,
+                fee_amount,
+            ));
+        }
+
         Ok(self
             .bnb(
                 required_utxos.clone(),
