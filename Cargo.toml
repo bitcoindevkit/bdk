@@ -33,6 +33,7 @@ lazy_static = { version = "1.4", optional = true }
 tiny-bip39 = { version = "^0.8", optional = true }
 zeroize = { version = "<1.4.0", optional = true }
 bitcoinconsensus = { version = "0.19.0-3", optional = true }
+base64 = { version = "^0.13", optional = true }
 
 # Needed by bdk_blockchain_tests macro
 bitcoincore-rpc = { version = "0.13", optional = true }
@@ -59,7 +60,7 @@ async-interface = ["async-trait"]
 all-keys = ["keys-bip39"]
 keys-bip39 = ["tiny-bip39", "zeroize"]
 rpc = ["bitcoincore-rpc"]
-
+reserves = ["bitcoinconsensus", "base64", "electrum"]
 
 # Debug/Test features
 test-blockchains = ["bitcoincore-rpc", "electrum-client"]
@@ -72,6 +73,9 @@ test-md-docs = ["electrum"]
 lazy_static = "1.4"
 env_logger = "0.7"
 clap = "2.33"
+#serial_test = "0.4"
+#bitcoind = "0.10.0"
+rstest = "^0.10"
 electrsd = { version= "0.6", features = ["trigger", "bitcoind_0_21_1"] }
 
 [[example]]

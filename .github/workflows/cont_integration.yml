@@ -24,6 +24,7 @@ jobs:
           - compiler
           - rpc
           - verify
+          - reserves
     steps:
       - name: checkout
         uses: actions/checkout@v2
