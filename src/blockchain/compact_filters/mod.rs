@@ -229,7 +229,6 @@ impl Blockchain for CompactFiltersBlockchain {
     #[allow(clippy::mutex_atomic)] // Mutex is easier to understand than a CAS loop.
     fn setup<D: BatchDatabase, P: 'static + Progress>(
         &self,
-        _stop_gap: Option<usize>, // TODO: move to electrum and esplora only
         database: &mut D,
         progress_update: P,
     ) -> Result<(), Error> {

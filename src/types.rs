@@ -160,7 +160,10 @@ pub struct TransactionDetails {
     pub received: u64,
     /// Sent value (sats)
     pub sent: u64,
-    /// Fee value (sats) if available
+    /// Fee value (sats) if available.
+    /// The availability of the fee depends on the backend. It's never `None` with an Electrum
+    /// Server backend, but it could be `None` with a Bitcoin RPC node without txindex that receive
+    /// funds while offline.
     pub fee: Option<u64>,
     /// If the transaction is confirmed, contains height and timestamp of the block containing the
     /// transaction, unconfirmed transaction contains `None`.

@@ -10,6 +10,7 @@
 // licenses.
 #![allow(missing_docs)]
 
+#[cfg(test)]
 #[cfg(feature = "test-blockchains")]
 pub mod blockchain_tests;
 

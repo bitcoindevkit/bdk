@@ -383,6 +383,7 @@ impl BatchDatabase for Tree {
 
 #[cfg(test)]
 mod test {
+    use lazy_static::lazy_static;
     use std::sync::{Arc, Condvar, Mutex, Once};
     use std::time::{SystemTime, UNIX_EPOCH};
 

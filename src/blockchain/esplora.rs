@@ -18,33 +18,31 @@
 //!
 //! ```no_run
 //! # use bdk::blockchain::esplora::EsploraBlockchain;
-//! let blockchain = EsploraBlockchain::new("https://blockstream.info/testnet/api", None);
+//! let blockchain = EsploraBlockchain::new("https://blockstream.info/testnet/api", None, 20);
 //! # Ok::<(), bdk::Error>(())
 //! ```
 
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 
-use futures::stream::{self, FuturesOrdered, StreamExt, TryStreamExt};
-
-#[allow(unused_imports)]
-use log::{debug, error, info, trace};
-
-use serde::Deserialize;
-
-use reqwest::{Client, StatusCode};
-
 use bitcoin::consensus::{self, deserialize, serialize};
 use bitcoin::hashes::hex::{FromHex, ToHex};
 use bitcoin::hashes::{sha256, Hash};
 use bitcoin::{BlockHash, BlockHeader, Script, Transaction, Txid};
+use futures::stream::{self, FuturesOrdered, StreamExt, TryStreamExt};
+#[allow(unused_imports)]
+use log::{debug, error, info, trace};
+use reqwest::{Client, StatusCode};
+use serde::Deserialize;
 
-use self::utils::{ElectrumLikeSync, ElsGetHistoryRes};
-use super::*;
 use crate::database::BatchDatabase;
 use crate::error::Error;
 use crate::wallet::utils::ChunksIterator;
 use crate::FeeRate;
+
+use super::*;
+
+use self::utils::{ElectrumLikeSync, ElsGetHistoryRes};
 
 const DEFAULT_CONCURRENT_REQUESTS: u8 = 4;
 
@@ -62,22 +60,31 @@ struct UrlClient {
 /// ## Example
 /// See the [`blockchain::esplora`](crate::blockchain::esplora) module for a usage example.
 #[derive(Debug)]
-pub struct EsploraBlockchain(UrlClient);
+pub struct EsploraBlockchain {
+    url_client: UrlClient,
+    stop_gap: usize,
+}
 
 impl std::convert::From<UrlClient> for EsploraBlockchain {
     fn from(url_client: UrlClient) -> Self {
-        EsploraBlockchain(url_client)
+        EsploraBlockchain {
+            url_client,
+            stop_gap: 20,
+        }
     }
 }
 
 impl EsploraBlockchain {
     /// Create a new instance of the client from a base URL
-    pub fn new(base_url: &str, concurrency: Option<u8>) -> Self {
-        EsploraBlockchain(UrlClient {
-            url: base_url.to_string(),
-            client: Client::new(),
-            concurrency: concurrency.unwrap_or(DEFAULT_CONCURRENT_REQUESTS),
-        })
+    pub fn new(base_url: &str, concurrency: Option<u8>, stop_gap: usize) -> Self {
+        EsploraBlockchain {
+            url_client: UrlClient {
+                url: base_url.to_string(),
+                client: Client::new(),
+                concurrency: concurrency.unwrap_or(DEFAULT_CONCURRENT_REQUESTS),
+            },
+            stop_gap,
+        }
     }
 }
 
@@ -95,29 +102,28 @@ impl Blockchain for EsploraBlockchain {
 
     fn setup<D: BatchDatabase, P: Progress>(
         &self,
-        stop_gap: Option<usize>,
         database: &mut D,
         progress_update: P,
     ) -> Result<(), Error> {
         maybe_await!(self
-            .0
-            .electrum_like_setup(stop_gap, database, progress_update))
+            .url_client
+            .electrum_like_setup(self.stop_gap, database, progress_update))
     }
 
     fn get_tx(&self, txid: &Txid) -> Result<Option<Transaction>, Error> {
-        Ok(await_or_block!(self.0._get_tx(txid))?)
+        Ok(await_or_block!(self.url_client._get_tx(txid))?)
     }
 
     fn broadcast(&self, tx: &Transaction) -> Result<(), Error> {
-        Ok(await_or_block!(self.0._broadcast(tx))?)
+        Ok(await_or_block!(self.url_client._broadcast(tx))?)
     }
 
     fn get_height(&self) -> Result<u32, Error> {
-        Ok(await_or_block!(self.0._get_height())?)
+        Ok(await_or_block!(self.url_client._get_height())?)
     }
 
     fn estimate_fee(&self, target: usize) -> Result<FeeRate, Error> {
-        let estimates = await_or_block!(self.0._get_fee_estimates())?;
+        let estimates = await_or_block!(self.url_client._get_fee_estimates())?;
 
         let fee_val = estimates
             .into_iter()
@@ -369,6 +375,8 @@ pub struct EsploraBlockchainConfig {
     pub base_url: String,
     /// Number of parallel requests sent to the esplora service (default: 4)
     pub concurrency: Option<u8>,
+    /// Stop searching addresses for transactions after finding an unused gap of this length
+    pub stop_gap: usize,
 }
 
 impl ConfigurableBlockchain for EsploraBlockchain {
@@ -378,6 +386,7 @@ impl ConfigurableBlockchain for EsploraBlockchain {
         Ok(EsploraBlockchain::new(
             config.base_url.as_str(),
             config.concurrency,
+            config.stop_gap,
         ))
     }
 }
@@ -415,9 +424,10 @@ impl_error!(std::num::ParseIntError, Parsing, EsploraError);
 impl_error!(consensus::encode::Error, BitcoinEncoding, EsploraError);
 impl_error!(bitcoin::hashes::hex::Error, Hex, EsploraError);
 
-#[cfg(feature = "test-blockchains")]
+#[cfg(test)]
+#[cfg(feature = "test-esplora")]
 crate::bdk_blockchain_tests! {
-    fn test_instance() -> EsploraBlockchain {
-        EsploraBlockchain::new(std::env::var("BDK_ESPLORA_URL").unwrap_or("127.0.0.1:3002".into()).as_str(), None)
+    fn test_instance(test_client: &TestClient) -> EsploraBlockchain {
+        EsploraBlockchain::new(&format!("http://{}",test_client.electrsd.esplora_url.as_ref().unwrap()), None, 20)
     }
 }

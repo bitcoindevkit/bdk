@@ -40,7 +40,7 @@
 //! interact with the bitcoin P2P network.
 //!
 //! ```toml
-//! bdk = "0.8.0"
+//! bdk = "0.9.0"
 //! ```
 #![cfg_attr(
     feature = "electrum",
@@ -235,12 +235,6 @@ pub extern crate reqwest;
 pub extern crate sled;
 
 #[allow(unused_imports)]
-#[cfg(test)]
-#[allow(unused_imports)]
-#[cfg(test)]
-#[macro_use]
-pub extern crate serial_test;
-
 #[macro_use]
 pub(crate) mod error;
 pub mod blockchain;

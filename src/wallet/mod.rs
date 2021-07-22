@@ -567,21 +567,6 @@ where
             output: vec![],
         };
 
-        let recipients = match &params.single_recipient {
-            Some(recipient) => vec![(recipient, 0)],
-            None => params.recipients.iter().map(|(r, v)| (r, *v)).collect(),
-        };
-        if params.single_recipient.is_some()
-            && !params.manually_selected_only
-            && !params.drain_wallet
-            && params.bumping_fee.is_none()
-        {
-            return Err(Error::SingleRecipientNoInputs);
-        }
-        if recipients.is_empty() {
-            return Err(Error::NoRecipients);
-        }
-
         if params.manually_selected_only && params.utxos.is_empty() {
             return Err(Error::NoUtxosSelected);
         }
@@ -593,12 +578,12 @@ where
         let calc_fee_bytes = |wu| (wu as f32) * fee_rate.as_sat_vb() / 4.0;
         fee_amount += calc_fee_bytes(tx.get_weight());
 
-        for (index, (script_pubkey, satoshi)) in recipients.into_iter().enumerate() {
-            let value = match params.single_recipient {
-                Some(_) => 0,
-                None if satoshi.is_dust() => return Err(Error::OutputBelowDustLimit(index)),
-                None => satoshi,
-            };
+        let recipients = params.recipients.iter().map(|(r, v)| (r, *v));
+
+        for (index, (script_pubkey, value)) in recipients.enumerate() {
+            if value.is_dust() {
+                return Err(Error::OutputBelowDustLimit(index));
+            }
 
             if self.is_mine(script_pubkey)? {
                 received += value;
@@ -653,52 +638,45 @@ where
             })
             .collect();
 
-        // prepare the change output
-        let change_output = match params.single_recipient {
-            Some(_) => None,
-            None => {
-                let change_script = self.get_change_address()?;
-                let change_output = TxOut {
-                    script_pubkey: change_script,
-                    value: 0,
-                };
+        // prepare the drain output
+        let mut drain_output = {
+            let script_pubkey = match params.drain_to {
+                Some(ref drain_recipient) => drain_recipient.clone(),
+                None => self.get_change_address()?,
+            };
 
-                // take the change into account for fees
-                fee_amount += calc_fee_bytes(serialize(&change_output).len() * 4);
-                Some(change_output)
+            TxOut {
+                script_pubkey,
+                value: 0,
             }
         };
+
+        fee_amount += calc_fee_bytes(serialize(&drain_output).len() * 4);
+
         let mut fee_amount = fee_amount.ceil() as u64;
-        let change_val = (coin_selection.selected_amount() - outgoing).saturating_sub(fee_amount);
+        let drain_val = (coin_selection.selected_amount() - outgoing).saturating_sub(fee_amount);
 
-        match change_output {
-            None if change_val.is_dust() => {
-                // single recipient, but the only output would be below dust limit
-                // TODO: or OutputBelowDustLimit?
-                return Err(Error::InsufficientFunds {
-                    needed: DUST_LIMIT_SATOSHI,
-                    available: change_val,
-                });
-            }
-            Some(_) if change_val.is_dust() => {
-                // skip the change output because it's dust -- just include it in the fee.
-                fee_amount += change_val;
-            }
-            Some(mut change_output) => {
-                change_output.value = change_val;
-                received += change_val;
-
-                tx.output.push(change_output);
-            }
-            None => {
-                // there's only one output, send everything to it
-                tx.output[0].value = change_val;
-
-                // the single recipient is our address
-                if self.is_mine(&tx.output[0].script_pubkey)? {
-                    received = change_val;
+        if tx.output.is_empty() {
+            if params.drain_to.is_some() {
+                if drain_val.is_dust() {
+                    return Err(Error::InsufficientFunds {
+                        needed: DUST_LIMIT_SATOSHI,
+                        available: drain_val,
+                    });
                 }
+            } else {
+                return Err(Error::NoRecipients);
             }
+        }
+
+        if drain_val.is_dust() {
+            fee_amount += drain_val;
+        } else {
+            drain_output.value = drain_val;
+            if self.is_mine(&drain_output.script_pubkey)? {
+                received += drain_val;
+            }
+            tx.output.push(drain_output);
         }
 
         // sort input/outputs according to the chosen algorithm
@@ -726,10 +704,6 @@ where
     /// Returns an error if the transaction is already confirmed or doesn't explicitly signal
     /// *repalce by fee* (RBF). If the transaction can be fee bumped then it returns a [`TxBuilder`]
     /// pre-populated with the inputs and outputs of the original transaction.
-    ///
-    /// **NOTE**: if the original transaction was made with [`TxBuilder::set_single_recipient`],
-    /// the [`TxBuilder::maintain_single_recipient`] flag should be enabled to correctly reduce the
-    /// only output's value in order to increase the fees.
     ///
     /// ## Example
     ///
@@ -782,7 +756,7 @@ where
             return Err(Error::IrreplaceableTransaction);
         }
 
-        let vbytes = tx.get_weight() as f32 / 4.0;
+        let vbytes = tx.get_weight().vbytes();
         let feerate = details.fee.ok_or(Error::FeeRateUnavailable)? as f32 / vbytes;
 
         // remove the inputs from the tx and process them
@@ -1528,17 +1502,13 @@ where
         // TODO: what if i generate an address first and cache some addresses?
         // TODO: we should sync if generating an address triggers a new batch to be stored
         if run_setup {
-            maybe_await!(self.client.setup(
-                None,
-                self.database.borrow_mut().deref_mut(),
-                progress_update,
-            ))?;
+            maybe_await!(self
+                .client
+                .setup(self.database.borrow_mut().deref_mut(), progress_update,))?;
         } else {
-            maybe_await!(self.client.sync(
-                None,
-                self.database.borrow_mut().deref_mut(),
-                progress_update,
-            ))?;
+            maybe_await!(self
+                .client
+                .sync(self.database.borrow_mut().deref_mut(), progress_update,))?;
         }
 
         #[cfg(feature = "verify")]
@@ -1577,6 +1547,18 @@ where
         maybe_await!(self.client.broadcast(&tx))?;
 
         Ok(tx.txid())
+    }
+}
+
+/// Trait implemented by types that can be used to measure weight units.
+pub trait Vbytes {
+    /// Convert weight units to virtual bytes.
+    fn vbytes(self) -> f32;
+}
+
+impl Vbytes for usize {
+    fn vbytes(self) -> f32 {
+        self as f32 / 4.0
     }
 }
 
@@ -1766,7 +1748,7 @@ pub(crate) mod test {
                 dust_change = true;
             )*
 
-            let tx_fee_rate = $fees as f32 / (tx.get_weight() as f32 / 4.0);
+            let tx_fee_rate = $fees as f32 / (tx.get_weight().vbytes());
             let fee_rate = $fee_rate.as_sat_vb();
 
             if !dust_change {
@@ -1998,13 +1980,11 @@ pub(crate) mod test {
     }
 
     #[test]
-    fn test_create_tx_single_recipient_drain_wallet() {
+    fn test_create_tx_drain_wallet_and_drain_to() {
         let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
         let addr = wallet.get_address(New).unwrap();
         let mut builder = wallet.build_tx();
-        builder
-            .set_single_recipient(addr.script_pubkey())
-            .drain_wallet();
+        builder.drain_to(addr.script_pubkey()).drain_wallet();
         let (psbt, details) = builder.finish().unwrap();
 
         assert_eq!(psbt.global.unsigned_tx.output.len(), 1);
@@ -2012,6 +1992,33 @@ pub(crate) mod test {
             psbt.global.unsigned_tx.output[0].value,
             50_000 - details.fee.unwrap_or(0)
         );
+    }
+
+    #[test]
+    fn test_create_tx_drain_wallet_and_drain_to_and_with_recipient() {
+        let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
+        let addr = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap();
+        let drain_addr = wallet.get_address(New).unwrap();
+        let mut builder = wallet.build_tx();
+        builder
+            .add_recipient(addr.script_pubkey(), 20_000)
+            .drain_to(drain_addr.script_pubkey())
+            .drain_wallet();
+        let (psbt, details) = builder.finish().unwrap();
+        dbg!(&psbt);
+        let outputs = psbt.global.unsigned_tx.output;
+
+        assert_eq!(outputs.len(), 2);
+        let main_output = outputs
+            .iter()
+            .find(|x| x.script_pubkey == addr.script_pubkey())
+            .unwrap();
+        let drain_output = outputs
+            .iter()
+            .find(|x| x.script_pubkey == drain_addr.script_pubkey())
+            .unwrap();
+        assert_eq!(main_output.value, 20_000,);
+        assert_eq!(drain_output.value, 30_000 - details.fee.unwrap_or(0));
     }
 
     #[test]
@@ -2044,7 +2051,7 @@ pub(crate) mod test {
         let addr = wallet.get_address(New).unwrap();
         let mut builder = wallet.build_tx();
         builder
-            .set_single_recipient(addr.script_pubkey())
+            .drain_to(addr.script_pubkey())
             .drain_wallet()
             .fee_absolute(100);
         let (psbt, details) = builder.finish().unwrap();
@@ -2063,7 +2070,7 @@ pub(crate) mod test {
         let addr = wallet.get_address(New).unwrap();
         let mut builder = wallet.build_tx();
         builder
-            .set_single_recipient(addr.script_pubkey())
+            .drain_to(addr.script_pubkey())
             .drain_wallet()
             .fee_absolute(0);
         let (psbt, details) = builder.finish().unwrap();
@@ -2083,7 +2090,7 @@ pub(crate) mod test {
         let addr = wallet.get_address(New).unwrap();
         let mut builder = wallet.build_tx();
         builder
-            .set_single_recipient(addr.script_pubkey())
+            .drain_to(addr.script_pubkey())
             .drain_wallet()
             .fee_absolute(60_000);
         let (_psbt, _details) = builder.finish().unwrap();
@@ -2124,13 +2131,13 @@ pub(crate) mod test {
 
     #[test]
     #[should_panic(expected = "InsufficientFunds")]
-    fn test_create_tx_single_recipient_dust_amount() {
+    fn test_create_tx_drain_to_dust_amount() {
         let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
         let addr = wallet.get_address(New).unwrap();
         // very high fee rate, so that the only output would be below dust
         let mut builder = wallet.build_tx();
         builder
-            .set_single_recipient(addr.script_pubkey())
+            .drain_to(addr.script_pubkey())
             .drain_wallet()
             .fee_rate(FeeRate::from_sat_per_vb(453.0));
         builder.finish().unwrap();
@@ -2191,9 +2198,7 @@ pub(crate) mod test {
         let (wallet, _, _) = get_funded_wallet("wpkh([d34db33f/44'/0'/0']tpubDEnoLuPdBep9bzw5LoGYpsxUQYheRQ9gcgrJhJEcdKFB9cWQRyYmkCyRoTqeD4tJYiVVgt6A3rN6rWn9RYhR9sBsGxji29LYWHuKKbdb1ev/0/*)");
         let addr = wallet.get_address(New).unwrap();
         let mut builder = wallet.build_tx();
-        builder
-            .set_single_recipient(addr.script_pubkey())
-            .drain_wallet();
+        builder.drain_to(addr.script_pubkey()).drain_wallet();
         let (psbt, _) = builder.finish().unwrap();
 
         assert_eq!(psbt.inputs[0].bip32_derivation.len(), 1);
@@ -2217,9 +2222,7 @@ pub(crate) mod test {
 
         let addr = testutils!(@external descriptors, 5);
         let mut builder = wallet.build_tx();
-        builder
-            .set_single_recipient(addr.script_pubkey())
-            .drain_wallet();
+        builder.drain_to(addr.script_pubkey()).drain_wallet();
         let (psbt, _) = builder.finish().unwrap();
 
         assert_eq!(psbt.outputs[0].bip32_derivation.len(), 1);
@@ -2240,9 +2243,7 @@ pub(crate) mod test {
             get_funded_wallet("sh(pk(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW))");
         let addr = wallet.get_address(New).unwrap();
         let mut builder = wallet.build_tx();
-        builder
-            .set_single_recipient(addr.script_pubkey())
-            .drain_wallet();
+        builder.drain_to(addr.script_pubkey()).drain_wallet();
         let (psbt, _) = builder.finish().unwrap();
 
         assert_eq!(
@@ -2265,9 +2266,7 @@ pub(crate) mod test {
             get_funded_wallet("wsh(pk(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW))");
         let addr = wallet.get_address(New).unwrap();
         let mut builder = wallet.build_tx();
-        builder
-            .set_single_recipient(addr.script_pubkey())
-            .drain_wallet();
+        builder.drain_to(addr.script_pubkey()).drain_wallet();
         let (psbt, _) = builder.finish().unwrap();
 
         assert_eq!(psbt.inputs[0].redeem_script, None);
@@ -2290,9 +2289,7 @@ pub(crate) mod test {
             get_funded_wallet("sh(wsh(pk(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW)))");
         let addr = wallet.get_address(New).unwrap();
         let mut builder = wallet.build_tx();
-        builder
-            .set_single_recipient(addr.script_pubkey())
-            .drain_wallet();
+        builder.drain_to(addr.script_pubkey()).drain_wallet();
         let (psbt, _) = builder.finish().unwrap();
 
         let script = Script::from(
@@ -2312,9 +2309,7 @@ pub(crate) mod test {
             get_funded_wallet("sh(pk(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW))");
         let addr = wallet.get_address(New).unwrap();
         let mut builder = wallet.build_tx();
-        builder
-            .set_single_recipient(addr.script_pubkey())
-            .drain_wallet();
+        builder.drain_to(addr.script_pubkey()).drain_wallet();
         let (psbt, _) = builder.finish().unwrap();
 
         assert!(psbt.inputs[0].non_witness_utxo.is_some());
@@ -2328,7 +2323,7 @@ pub(crate) mod test {
         let addr = wallet.get_address(New).unwrap();
         let mut builder = wallet.build_tx();
         builder
-            .set_single_recipient(addr.script_pubkey())
+            .drain_to(addr.script_pubkey())
             .only_witness_utxo()
             .drain_wallet();
         let (psbt, _) = builder.finish().unwrap();
@@ -2343,9 +2338,7 @@ pub(crate) mod test {
             get_funded_wallet("sh(wpkh(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW))");
         let addr = wallet.get_address(New).unwrap();
         let mut builder = wallet.build_tx();
-        builder
-            .set_single_recipient(addr.script_pubkey())
-            .drain_wallet();
+        builder.drain_to(addr.script_pubkey()).drain_wallet();
         let (psbt, _) = builder.finish().unwrap();
 
         assert!(psbt.inputs[0].witness_utxo.is_some());
@@ -2357,9 +2350,7 @@ pub(crate) mod test {
             get_funded_wallet("wsh(pk(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW))");
         let addr = wallet.get_address(New).unwrap();
         let mut builder = wallet.build_tx();
-        builder
-            .set_single_recipient(addr.script_pubkey())
-            .drain_wallet();
+        builder.drain_to(addr.script_pubkey()).drain_wallet();
         let (psbt, _) = builder.finish().unwrap();
 
         assert!(psbt.inputs[0].non_witness_utxo.is_some());
@@ -2993,7 +2984,7 @@ pub(crate) mod test {
         let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
         let mut builder = wallet.build_tx();
         builder
-            .set_single_recipient(addr.script_pubkey())
+            .drain_to(addr.script_pubkey())
             .drain_wallet()
             .enable_rbf();
         let (psbt, mut original_details) = builder.finish().unwrap();
@@ -3017,7 +3008,7 @@ pub(crate) mod test {
         let mut builder = wallet.build_fee_bump(txid).unwrap();
         builder
             .fee_rate(FeeRate::from_sat_per_vb(2.5))
-            .maintain_single_recipient()
+            .allow_shrinking(addr.script_pubkey())
             .unwrap();
         let (psbt, details) = builder.finish().unwrap();
 
@@ -3037,7 +3028,7 @@ pub(crate) mod test {
         let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
         let mut builder = wallet.build_tx();
         builder
-            .set_single_recipient(addr.script_pubkey())
+            .drain_to(addr.script_pubkey())
             .drain_wallet()
             .enable_rbf();
         let (psbt, mut original_details) = builder.finish().unwrap();
@@ -3060,7 +3051,7 @@ pub(crate) mod test {
 
         let mut builder = wallet.build_fee_bump(txid).unwrap();
         builder
-            .maintain_single_recipient()
+            .allow_shrinking(addr.script_pubkey())
             .unwrap()
             .fee_absolute(300);
         let (psbt, details) = builder.finish().unwrap();
@@ -3091,7 +3082,7 @@ pub(crate) mod test {
         let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
         let mut builder = wallet.build_tx();
         builder
-            .set_single_recipient(addr.script_pubkey())
+            .drain_to(addr.script_pubkey())
             .add_utxo(outpoint)
             .unwrap()
             .manually_selected_only()
@@ -3120,7 +3111,7 @@ pub(crate) mod test {
         let mut builder = wallet.build_fee_bump(txid).unwrap();
         builder
             .drain_wallet()
-            .maintain_single_recipient()
+            .allow_shrinking(addr.script_pubkey())
             .unwrap()
             .fee_rate(FeeRate::from_sat_per_vb(5.0));
         let (_, details) = builder.finish().unwrap();
@@ -3135,7 +3126,7 @@ pub(crate) mod test {
         // them, and make sure that `bump_fee` doesn't try to add more. This fails because we've
         // told the wallet it's not allowed to add more inputs AND it can't reduce the value of the
         // existing output. In other words, bump_fee + manually_selected_only is always an error
-        // unless you've also set "maintain_single_recipient".
+        // unless you've also set "allow_shrinking" OR there is a change output.
         let incoming_txid = crate::populate_test_db!(
             wallet.database.borrow_mut(),
             testutils! (@tx ( (@external descriptors, 0) => 25_000 ) (@confirmations 1)),
@@ -3148,7 +3139,7 @@ pub(crate) mod test {
         let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
         let mut builder = wallet.build_tx();
         builder
-            .set_single_recipient(addr.script_pubkey())
+            .drain_to(addr.script_pubkey())
             .add_utxo(outpoint)
             .unwrap()
             .manually_selected_only()
@@ -3314,11 +3305,11 @@ pub(crate) mod test {
             Some(100),
         );
 
-        // initially make a tx without change by using `set_single_recipient`
+        // initially make a tx without change by using `drain_to`
         let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
         let mut builder = wallet.build_tx();
         builder
-            .set_single_recipient(addr.script_pubkey())
+            .drain_to(addr.script_pubkey())
             .add_utxo(OutPoint {
                 txid: incoming_txid,
                 vout: 0,
@@ -3346,7 +3337,7 @@ pub(crate) mod test {
             .set_tx(&original_details)
             .unwrap();
 
-        // now bump the fees without using `maintain_single_recipient`. the wallet should add an
+        // now bump the fees without using `allow_shrinking`. the wallet should add an
         // extra input and a change output, and leave the original output untouched
         let mut builder = wallet.build_fee_bump(txid).unwrap();
         builder.fee_rate(FeeRate::from_sat_per_vb(50.0));
@@ -3592,9 +3583,7 @@ pub(crate) mod test {
         let (wallet, _, _) = get_funded_wallet("wpkh(tprv8ZgxMBicQKsPd3EupYiPRhaMooHKUHJxNsTfYuScep13go8QFfHdtkG9nRkFGb7busX4isf6X9dURGCoKgitaApQ6MupRhZMcELAxTBRJgS/*)");
         let addr = wallet.get_address(New).unwrap();
         let mut builder = wallet.build_tx();
-        builder
-            .set_single_recipient(addr.script_pubkey())
-            .drain_wallet();
+        builder.drain_to(addr.script_pubkey()).drain_wallet();
         let (mut psbt, _) = builder.finish().unwrap();
 
         let finalized = wallet.sign(&mut psbt, Default::default()).unwrap();
@@ -3609,9 +3598,7 @@ pub(crate) mod test {
         let (wallet, _, _) = get_funded_wallet("wpkh([d34db33f/84h/1h/0h]tprv8ZgxMBicQKsPd3EupYiPRhaMooHKUHJxNsTfYuScep13go8QFfHdtkG9nRkFGb7busX4isf6X9dURGCoKgitaApQ6MupRhZMcELAxTBRJgS/*)");
         let addr = wallet.get_address(New).unwrap();
         let mut builder = wallet.build_tx();
-        builder
-            .set_single_recipient(addr.script_pubkey())
-            .drain_wallet();
+        builder.drain_to(addr.script_pubkey()).drain_wallet();
         let (mut psbt, _) = builder.finish().unwrap();
 
         let finalized = wallet.sign(&mut psbt, Default::default()).unwrap();
@@ -3626,9 +3613,7 @@ pub(crate) mod test {
         let (wallet, _, _) = get_funded_wallet("wpkh(tprv8ZgxMBicQKsPd3EupYiPRhaMooHKUHJxNsTfYuScep13go8QFfHdtkG9nRkFGb7busX4isf6X9dURGCoKgitaApQ6MupRhZMcELAxTBRJgS/44'/0'/0'/0/*)");
         let addr = wallet.get_address(New).unwrap();
         let mut builder = wallet.build_tx();
-        builder
-            .set_single_recipient(addr.script_pubkey())
-            .drain_wallet();
+        builder.drain_to(addr.script_pubkey()).drain_wallet();
         let (mut psbt, _) = builder.finish().unwrap();
 
         let finalized = wallet.sign(&mut psbt, Default::default()).unwrap();
@@ -3643,9 +3628,7 @@ pub(crate) mod test {
         let (wallet, _, _) = get_funded_wallet("sh(wpkh(tprv8ZgxMBicQKsPd3EupYiPRhaMooHKUHJxNsTfYuScep13go8QFfHdtkG9nRkFGb7busX4isf6X9dURGCoKgitaApQ6MupRhZMcELAxTBRJgS/*))");
         let addr = wallet.get_address(New).unwrap();
         let mut builder = wallet.build_tx();
-        builder
-            .set_single_recipient(addr.script_pubkey())
-            .drain_wallet();
+        builder.drain_to(addr.script_pubkey()).drain_wallet();
         let (mut psbt, _) = builder.finish().unwrap();
 
         let finalized = wallet.sign(&mut psbt, Default::default()).unwrap();
@@ -3661,9 +3644,7 @@ pub(crate) mod test {
             get_funded_wallet("wpkh(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW)");
         let addr = wallet.get_address(New).unwrap();
         let mut builder = wallet.build_tx();
-        builder
-            .set_single_recipient(addr.script_pubkey())
-            .drain_wallet();
+        builder.drain_to(addr.script_pubkey()).drain_wallet();
         let (mut psbt, _) = builder.finish().unwrap();
 
         let finalized = wallet.sign(&mut psbt, Default::default()).unwrap();
@@ -3678,9 +3659,7 @@ pub(crate) mod test {
         let (wallet, _, _) = get_funded_wallet("wpkh(tprv8ZgxMBicQKsPd3EupYiPRhaMooHKUHJxNsTfYuScep13go8QFfHdtkG9nRkFGb7busX4isf6X9dURGCoKgitaApQ6MupRhZMcELAxTBRJgS/*)");
         let addr = wallet.get_address(New).unwrap();
         let mut builder = wallet.build_tx();
-        builder
-            .set_single_recipient(addr.script_pubkey())
-            .drain_wallet();
+        builder.drain_to(addr.script_pubkey()).drain_wallet();
         let (mut psbt, _) = builder.finish().unwrap();
 
         psbt.inputs[0].bip32_derivation.clear();
@@ -3762,7 +3741,7 @@ pub(crate) mod test {
         let addr = wallet.get_address(New).unwrap();
         let mut builder = wallet.build_tx();
         builder
-            .set_single_recipient(addr.script_pubkey())
+            .drain_to(addr.script_pubkey())
             .sighash(sighash)
             .drain_wallet();
         let (mut psbt, _) = builder.finish().unwrap();

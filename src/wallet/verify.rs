@@ -124,7 +124,6 @@ mod test {
         }
         fn setup<D: BatchDatabase, P: 'static + Progress>(
             &self,
-            _stop_gap: Option<usize>,
             _database: &mut D,
             _progress_update: P,
         ) -> Result<(), Error> {

@@ -6,38 +6,49 @@ use bitcoin::{Address, Amount, Script, Transaction, Txid};
 pub use bitcoincore_rpc::bitcoincore_rpc_json::AddressType;
 pub use bitcoincore_rpc::{Auth, Client as RpcClient, RpcApi};
 use core::str::FromStr;
+use electrsd::bitcoind::BitcoinD;
+use electrsd::{bitcoind, ElectrsD};
 pub use electrum_client::{Client as ElectrumClient, ElectrumApi};
 #[allow(unused_imports)]
 use log::{debug, error, info, trace};
 use std::collections::HashMap;
 use std::env;
 use std::ops::Deref;
-use std::path::PathBuf;
 use std::time::Duration;
 
 pub struct TestClient {
-    client: RpcClient,
-    electrum: ElectrumClient,
+    pub bitcoind: BitcoinD,
+    pub electrsd: ElectrsD,
 }
 
 impl TestClient {
-    pub fn new(rpc_host_and_wallet: String, rpc_wallet_name: String) -> Self {
-        let client = RpcClient::new(
-            format!("http://{}/wallet/{}", rpc_host_and_wallet, rpc_wallet_name),
-            get_auth(),
-        )
-        .unwrap();
-        let electrum = ElectrumClient::new(&get_electrum_url()).unwrap();
+    pub fn new(bitcoind_exe: String, electrs_exe: String) -> Self {
+        debug!("launching {} and {}", &bitcoind_exe, &electrs_exe);
+        let bitcoind = BitcoinD::new(bitcoind_exe).unwrap();
 
-        TestClient { client, electrum }
+        let http_enabled = cfg!(feature = "test-esplora");
+
+        let electrsd = ElectrsD::new(electrs_exe, &bitcoind, false, http_enabled).unwrap();
+
+        let node_address = bitcoind.client.get_new_address(None, None).unwrap();
+        bitcoind
+            .client
+            .generate_to_address(101, &node_address)
+            .unwrap();
+
+        let mut test_client = TestClient { bitcoind, electrsd };
+        TestClient::wait_for_block(&mut test_client, 101);
+        test_client
     }
 
     fn wait_for_tx(&mut self, txid: Txid, monitor_script: &Script) {
         // wait for electrs to index the tx
         exponential_backoff_poll(|| {
+            self.electrsd.trigger().unwrap();
             trace!("wait_for_tx {}", txid);
 
-            self.electrum
+            self.electrsd
+                .client
                 .script_get_history(monitor_script)
                 .unwrap()
                 .iter()
@@ -46,12 +57,13 @@ impl TestClient {
     }
 
     fn wait_for_block(&mut self, min_height: usize) {
-        self.electrum.block_headers_subscribe().unwrap();
+        self.electrsd.client.block_headers_subscribe().unwrap();
 
         loop {
             let header = exponential_backoff_poll(|| {
-                self.electrum.ping().unwrap();
-                self.electrum.block_headers_pop().unwrap()
+                self.electrsd.trigger().unwrap();
+                self.electrsd.client.ping().unwrap();
+                self.electrsd.client.block_headers_pop().unwrap()
             });
             if header.height >= min_height {
                 break;
@@ -96,10 +108,13 @@ impl TestClient {
             .unwrap();
 
         // broadcast through electrum so that it caches the tx immediately
+
         let txid = self
-            .electrum
+            .electrsd
+            .client
             .transaction_broadcast(&deserialize(&tx.hex).unwrap())
             .unwrap();
+        debug!("broadcasted to electrum {}", txid);
 
         if let Some(num) = meta_tx.min_confirmations {
             self.generate(num, None);
@@ -209,7 +224,7 @@ impl TestClient {
         let block_hex: String = serialize(&block).to_hex();
         debug!("generated block hex: {}", block_hex);
 
-        self.electrum.block_headers_subscribe().unwrap();
+        self.electrsd.client.block_headers_subscribe().unwrap();
 
         let submit_result: serde_json::Value =
             self.call("submitblock", &[block_hex.into()]).unwrap();
@@ -237,7 +252,7 @@ impl TestClient {
     }
 
     pub fn invalidate(&mut self, num_blocks: u64) {
-        self.electrum.block_headers_subscribe().unwrap();
+        self.electrsd.client.block_headers_subscribe().unwrap();
 
         let best_hash = self.get_best_block_hash().unwrap();
         let initial_height = self.get_block_info(&best_hash).unwrap().height;
@@ -288,16 +303,25 @@ impl Deref for TestClient {
     type Target = RpcClient;
 
     fn deref(&self) -> &Self::Target {
-        &self.client
+        &self.bitcoind.client
     }
 }
 
 impl Default for TestClient {
     fn default() -> Self {
-        let rpc_host_and_port =
-            env::var("BDK_RPC_URL").unwrap_or_else(|_| "127.0.0.1:18443".to_string());
-        let wallet = env::var("BDK_RPC_WALLET").unwrap_or_else(|_| "bdk-test".to_string());
-        Self::new(rpc_host_and_port, wallet)
+        let bitcoind_exe = env::var("BITCOIND_EXE")
+            .ok()
+            .or(bitcoind::downloaded_exe_path())
+            .expect(
+                "you should provide env var BITCOIND_EXE or specifiy a bitcoind version feature",
+            );
+        let electrs_exe = env::var("ELECTRS_EXE")
+            .ok()
+            .or(electrsd::downloaded_exe_path())
+            .expect(
+                "you should provide env var ELECTRS_EXE or specifiy a electrsd version feature",
+            );
+        Self::new(bitcoind_exe, electrs_exe)
     }
 }
 
@@ -317,27 +341,13 @@ where
     }
 }
 
-// TODO: we currently only support env vars, we could also parse a toml file
-fn get_auth() -> Auth {
-    match env::var("BDK_RPC_AUTH").as_ref().map(String::as_ref) {
-        Ok("USER_PASS") => Auth::UserPass(
-            env::var("BDK_RPC_USER").unwrap(),
-            env::var("BDK_RPC_PASS").unwrap(),
-        ),
-        _ => Auth::CookieFile(PathBuf::from(
-            env::var("BDK_RPC_COOKIEFILE")
-                .unwrap_or_else(|_| "/home/user/.bitcoin/regtest/.cookie".to_string()),
-        )),
-    }
-}
-
 /// This macro runs blockchain tests against a `Blockchain` implementation. It requires access to a
 /// Bitcoin core wallet via RPC. At the moment you have to dig into the code yourself and look at
 /// the setup required to run the tests yourself.
 #[macro_export]
 macro_rules! bdk_blockchain_tests {
     (
-     fn test_instance() -> $blockchain:ty $block:block) => {
+     fn $_fn_name:ident ( $( $test_client:ident : &TestClient )? $(,)? ) -> $blockchain:ty $block:block) => {
         #[cfg(test)]
         mod bdk_blockchain_tests {
             use $crate::bitcoin::Network;
@@ -347,16 +357,17 @@ macro_rules! bdk_blockchain_tests {
             use $crate::types::KeychainKind;
             use $crate::{Wallet, FeeRate};
             use $crate::testutils;
-            use $crate::serial_test::serial;
 
             use super::*;
 
-            fn get_blockchain() -> $blockchain {
+            #[allow(unused_variables)]
+            fn get_blockchain(test_client: &TestClient) -> $blockchain {
+                $( let $test_client = test_client; )?
                 $block
             }
 
-            fn get_wallet_from_descriptors(descriptors: &(String, Option<String>)) -> Wallet<$blockchain, MemoryDatabase> {
-                Wallet::new(&descriptors.0.to_string(), descriptors.1.as_ref(), Network::Regtest, MemoryDatabase::new(), get_blockchain()).unwrap()
+            fn get_wallet_from_descriptors(descriptors: &(String, Option<String>), test_client: &TestClient) -> Wallet<$blockchain, MemoryDatabase> {
+                Wallet::new(&descriptors.0.to_string(), descriptors.1.as_ref(), Network::Regtest, MemoryDatabase::new(), get_blockchain(test_client)).unwrap()
             }
 
             fn init_single_sig() -> (Wallet<$blockchain, MemoryDatabase>, (String, Option<String>), TestClient) {
@@ -367,7 +378,7 @@ macro_rules! bdk_blockchain_tests {
                 };
 
                 let test_client = TestClient::default();
-                let wallet = get_wallet_from_descriptors(&descriptors);
+                let wallet = get_wallet_from_descriptors(&descriptors, &test_client);
 
                 // rpc need to call import_multi before receiving any tx, otherwise will not see tx in the mempool
                 #[cfg(feature = "test-rpc")]
@@ -377,7 +388,6 @@ macro_rules! bdk_blockchain_tests {
             }
 
             #[test]
-            #[serial]
             fn test_sync_simple() {
                 let (wallet, descriptors, mut test_client) = init_single_sig();
 
@@ -400,7 +410,6 @@ macro_rules! bdk_blockchain_tests {
             }
 
             #[test]
-            #[serial]
             fn test_sync_stop_gap_20() {
                 let (wallet, descriptors, mut test_client) = init_single_sig();
 
@@ -418,7 +427,6 @@ macro_rules! bdk_blockchain_tests {
             }
 
             #[test]
-            #[serial]
             fn test_sync_before_and_after_receive() {
                 let (wallet, descriptors, mut test_client) = init_single_sig();
 
@@ -436,7 +444,6 @@ macro_rules! bdk_blockchain_tests {
             }
 
             #[test]
-            #[serial]
             fn test_sync_multiple_outputs_same_tx() {
                 let (wallet, descriptors, mut test_client) = init_single_sig();
 
@@ -458,7 +465,6 @@ macro_rules! bdk_blockchain_tests {
             }
 
             #[test]
-            #[serial]
             fn test_sync_receive_multi() {
                 let (wallet, descriptors, mut test_client) = init_single_sig();
 
@@ -477,7 +483,6 @@ macro_rules! bdk_blockchain_tests {
             }
 
             #[test]
-            #[serial]
             fn test_sync_address_reuse() {
                 let (wallet, descriptors, mut test_client) = init_single_sig();
 
@@ -497,7 +502,6 @@ macro_rules! bdk_blockchain_tests {
             }
 
             #[test]
-            #[serial]
             fn test_sync_receive_rbf_replaced() {
                 let (wallet, descriptors, mut test_client) = init_single_sig();
 
@@ -536,7 +540,6 @@ macro_rules! bdk_blockchain_tests {
             // doesn't work for some reason.
             #[cfg(not(feature = "esplora"))]
             #[test]
-            #[serial]
             fn test_sync_reorg_block() {
                 let (wallet, descriptors, mut test_client) = init_single_sig();
 
@@ -567,7 +570,6 @@ macro_rules! bdk_blockchain_tests {
             }
 
             #[test]
-            #[serial]
             fn test_sync_after_send() {
                 let (wallet, descriptors, mut test_client) = init_single_sig();
                 println!("{}", descriptors.0);
@@ -588,7 +590,6 @@ macro_rules! bdk_blockchain_tests {
                 let tx = psbt.extract_tx();
                 println!("{}", bitcoin::consensus::encode::serialize_hex(&tx));
                 wallet.broadcast(tx).unwrap();
-
                 wallet.sync(noop_progress(), None).unwrap();
                 assert_eq!(wallet.get_balance().unwrap(), details.received, "incorrect balance after send");
 
@@ -597,7 +598,6 @@ macro_rules! bdk_blockchain_tests {
             }
 
             #[test]
-            #[serial]
             fn test_update_confirmation_time_after_generate() {
                 let (wallet, descriptors, mut test_client) = init_single_sig();
                 println!("{}", descriptors.0);
@@ -623,9 +623,7 @@ macro_rules! bdk_blockchain_tests {
 
             }
 
-
             #[test]
-            #[serial]
             fn test_sync_outgoing_from_scratch() {
                 let (wallet, descriptors, mut test_client) = init_single_sig();
                 let node_addr = test_client.get_node_address(None);
@@ -648,7 +646,7 @@ macro_rules! bdk_blockchain_tests {
                 assert_eq!(wallet.get_balance().unwrap(), details.received, "incorrect balance after receive");
 
                 // empty wallet
-                let wallet = get_wallet_from_descriptors(&descriptors);
+                let wallet = get_wallet_from_descriptors(&descriptors, &test_client);
 
                 #[cfg(feature = "rpc")]  // rpc cannot see mempool tx before importmulti
                 test_client.generate(1, Some(node_addr));
@@ -667,7 +665,6 @@ macro_rules! bdk_blockchain_tests {
             }
 
             #[test]
-            #[serial]
             fn test_sync_long_change_chain() {
                 let (wallet, descriptors, mut test_client) = init_single_sig();
                 let node_addr = test_client.get_node_address(None);
@@ -698,7 +695,7 @@ macro_rules! bdk_blockchain_tests {
 
                 // empty wallet
 
-                let wallet = get_wallet_from_descriptors(&descriptors);
+                let wallet = get_wallet_from_descriptors(&descriptors, &test_client);
 
                 #[cfg(feature = "rpc")]  // rpc cannot see mempool tx before importmulti
                 test_client.generate(1, Some(node_addr));
@@ -709,7 +706,6 @@ macro_rules! bdk_blockchain_tests {
             }
 
             #[test]
-            #[serial]
             fn test_sync_bump_fee_basic() {
                 let (wallet, descriptors, mut test_client) = init_single_sig();
                 let node_addr = test_client.get_node_address(None);
@@ -745,7 +741,6 @@ macro_rules! bdk_blockchain_tests {
             }
 
             #[test]
-            #[serial]
             fn test_sync_bump_fee_remove_change() {
                 let (wallet, descriptors, mut test_client) = init_single_sig();
                 let node_addr = test_client.get_node_address(None);
@@ -781,7 +776,6 @@ macro_rules! bdk_blockchain_tests {
             }
 
             #[test]
-            #[serial]
             fn test_sync_bump_fee_add_input_simple() {
                 let (wallet, descriptors, mut test_client) = init_single_sig();
                 let node_addr = test_client.get_node_address(None);
@@ -815,7 +809,6 @@ macro_rules! bdk_blockchain_tests {
             }
 
             #[test]
-            #[serial]
             fn test_sync_bump_fee_add_input_no_change() {
                 let (wallet, descriptors, mut test_client) = init_single_sig();
                 let node_addr = test_client.get_node_address(None);
@@ -852,7 +845,6 @@ macro_rules! bdk_blockchain_tests {
             }
 
             #[test]
-            #[serial]
             fn test_sync_receive_coinbase() {
                 let (wallet, _, mut test_client) = init_single_sig();
 
@@ -875,5 +867,10 @@ macro_rules! bdk_blockchain_tests {
                 assert!(wallet.get_balance().unwrap() > 0, "incorrect balance after receiving coinbase");
             }
         }
-    }
+    };
+
+    ( fn $fn_name:ident ($( $tt:tt )+) -> $blockchain:ty $block:block) => {
+        compile_error!(concat!("Invalid arguments `", stringify!($($tt)*), "` in the blockchain tests fn."));
+        compile_error!("Only the exact `&TestClient` type is supported, **without** any leading path items.");
+    };
 }
