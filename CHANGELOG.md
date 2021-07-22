@@ -12,7 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Blockchain
 
-- Removed `stop_gap` from `Blockchain` trait and added it to only `ElectrumBlockchain` and `EsploraBlockchain` structs  
+- Removed `stop_gap` from `Blockchain` trait and added it to only `ElectrumBlockchain` and `EsploraBlockchain` structs
+
+- Derive `serde::{Deserialize, Serialize}` attributes for `RpcConfig`.
 
 ## [v0.9.0] - [v0.8.0]
 

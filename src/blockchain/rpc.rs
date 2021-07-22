@@ -43,7 +43,7 @@ use bitcoincore_rpc::json::{
 use bitcoincore_rpc::jsonrpc::serde_json::Value;
 use bitcoincore_rpc::{Auth, Client, RpcApi};
 use log::debug;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
 
@@ -64,7 +64,7 @@ pub struct RpcBlockchain {
 }
 
 /// RpcBlockchain configuration options
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct RpcConfig {
     /// The bitcoin node url
     pub url: String,
