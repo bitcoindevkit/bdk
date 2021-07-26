@@ -41,10 +41,12 @@ use bitcoincore_rpc::json::{
     ImportMultiRequestScriptPubkey, ImportMultiRescanSince,
 };
 use bitcoincore_rpc::jsonrpc::serde_json::Value;
-use bitcoincore_rpc::{Auth, Client, RpcApi};
+use bitcoincore_rpc::Auth as RpcAuth;
+use bitcoincore_rpc::{Client, RpcApi};
 use log::debug;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 use std::str::FromStr;
 
 /// The main struct for RPC backend implementing the [crate::blockchain::Blockchain] trait
@@ -64,7 +66,7 @@ pub struct RpcBlockchain {
 }
 
 /// RpcBlockchain configuration options
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct RpcConfig {
     /// The bitcoin node url
     pub url: String,
@@ -76,6 +78,39 @@ pub struct RpcConfig {
     pub wallet_name: String,
     /// Skip this many blocks of the blockchain at the first rescan, if None the rescan is done from the genesis block
     pub skip_blocks: Option<u32>,
+}
+
+/// This struct is equivalent to [bitcoincore_rpc::Auth] but it implements [serde::Serialize]
+/// To be removed once upstream equivalent is implementing Serialize (json serialization format
+/// should be the same)
+#[derive(Clone, Debug, Hash, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[serde(untagged)]
+pub enum Auth {
+    /// None authentication
+    None,
+    /// Authentication with username and password, usually [Auth::Cookie] should be preferred
+    UserPass {
+        /// Username
+        username: String,
+        /// Password
+        password: String,
+    },
+    /// Authentication with a cookie file
+    Cookie {
+        /// Cookie file
+        file: PathBuf,
+    },
+}
+
+impl From<Auth> for RpcAuth {
+    fn from(auth: Auth) -> Self {
+        match auth {
+            Auth::None => RpcAuth::None,
+            Auth::UserPass { username, password } => RpcAuth::UserPass(username, password),
+            Auth::Cookie { file } => RpcAuth::CookieFile(file),
+        }
+    }
 }
 
 impl RpcBlockchain {
@@ -320,7 +355,7 @@ impl ConfigurableBlockchain for RpcBlockchain {
         let wallet_url = format!("{}/wallet/{}", config.url, &wallet_name);
         debug!("connecting to {} auth:{:?}", wallet_url, config.auth);
 
-        let client = Client::new(wallet_url, config.auth.clone())?;
+        let client = Client::new(wallet_url, config.auth.clone().into())?;
         let loaded_wallets = client.list_wallets()?;
         if loaded_wallets.contains(&wallet_name) {
             debug!("wallet already loaded {:?}", wallet_name);
