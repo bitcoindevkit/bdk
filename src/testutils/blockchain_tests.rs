@@ -7,7 +7,7 @@ pub use bitcoincore_rpc::bitcoincore_rpc_json::AddressType;
 pub use bitcoincore_rpc::{Auth, Client as RpcClient, RpcApi};
 use core::str::FromStr;
 use electrsd::bitcoind::BitcoinD;
-use electrsd::{bitcoind, ElectrsD};
+use electrsd::{bitcoind, Conf, ElectrsD};
 pub use electrum_client::{Client as ElectrumClient, ElectrumApi};
 #[allow(unused_imports)]
 use log::{debug, error, info, trace};
@@ -28,7 +28,11 @@ impl TestClient {
 
         let http_enabled = cfg!(feature = "test-esplora");
 
-        let electrsd = ElectrsD::new(electrs_exe, &bitcoind, false, http_enabled).unwrap();
+        let conf = Conf {
+            http_enabled,
+            ..Default::default()
+        };
+        let electrsd = ElectrsD::with_conf(electrs_exe, &bitcoind, &conf).unwrap();
 
         let node_address = bitcoind.client.get_new_address(None, None).unwrap();
         bitcoind
