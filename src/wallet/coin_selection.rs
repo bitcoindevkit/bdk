@@ -340,6 +340,14 @@ impl<D: Database> CoinSelectionAlgorithm<D> for BranchAndBoundCoinSelection {
             .try_into()
             .expect("Bitcoin amount to fit into i64");
 
+        if curr_value > actual_target {
+            return Ok(BranchAndBoundCoinSelection::calculate_cs_result(
+                vec![],
+                required_utxos,
+                fee_amount,
+            ));
+        }
+
         Ok(self
             .bnb(
                 required_utxos.clone(),
@@ -545,50 +553,31 @@ mod test {
 
     const FEE_AMOUNT: u64 = 50;
 
+    fn utxo(value: u64, index: u32) -> WeightedUtxo {
+        assert!(index < 10);
+        let outpoint = OutPoint::from_str(&format!(
+            "000000000000000000000000000000000000000000000000000000000000000{}:0",
+            index
+        ))
+        .unwrap();
+        WeightedUtxo {
+            satisfaction_weight: P2WPKH_WITNESS_SIZE,
+            utxo: Utxo::Local(LocalUtxo {
+                outpoint,
+                txout: TxOut {
+                    value,
+                    script_pubkey: Script::new(),
+                },
+                keychain: KeychainKind::External,
+            }),
+        }
+    }
+
     fn get_test_utxos() -> Vec<WeightedUtxo> {
         vec![
-            WeightedUtxo {
-                satisfaction_weight: P2WPKH_WITNESS_SIZE,
-                utxo: Utxo::Local(LocalUtxo {
-                    outpoint: OutPoint::from_str(
-                        "0000000000000000000000000000000000000000000000000000000000000000:0",
-                    )
-                    .unwrap(),
-                    txout: TxOut {
-                        value: 100_000,
-                        script_pubkey: Script::new(),
-                    },
-                    keychain: KeychainKind::External,
-                }),
-            },
-            WeightedUtxo {
-                satisfaction_weight: P2WPKH_WITNESS_SIZE,
-                utxo: Utxo::Local(LocalUtxo {
-                    outpoint: OutPoint::from_str(
-                        "0000000000000000000000000000000000000000000000000000000000000001:0",
-                    )
-                    .unwrap(),
-                    txout: TxOut {
-                        value: FEE_AMOUNT as u64 - 40,
-                        script_pubkey: Script::new(),
-                    },
-                    keychain: KeychainKind::External,
-                }),
-            },
-            WeightedUtxo {
-                satisfaction_weight: P2WPKH_WITNESS_SIZE,
-                utxo: Utxo::Local(LocalUtxo {
-                    outpoint: OutPoint::from_str(
-                        "0000000000000000000000000000000000000000000000000000000000000002:0",
-                    )
-                    .unwrap(),
-                    txout: TxOut {
-                        value: 200_000,
-                        script_pubkey: Script::new(),
-                    },
-                    keychain: KeychainKind::Internal,
-                }),
-            },
+            utxo(100_000, 0),
+            utxo(FEE_AMOUNT as u64 - 40, 1),
+            utxo(200_000, 2),
         ]
     }
 
@@ -803,6 +792,37 @@ mod test {
         assert_eq!(result.selected.len(), 3);
         assert_eq!(result.selected_amount(), 300010);
         assert_eq!(result.fee_amount, 254);
+    }
+
+    #[test]
+    fn test_bnb_coin_selection_required_not_enough() {
+        let utxos = get_test_utxos();
+        let database = MemoryDatabase::default();
+
+        let required = vec![utxos[0].clone()];
+        let mut optional = utxos[1..].to_vec();
+        optional.push(utxo(500_000, 3));
+
+        // Defensive assertions, for sanity and in case someone changes the test utxos vector.
+        let amount: u64 = required.iter().map(|u| u.utxo.txout().value).sum();
+        assert_eq!(amount, 100_000);
+        let amount: u64 = optional.iter().map(|u| u.utxo.txout().value).sum();
+        assert!(amount > 150_000);
+
+        let result = BranchAndBoundCoinSelection::default()
+            .coin_select(
+                &database,
+                required,
+                optional,
+                FeeRate::from_sat_per_vb(1.0),
+                150_000,
+                FEE_AMOUNT,
+            )
+            .unwrap();
+
+        assert_eq!(result.selected.len(), 3);
+        assert_eq!(result.selected_amount(), 300_010);
+        assert!((result.fee_amount - 254.0).abs() < f32::EPSILON);
     }
 
     #[test]
