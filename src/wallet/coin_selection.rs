@@ -822,7 +822,7 @@ mod test {
 
         assert_eq!(result.selected.len(), 3);
         assert_eq!(result.selected_amount(), 300_010);
-        assert!((result.fee_amount - 254.0).abs() < f32::EPSILON);
+        assert!((result.fee_amount as f32 - 254.0).abs() < f32::EPSILON);
     }
 
     #[test]
