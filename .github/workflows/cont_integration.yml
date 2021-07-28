@@ -16,7 +16,7 @@ jobs:
           - default
           - minimal
           - all-keys
-          - minimal,esplora,ureq
+          - minimal,use-esplora-ureq
           - key-value-db
           - electrum
           - compact_filters
@@ -25,7 +25,7 @@ jobs:
           - rpc
           - verify
           - async-interface
-          - async-interface,esplora,reqwest
+          - use-esplora-reqwest
     steps:
       - name: checkout
         uses: actions/checkout@v2
@@ -139,7 +139,7 @@ jobs:
       - name: Update toolchain
         run: rustup update
       - name: Check
-        run: cargo check --target wasm32-unknown-unknown --features esplora,reqwest --no-default-features
+        run: cargo check --target wasm32-unknown-unknown --features use-esplora-reqwest --no-default-features
 
 
   fmt:

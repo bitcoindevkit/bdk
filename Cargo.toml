@@ -60,13 +60,20 @@ rpc = ["bitcoincore-rpc"]
 #
 # - Users wanting asynchronous HTTP calls should enable `async-interface` to get
 #   access to the asynchronous method implementations. Then, if Esplora is wanted,
-#   enable `esplora` AND `reqwest`.
+#   enable `esplora` AND `reqwest` (`--features=use-esplora-reqwest`).
 # - Users wanting blocking HTTP calls can use any of the other blockchain
 #   implementations (`compact_filters`, `electrum`, or `esplora`). Users wanting to
-#   use Esplora should enable `esplora` AND `ureq`.
+#   use Esplora should enable `esplora` AND `ureq`  (`--features=use-esplora-ureq`).
+#
+# WARNING: Please take care with the features below, various combinations will
+# fail to build. We cannot currently build `bdk` with `--all-features`.
 async-interface = ["async-trait"]
 electrum = ["electrum-client"]
-esplora = ["futures"]           # Requires one of: `ureq` or `reqwest`.
+# MUST ALSO USE `--no-default-features`.
+use-esplora-reqwest = ["async-interface", "esplora", "reqwest", "futures"]
+use-esplora-ureq = ["esplora", "ureq"]
+# Typical configurations will not need to use `esplora` feature directly.
+esplora = []
 
 
 # Debug/Test features
