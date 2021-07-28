@@ -30,9 +30,19 @@ use crate::FeeRate;
 #[cfg(any(feature = "electrum", feature = "esplora"))]
 pub(crate) mod utils;
 
-#[cfg(any(feature = "electrum", feature = "esplora", feature = "compact_filters"))]
+#[cfg(any(
+    feature = "electrum",
+    feature = "esplora",
+    feature = "compact_filters",
+    feature = "rpc"
+))]
 pub mod any;
-#[cfg(any(feature = "electrum", feature = "esplora", feature = "compact_filters"))]
+#[cfg(any(
+    feature = "electrum",
+    feature = "esplora",
+    feature = "compact_filters",
+    feature = "rpc"
+))]
 pub use any::{AnyBlockchain, AnyBlockchainConfig};
 
 #[cfg(feature = "electrum")]
