@@ -112,19 +112,7 @@ impl Blockchain for EsploraBlockchain {
 
     fn estimate_fee(&self, target: usize) -> Result<FeeRate, Error> {
         let estimates = self.url_client._get_fee_estimates()?;
-
-        let fee_val = estimates
-            .into_iter()
-            .map(|(k, v)| Ok::<_, std::num::ParseIntError>((k.parse::<usize>()?, v)))
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| Error::Generic(e.to_string()))?
-            .into_iter()
-            .take_while(|(k, _)| k <= &target)
-            .map(|(_, v)| v)
-            .last()
-            .unwrap_or(1.0);
-
-        Ok(FeeRate::from_sat_per_vb(fee_val as f32))
+        super::into_fee_rate(target, estimates)
     }
 }
 

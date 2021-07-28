@@ -17,6 +17,7 @@
 //! Please note, to configure the Esplora HTTP client correctly use one of:
 //! Blocking:  --features='esplora,ureq'
 //! Async:     --features='async-interface,esplora,reqwest' --no-default-features
+use std::collections::HashMap;
 use std::fmt;
 use std::io;
 
@@ -24,6 +25,9 @@ use serde::Deserialize;
 
 use bitcoin::consensus;
 use bitcoin::{BlockHash, Txid};
+
+use crate::error::Error;
+use crate::FeeRate;
 
 #[cfg(all(
     feature = "esplora",
@@ -58,6 +62,21 @@ mod ureq;
     )),
 ))]
 pub use self::ureq::*;
+
+fn into_fee_rate(target: usize, estimates: HashMap<String, f64>) -> Result<FeeRate, Error> {
+    let fee_val = estimates
+        .into_iter()
+        .map(|(k, v)| Ok::<_, std::num::ParseIntError>((k.parse::<usize>()?, v)))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| Error::Generic(e.to_string()))?
+        .into_iter()
+        .take_while(|(k, _)| k <= &target)
+        .map(|(_, v)| v)
+        .last()
+        .unwrap_or(1.0);
+
+    Ok(FeeRate::from_sat_per_vb(fee_val as f32))
+}
 
 /// Data type used when fetching transaction history from Esplora.
 #[derive(Deserialize)]
