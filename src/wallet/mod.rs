@@ -18,6 +18,7 @@ use std::collections::HashMap;
 use std::collections::{BTreeMap, HashSet};
 use std::fmt;
 use std::ops::{Deref, DerefMut};
+use std::str::FromStr;
 use std::sync::Arc;
 
 use bitcoin::secp256k1::Secp256k1;
@@ -55,6 +56,7 @@ use tx_builder::{BumpFee, CreateTx, FeePolicy, TxBuilder, TxParams};
 use utils::{check_nlocktime, check_nsequence_rbf, After, Older, SecpCtx, DUST_LIMIT_SATOSHI};
 
 use crate::blockchain::{Blockchain, Progress};
+use crate::database::memory::MemoryDatabase;
 use crate::database::{BatchDatabase, BatchOperations, DatabaseUtils};
 use crate::descriptor::derived::AsDerived;
 use crate::descriptor::policy::BuildSatisfaction;
@@ -66,6 +68,7 @@ use crate::descriptor::{
 use crate::error::Error;
 use crate::psbt::PsbtUtils;
 use crate::signer::SignerError;
+use crate::testutils;
 use crate::types::*;
 
 const CACHE_ADDR_BATCH_SIZE: u32 = 100;
@@ -166,6 +169,11 @@ where
             database: RefCell::new(database),
             secp,
         })
+    }
+
+    /// Get the Bitcoin network the wallet is using.
+    pub fn network(&self) -> Network {
+        self.network
     }
 }
 
@@ -1534,11 +1542,6 @@ where
         &self.client
     }
 
-    /// Get the Bitcoin network the wallet is using.
-    pub fn network(&self) -> Network {
-        self.network
-    }
-
     /// Broadcast a transaction to the network
     #[maybe_async]
     pub fn broadcast(&self, tx: Transaction) -> Result<Txid, Error> {
@@ -1548,19 +1551,60 @@ where
     }
 }
 
+/// Return a fake wallet that appears to be funded for testing.
+pub fn get_funded_wallet(
+    descriptor: &str,
+) -> (
+    Wallet<(), MemoryDatabase>,
+    (String, Option<String>),
+    bitcoin::Txid,
+) {
+    let descriptors = testutils!(@descriptors (descriptor));
+    let wallet = Wallet::new_offline(
+        &descriptors.0,
+        None,
+        Network::Regtest,
+        MemoryDatabase::new(),
+    )
+    .unwrap();
+
+    let funding_address_kix = 0;
+
+    let tx_meta = testutils! {
+            @tx ( (@external descriptors, funding_address_kix) => 50_000 ) (@confirmations 1)
+    };
+
+    wallet
+        .database
+        .borrow_mut()
+        .set_script_pubkey(
+            &bitcoin::Address::from_str(&tx_meta.output.get(0).unwrap().to_address)
+                .unwrap()
+                .script_pubkey(),
+            KeychainKind::External,
+            funding_address_kix,
+        )
+        .unwrap();
+    wallet
+        .database
+        .borrow_mut()
+        .set_last_index(KeychainKind::External, funding_address_kix)
+        .unwrap();
+
+    let txid = crate::populate_test_db!(wallet.database.borrow_mut(), tx_meta, Some(100));
+
+    (wallet, descriptors, txid)
+}
+
 #[cfg(test)]
 pub(crate) mod test {
-    use std::str::FromStr;
-
     use bitcoin::{util::psbt, Network};
 
-    use crate::database::memory::MemoryDatabase;
     use crate::database::Database;
     use crate::types::KeychainKind;
 
     use super::*;
     use crate::signer::{SignOptions, SignerError};
-    use crate::testutils;
     use crate::wallet::AddressIndex::{LastUnused, New, Peek, Reset};
 
     #[test]
@@ -1670,50 +1714,6 @@ pub(crate) mod test {
     pub(crate) fn get_test_single_sig_cltv() -> &'static str {
         // and(pk(Alice),after(100000))
         "wsh(and_v(v:pk(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW),after(100000)))"
-    }
-
-    pub(crate) fn get_funded_wallet(
-        descriptor: &str,
-    ) -> (
-        Wallet<(), MemoryDatabase>,
-        (String, Option<String>),
-        bitcoin::Txid,
-    ) {
-        let descriptors = testutils!(@descriptors (descriptor));
-        let wallet = Wallet::new_offline(
-            &descriptors.0,
-            None,
-            Network::Regtest,
-            MemoryDatabase::new(),
-        )
-        .unwrap();
-
-        let funding_address_kix = 0;
-
-        let tx_meta = testutils! {
-                @tx ( (@external descriptors, funding_address_kix) => 50_000 ) (@confirmations 1)
-        };
-
-        wallet
-            .database
-            .borrow_mut()
-            .set_script_pubkey(
-                &bitcoin::Address::from_str(&tx_meta.output.get(0).unwrap().to_address)
-                    .unwrap()
-                    .script_pubkey(),
-                KeychainKind::External,
-                funding_address_kix,
-            )
-            .unwrap();
-        wallet
-            .database
-            .borrow_mut()
-            .set_last_index(KeychainKind::External, funding_address_kix)
-            .unwrap();
-
-        let txid = crate::populate_test_db!(wallet.database.borrow_mut(), tx_meta, Some(100));
-
-        (wallet, descriptors, txid)
     }
 
     macro_rules! assert_fee_rate {
