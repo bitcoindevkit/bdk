@@ -18,7 +18,6 @@ use std::collections::HashMap;
 use std::collections::{BTreeMap, HashSet};
 use std::fmt;
 use std::ops::{Deref, DerefMut};
-use std::str::FromStr;
 use std::sync::Arc;
 
 use bitcoin::secp256k1::Secp256k1;
@@ -56,7 +55,6 @@ use tx_builder::{BumpFee, CreateTx, FeePolicy, TxBuilder, TxParams};
 use utils::{check_nlocktime, check_nsequence_rbf, After, Older, SecpCtx, DUST_LIMIT_SATOSHI};
 
 use crate::blockchain::{Blockchain, Progress};
-use crate::database::memory::MemoryDatabase;
 use crate::database::{BatchDatabase, BatchOperations, DatabaseUtils};
 use crate::descriptor::derived::AsDerived;
 use crate::descriptor::policy::BuildSatisfaction;
@@ -68,7 +66,6 @@ use crate::descriptor::{
 use crate::error::Error;
 use crate::psbt::PsbtUtils;
 use crate::signer::SignerError;
-use crate::testutils;
 use crate::types::*;
 
 const CACHE_ADDR_BATCH_SIZE: u32 = 100;
@@ -1551,6 +1548,11 @@ where
     }
 }
 
+#[cfg(feature = "test-wallet")]
+use crate::database::memory::MemoryDatabase;
+
+#[cfg(feature = "test-wallet")]
+#[doc(hidden)]
 /// Return a fake wallet that appears to be funded for testing.
 pub fn get_funded_wallet(
     descriptor: &str,
@@ -1559,6 +1561,9 @@ pub fn get_funded_wallet(
     (String, Option<String>),
     bitcoin::Txid,
 ) {
+    use crate::testutils;
+    use std::str::FromStr;
+
     let descriptors = testutils!(@descriptors (descriptor));
     let wallet = Wallet::new_offline(
         &descriptors.0,
@@ -1606,6 +1611,9 @@ pub(crate) mod test {
     use super::*;
     use crate::signer::{SignOptions, SignerError};
     use crate::wallet::AddressIndex::{LastUnused, New, Peek, Reset};
+
+    use crate::testutils;
+    use std::str::FromStr;
 
     #[test]
     fn test_cache_addresses_fixed() {
