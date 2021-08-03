@@ -10,7 +10,7 @@ use electrsd::bitcoind::BitcoinD;
 use electrsd::{bitcoind, Conf, ElectrsD};
 pub use electrum_client::{Client as ElectrumClient, ElectrumApi};
 #[allow(unused_imports)]
-use log::{debug, error, info, trace};
+use log::{debug, error, info, log_enabled, trace, Level};
 use std::collections::HashMap;
 use std::env;
 use std::ops::Deref;
@@ -24,12 +24,17 @@ pub struct TestClient {
 impl TestClient {
     pub fn new(bitcoind_exe: String, electrs_exe: String) -> Self {
         debug!("launching {} and {}", &bitcoind_exe, &electrs_exe);
-        let bitcoind = BitcoinD::new(bitcoind_exe).unwrap();
+        let conf = bitcoind::Conf {
+            view_stdout: log_enabled!(Level::Debug),
+            ..Default::default()
+        };
+        let bitcoind = BitcoinD::with_conf(bitcoind_exe, &conf).unwrap();
 
         let http_enabled = cfg!(feature = "test-esplora");
 
         let conf = Conf {
             http_enabled,
+            view_stderr: log_enabled!(Level::Debug),
             ..Default::default()
         };
         let electrsd = ElectrsD::with_conf(electrs_exe, &bitcoind, &conf).unwrap();
