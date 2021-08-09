@@ -12,7 +12,7 @@ readme = "README.md"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-bdk-macros = { path = "macros"} # TODO: Change this to version number after next release.
+bdk-macros = "0.5"
 log = "^0.4"
 miniscript = "5.1"
 bitcoin = { version = "~0.26.2", features = ["use-serde", "base64"] }
