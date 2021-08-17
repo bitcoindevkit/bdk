@@ -57,6 +57,21 @@ comment suggesting that you're working on it. If someone is already assigned,
 don't hesitate to ask if the assigned party or previous commenters are still
 working on it if it has been awhile.
 
+Deprecation policy
+------------------
+
+Where possible, breaking existing APIs should be avoided. Instead, add new APIs and
+use [`#[deprecated]`](https://github.com/rust-lang/rfcs/blob/master/text/1270-deprecation.md)
+to discourage use of the old one.
+
+Deprecated APIs are typically maintained for one release cycle. In other words, an
+API that has been deprecated with the 0.10 release can be expected to be removed in the
+0.11 release. This allows for smoother upgrades without incurring too much technical
+debt inside this library.
+
+If you deprecated an API as part of a contribution, we encourage you to "own" that API
+and send a follow-up to remove it as part of the next release cycle.
+
 Peer review
 -----------
 
