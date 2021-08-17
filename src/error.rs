@@ -139,7 +139,7 @@ pub enum Error {
     Sled(sled::Error),
     #[cfg(feature = "rpc")]
     /// Rpc client error
-    Rpc(bitcoincore_rpc::Error),
+    Rpc(core_rpc::Error),
 }
 
 impl fmt::Display for Error {
@@ -193,7 +193,7 @@ impl_error!(electrum_client::Error, Electrum);
 #[cfg(feature = "key-value-db")]
 impl_error!(sled::Error, Sled);
 #[cfg(feature = "rpc")]
-impl_error!(bitcoincore_rpc::Error, Rpc);
+impl_error!(core_rpc::Error, Rpc);
 
 #[cfg(feature = "compact_filters")]
 impl From<crate::blockchain::compact_filters::CompactFiltersError> for Error {

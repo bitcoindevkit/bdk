@@ -38,13 +38,13 @@ use crate::database::{BatchDatabase, DatabaseUtils};
 use crate::descriptor::{get_checksum, IntoWalletDescriptor};
 use crate::wallet::utils::SecpCtx;
 use crate::{ConfirmationTime, Error, FeeRate, KeychainKind, LocalUtxo, TransactionDetails};
-use bitcoincore_rpc::json::{
+use core_rpc::json::{
     GetAddressInfoResultLabel, ImportMultiOptions, ImportMultiRequest,
     ImportMultiRequestScriptPubkey, ImportMultiRescanSince,
 };
-use bitcoincore_rpc::jsonrpc::serde_json::Value;
-use bitcoincore_rpc::Auth as RpcAuth;
-use bitcoincore_rpc::{Client, RpcApi};
+use core_rpc::jsonrpc::serde_json::Value;
+use core_rpc::Auth as RpcAuth;
+use core_rpc::{Client, RpcApi};
 use log::debug;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -82,7 +82,7 @@ pub struct RpcConfig {
     pub skip_blocks: Option<u32>,
 }
 
-/// This struct is equivalent to [bitcoincore_rpc::Auth] but it implements [serde::Serialize]
+/// This struct is equivalent to [core_rpc::Auth] but it implements [serde::Serialize]
 /// To be removed once upstream equivalent is implementing Serialize (json serialization format
 /// should be the same) https://github.com/rust-bitcoin/rust-bitcoincore-rpc/pull/181
 #[derive(Clone, Debug, Hash, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
@@ -357,7 +357,7 @@ impl ConfigurableBlockchain for RpcBlockchain {
         let wallet_url = format!("{}/wallet/{}", config.url, &wallet_name);
         debug!("connecting to {} auth:{:?}", wallet_url, config.auth);
 
-        let client = Client::new(wallet_url, config.auth.clone().into())?;
+        let client = Client::new(wallet_url.as_str(), config.auth.clone().into())?;
         let loaded_wallets = client.list_wallets()?;
         if loaded_wallets.contains(&wallet_name) {
             debug!("wallet already loaded {:?}", wallet_name);
