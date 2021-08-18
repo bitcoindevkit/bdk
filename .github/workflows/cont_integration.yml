@@ -95,8 +95,6 @@ jobs:
         with:
           path: |
             ~/.cargo/registry
-            ~/.cargo/bitcoin
-            ~/.cargo/electrs
             ~/.cargo/git
             target
           key: ${{ runner.os }}-cargo-${{ github.job }}-${{ hashFiles('**/Cargo.toml','**/Cargo.lock') }}
