@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added `RpcBlockchain` in the `AnyBlockchain` struct to allow using Rpc backend where `AnyBlockchain` is used (eg `bdk-cli`)
 - Removed hard dependency on `tokio`.
+- Added `flush` method to the `Database` trait to explicitly flush to disk latest changes on the db.
 
 ### Wallet
 

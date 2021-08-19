@@ -233,6 +233,10 @@ impl Database for AnyDatabase {
     fn increment_last_index(&mut self, keychain: KeychainKind) -> Result<u32, Error> {
         impl_inner_method!(AnyDatabase, self, increment_last_index, keychain)
     }
+
+    fn flush(&mut self) -> Result<(), Error> {
+        impl_inner_method!(AnyDatabase, self, flush)
+    }
 }
 
 impl BatchOperations for AnyBatch {
