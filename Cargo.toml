@@ -1,6 +1,6 @@
 [package]
 name = "bdk"
-version = "0.9.1-dev"
+version = "0.10.1-dev"
 edition = "2018"
 authors = ["Alekos Filini <alekos.filini@gmail.com>", "Riccardo Casatta <riccardo@casatta.it>"]
 homepage = "https://bitcoindevkit.org"
@@ -12,7 +12,7 @@ readme = "README.md"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-bdk-macros = { path = "macros"} # TODO: Change this to version number after next release.
+bdk-macros = "0.5"
 log = "^0.4"
 miniscript = "^6.0"
 bitcoin = { version = "^0.27", features = ["use-serde", "base64"] }
