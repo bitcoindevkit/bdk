@@ -135,7 +135,7 @@ pub trait Database: BatchOperations {
     /// It should insert and return `0` if not present in the database
     fn increment_last_index(&mut self, keychain: KeychainKind) -> Result<u32, Error>;
 
-    /// Force changes to be written to disk, returning the number of bytes written
+    /// Force changes to be written to disk
     fn flush(&mut self) -> Result<(), Error>;
 }
 
