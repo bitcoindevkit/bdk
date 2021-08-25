@@ -43,8 +43,8 @@ impl PsbtUtils for Psbt {
 mod test {
     use crate::bitcoin::TxIn;
     use crate::psbt::Psbt;
-    use crate::wallet::test::{get_funded_wallet, get_test_wpkh};
     use crate::wallet::AddressIndex;
+    use crate::wallet::{get_funded_wallet, test::get_test_wpkh};
     use crate::SignOptions;
     use std::str::FromStr;
 
