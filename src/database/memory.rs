@@ -456,20 +456,21 @@ impl ConfigurableDatabase for MemoryDatabase {
 /// don't have `test` set.
 macro_rules! populate_test_db {
     ($db:expr, $tx_meta:expr, $current_height:expr$(,)?) => {{
+        use std::str::FromStr;
         use $crate::database::BatchOperations;
         let mut db = $db;
         let tx_meta = $tx_meta;
         let current_height: Option<u32> = $current_height;
-        let tx = Transaction {
+        let tx = $crate::bitcoin::Transaction {
             version: 1,
             lock_time: 0,
             input: vec![],
             output: tx_meta
                 .output
                 .iter()
-                .map(|out_meta| bitcoin::TxOut {
+                .map(|out_meta| $crate::bitcoin::TxOut {
                     value: out_meta.value,
-                    script_pubkey: bitcoin::Address::from_str(&out_meta.to_address)
+                    script_pubkey: $crate::bitcoin::Address::from_str(&out_meta.to_address)
                         .unwrap()
                         .script_pubkey(),
                 })
@@ -477,12 +478,14 @@ macro_rules! populate_test_db {
         };
 
         let txid = tx.txid();
-        let confirmation_time = tx_meta.min_confirmations.map(|conf| ConfirmationTime {
-            height: current_height.unwrap().checked_sub(conf as u32).unwrap(),
-            timestamp: 0,
-        });
+        let confirmation_time = tx_meta
+            .min_confirmations
+            .map(|conf| $crate::ConfirmationTime {
+                height: current_height.unwrap().checked_sub(conf as u32).unwrap(),
+                timestamp: 0,
+            });
 
-        let tx_details = TransactionDetails {
+        let tx_details = $crate::TransactionDetails {
             transaction: Some(tx.clone()),
             txid,
             fee: Some(0),
@@ -494,13 +497,13 @@ macro_rules! populate_test_db {
 
         db.set_tx(&tx_details).unwrap();
         for (vout, out) in tx.output.iter().enumerate() {
-            db.set_utxo(&LocalUtxo {
+            db.set_utxo(&$crate::LocalUtxo {
                 txout: out.clone(),
-                outpoint: OutPoint {
+                outpoint: $crate::bitcoin::OutPoint {
                     txid,
                     vout: vout as u32,
                 },
-                keychain: KeychainKind::External,
+                keychain: $crate::KeychainKind::External,
             })
             .unwrap();
         }
