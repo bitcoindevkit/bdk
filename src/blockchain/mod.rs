@@ -201,7 +201,7 @@ impl Progress for NoopProgress {
 #[derive(Clone, Copy)]
 pub struct LogProgress;
 
-/// Create a nwe instance of [`LogProgress`]
+/// Create a new instance of [`LogProgress`]
 pub fn log_progress() -> LogProgress {
     LogProgress
 }
