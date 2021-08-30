@@ -19,7 +19,7 @@ use std::time::Duration;
 #[allow(unused_imports)]
 use log::{debug, error, info, trace};
 
-use ureq::{Agent, Response};
+use ureq::{Agent, Proxy, Response};
 
 use bitcoin::consensus::{deserialize, serialize};
 use bitcoin::hashes::hex::{FromHex, ToHex};
@@ -59,7 +59,7 @@ impl std::convert::From<UrlClient> for EsploraBlockchain {
 }
 
 impl EsploraBlockchain {
-    /// Create a new instance of the client from a base URL and `stop_gap`.
+    /// Create a new instance of the client from a base URL and the `stop_gap`.
     pub fn new(base_url: &str, stop_gap: usize) -> Self {
         EsploraBlockchain {
             url_client: UrlClient {
@@ -358,6 +358,17 @@ impl ElectrumLikeSync for UrlClient {
 pub struct EsploraBlockchainConfig {
     /// Base URL of the esplora service eg. `https://blockstream.info/api/`
     pub base_url: String,
+    /// Optional URL of the proxy to use to make requests to the Esplora server
+    ///
+    /// The string should be formatted as: `<protocol>://<user>:<password>@host:<port>`.
+    ///
+    /// Note that the format of this value and the supported protocols change slightly between the
+    /// sync version of esplora (using `ureq`) and the async version (using `reqwest`). For more
+    /// details check with the documentation of the two crates. Both of them are compiled with
+    /// the `socks` feature enabled.
+    ///
+    /// The proxy is ignored when targeting `wasm32`.
+    pub proxy: Option<String>,
     /// Socket read timeout.
     pub timeout_read: u64,
     /// Socket write timeout.
@@ -370,10 +381,18 @@ impl ConfigurableBlockchain for EsploraBlockchain {
     type Config = EsploraBlockchainConfig;
 
     fn from_config(config: &Self::Config) -> Result<Self, Error> {
-        let agent: Agent = ureq::AgentBuilder::new()
+        let mut agent_builder = ureq::AgentBuilder::new()
             .timeout_read(Duration::from_secs(config.timeout_read))
-            .timeout_write(Duration::from_secs(config.timeout_write))
-            .build();
-        Ok(EsploraBlockchain::new(config.base_url.as_str(), config.stop_gap).with_agent(agent))
+            .timeout_write(Duration::from_secs(config.timeout_write));
+
+        if let Some(proxy) = &config.proxy {
+            agent_builder = agent_builder
+                .proxy(Proxy::new(proxy).map_err(|e| Error::Esplora(Box::new(e.into())))?);
+        }
+
+        Ok(
+            EsploraBlockchain::new(config.base_url.as_str(), config.stop_gap)
+                .with_agent(agent_builder.build()),
+        )
     }
 }

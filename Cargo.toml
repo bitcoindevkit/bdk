@@ -77,8 +77,8 @@ rpc = ["core-rpc"]
 async-interface = ["async-trait"]
 electrum = ["electrum-client"]
 # MUST ALSO USE `--no-default-features`.
-use-esplora-reqwest = ["esplora", "reqwest", "futures"]
-use-esplora-ureq = ["esplora", "ureq"]
+use-esplora-reqwest = ["esplora", "reqwest", "reqwest/socks", "futures"]
+use-esplora-ureq = ["esplora", "ureq", "ureq/socks"]
 # Typical configurations will not need to use `esplora` feature directly.
 esplora = []
 

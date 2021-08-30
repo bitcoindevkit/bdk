@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [v0.11.0] - [v0.10.0]
 
 - Added `flush` method to the `Database` trait to explicitly flush to disk latest changes on the db.
+- Add support for proxies in `EsploraBlockchain`
 
 ## [v0.10.0] - [v0.9.0]
 
