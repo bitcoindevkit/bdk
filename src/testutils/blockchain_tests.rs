@@ -375,10 +375,35 @@ macro_rules! bdk_blockchain_tests {
                 $block
             }
 
+            #[cfg(any(target_arch = "wasm32", feature = "async-interface"))]
+            async fn get_wallet_from_descriptors(descriptors: &(String, Option<String>), test_client: &TestClient) -> Wallet<$blockchain, MemoryDatabase> {
+                Wallet::new(&descriptors.0.to_string(), descriptors.1.as_ref(), Network::Regtest, MemoryDatabase::new(), get_blockchain(test_client)).await.unwrap()
+            }
+
+            #[cfg(not(any(target_arch = "wasm32", feature = "async-interface")))]
             fn get_wallet_from_descriptors(descriptors: &(String, Option<String>), test_client: &TestClient) -> Wallet<$blockchain, MemoryDatabase> {
                 Wallet::new(&descriptors.0.to_string(), descriptors.1.as_ref(), Network::Regtest, MemoryDatabase::new(), get_blockchain(test_client)).unwrap()
             }
 
+            #[cfg(any(target_arch = "wasm32", feature = "async-interface"))]
+            async fn init_single_sig() -> (Wallet<$blockchain, MemoryDatabase>, (String, Option<String>), TestClient) {
+                let _ = env_logger::try_init();
+
+                let descriptors = testutils! {
+                    @descriptors ( "wpkh(Alice)" ) ( "wpkh(Alice)" ) ( @keys ( "Alice" => (@generate_xprv "/44'/0'/0'/0/*", "/44'/0'/0'/1/*") ) )
+                };
+
+                let test_client = TestClient::default();
+                let wallet = get_wallet_from_descriptors(&descriptors, &test_client).await;
+
+                // rpc need to call import_multi before receiving any tx, otherwise will not see tx in the mempool
+                #[cfg(feature = "test-rpc")]
+                wallet.sync(noop_progress(), None).await.unwrap();
+
+                (wallet, descriptors, test_client)
+            }
+
+            #[cfg(not(any(target_arch = "wasm32", feature = "async-interface")))]
             fn init_single_sig() -> (Wallet<$blockchain, MemoryDatabase>, (String, Option<String>), TestClient) {
                 let _ = env_logger::try_init();
 
@@ -396,9 +421,9 @@ macro_rules! bdk_blockchain_tests {
                 (wallet, descriptors, test_client)
             }
 
-            #[test]
-            fn test_sync_simple() {
-                let (wallet, descriptors, mut test_client) = init_single_sig();
+            #[tokio::test]
+            async fn test_sync_simple() {
+                let (wallet, descriptors, mut test_client) = maybe_await!(init_single_sig());
 
                 let tx = testutils! {
                     @tx ( (@external descriptors, 0) => 50_000 )
@@ -406,7 +431,7 @@ macro_rules! bdk_blockchain_tests {
                 println!("{:?}", tx);
                 let txid = test_client.receive(tx);
 
-                wallet.sync(noop_progress(), None).unwrap();
+                maybe_await!(wallet.sync(noop_progress(), None)).unwrap();
 
                 assert_eq!(wallet.get_balance().unwrap(), 50_000, "incorrect balance");
                 assert_eq!(wallet.list_unspent().unwrap()[0].keychain, KeychainKind::External, "incorrect keychain kind");
@@ -418,9 +443,9 @@ macro_rules! bdk_blockchain_tests {
                 assert_eq!(list_tx_item.confirmation_time, None, "incorrect confirmation time");
             }
 
-            #[test]
-            fn test_sync_stop_gap_20() {
-                let (wallet, descriptors, mut test_client) = init_single_sig();
+            #[tokio::test]
+            async fn test_sync_stop_gap_20() {
+                let (wallet, descriptors, mut test_client) = maybe_await!(init_single_sig());
 
                 test_client.receive(testutils! {
                     @tx ( (@external descriptors, 5) => 50_000 )
@@ -429,38 +454,38 @@ macro_rules! bdk_blockchain_tests {
                     @tx ( (@external descriptors, 25) => 50_000 )
                 });
 
-                wallet.sync(noop_progress(), None).unwrap();
+                maybe_await!(wallet.sync(noop_progress(), None)).unwrap();
 
                 assert_eq!(wallet.get_balance().unwrap(), 100_000, "incorrect balance");
                 assert_eq!(wallet.list_transactions(false).unwrap().len(), 2, "incorrect number of txs");
             }
 
-            #[test]
-            fn test_sync_before_and_after_receive() {
-                let (wallet, descriptors, mut test_client) = init_single_sig();
+            #[tokio::test]
+            async fn test_sync_before_and_after_receive() {
+                let (wallet, descriptors, mut test_client) = maybe_await!(init_single_sig());
 
-                wallet.sync(noop_progress(), None).unwrap();
+                maybe_await!(wallet.sync(noop_progress(), None)).unwrap();
                 assert_eq!(wallet.get_balance().unwrap(), 0);
 
                 test_client.receive(testutils! {
                     @tx ( (@external descriptors, 0) => 50_000 )
                 });
 
-                wallet.sync(noop_progress(), None).unwrap();
+                maybe_await!(wallet.sync(noop_progress(), None)).unwrap();
 
                 assert_eq!(wallet.get_balance().unwrap(), 50_000, "incorrect balance");
                 assert_eq!(wallet.list_transactions(false).unwrap().len(), 1, "incorrect number of txs");
             }
 
-            #[test]
-            fn test_sync_multiple_outputs_same_tx() {
-                let (wallet, descriptors, mut test_client) = init_single_sig();
+            #[tokio::test]
+            async fn test_sync_multiple_outputs_same_tx() {
+                let (wallet, descriptors, mut test_client) = maybe_await!(init_single_sig());
 
                 let txid = test_client.receive(testutils! {
                     @tx ( (@external descriptors, 0) => 50_000, (@external descriptors, 1) => 25_000, (@external descriptors, 5) => 30_000 )
                 });
 
-                wallet.sync(noop_progress(), None).unwrap();
+                maybe_await!(wallet.sync(noop_progress(), None)).unwrap();
 
                 assert_eq!(wallet.get_balance().unwrap(), 105_000, "incorrect balance");
                 assert_eq!(wallet.list_transactions(false).unwrap().len(), 1, "incorrect number of txs");
@@ -473,9 +498,9 @@ macro_rules! bdk_blockchain_tests {
                 assert_eq!(list_tx_item.confirmation_time, None, "incorrect confirmation_time");
             }
 
-            #[test]
-            fn test_sync_receive_multi() {
-                let (wallet, descriptors, mut test_client) = init_single_sig();
+            #[tokio::test]
+            async fn test_sync_receive_multi() {
+                let (wallet, descriptors, mut test_client) = maybe_await!(init_single_sig());
 
                 test_client.receive(testutils! {
                     @tx ( (@external descriptors, 0) => 50_000 )
@@ -484,41 +509,41 @@ macro_rules! bdk_blockchain_tests {
                     @tx ( (@external descriptors, 5) => 25_000 )
                 });
 
-                wallet.sync(noop_progress(), None).unwrap();
+                maybe_await!(wallet.sync(noop_progress(), None)).unwrap();
 
                 assert_eq!(wallet.get_balance().unwrap(), 75_000, "incorrect balance");
                 assert_eq!(wallet.list_transactions(false).unwrap().len(), 2, "incorrect number of txs");
                 assert_eq!(wallet.list_unspent().unwrap().len(), 2, "incorrect number of unspent");
             }
 
-            #[test]
-            fn test_sync_address_reuse() {
-                let (wallet, descriptors, mut test_client) = init_single_sig();
+            #[tokio::test]
+            async fn test_sync_address_reuse() {
+                let (wallet, descriptors, mut test_client) = maybe_await!(init_single_sig());
 
                 test_client.receive(testutils! {
                     @tx ( (@external descriptors, 0) => 50_000 )
                 });
 
-                wallet.sync(noop_progress(), None).unwrap();
+                maybe_await!(wallet.sync(noop_progress(), None)).unwrap();
                 assert_eq!(wallet.get_balance().unwrap(), 50_000);
 
                 test_client.receive(testutils! {
                     @tx ( (@external descriptors, 0) => 25_000 )
                 });
 
-                wallet.sync(noop_progress(), None).unwrap();
+                maybe_await!(wallet.sync(noop_progress(), None)).unwrap();
                 assert_eq!(wallet.get_balance().unwrap(), 75_000, "incorrect balance");
             }
 
-            #[test]
-            fn test_sync_receive_rbf_replaced() {
-                let (wallet, descriptors, mut test_client) = init_single_sig();
+            #[tokio::test]
+            async fn test_sync_receive_rbf_replaced() {
+                let (wallet, descriptors, mut test_client) = maybe_await!(init_single_sig());
 
                 let txid = test_client.receive(testutils! {
                     @tx ( (@external descriptors, 0) => 50_000 ) ( @replaceable true )
                 });
 
-                wallet.sync(noop_progress(), None).unwrap();
+                maybe_await!(wallet.sync(noop_progress(), None)).unwrap();
 
                 assert_eq!(wallet.get_balance().unwrap(), 50_000, "incorrect balance");
                 assert_eq!(wallet.list_transactions(false).unwrap().len(), 1, "incorrect number of txs");
@@ -532,7 +557,7 @@ macro_rules! bdk_blockchain_tests {
 
                 let new_txid = test_client.bump_fee(&txid);
 
-                wallet.sync(noop_progress(), None).unwrap();
+                maybe_await!(wallet.sync(noop_progress(), None)).unwrap();
 
                 assert_eq!(wallet.get_balance().unwrap(), 50_000, "incorrect balance after bump");
                 assert_eq!(wallet.list_transactions(false).unwrap().len(), 1, "incorrect number of txs after bump");
@@ -548,15 +573,15 @@ macro_rules! bdk_blockchain_tests {
             // FIXME: I would like this to be cfg_attr(not(feature = "test-esplora"), ignore) but it
             // doesn't work for some reason.
             #[cfg(not(feature = "esplora"))]
-            #[test]
-            fn test_sync_reorg_block() {
-                let (wallet, descriptors, mut test_client) = init_single_sig();
+            #[tokio::test]
+            async fn test_sync_reorg_block() {
+                let (wallet, descriptors, mut test_client) = maybe_await!(init_single_sig());
 
                 let txid = test_client.receive(testutils! {
                     @tx ( (@external descriptors, 0) => 50_000 ) ( @confirmations 1 ) ( @replaceable true )
                 });
 
-                wallet.sync(noop_progress(), None).unwrap();
+                maybe_await!(wallet.sync(noop_progress(), None)).unwrap();
 
                 assert_eq!(wallet.get_balance().unwrap(), 50_000, "incorrect balance");
                 assert_eq!(wallet.list_transactions(false).unwrap().len(), 1, "incorrect number of txs");
@@ -569,7 +594,7 @@ macro_rules! bdk_blockchain_tests {
                 // Invalidate 1 block
                 test_client.invalidate(1);
 
-                wallet.sync(noop_progress(), None).unwrap();
+                maybe_await!(wallet.sync(noop_progress(), None)).unwrap();
 
                 assert_eq!(wallet.get_balance().unwrap(), 50_000, "incorrect balance after invalidate");
 
@@ -578,9 +603,9 @@ macro_rules! bdk_blockchain_tests {
                 assert_eq!(list_tx_item.confirmation_time, None, "incorrect confirmation time after invalidate");
             }
 
-            #[test]
-            fn test_sync_after_send() {
-                let (wallet, descriptors, mut test_client) = init_single_sig();
+            #[tokio::test]
+            async fn test_sync_after_send() {
+                let (wallet, descriptors, mut test_client) = maybe_await!(init_single_sig());
                 println!("{}", descriptors.0);
                 let node_addr = test_client.get_node_address(None);
 
@@ -588,7 +613,7 @@ macro_rules! bdk_blockchain_tests {
                     @tx ( (@external descriptors, 0) => 50_000 )
                 });
 
-                wallet.sync(noop_progress(), None).unwrap();
+                maybe_await!(wallet.sync(noop_progress(), None)).unwrap();
                 assert_eq!(wallet.get_balance().unwrap(), 50_000, "incorrect balance");
 
                 let mut builder = wallet.build_tx();
@@ -598,17 +623,17 @@ macro_rules! bdk_blockchain_tests {
                 assert!(finalized, "Cannot finalize transaction");
                 let tx = psbt.extract_tx();
                 println!("{}", bitcoin::consensus::encode::serialize_hex(&tx));
-                wallet.broadcast(tx).unwrap();
-                wallet.sync(noop_progress(), None).unwrap();
+                maybe_await!(wallet.broadcast(tx)).unwrap();
+                maybe_await!(wallet.sync(noop_progress(), None)).unwrap();
                 assert_eq!(wallet.get_balance().unwrap(), details.received, "incorrect balance after send");
 
                 assert_eq!(wallet.list_transactions(false).unwrap().len(), 2, "incorrect number of txs");
                 assert_eq!(wallet.list_unspent().unwrap().len(), 1, "incorrect number of unspents");
             }
 
-            #[test]
-            fn test_update_confirmation_time_after_generate() {
-                let (wallet, descriptors, mut test_client) = init_single_sig();
+            #[tokio::test]
+            async fn test_update_confirmation_time_after_generate() {
+                let (wallet, descriptors, mut test_client) = maybe_await!(init_single_sig());
                 println!("{}", descriptors.0);
                 let node_addr = test_client.get_node_address(None);
 
@@ -616,7 +641,7 @@ macro_rules! bdk_blockchain_tests {
                     @tx ( (@external descriptors, 0) => 50_000 )
                 });
 
-                wallet.sync(noop_progress(), None).unwrap();
+                maybe_await!(wallet.sync(noop_progress(), None)).unwrap();
                 assert_eq!(wallet.get_balance().unwrap(), 50_000, "incorrect balance");
 
                 let tx_map = wallet.list_transactions(false).unwrap().into_iter().map(|tx| (tx.txid, tx)).collect::<std::collections::HashMap<_, _>>();
@@ -624,7 +649,7 @@ macro_rules! bdk_blockchain_tests {
                 assert!(details.confirmation_time.is_none());
 
                 test_client.generate(1, Some(node_addr));
-                wallet.sync(noop_progress(), None).unwrap();
+                maybe_await!(wallet.sync(noop_progress(), None)).unwrap();
 
                 let tx_map = wallet.list_transactions(false).unwrap().into_iter().map(|tx| (tx.txid, tx)).collect::<std::collections::HashMap<_, _>>();
                 let details = tx_map.get(&received_txid).unwrap();
@@ -632,15 +657,15 @@ macro_rules! bdk_blockchain_tests {
 
             }
 
-            #[test]
-            fn test_sync_outgoing_from_scratch() {
-                let (wallet, descriptors, mut test_client) = init_single_sig();
+            #[tokio::test]
+            async fn test_sync_outgoing_from_scratch() {
+                let (wallet, descriptors, mut test_client) = maybe_await!(init_single_sig());
                 let node_addr = test_client.get_node_address(None);
                 let received_txid = test_client.receive(testutils! {
                     @tx ( (@external descriptors, 0) => 50_000 )
                 });
 
-                wallet.sync(noop_progress(), None).unwrap();
+                maybe_await!(wallet.sync(noop_progress(), None)).unwrap();
                 assert_eq!(wallet.get_balance().unwrap(), 50_000, "incorrect balance");
 
                 let mut builder = wallet.build_tx();
@@ -649,18 +674,18 @@ macro_rules! bdk_blockchain_tests {
 
                 let finalized = wallet.sign(&mut psbt, Default::default()).unwrap();
                 assert!(finalized, "Cannot finalize transaction");
-                let sent_txid = wallet.broadcast(psbt.extract_tx()).unwrap();
+                let sent_txid = maybe_await!(wallet.broadcast(psbt.extract_tx())).unwrap();
 
-                wallet.sync(noop_progress(), None).unwrap();
+                maybe_await!(wallet.sync(noop_progress(), None)).unwrap();
                 assert_eq!(wallet.get_balance().unwrap(), details.received, "incorrect balance after receive");
 
                 // empty wallet
-                let wallet = get_wallet_from_descriptors(&descriptors, &test_client);
+                let wallet = maybe_await!(get_wallet_from_descriptors(&descriptors, &test_client));
 
                 #[cfg(feature = "rpc")]  // rpc cannot see mempool tx before importmulti
                 test_client.generate(1, Some(node_addr));
 
-                wallet.sync(noop_progress(), None).unwrap();
+                maybe_await!(wallet.sync(noop_progress(), None)).unwrap();
                 let tx_map = wallet.list_transactions(false).unwrap().into_iter().map(|tx| (tx.txid, tx)).collect::<std::collections::HashMap<_, _>>();
 
                 let received = tx_map.get(&received_txid).unwrap();
@@ -673,16 +698,16 @@ macro_rules! bdk_blockchain_tests {
                 assert_eq!(sent.fee.unwrap_or(0), details.fee.unwrap_or(0), "incorrect fees from sender");
             }
 
-            #[test]
-            fn test_sync_long_change_chain() {
-                let (wallet, descriptors, mut test_client) = init_single_sig();
+            #[tokio::test]
+            async fn test_sync_long_change_chain() {
+                let (wallet, descriptors, mut test_client) = maybe_await!(init_single_sig());
                 let node_addr = test_client.get_node_address(None);
 
                 test_client.receive(testutils! {
                     @tx ( (@external descriptors, 0) => 50_000 )
                 });
 
-                wallet.sync(noop_progress(), None).unwrap();
+                maybe_await!(wallet.sync(noop_progress(), None)).unwrap();
                 assert_eq!(wallet.get_balance().unwrap(), 50_000, "incorrect balance");
 
                 let mut total_sent = 0;
@@ -692,38 +717,38 @@ macro_rules! bdk_blockchain_tests {
                     let (mut psbt, details) = builder.finish().unwrap();
                     let finalized = wallet.sign(&mut psbt, Default::default()).unwrap();
                     assert!(finalized, "Cannot finalize transaction");
-                    wallet.broadcast(psbt.extract_tx()).unwrap();
+                    maybe_await!(wallet.broadcast(psbt.extract_tx())).unwrap();
 
-                    wallet.sync(noop_progress(), None).unwrap();
+                    maybe_await!(wallet.sync(noop_progress(), None)).unwrap();
 
                     total_sent += 5_000 + details.fee.unwrap_or(0);
                 }
 
-                wallet.sync(noop_progress(), None).unwrap();
+                maybe_await!(wallet.sync(noop_progress(), None)).unwrap();
                 assert_eq!(wallet.get_balance().unwrap(), 50_000 - total_sent, "incorrect balance after chain");
 
                 // empty wallet
 
-                let wallet = get_wallet_from_descriptors(&descriptors, &test_client);
+                let wallet = maybe_await!(get_wallet_from_descriptors(&descriptors, &test_client));
 
                 #[cfg(feature = "rpc")]  // rpc cannot see mempool tx before importmulti
                 test_client.generate(1, Some(node_addr));
 
-                wallet.sync(noop_progress(), None).unwrap();
+                maybe_await!(wallet.sync(noop_progress(), None)).unwrap();
                 assert_eq!(wallet.get_balance().unwrap(), 50_000 - total_sent, "incorrect balance empty wallet");
 
             }
 
-            #[test]
-            fn test_sync_bump_fee_basic() {
-                let (wallet, descriptors, mut test_client) = init_single_sig();
+            #[tokio::test]
+            async fn test_sync_bump_fee_basic() {
+                let (wallet, descriptors, mut test_client) = maybe_await!(init_single_sig());
                 let node_addr = test_client.get_node_address(None);
 
                 test_client.receive(testutils! {
                     @tx ( (@external descriptors, 0) => 50_000 ) (@confirmations 1)
                 });
 
-                wallet.sync(noop_progress(), None).unwrap();
+                maybe_await!(wallet.sync(noop_progress(), None)).unwrap();
                 assert_eq!(wallet.get_balance().unwrap(), 50_000, "incorrect balance");
 
                 let mut builder = wallet.build_tx();
@@ -731,8 +756,8 @@ macro_rules! bdk_blockchain_tests {
                 let (mut psbt, details) = builder.finish().unwrap();
                 let finalized = wallet.sign(&mut psbt, Default::default()).unwrap();
                 assert!(finalized, "Cannot finalize transaction");
-                wallet.broadcast(psbt.extract_tx()).unwrap();
-                wallet.sync(noop_progress(), None).unwrap();
+                maybe_await!(wallet.broadcast(psbt.extract_tx())).unwrap();
+                maybe_await!(wallet.sync(noop_progress(), None)).unwrap();
                 assert_eq!(wallet.get_balance().unwrap(), 50_000 - details.fee.unwrap_or(0) - 5_000, "incorrect balance from fees");
                 assert_eq!(wallet.get_balance().unwrap(), details.received, "incorrect balance from received");
 
@@ -741,24 +766,24 @@ macro_rules! bdk_blockchain_tests {
                 let (mut new_psbt, new_details) = builder.finish().unwrap();
                 let finalized = wallet.sign(&mut new_psbt, Default::default()).unwrap();
                 assert!(finalized, "Cannot finalize transaction");
-                wallet.broadcast(new_psbt.extract_tx()).unwrap();
-                wallet.sync(noop_progress(), None).unwrap();
+                maybe_await!(wallet.broadcast(new_psbt.extract_tx())).unwrap();
+                maybe_await!(wallet.sync(noop_progress(), None)).unwrap();
                 assert_eq!(wallet.get_balance().unwrap(), 50_000 - new_details.fee.unwrap_or(0) - 5_000, "incorrect balance from fees after bump");
                 assert_eq!(wallet.get_balance().unwrap(), new_details.received, "incorrect balance from received after bump");
 
                 assert!(new_details.fee.unwrap_or(0) > details.fee.unwrap_or(0), "incorrect fees");
             }
 
-            #[test]
-            fn test_sync_bump_fee_remove_change() {
-                let (wallet, descriptors, mut test_client) = init_single_sig();
+            #[tokio::test]
+            async fn test_sync_bump_fee_remove_change() {
+                let (wallet, descriptors, mut test_client) = maybe_await!(init_single_sig());
                 let node_addr = test_client.get_node_address(None);
 
                 test_client.receive(testutils! {
                     @tx ( (@external descriptors, 0) => 50_000 ) (@confirmations 1)
                 });
 
-                wallet.sync(noop_progress(), None).unwrap();
+                maybe_await!(wallet.sync(noop_progress(), None)).unwrap();
                 assert_eq!(wallet.get_balance().unwrap(), 50_000, "incorrect balance");
 
                 let mut builder = wallet.build_tx();
@@ -766,8 +791,8 @@ macro_rules! bdk_blockchain_tests {
                 let (mut psbt, details) = builder.finish().unwrap();
                 let finalized = wallet.sign(&mut psbt, Default::default()).unwrap();
                 assert!(finalized, "Cannot finalize transaction");
-                wallet.broadcast(psbt.extract_tx()).unwrap();
-                wallet.sync(noop_progress(), None).unwrap();
+                maybe_await!(wallet.broadcast(psbt.extract_tx())).unwrap();
+                maybe_await!(wallet.sync(noop_progress(), None)).unwrap();
                 assert_eq!(wallet.get_balance().unwrap(), 1_000 - details.fee.unwrap_or(0), "incorrect balance after send");
                 assert_eq!(wallet.get_balance().unwrap(), details.received, "incorrect received after send");
 
@@ -776,24 +801,24 @@ macro_rules! bdk_blockchain_tests {
                 let (mut new_psbt, new_details) = builder.finish().unwrap();
                 let finalized = wallet.sign(&mut new_psbt, Default::default()).unwrap();
                 assert!(finalized, "Cannot finalize transaction");
-                wallet.broadcast(new_psbt.extract_tx()).unwrap();
-                wallet.sync(noop_progress(), None).unwrap();
+                maybe_await!(wallet.broadcast(new_psbt.extract_tx())).unwrap();
+                maybe_await!(wallet.sync(noop_progress(), None)).unwrap();
                 assert_eq!(wallet.get_balance().unwrap(), 0, "incorrect balance after change removal");
                 assert_eq!(new_details.received, 0, "incorrect received after change removal");
 
                 assert!(new_details.fee.unwrap_or(0) > details.fee.unwrap_or(0), "incorrect fees");
             }
 
-            #[test]
-            fn test_sync_bump_fee_add_input_simple() {
-                let (wallet, descriptors, mut test_client) = init_single_sig();
+            #[tokio::test]
+            async fn test_sync_bump_fee_add_input_simple() {
+                let (wallet, descriptors, mut test_client) = maybe_await!(init_single_sig());
                 let node_addr = test_client.get_node_address(None);
 
                 test_client.receive(testutils! {
                     @tx ( (@external descriptors, 0) => 50_000, (@external descriptors, 1) => 25_000 ) (@confirmations 1)
                 });
 
-                wallet.sync(noop_progress(), None).unwrap();
+                maybe_await!(wallet.sync(noop_progress(), None)).unwrap();
                 assert_eq!(wallet.get_balance().unwrap(), 75_000, "incorrect balance");
 
                 let mut builder = wallet.build_tx();
@@ -801,8 +826,8 @@ macro_rules! bdk_blockchain_tests {
                 let (mut psbt, details) = builder.finish().unwrap();
                 let finalized = wallet.sign(&mut psbt, Default::default()).unwrap();
                 assert!(finalized, "Cannot finalize transaction");
-                wallet.broadcast(psbt.extract_tx()).unwrap();
-                wallet.sync(noop_progress(), None).unwrap();
+                maybe_await!(wallet.broadcast(psbt.extract_tx())).unwrap();
+                maybe_await!(wallet.sync(noop_progress(), None)).unwrap();
                 assert_eq!(wallet.get_balance().unwrap(), 26_000 - details.fee.unwrap_or(0), "incorrect balance after send");
                 assert_eq!(details.received, 1_000 - details.fee.unwrap_or(0), "incorrect received after send");
 
@@ -811,22 +836,22 @@ macro_rules! bdk_blockchain_tests {
                 let (mut new_psbt, new_details) = builder.finish().unwrap();
                 let finalized = wallet.sign(&mut new_psbt, Default::default()).unwrap();
                 assert!(finalized, "Cannot finalize transaction");
-                wallet.broadcast(new_psbt.extract_tx()).unwrap();
-                wallet.sync(noop_progress(), None).unwrap();
+                maybe_await!(wallet.broadcast(new_psbt.extract_tx())).unwrap();
+                maybe_await!(wallet.sync(noop_progress(), None)).unwrap();
                 assert_eq!(new_details.sent, 75_000, "incorrect sent");
                 assert_eq!(wallet.get_balance().unwrap(), new_details.received, "incorrect balance after add input");
             }
 
-            #[test]
-            fn test_sync_bump_fee_add_input_no_change() {
-                let (wallet, descriptors, mut test_client) = init_single_sig();
+            #[tokio::test]
+            async fn test_sync_bump_fee_add_input_no_change() {
+                let (wallet, descriptors, mut test_client) = maybe_await!(init_single_sig());
                 let node_addr = test_client.get_node_address(None);
 
                 test_client.receive(testutils! {
                     @tx ( (@external descriptors, 0) => 50_000, (@external descriptors, 1) => 25_000 ) (@confirmations 1)
                 });
 
-                wallet.sync(noop_progress(), None).unwrap();
+                maybe_await!(wallet.sync(noop_progress(), None)).unwrap();
                 assert_eq!(wallet.get_balance().unwrap(), 75_000, "incorrect balance");
 
                 let mut builder = wallet.build_tx();
@@ -834,8 +859,8 @@ macro_rules! bdk_blockchain_tests {
                 let (mut psbt, details) = builder.finish().unwrap();
                 let finalized = wallet.sign(&mut psbt, Default::default()).unwrap();
                 assert!(finalized, "Cannot finalize transaction");
-                wallet.broadcast(psbt.extract_tx()).unwrap();
-                wallet.sync(noop_progress(), None).unwrap();
+                maybe_await!(wallet.broadcast(psbt.extract_tx())).unwrap();
+                maybe_await!(wallet.sync(noop_progress(), None)).unwrap();
                 assert_eq!(wallet.get_balance().unwrap(), 26_000 - details.fee.unwrap_or(0), "incorrect balance after send");
                 assert_eq!(details.received, 1_000 - details.fee.unwrap_or(0), "incorrect received after send");
 
@@ -846,20 +871,20 @@ macro_rules! bdk_blockchain_tests {
 
                 let finalized = wallet.sign(&mut new_psbt, Default::default()).unwrap();
                 assert!(finalized, "Cannot finalize transaction");
-                wallet.broadcast(new_psbt.extract_tx()).unwrap();
-                wallet.sync(noop_progress(), None).unwrap();
+                maybe_await!(wallet.broadcast(new_psbt.extract_tx())).unwrap();
+                maybe_await!(wallet.sync(noop_progress(), None)).unwrap();
                 assert_eq!(new_details.sent, 75_000, "incorrect sent");
                 assert_eq!(wallet.get_balance().unwrap(), 0, "incorrect balance after add input");
                 assert_eq!(new_details.received, 0, "incorrect received after add input");
             }
 
-            #[test]
-            fn test_sync_receive_coinbase() {
-                let (wallet, _, mut test_client) = init_single_sig();
+            #[tokio::test]
+            async fn test_sync_receive_coinbase() {
+                let (wallet, _, mut test_client) = maybe_await!(init_single_sig());
 
                 let wallet_addr = wallet.get_address($crate::wallet::AddressIndex::New).unwrap().address;
 
-                wallet.sync(noop_progress(), None).unwrap();
+                maybe_await!(wallet.sync(noop_progress(), None)).unwrap();
                 assert_eq!(wallet.get_balance().unwrap(), 0, "incorrect balance");
 
                 test_client.generate(1, Some(wallet_addr));
@@ -872,7 +897,7 @@ macro_rules! bdk_blockchain_tests {
                 }
 
 
-                wallet.sync(noop_progress(), None).unwrap();
+                maybe_await!(wallet.sync(noop_progress(), None)).unwrap();
                 assert!(wallet.get_balance().unwrap() > 0, "incorrect balance after receiving coinbase");
             }
         }
