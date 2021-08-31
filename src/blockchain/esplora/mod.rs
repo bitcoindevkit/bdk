@@ -29,38 +29,16 @@ use bitcoin::{BlockHash, Txid};
 use crate::error::Error;
 use crate::FeeRate;
 
-#[cfg(all(
-    feature = "esplora",
-    feature = "reqwest",
-    any(feature = "async-interface", target_arch = "wasm32"),
-))]
+#[cfg(feature = "reqwest")]
 mod reqwest;
 
-#[cfg(all(
-    feature = "esplora",
-    feature = "reqwest",
-    any(feature = "async-interface", target_arch = "wasm32"),
-))]
+#[cfg(feature = "reqwest")]
 pub use self::reqwest::*;
 
-#[cfg(all(
-    feature = "esplora",
-    not(any(
-        feature = "async-interface",
-        feature = "reqwest",
-        target_arch = "wasm32"
-    )),
-))]
+#[cfg(feature = "ureq")]
 mod ureq;
 
-#[cfg(all(
-    feature = "esplora",
-    not(any(
-        feature = "async-interface",
-        feature = "reqwest",
-        target_arch = "wasm32"
-    )),
-))]
+#[cfg(feature = "ureq")]
 pub use self::ureq::*;
 
 fn into_fee_rate(target: usize, estimates: HashMap<String, f64>) -> Result<FeeRate, Error> {
@@ -141,3 +119,11 @@ impl_error!(io::Error, Io, EsploraError);
 impl_error!(std::num::ParseIntError, Parsing, EsploraError);
 impl_error!(consensus::encode::Error, BitcoinEncoding, EsploraError);
 impl_error!(bitcoin::hashes::hex::Error, Hex, EsploraError);
+
+#[cfg(test)]
+#[cfg(feature = "test-esplora")]
+crate::bdk_blockchain_tests! {
+    fn test_instance(test_client: &TestClient) -> EsploraBlockchain {
+        EsploraBlockchain::new(&format!("http://{}",test_client.electrsd.esplora_url.as_ref().unwrap()), 20)
+    }
+}
