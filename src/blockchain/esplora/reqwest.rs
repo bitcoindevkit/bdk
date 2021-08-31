@@ -350,11 +350,3 @@ impl ConfigurableBlockchain for EsploraBlockchain {
         Ok(blockchain)
     }
 }
-
-#[cfg(test)]
-#[cfg(feature = "test-esplora")]
-crate::bdk_blockchain_tests! {
-    fn test_instance(test_client: &TestClient) -> EsploraBlockchain {
-        EsploraBlockchain::new(&format!("http://{}",test_client.electrsd.esplora_url.as_ref().unwrap()), None, 20)
-    }
-}
