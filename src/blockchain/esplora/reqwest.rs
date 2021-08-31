@@ -106,19 +106,19 @@ impl Blockchain for EsploraBlockchain {
     }
 
     fn get_tx(&self, txid: &Txid) -> Result<Option<Transaction>, Error> {
-        Ok(self.url_client._get_tx(txid).await?)
+        Ok(await_or_block!(self.url_client._get_tx(txid))?)
     }
 
     fn broadcast(&self, tx: &Transaction) -> Result<(), Error> {
-        Ok(self.url_client._broadcast(tx).await?)
+        Ok(await_or_block!(self.url_client._broadcast(tx))?)
     }
 
     fn get_height(&self) -> Result<u32, Error> {
-        Ok(self.url_client._get_height().await?)
+        Ok(await_or_block!(self.url_client._get_height())?)
     }
 
     fn estimate_fee(&self, target: usize) -> Result<FeeRate, Error> {
-        let estimates = self.url_client._get_fee_estimates().await?;
+        let estimates = await_or_block!(self.url_client._get_fee_estimates())?;
         super::into_fee_rate(target, estimates)
     }
 }
@@ -287,10 +287,10 @@ impl ElectrumLikeSync for UrlClient {
             for script in chunk {
                 futs.push(self._script_get_history(script));
             }
-            let partial_results: Vec<Vec<ElsGetHistoryRes>> = futs.try_collect().await?;
+            let partial_results: Vec<Vec<ElsGetHistoryRes>> = await_or_block!(futs.try_collect())?;
             results.extend(partial_results);
         }
-        Ok(stream::iter(results).collect().await)
+        Ok(await_or_block!(stream::iter(results).collect()))
     }
 
     fn els_batch_transaction_get<'s, I: IntoIterator<Item = &'s Txid>>(
@@ -303,10 +303,10 @@ impl ElectrumLikeSync for UrlClient {
             for txid in chunk {
                 futs.push(self._get_tx_no_opt(txid));
             }
-            let partial_results: Vec<Transaction> = futs.try_collect().await?;
+            let partial_results: Vec<Transaction> = await_or_block!(futs.try_collect())?;
             results.extend(partial_results);
         }
-        Ok(stream::iter(results).collect().await)
+        Ok(await_or_block!(stream::iter(results).collect()))
     }
 
     fn els_batch_block_header<I: IntoIterator<Item = u32>>(
@@ -319,10 +319,10 @@ impl ElectrumLikeSync for UrlClient {
             for height in chunk {
                 futs.push(self._get_header(height));
             }
-            let partial_results: Vec<BlockHeader> = futs.try_collect().await?;
+            let partial_results: Vec<BlockHeader> = await_or_block!(futs.try_collect())?;
             results.extend(partial_results);
         }
-        Ok(stream::iter(results).collect().await)
+        Ok(await_or_block!(stream::iter(results).collect()))
     }
 }
 
