@@ -80,7 +80,7 @@ esplora = []
 test-blockchains = ["core-rpc", "electrum-client"]
 test-electrum = ["electrum", "electrsd/electrs_0_8_10", "test-blockchains"]
 test-rpc = ["rpc", "electrsd/electrs_0_8_10", "test-blockchains"]
-test-esplora = ["esplora", "ureq", "electrsd/legacy", "electrsd/esplora_a33e97e1", "test-blockchains"]
+test-esplora = ["electrsd/legacy", "electrsd/esplora_a33e97e1", "test-blockchains"]
 test-md-docs = ["electrum"]
 
 [dev-dependencies]
