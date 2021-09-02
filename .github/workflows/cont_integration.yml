@@ -84,9 +84,9 @@ jobs:
       fail-fast: false
       matrix:
         blockchain:
+          # We test Esplora separately below.
           - name: electrum
           - name: rpc
-          - name: esplora
     steps:
       - name: Checkout
         uses: actions/checkout@v2
@@ -105,6 +105,34 @@ jobs:
           override: true
       - name: Test
         run: cargo test --features test-${{ matrix.blockchain.name }} ${{ matrix.blockchain.name }}::bdk_blockchain_tests
+
+  test-blockchains-esplora:
+    name: Test esplora-${{ matrix.backend.name }}
+    runs-on: ubuntu-20.04
+    strategy:
+      fail-fast: false
+      matrix:
+        backend:
+          - name: ureq
+          - name: reqwest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Cache
+        uses: actions/cache@v2
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ github.job }}-${{ hashFiles('**/Cargo.toml','**/Cargo.lock') }}
+      - name: Setup rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+      - name: Test
+        run: cargo test --no-default-features --features test-esplora,use-esplora-${{ matrix.backend.name }} esplora::bdk_blockchain_tests
 
   check-wasm:
     name: Check WASM
