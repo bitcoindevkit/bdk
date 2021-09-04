@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.11.0] - [v0.10.0]
+
 - Added `flush` method to the `Database` trait to explicitly flush to disk latest changes on the db.
 
 ## [v0.10.0] - [v0.9.0]
@@ -362,7 +364,7 @@ final transaction is created by calling `finish` on the builder.
 - Use `MemoryDatabase` in the compiler example
 - Make the REPL return JSON
 
-[unreleased]: https://github.com/bitcoindevkit/bdk/compare/v0.10.0...HEAD
+[unreleased]: https://github.com/bitcoindevkit/bdk/compare/v0.11.0...HEAD
 [0.1.0-beta.1]: https://github.com/bitcoindevkit/bdk/compare/96c87ea5...0.1.0-beta.1
 [v0.2.0]: https://github.com/bitcoindevkit/bdk/compare/0.1.0-beta.1...v0.2.0
 [v0.3.0]: https://github.com/bitcoindevkit/bdk/compare/v0.2.0...v0.3.0
@@ -374,3 +376,4 @@ final transaction is created by calling `finish` on the builder.
 [v0.8.0]: https://github.com/bitcoindevkit/bdk/compare/v0.7.0...v0.8.0
 [v0.9.0]: https://github.com/bitcoindevkit/bdk/compare/v0.8.0...v0.9.0
 [v0.10.0]: https://github.com/bitcoindevkit/bdk/compare/v0.9.0...v0.10.0
+[v0.11.0]: https://github.com/bitcoindevkit/bdk/compare/v0.10.0...v0.11.0
