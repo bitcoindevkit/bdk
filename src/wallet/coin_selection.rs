@@ -42,6 +42,7 @@
 //!         fee_rate: FeeRate,
 //!         amount_needed: u64,
 //!         fee_amount: u64,
+//!         cost_of_change: Option<u64>,
 //!     ) -> Result<CoinSelectionResult, bdk::Error> {
 //!         let mut selected_amount = 0;
 //!         let mut additional_weight = 0;
@@ -53,7 +54,7 @@
 //!                 |(selected_amount, additional_weight), weighted_utxo| {
 //!                     **selected_amount += weighted_utxo.utxo.txout().value;
 //!                     **additional_weight += TXIN_BASE_WEIGHT + weighted_utxo.satisfaction_weight;
-//!                     Some(weighted_utxo.utxo)
+//!                     Some(weighted_utxo)
 //!                 },
 //!             )
 //!             .collect::<Vec<_>>();
@@ -66,9 +67,13 @@
 //!             });
 //!         }
 //!
+//!         let calculated_waste =
+//!             Waste::calculate(&all_utxos_selected, None, amount_needed, fee_rate)?;
+//!
 //!         Ok(CoinSelectionResult {
-//!             selected: all_utxos_selected,
+//!             selected: all_utxos_selected.into_iter().map(|u| u.utxo).collect(),
 //!             fee_amount: fee_amount + additional_fees,
+//!             waste: calculated_waste,
 //!         })
 //!     }
 //! }
@@ -118,6 +123,8 @@ pub struct CoinSelectionResult {
     pub selected: Vec<Utxo>,
     /// Total fee amount in satoshi
     pub fee_amount: u64,
+    /// Waste value of current coin selection
+    pub waste: Waste,
 }
 
 impl CoinSelectionResult {
@@ -135,6 +142,99 @@ impl CoinSelectionResult {
                 _ => None,
             })
             .sum()
+    }
+}
+
+/// Metric introduced to measure the performance of different coin selection algorithms.
+///
+/// This implementations considers waste as the sum of two values:
+/// * Timing cost
+/// * Creation cost
+/// > waste = timing_cost + creation_cost
+///
+/// **Timing cost** is the cost associated to the current fee rate and some long term fee rate used
+/// as a treshold to consolidate UTXOs.
+/// > timing_cost = txin_size * current_fee_rate - txin_size * long_term_fee_rate
+///
+/// Timing cost can be negative if the `current_fee_rate` is cheaper than the `long_term_fee_rate`,
+/// or zero if they are equal.
+///
+/// **Creation cost** is the cost associated to the surplus of coins besides the transaction amount
+/// and transaction fees. It can happen in the form of a change output or in the form of excess
+/// fees paid to the miner.
+///
+/// Change cost is derived from the cost of adding the extra output to the transaction and spending
+/// that output in the future.
+/// > change_cost = current_fee_rate * change_output_size + long_term_feerate * change_spend_size
+///
+/// Excess happens when there is no change, and the surplus of coins is spend as part of the fees
+/// to the miner:
+/// > excess = tx_total_value - tx_fees - target
+///
+/// Where _target_ is the desired amount to send.
+///
+/// Creation cost can be zero if there is a perfect match as result of the coin selection
+/// algorithm.
+///
+/// So, waste can be zero if creation and timing cost are zero. Or can be negative, if timing cost
+/// is negative and the creation cost is lower enough (less than the absolute value of timing
+/// cost).
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Waste(pub i64);
+
+const LONG_TERM_FEE_RATE: FeeRate = FeeRate::from_sat_per_vb(5.0);
+
+impl Waste {
+    /// Calculate the amount of waste for the given coin selection
+    ///
+    /// - `selected`: the selected transaction inputs
+    /// - `cost_of_change`: the cost of creating change and spending it in the future
+    /// - `target`: the amount in satoshis of the aimed transaction output
+    /// - `fee_rate`: fee rate to use
+    pub fn calculate(
+        selected: &[WeightedUtxo],
+        cost_of_change: Option<u64>,
+        target: u64,
+        fee_rate: FeeRate,
+    ) -> Result<Waste, Error> {
+        // Always consider the cost of spending an input now vs in the future.
+        let utxo_groups: Vec<_> = selected
+            .iter()
+            .map(|u| OutputGroup::new(u, fee_rate))
+            .collect();
+
+        // If fee_rate < LONG_TERM_FEE_RATE, timing cost can be negative
+        let timing_cost: i64 = utxo_groups.iter().fold(0, |acc, utxo| {
+            let fee: i64 = utxo.fee as i64;
+            let long_term_fee: i64 = LONG_TERM_FEE_RATE
+                .fee_wu(TXIN_BASE_WEIGHT + utxo.weighted_utxo.satisfaction_weight)
+                as i64;
+
+            acc + fee - long_term_fee
+        });
+
+        let selected_effective_value: i64 = utxo_groups
+            .iter()
+            .fold(0, |acc, utxo| acc + utxo.effective_value);
+
+        let creation_cost = match cost_of_change {
+            Some(change_cost) => {
+                // Consider the cost of making change and spending it in the future
+                // If we aren't making change, the caller should've set cost_of_change to None
+                if change_cost == 0 {
+                    return Err(Error::Generic(
+                        "if there is not cost_of_change, set to None, not zero".to_string(),
+                    ));
+                }
+                change_cost as i64
+            }
+            None => {
+                // When we are not making change, consider the excess we are throwing away to fees
+                selected_effective_value - target as i64
+            }
+        };
+
+        Ok(Waste(timing_cost + creation_cost))
     }
 }
 
@@ -157,6 +257,11 @@ pub trait CoinSelectionAlgorithm<D: Database>: std::fmt::Debug {
     /// - `amount_needed`: the amount in satoshi to select
     /// - `fee_amount`: the amount of fees in satoshi already accumulated from adding outputs and
     ///                 the transaction's header
+    /// - `_cost_of_change`: the cost of creating change and spending it in the future
+    ///                      if there is change, it must be a positive number
+    ///                      must be None if there is no change
+    // REVIEW: refactor with less arguments?
+    #[allow(clippy::too_many_arguments)]
     fn coin_select(
         &self,
         database: &D,
@@ -165,6 +270,7 @@ pub trait CoinSelectionAlgorithm<D: Database>: std::fmt::Debug {
         fee_rate: FeeRate,
         amount_needed: u64,
         fee_amount: u64,
+        _cost_of_change: Option<u64>,
     ) -> Result<CoinSelectionResult, Error>;
 }
 
@@ -184,6 +290,7 @@ impl<D: Database> CoinSelectionAlgorithm<D> for LargestFirstCoinSelection {
         fee_rate: FeeRate,
         amount_needed: u64,
         fee_amount: u64,
+        _cost_of_change: Option<u64>,
     ) -> Result<CoinSelectionResult, Error> {
         log::debug!(
             "amount_needed = `{}`, fee_amount = `{}`, fee_rate = `{:?}`",
@@ -222,6 +329,7 @@ impl<D: Database> CoinSelectionAlgorithm<D> for OldestFirstCoinSelection {
         fee_rate: FeeRate,
         amount_needed: u64,
         fee_amount: u64,
+        _cost_of_change: Option<u64>,
     ) -> Result<CoinSelectionResult, Error> {
         // query db and create a blockheight lookup table
         let blockheights = optional_utxos
@@ -303,24 +411,26 @@ fn select_sorted_utxos(
         });
     }
 
+    // TODO: Calculate waste metric for selected coins
     Ok(CoinSelectionResult {
         selected,
         fee_amount,
+        waste: Waste(0),
     })
 }
 
 #[derive(Debug, Clone)]
 // Adds fee information to an UTXO.
-struct OutputGroup {
-    weighted_utxo: WeightedUtxo,
+struct OutputGroup<'u> {
+    weighted_utxo: &'u WeightedUtxo,
     // Amount of fees for spending a certain utxo, calculated using a certain FeeRate
     fee: u64,
     // The effective value of the UTXO, i.e., the utxo value minus the fee for spending it
     effective_value: i64,
 }
 
-impl OutputGroup {
-    fn new(weighted_utxo: WeightedUtxo, fee_rate: FeeRate) -> Self {
+impl<'u> OutputGroup<'u> {
+    fn new(weighted_utxo: &'u WeightedUtxo, fee_rate: FeeRate) -> Self {
         let fee = fee_rate.fee_wu(TXIN_BASE_WEIGHT + weighted_utxo.satisfaction_weight);
         let effective_value = weighted_utxo.utxo.txout().value as i64 - fee as i64;
         OutputGroup {
@@ -366,16 +476,17 @@ impl<D: Database> CoinSelectionAlgorithm<D> for BranchAndBoundCoinSelection {
         fee_rate: FeeRate,
         amount_needed: u64,
         fee_amount: u64,
+        _cost_of_change: Option<u64>,
     ) -> Result<CoinSelectionResult, Error> {
         // Mapping every (UTXO, usize) to an output group
-        let required_utxos: Vec<OutputGroup> = required_utxos
-            .into_iter()
+        let required_utxos: Vec<OutputGroup<'_>> = required_utxos
+            .iter()
             .map(|u| OutputGroup::new(u, fee_rate))
             .collect();
 
         // Mapping every (UTXO, usize) to an output group.
-        let optional_utxos: Vec<OutputGroup> = optional_utxos
-            .into_iter()
+        let optional_utxos: Vec<OutputGroup<'_>> = optional_utxos
+            .iter()
             .map(|u| OutputGroup::new(u, fee_rate))
             .collect();
 
@@ -443,8 +554,8 @@ impl BranchAndBoundCoinSelection {
     #[allow(clippy::too_many_arguments)]
     fn bnb(
         &self,
-        required_utxos: Vec<OutputGroup>,
-        mut optional_utxos: Vec<OutputGroup>,
+        required_utxos: Vec<OutputGroup<'_>>,
+        mut optional_utxos: Vec<OutputGroup<'_>>,
         mut curr_value: i64,
         mut curr_available_value: i64,
         actual_target: i64,
@@ -552,8 +663,8 @@ impl BranchAndBoundCoinSelection {
 
     fn single_random_draw(
         &self,
-        required_utxos: Vec<OutputGroup>,
-        mut optional_utxos: Vec<OutputGroup>,
+        required_utxos: Vec<OutputGroup<'_>>,
+        mut optional_utxos: Vec<OutputGroup<'_>>,
         curr_value: i64,
         actual_target: i64,
         fee_amount: u64,
@@ -582,21 +693,23 @@ impl BranchAndBoundCoinSelection {
         BranchAndBoundCoinSelection::calculate_cs_result(selected_utxos, required_utxos, fee_amount)
     }
 
-    fn calculate_cs_result(
-        mut selected_utxos: Vec<OutputGroup>,
-        mut required_utxos: Vec<OutputGroup>,
+    fn calculate_cs_result<'u>(
+        mut selected_utxos: Vec<OutputGroup<'u>>,
+        mut required_utxos: Vec<OutputGroup<'u>>,
         mut fee_amount: u64,
     ) -> CoinSelectionResult {
         selected_utxos.append(&mut required_utxos);
         fee_amount += selected_utxos.iter().map(|u| u.fee).sum::<u64>();
         let selected = selected_utxos
             .into_iter()
-            .map(|u| u.weighted_utxo.utxo)
+            .map(|u| u.weighted_utxo.utxo.clone())
             .collect::<Vec<_>>();
 
+        // TODO: Calculate waste metric for selected coins
         CoinSelectionResult {
             selected,
             fee_amount,
+            waste: Waste(0),
         }
     }
 }
@@ -745,6 +858,27 @@ mod test {
         vec![utxo; utxos_number]
     }
 
+    fn generate_utxos_of_values(utxos_values: Vec<u64>) -> Vec<WeightedUtxo> {
+        utxos_values
+            .into_iter()
+            .map(|value| WeightedUtxo {
+                satisfaction_weight: P2WPKH_WITNESS_SIZE,
+                utxo: Utxo::Local(LocalUtxo {
+                    outpoint: OutPoint::from_str(
+                        "ebd9813ecebc57ff8f30797de7c205e3c7498ca950ea4341ee51a685ff2fa30a:0",
+                    )
+                    .unwrap(),
+                    txout: TxOut {
+                        value,
+                        script_pubkey: Script::new(),
+                    },
+                    keychain: KeychainKind::External,
+                    is_spent: false,
+                }),
+            })
+            .collect()
+    }
+
     fn sum_random_utxos(mut rng: &mut StdRng, utxos: &mut Vec<WeightedUtxo>) -> u64 {
         let utxos_picked_len = rng.gen_range(2, utxos.len() / 2);
         utxos.shuffle(&mut rng);
@@ -767,6 +901,7 @@ mod test {
                 FeeRate::from_sat_per_vb(1.0),
                 250_000,
                 FEE_AMOUNT,
+                None,
             )
             .unwrap();
 
@@ -788,6 +923,7 @@ mod test {
                 FeeRate::from_sat_per_vb(1.0),
                 20_000,
                 FEE_AMOUNT,
+                None,
             )
             .unwrap();
 
@@ -809,6 +945,7 @@ mod test {
                 FeeRate::from_sat_per_vb(1.0),
                 20_000,
                 FEE_AMOUNT,
+                None,
             )
             .unwrap();
 
@@ -831,6 +968,7 @@ mod test {
                 FeeRate::from_sat_per_vb(1.0),
                 500_000,
                 FEE_AMOUNT,
+                None,
             )
             .unwrap();
     }
@@ -849,6 +987,7 @@ mod test {
                 FeeRate::from_sat_per_vb(1000.0),
                 250_000,
                 FEE_AMOUNT,
+                None,
             )
             .unwrap();
     }
@@ -866,6 +1005,7 @@ mod test {
                 FeeRate::from_sat_per_vb(1.0),
                 180_000,
                 FEE_AMOUNT,
+                None,
             )
             .unwrap();
 
@@ -922,6 +1062,7 @@ mod test {
                 FeeRate::from_sat_per_vb(1.0),
                 180_000,
                 FEE_AMOUNT,
+                None,
             )
             .unwrap();
 
@@ -943,6 +1084,7 @@ mod test {
                 FeeRate::from_sat_per_vb(1.0),
                 20_000,
                 FEE_AMOUNT,
+                None,
             )
             .unwrap();
 
@@ -964,6 +1106,7 @@ mod test {
                 FeeRate::from_sat_per_vb(1.0),
                 20_000,
                 FEE_AMOUNT,
+                None,
             )
             .unwrap();
 
@@ -986,6 +1129,7 @@ mod test {
                 FeeRate::from_sat_per_vb(1.0),
                 600_000,
                 FEE_AMOUNT,
+                None,
             )
             .unwrap();
     }
@@ -1007,6 +1151,7 @@ mod test {
                 FeeRate::from_sat_per_vb(1000.0),
                 amount_needed,
                 FEE_AMOUNT,
+                None,
             )
             .unwrap();
     }
@@ -1027,6 +1172,7 @@ mod test {
                 FeeRate::from_sat_per_vb(1.0),
                 250_000,
                 FEE_AMOUNT,
+                None,
             )
             .unwrap();
 
@@ -1048,6 +1194,7 @@ mod test {
                 FeeRate::from_sat_per_vb(1.0),
                 20_000,
                 FEE_AMOUNT,
+                None,
             )
             .unwrap();
 
@@ -1069,6 +1216,7 @@ mod test {
                 FeeRate::from_sat_per_vb(1.0),
                 299756,
                 FEE_AMOUNT,
+                None,
             )
             .unwrap();
 
@@ -1100,6 +1248,7 @@ mod test {
                 FeeRate::from_sat_per_vb(1.0),
                 150_000,
                 FEE_AMOUNT,
+                None,
             )
             .unwrap();
 
@@ -1122,6 +1271,7 @@ mod test {
                 FeeRate::from_sat_per_vb(1.0),
                 500_000,
                 FEE_AMOUNT,
+                None,
             )
             .unwrap();
     }
@@ -1140,6 +1290,7 @@ mod test {
                 FeeRate::from_sat_per_vb(1000.0),
                 250_000,
                 FEE_AMOUNT,
+                None,
             )
             .unwrap();
     }
@@ -1157,6 +1308,7 @@ mod test {
                 FeeRate::from_sat_per_vb(1.0),
                 99932, // first utxo's effective value
                 0,
+                None,
             )
             .unwrap();
 
@@ -1184,6 +1336,7 @@ mod test {
                     FeeRate::from_sat_per_vb(0.0),
                     target_amount,
                     0,
+                    None,
                 )
                 .unwrap();
             assert_eq!(result.selected_amount(), target_amount);
@@ -1194,8 +1347,9 @@ mod test {
     #[should_panic(expected = "BnBNoExactMatch")]
     fn test_bnb_function_no_exact_match() {
         let fee_rate = FeeRate::from_sat_per_vb(10.0);
-        let utxos: Vec<OutputGroup> = get_test_utxos()
-            .into_iter()
+        let test_utxos = get_test_utxos();
+        let utxos: Vec<OutputGroup<'_>> = test_utxos
+            .iter()
             .map(|u| OutputGroup::new(u, fee_rate))
             .collect();
 
@@ -1220,8 +1374,9 @@ mod test {
     #[should_panic(expected = "BnBTotalTriesExceeded")]
     fn test_bnb_function_tries_exceeded() {
         let fee_rate = FeeRate::from_sat_per_vb(10.0);
-        let utxos: Vec<OutputGroup> = generate_same_value_utxos(100_000, 100_000)
-            .into_iter()
+        let same_value_utxos = generate_same_value_utxos(100_000, 100_000);
+        let utxos: Vec<OutputGroup> = same_value_utxos
+            .iter()
             .map(|u| OutputGroup::new(u, fee_rate))
             .collect();
 
@@ -1250,8 +1405,9 @@ mod test {
         let size_of_change = 31;
         let cost_of_change = size_of_change as f32 * fee_rate.as_sat_vb();
 
-        let utxos: Vec<_> = generate_same_value_utxos(50_000, 10)
-            .into_iter()
+        let same_value_utxos = generate_same_value_utxos(50_000, 10);
+        let utxos: Vec<_> = same_value_utxos
+            .iter()
             .map(|u| OutputGroup::new(u, fee_rate))
             .collect();
 
@@ -1286,8 +1442,9 @@ mod test {
         let fee_rate = FeeRate::from_sat_per_vb(0.0);
 
         for _ in 0..200 {
-            let optional_utxos: Vec<_> = generate_random_utxos(&mut rng, 40)
-                .into_iter()
+            let random_utxos = generate_random_utxos(&mut rng, 40);
+            let optional_utxos: Vec<_> = random_utxos
+                .iter()
                 .map(|u| OutputGroup::new(u, fee_rate))
                 .collect();
 
@@ -1323,8 +1480,8 @@ mod test {
         let target_amount = sum_random_utxos(&mut rng, &mut utxos);
 
         let fee_rate = FeeRate::from_sat_per_vb(1.0);
-        let utxos: Vec<OutputGroup> = utxos
-            .into_iter()
+        let utxos: Vec<OutputGroup<'_>> = utxos
+            .iter()
             .map(|u| OutputGroup::new(u, fee_rate))
             .collect();
 
@@ -1338,5 +1495,132 @@ mod test {
 
         assert!(result.selected_amount() > target_amount);
         assert_eq!(result.fee_amount, (50 + result.selected.len() * 68) as u64);
+    }
+
+    #[test]
+    fn test_calculate_waste_with_change() {
+        let fee_rate = FeeRate::from_sat_per_vb(11.0);
+        let selected = generate_utxos_of_values(vec![100_000_000, 200_000_000]);
+        let amount_needed = 200_000_000;
+
+        let utxos: Vec<OutputGroup<'_>> = selected
+            .iter()
+            .map(|u| OutputGroup::new(u, fee_rate))
+            .collect();
+
+        let change_out_size = 31_f32;
+        let change_in_size = 68_f32;
+        let cost_of_change: u64 = (change_out_size * fee_rate.as_sat_vb()
+            - change_in_size * LONG_TERM_FEE_RATE.as_sat_vb())
+            as u64;
+
+        let utxo_fee_diff: i64 = utxos.iter().fold(0, |acc, utxo| {
+            let fee: i64 = utxo.fee as i64;
+            let long_term_fee: i64 = LONG_TERM_FEE_RATE
+                .fee_wu(TXIN_BASE_WEIGHT + utxo.weighted_utxo.satisfaction_weight)
+                as i64;
+
+            acc + fee - long_term_fee
+        });
+
+        // Waste with change is the change cost and difference between fee and long term fee
+        let waste = Waste::calculate(&selected, Some(cost_of_change), amount_needed, fee_rate);
+
+        assert_eq!(waste.unwrap(), Waste(utxo_fee_diff + cost_of_change as i64));
+    }
+
+    #[test]
+    fn test_calculate_waste_without_change() {
+        let fee_rate = FeeRate::from_sat_per_vb(11.0);
+        let utxo_values = vec![100_000_000, 200_000_000];
+        let selected = generate_utxos_of_values(utxo_values.clone());
+        let available_value: u64 = utxo_values.iter().sum();
+        let amount_needed = 200_000_000;
+
+        let utxos: Vec<OutputGroup<'_>> = selected
+            .iter()
+            .map(|u| OutputGroup::new(u, fee_rate))
+            .collect();
+
+        let utxos_fee: u64 = utxos.clone().iter().fold(0, |acc, utxo| acc + utxo.fee);
+
+        let utxo_fee_diff: i64 = utxos.iter().fold(0, |acc, utxo| {
+            let fee: i64 = utxo.fee as i64;
+            let long_term_fee: i64 = LONG_TERM_FEE_RATE
+                .fee_wu(TXIN_BASE_WEIGHT + utxo.weighted_utxo.satisfaction_weight)
+                as i64;
+
+            acc + fee - long_term_fee
+        });
+
+        let excess = available_value - utxos_fee - amount_needed;
+
+        // Waste without change is the excess and difference between fee and long term fee
+        let waste = Waste::calculate(&selected, None, amount_needed, fee_rate);
+
+        assert_eq!(waste.unwrap(), Waste(utxo_fee_diff + excess as i64));
+    }
+
+    #[test]
+    #[should_panic(expected = "Generic(\"if there is not cost_of_change, set to None, not zero\")")]
+    fn test_calculate_waste_with_change_not_set_to_none() {
+        let fee_rate = FeeRate::from_sat_per_vb(11.0);
+        let utxo_values = vec![100_000_000, 200_000_000];
+        let selected = generate_utxos_of_values(utxo_values);
+        let amount_needed = 200_000_000;
+
+        // Waste without change is the excess and difference between fee and long term fee
+        Waste::calculate(&selected, Some(0), amount_needed, fee_rate).unwrap();
+    }
+
+    #[test]
+    fn test_calculate_waste_with_negative_timing_cost() {
+        let fee_rate = FeeRate::from_sat_per_vb(8.0);
+        let utxo_values = vec![100_000_000, 200_000_000];
+        let selected = generate_utxos_of_values(utxo_values.clone());
+        let available_value: u64 = utxo_values.iter().sum();
+        let amount_needed = 200_000_000;
+
+        let utxos: Vec<OutputGroup<'_>> = selected
+            .iter()
+            .map(|u| OutputGroup::new(u, fee_rate))
+            .collect();
+
+        let utxos_fee: u64 = utxos.clone().iter().fold(0, |acc, utxo| acc + utxo.fee);
+
+        let utxo_fee_diff: i64 = utxos.iter().fold(0, |acc, utxo| {
+            let fee: i64 = utxo.fee as i64;
+            let long_term_fee: i64 = LONG_TERM_FEE_RATE
+                .fee_wu(TXIN_BASE_WEIGHT + utxo.weighted_utxo.satisfaction_weight)
+                as i64;
+
+            acc + fee - long_term_fee
+        });
+
+        let excess = available_value - utxos_fee - amount_needed;
+
+        // Waste without change is the excess and difference between fee and long term fee
+        let waste = Waste::calculate(&selected, None, amount_needed, fee_rate);
+
+        assert_eq!(waste.unwrap(), Waste(utxo_fee_diff + excess as i64));
+    }
+
+    #[test]
+    fn test_calculate_waste_with_no_timing_cost_and_no_creation_cost() {
+        let fee_rate = LONG_TERM_FEE_RATE;
+        let utxo_values = vec![200_000_000];
+        let selected = generate_utxos_of_values(utxo_values.clone());
+
+        let utxos_fee: u64 = fee_rate.fee_wu(TXIN_BASE_WEIGHT + selected[0].satisfaction_weight);
+
+        // Build amount_needed to avoid any excess
+        let amount_needed = utxo_values[0] - utxos_fee;
+
+        // Waste without change is the excess and difference between fee and long term fee
+        let waste = Waste::calculate(&selected, None, amount_needed, fee_rate);
+
+        // There shouldn't be any waste if there is no
+        // timing_cost nor creation_cost
+        assert_eq!(waste.unwrap(), Waste(0));
     }
 }

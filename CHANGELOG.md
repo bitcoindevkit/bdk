@@ -6,7 +6,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-- added `OldestFirstCoinSelection` impl to `CoinSelectionAlgorithm`
+- Added `OldestFirstCoinSelection` impl to `CoinSelectionAlgorithm`
 - New MSRV set to `1.56`
 - Unpinned tokio to `1`
 - Add traits to reuse `Blockchain`s across multiple wallets (`BlockchainFactory` and `StatelessBlockchain`).
@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Signing Taproot PSBTs (key spend and script spend)
   - Support for `tr()` descriptors in the `descriptor!()` macro
 - Add support for Bitcoin Core 23.0 when using the `rpc` blockchain
+- Added `Waste` struct to `coinselection` module, with impl of
+  `Waste::calculate` to compute waste metric for coin selection algorithms.
+- Added `_cost_of_change` parameter for `CoinSelectionAlgorithm::coin_select`
+  to pass the cost of generating change to calculate the waste metric for each
+  algorithm.
+- Changed `OutputGroup` owned `weighted_utxo` value to borrowed one.
 
 ## [v0.18.0] - [v0.17.0]
 

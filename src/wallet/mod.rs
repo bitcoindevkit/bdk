@@ -756,6 +756,8 @@ where
             fee_rate,
             outgoing,
             fee_amount,
+            // REVIEW: Add cost_of_change to TxParams
+            None,
         )?;
         let mut fee_amount = coin_selection.fee_amount;
 
