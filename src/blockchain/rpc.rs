@@ -370,7 +370,7 @@ impl ConfigurableBlockchain for RpcBlockchain {
                 client.load_wallet(&wallet_name)?;
                 debug!("wallet loaded {:?}", wallet_name);
             } else {
-                client.create_wallet(&wallet_name, Some(true), None, None, None)?;
+                client.create_wallet(&wallet_name, Some(true), None, None, None, None)?;
                 debug!("wallet created {:?}", wallet_name);
             }
         }
@@ -445,7 +445,7 @@ where
 }
 
 /// return the wallets available in default wallet directory
-//TODO use bitcoincore_rpc method when PR #179 lands
+//TODO use core_rpc method when PR #179 lands
 fn list_wallet_dir(client: &Client) -> Result<Vec<String>, Error> {
     #[derive(Deserialize)]
     struct Name {

@@ -3994,4 +3994,15 @@ pub(crate) mod test {
             }
         );
     }
+
+    #[test]
+    fn test_sending_to_bip350_bech32m_address() {
+        let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
+        let addr =
+            Address::from_str("tb1pqqqqp399et2xygdj5xreqhjjvcmzhxw4aywxecjdzew6hylgvsesf3hn0c")
+                .unwrap();
+        let mut builder = wallet.build_tx();
+        builder.add_recipient(addr.script_pubkey(), 45_000);
+        builder.finish().unwrap();
+    }
 }

@@ -90,6 +90,10 @@ test-rpc = ["rpc", "electrsd/electrs_0_8_10", "test-blockchains"]
 test-esplora = ["electrsd/legacy", "electrsd/esplora_a33e97e1", "test-blockchains"]
 test-md-docs = ["electrum"]
 
+[patch.crates-io]
+core-rpc = { git="https://github.com/sandipndev/rust-bitcoincore-rpc", branch="bech32m-support" }
+bitcoind = { git="https://github.com/sandipndev/bitcoind", branch="create-wallet-updates" }
+
 [dev-dependencies]
 lazy_static = "1.4"
 env_logger = "0.7"
