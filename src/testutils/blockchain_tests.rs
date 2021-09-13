@@ -145,9 +145,7 @@ impl TestClient {
 
         let bumped: serde_json::Value = self.call("bumpfee", &[txid.to_string().into()]).unwrap();
         let new_txid = Txid::from_str(&bumped["txid"].as_str().unwrap().to_string()).unwrap();
-
-        let monitor_script =
-            tx.vout[0].script_pub_key.addresses.as_ref().unwrap()[0].script_pubkey();
+        let monitor_script = Script::from_hex(&mut tx.vout[0].script_pub_key.hex.to_hex()).unwrap();
         self.wait_for_tx(new_txid, &monitor_script);
 
         debug!("Bumped {}, new txid {}", txid, new_txid);
@@ -910,6 +908,53 @@ macro_rules! bdk_blockchain_tests {
 
                 wallet.sync(noop_progress(), None).unwrap();
                 assert!(wallet.get_balance().unwrap() > 0, "incorrect balance after receiving coinbase");
+            }
+
+            #[test]
+            fn test_send_to_bech32m_addr() {
+                use std::str::FromStr;
+                use core_rpc::RpcApi;
+                use core_rpc::core_rpc_json::ImportDescriptorRequest;
+
+                let (wallet, descriptors, mut test_client) = init_single_sig();
+
+                let wallet_descriptor = "tr(tprv8ZgxMBicQKsPdBtxmEMPnNq58KGusNAimQirKFHqX2yk2D8q1v6pNLiKYVAdzDHy2w3vF4chuGfMvNtzsbTTLVXBcdkCA1rje1JG6oksWv8/86h/1h/0h/0/*)#y283ssmn";
+                let change_descriptor = "tr(tprv8ZgxMBicQKsPdBtxmEMPnNq58KGusNAimQirKFHqX2yk2D8q1v6pNLiKYVAdzDHy2w3vF4chuGfMvNtzsbTTLVXBcdkCA1rje1JG6oksWv8/86h/1h/0h/1/*)#47zsd9tt";
+
+                test_client.bitcoind.client
+                    .import_descriptors(
+                        vec![
+                            ImportDescriptorRequest::new(wallet_descriptor, false),
+                            ImportDescriptorRequest::new(change_descriptor, false),
+                        ]
+                    ).unwrap();
+
+                let node_addr = test_client.get_node_address(Some(core_rpc::core_rpc_json::AddressType::Bech32m));
+                assert_eq!(node_addr, bitcoin::Address::from_str("bcrt1pj5y3f0fu4y7g98k4v63j9n0xvj3lmln0cpwhsjzknm6nt0hr0q7qnzwsy9").unwrap());
+
+                let new_bech32m_addr = test_client.get_new_address(Some("test bech32m"), Some(core_rpc::core_rpc_json::AddressType::Bech32m)).unwrap();
+                assert_eq!(new_bech32m_addr, bitcoin::Address::from_str("bcrt1pxa4h86c5gc8x65un8nz546wy7hqxv7wljrv5sxukayh3xwnw23fs80jdf9").unwrap());
+
+                test_client.receive(testutils! {
+                    @tx ( (@external descriptors, 0) => 50_000 )
+                });
+
+                wallet.sync(noop_progress(), None).unwrap();
+                assert_eq!(wallet.get_balance().unwrap(), 50_000, "incorrect balance");
+
+                let mut builder = wallet.build_tx();
+                builder.add_recipient(node_addr.script_pubkey(), 25_000);
+                let (mut psbt, details) = builder.finish().unwrap();
+                let finalized = wallet.sign(&mut psbt, Default::default()).unwrap();
+                assert!(finalized, "Cannot finalize transaction");
+                let tx = psbt.extract_tx();
+                println!("{}", bitcoin::consensus::encode::serialize_hex(&tx));
+                wallet.broadcast(tx).unwrap();
+                wallet.sync(noop_progress(), None).unwrap();
+                assert_eq!(wallet.get_balance().unwrap(), details.received, "incorrect balance after send");
+
+                assert_eq!(wallet.list_transactions(false).unwrap().len(), 2, "incorrect number of txs");
+                assert_eq!(wallet.list_unspent().unwrap().len(), 1, "incorrect number of unspents");
             }
         }
     };
