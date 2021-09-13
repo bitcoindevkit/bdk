@@ -169,22 +169,25 @@ impl Blockchain for RpcBlockchain {
         //TODO maybe convenient using import_descriptor for compatible descriptor and import_multi as fallback
         self.client.import_multi(&requests, Some(&options))?;
 
-        let current_height = self.get_height()?;
+        loop {
+            let current_height = self.get_height()?;
 
-        // min because block invalidate may cause height to go down
-        let node_synced = self.get_node_synced_height()?.min(current_height);
+            // min because block invalidate may cause height to go down
+            let node_synced = self.get_node_synced_height()?.min(current_height);
 
-        //TODO call rescan in chunks (updating node_synced_height) so that in case of
-        // interruption work can be partially recovered
-        debug!(
-            "rescan_blockchain from:{} to:{}",
-            node_synced, current_height
-        );
-        self.client
-            .rescan_blockchain(Some(node_synced as usize), Some(current_height as usize))?;
-        progress_update.update(1.0, None)?;
+            let sync_up_to = node_synced.saturating_add(10_000).min(current_height);
 
-        self.set_node_synced_height(current_height)?;
+            debug!("rescan_blockchain from:{} to:{}", node_synced, sync_up_to);
+            self.client
+                .rescan_blockchain(Some(node_synced as usize), Some(sync_up_to as usize))?;
+            progress_update.update((sync_up_to as f32) / (current_height as f32), None)?;
+
+            self.set_node_synced_height(sync_up_to)?;
+
+            if sync_up_to == current_height {
+                break;
+            }
+        }
 
         self.sync(database, progress_update)
     }
