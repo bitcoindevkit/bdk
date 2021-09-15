@@ -1416,6 +1416,7 @@ mod test {
 
     const ALICE_TPRV_STR:&str = "tprv8ZgxMBicQKsPf6T5X327efHnvJDr45Xnb8W4JifNWtEoqXu9MRYS4v1oYe6DFcMVETxy5w3bqpubYRqvcVTqovG1LifFcVUuJcbwJwrhYzP";
     const BOB_TPRV_STR:&str = "tprv8ZgxMBicQKsPeinZ155cJAn117KYhbaN6MV3WeG6sWhxWzcvX1eg1awd4C9GpUN1ncLEM2rzEvunAg3GizdZD4QPPCkisTz99tXXB4wZArp";
+    const CAROL_TPRV_STR:&str = "tprv8ZgxMBicQKsPdC3CicFifuLCEyVVdXVUNYorxUWj3iGZ6nimnLAYAY9SYB7ib8rKzRxrCKFcEytCt6szwd2GHnGPRCBLAEAoSVDefSNk4Bt";
     const ALICE_BOB_PATH: &str = "m/0'";
 
     #[test]
@@ -1573,5 +1574,29 @@ mod test {
             )
         );
         //println!("{}", serde_json::to_string(&policy_expired_signed).unwrap());
+    }
+
+    #[test]
+    fn test_extract_pkh() {
+        let secp = Secp256k1::new();
+
+        let (prvkey_alice, _, _) = setup_keys(ALICE_TPRV_STR, ALICE_BOB_PATH, &secp);
+        let (prvkey_bob, _, _) = setup_keys(BOB_TPRV_STR, ALICE_BOB_PATH, &secp);
+        let (prvkey_carol, _, _) = setup_keys(CAROL_TPRV_STR, ALICE_BOB_PATH, &secp);
+
+        let desc = descriptor!(wsh(c: andor(
+            pk(prvkey_alice),
+            pk_k(prvkey_bob),
+            pk_h(prvkey_carol),
+        )))
+        .unwrap();
+
+        let (wallet_desc, keymap) = desc
+            .into_wallet_descriptor(&secp, Network::Testnet)
+            .unwrap();
+        let signers_container = Arc::new(SignersContainer::from(keymap));
+
+        let policy = wallet_desc.extract_policy(&signers_container, BuildSatisfaction::None, &secp);
+        assert!(policy.is_ok());
     }
 }
