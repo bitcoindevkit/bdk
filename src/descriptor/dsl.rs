@@ -602,6 +602,9 @@ macro_rules! fragment {
     ( and_or ( $( $inner:tt )* ) ) => ({
         $crate::impl_node_opcode_three!(AndOr, $( $inner )*)
     });
+    ( andor ( $( $inner:tt )* ) ) => ({
+        $crate::impl_node_opcode_three!(AndOr, $( $inner )*)
+    });
     ( or_b ( $( $inner:tt )* ) ) => ({
         $crate::impl_node_opcode_two!(OrB, $( $inner )*)
     });
