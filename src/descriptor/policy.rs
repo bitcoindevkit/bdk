@@ -47,14 +47,12 @@ use bitcoin::util::bip32::Fingerprint;
 use bitcoin::PublicKey;
 
 use miniscript::descriptor::{DescriptorPublicKey, ShInner, SortedMultiVec, WshInner};
-use miniscript::{
-    Descriptor, Miniscript, MiniscriptKey, Satisfier, ScriptContext, Terminal, ToPublicKey,
-};
+use miniscript::{Descriptor, Miniscript, MiniscriptKey, Satisfier, ScriptContext, Terminal};
 
 #[allow(unused_imports)]
 use log::{debug, error, info, trace};
 
-use crate::descriptor::{DerivedDescriptorKey, ExtractPolicy};
+use crate::descriptor::ExtractPolicy;
 use crate::wallet::signer::{SignerId, SignersContainer};
 use crate::wallet::utils::{self, After, Older, SecpCtx};
 
@@ -86,13 +84,6 @@ impl PkOrF {
                 fingerprint: Some(xpub.root_fingerprint(secp)),
                 ..Default::default()
             },
-        }
-    }
-
-    fn from_key_hash(k: hash160::Hash) -> Self {
-        PkOrF {
-            pubkey_hash: Some(k),
-            ..Default::default()
         }
     }
 }
@@ -779,25 +770,6 @@ fn signature_in_psbt(psbt: &Psbt, key: &DescriptorPublicKey, secp: &SecpCtx) -> 
     })
 }
 
-fn signature_key(
-    key: &<DescriptorPublicKey as MiniscriptKey>::Hash,
-    signers: &SignersContainer,
-    secp: &SecpCtx,
-) -> Policy {
-    let key_hash = DerivedDescriptorKey::new(key.clone(), secp)
-        .to_public_key()
-        .to_pubkeyhash();
-    let mut policy: Policy = SatisfiableItem::Signature(PkOrF::from_key_hash(key_hash)).into();
-
-    if signers.find(SignerId::PkHash(key_hash)).is_some() {
-        policy.contribution = Satisfaction::Complete {
-            condition: Default::default(),
-        }
-    }
-
-    policy
-}
-
 impl<Ctx: ScriptContext> ExtractPolicy for Miniscript<DescriptorPublicKey, Ctx> {
     fn extract_policy(
         &self,
@@ -809,7 +781,7 @@ impl<Ctx: ScriptContext> ExtractPolicy for Miniscript<DescriptorPublicKey, Ctx> 
             // Leaves
             Terminal::True | Terminal::False => None,
             Terminal::PkK(pubkey) => Some(signature(pubkey, signers, build_sat, secp)),
-            Terminal::PkH(pubkey_hash) => Some(signature_key(pubkey_hash, signers, secp)),
+            Terminal::PkH(pubkey_hash) => Some(signature(pubkey_hash, signers, build_sat, secp)),
             Terminal::After(value) => {
                 let mut policy: Policy = SatisfiableItem::AbsoluteTimelock { value: *value }.into();
                 policy.contribution = Satisfaction::Complete {
