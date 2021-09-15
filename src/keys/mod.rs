@@ -753,6 +753,20 @@ pub fn make_pk<Pk: IntoDescriptorKey<Ctx>, Ctx: ScriptContext>(
     Ok((minisc, key_map, valid_networks))
 }
 
+// Used internally by `bdk::fragment!` to build `pk_h()` fragments
+#[doc(hidden)]
+pub fn make_pkh<Pk: IntoDescriptorKey<Ctx>, Ctx: ScriptContext>(
+    descriptor_key: Pk,
+    secp: &SecpCtx,
+) -> Result<(Miniscript<DescriptorPublicKey, Ctx>, KeyMap, ValidNetworks), DescriptorError> {
+    let (key, key_map, valid_networks) = descriptor_key.into_descriptor_key()?.extract(secp)?;
+    let minisc = Miniscript::from_ast(Terminal::PkH(key))?;
+
+    minisc.check_minsicript()?;
+
+    Ok((minisc, key_map, valid_networks))
+}
+
 // Used internally by `bdk::fragment!` to build `multi()` fragments
 #[doc(hidden)]
 pub fn make_multi<Pk: IntoDescriptorKey<Ctx>, Ctx: ScriptContext>(

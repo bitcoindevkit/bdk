@@ -571,8 +571,9 @@ macro_rules! fragment {
     ( pk ( $key:expr ) ) => ({
         $crate::fragment!(c:pk_k ( $key ))
     });
-    ( pk_h ( $key_hash:expr ) ) => ({
-        $crate::impl_leaf_opcode_value!(PkH, $key_hash)
+    ( pk_h ( $key:expr ) ) => ({
+        let secp = $crate::bitcoin::secp256k1::Secp256k1::new();
+        $crate::keys::make_pkh($key, &secp)
     });
     ( after ( $value:expr ) ) => ({
         $crate::impl_leaf_opcode_value!(After, $value)
