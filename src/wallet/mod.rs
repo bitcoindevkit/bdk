@@ -323,7 +323,7 @@ where
 
     /// Return the list of unspent outputs of this wallet
     ///
-    /// Note that this methods only operate on the internal database, which first needs to be
+    /// Note that this method only operates on the internal database, which first needs to be
     /// [`Wallet::sync`] manually.
     pub fn list_unspent(&self) -> Result<Vec<LocalUtxo>, Error> {
         self.database.borrow().iter_utxos()
@@ -333,6 +333,21 @@ where
     /// wallet's database.
     pub fn get_utxo(&self, outpoint: OutPoint) -> Result<Option<LocalUtxo>, Error> {
         self.database.borrow().get_utxo(&outpoint)
+    }
+
+    /// Return a single transactions made and received by the wallet
+    ///
+    /// Optionally fill the [`TransactionDetails::transaction`] field with the raw transaction if
+    /// `include_raw` is `true`.
+    ///
+    /// Note that this method only operates on the internal database, which first needs to be
+    /// [`Wallet::sync`] manually.
+    pub fn get_tx(
+        &self,
+        txid: &Txid,
+        include_raw: bool,
+    ) -> Result<Option<TransactionDetails>, Error> {
+        self.database.borrow().get_tx(txid, include_raw)
     }
 
     /// Return the list of transactions made and received by the wallet
