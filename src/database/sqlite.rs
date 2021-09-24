@@ -374,8 +374,8 @@ impl SqliteDatabase {
                 None => None,
             };
 
-            let confirmation_time = match (timestamp, height) {
-                (Some(timestamp), Some(height)) => Some(ConfirmationTime { timestamp, height }),
+            let confirmation_time = match (height, timestamp) {
+                (Some(height), Some(timestamp)) => Some(ConfirmationTime { height, timestamp }),
                 _ => None,
             };
 
@@ -408,8 +408,8 @@ impl SqliteDatabase {
             let height: Option<u32> = row.get(5)?;
             let verified: bool = row.get(6)?;
 
-            let confirmation_time = match (timestamp, height) {
-                (Some(timestamp), Some(height)) => Some(ConfirmationTime { timestamp, height }),
+            let confirmation_time = match (height, timestamp) {
+                (Some(height), Some(timestamp)) => Some(ConfirmationTime { height, timestamp }),
                 _ => None,
             };
 
@@ -451,8 +451,8 @@ impl SqliteDatabase {
                     None => None,
                 };
 
-                let confirmation_time = match (timestamp, height) {
-                    (Some(timestamp), Some(height)) => Some(ConfirmationTime { timestamp, height }),
+                let confirmation_time = match (height, timestamp) {
+                    (Some(height), Some(timestamp)) => Some(ConfirmationTime { height, timestamp }),
                     _ => None,
                 };
 

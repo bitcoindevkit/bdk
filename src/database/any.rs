@@ -320,6 +320,7 @@ impl BatchDatabase for AnyDatabase {
         match self {
             AnyDatabase::Memory(db) => match batch {
                 AnyBatch::Memory(batch) => db.commit_batch(batch),
+                #[cfg(any(feature = "key-value-db", feature = "sqlite"))]
                 _ => unimplemented!("Other batch shouldn't be used with Memory db."),
             },
             #[cfg(feature = "key-value-db")]
