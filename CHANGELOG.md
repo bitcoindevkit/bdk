@@ -7,12 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 - Activate `miniscript/use-serde` feature to allow consumers of the library to access it via the re-exported `miniscript` crate.
+- Add support for proxies in `EsploraBlockchain`
+- Added `SqliteDatabase` that implements `Database` backed by a sqlite database using `rusqlite` crate.
 
 ## [v0.11.0] - [v0.10.0]
 
 - Added `flush` method to the `Database` trait to explicitly flush to disk latest changes on the db.
-- Add support for proxies in `EsploraBlockchain`
-- Added `SqliteDatabase` that implements `Database` backed by a sqlite database using `rusqlite` crate.
 
 ## [v0.10.0] - [v0.9.0]
 
