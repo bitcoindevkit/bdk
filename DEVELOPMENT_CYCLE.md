@@ -32,7 +32,7 @@ Pre-`v1.0.0` our "major" releases only affect the "minor" semver value. Accordin
     - If it's a minor issue you can just fix it in the release branch, since it will be merged back to `master` eventually
     - For bigger issues you can fix them on `master` and then *cherry-pick* the commit to the release branch
 6. Update the changelog with the new release version.
-7. Update `src/lib.rs` with the new version (line ~59)
+7. Update `src/lib.rs` with the new version (line ~43)
 8. On release day, make a commit on the release branch to bump the version to `x.y.z`. The message should be "Bump version to x.y.z".
 9. Add a tag to this commit. The tag name should be `vx.y.z` (for example `v0.5.0`), and the message "Release x.y.z". Make sure the tag is signed, for extra safety use the explicit `--sign` flag.
 10. Push the new commits to the upstream release branch, wait for the CI to finish one last time.
