@@ -84,7 +84,7 @@ pub struct RpcConfig {
 
 /// This struct is equivalent to [core_rpc::Auth] but it implements [serde::Serialize]
 /// To be removed once upstream equivalent is implementing Serialize (json serialization format
-/// should be the same) https://github.com/rust-bitcoin/rust-bitcoincore-rpc/pull/181
+/// should be the same), see [rust-bitcoincore-rpc/pull/181](https://github.com/rust-bitcoin/rust-bitcoincore-rpc/pull/181)
 #[derive(Clone, Debug, Hash, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[serde(untagged)]
