@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+
+## [v0.12.0] - [v0.11.0]
+
 - Activate `miniscript/use-serde` feature to allow consumers of the library to access it via the re-exported `miniscript` crate.
 - Add support for proxies in `EsploraBlockchain`
 - Added `SqliteDatabase` that implements `Database` backed by a sqlite database using `rusqlite` crate.
@@ -381,3 +384,4 @@ final transaction is created by calling `finish` on the builder.
 [v0.9.0]: https://github.com/bitcoindevkit/bdk/compare/v0.8.0...v0.9.0
 [v0.10.0]: https://github.com/bitcoindevkit/bdk/compare/v0.9.0...v0.10.0
 [v0.11.0]: https://github.com/bitcoindevkit/bdk/compare/v0.10.0...v0.11.0
+[v0.12.0]: https://github.com/bitcoindevkit/bdk/compare/v0.11.0...v0.12.0

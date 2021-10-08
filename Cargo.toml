@@ -1,6 +1,6 @@
 [package]
 name = "bdk"
-version = "0.11.1-dev"
+version = "0.12.1-dev"
 edition = "2018"
 authors = ["Alekos Filini <alekos.filini@gmail.com>", "Riccardo Casatta <riccardo@casatta.it>"]
 homepage = "https://bitcoindevkit.org"
@@ -12,7 +12,7 @@ readme = "README.md"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-bdk-macros = { path = "macros"} # TODO: Change this to version number after next release.
+bdk-macros = "^0.6"
 log = "^0.4"
 miniscript = { version = "^6.0", features = ["use-serde"] }
 bitcoin = { version = "^0.27", features = ["use-serde", "base64"] }
@@ -113,6 +113,6 @@ required-features = ["compiler"]
 [workspace]
 members = ["macros"]
 [package.metadata.docs.rs]
-features = ["compiler", "electrum", "esplora", "ureq", "compact_filters", "rpc", "key-value-db", "all-keys", "verify"]
+features = ["compiler", "electrum", "esplora", "ureq", "compact_filters", "rpc", "key-value-db", "sqlite", "all-keys", "verify"]
 # defines the configuration attribute `docsrs`
 rustdoc-args = ["--cfg", "docsrs"]
