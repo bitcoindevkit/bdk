@@ -14,6 +14,7 @@
 //! This module defines an in-memory database type called [`MemoryDatabase`] that is based on a
 //! [`BTreeMap`].
 
+use std::any::Any;
 use std::collections::BTreeMap;
 use std::ops::Bound::{Excluded, Included};
 
@@ -110,7 +111,7 @@ fn after(key: &[u8]) -> Vec<u8> {
 /// [`database`]: crate::database
 #[derive(Debug, Default)]
 pub struct MemoryDatabase {
-    map: BTreeMap<Vec<u8>, Box<dyn std::any::Any>>,
+    map: BTreeMap<Vec<u8>, Box<dyn Any + Send + Sync>>,
     deleted_keys: Vec<Vec<u8>>,
 }
 
