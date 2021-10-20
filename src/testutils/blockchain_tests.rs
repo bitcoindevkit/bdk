@@ -598,7 +598,7 @@ macro_rules! bdk_blockchain_tests {
                 assert!(finalized, "Cannot finalize transaction");
                 let tx = psbt.extract_tx();
                 println!("{}", bitcoin::consensus::encode::serialize_hex(&tx));
-                wallet.broadcast(tx).unwrap();
+                wallet.broadcast(&tx).unwrap();
                 wallet.sync(noop_progress(), None).unwrap();
                 assert_eq!(wallet.get_balance().unwrap(), details.received, "incorrect balance after send");
 
@@ -649,7 +649,7 @@ macro_rules! bdk_blockchain_tests {
 
                 let finalized = wallet.sign(&mut psbt, Default::default()).unwrap();
                 assert!(finalized, "Cannot finalize transaction");
-                let sent_txid = wallet.broadcast(psbt.extract_tx()).unwrap();
+                let sent_txid = wallet.broadcast(&psbt.extract_tx()).unwrap();
 
                 wallet.sync(noop_progress(), None).unwrap();
                 assert_eq!(wallet.get_balance().unwrap(), details.received, "incorrect balance after receive");
@@ -692,7 +692,7 @@ macro_rules! bdk_blockchain_tests {
                     let (mut psbt, details) = builder.finish().unwrap();
                     let finalized = wallet.sign(&mut psbt, Default::default()).unwrap();
                     assert!(finalized, "Cannot finalize transaction");
-                    wallet.broadcast(psbt.extract_tx()).unwrap();
+                    wallet.broadcast(&psbt.extract_tx()).unwrap();
 
                     wallet.sync(noop_progress(), None).unwrap();
 
@@ -731,7 +731,7 @@ macro_rules! bdk_blockchain_tests {
                 let (mut psbt, details) = builder.finish().unwrap();
                 let finalized = wallet.sign(&mut psbt, Default::default()).unwrap();
                 assert!(finalized, "Cannot finalize transaction");
-                wallet.broadcast(psbt.extract_tx()).unwrap();
+                wallet.broadcast(&psbt.extract_tx()).unwrap();
                 wallet.sync(noop_progress(), None).unwrap();
                 assert_eq!(wallet.get_balance().unwrap(), 50_000 - details.fee.unwrap_or(0) - 5_000, "incorrect balance from fees");
                 assert_eq!(wallet.get_balance().unwrap(), details.received, "incorrect balance from received");
@@ -741,7 +741,7 @@ macro_rules! bdk_blockchain_tests {
                 let (mut new_psbt, new_details) = builder.finish().unwrap();
                 let finalized = wallet.sign(&mut new_psbt, Default::default()).unwrap();
                 assert!(finalized, "Cannot finalize transaction");
-                wallet.broadcast(new_psbt.extract_tx()).unwrap();
+                wallet.broadcast(&new_psbt.extract_tx()).unwrap();
                 wallet.sync(noop_progress(), None).unwrap();
                 assert_eq!(wallet.get_balance().unwrap(), 50_000 - new_details.fee.unwrap_or(0) - 5_000, "incorrect balance from fees after bump");
                 assert_eq!(wallet.get_balance().unwrap(), new_details.received, "incorrect balance from received after bump");
@@ -766,7 +766,7 @@ macro_rules! bdk_blockchain_tests {
                 let (mut psbt, details) = builder.finish().unwrap();
                 let finalized = wallet.sign(&mut psbt, Default::default()).unwrap();
                 assert!(finalized, "Cannot finalize transaction");
-                wallet.broadcast(psbt.extract_tx()).unwrap();
+                wallet.broadcast(&psbt.extract_tx()).unwrap();
                 wallet.sync(noop_progress(), None).unwrap();
                 assert_eq!(wallet.get_balance().unwrap(), 1_000 - details.fee.unwrap_or(0), "incorrect balance after send");
                 assert_eq!(wallet.get_balance().unwrap(), details.received, "incorrect received after send");
@@ -776,7 +776,7 @@ macro_rules! bdk_blockchain_tests {
                 let (mut new_psbt, new_details) = builder.finish().unwrap();
                 let finalized = wallet.sign(&mut new_psbt, Default::default()).unwrap();
                 assert!(finalized, "Cannot finalize transaction");
-                wallet.broadcast(new_psbt.extract_tx()).unwrap();
+                wallet.broadcast(&new_psbt.extract_tx()).unwrap();
                 wallet.sync(noop_progress(), None).unwrap();
                 assert_eq!(wallet.get_balance().unwrap(), 0, "incorrect balance after change removal");
                 assert_eq!(new_details.received, 0, "incorrect received after change removal");
@@ -801,7 +801,7 @@ macro_rules! bdk_blockchain_tests {
                 let (mut psbt, details) = builder.finish().unwrap();
                 let finalized = wallet.sign(&mut psbt, Default::default()).unwrap();
                 assert!(finalized, "Cannot finalize transaction");
-                wallet.broadcast(psbt.extract_tx()).unwrap();
+                wallet.broadcast(&psbt.extract_tx()).unwrap();
                 wallet.sync(noop_progress(), None).unwrap();
                 assert_eq!(wallet.get_balance().unwrap(), 26_000 - details.fee.unwrap_or(0), "incorrect balance after send");
                 assert_eq!(details.received, 1_000 - details.fee.unwrap_or(0), "incorrect received after send");
@@ -811,7 +811,7 @@ macro_rules! bdk_blockchain_tests {
                 let (mut new_psbt, new_details) = builder.finish().unwrap();
                 let finalized = wallet.sign(&mut new_psbt, Default::default()).unwrap();
                 assert!(finalized, "Cannot finalize transaction");
-                wallet.broadcast(new_psbt.extract_tx()).unwrap();
+                wallet.broadcast(&new_psbt.extract_tx()).unwrap();
                 wallet.sync(noop_progress(), None).unwrap();
                 assert_eq!(new_details.sent, 75_000, "incorrect sent");
                 assert_eq!(wallet.get_balance().unwrap(), new_details.received, "incorrect balance after add input");
@@ -834,7 +834,7 @@ macro_rules! bdk_blockchain_tests {
                 let (mut psbt, details) = builder.finish().unwrap();
                 let finalized = wallet.sign(&mut psbt, Default::default()).unwrap();
                 assert!(finalized, "Cannot finalize transaction");
-                wallet.broadcast(psbt.extract_tx()).unwrap();
+                wallet.broadcast(&psbt.extract_tx()).unwrap();
                 wallet.sync(noop_progress(), None).unwrap();
                 assert_eq!(wallet.get_balance().unwrap(), 26_000 - details.fee.unwrap_or(0), "incorrect balance after send");
                 assert_eq!(details.received, 1_000 - details.fee.unwrap_or(0), "incorrect received after send");
@@ -846,7 +846,7 @@ macro_rules! bdk_blockchain_tests {
 
                 let finalized = wallet.sign(&mut new_psbt, Default::default()).unwrap();
                 assert!(finalized, "Cannot finalize transaction");
-                wallet.broadcast(new_psbt.extract_tx()).unwrap();
+                wallet.broadcast(&new_psbt.extract_tx()).unwrap();
                 wallet.sync(noop_progress(), None).unwrap();
                 assert_eq!(new_details.sent, 75_000, "incorrect sent");
                 assert_eq!(wallet.get_balance().unwrap(), 0, "incorrect balance after add input");

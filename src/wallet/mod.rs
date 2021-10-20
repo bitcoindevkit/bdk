@@ -1559,8 +1559,8 @@ where
 
     /// Broadcast a transaction to the network
     #[maybe_async]
-    pub fn broadcast(&self, tx: Transaction) -> Result<Txid, Error> {
-        maybe_await!(self.client.broadcast(&tx))?;
+    pub fn broadcast(&self, tx: &Transaction) -> Result<Txid, Error> {
+        maybe_await!(self.client.broadcast(tx))?;
 
         Ok(tx.txid())
     }
