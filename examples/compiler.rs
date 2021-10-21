@@ -70,7 +70,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let policy_str = matches.value_of("POLICY").unwrap();
     info!("Compiling policy: {}", policy_str);
 
-    let policy = Concrete::<String>::from_str(&policy_str)?;
+    let policy = Concrete::<String>::from_str(policy_str)?;
 
     let descriptor = match matches.value_of("TYPE").unwrap() {
         "sh" => Descriptor::new_sh(policy.compile()?)?,

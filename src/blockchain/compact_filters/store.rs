@@ -760,7 +760,7 @@ impl CfStore {
         let cf_headers: Vec<FilterHeader> = filter_hashes
             .into_iter()
             .scan(checkpoint, |prev_header, filter_hash| {
-                let filter_header = filter_hash.filter_header(&prev_header);
+                let filter_header = filter_hash.filter_header(prev_header);
                 *prev_header = filter_header;
 
                 Some(filter_header)
@@ -801,7 +801,7 @@ impl CfStore {
             .zip(headers.into_iter())
             .scan(checkpoint, |prev_header, ((_, filter_content), header)| {
                 let filter = BlockFilter::new(&filter_content);
-                if header != filter.filter_header(&prev_header) {
+                if header != filter.filter_header(prev_header) {
                     return Some(Err(CompactFiltersError::InvalidFilter));
                 }
                 *prev_header = header;
