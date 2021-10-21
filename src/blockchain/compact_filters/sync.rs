@@ -205,7 +205,7 @@ impl CfSync {
                     let block_hash = self.headers_store.get_block_hash(height)?.unwrap();
 
                     // TODO: also download random blocks?
-                    if process(&block_hash, &BlockFilter::new(&filter))? {
+                    if process(&block_hash, &BlockFilter::new(filter))? {
                         log::debug!("Downloading block {}", block_hash);
 
                         let block = peer

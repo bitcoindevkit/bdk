@@ -262,7 +262,7 @@ impl Peer {
         let message_resp = {
             let mut lock = responses.write().unwrap();
             let message_resp = lock.entry(wait_for).or_default();
-            Arc::clone(&message_resp)
+            Arc::clone(message_resp)
         };
 
         let (lock, cvar) = &*message_resp;
@@ -379,7 +379,7 @@ impl Peer {
             let message_resp = {
                 let mut lock = reader_thread_responses.write().unwrap();
                 let message_resp = lock.entry(in_message.cmd()).or_default();
-                Arc::clone(&message_resp)
+                Arc::clone(message_resp)
             };
 
             let (lock, cvar) = &*message_resp;

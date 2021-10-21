@@ -156,7 +156,7 @@ impl Blockchain for RpcBlockchain {
             .iter()
             .map(|s| ImportMultiRequest {
                 timestamp: ImportMultiRescanSince::Timestamp(0),
-                script_pubkey: Some(ImportMultiRequestScriptPubkey::Script(&s)),
+                script_pubkey: Some(ImportMultiRequestScriptPubkey::Script(s)),
                 watchonly: Some(true),
                 ..Default::default()
             })
@@ -238,7 +238,7 @@ impl Blockchain for RpcBlockchain {
                         txid, confirmation_time
                     );
                     known_tx.confirmation_time = confirmation_time;
-                    db.set_tx(&known_tx)?;
+                    db.set_tx(known_tx)?;
                 }
             } else {
                 //TODO check there is already the raw tx in db?
@@ -427,13 +427,13 @@ where
 {
     //TODO check descriptors contains only public keys
     let descriptor = descriptor
-        .into_wallet_descriptor(&secp, network)?
+        .into_wallet_descriptor(secp, network)?
         .0
         .to_string();
     let mut wallet_name = get_checksum(&descriptor[..descriptor.find('#').unwrap()])?;
     if let Some(change_descriptor) = change_descriptor {
         let change_descriptor = change_descriptor
-            .into_wallet_descriptor(&secp, network)?
+            .into_wallet_descriptor(secp, network)?
             .0
             .to_string();
         wallet_name.push_str(

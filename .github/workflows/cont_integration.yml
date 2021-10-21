@@ -10,7 +10,7 @@ jobs:
     strategy:
       matrix:
         rust:
-          - 1.53.0 # STABLE
+          - 1.56.0 # STABLE
           - 1.46.0 # MSRV
         features:
           - default
@@ -135,7 +135,7 @@ jobs:
       - run: sudo apt-get update || exit 1
       - run: sudo apt-get install -y libclang-common-10-dev clang-10 libc6-dev-i386 || exit 1
       - name: Set default toolchain
-        run: rustup default 1.53.0 # STABLE
+        run: rustup default 1.56.0 # STABLE
       - name: Set profile
         run: rustup set profile minimal
       - name: Add target wasm32
