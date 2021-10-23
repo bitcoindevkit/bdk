@@ -1447,6 +1447,11 @@ where
 
         Ok(())
     }
+
+    /// Return an immutable reference to the internal database
+    pub fn database(&self) -> impl std::ops::Deref<Target = D> + '_ {
+        self.database.borrow()
+    }
 }
 
 impl<B, D> Wallet<B, D>
