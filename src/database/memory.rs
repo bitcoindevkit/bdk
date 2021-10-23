@@ -33,6 +33,7 @@ use crate::types::*;
 // transactions         t<txid> -> tx details
 // deriv indexes        c{i,e} -> u32
 // descriptor checksum  d{i,e} -> vec<u8>
+// last sync time       l -> { height, timestamp }
 
 pub(crate) enum MapKey<'a> {
     Path((Option<KeychainKind>, Option<u32>)),
@@ -41,6 +42,7 @@ pub(crate) enum MapKey<'a> {
     RawTx(Option<&'a Txid>),
     Transaction(Option<&'a Txid>),
     LastIndex(KeychainKind),
+    LastSyncTime,
     DescriptorChecksum(KeychainKind),
 }
 
@@ -59,6 +61,7 @@ impl MapKey<'_> {
             MapKey::RawTx(_) => b"r".to_vec(),
             MapKey::Transaction(_) => b"t".to_vec(),
             MapKey::LastIndex(st) => [b"c", st.as_ref()].concat(),
+            MapKey::LastSyncTime => b"l".to_vec(),
             MapKey::DescriptorChecksum(st) => [b"d", st.as_ref()].concat(),
         }
     }
@@ -180,6 +183,12 @@ impl BatchOperations for MemoryDatabase {
 
         Ok(())
     }
+    fn set_last_sync_time(&mut self, ct: ConfirmationTime) -> Result<(), Error> {
+        let key = MapKey::LastSyncTime.as_map_key();
+        self.map.insert(key, Box::new(ct));
+
+        Ok(())
+    }
 
     fn del_script_pubkey_from_path(
         &mut self,
@@ -269,6 +278,13 @@ impl BatchOperations for MemoryDatabase {
             None => Ok(None),
             Some(b) => Ok(Some(*b.downcast_ref().unwrap())),
         }
+    }
+    fn del_last_sync_time(&mut self) -> Result<Option<ConfirmationTime>, Error> {
+        let key = MapKey::LastSyncTime.as_map_key();
+        let res = self.map.remove(&key);
+        self.deleted_keys.push(key);
+
+        Ok(res.map(|b| b.downcast_ref().cloned().unwrap()))
     }
 }
 
@@ -405,6 +421,14 @@ impl Database for MemoryDatabase {
     fn get_last_index(&self, keychain: KeychainKind) -> Result<Option<u32>, Error> {
         let key = MapKey::LastIndex(keychain).as_map_key();
         Ok(self.map.get(&key).map(|b| *b.downcast_ref().unwrap()))
+    }
+
+    fn get_last_sync_time(&self) -> Result<Option<ConfirmationTime>, Error> {
+        let key = MapKey::LastSyncTime.as_map_key();
+        Ok(self
+            .map
+            .get(&key)
+            .map(|b| b.downcast_ref().cloned().unwrap()))
     }
 
     // inserts 0 if not present
@@ -589,5 +613,10 @@ mod test {
     #[test]
     fn test_last_index() {
         crate::database::test::test_last_index(get_tree());
+    }
+
+    #[test]
+    fn test_last_sync_time() {
+        crate::database::test::test_last_sync_time(get_tree());
     }
 }

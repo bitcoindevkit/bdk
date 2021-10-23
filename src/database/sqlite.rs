@@ -35,6 +35,7 @@ static MIGRATIONS: &[&str] = &[
     "CREATE UNIQUE INDEX idx_indices_keychain ON last_derivation_indices(keychain);",
     "CREATE TABLE checksums (keychain TEXT, checksum BLOB);",
     "CREATE INDEX idx_checksums_keychain ON checksums(keychain);",
+    "CREATE TABLE last_sync_time (id INTEGER PRIMARY KEY, height INTEGER, timestamp INTEGER);"
 ];
 
 /// Sqlite database stored on filesystem
@@ -203,6 +204,19 @@ impl SqliteDatabase {
         })?;
 
         Ok(())
+    }
+
+    fn update_last_sync_time(&self, ct: ConfirmationTime) -> Result<i64, Error> {
+        let mut statement = self.connection.prepare_cached(
+            "INSERT INTO last_sync_time (id, height, timestamp) VALUES (0, :height, :timestamp) ON CONFLICT(id) DO UPDATE SET height=:height, timestamp=:timestamp WHERE id = 0",
+        )?;
+
+        statement.execute(named_params! {
+            ":height": ct.height,
+            ":timestamp": ct.timestamp,
+        })?;
+
+        Ok(self.connection.last_insert_rowid())
     }
 
     fn select_script_pubkeys(&self) -> Result<Vec<Script>, Error> {
@@ -487,6 +501,20 @@ impl SqliteDatabase {
         }
     }
 
+    fn select_last_sync_time(&self) -> Result<Option<ConfirmationTime>, Error> {
+        let mut statement = self
+            .connection
+            .prepare_cached("SELECT height, timestamp FROM last_sync_time WHERE id = 0")?;
+        let mut rows = statement.query_map([], |row| {
+            Ok(ConfirmationTime {
+                height: row.get(0)?,
+                timestamp: row.get(1)?,
+            })
+        })?;
+
+        Ok(rows.next().transpose()?)
+    }
+
     fn select_checksum_by_keychain(&self, keychain: String) -> Result<Option<Vec<u8>>, Error> {
         let mut statement = self
             .connection
@@ -563,6 +591,14 @@ impl SqliteDatabase {
 
         Ok(())
     }
+
+    fn delete_last_sync_time(&self) -> Result<(), Error> {
+        let mut statement = self
+            .connection
+            .prepare_cached("DELETE FROM last_sync_time WHERE id = 0")?;
+        statement.execute([])?;
+        Ok(())
+    }
 }
 
 impl BatchOperations for SqliteDatabase {
@@ -619,6 +655,11 @@ impl BatchOperations for SqliteDatabase {
 
     fn set_last_index(&mut self, keychain: KeychainKind, value: u32) -> Result<(), Error> {
         self.update_last_derivation_index(serde_json::to_string(&keychain)?, value)?;
+        Ok(())
+    }
+
+    fn set_last_sync_time(&mut self, ct: ConfirmationTime) -> Result<(), Error> {
+        self.update_last_sync_time(ct)?;
         Ok(())
     }
 
@@ -701,6 +742,17 @@ impl BatchOperations for SqliteDatabase {
         match self.select_last_derivation_index_by_keychain(keychain.clone())? {
             Some(value) => {
                 self.delete_last_derivation_index_by_keychain(keychain)?;
+
+                Ok(Some(value))
+            }
+            None => Ok(None),
+        }
+    }
+
+    fn del_last_sync_time(&mut self) -> Result<Option<ConfirmationTime>, Error> {
+        match self.select_last_sync_time()? {
+            Some(value) => {
+                self.delete_last_sync_time()?;
 
                 Ok(Some(value))
             }
@@ -816,6 +868,10 @@ impl Database for SqliteDatabase {
         let keychain = serde_json::to_string(&keychain)?;
         let value = self.select_last_derivation_index_by_keychain(keychain)?;
         Ok(value)
+    }
+
+    fn get_last_sync_time(&self) -> Result<Option<ConfirmationTime>, Error> {
+        self.select_last_sync_time()
     }
 
     fn increment_last_index(&mut self, keychain: KeychainKind) -> Result<u32, Error> {
@@ -964,5 +1020,10 @@ pub mod test {
     #[test]
     fn test_last_index() {
         crate::database::test::test_last_index(get_database());
+    }
+
+    #[test]
+    fn test_last_sync_time() {
+        crate::database::test::test_last_sync_time(get_database());
     }
 }

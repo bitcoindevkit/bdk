@@ -82,6 +82,13 @@ macro_rules! impl_batch_operations {
             Ok(())
         }
 
+        fn set_last_sync_time(&mut self, ct: ConfirmationTime) -> Result<(), Error> {
+            let key = MapKey::LastSyncTime.as_map_key();
+            self.insert(key, serde_json::to_vec(&ct)?)$($after_insert)*;
+
+            Ok(())
+        }
+
         fn del_script_pubkey_from_path(&mut self, keychain: KeychainKind, path: u32) -> Result<Option<Script>, Error> {
             let key = MapKey::Path((Some(keychain), Some(path))).as_map_key();
             let res = self.remove(key);
@@ -167,6 +174,14 @@ macro_rules! impl_batch_operations {
                     Ok(Some(val))
                 }
             }
+        }
+
+        fn del_last_sync_time(&mut self) -> Result<Option<ConfirmationTime>, Error> {
+            let key = MapKey::LastSyncTime.as_map_key();
+            let res = self.remove(key);
+            let res = $process_delete!(res);
+
+            Ok(res.map(|b| serde_json::from_slice(&b)).transpose()?)
         }
     }
 }
@@ -342,6 +357,14 @@ impl Database for Tree {
             .transpose()
     }
 
+    fn get_last_sync_time(&self) -> Result<Option<ConfirmationTime>, Error> {
+        let key = MapKey::LastSyncTime.as_map_key();
+        Ok(self
+            .get(key)?
+            .map(|b| serde_json::from_slice(&b))
+            .transpose()?)
+    }
+
     // inserts 0 if not present
     fn increment_last_index(&mut self, keychain: KeychainKind) -> Result<u32, Error> {
         let key = MapKey::LastIndex(keychain).as_map_key();
@@ -469,5 +492,10 @@ mod test {
     #[test]
     fn test_last_index() {
         crate::database::test::test_last_index(get_tree());
+    }
+
+    #[test]
+    fn test_last_sync_time() {
+        crate::database::test::test_last_sync_time(get_tree());
     }
 }
