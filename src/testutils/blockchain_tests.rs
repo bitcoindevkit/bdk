@@ -394,6 +394,9 @@ macro_rules! bdk_blockchain_tests {
 
             #[test]
             fn test_sync_simple() {
+                use std::ops::Deref;
+                use crate::database::Database;
+
                 let (wallet, descriptors, mut test_client) = init_single_sig();
 
                 let tx = testutils! {
@@ -402,7 +405,13 @@ macro_rules! bdk_blockchain_tests {
                 println!("{:?}", tx);
                 let txid = test_client.receive(tx);
 
+                // the RPC blockchain needs to call `sync()` during initialization to import the
+                // addresses (see `init_single_sig()`), so we skip this assertion
+                #[cfg(not(feature = "test-rpc"))]
+                assert!(wallet.database().deref().get_sync_time().unwrap().is_none(), "initial sync_time not none");
+
                 wallet.sync(noop_progress(), None).unwrap();
+                assert!(wallet.database().deref().get_sync_time().unwrap().is_some(), "sync_time hasn't been updated");
 
                 assert_eq!(wallet.get_balance().unwrap(), 50_000, "incorrect balance");
                 assert_eq!(wallet.list_unspent().unwrap()[0].keychain, KeychainKind::External, "incorrect keychain kind");

@@ -1554,6 +1554,15 @@ where
             }
         }
 
+        let last_sync_time = ConfirmationTime {
+            height: maybe_await!(self.client.get_height())?,
+            timestamp: time::get_timestamp(),
+        };
+        debug!("Saving `last_sync_time` = {:?}", last_sync_time);
+        self.database
+            .borrow_mut()
+            .set_last_sync_time(last_sync_time)?;
+
         Ok(())
     }
 
