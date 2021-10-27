@@ -601,7 +601,7 @@ where
         let recipients = params.recipients.iter().map(|(r, v)| (r, *v));
 
         for (index, (script_pubkey, value)) in recipients.enumerate() {
-            if value.is_dust() {
+            if value.is_dust() && !script_pubkey.is_provably_unspendable() {
                 return Err(Error::OutputBelowDustLimit(index));
             }
 
