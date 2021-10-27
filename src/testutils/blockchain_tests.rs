@@ -849,6 +849,37 @@ macro_rules! bdk_blockchain_tests {
                 assert_eq!(new_details.received, 0, "incorrect received after add input");
             }
 
+
+            #[test]
+            fn test_add_data() {
+                let (wallet, descriptors, mut test_client) = init_single_sig();
+                let node_addr = test_client.get_node_address(None);
+                let _ = test_client.receive(testutils! {
+                    @tx ( (@external descriptors, 0) => 50_000 )
+                });
+
+                wallet.sync(noop_progress(), None).unwrap();
+                assert_eq!(wallet.get_balance().unwrap(), 50_000, "incorrect balance");
+
+                let mut builder = wallet.build_tx();
+                let data = [42u8;80];
+                builder.add_data(&data);
+                let (mut psbt, details) = builder.finish().unwrap();
+
+                let finalized = wallet.sign(&mut psbt, Default::default()).unwrap();
+                assert!(finalized, "Cannot finalize transaction");
+                let tx = psbt.extract_tx();
+                let serialized_tx = bitcoin::consensus::encode::serialize(&tx);
+                assert!(serialized_tx.windows(data.len()).any(|e| e==data), "cannot find op_return data in transaction");
+                let sent_txid = wallet.broadcast(tx).unwrap();
+                test_client.generate(1, Some(node_addr));
+                wallet.sync(noop_progress(), None).unwrap();
+                assert_eq!(wallet.get_balance().unwrap(), 50_000 - details.fee.unwrap_or(0), "incorrect balance after send");
+
+                let tx_map = wallet.list_transactions(false).unwrap().into_iter().map(|tx| (tx.txid, tx)).collect::<std::collections::HashMap<_, _>>();
+                let _ = tx_map.get(&sent_txid).unwrap();
+            }
+
             #[test]
             fn test_sync_receive_coinbase() {
                 let (wallet, _, mut test_client) = init_single_sig();
