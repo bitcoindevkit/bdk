@@ -3,11 +3,11 @@ use bitcoin::consensus::encode::{deserialize, serialize};
 use bitcoin::hashes::hex::{FromHex, ToHex};
 use bitcoin::hashes::sha256d;
 use bitcoin::{Address, Amount, Script, Transaction, Txid};
+pub use bitcoincore_rpc::bitcoincore_rpc_json::AddressType;
+pub use bitcoincore_rpc::{Auth, Client as RpcClient, RpcApi};
 use core::str::FromStr;
-pub use core_rpc::core_rpc_json::AddressType;
-pub use core_rpc::{Auth, Client as RpcClient, RpcApi};
 use electrsd::bitcoind::BitcoinD;
-use electrsd::{bitcoind, Conf, ElectrsD};
+use electrsd::{bitcoind, ElectrsD};
 pub use electrum_client::{Client as ElectrumClient, ElectrumApi};
 #[allow(unused_imports)]
 use log::{debug, error, info, log_enabled, trace, Level};
@@ -24,19 +24,15 @@ pub struct TestClient {
 impl TestClient {
     pub fn new(bitcoind_exe: String, electrs_exe: String) -> Self {
         debug!("launching {} and {}", &bitcoind_exe, &electrs_exe);
-        let conf = bitcoind::Conf {
-            view_stdout: log_enabled!(Level::Debug),
-            ..Default::default()
-        };
+
+        let mut conf = bitcoind::Conf::default();
+        conf.view_stdout = log_enabled!(Level::Debug);
         let bitcoind = BitcoinD::with_conf(bitcoind_exe, &conf).unwrap();
 
-        let http_enabled = cfg!(feature = "test-esplora");
+        let mut conf = electrsd::Conf::default();
+        conf.view_stderr = log_enabled!(Level::Debug);
+        conf.http_enabled = cfg!(feature = "test-esplora");
 
-        let conf = Conf {
-            http_enabled,
-            view_stderr: log_enabled!(Level::Debug),
-            ..Default::default()
-        };
         let electrsd = ElectrsD::with_conf(electrs_exe, &bitcoind, &conf).unwrap();
 
         let node_address = bitcoind.client.get_new_address(None, None).unwrap();
