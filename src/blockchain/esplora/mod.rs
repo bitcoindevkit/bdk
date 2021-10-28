@@ -42,17 +42,18 @@ pub use self::ureq::*;
 mod api;
 
 fn into_fee_rate(target: usize, estimates: HashMap<String, f64>) -> Result<FeeRate, Error> {
-    let fee_val = estimates
-        .into_iter()
-        .map(|(k, v)| Ok::<_, std::num::ParseIntError>((k.parse::<usize>()?, v)))
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| Error::Generic(e.to_string()))?
-        .into_iter()
-        .take_while(|(k, _)| k <= &target)
-        .map(|(_, v)| v)
-        .last()
-        .unwrap_or(1.0);
-
+    let fee_val = {
+        let mut pairs = estimates
+            .into_iter()
+            .filter_map(|(k, v)| Some((k.parse::<usize>().ok()?, v)))
+            .collect::<Vec<_>>();
+        pairs.sort_unstable_by_key(|(k, _)| std::cmp::Reverse(*k));
+        pairs
+            .into_iter()
+            .find(|(k, _)| k <= &target)
+            .map(|(_, v)| v)
+            .unwrap_or(1.0)
+    };
     Ok(FeeRate::from_sat_per_vb(fee_val as f32))
 }
 
@@ -157,3 +158,55 @@ crate::bdk_blockchain_tests! {
 }
 
 const DEFAULT_CONCURRENT_REQUESTS: u8 = 4;
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn feerate_parsing() {
+        let esplora_fees = serde_json::from_str::<HashMap<String, f64>>(
+            r#"{
+  "25": 1.015,
+  "5": 2.3280000000000003,
+  "12": 2.0109999999999997,
+  "15": 1.018,
+  "17": 1.018,
+  "11": 2.0109999999999997,
+  "3": 3.01,
+  "2": 4.9830000000000005,
+  "6": 2.2359999999999998,
+  "21": 1.018,
+  "13": 1.081,
+  "7": 2.2359999999999998,
+  "8": 2.2359999999999998,
+  "16": 1.018,
+  "20": 1.018,
+  "22": 1.017,
+  "23": 1.017,
+  "504": 1,
+  "9": 2.2359999999999998,
+  "14": 1.018,
+  "10": 2.0109999999999997,
+  "24": 1.017,
+  "1008": 1,
+  "1": 4.9830000000000005,
+  "4": 2.3280000000000003,
+  "19": 1.018,
+  "144": 1,
+  "18": 1.018
+}
+"#,
+        )
+        .unwrap();
+        assert_eq!(
+            into_fee_rate(6, esplora_fees.clone()).unwrap(),
+            FeeRate::from_sat_per_vb(2.236)
+        );
+        assert_eq!(
+            into_fee_rate(26, esplora_fees).unwrap(),
+            FeeRate::from_sat_per_vb(1.015),
+            "should inherit from value for 25"
+        );
+    }
+}
