@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - BIP39 implementation dependency, in `keys::bip39` changed from tiny-bip39 to rust-bip39.
 - Add new method on the `TxBuilder` to embed data in the transaction via `OP_RETURN`. To allow that a fix to check the dust only on spendable output has been introduced.
+- Overhauled sync logic for electrum and esplora.
+- Unify ureq and reqwest esplora backends to have the same configuration parameters. This means reqwest now has a timeout parameter and ureq has a concurrency parameter.
+- Fixed esplora fee estimation.
 
 ## [v0.13.0] - [v0.12.0]
 
