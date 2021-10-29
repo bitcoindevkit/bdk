@@ -21,19 +21,15 @@ use bitcoin::{BlockHeader, Script, Transaction, Txid};
 #[allow(unused_imports)]
 use log::{debug, error, info, trace};
 
-use futures::stream::{self, FuturesOrdered, StreamExt, TryStreamExt};
-
 use ::reqwest::{Client, StatusCode};
+use futures::stream::{FuturesOrdered, TryStreamExt};
 
-use crate::blockchain::esplora::{EsploraError, EsploraGetHistory};
-use crate::blockchain::utils::{ElectrumLikeSync, ElsGetHistoryRes};
+use super::api::Tx;
+use crate::blockchain::esplora::EsploraError;
 use crate::blockchain::*;
 use crate::database::BatchDatabase;
 use crate::error::Error;
-use crate::wallet::utils::ChunksIterator;
 use crate::FeeRate;
-
-const DEFAULT_CONCURRENT_REQUESTS: u8 = 4;
 
 #[derive(Debug)]
 struct UrlClient {
@@ -70,7 +66,7 @@ impl EsploraBlockchain {
             url_client: UrlClient {
                 url: base_url.to_string(),
                 client: Client::new(),
-                concurrency: DEFAULT_CONCURRENT_REQUESTS,
+                concurrency: super::DEFAULT_CONCURRENT_REQUESTS,
             },
             stop_gap,
         }
@@ -98,11 +94,91 @@ impl Blockchain for EsploraBlockchain {
     fn setup<D: BatchDatabase, P: Progress>(
         &self,
         database: &mut D,
-        progress_update: P,
+        _progress_update: P,
     ) -> Result<(), Error> {
-        maybe_await!(self
-            .url_client
-            .electrum_like_setup(self.stop_gap, database, progress_update))
+        use crate::blockchain::script_sync::Request;
+        let mut request = script_sync::start(database, self.stop_gap)?;
+        let mut tx_index: HashMap<Txid, Tx> = HashMap::new();
+
+        let batch_update = loop {
+            request = match request {
+                Request::Script(script_req) => {
+                    let futures: FuturesOrdered<_> = script_req
+                        .request()
+                        .take(self.url_client.concurrency as usize)
+                        .map(|script| async move {
+                            let mut related_txs: Vec<Tx> =
+                                self.url_client._scripthash_txs(script, None).await?;
+
+                            let n_confirmed =
+                                related_txs.iter().filter(|tx| tx.status.confirmed).count();
+                            // esplora pages on 25 confirmed transactions. If there's more than
+                            // 25 we need to keep requesting.
+                            if n_confirmed >= 25 {
+                                loop {
+                                    let new_related_txs: Vec<Tx> = self
+                                        .url_client
+                                        ._scripthash_txs(
+                                            script,
+                                            Some(related_txs.last().unwrap().txid),
+                                        )
+                                        .await?;
+                                    let n = new_related_txs.len();
+                                    related_txs.extend(new_related_txs);
+                                    // we've reached the end
+                                    if n < 25 {
+                                        break;
+                                    }
+                                }
+                            }
+                            Result::<_, Error>::Ok(related_txs)
+                        })
+                        .collect();
+                    let txs_per_script: Vec<Vec<Tx>> = await_or_block!(futures.try_collect())?;
+                    let mut satisfaction = vec![];
+
+                    for txs in txs_per_script {
+                        satisfaction.push(
+                            txs.iter()
+                                .map(|tx| (tx.txid, tx.status.block_height))
+                                .collect(),
+                        );
+                        for tx in txs {
+                            tx_index.insert(tx.txid, tx);
+                        }
+                    }
+
+                    script_req.satisfy(satisfaction)?
+                }
+                Request::Conftime(conftimereq) => {
+                    let conftimes = conftimereq
+                        .request()
+                        .map(|txid| {
+                            tx_index
+                                .get(txid)
+                                .expect("must be in index")
+                                .confirmation_time()
+                        })
+                        .collect();
+                    conftimereq.satisfy(conftimes)?
+                }
+                Request::Tx(txreq) => {
+                    let full_txs = txreq
+                        .request()
+                        .map(|txid| {
+                            let tx = tx_index.get(txid).expect("must be in index");
+                            (tx.confirmation_time(), tx.previous_outputs(), tx.to_tx())
+                        })
+                        .collect();
+                    txreq.satisfy(full_txs)?
+                }
+                Request::Finish(batch_update) => break batch_update,
+            }
+        };
+
+        database.commit_batch(batch_update)?;
+
+        Ok(())
     }
 
     fn get_tx(&self, txid: &Txid) -> Result<Option<Transaction>, Error> {
@@ -124,10 +200,6 @@ impl Blockchain for EsploraBlockchain {
 }
 
 impl UrlClient {
-    fn script_to_scripthash(script: &Script) -> String {
-        sha256::Hash::hash(script.as_bytes()).into_inner().to_hex()
-    }
-
     async fn _get_tx(&self, txid: &Txid) -> Result<Option<Transaction>, EsploraError> {
         let resp = self
             .client
@@ -196,71 +268,27 @@ impl UrlClient {
         Ok(req.error_for_status()?.text().await?.parse()?)
     }
 
-    async fn _script_get_history(
+    async fn _scripthash_txs(
         &self,
         script: &Script,
-    ) -> Result<Vec<ElsGetHistoryRes>, EsploraError> {
-        let mut result = Vec::new();
-        let scripthash = Self::script_to_scripthash(script);
-
-        // Add the unconfirmed transactions first
-        result.extend(
-            self.client
-                .get(&format!(
-                    "{}/scripthash/{}/txs/mempool",
-                    self.url, scripthash
-                ))
-                .send()
-                .await?
-                .error_for_status()?
-                .json::<Vec<EsploraGetHistory>>()
-                .await?
-                .into_iter()
-                .map(|x| ElsGetHistoryRes {
-                    tx_hash: x.txid,
-                    height: x.status.block_height.unwrap_or(0) as i32,
-                }),
-        );
-
-        debug!(
-            "Found {} mempool txs for {} - {:?}",
-            result.len(),
-            scripthash,
-            script
-        );
-
-        // Then go through all the pages of confirmed transactions
-        let mut last_txid = String::new();
-        loop {
-            let response = self
-                .client
-                .get(&format!(
-                    "{}/scripthash/{}/txs/chain/{}",
-                    self.url, scripthash, last_txid
-                ))
-                .send()
-                .await?
-                .error_for_status()?
-                .json::<Vec<EsploraGetHistory>>()
-                .await?;
-            let len = response.len();
-            if let Some(elem) = response.last() {
-                last_txid = elem.txid.to_hex();
-            }
-
-            debug!("... adding {} confirmed transactions", len);
-
-            result.extend(response.into_iter().map(|x| ElsGetHistoryRes {
-                tx_hash: x.txid,
-                height: x.status.block_height.unwrap_or(0) as i32,
-            }));
-
-            if len < 25 {
-                break;
-            }
-        }
-
-        Ok(result)
+        last_seen: Option<Txid>,
+    ) -> Result<Vec<Tx>, EsploraError> {
+        let script_hash = sha256::Hash::hash(script.as_bytes()).into_inner().to_hex();
+        let url = match last_seen {
+            Some(last_seen) => format!(
+                "{}/scripthash/{}/txs/chain/{}",
+                self.url, script_hash, last_seen
+            ),
+            None => format!("{}/scripthash/{}/txs", self.url, script_hash),
+        };
+        Ok(self
+            .client
+            .get(url)
+            .send()
+            .await?
+            .error_for_status()?
+            .json::<Vec<Tx>>()
+            .await?)
     }
 
     async fn _get_fee_estimates(&self) -> Result<HashMap<String, f64>, EsploraError> {
@@ -275,83 +303,8 @@ impl UrlClient {
     }
 }
 
-#[maybe_async]
-impl ElectrumLikeSync for UrlClient {
-    fn els_batch_script_get_history<'s, I: IntoIterator<Item = &'s Script>>(
-        &self,
-        scripts: I,
-    ) -> Result<Vec<Vec<ElsGetHistoryRes>>, Error> {
-        let mut results = vec![];
-        for chunk in ChunksIterator::new(scripts.into_iter(), self.concurrency as usize) {
-            let mut futs = FuturesOrdered::new();
-            for script in chunk {
-                futs.push(self._script_get_history(script));
-            }
-            let partial_results: Vec<Vec<ElsGetHistoryRes>> = await_or_block!(futs.try_collect())?;
-            results.extend(partial_results);
-        }
-        Ok(await_or_block!(stream::iter(results).collect()))
-    }
-
-    fn els_batch_transaction_get<'s, I: IntoIterator<Item = &'s Txid>>(
-        &self,
-        txids: I,
-    ) -> Result<Vec<Transaction>, Error> {
-        let mut results = vec![];
-        for chunk in ChunksIterator::new(txids.into_iter(), self.concurrency as usize) {
-            let mut futs = FuturesOrdered::new();
-            for txid in chunk {
-                futs.push(self._get_tx_no_opt(txid));
-            }
-            let partial_results: Vec<Transaction> = await_or_block!(futs.try_collect())?;
-            results.extend(partial_results);
-        }
-        Ok(await_or_block!(stream::iter(results).collect()))
-    }
-
-    fn els_batch_block_header<I: IntoIterator<Item = u32>>(
-        &self,
-        heights: I,
-    ) -> Result<Vec<BlockHeader>, Error> {
-        let mut results = vec![];
-        for chunk in ChunksIterator::new(heights.into_iter(), self.concurrency as usize) {
-            let mut futs = FuturesOrdered::new();
-            for height in chunk {
-                futs.push(self._get_header(height));
-            }
-            let partial_results: Vec<BlockHeader> = await_or_block!(futs.try_collect())?;
-            results.extend(partial_results);
-        }
-        Ok(await_or_block!(stream::iter(results).collect()))
-    }
-}
-
-/// Configuration for an [`EsploraBlockchain`]
-#[derive(Debug, serde::Deserialize, serde::Serialize, Clone, PartialEq)]
-pub struct EsploraBlockchainConfig {
-    /// Base URL of the esplora service
-    ///
-    /// eg. `https://blockstream.info/api/`
-    pub base_url: String,
-    /// Optional URL of the proxy to use to make requests to the Esplora server
-    ///
-    /// The string should be formatted as: `<protocol>://<user>:<password>@host:<port>`.
-    ///
-    /// Note that the format of this value and the supported protocols change slightly between the
-    /// sync version of esplora (using `ureq`) and the async version (using `reqwest`). For more
-    /// details check with the documentation of the two crates. Both of them are compiled with
-    /// the `socks` feature enabled.
-    ///
-    /// The proxy is ignored when targeting `wasm32`.
-    pub proxy: Option<String>,
-    /// Number of parallel requests sent to the esplora service (default: 4)
-    pub concurrency: Option<u8>,
-    /// Stop searching addresses for transactions after finding an unused gap of this length.
-    pub stop_gap: usize,
-}
-
 impl ConfigurableBlockchain for EsploraBlockchain {
-    type Config = EsploraBlockchainConfig;
+    type Config = super::EsploraBlockchainConfig;
 
     fn from_config(config: &Self::Config) -> Result<Self, Error> {
         let map_e = |e: reqwest::Error| Error::Esplora(Box::new(e.into()));
@@ -360,13 +313,19 @@ impl ConfigurableBlockchain for EsploraBlockchain {
         if let Some(concurrency) = config.concurrency {
             blockchain.url_client.concurrency = concurrency;
         }
+        let mut builder = Client::builder();
         #[cfg(not(target_arch = "wasm32"))]
         if let Some(proxy) = &config.proxy {
-            blockchain.url_client.client = Client::builder()
-                .proxy(reqwest::Proxy::all(proxy).map_err(map_e)?)
-                .build()
-                .map_err(map_e)?;
+            builder = builder.proxy(reqwest::Proxy::all(proxy).map_err(map_e)?);
         }
+
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(timeout) = config.timeout {
+            builder = builder.timeout(core::time::Duration::from_secs(timeout));
+        }
+
+        blockchain.url_client.client = builder.build().map_err(map_e)?;
+
         Ok(blockchain)
     }
 }
