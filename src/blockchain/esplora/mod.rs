@@ -21,8 +21,6 @@ use std::collections::HashMap;
 use std::fmt;
 use std::io;
 
-use serde::Deserialize;
-
 use bitcoin::consensus;
 use bitcoin::{BlockHash, Txid};
 
@@ -41,6 +39,8 @@ mod ureq;
 #[cfg(feature = "ureq")]
 pub use self::ureq::*;
 
+mod api;
+
 fn into_fee_rate(target: usize, estimates: HashMap<String, f64>) -> Result<FeeRate, Error> {
     let fee_val = estimates
         .into_iter()
@@ -54,18 +54,6 @@ fn into_fee_rate(target: usize, estimates: HashMap<String, f64>) -> Result<FeeRa
         .unwrap_or(1.0);
 
     Ok(FeeRate::from_sat_per_vb(fee_val as f32))
-}
-
-/// Data type used when fetching transaction history from Esplora.
-#[derive(Deserialize)]
-pub struct EsploraGetHistory {
-    txid: Txid,
-    status: EsploraGetHistoryStatus,
-}
-
-#[derive(Deserialize)]
-struct EsploraGetHistoryStatus {
-    block_height: Option<usize>,
 }
 
 /// Errors that can happen during a sync with [`EsploraBlockchain`]
@@ -107,10 +95,50 @@ impl fmt::Display for EsploraError {
     }
 }
 
+/// Configuration for an [`EsploraBlockchain`]
+#[derive(Debug, serde::Deserialize, serde::Serialize, Clone, PartialEq)]
+pub struct EsploraBlockchainConfig {
+    /// Base URL of the esplora service
+    ///
+    /// eg. `https://blockstream.info/api/`
+    pub base_url: String,
+    /// Optional URL of the proxy to use to make requests to the Esplora server
+    ///
+    /// The string should be formatted as: `<protocol>://<user>:<password>@host:<port>`.
+    ///
+    /// Note that the format of this value and the supported protocols change slightly between the
+    /// sync version of esplora (using `ureq`) and the async version (using `reqwest`). For more
+    /// details check with the documentation of the two crates. Both of them are compiled with
+    /// the `socks` feature enabled.
+    ///
+    /// The proxy is ignored when targeting `wasm32`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub proxy: Option<String>,
+    /// Number of parallel requests sent to the esplora service (default: 4)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub concurrency: Option<u8>,
+    /// Stop searching addresses for transactions after finding an unused gap of this length.
+    pub stop_gap: usize,
+    /// Socket timeout.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timeout: Option<u64>,
+}
+
+impl EsploraBlockchainConfig {
+    /// create a config with default values given the base url and stop gap
+    pub fn new(base_url: String) -> Self {
+        Self {
+            base_url,
+            proxy: None,
+            timeout: None,
+            stop_gap: 20,
+            concurrency: None,
+        }
+    }
+}
+
 impl std::error::Error for EsploraError {}
 
-#[cfg(feature = "ureq")]
-impl_error!(::ureq::Error, Ureq, EsploraError);
 #[cfg(feature = "ureq")]
 impl_error!(::ureq::Transport, UreqTransport, EsploraError);
 #[cfg(feature = "reqwest")]
@@ -127,3 +155,5 @@ crate::bdk_blockchain_tests! {
         EsploraBlockchain::new(&format!("http://{}",test_client.electrsd.esplora_url.as_ref().unwrap()), 20)
     }
 }
+
+const DEFAULT_CONCURRENT_REQUESTS: u8 = 4;
