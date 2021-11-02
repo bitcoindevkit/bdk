@@ -112,15 +112,26 @@ impl Blockchain for ElectrumBlockchain {
                 }
 
                 Request::Conftime(conftimereq) => {
-                    let needs_block_height = conftimereq
-                        .request()
-                        .filter_map(|txid| txid_to_height.get(txid).cloned())
-                        .filter(|height| block_times.get(height).is_none())
-                        .take(chunk_size)
-                        .collect::<HashSet<_>>();
+                    // collect up to chunk_size heights to fetch from electrum
+                    let needs_block_height = {
+                        let mut needs_block_height_iter = conftimereq
+                            .request()
+                            .filter_map(|txid| txid_to_height.get(txid).cloned())
+                            .filter(|height| block_times.get(height).is_none());
+                        let mut needs_block_height = HashSet::new();
 
-                    let new_block_headers =
-                        self.client.batch_block_header(needs_block_height.clone())?;
+                        while needs_block_height.len() < chunk_size {
+                            match needs_block_height_iter.next() {
+                                Some(height) => needs_block_height.insert(height),
+                                None => break,
+                            };
+                        }
+                        needs_block_height
+                    };
+
+                    let new_block_headers = self
+                        .client
+                        .batch_block_header(needs_block_height.iter().cloned())?;
 
                     for (height, header) in needs_block_height.into_iter().zip(new_block_headers) {
                         block_times.insert(height, header.time);
