@@ -148,20 +148,7 @@ impl Blockchain for ElectrumBlockchain {
                     conftimereq.satisfy(conftimes)?
                 }
                 Request::Tx(txreq) => {
-                    let needs_block_height = txreq
-                        .request()
-                        .filter_map(|txid| txid_to_height.get(txid).cloned())
-                        .filter(|height| block_times.get(height).is_none())
-                        .take(chunk_size)
-                        .collect::<HashSet<_>>();
-
-                    let new_block_headers =
-                        self.client.batch_block_header(needs_block_height.clone())?;
-                    for (height, header) in needs_block_height.into_iter().zip(new_block_headers) {
-                        block_times.insert(height, header.time);
-                    }
                     let needs_full = txreq.request().take(chunk_size);
-
                     tx_cache.save_txs(needs_full.clone())?;
                     let full_transactions = needs_full
                         .map(|txid| tx_cache.get(*txid).ok_or_else(electrum_goof))
@@ -177,16 +164,6 @@ impl Blockchain for ElectrumBlockchain {
                     let full_details = full_transactions
                         .into_iter()
                         .map(|tx| {
-                            let confirmation_time = txid_to_height
-                                .get(&tx.txid())
-                                .map(|height| {
-                                    let time = block_times.get(height).ok_or_else(electrum_goof)?;
-                                    Result::<_, Error>::Ok(ConfirmationTime {
-                                        height: *height,
-                                        timestamp: *time as u64,
-                                    })
-                                })
-                                .transpose()?;
                             let prev_outputs = tx
                                 .input
                                 .iter()
@@ -204,7 +181,7 @@ impl Blockchain for ElectrumBlockchain {
                                     Ok(Some(txout.clone()))
                                 })
                                 .collect::<Result<Vec<_>, Error>>()?;
-                            Ok((confirmation_time, prev_outputs, tx))
+                            Ok((prev_outputs, tx))
                         })
                         .collect::<Result<Vec<_>, Error>>()?;
 

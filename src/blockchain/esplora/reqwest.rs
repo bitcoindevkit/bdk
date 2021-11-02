@@ -167,7 +167,7 @@ impl Blockchain for EsploraBlockchain {
                         .request()
                         .map(|txid| {
                             let tx = tx_index.get(txid).expect("must be in index");
-                            (tx.confirmation_time(), tx.previous_outputs(), tx.to_tx())
+                            (tx.previous_outputs(), tx.to_tx())
                         })
                         .collect();
                     txreq.satisfy(full_txs)?
