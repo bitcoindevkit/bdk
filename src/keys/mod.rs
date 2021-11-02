@@ -460,9 +460,9 @@ use bdk::keys::bip39::{Mnemonic, Language};
 
 # fn main() -> Result<(), Box<dyn std::error::Error>> {
 let xkey: ExtendedKey =
-    Mnemonic::from_phrase(
+    Mnemonic::parse_in(
+        Language::English,
         "jelly crash boy whisper mouse ecology tuna soccer memory million news short",
-        Language::English
     )?
     .into_extended_key()?;
 let xprv = xkey.into_xprv(Network::Bitcoin).unwrap();
