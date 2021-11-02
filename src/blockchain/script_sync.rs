@@ -5,9 +5,11 @@ returns associated transactions i.e. electrum.
 #![allow(dead_code)]
 use crate::{
     database::{BatchDatabase, BatchOperations, DatabaseUtils},
+    wallet::time::Instant,
     ConfirmationTime, Error, KeychainKind, LocalUtxo, TransactionDetails,
 };
 use bitcoin::{OutPoint, Script, Transaction, TxOut, Txid};
+use log::*;
 use std::collections::{HashMap, HashSet, VecDeque};
 
 /// A reqeust for on-chain information
@@ -33,14 +35,7 @@ pub fn start<D: BatchDatabase>(db: &D, stop_gap: usize) -> Result<Request<'_, D>
         .iter_script_pubkeys(Some(keychain))?
         .into_iter()
         .collect();
-    let state = State {
-        db,
-        last_active_index: HashMap::default(),
-        conftime_needed: VecDeque::default(),
-        observed_txs: vec![],
-        tx_needed: VecDeque::default(),
-        tx_missing_conftime: HashMap::default(),
-    };
+    let state = State::new(db);
 
     Ok(Request::Script(ScriptReq {
         state,
@@ -76,7 +71,12 @@ impl<'a, D: BatchDatabase> ScriptReq<'a, D> {
         // we want to know the txids assoiciated with the script and their height
         txids: Vec<Vec<(Txid, Option<u32>)>>,
     ) -> Result<Request<'a, D>, Error> {
-        for txid_list in txids.iter() {
+        for (txid_list, script) in txids.iter().zip(self.scripts_needed.iter()) {
+            debug!(
+                "found {} transactions for script pubkey {}",
+                txid_list.len(),
+                script
+            );
             if !txid_list.is_empty() {
                 // the address is active
                 self.state
@@ -131,6 +131,10 @@ impl<'a, D: BatchDatabase> ScriptReq<'a, D> {
             if self.script_index > last_active_index + self.stop_gap
                 || self.scripts_needed.is_empty()
             {
+                debug!(
+                    "finished scanning for transactions for keychain {:?} at index {}",
+                    self.keychain, last_active_index
+                );
                 // we're done here -- check if we need to do the next keychain
                 if let Some(keychain) = self.next_keychains.pop() {
                     self.keychain = keychain;
@@ -154,11 +158,6 @@ impl<'a, D: BatchDatabase> ScriptReq<'a, D> {
     }
 }
 
-/// Next step is to get confirmation times for those we are interested in.
-pub struct ConftimeReq<'a, D> {
-    state: State<'a, D>,
-}
-
 /// Then we get full transactions
 pub struct TxReq<'a, D> {
     state: State<'a, D>,
@@ -177,6 +176,7 @@ impl<'a, D: BatchDatabase> TxReq<'a, D> {
             .into_iter()
             .zip(self.state.tx_needed.iter())
             .map(|((vin, tx), txid)| {
+                debug!("found tx_details for {}", txid);
                 assert_eq!(tx.txid(), *txid);
                 let mut sent: u64 = 0;
                 let mut received: u64 = 0;
@@ -240,6 +240,11 @@ impl<'a, D: BatchDatabase> TxReq<'a, D> {
     }
 }
 
+/// Final step is to get confirmation times
+pub struct ConftimeReq<'a, D> {
+    state: State<'a, D>,
+}
+
 impl<'a, D: BatchDatabase> ConftimeReq<'a, D> {
     pub fn request(&self) -> impl Iterator<Item = &Txid> + Clone {
         self.state.conftime_needed.iter()
@@ -252,6 +257,7 @@ impl<'a, D: BatchDatabase> ConftimeReq<'a, D> {
         let n = confirmation_times.len();
         let conftime_needed = self.state.conftime_needed.iter();
         for (confirmation_time, txid) in confirmation_times.into_iter().zip(conftime_needed) {
+            debug!("confirmation time for {} was {:?}", txid, confirmation_time);
             // this is written awkwardly to avoid lifetime issues with using cleaner .or_else
             let mut tx_details = self.state.tx_missing_conftime.remove(txid);
             if tx_details.is_none() {
@@ -283,10 +289,22 @@ struct State<'a, D> {
     conftime_needed: VecDeque<Txid>,
     observed_txs: Vec<TransactionDetails>,
     tx_missing_conftime: HashMap<Txid, TransactionDetails>,
+    start_time: Instant,
 }
 
 impl<'a, D: BatchDatabase> State<'a, D> {
-    pub fn into_db_update(self) -> Result<D::Batch, Error> {
+    fn new(db: &'a D) -> Self {
+        State {
+            db,
+            last_active_index: HashMap::default(),
+            conftime_needed: VecDeque::default(),
+            observed_txs: vec![],
+            tx_needed: VecDeque::default(),
+            tx_missing_conftime: HashMap::default(),
+            start_time: Instant::new(),
+        }
+    }
+    fn into_db_update(self) -> Result<D::Batch, Error> {
         debug_assert!(
             self.tx_needed.is_empty()
                 && self.tx_missing_conftime.is_empty()
@@ -356,6 +374,10 @@ impl<'a, D: BatchDatabase> State<'a, D> {
             batch.set_last_index(keychain, last_active_index as u32)?;
         }
 
+        info!(
+            "finished setup, elapsed {:?}ms",
+            self.start_time.elapsed().as_millis()
+        );
         Ok(batch)
     }
 }
