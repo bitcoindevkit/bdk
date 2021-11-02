@@ -10,14 +10,6 @@ use crate::{
 use bitcoin::{OutPoint, Script, Transaction, TxOut, Txid};
 use std::collections::{HashMap, HashSet, VecDeque};
 
-struct State<'a, D> {
-    db: &'a D,
-    last_active_index: HashMap<KeychainKind, usize>,
-    tx_needed: VecDeque<Txid>,
-    conftime_needed: VecDeque<Txid>,
-    observed_txs: Vec<TransactionDetails>,
-}
-
 /// A reqeust for on-chain information
 pub enum Request<'a, D: BatchDatabase> {
     /// A request for transactions related to script pubkeys.
@@ -47,6 +39,7 @@ pub fn start<D: BatchDatabase>(db: &D, stop_gap: usize) -> Result<Request<'_, D>
         conftime_needed: VecDeque::default(),
         observed_txs: vec![],
         tx_needed: VecDeque::default(),
+        tx_missing_conftime: HashMap::default(),
     };
 
     Ok(Request::Script(ScriptReq {
@@ -152,7 +145,7 @@ impl<'a, D: BatchDatabase> ScriptReq<'a, D> {
                 } else {
                     self.state.conftime_needed = self.tx_conftime_interested.into_iter().collect();
                     self.state.tx_needed = self.tx_interested.into_iter().collect();
-                    Request::Conftime(ConftimeReq { state: self.state })
+                    Request::Tx(TxReq { state: self.state })
                 }
             } else {
                 Request::Script(self)
@@ -164,38 +157,6 @@ impl<'a, D: BatchDatabase> ScriptReq<'a, D> {
 /// Next step is to get confirmation times for those we are interested in.
 pub struct ConftimeReq<'a, D> {
     state: State<'a, D>,
-}
-
-impl<'a, D: BatchDatabase> ConftimeReq<'a, D> {
-    pub fn request(&self) -> impl Iterator<Item = &Txid> + Clone {
-        self.state.conftime_needed.iter()
-    }
-
-    pub fn satisfy(
-        mut self,
-        confirmation_times: Vec<Option<ConfirmationTime>>,
-    ) -> Result<Request<'a, D>, Error> {
-        let n = confirmation_times.len();
-        for (confirmation_time, txid) in confirmation_times
-            .into_iter()
-            .zip(self.state.conftime_needed.iter())
-        {
-            if let Some(mut tx_details) = self.state.db.get_tx(txid, true)? {
-                tx_details.confirmation_time = confirmation_time;
-                self.state.observed_txs.push(tx_details);
-            }
-        }
-
-        for _ in 0..n {
-            self.state.conftime_needed.pop_front();
-        }
-
-        if self.state.conftime_needed.is_empty() {
-            Ok(Request::Tx(TxReq { state: self.state }))
-        } else {
-            Ok(Request::Conftime(self))
-        }
-    }
 }
 
 /// Then we get full transactions
@@ -210,12 +171,12 @@ impl<'a, D: BatchDatabase> TxReq<'a, D> {
 
     pub fn satisfy(
         mut self,
-        tx_details: Vec<(Option<ConfirmationTime>, Vec<Option<TxOut>>, Transaction)>,
+        tx_details: Vec<(Vec<Option<TxOut>>, Transaction)>,
     ) -> Result<Request<'a, D>, Error> {
         let tx_details: Vec<TransactionDetails> = tx_details
             .into_iter()
             .zip(self.state.tx_needed.iter())
-            .map(|((confirmation_time, vin, tx), txid)| {
+            .map(|((vin, tx), txid)| {
                 assert_eq!(tx.txid(), *txid);
                 let mut sent: u64 = 0;
                 let mut received: u64 = 0;
@@ -255,7 +216,8 @@ impl<'a, D: BatchDatabase> TxReq<'a, D> {
                     transaction: Some(tx),
                     received,
                     sent,
-                    confirmation_time,
+                    // we're going to fill this in later
+                    confirmation_time: None,
                     fee: Some(fee),
                     verified: false,
                 })
@@ -263,81 +225,138 @@ impl<'a, D: BatchDatabase> TxReq<'a, D> {
             .collect::<Result<Vec<_>, _>>()?;
 
         for tx_detail in tx_details {
-            self.state.observed_txs.push(tx_detail);
+            self.state.conftime_needed.push_back(tx_detail.txid);
+            self.state
+                .tx_missing_conftime
+                .insert(tx_detail.txid, tx_detail);
             self.state.tx_needed.pop_front();
         }
 
         if !self.state.tx_needed.is_empty() {
             Ok(Request::Tx(self))
         } else {
-            let existing_txs = self.state.db.iter_txs(false)?;
-            let existing_txids: HashSet<Txid> = existing_txs.iter().map(|tx| tx.txid).collect();
-            let observed_txs = make_txs_consistent(&self.state.observed_txs);
-            let observed_txids: HashSet<Txid> = observed_txs.iter().map(|tx| tx.txid).collect();
-            let txids_to_delete = existing_txids.difference(&observed_txids);
-            let mut batch = self.state.db.begin_batch();
-
-            // Delete old txs that no longer exist
-            for txid in txids_to_delete {
-                if let Some(raw_tx) = self.state.db.get_raw_tx(txid)? {
-                    for i in 0..raw_tx.output.len() {
-                        // Also delete any utxos from the txs that no longer exist.
-                        let _ = batch.del_utxo(&OutPoint {
-                            txid: *txid,
-                            vout: i as u32,
-                        })?;
-                    }
-                } else {
-                    unreachable!("we should always have the raw tx");
-                }
-                batch.del_tx(txid, true)?;
-            }
-
-            // Set every tx we observed
-            for observed_tx in &observed_txs {
-                let tx = observed_tx
-                    .transaction
-                    .as_ref()
-                    .expect("transaction will always be present here");
-                for (i, output) in tx.output.iter().enumerate() {
-                    if let Some((keychain, _)) = self
-                        .state
-                        .db
-                        .get_path_from_script_pubkey(&output.script_pubkey)?
-                    {
-                        // add utxos we own from the new transactions we've seen.
-                        batch.set_utxo(&LocalUtxo {
-                            outpoint: OutPoint {
-                                txid: observed_tx.txid,
-                                vout: i as u32,
-                            },
-                            txout: output.clone(),
-                            keychain,
-                        })?;
-                    }
-                }
-                batch.set_tx(observed_tx)?;
-            }
-
-            // we don't do this in the loop above since we may want to delete some of the utxos we
-            // just added in case there are new tranasactions that spend form each other.
-            for observed_tx in &observed_txs {
-                let tx = observed_tx
-                    .transaction
-                    .as_ref()
-                    .expect("transaction will always be present here");
-                for input in &tx.input {
-                    // Delete any spent utxos
-                    batch.del_utxo(&input.previous_output)?;
-                }
-            }
-
-            for (keychain, last_active_index) in self.state.last_active_index {
-                batch.set_last_index(keychain, last_active_index as u32)?;
-            }
-
-            Ok(Request::Finish(batch))
+            Ok(Request::Conftime(ConftimeReq { state: self.state }))
         }
+    }
+}
+
+impl<'a, D: BatchDatabase> ConftimeReq<'a, D> {
+    pub fn request(&self) -> impl Iterator<Item = &Txid> + Clone {
+        self.state.conftime_needed.iter()
+    }
+
+    pub fn satisfy(
+        mut self,
+        confirmation_times: Vec<Option<ConfirmationTime>>,
+    ) -> Result<Request<'a, D>, Error> {
+        let n = confirmation_times.len();
+        let conftime_needed = self.state.conftime_needed.iter();
+        for (confirmation_time, txid) in confirmation_times.into_iter().zip(conftime_needed) {
+            // this is written awkwardly to avoid lifetime issues with using cleaner .or_else
+            let mut tx_details = self.state.tx_missing_conftime.remove(txid);
+            if tx_details.is_none() {
+                tx_details = self.state.db.get_tx(txid, true)?
+            }
+
+            if let Some(mut tx_details) = tx_details {
+                tx_details.confirmation_time = confirmation_time;
+                self.state.observed_txs.push(tx_details);
+            }
+        }
+
+        for _ in 0..n {
+            self.state.conftime_needed.pop_front();
+        }
+
+        if self.state.conftime_needed.is_empty() {
+            Ok(Request::Finish(self.state.into_db_update()?))
+        } else {
+            Ok(Request::Conftime(self))
+        }
+    }
+}
+
+struct State<'a, D> {
+    db: &'a D,
+    last_active_index: HashMap<KeychainKind, usize>,
+    tx_needed: VecDeque<Txid>,
+    conftime_needed: VecDeque<Txid>,
+    observed_txs: Vec<TransactionDetails>,
+    tx_missing_conftime: HashMap<Txid, TransactionDetails>,
+}
+
+impl<'a, D: BatchDatabase> State<'a, D> {
+    pub fn into_db_update(self) -> Result<D::Batch, Error> {
+        debug_assert!(
+            self.tx_needed.is_empty()
+                && self.tx_missing_conftime.is_empty()
+                && self.conftime_needed.is_empty()
+        );
+        let existing_txs = self.db.iter_txs(false)?;
+        let existing_txids: HashSet<Txid> = existing_txs.iter().map(|tx| tx.txid).collect();
+        let observed_txs = make_txs_consistent(&self.observed_txs);
+        let observed_txids: HashSet<Txid> = observed_txs.iter().map(|tx| tx.txid).collect();
+        let txids_to_delete = existing_txids.difference(&observed_txids);
+        let mut batch = self.db.begin_batch();
+
+        // Delete old txs that no longer exist
+        for txid in txids_to_delete {
+            if let Some(raw_tx) = self.db.get_raw_tx(txid)? {
+                for i in 0..raw_tx.output.len() {
+                    // Also delete any utxos from the txs that no longer exist.
+                    let _ = batch.del_utxo(&OutPoint {
+                        txid: *txid,
+                        vout: i as u32,
+                    })?;
+                }
+            } else {
+                unreachable!("we should always have the raw tx");
+            }
+            batch.del_tx(txid, true)?;
+        }
+
+        // Set every tx we observed
+        for observed_tx in &observed_txs {
+            let tx = observed_tx
+                .transaction
+                .as_ref()
+                .expect("transaction will always be present here");
+            for (i, output) in tx.output.iter().enumerate() {
+                if let Some((keychain, _)) =
+                    self.db.get_path_from_script_pubkey(&output.script_pubkey)?
+                {
+                    // add utxos we own from the new transactions we've seen.
+                    batch.set_utxo(&LocalUtxo {
+                        outpoint: OutPoint {
+                            txid: observed_tx.txid,
+                            vout: i as u32,
+                        },
+                        txout: output.clone(),
+                        keychain,
+                    })?;
+                }
+            }
+            batch.set_tx(observed_tx)?;
+        }
+
+        // we don't do this in the loop above since we may want to delete some of the utxos we
+        // just added in case there are new tranasactions that spend form each other.
+        for observed_tx in &observed_txs {
+            let tx = observed_tx
+                .transaction
+                .as_ref()
+                .expect("transaction will always be present here");
+            for input in &tx.input {
+                // Delete any spent utxos
+                batch.del_utxo(&input.previous_output)?;
+            }
+        }
+
+        for (keychain, last_active_index) in self.last_active_index {
+            batch.set_last_index(keychain, last_active_index as u32)?;
+        }
+
+        Ok(batch)
     }
 }
 
