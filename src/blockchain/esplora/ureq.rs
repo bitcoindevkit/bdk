@@ -149,8 +149,8 @@ impl Blockchain for EsploraBlockchain {
 
                     script_req.satisfy(satisfaction)?
                 }
-                Request::Conftime(conftimereq) => {
-                    let conftimes = conftimereq
+                Request::Conftime(conftime_req) => {
+                    let conftimes = conftime_req
                         .request()
                         .map(|txid| {
                             tx_index
@@ -159,17 +159,17 @@ impl Blockchain for EsploraBlockchain {
                                 .confirmation_time()
                         })
                         .collect();
-                    conftimereq.satisfy(conftimes)?
+                    conftime_req.satisfy(conftimes)?
                 }
-                Request::Tx(txreq) => {
-                    let full_txs = txreq
+                Request::Tx(tx_req) => {
+                    let full_txs = tx_req
                         .request()
                         .map(|txid| {
                             let tx = tx_index.get(txid).expect("must be in index");
                             (tx.previous_outputs(), tx.to_tx())
                         })
                         .collect();
-                    txreq.satisfy(full_txs)?
+                    tx_req.satisfy(full_txs)?
                 }
                 Request::Finish(batch_update) => break batch_update,
             }

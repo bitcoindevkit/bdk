@@ -111,10 +111,10 @@ impl Blockchain for ElectrumBlockchain {
                     script_req.satisfy(txids_per_script)?
                 }
 
-                Request::Conftime(conftimereq) => {
+                Request::Conftime(conftime_req) => {
                     // collect up to chunk_size heights to fetch from electrum
                     let needs_block_height = {
-                        let mut needs_block_height_iter = conftimereq
+                        let mut needs_block_height_iter = conftime_req
                             .request()
                             .filter_map(|txid| txid_to_height.get(txid).cloned())
                             .filter(|height| block_times.get(height).is_none());
@@ -137,7 +137,7 @@ impl Blockchain for ElectrumBlockchain {
                         block_times.insert(height, header.time);
                     }
 
-                    let conftimes = conftimereq
+                    let conftimes = conftime_req
                         .request()
                         .take(chunk_size)
                         .map(|txid| {
@@ -156,10 +156,10 @@ impl Blockchain for ElectrumBlockchain {
                         })
                         .collect::<Result<_, Error>>()?;
 
-                    conftimereq.satisfy(conftimes)?
+                    conftime_req.satisfy(conftimes)?
                 }
-                Request::Tx(txreq) => {
-                    let needs_full = txreq.request().take(chunk_size);
+                Request::Tx(tx_req) => {
+                    let needs_full = tx_req.request().take(chunk_size);
                     tx_cache.save_txs(needs_full.clone())?;
                     let full_transactions = needs_full
                         .map(|txid| tx_cache.get(*txid).ok_or_else(electrum_goof))
@@ -196,7 +196,7 @@ impl Blockchain for ElectrumBlockchain {
                         })
                         .collect::<Result<Vec<_>, Error>>()?;
 
-                    txreq.satisfy(full_details)?
+                    tx_req.satisfy(full_details)?
                 }
                 Request::Finish(batch_update) => break batch_update,
             }

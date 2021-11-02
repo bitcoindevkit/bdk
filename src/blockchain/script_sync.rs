@@ -12,7 +12,7 @@ use bitcoin::{OutPoint, Script, Transaction, TxOut, Txid};
 use log::*;
 use std::collections::{HashMap, HashSet, VecDeque};
 
-/// A reqeust for on-chain information
+/// A request for on-chain information
 pub enum Request<'a, D: BatchDatabase> {
     /// A request for transactions related to script pubkeys.
     Script(ScriptReq<'a, D>),
