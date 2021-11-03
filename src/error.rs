@@ -139,7 +139,7 @@ pub enum Error {
     Sled(sled::Error),
     #[cfg(feature = "rpc")]
     /// Rpc client error
-    Rpc(core_rpc::Error),
+    Rpc(bitcoincore_rpc::Error),
     #[cfg(feature = "sqlite")]
     /// Rusqlite client error
     Rusqlite(rusqlite::Error),
@@ -196,7 +196,7 @@ impl_error!(electrum_client::Error, Electrum);
 #[cfg(feature = "key-value-db")]
 impl_error!(sled::Error, Sled);
 #[cfg(feature = "rpc")]
-impl_error!(core_rpc::Error, Rpc);
+impl_error!(bitcoincore_rpc::Error, Rpc);
 #[cfg(feature = "sqlite")]
 impl_error!(rusqlite::Error, Rusqlite);
 

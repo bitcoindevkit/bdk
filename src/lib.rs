@@ -40,7 +40,7 @@
 //! interact with the bitcoin P2P network.
 //!
 //! ```toml
-//! bdk = "0.12.0"
+//! bdk = "0.13.0"
 //! ```
 #![cfg_attr(
     feature = "electrum",
@@ -236,7 +236,7 @@ extern crate bdk_macros;
 extern crate lazy_static;
 
 #[cfg(feature = "rpc")]
-pub extern crate core_rpc;
+pub extern crate bitcoincore_rpc;
 
 #[cfg(feature = "electrum")]
 pub extern crate electrum_client;
