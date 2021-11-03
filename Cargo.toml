@@ -35,10 +35,6 @@ socks = { version = "0.3", optional = true }
 lazy_static = { version = "1.4", optional = true }
 
 bip39 = { version = "1.0.1", optional = true }
-# backtrace > 0.3.61 includes object v0.27 which doesn't compile on 1.46. this is used by
-# tiny-bip39
-backtrace = { version = "=0.3.61", optional = true }
-
 bitcoinconsensus = { version = "0.19.0-3", optional = true }
 
 # Needed by bdk_blockchain_tests macro
