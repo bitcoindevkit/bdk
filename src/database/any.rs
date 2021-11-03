@@ -144,7 +144,7 @@ impl BatchOperations for AnyDatabase {
     fn set_last_index(&mut self, keychain: KeychainKind, value: u32) -> Result<(), Error> {
         impl_inner_method!(AnyDatabase, self, set_last_index, keychain, value)
     }
-    fn set_last_sync_time(&mut self, last_sync_time: ConfirmationTime) -> Result<(), Error> {
+    fn set_last_sync_time(&mut self, last_sync_time: BlockTime) -> Result<(), Error> {
         impl_inner_method!(AnyDatabase, self, set_last_sync_time, last_sync_time)
     }
 
@@ -183,7 +183,7 @@ impl BatchOperations for AnyDatabase {
     fn del_last_index(&mut self, keychain: KeychainKind) -> Result<Option<u32>, Error> {
         impl_inner_method!(AnyDatabase, self, del_last_index, keychain)
     }
-    fn del_last_sync_time(&mut self) -> Result<Option<ConfirmationTime>, Error> {
+    fn del_last_sync_time(&mut self) -> Result<Option<BlockTime>, Error> {
         impl_inner_method!(AnyDatabase, self, del_last_sync_time)
     }
 }
@@ -247,7 +247,7 @@ impl Database for AnyDatabase {
     fn get_last_index(&self, keychain: KeychainKind) -> Result<Option<u32>, Error> {
         impl_inner_method!(AnyDatabase, self, get_last_index, keychain)
     }
-    fn get_last_sync_time(&self) -> Result<Option<ConfirmationTime>, Error> {
+    fn get_last_sync_time(&self) -> Result<Option<BlockTime>, Error> {
         impl_inner_method!(AnyDatabase, self, get_last_sync_time)
     }
 
@@ -281,7 +281,7 @@ impl BatchOperations for AnyBatch {
     fn set_last_index(&mut self, keychain: KeychainKind, value: u32) -> Result<(), Error> {
         impl_inner_method!(AnyBatch, self, set_last_index, keychain, value)
     }
-    fn set_last_sync_time(&mut self, last_sync_time: ConfirmationTime) -> Result<(), Error> {
+    fn set_last_sync_time(&mut self, last_sync_time: BlockTime) -> Result<(), Error> {
         impl_inner_method!(AnyBatch, self, set_last_sync_time, last_sync_time)
     }
 
@@ -314,7 +314,7 @@ impl BatchOperations for AnyBatch {
     fn del_last_index(&mut self, keychain: KeychainKind) -> Result<Option<u32>, Error> {
         impl_inner_method!(AnyBatch, self, del_last_index, keychain)
     }
-    fn del_last_sync_time(&mut self) -> Result<Option<ConfirmationTime>, Error> {
+    fn del_last_sync_time(&mut self) -> Result<Option<BlockTime>, Error> {
         impl_inner_method!(AnyBatch, self, del_last_sync_time)
     }
 }

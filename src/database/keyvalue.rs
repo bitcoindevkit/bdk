@@ -82,7 +82,7 @@ macro_rules! impl_batch_operations {
             Ok(())
         }
 
-        fn set_last_sync_time(&mut self, ct: ConfirmationTime) -> Result<(), Error> {
+        fn set_last_sync_time(&mut self, ct: BlockTime) -> Result<(), Error> {
             let key = MapKey::LastSyncTime.as_map_key();
             self.insert(key, serde_json::to_vec(&ct)?)$($after_insert)*;
 
@@ -176,7 +176,7 @@ macro_rules! impl_batch_operations {
             }
         }
 
-        fn del_last_sync_time(&mut self) -> Result<Option<ConfirmationTime>, Error> {
+        fn del_last_sync_time(&mut self) -> Result<Option<BlockTime>, Error> {
             let key = MapKey::LastSyncTime.as_map_key();
             let res = self.remove(key);
             let res = $process_delete!(res);
@@ -357,7 +357,7 @@ impl Database for Tree {
             .transpose()
     }
 
-    fn get_last_sync_time(&self) -> Result<Option<ConfirmationTime>, Error> {
+    fn get_last_sync_time(&self) -> Result<Option<BlockTime>, Error> {
         let key = MapKey::LastSyncTime.as_map_key();
         Ok(self
             .get(key)?

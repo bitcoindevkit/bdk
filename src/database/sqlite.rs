@@ -206,7 +206,7 @@ impl SqliteDatabase {
         Ok(())
     }
 
-    fn update_last_sync_time(&self, ct: ConfirmationTime) -> Result<i64, Error> {
+    fn update_last_sync_time(&self, ct: BlockTime) -> Result<i64, Error> {
         let mut statement = self.connection.prepare_cached(
             "INSERT INTO last_sync_time (id, height, timestamp) VALUES (0, :height, :timestamp) ON CONFLICT(id) DO UPDATE SET height=:height, timestamp=:timestamp WHERE id = 0",
         )?;
@@ -389,7 +389,7 @@ impl SqliteDatabase {
             };
 
             let confirmation_time = match (height, timestamp) {
-                (Some(height), Some(timestamp)) => Some(ConfirmationTime { height, timestamp }),
+                (Some(height), Some(timestamp)) => Some(BlockTime { height, timestamp }),
                 _ => None,
             };
 
@@ -423,7 +423,7 @@ impl SqliteDatabase {
             let verified: bool = row.get(6)?;
 
             let confirmation_time = match (height, timestamp) {
-                (Some(height), Some(timestamp)) => Some(ConfirmationTime { height, timestamp }),
+                (Some(height), Some(timestamp)) => Some(BlockTime { height, timestamp }),
                 _ => None,
             };
 
@@ -466,7 +466,7 @@ impl SqliteDatabase {
                 };
 
                 let confirmation_time = match (height, timestamp) {
-                    (Some(height), Some(timestamp)) => Some(ConfirmationTime { height, timestamp }),
+                    (Some(height), Some(timestamp)) => Some(BlockTime { height, timestamp }),
                     _ => None,
                 };
 
@@ -501,12 +501,12 @@ impl SqliteDatabase {
         }
     }
 
-    fn select_last_sync_time(&self) -> Result<Option<ConfirmationTime>, Error> {
+    fn select_last_sync_time(&self) -> Result<Option<BlockTime>, Error> {
         let mut statement = self
             .connection
             .prepare_cached("SELECT height, timestamp FROM last_sync_time WHERE id = 0")?;
         let mut rows = statement.query_map([], |row| {
-            Ok(ConfirmationTime {
+            Ok(BlockTime {
                 height: row.get(0)?,
                 timestamp: row.get(1)?,
             })
@@ -658,7 +658,7 @@ impl BatchOperations for SqliteDatabase {
         Ok(())
     }
 
-    fn set_last_sync_time(&mut self, ct: ConfirmationTime) -> Result<(), Error> {
+    fn set_last_sync_time(&mut self, ct: BlockTime) -> Result<(), Error> {
         self.update_last_sync_time(ct)?;
         Ok(())
     }
@@ -749,7 +749,7 @@ impl BatchOperations for SqliteDatabase {
         }
     }
 
-    fn del_last_sync_time(&mut self) -> Result<Option<ConfirmationTime>, Error> {
+    fn del_last_sync_time(&mut self) -> Result<Option<BlockTime>, Error> {
         match self.select_last_sync_time()? {
             Some(value) => {
                 self.delete_last_sync_time()?;
@@ -870,7 +870,7 @@ impl Database for SqliteDatabase {
         Ok(value)
     }
 
-    fn get_last_sync_time(&self) -> Result<Option<ConfirmationTime>, Error> {
+    fn get_last_sync_time(&self) -> Result<Option<BlockTime>, Error> {
         self.select_last_sync_time()
     }
 

@@ -71,7 +71,7 @@ use super::{Blockchain, Capability, ConfigurableBlockchain, Progress};
 use crate::database::{BatchDatabase, BatchOperations, DatabaseUtils};
 use crate::error::Error;
 use crate::types::{KeychainKind, LocalUtxo, TransactionDetails};
-use crate::{ConfirmationTime, FeeRate};
+use crate::{BlockTime, FeeRate};
 
 use peer::*;
 use store::*;
@@ -206,7 +206,7 @@ impl CompactFiltersBlockchain {
                 transaction: Some(tx.clone()),
                 received: incoming,
                 sent: outgoing,
-                confirmation_time: ConfirmationTime::new(height, timestamp),
+                confirmation_time: BlockTime::new(height, timestamp),
                 verified: height.is_some(),
                 fee: Some(inputs_sum.saturating_sub(outputs_sum)),
             };

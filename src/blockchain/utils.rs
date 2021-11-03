@@ -21,7 +21,7 @@ use bitcoin::{BlockHeader, OutPoint, Script, Transaction, Txid};
 use super::*;
 use crate::database::{BatchDatabase, BatchOperations, DatabaseUtils};
 use crate::error::Error;
-use crate::types::{ConfirmationTime, KeychainKind, LocalUtxo, TransactionDetails};
+use crate::types::{BlockTime, KeychainKind, LocalUtxo, TransactionDetails};
 use crate::wallet::time::Instant;
 use crate::wallet::utils::ChunksIterator;
 
@@ -151,7 +151,7 @@ pub trait ElectrumLikeSync {
                 // check if tx height matches, otherwise updates it. timestamp is not in the if clause
                 // because we are not asking headers for confirmed tx we know about
                 if tx_details.confirmation_time.as_ref().map(|c| c.height) != height {
-                    let confirmation_time = ConfirmationTime::new(height, timestamp);
+                    let confirmation_time = BlockTime::new(height, timestamp);
                     let mut new_tx_details = tx_details.clone();
                     new_tx_details.confirmation_time = confirmation_time;
                     batch.set_tx(&new_tx_details)?;
@@ -359,7 +359,7 @@ fn save_transaction_details_and_utxos<D: BatchDatabase>(
         transaction: Some(tx),
         received: incoming,
         sent: outgoing,
-        confirmation_time: ConfirmationTime::new(height, timestamp),
+        confirmation_time: BlockTime::new(height, timestamp),
         fee: Some(inputs_sum.saturating_sub(outputs_sum)), /* if the tx is a coinbase, fees would be negative */
         verified: height.is_some(),
     };

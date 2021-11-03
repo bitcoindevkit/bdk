@@ -1554,7 +1554,7 @@ where
             }
         }
 
-        let last_sync_time = ConfirmationTime {
+        let last_sync_time = BlockTime {
             height: maybe_await!(self.client.get_height())?,
             timestamp: time::get_timestamp(),
         };
@@ -2792,7 +2792,7 @@ pub(crate) mod test {
         let txid = tx.txid();
         // skip saving the utxos, we know they can't be used anyways
         details.transaction = Some(tx);
-        details.confirmation_time = Some(ConfirmationTime {
+        details.confirmation_time = Some(BlockTime {
             timestamp: 12345678,
             height: 42,
         });

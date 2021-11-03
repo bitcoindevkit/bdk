@@ -183,7 +183,7 @@ impl BatchOperations for MemoryDatabase {
 
         Ok(())
     }
-    fn set_last_sync_time(&mut self, ct: ConfirmationTime) -> Result<(), Error> {
+    fn set_last_sync_time(&mut self, ct: BlockTime) -> Result<(), Error> {
         let key = MapKey::LastSyncTime.as_map_key();
         self.map.insert(key, Box::new(ct));
 
@@ -279,7 +279,7 @@ impl BatchOperations for MemoryDatabase {
             Some(b) => Ok(Some(*b.downcast_ref().unwrap())),
         }
     }
-    fn del_last_sync_time(&mut self) -> Result<Option<ConfirmationTime>, Error> {
+    fn del_last_sync_time(&mut self) -> Result<Option<BlockTime>, Error> {
         let key = MapKey::LastSyncTime.as_map_key();
         let res = self.map.remove(&key);
         self.deleted_keys.push(key);
@@ -423,7 +423,7 @@ impl Database for MemoryDatabase {
         Ok(self.map.get(&key).map(|b| *b.downcast_ref().unwrap()))
     }
 
-    fn get_last_sync_time(&self) -> Result<Option<ConfirmationTime>, Error> {
+    fn get_last_sync_time(&self) -> Result<Option<BlockTime>, Error> {
         let key = MapKey::LastSyncTime.as_map_key();
         Ok(self
             .map
@@ -505,7 +505,7 @@ macro_rules! populate_test_db {
         let txid = tx.txid();
         let confirmation_time = tx_meta
             .min_confirmations
-            .map(|conf| $crate::ConfirmationTime {
+            .map(|conf| $crate::BlockTime {
                 height: current_height.unwrap().checked_sub(conf as u32).unwrap(),
                 timestamp: 0,
             });

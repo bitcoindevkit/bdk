@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - BIP39 implementation dependency, in `keys::bip39` changed from tiny-bip39 to rust-bip39.
 - Add new method on the `TxBuilder` to embed data in the transaction via `OP_RETURN`. To allow that a fix to check the dust only on spendable output has been introduced.
 - Update the `Database` trait to store the last sync timestamp and block height
+- Rename `ConfirmationTime` to `BlockTime`
 
 ## [v0.13.0] - [v0.12.0]
 
