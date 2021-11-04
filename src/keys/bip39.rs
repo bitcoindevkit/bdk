@@ -19,7 +19,23 @@ use bitcoin::Network;
 
 use miniscript::ScriptContext;
 
-pub use bip39::{Language, Mnemonic, MnemonicType, Seed};
+pub use bip39::{Language, Mnemonic};
+
+type Seed = [u8; 64];
+
+/// Type describing entropy length (aka word count) in the mnemonic
+pub enum WordsCount {
+    /// 12 words mnemonic (128 bits entropy)
+    Words12 = 128,
+    /// 15 words mnemonic (160 bits entropy)
+    Words15 = 160,
+    /// 18 words mnemonic (192 bits entropy)
+    Words18 = 192,
+    /// 21 words mnemonic (224 bits entropy)
+    Words21 = 224,
+    /// 24 words mnemonic (256 bits entropy)
+    Words24 = 256,
+}
 
 use super::{
     any_network, DerivableKey, DescriptorKey, ExtendedKey, GeneratableKey, GeneratedKey, KeyError,
@@ -40,7 +56,7 @@ pub type MnemonicWithPassphrase = (Mnemonic, Option<String>);
 #[cfg_attr(docsrs, doc(cfg(feature = "keys-bip39")))]
 impl<Ctx: ScriptContext> DerivableKey<Ctx> for Seed {
     fn into_extended_key(self) -> Result<ExtendedKey<Ctx>, KeyError> {
-        Ok(bip32::ExtendedPrivKey::new_master(Network::Bitcoin, self.as_bytes())?.into())
+        Ok(bip32::ExtendedPrivKey::new_master(Network::Bitcoin, &self[..])?.into())
     }
 
     fn into_descriptor_key(
@@ -60,7 +76,7 @@ impl<Ctx: ScriptContext> DerivableKey<Ctx> for Seed {
 impl<Ctx: ScriptContext> DerivableKey<Ctx> for MnemonicWithPassphrase {
     fn into_extended_key(self) -> Result<ExtendedKey<Ctx>, KeyError> {
         let (mnemonic, passphrase) = self;
-        let seed = Seed::new(&mnemonic, passphrase.as_deref().unwrap_or(""));
+        let seed: Seed = mnemonic.to_seed(passphrase.as_deref().unwrap_or(""));
 
         seed.into_extended_key()
     }
@@ -101,15 +117,15 @@ impl<Ctx: ScriptContext> DerivableKey<Ctx> for Mnemonic {
 impl<Ctx: ScriptContext> GeneratableKey<Ctx> for Mnemonic {
     type Entropy = [u8; 32];
 
-    type Options = (MnemonicType, Language);
-    type Error = Option<bip39::ErrorKind>;
+    type Options = (WordsCount, Language);
+    type Error = Option<bip39::Error>;
 
     fn generate_with_entropy(
-        (mnemonic_type, language): Self::Options,
+        (word_count, language): Self::Options,
         entropy: Self::Entropy,
     ) -> Result<GeneratedKey<Self, Ctx>, Self::Error> {
-        let entropy = &entropy.as_ref()[..(mnemonic_type.entropy_bits() / 8)];
-        let mnemonic = Mnemonic::from_entropy(entropy, language).map_err(|e| e.downcast().ok())?;
+        let entropy = &entropy.as_ref()[..(word_count as usize / 8)];
+        let mnemonic = Mnemonic::from_entropy_in(language, entropy)?;
 
         Ok(GeneratedKey::new(mnemonic, any_network()))
     }
@@ -121,15 +137,17 @@ mod test {
 
     use bitcoin::util::bip32;
 
-    use bip39::{Language, Mnemonic, MnemonicType};
+    use bip39::{Language, Mnemonic};
 
     use crate::keys::{any_network, GeneratableKey, GeneratedKey};
+
+    use super::WordsCount;
 
     #[test]
     fn test_keys_bip39_mnemonic() {
         let mnemonic =
             "aim bunker wash balance finish force paper analyst cabin spoon stable organ";
-        let mnemonic = Mnemonic::from_phrase(mnemonic, Language::English).unwrap();
+        let mnemonic = Mnemonic::parse_in(Language::English, mnemonic).unwrap();
         let path = bip32::DerivationPath::from_str("m/44'/0'/0'/0").unwrap();
 
         let key = (mnemonic, path);
@@ -143,7 +161,7 @@ mod test {
     fn test_keys_bip39_mnemonic_passphrase() {
         let mnemonic =
             "aim bunker wash balance finish force paper analyst cabin spoon stable organ";
-        let mnemonic = Mnemonic::from_phrase(mnemonic, Language::English).unwrap();
+        let mnemonic = Mnemonic::parse_in(Language::English, mnemonic).unwrap();
         let path = bip32::DerivationPath::from_str("m/44'/0'/0'/0").unwrap();
 
         let key = ((mnemonic, Some("passphrase".into())), path);
@@ -157,7 +175,7 @@ mod test {
     fn test_keys_generate_bip39() {
         let generated_mnemonic: GeneratedKey<_, miniscript::Segwitv0> =
             Mnemonic::generate_with_entropy(
-                (MnemonicType::Words12, Language::English),
+                (WordsCount::Words12, Language::English),
                 crate::keys::test::TEST_ENTROPY,
             )
             .unwrap();
@@ -169,7 +187,7 @@ mod test {
 
         let generated_mnemonic: GeneratedKey<_, miniscript::Segwitv0> =
             Mnemonic::generate_with_entropy(
-                (MnemonicType::Words24, Language::English),
+                (WordsCount::Words24, Language::English),
                 crate::keys::test::TEST_ENTROPY,
             )
             .unwrap();
@@ -180,11 +198,11 @@ mod test {
     #[test]
     fn test_keys_generate_bip39_random() {
         let generated_mnemonic: GeneratedKey<_, miniscript::Segwitv0> =
-            Mnemonic::generate((MnemonicType::Words12, Language::English)).unwrap();
+            Mnemonic::generate((WordsCount::Words12, Language::English)).unwrap();
         assert_eq!(generated_mnemonic.valid_networks, any_network());
 
         let generated_mnemonic: GeneratedKey<_, miniscript::Segwitv0> =
-            Mnemonic::generate((MnemonicType::Words24, Language::English)).unwrap();
+            Mnemonic::generate((WordsCount::Words24, Language::English)).unwrap();
         assert_eq!(generated_mnemonic.valid_networks, any_network());
     }
 }

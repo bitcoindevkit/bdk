@@ -34,14 +34,7 @@ cc = { version = ">=1.0.64", optional = true }
 socks = { version = "0.3", optional = true }
 lazy_static = { version = "1.4", optional = true }
 
-# the latest 0.8 version of tiny-bip39 depends on zeroize_derive 1.2 which has MSRV 1.51 and our 
-# MSRV is 1.46, to fix this until we update our MSRV or replace the tiny-bip39 
-# dependency https://github.com/bitcoindevkit/bdk/issues/399 we can only use an older version
-tiny-bip39 = { version = "< 0.8", optional = true }
-# backtrace > 0.3.61 includes object v0.27 which doesn't compile on 1.46. this is used by
-# tiny-bip39
-backtrace = { version = "=0.3.61", optional = true }
-
+bip39 = { version = "1.0.1", optional = true }
 bitcoinconsensus = { version = "0.19.0-3", optional = true }
 
 # Needed by bdk_blockchain_tests macro
@@ -65,7 +58,7 @@ sqlite = ["rusqlite", "ahash"]
 compact_filters = ["rocksdb", "socks", "lazy_static", "cc"]
 key-value-db = ["sled"]
 all-keys = ["keys-bip39"]
-keys-bip39 = ["tiny-bip39", "backtrace"]
+keys-bip39 = ["bip39"]
 rpc = ["bitcoincore-rpc"]
 
 # We currently provide mulitple implementations of `Blockchain`, all are
