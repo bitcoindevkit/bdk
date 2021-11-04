@@ -57,7 +57,7 @@ use utils::{check_nlocktime, check_nsequence_rbf, After, Older, SecpCtx, DUST_LI
 
 use crate::blockchain::{Blockchain, Progress};
 use crate::database::memory::MemoryDatabase;
-use crate::database::{BatchDatabase, BatchOperations, DatabaseUtils};
+use crate::database::{BatchDatabase, BatchOperations, DatabaseUtils, SyncTime};
 use crate::descriptor::derived::AsDerived;
 use crate::descriptor::policy::BuildSatisfaction;
 use crate::descriptor::{
@@ -1554,14 +1554,14 @@ where
             }
         }
 
-        let last_sync_time = BlockTime {
-            height: maybe_await!(self.client.get_height())?,
-            timestamp: time::get_timestamp(),
+        let sync_time = SyncTime {
+            block_time: BlockTime {
+                height: maybe_await!(self.client.get_height())?,
+                timestamp: time::get_timestamp(),
+            },
         };
-        debug!("Saving `last_sync_time` = {:?}", last_sync_time);
-        self.database
-            .borrow_mut()
-            .set_last_sync_time(last_sync_time)?;
+        debug!("Saving `sync_time` = {:?}", sync_time);
+        self.database.borrow_mut().set_sync_time(sync_time)?;
 
         Ok(())
     }

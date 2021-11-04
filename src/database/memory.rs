@@ -22,7 +22,7 @@ use bitcoin::consensus::encode::{deserialize, serialize};
 use bitcoin::hash_types::Txid;
 use bitcoin::{OutPoint, Script, Transaction};
 
-use crate::database::{BatchDatabase, BatchOperations, ConfigurableDatabase, Database};
+use crate::database::{BatchDatabase, BatchOperations, ConfigurableDatabase, Database, SyncTime};
 use crate::error::Error;
 use crate::types::*;
 
@@ -42,7 +42,7 @@ pub(crate) enum MapKey<'a> {
     RawTx(Option<&'a Txid>),
     Transaction(Option<&'a Txid>),
     LastIndex(KeychainKind),
-    LastSyncTime,
+    SyncTime,
     DescriptorChecksum(KeychainKind),
 }
 
@@ -61,7 +61,7 @@ impl MapKey<'_> {
             MapKey::RawTx(_) => b"r".to_vec(),
             MapKey::Transaction(_) => b"t".to_vec(),
             MapKey::LastIndex(st) => [b"c", st.as_ref()].concat(),
-            MapKey::LastSyncTime => b"l".to_vec(),
+            MapKey::SyncTime => b"l".to_vec(),
             MapKey::DescriptorChecksum(st) => [b"d", st.as_ref()].concat(),
         }
     }
@@ -183,9 +183,9 @@ impl BatchOperations for MemoryDatabase {
 
         Ok(())
     }
-    fn set_last_sync_time(&mut self, ct: BlockTime) -> Result<(), Error> {
-        let key = MapKey::LastSyncTime.as_map_key();
-        self.map.insert(key, Box::new(ct));
+    fn set_sync_time(&mut self, data: SyncTime) -> Result<(), Error> {
+        let key = MapKey::SyncTime.as_map_key();
+        self.map.insert(key, Box::new(data));
 
         Ok(())
     }
@@ -279,8 +279,8 @@ impl BatchOperations for MemoryDatabase {
             Some(b) => Ok(Some(*b.downcast_ref().unwrap())),
         }
     }
-    fn del_last_sync_time(&mut self) -> Result<Option<BlockTime>, Error> {
-        let key = MapKey::LastSyncTime.as_map_key();
+    fn del_sync_time(&mut self) -> Result<Option<SyncTime>, Error> {
+        let key = MapKey::SyncTime.as_map_key();
         let res = self.map.remove(&key);
         self.deleted_keys.push(key);
 
@@ -423,8 +423,8 @@ impl Database for MemoryDatabase {
         Ok(self.map.get(&key).map(|b| *b.downcast_ref().unwrap()))
     }
 
-    fn get_last_sync_time(&self) -> Result<Option<BlockTime>, Error> {
-        let key = MapKey::LastSyncTime.as_map_key();
+    fn get_sync_time(&self) -> Result<Option<SyncTime>, Error> {
+        let key = MapKey::SyncTime.as_map_key();
         Ok(self
             .map
             .get(&key)
@@ -503,12 +503,10 @@ macro_rules! populate_test_db {
         };
 
         let txid = tx.txid();
-        let confirmation_time = tx_meta
-            .min_confirmations
-            .map(|conf| $crate::BlockTime {
-                height: current_height.unwrap().checked_sub(conf as u32).unwrap(),
-                timestamp: 0,
-            });
+        let confirmation_time = tx_meta.min_confirmations.map(|conf| $crate::BlockTime {
+            height: current_height.unwrap().checked_sub(conf as u32).unwrap(),
+            timestamp: 0,
+        });
 
         let tx_details = $crate::TransactionDetails {
             transaction: Some(tx.clone()),
@@ -616,7 +614,7 @@ mod test {
     }
 
     #[test]
-    fn test_last_sync_time() {
-        crate::database::test::test_last_sync_time(get_tree());
+    fn test_sync_time() {
+        crate::database::test::test_sync_time(get_tree());
     }
 }

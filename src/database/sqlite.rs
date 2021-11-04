@@ -13,7 +13,7 @@ use bitcoin::consensus::encode::{deserialize, serialize};
 use bitcoin::hash_types::Txid;
 use bitcoin::{OutPoint, Script, Transaction, TxOut};
 
-use crate::database::{BatchDatabase, BatchOperations, Database};
+use crate::database::{BatchDatabase, BatchOperations, Database, SyncTime};
 use crate::error::Error;
 use crate::types::*;
 
@@ -35,7 +35,7 @@ static MIGRATIONS: &[&str] = &[
     "CREATE UNIQUE INDEX idx_indices_keychain ON last_derivation_indices(keychain);",
     "CREATE TABLE checksums (keychain TEXT, checksum BLOB);",
     "CREATE INDEX idx_checksums_keychain ON checksums(keychain);",
-    "CREATE TABLE last_sync_time (id INTEGER PRIMARY KEY, height INTEGER, timestamp INTEGER);"
+    "CREATE TABLE sync_time (id INTEGER PRIMARY KEY, height INTEGER, timestamp INTEGER);"
 ];
 
 /// Sqlite database stored on filesystem
@@ -206,14 +206,14 @@ impl SqliteDatabase {
         Ok(())
     }
 
-    fn update_last_sync_time(&self, ct: BlockTime) -> Result<i64, Error> {
+    fn update_sync_time(&self, data: SyncTime) -> Result<i64, Error> {
         let mut statement = self.connection.prepare_cached(
-            "INSERT INTO last_sync_time (id, height, timestamp) VALUES (0, :height, :timestamp) ON CONFLICT(id) DO UPDATE SET height=:height, timestamp=:timestamp WHERE id = 0",
+            "INSERT INTO sync_time (id, height, timestamp) VALUES (0, :height, :timestamp) ON CONFLICT(id) DO UPDATE SET height=:height, timestamp=:timestamp WHERE id = 0",
         )?;
 
         statement.execute(named_params! {
-            ":height": ct.height,
-            ":timestamp": ct.timestamp,
+            ":height": data.block_time.height,
+            ":timestamp": data.block_time.timestamp,
         })?;
 
         Ok(self.connection.last_insert_rowid())
@@ -501,18 +501,22 @@ impl SqliteDatabase {
         }
     }
 
-    fn select_last_sync_time(&self) -> Result<Option<BlockTime>, Error> {
+    fn select_sync_time(&self) -> Result<Option<SyncTime>, Error> {
         let mut statement = self
             .connection
-            .prepare_cached("SELECT height, timestamp FROM last_sync_time WHERE id = 0")?;
-        let mut rows = statement.query_map([], |row| {
-            Ok(BlockTime {
-                height: row.get(0)?,
-                timestamp: row.get(1)?,
-            })
-        })?;
+            .prepare_cached("SELECT height, timestamp FROM sync_time WHERE id = 0")?;
+        let mut rows = statement.query([])?;
 
-        Ok(rows.next().transpose()?)
+        if let Some(row) = rows.next()? {
+            Ok(Some(SyncTime {
+                block_time: BlockTime {
+                    height: row.get(0)?,
+                    timestamp: row.get(1)?,
+                },
+            }))
+        } else {
+            Ok(None)
+        }
     }
 
     fn select_checksum_by_keychain(&self, keychain: String) -> Result<Option<Vec<u8>>, Error> {
@@ -592,10 +596,10 @@ impl SqliteDatabase {
         Ok(())
     }
 
-    fn delete_last_sync_time(&self) -> Result<(), Error> {
+    fn delete_sync_time(&self) -> Result<(), Error> {
         let mut statement = self
             .connection
-            .prepare_cached("DELETE FROM last_sync_time WHERE id = 0")?;
+            .prepare_cached("DELETE FROM sync_time WHERE id = 0")?;
         statement.execute([])?;
         Ok(())
     }
@@ -658,8 +662,8 @@ impl BatchOperations for SqliteDatabase {
         Ok(())
     }
 
-    fn set_last_sync_time(&mut self, ct: BlockTime) -> Result<(), Error> {
-        self.update_last_sync_time(ct)?;
+    fn set_sync_time(&mut self, ct: SyncTime) -> Result<(), Error> {
+        self.update_sync_time(ct)?;
         Ok(())
     }
 
@@ -749,10 +753,10 @@ impl BatchOperations for SqliteDatabase {
         }
     }
 
-    fn del_last_sync_time(&mut self) -> Result<Option<BlockTime>, Error> {
-        match self.select_last_sync_time()? {
+    fn del_sync_time(&mut self) -> Result<Option<SyncTime>, Error> {
+        match self.select_sync_time()? {
             Some(value) => {
-                self.delete_last_sync_time()?;
+                self.delete_sync_time()?;
 
                 Ok(Some(value))
             }
@@ -870,8 +874,8 @@ impl Database for SqliteDatabase {
         Ok(value)
     }
 
-    fn get_last_sync_time(&self) -> Result<Option<BlockTime>, Error> {
-        self.select_last_sync_time()
+    fn get_sync_time(&self) -> Result<Option<SyncTime>, Error> {
+        self.select_sync_time()
     }
 
     fn increment_last_index(&mut self, keychain: KeychainKind) -> Result<u32, Error> {
@@ -1023,7 +1027,7 @@ pub mod test {
     }
 
     #[test]
-    fn test_last_sync_time() {
-        crate::database::test::test_last_sync_time(get_database());
+    fn test_sync_time() {
+        crate::database::test::test_sync_time(get_database());
     }
 }
