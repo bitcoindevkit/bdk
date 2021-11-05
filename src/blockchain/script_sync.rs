@@ -101,9 +101,9 @@ impl<'a, D: BatchDatabase> ScriptReq<'a, D> {
                             }
                             (Some(_), None) => {
                                 details.confirmation_time = None;
-                                self.state.observed_txs.push(details);
+                                self.state.finished_txs.push(details);
                             }
-                            _ => self.state.observed_txs.push(details),
+                            _ => self.state.finished_txs.push(details),
                         }
                     }
                     None => {
@@ -266,7 +266,7 @@ impl<'a, D: BatchDatabase> ConftimeReq<'a, D> {
 
             if let Some(mut tx_details) = tx_details {
                 tx_details.confirmation_time = confirmation_time;
-                self.state.observed_txs.push(tx_details);
+                self.state.finished_txs.push(tx_details);
             }
         }
 
@@ -285,10 +285,15 @@ impl<'a, D: BatchDatabase> ConftimeReq<'a, D> {
 struct State<'a, D> {
     db: &'a D,
     last_active_index: HashMap<KeychainKind, usize>,
+    /// Transactions where we need to get the full details
     tx_needed: VecDeque<Txid>,
+    /// Transactions where we need to get the confirmation time
     conftime_needed: VecDeque<Txid>,
-    observed_txs: Vec<TransactionDetails>,
+    /// Transacitions that we know everything about
+    finished_txs: Vec<TransactionDetails>,
+    /// Transactions that discovered conftimes should be inserted into
     tx_missing_conftime: HashMap<Txid, TransactionDetails>,
+    /// The start of the sync
     start_time: Instant,
 }
 
@@ -298,7 +303,7 @@ impl<'a, D: BatchDatabase> State<'a, D> {
             db,
             last_active_index: HashMap::default(),
             conftime_needed: VecDeque::default(),
-            observed_txs: vec![],
+            finished_txs: vec![],
             tx_needed: VecDeque::default(),
             tx_missing_conftime: HashMap::default(),
             start_time: Instant::new(),
@@ -312,8 +317,8 @@ impl<'a, D: BatchDatabase> State<'a, D> {
         );
         let existing_txs = self.db.iter_txs(false)?;
         let existing_txids: HashSet<Txid> = existing_txs.iter().map(|tx| tx.txid).collect();
-        let observed_txs = make_txs_consistent(&self.observed_txs);
-        let observed_txids: HashSet<Txid> = observed_txs.iter().map(|tx| tx.txid).collect();
+        let finished_txs = make_txs_consistent(&self.finished_txs);
+        let observed_txids: HashSet<Txid> = finished_txs.iter().map(|tx| tx.txid).collect();
         let txids_to_delete = existing_txids.difference(&observed_txids);
         let mut batch = self.db.begin_batch();
 
@@ -334,8 +339,8 @@ impl<'a, D: BatchDatabase> State<'a, D> {
         }
 
         // Set every tx we observed
-        for observed_tx in &observed_txs {
-            let tx = observed_tx
+        for finished_tx in &finished_txs {
+            let tx = finished_tx
                 .transaction
                 .as_ref()
                 .expect("transaction will always be present here");
@@ -346,7 +351,7 @@ impl<'a, D: BatchDatabase> State<'a, D> {
                     // add utxos we own from the new transactions we've seen.
                     batch.set_utxo(&LocalUtxo {
                         outpoint: OutPoint {
-                            txid: observed_tx.txid,
+                            txid: finished_tx.txid,
                             vout: i as u32,
                         },
                         txout: output.clone(),
@@ -354,13 +359,13 @@ impl<'a, D: BatchDatabase> State<'a, D> {
                     })?;
                 }
             }
-            batch.set_tx(observed_tx)?;
+            batch.set_tx(finished_tx)?;
         }
 
         // we don't do this in the loop above since we may want to delete some of the utxos we
         // just added in case there are new tranasactions that spend form each other.
-        for observed_tx in &observed_txs {
-            let tx = observed_tx
+        for finished_tx in &finished_txs {
+            let tx = finished_tx
                 .transaction
                 .as_ref()
                 .expect("transaction will always be present here");
