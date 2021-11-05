@@ -170,7 +170,7 @@ impl<'a, D: BatchDatabase> TxReq<'a, D> {
         let tx_details: Vec<TransactionDetails> = tx_details
             .into_iter()
             .zip(self.state.tx_needed.iter())
-            .map(|((vin, tx), txid)| {
+            .map(|((vout, tx), txid)| {
                 debug!("found tx_details for {}", txid);
                 assert_eq!(tx.txid(), *txid);
                 let mut sent: u64 = 0;
@@ -178,7 +178,7 @@ impl<'a, D: BatchDatabase> TxReq<'a, D> {
                 let mut inputs_sum: u64 = 0;
                 let mut outputs_sum: u64 = 0;
 
-                for (txout, input) in vin.into_iter().zip(tx.input.iter()) {
+                for (txout, input) in vout.into_iter().zip(tx.input.iter()) {
                     let txout = match txout {
                         Some(txout) => txout,
                         None => {
