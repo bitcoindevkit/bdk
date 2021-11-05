@@ -127,12 +127,12 @@ pub struct EsploraBlockchainConfig {
 
 impl EsploraBlockchainConfig {
     /// create a config with default values given the base url and stop gap
-    pub fn new(base_url: String) -> Self {
+    pub fn new(base_url: String, stop_gap: usize) -> Self {
         Self {
             base_url,
             proxy: None,
             timeout: None,
-            stop_gap: 20,
+            stop_gap,
             concurrency: None,
         }
     }
