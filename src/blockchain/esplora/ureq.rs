@@ -111,8 +111,8 @@ impl Blockchain for EsploraBlockchain {
 
                             let n_confirmed =
                                 related_txs.iter().filter(|tx| tx.status.confirmed).count();
-                            // esplora pages on 25 confirmed transactions. If there's more than
-                            // 25 we need to keep requesting.
+                            // esplora pages on 25 confirmed transactions. If there's 25 or more we
+                            // keep requesting to see if there's more.
                             if n_confirmed >= 25 {
                                 loop {
                                     let new_related_txs: Vec<Tx> = client._scripthash_txs(

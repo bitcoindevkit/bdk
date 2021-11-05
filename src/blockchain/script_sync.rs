@@ -92,10 +92,11 @@ impl<'a, D: BatchDatabase> ScriptReq<'a, D> {
                                 self.state.tx_missing_conftime.insert(*txid, details);
                             }
                             (Some(old_height), Some(new_height)) if old_height != *new_height => {
-                                // The height of the tx has changed !? -- get the confirmation time.
+                                // The height of the tx has changed !? -- It's a reorg get the new confirmation time.
                                 self.state.tx_missing_conftime.insert(*txid, details);
                             }
                             (Some(_), None) => {
+                                // A re-org where the tx is not in the chain anymore.
                                 details.confirmation_time = None;
                                 self.state.finished_txs.push(details);
                             }
