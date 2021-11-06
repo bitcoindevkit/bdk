@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- BIP39 implementation dependency, in `keys::bip39` changed from tiny-bip39 to rust-bip39.
+
 ## [v0.13.0] - [v0.12.0]
 
 - Exposed `get_tx()` method from `Database` to `Wallet`.
