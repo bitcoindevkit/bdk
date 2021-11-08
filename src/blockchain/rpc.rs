@@ -32,12 +32,14 @@
 //! ```
 
 use crate::bitcoin::consensus::deserialize;
-use crate::bitcoin::{Address, Network, OutPoint, Transaction, TxOut, Txid};
-use crate::blockchain::{Blockchain, Capability, ConfigurableBlockchain, Progress};
+use crate::bitcoin::{Address, Network, Transaction, Txid};
+use crate::blockchain::{
+    script_sync::Request, Blockchain, Capability, ConfigurableBlockchain, Progress,
+};
 use crate::database::{BatchDatabase, DatabaseUtils};
 use crate::descriptor::{get_checksum, IntoWalletDescriptor};
 use crate::wallet::utils::SecpCtx;
-use crate::{ConfirmationTime, Error, FeeRate, KeychainKind, LocalUtxo, TransactionDetails};
+use crate::{ConfirmationTime, Error, FeeRate, KeychainKind};
 use bitcoincore_rpc::json::{
     GetAddressInfoResultLabel, ImportMultiOptions, ImportMultiRequest,
     ImportMultiRequestScriptPubkey, ImportMultiRescanSince,
@@ -47,9 +49,13 @@ use bitcoincore_rpc::Auth as RpcAuth;
 use bitcoincore_rpc::{Client, RpcApi};
 use log::debug;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::str::FromStr;
+
+// Default stop gap at which the sync loop terminates
+const DEFAULT_STOP_GAP: u32 = 20;
 
 /// The main struct for RPC backend implementing the [crate::blockchain::Blockchain] trait
 #[derive(Debug)]
@@ -62,6 +68,8 @@ pub struct RpcBlockchain {
     capabilities: HashSet<Capability>,
     /// Skip this many blocks of the blockchain at the first rescan, if None the rescan is done from the genesis block
     skip_blocks: Option<u32>,
+    /// Optional stop gap in address chain to stop syncing. Default = 20.
+    stop_gap: Option<u32>,
 
     /// This is a fixed Address used as a hack key to store information on the node
     _storage_address: Address,
@@ -80,6 +88,8 @@ pub struct RpcConfig {
     pub wallet_name: String,
     /// Skip this many blocks of the blockchain at the first rescan, if None the rescan is done from the genesis block
     pub skip_blocks: Option<u32>,
+    /// Optional stop gap in address chain to stop syncing. Default = 20.
+    pub stop_gap: Option<u32>,
 }
 
 /// This struct is equivalent to [bitcoincore_rpc::Auth] but it implements [serde::Serialize]
@@ -197,132 +207,151 @@ impl Blockchain for RpcBlockchain {
         db: &mut D,
         _progress_update: P,
     ) -> Result<(), Error> {
-        let mut indexes = HashMap::new();
-        for keykind in &[KeychainKind::External, KeychainKind::Internal] {
-            indexes.insert(*keykind, db.get_last_index(*keykind)?.unwrap_or(0));
-        }
+        // internal cache to speed up conftime lookups
+        let mut txid_conftime_map = BTreeMap::new();
 
-        let mut known_txs: HashMap<_, _> = db
-            .iter_txs(true)?
-            .into_iter()
-            .map(|tx| (tx.txid, tx))
-            .collect();
-        let known_utxos: HashSet<_> = db.iter_utxos()?.into_iter().collect();
+        let mut request =
+            super::script_sync::start(db, self.stop_gap.unwrap_or(DEFAULT_STOP_GAP) as usize)?;
 
-        //TODO list_since_blocks would be more efficient
-        let current_utxo = self
-            .client
-            .list_unspent(Some(0), None, None, Some(true), None)?;
-        debug!("current_utxo len {}", current_utxo.len());
-
-        //TODO supported up to 1_000 txs, should use since_blocks or do paging
-        let list_txs = self
-            .client
-            .list_transactions(None, Some(1_000), None, Some(true))?;
-        let mut list_txs_ids = HashSet::new();
-
-        for tx_result in list_txs.iter().filter(|t| {
-            // list_txs returns all conflicting tx we want to
-            // filter out replaced tx => unconfirmed and not in the mempool
-            t.info.confirmations > 0 || self.client.get_mempool_entry(&t.info.txid).is_ok()
-        }) {
-            let txid = tx_result.info.txid;
-            list_txs_ids.insert(txid);
-            if let Some(mut known_tx) = known_txs.get_mut(&txid) {
-                let confirmation_time =
-                    ConfirmationTime::new(tx_result.info.blockheight, tx_result.info.blocktime);
-                if confirmation_time != known_tx.confirmation_time {
-                    // reorg may change tx height
-                    debug!(
-                        "updating tx({}) confirmation time to: {:?}",
-                        txid, confirmation_time
-                    );
-                    known_tx.confirmation_time = confirmation_time;
-                    db.set_tx(known_tx)?;
-                }
-            } else {
-                //TODO check there is already the raw tx in db?
-                let tx_result = self.client.get_transaction(&txid, Some(true))?;
-                let tx: Transaction = deserialize(&tx_result.hex)?;
-                let mut received = 0u64;
-                let mut sent = 0u64;
-                for output in tx.output.iter() {
-                    if let Ok(Some((kind, index))) =
-                        db.get_path_from_script_pubkey(&output.script_pubkey)
-                    {
-                        if index > *indexes.get(&kind).unwrap() {
-                            indexes.insert(kind, index);
-                        }
-                        received += output.value;
-                    }
-                }
-
-                for input in tx.input.iter() {
-                    if let Some(previous_output) = db.get_previous_output(&input.previous_output)? {
-                        sent += previous_output.value;
-                    }
-                }
-
-                let td = TransactionDetails {
-                    transaction: Some(tx),
-                    txid: tx_result.info.txid,
-                    confirmation_time: ConfirmationTime::new(
-                        tx_result.info.blockheight,
-                        tx_result.info.blocktime,
-                    ),
-                    received,
-                    sent,
-                    fee: tx_result.fee.map(|f| f.as_sat().abs() as u64),
-                    verified: true,
-                };
-                debug!(
-                    "saving tx: {} tx_result.fee:{:?} td.fees:{:?}",
-                    td.txid, tx_result.fee, td.fee
-                );
-                db.set_tx(&td)?;
+        // Fetch txs from core in batches of 1000 txs
+        // Stop when there's no more
+        let mut listed_txs = vec![];
+        let mut fetch_count = 0;
+        loop {
+            let fetched_txs = self.client.list_transactions(
+                None,
+                Some((fetch_count + 1) * 1000),
+                Some(fetch_count * 1000),
+                Some(true),
+            )?;
+            listed_txs.extend(fetched_txs.clone());
+            if fetched_txs.len() < 1000 {
+                break;
             }
+            fetch_count += 1;
         }
 
-        for known_txid in known_txs.keys() {
-            if !list_txs_ids.contains(known_txid) {
-                debug!("removing tx: {}", known_txid);
-                db.del_tx(known_txid, false)?;
-            }
-        }
-
-        let current_utxos: HashSet<_> = current_utxo
-            .into_iter()
-            .map(|u| {
-                Ok(LocalUtxo {
-                    outpoint: OutPoint::new(u.txid, u.vout),
-                    keychain: db
-                        .get_path_from_script_pubkey(&u.script_pub_key)?
-                        .ok_or(Error::TransactionNotFound)?
-                        .0,
-                    txout: TxOut {
-                        value: u.amount.as_sat(),
-                        script_pubkey: u.script_pub_key,
-                    },
-                })
+        // list_transactions returns conflicting txs too.
+        // Filter out conflicting: confirmation < 0 and not in mempool.
+        let listed_txs = listed_txs
+            .iter()
+            .filter(|t| {
+                t.info.confirmations > 0 || self.client.get_mempool_entry(&t.info.txid).is_ok()
             })
-            .collect::<Result<_, Error>>()?;
+            .collect::<Vec<_>>();
 
-        let spent: HashSet<_> = known_utxos.difference(&current_utxos).collect();
-        for s in spent {
-            debug!("removing utxo: {:?}", s);
-            db.del_utxo(&s.outpoint)?;
-        }
-        let received: HashSet<_> = current_utxos.difference(&known_utxos).collect();
-        for s in received {
-            debug!("adding utxo: {:?}", s);
-            db.set_utxo(s)?;
-        }
+        let batch_update = loop {
+            request = match request {
+                Request::Script(script_req) => {
+                    let scripts = script_req.request();
 
-        for (keykind, index) in indexes {
-            debug!("{:?} max {}", keykind, index);
-            db.set_last_index(keykind, index)?;
-        }
+                    let satisfier = scripts
+                        .map(|sk| {
+                            let related_txs = listed_txs
+                                .iter()
+                                .filter(|tx_result| {
+                                    // Filter out txs related to the script_pubkey
+                                    if let Some(address) = &tx_result.detail.address {
+                                        if address.script_pubkey() == *sk {
+                                            // If conftime data is available, cache them.
+                                            if let (Some(height), Some(timestamp)) = (
+                                                tx_result.info.blockheight,
+                                                tx_result.info.blocktime,
+                                            ) {
+                                                txid_conftime_map.insert(
+                                                    tx_result.info.txid,
+                                                    ConfirmationTime { height, timestamp },
+                                                );
+                                            }
+                                            true
+                                        } else {
+                                            // address doesn't match
+                                            false
+                                        }
+                                    } else {
+                                        // There is no address associated with this tx
+                                        false
+                                    }
+                                })
+                                .map(|tx_result| (tx_result.info.txid, tx_result.info.blockheight))
+                                .collect::<Vec<_>>();
+                            related_txs
+                        })
+                        .collect::<Vec<_>>();
 
+                    script_req.satisfy(satisfier)?
+                }
+
+                Request::Tx(tx_req) => {
+                    let tx_needed = tx_req.request();
+
+                    let satisfier = tx_needed
+                        .map(|txid| {
+                            let full_tx = self.client.get_transaction(txid, Some(true))?;
+                            let tx = deserialize::<bitcoin::Transaction>(&full_tx.hex)?;
+                            let prev_outs = tx
+                                .input
+                                .iter()
+                                .map(|txin| {
+                                    // check if the prev_out is in db
+                                    if let Some(txout) =
+                                        db.get_previous_output(&txin.previous_output)?
+                                    {
+                                        Ok(Some(txout))
+                                    } else {
+                                        // if not, try to fetch the prev_out
+                                        if let Ok(tx) = self
+                                            .client
+                                            .get_raw_transaction(&txin.previous_output.txid, None)
+                                        {
+                                            Ok(Some(
+                                                tx.output[txin.previous_output.vout as usize]
+                                                    .clone(),
+                                            ))
+                                        } else {
+                                            // There is no prev_out, probably it's a coinbase
+                                            Ok(None)
+                                        }
+                                    }
+                                })
+                                .collect::<Result<Vec<_>, Error>>()?;
+                            Ok((prev_outs, tx))
+                        })
+                        .collect::<Result<Vec<_>, Error>>()?;
+
+                    tx_req.satisfy(satisfier)?
+                }
+
+                Request::Conftime(conftime_req) => {
+                    let txids = conftime_req.request();
+
+                    let satisfier = txids
+                        .map(|txid| {
+                            // first check in the cache
+                            if let Some(conf_time) = txid_conftime_map.get(txid) {
+                                Ok(Some(conf_time.to_owned()))
+                            // if not found, ask for more details
+                            } else {
+                                let tx_details = self.client.get_transaction(txid, Some(true))?;
+                                match (tx_details.info.blockheight, tx_details.info.blocktime) {
+                                    (Some(height), Some(timestamp)) => {
+                                        Ok(Some(ConfirmationTime { height, timestamp }))
+                                    }
+                                    // the tx is still unconfirmed
+                                    _ => Ok(None),
+                                }
+                            }
+                        })
+                        .collect::<Result<Vec<_>, Error>>()?;
+
+                    conftime_req.satisfy(satisfier)?
+                }
+
+                Request::Finish(batch_update) => break batch_update,
+            }
+        };
+
+        db.commit_batch(batch_update)?;
         Ok(())
     }
 
@@ -411,6 +440,7 @@ impl ConfigurableBlockchain for RpcBlockchain {
             capabilities,
             _storage_address: storage_address,
             skip_blocks: config.skip_blocks,
+            stop_gap: Some(config.stop_gap.unwrap_or(DEFAULT_STOP_GAP)),
         })
     }
 }
@@ -471,6 +501,7 @@ crate::bdk_blockchain_tests! {
             network: Network::Regtest,
             wallet_name: format!("client-wallet-test-{:?}", std::time::SystemTime::now() ),
             skip_blocks: None,
+            stop_gap: None,
         };
         RpcBlockchain::from_config(&config).unwrap()
     }
