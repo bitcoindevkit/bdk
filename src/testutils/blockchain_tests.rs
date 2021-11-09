@@ -871,7 +871,7 @@ macro_rules! bdk_blockchain_tests {
                 let tx = psbt.extract_tx();
                 let serialized_tx = bitcoin::consensus::encode::serialize(&tx);
                 assert!(serialized_tx.windows(data.len()).any(|e| e==data), "cannot find op_return data in transaction");
-                let sent_txid = wallet.broadcast(tx).unwrap();
+                let sent_txid = wallet.broadcast(&tx).unwrap();
                 test_client.generate(1, Some(node_addr));
                 wallet.sync(noop_progress(), None).unwrap();
                 assert_eq!(wallet.get_balance().unwrap(), 50_000 - details.fee.unwrap_or(0), "incorrect balance after send");
