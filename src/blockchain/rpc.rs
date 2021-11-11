@@ -365,13 +365,22 @@ impl Blockchain for RpcBlockchain {
                                 .input
                                 .iter()
                                 .map(|txin| {
-                                    // check if the prev_out is in db
-                                    if let Some(txout) =
+                                    // fetch txout for the given txin
+                                    // first check in the cache
+                                    if let Some(txout) = txid_prevout_map
+                                        .get(txid)
+                                        .and_then(|data| data.get(&txin.previous_output))
+                                    {
+                                        Ok(Some(txout.to_owned()))
+                                    }
+                                    // if not found, check in the db
+                                    else if let Some(txout) =
                                         db.get_previous_output(&txin.previous_output)?
                                     {
                                         Ok(Some(txout))
-                                    } else {
-                                        // if not, try to fetch the prev_out
+                                    }
+                                    // if not found, fetch from core
+                                    else {
                                         if let Ok(tx) = self
                                             .client
                                             .get_raw_transaction(&txin.previous_output.txid, None)
@@ -380,8 +389,9 @@ impl Blockchain for RpcBlockchain {
                                                 tx.output[txin.previous_output.vout as usize]
                                                     .clone(),
                                             ))
-                                        } else {
-                                            // There is no prev_out, probably it's a coinbase
+                                        }
+                                        // there is no prev_out, it's a coinbase
+                                        else {
                                             Ok(None)
                                         }
                                     }
@@ -402,7 +412,7 @@ impl Blockchain for RpcBlockchain {
                             // first check in the cache
                             if let Some(conf_time) = txid_conftime_map.get(txid) {
                                 Ok(Some(conf_time.to_owned()))
-                            // if not found, ask for more details
+                            // if not found, fetch from core
                             } else {
                                 let tx_details = self.client.get_transaction(txid, Some(true))?;
                                 match (tx_details.info.blockheight, tx_details.info.blocktime) {
