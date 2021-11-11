@@ -32,7 +32,7 @@
 //! ```
 
 use crate::bitcoin::consensus::deserialize;
-use crate::bitcoin::{Address, Network, Transaction, Txid};
+use crate::bitcoin::{Address, Network, OutPoint, Script, Transaction, TxOut, Txid};
 use crate::blockchain::{
     script_sync::Request, Blockchain, Capability, ConfigurableBlockchain, Progress,
 };
@@ -54,9 +54,6 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::str::FromStr;
 
-// Default stop gap at which the sync loop terminates
-const DEFAULT_STOP_GAP: u32 = 20;
-
 /// The main struct for RPC backend implementing the [crate::blockchain::Blockchain] trait
 #[derive(Debug)]
 pub struct RpcBlockchain {
@@ -68,8 +65,6 @@ pub struct RpcBlockchain {
     capabilities: HashSet<Capability>,
     /// Skip this many blocks of the blockchain at the first rescan, if None the rescan is done from the genesis block
     skip_blocks: Option<u32>,
-    /// Optional stop gap in address chain to stop syncing. Default = 20.
-    stop_gap: Option<u32>,
 
     /// This is a fixed Address used as a hack key to store information on the node
     _storage_address: Address,
@@ -88,8 +83,6 @@ pub struct RpcConfig {
     pub wallet_name: String,
     /// Skip this many blocks of the blockchain at the first rescan, if None the rescan is done from the genesis block
     pub skip_blocks: Option<u32>,
-    /// Optional stop gap in address chain to stop syncing. Default = 20.
-    pub stop_gap: Option<u32>,
 }
 
 /// This struct is equivalent to [bitcoincore_rpc::Auth] but it implements [serde::Serialize]
@@ -440,7 +433,6 @@ impl ConfigurableBlockchain for RpcBlockchain {
             capabilities,
             _storage_address: storage_address,
             skip_blocks: config.skip_blocks,
-            stop_gap: Some(config.stop_gap.unwrap_or(DEFAULT_STOP_GAP)),
         })
     }
 }
@@ -501,7 +493,6 @@ crate::bdk_blockchain_tests! {
             network: Network::Regtest,
             wallet_name: format!("client-wallet-test-{:?}", std::time::SystemTime::now() ),
             skip_blocks: None,
-            stop_gap: None,
         };
         RpcBlockchain::from_config(&config).unwrap()
     }
