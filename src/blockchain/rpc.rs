@@ -200,11 +200,12 @@ impl Blockchain for RpcBlockchain {
         db: &mut D,
         _progress_update: P,
     ) -> Result<(), Error> {
-        // internal cache to speed up conftime lookups
-        let mut txid_conftime_map = BTreeMap::new();
+        // internal caches to reduce unnecessary rpc calls
+        let mut script_txid_map: BTreeMap<Script, Vec<(Txid, Option<u32>)>> = BTreeMap::new();
+        let mut txid_prevout_map: BTreeMap<Txid, BTreeMap<OutPoint, TxOut>> = BTreeMap::new();
+        let mut txid_conftime_map: BTreeMap<Txid, ConfirmationTime> = BTreeMap::new();
 
-        let mut request =
-            super::script_sync::start(db, self.stop_gap.unwrap_or(DEFAULT_STOP_GAP) as usize)?;
+        let mut request = super::script_sync::start(db, 20)?;
 
         // Fetch txs from core in batches of 1000 txs
         // Stop when there's no more
@@ -224,53 +225,131 @@ impl Blockchain for RpcBlockchain {
             fetch_count += 1;
         }
 
-        // list_transactions returns conflicting txs too.
-        // Filter out conflicting: confirmation < 0 and not in mempool.
-        let listed_txs = listed_txs
-            .iter()
-            .filter(|t| {
-                t.info.confirmations > 0 || self.client.get_mempool_entry(&t.info.txid).is_ok()
-            })
-            .collect::<Vec<_>>();
-
         let batch_update = loop {
             request = match request {
                 Request::Script(script_req) => {
-                    let scripts = script_req.request();
+                    let scripts = script_req.request().collect::<Vec<_>>();
 
-                    let satisfier = scripts
-                        .map(|sk| {
-                            let related_txs = listed_txs
-                                .iter()
-                                .filter(|tx_result| {
-                                    // Filter out txs related to the script_pubkey
-                                    if let Some(address) = &tx_result.detail.address {
-                                        if address.script_pubkey() == *sk {
-                                            // If conftime data is available, cache them.
+                    for list_tx_result in &listed_txs {
+                        if let Some(address) = &list_tx_result.detail.address {
+                            // cache the conftime, if present
                                             if let (Some(height), Some(timestamp)) = (
-                                                tx_result.info.blockheight,
-                                                tx_result.info.blocktime,
+                                list_tx_result.info.blockheight,
+                                list_tx_result.info.blocktime,
                                             ) {
-                                                txid_conftime_map.insert(
-                                                    tx_result.info.txid,
-                                                    ConfirmationTime { height, timestamp },
-                                                );
+                                txid_conftime_map
+                                    .entry(list_tx_result.info.txid)
+                                    .or_insert(ConfirmationTime { height, timestamp });
+                            }
+
+                            // search for related output scripts, in script request
+                            let mut related_scripts = vec![];
+
+                            for script in &scripts {
+                                if address.script_pubkey() == **script {
+                                    related_scripts.push(script);
+                                }
+                            }
+
+                            // if no match found in output scripts, check in input scripts
+                            if related_scripts.is_empty() {
+                                let tx_result = self
+                                    .client
+                                    .get_transaction(&list_tx_result.info.txid, Some(true))?;
+                                let decoded_tx =
+                                    deserialize::<bitcoin::Transaction>(&tx_result.hex)?;
+
+                                let mut related_input_scripts = Vec::new();
+
+                                for input in decoded_tx.input {
+                                    // first check in the db
+                                    if let Ok(Some(txout)) =
+                                        db.get_previous_output(&input.previous_output)
+                                    {
+                                        for script in &scripts {
+                                            if txout.script_pubkey == **script {
+                                                related_input_scripts.push(script);
                                             }
-                                            true
+                                        }
+                                        // cache the prevout
+                                        txid_prevout_map
+                                            .entry(list_tx_result.info.txid)
+                                            .and_modify(|txouts| {
+                                                txouts.insert(input.previous_output, txout.clone());
+                                            })
+                                            .or_insert_with(|| {
+                                                let mut map = BTreeMap::new();
+                                                map.insert(input.previous_output, txout);
+                                                map
+                                            });
+                                    }
+                                    // if not found, then fetch from core
+                                    else if let Ok(tx_result) = self
+                                        .client
+                                        .get_transaction(&input.previous_output.txid, Some(true))
+                                    {
+                                        let decoded_tx =
+                                            deserialize::<bitcoin::Transaction>(&tx_result.hex)?;
+                                        let txout =
+                                            &decoded_tx.output[input.previous_output.vout as usize];
+
+                                        // cache the prevout
+                                        txid_prevout_map
+                                            .entry(list_tx_result.info.txid)
+                                            .and_modify(|txouts| {
+                                                txouts.insert(
+                                                    input.previous_output,
+                                                    txout.to_owned(),
+                                                );
+                                            })
+                                            .or_insert_with(|| {
+                                                let mut map = BTreeMap::new();
+                                                map.insert(input.previous_output, txout.to_owned());
+                                                map
+                                            });
+
+                                        for script in &scripts {
+                                            if txout.script_pubkey == **script {
+                                                related_input_scripts.push(script);
+                                            }
+                                        }
                                         } else {
-                                            // address doesn't match
-                                            false
+                                        ()
+                                    }
+                                }
+
+                                // extend the related script list to include both input + output matches
+                                related_scripts.extend(related_input_scripts);
+                            }
+
+                            // put the current txid in the correct entry of `script_txid_map`
+                            for script in related_scripts {
+                                script_txid_map
+                                    .entry(script.clone().clone())
+                                    .and_modify(|txids| {
+                                        txids.push((
+                                            list_tx_result.info.txid,
+                                            list_tx_result.info.blockheight,
+                                        ))
+                                    })
+                                    .or_insert(vec![(
+                                        list_tx_result.info.txid,
+                                        list_tx_result.info.blockheight,
+                                    )]);
                                         }
                                     } else {
-                                        // There is no address associated with this tx
-                                        false
+                            ()
                                     }
+                    }
+
+                    // extract satisfier from `script_txid_map`
+                    let satisfier = scripts
+                        .iter()
+                        .map(|script| match script_txid_map.get(script) {
+                            Some(txids) => return txids.clone(),
+                            _ => Vec::new(),
                                 })
-                                .map(|tx_result| (tx_result.info.txid, tx_result.info.blockheight))
-                                .collect::<Vec<_>>();
-                            related_txs
-                        })
-                        .collect::<Vec<_>>();
+                        .collect();
 
                     script_req.satisfy(satisfier)?
                 }
