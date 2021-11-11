@@ -233,10 +233,10 @@ impl Blockchain for RpcBlockchain {
                     for list_tx_result in &listed_txs {
                         if let Some(address) = &list_tx_result.detail.address {
                             // cache the conftime, if present
-                                            if let (Some(height), Some(timestamp)) = (
+                            if let (Some(height), Some(timestamp)) = (
                                 list_tx_result.info.blockheight,
                                 list_tx_result.info.blocktime,
-                                            ) {
+                            ) {
                                 txid_conftime_map
                                     .entry(list_tx_result.info.txid)
                                     .or_insert(ConfirmationTime { height, timestamp });
@@ -313,8 +313,6 @@ impl Blockchain for RpcBlockchain {
                                                 related_input_scripts.push(script);
                                             }
                                         }
-                                        } else {
-                                        ()
                                     }
                                 }
 
@@ -325,30 +323,30 @@ impl Blockchain for RpcBlockchain {
                             // put the current txid in the correct entry of `script_txid_map`
                             for script in related_scripts {
                                 script_txid_map
-                                    .entry(script.clone().clone())
+                                    .entry((*script).clone())
                                     .and_modify(|txids| {
                                         txids.push((
                                             list_tx_result.info.txid,
                                             list_tx_result.info.blockheight,
                                         ))
                                     })
-                                    .or_insert(vec![(
-                                        list_tx_result.info.txid,
-                                        list_tx_result.info.blockheight,
-                                    )]);
-                                        }
-                                    } else {
-                            ()
-                                    }
+                                    .or_insert_with(|| {
+                                        vec![(
+                                            list_tx_result.info.txid,
+                                            list_tx_result.info.blockheight,
+                                        )]
+                                    });
+                            }
+                        }
                     }
 
                     // extract satisfier from `script_txid_map`
                     let satisfier = scripts
                         .iter()
                         .map(|script| match script_txid_map.get(script) {
-                            Some(txids) => return txids.clone(),
+                            Some(txids) => txids.clone(),
                             _ => Vec::new(),
-                                })
+                        })
                         .collect();
 
                     script_req.satisfy(satisfier)?
@@ -380,20 +378,17 @@ impl Blockchain for RpcBlockchain {
                                         Ok(Some(txout))
                                     }
                                     // if not found, fetch from core
+                                    else if let Ok(tx) = self
+                                        .client
+                                        .get_raw_transaction(&txin.previous_output.txid, None)
+                                    {
+                                        Ok(Some(
+                                            tx.output[txin.previous_output.vout as usize].clone(),
+                                        ))
+                                    }
+                                    // there is no prev_out, it's a coinbase
                                     else {
-                                        if let Ok(tx) = self
-                                            .client
-                                            .get_raw_transaction(&txin.previous_output.txid, None)
-                                        {
-                                            Ok(Some(
-                                                tx.output[txin.previous_output.vout as usize]
-                                                    .clone(),
-                                            ))
-                                        }
-                                        // there is no prev_out, it's a coinbase
-                                        else {
-                                            Ok(None)
-                                        }
+                                        Ok(None)
                                     }
                                 })
                                 .collect::<Result<Vec<_>, Error>>()?;
