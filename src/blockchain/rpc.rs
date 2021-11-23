@@ -37,7 +37,7 @@ use crate::blockchain::{Blockchain, Capability, ConfigurableBlockchain, Progress
 use crate::database::{BatchDatabase, DatabaseUtils};
 use crate::descriptor::{get_checksum, IntoWalletDescriptor};
 use crate::wallet::utils::SecpCtx;
-use crate::{ConfirmationTime, Error, FeeRate, KeychainKind, LocalUtxo, TransactionDetails};
+use crate::{BlockTime, Error, FeeRate, KeychainKind, LocalUtxo, TransactionDetails};
 use bitcoincore_rpc::json::{
     GetAddressInfoResultLabel, ImportMultiOptions, ImportMultiRequest,
     ImportMultiRequestScriptPubkey, ImportMultiRescanSince,
@@ -230,7 +230,7 @@ impl Blockchain for RpcBlockchain {
             list_txs_ids.insert(txid);
             if let Some(mut known_tx) = known_txs.get_mut(&txid) {
                 let confirmation_time =
-                    ConfirmationTime::new(tx_result.info.blockheight, tx_result.info.blocktime);
+                    BlockTime::new(tx_result.info.blockheight, tx_result.info.blocktime);
                 if confirmation_time != known_tx.confirmation_time {
                     // reorg may change tx height
                     debug!(
@@ -266,7 +266,7 @@ impl Blockchain for RpcBlockchain {
                 let td = TransactionDetails {
                     transaction: Some(tx),
                     txid: tx_result.info.txid,
-                    confirmation_time: ConfirmationTime::new(
+                    confirmation_time: BlockTime::new(
                         tx_result.info.blockheight,
                         tx_result.info.blocktime,
                     ),

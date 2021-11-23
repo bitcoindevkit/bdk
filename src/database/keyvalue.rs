@@ -18,7 +18,7 @@ use bitcoin::hash_types::Txid;
 use bitcoin::{OutPoint, Script, Transaction};
 
 use crate::database::memory::MapKey;
-use crate::database::{BatchDatabase, BatchOperations, Database};
+use crate::database::{BatchDatabase, BatchOperations, Database, SyncTime};
 use crate::error::Error;
 use crate::types::*;
 
@@ -78,6 +78,13 @@ macro_rules! impl_batch_operations {
         fn set_last_index(&mut self, keychain: KeychainKind, value: u32) -> Result<(), Error> {
             let key = MapKey::LastIndex(keychain).as_map_key();
             self.insert(key, &value.to_be_bytes())$($after_insert)*;
+
+            Ok(())
+        }
+
+        fn set_sync_time(&mut self, data: SyncTime) -> Result<(), Error> {
+            let key = MapKey::SyncTime.as_map_key();
+            self.insert(key, serde_json::to_vec(&data)?)$($after_insert)*;
 
             Ok(())
         }
@@ -167,6 +174,14 @@ macro_rules! impl_batch_operations {
                     Ok(Some(val))
                 }
             }
+        }
+
+        fn del_sync_time(&mut self) -> Result<Option<SyncTime>, Error> {
+            let key = MapKey::SyncTime.as_map_key();
+            let res = self.remove(key);
+            let res = $process_delete!(res);
+
+            Ok(res.map(|b| serde_json::from_slice(&b)).transpose()?)
         }
     }
 }
@@ -342,6 +357,14 @@ impl Database for Tree {
             .transpose()
     }
 
+    fn get_sync_time(&self) -> Result<Option<SyncTime>, Error> {
+        let key = MapKey::SyncTime.as_map_key();
+        Ok(self
+            .get(key)?
+            .map(|b| serde_json::from_slice(&b))
+            .transpose()?)
+    }
+
     // inserts 0 if not present
     fn increment_last_index(&mut self, keychain: KeychainKind) -> Result<u32, Error> {
         let key = MapKey::LastIndex(keychain).as_map_key();
@@ -469,5 +492,10 @@ mod test {
     #[test]
     fn test_last_index() {
         crate::database::test::test_last_index(get_tree());
+    }
+
+    #[test]
+    fn test_sync_time() {
+        crate::database::test::test_sync_time(get_tree());
     }
 }

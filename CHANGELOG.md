@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Overhauled sync logic for electrum and esplora.
 - Unify ureq and reqwest esplora backends to have the same configuration parameters. This means reqwest now has a timeout parameter and ureq has a concurrency parameter.
 - Fixed esplora fee estimation.
+- Update the `Database` trait to store the last sync timestamp and block height
+- Rename `ConfirmationTime` to `BlockTime`
 
 ## [v0.13.0] - [v0.12.0]
 

@@ -37,7 +37,7 @@ use super::script_sync::Request;
 use super::*;
 use crate::database::{BatchDatabase, Database};
 use crate::error::Error;
-use crate::{ConfirmationTime, FeeRate};
+use crate::{BlockTime, FeeRate};
 
 /// Wrapper over an Electrum Client that implements the required blockchain traits
 ///
@@ -146,7 +146,7 @@ impl Blockchain for ElectrumBlockchain {
                                 .map(|height| {
                                     let timestamp =
                                         *block_times.get(height).ok_or_else(electrum_goof)?;
-                                    Result::<_, Error>::Ok(ConfirmationTime {
+                                    Result::<_, Error>::Ok(BlockTime {
                                         height: *height,
                                         timestamp: timestamp.into(),
                                     })

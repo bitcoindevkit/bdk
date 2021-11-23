@@ -212,7 +212,7 @@ mod test {
     use crate::database::{memory::MemoryDatabase, BatchOperations};
     use crate::types::TransactionDetails;
     use crate::wallet::Wallet;
-    use crate::ConfirmationTime;
+    use crate::BlockTime;
 
     fn get_test_db() -> MemoryDatabase {
         let mut db = MemoryDatabase::new();
@@ -226,7 +226,7 @@ mod test {
             received: 100_000,
             sent: 0,
             fee: Some(500),
-            confirmation_time: Some(ConfirmationTime {
+            confirmation_time: Some(BlockTime {
                 timestamp: 12345678,
                 height: 5000,
             }),

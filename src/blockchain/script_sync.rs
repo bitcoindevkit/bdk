@@ -6,7 +6,7 @@ returns associated transactions i.e. electrum.
 use crate::{
     database::{BatchDatabase, BatchOperations, DatabaseUtils},
     wallet::time::Instant,
-    ConfirmationTime, Error, KeychainKind, LocalUtxo, TransactionDetails,
+    BlockTime, Error, KeychainKind, LocalUtxo, TransactionDetails,
 };
 use bitcoin::{OutPoint, Script, Transaction, TxOut, Txid};
 use log::*;
@@ -246,7 +246,7 @@ impl<'a, D: BatchDatabase> ConftimeReq<'a, D> {
 
     pub fn satisfy(
         mut self,
-        confirmation_times: Vec<Option<ConfirmationTime>>,
+        confirmation_times: Vec<Option<BlockTime>>,
     ) -> Result<Request<'a, D>, Error> {
         let conftime_needed = self
             .request()

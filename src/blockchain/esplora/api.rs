@@ -1,7 +1,7 @@
 //! structs from the esplora API
 //!
 //! see: <https://github.com/Blockstream/esplora/blob/master/API.md>
-use crate::ConfirmationTime;
+use crate::BlockTime;
 use bitcoin::{OutPoint, Script, Transaction, TxIn, TxOut, Txid};
 
 #[derive(serde::Deserialize, Clone, Debug)]
@@ -78,13 +78,13 @@ impl Tx {
         }
     }
 
-    pub fn confirmation_time(&self) -> Option<ConfirmationTime> {
+    pub fn confirmation_time(&self) -> Option<BlockTime> {
         match self.status {
             TxStatus {
                 confirmed: true,
                 block_height: Some(height),
                 block_time: Some(timestamp),
-            } => Some(ConfirmationTime { timestamp, height }),
+            } => Some(BlockTime { timestamp, height }),
             _ => None,
         }
     }

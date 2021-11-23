@@ -24,6 +24,8 @@
 //!
 //! [`Wallet`]: crate::wallet::Wallet
 
+use serde::{Deserialize, Serialize};
+
 use bitcoin::hash_types::Txid;
 use bitcoin::{OutPoint, Script, Transaction, TxOut};
 
@@ -43,6 +45,15 @@ pub use sqlite::SqliteDatabase;
 
 pub mod memory;
 pub use memory::MemoryDatabase;
+
+/// Blockchain state at the time of syncing
+///
+/// Contains only the block time and height at the moment
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SyncTime {
+    /// Block timestamp and height at the time of sync
+    pub block_time: BlockTime,
+}
 
 /// Trait for operations that can be batched
 ///
@@ -64,6 +75,8 @@ pub trait BatchOperations {
     fn set_tx(&mut self, transaction: &TransactionDetails) -> Result<(), Error>;
     /// Store the last derivation index for a given keychain.
     fn set_last_index(&mut self, keychain: KeychainKind, value: u32) -> Result<(), Error>;
+    /// Store the sync time
+    fn set_sync_time(&mut self, sync_time: SyncTime) -> Result<(), Error>;
 
     /// Delete a script_pubkey given the keychain and its child number.
     fn del_script_pubkey_from_path(
@@ -89,6 +102,10 @@ pub trait BatchOperations {
     ) -> Result<Option<TransactionDetails>, Error>;
     /// Delete the last derivation index for a keychain.
     fn del_last_index(&mut self, keychain: KeychainKind) -> Result<Option<u32>, Error>;
+    /// Reset the sync time to `None`
+    ///
+    /// Returns the removed value
+    fn del_sync_time(&mut self) -> Result<Option<SyncTime>, Error>;
 }
 
 /// Trait for reading data from a database
@@ -134,6 +151,8 @@ pub trait Database: BatchOperations {
     fn get_tx(&self, txid: &Txid, include_raw: bool) -> Result<Option<TransactionDetails>, Error>;
     /// Return the last defivation index for a keychain.
     fn get_last_index(&self, keychain: KeychainKind) -> Result<Option<u32>, Error>;
+    /// Return the sync time, if present
+    fn get_sync_time(&self) -> Result<Option<SyncTime>, Error>;
 
     /// Increment the last derivation index for a keychain and return it
     ///
@@ -325,7 +344,7 @@ pub mod test {
             received: 1337,
             sent: 420420,
             fee: Some(140),
-            confirmation_time: Some(ConfirmationTime {
+            confirmation_time: Some(BlockTime {
                 timestamp: 123456,
                 height: 1000,
             }),
@@ -375,6 +394,26 @@ pub mod test {
             tree.get_last_index(KeychainKind::Internal).unwrap(),
             Some(0)
         );
+    }
+
+    pub fn test_sync_time<D: Database>(mut tree: D) {
+        assert!(tree.get_sync_time().unwrap().is_none());
+
+        tree.set_sync_time(SyncTime {
+            block_time: BlockTime {
+                height: 100,
+                timestamp: 1000,
+            },
+        })
+        .unwrap();
+
+        let extracted = tree.get_sync_time().unwrap();
+        assert!(extracted.is_some());
+        assert_eq!(extracted.as_ref().unwrap().block_time.height, 100);
+        assert_eq!(extracted.as_ref().unwrap().block_time.timestamp, 1000);
+
+        tree.del_sync_time().unwrap();
+        assert!(tree.get_sync_time().unwrap().is_none());
     }
 
     // TODO: more tests...

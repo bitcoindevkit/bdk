@@ -57,7 +57,7 @@ use utils::{check_nlocktime, check_nsequence_rbf, After, Older, SecpCtx, DUST_LI
 
 use crate::blockchain::{Blockchain, Progress};
 use crate::database::memory::MemoryDatabase;
-use crate::database::{BatchDatabase, BatchOperations, DatabaseUtils};
+use crate::database::{BatchDatabase, BatchOperations, DatabaseUtils, SyncTime};
 use crate::descriptor::derived::AsDerived;
 use crate::descriptor::policy::BuildSatisfaction;
 use crate::descriptor::{
@@ -1447,6 +1447,11 @@ where
 
         Ok(())
     }
+
+    /// Return an immutable reference to the internal database
+    pub fn database(&self) -> impl std::ops::Deref<Target = D> + '_ {
+        self.database.borrow()
+    }
 }
 
 impl<B, D> Wallet<B, D>
@@ -1548,6 +1553,15 @@ where
                 }
             }
         }
+
+        let sync_time = SyncTime {
+            block_time: BlockTime {
+                height: maybe_await!(self.client.get_height())?,
+                timestamp: time::get_timestamp(),
+            },
+        };
+        debug!("Saving `sync_time` = {:?}", sync_time);
+        self.database.borrow_mut().set_sync_time(sync_time)?;
 
         Ok(())
     }
@@ -2778,7 +2792,7 @@ pub(crate) mod test {
         let txid = tx.txid();
         // skip saving the utxos, we know they can't be used anyways
         details.transaction = Some(tx);
-        details.confirmation_time = Some(ConfirmationTime {
+        details.confirmation_time = Some(BlockTime {
             timestamp: 12345678,
             height: 42,
         });
@@ -3979,5 +3993,16 @@ pub(crate) mod test {
                 address: Address::from_str("tb1qzntf2mqex4ehwkjlfdyy3ewdlk08qkvkvrz7x2").unwrap()
             }
         );
+    }
+
+    #[test]
+    fn test_sending_to_bip350_bech32m_address() {
+        let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
+        let addr =
+            Address::from_str("tb1pqqqqp399et2xygdj5xreqhjjvcmzhxw4aywxecjdzew6hylgvsesf3hn0c")
+                .unwrap();
+        let mut builder = wallet.build_tx();
+        builder.add_recipient(addr.script_pubkey(), 45_000);
+        builder.finish().unwrap();
     }
 }

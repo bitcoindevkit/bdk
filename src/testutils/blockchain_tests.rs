@@ -145,9 +145,7 @@ impl TestClient {
 
         let bumped: serde_json::Value = self.call("bumpfee", &[txid.to_string().into()]).unwrap();
         let new_txid = Txid::from_str(&bumped["txid"].as_str().unwrap().to_string()).unwrap();
-
-        let monitor_script =
-            tx.vout[0].script_pub_key.addresses.as_ref().unwrap()[0].script_pubkey();
+        let monitor_script = Script::from_hex(&mut tx.vout[0].script_pub_key.hex.to_hex()).unwrap();
         self.wait_for_tx(new_txid, &monitor_script);
 
         debug!("Bumped {}, new txid {}", txid, new_txid);
@@ -394,6 +392,9 @@ macro_rules! bdk_blockchain_tests {
 
             #[test]
             fn test_sync_simple() {
+                use std::ops::Deref;
+                use crate::database::Database;
+
                 let (wallet, descriptors, mut test_client) = init_single_sig();
 
                 let tx = testutils! {
@@ -402,7 +403,13 @@ macro_rules! bdk_blockchain_tests {
                 println!("{:?}", tx);
                 let txid = test_client.receive(tx);
 
+                // the RPC blockchain needs to call `sync()` during initialization to import the
+                // addresses (see `init_single_sig()`), so we skip this assertion
+                #[cfg(not(feature = "test-rpc"))]
+                assert!(wallet.database().deref().get_sync_time().unwrap().is_none(), "initial sync_time not none");
+
                 wallet.sync(noop_progress(), None).unwrap();
+                assert!(wallet.database().deref().get_sync_time().unwrap().is_some(), "sync_time hasn't been updated");
 
                 assert_eq!(wallet.get_balance().unwrap(), 50_000, "incorrect balance");
                 assert_eq!(wallet.list_unspent().unwrap()[0].keychain, KeychainKind::External, "incorrect keychain kind");
@@ -969,6 +976,102 @@ macro_rules! bdk_blockchain_tests {
 
                 wallet.sync(noop_progress(), None).unwrap();
                 assert!(wallet.get_balance().unwrap() > 0, "incorrect balance after receiving coinbase");
+            }
+
+            #[test]
+            fn test_send_to_bech32m_addr() {
+                use std::str::FromStr;
+                use serde;
+                use serde_json;
+                use serde::Serialize;
+                use bitcoincore_rpc::jsonrpc::serde_json::Value;
+                use bitcoincore_rpc::{Auth, Client, RpcApi};
+
+                let (wallet, descriptors, mut test_client) = init_single_sig();
+
+                // TODO remove once rust-bitcoincore-rpc with PR 199 released
+                // https://github.com/rust-bitcoin/rust-bitcoincore-rpc/pull/199
+                /// Import Descriptor Request
+                #[derive(Serialize, Clone, PartialEq, Eq, Debug)]
+                pub struct ImportDescriptorRequest {
+                    pub active: bool,
+                    #[serde(rename = "desc")]
+                    pub descriptor: String,
+                    pub range: [i64; 2],
+                    pub next_index: i64,
+                    pub timestamp: String,
+                    pub internal: bool,
+                }
+
+                // TODO remove once rust-bitcoincore-rpc with PR 199 released
+                impl ImportDescriptorRequest {
+                    /// Create a new Import Descriptor request providing just the descriptor and internal flags
+                    pub fn new(descriptor: &str, internal: bool) -> Self {
+                        ImportDescriptorRequest {
+                            descriptor: descriptor.to_string(),
+                            internal,
+                            active: true,
+                            range: [0, 100],
+                            next_index: 0,
+                            timestamp: "now".to_string(),
+                        }
+                    }
+                }
+
+                // 1. Create and add descriptors to a test bitcoind node taproot wallet
+
+                // TODO replace once rust-bitcoincore-rpc with PR 174 released
+                // https://github.com/rust-bitcoin/rust-bitcoincore-rpc/pull/174
+                let _createwallet_result: Value = test_client.bitcoind.client.call("createwallet", &["taproot_wallet".into(),false.into(),true.into(),serde_json::to_value("").unwrap(), false.into(), true.into()]).unwrap();
+
+                // TODO replace once bitcoind released with support for rust-bitcoincore-rpc PR 174
+                let taproot_wallet_client = Client::new(&test_client.bitcoind.rpc_url_with_wallet("taproot_wallet"), Auth::CookieFile(test_client.bitcoind.params.cookie_file.clone())).unwrap();
+
+                let wallet_descriptor = "tr(tprv8ZgxMBicQKsPdBtxmEMPnNq58KGusNAimQirKFHqX2yk2D8q1v6pNLiKYVAdzDHy2w3vF4chuGfMvNtzsbTTLVXBcdkCA1rje1JG6oksWv8/86h/1h/0h/0/*)#y283ssmn";
+                let change_descriptor = "tr(tprv8ZgxMBicQKsPdBtxmEMPnNq58KGusNAimQirKFHqX2yk2D8q1v6pNLiKYVAdzDHy2w3vF4chuGfMvNtzsbTTLVXBcdkCA1rje1JG6oksWv8/86h/1h/0h/1/*)#47zsd9tt";
+
+                let tr_descriptors = vec![
+                            ImportDescriptorRequest::new(wallet_descriptor, false),
+                            ImportDescriptorRequest::new(change_descriptor, false),
+                        ];
+
+                // TODO replace once rust-bitcoincore-rpc with PR 199 released
+                let _import_result: Value = taproot_wallet_client.call("importdescriptors", &[serde_json::to_value(tr_descriptors).unwrap()]).unwrap();
+
+                // 2. Get a new bech32m address from test bitcoind node taproot wallet
+
+                // TODO replace once rust-bitcoincore-rpc with PR 199 released
+                let node_addr: bitcoin::Address = taproot_wallet_client.call("getnewaddress", &["test address".into(), "bech32m".into()]).unwrap();
+                assert_eq!(node_addr, bitcoin::Address::from_str("bcrt1pj5y3f0fu4y7g98k4v63j9n0xvj3lmln0cpwhsjzknm6nt0hr0q7qnzwsy9").unwrap());
+
+                // 3. Send 50_000 sats from test bitcoind node to test BDK wallet
+
+                test_client.receive(testutils! {
+                    @tx ( (@external descriptors, 0) => 50_000 )
+                });
+
+                wallet.sync(noop_progress(), None).unwrap();
+                assert_eq!(wallet.get_balance().unwrap(), 50_000, "wallet has incorrect balance");
+
+                // 4. Send 25_000 sats from test BDK wallet to test bitcoind node taproot wallet
+
+                let mut builder = wallet.build_tx();
+                builder.add_recipient(node_addr.script_pubkey(), 25_000);
+                let (mut psbt, details) = builder.finish().unwrap();
+                let finalized = wallet.sign(&mut psbt, Default::default()).unwrap();
+                assert!(finalized, "wallet cannot finalize transaction");
+                let tx = psbt.extract_tx();
+                wallet.broadcast(&tx).unwrap();
+                wallet.sync(noop_progress(), None).unwrap();
+                assert_eq!(wallet.get_balance().unwrap(), details.received, "wallet has incorrect balance after send");
+                assert_eq!(wallet.list_transactions(false).unwrap().len(), 2, "wallet has incorrect number of txs");
+                assert_eq!(wallet.list_unspent().unwrap().len(), 1, "wallet has incorrect number of unspents");
+                test_client.generate(1, None);
+
+                // 5. Verify 25_000 sats are received by test bitcoind node taproot wallet
+
+                let taproot_balance = taproot_wallet_client.get_balance(None, None).unwrap();
+                assert_eq!(taproot_balance.as_sat(), 25_000, "node has incorrect taproot wallet balance");
             }
         }
     };

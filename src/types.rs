@@ -210,7 +210,7 @@ pub struct TransactionDetails {
     pub fee: Option<u64>,
     /// If the transaction is confirmed, contains height and timestamp of the block containing the
     /// transaction, unconfirmed transaction contains `None`.
-    pub confirmation_time: Option<ConfirmationTime>,
+    pub confirmation_time: Option<BlockTime>,
     /// Whether the tx has been verified against the consensus rules
     ///
     /// Confirmed txs are considered "verified" by default, while unconfirmed txs are checked to
@@ -222,20 +222,26 @@ pub struct TransactionDetails {
     pub verified: bool,
 }
 
-/// Block height and timestamp of the block containing the confirmed transaction
+/// Block height and timestamp of a block
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default)]
-pub struct ConfirmationTime {
+pub struct BlockTime {
     /// confirmation block height
     pub height: u32,
     /// confirmation block timestamp
     pub timestamp: u64,
 }
 
-impl ConfirmationTime {
-    /// Returns `Some` `ConfirmationTime` if both `height` and `timestamp` are `Some`
+/// **DEPRECATED**: Confirmation time of a transaction
+///
+/// The structure has been renamed to `BlockTime`
+#[deprecated(note = "This structure has been renamed to `BlockTime`")]
+pub type ConfirmationTime = BlockTime;
+
+impl BlockTime {
+    /// Returns `Some` `BlockTime` if both `height` and `timestamp` are `Some`
     pub fn new(height: Option<u32>, timestamp: Option<u64>) -> Option<Self> {
         match (height, timestamp) {
-            (Some(height), Some(timestamp)) => Some(ConfirmationTime { height, timestamp }),
+            (Some(height), Some(timestamp)) => Some(BlockTime { height, timestamp }),
             _ => None,
         }
     }

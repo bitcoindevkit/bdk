@@ -13,7 +13,7 @@ use bitcoin::consensus::encode::{deserialize, serialize};
 use bitcoin::hash_types::Txid;
 use bitcoin::{OutPoint, Script, Transaction, TxOut};
 
-use crate::database::{BatchDatabase, BatchOperations, Database};
+use crate::database::{BatchDatabase, BatchOperations, Database, SyncTime};
 use crate::error::Error;
 use crate::types::*;
 
@@ -35,6 +35,7 @@ static MIGRATIONS: &[&str] = &[
     "CREATE UNIQUE INDEX idx_indices_keychain ON last_derivation_indices(keychain);",
     "CREATE TABLE checksums (keychain TEXT, checksum BLOB);",
     "CREATE INDEX idx_checksums_keychain ON checksums(keychain);",
+    "CREATE TABLE sync_time (id INTEGER PRIMARY KEY, height INTEGER, timestamp INTEGER);"
 ];
 
 /// Sqlite database stored on filesystem
@@ -203,6 +204,19 @@ impl SqliteDatabase {
         })?;
 
         Ok(())
+    }
+
+    fn update_sync_time(&self, data: SyncTime) -> Result<i64, Error> {
+        let mut statement = self.connection.prepare_cached(
+            "INSERT INTO sync_time (id, height, timestamp) VALUES (0, :height, :timestamp) ON CONFLICT(id) DO UPDATE SET height=:height, timestamp=:timestamp WHERE id = 0",
+        )?;
+
+        statement.execute(named_params! {
+            ":height": data.block_time.height,
+            ":timestamp": data.block_time.timestamp,
+        })?;
+
+        Ok(self.connection.last_insert_rowid())
     }
 
     fn select_script_pubkeys(&self) -> Result<Vec<Script>, Error> {
@@ -375,7 +389,7 @@ impl SqliteDatabase {
             };
 
             let confirmation_time = match (height, timestamp) {
-                (Some(height), Some(timestamp)) => Some(ConfirmationTime { height, timestamp }),
+                (Some(height), Some(timestamp)) => Some(BlockTime { height, timestamp }),
                 _ => None,
             };
 
@@ -409,7 +423,7 @@ impl SqliteDatabase {
             let verified: bool = row.get(6)?;
 
             let confirmation_time = match (height, timestamp) {
-                (Some(height), Some(timestamp)) => Some(ConfirmationTime { height, timestamp }),
+                (Some(height), Some(timestamp)) => Some(BlockTime { height, timestamp }),
                 _ => None,
             };
 
@@ -452,7 +466,7 @@ impl SqliteDatabase {
                 };
 
                 let confirmation_time = match (height, timestamp) {
-                    (Some(height), Some(timestamp)) => Some(ConfirmationTime { height, timestamp }),
+                    (Some(height), Some(timestamp)) => Some(BlockTime { height, timestamp }),
                     _ => None,
                 };
 
@@ -484,6 +498,24 @@ impl SqliteDatabase {
                 Ok(Some(value))
             }
             None => Ok(None),
+        }
+    }
+
+    fn select_sync_time(&self) -> Result<Option<SyncTime>, Error> {
+        let mut statement = self
+            .connection
+            .prepare_cached("SELECT height, timestamp FROM sync_time WHERE id = 0")?;
+        let mut rows = statement.query([])?;
+
+        if let Some(row) = rows.next()? {
+            Ok(Some(SyncTime {
+                block_time: BlockTime {
+                    height: row.get(0)?,
+                    timestamp: row.get(1)?,
+                },
+            }))
+        } else {
+            Ok(None)
         }
     }
 
@@ -563,6 +595,14 @@ impl SqliteDatabase {
 
         Ok(())
     }
+
+    fn delete_sync_time(&self) -> Result<(), Error> {
+        let mut statement = self
+            .connection
+            .prepare_cached("DELETE FROM sync_time WHERE id = 0")?;
+        statement.execute([])?;
+        Ok(())
+    }
 }
 
 impl BatchOperations for SqliteDatabase {
@@ -619,6 +659,11 @@ impl BatchOperations for SqliteDatabase {
 
     fn set_last_index(&mut self, keychain: KeychainKind, value: u32) -> Result<(), Error> {
         self.update_last_derivation_index(serde_json::to_string(&keychain)?, value)?;
+        Ok(())
+    }
+
+    fn set_sync_time(&mut self, ct: SyncTime) -> Result<(), Error> {
+        self.update_sync_time(ct)?;
         Ok(())
     }
 
@@ -701,6 +746,17 @@ impl BatchOperations for SqliteDatabase {
         match self.select_last_derivation_index_by_keychain(keychain.clone())? {
             Some(value) => {
                 self.delete_last_derivation_index_by_keychain(keychain)?;
+
+                Ok(Some(value))
+            }
+            None => Ok(None),
+        }
+    }
+
+    fn del_sync_time(&mut self) -> Result<Option<SyncTime>, Error> {
+        match self.select_sync_time()? {
+            Some(value) => {
+                self.delete_sync_time()?;
 
                 Ok(Some(value))
             }
@@ -816,6 +872,10 @@ impl Database for SqliteDatabase {
         let keychain = serde_json::to_string(&keychain)?;
         let value = self.select_last_derivation_index_by_keychain(keychain)?;
         Ok(value)
+    }
+
+    fn get_sync_time(&self) -> Result<Option<SyncTime>, Error> {
+        self.select_sync_time()
     }
 
     fn increment_last_index(&mut self, keychain: KeychainKind) -> Result<u32, Error> {
@@ -964,5 +1024,10 @@ pub mod test {
     #[test]
     fn test_last_index() {
         crate::database::test::test_last_index(get_database());
+    }
+
+    #[test]
+    fn test_sync_time() {
+        crate::database::test::test_sync_time(get_database());
     }
 }
