@@ -354,9 +354,9 @@ impl Satisfaction {
                 indexes
                     .into_iter()
                     // .inspect(|x| println!("--- orig --- {:?}", x))
-                    // we map each of the combinations of elements into a tuple of ([choosen items], [conditions]). unfortunately, those items have potentially more than one
+                    // we map each of the combinations of elements into a tuple of ([chosen items], [conditions]). unfortunately, those items have potentially more than one
                     // condition (think about ORs), so we also use `mix` to expand those, i.e. [[0], [1, 2]] becomes [[0, 1], [0, 2]]. This is necessary to make sure that we
-                    // consider every possibile options and check whether or not they are compatible.
+                    // consider every possible options and check whether or not they are compatible.
                     .map(|i_vec| {
                         mix(i_vec
                             .iter()

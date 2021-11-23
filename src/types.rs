@@ -217,7 +217,7 @@ pub struct TransactionDetails {
     /// ensure an unstrusted [`Blockchain`](crate::blockchain::Blockchain) backend can't trick the
     /// wallet into using an invalid tx as an RBF template.
     ///
-    /// The check is only perfomed when the `verify` feature is enabled.
+    /// The check is only performed when the `verify` feature is enabled.
     #[serde(default = "bool::default")] // default to `false` if not specified
     pub verified: bool,
 }

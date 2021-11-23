@@ -398,7 +398,7 @@ impl ChainStore<Full> {
             );
         }
 
-        // Delete full blocks overriden by snapshot
+        // Delete full blocks overridden by snapshot
         let from_key = StoreEntry::Block(Some(snaphost.min_height)).get_key();
         let to_key = StoreEntry::Block(Some(usize::MAX)).get_key();
         batch.delete_range(&from_key, &to_key);

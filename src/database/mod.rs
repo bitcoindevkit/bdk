@@ -149,7 +149,7 @@ pub trait Database: BatchOperations {
     fn get_raw_tx(&self, txid: &Txid) -> Result<Option<Transaction>, Error>;
     /// Fetch the transaction metadata and optionally also the raw transaction
     fn get_tx(&self, txid: &Txid, include_raw: bool) -> Result<Option<TransactionDetails>, Error>;
-    /// Return the last defivation index for a keychain.
+    /// Return the last derivation index for a keychain.
     fn get_last_index(&self, keychain: KeychainKind) -> Result<Option<u32>, Error>;
     /// Return the sync time, if present
     fn get_sync_time(&self) -> Result<Option<SyncTime>, Error>;

@@ -275,7 +275,7 @@ pub fn version() -> &'static str {
     env!("CARGO_PKG_VERSION", "unknown")
 }
 
-// We should consider putting this under a feature flag but we need the macro in doctets so we need
+// We should consider putting this under a feature flag but we need the macro in doctests so we need
 // to wait until https://github.com/rust-lang/rust/issues/67295 is fixed.
 //
 // Stuff in here is too rough to document atm
