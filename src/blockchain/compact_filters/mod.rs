@@ -472,7 +472,7 @@ pub struct CompactFiltersBlockchainConfig {
     pub peers: Vec<BitcoinPeerConfig>,
     /// Network used
     pub network: Network,
-    /// Storage dir to save partially downloaded headers and full blocks
+    /// Storage dir to save partially downloaded headers and full blocks. Should be a separate directory per descriptor. Consider using [crate::wallet::wallet_name_from_descriptor] for this.
     pub storage_dir: String,
     /// Optionally skip initial `skip_blocks` blocks (default: 0)
     pub skip_blocks: Option<usize>,
