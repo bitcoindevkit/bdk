@@ -24,20 +24,20 @@
 //! # Ok::<(), bdk::Error>(())
 //! ```
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 #[allow(unused_imports)]
 use log::{debug, error, info, trace};
 
-use bitcoin::{BlockHeader, Script, Transaction, Txid};
+use bitcoin::{Transaction, Txid};
 
 use electrum_client::{Client, ConfigBuilder, ElectrumApi, Socks5Config};
 
-use self::utils::{ElectrumLikeSync, ElsGetHistoryRes};
+use super::script_sync::Request;
 use super::*;
-use crate::database::BatchDatabase;
+use crate::database::{BatchDatabase, Database};
 use crate::error::Error;
-use crate::FeeRate;
+use crate::{BlockTime, FeeRate};
 
 /// Wrapper over an Electrum Client that implements the required blockchain traits
 ///
@@ -71,10 +71,139 @@ impl Blockchain for ElectrumBlockchain {
     fn setup<D: BatchDatabase, P: Progress>(
         &self,
         database: &mut D,
-        progress_update: P,
+        _progress_update: P,
     ) -> Result<(), Error> {
-        self.client
-            .electrum_like_setup(self.stop_gap, database, progress_update)
+        let mut request = script_sync::start(database, self.stop_gap)?;
+        let mut block_times = HashMap::<u32, u32>::new();
+        let mut txid_to_height = HashMap::<Txid, u32>::new();
+        let mut tx_cache = TxCache::new(database, &self.client);
+        let chunk_size = self.stop_gap;
+        // The electrum server has been inconsistent somehow in its responses during sync. For
+        // example, we do a batch request of transactions and the response contains less
+        // tranascations than in the request. This should never happen but we don't want to panic.
+        let electrum_goof = || Error::Generic("electrum server misbehaving".to_string());
+
+        let batch_update = loop {
+            request = match request {
+                Request::Script(script_req) => {
+                    let scripts = script_req.request().take(chunk_size);
+                    let txids_per_script: Vec<Vec<_>> = self
+                        .client
+                        .batch_script_get_history(scripts)
+                        .map_err(Error::Electrum)?
+                        .into_iter()
+                        .map(|txs| {
+                            txs.into_iter()
+                                .map(|tx| {
+                                    let tx_height = match tx.height {
+                                        none if none <= 0 => None,
+                                        height => {
+                                            txid_to_height.insert(tx.tx_hash, height as u32);
+                                            Some(height as u32)
+                                        }
+                                    };
+                                    (tx.tx_hash, tx_height)
+                                })
+                                .collect()
+                        })
+                        .collect();
+
+                    script_req.satisfy(txids_per_script)?
+                }
+
+                Request::Conftime(conftime_req) => {
+                    // collect up to chunk_size heights to fetch from electrum
+                    let needs_block_height = {
+                        let mut needs_block_height_iter = conftime_req
+                            .request()
+                            .filter_map(|txid| txid_to_height.get(txid).cloned())
+                            .filter(|height| block_times.get(height).is_none());
+                        let mut needs_block_height = HashSet::new();
+
+                        while needs_block_height.len() < chunk_size {
+                            match needs_block_height_iter.next() {
+                                Some(height) => needs_block_height.insert(height),
+                                None => break,
+                            };
+                        }
+                        needs_block_height
+                    };
+
+                    let new_block_headers = self
+                        .client
+                        .batch_block_header(needs_block_height.iter().cloned())?;
+
+                    for (height, header) in needs_block_height.into_iter().zip(new_block_headers) {
+                        block_times.insert(height, header.time);
+                    }
+
+                    let conftimes = conftime_req
+                        .request()
+                        .take(chunk_size)
+                        .map(|txid| {
+                            let confirmation_time = txid_to_height
+                                .get(txid)
+                                .map(|height| {
+                                    let timestamp =
+                                        *block_times.get(height).ok_or_else(electrum_goof)?;
+                                    Result::<_, Error>::Ok(BlockTime {
+                                        height: *height,
+                                        timestamp: timestamp.into(),
+                                    })
+                                })
+                                .transpose()?;
+                            Ok(confirmation_time)
+                        })
+                        .collect::<Result<_, Error>>()?;
+
+                    conftime_req.satisfy(conftimes)?
+                }
+                Request::Tx(tx_req) => {
+                    let needs_full = tx_req.request().take(chunk_size);
+                    tx_cache.save_txs(needs_full.clone())?;
+                    let full_transactions = needs_full
+                        .map(|txid| tx_cache.get(*txid).ok_or_else(electrum_goof))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    let input_txs = full_transactions.iter().flat_map(|tx| {
+                        tx.input
+                            .iter()
+                            .filter(|input| !input.previous_output.is_null())
+                            .map(|input| &input.previous_output.txid)
+                    });
+                    tx_cache.save_txs(input_txs)?;
+
+                    let full_details = full_transactions
+                        .into_iter()
+                        .map(|tx| {
+                            let prev_outputs = tx
+                                .input
+                                .iter()
+                                .map(|input| {
+                                    if input.previous_output.is_null() {
+                                        return Ok(None);
+                                    }
+                                    let prev_tx = tx_cache
+                                        .get(input.previous_output.txid)
+                                        .ok_or_else(electrum_goof)?;
+                                    let txout = prev_tx
+                                        .output
+                                        .get(input.previous_output.vout as usize)
+                                        .ok_or_else(electrum_goof)?;
+                                    Ok(Some(txout.clone()))
+                                })
+                                .collect::<Result<Vec<_>, Error>>()?;
+                            Ok((prev_outputs, tx))
+                        })
+                        .collect::<Result<Vec<_>, Error>>()?;
+
+                    tx_req.satisfy(full_details)?
+                }
+                Request::Finish(batch_update) => break batch_update,
+            }
+        };
+
+        database.commit_batch(batch_update)?;
+        Ok(())
     }
 
     fn get_tx(&self, txid: &Txid) -> Result<Option<Transaction>, Error> {
@@ -101,43 +230,48 @@ impl Blockchain for ElectrumBlockchain {
     }
 }
 
-impl ElectrumLikeSync for Client {
-    fn els_batch_script_get_history<'s, I: IntoIterator<Item = &'s Script> + Clone>(
-        &self,
-        scripts: I,
-    ) -> Result<Vec<Vec<ElsGetHistoryRes>>, Error> {
-        self.batch_script_get_history(scripts)
-            .map(|v| {
-                v.into_iter()
-                    .map(|v| {
-                        v.into_iter()
-                            .map(
-                                |electrum_client::GetHistoryRes {
-                                     height, tx_hash, ..
-                                 }| ElsGetHistoryRes {
-                                    height,
-                                    tx_hash,
-                                },
-                            )
-                            .collect()
-                    })
-                    .collect()
-            })
-            .map_err(Error::Electrum)
+struct TxCache<'a, 'b, D> {
+    db: &'a D,
+    client: &'b Client,
+    cache: HashMap<Txid, Transaction>,
+}
+
+impl<'a, 'b, D: Database> TxCache<'a, 'b, D> {
+    fn new(db: &'a D, client: &'b Client) -> Self {
+        TxCache {
+            db,
+            client,
+            cache: HashMap::default(),
+        }
+    }
+    fn save_txs<'c>(&mut self, txids: impl Iterator<Item = &'c Txid>) -> Result<(), Error> {
+        let mut need_fetch = vec![];
+        for txid in txids {
+            if self.cache.get(txid).is_some() {
+                continue;
+            } else if let Some(transaction) = self.db.get_raw_tx(txid)? {
+                self.cache.insert(*txid, transaction);
+            } else {
+                need_fetch.push(txid);
+            }
+        }
+
+        if !need_fetch.is_empty() {
+            let txs = self
+                .client
+                .batch_transaction_get(need_fetch.clone())
+                .map_err(Error::Electrum)?;
+            for (tx, _txid) in txs.into_iter().zip(need_fetch) {
+                debug_assert_eq!(*_txid, tx.txid());
+                self.cache.insert(tx.txid(), tx);
+            }
+        }
+
+        Ok(())
     }
 
-    fn els_batch_transaction_get<'s, I: IntoIterator<Item = &'s Txid> + Clone>(
-        &self,
-        txids: I,
-    ) -> Result<Vec<Transaction>, Error> {
-        self.batch_transaction_get(txids).map_err(Error::Electrum)
-    }
-
-    fn els_batch_block_header<I: IntoIterator<Item = u32> + Clone>(
-        &self,
-        heights: I,
-    ) -> Result<Vec<BlockHeader>, Error> {
-        self.batch_block_header(heights).map_err(Error::Electrum)
+    fn get(&self, txid: Txid) -> Option<Transaction> {
+        self.cache.get(&txid).map(Clone::clone)
     }
 }
 

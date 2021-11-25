@@ -138,40 +138,6 @@ impl<Pk: MiniscriptKey + ToPublicKey> Satisfier<Pk> for Older {
 
 pub(crate) type SecpCtx = Secp256k1<All>;
 
-pub struct ChunksIterator<I: Iterator> {
-    iter: I,
-    size: usize,
-}
-
-#[cfg(any(feature = "electrum", feature = "esplora"))]
-impl<I: Iterator> ChunksIterator<I> {
-    pub fn new(iter: I, size: usize) -> Self {
-        ChunksIterator { iter, size }
-    }
-}
-
-impl<I: Iterator> Iterator for ChunksIterator<I> {
-    type Item = Vec<<I as std::iter::Iterator>::Item>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let mut v = Vec::new();
-        for _ in 0..self.size {
-            let e = self.iter.next();
-
-            match e {
-                None => break,
-                Some(val) => v.push(val),
-            }
-        }
-
-        if v.is_empty() {
-            return None;
-        }
-
-        Some(v)
-    }
-}
-
 #[cfg(test)]
 mod test {
     use super::{
