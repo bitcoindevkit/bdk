@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.14.0] - [v0.13.0]
+
 - BIP39 implementation dependency, in `keys::bip39` changed from tiny-bip39 to rust-bip39.
 - Add new method on the `TxBuilder` to embed data in the transaction via `OP_RETURN`. To allow that a fix to check the dust only on spendable output has been introduced.
 - Update the `Database` trait to store the last sync timestamp and block height
@@ -394,3 +396,4 @@ final transaction is created by calling `finish` on the builder.
 [v0.11.0]: https://github.com/bitcoindevkit/bdk/compare/v0.10.0...v0.11.0
 [v0.12.0]: https://github.com/bitcoindevkit/bdk/compare/v0.11.0...v0.12.0
 [v0.13.0]: https://github.com/bitcoindevkit/bdk/compare/v0.12.0...v0.13.0
+[v0.14.0]: https://github.com/bitcoindevkit/bdk/compare/v0.13.0...v0.14.0
