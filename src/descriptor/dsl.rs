@@ -84,7 +84,7 @@ macro_rules! impl_leaf_opcode {
         )
         .map_err($crate::descriptor::DescriptorError::Miniscript)
         .and_then(|minisc| {
-            minisc.check_minsicript()?;
+            minisc.check_miniscript()?;
             Ok(minisc)
         })
         .map(|minisc| {
@@ -108,7 +108,7 @@ macro_rules! impl_leaf_opcode_value {
         )
         .map_err($crate::descriptor::DescriptorError::Miniscript)
         .and_then(|minisc| {
-            minisc.check_minsicript()?;
+            minisc.check_miniscript()?;
             Ok(minisc)
         })
         .map(|minisc| {
@@ -132,7 +132,7 @@ macro_rules! impl_leaf_opcode_value_two {
         )
         .map_err($crate::descriptor::DescriptorError::Miniscript)
         .and_then(|minisc| {
-            minisc.check_minsicript()?;
+            minisc.check_miniscript()?;
             Ok(minisc)
         })
         .map(|minisc| {
@@ -165,7 +165,7 @@ macro_rules! impl_node_opcode_two {
                     std::sync::Arc::new(b_minisc),
                 ))?;
 
-                minisc.check_minsicript()?;
+                minisc.check_miniscript()?;
 
                 Ok((minisc, a_keymap, $crate::keys::merge_networks(&a_networks, &b_networks)))
             })
@@ -197,7 +197,7 @@ macro_rules! impl_node_opcode_three {
                     std::sync::Arc::new(c_minisc),
                 ))?;
 
-                minisc.check_minsicript()?;
+                minisc.check_miniscript()?;
 
                 Ok((minisc, a_keymap, networks))
             })
@@ -243,7 +243,7 @@ macro_rules! apply_modifier {
                     ),
                 )?;
 
-                minisc.check_minsicript()?;
+                minisc.check_miniscript()?;
 
                 Ok((minisc, keymap, networks))
             })

@@ -748,7 +748,7 @@ pub fn make_pk<Pk: IntoDescriptorKey<Ctx>, Ctx: ScriptContext>(
     let (key, key_map, valid_networks) = descriptor_key.into_descriptor_key()?.extract(secp)?;
     let minisc = Miniscript::from_ast(Terminal::PkK(key))?;
 
-    minisc.check_minsicript()?;
+    minisc.check_miniscript()?;
 
     Ok((minisc, key_map, valid_networks))
 }
@@ -762,7 +762,7 @@ pub fn make_pkh<Pk: IntoDescriptorKey<Ctx>, Ctx: ScriptContext>(
     let (key, key_map, valid_networks) = descriptor_key.into_descriptor_key()?.extract(secp)?;
     let minisc = Miniscript::from_ast(Terminal::PkH(key))?;
 
-    minisc.check_minsicript()?;
+    minisc.check_miniscript()?;
 
     Ok((minisc, key_map, valid_networks))
 }
@@ -777,7 +777,7 @@ pub fn make_multi<Pk: IntoDescriptorKey<Ctx>, Ctx: ScriptContext>(
     let (pks, key_map, valid_networks) = expand_multi_keys(pks, secp)?;
     let minisc = Miniscript::from_ast(Terminal::Multi(thresh, pks))?;
 
-    minisc.check_minsicript()?;
+    minisc.check_miniscript()?;
 
     Ok((minisc, key_map, valid_networks))
 }

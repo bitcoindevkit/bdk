@@ -238,13 +238,13 @@ pub(crate) fn into_wallet_descriptor_checked<T: IntoWalletDescriptor>(
 #[doc(hidden)]
 /// Used internally mainly by the `descriptor!()` and `fragment!()` macros
 pub trait CheckMiniscript<Ctx: miniscript::ScriptContext> {
-    fn check_minsicript(&self) -> Result<(), miniscript::Error>;
+    fn check_miniscript(&self) -> Result<(), miniscript::Error>;
 }
 
 impl<Ctx: miniscript::ScriptContext, Pk: miniscript::MiniscriptKey> CheckMiniscript<Ctx>
     for miniscript::Miniscript<Pk, Ctx>
 {
-    fn check_minsicript(&self) -> Result<(), miniscript::Error> {
+    fn check_miniscript(&self) -> Result<(), miniscript::Error> {
         Ctx::check_global_validity(self)?;
 
         Ok(())
