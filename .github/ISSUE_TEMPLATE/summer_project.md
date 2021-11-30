@@ -32,7 +32,7 @@ fundamentals - achievable over 12-weeks. Below are just a few types of ideas:
    create new innovations and new perspectives for your project.
 -->
 
-**Descriptive Title**  
+**Description**
 <!-- Description: 3-7 sentences describing the project background and tasks to be done. -->  
 
 **Expected Outcomes**  
