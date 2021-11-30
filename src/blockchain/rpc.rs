@@ -35,8 +35,6 @@ use crate::bitcoin::consensus::deserialize;
 use crate::bitcoin::{Address, Network, OutPoint, Transaction, TxOut, Txid};
 use crate::blockchain::{Blockchain, Capability, ConfigurableBlockchain, Progress};
 use crate::database::{BatchDatabase, DatabaseUtils};
-use crate::descriptor::{get_checksum, IntoWalletDescriptor};
-use crate::wallet::utils::SecpCtx;
 use crate::{BlockTime, Error, FeeRate, KeychainKind, LocalUtxo, TransactionDetails};
 use bitcoincore_rpc::json::{
     GetAddressInfoResultLabel, ImportMultiOptions, ImportMultiRequest,
@@ -76,7 +74,7 @@ pub struct RpcConfig {
     pub auth: Auth,
     /// The network we are using (it will be checked the bitcoin node network matches this)
     pub network: Network,
-    /// The wallet name in the bitcoin node, consider using [wallet_name_from_descriptor] for this
+    /// The wallet name in the bitcoin node, consider using [crate::wallet::wallet_name_from_descriptor] for this
     pub wallet_name: String,
     /// Skip this many blocks of the blockchain at the first rescan, if None the rescan is done from the genesis block
     pub skip_blocks: Option<u32>,
@@ -413,35 +411,6 @@ impl ConfigurableBlockchain for RpcBlockchain {
             skip_blocks: config.skip_blocks,
         })
     }
-}
-
-/// Deterministically generate a unique name given the descriptors defining the wallet
-pub fn wallet_name_from_descriptor<T>(
-    descriptor: T,
-    change_descriptor: Option<T>,
-    network: Network,
-    secp: &SecpCtx,
-) -> Result<String, Error>
-where
-    T: IntoWalletDescriptor,
-{
-    //TODO check descriptors contains only public keys
-    let descriptor = descriptor
-        .into_wallet_descriptor(secp, network)?
-        .0
-        .to_string();
-    let mut wallet_name = get_checksum(&descriptor[..descriptor.find('#').unwrap()])?;
-    if let Some(change_descriptor) = change_descriptor {
-        let change_descriptor = change_descriptor
-            .into_wallet_descriptor(secp, network)?
-            .0
-            .to_string();
-        wallet_name.push_str(
-            get_checksum(&change_descriptor[..change_descriptor.find('#').unwrap()])?.as_str(),
-        );
-    }
-
-    Ok(wallet_name)
 }
 
 /// return the wallets available in default wallet directory

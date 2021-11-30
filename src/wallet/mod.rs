@@ -4006,3 +4006,32 @@ pub(crate) mod test {
         builder.finish().unwrap();
     }
 }
+
+/// Deterministically generate a unique name given the descriptors defining the wallet
+pub fn wallet_name_from_descriptor<T>(
+    descriptor: T,
+    change_descriptor: Option<T>,
+    network: Network,
+    secp: &SecpCtx,
+) -> Result<String, Error>
+where
+    T: IntoWalletDescriptor,
+{
+    //TODO check descriptors contains only public keys
+    let descriptor = descriptor
+        .into_wallet_descriptor(secp, network)?
+        .0
+        .to_string();
+    let mut wallet_name = get_checksum(&descriptor[..descriptor.find('#').unwrap()])?;
+    if let Some(change_descriptor) = change_descriptor {
+        let change_descriptor = change_descriptor
+            .into_wallet_descriptor(secp, network)?
+            .0
+            .to_string();
+        wallet_name.push_str(
+            get_checksum(&change_descriptor[..change_descriptor.find('#').unwrap()])?.as_str(),
+        );
+    }
+
+    Ok(wallet_name)
+}

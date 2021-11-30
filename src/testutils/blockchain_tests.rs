@@ -609,6 +609,74 @@ macro_rules! bdk_blockchain_tests {
                 assert_eq!(wallet.list_unspent().unwrap().len(), 1, "incorrect number of unspents");
             }
 
+            /// Send two conflicting transactions to the same address twice in a row.
+            /// The coins should only be received once!
+            #[test]
+            fn test_sync_double_receive() {
+                let (wallet, descriptors, mut test_client) = init_single_sig();
+                let receiver_wallet = get_wallet_from_descriptors(&("wpkh(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW)".to_string(), None), &test_client);
+                // need to sync so rpc can start watching
+                receiver_wallet.sync(noop_progress(), None).unwrap();
+
+                test_client.receive(testutils! {
+                    @tx ( (@external descriptors, 0) => 50_000, (@external descriptors, 1) => 25_000 ) (@confirmations 1)
+                });
+
+                wallet.sync(noop_progress(), None).unwrap();
+                assert_eq!(wallet.get_balance().unwrap(), 75_000, "incorrect balance");
+                let target_addr = receiver_wallet.get_address($crate::wallet::AddressIndex::New).unwrap().address;
+
+                let tx1 = {
+                    let mut builder = wallet.build_tx();
+                    builder.add_recipient(target_addr.script_pubkey(), 49_000).enable_rbf();
+                    let (mut psbt, _details) = builder.finish().unwrap();
+                    let finalized = wallet.sign(&mut psbt, Default::default()).unwrap();
+                    assert!(finalized, "Cannot finalize transaction");
+                    psbt.extract_tx()
+                };
+
+                let tx2 = {
+                    let mut builder = wallet.build_tx();
+                    builder.add_recipient(target_addr.script_pubkey(), 49_000).enable_rbf().fee_rate(FeeRate::from_sat_per_vb(5.0));
+                    let (mut psbt, _details) = builder.finish().unwrap();
+                    let finalized = wallet.sign(&mut psbt, Default::default()).unwrap();
+                    assert!(finalized, "Cannot finalize transaction");
+                    psbt.extract_tx()
+                };
+
+                wallet.broadcast(&tx1).unwrap();
+                wallet.broadcast(&tx2).unwrap();
+
+                receiver_wallet.sync(noop_progress(), None).unwrap();
+                assert_eq!(receiver_wallet.get_balance().unwrap(), 49_000, "should have received coins once and only once");
+            }
+
+            #[test]
+            fn test_sync_many_sends_to_a_single_address() {
+                let (wallet, descriptors, mut test_client) = init_single_sig();
+
+                for _ in 0..4 {
+                    // split this up into multiple blocks so rpc doesn't get angry
+                    for _ in 0..20 {
+                        test_client.receive(testutils! {
+                            @tx ( (@external descriptors, 0) => 1_000 )
+                        });
+                    }
+                    test_client.generate(1, None);
+                }
+
+                // add some to the mempool as well.
+                for _ in 0..20 {
+                    test_client.receive(testutils! {
+                        @tx ( (@external descriptors, 0) => 1_000 )
+                    });
+                }
+
+                wallet.sync(noop_progress(), None).unwrap();
+
+                assert_eq!(wallet.get_balance().unwrap(), 100_000);
+            }
+
             #[test]
             fn test_update_confirmation_time_after_generate() {
                 let (wallet, descriptors, mut test_client) = init_single_sig();
