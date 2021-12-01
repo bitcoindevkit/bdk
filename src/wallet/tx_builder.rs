@@ -310,7 +310,7 @@ impl<'a, B, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderConte
     /// 2. `psbt_input`: To know the value.
     /// 3. `satisfaction_weight`: To know how much weight/vbytes the input will add to the transaction for fee calculation.
     ///
-    /// There are several security concerns about adding foregin UTXOs that application
+    /// There are several security concerns about adding foreign UTXOs that application
     /// developers should consider. First, how do you know the value of the input is correct? If a
     /// `non_witness_utxo` is provided in the `psbt_input` then this method implicitly verifies the
     /// value by checking it against the transaction. If only a `witness_utxo` is provided then this

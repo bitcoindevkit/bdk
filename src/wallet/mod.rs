@@ -721,7 +721,7 @@ where
     /// Bump the fee of a transaction previously created with this wallet.
     ///
     /// Returns an error if the transaction is already confirmed or doesn't explicitly signal
-    /// *repalce by fee* (RBF). If the transaction can be fee bumped then it returns a [`TxBuilder`]
+    /// *replace by fee* (RBF). If the transaction can be fee bumped then it returns a [`TxBuilder`]
     /// pre-populated with the inputs and outputs of the original transaction.
     ///
     /// ## Example
@@ -1059,7 +1059,7 @@ where
         &self.secp
     }
 
-    /// Returns the descriptor used to create adddresses for a particular `keychain`.
+    /// Returns the descriptor used to create addresses for a particular `keychain`.
     pub fn get_descriptor_for_keychain(&self, keychain: KeychainKind) -> &ExtendedDescriptor {
         let (descriptor, _) = self._get_descriptor_for_keychain(keychain);
         descriptor

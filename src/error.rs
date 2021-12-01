@@ -115,7 +115,7 @@ pub enum Error {
     Hex(bitcoin::hashes::hex::Error),
     /// Partially signed bitcoin transaction error
     Psbt(bitcoin::util::psbt::Error),
-    /// Partially signed bitcoin transaction parseerror
+    /// Partially signed bitcoin transaction parse error
     PsbtParse(bitcoin::util::psbt::PsbtParseError),
 
     //KeyMismatch(bitcoin::secp256k1::PublicKey, bitcoin::secp256k1::PublicKey),

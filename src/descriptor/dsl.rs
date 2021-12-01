@@ -521,7 +521,7 @@ macro_rules! fragment_internal {
     // three operands it's (X, (X, (X, ()))), etc.
     //
     // To check that the right number of arguments has been passed we can "cast" those tuples to
-    // more convenient structures like `TupleTwo`. If the conversion succedes, the right number of
+    // more convenient structures like `TupleTwo`. If the conversion succeeds, the right number of
     // args was passed. Otherwise the compilation fails entirely.
     ( @t $op:ident ( $( $args:tt )* ) $( $tail:tt )* ) => ({
         ($crate::fragment!( $op ( $( $args )* ) ), $crate::fragment_internal!( @t $( $tail )* ))

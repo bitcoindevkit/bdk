@@ -143,7 +143,7 @@ pub enum SignerError {
     InvalidNonWitnessUtxo,
     /// The `witness_utxo` field of the transaction is required to sign this input
     MissingWitnessUtxo,
-    /// The `witness_script` field of the transaction is requied to sign this input
+    /// The `witness_script` field of the transaction is required to sign this input
     MissingWitnessScript,
     /// The fingerprint and derivation path are missing from the psbt input
     MissingHdKeypath,
@@ -289,7 +289,7 @@ impl Signer for PrivateKey {
         }
 
         // FIXME: use the presence of `witness_utxo` as an indication that we should make a bip143
-        // sig. Does this make sense? Should we add an extra argument to explicitly swith between
+        // sig. Does this make sense? Should we add an extra argument to explicitly switch between
         // these? The original idea was to declare sign() as sign<Ctx: ScriptContex>() and use Ctx,
         // but that violates the rules for trait-objects, so we can't do it.
         let (hash, sighash) = match psbt.inputs[input_index].witness_utxo {

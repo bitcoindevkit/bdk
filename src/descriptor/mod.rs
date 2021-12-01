@@ -667,7 +667,7 @@ mod test {
 
         // make a descriptor out of it
         let desc = crate::descriptor!(wpkh(key)).unwrap();
-        // this should conver the key that supports "any_network" to the right network (testnet)
+        // this should convert the key that supports "any_network" to the right network (testnet)
         let (wallet_desc, _) = desc
             .into_wallet_descriptor(&secp, Network::Testnet)
             .unwrap();

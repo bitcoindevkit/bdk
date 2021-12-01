@@ -372,7 +372,7 @@ impl<D: Database> CoinSelectionAlgorithm<D> for BranchAndBoundCoinSelection {
 
 impl BranchAndBoundCoinSelection {
     // TODO: make this more Rust-onic :)
-    // (And perhpaps refactor with less arguments?)
+    // (And perhaps refactor with less arguments?)
     #[allow(clippy::too_many_arguments)]
     fn bnb(
         &self,
