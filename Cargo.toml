@@ -94,7 +94,7 @@ test-md-docs = ["electrum"]
 lazy_static = "1.4"
 env_logger = "0.7"
 clap = "2.33"
-electrsd = { version= "0.12", features = ["trigger", "bitcoind_22_0"] }
+electrsd = { version= "0.13", features = ["trigger", "bitcoind_22_0"] }
 
 [[example]]
 name = "address_validator"
