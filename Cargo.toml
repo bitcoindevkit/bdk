@@ -59,7 +59,7 @@ compact_filters = ["rocksdb", "socks", "lazy_static", "cc"]
 key-value-db = ["sled"]
 all-keys = ["keys-bip39"]
 keys-bip39 = ["bip39"]
-rpc = ["bitcoincore-rpc"]
+rpc = ["bitcoincore-rpc", "socks"]
 
 # We currently provide mulitple implementations of `Blockchain`, all are
 # blocking except for the `EsploraBlockchain` which can be either async or
