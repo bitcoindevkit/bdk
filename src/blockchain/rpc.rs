@@ -24,6 +24,8 @@
 //!     auth: Auth::Cookie {
 //!         file: "/home/user/.bitcoin/.cookie".into(),
 //!     },
+//!     proxy: None,
+//!     proxy_auth: None,
 //!     network: bdk::bitcoin::Network::Testnet,
 //!     wallet_name: "wallet_name".to_string(),
 //!     skip_blocks: None,
@@ -31,6 +33,7 @@
 //! let blockchain = RpcBlockchain::from_config(&config);
 //! ```
 
+use super::rpc_proxy::ProxyTransport;
 use crate::bitcoin::consensus::deserialize;
 use crate::bitcoin::{Address, Network, OutPoint, Transaction, TxOut, Txid};
 use crate::blockchain::{Blockchain, Capability, ConfigurableBlockchain, Progress};
@@ -60,7 +63,6 @@ pub struct RpcBlockchain {
     capabilities: HashSet<Capability>,
     /// Skip this many blocks of the blockchain at the first rescan, if None the rescan is done from the genesis block
     skip_blocks: Option<u32>,
-
     /// This is a fixed Address used as a hack key to store information on the node
     _storage_address: Address,
 }
@@ -72,6 +74,10 @@ pub struct RpcConfig {
     pub url: String,
     /// The bitcoin node authentication mechanism
     pub auth: Auth,
+    /// A proxy (like Tor) can be used to connect Bitcoin Core RPC
+    pub proxy: Option<String>,
+    /// Authentication for proxy server
+    pub proxy_auth: Option<(String, String)>,
     /// The network we are using (it will be checked the bitcoin node network matches this)
     pub network: Network,
     /// The wallet name in the bitcoin node, consider using [crate::wallet::wallet_name_from_descriptor] for this
@@ -358,7 +364,20 @@ impl ConfigurableBlockchain for RpcBlockchain {
         let wallet_url = format!("{}/wallet/{}", config.url, &wallet_name);
         debug!("connecting to {} auth:{:?}", wallet_url, config.auth);
 
-        let client = Client::new(wallet_url.as_str(), config.auth.clone().into())?;
+        let client = if let Some(proxy) = &config.proxy {
+            let proxy_transport = ProxyTransport::new(
+                proxy,
+                wallet_url.as_str(),
+                config.proxy_auth.clone(),
+                &config.auth,
+            )?;
+            Client::from_jsonrpc(bitcoincore_rpc::jsonrpc::Client::with_transport(
+                proxy_transport,
+            ))
+        } else {
+            Client::new(wallet_url.as_str(), config.auth.clone().into())?
+        };
+
         let loaded_wallets = client.list_wallets()?;
         if loaded_wallets.contains(&wallet_name) {
             debug!("wallet already loaded {:?}", wallet_name);
@@ -437,6 +456,8 @@ crate::bdk_blockchain_tests! {
         let config = RpcConfig {
             url: test_client.bitcoind.rpc_url(),
             auth: Auth::Cookie { file: test_client.bitcoind.params.cookie_file.clone() },
+            proxy: None,
+            proxy_auth: None,
             network: Network::Regtest,
             wallet_name: format!("client-wallet-test-{:?}", std::time::SystemTime::now() ),
             skip_blocks: None,

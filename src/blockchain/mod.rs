@@ -60,6 +60,9 @@ pub use self::rpc::RpcBlockchain;
 #[cfg(feature = "rpc")]
 pub use self::rpc::RpcConfig;
 
+#[cfg(feature = "rpc")]
+pub mod rpc_proxy;
+
 #[cfg(feature = "esplora")]
 #[cfg_attr(docsrs, doc(cfg(feature = "esplora")))]
 pub mod esplora;
