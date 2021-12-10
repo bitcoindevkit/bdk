@@ -1,7 +1,7 @@
 <div align="center">
   <h1>BDK</h1>
 
-  <img src="./static/bdk.svg" width="220" />
+  <img src="./static/bdk.png" width="220" />
 
   <p>
     <strong>A modern, lightweight, descriptor-based wallet library written in Rust!</strong>
