@@ -89,13 +89,13 @@ jobs:
       matrix:
         blockchain:
           - name: electrum
-            features: test-electrum
+            features: test-electrum,verify
           - name: rpc
             features: test-rpc
           - name: esplora
-            features: test-esplora,use-esplora-reqwest
+            features: test-esplora,use-esplora-reqwest,verify
           - name: esplora
-            features: test-esplora,use-esplora-ureq    
+            features: test-esplora,use-esplora-ureq,verify
     steps:
       - name: Checkout
         uses: actions/checkout@v2
