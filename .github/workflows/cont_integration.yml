@@ -10,8 +10,9 @@ jobs:
     strategy:
       matrix:
         rust:
-          - 1.56.0 # STABLE
-          - 1.46.0 # MSRV
+          - version: 1.56.0 # STABLE
+            clippy: true
+          - version: 1.46.0 # MSRV
         features:
           - default
           - minimal
@@ -31,7 +32,7 @@ jobs:
       - name: checkout
         uses: actions/checkout@v2
       - name: Generate cache key
-        run: echo "${{ matrix.rust }} ${{ matrix.features }}" | tee .cache_key
+        run: echo "${{ matrix.rust.version }} ${{ matrix.features }}" | tee .cache_key
       - name: cache
         uses: actions/cache@v2
         with:
@@ -41,16 +42,18 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('.cache_key') }}-${{ hashFiles('**/Cargo.toml','**/Cargo.lock') }}
       - name: Set default toolchain
-        run: rustup default ${{ matrix.rust }}
+        run: rustup default ${{ matrix.rust.version }}
       - name: Set profile
         run: rustup set profile minimal
       - name: Add clippy
+        if: ${{ matrix.rust.clippy }}
         run: rustup component add clippy
       - name: Update toolchain
         run: rustup update
       - name: Build
         run: cargo build --features ${{ matrix.features }} --no-default-features
       - name: Clippy
+        if: ${{ matrix.rust.clippy }}
         run: cargo clippy --all-targets --features ${{ matrix.features }} --no-default-features -- -D warnings
       - name: Test
         run: cargo test --features ${{ matrix.features }} --no-default-features
