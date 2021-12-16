@@ -175,6 +175,7 @@ impl Blockchain for ElectrumBlockchain {
                     let full_details = full_transactions
                         .into_iter()
                         .map(|tx| {
+                            let mut input_index = 0usize;
                             let prev_outputs = tx
                                 .input
                                 .iter()
@@ -189,6 +190,20 @@ impl Blockchain for ElectrumBlockchain {
                                         .output
                                         .get(input.previous_output.vout as usize)
                                         .ok_or_else(electrum_goof)?;
+                                    // Verify this input if requested via feature flag
+                                    #[cfg(feature = "verify")]
+                                    {
+                                        use crate::wallet::verify::VerifyError;
+                                        let serialized_tx = bitcoin::consensus::serialize(&tx);
+                                        bitcoinconsensus::verify(
+                                            txout.script_pubkey.to_bytes().as_ref(),
+                                            txout.value,
+                                            &serialized_tx,
+                                            input_index,
+                                        )
+                                        .map_err(|e| VerifyError::from(e))?;
+                                    }
+                                    input_index += 1;
                                     Ok(Some(txout.clone()))
                                 })
                                 .collect::<Result<Vec<_>, Error>>()?;
