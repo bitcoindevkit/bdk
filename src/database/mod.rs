@@ -348,7 +348,6 @@ pub mod test {
                 timestamp: 123456,
                 height: 1000,
             }),
-            verified: true,
         };
 
         tree.set_tx(&tx_details).unwrap();

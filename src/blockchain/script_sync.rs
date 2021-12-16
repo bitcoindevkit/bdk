@@ -214,7 +214,6 @@ impl<'a, D: BatchDatabase> TxReq<'a, D> {
                     // we're going to fill this in later
                     confirmation_time: None,
                     fee: Some(fee),
-                    verified: false,
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;

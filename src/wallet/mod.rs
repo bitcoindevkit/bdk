@@ -712,7 +712,6 @@ where
             received,
             sent,
             fee: Some(fee_amount),
-            verified: true,
         };
 
         Ok((psbt, transaction_details))

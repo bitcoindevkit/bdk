@@ -230,7 +230,6 @@ mod test {
                 timestamp: 12345678,
                 height: 5000,
             }),
-            verified: true,
         })
         .unwrap();
 
