@@ -931,4 +931,27 @@ pub mod test {
             "L2wTu6hQrnDMiFNWA5na6jB12ErGQqtXwqpSL7aWquJaZG8Ai3ch"
         );
     }
+
+    #[test]
+    fn test_keys_wif_network() {
+        // test mainnet wif
+        let generated_xprv: GeneratedKey<_, miniscript::Segwitv0> =
+            bip32::ExtendedPrivKey::generate_with_entropy_default(TEST_ENTROPY).unwrap();
+        let xkey = generated_xprv.into_extended_key().unwrap();
+
+        let network = Network::Bitcoin;
+        let xprv = xkey.into_xprv(network).unwrap();
+        let wif = PrivateKey::from_wif(&xprv.private_key.to_wif()).unwrap();
+        assert_eq!(wif.network, network);
+
+        // test testnet wif
+        let generated_xprv: GeneratedKey<_, miniscript::Segwitv0> =
+            bip32::ExtendedPrivKey::generate_with_entropy_default(TEST_ENTROPY).unwrap();
+        let xkey = generated_xprv.into_extended_key().unwrap();
+
+        let network = Network::Testnet;
+        let xprv = xkey.into_xprv(network).unwrap();
+        let wif = PrivateKey::from_wif(&xprv.private_key.to_wif()).unwrap();
+        assert_eq!(wif.network, network);
+    }
 }
