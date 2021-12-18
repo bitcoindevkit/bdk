@@ -955,4 +955,20 @@ pub mod test {
         let wif = PrivateKey::from_wif(&xprv.private_key.to_wif()).unwrap();
         assert_eq!(wif.network, network);
     }
+
+    #[cfg(feature = "keys-bip39")]
+    #[test]
+    fn test_keys_wif_network_bip39() {
+        let xkey: ExtendedKey = bip39::Mnemonic::parse_in(
+            bip39::Language::English,
+            "jelly crash boy whisper mouse ecology tuna soccer memory million news short",
+        )
+        .unwrap()
+        .into_extended_key()
+        .unwrap();
+        let xprv = xkey.into_xprv(Network::Testnet).unwrap();
+        let wif = PrivateKey::from_wif(&xprv.private_key.to_wif()).unwrap();
+
+        assert_eq!(wif.network, Network::Testnet);
+    }
 }
