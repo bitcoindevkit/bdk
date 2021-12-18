@@ -44,14 +44,14 @@ jobs:
           repository: bitcoindevkit/bitcoindevkit.org
           ref: master
       - name: Create directories
-        run: mkdir -p ./static/docs-rs/bdk/nightly
+        run: mkdir -p ./docs/.vuepress/public/docs-rs/bdk/nightly
       - name: Remove old latest
-        run: rm -rf ./static/docs-rs/bdk/nightly/latest
+        run: rm -rf ./docs/.vuepress/public/docs-rs/bdk/nightly/latest
       - name: Download built docs
         uses: actions/download-artifact@v1
         with:
           name: built-docs
-          path: ./static/docs-rs/bdk/nightly/latest
+          path: ./docs/.vuepress/public/docs-rs/bdk/nightly/latest
       - name: Configure git
         run: git config user.email "github-actions@github.com" && git config user.name "github-actions"
       - name: Commit
