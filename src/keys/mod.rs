@@ -319,6 +319,7 @@ impl<Ctx: ScriptContext> ExtendedKey<Ctx> {
         match self {
             ExtendedKey::Private((mut xprv, _)) => {
                 xprv.network = network;
+                xprv.private_key.network = network;
                 Some(xprv)
             }
             ExtendedKey::Public(_) => None,
