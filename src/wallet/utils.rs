@@ -28,8 +28,7 @@ pub(crate) const BLOCKS_TIMELOCK_THRESHOLD: u32 = 500000000;
 
 /// Trait to check if a value is below the dust limit
 // we implement this trait to make sure we don't mess up the comparison with off-by-one like a <
-// instead of a <= etc. The constant value for the dust limit is not public on purpose, to
-// encourage the usage of this trait.
+// instead of a <= etc.
 pub trait IsDust {
     /// Check whether or not a value is below dust limit
     fn is_dust(&self, script: &Script) -> bool;
