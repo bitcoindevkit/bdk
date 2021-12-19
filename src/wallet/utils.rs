@@ -9,12 +9,10 @@
 // You may not use this file except in accordance with one or both of these
 // licenses.
 
+use bitcoin::blockdata::script::Script;
 use bitcoin::secp256k1::{All, Secp256k1};
 
 use miniscript::{MiniscriptKey, Satisfier, ToPublicKey};
-
-// De-facto standard "dust limit" (even though it should change based on the output type)
-pub const DUST_LIMIT_SATOSHI: u64 = 546;
 
 // MSB of the nSequence. If set there's no consensus-constraint, so it must be disabled when
 // spending using CSV in order to enforce CSV rules
@@ -34,12 +32,12 @@ pub(crate) const BLOCKS_TIMELOCK_THRESHOLD: u32 = 500000000;
 // encourage the usage of this trait.
 pub trait IsDust {
     /// Check whether or not a value is below dust limit
-    fn is_dust(&self) -> bool;
+    fn is_dust(&self, script: &Script) -> bool;
 }
 
 impl IsDust for u64 {
-    fn is_dust(&self) -> bool {
-        *self <= DUST_LIMIT_SATOSHI
+    fn is_dust(&self, script: &Script) -> bool {
+        *self <= script.dust_value().as_sat()
     }
 }
 
