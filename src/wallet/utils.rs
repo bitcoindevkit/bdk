@@ -26,7 +26,9 @@ pub(crate) const SEQUENCE_LOCKTIME_MASK: u32 = 0x0000FFFF;
 // Threshold for nLockTime to be considered a block-height-based timelock rather than time-based
 pub(crate) const BLOCKS_TIMELOCK_THRESHOLD: u32 = 500000000;
 
-/// Trait to check if a value is below the dust limit
+/// Trait to check if a value is below the dust limit.
+/// We are performing dust value calculation for a given script public key using rust-bitcoin to
+/// keep it compatible with network dust rate
 // we implement this trait to make sure we don't mess up the comparison with off-by-one like a <
 // instead of a <= etc.
 pub trait IsDust {
