@@ -319,6 +319,7 @@ impl<Ctx: ScriptContext> ExtendedKey<Ctx> {
         match self {
             ExtendedKey::Private((mut xprv, _)) => {
                 xprv.network = network;
+                xprv.private_key.network = network;
                 Some(xprv)
             }
             ExtendedKey::Public(_) => None,
@@ -930,5 +931,44 @@ pub mod test {
             generated_wif.to_string(),
             "L2wTu6hQrnDMiFNWA5na6jB12ErGQqtXwqpSL7aWquJaZG8Ai3ch"
         );
+    }
+
+    #[test]
+    fn test_keys_wif_network() {
+        // test mainnet wif
+        let generated_xprv: GeneratedKey<_, miniscript::Segwitv0> =
+            bip32::ExtendedPrivKey::generate_with_entropy_default(TEST_ENTROPY).unwrap();
+        let xkey = generated_xprv.into_extended_key().unwrap();
+
+        let network = Network::Bitcoin;
+        let xprv = xkey.into_xprv(network).unwrap();
+        let wif = PrivateKey::from_wif(&xprv.private_key.to_wif()).unwrap();
+        assert_eq!(wif.network, network);
+
+        // test testnet wif
+        let generated_xprv: GeneratedKey<_, miniscript::Segwitv0> =
+            bip32::ExtendedPrivKey::generate_with_entropy_default(TEST_ENTROPY).unwrap();
+        let xkey = generated_xprv.into_extended_key().unwrap();
+
+        let network = Network::Testnet;
+        let xprv = xkey.into_xprv(network).unwrap();
+        let wif = PrivateKey::from_wif(&xprv.private_key.to_wif()).unwrap();
+        assert_eq!(wif.network, network);
+    }
+
+    #[cfg(feature = "keys-bip39")]
+    #[test]
+    fn test_keys_wif_network_bip39() {
+        let xkey: ExtendedKey = bip39::Mnemonic::parse_in(
+            bip39::Language::English,
+            "jelly crash boy whisper mouse ecology tuna soccer memory million news short",
+        )
+        .unwrap()
+        .into_extended_key()
+        .unwrap();
+        let xprv = xkey.into_xprv(Network::Testnet).unwrap();
+        let wif = PrivateKey::from_wif(&xprv.private_key.to_wif()).unwrap();
+
+        assert_eq!(wif.network, Network::Testnet);
     }
 }
