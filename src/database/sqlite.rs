@@ -29,7 +29,7 @@ static MIGRATIONS: &[&str] = &[
     "CREATE INDEX idx_txid_vout ON utxos(txid, vout);",
     "CREATE TABLE transactions (txid BLOB, raw_tx BLOB);",
     "CREATE INDEX idx_txid ON transactions(txid);",
-    "CREATE TABLE transaction_details (txid BLOB, timestamp INTEGER, received INTEGER, sent INTEGER, fee INTEGER, height INTEGER, verified INTEGER DEFAULT 0);",
+    "CREATE TABLE transaction_details (txid BLOB, timestamp INTEGER, received INTEGER, sent INTEGER, fee INTEGER, height INTEGER);",
     "CREATE INDEX idx_txdetails_txid ON transaction_details(txid);",
     "CREATE TABLE last_derivation_indices (keychain TEXT, value INTEGER);",
     "CREATE UNIQUE INDEX idx_indices_keychain ON last_derivation_indices(keychain);",
@@ -127,7 +127,7 @@ impl SqliteDatabase {
 
         let txid: &[u8] = &transaction.txid;
 
-        let mut statement = self.connection.prepare_cached("INSERT INTO transaction_details (txid, timestamp, received, sent, fee, height, verified) VALUES (:txid, :timestamp, :received, :sent, :fee, :height, :verified)")?;
+        let mut statement = self.connection.prepare_cached("INSERT INTO transaction_details (txid, timestamp, received, sent, fee, height) VALUES (:txid, :timestamp, :received, :sent, :fee, :height)")?;
 
         statement.execute(named_params! {
             ":txid": txid,
@@ -136,7 +136,6 @@ impl SqliteDatabase {
             ":sent": transaction.sent,
             ":fee": transaction.fee,
             ":height": height,
-            ":verified": transaction.verified
         })?;
 
         Ok(self.connection.last_insert_rowid())
@@ -153,7 +152,7 @@ impl SqliteDatabase {
 
         let txid: &[u8] = &transaction.txid;
 
-        let mut statement = self.connection.prepare_cached("UPDATE transaction_details SET timestamp=:timestamp, received=:received, sent=:sent, fee=:fee, height=:height, verified=:verified WHERE txid=:txid")?;
+        let mut statement = self.connection.prepare_cached("UPDATE transaction_details SET timestamp=:timestamp, received=:received, sent=:sent, fee=:fee, height=:height WHERE txid=:txid")?;
 
         statement.execute(named_params! {
             ":txid": txid,
@@ -162,7 +161,6 @@ impl SqliteDatabase {
             ":sent": transaction.sent,
             ":fee": transaction.fee,
             ":height": height,
-            ":verified": transaction.verified,
         })?;
 
         Ok(())
@@ -367,7 +365,7 @@ impl SqliteDatabase {
     }
 
     fn select_transaction_details_with_raw(&self) -> Result<Vec<TransactionDetails>, Error> {
-        let mut statement = self.connection.prepare_cached("SELECT transaction_details.txid, transaction_details.timestamp, transaction_details.received, transaction_details.sent, transaction_details.fee, transaction_details.height, transaction_details.verified, transactions.raw_tx FROM transaction_details, transactions WHERE transaction_details.txid = transactions.txid")?;
+        let mut statement = self.connection.prepare_cached("SELECT transaction_details.txid, transaction_details.timestamp, transaction_details.received, transaction_details.sent, transaction_details.fee, transaction_details.height, transactions.raw_tx FROM transaction_details, transactions WHERE transaction_details.txid = transactions.txid")?;
         let mut transaction_details: Vec<TransactionDetails> = vec![];
         let mut rows = statement.query([])?;
         while let Some(row) = rows.next()? {
@@ -378,7 +376,6 @@ impl SqliteDatabase {
             let sent: u64 = row.get(3)?;
             let fee: Option<u64> = row.get(4)?;
             let height: Option<u32> = row.get(5)?;
-            let verified: bool = row.get(6)?;
             let raw_tx: Option<Vec<u8>> = row.get(7)?;
             let tx: Option<Transaction> = match raw_tx {
                 Some(raw_tx) => {
@@ -400,7 +397,6 @@ impl SqliteDatabase {
                 sent,
                 fee,
                 confirmation_time,
-                verified,
             });
         }
         Ok(transaction_details)
@@ -408,7 +404,7 @@ impl SqliteDatabase {
 
     fn select_transaction_details(&self) -> Result<Vec<TransactionDetails>, Error> {
         let mut statement = self.connection.prepare_cached(
-            "SELECT txid, timestamp, received, sent, fee, height, verified FROM transaction_details",
+            "SELECT txid, timestamp, received, sent, fee, height FROM transaction_details",
         )?;
         let mut transaction_details: Vec<TransactionDetails> = vec![];
         let mut rows = statement.query([])?;
@@ -420,7 +416,6 @@ impl SqliteDatabase {
             let sent: u64 = row.get(3)?;
             let fee: Option<u64> = row.get(4)?;
             let height: Option<u32> = row.get(5)?;
-            let verified: bool = row.get(6)?;
 
             let confirmation_time = match (height, timestamp) {
                 (Some(height), Some(timestamp)) => Some(BlockTime { height, timestamp }),
@@ -434,7 +429,6 @@ impl SqliteDatabase {
                 sent,
                 fee,
                 confirmation_time,
-                verified,
             });
         }
         Ok(transaction_details)
@@ -444,7 +438,7 @@ impl SqliteDatabase {
         &self,
         txid: &[u8],
     ) -> Result<Option<TransactionDetails>, Error> {
-        let mut statement = self.connection.prepare_cached("SELECT transaction_details.timestamp, transaction_details.received, transaction_details.sent, transaction_details.fee, transaction_details.height, transaction_details.verified, transactions.raw_tx FROM transaction_details, transactions WHERE transaction_details.txid=transactions.txid AND transaction_details.txid=:txid")?;
+        let mut statement = self.connection.prepare_cached("SELECT transaction_details.timestamp, transaction_details.received, transaction_details.sent, transaction_details.fee, transaction_details.height, transactions.raw_tx FROM transaction_details, transactions WHERE transaction_details.txid=transactions.txid AND transaction_details.txid=:txid")?;
         let mut rows = statement.query(named_params! { ":txid": txid })?;
 
         match rows.next()? {
@@ -454,9 +448,8 @@ impl SqliteDatabase {
                 let sent: u64 = row.get(2)?;
                 let fee: Option<u64> = row.get(3)?;
                 let height: Option<u32> = row.get(4)?;
-                let verified: bool = row.get(5)?;
 
-                let raw_tx: Option<Vec<u8>> = row.get(6)?;
+                let raw_tx: Option<Vec<u8>> = row.get(5)?;
                 let tx: Option<Transaction> = match raw_tx {
                     Some(raw_tx) => {
                         let tx: Transaction = deserialize(&raw_tx)?;
@@ -477,7 +470,6 @@ impl SqliteDatabase {
                     sent,
                     fee,
                     confirmation_time,
-                    verified,
                 }))
             }
             None => Ok(None),
