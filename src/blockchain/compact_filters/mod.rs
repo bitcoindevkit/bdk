@@ -207,7 +207,6 @@ impl CompactFiltersBlockchain {
                 received: incoming,
                 sent: outgoing,
                 confirmation_time: BlockTime::new(height, timestamp),
-                verified: height.is_some(),
                 fee: Some(inputs_sum.saturating_sub(outputs_sum)),
             };
 
