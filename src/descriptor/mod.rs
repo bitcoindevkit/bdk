@@ -30,7 +30,7 @@ use miniscript::{DescriptorTrait, ForEachKey, TranslatePk};
 use crate::descriptor::policy::BuildSatisfaction;
 
 pub mod checksum;
-pub(crate) mod derived;
+pub mod derived;
 #[doc(hidden)]
 pub mod dsl;
 pub mod error;

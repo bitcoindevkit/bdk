@@ -119,7 +119,7 @@ impl<'s> ToPublicKey for DerivedDescriptorKey<'s> {
     }
 }
 
-pub(crate) trait AsDerived {
+pub trait AsDerived {
     // Derive a descriptor and transform all of its keys to `DerivedDescriptorKey`
     fn as_derived<'s>(&self, index: u32, secp: &'s SecpCtx)
         -> Descriptor<DerivedDescriptorKey<'s>>;
