@@ -189,7 +189,7 @@ impl Blockchain for EsploraBlockchain {
         Ok(())
     }
 
-    fn get_height(&self) -> Result<u32, Error> {
+    fn get_height(&self) -> Result<u64, Error> {
         Ok(self.url_client._get_height()?)
     }
 
@@ -266,7 +266,7 @@ impl UrlClient {
         }
     }
 
-    fn _get_height(&self) -> Result<u32, EsploraError> {
+    fn _get_height(&self) -> Result<u64, EsploraError> {
         let resp = self
             .agent
             .get(&format!("{}/blocks/tip/height", self.url))

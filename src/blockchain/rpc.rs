@@ -59,7 +59,7 @@ pub struct RpcBlockchain {
     /// Blockchain capabilities, cached here at startup
     capabilities: HashSet<Capability>,
     /// Skip this many blocks of the blockchain at the first rescan, if None the rescan is done from the genesis block
-    skip_blocks: Option<u32>,
+    skip_blocks: Option<u64>,
 
     /// This is a fixed Address used as a hack key to store information on the node
     _storage_address: Address,
@@ -77,7 +77,7 @@ pub struct RpcConfig {
     /// The wallet name in the bitcoin node, consider using [crate::wallet::wallet_name_from_descriptor] for this
     pub wallet_name: String,
     /// Skip this many blocks of the blockchain at the first rescan, if None the rescan is done from the genesis block
-    pub skip_blocks: Option<u32>,
+    pub skip_blocks: Option<u64>,
 }
 
 /// This struct is equivalent to [bitcoincore_rpc::Auth] but it implements [serde::Serialize]
@@ -114,11 +114,11 @@ impl From<Auth> for RpcAuth {
 }
 
 impl RpcBlockchain {
-    fn get_node_synced_height(&self) -> Result<u32, Error> {
+    fn get_node_synced_height(&self) -> Result<u64, Error> {
         let info = self.client.get_address_info(&self._storage_address)?;
         if let Some(GetAddressInfoResultLabel::Simple(label)) = info.labels.first() {
             Ok(label
-                .parse::<u32>()
+                .parse::<u64>()
                 .unwrap_or_else(|_| self.skip_blocks.unwrap_or(0)))
         } else {
             Ok(self.skip_blocks.unwrap_or(0))
@@ -127,7 +127,7 @@ impl RpcBlockchain {
 
     /// Set the synced height in the core node by using a label of a fixed address so that
     /// another client with the same descriptor doesn't rescan the blockchain
-    fn set_node_synced_height(&self, height: u32) -> Result<(), Error> {
+    fn set_node_synced_height(&self, height: u64) -> Result<(), Error> {
         Ok(self
             .client
             .set_label(&self._storage_address, &height.to_string())?)
@@ -332,8 +332,8 @@ impl Blockchain for RpcBlockchain {
         Ok(self.client.send_raw_transaction(tx).map(|_| ())?)
     }
 
-    fn get_height(&self) -> Result<u32, Error> {
-        Ok(self.client.get_blockchain_info().map(|i| i.blocks as u32)?)
+    fn get_height(&self) -> Result<u64, Error> {
+        Ok(self.client.get_blockchain_info().map(|i| i.blocks as u64)?)
     }
 
     fn estimate_fee(&self, target: usize) -> Result<FeeRate, Error> {

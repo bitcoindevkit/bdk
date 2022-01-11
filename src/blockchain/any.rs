@@ -155,7 +155,7 @@ impl Blockchain for AnyBlockchain {
         maybe_await!(impl_inner_method!(self, broadcast, tx))
     }
 
-    fn get_height(&self) -> Result<u32, Error> {
+    fn get_height(&self) -> Result<u64, Error> {
         maybe_await!(impl_inner_method!(self, get_height))
     }
     fn estimate_fee(&self, target: usize) -> Result<FeeRate, Error> {

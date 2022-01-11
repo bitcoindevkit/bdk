@@ -1556,7 +1556,7 @@ where
 
         let sync_time = SyncTime {
             block_time: BlockTime {
-                height: maybe_await!(self.client.get_height())?,
+                height: maybe_await!(self.client.get_height())? as u32,
                 timestamp: time::get_timestamp(),
             },
         };

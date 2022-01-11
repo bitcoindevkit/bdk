@@ -444,8 +444,8 @@ impl Blockchain for CompactFiltersBlockchain {
         Ok(())
     }
 
-    fn get_height(&self) -> Result<u32, Error> {
-        Ok(self.headers.get_height()? as u32)
+    fn get_height(&self) -> Result<u64, Error> {
+        Ok(self.headers.get_height()? as u64)
     }
 
     fn estimate_fee(&self, _target: usize) -> Result<FeeRate, Error> {

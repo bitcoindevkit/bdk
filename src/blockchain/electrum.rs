@@ -214,13 +214,13 @@ impl Blockchain for ElectrumBlockchain {
         Ok(self.client.transaction_broadcast(tx).map(|_| ())?)
     }
 
-    fn get_height(&self) -> Result<u32, Error> {
+    fn get_height(&self) -> Result<u64, Error> {
         // TODO: unsubscribe when added to the client, or is there a better call to use here?
 
         Ok(self
             .client
             .block_headers_subscribe()
-            .map(|data| data.height as u32)?)
+            .map(|data| data.height as u64)?)
     }
 
     fn estimate_fee(&self, target: usize) -> Result<FeeRate, Error> {

@@ -138,7 +138,7 @@ pub trait Blockchain {
     fn broadcast(&self, tx: &Transaction) -> Result<(), Error>;
 
     /// Return the current height
-    fn get_height(&self) -> Result<u32, Error>;
+    fn get_height(&self) -> Result<u64, Error>;
     /// Estimate the fee rate required to confirm a transaction in a given `target` of blocks
     fn estimate_fee(&self, target: usize) -> Result<FeeRate, Error>;
 }
@@ -246,7 +246,7 @@ impl<T: Blockchain> Blockchain for Arc<T> {
         maybe_await!(self.deref().broadcast(tx))
     }
 
-    fn get_height(&self) -> Result<u32, Error> {
+    fn get_height(&self) -> Result<u64, Error> {
         maybe_await!(self.deref().get_height())
     }
     fn estimate_fee(&self, target: usize) -> Result<FeeRate, Error> {
