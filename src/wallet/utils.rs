@@ -38,7 +38,7 @@ pub trait IsDust {
 
 impl IsDust for u64 {
     fn is_dust(&self, script: &Script) -> bool {
-        *self <= script.dust_value().as_sat()
+        *self < script.dust_value().as_sat()
     }
 }
 
@@ -140,10 +140,29 @@ pub(crate) type SecpCtx = Secp256k1<All>;
 #[cfg(test)]
 mod test {
     use super::{
-        check_nlocktime, check_nsequence_rbf, BLOCKS_TIMELOCK_THRESHOLD,
+        check_nlocktime, check_nsequence_rbf, IsDust, BLOCKS_TIMELOCK_THRESHOLD,
         SEQUENCE_LOCKTIME_TYPE_FLAG,
     };
+    use crate::bitcoin::Address;
     use crate::types::FeeRate;
+    use std::str::FromStr;
+
+    #[test]
+    fn test_is_dust() {
+        let script_p2pkh = Address::from_str("1GNgwA8JfG7Kc8akJ8opdNWJUihqUztfPe")
+            .unwrap()
+            .script_pubkey();
+        assert!(script_p2pkh.is_p2pkh());
+        assert!(545.is_dust(&script_p2pkh));
+        assert!(!546.is_dust(&script_p2pkh));
+
+        let script_p2wpkh = Address::from_str("bc1qxlh2mnc0yqwas76gqq665qkggee5m98t8yskd8")
+            .unwrap()
+            .script_pubkey();
+        assert!(script_p2wpkh.is_v0_p2wpkh());
+        assert!(293.is_dust(&script_p2wpkh));
+        assert!(!294.is_dust(&script_p2wpkh));
+    }
 
     #[test]
     fn test_fee_from_btc_per_kb() {
