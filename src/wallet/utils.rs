@@ -9,12 +9,10 @@
 // You may not use this file except in accordance with one or both of these
 // licenses.
 
+use bitcoin::blockdata::script::Script;
 use bitcoin::secp256k1::{All, Secp256k1};
 
 use miniscript::{MiniscriptKey, Satisfier, ToPublicKey};
-
-// De-facto standard "dust limit" (even though it should change based on the output type)
-pub const DUST_LIMIT_SATOSHI: u64 = 546;
 
 // MSB of the nSequence. If set there's no consensus-constraint, so it must be disabled when
 // spending using CSV in order to enforce CSV rules
@@ -28,18 +26,19 @@ pub(crate) const SEQUENCE_LOCKTIME_MASK: u32 = 0x0000FFFF;
 // Threshold for nLockTime to be considered a block-height-based timelock rather than time-based
 pub(crate) const BLOCKS_TIMELOCK_THRESHOLD: u32 = 500000000;
 
-/// Trait to check if a value is below the dust limit
+/// Trait to check if a value is below the dust limit.
+/// We are performing dust value calculation for a given script public key using rust-bitcoin to
+/// keep it compatible with network dust rate
 // we implement this trait to make sure we don't mess up the comparison with off-by-one like a <
-// instead of a <= etc. The constant value for the dust limit is not public on purpose, to
-// encourage the usage of this trait.
+// instead of a <= etc.
 pub trait IsDust {
     /// Check whether or not a value is below dust limit
-    fn is_dust(&self) -> bool;
+    fn is_dust(&self, script: &Script) -> bool;
 }
 
 impl IsDust for u64 {
-    fn is_dust(&self) -> bool {
-        *self <= DUST_LIMIT_SATOSHI
+    fn is_dust(&self, script: &Script) -> bool {
+        *self < script.dust_value().as_sat()
     }
 }
 
@@ -141,10 +140,29 @@ pub(crate) type SecpCtx = Secp256k1<All>;
 #[cfg(test)]
 mod test {
     use super::{
-        check_nlocktime, check_nsequence_rbf, BLOCKS_TIMELOCK_THRESHOLD,
+        check_nlocktime, check_nsequence_rbf, IsDust, BLOCKS_TIMELOCK_THRESHOLD,
         SEQUENCE_LOCKTIME_TYPE_FLAG,
     };
+    use crate::bitcoin::Address;
     use crate::types::FeeRate;
+    use std::str::FromStr;
+
+    #[test]
+    fn test_is_dust() {
+        let script_p2pkh = Address::from_str("1GNgwA8JfG7Kc8akJ8opdNWJUihqUztfPe")
+            .unwrap()
+            .script_pubkey();
+        assert!(script_p2pkh.is_p2pkh());
+        assert!(545.is_dust(&script_p2pkh));
+        assert!(!546.is_dust(&script_p2pkh));
+
+        let script_p2wpkh = Address::from_str("bc1qxlh2mnc0yqwas76gqq665qkggee5m98t8yskd8")
+            .unwrap()
+            .script_pubkey();
+        assert!(script_p2wpkh.is_v0_p2wpkh());
+        assert!(293.is_dust(&script_p2wpkh));
+        assert!(!294.is_dust(&script_p2wpkh));
+    }
 
     #[test]
     fn test_fee_from_btc_per_kb() {

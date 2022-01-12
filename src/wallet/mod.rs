@@ -53,7 +53,7 @@ use address_validator::AddressValidator;
 use coin_selection::DefaultCoinSelectionAlgorithm;
 use signer::{SignOptions, Signer, SignerOrdering, SignersContainer};
 use tx_builder::{BumpFee, CreateTx, FeePolicy, TxBuilder, TxParams};
-use utils::{check_nlocktime, check_nsequence_rbf, After, Older, SecpCtx, DUST_LIMIT_SATOSHI};
+use utils::{check_nlocktime, check_nsequence_rbf, After, Older, SecpCtx};
 
 use crate::blockchain::{Blockchain, Progress};
 use crate::database::memory::MemoryDatabase;
@@ -601,7 +601,7 @@ where
         let recipients = params.recipients.iter().map(|(r, v)| (r, *v));
 
         for (index, (script_pubkey, value)) in recipients.enumerate() {
-            if value.is_dust() && !script_pubkey.is_provably_unspendable() {
+            if value.is_dust(script_pubkey) && !script_pubkey.is_provably_unspendable() {
                 return Err(Error::OutputBelowDustLimit(index));
             }
 
@@ -677,9 +677,9 @@ where
 
         if tx.output.is_empty() {
             if params.drain_to.is_some() {
-                if drain_val.is_dust() {
+                if drain_val.is_dust(&drain_output.script_pubkey) {
                     return Err(Error::InsufficientFunds {
-                        needed: DUST_LIMIT_SATOSHI,
+                        needed: drain_output.script_pubkey.dust_value().as_sat(),
                         available: drain_val,
                     });
                 }
@@ -688,7 +688,7 @@ where
             }
         }
 
-        if drain_val.is_dust() {
+        if drain_val.is_dust(&drain_output.script_pubkey) {
             fee_amount += drain_val;
         } else {
             drain_output.value = drain_val;
@@ -3424,7 +3424,7 @@ pub(crate) mod test {
             .unwrap();
 
         let mut builder = wallet.build_fee_bump(txid).unwrap();
-        builder.fee_rate(FeeRate::from_sat_per_vb(140.0));
+        builder.fee_rate(FeeRate::from_sat_per_vb(141.0));
         let (psbt, details) = builder.finish().unwrap();
 
         assert_eq!(

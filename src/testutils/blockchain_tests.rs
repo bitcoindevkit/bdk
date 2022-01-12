@@ -843,7 +843,7 @@ macro_rules! bdk_blockchain_tests {
                 assert_eq!(wallet.get_balance().unwrap(), details.received, "incorrect received after send");
 
                 let mut builder = wallet.build_fee_bump(details.txid).unwrap();
-                builder.fee_rate(FeeRate::from_sat_per_vb(5.0));
+                builder.fee_rate(FeeRate::from_sat_per_vb(5.1));
                 let (mut new_psbt, new_details) = builder.finish().unwrap();
                 let finalized = wallet.sign(&mut new_psbt, Default::default()).unwrap();
                 assert!(finalized, "Cannot finalize transaction");
