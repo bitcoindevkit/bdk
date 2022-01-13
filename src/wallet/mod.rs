@@ -1059,6 +1059,11 @@ where
         &self.secp
     }
 
+    /// Checks if the wallet has internal descriptor
+    pub fn has_internal_descriptor(&self) -> bool {
+        self.change_descriptor.is_some()
+    }
+
     /// Returns the descriptor used to create addresses for a particular `keychain`.
     pub fn get_descriptor_for_keychain(&self, keychain: KeychainKind) -> &ExtendedDescriptor {
         let (descriptor, _) = self._get_descriptor_for_keychain(keychain);
@@ -4004,6 +4009,17 @@ pub(crate) mod test {
         let mut builder = wallet.build_tx();
         builder.add_recipient(addr.script_pubkey(), 45_000);
         builder.finish().unwrap();
+    }
+
+    #[test]
+    fn test_has_internal_descriptor() {
+        let db = MemoryDatabase::new();
+        let wallet = Wallet::new_offline("wpkh(tpubEBr4i6yk5nf5DAaJpsi9N2pPYBeJ7fZ5Z9rmN4977iYLCGco1VyjB9tvvuvYtfZzjD5A8igzgw3HeWeeKFmanHYqksqZXYXGsw5zjnj7KM9/*)",
+                                         None, Network::Testnet, db).unwrap();
+
+        assert_eq!(
+            wallet.has_internal_descriptor(), false
+        );
     }
 }
 
