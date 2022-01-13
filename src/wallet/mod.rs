@@ -237,7 +237,7 @@ impl<B, D> Wallet<B, D>
 where
     D: BatchDatabase,
 {
-    // Return a newly derived address using the external descriptor
+    // Return a newly derived address for the specified `keychain`.
     fn get_new_address(&self, keychain: KeychainKind) -> Result<AddressInfo, Error> {
         let incremented_index = self.fetch_and_increment_index(keychain)?;
 
@@ -254,8 +254,8 @@ where
             .map_err(|_| Error::ScriptDoesntHaveAddressForm)
     }
 
-    // Return the the last previously derived address if it has not been used in a received
-    // transaction. Otherwise return a new address using [`Wallet::get_new_address`].
+    // Return the the last previously derived address for `keychain` if it has not been used in a
+    // received transaction. Otherwise return a new address using [`Wallet::get_new_address`].
     fn get_unused_address(&self, keychain: KeychainKind) -> Result<AddressInfo, Error> {
         let current_index = self.fetch_index(keychain)?;
 
@@ -285,7 +285,7 @@ where
         }
     }
 
-    // Return derived address for the external descriptor at a specific index
+    // Return derived address for the descriptor of given [`KeychainKind`] at a specific index
     fn peek_address(&self, index: u32, keychain: KeychainKind) -> Result<AddressInfo, Error> {
         self.get_descriptor_for_keychain(keychain)
             .as_derived(index, &self.secp)
@@ -294,7 +294,7 @@ where
             .map_err(|_| Error::ScriptDoesntHaveAddressForm)
     }
 
-    // Return derived address for the external descriptor at a specific index and reset current
+    // Return derived address for `keychain` at a specific index and reset current
     // address index
     fn reset_address(&self, index: u32, keychain: KeychainKind) -> Result<AddressInfo, Error> {
         self.set_index(keychain, index)?;
