@@ -44,7 +44,7 @@
 //! interact with the bitcoin P2P network.
 //!
 //! ```toml
-//! bdk = "0.15.0"
+//! bdk = "0.16.0"
 //! ```
 #![cfg_attr(
     feature = "electrum",
