@@ -166,24 +166,6 @@ impl Blockchain for EsploraBlockchain {
                         .request()
                         .map(|txid| {
                             let tx = tx_index.get(txid).expect("must be in index");
-                            // Verify this transaction if requested via feature flag
-                            #[cfg(feature = "verify")]
-                            {
-                                use crate::wallet::verify::VerifyError;
-                                let prev_outs = tx.previous_outputs();
-                                let tx_bytes = serialize(&tx.to_tx());
-                                for (index, output) in prev_outs.iter().enumerate() {
-                                    if let Some(output) = output {
-                                        bitcoinconsensus::verify(
-                                            output.script_pubkey.to_bytes().as_ref(),
-                                            output.value,
-                                            &tx_bytes,
-                                            index,
-                                        )
-                                        .map_err(|e| VerifyError::from(e))?;
-                                    }
-                                }
-                            }
                             Ok((tx.previous_outputs(), tx.to_tx()))
                         })
                         .collect::<Result<_, Error>>()?;
