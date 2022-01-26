@@ -16,61 +16,17 @@
 //!
 //! ## Example
 //!
-//! In this example both `wallet_electrum` and `wallet_esplora` have the same type of
-//! `Wallet<AnyBlockchain, MemoryDatabase>`. This means that they could both, for instance, be
-//! assigned to a struct member.
-//!
-//! ```no_run
-//! # use bitcoin::Network;
-//! # use bdk::blockchain::*;
-//! # use bdk::database::MemoryDatabase;
-//! # use bdk::Wallet;
-//! # #[cfg(feature = "electrum")]
-//! # {
-//! let electrum_blockchain = ElectrumBlockchain::from(electrum_client::Client::new("...")?);
-//! let wallet_electrum: Wallet<AnyBlockchain, _> = Wallet::new(
-//!     "...",
-//!     None,
-//!     Network::Testnet,
-//!     MemoryDatabase::default(),
-//!     electrum_blockchain.into(),
-//! )?;
-//! # }
-//!
-//! # #[cfg(all(feature = "esplora", feature = "ureq"))]
-//! # {
-//! let esplora_blockchain = EsploraBlockchain::new("...", 20);
-//! let wallet_esplora: Wallet<AnyBlockchain, _> = Wallet::new(
-//!     "...",
-//!     None,
-//!     Network::Testnet,
-//!     MemoryDatabase::default(),
-//!     esplora_blockchain.into(),
-//! )?;
-//! # }
-//!
-//! # Ok::<(), bdk::Error>(())
-//! ```
-//!
 //! When paired with the use of [`ConfigurableBlockchain`], it allows creating wallets with any
 //! blockchain type supported using a single line of code:
 //!
 //! ```no_run
 //! # use bitcoin::Network;
 //! # use bdk::blockchain::*;
-//! # use bdk::database::MemoryDatabase;
-//! # use bdk::Wallet;
 //! # #[cfg(all(feature = "esplora", feature = "ureq"))]
 //! # {
 //! let config = serde_json::from_str("...")?;
 //! let blockchain = AnyBlockchain::from_config(&config)?;
-//! let wallet = Wallet::new(
-//!     "...",
-//!     None,
-//!     Network::Testnet,
-//!     MemoryDatabase::default(),
-//!     blockchain,
-//! )?;
+//! let height = blockchain.get_height();
 //! # }
 //! # Ok::<(), bdk::Error>(())
 //! ```
@@ -133,21 +89,6 @@ impl Blockchain for AnyBlockchain {
         maybe_await!(impl_inner_method!(self, get_capabilities))
     }
 
-    fn setup<D: BatchDatabase, P: 'static + Progress>(
-        &self,
-        database: &mut D,
-        progress_update: P,
-    ) -> Result<(), Error> {
-        maybe_await!(impl_inner_method!(self, setup, database, progress_update))
-    }
-    fn sync<D: BatchDatabase, P: 'static + Progress>(
-        &self,
-        database: &mut D,
-        progress_update: P,
-    ) -> Result<(), Error> {
-        maybe_await!(impl_inner_method!(self, sync, database, progress_update))
-    }
-
     fn get_tx(&self, txid: &Txid) -> Result<Option<Transaction>, Error> {
         maybe_await!(impl_inner_method!(self, get_tx, txid))
     }
@@ -155,11 +96,42 @@ impl Blockchain for AnyBlockchain {
         maybe_await!(impl_inner_method!(self, broadcast, tx))
     }
 
+    fn estimate_fee(&self, target: usize) -> Result<FeeRate, Error> {
+        maybe_await!(impl_inner_method!(self, estimate_fee, target))
+    }
+}
+
+impl GetHeight for AnyBlockchain {
     fn get_height(&self) -> Result<u32, Error> {
         maybe_await!(impl_inner_method!(self, get_height))
     }
-    fn estimate_fee(&self, target: usize) -> Result<FeeRate, Error> {
-        maybe_await!(impl_inner_method!(self, estimate_fee, target))
+}
+
+impl WalletSync for AnyBlockchain {
+    fn wallet_sync<D: BatchDatabase, P: Progress>(
+        &self,
+        database: &mut D,
+        progress_update: P,
+    ) -> Result<(), Error> {
+        maybe_await!(impl_inner_method!(
+            self,
+            wallet_sync,
+            database,
+            progress_update
+        ))
+    }
+
+    fn wallet_setup<D: BatchDatabase, P: Progress>(
+        &self,
+        database: &mut D,
+        progress_update: P,
+    ) -> Result<(), Error> {
+        maybe_await!(impl_inner_method!(
+            self,
+            wallet_setup,
+            database,
+            progress_update
+        ))
     }
 }
 

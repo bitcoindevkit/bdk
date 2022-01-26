@@ -79,7 +79,7 @@ impl<T: DescriptorTemplate> IntoWalletDescriptor for T {
 ///
 /// let key =
 ///     bitcoin::PrivateKey::from_wif("cTc4vURSzdx6QE6KVynWGomDbLaA75dNALMNyfjh3p8DRRar84Um")?;
-/// let wallet = Wallet::new_offline(
+/// let wallet = Wallet::new(
 ///     P2Pkh(key),
 ///     None,
 ///     Network::Testnet,
@@ -113,7 +113,7 @@ impl<K: IntoDescriptorKey<Legacy>> DescriptorTemplate for P2Pkh<K> {
 ///
 /// let key =
 ///     bitcoin::PrivateKey::from_wif("cTc4vURSzdx6QE6KVynWGomDbLaA75dNALMNyfjh3p8DRRar84Um")?;
-/// let wallet = Wallet::new_offline(
+/// let wallet = Wallet::new(
 ///     P2Wpkh_P2Sh(key),
 ///     None,
 ///     Network::Testnet,
@@ -148,7 +148,7 @@ impl<K: IntoDescriptorKey<Segwitv0>> DescriptorTemplate for P2Wpkh_P2Sh<K> {
 ///
 /// let key =
 ///     bitcoin::PrivateKey::from_wif("cTc4vURSzdx6QE6KVynWGomDbLaA75dNALMNyfjh3p8DRRar84Um")?;
-/// let wallet = Wallet::new_offline(
+/// let wallet = Wallet::new(
 ///     P2Wpkh(key),
 ///     None,
 ///     Network::Testnet,
@@ -186,7 +186,7 @@ impl<K: IntoDescriptorKey<Segwitv0>> DescriptorTemplate for P2Wpkh<K> {
 /// use bdk::template::Bip44;
 ///
 /// let key = bitcoin::util::bip32::ExtendedPrivKey::from_str("tprv8ZgxMBicQKsPeZRHk4rTG6orPS2CRNFX3njhUXx5vj9qGog5ZMH4uGReDWN5kCkY3jmWEtWause41CDvBRXD1shKknAMKxT99o9qUTRVC6m")?;
-/// let wallet = Wallet::new_offline(
+/// let wallet = Wallet::new(
 ///     Bip44(key.clone(), KeychainKind::External),
 ///     Some(Bip44(key, KeychainKind::Internal)),
 ///     Network::Testnet,
@@ -226,7 +226,7 @@ impl<K: DerivableKey<Legacy>> DescriptorTemplate for Bip44<K> {
 ///
 /// let key = bitcoin::util::bip32::ExtendedPubKey::from_str("tpubDDDzQ31JkZB7VxUr9bjvBivDdqoFLrDPyLWtLapArAi51ftfmCb2DPxwLQzX65iNcXz1DGaVvyvo6JQ6rTU73r2gqdEo8uov9QKRb7nKCSU")?;
 /// let fingerprint = bitcoin::util::bip32::Fingerprint::from_str("c55b303f")?;
-/// let wallet = Wallet::new_offline(
+/// let wallet = Wallet::new(
 ///     Bip44Public(key.clone(), fingerprint, KeychainKind::External),
 ///     Some(Bip44Public(key, fingerprint, KeychainKind::Internal)),
 ///     Network::Testnet,
@@ -262,7 +262,7 @@ impl<K: DerivableKey<Legacy>> DescriptorTemplate for Bip44Public<K> {
 /// use bdk::template::Bip49;
 ///
 /// let key = bitcoin::util::bip32::ExtendedPrivKey::from_str("tprv8ZgxMBicQKsPeZRHk4rTG6orPS2CRNFX3njhUXx5vj9qGog5ZMH4uGReDWN5kCkY3jmWEtWause41CDvBRXD1shKknAMKxT99o9qUTRVC6m")?;
-/// let wallet = Wallet::new_offline(
+/// let wallet = Wallet::new(
 ///     Bip49(key.clone(), KeychainKind::External),
 ///     Some(Bip49(key, KeychainKind::Internal)),
 ///     Network::Testnet,
@@ -302,7 +302,7 @@ impl<K: DerivableKey<Segwitv0>> DescriptorTemplate for Bip49<K> {
 ///
 /// let key = bitcoin::util::bip32::ExtendedPubKey::from_str("tpubDC49r947KGK52X5rBWS4BLs5m9SRY3pYHnvRrm7HcybZ3BfdEsGFyzCMzayi1u58eT82ZeyFZwH7DD6Q83E3fM9CpfMtmnTygnLfP59jL9L")?;
 /// let fingerprint = bitcoin::util::bip32::Fingerprint::from_str("c55b303f")?;
-/// let wallet = Wallet::new_offline(
+/// let wallet = Wallet::new(
 ///     Bip49Public(key.clone(), fingerprint, KeychainKind::External),
 ///     Some(Bip49Public(key, fingerprint, KeychainKind::Internal)),
 ///     Network::Testnet,
@@ -338,7 +338,7 @@ impl<K: DerivableKey<Segwitv0>> DescriptorTemplate for Bip49Public<K> {
 /// use bdk::template::Bip84;
 ///
 /// let key = bitcoin::util::bip32::ExtendedPrivKey::from_str("tprv8ZgxMBicQKsPeZRHk4rTG6orPS2CRNFX3njhUXx5vj9qGog5ZMH4uGReDWN5kCkY3jmWEtWause41CDvBRXD1shKknAMKxT99o9qUTRVC6m")?;
-/// let wallet = Wallet::new_offline(
+/// let wallet = Wallet::new(
 ///     Bip84(key.clone(), KeychainKind::External),
 ///     Some(Bip84(key, KeychainKind::Internal)),
 ///     Network::Testnet,
@@ -378,7 +378,7 @@ impl<K: DerivableKey<Segwitv0>> DescriptorTemplate for Bip84<K> {
 ///
 /// let key = bitcoin::util::bip32::ExtendedPubKey::from_str("tpubDC2Qwo2TFsaNC4ju8nrUJ9mqVT3eSgdmy1yPqhgkjwmke3PRXutNGRYAUo6RCHTcVQaDR3ohNU9we59brGHuEKPvH1ags2nevW5opEE9Z5Q")?;
 /// let fingerprint = bitcoin::util::bip32::Fingerprint::from_str("c55b303f")?;
-/// let wallet = Wallet::new_offline(
+/// let wallet = Wallet::new(
 ///     Bip84Public(key.clone(), fingerprint, KeychainKind::External),
 ///     Some(Bip84Public(key, fingerprint, KeychainKind::Internal)),
 ///     Network::Testnet,

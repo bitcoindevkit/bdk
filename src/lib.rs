@@ -60,15 +60,15 @@ use bdk::electrum_client::Client;
 
 fn main() -> Result<(), bdk::Error> {
     let client = Client::new("ssl://electrum.blockstream.info:60002")?;
+    let blockchain = ElectrumBlockchain::from(client);
     let wallet = Wallet::new(
         "wpkh([c258d2e4/84h/1h/0h]tpubDDYkZojQFQjht8Tm4jsS3iuEmKjTiEGjG6KnuFNKKJb5A6ZUCUZKdvLdSDWofKi4ToRCwb9poe1XdqfUnP4jaJjCB2Zwv11ZLgSbnZSNecE/0/*)",
         Some("wpkh([c258d2e4/84h/1h/0h]tpubDDYkZojQFQjht8Tm4jsS3iuEmKjTiEGjG6KnuFNKKJb5A6ZUCUZKdvLdSDWofKi4ToRCwb9poe1XdqfUnP4jaJjCB2Zwv11ZLgSbnZSNecE/1/*)"),
         bitcoin::Network::Testnet,
         MemoryDatabase::default(),
-        ElectrumBlockchain::from(client)
     )?;
 
-    wallet.sync(noop_progress(), None)?;
+    wallet.sync(&blockchain, noop_progress(), None)?;
 
     println!("Descriptor balance: {} SAT", wallet.get_balance()?);
 
@@ -87,7 +87,7 @@ fn main() -> Result<(), bdk::Error> {
 //! use bdk::wallet::AddressIndex::New;
 //!
 //! fn main() -> Result<(), bdk::Error> {
-//! let wallet = Wallet::new_offline(
+//! let wallet = Wallet::new(
 //!         "wpkh([c258d2e4/84h/1h/0h]tpubDDYkZojQFQjht8Tm4jsS3iuEmKjTiEGjG6KnuFNKKJb5A6ZUCUZKdvLdSDWofKi4ToRCwb9poe1XdqfUnP4jaJjCB2Zwv11ZLgSbnZSNecE/0/*)",
 //!         Some("wpkh([c258d2e4/84h/1h/0h]tpubDDYkZojQFQjht8Tm4jsS3iuEmKjTiEGjG6KnuFNKKJb5A6ZUCUZKdvLdSDWofKi4ToRCwb9poe1XdqfUnP4jaJjCB2Zwv11ZLgSbnZSNecE/1/*)"),
 //!         bitcoin::Network::Testnet,
@@ -123,10 +123,10 @@ fn main() -> Result<(), bdk::Error> {
         Some("wpkh([c258d2e4/84h/1h/0h]tpubDDYkZojQFQjht8Tm4jsS3iuEmKjTiEGjG6KnuFNKKJb5A6ZUCUZKdvLdSDWofKi4ToRCwb9poe1XdqfUnP4jaJjCB2Zwv11ZLgSbnZSNecE/1/*)"),
         bitcoin::Network::Testnet,
         MemoryDatabase::default(),
-        ElectrumBlockchain::from(client)
     )?;
+    let blockchain = ElectrumBlockchain::from(client);
 
-    wallet.sync(noop_progress(), None)?;
+    wallet.sync(&blockchain, noop_progress(), None)?;
 
     let send_to = wallet.get_address(New)?;
     let (psbt, details) = {
@@ -160,7 +160,7 @@ fn main() -> Result<(), bdk::Error> {
 //! use bdk::database::MemoryDatabase;
 //!
 //! fn main() -> Result<(), bdk::Error> {
-//!     let wallet = Wallet::new_offline(
+//!     let wallet = Wallet::new(
 //!         "wpkh([c258d2e4/84h/1h/0h]tprv8griRPhA7342zfRyB6CqeKF8CJDXYu5pgnj1cjL1u2ngKcJha5jjTRimG82ABzJQ4MQe71CV54xfn25BbhCNfEGGJZnxvCDQCd6JkbvxW6h/0/*)",
 //!         Some("wpkh([c258d2e4/84h/1h/0h]tprv8griRPhA7342zfRyB6CqeKF8CJDXYu5pgnj1cjL1u2ngKcJha5jjTRimG82ABzJQ4MQe71CV54xfn25BbhCNfEGGJZnxvCDQCd6JkbvxW6h/1/*)"),
 //!         bitcoin::Network::Testnet,

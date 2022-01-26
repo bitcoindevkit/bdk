@@ -33,7 +33,9 @@
 
 use crate::bitcoin::consensus::deserialize;
 use crate::bitcoin::{Address, Network, OutPoint, Transaction, TxOut, Txid};
-use crate::blockchain::{Blockchain, Capability, ConfigurableBlockchain, Progress};
+use crate::blockchain::{
+    Blockchain, Capability, ConfigurableBlockchain, GetHeight, Progress, WalletSync,
+};
 use crate::database::{BatchDatabase, DatabaseUtils};
 use crate::{BlockTime, Error, FeeRate, KeychainKind, LocalUtxo, TransactionDetails};
 use bitcoincore_rpc::json::{
@@ -139,7 +141,34 @@ impl Blockchain for RpcBlockchain {
         self.capabilities.clone()
     }
 
-    fn setup<D: BatchDatabase, P: 'static + Progress>(
+    fn get_tx(&self, txid: &Txid) -> Result<Option<Transaction>, Error> {
+        Ok(Some(self.client.get_raw_transaction(txid, None)?))
+    }
+
+    fn broadcast(&self, tx: &Transaction) -> Result<(), Error> {
+        Ok(self.client.send_raw_transaction(tx).map(|_| ())?)
+    }
+
+    fn estimate_fee(&self, target: usize) -> Result<FeeRate, Error> {
+        let sat_per_kb = self
+            .client
+            .estimate_smart_fee(target as u16, None)?
+            .fee_rate
+            .ok_or(Error::FeeRateUnavailable)?
+            .as_sat() as f64;
+
+        Ok(FeeRate::from_sat_per_vb((sat_per_kb / 1000f64) as f32))
+    }
+}
+
+impl GetHeight for RpcBlockchain {
+    fn get_height(&self) -> Result<u32, Error> {
+        Ok(self.client.get_blockchain_info().map(|i| i.blocks as u32)?)
+    }
+}
+
+impl WalletSync for RpcBlockchain {
+    fn wallet_setup<D: BatchDatabase, P: Progress>(
         &self,
         database: &mut D,
         progress_update: P,
@@ -187,10 +216,10 @@ impl Blockchain for RpcBlockchain {
             }
         }
 
-        self.sync(database, progress_update)
+        self.wallet_sync(database, progress_update)
     }
 
-    fn sync<D: BatchDatabase, P: 'static + Progress>(
+    fn wallet_sync<D: BatchDatabase, P: Progress>(
         &self,
         db: &mut D,
         _progress_update: P,
@@ -322,29 +351,6 @@ impl Blockchain for RpcBlockchain {
         }
 
         Ok(())
-    }
-
-    fn get_tx(&self, txid: &Txid) -> Result<Option<Transaction>, Error> {
-        Ok(Some(self.client.get_raw_transaction(txid, None)?))
-    }
-
-    fn broadcast(&self, tx: &Transaction) -> Result<(), Error> {
-        Ok(self.client.send_raw_transaction(tx).map(|_| ())?)
-    }
-
-    fn get_height(&self) -> Result<u32, Error> {
-        Ok(self.client.get_blockchain_info().map(|i| i.blocks as u32)?)
-    }
-
-    fn estimate_fee(&self, target: usize) -> Result<FeeRate, Error> {
-        let sat_per_kb = self
-            .client
-            .estimate_smart_fee(target as u16, None)?
-            .fee_rate
-            .ok_or(Error::FeeRateUnavailable)?
-            .as_sat() as f64;
-
-        Ok(FeeRate::from_sat_per_vb((sat_per_kb / 1000f64) as f32))
     }
 }
 

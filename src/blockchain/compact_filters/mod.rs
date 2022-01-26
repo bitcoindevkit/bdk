@@ -67,7 +67,7 @@ mod peer;
 mod store;
 mod sync;
 
-use super::{Blockchain, Capability, ConfigurableBlockchain, Progress};
+use super::{Blockchain, Capability, ConfigurableBlockchain, GetHeight, Progress, WalletSync};
 use crate::database::{BatchDatabase, BatchOperations, DatabaseUtils};
 use crate::error::Error;
 use crate::types::{KeychainKind, LocalUtxo, TransactionDetails};
@@ -226,8 +226,33 @@ impl Blockchain for CompactFiltersBlockchain {
         vec![Capability::FullHistory].into_iter().collect()
     }
 
+    fn get_tx(&self, txid: &Txid) -> Result<Option<Transaction>, Error> {
+        Ok(self.peers[0]
+            .get_mempool()
+            .get_tx(&Inventory::Transaction(*txid)))
+    }
+
+    fn broadcast(&self, tx: &Transaction) -> Result<(), Error> {
+        self.peers[0].broadcast_tx(tx.clone())?;
+
+        Ok(())
+    }
+
+    fn estimate_fee(&self, _target: usize) -> Result<FeeRate, Error> {
+        // TODO
+        Ok(FeeRate::default())
+    }
+}
+
+impl GetHeight for CompactFiltersBlockchain {
+    fn get_height(&self) -> Result<u32, Error> {
+        Ok(self.headers.get_height()? as u32)
+    }
+}
+
+impl WalletSync for CompactFiltersBlockchain {
     #[allow(clippy::mutex_atomic)] // Mutex is easier to understand than a CAS loop.
-    fn setup<D: BatchDatabase, P: 'static + Progress>(
+    fn wallet_setup<D: BatchDatabase, P: Progress>(
         &self,
         database: &mut D,
         progress_update: P,
@@ -430,27 +455,6 @@ impl Blockchain for CompactFiltersBlockchain {
             .update(100.0, Some("Done".into()))?;
 
         Ok(())
-    }
-
-    fn get_tx(&self, txid: &Txid) -> Result<Option<Transaction>, Error> {
-        Ok(self.peers[0]
-            .get_mempool()
-            .get_tx(&Inventory::Transaction(*txid)))
-    }
-
-    fn broadcast(&self, tx: &Transaction) -> Result<(), Error> {
-        self.peers[0].broadcast_tx(tx.clone())?;
-
-        Ok(())
-    }
-
-    fn get_height(&self) -> Result<u32, Error> {
-        Ok(self.headers.get_height()? as u32)
-    }
-
-    fn estimate_fee(&self, _target: usize) -> Result<FeeRate, Error> {
-        // TODO
-        Ok(FeeRate::default())
     }
 }
 
