@@ -55,7 +55,7 @@ use signer::{SignOptions, Signer, SignerOrdering, SignersContainer};
 use tx_builder::{BumpFee, CreateTx, FeePolicy, TxBuilder, TxParams};
 use utils::{check_nlocktime, check_nsequence_rbf, After, Older, SecpCtx};
 
-use crate::blockchain::{Blockchain, Progress};
+use crate::blockchain::{GetHeight, Progress, WalletSync};
 use crate::database::memory::MemoryDatabase;
 use crate::database::{BatchDatabase, BatchOperations, DatabaseUtils, SyncTime};
 use crate::descriptor::derived::AsDerived;
@@ -75,16 +75,17 @@ const CACHE_ADDR_BATCH_SIZE: u32 = 100;
 
 /// A Bitcoin wallet
 ///
-/// A wallet takes descriptors, a [`database`](trait@crate::database::Database) and a
-/// [`blockchain`](trait@crate::blockchain::Blockchain) and implements the basic functions that a Bitcoin wallets
-/// needs to operate, like [generating addresses](Wallet::get_address), [returning the balance](Wallet::get_balance),
-/// [creating transactions](Wallet::build_tx), etc.
+/// The `Wallet` struct acts as a way of coherently interfacing with output descriptors and related transactions.
+/// Its main components are:
 ///
-/// A wallet can be either "online" if the [`blockchain`](crate::blockchain) type provided
-/// implements [`Blockchain`], or "offline" if it is the unit type `()`. Offline wallets only expose
-/// methods that don't need any interaction with the blockchain to work.
+/// 1. output *descriptors* from which it can derive addresses.
+/// 2. A [`Database`] where it tracks transactions and utxos related to the descriptors.
+/// 3. [`Signer`]s that can contribute signatures to addresses instantiated from the descriptors.
+///
+/// [`Database`]: crate::database::Database
+/// [`Signer`]: crate::signer::Signer
 #[derive(Debug)]
-pub struct Wallet<B, D> {
+pub struct Wallet<D> {
     descriptor: ExtendedDescriptor,
     change_descriptor: Option<ExtendedDescriptor>,
 
@@ -95,86 +96,9 @@ pub struct Wallet<B, D> {
 
     network: Network,
 
-    current_height: Option<u32>,
-
-    client: B,
     database: RefCell<D>,
 
     secp: SecpCtx,
-}
-
-impl<D> Wallet<(), D>
-where
-    D: BatchDatabase,
-{
-    /// Create a new "offline" wallet
-    pub fn new_offline<E: IntoWalletDescriptor>(
-        descriptor: E,
-        change_descriptor: Option<E>,
-        network: Network,
-        database: D,
-    ) -> Result<Self, Error> {
-        Self::_new(descriptor, change_descriptor, network, database, (), None)
-    }
-}
-
-impl<B, D> Wallet<B, D>
-where
-    D: BatchDatabase,
-{
-    fn _new<E: IntoWalletDescriptor>(
-        descriptor: E,
-        change_descriptor: Option<E>,
-        network: Network,
-        mut database: D,
-        client: B,
-        current_height: Option<u32>,
-    ) -> Result<Self, Error> {
-        let secp = Secp256k1::new();
-
-        let (descriptor, keymap) = into_wallet_descriptor_checked(descriptor, &secp, network)?;
-        database.check_descriptor_checksum(
-            KeychainKind::External,
-            get_checksum(&descriptor.to_string())?.as_bytes(),
-        )?;
-        let signers = Arc::new(SignersContainer::from(keymap));
-        let (change_descriptor, change_signers) = match change_descriptor {
-            Some(desc) => {
-                let (change_descriptor, change_keymap) =
-                    into_wallet_descriptor_checked(desc, &secp, network)?;
-                database.check_descriptor_checksum(
-                    KeychainKind::Internal,
-                    get_checksum(&change_descriptor.to_string())?.as_bytes(),
-                )?;
-
-                let change_signers = Arc::new(SignersContainer::from(change_keymap));
-                // if !parsed.same_structure(descriptor.as_ref()) {
-                //     return Err(Error::DifferentDescriptorStructure);
-                // }
-
-                (Some(change_descriptor), change_signers)
-            }
-            None => (None, Arc::new(SignersContainer::new())),
-        };
-
-        Ok(Wallet {
-            descriptor,
-            change_descriptor,
-            signers,
-            change_signers,
-            address_validators: Vec::new(),
-            network,
-            current_height,
-            client,
-            database: RefCell::new(database),
-            secp,
-        })
-    }
-
-    /// Get the Bitcoin network the wallet is using.
-    pub fn network(&self) -> Network {
-        self.network
-    }
 }
 
 /// The address index selection strategy to use to derived an address from the wallet's external
@@ -232,11 +156,63 @@ impl fmt::Display for AddressInfo {
     }
 }
 
-// offline actions, always available
-impl<B, D> Wallet<B, D>
+impl<D> Wallet<D>
 where
     D: BatchDatabase,
 {
+    /// Create a wallet.
+    ///
+    /// The only way this can fail is if the descriptors passed in do not match the checksums in `database`.
+    pub fn new<E: IntoWalletDescriptor>(
+        descriptor: E,
+        change_descriptor: Option<E>,
+        network: Network,
+        mut database: D,
+    ) -> Result<Self, Error> {
+        let secp = Secp256k1::new();
+
+        let (descriptor, keymap) = into_wallet_descriptor_checked(descriptor, &secp, network)?;
+        database.check_descriptor_checksum(
+            KeychainKind::External,
+            get_checksum(&descriptor.to_string())?.as_bytes(),
+        )?;
+        let signers = Arc::new(SignersContainer::from(keymap));
+        let (change_descriptor, change_signers) = match change_descriptor {
+            Some(desc) => {
+                let (change_descriptor, change_keymap) =
+                    into_wallet_descriptor_checked(desc, &secp, network)?;
+                database.check_descriptor_checksum(
+                    KeychainKind::Internal,
+                    get_checksum(&change_descriptor.to_string())?.as_bytes(),
+                )?;
+
+                let change_signers = Arc::new(SignersContainer::from(change_keymap));
+                // if !parsed.same_structure(descriptor.as_ref()) {
+                //     return Err(Error::DifferentDescriptorStructure);
+                // }
+
+                (Some(change_descriptor), change_signers)
+            }
+            None => (None, Arc::new(SignersContainer::new())),
+        };
+
+        Ok(Wallet {
+            descriptor,
+            change_descriptor,
+            signers,
+            change_signers,
+            address_validators: Vec::new(),
+            network,
+            database: RefCell::new(database),
+            secp,
+        })
+    }
+
+    /// Get the Bitcoin network the wallet is using.
+    pub fn network(&self) -> Network {
+        self.network
+    }
+
     // Return a newly derived address using the external descriptor
     fn get_new_address(&self) -> Result<AddressInfo, Error> {
         let incremented_index = self.fetch_and_increment_index(KeychainKind::External)?;
@@ -422,7 +398,7 @@ where
     /// ```
     ///
     /// [`TxBuilder`]: crate::TxBuilder
-    pub fn build_tx(&self) -> TxBuilder<'_, B, D, DefaultCoinSelectionAlgorithm, CreateTx> {
+    pub fn build_tx(&self) -> TxBuilder<'_, D, DefaultCoinSelectionAlgorithm, CreateTx> {
         TxBuilder {
             wallet: self,
             params: TxParams::default(),
@@ -762,7 +738,7 @@ where
     pub fn build_fee_bump(
         &self,
         txid: Txid,
-    ) -> Result<TxBuilder<'_, B, D, DefaultCoinSelectionAlgorithm, BumpFee>, Error> {
+    ) -> Result<TxBuilder<'_, D, DefaultCoinSelectionAlgorithm, BumpFee>, Error> {
         let mut details = match self.database.borrow().get_tx(&txid, true)? {
             None => return Err(Error::TransactionNotFound),
             Some(tx) if tx.transaction.is_none() => return Err(Error::TransactionNotFound),
@@ -993,7 +969,11 @@ where
                 .borrow()
                 .get_tx(&input.previous_output.txid, false)?
                 .map(|tx| tx.confirmation_time.map(|c| c.height).unwrap_or(u32::MAX));
-            let current_height = sign_options.assume_height.or(self.current_height);
+            let last_sync_height = self
+                .database()
+                .get_sync_time()?
+                .map(|sync_time| sync_time.block_time.height);
+            let current_height = sign_options.assume_height.or(last_sync_height);
 
             debug!(
                 "Input #{} - {}, using `create_height` = {:?}, `current_height` = {:?}",
@@ -1453,35 +1433,15 @@ where
     }
 }
 
-impl<B, D> Wallet<B, D>
+impl<D> Wallet<D>
 where
-    B: Blockchain,
     D: BatchDatabase,
 {
-    /// Create a new "online" wallet
-    #[maybe_async]
-    pub fn new<E: IntoWalletDescriptor>(
-        descriptor: E,
-        change_descriptor: Option<E>,
-        network: Network,
-        database: D,
-        client: B,
-    ) -> Result<Self, Error> {
-        let current_height = Some(maybe_await!(client.get_height())? as u32);
-        Self::_new(
-            descriptor,
-            change_descriptor,
-            network,
-            database,
-            client,
-            current_height,
-        )
-    }
-
     /// Sync the internal database with the blockchain
     #[maybe_async]
-    pub fn sync<P: 'static + Progress>(
+    pub fn sync<P: 'static + Progress, B: WalletSync + GetHeight>(
         &self,
+        blockchain: &B,
         progress_update: P,
         max_address_param: Option<u32>,
     ) -> Result<(), Error> {
@@ -1527,18 +1487,18 @@ where
         // TODO: what if i generate an address first and cache some addresses?
         // TODO: we should sync if generating an address triggers a new batch to be stored
         if run_setup {
-            maybe_await!(self
-                .client
-                .setup(self.database.borrow_mut().deref_mut(), progress_update,))?;
+            maybe_await!(
+                blockchain.wallet_setup(self.database.borrow_mut().deref_mut(), progress_update,)
+            )?;
         } else {
-            maybe_await!(self
-                .client
-                .sync(self.database.borrow_mut().deref_mut(), progress_update,))?;
+            maybe_await!(
+                blockchain.wallet_sync(self.database.borrow_mut().deref_mut(), progress_update,)
+            )?;
         }
 
         let sync_time = SyncTime {
             block_time: BlockTime {
-                height: maybe_await!(self.client.get_height())?,
+                height: maybe_await!(blockchain.get_height())?,
                 timestamp: time::get_timestamp(),
             },
         };
@@ -1547,31 +1507,18 @@ where
 
         Ok(())
     }
-
-    /// Return a reference to the internal blockchain client
-    pub fn client(&self) -> &B {
-        &self.client
-    }
-
-    /// Broadcast a transaction to the network
-    #[maybe_async]
-    pub fn broadcast(&self, tx: &Transaction) -> Result<Txid, Error> {
-        maybe_await!(self.client.broadcast(tx))?;
-
-        Ok(tx.txid())
-    }
 }
 
 /// Return a fake wallet that appears to be funded for testing.
 pub fn get_funded_wallet(
     descriptor: &str,
 ) -> (
-    Wallet<(), MemoryDatabase>,
+    Wallet<MemoryDatabase>,
     (String, Option<String>),
     bitcoin::Txid,
 ) {
     let descriptors = testutils!(@descriptors (descriptor));
-    let wallet = Wallet::new_offline(
+    let wallet = Wallet::new(
         &descriptors.0,
         None,
         Network::Regtest,
@@ -1621,7 +1568,7 @@ pub(crate) mod test {
     #[test]
     fn test_cache_addresses_fixed() {
         let db = MemoryDatabase::new();
-        let wallet = Wallet::new_offline(
+        let wallet = Wallet::new(
             "wpkh(L5EZftvrYaSudiozVRzTqLcHLNDoVn7H5HSfM9BAN6tMJX8oTWz6)",
             None,
             Network::Testnet,
@@ -1655,7 +1602,7 @@ pub(crate) mod test {
     #[test]
     fn test_cache_addresses() {
         let db = MemoryDatabase::new();
-        let wallet = Wallet::new_offline("wpkh(tpubEBr4i6yk5nf5DAaJpsi9N2pPYBeJ7fZ5Z9rmN4977iYLCGco1VyjB9tvvuvYtfZzjD5A8igzgw3HeWeeKFmanHYqksqZXYXGsw5zjnj7KM9/*)", None, Network::Testnet, db).unwrap();
+        let wallet = Wallet::new("wpkh(tpubEBr4i6yk5nf5DAaJpsi9N2pPYBeJ7fZ5Z9rmN4977iYLCGco1VyjB9tvvuvYtfZzjD5A8igzgw3HeWeeKFmanHYqksqZXYXGsw5zjnj7KM9/*)", None, Network::Testnet, db).unwrap();
 
         assert_eq!(
             wallet.get_address(New).unwrap().to_string(),
@@ -1683,7 +1630,7 @@ pub(crate) mod test {
     #[test]
     fn test_cache_addresses_refill() {
         let db = MemoryDatabase::new();
-        let wallet = Wallet::new_offline("wpkh(tpubEBr4i6yk5nf5DAaJpsi9N2pPYBeJ7fZ5Z9rmN4977iYLCGco1VyjB9tvvuvYtfZzjD5A8igzgw3HeWeeKFmanHYqksqZXYXGsw5zjnj7KM9/*)", None, Network::Testnet, db).unwrap();
+        let wallet = Wallet::new("wpkh(tpubEBr4i6yk5nf5DAaJpsi9N2pPYBeJ7fZ5Z9rmN4977iYLCGco1VyjB9tvvuvYtfZzjD5A8igzgw3HeWeeKFmanHYqksqZXYXGsw5zjnj7KM9/*)", None, Network::Testnet, db).unwrap();
 
         assert_eq!(
             wallet.get_address(New).unwrap().to_string(),
@@ -3781,7 +3728,7 @@ pub(crate) mod test {
     #[test]
     fn test_unused_address() {
         let db = MemoryDatabase::new();
-        let wallet = Wallet::new_offline("wpkh(tpubEBr4i6yk5nf5DAaJpsi9N2pPYBeJ7fZ5Z9rmN4977iYLCGco1VyjB9tvvuvYtfZzjD5A8igzgw3HeWeeKFmanHYqksqZXYXGsw5zjnj7KM9/*)",
+        let wallet = Wallet::new("wpkh(tpubEBr4i6yk5nf5DAaJpsi9N2pPYBeJ7fZ5Z9rmN4977iYLCGco1VyjB9tvvuvYtfZzjD5A8igzgw3HeWeeKFmanHYqksqZXYXGsw5zjnj7KM9/*)",
                                          None, Network::Testnet, db).unwrap();
 
         assert_eq!(
@@ -3798,7 +3745,7 @@ pub(crate) mod test {
     fn test_next_unused_address() {
         let descriptor = "wpkh(tpubEBr4i6yk5nf5DAaJpsi9N2pPYBeJ7fZ5Z9rmN4977iYLCGco1VyjB9tvvuvYtfZzjD5A8igzgw3HeWeeKFmanHYqksqZXYXGsw5zjnj7KM9/*)";
         let descriptors = testutils!(@descriptors (descriptor));
-        let wallet = Wallet::new_offline(
+        let wallet = Wallet::new(
             &descriptors.0,
             None,
             Network::Testnet,
@@ -3827,7 +3774,7 @@ pub(crate) mod test {
     #[test]
     fn test_peek_address_at_index() {
         let db = MemoryDatabase::new();
-        let wallet = Wallet::new_offline("wpkh(tpubEBr4i6yk5nf5DAaJpsi9N2pPYBeJ7fZ5Z9rmN4977iYLCGco1VyjB9tvvuvYtfZzjD5A8igzgw3HeWeeKFmanHYqksqZXYXGsw5zjnj7KM9/*)",
+        let wallet = Wallet::new("wpkh(tpubEBr4i6yk5nf5DAaJpsi9N2pPYBeJ7fZ5Z9rmN4977iYLCGco1VyjB9tvvuvYtfZzjD5A8igzgw3HeWeeKFmanHYqksqZXYXGsw5zjnj7KM9/*)",
                                          None, Network::Testnet, db).unwrap();
 
         assert_eq!(
@@ -3860,7 +3807,7 @@ pub(crate) mod test {
     #[test]
     fn test_peek_address_at_index_not_derivable() {
         let db = MemoryDatabase::new();
-        let wallet = Wallet::new_offline("wpkh(tpubEBr4i6yk5nf5DAaJpsi9N2pPYBeJ7fZ5Z9rmN4977iYLCGco1VyjB9tvvuvYtfZzjD5A8igzgw3HeWeeKFmanHYqksqZXYXGsw5zjnj7KM9/1)",
+        let wallet = Wallet::new("wpkh(tpubEBr4i6yk5nf5DAaJpsi9N2pPYBeJ7fZ5Z9rmN4977iYLCGco1VyjB9tvvuvYtfZzjD5A8igzgw3HeWeeKFmanHYqksqZXYXGsw5zjnj7KM9/1)",
                                          None, Network::Testnet, db).unwrap();
 
         assert_eq!(
@@ -3882,7 +3829,7 @@ pub(crate) mod test {
     #[test]
     fn test_reset_address_index() {
         let db = MemoryDatabase::new();
-        let wallet = Wallet::new_offline("wpkh(tpubEBr4i6yk5nf5DAaJpsi9N2pPYBeJ7fZ5Z9rmN4977iYLCGco1VyjB9tvvuvYtfZzjD5A8igzgw3HeWeeKFmanHYqksqZXYXGsw5zjnj7KM9/*)",
+        let wallet = Wallet::new("wpkh(tpubEBr4i6yk5nf5DAaJpsi9N2pPYBeJ7fZ5Z9rmN4977iYLCGco1VyjB9tvvuvYtfZzjD5A8igzgw3HeWeeKFmanHYqksqZXYXGsw5zjnj7KM9/*)",
                                          None, Network::Testnet, db).unwrap();
 
         // new index 0
@@ -3919,7 +3866,7 @@ pub(crate) mod test {
     #[test]
     fn test_returns_index_and_address() {
         let db = MemoryDatabase::new();
-        let wallet = Wallet::new_offline("wpkh(tpubEBr4i6yk5nf5DAaJpsi9N2pPYBeJ7fZ5Z9rmN4977iYLCGco1VyjB9tvvuvYtfZzjD5A8igzgw3HeWeeKFmanHYqksqZXYXGsw5zjnj7KM9/*)",
+        let wallet = Wallet::new("wpkh(tpubEBr4i6yk5nf5DAaJpsi9N2pPYBeJ7fZ5Z9rmN4977iYLCGco1VyjB9tvvuvYtfZzjD5A8igzgw3HeWeeKFmanHYqksqZXYXGsw5zjnj7KM9/*)",
                                          None, Network::Testnet, db).unwrap();
 
         // new index 0

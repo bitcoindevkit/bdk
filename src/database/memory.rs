@@ -554,7 +554,7 @@ macro_rules! doctest_wallet {
             Some(100),
         );
 
-        $crate::Wallet::new_offline(
+        $crate::Wallet::new(
             &descriptors.0,
             descriptors.1.as_ref(),
             Network::Regtest,

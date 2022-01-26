@@ -361,7 +361,7 @@ macro_rules! bdk_blockchain_tests {
         mod bdk_blockchain_tests {
             use $crate::bitcoin::{Transaction, Network};
             use $crate::testutils::blockchain_tests::TestClient;
-            use $crate::blockchain::noop_progress;
+            use $crate::blockchain::{Blockchain, noop_progress};
             use $crate::database::MemoryDatabase;
             use $crate::types::KeychainKind;
             use $crate::{Wallet, FeeRate};
@@ -375,11 +375,11 @@ macro_rules! bdk_blockchain_tests {
                 $block
             }
 
-            fn get_wallet_from_descriptors(descriptors: &(String, Option<String>), test_client: &TestClient) -> Wallet<$blockchain, MemoryDatabase> {
-                Wallet::new(&descriptors.0.to_string(), descriptors.1.as_ref(), Network::Regtest, MemoryDatabase::new(), get_blockchain(test_client)).unwrap()
+            fn get_wallet_from_descriptors(descriptors: &(String, Option<String>)) -> Wallet<MemoryDatabase> {
+                Wallet::new(&descriptors.0.to_string(), descriptors.1.as_ref(), Network::Regtest, MemoryDatabase::new()).unwrap()
             }
 
-            fn init_single_sig() -> (Wallet<$blockchain, MemoryDatabase>, (String, Option<String>), TestClient) {
+            fn init_single_sig() -> (Wallet<MemoryDatabase>, $blockchain, (String, Option<String>), TestClient) {
                 let _ = env_logger::try_init();
 
                 let descriptors = testutils! {
@@ -387,13 +387,14 @@ macro_rules! bdk_blockchain_tests {
                 };
 
                 let test_client = TestClient::default();
-                let wallet = get_wallet_from_descriptors(&descriptors, &test_client);
+                let blockchain = get_blockchain(&test_client);
+                let wallet = get_wallet_from_descriptors(&descriptors);
 
                 // rpc need to call import_multi before receiving any tx, otherwise will not see tx in the mempool
                 #[cfg(feature = "test-rpc")]
-                wallet.sync(noop_progress(), None).unwrap();
+                wallet.sync(&blockchain, noop_progress(), None).unwrap();
 
-                (wallet, descriptors, test_client)
+                (wallet, blockchain, descriptors, test_client)
             }
 
             #[test]
@@ -401,7 +402,7 @@ macro_rules! bdk_blockchain_tests {
                 use std::ops::Deref;
                 use crate::database::Database;
 
-                let (wallet, descriptors, mut test_client) = init_single_sig();
+                let (wallet, blockchain, descriptors, mut test_client) = init_single_sig();
 
                 let tx = testutils! {
                     @tx ( (@external descriptors, 0) => 50_000 )
@@ -414,7 +415,7 @@ macro_rules! bdk_blockchain_tests {
                 #[cfg(not(feature = "test-rpc"))]
                 assert!(wallet.database().deref().get_sync_time().unwrap().is_none(), "initial sync_time not none");
 
-                wallet.sync(noop_progress(), None).unwrap();
+                wallet.sync(&blockchain, noop_progress(), None).unwrap();
                 assert!(wallet.database().deref().get_sync_time().unwrap().is_some(), "sync_time hasn't been updated");
 
                 assert_eq!(wallet.get_balance().unwrap(), 50_000, "incorrect balance");
@@ -429,7 +430,7 @@ macro_rules! bdk_blockchain_tests {
 
             #[test]
             fn test_sync_stop_gap_20() {
-                let (wallet, descriptors, mut test_client) = init_single_sig();
+                let (wallet, blockchain, descriptors, mut test_client) = init_single_sig();
 
                 test_client.receive(testutils! {
                     @tx ( (@external descriptors, 5) => 50_000 )
@@ -438,7 +439,7 @@ macro_rules! bdk_blockchain_tests {
                     @tx ( (@external descriptors, 25) => 50_000 )
                 });
 
-                wallet.sync(noop_progress(), None).unwrap();
+                wallet.sync(&blockchain, noop_progress(), None).unwrap();
 
                 assert_eq!(wallet.get_balance().unwrap(), 100_000, "incorrect balance");
                 assert_eq!(wallet.list_transactions(false).unwrap().len(), 2, "incorrect number of txs");
@@ -446,16 +447,16 @@ macro_rules! bdk_blockchain_tests {
 
             #[test]
             fn test_sync_before_and_after_receive() {
-                let (wallet, descriptors, mut test_client) = init_single_sig();
+                let (wallet, blockchain, descriptors, mut test_client) = init_single_sig();
 
-                wallet.sync(noop_progress(), None).unwrap();
+                wallet.sync(&blockchain, noop_progress(), None).unwrap();
                 assert_eq!(wallet.get_balance().unwrap(), 0);
 
                 test_client.receive(testutils! {
                     @tx ( (@external descriptors, 0) => 50_000 )
                 });
 
-                wallet.sync(noop_progress(), None).unwrap();
+                wallet.sync(&blockchain, noop_progress(), None).unwrap();
 
                 assert_eq!(wallet.get_balance().unwrap(), 50_000, "incorrect balance");
                 assert_eq!(wallet.list_transactions(false).unwrap().len(), 1, "incorrect number of txs");
@@ -463,13 +464,13 @@ macro_rules! bdk_blockchain_tests {
 
             #[test]
             fn test_sync_multiple_outputs_same_tx() {
-                let (wallet, descriptors, mut test_client) = init_single_sig();
+                let (wallet, blockchain, descriptors, mut test_client) = init_single_sig();
 
                 let txid = test_client.receive(testutils! {
                     @tx ( (@external descriptors, 0) => 50_000, (@external descriptors, 1) => 25_000, (@external descriptors, 5) => 30_000 )
                 });
 
-                wallet.sync(noop_progress(), None).unwrap();
+                wallet.sync(&blockchain, noop_progress(), None).unwrap();
 
                 assert_eq!(wallet.get_balance().unwrap(), 105_000, "incorrect balance");
                 assert_eq!(wallet.list_transactions(false).unwrap().len(), 1, "incorrect number of txs");
@@ -484,7 +485,7 @@ macro_rules! bdk_blockchain_tests {
 
             #[test]
             fn test_sync_receive_multi() {
-                let (wallet, descriptors, mut test_client) = init_single_sig();
+                let (wallet, blockchain, descriptors, mut test_client) = init_single_sig();
 
                 test_client.receive(testutils! {
                     @tx ( (@external descriptors, 0) => 50_000 )
@@ -493,7 +494,7 @@ macro_rules! bdk_blockchain_tests {
                     @tx ( (@external descriptors, 5) => 25_000 )
                 });
 
-                wallet.sync(noop_progress(), None).unwrap();
+                wallet.sync(&blockchain, noop_progress(), None).unwrap();
 
                 assert_eq!(wallet.get_balance().unwrap(), 75_000, "incorrect balance");
                 assert_eq!(wallet.list_transactions(false).unwrap().len(), 2, "incorrect number of txs");
@@ -502,32 +503,32 @@ macro_rules! bdk_blockchain_tests {
 
             #[test]
             fn test_sync_address_reuse() {
-                let (wallet, descriptors, mut test_client) = init_single_sig();
+                let (wallet, blockchain, descriptors, mut test_client) = init_single_sig();
 
                 test_client.receive(testutils! {
                     @tx ( (@external descriptors, 0) => 50_000 )
                 });
 
-                wallet.sync(noop_progress(), None).unwrap();
+                wallet.sync(&blockchain, noop_progress(), None).unwrap();
                 assert_eq!(wallet.get_balance().unwrap(), 50_000);
 
                 test_client.receive(testutils! {
                     @tx ( (@external descriptors, 0) => 25_000 )
                 });
 
-                wallet.sync(noop_progress(), None).unwrap();
+                wallet.sync(&blockchain, noop_progress(), None).unwrap();
                 assert_eq!(wallet.get_balance().unwrap(), 75_000, "incorrect balance");
             }
 
             #[test]
             fn test_sync_receive_rbf_replaced() {
-                let (wallet, descriptors, mut test_client) = init_single_sig();
+                let (wallet, blockchain, descriptors, mut test_client) = init_single_sig();
 
                 let txid = test_client.receive(testutils! {
                     @tx ( (@external descriptors, 0) => 50_000 ) ( @replaceable true )
                 });
 
-                wallet.sync(noop_progress(), None).unwrap();
+                wallet.sync(&blockchain, noop_progress(), None).unwrap();
 
                 assert_eq!(wallet.get_balance().unwrap(), 50_000, "incorrect balance");
                 assert_eq!(wallet.list_transactions(false).unwrap().len(), 1, "incorrect number of txs");
@@ -541,7 +542,7 @@ macro_rules! bdk_blockchain_tests {
 
                 let new_txid = test_client.bump_fee(&txid);
 
-                wallet.sync(noop_progress(), None).unwrap();
+                wallet.sync(&blockchain, noop_progress(), None).unwrap();
 
                 assert_eq!(wallet.get_balance().unwrap(), 50_000, "incorrect balance after bump");
                 assert_eq!(wallet.list_transactions(false).unwrap().len(), 1, "incorrect number of txs after bump");
@@ -559,13 +560,13 @@ macro_rules! bdk_blockchain_tests {
             #[cfg(not(feature = "esplora"))]
             #[test]
             fn test_sync_reorg_block() {
-                let (wallet, descriptors, mut test_client) = init_single_sig();
+                let (wallet, blockchain, descriptors, mut test_client) = init_single_sig();
 
                 let txid = test_client.receive(testutils! {
                     @tx ( (@external descriptors, 0) => 50_000 ) ( @confirmations 1 ) ( @replaceable true )
                 });
 
-                wallet.sync(noop_progress(), None).unwrap();
+                wallet.sync(&blockchain, noop_progress(), None).unwrap();
 
                 assert_eq!(wallet.get_balance().unwrap(), 50_000, "incorrect balance");
                 assert_eq!(wallet.list_transactions(false).unwrap().len(), 1, "incorrect number of txs");
@@ -578,7 +579,7 @@ macro_rules! bdk_blockchain_tests {
                 // Invalidate 1 block
                 test_client.invalidate(1);
 
-                wallet.sync(noop_progress(), None).unwrap();
+                wallet.sync(&blockchain, noop_progress(), None).unwrap();
 
                 assert_eq!(wallet.get_balance().unwrap(), 50_000, "incorrect balance after invalidate");
 
@@ -589,15 +590,15 @@ macro_rules! bdk_blockchain_tests {
 
             #[test]
             fn test_sync_after_send() {
-                let (wallet, descriptors, mut test_client) = init_single_sig();
-                println!("{}", descriptors.0);
+                let (wallet, blockchain, descriptors, mut test_client) = init_single_sig();
+                                println!("{}", descriptors.0);
                 let node_addr = test_client.get_node_address(None);
 
                 test_client.receive(testutils! {
                     @tx ( (@external descriptors, 0) => 50_000 )
                 });
 
-                wallet.sync(noop_progress(), None).unwrap();
+                wallet.sync(&blockchain, noop_progress(), None).unwrap();
                 assert_eq!(wallet.get_balance().unwrap(), 50_000, "incorrect balance");
 
                 let mut builder = wallet.build_tx();
@@ -607,8 +608,8 @@ macro_rules! bdk_blockchain_tests {
                 assert!(finalized, "Cannot finalize transaction");
                 let tx = psbt.extract_tx();
                 println!("{}", bitcoin::consensus::encode::serialize_hex(&tx));
-                wallet.broadcast(&tx).unwrap();
-                wallet.sync(noop_progress(), None).unwrap();
+                blockchain.broadcast(&tx).unwrap();
+                wallet.sync(&blockchain, noop_progress(), None).unwrap();
                 assert_eq!(wallet.get_balance().unwrap(), details.received, "incorrect balance after send");
 
                 assert_eq!(wallet.list_transactions(false).unwrap().len(), 2, "incorrect number of txs");
@@ -619,16 +620,16 @@ macro_rules! bdk_blockchain_tests {
             /// The coins should only be received once!
             #[test]
             fn test_sync_double_receive() {
-                let (wallet, descriptors, mut test_client) = init_single_sig();
-                let receiver_wallet = get_wallet_from_descriptors(&("wpkh(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW)".to_string(), None), &test_client);
+                let (wallet, blockchain, descriptors, mut test_client) = init_single_sig();
+                                let receiver_wallet = get_wallet_from_descriptors(&("wpkh(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW)".to_string(), None));
                 // need to sync so rpc can start watching
-                receiver_wallet.sync(noop_progress(), None).unwrap();
+                receiver_wallet.sync(&blockchain, noop_progress(), None).unwrap();
 
                 test_client.receive(testutils! {
                     @tx ( (@external descriptors, 0) => 50_000, (@external descriptors, 1) => 25_000 ) (@confirmations 1)
                 });
 
-                wallet.sync(noop_progress(), None).unwrap();
+                wallet.sync(&blockchain, noop_progress(), None).unwrap();
                 assert_eq!(wallet.get_balance().unwrap(), 75_000, "incorrect balance");
                 let target_addr = receiver_wallet.get_address($crate::wallet::AddressIndex::New).unwrap().address;
 
@@ -650,16 +651,16 @@ macro_rules! bdk_blockchain_tests {
                     psbt.extract_tx()
                 };
 
-                wallet.broadcast(&tx1).unwrap();
-                wallet.broadcast(&tx2).unwrap();
+                blockchain.broadcast(&tx1).unwrap();
+                blockchain.broadcast(&tx2).unwrap();
 
-                receiver_wallet.sync(noop_progress(), None).unwrap();
+                receiver_wallet.sync(&blockchain, noop_progress(), None).unwrap();
                 assert_eq!(receiver_wallet.get_balance().unwrap(), 49_000, "should have received coins once and only once");
             }
 
             #[test]
             fn test_sync_many_sends_to_a_single_address() {
-                let (wallet, descriptors, mut test_client) = init_single_sig();
+                let (wallet, blockchain, descriptors, mut test_client) = init_single_sig();
 
                 for _ in 0..4 {
                     // split this up into multiple blocks so rpc doesn't get angry
@@ -678,22 +679,22 @@ macro_rules! bdk_blockchain_tests {
                     });
                 }
 
-                wallet.sync(noop_progress(), None).unwrap();
+                wallet.sync(&blockchain, noop_progress(), None).unwrap();
 
                 assert_eq!(wallet.get_balance().unwrap(), 100_000);
             }
 
             #[test]
             fn test_update_confirmation_time_after_generate() {
-                let (wallet, descriptors, mut test_client) = init_single_sig();
-                println!("{}", descriptors.0);
+                let (wallet, blockchain, descriptors, mut test_client) = init_single_sig();
+                                println!("{}", descriptors.0);
                 let node_addr = test_client.get_node_address(None);
 
                 let received_txid = test_client.receive(testutils! {
                     @tx ( (@external descriptors, 0) => 50_000 )
                 });
 
-                wallet.sync(noop_progress(), None).unwrap();
+                wallet.sync(&blockchain, noop_progress(), None).unwrap();
                 assert_eq!(wallet.get_balance().unwrap(), 50_000, "incorrect balance");
 
                 let tx_map = wallet.list_transactions(false).unwrap().into_iter().map(|tx| (tx.txid, tx)).collect::<std::collections::HashMap<_, _>>();
@@ -701,7 +702,7 @@ macro_rules! bdk_blockchain_tests {
                 assert!(details.confirmation_time.is_none());
 
                 test_client.generate(1, Some(node_addr));
-                wallet.sync(noop_progress(), None).unwrap();
+                wallet.sync(&blockchain, noop_progress(), None).unwrap();
 
                 let tx_map = wallet.list_transactions(false).unwrap().into_iter().map(|tx| (tx.txid, tx)).collect::<std::collections::HashMap<_, _>>();
                 let details = tx_map.get(&received_txid).unwrap();
@@ -711,13 +712,13 @@ macro_rules! bdk_blockchain_tests {
 
             #[test]
             fn test_sync_outgoing_from_scratch() {
-                let (wallet, descriptors, mut test_client) = init_single_sig();
-                let node_addr = test_client.get_node_address(None);
+                let (wallet, blockchain, descriptors, mut test_client) = init_single_sig();
+                                let node_addr = test_client.get_node_address(None);
                 let received_txid = test_client.receive(testutils! {
                     @tx ( (@external descriptors, 0) => 50_000 )
                 });
 
-                wallet.sync(noop_progress(), None).unwrap();
+                wallet.sync(&blockchain, noop_progress(), None).unwrap();
                 assert_eq!(wallet.get_balance().unwrap(), 50_000, "incorrect balance");
 
                 let mut builder = wallet.build_tx();
@@ -726,25 +727,26 @@ macro_rules! bdk_blockchain_tests {
 
                 let finalized = wallet.sign(&mut psbt, Default::default()).unwrap();
                 assert!(finalized, "Cannot finalize transaction");
-                let sent_txid = wallet.broadcast(&psbt.extract_tx()).unwrap();
+                let sent_tx = psbt.extract_tx();
+                blockchain.broadcast(&sent_tx).unwrap();
 
-                wallet.sync(noop_progress(), None).unwrap();
+                wallet.sync(&blockchain, noop_progress(), None).unwrap();
                 assert_eq!(wallet.get_balance().unwrap(), details.received, "incorrect balance after receive");
 
                 // empty wallet
-                let wallet = get_wallet_from_descriptors(&descriptors, &test_client);
+                let wallet = get_wallet_from_descriptors(&descriptors);
 
                 #[cfg(feature = "rpc")]  // rpc cannot see mempool tx before importmulti
                 test_client.generate(1, Some(node_addr));
 
-                wallet.sync(noop_progress(), None).unwrap();
+                wallet.sync(&blockchain, noop_progress(), None).unwrap();
                 let tx_map = wallet.list_transactions(false).unwrap().into_iter().map(|tx| (tx.txid, tx)).collect::<std::collections::HashMap<_, _>>();
 
                 let received = tx_map.get(&received_txid).unwrap();
                 assert_eq!(received.received, 50_000, "incorrect received from receiver");
                 assert_eq!(received.sent, 0, "incorrect sent from receiver");
 
-                let sent = tx_map.get(&sent_txid).unwrap();
+                let sent = tx_map.get(&sent_tx.txid()).unwrap();
                 assert_eq!(sent.received, details.received, "incorrect received from sender");
                 assert_eq!(sent.sent, details.sent, "incorrect sent from sender");
                 assert_eq!(sent.fee.unwrap_or(0), details.fee.unwrap_or(0), "incorrect fees from sender");
@@ -752,14 +754,14 @@ macro_rules! bdk_blockchain_tests {
 
             #[test]
             fn test_sync_long_change_chain() {
-                let (wallet, descriptors, mut test_client) = init_single_sig();
-                let node_addr = test_client.get_node_address(None);
+                let (wallet, blockchain, descriptors, mut test_client) = init_single_sig();
+                                let node_addr = test_client.get_node_address(None);
 
                 test_client.receive(testutils! {
                     @tx ( (@external descriptors, 0) => 50_000 )
                 });
 
-                wallet.sync(noop_progress(), None).unwrap();
+                wallet.sync(&blockchain, noop_progress(), None).unwrap();
                 assert_eq!(wallet.get_balance().unwrap(), 50_000, "incorrect balance");
 
                 let mut total_sent = 0;
@@ -769,38 +771,38 @@ macro_rules! bdk_blockchain_tests {
                     let (mut psbt, details) = builder.finish().unwrap();
                     let finalized = wallet.sign(&mut psbt, Default::default()).unwrap();
                     assert!(finalized, "Cannot finalize transaction");
-                    wallet.broadcast(&psbt.extract_tx()).unwrap();
+                    blockchain.broadcast(&psbt.extract_tx()).unwrap();
 
-                    wallet.sync(noop_progress(), None).unwrap();
+                    wallet.sync(&blockchain, noop_progress(), None).unwrap();
 
                     total_sent += 5_000 + details.fee.unwrap_or(0);
                 }
 
-                wallet.sync(noop_progress(), None).unwrap();
+                wallet.sync(&blockchain, noop_progress(), None).unwrap();
                 assert_eq!(wallet.get_balance().unwrap(), 50_000 - total_sent, "incorrect balance after chain");
 
                 // empty wallet
 
-                let wallet = get_wallet_from_descriptors(&descriptors, &test_client);
+                let wallet = get_wallet_from_descriptors(&descriptors);
 
                 #[cfg(feature = "rpc")]  // rpc cannot see mempool tx before importmulti
                 test_client.generate(1, Some(node_addr));
 
-                wallet.sync(noop_progress(), None).unwrap();
+                wallet.sync(&blockchain, noop_progress(), None).unwrap();
                 assert_eq!(wallet.get_balance().unwrap(), 50_000 - total_sent, "incorrect balance empty wallet");
 
             }
 
             #[test]
             fn test_sync_bump_fee_basic() {
-                let (wallet, descriptors, mut test_client) = init_single_sig();
-                let node_addr = test_client.get_node_address(None);
+                let (wallet, blockchain, descriptors, mut test_client) = init_single_sig();
+                                let node_addr = test_client.get_node_address(None);
 
                 test_client.receive(testutils! {
                     @tx ( (@external descriptors, 0) => 50_000 ) (@confirmations 1)
                 });
 
-                wallet.sync(noop_progress(), None).unwrap();
+                wallet.sync(&blockchain, noop_progress(), None).unwrap();
                 assert_eq!(wallet.get_balance().unwrap(), 50_000, "incorrect balance");
 
                 let mut builder = wallet.build_tx();
@@ -808,8 +810,8 @@ macro_rules! bdk_blockchain_tests {
                 let (mut psbt, details) = builder.finish().unwrap();
                 let finalized = wallet.sign(&mut psbt, Default::default()).unwrap();
                 assert!(finalized, "Cannot finalize transaction");
-                wallet.broadcast(&psbt.extract_tx()).unwrap();
-                wallet.sync(noop_progress(), None).unwrap();
+                blockchain.broadcast(&psbt.extract_tx()).unwrap();
+                wallet.sync(&blockchain, noop_progress(), None).unwrap();
                 assert_eq!(wallet.get_balance().unwrap(), 50_000 - details.fee.unwrap_or(0) - 5_000, "incorrect balance from fees");
                 assert_eq!(wallet.get_balance().unwrap(), details.received, "incorrect balance from received");
 
@@ -818,8 +820,8 @@ macro_rules! bdk_blockchain_tests {
                 let (mut new_psbt, new_details) = builder.finish().unwrap();
                 let finalized = wallet.sign(&mut new_psbt, Default::default()).unwrap();
                 assert!(finalized, "Cannot finalize transaction");
-                wallet.broadcast(&new_psbt.extract_tx()).unwrap();
-                wallet.sync(noop_progress(), None).unwrap();
+                blockchain.broadcast(&new_psbt.extract_tx()).unwrap();
+                wallet.sync(&blockchain, noop_progress(), None).unwrap();
                 assert_eq!(wallet.get_balance().unwrap(), 50_000 - new_details.fee.unwrap_or(0) - 5_000, "incorrect balance from fees after bump");
                 assert_eq!(wallet.get_balance().unwrap(), new_details.received, "incorrect balance from received after bump");
 
@@ -828,14 +830,14 @@ macro_rules! bdk_blockchain_tests {
 
             #[test]
             fn test_sync_bump_fee_remove_change() {
-                let (wallet, descriptors, mut test_client) = init_single_sig();
-                let node_addr = test_client.get_node_address(None);
+                let (wallet, blockchain, descriptors, mut test_client) = init_single_sig();
+                                let node_addr = test_client.get_node_address(None);
 
                 test_client.receive(testutils! {
                     @tx ( (@external descriptors, 0) => 50_000 ) (@confirmations 1)
                 });
 
-                wallet.sync(noop_progress(), None).unwrap();
+                wallet.sync(&blockchain, noop_progress(), None).unwrap();
                 assert_eq!(wallet.get_balance().unwrap(), 50_000, "incorrect balance");
 
                 let mut builder = wallet.build_tx();
@@ -843,8 +845,8 @@ macro_rules! bdk_blockchain_tests {
                 let (mut psbt, details) = builder.finish().unwrap();
                 let finalized = wallet.sign(&mut psbt, Default::default()).unwrap();
                 assert!(finalized, "Cannot finalize transaction");
-                wallet.broadcast(&psbt.extract_tx()).unwrap();
-                wallet.sync(noop_progress(), None).unwrap();
+                blockchain.broadcast(&psbt.extract_tx()).unwrap();
+                wallet.sync(&blockchain, noop_progress(), None).unwrap();
                 assert_eq!(wallet.get_balance().unwrap(), 1_000 - details.fee.unwrap_or(0), "incorrect balance after send");
                 assert_eq!(wallet.get_balance().unwrap(), details.received, "incorrect received after send");
 
@@ -853,8 +855,8 @@ macro_rules! bdk_blockchain_tests {
                 let (mut new_psbt, new_details) = builder.finish().unwrap();
                 let finalized = wallet.sign(&mut new_psbt, Default::default()).unwrap();
                 assert!(finalized, "Cannot finalize transaction");
-                wallet.broadcast(&new_psbt.extract_tx()).unwrap();
-                wallet.sync(noop_progress(), None).unwrap();
+                blockchain.broadcast(&new_psbt.extract_tx()).unwrap();
+                wallet.sync(&blockchain, noop_progress(), None).unwrap();
                 assert_eq!(wallet.get_balance().unwrap(), 0, "incorrect balance after change removal");
                 assert_eq!(new_details.received, 0, "incorrect received after change removal");
 
@@ -863,14 +865,14 @@ macro_rules! bdk_blockchain_tests {
 
             #[test]
             fn test_sync_bump_fee_add_input_simple() {
-                let (wallet, descriptors, mut test_client) = init_single_sig();
-                let node_addr = test_client.get_node_address(None);
+                let (wallet, blockchain, descriptors, mut test_client) = init_single_sig();
+                                let node_addr = test_client.get_node_address(None);
 
                 test_client.receive(testutils! {
                     @tx ( (@external descriptors, 0) => 50_000, (@external descriptors, 1) => 25_000 ) (@confirmations 1)
                 });
 
-                wallet.sync(noop_progress(), None).unwrap();
+                wallet.sync(&blockchain, noop_progress(), None).unwrap();
                 assert_eq!(wallet.get_balance().unwrap(), 75_000, "incorrect balance");
 
                 let mut builder = wallet.build_tx();
@@ -878,8 +880,8 @@ macro_rules! bdk_blockchain_tests {
                 let (mut psbt, details) = builder.finish().unwrap();
                 let finalized = wallet.sign(&mut psbt, Default::default()).unwrap();
                 assert!(finalized, "Cannot finalize transaction");
-                wallet.broadcast(&psbt.extract_tx()).unwrap();
-                wallet.sync(noop_progress(), None).unwrap();
+                blockchain.broadcast(&psbt.extract_tx()).unwrap();
+                wallet.sync(&blockchain, noop_progress(), None).unwrap();
                 assert_eq!(wallet.get_balance().unwrap(), 26_000 - details.fee.unwrap_or(0), "incorrect balance after send");
                 assert_eq!(details.received, 1_000 - details.fee.unwrap_or(0), "incorrect received after send");
 
@@ -888,22 +890,22 @@ macro_rules! bdk_blockchain_tests {
                 let (mut new_psbt, new_details) = builder.finish().unwrap();
                 let finalized = wallet.sign(&mut new_psbt, Default::default()).unwrap();
                 assert!(finalized, "Cannot finalize transaction");
-                wallet.broadcast(&new_psbt.extract_tx()).unwrap();
-                wallet.sync(noop_progress(), None).unwrap();
+                blockchain.broadcast(&new_psbt.extract_tx()).unwrap();
+                wallet.sync(&blockchain, noop_progress(), None).unwrap();
                 assert_eq!(new_details.sent, 75_000, "incorrect sent");
                 assert_eq!(wallet.get_balance().unwrap(), new_details.received, "incorrect balance after add input");
             }
 
             #[test]
             fn test_sync_bump_fee_add_input_no_change() {
-                let (wallet, descriptors, mut test_client) = init_single_sig();
-                let node_addr = test_client.get_node_address(None);
+                let (wallet, blockchain, descriptors, mut test_client) = init_single_sig();
+                                let node_addr = test_client.get_node_address(None);
 
                 test_client.receive(testutils! {
                     @tx ( (@external descriptors, 0) => 50_000, (@external descriptors, 1) => 25_000 ) (@confirmations 1)
                 });
 
-                wallet.sync(noop_progress(), None).unwrap();
+                wallet.sync(&blockchain, noop_progress(), None).unwrap();
                 assert_eq!(wallet.get_balance().unwrap(), 75_000, "incorrect balance");
 
                 let mut builder = wallet.build_tx();
@@ -911,8 +913,8 @@ macro_rules! bdk_blockchain_tests {
                 let (mut psbt, details) = builder.finish().unwrap();
                 let finalized = wallet.sign(&mut psbt, Default::default()).unwrap();
                 assert!(finalized, "Cannot finalize transaction");
-                wallet.broadcast(&psbt.extract_tx()).unwrap();
-                wallet.sync(noop_progress(), None).unwrap();
+                blockchain.broadcast(&psbt.extract_tx()).unwrap();
+                wallet.sync(&blockchain, noop_progress(), None).unwrap();
                 assert_eq!(wallet.get_balance().unwrap(), 26_000 - details.fee.unwrap_or(0), "incorrect balance after send");
                 assert_eq!(details.received, 1_000 - details.fee.unwrap_or(0), "incorrect received after send");
 
@@ -923,8 +925,8 @@ macro_rules! bdk_blockchain_tests {
 
                 let finalized = wallet.sign(&mut new_psbt, Default::default()).unwrap();
                 assert!(finalized, "Cannot finalize transaction");
-                wallet.broadcast(&new_psbt.extract_tx()).unwrap();
-                wallet.sync(noop_progress(), None).unwrap();
+                blockchain.broadcast(&new_psbt.extract_tx()).unwrap();
+                wallet.sync(&blockchain, noop_progress(), None).unwrap();
                 assert_eq!(new_details.sent, 75_000, "incorrect sent");
                 assert_eq!(wallet.get_balance().unwrap(), 0, "incorrect balance after add input");
                 assert_eq!(new_details.received, 0, "incorrect received after add input");
@@ -933,13 +935,13 @@ macro_rules! bdk_blockchain_tests {
 
             #[test]
             fn test_add_data() {
-                let (wallet, descriptors, mut test_client) = init_single_sig();
-                let node_addr = test_client.get_node_address(None);
+                let (wallet, blockchain, descriptors, mut test_client) = init_single_sig();
+                                let node_addr = test_client.get_node_address(None);
                 let _ = test_client.receive(testutils! {
                     @tx ( (@external descriptors, 0) => 50_000 )
                 });
 
-                wallet.sync(noop_progress(), None).unwrap();
+                wallet.sync(&blockchain, noop_progress(), None).unwrap();
                 assert_eq!(wallet.get_balance().unwrap(), 50_000, "incorrect balance");
 
                 let mut builder = wallet.build_tx();
@@ -952,22 +954,22 @@ macro_rules! bdk_blockchain_tests {
                 let tx = psbt.extract_tx();
                 let serialized_tx = bitcoin::consensus::encode::serialize(&tx);
                 assert!(serialized_tx.windows(data.len()).any(|e| e==data), "cannot find op_return data in transaction");
-                let sent_txid = wallet.broadcast(&tx).unwrap();
+                blockchain.broadcast(&tx).unwrap();
                 test_client.generate(1, Some(node_addr));
-                wallet.sync(noop_progress(), None).unwrap();
+                wallet.sync(&blockchain, noop_progress(), None).unwrap();
                 assert_eq!(wallet.get_balance().unwrap(), 50_000 - details.fee.unwrap_or(0), "incorrect balance after send");
 
                 let tx_map = wallet.list_transactions(false).unwrap().into_iter().map(|tx| (tx.txid, tx)).collect::<std::collections::HashMap<_, _>>();
-                let _ = tx_map.get(&sent_txid).unwrap();
+                let _ = tx_map.get(&tx.txid()).unwrap();
             }
 
             #[test]
             fn test_sync_receive_coinbase() {
-                let (wallet, _, mut test_client) = init_single_sig();
+                let (wallet, blockchain, _, mut test_client) = init_single_sig();
 
                 let wallet_addr = wallet.get_address($crate::wallet::AddressIndex::New).unwrap().address;
 
-                wallet.sync(noop_progress(), None).unwrap();
+                wallet.sync(&blockchain, noop_progress(), None).unwrap();
                 assert_eq!(wallet.get_balance().unwrap(), 0, "incorrect balance");
 
                 test_client.generate(1, Some(wallet_addr));
@@ -980,7 +982,7 @@ macro_rules! bdk_blockchain_tests {
                 }
 
 
-                wallet.sync(noop_progress(), None).unwrap();
+                wallet.sync(&blockchain, noop_progress(), None).unwrap();
                 assert!(wallet.get_balance().unwrap() > 0, "incorrect balance after receiving coinbase");
             }
 
@@ -993,7 +995,7 @@ macro_rules! bdk_blockchain_tests {
                 use bitcoincore_rpc::jsonrpc::serde_json::Value;
                 use bitcoincore_rpc::{Auth, Client, RpcApi};
 
-                let (wallet, descriptors, mut test_client) = init_single_sig();
+                let (wallet, blockchain, descriptors, mut test_client) = init_single_sig();
 
                 // TODO remove once rust-bitcoincore-rpc with PR 199 released
                 // https://github.com/rust-bitcoin/rust-bitcoincore-rpc/pull/199
@@ -1056,7 +1058,7 @@ macro_rules! bdk_blockchain_tests {
                     @tx ( (@external descriptors, 0) => 50_000 )
                 });
 
-                wallet.sync(noop_progress(), None).unwrap();
+                wallet.sync(&blockchain, noop_progress(), None).unwrap();
                 assert_eq!(wallet.get_balance().unwrap(), 50_000, "wallet has incorrect balance");
 
                 // 4. Send 25_000 sats from test BDK wallet to test bitcoind node taproot wallet
@@ -1067,8 +1069,8 @@ macro_rules! bdk_blockchain_tests {
                 let finalized = wallet.sign(&mut psbt, Default::default()).unwrap();
                 assert!(finalized, "wallet cannot finalize transaction");
                 let tx = psbt.extract_tx();
-                wallet.broadcast(&tx).unwrap();
-                wallet.sync(noop_progress(), None).unwrap();
+                blockchain.broadcast(&tx).unwrap();
+                wallet.sync(&blockchain, noop_progress(), None).unwrap();
                 assert_eq!(wallet.get_balance().unwrap(), details.received, "wallet has incorrect balance after send");
                 assert_eq!(wallet.list_transactions(false).unwrap().len(), 2, "wallet has incorrect number of txs");
                 assert_eq!(wallet.list_unspent().unwrap().len(), 1, "wallet has incorrect number of unspents");

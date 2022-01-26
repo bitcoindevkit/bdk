@@ -91,7 +91,30 @@ impl Blockchain for EsploraBlockchain {
         .collect()
     }
 
-    fn setup<D: BatchDatabase, P: Progress>(
+    fn get_tx(&self, txid: &Txid) -> Result<Option<Transaction>, Error> {
+        Ok(await_or_block!(self.url_client._get_tx(txid))?)
+    }
+
+    fn broadcast(&self, tx: &Transaction) -> Result<(), Error> {
+        Ok(await_or_block!(self.url_client._broadcast(tx))?)
+    }
+
+    fn estimate_fee(&self, target: usize) -> Result<FeeRate, Error> {
+        let estimates = await_or_block!(self.url_client._get_fee_estimates())?;
+        super::into_fee_rate(target, estimates)
+    }
+}
+
+#[maybe_async]
+impl GetHeight for EsploraBlockchain {
+    fn get_height(&self) -> Result<u32, Error> {
+        Ok(await_or_block!(self.url_client._get_height())?)
+    }
+}
+
+#[maybe_async]
+impl WalletSync for EsploraBlockchain {
+    fn wallet_setup<D: BatchDatabase, P: Progress>(
         &self,
         database: &mut D,
         _progress_update: P,
@@ -179,23 +202,6 @@ impl Blockchain for EsploraBlockchain {
         database.commit_batch(batch_update)?;
 
         Ok(())
-    }
-
-    fn get_tx(&self, txid: &Txid) -> Result<Option<Transaction>, Error> {
-        Ok(await_or_block!(self.url_client._get_tx(txid))?)
-    }
-
-    fn broadcast(&self, tx: &Transaction) -> Result<(), Error> {
-        Ok(await_or_block!(self.url_client._broadcast(tx))?)
-    }
-
-    fn get_height(&self) -> Result<u32, Error> {
-        Ok(await_or_block!(self.url_client._get_height())?)
-    }
-
-    fn estimate_fee(&self, target: usize) -> Result<FeeRate, Error> {
-        let estimates = await_or_block!(self.url_client._get_fee_estimates())?;
-        super::into_fee_rate(target, estimates)
     }
 }
 
