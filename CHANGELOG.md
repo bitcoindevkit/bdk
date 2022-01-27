@@ -6,14 +6,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.16.0] - [v0.15.0]
+
+- Disable `reqwest` default features.
+- Added `reqwest-default-tls` feature: Use this to restore the TLS defaults of reqwest if you don't want to add a dependency to it in your own manifest.
+- Use dust_value from rust-bitcoin
+- Fixed generating WIF in the correct network format.
+
 ## [v0.15.0] - [v0.14.0]
 
 - Overhauled sync logic for electrum and esplora.
 - Unify ureq and reqwest esplora backends to have the same configuration parameters. This means reqwest now has a timeout parameter and ureq has a concurrency parameter.
 - Fixed esplora fee estimation.
-- Fixed generating WIF in the correct network format.
-- Disable `reqwest` default features.
-- Added `reqwest-default-tls` feature: Use this to restore the TLS defaults of reqwest if you don't want to add a dependency to it in your own manifest.
 
 ## [v0.14.0] - [v0.13.0]
 
@@ -407,3 +411,4 @@ final transaction is created by calling `finish` on the builder.
 [v0.13.0]: https://github.com/bitcoindevkit/bdk/compare/v0.12.0...v0.13.0
 [v0.14.0]: https://github.com/bitcoindevkit/bdk/compare/v0.13.0...v0.14.0
 [v0.15.0]: https://github.com/bitcoindevkit/bdk/compare/v0.14.0...v0.15.0
+[v0.16.0]: https://github.com/bitcoindevkit/bdk/compare/v0.15.0...v0.16.0
