@@ -118,10 +118,10 @@ pub trait WalletSync {
     /// For types that do not have that distinction, only this method can be implemented, since
     /// [`WalletSync::wallet_sync`] defaults to calling this internally if not overridden.
     /// Populate the internal database with transactions and UTXOs
-    fn wallet_setup<D: BatchDatabase, P: Progress>(
+    fn wallet_setup<D: BatchDatabase>(
         &self,
         database: &mut D,
-        progress_update: P,
+        progress_update: Box<dyn Progress>,
     ) -> Result<(), Error>;
 
     /// If not overridden, it defaults to calling [`Self::wallet_setup`] internally.
@@ -141,10 +141,10 @@ pub trait WalletSync {
     /// [`BatchOperations::set_tx`]: crate::database::BatchOperations::set_tx
     /// [`BatchOperations::set_utxo`]: crate::database::BatchOperations::set_utxo
     /// [`BatchOperations::del_utxo`]: crate::database::BatchOperations::del_utxo
-    fn wallet_sync<D: BatchDatabase, P: Progress>(
+    fn wallet_sync<D: BatchDatabase>(
         &self,
         database: &mut D,
-        progress_update: P,
+        progress_update: Box<dyn Progress>,
     ) -> Result<(), Error> {
         maybe_await!(self.wallet_setup(database, progress_update))
     }
@@ -164,7 +164,7 @@ pub type ProgressData = (f32, Option<String>);
 
 /// Trait for types that can receive and process progress updates during [`WalletSync::wallet_sync`] and
 /// [`WalletSync::wallet_setup`]
-pub trait Progress: Send + 'static {
+pub trait Progress: Send + 'static + core::fmt::Debug {
     /// Send a new progress update
     ///
     /// The `progress` value should be in the range 0.0 - 100.0, and the `message` value is an
@@ -189,7 +189,7 @@ impl Progress for Sender<ProgressData> {
 }
 
 /// Type that implements [`Progress`] and drops every update received
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default, Debug)]
 pub struct NoopProgress;
 
 /// Create a new instance of [`NoopProgress`]
@@ -204,7 +204,7 @@ impl Progress for NoopProgress {
 }
 
 /// Type that implements [`Progress`] and logs at level `INFO` every update received
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default, Debug)]
 pub struct LogProgress;
 
 /// Create a new instance of [`LogProgress`]
@@ -251,18 +251,18 @@ impl<T: GetHeight> GetHeight for Arc<T> {
 
 #[maybe_async]
 impl<T: WalletSync> WalletSync for Arc<T> {
-    fn wallet_setup<D: BatchDatabase, P: Progress>(
+    fn wallet_setup<D: BatchDatabase>(
         &self,
         database: &mut D,
-        progress_update: P,
+        progress_update: Box<dyn Progress>,
     ) -> Result<(), Error> {
         maybe_await!(self.deref().wallet_setup(database, progress_update))
     }
 
-    fn wallet_sync<D: BatchDatabase, P: Progress>(
+    fn wallet_sync<D: BatchDatabase>(
         &self,
         database: &mut D,
-        progress_update: P,
+        progress_update: Box<dyn Progress>,
     ) -> Result<(), Error> {
         maybe_await!(self.deref().wallet_sync(database, progress_update))
     }

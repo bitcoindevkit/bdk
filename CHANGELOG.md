@@ -8,10 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Removed default verification from `wallet::sync`. sync-time verification is added in `script_sync` and is activated by `verify` feature flag.
 - `verify` flag removed from `TransactionDetails`.
-- Removed Blockchain from Wallet.
-- Removed `Wallet::broadcast` (just use blockchain.broadcast)
+
+### Sync API change
+
+To decouple the `Wallet` from the `Blockchain` we've made major changes:
+
+- Removed `Blockchain` from Wallet.
+- Removed `Wallet::broadcast` (just use `Blockchain::broadcast`)
 - Depreciated `Wallet::new_offline` (all wallets are offline now)
-- Changed `Wallet::sync` to take a blockchain argument.
+- Changed `Wallet::sync` to take a `Blockchain`.
+- Stop making a request for the block height when calling `Wallet:new`.
+- Added `SyncOptions` to capture extra (future) arguments to `Wallet::sync`.
 
 ## [v0.16.1] - [v0.16.0]
 

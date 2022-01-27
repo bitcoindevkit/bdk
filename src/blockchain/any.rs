@@ -110,10 +110,10 @@ impl GetHeight for AnyBlockchain {
 
 #[maybe_async]
 impl WalletSync for AnyBlockchain {
-    fn wallet_sync<D: BatchDatabase, P: Progress>(
+    fn wallet_sync<D: BatchDatabase>(
         &self,
         database: &mut D,
-        progress_update: P,
+        progress_update: Box<dyn Progress>,
     ) -> Result<(), Error> {
         maybe_await!(impl_inner_method!(
             self,
@@ -123,10 +123,10 @@ impl WalletSync for AnyBlockchain {
         ))
     }
 
-    fn wallet_setup<D: BatchDatabase, P: Progress>(
+    fn wallet_setup<D: BatchDatabase>(
         &self,
         database: &mut D,
-        progress_update: P,
+        progress_update: Box<dyn Progress>,
     ) -> Result<(), Error> {
         maybe_await!(impl_inner_method!(
             self,

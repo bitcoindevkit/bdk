@@ -168,10 +168,10 @@ impl GetHeight for RpcBlockchain {
 }
 
 impl WalletSync for RpcBlockchain {
-    fn wallet_setup<D: BatchDatabase, P: Progress>(
+    fn wallet_setup<D: BatchDatabase>(
         &self,
         database: &mut D,
-        progress_update: P,
+        progress_update: Box<dyn Progress>,
     ) -> Result<(), Error> {
         let mut scripts_pubkeys = database.iter_script_pubkeys(Some(KeychainKind::External))?;
         scripts_pubkeys.extend(database.iter_script_pubkeys(Some(KeychainKind::Internal))?);
@@ -219,10 +219,10 @@ impl WalletSync for RpcBlockchain {
         self.wallet_sync(database, progress_update)
     }
 
-    fn wallet_sync<D: BatchDatabase, P: Progress>(
+    fn wallet_sync<D: BatchDatabase>(
         &self,
         db: &mut D,
-        _progress_update: P,
+        _progress_update: Box<dyn Progress>,
     ) -> Result<(), Error> {
         let mut indexes = HashMap::new();
         for keykind in &[KeychainKind::External, KeychainKind::Internal] {

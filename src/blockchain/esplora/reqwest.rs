@@ -114,10 +114,10 @@ impl GetHeight for EsploraBlockchain {
 
 #[maybe_async]
 impl WalletSync for EsploraBlockchain {
-    fn wallet_setup<D: BatchDatabase, P: Progress>(
+    fn wallet_setup<D: BatchDatabase>(
         &self,
         database: &mut D,
-        _progress_update: P,
+        _progress_update: Box<dyn Progress>,
     ) -> Result<(), Error> {
         use crate::blockchain::script_sync::Request;
         let mut request = script_sync::start(database, self.stop_gap)?;

@@ -251,10 +251,10 @@ impl GetHeight for CompactFiltersBlockchain {
 
 impl WalletSync for CompactFiltersBlockchain {
     #[allow(clippy::mutex_atomic)] // Mutex is easier to understand than a CAS loop.
-    fn wallet_setup<D: BatchDatabase, P: Progress>(
+    fn wallet_setup<D: BatchDatabase>(
         &self,
         database: &mut D,
-        progress_update: P,
+        progress_update: Box<dyn Progress>,
     ) -> Result<(), Error> {
         let first_peer = &self.peers[0];
 
