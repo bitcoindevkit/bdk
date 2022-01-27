@@ -53,9 +53,9 @@
 
 ### Example
 ```no_run
-use bdk::Wallet;
+use bdk::{Wallet, SyncOptions};
 use bdk::database::MemoryDatabase;
-use bdk::blockchain::{noop_progress, ElectrumBlockchain};
+use bdk::blockchain::ElectrumBlockchain;
 use bdk::electrum_client::Client;
 
 fn main() -> Result<(), bdk::Error> {
@@ -68,7 +68,7 @@ fn main() -> Result<(), bdk::Error> {
         MemoryDatabase::default(),
     )?;
 
-    wallet.sync(&blockchain, noop_progress(), None)?;
+    wallet.sync(&blockchain, SyncOptions::default())?;
 
     println!("Descriptor balance: {} SAT", wallet.get_balance()?);
 
@@ -108,9 +108,9 @@ fn main() -> Result<(), bdk::Error> {
 
 ### Example
 ```no_run
-use bdk::{FeeRate, Wallet};
+use bdk::{FeeRate, Wallet, SyncOptions};
 use bdk::database::MemoryDatabase;
-use bdk::blockchain::{noop_progress, ElectrumBlockchain};
+use bdk::blockchain::ElectrumBlockchain;
 use bdk::electrum_client::Client;
 
 use bitcoin::consensus::serialize;
@@ -126,7 +126,7 @@ fn main() -> Result<(), bdk::Error> {
     )?;
     let blockchain = ElectrumBlockchain::from(client);
 
-    wallet.sync(&blockchain, noop_progress(), None)?;
+    wallet.sync(&blockchain, SyncOptions::default())?;
 
     let send_to = wallet.get_address(New)?;
     let (psbt, details) = {
@@ -272,6 +272,7 @@ pub use wallet::address_validator;
 pub use wallet::signer;
 pub use wallet::signer::SignOptions;
 pub use wallet::tx_builder::TxBuilder;
+pub use wallet::SyncOptions;
 pub use wallet::Wallet;
 
 /// Get the version of BDK at runtime

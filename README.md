@@ -41,21 +41,21 @@ The `bdk` library aims to be the core building block for Bitcoin wallets of any 
 ```rust,no_run
 use bdk::Wallet;
 use bdk::database::MemoryDatabase;
-use bdk::blockchain::{noop_progress, ElectrumBlockchain};
+use bdk::blockchain::ElectrumBlockchain;
+use bdk::SyncOptions;
 
 use bdk::electrum_client::Client;
 
 fn main() -> Result<(), bdk::Error> {
-    let client = Client::new("ssl://electrum.blockstream.info:60002")?;
+    let blockchain = ElectrumBlockchain::from(Client::new("ssl://electrum.blockstream.info:60002")?);
     let wallet = Wallet::new(
         "wpkh([c258d2e4/84h/1h/0h]tpubDDYkZojQFQjht8Tm4jsS3iuEmKjTiEGjG6KnuFNKKJb5A6ZUCUZKdvLdSDWofKi4ToRCwb9poe1XdqfUnP4jaJjCB2Zwv11ZLgSbnZSNecE/0/*)",
         Some("wpkh([c258d2e4/84h/1h/0h]tpubDDYkZojQFQjht8Tm4jsS3iuEmKjTiEGjG6KnuFNKKJb5A6ZUCUZKdvLdSDWofKi4ToRCwb9poe1XdqfUnP4jaJjCB2Zwv11ZLgSbnZSNecE/1/*)"),
         bitcoin::Network::Testnet,
         MemoryDatabase::default(),
-        ElectrumBlockchain::from(client)
     )?;
 
-    wallet.sync(noop_progress(), None)?;
+    wallet.sync(&blockchain, SyncOptions::default())?;
 
     println!("Descriptor balance: {} SAT", wallet.get_balance()?);
 
@@ -88,9 +88,9 @@ fn main() -> Result<(), bdk::Error> {
 ### Create a transaction
 
 ```rust,no_run
-use bdk::{FeeRate, Wallet};
+use bdk::{FeeRate, Wallet, SyncOptions};
 use bdk::database::MemoryDatabase;
-use bdk::blockchain::{noop_progress, ElectrumBlockchain};
+use bdk::blockchain::ElectrumBlockchain;
 
 use bdk::electrum_client::Client;
 use bdk::wallet::AddressIndex::New;
@@ -98,16 +98,15 @@ use bdk::wallet::AddressIndex::New;
 use bitcoin::consensus::serialize;
 
 fn main() -> Result<(), bdk::Error> {
-    let client = Client::new("ssl://electrum.blockstream.info:60002")?;
+    let blockchain = ElectrumBlockchain::from(Client::new("ssl://electrum.blockstream.info:60002")?);
     let wallet = Wallet::new(
         "wpkh([c258d2e4/84h/1h/0h]tpubDDYkZojQFQjht8Tm4jsS3iuEmKjTiEGjG6KnuFNKKJb5A6ZUCUZKdvLdSDWofKi4ToRCwb9poe1XdqfUnP4jaJjCB2Zwv11ZLgSbnZSNecE/0/*)",
         Some("wpkh([c258d2e4/84h/1h/0h]tpubDDYkZojQFQjht8Tm4jsS3iuEmKjTiEGjG6KnuFNKKJb5A6ZUCUZKdvLdSDWofKi4ToRCwb9poe1XdqfUnP4jaJjCB2Zwv11ZLgSbnZSNecE/1/*)"),
         bitcoin::Network::Testnet,
         MemoryDatabase::default(),
-        ElectrumBlockchain::from(client)
     )?;
 
-    wallet.sync(noop_progress(), None)?;
+    wallet.sync(&blockchain, SyncOptions::default())?;
 
     let send_to = wallet.get_address(New)?;
     let (psbt, details) = {

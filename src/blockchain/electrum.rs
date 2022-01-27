@@ -95,10 +95,10 @@ impl GetHeight for ElectrumBlockchain {
 }
 
 impl WalletSync for ElectrumBlockchain {
-    fn wallet_setup<D: BatchDatabase, P: Progress>(
+    fn wallet_setup<D: BatchDatabase>(
         &self,
         database: &mut D,
-        _progress_update: P,
+        _progress_update: Box<dyn Progress>,
     ) -> Result<(), Error> {
         let mut request = script_sync::start(database, self.stop_gap)?;
         let mut block_times = HashMap::<u32, u32>::new();

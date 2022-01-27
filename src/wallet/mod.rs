@@ -55,7 +55,7 @@ use signer::{SignOptions, Signer, SignerOrdering, SignersContainer};
 use tx_builder::{BumpFee, CreateTx, FeePolicy, TxBuilder, TxParams};
 use utils::{check_nlocktime, check_nsequence_rbf, After, Older, SecpCtx};
 
-use crate::blockchain::{GetHeight, Progress, WalletSync};
+use crate::blockchain::{GetHeight, NoopProgress, Progress, WalletSync};
 use crate::database::memory::MemoryDatabase;
 use crate::database::{BatchDatabase, BatchOperations, DatabaseUtils, SyncTime};
 use crate::descriptor::derived::AsDerived;
@@ -154,6 +154,15 @@ impl fmt::Display for AddressInfo {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.address)
     }
+}
+
+#[derive(Debug, Default)]
+/// Options to a [`Wallet::sync`]
+pub struct SyncOptions {
+    /// The progress tracker which may be informated when progress is made.
+    pub progress: Option<Box<dyn Progress>>,
+    /// The maximum number of addresses sync on.
+    pub max_addresses: Option<u32>,
 }
 
 impl<D> Wallet<D>
@@ -1432,27 +1441,26 @@ where
     pub fn database(&self) -> impl std::ops::Deref<Target = D> + '_ {
         self.database.borrow()
     }
-}
 
-impl<D> Wallet<D>
-where
-    D: BatchDatabase,
-{
     /// Sync the internal database with the blockchain
     #[maybe_async]
-    pub fn sync<P: 'static + Progress, B: WalletSync + GetHeight>(
+    pub fn sync<B: WalletSync + GetHeight>(
         &self,
         blockchain: &B,
-        progress_update: P,
-        max_address_param: Option<u32>,
+        sync_opts: SyncOptions,
     ) -> Result<(), Error> {
         debug!("Begin sync...");
 
         let mut run_setup = false;
+        let SyncOptions {
+            max_addresses,
+            progress,
+        } = sync_opts;
+        let progress = progress.unwrap_or_else(|| Box::new(NoopProgress));
 
         let max_address = match self.descriptor.is_deriveable() {
             false => 0,
-            true => max_address_param.unwrap_or(CACHE_ADDR_BATCH_SIZE),
+            true => max_addresses.unwrap_or(CACHE_ADDR_BATCH_SIZE),
         };
         debug!("max_address {}", max_address);
         if self
@@ -1469,7 +1477,7 @@ where
         if let Some(change_descriptor) = &self.change_descriptor {
             let max_address = match change_descriptor.is_deriveable() {
                 false => 0,
-                true => max_address_param.unwrap_or(CACHE_ADDR_BATCH_SIZE),
+                true => max_addresses.unwrap_or(CACHE_ADDR_BATCH_SIZE),
             };
 
             if self
@@ -1489,12 +1497,10 @@ where
         // TODO: we should sync if generating an address triggers a new batch to be stored
         if run_setup {
             maybe_await!(
-                blockchain.wallet_setup(self.database.borrow_mut().deref_mut(), progress_update,)
+                blockchain.wallet_setup(self.database.borrow_mut().deref_mut(), progress,)
             )?;
         } else {
-            maybe_await!(
-                blockchain.wallet_sync(self.database.borrow_mut().deref_mut(), progress_update,)
-            )?;
+            maybe_await!(blockchain.wallet_sync(self.database.borrow_mut().deref_mut(), progress,))?;
         }
 
         #[cfg(feature = "verify")]
