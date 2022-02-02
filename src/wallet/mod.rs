@@ -316,6 +316,50 @@ where
         }
     }
 
+    /// Ensures that there are at least `max_addresses` addresses cached in the database if the
+    /// descriptor is derivable, or 1 address if it is not.
+    /// Will return `Ok(true)` if there are new addresses generated (either external or internal),
+    /// and `Ok(false)` if all the required addresses are already cached. This function is useful to
+    /// explicitly cache addresses in a wallet to do things like check [`Wallet::is_mine`] on
+    /// transaction output scripts.
+    pub fn ensure_addresses_cached(&self, max_addresses: u32) -> Result<bool, Error> {
+        let mut new_addresses_cached = false;
+        let max_address = match self.descriptor.is_deriveable() {
+            false => 0,
+            true => max_addresses,
+        };
+        debug!("max_address {}", max_address);
+        if self
+            .database
+            .borrow()
+            .get_script_pubkey_from_path(KeychainKind::External, max_address.saturating_sub(1))?
+            .is_none()
+        {
+            debug!("caching external addresses");
+            new_addresses_cached = true;
+            self.cache_addresses(KeychainKind::External, 0, max_address)?;
+        }
+
+        if let Some(change_descriptor) = &self.change_descriptor {
+            let max_address = match change_descriptor.is_deriveable() {
+                false => 0,
+                true => max_addresses,
+            };
+
+            if self
+                .database
+                .borrow()
+                .get_script_pubkey_from_path(KeychainKind::Internal, max_address.saturating_sub(1))?
+                .is_none()
+            {
+                debug!("caching internal addresses");
+                new_addresses_cached = true;
+                self.cache_addresses(KeychainKind::Internal, 0, max_address)?;
+            }
+        }
+        Ok(new_addresses_cached)
+    }
+
     /// Return whether or not a `script` is part of this wallet (either internal or external)
     pub fn is_mine(&self, script: &Script) -> Result<bool, Error> {
         self.database.borrow().is_mine(script)
@@ -1487,41 +1531,8 @@ where
     ) -> Result<(), Error> {
         debug!("Begin sync...");
 
-        let mut run_setup = false;
-
-        let max_address = match self.descriptor.is_deriveable() {
-            false => 0,
-            true => max_address_param.unwrap_or(CACHE_ADDR_BATCH_SIZE),
-        };
-        debug!("max_address {}", max_address);
-        if self
-            .database
-            .borrow()
-            .get_script_pubkey_from_path(KeychainKind::External, max_address.saturating_sub(1))?
-            .is_none()
-        {
-            debug!("caching external addresses");
-            run_setup = true;
-            self.cache_addresses(KeychainKind::External, 0, max_address)?;
-        }
-
-        if let Some(change_descriptor) = &self.change_descriptor {
-            let max_address = match change_descriptor.is_deriveable() {
-                false => 0,
-                true => max_address_param.unwrap_or(CACHE_ADDR_BATCH_SIZE),
-            };
-
-            if self
-                .database
-                .borrow()
-                .get_script_pubkey_from_path(KeychainKind::Internal, max_address.saturating_sub(1))?
-                .is_none()
-            {
-                debug!("caching internal addresses");
-                run_setup = true;
-                self.cache_addresses(KeychainKind::Internal, 0, max_address)?;
-            }
-        }
+        let run_setup =
+            self.ensure_addresses_cached(max_address_param.unwrap_or(CACHE_ADDR_BATCH_SIZE))?;
 
         debug!("run_setup: {}", run_setup);
         // TODO: what if i generate an address first and cache some addresses?
