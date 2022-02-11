@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- Removed default verification from `wallet::sync`. sync-time verification is added in `script_sync` and is activated by `verify` feature flag.
+- `verify` flag removed from `TransactionDetails`.
+
 ## [v0.16.0] - [v0.15.0]
 
 - Disable `reqwest` default features.
@@ -18,12 +21,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Overhauled sync logic for electrum and esplora.
 - Unify ureq and reqwest esplora backends to have the same configuration parameters. This means reqwest now has a timeout parameter and ureq has a concurrency parameter.
 - Fixed esplora fee estimation.
-- Fixed generating WIF in the correct network format.
-- Disable `reqwest` default features.
-- Added `reqwest-default-tls` feature: Use this to restore the TLS defaults of reqwest if you don't want to add a dependency to it in your own manifest.
-- Removed default verification from `wallet::sync`. `sync` verification is added only for `electrum` and
-`esplora` blockchains. No `sync` verification for `rpc`. `verify_tx()` is refactored as an wallet api.
-`verify` flag removed from `TransactionDetails`.
 
 ## [v0.14.0] - [v0.13.0]
 
