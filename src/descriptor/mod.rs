@@ -17,13 +17,13 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::Deref;
 
-use bitcoin::util::bip32::{
-    ChildNumber, DerivationPath, ExtendedPrivKey, ExtendedPubKey, Fingerprint, KeySource,
-};
+use bitcoin::util::bip32::{ChildNumber, DerivationPath, ExtendedPubKey, Fingerprint, KeySource};
 use bitcoin::util::psbt;
 use bitcoin::{Network, PublicKey, Script, TxOut};
 
-use miniscript::descriptor::{DescriptorPublicKey, DescriptorType, DescriptorXKey, Wildcard};
+use miniscript::descriptor::{
+    DescriptorPublicKey, DescriptorType, DescriptorXKey, InnerXKey, Wildcard,
+};
 pub use miniscript::{descriptor::KeyMap, Descriptor, Legacy, Miniscript, ScriptContext, Segwitv0};
 use miniscript::{DescriptorTrait, ForEachKey, TranslatePk};
 
@@ -267,41 +267,10 @@ pub(crate) trait XKeyUtils {
     fn root_fingerprint(&self, secp: &SecpCtx) -> Fingerprint;
 }
 
-// FIXME: `InnerXKey` was made private in rust-miniscript, so we have to implement this manually on
-// both `ExtendedPubKey` and `ExtendedPrivKey`.
-//
-// Revert back to using the trait once https://github.com/rust-bitcoin/rust-miniscript/pull/230 is
-// released
-impl XKeyUtils for DescriptorXKey<ExtendedPubKey> {
-    fn full_path(&self, append: &[ChildNumber]) -> DerivationPath {
-        let full_path = match self.origin {
-            Some((_, ref path)) => path
-                .into_iter()
-                .chain(self.derivation_path.into_iter())
-                .cloned()
-                .collect(),
-            None => self.derivation_path.clone(),
-        };
-
-        if self.wildcard != Wildcard::None {
-            full_path
-                .into_iter()
-                .chain(append.iter())
-                .cloned()
-                .collect()
-        } else {
-            full_path
-        }
-    }
-
-    fn root_fingerprint(&self, _: &SecpCtx) -> Fingerprint {
-        match self.origin {
-            Some((fingerprint, _)) => fingerprint,
-            None => self.xkey.fingerprint(),
-        }
-    }
-}
-impl XKeyUtils for DescriptorXKey<ExtendedPrivKey> {
+impl<T> XKeyUtils for DescriptorXKey<T>
+where
+    T: InnerXKey,
+{
     fn full_path(&self, append: &[ChildNumber]) -> DerivationPath {
         let full_path = match self.origin {
             Some((_, ref path)) => path
@@ -326,7 +295,7 @@ impl XKeyUtils for DescriptorXKey<ExtendedPrivKey> {
     fn root_fingerprint(&self, secp: &SecpCtx) -> Fingerprint {
         match self.origin {
             Some((fingerprint, _)) => fingerprint,
-            None => self.xkey.fingerprint(secp),
+            None => self.xkey.xkey_fingerprint(secp),
         }
     }
 }
