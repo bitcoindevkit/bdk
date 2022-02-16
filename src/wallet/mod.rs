@@ -116,6 +116,13 @@ pub enum AddressIndex {
     /// caller is untrusted; for example when deriving donation addresses on-demand for a public
     /// web page.
     LastUnused,
+    /// Return the address for the first address in the keychain that has not been used in a received
+    /// transaction. Otherwise return a new address as with [`AddressIndex::New`].
+    ///
+    /// Use with caution, if the wallet has not yet detected an address has been used it could
+    /// return an already used address. This function is primarily meant for making use of addresses earlier
+    /// in the keychain that were infact never used.
+    FirstUnused,
     /// Return the address for a specific descriptor index. Does not change the current descriptor
     /// index used by `AddressIndex::New` and `AddressIndex::LastUsed`.
     ///
@@ -290,7 +297,7 @@ where
 
     // Return the the last previously derived address for `keychain` if it has not been used in a
     // received transaction. Otherwise return a new address using [`Wallet::get_new_address`].
-    fn get_unused_address(&self, keychain: KeychainKind) -> Result<AddressInfo, Error> {
+    fn get_last_unused_address(&self, keychain: KeychainKind) -> Result<AddressInfo, Error> {
         let mut unused_key_indexes = self.get_unused_key_indexes(keychain)?;
         match unused_key_indexes.pop() {
             None => self.get_new_address(keychain),
@@ -321,6 +328,27 @@ where
                         .map_err(|_| Error::ScriptDoesntHaveAddressForm)
                 }
             }
+        }
+    }
+
+    // Return the the first address in the keychain which has not been a recipient of a transaction
+    fn get_first_unused_address(&self, keychain: KeychainKind) -> Result<AddressInfo, Error> {
+        let unused_key_indexes = self.get_unused_key_indexes(keychain)?;
+        if unused_key_indexes.is_empty() {
+            self.get_new_address(keychain)
+        } else {
+            let derived_key = self
+                .get_descriptor_for_keychain(keychain)
+                .as_derived(unused_key_indexes[0], &self.secp);
+
+            derived_key
+                .address(self.network)
+                .map(|address| AddressInfo {
+                    address,
+                    index: unused_key_indexes[0],
+                    keychain,
+                })
+                .map_err(|_| Error::ScriptDoesntHaveAddressForm)
         }
     }
 
@@ -378,7 +406,8 @@ where
     ) -> Result<AddressInfo, Error> {
         match address_index {
             AddressIndex::New => self.get_new_address(keychain),
-            AddressIndex::LastUnused => self.get_unused_address(keychain),
+            AddressIndex::LastUnused => self.get_last_unused_address(keychain),
+            AddressIndex::FirstUnused => self.get_first_unused_address(keychain),
             AddressIndex::Peek(index) => self.peek_address(index, keychain),
             AddressIndex::Reset(index) => self.reset_address(index, keychain),
         }
@@ -1703,7 +1732,7 @@ pub(crate) mod test {
 
     use super::*;
     use crate::signer::{SignOptions, SignerError};
-    use crate::wallet::AddressIndex::{LastUnused, New, Peek, Reset};
+    use crate::wallet::AddressIndex::{FirstUnused, LastUnused, New, Peek, Reset};
 
     #[test]
     fn test_cache_addresses_fixed() {
@@ -3907,6 +3936,36 @@ pub(crate) mod test {
 
         assert_eq!(
             wallet.get_address(LastUnused).unwrap().to_string(),
+            "tb1q4er7kxx6sssz3q7qp7zsqsdx4erceahhax77d7"
+        );
+    }
+
+    #[test]
+    fn test_firstunused_address() {
+        let descriptor = "wpkh(tpubEBr4i6yk5nf5DAaJpsi9N2pPYBeJ7fZ5Z9rmN4977iYLCGco1VyjB9tvvuvYtfZzjD5A8igzgw3HeWeeKFmanHYqksqZXYXGsw5zjnj7KM9/*)";
+        let descriptors = testutils!(@descriptors (descriptor));
+        let wallet = Wallet::new(
+            &descriptors.0,
+            None,
+            Network::Testnet,
+            MemoryDatabase::new(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            wallet.get_address(FirstUnused).unwrap().to_string(),
+            "tb1q6yn66vajcctph75pvylgkksgpp6nq04ppwct9a"
+        );
+
+        // use the first address
+        crate::populate_test_db!(
+            wallet.database.borrow_mut(),
+            testutils! (@tx ( (@external descriptors, 0) => 25_000 ) (@confirmations 1)),
+            Some(100),
+        );
+
+        assert_eq!(
+            wallet.get_address(FirstUnused).unwrap().to_string(),
             "tb1q4er7kxx6sssz3q7qp7zsqsdx4erceahhax77d7"
         );
     }
