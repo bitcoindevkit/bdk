@@ -359,7 +359,7 @@ macro_rules! bdk_blockchain_tests {
      fn $_fn_name:ident ( $( $test_client:ident : &TestClient )? $(,)? ) -> $blockchain:ty $block:block) => {
         #[cfg(test)]
         mod bdk_blockchain_tests {
-            use $crate::bitcoin::Network;
+            use $crate::bitcoin::{Transaction, Network};
             use $crate::testutils::blockchain_tests::TestClient;
             use $crate::blockchain::noop_progress;
             use $crate::database::MemoryDatabase;
@@ -1078,6 +1078,49 @@ macro_rules! bdk_blockchain_tests {
 
                 let taproot_balance = taproot_wallet_client.get_balance(None, None).unwrap();
                 assert_eq!(taproot_balance.as_sat(), 25_000, "node has incorrect taproot wallet balance");
+            }
+
+            #[test]
+            fn test_tx_chain() {
+                use bitcoincore_rpc::RpcApi;
+                use bitcoin::consensus::encode::deserialize;
+                use $crate::wallet::AddressIndex;
+
+                // Here we want to test that we set correctly the send and receive
+                // fields in the transaction object. For doing so, we create two
+                // different txs, the second one spending from the first:
+                // 1.
+                // Core (#1) -> Core (#2)
+                //           -> Us   (#3)
+                // 2.
+                // Core (#2) -> Us   (#4)
+
+                let (wallet, _, mut test_client) = init_single_sig();
+                let bdk_address = wallet.get_address(AddressIndex::New).unwrap().address;
+                let core_address = test_client.get_new_address(None, None).unwrap();
+                let tx = testutils! {
+                    @tx ( (@addr bdk_address.clone()) => 50_000, (@addr core_address.clone()) => 40_000 )
+                };
+
+                // Tx one: from Core #1 to Core #2 and Us #3.
+                let txid_1 = test_client.receive(tx);
+                let tx_1: Transaction = deserialize(&test_client.get_transaction(&txid_1, None).unwrap().hex).unwrap();
+                let vout_1 = tx_1.output.into_iter().position(|o| o.script_pubkey == core_address.script_pubkey()).unwrap() as u32;
+                wallet.sync(noop_progress(), None).unwrap();
+                let tx_1 = wallet.list_transactions(false).unwrap().into_iter().find(|tx| tx.txid == txid_1).unwrap();
+                assert_eq!(tx_1.received, 50_000);
+                assert_eq!(tx_1.sent, 0);
+
+                // Tx two: from Core #2 to Us #4.
+                let tx = testutils! {
+                    @tx ( (@addr bdk_address) => 10_000 ) ( @inputs (txid_1,vout_1))
+                };
+                let txid_2 = test_client.receive(tx);
+
+                wallet.sync(noop_progress(), None).unwrap();
+                let tx_2 = wallet.list_transactions(false).unwrap().into_iter().find(|tx| tx.txid == txid_2).unwrap();
+                assert_eq!(tx_2.received, 10_000);
+                assert_eq!(tx_2.sent, 0);
             }
         }
     };
