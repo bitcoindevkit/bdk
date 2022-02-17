@@ -95,6 +95,7 @@ impl FromStr for WalletExport {
     }
 }
 
+#[allow(clippy::manual_split_once)]
 fn remove_checksum(s: String) -> String {
     s.splitn(2, '#').next().map(String::from).unwrap()
 }
