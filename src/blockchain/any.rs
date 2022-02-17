@@ -108,6 +108,7 @@ macro_rules! impl_inner_method {
 /// It allows switching backend at runtime
 ///
 /// See [this module](crate::blockchain::any)'s documentation for a usage example.
+#[allow(clippy::large_enum_variant)] // TODO fix https://rust-lang.github.io/rust-clippy/master/index.html#large_enum_variant
 pub enum AnyBlockchain {
     #[cfg(feature = "electrum")]
     #[cfg_attr(docsrs, doc(cfg(feature = "electrum")))]
