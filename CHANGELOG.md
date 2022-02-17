@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- Increase project MSRV from 1.46.0 to 1.49.0, see new policy in README
+
 ## [v0.16.0] - [v0.15.0]
 
 - Disable `reqwest` default features.
