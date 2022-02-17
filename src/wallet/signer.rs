@@ -448,7 +448,7 @@ impl SignersContainer {
 /// Options for a software signer
 ///
 /// Adjust the behavior of our software signers and the way a transaction is finalized
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct SignOptions {
     /// Whether the signer should trust the `witness_utxo`, if the `non_witness_utxo` hasn't been
     /// provided
@@ -477,16 +477,6 @@ pub struct SignOptions {
     ///
     /// Defaults to `false` which will only allow signing using `SIGHASH_ALL`.
     pub allow_all_sighashes: bool,
-}
-
-impl Default for SignOptions {
-    fn default() -> Self {
-        SignOptions {
-            trust_witness_utxo: false,
-            assume_height: None,
-            allow_all_sighashes: false,
-        }
-    }
 }
 
 pub(crate) trait ComputeSighash {
