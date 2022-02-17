@@ -115,7 +115,7 @@ pub struct Peer {
     writer: Arc<Mutex<TcpStream>>,
     responses: Arc<RwLock<ResponsesMap>>,
 
-    reader_thread: thread::JoinHandle<()>,
+    _reader_thread: thread::JoinHandle<()>,
     connected: Arc<RwLock<bool>>,
 
     mempool: Arc<Mempool>,
@@ -228,7 +228,7 @@ impl Peer {
         Ok(Peer {
             writer,
             responses,
-            reader_thread,
+            _reader_thread: reader_thread,
             connected,
             mempool,
             version,
