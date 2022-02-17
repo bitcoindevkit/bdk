@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- Pin tokio dependency version to ~1.14 to prevent errors due to their new MSRV 1.49.0
+
 ## [v0.16.0] - [v0.15.0]
 
 - Disable `reqwest` default features.
