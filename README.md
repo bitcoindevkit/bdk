@@ -170,6 +170,16 @@ cargo test --features test-electrum
 The other options are `test-esplora` or `test-rpc`.
 Note that `electrs` and `bitcoind` binaries are automatically downloaded (on mac and linux), to specify you already have installed binaries you must use `--no-default-features` and provide `BITCOIND_EXE` and `ELECTRS_EXE` as environment variables.
 
+## Supported Rust Versions
+
+The BDK MSRV (minimum supported rust version) will be as low as possible to support required 
+dependencies and no higher than the [rustc](https://tracker.debian.org/pkg/rustc) version packaged 
+with the Debian ["testing"] release, and if possible the ["stable"] release. We will only increase 
+the BDK MSRV with a new MINOR release, never a PATCH release.
+
+["testing"]: https://www.debian.org/releases/testing/
+["stable"]: https://www.debian.org/releases/stable/
+
 ## License
 
 Licensed under either of
