@@ -85,7 +85,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let network = matches
         .value_of("network")
-        .map(|n| Network::from_str(n))
+        .map(Network::from_str)
         .transpose()
         .unwrap()
         .unwrap_or(Network::Testnet);
