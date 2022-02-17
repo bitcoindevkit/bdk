@@ -90,13 +90,19 @@ impl TestClient {
             map.insert(out.to_address.clone(), Amount::from_sat(out.value));
         }
 
+        let input: Vec<_> = meta_tx
+            .input
+            .into_iter()
+            .map(|x| x.into_raw_tx_input())
+            .collect();
+
         if self.get_balance(None, None).unwrap() < Amount::from_sat(required_balance) {
             panic!("Insufficient funds in bitcoind. Please generate a few blocks with: `bitcoin-cli generatetoaddress 10 {}`", self.get_new_address(None, None).unwrap());
         }
 
         // FIXME: core can't create a tx with two outputs to the same address
         let tx = self
-            .create_raw_transaction_hex(&[], &map, meta_tx.locktime, meta_tx.replaceable)
+            .create_raw_transaction_hex(&input, &map, meta_tx.locktime, meta_tx.replaceable)
             .unwrap();
         let tx = self.fund_raw_transaction(tx, None, None).unwrap();
         let mut tx: Transaction = deserialize(&tx.hex).unwrap();
