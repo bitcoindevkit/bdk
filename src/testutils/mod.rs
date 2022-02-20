@@ -15,10 +15,36 @@
 pub mod blockchain_tests;
 
 use bitcoin::secp256k1::{Secp256k1, Verification};
-use bitcoin::{Address, PublicKey};
+use bitcoin::{Address, PublicKey, Txid};
 
 use miniscript::descriptor::DescriptorPublicKey;
 use miniscript::{Descriptor, MiniscriptKey, TranslatePk};
+
+#[derive(Clone, Debug)]
+pub struct TestIncomingInput {
+    pub txid: Txid,
+    pub vout: u32,
+    pub sequence: Option<u32>,
+}
+
+impl TestIncomingInput {
+    pub fn new(txid: Txid, vout: u32, sequence: Option<u32>) -> Self {
+        Self {
+            txid,
+            vout,
+            sequence,
+        }
+    }
+
+    #[cfg(feature = "test-blockchains")]
+    pub fn into_raw_tx_input(self) -> bitcoincore_rpc::json::CreateRawTransactionInput {
+        bitcoincore_rpc::json::CreateRawTransactionInput {
+            txid: self.txid,
+            vout: self.vout,
+            sequence: self.sequence,
+        }
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct TestIncomingOutput {
@@ -37,6 +63,7 @@ impl TestIncomingOutput {
 
 #[derive(Clone, Debug)]
 pub struct TestIncomingTx {
+    pub input: Vec<TestIncomingInput>,
     pub output: Vec<TestIncomingOutput>,
     pub min_confirmations: Option<u64>,
     pub locktime: Option<i64>,
@@ -45,17 +72,23 @@ pub struct TestIncomingTx {
 
 impl TestIncomingTx {
     pub fn new(
+        input: Vec<TestIncomingInput>,
         output: Vec<TestIncomingOutput>,
         min_confirmations: Option<u64>,
         locktime: Option<i64>,
         replaceable: Option<bool>,
     ) -> Self {
         Self {
+            input,
             output,
             min_confirmations,
             locktime,
             replaceable,
         }
+    }
+
+    pub fn add_input(&mut self, input: TestIncomingInput) {
+        self.input.push(input);
     }
 
     pub fn add_output(&mut self, output: TestIncomingOutput) {
@@ -123,16 +156,21 @@ macro_rules! testutils {
     });
     ( @e $descriptors:expr, $child:expr ) => ({ testutils!(@external $descriptors, $child) });
     ( @i $descriptors:expr, $child:expr ) => ({ testutils!(@internal $descriptors, $child) });
+    ( @addr $addr:expr ) => ({ $addr });
 
-    ( @tx ( $( ( $( $addr:tt )* ) => $amount:expr ),+ ) $( ( @locktime $locktime:expr ) )? $( ( @confirmations $confirmations:expr ) )? $( ( @replaceable $replaceable:expr ) )? ) => ({
+    ( @tx ( $( ( $( $addr:tt )* ) => $amount:expr ),+ ) $( ( @inputs $( ($txid:expr, $vout:expr) ),+ ) )? $( ( @locktime $locktime:expr ) )? $( ( @confirmations $confirmations:expr ) )? $( ( @replaceable $replaceable:expr ) )? ) => ({
         let outs = vec![$( $crate::testutils::TestIncomingOutput::new($amount, testutils!( $($addr)* ))),+];
+        let _ins: Vec<$crate::testutils::TestIncomingInput> = vec![];
+        $(
+            let _ins = vec![$( $crate::testutils::TestIncomingInput { txid: $txid, vout: $vout, sequence: None }),+];
+        )?
 
         let locktime = None::<i64>$(.or(Some($locktime)))?;
 
         let min_confirmations = None::<u64>$(.or(Some($confirmations)))?;
         let replaceable = None::<bool>$(.or(Some($replaceable)))?;
 
-        $crate::testutils::TestIncomingTx::new(outs, min_confirmations, locktime, replaceable)
+        $crate::testutils::TestIncomingTx::new(_ins, outs, min_confirmations, locktime, replaceable)
     });
 
     ( @literal $key:expr ) => ({

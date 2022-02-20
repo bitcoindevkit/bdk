@@ -257,7 +257,9 @@ impl Blockchain for RpcBlockchain {
 
                 for input in tx.input.iter() {
                     if let Some(previous_output) = db.get_previous_output(&input.previous_output)? {
-                        sent += previous_output.value;
+                        if db.is_mine(&previous_output.script_pubkey)? {
+                            sent += previous_output.value;
+                        }
                     }
                 }
 
