@@ -29,13 +29,17 @@ static MIGRATIONS: &[&str] = &[
     "CREATE INDEX idx_txid_vout ON utxos(txid, vout);",
     "CREATE TABLE transactions (txid BLOB, raw_tx BLOB);",
     "CREATE INDEX idx_txid ON transactions(txid);",
-    "CREATE TABLE transaction_details (txid BLOB, timestamp INTEGER, received INTEGER, sent INTEGER, fee INTEGER, height INTEGER);",
+    "CREATE TABLE transaction_details (txid BLOB, timestamp INTEGER, received INTEGER, sent INTEGER, fee INTEGER, height INTEGER, verified INTEGER DEFAULT 0);",
     "CREATE INDEX idx_txdetails_txid ON transaction_details(txid);",
     "CREATE TABLE last_derivation_indices (keychain TEXT, value INTEGER);",
     "CREATE UNIQUE INDEX idx_indices_keychain ON last_derivation_indices(keychain);",
     "CREATE TABLE checksums (keychain TEXT, checksum BLOB);",
     "CREATE INDEX idx_checksums_keychain ON checksums(keychain);",
-    "CREATE TABLE sync_time (id INTEGER PRIMARY KEY, height INTEGER, timestamp INTEGER);"
+    "CREATE TABLE sync_time (id INTEGER PRIMARY KEY, height INTEGER, timestamp INTEGER);",
+    "ALTER TABLE transaction_details RENAME TO transaction_details_old;",
+    "CREATE TABLE transaction_details (txid BLOB, timestamp INTEGER, received INTEGER, sent INTEGER, fee INTEGER, height INTEGER);",
+    "INSERT INTO transaction_details SELECT txid, timestamp, received, sent, fee, height FROM transaction_details_old;",
+    "DROP TABLE transaction_details_old;",
 ];
 
 /// Sqlite database stored on filesystem
