@@ -171,6 +171,18 @@ impl<D> Wallet<D>
 where
     D: BatchDatabase,
 {
+
+    #[deprecated = "Just use Wallet::new -- all wallets are offline now!"]
+    /// Create a new "offline" wallet
+    pub fn new_offline<E: IntoWalletDescriptor>(
+        descriptor: E,
+        change_descriptor: Option<E>,
+        network: Network,
+        database: D,
+    ) -> Result<Self, Error> {
+        Self::new(descriptor, change_descriptor, network, database)
+    }
+
     /// Create a wallet.
     ///
     /// The only way this can fail is if the descriptors passed in do not match the checksums in `database`.
