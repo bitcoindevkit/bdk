@@ -6,6 +6,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- Pin tokio dependency version to ~1.14 to prevent errors due to their new MSRV 1.49.0
 - Removed default verification from `wallet::sync`. sync-time verification is added in `script_sync` and is activated by `verify` feature flag.
 - `verify` flag removed from `TransactionDetails`.
 
