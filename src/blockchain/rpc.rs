@@ -33,9 +33,7 @@
 
 use crate::bitcoin::consensus::deserialize;
 use crate::bitcoin::{Address, Network, OutPoint, Transaction, TxOut, Txid};
-use crate::blockchain::{
-    Blockchain, Capability, ConfigurableBlockchain, GetHeight, Progress, WalletSync,
-};
+use crate::blockchain::*;
 use crate::database::{BatchDatabase, DatabaseUtils};
 use crate::{BlockTime, Error, FeeRate, KeychainKind, LocalUtxo, TransactionDetails};
 use bitcoincore_rpc::json::{
@@ -141,10 +139,6 @@ impl Blockchain for RpcBlockchain {
         self.capabilities.clone()
     }
 
-    fn get_tx(&self, txid: &Txid) -> Result<Option<Transaction>, Error> {
-        Ok(Some(self.client.get_raw_transaction(txid, None)?))
-    }
-
     fn broadcast(&self, tx: &Transaction) -> Result<(), Error> {
         Ok(self.client.send_raw_transaction(tx).map(|_| ())?)
     }
@@ -158,6 +152,12 @@ impl Blockchain for RpcBlockchain {
             .as_sat() as f64;
 
         Ok(FeeRate::from_sat_per_vb((sat_per_kb / 1000f64) as f32))
+    }
+}
+
+impl GetTx for RpcBlockchain {
+    fn get_tx(&self, txid: &Txid) -> Result<Option<Transaction>, Error> {
+        Ok(Some(self.client.get_raw_transaction(txid, None)?))
     }
 }
 

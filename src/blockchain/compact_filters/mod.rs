@@ -67,7 +67,7 @@ mod peer;
 mod store;
 mod sync;
 
-use super::{Blockchain, Capability, ConfigurableBlockchain, GetHeight, Progress, WalletSync};
+use crate::blockchain::*;
 use crate::database::{BatchDatabase, BatchOperations, DatabaseUtils};
 use crate::error::Error;
 use crate::types::{KeychainKind, LocalUtxo, TransactionDetails};
@@ -225,12 +225,6 @@ impl Blockchain for CompactFiltersBlockchain {
         vec![Capability::FullHistory].into_iter().collect()
     }
 
-    fn get_tx(&self, txid: &Txid) -> Result<Option<Transaction>, Error> {
-        Ok(self.peers[0]
-            .get_mempool()
-            .get_tx(&Inventory::Transaction(*txid)))
-    }
-
     fn broadcast(&self, tx: &Transaction) -> Result<(), Error> {
         self.peers[0].broadcast_tx(tx.clone())?;
 
@@ -246,6 +240,14 @@ impl Blockchain for CompactFiltersBlockchain {
 impl GetHeight for CompactFiltersBlockchain {
     fn get_height(&self) -> Result<u32, Error> {
         Ok(self.headers.get_height()? as u32)
+    }
+}
+
+impl GetTx for CompactFiltersBlockchain {
+    fn get_tx(&self, txid: &Txid) -> Result<Option<Transaction>, Error> {
+        Ok(self.peers[0]
+            .get_mempool()
+            .get_tx(&Inventory::Transaction(*txid)))
     }
 }
 

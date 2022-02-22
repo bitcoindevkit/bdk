@@ -68,10 +68,6 @@ impl Blockchain for ElectrumBlockchain {
         .collect()
     }
 
-    fn get_tx(&self, txid: &Txid) -> Result<Option<Transaction>, Error> {
-        Ok(self.client.transaction_get(txid).map(Option::Some)?)
-    }
-
     fn broadcast(&self, tx: &Transaction) -> Result<(), Error> {
         Ok(self.client.transaction_broadcast(tx).map(|_| ())?)
     }
@@ -91,6 +87,12 @@ impl GetHeight for ElectrumBlockchain {
             .client
             .block_headers_subscribe()
             .map(|data| data.height as u32)?)
+    }
+}
+
+impl GetTx for ElectrumBlockchain {
+    fn get_tx(&self, txid: &Txid) -> Result<Option<Transaction>, Error> {
+        Ok(self.client.transaction_get(txid).map(Option::Some)?)
     }
 }
 

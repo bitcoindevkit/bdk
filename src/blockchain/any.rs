@@ -89,9 +89,6 @@ impl Blockchain for AnyBlockchain {
         maybe_await!(impl_inner_method!(self, get_capabilities))
     }
 
-    fn get_tx(&self, txid: &Txid) -> Result<Option<Transaction>, Error> {
-        maybe_await!(impl_inner_method!(self, get_tx, txid))
-    }
     fn broadcast(&self, tx: &Transaction) -> Result<(), Error> {
         maybe_await!(impl_inner_method!(self, broadcast, tx))
     }
@@ -105,6 +102,13 @@ impl Blockchain for AnyBlockchain {
 impl GetHeight for AnyBlockchain {
     fn get_height(&self) -> Result<u32, Error> {
         maybe_await!(impl_inner_method!(self, get_height))
+    }
+}
+
+#[maybe_async]
+impl GetTx for AnyBlockchain {
+    fn get_tx(&self, txid: &Txid) -> Result<Option<Transaction>, Error> {
+        maybe_await!(impl_inner_method!(self, get_tx, txid))
     }
 }
 

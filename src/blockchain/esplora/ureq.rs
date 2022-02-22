@@ -87,10 +87,6 @@ impl Blockchain for EsploraBlockchain {
         .collect()
     }
 
-    fn get_tx(&self, txid: &Txid) -> Result<Option<Transaction>, Error> {
-        Ok(self.url_client._get_tx(txid)?)
-    }
-
     fn broadcast(&self, tx: &Transaction) -> Result<(), Error> {
         let _txid = self.url_client._broadcast(tx)?;
         Ok(())
@@ -105,6 +101,12 @@ impl Blockchain for EsploraBlockchain {
 impl GetHeight for EsploraBlockchain {
     fn get_height(&self) -> Result<u32, Error> {
         Ok(self.url_client._get_height()?)
+    }
+}
+
+impl GetTx for EsploraBlockchain {
+    fn get_tx(&self, txid: &Txid) -> Result<Option<Transaction>, Error> {
+        Ok(self.url_client._get_tx(txid)?)
     }
 }
 

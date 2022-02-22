@@ -171,7 +171,6 @@ impl<D> Wallet<D>
 where
     D: BatchDatabase,
 {
-
     #[deprecated = "Just use Wallet::new -- all wallets are offline now!"]
     /// Create a new "offline" wallet
     pub fn new_offline<E: IntoWalletDescriptor>(

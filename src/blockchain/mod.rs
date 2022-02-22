@@ -86,11 +86,9 @@ pub enum Capability {
 
 /// Trait that defines the actions that must be supported by a blockchain backend
 #[maybe_async]
-pub trait Blockchain: WalletSync + GetHeight {
+pub trait Blockchain: WalletSync + GetHeight + GetTx {
     /// Return the set of [`Capability`] supported by this backend
     fn get_capabilities(&self) -> HashSet<Capability>;
-    /// Fetch a transaction from the blockchain given its txid
-    fn get_tx(&self, txid: &Txid) -> Result<Option<Transaction>, Error>;
     /// Broadcast a transaction
     fn broadcast(&self, tx: &Transaction) -> Result<(), Error>;
     /// Estimate the fee rate required to confirm a transaction in a given `target` of blocks
@@ -102,6 +100,13 @@ pub trait Blockchain: WalletSync + GetHeight {
 pub trait GetHeight {
     /// Return the current height
     fn get_height(&self) -> Result<u32, Error>;
+}
+
+#[maybe_async]
+/// Trait for getting a transaction by txid
+pub trait GetTx {
+    /// Fetch a transaction given its txid
+    fn get_tx(&self, txid: &Txid) -> Result<Option<Transaction>, Error>;
 }
 
 /// Trait for blockchains that can sync by updating the database directly.
@@ -230,15 +235,19 @@ impl<T: Blockchain> Blockchain for Arc<T> {
         maybe_await!(self.deref().get_capabilities())
     }
 
-    fn get_tx(&self, txid: &Txid) -> Result<Option<Transaction>, Error> {
-        maybe_await!(self.deref().get_tx(txid))
-    }
     fn broadcast(&self, tx: &Transaction) -> Result<(), Error> {
         maybe_await!(self.deref().broadcast(tx))
     }
 
     fn estimate_fee(&self, target: usize) -> Result<FeeRate, Error> {
         maybe_await!(self.deref().estimate_fee(target))
+    }
+}
+
+#[maybe_async]
+impl<T: GetTx> GetTx for Arc<T> {
+    fn get_tx(&self, txid: &Txid) -> Result<Option<Transaction>, Error> {
+        maybe_await!(self.deref().get_tx(txid))
     }
 }
 
