@@ -166,9 +166,9 @@ impl Blockchain for EsploraBlockchain {
                         .request()
                         .map(|txid| {
                             let tx = tx_index.get(txid).expect("must be in index");
-                            (tx.previous_outputs(), tx.to_tx())
+                            Ok((tx.previous_outputs(), tx.to_tx()))
                         })
-                        .collect();
+                        .collect::<Result<_, Error>>()?;
                     tx_req.satisfy(full_txs)?
                 }
                 Request::Finish(batch_update) => break batch_update,

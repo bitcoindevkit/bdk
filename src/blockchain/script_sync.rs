@@ -178,7 +178,9 @@ impl<'a, D: BatchDatabase> TxReq<'a, D> {
                 let mut inputs_sum: u64 = 0;
                 let mut outputs_sum: u64 = 0;
 
-                for (txout, input) in vout.into_iter().zip(tx.input.iter()) {
+                for (txout, (_input_index, input)) in
+                    vout.into_iter().zip(tx.input.iter().enumerate())
+                {
                     let txout = match txout {
                         Some(txout) => txout,
                         None => {
@@ -190,7 +192,19 @@ impl<'a, D: BatchDatabase> TxReq<'a, D> {
                             continue;
                         }
                     };
-
+                    // Verify this input if requested via feature flag
+                    #[cfg(feature = "verify")]
+                    {
+                        use crate::wallet::verify::VerifyError;
+                        let serialized_tx = bitcoin::consensus::serialize(&tx);
+                        bitcoinconsensus::verify(
+                            txout.script_pubkey.to_bytes().as_ref(),
+                            txout.value,
+                            &serialized_tx,
+                            _input_index,
+                        )
+                        .map_err(VerifyError::from)?;
+                    }
                     inputs_sum += txout.value;
                     if self.state.db.is_mine(&txout.script_pubkey)? {
                         sent += txout.value;
@@ -214,7 +228,6 @@ impl<'a, D: BatchDatabase> TxReq<'a, D> {
                     // we're going to fill this in later
                     confirmation_time: None,
                     fee: Some(fee),
-                    verified: false,
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;

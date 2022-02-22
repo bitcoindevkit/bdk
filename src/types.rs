@@ -211,15 +211,6 @@ pub struct TransactionDetails {
     /// If the transaction is confirmed, contains height and timestamp of the block containing the
     /// transaction, unconfirmed transaction contains `None`.
     pub confirmation_time: Option<BlockTime>,
-    /// Whether the tx has been verified against the consensus rules
-    ///
-    /// Confirmed txs are considered "verified" by default, while unconfirmed txs are checked to
-    /// ensure an unstrusted [`Blockchain`](crate::blockchain::Blockchain) backend can't trick the
-    /// wallet into using an invalid tx as an RBF template.
-    ///
-    /// The check is only performed when the `verify` feature is enabled.
-    #[serde(default = "bool::default")] // default to `false` if not specified
-    pub verified: bool,
 }
 
 /// Block height and timestamp of a block

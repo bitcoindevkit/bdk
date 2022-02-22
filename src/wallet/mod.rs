@@ -712,7 +712,6 @@ where
             received,
             sent,
             fee: Some(fee_amount),
-            verified: true,
         };
 
         Ok((psbt, transaction_details))
@@ -1535,23 +1534,6 @@ where
             maybe_await!(self
                 .client
                 .sync(self.database.borrow_mut().deref_mut(), progress_update,))?;
-        }
-
-        #[cfg(feature = "verify")]
-        {
-            debug!("Verifying transactions...");
-            for mut tx in self.database.borrow().iter_txs(true)? {
-                if !tx.verified {
-                    verify::verify_tx(
-                        tx.transaction.as_ref().ok_or(Error::TransactionNotFound)?,
-                        self.database.borrow().deref(),
-                        &self.client,
-                    )?;
-
-                    tx.verified = true;
-                    self.database.borrow_mut().set_tx(&tx)?;
-                }
-            }
         }
 
         let sync_time = SyncTime {

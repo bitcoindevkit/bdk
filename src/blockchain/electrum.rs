@@ -175,6 +175,7 @@ impl Blockchain for ElectrumBlockchain {
                     let full_details = full_transactions
                         .into_iter()
                         .map(|tx| {
+                            let mut input_index = 0usize;
                             let prev_outputs = tx
                                 .input
                                 .iter()
@@ -189,6 +190,7 @@ impl Blockchain for ElectrumBlockchain {
                                         .output
                                         .get(input.previous_output.vout as usize)
                                         .ok_or_else(electrum_goof)?;
+                                    input_index += 1;
                                     Ok(Some(txout.clone()))
                                 })
                                 .collect::<Result<Vec<_>, Error>>()?;
