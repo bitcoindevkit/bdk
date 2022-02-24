@@ -621,7 +621,7 @@ macro_rules! bdk_blockchain_tests {
             #[test]
             fn test_sync_double_receive() {
                 let (wallet, blockchain, descriptors, mut test_client) = init_single_sig();
-                                let receiver_wallet = get_wallet_from_descriptors(&("wpkh(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW)".to_string(), None));
+                let receiver_wallet = get_wallet_from_descriptors(&("wpkh(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW)".to_string(), None));
                 // need to sync so rpc can start watching
                 receiver_wallet.sync(&blockchain, SyncOptions::default()).unwrap();
 
@@ -629,15 +629,15 @@ macro_rules! bdk_blockchain_tests {
                     @tx ( (@external descriptors, 0) => 50_000, (@external descriptors, 1) => 25_000 ) (@confirmations 1)
                 });
 
-                wallet.sync(&blockchain, SyncOptions::default()).unwrap();
+                wallet.sync(&blockchain, SyncOptions::default()).expect("sync");
                 assert_eq!(wallet.get_balance().unwrap(), 75_000, "incorrect balance");
                 let target_addr = receiver_wallet.get_address($crate::wallet::AddressIndex::New).unwrap().address;
 
                 let tx1 = {
                     let mut builder = wallet.build_tx();
                     builder.add_recipient(target_addr.script_pubkey(), 49_000).enable_rbf();
-                    let (mut psbt, _details) = builder.finish().unwrap();
-                    let finalized = wallet.sign(&mut psbt, Default::default()).unwrap();
+                    let (mut psbt, _details) = builder.finish().expect("building first tx");
+                    let finalized = wallet.sign(&mut psbt, Default::default()).expect("signing first tx");
                     assert!(finalized, "Cannot finalize transaction");
                     psbt.extract_tx()
                 };
@@ -645,17 +645,17 @@ macro_rules! bdk_blockchain_tests {
                 let tx2 = {
                     let mut builder = wallet.build_tx();
                     builder.add_recipient(target_addr.script_pubkey(), 49_000).enable_rbf().fee_rate(FeeRate::from_sat_per_vb(5.0));
-                    let (mut psbt, _details) = builder.finish().unwrap();
-                    let finalized = wallet.sign(&mut psbt, Default::default()).unwrap();
+                    let (mut psbt, _details) = builder.finish().expect("building replacement tx");
+                    let finalized = wallet.sign(&mut psbt, Default::default()).expect("signing replacement tx");
                     assert!(finalized, "Cannot finalize transaction");
                     psbt.extract_tx()
                 };
 
-                blockchain.broadcast(&tx1).unwrap();
-                blockchain.broadcast(&tx2).unwrap();
+                blockchain.broadcast(&tx1).expect("broadcasting first");
+                blockchain.broadcast(&tx2).expect("broadcasting replacement");
 
-                receiver_wallet.sync(&blockchain, SyncOptions::default()).unwrap();
-                assert_eq!(receiver_wallet.get_balance().unwrap(), 49_000, "should have received coins once and only once");
+                receiver_wallet.sync(&blockchain, SyncOptions::default()).expect("syncing receiver");
+                assert_eq!(receiver_wallet.get_balance().expect("balance"), 49_000, "should have received coins once and only once");
             }
 
             #[test]

@@ -318,22 +318,24 @@ impl WalletSync for RpcBlockchain {
             }
         }
 
-        let current_utxos: HashSet<_> = current_utxo
+        // Filter out trasactions that are for script pubkeys that aren't in this wallet.
+        let current_utxos = current_utxo
             .into_iter()
-            .map(|u| {
-                Ok(LocalUtxo {
-                    outpoint: OutPoint::new(u.txid, u.vout),
-                    keychain: db
-                        .get_path_from_script_pubkey(&u.script_pub_key)?
-                        .ok_or(Error::TransactionNotFound)?
-                        .0,
-                    txout: TxOut {
-                        value: u.amount.as_sat(),
-                        script_pubkey: u.script_pub_key,
-                    },
-                })
-            })
-            .collect::<Result<_, Error>>()?;
+            .filter_map(
+                |u| match db.get_path_from_script_pubkey(&u.script_pub_key) {
+                    Err(e) => Some(Err(e)),
+                    Ok(None) => None,
+                    Ok(Some(path)) => Some(Ok(LocalUtxo {
+                        outpoint: OutPoint::new(u.txid, u.vout),
+                        keychain: path.0,
+                        txout: TxOut {
+                            value: u.amount.as_sat(),
+                            script_pubkey: u.script_pub_key,
+                        },
+                    })),
+                },
+            )
+            .collect::<Result<HashSet<_>, Error>>()?;
 
         let spent: HashSet<_> = known_utxos.difference(&current_utxos).collect();
         for s in spent {
