@@ -163,7 +163,7 @@ impl fmt::Display for AddressInfo {
 pub struct SyncOptions {
     /// The progress tracker which may be informed when progress is made.
     pub progress: Option<Box<dyn Progress>>,
-    /// The maximum number of addresses sync on.
+    /// The maximum number of new addresses to derive and cache on sync.
     pub max_addresses: Option<u32>,
 }
 

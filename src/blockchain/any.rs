@@ -16,7 +16,7 @@
 //!
 //! ## Example
 //!
-//! When paired with the use of [`ConfigurableBlockchain`], it allows creating wallets with any
+//! When paired with the use of [`ConfigurableBlockchain`], it allows creating any
 //! blockchain type supported using a single line of code:
 //!
 //! ```no_run
