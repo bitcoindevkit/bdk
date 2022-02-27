@@ -42,10 +42,13 @@ use alloc::{boxed::Box, rc::Rc, string::String, vec::Vec};
 use core::cell::RefCell;
 use core::fmt;
 
+use alloc::sync::Arc;
+
 use bitcoin::psbt::{self, Psbt};
 use bitcoin::script::PushBytes;
 use bitcoin::{
-    absolute, Amount, FeeRate, OutPoint, ScriptBuf, Sequence, Transaction, Txid, Weight,
+    absolute, Amount, FeeRate, OutPoint, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Txid,
+    Weight,
 };
 use rand_core::RngCore;
 
@@ -763,8 +766,10 @@ impl fmt::Display for AddForeignUtxoError {
 #[cfg(feature = "std")]
 impl std::error::Error for AddForeignUtxoError {}
 
+type TxSort<T> = dyn Fn(&T, &T) -> core::cmp::Ordering;
+
 /// Ordering of the transaction's inputs and outputs
-#[derive(Default, Debug, Ord, PartialOrd, Eq, PartialEq, Hash, Clone, Copy)]
+#[derive(Clone, Default)]
 pub enum TxOrdering {
     /// Randomized (default)
     #[default]
@@ -773,6 +778,24 @@ pub enum TxOrdering {
     Untouched,
     /// BIP69 / Lexicographic
     Bip69Lexicographic,
+    /// Provide custom comparison functions for sorting
+    Custom {
+        /// Transaction inputs sort function
+        input_sort: Arc<TxSort<TxIn>>,
+        /// Transaction outputs sort function
+        output_sort: Arc<TxSort<TxOut>>,
+    },
+}
+
+impl core::fmt::Debug for TxOrdering {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+        match self {
+            TxOrdering::Shuffle => write!(f, "Shuffle"),
+            TxOrdering::Untouched => write!(f, "Untouched"),
+            TxOrdering::Bip69Lexicographic => write!(f, "Bip69Lexicographic"),
+            TxOrdering::Custom { .. } => write!(f, "Custom"),
+        }
+    }
 }
 
 impl TxOrdering {
@@ -780,14 +803,14 @@ impl TxOrdering {
     ///
     /// Uses the thread-local random number generator (rng).
     #[cfg(feature = "std")]
-    pub fn sort_tx(self, tx: &mut Transaction) {
+    pub fn sort_tx(&self, tx: &mut Transaction) {
         self.sort_tx_with_aux_rand(tx, &mut bitcoin::key::rand::thread_rng())
     }
 
     /// Sort transaction inputs and outputs by [`TxOrdering`] variant.
     ///
     /// Uses a provided random number generator (rng).
-    pub fn sort_tx_with_aux_rand(self, tx: &mut Transaction, rng: &mut impl RngCore) {
+    pub fn sort_tx_with_aux_rand(&self, tx: &mut Transaction, rng: &mut impl RngCore) {
         match self {
             TxOrdering::Untouched => {}
             TxOrdering::Shuffle => {
@@ -800,6 +823,13 @@ impl TxOrdering {
                 });
                 tx.output
                     .sort_unstable_by_key(|txout| (txout.value, txout.script_pubkey.clone()));
+            }
+            TxOrdering::Custom {
+                input_sort,
+                output_sort,
+            } => {
+                tx.input.sort_unstable_by(|a, b| input_sort(a, b));
+                tx.output.sort_unstable_by(|a, b| output_sort(a, b));
             }
         }
     }
@@ -946,6 +976,117 @@ mod test {
             tx.output[2].script_pubkey,
             ScriptBuf::from(vec![0xAA, 0xEE])
         );
+    }
+
+    #[test]
+    fn test_output_ordering_custom_but_bip69() {
+        use core::str::FromStr;
+
+        let original_tx = ordering_test_tx!();
+        let mut tx = original_tx;
+
+        let bip69_txin_cmp = |tx_a: &TxIn, tx_b: &TxIn| {
+            let project_outpoint = |t: &TxIn| (t.previous_output.txid, t.previous_output.vout);
+            project_outpoint(tx_a).cmp(&project_outpoint(tx_b))
+        };
+
+        let bip69_txout_cmp = |tx_a: &TxOut, tx_b: &TxOut| {
+            let project_utxo = |t: &TxOut| (t.value, t.script_pubkey.clone());
+            project_utxo(tx_a).cmp(&project_utxo(tx_b))
+        };
+
+        let custom_bip69_ordering = TxOrdering::Custom {
+            input_sort: Arc::new(bip69_txin_cmp),
+            output_sort: Arc::new(bip69_txout_cmp),
+        };
+
+        custom_bip69_ordering.sort_tx(&mut tx);
+
+        assert_eq!(
+            tx.input[0].previous_output,
+            bitcoin::OutPoint::from_str(
+                "0e53ec5dfb2cb8a71fec32dc9a634a35b7e24799295ddd5278217822e0b31f57:5"
+            )
+            .unwrap()
+        );
+        assert_eq!(
+            tx.input[1].previous_output,
+            bitcoin::OutPoint::from_str(
+                "0f60fdd185542f2c6ea19030b0796051e7772b6026dd5ddccd7a2f93b73e6fc2:0"
+            )
+            .unwrap()
+        );
+        assert_eq!(
+            tx.input[2].previous_output,
+            bitcoin::OutPoint::from_str(
+                "0f60fdd185542f2c6ea19030b0796051e7772b6026dd5ddccd7a2f93b73e6fc2:1"
+            )
+            .unwrap()
+        );
+
+        assert_eq!(tx.output[0].value.to_sat(), 800);
+        assert_eq!(tx.output[1].script_pubkey, ScriptBuf::from(vec![0xAA]));
+        assert_eq!(
+            tx.output[2].script_pubkey,
+            ScriptBuf::from(vec![0xAA, 0xEE])
+        );
+    }
+
+    #[test]
+    fn test_output_ordering_custom_with_sha256() {
+        use bitcoin::hashes::{sha256, Hash};
+
+        let original_tx = ordering_test_tx!();
+        let mut tx_1 = original_tx.clone();
+        let mut tx_2 = original_tx.clone();
+        let shared_secret = "secret_tweak";
+
+        let hash_txin_with_shared_secret_seed = Arc::new(|tx_a: &TxIn, tx_b: &TxIn| {
+            let secret_digest_from_txin = |txin: &TxIn| {
+                sha256::Hash::hash(
+                    &[
+                        &txin.previous_output.txid.to_raw_hash()[..],
+                        &txin.previous_output.vout.to_be_bytes(),
+                        shared_secret.as_bytes(),
+                    ]
+                    .concat(),
+                )
+            };
+            secret_digest_from_txin(tx_a).cmp(&secret_digest_from_txin(tx_b))
+        });
+
+        let hash_txout_with_shared_secret_seed = Arc::new(|tx_a: &TxOut, tx_b: &TxOut| {
+            let secret_digest_from_txout = |txin: &TxOut| {
+                sha256::Hash::hash(
+                    &[
+                        &txin.value.to_sat().to_be_bytes(),
+                        &txin.script_pubkey.clone().into_bytes()[..],
+                        shared_secret.as_bytes(),
+                    ]
+                    .concat(),
+                )
+            };
+            secret_digest_from_txout(tx_a).cmp(&secret_digest_from_txout(tx_b))
+        });
+
+        let custom_ordering_from_salted_sha256_1 = TxOrdering::Custom {
+            input_sort: hash_txin_with_shared_secret_seed.clone(),
+            output_sort: hash_txout_with_shared_secret_seed.clone(),
+        };
+
+        let custom_ordering_from_salted_sha256_2 = TxOrdering::Custom {
+            input_sort: hash_txin_with_shared_secret_seed,
+            output_sort: hash_txout_with_shared_secret_seed,
+        };
+
+        custom_ordering_from_salted_sha256_1.sort_tx(&mut tx_1);
+        custom_ordering_from_salted_sha256_2.sort_tx(&mut tx_2);
+
+        // Check the ordering is consistent between calls
+        assert_eq!(tx_1, tx_2);
+        // Check transaction order has changed
+        assert_ne!(tx_1, original_tx);
+        assert_ne!(tx_2, original_tx);
     }
 
     fn get_test_utxos() -> Vec<LocalOutput> {
