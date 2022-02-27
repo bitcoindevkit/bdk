@@ -2145,6 +2145,7 @@ pub(crate) mod test {
         let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
         let addr = wallet.get_address(New).unwrap();
         let mut builder = wallet.build_tx();
+        #[allow(deprecated)]
         builder
             .add_recipient(addr.script_pubkey(), 30_000)
             .add_recipient(addr.script_pubkey(), 10_000)

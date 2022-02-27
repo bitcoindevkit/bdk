@@ -36,11 +36,14 @@
 //! # Ok::<(), bdk::Error>(())
 //! ```
 
+use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::default::Default;
 use std::marker::PhantomData;
+use std::sync::Arc;
 
+use bitcoin::blockdata::transaction::{TxIn, TxOut};
 use bitcoin::util::psbt::{self, PartiallySignedTransaction as Psbt};
 use bitcoin::{OutPoint, Script, SigHashType, Transaction};
 
@@ -646,19 +649,39 @@ impl<'a, B, D: BatchDatabase> TxBuilder<'a, B, D, DefaultCoinSelectionAlgorithm,
 }
 
 /// Ordering of the transaction's inputs and outputs
-#[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Hash, Clone, Copy)]
+#[derive(Clone)]
 pub enum TxOrdering {
     /// Randomized (default)
     Shuffle,
     /// Unchanged
     Untouched,
     /// BIP69 / Lexicographic
+    #[deprecated = "BIP69 does not improve privacy as was the intention of the BIP"]
     Bip69Lexicographic,
+    /// Provide custom comparison functions for sorting
+    Custom {
+        /// Transaction inputs sort function
+        input_sort: Arc<dyn Fn(&TxIn, &TxIn) -> Ordering>,
+        /// Transaction outputs sort function
+        output_sort: Arc<dyn Fn(&TxOut, &TxOut) -> Ordering>,
+    },
 }
 
 impl Default for TxOrdering {
     fn default() -> Self {
         TxOrdering::Shuffle
+    }
+}
+
+impl std::fmt::Debug for TxOrdering {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            TxOrdering::Shuffle => write!(f, "Randomized"),
+            TxOrdering::Untouched => write!(f, "Unchanged"),
+            #[allow(deprecated)]
+            TxOrdering::Bip69Lexicographic => write!(f, "BIP69 / Lexicographic"),
+            TxOrdering::Custom { .. } => write!(f, "Custom"),
+        }
     }
 }
 
@@ -679,12 +702,20 @@ impl TxOrdering {
 
                 tx.output.shuffle(&mut rng);
             }
+            #[allow(deprecated)]
             TxOrdering::Bip69Lexicographic => {
                 tx.input.sort_unstable_by_key(|txin| {
                     (txin.previous_output.txid, txin.previous_output.vout)
                 });
                 tx.output
                     .sort_unstable_by_key(|txout| (txout.value, txout.script_pubkey.clone()));
+            }
+            TxOrdering::Custom {
+                input_sort,
+                output_sort,
+            } => {
+                tx.input.sort_unstable_by(|a, b| input_sort(a, b));
+                tx.output.sort_unstable_by(|a, b| output_sort(a, b));
             }
         }
     }
@@ -769,7 +800,7 @@ mod test {
 
     #[test]
     fn test_output_ordering_default_shuffle() {
-        assert_eq!(TxOrdering::default(), TxOrdering::Shuffle);
+        assert!(std::matches!(TxOrdering::default(), TxOrdering::Shuffle));
     }
 
     #[test]
@@ -800,6 +831,7 @@ mod test {
         let original_tx = ordering_test_tx!();
         let mut tx = original_tx;
 
+        #[allow(deprecated)]
         TxOrdering::Bip69Lexicographic.sort_tx(&mut tx);
 
         assert_eq!(
