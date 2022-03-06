@@ -163,8 +163,6 @@ impl fmt::Display for AddressInfo {
 pub struct SyncOptions {
     /// The progress tracker which may be informed when progress is made.
     pub progress: Option<Box<dyn Progress>>,
-    /// The maximum number of new addresses to derive and cache on sync.
-    pub max_addresses: Option<u32>,
 }
 
 impl<D> Wallet<D>
@@ -1524,14 +1522,10 @@ where
     ) -> Result<(), Error> {
         debug!("Begin sync...");
 
-        let SyncOptions {
-            max_addresses,
-            progress,
-        } = sync_opts;
+        let SyncOptions { progress } = sync_opts;
         let progress = progress.unwrap_or_else(|| Box::new(NoopProgress));
 
-        let run_setup =
-            self.ensure_addresses_cached(max_addresses.unwrap_or(CACHE_ADDR_BATCH_SIZE))?;
+        let run_setup = self.ensure_addresses_cached(CACHE_ADDR_BATCH_SIZE)?;
 
         debug!("run_setup: {}", run_setup);
         // TODO: what if i generate an address first and cache some addresses?
