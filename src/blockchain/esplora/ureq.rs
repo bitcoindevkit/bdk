@@ -24,7 +24,7 @@ use ureq::{Agent, Proxy, Response};
 use bitcoin::consensus::{deserialize, serialize};
 use bitcoin::hashes::hex::{FromHex, ToHex};
 use bitcoin::hashes::{sha256, Hash};
-use bitcoin::{BlockHeader, Script, Transaction, Txid};
+use bitcoin::{BlockHeader, Script, Transaction, TxOut, Txid};
 
 use super::api::Tx;
 use crate::blockchain::esplora::EsploraError;
@@ -46,8 +46,17 @@ struct UrlClient {
 #[derive(Debug)]
 pub struct EsploraBlockchain {
     url_client: UrlClient,
-    stop_gap: usize,
     concurrency: u8,
+}
+
+pub struct SyncSession {}
+pub struct WalletUpdate {
+    transactions: Vec<(Vec<Option<TxOut>>, Transaction)>,
+    last_active_index: Vec<usize>,
+}
+
+pub struct SetupSession {
+    scripts: Vec<(Box<dyn Iterator<Item = Script> + Send + 'static>, usize)>,
 }
 
 impl EsploraBlockchain {
@@ -59,7 +68,6 @@ impl EsploraBlockchain {
                 agent: Agent::new(),
             },
             concurrency: super::DEFAULT_CONCURRENT_REQUESTS,
-            stop_gap,
         }
     }
 
@@ -73,6 +81,85 @@ impl EsploraBlockchain {
     pub fn with_concurrency(mut self, concurrency: u8) -> Self {
         self.concurrency = concurrency;
         self
+    }
+
+    // pub fn setup(&self, session: SetupSession) -> Result<WalletUpdate, Error> {
+    //     let transactions = vec![];
+    //     // fn take_mut(iter: &mut impl Iterator<Item=Script>, n: usize) -> Vec<Script> {
+    //     //     let mut res = Vec::with_capacity(n);
+
+    //     //     for i in 0..n {
+    //     //         res.push(item);
+    //     //     }
+    //     //     res
+    //     // }
+    //     for (scripts, stop_gap) in session.scripts {
+    //     }
+    // }
+
+    pub fn setup_for_keychain(
+        &self,
+        mut scripts: impl Iterator<Item = Script>,
+        stop_gap: usize,
+    ) -> Result<(Vec<(Vec<Option<TxOut>>, Transaction)>, usize), Error> {
+        let mut empty_scripts = 0;
+        let mut last_active_index = 0;
+        let mut index = 0;
+        let mut transactions = vec![];
+        loop {
+            let handles = (0..self.concurrency)
+                .filter_map(|_| {
+                    let script = scripts.next()?;
+                    let client = self.url_client.clone();
+                    Some(std::thread::spawn(move || {
+                        let mut related_txs: Vec<Tx> = client._scripthash_txs(&script, None)?;
+
+                        let n_confirmed =
+                            related_txs.iter().filter(|tx| tx.status.confirmed).count();
+                        // esplora pages on 25 confirmed transactions. If there's 25 or more we
+                        // keep requesting to see if there's more.
+                        if n_confirmed >= 25 {
+                            loop {
+                                let new_related_txs: Vec<Tx> = client._scripthash_txs(
+                                    &script,
+                                    Some(related_txs.last().unwrap().txid),
+                                )?;
+                                let n = new_related_txs.len();
+                                related_txs.extend(new_related_txs);
+                                // we've reached the end
+                                if n < 25 {
+                                    break;
+                                }
+                            }
+                        }
+                        Result::<_, Error>::Ok(related_txs)
+                    }))
+                })
+                .collect::<Vec<_>>();
+
+            let n_handles = handles.len();
+
+            for handle in handles {
+                let txs = handle.join().unwrap()?; // TODO: don't unwrap return error
+                if txs.is_empty() {
+                    empty_scripts += 1;
+                } else {
+                    empty_scripts = 0;
+                    last_active_index = index;
+                }
+                index += 1;
+
+                for tx in txs {
+                    transactions.push((tx.previous_outputs(), tx.to_tx()))
+                }
+            }
+
+            if n_handles == 0 || empty_scripts >= stop_gap {
+                break;
+            }
+        }
+
+        Ok((transactions, last_active_index))
     }
 }
 
@@ -117,7 +204,7 @@ impl WalletSync for EsploraBlockchain {
         _progress_update: Box<dyn Progress>,
     ) -> Result<(), Error> {
         use crate::blockchain::script_sync::Request;
-        let mut request = script_sync::start(database, self.stop_gap)?;
+        let mut request = script_sync::start(database, todo!())?;
         let mut tx_index: HashMap<Txid, Tx> = HashMap::new();
         let batch_update = loop {
             request = match request {
@@ -373,5 +460,15 @@ impl From<ureq::Error> for EsploraError {
             ureq::Error::Status(code, _) => EsploraError::HttpResponse(code),
             e => EsploraError::Ureq(e),
         }
+    }
+}
+
+mod test {
+    use super::*;
+
+    #[test]
+    fn setup_session_is_send_and_static() {
+        fn assert_send_static<T: Send + 'static>() {}
+        assert_send_static::<SetupSession>()
     }
 }
