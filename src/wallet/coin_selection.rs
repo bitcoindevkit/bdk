@@ -183,7 +183,7 @@ impl<D: Database> CoinSelectionAlgorithm<D> for LargestFirstCoinSelection {
         mut optional_utxos: Vec<WeightedUtxo>,
         fee_rate: FeeRate,
         amount_needed: u64,
-        mut fee_amount: u64,
+        fee_amount: u64,
     ) -> Result<CoinSelectionResult, Error> {
         log::debug!(
             "amount_needed = `{}`, fee_amount = `{}`, fee_rate = `{:?}`",
@@ -202,44 +202,7 @@ impl<D: Database> CoinSelectionAlgorithm<D> for LargestFirstCoinSelection {
                 .chain(optional_utxos.into_iter().rev().map(|utxo| (false, utxo)))
         };
 
-        // Keep including inputs until we've got enough.
-        // Store the total input value in selected_amount and the total fee being paid in fee_amount
-        let mut selected_amount = 0;
-        let selected = utxos
-            .scan(
-                (&mut selected_amount, &mut fee_amount),
-                |(selected_amount, fee_amount), (must_use, weighted_utxo)| {
-                    if must_use || **selected_amount < amount_needed + **fee_amount {
-                        **fee_amount +=
-                            fee_rate.fee_wu(TXIN_BASE_WEIGHT + weighted_utxo.satisfaction_weight);
-                        **selected_amount += weighted_utxo.utxo.txout().value;
-
-                        log::debug!(
-                            "Selected {}, updated fee_amount = `{}`",
-                            weighted_utxo.utxo.outpoint(),
-                            fee_amount
-                        );
-
-                        Some(weighted_utxo.utxo)
-                    } else {
-                        None
-                    }
-                },
-            )
-            .collect::<Vec<_>>();
-
-        let amount_needed_with_fees = amount_needed + fee_amount;
-        if selected_amount < amount_needed_with_fees {
-            return Err(Error::InsufficientFunds {
-                needed: amount_needed_with_fees,
-                available: selected_amount,
-            });
-        }
-
-        Ok(CoinSelectionResult {
-            selected,
-            fee_amount,
-        })
+        select_sorted_utxos(utxos, fee_rate, amount_needed, fee_amount)
     }
 }
 
@@ -258,7 +221,7 @@ impl<D: Database> CoinSelectionAlgorithm<D> for OldestFirstCoinSelection {
         mut optional_utxos: Vec<WeightedUtxo>,
         fee_rate: FeeRate,
         amount_needed: u64,
-        mut fee_amount: u64,
+        fee_amount: u64,
     ) -> Result<CoinSelectionResult, Error> {
         // query db and create a blockheight lookup table
         let blockheights = optional_utxos
@@ -298,45 +261,52 @@ impl<D: Database> CoinSelectionAlgorithm<D> for OldestFirstCoinSelection {
                 .chain(optional_utxos.into_iter().map(|utxo| (false, utxo)))
         };
 
-        // Keep including inputs until we've got enough.
-        // Store the total input value in selected_amount and the total fee being paid in fee_amount
-        let mut selected_amount = 0;
-        let selected = utxos
-            .scan(
-                (&mut selected_amount, &mut fee_amount),
-                |(selected_amount, fee_amount), (must_use, weighted_utxo)| {
-                    if must_use || **selected_amount < amount_needed + **fee_amount {
-                        **fee_amount +=
-                            fee_rate.fee_wu(TXIN_BASE_WEIGHT + weighted_utxo.satisfaction_weight);
-                        **selected_amount += weighted_utxo.utxo.txout().value;
-
-                        log::debug!(
-                            "Selected {}, updated fee_amount = `{}`",
-                            weighted_utxo.utxo.outpoint(),
-                            fee_amount
-                        );
-
-                        Some(weighted_utxo.utxo)
-                    } else {
-                        None
-                    }
-                },
-            )
-            .collect::<Vec<_>>();
-
-        let amount_needed_with_fees = amount_needed + fee_amount;
-        if selected_amount < amount_needed_with_fees {
-            return Err(Error::InsufficientFunds {
-                needed: amount_needed_with_fees,
-                available: selected_amount,
-            });
-        }
-
-        Ok(CoinSelectionResult {
-            selected,
-            fee_amount,
-        })
+        select_sorted_utxos(utxos, fee_rate, amount_needed, fee_amount)
     }
+}
+
+fn select_sorted_utxos(
+    utxos: impl Iterator<Item = (bool, WeightedUtxo)>,
+    fee_rate: FeeRate,
+    amount_needed: u64,
+    mut fee_amount: u64,
+) -> Result<CoinSelectionResult, Error> {
+    let mut selected_amount = 0;
+    let selected = utxos
+        .scan(
+            (&mut selected_amount, &mut fee_amount),
+            |(selected_amount, fee_amount), (must_use, weighted_utxo)| {
+                if must_use || **selected_amount < amount_needed + **fee_amount {
+                    **fee_amount +=
+                        fee_rate.fee_wu(TXIN_BASE_WEIGHT + weighted_utxo.satisfaction_weight);
+                    **selected_amount += weighted_utxo.utxo.txout().value;
+
+                    log::debug!(
+                        "Selected {}, updated fee_amount = `{}`",
+                        weighted_utxo.utxo.outpoint(),
+                        fee_amount
+                    );
+
+                    Some(weighted_utxo.utxo)
+                } else {
+                    None
+                }
+            },
+        )
+        .collect::<Vec<_>>();
+
+    let amount_needed_with_fees = amount_needed + fee_amount;
+    if selected_amount < amount_needed_with_fees {
+        return Err(Error::InsufficientFunds {
+            needed: amount_needed_with_fees,
+            available: selected_amount,
+        });
+    }
+
+    Ok(CoinSelectionResult {
+        selected,
+        fee_amount,
+    })
 }
 
 #[derive(Debug, Clone)]
