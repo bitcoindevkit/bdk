@@ -233,8 +233,8 @@ extern crate bip39;
 #[cfg(any(target_arch = "wasm32", feature = "async-interface"))]
 #[macro_use]
 extern crate async_trait;
-#[macro_use]
-extern crate bdk_macros;
+// #[macro_use]
+// extern crate bdk_macros;
 
 #[cfg(feature = "compact_filters")]
 extern crate lazy_static;

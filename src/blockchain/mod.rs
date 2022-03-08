@@ -17,9 +17,7 @@
 //! [`Blockchain`] that can be implemented to build customized backends.
 
 use std::collections::HashSet;
-use std::ops::Deref;
 use std::sync::mpsc::{channel, Receiver, Sender};
-use std::sync::Arc;
 
 use bitcoin::{Transaction, Txid};
 
@@ -85,7 +83,6 @@ pub enum Capability {
 }
 
 /// Trait that defines the actions that must be supported by a blockchain backend
-#[maybe_async]
 pub trait Blockchain: WalletSync + GetHeight + GetTx {
     /// Return the set of [`Capability`] supported by this backend
     fn get_capabilities(&self) -> HashSet<Capability>;
@@ -96,13 +93,11 @@ pub trait Blockchain: WalletSync + GetHeight + GetTx {
 }
 
 /// Trait for getting the current height of the blockchain.
-#[maybe_async]
 pub trait GetHeight {
     /// Return the current height
     fn get_height(&self) -> Result<u32, Error>;
 }
 
-#[maybe_async]
 /// Trait for getting a transaction by txid
 pub trait GetTx {
     /// Fetch a transaction given its txid
@@ -110,7 +105,6 @@ pub trait GetTx {
 }
 
 /// Trait for blockchains that can sync by updating the database directly.
-#[maybe_async]
 pub trait WalletSync {
     /// Setup the backend and populate the internal database for the first time
     ///
@@ -151,7 +145,7 @@ pub trait WalletSync {
         database: &mut D,
         progress_update: Box<dyn Progress>,
     ) -> Result<(), Error> {
-        maybe_await!(self.wallet_setup(database, progress_update))
+        self.wallet_setup(database, progress_update)
     }
 }
 
@@ -229,50 +223,47 @@ impl Progress for LogProgress {
     }
 }
 
-#[maybe_async]
-impl<T: Blockchain> Blockchain for Arc<T> {
-    fn get_capabilities(&self) -> HashSet<Capability> {
-        maybe_await!(self.deref().get_capabilities())
-    }
+// TODO: Do we need this?
+// impl<T: Blockchain> Blockchain for Arc<T> {
+//     fn get_capabilities(&self) -> HashSet<Capability> {
+//         maybe_await!(self.deref().get_capabilities())
+//     }
 
-    fn broadcast(&self, tx: &Transaction) -> Result<(), Error> {
-        maybe_await!(self.deref().broadcast(tx))
-    }
+//     fn broadcast(&self, tx: &Transaction) -> Result<(), Error> {
+//         maybe_await!(self.deref().broadcast(tx))
+//     }
 
-    fn estimate_fee(&self, target: usize) -> Result<FeeRate, Error> {
-        maybe_await!(self.deref().estimate_fee(target))
-    }
-}
+//     fn estimate_fee(&self, target: usize) -> Result<FeeRate, Error> {
+//         maybe_await!(self.deref().estimate_fee(target))
+//     }
+// }
 
-#[maybe_async]
-impl<T: GetTx> GetTx for Arc<T> {
-    fn get_tx(&self, txid: &Txid) -> Result<Option<Transaction>, Error> {
-        maybe_await!(self.deref().get_tx(txid))
-    }
-}
+// impl<T: GetTx> GetTx for Arc<T> {
+//     fn get_tx(&self, txid: &Txid) -> Result<Option<Transaction>, Error> {
+//         maybe_await!(self.deref().get_tx(txid))
+//     }
+// }
 
-#[maybe_async]
-impl<T: GetHeight> GetHeight for Arc<T> {
-    fn get_height(&self) -> Result<u32, Error> {
-        maybe_await!(self.deref().get_height())
-    }
-}
+// impl<T: GetHeight> GetHeight for Arc<T> {
+//     fn get_height(&self) -> Result<u32, Error> {
+//         maybe_await!(self.deref().get_height())
+//     }
+// }
 
-#[maybe_async]
-impl<T: WalletSync> WalletSync for Arc<T> {
-    fn wallet_setup<D: BatchDatabase>(
-        &self,
-        database: &mut D,
-        progress_update: Box<dyn Progress>,
-    ) -> Result<(), Error> {
-        maybe_await!(self.deref().wallet_setup(database, progress_update))
-    }
+// impl<T: WalletSync> WalletSync for Arc<T> {
+//     fn wallet_setup<D: BatchDatabase>(
+//         &self,
+//         database: &mut D,
+//         progress_update: Box<dyn Progress>,
+//     ) -> Result<(), Error> {
+//         maybe_await!(self.deref().wallet_setup(database, progress_update))
+//     }
 
-    fn wallet_sync<D: BatchDatabase>(
-        &self,
-        database: &mut D,
-        progress_update: Box<dyn Progress>,
-    ) -> Result<(), Error> {
-        maybe_await!(self.deref().wallet_sync(database, progress_update))
-    }
-}
+//     fn wallet_sync<D: BatchDatabase>(
+//         &self,
+//         database: &mut D,
+//         progress_update: Box<dyn Progress>,
+//     ) -> Result<(), Error> {
+//         maybe_await!(self.deref().wallet_sync(database, progress_update))
+//     }
+// }

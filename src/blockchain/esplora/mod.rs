@@ -28,8 +28,8 @@ use crate::error::Error;
 use crate::FeeRate;
 
 #[cfg(feature = "reqwest")]
-mod reqwest;
-
+// TODO: implement the new async traits with this one
+// mod reqwest;
 #[cfg(feature = "reqwest")]
 pub use self::reqwest::*;
 

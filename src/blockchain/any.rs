@@ -44,20 +44,20 @@ macro_rules! impl_from {
     };
 }
 
-macro_rules! impl_inner_method {
-    ( $self:expr, $name:ident $(, $args:expr)* ) => {
-        match $self {
-            #[cfg(feature = "electrum")]
-            AnyBlockchain::Electrum(inner) => inner.$name( $($args, )* ),
-            #[cfg(feature = "esplora")]
-            AnyBlockchain::Esplora(inner) => inner.$name( $($args, )* ),
-            #[cfg(feature = "compact_filters")]
-            AnyBlockchain::CompactFilters(inner) => inner.$name( $($args, )* ),
-            #[cfg(feature = "rpc")]
-            AnyBlockchain::Rpc(inner) => inner.$name( $($args, )* ),
-        }
-    }
-}
+// macro_rules! impl_inner_method {
+//     ( $self:expr, $name:ident $(, $args:expr)* ) => {
+//         match $self {
+//             #[cfg(feature = "electrum")]
+//             AnyBlockchain::Electrum(inner) => inner.$name( $($args, )* ),
+//             #[cfg(feature = "esplora")]
+//             AnyBlockchain::Esplora(inner) => inner.$name( $($args, )* ),
+//             #[cfg(feature = "compact_filters")]
+//             AnyBlockchain::CompactFilters(inner) => inner.$name( $($args, )* ),
+//             #[cfg(feature = "rpc")]
+//             AnyBlockchain::Rpc(inner) => inner.$name( $($args, )* ),
+//         }
+//     }
+// }
 
 /// Type that can contain any of the [`Blockchain`] types defined by the library
 ///
@@ -83,63 +83,60 @@ pub enum AnyBlockchain {
     Rpc(rpc::RpcBlockchain),
 }
 
-#[maybe_async]
-impl Blockchain for AnyBlockchain {
-    fn get_capabilities(&self) -> HashSet<Capability> {
-        maybe_await!(impl_inner_method!(self, get_capabilities))
-    }
+// TODO remove?
+// impl Blockchain for AnyBlockchain {
+//     fn get_capabilities(&self) -> HashSet<Capability> {
+//         maybe_await!(impl_inner_method!(self, get_capabilities))
+//     }
 
-    fn broadcast(&self, tx: &Transaction) -> Result<(), Error> {
-        maybe_await!(impl_inner_method!(self, broadcast, tx))
-    }
+//     fn broadcast(&self, tx: &Transaction) -> Result<(), Error> {
+//         maybe_await!(impl_inner_method!(self, broadcast, tx))
+//     }
 
-    fn estimate_fee(&self, target: usize) -> Result<FeeRate, Error> {
-        maybe_await!(impl_inner_method!(self, estimate_fee, target))
-    }
-}
+//     fn estimate_fee(&self, target: usize) -> Result<FeeRate, Error> {
+//         maybe_await!(impl_inner_method!(self, estimate_fee, target))
+//     }
+// }
 
-#[maybe_async]
-impl GetHeight for AnyBlockchain {
-    fn get_height(&self) -> Result<u32, Error> {
-        maybe_await!(impl_inner_method!(self, get_height))
-    }
-}
+// impl GetHeight for AnyBlockchain {
+//     fn get_height(&self) -> Result<u32, Error> {
+//         maybe_await!(impl_inner_method!(self, get_height))
+//     }
+// }
 
-#[maybe_async]
-impl GetTx for AnyBlockchain {
-    fn get_tx(&self, txid: &Txid) -> Result<Option<Transaction>, Error> {
-        maybe_await!(impl_inner_method!(self, get_tx, txid))
-    }
-}
+// impl GetTx for AnyBlockchain {
+//     fn get_tx(&self, txid: &Txid) -> Result<Option<Transaction>, Error> {
+//         maybe_await!(impl_inner_method!(self, get_tx, txid))
+//     }
+// }
 
-#[maybe_async]
-impl WalletSync for AnyBlockchain {
-    fn wallet_sync<D: BatchDatabase>(
-        &self,
-        database: &mut D,
-        progress_update: Box<dyn Progress>,
-    ) -> Result<(), Error> {
-        maybe_await!(impl_inner_method!(
-            self,
-            wallet_sync,
-            database,
-            progress_update
-        ))
-    }
+// impl WalletSync for AnyBlockchain {
+//     fn wallet_sync<D: BatchDatabase>(
+//         &self,
+//         database: &mut D,
+//         progress_update: Box<dyn Progress>,
+//     ) -> Result<(), Error> {
+//         maybe_await!(impl_inner_method!(
+//             self,
+//             wallet_sync,
+//             database,
+//             progress_update
+//         ))
+//     }
 
-    fn wallet_setup<D: BatchDatabase>(
-        &self,
-        database: &mut D,
-        progress_update: Box<dyn Progress>,
-    ) -> Result<(), Error> {
-        maybe_await!(impl_inner_method!(
-            self,
-            wallet_setup,
-            database,
-            progress_update
-        ))
-    }
-}
+//     fn wallet_setup<D: BatchDatabase>(
+//         &self,
+//         database: &mut D,
+//         progress_update: Box<dyn Progress>,
+//     ) -> Result<(), Error> {
+//         maybe_await!(impl_inner_method!(
+//             self,
+//             wallet_setup,
+//             database,
+//             progress_update
+//         ))
+//     }
+// }
 
 impl_from!(electrum::ElectrumBlockchain, AnyBlockchain, Electrum, #[cfg(feature = "electrum")]);
 impl_from!(esplora::EsploraBlockchain, AnyBlockchain, Esplora, #[cfg(feature = "esplora")]);
@@ -200,30 +197,30 @@ pub enum AnyBlockchainConfig {
     Rpc(rpc::RpcConfig),
 }
 
-impl ConfigurableBlockchain for AnyBlockchain {
-    type Config = AnyBlockchainConfig;
+// impl ConfigurableBlockchain for AnyBlockchain {
+//     type Config = AnyBlockchainConfig;
 
-    fn from_config(config: &Self::Config) -> Result<Self, Error> {
-        Ok(match config {
-            #[cfg(feature = "electrum")]
-            AnyBlockchainConfig::Electrum(inner) => {
-                AnyBlockchain::Electrum(electrum::ElectrumBlockchain::from_config(inner)?)
-            }
-            #[cfg(feature = "esplora")]
-            AnyBlockchainConfig::Esplora(inner) => {
-                AnyBlockchain::Esplora(esplora::EsploraBlockchain::from_config(inner)?)
-            }
-            #[cfg(feature = "compact_filters")]
-            AnyBlockchainConfig::CompactFilters(inner) => AnyBlockchain::CompactFilters(
-                compact_filters::CompactFiltersBlockchain::from_config(inner)?,
-            ),
-            #[cfg(feature = "rpc")]
-            AnyBlockchainConfig::Rpc(inner) => {
-                AnyBlockchain::Rpc(rpc::RpcBlockchain::from_config(inner)?)
-            }
-        })
-    }
-}
+//     fn from_config(config: &Self::Config) -> Result<Self, Error> {
+//         Ok(match config {
+//             #[cfg(feature = "electrum")]
+//             AnyBlockchainConfig::Electrum(inner) => {
+//                 AnyBlockchain::Electrum(electrum::ElectrumBlockchain::from_config(inner)?)
+//             }
+//             #[cfg(feature = "esplora")]
+//             AnyBlockchainConfig::Esplora(inner) => {
+//                 AnyBlockchain::Esplora(esplora::EsploraBlockchain::from_config(inner)?)
+//             }
+//             #[cfg(feature = "compact_filters")]
+//             AnyBlockchainConfig::CompactFilters(inner) => AnyBlockchain::CompactFilters(
+//                 compact_filters::CompactFiltersBlockchain::from_config(inner)?,
+//             ),
+//             #[cfg(feature = "rpc")]
+//             AnyBlockchainConfig::Rpc(inner) => {
+//                 AnyBlockchain::Rpc(rpc::RpcBlockchain::from_config(inner)?)
+//             }
+//         })
+//     }
+// }
 
 impl_from!(electrum::ElectrumBlockchainConfig, AnyBlockchainConfig, Electrum, #[cfg(feature = "electrum")]);
 impl_from!(esplora::EsploraBlockchainConfig, AnyBlockchainConfig, Esplora, #[cfg(feature = "esplora")]);

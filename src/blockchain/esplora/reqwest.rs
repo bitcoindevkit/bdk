@@ -79,7 +79,6 @@ impl EsploraBlockchain {
     }
 }
 
-#[maybe_async]
 impl Blockchain for EsploraBlockchain {
     fn get_capabilities(&self) -> HashSet<Capability> {
         vec![
@@ -101,21 +100,18 @@ impl Blockchain for EsploraBlockchain {
     }
 }
 
-#[maybe_async]
 impl GetHeight for EsploraBlockchain {
     fn get_height(&self) -> Result<u32, Error> {
         Ok(await_or_block!(self.url_client._get_height())?)
     }
 }
 
-#[maybe_async]
 impl GetTx for EsploraBlockchain {
     fn get_tx(&self, txid: &Txid) -> Result<Option<Transaction>, Error> {
         Ok(await_or_block!(self.url_client._get_tx(txid))?)
     }
 }
 
-#[maybe_async]
 impl WalletSync for EsploraBlockchain {
     fn wallet_setup<D: BatchDatabase>(
         &self,

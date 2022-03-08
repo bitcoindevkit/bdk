@@ -1514,7 +1514,6 @@ where
     }
 
     /// Sync the internal database with the blockchain
-    #[maybe_async]
     pub fn sync<B: WalletSync + GetHeight>(
         &self,
         blockchain: &B,
@@ -1531,16 +1530,14 @@ where
         // TODO: what if i generate an address first and cache some addresses?
         // TODO: we should sync if generating an address triggers a new batch to be stored
         if run_setup {
-            maybe_await!(
-                blockchain.wallet_setup(self.database.borrow_mut().deref_mut(), progress,)
-            )?;
+            blockchain.wallet_setup(self.database.borrow_mut().deref_mut(), progress)?
         } else {
-            maybe_await!(blockchain.wallet_sync(self.database.borrow_mut().deref_mut(), progress,))?;
+            blockchain.wallet_sync(self.database.borrow_mut().deref_mut(), progress)?;
         }
 
         let sync_time = SyncTime {
             block_time: BlockTime {
-                height: maybe_await!(blockchain.get_height())?,
+                height: blockchain.get_height()?,
                 timestamp: time::get_timestamp(),
             },
         };
