@@ -86,28 +86,50 @@ pub enum Capability {
 
 /// Trait that defines the actions that must be supported by a blockchain backend
 #[maybe_async]
-pub trait Blockchain {
+pub trait Blockchain: WalletSync + GetHeight + GetTx {
     /// Return the set of [`Capability`] supported by this backend
     fn get_capabilities(&self) -> HashSet<Capability>;
+    /// Broadcast a transaction
+    fn broadcast(&self, tx: &Transaction) -> Result<(), Error>;
+    /// Estimate the fee rate required to confirm a transaction in a given `target` of blocks
+    fn estimate_fee(&self, target: usize) -> Result<FeeRate, Error>;
+}
 
+/// Trait for getting the current height of the blockchain.
+#[maybe_async]
+pub trait GetHeight {
+    /// Return the current height
+    fn get_height(&self) -> Result<u32, Error>;
+}
+
+#[maybe_async]
+/// Trait for getting a transaction by txid
+pub trait GetTx {
+    /// Fetch a transaction given its txid
+    fn get_tx(&self, txid: &Txid) -> Result<Option<Transaction>, Error>;
+}
+
+/// Trait for blockchains that can sync by updating the database directly.
+#[maybe_async]
+pub trait WalletSync {
     /// Setup the backend and populate the internal database for the first time
     ///
-    /// This method is the equivalent of [`Blockchain::sync`], but it's guaranteed to only be
+    /// This method is the equivalent of [`Self::wallet_sync`], but it's guaranteed to only be
     /// called once, at the first [`Wallet::sync`](crate::wallet::Wallet::sync).
     ///
     /// The rationale behind the distinction between `sync` and `setup` is that some custom backends
     /// might need to perform specific actions only the first time they are synced.
     ///
     /// For types that do not have that distinction, only this method can be implemented, since
-    /// [`Blockchain::sync`] defaults to calling this internally if not overridden.
-    fn setup<D: BatchDatabase, P: 'static + Progress>(
+    /// [`WalletSync::wallet_sync`] defaults to calling this internally if not overridden.
+    /// Populate the internal database with transactions and UTXOs
+    fn wallet_setup<D: BatchDatabase>(
         &self,
         database: &mut D,
-        progress_update: P,
+        progress_update: Box<dyn Progress>,
     ) -> Result<(), Error>;
-    /// Populate the internal database with transactions and UTXOs
-    ///
-    /// If not overridden, it defaults to calling [`Blockchain::setup`] internally.
+
+    /// If not overridden, it defaults to calling [`Self::wallet_setup`] internally.
     ///
     /// This method should implement the logic required to iterate over the list of the wallet's
     /// script_pubkeys using [`Database::iter_script_pubkeys`] and look for relevant transactions
@@ -124,23 +146,13 @@ pub trait Blockchain {
     /// [`BatchOperations::set_tx`]: crate::database::BatchOperations::set_tx
     /// [`BatchOperations::set_utxo`]: crate::database::BatchOperations::set_utxo
     /// [`BatchOperations::del_utxo`]: crate::database::BatchOperations::del_utxo
-    fn sync<D: BatchDatabase, P: 'static + Progress>(
+    fn wallet_sync<D: BatchDatabase>(
         &self,
         database: &mut D,
-        progress_update: P,
+        progress_update: Box<dyn Progress>,
     ) -> Result<(), Error> {
-        maybe_await!(self.setup(database, progress_update))
+        maybe_await!(self.wallet_setup(database, progress_update))
     }
-
-    /// Fetch a transaction from the blockchain given its txid
-    fn get_tx(&self, txid: &Txid) -> Result<Option<Transaction>, Error>;
-    /// Broadcast a transaction
-    fn broadcast(&self, tx: &Transaction) -> Result<(), Error>;
-
-    /// Return the current height
-    fn get_height(&self) -> Result<u32, Error>;
-    /// Estimate the fee rate required to confirm a transaction in a given `target` of blocks
-    fn estimate_fee(&self, target: usize) -> Result<FeeRate, Error>;
 }
 
 /// Trait for [`Blockchain`] types that can be created given a configuration
@@ -155,9 +167,9 @@ pub trait ConfigurableBlockchain: Blockchain + Sized {
 /// Data sent with a progress update over a [`channel`]
 pub type ProgressData = (f32, Option<String>);
 
-/// Trait for types that can receive and process progress updates during [`Blockchain::sync`] and
-/// [`Blockchain::setup`]
-pub trait Progress: Send {
+/// Trait for types that can receive and process progress updates during [`WalletSync::wallet_sync`] and
+/// [`WalletSync::wallet_setup`]
+pub trait Progress: Send + 'static + core::fmt::Debug {
     /// Send a new progress update
     ///
     /// The `progress` value should be in the range 0.0 - 100.0, and the `message` value is an
@@ -182,7 +194,7 @@ impl Progress for Sender<ProgressData> {
 }
 
 /// Type that implements [`Progress`] and drops every update received
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default, Debug)]
 pub struct NoopProgress;
 
 /// Create a new instance of [`NoopProgress`]
@@ -197,7 +209,7 @@ impl Progress for NoopProgress {
 }
 
 /// Type that implements [`Progress`] and logs at level `INFO` every update received
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default, Debug)]
 pub struct LogProgress;
 
 /// Create a new instance of [`LogProgress`]
@@ -223,33 +235,44 @@ impl<T: Blockchain> Blockchain for Arc<T> {
         maybe_await!(self.deref().get_capabilities())
     }
 
-    fn setup<D: BatchDatabase, P: 'static + Progress>(
-        &self,
-        database: &mut D,
-        progress_update: P,
-    ) -> Result<(), Error> {
-        maybe_await!(self.deref().setup(database, progress_update))
-    }
-
-    fn sync<D: BatchDatabase, P: 'static + Progress>(
-        &self,
-        database: &mut D,
-        progress_update: P,
-    ) -> Result<(), Error> {
-        maybe_await!(self.deref().sync(database, progress_update))
-    }
-
-    fn get_tx(&self, txid: &Txid) -> Result<Option<Transaction>, Error> {
-        maybe_await!(self.deref().get_tx(txid))
-    }
     fn broadcast(&self, tx: &Transaction) -> Result<(), Error> {
         maybe_await!(self.deref().broadcast(tx))
     }
 
+    fn estimate_fee(&self, target: usize) -> Result<FeeRate, Error> {
+        maybe_await!(self.deref().estimate_fee(target))
+    }
+}
+
+#[maybe_async]
+impl<T: GetTx> GetTx for Arc<T> {
+    fn get_tx(&self, txid: &Txid) -> Result<Option<Transaction>, Error> {
+        maybe_await!(self.deref().get_tx(txid))
+    }
+}
+
+#[maybe_async]
+impl<T: GetHeight> GetHeight for Arc<T> {
     fn get_height(&self) -> Result<u32, Error> {
         maybe_await!(self.deref().get_height())
     }
-    fn estimate_fee(&self, target: usize) -> Result<FeeRate, Error> {
-        maybe_await!(self.deref().estimate_fee(target))
+}
+
+#[maybe_async]
+impl<T: WalletSync> WalletSync for Arc<T> {
+    fn wallet_setup<D: BatchDatabase>(
+        &self,
+        database: &mut D,
+        progress_update: Box<dyn Progress>,
+    ) -> Result<(), Error> {
+        maybe_await!(self.deref().wallet_setup(database, progress_update))
+    }
+
+    fn wallet_sync<D: BatchDatabase>(
+        &self,
+        database: &mut D,
+        progress_update: Box<dyn Progress>,
+    ) -> Result<(), Error> {
+        maybe_await!(self.deref().wallet_sync(database, progress_update))
     }
 }

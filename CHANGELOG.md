@@ -11,6 +11,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add `get_internal_address` to allow you to get internal addresses just as you get external addresses.
 - added `ensure_addresses_cached` to `Wallet` to let offline wallets load and cache addresses in their database
 
+### Sync API change
+
+To decouple the `Wallet` from the `Blockchain` we've made major changes:
+
+- Removed `Blockchain` from Wallet.
+- Removed `Wallet::broadcast` (just use `Blockchain::broadcast`)
+- Deprecated `Wallet::new_offline` (all wallets are offline now)
+- Changed `Wallet::sync` to take a `Blockchain`.
+- Stop making a request for the block height when calling `Wallet:new`.
+- Added `SyncOptions` to capture extra (future) arguments to `Wallet::sync`.
+- Removed `max_addresses` sync parameter which determined how many addresses to cache before syncing since this can just be done with `ensure_addresses_cached`.
+
 ## [v0.16.1] - [v0.16.0]
 
 - Pin tokio dependency version to ~1.14 to prevent errors due to their new MSRV 1.49.0

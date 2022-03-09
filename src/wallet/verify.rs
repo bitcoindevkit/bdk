@@ -17,7 +17,7 @@ use std::fmt;
 use bitcoin::consensus::serialize;
 use bitcoin::{OutPoint, Transaction, Txid};
 
-use crate::blockchain::Blockchain;
+use crate::blockchain::GetTx;
 use crate::database::Database;
 use crate::error::Error;
 
@@ -29,7 +29,7 @@ use crate::error::Error;
 /// Depending on the [capabilities](crate::blockchain::Blockchain::get_capabilities) of the
 /// [`Blockchain`] backend, the method could fail when called with old "historical" transactions or
 /// with unconfirmed transactions that have been evicted from the backend's memory.
-pub fn verify_tx<D: Database, B: Blockchain>(
+pub fn verify_tx<D: Database, B: GetTx>(
     tx: &Transaction,
     database: &D,
     blockchain: &B,
@@ -104,42 +104,17 @@ impl_error!(bitcoinconsensus::Error, Consensus, VerifyError);
 
 #[cfg(test)]
 mod test {
-    use std::collections::HashSet;
-
+    use super::*;
+    use crate::database::{BatchOperations, MemoryDatabase};
     use bitcoin::consensus::encode::deserialize;
     use bitcoin::hashes::hex::FromHex;
     use bitcoin::{Transaction, Txid};
 
-    use crate::blockchain::{Blockchain, Capability, Progress};
-    use crate::database::{BatchDatabase, BatchOperations, MemoryDatabase};
-    use crate::FeeRate;
-
-    use super::*;
-
     struct DummyBlockchain;
 
-    impl Blockchain for DummyBlockchain {
-        fn get_capabilities(&self) -> HashSet<Capability> {
-            Default::default()
-        }
-        fn setup<D: BatchDatabase, P: 'static + Progress>(
-            &self,
-            _database: &mut D,
-            _progress_update: P,
-        ) -> Result<(), Error> {
-            Ok(())
-        }
+    impl GetTx for DummyBlockchain {
         fn get_tx(&self, _txid: &Txid) -> Result<Option<Transaction>, Error> {
             Ok(None)
-        }
-        fn broadcast(&self, _tx: &Transaction) -> Result<(), Error> {
-            Ok(())
-        }
-        fn get_height(&self) -> Result<u32, Error> {
-            Ok(42)
-        }
-        fn estimate_fee(&self, _target: usize) -> Result<FeeRate, Error> {
-            Ok(FeeRate::default_min_relay_fee())
         }
     }
 

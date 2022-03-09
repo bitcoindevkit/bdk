@@ -10,7 +10,6 @@
 // licenses.
 
 use bdk::blockchain::compact_filters::*;
-use bdk::blockchain::noop_progress;
 use bdk::database::MemoryDatabase;
 use bdk::*;
 use bitcoin::*;
@@ -35,9 +34,8 @@ fn main() -> Result<(), CompactFiltersError> {
     let descriptor = "wpkh(tpubD6NzVbkrYhZ4X2yy78HWrr1M9NT8dKeWfzNiQqDdMqqa9UmmGztGGz6TaLFGsLfdft5iu32gxq1T4eMNxExNNWzVCpf9Y6JZi5TnqoC9wJq/*)";
 
     let database = MemoryDatabase::default();
-    let wallet =
-        Arc::new(Wallet::new(descriptor, None, Network::Testnet, database, blockchain).unwrap());
-    wallet.sync(noop_progress(), None).unwrap();
+    let wallet = Arc::new(Wallet::new(descriptor, None, Network::Testnet, database).unwrap());
+    wallet.sync(&blockchain, SyncOptions::default()).unwrap();
     info!("balance: {}", wallet.get_balance()?);
     Ok(())
 }

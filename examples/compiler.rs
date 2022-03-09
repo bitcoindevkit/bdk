@@ -89,7 +89,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .transpose()
         .unwrap()
         .unwrap_or(Network::Testnet);
-    let wallet = Wallet::new_offline(&format!("{}", descriptor), None, network, database)?;
+    let wallet = Wallet::new(&format!("{}", descriptor), None, network, database)?;
 
     info!("... First address: {}", wallet.get_address(New)?);
 

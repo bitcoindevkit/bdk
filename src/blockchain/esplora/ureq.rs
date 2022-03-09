@@ -87,10 +87,34 @@ impl Blockchain for EsploraBlockchain {
         .collect()
     }
 
-    fn setup<D: BatchDatabase, P: Progress>(
+    fn broadcast(&self, tx: &Transaction) -> Result<(), Error> {
+        let _txid = self.url_client._broadcast(tx)?;
+        Ok(())
+    }
+
+    fn estimate_fee(&self, target: usize) -> Result<FeeRate, Error> {
+        let estimates = self.url_client._get_fee_estimates()?;
+        super::into_fee_rate(target, estimates)
+    }
+}
+
+impl GetHeight for EsploraBlockchain {
+    fn get_height(&self) -> Result<u32, Error> {
+        Ok(self.url_client._get_height()?)
+    }
+}
+
+impl GetTx for EsploraBlockchain {
+    fn get_tx(&self, txid: &Txid) -> Result<Option<Transaction>, Error> {
+        Ok(self.url_client._get_tx(txid)?)
+    }
+}
+
+impl WalletSync for EsploraBlockchain {
+    fn wallet_setup<D: BatchDatabase>(
         &self,
         database: &mut D,
-        _progress_update: P,
+        _progress_update: Box<dyn Progress>,
     ) -> Result<(), Error> {
         use crate::blockchain::script_sync::Request;
         let mut request = script_sync::start(database, self.stop_gap)?;
@@ -178,24 +202,6 @@ impl Blockchain for EsploraBlockchain {
         database.commit_batch(batch_update)?;
 
         Ok(())
-    }
-
-    fn get_tx(&self, txid: &Txid) -> Result<Option<Transaction>, Error> {
-        Ok(self.url_client._get_tx(txid)?)
-    }
-
-    fn broadcast(&self, tx: &Transaction) -> Result<(), Error> {
-        let _txid = self.url_client._broadcast(tx)?;
-        Ok(())
-    }
-
-    fn get_height(&self) -> Result<u32, Error> {
-        Ok(self.url_client._get_height()?)
-    }
-
-    fn estimate_fee(&self, target: usize) -> Result<FeeRate, Error> {
-        let estimates = self.url_client._get_fee_estimates()?;
-        super::into_fee_rate(target, estimates)
     }
 }
 

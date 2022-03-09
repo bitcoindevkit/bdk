@@ -68,10 +68,39 @@ impl Blockchain for ElectrumBlockchain {
         .collect()
     }
 
-    fn setup<D: BatchDatabase, P: Progress>(
+    fn broadcast(&self, tx: &Transaction) -> Result<(), Error> {
+        Ok(self.client.transaction_broadcast(tx).map(|_| ())?)
+    }
+
+    fn estimate_fee(&self, target: usize) -> Result<FeeRate, Error> {
+        Ok(FeeRate::from_btc_per_kvb(
+            self.client.estimate_fee(target)? as f32
+        ))
+    }
+}
+
+impl GetHeight for ElectrumBlockchain {
+    fn get_height(&self) -> Result<u32, Error> {
+        // TODO: unsubscribe when added to the client, or is there a better call to use here?
+
+        Ok(self
+            .client
+            .block_headers_subscribe()
+            .map(|data| data.height as u32)?)
+    }
+}
+
+impl GetTx for ElectrumBlockchain {
+    fn get_tx(&self, txid: &Txid) -> Result<Option<Transaction>, Error> {
+        Ok(self.client.transaction_get(txid).map(Option::Some)?)
+    }
+}
+
+impl WalletSync for ElectrumBlockchain {
+    fn wallet_setup<D: BatchDatabase>(
         &self,
         database: &mut D,
-        _progress_update: P,
+        _progress_update: Box<dyn Progress>,
     ) -> Result<(), Error> {
         let mut request = script_sync::start(database, self.stop_gap)?;
         let mut block_times = HashMap::<u32, u32>::new();
@@ -206,29 +235,6 @@ impl Blockchain for ElectrumBlockchain {
 
         database.commit_batch(batch_update)?;
         Ok(())
-    }
-
-    fn get_tx(&self, txid: &Txid) -> Result<Option<Transaction>, Error> {
-        Ok(self.client.transaction_get(txid).map(Option::Some)?)
-    }
-
-    fn broadcast(&self, tx: &Transaction) -> Result<(), Error> {
-        Ok(self.client.transaction_broadcast(tx).map(|_| ())?)
-    }
-
-    fn get_height(&self) -> Result<u32, Error> {
-        // TODO: unsubscribe when added to the client, or is there a better call to use here?
-
-        Ok(self
-            .client
-            .block_headers_subscribe()
-            .map(|data| data.height as u32)?)
-    }
-
-    fn estimate_fee(&self, target: usize) -> Result<FeeRate, Error> {
-        Ok(FeeRate::from_btc_per_kvb(
-            self.client.estimate_fee(target)? as f32
-        ))
     }
 }
 

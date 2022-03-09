@@ -33,7 +33,7 @@
 
 use crate::bitcoin::consensus::deserialize;
 use crate::bitcoin::{Address, Network, OutPoint, Transaction, TxOut, Txid};
-use crate::blockchain::{Blockchain, Capability, ConfigurableBlockchain, Progress};
+use crate::blockchain::*;
 use crate::database::{BatchDatabase, DatabaseUtils};
 use crate::{BlockTime, Error, FeeRate, KeychainKind, LocalUtxo, TransactionDetails};
 use bitcoincore_rpc::json::{
@@ -139,10 +139,39 @@ impl Blockchain for RpcBlockchain {
         self.capabilities.clone()
     }
 
-    fn setup<D: BatchDatabase, P: 'static + Progress>(
+    fn broadcast(&self, tx: &Transaction) -> Result<(), Error> {
+        Ok(self.client.send_raw_transaction(tx).map(|_| ())?)
+    }
+
+    fn estimate_fee(&self, target: usize) -> Result<FeeRate, Error> {
+        let sat_per_kb = self
+            .client
+            .estimate_smart_fee(target as u16, None)?
+            .fee_rate
+            .ok_or(Error::FeeRateUnavailable)?
+            .as_sat() as f64;
+
+        Ok(FeeRate::from_sat_per_vb((sat_per_kb / 1000f64) as f32))
+    }
+}
+
+impl GetTx for RpcBlockchain {
+    fn get_tx(&self, txid: &Txid) -> Result<Option<Transaction>, Error> {
+        Ok(Some(self.client.get_raw_transaction(txid, None)?))
+    }
+}
+
+impl GetHeight for RpcBlockchain {
+    fn get_height(&self) -> Result<u32, Error> {
+        Ok(self.client.get_blockchain_info().map(|i| i.blocks as u32)?)
+    }
+}
+
+impl WalletSync for RpcBlockchain {
+    fn wallet_setup<D: BatchDatabase>(
         &self,
         database: &mut D,
-        progress_update: P,
+        progress_update: Box<dyn Progress>,
     ) -> Result<(), Error> {
         let mut scripts_pubkeys = database.iter_script_pubkeys(Some(KeychainKind::External))?;
         scripts_pubkeys.extend(database.iter_script_pubkeys(Some(KeychainKind::Internal))?);
@@ -187,13 +216,13 @@ impl Blockchain for RpcBlockchain {
             }
         }
 
-        self.sync(database, progress_update)
+        self.wallet_sync(database, progress_update)
     }
 
-    fn sync<D: BatchDatabase, P: 'static + Progress>(
+    fn wallet_sync<D: BatchDatabase>(
         &self,
         db: &mut D,
-        _progress_update: P,
+        _progress_update: Box<dyn Progress>,
     ) -> Result<(), Error> {
         let mut indexes = HashMap::new();
         for keykind in &[KeychainKind::External, KeychainKind::Internal] {
@@ -289,22 +318,24 @@ impl Blockchain for RpcBlockchain {
             }
         }
 
-        let current_utxos: HashSet<_> = current_utxo
+        // Filter out trasactions that are for script pubkeys that aren't in this wallet.
+        let current_utxos = current_utxo
             .into_iter()
-            .map(|u| {
-                Ok(LocalUtxo {
-                    outpoint: OutPoint::new(u.txid, u.vout),
-                    keychain: db
-                        .get_path_from_script_pubkey(&u.script_pub_key)?
-                        .ok_or(Error::TransactionNotFound)?
-                        .0,
-                    txout: TxOut {
-                        value: u.amount.as_sat(),
-                        script_pubkey: u.script_pub_key,
-                    },
-                })
-            })
-            .collect::<Result<_, Error>>()?;
+            .filter_map(
+                |u| match db.get_path_from_script_pubkey(&u.script_pub_key) {
+                    Err(e) => Some(Err(e)),
+                    Ok(None) => None,
+                    Ok(Some(path)) => Some(Ok(LocalUtxo {
+                        outpoint: OutPoint::new(u.txid, u.vout),
+                        keychain: path.0,
+                        txout: TxOut {
+                            value: u.amount.as_sat(),
+                            script_pubkey: u.script_pub_key,
+                        },
+                    })),
+                },
+            )
+            .collect::<Result<HashSet<_>, Error>>()?;
 
         let spent: HashSet<_> = known_utxos.difference(&current_utxos).collect();
         for s in spent {
@@ -323,29 +354,6 @@ impl Blockchain for RpcBlockchain {
         }
 
         Ok(())
-    }
-
-    fn get_tx(&self, txid: &Txid) -> Result<Option<Transaction>, Error> {
-        Ok(Some(self.client.get_raw_transaction(txid, None)?))
-    }
-
-    fn broadcast(&self, tx: &Transaction) -> Result<(), Error> {
-        Ok(self.client.send_raw_transaction(tx).map(|_| ())?)
-    }
-
-    fn get_height(&self) -> Result<u32, Error> {
-        Ok(self.client.get_blockchain_info().map(|i| i.blocks as u32)?)
-    }
-
-    fn estimate_fee(&self, target: usize) -> Result<FeeRate, Error> {
-        let sat_per_kb = self
-            .client
-            .estimate_smart_fee(target as u16, None)?
-            .fee_rate
-            .ok_or(Error::FeeRateUnavailable)?
-            .as_sat() as f64;
-
-        Ok(FeeRate::from_sat_per_vb((sat_per_kb / 1000f64) as f32))
     }
 }
 
