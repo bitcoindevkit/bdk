@@ -233,7 +233,7 @@ where
         self.network
     }
 
-    // Return a newly derived address using the external descriptor
+    // Return a newly derived address for the specified `keychain`.
     fn get_new_address(&self, keychain: KeychainKind) -> Result<AddressInfo, Error> {
         let incremented_index = self.fetch_and_increment_index(keychain)?;
 

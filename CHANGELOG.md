@@ -17,7 +17,7 @@ To decouple the `Wallet` from the `Blockchain` we've made major changes:
 
 - Removed `Blockchain` from Wallet.
 - Removed `Wallet::broadcast` (just use `Blockchain::broadcast`)
-- Depreciated `Wallet::new_offline` (all wallets are offline now)
+- Deprecated `Wallet::new_offline` (all wallets are offline now)
 - Changed `Wallet::sync` to take a `Blockchain`.
 - Stop making a request for the block height when calling `Wallet:new`.
 - Added `SyncOptions` to capture extra (future) arguments to `Wallet::sync`.
