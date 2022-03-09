@@ -10,6 +10,41 @@
 // licenses.
 
 //! Derived descriptor keys
+//!
+//! The [`DerivedDescriptorKey`] type is a wrapper over the standard [`DescriptorPublicKey`] which
+//! guarantees that all the extended keys have a fixed derivation path, i.e. all the wildcards have
+//! been replaced by actual derivation indexes.
+//!
+//! The [`AsDerived`] trait provides a quick way to derive descriptors to obtain a
+//! `Descriptor<DerivedDescriptorKey>` type. This, in turn, can be used to derive public
+//! keys for arbitrary derivation indexes.
+//!
+//! Combining this with [`Wallet::get_signers`], secret keys can also be derived.
+//!
+//! # Example
+//!
+//! ```
+//! # use std::str::FromStr;
+//! # use bitcoin::secp256k1::Secp256k1;
+//! use bdk::descriptor::{AsDerived, DescriptorPublicKey};
+//! use bdk::miniscript::{ToPublicKey, TranslatePk, MiniscriptKey};
+//!
+//! let secp = Secp256k1::gen_new();
+//!
+//! let key = DescriptorPublicKey::from_str("[aa600a45/84'/0'/0']tpubDCbDXFKoLTQp44wQuC12JgSn5g9CWGjZdpBHeTqyypZ4VvgYjTJmK9CkyR5bFvG9f4PutvwmvpYCLkFx2rpx25hiMs4sUgxJveW8ZzSAVAc/0/*")?;
+//! let (descriptor, _, _) = bdk::descriptor!(wpkh(key))?;
+//!
+//! // derived: wpkh([aa600a45/84'/0'/0']tpubDCbDXFKoLTQp44wQuC12JgSn5g9CWGjZdpBHeTqyypZ4VvgYjTJmK9CkyR5bFvG9f4PutvwmvpYCLkFx2rpx25hiMs4sUgxJveW8ZzSAVAc/0/42)#3ladd0t2
+//! let derived = descriptor.as_derived(42, &secp);
+//! println!("derived: {}", derived);
+//!
+//! // with_pks: wpkh(02373ecb54c5e83bd7e0d40adf78b65efaf12fafb13571f0261fc90364eee22e1e)#p4jjgvll
+//! let with_pks = derived.translate_pk_infallible(|pk| pk.to_public_key(), |pkh| pkh.to_public_key().to_pubkeyhash());
+//! println!("with_pks: {}", with_pks);
+//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
+//!
+//! [`Wallet::get_signers`]: crate::wallet::Wallet::get_signers
 
 use std::cmp::Ordering;
 use std::fmt;
@@ -19,10 +54,7 @@ use std::ops::Deref;
 use bitcoin::hashes::hash160;
 use bitcoin::PublicKey;
 
-pub use miniscript::{
-    descriptor::KeyMap, descriptor::Wildcard, Descriptor, DescriptorPublicKey, Legacy, Miniscript,
-    ScriptContext, Segwitv0,
-};
+use miniscript::{descriptor::Wildcard, Descriptor, DescriptorPublicKey};
 use miniscript::{MiniscriptKey, ToPublicKey, TranslatePk};
 
 use crate::wallet::utils::SecpCtx;
@@ -119,14 +151,19 @@ impl<'s> ToPublicKey for DerivedDescriptorKey<'s> {
     }
 }
 
-pub(crate) trait AsDerived {
-    // Derive a descriptor and transform all of its keys to `DerivedDescriptorKey`
+/// Utilities to derive descriptors
+///
+/// Check out the [module level] documentation for more.
+///
+/// [module level]: crate::descriptor::derived
+pub trait AsDerived {
+    /// Derive a descriptor and transform all of its keys to `DerivedDescriptorKey`
     fn as_derived<'s>(&self, index: u32, secp: &'s SecpCtx)
         -> Descriptor<DerivedDescriptorKey<'s>>;
 
-    // Transform the keys into `DerivedDescriptorKey`.
-    //
-    // Panics if the descriptor is not "fixed", i.e. if it's derivable
+    /// Transform the keys into `DerivedDescriptorKey`.
+    ///
+    /// Panics if the descriptor is not "fixed", i.e. if it's derivable
     fn as_derived_fixed<'s>(&self, secp: &'s SecpCtx) -> Descriptor<DerivedDescriptorKey<'s>>;
 }
 
