@@ -131,6 +131,8 @@ pub struct LocalUtxo {
     pub txout: TxOut,
     /// Type of keychain
     pub keychain: KeychainKind,
+    /// Whether this UTXO is spent or not
+    pub is_spent: bool,
 }
 
 /// A [`Utxo`] with its `satisfaction_weight`.

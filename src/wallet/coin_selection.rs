@@ -569,6 +569,7 @@ mod test {
                     script_pubkey: Script::new(),
                 },
                 keychain: KeychainKind::External,
+                is_spent: false,
             }),
         }
     }
@@ -596,6 +597,7 @@ mod test {
                         script_pubkey: Script::new(),
                     },
                     keychain: KeychainKind::External,
+                    is_spent: false,
                 }),
             });
         }
@@ -615,6 +617,7 @@ mod test {
                     script_pubkey: Script::new(),
                 },
                 keychain: KeychainKind::External,
+                is_spent: false,
             }),
         };
         vec![utxo; utxos_number]

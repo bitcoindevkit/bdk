@@ -43,6 +43,7 @@ macro_rules! impl_batch_operations {
             let value = json!({
                 "t": utxo.txout,
                 "i": utxo.keychain,
+                "s": utxo.is_spent,
             });
             self.insert(key, serde_json::to_vec(&value)?)$($after_insert)*;
 
@@ -125,8 +126,9 @@ macro_rules! impl_batch_operations {
                     let mut val: serde_json::Value = serde_json::from_slice(&b)?;
                     let txout = serde_json::from_value(val["t"].take())?;
                     let keychain = serde_json::from_value(val["i"].take())?;
+                    let is_spent = val.get_mut("s").and_then(|s| s.take().as_bool()).unwrap_or(false);
 
-                    Ok(Some(LocalUtxo { outpoint: outpoint.clone(), txout, keychain }))
+                    Ok(Some(LocalUtxo { outpoint: outpoint.clone(), txout, keychain, is_spent, }))
                 }
             }
         }
@@ -246,11 +248,16 @@ impl Database for Tree {
                 let mut val: serde_json::Value = serde_json::from_slice(&v)?;
                 let txout = serde_json::from_value(val["t"].take())?;
                 let keychain = serde_json::from_value(val["i"].take())?;
+                let is_spent = val
+                    .get_mut("s")
+                    .and_then(|s| s.take().as_bool())
+                    .unwrap_or(false);
 
                 Ok(LocalUtxo {
                     outpoint,
                     txout,
                     keychain,
+                    is_spent,
                 })
             })
             .collect()
@@ -314,11 +321,16 @@ impl Database for Tree {
                 let mut val: serde_json::Value = serde_json::from_slice(&b)?;
                 let txout = serde_json::from_value(val["t"].take())?;
                 let keychain = serde_json::from_value(val["i"].take())?;
+                let is_spent = val
+                    .get_mut("s")
+                    .and_then(|s| s.take().as_bool())
+                    .unwrap_or(false);
 
                 Ok(LocalUtxo {
                     outpoint: *outpoint,
                     txout,
                     keychain,
+                    is_spent,
                 })
             })
             .transpose()

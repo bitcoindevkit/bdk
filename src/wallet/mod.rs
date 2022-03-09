@@ -387,7 +387,13 @@ where
     /// Note that this method only operates on the internal database, which first needs to be
     /// [`Wallet::sync`] manually.
     pub fn list_unspent(&self) -> Result<Vec<LocalUtxo>, Error> {
-        self.database.borrow().iter_utxos()
+        Ok(self
+            .database
+            .borrow()
+            .iter_utxos()?
+            .into_iter()
+            .filter(|l| !l.is_spent)
+            .collect())
     }
 
     /// Returns the `UTXO` owned by this wallet corresponding to `outpoint` if it exists in the
@@ -879,6 +885,7 @@ where
                     outpoint: txin.previous_output,
                     txout,
                     keychain,
+                    is_spent: true,
                 };
 
                 Ok(WeightedUtxo {

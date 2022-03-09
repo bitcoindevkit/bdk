@@ -249,7 +249,7 @@ impl WalletSync for RpcBlockchain {
         let mut list_txs_ids = HashSet::new();
 
         for tx_result in list_txs.iter().filter(|t| {
-            // list_txs returns all conflicting tx we want to
+            // list_txs returns all conflicting txs, we want to
             // filter out replaced tx => unconfirmed and not in the mempool
             t.info.confirmations > 0 || self.client.get_mempool_entry(&t.info.txid).is_ok()
         }) {
@@ -332,20 +332,23 @@ impl WalletSync for RpcBlockchain {
                             value: u.amount.as_sat(),
                             script_pubkey: u.script_pub_key,
                         },
+                        is_spent: false,
                     })),
                 },
             )
             .collect::<Result<HashSet<_>, Error>>()?;
 
         let spent: HashSet<_> = known_utxos.difference(&current_utxos).collect();
-        for s in spent {
-            debug!("removing utxo: {:?}", s);
-            db.del_utxo(&s.outpoint)?;
+        for utxo in spent {
+            debug!("setting as spent utxo: {:?}", utxo);
+            let mut spent_utxo = utxo.clone();
+            spent_utxo.is_spent = true;
+            db.set_utxo(&spent_utxo)?;
         }
         let received: HashSet<_> = current_utxos.difference(&known_utxos).collect();
-        for s in received {
-            debug!("adding utxo: {:?}", s);
-            db.set_utxo(s)?;
+        for utxo in received {
+            debug!("adding utxo: {:?}", utxo);
+            db.set_utxo(utxo)?;
         }
 
         for (keykind, index) in indexes {

@@ -150,8 +150,10 @@ impl BatchOperations for MemoryDatabase {
 
     fn set_utxo(&mut self, utxo: &LocalUtxo) -> Result<(), Error> {
         let key = MapKey::Utxo(Some(&utxo.outpoint)).as_map_key();
-        self.map
-            .insert(key, Box::new((utxo.txout.clone(), utxo.keychain)));
+        self.map.insert(
+            key,
+            Box::new((utxo.txout.clone(), utxo.keychain, utxo.is_spent)),
+        );
 
         Ok(())
     }
@@ -228,11 +230,12 @@ impl BatchOperations for MemoryDatabase {
         match res {
             None => Ok(None),
             Some(b) => {
-                let (txout, keychain) = b.downcast_ref().cloned().unwrap();
+                let (txout, keychain, is_spent) = b.downcast_ref().cloned().unwrap();
                 Ok(Some(LocalUtxo {
                     outpoint: *outpoint,
                     txout,
                     keychain,
+                    is_spent,
                 }))
             }
         }
@@ -326,11 +329,12 @@ impl Database for MemoryDatabase {
             .range::<Vec<u8>, _>((Included(&key), Excluded(&after(&key))))
             .map(|(k, v)| {
                 let outpoint = deserialize(&k[1..]).unwrap();
-                let (txout, keychain) = v.downcast_ref().cloned().unwrap();
+                let (txout, keychain, is_spent) = v.downcast_ref().cloned().unwrap();
                 Ok(LocalUtxo {
                     outpoint,
                     txout,
                     keychain,
+                    is_spent,
                 })
             })
             .collect()
@@ -389,11 +393,12 @@ impl Database for MemoryDatabase {
     fn get_utxo(&self, outpoint: &OutPoint) -> Result<Option<LocalUtxo>, Error> {
         let key = MapKey::Utxo(Some(outpoint)).as_map_key();
         Ok(self.map.get(&key).map(|b| {
-            let (txout, keychain) = b.downcast_ref().cloned().unwrap();
+            let (txout, keychain, is_spent) = b.downcast_ref().cloned().unwrap();
             LocalUtxo {
                 outpoint: *outpoint,
                 txout,
                 keychain,
+                is_spent,
             }
         }))
     }
@@ -526,6 +531,7 @@ macro_rules! populate_test_db {
                     vout: vout as u32,
                 },
                 keychain: $crate::KeychainKind::External,
+                is_spent: false,
             })
             .unwrap();
         }

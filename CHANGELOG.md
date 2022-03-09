@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `verify` flag removed from `TransactionDetails`.
 - Add `get_internal_address` to allow you to get internal addresses just as you get external addresses.
 - added `ensure_addresses_cached` to `Wallet` to let offline wallets load and cache addresses in their database
+- Add `is_spent` field to `LocalUtxo`; when we notice that a utxo has been spent we set `is_spent` field to true instead of deleting it from the db.
 
 ### Sync API change
 
