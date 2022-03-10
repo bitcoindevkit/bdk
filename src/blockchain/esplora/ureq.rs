@@ -49,19 +49,9 @@ pub struct EsploraBlockchain {
     concurrency: u8,
 }
 
-pub struct SyncSession {}
-pub struct WalletUpdate {
-    transactions: Vec<(Vec<Option<TxOut>>, Transaction)>,
-    last_active_index: Vec<usize>,
-}
-
-pub struct SetupSession {
-    scripts: Vec<(Box<dyn Iterator<Item = Script> + Send + 'static>, usize)>,
-}
-
 impl EsploraBlockchain {
     /// Create a new instance of the client from a base URL and the `stop_gap`.
-    pub fn new(base_url: &str, stop_gap: usize) -> Self {
+    pub fn new(base_url: &str) -> Self {
         EsploraBlockchain {
             url_client: UrlClient {
                 url: base_url.to_string(),
@@ -83,25 +73,12 @@ impl EsploraBlockchain {
         self
     }
 
-    // pub fn setup(&self, session: SetupSession) -> Result<WalletUpdate, Error> {
-    //     let transactions = vec![];
-    //     // fn take_mut(iter: &mut impl Iterator<Item=Script>, n: usize) -> Vec<Script> {
-    //     //     let mut res = Vec::with_capacity(n);
-
-    //     //     for i in 0..n {
-    //     //         res.push(item);
-    //     //     }
-    //     //     res
-    //     // }
-    //     for (scripts, stop_gap) in session.scripts {
-    //     }
-    // }
-
-    pub fn setup_for_keychain(
+    /// TODO
+    pub fn fetch_related_transactions(
         &self,
         mut scripts: impl Iterator<Item = Script>,
         stop_gap: usize,
-    ) -> Result<(Vec<(Vec<Option<TxOut>>, Transaction)>, usize), Error> {
+    ) -> Result<(Vec<(Vec<Option<TxOut>>, Transaction)>, u32), Error> {
         let mut empty_scripts = 0;
         let mut last_active_index = 0;
         let mut index = 0;
@@ -145,7 +122,7 @@ impl EsploraBlockchain {
                     empty_scripts += 1;
                 } else {
                     empty_scripts = 0;
-                    last_active_index = index;
+                    last_active_index = index + 1;
                 }
                 index += 1;
 
@@ -204,7 +181,7 @@ impl WalletSync for EsploraBlockchain {
         _progress_update: Box<dyn Progress>,
     ) -> Result<(), Error> {
         use crate::blockchain::script_sync::Request;
-        let mut request = script_sync::start(database, todo!())?;
+        let mut request = script_sync::start(database, 20)?;
         let mut tx_index: HashMap<Txid, Tx> = HashMap::new();
         let batch_update = loop {
             request = match request {
@@ -443,7 +420,7 @@ impl ConfigurableBlockchain for EsploraBlockchain {
                 .proxy(Proxy::new(proxy).map_err(|e| Error::Esplora(Box::new(e.into())))?);
         }
 
-        let mut blockchain = EsploraBlockchain::new(config.base_url.as_str(), config.stop_gap)
+        let mut blockchain = EsploraBlockchain::new(config.base_url.as_str())
             .with_agent(agent_builder.build());
 
         if let Some(concurrency) = config.concurrency {
@@ -463,12 +440,12 @@ impl From<ureq::Error> for EsploraError {
     }
 }
 
-mod test {
-    use super::*;
+// mod test {
+//     use super::*;
 
-    #[test]
-    fn setup_session_is_send_and_static() {
-        fn assert_send_static<T: Send + 'static>() {}
-        assert_send_static::<SetupSession>()
-    }
-}
+//     #[test]
+//     fn setup_session_is_send_and_static() {
+//         fn assert_send_static<T: Send + 'static>() {}
+//         assert_send_static::<SetupSession>()
+//     }
+// }

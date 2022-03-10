@@ -1124,6 +1124,27 @@ macro_rules! bdk_blockchain_tests {
                 assert_eq!(tx_2.received, 10_000);
                 assert_eq!(tx_2.sent, 0);
             }
+
+            #[test]
+            #[cfg(feature = "use-esplora-ureq")]
+            fn test_new_sync() {
+                let (wallet, blockchain, descriptors, mut test_client) = init_single_sig();
+                let _ = test_client.receive(testutils! {
+                    @tx ( (@external descriptors, 0) => 50_000 )
+                });
+
+                let script_iter = wallet.script_iter(KeychainKind::External);
+
+                let (txs, keychain_index) = blockchain.fetch_related_transactions(script_iter, 10).unwrap();
+
+                dbg!(&txs);
+                assert_eq!(keychain_index,1);
+                assert_eq!(txs.len(), 1);
+
+                wallet.apply_full_sync(KeychainKind::External, txs, keychain_index).unwrap();
+
+                assert_eq!(wallet.get_balance().unwrap(), 50_000);
+            }
         }
     };
 

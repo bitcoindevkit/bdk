@@ -16,10 +16,10 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::collections::{BTreeMap, HashSet};
-use std::fmt;
 use std::ops::{Deref, DerefMut};
 use std::str::FromStr;
 use std::sync::Arc;
+use std::fmt;
 
 use bitcoin::secp256k1::Secp256k1;
 
@@ -1545,6 +1545,188 @@ where
         self.database.borrow_mut().set_sync_time(sync_time)?;
 
         Ok(())
+    }
+
+    /// TOOD
+    pub fn script_iter(&self, keychain: KeychainKind) -> impl Iterator<Item = Script> {
+        let descriptor = self.get_descriptor_for_keychain(keychain).clone();
+
+        let end = if descriptor.is_deriveable() {
+            u32::MAX
+        } else {
+            1
+        };
+
+        let secp = self.secp.clone();
+        (0..end).map(move |i| descriptor.as_derived(i, &secp).script_pubkey())
+    }
+
+    /// TODO
+    pub fn apply_full_sync(
+        &self,
+        keychain: KeychainKind,
+        transactions: Vec<(Vec<Option<TxOut>>, Transaction)>,
+        last_active_index: u32,
+    ) -> Result<(), Error> {
+        self.ensure_addresses_cached(last_active_index)?;
+        let db = &mut *self.database.borrow_mut();
+        let tx_details = transactions
+            .into_iter()
+            .map(|(vout, tx)| {
+                {
+                    let txid = tx.txid();
+                    debug!("applying tx {} in full_sync", txid);
+                    let mut sent: u64 = 0;
+                    let mut received: u64 = 0;
+                    let mut inputs_sum: u64 = 0;
+                    let mut outputs_sum: u64 = 0;
+
+                    for (txout, (_input_index, input)) in
+                        vout.into_iter().zip(tx.input.iter().enumerate())
+                    {
+                        let txout = match txout {
+                            Some(txout) => txout,
+                            None => {
+                                // skip coinbase inputs
+                                debug_assert!(
+                                    input.previous_output.is_null(),
+                                    "prevout should only be missing for coinbase"
+                                );
+                                continue;
+                            }
+                        };
+                        // Verify this input if requested via feature flag
+                        // #[cfg(feature = "verify")]
+                        // {
+                        //     use crate::wallet::verify::VerifyError;
+                        //     let serialized_tx = bitcoin::consensus::serialize(&tx);
+                        //     bitcoinconsensus::verify(
+                        //         txout.script_pubkey.to_bytes().as_ref(),
+                        //         txout.value,
+                        //         &serialized_tx,
+                        //         _input_index,
+                        //     )
+                        //         .map_err(VerifyError::from)?;
+                        // }
+                        inputs_sum += txout.value;
+                        if db.is_mine(&txout.script_pubkey)? {
+                            sent += txout.value;
+                        }
+                    }
+
+                    for out in &tx.output {
+                        outputs_sum += out.value;
+                        if db.is_mine(&out.script_pubkey)? {
+                            received += out.value;
+                        }
+                    }
+                    // we need to saturating sub since we want coinbase txs to map to 0 fee and
+                    // this subtraction will be negative for coinbase txs.
+                    let fee = inputs_sum.saturating_sub(outputs_sum);
+                    Result::<_, Error>::Ok(TransactionDetails {
+                        txid,
+                        transaction: Some(tx),
+                        received,
+                        sent,
+                        // we're going to fill this in later
+                        confirmation_time: None,
+                        fee: Some(fee),
+                    })
+                }
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let existing_txs = db.iter_txs(true)?;
+        let existing_txids: HashSet<Txid> = existing_txs.iter().map(|tx| tx.txid).collect();
+        let finished_txs = Self::make_txs_consistent(&tx_details);
+        let observed_txids: HashSet<Txid> = finished_txs.iter().map(|tx| tx.txid).collect();
+        let txids_to_delete = existing_txids.difference(&observed_txids);
+
+        let mut batch = db.begin_batch();
+
+        // Delete old txs that no longer exist
+        for txid in txids_to_delete {
+            if let Some(raw_tx) = db.get_raw_tx(txid)? {
+                for i in 0..raw_tx.output.len() {
+                    // Also delete any utxos from the txs that no longer exist.
+                    let _ = batch.del_utxo(&OutPoint {
+                        txid: *txid,
+                        vout: i as u32,
+                    })?;
+                }
+            } else {
+                // TODO: change to some kind of DB error
+                unreachable!("we should always have the raw tx");
+            }
+            batch.del_tx(txid, true)?;
+        }
+
+        // Set every tx we observed
+        for finished_tx in &finished_txs {
+            let tx = finished_tx
+                .transaction
+                .as_ref()
+                .expect("transaction will always be present here");
+            for (i, output) in tx.output.iter().enumerate() {
+                if let Some((keychain, _)) =
+                    db.get_path_from_script_pubkey(&output.script_pubkey)?
+                {
+                    // add utxos we own from the new transactions we've seen.
+                    batch.set_utxo(&LocalUtxo {
+                        outpoint: OutPoint {
+                            txid: finished_tx.txid,
+                            vout: i as u32,
+                        },
+                        txout: output.clone(),
+                        keychain,
+                    })?;
+                }
+            }
+            batch.set_tx(finished_tx)?;
+        }
+
+        // we don't do this in the loop above since we may want to delete some of the utxos we
+        // just added in case there are new tranasactions that spend form each other.
+        for finished_tx in &finished_txs {
+            let tx = finished_tx
+                .transaction
+                .as_ref()
+                .expect("transaction will always be present here");
+            for input in &tx.input {
+                // Delete any spent utxos
+                batch.del_utxo(&input.previous_output)?;
+            }
+        }
+
+        batch.set_last_index(keychain, last_active_index as u32)?;
+
+        db.commit_batch(batch)?;
+
+        Ok(())
+    }
+
+    /// Remove conflicting transactions -- tie breaking them by fee.
+    fn make_txs_consistent(txs: &[TransactionDetails]) -> Vec<&TransactionDetails> {
+        let mut utxo_index: HashMap<OutPoint, &TransactionDetails> = HashMap::default();
+        for tx in txs {
+            for input in &tx.transaction.as_ref().unwrap().input {
+                utxo_index
+                    .entry(input.previous_output)
+                    .and_modify(|existing| match (tx.fee, existing.fee) {
+                        (Some(fee), Some(existing_fee)) if fee > existing_fee => *existing = tx,
+                        (Some(_), None) => *existing = tx,
+                        _ => { /* leave it the same */ }
+                    })
+                    .or_insert(tx);
+            }
+        }
+
+        utxo_index
+            .into_iter()
+            .map(|(_, tx)| (tx.txid, tx))
+            .collect::<HashMap<_, _>>()
+            .into_iter()
+            .map(|(_, tx)| tx)
+            .collect()
     }
 }
 

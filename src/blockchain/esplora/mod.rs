@@ -118,8 +118,6 @@ pub struct EsploraBlockchainConfig {
     /// Number of parallel requests sent to the esplora service (default: 4)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub concurrency: Option<u8>,
-    /// Stop searching addresses for transactions after finding an unused gap of this length.
-    pub stop_gap: usize,
     /// Socket timeout.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub timeout: Option<u64>,
@@ -127,12 +125,11 @@ pub struct EsploraBlockchainConfig {
 
 impl EsploraBlockchainConfig {
     /// create a config with default values given the base url and stop gap
-    pub fn new(base_url: String, stop_gap: usize) -> Self {
+    pub fn new(base_url: String) -> Self {
         Self {
             base_url,
             proxy: None,
             timeout: None,
-            stop_gap,
             concurrency: None,
         }
     }
