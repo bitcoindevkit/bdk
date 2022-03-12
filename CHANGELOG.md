@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- Add `sqlite-bundled` feature for deployments that need a bundled version of sqlite, ie. for mobile platforms.
+
 ## [v0.17.0] - [v0.16.1]
 
 - Removed default verification from `wallet::sync`. sync-time verification is added in `script_sync` and is activated by `verify` feature flag.
