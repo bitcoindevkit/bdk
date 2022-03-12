@@ -28,6 +28,7 @@ jobs:
           - async-interface
           - use-esplora-reqwest
           - sqlite
+          - sqlite-bundled
     steps:
       - name: checkout
         uses: actions/checkout@v2
@@ -114,7 +115,7 @@ jobs:
           override: true
       - name: Test
         run: cargo test --no-default-features --features ${{ matrix.blockchain.features }} ${{ matrix.blockchain.name }}::bdk_blockchain_tests
-  
+
   check-wasm:
     name: Check WASM
     runs-on: ubuntu-20.04
