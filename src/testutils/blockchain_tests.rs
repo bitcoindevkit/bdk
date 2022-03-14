@@ -1124,6 +1124,47 @@ macro_rules! bdk_blockchain_tests {
                 assert_eq!(tx_2.received, 10_000);
                 assert_eq!(tx_2.sent, 0);
             }
+
+            #[test]
+            fn test_double_spend() {
+                // We create a tx and then we try to double spend it; BDK will always allow
+                // us to do so, as it never forgets about spent UTXOs
+                let (wallet, blockchain, descriptors, mut test_client) = init_single_sig();
+                let node_addr = test_client.get_node_address(None);
+                let _ = test_client.receive(testutils! {
+                    @tx ( (@external descriptors, 0) => 50_000 )
+                });
+
+                wallet.sync(&blockchain, SyncOptions::default()).unwrap();
+                let mut builder = wallet.build_tx();
+                builder.add_recipient(node_addr.script_pubkey(), 25_000);
+                let (mut psbt, _details) = builder.finish().unwrap();
+                let finalized = wallet.sign(&mut psbt, Default::default()).unwrap();
+                assert!(finalized, "Cannot finalize transaction");
+                let initial_tx = psbt.extract_tx();
+                let _sent_txid = blockchain.broadcast(&initial_tx).unwrap();
+                wallet.sync(&blockchain, SyncOptions::default()).unwrap();
+                for utxo in wallet.list_unspent().unwrap() {
+                    // Making sure the TXO we just spent is not returned by list_unspent
+                    assert!(utxo.outpoint != initial_tx.input[0].previous_output, "wallet displays spent txo in unspents");
+                }
+                // We can still create a transaction double spending `initial_tx`
+                let mut builder = wallet.build_tx();
+                builder
+                    .add_utxo(initial_tx.input[0].previous_output)
+                    .expect("Can't manually add an UTXO spent");
+                test_client.generate(1, Some(node_addr));
+                wallet.sync(&blockchain, SyncOptions::default()).unwrap();
+                // Even after confirmation, we can still create a tx double spend it
+                let mut builder = wallet.build_tx();
+                builder
+                    .add_utxo(initial_tx.input[0].previous_output)
+                    .expect("Can't manually add an UTXO spent");
+                for utxo in wallet.list_unspent().unwrap() {
+                    // Making sure the TXO we just spent is not returned by list_unspent
+                    assert!(utxo.outpoint != initial_tx.input[0].previous_output, "wallet displays spent txo in unspents");
+                }
+            }
         }
     };
 

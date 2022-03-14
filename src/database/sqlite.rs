@@ -40,6 +40,7 @@ static MIGRATIONS: &[&str] = &[
     "CREATE TABLE transaction_details (txid BLOB, timestamp INTEGER, received INTEGER, sent INTEGER, fee INTEGER, height INTEGER);",
     "INSERT INTO transaction_details SELECT txid, timestamp, received, sent, fee, height FROM transaction_details_old;",
     "DROP TABLE transaction_details_old;",
+    "ALTER TABLE utxos ADD COLUMN is_spent;",
 ];
 
 /// Sqlite database stored on filesystem
@@ -83,14 +84,16 @@ impl SqliteDatabase {
         vout: u32,
         txid: &[u8],
         script: &[u8],
+        is_spent: bool,
     ) -> Result<i64, Error> {
-        let mut statement = self.connection.prepare_cached("INSERT INTO utxos (value, keychain, vout, txid, script) VALUES (:value, :keychain, :vout, :txid, :script)")?;
+        let mut statement = self.connection.prepare_cached("INSERT INTO utxos (value, keychain, vout, txid, script, is_spent) VALUES (:value, :keychain, :vout, :txid, :script, :is_spent)")?;
         statement.execute(named_params! {
             ":value": value,
             ":keychain": keychain,
             ":vout": vout,
             ":txid": txid,
-            ":script": script
+            ":script": script,
+            ":is_spent": is_spent,
         })?;
 
         Ok(self.connection.last_insert_rowid())
@@ -291,7 +294,7 @@ impl SqliteDatabase {
     fn select_utxos(&self) -> Result<Vec<LocalUtxo>, Error> {
         let mut statement = self
             .connection
-            .prepare_cached("SELECT value, keychain, vout, txid, script FROM utxos")?;
+            .prepare_cached("SELECT value, keychain, vout, txid, script, is_spent FROM utxos")?;
         let mut utxos: Vec<LocalUtxo> = vec![];
         let mut rows = statement.query([])?;
         while let Some(row) = rows.next()? {
@@ -300,6 +303,7 @@ impl SqliteDatabase {
             let vout = row.get(2)?;
             let txid: Vec<u8> = row.get(3)?;
             let script: Vec<u8> = row.get(4)?;
+            let is_spent: bool = row.get(5)?;
 
             let keychain: KeychainKind = serde_json::from_str(&keychain)?;
 
@@ -310,19 +314,16 @@ impl SqliteDatabase {
                     script_pubkey: script.into(),
                 },
                 keychain,
+                is_spent,
             })
         }
 
         Ok(utxos)
     }
 
-    fn select_utxo_by_outpoint(
-        &self,
-        txid: &[u8],
-        vout: u32,
-    ) -> Result<Option<(u64, KeychainKind, Script)>, Error> {
+    fn select_utxo_by_outpoint(&self, txid: &[u8], vout: u32) -> Result<Option<LocalUtxo>, Error> {
         let mut statement = self.connection.prepare_cached(
-            "SELECT value, keychain, script FROM utxos WHERE txid=:txid AND vout=:vout",
+            "SELECT value, keychain, script, is_spent FROM utxos WHERE txid=:txid AND vout=:vout",
         )?;
         let mut rows = statement.query(named_params! {":txid": txid,":vout": vout})?;
         match rows.next()? {
@@ -331,9 +332,18 @@ impl SqliteDatabase {
                 let keychain: String = row.get(1)?;
                 let keychain: KeychainKind = serde_json::from_str(&keychain)?;
                 let script: Vec<u8> = row.get(2)?;
-                let script: Script = script.into();
+                let script_pubkey: Script = script.into();
+                let is_spent: bool = row.get(3)?;
 
-                Ok(Some((value, keychain, script)))
+                Ok(Some(LocalUtxo {
+                    outpoint: OutPoint::new(deserialize(txid)?, vout),
+                    txout: TxOut {
+                        value,
+                        script_pubkey,
+                    },
+                    keychain,
+                    is_spent,
+                }))
             }
             None => Ok(None),
         }
@@ -620,6 +630,7 @@ impl BatchOperations for SqliteDatabase {
             utxo.outpoint.vout,
             &utxo.outpoint.txid,
             utxo.txout.script_pubkey.as_bytes(),
+            utxo.is_spent,
         )?;
         Ok(())
     }
@@ -694,16 +705,9 @@ impl BatchOperations for SqliteDatabase {
 
     fn del_utxo(&mut self, outpoint: &OutPoint) -> Result<Option<LocalUtxo>, Error> {
         match self.select_utxo_by_outpoint(&outpoint.txid, outpoint.vout)? {
-            Some((value, keychain, script_pubkey)) => {
+            Some(local_utxo) => {
                 self.delete_utxo_by_outpoint(&outpoint.txid, outpoint.vout)?;
-                Ok(Some(LocalUtxo {
-                    outpoint: *outpoint,
-                    txout: TxOut {
-                        value,
-                        script_pubkey,
-                    },
-                    keychain,
-                }))
+                Ok(Some(local_utxo))
             }
             None => Ok(None),
         }
@@ -832,17 +836,7 @@ impl Database for SqliteDatabase {
     }
 
     fn get_utxo(&self, outpoint: &OutPoint) -> Result<Option<LocalUtxo>, Error> {
-        match self.select_utxo_by_outpoint(&outpoint.txid, outpoint.vout)? {
-            Some((value, keychain, script_pubkey)) => Ok(Some(LocalUtxo {
-                outpoint: *outpoint,
-                txout: TxOut {
-                    value,
-                    script_pubkey,
-                },
-                keychain,
-            })),
-            None => Ok(None),
-        }
+        self.select_utxo_by_outpoint(&outpoint.txid, outpoint.vout)
     }
 
     fn get_raw_tx(&self, txid: &Txid) -> Result<Option<Transaction>, Error> {

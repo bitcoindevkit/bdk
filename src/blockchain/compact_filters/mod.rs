@@ -163,11 +163,19 @@ impl CompactFiltersBlockchain {
             if let Some(previous_output) = database.get_previous_output(&input.previous_output)? {
                 inputs_sum += previous_output.value;
 
-                if database.is_mine(&previous_output.script_pubkey)? {
+                // this output is ours, we have a path to derive it
+                if let Some((keychain, _)) =
+                    database.get_path_from_script_pubkey(&previous_output.script_pubkey)?
+                {
                     outgoing += previous_output.value;
 
-                    debug!("{} input #{} is mine, removing from utxo", tx.txid(), i);
-                    updates.del_utxo(&input.previous_output)?;
+                    debug!("{} input #{} is mine, setting utxo as spent", tx.txid(), i);
+                    updates.set_utxo(&LocalUtxo {
+                        outpoint: input.previous_output,
+                        txout: previous_output.clone(),
+                        keychain,
+                        is_spent: true,
+                    })?;
                 }
             }
         }
@@ -185,6 +193,7 @@ impl CompactFiltersBlockchain {
                     outpoint: OutPoint::new(tx.txid(), i as u32),
                     txout: output.clone(),
                     keychain,
+                    is_spent: false,
                 })?;
                 incoming += output.value;
 

@@ -316,6 +316,7 @@ pub mod test {
             txout,
             outpoint,
             keychain: KeychainKind::External,
+            is_spent: true,
         };
 
         tree.set_utxo(&utxo).unwrap();

@@ -332,7 +332,23 @@ impl<'a, D: BatchDatabase> State<'a, D> {
             batch.del_tx(txid, true)?;
         }
 
-        // Set every tx we observed
+        let mut spent_utxos = HashSet::new();
+
+        // track all the spent utxos
+        for finished_tx in &finished_txs {
+            let tx = finished_tx
+                .transaction
+                .as_ref()
+                .expect("transaction will always be present here");
+            for input in &tx.input {
+                spent_utxos.insert(&input.previous_output);
+            }
+        }
+
+        // set every utxo we observed, unless it's already spent
+        // we don't do this in the loop above as we want to know all the spent outputs before
+        // adding the non-spent to the batch in case there are new tranasactions
+        // that spend form each other.
         for finished_tx in &finished_txs {
             let tx = finished_tx
                 .transaction
@@ -343,30 +359,22 @@ impl<'a, D: BatchDatabase> State<'a, D> {
                     self.db.get_path_from_script_pubkey(&output.script_pubkey)?
                 {
                     // add utxos we own from the new transactions we've seen.
+                    let outpoint = OutPoint {
+                        txid: finished_tx.txid,
+                        vout: i as u32,
+                    };
+
                     batch.set_utxo(&LocalUtxo {
-                        outpoint: OutPoint {
-                            txid: finished_tx.txid,
-                            vout: i as u32,
-                        },
+                        outpoint,
                         txout: output.clone(),
                         keychain,
+                        // Is this UTXO in the spent_utxos set?
+                        is_spent: spent_utxos.get(&outpoint).is_some(),
                     })?;
                 }
             }
-            batch.set_tx(finished_tx)?;
-        }
 
-        // we don't do this in the loop above since we may want to delete some of the utxos we
-        // just added in case there are new tranasactions that spend form each other.
-        for finished_tx in &finished_txs {
-            let tx = finished_tx
-                .transaction
-                .as_ref()
-                .expect("transaction will always be present here");
-            for input in &tx.input {
-                // Delete any spent utxos
-                batch.del_utxo(&input.previous_output)?;
-            }
+            batch.set_tx(finished_tx)?;
         }
 
         for (keychain, last_active_index) in self.last_active_index {
