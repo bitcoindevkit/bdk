@@ -101,6 +101,8 @@ impl Blockchain for EsploraBlockchain {
     }
 }
 
+impl StatelessBlockchain for EsploraBlockchain {}
+
 #[maybe_async]
 impl GetHeight for EsploraBlockchain {
     fn get_height(&self) -> Result<u32, Error> {

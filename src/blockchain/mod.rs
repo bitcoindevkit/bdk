@@ -25,7 +25,8 @@ use bitcoin::{Transaction, Txid};
 
 use crate::database::BatchDatabase;
 use crate::error::Error;
-use crate::FeeRate;
+use crate::wallet::{wallet_name_from_descriptor, Wallet};
+use crate::{FeeRate, KeychainKind};
 
 #[cfg(any(
     feature = "electrum",
@@ -162,6 +163,106 @@ pub trait ConfigurableBlockchain: Blockchain + Sized {
 
     /// Create a new instance given a configuration
     fn from_config(config: &Self::Config) -> Result<Self, Error>;
+}
+
+/// Trait for blockchains that don't contain any state
+///
+/// Statless blockchains can be used to sync multiple wallets with different descriptors.
+///
+/// [`BlockchainFactory`] is automatically implemented for `Arc<T>` where `T` is a stateless
+/// blockchain.
+pub trait StatelessBlockchain: Blockchain {}
+
+/// Trait for a factory of blockchains that share the underlying connection or configuration
+#[cfg_attr(
+    not(feature = "async-interface"),
+    doc = r##"
+## Example
+
+This example shows how to sync multiple walles and return the sum of their balances
+
+```no_run
+# use bdk::Error;
+# use bdk::blockchain::*;
+# use bdk::database::*;
+# use bdk::wallet::*;
+# use bdk::*;
+fn sum_of_balances<B: BlockchainFactory>(blockchain_factory: B, wallets: &[Wallet<MemoryDatabase>]) -> Result<u64, Error> {
+    Ok(wallets
+        .iter()
+        .map(|w| -> Result<_, Error> {
+            blockchain_factory.sync_wallet(&w, None, SyncOptions::default())?;
+            w.get_balance()
+        })
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .sum())
+}
+```
+"##
+)]
+pub trait BlockchainFactory {
+    /// The type returned when building a blockchain from this factory
+    type Inner: Blockchain;
+
+    /// Build a new blockchain for the given descriptor wallet_name
+    ///
+    /// If `override_skip_blocks` is `None`, the returned blockchain will inherit the number of blocks
+    /// from the factory. Since it's not possible to override the value to `None`, set it to
+    /// `Some(0)` to rescan from the genesis.
+    fn build(
+        &self,
+        wallet_name: &str,
+        override_skip_blocks: Option<u32>,
+    ) -> Result<Self::Inner, Error>;
+
+    /// Build a new blockchain for a given wallet
+    ///
+    /// Internally uses [`wallet_name_from_descriptor`] to derive the name, and then calls
+    /// [`BlockchainFactory::build`] to create the blockchain instance.
+    fn build_for_wallet<D: BatchDatabase>(
+        &self,
+        wallet: &Wallet<D>,
+        override_skip_blocks: Option<u32>,
+    ) -> Result<Self::Inner, Error> {
+        let wallet_name = wallet_name_from_descriptor(
+            wallet.public_descriptor(KeychainKind::External)?.unwrap(),
+            wallet.public_descriptor(KeychainKind::Internal)?,
+            wallet.network(),
+            wallet.secp_ctx(),
+        )?;
+        self.build(&wallet_name, override_skip_blocks)
+    }
+
+    /// Use [`BlockchainFactory::build_for_wallet`] to get a blockchain, then sync the wallet
+    ///
+    /// This can be used when a new blockchain would only be used to sync a wallet and then
+    /// immediately dropped. Keep in mind that specific blockchain factories may perform slow
+    /// operations to build a blockchain for a given wallet, so if a wallet needs to be synced
+    /// often it's recommended to use [`BlockchainFactory::build_for_wallet`] to reuse the same
+    /// blockchain multiple times.
+    #[cfg(not(any(target_arch = "wasm32", feature = "async-interface")))]
+    #[cfg_attr(
+        docsrs,
+        doc(cfg(not(any(target_arch = "wasm32", feature = "async-interface"))))
+    )]
+    fn sync_wallet<D: BatchDatabase>(
+        &self,
+        wallet: &Wallet<D>,
+        override_skip_blocks: Option<u32>,
+        sync_options: crate::wallet::SyncOptions,
+    ) -> Result<(), Error> {
+        let blockchain = self.build_for_wallet(wallet, override_skip_blocks)?;
+        wallet.sync(&blockchain, sync_options)
+    }
+}
+
+impl<T: StatelessBlockchain> BlockchainFactory for Arc<T> {
+    type Inner = Self;
+
+    fn build(&self, _wallet_name: &str, _override_skip_blocks: Option<u32>) -> Result<Self, Error> {
+        Ok(Arc::clone(self))
+    }
 }
 
 /// Data sent with a progress update over a [`channel`]

@@ -4089,6 +4089,8 @@ pub(crate) mod test {
 }
 
 /// Deterministically generate a unique name given the descriptors defining the wallet
+///
+/// Compatible with [`wallet_name_from_descriptor`]
 pub fn wallet_name_from_descriptor<T>(
     descriptor: T,
     change_descriptor: Option<T>,
