@@ -17,7 +17,7 @@ pub struct Vin {
     // None if coinbase
     pub prevout: Option<PrevOut>,
     pub scriptsig: Script,
-    #[serde(deserialize_with = "deserialize_witness")]
+    #[serde(deserialize_with = "deserialize_witness", default)]
     pub witness: Vec<Vec<u8>>,
     pub sequence: u32,
     pub is_coinbase: bool,

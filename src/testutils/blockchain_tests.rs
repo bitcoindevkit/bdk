@@ -1165,6 +1165,36 @@ macro_rules! bdk_blockchain_tests {
                     assert!(utxo.outpoint != initial_tx.input[0].previous_output, "wallet displays spent txo in unspents");
                 }
             }
+
+            #[test]
+            fn test_send_receive_pkh() {
+                let descriptors = ("pkh(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW)".to_string(), None);
+                let mut test_client = TestClient::default();
+                let blockchain = get_blockchain(&test_client);
+
+                let wallet = get_wallet_from_descriptors(&descriptors);
+                #[cfg(feature = "test-rpc")]
+                wallet.sync(&blockchain, SyncOptions::default()).unwrap();
+
+                let _ = test_client.receive(testutils! {
+                    @tx ( (@external descriptors, 0)   => 50_000 )
+                });
+
+                wallet.sync(&blockchain, SyncOptions::default()).unwrap();
+
+                assert_eq!(wallet.get_balance().unwrap(), 50_000);
+
+                let tx = {
+                    let mut builder = wallet.build_tx();
+                    builder.add_recipient(test_client.get_node_address(None).script_pubkey(), 25_000);
+                    let (mut psbt, _details) = builder.finish().unwrap();
+                    wallet.sign(&mut psbt, Default::default()).unwrap();
+                    psbt.extract_tx()
+                };
+                blockchain.broadcast(&tx).unwrap();
+
+                wallet.sync(&blockchain, SyncOptions::default()).unwrap();
+            }
         }
     };
 
