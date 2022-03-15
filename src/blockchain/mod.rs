@@ -164,6 +164,61 @@ pub trait ConfigurableBlockchain: Blockchain + Sized {
     fn from_config(config: &Self::Config) -> Result<Self, Error>;
 }
 
+/// Trait for blockchains that don't contain any state
+///
+/// Statless blockchains can be used to sync multiple wallets with different descriptors.
+///
+/// [`BlockchainFactory`] is automatically implemented for `Arc<T>` where `T` is a stateless
+/// blockchain.
+pub trait StatelessBlockchain: Blockchain {}
+
+/// Trait for a factory of blockchains that share the underlying connection or configuration
+///
+/// ## Example
+///
+/// This example shows how to sync multiple walles and return the sum of their balances
+///
+/// ```no_run
+/// # use bdk::Error;
+/// # use bdk::blockchain::*;
+/// # use bdk::database::*;
+/// # use bdk::wallet::*;
+/// fn sum_of_balances<B: BlockchainFactory>(blockchain_factory: B, wallets: &[Wallet<MemoryDatabase>]) -> Result<u64, Error> {
+///     Ok(wallets
+///         .iter()
+///         .map(|w| -> Result<_, Error> {
+///             w.sync(&blockchain_factory.build("wallet_1", None)?, SyncOptions::default())?;
+///             w.get_balance()
+///         })
+///         .collect::<Result<Vec<_>, _>>()?
+///         .into_iter()
+///         .sum())
+/// }
+/// ```
+pub trait BlockchainFactory {
+    /// The type returned when building a blockchain from this factory
+    type Inner: Blockchain;
+
+    /// Build a new blockchain for the given descriptor checksum
+    ///
+    /// If `override_skip_blocks` is `None`, the returned blockchain will inherit the number of blocks
+    /// from the factory. Since it's not possible to override the value to `None`, set it to
+    /// `Some(0)` to rescan from the genesis.
+    fn build(
+        &self,
+        checksum: &str,
+        override_skip_blocks: Option<u32>,
+    ) -> Result<Self::Inner, Error>;
+}
+
+impl<T: StatelessBlockchain> BlockchainFactory for Arc<T> {
+    type Inner = Self;
+
+    fn build(&self, _checksum: &str, _override_skip_blocks: Option<u32>) -> Result<Self, Error> {
+        Ok(Arc::clone(self))
+    }
+}
+
 /// Data sent with a progress update over a [`channel`]
 pub type ProgressData = (f32, Option<String>);
 

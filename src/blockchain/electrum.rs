@@ -79,6 +79,8 @@ impl Blockchain for ElectrumBlockchain {
     }
 }
 
+impl StatelessBlockchain for ElectrumBlockchain {}
+
 impl GetHeight for ElectrumBlockchain {
     fn get_height(&self) -> Result<u32, Error> {
         // TODO: unsubscribe when added to the client, or is there a better call to use here?

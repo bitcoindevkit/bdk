@@ -441,6 +441,57 @@ fn list_wallet_dir(client: &Client) -> Result<Vec<String>, Error> {
     Ok(result.wallets.into_iter().map(|n| n.name).collect())
 }
 
+/// Factory of [`RpcBlockchain`] instances, implements [`BlockchainFactory`]
+///
+/// Internally caches the node url and authentication params and allows getting many different [`RpcBlockchain`]
+/// objects for different wallet names and with different rescan heights.
+///
+/// ## Example
+///
+/// ```no_run
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let factory = RpcBlockchainFactory {
+///     url: "http://127.0.0.1:18332",
+///     auth: Auth::Cookie { file: "/home/user/.bitcoin/.cookie".to_string() },
+///     network: Network::Testnet,
+///     wallet_name_prefix: "prefix-".to_string(),
+///     default_skip_blocks: 100_000,
+/// };
+/// let main_wallet_blockchain = factory.build("main_wallet", Some(200_000))?;
+/// # Ok(())
+/// ```
+#[derive(Debug, Clone)]
+pub struct RpcBlockchainFactory {
+    /// The bitcoin node url
+    pub url: String,
+    /// The bitcoin node authentication mechanism
+    pub auth: Auth,
+    /// The network we are using (it will be checked the bitcoin node network matches this)
+    pub network: Network,
+    /// The prefix used to build the full wallet name for blockchains
+    pub wallet_name_prefix: String,
+    /// Default number of blocks to skip which will be inherited by blockchain unless overridden
+    pub default_skip_blocks: u32,
+}
+
+impl BlockchainFactory for RpcBlockchainFactory {
+    type Inner = RpcBlockchain;
+
+    fn build(
+        &self,
+        checksum: &str,
+        override_skip_blocks: Option<u32>,
+    ) -> Result<Self::Inner, Error> {
+        Ok(RpcBlockchain::from_config(&RpcConfig {
+            url: self.url.clone(),
+            auth: self.auth.clone(),
+            network: self.network,
+            wallet_name: format!("{}{}", self.wallet_name_prefix, checksum),
+            skip_blocks: Some(override_skip_blocks.unwrap_or(self.default_skip_blocks)),
+        })?)
+    }
+}
+
 #[cfg(test)]
 #[cfg(feature = "test-rpc")]
 crate::bdk_blockchain_tests! {
@@ -454,5 +505,51 @@ crate::bdk_blockchain_tests! {
             skip_blocks: None,
         };
         RpcBlockchain::from_config(&config).unwrap()
+    }
+}
+
+#[cfg(test)]
+#[cfg(feature = "test-rpc")]
+mod test {
+    use super::*;
+    use crate::blockchain::*;
+    use crate::testutils::blockchain_tests::TestClient;
+
+    use bitcoin::Network;
+    use bitcoincore_rpc::RpcApi;
+
+    #[test]
+    fn test_rpc_blockchain_factory() {
+        let test_client = TestClient::default();
+
+        let factory = RpcBlockchainFactory {
+            url: test_client.bitcoind.rpc_url(),
+            auth: Auth::Cookie {
+                file: test_client.bitcoind.params.cookie_file.clone(),
+            },
+            network: Network::Regtest,
+            wallet_name_prefix: "prefix-".into(),
+            default_skip_blocks: 0,
+        };
+
+        let a = factory.build("aaaaaa", None).unwrap();
+        assert_eq!(a.skip_blocks, Some(0));
+        assert_eq!(
+            a.client
+                .get_wallet_info()
+                .expect("Node connection is working")
+                .wallet_name,
+            "prefix-aaaaaa"
+        );
+
+        let b = factory.build("bbbbbb", Some(100)).unwrap();
+        assert_eq!(b.skip_blocks, Some(100));
+        assert_eq!(
+            a.client
+                .get_wallet_info()
+                .expect("Node connection is working")
+                .wallet_name,
+            "prefix-bbbbbb"
+        );
     }
 }
