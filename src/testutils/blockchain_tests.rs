@@ -320,7 +320,7 @@ impl Default for TestClient {
     fn default() -> Self {
         let bitcoind_exe = env::var("BITCOIND_EXE")
             .ok()
-            .or(bitcoind::downloaded_exe_path())
+            .or(bitcoind::downloaded_exe_path().ok())
             .expect(
                 "you should provide env var BITCOIND_EXE or specifiy a bitcoind version feature",
             );
