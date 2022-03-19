@@ -43,10 +43,6 @@
 //! blockchain data and an [electrum](https://docs.rs/electrum-client/) blockchain client to
 //! interact with the bitcoin P2P network.
 //!
-//! ```toml
-//! bdk = "0.21.0"
-//! ```
-//!
 //! # Examples
 #![cfg_attr(
     feature = "electrum",
@@ -81,6 +77,7 @@ fn main() -> Result<(), bdk::Error> {
 //!
 //! ## Generate a few addresses
 //!
+//! ### Example
 //! ```
 //! use bdk::{Wallet};
 //! use bdk::database::MemoryDatabase;

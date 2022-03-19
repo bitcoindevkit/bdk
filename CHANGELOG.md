@@ -1,14 +1,11 @@
 # Changelog
-All notable changes to this project will be documented in this file.
+All notable changes to this project prior to release **0.22.0** are documented in this file. Future
+changelog information can be found in each release's git tag and can be viewed with `git tag -ln100 "v*"`.
+Changelog info is also documented on the [GitHub releases](https://github.com/bitcoindevkit/bdk/releases)
+page. See [DEVELOPMENT_CYCLE.md](DEVELOPMENT_CYCLE.md) for more details.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-
-## [Unreleased]
-- Add capacity to create FeeRate from sats/kvbytes and sats/kwu.
-- Rename `as_sat_vb` to `as_sat_per_vb`. Move all `FeeRate` test to `types.rs`.
-- Add custom Harware Wallet Signer `HwiSigner` in `src/wallet/harwaresigner/` module.
-- Add `allow_dust` method on `TxBuilder`.
 
 ## [v0.21.0] - [v0.20.0]
 
@@ -496,4 +493,3 @@ final transaction is created by calling `finish` on the builder.
 [v0.19.0]: https://github.com/bitcoindevkit/bdk/compare/v0.18.0...v0.19.0
 [v0.20.0]: https://github.com/bitcoindevkit/bdk/compare/v0.19.0...v0.20.0
 [v0.21.0]: https://github.com/bitcoindevkit/bdk/compare/v0.20.0...v0.21.0
-[unreleased]: https://github.com/bitcoindevkit/bdk/compare/v0.21.0...HEAD
