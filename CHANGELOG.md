@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.17.0] - [v0.16.1]
+
 - Removed default verification from `wallet::sync`. sync-time verification is added in `script_sync` and is activated by `verify` feature flag.
 - `verify` flag removed from `TransactionDetails`.
 - Add `get_internal_address` to allow you to get internal addresses just as you get external addresses.
@@ -416,7 +418,6 @@ final transaction is created by calling `finish` on the builder.
 - Use `MemoryDatabase` in the compiler example
 - Make the REPL return JSON
 
-[unreleased]: https://github.com/bitcoindevkit/bdk/compare/v0.11.0...HEAD
 [0.1.0-beta.1]: https://github.com/bitcoindevkit/bdk/compare/96c87ea5...0.1.0-beta.1
 [v0.2.0]: https://github.com/bitcoindevkit/bdk/compare/0.1.0-beta.1...v0.2.0
 [v0.3.0]: https://github.com/bitcoindevkit/bdk/compare/v0.2.0...v0.3.0
@@ -435,3 +436,5 @@ final transaction is created by calling `finish` on the builder.
 [v0.15.0]: https://github.com/bitcoindevkit/bdk/compare/v0.14.0...v0.15.0
 [v0.16.0]: https://github.com/bitcoindevkit/bdk/compare/v0.15.0...v0.16.0
 [v0.16.1]: https://github.com/bitcoindevkit/bdk/compare/v0.16.0...v0.16.1
+[v0.17.0]: https://github.com/bitcoindevkit/bdk/compare/v0.16.1...v0.17.0
+[unreleased]: https://github.com/bitcoindevkit/bdk/compare/v0.17.0...HEAD
