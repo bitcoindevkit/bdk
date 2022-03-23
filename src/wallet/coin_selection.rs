@@ -267,7 +267,7 @@ impl OutputGroup {
 /// Branch and bound coin selection
 ///
 /// Code adapted from Bitcoin Core's implementation and from Mark Erhardt Master's Thesis: <http://murch.one/wp-content/uploads/2016/11/erhardt2016coinselection.pdf>
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BranchAndBoundCoinSelection {
     size_of_change: u64,
 }
