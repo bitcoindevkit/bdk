@@ -22,10 +22,10 @@ use bitcoin::secp256k1::{self, Secp256k1, Signing};
 use bitcoin::util::bip32;
 use bitcoin::{Network, PrivateKey, PublicKey};
 
-use miniscript::descriptor::{Descriptor, DescriptorXKey, Wildcard};
+use miniscript::descriptor::{Descriptor, Wildcard};
 pub use miniscript::descriptor::{
-    DescriptorPublicKey, DescriptorSecretKey, DescriptorSinglePriv, DescriptorSinglePub, KeyMap,
-    SortedMultiVec,
+    DescriptorPublicKey, DescriptorSecretKey, DescriptorSinglePriv, DescriptorSinglePub,
+    DescriptorXKey, KeyMap, SortedMultiVec,
 };
 pub use miniscript::ScriptContext;
 use miniscript::{Miniscript, Terminal};
@@ -94,6 +94,13 @@ impl<Ctx: ScriptContext> DescriptorKey<Ctx> {
         }
     }
 
+    pub fn as_public(&self, secp: &SecpCtx) -> Result<DescriptorPublicKey, KeyError> {
+        match self {
+            DescriptorKey::Public(pk, _, _) => Ok(pk.clone()),
+            DescriptorKey::Secret(secret, _, _) => Ok(secret.as_public(secp)?),
+        }
+    }
+
     // This method is used internally by `bdk::fragment!` and `bdk::descriptor!`. It has to be
     // public because it is effectively called by external crates, once the macros are expanded,
     // but since it is not meant to be part of the public api we hide it from the docs.
@@ -102,18 +109,15 @@ impl<Ctx: ScriptContext> DescriptorKey<Ctx> {
         self,
         secp: &SecpCtx,
     ) -> Result<(DescriptorPublicKey, KeyMap, ValidNetworks), KeyError> {
+        let public = self.as_public(secp)?;
+
         match self {
-            DescriptorKey::Public(public, valid_networks, _) => {
+            DescriptorKey::Public(_, valid_networks, _) => {
                 Ok((public, KeyMap::default(), valid_networks))
             }
             DescriptorKey::Secret(secret, valid_networks, _) => {
                 let mut key_map = KeyMap::with_capacity(1);
-
-                let public = secret
-                    .as_public(secp)
-                    .map_err(|e| miniscript::Error::Unexpected(e.to_string()))?;
                 key_map.insert(public.clone(), secret);
-
                 Ok((public, key_map, valid_networks))
             }
         }
@@ -891,9 +895,15 @@ pub enum KeyError {
     Bip32(bitcoin::util::bip32::Error),
     /// Miniscript error
     Miniscript(miniscript::Error),
+    KeyParseError(miniscript::descriptor::DescriptorKeyParseError),
 }
 
 impl_error!(miniscript::Error, Miniscript, KeyError);
+impl_error!(
+    miniscript::descriptor::DescriptorKeyParseError,
+    KeyParseError,
+    KeyError
+);
 impl_error!(bitcoin::util::bip32::Error, Bip32, KeyError);
 
 impl std::fmt::Display for KeyError {
