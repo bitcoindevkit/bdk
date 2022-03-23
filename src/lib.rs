@@ -270,6 +270,7 @@ mod doctest;
 pub mod keys;
 pub(crate) mod psbt;
 pub(crate) mod types;
+pub mod util;
 pub mod wallet;
 
 pub use descriptor::template;
