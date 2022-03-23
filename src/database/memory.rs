@@ -449,10 +449,6 @@ impl Database for MemoryDatabase {
 
         Ok(*value)
     }
-
-    fn flush(&mut self) -> Result<(), Error> {
-        Ok(())
-    }
 }
 
 impl BatchDatabase for MemoryDatabase {

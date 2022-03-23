@@ -402,10 +402,6 @@ impl Database for Tree {
             Ok(val)
         })
     }
-
-    fn flush(&mut self) -> Result<(), Error> {
-        Ok(Tree::flush(self).map(|_| ())?)
-    }
 }
 
 impl BatchDatabase for Tree {
