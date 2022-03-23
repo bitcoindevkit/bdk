@@ -267,3 +267,5 @@ macro_rules! testutils {
         (external, internal)
     })
 }
+
+pub use testutils;
