@@ -251,6 +251,14 @@ pub extern crate sled;
 #[cfg(feature = "sqlite")]
 pub extern crate rusqlite;
 
+// We should consider putting this under a feature flag but we need the macro in doctests so we need
+// to wait until https://github.com/rust-lang/rust/issues/67295 is fixed.
+//
+// Stuff in here is too rough to document atm
+#[doc(hidden)]
+#[macro_use]
+pub mod testutils;
+
 #[allow(unused_imports)]
 #[macro_use]
 pub(crate) mod error;
@@ -279,10 +287,3 @@ pub use wallet::Wallet;
 pub fn version() -> &'static str {
     env!("CARGO_PKG_VERSION", "unknown")
 }
-
-// We should consider putting this under a feature flag but we need the macro in doctests so we need
-// to wait until https://github.com/rust-lang/rust/issues/67295 is fixed.
-//
-// Stuff in here is too rough to document atm
-#[doc(hidden)]
-pub mod testutils;
