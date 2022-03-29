@@ -109,6 +109,11 @@ name = "miniscriptc"
 path = "examples/compiler.rs"
 required-features = ["compiler"]
 
+[[example]]
+name = "rpcwallet"
+path = "examples/rpcwallet.rs"
+required-features = ["keys-bip39", "key-value-db", "rpc"]
+
 [workspace]
 members = ["macros"]
 [package.metadata.docs.rs]
