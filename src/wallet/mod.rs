@@ -619,9 +619,27 @@ where
             _ => 1,
         };
 
+        // We use a match here instead of a map_or_else as it's way more readable :)
+        let current_height = match params.current_height {
+            // If they didn't tell us the current height, we assume it's the latest sync height.
+            None => self
+                .database()
+                .get_sync_time()?
+                .map(|sync_time| sync_time.block_time.height),
+            h => h,
+        };
+
         let lock_time = match params.locktime {
-            // No nLockTime, default to 0
-            None => requirements.timelock.unwrap_or(0),
+            // When no nLockTime is specified, we try to prevent fee sniping, if possible
+            None => {
+                // Fee sniping can be partially prevented by setting the timelock
+                // to current_height. If we don't know the current_height,
+                // we default to 0.
+                let fee_sniping_height = current_height.unwrap_or(0);
+                // We choose the biggest between the required nlocktime and the fee sniping
+                // height
+                std::cmp::max(requirements.timelock.unwrap_or(0), fee_sniping_height)
+            }
             // Specific nLockTime required and we have no constraints, so just set to that value
             Some(x) if requirements.timelock.is_none() => x,
             // Specific nLockTime required and it's compatible with the constraints
@@ -1980,7 +1998,57 @@ pub(crate) mod test {
         builder.add_recipient(addr.script_pubkey(), 25_000);
         let (psbt, _) = builder.finish().unwrap();
 
+        // Since we never synced the wallet we don't have a last_sync_height
+        // we could use to try to prevent fee sniping. We default to 0.
         assert_eq!(psbt.unsigned_tx.lock_time, 0);
+    }
+
+    #[test]
+    fn test_create_tx_fee_sniping_locktime_provided_height() {
+        let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
+        let addr = wallet.get_address(New).unwrap();
+        let mut builder = wallet.build_tx();
+        builder.add_recipient(addr.script_pubkey(), 25_000);
+        let sync_time = SyncTime {
+            block_time: BlockTime {
+                height: 24,
+                timestamp: 0,
+            },
+        };
+        wallet
+            .database
+            .borrow_mut()
+            .set_sync_time(sync_time)
+            .unwrap();
+        let current_height = 25;
+        builder.set_current_height(current_height);
+        let (psbt, _) = builder.finish().unwrap();
+
+        // current_height will override the last sync height
+        assert_eq!(psbt.unsigned_tx.lock_time, current_height);
+    }
+
+    #[test]
+    fn test_create_tx_fee_sniping_locktime_last_sync() {
+        let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
+        let addr = wallet.get_address(New).unwrap();
+        let mut builder = wallet.build_tx();
+        builder.add_recipient(addr.script_pubkey(), 25_000);
+        let sync_time = SyncTime {
+            block_time: BlockTime {
+                height: 25,
+                timestamp: 0,
+            },
+        };
+        wallet
+            .database
+            .borrow_mut()
+            .set_sync_time(sync_time.clone())
+            .unwrap();
+        let (psbt, _) = builder.finish().unwrap();
+
+        // If there's no current_height we're left with using the last sync height
+        assert_eq!(psbt.unsigned_tx.lock_time, sync_time.block_time.height);
     }
 
     #[test]
@@ -2001,9 +2069,13 @@ pub(crate) mod test {
         let mut builder = wallet.build_tx();
         builder
             .add_recipient(addr.script_pubkey(), 25_000)
+            .set_current_height(630_001)
             .nlocktime(630_000);
         let (psbt, _) = builder.finish().unwrap();
 
+        // When we explicitly specify a nlocktime
+        // we don't try any fee sniping prevention trick
+        // (we ignore the current_height)
         assert_eq!(psbt.unsigned_tx.lock_time, 630_000);
     }
 

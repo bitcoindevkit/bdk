@@ -147,6 +147,7 @@ pub(crate) struct TxParams {
     pub(crate) add_global_xpubs: bool,
     pub(crate) include_output_redeem_witness_script: bool,
     pub(crate) bumping_fee: Option<PreviousFee>,
+    pub(crate) current_height: Option<u32>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -541,6 +542,17 @@ impl<'a, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderContext>
     /// be a valid nSequence to signal RBF.
     pub fn enable_rbf_with_sequence(&mut self, nsequence: u32) -> &mut Self {
         self.params.rbf = Some(RbfValue::Value(nsequence));
+        self
+    }
+
+    /// Set the current blockchain height.
+    ///
+    /// This will be used to set the nLockTime for preventing fee sniping. If the current height is
+    /// not provided, the last sync height will be used instead.
+    ///
+    /// **Note**: This will be ignored if you manually specify a nlocktime using [`TxBuilder::nlocktime`].
+    pub fn set_current_height(&mut self, height: u32) -> &mut Self {
+        self.params.current_height = Some(height);
         self
     }
 }
