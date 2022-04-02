@@ -46,12 +46,13 @@
 //! ```toml
 //! bdk = "0.17.0"
 //! ```
+//!
+//! # Examples
 #![cfg_attr(
     feature = "electrum",
     doc = r##"
 ## Sync the balance of a descriptor
 
-### Example
 ```no_run
 use bdk::{Wallet, SyncOptions};
 use bdk::database::MemoryDatabase;
@@ -80,7 +81,6 @@ fn main() -> Result<(), bdk::Error> {
 //!
 //! ## Generate a few addresses
 //!
-//! ### Example
 //! ```
 //! use bdk::{Wallet};
 //! use bdk::database::MemoryDatabase;
@@ -106,7 +106,6 @@ fn main() -> Result<(), bdk::Error> {
     doc = r##"
 ## Create a transaction
 
-### Example
 ```no_run
 use bdk::{FeeRate, Wallet, SyncOptions};
 use bdk::database::MemoryDatabase;
@@ -150,7 +149,6 @@ fn main() -> Result<(), bdk::Error> {
 //!
 //! ## Sign a transaction
 //!
-//! ### Example
 //! ```no_run
 //! use std::str::FromStr;
 //!
@@ -192,7 +190,7 @@ fn main() -> Result<(), bdk::Error> {
 //! * `async-interface`: async functions in bdk traits
 //! * `keys-bip39`: [BIP-39](https://github.com/bitcoin/bips/blob/master/bip-0039.mediawiki) mnemonic codes for generating deterministic keys
 //!
-//! ## Internal features
+//! # Internal features
 //!
 //! These features do not expose any new API, but influence internal implementation aspects of
 //! BDK.
