@@ -21,16 +21,17 @@ use bitcoin::util::bip32::{ChildNumber, DerivationPath, ExtendedPubKey, Fingerpr
 use bitcoin::util::psbt;
 use bitcoin::{Network, PublicKey, Script, TxOut};
 
-use miniscript::descriptor::{
-    DescriptorPublicKey, DescriptorType, DescriptorXKey, InnerXKey, Wildcard,
+use miniscript::descriptor::{DescriptorType, InnerXKey};
+pub use miniscript::{
+    descriptor::DescriptorXKey, descriptor::KeyMap, descriptor::Wildcard, Descriptor,
+    DescriptorPublicKey, Legacy, Miniscript, ScriptContext, Segwitv0,
 };
-pub use miniscript::{descriptor::KeyMap, Descriptor, Legacy, Miniscript, ScriptContext, Segwitv0};
 use miniscript::{DescriptorTrait, ForEachKey, TranslatePk};
 
 use crate::descriptor::policy::BuildSatisfaction;
 
 pub mod checksum;
-pub(crate) mod derived;
+pub mod derived;
 #[doc(hidden)]
 pub mod dsl;
 pub mod error;
@@ -38,8 +39,7 @@ pub mod policy;
 pub mod template;
 
 pub use self::checksum::get_checksum;
-use self::derived::AsDerived;
-pub use self::derived::DerivedDescriptorKey;
+pub use self::derived::{AsDerived, DerivedDescriptorKey};
 pub use self::error::Error as DescriptorError;
 pub use self::policy::Policy;
 use self::template::DescriptorTemplateOut;

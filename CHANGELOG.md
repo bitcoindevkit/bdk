@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 - Add `sqlite-bundled` feature for deployments that need a bundled version of sqlite, ie. for mobile platforms.
+- Added `Wallet::get_signers()`, `Wallet::descriptor_checksum()` and `Wallet::get_address_validators()`, exposed the `AsDerived` trait.
 
 ## [v0.17.0] - [v0.16.1]
 

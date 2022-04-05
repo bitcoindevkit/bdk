@@ -64,9 +64,10 @@ use std::str::FromStr;
 use serde::{Deserialize, Serialize};
 
 use miniscript::descriptor::{ShInner, WshInner};
-use miniscript::{Descriptor, DescriptorPublicKey, ScriptContext, Terminal};
+use miniscript::{Descriptor, ScriptContext, Terminal};
 
 use crate::database::BatchDatabase;
+use crate::types::KeychainKind;
 use crate::wallet::Wallet;
 
 /// Structure that contains the export of a wallet
@@ -117,8 +118,12 @@ impl WalletExport {
         include_blockheight: bool,
     ) -> Result<Self, &'static str> {
         let descriptor = wallet
-            .descriptor
-            .to_string_with_secret(&wallet.signers.as_key_map(wallet.secp_ctx()));
+            .get_descriptor_for_keychain(KeychainKind::External)
+            .to_string_with_secret(
+                &wallet
+                    .get_signers(KeychainKind::External)
+                    .as_key_map(wallet.secp_ctx()),
+            );
         let descriptor = remove_checksum(descriptor);
         Self::is_compatible_with_core(&descriptor)?;
 
@@ -142,12 +147,24 @@ impl WalletExport {
             blockheight,
         };
 
-        let desc_to_string = |d: &Descriptor<DescriptorPublicKey>| {
-            let descriptor =
-                d.to_string_with_secret(&wallet.change_signers.as_key_map(wallet.secp_ctx()));
-            remove_checksum(descriptor)
+        let change_descriptor = match wallet
+            .public_descriptor(KeychainKind::Internal)
+            .map_err(|_| "Invalid change descriptor")?
+            .is_some()
+        {
+            false => None,
+            true => {
+                let descriptor = wallet
+                    .get_descriptor_for_keychain(KeychainKind::Internal)
+                    .to_string_with_secret(
+                        &wallet
+                            .get_signers(KeychainKind::Internal)
+                            .as_key_map(wallet.secp_ctx()),
+                    );
+                Some(remove_checksum(descriptor))
+            }
         };
-        if export.change_descriptor() != wallet.change_descriptor.as_ref().map(desc_to_string) {
+        if export.change_descriptor() != change_descriptor {
             return Err("Incompatible change descriptor");
         }
 

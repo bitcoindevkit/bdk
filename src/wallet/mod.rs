@@ -468,11 +468,39 @@ where
         signers.add_external(signer.id(&self.secp), ordering, signer);
     }
 
+    /// Get the signers
+    ///
+    /// ## Example
+    ///
+    /// ```
+    /// # use bdk::{Wallet, KeychainKind};
+    /// # use bdk::bitcoin::Network;
+    /// # use bdk::database::MemoryDatabase;
+    /// let wallet = Wallet::new("wpkh(tprv8ZgxMBicQKsPe73PBRSmNbTfbcsZnwWhz5eVmhHpi31HW29Z7mc9B4cWGRQzopNUzZUT391DeDJxL2PefNunWyLgqCKRMDkU1s2s8bAfoSk/84'/0'/0'/0/*)", None, Network::Testnet, MemoryDatabase::new())?;
+    /// for secret_key in wallet.get_signers(KeychainKind::External).signers().iter().filter_map(|s| s.descriptor_secret_key()) {
+    ///     // secret_key: tprv8ZgxMBicQKsPe73PBRSmNbTfbcsZnwWhz5eVmhHpi31HW29Z7mc9B4cWGRQzopNUzZUT391DeDJxL2PefNunWyLgqCKRMDkU1s2s8bAfoSk/84'/0'/0'/0/*
+    ///     println!("secret_key: {}", secret_key);
+    /// }
+    ///
+    /// Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn get_signers(&self, keychain: KeychainKind) -> Arc<SignersContainer> {
+        match keychain {
+            KeychainKind::External => Arc::clone(&self.signers),
+            KeychainKind::Internal => Arc::clone(&self.change_signers),
+        }
+    }
+
     /// Add an address validator
     ///
     /// See [the `address_validator` module](address_validator) for an example.
     pub fn add_address_validator(&mut self, validator: Arc<dyn AddressValidator>) {
         self.address_validators.push(validator);
+    }
+
+    /// Get the address validators
+    pub fn get_address_validators(&self) -> &[Arc<dyn AddressValidator>] {
+        &self.address_validators
     }
 
     /// Start building a transaction.
@@ -1567,6 +1595,18 @@ where
         self.database.borrow_mut().set_sync_time(sync_time)?;
 
         Ok(())
+    }
+
+    /// Return the checksum of the public descriptor associated to `keychain`
+    ///
+    /// Internally calls [`Self::get_descriptor_for_keychain`] to fetch the right descriptor
+    pub fn descriptor_checksum(&self, keychain: KeychainKind) -> String {
+        self.get_descriptor_for_keychain(keychain)
+            .to_string()
+            .splitn(2, '#')
+            .next()
+            .unwrap()
+            .to_string()
     }
 }
 
