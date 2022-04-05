@@ -140,6 +140,8 @@ pub struct AddressInfo {
     pub index: u32,
     /// Address
     pub address: Address,
+    /// Type of keychain
+    pub keychain: KeychainKind,
 }
 
 impl Deref for AddressInfo {
@@ -246,6 +248,7 @@ where
             .map(|address| AddressInfo {
                 address,
                 index: incremented_index,
+                keychain,
             })
             .map_err(|_| Error::ScriptDoesntHaveAddressForm)
     }
@@ -276,6 +279,7 @@ where
                 .map(|address| AddressInfo {
                     address,
                     index: current_index,
+                    keychain,
                 })
                 .map_err(|_| Error::ScriptDoesntHaveAddressForm)
         }
@@ -286,7 +290,11 @@ where
         self.get_descriptor_for_keychain(keychain)
             .as_derived(index, &self.secp)
             .address(self.network)
-            .map(|address| AddressInfo { index, address })
+            .map(|address| AddressInfo {
+                index,
+                address,
+                keychain,
+            })
             .map_err(|_| Error::ScriptDoesntHaveAddressForm)
     }
 
@@ -298,7 +306,11 @@ where
         self.get_descriptor_for_keychain(keychain)
             .as_derived(index, &self.secp)
             .address(self.network)
-            .map(|address| AddressInfo { index, address })
+            .map(|address| AddressInfo {
+                index,
+                address,
+                keychain,
+            })
             .map_err(|_| Error::ScriptDoesntHaveAddressForm)
     }
 
@@ -3964,6 +3976,7 @@ pub(crate) mod test {
             AddressInfo {
                 index: 0,
                 address: Address::from_str("tb1q6yn66vajcctph75pvylgkksgpp6nq04ppwct9a").unwrap(),
+                keychain: KeychainKind::External,
             }
         );
 
@@ -3972,7 +3985,8 @@ pub(crate) mod test {
             wallet.get_address(New).unwrap(),
             AddressInfo {
                 index: 1,
-                address: Address::from_str("tb1q4er7kxx6sssz3q7qp7zsqsdx4erceahhax77d7").unwrap()
+                address: Address::from_str("tb1q4er7kxx6sssz3q7qp7zsqsdx4erceahhax77d7").unwrap(),
+                keychain: KeychainKind::External,
             }
         );
 
@@ -3981,7 +3995,8 @@ pub(crate) mod test {
             wallet.get_address(Peek(25)).unwrap(),
             AddressInfo {
                 index: 25,
-                address: Address::from_str("tb1qsp7qu0knx3sl6536dzs0703u2w2ag6ppl9d0c2").unwrap()
+                address: Address::from_str("tb1qsp7qu0knx3sl6536dzs0703u2w2ag6ppl9d0c2").unwrap(),
+                keychain: KeychainKind::External,
             }
         );
 
@@ -3990,7 +4005,8 @@ pub(crate) mod test {
             wallet.get_address(New).unwrap(),
             AddressInfo {
                 index: 2,
-                address: Address::from_str("tb1qzntf2mqex4ehwkjlfdyy3ewdlk08qkvkvrz7x2").unwrap()
+                address: Address::from_str("tb1qzntf2mqex4ehwkjlfdyy3ewdlk08qkvkvrz7x2").unwrap(),
+                keychain: KeychainKind::External,
             }
         );
 
@@ -3999,7 +4015,8 @@ pub(crate) mod test {
             wallet.get_address(Reset(1)).unwrap(),
             AddressInfo {
                 index: 1,
-                address: Address::from_str("tb1q4er7kxx6sssz3q7qp7zsqsdx4erceahhax77d7").unwrap()
+                address: Address::from_str("tb1q4er7kxx6sssz3q7qp7zsqsdx4erceahhax77d7").unwrap(),
+                keychain: KeychainKind::External,
             }
         );
 
@@ -4008,7 +4025,8 @@ pub(crate) mod test {
             wallet.get_address(New).unwrap(),
             AddressInfo {
                 index: 2,
-                address: Address::from_str("tb1qzntf2mqex4ehwkjlfdyy3ewdlk08qkvkvrz7x2").unwrap()
+                address: Address::from_str("tb1qzntf2mqex4ehwkjlfdyy3ewdlk08qkvkvrz7x2").unwrap(),
+                keychain: KeychainKind::External,
             }
         );
     }
@@ -4037,15 +4055,21 @@ pub(crate) mod test {
         .unwrap();
 
         assert_eq!(
-            wallet.get_address(AddressIndex::New).unwrap().address,
-            Address::from_str("bcrt1qkmvk2nadgplmd57ztld8nf8v2yxkzmdvwtjf8s").unwrap()
+            wallet.get_address(AddressIndex::New).unwrap(),
+            AddressInfo {
+                index: 0,
+                address: Address::from_str("bcrt1qkmvk2nadgplmd57ztld8nf8v2yxkzmdvwtjf8s").unwrap(),
+                keychain: KeychainKind::External,
+            }
         );
+
         assert_eq!(
-            wallet
-                .get_internal_address(AddressIndex::New)
-                .unwrap()
-                .address,
-            Address::from_str("bcrt1qtrwtz00wxl69e5xex7amy4xzlxkaefg3gfdkxa").unwrap()
+            wallet.get_internal_address(AddressIndex::New).unwrap(),
+            AddressInfo {
+                index: 0,
+                address: Address::from_str("bcrt1qtrwtz00wxl69e5xex7amy4xzlxkaefg3gfdkxa").unwrap(),
+                keychain: KeychainKind::Internal,
+            }
         );
 
         let wallet = Wallet::new(
@@ -4057,11 +4081,12 @@ pub(crate) mod test {
         .unwrap();
 
         assert_eq!(
-            wallet
-                .get_internal_address(AddressIndex::New)
-                .unwrap()
-                .address,
-            Address::from_str("bcrt1qkmvk2nadgplmd57ztld8nf8v2yxkzmdvwtjf8s").unwrap(),
+            wallet.get_internal_address(AddressIndex::New).unwrap(),
+            AddressInfo {
+                index: 0,
+                address: Address::from_str("bcrt1qkmvk2nadgplmd57ztld8nf8v2yxkzmdvwtjf8s").unwrap(),
+                keychain: KeychainKind::Internal,
+            },
             "when there's no internal descriptor it should just use external"
         );
     }

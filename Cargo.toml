@@ -55,6 +55,7 @@ compiler = ["miniscript/compiler"]
 verify = ["bitcoinconsensus"]
 default = ["key-value-db", "electrum"]
 sqlite = ["rusqlite", "ahash"]
+sqlite-bundled = ["sqlite", "rusqlite/bundled"]
 compact_filters = ["rocksdb", "socks", "lazy_static", "cc"]
 key-value-db = ["sled"]
 all-keys = ["keys-bip39"]
@@ -108,6 +109,11 @@ required-features = ["compact_filters"]
 name = "miniscriptc"
 path = "examples/compiler.rs"
 required-features = ["compiler"]
+
+[[example]]
+name = "rpcwallet"
+path = "examples/rpcwallet.rs"
+required-features = ["keys-bip39", "key-value-db", "rpc"]
 
 [workspace]
 members = ["macros"]
