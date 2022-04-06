@@ -127,10 +127,11 @@ impl WalletSync for EsploraBlockchain {
                         .take(self.concurrency as usize)
                         .cloned();
 
-                    let handles = scripts.map(move |script| {
+                    let mut handles = vec![];
+                    for script in scripts {
                         let client = self.url_client.clone();
                         // make each request in its own thread.
-                        std::thread::spawn(move || {
+                        handles.push(std::thread::spawn(move || {
                             let mut related_txs: Vec<Tx> = client._scripthash_txs(&script, None)?;
 
                             let n_confirmed =
@@ -152,10 +153,11 @@ impl WalletSync for EsploraBlockchain {
                                 }
                             }
                             Result::<_, Error>::Ok(related_txs)
-                        })
-                    });
+                        }));
+                    }
 
                     let txs_per_script: Vec<Vec<Tx>> = handles
+                        .into_iter()
                         .map(|handle| handle.join().unwrap())
                         .collect::<Result<_, _>>()?;
                     let mut satisfaction = vec![];
