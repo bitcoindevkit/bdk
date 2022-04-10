@@ -27,6 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add `get_internal_address` to allow you to get internal addresses just as you get external addresses.
 - added `ensure_addresses_cached` to `Wallet` to let offline wallets load and cache addresses in their database
 - Add `is_spent` field to `LocalUtxo`; when we notice that a utxo has been spent we set `is_spent` field to true instead of deleting it from the db.
+- Changed `AddressIndex::LastUnused` to look back further than `current_index`, and only return a new address if all have been used.
+- Add `AddressIndex::FirstUnused` to get unused addresses from the beginning of the keychain.
+- Add `wallet.get_batch_unused_addresses` to return vector of N unused addresses, populating any remaining with new addresses.
 
 ### Sync API change
 
