@@ -95,6 +95,23 @@ impl<Ctx: ScriptContext> DerivableKey<Ctx> for MnemonicWithPassphrase {
 }
 
 #[cfg_attr(docsrs, doc(cfg(feature = "keys-bip39")))]
+impl<Ctx: ScriptContext> DerivableKey<Ctx> for (GeneratedKey<Mnemonic, Ctx>, Option<String>) {
+    fn into_extended_key(self) -> Result<ExtendedKey<Ctx>, KeyError> {
+        let (mnemonic, passphrase) = self;
+        (mnemonic.into_key(), passphrase).into_extended_key()
+    }
+
+    fn into_descriptor_key(
+        self,
+        source: Option<bip32::KeySource>,
+        derivation_path: bip32::DerivationPath,
+    ) -> Result<DescriptorKey<Ctx>, KeyError> {
+        let (mnemonic, passphrase) = self;
+        (mnemonic.into_key(), passphrase).into_descriptor_key(source, derivation_path)
+    }
+}
+
+#[cfg_attr(docsrs, doc(cfg(feature = "keys-bip39")))]
 impl<Ctx: ScriptContext> DerivableKey<Ctx> for Mnemonic {
     fn into_extended_key(self) -> Result<ExtendedKey<Ctx>, KeyError> {
         (self, None).into_extended_key()
