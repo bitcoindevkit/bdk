@@ -61,6 +61,7 @@ macro_rules! impl_from {
 
 macro_rules! impl_inner_method {
     ( $enum_name:ident, $self:expr, $name:ident $(, $args:expr)* ) => {
+        #[allow(deprecated)]
         match $self {
             $enum_name::Memory(inner) => inner.$name( $($args, )* ),
             #[cfg(feature = "key-value-db")]
