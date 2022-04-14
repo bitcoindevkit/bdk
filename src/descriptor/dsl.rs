@@ -1054,7 +1054,9 @@ mod test {
     }
 
     #[test]
-    #[should_panic(expected = "Miniscript(ContextError(CompressedOnly))")]
+    #[should_panic(
+        expected = "Miniscript(ContextError(CompressedOnly(\"04b4632d08485ff1df2db55b9dafd23347d1c47a457072a1e87be26896549a87378ec38ff91d43e8c2092ebda601780485263da089465619e0358a5c1be7ac91f4\")))"
+    )]
     fn test_dsl_miniscript_checks() {
         let mut uncompressed_pk =
             PrivateKey::from_wif("L5EZftvrYaSudiozVRzTqLcHLNDoVn7H5HSfM9BAN6tMJX8oTWz6").unwrap();

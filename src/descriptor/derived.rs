@@ -52,10 +52,10 @@ use std::hash::{Hash, Hasher};
 use std::ops::Deref;
 
 use bitcoin::hashes::hash160;
-use bitcoin::PublicKey;
+use bitcoin::{PublicKey, XOnlyPublicKey};
 
-use miniscript::{descriptor::Wildcard, Descriptor, DescriptorPublicKey};
-use miniscript::{MiniscriptKey, ToPublicKey, TranslatePk};
+use miniscript::descriptor::{DescriptorSinglePub, SinglePubKey, Wildcard};
+use miniscript::{Descriptor, DescriptorPublicKey, MiniscriptKey, ToPublicKey, TranslatePk};
 
 use crate::wallet::utils::SecpCtx;
 
@@ -128,21 +128,44 @@ impl<'s> MiniscriptKey for DerivedDescriptorKey<'s> {
     fn is_uncompressed(&self) -> bool {
         self.0.is_uncompressed()
     }
-    fn serialized_len(&self) -> usize {
-        self.0.serialized_len()
-    }
 }
 
 impl<'s> ToPublicKey for DerivedDescriptorKey<'s> {
     fn to_public_key(&self) -> PublicKey {
         match &self.0 {
-            DescriptorPublicKey::SinglePub(ref spub) => spub.key.to_public_key(),
-            DescriptorPublicKey::XPub(ref xpub) => {
+            DescriptorPublicKey::SinglePub(DescriptorSinglePub {
+                key: SinglePubKey::XOnly(_),
+                ..
+            }) => panic!("Found x-only public key in non-tr descriptor"),
+            DescriptorPublicKey::SinglePub(DescriptorSinglePub {
+                key: SinglePubKey::FullKey(ref pk),
+                ..
+            }) => *pk,
+            DescriptorPublicKey::XPub(ref xpub) => PublicKey::new(
                 xpub.xkey
                     .derive_pub(self.1, &xpub.derivation_path)
                     .expect("Shouldn't fail, only normal derivations")
-                    .public_key
-            }
+                    .public_key,
+            ),
+        }
+    }
+
+    fn to_x_only_pubkey(&self) -> XOnlyPublicKey {
+        match &self.0 {
+            DescriptorPublicKey::SinglePub(DescriptorSinglePub {
+                key: SinglePubKey::XOnly(ref pk),
+                ..
+            }) => *pk,
+            DescriptorPublicKey::SinglePub(DescriptorSinglePub {
+                key: SinglePubKey::FullKey(ref pk),
+                ..
+            }) => XOnlyPublicKey::from(pk.inner),
+            DescriptorPublicKey::XPub(ref xpub) => XOnlyPublicKey::from(
+                xpub.xkey
+                    .derive_pub(self.1, &xpub.derivation_path)
+                    .expect("Shouldn't fail, only normal derivations")
+                    .public_key,
+            ),
         }
     }
 

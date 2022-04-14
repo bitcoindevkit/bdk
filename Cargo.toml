@@ -14,15 +14,15 @@ license = "MIT OR Apache-2.0"
 [dependencies]
 bdk-macros = "^0.6"
 log = "^0.4"
-miniscript = { version = "^6.1", features = ["use-serde"] }
-bitcoin = { version = "^0.27", features = ["use-serde", "base64"] }
+miniscript = { version = "7.0", features = ["use-serde"] }
+bitcoin = { version = "0.28", features = ["use-serde", "base64"] }
 serde = { version = "^1.0", features = ["derive"] }
 serde_json = { version = "^1.0" }
 rand = "^0.7"
 
 # Optional dependencies
 sled = { version = "0.34", optional = true }
-electrum-client = { version = "0.8", optional = true }
+electrum-client = { version = "0.10", optional = true }
 rusqlite = { version = "0.25.3", optional = true }
 ahash = { version = "=0.7.4", optional = true }
 reqwest = { version = "0.11", optional = true, default-features = false, features = ["json"] }
@@ -37,8 +37,8 @@ lazy_static = { version = "1.4", optional = true }
 bip39 = { version = "1.0.1", optional = true }
 bitcoinconsensus = { version = "0.19.0-3", optional = true }
 
-# Needed by bdk_blockchain_tests macro
-bitcoincore-rpc = { version = "0.14", optional = true }
+# Needed by bdk_blockchain_tests macro and the `rpc` feature
+bitcoincore-rpc = { version = "0.15", optional = true }
 
 # Platform-specific dependencies
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
@@ -97,7 +97,7 @@ test-md-docs = ["electrum"]
 lazy_static = "1.4"
 env_logger = "0.7"
 clap = "2.33"
-electrsd = { version= "0.15", features = ["trigger", "bitcoind_22_0"] }
+electrsd = { version= "0.19.1", features = ["bitcoind_22_0"] }
 
 [[example]]
 name = "address_validator"

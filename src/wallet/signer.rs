@@ -91,10 +91,11 @@ use std::sync::Arc;
 use bitcoin::blockdata::opcodes;
 use bitcoin::blockdata::script::Builder as ScriptBuilder;
 use bitcoin::hashes::{hash160, Hash};
+use bitcoin::secp256k1;
 use bitcoin::secp256k1::{Message, Secp256k1};
 use bitcoin::util::bip32::{ChildNumber, DerivationPath, ExtendedPrivKey, Fingerprint};
-use bitcoin::util::{bip143, psbt};
-use bitcoin::{PrivateKey, Script, SigHash, SigHashType};
+use bitcoin::util::{bip143, ecdsa, psbt};
+use bitcoin::{PrivateKey, PublicKey, Script, SigHashType, Sighash};
 
 use miniscript::descriptor::{DescriptorSecretKey, DescriptorSinglePriv, DescriptorXKey, KeyMap};
 use miniscript::{Legacy, MiniscriptKey, Segwitv0};
@@ -153,6 +154,8 @@ pub enum SignerError {
     /// To enable signing transactions with non-standard sighashes set
     /// [`SignOptions::allow_all_sighashes`] to `true`.
     NonStandardSighash,
+    /// Invalid SIGHASH for the signing context in use
+    InvalidSighash,
 }
 
 impl fmt::Display for SignerError {
@@ -245,10 +248,16 @@ impl Signer for DescriptorXKey<ExtendedPrivKey> {
             None => self.xkey.derive_priv(secp, &full_path).unwrap(),
         };
 
-        if &derived_key.private_key.public_key(secp) != public_key {
+        if &secp256k1::PublicKey::from_secret_key(secp, &derived_key.private_key) != public_key {
             Err(SignerError::InvalidKey)
         } else {
-            derived_key.private_key.sign(psbt, Some(input_index), secp)
+            // HD wallets imply compressed keys
+            PrivateKey {
+                compressed: true,
+                network: self.xkey.network,
+                inner: derived_key.private_key,
+            }
+            .sign(psbt, Some(input_index), secp)
         }
     }
 
@@ -273,7 +282,7 @@ impl Signer for PrivateKey {
         secp: &SecpCtx,
     ) -> Result<(), SignerError> {
         let input_index = input_index.unwrap();
-        if input_index >= psbt.inputs.len() || input_index >= psbt.global.unsigned_tx.input.len() {
+        if input_index >= psbt.inputs.len() || input_index >= psbt.unsigned_tx.input.len() {
             return Err(SignerError::InputIndexOutOfRange);
         }
 
@@ -283,7 +292,7 @@ impl Signer for PrivateKey {
             return Ok(());
         }
 
-        let pubkey = self.public_key(secp);
+        let pubkey = PublicKey::from_private_key(secp, &self);
         if psbt.inputs[input_index].partial_sigs.contains_key(&pubkey) {
             return Ok(());
         }
@@ -297,15 +306,15 @@ impl Signer for PrivateKey {
             None => Legacy::sighash(psbt, input_index)?,
         };
 
-        let signature = secp.sign(
+        let sig = secp.sign_ecdsa(
             &Message::from_slice(&hash.into_inner()[..]).unwrap(),
-            &self.key,
+            &self.inner,
         );
 
-        let mut final_signature = Vec::with_capacity(75);
-        final_signature.extend_from_slice(&signature.serialize_der());
-        final_signature.push(sighash.as_u32() as u8);
-
+        let final_signature = ecdsa::EcdsaSig {
+            sig,
+            hash_ty: sighash.ecdsa_hash_ty().unwrap(), // FIXME
+        };
         psbt.inputs[input_index]
             .partial_sigs
             .insert(pubkey, final_signature);
@@ -494,22 +503,22 @@ pub(crate) trait ComputeSighash {
     fn sighash(
         psbt: &psbt::PartiallySignedTransaction,
         input_index: usize,
-    ) -> Result<(SigHash, SigHashType), SignerError>;
+    ) -> Result<(Sighash, psbt::PsbtSighashType), SignerError>;
 }
 
 impl ComputeSighash for Legacy {
     fn sighash(
         psbt: &psbt::PartiallySignedTransaction,
         input_index: usize,
-    ) -> Result<(SigHash, SigHashType), SignerError> {
-        if input_index >= psbt.inputs.len() || input_index >= psbt.global.unsigned_tx.input.len() {
+    ) -> Result<(Sighash, psbt::PsbtSighashType), SignerError> {
+        if input_index >= psbt.inputs.len() || input_index >= psbt.unsigned_tx.input.len() {
             return Err(SignerError::InputIndexOutOfRange);
         }
 
         let psbt_input = &psbt.inputs[input_index];
-        let tx_input = &psbt.global.unsigned_tx.input[input_index];
+        let tx_input = &psbt.unsigned_tx.input[input_index];
 
-        let sighash = psbt_input.sighash_type.unwrap_or(SigHashType::All);
+        let sighash = psbt_input.sighash_type.unwrap_or(SigHashType::All.into());
         let script = match psbt_input.redeem_script {
             Some(ref redeem_script) => redeem_script.clone(),
             None => {
@@ -527,9 +536,8 @@ impl ComputeSighash for Legacy {
         };
 
         Ok((
-            psbt.global
-                .unsigned_tx
-                .signature_hash(input_index, &script, sighash.as_u32()),
+            psbt.unsigned_tx
+                .signature_hash(input_index, &script, sighash.to_u32()),
             sighash,
         ))
     }
@@ -549,15 +557,19 @@ impl ComputeSighash for Segwitv0 {
     fn sighash(
         psbt: &psbt::PartiallySignedTransaction,
         input_index: usize,
-    ) -> Result<(SigHash, SigHashType), SignerError> {
-        if input_index >= psbt.inputs.len() || input_index >= psbt.global.unsigned_tx.input.len() {
+    ) -> Result<(Sighash, psbt::PsbtSighashType), SignerError> {
+        if input_index >= psbt.inputs.len() || input_index >= psbt.unsigned_tx.input.len() {
             return Err(SignerError::InputIndexOutOfRange);
         }
 
         let psbt_input = &psbt.inputs[input_index];
-        let tx_input = &psbt.global.unsigned_tx.input[input_index];
+        let tx_input = &psbt.unsigned_tx.input[input_index];
 
-        let sighash = psbt_input.sighash_type.unwrap_or(SigHashType::All);
+        let sighash = psbt_input
+            .sighash_type
+            .unwrap_or(SigHashType::All.into())
+            .ecdsa_hash_ty()
+            .map_err(|_| SignerError::InvalidSighash)?;
 
         // Always try first with the non-witness utxo
         let utxo = if let Some(prev_tx) = &psbt_input.non_witness_utxo {
@@ -600,13 +612,13 @@ impl ComputeSighash for Segwitv0 {
         };
 
         Ok((
-            bip143::SigHashCache::new(&psbt.global.unsigned_tx).signature_hash(
+            bip143::SigHashCache::new(&psbt.unsigned_tx).signature_hash(
                 input_index,
                 &script,
                 value,
                 sighash,
             ),
-            sighash,
+            sighash.into(),
         ))
     }
 }
@@ -757,7 +769,7 @@ mod signers_container_tests {
         let secp: Secp256k1<All> = Secp256k1::new();
         let path = bip32::DerivationPath::from_str(PATH).unwrap();
         let tprv = bip32::ExtendedPrivKey::from_str(tprv).unwrap();
-        let tpub = bip32::ExtendedPubKey::from_private(&secp, &tprv);
+        let tpub = bip32::ExtendedPubKey::from_priv(&secp, &tprv);
         let fingerprint = tprv.fingerprint(&secp);
         let prvkey = (tprv, path.clone()).into_descriptor_key().unwrap();
         let pubkey = (tpub, path).into_descriptor_key().unwrap();
