@@ -7,7 +7,6 @@
 // licenses.
 
 use bdk::bitcoin::secp256k1::Secp256k1;
-use bdk::bitcoin::util::bip32::ExtendedPrivKey;
 use bdk::bitcoin::Amount;
 use bdk::bitcoin::Network;
 use bdk::bitcoincore_rpc::RpcApi;
@@ -16,7 +15,7 @@ use bdk::blockchain::rpc::{Auth, RpcBlockchain, RpcConfig};
 use bdk::blockchain::ConfigurableBlockchain;
 
 use bdk::keys::bip39::{Language, Mnemonic, WordCount};
-use bdk::keys::{DerivableKey, ExtendedKey, GeneratableKey, GeneratedKey};
+use bdk::keys::{DerivableKey, GeneratableKey, GeneratedKey};
 
 use bdk::miniscript::miniscript::Segwitv0;
 
@@ -85,8 +84,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     // create unique wallet name.
     // This is a special utility function exposed via `bdk::wallet_name_from_descriptor()`
     let wallet_name = wallet_name_from_descriptor(
-        Bip84(xprv, KeychainKind::External),
-        Some(Bip84(xprv, KeychainKind::Internal)),
+        Bip84(xprv.clone(), KeychainKind::External),
+        Some(Bip84(xprv.clone(), KeychainKind::Internal)),
         Network::Regtest,
         &Secp256k1::new(),
     )?;
@@ -112,8 +111,8 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // Combine Database + Descriptor to create the final wallet
     let wallet = Wallet::new(
-        Bip84(xprv, KeychainKind::External),
-        Some(Bip84(xprv, KeychainKind::Internal)),
+        Bip84(xprv.clone(), KeychainKind::External),
+        Some(Bip84(xprv.clone(), KeychainKind::Internal)),
         Network::Regtest,
         database,
     )?;
@@ -216,18 +215,15 @@ fn main() -> Result<(), Box<dyn Error>> {
 // Helper function demonstrating privatekey extraction using bip39 mnemonic
 // The mnemonic can be shown to user to safekeeping and the same wallet
 // private descriptors can be recreated from it.
-fn generate_random_ext_privkey() -> Result<ExtendedPrivKey, Box<dyn Error>> {
+fn generate_random_ext_privkey() -> Result<impl DerivableKey<Segwitv0> + Clone, Box<dyn Error>> {
     // a Bip39 passphrase can be set optionally
     let password = Some("random password".to_string());
 
-    // Generate a random mnemonic, and use that to create an Extended PrivateKey
-    let mnemonic: GeneratedKey<_, Segwitv0> =
-        Mnemonic::generate((WordCount::Words12, Language::English))
-            .map_err(|e| e.expect("Unknown Error"))?;
-    let mnemonic = mnemonic.into_key();
-    let xkey: ExtendedKey = (mnemonic, password).into_extended_key()?;
-    let xprv = xkey
-        .into_xprv(Network::Regtest)
-        .expect("Expected Private Key");
-    Ok(xprv)
+    // Generate a random mnemonic, and use that to create a "DerivableKey"
+    let mnemonic: GeneratedKey<_, _> = Mnemonic::generate((WordCount::Words12, Language::English))
+        .map_err(|e| e.expect("Unknown Error"))?;
+
+    // `Ok(mnemonic)` would also work if there's no passphrase and it would
+    // yield the same result as this construct with `password` = `None`.
+    Ok((mnemonic, password))
 }

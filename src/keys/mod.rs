@@ -548,6 +548,16 @@ impl<K, Ctx: ScriptContext> Deref for GeneratedKey<K, Ctx> {
     }
 }
 
+impl<K: Clone, Ctx: ScriptContext> Clone for GeneratedKey<K, Ctx> {
+    fn clone(&self) -> GeneratedKey<K, Ctx> {
+        GeneratedKey {
+            key: self.key.clone(),
+            valid_networks: self.valid_networks.clone(),
+            phantom: self.phantom,
+        }
+    }
+}
+
 // Make generated "derivable" keys themselves "derivable". Also make sure they are assigned the
 // right `valid_networks`.
 impl<Ctx, K> DerivableKey<Ctx> for GeneratedKey<K, Ctx>
