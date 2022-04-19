@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Deprecate `database::Database::flush()`, the function is only needed for the sled database on mobile, instead for mobile use the sqlite database.
 - Add `keychain: KeychainKind` to `wallet::AddressInfo`.
 - Improve key generation traits
+- Rename `WalletExport` to `FullyNodedExport`, deprecate the former.
 
 ## [v0.17.0] - [v0.16.1]
 
