@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add `keychain: KeychainKind` to `wallet::AddressInfo`.
 - Improve key generation traits
 - Rename `WalletExport` to `FullyNodedExport`, deprecate the former.
+- Bump `miniscript` dependency version to `^6.1`. 
 
 ## [v0.17.0] - [v0.16.1]
 
