@@ -29,7 +29,7 @@
 //!     "label":"testnet"
 //! }"#;
 //!
-//! let import = WalletExport::from_str(import)?;
+//! let import = FullyNodedExport::from_str(import)?;
 //! let wallet = Wallet::new(
 //!     &import.descriptor(),
 //!     import.change_descriptor().as_ref(),
@@ -51,7 +51,7 @@
 //!     Network::Testnet,
 //!     MemoryDatabase::default()
 //! )?;
-//! let export = WalletExport::export_wallet(&wallet, "exported wallet", true)
+//! let export = FullyNodedExport::export_wallet(&wallet, "exported wallet", true)
 //!     .map_err(ToString::to_string)
 //!     .map_err(bdk::Error::Generic)?;
 //!
@@ -70,11 +70,15 @@ use crate::database::BatchDatabase;
 use crate::types::KeychainKind;
 use crate::wallet::Wallet;
 
+/// Alias for [`FullyNodedExport`]
+#[deprecated(since = "0.18.0", note = "Please use [`FullyNodedExport`] instead")]
+pub type WalletExport = FullyNodedExport;
+
 /// Structure that contains the export of a wallet
 ///
 /// For a usage example see [this module](crate::wallet::export)'s documentation.
 #[derive(Debug, Serialize, Deserialize)]
-pub struct WalletExport {
+pub struct FullyNodedExport {
     descriptor: String,
     /// Earliest block to rescan when looking for the wallet's transactions
     pub blockheight: u32,
@@ -82,13 +86,13 @@ pub struct WalletExport {
     pub label: String,
 }
 
-impl ToString for WalletExport {
+impl ToString for FullyNodedExport {
     fn to_string(&self) -> String {
         serde_json::to_string(self).unwrap()
     }
 }
 
-impl FromStr for WalletExport {
+impl FromStr for FullyNodedExport {
     type Err = serde_json::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -100,7 +104,7 @@ fn remove_checksum(s: String) -> String {
     s.splitn(2, '#').next().map(String::from).unwrap()
 }
 
-impl WalletExport {
+impl FullyNodedExport {
     /// Export a wallet
     ///
     /// This function returns an error if it determines that the `wallet`'s descriptor(s) are not
@@ -141,7 +145,7 @@ impl WalletExport {
             }
         };
 
-        let export = WalletExport {
+        let export = FullyNodedExport {
             descriptor,
             label: label.into(),
             blockheight,
@@ -265,7 +269,7 @@ mod test {
             get_test_db(),
         )
         .unwrap();
-        let export = WalletExport::export_wallet(&wallet, "Test Label", true).unwrap();
+        let export = FullyNodedExport::export_wallet(&wallet, "Test Label", true).unwrap();
 
         assert_eq!(export.descriptor(), descriptor);
         assert_eq!(export.change_descriptor(), Some(change_descriptor.into()));
@@ -283,7 +287,7 @@ mod test {
         let descriptor = "wpkh(xprv9s21ZrQH143K4CTb63EaMxja1YiTnSEWKMbn23uoEnAzxjdUJRQkazCAtzxGm4LSoTSVTptoV9RbchnKPW9HxKtZumdyxyikZFDLhogJ5Uj/44'/0'/0'/0/*)";
 
         let wallet = Wallet::new(descriptor, None, Network::Bitcoin, get_test_db()).unwrap();
-        WalletExport::export_wallet(&wallet, "Test Label", true).unwrap();
+        FullyNodedExport::export_wallet(&wallet, "Test Label", true).unwrap();
     }
 
     #[test]
@@ -302,7 +306,7 @@ mod test {
             get_test_db(),
         )
         .unwrap();
-        WalletExport::export_wallet(&wallet, "Test Label", true).unwrap();
+        FullyNodedExport::export_wallet(&wallet, "Test Label", true).unwrap();
     }
 
     #[test]
@@ -325,7 +329,7 @@ mod test {
             get_test_db(),
         )
         .unwrap();
-        let export = WalletExport::export_wallet(&wallet, "Test Label", true).unwrap();
+        let export = FullyNodedExport::export_wallet(&wallet, "Test Label", true).unwrap();
 
         assert_eq!(export.descriptor(), descriptor);
         assert_eq!(export.change_descriptor(), Some(change_descriptor.into()));
@@ -345,7 +349,7 @@ mod test {
             get_test_db(),
         )
         .unwrap();
-        let export = WalletExport::export_wallet(&wallet, "Test Label", true).unwrap();
+        let export = FullyNodedExport::export_wallet(&wallet, "Test Label", true).unwrap();
 
         assert_eq!(export.to_string(), "{\"descriptor\":\"wpkh(xprv9s21ZrQH143K4CTb63EaMxja1YiTnSEWKMbn23uoEnAzxjdUJRQkazCAtzxGm4LSoTSVTptoV9RbchnKPW9HxKtZumdyxyikZFDLhogJ5Uj/44\'/0\'/0\'/0/*)\",\"blockheight\":5000,\"label\":\"Test Label\"}");
     }
@@ -356,7 +360,7 @@ mod test {
         let change_descriptor = "wpkh(xprv9s21ZrQH143K4CTb63EaMxja1YiTnSEWKMbn23uoEnAzxjdUJRQkazCAtzxGm4LSoTSVTptoV9RbchnKPW9HxKtZumdyxyikZFDLhogJ5Uj/44'/0'/0'/1/*)";
 
         let import_str = "{\"descriptor\":\"wpkh(xprv9s21ZrQH143K4CTb63EaMxja1YiTnSEWKMbn23uoEnAzxjdUJRQkazCAtzxGm4LSoTSVTptoV9RbchnKPW9HxKtZumdyxyikZFDLhogJ5Uj/44\'/0\'/0\'/0/*)\",\"blockheight\":5000,\"label\":\"Test Label\"}";
-        let export = WalletExport::from_str(import_str).unwrap();
+        let export = FullyNodedExport::from_str(import_str).unwrap();
 
         assert_eq!(export.descriptor(), descriptor);
         assert_eq!(export.change_descriptor(), Some(change_descriptor.into()));
