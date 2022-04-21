@@ -1501,7 +1501,7 @@ mod test {
         let (prvkey_bob, _, _) = setup_keys(BOB_TPRV_STR, ALICE_BOB_PATH, &secp);
 
         let desc =
-            descriptor!(wsh(thresh(2,d:v:older(2),s:pk(prvkey_alice),s:pk(prvkey_bob)))).unwrap();
+            descriptor!(wsh(thresh(2,n:d:v:older(2),s:pk(prvkey_alice),s:pk(prvkey_bob)))).unwrap();
 
         let (wallet_desc, keymap) = desc
             .into_wallet_descriptor(&secp, Network::Testnet)
@@ -1513,7 +1513,7 @@ mod test {
             .address(Network::Testnet)
             .unwrap();
         assert_eq!(
-            "tb1qhpemaacpeu8ajlnh8k9v55ftg0px58r8630fz8t5mypxcwdk5d8sum522g",
+            "tb1qsydsey4hexagwkvercqsmes6yet0ndkyt6uzcphtqnygjd8hmzmsfxrv58",
             addr.to_string()
         );
 

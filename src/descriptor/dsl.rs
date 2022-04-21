@@ -336,7 +336,7 @@ macro_rules! apply_modifier {
 /// syntax is more suitable for a fixed number of items known at compile time, while the other accepts a
 /// [`Vec`] of items, which makes it more suitable for writing dynamic descriptors.
 ///
-/// They both produce the descriptor: `wsh(thresh(2,pk(...),s:pk(...),sdv:older(...)))`
+/// They both produce the descriptor: `wsh(thresh(2,pk(...),s:pk(...),sndv:older(...)))`
 ///
 /// ```
 /// # use std::str::FromStr;
@@ -349,7 +349,7 @@ macro_rules! apply_modifier {
 ///
 /// let (descriptor_a, key_map_a, networks) = bdk::descriptor! {
 ///     wsh (
-///         thresh(2, pk(my_key_1), s:pk(my_key_2), s:d:v:older(my_timelock))
+///         thresh(2, pk(my_key_1), s:pk(my_key_2), s:n:d:v:older(my_timelock))
 ///     )
 /// }?;
 ///
@@ -357,7 +357,7 @@ macro_rules! apply_modifier {
 /// let b_items = vec![
 ///     bdk::fragment!(pk(my_key_1))?,
 ///     bdk::fragment!(s:pk(my_key_2))?,
-///     bdk::fragment!(s:d:v:older(my_timelock))?,
+///     bdk::fragment!(s:n:d:v:older(my_timelock))?,
 /// ];
 /// let (descriptor_b, mut key_map_b, networks) = bdk::descriptor!(wsh(thresh_vec(2, b_items)))?;
 ///
@@ -1048,9 +1048,9 @@ mod test {
         let private_key =
             PrivateKey::from_wif("cSQPHDBwXGjVzWRqAHm6zfvQhaTuj1f2bFH58h55ghbjtFwvmeXR").unwrap();
         let (descriptor, _, _) =
-            descriptor!(wsh(thresh(2,d:v:older(1),s:pk(private_key),s:pk(private_key)))).unwrap();
+            descriptor!(wsh(thresh(2,n:d:v:older(1),s:pk(private_key),s:pk(private_key)))).unwrap();
 
-        assert_eq!(descriptor.to_string(), "wsh(thresh(2,dv:older(1),s:pk(02e96fe52ef0e22d2f131dd425ce1893073a3c6ad20e8cac36726393dfb4856a4c),s:pk(02e96fe52ef0e22d2f131dd425ce1893073a3c6ad20e8cac36726393dfb4856a4c)))#cfdcqs3s")
+        assert_eq!(descriptor.to_string(), "wsh(thresh(2,ndv:older(1),s:pk(02e96fe52ef0e22d2f131dd425ce1893073a3c6ad20e8cac36726393dfb4856a4c),s:pk(02e96fe52ef0e22d2f131dd425ce1893073a3c6ad20e8cac36726393dfb4856a4c)))#zzk3ux8g")
     }
 
     #[test]

@@ -1,6 +1,6 @@
 [package]
 name = "bdk"
-version = "0.17.1-dev"
+version = "0.19.0-dev"
 edition = "2018"
 authors = ["Alekos Filini <alekos.filini@gmail.com>", "Riccardo Casatta <riccardo@casatta.it>"]
 homepage = "https://bitcoindevkit.org"
@@ -14,7 +14,7 @@ license = "MIT OR Apache-2.0"
 [dependencies]
 bdk-macros = "^0.6"
 log = "^0.4"
-miniscript = { version = "^6.0", features = ["use-serde"] }
+miniscript = { version = "^6.1", features = ["use-serde"] }
 bitcoin = { version = "^0.27", features = ["use-serde", "base64"] }
 serde = { version = "^1.0", features = ["derive"] }
 serde_json = { version = "^1.0" }

@@ -6,10 +6,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+
+
+## [v0.18.0] - [v0.17.0]
+
 - Add `sqlite-bundled` feature for deployments that need a bundled version of sqlite, ie. for mobile platforms.
 - Added `Wallet::get_signers()`, `Wallet::descriptor_checksum()` and `Wallet::get_address_validators()`, exposed the `AsDerived` trait.
 - Deprecate `database::Database::flush()`, the function is only needed for the sled database on mobile, instead for mobile use the sqlite database.
+- Add `keychain: KeychainKind` to `wallet::AddressInfo`.
 - Improve key generation traits
+- Rename `WalletExport` to `FullyNodedExport`, deprecate the former.
+- Bump `miniscript` dependency version to `^6.1`. 
 
 ## [v0.17.0] - [v0.16.1]
 
@@ -442,4 +449,5 @@ final transaction is created by calling `finish` on the builder.
 [v0.16.0]: https://github.com/bitcoindevkit/bdk/compare/v0.15.0...v0.16.0
 [v0.16.1]: https://github.com/bitcoindevkit/bdk/compare/v0.16.0...v0.16.1
 [v0.17.0]: https://github.com/bitcoindevkit/bdk/compare/v0.16.1...v0.17.0
-[unreleased]: https://github.com/bitcoindevkit/bdk/compare/v0.17.0...HEAD
+[v0.18.0]: https://github.com/bitcoindevkit/bdk/compare/v0.17.0...v0.18.0
+[unreleased]: https://github.com/bitcoindevkit/bdk/compare/v0.18.0...HEAD
