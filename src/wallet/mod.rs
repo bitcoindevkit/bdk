@@ -25,7 +25,9 @@ use bitcoin::secp256k1::Secp256k1;
 
 use bitcoin::consensus::encode::serialize;
 use bitcoin::util::psbt;
-use bitcoin::{Address, Network, OutPoint, Script, SigHashType, Transaction, TxOut, Txid, Witness};
+use bitcoin::{
+    Address, EcdsaSighashType, Network, OutPoint, Script, Transaction, TxOut, Txid, Witness,
+};
 
 use miniscript::descriptor::DescriptorTrait;
 use miniscript::psbt::PsbtInputSatisfier;
@@ -1022,7 +1024,7 @@ where
         // is using `SIGHASH_ALL`
         if !sign_options.allow_all_sighashes
             && !psbt.inputs.iter().all(|i| {
-                i.sighash_type.is_none() || i.sighash_type == Some(SigHashType::All.into())
+                i.sighash_type.is_none() || i.sighash_type == Some(EcdsaSighashType::All.into())
             })
         {
             return Err(Error::Signer(signer::SignerError::NonStandardSighash));
@@ -2241,12 +2243,12 @@ pub(crate) mod test {
         let mut builder = wallet.build_tx();
         builder
             .add_recipient(addr.script_pubkey(), 30_000)
-            .sighash(bitcoin::SigHashType::Single.into());
+            .sighash(bitcoin::EcdsaSighashType::Single.into());
         let (psbt, _) = builder.finish().unwrap();
 
         assert_eq!(
             psbt.inputs[0].sighash_type,
-            Some(bitcoin::SigHashType::Single.into())
+            Some(bitcoin::EcdsaSighashType::Single.into())
         );
     }
 
@@ -3785,7 +3787,7 @@ pub(crate) mod test {
 
     #[test]
     fn test_sign_nonstandard_sighash() {
-        let sighash = SigHashType::NonePlusAnyoneCanPay;
+        let sighash = EcdsaSighashType::NonePlusAnyoneCanPay;
 
         let (wallet, _, _) = get_funded_wallet("wpkh(tprv8ZgxMBicQKsPd3EupYiPRhaMooHKUHJxNsTfYuScep13go8QFfHdtkG9nRkFGb7busX4isf6X9dURGCoKgitaApQ6MupRhZMcELAxTBRJgS/*)");
         let addr = wallet.get_address(New).unwrap();

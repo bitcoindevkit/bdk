@@ -94,8 +94,8 @@ use bitcoin::hashes::{hash160, Hash};
 use bitcoin::secp256k1;
 use bitcoin::secp256k1::{Message, Secp256k1};
 use bitcoin::util::bip32::{ChildNumber, DerivationPath, ExtendedPrivKey, Fingerprint};
-use bitcoin::util::{bip143, ecdsa, psbt};
-use bitcoin::{PrivateKey, PublicKey, Script, SigHashType, Sighash};
+use bitcoin::util::{ecdsa, psbt, sighash};
+use bitcoin::{EcdsaSighashType, PrivateKey, PublicKey, Script, Sighash};
 
 use miniscript::descriptor::{DescriptorSecretKey, DescriptorSinglePriv, DescriptorXKey, KeyMap};
 use miniscript::{Legacy, MiniscriptKey, Segwitv0};
@@ -156,6 +156,14 @@ pub enum SignerError {
     NonStandardSighash,
     /// Invalid SIGHASH for the signing context in use
     InvalidSighash,
+    /// Error while computing the hash to sign
+    SighashError(sighash::Error),
+}
+
+impl From<sighash::Error> for SignerError {
+    fn from(e: sighash::Error) -> Self {
+        SignerError::SighashError(e)
+    }
 }
 
 impl fmt::Display for SignerError {
@@ -292,7 +300,7 @@ impl Signer for PrivateKey {
             return Ok(());
         }
 
-        let pubkey = PublicKey::from_private_key(secp, &self);
+        let pubkey = PublicKey::from_private_key(secp, self);
         if psbt.inputs[input_index].partial_sigs.contains_key(&pubkey) {
             return Ok(());
         }
@@ -518,7 +526,9 @@ impl ComputeSighash for Legacy {
         let psbt_input = &psbt.inputs[input_index];
         let tx_input = &psbt.unsigned_tx.input[input_index];
 
-        let sighash = psbt_input.sighash_type.unwrap_or(SigHashType::All.into());
+        let sighash = psbt_input
+            .sighash_type
+            .unwrap_or_else(|| EcdsaSighashType::All.into());
         let script = match psbt_input.redeem_script {
             Some(ref redeem_script) => redeem_script.clone(),
             None => {
@@ -536,8 +546,11 @@ impl ComputeSighash for Legacy {
         };
 
         Ok((
-            psbt.unsigned_tx
-                .signature_hash(input_index, &script, sighash.to_u32()),
+            sighash::SighashCache::new(&psbt.unsigned_tx).legacy_signature_hash(
+                input_index,
+                &script,
+                sighash.to_u32(),
+            )?,
             sighash,
         ))
     }
@@ -567,7 +580,7 @@ impl ComputeSighash for Segwitv0 {
 
         let sighash = psbt_input
             .sighash_type
-            .unwrap_or(SigHashType::All.into())
+            .unwrap_or_else(|| EcdsaSighashType::All.into())
             .ecdsa_hash_ty()
             .map_err(|_| SignerError::InvalidSighash)?;
 
@@ -612,12 +625,12 @@ impl ComputeSighash for Segwitv0 {
         };
 
         Ok((
-            bip143::SigHashCache::new(&psbt.unsigned_tx).signature_hash(
+            sighash::SighashCache::new(&psbt.unsigned_tx).segwit_signature_hash(
                 input_index,
                 &script,
                 value,
                 sighash,
-            ),
+            )?,
             sighash.into(),
         ))
     }
