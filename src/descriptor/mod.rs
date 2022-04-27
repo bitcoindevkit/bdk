@@ -19,7 +19,7 @@ use std::ops::Deref;
 
 use bitcoin::secp256k1;
 use bitcoin::util::bip32::{ChildNumber, DerivationPath, ExtendedPubKey, Fingerprint, KeySource};
-use bitcoin::util::psbt;
+use bitcoin::util::{psbt, taproot};
 use bitcoin::{Network, Script, TxOut};
 
 use miniscript::descriptor::{DescriptorType, InnerXKey};
@@ -60,6 +60,13 @@ pub type DerivedDescriptor<'s> = Descriptor<DerivedDescriptorKey<'s>>;
 /// [`psbt::Input`]: bitcoin::util::psbt::Input
 /// [`psbt::Output`]: bitcoin::util::psbt::Output
 pub type HdKeyPaths = BTreeMap<secp256k1::PublicKey, KeySource>;
+
+/// Alias for the type of maps that represent taproot key origins in a [`psbt::Input`] or
+/// [`psbt::Output`]
+///
+/// [`psbt::Input`]: bitcoin::util::psbt::Input
+/// [`psbt::Output`]: bitcoin::util::psbt::Output
+pub type TapKeyOrigins = BTreeMap<bitcoin::XOnlyPublicKey, (Vec<taproot::TapLeafHash>, KeySource)>;
 
 /// Trait for types which can be converted into an [`ExtendedDescriptor`] and a [`KeyMap`] usable by a wallet in a specific [`Network`]
 pub trait IntoWalletDescriptor {
@@ -302,7 +309,8 @@ where
 }
 
 pub(crate) trait DerivedDescriptorMeta {
-    fn get_hd_keypaths(&self, secp: &SecpCtx) -> Result<HdKeyPaths, DescriptorError>;
+    fn get_hd_keypaths(&self, secp: &SecpCtx) -> HdKeyPaths;
+    fn get_tap_key_origins(&self, secp: &SecpCtx) -> TapKeyOrigins;
 }
 
 pub(crate) trait DescriptorMeta {
@@ -497,7 +505,7 @@ impl DescriptorMeta for ExtendedDescriptor {
 }
 
 impl<'s> DerivedDescriptorMeta for DerivedDescriptor<'s> {
-    fn get_hd_keypaths(&self, secp: &SecpCtx) -> Result<HdKeyPaths, DescriptorError> {
+    fn get_hd_keypaths(&self, secp: &SecpCtx) -> HdKeyPaths {
         let mut answer = BTreeMap::new();
         self.for_each_key(|key| {
             if let DescriptorPublicKey::XPub(xpub) = key.as_key().deref() {
@@ -515,7 +523,64 @@ impl<'s> DerivedDescriptorMeta for DerivedDescriptor<'s> {
             true
         });
 
-        Ok(answer)
+        answer
+    }
+
+    fn get_tap_key_origins(&self, secp: &SecpCtx) -> TapKeyOrigins {
+        use miniscript::ToPublicKey;
+
+        let mut answer = BTreeMap::new();
+        let mut insert_path = |pk: &DerivedDescriptorKey<'_>, lh| {
+            let key_origin = match pk.deref() {
+                DescriptorPublicKey::XPub(xpub) => {
+                    Some((xpub.root_fingerprint(secp), xpub.full_path(&[])))
+                }
+                DescriptorPublicKey::SinglePub(_) => None,
+            };
+
+            // If this is the internal key, we only insert the key origin if it's not None.
+            // For keys found in the tap tree we always insert a key origin (because the signer
+            // looks for it to know which leaves to sign for), even though it may be None
+            match (lh, key_origin) {
+                (None, Some(ko)) => {
+                    answer
+                        .entry(pk.to_x_only_pubkey())
+                        .or_insert_with(|| (vec![], ko));
+                }
+                (Some(lh), origin) => {
+                    answer
+                        .entry(pk.to_x_only_pubkey())
+                        .or_insert_with(|| (vec![], origin.unwrap_or_default()))
+                        .0
+                        .push(lh);
+                }
+                _ => {}
+            }
+        };
+
+        if let Descriptor::Tr(tr) = &self {
+            // Internal key first, then iterate the scripts
+            insert_path(tr.internal_key(), None);
+
+            for (_, ms) in tr.iter_scripts() {
+                // Assume always the same leaf version
+                let leaf_hash = taproot::TapLeafHash::from_script(
+                    &ms.encode(),
+                    taproot::LeafVersion::TapScript,
+                );
+
+                for key in ms.iter_pk_pkh() {
+                    let key = match key {
+                        miniscript::miniscript::iter::PkPkh::PlainPubkey(pk) => pk,
+                        miniscript::miniscript::iter::PkPkh::HashedPubkey(pk) => pk,
+                    };
+
+                    insert_path(&key, Some(leaf_hash));
+                }
+            }
+        }
+
+        answer
     }
 }
 
