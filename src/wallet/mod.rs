@@ -24,13 +24,14 @@ use std::sync::Arc;
 use bitcoin::secp256k1::Secp256k1;
 
 use bitcoin::consensus::encode::serialize;
-use bitcoin::util::psbt;
+use bitcoin::util::{psbt, taproot};
 use bitcoin::{
     Address, EcdsaSighashType, Network, OutPoint, Script, Transaction, TxOut, Txid, Witness,
 };
 
 use miniscript::descriptor::DescriptorTrait;
 use miniscript::psbt::PsbtInputSatisfier;
+use miniscript::ToPublicKey;
 
 #[allow(unused_imports)]
 use log::{debug, error, info, trace};
@@ -1436,8 +1437,15 @@ where
                     psbt_input: foreign_psbt_input,
                     outpoint,
                 } => {
-                    // TODO: do not require non_witness_utxo for taproot utxos
-                    if !params.only_witness_utxo && foreign_psbt_input.non_witness_utxo.is_none() {
+                    let is_taproot = foreign_psbt_input
+                        .witness_utxo
+                        .as_ref()
+                        .map(|txout| txout.script_pubkey.is_v1_p2tr())
+                        .unwrap_or(false);
+                    if !is_taproot
+                        && !params.only_witness_utxo
+                        && foreign_psbt_input.non_witness_utxo.is_none()
+                    {
                         return Err(Error::Generic(format!(
                             "Missing non_witness_utxo on foreign utxo {}",
                             outpoint
@@ -1462,10 +1470,27 @@ where
                 let (desc, _) = self._get_descriptor_for_keychain(keychain);
                 let derived_descriptor = desc.as_derived(child, &self.secp);
 
-                if desc.is_taproot() {
+                if let miniscript::Descriptor::Tr(tr) = &derived_descriptor {
+                    let tap_tree = if tr.taptree().is_some() {
+                        let mut builder = taproot::TaprootBuilder::new();
+                        for (depth, ms) in tr.iter_scripts() {
+                            let script = ms.encode();
+                            builder = builder.add_leaf(depth, script).expect(
+                                "Computing spend data on a valid Tree should always succeed",
+                            );
+                        }
+                        Some(
+                            psbt::TapTree::from_builder(builder)
+                                .expect("The tree should always be valid"),
+                        )
+                    } else {
+                        None
+                    };
+                    psbt_output.tap_tree = tap_tree;
                     psbt_output
                         .tap_key_origins
                         .append(&mut derived_descriptor.get_tap_key_origins(&self.secp));
+                    psbt_output.tap_internal_key = Some(tr.internal_key().to_x_only_pubkey());
                 } else {
                     psbt_output
                         .bip32_derivation
@@ -1503,8 +1528,22 @@ where
 
         let desc = self.get_descriptor_for_keychain(keychain);
         let derived_descriptor = desc.as_derived(child, &self.secp);
-        if desc.is_taproot() {
+
+        if let miniscript::Descriptor::Tr(tr) = &derived_descriptor {
             psbt_input.tap_key_origins = derived_descriptor.get_tap_key_origins(&self.secp);
+            psbt_input.tap_internal_key = Some(tr.internal_key().to_x_only_pubkey());
+
+            let spend_info = tr.spend_info();
+            psbt_input.tap_merkle_root = spend_info.merkle_root();
+            psbt_input.tap_scripts = spend_info
+                .as_script_map()
+                .keys()
+                .filter_map(|script_ver| {
+                    spend_info
+                        .control_block(script_ver)
+                        .map(|cb| (cb, script_ver.clone()))
+                })
+                .collect();
         } else {
             psbt_input.bip32_derivation = derived_descriptor.get_hd_keypaths(&self.secp);
         }
@@ -1812,6 +1851,14 @@ pub(crate) mod test {
 
     pub(crate) fn get_test_tr_single_sig() -> &'static str {
         "tr(tprv8ZgxMBicQKsPdDArR4xSAECuVxeX1jwwSXR4ApKbkYgZiziDc4LdBy2WvJeGDfUSE4UT4hHhbgEwbdq8ajjUHiKDegkwrNU6V55CxcxonVN/*)"
+    }
+
+    pub(crate) fn get_test_tr_with_taptree() -> &'static str {
+        "tr(cPZzKuNmpuUjD1e8jUU4PVzy2b5LngbSip8mBsxf4e7rSFZVb4Uh,{pk(b511bd5771e47ee27558b1765e87b541668304ec567721c7b880edc0a010da55),pk(8aee2b8120a5f157f1223f72b5e62b825831a27a9fdf427db7cc697494d4a642)})"
+    }
+
+    pub(crate) fn get_test_tr_repeated_key() -> &'static str {
+        "tr(b511bd5771e47ee27558b1765e87b541668304ec567721c7b880edc0a010da55,{and_v(v:pk(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW),after(100)),and_v(v:pk(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW),after(200))})"
     }
 
     macro_rules! assert_fee_rate {
@@ -4163,6 +4210,150 @@ pub(crate) mod test {
                 (vec![], (from_str!("f6a5cb8b"), from_str!("m/1")))
             )],
             "Wrong output tap_key_origins"
+        );
+    }
+
+    #[test]
+    fn test_taproot_psbt_populate_tap_key_origins_repeated_key() {
+        let (wallet, _, _) = get_funded_wallet(get_test_tr_repeated_key());
+        let addr = wallet.get_address(AddressIndex::New).unwrap();
+
+        let path = vec![("rn4nre9c".to_string(), vec![0])]
+            .into_iter()
+            .collect();
+
+        let mut builder = wallet.build_tx();
+        builder
+            .add_recipient(addr.script_pubkey(), 25_000)
+            .policy_path(path, KeychainKind::External);
+        let (psbt, _) = builder.finish().unwrap();
+
+        assert_eq!(
+            psbt.inputs[0]
+                .tap_key_origins
+                .clone()
+                .into_iter()
+                .collect::<Vec<_>>(),
+            vec![(
+                from_str!("2b0558078bec38694a84933d659303e2575dae7e91685911454115bfd64487e3"),
+                (
+                    vec![
+                        from_str!(
+                            "858ad7a7d7f270e2c490c4d6ba00c499e46b18fdd59ea3c2c47d20347110271e"
+                        ),
+                        from_str!(
+                            "f6e927ad4492c051fe325894a4f5f14538333b55a35f099876be42009ec8f903"
+                        )
+                    ],
+                    (Default::default(), Default::default())
+                )
+            )],
+            "Wrong input tap_key_origins"
+        );
+        assert_eq!(
+            psbt.outputs[0]
+                .tap_key_origins
+                .clone()
+                .into_iter()
+                .collect::<Vec<_>>(),
+            vec![(
+                from_str!("2b0558078bec38694a84933d659303e2575dae7e91685911454115bfd64487e3"),
+                (
+                    vec![
+                        from_str!(
+                            "858ad7a7d7f270e2c490c4d6ba00c499e46b18fdd59ea3c2c47d20347110271e"
+                        ),
+                        from_str!(
+                            "f6e927ad4492c051fe325894a4f5f14538333b55a35f099876be42009ec8f903"
+                        )
+                    ],
+                    (Default::default(), Default::default())
+                )
+            )],
+            "Wrong output tap_key_origins"
+        );
+    }
+
+    #[test]
+    fn test_taproot_psbt_input_tap_tree() {
+        use bitcoin::hashes::hex::FromHex;
+        use bitcoin::util::taproot;
+
+        let (wallet, _, _) = get_funded_wallet(get_test_tr_with_taptree());
+        let addr = wallet.get_address(AddressIndex::Peek(0)).unwrap();
+
+        let mut builder = wallet.build_tx();
+        builder.drain_to(addr.script_pubkey()).drain_wallet();
+        let (psbt, _) = builder.finish().unwrap();
+
+        assert_eq!(
+            psbt.inputs[0].tap_merkle_root,
+            Some(
+                FromHex::from_hex(
+                    "d9ca24475ed2c4081ae181d8faa7461649961237bee7bc692f1de448d2d62031"
+                )
+                .unwrap()
+            ),
+        );
+        assert_eq!(
+            psbt.inputs[0].tap_scripts.clone().into_iter().collect::<Vec<_>>(),
+            vec![
+                (taproot::ControlBlock::from_slice(&Vec::<u8>::from_hex("c151494dc22e24a32fe9dcfbd7e85faf345fa1df296fb49d156e859ef3452012958b0afded0ee3149dbf6710d349dc30e55ae30c319c30efbc79efe19cf70f46a8").unwrap()).unwrap(), (from_str!("208aee2b8120a5f157f1223f72b5e62b825831a27a9fdf427db7cc697494d4a642ac"), taproot::LeafVersion::TapScript)),
+                (taproot::ControlBlock::from_slice(&Vec::<u8>::from_hex("c151494dc22e24a32fe9dcfbd7e85faf345fa1df296fb49d156e859ef345201295b9a515f7be31a70186e3c5937ee4a70cc4b4e1efe876c1d38e408222ffc64834").unwrap()).unwrap(), (from_str!("20b511bd5771e47ee27558b1765e87b541668304ec567721c7b880edc0a010da55ac"), taproot::LeafVersion::TapScript)),
+            ],
+        );
+        assert_eq!(
+            psbt.inputs[0].tap_internal_key,
+            Some(from_str!(
+                "b511bd5771e47ee27558b1765e87b541668304ec567721c7b880edc0a010da55"
+            ))
+        );
+
+        // Since we are creating an output to the same address as the input, assert that the
+        // internal_key is the same
+        assert_eq!(
+            psbt.inputs[0].tap_internal_key,
+            psbt.outputs[0].tap_internal_key
+        );
+    }
+
+    #[test]
+    fn test_taproot_foreign_utxo() {
+        let (wallet1, _, _) = get_funded_wallet(get_test_wpkh());
+        let (wallet2, _, _) = get_funded_wallet(get_test_tr_single_sig());
+
+        let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
+        let utxo = wallet2.list_unspent().unwrap().remove(0);
+        let psbt_input = wallet2.get_psbt_input(utxo.clone(), None, false).unwrap();
+        let foreign_utxo_satisfaction = wallet2
+            .get_descriptor_for_keychain(KeychainKind::External)
+            .max_satisfaction_weight()
+            .unwrap();
+
+        assert!(
+            psbt_input.non_witness_utxo.is_none(),
+            "`non_witness_utxo` should never be populated for taproot"
+        );
+
+        let mut builder = wallet1.build_tx();
+        builder
+            .add_recipient(addr.script_pubkey(), 60_000)
+            .add_foreign_utxo(utxo.outpoint, psbt_input, foreign_utxo_satisfaction)
+            .unwrap();
+        let (psbt, details) = builder.finish().unwrap();
+
+        assert_eq!(
+            details.sent - details.received,
+            10_000 + details.fee.unwrap_or(0),
+            "we should have only net spent ~10_000"
+        );
+
+        assert!(
+            psbt.unsigned_tx
+                .input
+                .iter()
+                .any(|input| input.previous_output == utxo.outpoint),
+            "foreign_utxo should be in there"
         );
     }
 }
