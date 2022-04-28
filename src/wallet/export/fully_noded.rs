@@ -9,7 +9,7 @@
 // You may not use this file except in accordance with one or both of these
 // licenses.
 
-//! Wallet export
+//! Fully Noded Wallet export
 //!
 //! This modules implements the wallet export format used by [FullyNoded](https://github.com/Fonta1n3/FullyNoded/blob/10b7808c8b929b171cca537fb50522d015168ac9/Docs/Wallets/Wallet-Export-Spec.md).
 //!
@@ -21,7 +21,7 @@
 //! # use std::str::FromStr;
 //! # use bitcoin::*;
 //! # use bdk::database::*;
-//! # use bdk::wallet::export::*;
+//! # use bdk::wallet::fully_noded::*;
 //! # use bdk::*;
 //! let import = r#"{
 //!     "descriptor": "wpkh([c258d2e4\/84h\/1h\/0h]tpubDD3ynpHgJQW8VvWRzQ5WFDCrs4jqVFGHB3vLC3r49XHJSqP8bHKdK4AriuUKLccK68zfzowx7YhmDN8SiSkgCDENUFx9qVw65YyqM78vyVe\/0\/*)",
@@ -43,7 +43,7 @@
 //! ```
 //! # use bitcoin::*;
 //! # use bdk::database::*;
-//! # use bdk::wallet::export::*;
+//! # use bdk::wallet::fully_noded::*;
 //! # use bdk::*;
 //! let wallet = Wallet::new(
 //!     "wpkh([c258d2e4/84h/1h/0h]tpubDD3ynpHgJQW8VvWRzQ5WFDCrs4jqVFGHB3vLC3r49XHJSqP8bHKdK4AriuUKLccK68zfzowx7YhmDN8SiSkgCDENUFx9qVw65YyqM78vyVe/0/*)",
@@ -76,7 +76,7 @@ pub type WalletExport = FullyNodedExport;
 
 /// Structure that contains the export of a wallet
 ///
-/// For a usage example see [this module](crate::wallet::export)'s documentation.
+/// For a usage example see [this module](crate::wallet::export::fully_noded)'s documentation.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct FullyNodedExport {
     descriptor: String,
