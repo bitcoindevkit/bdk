@@ -579,6 +579,23 @@ impl<A, B, C> From<(A, (B, (C, ())))> for TupleThree<A, B, C> {
 
 #[doc(hidden)]
 #[macro_export]
+macro_rules! group_multi_keys {
+    ( $( $key:expr ),+ ) => {{
+        use $crate::keys::IntoDescriptorKey;
+
+        let keys = vec![
+            $(
+                $key.into_descriptor_key(),
+            )*
+        ];
+
+        keys.into_iter().collect::<Result<Vec<_>, _>>()
+            .map_err($crate::descriptor::DescriptorError::Key)
+    }};
+}
+
+#[doc(hidden)]
+#[macro_export]
 macro_rules! fragment_internal {
     // The @v prefix is used to parse a sequence of operands and return them in a vector. This is
     // used by operands that take a variable number of arguments, like `thresh()` and `multi()`.
@@ -737,21 +754,22 @@ macro_rules! fragment {
             .and_then(|items| $crate::fragment!(thresh_vec($thresh, items)))
     });
     ( multi_vec ( $thresh:expr, $keys:expr ) ) => ({
-        $crate::keys::make_multi($thresh, $keys)
-    });
-    ( multi ( $thresh:expr $(, $key:expr )+ ) ) => ({
-        use $crate::keys::IntoDescriptorKey;
         let secp = $crate::bitcoin::secp256k1::Secp256k1::new();
 
-        let keys = vec![
-            $(
-                $key.into_descriptor_key(),
-            )*
-        ];
+        $crate::keys::make_multi($thresh, $crate::miniscript::Terminal::Multi, $keys, &secp)
+    });
+    ( multi ( $thresh:expr $(, $key:expr )+ ) ) => ({
+        $crate::group_multi_keys!( $( $key ),* )
+            .and_then(|keys| $crate::fragment!( multi_vec ( $thresh, keys ) ))
+    });
+    ( multi_a_vec ( $thresh:expr, $keys:expr ) ) => ({
+        let secp = $crate::bitcoin::secp256k1::Secp256k1::new();
 
-        keys.into_iter().collect::<Result<Vec<_>, _>>()
-            .map_err($crate::descriptor::DescriptorError::Key)
-            .and_then(|keys| $crate::keys::make_multi($thresh, keys, &secp))
+        $crate::keys::make_multi($thresh, $crate::miniscript::Terminal::MultiA, $keys, &secp)
+    });
+    ( multi_a ( $thresh:expr $(, $key:expr )+ ) ) => ({
+        $crate::group_multi_keys!( $( $key ),* )
+            .and_then(|keys| $crate::fragment!( multi_a_vec ( $thresh, keys ) ))
     });
 
     // `sortedmulti()` is handled separately

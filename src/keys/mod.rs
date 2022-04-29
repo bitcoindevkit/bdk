@@ -792,13 +792,18 @@ pub fn make_pkh<Pk: IntoDescriptorKey<Ctx>, Ctx: ScriptContext>(
 
 // Used internally by `bdk::fragment!` to build `multi()` fragments
 #[doc(hidden)]
-pub fn make_multi<Pk: IntoDescriptorKey<Ctx>, Ctx: ScriptContext>(
+pub fn make_multi<
+    Pk: IntoDescriptorKey<Ctx>,
+    Ctx: ScriptContext,
+    V: Fn(usize, Vec<DescriptorPublicKey>) -> Terminal<DescriptorPublicKey, Ctx>,
+>(
     thresh: usize,
+    variant: V,
     pks: Vec<Pk>,
     secp: &SecpCtx,
 ) -> Result<(Miniscript<DescriptorPublicKey, Ctx>, KeyMap, ValidNetworks), DescriptorError> {
     let (pks, key_map, valid_networks) = expand_multi_keys(pks, secp)?;
-    let minisc = Miniscript::from_ast(Terminal::Multi(thresh, pks))?;
+    let minisc = Miniscript::from_ast(variant(thresh, pks))?;
 
     minisc.check_miniscript()?;
 
