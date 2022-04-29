@@ -77,11 +77,14 @@ macro_rules! impl_top_level_pk {
 #[macro_export]
 macro_rules! impl_top_level_tr {
     ( $internal_key:expr, $tap_tree:expr ) => {{
-        use $crate::miniscript::descriptor::{Descriptor, DescriptorPublicKey, Tr};
+        use $crate::miniscript::descriptor::{
+            Descriptor, DescriptorPublicKey, KeyMap, TapTree, Tr,
+        };
         use $crate::miniscript::Tap;
 
         #[allow(unused_imports)]
-        use $crate::keys::{DescriptorKey, IntoDescriptorKey};
+        use $crate::keys::{DescriptorKey, IntoDescriptorKey, ValidNetworks};
+
         let secp = $crate::bitcoin::secp256k1::Secp256k1::new();
 
         $internal_key
@@ -89,12 +92,19 @@ macro_rules! impl_top_level_tr {
             .and_then(|key: DescriptorKey<Tap>| key.extract(&secp))
             .map_err($crate::descriptor::DescriptorError::Key)
             .and_then(|(pk, mut key_map, mut valid_networks)| {
-                let tap_tree = $tap_tree.map(|(tap_tree, tree_keymap, tree_networks)| {
-                    key_map.extend(tree_keymap.into_iter());
-                    valid_networks = $crate::keys::merge_networks(&valid_networks, &tree_networks);
+                let tap_tree = $tap_tree.map(
+                    |(tap_tree, tree_keymap, tree_networks): (
+                        TapTree<DescriptorPublicKey>,
+                        KeyMap,
+                        ValidNetworks,
+                    )| {
+                        key_map.extend(tree_keymap.into_iter());
+                        valid_networks =
+                            $crate::keys::merge_networks(&valid_networks, &tree_networks);
 
-                    tap_tree
-                });
+                        tap_tree
+                    },
+                );
 
                 Ok((
                     Descriptor::<DescriptorPublicKey>::Tr(Tr::new(pk, tap_tree)?),
@@ -1178,5 +1188,36 @@ mod test {
         uncompressed_pk.compressed = false;
 
         descriptor!(wsh(v: pk(uncompressed_pk))).unwrap();
+    }
+
+    #[test]
+    fn test_dsl_tr_only_key() {
+        let private_key =
+            PrivateKey::from_wif("cSQPHDBwXGjVzWRqAHm6zfvQhaTuj1f2bFH58h55ghbjtFwvmeXR").unwrap();
+        let (descriptor, _, _) = descriptor!(tr(private_key)).unwrap();
+
+        assert_eq!(
+            descriptor.to_string(),
+            "tr(02e96fe52ef0e22d2f131dd425ce1893073a3c6ad20e8cac36726393dfb4856a4c)#heq9m95v"
+        )
+    }
+
+    #[test]
+    fn test_dsl_tr_simple_tree() {
+        let private_key =
+            PrivateKey::from_wif("cSQPHDBwXGjVzWRqAHm6zfvQhaTuj1f2bFH58h55ghbjtFwvmeXR").unwrap();
+        let (descriptor, _, _) =
+            descriptor!(tr(private_key, { pk(private_key), pk(private_key) })).unwrap();
+
+        assert_eq!(descriptor.to_string(), "tr(02e96fe52ef0e22d2f131dd425ce1893073a3c6ad20e8cac36726393dfb4856a4c,{pk(02e96fe52ef0e22d2f131dd425ce1893073a3c6ad20e8cac36726393dfb4856a4c),pk(02e96fe52ef0e22d2f131dd425ce1893073a3c6ad20e8cac36726393dfb4856a4c)})#xy5fjw6d")
+    }
+
+    #[test]
+    fn test_dsl_tr_single_leaf() {
+        let private_key =
+            PrivateKey::from_wif("cSQPHDBwXGjVzWRqAHm6zfvQhaTuj1f2bFH58h55ghbjtFwvmeXR").unwrap();
+        let (descriptor, _, _) = descriptor!(tr(private_key, pk(private_key))).unwrap();
+
+        assert_eq!(descriptor.to_string(), "tr(02e96fe52ef0e22d2f131dd425ce1893073a3c6ad20e8cac36726393dfb4856a4c,pk(02e96fe52ef0e22d2f131dd425ce1893073a3c6ad20e8cac36726393dfb4856a4c))#lzl2vmc7")
     }
 }

@@ -302,8 +302,7 @@ impl InputSigner for SignerWrapper<DescriptorXKey<ExtendedPrivKey>> {
         let tap_key_origins = psbt.inputs[input_index]
             .tap_key_origins
             .iter()
-            .map(|(pk, (_, keysource))| (SinglePubKey::XOnly(*pk), keysource))
-            .collect::<Vec<_>>();
+            .map(|(pk, (_, keysource))| (SinglePubKey::XOnly(*pk), keysource));
         let (public_key, full_path) = match psbt.inputs[input_index]
             .bip32_derivation
             .iter()
