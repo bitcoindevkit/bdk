@@ -26,6 +26,9 @@ electrum-client = { version = "0.8", optional = true }
 rusqlite = { version = "0.25.3", optional = true }
 ahash = { version = "=0.7.4", optional = true }
 reqwest = { version = "0.11", optional = true, default-features = false, features = ["json"] }
+# pinned http versions to work with MSRV 1.46
+http = { version = "=0.2.6", optional = true }
+
 ureq = { version = "~2.2.0", features = ["json"], optional = true }
 futures = { version = "0.3", optional = true }
 async-trait = { version = "0.1", optional = true }
@@ -78,7 +81,7 @@ rpc = ["bitcoincore-rpc"]
 async-interface = ["async-trait"]
 electrum = ["electrum-client"]
 # MUST ALSO USE `--no-default-features`.
-use-esplora-reqwest = ["esplora", "reqwest", "reqwest/socks", "futures"]
+use-esplora-reqwest = ["esplora", "reqwest", "http", "reqwest/socks", "futures"]
 use-esplora-ureq = ["esplora", "ureq", "ureq/socks"]
 # Typical configurations will not need to use `esplora` feature directly.
 esplora = []
