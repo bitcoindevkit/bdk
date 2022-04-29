@@ -109,26 +109,34 @@ pub type WalletExport = FullyNodedExport;
 /// For a usage example see [this module](crate::wallet::export::caravan)'s documentation.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CaravanExport {
+    /// Vault name
     pub name: String,
+    /// Caravan address type,
     #[serde(rename = "addressType")]
     pub address_type: CaravanAddressType,
+    /// Caravan network
     network: CaravanNetwork,
+    /// Caravan client
     pub client: CaravanClient,
+    /// Signing quorum
     pub quorum: Quorum,
+    /// Extended public keys
     #[serde(rename = "extendedPublicKeys")]
     pub extended_public_keys: Vec<CaravanExtendedPublicKey>,
+    /// Starting address index, always 0 when exporting
     #[serde(rename = "startingAddressIndex")]
     pub starting_address_index: u32,
 }
 
 impl CaravanExport {
+    /// Get the bitcoin network value
     pub fn network(&self) -> Network {
         match self.network {
             CaravanNetwork::Mainnet => Network::Bitcoin,
             CaravanNetwork::Testnet => Network::Testnet,
         }
     }
-
+    /// Get the descriptor value
     pub fn descriptor(&self) -> Result<Descriptor<DescriptorPublicKey>, Error> {
         let required = self.quorum.required_signers;
         let network: Network = self.network();
@@ -198,6 +206,7 @@ impl CaravanExport {
         (quorum, extended_public_keys)
     }
 
+    /// Export BDK wallet configuration as a Caravan configuration
     pub fn export(
         name: String,
         client_type: String,
@@ -278,16 +287,21 @@ impl CaravanExport {
     }
 }
 
+/// The address types supported by Caravan
 #[derive(Debug, Serialize, Deserialize)]
 pub enum CaravanAddressType {
+    /// P2SH
     #[serde(rename = "P2SH")]
     P2sh,
+    /// P2SH-P2WSH
     #[serde(rename = "P2SH-P2WSH")]
     P2shP2wsh,
+    /// P2WSH
     #[serde(rename = "P2WSH")]
     P2wsh,
 }
 
+/// The networks supported by Caravan
 #[derive(Debug, Serialize, Deserialize)]
 enum CaravanNetwork {
     #[serde(rename = "mainnet")]
@@ -296,12 +310,15 @@ enum CaravanNetwork {
     Testnet,
 }
 
+/// A caravan client
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CaravanClient {
+    /// The client type value
     #[serde(rename = "type")]
     value: String,
 }
 
+/// The quorum of signers required and total signers
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Quorum {
     #[serde(rename = "requiredSigners")]
@@ -310,6 +327,7 @@ pub struct Quorum {
     total_signers: usize,
 }
 
+/// The Caravan extended public key information
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CaravanExtendedPublicKey {
     name: String,
