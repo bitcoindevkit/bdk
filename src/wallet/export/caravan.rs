@@ -79,7 +79,7 @@
 //! let network = wallet.network();
 //! let descriptor = wallet.get_descriptor_for_keychain(KeychainKind::External);
 //!
-//! let export = CaravanExport::export(name, client, network, &descriptor)?;
+//! let export = CaravanExport::export_wallet(&wallet, name, client)?;
 //!
 //! println!("Exported: {}", export.to_string());
 //! # Ok::<_, bdk::Error>(())
@@ -93,12 +93,13 @@ use crate::bitcoin::util::bip32::{ChildNumber, DerivationPath, ExtendedPubKey, F
 use crate::bitcoin::Network;
 use miniscript::{Descriptor, ScriptContext};
 
-use crate::descriptor;
+use crate::database::BatchDatabase;
 use crate::descriptor::{DescriptorError, DescriptorPublicKey, Legacy, Segwitv0};
 use crate::error::Error;
 use crate::keys::{DerivableKey, DescriptorKey, SortedMultiVec};
 use crate::miniscript::descriptor::{ShInner, WshInner};
 use crate::miniscript::MiniscriptKey;
+use crate::{descriptor, KeychainKind, Wallet};
 
 /// Alias for [`FullyNodedExport`]
 #[deprecated(since = "0.18.0", note = "Please use [`FullyNodedExport`] instead")]
@@ -108,11 +109,11 @@ pub type WalletExport = FullyNodedExport;
 ///
 /// For a usage example see [this module](crate::wallet::export::caravan)'s documentation.
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CaravanExport {
     /// Vault name
     pub name: String,
     /// Caravan address type,
-    #[serde(rename = "addressType")]
     pub address_type: CaravanAddressType,
     /// Caravan network
     network: CaravanNetwork,
@@ -121,10 +122,8 @@ pub struct CaravanExport {
     /// Signing quorum
     pub quorum: Quorum,
     /// Extended public keys
-    #[serde(rename = "extendedPublicKeys")]
     pub extended_public_keys: Vec<CaravanExtendedPublicKey>,
     /// Starting address index, always 0 when exporting
-    #[serde(rename = "startingAddressIndex")]
     pub starting_address_index: u32,
 }
 
@@ -180,11 +179,8 @@ impl CaravanExport {
             .iter()
             .map(|k| {
                 let fingerprint = k.xfp;
-                let key_path = k.clone().bip32_path;
-                let mut key_source = None;
-                if let (Some(fp), Some(kp)) = (fingerprint, key_path) {
-                    key_source = Some((fp, kp))
-                };
+                let key_path = k.bip32_path.clone();
+                let key_source = fingerprint.zip(key_path);
                 let derivation_path =
                     DerivationPath::master().child(ChildNumber::Normal { index: 0 });
                 k.xpub
@@ -197,21 +193,38 @@ impl CaravanExport {
 
     fn parse_sorted_multi<Pk: MiniscriptKey, Ctx: ScriptContext>(
         sorted_multi: &SortedMultiVec<Pk, Ctx>,
-    ) -> (Quorum, Vec<Pk>) {
+    ) -> (Quorum, &[Pk]) {
         let quorum = Quorum {
             required_signers: sorted_multi.k,
             total_signers: sorted_multi.pks.len(),
         };
-        let extended_public_keys = sorted_multi.pks.clone();
+        let extended_public_keys = sorted_multi.pks.as_slice();
         (quorum, extended_public_keys)
     }
 
     /// Export BDK wallet configuration as a Caravan configuration
-    pub fn export(
+    pub fn export_wallet<D: BatchDatabase>(
+        wallet: &Wallet<D>,
         name: String,
         client_type: String,
+    ) -> Result<Self, Error> {
+        let network = wallet.network;
+        let descriptor = wallet.get_descriptor_for_keychain(KeychainKind::External);
+        if wallet.change_descriptor.is_none() {
+            Self::export(network, descriptor, name, client_type)
+        } else {
+            Err(Error::Generic(
+                "Can not export a wallet with a change descriptor to Caravan.".to_string(),
+            ))
+        }
+    }
+
+    /// Export BDK wallet network and descriptor as a Caravan configuration
+    pub fn export(
         network: Network,
         descriptor: &Descriptor<DescriptorPublicKey>,
+        name: String,
+        client_type: String,
     ) -> Result<Self, Error> {
         let (address_type, quorum, descriptor_public_keys) = match descriptor {
             Descriptor::Sh(sh) => match sh.as_inner() {
@@ -251,7 +264,7 @@ impl CaravanExport {
             _ => CaravanNetwork::Testnet,
         };
         let client = CaravanClient { value: client_type };
-        let extended_public_keys: Vec<CaravanExtendedPublicKey> = descriptor_public_keys
+        let extended_public_keys = descriptor_public_keys
             .iter()
             .map(|k| match k {
                 DescriptorPublicKey::SinglePub(_) => {
@@ -273,7 +286,7 @@ impl CaravanExport {
                 }
             })
             .flatten()
-            .collect::<Vec<CaravanExtendedPublicKey>>();
+            .collect();
 
         Ok(Self {
             name,
@@ -303,10 +316,9 @@ pub enum CaravanAddressType {
 
 /// The networks supported by Caravan
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 enum CaravanNetwork {
-    #[serde(rename = "mainnet")]
     Mainnet,
-    #[serde(rename = "testnet")]
     Testnet,
 }
 
@@ -429,7 +441,7 @@ mod test {
         let network = wallet.network();
         let descriptor = wallet.get_descriptor_for_keychain(KeychainKind::External);
 
-        let export = CaravanExport::export(name, client, network, &descriptor).expect("export");
+        let export = CaravanExport::export(network, &descriptor, name, client).expect("export");
 
         println!("Exported: {}", export.to_string());
 
