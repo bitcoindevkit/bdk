@@ -99,6 +99,7 @@ lazy_static = "1.4"
 env_logger = "0.7"
 clap = "2.33"
 electrsd = "0.19.1"
+assert-json-diff = "2.0"
 
 [[example]]
 name = "address_validator"

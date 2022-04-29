@@ -1,7 +1,7 @@
 // Bitcoin Dev Kit
 // Written in 2020 by Alekos Filini <alekos.filini@gmail.com>
 //
-// Copyright (c) 2020-2021 Bitcoin Dev Kit Developers
+// Copyright (c) 2020-2022 Bitcoin Dev Kit Developers
 //
 // This file is licensed under the Apache License, Version 2.0 <LICENSE-APACHE
 // or http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
@@ -21,7 +21,7 @@
 //! # use std::str::FromStr;
 //! # use bitcoin::*;
 //! # use bdk::database::*;
-//! # use bdk::wallet::fully_noded::*;
+//! # use bdk::wallet::export::fully_noded::*;
 //! # use bdk::*;
 //! let import = r#"{
 //!     "descriptor": "wpkh([c258d2e4\/84h\/1h\/0h]tpubDD3ynpHgJQW8VvWRzQ5WFDCrs4jqVFGHB3vLC3r49XHJSqP8bHKdK4AriuUKLccK68zfzowx7YhmDN8SiSkgCDENUFx9qVw65YyqM78vyVe\/0\/*)",
@@ -43,7 +43,7 @@
 //! ```
 //! # use bitcoin::*;
 //! # use bdk::database::*;
-//! # use bdk::wallet::fully_noded::*;
+//! # use bdk::wallet::export::fully_noded::*;
 //! # use bdk::*;
 //! let wallet = Wallet::new(
 //!     "wpkh([c258d2e4/84h/1h/0h]tpubDD3ynpHgJQW8VvWRzQ5WFDCrs4jqVFGHB3vLC3r49XHJSqP8bHKdK4AriuUKLccK68zfzowx7YhmDN8SiSkgCDENUFx9qVw65YyqM78vyVe/0/*)",

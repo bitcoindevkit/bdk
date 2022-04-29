@@ -10,4 +10,5 @@
 
 //! This module contains submodules that implement various wallet export formats.
 
+pub mod caravan;
 pub mod fully_noded;
