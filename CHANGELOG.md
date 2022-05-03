@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 - added `OldestFirstCoinSelection` impl to `CoinSelectionAlgorithm`
+- New MSRV set to `1.56`
 
 
 ## [v0.18.0] - [v0.17.0]

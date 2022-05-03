@@ -34,6 +34,14 @@
 use super::*;
 
 macro_rules! impl_from {
+    ( boxed $from:ty, $to:ty, $variant:ident, $( $cfg:tt )* ) => {
+        $( $cfg )*
+        impl From<$from> for $to {
+            fn from(inner: $from) -> Self {
+                <$to>::$variant(Box::new(inner))
+            }
+        }
+    };
     ( $from:ty, $to:ty, $variant:ident, $( $cfg:tt )* ) => {
         $( $cfg )*
         impl From<$from> for $to {
@@ -68,19 +76,19 @@ pub enum AnyBlockchain {
     #[cfg(feature = "electrum")]
     #[cfg_attr(docsrs, doc(cfg(feature = "electrum")))]
     /// Electrum client
-    Electrum(electrum::ElectrumBlockchain),
+    Electrum(Box<electrum::ElectrumBlockchain>),
     #[cfg(feature = "esplora")]
     #[cfg_attr(docsrs, doc(cfg(feature = "esplora")))]
     /// Esplora client
-    Esplora(esplora::EsploraBlockchain),
+    Esplora(Box<esplora::EsploraBlockchain>),
     #[cfg(feature = "compact_filters")]
     #[cfg_attr(docsrs, doc(cfg(feature = "compact_filters")))]
     /// Compact filters client
-    CompactFilters(compact_filters::CompactFiltersBlockchain),
+    CompactFilters(Box<compact_filters::CompactFiltersBlockchain>),
     #[cfg(feature = "rpc")]
     #[cfg_attr(docsrs, doc(cfg(feature = "rpc")))]
     /// RPC client
-    Rpc(rpc::RpcBlockchain),
+    Rpc(Box<rpc::RpcBlockchain>),
 }
 
 #[maybe_async]
@@ -141,10 +149,10 @@ impl WalletSync for AnyBlockchain {
     }
 }
 
-impl_from!(electrum::ElectrumBlockchain, AnyBlockchain, Electrum, #[cfg(feature = "electrum")]);
-impl_from!(esplora::EsploraBlockchain, AnyBlockchain, Esplora, #[cfg(feature = "esplora")]);
-impl_from!(compact_filters::CompactFiltersBlockchain, AnyBlockchain, CompactFilters, #[cfg(feature = "compact_filters")]);
-impl_from!(rpc::RpcBlockchain, AnyBlockchain, Rpc, #[cfg(feature = "rpc")]);
+impl_from!(boxed electrum::ElectrumBlockchain, AnyBlockchain, Electrum, #[cfg(feature = "electrum")]);
+impl_from!(boxed esplora::EsploraBlockchain, AnyBlockchain, Esplora, #[cfg(feature = "esplora")]);
+impl_from!(boxed compact_filters::CompactFiltersBlockchain, AnyBlockchain, CompactFilters, #[cfg(feature = "compact_filters")]);
+impl_from!(boxed rpc::RpcBlockchain, AnyBlockchain, Rpc, #[cfg(feature = "rpc")]);
 
 /// Type that can contain any of the blockchain configurations defined by the library
 ///
@@ -207,19 +215,19 @@ impl ConfigurableBlockchain for AnyBlockchain {
         Ok(match config {
             #[cfg(feature = "electrum")]
             AnyBlockchainConfig::Electrum(inner) => {
-                AnyBlockchain::Electrum(electrum::ElectrumBlockchain::from_config(inner)?)
+                AnyBlockchain::Electrum(Box::new(electrum::ElectrumBlockchain::from_config(inner)?))
             }
             #[cfg(feature = "esplora")]
             AnyBlockchainConfig::Esplora(inner) => {
-                AnyBlockchain::Esplora(esplora::EsploraBlockchain::from_config(inner)?)
+                AnyBlockchain::Esplora(Box::new(esplora::EsploraBlockchain::from_config(inner)?))
             }
             #[cfg(feature = "compact_filters")]
-            AnyBlockchainConfig::CompactFilters(inner) => AnyBlockchain::CompactFilters(
+            AnyBlockchainConfig::CompactFilters(inner) => AnyBlockchain::CompactFilters(Box::new(
                 compact_filters::CompactFiltersBlockchain::from_config(inner)?,
-            ),
+            )),
             #[cfg(feature = "rpc")]
             AnyBlockchainConfig::Rpc(inner) => {
-                AnyBlockchain::Rpc(rpc::RpcBlockchain::from_config(inner)?)
+                AnyBlockchain::Rpc(Box::new(rpc::RpcBlockchain::from_config(inner)?))
             }
         })
     }

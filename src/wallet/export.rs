@@ -101,7 +101,7 @@ impl FromStr for FullyNodedExport {
 }
 
 fn remove_checksum(s: String) -> String {
-    s.splitn(2, '#').next().map(String::from).unwrap()
+    s.split_once('#').map(|(a, _)| String::from(a)).unwrap()
 }
 
 impl FullyNodedExport {

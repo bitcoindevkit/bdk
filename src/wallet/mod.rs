@@ -1603,9 +1603,9 @@ where
     pub fn descriptor_checksum(&self, keychain: KeychainKind) -> String {
         self.get_descriptor_for_keychain(keychain)
             .to_string()
-            .splitn(2, '#')
-            .next()
+            .split_once('#')
             .unwrap()
+            .0
             .to_string()
     }
 }

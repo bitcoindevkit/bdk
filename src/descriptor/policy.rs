@@ -357,7 +357,8 @@ impl Satisfaction {
                     // we map each of the combinations of elements into a tuple of ([chosen items], [conditions]). unfortunately, those items have potentially more than one
                     // condition (think about ORs), so we also use `mix` to expand those, i.e. [[0], [1, 2]] becomes [[0, 1], [0, 2]]. This is necessary to make sure that we
                     // consider every possible options and check whether or not they are compatible.
-                    .map(|i_vec| {
+                    // since this step can turn one item of the iterator into multiple ones, we use `flat_map()` to expand them out
+                    .flat_map(|i_vec| {
                         mix(i_vec
                             .iter()
                             .map(|i| {
@@ -371,9 +372,6 @@ impl Satisfaction {
                         .map(|x| (i_vec.clone(), x))
                         .collect::<Vec<(Vec<usize>, Vec<Condition>)>>()
                     })
-                    // .inspect(|x: &Vec<(Vec<usize>, Vec<Condition>)>| println!("fetch {:?}", x))
-                    // since the previous step can turn one item of the iterator into multiple ones, we call flatten to expand them out
-                    .flatten()
                     // .inspect(|x| println!("flat {:?}", x))
                     // try to fold all the conditions for this specific combination of indexes/options. if they are not compatible, try_fold will be Err
                     .map(|(key, val)| {

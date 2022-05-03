@@ -54,8 +54,6 @@ use std::str::FromStr;
 pub struct RpcBlockchain {
     /// Rpc client to the node, includes the wallet name
     client: Client,
-    /// Network used
-    network: Network,
     /// Blockchain capabilities, cached here at startup
     capabilities: HashSet<Capability>,
     /// Skip this many blocks of the blockchain at the first rescan, if None the rescan is done from the genesis block
@@ -417,7 +415,6 @@ impl ConfigurableBlockchain for RpcBlockchain {
 
         Ok(RpcBlockchain {
             client,
-            network,
             capabilities,
             _storage_address: storage_address,
             skip_blocks: config.skip_blocks,
