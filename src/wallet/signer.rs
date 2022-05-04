@@ -479,6 +479,7 @@ pub struct SignOptions {
     pub allow_all_sighashes: bool,
 }
 
+#[allow(clippy::derivable_impls)]
 impl Default for SignOptions {
     fn default() -> Self {
         SignOptions {

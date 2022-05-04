@@ -94,8 +94,7 @@ impl Mempool {
             TxIdentifier::Wtxid(wtxid) => self.0.read().unwrap().wtxids.get(&wtxid).cloned(),
         };
 
-        txid.map(|txid| self.0.read().unwrap().txs.get(&txid).cloned())
-            .flatten()
+        txid.and_then(|txid| self.0.read().unwrap().txs.get(&txid).cloned())
     }
 
     /// Return whether or not the mempool contains a transaction with a given txid
@@ -111,6 +110,7 @@ impl Mempool {
 
 /// A Bitcoin peer
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct Peer {
     writer: Arc<Mutex<TcpStream>>,
     responses: Arc<RwLock<ResponsesMap>>,

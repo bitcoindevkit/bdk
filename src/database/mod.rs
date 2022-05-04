@@ -200,8 +200,7 @@ pub(crate) trait DatabaseUtils: Database {
         D: FnOnce() -> Result<Option<Transaction>, Error>,
     {
         self.get_tx(txid, true)?
-            .map(|t| t.transaction)
-            .flatten()
+            .and_then(|t| t.transaction)
             .map_or_else(default, |t| Ok(Some(t)))
     }
 
