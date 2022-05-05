@@ -57,7 +57,7 @@ use utils::{check_nlocktime, check_nsequence_rbf, After, Older, SecpCtx};
 
 use crate::blockchain::{GetHeight, NoopProgress, Progress, WalletSync};
 use crate::database::memory::MemoryDatabase;
-use crate::database::{BatchDatabase, BatchOperations, DatabaseUtils, SyncTime};
+use crate::database::{AnyDatabase, BatchDatabase, BatchOperations, DatabaseUtils, SyncTime};
 use crate::descriptor::derived::AsDerived;
 use crate::descriptor::policy::BuildSatisfaction;
 use crate::descriptor::{
@@ -1613,17 +1613,13 @@ where
 /// Return a fake wallet that appears to be funded for testing.
 pub fn get_funded_wallet(
     descriptor: &str,
-) -> (
-    Wallet<MemoryDatabase>,
-    (String, Option<String>),
-    bitcoin::Txid,
-) {
+) -> (Wallet<AnyDatabase>, (String, Option<String>), bitcoin::Txid) {
     let descriptors = testutils!(@descriptors (descriptor));
     let wallet = Wallet::new(
         &descriptors.0,
         None,
         Network::Regtest,
-        MemoryDatabase::new(),
+        AnyDatabase::Memory(MemoryDatabase::new()),
     )
     .unwrap();
 
