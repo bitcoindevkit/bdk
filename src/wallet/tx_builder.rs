@@ -615,7 +615,7 @@ impl<'a, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>> TxBuilder<'a, D, Cs, C
 
 // methods supported only by bump_fee
 impl<'a, D: BatchDatabase> TxBuilder<'a, D, DefaultCoinSelectionAlgorithm, BumpFee> {
-    /// Explicitly tells the wallet that it is allowed to reduce the fee of the output matching this
+    /// Explicitly tells the wallet that it is allowed to reduce the amount of the output matching this
     /// `script_pubkey` in order to bump the transaction fee. Without specifying this the wallet
     /// will attempt to find a change output to shrink instead.
     ///
