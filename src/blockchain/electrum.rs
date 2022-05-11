@@ -79,6 +79,8 @@ impl Blockchain for ElectrumBlockchain {
     }
 }
 
+impl StatelessBlockchain for ElectrumBlockchain {}
+
 impl GetHeight for ElectrumBlockchain {
     fn get_height(&self) -> Result<u32, Error> {
         // TODO: unsubscribe when added to the client, or is there a better call to use here?
@@ -320,8 +322,67 @@ impl ConfigurableBlockchain for ElectrumBlockchain {
 
 #[cfg(test)]
 #[cfg(feature = "test-electrum")]
-crate::bdk_blockchain_tests! {
-    fn test_instance(test_client: &TestClient) -> ElectrumBlockchain {
-        ElectrumBlockchain::from(Client::new(&test_client.electrsd.electrum_url).unwrap())
+mod test {
+    use std::sync::Arc;
+
+    use super::*;
+    use crate::database::MemoryDatabase;
+    use crate::testutils::blockchain_tests::TestClient;
+    use crate::wallet::{AddressIndex, Wallet};
+
+    crate::bdk_blockchain_tests! {
+        fn test_instance(test_client: &TestClient) -> ElectrumBlockchain {
+            ElectrumBlockchain::from(Client::new(&test_client.electrsd.electrum_url).unwrap())
+        }
+    }
+
+    fn get_factory() -> (TestClient, Arc<ElectrumBlockchain>) {
+        let test_client = TestClient::default();
+
+        let factory = Arc::new(ElectrumBlockchain::from(
+            Client::new(&test_client.electrsd.electrum_url).unwrap(),
+        ));
+
+        (test_client, factory)
+    }
+
+    #[test]
+    fn test_electrum_blockchain_factory() {
+        let (_test_client, factory) = get_factory();
+
+        let a = factory.build("aaaaaa", None).unwrap();
+        let b = factory.build("bbbbbb", None).unwrap();
+
+        assert_eq!(
+            a.client.block_headers_subscribe().unwrap().height,
+            b.client.block_headers_subscribe().unwrap().height
+        );
+    }
+
+    #[test]
+    fn test_electrum_blockchain_factory_sync_wallet() {
+        let (mut test_client, factory) = get_factory();
+
+        let db = MemoryDatabase::new();
+        let wallet = Wallet::new(
+            "wpkh(L5EZftvrYaSudiozVRzTqLcHLNDoVn7H5HSfM9BAN6tMJX8oTWz6)",
+            None,
+            bitcoin::Network::Regtest,
+            db,
+        )
+        .unwrap();
+
+        let address = wallet.get_address(AddressIndex::New).unwrap();
+
+        let tx = testutils! {
+            @tx ( (@addr address.address) => 50_000 )
+        };
+        test_client.receive(tx);
+
+        factory
+            .sync_wallet(&wallet, None, Default::default())
+            .unwrap();
+
+        assert_eq!(wallet.get_balance().unwrap(), 50_000);
     }
 }

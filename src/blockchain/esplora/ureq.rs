@@ -98,6 +98,8 @@ impl Blockchain for EsploraBlockchain {
     }
 }
 
+impl StatelessBlockchain for EsploraBlockchain {}
+
 impl GetHeight for EsploraBlockchain {
     fn get_height(&self) -> Result<u32, Error> {
         Ok(self.url_client._get_height()?)
