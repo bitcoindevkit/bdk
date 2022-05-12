@@ -82,23 +82,26 @@
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::fmt;
-use std::ops::Bound::Included;
+use std::ops::{Bound::Included, Deref};
 use std::sync::Arc;
 
 use bitcoin::blockdata::opcodes;
 use bitcoin::blockdata::script::Builder as ScriptBuilder;
 use bitcoin::hashes::{hash160, Hash};
-use bitcoin::secp256k1::{Message, Secp256k1};
+use bitcoin::secp256k1::Message;
 use bitcoin::util::bip32::{ChildNumber, DerivationPath, ExtendedPrivKey, Fingerprint};
 use bitcoin::util::{ecdsa, psbt, schnorr, sighash, taproot};
 use bitcoin::{secp256k1, XOnlyPublicKey};
 use bitcoin::{EcdsaSighashType, PrivateKey, PublicKey, SchnorrSighashType, Script};
 
-use miniscript::descriptor::{DescriptorSecretKey, DescriptorSinglePriv, DescriptorXKey, KeyMap};
+use miniscript::descriptor::{
+    Descriptor, DescriptorPublicKey, DescriptorSecretKey, DescriptorSinglePriv, DescriptorXKey,
+    KeyMap,
+};
 use miniscript::{Legacy, MiniscriptKey, Segwitv0, Tap};
 
 use super::utils::SecpCtx;
-use crate::descriptor::XKeyUtils;
+use crate::descriptor::{DescriptorMeta, XKeyUtils};
 
 /// Identifier of a signer in the `SignersContainers`. Used as a key to find the right signer among
 /// multiple of them
@@ -171,6 +174,44 @@ impl fmt::Display for SignerError {
 
 impl std::error::Error for SignerError {}
 
+/// Signing context
+///
+/// Used by our software signers to determine the type of signatures to make
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SignerContext {
+    /// Legacy context
+    Legacy,
+    /// Segwit v0 context (BIP 143)
+    Segwitv0,
+    /// Taproot context (BIP 340)
+    Tap {
+        /// Whether the signer can sign for the internal key or not
+        is_internal_key: bool,
+    },
+}
+
+/// Wrapper structure to pair a signer with its context
+#[derive(Debug, Clone)]
+pub struct SignerWrapper<S: Sized + fmt::Debug + Clone> {
+    signer: S,
+    ctx: SignerContext,
+}
+
+impl<S: Sized + fmt::Debug + Clone> SignerWrapper<S> {
+    /// Create a wrapped signer from a signer and a context
+    pub fn new(signer: S, ctx: SignerContext) -> Self {
+        SignerWrapper { signer, ctx }
+    }
+}
+
+impl<S: Sized + fmt::Debug + Clone> Deref for SignerWrapper<S> {
+    type Target = S;
+
+    fn deref(&self) -> &Self::Target {
+        &self.signer
+    }
+}
+
 /// Common signer methods
 pub trait SignerCommon: fmt::Debug + Send + Sync {
     /// Return the [`SignerId`] for this signer
@@ -231,17 +272,17 @@ impl<T: InputSigner> TransactionSigner for T {
     }
 }
 
-impl SignerCommon for DescriptorXKey<ExtendedPrivKey> {
+impl SignerCommon for SignerWrapper<DescriptorXKey<ExtendedPrivKey>> {
     fn id(&self, secp: &SecpCtx) -> SignerId {
         SignerId::from(self.root_fingerprint(secp))
     }
 
     fn descriptor_secret_key(&self) -> Option<DescriptorSecretKey> {
-        Some(DescriptorSecretKey::XPrv(self.clone()))
+        Some(DescriptorSecretKey::XPrv(self.signer.clone()))
     }
 }
 
-impl InputSigner for DescriptorXKey<ExtendedPrivKey> {
+impl InputSigner for SignerWrapper<DescriptorXKey<ExtendedPrivKey>> {
     fn sign_input(
         &self,
         psbt: &mut psbt::PartiallySignedTransaction,
@@ -289,30 +330,31 @@ impl InputSigner for DescriptorXKey<ExtendedPrivKey> {
             Err(SignerError::InvalidKey)
         } else {
             // HD wallets imply compressed keys
-            PrivateKey {
+            let priv_key = PrivateKey {
                 compressed: true,
                 network: self.xkey.network,
                 inner: derived_key.private_key,
-            }
-            .sign_input(psbt, input_index, secp)
+            };
+
+            SignerWrapper::new(priv_key, self.ctx).sign_input(psbt, input_index, secp)
         }
     }
 }
 
-impl SignerCommon for PrivateKey {
+impl SignerCommon for SignerWrapper<PrivateKey> {
     fn id(&self, secp: &SecpCtx) -> SignerId {
         SignerId::from(self.public_key(secp).to_pubkeyhash())
     }
 
     fn descriptor_secret_key(&self) -> Option<DescriptorSecretKey> {
         Some(DescriptorSecretKey::SinglePriv(DescriptorSinglePriv {
-            key: *self,
+            key: self.signer,
             origin: None,
         }))
     }
 }
 
-impl InputSigner for PrivateKey {
+impl InputSigner for SignerWrapper<PrivateKey> {
     fn sign_input(
         &self,
         psbt: &mut psbt::PartiallySignedTransaction,
@@ -331,11 +373,9 @@ impl InputSigner for PrivateKey {
 
         let pubkey = PublicKey::from_private_key(secp, self);
         let x_only_pubkey = XOnlyPublicKey::from(pubkey.inner);
-        let is_taproot = psbt.inputs[input_index].tap_internal_key.is_some()
-            || psbt.inputs[input_index].tap_merkle_root.is_some();
 
-        match psbt.inputs[input_index].tap_internal_key {
-            Some(k) if k == x_only_pubkey && psbt.inputs[input_index].tap_key_sig.is_none() => {
+        if let SignerContext::Tap { is_internal_key } = self.ctx {
+            if is_internal_key && psbt.inputs[input_index].tap_key_sig.is_none() {
                 let (hash, hash_ty) = Tap::sighash(psbt, input_index, None)?;
                 sign_psbt_schnorr(
                     &self.inner,
@@ -347,55 +387,53 @@ impl InputSigner for PrivateKey {
                     secp,
                 );
             }
-            _ => {}
-        }
-        if let Some((leaf_hashes, _)) = psbt.inputs[input_index].tap_key_origins.get(&x_only_pubkey)
-        {
-            let leaf_hashes = leaf_hashes
-                .iter()
-                .filter(|lh| {
-                    !psbt.inputs[input_index]
-                        .tap_script_sigs
-                        .contains_key(&(x_only_pubkey, **lh))
-                })
-                .cloned()
-                .collect::<Vec<_>>();
-            for lh in leaf_hashes {
-                let (hash, hash_ty) = Tap::sighash(psbt, input_index, Some(lh))?;
-                sign_psbt_schnorr(
-                    &self.inner,
-                    x_only_pubkey,
-                    Some(lh),
-                    &mut psbt.inputs[input_index],
-                    hash,
-                    hash_ty,
-                    secp,
-                );
-            }
-        }
 
-        if !is_taproot {
-            if psbt.inputs[input_index].partial_sigs.contains_key(&pubkey) {
-                return Ok(());
+            if let Some((leaf_hashes, _)) =
+                psbt.inputs[input_index].tap_key_origins.get(&x_only_pubkey)
+            {
+                let leaf_hashes = leaf_hashes
+                    .iter()
+                    .filter(|lh| {
+                        !psbt.inputs[input_index]
+                            .tap_script_sigs
+                            .contains_key(&(x_only_pubkey, **lh))
+                    })
+                    .cloned()
+                    .collect::<Vec<_>>();
+                for lh in leaf_hashes {
+                    let (hash, hash_ty) = Tap::sighash(psbt, input_index, Some(lh))?;
+                    sign_psbt_schnorr(
+                        &self.inner,
+                        x_only_pubkey,
+                        Some(lh),
+                        &mut psbt.inputs[input_index],
+                        hash,
+                        hash_ty,
+                        secp,
+                    );
+                }
             }
 
-            // FIXME: use the presence of `witness_utxo` as an indication that we should make a bip143
-            // sig. Does this make sense? Should we add an extra argument to explicitly switch between
-            // these? The original idea was to declare sign() as sign<Ctx: ScriptContex>() and use Ctx,
-            // but that violates the rules for trait-objects, so we can't do it.
-            let (hash, hash_ty) = match psbt.inputs[input_index].witness_utxo {
-                Some(_) => Segwitv0::sighash(psbt, input_index, ())?,
-                None => Legacy::sighash(psbt, input_index, ())?,
-            };
-            sign_psbt_ecdsa(
-                &self.inner,
-                pubkey,
-                &mut psbt.inputs[input_index],
-                hash,
-                hash_ty,
-                secp,
-            );
+            return Ok(());
         }
+
+        if psbt.inputs[input_index].partial_sigs.contains_key(&pubkey) {
+            return Ok(());
+        }
+
+        let (hash, hash_ty) = match self.ctx {
+            SignerContext::Segwitv0 => Segwitv0::sighash(psbt, input_index, ())?,
+            SignerContext::Legacy => Legacy::sighash(psbt, input_index, ())?,
+            _ => return Ok(()), // handled above
+        };
+        sign_psbt_ecdsa(
+            &self.inner,
+            pubkey,
+            &mut psbt.inputs[input_index],
+            hash,
+            hash_ty,
+            secp,
+        );
 
         Ok(())
     }
@@ -496,24 +534,37 @@ impl SignersContainer {
             .filter_map(|secret| secret.as_public(secp).ok().map(|public| (public, secret)))
             .collect()
     }
-}
 
-impl From<KeyMap> for SignersContainer {
-    fn from(keymap: KeyMap) -> SignersContainer {
-        let secp = Secp256k1::new();
+    /// Build a new signer container from a [`KeyMap`]
+    ///
+    /// Also looks at the corresponding descriptor to determine the [`SignerContext`] to attach to
+    /// the signers
+    pub fn build(
+        keymap: KeyMap,
+        descriptor: &Descriptor<DescriptorPublicKey>,
+        secp: &SecpCtx,
+    ) -> SignersContainer {
         let mut container = SignersContainer::new();
 
-        for (_, secret) in keymap {
+        for (pubkey, secret) in keymap {
+            let ctx = match descriptor {
+                Descriptor::Tr(tr) => SignerContext::Tap {
+                    is_internal_key: tr.internal_key() == &pubkey,
+                },
+                _ if descriptor.is_witness() => SignerContext::Segwitv0,
+                _ => SignerContext::Legacy,
+            };
+
             match secret {
                 DescriptorSecretKey::SinglePriv(private_key) => container.add_external(
-                    SignerId::from(private_key.key.public_key(&secp).to_pubkeyhash()),
+                    SignerId::from(private_key.key.public_key(secp).to_pubkeyhash()),
                     SignerOrdering::default(),
-                    Arc::new(private_key.key),
+                    Arc::new(SignerWrapper::new(private_key.key, ctx)),
                 ),
                 DescriptorSecretKey::XPrv(xprv) => container.add_external(
-                    SignerId::from(xprv.root_fingerprint(&secp)),
+                    SignerId::from(xprv.root_fingerprint(secp)),
                     SignerOrdering::default(),
-                    Arc::new(xprv),
+                    Arc::new(SignerWrapper::new(xprv, ctx)),
                 ),
             };
         }
@@ -869,11 +920,11 @@ mod signers_container_tests {
         let (prvkey1, _, _) = setup_keys(TPRV0_STR);
         let (prvkey2, _, _) = setup_keys(TPRV1_STR);
         let desc = descriptor!(sh(multi(2, prvkey1, prvkey2))).unwrap();
-        let (_, keymap) = desc
+        let (wallet_desc, keymap) = desc
             .into_wallet_descriptor(&secp, Network::Testnet)
             .unwrap();
 
-        let signers = SignersContainer::from(keymap);
+        let signers = SignersContainer::build(keymap, &wallet_desc, &secp);
         assert_eq!(signers.ids().len(), 2);
 
         let signers = signers.signers();

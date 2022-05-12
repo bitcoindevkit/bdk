@@ -197,7 +197,7 @@ where
             KeychainKind::External,
             get_checksum(&descriptor.to_string())?.as_bytes(),
         )?;
-        let signers = Arc::new(SignersContainer::from(keymap));
+        let signers = Arc::new(SignersContainer::build(keymap, &descriptor, &secp));
         let (change_descriptor, change_signers) = match change_descriptor {
             Some(desc) => {
                 let (change_descriptor, change_keymap) =
@@ -207,7 +207,11 @@ where
                     get_checksum(&change_descriptor.to_string())?.as_bytes(),
                 )?;
 
-                let change_signers = Arc::new(SignersContainer::from(change_keymap));
+                let change_signers = Arc::new(SignersContainer::build(
+                    change_keymap,
+                    &change_descriptor,
+                    &secp,
+                ));
                 // if !parsed.same_structure(descriptor.as_ref()) {
                 //     return Err(Error::DifferentDescriptorStructure);
                 // }
