@@ -18,27 +18,24 @@ pub trait MessageSignatureVerifier<S> {
 }
 
 /// A message signer using ECDSA
-pub struct EcdsaMessageSigner {
-    secp: Secp256k1<All>,
+pub struct EcdsaMessageSigner<'a> {
+    secp: &'a Secp256k1<All>,
     secret_key: SecretKey,
 }
 
-impl EcdsaMessageSigner {
+impl<'a> EcdsaMessageSigner<'a> {
     /// Creates message signer from a bitcoin ECDSA private key
-    pub fn from_prv(prv: PrivateKey) -> Self {
-        Self::from_secret_key(prv.inner)
+    pub fn from_prv(prv: PrivateKey, secp: &'a Secp256k1<All>) -> Self {
+        Self::from_secret_key(prv.inner, secp)
     }
 
     /// Creates message signer from an ECDSA secret key
-    pub fn from_secret_key(secret_key: SecretKey) -> Self {
-        EcdsaMessageSigner {
-            secret_key,
-            secp: Secp256k1::new(),
-        }
+    pub fn from_secret_key(secret_key: SecretKey, secp: &'a Secp256k1<All>) -> Self {
+        EcdsaMessageSigner { secret_key, secp }
     }
 }
 
-impl MessageSigner<RecoverableSignature> for EcdsaMessageSigner {
+impl<'a> MessageSigner<RecoverableSignature> for EcdsaMessageSigner<'a> {
     fn sign(&self, message: &str) -> RecoverableSignature {
         let msg_hash = signed_msg_hash(message);
         self.secp.sign_ecdsa_recoverable(
@@ -50,33 +47,30 @@ impl MessageSigner<RecoverableSignature> for EcdsaMessageSigner {
 }
 
 /// A message signature verifier using ECDSA
-pub struct EcdsaMessageSignatureVerifier {
-    secp: Secp256k1<All>,
+pub struct EcdsaMessageSignatureVerifier<'a> {
+    secp: &'a Secp256k1<All>,
     address: Address,
 }
 
-impl EcdsaMessageSignatureVerifier {
+impl<'a> EcdsaMessageSignatureVerifier<'a> {
     /// Creates a message signature verifier from a public key
-    pub fn from_pub(public_key: PublicKey) -> Self {
+    pub fn from_pub(public_key: PublicKey, secp: &'a Secp256k1<All>) -> Self {
         let address = Address::p2pkh(&public_key, Network::Bitcoin);
-        Self::from_address(address)
+        Self::from_address(address, secp)
     }
 
     /// Creates a message signature verifier from an address
-    pub fn from_address(address: Address) -> Self {
-        EcdsaMessageSignatureVerifier {
-            address,
-            secp: Secp256k1::new(),
-        }
+    pub fn from_address(address: Address, secp: &'a Secp256k1<All>) -> Self {
+        EcdsaMessageSignatureVerifier { address, secp }
     }
 }
 
-impl MessageSignatureVerifier<RecoverableSignature> for EcdsaMessageSignatureVerifier {
+impl<'a> MessageSignatureVerifier<RecoverableSignature> for EcdsaMessageSignatureVerifier<'a> {
     fn verify(&self, sig: RecoverableSignature, msg: &str) -> bool {
         let message_sig = MessageSignature::new(sig, false);
         let msg_hash = signed_msg_hash(msg);
         message_sig
-            .is_signed_by_address(&self.secp, &self.address, msg_hash)
+            .is_signed_by_address(self.secp, &self.address, msg_hash)
             .unwrap_or(false)
     }
 }
@@ -98,7 +92,7 @@ mod ecdsa_msg_sign {
         let secp = Secp256k1::new();
         let prv = PrivateKey::from_wif(PRV_WIF).unwrap();
 
-        let signer = EcdsaMessageSigner::from_prv(prv);
+        let signer = EcdsaMessageSigner::from_prv(prv, &secp);
         let sig = signer.sign(MSG);
         let pub_key = prv.public_key(&secp);
         let address = Address::p2pkh(&pub_key, Network::Bitcoin);
@@ -116,8 +110,8 @@ mod ecdsa_msg_sign {
     fn test_verify_signed_message() {
         let secp = Secp256k1::new();
         let prv = PrivateKey::from_wif(PRV_WIF).unwrap();
-        let sig = EcdsaMessageSigner::from_prv(prv).sign(MSG);
-        let verifier = EcdsaMessageSignatureVerifier::from_pub(prv.public_key(&secp));
+        let sig = EcdsaMessageSigner::from_prv(prv, &secp).sign(MSG);
+        let verifier = EcdsaMessageSignatureVerifier::from_pub(prv.public_key(&secp), &secp);
 
         assert_eq!(verifier.verify(sig, MSG), true);
     }
