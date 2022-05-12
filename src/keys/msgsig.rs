@@ -1,6 +1,4 @@
-
 /// Signing arbitrary messages and verify message signatures
-
 use bitcoin::hashes::Hash;
 use bitcoin::secp256k1::recovery::RecoverableSignature;
 use bitcoin::secp256k1::{All, Message, Secp256k1, SecretKey};
@@ -26,7 +24,6 @@ pub struct EcdsaMessageSigner {
 }
 
 impl EcdsaMessageSigner {
-
     /// Creates message signer from a bitcoin ECDSA private key
     pub fn from_prv(prv: PrivateKey) -> Self {
         Self::from_secret_key(prv.key)
@@ -58,7 +55,6 @@ pub struct EcdsaMessageSignatureVerifier {
 }
 
 impl EcdsaMessageSignatureVerifier {
-
     /// Creates a message signature verifier from a public key
     pub fn from_pub(public_key: PublicKey) -> Self {
         let address = Address::p2pkh(&public_key, Network::Bitcoin);
