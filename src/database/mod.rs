@@ -323,7 +323,8 @@ pub mod test {
         };
 
         tree.set_utxo(&utxo).unwrap();
-
+        tree.set_utxo(&utxo).unwrap();
+        assert_eq!(tree.iter_utxos().unwrap().len(), 1);
         assert_eq!(tree.get_utxo(&outpoint).unwrap(), Some(utxo));
     }
 
