@@ -74,10 +74,9 @@ impl MessageSignatureVerifier<RecoverableSignature> for EcdsaMessageSignatureVer
     fn verify(&self, sig: RecoverableSignature, msg: &str) -> bool {
         let message_sig = MessageSignature::new(sig, false);
         let msg_hash = signed_msg_hash(msg);
-        return match message_sig.is_signed_by_address(&self.secp, &self.address, msg_hash) {
-            Ok(is_signed) => is_signed,
-            Err(_) => false,
-        };
+        message_sig
+            .is_signed_by_address(&self.secp, &self.address, msg_hash)
+            .unwrap_or(false)
     }
 }
 
