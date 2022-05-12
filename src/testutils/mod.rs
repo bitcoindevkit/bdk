@@ -14,11 +14,7 @@
 #[cfg(feature = "test-blockchains")]
 pub mod blockchain_tests;
 
-use bitcoin::secp256k1::{Secp256k1, Verification};
-use bitcoin::{Address, PublicKey, Txid};
-
-use miniscript::descriptor::DescriptorPublicKey;
-use miniscript::{Descriptor, MiniscriptKey, TranslatePk};
+use bitcoin::{Address, Txid};
 
 #[derive(Clone, Debug)]
 pub struct TestIncomingInput {
@@ -97,62 +93,29 @@ impl TestIncomingTx {
 }
 
 #[doc(hidden)]
-pub trait TranslateDescriptor {
-    // derive and translate a `Descriptor<DescriptorPublicKey>` into a `Descriptor<PublicKey>`
-    fn derive_translated<C: Verification>(
-        &self,
-        secp: &Secp256k1<C>,
-        index: u32,
-    ) -> Descriptor<PublicKey>;
-}
-
-impl TranslateDescriptor for Descriptor<DescriptorPublicKey> {
-    fn derive_translated<C: Verification>(
-        &self,
-        secp: &Secp256k1<C>,
-        index: u32,
-    ) -> Descriptor<PublicKey> {
-        let translate = |key: &DescriptorPublicKey| -> PublicKey {
-            match key {
-                DescriptorPublicKey::XPub(xpub) => {
-                    xpub.xkey
-                        .derive_pub(secp, &xpub.derivation_path)
-                        .expect("hardened derivation steps")
-                        .public_key
-                }
-                DescriptorPublicKey::SinglePub(key) => key.key,
-            }
-        };
-
-        self.derive(index)
-            .translate_pk_infallible(|pk| translate(pk), |pkh| translate(pkh).to_pubkeyhash())
-    }
-}
-
-#[doc(hidden)]
 #[macro_export]
 macro_rules! testutils {
     ( @external $descriptors:expr, $child:expr ) => ({
         use $crate::bitcoin::secp256k1::Secp256k1;
         use $crate::miniscript::descriptor::{Descriptor, DescriptorPublicKey, DescriptorTrait};
 
-        use $crate::testutils::TranslateDescriptor;
+        use $crate::descriptor::AsDerived;
 
         let secp = Secp256k1::new();
 
         let parsed = Descriptor::<DescriptorPublicKey>::parse_descriptor(&secp, &$descriptors.0).expect("Failed to parse descriptor in `testutils!(@external)`").0;
-        parsed.derive_translated(&secp, $child).address(bitcoin::Network::Regtest).expect("No address form")
+        parsed.as_derived($child, &secp).address(bitcoin::Network::Regtest).expect("No address form")
     });
     ( @internal $descriptors:expr, $child:expr ) => ({
         use $crate::bitcoin::secp256k1::Secp256k1;
         use $crate::miniscript::descriptor::{Descriptor, DescriptorPublicKey, DescriptorTrait};
 
-        use $crate::testutils::TranslateDescriptor;
+        use $crate::descriptor::AsDerived;
 
         let secp = Secp256k1::new();
 
         let parsed = Descriptor::<DescriptorPublicKey>::parse_descriptor(&secp, &$descriptors.1.expect("Missing internal descriptor")).expect("Failed to parse descriptor in `testutils!(@internal)`").0;
-        parsed.derive_translated(&secp, $child).address($crate::bitcoin::Network::Regtest).expect("No address form")
+        parsed.as_derived($child, &secp).address($crate::bitcoin::Network::Regtest).expect("No address form")
     });
     ( @e $descriptors:expr, $child:expr ) => ({ testutils!(@external $descriptors, $child) });
     ( @i $descriptors:expr, $child:expr ) => ({ testutils!(@internal $descriptors, $child) });

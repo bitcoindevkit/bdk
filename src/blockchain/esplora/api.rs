@@ -2,7 +2,7 @@
 //!
 //! see: <https://github.com/Blockstream/esplora/blob/master/API.md>
 use crate::BlockTime;
-use bitcoin::{OutPoint, Script, Transaction, TxIn, TxOut, Txid};
+use bitcoin::{OutPoint, Script, Transaction, TxIn, TxOut, Txid, Witness};
 
 #[derive(serde::Deserialize, Clone, Debug)]
 pub struct PrevOut {
@@ -63,7 +63,7 @@ impl Tx {
                     },
                     script_sig: vin.scriptsig,
                     sequence: vin.sequence,
-                    witness: vin.witness,
+                    witness: Witness::from_vec(vin.witness),
                 })
                 .collect(),
             output: self

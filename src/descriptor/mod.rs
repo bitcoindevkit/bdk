@@ -17,9 +17,10 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::Deref;
 
+use bitcoin::secp256k1;
 use bitcoin::util::bip32::{ChildNumber, DerivationPath, ExtendedPubKey, Fingerprint, KeySource};
 use bitcoin::util::psbt;
-use bitcoin::{Network, PublicKey, Script, TxOut};
+use bitcoin::{Network, Script, TxOut};
 
 use miniscript::descriptor::{DescriptorType, InnerXKey};
 pub use miniscript::{
@@ -58,7 +59,7 @@ pub type DerivedDescriptor<'s> = Descriptor<DerivedDescriptorKey<'s>>;
 ///
 /// [`psbt::Input`]: bitcoin::util::psbt::Input
 /// [`psbt::Output`]: bitcoin::util::psbt::Output
-pub type HdKeyPaths = BTreeMap<PublicKey, KeySource>;
+pub type HdKeyPaths = BTreeMap<secp256k1::PublicKey, KeySource>;
 
 /// Trait for types which can be converted into an [`ExtendedDescriptor`] and a [`KeyMap`] usable by a wallet in a specific [`Network`]
 pub trait IntoWalletDescriptor {
@@ -306,6 +307,7 @@ pub(crate) trait DerivedDescriptorMeta {
 
 pub(crate) trait DescriptorMeta {
     fn is_witness(&self) -> bool;
+    fn is_taproot(&self) -> bool;
     fn get_extended_keys(&self) -> Result<Vec<DescriptorXKey<ExtendedPubKey>>, DescriptorError>;
     fn derive_from_hd_keypaths<'s>(
         &self,
@@ -328,21 +330,21 @@ pub(crate) trait DescriptorScripts {
 impl<'s> DescriptorScripts for DerivedDescriptor<'s> {
     fn psbt_redeem_script(&self) -> Option<Script> {
         match self.desc_type() {
-            DescriptorType::ShWpkh => Some(self.explicit_script()),
-            DescriptorType::ShWsh => Some(self.explicit_script().to_v0_p2wsh()),
-            DescriptorType::Sh => Some(self.explicit_script()),
-            DescriptorType::Bare => Some(self.explicit_script()),
-            DescriptorType::ShSortedMulti => Some(self.explicit_script()),
+            DescriptorType::ShWpkh => Some(self.explicit_script().unwrap()),
+            DescriptorType::ShWsh => Some(self.explicit_script().unwrap().to_v0_p2wsh()),
+            DescriptorType::Sh => Some(self.explicit_script().unwrap()),
+            DescriptorType::Bare => Some(self.explicit_script().unwrap()),
+            DescriptorType::ShSortedMulti => Some(self.explicit_script().unwrap()),
             _ => None,
         }
     }
 
     fn psbt_witness_script(&self) -> Option<Script> {
         match self.desc_type() {
-            DescriptorType::Wsh => Some(self.explicit_script()),
-            DescriptorType::ShWsh => Some(self.explicit_script()),
+            DescriptorType::Wsh => Some(self.explicit_script().unwrap()),
+            DescriptorType::ShWsh => Some(self.explicit_script().unwrap()),
             DescriptorType::WshSortedMulti | DescriptorType::ShWshSortedMulti => {
-                Some(self.explicit_script())
+                Some(self.explicit_script().unwrap())
             }
             _ => None,
         }
@@ -360,6 +362,10 @@ impl DescriptorMeta for ExtendedDescriptor {
                 | DescriptorType::ShWshSortedMulti
                 | DescriptorType::WshSortedMulti
         )
+    }
+
+    fn is_taproot(&self) -> bool {
+        self.desc_type() == DescriptorType::Tr
     }
 
     fn get_extended_keys(&self) -> Result<Vec<DescriptorXKey<ExtendedPubKey>>, DescriptorError> {
@@ -448,7 +454,10 @@ impl DescriptorMeta for ExtendedDescriptor {
         let descriptor = self.as_derived_fixed(secp);
         match descriptor.desc_type() {
             // TODO: add pk() here
-            DescriptorType::Pkh | DescriptorType::Wpkh | DescriptorType::ShWpkh
+            DescriptorType::Pkh
+            | DescriptorType::Wpkh
+            | DescriptorType::ShWpkh
+            | DescriptorType::Tr
                 if utxo.is_some()
                     && descriptor.script_pubkey() == utxo.as_ref().unwrap().script_pubkey =>
             {
@@ -456,7 +465,7 @@ impl DescriptorMeta for ExtendedDescriptor {
             }
             DescriptorType::Bare | DescriptorType::Sh | DescriptorType::ShSortedMulti
                 if psbt_input.redeem_script.is_some()
-                    && &descriptor.explicit_script()
+                    && &descriptor.explicit_script().unwrap()
                         == psbt_input.redeem_script.as_ref().unwrap() =>
             {
                 Some(descriptor)
@@ -466,7 +475,7 @@ impl DescriptorMeta for ExtendedDescriptor {
             | DescriptorType::ShWshSortedMulti
             | DescriptorType::WshSortedMulti
                 if psbt_input.witness_script.is_some()
-                    && &descriptor.explicit_script()
+                    && &descriptor.explicit_script().unwrap()
                         == psbt_input.witness_script.as_ref().unwrap() =>
             {
                 Some(descriptor)

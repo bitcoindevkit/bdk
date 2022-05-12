@@ -43,23 +43,27 @@ use serde::ser::SerializeMap;
 use serde::{Serialize, Serializer};
 
 use bitcoin::hashes::*;
+use bitcoin::secp256k1;
 use bitcoin::util::bip32::Fingerprint;
-use bitcoin::PublicKey;
+use bitcoin::{PublicKey, XOnlyPublicKey};
 
-use miniscript::descriptor::{DescriptorPublicKey, ShInner, SortedMultiVec, WshInner};
+use miniscript::descriptor::{
+    DescriptorPublicKey, DescriptorSinglePub, ShInner, SinglePubKey, SortedMultiVec, WshInner,
+};
 use miniscript::{Descriptor, Miniscript, MiniscriptKey, Satisfier, ScriptContext, Terminal};
 
 #[allow(unused_imports)]
 use log::{debug, error, info, trace};
 
 use crate::descriptor::ExtractPolicy;
+use crate::keys::ExtScriptContext;
 use crate::wallet::signer::{SignerId, SignersContainer};
 use crate::wallet::utils::{self, After, Older, SecpCtx};
 
 use super::checksum::get_checksum;
 use super::error::Error;
 use super::XKeyUtils;
-use bitcoin::util::psbt::PartiallySignedTransaction as Psbt;
+use bitcoin::util::psbt::{Input as PsbtInput, PartiallySignedTransaction as Psbt};
 use miniscript::psbt::PsbtInputSatisfier;
 
 /// Raw public key or extended key fingerprint
@@ -67,6 +71,8 @@ use miniscript::psbt::PsbtInputSatisfier;
 pub struct PkOrF {
     #[serde(skip_serializing_if = "Option::is_none")]
     pubkey: Option<PublicKey>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    x_only_pubkey: Option<XOnlyPublicKey>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pubkey_hash: Option<hash160::Hash>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -76,8 +82,18 @@ pub struct PkOrF {
 impl PkOrF {
     fn from_key(k: &DescriptorPublicKey, secp: &SecpCtx) -> Self {
         match k {
-            DescriptorPublicKey::SinglePub(pubkey) => PkOrF {
-                pubkey: Some(pubkey.key),
+            DescriptorPublicKey::SinglePub(DescriptorSinglePub {
+                key: SinglePubKey::FullKey(pk),
+                ..
+            }) => PkOrF {
+                pubkey: Some(*pk),
+                ..Default::default()
+            },
+            DescriptorPublicKey::SinglePub(DescriptorSinglePub {
+                key: SinglePubKey::XOnly(pk),
+                ..
+            }) => PkOrF {
+                x_only_pubkey: Some(*pk),
                 ..Default::default()
             },
             DescriptorPublicKey::XPub(xpub) => PkOrF {
@@ -93,10 +109,10 @@ impl PkOrF {
 #[serde(tag = "type", rename_all = "UPPERCASE")]
 pub enum SatisfiableItem {
     // Leaves
-    /// Signature for a raw public key
-    Signature(PkOrF),
-    /// Signature for an extended key fingerprint
-    SignatureKey(PkOrF),
+    /// ECDSA Signature for a raw public key
+    EcdsaSignature(PkOrF),
+    /// Schnorr Signature for a raw public key
+    SchnorrSignature(PkOrF),
     /// SHA256 preimage hash
     Sha256Preimage {
         /// The digest value
@@ -571,6 +587,7 @@ impl Policy {
         build_sat: BuildSatisfaction,
         threshold: usize,
         sorted: bool,
+        is_ecdsa: bool,
         secp: &SecpCtx,
     ) -> Result<Option<Policy>, PolicyError> {
         if threshold == 0 {
@@ -599,7 +616,9 @@ impl Policy {
             }
 
             if let Some(psbt) = build_sat.psbt() {
-                if signature_in_psbt(psbt, key, secp) {
+                if is_ecdsa && ecdsa_signature_in_psbt(psbt, key, secp)
+                    || !is_ecdsa && schnorr_signature_in_psbt(psbt, key, secp)
+                {
                     satisfaction.add(
                         &Satisfaction::Complete {
                             condition: Default::default(),
@@ -715,7 +734,14 @@ impl From<SatisfiableItem> for Policy {
 
 fn signer_id(key: &DescriptorPublicKey, secp: &SecpCtx) -> SignerId {
     match key {
-        DescriptorPublicKey::SinglePub(pubkey) => pubkey.key.to_pubkeyhash().into(),
+        DescriptorPublicKey::SinglePub(DescriptorSinglePub {
+            key: SinglePubKey::FullKey(pk),
+            ..
+        }) => pk.to_pubkeyhash().into(),
+        DescriptorPublicKey::SinglePub(DescriptorSinglePub {
+            key: SinglePubKey::XOnly(pk),
+            ..
+        }) => pk.to_pubkeyhash().into(),
         DescriptorPublicKey::XPub(xpub) => xpub.root_fingerprint(secp).into(),
     }
 }
@@ -726,7 +752,7 @@ fn signature(
     build_sat: BuildSatisfaction,
     secp: &SecpCtx,
 ) -> Policy {
-    let mut policy: Policy = SatisfiableItem::Signature(PkOrF::from_key(key, secp)).into();
+    let mut policy: Policy = SatisfiableItem::EcdsaSignature(PkOrF::from_key(key, secp)).into();
 
     policy.contribution = if signers.find(signer_id(key, secp)).is_some() {
         Satisfaction::Complete {
@@ -737,7 +763,7 @@ fn signature(
     };
 
     if let Some(psbt) = build_sat.psbt() {
-        policy.satisfaction = if signature_in_psbt(psbt, key, secp) {
+        policy.satisfaction = if ecdsa_signature_in_psbt(psbt, key, secp) {
             Satisfaction::Complete {
                 condition: Default::default(),
             }
@@ -749,10 +775,19 @@ fn signature(
     policy
 }
 
-fn signature_in_psbt(psbt: &Psbt, key: &DescriptorPublicKey, secp: &SecpCtx) -> bool {
+fn generic_sig_in_psbt<
+    C: Fn(&PsbtInput, &SinglePubKey) -> bool,
+    M: Fn(&secp256k1::PublicKey) -> SinglePubKey,
+>(
+    psbt: &Psbt,
+    key: &DescriptorPublicKey,
+    secp: &SecpCtx,
+    map: M,
+    check: C,
+) -> bool {
     //TODO check signature validity
     psbt.inputs.iter().all(|input| match key {
-        DescriptorPublicKey::SinglePub(key) => input.partial_sigs.contains_key(&key.key),
+        DescriptorPublicKey::SinglePub(DescriptorSinglePub { key, .. }) => check(input, key),
         DescriptorPublicKey::XPub(xpub) => {
             let pubkey = input
                 .bip32_derivation
@@ -761,14 +796,49 @@ fn signature_in_psbt(psbt: &Psbt, key: &DescriptorPublicKey, secp: &SecpCtx) -> 
                 .map(|(p, _)| p);
             //TODO check actual derivation matches
             match pubkey {
-                Some(pubkey) => input.partial_sigs.contains_key(pubkey),
+                Some(pubkey) => check(input, &map(pubkey)),
                 None => false,
             }
         }
     })
 }
 
-impl<Ctx: ScriptContext> ExtractPolicy for Miniscript<DescriptorPublicKey, Ctx> {
+fn ecdsa_signature_in_psbt(psbt: &Psbt, key: &DescriptorPublicKey, secp: &SecpCtx) -> bool {
+    generic_sig_in_psbt(
+        psbt,
+        key,
+        secp,
+        |pk| SinglePubKey::FullKey(PublicKey::new(*pk)),
+        |input, pk| match pk {
+            SinglePubKey::FullKey(pk) => input.partial_sigs.contains_key(pk),
+            _ => false,
+        },
+    )
+}
+
+fn schnorr_signature_in_psbt(psbt: &Psbt, key: &DescriptorPublicKey, secp: &SecpCtx) -> bool {
+    generic_sig_in_psbt(
+        psbt,
+        key,
+        secp,
+        |pk| SinglePubKey::XOnly((*pk).into()),
+        |input, pk| {
+            let pk = match pk {
+                SinglePubKey::XOnly(pk) => pk,
+                _ => return false,
+            };
+
+            // This assumes the internal key is never used in the script leaves, which I think is
+            // reasonable
+            match &input.tap_internal_key {
+                Some(ik) if ik == pk => input.tap_key_sig.is_some(),
+                _ => input.tap_script_sigs.keys().any(|(sk, _)| sk == pk),
+            }
+        },
+    )
+}
+
+impl<Ctx: ScriptContext + 'static> ExtractPolicy for Miniscript<DescriptorPublicKey, Ctx> {
     fn extract_policy(
         &self,
         signers: &SignersContainer,
@@ -840,9 +910,15 @@ impl<Ctx: ScriptContext> ExtractPolicy for Miniscript<DescriptorPublicKey, Ctx> 
             Terminal::Hash160(hash) => {
                 Some(SatisfiableItem::Hash160Preimage { hash: *hash }.into())
             }
-            Terminal::Multi(k, pks) => {
-                Policy::make_multisig(pks, signers, build_sat, *k, false, secp)?
-            }
+            Terminal::Multi(k, pks) | Terminal::MultiA(k, pks) => Policy::make_multisig(
+                pks,
+                signers,
+                build_sat,
+                *k,
+                false,
+                !Ctx::as_enum().is_taproot(),
+                secp,
+            )?,
             // Identities
             Terminal::Alt(inner)
             | Terminal::Swap(inner)
@@ -944,6 +1020,7 @@ impl ExtractPolicy for Descriptor<DescriptorPublicKey> {
                 build_sat,
                 keys.k,
                 true,
+                true,
                 secp,
             )?)
         }
@@ -967,6 +1044,19 @@ impl ExtractPolicy for Descriptor<DescriptorPublicKey> {
                 WshInner::SortedMulti(ref keys) => make_sortedmulti(keys, signers, build_sat, secp),
             },
             Descriptor::Bare(ms) => Ok(ms.as_inner().extract_policy(signers, build_sat, secp)?),
+            Descriptor::Tr(tr) => {
+                let mut items = vec![signature(tr.internal_key(), signers, build_sat, secp)];
+                items.append(
+                    &mut tr
+                        .iter_scripts()
+                        .filter_map(|(_, ms)| {
+                            ms.extract_policy(signers, build_sat, secp).transpose()
+                        })
+                        .collect::<Result<Vec<_>, _>>()?,
+                );
+
+                Ok(Policy::make_thresh(items, 1)?)
+            }
         }
     }
 }
@@ -978,7 +1068,7 @@ mod test {
 
     use super::*;
     use crate::descriptor::derived::AsDerived;
-    use crate::descriptor::policy::SatisfiableItem::{Multisig, Signature, Thresh};
+    use crate::descriptor::policy::SatisfiableItem::{EcdsaSignature, Multisig, Thresh};
     use crate::keys::{DescriptorKey, IntoDescriptorKey};
     use crate::wallet::signer::SignersContainer;
     use bitcoin::secp256k1::Secp256k1;
@@ -1000,7 +1090,7 @@ mod test {
     ) -> (DescriptorKey<Ctx>, DescriptorKey<Ctx>, Fingerprint) {
         let path = bip32::DerivationPath::from_str(path).unwrap();
         let tprv = bip32::ExtendedPrivKey::from_str(tprv).unwrap();
-        let tpub = bip32::ExtendedPubKey::from_private(secp, &tprv);
+        let tpub = bip32::ExtendedPubKey::from_priv(secp, &tprv);
         let fingerprint = tprv.fingerprint(secp);
         let prvkey = (tprv, path.clone()).into_descriptor_key().unwrap();
         let pubkey = (tpub, path).into_descriptor_key().unwrap();
@@ -1026,7 +1116,7 @@ mod test {
             .unwrap();
 
         assert!(
-            matches!(&policy.item, Signature(pk_or_f) if pk_or_f.fingerprint.unwrap() == fingerprint)
+            matches!(&policy.item, EcdsaSignature(pk_or_f) if pk_or_f.fingerprint.unwrap() == fingerprint)
         );
         assert!(matches!(&policy.contribution, Satisfaction::None));
 
@@ -1041,7 +1131,7 @@ mod test {
             .unwrap();
 
         assert!(
-            matches!(&policy.item, Signature(pk_or_f) if pk_or_f.fingerprint.unwrap() == fingerprint)
+            matches!(&policy.item, EcdsaSignature(pk_or_f) if pk_or_f.fingerprint.unwrap() == fingerprint)
         );
         assert!(
             matches!(&policy.contribution, Satisfaction::Complete {condition} if condition.csv == None && condition.timelock == None)
@@ -1194,7 +1284,7 @@ mod test {
             .unwrap();
 
         assert!(
-            matches!(&policy.item, Signature(pk_or_f) if pk_or_f.fingerprint.unwrap() == fingerprint)
+            matches!(&policy.item, EcdsaSignature(pk_or_f) if pk_or_f.fingerprint.unwrap() == fingerprint)
         );
         assert!(matches!(&policy.contribution, Satisfaction::None));
 
@@ -1210,7 +1300,7 @@ mod test {
             .unwrap();
 
         assert!(
-            matches!(&policy.item, Signature(pk_or_f) if pk_or_f.fingerprint.unwrap() == fingerprint)
+            matches!(&policy.item, EcdsaSignature(pk_or_f) if pk_or_f.fingerprint.unwrap() == fingerprint)
         );
         assert!(
             matches!(&policy.contribution, Satisfaction::Complete {condition} if condition.csv == None && condition.timelock == None)

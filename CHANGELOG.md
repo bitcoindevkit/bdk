@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - added `OldestFirstCoinSelection` impl to `CoinSelectionAlgorithm`
 - New MSRV set to `1.56`
 - Add traits to reuse `Blockchain`s across multiple wallets (`BlockchainFactory` and `StatelessBlockchain`).
+- Upgrade to rust-bitcoin `0.28` 
 
 
 ## [v0.18.0] - [v0.17.0]

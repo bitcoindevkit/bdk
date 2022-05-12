@@ -19,7 +19,7 @@ pub trait PsbtUtils {
 impl PsbtUtils for Psbt {
     #[allow(clippy::all)] // We want to allow `manual_map` but it is too new.
     fn get_utxo_for(&self, input_index: usize) -> Option<TxOut> {
-        let tx = &self.global.unsigned_tx;
+        let tx = &self.unsigned_tx;
 
         if input_index >= tx.input.len() {
             return None;
@@ -93,7 +93,7 @@ mod test {
         let mut builder = wallet.build_tx();
         builder.add_recipient(send_to.script_pubkey(), 10_000);
         let (mut psbt, _) = builder.finish().unwrap();
-        psbt.global.unsigned_tx.input.push(TxIn::default());
+        psbt.unsigned_tx.input.push(TxIn::default());
         let options = SignOptions {
             trust_witness_utxo: true,
             ..Default::default()
@@ -112,10 +112,9 @@ mod test {
 
         // add a finalized input
         psbt.inputs.push(psbt_bip.inputs[0].clone());
-        psbt.global
-            .unsigned_tx
+        psbt.unsigned_tx
             .input
-            .push(psbt_bip.global.unsigned_tx.input[0].clone());
+            .push(psbt_bip.unsigned_tx.input[0].clone());
 
         let _ = wallet.sign(&mut psbt, SignOptions::default()).unwrap();
     }

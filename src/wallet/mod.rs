@@ -24,11 +24,10 @@ use std::sync::Arc;
 use bitcoin::secp256k1::Secp256k1;
 
 use bitcoin::consensus::encode::serialize;
-use bitcoin::util::base58;
-use bitcoin::util::psbt::raw::Key as PsbtKey;
-use bitcoin::util::psbt::Input;
-use bitcoin::util::psbt::PartiallySignedTransaction as Psbt;
-use bitcoin::{Address, Network, OutPoint, Script, SigHashType, Transaction, TxOut, Txid};
+use bitcoin::util::psbt;
+use bitcoin::{
+    Address, EcdsaSighashType, Network, OutPoint, Script, Transaction, TxOut, Txid, Witness,
+};
 
 use miniscript::descriptor::DescriptorTrait;
 use miniscript::psbt::PsbtInputSatisfier;
@@ -542,7 +541,7 @@ where
         &self,
         coin_selection: Cs,
         params: TxParams,
-    ) -> Result<(Psbt, TransactionDetails), Error> {
+    ) -> Result<(psbt::PartiallySignedTransaction, TransactionDetails), Error> {
         let external_policy = self
             .descriptor
             .extract_policy(&self.signers, BuildSatisfaction::None, &self.secp)?
@@ -703,7 +702,7 @@ where
         let mut outgoing: u64 = 0;
         let mut received: u64 = 0;
 
-        fee_amount += fee_rate.fee_wu(tx.get_weight());
+        fee_amount += fee_rate.fee_wu(tx.weight());
 
         let recipients = params.recipients.iter().map(|(r, v)| (r, *v));
 
@@ -761,7 +760,7 @@ where
                 previous_output: u.outpoint(),
                 script_sig: Script::default(),
                 sequence: n_sequence,
-                witness: vec![],
+                witness: Witness::new(),
             })
             .collect();
 
@@ -884,10 +883,7 @@ where
             return Err(Error::IrreplaceableTransaction);
         }
 
-        let feerate = FeeRate::from_wu(
-            details.fee.ok_or(Error::FeeRateUnavailable)?,
-            tx.get_weight(),
-        );
+        let feerate = FeeRate::from_wu(details.fee.ok_or(Error::FeeRateUnavailable)?, tx.weight());
 
         // remove the inputs from the tx and process them
         let original_txin = tx.input.drain(..).collect::<Vec<_>>();
@@ -1004,7 +1000,11 @@ where
     /// let  finalized = wallet.sign(&mut psbt, SignOptions::default())?;
     /// assert!(finalized, "we should have signed all the inputs");
     /// # Ok::<(), bdk::Error>(())
-    pub fn sign(&self, psbt: &mut Psbt, sign_options: SignOptions) -> Result<bool, Error> {
+    pub fn sign(
+        &self,
+        psbt: &mut psbt::PartiallySignedTransaction,
+        sign_options: SignOptions,
+    ) -> Result<bool, Error> {
         // this helps us doing our job later
         self.add_input_hd_keypaths(psbt)?;
 
@@ -1023,10 +1023,9 @@ where
         // If the user hasn't explicitly opted-in, refuse to sign the transaction unless every input
         // is using `SIGHASH_ALL`
         if !sign_options.allow_all_sighashes
-            && !psbt
-                .inputs
-                .iter()
-                .all(|i| i.sighash_type.is_none() || i.sighash_type == Some(SigHashType::All))
+            && !psbt.inputs.iter().all(|i| {
+                i.sighash_type.is_none() || i.sighash_type == Some(EcdsaSighashType::All.into())
+            })
         {
             return Err(Error::Signer(signer::SignerError::NonStandardSighash));
         }
@@ -1085,8 +1084,12 @@ where
     /// Try to finalize a PSBT
     ///
     /// The [`SignOptions`] can be used to tweak the behavior of the finalizer.
-    pub fn finalize_psbt(&self, psbt: &mut Psbt, sign_options: SignOptions) -> Result<bool, Error> {
-        let tx = &psbt.global.unsigned_tx;
+    pub fn finalize_psbt(
+        &self,
+        psbt: &mut psbt::PartiallySignedTransaction,
+        sign_options: SignOptions,
+    ) -> Result<bool, Error> {
+        let tx = &psbt.unsigned_tx;
         let mut finished = true;
 
         for (n, input) in tx.input.iter().enumerate() {
@@ -1383,10 +1386,8 @@ where
         tx: Transaction,
         selected: Vec<Utxo>,
         params: TxParams,
-    ) -> Result<Psbt, Error> {
-        use bitcoin::util::psbt::serialize::Serialize;
-
-        let mut psbt = Psbt::from_unsigned_tx(tx)?;
+    ) -> Result<psbt::PartiallySignedTransaction, Error> {
+        let mut psbt = psbt::PartiallySignedTransaction::from_unsigned_tx(tx)?;
 
         if params.add_global_xpubs {
             let mut all_xpubs = self.descriptor.get_extended_keys()?;
@@ -1395,13 +1396,6 @@ where
             }
 
             for xpub in all_xpubs {
-                let serialized_xpub = base58::from_check(&xpub.xkey.to_string())
-                    .expect("Internal serialization error");
-                let key = PsbtKey {
-                    type_value: 0x01,
-                    key: serialized_xpub,
-                };
-
                 let origin = match xpub.origin {
                     Some(origin) => origin,
                     None if xpub.xkey.depth == 0 => {
@@ -1410,7 +1404,7 @@ where
                     _ => return Err(Error::MissingKeyOrigin(xpub.xkey.to_string())),
                 };
 
-                psbt.global.unknown.insert(key, origin.serialize());
+                psbt.xpub.insert(xpub.xkey, origin);
             }
         }
 
@@ -1420,11 +1414,7 @@ where
             .collect::<HashMap<_, _>>();
 
         // add metadata for the inputs
-        for (psbt_input, input) in psbt
-            .inputs
-            .iter_mut()
-            .zip(psbt.global.unsigned_tx.input.iter())
-        {
+        for (psbt_input, input) in psbt.inputs.iter_mut().zip(psbt.unsigned_tx.input.iter()) {
             let utxo = match lookup_output.remove(&input.previous_output) {
                 Some(utxo) => utxo,
                 None => continue,
@@ -1436,9 +1426,9 @@ where
                         match self.get_psbt_input(utxo, params.sighash, params.only_witness_utxo) {
                             Ok(psbt_input) => psbt_input,
                             Err(e) => match e {
-                                Error::UnknownUtxo => Input {
+                                Error::UnknownUtxo => psbt::Input {
                                     sighash_type: params.sighash,
-                                    ..Input::default()
+                                    ..psbt::Input::default()
                                 },
                                 _ => return Err(e),
                             },
@@ -1463,10 +1453,7 @@ where
         self.add_input_hd_keypaths(&mut psbt)?;
 
         // add metadata for the outputs
-        for (psbt_output, tx_output) in psbt
-            .outputs
-            .iter_mut()
-            .zip(psbt.global.unsigned_tx.output.iter())
+        for (psbt_output, tx_output) in psbt.outputs.iter_mut().zip(psbt.unsigned_tx.output.iter())
         {
             if let Some((keychain, child)) = self
                 .database
@@ -1491,9 +1478,9 @@ where
     pub fn get_psbt_input(
         &self,
         utxo: LocalUtxo,
-        sighash_type: Option<SigHashType>,
+        sighash_type: Option<psbt::PsbtSighashType>,
         only_witness_utxo: bool,
-    ) -> Result<Input, Error> {
+    ) -> Result<psbt::Input, Error> {
         // Try to find the prev_script in our db to figure out if this is internal or external,
         // and the derivation index
         let (keychain, child) = self
@@ -1502,9 +1489,9 @@ where
             .get_path_from_script_pubkey(&utxo.txout.script_pubkey)?
             .ok_or(Error::UnknownUtxo)?;
 
-        let mut psbt_input = Input {
+        let mut psbt_input = psbt::Input {
             sighash_type,
-            ..Input::default()
+            ..psbt::Input::default()
         };
 
         let desc = self.get_descriptor_for_keychain(keychain);
@@ -1526,7 +1513,10 @@ where
         Ok(psbt_input)
     }
 
-    fn add_input_hd_keypaths(&self, psbt: &mut Psbt) -> Result<(), Error> {
+    fn add_input_hd_keypaths(
+        &self,
+        psbt: &mut psbt::PartiallySignedTransaction,
+    ) -> Result<(), Error> {
         let mut input_utxos = Vec::with_capacity(psbt.inputs.len());
         for n in 0..psbt.inputs.len() {
             input_utxos.push(psbt.get_utxo_for(n).clone());
@@ -1808,7 +1798,7 @@ pub(crate) mod test {
             $(
                 $( $add_signature )*
                 for txin in &mut tx.input {
-                    txin.witness.push([0x00; 108].to_vec()); // fake signature
+                    txin.witness.push([0x00; 108]); // fake signature
                 }
             )*
 
@@ -1820,7 +1810,7 @@ pub(crate) mod test {
                 dust_change = true;
             )*
 
-            let tx_fee_rate = FeeRate::from_wu($fees, tx.get_weight());
+            let tx_fee_rate = FeeRate::from_wu($fees, tx.weight());
             let fee_rate = $fee_rate;
 
             if !dust_change {
@@ -1886,7 +1876,7 @@ pub(crate) mod test {
             .version(42);
         let (psbt, _) = builder.finish().unwrap();
 
-        assert_eq!(psbt.global.unsigned_tx.version, 42);
+        assert_eq!(psbt.unsigned_tx.version, 42);
     }
 
     #[test]
@@ -1897,7 +1887,7 @@ pub(crate) mod test {
         builder.add_recipient(addr.script_pubkey(), 25_000);
         let (psbt, _) = builder.finish().unwrap();
 
-        assert_eq!(psbt.global.unsigned_tx.lock_time, 0);
+        assert_eq!(psbt.unsigned_tx.lock_time, 0);
     }
 
     #[test]
@@ -1908,7 +1898,7 @@ pub(crate) mod test {
         builder.add_recipient(addr.script_pubkey(), 25_000);
         let (psbt, _) = builder.finish().unwrap();
 
-        assert_eq!(psbt.global.unsigned_tx.lock_time, 100_000);
+        assert_eq!(psbt.unsigned_tx.lock_time, 100_000);
     }
 
     #[test]
@@ -1921,7 +1911,7 @@ pub(crate) mod test {
             .nlocktime(630_000);
         let (psbt, _) = builder.finish().unwrap();
 
-        assert_eq!(psbt.global.unsigned_tx.lock_time, 630_000);
+        assert_eq!(psbt.unsigned_tx.lock_time, 630_000);
     }
 
     #[test]
@@ -1934,7 +1924,7 @@ pub(crate) mod test {
             .nlocktime(630_000);
         let (psbt, _) = builder.finish().unwrap();
 
-        assert_eq!(psbt.global.unsigned_tx.lock_time, 630_000);
+        assert_eq!(psbt.unsigned_tx.lock_time, 630_000);
     }
 
     #[test]
@@ -1959,7 +1949,7 @@ pub(crate) mod test {
         builder.add_recipient(addr.script_pubkey(), 25_000);
         let (psbt, _) = builder.finish().unwrap();
 
-        assert_eq!(psbt.global.unsigned_tx.input[0].sequence, 6);
+        assert_eq!(psbt.unsigned_tx.input[0].sequence, 6);
     }
 
     #[test]
@@ -1973,7 +1963,7 @@ pub(crate) mod test {
         let (psbt, _) = builder.finish().unwrap();
         // When CSV is enabled it takes precedence over the rbf value (unless forced by the user).
         // It will be set to the OP_CSV value, in this case 6
-        assert_eq!(psbt.global.unsigned_tx.input[0].sequence, 6);
+        assert_eq!(psbt.unsigned_tx.input[0].sequence, 6);
     }
 
     #[test]
@@ -1998,7 +1988,7 @@ pub(crate) mod test {
         builder.add_recipient(addr.script_pubkey(), 25_000);
         let (psbt, _) = builder.finish().unwrap();
 
-        assert_eq!(psbt.global.unsigned_tx.input[0].sequence, 0xFFFFFFFE);
+        assert_eq!(psbt.unsigned_tx.input[0].sequence, 0xFFFFFFFE);
     }
 
     #[test]
@@ -2023,7 +2013,7 @@ pub(crate) mod test {
             .enable_rbf_with_sequence(0xDEADBEEF);
         let (psbt, _) = builder.finish().unwrap();
 
-        assert_eq!(psbt.global.unsigned_tx.input[0].sequence, 0xDEADBEEF);
+        assert_eq!(psbt.unsigned_tx.input[0].sequence, 0xDEADBEEF);
     }
 
     #[test]
@@ -2034,7 +2024,7 @@ pub(crate) mod test {
         builder.add_recipient(addr.script_pubkey(), 25_000);
         let (psbt, _) = builder.finish().unwrap();
 
-        assert_eq!(psbt.global.unsigned_tx.input[0].sequence, 0xFFFFFFFF);
+        assert_eq!(psbt.unsigned_tx.input[0].sequence, 0xFFFFFFFF);
     }
 
     #[test]
@@ -2059,9 +2049,9 @@ pub(crate) mod test {
         builder.drain_to(addr.script_pubkey()).drain_wallet();
         let (psbt, details) = builder.finish().unwrap();
 
-        assert_eq!(psbt.global.unsigned_tx.output.len(), 1);
+        assert_eq!(psbt.unsigned_tx.output.len(), 1);
         assert_eq!(
-            psbt.global.unsigned_tx.output[0].value,
+            psbt.unsigned_tx.output[0].value,
             50_000 - details.fee.unwrap_or(0)
         );
     }
@@ -2078,7 +2068,7 @@ pub(crate) mod test {
             .drain_wallet();
         let (psbt, details) = builder.finish().unwrap();
         dbg!(&psbt);
-        let outputs = psbt.global.unsigned_tx.output;
+        let outputs = psbt.unsigned_tx.output;
 
         assert_eq!(outputs.len(), 2);
         let main_output = outputs
@@ -2129,9 +2119,9 @@ pub(crate) mod test {
         let (psbt, details) = builder.finish().unwrap();
 
         assert_eq!(details.fee.unwrap_or(0), 100);
-        assert_eq!(psbt.global.unsigned_tx.output.len(), 1);
+        assert_eq!(psbt.unsigned_tx.output.len(), 1);
         assert_eq!(
-            psbt.global.unsigned_tx.output[0].value,
+            psbt.unsigned_tx.output[0].value,
             50_000 - details.fee.unwrap_or(0)
         );
     }
@@ -2148,9 +2138,9 @@ pub(crate) mod test {
         let (psbt, details) = builder.finish().unwrap();
 
         assert_eq!(details.fee.unwrap_or(0), 0);
-        assert_eq!(psbt.global.unsigned_tx.output.len(), 1);
+        assert_eq!(psbt.unsigned_tx.output.len(), 1);
         assert_eq!(
-            psbt.global.unsigned_tx.output[0].value,
+            psbt.unsigned_tx.output[0].value,
             50_000 - details.fee.unwrap_or(0)
         );
     }
@@ -2180,10 +2170,10 @@ pub(crate) mod test {
             .ordering(TxOrdering::Untouched);
         let (psbt, details) = builder.finish().unwrap();
 
-        assert_eq!(psbt.global.unsigned_tx.output.len(), 2);
-        assert_eq!(psbt.global.unsigned_tx.output[0].value, 25_000);
+        assert_eq!(psbt.unsigned_tx.output.len(), 2);
+        assert_eq!(psbt.unsigned_tx.output[0].value, 25_000);
         assert_eq!(
-            psbt.global.unsigned_tx.output[1].value,
+            psbt.unsigned_tx.output[1].value,
             25_000 - details.fee.unwrap_or(0)
         );
     }
@@ -2196,8 +2186,8 @@ pub(crate) mod test {
         builder.add_recipient(addr.script_pubkey(), 49_800);
         let (psbt, details) = builder.finish().unwrap();
 
-        assert_eq!(psbt.global.unsigned_tx.output.len(), 1);
-        assert_eq!(psbt.global.unsigned_tx.output[0].value, 49_800);
+        assert_eq!(psbt.unsigned_tx.output.len(), 1);
+        assert_eq!(psbt.unsigned_tx.output[0].value, 49_800);
         assert_eq!(details.fee.unwrap_or(0), 200);
     }
 
@@ -2226,13 +2216,13 @@ pub(crate) mod test {
             .ordering(super::tx_builder::TxOrdering::Bip69Lexicographic);
         let (psbt, details) = builder.finish().unwrap();
 
-        assert_eq!(psbt.global.unsigned_tx.output.len(), 3);
+        assert_eq!(psbt.unsigned_tx.output.len(), 3);
         assert_eq!(
-            psbt.global.unsigned_tx.output[0].value,
+            psbt.unsigned_tx.output[0].value,
             10_000 - details.fee.unwrap_or(0)
         );
-        assert_eq!(psbt.global.unsigned_tx.output[1].value, 10_000);
-        assert_eq!(psbt.global.unsigned_tx.output[2].value, 30_000);
+        assert_eq!(psbt.unsigned_tx.output[1].value, 10_000);
+        assert_eq!(psbt.unsigned_tx.output[2].value, 30_000);
     }
 
     #[test]
@@ -2253,12 +2243,12 @@ pub(crate) mod test {
         let mut builder = wallet.build_tx();
         builder
             .add_recipient(addr.script_pubkey(), 30_000)
-            .sighash(bitcoin::SigHashType::Single);
+            .sighash(bitcoin::EcdsaSighashType::Single.into());
         let (psbt, _) = builder.finish().unwrap();
 
         assert_eq!(
             psbt.inputs[0].sighash_type,
-            Some(bitcoin::SigHashType::Single)
+            Some(bitcoin::EcdsaSighashType::Single.into())
         );
     }
 
@@ -2450,7 +2440,7 @@ pub(crate) mod test {
         let (psbt, details) = builder.finish().unwrap();
 
         assert_eq!(
-            psbt.global.unsigned_tx.input.len(),
+            psbt.unsigned_tx.input.len(),
             2,
             "should add an additional input since 25_000 < 30_000"
         );
@@ -2507,7 +2497,7 @@ pub(crate) mod test {
             .policy_path(path, KeychainKind::External);
         let (psbt, _) = builder.finish().unwrap();
 
-        assert_eq!(psbt.global.unsigned_tx.input[0].sequence, 0xFFFFFFFF);
+        assert_eq!(psbt.unsigned_tx.input[0].sequence, 0xFFFFFFFF);
     }
 
     #[test]
@@ -2526,14 +2516,13 @@ pub(crate) mod test {
             .policy_path(path, KeychainKind::External);
         let (psbt, _) = builder.finish().unwrap();
 
-        assert_eq!(psbt.global.unsigned_tx.input[0].sequence, 144);
+        assert_eq!(psbt.unsigned_tx.input[0].sequence, 144);
     }
 
     #[test]
     fn test_create_tx_global_xpubs_with_origin() {
         use bitcoin::hashes::hex::FromHex;
-        use bitcoin::util::base58;
-        use bitcoin::util::psbt::raw::Key;
+        use bitcoin::util::bip32;
 
         let (wallet, _, _) = get_funded_wallet("wpkh([73756c7f/48'/0'/0'/2']tpubDCKxNyM3bLgbEX13Mcd8mYxbVg9ajDkWXMh29hMWBurKfVmBfWAM96QVP3zaUcN51HvkZ3ar4VwP82kC8JZhhux8vFQoJintSpVBwpFvyU3/0/*)");
         let addr = wallet.get_address(New).unwrap();
@@ -2543,16 +2532,12 @@ pub(crate) mod test {
             .add_global_xpubs();
         let (psbt, _) = builder.finish().unwrap();
 
-        let type_value = 0x01;
-        let key = base58::from_check("tpubDCKxNyM3bLgbEX13Mcd8mYxbVg9ajDkWXMh29hMWBurKfVmBfWAM96QVP3zaUcN51HvkZ3ar4VwP82kC8JZhhux8vFQoJintSpVBwpFvyU3").unwrap();
+        let key = bip32::ExtendedPubKey::from_str("tpubDCKxNyM3bLgbEX13Mcd8mYxbVg9ajDkWXMh29hMWBurKfVmBfWAM96QVP3zaUcN51HvkZ3ar4VwP82kC8JZhhux8vFQoJintSpVBwpFvyU3").unwrap();
+        let fingerprint = bip32::Fingerprint::from_hex("73756c7f").unwrap();
+        let path = bip32::DerivationPath::from_str("m/48'/0'/0'/2'").unwrap();
 
-        let psbt_key = Key { type_value, key };
-
-        // This key has an explicit origin, so it will be encoded here
-        let value_bytes = Vec::<u8>::from_hex("73756c7f30000080000000800000008002000080").unwrap();
-
-        assert_eq!(psbt.global.unknown.len(), 1);
-        assert_eq!(psbt.global.unknown.get(&psbt_key), Some(&value_bytes));
+        assert_eq!(psbt.xpub.len(), 1);
+        assert_eq!(psbt.xpub.get(&key), Some(&(fingerprint, path)));
     }
 
     #[test]
@@ -2588,8 +2573,7 @@ pub(crate) mod test {
         );
 
         assert!(
-            psbt.global
-                .unsigned_tx
+            psbt.unsigned_tx
                 .input
                 .iter()
                 .any(|input| input.previous_output == utxo.outpoint),
@@ -2794,8 +2778,7 @@ pub(crate) mod test {
     #[test]
     fn test_create_tx_global_xpubs_master_without_origin() {
         use bitcoin::hashes::hex::FromHex;
-        use bitcoin::util::base58;
-        use bitcoin::util::psbt::raw::Key;
+        use bitcoin::util::bip32;
 
         let (wallet, _, _) = get_funded_wallet("wpkh(tpubD6NzVbkrYhZ4Y55A58Gv9RSNF5hy84b5AJqYy7sCcjFrkcLpPre8kmgfit6kY1Zs3BLgeypTDBZJM222guPpdz7Cup5yzaMu62u7mYGbwFL/0/*)");
         let addr = wallet.get_address(New).unwrap();
@@ -2805,17 +2788,14 @@ pub(crate) mod test {
             .add_global_xpubs();
         let (psbt, _) = builder.finish().unwrap();
 
-        let type_value = 0x01;
-        let key = base58::from_check("tpubD6NzVbkrYhZ4Y55A58Gv9RSNF5hy84b5AJqYy7sCcjFrkcLpPre8kmgfit6kY1Zs3BLgeypTDBZJM222guPpdz7Cup5yzaMu62u7mYGbwFL").unwrap();
+        let key = bip32::ExtendedPubKey::from_str("tpubD6NzVbkrYhZ4Y55A58Gv9RSNF5hy84b5AJqYy7sCcjFrkcLpPre8kmgfit6kY1Zs3BLgeypTDBZJM222guPpdz7Cup5yzaMu62u7mYGbwFL").unwrap();
+        let fingerprint = bip32::Fingerprint::from_hex("997a323b").unwrap();
 
-        let psbt_key = Key { type_value, key };
-
-        // This key doesn't have an explicit origin, but it's a master key (depth = 0). So we encode
-        // its fingerprint directly and an empty path
-        let value_bytes = Vec::<u8>::from_hex("997a323b").unwrap();
-
-        assert_eq!(psbt.global.unknown.len(), 1);
-        assert_eq!(psbt.global.unknown.get(&psbt_key), Some(&value_bytes));
+        assert_eq!(psbt.xpub.len(), 1);
+        assert_eq!(
+            psbt.xpub.get(&key),
+            Some(&(fingerprint, bip32::DerivationPath::default()))
+        );
     }
 
     #[test]
@@ -2937,7 +2917,7 @@ pub(crate) mod test {
         let txid = tx.txid();
         // skip saving the new utxos, we know they can't be used anyways
         for txin in &mut tx.input {
-            txin.witness.push([0x00; 108].to_vec()); // fake signature
+            txin.witness.push([0x00; 108]); // fake signature
             wallet
                 .database
                 .borrow_mut()
@@ -2962,7 +2942,7 @@ pub(crate) mod test {
         );
         assert!(details.fee.unwrap_or(0) > original_details.fee.unwrap_or(0));
 
-        let tx = &psbt.global.unsigned_tx;
+        let tx = &psbt.unsigned_tx;
         assert_eq!(tx.output.len(), 2);
         assert_eq!(
             tx.output
@@ -2997,7 +2977,7 @@ pub(crate) mod test {
         let txid = tx.txid();
         // skip saving the new utxos, we know they can't be used anyways
         for txin in &mut tx.input {
-            txin.witness.push([0x00; 108].to_vec()); // fake signature
+            txin.witness.push([0x00; 108]); // fake signature
             wallet
                 .database
                 .borrow_mut()
@@ -3028,7 +3008,7 @@ pub(crate) mod test {
             original_details.fee.unwrap_or(0)
         );
 
-        let tx = &psbt.global.unsigned_tx;
+        let tx = &psbt.unsigned_tx;
         assert_eq!(tx.output.len(), 2);
         assert_eq!(
             tx.output
@@ -3063,7 +3043,7 @@ pub(crate) mod test {
         let mut tx = psbt.extract_tx();
         let txid = tx.txid();
         for txin in &mut tx.input {
-            txin.witness.push([0x00; 108].to_vec()); // fake signature
+            txin.witness.push([0x00; 108]); // fake signature
             wallet
                 .database
                 .borrow_mut()
@@ -3087,7 +3067,7 @@ pub(crate) mod test {
         assert_eq!(details.sent, original_details.sent);
         assert!(details.fee.unwrap_or(0) > original_details.fee.unwrap_or(0));
 
-        let tx = &psbt.global.unsigned_tx;
+        let tx = &psbt.unsigned_tx;
         assert_eq!(tx.output.len(), 1);
         assert_eq!(tx.output[0].value + details.fee.unwrap_or(0), details.sent);
 
@@ -3107,7 +3087,7 @@ pub(crate) mod test {
         let mut tx = psbt.extract_tx();
         let txid = tx.txid();
         for txin in &mut tx.input {
-            txin.witness.push([0x00; 108].to_vec()); // fake signature
+            txin.witness.push([0x00; 108]); // fake signature
             wallet
                 .database
                 .borrow_mut()
@@ -3131,7 +3111,7 @@ pub(crate) mod test {
         assert_eq!(details.sent, original_details.sent);
         assert!(details.fee.unwrap_or(0) > original_details.fee.unwrap_or(0));
 
-        let tx = &psbt.global.unsigned_tx;
+        let tx = &psbt.unsigned_tx;
         assert_eq!(tx.output.len(), 1);
         assert_eq!(tx.output[0].value + details.fee.unwrap_or(0), details.sent);
 
@@ -3163,7 +3143,7 @@ pub(crate) mod test {
         let mut tx = psbt.extract_tx();
         let txid = tx.txid();
         for txin in &mut tx.input {
-            txin.witness.push([0x00; 108].to_vec()); // fake signature
+            txin.witness.push([0x00; 108]); // fake signature
             wallet
                 .database
                 .borrow_mut()
@@ -3220,7 +3200,7 @@ pub(crate) mod test {
         let mut tx = psbt.extract_tx();
         let txid = tx.txid();
         for txin in &mut tx.input {
-            txin.witness.push([0x00; 108].to_vec()); // fake signature
+            txin.witness.push([0x00; 108]); // fake signature
             wallet
                 .database
                 .borrow_mut()
@@ -3261,7 +3241,7 @@ pub(crate) mod test {
         let txid = tx.txid();
         // skip saving the new utxos, we know they can't be used anyways
         for txin in &mut tx.input {
-            txin.witness.push([0x00; 108].to_vec()); // fake signature
+            txin.witness.push([0x00; 108]); // fake signature
             wallet
                 .database
                 .borrow_mut()
@@ -3282,7 +3262,7 @@ pub(crate) mod test {
         assert_eq!(details.sent, original_details.sent + 25_000);
         assert_eq!(details.fee.unwrap_or(0) + details.received, 30_000);
 
-        let tx = &psbt.global.unsigned_tx;
+        let tx = &psbt.unsigned_tx;
         assert_eq!(tx.input.len(), 2);
         assert_eq!(tx.output.len(), 2);
         assert_eq!(
@@ -3324,7 +3304,7 @@ pub(crate) mod test {
         let txid = tx.txid();
         // skip saving the new utxos, we know they can't be used anyways
         for txin in &mut tx.input {
-            txin.witness.push([0x00; 108].to_vec()); // fake signature
+            txin.witness.push([0x00; 108]); // fake signature
             wallet
                 .database
                 .borrow_mut()
@@ -3345,7 +3325,7 @@ pub(crate) mod test {
         assert_eq!(details.sent, original_details.sent + 25_000);
         assert_eq!(details.fee.unwrap_or(0) + details.received, 30_000);
 
-        let tx = &psbt.global.unsigned_tx;
+        let tx = &psbt.unsigned_tx;
         assert_eq!(tx.input.len(), 2);
         assert_eq!(tx.output.len(), 2);
         assert_eq!(
@@ -3395,7 +3375,7 @@ pub(crate) mod test {
         let txid = tx.txid();
         // skip saving the new utxos, we know they can't be used anyways
         for txin in &mut tx.input {
-            txin.witness.push([0x00; 108].to_vec()); // fake signature
+            txin.witness.push([0x00; 108]); // fake signature
             wallet
                 .database
                 .borrow_mut()
@@ -3422,7 +3402,7 @@ pub(crate) mod test {
             75_000 - original_send_all_amount - details.fee.unwrap_or(0)
         );
 
-        let tx = &psbt.global.unsigned_tx;
+        let tx = &psbt.unsigned_tx;
         assert_eq!(tx.input.len(), 2);
         assert_eq!(tx.output.len(), 2);
         assert_eq!(
@@ -3466,7 +3446,7 @@ pub(crate) mod test {
         let txid = tx.txid();
         // skip saving the new utxos, we know they can't be used anyways
         for txin in &mut tx.input {
-            txin.witness.push([0x00; 108].to_vec()); // fake signature
+            txin.witness.push([0x00; 108]); // fake signature
             wallet
                 .database
                 .borrow_mut()
@@ -3493,7 +3473,7 @@ pub(crate) mod test {
         assert_eq!(details.fee.unwrap_or(0), 30_000);
         assert_eq!(details.received, 0);
 
-        let tx = &psbt.global.unsigned_tx;
+        let tx = &psbt.unsigned_tx;
         assert_eq!(tx.input.len(), 2);
         assert_eq!(tx.output.len(), 1);
         assert_eq!(
@@ -3527,7 +3507,7 @@ pub(crate) mod test {
         let txid = tx.txid();
         // skip saving the new utxos, we know they can't be used anyways
         for txin in &mut tx.input {
-            txin.witness.push([0x00; 108].to_vec()); // fake signature
+            txin.witness.push([0x00; 108]); // fake signature
             wallet
                 .database
                 .borrow_mut()
@@ -3556,7 +3536,7 @@ pub(crate) mod test {
         assert_eq!(details.sent, original_details.sent + 25_000);
         assert_eq!(details.fee.unwrap_or(0) + details.received, 30_000);
 
-        let tx = &psbt.global.unsigned_tx;
+        let tx = &psbt.unsigned_tx;
         assert_eq!(tx.input.len(), 2);
         assert_eq!(tx.output.len(), 2);
         assert_eq!(
@@ -3598,7 +3578,7 @@ pub(crate) mod test {
         let txid = tx.txid();
         // skip saving the new utxos, we know they can't be used anyways
         for txin in &mut tx.input {
-            txin.witness.push([0x00; 108].to_vec()); // fake signature
+            txin.witness.push([0x00; 108]); // fake signature
             wallet
                 .database
                 .borrow_mut()
@@ -3627,7 +3607,7 @@ pub(crate) mod test {
         assert_eq!(details.sent, original_details.sent + 25_000);
         assert_eq!(details.fee.unwrap_or(0) + details.received, 30_000);
 
-        let tx = &psbt.global.unsigned_tx;
+        let tx = &psbt.unsigned_tx;
         assert_eq!(tx.input.len(), 2);
         assert_eq!(tx.output.len(), 2);
         assert_eq!(
@@ -3785,7 +3765,7 @@ pub(crate) mod test {
         };
 
         psbt.inputs.push(dud_input);
-        psbt.global.unsigned_tx.input.push(bitcoin::TxIn::default());
+        psbt.unsigned_tx.input.push(bitcoin::TxIn::default());
         let is_final = wallet
             .sign(
                 &mut psbt,
@@ -3807,14 +3787,14 @@ pub(crate) mod test {
 
     #[test]
     fn test_sign_nonstandard_sighash() {
-        let sighash = SigHashType::NonePlusAnyoneCanPay;
+        let sighash = EcdsaSighashType::NonePlusAnyoneCanPay;
 
         let (wallet, _, _) = get_funded_wallet("wpkh(tprv8ZgxMBicQKsPd3EupYiPRhaMooHKUHJxNsTfYuScep13go8QFfHdtkG9nRkFGb7busX4isf6X9dURGCoKgitaApQ6MupRhZMcELAxTBRJgS/*)");
         let addr = wallet.get_address(New).unwrap();
         let mut builder = wallet.build_tx();
         builder
             .drain_to(addr.script_pubkey())
-            .sighash(sighash)
+            .sighash(sighash.into())
             .drain_wallet();
         let (mut psbt, _) = builder.finish().unwrap();
 
@@ -3847,8 +3827,8 @@ pub(crate) mod test {
 
         let extracted = psbt.extract_tx();
         assert_eq!(
-            *extracted.input[0].witness[0].last().unwrap(),
-            sighash.as_u32() as u8,
+            *extracted.input[0].witness.to_vec()[0].last().unwrap(),
+            sighash.to_u32() as u8,
             "The signature should have been made with the right sighash"
         );
     }

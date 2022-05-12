@@ -42,7 +42,7 @@ use std::default::Default;
 use std::marker::PhantomData;
 
 use bitcoin::util::psbt::{self, PartiallySignedTransaction as Psbt};
-use bitcoin::{OutPoint, Script, SigHashType, Transaction};
+use bitcoin::{OutPoint, Script, Transaction};
 
 use miniscript::descriptor::DescriptorTrait;
 
@@ -103,10 +103,7 @@ impl TxBuilderContext for BumpFee {}
 ///     builder.finish()?
 /// };
 ///
-/// assert_eq!(
-///     psbt1.global.unsigned_tx.output[..2],
-///     psbt2.global.unsigned_tx.output[..2]
-/// );
+/// assert_eq!(psbt1.unsigned_tx.output[..2], psbt2.unsigned_tx.output[..2]);
 /// # Ok::<(), bdk::Error>(())
 /// ```
 ///
@@ -140,7 +137,7 @@ pub(crate) struct TxParams {
     pub(crate) utxos: Vec<WeightedUtxo>,
     pub(crate) unspendable: HashSet<OutPoint>,
     pub(crate) manually_selected_only: bool,
-    pub(crate) sighash: Option<SigHashType>,
+    pub(crate) sighash: Option<psbt::PsbtSighashType>,
     pub(crate) ordering: TxOrdering,
     pub(crate) locktime: Option<u32>,
     pub(crate) rbf: Option<RbfValue>,
@@ -412,7 +409,7 @@ impl<'a, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderContext>
     /// Sign with a specific sig hash
     ///
     /// **Use this option very carefully**
-    pub fn sighash(&mut self, sighash: SigHashType) -> &mut Self {
+    pub fn sighash(&mut self, sighash: psbt::PsbtSighashType) -> &mut Self {
         self.params.sighash = Some(sighash);
         self
     }

@@ -20,12 +20,12 @@ use std::str::FromStr;
 use bitcoin::secp256k1::{self, Secp256k1, Signing};
 
 use bitcoin::util::bip32;
-use bitcoin::{Network, PrivateKey, PublicKey};
+use bitcoin::{Network, PrivateKey, PublicKey, XOnlyPublicKey};
 
 use miniscript::descriptor::{Descriptor, DescriptorXKey, Wildcard};
 pub use miniscript::descriptor::{
     DescriptorPublicKey, DescriptorSecretKey, DescriptorSinglePriv, DescriptorSinglePub, KeyMap,
-    SortedMultiVec,
+    SinglePubKey, SortedMultiVec,
 };
 pub use miniscript::ScriptContext;
 use miniscript::{Miniscript, Terminal};
@@ -127,6 +127,8 @@ pub enum ScriptContextEnum {
     Legacy,
     /// Segwitv0 scripts
     Segwitv0,
+    /// Taproot scripts
+    Tap,
 }
 
 impl ScriptContextEnum {
@@ -138,6 +140,11 @@ impl ScriptContextEnum {
     /// Returns whether the script context is [`ScriptContextEnum::Segwitv0`]
     pub fn is_segwit_v0(&self) -> bool {
         self == &ScriptContextEnum::Segwitv0
+    }
+
+    /// Returns whether the script context is [`ScriptContextEnum::Tap`]
+    pub fn is_taproot(&self) -> bool {
+        self == &ScriptContextEnum::Tap
     }
 }
 
@@ -155,6 +162,11 @@ pub trait ExtScriptContext: ScriptContext {
     fn is_segwit_v0() -> bool {
         Self::as_enum().is_segwit_v0()
     }
+
+    /// Returns whether the script context is [`Tap`](miniscript::Tap), aka Taproot or Segwit V1
+    fn is_taproot() -> bool {
+        Self::as_enum().is_taproot()
+    }
 }
 
 impl<Ctx: ScriptContext + 'static> ExtScriptContext for Ctx {
@@ -162,6 +174,7 @@ impl<Ctx: ScriptContext + 'static> ExtScriptContext for Ctx {
         match TypeId::of::<Ctx>() {
             t if t == TypeId::of::<miniscript::Legacy>() => ScriptContextEnum::Legacy,
             t if t == TypeId::of::<miniscript::Segwitv0>() => ScriptContextEnum::Segwitv0,
+            t if t == TypeId::of::<miniscript::Tap>() => ScriptContextEnum::Tap,
             _ => unimplemented!("Unknown ScriptContext type"),
         }
     }
@@ -212,7 +225,7 @@ impl<Ctx: ScriptContext + 'static> ExtScriptContext for Ctx {
 ///
 /// use bdk::keys::{
 ///     mainnet_network, DescriptorKey, DescriptorPublicKey, DescriptorSinglePub,
-///     IntoDescriptorKey, KeyError, ScriptContext,
+///     IntoDescriptorKey, KeyError, ScriptContext, SinglePubKey,
 /// };
 ///
 /// pub struct MyKeyType {
@@ -224,7 +237,7 @@ impl<Ctx: ScriptContext + 'static> ExtScriptContext for Ctx {
 ///         Ok(DescriptorKey::from_public(
 ///             DescriptorPublicKey::SinglePub(DescriptorSinglePub {
 ///                 origin: None,
-///                 key: self.pubkey,
+///                 key: SinglePubKey::FullKey(self.pubkey),
 ///             }),
 ///             mainnet_network(),
 ///         ))
@@ -319,7 +332,6 @@ impl<Ctx: ScriptContext> ExtendedKey<Ctx> {
         match self {
             ExtendedKey::Private((mut xprv, _)) => {
                 xprv.network = network;
-                xprv.private_key.network = network;
                 Some(xprv)
             }
             ExtendedKey::Public(_) => None,
@@ -334,7 +346,7 @@ impl<Ctx: ScriptContext> ExtendedKey<Ctx> {
         secp: &Secp256k1<C>,
     ) -> bip32::ExtendedPubKey {
         let mut xpub = match self {
-            ExtendedKey::Private((xprv, _)) => bip32::ExtendedPubKey::from_private(secp, &xprv),
+            ExtendedKey::Private((xprv, _)) => bip32::ExtendedPubKey::from_priv(secp, &xprv),
             ExtendedKey::Public((xpub, _)) => xpub,
         };
 
@@ -388,7 +400,7 @@ impl<Ctx: ScriptContext> From<bip32::ExtendedPrivKey> for ExtendedKey<Ctx> {
 ///             network: self.network,
 ///             depth: 0,
 ///             parent_fingerprint: bip32::Fingerprint::default(),
-///             private_key: self.key_data,
+///             private_key: self.key_data.inner,
 ///             chain_code: bip32::ChainCode::from(self.chain_code.as_ref()),
 ///             child_number: bip32::ChildNumber::Normal { index: 0 },
 ///         };
@@ -420,7 +432,7 @@ impl<Ctx: ScriptContext> From<bip32::ExtendedPrivKey> for ExtendedKey<Ctx> {
 ///             network: bitcoin::Network::Bitcoin, // pick an arbitrary network here
 ///             depth: 0,
 ///             parent_fingerprint: bip32::Fingerprint::default(),
-///             private_key: self.key_data,
+///             private_key: self.key_data.inner,
 ///             chain_code: bip32::ChainCode::from(self.chain_code.as_ref()),
 ///             child_number: bip32::ChildNumber::Normal { index: 0 },
 ///         };
@@ -698,11 +710,11 @@ impl<Ctx: ScriptContext> GeneratableKey<Ctx> for PrivateKey {
         entropy: Self::Entropy,
     ) -> Result<GeneratedKey<Self, Ctx>, Self::Error> {
         // pick a arbitrary network here, but say that we support all of them
-        let key = secp256k1::SecretKey::from_slice(&entropy)?;
+        let inner = secp256k1::SecretKey::from_slice(&entropy)?;
         let private_key = PrivateKey {
             compressed: options.compressed,
             network: Network::Bitcoin,
-            key,
+            inner,
         };
 
         Ok(GeneratedKey::new(private_key, any_network()))
@@ -841,7 +853,17 @@ impl<Ctx: ScriptContext> IntoDescriptorKey<Ctx> for DescriptorPublicKey {
 impl<Ctx: ScriptContext> IntoDescriptorKey<Ctx> for PublicKey {
     fn into_descriptor_key(self) -> Result<DescriptorKey<Ctx>, KeyError> {
         DescriptorPublicKey::SinglePub(DescriptorSinglePub {
-            key: self,
+            key: SinglePubKey::FullKey(self),
+            origin: None,
+        })
+        .into_descriptor_key()
+    }
+}
+
+impl<Ctx: ScriptContext> IntoDescriptorKey<Ctx> for XOnlyPublicKey {
+    fn into_descriptor_key(self) -> Result<DescriptorKey<Ctx>, KeyError> {
+        DescriptorPublicKey::SinglePub(DescriptorSinglePub {
+            key: SinglePubKey::XOnly(self),
             origin: None,
         })
         .into_descriptor_key()
@@ -943,29 +965,6 @@ pub mod test {
         );
     }
 
-    #[test]
-    fn test_keys_wif_network() {
-        // test mainnet wif
-        let generated_xprv: GeneratedKey<_, miniscript::Segwitv0> =
-            bip32::ExtendedPrivKey::generate_with_entropy_default(TEST_ENTROPY).unwrap();
-        let xkey = generated_xprv.into_extended_key().unwrap();
-
-        let network = Network::Bitcoin;
-        let xprv = xkey.into_xprv(network).unwrap();
-        let wif = PrivateKey::from_wif(&xprv.private_key.to_wif()).unwrap();
-        assert_eq!(wif.network, network);
-
-        // test testnet wif
-        let generated_xprv: GeneratedKey<_, miniscript::Segwitv0> =
-            bip32::ExtendedPrivKey::generate_with_entropy_default(TEST_ENTROPY).unwrap();
-        let xkey = generated_xprv.into_extended_key().unwrap();
-
-        let network = Network::Testnet;
-        let xprv = xkey.into_xprv(network).unwrap();
-        let wif = PrivateKey::from_wif(&xprv.private_key.to_wif()).unwrap();
-        assert_eq!(wif.network, network);
-    }
-
     #[cfg(feature = "keys-bip39")]
     #[test]
     fn test_keys_wif_network_bip39() {
@@ -977,8 +976,7 @@ pub mod test {
         .into_extended_key()
         .unwrap();
         let xprv = xkey.into_xprv(Network::Testnet).unwrap();
-        let wif = PrivateKey::from_wif(&xprv.private_key.to_wif()).unwrap();
 
-        assert_eq!(wif.network, Network::Testnet);
+        assert_eq!(xprv.network, Network::Testnet);
     }
 }

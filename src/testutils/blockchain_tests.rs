@@ -2,7 +2,7 @@ use crate::testutils::TestIncomingTx;
 use bitcoin::consensus::encode::{deserialize, serialize};
 use bitcoin::hashes::hex::{FromHex, ToHex};
 use bitcoin::hashes::sha256d;
-use bitcoin::{Address, Amount, Script, Transaction, Txid};
+use bitcoin::{Address, Amount, Script, Transaction, Txid, Witness};
 pub use bitcoincore_rpc::bitcoincore_rpc_json::AddressType;
 pub use bitcoincore_rpc::{Auth, Client as RpcClient, RpcApi};
 use core::str::FromStr;
@@ -193,7 +193,7 @@ impl TestClient {
                 previous_output: OutPoint::null(),
                 script_sig: Builder::new().push_int(height).into_script(),
                 sequence: 0xFFFFFFFF,
-                witness: vec![witness_reserved_value],
+                witness: Witness::from_vec(vec![witness_reserved_value]),
             }],
             output: vec![],
         };
@@ -203,23 +203,31 @@ impl TestClient {
 
         let mut block = Block { header, txdata };
 
-        let witness_root = block.witness_root();
-        let witness_commitment =
-            Block::compute_witness_commitment(&witness_root, &coinbase_tx.input[0].witness[0]);
+        if let Some(witness_root) = block.witness_root() {
+            let witness_commitment = Block::compute_witness_commitment(
+                &witness_root,
+                &coinbase_tx.input[0]
+                    .witness
+                    .last()
+                    .expect("Should contain the witness reserved value"),
+            );
 
-        // now update and replace the coinbase tx
-        let mut coinbase_witness_commitment_script = vec![0x6a, 0x24, 0xaa, 0x21, 0xa9, 0xed];
-        coinbase_witness_commitment_script.extend_from_slice(&witness_commitment);
+            // now update and replace the coinbase tx
+            let mut coinbase_witness_commitment_script = vec![0x6a, 0x24, 0xaa, 0x21, 0xa9, 0xed];
+            coinbase_witness_commitment_script.extend_from_slice(&witness_commitment);
 
-        coinbase_tx.output.push(TxOut {
-            value: 0,
-            script_pubkey: coinbase_witness_commitment_script.into(),
-        });
+            coinbase_tx.output.push(TxOut {
+                value: 0,
+                script_pubkey: coinbase_witness_commitment_script.into(),
+            });
+        }
+
         block.txdata[0] = coinbase_tx;
 
         // set merkle root
-        let merkle_root = block.merkle_root();
-        block.header.merkle_root = merkle_root;
+        if let Some(merkle_root) = block.compute_merkle_root() {
+            block.header.merkle_root = merkle_root;
+        }
 
         assert!(block.check_merkle_root());
         assert!(block.check_witness_commitment());

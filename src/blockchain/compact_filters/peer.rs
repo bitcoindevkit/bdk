@@ -10,6 +10,7 @@
 // licenses.
 
 use std::collections::HashMap;
+use std::io::BufReader;
 use std::net::{TcpStream, ToSocketAddrs};
 use std::sync::{Arc, Condvar, Mutex, RwLock};
 use std::thread;
@@ -19,14 +20,13 @@ use socks::{Socks5Stream, ToTargetAddr};
 
 use rand::{thread_rng, Rng};
 
-use bitcoin::consensus::Encodable;
+use bitcoin::consensus::{Decodable, Encodable};
 use bitcoin::hash_types::BlockHash;
 use bitcoin::network::constants::ServiceFlags;
 use bitcoin::network::message::{NetworkMessage, RawNetworkMessage};
 use bitcoin::network::message_blockdata::*;
 use bitcoin::network::message_filter::*;
 use bitcoin::network::message_network::VersionMessage;
-use bitcoin::network::stream_reader::StreamReader;
 use bitcoin::network::Address;
 use bitcoin::{Block, Network, Transaction, Txid, Wtxid};
 
@@ -327,9 +327,10 @@ impl Peer {
             };
         }
 
-        let mut reader = StreamReader::new(connection, None);
+        let mut reader = BufReader::new(connection);
         loop {
-            let raw_message: RawNetworkMessage = check_disconnect!(reader.read_next());
+            let raw_message: RawNetworkMessage =
+                check_disconnect!(Decodable::consensus_decode(&mut reader));
 
             let in_message = if raw_message.magic != network.magic() {
                 continue;
