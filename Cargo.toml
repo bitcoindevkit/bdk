@@ -42,7 +42,7 @@ bitcoincore-rpc = { version = "0.15", optional = true }
 
 # Platform-specific dependencies
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-tokio = { version = "~1.14", features = ["rt"] }
+tokio = { version = "1", features = ["rt"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 async-trait = "0.1"
