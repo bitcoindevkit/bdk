@@ -189,6 +189,8 @@ fn main() -> Result<(), bdk::Error> {
 //! * `all-keys`: all features for working with bitcoin keys
 //! * `async-interface`: async functions in bdk traits
 //! * `keys-bip39`: [BIP-39](https://github.com/bitcoin/bips/blob/master/bip-0039.mediawiki) mnemonic codes for generating deterministic keys
+//! * `japanese`, `korean`, `spanish`, `chinese_simplified`, `chinese_traditional`, `french`, `italian`, `czech`, `portuguese`: languages for BIP39 mnemonics. English is enabled by default.
+//! * `all-languages`: all languages for BIP39 mnemonics
 //!
 //! # Internal features
 //!
