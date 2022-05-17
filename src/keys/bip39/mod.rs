@@ -11,9 +11,6 @@
 
 //! BIP-0039
 
-// TODO: maybe write our own implementation of bip39? Seems stupid to have an extra dependency for
-// something that should be fairly simple to re-implement.
-
 use std::fmt;
 
 use bitcoin::{util::bip32, hashes::{Hash, sha256}};
@@ -540,7 +537,8 @@ mod test {
 
             assert_eq!(generated_mnemonic.valid_networks, any_network());
             assert_eq!(generated_mnemonic.to_string(), mnemonic);
-            assert_eq!(generated_seed[..], seed[..]);			assert_eq!(generated_privkey.to_string(), xprivkey);
+            assert_eq!(Mnemonic::parse_in(Language::English, mnemonic).unwrap().to_string(), generated_mnemonic.to_string());
+            assert_eq!(generated_seed[..], seed[..]);
             assert_eq!(generated_privkey.to_string(), xprivkey);
         }
     }
@@ -724,6 +722,7 @@ mod test {
         // tiny-bip39 also skip matching the japenese mnemonic.
         for vector in test_vectors {
             let entropy = Vec::from_hex(vector[0]).unwrap();
+            let mnemonic = vector[1];
             let passphrase = Some(vector[2].to_string());
             let seed = Vec::from_hex(vector[3]).unwrap();
             let xprivkey = vector[4];
@@ -734,6 +733,7 @@ mod test {
             let generated_privkey = bip32::ExtendedPrivKey::new_master(bitcoin::Network::Bitcoin, &generated_seed).unwrap();
 
             assert_eq!(generated_mnemonic.valid_networks, any_network());
+            assert_eq!(Mnemonic::parse_in(Language::Japanese, mnemonic).unwrap().to_string(), generated_mnemonic.to_string());
             assert_eq!(generated_seed[..], seed[..]);
             assert_eq!(generated_privkey.to_string(), xprivkey);
         }
