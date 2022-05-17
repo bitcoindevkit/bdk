@@ -59,6 +59,8 @@ pub enum Error {
     InvalidChecksum(usize)
 }
 
+impl std::error::Error for Error {}
+
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match &*self {
@@ -136,7 +138,7 @@ impl Mnemonic {
             return Err(Error::InvalidEntropyLength(ent_bits))
         }
 
-        if ent_bits < MIN_ENTROPY_BITS || ent_bits > MAX_ENTROPY_BITS {
+		if !(MIN_ENTROPY_BITS..=MAX_ENTROPY_BITS).contains(&ent_bits) {
             return Err(Error::InvalidEntropyLength(ent_bits))
         }
 
@@ -186,7 +188,7 @@ impl Mnemonic {
             .join(" ")
             .nfkd()
             .collect::<String>();
-        let salt = ("mnemonic".to_string() + &passphrase.unwrap_or("".to_string()))
+        let salt = ("mnemonic".to_string() + &passphrase.unwrap_or_else(|| "".to_string()))
             .nfkd()
             .collect::<String>();
 

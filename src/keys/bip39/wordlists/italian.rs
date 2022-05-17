@@ -2047,4 +2047,4 @@ pub const WORDS: [&str; 2048] = [
     "zufolo",
     "zulu",
     "zuppa",
-    ];
+];
