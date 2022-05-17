@@ -1,34 +1,53 @@
+// English is always included as the default for BIP39
 mod english;
+#[cfg(feature = "japanese")]
 mod japanese;
+#[cfg(feature = "korean")]
 mod korean;
+#[cfg(feature = "spanish")]
 mod spanish;
+#[cfg(feature = "chinese_simplified")]
 mod chinese_simplified;
+#[cfg(feature = "chinese_traditional")]
 mod chinese_traditional;
+#[cfg(feature = "french")]
 mod french;
+#[cfg(feature = "italian")]
 mod italian;
+#[cfg(feature = "czech")]
 mod czech;
+#[cfg(feature = "portuguese")]
 mod portuguese;
 
 /// List of supported languages for mnemonics
 pub enum Language {
     /// The English language
     English,
+    #[cfg(feature = "japanese")]
     /// The Japanese language
     Japanese,
+    #[cfg(feature = "korean")]
     /// The Korean language
     Korean,
+    #[cfg(feature = "spanish")]
     /// The Spanish language
     Spanish,
+    #[cfg(feature = "chinese_simplified")]
     /// The Chinese (Simplified) language
     ChineseSimplified,
+    #[cfg(feature = "chinese_traditional")]
     /// The Chinese (Traditional) language
     ChineseTraditional,
+    #[cfg(feature = "french")]
     /// The French language
     French,
+    #[cfg(feature = "italian")]
     /// The Italian language
     Italian,
+    #[cfg(feature = "czech")]
     /// The Czech language
     Czech,
+    #[cfg(feature = "portuguese")]
     /// The Portuguese language
     Portuguese,
 }
@@ -38,19 +57,39 @@ impl Language {
     pub fn wordlist(&self) -> &[&str; 2048] {
         match *self {
             Language::English => &english::WORDS,
+            #[cfg(feature = "japanese")]
             Language::Japanese => &japanese::WORDS,
+            #[cfg(feature = "korean")]
             Language::Korean => &korean::WORDS,
+            #[cfg(feature = "spanish")]
             Language::Spanish => &spanish::WORDS,
+            #[cfg(feature = "chinese_simplified")]
             Language::ChineseSimplified => &chinese_simplified::WORDS,
+            #[cfg(feature = "chinese_traditional")]
             Language::ChineseTraditional => &chinese_traditional::WORDS,
+            #[cfg(feature = "french")]
             Language::French => &french::WORDS,
+            #[cfg(feature = "italian")]
             Language::Italian => &italian::WORDS,
+            #[cfg(feature = "czech")]
             Language::Czech => &czech::WORDS,
+            #[cfg(feature = "portuguese")]
             Language::Portuguese => &portuguese::WORDS,
         }
     }
 }
 
+#[cfg(all(
+    feature = "japanese",
+    feature = "korean",
+    feature = "spanish",
+    feature = "chinese_simplified",
+    feature = "chinese_traditional",
+    feature = "french",
+    feature = "italian",
+    feature = "czech",
+    feature = "portuguese",
+))]
 #[cfg(test)]
 mod test {
     use super::Language;

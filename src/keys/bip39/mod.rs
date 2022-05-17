@@ -543,6 +543,7 @@ mod test {
         }
     }
 
+    #[cfg(feature = "japanese")]
     #[test]
     fn test_keys_generate_bip39_japanese() {
         // Structure: vec![[entropy, mnemonic, passphrase, seed, bip32_xprv]]

@@ -62,8 +62,31 @@ sqlite-bundled = ["sqlite", "rusqlite/bundled"]
 compact_filters = ["rocksdb", "socks", "lazy_static", "cc"]
 key-value-db = ["sled"]
 all-keys = ["keys-bip39"]
-keys-bip39 = ["pbkdf2", "unicode-normalization", "sha2", "hmac"]
 rpc = ["bitcoincore-rpc"]
+keys-bip39 = ["pbkdf2", "unicode-normalization", "sha2", "hmac"]
+
+# Languages for BIP39 mnemonics. English is always included by default
+japanese = []
+korean = []
+spanish = []
+chinese_simplified = []
+chinese_traditional = []
+french = []
+italian = []
+czech = []
+portuguese = []
+
+all-languages = [
+    "japanese",
+    "korean",
+    "spanish",
+    "chinese_simplified",
+    "chinese_traditional",
+    "french",
+    "italian",
+    "czech",
+    "portuguese",
+]
 
 # We currently provide mulitple implementations of `Blockchain`, all are
 # blocking except for the `EsploraBlockchain` which can be either async or
