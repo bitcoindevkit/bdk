@@ -1855,7 +1855,7 @@ pub(crate) mod test {
     }
 
     pub(crate) fn get_test_tr_single_sig() -> &'static str {
-        "tr(tprv8ZgxMBicQKsPdDArR4xSAECuVxeX1jwwSXR4ApKbkYgZiziDc4LdBy2WvJeGDfUSE4UT4hHhbgEwbdq8ajjUHiKDegkwrNU6V55CxcxonVN/*)"
+        "tr(cNJmN3fH9DDbDt131fQNkVakkpzawJBSeybCUNmP1BovpmGQ45xG)"
     }
 
     pub(crate) fn get_test_tr_with_taptree() -> &'static str {
@@ -1864,6 +1864,14 @@ pub(crate) mod test {
 
     pub(crate) fn get_test_tr_repeated_key() -> &'static str {
         "tr(b511bd5771e47ee27558b1765e87b541668304ec567721c7b880edc0a010da55,{and_v(v:pk(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW),after(100)),and_v(v:pk(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW),after(200))})"
+    }
+
+    pub(crate) fn get_test_tr_single_sig_xprv() -> &'static str {
+        "tr(tprv8ZgxMBicQKsPdDArR4xSAECuVxeX1jwwSXR4ApKbkYgZiziDc4LdBy2WvJeGDfUSE4UT4hHhbgEwbdq8ajjUHiKDegkwrNU6V55CxcxonVN/*)"
+    }
+
+    pub(crate) fn get_test_tr_with_taptree_xprv() -> &'static str {
+        "tr(b511bd5771e47ee27558b1765e87b541668304ec567721c7b880edc0a010da55,{pk(tprv8ZgxMBicQKsPdDArR4xSAECuVxeX1jwwSXR4ApKbkYgZiziDc4LdBy2WvJeGDfUSE4UT4hHhbgEwbdq8ajjUHiKDegkwrNU6V55CxcxonVN/*),pk(8aee2b8120a5f157f1223f72b5e62b825831a27a9fdf427db7cc697494d4a642)})"
     }
 
     macro_rules! assert_fee_rate {
@@ -4185,7 +4193,7 @@ pub(crate) mod test {
 
     #[test]
     fn test_taproot_psbt_populate_tap_key_origins() {
-        let (wallet, _, _) = get_funded_wallet(get_test_tr_single_sig());
+        let (wallet, _, _) = get_funded_wallet(get_test_tr_single_sig_xprv());
         let addr = wallet.get_address(AddressIndex::New).unwrap();
 
         let mut builder = wallet.build_tx();
@@ -4323,6 +4331,52 @@ pub(crate) mod test {
     }
 
     #[test]
+    fn test_taproot_sign_missing_witness_utxo() {
+        let (wallet, _, _) = get_funded_wallet(get_test_tr_single_sig());
+        let addr = wallet.get_address(New).unwrap();
+        let mut builder = wallet.build_tx();
+        builder.drain_to(addr.script_pubkey()).drain_wallet();
+        let (mut psbt, _) = builder.finish().unwrap();
+        let witness_utxo = psbt.inputs[0].witness_utxo.take();
+
+        let result = wallet.sign(
+            &mut psbt,
+            SignOptions {
+                allow_all_sighashes: true,
+                ..Default::default()
+            },
+        );
+        assert!(
+            result.is_err(),
+            "Signing should have failed because the witness_utxo is missing"
+        );
+        assert!(
+            matches!(
+                result.unwrap_err(),
+                Error::Signer(SignerError::MissingWitnessUtxo)
+            ),
+            "Signing failed with the wrong error type"
+        );
+
+        // restore the witness_utxo
+        psbt.inputs[0].witness_utxo = witness_utxo;
+
+        let result = wallet.sign(
+            &mut psbt,
+            SignOptions {
+                allow_all_sighashes: true,
+                ..Default::default()
+            },
+        );
+
+        assert!(result.is_ok(), "Signing should have worked");
+        assert!(
+            result.unwrap(),
+            "Should finalize the input since we can produce signatures"
+        );
+    }
+
+    #[test]
     fn test_taproot_foreign_utxo() {
         let (wallet1, _, _) = get_funded_wallet(get_test_wpkh());
         let (wallet2, _, _) = get_funded_wallet(get_test_tr_single_sig());
@@ -4362,9 +4416,7 @@ pub(crate) mod test {
         );
     }
 
-    #[test]
-    fn test_taproot_key_spend() {
-        let (wallet, _, _) = get_funded_wallet(get_test_tr_single_sig());
+    fn test_spend_from_wallet(wallet: Wallet<AnyDatabase>) {
         let addr = wallet.get_address(AddressIndex::New).unwrap();
 
         let mut builder = wallet.build_tx();
@@ -4373,22 +4425,143 @@ pub(crate) mod test {
 
         assert!(
             wallet.sign(&mut psbt, Default::default()).unwrap(),
-            "Unable to finalize taproot key spend"
+            "Unable to finalize tx"
         );
+    }
+
+    #[test]
+    fn test_taproot_key_spend() {
+        let (wallet, _, _) = get_funded_wallet(get_test_tr_single_sig());
+        test_spend_from_wallet(wallet);
+
+        let (wallet, _, _) = get_funded_wallet(get_test_tr_single_sig_xprv());
+        test_spend_from_wallet(wallet);
     }
 
     #[test]
     fn test_taproot_script_spend() {
         let (wallet, _, _) = get_funded_wallet(get_test_tr_with_taptree());
+        test_spend_from_wallet(wallet);
+
+        let (wallet, _, _) = get_funded_wallet(get_test_tr_with_taptree_xprv());
+        test_spend_from_wallet(wallet);
+    }
+
+    #[test]
+    fn test_taproot_sign_derive_index_from_psbt() {
+        let (wallet, _, _) = get_funded_wallet(get_test_tr_single_sig_xprv());
+
         let addr = wallet.get_address(AddressIndex::New).unwrap();
 
         let mut builder = wallet.build_tx();
         builder.add_recipient(addr.script_pubkey(), 25_000);
         let (mut psbt, _) = builder.finish().unwrap();
 
+        // re-create the wallet with an empty db
+        let wallet_empty = Wallet::new(
+            get_test_tr_single_sig_xprv(),
+            None,
+            Network::Regtest,
+            AnyDatabase::Memory(MemoryDatabase::new()),
+        )
+        .unwrap();
+
+        // signing with an empty db means that we will only look at the psbt to infer the
+        // derivation index
         assert!(
-            wallet.sign(&mut psbt, Default::default()).unwrap(),
-            "Unable to finalize taproot script spend"
+            wallet_empty.sign(&mut psbt, Default::default()).unwrap(),
+            "Unable to finalize tx"
+        );
+    }
+
+    #[test]
+    fn test_taproot_sign_explicit_sighash_all() {
+        let (wallet, _, _) = get_funded_wallet(get_test_tr_single_sig());
+        let addr = wallet.get_address(New).unwrap();
+        let mut builder = wallet.build_tx();
+        builder
+            .drain_to(addr.script_pubkey())
+            .sighash(SchnorrSighashType::All.into())
+            .drain_wallet();
+        let (mut psbt, _) = builder.finish().unwrap();
+
+        let result = wallet.sign(&mut psbt, Default::default());
+        assert!(
+            result.is_ok(),
+            "Signing should work because SIGHASH_ALL is safe"
+        )
+    }
+
+    #[test]
+    fn test_taproot_sign_non_default_sighash() {
+        let sighash = SchnorrSighashType::NonePlusAnyoneCanPay;
+
+        let (wallet, _, _) = get_funded_wallet(get_test_tr_single_sig());
+        let addr = wallet.get_address(New).unwrap();
+        let mut builder = wallet.build_tx();
+        builder
+            .drain_to(addr.script_pubkey())
+            .sighash(sighash.into())
+            .drain_wallet();
+        let (mut psbt, _) = builder.finish().unwrap();
+
+        let witness_utxo = psbt.inputs[0].witness_utxo.take();
+
+        let result = wallet.sign(&mut psbt, Default::default());
+        assert!(
+            result.is_err(),
+            "Signing should have failed because the TX uses non-standard sighashes"
+        );
+        assert!(
+            matches!(
+                result.unwrap_err(),
+                Error::Signer(SignerError::NonStandardSighash)
+            ),
+            "Signing failed with the wrong error type"
+        );
+
+        // try again after opting-in
+        let result = wallet.sign(
+            &mut psbt,
+            SignOptions {
+                allow_all_sighashes: true,
+                ..Default::default()
+            },
+        );
+        assert!(
+            result.is_err(),
+            "Signing should have failed because the witness_utxo is missing"
+        );
+        assert!(
+            matches!(
+                result.unwrap_err(),
+                Error::Signer(SignerError::MissingWitnessUtxo)
+            ),
+            "Signing failed with the wrong error type"
+        );
+
+        // restore the witness_utxo
+        psbt.inputs[0].witness_utxo = witness_utxo;
+
+        let result = wallet.sign(
+            &mut psbt,
+            SignOptions {
+                allow_all_sighashes: true,
+                ..Default::default()
+            },
+        );
+
+        assert!(result.is_ok(), "Signing should have worked");
+        assert!(
+            result.unwrap(),
+            "Should finalize the input since we can produce signatures"
+        );
+
+        let extracted = psbt.extract_tx();
+        assert_eq!(
+            *extracted.input[0].witness.to_vec()[0].last().unwrap(),
+            sighash as u8,
+            "The signature should have been made with the right sighash"
         );
     }
 }
