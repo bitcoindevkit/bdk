@@ -47,7 +47,7 @@ const MIN_WORDS: usize = 12;
 const MAX_WORDS: usize = 24;
 
 /// A BIP39 error
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Error {
     /// Mnemonic has a word count that is not a multiple of 6 and between 12 and 24
     InvalidWordCount(usize),
@@ -87,6 +87,7 @@ pub enum WordCount {
 }
 
 /// A mnemonic is group of easy to remember words used in the generation of deterministic wallets
+#[derive(Debug, PartialEq)]
 pub struct Mnemonic {
     /// The language this mnemoic belongs to
     language: Language,
@@ -370,7 +371,7 @@ impl<Ctx: ScriptContext> GeneratableKey<Ctx> for Mnemonic {
 
 #[cfg(test)]
 mod test {
-    use super::{Language, Mnemonic};
+    use super::{Error, Language, Mnemonic};
     use crate::keys::{any_network, bip39::WordCount, GeneratableKey, GeneratedKey};
     use bitcoin::{hashes::hex::FromHex, util::bip32};
     use std::str::FromStr;
@@ -820,5 +821,26 @@ mod test {
         let generated_mnemonic: GeneratedKey<_, miniscript::Segwitv0> =
             Mnemonic::generate((Some(WordCount::Words24), Language::English)).unwrap();
         assert_eq!(generated_mnemonic.valid_networks, any_network());
+    }
+
+    #[test]
+    fn test_invalid_entropies() {
+        //testing with entropy less than 128 bits
+        assert_eq!(
+            Mnemonic::from_entropy_in(Language::English, &vec![b'0'; 15]),
+            Err(Error::InvalidEntropyLength(120))
+        );
+
+        //testing with entropy greater than 256 bits
+        assert_eq!(
+            Mnemonic::from_entropy_in(Language::English, &vec![b'0'; 33]),
+            Err(Error::InvalidEntropyLength(264))
+        );
+
+        //testing entropy which is not a multiple of 32 bits
+        assert_eq!(
+            Mnemonic::from_entropy_in(Language::English, &vec![b'0'; 31]),
+            Err(Error::InvalidEntropyLength(248))
+        );
     }
 }

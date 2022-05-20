@@ -20,6 +20,7 @@ mod portuguese;
 mod spanish;
 
 /// List of supported languages for mnemonics
+#[derive(Debug, PartialEq)]
 pub enum Language {
     /// The English language
     English,
