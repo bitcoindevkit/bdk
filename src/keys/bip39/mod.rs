@@ -47,7 +47,7 @@ const MIN_WORDS: usize = 12;
 const MAX_WORDS: usize = 24;
 
 /// A BIP39 error
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Error {
     /// Mnemonic has a word count that is not a multiple of 6 and between 12 and 24
     InvalidWordCount(usize),
@@ -87,6 +87,7 @@ pub enum WordCount {
 }
 
 /// A mnemonic is group of easy to remember words used in the generation of deterministic wallets
+#[derive(Debug, PartialEq)]
 pub struct Mnemonic {
     /// The language this mnemoic belongs to
     language: Language,
@@ -111,13 +112,42 @@ impl Mnemonic {
 
         let mut indices: Vec<u16> = Vec::with_capacity(words.len());
         let wordlist = language.wordlist();
-        for word in words {
-            let idx = match wordlist.iter().position(|&x| x == word) {
+        let mut mnemonic_bits = vec![false; words.len() * 11];
+        for (i, word) in words.iter().enumerate() {
+            let idx = match wordlist.iter().position(|&x| x == *word) {
                 Some(i) => i as u16,
                 None => return Err(Error::InvalidWord(word.to_string())),
             };
 
             indices.push(idx);
+
+            for j in 0..11 {
+                mnemonic_bits[i * 11 + j] = (idx & (1 << (10 - j))) != 0;
+            }
+        }
+
+        //calculate the entropy length in bits using CS = ENT / 32 and
+        //MS = (ENT + CS) / 11, then convert to bytes
+        let entropy_bytes_len = (words.len() * 4) / 3;
+        let mut entropy = vec![0u8; entropy_bytes_len];
+        for i in 0..entropy_bytes_len {
+            for j in 0..8 {
+                if mnemonic_bits[i * 8 + j] {
+                    entropy[i] += 1 << (7 - j);
+                }
+            }
+        }
+
+        let entropy_hash = sha256::Hash::hash(&entropy);
+        let entropy_hash = entropy_hash.as_ref();
+        let checksum_byte = entropy_hash[0];
+
+        //verify checksum calculated from entropy
+        let entropy_bits_len = (words.len() * 32) / 3;
+        for (i, &bit) in mnemonic_bits[entropy_bits_len..].iter().enumerate() {
+            if (checksum_byte & (1 << (7 - i)) != 0) != bit {
+                return Err(Error::InvalidChecksum(checksum_byte as usize));
+            }
         }
 
         Ok(Mnemonic {
@@ -341,7 +371,7 @@ impl<Ctx: ScriptContext> GeneratableKey<Ctx> for Mnemonic {
 
 #[cfg(test)]
 mod test {
-    use super::{Language, Mnemonic};
+    use super::{Error, Language, Mnemonic};
     use crate::keys::{any_network, bip39::WordCount, GeneratableKey, GeneratedKey};
     use bitcoin::{hashes::hex::FromHex, util::bip32};
     use std::str::FromStr;
@@ -791,5 +821,72 @@ mod test {
         let generated_mnemonic: GeneratedKey<_, miniscript::Segwitv0> =
             Mnemonic::generate((Some(WordCount::Words24), Language::English)).unwrap();
         assert_eq!(generated_mnemonic.valid_networks, any_network());
+    }
+
+    #[test]
+    fn test_invalid_entropies() {
+        //testing with entropy less than 128 bits
+        assert_eq!(
+            Mnemonic::from_entropy_in(Language::English, &[b'0'; 15]),
+            Err(Error::InvalidEntropyLength(120))
+        );
+
+        //testing with entropy greater than 256 bits
+        assert_eq!(
+            Mnemonic::from_entropy_in(Language::English, &[b'0'; 33]),
+            Err(Error::InvalidEntropyLength(264))
+        );
+
+        //testing entropy which is not a multiple of 32 bits
+        assert_eq!(
+            Mnemonic::from_entropy_in(Language::English, &[b'0'; 31]),
+            Err(Error::InvalidEntropyLength(248))
+        );
+    }
+
+    #[test]
+    fn test_invalid_mnemonic() {
+        //less than 12 words
+        assert_eq!(
+            Mnemonic::parse_in(
+                Language::English,
+                "join fossil bulk soft easily give section spoon divorce ice pilot"
+            ),
+            Err(Error::InvalidWordCount(11))
+        );
+
+        //more than 24 words
+        assert_eq!(Mnemonic::parse_in(Language::English, "area secret six clutch run reject tape
+        ritual soldier mad eagle win impulse found tattoo door culture reject movie grocery resource 
+        thought please conduct gorilla"), Err(Error::InvalidWordCount(25)));
+
+        //not a multiple of six
+        assert_eq!(
+            Mnemonic::parse_in(
+                Language::English,
+                "gorilla convince minor amateur labor advance hungry
+        treat ripple bracket draft wrong found"
+            ),
+            Err(Error::InvalidWordCount(13))
+        );
+
+        //invalid word
+        assert_eq!(
+            Mnemonic::parse_in(
+                Language::English,
+                "here convince minor amateur labor advance hungry treat ripple bracket draft wrong"
+            ),
+            Err(Error::InvalidWord(String::from("here")))
+        );
+
+        //invalid checksum
+        assert_eq!(
+            Mnemonic::parse_in(
+                Language::English,
+                "gorilla convince minor amateur labor advance
+        hungry treat ripple bracket draft gorilla"
+            ),
+            Err(Error::InvalidChecksum(175))
+        );
     }
 }
