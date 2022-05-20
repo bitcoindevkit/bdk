@@ -111,13 +111,42 @@ impl Mnemonic {
 
         let mut indices: Vec<u16> = Vec::with_capacity(words.len());
         let wordlist = language.wordlist();
-        for word in words {
-            let idx = match wordlist.iter().position(|&x| x == word) {
+        let mut mnemonic_bits = vec![false; words.len() * 11];
+        for (i, word) in words.iter().enumerate() {
+            let idx = match wordlist.iter().position(|&x| x == *word) {
                 Some(i) => i as u16,
                 None => return Err(Error::InvalidWord(word.to_string())),
             };
 
             indices.push(idx);
+
+            for j in 0..11 {
+                mnemonic_bits[i * 11 + j] = (idx & (1 << 10 - j)) != 0;
+            }
+        }
+
+        //calculate the entropy length in bits using CS = ENT / 32 and
+        //MS = (ENT + CS) / 11, then convert to bytes
+        let entropy_bytes_len = (words.len() * 4) / 3;
+        let mut entropy = vec![0u8; entropy_bytes_len];
+        for i in 0..entropy_bytes_len {
+            for j in 0..8 {
+                if mnemonic_bits[i * 8 + j] {
+                    entropy[i] += 1 << 7 - j;
+                }
+            }
+        }
+
+        let entropy_hash = sha256::Hash::hash(&entropy);
+        let entropy_hash = entropy_hash.as_ref();
+        let checksum_byte = entropy_hash[0];
+
+        //verify checksum calculated from entropy
+        let entropy_bits_len = (words.len() * 32) / 3;
+        for (i, &bit) in mnemonic_bits[entropy_bits_len..].iter().enumerate() {
+            if (checksum_byte & (1 << 7 - i) != 0) != bit {
+                return Err(Error::InvalidChecksum(checksum_byte as usize));
+            }
         }
 
         Ok(Mnemonic {
