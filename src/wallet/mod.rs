@@ -749,6 +749,14 @@ where
             params.bumping_fee.is_some(), // we mandate confirmed transactions if we're bumping the fee
         )?;
 
+        let weighted_drain_txout = WeightedTxOut {
+            txout: TxOut {
+                value: 0,
+                script_pubkey: Script::new(),
+            },
+            satisfaction_weight: 0,
+        };
+
         let coin_selection = coin_selection.coin_select(
             self.database.borrow().deref(),
             required_utxos,
@@ -756,8 +764,7 @@ where
             fee_rate,
             outgoing,
             fee_amount,
-            // REVIEW: Add cost_of_change to TxParams
-            None,
+            weighted_drain_txout,
         )?;
         let mut fee_amount = coin_selection.fee_amount;
 

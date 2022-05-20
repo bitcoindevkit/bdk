@@ -147,6 +147,19 @@ pub struct WeightedUtxo {
     pub utxo: Utxo,
 }
 
+/// A [`TxOut`] with its `satisfaction_weight`, if it were spend by the wallet owning the produced
+/// UTXO from this TxOut.
+#[derive(Debug, Clone, PartialEq)]
+pub struct WeightedTxOut {
+    /// The weight of the witness data and `scriptSig` expressed in [weight units]. This is used to
+    /// properly compute the cost of change for waste metric.
+    ///
+    /// [weight units]: https://en.bitcoin.it/wiki/Weight_units
+    pub satisfaction_weight: usize,
+    /// The TxOut
+    pub txout: TxOut,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 /// An unspent transaction output (UTXO).
 pub enum Utxo {
