@@ -4223,7 +4223,7 @@ pub(crate) mod test {
         let (wallet, _, _) = get_funded_wallet(get_test_tr_repeated_key());
         let addr = wallet.get_address(AddressIndex::New).unwrap();
 
-        let path = vec![("u6ugnnck".to_string(), vec![0])]
+        let path = vec![("rn4nre9c".to_string(), vec![0])]
             .into_iter()
             .collect();
 

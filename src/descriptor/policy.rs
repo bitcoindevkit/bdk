@@ -572,13 +572,12 @@ impl Policy {
         Ok(Some(policy))
     }
 
-    fn make_multisig(
+    fn make_multisig<Ctx: ScriptContext + 'static>(
         keys: &[DescriptorPublicKey],
         signers: &SignersContainer,
         build_sat: BuildSatisfaction,
         threshold: usize,
         sorted: bool,
-        is_ecdsa: bool,
         secp: &SecpCtx,
     ) -> Result<Option<Policy>, PolicyError> {
         if threshold == 0 {
@@ -607,9 +606,7 @@ impl Policy {
             }
 
             if let Some(psbt) = build_sat.psbt() {
-                if is_ecdsa && ecdsa_signature_in_psbt(psbt, key, secp)
-                    || !is_ecdsa && schnorr_signature_in_psbt(psbt, key, secp)
-                {
+                if Ctx::find_signature(psbt, key, secp) {
                     satisfaction.add(
                         &Satisfaction::Complete {
                             condition: Default::default(),
@@ -737,13 +734,15 @@ fn signer_id(key: &DescriptorPublicKey, secp: &SecpCtx) -> SignerId {
     }
 }
 
-fn signature(
+fn make_generic_signature<M: Fn() -> SatisfiableItem, F: Fn(&Psbt) -> bool>(
     key: &DescriptorPublicKey,
     signers: &SignersContainer,
     build_sat: BuildSatisfaction,
     secp: &SecpCtx,
+    make_policy: M,
+    find_sig: F,
 ) -> Policy {
-    let mut policy: Policy = SatisfiableItem::EcdsaSignature(PkOrF::from_key(key, secp)).into();
+    let mut policy: Policy = make_policy().into();
 
     policy.contribution = if signers.find(signer_id(key, secp)).is_some() {
         Satisfaction::Complete {
@@ -754,7 +753,7 @@ fn signature(
     };
 
     if let Some(psbt) = build_sat.psbt() {
-        policy.satisfaction = if ecdsa_signature_in_psbt(psbt, key, secp) {
+        policy.satisfaction = if find_sig(psbt) {
             Satisfaction::Complete {
                 condition: Default::default(),
             }
@@ -794,39 +793,78 @@ fn generic_sig_in_psbt<
     })
 }
 
-fn ecdsa_signature_in_psbt(psbt: &Psbt, key: &DescriptorPublicKey, secp: &SecpCtx) -> bool {
-    generic_sig_in_psbt(
-        psbt,
-        key,
-        secp,
-        |pk| SinglePubKey::FullKey(PublicKey::new(*pk)),
-        |input, pk| match pk {
-            SinglePubKey::FullKey(pk) => input.partial_sigs.contains_key(pk),
-            _ => false,
-        },
-    )
+trait SigExt: ScriptContext {
+    fn make_signature(
+        key: &DescriptorPublicKey,
+        signers: &SignersContainer,
+        build_sat: BuildSatisfaction,
+        secp: &SecpCtx,
+    ) -> Policy;
+
+    fn find_signature(psbt: &Psbt, key: &DescriptorPublicKey, secp: &SecpCtx) -> bool;
 }
 
-fn schnorr_signature_in_psbt(psbt: &Psbt, key: &DescriptorPublicKey, secp: &SecpCtx) -> bool {
-    generic_sig_in_psbt(
-        psbt,
-        key,
-        secp,
-        |pk| SinglePubKey::XOnly((*pk).into()),
-        |input, pk| {
-            let pk = match pk {
-                SinglePubKey::XOnly(pk) => pk,
-                _ => return false,
-            };
+impl<T: ScriptContext + 'static> SigExt for T {
+    fn make_signature(
+        key: &DescriptorPublicKey,
+        signers: &SignersContainer,
+        build_sat: BuildSatisfaction,
+        secp: &SecpCtx,
+    ) -> Policy {
+        if T::as_enum().is_taproot() {
+            make_generic_signature(
+                key,
+                signers,
+                build_sat,
+                secp,
+                || SatisfiableItem::SchnorrSignature(PkOrF::from_key(key, secp)),
+                |psbt| Self::find_signature(psbt, key, secp),
+            )
+        } else {
+            make_generic_signature(
+                key,
+                signers,
+                build_sat,
+                secp,
+                || SatisfiableItem::EcdsaSignature(PkOrF::from_key(key, secp)),
+                |psbt| Self::find_signature(psbt, key, secp),
+            )
+        }
+    }
 
-            // This assumes the internal key is never used in the script leaves, which I think is
-            // reasonable
-            match &input.tap_internal_key {
-                Some(ik) if ik == pk => input.tap_key_sig.is_some(),
-                _ => input.tap_script_sigs.keys().any(|(sk, _)| sk == pk),
-            }
-        },
-    )
+    fn find_signature(psbt: &Psbt, key: &DescriptorPublicKey, secp: &SecpCtx) -> bool {
+        if T::as_enum().is_taproot() {
+            generic_sig_in_psbt(
+                psbt,
+                key,
+                secp,
+                |pk| SinglePubKey::XOnly((*pk).into()),
+                |input, pk| {
+                    let pk = match pk {
+                        SinglePubKey::XOnly(pk) => pk,
+                        _ => return false,
+                    };
+
+                    if input.tap_internal_key == Some(*pk) && input.tap_key_sig.is_some() {
+                        true
+                    } else {
+                        input.tap_script_sigs.keys().any(|(sk, _)| sk == pk)
+                    }
+                },
+            )
+        } else {
+            generic_sig_in_psbt(
+                psbt,
+                key,
+                secp,
+                |pk| SinglePubKey::FullKey(PublicKey::new(*pk)),
+                |input, pk| match pk {
+                    SinglePubKey::FullKey(pk) => input.partial_sigs.contains_key(pk),
+                    _ => false,
+                },
+            )
+        }
+    }
 }
 
 impl<Ctx: ScriptContext + 'static> ExtractPolicy for Miniscript<DescriptorPublicKey, Ctx> {
@@ -839,8 +877,10 @@ impl<Ctx: ScriptContext + 'static> ExtractPolicy for Miniscript<DescriptorPublic
         Ok(match &self.node {
             // Leaves
             Terminal::True | Terminal::False => None,
-            Terminal::PkK(pubkey) => Some(signature(pubkey, signers, build_sat, secp)),
-            Terminal::PkH(pubkey_hash) => Some(signature(pubkey_hash, signers, build_sat, secp)),
+            Terminal::PkK(pubkey) => Some(Ctx::make_signature(pubkey, signers, build_sat, secp)),
+            Terminal::PkH(pubkey_hash) => {
+                Some(Ctx::make_signature(pubkey_hash, signers, build_sat, secp))
+            }
             Terminal::After(value) => {
                 let mut policy: Policy = SatisfiableItem::AbsoluteTimelock { value: *value }.into();
                 policy.contribution = Satisfaction::Complete {
@@ -901,15 +941,9 @@ impl<Ctx: ScriptContext + 'static> ExtractPolicy for Miniscript<DescriptorPublic
             Terminal::Hash160(hash) => {
                 Some(SatisfiableItem::Hash160Preimage { hash: *hash }.into())
             }
-            Terminal::Multi(k, pks) | Terminal::MultiA(k, pks) => Policy::make_multisig(
-                pks,
-                signers,
-                build_sat,
-                *k,
-                false,
-                !Ctx::as_enum().is_taproot(),
-                secp,
-            )?,
+            Terminal::Multi(k, pks) | Terminal::MultiA(k, pks) => {
+                Policy::make_multisig::<Ctx>(pks, signers, build_sat, *k, false, secp)?
+            }
             // Identities
             Terminal::Alt(inner)
             | Terminal::Swap(inner)
@@ -999,28 +1033,42 @@ impl ExtractPolicy for Descriptor<DescriptorPublicKey> {
         build_sat: BuildSatisfaction,
         secp: &SecpCtx,
     ) -> Result<Option<Policy>, Error> {
-        fn make_sortedmulti<Ctx: ScriptContext>(
+        fn make_sortedmulti<Ctx: ScriptContext + 'static>(
             keys: &SortedMultiVec<DescriptorPublicKey, Ctx>,
             signers: &SignersContainer,
             build_sat: BuildSatisfaction,
             secp: &SecpCtx,
         ) -> Result<Option<Policy>, Error> {
-            Ok(Policy::make_multisig(
+            Ok(Policy::make_multisig::<Ctx>(
                 keys.pks.as_ref(),
                 signers,
                 build_sat,
                 keys.k,
-                true,
                 true,
                 secp,
             )?)
         }
 
         match self {
-            Descriptor::Pkh(pk) => Ok(Some(signature(pk.as_inner(), signers, build_sat, secp))),
-            Descriptor::Wpkh(pk) => Ok(Some(signature(pk.as_inner(), signers, build_sat, secp))),
+            Descriptor::Pkh(pk) => Ok(Some(miniscript::Legacy::make_signature(
+                pk.as_inner(),
+                signers,
+                build_sat,
+                secp,
+            ))),
+            Descriptor::Wpkh(pk) => Ok(Some(miniscript::Segwitv0::make_signature(
+                pk.as_inner(),
+                signers,
+                build_sat,
+                secp,
+            ))),
             Descriptor::Sh(sh) => match sh.as_inner() {
-                ShInner::Wpkh(pk) => Ok(Some(signature(pk.as_inner(), signers, build_sat, secp))),
+                ShInner::Wpkh(pk) => Ok(Some(miniscript::Segwitv0::make_signature(
+                    pk.as_inner(),
+                    signers,
+                    build_sat,
+                    secp,
+                ))),
                 ShInner::Ms(ms) => Ok(ms.extract_policy(signers, build_sat, secp)?),
                 ShInner::SortedMulti(ref keys) => make_sortedmulti(keys, signers, build_sat, secp),
                 ShInner::Wsh(wsh) => match wsh.as_inner() {
@@ -1036,17 +1084,26 @@ impl ExtractPolicy for Descriptor<DescriptorPublicKey> {
             },
             Descriptor::Bare(ms) => Ok(ms.as_inner().extract_policy(signers, build_sat, secp)?),
             Descriptor::Tr(tr) => {
-                let mut items = vec![signature(tr.internal_key(), signers, build_sat, secp)];
-                items.append(
-                    &mut tr
-                        .iter_scripts()
-                        .filter_map(|(_, ms)| {
-                            ms.extract_policy(signers, build_sat, secp).transpose()
-                        })
-                        .collect::<Result<Vec<_>, _>>()?,
-                );
+                // If there's no tap tree, treat this as a single sig, otherwise build a `Thresh`
+                // node with threshold = 1 and the key spend signature plus all the tree leaves
+                let key_spend_sig =
+                    miniscript::Tap::make_signature(tr.internal_key(), signers, build_sat, secp);
 
-                Ok(Policy::make_thresh(items, 1)?)
+                if tr.taptree().is_none() {
+                    Ok(Some(key_spend_sig))
+                } else {
+                    let mut items = vec![key_spend_sig];
+                    items.append(
+                        &mut tr
+                            .iter_scripts()
+                            .filter_map(|(_, ms)| {
+                                ms.extract_policy(signers, build_sat, secp).transpose()
+                            })
+                            .collect::<Result<Vec<_>, _>>()?,
+                    );
+
+                    Ok(Policy::make_thresh(items, 1)?)
+                }
             }
         }
     }
