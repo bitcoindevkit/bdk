@@ -41,6 +41,16 @@ static MIGRATIONS: &[&str] = &[
     "INSERT INTO transaction_details SELECT txid, timestamp, received, sent, fee, height FROM transaction_details_old;",
     "DROP TABLE transaction_details_old;",
     "ALTER TABLE utxos ADD COLUMN is_spent;",
+    // drop all data due to possible inconsistencies with duplicate utxos, re-sync required
+    "DELETE FROM checksums;",
+    "DELETE FROM last_derivation_indices;",
+    "DELETE FROM script_pubkeys;",
+    "DELETE FROM sync_time;",
+    "DELETE FROM transaction_details;",
+    "DELETE FROM transactions;",
+    "DELETE FROM utxos;",
+    "DROP INDEX idx_txid_vout;",
+    "CREATE UNIQUE INDEX idx_utxos_txid_vout ON utxos(txid, vout);"
 ];
 
 /// Sqlite database stored on filesystem
@@ -86,7 +96,7 @@ impl SqliteDatabase {
         script: &[u8],
         is_spent: bool,
     ) -> Result<i64, Error> {
-        let mut statement = self.connection.prepare_cached("INSERT INTO utxos (value, keychain, vout, txid, script, is_spent) VALUES (:value, :keychain, :vout, :txid, :script, :is_spent)")?;
+        let mut statement = self.connection.prepare_cached("INSERT INTO utxos (value, keychain, vout, txid, script, is_spent) VALUES (:value, :keychain, :vout, :txid, :script, :is_spent) ON CONFLICT(txid, vout) DO UPDATE SET value=:value, keychain=:keychain, script=:script, is_spent=:is_spent")?;
         statement.execute(named_params! {
             ":value": value,
             ":keychain": keychain,

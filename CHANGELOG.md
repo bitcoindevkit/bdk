@@ -10,8 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New MSRV set to `1.56`
 - Unpinned tokio to `1`
 - Add traits to reuse `Blockchain`s across multiple wallets (`BlockchainFactory` and `StatelessBlockchain`).
-- Upgrade to rust-bitcoin `0.28` 
-
+- Upgrade to rust-bitcoin `0.28`
+- If using the `sqlite-db` feature all cached wallet data is deleted due to a possible UTXO inconsistency, a wallet.sync will recreate it  
 
 ## [v0.18.0] - [v0.17.0]
 

@@ -90,12 +90,16 @@ jobs:
       matrix:
         blockchain:
           - name: electrum
+            testprefix: blockchain::electrum::test
             features: test-electrum,verify
           - name: rpc
+            testprefix: blockchain::rpc::test
             features: test-rpc
           - name: esplora
+            testprefix: esplora
             features: test-esplora,use-esplora-reqwest,verify
           - name: esplora
+            testprefix: esplora
             features: test-esplora,use-esplora-ureq,verify
     steps:
       - name: Checkout
@@ -114,7 +118,7 @@ jobs:
           toolchain: stable
           override: true
       - name: Test
-        run: cargo test --no-default-features --features ${{ matrix.blockchain.features }} ${{ matrix.blockchain.name }}::bdk_blockchain_tests
+        run: cargo test --no-default-features --features ${{ matrix.blockchain.features }} ${{ matrix.blockchain.testprefix }}::bdk_blockchain_tests
 
   check-wasm:
     name: Check WASM
