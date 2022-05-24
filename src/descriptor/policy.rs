@@ -1736,4 +1736,180 @@ mod test {
         let policy = wallet_desc.extract_policy(&signers_container, BuildSatisfaction::None, &secp);
         assert!(policy.is_ok());
     }
+
+    #[test]
+    fn test_extract_tr_key_spend() {
+        let secp = Secp256k1::new();
+
+        let (prvkey, _, fingerprint) = setup_keys(ALICE_TPRV_STR, ALICE_BOB_PATH, &secp);
+
+        let desc = descriptor!(tr(prvkey)).unwrap();
+        let (wallet_desc, keymap) = desc
+            .into_wallet_descriptor(&secp, Network::Testnet)
+            .unwrap();
+        let signers_container = Arc::new(SignersContainer::build(keymap, &wallet_desc, &secp));
+
+        let policy = wallet_desc
+            .extract_policy(&signers_container, BuildSatisfaction::None, &secp)
+            .unwrap();
+        assert_eq!(
+            policy,
+            Some(Policy {
+                id: "48u0tz0n".to_string(),
+                item: SatisfiableItem::SchnorrSignature(PkOrF::Fingerprint(fingerprint)),
+                satisfaction: Satisfaction::None,
+                contribution: Satisfaction::Complete {
+                    condition: Condition::default()
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn test_extract_tr_script_spend() {
+        let secp = Secp256k1::new();
+
+        let (alice_prv, _, alice_fing) = setup_keys(ALICE_TPRV_STR, ALICE_BOB_PATH, &secp);
+        let (_, bob_pub, bob_fing) = setup_keys(BOB_TPRV_STR, ALICE_BOB_PATH, &secp);
+
+        let desc = descriptor!(tr(bob_pub, pk(alice_prv))).unwrap();
+        let (wallet_desc, keymap) = desc
+            .into_wallet_descriptor(&secp, Network::Testnet)
+            .unwrap();
+        let signers_container = Arc::new(SignersContainer::build(keymap, &wallet_desc, &secp));
+
+        let policy = wallet_desc
+            .extract_policy(&signers_container, BuildSatisfaction::None, &secp)
+            .unwrap()
+            .unwrap();
+
+        assert!(
+            matches!(policy.item, SatisfiableItem::Thresh { ref items, threshold: 1 } if items.len() == 2)
+        );
+        assert!(
+            matches!(policy.contribution, Satisfaction::PartialComplete { n: 2, m: 1, items, .. } if items == vec![1])
+        );
+
+        let alice_sig = SatisfiableItem::SchnorrSignature(PkOrF::Fingerprint(alice_fing));
+        let bob_sig = SatisfiableItem::SchnorrSignature(PkOrF::Fingerprint(bob_fing));
+
+        let thresh_items = match policy.item {
+            SatisfiableItem::Thresh { items, .. } => items,
+            _ => unreachable!(),
+        };
+
+        assert_eq!(thresh_items[0].item, bob_sig);
+        assert_eq!(thresh_items[1].item, alice_sig);
+    }
+
+    #[test]
+    fn test_extract_tr_satisfaction_key_spend() {
+        const UNSIGNED_PSBT: &str = "cHNidP8BAFMBAAAAAUKgMCqtGLSiGYhsTols2UJ/VQQgQi/SXO38uXs2SahdAQAAAAD/////ARyWmAAAAAAAF6kU4R3W8CnGzZcSsaovTYu0X8vHt3WHAAAAAAABASuAlpgAAAAAACJRIEiEBFjbZa1xdjLfFjrKzuC1F1LeRyI/gL6IuGKNmUuSIRYnkGTDxwXMHP32fkDFoGJY28trxbkkVgR2z7jZa2pOJA0AyRF8LgAAAIADAAAAARcgJ5Bkw8cFzBz99n5AxaBiWNvLa8W5JFYEds+42WtqTiQAAA==";
+        const SIGNED_PSBT: &str = "cHNidP8BAFMBAAAAAUKgMCqtGLSiGYhsTols2UJ/VQQgQi/SXO38uXs2SahdAQAAAAD/////ARyWmAAAAAAAF6kU4R3W8CnGzZcSsaovTYu0X8vHt3WHAAAAAAABASuAlpgAAAAAACJRIEiEBFjbZa1xdjLfFjrKzuC1F1LeRyI/gL6IuGKNmUuSARNAIsRvARpRxuyQosVA7guRQT9vXr+S25W2tnP2xOGBsSgq7A4RL8yrbvwDmNlWw9R0Nc/6t+IsyCyy7dD/lbUGgyEWJ5Bkw8cFzBz99n5AxaBiWNvLa8W5JFYEds+42WtqTiQNAMkRfC4AAACAAwAAAAEXICeQZMPHBcwc/fZ+QMWgYljby2vFuSRWBHbPuNlrak4kAAA=";
+
+        let unsigned_psbt = Psbt::from_str(UNSIGNED_PSBT).unwrap();
+        let signed_psbt = Psbt::from_str(SIGNED_PSBT).unwrap();
+
+        let secp = Secp256k1::new();
+
+        let (_, pubkey, _) = setup_keys(ALICE_TPRV_STR, ALICE_BOB_PATH, &secp);
+
+        let desc = descriptor!(tr(pubkey)).unwrap();
+        let (wallet_desc, _) = desc
+            .into_wallet_descriptor(&secp, Network::Testnet)
+            .unwrap();
+
+        let policy_unsigned = wallet_desc
+            .extract_policy(
+                &SignersContainer::default(),
+                BuildSatisfaction::Psbt(&unsigned_psbt),
+                &secp,
+            )
+            .unwrap()
+            .unwrap();
+        let policy_signed = wallet_desc
+            .extract_policy(
+                &SignersContainer::default(),
+                BuildSatisfaction::Psbt(&signed_psbt),
+                &secp,
+            )
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(policy_unsigned.satisfaction, Satisfaction::None);
+        assert_eq!(
+            policy_signed.satisfaction,
+            Satisfaction::Complete {
+                condition: Default::default()
+            }
+        );
+    }
+
+    #[test]
+    fn test_extract_tr_satisfaction_script_spend() {
+        const UNSIGNED_PSBT: &str = "cHNidP8BAFMBAAAAAWZalxaErOL7P3WPIUc8DsjgE68S+ww+uqiqEI2SAwlPAAAAAAD/////AQiWmAAAAAAAF6kU4R3W8CnGzZcSsaovTYu0X8vHt3WHAAAAAAABASuAlpgAAAAAACJRINa6bLPZwp3/CYWoxyI3mLYcSC5f9LInAMUng94nspa2IhXBgiPY+kcolS1Hp0niOK/+7VHz6F+nsz8JVxnzWzkgToYjIHhGyuexxtRVKevRx4YwWR/W0r7LPHt6oS6DLlzyuYQarMAhFnhGyuexxtRVKevRx4YwWR/W0r7LPHt6oS6DLlzyuYQaLQH2onWFc3UR6I9ZhuHVeJCi5LNAf4APVd7mHn4BhdViHRwu7j4AAACAAgAAACEWgiPY+kcolS1Hp0niOK/+7VHz6F+nsz8JVxnzWzkgToYNAMkRfC4AAACAAgAAAAEXIIIj2PpHKJUtR6dJ4jiv/u1R8+hfp7M/CVcZ81s5IE6GARgg9qJ1hXN1EeiPWYbh1XiQouSzQH+AD1Xe5h5+AYXVYh0AAA==";
+        const SIGNED_PSBT: &str = "cHNidP8BAFMBAAAAAWZalxaErOL7P3WPIUc8DsjgE68S+ww+uqiqEI2SAwlPAAAAAAD/////AQiWmAAAAAAAF6kU4R3W8CnGzZcSsaovTYu0X8vHt3WHAAAAAAABASuAlpgAAAAAACJRINa6bLPZwp3/CYWoxyI3mLYcSC5f9LInAMUng94nspa2AQcAAQhCAUALcP9w/+Ddly9DWdhHTnQ9uCDWLPZjR6vKbKePswW2Ee6W5KNfrklus/8z98n7BQ1U4vADHk0FbadeeL8rrbHlARNAC3D/cP/g3ZcvQ1nYR050Pbgg1iz2Y0erymynj7MFthHuluSjX65JbrP/M/fJ+wUNVOLwAx5NBW2nXni/K62x5UEUeEbK57HG1FUp69HHhjBZH9bSvss8e3qhLoMuXPK5hBr2onWFc3UR6I9ZhuHVeJCi5LNAf4APVd7mHn4BhdViHUAXNmWieJ80Fs+PMa2C186YOBPZbYG/ieEUkagMwzJ788SoCucNdp5wnxfpuJVygFhglDrXGzujFtC82PrMohwuIhXBgiPY+kcolS1Hp0niOK/+7VHz6F+nsz8JVxnzWzkgToYjIHhGyuexxtRVKevRx4YwWR/W0r7LPHt6oS6DLlzyuYQarMAhFnhGyuexxtRVKevRx4YwWR/W0r7LPHt6oS6DLlzyuYQaLQH2onWFc3UR6I9ZhuHVeJCi5LNAf4APVd7mHn4BhdViHRwu7j4AAACAAgAAACEWgiPY+kcolS1Hp0niOK/+7VHz6F+nsz8JVxnzWzkgToYNAMkRfC4AAACAAgAAAAEXIIIj2PpHKJUtR6dJ4jiv/u1R8+hfp7M/CVcZ81s5IE6GARgg9qJ1hXN1EeiPWYbh1XiQouSzQH+AD1Xe5h5+AYXVYh0AAA==";
+
+        let unsigned_psbt = Psbt::from_str(UNSIGNED_PSBT).unwrap();
+        let signed_psbt = Psbt::from_str(SIGNED_PSBT).unwrap();
+
+        let secp = Secp256k1::new();
+
+        let (_, alice_pub, _) = setup_keys(ALICE_TPRV_STR, ALICE_BOB_PATH, &secp);
+        let (_, bob_pub, _) = setup_keys(BOB_TPRV_STR, ALICE_BOB_PATH, &secp);
+
+        let desc = descriptor!(tr(bob_pub, pk(alice_pub))).unwrap();
+        let (wallet_desc, _) = desc
+            .into_wallet_descriptor(&secp, Network::Testnet)
+            .unwrap();
+
+        let policy_unsigned = wallet_desc
+            .extract_policy(
+                &SignersContainer::default(),
+                BuildSatisfaction::Psbt(&unsigned_psbt),
+                &secp,
+            )
+            .unwrap()
+            .unwrap();
+        let policy_signed = wallet_desc
+            .extract_policy(
+                &SignersContainer::default(),
+                BuildSatisfaction::Psbt(&signed_psbt),
+                &secp,
+            )
+            .unwrap()
+            .unwrap();
+
+        assert!(
+            matches!(policy_unsigned.item, SatisfiableItem::Thresh { ref items, threshold: 1 } if items.len() == 2)
+        );
+        assert!(
+            matches!(policy_unsigned.satisfaction, Satisfaction::Partial { n: 2, m: 1, items, .. } if items.is_empty())
+        );
+
+        assert!(
+            matches!(policy_signed.item, SatisfiableItem::Thresh { ref items, threshold: 1 } if items.len() == 2)
+        );
+        assert!(
+            matches!(policy_signed.satisfaction, Satisfaction::PartialComplete { n: 2, m: 1, items, .. } if items == vec![0, 1])
+        );
+
+        let satisfied_items = match policy_signed.item {
+            SatisfiableItem::Thresh { items, .. } => items,
+            _ => unreachable!(),
+        };
+
+        assert_eq!(
+            satisfied_items[0].satisfaction,
+            Satisfaction::Complete {
+                condition: Default::default()
+            }
+        );
+        assert_eq!(
+            satisfied_items[1].satisfaction,
+            Satisfaction::Complete {
+                condition: Default::default()
+            }
+        );
+    }
 }
