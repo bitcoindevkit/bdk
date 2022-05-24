@@ -44,7 +44,6 @@ use serde::ser::SerializeMap;
 use serde::{Serialize, Serializer};
 
 use bitcoin::hashes::*;
-use bitcoin::secp256k1;
 use bitcoin::util::bip32::Fingerprint;
 use bitcoin::{PublicKey, XOnlyPublicKey};
 
@@ -766,27 +765,25 @@ fn make_generic_signature<M: Fn() -> SatisfiableItem, F: Fn(&Psbt) -> bool>(
 }
 
 fn generic_sig_in_psbt<
+    // C is for "check", it's a closure we use to *check* if a psbt input contains the signature
+    // for a specific key
     C: Fn(&PsbtInput, &SinglePubKey) -> bool,
-    M: Fn(&secp256k1::PublicKey) -> SinglePubKey,
+    // E is for "extract", it extracts a key from the bip32 derivations found in the psbt input
+    E: Fn(&PsbtInput, Fingerprint) -> Option<SinglePubKey>,
 >(
     psbt: &Psbt,
     key: &DescriptorPublicKey,
     secp: &SecpCtx,
-    map: M,
     check: C,
+    extract: E,
 ) -> bool {
     //TODO check signature validity
     psbt.inputs.iter().all(|input| match key {
         DescriptorPublicKey::SinglePub(DescriptorSinglePub { key, .. }) => check(input, key),
         DescriptorPublicKey::XPub(xpub) => {
-            let pubkey = input
-                .bip32_derivation
-                .iter()
-                .find(|(_, (f, _))| *f == xpub.root_fingerprint(secp))
-                .map(|(p, _)| p);
             //TODO check actual derivation matches
-            match pubkey {
-                Some(pubkey) => check(input, &map(pubkey)),
+            match extract(input, xpub.root_fingerprint(secp)) {
+                Some(pubkey) => check(input, &pubkey),
                 None => false,
             }
         }
@@ -838,7 +835,6 @@ impl<T: ScriptContext + 'static> SigExt for T {
                 psbt,
                 key,
                 secp,
-                |pk| SinglePubKey::XOnly((*pk).into()),
                 |input, pk| {
                     let pk = match pk {
                         SinglePubKey::XOnly(pk) => pk,
@@ -851,16 +847,29 @@ impl<T: ScriptContext + 'static> SigExt for T {
                         input.tap_script_sigs.keys().any(|(sk, _)| sk == pk)
                     }
                 },
+                |input, fing| {
+                    input
+                        .tap_key_origins
+                        .iter()
+                        .find(|(_, (_, (f, _)))| f == &fing)
+                        .map(|(pk, _)| SinglePubKey::XOnly(*pk))
+                },
             )
         } else {
             generic_sig_in_psbt(
                 psbt,
                 key,
                 secp,
-                |pk| SinglePubKey::FullKey(PublicKey::new(*pk)),
                 |input, pk| match pk {
                     SinglePubKey::FullKey(pk) => input.partial_sigs.contains_key(pk),
                     _ => false,
+                },
+                |input, fing| {
+                    input
+                        .bip32_derivation
+                        .iter()
+                        .find(|(_, (f, _))| f == &fing)
+                        .map(|(pk, _)| SinglePubKey::FullKey(PublicKey::new(*pk)))
                 },
             )
         }
