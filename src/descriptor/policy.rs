@@ -67,17 +67,16 @@ use super::XKeyUtils;
 use bitcoin::util::psbt::{Input as PsbtInput, PartiallySignedTransaction as Psbt};
 use miniscript::psbt::PsbtInputSatisfier;
 
-/// Raw public key or extended key fingerprint
-#[derive(Debug, Clone, Default, Serialize)]
-pub struct PkOrF {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pubkey: Option<PublicKey>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    x_only_pubkey: Option<XOnlyPublicKey>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pubkey_hash: Option<hash160::Hash>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    fingerprint: Option<Fingerprint>,
+/// A unique identifier for a key
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PkOrF {
+    /// A legacy public key
+    Pubkey(PublicKey),
+    /// A x-only public key
+    XOnlyPubkey(XOnlyPublicKey),
+    /// An extended key fingerprint
+    Fingerprint(Fingerprint),
 }
 
 impl PkOrF {
@@ -86,27 +85,18 @@ impl PkOrF {
             DescriptorPublicKey::SinglePub(DescriptorSinglePub {
                 key: SinglePubKey::FullKey(pk),
                 ..
-            }) => PkOrF {
-                pubkey: Some(*pk),
-                ..Default::default()
-            },
+            }) => PkOrF::Pubkey(*pk),
             DescriptorPublicKey::SinglePub(DescriptorSinglePub {
                 key: SinglePubKey::XOnly(pk),
                 ..
-            }) => PkOrF {
-                x_only_pubkey: Some(*pk),
-                ..Default::default()
-            },
-            DescriptorPublicKey::XPub(xpub) => PkOrF {
-                fingerprint: Some(xpub.root_fingerprint(secp)),
-                ..Default::default()
-            },
+            }) => PkOrF::XOnlyPubkey(*pk),
+            DescriptorPublicKey::XPub(xpub) => PkOrF::Fingerprint(xpub.root_fingerprint(secp)),
         }
     }
 }
 
 /// An item that needs to be satisfied
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "type", rename_all = "UPPERCASE")]
 pub enum SatisfiableItem {
     // Leaves
@@ -260,7 +250,7 @@ where
 }
 
 /// Represent if and how much a policy item is satisfied by the wallet's descriptor
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "type", rename_all = "UPPERCASE")]
 pub enum Satisfaction {
     /// Only a partial satisfaction of some kind of threshold policy
@@ -434,7 +424,7 @@ impl From<bool> for Satisfaction {
 }
 
 /// Descriptor spending policy
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Policy {
     /// Identifier for this policy node
     pub id: String,
@@ -1116,9 +1106,7 @@ mod test {
             .unwrap()
             .unwrap();
 
-        assert!(
-            matches!(&policy.item, EcdsaSignature(pk_or_f) if pk_or_f.fingerprint.unwrap() == fingerprint)
-        );
+        assert!(matches!(&policy.item, EcdsaSignature(PkOrF::Fingerprint(f)) if f == &fingerprint));
         assert!(matches!(&policy.contribution, Satisfaction::None));
 
         let desc = descriptor!(wpkh(prvkey)).unwrap();
@@ -1131,9 +1119,7 @@ mod test {
             .unwrap()
             .unwrap();
 
-        assert!(
-            matches!(&policy.item, EcdsaSignature(pk_or_f) if pk_or_f.fingerprint.unwrap() == fingerprint)
-        );
+        assert!(matches!(&policy.item, EcdsaSignature(PkOrF::Fingerprint(f)) if f == &fingerprint));
         assert!(
             matches!(&policy.contribution, Satisfaction::Complete {condition} if condition.csv == None && condition.timelock == None)
         );
@@ -1157,8 +1143,8 @@ mod test {
 
         assert!(
             matches!(&policy.item, Multisig { keys, threshold } if threshold == &2usize
-            && keys[0].fingerprint.unwrap() == fingerprint0
-            && keys[1].fingerprint.unwrap() == fingerprint1)
+            && keys[0] == PkOrF::Fingerprint(fingerprint0)
+            && keys[1] == PkOrF::Fingerprint(fingerprint1))
         );
         // TODO should this be "Satisfaction::None" since we have no prv keys?
         // TODO should items and conditions not be empty?
@@ -1188,8 +1174,8 @@ mod test {
             .unwrap();
         assert!(
             matches!(&policy.item, Multisig { keys, threshold } if threshold == &2usize
-            && keys[0].fingerprint.unwrap() == fingerprint0
-            && keys[1].fingerprint.unwrap() == fingerprint1)
+            && keys[0] == PkOrF::Fingerprint(fingerprint0)
+            && keys[1] == PkOrF::Fingerprint(fingerprint1))
         );
 
         assert!(
@@ -1221,8 +1207,8 @@ mod test {
 
         assert!(
             matches!(&policy.item, Multisig { keys, threshold } if threshold == &1
-            && keys[0].fingerprint.unwrap() == fingerprint0
-            && keys[1].fingerprint.unwrap() == fingerprint1)
+            && keys[0] == PkOrF::Fingerprint(fingerprint0)
+            && keys[1] == PkOrF::Fingerprint(fingerprint1))
         );
         assert!(
             matches!(&policy.contribution, Satisfaction::PartialComplete { n, m, items, conditions, .. } if n == &2
@@ -1253,8 +1239,8 @@ mod test {
 
         assert!(
             matches!(&policy.item, Multisig { keys, threshold } if threshold == &2
-            && keys[0].fingerprint.unwrap() == fingerprint0
-            && keys[1].fingerprint.unwrap() == fingerprint1)
+            && keys[0] == PkOrF::Fingerprint(fingerprint0)
+            && keys[1] == PkOrF::Fingerprint(fingerprint1))
         );
 
         assert!(
@@ -1284,9 +1270,7 @@ mod test {
             .unwrap()
             .unwrap();
 
-        assert!(
-            matches!(&policy.item, EcdsaSignature(pk_or_f) if pk_or_f.fingerprint.unwrap() == fingerprint)
-        );
+        assert!(matches!(&policy.item, EcdsaSignature(PkOrF::Fingerprint(f)) if f == &fingerprint));
         assert!(matches!(&policy.contribution, Satisfaction::None));
 
         let desc = descriptor!(wpkh(prvkey)).unwrap();
@@ -1300,9 +1284,7 @@ mod test {
             .unwrap()
             .unwrap();
 
-        assert!(
-            matches!(&policy.item, EcdsaSignature(pk_or_f) if pk_or_f.fingerprint.unwrap() == fingerprint)
-        );
+        assert!(matches!(&policy.item, EcdsaSignature(PkOrF::Fingerprint(f)) if f == &fingerprint));
         assert!(
             matches!(&policy.contribution, Satisfaction::Complete {condition} if condition.csv == None && condition.timelock == None)
         );
@@ -1329,8 +1311,8 @@ mod test {
 
         assert!(
             matches!(&policy.item, Multisig { keys, threshold } if threshold == &1
-            && keys[0].fingerprint.unwrap() == fingerprint0
-            && keys[1].fingerprint.unwrap() == fingerprint1)
+            && keys[0] == PkOrF::Fingerprint(fingerprint0)
+            && keys[1] == PkOrF::Fingerprint(fingerprint1))
         );
         assert!(
             matches!(&policy.contribution, Satisfaction::PartialComplete { n, m, items, conditions, .. } if n == &2

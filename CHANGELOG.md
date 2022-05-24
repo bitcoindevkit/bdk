@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add traits to reuse `Blockchain`s across multiple wallets (`BlockchainFactory` and `StatelessBlockchain`).
 - Upgrade to rust-bitcoin `0.28`
 - If using the `sqlite-db` feature all cached wallet data is deleted due to a possible UTXO inconsistency, a wallet.sync will recreate it  
+- Update `PkOrF` in the policy module to become an enum
 
 ## [v0.18.0] - [v0.17.0]
 
