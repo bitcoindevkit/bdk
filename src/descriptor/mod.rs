@@ -335,7 +335,12 @@ impl<'s> DescriptorScripts for DerivedDescriptor<'s> {
             DescriptorType::Sh => Some(self.explicit_script().unwrap()),
             DescriptorType::Bare => Some(self.explicit_script().unwrap()),
             DescriptorType::ShSortedMulti => Some(self.explicit_script().unwrap()),
-            _ => None,
+            DescriptorType::ShWshSortedMulti => Some(self.explicit_script().unwrap().to_v0_p2wsh()),
+            DescriptorType::Pkh
+            | DescriptorType::Wpkh
+            | DescriptorType::Tr
+            | DescriptorType::Wsh
+            | DescriptorType::WshSortedMulti => None,
         }
     }
 
@@ -346,7 +351,13 @@ impl<'s> DescriptorScripts for DerivedDescriptor<'s> {
             DescriptorType::WshSortedMulti | DescriptorType::ShWshSortedMulti => {
                 Some(self.explicit_script().unwrap())
             }
-            _ => None,
+            DescriptorType::Bare
+            | DescriptorType::Sh
+            | DescriptorType::Pkh
+            | DescriptorType::Wpkh
+            | DescriptorType::ShSortedMulti
+            | DescriptorType::Tr
+            | DescriptorType::ShWpkh => None,
         }
     }
 }
@@ -516,6 +527,7 @@ mod test {
     use bitcoin::hashes::hex::FromHex;
     use bitcoin::secp256k1::Secp256k1;
     use bitcoin::util::{bip32, psbt};
+    use bitcoin::Script;
 
     use super::*;
     use crate::psbt::PsbtUtils;
@@ -778,5 +790,23 @@ mod test {
             result.unwrap_err(),
             DescriptorError::DuplicatedKeys
         ));
+    }
+
+    #[test]
+    fn test_sh_wsh_sortedmulti_redeemscript() {
+        use super::{AsDerived, DescriptorScripts};
+
+        let secp = Secp256k1::new();
+
+        let descriptor = "sh(wsh(sortedmulti(3,tpubDEsqS36T4DVsKJd9UH8pAKzrkGBYPLEt9jZMwpKtzh1G6mgYehfHt9WCgk7MJG5QGSFWf176KaBNoXbcuFcuadAFKxDpUdMDKGBha7bY3QM/0/*,tpubDF3cpwfs7fMvXXuoQbohXtLjNM6ehwYT287LWtmLsd4r77YLg6MZg4vTETx5MSJ2zkfigbYWu31VA2Z2Vc1cZugCYXgS7FQu6pE8V6TriEH/0/*,tpubDE1SKfcW76Tb2AASv5bQWMuScYNAdoqLHoexw13sNDXwmUhQDBbCD3QAedKGLhxMrWQdMDKENzYtnXPDRvexQPNuDrLj52wAjHhNEm8sJ4p/0/*,tpubDFLc6oXwJmhm3FGGzXkfJNTh2KitoY3WhmmQvuAjMhD8YbyWn5mAqckbxXfm2etM3p5J6JoTpSrMqRSTfMLtNW46poDaEZJ1kjd3csRSjwH/0/*,tpubDEWD9NBeWP59xXmdqSNt4VYdtTGwbpyP8WS962BuqpQeMZmX9Pur14dhXdZT5a7wR1pK6dPtZ9fP5WR493hPzemnBvkfLLYxnUjAKj1JCQV/0/*,tpubDEHyZkkwd7gZWCTgQuYQ9C4myF2hMEmyHsBCCmLssGqoqUxeT3gzohF5uEVURkf9TtmeepJgkSUmteac38FwZqirjApzNX59XSHLcwaTZCH/0/*,tpubDEqLouCekwnMUWN486kxGzD44qVgeyuqHyxUypNEiQt5RnUZNJe386TKPK99fqRV1vRkZjYAjtXGTECz98MCsdLcnkM67U6KdYRzVubeCgZ/0/*)))";
+        let (descriptor, _) =
+            into_wallet_descriptor_checked(descriptor, &secp, Network::Testnet).unwrap();
+
+        let descriptor = descriptor.as_derived(0, &secp);
+
+        let script = Script::from_str("5321022f533b667e2ea3b36e21961c9fe9dca340fbe0af5210173a83ae0337ab20a57621026bb53a98e810bd0ee61a0ed1164ba6c024786d76554e793e202dc6ce9c78c4ea2102d5b8a7d66a41ffdb6f4c53d61994022e886b4f45001fb158b95c9164d45f8ca3210324b75eead2c1f9c60e8adeb5e7009fec7a29afcdb30d829d82d09562fe8bae8521032d34f8932200833487bd294aa219dcbe000b9f9b3d824799541430009f0fa55121037468f8ea99b6c64788398b5ad25480cad08f4b0d65be54ce3a55fd206b5ae4722103f72d3d96663b0ea99b0aeb0d7f273cab11a8de37885f1dddc8d9112adb87169357ae").unwrap();
+
+        assert_eq!(descriptor.psbt_redeem_script(), Some(script.to_v0_p2wsh()));
+        assert_eq!(descriptor.psbt_witness_script(), Some(script));
     }
 }
