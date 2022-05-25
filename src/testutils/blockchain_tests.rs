@@ -27,6 +27,7 @@ impl TestClient {
 
         let mut conf = bitcoind::Conf::default();
         conf.view_stdout = log_enabled!(Level::Debug);
+        conf.p2p = bitcoind::P2P::Yes;
         let bitcoind = BitcoinD::with_conf(bitcoind_exe, &conf).unwrap();
 
         let mut conf = electrsd::Conf::default();

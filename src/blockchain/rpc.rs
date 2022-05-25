@@ -378,7 +378,22 @@ impl ConfigurableBlockchain for RpcBlockchain {
                 client.load_wallet(&wallet_name)?;
                 debug!("wallet loaded {:?}", wallet_name);
             } else {
-                client.create_wallet(&wallet_name, Some(true), None, None, None)?;
+                // this call doesn't work with core v0.23.0
+                //client.create_wallet(&wallet_name, Some(true), None, None, None)?;
+                {
+                    // TODO: move back to api call when https://github.com/rust-bitcoin/rust-bitcoincore-rpc/issues/225 is fixed
+                    let args = [
+                        Value::String(wallet_name.clone()),
+                        Value::Bool(true),
+                        Value::Bool(false),
+                        Value::Null,
+                        Value::Bool(false),
+                        Value::Bool(false),
+                        Value::Bool(false),
+                        Value::Bool(false),
+                    ];
+                    let _: Value = client.call("createwallet", &args)?;
+                }
                 debug!("wallet created {:?}", wallet_name);
             }
         }
