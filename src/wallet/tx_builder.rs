@@ -547,10 +547,15 @@ impl<'a, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderContext>
 
     /// Set the current blockchain height.
     ///
-    /// This will be used to set the nLockTime for preventing fee sniping. If the current height is
-    /// not provided, the last sync height will be used instead.
-    ///
+    /// This will be used to:
+    /// 1. Set the nLockTime for preventing fee sniping.
     /// **Note**: This will be ignored if you manually specify a nlocktime using [`TxBuilder::nlocktime`].
+    /// 2. Decide whether coinbase outputs are mature or not. If the coinbase outputs are not
+    ///    mature at `current_height`, we ignore them in the coin selection.
+    ///    If you want to create a transaction that spends immature coinbase inputs, manually
+    ///    add them using [`TxBuilder::add_utxos`].
+    ///
+    /// In both cases, if you don't provide a current height, we use the last sync height.
     pub fn set_current_height(&mut self, height: u32) -> &mut Self {
         self.params.current_height = Some(height);
         self
