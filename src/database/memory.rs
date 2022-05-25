@@ -486,15 +486,23 @@ impl ConfigurableDatabase for MemoryDatabase {
 /// don't have `test` set.
 macro_rules! populate_test_db {
     ($db:expr, $tx_meta:expr, $current_height:expr$(,)?) => {{
+        $crate::populate_test_db!($db, $tx_meta, $current_height, (@coinbase false))
+    }};
+    ($db:expr, $tx_meta:expr, $current_height:expr, (@coinbase $is_coinbase:expr)$(,)?) => {{
         use std::str::FromStr;
         use $crate::database::BatchOperations;
         let mut db = $db;
         let tx_meta = $tx_meta;
         let current_height: Option<u32> = $current_height;
+        let input = if $is_coinbase {
+            vec![$crate::bitcoin::TxIn::default()]
+        } else {
+            vec![]
+        };
         let tx = $crate::bitcoin::Transaction {
             version: 1,
             lock_time: 0,
-            input: vec![],
+            input,
             output: tx_meta
                 .output
                 .iter()
