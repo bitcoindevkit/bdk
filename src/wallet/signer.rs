@@ -667,6 +667,10 @@ pub struct SignOptions {
     ///
     /// Defaults to `false` which will only allow signing using `SIGHASH_ALL`.
     pub allow_all_sighashes: bool,
+    /// Whether to remove partial_sigs from psbt inputs while finalizing psbt.
+    ///
+    /// Defaults to `true` which will remove partial_sigs after finalizing.
+    pub remove_partial_sigs: bool,
 }
 
 #[allow(clippy::derivable_impls)]
@@ -676,6 +680,7 @@ impl Default for SignOptions {
             trust_witness_utxo: false,
             assume_height: None,
             allow_all_sighashes: false,
+            remove_partial_sigs: true,
         }
     }
 }
