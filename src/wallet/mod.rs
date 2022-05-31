@@ -4289,6 +4289,8 @@ pub(crate) mod test {
 
     #[test]
     fn test_taproot_psbt_input_tap_tree() {
+        use crate::bitcoin::psbt::serialize::Deserialize;
+        use crate::bitcoin::psbt::TapTree;
         use bitcoin::hashes::hex::FromHex;
         use bitcoin::util::taproot;
 
@@ -4327,6 +4329,11 @@ pub(crate) mod test {
         assert_eq!(
             psbt.inputs[0].tap_internal_key,
             psbt.outputs[0].tap_internal_key
+        );
+
+        assert_eq!(
+            psbt.outputs[0].tap_tree,
+            Some(TapTree::deserialize(&Vec::<u8>::from_hex("01c022208aee2b8120a5f157f1223f72b5e62b825831a27a9fdf427db7cc697494d4a642ac01c0222051494dc22e24a32fe9dcfbd7e85faf345fa1df296fb49d156e859ef345201295ac",).unwrap()).unwrap())
         );
     }
 
