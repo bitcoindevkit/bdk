@@ -387,11 +387,33 @@ macro_rules! bdk_blockchain_tests {
                 Wallet::new(&descriptors.0.to_string(), descriptors.1.as_ref(), Network::Regtest, MemoryDatabase::new()).unwrap()
             }
 
-            fn init_single_sig() -> (Wallet<MemoryDatabase>, $blockchain, (String, Option<String>), TestClient) {
+            enum WalletType {
+                WpkhSingleSig,
+                TaprootKeySpend,
+                TaprootScriptSpend,
+                TaprootScriptSpend2,
+                TaprootScriptSpend3,
+            }
+
+            fn init_wallet(ty: WalletType) -> (Wallet<MemoryDatabase>, $blockchain, (String, Option<String>), TestClient) {
                 let _ = env_logger::try_init();
 
-                let descriptors = testutils! {
-                    @descriptors ( "wpkh(Alice)" ) ( "wpkh(Alice)" ) ( @keys ( "Alice" => (@generate_xprv "/44'/0'/0'/0/*", "/44'/0'/0'/1/*") ) )
+                let descriptors = match ty {
+                    WalletType::WpkhSingleSig => testutils! {
+                        @descriptors ( "wpkh(Alice)" ) ( "wpkh(Alice)" ) ( @keys ( "Alice" => (@generate_xprv "/44'/0'/0'/0/*", "/44'/0'/0'/1/*") ) )
+                    },
+                    WalletType::TaprootKeySpend => testutils! {
+                        @descriptors ( "tr(Alice)" ) ( "tr(Alice)" ) ( @keys ( "Alice" => (@generate_xprv "/44'/0'/0'/0/*", "/44'/0'/0'/1/*") ) )
+                    },
+                    WalletType::TaprootScriptSpend => testutils! {
+                        @descriptors ( "tr(Key,and_v(v:pk(Script),older(6)))" ) ( "tr(Key,and_v(v:pk(Script),older(6)))" ) ( @keys ( "Key" => (@literal "30e14486f993d5a2d222770e97286c56cec5af115e1fb2e0065f476a0fcf8788"), "Script" => (@generate_xprv "/0/*", "/1/*") ) )
+                    },
+                    WalletType::TaprootScriptSpend2 => testutils! {
+                        @descriptors ( "tr(Alice,pk(Bob))" ) ( "tr(Alice,pk(Bob))" ) ( @keys ( "Alice" => (@literal "30e14486f993d5a2d222770e97286c56cec5af115e1fb2e0065f476a0fcf8788"), "Bob" => (@generate_xprv "/0/*", "/1/*") ) )
+                    },
+                    WalletType::TaprootScriptSpend3 => testutils! {
+                        @descriptors ( "tr(Alice,{pk(Bob),pk(Carol)})" ) ( "tr(Alice,{pk(Bob),pk(Carol)})" ) ( @keys ( "Alice" => (@literal "30e14486f993d5a2d222770e97286c56cec5af115e1fb2e0065f476a0fcf8788"), "Bob" => (@generate_xprv "/0/*", "/1/*"), "Carol" => (@generate_xprv "/0/*", "/1/*") ) )
+                    },
                 };
 
                 let test_client = TestClient::default();
@@ -403,6 +425,10 @@ macro_rules! bdk_blockchain_tests {
                 wallet.sync(&blockchain, SyncOptions::default()).unwrap();
 
                 (wallet, blockchain, descriptors, test_client)
+            }
+
+            fn init_single_sig() -> (Wallet<MemoryDatabase>, $blockchain, (String, Option<String>), TestClient) {
+                init_wallet(WalletType::WpkhSingleSig)
             }
 
             #[test]
@@ -1202,6 +1228,130 @@ macro_rules! bdk_blockchain_tests {
                 blockchain.broadcast(&tx).unwrap();
 
                 wallet.sync(&blockchain, SyncOptions::default()).unwrap();
+            }
+
+            #[test]
+            fn test_taproot_key_spend() {
+                let (wallet, blockchain, descriptors, mut test_client) = init_wallet(WalletType::TaprootKeySpend);
+
+                let _ = test_client.receive(testutils! {
+                    @tx ( (@external descriptors, 0) => 50_000 )
+                });
+                wallet.sync(&blockchain, SyncOptions::default()).unwrap();
+                assert_eq!(wallet.get_balance().unwrap(), 50_000);
+
+                let tx = {
+                    let mut builder = wallet.build_tx();
+                    builder.add_recipient(test_client.get_node_address(None).script_pubkey(), 25_000);
+                    let (mut psbt, _details) = builder.finish().unwrap();
+                    wallet.sign(&mut psbt, Default::default()).unwrap();
+                    psbt.extract_tx()
+                };
+                blockchain.broadcast(&tx).unwrap();
+            }
+
+            #[test]
+            fn test_taproot_script_spend() {
+                let (wallet, blockchain, descriptors, mut test_client) = init_wallet(WalletType::TaprootScriptSpend);
+
+                let _ = test_client.receive(testutils! {
+                    @tx ( (@external descriptors, 0) => 50_000 ) ( @confirmations 6 )
+                });
+                wallet.sync(&blockchain, SyncOptions::default()).unwrap();
+                assert_eq!(wallet.get_balance().unwrap(), 50_000);
+
+                let ext_policy = wallet.policies(KeychainKind::External).unwrap().unwrap();
+                let int_policy = wallet.policies(KeychainKind::Internal).unwrap().unwrap();
+
+                let ext_path = vec![(ext_policy.id.clone(), vec![1])].into_iter().collect();
+                let int_path = vec![(int_policy.id.clone(), vec![1])].into_iter().collect();
+
+                let tx = {
+                    let mut builder = wallet.build_tx();
+                    builder.add_recipient(test_client.get_node_address(None).script_pubkey(), 25_000)
+                        .policy_path(ext_path, KeychainKind::External)
+                        .policy_path(int_path, KeychainKind::Internal);
+                    let (mut psbt, _details) = builder.finish().unwrap();
+                    wallet.sign(&mut psbt, Default::default()).unwrap();
+                    psbt.extract_tx()
+                };
+                blockchain.broadcast(&tx).unwrap();
+            }
+
+            #[test]
+            fn test_sign_taproot_core_keyspend_psbt() {
+                test_sign_taproot_core_psbt(WalletType::TaprootKeySpend);
+            }
+
+            #[test]
+            fn test_sign_taproot_core_scriptspend2_psbt() {
+                test_sign_taproot_core_psbt(WalletType::TaprootScriptSpend2);
+            }
+
+            #[test]
+            fn test_sign_taproot_core_scriptspend3_psbt() {
+                test_sign_taproot_core_psbt(WalletType::TaprootScriptSpend3);
+            }
+
+            fn test_sign_taproot_core_psbt(wallet_type: WalletType) {
+                use std::str::FromStr;
+                use serde_json;
+                use bitcoincore_rpc::jsonrpc::serde_json::Value;
+                use bitcoincore_rpc::{Auth, Client, RpcApi};
+
+                let (wallet, _blockchain, _descriptors, test_client) = init_wallet(wallet_type);
+
+                // TODO replace once rust-bitcoincore-rpc with PR 174 released
+                // https://github.com/rust-bitcoin/rust-bitcoincore-rpc/pull/174
+                let _createwallet_result: Value = test_client.bitcoind.client.call("createwallet", &["taproot_wallet".into(), true.into(), true.into(), serde_json::to_value("").unwrap(), false.into(), true.into(), true.into(), false.into()]).expect("created wallet");
+
+                let external_descriptor = wallet.get_descriptor_for_keychain(KeychainKind::External);
+
+                // TODO replace once bitcoind released with support for rust-bitcoincore-rpc PR 174
+                let taproot_wallet_client = Client::new(&test_client.bitcoind.rpc_url_with_wallet("taproot_wallet"), Auth::CookieFile(test_client.bitcoind.params.cookie_file.clone())).unwrap();
+
+                let descriptor_info = taproot_wallet_client.get_descriptor_info(external_descriptor.to_string().as_str()).expect("descriptor info");
+
+                let import_descriptor_args = json!([{
+                    "desc": descriptor_info.descriptor,
+                    "active": true,
+                    "timestamp": "now",
+                    "label":"taproot key spend",
+                }]);
+                let _importdescriptors_result: Value = taproot_wallet_client.call("importdescriptors", &[import_descriptor_args]).expect("import wallet");
+                let generate_to_address: bitcoin::Address = taproot_wallet_client.call("getnewaddress", &["test address".into(), "bech32m".into()]).expect("new address");
+                let _generatetoaddress_result = taproot_wallet_client.generate_to_address(101, &generate_to_address).expect("generated to address");
+                let send_to_address = wallet.get_address($crate::wallet::AddressIndex::New).unwrap().address.to_string();
+                let change_address = wallet.get_address($crate::wallet::AddressIndex::New).unwrap().address.to_string();
+                let send_addr_amounts = json!([{
+                    send_to_address: "0.4321"
+                }]);
+                let send_options = json!({
+                    "change_address": change_address,
+                    "psbt": true,
+                });
+                let send_result: Value = taproot_wallet_client.call("send", &[send_addr_amounts, Value::Null, "unset".into(), Value::Null, send_options]).expect("send psbt");
+                let core_psbt = send_result["psbt"].as_str().expect("core psbt str");
+
+                use bitcoin::util::psbt::PartiallySignedTransaction;
+
+                // Test parsing core created PSBT
+                let mut psbt = PartiallySignedTransaction::from_str(&core_psbt).expect("core taproot psbt");
+
+                // Test signing core created PSBT
+                let finalized = wallet.sign(&mut psbt, Default::default()).unwrap();
+                assert_eq!(finalized, true);
+
+                // Test with updated psbt
+                let update_result: Value = taproot_wallet_client.call("utxoupdatepsbt", &[core_psbt.into()]).expect("update psbt utxos");
+                let core_updated_psbt = update_result.as_str().expect("core updated psbt");
+
+                // Test parsing core created and updated PSBT
+                let mut psbt = PartiallySignedTransaction::from_str(&core_updated_psbt).expect("core taproot psbt");
+
+                // Test signing core created and updated PSBT
+                let finalized = wallet.sign(&mut psbt, Default::default()).unwrap();
+                assert_eq!(finalized, true);
             }
         }
     };

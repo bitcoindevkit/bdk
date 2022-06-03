@@ -24,13 +24,15 @@ use std::sync::Arc;
 use bitcoin::secp256k1::Secp256k1;
 
 use bitcoin::consensus::encode::serialize;
-use bitcoin::util::psbt;
+use bitcoin::util::{psbt, taproot};
 use bitcoin::{
-    Address, EcdsaSighashType, Network, OutPoint, Script, Transaction, TxOut, Txid, Witness,
+    Address, EcdsaSighashType, Network, OutPoint, SchnorrSighashType, Script, Transaction, TxOut,
+    Txid, Witness,
 };
 
 use miniscript::descriptor::DescriptorTrait;
 use miniscript::psbt::PsbtInputSatisfier;
+use miniscript::ToPublicKey;
 
 #[allow(unused_imports)]
 use log::{debug, error, info, trace};
@@ -50,7 +52,7 @@ pub use utils::IsDust;
 
 use address_validator::AddressValidator;
 use coin_selection::DefaultCoinSelectionAlgorithm;
-use signer::{SignOptions, Signer, SignerOrdering, SignersContainer};
+use signer::{SignOptions, SignerOrdering, SignersContainer, TransactionSigner};
 use tx_builder::{BumpFee, CreateTx, FeePolicy, TxBuilder, TxParams};
 use utils::{check_nlocktime, check_nsequence_rbf, After, Older, SecpCtx};
 
@@ -79,10 +81,10 @@ const CACHE_ADDR_BATCH_SIZE: u32 = 100;
 ///
 /// 1. output *descriptors* from which it can derive addresses.
 /// 2. A [`Database`] where it tracks transactions and utxos related to the descriptors.
-/// 3. [`Signer`]s that can contribute signatures to addresses instantiated from the descriptors.
+/// 3. [`signer`]s that can contribute signatures to addresses instantiated from the descriptors.
 ///
 /// [`Database`]: crate::database::Database
-/// [`Signer`]: crate::signer::Signer
+/// [`signer`]: crate::signer
 #[derive(Debug)]
 pub struct Wallet<D> {
     descriptor: ExtendedDescriptor,
@@ -197,7 +199,7 @@ where
             KeychainKind::External,
             get_checksum(&descriptor.to_string())?.as_bytes(),
         )?;
-        let signers = Arc::new(SignersContainer::from(keymap));
+        let signers = Arc::new(SignersContainer::build(keymap, &descriptor, &secp));
         let (change_descriptor, change_signers) = match change_descriptor {
             Some(desc) => {
                 let (change_descriptor, change_keymap) =
@@ -207,7 +209,11 @@ where
                     get_checksum(&change_descriptor.to_string())?.as_bytes(),
                 )?;
 
-                let change_signers = Arc::new(SignersContainer::from(change_keymap));
+                let change_signers = Arc::new(SignersContainer::build(
+                    change_keymap,
+                    &change_descriptor,
+                    &secp,
+                ));
                 // if !parsed.same_structure(descriptor.as_ref()) {
                 //     return Err(Error::DifferentDescriptorStructure);
                 // }
@@ -457,7 +463,7 @@ where
         &mut self,
         keychain: KeychainKind,
         ordering: SignerOrdering,
-        signer: Arc<dyn Signer>,
+        signer: Arc<dyn TransactionSigner>,
     ) {
         let signers = match keychain {
             KeychainKind::External => Arc::make_mut(&mut self.signers),
@@ -1008,23 +1014,27 @@ where
         // this helps us doing our job later
         self.add_input_hd_keypaths(psbt)?;
 
-        // If we aren't allowed to use `witness_utxo`, ensure that every input but finalized one
+        // If we aren't allowed to use `witness_utxo`, ensure that every input (except p2tr and finalized ones)
         // has the `non_witness_utxo`
         if !sign_options.trust_witness_utxo
             && psbt
                 .inputs
                 .iter()
                 .filter(|i| i.final_script_witness.is_none() && i.final_script_sig.is_none())
+                .filter(|i| i.tap_internal_key.is_none() && i.tap_merkle_root.is_none())
                 .any(|i| i.non_witness_utxo.is_none())
         {
             return Err(Error::Signer(signer::SignerError::MissingNonWitnessUtxo));
         }
 
         // If the user hasn't explicitly opted-in, refuse to sign the transaction unless every input
-        // is using `SIGHASH_ALL`
+        // is using `SIGHASH_ALL` or `SIGHASH_DEFAULT` for taproot
         if !sign_options.allow_all_sighashes
             && !psbt.inputs.iter().all(|i| {
-                i.sighash_type.is_none() || i.sighash_type == Some(EcdsaSighashType::All.into())
+                i.sighash_type.is_none()
+                    || i.sighash_type == Some(EcdsaSighashType::All.into())
+                    || i.sighash_type == Some(SchnorrSighashType::All.into())
+                    || i.sighash_type == Some(SchnorrSighashType::Default.into())
             })
         {
             return Err(Error::Signer(signer::SignerError::NonStandardSighash));
@@ -1036,13 +1046,7 @@ where
             .iter()
             .chain(self.change_signers.signers().iter())
         {
-            if signer.sign_whole_tx() {
-                signer.sign(psbt, None, &self.secp)?;
-            } else {
-                for index in 0..psbt.inputs.len() {
-                    signer.sign(psbt, Some(index), &self.secp)?;
-                }
-            }
+            signer.sign_transaction(psbt, &self.secp)?;
         }
 
         // attempt to finalize
@@ -1227,7 +1231,7 @@ where
 
         let derived_descriptor = descriptor.as_derived(index, &self.secp);
 
-        let hd_keypaths = derived_descriptor.get_hd_keypaths(&self.secp)?;
+        let hd_keypaths = derived_descriptor.get_hd_keypaths(&self.secp);
         let script = derived_descriptor.script_pubkey();
 
         for validator in &self.address_validators {
@@ -1438,7 +1442,15 @@ where
                     psbt_input: foreign_psbt_input,
                     outpoint,
                 } => {
-                    if !params.only_witness_utxo && foreign_psbt_input.non_witness_utxo.is_none() {
+                    let is_taproot = foreign_psbt_input
+                        .witness_utxo
+                        .as_ref()
+                        .map(|txout| txout.script_pubkey.is_v1_p2tr())
+                        .unwrap_or(false);
+                    if !is_taproot
+                        && !params.only_witness_utxo
+                        && foreign_psbt_input.non_witness_utxo.is_none()
+                    {
                         return Err(Error::Generic(format!(
                             "Missing non_witness_utxo on foreign utxo {}",
                             outpoint
@@ -1463,7 +1475,32 @@ where
                 let (desc, _) = self._get_descriptor_for_keychain(keychain);
                 let derived_descriptor = desc.as_derived(child, &self.secp);
 
-                psbt_output.bip32_derivation = derived_descriptor.get_hd_keypaths(&self.secp)?;
+                if let miniscript::Descriptor::Tr(tr) = &derived_descriptor {
+                    let tap_tree = if tr.taptree().is_some() {
+                        let mut builder = taproot::TaprootBuilder::new();
+                        for (depth, ms) in tr.iter_scripts() {
+                            let script = ms.encode();
+                            builder = builder.add_leaf(depth, script).expect(
+                                "Computing spend data on a valid Tree should always succeed",
+                            );
+                        }
+                        Some(
+                            psbt::TapTree::from_builder(builder)
+                                .expect("The tree should always be valid"),
+                        )
+                    } else {
+                        None
+                    };
+                    psbt_output.tap_tree = tap_tree;
+                    psbt_output
+                        .tap_key_origins
+                        .append(&mut derived_descriptor.get_tap_key_origins(&self.secp));
+                    psbt_output.tap_internal_key = Some(tr.internal_key().to_x_only_pubkey());
+                } else {
+                    psbt_output
+                        .bip32_derivation
+                        .append(&mut derived_descriptor.get_hd_keypaths(&self.secp));
+                }
                 if params.include_output_redeem_witness_script {
                     psbt_output.witness_script = derived_descriptor.psbt_witness_script();
                     psbt_output.redeem_script = derived_descriptor.psbt_redeem_script();
@@ -1496,17 +1533,35 @@ where
 
         let desc = self.get_descriptor_for_keychain(keychain);
         let derived_descriptor = desc.as_derived(child, &self.secp);
-        psbt_input.bip32_derivation = derived_descriptor.get_hd_keypaths(&self.secp)?;
+
+        if let miniscript::Descriptor::Tr(tr) = &derived_descriptor {
+            psbt_input.tap_key_origins = derived_descriptor.get_tap_key_origins(&self.secp);
+            psbt_input.tap_internal_key = Some(tr.internal_key().to_x_only_pubkey());
+
+            let spend_info = tr.spend_info();
+            psbt_input.tap_merkle_root = spend_info.merkle_root();
+            psbt_input.tap_scripts = spend_info
+                .as_script_map()
+                .keys()
+                .filter_map(|script_ver| {
+                    spend_info
+                        .control_block(script_ver)
+                        .map(|cb| (cb, script_ver.clone()))
+                })
+                .collect();
+        } else {
+            psbt_input.bip32_derivation = derived_descriptor.get_hd_keypaths(&self.secp);
+        }
 
         psbt_input.redeem_script = derived_descriptor.psbt_redeem_script();
         psbt_input.witness_script = derived_descriptor.psbt_witness_script();
 
         let prev_output = utxo.outpoint;
         if let Some(prev_tx) = self.database.borrow().get_raw_tx(&prev_output.txid)? {
-            if desc.is_witness() {
+            if desc.is_witness() || desc.is_taproot() {
                 psbt_input.witness_utxo = Some(prev_tx.output[prev_output.vout as usize].clone());
             }
-            if !desc.is_witness() || !only_witness_utxo {
+            if !desc.is_taproot() && (!desc.is_witness() || !only_witness_utxo) {
                 psbt_input.non_witness_utxo = Some(prev_tx);
             }
         }
@@ -1532,12 +1587,19 @@ where
                 {
                     debug!("Found descriptor {:?}/{}", keychain, child);
 
-                    // merge hd_keypaths
+                    // merge hd_keypaths or tap_key_origins
                     let desc = self.get_descriptor_for_keychain(keychain);
-                    let mut hd_keypaths = desc
-                        .as_derived(child, &self.secp)
-                        .get_hd_keypaths(&self.secp)?;
-                    psbt_input.bip32_derivation.append(&mut hd_keypaths);
+                    if desc.is_taproot() {
+                        let mut tap_key_origins = desc
+                            .as_derived(child, &self.secp)
+                            .get_tap_key_origins(&self.secp);
+                        psbt_input.tap_key_origins.append(&mut tap_key_origins);
+                    } else {
+                        let mut hd_keypaths = desc
+                            .as_derived(child, &self.secp)
+                            .get_hd_keypaths(&self.secp);
+                        psbt_input.bip32_derivation.append(&mut hd_keypaths);
+                    }
                 }
             }
         }
@@ -1792,6 +1854,26 @@ pub(crate) mod test {
         "wsh(and_v(v:pk(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW),after(100000)))"
     }
 
+    pub(crate) fn get_test_tr_single_sig() -> &'static str {
+        "tr(cNJmN3fH9DDbDt131fQNkVakkpzawJBSeybCUNmP1BovpmGQ45xG)"
+    }
+
+    pub(crate) fn get_test_tr_with_taptree() -> &'static str {
+        "tr(b511bd5771e47ee27558b1765e87b541668304ec567721c7b880edc0a010da55,{pk(cPZzKuNmpuUjD1e8jUU4PVzy2b5LngbSip8mBsxf4e7rSFZVb4Uh),pk(8aee2b8120a5f157f1223f72b5e62b825831a27a9fdf427db7cc697494d4a642)})"
+    }
+
+    pub(crate) fn get_test_tr_repeated_key() -> &'static str {
+        "tr(b511bd5771e47ee27558b1765e87b541668304ec567721c7b880edc0a010da55,{and_v(v:pk(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW),after(100)),and_v(v:pk(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW),after(200))})"
+    }
+
+    pub(crate) fn get_test_tr_single_sig_xprv() -> &'static str {
+        "tr(tprv8ZgxMBicQKsPdDArR4xSAECuVxeX1jwwSXR4ApKbkYgZiziDc4LdBy2WvJeGDfUSE4UT4hHhbgEwbdq8ajjUHiKDegkwrNU6V55CxcxonVN/*)"
+    }
+
+    pub(crate) fn get_test_tr_with_taptree_xprv() -> &'static str {
+        "tr(b511bd5771e47ee27558b1765e87b541668304ec567721c7b880edc0a010da55,{pk(tprv8ZgxMBicQKsPdDArR4xSAECuVxeX1jwwSXR4ApKbkYgZiziDc4LdBy2WvJeGDfUSE4UT4hHhbgEwbdq8ajjUHiKDegkwrNU6V55CxcxonVN/*),pk(8aee2b8120a5f157f1223f72b5e62b825831a27a9fdf427db7cc697494d4a642)})"
+    }
+
     macro_rules! assert_fee_rate {
         ($tx:expr, $fees:expr, $fee_rate:expr $( ,@dust_change $( $dust_change:expr )* )* $( ,@add_signature $( $add_signature:expr )* )* ) => ({
             let mut tx = $tx.clone();
@@ -1819,6 +1901,17 @@ pub(crate) mod test {
                 assert!(tx_fee_rate >= fee_rate, "Expected fee rate of at least {:?}, the tx has {:?}", fee_rate, tx_fee_rate);
             }
         });
+    }
+
+    macro_rules! from_str {
+        ($e:expr, $t:ty) => {{
+            use std::str::FromStr;
+            <$t>::from_str($e).unwrap()
+        }};
+
+        ($e:expr) => {
+            from_str!($e, _)
+        };
     }
 
     #[test]
@@ -4095,6 +4188,387 @@ pub(crate) mod test {
                 keychain: KeychainKind::Internal,
             },
             "when there's no internal descriptor it should just use external"
+        );
+    }
+
+    #[test]
+    fn test_taproot_psbt_populate_tap_key_origins() {
+        let (wallet, _, _) = get_funded_wallet(get_test_tr_single_sig_xprv());
+        let addr = wallet.get_address(AddressIndex::New).unwrap();
+
+        let mut builder = wallet.build_tx();
+        builder.add_recipient(addr.script_pubkey(), 25_000);
+        let (psbt, _) = builder.finish().unwrap();
+
+        assert_eq!(
+            psbt.inputs[0]
+                .tap_key_origins
+                .clone()
+                .into_iter()
+                .collect::<Vec<_>>(),
+            vec![(
+                from_str!("b96d3a3dc76a4fc74e976511b23aecb78e0754c23c0ed7a6513e18cbbc7178e9"),
+                (vec![], (from_str!("f6a5cb8b"), from_str!("m/0")))
+            )],
+            "Wrong input tap_key_origins"
+        );
+        assert_eq!(
+            psbt.outputs[0]
+                .tap_key_origins
+                .clone()
+                .into_iter()
+                .collect::<Vec<_>>(),
+            vec![(
+                from_str!("e9b03068cf4a2621d4f81e68f6c4216e6bd260fe6edf6acc55c8d8ae5aeff0a8"),
+                (vec![], (from_str!("f6a5cb8b"), from_str!("m/1")))
+            )],
+            "Wrong output tap_key_origins"
+        );
+    }
+
+    #[test]
+    fn test_taproot_psbt_populate_tap_key_origins_repeated_key() {
+        let (wallet, _, _) = get_funded_wallet(get_test_tr_repeated_key());
+        let addr = wallet.get_address(AddressIndex::New).unwrap();
+
+        let path = vec![("rn4nre9c".to_string(), vec![0])]
+            .into_iter()
+            .collect();
+
+        let mut builder = wallet.build_tx();
+        builder
+            .add_recipient(addr.script_pubkey(), 25_000)
+            .policy_path(path, KeychainKind::External);
+        let (psbt, _) = builder.finish().unwrap();
+
+        assert_eq!(
+            psbt.inputs[0]
+                .tap_key_origins
+                .clone()
+                .into_iter()
+                .collect::<Vec<_>>(),
+            vec![(
+                from_str!("2b0558078bec38694a84933d659303e2575dae7e91685911454115bfd64487e3"),
+                (
+                    vec![
+                        from_str!(
+                            "858ad7a7d7f270e2c490c4d6ba00c499e46b18fdd59ea3c2c47d20347110271e"
+                        ),
+                        from_str!(
+                            "f6e927ad4492c051fe325894a4f5f14538333b55a35f099876be42009ec8f903"
+                        )
+                    ],
+                    (Default::default(), Default::default())
+                )
+            )],
+            "Wrong input tap_key_origins"
+        );
+        assert_eq!(
+            psbt.outputs[0]
+                .tap_key_origins
+                .clone()
+                .into_iter()
+                .collect::<Vec<_>>(),
+            vec![(
+                from_str!("2b0558078bec38694a84933d659303e2575dae7e91685911454115bfd64487e3"),
+                (
+                    vec![
+                        from_str!(
+                            "858ad7a7d7f270e2c490c4d6ba00c499e46b18fdd59ea3c2c47d20347110271e"
+                        ),
+                        from_str!(
+                            "f6e927ad4492c051fe325894a4f5f14538333b55a35f099876be42009ec8f903"
+                        )
+                    ],
+                    (Default::default(), Default::default())
+                )
+            )],
+            "Wrong output tap_key_origins"
+        );
+    }
+
+    #[test]
+    fn test_taproot_psbt_input_tap_tree() {
+        use crate::bitcoin::psbt::serialize::Deserialize;
+        use crate::bitcoin::psbt::TapTree;
+        use bitcoin::hashes::hex::FromHex;
+        use bitcoin::util::taproot;
+
+        let (wallet, _, _) = get_funded_wallet(get_test_tr_with_taptree());
+        let addr = wallet.get_address(AddressIndex::Peek(0)).unwrap();
+
+        let mut builder = wallet.build_tx();
+        builder.drain_to(addr.script_pubkey()).drain_wallet();
+        let (psbt, _) = builder.finish().unwrap();
+
+        assert_eq!(
+            psbt.inputs[0].tap_merkle_root,
+            Some(
+                FromHex::from_hex(
+                    "61f81509635053e52d9d1217545916167394490da2287aca4693606e43851986"
+                )
+                .unwrap()
+            ),
+        );
+        assert_eq!(
+            psbt.inputs[0].tap_scripts.clone().into_iter().collect::<Vec<_>>(),
+            vec![
+                (taproot::ControlBlock::from_slice(&Vec::<u8>::from_hex("c0b511bd5771e47ee27558b1765e87b541668304ec567721c7b880edc0a010da55b7ef769a745e625ed4b9a4982a4dc08274c59187e73e6f07171108f455081cb2").unwrap()).unwrap(), (from_str!("208aee2b8120a5f157f1223f72b5e62b825831a27a9fdf427db7cc697494d4a642ac"), taproot::LeafVersion::TapScript)),
+                (taproot::ControlBlock::from_slice(&Vec::<u8>::from_hex("c0b511bd5771e47ee27558b1765e87b541668304ec567721c7b880edc0a010da55b9a515f7be31a70186e3c5937ee4a70cc4b4e1efe876c1d38e408222ffc64834").unwrap()).unwrap(), (from_str!("2051494dc22e24a32fe9dcfbd7e85faf345fa1df296fb49d156e859ef345201295ac"), taproot::LeafVersion::TapScript)),
+            ],
+        );
+        assert_eq!(
+            psbt.inputs[0].tap_internal_key,
+            Some(from_str!(
+                "b511bd5771e47ee27558b1765e87b541668304ec567721c7b880edc0a010da55"
+            ))
+        );
+
+        // Since we are creating an output to the same address as the input, assert that the
+        // internal_key is the same
+        assert_eq!(
+            psbt.inputs[0].tap_internal_key,
+            psbt.outputs[0].tap_internal_key
+        );
+
+        assert_eq!(
+            psbt.outputs[0].tap_tree,
+            Some(TapTree::deserialize(&Vec::<u8>::from_hex("01c022208aee2b8120a5f157f1223f72b5e62b825831a27a9fdf427db7cc697494d4a642ac01c0222051494dc22e24a32fe9dcfbd7e85faf345fa1df296fb49d156e859ef345201295ac",).unwrap()).unwrap())
+        );
+    }
+
+    #[test]
+    fn test_taproot_sign_missing_witness_utxo() {
+        let (wallet, _, _) = get_funded_wallet(get_test_tr_single_sig());
+        let addr = wallet.get_address(New).unwrap();
+        let mut builder = wallet.build_tx();
+        builder.drain_to(addr.script_pubkey()).drain_wallet();
+        let (mut psbt, _) = builder.finish().unwrap();
+        let witness_utxo = psbt.inputs[0].witness_utxo.take();
+
+        let result = wallet.sign(
+            &mut psbt,
+            SignOptions {
+                allow_all_sighashes: true,
+                ..Default::default()
+            },
+        );
+        assert!(
+            result.is_err(),
+            "Signing should have failed because the witness_utxo is missing"
+        );
+        assert!(
+            matches!(
+                result.unwrap_err(),
+                Error::Signer(SignerError::MissingWitnessUtxo)
+            ),
+            "Signing failed with the wrong error type"
+        );
+
+        // restore the witness_utxo
+        psbt.inputs[0].witness_utxo = witness_utxo;
+
+        let result = wallet.sign(
+            &mut psbt,
+            SignOptions {
+                allow_all_sighashes: true,
+                ..Default::default()
+            },
+        );
+
+        assert!(result.is_ok(), "Signing should have worked");
+        assert!(
+            result.unwrap(),
+            "Should finalize the input since we can produce signatures"
+        );
+    }
+
+    #[test]
+    fn test_taproot_foreign_utxo() {
+        let (wallet1, _, _) = get_funded_wallet(get_test_wpkh());
+        let (wallet2, _, _) = get_funded_wallet(get_test_tr_single_sig());
+
+        let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
+        let utxo = wallet2.list_unspent().unwrap().remove(0);
+        let psbt_input = wallet2.get_psbt_input(utxo.clone(), None, false).unwrap();
+        let foreign_utxo_satisfaction = wallet2
+            .get_descriptor_for_keychain(KeychainKind::External)
+            .max_satisfaction_weight()
+            .unwrap();
+
+        assert!(
+            psbt_input.non_witness_utxo.is_none(),
+            "`non_witness_utxo` should never be populated for taproot"
+        );
+
+        let mut builder = wallet1.build_tx();
+        builder
+            .add_recipient(addr.script_pubkey(), 60_000)
+            .add_foreign_utxo(utxo.outpoint, psbt_input, foreign_utxo_satisfaction)
+            .unwrap();
+        let (psbt, details) = builder.finish().unwrap();
+
+        assert_eq!(
+            details.sent - details.received,
+            10_000 + details.fee.unwrap_or(0),
+            "we should have only net spent ~10_000"
+        );
+
+        assert!(
+            psbt.unsigned_tx
+                .input
+                .iter()
+                .any(|input| input.previous_output == utxo.outpoint),
+            "foreign_utxo should be in there"
+        );
+    }
+
+    fn test_spend_from_wallet(wallet: Wallet<AnyDatabase>) {
+        let addr = wallet.get_address(AddressIndex::New).unwrap();
+
+        let mut builder = wallet.build_tx();
+        builder.add_recipient(addr.script_pubkey(), 25_000);
+        let (mut psbt, _) = builder.finish().unwrap();
+
+        assert!(
+            wallet.sign(&mut psbt, Default::default()).unwrap(),
+            "Unable to finalize tx"
+        );
+    }
+
+    #[test]
+    fn test_taproot_key_spend() {
+        let (wallet, _, _) = get_funded_wallet(get_test_tr_single_sig());
+        test_spend_from_wallet(wallet);
+
+        let (wallet, _, _) = get_funded_wallet(get_test_tr_single_sig_xprv());
+        test_spend_from_wallet(wallet);
+    }
+
+    #[test]
+    fn test_taproot_script_spend() {
+        let (wallet, _, _) = get_funded_wallet(get_test_tr_with_taptree());
+        test_spend_from_wallet(wallet);
+
+        let (wallet, _, _) = get_funded_wallet(get_test_tr_with_taptree_xprv());
+        test_spend_from_wallet(wallet);
+    }
+
+    #[test]
+    fn test_taproot_sign_derive_index_from_psbt() {
+        let (wallet, _, _) = get_funded_wallet(get_test_tr_single_sig_xprv());
+
+        let addr = wallet.get_address(AddressIndex::New).unwrap();
+
+        let mut builder = wallet.build_tx();
+        builder.add_recipient(addr.script_pubkey(), 25_000);
+        let (mut psbt, _) = builder.finish().unwrap();
+
+        // re-create the wallet with an empty db
+        let wallet_empty = Wallet::new(
+            get_test_tr_single_sig_xprv(),
+            None,
+            Network::Regtest,
+            AnyDatabase::Memory(MemoryDatabase::new()),
+        )
+        .unwrap();
+
+        // signing with an empty db means that we will only look at the psbt to infer the
+        // derivation index
+        assert!(
+            wallet_empty.sign(&mut psbt, Default::default()).unwrap(),
+            "Unable to finalize tx"
+        );
+    }
+
+    #[test]
+    fn test_taproot_sign_explicit_sighash_all() {
+        let (wallet, _, _) = get_funded_wallet(get_test_tr_single_sig());
+        let addr = wallet.get_address(New).unwrap();
+        let mut builder = wallet.build_tx();
+        builder
+            .drain_to(addr.script_pubkey())
+            .sighash(SchnorrSighashType::All.into())
+            .drain_wallet();
+        let (mut psbt, _) = builder.finish().unwrap();
+
+        let result = wallet.sign(&mut psbt, Default::default());
+        assert!(
+            result.is_ok(),
+            "Signing should work because SIGHASH_ALL is safe"
+        )
+    }
+
+    #[test]
+    fn test_taproot_sign_non_default_sighash() {
+        let sighash = SchnorrSighashType::NonePlusAnyoneCanPay;
+
+        let (wallet, _, _) = get_funded_wallet(get_test_tr_single_sig());
+        let addr = wallet.get_address(New).unwrap();
+        let mut builder = wallet.build_tx();
+        builder
+            .drain_to(addr.script_pubkey())
+            .sighash(sighash.into())
+            .drain_wallet();
+        let (mut psbt, _) = builder.finish().unwrap();
+
+        let witness_utxo = psbt.inputs[0].witness_utxo.take();
+
+        let result = wallet.sign(&mut psbt, Default::default());
+        assert!(
+            result.is_err(),
+            "Signing should have failed because the TX uses non-standard sighashes"
+        );
+        assert!(
+            matches!(
+                result.unwrap_err(),
+                Error::Signer(SignerError::NonStandardSighash)
+            ),
+            "Signing failed with the wrong error type"
+        );
+
+        // try again after opting-in
+        let result = wallet.sign(
+            &mut psbt,
+            SignOptions {
+                allow_all_sighashes: true,
+                ..Default::default()
+            },
+        );
+        assert!(
+            result.is_err(),
+            "Signing should have failed because the witness_utxo is missing"
+        );
+        assert!(
+            matches!(
+                result.unwrap_err(),
+                Error::Signer(SignerError::MissingWitnessUtxo)
+            ),
+            "Signing failed with the wrong error type"
+        );
+
+        // restore the witness_utxo
+        psbt.inputs[0].witness_utxo = witness_utxo;
+
+        let result = wallet.sign(
+            &mut psbt,
+            SignOptions {
+                allow_all_sighashes: true,
+                ..Default::default()
+            },
+        );
+
+        assert!(result.is_ok(), "Signing should have worked");
+        assert!(
+            result.unwrap(),
+            "Should finalize the input since we can produce signatures"
+        );
+
+        let extracted = psbt.extract_tx();
+        assert_eq!(
+            *extracted.input[0].witness.to_vec()[0].last().unwrap(),
+            sighash as u8,
+            "The signature should have been made with the right sighash"
         );
     }
 }

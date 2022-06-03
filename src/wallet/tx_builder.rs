@@ -334,8 +334,9 @@ impl<'a, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderContext>
     /// 1. The `psbt_input` does not contain a `witness_utxo` or `non_witness_utxo`.
     /// 2. The data in `non_witness_utxo` does not match what is in `outpoint`.
     ///
-    /// Note unless you set [`only_witness_utxo`] any `psbt_input` you pass to this method must
-    /// have `non_witness_utxo` set otherwise you will get an error when [`finish`] is called.
+    /// Note unless you set [`only_witness_utxo`] any non-taproot `psbt_input` you pass to this
+    /// method must have `non_witness_utxo` set otherwise you will get an error when [`finish`]
+    /// is called.
     ///
     /// [`only_witness_utxo`]: Self::only_witness_utxo
     /// [`finish`]: Self::finish

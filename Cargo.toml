@@ -15,7 +15,7 @@ license = "MIT OR Apache-2.0"
 bdk-macros = "^0.6"
 log = "^0.4"
 miniscript = { version = "7.0", features = ["use-serde"] }
-bitcoin = { version = "0.28", features = ["use-serde", "base64"] }
+bitcoin = { version = "0.28.1", features = ["use-serde", "base64", "rand"] }
 serde = { version = "^1.0", features = ["derive"] }
 serde_json = { version = "^1.0" }
 rand = "^0.7"

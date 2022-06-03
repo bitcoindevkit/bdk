@@ -14,15 +14,15 @@
 //! This module contains generic utilities to work with descriptors, plus some re-exported types
 //! from [`miniscript`].
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 use std::ops::Deref;
 
-use bitcoin::secp256k1;
 use bitcoin::util::bip32::{ChildNumber, DerivationPath, ExtendedPubKey, Fingerprint, KeySource};
-use bitcoin::util::psbt;
+use bitcoin::util::{psbt, taproot};
+use bitcoin::{secp256k1, PublicKey, XOnlyPublicKey};
 use bitcoin::{Network, Script, TxOut};
 
-use miniscript::descriptor::{DescriptorType, InnerXKey};
+use miniscript::descriptor::{DescriptorType, InnerXKey, SinglePubKey};
 pub use miniscript::{
     descriptor::DescriptorXKey, descriptor::KeyMap, descriptor::Wildcard, Descriptor,
     DescriptorPublicKey, Legacy, Miniscript, ScriptContext, Segwitv0,
@@ -60,6 +60,13 @@ pub type DerivedDescriptor<'s> = Descriptor<DerivedDescriptorKey<'s>>;
 /// [`psbt::Input`]: bitcoin::util::psbt::Input
 /// [`psbt::Output`]: bitcoin::util::psbt::Output
 pub type HdKeyPaths = BTreeMap<secp256k1::PublicKey, KeySource>;
+
+/// Alias for the type of maps that represent taproot key origins in a [`psbt::Input`] or
+/// [`psbt::Output`]
+///
+/// [`psbt::Input`]: bitcoin::util::psbt::Input
+/// [`psbt::Output`]: bitcoin::util::psbt::Output
+pub type TapKeyOrigins = BTreeMap<bitcoin::XOnlyPublicKey, (Vec<taproot::TapLeafHash>, KeySource)>;
 
 /// Trait for types which can be converted into an [`ExtendedDescriptor`] and a [`KeyMap`] usable by a wallet in a specific [`Network`]
 pub trait IntoWalletDescriptor {
@@ -302,7 +309,8 @@ where
 }
 
 pub(crate) trait DerivedDescriptorMeta {
-    fn get_hd_keypaths(&self, secp: &SecpCtx) -> Result<HdKeyPaths, DescriptorError>;
+    fn get_hd_keypaths(&self, secp: &SecpCtx) -> HdKeyPaths;
+    fn get_tap_key_origins(&self, secp: &SecpCtx) -> TapKeyOrigins;
 }
 
 pub(crate) trait DescriptorMeta {
@@ -312,6 +320,16 @@ pub(crate) trait DescriptorMeta {
     fn derive_from_hd_keypaths<'s>(
         &self,
         hd_keypaths: &HdKeyPaths,
+        secp: &'s SecpCtx,
+    ) -> Option<DerivedDescriptor<'s>>;
+    fn derive_from_tap_key_origins<'s>(
+        &self,
+        tap_key_origins: &TapKeyOrigins,
+        secp: &'s SecpCtx,
+    ) -> Option<DerivedDescriptor<'s>>;
+    fn derive_from_psbt_key_origins<'s>(
+        &self,
+        key_origins: BTreeMap<Fingerprint, (&DerivationPath, SinglePubKey)>,
         secp: &'s SecpCtx,
     ) -> Option<DerivedDescriptor<'s>>;
     fn derive_from_psbt_input<'s>(
@@ -393,59 +411,122 @@ impl DescriptorMeta for ExtendedDescriptor {
         Ok(answer)
     }
 
-    fn derive_from_hd_keypaths<'s>(
+    fn derive_from_psbt_key_origins<'s>(
         &self,
-        hd_keypaths: &HdKeyPaths,
+        key_origins: BTreeMap<Fingerprint, (&DerivationPath, SinglePubKey)>,
         secp: &'s SecpCtx,
     ) -> Option<DerivedDescriptor<'s>> {
-        let index: HashMap<_, _> = hd_keypaths.values().map(|(a, b)| (a, b)).collect();
+        // Ensure that deriving `xpub` with `path` yields `expected`
+        let verify_key = |xpub: &DescriptorXKey<ExtendedPubKey>,
+                          path: &DerivationPath,
+                          expected: &SinglePubKey| {
+            let derived = xpub
+                .xkey
+                .derive_pub(secp, path)
+                .expect("The path should never contain hardened derivation steps")
+                .public_key;
+
+            match expected {
+                SinglePubKey::FullKey(pk) if &PublicKey::new(derived) == pk => true,
+                SinglePubKey::XOnly(pk) if &XOnlyPublicKey::from(derived) == pk => true,
+                _ => false,
+            }
+        };
 
         let mut path_found = None;
-        self.for_each_key(|key| {
-            if path_found.is_some() {
-                // already found a matching path, we are done
-                return true;
-            }
 
+        // using `for_any_key` should make this stop as soon as we return `true`
+        self.for_any_key(|key| {
             if let DescriptorPublicKey::XPub(xpub) = key.as_key().deref() {
-                // Check if the key matches one entry in our `index`. If it does, `matches()` will
+                // Check if the key matches one entry in our `key_origins`. If it does, `matches()` will
                 // return the "prefix" that matched, so we remove that prefix from the full path
-                // found in `index` and save it in `derive_path`. We expect this to be a derivation
+                // found in `key_origins` and save it in `derive_path`. We expect this to be a derivation
                 // path of length 1 if the key is `wildcard` and an empty path otherwise.
                 let root_fingerprint = xpub.root_fingerprint(secp);
-                let derivation_path: Option<Vec<ChildNumber>> = index
+                let derive_path = key_origins
                     .get_key_value(&root_fingerprint)
-                    .and_then(|(fingerprint, path)| {
-                        xpub.matches(&(**fingerprint, (*path).clone()), secp)
+                    .and_then(|(fingerprint, (path, expected))| {
+                        xpub.matches(&(*fingerprint, (*path).clone()), secp)
+                            .zip(Some((path, expected)))
                     })
-                    .map(|prefix| {
-                        index
-                            .get(&xpub.root_fingerprint(secp))
-                            .unwrap()
+                    .and_then(|(prefix, (full_path, expected))| {
+                        let derive_path = full_path
                             .into_iter()
                             .skip(prefix.into_iter().count())
                             .cloned()
-                            .collect()
+                            .collect::<DerivationPath>();
+
+                        // `derive_path` only contains the replacement index for the wildcard, if present, or
+                        // an empty path for fixed descriptors. To verify the key we also need the normal steps
+                        // that come before the wildcard, so we take them directly from `xpub` and then append
+                        // the final index
+                        if verify_key(
+                            xpub,
+                            &xpub.derivation_path.extend(derive_path.clone()),
+                            expected,
+                        ) {
+                            Some(derive_path)
+                        } else {
+                            log::debug!(
+                                "Key `{}` derived with {} yields an unexpected key",
+                                root_fingerprint,
+                                derive_path
+                            );
+                            None
+                        }
                     });
 
-                match derivation_path {
+                match derive_path {
                     Some(path) if xpub.wildcard != Wildcard::None && path.len() == 1 => {
                         // Ignore hardened wildcards
                         if let ChildNumber::Normal { index } = path[0] {
-                            path_found = Some(index)
+                            path_found = Some(index);
+                            return true;
                         }
                     }
                     Some(path) if xpub.wildcard == Wildcard::None && path.is_empty() => {
-                        path_found = Some(0)
+                        path_found = Some(0);
+                        return true;
                     }
                     _ => {}
                 }
             }
 
-            true
+            false
         });
 
         path_found.map(|path| self.as_derived(path, secp))
+    }
+
+    fn derive_from_hd_keypaths<'s>(
+        &self,
+        hd_keypaths: &HdKeyPaths,
+        secp: &'s SecpCtx,
+    ) -> Option<DerivedDescriptor<'s>> {
+        // "Convert" an hd_keypaths map to the format required by `derive_from_psbt_key_origins`
+        let key_origins = hd_keypaths
+            .iter()
+            .map(|(pk, (fingerprint, path))| {
+                (
+                    *fingerprint,
+                    (path, SinglePubKey::FullKey(PublicKey::new(*pk))),
+                )
+            })
+            .collect();
+        self.derive_from_psbt_key_origins(key_origins, secp)
+    }
+
+    fn derive_from_tap_key_origins<'s>(
+        &self,
+        tap_key_origins: &TapKeyOrigins,
+        secp: &'s SecpCtx,
+    ) -> Option<DerivedDescriptor<'s>> {
+        // "Convert" a tap_key_origins map to the format required by `derive_from_psbt_key_origins`
+        let key_origins = tap_key_origins
+            .iter()
+            .map(|(pk, (_, (fingerprint, path)))| (*fingerprint, (path, SinglePubKey::XOnly(*pk))))
+            .collect();
+        self.derive_from_psbt_key_origins(key_origins, secp)
     }
 
     fn derive_from_psbt_input<'s>(
@@ -455,6 +536,9 @@ impl DescriptorMeta for ExtendedDescriptor {
         secp: &'s SecpCtx,
     ) -> Option<DerivedDescriptor<'s>> {
         if let Some(derived) = self.derive_from_hd_keypaths(&psbt_input.bip32_derivation, secp) {
+            return Some(derived);
+        }
+        if let Some(derived) = self.derive_from_tap_key_origins(&psbt_input.tap_key_origins, secp) {
             return Some(derived);
         }
         if self.is_deriveable() {
@@ -497,7 +581,7 @@ impl DescriptorMeta for ExtendedDescriptor {
 }
 
 impl<'s> DerivedDescriptorMeta for DerivedDescriptor<'s> {
-    fn get_hd_keypaths(&self, secp: &SecpCtx) -> Result<HdKeyPaths, DescriptorError> {
+    fn get_hd_keypaths(&self, secp: &SecpCtx) -> HdKeyPaths {
         let mut answer = BTreeMap::new();
         self.for_each_key(|key| {
             if let DescriptorPublicKey::XPub(xpub) = key.as_key().deref() {
@@ -515,7 +599,64 @@ impl<'s> DerivedDescriptorMeta for DerivedDescriptor<'s> {
             true
         });
 
-        Ok(answer)
+        answer
+    }
+
+    fn get_tap_key_origins(&self, secp: &SecpCtx) -> TapKeyOrigins {
+        use miniscript::ToPublicKey;
+
+        let mut answer = BTreeMap::new();
+        let mut insert_path = |pk: &DerivedDescriptorKey<'_>, lh| {
+            let key_origin = match pk.deref() {
+                DescriptorPublicKey::XPub(xpub) => {
+                    Some((xpub.root_fingerprint(secp), xpub.full_path(&[])))
+                }
+                DescriptorPublicKey::SinglePub(_) => None,
+            };
+
+            // If this is the internal key, we only insert the key origin if it's not None.
+            // For keys found in the tap tree we always insert a key origin (because the signer
+            // looks for it to know which leaves to sign for), even though it may be None
+            match (lh, key_origin) {
+                (None, Some(ko)) => {
+                    answer
+                        .entry(pk.to_x_only_pubkey())
+                        .or_insert_with(|| (vec![], ko));
+                }
+                (Some(lh), origin) => {
+                    answer
+                        .entry(pk.to_x_only_pubkey())
+                        .or_insert_with(|| (vec![], origin.unwrap_or_default()))
+                        .0
+                        .push(lh);
+                }
+                _ => {}
+            }
+        };
+
+        if let Descriptor::Tr(tr) = &self {
+            // Internal key first, then iterate the scripts
+            insert_path(tr.internal_key(), None);
+
+            for (_, ms) in tr.iter_scripts() {
+                // Assume always the same leaf version
+                let leaf_hash = taproot::TapLeafHash::from_script(
+                    &ms.encode(),
+                    taproot::LeafVersion::TapScript,
+                );
+
+                for key in ms.iter_pk_pkh() {
+                    let key = match key {
+                        miniscript::miniscript::iter::PkPkh::PlainPubkey(pk) => pk,
+                        miniscript::miniscript::iter::PkPkh::HashedPubkey(pk) => pk,
+                    };
+
+                    insert_path(&key, Some(leaf_hash));
+                }
+            }
+        }
+
+        answer
     }
 }
 

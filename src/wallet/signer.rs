@@ -26,7 +26,7 @@
 //! # #[derive(Debug)]
 //! # struct CustomHSM;
 //! # impl CustomHSM {
-//! #     fn sign_input(&self, _psbt: &mut psbt::PartiallySignedTransaction, _input: usize) -> Result<(), SignerError> {
+//! #     fn hsm_sign_input(&self, _psbt: &mut psbt::PartiallySignedTransaction, _input: usize) -> Result<(), SignerError> {
 //! #         Ok(())
 //! #     }
 //! #     fn connect() -> Self {
@@ -47,25 +47,22 @@
 //!     }
 //! }
 //!
-//! impl Signer for CustomSigner {
-//!     fn sign(
-//!         &self,
-//!         psbt: &mut psbt::PartiallySignedTransaction,
-//!         input_index: Option<usize>,
-//!         _secp: &Secp256k1<All>,
-//!     ) -> Result<(), SignerError> {
-//!         let input_index = input_index.ok_or(SignerError::InputIndexOutOfRange)?;
-//!         self.device.sign_input(psbt, input_index)?;
-//!
-//!         Ok(())
-//!     }
-//!
+//! impl SignerCommon for CustomSigner {
 //!     fn id(&self, _secp: &Secp256k1<All>) -> SignerId {
 //!         self.device.get_id()
 //!     }
+//! }
 //!
-//!     fn sign_whole_tx(&self) -> bool {
-//!         false
+//! impl InputSigner for CustomSigner {
+//!     fn sign_input(
+//!         &self,
+//!         psbt: &mut psbt::PartiallySignedTransaction,
+//!         input_index: usize,
+//!         _secp: &Secp256k1<All>,
+//!     ) -> Result<(), SignerError> {
+//!         self.device.hsm_sign_input(psbt, input_index)?;
+//!
+//!         Ok(())
 //!     }
 //! }
 //!
@@ -85,23 +82,26 @@
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::fmt;
-use std::ops::Bound::Included;
+use std::ops::{Bound::Included, Deref};
 use std::sync::Arc;
 
 use bitcoin::blockdata::opcodes;
 use bitcoin::blockdata::script::Builder as ScriptBuilder;
 use bitcoin::hashes::{hash160, Hash};
-use bitcoin::secp256k1;
-use bitcoin::secp256k1::{Message, Secp256k1};
+use bitcoin::secp256k1::Message;
 use bitcoin::util::bip32::{ChildNumber, DerivationPath, ExtendedPrivKey, Fingerprint};
-use bitcoin::util::{ecdsa, psbt, sighash};
-use bitcoin::{EcdsaSighashType, PrivateKey, PublicKey, Script, Sighash};
+use bitcoin::util::{ecdsa, psbt, schnorr, sighash, taproot};
+use bitcoin::{secp256k1, XOnlyPublicKey};
+use bitcoin::{EcdsaSighashType, PrivateKey, PublicKey, SchnorrSighashType, Script};
 
-use miniscript::descriptor::{DescriptorSecretKey, DescriptorSinglePriv, DescriptorXKey, KeyMap};
-use miniscript::{Legacy, MiniscriptKey, Segwitv0};
+use miniscript::descriptor::{
+    Descriptor, DescriptorPublicKey, DescriptorSecretKey, DescriptorSinglePriv, DescriptorXKey,
+    KeyMap, SinglePubKey,
+};
+use miniscript::{Legacy, MiniscriptKey, Segwitv0, Tap};
 
 use super::utils::SecpCtx;
-use crate::descriptor::XKeyUtils;
+use crate::descriptor::{DescriptorMeta, XKeyUtils};
 
 /// Identifier of a signer in the `SignersContainers`. Used as a key to find the right signer among
 /// multiple of them
@@ -174,27 +174,46 @@ impl fmt::Display for SignerError {
 
 impl std::error::Error for SignerError {}
 
-/// Trait for signers
+/// Signing context
 ///
-/// This trait can be implemented to provide customized signers to the wallet. For an example see
-/// [`this module`](crate::wallet::signer)'s documentation.
-pub trait Signer: fmt::Debug + Send + Sync {
-    /// Sign a PSBT
-    ///
-    /// The `input_index` argument is only provided if the wallet doesn't declare to sign the whole
-    /// transaction in one go (see [`Signer::sign_whole_tx`]). Otherwise its value is `None` and
-    /// can be ignored.
-    fn sign(
-        &self,
-        psbt: &mut psbt::PartiallySignedTransaction,
-        input_index: Option<usize>,
-        secp: &SecpCtx,
-    ) -> Result<(), SignerError>;
+/// Used by our software signers to determine the type of signatures to make
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SignerContext {
+    /// Legacy context
+    Legacy,
+    /// Segwit v0 context (BIP 143)
+    Segwitv0,
+    /// Taproot context (BIP 340)
+    Tap {
+        /// Whether the signer can sign for the internal key or not
+        is_internal_key: bool,
+    },
+}
 
-    /// Return whether or not the signer signs the whole transaction in one go instead of every
-    /// input individually
-    fn sign_whole_tx(&self) -> bool;
+/// Wrapper structure to pair a signer with its context
+#[derive(Debug, Clone)]
+pub struct SignerWrapper<S: Sized + fmt::Debug + Clone> {
+    signer: S,
+    ctx: SignerContext,
+}
 
+impl<S: Sized + fmt::Debug + Clone> SignerWrapper<S> {
+    /// Create a wrapped signer from a signer and a context
+    pub fn new(signer: S, ctx: SignerContext) -> Self {
+        SignerWrapper { signer, ctx }
+    }
+}
+
+impl<S: Sized + fmt::Debug + Clone> Deref for SignerWrapper<S> {
+    type Target = S;
+
+    fn deref(&self) -> &Self::Target {
+        &self.signer
+    }
+}
+
+/// Common signer methods
+pub trait SignerCommon: fmt::Debug + Send + Sync {
     /// Return the [`SignerId`] for this signer
     ///
     /// The [`SignerId`] can be used to lookup a signer in the [`Wallet`](crate::Wallet)'s signers map or to
@@ -211,14 +230,65 @@ pub trait Signer: fmt::Debug + Send + Sync {
     }
 }
 
-impl Signer for DescriptorXKey<ExtendedPrivKey> {
-    fn sign(
+/// PSBT Input signer
+///
+/// This trait can be implemented to provide custom signers to the wallet. If the signer supports signing
+/// individual inputs, this trait should be implemented and BDK will provide automatically an implementation
+/// for [`TransactionSigner`].
+pub trait InputSigner: SignerCommon {
+    /// Sign a single psbt input
+    fn sign_input(
         &self,
         psbt: &mut psbt::PartiallySignedTransaction,
-        input_index: Option<usize>,
+        input_index: usize,
+        secp: &SecpCtx,
+    ) -> Result<(), SignerError>;
+}
+
+/// PSBT signer
+///
+/// This trait can be implemented when the signer can't sign inputs individually, but signs the whole transaction
+/// at once.
+pub trait TransactionSigner: SignerCommon {
+    /// Sign all the inputs of the psbt
+    fn sign_transaction(
+        &self,
+        psbt: &mut psbt::PartiallySignedTransaction,
+        secp: &SecpCtx,
+    ) -> Result<(), SignerError>;
+}
+
+impl<T: InputSigner> TransactionSigner for T {
+    fn sign_transaction(
+        &self,
+        psbt: &mut psbt::PartiallySignedTransaction,
         secp: &SecpCtx,
     ) -> Result<(), SignerError> {
-        let input_index = input_index.unwrap();
+        for input_index in 0..psbt.inputs.len() {
+            self.sign_input(psbt, input_index, secp)?;
+        }
+
+        Ok(())
+    }
+}
+
+impl SignerCommon for SignerWrapper<DescriptorXKey<ExtendedPrivKey>> {
+    fn id(&self, secp: &SecpCtx) -> SignerId {
+        SignerId::from(self.root_fingerprint(secp))
+    }
+
+    fn descriptor_secret_key(&self) -> Option<DescriptorSecretKey> {
+        Some(DescriptorSecretKey::XPrv(self.signer.clone()))
+    }
+}
+
+impl InputSigner for SignerWrapper<DescriptorXKey<ExtendedPrivKey>> {
+    fn sign_input(
+        &self,
+        psbt: &mut psbt::PartiallySignedTransaction,
+        input_index: usize,
+        secp: &SecpCtx,
+    ) -> Result<(), SignerError> {
         if input_index >= psbt.inputs.len() {
             return Err(SignerError::InputIndexOutOfRange);
         }
@@ -229,19 +299,23 @@ impl Signer for DescriptorXKey<ExtendedPrivKey> {
             return Ok(());
         }
 
+        let tap_key_origins = psbt.inputs[input_index]
+            .tap_key_origins
+            .iter()
+            .map(|(pk, (_, keysource))| (SinglePubKey::XOnly(*pk), keysource));
         let (public_key, full_path) = match psbt.inputs[input_index]
             .bip32_derivation
             .iter()
-            .filter_map(|(pk, &(fingerprint, ref path))| {
-                if self.matches(&(fingerprint, path.clone()), secp).is_some() {
-                    Some((pk, path))
+            .map(|(pk, keysource)| (SinglePubKey::FullKey(PublicKey::new(*pk)), keysource))
+            .chain(tap_key_origins)
+            .find_map(|(pk, keysource)| {
+                if self.matches(keysource, secp).is_some() {
+                    Some((pk, keysource.1.clone()))
                 } else {
                     None
                 }
-            })
-            .next()
-        {
-            Some((pk, full_path)) => (pk, full_path.clone()),
+            }) {
+            Some((pk, full_path)) => (pk, full_path),
             None => return Ok(()),
         };
 
@@ -256,40 +330,47 @@ impl Signer for DescriptorXKey<ExtendedPrivKey> {
             None => self.xkey.derive_priv(secp, &full_path).unwrap(),
         };
 
-        if &secp256k1::PublicKey::from_secret_key(secp, &derived_key.private_key) != public_key {
+        let computed_pk = secp256k1::PublicKey::from_secret_key(secp, &derived_key.private_key);
+        let valid_key = match public_key {
+            SinglePubKey::FullKey(pk) if pk.inner == computed_pk => true,
+            SinglePubKey::XOnly(x_only) if XOnlyPublicKey::from(computed_pk) == x_only => true,
+            _ => false,
+        };
+        if !valid_key {
             Err(SignerError::InvalidKey)
         } else {
             // HD wallets imply compressed keys
-            PrivateKey {
+            let priv_key = PrivateKey {
                 compressed: true,
                 network: self.xkey.network,
                 inner: derived_key.private_key,
-            }
-            .sign(psbt, Some(input_index), secp)
+            };
+
+            SignerWrapper::new(priv_key, self.ctx).sign_input(psbt, input_index, secp)
         }
-    }
-
-    fn sign_whole_tx(&self) -> bool {
-        false
-    }
-
-    fn id(&self, secp: &SecpCtx) -> SignerId {
-        SignerId::from(self.root_fingerprint(secp))
-    }
-
-    fn descriptor_secret_key(&self) -> Option<DescriptorSecretKey> {
-        Some(DescriptorSecretKey::XPrv(self.clone()))
     }
 }
 
-impl Signer for PrivateKey {
-    fn sign(
+impl SignerCommon for SignerWrapper<PrivateKey> {
+    fn id(&self, secp: &SecpCtx) -> SignerId {
+        SignerId::from(self.public_key(secp).to_pubkeyhash())
+    }
+
+    fn descriptor_secret_key(&self) -> Option<DescriptorSecretKey> {
+        Some(DescriptorSecretKey::SinglePriv(DescriptorSinglePriv {
+            key: self.signer,
+            origin: None,
+        }))
+    }
+}
+
+impl InputSigner for SignerWrapper<PrivateKey> {
+    fn sign_input(
         &self,
         psbt: &mut psbt::PartiallySignedTransaction,
-        input_index: Option<usize>,
+        input_index: usize,
         secp: &SecpCtx,
     ) -> Result<(), SignerError> {
-        let input_index = input_index.unwrap();
         if input_index >= psbt.inputs.len() || input_index >= psbt.unsigned_tx.input.len() {
             return Err(SignerError::InputIndexOutOfRange);
         }
@@ -301,48 +382,123 @@ impl Signer for PrivateKey {
         }
 
         let pubkey = PublicKey::from_private_key(secp, self);
+        let x_only_pubkey = XOnlyPublicKey::from(pubkey.inner);
+
+        if let SignerContext::Tap { is_internal_key } = self.ctx {
+            if is_internal_key && psbt.inputs[input_index].tap_key_sig.is_none() {
+                let (hash, hash_ty) = Tap::sighash(psbt, input_index, None)?;
+                sign_psbt_schnorr(
+                    &self.inner,
+                    x_only_pubkey,
+                    None,
+                    &mut psbt.inputs[input_index],
+                    hash,
+                    hash_ty,
+                    secp,
+                );
+            }
+
+            if let Some((leaf_hashes, _)) =
+                psbt.inputs[input_index].tap_key_origins.get(&x_only_pubkey)
+            {
+                let leaf_hashes = leaf_hashes
+                    .iter()
+                    .filter(|lh| {
+                        !psbt.inputs[input_index]
+                            .tap_script_sigs
+                            .contains_key(&(x_only_pubkey, **lh))
+                    })
+                    .cloned()
+                    .collect::<Vec<_>>();
+                for lh in leaf_hashes {
+                    let (hash, hash_ty) = Tap::sighash(psbt, input_index, Some(lh))?;
+                    sign_psbt_schnorr(
+                        &self.inner,
+                        x_only_pubkey,
+                        Some(lh),
+                        &mut psbt.inputs[input_index],
+                        hash,
+                        hash_ty,
+                        secp,
+                    );
+                }
+            }
+
+            return Ok(());
+        }
+
         if psbt.inputs[input_index].partial_sigs.contains_key(&pubkey) {
             return Ok(());
         }
 
-        // FIXME: use the presence of `witness_utxo` as an indication that we should make a bip143
-        // sig. Does this make sense? Should we add an extra argument to explicitly switch between
-        // these? The original idea was to declare sign() as sign<Ctx: ScriptContex>() and use Ctx,
-        // but that violates the rules for trait-objects, so we can't do it.
-        let (hash, sighash) = match psbt.inputs[input_index].witness_utxo {
-            Some(_) => Segwitv0::sighash(psbt, input_index)?,
-            None => Legacy::sighash(psbt, input_index)?,
+        let (hash, hash_ty) = match self.ctx {
+            SignerContext::Segwitv0 => Segwitv0::sighash(psbt, input_index, ())?,
+            SignerContext::Legacy => Legacy::sighash(psbt, input_index, ())?,
+            _ => return Ok(()), // handled above
         };
-
-        let sig = secp.sign_ecdsa(
-            &Message::from_slice(&hash.into_inner()[..]).unwrap(),
+        sign_psbt_ecdsa(
             &self.inner,
+            pubkey,
+            &mut psbt.inputs[input_index],
+            hash,
+            hash_ty,
+            secp,
         );
-
-        let final_signature = ecdsa::EcdsaSig {
-            sig,
-            hash_ty: sighash.ecdsa_hash_ty().unwrap(), // FIXME
-        };
-        psbt.inputs[input_index]
-            .partial_sigs
-            .insert(pubkey, final_signature);
 
         Ok(())
     }
+}
 
-    fn sign_whole_tx(&self) -> bool {
-        false
-    }
+fn sign_psbt_ecdsa(
+    secret_key: &secp256k1::SecretKey,
+    pubkey: PublicKey,
+    psbt_input: &mut psbt::Input,
+    hash: bitcoin::Sighash,
+    hash_ty: EcdsaSighashType,
+    secp: &SecpCtx,
+) {
+    let sig = secp.sign_ecdsa(
+        &Message::from_slice(&hash.into_inner()[..]).unwrap(),
+        secret_key,
+    );
 
-    fn id(&self, secp: &SecpCtx) -> SignerId {
-        SignerId::from(self.public_key(secp).to_pubkeyhash())
-    }
+    let final_signature = ecdsa::EcdsaSig { sig, hash_ty };
+    psbt_input.partial_sigs.insert(pubkey, final_signature);
+}
 
-    fn descriptor_secret_key(&self) -> Option<DescriptorSecretKey> {
-        Some(DescriptorSecretKey::SinglePriv(DescriptorSinglePriv {
-            key: *self,
-            origin: None,
-        }))
+// Calling this with `leaf_hash` = `None` will sign for key-spend
+fn sign_psbt_schnorr(
+    secret_key: &secp256k1::SecretKey,
+    pubkey: XOnlyPublicKey,
+    leaf_hash: Option<taproot::TapLeafHash>,
+    psbt_input: &mut psbt::Input,
+    hash: taproot::TapSighashHash,
+    hash_ty: SchnorrSighashType,
+    secp: &SecpCtx,
+) {
+    use schnorr::TapTweak;
+
+    let keypair = secp256k1::KeyPair::from_seckey_slice(secp, secret_key.as_ref()).unwrap();
+    let keypair = match leaf_hash {
+        None => keypair
+            .tap_tweak(secp, psbt_input.tap_merkle_root)
+            .into_inner(),
+        Some(_) => keypair, // no tweak for script spend
+    };
+
+    let sig = secp.sign_schnorr(
+        &Message::from_slice(&hash.into_inner()[..]).unwrap(),
+        &keypair,
+    );
+
+    let final_signature = schnorr::SchnorrSig { sig, hash_ty };
+
+    if let Some(lh) = leaf_hash {
+        psbt_input
+            .tap_script_sigs
+            .insert((pubkey, lh), final_signature);
+    } else {
+        psbt_input.tap_key_sig = Some(final_signature);
     }
 }
 
@@ -377,7 +533,7 @@ impl From<(SignerId, SignerOrdering)> for SignersContainerKey {
 
 /// Container for multiple signers
 #[derive(Debug, Default, Clone)]
-pub struct SignersContainer(BTreeMap<SignersContainerKey, Arc<dyn Signer>>);
+pub struct SignersContainer(BTreeMap<SignersContainerKey, Arc<dyn TransactionSigner>>);
 
 impl SignersContainer {
     /// Create a map of public keys to secret keys
@@ -388,24 +544,37 @@ impl SignersContainer {
             .filter_map(|secret| secret.as_public(secp).ok().map(|public| (public, secret)))
             .collect()
     }
-}
 
-impl From<KeyMap> for SignersContainer {
-    fn from(keymap: KeyMap) -> SignersContainer {
-        let secp = Secp256k1::new();
+    /// Build a new signer container from a [`KeyMap`]
+    ///
+    /// Also looks at the corresponding descriptor to determine the [`SignerContext`] to attach to
+    /// the signers
+    pub fn build(
+        keymap: KeyMap,
+        descriptor: &Descriptor<DescriptorPublicKey>,
+        secp: &SecpCtx,
+    ) -> SignersContainer {
         let mut container = SignersContainer::new();
 
-        for (_, secret) in keymap {
+        for (pubkey, secret) in keymap {
+            let ctx = match descriptor {
+                Descriptor::Tr(tr) => SignerContext::Tap {
+                    is_internal_key: tr.internal_key() == &pubkey,
+                },
+                _ if descriptor.is_witness() => SignerContext::Segwitv0,
+                _ => SignerContext::Legacy,
+            };
+
             match secret {
                 DescriptorSecretKey::SinglePriv(private_key) => container.add_external(
-                    SignerId::from(private_key.key.public_key(&secp).to_pubkeyhash()),
+                    SignerId::from(private_key.key.public_key(secp).to_pubkeyhash()),
                     SignerOrdering::default(),
-                    Arc::new(private_key.key),
+                    Arc::new(SignerWrapper::new(private_key.key, ctx)),
                 ),
                 DescriptorSecretKey::XPrv(xprv) => container.add_external(
-                    SignerId::from(xprv.root_fingerprint(&secp)),
+                    SignerId::from(xprv.root_fingerprint(secp)),
                     SignerOrdering::default(),
-                    Arc::new(xprv),
+                    Arc::new(SignerWrapper::new(xprv, ctx)),
                 ),
             };
         }
@@ -426,13 +595,17 @@ impl SignersContainer {
         &mut self,
         id: SignerId,
         ordering: SignerOrdering,
-        signer: Arc<dyn Signer>,
-    ) -> Option<Arc<dyn Signer>> {
+        signer: Arc<dyn TransactionSigner>,
+    ) -> Option<Arc<dyn TransactionSigner>> {
         self.0.insert((id, ordering).into(), signer)
     }
 
     /// Removes a signer from the container and returns it
-    pub fn remove(&mut self, id: SignerId, ordering: SignerOrdering) -> Option<Arc<dyn Signer>> {
+    pub fn remove(
+        &mut self,
+        id: SignerId,
+        ordering: SignerOrdering,
+    ) -> Option<Arc<dyn TransactionSigner>> {
         self.0.remove(&(id, ordering).into())
     }
 
@@ -445,12 +618,12 @@ impl SignersContainer {
     }
 
     /// Returns the list of signers in the container, sorted by lowest to highest `ordering`
-    pub fn signers(&self) -> Vec<&Arc<dyn Signer>> {
+    pub fn signers(&self) -> Vec<&Arc<dyn TransactionSigner>> {
         self.0.values().collect()
     }
 
     /// Finds the signer with lowest ordering for a given id in the container.
-    pub fn find(&self, id: SignerId) -> Option<&Arc<dyn Signer>> {
+    pub fn find(&self, id: SignerId) -> Option<&Arc<dyn TransactionSigner>> {
         self.0
             .range((
                 Included(&(id.clone(), SignerOrdering(0)).into()),
@@ -508,17 +681,27 @@ impl Default for SignOptions {
 }
 
 pub(crate) trait ComputeSighash {
+    type Extra;
+    type Sighash;
+    type SighashType;
+
     fn sighash(
         psbt: &psbt::PartiallySignedTransaction,
         input_index: usize,
-    ) -> Result<(Sighash, psbt::PsbtSighashType), SignerError>;
+        extra: Self::Extra,
+    ) -> Result<(Self::Sighash, Self::SighashType), SignerError>;
 }
 
 impl ComputeSighash for Legacy {
+    type Extra = ();
+    type Sighash = bitcoin::Sighash;
+    type SighashType = EcdsaSighashType;
+
     fn sighash(
         psbt: &psbt::PartiallySignedTransaction,
         input_index: usize,
-    ) -> Result<(Sighash, psbt::PsbtSighashType), SignerError> {
+        _extra: (),
+    ) -> Result<(Self::Sighash, Self::SighashType), SignerError> {
         if input_index >= psbt.inputs.len() || input_index >= psbt.unsigned_tx.input.len() {
             return Err(SignerError::InputIndexOutOfRange);
         }
@@ -528,7 +711,9 @@ impl ComputeSighash for Legacy {
 
         let sighash = psbt_input
             .sighash_type
-            .unwrap_or_else(|| EcdsaSighashType::All.into());
+            .unwrap_or_else(|| EcdsaSighashType::All.into())
+            .ecdsa_hash_ty()
+            .map_err(|_| SignerError::InvalidSighash)?;
         let script = match psbt_input.redeem_script {
             Some(ref redeem_script) => redeem_script.clone(),
             None => {
@@ -567,10 +752,15 @@ fn p2wpkh_script_code(script: &Script) -> Script {
 }
 
 impl ComputeSighash for Segwitv0 {
+    type Extra = ();
+    type Sighash = bitcoin::Sighash;
+    type SighashType = EcdsaSighashType;
+
     fn sighash(
         psbt: &psbt::PartiallySignedTransaction,
         input_index: usize,
-    ) -> Result<(Sighash, psbt::PsbtSighashType), SignerError> {
+        _extra: (),
+    ) -> Result<(Self::Sighash, Self::SighashType), SignerError> {
         if input_index >= psbt.inputs.len() || input_index >= psbt.unsigned_tx.input.len() {
             return Err(SignerError::InputIndexOutOfRange);
         }
@@ -631,7 +821,62 @@ impl ComputeSighash for Segwitv0 {
                 value,
                 sighash,
             )?,
-            sighash.into(),
+            sighash,
+        ))
+    }
+}
+
+impl ComputeSighash for Tap {
+    type Extra = Option<taproot::TapLeafHash>;
+    type Sighash = taproot::TapSighashHash;
+    type SighashType = SchnorrSighashType;
+
+    fn sighash(
+        psbt: &psbt::PartiallySignedTransaction,
+        input_index: usize,
+        extra: Self::Extra,
+    ) -> Result<(Self::Sighash, SchnorrSighashType), SignerError> {
+        if input_index >= psbt.inputs.len() || input_index >= psbt.unsigned_tx.input.len() {
+            return Err(SignerError::InputIndexOutOfRange);
+        }
+
+        let psbt_input = &psbt.inputs[input_index];
+
+        let sighash_type = psbt_input
+            .sighash_type
+            .unwrap_or_else(|| SchnorrSighashType::Default.into())
+            .schnorr_hash_ty()
+            .map_err(|_| SignerError::InvalidSighash)?;
+        let witness_utxos = psbt
+            .inputs
+            .iter()
+            .cloned()
+            .map(|i| i.witness_utxo)
+            .collect::<Vec<_>>();
+        let mut all_witness_utxos = vec![];
+
+        let mut cache = sighash::SighashCache::new(&psbt.unsigned_tx);
+        let is_anyone_can_pay = psbt::PsbtSighashType::from(sighash_type).to_u32() & 0x80 != 0;
+        let prevouts = if is_anyone_can_pay {
+            sighash::Prevouts::One(
+                input_index,
+                witness_utxos[input_index]
+                    .as_ref()
+                    .ok_or(SignerError::MissingWitnessUtxo)?,
+            )
+        } else if witness_utxos.iter().all(Option::is_some) {
+            all_witness_utxos.extend(witness_utxos.iter().filter_map(|x| x.as_ref()));
+            sighash::Prevouts::All(&all_witness_utxos)
+        } else {
+            return Err(SignerError::MissingWitnessUtxo);
+        };
+
+        // Assume no OP_CODESEPARATOR
+        let extra = extra.map(|leaf_hash| (leaf_hash, 0xFFFFFFFF));
+
+        Ok((
+            cache.taproot_signature_hash(input_index, &prevouts, None, extra, sighash_type)?,
+            sighash_type,
         ))
     }
 }
@@ -666,12 +911,11 @@ mod signers_container_tests {
     use crate::keys::{DescriptorKey, IntoDescriptorKey};
     use bitcoin::secp256k1::{All, Secp256k1};
     use bitcoin::util::bip32;
-    use bitcoin::util::psbt::PartiallySignedTransaction;
     use bitcoin::Network;
     use miniscript::ScriptContext;
     use std::str::FromStr;
 
-    fn is_equal(this: &Arc<dyn Signer>, that: &Arc<DummySigner>) -> bool {
+    fn is_equal(this: &Arc<dyn TransactionSigner>, that: &Arc<DummySigner>) -> bool {
         let secp = Secp256k1::new();
         this.id(&secp) == that.id(&secp)
     }
@@ -686,11 +930,11 @@ mod signers_container_tests {
         let (prvkey1, _, _) = setup_keys(TPRV0_STR);
         let (prvkey2, _, _) = setup_keys(TPRV1_STR);
         let desc = descriptor!(sh(multi(2, prvkey1, prvkey2))).unwrap();
-        let (_, keymap) = desc
+        let (wallet_desc, keymap) = desc
             .into_wallet_descriptor(&secp, Network::Testnet)
             .unwrap();
 
-        let signers = SignersContainer::from(keymap);
+        let signers = SignersContainer::build(keymap, &wallet_desc, &secp);
         assert_eq!(signers.ids().len(), 2);
 
         let signers = signers.signers();
@@ -752,22 +996,19 @@ mod signers_container_tests {
         number: u64,
     }
 
-    impl Signer for DummySigner {
-        fn sign(
-            &self,
-            _psbt: &mut PartiallySignedTransaction,
-            _input_index: Option<usize>,
-            _secp: &SecpCtx,
-        ) -> Result<(), SignerError> {
-            Ok(())
-        }
-
+    impl SignerCommon for DummySigner {
         fn id(&self, _secp: &SecpCtx) -> SignerId {
             SignerId::Dummy(self.number)
         }
+    }
 
-        fn sign_whole_tx(&self) -> bool {
-            true
+    impl TransactionSigner for DummySigner {
+        fn sign_transaction(
+            &self,
+            _psbt: &mut psbt::PartiallySignedTransaction,
+            _secp: &SecpCtx,
+        ) -> Result<(), SignerError> {
+            Ok(())
         }
     }
 

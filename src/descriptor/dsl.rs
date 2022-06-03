@@ -75,6 +75,48 @@ macro_rules! impl_top_level_pk {
 
 #[doc(hidden)]
 #[macro_export]
+macro_rules! impl_top_level_tr {
+    ( $internal_key:expr, $tap_tree:expr ) => {{
+        use $crate::miniscript::descriptor::{
+            Descriptor, DescriptorPublicKey, KeyMap, TapTree, Tr,
+        };
+        use $crate::miniscript::Tap;
+
+        #[allow(unused_imports)]
+        use $crate::keys::{DescriptorKey, IntoDescriptorKey, ValidNetworks};
+
+        let secp = $crate::bitcoin::secp256k1::Secp256k1::new();
+
+        $internal_key
+            .into_descriptor_key()
+            .and_then(|key: DescriptorKey<Tap>| key.extract(&secp))
+            .map_err($crate::descriptor::DescriptorError::Key)
+            .and_then(|(pk, mut key_map, mut valid_networks)| {
+                let tap_tree = $tap_tree.map(
+                    |(tap_tree, tree_keymap, tree_networks): (
+                        TapTree<DescriptorPublicKey>,
+                        KeyMap,
+                        ValidNetworks,
+                    )| {
+                        key_map.extend(tree_keymap.into_iter());
+                        valid_networks =
+                            $crate::keys::merge_networks(&valid_networks, &tree_networks);
+
+                        tap_tree
+                    },
+                );
+
+                Ok((
+                    Descriptor::<DescriptorPublicKey>::Tr(Tr::new(pk, tap_tree)?),
+                    key_map,
+                    valid_networks,
+                ))
+            })
+    }};
+}
+
+#[doc(hidden)]
+#[macro_export]
 macro_rules! impl_leaf_opcode {
     ( $terminal_variant:ident ) => {{
         use $crate::descriptor::CheckMiniscript;
@@ -226,6 +268,62 @@ macro_rules! impl_sortedmulti {
             .and_then(|keys| $crate::keys::make_sortedmulti($thresh, keys, $build_desc, &secp))
     });
 
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! parse_tap_tree {
+    ( @merge $tree_a:expr, $tree_b:expr) => {{
+        use std::sync::Arc;
+        use $crate::miniscript::descriptor::TapTree;
+
+        $tree_a
+            .and_then(|tree_a| Ok((tree_a, $tree_b?)))
+            .and_then(|((a_tree, mut a_keymap, a_networks), (b_tree, b_keymap, b_networks))| {
+                a_keymap.extend(b_keymap.into_iter());
+                Ok((TapTree::Tree(Arc::new(a_tree), Arc::new(b_tree)), a_keymap, $crate::keys::merge_networks(&a_networks, &b_networks)))
+            })
+
+    }};
+
+    // Two sub-trees
+    ( { { $( $tree_a:tt )* }, { $( $tree_b:tt )* } } ) => {{
+        let tree_a = $crate::parse_tap_tree!( { $( $tree_a )* } );
+        let tree_b = $crate::parse_tap_tree!( { $( $tree_b )* } );
+
+        $crate::parse_tap_tree!(@merge tree_a, tree_b)
+    }};
+
+    // One leaf and a sub-tree
+    ( { $op_a:ident ( $( $minisc_a:tt )* ), { $( $tree_b:tt )* } } ) => {{
+        let tree_a = $crate::parse_tap_tree!( $op_a ( $( $minisc_a )* ) );
+        let tree_b = $crate::parse_tap_tree!( { $( $tree_b )* } );
+
+        $crate::parse_tap_tree!(@merge tree_a, tree_b)
+    }};
+    ( { { $( $tree_a:tt )* }, $op_b:ident ( $( $minisc_b:tt )* ) } ) => {{
+        let tree_a = $crate::parse_tap_tree!( { $( $tree_a )* } );
+        let tree_b = $crate::parse_tap_tree!( $op_b ( $( $minisc_b )* ) );
+
+        $crate::parse_tap_tree!(@merge tree_a, tree_b)
+    }};
+
+    // Two leaves
+    ( { $op_a:ident ( $( $minisc_a:tt )* ), $op_b:ident ( $( $minisc_b:tt )* ) } ) => {{
+        let tree_a = $crate::parse_tap_tree!( $op_a ( $( $minisc_a )* ) );
+        let tree_b = $crate::parse_tap_tree!( $op_b ( $( $minisc_b )* ) );
+
+        $crate::parse_tap_tree!(@merge tree_a, tree_b)
+    }};
+
+    // Single leaf
+    ( $op:ident ( $( $minisc:tt )* ) ) => {{
+        use std::sync::Arc;
+        use $crate::miniscript::descriptor::TapTree;
+
+        $crate::fragment!( $op ( $( $minisc )* ) )
+            .map(|(a_minisc, a_keymap, a_networks)| (TapTree::Leaf(Arc::new(a_minisc)), a_keymap, a_networks))
+    }};
 }
 
 #[doc(hidden)]
@@ -441,6 +539,15 @@ macro_rules! descriptor {
     ( wsh ( $( $minisc:tt )* ) ) => ({
         $crate::impl_top_level_sh!(Wsh, new, new_sortedmulti, Segwitv0, $( $minisc )*)
     });
+
+    ( tr ( $internal_key:expr ) ) => ({
+        $crate::impl_top_level_tr!($internal_key, None)
+    });
+    ( tr ( $internal_key:expr, $( $taptree:tt )* ) ) => ({
+        let tap_tree = $crate::parse_tap_tree!( $( $taptree )* );
+        tap_tree
+            .and_then(|tap_tree| $crate::impl_top_level_tr!($internal_key, Some(tap_tree)))
+    });
 }
 
 #[doc(hidden)]
@@ -478,6 +585,23 @@ impl<A, B, C> From<(A, (B, (C, ())))> for TupleThree<A, B, C> {
     fn from((a, (b, (c, _))): (A, (B, (C, ())))) -> Self {
         TupleThree { a, b, c }
     }
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! group_multi_keys {
+    ( $( $key:expr ),+ ) => {{
+        use $crate::keys::IntoDescriptorKey;
+
+        let keys = vec![
+            $(
+                $key.into_descriptor_key(),
+            )*
+        ];
+
+        keys.into_iter().collect::<Result<Vec<_>, _>>()
+            .map_err($crate::descriptor::DescriptorError::Key)
+    }};
 }
 
 #[doc(hidden)]
@@ -640,21 +764,22 @@ macro_rules! fragment {
             .and_then(|items| $crate::fragment!(thresh_vec($thresh, items)))
     });
     ( multi_vec ( $thresh:expr, $keys:expr ) ) => ({
-        $crate::keys::make_multi($thresh, $keys)
-    });
-    ( multi ( $thresh:expr $(, $key:expr )+ ) ) => ({
-        use $crate::keys::IntoDescriptorKey;
         let secp = $crate::bitcoin::secp256k1::Secp256k1::new();
 
-        let keys = vec![
-            $(
-                $key.into_descriptor_key(),
-            )*
-        ];
+        $crate::keys::make_multi($thresh, $crate::miniscript::Terminal::Multi, $keys, &secp)
+    });
+    ( multi ( $thresh:expr $(, $key:expr )+ ) ) => ({
+        $crate::group_multi_keys!( $( $key ),* )
+            .and_then(|keys| $crate::fragment!( multi_vec ( $thresh, keys ) ))
+    });
+    ( multi_a_vec ( $thresh:expr, $keys:expr ) ) => ({
+        let secp = $crate::bitcoin::secp256k1::Secp256k1::new();
 
-        keys.into_iter().collect::<Result<Vec<_>, _>>()
-            .map_err($crate::descriptor::DescriptorError::Key)
-            .and_then(|keys| $crate::keys::make_multi($thresh, keys, &secp))
+        $crate::keys::make_multi($thresh, $crate::miniscript::Terminal::MultiA, $keys, &secp)
+    });
+    ( multi_a ( $thresh:expr $(, $key:expr )+ ) ) => ({
+        $crate::group_multi_keys!( $( $key ),* )
+            .and_then(|keys| $crate::fragment!( multi_a_vec ( $thresh, keys ) ))
     });
 
     // `sortedmulti()` is handled separately
@@ -1063,5 +1188,36 @@ mod test {
         uncompressed_pk.compressed = false;
 
         descriptor!(wsh(v: pk(uncompressed_pk))).unwrap();
+    }
+
+    #[test]
+    fn test_dsl_tr_only_key() {
+        let private_key =
+            PrivateKey::from_wif("cSQPHDBwXGjVzWRqAHm6zfvQhaTuj1f2bFH58h55ghbjtFwvmeXR").unwrap();
+        let (descriptor, _, _) = descriptor!(tr(private_key)).unwrap();
+
+        assert_eq!(
+            descriptor.to_string(),
+            "tr(02e96fe52ef0e22d2f131dd425ce1893073a3c6ad20e8cac36726393dfb4856a4c)#heq9m95v"
+        )
+    }
+
+    #[test]
+    fn test_dsl_tr_simple_tree() {
+        let private_key =
+            PrivateKey::from_wif("cSQPHDBwXGjVzWRqAHm6zfvQhaTuj1f2bFH58h55ghbjtFwvmeXR").unwrap();
+        let (descriptor, _, _) =
+            descriptor!(tr(private_key, { pk(private_key), pk(private_key) })).unwrap();
+
+        assert_eq!(descriptor.to_string(), "tr(02e96fe52ef0e22d2f131dd425ce1893073a3c6ad20e8cac36726393dfb4856a4c,{pk(02e96fe52ef0e22d2f131dd425ce1893073a3c6ad20e8cac36726393dfb4856a4c),pk(02e96fe52ef0e22d2f131dd425ce1893073a3c6ad20e8cac36726393dfb4856a4c)})#xy5fjw6d")
+    }
+
+    #[test]
+    fn test_dsl_tr_single_leaf() {
+        let private_key =
+            PrivateKey::from_wif("cSQPHDBwXGjVzWRqAHm6zfvQhaTuj1f2bFH58h55ghbjtFwvmeXR").unwrap();
+        let (descriptor, _, _) = descriptor!(tr(private_key, pk(private_key))).unwrap();
+
+        assert_eq!(descriptor.to_string(), "tr(02e96fe52ef0e22d2f131dd425ce1893073a3c6ad20e8cac36726393dfb4856a4c,pk(02e96fe52ef0e22d2f131dd425ce1893073a3c6ad20e8cac36726393dfb4856a4c))#lzl2vmc7")
     }
 }
