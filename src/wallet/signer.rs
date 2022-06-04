@@ -671,6 +671,10 @@ pub struct SignOptions {
     ///
     /// Defaults to `true` which will remove partial_sigs after finalizing.
     pub remove_partial_sigs: bool,
+    /// Whether to try finalizing psbt input after the inputs are signed.
+    ///
+    /// Defaults to `true` which will try fianlizing psbt after inputs are signed.
+    pub try_finalize: bool,
 }
 
 #[allow(clippy::derivable_impls)]
@@ -681,6 +685,7 @@ impl Default for SignOptions {
             assume_height: None,
             allow_all_sighashes: false,
             remove_partial_sigs: true,
+            try_finalize: true,
         }
     }
 }

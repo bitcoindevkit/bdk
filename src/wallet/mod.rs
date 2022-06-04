@@ -1050,7 +1050,11 @@ where
         }
 
         // attempt to finalize
-        self.finalize_psbt(psbt, sign_options)
+        if sign_options.try_finalize {
+            self.finalize_psbt(psbt, sign_options)
+        } else {
+            Ok(false)
+        }
     }
 
     /// Return the spending policies for the wallet's descriptor
@@ -3906,6 +3910,40 @@ pub(crate) mod test {
                     assert!(input.partial_sigs.is_empty())
                 } else {
                     assert!(!input.partial_sigs.is_empty())
+                }
+            });
+        }
+    }
+
+    #[test]
+    fn test_try_finalize_sign_option() {
+        let (wallet, _, _) = get_funded_wallet("wpkh(tprv8ZgxMBicQKsPd3EupYiPRhaMooHKUHJxNsTfYuScep13go8QFfHdtkG9nRkFGb7busX4isf6X9dURGCoKgitaApQ6MupRhZMcELAxTBRJgS/*)");
+
+        for try_finalize in &[true, false] {
+            let addr = wallet.get_address(New).unwrap();
+            let mut builder = wallet.build_tx();
+            builder.drain_to(addr.script_pubkey()).drain_wallet();
+            let mut psbt = builder.finish().unwrap().0;
+
+            let finalized = wallet
+                .sign(
+                    &mut psbt,
+                    SignOptions {
+                        try_finalize: *try_finalize,
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+
+            psbt.inputs.iter().for_each(|input| {
+                if *try_finalize {
+                    assert!(finalized);
+                    assert!(input.final_script_sig.is_some());
+                    assert!(input.final_script_witness.is_some());
+                } else {
+                    assert!(!finalized);
+                    assert!(input.final_script_sig.is_none());
+                    assert!(input.final_script_witness.is_none());
                 }
             });
         }
