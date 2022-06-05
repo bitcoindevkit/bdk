@@ -400,7 +400,7 @@ impl SqliteDatabase {
             let sent: u64 = row.get(3)?;
             let fee: Option<u64> = row.get(4)?;
             let height: Option<u32> = row.get(5)?;
-            let raw_tx: Option<Vec<u8>> = row.get(7)?;
+            let raw_tx: Option<Vec<u8>> = row.get(6)?;
             let tx: Option<Transaction> = match raw_tx {
                 Some(raw_tx) => {
                     let tx: Transaction = deserialize(&raw_tx)?;
@@ -1029,5 +1029,10 @@ pub mod test {
     #[test]
     fn test_sync_time() {
         crate::database::test::test_sync_time(get_database());
+    }
+
+    #[test]
+    fn test_txs() {
+        crate::database::test::test_list_transaction(get_database());
     }
 }

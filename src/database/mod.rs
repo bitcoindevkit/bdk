@@ -376,6 +376,34 @@ pub mod test {
         );
     }
 
+    pub fn test_list_transaction<D: Database>(mut tree: D) {
+        let hex_tx = Vec::<u8>::from_hex("0100000001a15d57094aa7a21a28cb20b59aab8fc7d1149a3bdbcddba9c622e4f5f6a99ece010000006c493046022100f93bb0e7d8db7bd46e40132d1f8242026e045f03a0efe71bbb8e3f475e970d790221009337cd7f1f929f00cc6ff01f03729b069a7c21b59b1736ddfee5db5946c5da8c0121033b9b137ee87d5a812d6f506efdd37f0affa7ffc310711c06c7f3e097c9447c52ffffffff0100e1f505000000001976a9140389035a9225b3839e2bbf32d826a1e222031fd888ac00000000").unwrap();
+        let tx: Transaction = deserialize(&hex_tx).unwrap();
+        let txid = tx.txid();
+        let mut tx_details = TransactionDetails {
+            transaction: Some(tx),
+            txid,
+            received: 1337,
+            sent: 420420,
+            fee: Some(140),
+            confirmation_time: Some(BlockTime {
+                timestamp: 123456,
+                height: 1000,
+            }),
+        };
+
+        tree.set_tx(&tx_details).unwrap();
+
+        // get raw tx
+        assert_eq!(tree.iter_txs(true).unwrap(), vec![tx_details.clone()]);
+
+        // now get without raw tx
+        tx_details.transaction = None;
+
+        // get not raw tx
+        assert_eq!(tree.iter_txs(false).unwrap(), vec![tx_details.clone()]);
+    }
+
     pub fn test_last_index<D: Database>(mut tree: D) {
         tree.set_last_index(KeychainKind::External, 1337).unwrap();
 
