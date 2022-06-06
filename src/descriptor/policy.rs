@@ -41,10 +41,10 @@ use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::fmt;
 
 use serde::ser::SerializeMap;
-use serde::{Serialize, Serializer};
+use serde::{Deserialize, Serialize, Serializer};
 
 use bitcoin::hashes::*;
-use bitcoin::util::bip32::Fingerprint;
+use bitcoin::util::bip32::{DerivationPath, ExtendedPubKey, Fingerprint};
 use bitcoin::{PublicKey, XOnlyPublicKey};
 
 use miniscript::descriptor::{
@@ -76,6 +76,19 @@ pub enum PkOrF {
     XOnlyPubkey(XOnlyPublicKey),
     /// An extended key fingerprint
     Fingerprint(Fingerprint),
+    /// serialization for xpub origin metadata
+    XpubOrigin(XpubOrigin),
+}
+
+/// Raw public key or extended key fingerprint
+#[derive(Debug, Clone, Default, Serialize, PartialEq, Eq, Hash)]
+pub struct XpubOrigin {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fingerprint: Option<Fingerprint>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    derivation_path: Option<DerivationPath>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    xkey: Option<ExtendedPubKey>,
 }
 
 impl PkOrF {
@@ -89,9 +102,27 @@ impl PkOrF {
                 key: SinglePubKey::XOnly(pk),
                 ..
             }) => PkOrF::XOnlyPubkey(*pk),
-            DescriptorPublicKey::XPub(xpub) => PkOrF::Fingerprint(xpub.root_fingerprint(secp)),
+            DescriptorPublicKey::XPub(xpub) => PkOrF::XpubOrigin(XpubOrigin {
+                fingerprint: Some(xpub.root_fingerprint(secp)),
+                derivation_path: xpub.origin.as_ref().map(|origin| origin.clone().1),
+                xkey: Some(xpub.xkey),
+            }),
         }
     }
+}
+
+/// script type used to encode multisig script
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Eq, PartialEq)]
+pub enum MultisigScriptType {
+    /// P2SH
+    #[serde(rename = "P2SH")]
+    P2sh,
+    /// P2SH-P2WSH
+    #[serde(rename = "P2SH_P2WSH")]
+    P2shP2wsh,
+    /// P2WSH
+    #[serde(rename = "P2WSH")]
+    P2wsh,
 }
 
 /// An item that needs to be satisfied
@@ -139,6 +170,9 @@ pub enum SatisfiableItem {
         keys: Vec<PkOrF>,
         /// The required threshold count
         threshold: usize,
+        /// The script type used to encode
+        #[serde(skip_serializing_if = "Option::is_none")]
+        script_type: Option<MultisigScriptType>,
     },
 
     // Complex item
@@ -578,6 +612,7 @@ impl Policy {
         threshold: usize,
         sorted: bool,
         secp: &SecpCtx,
+        script_type: Option<MultisigScriptType>,
     ) -> Result<Option<Policy>, PolicyError> {
         if threshold == 0 {
             return Ok(None);
@@ -621,6 +656,7 @@ impl Policy {
         let mut policy: Policy = SatisfiableItem::Multisig {
             keys: parsed_keys,
             threshold,
+            script_type,
         }
         .into();
         policy.contribution = contribution;
@@ -690,7 +726,9 @@ impl Policy {
 
                 Ok(requirements)
             }
-            SatisfiableItem::Multisig { keys, threshold } => {
+            SatisfiableItem::Multisig {
+                keys, threshold, ..
+            } => {
                 if selected.len() < *threshold {
                     return Err(PolicyError::NotEnoughItemsSelected(self.id.clone()));
                 }
@@ -951,7 +989,7 @@ impl<Ctx: ScriptContext + 'static> ExtractPolicy for Miniscript<DescriptorPublic
                 Some(SatisfiableItem::Hash160Preimage { hash: *hash }.into())
             }
             Terminal::Multi(k, pks) | Terminal::MultiA(k, pks) => {
-                Policy::make_multisig::<Ctx>(pks, signers, build_sat, *k, false, secp)?
+                Policy::make_multisig::<Ctx>(pks, signers, build_sat, *k, false, secp, None)?
             }
             // Identities
             Terminal::Alt(inner)
@@ -1047,6 +1085,7 @@ impl ExtractPolicy for Descriptor<DescriptorPublicKey> {
             signers: &SignersContainer,
             build_sat: BuildSatisfaction,
             secp: &SecpCtx,
+            script_type: Option<MultisigScriptType>,
         ) -> Result<Option<Policy>, Error> {
             Ok(Policy::make_multisig::<Ctx>(
                 keys.pks.as_ref(),
@@ -1055,6 +1094,7 @@ impl ExtractPolicy for Descriptor<DescriptorPublicKey> {
                 keys.k,
                 true,
                 secp,
+                script_type,
             )?)
         }
 
@@ -1079,17 +1119,33 @@ impl ExtractPolicy for Descriptor<DescriptorPublicKey> {
                     secp,
                 ))),
                 ShInner::Ms(ms) => Ok(ms.extract_policy(signers, build_sat, secp)?),
-                ShInner::SortedMulti(ref keys) => make_sortedmulti(keys, signers, build_sat, secp),
+                ShInner::SortedMulti(ref keys) => make_sortedmulti(
+                    keys,
+                    signers,
+                    build_sat,
+                    secp,
+                    Some(MultisigScriptType::P2sh),
+                ),
                 ShInner::Wsh(wsh) => match wsh.as_inner() {
                     WshInner::Ms(ms) => Ok(ms.extract_policy(signers, build_sat, secp)?),
-                    WshInner::SortedMulti(ref keys) => {
-                        make_sortedmulti(keys, signers, build_sat, secp)
-                    }
+                    WshInner::SortedMulti(ref keys) => make_sortedmulti(
+                        keys,
+                        signers,
+                        build_sat,
+                        secp,
+                        Some(MultisigScriptType::P2shP2wsh),
+                    ),
                 },
             },
             Descriptor::Wsh(wsh) => match wsh.as_inner() {
                 WshInner::Ms(ms) => Ok(ms.extract_policy(signers, build_sat, secp)?),
-                WshInner::SortedMulti(ref keys) => make_sortedmulti(keys, signers, build_sat, secp),
+                WshInner::SortedMulti(ref keys) => make_sortedmulti(
+                    keys,
+                    signers,
+                    build_sat,
+                    secp,
+                    Some(MultisigScriptType::P2wsh),
+                ),
             },
             Descriptor::Bare(ms) => Ok(ms.as_inner().extract_policy(signers, build_sat, secp)?),
             Descriptor::Tr(tr) => {
@@ -1172,6 +1228,7 @@ mod test {
             .unwrap()
             .unwrap();
 
+        println!("{:?}", policy);
         assert!(matches!(&policy.item, EcdsaSignature(PkOrF::Fingerprint(f)) if f == &fingerprint));
         assert!(matches!(&policy.contribution, Satisfaction::None));
 
@@ -1184,7 +1241,6 @@ mod test {
             .extract_policy(&signers_container, BuildSatisfaction::None, &secp)
             .unwrap()
             .unwrap();
-
         assert!(matches!(&policy.item, EcdsaSignature(PkOrF::Fingerprint(f)) if f == &fingerprint));
         assert!(
             matches!(&policy.contribution, Satisfaction::Complete {condition} if condition.csv == None && condition.timelock == None)
@@ -1208,7 +1264,7 @@ mod test {
             .unwrap();
 
         assert!(
-            matches!(&policy.item, Multisig { keys, threshold } if threshold == &2usize
+            matches!(&policy.item, Multisig { keys, threshold, .. } if threshold == &2usize
             && keys[0] == PkOrF::Fingerprint(fingerprint0)
             && keys[1] == PkOrF::Fingerprint(fingerprint1))
         );
@@ -1238,8 +1294,9 @@ mod test {
             .extract_policy(&signers_container, BuildSatisfaction::None, &secp)
             .unwrap()
             .unwrap();
+
         assert!(
-            matches!(&policy.item, Multisig { keys, threshold } if threshold == &2usize
+            matches!(&policy.item, Multisig { keys, threshold, .. } if threshold == &2usize
             && keys[0] == PkOrF::Fingerprint(fingerprint0)
             && keys[1] == PkOrF::Fingerprint(fingerprint1))
         );
@@ -1272,7 +1329,7 @@ mod test {
             .unwrap();
 
         assert!(
-            matches!(&policy.item, Multisig { keys, threshold } if threshold == &1
+            matches!(&policy.item, Multisig { keys, threshold, .. } if threshold == &1
             && keys[0] == PkOrF::Fingerprint(fingerprint0)
             && keys[1] == PkOrF::Fingerprint(fingerprint1))
         );
@@ -1304,7 +1361,7 @@ mod test {
             .unwrap();
 
         assert!(
-            matches!(&policy.item, Multisig { keys, threshold } if threshold == &2
+            matches!(&policy.item, Multisig { keys, threshold, .. } if threshold == &2
             && keys[0] == PkOrF::Fingerprint(fingerprint0)
             && keys[1] == PkOrF::Fingerprint(fingerprint1))
         );
@@ -1376,10 +1433,12 @@ mod test {
             .unwrap();
 
         assert!(
-            matches!(&policy.item, Multisig { keys, threshold } if threshold == &1
-            && keys[0] == PkOrF::Fingerprint(fingerprint0)
-            && keys[1] == PkOrF::Fingerprint(fingerprint1))
+            matches!(&policy.item, Multisig { keys, threshold, .. } if threshold == &1
+                && matches!(&keys[0], PkOrF::XpubOrigin(XpubOrigin{ fingerprint, .. }) if fingerprint.unwrap() == fingerprint0)
+                && matches!(&keys[1], PkOrF::XpubOrigin(XpubOrigin{ fingerprint, .. }) if fingerprint.unwrap() == fingerprint1)
+            )
         );
+
         assert!(
             matches!(&policy.contribution, Satisfaction::PartialComplete { n, m, items, conditions, .. } if n == &2
              && m == &1
@@ -1910,6 +1969,67 @@ mod test {
             Satisfaction::Complete {
                 condition: Default::default()
             }
+        )
+    }
+
+    fn setup_descriptor_key<Ctx: ScriptContext>(
+        xpub: &str,
+        fingerprint: &str,
+        path: &str,
+    ) -> DescriptorKey<Ctx> {
+        use miniscript::descriptor::{DescriptorXKey, Wildcard};
+        let xfp = Fingerprint::from_str(fingerprint).unwrap();
+        let origin_path = bip32::DerivationPath::from_str(&path).unwrap();
+        let origin: bip32::KeySource = (xfp, origin_path);
+        let xpub = bip32::ExtendedPubKey::from_str(xpub).unwrap();
+        let derivation_path = bip32::DerivationPath::from_str("m/0").unwrap();
+        let xkey = DescriptorPublicKey::XPub(DescriptorXKey {
+            origin: Some(origin),
+            xkey: xpub,
+            derivation_path,
+            wildcard: Wildcard::Unhardened,
+        });
+        xkey.into_descriptor_key().unwrap()
+    }
+
+    #[test]
+    fn test_extract_multisig_descriptor_policy() {
+        let secp = Secp256k1::new();
+        let pubkey1 = "xpub6FDrnnUsgQSwRFazYbVDs9eadQaNV13f5dtQDoWrCuMNq2qgMH7GevctMAm3PeHq3KBkh9BgA8iPfaHYACHFpfueYdeAUtjjEH3vMJWEKfu";
+        let pubkey2 = "xpub6EgGHjcvovyN3nK921zAGPfuB41cJXkYRdt3tLGmiMyvbgHpss4X1eRZwShbEBb1znz2e2bCkCED87QZpin3sSYKbmCzQ9Sc7LaV98ngdeX";
+        let xfp1 = "9d120b19";
+        let xfp2 = "5c9e228d";
+        let path = "m/48'/0'/0'/2";
+
+        let pubkey_alice = setup_descriptor_key(pubkey1, xfp1, path);
+        let pubkey_bob = setup_descriptor_key(pubkey2, xfp2, path);
+        let (desc, _, _) = descriptor!(wsh(sortedmulti(1, pubkey_alice, pubkey_bob))).unwrap();
+
+        let (wallet_desc, keymap) = desc
+            .into_wallet_descriptor(&secp, Network::Bitcoin)
+            .unwrap();
+        let signers_container = Arc::new(SignersContainer::build(keymap, &wallet_desc, &secp));
+
+        let policy = wallet_desc
+            .extract_policy(&signers_container, BuildSatisfaction::None, &secp)
+            .unwrap()
+            .unwrap();
+
+        assert!(
+            matches!(&policy.item, SatisfiableItem::Multisig { keys, script_type, threshold, .. } if threshold == &1
+                && script_type.unwrap() == MultisigScriptType::P2wsh
+                && keys.len() == 2
+                && matches!(&keys[0], PkOrF::XpubOrigin(XpubOrigin{ fingerprint, derivation_path, xkey })
+                    if fingerprint.unwrap().to_string() == xfp1
+                    && derivation_path.as_ref().unwrap().to_string() == path
+                    && xkey.unwrap().to_string() == pubkey1
+                )
+                && matches!(&keys[1], PkOrF::XpubOrigin(XpubOrigin{ fingerprint, derivation_path, xkey })
+                    if fingerprint.unwrap().to_string() == xfp2
+                    && derivation_path.as_ref().unwrap().to_string() == path
+                    && xkey.unwrap().to_string() == pubkey2
+                )
+            )
         );
     }
 }
