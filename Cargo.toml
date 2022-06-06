@@ -24,7 +24,7 @@ rand = "^0.7"
 sled = { version = "0.34", optional = true }
 electrum-client = { version = "0.10", optional = true }
 rusqlite = { version = "0.25.3", optional = true }
-ahash = { version = "=0.7.4", optional = true }
+ahash = { version = "0.7.6", optional = true }
 reqwest = { version = "0.11", optional = true, default-features = false, features = ["json"] }
 ureq = { version = "~2.2.0", features = ["json"], optional = true }
 futures = { version = "0.3", optional = true }
