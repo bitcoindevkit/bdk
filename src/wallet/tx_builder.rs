@@ -574,6 +574,9 @@ impl<'a, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>> TxBuilder<'a, D, Cs, C
     /// difference is that it is valid to use `drain_to` without setting any ordinary recipients
     /// with [`add_recipient`] (but it is perfectly fine to add recipients as well).
     ///
+    /// If you choose not to set any recipients, you should either provide the utxos that the
+    /// transaction should spend via [`add_utxos`], or set [`drain_wallet`] to spend all of them.
+    ///
     /// When bumping the fees of a transaction made with this option, you probably want to
     /// use [`allow_shrinking`] to allow this output to be reduced to pay for the extra fees.
     ///
@@ -604,6 +607,7 @@ impl<'a, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>> TxBuilder<'a, D, Cs, C
     ///
     /// [`allow_shrinking`]: Self::allow_shrinking
     /// [`add_recipient`]: Self::add_recipient
+    /// [`add_utxos`]: Self::add_utxos
     /// [`drain_wallet`]: Self::drain_wallet
     pub fn drain_to(&mut self, script_pubkey: Script) -> &mut Self {
         self.params.drain_to = Some(script_pubkey);
