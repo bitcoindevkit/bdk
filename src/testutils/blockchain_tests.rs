@@ -387,6 +387,7 @@ macro_rules! bdk_blockchain_tests {
                 Wallet::new(&descriptors.0.to_string(), descriptors.1.as_ref(), Network::Regtest, MemoryDatabase::new()).unwrap()
             }
 
+            #[allow(dead_code)]
             enum WalletType {
                 WpkhSingleSig,
                 TaprootKeySpend,
@@ -421,7 +422,7 @@ macro_rules! bdk_blockchain_tests {
                 let wallet = get_wallet_from_descriptors(&descriptors);
 
                 // rpc need to call import_multi before receiving any tx, otherwise will not see tx in the mempool
-                #[cfg(feature = "test-rpc")]
+                #[cfg(any(feature = "test-rpc", feature = "test-rpc-legacy"))]
                 wallet.sync(&blockchain, SyncOptions::default()).unwrap();
 
                 (wallet, blockchain, descriptors, test_client)
@@ -446,7 +447,7 @@ macro_rules! bdk_blockchain_tests {
 
                 // the RPC blockchain needs to call `sync()` during initialization to import the
                 // addresses (see `init_single_sig()`), so we skip this assertion
-                #[cfg(not(feature = "test-rpc"))]
+                #[cfg(not(any(feature = "test-rpc", feature = "test-rpc-legacy")))]
                 assert!(wallet.database().deref().get_sync_time().unwrap().is_none(), "initial sync_time not none");
 
                 wallet.sync(&blockchain, SyncOptions::default()).unwrap();
@@ -933,7 +934,7 @@ macro_rules! bdk_blockchain_tests {
             #[test]
             fn test_sync_bump_fee_add_input_no_change() {
                 let (wallet, blockchain, descriptors, mut test_client) = init_single_sig();
-                                let node_addr = test_client.get_node_address(None);
+                let node_addr = test_client.get_node_address(None);
 
                 test_client.receive(testutils! {
                     @tx ( (@external descriptors, 0) => 50_000, (@external descriptors, 1) => 25_000 ) (@confirmations 1)
@@ -1021,6 +1022,7 @@ macro_rules! bdk_blockchain_tests {
             }
 
             #[test]
+            #[cfg(not(feature = "test-rpc-legacy"))]
             fn test_send_to_bech32m_addr() {
                 use std::str::FromStr;
                 use serde;
@@ -1207,7 +1209,7 @@ macro_rules! bdk_blockchain_tests {
                 let blockchain = get_blockchain(&test_client);
 
                 let wallet = get_wallet_from_descriptors(&descriptors);
-                #[cfg(feature = "test-rpc")]
+                #[cfg(any(feature = "test-rpc", feature = "test-rpc-legacy"))]
                 wallet.sync(&blockchain, SyncOptions::default()).unwrap();
 
                 let _ = test_client.receive(testutils! {
@@ -1231,6 +1233,7 @@ macro_rules! bdk_blockchain_tests {
             }
 
             #[test]
+            #[cfg(not(feature = "test-rpc-legacy"))]
             fn test_taproot_key_spend() {
                 let (wallet, blockchain, descriptors, mut test_client) = init_wallet(WalletType::TaprootKeySpend);
 
@@ -1251,6 +1254,7 @@ macro_rules! bdk_blockchain_tests {
             }
 
             #[test]
+            #[cfg(not(feature = "test-rpc-legacy"))]
             fn test_taproot_script_spend() {
                 let (wallet, blockchain, descriptors, mut test_client) = init_wallet(WalletType::TaprootScriptSpend);
 
@@ -1279,20 +1283,24 @@ macro_rules! bdk_blockchain_tests {
             }
 
             #[test]
+            #[cfg(not(feature = "test-rpc-legacy"))]
             fn test_sign_taproot_core_keyspend_psbt() {
                 test_sign_taproot_core_psbt(WalletType::TaprootKeySpend);
             }
 
             #[test]
+            #[cfg(not(feature = "test-rpc-legacy"))]
             fn test_sign_taproot_core_scriptspend2_psbt() {
                 test_sign_taproot_core_psbt(WalletType::TaprootScriptSpend2);
             }
 
             #[test]
+            #[cfg(not(feature = "test-rpc-legacy"))]
             fn test_sign_taproot_core_scriptspend3_psbt() {
                 test_sign_taproot_core_psbt(WalletType::TaprootScriptSpend3);
             }
 
+            #[cfg(not(feature = "test-rpc-legacy"))]
             fn test_sign_taproot_core_psbt(wallet_type: WalletType) {
                 use std::str::FromStr;
                 use serde_json;

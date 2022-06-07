@@ -95,6 +95,9 @@ jobs:
           - name: rpc
             testprefix: blockchain::rpc::test
             features: test-rpc
+          - name: rpc-legacy
+            testprefix: blockchain::rpc::test
+            features: test-rpc-legacy
           - name: esplora
             testprefix: esplora
             features: test-esplora,use-esplora-reqwest,verify
