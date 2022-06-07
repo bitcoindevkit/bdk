@@ -88,16 +88,17 @@ reqwest-default-tls = ["reqwest/default-tls"]
 
 # Debug/Test features
 test-blockchains = ["bitcoincore-rpc", "electrum-client"]
-test-electrum = ["electrum", "electrsd/electrs_0_8_10", "test-blockchains"]
-test-rpc = ["rpc", "electrsd/electrs_0_8_10", "test-blockchains"]
-test-esplora = ["electrsd/legacy", "electrsd/esplora_a33e97e1", "test-blockchains"]
+test-electrum = ["electrum", "electrsd/electrs_0_8_10", "electrsd/bitcoind_22_0", "test-blockchains"]
+test-rpc = ["rpc", "electrsd/electrs_0_8_10", "electrsd/bitcoind_22_0", "test-blockchains"]
+test-rpc-legacy = ["rpc", "electrsd/electrs_0_8_10", "electrsd/bitcoind_0_20_0", "test-blockchains"]
+test-esplora = ["electrsd/legacy", "electrsd/esplora_a33e97e1", "electrsd/bitcoind_22_0", "test-blockchains"]
 test-md-docs = ["electrum"]
 
 [dev-dependencies]
 lazy_static = "1.4"
 env_logger = "0.7"
 clap = "2.33"
-electrsd = { version= "0.19.1", features = ["bitcoind_22_0"] }
+electrsd = "0.19.1"
 
 [[example]]
 name = "address_validator"

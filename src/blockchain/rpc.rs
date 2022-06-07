@@ -32,15 +32,17 @@
 //! ```
 
 use crate::bitcoin::consensus::deserialize;
+use crate::bitcoin::hashes::hex::ToHex;
 use crate::bitcoin::{Address, Network, OutPoint, Transaction, TxOut, Txid};
 use crate::blockchain::*;
 use crate::database::{BatchDatabase, DatabaseUtils};
+use crate::descriptor::get_checksum;
 use crate::{BlockTime, Error, FeeRate, KeychainKind, LocalUtxo, TransactionDetails};
 use bitcoincore_rpc::json::{
     GetAddressInfoResultLabel, ImportMultiOptions, ImportMultiRequest,
     ImportMultiRequestScriptPubkey, ImportMultiRescanSince,
 };
-use bitcoincore_rpc::jsonrpc::serde_json::Value;
+use bitcoincore_rpc::jsonrpc::serde_json::{json, Value};
 use bitcoincore_rpc::Auth as RpcAuth;
 use bitcoincore_rpc::{Client, RpcApi};
 use log::debug;
@@ -54,6 +56,8 @@ use std::str::FromStr;
 pub struct RpcBlockchain {
     /// Rpc client to the node, includes the wallet name
     client: Client,
+    /// Whether the wallet is a "descriptor" or "legacy" wallet in Core
+    is_descriptors: bool,
     /// Blockchain capabilities, cached here at startup
     capabilities: HashSet<Capability>,
     /// Skip this many blocks of the blockchain at the first rescan, if None the rescan is done from the genesis block
@@ -177,22 +181,53 @@ impl WalletSync for RpcBlockchain {
             "importing {} script_pubkeys (some maybe already imported)",
             scripts_pubkeys.len()
         );
-        let requests: Vec<_> = scripts_pubkeys
-            .iter()
-            .map(|s| ImportMultiRequest {
-                timestamp: ImportMultiRescanSince::Timestamp(0),
-                script_pubkey: Some(ImportMultiRequestScriptPubkey::Script(s)),
-                watchonly: Some(true),
-                ..Default::default()
-            })
-            .collect();
-        let options = ImportMultiOptions {
-            rescan: Some(false),
-        };
-        // Note we use import_multi because as of bitcoin core 0.21.0 many descriptors are not supported
-        // https://bitcoindevkit.org/descriptors/#compatibility-matrix
-        //TODO maybe convenient using import_descriptor for compatible descriptor and import_multi as fallback
-        self.client.import_multi(&requests, Some(&options))?;
+
+        if self.is_descriptors {
+            // Core still doesn't support complex descriptors like BDK, but when the wallet type is
+            // "descriptors" we should import individual addresses using `importdescriptors` rather
+            // than `importmulti`, using the `raw()` descriptor which allows us to specify an
+            // arbitrary script
+            let requests = Value::Array(
+                scripts_pubkeys
+                    .iter()
+                    .map(|s| {
+                        let desc = format!("raw({})", s.to_hex());
+                        json!({
+                            "timestamp": "now",
+                            "desc": format!("{}#{}", desc, get_checksum(&desc).unwrap()),
+                        })
+                    })
+                    .collect(),
+            );
+
+            let res: Vec<Value> = self.client.call("importdescriptors", &[requests])?;
+            res.into_iter()
+                .map(|v| match v["success"].as_bool() {
+                    Some(true) => Ok(()),
+                    Some(false) => Err(Error::Generic(
+                        v["error"]["message"]
+                            .as_str()
+                            .unwrap_or("Unknown error")
+                            .to_string(),
+                    )),
+                    _ => Err(Error::Generic("Unexpected response from Core".to_string())),
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+        } else {
+            let requests: Vec<_> = scripts_pubkeys
+                .iter()
+                .map(|s| ImportMultiRequest {
+                    timestamp: ImportMultiRescanSince::Timestamp(0),
+                    script_pubkey: Some(ImportMultiRequestScriptPubkey::Script(s)),
+                    watchonly: Some(true),
+                    ..Default::default()
+                })
+                .collect();
+            let options = ImportMultiOptions {
+                rescan: Some(false),
+            };
+            self.client.import_multi(&requests, Some(&options))?;
+        }
 
         loop {
             let current_height = self.get_height()?;
@@ -369,19 +404,35 @@ impl ConfigurableBlockchain for RpcBlockchain {
         debug!("connecting to {} auth:{:?}", wallet_url, config.auth);
 
         let client = Client::new(wallet_url.as_str(), config.auth.clone().into())?;
+        let rpc_version = client.version()?;
+
         let loaded_wallets = client.list_wallets()?;
         if loaded_wallets.contains(&wallet_name) {
             debug!("wallet already loaded {:?}", wallet_name);
+        } else if list_wallet_dir(&client)?.contains(&wallet_name) {
+            client.load_wallet(&wallet_name)?;
+            debug!("wallet loaded {:?}", wallet_name);
         } else {
-            let existing_wallets = list_wallet_dir(&client)?;
-            if existing_wallets.contains(&wallet_name) {
-                client.load_wallet(&wallet_name)?;
-                debug!("wallet loaded {:?}", wallet_name);
-            } else {
+            // pre-0.21 use legacy wallets
+            if rpc_version < 210_000 {
                 client.create_wallet(&wallet_name, Some(true), None, None, None)?;
-                debug!("wallet created {:?}", wallet_name);
+            } else {
+                // TODO: move back to api call when https://github.com/rust-bitcoin/rust-bitcoincore-rpc/issues/225 is closed
+                let args = [
+                    Value::String(wallet_name.clone()),
+                    Value::Bool(true),
+                    Value::Bool(false),
+                    Value::Null,
+                    Value::Bool(false),
+                    Value::Bool(true),
+                ];
+                let _: Value = client.call("createwallet", &args)?;
             }
+
+            debug!("wallet created {:?}", wallet_name);
         }
+
+        let is_descriptors = is_wallet_descriptor(&client)?;
 
         let blockchain_info = client.get_blockchain_info()?;
         let network = match blockchain_info.chain.as_str() {
@@ -399,7 +450,6 @@ impl ConfigurableBlockchain for RpcBlockchain {
         }
 
         let mut capabilities: HashSet<_> = vec![Capability::FullHistory].into_iter().collect();
-        let rpc_version = client.version()?;
         if rpc_version >= 210_000 {
             let info: HashMap<String, Value> = client.call("getindexinfo", &[]).unwrap();
             if info.contains_key("txindex") {
@@ -416,6 +466,7 @@ impl ConfigurableBlockchain for RpcBlockchain {
         Ok(RpcBlockchain {
             client,
             capabilities,
+            is_descriptors,
             _storage_address: storage_address,
             skip_blocks: config.skip_blocks,
         })
@@ -436,6 +487,20 @@ fn list_wallet_dir(client: &Client) -> Result<Vec<String>, Error> {
 
     let result: CallResult = client.call("listwalletdir", &[])?;
     Ok(result.wallets.into_iter().map(|n| n.name).collect())
+}
+
+/// Returns whether a wallet is legacy or descriptors by calling `getwalletinfo`.
+///
+/// This API is mapped by bitcoincore_rpc, but it doesn't have the fields we need (either
+/// "descriptors" or "format") so we have to call the RPC manually
+fn is_wallet_descriptor(client: &Client) -> Result<bool, Error> {
+    #[derive(Deserialize)]
+    struct CallResult {
+        descriptors: Option<bool>,
+    }
+
+    let result: CallResult = client.call("getwalletinfo", &[])?;
+    Ok(result.descriptors.unwrap_or(false))
 }
 
 /// Factory of [`RpcBlockchain`] instances, implements [`BlockchainFactory`]
@@ -500,7 +565,7 @@ impl BlockchainFactory for RpcBlockchainFactory {
 }
 
 #[cfg(test)]
-#[cfg(feature = "test-rpc")]
+#[cfg(any(feature = "test-rpc", feature = "test-rpc-legacy"))]
 mod test {
     use super::*;
     use crate::testutils::blockchain_tests::TestClient;
@@ -514,7 +579,7 @@ mod test {
                 url: test_client.bitcoind.rpc_url(),
                 auth: Auth::Cookie { file: test_client.bitcoind.params.cookie_file.clone() },
                 network: Network::Regtest,
-                wallet_name: format!("client-wallet-test-{:?}", std::time::SystemTime::now() ),
+                wallet_name: format!("client-wallet-test-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos() ),
                 skip_blocks: None,
             };
             RpcBlockchain::from_config(&config).unwrap()

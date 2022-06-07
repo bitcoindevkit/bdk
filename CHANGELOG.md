@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Creation of Taproot PSBTs (BIP-371)
   - Signing Taproot PSBTs (key spend and script spend)
   - Support for `tr()` descriptors in the `descriptor!()` macro
+- Add support for Bitcoin Core 23.0 when using the `rpc` blockchain
 
 ## [v0.18.0] - [v0.17.0]
 
