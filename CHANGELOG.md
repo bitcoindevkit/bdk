@@ -21,9 +21,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add support for Bitcoin Core 23.0 when using the `rpc` blockchain
 - Added `Waste` struct to `coinselection` module, with impl of
   `Waste::calculate` to compute waste metric for coin selection algorithms.
-- Added `_cost_of_change` parameter for `CoinSelectionAlgorithm::coin_select`
-  to pass the cost of generating change to calculate the waste metric for each
-  algorithm.
+- Added new type `WeightedTxOut`. It joins a TxOut with the satisfaction weight
+  needed to spend it in the future.
+- Added new field `drain_output` to struct `CoinSelectionResult`. It'll hold
+  the created change output if needed.
+- Added `weighted_drain_output` parameter for
+  `CoinSelectionAlgorithm::coin_select` to pass the TxOut to drain the change
+  joined with the satisfaction weight to spend it in the future.
 - Changed `OutputGroup` owned `weighted_utxo` value to borrowed one.
 
 ## [v0.18.0] - [v0.17.0]
