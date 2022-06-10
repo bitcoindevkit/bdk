@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.19.0] - [v0.18.0]
+
 - added `OldestFirstCoinSelection` impl to `CoinSelectionAlgorithm`
 - New MSRV set to `1.56`
 - Unpinned tokio to `1`
@@ -462,4 +464,5 @@ final transaction is created by calling `finish` on the builder.
 [v0.16.1]: https://github.com/bitcoindevkit/bdk/compare/v0.16.0...v0.16.1
 [v0.17.0]: https://github.com/bitcoindevkit/bdk/compare/v0.16.1...v0.17.0
 [v0.18.0]: https://github.com/bitcoindevkit/bdk/compare/v0.17.0...v0.18.0
-[unreleased]: https://github.com/bitcoindevkit/bdk/compare/v0.18.0...HEAD
+[v0.19.0]: https://github.com/bitcoindevkit/bdk/compare/v0.18.0...v0.19.0
+[unreleased]: https://github.com/bitcoindevkit/bdk/compare/v0.19.0...HEAD
