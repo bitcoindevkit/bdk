@@ -5,8 +5,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
-
 - Add `descriptor::checksum::get_checksum_bytes` method.
+- Add `Excess` enum to handle remaining amount after coin selection.
+- Move change creation from `Wallet::create_tx` to `CoinSelectionAlgorithm::coin_select`.
 
 ## [v0.20.0] - [v0.19.0]
 

@@ -72,6 +72,7 @@ use crate::psbt::PsbtUtils;
 use crate::signer::SignerError;
 use crate::testutils;
 use crate::types::*;
+use crate::wallet::coin_selection::Excess::{Change, NoChange};
 
 const CACHE_ADDR_BATCH_SIZE: u32 = 100;
 const COINBASE_MATURITY: u32 = 100;
@@ -777,6 +778,15 @@ where
             current_height,
         )?;
 
+        // get drain script
+        let drain_script = match params.drain_to {
+            Some(ref drain_recipient) => drain_recipient.clone(),
+            None => self
+                .get_internal_address(AddressIndex::New)?
+                .address
+                .script_pubkey(),
+        };
+
         let coin_selection = coin_selection.coin_select(
             self.database.borrow().deref(),
             required_utxos,
@@ -784,8 +794,10 @@ where
             fee_rate,
             outgoing,
             fee_amount,
+            &drain_script,
         )?;
         let mut fee_amount = coin_selection.fee_amount;
+        let excess = &coin_selection.excess;
 
         tx.input = coin_selection
             .selected
@@ -798,26 +810,6 @@ where
             })
             .collect();
 
-        // prepare the drain output
-        let mut drain_output = {
-            let script_pubkey = match params.drain_to {
-                Some(ref drain_recipient) => drain_recipient.clone(),
-                None => self
-                    .get_internal_address(AddressIndex::New)?
-                    .address
-                    .script_pubkey(),
-            };
-
-            TxOut {
-                script_pubkey,
-                value: 0,
-            }
-        };
-
-        fee_amount += fee_rate.fee_vb(serialize(&drain_output).len());
-
-        let drain_val = (coin_selection.selected_amount() - outgoing).saturating_sub(fee_amount);
-
         if tx.output.is_empty() {
             // Uh oh, our transaction has no outputs.
             // We allow this when:
@@ -827,10 +819,15 @@ where
             // Otherwise, we don't know who we should send the funds to, and how much
             // we should send!
             if params.drain_to.is_some() && (params.drain_wallet || !params.utxos.is_empty()) {
-                if drain_val.is_dust(&drain_output.script_pubkey) {
+                if let NoChange {
+                    dust_threshold,
+                    remaining_amount,
+                    change_fee,
+                } = excess
+                {
                     return Err(Error::InsufficientFunds {
-                        needed: drain_output.script_pubkey.dust_value().as_sat(),
-                        available: drain_val,
+                        needed: *dust_threshold,
+                        available: remaining_amount.saturating_sub(*change_fee),
                     });
                 }
             } else {
@@ -838,15 +835,25 @@ where
             }
         }
 
-        if drain_val.is_dust(&drain_output.script_pubkey) {
-            fee_amount += drain_val;
-        } else {
-            drain_output.value = drain_val;
-            if self.is_mine(&drain_output.script_pubkey)? {
-                received += drain_val;
+        match excess {
+            NoChange {
+                remaining_amount, ..
+            } => fee_amount += remaining_amount,
+            Change { amount, fee } => {
+                if self.is_mine(&drain_script)? {
+                    received += amount;
+                }
+                fee_amount += fee;
+
+                // create drain output
+                let drain_output = TxOut {
+                    value: *amount,
+                    script_pubkey: drain_script,
+                };
+
+                tx.output.push(drain_output);
             }
-            tx.output.push(drain_output);
-        }
+        };
 
         // sort input/outputs according to the chosen algorithm
         params.ordering.sort_tx(&mut tx);
