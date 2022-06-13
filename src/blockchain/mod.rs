@@ -61,6 +61,14 @@ pub use self::rpc::RpcBlockchain;
 #[cfg(feature = "rpc")]
 pub use self::rpc::RpcConfig;
 
+#[cfg(feature = "rpc")]
+#[cfg_attr(docsrc, doc(cfg(feature = "rpc")))]
+pub mod pruned_rpc;
+#[cfg(feature = "rpc")]
+pub use self::pruned_rpc::PrunedRpcBlockchain;
+#[cfg(feature = "rpc")]
+pub use self::pruned_rpc::PrunedRpcConfig;
+
 #[cfg(feature = "esplora")]
 #[cfg_attr(docsrs, doc(cfg(feature = "esplora")))]
 pub mod esplora;
