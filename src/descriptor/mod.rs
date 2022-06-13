@@ -134,13 +134,13 @@ impl IntoWalletDescriptor for (ExtendedDescriptor, KeyMap) {
 
         let check_key = |pk: &DescriptorPublicKey| {
             let (pk, _, networks) = if self.0.is_witness() {
-                let desciptor_key: DescriptorKey<miniscript::Segwitv0> =
+                let descriptor_key: DescriptorKey<miniscript::Segwitv0> =
                     pk.clone().into_descriptor_key()?;
-                desciptor_key.extract(secp)?
+                descriptor_key.extract(secp)?
             } else {
-                let desciptor_key: DescriptorKey<miniscript::Legacy> =
+                let descriptor_key: DescriptorKey<miniscript::Legacy> =
                     pk.clone().into_descriptor_key()?;
-                desciptor_key.extract(secp)?
+                descriptor_key.extract(secp)?
             };
 
             if networks.contains(&network) {
