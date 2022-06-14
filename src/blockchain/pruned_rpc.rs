@@ -6,10 +6,12 @@
 //! ```no run
 //! ```
 
-use crate::bitcoin::{Address, Network};
+use crate::bitcoin::{Address, Network, Transaction, Txid};
 use crate::blockchain::*;
+use crate::database::BatchDatabase;
+use crate::{Error, FeeRate};
 use bitcoincore_rpc::Auth as RpcAuth;
-use bitcoincore_rpc::Client;
+use bitcoincore_rpc::{Client, RpcApi};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -18,11 +20,11 @@ use std::path::PathBuf;
 #[derive(Debug)]
 pub struct PrunedRpcBlockchain {
     /// Rpc client to the node, includes the wallet name
-    _client: Client,
+    client: Client,
     /// Whether the wallet is a "descriptor" or "legacy" wallet in Core
     _is_descriptors: bool,
     /// Blockchain capabilities, cached here at startup
-    _capabilities: HashSet<Capability>,
+    capabilities: HashSet<Capability>,
     /// This is a fixed Address used as a hack key to store information on the node
     _storage_address: Address,
 }
@@ -78,27 +80,34 @@ impl PrunedRpcBlockchain {}
 
 impl Blockchain for PrunedRpcBlockchain {
     fn get_capabilities(&self) -> HashSet<Capability> {
-        todo!()
+        self.capabilities.clone()
     }
 
-    fn broadcast(&self, _tx: &Transaction) -> Result<(), Error> {
-        todo!()
+    fn broadcast(&self, tx: &Transaction) -> Result<(), Error> {
+        Ok(self.client.send_raw_transaction(tx).map(|_| ())?)
     }
 
-    fn estimate_fee(&self, _target: usize) -> Result<FeeRate, Error> {
-        todo!()
+    fn estimate_fee(&self, target: usize) -> Result<FeeRate, Error> {
+        let sat_per_kb = self
+            .client
+            .estimate_smart_fee(target as u16, None)?
+            .fee_rate
+            .ok_or(Error::FeeRateUnavailable)?
+            .as_sat() as f64;
+
+        Ok(FeeRate::from_sat_per_vb((sat_per_kb / 1000f64) as f32))
     }
 }
 
 impl GetTx for PrunedRpcBlockchain {
-    fn get_tx(&self, _txid: &Txid) -> Result<Option<Transaction>, Error> {
-        todo!()
+    fn get_tx(&self, txid: &Txid) -> Result<Option<Transaction>, Error> {
+        Ok(Some(self.client.get_raw_transaction(txid, None)?))
     }
 }
 
 impl GetHeight for PrunedRpcBlockchain {
     fn get_height(&self) -> Result<u32, Error> {
-        todo!()
+        Ok(self.client.get_blockchain_info().map(|i| i.blocks as u32)?)
     }
 }
 
