@@ -169,6 +169,12 @@ impl GetHeight for RpcBlockchain {
     }
 }
 
+impl GetBlockHash for RpcBlockchain {
+    fn get_block_hash(&self, height: u64) -> Result<BlockHash, Error> {
+        Ok(self.client.get_block_hash(height)?)
+    }
+}
+
 impl WalletSync for RpcBlockchain {
     fn wallet_setup<D: BatchDatabase>(
         &self,

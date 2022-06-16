@@ -112,6 +112,13 @@ impl GetTx for EsploraBlockchain {
     }
 }
 
+impl GetBlockHash for EsploraBlockchain {
+    fn get_block_hash(&self, height: u64) -> Result<BlockHash, Error> {
+        let block_header = self.url_client._get_header(height as u32)?;
+        Ok(block_header.block_hash())
+    }
+}
+
 impl WalletSync for EsploraBlockchain {
     fn wallet_setup<D: BatchDatabase>(
         &self,
