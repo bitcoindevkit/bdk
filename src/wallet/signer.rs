@@ -58,6 +58,7 @@
 //!         &self,
 //!         psbt: &mut psbt::PartiallySignedTransaction,
 //!         input_index: usize,
+//!         _sign_options: &SignOptions,
 //!         _secp: &Secp256k1<All>,
 //!     ) -> Result<(), SignerError> {
 //!         self.device.hsm_sign_input(psbt, input_index)?;
@@ -241,6 +242,7 @@ pub trait InputSigner: SignerCommon {
         &self,
         psbt: &mut psbt::PartiallySignedTransaction,
         input_index: usize,
+        sign_options: &SignOptions,
         secp: &SecpCtx,
     ) -> Result<(), SignerError>;
 }
@@ -254,6 +256,7 @@ pub trait TransactionSigner: SignerCommon {
     fn sign_transaction(
         &self,
         psbt: &mut psbt::PartiallySignedTransaction,
+        sign_options: &SignOptions,
         secp: &SecpCtx,
     ) -> Result<(), SignerError>;
 }
@@ -262,10 +265,11 @@ impl<T: InputSigner> TransactionSigner for T {
     fn sign_transaction(
         &self,
         psbt: &mut psbt::PartiallySignedTransaction,
+        sign_options: &SignOptions,
         secp: &SecpCtx,
     ) -> Result<(), SignerError> {
         for input_index in 0..psbt.inputs.len() {
-            self.sign_input(psbt, input_index, secp)?;
+            self.sign_input(psbt, input_index, sign_options, secp)?;
         }
 
         Ok(())
@@ -287,6 +291,7 @@ impl InputSigner for SignerWrapper<DescriptorXKey<ExtendedPrivKey>> {
         &self,
         psbt: &mut psbt::PartiallySignedTransaction,
         input_index: usize,
+        sign_options: &SignOptions,
         secp: &SecpCtx,
     ) -> Result<(), SignerError> {
         if input_index >= psbt.inputs.len() {
@@ -346,7 +351,7 @@ impl InputSigner for SignerWrapper<DescriptorXKey<ExtendedPrivKey>> {
                 inner: derived_key.private_key,
             };
 
-            SignerWrapper::new(priv_key, self.ctx).sign_input(psbt, input_index, secp)
+            SignerWrapper::new(priv_key, self.ctx).sign_input(psbt, input_index, sign_options, secp)
         }
     }
 }
@@ -369,6 +374,7 @@ impl InputSigner for SignerWrapper<PrivateKey> {
         &self,
         psbt: &mut psbt::PartiallySignedTransaction,
         input_index: usize,
+        sign_options: &SignOptions,
         secp: &SecpCtx,
     ) -> Result<(), SignerError> {
         if input_index >= psbt.inputs.len() || input_index >= psbt.unsigned_tx.input.len() {
@@ -385,7 +391,10 @@ impl InputSigner for SignerWrapper<PrivateKey> {
         let x_only_pubkey = XOnlyPublicKey::from(pubkey.inner);
 
         if let SignerContext::Tap { is_internal_key } = self.ctx {
-            if is_internal_key && psbt.inputs[input_index].tap_key_sig.is_none() {
+            if is_internal_key
+                && psbt.inputs[input_index].tap_key_sig.is_none()
+                && sign_options.sign_with_tap_internal_key
+            {
                 let (hash, hash_ty) = Tap::sighash(psbt, input_index, None)?;
                 sign_psbt_schnorr(
                     &self.inner,
@@ -404,9 +413,18 @@ impl InputSigner for SignerWrapper<PrivateKey> {
                 let leaf_hashes = leaf_hashes
                     .iter()
                     .filter(|lh| {
-                        !psbt.inputs[input_index]
-                            .tap_script_sigs
-                            .contains_key(&(x_only_pubkey, **lh))
+                        // Removing the leaves we shouldn't sign for
+                        let should_sign = match &sign_options.tap_leaves_options {
+                            TapLeavesOptions::All => true,
+                            TapLeavesOptions::Include(v) => v.contains(lh),
+                            TapLeavesOptions::Exclude(v) => !v.contains(lh),
+                            TapLeavesOptions::None => false,
+                        };
+                        // Filtering out the leaves without our key
+                        should_sign
+                            && !psbt.inputs[input_index]
+                                .tap_script_sigs
+                                .contains_key(&(x_only_pubkey, **lh))
                     })
                     .cloned()
                     .collect::<Vec<_>>();
@@ -677,6 +695,38 @@ pub struct SignOptions {
     ///
     /// Defaults to `true` which will try fianlizing psbt after inputs are signed.
     pub try_finalize: bool,
+
+    /// Specifies which Taproot script-spend leaves we should sign for. This option is
+    /// ignored if we're signing a non-taproot PSBT.
+    ///
+    /// Defaults to All, i.e., the wallet will sign all the leaves it has a key for.
+    pub tap_leaves_options: TapLeavesOptions,
+
+    /// Whether we should try to sign a taproot transaction with the taproot internal key
+    /// or not. This option is ignored if we're signing a non-taproot PSBT.
+    ///
+    /// Defaults to `true`, i.e., we always try to sign with the taproot internal key.
+    pub sign_with_tap_internal_key: bool,
+}
+
+/// Customize which taproot script-path leaves the signer should sign.
+#[derive(Debug, Clone, PartialEq)]
+pub enum TapLeavesOptions {
+    /// The signer will sign all the leaves it has a key for.
+    All,
+    /// The signer won't sign leaves other than the ones specified. Note that it could still ignore
+    /// some of the specified leaves, if it doesn't have the right key to sign them.
+    Include(Vec<taproot::TapLeafHash>),
+    /// The signer won't sign the specified leaves.
+    Exclude(Vec<taproot::TapLeafHash>),
+    /// The signer won't sign any leaf.
+    None,
+}
+
+impl Default for TapLeavesOptions {
+    fn default() -> Self {
+        TapLeavesOptions::All
+    }
 }
 
 #[allow(clippy::derivable_impls)]
@@ -688,6 +738,8 @@ impl Default for SignOptions {
             allow_all_sighashes: false,
             remove_partial_sigs: true,
             try_finalize: true,
+            tap_leaves_options: TapLeavesOptions::default(),
+            sign_with_tap_internal_key: true,
         }
     }
 }
@@ -1018,6 +1070,7 @@ mod signers_container_tests {
         fn sign_transaction(
             &self,
             _psbt: &mut psbt::PartiallySignedTransaction,
+            _sign_options: &SignOptions,
             _secp: &SecpCtx,
         ) -> Result<(), SignerError> {
             Ok(())
