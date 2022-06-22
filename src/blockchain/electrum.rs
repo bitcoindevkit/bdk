@@ -385,7 +385,7 @@ mod test {
             .sync_wallet(&wallet, None, Default::default())
             .unwrap();
 
-        assert_eq!(wallet.get_balance().unwrap(), 50_000);
+        assert_eq!(wallet.get_balance().unwrap().untrusted_pending, 50_000);
     }
 
     #[test]

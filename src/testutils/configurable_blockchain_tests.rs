@@ -124,7 +124,7 @@ where
         // perform wallet sync
         wallet.sync(&blockchain, Default::default()).unwrap();
 
-        let wallet_balance = wallet.get_balance().unwrap();
+        let wallet_balance = wallet.get_balance().unwrap().get_total();
         println!(
             "max: {}, min: {}, actual: {}",
             max_balance, min_balance, wallet_balance
@@ -193,7 +193,7 @@ where
     wallet.sync(&blockchain, Default::default()).unwrap();
     println!("sync done!");
 
-    let balance = wallet.get_balance().unwrap();
+    let balance = wallet.get_balance().unwrap().get_total();
     assert_eq!(balance, expected_balance);
 }
 
@@ -245,13 +245,13 @@ where
 
     // actually test the wallet
     wallet.sync(&blockchain, Default::default()).unwrap();
-    let balance = wallet.get_balance().unwrap();
+    let balance = wallet.get_balance().unwrap().get_total();
     assert_eq!(balance, expected_balance);
 
     // now try with a fresh wallet
     let fresh_wallet =
         Wallet::new(descriptor, None, Network::Regtest, MemoryDatabase::new()).unwrap();
     fresh_wallet.sync(&blockchain, Default::default()).unwrap();
-    let fresh_balance = fresh_wallet.get_balance().unwrap();
+    let fresh_balance = fresh_wallet.get_balance().unwrap().get_total();
     assert_eq!(fresh_balance, expected_balance);
 }

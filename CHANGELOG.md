@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Consolidate params `fee_amount` and `amount_needed` in `target_amount` in `CoinSelectionAlgorithm::coin_select` signature.
 - Change the meaning of the `fee_amount` field inside `CoinSelectionResult`: from now on the `fee_amount` will represent only the fees asociated with the utxos in the `selected` field of `CoinSelectionResult`.
 - New `RpcBlockchain` implementation with various fixes.
+- Return balance in separate categories, namely `confirmed`, `trusted_pending`, `untrusted_pending` & `immature`.
 
 ## [v0.20.0] - [v0.19.0]
 
