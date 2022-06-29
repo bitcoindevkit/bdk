@@ -18,8 +18,6 @@ use bitcoin::{
     hashes::{sha256, Hash},
     util::bip32,
 };
-use hmac::Hmac;
-use sha2::Sha512;
 use unicode_normalization::UnicodeNormalization;
 
 use miniscript::ScriptContext;
@@ -28,10 +26,14 @@ use super::{
     any_network, DerivableKey, DescriptorKey, ExtendedKey, GeneratableKey, GeneratedKey, KeyError,
 };
 
+mod pbkdf2;
 mod wordlists;
 pub use wordlists::Language;
 
-type Seed = [u8; 64];
+/// Seed length in bytes
+const SEED_LEN: usize = 64;
+
+type Seed = [u8; SEED_LEN];
 
 /// To generate a mnemonic from an entropy, the entropy must be divisble by 32 bits
 const ENTROPY_MULTIPLE: usize = 32;
@@ -205,33 +207,14 @@ impl Mnemonic {
     }
 
     /// Convert a mnemonic to a seed with an optional passphrase
-    fn to_seed(&self, passphrase: Option<String>) -> [u8; 64] {
-        const PBKDF2_ITERATIONS: u32 = 2048;
-        const PBKDF2_BYTES: usize = 64;
-
-        let password = self
-            .word_iter()
-            .collect::<Vec<&str>>()
-            .join(" ")
-            .nfkd()
-            .collect::<String>();
-        let salt = ("mnemonic".to_string() + &passphrase.unwrap_or_else(|| "".to_string()))
-            .nfkd()
-            .collect::<String>();
-
-        let mut seed = [0u8; PBKDF2_BYTES];
-        pbkdf2::pbkdf2::<Hmac<Sha512>>(
-            password.as_bytes(),
-            salt.as_bytes(),
-            PBKDF2_ITERATIONS,
-            &mut seed,
-        );
-
+    fn to_seed(&self, passphrase: Option<String>) -> Seed {
+        let mut seed = [0_u8; SEED_LEN];
+        pbkdf2::generate_seed(self.word_iter(), passphrase.as_deref(), &mut seed);
         seed
     }
 
     /// Convert a vec of word indices to an iterator of the mnemonic words
-    fn word_iter(&self) -> impl Iterator<Item = &str> + '_ {
+    fn word_iter(&self) -> impl Iterator<Item = &str> + Clone + '_ {
         let wordlist = self.language.wordlist();
         self.words.iter().map(move |&w| wordlist[w as usize])
     }
@@ -599,7 +582,7 @@ mod test {
                     .to_string(),
                 generated_mnemonic.to_string()
             );
-            assert_eq!(generated_seed[..], seed[..]);
+            assert_eq!(generated_seed[..], seed[..], "mnemonic: {}", vector[1]);
             assert_eq!(generated_privkey.to_string(), xprivkey);
         }
     }
