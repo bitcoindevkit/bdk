@@ -202,8 +202,10 @@ pub struct TransactionDetails {
     pub txid: Txid,
 
     /// Received value (sats)
+    /// Sum of owned outputs of this transaction.
     pub received: u64,
     /// Sent value (sats)
+    /// Sum of owned inputs of this transaction.
     pub sent: u64,
     /// Fee value (sats) if available.
     /// The availability of the fee depends on the backend. It's never `None` with an Electrum
