@@ -809,7 +809,14 @@ where
         let drain_val = (coin_selection.selected_amount() - outgoing).saturating_sub(fee_amount);
 
         if tx.output.is_empty() {
-            if params.drain_to.is_some() {
+            // Uh oh, our transaction has no outputs.
+            // We allow this when:
+            // - We have a drain_to address and the utxos we must spend (this happens,
+            // for example, when we RBF)
+            // - We have a drain_to address and drain_wallet set
+            // Otherwise, we don't know who we should send the funds to, and how much
+            // we should send!
+            if params.drain_to.is_some() && (params.drain_wallet || !params.utxos.is_empty()) {
                 if drain_val.is_dust(&drain_output.script_pubkey) {
                     return Err(Error::InsufficientFunds {
                         needed: drain_output.script_pubkey.dust_value().as_sat(),
@@ -2246,6 +2253,40 @@ pub(crate) mod test {
             .unwrap();
         assert_eq!(main_output.value, 20_000,);
         assert_eq!(drain_output.value, 30_000 - details.fee.unwrap_or(0));
+    }
+
+    #[test]
+    fn test_create_tx_drain_to_and_utxos() {
+        let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
+        let addr = wallet.get_address(New).unwrap();
+        let utxos: Vec<_> = wallet
+            .get_available_utxos()
+            .unwrap()
+            .into_iter()
+            .map(|(u, _)| u.outpoint)
+            .collect();
+        let mut builder = wallet.build_tx();
+        builder
+            .drain_to(addr.script_pubkey())
+            .add_utxos(&utxos)
+            .unwrap();
+        let (psbt, details) = builder.finish().unwrap();
+
+        assert_eq!(psbt.unsigned_tx.output.len(), 1);
+        assert_eq!(
+            psbt.unsigned_tx.output[0].value,
+            50_000 - details.fee.unwrap_or(0)
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "NoRecipients")]
+    fn test_create_tx_drain_to_no_drain_wallet_no_utxos() {
+        let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
+        let drain_addr = wallet.get_address(New).unwrap();
+        let mut builder = wallet.build_tx();
+        builder.drain_to(drain_addr.script_pubkey());
+        builder.finish().unwrap();
     }
 
     #[test]
