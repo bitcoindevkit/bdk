@@ -584,7 +584,9 @@ where
             && external_policy.requires_path()
             && external_policy_path.is_none()
         {
-            return Err(Error::SpendingPolicyRequired(KeychainKind::External)); // TODO: Error should be of descriptor
+            return Err(Error::SpendingPolicyRequired(Box::new(
+                self.descriptor.clone(),
+            )));
         };
         // Same for the internal_policy path, if present
         if let Some(internal_policy) = &internal_policy {
@@ -592,7 +594,9 @@ where
                 && internal_policy.requires_path()
                 && internal_policy_path.is_none()
             {
-                return Err(Error::SpendingPolicyRequired(KeychainKind::Internal));
+                return Err(Error::SpendingPolicyRequired(Box::new(
+                    self.change_descriptor.as_ref().unwrap().clone(),
+                )));
             };
         }
 
@@ -2712,14 +2716,17 @@ pub(crate) mod test {
     }
 
     #[test]
-    #[should_panic(expected = "SpendingPolicyRequired(External)")]
     fn test_create_tx_policy_path_required() {
         let (wallet, _, _) = get_funded_wallet(get_test_a_or_b_plus_csv());
 
         let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
         let mut builder = wallet.build_tx();
         builder.add_recipient(addr.script_pubkey(), 30_000);
-        builder.finish().unwrap();
+
+        match builder.finish().unwrap_err() {
+            Error::SpendingPolicyRequired(desc) => assert_eq!(desc.as_ref(), &wallet.descriptor),
+            err => panic!("unexpected error type: {}", err),
+        };
     }
 
     #[test]
