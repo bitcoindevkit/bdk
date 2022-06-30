@@ -572,39 +572,36 @@ where
             })
             .transpose()?;
 
+        let external_policy_path = params.descriptor_policy_paths.get(&self.descriptor);
+        let internal_policy_path = self
+            .change_descriptor
+            .as_ref()
+            .and_then(|desc| params.descriptor_policy_paths.get(desc));
+
         // The policy allows spending external outputs, but it requires a policy path that hasn't been
         // provided
         if params.change_policy != tx_builder::ChangeSpendPolicy::OnlyChange
             && external_policy.requires_path()
-            && params.external_policy_path.is_none()
+            && external_policy_path.is_none()
         {
-            return Err(Error::SpendingPolicyRequired(KeychainKind::External));
+            return Err(Error::SpendingPolicyRequired(KeychainKind::External)); // TODO: Error should be of descriptor
         };
         // Same for the internal_policy path, if present
         if let Some(internal_policy) = &internal_policy {
             if params.change_policy != tx_builder::ChangeSpendPolicy::ChangeForbidden
                 && internal_policy.requires_path()
-                && params.internal_policy_path.is_none()
+                && internal_policy_path.is_none()
             {
                 return Err(Error::SpendingPolicyRequired(KeychainKind::Internal));
             };
         }
 
-        let external_requirements = external_policy.get_condition(
-            params
-                .external_policy_path
-                .as_ref()
-                .unwrap_or(&BTreeMap::new()),
-        )?;
+        let external_requirements =
+            external_policy.get_condition(external_policy_path.unwrap_or(&BTreeMap::new()))?;
         let internal_requirements = internal_policy
             .map(|policy| {
                 Ok::<_, Error>(
-                    policy.get_condition(
-                        params
-                            .internal_policy_path
-                            .as_ref()
-                            .unwrap_or(&BTreeMap::new()),
-                    )?,
+                    policy.get_condition(internal_policy_path.unwrap_or(&BTreeMap::new()))?,
                 )
             })
             .transpose()?;
@@ -2738,7 +2735,7 @@ pub(crate) mod test {
         let mut builder = wallet.build_tx();
         builder
             .add_recipient(addr.script_pubkey(), 30_000)
-            .policy_path(path, KeychainKind::External);
+            .policy_path(path, &wallet.descriptor);
         let (psbt, _) = builder.finish().unwrap();
 
         assert_eq!(psbt.unsigned_tx.input[0].sequence, 0xFFFFFFFF);
@@ -2757,7 +2754,7 @@ pub(crate) mod test {
         let mut builder = wallet.build_tx();
         builder
             .add_recipient(addr.script_pubkey(), 30_000)
-            .policy_path(path, KeychainKind::External);
+            .policy_path(path, &wallet.descriptor);
         let (psbt, _) = builder.finish().unwrap();
 
         assert_eq!(psbt.unsigned_tx.input[0].sequence, 144);
@@ -4546,7 +4543,7 @@ pub(crate) mod test {
         let mut builder = wallet.build_tx();
         builder
             .add_recipient(addr.script_pubkey(), 25_000)
-            .policy_path(path, KeychainKind::External);
+            .policy_path(path, &wallet.descriptor);
         let (psbt, _) = builder.finish().unwrap();
 
         assert_eq!(

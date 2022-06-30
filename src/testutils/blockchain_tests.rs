@@ -1328,8 +1328,8 @@ macro_rules! bdk_blockchain_tests {
                 let tx = {
                     let mut builder = wallet.build_tx();
                     builder.add_recipient(test_client.get_node_address(None).script_pubkey(), 25_000)
-                        .policy_path(ext_path, KeychainKind::External)
-                        .policy_path(int_path, KeychainKind::Internal);
+                        .policy_path(ext_path, wallet.get_descriptor_for_keychain(KeychainKind::External))
+                        .policy_path(int_path, wallet.get_descriptor_for_keychain(KeychainKind::Internal));
                     let (mut psbt, _details) = builder.finish().unwrap();
                     wallet.sign(&mut psbt, Default::default()).unwrap();
                     psbt.extract_tx()
