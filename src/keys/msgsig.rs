@@ -1,6 +1,6 @@
 /// Signing arbitrary messages and verify message signatures
 use bitcoin::hashes::Hash;
-use bitcoin::secp256k1::recovery::RecoverableSignature;
+use bitcoin::secp256k1::ecdsa::RecoverableSignature;
 use bitcoin::secp256k1::{All, Message, Secp256k1, SecretKey};
 use bitcoin::util::misc::{signed_msg_hash, MessageSignature};
 use bitcoin::{Address, Network, PrivateKey, PublicKey};
@@ -26,7 +26,7 @@ pub struct EcdsaMessageSigner {
 impl EcdsaMessageSigner {
     /// Creates message signer from a bitcoin ECDSA private key
     pub fn from_prv(prv: PrivateKey) -> Self {
-        Self::from_secret_key(prv.key)
+        Self::from_secret_key(prv.inner)
     }
 
     /// Creates message signer from an ECDSA secret key
@@ -41,8 +41,9 @@ impl EcdsaMessageSigner {
 impl MessageSigner<RecoverableSignature> for EcdsaMessageSigner {
     fn sign(&self, message: &str) -> RecoverableSignature {
         let msg_hash = signed_msg_hash(message);
-        self.secp.sign_recoverable(
-            &Message::from_slice(&msg_hash.into_inner()[..]).unwrap(),
+        self.secp.sign_ecdsa_recoverable(
+            &Message::from_slice(&msg_hash.into_inner()[..])
+                .expect("Message to be signed is not a valid Hash"),
             &self.secret_key,
         )
     }
