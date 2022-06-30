@@ -899,8 +899,6 @@ where
     /// # Ok::<(), bdk::Error>(())
     /// ```
     // TODO: support for merging multiple transactions while bumping the fees
-    // TODO: option to force addition of an extra output? seems bad for privacy to update the
-    // change
     pub fn build_fee_bump(
         &self,
         txid: Txid,
