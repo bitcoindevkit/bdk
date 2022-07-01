@@ -5,18 +5,6 @@ use bitcoin::secp256k1::{All, Message, Secp256k1, SecretKey};
 use bitcoin::util::misc::{signed_msg_hash, MessageSignature};
 use bitcoin::{Address, Network, PrivateKey, PublicKey};
 
-/// Trait for message signers
-pub trait MessageSigner<S> {
-    /// Sign an arbitrary message
-    fn sign(&self, msg: &str) -> S;
-}
-
-/// Trait for message signature verifiers
-pub trait MessageSignatureVerifier<S> {
-    /// Verify a signature against an arbitrary message
-    fn verify(&self, sig: S, msg: &str) -> bool;
-}
-
 /// A message signer using ECDSA
 pub struct EcdsaMessageSigner<'a> {
     secp: &'a Secp256k1<All>,
@@ -33,9 +21,7 @@ impl<'a> EcdsaMessageSigner<'a> {
     pub fn from_secret_key(secret_key: SecretKey, secp: &'a Secp256k1<All>) -> Self {
         EcdsaMessageSigner { secret_key, secp }
     }
-}
 
-impl<'a> MessageSigner<RecoverableSignature> for EcdsaMessageSigner<'a> {
     fn sign(&self, message: &str) -> RecoverableSignature {
         let msg_hash = signed_msg_hash(message);
         self.secp.sign_ecdsa_recoverable(
@@ -63,9 +49,7 @@ impl<'a> EcdsaMessageSignatureVerifier<'a> {
     pub fn from_address(address: Address, secp: &'a Secp256k1<All>) -> Self {
         EcdsaMessageSignatureVerifier { address, secp }
     }
-}
 
-impl<'a> MessageSignatureVerifier<RecoverableSignature> for EcdsaMessageSignatureVerifier<'a> {
     fn verify(&self, sig: RecoverableSignature, msg: &str) -> bool {
         let message_sig = MessageSignature::new(sig, false);
         let msg_hash = signed_msg_hash(msg);
