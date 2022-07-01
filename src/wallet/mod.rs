@@ -2262,7 +2262,6 @@ pub(crate) mod test {
             .drain_to(drain_addr.script_pubkey())
             .drain_wallet();
         let (psbt, details) = builder.finish().unwrap();
-        dbg!(&psbt);
         let outputs = psbt.unsigned_tx.output;
 
         assert_eq!(outputs.len(), 2);
@@ -3857,6 +3856,99 @@ pub(crate) mod test {
         );
 
         assert_eq!(details.fee.unwrap_or(0), 250);
+    }
+
+    #[test]
+    #[should_panic(expected = "InsufficientFunds")]
+    fn test_bump_fee_unconfirmed_inputs_only() {
+        // We try to bump the fee, but:
+        // - We can't reduce the change, as we have no change
+        // - All our UTXOs are unconfirmed
+        // So, we fail with "InsufficientFunds", as per RBF rule 2:
+        // The replacement transaction may only include an unconfirmed input
+        // if that input was included in one of the original transactions.
+        let (wallet, descriptors, _) = get_funded_wallet(get_test_wpkh());
+        let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
+        let mut builder = wallet.build_tx();
+        builder
+            .drain_wallet()
+            .drain_to(addr.script_pubkey())
+            .enable_rbf();
+        let (psbt, mut original_details) = builder.finish().unwrap();
+        // Now we receive one transaction with 0 confirmations. We won't be able to use that for
+        // fee bumping, as it's still unconfirmed!
+        crate::populate_test_db!(
+            wallet.database.borrow_mut(),
+            testutils! (@tx ( (@external descriptors, 0) => 25_000 ) (@confirmations 0)),
+            Some(100),
+        );
+        let mut tx = psbt.extract_tx();
+        let txid = tx.txid();
+        for txin in &mut tx.input {
+            txin.witness.push([0x00; 108]); // fake signature
+            wallet
+                .database
+                .borrow_mut()
+                .del_utxo(&txin.previous_output)
+                .unwrap();
+        }
+        original_details.transaction = Some(tx);
+        wallet
+            .database
+            .borrow_mut()
+            .set_tx(&original_details)
+            .unwrap();
+
+        let mut builder = wallet.build_fee_bump(txid).unwrap();
+        builder.fee_rate(FeeRate::from_sat_per_vb(25.0));
+        builder.finish().unwrap();
+    }
+
+    #[test]
+    fn test_bump_fee_unconfirmed_input() {
+        // We create a tx draining the wallet and spending one confirmed
+        // and one unconfirmed UTXO. We check that we can fee bump normally
+        // (BIP125 rule 2 only apply to newly added unconfirmed input, you can
+        // always fee bump with an unconfirmed input if it was included in the
+        // original transaction)
+        let (wallet, descriptors, _) = get_funded_wallet(get_test_wpkh());
+        let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
+        // We receive a tx with 0 confirmations, which will be used as an input
+        // in the drain tx.
+        crate::populate_test_db!(
+            wallet.database.borrow_mut(),
+            testutils! (@tx ( (@external descriptors, 0) => 25_000 ) (@confirmations 0)),
+            Some(100),
+        );
+        let mut builder = wallet.build_tx();
+        builder
+            .drain_wallet()
+            .drain_to(addr.script_pubkey())
+            .enable_rbf();
+        let (psbt, mut original_details) = builder.finish().unwrap();
+        let mut tx = psbt.extract_tx();
+        let txid = tx.txid();
+        for txin in &mut tx.input {
+            txin.witness.push([0x00; 108]); // fake signature
+            wallet
+                .database
+                .borrow_mut()
+                .del_utxo(&txin.previous_output)
+                .unwrap();
+        }
+        original_details.transaction = Some(tx);
+        wallet
+            .database
+            .borrow_mut()
+            .set_tx(&original_details)
+            .unwrap();
+
+        let mut builder = wallet.build_fee_bump(txid).unwrap();
+        builder
+            .fee_rate(FeeRate::from_sat_per_vb(15.0))
+            .allow_shrinking(addr.script_pubkey())
+            .unwrap();
+        builder.finish().unwrap();
     }
 
     #[test]
