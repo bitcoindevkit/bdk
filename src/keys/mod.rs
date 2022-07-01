@@ -36,6 +36,7 @@ use crate::wallet::utils::SecpCtx;
 #[cfg(feature = "keys-bip39")]
 #[cfg_attr(docsrs, doc(cfg(feature = "keys-bip39")))]
 pub mod bip39;
+pub mod msgsig;
 
 /// Set of valid networks for a key
 pub type ValidNetworks = HashSet<Network>;
