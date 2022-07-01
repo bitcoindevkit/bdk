@@ -512,10 +512,13 @@ macro_rules! populate_test_db {
         };
 
         let txid = tx.txid();
-        let confirmation_time = tx_meta.min_confirmations.map(|conf| $crate::BlockTime {
-            height: current_height.unwrap().checked_sub(conf as u32).unwrap(),
-            timestamp: 0,
-        });
+        let confirmation_time = tx_meta
+            .min_confirmations
+            .and_then(|v| if v == 0 { None } else { Some(v) })
+            .map(|conf| $crate::BlockTime {
+                height: current_height.unwrap().checked_sub(conf as u32).unwrap() + 1,
+                timestamp: 0,
+            });
 
         let tx_details = $crate::TransactionDetails {
             transaction: Some(tx.clone()),

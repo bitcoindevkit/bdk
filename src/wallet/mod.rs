@@ -4723,7 +4723,7 @@ pub(crate) mod test {
 
         crate::populate_test_db!(
             wallet.database.borrow_mut(),
-            testutils! (@tx ( (@external descriptors, 0) => 25_000 ) (@confirmations 0)),
+            testutils! (@tx ( (@external descriptors, 0) => 25_000 ) (@confirmations 1)),
             Some(confirmation_time),
             (@coinbase true)
         );
