@@ -619,9 +619,27 @@ where
             _ => 1,
         };
 
+        // We use a match here instead of a map_or_else as it's way more readable :)
+        let current_height = match params.current_height {
+            // If they didn't tell us the current height, we assume it's the latest sync height.
+            None => self
+                .database()
+                .get_sync_time()?
+                .map(|sync_time| sync_time.block_time.height),
+            h => h,
+        };
+
         let lock_time = match params.locktime {
-            // No nLockTime, default to 0
-            None => requirements.timelock.unwrap_or(0),
+            // When no nLockTime is specified, we try to prevent fee sniping, if possible
+            None => {
+                // Fee sniping can be partially prevented by setting the timelock
+                // to current_height. If we don't know the current_height,
+                // we default to 0.
+                let fee_sniping_height = current_height.unwrap_or(0);
+                // We choose the biggest between the required nlocktime and the fee sniping
+                // height
+                std::cmp::max(requirements.timelock.unwrap_or(0), fee_sniping_height)
+            }
             // Specific nLockTime required and we have no constraints, so just set to that value
             Some(x) if requirements.timelock.is_none() => x,
             // Specific nLockTime required and it's compatible with the constraints
@@ -791,7 +809,14 @@ where
         let drain_val = (coin_selection.selected_amount() - outgoing).saturating_sub(fee_amount);
 
         if tx.output.is_empty() {
-            if params.drain_to.is_some() {
+            // Uh oh, our transaction has no outputs.
+            // We allow this when:
+            // - We have a drain_to address and the utxos we must spend (this happens,
+            // for example, when we RBF)
+            // - We have a drain_to address and drain_wallet set
+            // Otherwise, we don't know who we should send the funds to, and how much
+            // we should send!
+            if params.drain_to.is_some() && (params.drain_wallet || !params.utxos.is_empty()) {
                 if drain_val.is_dust(&drain_output.script_pubkey) {
                     return Err(Error::InsufficientFunds {
                         needed: drain_output.script_pubkey.dust_value().as_sat(),
@@ -1980,7 +2005,57 @@ pub(crate) mod test {
         builder.add_recipient(addr.script_pubkey(), 25_000);
         let (psbt, _) = builder.finish().unwrap();
 
+        // Since we never synced the wallet we don't have a last_sync_height
+        // we could use to try to prevent fee sniping. We default to 0.
         assert_eq!(psbt.unsigned_tx.lock_time, 0);
+    }
+
+    #[test]
+    fn test_create_tx_fee_sniping_locktime_provided_height() {
+        let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
+        let addr = wallet.get_address(New).unwrap();
+        let mut builder = wallet.build_tx();
+        builder.add_recipient(addr.script_pubkey(), 25_000);
+        let sync_time = SyncTime {
+            block_time: BlockTime {
+                height: 24,
+                timestamp: 0,
+            },
+        };
+        wallet
+            .database
+            .borrow_mut()
+            .set_sync_time(sync_time)
+            .unwrap();
+        let current_height = 25;
+        builder.set_current_height(current_height);
+        let (psbt, _) = builder.finish().unwrap();
+
+        // current_height will override the last sync height
+        assert_eq!(psbt.unsigned_tx.lock_time, current_height);
+    }
+
+    #[test]
+    fn test_create_tx_fee_sniping_locktime_last_sync() {
+        let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
+        let addr = wallet.get_address(New).unwrap();
+        let mut builder = wallet.build_tx();
+        builder.add_recipient(addr.script_pubkey(), 25_000);
+        let sync_time = SyncTime {
+            block_time: BlockTime {
+                height: 25,
+                timestamp: 0,
+            },
+        };
+        wallet
+            .database
+            .borrow_mut()
+            .set_sync_time(sync_time.clone())
+            .unwrap();
+        let (psbt, _) = builder.finish().unwrap();
+
+        // If there's no current_height we're left with using the last sync height
+        assert_eq!(psbt.unsigned_tx.lock_time, sync_time.block_time.height);
     }
 
     #[test]
@@ -2001,9 +2076,13 @@ pub(crate) mod test {
         let mut builder = wallet.build_tx();
         builder
             .add_recipient(addr.script_pubkey(), 25_000)
+            .set_current_height(630_001)
             .nlocktime(630_000);
         let (psbt, _) = builder.finish().unwrap();
 
+        // When we explicitly specify a nlocktime
+        // we don't try any fee sniping prevention trick
+        // (we ignore the current_height)
         assert_eq!(psbt.unsigned_tx.lock_time, 630_000);
     }
 
@@ -2174,6 +2253,40 @@ pub(crate) mod test {
             .unwrap();
         assert_eq!(main_output.value, 20_000,);
         assert_eq!(drain_output.value, 30_000 - details.fee.unwrap_or(0));
+    }
+
+    #[test]
+    fn test_create_tx_drain_to_and_utxos() {
+        let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
+        let addr = wallet.get_address(New).unwrap();
+        let utxos: Vec<_> = wallet
+            .get_available_utxos()
+            .unwrap()
+            .into_iter()
+            .map(|(u, _)| u.outpoint)
+            .collect();
+        let mut builder = wallet.build_tx();
+        builder
+            .drain_to(addr.script_pubkey())
+            .add_utxos(&utxos)
+            .unwrap();
+        let (psbt, details) = builder.finish().unwrap();
+
+        assert_eq!(psbt.unsigned_tx.output.len(), 1);
+        assert_eq!(
+            psbt.unsigned_tx.output[0].value,
+            50_000 - details.fee.unwrap_or(0)
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "NoRecipients")]
+    fn test_create_tx_drain_to_no_drain_wallet_no_utxos() {
+        let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
+        let drain_addr = wallet.get_address(New).unwrap();
+        let mut builder = wallet.build_tx();
+        builder.drain_to(drain_addr.script_pubkey());
+        builder.finish().unwrap();
     }
 
     #[test]

@@ -13,7 +13,7 @@
     <a href="https://github.com/bitcoindevkit/bdk/actions?query=workflow%3ACI"><img alt="CI Status" src="https://github.com/bitcoindevkit/bdk/workflows/CI/badge.svg"></a>
     <a href="https://codecov.io/gh/bitcoindevkit/bdk"><img src="https://codecov.io/gh/bitcoindevkit/bdk/branch/master/graph/badge.svg"/></a>
     <a href="https://docs.rs/bdk"><img alt="API Docs" src="https://img.shields.io/badge/docs.rs-bdk-green"/></a>
-    <a href="https://blog.rust-lang.org/2020/08/27/Rust-1.56.0.html"><img alt="Rustc Version 1.56+" src="https://img.shields.io/badge/rustc-1.56%2B-lightgrey.svg"/></a>
+    <a href="https://blog.rust-lang.org/2021/11/01/Rust-1.56.1.html"><img alt="Rustc Version 1.56.1+" src="https://img.shields.io/badge/rustc-1.56.1%2B-lightgrey.svg"/></a>
     <a href="https://discord.gg/d7NkDKm"><img alt="Chat on Discord" src="https://img.shields.io/discord/753336465005608961?logo=discord"></a>
   </p>
 
