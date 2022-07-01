@@ -6,11 +6,16 @@
 //! ```no run
 //! ```
 
+use crate::bitcoin::hashes::hex::ToHex;
 use crate::bitcoin::{Address, Network, Transaction, Txid};
 use crate::blockchain::*;
 use crate::database::BatchDatabase;
-use crate::{Error, FeeRate};
-use bitcoincore_rpc::jsonrpc::serde_json::Value;
+use crate::descriptor::get_checksum;
+use crate::{Error, FeeRate, KeychainKind};
+use bitcoincore_rpc::json::{
+    ImportMultiOptions, ImportMultiRequest, ImportMultiRequestScriptPubkey, ImportMultiRescanSince,
+};
+use bitcoincore_rpc::jsonrpc::serde_json::{json, Value};
 use bitcoincore_rpc::Auth as PrunedRpcAuth;
 use bitcoincore_rpc::{Client, RpcApi};
 use log::debug;
@@ -27,7 +32,7 @@ pub struct PrunedRpcBlockchain {
     /// Blockchain capabilities, cached here at startup
     capabilities: HashSet<Capability>,
     // Whether the wallet is a "descriptor" or "legacy" in core
-    _is_descriptor: bool,
+    is_descriptor: bool,
     /// This is a fixed Address used as a hack key to store information on the node
     _storage_address: Address,
 }
@@ -118,14 +123,68 @@ impl WalletSync for PrunedRpcBlockchain {
     fn wallet_setup<D: BatchDatabase>(
         &self,
         database: &mut D,
-        progress_update: Box<dyn Progress>,
+        _progress_update: Box<dyn Progress>,
     ) -> Result<(), Error> {
+        let mut script_pubkeys = database.iter_script_pubkeys(Some(KeychainKind::External))?;
+        script_pubkeys.extend(database.iter_script_pubkeys(Some(KeychainKind::Internal))?);
+
+        debug!(
+            "importing {} script_pubkeys (some maybe aleady imported)",
+            script_pubkeys.len()
+        );
+
+        if self.is_descriptor {
+            let requests = Value::Array(
+                script_pubkeys
+                    .iter()
+                    .map(|s| {
+                        let desc = format!("raw({})", s.to_hex());
+                        json!({
+                            "timestamp": "now",
+                            "desc": format!("{}#{}", desc, get_checksum(&desc).unwrap()),
+                        })
+                    })
+                    .collect(),
+            );
+            let res: Vec<Value> = self.client.call("importdescriptors", &[requests])?;
+            res.into_iter()
+                .map(|v| match v["success"].as_bool() {
+                    Some(true) => Ok(()),
+                    Some(false) => Err(Error::Generic(
+                        v["error"]["message"]
+                            .as_str()
+                            .unwrap_or("Unknown error")
+                            .to_string(),
+                    )),
+                    _ => Err(Error::Generic("Unexpected response from Core".to_string())),
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+        } else {
+            let requests: Vec<_> = script_pubkeys
+                .iter()
+                .map(|s| ImportMultiRequest {
+                    timestamp: ImportMultiRescanSince::Timestamp(0),
+                    script_pubkey: Some(ImportMultiRequestScriptPubkey::Script(s)),
+                    watchonly: Some(true),
+                    ..Default::default()
+                })
+                .collect();
+            let options = ImportMultiOptions {
+                rescan: Some(false),
+            };
+            self.client.import_multi(&requests, Some(&options))?;
+        }
+
+        // make a request using scantxout and loop through it here
+        // the scan needs to have all the descriptors in it
+        // see how to make sure you're scanning the minimum possible set
+
         todo!()
     }
 
     fn wallet_sync<D: BatchDatabase>(
         &self,
-        db: &mut D,
+        _db: &mut D,
         _progress_update: Box<dyn Progress>,
     ) -> Result<(), Error> {
         todo!()
@@ -202,7 +261,7 @@ impl ConfigurableBlockchain for PrunedRpcBlockchain {
         Ok(PrunedRpcBlockchain {
             client,
             capabilities,
-            _is_descriptor: is_descriptors,
+            is_descriptor: is_descriptors,
             _storage_address: storage_address,
         })
     }
