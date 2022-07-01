@@ -11,13 +11,10 @@
 
 //! BIP-0039
 
-use std::fmt;
+use std::{fmt, ops::ControlFlow};
 
+use bitcoin::util::bip32;
 use bitcoin::Network;
-use bitcoin::{
-    hashes::{sha256, Hash},
-    util::bip32,
-};
 use unicode_normalization::UnicodeNormalization;
 
 use miniscript::ScriptContext;
@@ -27,26 +24,24 @@ use super::{
 };
 
 mod pbkdf2;
+mod utils;
 mod wordlists;
 pub use wordlists::Language;
+
+// MS (Mnemonic Sentence) constants
+const MS_MULTIPLE: usize = 6; // MS must be a multiple of this (in bytes)
+const MS_MIN: usize = 12; // Minimum MS value
+const MS_MAX: usize = 24; // Maximum MS value
+
+// ENT (Initial Entropy) constants
+const ENT_MULTIPLE: usize = 4; // MS must be a multiple of this (in bytes)
+const ENT_MIN: usize = 16; // Minimum ENT value
+const ENT_MAX: usize = 32; // Maximum ENT value
 
 /// Seed length in bytes
 const SEED_LEN: usize = 64;
 
 type Seed = [u8; SEED_LEN];
-
-/// To generate a mnemonic from an entropy, the entropy must be divisble by 32 bits
-const ENTROPY_MULTIPLE: usize = 32;
-/// Minimum entropy size in bits to generate a mnemonic
-const MIN_ENTROPY_BITS: usize = 128;
-/// Maximum entropy size in bits to generate a mnemonic
-const MAX_ENTROPY_BITS: usize = 256;
-/// Mnemonic words are indices in a wordlist which are formed from 11 bits each
-const BITS_PER_WORD: usize = 11;
-/// Minimum word count a mnemonic can have
-const MIN_WORDS: usize = 12;
-/// Maximum word count a mnemonic can have
-const MAX_WORDS: usize = 24;
 
 /// A BIP39 error
 #[derive(Debug, PartialEq)]
@@ -54,11 +49,12 @@ pub enum Error {
     /// Mnemonic has a word count that is not a multiple of 6 and between 12 and 24
     InvalidWordCount(usize),
     /// Mnemonic has a word that does not belong to the specified language
-    InvalidWord(String),
-    /// Entropy is not a multiple of 32-bits and between 128-256
+    InvalidWordAtIndex(usize),
+    /// Entropy length in bytes.
+    /// Length must be a multiple of 32 bits (4 bytes) and between 128-256 bits (16-32 bytes)
     InvalidEntropyLength(usize),
     /// The mnemonic has an invalid checksum
-    InvalidChecksum(usize),
+    InvalidChecksum,
 }
 
 impl std::error::Error for Error {}
@@ -66,10 +62,12 @@ impl std::error::Error for Error {}
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match &*self {
-            Error::InvalidWordCount(b) => write!(f, "invalid word count {}", b),
-            Error::InvalidWord(word) => write!(f, "invalid word in mnemonic {}", word),
+            Error::InvalidWordCount(b) => write!(f, "mnemonic has an invalid word count: {}", b),
+            Error::InvalidWordAtIndex(word) => {
+                write!(f, "word #{} of the mnemonic is invalid", word)
+            }
             Error::InvalidEntropyLength(b) => write!(f, "invalid entropy length {}", b),
-            Error::InvalidChecksum(b) => write!(f, "invalid checksum length {}", b),
+            Error::InvalidChecksum => write!(f, "mnemonic has an invalid checksum"),
         }
     }
 }
@@ -98,124 +96,136 @@ pub struct Mnemonic {
 }
 
 impl Mnemonic {
-    /// Encode a mnemonic string to a `Mnemonic` type
+    /// Parses a mnemonic in the given language.
     pub fn parse_in(language: Language, mnemonic: &str) -> Result<Mnemonic, Error> {
-        let mnemonic: String = mnemonic.nfkd().collect();
+        let mnemonic = mnemonic.nfkd().to_string();
+        let split_mnemonic: Vec<&str> = mnemonic.split_whitespace().collect();
 
-        let words: Vec<&str> = mnemonic.split_whitespace().collect();
+        // find MS (mnemonic scentence) in words
+        let ms = split_mnemonic.len();
 
-        if words.len() % 6 != 0 {
-            return Err(Error::InvalidWordCount(words.len()));
+        // check word count is valid
+        if ms % MS_MULTIPLE != 0 || ms < MS_MIN || ms > MS_MAX {
+            return Err(Error::InvalidWordCount(ms));
         }
 
-        if words.len() < MIN_WORDS || words.len() > MAX_WORDS {
-            return Err(Error::InvalidWordCount(words.len()));
-        }
+        let word_to_index_map = language.word_map();
+        let mut words = Vec::with_capacity(MS_MAX); // word indexes
+        let mut ent_cs_bits = Vec::with_capacity(MS_MAX * utils::U11_BITS); // ENT+CS bits
 
-        let mut indices: Vec<u16> = Vec::with_capacity(words.len());
-        let wordlist = language.wordlist();
-        let mut mnemonic_bits = vec![false; words.len() * 11];
-        for (i, word) in words.iter().enumerate() {
-            let idx = match wordlist.iter().position(|&x| x == *word) {
-                Some(i) => i as u16,
-                None => return Err(Error::InvalidWord(word.to_string())),
-            };
-
-            indices.push(idx);
-
-            for j in 0..11 {
-                mnemonic_bits[i * 11 + j] = (idx & (1 << (10 - j))) != 0;
-            }
-        }
-
-        //calculate the entropy length in bits using CS = ENT / 32 and
-        //MS = (ENT + CS) / 11, then convert to bytes
-        let entropy_bytes_len = (words.len() * 4) / 3;
-        let mut entropy = vec![0u8; entropy_bytes_len];
-        for i in 0..entropy_bytes_len {
-            for j in 0..8 {
-                if mnemonic_bits[i * 8 + j] {
-                    entropy[i] += 1 << (7 - j);
+        // parse word indexes and ENT+CS bits from mnemonic words
+        let parse_result = split_mnemonic
+            .iter()
+            .map(|&word| word_to_index_map.get(word).unwrap_or(&utils::U11_EOF))
+            .try_for_each(|word_index| {
+                if *word_index > utils::U11_MAX {
+                    // break on invalid word
+                    ControlFlow::Break(())
+                } else {
+                    words.push(*word_index);
+                    ent_cs_bits.extend(utils::u11_to_bool_array(word_index));
+                    ControlFlow::Continue(())
                 }
-            }
+            });
+
+        assert_eq!(
+            parse_result == ControlFlow::Continue(()),
+            words.len() == ms && ent_cs_bits.len() == ms * utils::U11_BITS
+        );
+
+        // return error on invalid words
+        if parse_result == ControlFlow::Break(()) {
+            return Err(Error::InvalidWordAtIndex(words.len()));
         }
 
-        let entropy_hash = sha256::Hash::hash(&entropy);
-        let entropy_hash = entropy_hash.as_ref();
-        let checksum_byte = entropy_hash[0];
+        // expected lengths (in bits) for ENT and CS
+        let ent = ms * 32 / 3;
+        let cs = ent / 32;
 
-        //verify checksum calculated from entropy
-        let entropy_bits_len = (words.len() * 32) / 3;
-        for (i, &bit) in mnemonic_bits[entropy_bits_len..].iter().enumerate() {
-            if (checksum_byte & (1 << (7 - i)) != 0) != bit {
-                return Err(Error::InvalidChecksum(checksum_byte as usize));
-            }
-        }
+        // separate ENT bits and CS bits
+        let (ent_bits, cs_bits) = ent_cs_bits.split_at(ent);
 
-        Ok(Mnemonic {
-            language,
-            words: indices,
-        })
-    }
+        // parse ENT
+        let entropy = ent_bits
+            .chunks_exact(utils::U8_BITS)
+            .map(utils::bool_array_to_u8)
+            .collect::<Vec<_>>();
 
-    /// Generate a mnemonic from a given entropy in a specific language. Entropy must be between
-    /// 128-bits and 256-bits long and a multiple of 32 bits.
-    fn from_entropy_in(language: Language, entropy: &[u8]) -> Result<Mnemonic, Error> {
-        let ent_bits = entropy.len() * 8;
-        let check_bits = ent_bits / ENTROPY_MULTIPLE;
-        let seed_bits = ent_bits + check_bits;
-        let word_count = seed_bits / BITS_PER_WORD;
+        // calculate CS from checksum
+        let checksum = utils::generate_checksum_byte(&entropy);
+        let calculated_cs = utils::u8_to_bool_array(&checksum);
+        let calculated_cs_bits = calculated_cs
+            .get(0..cs)
+            .expect("failed to extract CS bits from checksum");
 
-        if ent_bits % ENTROPY_MULTIPLE != 0 {
-            return Err(Error::InvalidEntropyLength(ent_bits));
-        }
-
-        if !(MIN_ENTROPY_BITS..=MAX_ENTROPY_BITS).contains(&ent_bits) {
-            return Err(Error::InvalidEntropyLength(ent_bits));
-        }
-
-        let mut seed = vec![0; seed_bits];
-        for i in 0..entropy.len() {
-            for j in 0..8 {
-                seed[i * 8 + j] = entropy[i] & (1 << (7 - j));
-            }
-        }
-
-        let hash = sha256::Hash::hash(entropy);
-        // Possible size for check is >= 4 and <= 8
-        for j in 0..check_bits {
-            // Append check at the end of entropy bits
-            seed[seed_bits - check_bits + j] = hash[0] & (1 << (7 - j));
-        }
-
-        if seed.len() != seed_bits {
-            return Err(Error::InvalidChecksum(check_bits));
-        }
-
-        let mut words: Vec<u16> = vec![0; word_count];
-        for i in 0..word_count {
-            let mut index = 0;
-            for j in 0..BITS_PER_WORD {
-                if seed[i * BITS_PER_WORD + j] > 0 {
-                    index += 1 << (10 - j);
-                }
-            }
-            words[i] = index;
+        // check calculated CS is the same as the parsed CS, otherwise return error
+        if calculated_cs_bits.cmp(cs_bits).is_ne() {
+            return Err(Error::InvalidChecksum);
         }
 
         Ok(Mnemonic { language, words })
     }
 
-    /// Convert a mnemonic to a seed with an optional passphrase
-    fn to_seed(&self, passphrase: Option<String>) -> Seed {
+    /// Generates mnemonic from a given language and entropy.
+    ///
+    /// Entropy length must be a multiple of 32 bits (4 bytes) and between 128-256 bits (16-32 bytes).
+    pub fn from_entropy_in(language: Language, entropy: &[u8]) -> Result<Mnemonic, Error> {
+        let entropy_len = entropy.len();
+
+        // check entropy length is valid
+        if entropy_len % ENT_MULTIPLE != 0 || entropy_len < ENT_MIN || entropy_len > ENT_MAX {
+            return Err(Error::InvalidEntropyLength(entropy_len));
+        }
+
+        // expected lengths (in bits) of ENT and CS
+        let ent = entropy_len * 8;
+        let cs = ent / 32;
+
+        // generate CS
+        // stored in a byte and may contain extra bits
+        let checksum = utils::generate_checksum_byte(entropy);
+
+        // generate ENT+CS
+        // concat entropy and checksum and convert to array of bits
+        // remove extra bits introduced by `checksum`
+        let ent_cs = entropy
+            .iter()
+            .chain([&checksum])
+            .flat_map(utils::u8_to_bool_array)
+            .take(ent + cs)
+            .collect::<Vec<_>>();
+
+        // generate MS
+        // split into groups of 11 bits and store each group in an u16
+        // each group represents a word index of range (0-2047)
+        let words = ent_cs
+            .chunks_exact(utils::U11_BITS)
+            .map(utils::bool_array_to_u11)
+            .collect::<Vec<_>>();
+
+        Ok(Mnemonic { language, words })
+    }
+
+    /// Converts a mnemonic into a seed with an optional passphrase.
+    pub fn to_seed(&self, passphrase: &str) -> Seed {
         let mut seed = [0_u8; SEED_LEN];
-        pbkdf2::generate_seed(self.word_iter(), passphrase.as_deref(), &mut seed);
+        pbkdf2::generate_seed(self.word_iter(), passphrase, &mut seed);
         seed
     }
 
+    /// Get the language of the [Mnemonic].
+    pub fn language(&self) -> Language {
+        self.language
+    }
+
+    /// Get the number of words in the mnemonic.
+    pub fn word_count(&self) -> usize {
+        self.words.len()
+    }
+
     /// Convert a vec of word indices to an iterator of the mnemonic words
-    fn word_iter(&self) -> impl Iterator<Item = &str> + Clone + '_ {
-        let wordlist = self.language.wordlist();
+    pub fn word_iter(&self) -> impl Iterator<Item = &str> + Clone + '_ {
+        let wordlist = self.language.word_list();
         self.words.iter().map(move |&w| wordlist[w as usize])
     }
 }
@@ -267,7 +277,7 @@ impl<Ctx: ScriptContext> DerivableKey<Ctx> for Seed {
 impl<Ctx: ScriptContext> DerivableKey<Ctx> for MnemonicWithPassphrase {
     fn into_extended_key(self) -> Result<ExtendedKey<Ctx>, KeyError> {
         let (mnemonic, passphrase) = self;
-        let seed: Seed = mnemonic.to_seed(passphrase);
+        let seed: Seed = mnemonic.to_seed(passphrase.as_deref().unwrap_or_default());
 
         seed.into_extended_key()
     }
@@ -569,7 +579,7 @@ mod test {
                     entropy.into_boxed_slice(),
                 )
                 .unwrap();
-            let generated_seed = generated_mnemonic.to_seed(Some("TREZOR".to_string()));
+            let generated_seed = generated_mnemonic.to_seed("TREZOR");
             let generated_privkey =
                 bip32::ExtendedPrivKey::new_master(bitcoin::Network::Bitcoin, &generated_seed)
                     .unwrap();
@@ -808,68 +818,57 @@ mod test {
 
     #[test]
     fn test_invalid_entropies() {
-        //testing with entropy less than 128 bits
-        assert_eq!(
-            Mnemonic::from_entropy_in(Language::English, &[b'0'; 15]),
-            Err(Error::InvalidEntropyLength(120))
-        );
+        let test_cases = [
+            15, // ENT < 128 bits
+            33, // ENT > 256 bits
+            31, // ENT not a multiple of 32 bits
+        ];
 
-        //testing with entropy greater than 256 bits
-        assert_eq!(
-            Mnemonic::from_entropy_in(Language::English, &[b'0'; 33]),
-            Err(Error::InvalidEntropyLength(264))
-        );
-
-        //testing entropy which is not a multiple of 32 bits
-        assert_eq!(
-            Mnemonic::from_entropy_in(Language::English, &[b'0'; 31]),
-            Err(Error::InvalidEntropyLength(248))
-        );
+        test_cases.iter().for_each(|&word_count| {
+            assert_eq!(
+                Mnemonic::from_entropy_in(Language::English, &vec![0_u8; word_count]),
+                Err(Error::InvalidEntropyLength(word_count))
+            )
+        });
     }
 
     #[test]
     fn test_invalid_mnemonic() {
-        //less than 12 words
-        assert_eq!(
-            Mnemonic::parse_in(
-                Language::English,
-                "join fossil bulk soft easily give section spoon divorce ice pilot"
+        let test_cases = [
+            (
+                "less than 12 words",
+                "join fossil bulk soft easily give section spoon divorce ice pilot",
+                Error::InvalidWordCount(11),
             ),
-            Err(Error::InvalidWordCount(11))
-        );
-
-        //more than 24 words
-        assert_eq!(Mnemonic::parse_in(Language::English, "area secret six clutch run reject tape
-        ritual soldier mad eagle win impulse found tattoo door culture reject movie grocery resource 
-        thought please conduct gorilla"), Err(Error::InvalidWordCount(25)));
-
-        //not a multiple of six
-        assert_eq!(
-            Mnemonic::parse_in(
-                Language::English,
-                "gorilla convince minor amateur labor advance hungry
-        treat ripple bracket draft wrong found"
+            (
+                "more than 24 words",
+                "area secret six clutch run reject tape ritual soldier mad eagle win impulse found tattoo door culture reject movie grocery resource thought please conduct gorilla",
+                Error::InvalidWordCount(25),
             ),
-            Err(Error::InvalidWordCount(13))
-        );
-
-        //invalid word
-        assert_eq!(
-            Mnemonic::parse_in(
-                Language::English,
-                "here convince minor amateur labor advance hungry treat ripple bracket draft wrong"
+            (
+                "not a multiple of six",
+                "gorilla convince minor amateur labor advance hungry treat ripple bracket draft wrong found",
+                Error::InvalidWordCount(13),
             ),
-            Err(Error::InvalidWord(String::from("here")))
-        );
-
-        //invalid checksum
-        assert_eq!(
-            Mnemonic::parse_in(
-                Language::English,
-                "gorilla convince minor amateur labor advance
-        hungry treat ripple bracket draft gorilla"
+            (
+                "invalid word at index",
+                "here convince minor amateur labor advance hungry treat ripple bracket draft wrong",
+                Error::InvalidWordAtIndex(0),
             ),
-            Err(Error::InvalidChecksum(175))
-        );
+            (
+                "invalid checksum",
+                "gorilla convince minor amateur labor advance hungry treat ripple bracket draft gorilla",
+                Error::InvalidChecksum,
+            ),
+        ];
+
+        for (description, phrase, err) in test_cases {
+            assert_eq!(
+                Mnemonic::parse_in(Language::English, phrase),
+                Err(err),
+                "{}",
+                description
+            );
+        }
     }
 }

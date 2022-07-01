@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 // English is always included as the default for BIP39
 #[cfg(feature = "chinese_simplified")]
 mod chinese_simplified;
@@ -20,7 +22,7 @@ mod portuguese;
 mod spanish;
 
 /// List of supported languages for mnemonics
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub enum Language {
     /// The English language
     English,
@@ -54,8 +56,8 @@ pub enum Language {
 }
 
 impl Language {
-    /// Fetch the wordlist for a specific language
-    pub fn wordlist(&self) -> &[&str; 2048] {
+    /// Fetch word list for a given language.
+    pub fn word_list(&self) -> &[&str; 2048] {
         match *self {
             Language::English => &english::WORDS,
             #[cfg(feature = "japanese")]
@@ -77,6 +79,16 @@ impl Language {
             #[cfg(feature = "portuguese")]
             Language::Portuguese => &portuguese::WORDS,
         }
+    }
+
+    /// Generate word map for given language.
+    pub fn word_map(&self) -> HashMap<&str, u16> {
+        let word_list = self.word_list();
+        let mut map = HashMap::with_capacity(word_list.len());
+        word_list.iter().enumerate().for_each(|(i, &w)| {
+            map.insert(w, i as _);
+        });
+        map
     }
 }
 

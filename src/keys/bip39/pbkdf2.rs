@@ -67,16 +67,16 @@ where
 }
 
 /// Salt is the UTF8-NFKD-normalized result of (SALT_PREFIX + passphrase).
-fn make_salt(passphrase: Option<&str>) -> Cow<'static, str> {
+fn make_salt(passphrase: &str) -> Cow<'static, str> {
     let mut salt = Cow::from(SALT_PREFIX);
-    if let Some(passphrase) = passphrase {
+    if !passphrase.is_empty() {
         salt.to_mut().push_str(&passphrase.nfkd().to_string());
     }
     salt
 }
 
 /// Generate BIP-0039 seed.
-pub(crate) fn generate_seed<'a, W>(words: W, passphrase: Option<&str>, seed: &mut [u8])
+pub(crate) fn generate_seed<'a, W>(words: W, passphrase: &str, seed: &mut [u8])
 where
     W: Iterator<Item = &'a str>,
 {
