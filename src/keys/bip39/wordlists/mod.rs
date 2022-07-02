@@ -22,7 +22,7 @@ mod portuguese;
 mod spanish;
 
 /// List of supported languages for mnemonics
-#[derive(Debug, PartialEq, Clone, Copy)]
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Language {
     /// The English language
     English,
@@ -159,7 +159,7 @@ mod test {
         ];
 
         for (hash, language) in checksum {
-            let wordlist = language.wordlist();
+            let wordlist = language.word_list();
             let mut digest = sha256::Hash::engine();
             for word in wordlist {
                 digest.input(word.as_bytes());

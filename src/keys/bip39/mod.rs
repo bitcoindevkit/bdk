@@ -11,9 +11,11 @@
 
 //! BIP-0039
 
+use std::convert::TryFrom;
 use std::{fmt, ops::ControlFlow};
 
-use bitcoin::util::bip32;
+use bitcoin::hashes::{sha256, Hash};
+use bitcoin::util::bip32::{self, ExtendedPrivKey};
 use bitcoin::Network;
 use unicode_normalization::UnicodeNormalization;
 
@@ -29,31 +31,45 @@ mod wordlists;
 pub use wordlists::Language;
 
 // MS (Mnemonic Sentence) constants
-const MS_MULTIPLE: usize = 6; // MS must be a multiple of this (in bytes)
-const MS_MIN: usize = 12; // Minimum MS value
-const MS_MAX: usize = 24; // Maximum MS value
+const MS_MULTIPLE: usize = 3; // MS must be a multiple of this (in bytes)
+const MS_MIN: usize = MS_MULTIPLE * 4; // Minimum MS value
+const MS_MAX: usize = MS_MULTIPLE * 8; // Maximum MS value
 
 // ENT (Initial Entropy) constants
 const ENT_MULTIPLE: usize = 4; // MS must be a multiple of this (in bytes)
-const ENT_MIN: usize = 16; // Minimum ENT value
-const ENT_MAX: usize = 32; // Maximum ENT value
+const ENT_MIN: usize = ENT_MULTIPLE * 4; // Minimum ENT value
+const ENT_MAX: usize = ENT_MULTIPLE * 8; // Maximum ENT value
 
 /// Seed length in bytes
 const SEED_LEN: usize = 64;
 
+/// BIP39 seed (64 bytes)
 type Seed = [u8; SEED_LEN];
+
+/// Helper function for [`DerivableKey`] implementations.
+fn extended_key_from_seed<Ctx: ScriptContext>(seed: &Seed) -> Result<ExtendedKey<Ctx>, KeyError> {
+    ExtendedPrivKey::new_master(Network::Bitcoin, seed)
+        .map(|k| k.into())
+        .map_err(KeyError::Bip32)
+}
+
+/// Helper function that returns the first byte of the entropy hash.
+///
+/// The actual size for CS should be ENT/32bits so this function may contain extra bits.
+fn generate_checksum_byte(entropy: &[u8]) -> u8 {
+    sha256::Hash::hash(entropy)[0]
+}
 
 /// A BIP39 error
 #[derive(Debug, PartialEq)]
 pub enum Error {
-    /// Mnemonic has a word count that is not a multiple of 6 and between 12 and 24
+    /// Occurs when the mnemonic has an invalid word count
     InvalidWordCount(usize),
-    /// Mnemonic has a word that does not belong to the specified language
+    /// Occurs when the mnemonic has an invalid word for the specified language
     InvalidWordAtIndex(usize),
-    /// Entropy length in bytes.
-    /// Length must be a multiple of 32 bits (4 bytes) and between 128-256 bits (16-32 bytes)
+    /// Occurs when the entropy length is invalid
     InvalidEntropyLength(usize),
-    /// The mnemonic has an invalid checksum
+    /// Occurs when the mnemonic has an invalid checksum
     InvalidChecksum,
 }
 
@@ -73,36 +89,55 @@ impl fmt::Display for Error {
 }
 
 /// Type describing entropy length (aka word count) in the mnemonic
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum WordCount {
-    /// 12 words mnemonic (128 bits entropy)
-    Words12 = 128,
-    /// 15 words mnemonic (160 bits entropy)
-    Words15 = 160,
-    /// 18 words mnemonic (192 bits entropy)
-    Words18 = 192,
-    /// 21 words mnemonic (224 bits entropy)
-    Words21 = 224,
-    /// 24 words mnemonic (256 bits entropy)
-    Words24 = 256,
+    /// 12 words mnemonic (16 bytes / 128 bits entropy)
+    Words12 = (ENT_MULTIPLE * 4) as _,
+    /// 15 words mnemonic (20 bytes / 160 bits entropy)
+    Words15 = (ENT_MULTIPLE * 5) as _,
+    /// 18 words mnemonic (24 bytes / 192 bits entropy)
+    Words18 = (ENT_MULTIPLE * 6) as _,
+    /// 21 words mnemonic (28 bytes / 224 bits entropy)
+    Words21 = (ENT_MULTIPLE * 7) as _,
+    /// 24 words mnemonic (32 bytes / 256 bits entropy)
+    Words24 = (ENT_MULTIPLE * 8) as _,
 }
 
+impl TryFrom<usize> for WordCount {
+    type Error = Error;
+
+    fn try_from(value: usize) -> Result<Self, Self::Error> {
+        match value {
+            12 => Ok(Self::Words12),
+            15 => Ok(Self::Words15),
+            18 => Ok(Self::Words18),
+            21 => Ok(Self::Words21),
+            24 => Ok(Self::Words24),
+            _ => Err(Error::InvalidWordCount(value)),
+        }
+    }
+}
+
+/// BIP39 mnemonic with an optional passphrase.
+pub type MnemonicWithPassphrase<'a> = (Mnemonic, &'a str);
+
 /// A mnemonic is group of easy to remember words used in the generation of deterministic wallets
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Mnemonic {
     /// The language this mnemoic belongs to
     language: Language,
-    /// Vec of indices of words from the respective wordlist
-    words: Vec<u16>,
+    /// Vec of indices of words from the respective word list
+    word_indexes: Vec<u16>,
 }
 
 impl Mnemonic {
     /// Parses a mnemonic in the given language.
-    pub fn parse_in(language: Language, mnemonic: &str) -> Result<Mnemonic, Error> {
-        let mnemonic = mnemonic.nfkd().to_string();
-        let split_mnemonic: Vec<&str> = mnemonic.split_whitespace().collect();
+    pub fn parse_in(language: Language, mnemonic_sentence: &str) -> Result<Mnemonic, Error> {
+        let normalized_sentence = mnemonic_sentence.nfkd().to_string();
+        let sentence_words: Vec<&str> = normalized_sentence.split_whitespace().collect();
 
         // find MS (mnemonic scentence) in words
-        let ms = split_mnemonic.len();
+        let ms = sentence_words.len();
 
         // check word count is valid
         if ms % MS_MULTIPLE != 0 || ms < MS_MIN || ms > MS_MAX {
@@ -110,11 +145,11 @@ impl Mnemonic {
         }
 
         let word_to_index_map = language.word_map();
-        let mut words = Vec::with_capacity(MS_MAX); // word indexes
+        let mut word_indexes = Vec::with_capacity(MS_MAX); // word indexes
         let mut ent_cs_bits = Vec::with_capacity(MS_MAX * utils::U11_BITS); // ENT+CS bits
 
         // parse word indexes and ENT+CS bits from mnemonic words
-        let parse_result = split_mnemonic
+        let parse_result = sentence_words
             .iter()
             .map(|&word| word_to_index_map.get(word).unwrap_or(&utils::U11_EOF))
             .try_for_each(|word_index| {
@@ -122,7 +157,7 @@ impl Mnemonic {
                     // break on invalid word
                     ControlFlow::Break(())
                 } else {
-                    words.push(*word_index);
+                    word_indexes.push(*word_index);
                     ent_cs_bits.extend(utils::u11_to_bool_array(word_index));
                     ControlFlow::Continue(())
                 }
@@ -130,12 +165,12 @@ impl Mnemonic {
 
         assert_eq!(
             parse_result == ControlFlow::Continue(()),
-            words.len() == ms && ent_cs_bits.len() == ms * utils::U11_BITS
+            word_indexes.len() == ms && ent_cs_bits.len() == ms * utils::U11_BITS
         );
 
         // return error on invalid words
         if parse_result == ControlFlow::Break(()) {
-            return Err(Error::InvalidWordAtIndex(words.len()));
+            return Err(Error::InvalidWordAtIndex(word_indexes.len()));
         }
 
         // expected lengths (in bits) for ENT and CS
@@ -152,7 +187,7 @@ impl Mnemonic {
             .collect::<Vec<_>>();
 
         // calculate CS from checksum
-        let checksum = utils::generate_checksum_byte(&entropy);
+        let checksum = generate_checksum_byte(&entropy);
         let calculated_cs = utils::u8_to_bool_array(&checksum);
         let calculated_cs_bits = calculated_cs
             .get(0..cs)
@@ -163,7 +198,10 @@ impl Mnemonic {
             return Err(Error::InvalidChecksum);
         }
 
-        Ok(Mnemonic { language, words })
+        Ok(Mnemonic {
+            language,
+            word_indexes,
+        })
     }
 
     /// Generates mnemonic from a given language and entropy.
@@ -183,7 +221,7 @@ impl Mnemonic {
 
         // generate CS
         // stored in a byte and may contain extra bits
-        let checksum = utils::generate_checksum_byte(entropy);
+        let checksum = generate_checksum_byte(entropy);
 
         // generate ENT+CS
         // concat entropy and checksum and convert to array of bits
@@ -198,12 +236,15 @@ impl Mnemonic {
         // generate MS
         // split into groups of 11 bits and store each group in an u16
         // each group represents a word index of range (0-2047)
-        let words = ent_cs
+        let word_indexes = ent_cs
             .chunks_exact(utils::U11_BITS)
             .map(utils::bool_array_to_u11)
             .collect::<Vec<_>>();
 
-        Ok(Mnemonic { language, words })
+        Ok(Mnemonic {
+            language,
+            word_indexes,
+        })
     }
 
     /// Converts a mnemonic into a seed with an optional passphrase.
@@ -213,6 +254,11 @@ impl Mnemonic {
         seed
     }
 
+    /// Returns a mnemonic with passphrase.
+    pub fn with_passphrase(self, passphrase: &str) -> MnemonicWithPassphrase {
+        (self, passphrase)
+    }
+
     /// Get the language of the [Mnemonic].
     pub fn language(&self) -> Language {
         self.language
@@ -220,13 +266,13 @@ impl Mnemonic {
 
     /// Get the number of words in the mnemonic.
     pub fn word_count(&self) -> usize {
-        self.words.len()
+        self.word_indexes.len()
     }
 
     /// Convert a vec of word indices to an iterator of the mnemonic words
     pub fn word_iter(&self) -> impl Iterator<Item = &str> + Clone + '_ {
         let wordlist = self.language.word_list();
-        self.words.iter().map(move |&w| wordlist[w as usize])
+        self.word_indexes.iter().map(move |&w| wordlist[w as usize])
     }
 }
 
@@ -242,81 +288,11 @@ impl fmt::Display for Mnemonic {
     }
 }
 
-fn set_valid_on_any_network<Ctx: ScriptContext>(
-    descriptor_key: DescriptorKey<Ctx>,
-) -> DescriptorKey<Ctx> {
-    // We have to pick one network to build the xprv, but since the bip39 standard doesn't
-    // encode the network, the xprv we create is actually valid everywhere. So we override the
-    // valid networks with `any_network()`.
-    descriptor_key.override_valid_networks(any_network())
-}
-
-/// Type for a BIP39 mnemonic with an optional passphrase
-pub type MnemonicWithPassphrase = (Mnemonic, Option<String>);
-
-#[cfg_attr(docsrs, doc(cfg(feature = "keys-bip39")))]
-impl<Ctx: ScriptContext> DerivableKey<Ctx> for Seed {
-    fn into_extended_key(self) -> Result<ExtendedKey<Ctx>, KeyError> {
-        Ok(bip32::ExtendedPrivKey::new_master(Network::Bitcoin, &self[..])?.into())
-    }
-
-    fn into_descriptor_key(
-        self,
-        source: Option<bip32::KeySource>,
-        derivation_path: bip32::DerivationPath,
-    ) -> Result<DescriptorKey<Ctx>, KeyError> {
-        let descriptor_key = self
-            .into_extended_key()?
-            .into_descriptor_key(source, derivation_path)?;
-
-        Ok(set_valid_on_any_network(descriptor_key))
-    }
-}
-
-#[cfg_attr(docsrs, doc(cfg(feature = "keys-bip39")))]
-impl<Ctx: ScriptContext> DerivableKey<Ctx> for MnemonicWithPassphrase {
-    fn into_extended_key(self) -> Result<ExtendedKey<Ctx>, KeyError> {
-        let (mnemonic, passphrase) = self;
-        let seed: Seed = mnemonic.to_seed(passphrase.as_deref().unwrap_or_default());
-
-        seed.into_extended_key()
-    }
-
-    fn into_descriptor_key(
-        self,
-        source: Option<bip32::KeySource>,
-        derivation_path: bip32::DerivationPath,
-    ) -> Result<DescriptorKey<Ctx>, KeyError> {
-        let descriptor_key = self
-            .into_extended_key()?
-            .into_descriptor_key(source, derivation_path)?;
-
-        Ok(set_valid_on_any_network(descriptor_key))
-    }
-}
-
-#[cfg_attr(docsrs, doc(cfg(feature = "keys-bip39")))]
-impl<Ctx: ScriptContext> DerivableKey<Ctx> for (GeneratedKey<Mnemonic, Ctx>, Option<String>) {
-    fn into_extended_key(self) -> Result<ExtendedKey<Ctx>, KeyError> {
-        let (mnemonic, passphrase) = self;
-        (mnemonic.into_key(), passphrase).into_extended_key()
-    }
-
-    fn into_descriptor_key(
-        self,
-        source: Option<bip32::KeySource>,
-        derivation_path: bip32::DerivationPath,
-    ) -> Result<DescriptorKey<Ctx>, KeyError> {
-        let (mnemonic, passphrase) = self;
-
-        (mnemonic.into_key(), passphrase).into_descriptor_key(source, derivation_path)
-    }
-}
-
 #[cfg_attr(docsrs, doc(cfg(feature = "keys-bip39")))]
 impl<Ctx: ScriptContext> DerivableKey<Ctx> for Mnemonic {
     fn into_extended_key(self) -> Result<ExtendedKey<Ctx>, KeyError> {
-        (self, None).into_extended_key()
+        let seed = self.to_seed("");
+        extended_key_from_seed(&seed)
     }
 
     fn into_descriptor_key(
@@ -324,50 +300,207 @@ impl<Ctx: ScriptContext> DerivableKey<Ctx> for Mnemonic {
         source: Option<bip32::KeySource>,
         derivation_path: bip32::DerivationPath,
     ) -> Result<DescriptorKey<Ctx>, KeyError> {
-        let descriptor_key = self
+        Ok(self
             .into_extended_key()?
-            .into_descriptor_key(source, derivation_path)?;
-
-        Ok(set_valid_on_any_network(descriptor_key))
+            .into_descriptor_key(source, derivation_path)?
+            .override_valid_networks(any_network()))
     }
 }
 
 #[cfg_attr(docsrs, doc(cfg(feature = "keys-bip39")))]
 impl<Ctx: ScriptContext> GeneratableKey<Ctx> for Mnemonic {
-    type Entropy = Box<[u8]>;
-
-    // If word count is `None`, it is picked from the entropy length
-    type Options = (Option<WordCount>, Language);
-    type Error = Option<Error>;
+    type Entropy = [u8; ENT_MAX];
+    type Options = (WordCount, Language);
+    type Error = Error;
 
     fn generate_with_entropy(
-        (word_count, language): Self::Options,
+        options: Self::Options,
         entropy: Self::Entropy,
     ) -> Result<GeneratedKey<Self, Ctx>, Self::Error> {
-        let entropy = match word_count {
-            Some(count) => &entropy.as_ref()[..(count as usize / 8)],
-            None => &entropy,
-        };
+        let (word_count, language) = options;
+        let entropy = entropy.get(..word_count as usize).unwrap();
         let mnemonic = Mnemonic::from_entropy_in(language, entropy)?;
-
         Ok(GeneratedKey::new(mnemonic, any_network()))
     }
+}
 
-    fn generate(options: Self::Options) -> Result<GeneratedKey<Self, Ctx>, Self::Error> {
-        use rand::{thread_rng, Rng};
+#[cfg_attr(docsrs, doc(cfg(feature = "keys-bip39")))]
+impl<'a, Ctx: ScriptContext> DerivableKey<Ctx> for MnemonicWithPassphrase<'a> {
+    fn into_extended_key(self) -> Result<ExtendedKey<Ctx>, KeyError> {
+        let (mnemonic, passphrase) = self;
+        let seed = mnemonic.to_seed(passphrase);
+        extended_key_from_seed(&seed)
+    }
 
-        let mut entropy = Box::new([0; 32]);
-        thread_rng().fill(entropy.as_mut());
-        Self::generate_with_entropy(options, entropy)
+    fn into_descriptor_key(
+        self,
+        source: Option<bip32::KeySource>,
+        derivation_path: bip32::DerivationPath,
+    ) -> Result<DescriptorKey<Ctx>, KeyError> {
+        Ok(self
+            .into_extended_key()?
+            .into_descriptor_key(source, derivation_path)?
+            .override_valid_networks(any_network()))
+    }
+}
+
+#[cfg_attr(docsrs, doc(cfg(feature = "keys-bip39")))]
+impl<'a, Ctx: ScriptContext> GeneratableKey<Ctx> for MnemonicWithPassphrase<'a> {
+    type Entropy = [u8; ENT_MAX];
+    type Options = (WordCount, Language, &'a str);
+    type Error = Error;
+
+    fn generate_with_entropy(
+        options: Self::Options,
+        entropy: Self::Entropy,
+    ) -> Result<GeneratedKey<Self, Ctx>, Self::Error> {
+        let (word_count, language, passphrase) = options;
+        let entropy = entropy.get(..word_count as usize).unwrap();
+        let mnemonic = Mnemonic::from_entropy_in(language, entropy)?.with_passphrase(passphrase);
+        Ok(GeneratedKey::new(mnemonic, any_network()))
     }
 }
 
 #[cfg(test)]
 mod test {
-    use super::{Error, Language, Mnemonic};
-    use crate::keys::{any_network, bip39::WordCount, GeneratableKey, GeneratedKey};
-    use bitcoin::{hashes::hex::FromHex, util::bip32};
-    use std::str::FromStr;
+    use super::{Error, Language, Mnemonic, MnemonicWithPassphrase, Seed, ENT_MAX, SEED_LEN};
+    use crate::keys::{
+        any_network, bip39::WordCount, DerivableKey, ExtendedKey, GeneratableKey, GeneratedKey,
+    };
+    use bitcoin::{
+        hashes::hex::FromHex,
+        util::bip32::{self, ExtendedPrivKey},
+        Network,
+    };
+    use miniscript::Legacy;
+    use std::{convert::TryFrom, str::FromStr};
+    use unicode_normalization::UnicodeNormalization;
+
+    const TEST_PASSPHRASE: &str = "TREZOR";
+
+    /// Structure to parse BIP39 test vectors
+    ///
+    /// https://github.com/bitcoin/bips/blob/master/bip-0039.mediawiki#test-vectors
+    struct Bip39TestVector<'a> {
+        lang: Language,
+        entropy: ([u8; ENT_MAX], usize), // (entropy_container, entropy_len)
+        phrase: &'a str,
+        extra_phrase: &'a str,
+        seed: Seed,
+        xkey: ExtendedPrivKey,
+    }
+
+    impl<'a> Bip39TestVector<'a> {
+        /// Parse in a raw test vector
+        fn from_raw(lang: Language, raw: &[&'a str; 4], extra_phrase: &'a str) -> Self {
+            let entropy = Vec::from_hex(raw[0])
+                .map(|raw_ent| {
+                    let ent_len = raw_ent.len();
+                    let mut ent_cont = [0_u8; ENT_MAX];
+                    ent_cont
+                        .get_mut(..ent_len)
+                        .unwrap()
+                        .copy_from_slice(&raw_ent);
+                    (ent_cont, ent_len)
+                })
+                .unwrap();
+
+            let phrase = raw[1];
+
+            let seed = Vec::from_hex(raw[2])
+                .map(|raw_seed| {
+                    let mut seed = [0_u8; SEED_LEN];
+                    seed.copy_from_slice(&raw_seed);
+                    seed
+                })
+                .unwrap();
+
+            let xkey = ExtendedPrivKey::from_str(raw[3]).unwrap();
+
+            Self {
+                lang,
+                entropy,
+                phrase,
+                extra_phrase,
+                seed,
+                xkey,
+            }
+        }
+
+        /// Helper: get expected entropy (of corrent length)
+        fn entropy(&self) -> &[u8] {
+            let (cont, len) = &self.entropy;
+            cont.get(..*len).unwrap()
+        }
+
+        /// Helper: get expected word count
+        fn word_count(&self) -> usize {
+            self.phrase.split_whitespace().count()
+        }
+
+        /// Runs [`Bip39TestVector::test_mnemonic`] against all possible mnemonic-generation methods
+        fn test_all(&self) -> Result<(), Error> {
+            self.test_mnemonic(Mnemonic::parse_in(self.lang, self.phrase)?);
+            self.test_mnemonic(Mnemonic::from_entropy_in(self.lang, self.entropy())?);
+
+            let word_count = WordCount::try_from(self.word_count()).unwrap();
+
+            // Check `Generatablekey` implementation for `Mnemonic`
+            let gen_key: GeneratedKey<Mnemonic, Legacy> =
+                Mnemonic::generate_with_entropy((word_count, self.lang), self.entropy.0)?;
+            self.test_mnemonic(gen_key.key);
+
+            // Check `GeneratableKey` implementation for `MnemonicWithPassphrase`
+            let gen_key: GeneratedKey<(Mnemonic, &str), Legacy> =
+                MnemonicWithPassphrase::generate_with_entropy(
+                    (word_count, self.lang, self.extra_phrase),
+                    self.entropy.0,
+                )?;
+            assert_eq!(gen_key.1, self.extra_phrase);
+            self.test_mnemonic(gen_key.0.clone());
+
+            Ok(())
+        }
+
+        /// Checks all methods of a generated [`Mnemonic`] return as expected
+        fn test_mnemonic(&self, mnemonic: Mnemonic) {
+            assert_eq!(mnemonic.to_string(), self.phrase.nfkd().to_string());
+            assert_eq!(mnemonic.to_seed(self.extra_phrase), self.seed);
+            assert_eq!(mnemonic.language(), self.lang);
+            assert_eq!(mnemonic.word_count(), self.word_count());
+            assert_eq!(
+                mnemonic
+                    .word_iter()
+                    .enumerate()
+                    .map(|(i, w)| {
+                        let mut out = String::new();
+                        if i > 0 {
+                            out += " ";
+                        }
+                        out += w;
+                        out
+                    })
+                    .collect::<String>(),
+                self.phrase.nfkd().to_string()
+            );
+
+            // TODO @evanlinjin: mnemonic to ENT
+            // assert_eq!(ENT, self.entropy);
+
+            // Test `DeriveKey::into_extended_key` for `Mnemonic`
+            let xkey: ExtendedKey<miniscript::Segwitv0> = mnemonic
+                .clone()
+                .with_passphrase(self.extra_phrase)
+                .into_extended_key()
+                .unwrap();
+            assert_eq!(xkey.into_xprv(Network::Bitcoin), Some(self.xkey));
+
+            // Test `DeriveKey::into_extended_key` for `MnemonicWithPassphrase`
+            let xkey: ExtendedKey<miniscript::Segwitv0> =
+                (mnemonic, self.extra_phrase).into_extended_key().unwrap();
+            assert_eq!(xkey.into_xprv(Network::Bitcoin), Some(self.xkey));
+        }
+    }
 
     #[test]
     fn test_keys_bip39_mnemonic() {
@@ -390,7 +523,7 @@ mod test {
         let mnemonic = Mnemonic::parse_in(Language::English, mnemonic).unwrap();
         let path = bip32::DerivationPath::from_str("m/44'/0'/0'/0").unwrap();
 
-        let key = ((mnemonic, Some("passphrase".into())), path);
+        let key = ((mnemonic, "passphrase"), path);
         let (desc, keys, networks) = crate::descriptor!(wpkh(key)).unwrap();
         assert_eq!(desc.to_string(), "wpkh([8f6cb80c/44'/0'/0']xpub6DWYS8bbihFevy29M4cbw4ZR3P5E12jB8R88gBDWCTCNpYiDHhYWNywrCF9VZQYagzPmsZpxXpytzSoxynyeFr4ZyzheVjnpLKuse4fiwZw/0/*)#h0j0tg5m");
         assert_eq!(keys.len(), 1);
@@ -401,8 +534,8 @@ mod test {
     fn test_keys_generate_bip39_english() {
         let generated_mnemonic: GeneratedKey<_, miniscript::Segwitv0> =
             Mnemonic::generate_with_entropy(
-                (Some(WordCount::Words12), Language::English),
-                Box::new(crate::keys::test::TEST_ENTROPY),
+                (WordCount::Words12, Language::English),
+                crate::keys::test::TEST_ENTROPY,
             )
             .unwrap();
         assert_eq!(generated_mnemonic.valid_networks, any_network());
@@ -413,8 +546,8 @@ mod test {
 
         let generated_mnemonic: GeneratedKey<_, miniscript::Segwitv0> =
             Mnemonic::generate_with_entropy(
-                (None, Language::English),
-                Box::new(crate::keys::test::TEST_ENTROPY),
+                (WordCount::Words24, Language::English),
+                crate::keys::test::TEST_ENTROPY,
             )
             .unwrap();
         assert_eq!(generated_mnemonic.valid_networks, any_network());
@@ -568,32 +701,9 @@ mod test {
         ];
 
         for vector in test_vectors {
-            let entropy = Vec::from_hex(vector[0]).unwrap();
-            let mnemonic = vector[1];
-            let seed = Vec::from_hex(vector[2]).unwrap();
-            let xprivkey = vector[3];
-
-            let generated_mnemonic: GeneratedKey<_, miniscript::Segwitv0> =
-                Mnemonic::generate_with_entropy(
-                    (None, Language::English),
-                    entropy.into_boxed_slice(),
-                )
+            Bip39TestVector::from_raw(Language::English, &vector, TEST_PASSPHRASE)
+                .test_all()
                 .unwrap();
-            let generated_seed = generated_mnemonic.to_seed("TREZOR");
-            let generated_privkey =
-                bip32::ExtendedPrivKey::new_master(bitcoin::Network::Bitcoin, &generated_seed)
-                    .unwrap();
-
-            assert_eq!(generated_mnemonic.valid_networks, any_network());
-            assert_eq!(generated_mnemonic.to_string(), mnemonic);
-            assert_eq!(
-                Mnemonic::parse_in(Language::English, mnemonic)
-                    .unwrap()
-                    .to_string(),
-                generated_mnemonic.to_string()
-            );
-            assert_eq!(generated_seed[..], seed[..], "mnemonic: {}", vector[1]);
-            assert_eq!(generated_privkey.to_string(), xprivkey);
         }
     }
 
@@ -772,47 +882,22 @@ mod test {
             ],
         ];
 
-        // The mnemonic we generate is different than the mnemonic in the test vectors but the
-        // generated seed and private key match. Other implementations like rust-bip39 and
-        // tiny-bip39 also skip matching the japenese mnemonic.
-        for vector in test_vectors {
-            let entropy = Vec::from_hex(vector[0]).unwrap();
-            let mnemonic = vector[1];
-            let passphrase = Some(vector[2].to_string());
-            let seed = Vec::from_hex(vector[3]).unwrap();
-            let xprivkey = vector[4];
-
-            let generated_mnemonic: GeneratedKey<_, miniscript::Segwitv0> =
-                Mnemonic::generate_with_entropy(
-                    (None, Language::Japanese),
-                    entropy.into_boxed_slice(),
-                )
+        for v in test_vectors {
+            let vector = [v[0], v[1], v[3], v[4]];
+            Bip39TestVector::from_raw(Language::Japanese, &vector, v[2])
+                .test_all()
                 .unwrap();
-            let generated_seed = generated_mnemonic.to_seed(passphrase);
-            let generated_privkey =
-                bip32::ExtendedPrivKey::new_master(bitcoin::Network::Bitcoin, &generated_seed)
-                    .unwrap();
-
-            assert_eq!(generated_mnemonic.valid_networks, any_network());
-            assert_eq!(
-                Mnemonic::parse_in(Language::Japanese, mnemonic)
-                    .unwrap()
-                    .to_string(),
-                generated_mnemonic.to_string()
-            );
-            assert_eq!(generated_seed[..], seed[..]);
-            assert_eq!(generated_privkey.to_string(), xprivkey);
         }
     }
 
     #[test]
     fn test_keys_generate_bip39_random() {
         let generated_mnemonic: GeneratedKey<_, miniscript::Segwitv0> =
-            Mnemonic::generate((Some(WordCount::Words12), Language::English)).unwrap();
+            Mnemonic::generate((WordCount::Words12, Language::English)).unwrap();
         assert_eq!(generated_mnemonic.valid_networks, any_network());
 
         let generated_mnemonic: GeneratedKey<_, miniscript::Segwitv0> =
-            Mnemonic::generate((Some(WordCount::Words24), Language::English)).unwrap();
+            Mnemonic::generate((WordCount::Words24, Language::English)).unwrap();
         assert_eq!(generated_mnemonic.valid_networks, any_network());
     }
 

@@ -16,7 +16,7 @@ jobs:
         features:
           - default
           - minimal
-          - all-keys
+          - all-keys,all-languages
           - minimal,use-esplora-ureq
           - key-value-db
           - electrum

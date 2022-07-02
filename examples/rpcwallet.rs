@@ -14,7 +14,8 @@ use bdk::bitcoincore_rpc::RpcApi;
 use bdk::blockchain::rpc::{Auth, RpcBlockchain, RpcConfig};
 use bdk::blockchain::ConfigurableBlockchain;
 
-use bdk::keys::bip39::{Language, Mnemonic, WordCount};
+use bdk::keys::bip39::MnemonicWithPassphrase;
+use bdk::keys::bip39::{Language, WordCount};
 use bdk::keys::{DerivableKey, GeneratableKey, GeneratedKey};
 
 use bdk::miniscript::miniscript::Segwitv0;
@@ -217,13 +218,10 @@ fn main() -> Result<(), Box<dyn Error>> {
 // private descriptors can be recreated from it.
 fn generate_random_ext_privkey() -> Result<impl DerivableKey<Segwitv0> + Clone, Box<dyn Error>> {
     // a Bip39 passphrase can be set optionally
-    let password = Some("random password".to_string());
+    let password = "random password";
 
     // Generate a random mnemonic, and use that to create a "DerivableKey"
-    let mnemonic: GeneratedKey<_, _> = Mnemonic::generate((WordCount::Words12, Language::English))
-        .map_err(|e| e.expect("Unknown Error"))?;
-
-    // `Ok(mnemonic)` would also work if there's no passphrase and it would
-    // yield the same result as this construct with `password` = `None`.
-    Ok((mnemonic, password))
+    let mnemonic_with_passphrase: GeneratedKey<_, _> =
+        MnemonicWithPassphrase::generate((WordCount::Words12, Language::English, password))?;
+    Ok(mnemonic_with_passphrase)
 }

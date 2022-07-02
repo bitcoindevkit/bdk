@@ -9,8 +9,6 @@
 // You may not use this file except in accordance with one or both of these
 // licenses.
 
-use bitcoin::hashes::{sha256, Hash};
-
 pub(crate) const U8_BITS: usize = u8::BITS as _;
 pub(crate) const U11_BITS: usize = 11;
 pub(crate) const U11_MAX: u16 = 2047;
@@ -51,11 +49,4 @@ pub(crate) fn bool_array_to_u8(arr: &[bool]) -> u8 {
             false => 0_u8,
         }
     })
-}
-
-/// Returns the first byte of the entropy hash.
-///
-/// The actual size for CS should be ENT/32bits and is handled elsewhere.
-pub(crate) fn generate_checksum_byte(entropy: &[u8]) -> u8 {
-    sha256::Hash::hash(entropy)[0]
 }
