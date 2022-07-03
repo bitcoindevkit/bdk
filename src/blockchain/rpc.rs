@@ -340,7 +340,7 @@ impl WalletSync for RpcBlockchain {
                     ),
                     received,
                     sent,
-                    fee: tx_result.fee.map(|f| f.as_sat().abs() as u64),
+                    fee: tx_result.fee.map(|f| f.as_sat().unsigned_abs()),
                 };
                 debug!(
                     "saving tx: {} tx_result.fee:{:?} td.fees:{:?}",
