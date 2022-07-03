@@ -108,7 +108,10 @@ impl WalletSync for ElectrumBlockchain {
         let mut block_times = HashMap::<u32, u32>::new();
         let mut txid_to_height = HashMap::<Txid, u32>::new();
         let mut tx_cache = TxCache::new(database, &self.client);
-        let chunk_size = self.stop_gap;
+
+        // Set chunk_size to the smallest value capable of finding a gap greater than stop_gap.
+        let chunk_size = self.stop_gap + 1;
+
         // The electrum server has been inconsistent somehow in its responses during sync. For
         // example, we do a batch request of transactions and the response contains less
         // tranascations than in the request. This should never happen but we don't want to panic.
@@ -145,18 +148,16 @@ impl WalletSync for ElectrumBlockchain {
                 Request::Conftime(conftime_req) => {
                     // collect up to chunk_size heights to fetch from electrum
                     let needs_block_height = {
-                        let mut needs_block_height_iter = conftime_req
+                        let mut needs_block_height = HashSet::with_capacity(chunk_size);
+                        conftime_req
                             .request()
                             .filter_map(|txid| txid_to_height.get(txid).cloned())
-                            .filter(|height| block_times.get(height).is_none());
-                        let mut needs_block_height = HashSet::new();
+                            .filter(|height| block_times.get(height).is_none())
+                            .take(chunk_size)
+                            .for_each(|height| {
+                                needs_block_height.insert(height);
+                            });
 
-                        while needs_block_height.len() < chunk_size {
-                            match needs_block_height_iter.next() {
-                                Some(height) => needs_block_height.insert(height),
-                                None => break,
-                            };
-                        }
                         needs_block_height
                     };
 
@@ -384,5 +385,117 @@ mod test {
             .unwrap();
 
         assert_eq!(wallet.get_balance().unwrap(), 50_000);
+    }
+
+    #[test]
+    fn test_electrum_blockchain_factory_sync_with_stop_gaps() {
+        // Test whether Electrum blockchain syncs with expected behaviour given different `stop_gap`
+        // parameters.
+        //
+        // For each test vector:
+        // * Fill wallet's derived addresses with balances (as specified by test vector).
+        //    * [0..addrs_before]          => 1000sats for each address
+        //    * [addrs_before..actual_gap] => empty addresses
+        //    * [actual_gap..addrs_after]  => 1000sats for each address
+        // * Then, perform wallet sync and obtain wallet balance
+        // * Check balance is within expected range (we can compare `stop_gap` and `actual_gap` to
+        //    determine this).
+
+        // Generates wallet descriptor
+        let descriptor_of_account = |account_index: usize| -> String {
+            format!("wpkh([c258d2e4/84h/1h/0h]tpubDDYkZojQFQjht8Tm4jsS3iuEmKjTiEGjG6KnuFNKKJb5A6ZUCUZKdvLdSDWofKi4ToRCwb9poe1XdqfUnP4jaJjCB2Zwv11ZLgSbnZSNecE/{account_index}/*)")
+        };
+
+        // Amount (in satoshis) provided to a single address (which expects to have a balance)
+        const AMOUNT_PER_TX: u64 = 1000;
+
+        // [stop_gap, actual_gap, addrs_before, addrs_after]
+        //
+        // [0]     stop_gap: Passed to [`ElectrumBlockchainConfig`]
+        // [1]   actual_gap: Range size of address indexes without a balance
+        // [2] addrs_before: Range size of address indexes (before gap) which contains a balance
+        // [3]  addrs_after: Range size of address indexes (after gap) which contains a balance
+        let test_vectors: Vec<[u64; 4]> = vec![
+            [0, 0, 0, 5],
+            [0, 0, 5, 5],
+            [0, 1, 5, 5],
+            [0, 2, 5, 5],
+            [1, 0, 5, 5],
+            [1, 1, 5, 5],
+            [1, 2, 5, 5],
+            [2, 1, 5, 5],
+            [2, 2, 5, 5],
+            [2, 3, 5, 5],
+        ];
+
+        let mut test_client = TestClient::default();
+
+        for (account_index, vector) in test_vectors.into_iter().enumerate() {
+            let [stop_gap, actual_gap, addrs_before, addrs_after] = vector;
+            let descriptor = descriptor_of_account(account_index);
+
+            let factory = Arc::new(
+                ElectrumBlockchain::from_config(&ElectrumBlockchainConfig {
+                    url: test_client.electrsd.electrum_url.clone(),
+                    socks5: None,
+                    retry: 0,
+                    timeout: None,
+                    stop_gap: stop_gap as _,
+                })
+                .unwrap(),
+            );
+            let wallet = Wallet::new(
+                descriptor.as_str(),
+                None,
+                bitcoin::Network::Regtest,
+                MemoryDatabase::new(),
+            )
+            .unwrap();
+
+            // fill server-side with txs to specified address indexes
+            // return the max balance of the wallet (also the actual balance)
+            let max_balance = (0..addrs_before)
+                .chain(addrs_before + actual_gap..addrs_before + actual_gap + addrs_after)
+                .fold(0_u64, |sum, i| {
+                    let address = wallet.get_address(AddressIndex::Peek(i as _)).unwrap();
+                    let tx = testutils! {
+                        @tx ( (@addr address.address) => AMOUNT_PER_TX )
+                    };
+                    test_client.receive(tx);
+                    sum + AMOUNT_PER_TX
+                });
+
+            // generate blocks to confirm new transactions
+            test_client.generate(3, None);
+
+            // minimum allowed balance of wallet (based on stop gap)
+            let min_balance = if actual_gap > stop_gap {
+                addrs_before * AMOUNT_PER_TX
+            } else {
+                max_balance
+            };
+
+            // perform wallet sync
+            factory
+                .sync_wallet(&wallet, None, Default::default())
+                .unwrap();
+
+            let wallet_balance = wallet.get_balance().unwrap();
+
+            let details = format!(
+                "test_vector: [stop_gap: {}, actual_gap: {}, addrs_before: {}, addrs_after: {}]",
+                stop_gap, actual_gap, addrs_before, addrs_after,
+            );
+            assert!(
+                wallet_balance <= max_balance,
+                "wallet balance is greater than received amount: {}",
+                details
+            );
+            assert!(
+                wallet_balance >= min_balance,
+                "wallet balance is smaller than expected: {}",
+                details
+            );
+        }
     }
 }
