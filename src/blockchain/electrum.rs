@@ -147,19 +147,12 @@ impl WalletSync for ElectrumBlockchain {
 
                 Request::Conftime(conftime_req) => {
                     // collect up to chunk_size heights to fetch from electrum
-                    let needs_block_height = {
-                        let mut needs_block_height = HashSet::with_capacity(chunk_size);
-                        conftime_req
-                            .request()
-                            .filter_map(|txid| txid_to_height.get(txid).cloned())
-                            .filter(|height| block_times.get(height).is_none())
-                            .take(chunk_size)
-                            .for_each(|height| {
-                                needs_block_height.insert(height);
-                            });
-
-                        needs_block_height
-                    };
+                    let needs_block_height = conftime_req
+                        .request()
+                        .filter_map(|txid| txid_to_height.get(txid).cloned())
+                        .filter(|height| block_times.get(height).is_none())
+                        .take(chunk_size)
+                        .collect::<HashSet<u32>>();
 
                     let new_block_headers = self
                         .client
@@ -329,6 +322,7 @@ mod test {
     use super::*;
     use crate::database::MemoryDatabase;
     use crate::testutils::blockchain_tests::TestClient;
+    use crate::testutils::configurable_blockchain_tests::ConfigurableBlockchainTester;
     use crate::wallet::{AddressIndex, Wallet};
 
     crate::bdk_blockchain_tests! {
@@ -388,114 +382,27 @@ mod test {
     }
 
     #[test]
-    fn test_electrum_blockchain_factory_sync_with_stop_gaps() {
-        // Test whether Electrum blockchain syncs with expected behaviour given different `stop_gap`
-        // parameters.
-        //
-        // For each test vector:
-        // * Fill wallet's derived addresses with balances (as specified by test vector).
-        //    * [0..addrs_before]          => 1000sats for each address
-        //    * [addrs_before..actual_gap] => empty addresses
-        //    * [actual_gap..addrs_after]  => 1000sats for each address
-        // * Then, perform wallet sync and obtain wallet balance
-        // * Check balance is within expected range (we can compare `stop_gap` and `actual_gap` to
-        //    determine this).
+    fn test_electrum_with_variable_configs() {
+        struct ElectrumTester;
 
-        // Generates wallet descriptor
-        let descriptor_of_account = |account_index: usize| -> String {
-            format!("wpkh([c258d2e4/84h/1h/0h]tpubDDYkZojQFQjht8Tm4jsS3iuEmKjTiEGjG6KnuFNKKJb5A6ZUCUZKdvLdSDWofKi4ToRCwb9poe1XdqfUnP4jaJjCB2Zwv11ZLgSbnZSNecE/{account_index}/*)")
-        };
+        impl ConfigurableBlockchainTester<ElectrumBlockchain> for ElectrumTester {
+            const BLOCKCHAIN_NAME: &'static str = "Electrum";
 
-        // Amount (in satoshis) provided to a single address (which expects to have a balance)
-        const AMOUNT_PER_TX: u64 = 1000;
-
-        // [stop_gap, actual_gap, addrs_before, addrs_after]
-        //
-        // [0]     stop_gap: Passed to [`ElectrumBlockchainConfig`]
-        // [1]   actual_gap: Range size of address indexes without a balance
-        // [2] addrs_before: Range size of address indexes (before gap) which contains a balance
-        // [3]  addrs_after: Range size of address indexes (after gap) which contains a balance
-        let test_vectors: Vec<[u64; 4]> = vec![
-            [0, 0, 0, 5],
-            [0, 0, 5, 5],
-            [0, 1, 5, 5],
-            [0, 2, 5, 5],
-            [1, 0, 5, 5],
-            [1, 1, 5, 5],
-            [1, 2, 5, 5],
-            [2, 1, 5, 5],
-            [2, 2, 5, 5],
-            [2, 3, 5, 5],
-        ];
-
-        let mut test_client = TestClient::default();
-
-        for (account_index, vector) in test_vectors.into_iter().enumerate() {
-            let [stop_gap, actual_gap, addrs_before, addrs_after] = vector;
-            let descriptor = descriptor_of_account(account_index);
-
-            let factory = Arc::new(
-                ElectrumBlockchain::from_config(&ElectrumBlockchainConfig {
+            fn config_with_stop_gap(
+                &self,
+                test_client: &mut TestClient,
+                stop_gap: usize,
+            ) -> Option<ElectrumBlockchainConfig> {
+                Some(ElectrumBlockchainConfig {
                     url: test_client.electrsd.electrum_url.clone(),
                     socks5: None,
                     retry: 0,
                     timeout: None,
-                    stop_gap: stop_gap as _,
+                    stop_gap: stop_gap,
                 })
-                .unwrap(),
-            );
-            let wallet = Wallet::new(
-                descriptor.as_str(),
-                None,
-                bitcoin::Network::Regtest,
-                MemoryDatabase::new(),
-            )
-            .unwrap();
-
-            // fill server-side with txs to specified address indexes
-            // return the max balance of the wallet (also the actual balance)
-            let max_balance = (0..addrs_before)
-                .chain(addrs_before + actual_gap..addrs_before + actual_gap + addrs_after)
-                .fold(0_u64, |sum, i| {
-                    let address = wallet.get_address(AddressIndex::Peek(i as _)).unwrap();
-                    let tx = testutils! {
-                        @tx ( (@addr address.address) => AMOUNT_PER_TX )
-                    };
-                    test_client.receive(tx);
-                    sum + AMOUNT_PER_TX
-                });
-
-            // generate blocks to confirm new transactions
-            test_client.generate(3, None);
-
-            // minimum allowed balance of wallet (based on stop gap)
-            let min_balance = if actual_gap > stop_gap {
-                addrs_before * AMOUNT_PER_TX
-            } else {
-                max_balance
-            };
-
-            // perform wallet sync
-            factory
-                .sync_wallet(&wallet, None, Default::default())
-                .unwrap();
-
-            let wallet_balance = wallet.get_balance().unwrap();
-
-            let details = format!(
-                "test_vector: [stop_gap: {}, actual_gap: {}, addrs_before: {}, addrs_after: {}]",
-                stop_gap, actual_gap, addrs_before, addrs_after,
-            );
-            assert!(
-                wallet_balance <= max_balance,
-                "wallet balance is greater than received amount: {}",
-                details
-            );
-            assert!(
-                wallet_balance >= min_balance,
-                "wallet balance is smaller than expected: {}",
-                details
-            );
+            }
         }
+
+        ElectrumTester.run();
     }
 }
