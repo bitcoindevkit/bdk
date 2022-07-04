@@ -122,12 +122,28 @@ impl TryFrom<usize> for WordCount {
 pub type MnemonicWithPassphrase<'a> = (Mnemonic, &'a str);
 
 /// A mnemonic is group of easy to remember words used in the generation of deterministic wallets
-#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone)]
 pub struct Mnemonic {
     /// The language this mnemoic belongs to
     language: Language,
     /// Vec of indices of words from the respective word list
     word_indexes: Vec<u16>,
+}
+
+impl fmt::Debug for Mnemonic {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Redact all fields to protect against accidental leakage into logs
+        f.debug_struct("Mnemonic").finish_non_exhaustive()
+    }
+}
+
+impl ToString for Mnemonic {
+    fn to_string(&self) -> String {
+        self.word_iter()
+            .enumerate()
+            .flat_map(|(i, w)| if i > 0 { [" ", w] } else { ["", w] })
+            .collect()
+    }
 }
 
 impl Mnemonic {
@@ -271,20 +287,10 @@ impl Mnemonic {
 
     /// Convert a vec of word indices to an iterator of the mnemonic words
     pub fn word_iter(&self) -> impl Iterator<Item = &str> + Clone + '_ {
-        let wordlist = self.language.word_list();
-        self.word_indexes.iter().map(move |&w| wordlist[w as usize])
-    }
-}
-
-impl fmt::Display for Mnemonic {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        for (i, word) in self.word_iter().enumerate() {
-            if i > 0 {
-                f.write_str(" ")?;
-            }
-            f.write_str(word)?;
-        }
-        Ok(())
+        let word_list = self.language.word_list();
+        self.word_indexes
+            .iter()
+            .map(move |i| word_list[*i as usize])
     }
 }
 
@@ -500,6 +506,15 @@ mod test {
                 (mnemonic, self.extra_phrase).into_extended_key().unwrap();
             assert_eq!(xkey.into_xprv(Network::Bitcoin), Some(self.xkey));
         }
+    }
+
+    #[test]
+    fn test_redacted() {
+        // Ensure [`Mnemonic`] fields are redacted
+        let mnemonic: GeneratedKey<_, Legacy> =
+            Mnemonic::generate((WordCount::Words12, Language::English)).unwrap();
+        let debug_str = format!("{:?}", mnemonic.into_key());
+        assert_eq!(debug_str, "Mnemonic { .. }");
     }
 
     #[test]
@@ -904,6 +919,7 @@ mod test {
     #[test]
     fn test_invalid_entropies() {
         let test_cases = [
+            0,  // ENT < 128 bits
             15, // ENT < 128 bits
             33, // ENT > 256 bits
             31, // ENT not a multiple of 32 bits
@@ -911,8 +927,8 @@ mod test {
 
         test_cases.iter().for_each(|&word_count| {
             assert_eq!(
-                Mnemonic::from_entropy_in(Language::English, &vec![0_u8; word_count]),
-                Err(Error::InvalidEntropyLength(word_count))
+                Mnemonic::from_entropy_in(Language::English, &vec![0_u8; word_count]).err(),
+                Some(Error::InvalidEntropyLength(word_count))
             )
         });
     }
@@ -949,8 +965,8 @@ mod test {
 
         for (description, phrase, err) in test_cases {
             assert_eq!(
-                Mnemonic::parse_in(Language::English, phrase),
-                Err(err),
+                Mnemonic::parse_in(Language::English, phrase).err(),
+                Some(err),
                 "{}",
                 description
             );
