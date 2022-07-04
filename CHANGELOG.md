@@ -53,6 +53,7 @@ To decouple the `Wallet` from the `Blockchain` we've made major changes:
 - Stop making a request for the block height when calling `Wallet:new`.
 - Added `SyncOptions` to capture extra (future) arguments to `Wallet::sync`.
 - Removed `max_addresses` sync parameter which determined how many addresses to cache before syncing since this can just be done with `ensure_addresses_cached`.
+- remove `flush` method from the `Database` trait.
 
 ## [v0.16.1] - [v0.16.0]
 
