@@ -26,6 +26,8 @@ use crate::database::{BatchDatabase, BatchOperations, ConfigurableDatabase, Data
 use crate::error::Error;
 use crate::types::*;
 
+use super::DatabaseFactory;
+
 // path -> script       p{i,e}<path> -> script
 // script -> path       s<script> -> {i,e}<path>
 // outpoint             u<outpoint> -> txout
@@ -475,6 +477,23 @@ impl ConfigurableDatabase for MemoryDatabase {
     }
 }
 
+/// A [`DatabaseFactory`] implementation that builds [`MemoryDatabase`].
+#[derive(Debug, Default)]
+pub struct MemoryDatabaseFactory;
+
+impl DatabaseFactory for MemoryDatabaseFactory {
+    type Inner = MemoryDatabase;
+
+    fn build(
+        &self,
+        _descriptor: &crate::descriptor::ExtendedDescriptor,
+        _network: bitcoin::Network,
+        _secp: &crate::wallet::utils::SecpCtx,
+    ) -> Result<Self::Inner, Error> {
+        Ok(MemoryDatabase::default())
+    }
+}
+
 #[macro_export]
 #[doc(hidden)]
 /// Artificially insert a tx in the database, as if we had found it with a `sync`. This is a hidden
@@ -579,7 +598,7 @@ macro_rules! doctest_wallet {
 
 #[cfg(test)]
 mod test {
-    use super::MemoryDatabase;
+    use super::{MemoryDatabase, MemoryDatabaseFactory};
 
     fn get_tree() -> MemoryDatabase {
         MemoryDatabase::new()
@@ -628,5 +647,11 @@ mod test {
     #[test]
     fn test_sync_time() {
         crate::database::test::test_sync_time(get_tree());
+    }
+
+    #[test]
+    fn test_factory() {
+        let fac = MemoryDatabaseFactory;
+        crate::database::test::test_factory(&fac);
     }
 }

@@ -9,6 +9,8 @@
 // You may not use this file except in accordance with one or both of these
 // licenses.
 
+use std::path::Path;
+
 use bitcoin::consensus::encode::{deserialize, serialize};
 use bitcoin::hash_types::Txid;
 use bitcoin::{OutPoint, Script, Transaction, TxOut};
@@ -16,8 +18,11 @@ use bitcoin::{OutPoint, Script, Transaction, TxOut};
 use crate::database::{BatchDatabase, BatchOperations, Database, SyncTime};
 use crate::error::Error;
 use crate::types::*;
+use crate::wallet::wallet_name_from_descriptor;
 
 use rusqlite::{named_params, Connection};
+
+use super::DatabaseFactory;
 
 static MIGRATIONS: &[&str] = &[
     "CREATE TABLE version (version INTEGER)",
@@ -970,10 +975,47 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     Ok(())
 }
 
+/// A [`DatabaseFactory`] implementation that builds [`SqliteDatabase`].
+///
+/// Each built database is stored in path of format: `<path_root>_<hash>.<path_ext>`
+/// Where `hash` contains identifying data derived with inputs provided by
+/// [`DatabaseFactory::build`] or [`DatabaseFactory::build_with_change`] calls.
+pub struct SqliteDatabaseFactory<P> {
+    pub dir: P,
+    pub ext: String,
+}
+
+impl<P: AsRef<Path>> DatabaseFactory for SqliteDatabaseFactory<P> {
+    type Inner = SqliteDatabase;
+
+    fn build(
+        &self,
+        descriptor: &crate::descriptor::ExtendedDescriptor,
+        network: bitcoin::Network,
+        secp: &crate::wallet::utils::SecpCtx,
+    ) -> Result<Self::Inner, Error> {
+        // ensure dir exists
+        std::fs::create_dir_all(&self.dir).map_err(|e| Error::Generic(e.to_string()))?;
+
+        let name = wallet_name_from_descriptor(descriptor.clone(), None, network, secp)?;
+        let ext = self.ext.trim_start_matches('.');
+
+        let mut path = std::path::PathBuf::new();
+        path.push(&self.dir);
+        path.push(name);
+        path.set_extension(ext);
+
+        // TODO: This is stupid, fix this
+        Ok(Self::Inner::new(path.to_str().unwrap().to_string()))
+    }
+}
+
 #[cfg(test)]
 pub mod test {
     use crate::database::SqliteDatabase;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    use super::SqliteDatabaseFactory;
 
     fn get_database() -> SqliteDatabase {
         let time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
@@ -1030,5 +1072,21 @@ pub mod test {
     #[test]
     fn test_txs() {
         crate::database::test::test_list_transaction(get_database());
+    }
+
+    #[test]
+    fn test_factory() {
+        let time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
+        let mut dir = std::env::temp_dir();
+        dir.push(format!("bdk_{}", time.as_nanos()));
+
+        let fac = SqliteDatabaseFactory {
+            dir: dir.clone(),
+            ext: "db".to_string(),
+        };
+
+        crate::database::test::test_factory(&fac);
+
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

@@ -6,6 +6,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- Introduce `DatabaseFactory` trait.
 
 ## [v0.20.0] - [v0.19.0]
 

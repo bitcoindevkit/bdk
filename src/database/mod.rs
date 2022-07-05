@@ -27,10 +27,12 @@
 use serde::{Deserialize, Serialize};
 
 use bitcoin::hash_types::Txid;
-use bitcoin::{OutPoint, Script, Transaction, TxOut};
+use bitcoin::{Network, OutPoint, Script, Transaction, TxOut};
 
+use crate::descriptor::ExtendedDescriptor;
 use crate::error::Error;
 use crate::types::*;
+use crate::wallet::utils::SecpCtx;
 
 pub mod any;
 pub use any::{AnyDatabase, AnyDatabaseConfig};
@@ -212,12 +214,28 @@ pub(crate) trait DatabaseUtils: Database {
 
 impl<T: Database> DatabaseUtils for T {}
 
+/// A factory trait that builds databases which share underlying configurations and/or storage
+/// paths.
+pub trait DatabaseFactory: Sized {
+    /// Inner type to build
+    type Inner: BatchDatabase;
+
+    /// Builds the defined [`DatabaseFactory::Inner`] type.
+    fn build(
+        &self,
+        descriptor: &ExtendedDescriptor,
+        network: Network,
+        secp: &SecpCtx,
+    ) -> Result<Self::Inner, Error>;
+}
+
 #[cfg(test)]
 pub mod test {
     use std::str::FromStr;
 
     use bitcoin::consensus::encode::deserialize;
     use bitcoin::hashes::hex::*;
+    use bitcoin::util::bip32::{self, DerivationPath, ExtendedPubKey};
     use bitcoin::*;
 
     use super::*;
@@ -439,6 +457,43 @@ pub mod test {
 
         tree.del_sync_time().unwrap();
         assert!(tree.get_sync_time().unwrap().is_none());
+    }
+
+    pub fn test_factory<F: DatabaseFactory>(fac: &F) {
+        let secp = SecpCtx::new();
+        let network = Network::Regtest;
+        let master_privkey = bip32::ExtendedPrivKey::from_str("tprv8ZgxMBicQKsPdowxEXJxXqPYd7i7WN3jG8NTVsq9MYVaR7qnLgi5xo1KZq4z1T89GfGs7BwQTVrtVKWozxwuQLgFNcd3snADMeivux1Y5u5").unwrap();
+
+        let descriptor = |acc: usize| -> ExtendedDescriptor {
+            let path = DerivationPath::from_str(&format!("m/84h/1h/{}h", acc)).unwrap();
+            let sk = master_privkey.derive_priv(&secp, &path).unwrap();
+            let pk = ExtendedPubKey::from_priv(&secp, &sk);
+            ExtendedDescriptor::from_str(&format!(
+                "wpkh([{}/84h/1h/{}h]{}/0/*)",
+                master_privkey.fingerprint(&secp),
+                acc,
+                pk
+            ))
+            .unwrap()
+        };
+
+        let mut acc_index = 0_usize;
+        let mut database = || {
+            let db = fac.build(&descriptor(acc_index), network, &secp).unwrap();
+            acc_index += 1;
+            db
+        };
+
+        test_script_pubkey(database());
+        test_batch_script_pubkey(database());
+        test_iter_script_pubkey(database());
+        test_del_script_pubkey(database());
+        test_utxo(database());
+        test_raw_tx(database());
+        test_tx(database());
+        test_list_transaction(database());
+        test_last_index(database());
+        test_sync_time(database());
     }
 
     // TODO: more tests...

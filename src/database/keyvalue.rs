@@ -21,6 +21,9 @@ use crate::database::memory::MapKey;
 use crate::database::{BatchDatabase, BatchOperations, Database, SyncTime};
 use crate::error::Error;
 use crate::types::*;
+use crate::wallet::wallet_name_from_descriptor;
+
+use super::DatabaseFactory;
 
 macro_rules! impl_batch_operations {
     ( { $($after_insert:tt)* }, $process_delete:ident ) => {
@@ -402,6 +405,21 @@ impl BatchDatabase for Tree {
     }
 }
 
+/// A [`DatabaseFactory`] implementation that builds [`Tree`]
+impl DatabaseFactory for sled::Db {
+    type Inner = sled::Tree;
+
+    fn build(
+        &self,
+        descriptor: &crate::descriptor::ExtendedDescriptor,
+        network: bitcoin::Network,
+        secp: &crate::wallet::utils::SecpCtx,
+    ) -> Result<Self::Inner, Error> {
+        let name = wallet_name_from_descriptor(descriptor.clone(), None, network, secp)?;
+        self.open_tree(&name).map_err(Error::Sled)
+    }
+}
+
 #[cfg(test)]
 mod test {
     use lazy_static::lazy_static;
@@ -491,5 +509,17 @@ mod test {
     #[test]
     fn test_sync_time() {
         crate::database::test::test_sync_time(get_tree());
+    }
+
+    #[test]
+    fn test_factory() {
+        let time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
+        let mut dir = std::env::temp_dir();
+        dir.push(format!("bdk_{}", time.as_nanos()));
+
+        let fac = sled::open(&dir).unwrap();
+        crate::database::test::test_factory(&fac);
+
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

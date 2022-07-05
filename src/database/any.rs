@@ -425,3 +425,42 @@ impl ConfigurableDatabase for AnyDatabase {
 impl_from!((), AnyDatabaseConfig, Memory,);
 impl_from!(SledDbConfiguration, AnyDatabaseConfig, Sled, #[cfg(feature = "key-value-db")]);
 impl_from!(SqliteDbConfiguration, AnyDatabaseConfig, Sqlite, #[cfg(feature = "sqlite")]);
+
+/// Type that implements [`DatabaseFactory`] that builds [`AnyDatabase`].
+pub enum AnyDatabaseFactory {
+    /// Memory database factory
+    Memory(memory::MemoryDatabaseFactory),
+    #[cfg(feature = "key-value-db")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "key-value-db")))]
+    /// Key-value database factory
+    Sled(sled::Db),
+    #[cfg(feature = "sqlite")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "sqlite")))]
+    /// Sqlite database factory
+    Sqlite(sqlite::SqliteDatabaseFactory<String>),
+}
+
+impl DatabaseFactory for AnyDatabaseFactory {
+    type Inner = AnyDatabase;
+
+    fn build(
+        &self,
+        descriptor: &ExtendedDescriptor,
+        network: Network,
+        secp: &SecpCtx,
+    ) -> Result<Self::Inner, Error> {
+        match self {
+            AnyDatabaseFactory::Memory(f) => {
+                f.build(descriptor, network, secp).map(Self::Inner::Memory)
+            }
+            #[cfg(feature = "key-value-db")]
+            AnyDatabaseFactory::Sled(f) => {
+                f.build(descriptor, network, secp).map(Self::Inner::Sled)
+            }
+            #[cfg(feature = "sqlite")]
+            AnyDatabaseFactory::Sqlite(f) => {
+                f.build(descriptor, network, secp).map(Self::Inner::Sqlite)
+            }
+        }
+    }
+}
