@@ -209,4 +209,38 @@ mod test {
             "should inherit from value for 25"
         );
     }
+
+    #[test]
+    #[cfg(feature = "test-esplora")]
+    fn test_esplora_with_variable_configs() {
+        use crate::testutils::{
+            blockchain_tests::TestClient,
+            configurable_blockchain_tests::ConfigurableBlockchainTester,
+        };
+
+        struct EsploraTester;
+
+        impl ConfigurableBlockchainTester<EsploraBlockchain> for EsploraTester {
+            const BLOCKCHAIN_NAME: &'static str = "Esplora";
+
+            fn config_with_stop_gap(
+                &self,
+                test_client: &mut TestClient,
+                stop_gap: usize,
+            ) -> Option<EsploraBlockchainConfig> {
+                Some(EsploraBlockchainConfig {
+                    base_url: format!(
+                        "http://{}",
+                        test_client.electrsd.esplora_url.as_ref().unwrap()
+                    ),
+                    proxy: None,
+                    concurrency: None,
+                    stop_gap: stop_gap,
+                    timeout: None,
+                })
+            }
+        }
+
+        EsploraTester.run();
+    }
 }

@@ -88,7 +88,7 @@ impl Blockchain for EsploraBlockchain {
     }
 
     fn broadcast(&self, tx: &Transaction) -> Result<(), Error> {
-        let _txid = self.url_client._broadcast(tx)?;
+        self.url_client._broadcast(tx)?;
         Ok(())
     }
 
