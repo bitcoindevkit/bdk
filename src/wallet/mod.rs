@@ -73,6 +73,7 @@ use crate::testutils;
 use crate::types::*;
 
 const CACHE_ADDR_BATCH_SIZE: u32 = 100;
+const COINBASE_MATURITY: u32 = 100;
 
 /// A Bitcoin wallet
 ///
@@ -765,6 +766,7 @@ where
             params.drain_wallet,
             params.manually_selected_only,
             params.bumping_fee.is_some(), // we mandate confirmed transactions if we're bumping the fee
+            current_height,
         )?;
 
         let coin_selection = coin_selection.coin_select(
@@ -1342,6 +1344,7 @@ where
     /// Given the options returns the list of utxos that must be used to form the
     /// transaction and any further that may be used if needed.
     #[allow(clippy::type_complexity)]
+    #[allow(clippy::too_many_arguments)]
     fn preselect_utxos(
         &self,
         change_policy: tx_builder::ChangeSpendPolicy,
@@ -1350,6 +1353,7 @@ where
         must_use_all_available: bool,
         manual_only: bool,
         must_only_use_confirmed_tx: bool,
+        current_height: Option<u32>,
     ) -> Result<(Vec<WeightedUtxo>, Vec<WeightedUtxo>), Error> {
         //    must_spend <- manually selected utxos
         //    may_spend  <- all other available utxos
@@ -1368,23 +1372,44 @@ where
             return Ok((must_spend, vec![]));
         }
 
-        let satisfies_confirmed = match must_only_use_confirmed_tx {
-            true => {
-                let database = self.database.borrow();
-                may_spend
-                    .iter()
-                    .map(|u| {
-                        database
-                            .get_tx(&u.0.outpoint.txid, true)
-                            .map(|tx| match tx {
-                                None => false,
-                                Some(tx) => tx.confirmation_time.is_some(),
-                            })
+        let database = self.database.borrow();
+        let satisfies_confirmed = may_spend
+            .iter()
+            .map(|u| {
+                database
+                    .get_tx(&u.0.outpoint.txid, true)
+                    .map(|tx| match tx {
+                        // We don't have the tx in the db for some reason,
+                        // so we can't know for sure if it's mature or not.
+                        // We prefer not to spend it.
+                        None => false,
+                        Some(tx) => {
+                            // Whether the UTXO is mature and, if needed, confirmed
+                            let mut spendable = true;
+                            if must_only_use_confirmed_tx && tx.confirmation_time.is_none() {
+                                return false;
+                            }
+                            if tx
+                                .transaction
+                                .expect("We specifically ask for the transaction above")
+                                .is_coin_base()
+                            {
+                                if let Some(current_height) = current_height {
+                                    match &tx.confirmation_time {
+                                        Some(t) => {
+                                            // https://github.com/bitcoin/bitcoin/blob/c5e67be03bb06a5d7885c55db1f016fbf2333fe3/src/validation.cpp#L373-L375
+                                            spendable &= (current_height.saturating_sub(t.height))
+                                                >= COINBASE_MATURITY;
+                                        }
+                                        None => spendable = false,
+                                    }
+                                }
+                            }
+                            spendable
+                        }
                     })
-                    .collect::<Result<Vec<_>, _>>()?
-            }
-            false => vec![true; may_spend.len()],
-        };
+            })
+            .collect::<Result<Vec<_>, _>>()?;
 
         let mut i = 0;
         may_spend.retain(|u| {
@@ -4683,5 +4708,71 @@ pub(crate) mod test {
             sighash as u8,
             "The signature should have been made with the right sighash"
         );
+    }
+
+    #[test]
+    fn test_spend_coinbase() {
+        let descriptors = testutils!(@descriptors (get_test_wpkh()));
+        let wallet = Wallet::new(
+            &descriptors.0,
+            None,
+            Network::Regtest,
+            AnyDatabase::Memory(MemoryDatabase::new()),
+        )
+        .unwrap();
+
+        let confirmation_time = 5;
+
+        crate::populate_test_db!(
+            wallet.database.borrow_mut(),
+            testutils! (@tx ( (@external descriptors, 0) => 25_000 ) (@confirmations 0)),
+            Some(confirmation_time),
+            (@coinbase true)
+        );
+
+        let not_yet_mature_time = confirmation_time + COINBASE_MATURITY - 1;
+        let maturity_time = confirmation_time + COINBASE_MATURITY;
+
+        // The balance is nonzero, even if we can't spend anything
+        // FIXME: we should differentiate the balance between immature,
+        // trusted, untrusted_pending
+        // See https://github.com/bitcoindevkit/bdk/issues/238
+        let balance = wallet.get_balance().unwrap();
+        assert!(balance != 0);
+
+        // We try to create a transaction, only to notice that all
+        // our funds are unspendable
+        let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
+        let mut builder = wallet.build_tx();
+        builder
+            .add_recipient(addr.script_pubkey(), balance / 2)
+            .set_current_height(confirmation_time);
+        assert!(matches!(
+            builder.finish().unwrap_err(),
+            Error::InsufficientFunds {
+                needed: _,
+                available: 0
+            }
+        ));
+
+        // Still unspendable...
+        let mut builder = wallet.build_tx();
+        builder
+            .add_recipient(addr.script_pubkey(), balance / 2)
+            .set_current_height(not_yet_mature_time);
+        assert!(matches!(
+            builder.finish().unwrap_err(),
+            Error::InsufficientFunds {
+                needed: _,
+                available: 0
+            }
+        ));
+
+        // ...Now the coinbase is mature :)
+        let mut builder = wallet.build_tx();
+        builder
+            .add_recipient(addr.script_pubkey(), balance / 2)
+            .set_current_height(maturity_time);
+        builder.finish().unwrap();
     }
 }
