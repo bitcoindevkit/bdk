@@ -4296,7 +4296,7 @@ pub(crate) mod test {
             wallet.get_address(AddressIndex::New).unwrap(),
             AddressInfo {
                 index: 0,
-                address: Address::from_str("bcrt1qkmvk2nadgplmd57ztld8nf8v2yxkzmdvwtjf8s").unwrap(),
+                address: Address::from_str("bcrt1qrhgaqu0zvf5q2d0gwwz04w0dh0cuehhqvzpp4w").unwrap(),
                 keychain: KeychainKind::External,
             }
         );
@@ -4305,7 +4305,7 @@ pub(crate) mod test {
             wallet.get_internal_address(AddressIndex::New).unwrap(),
             AddressInfo {
                 index: 0,
-                address: Address::from_str("bcrt1qtrwtz00wxl69e5xex7amy4xzlxkaefg3gfdkxa").unwrap(),
+                address: Address::from_str("bcrt1q0ue3s5y935tw7v3gmnh36c5zzsaw4n9c9smq79").unwrap(),
                 keychain: KeychainKind::Internal,
             }
         );
@@ -4322,7 +4322,7 @@ pub(crate) mod test {
             wallet.get_internal_address(AddressIndex::New).unwrap(),
             AddressInfo {
                 index: 0,
-                address: Address::from_str("bcrt1qkmvk2nadgplmd57ztld8nf8v2yxkzmdvwtjf8s").unwrap(),
+                address: Address::from_str("bcrt1qrhgaqu0zvf5q2d0gwwz04w0dh0cuehhqvzpp4w").unwrap(),
                 keychain: KeychainKind::Internal,
             },
             "when there's no internal descriptor it should just use external"

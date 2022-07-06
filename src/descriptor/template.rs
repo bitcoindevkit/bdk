@@ -40,18 +40,19 @@ pub type DescriptorTemplateOut = (ExtendedDescriptor, KeyMap, ValidNetworks);
 /// use bdk::keys::{IntoDescriptorKey, KeyError};
 /// use bdk::miniscript::Legacy;
 /// use bdk::template::{DescriptorTemplate, DescriptorTemplateOut};
+/// use bitcoin::Network;
 ///
 /// struct MyP2PKH<K: IntoDescriptorKey<Legacy>>(K);
 ///
 /// impl<K: IntoDescriptorKey<Legacy>> DescriptorTemplate for MyP2PKH<K> {
-///     fn build(self) -> Result<DescriptorTemplateOut, DescriptorError> {
+///     fn build(self, network: Network) -> Result<DescriptorTemplateOut, DescriptorError> {
 ///         Ok(bdk::descriptor!(pkh(self.0))?)
 ///     }
 /// }
 /// ```
 pub trait DescriptorTemplate {
     /// Build the complete descriptor
-    fn build(self) -> Result<DescriptorTemplateOut, DescriptorError>;
+    fn build(self, network: Network) -> Result<DescriptorTemplateOut, DescriptorError>;
 }
 
 /// Turns a [`DescriptorTemplate`] into a valid wallet descriptor by calling its
@@ -62,7 +63,7 @@ impl<T: DescriptorTemplate> IntoWalletDescriptor for T {
         secp: &SecpCtx,
         network: Network,
     ) -> Result<(ExtendedDescriptor, KeyMap), DescriptorError> {
-        self.build()?.into_wallet_descriptor(secp, network)
+        self.build(network)?.into_wallet_descriptor(secp, network)
     }
 }
 
@@ -95,7 +96,7 @@ impl<T: DescriptorTemplate> IntoWalletDescriptor for T {
 pub struct P2Pkh<K: IntoDescriptorKey<Legacy>>(pub K);
 
 impl<K: IntoDescriptorKey<Legacy>> DescriptorTemplate for P2Pkh<K> {
-    fn build(self) -> Result<DescriptorTemplateOut, DescriptorError> {
+    fn build(self, _network: Network) -> Result<DescriptorTemplateOut, DescriptorError> {
         descriptor!(pkh(self.0))
     }
 }
@@ -130,7 +131,7 @@ impl<K: IntoDescriptorKey<Legacy>> DescriptorTemplate for P2Pkh<K> {
 pub struct P2Wpkh_P2Sh<K: IntoDescriptorKey<Segwitv0>>(pub K);
 
 impl<K: IntoDescriptorKey<Segwitv0>> DescriptorTemplate for P2Wpkh_P2Sh<K> {
-    fn build(self) -> Result<DescriptorTemplateOut, DescriptorError> {
+    fn build(self, _network: Network) -> Result<DescriptorTemplateOut, DescriptorError> {
         descriptor!(sh(wpkh(self.0)))
     }
 }
@@ -164,12 +165,12 @@ impl<K: IntoDescriptorKey<Segwitv0>> DescriptorTemplate for P2Wpkh_P2Sh<K> {
 pub struct P2Wpkh<K: IntoDescriptorKey<Segwitv0>>(pub K);
 
 impl<K: IntoDescriptorKey<Segwitv0>> DescriptorTemplate for P2Wpkh<K> {
-    fn build(self) -> Result<DescriptorTemplateOut, DescriptorError> {
+    fn build(self, _network: Network) -> Result<DescriptorTemplateOut, DescriptorError> {
         descriptor!(wpkh(self.0))
     }
 }
 
-/// BIP44 template. Expands to `pkh(key/44'/0'/0'/{0,1}/*)`
+/// BIP44 template. Expands to `pkh(key/44'/{0,1}'/0'/{0,1}/*)`
 ///
 /// Since there are hardened derivation steps, this template requires a private derivable key (generally a `xprv`/`tprv`).
 ///
@@ -193,21 +194,21 @@ impl<K: IntoDescriptorKey<Segwitv0>> DescriptorTemplate for P2Wpkh<K> {
 ///     MemoryDatabase::default()
 /// )?;
 ///
-/// assert_eq!(wallet.get_address(New)?.to_string(), "miNG7dJTzJqNbFS19svRdTCisC65dsubtR");
-/// assert_eq!(wallet.public_descriptor(KeychainKind::External)?.unwrap().to_string(), "pkh([c55b303f/44'/0'/0']tpubDDDzQ31JkZB7VxUr9bjvBivDdqoFLrDPyLWtLapArAi51ftfmCb2DPxwLQzX65iNcXz1DGaVvyvo6JQ6rTU73r2gqdEo8uov9QKRb7nKCSU/0/*)#xgaaevjx");
+/// assert_eq!(wallet.get_address(New)?.to_string(), "mmogjc7HJEZkrLqyQYqJmxUqFaC7i4uf89");
+/// assert_eq!(wallet.public_descriptor(KeychainKind::External)?.unwrap().to_string(), "pkh([c55b303f/44'/1'/0']tpubDCuorCpzvYS2LCD75BR46KHE8GdDeg1wsAgNZeNr6DaB5gQK1o14uErKwKLuFmeemkQ6N2m3rNgvctdJLyr7nwu2yia7413Hhg8WWE44cgT/0/*)#5wrnv0xt");
 /// # Ok::<_, Box<dyn std::error::Error>>(())
 /// ```
 pub struct Bip44<K: DerivableKey<Legacy>>(pub K, pub KeychainKind);
 
 impl<K: DerivableKey<Legacy>> DescriptorTemplate for Bip44<K> {
-    fn build(self) -> Result<DescriptorTemplateOut, DescriptorError> {
-        P2Pkh(legacy::make_bipxx_private(44, self.0, self.1)?).build()
+    fn build(self, network: Network) -> Result<DescriptorTemplateOut, DescriptorError> {
+        P2Pkh(legacy::make_bipxx_private(44, self.0, self.1, network)?).build(network)
     }
 }
 
 /// BIP44 public template. Expands to `pkh(key/{0,1}/*)`
 ///
-/// This assumes that the key used has already been derived with `m/44'/0'/0'`.
+/// This assumes that the key used has already been derived with `m/44'/0'/0'` for Mainnet or `m/44'/1'/0'` for Testnet.
 ///
 /// This template requires the parent fingerprint to populate correctly the metadata of PSBTs.
 ///
@@ -240,12 +241,12 @@ impl<K: DerivableKey<Legacy>> DescriptorTemplate for Bip44<K> {
 pub struct Bip44Public<K: DerivableKey<Legacy>>(pub K, pub bip32::Fingerprint, pub KeychainKind);
 
 impl<K: DerivableKey<Legacy>> DescriptorTemplate for Bip44Public<K> {
-    fn build(self) -> Result<DescriptorTemplateOut, DescriptorError> {
-        P2Pkh(legacy::make_bipxx_public(44, self.0, self.1, self.2)?).build()
+    fn build(self, network: Network) -> Result<DescriptorTemplateOut, DescriptorError> {
+        P2Pkh(legacy::make_bipxx_public(44, self.0, self.1, self.2)?).build(network)
     }
 }
 
-/// BIP49 template. Expands to `sh(wpkh(key/49'/0'/0'/{0,1}/*))`
+/// BIP49 template. Expands to `sh(wpkh(key/49'/{0,1}'/0'/{0,1}/*))`
 ///
 /// Since there are hardened derivation steps, this template requires a private derivable key (generally a `xprv`/`tprv`).
 ///
@@ -269,15 +270,15 @@ impl<K: DerivableKey<Legacy>> DescriptorTemplate for Bip44Public<K> {
 ///     MemoryDatabase::default()
 /// )?;
 ///
-/// assert_eq!(wallet.get_address(New)?.to_string(), "2N3K4xbVAHoiTQSwxkZjWDfKoNC27pLkYnt");
-/// assert_eq!(wallet.public_descriptor(KeychainKind::External)?.unwrap().to_string(), "sh(wpkh([c55b303f/49\'/0\'/0\']tpubDC49r947KGK52X5rBWS4BLs5m9SRY3pYHnvRrm7HcybZ3BfdEsGFyzCMzayi1u58eT82ZeyFZwH7DD6Q83E3fM9CpfMtmnTygnLfP59jL9L/0/*))#gsmdv4xr");
+/// assert_eq!(wallet.get_address(New)?.to_string(), "2N4zkWAoGdUv4NXhSsU8DvS5MB36T8nKHEB");
+/// assert_eq!(wallet.public_descriptor(KeychainKind::External)?.unwrap().to_string(), "sh(wpkh([c55b303f/49'/1'/0']tpubDDYr4kdnZgjjShzYNjZUZXUUtpXaofdkMaipyS8ThEh45qFmhT4hKYways7UXmg6V7het1QiFo9kf4kYUXyDvV4rHEyvSpys9pjCB3pukxi/0/*))#s9vxlc8e");
 /// # Ok::<_, Box<dyn std::error::Error>>(())
 /// ```
 pub struct Bip49<K: DerivableKey<Segwitv0>>(pub K, pub KeychainKind);
 
 impl<K: DerivableKey<Segwitv0>> DescriptorTemplate for Bip49<K> {
-    fn build(self) -> Result<DescriptorTemplateOut, DescriptorError> {
-        P2Wpkh_P2Sh(segwit_v0::make_bipxx_private(49, self.0, self.1)?).build()
+    fn build(self, network: Network) -> Result<DescriptorTemplateOut, DescriptorError> {
+        P2Wpkh_P2Sh(segwit_v0::make_bipxx_private(49, self.0, self.1, network)?).build(network)
     }
 }
 
@@ -310,18 +311,18 @@ impl<K: DerivableKey<Segwitv0>> DescriptorTemplate for Bip49<K> {
 /// )?;
 ///
 /// assert_eq!(wallet.get_address(New)?.to_string(), "2N3K4xbVAHoiTQSwxkZjWDfKoNC27pLkYnt");
-/// assert_eq!(wallet.public_descriptor(KeychainKind::External)?.unwrap().to_string(), "sh(wpkh([c55b303f/49\'/0\'/0\']tpubDC49r947KGK52X5rBWS4BLs5m9SRY3pYHnvRrm7HcybZ3BfdEsGFyzCMzayi1u58eT82ZeyFZwH7DD6Q83E3fM9CpfMtmnTygnLfP59jL9L/0/*))#gsmdv4xr");
+/// assert_eq!(wallet.public_descriptor(KeychainKind::External)?.unwrap().to_string(), "sh(wpkh([c55b303f/49'/0'/0']tpubDC49r947KGK52X5rBWS4BLs5m9SRY3pYHnvRrm7HcybZ3BfdEsGFyzCMzayi1u58eT82ZeyFZwH7DD6Q83E3fM9CpfMtmnTygnLfP59jL9L/0/*))#gsmdv4xr");
 /// # Ok::<_, Box<dyn std::error::Error>>(())
 /// ```
 pub struct Bip49Public<K: DerivableKey<Segwitv0>>(pub K, pub bip32::Fingerprint, pub KeychainKind);
 
 impl<K: DerivableKey<Segwitv0>> DescriptorTemplate for Bip49Public<K> {
-    fn build(self) -> Result<DescriptorTemplateOut, DescriptorError> {
-        P2Wpkh_P2Sh(segwit_v0::make_bipxx_public(49, self.0, self.1, self.2)?).build()
+    fn build(self, network: Network) -> Result<DescriptorTemplateOut, DescriptorError> {
+        P2Wpkh_P2Sh(segwit_v0::make_bipxx_public(49, self.0, self.1, self.2)?).build(network)
     }
 }
 
-/// BIP84 template. Expands to `wpkh(key/84'/0'/0'/{0,1}/*)`
+/// BIP84 template. Expands to `wpkh(key/84'/{0,1}'/0'/{0,1}/*)`
 ///
 /// Since there are hardened derivation steps, this template requires a private derivable key (generally a `xprv`/`tprv`).
 ///
@@ -345,15 +346,15 @@ impl<K: DerivableKey<Segwitv0>> DescriptorTemplate for Bip49Public<K> {
 ///     MemoryDatabase::default()
 /// )?;
 ///
-/// assert_eq!(wallet.get_address(New)?.to_string(), "tb1qedg9fdlf8cnnqfd5mks6uz5w4kgpk2pr6y4qc7");
-/// assert_eq!(wallet.public_descriptor(KeychainKind::External)?.unwrap().to_string(), "wpkh([c55b303f/84\'/0\'/0\']tpubDC2Qwo2TFsaNC4ju8nrUJ9mqVT3eSgdmy1yPqhgkjwmke3PRXutNGRYAUo6RCHTcVQaDR3ohNU9we59brGHuEKPvH1ags2nevW5opEE9Z5Q/0/*)#nkk5dtkg");
+/// assert_eq!(wallet.get_address(New)?.to_string(), "tb1qhl85z42h7r4su5u37rvvw0gk8j2t3n9y7zsg4n");
+/// assert_eq!(wallet.public_descriptor(KeychainKind::External)?.unwrap().to_string(), "wpkh([c55b303f/84'/1'/0']tpubDDc5mum24DekpNw92t6fHGp8Gr2JjF9J7i4TZBtN6Vp8xpAULG5CFaKsfugWa5imhrQQUZKXe261asP5koDHo5bs3qNTmf3U3o4v9SaB8gg/0/*)#6kfecsmr");
 /// # Ok::<_, Box<dyn std::error::Error>>(())
 /// ```
 pub struct Bip84<K: DerivableKey<Segwitv0>>(pub K, pub KeychainKind);
 
 impl<K: DerivableKey<Segwitv0>> DescriptorTemplate for Bip84<K> {
-    fn build(self) -> Result<DescriptorTemplateOut, DescriptorError> {
-        P2Wpkh(segwit_v0::make_bipxx_private(84, self.0, self.1)?).build()
+    fn build(self, network: Network) -> Result<DescriptorTemplateOut, DescriptorError> {
+        P2Wpkh(segwit_v0::make_bipxx_private(84, self.0, self.1, network)?).build(network)
     }
 }
 
@@ -392,8 +393,8 @@ impl<K: DerivableKey<Segwitv0>> DescriptorTemplate for Bip84<K> {
 pub struct Bip84Public<K: DerivableKey<Segwitv0>>(pub K, pub bip32::Fingerprint, pub KeychainKind);
 
 impl<K: DerivableKey<Segwitv0>> DescriptorTemplate for Bip84Public<K> {
-    fn build(self) -> Result<DescriptorTemplateOut, DescriptorError> {
-        P2Wpkh(segwit_v0::make_bipxx_public(84, self.0, self.1, self.2)?).build()
+    fn build(self, network: Network) -> Result<DescriptorTemplateOut, DescriptorError> {
+        P2Wpkh(segwit_v0::make_bipxx_public(84, self.0, self.1, self.2)?).build(network)
     }
 }
 
@@ -406,10 +407,19 @@ macro_rules! expand_make_bipxx {
                 bip: u32,
                 key: K,
                 keychain: KeychainKind,
+                network: Network,
             ) -> Result<impl IntoDescriptorKey<$ctx>, DescriptorError> {
                 let mut derivation_path = Vec::with_capacity(4);
                 derivation_path.push(bip32::ChildNumber::from_hardened_idx(bip)?);
-                derivation_path.push(bip32::ChildNumber::from_hardened_idx(0)?);
+
+                match network {
+                    Network::Bitcoin => {
+                        derivation_path.push(bip32::ChildNumber::from_hardened_idx(0)?);
+                    }
+                    _ => {
+                        derivation_path.push(bip32::ChildNumber::from_hardened_idx(1)?);
+                    }
+                }
                 derivation_path.push(bip32::ChildNumber::from_hardened_idx(0)?);
 
                 match keychain {
@@ -466,6 +476,40 @@ mod test {
     use miniscript::descriptor::{DescriptorPublicKey, DescriptorTrait, KeyMap};
     use miniscript::Descriptor;
 
+    // BIP44 `pkh(key/44'/{0,1}'/0'/{0,1}/*)`
+    #[test]
+    fn test_bip44_template_cointype() {
+        use bitcoin::util::bip32::ChildNumber::{self, Hardened};
+
+        let xprvkey = bitcoin::util::bip32::ExtendedPrivKey::from_str("xprv9s21ZrQH143K2fpbqApQL69a4oKdGVnVN52R82Ft7d1pSqgKmajF62acJo3aMszZb6qQ22QsVECSFxvf9uyxFUvFYQMq3QbtwtRSMjLAhMf").unwrap();
+        assert_eq!(Network::Bitcoin, xprvkey.network);
+        let xdesc = Bip44(xprvkey, KeychainKind::Internal)
+            .build(Network::Bitcoin)
+            .unwrap();
+
+        if let ExtendedDescriptor::Pkh(pkh) = xdesc.0 {
+            let path: Vec<ChildNumber> = pkh.into_inner().full_derivation_path().into();
+            let purpose = path.get(0).unwrap();
+            assert!(matches!(purpose, Hardened { index: 44 }));
+            let coin_type = path.get(1).unwrap();
+            assert!(matches!(coin_type, Hardened { index: 0 }));
+        }
+
+        let tprvkey = bitcoin::util::bip32::ExtendedPrivKey::from_str("tprv8ZgxMBicQKsPcx5nBGsR63Pe8KnRUqmbJNENAfGftF3yuXoMMoVJJcYeUw5eVkm9WBPjWYt6HMWYJNesB5HaNVBaFc1M6dRjWSYnmewUMYy").unwrap();
+        assert_eq!(Network::Testnet, tprvkey.network);
+        let tdesc = Bip44(tprvkey, KeychainKind::Internal)
+            .build(Network::Testnet)
+            .unwrap();
+
+        if let ExtendedDescriptor::Pkh(pkh) = tdesc.0 {
+            let path: Vec<ChildNumber> = pkh.into_inner().full_derivation_path().into();
+            let purpose = path.get(0).unwrap();
+            assert!(matches!(purpose, Hardened { index: 44 }));
+            let coin_type = path.get(1).unwrap();
+            assert!(matches!(coin_type, Hardened { index: 1 }));
+        }
+    }
+
     // verify template descriptor generates expected address(es)
     fn check(
         desc: Result<(Descriptor<DescriptorPublicKey>, KeyMap, ValidNetworks), DescriptorError>,
@@ -497,7 +541,7 @@ mod test {
             bitcoin::PrivateKey::from_wif("cTc4vURSzdx6QE6KVynWGomDbLaA75dNALMNyfjh3p8DRRar84Um")
                 .unwrap();
         check(
-            P2Pkh(prvkey).build(),
+            P2Pkh(prvkey).build(Network::Bitcoin),
             false,
             true,
             &["mwJ8hxFYW19JLuc65RCTaP4v1rzVU8cVMT"],
@@ -508,7 +552,7 @@ mod test {
         )
         .unwrap();
         check(
-            P2Pkh(pubkey).build(),
+            P2Pkh(pubkey).build(Network::Bitcoin),
             false,
             true,
             &["muZpTpBYhxmRFuCjLc7C6BBDF32C8XVJUi"],
@@ -522,7 +566,7 @@ mod test {
             bitcoin::PrivateKey::from_wif("cTc4vURSzdx6QE6KVynWGomDbLaA75dNALMNyfjh3p8DRRar84Um")
                 .unwrap();
         check(
-            P2Wpkh_P2Sh(prvkey).build(),
+            P2Wpkh_P2Sh(prvkey).build(Network::Bitcoin),
             true,
             true,
             &["2NB4ox5VDRw1ecUv6SnT3VQHPXveYztRqk5"],
@@ -533,7 +577,7 @@ mod test {
         )
         .unwrap();
         check(
-            P2Wpkh_P2Sh(pubkey).build(),
+            P2Wpkh_P2Sh(pubkey).build(Network::Bitcoin),
             true,
             true,
             &["2N5LiC3CqzxDamRTPG1kiNv1FpNJQ7x28sb"],
@@ -547,7 +591,7 @@ mod test {
             bitcoin::PrivateKey::from_wif("cTc4vURSzdx6QE6KVynWGomDbLaA75dNALMNyfjh3p8DRRar84Um")
                 .unwrap();
         check(
-            P2Wpkh(prvkey).build(),
+            P2Wpkh(prvkey).build(Network::Bitcoin),
             true,
             true,
             &["bcrt1q4525hmgw265tl3drrl8jjta7ayffu6jfcwxx9y"],
@@ -558,7 +602,7 @@ mod test {
         )
         .unwrap();
         check(
-            P2Wpkh(pubkey).build(),
+            P2Wpkh(pubkey).build(Network::Bitcoin),
             true,
             true,
             &["bcrt1qngw83fg8dz0k749cg7k3emc7v98wy0c7azaa6h"],
@@ -570,7 +614,7 @@ mod test {
     fn test_bip44_template() {
         let prvkey = bitcoin::util::bip32::ExtendedPrivKey::from_str("tprv8ZgxMBicQKsPcx5nBGsR63Pe8KnRUqmbJNENAfGftF3yuXoMMoVJJcYeUw5eVkm9WBPjWYt6HMWYJNesB5HaNVBaFc1M6dRjWSYnmewUMYy").unwrap();
         check(
-            Bip44(prvkey, KeychainKind::External).build(),
+            Bip44(prvkey, KeychainKind::External).build(Network::Bitcoin),
             false,
             false,
             &[
@@ -580,7 +624,7 @@ mod test {
             ],
         );
         check(
-            Bip44(prvkey, KeychainKind::Internal).build(),
+            Bip44(prvkey, KeychainKind::Internal).build(Network::Bitcoin),
             false,
             false,
             &[
@@ -597,7 +641,7 @@ mod test {
         let pubkey = bitcoin::util::bip32::ExtendedPubKey::from_str("tpubDDDzQ31JkZB7VxUr9bjvBivDdqoFLrDPyLWtLapArAi51ftfmCb2DPxwLQzX65iNcXz1DGaVvyvo6JQ6rTU73r2gqdEo8uov9QKRb7nKCSU").unwrap();
         let fingerprint = bitcoin::util::bip32::Fingerprint::from_str("c55b303f").unwrap();
         check(
-            Bip44Public(pubkey, fingerprint, KeychainKind::External).build(),
+            Bip44Public(pubkey, fingerprint, KeychainKind::External).build(Network::Bitcoin),
             false,
             false,
             &[
@@ -607,7 +651,7 @@ mod test {
             ],
         );
         check(
-            Bip44Public(pubkey, fingerprint, KeychainKind::Internal).build(),
+            Bip44Public(pubkey, fingerprint, KeychainKind::Internal).build(Network::Bitcoin),
             false,
             false,
             &[
@@ -623,7 +667,7 @@ mod test {
     fn test_bip49_template() {
         let prvkey = bitcoin::util::bip32::ExtendedPrivKey::from_str("tprv8ZgxMBicQKsPcx5nBGsR63Pe8KnRUqmbJNENAfGftF3yuXoMMoVJJcYeUw5eVkm9WBPjWYt6HMWYJNesB5HaNVBaFc1M6dRjWSYnmewUMYy").unwrap();
         check(
-            Bip49(prvkey, KeychainKind::External).build(),
+            Bip49(prvkey, KeychainKind::External).build(Network::Bitcoin),
             true,
             false,
             &[
@@ -633,7 +677,7 @@ mod test {
             ],
         );
         check(
-            Bip49(prvkey, KeychainKind::Internal).build(),
+            Bip49(prvkey, KeychainKind::Internal).build(Network::Bitcoin),
             true,
             false,
             &[
@@ -650,7 +694,7 @@ mod test {
         let pubkey = bitcoin::util::bip32::ExtendedPubKey::from_str("tpubDC49r947KGK52X5rBWS4BLs5m9SRY3pYHnvRrm7HcybZ3BfdEsGFyzCMzayi1u58eT82ZeyFZwH7DD6Q83E3fM9CpfMtmnTygnLfP59jL9L").unwrap();
         let fingerprint = bitcoin::util::bip32::Fingerprint::from_str("c55b303f").unwrap();
         check(
-            Bip49Public(pubkey, fingerprint, KeychainKind::External).build(),
+            Bip49Public(pubkey, fingerprint, KeychainKind::External).build(Network::Bitcoin),
             true,
             false,
             &[
@@ -660,7 +704,7 @@ mod test {
             ],
         );
         check(
-            Bip49Public(pubkey, fingerprint, KeychainKind::Internal).build(),
+            Bip49Public(pubkey, fingerprint, KeychainKind::Internal).build(Network::Bitcoin),
             true,
             false,
             &[
@@ -676,7 +720,7 @@ mod test {
     fn test_bip84_template() {
         let prvkey = bitcoin::util::bip32::ExtendedPrivKey::from_str("tprv8ZgxMBicQKsPcx5nBGsR63Pe8KnRUqmbJNENAfGftF3yuXoMMoVJJcYeUw5eVkm9WBPjWYt6HMWYJNesB5HaNVBaFc1M6dRjWSYnmewUMYy").unwrap();
         check(
-            Bip84(prvkey, KeychainKind::External).build(),
+            Bip84(prvkey, KeychainKind::External).build(Network::Bitcoin),
             true,
             false,
             &[
@@ -686,7 +730,7 @@ mod test {
             ],
         );
         check(
-            Bip84(prvkey, KeychainKind::Internal).build(),
+            Bip84(prvkey, KeychainKind::Internal).build(Network::Bitcoin),
             true,
             false,
             &[
@@ -703,7 +747,7 @@ mod test {
         let pubkey = bitcoin::util::bip32::ExtendedPubKey::from_str("tpubDC2Qwo2TFsaNC4ju8nrUJ9mqVT3eSgdmy1yPqhgkjwmke3PRXutNGRYAUo6RCHTcVQaDR3ohNU9we59brGHuEKPvH1ags2nevW5opEE9Z5Q").unwrap();
         let fingerprint = bitcoin::util::bip32::Fingerprint::from_str("c55b303f").unwrap();
         check(
-            Bip84Public(pubkey, fingerprint, KeychainKind::External).build(),
+            Bip84Public(pubkey, fingerprint, KeychainKind::External).build(Network::Bitcoin),
             true,
             false,
             &[
@@ -713,7 +757,7 @@ mod test {
             ],
         );
         check(
-            Bip84Public(pubkey, fingerprint, KeychainKind::Internal).build(),
+            Bip84Public(pubkey, fingerprint, KeychainKind::Internal).build(Network::Bitcoin),
             true,
             false,
             &[
