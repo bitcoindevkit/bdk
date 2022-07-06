@@ -121,6 +121,13 @@ impl GetTx for AnyBlockchain {
 }
 
 #[maybe_async]
+impl GetBlockHash for AnyBlockchain {
+    fn get_block_hash(&self, height: u64) -> Result<BlockHash, Error> {
+        maybe_await!(impl_inner_method!(self, get_block_hash, height))
+    }
+}
+
+#[maybe_async]
 impl WalletSync for AnyBlockchain {
     fn wallet_sync<D: BatchDatabase>(
         &self,

@@ -1361,6 +1361,35 @@ macro_rules! bdk_blockchain_tests {
                 let finalized = wallet.sign(&mut psbt, Default::default()).unwrap();
                 assert_eq!(finalized, true);
             }
+
+            #[test]
+            fn test_get_block_hash() {
+                use bitcoincore_rpc::{ RpcApi };
+                use crate::blockchain::GetBlockHash;
+
+                // create wallet with init_wallet
+                let (_, blockchain, _descriptors, mut test_client) = init_single_sig();
+
+                let height = test_client.bitcoind.client.get_blockchain_info().unwrap().blocks as u64;
+                let best_hash = test_client.bitcoind.client.get_best_block_hash().unwrap();
+
+                // use get_block_hash to get best block hash and compare with best_hash above
+                let block_hash = blockchain.get_block_hash(height).unwrap();
+                assert_eq!(best_hash, block_hash);
+
+                // generate blocks to address
+                let node_addr = test_client.get_node_address(None);
+                test_client.generate(10, Some(node_addr));
+
+                let height = test_client.bitcoind.client.get_blockchain_info().unwrap().blocks as u64;
+                let best_hash = test_client.bitcoind.client.get_best_block_hash().unwrap();
+
+                let block_hash = blockchain.get_block_hash(height).unwrap();
+                assert_eq!(best_hash, block_hash);
+
+                // try to get hash for block that has not yet been created.
+                assert!(blockchain.get_block_hash(height + 1).is_err());
+            }
         }
     };
 
