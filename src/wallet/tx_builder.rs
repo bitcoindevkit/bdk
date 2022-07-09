@@ -47,8 +47,12 @@ use bitcoin::{OutPoint, Script, Transaction};
 use miniscript::descriptor::DescriptorTrait;
 
 use super::coin_selection::{CoinSelectionAlgorithm, DefaultCoinSelectionAlgorithm};
+use super::spendable_collection::SpendableCollection;
+use super::utils::SecpCtx;
 use crate::descriptor::ExtendedDescriptor;
-use crate::{database::BatchDatabase, Error, Utxo, Wallet};
+use crate::signer::SignersContainer;
+use crate::Wallet;
+use crate::{database::BatchDatabase, Error, Utxo};
 use crate::{
     types::{FeeRate, KeychainKind, LocalUtxo, WeightedUtxo},
     TransactionDetails,
@@ -118,11 +122,18 @@ impl TxBuilderContext for BumpFee {}
 /// [`finish`]: Self::finish
 /// [`coin_selection`]: Self::coin_selection
 #[derive(Debug)]
-pub struct TxBuilder<'a, D, Cs, Ctx> {
-    pub(crate) wallet: &'a Wallet<D>,
+pub struct TxBuilder<'a, D, Sc, Cs, Ctx> {
+    pub(crate) spendable_collection: Sc,
     pub(crate) params: TxParams<'a>,
+    pub(crate) default_block_height: u32,
     pub(crate) coin_selection: Cs,
+    pub(crate) signers: &'a SignersContainer,
+    pub(crate) secp: SecpCtx,
     pub(crate) phantom: PhantomData<Ctx>,
+
+    /// TODO @evanlinjin: We can remove the generic type parameter `D` once we actually
+    /// move the various methods out of [`Wallet`].
+    pub(crate) phantom_database: PhantomData<D>,
 }
 
 /// The parameters for transaction creation sans coin selection algorithm.
@@ -143,7 +154,7 @@ pub(crate) struct TxParams<'a> {
     pub(crate) locktime: Option<u32>,
     pub(crate) rbf: Option<RbfValue>,
     pub(crate) version: Option<Version>,
-    pub(crate) change_policy: ChangeSpendPolicy,
+    pub(crate) change_policy: ChangeSpendPolicy, // when selecting prev_outputs
     pub(crate) only_witness_utxo: bool,
     pub(crate) add_global_xpubs: bool,
     pub(crate) include_output_redeem_witness_script: bool,
@@ -169,20 +180,47 @@ impl std::default::Default for FeePolicy {
     }
 }
 
-impl<'a, Cs: Clone, Ctx, D> Clone for TxBuilder<'a, D, Cs, Ctx> {
+impl<'a, D, Sc: Clone, Cs: Clone, Ctx> Clone for TxBuilder<'a, D, Sc, Cs, Ctx> {
     fn clone(&self) -> Self {
         TxBuilder {
-            wallet: self.wallet,
+            spendable_collection: self.spendable_collection.clone(),
             params: self.params.clone(),
             coin_selection: self.coin_selection.clone(),
+            default_block_height: self.default_block_height,
             phantom: PhantomData,
+            phantom_database: self.phantom_database,
+            signers: self.signers,
+            secp: self.secp.clone(),
+        }
+    }
+}
+
+impl<'a, D: BatchDatabase, Sc: SpendableCollection, Ctx: TxBuilderContext>
+    TxBuilder<'a, D, Sc, DefaultCoinSelectionAlgorithm, Ctx>
+{
+    /// Creates a new [`TxBuilder`]
+    pub fn new(spendables: Sc, signers: &'a SignersContainer, fallback_block_height: u32) -> Self {
+        Self {
+            spendable_collection: spendables,
+            params: TxParams::default(),
+            coin_selection: DefaultCoinSelectionAlgorithm::default(),
+            signers,
+            default_block_height: fallback_block_height,
+            secp: SecpCtx::new(),
+            phantom: core::marker::PhantomData,
+            phantom_database: core::marker::PhantomData,
         }
     }
 }
 
 // methods supported by both contexts, for any CoinSelectionAlgorithm
-impl<'a, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderContext>
-    TxBuilder<'a, D, Cs, Ctx>
+impl<
+        'a,
+        D: BatchDatabase,
+        Sc: SpendableCollection,
+        Cs: CoinSelectionAlgorithm,
+        Ctx: TxBuilderContext,
+    > TxBuilder<'a, D, Sc, Cs, Ctx>
 {
     /// Set a custom fee rate
     pub fn fee_rate(&mut self, fee_rate: FeeRate) -> &mut Self {
@@ -278,16 +316,32 @@ impl<'a, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderContext>
     pub fn add_utxos(&mut self, outpoints: &[OutPoint]) -> Result<&mut Self, Error> {
         let utxos = outpoints
             .iter()
-            .map(|outpoint| self.wallet.get_utxo(*outpoint)?.ok_or(Error::UnknownUtxo))
+            .map(|outpoint| {
+                self.spendable_collection
+                    .get_utxo(outpoint)?
+                    .ok_or(Error::UnknownUtxo)
+            })
             .collect::<Result<Vec<_>, _>>()?;
 
-        for utxo in utxos {
-            let descriptor = self.wallet.get_descriptor_for_keychain(utxo.keychain);
-            let satisfaction_weight = descriptor.max_satisfaction_weight().unwrap();
-            self.params.utxos.push(WeightedUtxo {
-                satisfaction_weight,
-                utxo: Utxo::Local(utxo),
-            });
+        let weighted_utxos = utxos
+            .into_iter()
+            .map(|utxo| {
+                self.spendable_collection
+                    .get_path_of_script_pubkey(&utxo.txout.script_pubkey)?
+                    .map(|(desc, _)| {
+                        let utxo = Utxo::Local(utxo);
+                        let satisfaction_weight = desc.max_satisfaction_weight().unwrap();
+                        WeightedUtxo {
+                            utxo,
+                            satisfaction_weight,
+                        }
+                    })
+                    .ok_or(Error::UnknownUtxo)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        for weighted_utxo in weighted_utxos {
+            self.params.utxos.push(weighted_utxo);
         }
 
         Ok(self)
@@ -505,15 +559,19 @@ impl<'a, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderContext>
     /// Overrides the [`DefaultCoinSelectionAlgorithm`](super::coin_selection::DefaultCoinSelectionAlgorithm).
     ///
     /// Note that this function consumes the builder and returns it so it is usually best to put this as the first call on the builder.
-    pub fn coin_selection<P: CoinSelectionAlgorithm<D>>(
+    pub fn coin_selection<P: CoinSelectionAlgorithm>(
         self,
         coin_selection: P,
-    ) -> TxBuilder<'a, D, P, Ctx> {
+    ) -> TxBuilder<'a, D, Sc, P, Ctx> {
         TxBuilder {
-            wallet: self.wallet,
+            spendable_collection: self.spendable_collection,
             params: self.params,
             coin_selection,
+            default_block_height: self.default_block_height,
             phantom: PhantomData,
+            phantom_database: self.phantom_database,
+            signers: self.signers,
+            secp: self.secp,
         }
     }
 
@@ -523,7 +581,18 @@ impl<'a, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderContext>
     ///
     /// [`BIP174`]: https://github.com/bitcoin/bips/blob/master/bip-0174.mediawiki
     pub fn finish(self) -> Result<(Psbt, TransactionDetails), Error> {
-        self.wallet.create_tx(self.coin_selection, self.params)
+        // self.cache.create_tx(self.coin_selection, self.params)
+
+        // TODO @evalinjin: Get rid of the D. #NoPunIntended
+        Wallet::<D>::_create_tx(
+            &self.spendable_collection,
+            self.coin_selection,
+            self.params,
+            self.default_block_height,
+            self.signers,
+            &self.secp,
+        )
+        // todo!()
     }
 
     /// Enable signaling RBF
@@ -563,7 +632,9 @@ impl<'a, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderContext>
     }
 }
 
-impl<'a, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>> TxBuilder<'a, D, Cs, CreateTx> {
+impl<'a, D: BatchDatabase, Sc: SpendableCollection, Cs: CoinSelectionAlgorithm>
+    TxBuilder<'a, D, Sc, Cs, CreateTx>
+{
     /// Replace the recipients already added with a new list
     pub fn set_recipients(&mut self, recipients: Vec<(Script, u64)>) -> &mut Self {
         self.params.recipients = recipients;
@@ -634,7 +705,9 @@ impl<'a, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>> TxBuilder<'a, D, Cs, C
 }
 
 // methods supported only by bump_fee
-impl<'a, D: BatchDatabase> TxBuilder<'a, D, DefaultCoinSelectionAlgorithm, BumpFee> {
+impl<'a, D: BatchDatabase, Sc: SpendableCollection>
+    TxBuilder<'a, D, Sc, DefaultCoinSelectionAlgorithm, BumpFee>
+{
     /// Explicitly tells the wallet that it is allowed to reduce the amount of the output matching this
     /// `script_pubkey` in order to bump the transaction fee. Without specifying this the wallet
     /// will attempt to find a change output to shrink instead.

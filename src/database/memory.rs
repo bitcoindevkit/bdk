@@ -555,6 +555,7 @@ macro_rules! doctest_wallet {
         use $crate::bitcoin::Network;
         use $crate::database::MemoryDatabase;
         use $crate::testutils;
+
         let descriptor = "wpkh(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW)";
         let descriptors = testutils!(@descriptors (descriptor) (descriptor));
 
@@ -567,13 +568,17 @@ macro_rules! doctest_wallet {
             Some(100),
         );
 
-        $crate::Wallet::new(
+        let wallet = $crate::Wallet::new(
             &descriptors.0,
             descriptors.1.as_ref(),
             Network::Regtest,
             db
         )
-        .unwrap()
+        .unwrap();
+
+        wallet.ensure_addresses_cached(10).unwrap();
+
+        wallet
     }}
 }
 
