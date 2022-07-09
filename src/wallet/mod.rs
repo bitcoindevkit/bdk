@@ -4491,6 +4491,34 @@ pub(crate) mod test {
     }
 
     #[test]
+    fn test_get_address_no_reuse_single_descriptor() {
+        use crate::descriptor::template::Bip84;
+        use std::collections::HashSet;
+
+        let key = bitcoin::util::bip32::ExtendedPrivKey::from_str("tprv8ZgxMBicQKsPcx5nBGsR63Pe8KnRUqmbJNENAfGftF3yuXoMMoVJJcYeUw5eVkm9WBPjWYt6HMWYJNesB5HaNVBaFc1M6dRjWSYnmewUMYy").unwrap();
+        let wallet = Wallet::new(
+            Bip84(key, KeychainKind::External),
+            None,
+            Network::Regtest,
+            MemoryDatabase::default(),
+        )
+        .unwrap();
+
+        let mut used_set = HashSet::new();
+
+        (0..3).for_each(|_| {
+            let external_addr = wallet.get_address(AddressIndex::New).unwrap().address;
+            assert!(used_set.insert(external_addr));
+
+            let internal_addr = wallet
+                .get_internal_address(AddressIndex::New)
+                .unwrap()
+                .address;
+            assert!(used_set.insert(internal_addr));
+        });
+    }
+
+    #[test]
     fn test_taproot_psbt_populate_tap_key_origins() {
         let (wallet, _, _) = get_funded_wallet(get_test_tr_single_sig_xprv());
         let addr = wallet.get_address(AddressIndex::New).unwrap();
