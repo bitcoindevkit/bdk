@@ -802,11 +802,10 @@ where
             required_utxos,
             optional_utxos,
             fee_rate,
-            outgoing,
-            fee_amount,
+            outgoing + fee_amount,
             &drain_script,
         )?;
-        let mut fee_amount = coin_selection.fee_amount;
+        fee_amount += coin_selection.fee_amount;
         let excess = &coin_selection.excess;
 
         tx.input = coin_selection
