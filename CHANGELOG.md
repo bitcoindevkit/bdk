@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fix hang when `ElectrumBlockchainConfig::stop_gap` is zero.
 - Set coin type in BIP44, BIP49, and BIP84 templates
 - Get block hash given a block height - A `get_block_hash` method is now defined on the `GetBlockHash` trait and implemented on every blockchain backend. This method expects a block height and returns the corresponding block hash. 
+- Deprecate `AddressValidator`
 
 ## [v0.19.0] - [v0.18.0]
 

@@ -14,6 +14,7 @@ use std::sync::Arc;
 use bdk::bitcoin;
 use bdk::database::MemoryDatabase;
 use bdk::descriptor::HdKeyPaths;
+#[allow(deprecated)]
 use bdk::wallet::address_validator::{AddressValidator, AddressValidatorError};
 use bdk::KeychainKind;
 use bdk::Wallet;
@@ -25,6 +26,7 @@ use bitcoin::{Network, Script};
 
 #[derive(Debug)]
 struct DummyValidator;
+#[allow(deprecated)]
 impl AddressValidator for DummyValidator {
     fn validate(
         &self,
@@ -50,6 +52,7 @@ fn main() -> Result<(), bdk::Error> {
     let descriptor = "sh(and_v(v:pk(tpubDDpWvmUrPZrhSPmUzCMBHffvC3HyMAPnWDSAQNBTnj1iZeJa7BZQEttFiP4DS4GCcXQHezdXhn86Hj6LHX5EDstXPWrMaSneRWM8yUf6NFd/*),after(630000)))";
     let mut wallet = Wallet::new(descriptor, None, Network::Regtest, MemoryDatabase::new())?;
 
+    #[allow(deprecated)]
     wallet.add_address_validator(Arc::new(DummyValidator));
 
     wallet.get_address(New)?;
