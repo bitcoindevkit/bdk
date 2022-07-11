@@ -21,7 +21,7 @@ use std::ops::Deref;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 
-use bitcoin::{BlockHash, Transaction, Txid};
+use bitcoin::{BlockHash, BlockHeader, Transaction, Txid};
 
 use crate::database::BatchDatabase;
 use crate::error::Error;
@@ -87,7 +87,7 @@ pub enum Capability {
 
 /// Trait that defines the actions that must be supported by a blockchain backend
 #[maybe_async]
-pub trait Blockchain: WalletSync + GetHeight + GetTx + GetBlockHash {
+pub trait Blockchain: WalletSync + GetHeight + GetTx + GetBlockInfo {
     /// Return the set of [`Capability`] supported by this backend
     fn get_capabilities(&self) -> HashSet<Capability>;
     /// Broadcast a transaction
@@ -112,9 +112,11 @@ pub trait GetTx {
 
 #[maybe_async]
 /// Trait for getting block hash by block height
-pub trait GetBlockHash {
+pub trait GetBlockInfo {
     /// fetch block hash given its height
     fn get_block_hash(&self, height: u64) -> Result<BlockHash, Error>;
+    /// fetch block header given its height
+    fn get_block_header(&self, height: u64) -> Result<BlockHeader, Error>;
 }
 
 /// Trait for blockchains that can sync by updating the database directly.
@@ -367,9 +369,12 @@ impl<T: GetHeight> GetHeight for Arc<T> {
 }
 
 #[maybe_async]
-impl<T: GetBlockHash> GetBlockHash for Arc<T> {
+impl<T: GetBlockInfo> GetBlockInfo for Arc<T> {
     fn get_block_hash(&self, height: u64) -> Result<BlockHash, Error> {
         maybe_await!(self.deref().get_block_hash(height))
+    }
+    fn get_block_header(&self, height: u64) -> Result<BlockHeader, Error> {
+        maybe_await!(self.deref().get_block_header(height))
     }
 }
 

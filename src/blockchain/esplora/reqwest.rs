@@ -118,10 +118,14 @@ impl GetTx for EsploraBlockchain {
 }
 
 #[maybe_async]
-impl GetBlockHash for EsploraBlockchain {
+impl GetBlockInfo for EsploraBlockchain {
     fn get_block_hash(&self, height: u64) -> Result<BlockHash, Error> {
         let block_header = await_or_block!(self.url_client._get_header(height as u32))?;
         Ok(block_header.block_hash())
+    }
+    fn get_block_header(&self, height: u64) -> Result<BlockHeader, Error> {
+        let block_header = await_or_block!(self.url_client._get_header(height as u32))?;
+        Ok(block_header)
     }
 }
 

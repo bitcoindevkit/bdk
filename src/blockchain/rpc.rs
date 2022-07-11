@@ -169,9 +169,13 @@ impl GetHeight for RpcBlockchain {
     }
 }
 
-impl GetBlockHash for RpcBlockchain {
+impl GetBlockInfo for RpcBlockchain {
     fn get_block_hash(&self, height: u64) -> Result<BlockHash, Error> {
         Ok(self.client.get_block_hash(height)?)
+    }
+    fn get_block_header(&self, height: u64) -> Result<BlockHeader, Error> {
+        let block_hash = self.client.get_block_hash(height)?;
+        Ok(self.client.get_block_header(&block_hash)?)
     }
 }
 

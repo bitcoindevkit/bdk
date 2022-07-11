@@ -98,10 +98,14 @@ impl GetTx for ElectrumBlockchain {
     }
 }
 
-impl GetBlockHash for ElectrumBlockchain {
+impl GetBlockInfo for ElectrumBlockchain {
     fn get_block_hash(&self, height: u64) -> Result<BlockHash, Error> {
         let block_header = self.client.block_header(height as usize)?;
         Ok(block_header.block_hash())
+    }
+    fn get_block_header(&self, height: u64) -> Result<BlockHeader, Error> {
+        let block_header = self.client.block_header(height as usize)?;
+        Ok(block_header)
     }
 }
 

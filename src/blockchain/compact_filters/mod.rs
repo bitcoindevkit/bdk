@@ -260,13 +260,18 @@ impl GetTx for CompactFiltersBlockchain {
     }
 }
 
-impl GetBlockHash for CompactFiltersBlockchain {
+impl GetBlockInfo for CompactFiltersBlockchain {
     fn get_block_hash(&self, height: u64) -> Result<BlockHash, Error> {
         self.headers
             .get_block_hash(height as usize)?
             .ok_or(Error::CompactFilters(
                 CompactFiltersError::BlockHashNotFound,
             ))
+    }
+    fn get_block_header(&self, height: u64) -> Result<BlockHeader, Error> {
+        self.headers
+            .get_block_header(height as usize)?
+            .ok_or(Error::CompactFilters(CompactFiltersError::InvalidHeaders))
     }
 }
 

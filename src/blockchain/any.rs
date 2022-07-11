@@ -121,9 +121,12 @@ impl GetTx for AnyBlockchain {
 }
 
 #[maybe_async]
-impl GetBlockHash for AnyBlockchain {
+impl GetBlockInfo for AnyBlockchain {
     fn get_block_hash(&self, height: u64) -> Result<BlockHash, Error> {
         maybe_await!(impl_inner_method!(self, get_block_hash, height))
+    }
+    fn get_block_header(&self, height: u64) -> Result<BlockHeader, Error> {
+        maybe_await!(impl_inner_method!(self, get_block_header, height))
     }
 }
 

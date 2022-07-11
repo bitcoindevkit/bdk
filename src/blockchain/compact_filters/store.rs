@@ -436,6 +436,16 @@ impl ChainStore<Full> {
     }
 
     pub fn get_block_hash(&self, height: usize) -> Result<Option<BlockHash>, CompactFiltersError> {
+        match self.get_block_header(height)? {
+            Some(header) => Ok(Some(header.block_hash())),
+            None => Ok(None),
+        }
+    }
+
+    pub fn get_block_header(
+        &self,
+        height: usize,
+    ) -> Result<Option<BlockHeader>, CompactFiltersError> {
         let read_store = self.store.read().unwrap();
         let cf_handle = read_store.cf_handle(&self.cf_name).unwrap();
 
@@ -444,7 +454,7 @@ impl ChainStore<Full> {
         data.map(|data| {
             let (header, _): (BlockHeader, Uint256) =
                 deserialize(&data).map_err(|_| CompactFiltersError::DataCorruption)?;
-            Ok::<_, CompactFiltersError>(header.block_hash())
+            Ok::<_, CompactFiltersError>(header)
         })
         .transpose()
     }

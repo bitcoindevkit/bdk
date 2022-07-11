@@ -1419,7 +1419,7 @@ macro_rules! bdk_blockchain_tests {
             #[test]
             fn test_get_block_hash() {
                 use bitcoincore_rpc::{ RpcApi };
-                use crate::blockchain::GetBlockHash;
+                use crate::blockchain::GetBlockInfo;
 
                 // create wallet with init_wallet
                 let (_, blockchain, _descriptors, mut test_client) = init_single_sig();
