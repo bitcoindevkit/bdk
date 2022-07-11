@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Get block hash given a block height - A `get_block_hash` method is now defined on the `GetBlockHash` trait and implemented on every blockchain backend. This method expects a block height and returns the corresponding block hash. 
 - Add `remove_partial_sigs` and `try_finalize` to `SignOptions`
 - Deprecate `AddressValidator`
+- Fix Electrum wallet sync potentially causing address index decrement - compare proposed index and current index before applying batch operations during sync.
 
 ## [v0.19.0] - [v0.18.0]
 
