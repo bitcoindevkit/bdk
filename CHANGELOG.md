@@ -5,17 +5,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
-
-
-## [v0.20.0] - [v0.19.0]
-
 - New MSRV set to `1.56.1`
 - Fee sniping discouraging through nLockTime - if the user specifies a `current_height`, we use that as a nlocktime, otherwise we use the last sync height (or 0 if we never synced)
 - Fix hang when `ElectrumBlockchainConfig::stop_gap` is zero.
 - Set coin type in BIP44, BIP49, and BIP84 templates
 - Get block hash given a block height - A `get_block_hash` method is now defined on the `GetBlockHash` trait and implemented on every blockchain backend. This method expects a block height and returns the corresponding block hash. 
 - Deprecate `AddressValidator`
-- Add `remove_partial_sigs` and `try_finalize` to `SignOptions`
 
 ## [v0.19.0] - [v0.18.0]
 
@@ -32,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Signing Taproot PSBTs (key spend and script spend)
   - Support for `tr()` descriptors in the `descriptor!()` macro
 - Add support for Bitcoin Core 23.0 when using the `rpc` blockchain
+- Add `remove_partial_sigs` and `try_finalize` to `SignOptions`
 
 ## [v0.18.0] - [v0.17.0]
 
@@ -477,5 +473,4 @@ final transaction is created by calling `finish` on the builder.
 [v0.17.0]: https://github.com/bitcoindevkit/bdk/compare/v0.16.1...v0.17.0
 [v0.18.0]: https://github.com/bitcoindevkit/bdk/compare/v0.17.0...v0.18.0
 [v0.19.0]: https://github.com/bitcoindevkit/bdk/compare/v0.18.0...v0.19.0
-[v0.20.0]: https://github.com/bitcoindevkit/bdk/compare/v0.19.0...v0.20.0
-[unreleased]: https://github.com/bitcoindevkit/bdk/compare/v0.20.0...HEAD
+[unreleased]: https://github.com/bitcoindevkit/bdk/compare/v0.19.0...HEAD
