@@ -736,8 +736,6 @@ where
         let mut outgoing: u64 = 0;
         let mut received: u64 = 0;
 
-        fee_amount += fee_rate.fee_wu(tx.weight());
-
         let recipients = params.recipients.iter().map(|(r, v)| (r, *v));
 
         for (index, (script_pubkey, value)) in recipients.enumerate() {
@@ -753,12 +751,13 @@ where
                 script_pubkey: script_pubkey.clone(),
                 value,
             };
-            fee_amount += fee_rate.fee_vb(serialize(&new_out).len());
 
             tx.output.push(new_out);
 
             outgoing += value;
         }
+
+        fee_amount += fee_rate.fee_wu(tx.weight());
 
         if params.change_policy != tx_builder::ChangeSpendPolicy::ChangeAllowed
             && self.change_descriptor.is_none()
@@ -851,6 +850,9 @@ where
                     script_pubkey: drain_script,
                 };
 
+                // TODO: We should pay attention when adding a new output: this might increase
+                // the lenght of the "number of vouts" parameter by 2 bytes, potentially making
+                // our feerate too low
                 tx.output.push(drain_output);
             }
         };
