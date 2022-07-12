@@ -759,6 +759,17 @@ where
 
         fee_amount += fee_rate.fee_wu(tx.weight());
 
+        // Segwit transactions' header is 2WU larger than legacy txs' header,
+        // as they contain a witness marker (1WU) and a witness flag (1WU) (see BIP144).
+        // At this point we really don't know if the resulting transaction will be segwit
+        // or legacy, so we just add this 2WU to the fee_amount - overshooting the fee amount
+        // is better than undershooting it.
+        // If we pass a fee_amount that is slightly higher than the final fee_amount, we
+        // end up with a transaction with a slightly higher fee rate than the requested one.
+        // If, instead, we undershoot, we may end up with a feerate lower than the requested one
+        // - we might come up with non broadcastable txs!
+        fee_amount += fee_rate.fee_wu(2);
+
         if params.change_policy != tx_builder::ChangeSpendPolicy::ChangeAllowed
             && self.change_descriptor.is_none()
         {
