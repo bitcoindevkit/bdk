@@ -10,6 +10,7 @@ use crate::{
     address_validator::AddressValidator,
     database::{BatchDatabase, DatabaseUtils},
     descriptor::{AsDerived, ExtendedDescriptor},
+    signer::{SignersContainer, TransactionSigner},
     BlockTime, Error, KeychainKind, LocalUtxo, Wallet,
 };
 
@@ -21,11 +22,17 @@ pub trait SpendableCollectionInner {
     /// Iterates though descriptors with associated keychain kind.
     type DescIter: Iterator<Item = (ExtendedDescriptor, KeychainKind)> + ExactSizeIterator;
 
+    /// Iterates though signers.
+    type SignerIter: Iterator<Item = Arc<dyn TransactionSigner>>;
+
     /// Iterates through UTXOs with associated weight.
     type UtxoIter: Iterator<Item = (LocalUtxo, usize)>;
 
     /// Returns an iterator that ranges through all owned descriptors.
     fn iter_descriptors(&self) -> Result<Self::DescIter, Error>;
+
+    /// Returns an iterator that ranges through all owned signers.
+    fn iter_signers(&self) -> Result<Self::SignerIter, Error>;
 
     /// Obtains owned UTXOs alongside their satisfaction weights.
     ///     Warning: It is possible that the returned list contains a UTXO currently used as an
@@ -127,6 +134,7 @@ pub struct SpendableDatabase<'a, D> {
     secp: SecpCtx,
 
     pub(crate) db: &'a RefCell<D>,
+    pub(crate) signers: Vec<Arc<SignersContainer>>, // [external, internal]
     pub(crate) address_validators: Vec<Arc<dyn AddressValidator>>,
 }
 
@@ -138,6 +146,7 @@ impl<'a, D: BatchDatabase> Clone for SpendableDatabase<'a, D> {
             network: self.network,
             secp: self.secp.clone(),
             db: self.db,
+            signers: self.signers.clone(),
             address_validators: self.address_validators.clone(),
         }
     }
@@ -181,6 +190,7 @@ impl<'a, D: BatchDatabase> SpendableDatabase<'a, D> {
         change_descriptor: Option<&'a ExtendedDescriptor>,
         network: Network,
         db: &'a RefCell<D>,
+        signers: Vec<Arc<SignersContainer>>,
         address_validators: Vec<Arc<dyn AddressValidator>>,
     ) -> Self {
         let secp = SecpCtx::new();
@@ -190,6 +200,7 @@ impl<'a, D: BatchDatabase> SpendableDatabase<'a, D> {
             network,
             secp,
             db,
+            signers,
             address_validators,
         }
     }
@@ -198,10 +209,24 @@ impl<'a, D: BatchDatabase> SpendableDatabase<'a, D> {
 impl<'a, D: BatchDatabase> SpendableCollectionInner for SpendableDatabase<'a, D> {
     type DescIter = DatabaseDescIter<'a, D>;
 
+    type SignerIter = std::vec::IntoIter<Arc<dyn TransactionSigner>>;
+
     type UtxoIter = std::vec::IntoIter<(LocalUtxo, usize)>;
 
     fn iter_descriptors(&self) -> Result<Self::DescIter, Error> {
         Ok(DatabaseDescIter::<'_>(self.clone(), 0))
+    }
+
+    fn iter_signers(&self) -> Result<Self::SignerIter, Error> {
+        #[allow(clippy::needless_collect)]
+        let signers = self
+            .signers
+            .iter()
+            .flat_map(|cont| cont.signers())
+            .map(Arc::clone)
+            .collect::<Vec<_>>();
+
+        Ok(signers.into_iter())
     }
 
     /// TODO @evanlinjin:

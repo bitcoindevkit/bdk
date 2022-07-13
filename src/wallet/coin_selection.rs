@@ -648,7 +648,7 @@ mod test {
         desc: &'a ExtendedDescriptor,
         db: &'a RefCell<MemoryDatabase>,
     ) -> SpendableDatabase<'a, MemoryDatabase> {
-        SpendableDatabase::new(desc, None, Network::Regtest, db, Vec::new())
+        SpendableDatabase::new(desc, None, Network::Regtest, db, Vec::new(), Vec::new())
     }
 
     fn utxo(value: u64, index: u32) -> WeightedUtxo {

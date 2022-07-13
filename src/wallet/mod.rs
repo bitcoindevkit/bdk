@@ -66,9 +66,8 @@ use crate::database::{AnyDatabase, BatchDatabase, BatchOperations, DatabaseUtils
 use crate::descriptor::derived::AsDerived;
 use crate::descriptor::policy::BuildSatisfaction;
 use crate::descriptor::{
-    get_checksum, into_wallet_descriptor_checked, DerivedDescriptor, DerivedDescriptorMeta,
-    DescriptorMeta, DescriptorScripts, ExtendedDescriptor, ExtractPolicy, IntoWalletDescriptor,
-    Policy, XKeyUtils,
+    get_checksum, into_wallet_descriptor_checked, DerivedDescriptorMeta, DescriptorMeta,
+    DescriptorScripts, ExtendedDescriptor, ExtractPolicy, IntoWalletDescriptor, Policy, XKeyUtils,
 };
 use crate::error::Error;
 use crate::psbt::PsbtUtils;
@@ -549,11 +548,14 @@ where
     }
 
     fn as_spendable_collection(&self) -> SpendableDatabase<D> {
+        let signers = vec![Arc::clone(&self.signers), Arc::clone(&self.change_signers)];
+
         SpendableDatabase::new(
             &self.descriptor,
             self.change_descriptor.as_ref(),
             self.network,
             &self.database,
+            signers,
             self.address_validators.clone(),
         )
     }
@@ -1124,8 +1126,32 @@ where
         psbt: &mut psbt::PartiallySignedTransaction,
         sign_options: SignOptions,
     ) -> Result<bool, Error> {
+        let spendable_collection = self.as_spendable_collection();
+
+        let fallback_block_height = self
+            .database()
+            .get_sync_time()?
+            .map(|sync_time| sync_time.block_time.height);
+
+        Self::_sign(
+            &spendable_collection,
+            fallback_block_height,
+            &self.secp,
+            psbt,
+            sign_options,
+        )
+    }
+
+    pub(crate) fn _sign<Sc: SpendableCollection>(
+        spendable_collection: &Sc,
+        fallback_block_height: Option<u32>,
+        secp: &SecpCtx,
+        psbt: &mut psbt::PartiallySignedTransaction,
+        sign_options: SignOptions,
+    ) -> Result<bool, Error> {
         // this helps us doing our job later
-        self.add_input_hd_keypaths(psbt)?;
+        Self::_add_input_hd_keypaths(spendable_collection, secp, psbt)?;
+        // self.add_input_hd_keypaths(psbt)?;
 
         // If we aren't allowed to use `witness_utxo`, ensure that every input (except p2tr and finalized ones)
         // has the `non_witness_utxo`
@@ -1153,18 +1179,29 @@ where
             return Err(Error::Signer(signer::SignerError::NonStandardSighash));
         }
 
-        for signer in self
-            .signers
-            .signers()
-            .iter()
-            .chain(self.change_signers.signers().iter())
-        {
-            signer.sign_transaction(psbt, &self.secp)?;
+        for signer in spendable_collection.iter_signers()? {
+            signer.sign_transaction(psbt, secp)?;
         }
+
+        // for signer in self
+        //     .signers
+        //     .signers()
+        //     .iter()
+        //     .chain(self.change_signers.signers().iter())
+        // {
+        //     signer.sign_transaction(psbt, secp)?;
+        // }
 
         // attempt to finalize
         if sign_options.try_finalize {
-            self.finalize_psbt(psbt, sign_options)
+            Self::_finalize_psbt(
+                spendable_collection,
+                fallback_block_height,
+                secp,
+                psbt,
+                sign_options,
+            )
+            // self.finalize_psbt(psbt, sign_options)
         } else {
             Ok(false)
         }
@@ -1210,6 +1247,29 @@ where
         psbt: &mut psbt::PartiallySignedTransaction,
         sign_options: SignOptions,
     ) -> Result<bool, Error> {
+        let spendable_collection = self.as_spendable_collection();
+
+        let fallback_block_height = self
+            .database()
+            .get_sync_time()?
+            .map(|sync_time| sync_time.block_time.height);
+
+        Self::_finalize_psbt(
+            &spendable_collection,
+            fallback_block_height,
+            &self.secp,
+            psbt,
+            sign_options,
+        )
+    }
+
+    pub(crate) fn _finalize_psbt<Sc: SpendableCollection>(
+        spendable_collection: &Sc,
+        fallback_block_height: Option<u32>,
+        secp: &SecpCtx,
+        psbt: &mut psbt::PartiallySignedTransaction,
+        sign_options: SignOptions,
+    ) -> Result<bool, Error> {
         // NOTE @evanlinjin: this is only used in `.sign`
         let tx = &psbt.unsigned_tx;
         let mut finished = true;
@@ -1224,15 +1284,10 @@ where
             }
             // if the height is None in the database it means it's still unconfirmed, so consider
             // that as a very high value
-            let create_height = self
-                .database
-                .borrow()
-                .get_tx(&input.previous_output.txid, false)?
-                .map(|tx| tx.confirmation_time.map(|c| c.height).unwrap_or(u32::MAX));
-            let last_sync_height = self
-                .database()
-                .get_sync_time()?
-                .map(|sync_time| sync_time.block_time.height);
+            let create_height = spendable_collection
+                .get_tx(&input.previous_output.txid)?
+                .map(|(_, bt)| bt.map_or(u32::MAX, |c| c.height));
+            let last_sync_height = fallback_block_height;
             let current_height = sign_options.assume_height.or(last_sync_height);
 
             debug!(
@@ -1246,25 +1301,25 @@ where
             //   is in `src/descriptor/mod.rs`, but it will basically look at `bip32_derivation`,
             //   `redeem_script` and `witness_script` to determine the right derivation
             // - If that also fails, it will try it on the internal descriptor, if present
-            let desc = psbt
+            let derived_desc = psbt
                 .get_utxo_for(n)
-                .map(|txout| self.get_descriptor_for_txout(&txout))
-                .transpose()?
-                .flatten()
-                .or_else(|| {
-                    self.descriptor.derive_from_psbt_input(
-                        psbt_input,
-                        psbt.get_utxo_for(n),
-                        &self.secp,
-                    )
+                .and_then(|txout| {
+                    spendable_collection
+                        .get_path_of_script_pubkey(&txout.script_pubkey)
+                        .expect("spendable collection should not fail")
+                        .map(|(parent_desc, child_ind)| parent_desc.as_derived(child_ind, secp))
                 })
                 .or_else(|| {
-                    self.change_descriptor.as_ref().and_then(|desc| {
-                        desc.derive_from_psbt_input(psbt_input, psbt.get_utxo_for(n), &self.secp)
-                    })
+                    spendable_collection
+                        .iter_descriptors()
+                        .expect("spendable collection should not fail")
+                        .find_map(|(desc, _)| {
+                            let prev_utxo = psbt.get_utxo_for(n);
+                            desc.derive_from_psbt_input(psbt_input, prev_utxo, secp)
+                        })
                 });
 
-            match desc {
+            match derived_desc {
                 Some(desc) => {
                     let mut tmp_input = bitcoin::TxIn::default();
                     match desc.satisfy(
@@ -1320,18 +1375,6 @@ where
             ),
             _ => (&self.descriptor, KeychainKind::External),
         }
-    }
-
-    fn get_descriptor_for_txout(
-        &self,
-        txout: &TxOut,
-    ) -> Result<Option<DerivedDescriptor<'_>>, Error> {
-        Ok(self
-            .database
-            .borrow()
-            .get_path_from_script_pubkey(&txout.script_pubkey)?
-            .map(|(keychain, child)| (self.get_descriptor_for_keychain(keychain), child))
-            .map(|(desc, child)| desc.as_derived(child, &self.secp)))
     }
 
     fn fetch_and_increment_index(&self, keychain: KeychainKind) -> Result<u32, Error> {
@@ -1575,11 +1618,6 @@ where
                 })
                 .map_err(Error::Descriptor)?;
 
-            // let mut all_xpubs = self.descriptor.get_extended_keys()?;
-            // if let Some(change_descriptor) = &self.change_descriptor {
-            //     all_xpubs.extend(change_descriptor.get_extended_keys()?);
-            // }
-
             for xpub in all_xpubs {
                 let origin = match xpub.origin {
                     Some(origin) => origin,
@@ -1655,14 +1693,9 @@ where
         // add metadata for the outputs
         for (psbt_output, tx_output) in psbt.outputs.iter_mut().zip(psbt.unsigned_tx.output.iter())
         {
-            // TODO @evanlinjin
             let path_opt =
                 spendable_collection.get_path_of_script_pubkey(&tx_output.script_pubkey)?;
-            // if let Some((keychain, child)) = self
-            //     .database
-            //     .borrow()
-            //     .get_path_from_script_pubkey(&tx_output.script_pubkey)?
-            // {
+
             if let Some((desc, child)) = path_opt {
                 // let (desc, _) = self._get_descriptor_for_keychain(keychain);
                 let derived_descriptor = desc.as_derived(child, secp);
@@ -1734,11 +1767,6 @@ where
         let (desc, child) = spendable_collection
             .get_path_of_script_pubkey(&utxo.txout.script_pubkey)?
             .ok_or(Error::UnknownUtxo)?;
-        // let (keychain, child) = self
-        //     .database
-        //     .borrow()
-        //     .get_path_from_script_pubkey(&utxo.txout.script_pubkey)?
-        //     .ok_or(Error::UnknownUtxo)?;
 
         let mut psbt_input = psbt::Input {
             sighash_type,
@@ -1784,13 +1812,13 @@ where
         Ok(psbt_input)
     }
 
-    fn add_input_hd_keypaths(
-        &self,
-        psbt: &mut psbt::PartiallySignedTransaction,
-    ) -> Result<(), Error> {
-        let spendable_collection = self.as_spendable_collection();
-        Self::_add_input_hd_keypaths(&spendable_collection, &self.secp, psbt)
-    }
+    // fn add_input_hd_keypaths(
+    //     &self,
+    //     psbt: &mut psbt::PartiallySignedTransaction,
+    // ) -> Result<(), Error> {
+    //     let spendable_collection = self.as_spendable_collection();
+    //     Self::_add_input_hd_keypaths(&spendable_collection, &self.secp, psbt)
+    // }
 
     /// TODO @evanlinjin: Move out of [`Wallet`].
     fn _add_input_hd_keypaths<'a, Sc>(
@@ -1838,42 +1866,6 @@ where
 
                 Ok(())
             })
-
-        // let mut input_utxos = Vec::with_capacity(psbt.inputs.len());
-        // for n in 0..psbt.inputs.len() {
-        //     input_utxos.push(psbt.get_utxo_for(n).clone());
-        // }
-
-        // // try to add hd_keypaths if we've already seen the output
-        // // @evanlinjin: Just some notes for myself:
-        // //  * out: psbt input (UTXO)
-        // for (psbt_input, out) in psbt.inputs.iter_mut().zip(input_utxos.iter()) {
-        //     if let Some(out) = out {
-        //         if let Some((keychain, child)) = self
-        //             .database
-        //             .borrow()
-        //             .get_path_from_script_pubkey(&out.script_pubkey)?
-        //         {
-        //             debug!("Found descriptor {:?}/{}", keychain, child);
-
-        //             // merge hd_keypaths or tap_key_origins
-        //             let desc = self.get_descriptor_for_keychain(keychain);
-        //             if desc.is_taproot() {
-        //                 let mut tap_key_origins = desc
-        //                     .as_derived(child, &self.secp)
-        //                     .get_tap_key_origins(&self.secp);
-        //                 psbt_input.tap_key_origins.append(&mut tap_key_origins);
-        //             } else {
-        //                 let mut hd_keypaths = desc
-        //                     .as_derived(child, &self.secp)
-        //                     .get_hd_keypaths(&self.secp);
-        //                 psbt_input.bip32_derivation.append(&mut hd_keypaths);
-        //             }
-        //         }
-        //     }
-        // }
-
-        // Ok(())
     }
 
     /// Return an immutable reference to the internal database

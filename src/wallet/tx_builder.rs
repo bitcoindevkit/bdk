@@ -581,8 +581,6 @@ impl<
     ///
     /// [`BIP174`]: https://github.com/bitcoin/bips/blob/master/bip-0174.mediawiki
     pub fn finish(self) -> Result<(Psbt, TransactionDetails), Error> {
-        // self.cache.create_tx(self.coin_selection, self.params)
-
         // TODO @evalinjin: Get rid of the D. #NoPunIntended
         Wallet::<D>::_create_tx(
             &self.spendable_collection,
@@ -592,7 +590,6 @@ impl<
             self.signers,
             &self.secp,
         )
-        // todo!()
     }
 
     /// Enable signaling RBF
