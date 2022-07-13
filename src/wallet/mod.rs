@@ -2067,7 +2067,7 @@ pub(crate) mod test {
             .set_sync_time(sync_time)
             .unwrap();
         let current_height = 25;
-        builder.set_current_height(current_height);
+        builder.current_height(current_height);
         let (psbt, _) = builder.finish().unwrap();
 
         // current_height will override the last sync height
@@ -2115,7 +2115,7 @@ pub(crate) mod test {
         let mut builder = wallet.build_tx();
         builder
             .add_recipient(addr.script_pubkey(), 25_000)
-            .set_current_height(630_001)
+            .current_height(630_001)
             .nlocktime(630_000);
         let (psbt, _) = builder.finish().unwrap();
 
@@ -4916,7 +4916,7 @@ pub(crate) mod test {
         let mut builder = wallet.build_tx();
         builder
             .add_recipient(addr.script_pubkey(), balance / 2)
-            .set_current_height(confirmation_time);
+            .current_height(confirmation_time);
         assert!(matches!(
             builder.finish().unwrap_err(),
             Error::InsufficientFunds {
@@ -4929,7 +4929,7 @@ pub(crate) mod test {
         let mut builder = wallet.build_tx();
         builder
             .add_recipient(addr.script_pubkey(), balance / 2)
-            .set_current_height(not_yet_mature_time);
+            .current_height(not_yet_mature_time);
         assert!(matches!(
             builder.finish().unwrap_err(),
             Error::InsufficientFunds {
@@ -4942,7 +4942,7 @@ pub(crate) mod test {
         let mut builder = wallet.build_tx();
         builder
             .add_recipient(addr.script_pubkey(), balance / 2)
-            .set_current_height(maturity_time);
+            .current_height(maturity_time);
         builder.finish().unwrap();
     }
 }

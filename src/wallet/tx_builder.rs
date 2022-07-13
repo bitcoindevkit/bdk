@@ -556,7 +556,7 @@ impl<'a, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderContext>
     ///    add them using [`TxBuilder::add_utxos`].
     ///
     /// In both cases, if you don't provide a current height, we use the last sync height.
-    pub fn set_current_height(&mut self, height: u32) -> &mut Self {
+    pub fn current_height(&mut self, height: u32) -> &mut Self {
         self.params.current_height = Some(height);
         self
     }
