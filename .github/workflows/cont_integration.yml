@@ -104,6 +104,9 @@ jobs:
           - name: esplora
             testprefix: esplora
             features: test-esplora,use-esplora-ureq,verify
+          - name: compact-filters
+            testprefix: blockchain::compact_filters::test
+            features: test-compact-filters
     steps:
       - name: Checkout
         uses: actions/checkout@v2

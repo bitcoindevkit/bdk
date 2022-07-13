@@ -580,3 +580,22 @@ impl From<crate::error::Error> for CompactFiltersError {
         CompactFiltersError::Global(Box::new(err))
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "test-compact-filters")]
+mod test {
+
+    use super::*;
+
+    crate::bdk_blockchain_tests! {
+        fn test_instance(test_client: &TestClient) -> CompactFiltersBlockchain {
+            let bitcoind_port = test_client.bitcoind.params.rpc_socket.port();
+            let num_threads = 2;
+            let mempool = Arc::new(Mempool::default());
+            let peers = (0..num_threads)
+            .map(|_| Peer::connect(format!("localhost:{}", bitcoind_port), Arc::clone(&mempool), Network::Regtest))
+            .collect::<Result<_, _>>().unwrap();
+            CompactFiltersBlockchain::new(peers, "./wallet-filters", Some(0)).unwrap()
+        }
+    }
+}
