@@ -4051,6 +4051,38 @@ pub(crate) mod test {
     }
 
     #[test]
+    fn test_fee_amount_negative_drain_val() {
+        // While building the transaction, bdk would calculate the drain_value
+        // as
+        // current_delta - fee_amount - drain_fee
+        // using saturating_sub, meaning that if the result would end up negative,
+        // it'll remain to zero instead.
+        // This caused a bug in master where we would calculate the wrong fee
+        // for a transaction.
+        // See https://github.com/bitcoindevkit/bdk/issues/660
+        let (wallet, descriptors, _) = get_funded_wallet(get_test_wpkh());
+        let send_to = Address::from_str("tb1ql7w62elx9ucw4pj5lgw4l028hmuw80sndtntxt").unwrap();
+        let fee_rate = FeeRate::from_sat_per_vb(2.01);
+        let incoming_txid = crate::populate_test_db!(
+            wallet.database.borrow_mut(),
+            testutils! (@tx ( (@external descriptors, 0) => 8859 ) (@confirmations 1)),
+            Some(100),
+        );
+
+        let mut builder = wallet.build_tx();
+        builder
+            .add_recipient(send_to.script_pubkey(), 8630)
+            .add_utxo(OutPoint::new(incoming_txid, 0))
+            .unwrap()
+            .enable_rbf()
+            .fee_rate(fee_rate);
+        let (psbt, details) = builder.finish().unwrap();
+
+        assert!(psbt.inputs.len() == 1);
+        assert_fee_rate!(psbt, details.fee.unwrap_or(0), fee_rate, @add_signature);
+    }
+
+    #[test]
     fn test_sign_single_xprv() {
         let (wallet, _, _) = get_funded_wallet("wpkh(tprv8ZgxMBicQKsPd3EupYiPRhaMooHKUHJxNsTfYuScep13go8QFfHdtkG9nRkFGb7busX4isf6X9dURGCoKgitaApQ6MupRhZMcELAxTBRJgS/*)");
         let addr = wallet.get_address(New).unwrap();
