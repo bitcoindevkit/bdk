@@ -51,6 +51,7 @@ use super::spendable_collection::SpendableCollection;
 use super::utils::SecpCtx;
 use crate::descriptor::ExtendedDescriptor;
 use crate::signer::SignersContainer;
+use crate::SignOptions;
 use crate::Wallet;
 use crate::{database::BatchDatabase, Error, Utxo};
 use crate::{
@@ -592,6 +593,31 @@ impl<
         )
     }
 
+    /// Finishes and signs the transaction.
+    pub fn finish_and_sign(self, sign_options: SignOptions) -> Result<SignedResult, Error> {
+        let (mut psbt, details) = Wallet::<D>::_create_tx(
+            &self.spendable_collection,
+            self.coin_selection,
+            self.params,
+            self.default_block_height,
+            self.signers,
+            &self.secp,
+        )?;
+        let is_finalized = Wallet::<D>::_sign(
+            &self.spendable_collection,
+            None,
+            &self.secp,
+            &mut psbt,
+            sign_options,
+        )?;
+
+        Ok(SignedResult {
+            psbt,
+            details,
+            is_finalized,
+        })
+    }
+
     /// Enable signaling RBF
     ///
     /// This will use the default nSequence value of `0xFFFFFFFD`.
@@ -733,6 +759,17 @@ impl<'a, D: BatchDatabase, Sc: SpendableCollection>
             ))),
         }
     }
+}
+
+/// Represents a signed result
+#[derive(Debug, Clone)]
+pub struct SignedResult {
+    /// The generated (and signed) PSBT
+    pub psbt: Psbt,
+    /// Additional transaction details
+    pub details: TransactionDetails,
+    /// Whether transaction is finalized
+    pub is_finalized: bool,
 }
 
 /// Ordering of the transaction's inputs and outputs
