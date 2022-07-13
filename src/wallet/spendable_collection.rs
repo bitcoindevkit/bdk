@@ -1,7 +1,7 @@
 ///! SpendableCollection
 ///
 /// This module defines the [`SpendableCollection`] trait.
-use std::{cell::RefCell, sync::Arc};
+use std::{cell::RefCell, collections::HashMap, sync::Arc};
 
 use bitcoin::{Network, OutPoint, Script, Transaction, TxOut, Txid};
 use miniscript::DescriptorTrait;
@@ -16,11 +16,33 @@ use crate::{
 
 use super::{utils::SecpCtx, AddressInfo};
 
+/// Contains a descriptor and associated data
+#[derive(Debug, Clone)]
+pub struct DescriptorItem {
+    /// Wallet descriptor
+    pub descriptor: ExtendedDescriptor,
+    /// Keychain kind of descriptor - external/internal
+    pub keychain: KeychainKind,
+    /// Signers of descriptor
+    pub signers: Arc<SignersContainer>,
+}
+
+/// Contains a transaction and it's associated data
+#[derive(Debug, Clone)]
+pub struct TransactionItem {
+    /// Raw transaction
+    pub raw: Transaction,
+    /// Confirmed time (if any) of the transaction
+    pub confirmed: Option<BlockTime>,
+    /// Fees of the transaction (if avaliable)
+    pub fees: Option<u64>,
+}
+
 /// Contains the "required" methods of [`SpendableCollection`], where all other methods could be
 /// deried from (albiet probably not in an optimised manner).
 pub trait SpendableCollectionInner {
     /// Iterates though descriptors with associated keychain kind.
-    type DescIter: Iterator<Item = (ExtendedDescriptor, KeychainKind)> + ExactSizeIterator;
+    type DescIter: Iterator<Item = DescriptorItem> + ExactSizeIterator;
 
     /// Iterates though signers.
     type SignerIter: Iterator<Item = Arc<dyn TransactionSigner>>;
@@ -47,7 +69,7 @@ pub trait SpendableCollectionInner {
     /// confirm this).
     ///
     /// TODO @evanlinjin: Maybe this should be in it's own trait?
-    fn get_tx(&self, txid: &Txid) -> Result<Option<(Transaction, Option<BlockTime>)>, Error>;
+    fn get_tx(&self, txid: &Txid) -> Result<Option<TransactionItem>, Error>;
 
     /// Returns a fresh/unused address derived from given descriptor. This is currently used for
     /// obtaining a change/drain address.
@@ -63,19 +85,17 @@ pub trait SpendableCollection: SpendableCollectionInner {
     fn get_path_of_script_pubkey(
         &self,
         script: &Script,
-    ) -> Result<Option<(ExtendedDescriptor, u32)>, Error> {
-        let descriptors = self
-            .iter_descriptors()?
-            .map(|(desc, _)| desc)
-            .collect::<Vec<_>>();
+    ) -> Result<Option<(DescriptorItem, u32)>, Error> {
+        let descriptors = self.iter_descriptors()?.collect::<Vec<_>>();
 
         let secp = SecpCtx::new();
 
         for index in 0..2100_u32 {
-            for desc in &descriptors {
+            for item in &descriptors {
+                let desc = item.descriptor.clone();
                 let derived_script = desc.as_derived(index, &secp).script_pubkey();
                 if script == &derived_script {
-                    return Ok(Some((desc.clone(), index)));
+                    return Ok(Some((item.clone(), index)));
                 }
             }
         }
@@ -95,6 +115,21 @@ pub trait SpendableCollection: SpendableCollectionInner {
         }))
     }
 
+    /// Obtain output of the provided outpoint.
+    /// Output may not be owned by us, just be part of a transaction that we are keeping track of.
+    fn get_output(&self, outpoint: &OutPoint) -> Result<Option<TxOut>, Error> {
+        self.get_tx(&outpoint.txid)?.map_or_else(
+            || Err(Error::InvalidOutpoint(*outpoint)),
+            |tx_item| {
+                Ok(tx_item
+                    .raw
+                    .output
+                    .get(outpoint.vout as usize)
+                    .map(Clone::clone))
+            },
+        )
+    }
+
     /// Returns whether given script is owned by us, or not.
     fn is_mine(&self, script: &Script) -> Result<bool, Error> {
         self.get_path_of_script_pubkey(script)
@@ -106,23 +141,15 @@ pub trait SpendableCollection: SpendableCollectionInner {
     fn new_auto_address(&self) -> Result<AddressInfo, Error> {
         let (mut internal, mut external): (Vec<_>, Vec<_>) = self
             .iter_descriptors()?
-            .partition(|(_, kc)| kc == &KeychainKind::Internal);
+            .partition(|item| item.keychain == KeychainKind::Internal);
 
         internal.append(&mut external);
 
-        let (desc, _) = internal.iter().chain(external.iter()).next().unwrap();
+        let item = internal.iter().chain(external.iter()).next().unwrap();
 
         #[allow(deprecated)]
-        self.new_address(desc)
+        self.new_address(&item.descriptor)
     }
-}
-
-/// Addons to [`SpendableCollection`] to allow for usage with fee-bump logic.
-///
-/// TODO @evanlinjin: decouple fee-bump logic from Wallet.
-pub trait FeeBumpCollection: SpendableCollection {
-    /// Previous output may be from a confirmed transaction.
-    fn get_previous_output(&self, outpoint: &OutPoint) -> Result<Option<TxOut>, Error>;
 }
 
 /// Implements [`SpendableCollection`] with one external descriptor and an optional internal descriptor.
@@ -156,17 +183,22 @@ impl<'a, D: BatchDatabase> Clone for SpendableDatabase<'a, D> {
 pub struct DatabaseDescIter<'a, D>(SpendableDatabase<'a, D>, usize);
 
 impl<'a, D> Iterator for DatabaseDescIter<'a, D> {
-    type Item = (ExtendedDescriptor, KeychainKind);
+    type Item = DescriptorItem;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.1 += 1;
 
         match self.1 {
-            1 => Some((self.0.descriptor.clone(), KeychainKind::External)),
-            2 => self
-                .0
-                .change_descriptor
-                .map(|change_desc| (change_desc.clone(), KeychainKind::Internal)),
+            1 => Some(DescriptorItem {
+                descriptor: self.0.descriptor.clone(),
+                keychain: KeychainKind::External,
+                signers: Arc::clone(&self.0.signers[0]),
+            }),
+            2 => self.0.change_descriptor.map(|change_desc| DescriptorItem {
+                descriptor: change_desc.clone(),
+                keychain: KeychainKind::Internal,
+                signers: Arc::clone(&self.0.signers[1]),
+            }),
             _ => None,
         }
     }
@@ -249,11 +281,11 @@ impl<'a, D: BatchDatabase> SpendableCollectionInner for SpendableDatabase<'a, D>
             .into_iter()
             .filter(|utxo| !utxo.is_spent)
             .filter_map(|utxo| {
-                let (parent_desc, _) = self
+                let (item, _) = self
                     // @evanlinjin: Will panic with default implementation on timeout.
                     .get_path_of_script_pubkey(&utxo.txout.script_pubkey)
                     .unwrap()?;
-                let weight = parent_desc.max_satisfaction_weight().unwrap();
+                let weight = item.descriptor.max_satisfaction_weight().unwrap();
                 Some((utxo, weight))
             })
             .collect::<Vec<_>>();
@@ -261,13 +293,16 @@ impl<'a, D: BatchDatabase> SpendableCollectionInner for SpendableDatabase<'a, D>
         Ok(utxos.into_iter())
     }
 
-    fn get_tx(&self, txid: &Txid) -> Result<Option<(Transaction, Option<BlockTime>)>, Error> {
-        Ok(self.db.borrow().get_tx(txid, true)?.map(|tx_details| {
-            (
-                tx_details.transaction.unwrap(),
-                tx_details.confirmation_time,
-            )
-        }))
+    fn get_tx(&self, txid: &Txid) -> Result<Option<TransactionItem>, Error> {
+        Ok(self
+            .db
+            .borrow()
+            .get_tx(txid, true)?
+            .map(|details| TransactionItem {
+                raw: details.transaction.unwrap(),
+                confirmed: details.confirmation_time,
+                fees: details.fee,
+            }))
     }
 
     fn new_address(&self, desc: &ExtendedDescriptor) -> Result<AddressInfo, Error> {
@@ -298,7 +333,14 @@ impl<'a, D: BatchDatabase> SpendableCollection for SpendableDatabase<'a, D> {
     fn get_path_of_script_pubkey(
         &self,
         script: &Script,
-    ) -> Result<Option<(ExtendedDescriptor, u32)>, Error> {
+    ) -> Result<Option<(DescriptorItem, u32)>, Error> {
+        // TODO: Add as struct field
+        let desc_map = self
+            .iter_descriptors()?
+            .map(|desc| (desc.descriptor.to_string(), desc))
+            .collect::<HashMap<_, _>>();
+
+        // check internal cache for relation
         let cached_res =
             self.db
                 .borrow()
@@ -308,39 +350,30 @@ impl<'a, D: BatchDatabase> SpendableCollection for SpendableDatabase<'a, D> {
                         KeychainKind::External => self.descriptor,
                         KeychainKind::Internal => self.change_descriptor.unwrap(),
                     };
-
-                    (desc.clone(), child_ind)
+                    let item = desc_map.get(&desc.to_string()).unwrap();
+                    (item.clone(), child_ind)
                 });
 
         if cached_res.is_some() {
             return Ok(cached_res);
         }
 
-        // // try brute-force method...
-        let last_ext = self
-            .db
-            .borrow()
-            .get_last_index(KeychainKind::External)?
-            .unwrap_or(0_u32);
-        let last_int = self
-            .db
-            .borrow()
-            .get_last_index(KeychainKind::Internal)?
-            .unwrap_or(0_u32);
+        // try brute-force method
+        let db = self.db.borrow();
+        let last_ext = db.get_last_index(KeychainKind::External)?.unwrap_or(0_u32);
+        let last_int = db.get_last_index(KeychainKind::Internal)?.unwrap_or(0_u32);
         let start = std::cmp::min(last_ext, last_int);
 
-        let descriptors = self
-            .iter_descriptors()?
-            .map(|(desc, _)| desc)
-            .collect::<Vec<_>>();
-
-        let secp = SecpCtx::new();
+        let descriptors = self.iter_descriptors()?.collect::<Vec<_>>();
 
         for index in start..start + 2100_u32 {
-            for desc in &descriptors {
-                let derived_script = desc.as_derived(index, &secp).script_pubkey();
+            for item in &descriptors {
+                let derived_script = item
+                    .descriptor
+                    .as_derived(index, &self.secp)
+                    .script_pubkey();
                 if script == &derived_script {
-                    return Ok(Some((desc.clone(), index)));
+                    return Ok(Some((item.clone(), index)));
                 }
             }
         }

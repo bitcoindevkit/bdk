@@ -42,15 +42,14 @@ use std::default::Default;
 use std::marker::PhantomData;
 
 use bitcoin::util::psbt::{self, PartiallySignedTransaction as Psbt};
+use bitcoin::Txid;
 use bitcoin::{OutPoint, Script, Transaction};
-
-use miniscript::descriptor::DescriptorTrait;
+use miniscript::DescriptorTrait;
 
 use super::coin_selection::{CoinSelectionAlgorithm, DefaultCoinSelectionAlgorithm};
 use super::spendable_collection::SpendableCollection;
 use super::utils::SecpCtx;
 use crate::descriptor::ExtendedDescriptor;
-use crate::signer::SignersContainer;
 use crate::SignOptions;
 use crate::Wallet;
 use crate::{database::BatchDatabase, Error, Utxo};
@@ -126,9 +125,8 @@ impl TxBuilderContext for BumpFee {}
 pub struct TxBuilder<'a, D, Sc, Cs, Ctx> {
     pub(crate) spendable_collection: Sc,
     pub(crate) params: TxParams<'a>,
-    pub(crate) default_block_height: u32,
+    pub(crate) fallback_height: u32,
     pub(crate) coin_selection: Cs,
-    pub(crate) signers: &'a SignersContainer,
     pub(crate) secp: SecpCtx,
     pub(crate) phantom: PhantomData<Ctx>,
 
@@ -187,10 +185,9 @@ impl<'a, D, Sc: Clone, Cs: Clone, Ctx> Clone for TxBuilder<'a, D, Sc, Cs, Ctx> {
             spendable_collection: self.spendable_collection.clone(),
             params: self.params.clone(),
             coin_selection: self.coin_selection.clone(),
-            default_block_height: self.default_block_height,
+            fallback_height: self.fallback_height,
             phantom: PhantomData,
             phantom_database: self.phantom_database,
-            signers: self.signers,
             secp: self.secp.clone(),
         }
     }
@@ -200,13 +197,12 @@ impl<'a, D: BatchDatabase, Sc: SpendableCollection, Ctx: TxBuilderContext>
     TxBuilder<'a, D, Sc, DefaultCoinSelectionAlgorithm, Ctx>
 {
     /// Creates a new [`TxBuilder`]
-    pub fn new(spendables: Sc, signers: &'a SignersContainer, fallback_block_height: u32) -> Self {
+    pub fn new(spendables: Sc, fallback_block_height: u32) -> Self {
         Self {
             spendable_collection: spendables,
             params: TxParams::default(),
             coin_selection: DefaultCoinSelectionAlgorithm::default(),
-            signers,
-            default_block_height: fallback_block_height,
+            fallback_height: fallback_block_height,
             secp: SecpCtx::new(),
             phantom: core::marker::PhantomData,
             phantom_database: core::marker::PhantomData,
@@ -329,9 +325,10 @@ impl<
             .map(|utxo| {
                 self.spendable_collection
                     .get_path_of_script_pubkey(&utxo.txout.script_pubkey)?
-                    .map(|(desc, _)| {
+                    .map(|(item, _)| {
                         let utxo = Utxo::Local(utxo);
-                        let satisfaction_weight = desc.max_satisfaction_weight().unwrap();
+                        let satisfaction_weight =
+                            item.descriptor.max_satisfaction_weight().unwrap();
                         WeightedUtxo {
                             utxo,
                             satisfaction_weight,
@@ -568,10 +565,9 @@ impl<
             spendable_collection: self.spendable_collection,
             params: self.params,
             coin_selection,
-            default_block_height: self.default_block_height,
+            fallback_height: self.fallback_height,
             phantom: PhantomData,
             phantom_database: self.phantom_database,
-            signers: self.signers,
             secp: self.secp,
         }
     }
@@ -587,8 +583,7 @@ impl<
             &self.spendable_collection,
             self.coin_selection,
             self.params,
-            self.default_block_height,
-            self.signers,
+            self.fallback_height,
             &self.secp,
         )
     }
@@ -599,8 +594,7 @@ impl<
             &self.spendable_collection,
             self.coin_selection,
             self.params,
-            self.default_block_height,
-            self.signers,
+            self.fallback_height,
             &self.secp,
         )?;
         let is_finalized = Wallet::<D>::_sign(
@@ -731,6 +725,11 @@ impl<'a, D: BatchDatabase, Sc: SpendableCollection, Cs: CoinSelectionAlgorithm>
 impl<'a, D: BatchDatabase, Sc: SpendableCollection>
     TxBuilder<'a, D, Sc, DefaultCoinSelectionAlgorithm, BumpFee>
 {
+    /// New transaction builder for fee bump.
+    pub fn new_fee_bump(spendables: Sc, txid: Txid, fallback_height: u32) -> Result<Self, Error> {
+        Wallet::<D>::_build_fee_bump(spendables, SecpCtx::new(), fallback_height, txid)
+    }
+
     /// Explicitly tells the wallet that it is allowed to reduce the amount of the output matching this
     /// `script_pubkey` in order to bump the transaction fee. Without specifying this the wallet
     /// will attempt to find a change output to shrink instead.

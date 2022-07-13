@@ -75,6 +75,7 @@ use crate::signer::SignerError;
 use crate::testutils;
 use crate::types::*;
 
+use self::spendable_collection::TransactionItem;
 pub use self::spendable_collection::{SpendableCollection, SpendableDatabase};
 
 const CACHE_ADDR_BATCH_SIZE: u32 = 100;
@@ -599,14 +600,13 @@ where
     ) -> TxBuilder<'_, D, SpendableDatabase<D>, DefaultCoinSelectionAlgorithm, CreateTx> {
         // Get default block height to set as nLockTime (we try to prevent fee sniping).
         // However, if we do not know the block height, we default to 0.
-        let default_block_height = self.get_current_known_block_height().unwrap_or(0_u32);
+        let fallback_height = self.get_current_known_block_height().unwrap_or(0_u32);
 
         TxBuilder {
             spendable_collection: self.as_spendable_collection(),
             params: TxParams::default(),
-            default_block_height,
+            fallback_height,
             coin_selection: DefaultCoinSelectionAlgorithm::default(),
-            signers: &self.signers,
             secp: self.secp.clone(),
             phantom: core::marker::PhantomData,
             phantom_database: core::marker::PhantomData,
@@ -620,40 +620,40 @@ where
         coin_selection: Cs,
         params: TxParams,
         fallback_block_height: u32,
-        signers: &SignersContainer,
         secp: &SecpCtx,
     ) -> Result<(psbt::PartiallySignedTransaction, TransactionDetails), Error>
     where
         Sc: SpendableCollection,
         Cs: coin_selection::CoinSelectionAlgorithm,
     {
-        let conditions = spendable_collection
-            .iter_descriptors()?
-            .map(|(desc, keychain)| {
-                let policy = desc
-                    .extract_policy(signers, BuildSatisfaction::None, secp)?
-                    .unwrap();
-                let policy_path = params.descriptor_policy_paths.get(&desc);
+        let conditions = spendable_collection.iter_descriptors()?.map(|item| {
+            let policy = item
+                .descriptor
+                .extract_policy(&item.signers, BuildSatisfaction::None, secp)?
+                .unwrap();
+            let policy_path = params.descriptor_policy_paths.get(&item.descriptor);
 
-                // are we permitted to spend inputs?
-                let is_permitted = match keychain {
-                    KeychainKind::External => {
-                        params.change_policy != tx_builder::ChangeSpendPolicy::OnlyChange
-                    }
-                    KeychainKind::Internal => {
-                        params.change_policy != tx_builder::ChangeSpendPolicy::ChangeForbidden
-                    }
-                };
-
-                // if permitted, ensure policy path requirements are satisfied
-                if is_permitted && policy.requires_path() && policy_path.is_none() {
-                    Err(Error::SpendingPolicyRequired(Box::new(desc.clone())))
-                } else {
-                    policy
-                        .get_condition(policy_path.unwrap_or(&BTreeMap::new()))
-                        .map_err(Error::InvalidPolicyPathError)
+            // are we permitted to spend inputs?
+            let is_permitted = match item.keychain {
+                KeychainKind::External => {
+                    params.change_policy != tx_builder::ChangeSpendPolicy::OnlyChange
                 }
-            });
+                KeychainKind::Internal => {
+                    params.change_policy != tx_builder::ChangeSpendPolicy::ChangeForbidden
+                }
+            };
+
+            // if permitted, ensure policy path requirements are satisfied
+            if is_permitted && policy.requires_path() && policy_path.is_none() {
+                Err(Error::SpendingPolicyRequired(Box::new(
+                    item.descriptor.clone(),
+                )))
+            } else {
+                policy
+                    .get_condition(policy_path.unwrap_or(&BTreeMap::new()))
+                    .map_err(Error::InvalidPolicyPathError)
+            }
+        });
 
         let requirements = conditions
             .reduce(|acc_res, cond_res| match (acc_res, cond_res) {
@@ -818,7 +818,7 @@ where
         if params.change_policy == tx_builder::ChangeSpendPolicy::OnlyChange {
             let has_internal = spendable_collection
                 .iter_descriptors()?
-                .any(|(_, kc)| kc == KeychainKind::Internal);
+                .any(|item| item.keychain == KeychainKind::Internal);
 
             if !has_internal {
                 return Err(Error::Generic(
@@ -981,46 +981,54 @@ where
         txid: Txid,
     ) -> Result<TxBuilder<'_, D, SpendableDatabase<D>, DefaultCoinSelectionAlgorithm, BumpFee>, Error>
     {
-        let mut details = match self.database.borrow().get_tx(&txid, true)? {
+        let spendable_collection = self.as_spendable_collection();
+        let fallback_height = self.get_current_known_block_height().unwrap_or(0_u32);
+
+        Self::_build_fee_bump(
+            spendable_collection,
+            self.secp.clone(),
+            fallback_height,
+            txid,
+        )
+    }
+
+    pub(crate) fn _build_fee_bump<'a, Sc: SpendableCollection>(
+        spendable_collection: Sc,
+        secp: SecpCtx,
+        fallback_height: u32,
+        txid: Txid,
+    ) -> Result<TxBuilder<'a, D, Sc, DefaultCoinSelectionAlgorithm, BumpFee>, Error> {
+        let (mut tx, tx_fee) = match spendable_collection.get_tx(&txid)? {
             None => return Err(Error::TransactionNotFound),
-            Some(tx) if tx.transaction.is_none() => return Err(Error::TransactionNotFound),
-            Some(tx) if tx.confirmation_time.is_some() => return Err(Error::TransactionConfirmed),
-            Some(tx) => tx,
+            Some(TransactionItem {
+                confirmed: Some(_), ..
+            }) => return Err(Error::TransactionConfirmed),
+            Some(TransactionItem { fees: None, .. }) => return Err(Error::FeeRateUnavailable),
+            Some(tx) => (tx.raw, tx.fees.unwrap()),
         };
-        let mut tx = details.transaction.take().unwrap();
+
+        // let mut tx = details.transaction.take().unwrap();
         if !tx.input.iter().any(|txin| txin.sequence <= 0xFFFFFFFD) {
             return Err(Error::IrreplaceableTransaction);
         }
 
-        let feerate = FeeRate::from_wu(details.fee.ok_or(Error::FeeRateUnavailable)?, tx.weight());
+        let feerate = FeeRate::from_wu(tx_fee, tx.weight());
 
         // remove the inputs from the tx and process them
         let original_txin = tx.input.drain(..).collect::<Vec<_>>();
         let original_utxos = original_txin
             .iter()
             .map(|txin| -> Result<_, Error> {
-                let txout = self
-                    .database
-                    .borrow()
-                    .get_previous_output(&txin.previous_output)?
+                let txout = spendable_collection
+                    .get_output(&txin.previous_output)?
                     .ok_or(Error::UnknownUtxo)?;
 
-                // TODO @evanlinjin: Remove requirement of &self -> TxbuilderCache
-                //  Option(root_desc, child_index) <- txout.script_pubkey
-                //      Some => (root_desc.max_satisfaction_weight(), keychain_kind(root_desc))
-                //      None => (ser_len(txin.script_sig) * 4 + ser_len(txin.witness), external_keychain)
-                let (weight, keychain) = match self
-                    .database
-                    .borrow()
-                    .get_path_from_script_pubkey(&txout.script_pubkey)?
-                {
-                    Some((keychain, _)) => (
-                        self._get_descriptor_for_keychain(keychain)
-                            .0
-                            .max_satisfaction_weight()
-                            .unwrap(),
-                        keychain,
-                    ),
+                let path = spendable_collection.get_path_of_script_pubkey(&txout.script_pubkey)?;
+                let (weight, keychain) = match path {
+                    Some((item, _)) => {
+                        let weight = item.descriptor.max_satisfaction_weight().unwrap();
+                        (weight, item.keychain)
+                    }
                     None => {
                         // estimate the weight based on the scriptsig/witness size present in the
                         // original transaction
@@ -1044,21 +1052,19 @@ where
             })
             .collect::<Result<Vec<_>, _>>()?;
 
+        // Find change index
+        // TODO @evanlinjin: Should we prioritize larger inputs so we have more wriggle room?
         if tx.output.len() > 1 {
             let mut change_index = None;
-            for (index, txout) in tx.output.iter().enumerate() {
-                // TODO @evanlinjin:
-                // if has_explicit_change_descriptor() => change_type = External
-                // else                                => change_type = Internal
-                let (_, change_type) = self._get_descriptor_for_keychain(KeychainKind::Internal);
 
-                match self
-                    .database
-                    .borrow()
-                    .get_path_from_script_pubkey(&txout.script_pubkey)?
-                {
-                    Some((keychain, _)) if keychain == change_type => change_index = Some(index),
-                    _ => {}
+            for (index, txout) in tx.output.iter().enumerate() {
+                let path = spendable_collection.get_path_of_script_pubkey(&txout.script_pubkey)?;
+
+                if let Some((item, _)) = path {
+                    // Prioritize internal inputs
+                    if change_index.is_none() || item.keychain == KeychainKind::Internal {
+                        change_index = Some(index);
+                    }
                 }
             }
 
@@ -1077,21 +1083,20 @@ where
                 .collect(),
             utxos: original_utxos,
             bumping_fee: Some(tx_builder::PreviousFee {
-                absolute: details.fee.ok_or(Error::FeeRateUnavailable)?,
+                absolute: tx_fee,
                 rate: feerate.as_sat_vb(),
             }),
             ..Default::default()
         };
 
         Ok(TxBuilder {
-            spendable_collection: self.as_spendable_collection(),
+            spendable_collection,
             params,
             coin_selection: DefaultCoinSelectionAlgorithm::default(),
             phantom: core::marker::PhantomData,
             phantom_database: core::marker::PhantomData,
-            default_block_height: 0, // TODO
-            signers: &self.signers,
-            secp: self.secp.clone(),
+            fallback_height,
+            secp,
         })
     }
 
@@ -1183,15 +1188,6 @@ where
             signer.sign_transaction(psbt, secp)?;
         }
 
-        // for signer in self
-        //     .signers
-        //     .signers()
-        //     .iter()
-        //     .chain(self.change_signers.signers().iter())
-        // {
-        //     signer.sign_transaction(psbt, secp)?;
-        // }
-
         // attempt to finalize
         if sign_options.try_finalize {
             Self::_finalize_psbt(
@@ -1201,7 +1197,6 @@ where
                 psbt,
                 sign_options,
             )
-            // self.finalize_psbt(psbt, sign_options)
         } else {
             Ok(false)
         }
@@ -1270,7 +1265,6 @@ where
         psbt: &mut psbt::PartiallySignedTransaction,
         sign_options: SignOptions,
     ) -> Result<bool, Error> {
-        // NOTE @evanlinjin: this is only used in `.sign`
         let tx = &psbt.unsigned_tx;
         let mut finished = true;
 
@@ -1286,7 +1280,7 @@ where
             // that as a very high value
             let create_height = spendable_collection
                 .get_tx(&input.previous_output.txid)?
-                .map(|(_, bt)| bt.map_or(u32::MAX, |c| c.height));
+                .map(|tx| tx.confirmed.map_or(u32::MAX, |c| c.height));
             let last_sync_height = fallback_block_height;
             let current_height = sign_options.assume_height.or(last_sync_height);
 
@@ -1307,15 +1301,18 @@ where
                     spendable_collection
                         .get_path_of_script_pubkey(&txout.script_pubkey)
                         .expect("spendable collection should not fail")
-                        .map(|(parent_desc, child_ind)| parent_desc.as_derived(child_ind, secp))
+                        .map(|(parent_item, child_ind)| {
+                            parent_item.descriptor.as_derived(child_ind, secp)
+                        })
                 })
                 .or_else(|| {
                     spendable_collection
                         .iter_descriptors()
                         .expect("spendable collection should not fail")
-                        .find_map(|(desc, _)| {
+                        .find_map(|item| {
                             let prev_utxo = psbt.get_utxo_for(n);
-                            desc.derive_from_psbt_input(psbt_input, prev_utxo, secp)
+                            item.descriptor
+                                .derive_from_psbt_input(psbt_input, prev_utxo, secp)
                         })
                 });
 
@@ -1548,15 +1545,15 @@ where
                         // so we can't know for sure if it's mature or not.
                         // We prefer not to spend it.
                         None => false,
-                        Some((tx, block_time)) => {
+                        Some(tx) => {
                             // Whether the UTXO is mature and, if needed, confirmed
                             let mut spendable = true;
-                            if must_only_use_confirmed_tx && block_time.is_none() {
+                            if must_only_use_confirmed_tx && tx.confirmed.is_none() {
                                 return false;
                             }
-                            if tx.is_coin_base() {
+                            if tx.raw.is_coin_base() {
                                 if let Some(current_height) = current_height {
-                                    match &block_time {
+                                    match &tx.confirmed {
                                         Some(t) => {
                                             // https://github.com/bitcoin/bitcoin/blob/c5e67be03bb06a5d7885c55db1f016fbf2333fe3/src/validation.cpp#L373-L375
                                             spendable &= (current_height.saturating_sub(t.height))
@@ -1612,8 +1609,8 @@ where
         if params.add_global_xpubs {
             let all_xpubs = spendable_collection
                 .iter_descriptors()?
-                .try_fold(Vec::new(), |mut xpubs, (desc, _)| {
-                    xpubs.append(&mut desc.get_extended_keys()?);
+                .try_fold(Vec::new(), |mut xpubs, item| {
+                    xpubs.append(&mut item.descriptor.get_extended_keys()?);
                     Ok(xpubs)
                 })
                 .map_err(Error::Descriptor)?;
@@ -1650,18 +1647,16 @@ where
                         params.sighash,
                         params.only_witness_utxo,
                     );
-                    *psbt_input =
-                        // match self.get_psbt_input(utxo, params.sighash, params.only_witness_utxo) {
-                        match psbt_input_res {
-                            Ok(psbt_input) => psbt_input,
-                            Err(e) => match e {
-                                Error::UnknownUtxo => psbt::Input {
-                                    sighash_type: params.sighash,
-                                    ..psbt::Input::default()
-                                },
-                                _ => return Err(e),
+                    *psbt_input = match psbt_input_res {
+                        Ok(psbt_input) => psbt_input,
+                        Err(e) => match e {
+                            Error::UnknownUtxo => psbt::Input {
+                                sighash_type: params.sighash,
+                                ..psbt::Input::default()
                             },
-                        }
+                            _ => return Err(e),
+                        },
+                    }
                 }
                 Utxo::Foreign {
                     psbt_input: foreign_psbt_input,
@@ -1696,9 +1691,9 @@ where
             let path_opt =
                 spendable_collection.get_path_of_script_pubkey(&tx_output.script_pubkey)?;
 
-            if let Some((desc, child)) = path_opt {
+            if let Some((item, child)) = path_opt {
                 // let (desc, _) = self._get_descriptor_for_keychain(keychain);
-                let derived_descriptor = desc.as_derived(child, secp);
+                let derived_descriptor = item.descriptor.as_derived(child, secp);
 
                 if let miniscript::Descriptor::Tr(tr) = &derived_descriptor {
                     let tap_tree = if tr.taptree().is_some() {
@@ -1764,7 +1759,7 @@ where
     ) -> Result<psbt::Input, Error> {
         // Try to find the prev_script in our db to figure out if this is internal or external,
         // and the derivation index
-        let (desc, child) = spendable_collection
+        let (item, child) = spendable_collection
             .get_path_of_script_pubkey(&utxo.txout.script_pubkey)?
             .ok_or(Error::UnknownUtxo)?;
 
@@ -1773,8 +1768,7 @@ where
             ..psbt::Input::default()
         };
 
-        // let desc = self.get_descriptor_for_keychain(keychain);
-        let derived_descriptor = desc.as_derived(child, secp);
+        let derived_descriptor = item.descriptor.as_derived(child, secp);
 
         if let miniscript::Descriptor::Tr(tr) = &derived_descriptor {
             psbt_input.tap_key_origins = derived_descriptor.get_tap_key_origins(secp);
@@ -1801,24 +1795,19 @@ where
         let prev_output = utxo.outpoint;
         let prev_tx_opt = spendable_collection.get_tx(&prev_output.txid)?;
         // if let Some(prev_tx) = self.database.borrow().get_raw_tx(&prev_output.txid)? {
-        if let Some((prev_tx, _)) = prev_tx_opt {
-            if desc.is_witness() || desc.is_taproot() {
-                psbt_input.witness_utxo = Some(prev_tx.output[prev_output.vout as usize].clone());
+        if let Some(prev_tx) = prev_tx_opt {
+            if item.descriptor.is_witness() || item.descriptor.is_taproot() {
+                psbt_input.witness_utxo =
+                    Some(prev_tx.raw.output[prev_output.vout as usize].clone());
             }
-            if !desc.is_taproot() && (!desc.is_witness() || !only_witness_utxo) {
-                psbt_input.non_witness_utxo = Some(prev_tx);
+            if !item.descriptor.is_taproot()
+                && (!item.descriptor.is_witness() || !only_witness_utxo)
+            {
+                psbt_input.non_witness_utxo = Some(prev_tx.raw);
             }
         }
         Ok(psbt_input)
     }
-
-    // fn add_input_hd_keypaths(
-    //     &self,
-    //     psbt: &mut psbt::PartiallySignedTransaction,
-    // ) -> Result<(), Error> {
-    //     let spendable_collection = self.as_spendable_collection();
-    //     Self::_add_input_hd_keypaths(&spendable_collection, &self.secp, psbt)
-    // }
 
     /// TODO @evanlinjin: Move out of [`Wallet`].
     fn _add_input_hd_keypaths<'a, Sc>(
@@ -1844,23 +1833,26 @@ where
                 };
 
                 // obtain parent descriptor + child index of script_pubkey (if any)
-                let (parent_desc, child) =
+                let (parent, child) =
                     match spendable_collection.get_path_of_script_pubkey(prev_script_pubkey)? {
                         Some(path) => path,
                         None => return Ok(()),
                     };
 
-                debug!("Found descriptor {} /{}", parent_desc, child);
+                debug!("Found descriptor {} /{}", parent.descriptor, child);
 
                 // merge hd_keypaths or tap_keys_origins
-                if parent_desc.is_taproot() {
-                    let tap_key_origins = &mut parent_desc
+                if parent.descriptor.is_taproot() {
+                    let tap_key_origins = &mut parent
+                        .descriptor
                         .as_derived(child, secp)
                         .get_tap_key_origins(secp);
                     psbt_input.tap_key_origins.append(tap_key_origins);
                 } else {
-                    let hd_keypaths =
-                        &mut parent_desc.as_derived(child, secp).get_hd_keypaths(secp);
+                    let hd_keypaths = &mut parent
+                        .descriptor
+                        .as_derived(child, secp)
+                        .get_hd_keypaths(secp);
                     psbt_input.bip32_derivation.append(hd_keypaths);
                 }
 
@@ -2294,18 +2286,6 @@ pub(crate) mod test {
 
         let mut builder = wallet.build_tx();
         builder.add_recipient(addr.script_pubkey(), 25_000);
-
-        // let sync_time = SyncTime {
-        //     block_time: BlockTime {
-        //         height: 25,
-        //         timestamp: 0,
-        //     },
-        // };
-        // wallet
-        //     .database
-        //     .borrow_mut()
-        //     .set_sync_time(sync_time.clone())
-        //     .unwrap();
 
         let (psbt, _) = builder.finish().unwrap();
 
@@ -3162,9 +3142,6 @@ pub(crate) mod test {
             builder.add_recipient(addr.script_pubkey(), 60_000);
             builder
         };
-
-        // let mut builder = wallet1.build_tx();
-        // builder.add_recipient(addr.script_pubkey(), 60_000);
 
         {
             // let mut builder = builder.clone();

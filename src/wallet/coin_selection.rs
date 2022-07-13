@@ -236,7 +236,7 @@ impl CoinSelectionAlgorithm for OldestFirstCoinSelection {
                     } else {
                         database.get_tx(&txid).map(|details| {
                             let conf_time =
-                                details.and_then(|(_, bt_opt)| bt_opt.map(|bt| bt.height));
+                                details.and_then(|tx| tx.confirmed.map(|conf| conf.height));
                             bh_acc.insert(txid, conf_time);
                             println!(
                                 "OldestFirstCoinSelection: insert({}, {:?})",
@@ -628,11 +628,6 @@ mod test {
 
     const FEE_AMOUNT: u64 = 50;
 
-    // static DESCRIPTOR: ExtendedDescriptor =
-    //     "wsh(pk(cRYhyJQzA92kLQUtJZbVVQrBoQwSm4WT23sanTXYrKoUMjX8ph1Z))"
-    //         .into_wallet_descriptor(&SecpCtx::new(), Network::Regtest)
-    //         .unwrap()
-    //         .0;
     fn new_desc() -> ExtendedDescriptor {
         "wsh(pk(cRYhyJQzA92kLQUtJZbVVQrBoQwSm4WT23sanTXYrKoUMjX8ph1Z))"
             .into_wallet_descriptor(&SecpCtx::new(), Network::Regtest)
@@ -1025,10 +1020,7 @@ mod test {
         let desc = new_desc();
         let db = new_db();
         let cache = new_collection(&desc, &db);
-        let utxos = {
-            // let database: &mut MemoryDatabase = cache.borrow_mut();
-            setup_database_and_get_oldest_first_test_utxos(&mut *db.borrow_mut())
-        };
+        let utxos = { setup_database_and_get_oldest_first_test_utxos(&mut *db.borrow_mut()) };
 
         let result = OldestFirstCoinSelection::default()
             .coin_select(
