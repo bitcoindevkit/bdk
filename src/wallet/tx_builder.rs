@@ -47,16 +47,17 @@ use bitcoin::{OutPoint, Script, Transaction};
 use miniscript::DescriptorTrait;
 
 use super::coin_selection::{CoinSelectionAlgorithm, DefaultCoinSelectionAlgorithm};
-use super::spendable_collection::SpendableCollection;
+use super::multi_tracker::MultiTracker;
 use super::utils::SecpCtx;
+use crate::database::MemoryDatabase;
 use crate::descriptor::ExtendedDescriptor;
 use crate::SignOptions;
 use crate::Wallet;
-use crate::{database::BatchDatabase, Error, Utxo};
 use crate::{
     types::{FeeRate, KeychainKind, LocalUtxo, WeightedUtxo},
     TransactionDetails,
 };
+use crate::{Error, Utxo};
 /// Context in which the [`TxBuilder`] is valid
 pub trait TxBuilderContext: std::fmt::Debug + Default + Clone {}
 
@@ -122,17 +123,12 @@ impl TxBuilderContext for BumpFee {}
 /// [`finish`]: Self::finish
 /// [`coin_selection`]: Self::coin_selection
 #[derive(Debug)]
-pub struct TxBuilder<'a, D, Sc, Cs, Ctx> {
-    pub(crate) spendable_collection: Sc,
+pub struct TxBuilder<'a, Mt, Cs, Ctx> {
+    pub(crate) multi_tracker: Mt,
     pub(crate) params: TxParams<'a>,
-    pub(crate) fallback_height: u32,
     pub(crate) coin_selection: Cs,
     pub(crate) secp: SecpCtx,
     pub(crate) phantom: PhantomData<Ctx>,
-
-    /// TODO @evanlinjin: We can remove the generic type parameter `D` once we actually
-    /// move the various methods out of [`Wallet`].
-    pub(crate) phantom_database: PhantomData<D>,
 }
 
 /// The parameters for transaction creation sans coin selection algorithm.
@@ -179,45 +175,36 @@ impl std::default::Default for FeePolicy {
     }
 }
 
-impl<'a, D, Sc: Clone, Cs: Clone, Ctx> Clone for TxBuilder<'a, D, Sc, Cs, Ctx> {
+impl<'a, Mt: Clone, Cs: Clone, Ctx> Clone for TxBuilder<'a, Mt, Cs, Ctx> {
     fn clone(&self) -> Self {
         TxBuilder {
-            spendable_collection: self.spendable_collection.clone(),
+            multi_tracker: self.multi_tracker.clone(),
             params: self.params.clone(),
             coin_selection: self.coin_selection.clone(),
-            fallback_height: self.fallback_height,
             phantom: PhantomData,
-            phantom_database: self.phantom_database,
             secp: self.secp.clone(),
         }
     }
 }
 
-impl<'a, D: BatchDatabase, Sc: SpendableCollection, Ctx: TxBuilderContext>
-    TxBuilder<'a, D, Sc, DefaultCoinSelectionAlgorithm, Ctx>
+impl<'a, Mt: MultiTracker, Ctx: TxBuilderContext>
+    TxBuilder<'a, Mt, DefaultCoinSelectionAlgorithm, Ctx>
 {
     /// Creates a new [`TxBuilder`]
-    pub fn new(spendables: Sc, fallback_block_height: u32) -> Self {
+    pub fn new(multi_tracker: Mt) -> Self {
         Self {
-            spendable_collection: spendables,
+            multi_tracker,
             params: TxParams::default(),
             coin_selection: DefaultCoinSelectionAlgorithm::default(),
-            fallback_height: fallback_block_height,
             secp: SecpCtx::new(),
             phantom: core::marker::PhantomData,
-            phantom_database: core::marker::PhantomData,
         }
     }
 }
 
 // methods supported by both contexts, for any CoinSelectionAlgorithm
-impl<
-        'a,
-        D: BatchDatabase,
-        Sc: SpendableCollection,
-        Cs: CoinSelectionAlgorithm,
-        Ctx: TxBuilderContext,
-    > TxBuilder<'a, D, Sc, Cs, Ctx>
+impl<'a, Mt: MultiTracker, Cs: CoinSelectionAlgorithm, Ctx: TxBuilderContext>
+    TxBuilder<'a, Mt, Cs, Ctx>
 {
     /// Set a custom fee rate
     pub fn fee_rate(&mut self, fee_rate: FeeRate) -> &mut Self {
@@ -314,7 +301,7 @@ impl<
         let utxos = outpoints
             .iter()
             .map(|outpoint| {
-                self.spendable_collection
+                self.multi_tracker
                     .get_utxo(outpoint)?
                     .ok_or(Error::UnknownUtxo)
             })
@@ -323,7 +310,7 @@ impl<
         let weighted_utxos = utxos
             .into_iter()
             .map(|utxo| {
-                self.spendable_collection
+                self.multi_tracker
                     .get_path_of_script_pubkey(&utxo.txout.script_pubkey)?
                     .map(|(item, _)| {
                         let utxo = Utxo::Local(utxo);
@@ -560,14 +547,12 @@ impl<
     pub fn coin_selection<P: CoinSelectionAlgorithm>(
         self,
         coin_selection: P,
-    ) -> TxBuilder<'a, D, Sc, P, Ctx> {
+    ) -> TxBuilder<'a, Mt, P, Ctx> {
         TxBuilder {
-            spendable_collection: self.spendable_collection,
+            multi_tracker: self.multi_tracker,
             params: self.params,
             coin_selection,
-            fallback_height: self.fallback_height,
             phantom: PhantomData,
-            phantom_database: self.phantom_database,
             secp: self.secp,
         }
     }
@@ -578,28 +563,24 @@ impl<
     ///
     /// [`BIP174`]: https://github.com/bitcoin/bips/blob/master/bip-0174.mediawiki
     pub fn finish(self) -> Result<(Psbt, TransactionDetails), Error> {
-        // TODO @evalinjin: Get rid of the D. #NoPunIntended
-        Wallet::<D>::_create_tx(
-            &self.spendable_collection,
+        Wallet::<MemoryDatabase>::_create_tx(
+            &self.multi_tracker,
             self.coin_selection,
             self.params,
-            self.fallback_height,
             &self.secp,
         )
     }
 
     /// Finishes and signs the transaction.
     pub fn finish_and_sign(self, sign_options: SignOptions) -> Result<SignedResult, Error> {
-        let (mut psbt, details) = Wallet::<D>::_create_tx(
-            &self.spendable_collection,
+        let (mut psbt, details) = Wallet::<MemoryDatabase>::_create_tx(
+            &self.multi_tracker,
             self.coin_selection,
             self.params,
-            self.fallback_height,
             &self.secp,
         )?;
-        let is_finalized = Wallet::<D>::_sign(
-            &self.spendable_collection,
-            None,
+        let is_finalized = Wallet::<MemoryDatabase>::_sign(
+            &self.multi_tracker,
             &self.secp,
             &mut psbt,
             sign_options,
@@ -649,9 +630,7 @@ impl<
     }
 }
 
-impl<'a, D: BatchDatabase, Sc: SpendableCollection, Cs: CoinSelectionAlgorithm>
-    TxBuilder<'a, D, Sc, Cs, CreateTx>
-{
+impl<'a, Mt: MultiTracker, Cs: CoinSelectionAlgorithm> TxBuilder<'a, Mt, Cs, CreateTx> {
     /// Replace the recipients already added with a new list
     pub fn set_recipients(&mut self, recipients: Vec<(Script, u64)>) -> &mut Self {
         self.params.recipients = recipients;
@@ -722,12 +701,10 @@ impl<'a, D: BatchDatabase, Sc: SpendableCollection, Cs: CoinSelectionAlgorithm>
 }
 
 // methods supported only by bump_fee
-impl<'a, D: BatchDatabase, Sc: SpendableCollection>
-    TxBuilder<'a, D, Sc, DefaultCoinSelectionAlgorithm, BumpFee>
-{
+impl<'a, Mt: MultiTracker> TxBuilder<'a, Mt, DefaultCoinSelectionAlgorithm, BumpFee> {
     /// New transaction builder for fee bump.
-    pub fn new_fee_bump(spendables: Sc, txid: Txid, fallback_height: u32) -> Result<Self, Error> {
-        Wallet::<D>::_build_fee_bump(spendables, SecpCtx::new(), fallback_height, txid)
+    pub fn new_fee_bump(multi_tracker: Mt, txid: Txid) -> Result<Self, Error> {
+        Wallet::<MemoryDatabase>::_build_fee_bump(multi_tracker, SecpCtx::new(), txid)
     }
 
     /// Explicitly tells the wallet that it is allowed to reduce the amount of the output matching this

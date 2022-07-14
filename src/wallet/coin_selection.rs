@@ -26,14 +26,14 @@
 //! ```
 //! # use std::str::FromStr;
 //! # use bitcoin::*;
-//! # use bdk::wallet::{self, coin_selection::*, spendable_collection::*};
+//! # use bdk::wallet::{self, coin_selection::*, multi_tracker::*};
 //! # use bdk::*;
 //! # const TXIN_BASE_WEIGHT: usize = (32 + 4 + 4 + 1) * 4;
 //! #[derive(Debug)]
 //! struct AlwaysSpendEverything;
 //!
 //! impl CoinSelectionAlgorithm for AlwaysSpendEverything {
-//!     fn coin_select<D: SpendableCollection>(
+//!     fn coin_select<D: MultiTracker>(
 //!         &self,
 //!         database: &D,
 //!         required_utxos: Vec<WeightedUtxo>,
@@ -99,7 +99,7 @@ use rand::{rngs::StdRng, SeedableRng};
 use std::collections::HashMap;
 use std::convert::TryInto;
 
-use super::spendable_collection::SpendableCollection;
+use super::multi_tracker::MultiTracker;
 
 /// Default coin selection algorithm used by [`TxBuilder`](super::tx_builder::TxBuilder) if not
 /// overridden
@@ -158,7 +158,7 @@ pub trait CoinSelectionAlgorithm: std::fmt::Debug {
     /// - `amount_needed`: the amount in satoshi to select
     /// - `fee_amount`: the amount of fees in satoshi already accumulated from adding outputs and
     ///                 the transaction's header
-    fn coin_select<Sc: SpendableCollection>(
+    fn coin_select<Sc: MultiTracker>(
         &self,
         database: &Sc,
         required_utxos: Vec<WeightedUtxo>,
@@ -177,7 +177,7 @@ pub trait CoinSelectionAlgorithm: std::fmt::Debug {
 pub struct LargestFirstCoinSelection;
 
 impl CoinSelectionAlgorithm for LargestFirstCoinSelection {
-    fn coin_select<D: SpendableCollection>(
+    fn coin_select<D: MultiTracker>(
         &self,
         _database: &D,
         required_utxos: Vec<WeightedUtxo>,
@@ -215,7 +215,7 @@ impl CoinSelectionAlgorithm for LargestFirstCoinSelection {
 pub struct OldestFirstCoinSelection;
 
 impl CoinSelectionAlgorithm for OldestFirstCoinSelection {
-    fn coin_select<D: SpendableCollection>(
+    fn coin_select<D: MultiTracker>(
         &self,
         database: &D,
         required_utxos: Vec<WeightedUtxo>,
@@ -362,7 +362,7 @@ impl BranchAndBoundCoinSelection {
 const BNB_TOTAL_TRIES: usize = 100_000;
 
 impl CoinSelectionAlgorithm for BranchAndBoundCoinSelection {
-    fn coin_select<D: SpendableCollection>(
+    fn coin_select<D: MultiTracker>(
         &self,
         _database: &D,
         required_utxos: Vec<WeightedUtxo>,
@@ -616,7 +616,7 @@ mod test {
     use crate::database::{BatchOperations, Database, MemoryDatabase};
     use crate::descriptor::{ExtendedDescriptor, IntoWalletDescriptor};
     use crate::types::*;
-    use crate::wallet::spendable_collection::SpendableDatabase;
+    use crate::wallet::multi_tracker::LegacyTracker;
     use crate::wallet::utils::SecpCtx;
     use crate::wallet::Vbytes;
 
@@ -642,8 +642,8 @@ mod test {
     fn new_collection<'a>(
         desc: &'a ExtendedDescriptor,
         db: &'a RefCell<MemoryDatabase>,
-    ) -> SpendableDatabase<'a, MemoryDatabase> {
-        SpendableDatabase::new(desc, None, Network::Regtest, db, Vec::new(), Vec::new())
+    ) -> LegacyTracker<'a, MemoryDatabase> {
+        LegacyTracker::new(desc, None, Network::Regtest, db, Vec::new(), Vec::new())
     }
 
     fn utxo(value: u64, index: u32) -> WeightedUtxo {

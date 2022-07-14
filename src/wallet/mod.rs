@@ -43,7 +43,7 @@ pub mod export;
 pub mod signer;
 
 /// Spendable collection
-pub mod spendable_collection;
+pub mod multi_tracker;
 pub mod time;
 pub mod tx_builder;
 pub(crate) mod utils;
@@ -75,8 +75,8 @@ use crate::signer::SignerError;
 use crate::testutils;
 use crate::types::*;
 
-use self::spendable_collection::TransactionItem;
-pub use self::spendable_collection::{SpendableCollection, SpendableDatabase};
+use self::multi_tracker::TransactionItem;
+pub use self::multi_tracker::{LegacyTracker, MultiTracker};
 
 const CACHE_ADDR_BATCH_SIZE: u32 = 100;
 const COINBASE_MATURITY: u32 = 100;
@@ -263,6 +263,7 @@ where
     }
 
     /// TODO @evanlinjin: Move out of [`Wallet`].
+    #[allow(deprecated)]
     pub(crate) fn _get_new_address(
         database: &RefCell<D>,
         secp: &SecpCtx,
@@ -548,10 +549,10 @@ where
         &self.address_validators
     }
 
-    fn as_spendable_collection(&self) -> SpendableDatabase<D> {
+    fn as_multi_tracker(&self) -> LegacyTracker<D> {
         let signers = vec![Arc::clone(&self.signers), Arc::clone(&self.change_signers)];
 
-        SpendableDatabase::new(
+        LegacyTracker::new(
             &self.descriptor,
             self.change_descriptor.as_ref(),
             self.network,
@@ -559,14 +560,6 @@ where
             signers,
             self.address_validators.clone(),
         )
-    }
-
-    /// Returns 0 when not synced
-    fn get_current_known_block_height(&self) -> Result<u32, Error> {
-        self.database().get_sync_time().map(|opt| match opt {
-            Some(sync_time) => sync_time.block_time.height,
-            None => 0_u32,
-        })
     }
 
     /// Start building a transaction.
@@ -597,19 +590,13 @@ where
     /// [`TxBuilder`]: crate::TxBuilder
     pub fn build_tx(
         &self,
-    ) -> TxBuilder<'_, D, SpendableDatabase<D>, DefaultCoinSelectionAlgorithm, CreateTx> {
-        // Get default block height to set as nLockTime (we try to prevent fee sniping).
-        // However, if we do not know the block height, we default to 0.
-        let fallback_height = self.get_current_known_block_height().unwrap_or(0_u32);
-
+    ) -> TxBuilder<'_, LegacyTracker<D>, DefaultCoinSelectionAlgorithm, CreateTx> {
         TxBuilder {
-            spendable_collection: self.as_spendable_collection(),
+            multi_tracker: self.as_multi_tracker(),
             params: TxParams::default(),
-            fallback_height,
             coin_selection: DefaultCoinSelectionAlgorithm::default(),
             secp: self.secp.clone(),
             phantom: core::marker::PhantomData,
-            phantom_database: core::marker::PhantomData,
         }
     }
 
@@ -619,11 +606,10 @@ where
         spendable_collection: &'a Sc,
         coin_selection: Cs,
         params: TxParams,
-        fallback_block_height: u32,
         secp: &SecpCtx,
     ) -> Result<(psbt::PartiallySignedTransaction, TransactionDetails), Error>
     where
-        Sc: SpendableCollection,
+        Sc: MultiTracker,
         Cs: coin_selection::CoinSelectionAlgorithm,
     {
         let conditions = spendable_collection.iter_descriptors()?.map(|item| {
@@ -686,7 +672,9 @@ where
         // We use a match here instead of a map_or_else as it's way more readable :)
         let current_height = match params.current_height {
             // If they didn't tell us the current height, we assume it's the latest sync height.
-            None => Some(fallback_block_height),
+            None => spendable_collection
+                .latest_blockheight()?
+                .map(|bt| bt.height),
             h => h,
         };
 
@@ -979,26 +967,19 @@ where
     pub fn build_fee_bump(
         &self,
         txid: Txid,
-    ) -> Result<TxBuilder<'_, D, SpendableDatabase<D>, DefaultCoinSelectionAlgorithm, BumpFee>, Error>
+    ) -> Result<TxBuilder<'_, LegacyTracker<D>, DefaultCoinSelectionAlgorithm, BumpFee>, Error>
     {
-        let spendable_collection = self.as_spendable_collection();
-        let fallback_height = self.get_current_known_block_height().unwrap_or(0_u32);
+        let multi_tracker = self.as_multi_tracker();
 
-        Self::_build_fee_bump(
-            spendable_collection,
-            self.secp.clone(),
-            fallback_height,
-            txid,
-        )
+        Self::_build_fee_bump(multi_tracker, self.secp.clone(), txid)
     }
 
-    pub(crate) fn _build_fee_bump<'a, Sc: SpendableCollection>(
-        spendable_collection: Sc,
+    pub(crate) fn _build_fee_bump<'a, Mt: MultiTracker>(
+        multi_tracker: Mt,
         secp: SecpCtx,
-        fallback_height: u32,
         txid: Txid,
-    ) -> Result<TxBuilder<'a, D, Sc, DefaultCoinSelectionAlgorithm, BumpFee>, Error> {
-        let (mut tx, tx_fee) = match spendable_collection.get_tx(&txid)? {
+    ) -> Result<TxBuilder<'a, Mt, DefaultCoinSelectionAlgorithm, BumpFee>, Error> {
+        let (mut tx, tx_fee) = match multi_tracker.get_tx(&txid)? {
             None => return Err(Error::TransactionNotFound),
             Some(TransactionItem {
                 confirmed: Some(_), ..
@@ -1019,11 +1000,11 @@ where
         let original_utxos = original_txin
             .iter()
             .map(|txin| -> Result<_, Error> {
-                let txout = spendable_collection
+                let txout = multi_tracker
                     .get_output(&txin.previous_output)?
                     .ok_or(Error::UnknownUtxo)?;
 
-                let path = spendable_collection.get_path_of_script_pubkey(&txout.script_pubkey)?;
+                let path = multi_tracker.get_path_of_script_pubkey(&txout.script_pubkey)?;
                 let (weight, keychain) = match path {
                     Some((item, _)) => {
                         let weight = item.descriptor.max_satisfaction_weight().unwrap();
@@ -1058,7 +1039,7 @@ where
             let mut change_index = None;
 
             for (index, txout) in tx.output.iter().enumerate() {
-                let path = spendable_collection.get_path_of_script_pubkey(&txout.script_pubkey)?;
+                let path = multi_tracker.get_path_of_script_pubkey(&txout.script_pubkey)?;
 
                 if let Some((item, _)) = path {
                     // Prioritize internal inputs
@@ -1090,12 +1071,10 @@ where
         };
 
         Ok(TxBuilder {
-            spendable_collection,
+            multi_tracker,
             params,
             coin_selection: DefaultCoinSelectionAlgorithm::default(),
             phantom: core::marker::PhantomData,
-            phantom_database: core::marker::PhantomData,
-            fallback_height,
             secp,
         })
     }
@@ -1131,25 +1110,13 @@ where
         psbt: &mut psbt::PartiallySignedTransaction,
         sign_options: SignOptions,
     ) -> Result<bool, Error> {
-        let spendable_collection = self.as_spendable_collection();
+        let spendable_collection = self.as_multi_tracker();
 
-        let fallback_block_height = self
-            .database()
-            .get_sync_time()?
-            .map(|sync_time| sync_time.block_time.height);
-
-        Self::_sign(
-            &spendable_collection,
-            fallback_block_height,
-            &self.secp,
-            psbt,
-            sign_options,
-        )
+        Self::_sign(&spendable_collection, &self.secp, psbt, sign_options)
     }
 
-    pub(crate) fn _sign<Sc: SpendableCollection>(
+    pub(crate) fn _sign<Sc: MultiTracker>(
         spendable_collection: &Sc,
-        fallback_block_height: Option<u32>,
         secp: &SecpCtx,
         psbt: &mut psbt::PartiallySignedTransaction,
         sign_options: SignOptions,
@@ -1190,13 +1157,7 @@ where
 
         // attempt to finalize
         if sign_options.try_finalize {
-            Self::_finalize_psbt(
-                spendable_collection,
-                fallback_block_height,
-                secp,
-                psbt,
-                sign_options,
-            )
+            Self::_finalize_psbt(spendable_collection, secp, psbt, sign_options)
         } else {
             Ok(false)
         }
@@ -1242,25 +1203,13 @@ where
         psbt: &mut psbt::PartiallySignedTransaction,
         sign_options: SignOptions,
     ) -> Result<bool, Error> {
-        let spendable_collection = self.as_spendable_collection();
+        let spendable_collection = self.as_multi_tracker();
 
-        let fallback_block_height = self
-            .database()
-            .get_sync_time()?
-            .map(|sync_time| sync_time.block_time.height);
-
-        Self::_finalize_psbt(
-            &spendable_collection,
-            fallback_block_height,
-            &self.secp,
-            psbt,
-            sign_options,
-        )
+        Self::_finalize_psbt(&spendable_collection, &self.secp, psbt, sign_options)
     }
 
-    pub(crate) fn _finalize_psbt<Sc: SpendableCollection>(
+    pub(crate) fn _finalize_psbt<Sc: MultiTracker>(
         spendable_collection: &Sc,
-        fallback_block_height: Option<u32>,
         secp: &SecpCtx,
         psbt: &mut psbt::PartiallySignedTransaction,
         sign_options: SignOptions,
@@ -1281,7 +1230,9 @@ where
             let create_height = spendable_collection
                 .get_tx(&input.previous_output.txid)?
                 .map(|tx| tx.confirmed.map_or(u32::MAX, |c| c.height));
-            let last_sync_height = fallback_block_height;
+            let last_sync_height = spendable_collection
+                .latest_blockheight()?
+                .map(|bt| bt.height);
             let current_height = sign_options.assume_height.or(last_sync_height);
 
             debug!(
@@ -1386,6 +1337,7 @@ where
     }
 
     // TODO @evanlinjin: Move out of [`Wallet`].
+    #[allow(deprecated)]
     fn _fetch_and_increment_index(
         database: &RefCell<D>,
         secp: &SecpCtx,
@@ -1512,7 +1464,7 @@ where
         current_height: Option<u32>,
     ) -> Result<(Vec<WeightedUtxo>, Vec<WeightedUtxo>), Error>
     where
-        Sc: SpendableCollection,
+        Sc: MultiTracker,
     {
         // NOTE: we are intentionally ignoring `unspendable` here. i.e manual
         // selection overrides unspendable.
@@ -1523,7 +1475,7 @@ where
         //    must_spend <- manually selected utxos
         //    may_spend  <- all other available utxos
         let mut may_spend = spendable_collection
-            .iter_utxos()?
+            .iter_unspent()?
             .filter(|(utxo, _)| {
                 let is_manually_selected = manually_selected
                     .iter()
@@ -1602,7 +1554,7 @@ where
         secp: &SecpCtx,
     ) -> Result<psbt::PartiallySignedTransaction, Error>
     where
-        Sc: SpendableCollection,
+        Sc: MultiTracker,
     {
         let mut psbt = psbt::PartiallySignedTransaction::from_unsigned_tx(tx)?;
 
@@ -1738,7 +1690,7 @@ where
         sighash_type: Option<psbt::PsbtSighashType>,
         only_witness_utxo: bool,
     ) -> Result<psbt::Input, Error> {
-        let spendable_collection = self.as_spendable_collection();
+        let spendable_collection = self.as_multi_tracker();
         Self::_get_psbt_input(
             &spendable_collection,
             &self.secp,
@@ -1750,7 +1702,7 @@ where
 
     /// TODO @evanlinjin: Move out of [`Wallet`].
     /// * Should this method be renamed to `make_psbt_input`?
-    fn _get_psbt_input<Sc: SpendableCollection>(
+    fn _get_psbt_input<Sc: MultiTracker>(
         spendable_collection: &Sc,
         secp: &SecpCtx,
         utxo: LocalUtxo,
@@ -1816,7 +1768,7 @@ where
         psbt: &mut psbt::PartiallySignedTransaction,
     ) -> Result<(), Error>
     where
-        Sc: SpendableCollection,
+        Sc: MultiTracker,
     {
         let input_utxos = (0..psbt.inputs.len())
             .map(|i| psbt.get_utxo_for(i))
@@ -1993,7 +1945,7 @@ pub(crate) mod test {
 
     use crate::database::Database;
     use crate::types::KeychainKind;
-    use crate::wallet::spendable_collection::SpendableCollectionInner;
+    use crate::wallet::multi_tracker::MultiTrackerInner;
 
     use super::*;
     use crate::signer::{SignOptions, SignerError};
@@ -2494,8 +2446,8 @@ pub(crate) mod test {
         let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
         let addr = wallet.get_address(New).unwrap();
         let utxos: Vec<_> = wallet
-            .as_spendable_collection()
-            .iter_utxos()
+            .as_multi_tracker()
+            .iter_unspent()
             .unwrap()
             // .into_iter()
             .map(|(u, _)| u.outpoint)

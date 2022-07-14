@@ -1,11 +1,12 @@
-///! SpendableCollection
+///! MultiTracker
 ///
-/// This module defines the [`SpendableCollection`] trait.
+/// This module defines the [`MultiTracker`] trait.
 use std::{cell::RefCell, collections::HashMap, sync::Arc};
 
 use bitcoin::{Network, OutPoint, Script, Transaction, TxOut, Txid};
 use miniscript::DescriptorTrait;
 
+#[allow(deprecated)]
 use crate::{
     address_validator::AddressValidator,
     database::{BatchDatabase, DatabaseUtils},
@@ -38,9 +39,12 @@ pub struct TransactionItem {
     pub fees: Option<u64>,
 }
 
-/// Contains the "required" methods of [`SpendableCollection`], where all other methods could be
+/// Contains the "required" methods of [`MultiTracker`], where all other methods could be
 /// deried from (albiet probably not in an optimised manner).
-pub trait SpendableCollectionInner {
+///
+/// TODO @evanlinjin: Should we have an `iter_txout` method as defined in `bdk_core`?
+/// <https://github.com/LLFourn/bdk_core_staging/blob/67d1e5499b0eb1de59f652c433c88942646593b3/bdk_core/src/descriptor_tracker.rs#L873>
+pub trait MultiTrackerInner {
     /// Returns an iterator that ranges through all owned descriptors.
     fn iter_descriptors(&self) -> Result<Box<dyn Iterator<Item = DescriptorItem> + '_>, Error>;
 
@@ -50,19 +54,22 @@ pub trait SpendableCollectionInner {
     ) -> Result<Box<dyn Iterator<Item = Arc<dyn TransactionSigner>> + '_>, Error>;
 
     /// Obtains owned UTXOs alongside their satisfaction weights.
-    ///     Warning: It is possible that the returned list contains a UTXO currently used as an
-    ///     unconfirmed tx input.
-    fn iter_utxos(&self) -> Result<Box<dyn Iterator<Item = (LocalUtxo, usize)> + '_>, Error>;
+    ///
+    /// TODO @evanlinjin: We should have our own structure for Unspents.
+    /// Fields that make sense =>
+    /// * Confirmed height.
+    /// * Descriptor + Child index.
+    /// * Satisfaction weight of scriptPubKey (weight of corresponding scriptSig/witness data).
+    fn iter_unspent(&self) -> Result<Box<dyn Iterator<Item = (LocalUtxo, usize)> + '_>, Error>;
 
     /// Obtains transaction (and details) of given txid.
     ///
     /// Internally, we should include atleast all transactions containing owned and spendable UTXOs
     /// of the given descriptors (internal and external).
-    /// However, having extra and unnecessary transactions should not hurt (TODO @evanlinjin:
-    /// confirm this).
-    ///
-    /// TODO @evanlinjin: Maybe this should be in it's own trait?
     fn get_tx(&self, txid: &Txid) -> Result<Option<TransactionItem>, Error>;
+
+    /// Obtains the latest block height of internal trackers.
+    fn latest_blockheight(&self) -> Result<Option<BlockTime>, Error>;
 
     /// Returns a fresh/unused address derived from given descriptor. This is currently used for
     /// obtaining a change/drain address.
@@ -72,7 +79,7 @@ pub trait SpendableCollectionInner {
 
 /// Represents a collection of owned and spendable `UTXO`s, `ExtendedDescriptor`s and associated
 /// `Transaction`s.
-pub trait SpendableCollection: SpendableCollectionInner {
+pub trait MultiTracker: MultiTrackerInner {
     /// Obtains parent [`ExtendedDescriptor`] and child index of the provided `ScriptPubKey`.
     /// Note that if the script is not owned, None shoud be returned.
     fn get_path_of_script_pubkey(
@@ -99,7 +106,7 @@ pub trait SpendableCollection: SpendableCollectionInner {
     /// Obtain a local UTXO given the provided outpoint.
     /// The default implementation is very inefficient and should be overloaded.
     fn get_utxo(&self, outpoint: &OutPoint) -> Result<Option<LocalUtxo>, Error> {
-        Ok(self.iter_utxos()?.find_map(|(utxo, _)| {
+        Ok(self.iter_unspent()?.find_map(|(utxo, _)| {
             if &utxo.outpoint == outpoint {
                 Some(utxo)
             } else {
@@ -145,9 +152,9 @@ pub trait SpendableCollection: SpendableCollectionInner {
     }
 }
 
-/// Implements [`SpendableCollection`] with one external descriptor and an optional internal descriptor.
+/// Implements [`MultiTracker`] with one external descriptor and an optional internal descriptor.
 // #[derive(Clone)]
-pub struct SpendableDatabase<'a, D> {
+pub struct LegacyTracker<'a, D> {
     descriptor: &'a ExtendedDescriptor,
     change_descriptor: Option<&'a ExtendedDescriptor>,
     network: Network,
@@ -155,10 +162,11 @@ pub struct SpendableDatabase<'a, D> {
 
     pub(crate) db: &'a RefCell<D>,
     pub(crate) signers: Vec<Arc<SignersContainer>>, // [external, internal]
+    #[allow(deprecated)]
     pub(crate) address_validators: Vec<Arc<dyn AddressValidator>>,
 }
 
-impl<'a, D: BatchDatabase> Clone for SpendableDatabase<'a, D> {
+impl<'a, D: BatchDatabase> Clone for LegacyTracker<'a, D> {
     fn clone(&self) -> Self {
         Self {
             descriptor: self.descriptor,
@@ -172,10 +180,10 @@ impl<'a, D: BatchDatabase> Clone for SpendableDatabase<'a, D> {
     }
 }
 
-/// [`SpendableCollection`] `::DescIter` implementation for [`SpendableDatabase`].
-pub struct DatabaseDescIter<'a, D>(SpendableDatabase<'a, D>, usize);
+/// [`MultiTracker`] descriptor iterator implementation for [`LegacyTracker`].
+pub struct LegacyDescIter<'a, D>(LegacyTracker<'a, D>, usize);
 
-impl<'a, D> Iterator for DatabaseDescIter<'a, D> {
+impl<'a, D> Iterator for LegacyDescIter<'a, D> {
     type Item = DescriptorItem;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -197,7 +205,7 @@ impl<'a, D> Iterator for DatabaseDescIter<'a, D> {
     }
 }
 
-impl<'a, D> ExactSizeIterator for DatabaseDescIter<'a, D> {
+impl<'a, D> ExactSizeIterator for LegacyDescIter<'a, D> {
     fn len(&self) -> usize {
         let start_count = if self.0.change_descriptor.is_some() {
             2
@@ -208,8 +216,9 @@ impl<'a, D> ExactSizeIterator for DatabaseDescIter<'a, D> {
     }
 }
 
-impl<'a, D: BatchDatabase> SpendableDatabase<'a, D> {
-    /// Creates a new [`SpendableDatabase`].
+impl<'a, D: BatchDatabase> LegacyTracker<'a, D> {
+    /// Creates a new [`LegacyTracker`].
+    #[allow(deprecated)]
     pub fn new(
         descriptor: &'a ExtendedDescriptor,
         change_descriptor: Option<&'a ExtendedDescriptor>,
@@ -231,9 +240,9 @@ impl<'a, D: BatchDatabase> SpendableDatabase<'a, D> {
     }
 }
 
-impl<'a, D: BatchDatabase> SpendableCollectionInner for SpendableDatabase<'a, D> {
+impl<'a, D: BatchDatabase> MultiTrackerInner for LegacyTracker<'a, D> {
     fn iter_descriptors(&self) -> Result<Box<dyn Iterator<Item = DescriptorItem> + '_>, Error> {
-        Ok(Box::new(DatabaseDescIter::<'_>(self.clone(), 0)))
+        Ok(Box::new(LegacyDescIter::<'_>(self.clone(), 0)))
     }
 
     fn iter_signers(
@@ -259,7 +268,7 @@ impl<'a, D: BatchDatabase> SpendableCollectionInner for SpendableDatabase<'a, D>
     ///
     /// For now, we need to ensure the aforementioned relationship is sufficiently cached to
     /// avoid "missing" available UTXOs.
-    fn iter_utxos(&self) -> Result<Box<dyn Iterator<Item = (LocalUtxo, usize)> + '_>, Error> {
+    fn iter_unspent(&self) -> Result<Box<dyn Iterator<Item = (LocalUtxo, usize)> + '_>, Error> {
         let utxos = self
             .db
             .borrow()
@@ -290,6 +299,13 @@ impl<'a, D: BatchDatabase> SpendableCollectionInner for SpendableDatabase<'a, D>
             }))
     }
 
+    fn latest_blockheight(&self) -> Result<Option<BlockTime>, Error> {
+        self.db
+            .borrow()
+            .get_sync_time()
+            .map(|opt| opt.map(|sync_time| sync_time.block_time))
+    }
+
     fn new_address(&self, desc: &ExtendedDescriptor) -> Result<AddressInfo, Error> {
         let keychain = if desc == self.descriptor {
             KeychainKind::External
@@ -310,7 +326,7 @@ impl<'a, D: BatchDatabase> SpendableCollectionInner for SpendableDatabase<'a, D>
     }
 }
 
-impl<'a, D: BatchDatabase> SpendableCollection for SpendableDatabase<'a, D> {
+impl<'a, D: BatchDatabase> MultiTracker for LegacyTracker<'a, D> {
     fn get_utxo(&self, outpoint: &OutPoint) -> Result<Option<LocalUtxo>, Error> {
         self.db.borrow().get_utxo(outpoint)
     }
