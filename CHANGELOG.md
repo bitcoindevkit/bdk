@@ -5,8 +5,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+
+## [v0.20.0] - [v0.19.0]
+
 - New MSRV set to `1.56.1`
 - Fee sniping discouraging through nLockTime - if the user specifies a `current_height`, we use that as a nlocktime, otherwise we use the last sync height (or 0 if we never synced)
+- Fix hang when `ElectrumBlockchainConfig::stop_gap` is zero.
+- Set coin type in BIP44, BIP49, and BIP84 templates
+- Get block hash given a block height - A `get_block_hash` method is now defined on the `GetBlockHash` trait and implemented on every blockchain backend. This method expects a block height and returns the corresponding block hash. 
+- Add `remove_partial_sigs` and `try_finalize` to `SignOptions`
+- Deprecate `AddressValidator`
+- Fix Electrum wallet sync potentially causing address index decrement - compare proposed index and current index before applying batch operations during sync.
 
 ## [v0.19.0] - [v0.18.0]
 
@@ -53,6 +63,7 @@ To decouple the `Wallet` from the `Blockchain` we've made major changes:
 - Stop making a request for the block height when calling `Wallet:new`.
 - Added `SyncOptions` to capture extra (future) arguments to `Wallet::sync`.
 - Removed `max_addresses` sync parameter which determined how many addresses to cache before syncing since this can just be done with `ensure_addresses_cached`.
+- remove `flush` method from the `Database` trait.
 
 ## [v0.16.1] - [v0.16.0]
 
@@ -467,4 +478,5 @@ final transaction is created by calling `finish` on the builder.
 [v0.17.0]: https://github.com/bitcoindevkit/bdk/compare/v0.16.1...v0.17.0
 [v0.18.0]: https://github.com/bitcoindevkit/bdk/compare/v0.17.0...v0.18.0
 [v0.19.0]: https://github.com/bitcoindevkit/bdk/compare/v0.18.0...v0.19.0
-[unreleased]: https://github.com/bitcoindevkit/bdk/compare/v0.19.0...HEAD
+[v0.20.0]: https://github.com/bitcoindevkit/bdk/compare/v0.19.0...v0.20.0
+[unreleased]: https://github.com/bitcoindevkit/bdk/compare/v0.20.0...HEAD

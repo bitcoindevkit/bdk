@@ -100,6 +100,7 @@ impl std::error::Error for AddressValidatorError {}
 /// validator will be propagated up to the original caller that triggered the address generation.
 ///
 /// For a usage example see [this module](crate::address_validator)'s documentation.
+#[deprecated = "AddressValidator was rarely used. Address validation can occur outside of BDK"]
 pub trait AddressValidator: Send + Sync + fmt::Debug {
     /// Validate or inspect an address
     fn validate(
@@ -120,6 +121,7 @@ mod test {
 
     #[derive(Debug)]
     struct TestValidator;
+    #[allow(deprecated)]
     impl AddressValidator for TestValidator {
         fn validate(
             &self,
@@ -135,6 +137,7 @@ mod test {
     #[should_panic(expected = "InvalidScript")]
     fn test_address_validator_external() {
         let (mut wallet, _, _) = get_funded_wallet(get_test_wpkh());
+        #[allow(deprecated)]
         wallet.add_address_validator(Arc::new(TestValidator));
 
         wallet.get_address(New).unwrap();
@@ -144,6 +147,7 @@ mod test {
     #[should_panic(expected = "InvalidScript")]
     fn test_address_validator_internal() {
         let (mut wallet, descriptors, _) = get_funded_wallet(get_test_wpkh());
+        #[allow(deprecated)]
         wallet.add_address_validator(Arc::new(TestValidator));
 
         let addr = crate::testutils!(@external descriptors, 10);

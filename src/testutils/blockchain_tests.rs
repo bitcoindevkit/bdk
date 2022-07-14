@@ -372,6 +372,7 @@ macro_rules! bdk_blockchain_tests {
             use $crate::blockchain::Blockchain;
             use $crate::database::MemoryDatabase;
             use $crate::types::KeychainKind;
+            use $crate::wallet::AddressIndex;
             use $crate::{Wallet, FeeRate, SyncOptions};
             use $crate::testutils;
 
@@ -649,6 +650,60 @@ macro_rules! bdk_blockchain_tests {
 
                 assert_eq!(wallet.list_transactions(false).unwrap().len(), 2, "incorrect number of txs");
                 assert_eq!(wallet.list_unspent().unwrap().len(), 1, "incorrect number of unspents");
+            }
+
+            // Syncing wallet should not result in wallet address index to decrement.
+            // This is critical as we should always ensure to not reuse addresses.
+            #[test]
+            fn test_sync_address_index_should_not_decrement() {
+                let (wallet, blockchain, _descriptors, mut test_client) = init_single_sig();
+
+                const ADDRS_TO_FUND: u32 = 7;
+                const ADDRS_TO_IGNORE: u32 = 11;
+
+                let mut first_addr_index: u32 = 0;
+
+                (0..ADDRS_TO_FUND + ADDRS_TO_IGNORE).for_each(|i| {
+                    let new_addr = wallet.get_address(AddressIndex::New).unwrap();
+
+                    if i == 0 {
+                        first_addr_index = new_addr.index;
+                    }
+                    assert_eq!(new_addr.index, i+first_addr_index, "unexpected new address index (before sync)");
+
+                    if i < ADDRS_TO_FUND {
+                        test_client.receive(testutils! {
+                            @tx ((@addr new_addr.address) => 50_000)
+                        });
+                    }
+                });
+
+                wallet.sync(&blockchain, SyncOptions::default()).unwrap();
+
+                let new_addr = wallet.get_address(AddressIndex::New).unwrap();
+                assert_eq!(new_addr.index, ADDRS_TO_FUND+ADDRS_TO_IGNORE+first_addr_index, "unexpected new address index (after sync)");
+            }
+
+            // Even if user does not explicitly grab new addresses, the address index should
+            // increment after sync (if wallet has a balance).
+            #[test]
+            fn test_sync_address_index_should_increment() {
+                let (wallet, blockchain, descriptors, mut test_client) = init_single_sig();
+
+                const START_FUND: u32 = 4;
+                const END_FUND: u32 = 20;
+
+                // "secretly" fund wallet via given range
+                (START_FUND..END_FUND).for_each(|addr_index| {
+                    test_client.receive(testutils! {
+                        @tx ((@external descriptors, addr_index) => 50_000)
+                    });
+                });
+
+                wallet.sync(&blockchain, SyncOptions::default()).unwrap();
+
+                let address = wallet.get_address(AddressIndex::New).unwrap();
+                assert_eq!(address.index, END_FUND, "unexpected new address index (after sync)");
             }
 
             /// Send two conflicting transactions to the same address twice in a row.
@@ -1360,6 +1415,35 @@ macro_rules! bdk_blockchain_tests {
                 // Test signing core created and updated PSBT
                 let finalized = wallet.sign(&mut psbt, Default::default()).unwrap();
                 assert_eq!(finalized, true);
+            }
+
+            #[test]
+            fn test_get_block_hash() {
+                use bitcoincore_rpc::{ RpcApi };
+                use crate::blockchain::GetBlockHash;
+
+                // create wallet with init_wallet
+                let (_, blockchain, _descriptors, mut test_client) = init_single_sig();
+
+                let height = test_client.bitcoind.client.get_blockchain_info().unwrap().blocks as u64;
+                let best_hash = test_client.bitcoind.client.get_best_block_hash().unwrap();
+
+                // use get_block_hash to get best block hash and compare with best_hash above
+                let block_hash = blockchain.get_block_hash(height).unwrap();
+                assert_eq!(best_hash, block_hash);
+
+                // generate blocks to address
+                let node_addr = test_client.get_node_address(None);
+                test_client.generate(10, Some(node_addr));
+
+                let height = test_client.bitcoind.client.get_blockchain_info().unwrap().blocks as u64;
+                let best_hash = test_client.bitcoind.client.get_best_block_hash().unwrap();
+
+                let block_hash = blockchain.get_block_hash(height).unwrap();
+                assert_eq!(best_hash, block_hash);
+
+                // try to get hash for block that has not yet been created.
+                assert!(blockchain.get_block_hash(height + 1).is_err());
             }
         }
     };

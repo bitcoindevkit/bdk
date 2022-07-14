@@ -50,6 +50,7 @@ pub mod verify;
 
 pub use utils::IsDust;
 
+#[allow(deprecated)]
 use address_validator::AddressValidator;
 use coin_selection::DefaultCoinSelectionAlgorithm;
 use signer::{SignOptions, SignerOrdering, SignersContainer, TransactionSigner};
@@ -73,6 +74,7 @@ use crate::testutils;
 use crate::types::*;
 
 const CACHE_ADDR_BATCH_SIZE: u32 = 100;
+const COINBASE_MATURITY: u32 = 100;
 
 /// A Bitcoin wallet
 ///
@@ -93,6 +95,7 @@ pub struct Wallet<D> {
     signers: Arc<SignersContainer>,
     change_signers: Arc<SignersContainer>,
 
+    #[allow(deprecated)]
     address_validators: Vec<Arc<dyn AddressValidator>>,
 
     network: Network,
@@ -499,11 +502,17 @@ where
     /// Add an address validator
     ///
     /// See [the `address_validator` module](address_validator) for an example.
+    #[deprecated]
+    #[allow(deprecated)]
     pub fn add_address_validator(&mut self, validator: Arc<dyn AddressValidator>) {
         self.address_validators.push(validator);
     }
 
     /// Get the address validators
+    ///
+    /// See [the `address_validator` module](address_validator).
+    #[deprecated]
+    #[allow(deprecated)]
     pub fn get_address_validators(&self) -> &[Arc<dyn AddressValidator>] {
         &self.address_validators
     }
@@ -765,6 +774,7 @@ where
             params.drain_wallet,
             params.manually_selected_only,
             params.bumping_fee.is_some(), // we mandate confirmed transactions if we're bumping the fee
+            current_height,
         )?;
 
         let coin_selection = coin_selection.coin_select(
@@ -897,8 +907,6 @@ where
     /// # Ok::<(), bdk::Error>(())
     /// ```
     // TODO: support for merging multiple transactions while bumping the fees
-    // TODO: option to force addition of an extra output? seems bad for privacy to update the
-    // change
     pub fn build_fee_bump(
         &self,
         txid: Txid,
@@ -1075,7 +1083,11 @@ where
         }
 
         // attempt to finalize
-        self.finalize_psbt(psbt, sign_options)
+        if sign_options.try_finalize {
+            self.finalize_psbt(psbt, sign_options)
+        } else {
+            Ok(false)
+        }
     }
 
     /// Return the spending policies for the wallet's descriptor
@@ -1186,6 +1198,9 @@ where
                             let psbt_input = &mut psbt.inputs[n];
                             psbt_input.final_script_sig = Some(tmp_input.script_sig);
                             psbt_input.final_script_witness = Some(tmp_input.witness);
+                            if sign_options.remove_partial_sigs {
+                                psbt_input.partial_sigs.clear();
+                            }
                         }
                         Err(e) => {
                             debug!("satisfy error {:?} for input {}", e, n);
@@ -1260,6 +1275,7 @@ where
         let script = derived_descriptor.script_pubkey();
 
         for validator in &self.address_validators {
+            #[allow(deprecated)]
             validator.validate(keychain, &hd_keypaths, &script)?;
         }
 
@@ -1342,6 +1358,7 @@ where
     /// Given the options returns the list of utxos that must be used to form the
     /// transaction and any further that may be used if needed.
     #[allow(clippy::type_complexity)]
+    #[allow(clippy::too_many_arguments)]
     fn preselect_utxos(
         &self,
         change_policy: tx_builder::ChangeSpendPolicy,
@@ -1350,6 +1367,7 @@ where
         must_use_all_available: bool,
         manual_only: bool,
         must_only_use_confirmed_tx: bool,
+        current_height: Option<u32>,
     ) -> Result<(Vec<WeightedUtxo>, Vec<WeightedUtxo>), Error> {
         //    must_spend <- manually selected utxos
         //    may_spend  <- all other available utxos
@@ -1368,23 +1386,44 @@ where
             return Ok((must_spend, vec![]));
         }
 
-        let satisfies_confirmed = match must_only_use_confirmed_tx {
-            true => {
-                let database = self.database.borrow();
-                may_spend
-                    .iter()
-                    .map(|u| {
-                        database
-                            .get_tx(&u.0.outpoint.txid, true)
-                            .map(|tx| match tx {
-                                None => false,
-                                Some(tx) => tx.confirmation_time.is_some(),
-                            })
+        let database = self.database.borrow();
+        let satisfies_confirmed = may_spend
+            .iter()
+            .map(|u| {
+                database
+                    .get_tx(&u.0.outpoint.txid, true)
+                    .map(|tx| match tx {
+                        // We don't have the tx in the db for some reason,
+                        // so we can't know for sure if it's mature or not.
+                        // We prefer not to spend it.
+                        None => false,
+                        Some(tx) => {
+                            // Whether the UTXO is mature and, if needed, confirmed
+                            let mut spendable = true;
+                            if must_only_use_confirmed_tx && tx.confirmation_time.is_none() {
+                                return false;
+                            }
+                            if tx
+                                .transaction
+                                .expect("We specifically ask for the transaction above")
+                                .is_coin_base()
+                            {
+                                if let Some(current_height) = current_height {
+                                    match &tx.confirmation_time {
+                                        Some(t) => {
+                                            // https://github.com/bitcoin/bitcoin/blob/c5e67be03bb06a5d7885c55db1f016fbf2333fe3/src/validation.cpp#L373-L375
+                                            spendable &= (current_height.saturating_sub(t.height))
+                                                >= COINBASE_MATURITY;
+                                        }
+                                        None => spendable = false,
+                                    }
+                                }
+                            }
+                            spendable
+                        }
                     })
-                    .collect::<Result<Vec<_>, _>>()?
-            }
-            false => vec![true; may_spend.len()],
-        };
+            })
+            .collect::<Result<Vec<_>, _>>()?;
 
         let mut i = 0;
         may_spend.retain(|u| {
@@ -2028,7 +2067,7 @@ pub(crate) mod test {
             .set_sync_time(sync_time)
             .unwrap();
         let current_height = 25;
-        builder.set_current_height(current_height);
+        builder.current_height(current_height);
         let (psbt, _) = builder.finish().unwrap();
 
         // current_height will override the last sync height
@@ -2076,7 +2115,7 @@ pub(crate) mod test {
         let mut builder = wallet.build_tx();
         builder
             .add_recipient(addr.script_pubkey(), 25_000)
-            .set_current_height(630_001)
+            .current_height(630_001)
             .nlocktime(630_000);
         let (psbt, _) = builder.finish().unwrap();
 
@@ -2239,7 +2278,6 @@ pub(crate) mod test {
             .drain_to(drain_addr.script_pubkey())
             .drain_wallet();
         let (psbt, details) = builder.finish().unwrap();
-        dbg!(&psbt);
         let outputs = psbt.unsigned_tx.output;
 
         assert_eq!(outputs.len(), 2);
@@ -3837,6 +3875,99 @@ pub(crate) mod test {
     }
 
     #[test]
+    #[should_panic(expected = "InsufficientFunds")]
+    fn test_bump_fee_unconfirmed_inputs_only() {
+        // We try to bump the fee, but:
+        // - We can't reduce the change, as we have no change
+        // - All our UTXOs are unconfirmed
+        // So, we fail with "InsufficientFunds", as per RBF rule 2:
+        // The replacement transaction may only include an unconfirmed input
+        // if that input was included in one of the original transactions.
+        let (wallet, descriptors, _) = get_funded_wallet(get_test_wpkh());
+        let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
+        let mut builder = wallet.build_tx();
+        builder
+            .drain_wallet()
+            .drain_to(addr.script_pubkey())
+            .enable_rbf();
+        let (psbt, mut original_details) = builder.finish().unwrap();
+        // Now we receive one transaction with 0 confirmations. We won't be able to use that for
+        // fee bumping, as it's still unconfirmed!
+        crate::populate_test_db!(
+            wallet.database.borrow_mut(),
+            testutils! (@tx ( (@external descriptors, 0) => 25_000 ) (@confirmations 0)),
+            Some(100),
+        );
+        let mut tx = psbt.extract_tx();
+        let txid = tx.txid();
+        for txin in &mut tx.input {
+            txin.witness.push([0x00; 108]); // fake signature
+            wallet
+                .database
+                .borrow_mut()
+                .del_utxo(&txin.previous_output)
+                .unwrap();
+        }
+        original_details.transaction = Some(tx);
+        wallet
+            .database
+            .borrow_mut()
+            .set_tx(&original_details)
+            .unwrap();
+
+        let mut builder = wallet.build_fee_bump(txid).unwrap();
+        builder.fee_rate(FeeRate::from_sat_per_vb(25.0));
+        builder.finish().unwrap();
+    }
+
+    #[test]
+    fn test_bump_fee_unconfirmed_input() {
+        // We create a tx draining the wallet and spending one confirmed
+        // and one unconfirmed UTXO. We check that we can fee bump normally
+        // (BIP125 rule 2 only apply to newly added unconfirmed input, you can
+        // always fee bump with an unconfirmed input if it was included in the
+        // original transaction)
+        let (wallet, descriptors, _) = get_funded_wallet(get_test_wpkh());
+        let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
+        // We receive a tx with 0 confirmations, which will be used as an input
+        // in the drain tx.
+        crate::populate_test_db!(
+            wallet.database.borrow_mut(),
+            testutils! (@tx ( (@external descriptors, 0) => 25_000 ) (@confirmations 0)),
+            Some(100),
+        );
+        let mut builder = wallet.build_tx();
+        builder
+            .drain_wallet()
+            .drain_to(addr.script_pubkey())
+            .enable_rbf();
+        let (psbt, mut original_details) = builder.finish().unwrap();
+        let mut tx = psbt.extract_tx();
+        let txid = tx.txid();
+        for txin in &mut tx.input {
+            txin.witness.push([0x00; 108]); // fake signature
+            wallet
+                .database
+                .borrow_mut()
+                .del_utxo(&txin.previous_output)
+                .unwrap();
+        }
+        original_details.transaction = Some(tx);
+        wallet
+            .database
+            .borrow_mut()
+            .set_tx(&original_details)
+            .unwrap();
+
+        let mut builder = wallet.build_fee_bump(txid).unwrap();
+        builder
+            .fee_rate(FeeRate::from_sat_per_vb(15.0))
+            .allow_shrinking(addr.script_pubkey())
+            .unwrap();
+        builder.finish().unwrap();
+    }
+
+    #[test]
     fn test_sign_single_xprv() {
         let (wallet, _, _) = get_funded_wallet("wpkh(tprv8ZgxMBicQKsPd3EupYiPRhaMooHKUHJxNsTfYuScep13go8QFfHdtkG9nRkFGb7busX4isf6X9dURGCoKgitaApQ6MupRhZMcELAxTBRJgS/*)");
         let addr = wallet.get_address(New).unwrap();
@@ -3989,6 +4120,70 @@ pub(crate) mod test {
             psbt.inputs[0].final_script_witness.is_some(),
             "should finalized input it signed"
         )
+    }
+
+    #[test]
+    fn test_remove_partial_sigs_after_finalize_sign_option() {
+        let (wallet, _, _) = get_funded_wallet("wpkh(tprv8ZgxMBicQKsPd3EupYiPRhaMooHKUHJxNsTfYuScep13go8QFfHdtkG9nRkFGb7busX4isf6X9dURGCoKgitaApQ6MupRhZMcELAxTBRJgS/*)");
+
+        for remove_partial_sigs in &[true, false] {
+            let addr = wallet.get_address(New).unwrap();
+            let mut builder = wallet.build_tx();
+            builder.drain_to(addr.script_pubkey()).drain_wallet();
+            let mut psbt = builder.finish().unwrap().0;
+
+            assert!(wallet
+                .sign(
+                    &mut psbt,
+                    SignOptions {
+                        remove_partial_sigs: *remove_partial_sigs,
+                        ..Default::default()
+                    },
+                )
+                .unwrap());
+
+            psbt.inputs.iter().for_each(|input| {
+                if *remove_partial_sigs {
+                    assert!(input.partial_sigs.is_empty())
+                } else {
+                    assert!(!input.partial_sigs.is_empty())
+                }
+            });
+        }
+    }
+
+    #[test]
+    fn test_try_finalize_sign_option() {
+        let (wallet, _, _) = get_funded_wallet("wpkh(tprv8ZgxMBicQKsPd3EupYiPRhaMooHKUHJxNsTfYuScep13go8QFfHdtkG9nRkFGb7busX4isf6X9dURGCoKgitaApQ6MupRhZMcELAxTBRJgS/*)");
+
+        for try_finalize in &[true, false] {
+            let addr = wallet.get_address(New).unwrap();
+            let mut builder = wallet.build_tx();
+            builder.drain_to(addr.script_pubkey()).drain_wallet();
+            let mut psbt = builder.finish().unwrap().0;
+
+            let finalized = wallet
+                .sign(
+                    &mut psbt,
+                    SignOptions {
+                        try_finalize: *try_finalize,
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+
+            psbt.inputs.iter().for_each(|input| {
+                if *try_finalize {
+                    assert!(finalized);
+                    assert!(input.final_script_sig.is_some());
+                    assert!(input.final_script_witness.is_some());
+                } else {
+                    assert!(!finalized);
+                    assert!(input.final_script_sig.is_none());
+                    assert!(input.final_script_witness.is_none());
+                }
+            });
+        }
     }
 
     #[test]
@@ -4271,7 +4466,7 @@ pub(crate) mod test {
             wallet.get_address(AddressIndex::New).unwrap(),
             AddressInfo {
                 index: 0,
-                address: Address::from_str("bcrt1qkmvk2nadgplmd57ztld8nf8v2yxkzmdvwtjf8s").unwrap(),
+                address: Address::from_str("bcrt1qrhgaqu0zvf5q2d0gwwz04w0dh0cuehhqvzpp4w").unwrap(),
                 keychain: KeychainKind::External,
             }
         );
@@ -4280,7 +4475,7 @@ pub(crate) mod test {
             wallet.get_internal_address(AddressIndex::New).unwrap(),
             AddressInfo {
                 index: 0,
-                address: Address::from_str("bcrt1qtrwtz00wxl69e5xex7amy4xzlxkaefg3gfdkxa").unwrap(),
+                address: Address::from_str("bcrt1q0ue3s5y935tw7v3gmnh36c5zzsaw4n9c9smq79").unwrap(),
                 keychain: KeychainKind::Internal,
             }
         );
@@ -4297,7 +4492,7 @@ pub(crate) mod test {
             wallet.get_internal_address(AddressIndex::New).unwrap(),
             AddressInfo {
                 index: 0,
-                address: Address::from_str("bcrt1qkmvk2nadgplmd57ztld8nf8v2yxkzmdvwtjf8s").unwrap(),
+                address: Address::from_str("bcrt1qrhgaqu0zvf5q2d0gwwz04w0dh0cuehhqvzpp4w").unwrap(),
                 keychain: KeychainKind::Internal,
             },
             "when there's no internal descriptor it should just use external"
@@ -4683,5 +4878,71 @@ pub(crate) mod test {
             sighash as u8,
             "The signature should have been made with the right sighash"
         );
+    }
+
+    #[test]
+    fn test_spend_coinbase() {
+        let descriptors = testutils!(@descriptors (get_test_wpkh()));
+        let wallet = Wallet::new(
+            &descriptors.0,
+            None,
+            Network::Regtest,
+            AnyDatabase::Memory(MemoryDatabase::new()),
+        )
+        .unwrap();
+
+        let confirmation_time = 5;
+
+        crate::populate_test_db!(
+            wallet.database.borrow_mut(),
+            testutils! (@tx ( (@external descriptors, 0) => 25_000 ) (@confirmations 1)),
+            Some(confirmation_time),
+            (@coinbase true)
+        );
+
+        let not_yet_mature_time = confirmation_time + COINBASE_MATURITY - 1;
+        let maturity_time = confirmation_time + COINBASE_MATURITY;
+
+        // The balance is nonzero, even if we can't spend anything
+        // FIXME: we should differentiate the balance between immature,
+        // trusted, untrusted_pending
+        // See https://github.com/bitcoindevkit/bdk/issues/238
+        let balance = wallet.get_balance().unwrap();
+        assert!(balance != 0);
+
+        // We try to create a transaction, only to notice that all
+        // our funds are unspendable
+        let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
+        let mut builder = wallet.build_tx();
+        builder
+            .add_recipient(addr.script_pubkey(), balance / 2)
+            .current_height(confirmation_time);
+        assert!(matches!(
+            builder.finish().unwrap_err(),
+            Error::InsufficientFunds {
+                needed: _,
+                available: 0
+            }
+        ));
+
+        // Still unspendable...
+        let mut builder = wallet.build_tx();
+        builder
+            .add_recipient(addr.script_pubkey(), balance / 2)
+            .current_height(not_yet_mature_time);
+        assert!(matches!(
+            builder.finish().unwrap_err(),
+            Error::InsufficientFunds {
+                needed: _,
+                available: 0
+            }
+        ));
+
+        // ...Now the coinbase is mature :)
+        let mut builder = wallet.build_tx();
+        builder
+            .add_recipient(addr.script_pubkey(), balance / 2)
+            .current_height(maturity_time);
+        builder.finish().unwrap();
     }
 }

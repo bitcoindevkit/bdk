@@ -98,6 +98,13 @@ impl GetTx for ElectrumBlockchain {
     }
 }
 
+impl GetBlockHash for ElectrumBlockchain {
+    fn get_block_hash(&self, height: u64) -> Result<BlockHash, Error> {
+        let block_header = self.client.block_header(height as usize)?;
+        Ok(block_header.block_hash())
+    }
+}
+
 impl WalletSync for ElectrumBlockchain {
     fn wallet_setup<D: BatchDatabase>(
         &self,
@@ -108,7 +115,10 @@ impl WalletSync for ElectrumBlockchain {
         let mut block_times = HashMap::<u32, u32>::new();
         let mut txid_to_height = HashMap::<Txid, u32>::new();
         let mut tx_cache = TxCache::new(database, &self.client);
-        let chunk_size = self.stop_gap;
+
+        // Set chunk_size to the smallest value capable of finding a gap greater than stop_gap.
+        let chunk_size = self.stop_gap + 1;
+
         // The electrum server has been inconsistent somehow in its responses during sync. For
         // example, we do a batch request of transactions and the response contains less
         // tranascations than in the request. This should never happen but we don't want to panic.
@@ -144,21 +154,12 @@ impl WalletSync for ElectrumBlockchain {
 
                 Request::Conftime(conftime_req) => {
                     // collect up to chunk_size heights to fetch from electrum
-                    let needs_block_height = {
-                        let mut needs_block_height_iter = conftime_req
-                            .request()
-                            .filter_map(|txid| txid_to_height.get(txid).cloned())
-                            .filter(|height| block_times.get(height).is_none());
-                        let mut needs_block_height = HashSet::new();
-
-                        while needs_block_height.len() < chunk_size {
-                            match needs_block_height_iter.next() {
-                                Some(height) => needs_block_height.insert(height),
-                                None => break,
-                            };
-                        }
-                        needs_block_height
-                    };
+                    let needs_block_height = conftime_req
+                        .request()
+                        .filter_map(|txid| txid_to_height.get(txid).cloned())
+                        .filter(|height| block_times.get(height).is_none())
+                        .take(chunk_size)
+                        .collect::<HashSet<u32>>();
 
                     let new_block_headers = self
                         .client
@@ -328,6 +329,7 @@ mod test {
     use super::*;
     use crate::database::MemoryDatabase;
     use crate::testutils::blockchain_tests::TestClient;
+    use crate::testutils::configurable_blockchain_tests::ConfigurableBlockchainTester;
     use crate::wallet::{AddressIndex, Wallet};
 
     crate::bdk_blockchain_tests! {
@@ -384,5 +386,30 @@ mod test {
             .unwrap();
 
         assert_eq!(wallet.get_balance().unwrap(), 50_000);
+    }
+
+    #[test]
+    fn test_electrum_with_variable_configs() {
+        struct ElectrumTester;
+
+        impl ConfigurableBlockchainTester<ElectrumBlockchain> for ElectrumTester {
+            const BLOCKCHAIN_NAME: &'static str = "Electrum";
+
+            fn config_with_stop_gap(
+                &self,
+                test_client: &mut TestClient,
+                stop_gap: usize,
+            ) -> Option<ElectrumBlockchainConfig> {
+                Some(ElectrumBlockchainConfig {
+                    url: test_client.electrsd.electrum_url.clone(),
+                    socks5: None,
+                    retry: 0,
+                    timeout: None,
+                    stop_gap: stop_gap,
+                })
+            }
+        }
+
+        ElectrumTester.run();
     }
 }

@@ -158,13 +158,6 @@ pub trait Database: BatchOperations {
     ///
     /// It should insert and return `0` if not present in the database
     fn increment_last_index(&mut self, keychain: KeychainKind) -> Result<u32, Error>;
-
-    #[deprecated(
-        since = "0.18.0",
-        note = "The flush function is only needed for the sled database on mobile, instead for mobile use the sqlite database."
-    )]
-    /// Force changes to be written to disk
-    fn flush(&mut self) -> Result<(), Error>;
 }
 
 /// Trait for a database that supports batch operations

@@ -449,10 +449,6 @@ impl Database for MemoryDatabase {
 
         Ok(*value)
     }
-
-    fn flush(&mut self) -> Result<(), Error> {
-        Ok(())
-    }
 }
 
 impl BatchDatabase for MemoryDatabase {
@@ -486,15 +482,23 @@ impl ConfigurableDatabase for MemoryDatabase {
 /// don't have `test` set.
 macro_rules! populate_test_db {
     ($db:expr, $tx_meta:expr, $current_height:expr$(,)?) => {{
+        $crate::populate_test_db!($db, $tx_meta, $current_height, (@coinbase false))
+    }};
+    ($db:expr, $tx_meta:expr, $current_height:expr, (@coinbase $is_coinbase:expr)$(,)?) => {{
         use std::str::FromStr;
         use $crate::database::BatchOperations;
         let mut db = $db;
         let tx_meta = $tx_meta;
         let current_height: Option<u32> = $current_height;
+        let input = if $is_coinbase {
+            vec![$crate::bitcoin::TxIn::default()]
+        } else {
+            vec![]
+        };
         let tx = $crate::bitcoin::Transaction {
             version: 1,
             lock_time: 0,
-            input: vec![],
+            input,
             output: tx_meta
                 .output
                 .iter()
@@ -508,10 +512,13 @@ macro_rules! populate_test_db {
         };
 
         let txid = tx.txid();
-        let confirmation_time = tx_meta.min_confirmations.map(|conf| $crate::BlockTime {
-            height: current_height.unwrap().checked_sub(conf as u32).unwrap(),
-            timestamp: 0,
-        });
+        let confirmation_time = tx_meta
+            .min_confirmations
+            .and_then(|v| if v == 0 { None } else { Some(v) })
+            .map(|conf| $crate::BlockTime {
+                height: current_height.unwrap().checked_sub(conf as u32).unwrap() + 1,
+                timestamp: 0,
+            });
 
         let tx_details = $crate::TransactionDetails {
             transaction: Some(tx.clone()),

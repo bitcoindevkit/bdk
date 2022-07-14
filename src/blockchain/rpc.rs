@@ -169,6 +169,12 @@ impl GetHeight for RpcBlockchain {
     }
 }
 
+impl GetBlockHash for RpcBlockchain {
+    fn get_block_hash(&self, height: u64) -> Result<BlockHash, Error> {
+        Ok(self.client.get_block_hash(height)?)
+    }
+}
+
 impl WalletSync for RpcBlockchain {
     fn wallet_setup<D: BatchDatabase>(
         &self,
@@ -334,7 +340,7 @@ impl WalletSync for RpcBlockchain {
                     ),
                     received,
                     sent,
-                    fee: tx_result.fee.map(|f| f.as_sat().abs() as u64),
+                    fee: tx_result.fee.map(|f| f.as_sat().unsigned_abs()),
                 };
                 debug!(
                     "saving tx: {} tx_result.fee:{:?} td.fees:{:?}",

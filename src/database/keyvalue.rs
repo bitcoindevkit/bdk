@@ -166,16 +166,9 @@ macro_rules! impl_batch_operations {
         fn del_last_index(&mut self, keychain: KeychainKind) -> Result<Option<u32>, Error> {
             let key = MapKey::LastIndex(keychain).as_map_key();
             let res = self.remove(key);
-            let res = $process_delete!(res);
-
-            match res {
-                None => Ok(None),
-                Some(b) => {
-                    let array: [u8; 4] = b.as_ref().try_into().map_err(|_| Error::InvalidU32Bytes(b.to_vec()))?;
-                    let val = u32::from_be_bytes(array);
-                    Ok(Some(val))
-                }
-            }
+            $process_delete!(res)
+            .map(ivec_to_u32)
+            .transpose()
         }
 
         fn del_sync_time(&mut self) -> Result<Option<SyncTime>, Error> {
@@ -357,16 +350,7 @@ impl Database for Tree {
 
     fn get_last_index(&self, keychain: KeychainKind) -> Result<Option<u32>, Error> {
         let key = MapKey::LastIndex(keychain).as_map_key();
-        self.get(key)?
-            .map(|b| -> Result<_, Error> {
-                let array: [u8; 4] = b
-                    .as_ref()
-                    .try_into()
-                    .map_err(|_| Error::InvalidU32Bytes(b.to_vec()))?;
-                let val = u32::from_be_bytes(array);
-                Ok(val)
-            })
-            .transpose()
+        self.get(key)?.map(ivec_to_u32).transpose()
     }
 
     fn get_sync_time(&self) -> Result<Option<SyncTime>, Error> {
@@ -393,19 +377,17 @@ impl Database for Tree {
 
             Some(new.to_be_bytes().to_vec())
         })?
-        .map_or(Ok(0), |b| -> Result<_, Error> {
-            let array: [u8; 4] = b
-                .as_ref()
-                .try_into()
-                .map_err(|_| Error::InvalidU32Bytes(b.to_vec()))?;
-            let val = u32::from_be_bytes(array);
-            Ok(val)
-        })
+        .map_or(Ok(0), ivec_to_u32)
     }
+}
 
-    fn flush(&mut self) -> Result<(), Error> {
-        Ok(Tree::flush(self).map(|_| ())?)
-    }
+fn ivec_to_u32(b: sled::IVec) -> Result<u32, Error> {
+    let array: [u8; 4] = b
+        .as_ref()
+        .try_into()
+        .map_err(|_| Error::InvalidU32Bytes(b.to_vec()))?;
+    let val = u32::from_be_bytes(array);
+    Ok(val)
 }
 
 impl BatchDatabase for Tree {

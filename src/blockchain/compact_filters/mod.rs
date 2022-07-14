@@ -260,6 +260,16 @@ impl GetTx for CompactFiltersBlockchain {
     }
 }
 
+impl GetBlockHash for CompactFiltersBlockchain {
+    fn get_block_hash(&self, height: u64) -> Result<BlockHash, Error> {
+        self.headers
+            .get_block_hash(height as usize)?
+            .ok_or(Error::CompactFilters(
+                CompactFiltersError::BlockHashNotFound,
+            ))
+    }
+}
+
 impl WalletSync for CompactFiltersBlockchain {
     #[allow(clippy::mutex_atomic)] // Mutex is easier to understand than a CAS loop.
     fn wallet_setup<D: BatchDatabase>(
@@ -536,6 +546,8 @@ pub enum CompactFiltersError {
     InvalidFilter,
     /// The peer is missing a block in the valid chain
     MissingBlock,
+    /// Block hash at specified height not found
+    BlockHashNotFound,
     /// The data stored in the block filters storage are corrupted
     DataCorruption,
 
