@@ -41,25 +41,18 @@ pub struct TransactionItem {
 /// Contains the "required" methods of [`SpendableCollection`], where all other methods could be
 /// deried from (albiet probably not in an optimised manner).
 pub trait SpendableCollectionInner {
-    /// Iterates though descriptors with associated keychain kind.
-    type DescIter: Iterator<Item = DescriptorItem> + ExactSizeIterator;
-
-    /// Iterates though signers.
-    type SignerIter: Iterator<Item = Arc<dyn TransactionSigner>>;
-
-    /// Iterates through UTXOs with associated weight.
-    type UtxoIter: Iterator<Item = (LocalUtxo, usize)>;
-
     /// Returns an iterator that ranges through all owned descriptors.
-    fn iter_descriptors(&self) -> Result<Self::DescIter, Error>;
+    fn iter_descriptors(&self) -> Result<Box<dyn Iterator<Item = DescriptorItem> + '_>, Error>;
 
     /// Returns an iterator that ranges through all owned signers.
-    fn iter_signers(&self) -> Result<Self::SignerIter, Error>;
+    fn iter_signers(
+        &self,
+    ) -> Result<Box<dyn Iterator<Item = Arc<dyn TransactionSigner>> + '_>, Error>;
 
     /// Obtains owned UTXOs alongside their satisfaction weights.
     ///     Warning: It is possible that the returned list contains a UTXO currently used as an
     ///     unconfirmed tx input.
-    fn iter_utxos(&self) -> Result<Self::UtxoIter, Error>;
+    fn iter_utxos(&self) -> Result<Box<dyn Iterator<Item = (LocalUtxo, usize)> + '_>, Error>;
 
     /// Obtains transaction (and details) of given txid.
     ///
@@ -239,26 +232,20 @@ impl<'a, D: BatchDatabase> SpendableDatabase<'a, D> {
 }
 
 impl<'a, D: BatchDatabase> SpendableCollectionInner for SpendableDatabase<'a, D> {
-    type DescIter = DatabaseDescIter<'a, D>;
-
-    type SignerIter = std::vec::IntoIter<Arc<dyn TransactionSigner>>;
-
-    type UtxoIter = std::vec::IntoIter<(LocalUtxo, usize)>;
-
-    fn iter_descriptors(&self) -> Result<Self::DescIter, Error> {
-        Ok(DatabaseDescIter::<'_>(self.clone(), 0))
+    fn iter_descriptors(&self) -> Result<Box<dyn Iterator<Item = DescriptorItem> + '_>, Error> {
+        Ok(Box::new(DatabaseDescIter::<'_>(self.clone(), 0)))
     }
 
-    fn iter_signers(&self) -> Result<Self::SignerIter, Error> {
-        #[allow(clippy::needless_collect)]
+    fn iter_signers(
+        &self,
+    ) -> Result<Box<dyn Iterator<Item = Arc<dyn TransactionSigner>> + '_>, Error> {
         let signers = self
             .signers
             .iter()
             .flat_map(|cont| cont.signers())
-            .map(Arc::clone)
-            .collect::<Vec<_>>();
+            .map(Arc::clone);
 
-        Ok(signers.into_iter())
+        Ok(Box::new(signers))
     }
 
     /// TODO @evanlinjin:
@@ -272,25 +259,23 @@ impl<'a, D: BatchDatabase> SpendableCollectionInner for SpendableDatabase<'a, D>
     ///
     /// For now, we need to ensure the aforementioned relationship is sufficiently cached to
     /// avoid "missing" available UTXOs.
-    fn iter_utxos(&self) -> Result<Self::UtxoIter, Error> {
-        #[allow(clippy::needless_collect)]
+    fn iter_utxos(&self) -> Result<Box<dyn Iterator<Item = (LocalUtxo, usize)> + '_>, Error> {
         let utxos = self
             .db
             .borrow()
             .iter_utxos()?
             .into_iter()
             .filter(|utxo| !utxo.is_spent)
-            .filter_map(|utxo| {
+            .filter_map(move |utxo| {
                 let (item, _) = self
                     // @evanlinjin: Will panic with default implementation on timeout.
                     .get_path_of_script_pubkey(&utxo.txout.script_pubkey)
                     .unwrap()?;
                 let weight = item.descriptor.max_satisfaction_weight().unwrap();
                 Some((utxo, weight))
-            })
-            .collect::<Vec<_>>();
+            });
 
-        Ok(utxos.into_iter())
+        Ok(Box::new(utxos))
     }
 
     fn get_tx(&self, txid: &Txid) -> Result<Option<TransactionItem>, Error> {
