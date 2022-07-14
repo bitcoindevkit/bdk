@@ -14,6 +14,7 @@ use crate::descriptor::get_checksum;
 use crate::{Error, FeeRate, KeychainKind};
 use bitcoincore_rpc::json::{
     ImportMultiOptions, ImportMultiRequest, ImportMultiRequestScriptPubkey, ImportMultiRescanSince,
+    ScanTxOutRequest, ScanTxOutResult,
 };
 use bitcoincore_rpc::jsonrpc::serde_json::{json, Value};
 use bitcoincore_rpc::Auth as PrunedRpcAuth;
@@ -119,11 +120,17 @@ impl GetHeight for PrunedRpcBlockchain {
     }
 }
 
+impl GetBlockHash for PrunedRpcBlockchain {
+    fn get_block_hash(&self, height: u64) -> Result<BlockHash, Error> {
+        Ok(self.client.get_block_hash(height)?)
+    }
+}
+
 impl WalletSync for PrunedRpcBlockchain {
     fn wallet_setup<D: BatchDatabase>(
         &self,
         database: &mut D,
-        _progress_update: Box<dyn Progress>,
+        progress_update: Box<dyn Progress>,
     ) -> Result<(), Error> {
         let mut script_pubkeys = database.iter_script_pubkeys(Some(KeychainKind::External))?;
         script_pubkeys.extend(database.iter_script_pubkeys(Some(KeychainKind::Internal))?);
@@ -178,8 +185,13 @@ impl WalletSync for PrunedRpcBlockchain {
         // make a request using scantxout and loop through it here
         // the scan needs to have all the descriptors in it
         // see how to make sure you're scanning the minimum possible set
-
-        todo!()
+        let mut descriptors: Vec<ScanTxOutRequest> = vec![];
+        for script in script_pubkeys {
+            let desc = format!("raw({})", script.to_hex());
+            descriptors.push(ScanTxOutRequest::Single(desc));
+        }
+        let _res: Result<ScanTxOutResult, _> = self.client.scan_tx_out_set_blocking(&descriptors);
+        self.wallet_sync(database, progress_update)
     }
 
     fn wallet_sync<D: BatchDatabase>(
@@ -364,6 +376,18 @@ mod test {
 
     use bitcoin::Network;
     use bitcoincore_rpc::RpcApi;
+
+    // crate::bdk_blockchain_tests! {
+    //     fn test_instance(test_client: &TestClient) -> PrunedRpcBlockchain {
+    //         let config = PrunedRpcConfig {
+    //             url: test_client.bitcoind.rpc_url(),
+    //             auth: Auth::Cookie { file: test_client.bitcoind.params.cookie_file.clone() },
+    //             network: Network::Regtest,
+    //             wallet_name: format!("client-wallet-test-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos() ),
+    //         };
+    //         PrunedRpcBlockchain::from_config(&config).unwrap()
+    //     }
+    // }
 
     fn get_factory() -> (TestClient, PrunedRpcBlockchainFactory) {
         let test_client = TestClient::default();
