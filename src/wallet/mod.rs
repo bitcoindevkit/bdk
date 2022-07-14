@@ -50,6 +50,7 @@ pub mod verify;
 
 pub use utils::IsDust;
 
+#[allow(deprecated)]
 use address_validator::AddressValidator;
 use coin_selection::DefaultCoinSelectionAlgorithm;
 use signer::{SignOptions, SignerOrdering, SignersContainer, TransactionSigner};
@@ -94,6 +95,7 @@ pub struct Wallet<D> {
     signers: Arc<SignersContainer>,
     change_signers: Arc<SignersContainer>,
 
+    #[allow(deprecated)]
     address_validators: Vec<Arc<dyn AddressValidator>>,
 
     network: Network,
@@ -500,11 +502,17 @@ where
     /// Add an address validator
     ///
     /// See [the `address_validator` module](address_validator) for an example.
+    #[deprecated]
+    #[allow(deprecated)]
     pub fn add_address_validator(&mut self, validator: Arc<dyn AddressValidator>) {
         self.address_validators.push(validator);
     }
 
     /// Get the address validators
+    ///
+    /// See [the `address_validator` module](address_validator).
+    #[deprecated]
+    #[allow(deprecated)]
     pub fn get_address_validators(&self) -> &[Arc<dyn AddressValidator>] {
         &self.address_validators
     }
@@ -1267,6 +1275,7 @@ where
         let script = derived_descriptor.script_pubkey();
 
         for validator in &self.address_validators {
+            #[allow(deprecated)]
             validator.validate(keychain, &hd_keypaths, &script)?;
         }
 
@@ -2058,7 +2067,7 @@ pub(crate) mod test {
             .set_sync_time(sync_time)
             .unwrap();
         let current_height = 25;
-        builder.set_current_height(current_height);
+        builder.current_height(current_height);
         let (psbt, _) = builder.finish().unwrap();
 
         // current_height will override the last sync height
@@ -2106,7 +2115,7 @@ pub(crate) mod test {
         let mut builder = wallet.build_tx();
         builder
             .add_recipient(addr.script_pubkey(), 25_000)
-            .set_current_height(630_001)
+            .current_height(630_001)
             .nlocktime(630_000);
         let (psbt, _) = builder.finish().unwrap();
 
@@ -4907,7 +4916,7 @@ pub(crate) mod test {
         let mut builder = wallet.build_tx();
         builder
             .add_recipient(addr.script_pubkey(), balance / 2)
-            .set_current_height(confirmation_time);
+            .current_height(confirmation_time);
         assert!(matches!(
             builder.finish().unwrap_err(),
             Error::InsufficientFunds {
@@ -4920,7 +4929,7 @@ pub(crate) mod test {
         let mut builder = wallet.build_tx();
         builder
             .add_recipient(addr.script_pubkey(), balance / 2)
-            .set_current_height(not_yet_mature_time);
+            .current_height(not_yet_mature_time);
         assert!(matches!(
             builder.finish().unwrap_err(),
             Error::InsufficientFunds {
@@ -4933,7 +4942,7 @@ pub(crate) mod test {
         let mut builder = wallet.build_tx();
         builder
             .add_recipient(addr.script_pubkey(), balance / 2)
-            .set_current_height(maturity_time);
+            .current_height(maturity_time);
         builder.finish().unwrap();
     }
 }

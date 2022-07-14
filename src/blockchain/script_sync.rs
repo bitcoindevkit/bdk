@@ -314,6 +314,22 @@ impl<'a, D: BatchDatabase> State<'a, D> {
         let finished_txs = make_txs_consistent(&self.finished_txs);
         let observed_txids: HashSet<Txid> = finished_txs.iter().map(|tx| tx.txid).collect();
         let txids_to_delete = existing_txids.difference(&observed_txids);
+
+        // Ensure `last_active_index` does not decrement database's current state.
+        let index_updates = self
+            .last_active_index
+            .iter()
+            .map(|(keychain, sync_index)| {
+                let sync_index = *sync_index as u32;
+                let index_res = match self.db.get_last_index(*keychain) {
+                    Ok(Some(db_index)) => Ok(std::cmp::max(db_index, sync_index)),
+                    Ok(None) => Ok(sync_index),
+                    Err(err) => Err(err),
+                };
+                index_res.map(|index| (*keychain, index))
+            })
+            .collect::<Result<Vec<(KeychainKind, u32)>, _>>()?;
+
         let mut batch = self.db.begin_batch();
 
         // Delete old txs that no longer exist
@@ -377,8 +393,10 @@ impl<'a, D: BatchDatabase> State<'a, D> {
             batch.set_tx(finished_tx)?;
         }
 
-        for (keychain, last_active_index) in self.last_active_index {
-            batch.set_last_index(keychain, last_active_index as u32)?;
+        // apply index updates
+        for (keychain, new_index) in index_updates {
+            debug!("updating index ({}, {})", keychain.as_byte(), new_index);
+            batch.set_last_index(keychain, new_index)?;
         }
 
         info!(
