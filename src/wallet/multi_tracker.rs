@@ -39,6 +39,23 @@ pub struct TransactionItem {
     pub fees: Option<u64>,
 }
 
+/// Contains a local tx output and it's associated data
+/// TODO @evanlinjin: Figure out if this is useful
+#[derive(Debug, Clone)]
+pub struct LocalOutputItem {
+    /// References this output
+    pub outpoint: OutPoint,
+    /// The actual tx output
+    pub txout: TxOut,
+    /// Confirmation time (if any) of the tx that contains this output
+    pub confirmed: Option<BlockTime>,
+    /// Path for `scriptPubKey` creation (descriptor_item, child_index)
+    pub script_path: (DescriptorItem, u32),
+    /// Satisfaction weight for the `scriptPubKey` (required weight of corresponding
+    /// `scriptSig`/`witness` data)
+    pub satisfaction_weight: u32,
+}
+
 /// Contains the "required" methods of [`MultiTracker`], where all other methods could be
 /// deried from (albiet probably not in an optimised manner).
 ///
