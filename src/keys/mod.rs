@@ -13,6 +13,7 @@
 
 use std::any::TypeId;
 use std::collections::HashSet;
+use std::fmt::{Display, Formatter};
 use std::marker::PhantomData;
 use std::ops::Deref;
 use std::str::FromStr;
@@ -20,6 +21,7 @@ use std::str::FromStr;
 use bitcoin::secp256k1::{self, Secp256k1, Signing};
 
 use bitcoin::util::bip32;
+use bitcoin::util::bip32::{DerivationPath, KeySource};
 use bitcoin::{Network, PrivateKey, PublicKey, XOnlyPublicKey};
 
 use miniscript::descriptor::{Descriptor, DescriptorXKey, Wildcard};
@@ -94,6 +96,76 @@ impl<Ctx: ScriptContext> DescriptorKey<Ctx> {
         }
     }
 
+    /// Derive a new `DescriptorKey` at a given `DerivationPath` keeping the extended path part the same.
+    pub fn derive(&self, path: DerivationPath) -> Result<Self, KeyError> {
+        let secp = Secp256k1::new();
+        match self {
+            DescriptorKey::Public(DescriptorPublicKey::XPub(xpub), _, _) => {
+                let key_source: KeySource = match xpub.origin.clone() {
+                    None => (xpub.xkey.fingerprint(), path.clone()),
+                    Some((fingerprint, origin_path)) => {
+                        (fingerprint, origin_path.extend(path.clone()))
+                    }
+                };
+                let derived_xpub = xpub.xkey.derive_pub(&secp, &path)?;
+                let derived_descriptor_key = derived_xpub
+                    .into_descriptor_key(Some(key_source), xpub.derivation_path.clone())?;
+                Ok(derived_descriptor_key)
+            }
+            DescriptorKey::Secret(DescriptorSecretKey::XPrv(xprv), _, _) => {
+                let key_source: KeySource = match xprv.origin.clone() {
+                    None => (xprv.xkey.fingerprint(&secp), path.clone()),
+                    Some((fingerprint, origin_path)) => {
+                        (fingerprint, origin_path.extend(path.clone()))
+                    }
+                };
+                let derived_xpub = xprv.xkey.derive_priv(&secp, &path)?;
+                let derived_descriptor_key = derived_xpub
+                    .into_descriptor_key(Some(key_source), xprv.derivation_path.clone())?;
+                Ok(derived_descriptor_key)
+            }
+            // TODO support all types
+            _ => Err(KeyError::Message("Unsupported Key Type".to_string())),
+        }
+    }
+
+    /// Extend the extended path of a `DescriptorKey` with a given `DerivationPath` keeping the origin part the same.
+    pub fn extend(&self, path: DerivationPath) -> Result<Self, KeyError> {
+        match self {
+            DescriptorKey::Public(DescriptorPublicKey::XPub(xpub), _, _) => {
+                let key_source: Option<KeySource> = xpub.origin.clone();
+                let extended_descriptor_key = xpub
+                    .xkey
+                    .into_descriptor_key(key_source, xpub.derivation_path.extend(path))?;
+                Ok(extended_descriptor_key)
+            }
+            DescriptorKey::Secret(DescriptorSecretKey::XPrv(xprv), _, _) => {
+                let key_source: Option<KeySource> = xprv.origin.clone();
+                let extended_descriptor_key = xprv
+                    .xkey
+                    .into_descriptor_key(key_source, xprv.derivation_path.extend(path))?;
+                Ok(extended_descriptor_key)
+            }
+            // TODO support all types
+            _ => Err(KeyError::Message("Unsupported Key Type".to_string())),
+        }
+    }
+
+    /// Create a new public key version of the `DescriptorKey`, if already public will return the same key.
+    fn as_public(&self) -> Self {
+        let secp = Secp256k1::new();
+
+        match self {
+            DescriptorKey::Public(descriptor_public_key, network, _) => {
+                DescriptorKey::from_public(descriptor_public_key.clone(), network.clone())
+            }
+            DescriptorKey::Secret(descriptor_secret_key, network, _) => {
+                let descriptor_public_key = descriptor_secret_key.as_public(&secp).unwrap();
+                DescriptorKey::from_public(descriptor_public_key, network.clone())
+            }
+        }
+    }
+
     // This method is used internally by `bdk::fragment!` and `bdk::descriptor!`. It has to be
     // public because it is effectively called by external crates, once the macros are expanded,
     // but since it is not meant to be part of the public api we hide it from the docs.
@@ -115,6 +187,19 @@ impl<Ctx: ScriptContext> DescriptorKey<Ctx> {
                 key_map.insert(public.clone(), secret);
 
                 Ok((public, key_map, valid_networks))
+            }
+        }
+    }
+}
+
+impl<Ctx: ScriptContext> Display for DescriptorKey<Ctx> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DescriptorKey::Public(descriptor_public_key, _, _) => {
+                write!(f, "{}", descriptor_public_key.to_string())
+            }
+            DescriptorKey::Secret(descriptor_secret_key, _, _) => {
+                write!(f, "{}", descriptor_secret_key.to_string())
             }
         }
     }
@@ -983,5 +1068,84 @@ pub mod test {
         let xprv = xkey.into_xprv(Network::Testnet).unwrap();
 
         assert_eq!(xprv.network, Network::Testnet);
+    }
+
+    #[test]
+    fn test_descriptor_key_derive() {
+        let generated_xprv: GeneratedKey<_, miniscript::Segwitv0> =
+            bip32::ExtendedPrivKey::generate_with_entropy_default(TEST_ENTROPY).unwrap();
+        let descriptor_key = generated_xprv
+            .into_descriptor_key(None, DerivationPath::default())
+            .unwrap();
+        assert_eq!(descriptor_key.to_string(), "xprv9s21ZrQH143K4Xr1cJyqTvuL2FWR8eicgY9boWqMBv8MDVUZ65AXHnzBrK1nyomu6wdcabRgmGTaAKawvhAno1V5FowGpTLVx3jxzE5uk3Q/*");
+
+        let derivation_path1 = DerivationPath::from_str("m/0/1/2").unwrap();
+        let derived_descriptor_key1 = descriptor_key.derive(derivation_path1).unwrap();
+        assert_eq!(derived_descriptor_key1.to_string(), "[f007308b/0/1/2]xprv9yvqSfj4xRGnndsLmpTTuPE3QwAHkmAvCEbpgxhBPvGcFSyi6wGpZTziiEhD3bpKLf7cKhfavzHgoYvSuwqQ6yaeeFdG673MfNo4aYJFUQG/*");
+
+        let derivation_path2 = DerivationPath::from_str("m/3/4/5").unwrap();
+        let derived_descriptor_key2 = derived_descriptor_key1.derive(derivation_path2).unwrap();
+        assert_eq!(derived_descriptor_key2.to_string(), "[f007308b/0/1/2/3/4/5]xprvA4cQ9Bfd5ptGH82JecGtKoPG8bQkmV4q1v1MGnG5mTiJLvnjmNJisuutnYQCeyJRiCYAEVu54ZneHGnR2V81r64nSQ27aZwrEHCYkBVmhjJ/*");
+
+        let derivation_path3 = DerivationPath::from_str("m/0/1/2/3/4/5").unwrap();
+        let derived_descriptor_key3 = descriptor_key.derive(derivation_path3).unwrap();
+        assert_eq!(
+            derived_descriptor_key2.to_string(),
+            derived_descriptor_key3.to_string()
+        );
+    }
+
+    #[test]
+    fn test_descriptor_key_extend() {
+        let generated_xprv: GeneratedKey<_, miniscript::Segwitv0> =
+            bip32::ExtendedPrivKey::generate_with_entropy_default(TEST_ENTROPY).unwrap();
+        let descriptor_key = generated_xprv
+            .into_descriptor_key(None, DerivationPath::default())
+            .unwrap();
+        assert_eq!(descriptor_key.to_string(),"xprv9s21ZrQH143K4Xr1cJyqTvuL2FWR8eicgY9boWqMBv8MDVUZ65AXHnzBrK1nyomu6wdcabRgmGTaAKawvhAno1V5FowGpTLVx3jxzE5uk3Q/*");
+
+        let derivation_path = DerivationPath::from_str("m/0/1/2").unwrap();
+        let derived_descriptor_key1 = descriptor_key.derive(derivation_path).unwrap();
+        assert_eq!(derived_descriptor_key1.to_string(),"[f007308b/0/1/2]xprv9yvqSfj4xRGnndsLmpTTuPE3QwAHkmAvCEbpgxhBPvGcFSyi6wGpZTziiEhD3bpKLf7cKhfavzHgoYvSuwqQ6yaeeFdG673MfNo4aYJFUQG/*");
+
+        let extended_path1 = DerivationPath::from_str("m/3/4/5").unwrap();
+        let extended_descriptor_key1 = derived_descriptor_key1.extend(extended_path1).unwrap();
+        assert_eq!(extended_descriptor_key1.to_string(), "[f007308b/0/1/2]xprv9yvqSfj4xRGnndsLmpTTuPE3QwAHkmAvCEbpgxhBPvGcFSyi6wGpZTziiEhD3bpKLf7cKhfavzHgoYvSuwqQ6yaeeFdG673MfNo4aYJFUQG/3/4/5/*");
+
+        let extended_path2 = DerivationPath::from_str("m/6/7/8").unwrap();
+        let extended_descriptor_key2 = extended_descriptor_key1.extend(extended_path2).unwrap();
+        assert_eq!(extended_descriptor_key2.to_string(), "[f007308b/0/1/2]xprv9yvqSfj4xRGnndsLmpTTuPE3QwAHkmAvCEbpgxhBPvGcFSyi6wGpZTziiEhD3bpKLf7cKhfavzHgoYvSuwqQ6yaeeFdG673MfNo4aYJFUQG/3/4/5/6/7/8/*");
+
+        let extended_path3 = DerivationPath::from_str("m/3/4/5/6/7/8").unwrap();
+        let extended_descriptor_key3 = derived_descriptor_key1.extend(extended_path3).unwrap();
+        assert_eq!(
+            extended_descriptor_key2.to_string(),
+            extended_descriptor_key3.to_string()
+        );
+    }
+
+    #[test]
+    fn test_descriptor_key_as_public() {
+        let generated_xprv: GeneratedKey<_, miniscript::Segwitv0> =
+            bip32::ExtendedPrivKey::generate_with_entropy_default(TEST_ENTROPY).unwrap();
+        let descriptor_key = generated_xprv
+            .into_descriptor_key(None, DerivationPath::default())
+            .unwrap();
+        assert_eq!(descriptor_key.to_string(),"xprv9s21ZrQH143K4Xr1cJyqTvuL2FWR8eicgY9boWqMBv8MDVUZ65AXHnzBrK1nyomu6wdcabRgmGTaAKawvhAno1V5FowGpTLVx3jxzE5uk3Q/*");
+
+        let public_descriptor_key1 = descriptor_key.as_public();
+        assert_eq!(public_descriptor_key1.to_string(),"xpub661MyMwAqRbcH1vUiLWqq4r4aHLuY7SU3m5CbuExkFfL6HohdcUmqbJfhccvv3g5zwMBu57oq59icgs1sCnsMXeDdVZQrvTLcS1fokbsGMT/*");
+
+        let derivation_path1 = DerivationPath::from_str("m/0/1/2").unwrap();
+        let derived_descriptor_key1 = descriptor_key.derive(derivation_path1).unwrap();
+        assert_eq!(derived_descriptor_key1.to_string(), "[f007308b/0/1/2]xprv9yvqSfj4xRGnndsLmpTTuPE3QwAHkmAvCEbpgxhBPvGcFSyi6wGpZTziiEhD3bpKLf7cKhfavzHgoYvSuwqQ6yaeeFdG673MfNo4aYJFUQG/*");
+
+        let public_derived_descriptor_key1 = derived_descriptor_key1.as_public();
+        assert_eq!(public_derived_descriptor_key1.to_string(),"[f007308b/0/1/2]xpub6CvBrBFxnnq617wosqzUGXAmxxznADtmZTXRVM6nxFob8FJreUb57GKCZX1ekfVCJjKgsqWRDo595srhCQq5JizTM6f8XoBPWWYUKgTxfDg/*");
+
+        let extended_path1 = DerivationPath::from_str("m/3/4/5").unwrap();
+        let extended_descriptor_key1 = derived_descriptor_key1.extend(extended_path1).unwrap();
+        let public_extended_descriptor_key1 = extended_descriptor_key1.as_public();
+        assert_eq!(public_extended_descriptor_key1.to_string(),"[f007308b/0/1/2]xpub6CvBrBFxnnq617wosqzUGXAmxxznADtmZTXRVM6nxFob8FJreUb57GKCZX1ekfVCJjKgsqWRDo595srhCQq5JizTM6f8XoBPWWYUKgTxfDg/3/4/5/*");
     }
 }
