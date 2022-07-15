@@ -904,7 +904,7 @@ impl<Ctx: ScriptContext + 'static> ExtractPolicy for Miniscript<DescriptorPublic
                     ..
                 } = build_sat
                 {
-                    let after = After::new(Some(current_height), false);
+                    let after = After::new(Some(current_height), None, false);
                     let after_sat = Satisfier::<bitcoin::PublicKey>::check_after(&after, *value);
                     let inputs_sat = psbt_inputs_sat(psbt)
                         .all(|sat| Satisfier::<bitcoin::PublicKey>::check_after(&sat, *value));
@@ -929,7 +929,13 @@ impl<Ctx: ScriptContext + 'static> ExtractPolicy for Miniscript<DescriptorPublic
                     psbt,
                 } = build_sat
                 {
-                    let older = Older::new(Some(current_height), Some(input_max_height), false);
+                    let older = Older::new(
+                        Some(current_height),
+                        None,
+                        Some(input_max_height),
+                        None,
+                        false,
+                    );
                     let older_sat = Satisfier::<bitcoin::PublicKey>::check_older(&older, *value);
                     let inputs_sat = psbt_inputs_sat(psbt)
                         .all(|sat| Satisfier::<bitcoin::PublicKey>::check_older(&sat, *value));

@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Move change creation from `Wallet::create_tx` to `CoinSelectionAlgorithm::coin_select`.
 - Change the interface of `SqliteDatabase::new` to accept any type that implement AsRef<Path>
 - Change trait `GetBlockHash` to `GetBlockInfo`. A new function is added to the new trait `get_block_header` which expects a block height and returns corresponding block header. This is implemented on every blockchain backend.
+- Amend the struct `After` and `Older` to accept and check against timestamps as well.
 
 ## [v0.20.0] - [v0.19.0]
 

@@ -44,14 +44,20 @@ impl IsDust for u64 {
 
 pub struct After {
     pub current_height: Option<u32>,
-    pub assume_height_reached: bool,
+    pub current_time: Option<u32>,
+    pub assume_reached: bool,
 }
 
 impl After {
-    pub(crate) fn new(current_height: Option<u32>, assume_height_reached: bool) -> After {
+    pub(crate) fn new(
+        current_height: Option<u32>,
+        current_time: Option<u32>,
+        assume_reached: bool,
+    ) -> After {
         After {
             current_height,
-            assume_height_reached,
+            current_time,
+            assume_reached,
         }
     }
 }
@@ -96,41 +102,61 @@ pub(crate) fn check_nlocktime(nlocktime: u32, required: u32) -> bool {
 
 impl<Pk: MiniscriptKey + ToPublicKey> Satisfier<Pk> for After {
     fn check_after(&self, n: u32) -> bool {
-        if let Some(current_height) = self.current_height {
-            current_height >= n
+        if n < BLOCKS_TIMELOCK_THRESHOLD {
+            if let Some(current_height) = self.current_height {
+                current_height >= n
+            } else {
+                self.assume_reached
+            }
+        } else if let Some(current_time) = self.current_time {
+            current_time >= n
         } else {
-            self.assume_height_reached
+            self.assume_reached
         }
     }
 }
 
 pub struct Older {
     pub current_height: Option<u32>,
+    pub current_time: Option<u32>,
     pub create_height: Option<u32>,
-    pub assume_height_reached: bool,
+    pub create_time: Option<u32>,
+    pub assume_reached: bool,
 }
 
 impl Older {
     pub(crate) fn new(
         current_height: Option<u32>,
+        current_time: Option<u32>,
         create_height: Option<u32>,
-        assume_height_reached: bool,
+        create_time: Option<u32>,
+        assume_reached: bool,
     ) -> Older {
         Older {
             current_height,
+            current_time,
             create_height,
-            assume_height_reached,
+            create_time,
+            assume_reached,
         }
     }
 }
 
 impl<Pk: MiniscriptKey + ToPublicKey> Satisfier<Pk> for Older {
     fn check_older(&self, n: u32) -> bool {
-        if let Some(current_height) = self.current_height {
+        let masked_n = n & SEQUENCE_LOCKTIME_MASK;
+        if n & SEQUENCE_LOCKTIME_TYPE_FLAG == 0 {
+            if let Some(current_height) = self.current_height {
+                // TODO: test >= / >
+                current_height as u64 >= self.create_height.unwrap_or(0) as u64 + masked_n as u64
+            } else {
+                self.assume_reached
+            }
+        } else if let Some(current_time) = self.current_time {
             // TODO: test >= / >
-            current_height as u64 >= self.create_height.unwrap_or(0) as u64 + n as u64
+            current_time as u64 >= self.create_time.unwrap_or(0) as u64 + masked_n as u64
         } else {
-            self.assume_height_reached
+            self.assume_reached
         }
     }
 }

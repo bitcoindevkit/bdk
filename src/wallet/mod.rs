@@ -16,6 +16,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::collections::{BTreeMap, HashSet};
+use std::convert::TryInto;
 use std::fmt;
 use std::ops::{Deref, DerefMut};
 use std::str::FromStr;
@@ -1155,15 +1156,37 @@ where
                 .borrow()
                 .get_tx(&input.previous_output.txid, false)?
                 .map(|tx| tx.confirmation_time.map(|c| c.height).unwrap_or(u32::MAX));
+            let create_time = self
+                .database
+                .borrow()
+                .get_tx(&input.previous_output.txid, false)?
+                .map(|tx| {
+                    tx.confirmation_time
+                        .map(|c| {
+                            c.timestamp
+                                .try_into()
+                                .expect("Time is greater than 0xFFFFFFFF")
+                        })
+                        .unwrap_or(u32::MAX)
+                });
             let last_sync_height = self
                 .database()
                 .get_sync_time()?
                 .map(|sync_time| sync_time.block_time.height);
             let current_height = sign_options.assume_height.or(last_sync_height);
+            // TODO: Change current time to median time of latest 11 blocks with Blockchain::GetBlockInfo
+            // according to BIP-113
+            let current_time = self.database().get_sync_time()?.map(|sync_time| {
+                sync_time
+                    .block_time
+                    .timestamp
+                    .try_into()
+                    .expect("Time is greater than 0xFFFFFFFF")
+            });
 
             debug!(
-                "Input #{} - {}, using `create_height` = {:?}, `current_height` = {:?}",
-                n, input.previous_output, create_height, current_height
+                "Input #{} - {}, using `create_height` = {:?}, `current_height` = {:?}, `create_time` = {:?}, `current_time` = {:?}",
+                n, input.previous_output, create_height, current_height, create_time, current_time
             );
 
             // - Try to derive the descriptor by looking at the txout. If it's in our database, we
@@ -1197,8 +1220,16 @@ where
                         &mut tmp_input,
                         (
                             PsbtInputSatisfier::new(psbt, n),
-                            After::new(current_height, false),
-                            Older::new(current_height, create_height, false),
+                            // FIXME: The satisfier doesn't call check methods of After and Older defined in wallet/utils.rs
+                            // Instead it calls the implementations defined in miniscript
+                            After::new(current_height, current_time, false),
+                            Older::new(
+                                current_height,
+                                current_time,
+                                create_height,
+                                create_time,
+                                false,
+                            ),
                         ),
                     ) {
                         Ok(_) => {
@@ -1962,9 +1993,19 @@ pub(crate) mod test {
         "wsh(or_d(pk(cRjo6jqfVNP33HhSS76UhXETZsGTZYx8FMFvR9kpbtCSV1PmdZdu),and_v(v:pk(cMnkdebixpXMPfkcNEjjGin7s94hiehAH4mLbYkZoh9KSiNNmqC8),older(144))))"
     }
 
+    pub(crate) fn get_test_single_sig_csv_with_time() -> &'static str {
+        // and(pk(Alice),older(4194904)) // (1 << 22) | 600 -> lock of 600 seconds with type time
+        "wsh(and_v(v:pk(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW),older(4194904)))"
+    }
+
     pub(crate) fn get_test_single_sig_cltv() -> &'static str {
         // and(pk(Alice),after(100000))
         "wsh(and_v(v:pk(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW),after(100000)))"
+    }
+
+    pub(crate) fn get_test_single_sig_cltv_with_future_time() -> &'static str {
+        // and(pk(Alice),after(1893456000)) // Tue Jan 01 2030 00:00:00 GMT+0000
+        "wsh(and_v(v:pk(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW),after(1893456000)))"
     }
 
     pub(crate) fn get_test_tr_single_sig() -> &'static str {
@@ -2155,6 +2196,54 @@ pub(crate) mod test {
         let (psbt, _) = builder.finish().unwrap();
 
         assert_eq!(psbt.unsigned_tx.lock_time, 100_000);
+    }
+
+    #[test]
+    fn test_create_tx_locktime_cltv_with_time() {
+        let (wallet, _, _) = get_funded_wallet(get_test_single_sig_cltv_with_future_time());
+        let addr = wallet.get_address(New).unwrap();
+        let mut builder = wallet.build_tx();
+        builder.add_recipient(addr.script_pubkey(), 25_000);
+        let (psbt, _) = builder.finish().unwrap();
+        let after = After::new(None, Some(time::get_timestamp() as u32), false);
+        let after_sat = miniscript::Satisfier::<bitcoin::PublicKey>::check_after(
+            &after,
+            psbt.unsigned_tx.lock_time,
+        );
+
+        assert!(!after_sat);
+
+        let after = After::new(None, Some(1893456000), false);
+        let after_sat = miniscript::Satisfier::<bitcoin::PublicKey>::check_after(
+            &after,
+            psbt.unsigned_tx.lock_time,
+        );
+        assert!(after_sat);
+    }
+
+    #[test]
+    fn test_create_tx_locktime_csv_with_time() {
+        let (wallet, _, _) = get_funded_wallet(get_test_single_sig_csv_with_time());
+        let addr = wallet.get_address(New).unwrap();
+        let mut builder = wallet.build_tx();
+        builder.add_recipient(addr.script_pubkey(), 25_000);
+        let (psbt, _) = builder.finish().unwrap();
+        let time_stamp = Some(time::get_timestamp() as u32);
+        let late_time_stamp = Some(time::get_timestamp() as u32 + 601);
+
+        let older = Older::new(None, time_stamp, None, time_stamp, false);
+        let older_sat = miniscript::Satisfier::<bitcoin::PublicKey>::check_older(
+            &older,
+            psbt.unsigned_tx.input[0].sequence,
+        );
+        assert!(!older_sat);
+
+        let older = Older::new(None, late_time_stamp, None, time_stamp, false);
+        let older_sat = miniscript::Satisfier::<bitcoin::PublicKey>::check_older(
+            &older,
+            psbt.unsigned_tx.input[0].sequence,
+        );
+        assert!(older_sat);
     }
 
     #[test]
