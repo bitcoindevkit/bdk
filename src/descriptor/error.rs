@@ -28,8 +28,8 @@ pub enum Error {
     /// Error while extracting and manipulating policies
     Policy(crate::descriptor::policy::PolicyError),
 
-    /// Invalid character found in the descriptor checksum
-    InvalidDescriptorCharacter(char),
+    /// Invalid byte found in the descriptor checksum
+    InvalidDescriptorCharacter(u8),
 
     /// BIP32 error
     Bip32(bitcoin::util::bip32::Error),
