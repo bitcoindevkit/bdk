@@ -21,7 +21,7 @@ use std::str::FromStr;
 use bitcoin::secp256k1::{self, Secp256k1, Signing};
 
 use bitcoin::util::bip32;
-use bitcoin::util::bip32::{DerivationPath, KeySource};
+use bitcoin::util::bip32::{DerivationPath, ExtendedPrivKey, KeySource};
 use bitcoin::{Network, PrivateKey, PublicKey, XOnlyPublicKey};
 
 use miniscript::descriptor::{Descriptor, DescriptorXKey, Wildcard};
@@ -96,6 +96,18 @@ impl<Ctx: ScriptContext> DescriptorKey<Ctx> {
         }
     }
 
+    /// Generate an `ExtendedPrivKey` based `DescriptorKey` with the default generate options and random entropy.
+    pub fn generate_xprv(network: Network) -> Result<Self, KeyError> {
+        let mut xprv = <ExtendedPrivKey as GeneratableDefaultOptions<Ctx>>::generate_default()?;
+        //dbg!(&xprv);
+        xprv.key.network = network;
+        xprv.into_descriptor_key(None, DerivationPath::default())
+            .map(|k| match network {
+                Network::Bitcoin => k.override_valid_networks(mainnet_network()),
+                _ => k.override_valid_networks(test_networks()),
+            })
+    }
+
     /// Derive a new `DescriptorKey` at a given `DerivationPath` keeping the extended path part the same.
     pub fn derive(&self, path: DerivationPath) -> Result<Self, KeyError> {
         let secp = Secp256k1::new();
@@ -152,7 +164,7 @@ impl<Ctx: ScriptContext> DescriptorKey<Ctx> {
     }
 
     /// Create a new public key version of the `DescriptorKey`, if already public will return the same key.
-    fn as_public(&self) -> Self {
+    pub fn as_public(&self) -> Self {
         let secp = Secp256k1::new();
 
         match self {
@@ -196,10 +208,10 @@ impl<Ctx: ScriptContext> Display for DescriptorKey<Ctx> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             DescriptorKey::Public(descriptor_public_key, _, _) => {
-                write!(f, "{}", descriptor_public_key.to_string())
+                write!(f, "{}", descriptor_public_key)
             }
             DescriptorKey::Secret(descriptor_secret_key, _, _) => {
-                write!(f, "{}", descriptor_secret_key.to_string())
+                write!(f, "{}", descriptor_secret_key)
             }
         }
     }
@@ -1029,6 +1041,8 @@ impl std::error::Error for KeyError {}
 #[cfg(test)]
 pub mod test {
     use bitcoin::util::bip32;
+    use bitcoin::Network::{Bitcoin, Testnet};
+    use miniscript::BareCtx;
 
     use super::*;
 
@@ -1068,6 +1082,25 @@ pub mod test {
         let xprv = xkey.into_xprv(Network::Testnet).unwrap();
 
         assert_eq!(xprv.network, Network::Testnet);
+    }
+
+    #[test]
+    fn test_descriptor_key_generate_master_xprv() {
+        let testnet_key: DescriptorKey<BareCtx> = DescriptorKey::generate_xprv(Testnet).unwrap();
+        assert!(
+            matches!(&testnet_key, DescriptorKey::Secret(_, networks, _) if networks.eq(&test_networks()))
+        );
+        assert!(
+            matches!(&testnet_key.as_public(), DescriptorKey::Public(_, networks, _) if networks.eq(&test_networks()))
+        );
+
+        let mainnet_key: DescriptorKey<BareCtx> = DescriptorKey::generate_xprv(Bitcoin).unwrap();
+        assert!(
+            matches!(&mainnet_key, DescriptorKey::Secret(_, networks, _) if networks.eq(&mainnet_network()))
+        );
+        assert!(
+            matches!(&mainnet_key.as_public(), DescriptorKey::Public(_, networks, _) if networks.eq(&mainnet_network()))
+        );
     }
 
     #[test]

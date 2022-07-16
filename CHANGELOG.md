@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add `Excess` enum to handle remaining amount after coin selection.
 - Move change creation from `Wallet::create_tx` to `CoinSelectionAlgorithm::coin_select`.
 - Add `DescriptorKey` `derive`, `extend`, `to_public` and `to_string` functions
+- Add `DescriptorKey` `generate_xprv`, `derive`, `extend`, `to_public` and `to_string` functions.
 
 ## [v0.20.0] - [v0.19.0]
 
