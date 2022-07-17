@@ -148,16 +148,14 @@ pub trait MultiTracker: MultiTrackerInner {
     /// Obtain output of the provided outpoint.
     /// Output may not be owned by us, just be part of a transaction that we are keeping track of.
     fn get_output(&self, outpoint: &OutPoint) -> Result<Option<TxOut>, Error> {
-        self.get_tx(&outpoint.txid)?.map_or_else(
-            || Err(Error::InvalidOutpoint(*outpoint)),
-            |tx_item| {
-                Ok(tx_item
-                    .raw
-                    .output
-                    .get(outpoint.vout as usize)
-                    .map(Clone::clone))
-            },
-        )
+        match self.get_tx(&outpoint.txid)? {
+            // return error if vout is invalid
+            Some(tx) => tx.raw.output.get(outpoint.vout as usize).map_or_else(
+                || Err(Error::InvalidOutpoint(*outpoint)),
+                |tx_out| Ok(Some(tx_out.clone())),
+            ),
+            None => Ok(None),
+        }
     }
 
     /// Returns whether given script is owned by us, or not.
