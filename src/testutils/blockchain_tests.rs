@@ -743,7 +743,6 @@ macro_rules! bdk_blockchain_tests {
 
                 blockchain.broadcast(&tx1).expect("broadcasting first");
                 blockchain.broadcast(&tx2).expect("broadcasting replacement");
-
                 receiver_wallet.sync(&blockchain, SyncOptions::default()).expect("syncing receiver");
                 assert_eq!(receiver_wallet.get_balance().expect("balance"), 49_000, "should have received coins once and only once");
             }

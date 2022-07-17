@@ -1685,20 +1685,62 @@ where
     ) -> Result<(), Error> {
         debug!("Begin sync...");
 
-        let SyncOptions { progress } = sync_opts;
-        let progress = progress.unwrap_or_else(|| Box::new(NoopProgress));
+        // TODO: for the next runs, we cannot reuse the `sync_opts.progress` object due to trait
+        // restrictions
+        let mut progress_iter = sync_opts.progress.into_iter();
+        let mut new_progress = || {
+            progress_iter
+                .next()
+                .unwrap_or_else(|| Box::new(NoopProgress))
+        };
 
         let run_setup = self.ensure_addresses_cached(CACHE_ADDR_BATCH_SIZE)?;
-
         debug!("run_setup: {}", run_setup);
+
         // TODO: what if i generate an address first and cache some addresses?
         // TODO: we should sync if generating an address triggers a new batch to be stored
-        if run_setup {
-            maybe_await!(
-                blockchain.wallet_setup(self.database.borrow_mut().deref_mut(), progress,)
+
+        // We need to ensure descriptor is derivable to fullfil "missing cache", otherwise we will
+        // end up with an infinite loop
+        let is_deriveable = self.descriptor.is_deriveable()
+            && (self.change_descriptor.is_none()
+                || self.change_descriptor.as_ref().unwrap().is_deriveable());
+
+        // Restrict max rounds in case of faulty "missing cache" implementation by blockchain
+        let max_rounds = if is_deriveable { 100 } else { 1 };
+
+        for _ in 0..max_rounds {
+            let sync_res =
+                if run_setup {
+                    maybe_await!(blockchain
+                        .wallet_setup(self.database.borrow_mut().deref_mut(), new_progress()))
+                } else {
+                    maybe_await!(blockchain
+                        .wallet_sync(self.database.borrow_mut().deref_mut(), new_progress()))
+                };
+
+            // If the error is the special `MissingCachedScripts` error, we return the number of
+            // scripts we should ensure cached.
+            // On any other error, we should return the error.
+            // On no error, we say `ensure_cache` is 0.
+            let ensure_cache = sync_res.map_or_else(
+                |e| match e {
+                    Error::MissingCachedScripts(inner) => {
+                        // each call to `WalletSync` is expensive, maximize on scripts to search for
+                        let extra =
+                            std::cmp::max(inner.missing_count as u32, CACHE_ADDR_BATCH_SIZE);
+                        let last = inner.last_count as u32;
+                        Ok(extra + last)
+                    }
+                    _ => Err(e),
+                },
+                |_| Ok(0_u32),
             )?;
-        } else {
-            maybe_await!(blockchain.wallet_sync(self.database.borrow_mut().deref_mut(), progress,))?;
+
+            // cache and try again, break when there is nothing to cache
+            if !self.ensure_addresses_cached(ensure_cache)? {
+                break;
+            }
         }
 
         let sync_time = SyncTime {
