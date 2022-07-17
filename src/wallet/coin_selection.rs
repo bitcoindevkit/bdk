@@ -141,15 +141,15 @@ impl CoinSelectionResult {
 
 /// Trait for generalized coin selection algorithms
 ///
-/// This trait can be implemented to make the [`Wallet`](super::Wallet) use a customized coin
-/// selection algorithm when it creates transactions.
+/// This trait can be implemented to make the [`TxBuilder`](super::tx_builder::TxBuilder) use a
+/// customized coin selection algorithm when it creates transactions.
 ///
 /// For an example see [this module](crate::wallet::coin_selection)'s documentation.
 pub trait CoinSelectionAlgorithm: std::fmt::Debug {
     /// Perform the coin selection
     ///
-    /// - `database`: a reference to the wallet's database that can be used to lookup additional
-    ///               details for a specific UTXO
+    /// - `multi_tracker`: a reference to the multi-descriptor tracker that can be used to lookup
+    ///                     additional details for a specific UTXO
     /// - `required_utxos`: the utxos that must be spent regardless of `amount_needed` with their
     ///                     weight cost
     /// - `optional_utxos`: the remaining available utxos to satisfy `amount_needed` with their
@@ -158,9 +158,9 @@ pub trait CoinSelectionAlgorithm: std::fmt::Debug {
     /// - `amount_needed`: the amount in satoshi to select
     /// - `fee_amount`: the amount of fees in satoshi already accumulated from adding outputs and
     ///                 the transaction's header
-    fn coin_select<Sc: MultiTracker>(
+    fn coin_select<Mt: MultiTracker>(
         &self,
-        database: &Sc,
+        multi_tracker: &Mt,
         required_utxos: Vec<WeightedUtxo>,
         optional_utxos: Vec<WeightedUtxo>,
         fee_rate: FeeRate,
@@ -177,9 +177,9 @@ pub trait CoinSelectionAlgorithm: std::fmt::Debug {
 pub struct LargestFirstCoinSelection;
 
 impl CoinSelectionAlgorithm for LargestFirstCoinSelection {
-    fn coin_select<D: MultiTracker>(
+    fn coin_select<Mt: MultiTracker>(
         &self,
-        _database: &D,
+        _multi_tracker: &Mt,
         required_utxos: Vec<WeightedUtxo>,
         mut optional_utxos: Vec<WeightedUtxo>,
         fee_rate: FeeRate,
@@ -215,9 +215,9 @@ impl CoinSelectionAlgorithm for LargestFirstCoinSelection {
 pub struct OldestFirstCoinSelection;
 
 impl CoinSelectionAlgorithm for OldestFirstCoinSelection {
-    fn coin_select<D: MultiTracker>(
+    fn coin_select<Mt: MultiTracker>(
         &self,
-        database: &D,
+        multi_tracker: &Mt,
         required_utxos: Vec<WeightedUtxo>,
         mut optional_utxos: Vec<WeightedUtxo>,
         fee_rate: FeeRate,
@@ -234,7 +234,7 @@ impl CoinSelectionAlgorithm for OldestFirstCoinSelection {
                     if bh_acc.contains_key(&txid) {
                         Ok(bh_acc)
                     } else {
-                        database.get_tx(&txid).map(|details| {
+                        multi_tracker.get_tx(&txid).map(|details| {
                             let conf_time =
                                 details.and_then(|tx| tx.confirmed.map(|conf| conf.height));
                             bh_acc.insert(txid, conf_time);
@@ -362,9 +362,9 @@ impl BranchAndBoundCoinSelection {
 const BNB_TOTAL_TRIES: usize = 100_000;
 
 impl CoinSelectionAlgorithm for BranchAndBoundCoinSelection {
-    fn coin_select<D: MultiTracker>(
+    fn coin_select<Mt: MultiTracker>(
         &self,
-        _database: &D,
+        _multi_tracker: &Mt,
         required_utxos: Vec<WeightedUtxo>,
         optional_utxos: Vec<WeightedUtxo>,
         fee_rate: FeeRate,
