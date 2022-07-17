@@ -110,6 +110,8 @@ pub trait MultiTrackerInner {
 pub trait MultiTracker: MultiTrackerInner {
     /// Obtains parent [`ExtendedDescriptor`] and child index of the provided `ScriptPubKey`.
     /// Note that if the script is not owned, None shoud be returned.
+    ///
+    /// The default implementation of this method is very inefficient and should be overloaded.
     fn get_path_of_script_pubkey(
         &self,
         script: &Script,
@@ -118,7 +120,7 @@ pub trait MultiTracker: MultiTrackerInner {
 
         let secp = SecpCtx::new();
 
-        for index in 0..2100_u32 {
+        for index in 0..200_u32 {
             for item in &descriptors {
                 let desc = item.descriptor.clone();
                 let derived_script = desc.as_derived(index, &secp).script_pubkey();
@@ -395,7 +397,7 @@ impl<'a, D: BatchDatabase> MultiTracker for LegacyTracker<'a, D> {
 
         let descriptors = self.iter_descriptors()?.collect::<Vec<_>>();
 
-        for index in start..start + 2100_u32 {
+        for index in start..start + 200_u32 {
             for item in &descriptors {
                 let derived_script = item
                     .descriptor
