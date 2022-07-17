@@ -680,7 +680,7 @@ mod test {
     fn tx(utxo: &mut WeightedUtxo, lock_time: u32) -> (Transaction, Txid) {
         let local = match &mut utxo.utxo {
             Utxo::Local(local) => local,
-            _ => panic!(),
+            _ => panic!("utxo should be a `LocalUtxo`"),
         };
         let tx = Transaction {
             version: 2,
