@@ -167,12 +167,12 @@ pub trait MultiTracker: MultiTrackerInner {
     /// Obtains a new change address without a descriptor provided explicitly
     #[deprecated]
     fn new_auto_address(&self) -> Result<AddressInfo, Error> {
-        let (mut internal, mut external): (Vec<_>, Vec<_>) = self
+        let (internal, external): (Vec<_>, Vec<_>) = self
             .iter_descriptors()?
             .partition(|item| item.keychain == KeychainKind::Internal);
 
-        internal.append(&mut external);
-
+        // This should obtain the internal descriptor (if exists), all obtains the external
+        // descriptor as fallback.
         let item = internal.iter().chain(external.iter()).next().unwrap();
 
         #[allow(deprecated)]
