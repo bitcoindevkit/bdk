@@ -6,6 +6,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- Add `descriptor::checksum::get_checksum_bytes` method.
 
 ## [v0.20.0] - [v0.19.0]
 
