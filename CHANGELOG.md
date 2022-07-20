@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add `descriptor::checksum::get_checksum_bytes` method.
 - Add `Excess` enum to handle remaining amount after coin selection.
 - Move change creation from `Wallet::create_tx` to `CoinSelectionAlgorithm::coin_select`.
+- Change the interface of `SqliteDatabase::new` to accept any type that implement AsRef<Path>
 
 ## [v0.20.0] - [v0.19.0]
 
