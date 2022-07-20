@@ -95,6 +95,7 @@ use bdk::blockchain::ElectrumBlockchain;
 use bdk::electrum_client::Client;
 use bdk::wallet::AddressIndex::New;
 
+use bitcoin::base64;
 use bitcoin::consensus::serialize;
 
 fn main() -> Result<(), bdk::Error> {
@@ -131,6 +132,7 @@ fn main() -> Result<(), bdk::Error> {
 ```rust,no_run
 use bdk::{Wallet, SignOptions, database::MemoryDatabase};
 
+use bitcoin::base64;
 use bitcoin::consensus::deserialize;
 
 fn main() -> Result<(), bdk::Error> {
@@ -154,7 +156,7 @@ fn main() -> Result<(), bdk::Error> {
 
 ### Unit testing
 
-```
+```bash
 cargo test
 ```
 
@@ -162,7 +164,7 @@ cargo test
 
 Integration testing require testing features, for example:
 
-```
+```bash
 cargo test --features test-electrum
 ```
 
