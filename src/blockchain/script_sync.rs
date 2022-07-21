@@ -5,6 +5,7 @@ returns associated transactions i.e. electrum.
 #![allow(dead_code)]
 use crate::{
     database::{BatchDatabase, BatchOperations, DatabaseUtils},
+    error::MissingCachedScripts,
     wallet::time::Instant,
     BlockTime, Error, KeychainKind, LocalUtxo, TransactionDetails,
 };
@@ -34,11 +35,12 @@ pub fn start<D: BatchDatabase>(db: &D, stop_gap: usize) -> Result<Request<'_, D>
     let scripts_needed = db
         .iter_script_pubkeys(Some(keychain))?
         .into_iter()
-        .collect();
+        .collect::<VecDeque<_>>();
     let state = State::new(db);
 
     Ok(Request::Script(ScriptReq {
         state,
+        initial_scripts_needed: scripts_needed.len(),
         scripts_needed,
         script_index: 0,
         stop_gap,
@@ -50,6 +52,7 @@ pub fn start<D: BatchDatabase>(db: &D, stop_gap: usize) -> Result<Request<'_, D>
 pub struct ScriptReq<'a, D: BatchDatabase> {
     state: State<'a, D>,
     script_index: usize,
+    initial_scripts_needed: usize, // if this is 1, we assume the descriptor is not derivable
     scripts_needed: VecDeque<Script>,
     stop_gap: usize,
     keychain: KeychainKind,
@@ -113,43 +116,71 @@ impl<'a, D: BatchDatabase> ScriptReq<'a, D> {
             self.script_index += 1;
         }
 
-        for _ in txids {
-            self.scripts_needed.pop_front();
-        }
+        self.scripts_needed.drain(..txids.len());
 
-        let last_active_index = self
+        // last active index: 0 => No last active
+        let last = self
             .state
             .last_active_index
             .get(&self.keychain)
-            .map(|x| x + 1)
-            .unwrap_or(0); // so no addresses active maps to 0
+            .map(|&l| l + 1)
+            .unwrap_or(0);
+        // remaining scripts left to check
+        let remaining = self.scripts_needed.len();
+        // difference between current index and last active index
+        let current_gap = self.script_index - last;
 
-        Ok(
-            if self.script_index > last_active_index + self.stop_gap
-                || self.scripts_needed.is_empty()
-            {
-                debug!(
-                    "finished scanning for transactions for keychain {:?} at index {}",
-                    self.keychain, last_active_index
-                );
-                // we're done here -- check if we need to do the next keychain
-                if let Some(keychain) = self.next_keychains.pop() {
-                    self.keychain = keychain;
-                    self.script_index = 0;
-                    self.scripts_needed = self
-                        .state
-                        .db
-                        .iter_script_pubkeys(Some(keychain))?
-                        .into_iter()
-                        .collect();
-                    Request::Script(self)
-                } else {
-                    Request::Tx(TxReq { state: self.state })
-                }
-            } else {
-                Request::Script(self)
-            },
-        )
+        // this is a hack to check whether the scripts are coming from a derivable descriptor
+        // we assume for non-derivable descriptors, the initial script count is always 1
+        let is_derivable = self.initial_scripts_needed > 1;
+
+        debug!(
+            "sync: last={}, remaining={}, diff={}, stop_gap={}",
+            last, remaining, current_gap, self.stop_gap
+        );
+
+        if is_derivable {
+            if remaining > 0 {
+                // we still have scriptPubKeys to do requests for
+                return Ok(Request::Script(self));
+            }
+
+            if last > 0 && current_gap < self.stop_gap {
+                // current gap is not large enough to stop, but we are unable to keep checking since
+                // we have exhausted cached scriptPubKeys, so return error
+                let err = MissingCachedScripts {
+                    last_count: self.script_index,
+                    missing_count: self.stop_gap - current_gap,
+                };
+                return Err(Error::MissingCachedScripts(err));
+            }
+
+            // we have exhausted cached scriptPubKeys and found no txs, continue
+        }
+
+        debug!(
+            "finished scanning for txs of keychain {:?} at index {:?}",
+            self.keychain, last
+        );
+
+        if let Some(keychain) = self.next_keychains.pop() {
+            // we still have another keychain to request txs with
+            let scripts_needed = self
+                .state
+                .db
+                .iter_script_pubkeys(Some(keychain))?
+                .into_iter()
+                .collect::<VecDeque<_>>();
+
+            self.keychain = keychain;
+            self.script_index = 0;
+            self.initial_scripts_needed = scripts_needed.len();
+            self.scripts_needed = scripts_needed;
+            return Ok(Request::Script(self));
+        }
+
+        // We have finished requesting txids, let's get the actual txs.
+        Ok(Request::Tx(TxReq { state: self.state }))
     }
 }
 
@@ -294,6 +325,8 @@ struct State<'a, D> {
     tx_missing_conftime: BTreeMap<Txid, TransactionDetails>,
     /// The start of the sync
     start_time: Instant,
+    /// Missing number of scripts to cache per keychain
+    missing_script_counts: HashMap<KeychainKind, usize>,
 }
 
 impl<'a, D: BatchDatabase> State<'a, D> {
@@ -305,6 +338,7 @@ impl<'a, D: BatchDatabase> State<'a, D> {
             tx_needed: BTreeSet::default(),
             tx_missing_conftime: BTreeMap::default(),
             start_time: Instant::new(),
+            missing_script_counts: HashMap::default(),
         }
     }
     fn into_db_update(self) -> Result<D::Batch, Error> {

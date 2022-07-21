@@ -13,7 +13,7 @@ use std::fmt;
 
 use crate::bitcoin::Network;
 use crate::{descriptor, wallet, wallet::address_validator};
-use bitcoin::OutPoint;
+use bitcoin::{OutPoint, Txid};
 
 /// Errors that can be thrown by the [`Wallet`](crate::wallet::Wallet)
 #[derive(Debug)]
@@ -125,6 +125,10 @@ pub enum Error {
     //DifferentDescriptorStructure,
     //Uncapable(crate::blockchain::Capability),
     //MissingCachedAddresses,
+    /// [`crate::blockchain::WalletSync`] sync attempt failed due to missing scripts in cache which
+    /// are needed to satisfy `stop_gap`.
+    MissingCachedScripts(MissingCachedScripts),
+
     #[cfg(feature = "electrum")]
     /// Electrum client error
     Electrum(electrum_client::Error),
@@ -143,6 +147,16 @@ pub enum Error {
     #[cfg(feature = "sqlite")]
     /// Rusqlite client error
     Rusqlite(rusqlite::Error),
+}
+
+/// Represents the last failed [`crate::blockchain::WalletSync`] sync attempt in which we were short
+/// on cached `scriptPubKey`s.
+#[derive(Debug)]
+pub struct MissingCachedScripts {
+    /// Number of scripts in which txs were requested during last request.
+    pub last_count: usize,
+    /// Minimum number of scripts to cache more of in order to satisfy `stop_gap`.
+    pub missing_count: usize,
 }
 
 impl fmt::Display for Error {
