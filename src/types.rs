@@ -63,6 +63,16 @@ impl FeeRate {
         FeeRate(value)
     }
 
+    /// Create a new instance of [`FeeRate`] given a float fee rate in sats/kwu
+    pub fn from_sat_per_kwu(sat_per_kwu: f32) -> Self {
+        FeeRate::new_checked(sat_per_kwu / 250.0_f32)
+    }
+
+    /// Create a new instance of [`FeeRate`] given a float fee rate in sats/kvb
+    pub fn from_sat_per_kvb(sat_per_kvb: f32) -> Self {
+        FeeRate::new_checked(sat_per_kvb / 1000.0_f32)
+    }
+
     /// Create a new instance of [`FeeRate`] given a float fee rate in btc/kvbytes
     ///
     /// ## Panics
@@ -98,7 +108,7 @@ impl FeeRate {
     }
 
     /// Return the value as satoshi/vbyte
-    pub fn as_sat_vb(&self) -> f32 {
+    pub fn as_sat_per_vb(&self) -> f32 {
         self.0
     }
 
@@ -109,7 +119,7 @@ impl FeeRate {
 
     /// Calculate absolute fee in Satoshis using size in virtual bytes.
     pub fn fee_vb(&self, vbytes: usize) -> u64 {
-        (self.as_sat_vb() * vbytes as f32).ceil() as u64
+        (self.as_sat_per_vb() * vbytes as f32).ceil() as u64
     }
 }
 
@@ -357,5 +367,35 @@ mod tests {
     #[test]
     fn test_valid_feerate_pos_zero() {
         let _ = FeeRate::from_sat_per_vb(0.0);
+    }
+
+    #[test]
+    fn test_fee_from_btc_per_kvb() {
+        let fee = FeeRate::from_btc_per_kvb(1e-5);
+        assert!((fee.as_sat_per_vb() - 1.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_fee_from_sat_per_vbyte() {
+        let fee = FeeRate::from_sat_per_vb(1.0);
+        assert!((fee.as_sat_per_vb() - 1.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_fee_default_min_relay_fee() {
+        let fee = FeeRate::default_min_relay_fee();
+        assert!((fee.as_sat_per_vb() - 1.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_fee_from_sat_per_kvb() {
+        let fee = FeeRate::from_sat_per_kvb(1000.0);
+        assert!((fee.as_sat_per_vb() - 1.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_fee_from_sat_per_kwu() {
+        let fee = FeeRate::from_sat_per_kwu(250.0);
+        assert!((fee.as_sat_per_vb() - 1.0).abs() < f32::EPSILON);
     }
 }

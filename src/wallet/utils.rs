@@ -144,7 +144,6 @@ mod test {
         SEQUENCE_LOCKTIME_TYPE_FLAG,
     };
     use crate::bitcoin::Address;
-    use crate::types::FeeRate;
     use std::str::FromStr;
 
     #[test]
@@ -162,24 +161,6 @@ mod test {
         assert!(script_p2wpkh.is_v0_p2wpkh());
         assert!(293.is_dust(&script_p2wpkh));
         assert!(!294.is_dust(&script_p2wpkh));
-    }
-
-    #[test]
-    fn test_fee_from_btc_per_kb() {
-        let fee = FeeRate::from_btc_per_kvb(1e-5);
-        assert!((fee.as_sat_vb() - 1.0).abs() < 0.0001);
-    }
-
-    #[test]
-    fn test_fee_from_sats_vbyte() {
-        let fee = FeeRate::from_sat_per_vb(1.0);
-        assert!((fee.as_sat_vb() - 1.0).abs() < 0.0001);
-    }
-
-    #[test]
-    fn test_fee_default_min_relay_fee() {
-        let fee = FeeRate::default_min_relay_fee();
-        assert!((fee.as_sat_vb() - 1.0).abs() < 0.0001);
     }
 
     #[test]
