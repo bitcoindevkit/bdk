@@ -36,6 +36,9 @@ use crate::descriptor::{CheckMiniscript, DescriptorError};
 use crate::wallet::utils::SecpCtx;
 
 #[cfg(feature = "keys-bip39")]
+use crate::bip39::Mnemonic;
+
+#[cfg(feature = "keys-bip39")]
 #[cfg_attr(docsrs, doc(cfg(feature = "keys-bip39")))]
 pub mod bip39;
 
@@ -96,7 +99,9 @@ impl<Ctx: ScriptContext> DescriptorKey<Ctx> {
         }
     }
 
-    /// Generate an `ExtendedPrivKey` based `DescriptorKey` with the default generate options and random entropy.
+    /// Generate an `ExtendedPrivKey` based `DescriptorKey` for a given network with the default
+    /// generate options and random entropy. The key will be a master xkey with no origin or
+    /// extended derivation path.
     pub fn generate_xprv(network: Network) -> Result<Self, KeyError> {
         let mut xprv = <ExtendedPrivKey as GeneratableDefaultOptions<Ctx>>::generate_default()?;
         //dbg!(&xprv);
@@ -108,7 +113,23 @@ impl<Ctx: ScriptContext> DescriptorKey<Ctx> {
             })
     }
 
-    /// Derive a new `DescriptorKey` at a given `DerivationPath` keeping the extended path part the same.
+    #[cfg(feature = "keys-bip39")]
+    /// Restore an `ExtendedPrivKey` based `DescriptorKey` for a given network from `Mnemonic`
+    /// seed words and optional password (BIP-39). The key will be a master xkey with no origin or
+    /// extended derivation path.
+    pub fn restore_xprv(
+        network: Network,
+        mnemonic: Mnemonic,
+        password: Option<String>,
+    ) -> Result<Self, KeyError> {
+        let xkey: ExtendedKey = (mnemonic, password).into_extended_key()?;
+        xkey.into_xprv(network)
+            .unwrap()
+            .into_descriptor_key(None, DerivationPath::master())
+    }
+
+    /// Derive a new `DescriptorKey` from the origin key at a given `DerivationPath` keeping the
+    /// extended path part the same.
     pub fn derive(&self, path: DerivationPath) -> Result<Self, KeyError> {
         let secp = Secp256k1::new();
         match self {
@@ -141,7 +162,8 @@ impl<Ctx: ScriptContext> DescriptorKey<Ctx> {
         }
     }
 
-    /// Extend the extended path of a `DescriptorKey` with a given `DerivationPath` keeping the origin part the same.
+    /// Extend the extended path of a `DescriptorKey` with a given `DerivationPath` keeping the
+    /// origin part the same.
     pub fn extend(&self, path: DerivationPath) -> Result<Self, KeyError> {
         match self {
             DescriptorKey::Public(DescriptorPublicKey::XPub(xpub), _, _) => {
@@ -163,7 +185,8 @@ impl<Ctx: ScriptContext> DescriptorKey<Ctx> {
         }
     }
 
-    /// Create a new public key version of the `DescriptorKey`, if already public will return the same key.
+    /// Create a new public key version of the `DescriptorKey`, if already public return a copy of
+    /// the same key.
     pub fn as_public(&self) -> Self {
         let secp = Secp256k1::new();
 
@@ -1085,7 +1108,7 @@ pub mod test {
     }
 
     #[test]
-    fn test_descriptor_key_generate_master_xprv() {
+    fn test_descriptor_key_generate_xprv() {
         let testnet_key: DescriptorKey<BareCtx> = DescriptorKey::generate_xprv(Testnet).unwrap();
         assert!(
             matches!(&testnet_key, DescriptorKey::Secret(_, networks, _) if networks.eq(&test_networks()))
@@ -1101,6 +1124,38 @@ pub mod test {
         assert!(
             matches!(&mainnet_key.as_public(), DescriptorKey::Public(_, networks, _) if networks.eq(&mainnet_network()))
         );
+    }
+
+    #[cfg(feature = "keys-bip39")]
+    #[test]
+    fn test_descriptor_key_restore_xprv() {
+        let mnemonic = bip39::Mnemonic::parse_in(
+            bip39::Language::English,
+            "jelly crash boy whisper mouse ecology tuna soccer memory million news short",
+        )
+        .unwrap();
+
+        let testnet_key: DescriptorKey<BareCtx> =
+            DescriptorKey::restore_xprv(Testnet, mnemonic.clone(), None).unwrap();
+
+        assert!(
+            matches!(&testnet_key, DescriptorKey::Secret(_, networks, _) if networks.eq(&test_networks()))
+        );
+        assert_eq!(&testnet_key.to_string(), "tprv8ZgxMBicQKsPeor8zpRV385751w5QDjDA2rf8ek8LTQQbAh7WX7XrD2Wt1UQSaj2ATZwgu7dUMWMBqKUmQhnHCQkMoAJJAx7hRuwC1RPR7a/*");
+
+        let mainnet_key: DescriptorKey<BareCtx> =
+            DescriptorKey::restore_xprv(Bitcoin, mnemonic.clone(), None).unwrap();
+
+        assert!(
+            matches!(&mainnet_key, DescriptorKey::Secret(_, networks, _) if networks.eq(&mainnet_network()))
+        );
+        assert_eq!(&mainnet_key.to_string(), "xprv9s21ZrQH143K3zccLFZysUT7ktWsAhhCpUwYGEKfrUuvoZx2X9mnLTf4xqJkSDLho23AgoVsJzvYiymjeCMqU999q9wzdpE4nLAWkH7wcgM/*");
+
+        let testnet_password_key: DescriptorKey<BareCtx> =
+            DescriptorKey::restore_xprv(Testnet, mnemonic, Some("bdk is great".to_string()))
+                .unwrap();
+
+        assert_eq!(&testnet_password_key.to_string(), "tprv8ZgxMBicQKsPdKPThWPH2rXw9ujkNL4F8eY4iT5RxkVzRGLCzLbdMhyu8ZyH5ntCB4xyFFye9dhwCyc4X22jyUafDPtn66QoGPyuQ7WpDYD/*");
     }
 
     #[test]
