@@ -114,7 +114,7 @@ required-features = ["compiler"]
 [[example]]
 name = "rpcwallet"
 path = "examples/rpcwallet.rs"
-required-features = ["keys-bip39", "key-value-db", "rpc"]
+required-features = ["keys-bip39", "key-value-db", "rpc", "electrsd/bitcoind_22_0"]
 
 [workspace]
 members = ["macros"]
