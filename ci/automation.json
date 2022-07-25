@@ -1,0 +1,30 @@
+{
+    "version": 1,
+    "rules": [
+        {
+            "regexp": "Address \\(\\d/\\d\\)|Message hash \\(\\d/\\d\\)|Confirm|Fees|Review|Amount",
+            "actions": [
+                [ "button", 2, true ],
+                [ "button", 2, false ]
+            ]
+        },
+        {
+            "text": "Sign",
+            "conditions": [
+                [ "seen", false ]
+            ],
+            "actions": [
+                [ "button", 2, true ],
+                [ "button", 2, false ],
+                [ "setbool", "seen", true ]
+            ]
+        },
+        {
+            "regexp": "Approve|Sign|Accept",
+            "actions": [
+                [ "button", 3, true ],
+                [ "button", 3, false ]
+            ]
+        }
+    ]
+}
