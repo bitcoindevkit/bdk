@@ -159,6 +159,16 @@ pub enum SignerError {
     InvalidSighash,
     /// Error while computing the hash to sign
     SighashError(sighash::Error),
+    /// Error while signing using hardware wallets
+    #[cfg(feature = "hardware-signer")]
+    HWIError(hwi::error::Error),
+}
+
+#[cfg(feature = "hardware-signer")]
+impl From<hwi::error::Error> for SignerError {
+    fn from(e: hwi::error::Error) -> Self {
+        SignerError::HWIError(e)
+    }
 }
 
 impl From<sighash::Error> for SignerError {

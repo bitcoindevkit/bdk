@@ -48,6 +48,9 @@ pub(crate) mod utils;
 #[cfg_attr(docsrs, doc(cfg(feature = "verify")))]
 pub mod verify;
 
+#[cfg(feature = "hardware-signer")]
+pub mod hardwaresigner;
+
 pub use utils::IsDust;
 
 #[allow(deprecated)]
@@ -5413,5 +5416,34 @@ pub(crate) mod test {
             .unwrap();
         // ...and checking that everything is fine
         assert_fee_rate!(psbt, details.fee.unwrap_or(0), fee_rate);
+    }
+
+    #[cfg(feature = "test-hardware-signer")]
+    #[test]
+    fn test_create_signer() {
+        use crate::wallet::hardwaresigner::HWISigner;
+        use hwi::types::HWIChain;
+        use hwi::HWIClient;
+
+        let devices = HWIClient::enumerate().unwrap();
+        let device = devices.first().expect("No devices found");
+        let client = HWIClient::get_client(device, true, HWIChain::Regtest).unwrap();
+        let descriptors = client.get_descriptors(None).unwrap();
+        let custom_signer = HWISigner::from_device(device, HWIChain::Regtest).unwrap();
+
+        let (mut wallet, _, _) = get_funded_wallet(&descriptors.internal[0]);
+        wallet.add_signer(
+            KeychainKind::External,
+            SignerOrdering(200),
+            Arc::new(custom_signer),
+        );
+
+        let addr = wallet.get_address(LastUnused).unwrap();
+        let mut builder = wallet.build_tx();
+        builder.drain_to(addr.script_pubkey()).drain_wallet();
+        let (mut psbt, _) = builder.finish().unwrap();
+
+        let finalized = wallet.sign(&mut psbt, Default::default()).unwrap();
+        assert!(finalized);
     }
 }

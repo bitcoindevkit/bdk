@@ -33,6 +33,7 @@ rocksdb = { version = "0.14", default-features = false, features = ["snappy"], o
 cc = { version = ">=1.0.64", optional = true }
 socks = { version = "0.3", optional = true }
 lazy_static = { version = "1.4", optional = true }
+hwi = { version = "0.2.2", optional = true }
 
 bip39 = { version = "1.0.1", optional = true }
 bitcoinconsensus = { version = "0.19.0-3", optional = true }
@@ -61,6 +62,7 @@ key-value-db = ["sled"]
 all-keys = ["keys-bip39"]
 keys-bip39 = ["bip39"]
 rpc = ["bitcoincore-rpc"]
+hardware-signer = ["hwi"]
 
 # We currently provide mulitple implementations of `Blockchain`, all are
 # blocking except for the `EsploraBlockchain` which can be either async or
@@ -93,6 +95,7 @@ test-rpc = ["rpc", "electrsd/electrs_0_8_10", "electrsd/bitcoind_22_0", "test-bl
 test-rpc-legacy = ["rpc", "electrsd/electrs_0_8_10", "electrsd/bitcoind_0_20_0", "test-blockchains"]
 test-esplora = ["electrsd/legacy", "electrsd/esplora_a33e97e1", "electrsd/bitcoind_22_0", "test-blockchains"]
 test-md-docs = ["electrum"]
+test-hardware-signer = ["hardware-signer"]
 
 [dev-dependencies]
 lazy_static = "1.4"
