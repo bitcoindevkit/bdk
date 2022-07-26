@@ -438,10 +438,12 @@ impl<D: Database> CoinSelectionAlgorithm<D> for BranchAndBoundCoinSelection {
             .map(|u| OutputGroup::new(u, fee_rate))
             .collect();
 
-        // Mapping every (UTXO, usize) to an output group.
+        // Mapping every (UTXO, usize) to an output group, filtering UTXOs with a negative
+        // effective value
         let optional_utxos: Vec<OutputGroup> = optional_utxos
             .into_iter()
             .map(|u| OutputGroup::new(u, fee_rate))
+            .filter(|u| u.effective_value.is_positive())
             .collect();
 
         let curr_value = required_utxos
@@ -454,17 +456,39 @@ impl<D: Database> CoinSelectionAlgorithm<D> for BranchAndBoundCoinSelection {
 
         let cost_of_change = self.size_of_change as f32 * fee_rate.as_sat_vb();
 
-        let expected = (curr_available_value + curr_value)
-            .try_into()
-            .map_err(|_| {
-                Error::Generic("Sum of UTXO spendable values does not fit into u64".to_string())
-            })?;
+        // `curr_value` and `curr_available_value` are both the sum of *effective_values* of
+        // the UTXOs. For the optional UTXOs (curr_available_value) we filter out UTXOs with
+        // negative effective value, so it will always be positive.
+        //
+        // Since we are required to spend the required UTXOs (curr_value) we have to consider
+        // all their effective values, even when negative, which means that curr_value could
+        // be negative as well.
+        //
+        // If the sum of curr_value and curr_available_value is negative or lower than our target,
+        // we can immediately exit with an error, as it's guaranteed we will never find a solution
+        // if we actually run the BnB.
+        let total_value: Result<u64, _> = (curr_available_value + curr_value).try_into();
+        match total_value {
+            Ok(v) if v >= target_amount => {}
+            _ => {
+                // Assume we spend all the UTXOs we can (all the required + all the optional with
+                // positive effective value), sum their value and their fee cost.
+                let (utxo_fees, utxo_value) = required_utxos
+                    .iter()
+                    .chain(optional_utxos.iter())
+                    .fold((0, 0), |(mut fees, mut value), utxo| {
+                        fees += utxo.fee;
+                        value += utxo.weighted_utxo.utxo.txout().value;
 
-        if expected < target_amount {
-            return Err(Error::InsufficientFunds {
-                needed: target_amount,
-                available: expected,
-            });
+                        (fees, value)
+                    });
+
+                // Add to the target the fee cost of the UTXOs
+                return Err(Error::InsufficientFunds {
+                    needed: target_amount + utxo_fees,
+                    available: utxo_value,
+                });
+            }
         }
 
         let target_amount = target_amount
@@ -1194,9 +1218,9 @@ mod test {
             )
             .unwrap();
 
-        assert_eq!(result.selected.len(), 3);
-        assert_eq!(result.selected_amount(), 300010);
-        assert_eq!(result.fee_amount, 204);
+        assert_eq!(result.selected.len(), 2);
+        assert_eq!(result.selected_amount(), 300000);
+        assert_eq!(result.fee_amount, 136);
     }
 
     #[test]
@@ -1228,9 +1252,9 @@ mod test {
             )
             .unwrap();
 
-        assert_eq!(result.selected.len(), 3);
-        assert_eq!(result.selected_amount(), 300_010);
-        assert!((result.fee_amount as f32 - 204.0).abs() < f32::EPSILON);
+        assert_eq!(result.selected.len(), 2);
+        assert_eq!(result.selected_amount(), 300_000);
+        assert_eq!(result.fee_amount, 136);
     }
 
     #[test]
@@ -1486,5 +1510,87 @@ mod test {
 
         assert!(result.selected_amount() > target_amount);
         assert_eq!(result.fee_amount, (result.selected.len() * 68) as u64);
+    }
+
+    #[test]
+    fn test_bnb_exclude_negative_effective_value() {
+        let utxos = get_test_utxos();
+        let database = MemoryDatabase::default();
+        let drain_script = Script::default();
+
+        let err = BranchAndBoundCoinSelection::default()
+            .coin_select(
+                &database,
+                vec![],
+                utxos,
+                FeeRate::from_sat_per_vb(10.0),
+                500_000,
+                &drain_script,
+            )
+            .unwrap_err();
+
+        assert!(matches!(
+            err,
+            Error::InsufficientFunds {
+                available: 300_000,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn test_bnb_include_negative_effective_value_when_required() {
+        let utxos = get_test_utxos();
+        let database = MemoryDatabase::default();
+        let drain_script = Script::default();
+
+        let (required, optional) = utxos
+            .into_iter()
+            .partition(|u| matches!(u, WeightedUtxo { utxo, .. } if utxo.txout().value < 1000));
+
+        let err = BranchAndBoundCoinSelection::default()
+            .coin_select(
+                &database,
+                required,
+                optional,
+                FeeRate::from_sat_per_vb(10.0),
+                500_000,
+                &drain_script,
+            )
+            .unwrap_err();
+
+        assert!(matches!(
+            err,
+            Error::InsufficientFunds {
+                available: 300_010,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn test_bnb_sum_of_effective_value_negative() {
+        let utxos = get_test_utxos();
+        let database = MemoryDatabase::default();
+        let drain_script = Script::default();
+
+        let err = BranchAndBoundCoinSelection::default()
+            .coin_select(
+                &database,
+                utxos,
+                vec![],
+                FeeRate::from_sat_per_vb(10_000.0),
+                500_000,
+                &drain_script,
+            )
+            .unwrap_err();
+
+        assert!(matches!(
+            err,
+            Error::InsufficientFunds {
+                available: 300_010,
+                ..
+            }
+        ));
     }
 }
