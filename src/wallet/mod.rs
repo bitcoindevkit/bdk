@@ -1988,8 +1988,9 @@ pub(crate) mod test {
     }
 
     macro_rules! assert_fee_rate {
-        ($tx:expr, $fees:expr, $fee_rate:expr $( ,@dust_change $( $dust_change:expr )* )* $( ,@add_signature $( $add_signature:expr )* )* ) => ({
-            let mut tx = $tx.clone();
+        ($psbt:expr, $fees:expr, $fee_rate:expr $( ,@dust_change $( $dust_change:expr )* )* $( ,@add_signature $( $add_signature:expr )* )* ) => ({
+            let psbt = $psbt.clone();
+            let mut tx = $psbt.clone().extract_tx();
             $(
                 $( $add_signature )*
                 for txin in &mut tx.input {
@@ -2004,6 +2005,18 @@ pub(crate) mod test {
                 $( $dust_change )*
                 dust_change = true;
             )*
+
+            let fee_amount = psbt
+                .inputs
+                .iter()
+                .fold(0, |acc, i| acc + i.witness_utxo.as_ref().unwrap().value)
+                - psbt
+                    .unsigned_tx
+                    .output
+                    .iter()
+                    .fold(0, |acc, o| acc + o.value);
+
+            assert_eq!(fee_amount, $fees);
 
             let tx_fee_rate = FeeRate::from_wu($fees, tx.weight());
             let fee_rate = $fee_rate;
@@ -2384,7 +2397,7 @@ pub(crate) mod test {
         builder.add_recipient(addr.script_pubkey(), 25_000);
         let (psbt, details) = builder.finish().unwrap();
 
-        assert_fee_rate!(psbt.extract_tx(), details.fee.unwrap_or(0), FeeRate::default(), @add_signature);
+        assert_fee_rate!(psbt, details.fee.unwrap_or(0), FeeRate::default(), @add_signature);
     }
 
     #[test]
@@ -2397,7 +2410,7 @@ pub(crate) mod test {
             .fee_rate(FeeRate::from_sat_per_vb(5.0));
         let (psbt, details) = builder.finish().unwrap();
 
-        assert_fee_rate!(psbt.extract_tx(), details.fee.unwrap_or(0), FeeRate::from_sat_per_vb(5.0), @add_signature);
+        assert_fee_rate!(psbt, details.fee.unwrap_or(0), FeeRate::from_sat_per_vb(5.0), @add_signature);
     }
 
     #[test]
@@ -3254,7 +3267,7 @@ pub(crate) mod test {
             details.received
         );
 
-        assert_fee_rate!(psbt.extract_tx(), details.fee.unwrap_or(0), FeeRate::from_sat_per_vb(2.5), @add_signature);
+        assert_fee_rate!(psbt, details.fee.unwrap_or(0), FeeRate::from_sat_per_vb(2.5), @add_signature);
     }
 
     #[test]
@@ -3364,7 +3377,7 @@ pub(crate) mod test {
         assert_eq!(tx.output.len(), 1);
         assert_eq!(tx.output[0].value + details.fee.unwrap_or(0), details.sent);
 
-        assert_fee_rate!(psbt.extract_tx(), details.fee.unwrap_or(0), FeeRate::from_sat_per_vb(2.5), @add_signature);
+        assert_fee_rate!(psbt, details.fee.unwrap_or(0), FeeRate::from_sat_per_vb(2.5), @add_signature);
     }
 
     #[test]
@@ -3575,7 +3588,7 @@ pub(crate) mod test {
             details.received
         );
 
-        assert_fee_rate!(psbt.extract_tx(), details.fee.unwrap_or(0), FeeRate::from_sat_per_vb(50.0), @add_signature);
+        assert_fee_rate!(psbt, details.fee.unwrap_or(0), FeeRate::from_sat_per_vb(50.0), @add_signature);
     }
 
     #[test]
@@ -3715,7 +3728,7 @@ pub(crate) mod test {
             75_000 - original_send_all_amount - details.fee.unwrap_or(0)
         );
 
-        assert_fee_rate!(psbt.extract_tx(), details.fee.unwrap_or(0), FeeRate::from_sat_per_vb(50.0), @add_signature);
+        assert_fee_rate!(psbt, details.fee.unwrap_or(0), FeeRate::from_sat_per_vb(50.0), @add_signature);
     }
 
     #[test]
@@ -3778,7 +3791,7 @@ pub(crate) mod test {
             45_000
         );
 
-        assert_fee_rate!(psbt.extract_tx(), details.fee.unwrap_or(0), FeeRate::from_sat_per_vb(140.0), @dust_change, @add_signature);
+        assert_fee_rate!(psbt, details.fee.unwrap_or(0), FeeRate::from_sat_per_vb(140.0), @dust_change, @add_signature);
     }
 
     #[test]
@@ -3849,7 +3862,7 @@ pub(crate) mod test {
             details.received
         );
 
-        assert_fee_rate!(psbt.extract_tx(), details.fee.unwrap_or(0), FeeRate::from_sat_per_vb(5.0), @add_signature);
+        assert_fee_rate!(psbt, details.fee.unwrap_or(0), FeeRate::from_sat_per_vb(5.0), @add_signature);
     }
 
     #[test]
