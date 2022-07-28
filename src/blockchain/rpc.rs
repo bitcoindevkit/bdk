@@ -39,8 +39,9 @@ use crate::database::{BatchDatabase, DatabaseUtils};
 use crate::descriptor::get_checksum;
 use crate::{BlockTime, Error, FeeRate, KeychainKind, LocalUtxo, TransactionDetails};
 use bitcoincore_rpc::json::{
-    GetAddressInfoResultLabel, ImportMultiOptions, ImportMultiRequest,
-    ImportMultiRequestScriptPubkey, ImportMultiRescanSince,
+    GetAddressInfoResultLabel, GetTransactionResultDetailCategory, ImportMultiOptions,
+    ImportMultiRequest, ImportMultiRequestScriptPubkey, ImportMultiRescanSince,
+    ListUnspentResultEntry,
 };
 use bitcoincore_rpc::jsonrpc::serde_json::{json, Value};
 use bitcoincore_rpc::Auth as RpcAuth;
@@ -276,7 +277,7 @@ impl WalletSync for RpcBlockchain {
         let known_utxos: HashSet<_> = db.iter_utxos()?.into_iter().collect();
 
         //TODO list_since_blocks would be more efficient
-        let current_utxo = self
+        let mut current_utxo = self
             .client
             .list_unspent(Some(0), None, None, Some(true), None)?;
         debug!("current_utxo len {}", current_utxo.len());
@@ -294,6 +295,38 @@ impl WalletSync for RpcBlockchain {
         }) {
             let txid = tx_result.info.txid;
             list_txs_ids.insert(txid);
+            if tx_result.detail.category == GetTransactionResultDetailCategory::Immature {
+                // Immature UTXOs don't appear in rpc's listunspent, so we
+                // have to manually add them to the current_utxos list
+                // FIXME: This will produce a wrong result if the immature utxo is spent,
+                // which *should* be impossible.
+                let utxo = ListUnspentResultEntry {
+                    txid: tx_result.info.txid,
+                    vout: tx_result.detail.vout,
+                    amount: tx_result
+                        .detail
+                        .amount
+                        .to_unsigned()
+                        .expect("immature txs amount can't be negative"),
+                    script_pub_key: tx_result
+                        .detail
+                        .address
+                        .as_ref()
+                        .expect("Should always be here")
+                        .script_pubkey(),
+                    // We don't care about those other fields, we set them to their default
+                    address: None,
+                    confirmations: 0,
+                    descriptor: None,
+                    label: None,
+                    redeem_script: None,
+                    witness_script: None,
+                    safe: true,
+                    solvable: true,
+                    spendable: true,
+                };
+                current_utxo.push(utxo);
+            }
             if let Some(mut known_tx) = known_txs.get_mut(&txid) {
                 let confirmation_time =
                     BlockTime::new(tx_result.info.blockheight, tx_result.info.blocktime);
