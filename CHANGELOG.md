@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add capacity to create FeeRate from sats/kvbytes and sats/kwu.
 - Rename `as_sat_vb` to `as_sat_per_vb`. Move all `FeeRate` test to `types.rs`.
 - Add custom Harware Wallet Signer `HwiSigner` in `src/wallet/harwaresigner/` module.
+- Add `allow_dust` method on `TxBuilder`.
 
 ## [v0.21.0] - [v0.20.0]
 
@@ -22,14 +23,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New `RpcBlockchain` implementation with various fixes.
 - Return balance in separate categories, namely `confirmed`, `trusted_pending`, `untrusted_pending` & `immature`.
 
-
 ## [v0.20.0] - [v0.19.0]
 
 - New MSRV set to `1.56.1`
 - Fee sniping discouraging through nLockTime - if the user specifies a `current_height`, we use that as a nlocktime, otherwise we use the last sync height (or 0 if we never synced)
 - Fix hang when `ElectrumBlockchainConfig::stop_gap` is zero.
 - Set coin type in BIP44, BIP49, and BIP84 templates
-- Get block hash given a block height - A `get_block_hash` method is now defined on the `GetBlockHash` trait and implemented on every blockchain backend. This method expects a block height and returns the corresponding block hash. 
+- Get block hash given a block height - A `get_block_hash` method is now defined on the `GetBlockHash` trait and implemented on every blockchain backend. This method expects a block height and returns the corresponding block hash.
 - Add `remove_partial_sigs` and `try_finalize` to `SignOptions`
 - Deprecate `AddressValidator`
 - Fix Electrum wallet sync potentially causing address index decrement - compare proposed index and current index before applying batch operations during sync.
@@ -41,7 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Unpinned tokio to `1`
 - Add traits to reuse `Blockchain`s across multiple wallets (`BlockchainFactory` and `StatelessBlockchain`).
 - Upgrade to rust-bitcoin `0.28`
-- If using the `sqlite-db` feature all cached wallet data is deleted due to a possible UTXO inconsistency, a wallet.sync will recreate it  
+- If using the `sqlite-db` feature all cached wallet data is deleted due to a possible UTXO inconsistency, a wallet.sync will recreate it
 - Update `PkOrF` in the policy module to become an enum
 - Add experimental support for Taproot, including:
   - Support for `tr()` descriptors with complex tapscript trees
@@ -58,7 +58,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add `keychain: KeychainKind` to `wallet::AddressInfo`.
 - Improve key generation traits
 - Rename `WalletExport` to `FullyNodedExport`, deprecate the former.
-- Bump `miniscript` dependency version to `^6.1`. 
+- Bump `miniscript` dependency version to `^6.1`.
 
 ## [v0.17.0] - [v0.16.1]
 
