@@ -8,6 +8,8 @@
 // <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your option.
 // You may not use this file except in accordance with one or both of these
 // licenses.
+use std::path::Path;
+use std::path::PathBuf;
 
 use bitcoin::consensus::encode::{deserialize, serialize};
 use bitcoin::hash_types::Txid;
@@ -60,7 +62,7 @@ static MIGRATIONS: &[&str] = &[
 #[derive(Debug)]
 pub struct SqliteDatabase {
     /// Path on the local filesystem to store the sqlite file
-    pub path: String,
+    pub path: PathBuf,
     /// A rusqlite connection object to the sqlite database
     pub connection: Connection,
 }
@@ -68,9 +70,12 @@ pub struct SqliteDatabase {
 impl SqliteDatabase {
     /// Instantiate a new SqliteDatabase instance by creating a connection
     /// to the database stored at path
-    pub fn new(path: String) -> Self {
+    pub fn new<T: AsRef<Path>>(path: T) -> Self {
         let connection = get_connection(&path).unwrap();
-        SqliteDatabase { path, connection }
+        SqliteDatabase {
+            path: PathBuf::from(path.as_ref()),
+            connection,
+        }
     }
     fn insert_script_pubkey(
         &self,
@@ -908,7 +913,7 @@ impl BatchDatabase for SqliteDatabase {
     }
 }
 
-pub fn get_connection(path: &str) -> Result<Connection, Error> {
+pub fn get_connection<T: AsRef<Path>>(path: &T) -> Result<Connection, Error> {
     let connection = Connection::open(path)?;
     migrate(&connection)?;
     Ok(connection)
