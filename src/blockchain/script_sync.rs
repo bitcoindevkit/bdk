@@ -131,8 +131,9 @@ impl<'a, D: BatchDatabase> ScriptReq<'a, D> {
         let current_gap = self.script_index - last;
 
         // this is a hack to check whether the scripts are coming from a derivable descriptor
-        // we assume for non-derivable descriptors, the initial script count is always 1
-        let is_derivable = self.initial_scripts_needed > 1;
+        // we assume for non-derivable descriptors, the initial script count is always 1 and
+        // as we are working with (at-most) 2 descriptors, we use 2 to determine derivability
+        let is_derivable = self.initial_scripts_needed > 2;
 
         debug!(
             "sync: last={}, remaining={}, diff={}, stop_gap={}",
