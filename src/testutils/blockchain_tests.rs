@@ -1064,13 +1064,6 @@ macro_rules! bdk_blockchain_tests {
 
                 test_client.generate(1, Some(wallet_addr));
 
-                #[cfg(feature = "rpc")]
-                {
-                    // rpc consider coinbase only when mature (100 blocks)
-                    let node_addr = test_client.get_node_address(None);
-                    test_client.generate(100, Some(node_addr));
-                }
-
                 wallet.sync(&blockchain, SyncOptions::default()).unwrap();
                 assert!(wallet.get_balance().unwrap() > 0, "incorrect balance after receiving coinbase");
             }

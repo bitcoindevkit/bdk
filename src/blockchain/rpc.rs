@@ -424,24 +424,29 @@ impl DbState {
             // check if tx has an immature coinbase output (add to updated UTXOs)
             // this is required because `listunspent` does not include immature coinbase outputs
             if tx_res.detail.category == GetTransactionResultDetailCategory::Immature {
-                // let vout = tx_res.detail.vout;
-                // let txout = raw_tx.output.get(vout as usize).cloned().ok_or_else(|| {
-                //     Error::Generic(format!(
-                //         "Core RPC returned detail with invalid vout '{}' for tx '{}'",
-                //         vout, tx_res.info.txid,
-                //     ))
-                // })?;
-                // println!("got immature detail!");
+                let txout = raw_tx
+                    .output
+                    .get(tx_res.detail.vout as usize)
+                    .cloned()
+                    .ok_or_else(|| {
+                        Error::Generic(format!(
+                            "Core RPC returned detail with invalid vout '{}' for tx '{}'",
+                            tx_res.detail.vout, tx_res.info.txid,
+                        ))
+                    })?;
 
-                // if let Some((keychain, _)) = db.get_path_from_script_pubkey(&txout.script_pubkey)? {
-                //     let utxo = LocalUtxo {
-                //         outpoint: OutPoint::new(tx_res.info.txid, d.vout),
-                //         txout,
-                //         keychain,
-                //         is_spent: false,
-                //     };
-                //     self.updated_utxos.insert(utxo);
-                // }
+                if let Some((keychain, index)) =
+                    db.get_path_from_script_pubkey(&txout.script_pubkey)?
+                {
+                    let utxo = LocalUtxo {
+                        outpoint: OutPoint::new(tx_res.info.txid, tx_res.detail.vout),
+                        txout,
+                        keychain,
+                        is_spent: false,
+                    };
+                    self.updated_utxos.insert(utxo);
+                    self._update_last_index(keychain, index);
+                }
             }
 
             // update tx deltas
@@ -511,7 +516,7 @@ impl DbState {
         let new_utxos = core_utxos.difference(&self.utxos).cloned();
 
         // add to updated utxos
-        self.updated_utxos = spent_utxos.chain(new_utxos).collect();
+        self.updated_utxos.extend(spent_utxos.chain(new_utxos));
 
         Ok(self)
     }
@@ -604,6 +609,7 @@ impl DbState {
         // update utxos
         self.updated_utxos
             .iter()
+            .inspect(|&utxo| println!("updating: {:?}", utxo.txout))
             .try_for_each(|utxo| batch.set_utxo(utxo))?;
 
         // update last indexes
