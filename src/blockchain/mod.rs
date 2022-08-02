@@ -111,6 +111,21 @@ pub trait GetTx {
 }
 
 #[maybe_async]
+/// Trait for getting the status of a transaction by txid
+pub trait GetTxStatus {
+    /// Fetch the status of a transaction given its txid
+    fn get_tx_status(&self, txid: &Txid) -> Result<Option<TransactionStatus>, Error>;
+}
+
+/// The confirmation status of a transaction
+#[derive(Debug, Clone, PartialEq)]
+pub struct TransactionStatus {
+    confirmed: bool,
+    block_height: Option<u32>,
+    block_hash: Option<BlockHash>,
+}
+
+#[maybe_async]
 /// Trait for getting block hash by block height
 pub trait GetBlockHash {
     /// fetch block hash given its height
@@ -356,6 +371,13 @@ impl<T: Blockchain> Blockchain for Arc<T> {
 impl<T: GetTx> GetTx for Arc<T> {
     fn get_tx(&self, txid: &Txid) -> Result<Option<Transaction>, Error> {
         maybe_await!(self.deref().get_tx(txid))
+    }
+}
+
+#[maybe_async]
+impl<T: GetTxStatus> GetTxStatus for Arc<T> {
+    fn get_tx_status(&self, txid: &Txid) -> Result<Option<TransactionStatus>, Error> {
+        maybe_await!(self.deref().get_tx_status(txid))
     }
 }
 

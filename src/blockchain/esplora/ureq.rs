@@ -112,6 +112,12 @@ impl GetTx for EsploraBlockchain {
     }
 }
 
+impl GetTxStatus for EsploraBlockchain {
+    fn get_tx_status(&self, txid: &Txid) -> Result<Option<TransactionStatus>, Error> {
+        Ok(self.url_client._get_tx_status(txid)?)
+    }
+}
+
 impl GetBlockHash for EsploraBlockchain {
     fn get_block_hash(&self, height: u64) -> Result<BlockHash, Error> {
         let block_header = self.url_client._get_header(height as u32)?;
@@ -221,6 +227,24 @@ impl UrlClient {
         let resp = self
             .agent
             .get(&format!("{}/tx/{}/raw", self.url, txid))
+            .call();
+
+        match resp {
+            Ok(resp) => Ok(Some(deserialize(&into_bytes(resp)?)?)),
+            Err(ureq::Error::Status(code, _)) => {
+                if is_status_not_found(code) {
+                    return Ok(None);
+                }
+                Err(EsploraError::HttpResponse(code))
+            }
+            Err(e) => Err(EsploraError::Ureq(e)),
+        }
+    }
+
+    fn _get_tx_status(&self, txid: &Txid) -> Result<Option<TransactionStatus>, EsploraError> {
+        let resp = self
+            .agent
+            .get(&format!("{}/tx/{}/status", self.url, txid))
             .call();
 
         match resp {
