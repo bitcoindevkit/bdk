@@ -8,10 +8,13 @@
 
 use crate::bitcoin::hashes::hex::ToHex;
 use crate::bitcoin::{Address, Network, Transaction, Txid};
-use crate::blockchain::*;
-use crate::database::BatchDatabase;
+use crate::database::{BatchDatabase, DatabaseUtils};
 use crate::descriptor::get_checksum;
-use crate::{Error, FeeRate, KeychainKind};
+use crate::{blockchain::*, BlockTime};
+use crate::{Error, FeeRate, KeychainKind, LocalUtxo, TransactionDetails};
+use bitcoin::consensus::deserialize;
+use bitcoin::{OutPoint, TxOut};
+use bitcoincore_rpc::bitcoincore_rpc_json::Utxo;
 use bitcoincore_rpc::json::{
     ImportMultiOptions, ImportMultiRequest, ImportMultiRequestScriptPubkey, ImportMultiRescanSince,
     ScanTxOutRequest, ScanTxOutResult,
@@ -182,6 +185,22 @@ impl WalletSync for PrunedRpcBlockchain {
             self.client.import_multi(&requests, Some(&options))?;
         }
 
+        self.wallet_sync(database, progress_update)
+    }
+
+    fn wallet_sync<D: BatchDatabase>(
+        &self,
+        db: &mut D,
+        _progress_update: Box<dyn Progress>,
+    ) -> Result<(), Error> {
+        let mut script_pubkeys = db.iter_script_pubkeys(Some(KeychainKind::External))?;
+        script_pubkeys.extend(db.iter_script_pubkeys(Some(KeychainKind::Internal))?);
+
+        debug!(
+            "importing {} script_pubkeys (some maybe aleady imported)",
+            script_pubkeys.len()
+        );
+
         // make a request using scantxout and loop through it here
         // the scan needs to have all the descriptors in it
         // see how to make sure you're scanning the minimum possible set
@@ -190,16 +209,139 @@ impl WalletSync for PrunedRpcBlockchain {
             let desc = format!("raw({})", script.to_hex());
             descriptors.push(ScanTxOutRequest::Single(desc));
         }
-        let _res: Result<ScanTxOutResult, _> = self.client.scan_tx_out_set_blocking(&descriptors);
-        self.wallet_sync(database, progress_update)
-    }
+        let res: ScanTxOutResult = self.client.scan_tx_out_set_blocking(&descriptors)?;
+        // assume res is valid for now?
+        let mut indexes = HashMap::new();
+        for keykind in &[KeychainKind::External, KeychainKind::Internal] {
+            indexes.insert(*keykind, db.get_last_index(*keykind)?.unwrap_or(0));
+        }
 
-    fn wallet_sync<D: BatchDatabase>(
-        &self,
-        _db: &mut D,
-        _progress_update: Box<dyn Progress>,
-    ) -> Result<(), Error> {
-        todo!()
+        let mut known_txs: HashMap<_, _> = db
+            .iter_txs(true)?
+            .into_iter()
+            .map(|tx| (tx.txid, tx))
+            .collect();
+        let known_utxos: HashSet<_> = db.iter_utxos()?.into_iter().collect();
+
+        // set current_utxo from res
+        // if res.success == Some(false) {
+        // idk what to do
+        // Ok(())
+        // }
+        // if res.success == Some(true) {
+        let mut current_utxo: Vec<Utxo> = Vec::new();
+        for utxo in res.unspents {
+            current_utxo.push(utxo);
+        }
+        let list_txs = self
+            .client
+            .list_transactions(None, Some(1_000), None, Some(true))?;
+        let mut list_txs_ids = HashSet::new();
+
+        for tx_result in list_txs.iter().filter(|t| {
+            t.info.confirmations > 0 || self.client.get_mempool_entry(&t.info.txid).is_ok()
+        }) {
+            let txid = tx_result.info.txid;
+            list_txs_ids.insert(txid);
+            if let Some(mut known_tx) = known_txs.get_mut(&txid) {
+                let confirmation_time =
+                    BlockTime::new(tx_result.info.blockheight, tx_result.info.blocktime);
+                if confirmation_time != known_tx.confirmation_time {
+                    debug!(
+                        "updating tx({}) confirmation time to: {:?}",
+                        txid, confirmation_time
+                    );
+                    known_tx.confirmation_time = confirmation_time;
+                    db.set_tx(known_tx)?;
+                }
+            } else {
+                let tx_result = self.client.get_transaction(&txid, Some(true))?;
+                let tx: Transaction = deserialize(&tx_result.hex)?;
+                let mut received = 0u64;
+                let mut sent = 0u64;
+                for output in tx.output.iter() {
+                    if let Ok(Some((kind, index))) =
+                        db.get_path_from_script_pubkey(&output.script_pubkey)
+                    {
+                        if index > *indexes.get(&kind).unwrap() {
+                            indexes.insert(kind, index);
+                        }
+                        received += output.value;
+                    }
+                }
+
+                for input in tx.input.iter() {
+                    if let Some(previous_output) = db.get_previous_output(&input.previous_output)? {
+                        if db.is_mine(&previous_output.script_pubkey)? {
+                            sent += previous_output.value;
+                        }
+                    }
+                }
+
+                let td = TransactionDetails {
+                    transaction: Some(tx),
+                    txid: tx_result.info.txid,
+                    confirmation_time: BlockTime::new(
+                        tx_result.info.blockheight,
+                        tx_result.info.blocktime,
+                    ),
+                    received,
+                    sent,
+                    fee: tx_result.fee.map(|f| f.as_sat().unsigned_abs()),
+                };
+                debug!(
+                    "saving tx: {} tx_result.fee:{:?} td.fees:{:?}",
+                    td.txid, tx_result.fee, td.fee
+                );
+                db.set_tx(&td)?;
+            }
+        }
+
+        for known_txid in known_txs.keys() {
+            if !list_txs_ids.contains(known_txid) {
+                debug!("removing tx: {}", known_txid);
+                db.del_tx(known_txid, false)?;
+            }
+        }
+
+        let current_utxos = current_utxo
+            .into_iter()
+            .filter_map(
+                |u| match db.get_path_from_script_pubkey(&u.script_pub_key) {
+                    Err(e) => Some(Err(e)),
+                    Ok(None) => None,
+                    Ok(Some(path)) => Some(Ok(LocalUtxo {
+                        outpoint: OutPoint::new(u.txid, u.vout),
+                        keychain: path.0,
+                        txout: TxOut {
+                            value: u.amount.as_sat(),
+                            script_pubkey: u.script_pub_key,
+                        },
+                        is_spent: false,
+                    })),
+                },
+            )
+            .collect::<Result<HashSet<_>, Error>>()?;
+
+        let spent: HashSet<_> = known_utxos.difference(&current_utxos).collect();
+        for utxo in spent {
+            debug!("setting as spent utxo: {:?}", utxo);
+            let mut spent_utxo = utxo.clone();
+            spent_utxo.is_spent = true;
+            db.set_utxo(&spent_utxo)?;
+        }
+        let received: HashSet<_> = current_utxos.difference(&known_utxos).collect();
+        for utxo in received {
+            debug!("adding utxo: {:?}", utxo);
+            db.set_utxo(utxo)?;
+        }
+
+        for (keykind, index) in indexes {
+            debug!("{:?} max {}", keykind, index);
+            db.set_last_index(keykind, index)?;
+        }
+        // }
+        Ok(())
     }
 }
 
@@ -369,7 +511,7 @@ impl BlockchainFactory for PrunedRpcBlockchainFactory {
 }
 
 #[cfg(test)]
-#[cfg(any(feature = "test-rpc", feature = "test-rpc-legacy"))]
+#[cfg(any(feature = "test-pruned-rpc", feature = "test-pruned-rpc-legacy"))]
 mod test {
     use super::*;
     use crate::testutils::blockchain_tests::TestClient;
@@ -377,17 +519,17 @@ mod test {
     use bitcoin::Network;
     use bitcoincore_rpc::RpcApi;
 
-    // crate::bdk_blockchain_tests! {
-    //     fn test_instance(test_client: &TestClient) -> PrunedRpcBlockchain {
-    //         let config = PrunedRpcConfig {
-    //             url: test_client.bitcoind.rpc_url(),
-    //             auth: Auth::Cookie { file: test_client.bitcoind.params.cookie_file.clone() },
-    //             network: Network::Regtest,
-    //             wallet_name: format!("client-wallet-test-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos() ),
-    //         };
-    //         PrunedRpcBlockchain::from_config(&config).unwrap()
-    //     }
-    // }
+    crate::bdk_blockchain_tests! {
+        fn test_instance(test_client: &TestClient) -> PrunedRpcBlockchain {
+            let config = PrunedRpcConfig {
+                url: test_client.bitcoind.rpc_url(),
+                auth: Auth::Cookie { file: test_client.bitcoind.params.cookie_file.clone() },
+                network: Network::Regtest,
+                wallet_name: format!("client-wallet-test-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos() ),
+            };
+            PrunedRpcBlockchain::from_config(&config).unwrap()
+        }
+    }
 
     fn get_factory() -> (TestClient, PrunedRpcBlockchainFactory) {
         let test_client = TestClient::default();
