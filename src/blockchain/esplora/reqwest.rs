@@ -213,7 +213,6 @@ impl WalletSync for EsploraBlockchain {
         };
 
         database.commit_batch(batch_update)?;
-
         Ok(())
     }
 }

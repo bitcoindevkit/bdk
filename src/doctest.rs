@@ -9,6 +9,6 @@
 // You may not use this file except in accordance with one or both of these
 // licenses.
 
-#[doc(include = "../README.md")]
+#[doc = include_str!("../README.md")]
 #[cfg(doctest)]
 pub struct ReadmeDoctests;

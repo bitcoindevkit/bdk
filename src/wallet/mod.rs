@@ -72,6 +72,7 @@ use crate::psbt::PsbtUtils;
 use crate::signer::SignerError;
 use crate::testutils;
 use crate::types::*;
+use crate::wallet::coin_selection::Excess::{Change, NoChange};
 
 const CACHE_ADDR_BATCH_SIZE: u32 = 100;
 const COINBASE_MATURITY: u32 = 100;
@@ -777,6 +778,15 @@ where
             current_height,
         )?;
 
+        // get drain script
+        let drain_script = match params.drain_to {
+            Some(ref drain_recipient) => drain_recipient.clone(),
+            None => self
+                .get_internal_address(AddressIndex::New)?
+                .address
+                .script_pubkey(),
+        };
+
         let coin_selection = coin_selection.coin_select(
             self.database.borrow().deref(),
             required_utxos,
@@ -784,8 +794,10 @@ where
             fee_rate,
             outgoing,
             fee_amount,
+            &drain_script,
         )?;
         let mut fee_amount = coin_selection.fee_amount;
+        let excess = &coin_selection.excess;
 
         tx.input = coin_selection
             .selected
@@ -798,26 +810,6 @@ where
             })
             .collect();
 
-        // prepare the drain output
-        let mut drain_output = {
-            let script_pubkey = match params.drain_to {
-                Some(ref drain_recipient) => drain_recipient.clone(),
-                None => self
-                    .get_internal_address(AddressIndex::New)?
-                    .address
-                    .script_pubkey(),
-            };
-
-            TxOut {
-                script_pubkey,
-                value: 0,
-            }
-        };
-
-        fee_amount += fee_rate.fee_vb(serialize(&drain_output).len());
-
-        let drain_val = (coin_selection.selected_amount() - outgoing).saturating_sub(fee_amount);
-
         if tx.output.is_empty() {
             // Uh oh, our transaction has no outputs.
             // We allow this when:
@@ -827,10 +819,15 @@ where
             // Otherwise, we don't know who we should send the funds to, and how much
             // we should send!
             if params.drain_to.is_some() && (params.drain_wallet || !params.utxos.is_empty()) {
-                if drain_val.is_dust(&drain_output.script_pubkey) {
+                if let NoChange {
+                    dust_threshold,
+                    remaining_amount,
+                    change_fee,
+                } = excess
+                {
                     return Err(Error::InsufficientFunds {
-                        needed: drain_output.script_pubkey.dust_value().as_sat(),
-                        available: drain_val,
+                        needed: *dust_threshold,
+                        available: remaining_amount.saturating_sub(*change_fee),
                     });
                 }
             } else {
@@ -838,15 +835,25 @@ where
             }
         }
 
-        if drain_val.is_dust(&drain_output.script_pubkey) {
-            fee_amount += drain_val;
-        } else {
-            drain_output.value = drain_val;
-            if self.is_mine(&drain_output.script_pubkey)? {
-                received += drain_val;
+        match excess {
+            NoChange {
+                remaining_amount, ..
+            } => fee_amount += remaining_amount,
+            Change { amount, fee } => {
+                if self.is_mine(&drain_script)? {
+                    received += amount;
+                }
+                fee_amount += fee;
+
+                // create drain output
+                let drain_output = TxOut {
+                    value: *amount,
+                    script_pubkey: drain_script,
+                };
+
+                tx.output.push(drain_output);
             }
-            tx.output.push(drain_output);
-        }
+        };
 
         // sort input/outputs according to the chosen algorithm
         params.ordering.sort_tx(&mut tx);
@@ -1685,20 +1692,62 @@ where
     ) -> Result<(), Error> {
         debug!("Begin sync...");
 
-        let SyncOptions { progress } = sync_opts;
-        let progress = progress.unwrap_or_else(|| Box::new(NoopProgress));
+        // TODO: for the next runs, we cannot reuse the `sync_opts.progress` object due to trait
+        // restrictions
+        let mut progress_iter = sync_opts.progress.into_iter();
+        let mut new_progress = || {
+            progress_iter
+                .next()
+                .unwrap_or_else(|| Box::new(NoopProgress))
+        };
 
         let run_setup = self.ensure_addresses_cached(CACHE_ADDR_BATCH_SIZE)?;
-
         debug!("run_setup: {}", run_setup);
+
         // TODO: what if i generate an address first and cache some addresses?
         // TODO: we should sync if generating an address triggers a new batch to be stored
-        if run_setup {
-            maybe_await!(
-                blockchain.wallet_setup(self.database.borrow_mut().deref_mut(), progress,)
+
+        // We need to ensure descriptor is derivable to fullfil "missing cache", otherwise we will
+        // end up with an infinite loop
+        let is_deriveable = self.descriptor.is_deriveable()
+            && (self.change_descriptor.is_none()
+                || self.change_descriptor.as_ref().unwrap().is_deriveable());
+
+        // Restrict max rounds in case of faulty "missing cache" implementation by blockchain
+        let max_rounds = if is_deriveable { 100 } else { 1 };
+
+        for _ in 0..max_rounds {
+            let sync_res =
+                if run_setup {
+                    maybe_await!(blockchain
+                        .wallet_setup(self.database.borrow_mut().deref_mut(), new_progress()))
+                } else {
+                    maybe_await!(blockchain
+                        .wallet_sync(self.database.borrow_mut().deref_mut(), new_progress()))
+                };
+
+            // If the error is the special `MissingCachedScripts` error, we return the number of
+            // scripts we should ensure cached.
+            // On any other error, we should return the error.
+            // On no error, we say `ensure_cache` is 0.
+            let ensure_cache = sync_res.map_or_else(
+                |e| match e {
+                    Error::MissingCachedScripts(inner) => {
+                        // each call to `WalletSync` is expensive, maximize on scripts to search for
+                        let extra =
+                            std::cmp::max(inner.missing_count as u32, CACHE_ADDR_BATCH_SIZE);
+                        let last = inner.last_count as u32;
+                        Ok(extra + last)
+                    }
+                    _ => Err(e),
+                },
+                |_| Ok(0_u32),
             )?;
-        } else {
-            maybe_await!(blockchain.wallet_sync(self.database.borrow_mut().deref_mut(), progress,))?;
+
+            // cache and try again, break when there is nothing to cache
+            if !self.ensure_addresses_cached(ensure_cache)? {
+                break;
+            }
         }
 
         let sync_time = SyncTime {
@@ -4497,6 +4546,34 @@ pub(crate) mod test {
             },
             "when there's no internal descriptor it should just use external"
         );
+    }
+
+    #[test]
+    fn test_get_address_no_reuse_single_descriptor() {
+        use crate::descriptor::template::Bip84;
+        use std::collections::HashSet;
+
+        let key = bitcoin::util::bip32::ExtendedPrivKey::from_str("tprv8ZgxMBicQKsPcx5nBGsR63Pe8KnRUqmbJNENAfGftF3yuXoMMoVJJcYeUw5eVkm9WBPjWYt6HMWYJNesB5HaNVBaFc1M6dRjWSYnmewUMYy").unwrap();
+        let wallet = Wallet::new(
+            Bip84(key, KeychainKind::External),
+            None,
+            Network::Regtest,
+            MemoryDatabase::default(),
+        )
+        .unwrap();
+
+        let mut used_set = HashSet::new();
+
+        (0..3).for_each(|_| {
+            let external_addr = wallet.get_address(AddressIndex::New).unwrap().address;
+            assert!(used_set.insert(external_addr));
+
+            let internal_addr = wallet
+                .get_internal_address(AddressIndex::New)
+                .unwrap()
+                .address;
+            assert!(used_set.insert(internal_addr));
+        });
     }
 
     #[test]

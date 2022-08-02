@@ -29,6 +29,7 @@
 //! # use bdk::wallet::{self, coin_selection::*};
 //! # use bdk::database::Database;
 //! # use bdk::*;
+//! # use bdk::wallet::coin_selection::decide_change;
 //! # const TXIN_BASE_WEIGHT: usize = (32 + 4 + 4 + 1) * 4;
 //! #[derive(Debug)]
 //! struct AlwaysSpendEverything;
@@ -42,6 +43,7 @@
 //!         fee_rate: FeeRate,
 //!         amount_needed: u64,
 //!         fee_amount: u64,
+//!         drain_script: &Script,
 //!     ) -> Result<CoinSelectionResult, bdk::Error> {
 //!         let mut selected_amount = 0;
 //!         let mut additional_weight = 0;
@@ -59,16 +61,21 @@
 //!             .collect::<Vec<_>>();
 //!         let additional_fees = fee_rate.fee_wu(additional_weight);
 //!         let amount_needed_with_fees = (fee_amount + additional_fees) + amount_needed;
-//!         if amount_needed_with_fees > selected_amount {
+//!         if selected_amount < amount_needed_with_fees {
 //!             return Err(bdk::Error::InsufficientFunds {
 //!                 needed: amount_needed_with_fees,
 //!                 available: selected_amount,
 //!             });
 //!         }
 //!
+//!         let remaining_amount = selected_amount - amount_needed_with_fees;
+//!
+//!         let excess = decide_change(remaining_amount, fee_rate, drain_script);
+//!
 //!         Ok(CoinSelectionResult {
 //!             selected: all_utxos_selected,
 //!             fee_amount: fee_amount + additional_fees,
+//!             excess,
 //!         })
 //!     }
 //! }
@@ -89,8 +96,12 @@
 //! ```
 
 use crate::types::FeeRate;
+use crate::wallet::utils::IsDust;
 use crate::{database::Database, WeightedUtxo};
 use crate::{error::Error, Utxo};
+
+use bitcoin::consensus::encode::serialize;
+use bitcoin::Script;
 
 use rand::seq::SliceRandom;
 #[cfg(not(test))]
@@ -111,6 +122,27 @@ pub type DefaultCoinSelectionAlgorithm = LargestFirstCoinSelection; // make the 
 // prev_txid (32 bytes) + prev_vout (4 bytes) + sequence (4 bytes) + script_len (1 bytes)
 pub(crate) const TXIN_BASE_WEIGHT: usize = (32 + 4 + 4 + 1) * 4;
 
+#[derive(Debug)]
+/// Remaining amount after performing coin selection
+pub enum Excess {
+    /// It's not possible to create spendable output from excess using the current drain output
+    NoChange {
+        /// Threshold to consider amount as dust for this particular change script_pubkey
+        dust_threshold: u64,
+        /// Exceeding amount of current selection over outgoing value and fee costs
+        remaining_amount: u64,
+        /// The calculated fee for the drain TxOut with the selected script_pubkey
+        change_fee: u64,
+    },
+    /// It's possible to create spendable output from excess using the current drain output
+    Change {
+        /// Effective amount available to create change after deducting the change output fee
+        amount: u64,
+        /// The deducted change output fee
+        fee: u64,
+    },
+}
+
 /// Result of a successful coin selection
 #[derive(Debug)]
 pub struct CoinSelectionResult {
@@ -118,6 +150,8 @@ pub struct CoinSelectionResult {
     pub selected: Vec<Utxo>,
     /// Total fee amount in satoshi
     pub fee_amount: u64,
+    /// Remaining amount after deducing fees and outgoing outputs
+    pub excess: Excess,
 }
 
 impl CoinSelectionResult {
@@ -157,6 +191,8 @@ pub trait CoinSelectionAlgorithm<D: Database>: std::fmt::Debug {
     /// - `amount_needed`: the amount in satoshi to select
     /// - `fee_amount`: the amount of fees in satoshi already accumulated from adding outputs and
     ///                 the transaction's header
+    /// - `drain_script`: the script to use in case of change
+    #[allow(clippy::too_many_arguments)]
     fn coin_select(
         &self,
         database: &D,
@@ -165,6 +201,7 @@ pub trait CoinSelectionAlgorithm<D: Database>: std::fmt::Debug {
         fee_rate: FeeRate,
         amount_needed: u64,
         fee_amount: u64,
+        drain_script: &Script,
     ) -> Result<CoinSelectionResult, Error>;
 }
 
@@ -184,6 +221,7 @@ impl<D: Database> CoinSelectionAlgorithm<D> for LargestFirstCoinSelection {
         fee_rate: FeeRate,
         amount_needed: u64,
         fee_amount: u64,
+        drain_script: &Script,
     ) -> Result<CoinSelectionResult, Error> {
         log::debug!(
             "amount_needed = `{}`, fee_amount = `{}`, fee_rate = `{:?}`",
@@ -202,7 +240,7 @@ impl<D: Database> CoinSelectionAlgorithm<D> for LargestFirstCoinSelection {
                 .chain(optional_utxos.into_iter().rev().map(|utxo| (false, utxo)))
         };
 
-        select_sorted_utxos(utxos, fee_rate, amount_needed, fee_amount)
+        select_sorted_utxos(utxos, fee_rate, amount_needed, fee_amount, drain_script)
     }
 }
 
@@ -222,6 +260,7 @@ impl<D: Database> CoinSelectionAlgorithm<D> for OldestFirstCoinSelection {
         fee_rate: FeeRate,
         amount_needed: u64,
         fee_amount: u64,
+        drain_script: &Script,
     ) -> Result<CoinSelectionResult, Error> {
         // query db and create a blockheight lookup table
         let blockheights = optional_utxos
@@ -261,7 +300,33 @@ impl<D: Database> CoinSelectionAlgorithm<D> for OldestFirstCoinSelection {
                 .chain(optional_utxos.into_iter().map(|utxo| (false, utxo)))
         };
 
-        select_sorted_utxos(utxos, fee_rate, amount_needed, fee_amount)
+        select_sorted_utxos(utxos, fee_rate, amount_needed, fee_amount, drain_script)
+    }
+}
+
+/// Decide if change can be created
+///
+/// - `remaining_amount`: the amount in which the selected coins exceed the target amount
+/// - `fee_rate`: required fee rate for the current selection
+/// - `drain_script`: script to consider change creation
+pub fn decide_change(remaining_amount: u64, fee_rate: FeeRate, drain_script: &Script) -> Excess {
+    // drain_output_len = size(len(script_pubkey)) + len(script_pubkey) + size(output_value)
+    let drain_output_len = serialize(drain_script).len() + 8usize;
+    let change_fee = fee_rate.fee_vb(drain_output_len);
+    let drain_val = remaining_amount.saturating_sub(change_fee);
+
+    if drain_val.is_dust(drain_script) {
+        let dust_threshold = drain_script.dust_value().as_sat();
+        Excess::NoChange {
+            dust_threshold,
+            change_fee,
+            remaining_amount,
+        }
+    } else {
+        Excess::Change {
+            amount: drain_val,
+            fee: change_fee,
+        }
     }
 }
 
@@ -270,6 +335,7 @@ fn select_sorted_utxos(
     fee_rate: FeeRate,
     amount_needed: u64,
     mut fee_amount: u64,
+    drain_script: &Script,
 ) -> Result<CoinSelectionResult, Error> {
     let mut selected_amount = 0;
     let selected = utxos
@@ -296,6 +362,7 @@ fn select_sorted_utxos(
         .collect::<Vec<_>>();
 
     let amount_needed_with_fees = amount_needed + fee_amount;
+
     if selected_amount < amount_needed_with_fees {
         return Err(Error::InsufficientFunds {
             needed: amount_needed_with_fees,
@@ -303,9 +370,14 @@ fn select_sorted_utxos(
         });
     }
 
+    let remaining_amount = selected_amount - amount_needed_with_fees;
+
+    let excess = decide_change(remaining_amount, fee_rate, drain_script);
+
     Ok(CoinSelectionResult {
         selected,
         fee_amount,
+        excess,
     })
 }
 
@@ -366,6 +438,7 @@ impl<D: Database> CoinSelectionAlgorithm<D> for BranchAndBoundCoinSelection {
         fee_rate: FeeRate,
         amount_needed: u64,
         fee_amount: u64,
+        drain_script: &Script,
     ) -> Result<CoinSelectionResult, Error> {
         // Mapping every (UTXO, usize) to an output group
         let required_utxos: Vec<OutputGroup> = required_utxos
@@ -408,10 +481,18 @@ impl<D: Database> CoinSelectionAlgorithm<D> for BranchAndBoundCoinSelection {
             .expect("Bitcoin amount to fit into i64");
 
         if curr_value > actual_target {
+            // remaining_amount can't be negative as that would mean the
+            // selection wasn't successful
+            // actual_target = amount_needed + (fee_amount - vin_fees)
+            let remaining_amount = (curr_value - actual_target) as u64;
+
+            let excess = decide_change(remaining_amount, fee_rate, drain_script);
+
             return Ok(BranchAndBoundCoinSelection::calculate_cs_result(
                 vec![],
                 required_utxos,
                 fee_amount,
+                excess,
             ));
         }
 
@@ -424,6 +505,8 @@ impl<D: Database> CoinSelectionAlgorithm<D> for BranchAndBoundCoinSelection {
                 actual_target,
                 fee_amount,
                 cost_of_change,
+                drain_script,
+                fee_rate,
             )
             .unwrap_or_else(|_| {
                 self.single_random_draw(
@@ -432,6 +515,8 @@ impl<D: Database> CoinSelectionAlgorithm<D> for BranchAndBoundCoinSelection {
                     curr_value,
                     actual_target,
                     fee_amount,
+                    drain_script,
+                    fee_rate,
                 )
             }))
     }
@@ -450,6 +535,8 @@ impl BranchAndBoundCoinSelection {
         actual_target: i64,
         fee_amount: u64,
         cost_of_change: f32,
+        drain_script: &Script,
+        fee_rate: FeeRate,
     ) -> Result<CoinSelectionResult, Error> {
         // current_selection[i] will contain true if we are using optional_utxos[i],
         // false otherwise. Note that current_selection.len() could be less than
@@ -541,15 +628,26 @@ impl BranchAndBoundCoinSelection {
             .into_iter()
             .zip(best_selection)
             .filter_map(|(optional, is_in_best)| if is_in_best { Some(optional) } else { None })
-            .collect();
+            .collect::<Vec<OutputGroup>>();
+
+        let selected_amount = best_selection_value.unwrap();
+
+        // remaining_amount can't be negative as that would mean the
+        // selection wasn't successful
+        // actual_target = amount_needed + (fee_amount - vin_fees)
+        let remaining_amount = (selected_amount - actual_target) as u64;
+
+        let excess = decide_change(remaining_amount, fee_rate, drain_script);
 
         Ok(BranchAndBoundCoinSelection::calculate_cs_result(
             selected_utxos,
             required_utxos,
             fee_amount,
+            excess,
         ))
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn single_random_draw(
         &self,
         required_utxos: Vec<OutputGroup>,
@@ -557,6 +655,8 @@ impl BranchAndBoundCoinSelection {
         curr_value: i64,
         actual_target: i64,
         fee_amount: u64,
+        drain_script: &Script,
+        fee_rate: FeeRate,
     ) -> CoinSelectionResult {
         #[cfg(not(test))]
         optional_utxos.shuffle(&mut thread_rng());
@@ -567,25 +667,39 @@ impl BranchAndBoundCoinSelection {
             optional_utxos.shuffle(&mut rng);
         }
 
-        let selected_utxos = optional_utxos
-            .into_iter()
-            .scan(curr_value, |curr_value, utxo| {
-                if *curr_value >= actual_target {
-                    None
+        let selected_utxos = optional_utxos.into_iter().fold(
+            (curr_value, vec![]),
+            |(mut amount, mut utxos), utxo| {
+                if amount >= actual_target {
+                    (amount, utxos)
                 } else {
-                    *curr_value += utxo.effective_value;
-                    Some(utxo)
+                    amount += utxo.effective_value;
+                    utxos.push(utxo);
+                    (amount, utxos)
                 }
-            })
-            .collect::<Vec<_>>();
+            },
+        );
 
-        BranchAndBoundCoinSelection::calculate_cs_result(selected_utxos, required_utxos, fee_amount)
+        // remaining_amount can't be negative as that would mean the
+        // selection wasn't successful
+        // actual_target = amount_needed + (fee_amount - vin_fees)
+        let remaining_amount = (selected_utxos.0 - actual_target) as u64;
+
+        let excess = decide_change(remaining_amount, fee_rate, drain_script);
+
+        BranchAndBoundCoinSelection::calculate_cs_result(
+            selected_utxos.1,
+            required_utxos,
+            fee_amount,
+            excess,
+        )
     }
 
     fn calculate_cs_result(
         mut selected_utxos: Vec<OutputGroup>,
         mut required_utxos: Vec<OutputGroup>,
         mut fee_amount: u64,
+        excess: Excess,
     ) -> CoinSelectionResult {
         selected_utxos.append(&mut required_utxos);
         fee_amount += selected_utxos.iter().map(|u| u.fee).sum::<u64>();
@@ -597,6 +711,7 @@ impl BranchAndBoundCoinSelection {
         CoinSelectionResult {
             selected,
             fee_amount,
+            excess,
         }
     }
 }
@@ -758,6 +873,7 @@ mod test {
     fn test_largest_first_coin_selection_success() {
         let utxos = get_test_utxos();
         let database = MemoryDatabase::default();
+        let drain_script = Script::default();
 
         let result = LargestFirstCoinSelection::default()
             .coin_select(
@@ -767,6 +883,7 @@ mod test {
                 FeeRate::from_sat_per_vb(1.0),
                 250_000,
                 FEE_AMOUNT,
+                &drain_script,
             )
             .unwrap();
 
@@ -779,6 +896,7 @@ mod test {
     fn test_largest_first_coin_selection_use_all() {
         let utxos = get_test_utxos();
         let database = MemoryDatabase::default();
+        let drain_script = Script::default();
 
         let result = LargestFirstCoinSelection::default()
             .coin_select(
@@ -788,6 +906,7 @@ mod test {
                 FeeRate::from_sat_per_vb(1.0),
                 20_000,
                 FEE_AMOUNT,
+                &drain_script,
             )
             .unwrap();
 
@@ -800,6 +919,7 @@ mod test {
     fn test_largest_first_coin_selection_use_only_necessary() {
         let utxos = get_test_utxos();
         let database = MemoryDatabase::default();
+        let drain_script = Script::default();
 
         let result = LargestFirstCoinSelection::default()
             .coin_select(
@@ -809,6 +929,7 @@ mod test {
                 FeeRate::from_sat_per_vb(1.0),
                 20_000,
                 FEE_AMOUNT,
+                &drain_script,
             )
             .unwrap();
 
@@ -822,6 +943,7 @@ mod test {
     fn test_largest_first_coin_selection_insufficient_funds() {
         let utxos = get_test_utxos();
         let database = MemoryDatabase::default();
+        let drain_script = Script::default();
 
         LargestFirstCoinSelection::default()
             .coin_select(
@@ -831,6 +953,7 @@ mod test {
                 FeeRate::from_sat_per_vb(1.0),
                 500_000,
                 FEE_AMOUNT,
+                &drain_script,
             )
             .unwrap();
     }
@@ -840,6 +963,7 @@ mod test {
     fn test_largest_first_coin_selection_insufficient_funds_high_fees() {
         let utxos = get_test_utxos();
         let database = MemoryDatabase::default();
+        let drain_script = Script::default();
 
         LargestFirstCoinSelection::default()
             .coin_select(
@@ -849,6 +973,7 @@ mod test {
                 FeeRate::from_sat_per_vb(1000.0),
                 250_000,
                 FEE_AMOUNT,
+                &drain_script,
             )
             .unwrap();
     }
@@ -857,6 +982,7 @@ mod test {
     fn test_oldest_first_coin_selection_success() {
         let mut database = MemoryDatabase::default();
         let utxos = setup_database_and_get_oldest_first_test_utxos(&mut database);
+        let drain_script = Script::default();
 
         let result = OldestFirstCoinSelection::default()
             .coin_select(
@@ -866,6 +992,7 @@ mod test {
                 FeeRate::from_sat_per_vb(1.0),
                 180_000,
                 FEE_AMOUNT,
+                &drain_script,
             )
             .unwrap();
 
@@ -880,6 +1007,7 @@ mod test {
         let utxo1 = utxo(120_000, 1);
         let utxo2 = utxo(80_000, 2);
         let utxo3 = utxo(300_000, 3);
+        let drain_script = Script::default();
 
         let mut database = MemoryDatabase::default();
 
@@ -922,6 +1050,7 @@ mod test {
                 FeeRate::from_sat_per_vb(1.0),
                 180_000,
                 FEE_AMOUNT,
+                &drain_script,
             )
             .unwrap();
 
@@ -934,6 +1063,7 @@ mod test {
     fn test_oldest_first_coin_selection_use_all() {
         let mut database = MemoryDatabase::default();
         let utxos = setup_database_and_get_oldest_first_test_utxos(&mut database);
+        let drain_script = Script::default();
 
         let result = OldestFirstCoinSelection::default()
             .coin_select(
@@ -943,6 +1073,7 @@ mod test {
                 FeeRate::from_sat_per_vb(1.0),
                 20_000,
                 FEE_AMOUNT,
+                &drain_script,
             )
             .unwrap();
 
@@ -955,6 +1086,7 @@ mod test {
     fn test_oldest_first_coin_selection_use_only_necessary() {
         let mut database = MemoryDatabase::default();
         let utxos = setup_database_and_get_oldest_first_test_utxos(&mut database);
+        let drain_script = Script::default();
 
         let result = OldestFirstCoinSelection::default()
             .coin_select(
@@ -964,6 +1096,7 @@ mod test {
                 FeeRate::from_sat_per_vb(1.0),
                 20_000,
                 FEE_AMOUNT,
+                &drain_script,
             )
             .unwrap();
 
@@ -977,6 +1110,7 @@ mod test {
     fn test_oldest_first_coin_selection_insufficient_funds() {
         let mut database = MemoryDatabase::default();
         let utxos = setup_database_and_get_oldest_first_test_utxos(&mut database);
+        let drain_script = Script::default();
 
         OldestFirstCoinSelection::default()
             .coin_select(
@@ -986,6 +1120,7 @@ mod test {
                 FeeRate::from_sat_per_vb(1.0),
                 600_000,
                 FEE_AMOUNT,
+                &drain_script,
             )
             .unwrap();
     }
@@ -998,6 +1133,7 @@ mod test {
 
         let amount_needed: u64 =
             utxos.iter().map(|wu| wu.utxo.txout().value).sum::<u64>() - (FEE_AMOUNT + 50);
+        let drain_script = Script::default();
 
         OldestFirstCoinSelection::default()
             .coin_select(
@@ -1007,6 +1143,7 @@ mod test {
                 FeeRate::from_sat_per_vb(1000.0),
                 amount_needed,
                 FEE_AMOUNT,
+                &drain_script,
             )
             .unwrap();
     }
@@ -1018,6 +1155,7 @@ mod test {
         let utxos = generate_same_value_utxos(100_000, 20);
 
         let database = MemoryDatabase::default();
+        let drain_script = Script::default();
 
         let result = BranchAndBoundCoinSelection::default()
             .coin_select(
@@ -1027,6 +1165,7 @@ mod test {
                 FeeRate::from_sat_per_vb(1.0),
                 250_000,
                 FEE_AMOUNT,
+                &drain_script,
             )
             .unwrap();
 
@@ -1039,6 +1178,7 @@ mod test {
     fn test_bnb_coin_selection_required_are_enough() {
         let utxos = get_test_utxos();
         let database = MemoryDatabase::default();
+        let drain_script = Script::default();
 
         let result = BranchAndBoundCoinSelection::default()
             .coin_select(
@@ -1048,6 +1188,7 @@ mod test {
                 FeeRate::from_sat_per_vb(1.0),
                 20_000,
                 FEE_AMOUNT,
+                &drain_script,
             )
             .unwrap();
 
@@ -1060,6 +1201,7 @@ mod test {
     fn test_bnb_coin_selection_optional_are_enough() {
         let utxos = get_test_utxos();
         let database = MemoryDatabase::default();
+        let drain_script = Script::default();
 
         let result = BranchAndBoundCoinSelection::default()
             .coin_select(
@@ -1069,6 +1211,7 @@ mod test {
                 FeeRate::from_sat_per_vb(1.0),
                 299756,
                 FEE_AMOUNT,
+                &drain_script,
             )
             .unwrap();
 
@@ -1091,6 +1234,7 @@ mod test {
         assert_eq!(amount, 100_000);
         let amount: u64 = optional.iter().map(|u| u.utxo.txout().value).sum();
         assert!(amount > 150_000);
+        let drain_script = Script::default();
 
         let result = BranchAndBoundCoinSelection::default()
             .coin_select(
@@ -1100,6 +1244,7 @@ mod test {
                 FeeRate::from_sat_per_vb(1.0),
                 150_000,
                 FEE_AMOUNT,
+                &drain_script,
             )
             .unwrap();
 
@@ -1113,6 +1258,7 @@ mod test {
     fn test_bnb_coin_selection_insufficient_funds() {
         let utxos = get_test_utxos();
         let database = MemoryDatabase::default();
+        let drain_script = Script::default();
 
         BranchAndBoundCoinSelection::default()
             .coin_select(
@@ -1122,6 +1268,7 @@ mod test {
                 FeeRate::from_sat_per_vb(1.0),
                 500_000,
                 FEE_AMOUNT,
+                &drain_script,
             )
             .unwrap();
     }
@@ -1131,6 +1278,7 @@ mod test {
     fn test_bnb_coin_selection_insufficient_funds_high_fees() {
         let utxos = get_test_utxos();
         let database = MemoryDatabase::default();
+        let drain_script = Script::default();
 
         BranchAndBoundCoinSelection::default()
             .coin_select(
@@ -1140,6 +1288,7 @@ mod test {
                 FeeRate::from_sat_per_vb(1000.0),
                 250_000,
                 FEE_AMOUNT,
+                &drain_script,
             )
             .unwrap();
     }
@@ -1148,6 +1297,7 @@ mod test {
     fn test_bnb_coin_selection_check_fee_rate() {
         let utxos = get_test_utxos();
         let database = MemoryDatabase::default();
+        let drain_script = Script::default();
 
         let result = BranchAndBoundCoinSelection::new(0)
             .coin_select(
@@ -1157,6 +1307,7 @@ mod test {
                 FeeRate::from_sat_per_vb(1.0),
                 99932, // first utxo's effective value
                 0,
+                &drain_script,
             )
             .unwrap();
 
@@ -1176,6 +1327,7 @@ mod test {
         for _i in 0..200 {
             let mut optional_utxos = generate_random_utxos(&mut rng, 16);
             let target_amount = sum_random_utxos(&mut rng, &mut optional_utxos);
+            let drain_script = Script::default();
             let result = BranchAndBoundCoinSelection::new(0)
                 .coin_select(
                     &database,
@@ -1184,6 +1336,7 @@ mod test {
                     FeeRate::from_sat_per_vb(0.0),
                     target_amount,
                     0,
+                    &drain_script,
                 )
                 .unwrap();
             assert_eq!(result.selected_amount(), target_amount);
@@ -1203,6 +1356,9 @@ mod test {
 
         let size_of_change = 31;
         let cost_of_change = size_of_change as f32 * fee_rate.as_sat_vb();
+
+        let drain_script = Script::default();
+
         BranchAndBoundCoinSelection::new(size_of_change)
             .bnb(
                 vec![],
@@ -1212,6 +1368,8 @@ mod test {
                 20_000,
                 FEE_AMOUNT,
                 cost_of_change,
+                &drain_script,
+                fee_rate,
             )
             .unwrap();
     }
@@ -1230,6 +1388,8 @@ mod test {
         let size_of_change = 31;
         let cost_of_change = size_of_change as f32 * fee_rate.as_sat_vb();
 
+        let drain_script = Script::default();
+
         BranchAndBoundCoinSelection::new(size_of_change)
             .bnb(
                 vec![],
@@ -1239,6 +1399,8 @@ mod test {
                 20_000,
                 FEE_AMOUNT,
                 cost_of_change,
+                &drain_script,
+                fee_rate,
             )
             .unwrap();
     }
@@ -1263,6 +1425,8 @@ mod test {
         // cost_of_change + 5.
         let target_amount = 2 * 50_000 - 2 * 67 - cost_of_change.ceil() as i64 + 5;
 
+        let drain_script = Script::default();
+
         let result = BranchAndBoundCoinSelection::new(size_of_change)
             .bnb(
                 vec![],
@@ -1272,6 +1436,8 @@ mod test {
                 target_amount,
                 FEE_AMOUNT,
                 cost_of_change,
+                &drain_script,
+                fee_rate,
             )
             .unwrap();
         assert_eq!(result.selected_amount(), 100_000);
@@ -1300,6 +1466,8 @@ mod test {
             let target_amount =
                 optional_utxos[3].effective_value + optional_utxos[23].effective_value;
 
+            let drain_script = Script::default();
+
             let result = BranchAndBoundCoinSelection::new(0)
                 .bnb(
                     vec![],
@@ -1309,6 +1477,8 @@ mod test {
                     target_amount,
                     0,
                     0.0,
+                    &drain_script,
+                    fee_rate,
                 )
                 .unwrap();
             assert_eq!(result.selected_amount(), target_amount as u64);
@@ -1328,12 +1498,16 @@ mod test {
             .map(|u| OutputGroup::new(u, fee_rate))
             .collect();
 
+        let drain_script = Script::default();
+
         let result = BranchAndBoundCoinSelection::default().single_random_draw(
             vec![],
             utxos,
             0,
             target_amount as i64,
             FEE_AMOUNT,
+            &drain_script,
+            fee_rate,
         );
 
         assert!(result.selected_amount() > target_amount);
