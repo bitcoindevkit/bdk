@@ -2011,6 +2011,7 @@ pub(crate) mod test {
     macro_rules! assert_fee_rate {
         ($psbt:expr, $fees:expr, $fee_rate:expr $( ,@dust_change $( $dust_change:expr )* )* $( ,@add_signature $( $add_signature:expr )* )* ) => ({
             let psbt = $psbt.clone();
+            #[allow(unused_mut)]
             let mut tx = $psbt.clone().extract_tx();
             $(
                 $( $add_signature )*
@@ -5087,5 +5088,67 @@ pub(crate) mod test {
             .add_recipient(addr.script_pubkey(), balance / 2)
             .current_height(maturity_time);
         builder.finish().unwrap();
+    }
+
+    #[test]
+    fn test_fee_rate_sign_no_grinding_high_r() {
+        // Our goal is to obtain a transaction with a signature with high-R (71 bytes
+        // instead of 70). We then check that our fee rate and fee calculation is
+        // alright.
+        let (wallet, _, _) = get_funded_wallet("wpkh(tprv8ZgxMBicQKsPd3EupYiPRhaMooHKUHJxNsTfYuScep13go8QFfHdtkG9nRkFGb7busX4isf6X9dURGCoKgitaApQ6MupRhZMcELAxTBRJgS/*)");
+        let addr = wallet.get_address(New).unwrap();
+        let fee_rate = FeeRate::from_sat_per_vb(1.0);
+        let mut builder = wallet.build_tx();
+        let mut data = vec![0];
+        builder
+            .drain_to(addr.script_pubkey())
+            .drain_wallet()
+            .fee_rate(fee_rate)
+            .add_data(&data);
+        let (mut psbt, details) = builder.finish().unwrap();
+        let (op_return_vout, _) = psbt
+            .unsigned_tx
+            .output
+            .iter()
+            .enumerate()
+            .find(|(_n, i)| i.script_pubkey.is_op_return())
+            .unwrap();
+
+        let mut sig_len: usize = 0;
+        // We try to sign many different times until we find a longer signature (71 bytes)
+        while sig_len < 71 {
+            // Changing the OP_RETURN data will make the signature change (but not the fee, until
+            // data[0] is small enough)
+            data[0] += 1;
+            psbt.unsigned_tx.output[op_return_vout].script_pubkey = Script::new_op_return(&data);
+            // Clearing the previous signature
+            psbt.inputs[0].partial_sigs.clear();
+            // Signing
+            wallet
+                .sign(
+                    &mut psbt,
+                    SignOptions {
+                        remove_partial_sigs: false,
+                        try_finalize: false,
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+            // We only have one key in the partial_sigs map, this is a trick to retrieve it
+            let key = psbt.inputs[0].partial_sigs.keys().next().unwrap();
+            sig_len = psbt.inputs[0].partial_sigs[key].sig.serialize_der().len();
+        }
+        // Actually finalizing the transaction...
+        wallet
+            .sign(
+                &mut psbt,
+                SignOptions {
+                    remove_partial_sigs: false,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        // ...and checking that everything is fine
+        assert_fee_rate!(psbt, details.fee.unwrap_or(0), fee_rate);
     }
 }
