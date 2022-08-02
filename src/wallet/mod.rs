@@ -3781,6 +3781,7 @@ pub(crate) mod test {
                 .del_utxo(&txin.previous_output)
                 .unwrap();
         }
+        let original_tx_weight = tx.weight();
         original_details.transaction = Some(tx);
         wallet
             .database
@@ -3789,7 +3790,20 @@ pub(crate) mod test {
             .unwrap();
 
         let mut builder = wallet.build_fee_bump(txid).unwrap();
-        builder.fee_rate(FeeRate::from_sat_per_vb(141.0));
+        // We set a fee high enough that during rbf we are forced to add
+        // a new input and also that we have to remove the change
+        // that we had previously
+
+        // We calculate the new weight as:
+        //   original weight
+        // + extra input weight: 160 WU = (32 (prevout) + 4 (vout) + 4 (nsequence)) * 4
+        // + input satisfaction weight: 112 WU = 106 (witness) + 2 (witness len) + (1 (script len)) * 4
+        // - change output weight: 124 WU = (8 (value) + 1 (script len) + 22 (script)) * 4
+        let new_tx_weight = original_tx_weight + 160 + 112 - 124;
+        // two inputs (50k, 25k) and one output (45k) - epsilon
+        // We use epsilon here to avoid asking for a slightly too high feerate
+        let fee_abs = 50_000 + 25_000 - 45_000 - 10;
+        builder.fee_rate(FeeRate::from_wu(fee_abs, new_tx_weight));
         let (psbt, details) = builder.finish().unwrap();
 
         assert_eq!(
