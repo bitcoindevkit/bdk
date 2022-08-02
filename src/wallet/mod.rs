@@ -1086,7 +1086,7 @@ where
             .iter()
             .chain(self.change_signers.signers().iter())
         {
-            signer.sign_transaction(psbt, &self.secp)?;
+            signer.sign_transaction(psbt, &sign_options, &self.secp)?;
         }
 
         // attempt to finalize
@@ -1975,6 +1975,10 @@ pub(crate) mod test {
         "tr(b511bd5771e47ee27558b1765e87b541668304ec567721c7b880edc0a010da55,{pk(cPZzKuNmpuUjD1e8jUU4PVzy2b5LngbSip8mBsxf4e7rSFZVb4Uh),pk(8aee2b8120a5f157f1223f72b5e62b825831a27a9fdf427db7cc697494d4a642)})"
     }
 
+    pub(crate) fn get_test_tr_with_taptree_both_priv() -> &'static str {
+        "tr(b511bd5771e47ee27558b1765e87b541668304ec567721c7b880edc0a010da55,{pk(cPZzKuNmpuUjD1e8jUU4PVzy2b5LngbSip8mBsxf4e7rSFZVb4Uh),pk(cNaQCDwmmh4dS9LzCgVtyy1e1xjCJ21GUDHe9K98nzb689JvinGV)})"
+    }
+
     pub(crate) fn get_test_tr_repeated_key() -> &'static str {
         "tr(b511bd5771e47ee27558b1765e87b541668304ec567721c7b880edc0a010da55,{and_v(v:pk(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW),after(100)),and_v(v:pk(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW),after(200))})"
     }
@@ -1984,7 +1988,7 @@ pub(crate) mod test {
     }
 
     pub(crate) fn get_test_tr_with_taptree_xprv() -> &'static str {
-        "tr(b511bd5771e47ee27558b1765e87b541668304ec567721c7b880edc0a010da55,{pk(tprv8ZgxMBicQKsPdDArR4xSAECuVxeX1jwwSXR4ApKbkYgZiziDc4LdBy2WvJeGDfUSE4UT4hHhbgEwbdq8ajjUHiKDegkwrNU6V55CxcxonVN/*),pk(8aee2b8120a5f157f1223f72b5e62b825831a27a9fdf427db7cc697494d4a642)})"
+        "tr(cNJmN3fH9DDbDt131fQNkVakkpzawJBSeybCUNmP1BovpmGQ45xG,{pk(tprv8ZgxMBicQKsPdDArR4xSAECuVxeX1jwwSXR4ApKbkYgZiziDc4LdBy2WvJeGDfUSE4UT4hHhbgEwbdq8ajjUHiKDegkwrNU6V55CxcxonVN/*),pk(8aee2b8120a5f157f1223f72b5e62b825831a27a9fdf427db7cc697494d4a642)})"
     }
 
     macro_rules! assert_fee_rate {
@@ -4831,12 +4835,173 @@ pub(crate) mod test {
     }
 
     #[test]
+    fn test_taproot_no_key_spend() {
+        let (wallet, _, _) = get_funded_wallet(get_test_tr_with_taptree_both_priv());
+        let addr = wallet.get_address(AddressIndex::New).unwrap();
+
+        let mut builder = wallet.build_tx();
+        builder.add_recipient(addr.script_pubkey(), 25_000);
+        let (mut psbt, _) = builder.finish().unwrap();
+
+        assert!(
+            wallet
+                .sign(
+                    &mut psbt,
+                    SignOptions {
+                        sign_with_tap_internal_key: false,
+                        ..Default::default()
+                    },
+                )
+                .unwrap(),
+            "Unable to finalize tx"
+        );
+
+        assert!(psbt.inputs.iter().all(|i| i.tap_key_sig.is_none()));
+    }
+
+    #[test]
     fn test_taproot_script_spend() {
         let (wallet, _, _) = get_funded_wallet(get_test_tr_with_taptree());
         test_spend_from_wallet(wallet);
 
         let (wallet, _, _) = get_funded_wallet(get_test_tr_with_taptree_xprv());
         test_spend_from_wallet(wallet);
+    }
+
+    #[test]
+    fn test_taproot_script_spend_sign_all_leaves() {
+        use crate::signer::TapLeavesOptions;
+        let (wallet, _, _) = get_funded_wallet(get_test_tr_with_taptree_both_priv());
+        let addr = wallet.get_address(AddressIndex::New).unwrap();
+
+        let mut builder = wallet.build_tx();
+        builder.add_recipient(addr.script_pubkey(), 25_000);
+        let (mut psbt, _) = builder.finish().unwrap();
+
+        assert!(
+            wallet
+                .sign(
+                    &mut psbt,
+                    SignOptions {
+                        tap_leaves_options: TapLeavesOptions::All,
+                        ..Default::default()
+                    },
+                )
+                .unwrap(),
+            "Unable to finalize tx"
+        );
+
+        assert!(psbt
+            .inputs
+            .iter()
+            .all(|i| i.tap_script_sigs.len() == i.tap_scripts.len()));
+    }
+
+    #[test]
+    fn test_taproot_script_spend_sign_include_some_leaves() {
+        use crate::signer::TapLeavesOptions;
+        use crate::wallet::taproot::TapLeafHash;
+
+        let (wallet, _, _) = get_funded_wallet(get_test_tr_with_taptree_both_priv());
+        let addr = wallet.get_address(AddressIndex::New).unwrap();
+
+        let mut builder = wallet.build_tx();
+        builder.add_recipient(addr.script_pubkey(), 25_000);
+        let (mut psbt, _) = builder.finish().unwrap();
+        let mut script_leaves: Vec<_> = psbt.inputs[0]
+            .tap_scripts
+            .clone()
+            .values()
+            .map(|(script, version)| TapLeafHash::from_script(script, *version))
+            .collect();
+        let included_script_leaves = vec![script_leaves.pop().unwrap()];
+        let excluded_script_leaves = script_leaves;
+
+        assert!(
+            wallet
+                .sign(
+                    &mut psbt,
+                    SignOptions {
+                        tap_leaves_options: TapLeavesOptions::Include(
+                            included_script_leaves.clone()
+                        ),
+                        ..Default::default()
+                    },
+                )
+                .unwrap(),
+            "Unable to finalize tx"
+        );
+
+        assert!(psbt.inputs[0]
+            .tap_script_sigs
+            .iter()
+            .all(|s| included_script_leaves.contains(&s.0 .1)
+                && !excluded_script_leaves.contains(&s.0 .1)));
+    }
+
+    #[test]
+    fn test_taproot_script_spend_sign_exclude_some_leaves() {
+        use crate::signer::TapLeavesOptions;
+        use crate::wallet::taproot::TapLeafHash;
+
+        let (wallet, _, _) = get_funded_wallet(get_test_tr_with_taptree_both_priv());
+        let addr = wallet.get_address(AddressIndex::New).unwrap();
+
+        let mut builder = wallet.build_tx();
+        builder.add_recipient(addr.script_pubkey(), 25_000);
+        let (mut psbt, _) = builder.finish().unwrap();
+        let mut script_leaves: Vec<_> = psbt.inputs[0]
+            .tap_scripts
+            .clone()
+            .values()
+            .map(|(script, version)| TapLeafHash::from_script(script, *version))
+            .collect();
+        let included_script_leaves = vec![script_leaves.pop().unwrap()];
+        let excluded_script_leaves = script_leaves;
+
+        assert!(
+            wallet
+                .sign(
+                    &mut psbt,
+                    SignOptions {
+                        tap_leaves_options: TapLeavesOptions::Exclude(
+                            excluded_script_leaves.clone()
+                        ),
+                        ..Default::default()
+                    },
+                )
+                .unwrap(),
+            "Unable to finalize tx"
+        );
+
+        assert!(psbt.inputs[0]
+            .tap_script_sigs
+            .iter()
+            .all(|s| included_script_leaves.contains(&s.0 .1)
+                && !excluded_script_leaves.contains(&s.0 .1)));
+    }
+
+    #[test]
+    fn test_taproot_script_spend_sign_no_leaves() {
+        use crate::signer::TapLeavesOptions;
+        let (wallet, _, _) = get_funded_wallet(get_test_tr_with_taptree_both_priv());
+        let addr = wallet.get_address(AddressIndex::New).unwrap();
+
+        let mut builder = wallet.build_tx();
+        builder.add_recipient(addr.script_pubkey(), 25_000);
+        let (mut psbt, _) = builder.finish().unwrap();
+
+        wallet
+            .sign(
+                &mut psbt,
+                SignOptions {
+                    tap_leaves_options: TapLeavesOptions::None,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+
+        assert!(psbt.inputs.iter().all(|i| i.tap_script_sigs.is_empty()));
     }
 
     #[test]
