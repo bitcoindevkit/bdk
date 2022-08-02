@@ -51,14 +51,34 @@ impl AsRef<[u8]> for KeychainKind {
 pub struct FeeRate(f32);
 
 impl FeeRate {
+    /// Create a new instance checking the value provided
+    ///
+    /// ## Panics
+    ///
+    /// Panics if the value is not [normal](https://doc.rust-lang.org/std/primitive.f32.html#method.is_normal) (except if it's a positive zero) or negative.
+    fn new_checked(value: f32) -> Self {
+        assert!(value.is_normal() || value == 0.0);
+        assert!(value.is_sign_positive());
+
+        FeeRate(value)
+    }
+
     /// Create a new instance of [`FeeRate`] given a float fee rate in btc/kvbytes
+    ///
+    /// ## Panics
+    ///
+    /// Panics if the value is not [normal](https://doc.rust-lang.org/std/primitive.f32.html#method.is_normal) (except if it's a positive zero) or negative.
     pub fn from_btc_per_kvb(btc_per_kvb: f32) -> Self {
-        FeeRate(btc_per_kvb * 1e5)
+        FeeRate::new_checked(btc_per_kvb * 1e5)
     }
 
     /// Create a new instance of [`FeeRate`] given a float fee rate in satoshi/vbyte
-    pub const fn from_sat_per_vb(sat_per_vb: f32) -> Self {
-        FeeRate(sat_per_vb)
+    ///
+    /// ## Panics
+    ///
+    /// Panics if the value is not [normal](https://doc.rust-lang.org/std/primitive.f32.html#method.is_normal) (except if it's a positive zero) or negative.
+    pub fn from_sat_per_vb(sat_per_vb: f32) -> Self {
+        FeeRate::new_checked(sat_per_vb)
     }
 
     /// Create a new [`FeeRate`] with the default min relay fee value
@@ -248,7 +268,35 @@ mod tests {
 
     #[test]
     fn can_store_feerate_in_const() {
-        const _MY_RATE: FeeRate = FeeRate::from_sat_per_vb(10.0);
         const _MIN_RELAY: FeeRate = FeeRate::default_min_relay_fee();
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_invalid_feerate_neg_zero() {
+        let _ = FeeRate::from_sat_per_vb(-0.0);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_invalid_feerate_neg_value() {
+        let _ = FeeRate::from_sat_per_vb(-5.0);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_invalid_feerate_nan() {
+        let _ = FeeRate::from_sat_per_vb(f32::NAN);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_invalid_feerate_inf() {
+        let _ = FeeRate::from_sat_per_vb(f32::INFINITY);
+    }
+
+    #[test]
+    fn test_valid_feerate_pos_zero() {
+        let _ = FeeRate::from_sat_per_vb(0.0);
     }
 }
