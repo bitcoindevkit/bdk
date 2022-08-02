@@ -1871,6 +1871,14 @@ pub(crate) mod test {
     use crate::signer::{SignOptions, SignerError};
     use crate::wallet::AddressIndex::{LastUnused, New, Peek, Reset};
 
+    // The satisfaction size of a P2WPKH is 112 WU =
+    // 1 (elements in witness) + 1 (OP_PUSH) + 33 (pk) + 1 (OP_PUSH) + 72 (signature + sighash) + 1*4 (script len)
+    // On the witness itself, we have to push once for the pk (33WU) and once for signature + sighash (72WU), for
+    // a total of 105 WU.
+    // Here, we push just once for simplicity, so we have to add an extra byte for the missing
+    // OP_PUSH.
+    const P2WPKH_FAKE_WITNESS_SIZE: usize = 106;
+
     #[test]
     fn test_cache_addresses_fixed() {
         let db = MemoryDatabase::new();
@@ -2007,7 +2015,7 @@ pub(crate) mod test {
             $(
                 $( $add_signature )*
                 for txin in &mut tx.input {
-                    txin.witness.push([0x00; 108]); // fake signature
+                    txin.witness.push([0x00; P2WPKH_FAKE_WITNESS_SIZE]); // fake signature
                 }
             )*
 
@@ -3236,7 +3244,7 @@ pub(crate) mod test {
         let txid = tx.txid();
         // skip saving the new utxos, we know they can't be used anyways
         for txin in &mut tx.input {
-            txin.witness.push([0x00; 108]); // fake signature
+            txin.witness.push([0x00; P2WPKH_FAKE_WITNESS_SIZE]); // fake signature
             wallet
                 .database
                 .borrow_mut()
@@ -3296,7 +3304,7 @@ pub(crate) mod test {
         let txid = tx.txid();
         // skip saving the new utxos, we know they can't be used anyways
         for txin in &mut tx.input {
-            txin.witness.push([0x00; 108]); // fake signature
+            txin.witness.push([0x00; P2WPKH_FAKE_WITNESS_SIZE]); // fake signature
             wallet
                 .database
                 .borrow_mut()
@@ -3362,7 +3370,7 @@ pub(crate) mod test {
         let mut tx = psbt.extract_tx();
         let txid = tx.txid();
         for txin in &mut tx.input {
-            txin.witness.push([0x00; 108]); // fake signature
+            txin.witness.push([0x00; P2WPKH_FAKE_WITNESS_SIZE]); // fake signature
             wallet
                 .database
                 .borrow_mut()
@@ -3406,7 +3414,7 @@ pub(crate) mod test {
         let mut tx = psbt.extract_tx();
         let txid = tx.txid();
         for txin in &mut tx.input {
-            txin.witness.push([0x00; 108]); // fake signature
+            txin.witness.push([0x00; P2WPKH_FAKE_WITNESS_SIZE]); // fake signature
             wallet
                 .database
                 .borrow_mut()
@@ -3462,7 +3470,7 @@ pub(crate) mod test {
         let mut tx = psbt.extract_tx();
         let txid = tx.txid();
         for txin in &mut tx.input {
-            txin.witness.push([0x00; 108]); // fake signature
+            txin.witness.push([0x00; P2WPKH_FAKE_WITNESS_SIZE]); // fake signature
             wallet
                 .database
                 .borrow_mut()
@@ -3519,7 +3527,7 @@ pub(crate) mod test {
         let mut tx = psbt.extract_tx();
         let txid = tx.txid();
         for txin in &mut tx.input {
-            txin.witness.push([0x00; 108]); // fake signature
+            txin.witness.push([0x00; P2WPKH_FAKE_WITNESS_SIZE]); // fake signature
             wallet
                 .database
                 .borrow_mut()
@@ -3560,7 +3568,7 @@ pub(crate) mod test {
         let txid = tx.txid();
         // skip saving the new utxos, we know they can't be used anyways
         for txin in &mut tx.input {
-            txin.witness.push([0x00; 108]); // fake signature
+            txin.witness.push([0x00; P2WPKH_FAKE_WITNESS_SIZE]); // fake signature
             wallet
                 .database
                 .borrow_mut()
@@ -3623,7 +3631,7 @@ pub(crate) mod test {
         let txid = tx.txid();
         // skip saving the new utxos, we know they can't be used anyways
         for txin in &mut tx.input {
-            txin.witness.push([0x00; 108]); // fake signature
+            txin.witness.push([0x00; P2WPKH_FAKE_WITNESS_SIZE]); // fake signature
             wallet
                 .database
                 .borrow_mut()
@@ -3694,7 +3702,7 @@ pub(crate) mod test {
         let txid = tx.txid();
         // skip saving the new utxos, we know they can't be used anyways
         for txin in &mut tx.input {
-            txin.witness.push([0x00; 108]); // fake signature
+            txin.witness.push([0x00; P2WPKH_FAKE_WITNESS_SIZE]); // fake signature
             wallet
                 .database
                 .borrow_mut()
@@ -3765,7 +3773,7 @@ pub(crate) mod test {
         let txid = tx.txid();
         // skip saving the new utxos, we know they can't be used anyways
         for txin in &mut tx.input {
-            txin.witness.push([0x00; 108]); // fake signature
+            txin.witness.push([0x00; P2WPKH_FAKE_WITNESS_SIZE]); // fake signature
             wallet
                 .database
                 .borrow_mut()
@@ -3826,7 +3834,7 @@ pub(crate) mod test {
         let txid = tx.txid();
         // skip saving the new utxos, we know they can't be used anyways
         for txin in &mut tx.input {
-            txin.witness.push([0x00; 108]); // fake signature
+            txin.witness.push([0x00; P2WPKH_FAKE_WITNESS_SIZE]); // fake signature
             wallet
                 .database
                 .borrow_mut()
@@ -3897,7 +3905,7 @@ pub(crate) mod test {
         let txid = tx.txid();
         // skip saving the new utxos, we know they can't be used anyways
         for txin in &mut tx.input {
-            txin.witness.push([0x00; 108]); // fake signature
+            txin.witness.push([0x00; P2WPKH_FAKE_WITNESS_SIZE]); // fake signature
             wallet
                 .database
                 .borrow_mut()
@@ -3976,7 +3984,7 @@ pub(crate) mod test {
         let mut tx = psbt.extract_tx();
         let txid = tx.txid();
         for txin in &mut tx.input {
-            txin.witness.push([0x00; 108]); // fake signature
+            txin.witness.push([0x00; P2WPKH_FAKE_WITNESS_SIZE]); // fake signature
             wallet
                 .database
                 .borrow_mut()
@@ -4020,7 +4028,7 @@ pub(crate) mod test {
         let mut tx = psbt.extract_tx();
         let txid = tx.txid();
         for txin in &mut tx.input {
-            txin.witness.push([0x00; 108]); // fake signature
+            txin.witness.push([0x00; P2WPKH_FAKE_WITNESS_SIZE]); // fake signature
             wallet
                 .database
                 .borrow_mut()
