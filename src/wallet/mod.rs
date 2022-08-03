@@ -438,10 +438,21 @@ where
         self.database.borrow().get_tx(txid, include_raw)
     }
 
-    /// Return the list of transactions made and received by the wallet
+    /// Return an unsorted list of transactions made and received by the wallet
     ///
     /// Optionally fill the [`TransactionDetails::transaction`] field with the raw transaction if
     /// `include_raw` is `true`.
+    ///
+    /// To sort transactions, the following code can be used:
+    /// ```no_run
+    /// # let mut tx_list: Vec<bdk::TransactionDetails> = vec![];
+    /// tx_list.sort_by(|a, b| {
+    ///     b.confirmation_time
+    ///         .as_ref()
+    ///         .map(|t| t.height)
+    ///         .cmp(&a.confirmation_time.as_ref().map(|t| t.height))
+    /// });
+    /// ```
     ///
     /// Note that this methods only operate on the internal database, which first needs to be
     /// [`Wallet::sync`] manually.
