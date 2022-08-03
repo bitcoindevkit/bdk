@@ -138,6 +138,11 @@ name = "hardware_signer"
 path = "examples/hardware_signer.rs"
 required-features = ["electrum", "hardware-signer"]
 
+[[example]]
+name = "electrum_backend"
+path = "examples/electrum_backend.rs"
+required-features = ["electrum"]
+
 [workspace]
 members = ["macros"]
 [package.metadata.docs.rs]
