@@ -41,7 +41,7 @@ bitcoincore-rpc = { version = "0.16", optional = true }
 
 # Platform-specific dependencies
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-tokio = { version = "1", features = ["rt"] }
+tokio = { version = "1", features = ["rt", "macros"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = "0.2"
@@ -142,6 +142,16 @@ required-features = ["electrum", "hardware-signer"]
 name = "electrum_backend"
 path = "examples/electrum_backend.rs"
 required-features = ["electrum"]
+
+[[example]]
+name = "esplora_backend_synchronous"
+path = "examples/esplora_backend_synchronous.rs"
+required-features = ["use-esplora-ureq"]
+
+[[example]]
+name = "esplora_backend_asynchronous"
+path = "examples/esplora_backend_asynchronous.rs"
+required-features = ["use-esplora-reqwest", "reqwest-default-tls", "async-interface"]
 
 [workspace]
 members = ["macros"]
