@@ -30,7 +30,7 @@
 //! # use bdk::database::Database;
 //! # use bdk::*;
 //! # use bdk::wallet::coin_selection::decide_change;
-//! # const TXIN_BASE_WEIGHT: usize = (32 + 4 + 4 + 1) * 4;
+//! # const TXIN_BASE_WEIGHT: usize = (32 + 4 + 4) * 4;
 //! #[derive(Debug)]
 //! struct AlwaysSpendEverything;
 //!
@@ -119,8 +119,8 @@ pub type DefaultCoinSelectionAlgorithm = BranchAndBoundCoinSelection;
 pub type DefaultCoinSelectionAlgorithm = LargestFirstCoinSelection; // make the tests more predictable
 
 // Base weight of a Txin, not counting the weight needed for satisfying it.
-// prev_txid (32 bytes) + prev_vout (4 bytes) + sequence (4 bytes) + script_len (1 bytes)
-pub(crate) const TXIN_BASE_WEIGHT: usize = (32 + 4 + 4 + 1) * 4;
+// prev_txid (32 bytes) + prev_vout (4 bytes) + sequence (4 bytes)
+pub(crate) const TXIN_BASE_WEIGHT: usize = (32 + 4 + 4) * 4;
 
 #[derive(Debug)]
 /// Remaining amount after performing coin selection
@@ -731,7 +731,7 @@ mod test {
     use rand::seq::SliceRandom;
     use rand::{Rng, SeedableRng};
 
-    const P2WPKH_WITNESS_SIZE: usize = 73 + 33 + 2;
+    const P2WPKH_SATISFACTION_SIZE: usize = 73 + 33 + 2 + 1;
 
     const FEE_AMOUNT: u64 = 50;
 
@@ -743,7 +743,7 @@ mod test {
         ))
         .unwrap();
         WeightedUtxo {
-            satisfaction_weight: P2WPKH_WITNESS_SIZE,
+            satisfaction_weight: P2WPKH_SATISFACTION_SIZE,
             utxo: Utxo::Local(LocalUtxo {
                 outpoint,
                 txout: TxOut {
@@ -823,7 +823,7 @@ mod test {
         let mut res = Vec::new();
         for _ in 0..utxos_number {
             res.push(WeightedUtxo {
-                satisfaction_weight: P2WPKH_WITNESS_SIZE,
+                satisfaction_weight: P2WPKH_SATISFACTION_SIZE,
                 utxo: Utxo::Local(LocalUtxo {
                     outpoint: OutPoint::from_str(
                         "ebd9813ecebc57ff8f30797de7c205e3c7498ca950ea4341ee51a685ff2fa30a:0",
@@ -843,7 +843,7 @@ mod test {
 
     fn generate_same_value_utxos(utxos_value: u64, utxos_number: usize) -> Vec<WeightedUtxo> {
         let utxo = WeightedUtxo {
-            satisfaction_weight: P2WPKH_WITNESS_SIZE,
+            satisfaction_weight: P2WPKH_SATISFACTION_SIZE,
             utxo: Utxo::Local(LocalUtxo {
                 outpoint: OutPoint::from_str(
                     "ebd9813ecebc57ff8f30797de7c205e3c7498ca950ea4341ee51a685ff2fa30a:0",
@@ -1313,7 +1313,7 @@ mod test {
 
         assert_eq!(result.selected.len(), 1);
         assert_eq!(result.selected_amount(), 100_000);
-        let input_size = (TXIN_BASE_WEIGHT + P2WPKH_WITNESS_SIZE).vbytes();
+        let input_size = (TXIN_BASE_WEIGHT + P2WPKH_SATISFACTION_SIZE).vbytes();
         let epsilon = 0.5;
         assert!((1.0 - (result.fee_amount as f32 / input_size as f32)).abs() < epsilon);
     }
