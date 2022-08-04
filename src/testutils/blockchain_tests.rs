@@ -1057,19 +1057,12 @@ macro_rules! bdk_blockchain_tests {
                 let (wallet, blockchain, _, mut test_client) = init_single_sig();
 
                 let wallet_addr = wallet.get_address($crate::wallet::AddressIndex::New).unwrap().address;
+                println!("wallet addr: {}", wallet_addr);
 
                 wallet.sync(&blockchain, SyncOptions::default()).unwrap();
                 assert_eq!(wallet.get_balance().unwrap(), 0, "incorrect balance");
 
                 test_client.generate(1, Some(wallet_addr));
-
-                #[cfg(feature = "rpc")]
-                {
-                    // rpc consider coinbase only when mature (100 blocks)
-                    let node_addr = test_client.get_node_address(None);
-                    test_client.generate(100, Some(node_addr));
-                }
-
 
                 wallet.sync(&blockchain, SyncOptions::default()).unwrap();
                 assert!(wallet.get_balance().unwrap() > 0, "incorrect balance after receiving coinbase");
@@ -1267,7 +1260,7 @@ macro_rules! bdk_blockchain_tests {
                 wallet.sync(&blockchain, SyncOptions::default()).unwrap();
 
                 let _ = test_client.receive(testutils! {
-                    @tx ( (@external descriptors, 0)   => 50_000 )
+                    @tx ( (@external descriptors, 0) => 50_000 )
                 });
 
                 wallet.sync(&blockchain, SyncOptions::default()).unwrap();

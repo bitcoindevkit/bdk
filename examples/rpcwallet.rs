@@ -103,7 +103,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         auth: bitcoind_auth,
         network: Network::Regtest,
         wallet_name,
-        skip_blocks: None,
+        sync_params: None,
     };
 
     // Use the above configuration to create a RPC blockchain backend
