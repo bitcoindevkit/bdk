@@ -460,15 +460,52 @@ where
         self.database.borrow().iter_txs(include_raw)
     }
 
-    /// Return the balance, meaning the sum of this wallet's unspent outputs' values
+    /// Return the balance, separated into available, trusted-pending, untrusted-pending and immature
+    /// values.
     ///
     /// Note that this methods only operate on the internal database, which first needs to be
     /// [`Wallet::sync`] manually.
-    pub fn get_balance(&self) -> Result<u64, Error> {
-        Ok(self
-            .list_unspent()?
-            .iter()
-            .fold(0, |sum, i| sum + i.txout.value))
+    pub fn get_balance(&self) -> Result<Balance, Error> {
+        let mut immature = 0;
+        let mut trusted_pending = 0;
+        let mut untrusted_pending = 0;
+        let mut confirmed = 0;
+        let utxos = self.list_unspent()?;
+        let database = self.database.borrow();
+        let last_sync_height = match database
+            .get_sync_time()?
+            .map(|sync_time| sync_time.block_time.height)
+        {
+            Some(height) => height,
+            // None means database was never synced
+            None => return Ok(Balance::default()),
+        };
+        for u in utxos {
+            // Unwrap used since utxo set is created from database
+            let tx = database
+                .get_tx(&u.outpoint.txid, true)?
+                .expect("Transaction not found in database");
+            if let Some(tx_conf_time) = &tx.confirmation_time {
+                if tx.transaction.expect("No transaction").is_coin_base()
+                    && (last_sync_height - tx_conf_time.height) < COINBASE_MATURITY
+                {
+                    immature += u.txout.value;
+                } else {
+                    confirmed += u.txout.value;
+                }
+            } else if u.keychain == KeychainKind::Internal {
+                trusted_pending += u.txout.value;
+            } else {
+                untrusted_pending += u.txout.value;
+            }
+        }
+
+        Ok(Balance {
+            immature,
+            trusted_pending,
+            untrusted_pending,
+            confirmed,
+        })
     }
 
     /// Add an external signer
@@ -5232,23 +5269,38 @@ pub(crate) mod test {
             Some(confirmation_time),
             (@coinbase true)
         );
+        let sync_time = SyncTime {
+            block_time: BlockTime {
+                height: confirmation_time,
+                timestamp: 0,
+            },
+        };
+        wallet
+            .database
+            .borrow_mut()
+            .set_sync_time(sync_time)
+            .unwrap();
 
         let not_yet_mature_time = confirmation_time + COINBASE_MATURITY - 1;
         let maturity_time = confirmation_time + COINBASE_MATURITY;
 
-        // The balance is nonzero, even if we can't spend anything
-        // FIXME: we should differentiate the balance between immature,
-        // trusted, untrusted_pending
-        // See https://github.com/bitcoindevkit/bdk/issues/238
         let balance = wallet.get_balance().unwrap();
-        assert!(balance != 0);
+        assert_eq!(
+            balance,
+            Balance {
+                immature: 25_000,
+                trusted_pending: 0,
+                untrusted_pending: 0,
+                confirmed: 0
+            }
+        );
 
         // We try to create a transaction, only to notice that all
         // our funds are unspendable
         let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
         let mut builder = wallet.build_tx();
         builder
-            .add_recipient(addr.script_pubkey(), balance / 2)
+            .add_recipient(addr.script_pubkey(), balance.immature / 2)
             .current_height(confirmation_time);
         assert!(matches!(
             builder.finish().unwrap_err(),
@@ -5261,7 +5313,7 @@ pub(crate) mod test {
         // Still unspendable...
         let mut builder = wallet.build_tx();
         builder
-            .add_recipient(addr.script_pubkey(), balance / 2)
+            .add_recipient(addr.script_pubkey(), balance.immature / 2)
             .current_height(not_yet_mature_time);
         assert!(matches!(
             builder.finish().unwrap_err(),
@@ -5272,9 +5324,31 @@ pub(crate) mod test {
         ));
 
         // ...Now the coinbase is mature :)
+        let sync_time = SyncTime {
+            block_time: BlockTime {
+                height: maturity_time,
+                timestamp: 0,
+            },
+        };
+        wallet
+            .database
+            .borrow_mut()
+            .set_sync_time(sync_time)
+            .unwrap();
+
+        let balance = wallet.get_balance().unwrap();
+        assert_eq!(
+            balance,
+            Balance {
+                immature: 0,
+                trusted_pending: 0,
+                untrusted_pending: 0,
+                confirmed: 25_000
+            }
+        );
         let mut builder = wallet.build_tx();
         builder
-            .add_recipient(addr.script_pubkey(), balance / 2)
+            .add_recipient(addr.script_pubkey(), balance.confirmed / 2)
             .current_height(maturity_time);
         builder.finish().unwrap();
     }
