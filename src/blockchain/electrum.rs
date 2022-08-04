@@ -98,6 +98,38 @@ impl GetTx for ElectrumBlockchain {
     }
 }
 
+impl GetTxStatus for ElectrumBlockchain {
+    fn get_tx_status(&self, txid: &Txid) -> Result<TransactionStatus, Error> {
+        let tx_verbose_res = self.client.transaction_get_verbose(txid)?;
+        if let Some(confirmations) = tx_verbose_res.confirmations {
+            if confirmations > 0 {
+                // TODO: this is unfortunately race-y since a new block might have come in between the
+                // first and second request.
+                let cur_height = self
+                    .client
+                    .block_headers_subscribe()
+                    .map(|data| data.height as u32)?;
+
+                // Calculate the confirmation block height. If a transaction has one confirmation, it was confirmed in
+                // the current tip.
+                let block_height = cur_height + 1 - confirmations;
+
+                return Ok(TransactionStatus {
+                    confirmed: true,
+                    block_height: Some(block_height),
+                    block_hash: tx_verbose_res.blockhash,
+                });
+            }
+        }
+
+        Ok(TransactionStatus {
+            confirmed: false,
+            block_height: None,
+            block_hash: None,
+        })
+    }
+}
+
 impl GetBlockHash for ElectrumBlockchain {
     fn get_block_hash(&self, height: u64) -> Result<BlockHash, Error> {
         let block_header = self.client.block_header(height as usize)?;

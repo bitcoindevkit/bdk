@@ -87,7 +87,7 @@ pub enum Capability {
 
 /// Trait that defines the actions that must be supported by a blockchain backend
 #[maybe_async]
-pub trait Blockchain: WalletSync + GetHeight + GetTx + GetBlockHash {
+pub trait Blockchain: WalletSync + GetHeight + GetTx + GetTxStatus + GetBlockHash {
     /// Return the set of [`Capability`] supported by this backend
     fn get_capabilities(&self) -> HashSet<Capability>;
     /// Broadcast a transaction
@@ -114,7 +114,7 @@ pub trait GetTx {
 /// Trait for getting the status of a transaction by txid
 pub trait GetTxStatus {
     /// Fetch the status of a transaction given its txid
-    fn get_tx_status(&self, txid: &Txid) -> Result<Option<TransactionStatus>, Error>;
+    fn get_tx_status(&self, txid: &Txid) -> Result<TransactionStatus, Error>;
 }
 
 /// The confirmation status of a transaction
@@ -376,7 +376,7 @@ impl<T: GetTx> GetTx for Arc<T> {
 
 #[maybe_async]
 impl<T: GetTxStatus> GetTxStatus for Arc<T> {
-    fn get_tx_status(&self, txid: &Txid) -> Result<Option<TransactionStatus>, Error> {
+    fn get_tx_status(&self, txid: &Txid) -> Result<TransactionStatus, Error> {
         maybe_await!(self.deref().get_tx_status(txid))
     }
 }

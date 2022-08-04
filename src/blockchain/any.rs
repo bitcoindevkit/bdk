@@ -121,6 +121,13 @@ impl GetTx for AnyBlockchain {
 }
 
 #[maybe_async]
+impl GetTxStatus for AnyBlockchain {
+    fn get_tx_status(&self, txid: &Txid) -> Result<TransactionStatus, Error> {
+        maybe_await!(impl_inner_method!(self, get_tx_status, txid))
+    }
+}
+
+#[maybe_async]
 impl GetBlockHash for AnyBlockchain {
     fn get_block_hash(&self, height: u64) -> Result<BlockHash, Error> {
         maybe_await!(impl_inner_method!(self, get_block_hash, height))
