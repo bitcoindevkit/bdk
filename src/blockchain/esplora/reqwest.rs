@@ -24,7 +24,7 @@ use log::{debug, error, info, trace};
 use ::reqwest::{Client, StatusCode};
 use futures::stream::{FuturesOrdered, TryStreamExt};
 
-use super::api::Tx;
+use super::api::{Tx, TxStatus};
 use crate::blockchain::esplora::EsploraError;
 use crate::blockchain::*;
 use crate::database::BatchDatabase;
@@ -114,6 +114,13 @@ impl GetHeight for EsploraBlockchain {
 impl GetTx for EsploraBlockchain {
     fn get_tx(&self, txid: &Txid) -> Result<Option<Transaction>, Error> {
         Ok(await_or_block!(self.url_client._get_tx(txid))?)
+    }
+}
+
+#[maybe_async]
+impl GetTxStatus for EsploraBlockchain {
+    fn get_tx_status(&self, txid: &Txid) -> Result<TransactionStatus, Error> {
+        Ok(await_or_block!(self.url_client._get_tx_status(txid))?)
     }
 }
 
@@ -230,6 +237,18 @@ impl UrlClient {
         }
 
         Ok(Some(deserialize(&resp.error_for_status()?.bytes().await?)?))
+    }
+
+    async fn _get_tx_status(&self, txid: &Txid) -> Result<TransactionStatus, EsploraError> {
+        let resp = self
+            .client
+            .get(&format!("{}/tx/{}/status", self.url, txid))
+            .send()
+            .await?;
+
+        let tx_status: TxStatus = resp.error_for_status()?.json::<TxStatus>().await?;
+
+        Ok(tx_status.into())
     }
 
     async fn _get_tx_no_opt(&self, txid: &Txid) -> Result<Transaction, EsploraError> {

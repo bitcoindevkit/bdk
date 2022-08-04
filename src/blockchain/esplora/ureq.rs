@@ -26,7 +26,7 @@ use bitcoin::hashes::hex::{FromHex, ToHex};
 use bitcoin::hashes::{sha256, Hash};
 use bitcoin::{BlockHeader, Script, Transaction, Txid};
 
-use super::api::Tx;
+use super::api::{Tx, TxStatus};
 use crate::blockchain::esplora::EsploraError;
 use crate::blockchain::*;
 use crate::database::BatchDatabase;
@@ -113,7 +113,7 @@ impl GetTx for EsploraBlockchain {
 }
 
 impl GetTxStatus for EsploraBlockchain {
-    fn get_tx_status(&self, txid: &Txid) -> Result<Option<TransactionStatus>, Error> {
+    fn get_tx_status(&self, txid: &Txid) -> Result<TransactionStatus, Error> {
         Ok(self.url_client._get_tx_status(txid)?)
     }
 }
@@ -241,20 +241,18 @@ impl UrlClient {
         }
     }
 
-    fn _get_tx_status(&self, txid: &Txid) -> Result<Option<TransactionStatus>, EsploraError> {
+    fn _get_tx_status(&self, txid: &Txid) -> Result<TransactionStatus, EsploraError> {
         let resp = self
             .agent
             .get(&format!("{}/tx/{}/status", self.url, txid))
             .call();
 
         match resp {
-            Ok(resp) => Ok(Some(deserialize(&into_bytes(resp)?)?)),
-            Err(ureq::Error::Status(code, _)) => {
-                if is_status_not_found(code) {
-                    return Ok(None);
-                }
-                Err(EsploraError::HttpResponse(code))
+            Ok(resp) => {
+                let tx_status: TxStatus = resp.into_json()?;
+                Ok(tx_status.into())
             }
+            Err(ureq::Error::Status(code, _)) => Err(EsploraError::HttpResponse(code)),
             Err(e) => Err(EsploraError::Ureq(e)),
         }
     }

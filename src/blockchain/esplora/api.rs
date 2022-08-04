@@ -1,8 +1,10 @@
 //! structs from the esplora API
 //!
 //! see: <https://github.com/Blockstream/esplora/blob/master/API.md>
+use crate::blockchain::TransactionStatus;
 use crate::BlockTime;
-use bitcoin::{OutPoint, Script, Transaction, TxIn, TxOut, Txid, Witness};
+use bitcoin::{BlockHash, OutPoint, Script, Transaction, TxIn, TxOut, Txid, Witness};
+use std::convert::From;
 
 #[derive(serde::Deserialize, Clone, Debug)]
 pub struct PrevOut {
@@ -33,7 +35,18 @@ pub struct Vout {
 pub struct TxStatus {
     pub confirmed: bool,
     pub block_height: Option<u32>,
+    pub block_hash: Option<BlockHash>,
     pub block_time: Option<u64>,
+}
+
+impl From<TxStatus> for TransactionStatus {
+    fn from(esplora_tx_status: TxStatus) -> Self {
+        TransactionStatus {
+            confirmed: esplora_tx_status.confirmed,
+            block_height: esplora_tx_status.block_height,
+            block_hash: esplora_tx_status.block_hash,
+        }
+    }
 }
 
 #[derive(serde::Deserialize, Clone, Debug)]
@@ -84,6 +97,7 @@ impl Tx {
                 confirmed: true,
                 block_height: Some(height),
                 block_time: Some(timestamp),
+                ..
             } => Some(BlockTime { timestamp, height }),
             _ => None,
         }
