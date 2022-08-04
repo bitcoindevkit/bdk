@@ -1,6 +1,6 @@
 [package]
 name = "bdk"
-version = "0.20.1-dev"
+version = "0.21.0-rc.1"
 edition = "2018"
 authors = ["Alekos Filini <alekos.filini@gmail.com>", "Riccardo Casatta <riccardo@casatta.it>"]
 homepage = "https://bitcoindevkit.org"
