@@ -163,6 +163,35 @@ impl GetTx for RpcBlockchain {
     }
 }
 
+impl GetTxStatus for RpcBlockchain {
+    fn get_tx_status(&self, txid: &Txid) -> Result<TransactionStatus, Error> {
+        let tx_info = self.client.get_raw_transaction_info(txid, None)?;
+        if let Some(confirmations) = tx_info.confirmations {
+            if confirmations > 0 {
+                // TODO: this is unfortunately race-y since a new block might have come in between the
+                // first and second request.
+                let cur_height = self.client.get_blockchain_info().map(|i| i.blocks as u32)?;
+
+                // Calculate the confirmation block height. If a transaction has one confirmation, it was confirmed in
+                // the current tip.
+                let block_height = cur_height + 1 - confirmations;
+
+                return Ok(TransactionStatus {
+                    confirmed: true,
+                    block_hash: tx_info.blockhash,
+                    block_height: Some(block_height),
+                });
+            }
+        }
+
+        Ok(TransactionStatus {
+            confirmed: false,
+            block_height: None,
+            block_hash: None,
+        })
+    }
+}
+
 impl GetHeight for RpcBlockchain {
     fn get_height(&self) -> Result<u32, Error> {
         Ok(self.client.get_blockchain_info().map(|i| i.blocks as u32)?)
