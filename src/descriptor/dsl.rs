@@ -839,7 +839,7 @@ mod test {
         }
     }
 
-    // - at least one of each "type" of operator; ie. one modifier, one leaf_opcode, one leaf_opcode_value, etc.
+    // - at least one of each "type" of operator; i.e. one modifier, one leaf_opcode, one leaf_opcode_value, etc.
     // - mixing up key types that implement IntoDescriptorKey in multi() or thresh()
 
     // expected script for pk and bare manually created
