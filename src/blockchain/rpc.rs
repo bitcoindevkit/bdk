@@ -164,7 +164,7 @@ impl GetTx for RpcBlockchain {
 }
 
 impl GetTxStatus for RpcBlockchain {
-    fn get_tx_status(&self, txid: &Txid) -> Result<TransactionStatus, Error> {
+    fn get_tx_status(&self, txid: &Txid) -> Result<Option<TxStatus>, Error> {
         let tx_info = self.client.get_raw_transaction_info(txid, None)?;
         if let Some(confirmations) = tx_info.confirmations {
             if confirmations > 0 {
@@ -176,19 +176,20 @@ impl GetTxStatus for RpcBlockchain {
                 // the current tip.
                 let block_height = cur_height + 1 - confirmations;
 
-                return Ok(TransactionStatus {
+                return Ok(Some(TxStatus {
                     confirmed: true,
                     block_hash: tx_info.blockhash,
                     block_height: Some(block_height),
-                });
+                    block_time: tx_info.blocktime.map(|t| t as u64),
+                }));
             }
         }
-
-        Ok(TransactionStatus {
+        return Ok(Some(TxStatus {
             confirmed: false,
             block_height: None,
             block_hash: None,
-        })
+            block_time: None,
+        }));
     }
 }
 

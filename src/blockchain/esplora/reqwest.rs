@@ -24,7 +24,7 @@ use log::{debug, error, info, trace};
 use ::reqwest::{Client, StatusCode};
 use futures::stream::{FuturesOrdered, TryStreamExt};
 
-use super::api::{Tx, TxStatus};
+use super::api::Tx;
 use crate::blockchain::esplora::EsploraError;
 use crate::blockchain::*;
 use crate::database::BatchDatabase;
@@ -119,7 +119,7 @@ impl GetTx for EsploraBlockchain {
 
 #[maybe_async]
 impl GetTxStatus for EsploraBlockchain {
-    fn get_tx_status(&self, txid: &Txid) -> Result<TransactionStatus, Error> {
+    fn get_tx_status(&self, txid: &Txid) -> Result<TxStatus, Error> {
         Ok(await_or_block!(self.url_client._get_tx_status(txid))?)
     }
 }
@@ -239,16 +239,18 @@ impl UrlClient {
         Ok(Some(deserialize(&resp.error_for_status()?.bytes().await?)?))
     }
 
-    async fn _get_tx_status(&self, txid: &Txid) -> Result<TransactionStatus, EsploraError> {
+    async fn _get_tx_status(&self, txid: &Txid) -> Result<Option<TxStatus>, EsploraError> {
         let resp = self
             .client
             .get(&format!("{}/tx/{}/status", self.url, txid))
             .send()
             .await?;
 
-        let tx_status: TxStatus = resp.error_for_status()?.json::<TxStatus>().await?;
+        if let StatusCode::NOT_FOUND = resp.status() {
+            return Ok(None);
+        }
 
-        Ok(tx_status.into())
+        Ok(Some(resp.error_for_status()?.json().await?))
     }
 
     async fn _get_tx_no_opt(&self, txid: &Txid) -> Result<Transaction, EsploraError> {

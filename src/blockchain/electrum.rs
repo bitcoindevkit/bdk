@@ -99,7 +99,7 @@ impl GetTx for ElectrumBlockchain {
 }
 
 impl GetTxStatus for ElectrumBlockchain {
-    fn get_tx_status(&self, txid: &Txid) -> Result<TransactionStatus, Error> {
+    fn get_tx_status(&self, txid: &Txid) -> Result<Option<TxStatus>, Error> {
         let tx_verbose_res = self.client.transaction_get_verbose(txid)?;
         if let Some(confirmations) = tx_verbose_res.confirmations {
             if confirmations > 0 {
@@ -114,19 +114,23 @@ impl GetTxStatus for ElectrumBlockchain {
                 // the current tip.
                 let block_height = cur_height + 1 - confirmations;
 
-                return Ok(TransactionStatus {
+                return Ok(Some(TxStatus {
                     confirmed: true,
                     block_height: Some(block_height),
                     block_hash: tx_verbose_res.blockhash,
-                });
+                    block_time: tx_verbose_res.blocktime.map(|t| t as u64),
+                }));
+            } else {
+                return Ok(Some(TxStatus {
+                    confirmed: false,
+                    block_height: None,
+                    block_hash: None,
+                    block_time: None,
+                }));
             }
         }
 
-        Ok(TransactionStatus {
-            confirmed: false,
-            block_height: None,
-            block_hash: None,
-        })
+        Ok(None)
     }
 }
 

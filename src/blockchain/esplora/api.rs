@@ -1,7 +1,7 @@
 //! structs from the esplora API
 //!
 //! see: <https://github.com/Blockstream/esplora/blob/master/API.md>
-use crate::blockchain::TransactionStatus;
+use crate::blockchain::TxStatus;
 use crate::BlockTime;
 use bitcoin::{BlockHash, OutPoint, Script, Transaction, TxIn, TxOut, Txid, Witness};
 use std::convert::From;
@@ -29,24 +29,6 @@ pub struct Vin {
 pub struct Vout {
     pub value: u64,
     pub scriptpubkey: Script,
-}
-
-#[derive(serde::Deserialize, Clone, Debug)]
-pub struct TxStatus {
-    pub confirmed: bool,
-    pub block_height: Option<u32>,
-    pub block_hash: Option<BlockHash>,
-    pub block_time: Option<u64>,
-}
-
-impl From<TxStatus> for TransactionStatus {
-    fn from(esplora_tx_status: TxStatus) -> Self {
-        TransactionStatus {
-            confirmed: esplora_tx_status.confirmed,
-            block_height: esplora_tx_status.block_height,
-            block_hash: esplora_tx_status.block_hash,
-        }
-    }
 }
 
 #[derive(serde::Deserialize, Clone, Debug)]
