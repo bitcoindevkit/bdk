@@ -516,7 +516,7 @@ impl<'a, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderContext>
         }
     }
 
-    /// Finish the building the transaction.
+    /// Finish building the transaction.
     ///
     /// Returns the [`BIP174`] "PSBT" and summary details about the transaction.
     ///

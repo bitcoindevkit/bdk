@@ -325,7 +325,7 @@ where
 
     /// Return a derived address using the external descriptor, see [`AddressIndex`] for
     /// available address index selection strategies. If none of the keys in the descriptor are derivable
-    /// (ie. does not end with /*) then the same address will always be returned for any [`AddressIndex`].
+    /// (i.e. does not end with /*) then the same address will always be returned for any [`AddressIndex`].
     pub fn get_address(&self, address_index: AddressIndex) -> Result<AddressInfo, Error> {
         self._get_address(address_index, KeychainKind::External)
     }
@@ -335,7 +335,7 @@ where
     /// If the wallet doesn't have an internal descriptor it will use the external descriptor.
     ///
     /// see [`AddressIndex`] for available address index selection strategies. If none of the keys
-    /// in the descriptor are derivable (ie. does not end with /*) then the same address will always
+    /// in the descriptor are derivable (i.e. does not end with /*) then the same address will always
     /// be returned for any [`AddressIndex`].
     pub fn get_internal_address(&self, address_index: AddressIndex) -> Result<AddressInfo, Error> {
         self._get_address(address_index, KeychainKind::Internal)
@@ -454,7 +454,7 @@ where
     /// });
     /// ```
     ///
-    /// Note that this methods only operate on the internal database, which first needs to be
+    /// Note that this method only operates on the internal database, which first needs to be
     /// [`Wallet::sync`] manually.
     pub fn list_transactions(&self, include_raw: bool) -> Result<Vec<TransactionDetails>, Error> {
         self.database.borrow().iter_txs(include_raw)
@@ -463,7 +463,7 @@ where
     /// Return the balance, separated into available, trusted-pending, untrusted-pending and immature
     /// values.
     ///
-    /// Note that this methods only operate on the internal database, which first needs to be
+    /// Note that this method only operates on the internal database, which first needs to be
     /// [`Wallet::sync`] manually.
     pub fn get_balance(&self) -> Result<Balance, Error> {
         let mut immature = 0;
