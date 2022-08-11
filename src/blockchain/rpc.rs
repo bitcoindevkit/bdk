@@ -46,6 +46,7 @@ use bitcoincore_rpc::json::{
     ImportMultiRequestScriptPubkey, ImportMultiRescanSince, ListTransactionResult,
     ListUnspentResultEntry, ScanningDetails,
 };
+use bitcoincore_rpc::jsonrpc::error::RpcError;
 use bitcoincore_rpc::jsonrpc::serde_json::{json, Value};
 use bitcoincore_rpc::jsonrpc::{
     self, simple_http::SimpleHttpTransport, Error as JsonRpcError, Request, Response, Transport,
@@ -274,9 +275,9 @@ macro_rules! impl_inner {
                             if io.kind() == std::io::ErrorKind::WouldBlock =>
                         {
                             let attempt = $self.attempts.fetch_add(1, Ordering::Relaxed);
-                            let delay = std::cmp::min(1000, 100 << attempt as u64);
+                            let delay = std::cmp::min(5000, 100 << attempt as u64);
 
-                            debug!(
+                            warn!(
                                 "Got a WouldBlock error at attempt {}, sleeping for {}ms",
                                 attempt, delay
                             );
@@ -521,8 +522,9 @@ impl<'a, D: BatchDatabase> DbState<'a, D> {
                 .map_or(self.params.start_time, |st| st.block_time.timestamp)
         };
 
-        // sync scriptPubKeys from Database into Core wallet, starting from derivation indexes
-        // defined in `import_params`
+        // Sync scriptPubKeys from Database into Core wallet, starting from derivation indexes
+        // defined in `import_params`. After sync, we update `import_params` to reflect starting
+        // point for next sync cycle, unless if importing resulted in error code -4.
         let scripts_iter = {
             let ext_spks = self
                 .ext_spks
@@ -534,7 +536,7 @@ impl<'a, D: BatchDatabase> DbState<'a, D> {
                 .skip(import_params.internal_start_index);
             ext_spks.chain(int_spks)
         };
-        pagenated_import(
+        let update_import_params = pagenated_import(
             client,
             use_desc,
             start_epoch,
@@ -543,11 +545,10 @@ impl<'a, D: BatchDatabase> DbState<'a, D> {
             scripts_iter,
             self.prog,
         )?;
-        // await_wallet_scan(client, self.params.poll_rate_sec, self.prog)?;
-
-        // update import_params
-        import_params.external_start_index = self.ext_spks.len();
-        import_params.internal_start_index = self.int_spks.len();
+        if update_import_params {
+            import_params.external_start_index = self.ext_spks.len();
+            import_params.internal_start_index = self.int_spks.len();
+        }
 
         // obtain iterator of pagenated `listtransactions` RPC calls
         let tx_iter = list_transactions(client, self.params.page_size)?.filter(|item| {
@@ -874,6 +875,8 @@ where
     Ok(())
 }
 
+/// Import descriptors/scriptPubKeys in a pagenated manner, and wait for rescan to complete (if
+/// import is successful or errored with code -4).
 fn pagenated_import<'a, S>(
     client: &Client,
     use_desc: bool,
@@ -882,10 +885,14 @@ fn pagenated_import<'a, S>(
     page_size: usize,
     scripts_iter: S,
     progress: &dyn Progress,
-) -> Result<(), Error>
+) -> Result<bool, Error>
 where
     S: Iterator<Item = &'a Script> + Clone,
 {
+    use bitcoincore_rpc::Error as CoreError;
+
+    let mut successful_import = true;
+
     (0_usize..)
         .map(|page_index| {
             scripts_iter
@@ -897,13 +904,29 @@ where
         })
         .take_while(|scripts| !scripts.is_empty())
         .try_for_each(|scripts| {
-            if use_desc {
-                import_descriptors(client, start_epoch, scripts.iter())?;
+            let result = if use_desc {
+                import_descriptors(client, start_epoch, scripts.iter())
             } else {
-                import_multi(client, start_epoch, scripts.iter())?;
+                import_multi(client, start_epoch, scripts.iter())
+            };
+
+            // On successful import, or unsuccessful with code -4, we wait until rescan is complete
+            // and return. Any other error will be returned immediately.
+            match result {
+                Err(Error::Rpc(CoreError::JsonRpc(JsonRpcError::Rpc(RpcError {
+                    code: -4,
+                    message,
+                    ..
+                })))) => {
+                    warn!("import return with code -4: \"{}\", waiting...", message);
+                    successful_import = false;
+                    Ok(())
+                }
+                res => res,
             }
-            await_wallet_scan(client, poll_rate_sec, progress)
+            .and_then(|_| await_wallet_scan(client, poll_rate_sec, progress))
         })
+        .map(|_| successful_import)
 }
 
 /// Calls the `listtransactions` RPC method in `page_size`s and returns iterator of the tx results
