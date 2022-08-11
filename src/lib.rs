@@ -44,7 +44,7 @@
 //! interact with the bitcoin P2P network.
 //!
 //! ```toml
-//! bdk = "0.20.0"
+//! bdk = "0.21.0"
 //! ```
 //!
 //! # Examples
