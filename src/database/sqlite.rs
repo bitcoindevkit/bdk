@@ -42,7 +42,7 @@ static MIGRATIONS: &[&str] = &[
     "CREATE TABLE transaction_details (txid BLOB, timestamp INTEGER, received INTEGER, sent INTEGER, fee INTEGER, height INTEGER);",
     "INSERT INTO transaction_details SELECT txid, timestamp, received, sent, fee, height FROM transaction_details_old;",
     "DROP TABLE transaction_details_old;",
-    "ALTER TABLE utxos ADD COLUMN is_spent;",
+    "ALTER TABLE utxos ADD COLUMN is_spent BOOLEAN CHECK (is_spent IN (0, 1));",
     // drop all data due to possible inconsistencies with duplicate utxos, re-sync required
     "DELETE FROM checksums;",
     "DELETE FROM last_derivation_indices;",
