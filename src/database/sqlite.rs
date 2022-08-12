@@ -52,7 +52,14 @@ static MIGRATIONS: &[&str] = &[
     "DELETE FROM transactions;",
     "DELETE FROM utxos;",
     "DROP INDEX idx_txid_vout;",
-    "CREATE UNIQUE INDEX idx_utxos_txid_vout ON utxos(txid, vout);"
+    "CREATE UNIQUE INDEX idx_utxos_txid_vout ON utxos(txid, vout);",
+    "BEGIN TRANSACTION;\
+    ALTER TABLE utxos RENAME TO utxos_old;\
+    CREATE TABLE utxos (value INTEGER, keychain TEXT, vout INTEGER, txid BLOB, script BLOB, is_spent BOOLEAN DEFAULT 0);\
+    INSERT INTO utxos SELECT value, keychain, vout, txid, script, is_spent FROM utxos_old;\
+    DROP TABLE utxos_old;\
+    CREATE UNIQUE INDEX idx_utxos_txid_vout ON utxos(txid, vout);\
+    COMMIT;"
 ];
 
 /// Sqlite database stored on filesystem
