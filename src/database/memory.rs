@@ -520,6 +520,13 @@ macro_rules! populate_test_db {
                 timestamp: 0,
             });
 
+        let sync_time = BlockTime {
+            height: current_height.unwrap(),
+            timestamp: 0
+        };
+
+        db.set_sync_time(SyncTime{block_time: sync_time}).unwrap();
+
         let tx_details = $crate::TransactionDetails {
             transaction: Some(tx.clone()),
             txid,

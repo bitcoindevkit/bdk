@@ -2114,6 +2114,12 @@ pub(crate) mod test {
     }
 
     #[test]
+    fn test_get_funded_wallet_balance() {
+        let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
+        assert_eq!(wallet.get_balance().unwrap().confirmed, 50000);
+    }
+
+    #[test]
     #[should_panic(expected = "NoRecipients")]
     fn test_create_tx_empty_recipients() {
         let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
