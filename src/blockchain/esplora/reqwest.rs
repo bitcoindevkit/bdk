@@ -12,6 +12,7 @@
 //! Esplora by way of `reqwest` HTTP client.
 
 use std::collections::{HashMap, HashSet};
+use std::ops::Deref;
 
 use bitcoin::consensus::{deserialize, serialize};
 use bitcoin::hashes::hex::{FromHex, ToHex};
@@ -46,7 +47,7 @@ struct UrlClient {
 /// See the [`blockchain::esplora`](crate::blockchain::esplora) module for a usage example.
 #[derive(Debug)]
 pub struct EsploraBlockchain {
-    url_client: UrlClient,
+    pub url_client: UrlClient,
     stop_gap: usize,
 }
 
@@ -98,6 +99,14 @@ impl Blockchain for EsploraBlockchain {
     fn estimate_fee(&self, target: usize) -> Result<FeeRate, Error> {
         let estimates = await_or_block!(self.url_client._get_fee_estimates())?;
         super::into_fee_rate(target, estimates)
+    }
+}
+
+impl Deref for EsploraBlockchain {
+    type Target = UrlClient;
+
+    fn deref(&self) -> &Self::Target {
+        &self.url_client
     }
 }
 

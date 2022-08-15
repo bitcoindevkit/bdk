@@ -14,6 +14,7 @@
 use std::collections::{HashMap, HashSet};
 use std::io;
 use std::io::Read;
+use std::ops::Deref;
 use std::time::Duration;
 
 #[allow(unused_imports)]
@@ -45,7 +46,7 @@ struct UrlClient {
 /// See the [`blockchain::esplora`](crate::blockchain::esplora) module for a usage example.
 #[derive(Debug)]
 pub struct EsploraBlockchain {
-    url_client: UrlClient,
+    pub url_client: UrlClient,
     stop_gap: usize,
     concurrency: u8,
 }
@@ -73,6 +74,14 @@ impl EsploraBlockchain {
     pub fn with_concurrency(mut self, concurrency: u8) -> Self {
         self.concurrency = concurrency;
         self
+    }
+}
+
+impl Deref for EsploraBlockchain {
+    type Target = UrlClient;
+
+    fn deref(&self) -> &Self::Target {
+        &self.url_client
     }
 }
 
