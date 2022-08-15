@@ -475,10 +475,10 @@ fn sign_psbt_ecdsa(
     hash_ty: EcdsaSighashType,
     secp: &SecpCtx,
 ) {
-    let sig = secp.sign_ecdsa(
-        &Message::from_slice(&hash.into_inner()[..]).unwrap(),
-        secret_key,
-    );
+    let msg = &Message::from_slice(&hash.into_inner()[..]).unwrap();
+    let sig = secp.sign_ecdsa(msg, secret_key);
+    secp.verify_ecdsa(msg, &sig, &pubkey.inner)
+        .expect("invalid or corrupted ecdsa signature");
 
     let final_signature = ecdsa::EcdsaSig { sig, hash_ty };
     psbt_input.partial_sigs.insert(pubkey, final_signature);
@@ -504,10 +504,10 @@ fn sign_psbt_schnorr(
         Some(_) => keypair, // no tweak for script spend
     };
 
-    let sig = secp.sign_schnorr(
-        &Message::from_slice(&hash.into_inner()[..]).unwrap(),
-        &keypair,
-    );
+    let msg = &Message::from_slice(&hash.into_inner()[..]).unwrap();
+    let sig = secp.sign_schnorr(msg, &keypair);
+    secp.verify_schnorr(&sig, msg, &XOnlyPublicKey::from_keypair(&keypair))
+        .expect("invalid or corrupted schnorr signature");
 
     let final_signature = schnorr::SchnorrSig { sig, hash_ty };
 
