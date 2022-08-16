@@ -44,6 +44,17 @@ lazy_static! {
     static ref SIGNET_GENESIS: Block = deserialize(&Vec::<u8>::from_hex("0100000000000000000000000000000000000000000000000000000000000000000000003BA3EDFD7A7B12B27AC72C3E67768F617FC81BC3888A51323A9FB8AA4B1E5E4A008F4D5FAE77031E8AD222030101000000010000000000000000000000000000000000000000000000000000000000000000FFFFFFFF4D04FFFF001D0104455468652054696D65732030332F4A616E2F32303039204368616E63656C6C6F72206F6E206272696E6B206F66207365636F6E64206261696C6F757420666F722062616E6B73FFFFFFFF0100F2052A01000000434104678AFDB0FE5548271967F1A67130B7105CD6A828E03909A67962E0EA1F61DEB649F6BC3F4CEF38C4F35504E51EC112DE5C384DF7BA0B8D578A4C702B6BF11D5FAC00000000").unwrap()).unwrap();
 }
 
+// We can't use the question mark in `filter_map` closures because the closure returns
+// an option. This is a macro that works like `?` but wraps the error in an option.
+macro_rules! check_err {
+    ($e:expr) => {
+        match $e {
+            Ok(v) => v,
+            Err(e) => return Some(Err(e.into())),
+        }
+    };
+}
+
 pub trait StoreType: Default + fmt::Debug {}
 
 #[derive(Default, Debug)]
@@ -339,6 +350,7 @@ impl ChainStore<Full> {
 
         let min_height = match iterator
             .next()
+            .transpose()?
             .and_then(|(k, _)| k[1..].try_into().ok())
             .map(usize::from_be_bytes)
         {
@@ -385,11 +397,12 @@ impl ChainStore<Full> {
 
         log::debug!("Removing items");
         batch.delete_range_cf(cf_handle, &from_key, &to_key);
-        for (_, v) in read_store.iterator_cf_opt(
+        for item in read_store.iterator_cf_opt(
             cf_handle,
             opts,
             IteratorMode::From(&from_key, Direction::Forward),
         ) {
+            let (_, v) = item?;
             let (header, _): (BlockHeader, Uint256) = SerializeDb::deserialize(&v)?;
 
             batch.delete_cf(
@@ -404,7 +417,8 @@ impl ChainStore<Full> {
         batch.delete_range(&from_key, &to_key);
 
         log::debug!("Copying over new items");
-        for (k, v) in read_store.iterator_cf(snapshot_cf_handle, IteratorMode::Start) {
+        for item in read_store.iterator_cf(snapshot_cf_handle, IteratorMode::Start) {
+            let (k, v) = item?;
             batch.put_cf(cf_handle, k, v);
         }
 
@@ -489,16 +503,19 @@ impl ChainStore<Full> {
         // FIXME: we have to filter manually because rocksdb sometimes returns stuff that doesn't
         // have the right prefix
         iterator
-            .filter(|(k, _)| k.starts_with(&prefix))
-            .map(|(k, v)| {
-                let height: usize = usize::from_be_bytes(
-                    k[1..]
-                        .try_into()
-                        .map_err(|_| CompactFiltersError::DataCorruption)?,
-                );
-                let block = SerializeDb::deserialize(&v)?;
+            .filter_map(|item| {
+                let (k, v) = check_err!(item);
 
-                Ok((height, block))
+                if !k.starts_with(&prefix) {
+                    None
+                } else {
+                    let height: usize = usize::from_be_bytes(check_err!(k[1..]
+                        .try_into()
+                        .map_err(|_| CompactFiltersError::DataCorruption)));
+                    let block = check_err!(SerializeDb::deserialize(&v));
+
+                    Some(Ok((height, block)))
+                }
             })
             .collect::<Result<_, _>>()
     }
@@ -514,6 +531,7 @@ impl<T: StoreType> ChainStore<T> {
 
         Ok(iterator
             .last()
+            .transpose()?
             .map(|(_, v)| -> Result<_, CompactFiltersError> {
                 let (_, work): (BlockHeader, Uint256) = SerializeDb::deserialize(&v)?;
 
@@ -532,6 +550,7 @@ impl<T: StoreType> ChainStore<T> {
 
         Ok(iterator
             .last()
+            .transpose()?
             .map(|(k, _)| -> Result<_, CompactFiltersError> {
                 let height = usize::from_be_bytes(
                     k[1..]
@@ -554,6 +573,7 @@ impl<T: StoreType> ChainStore<T> {
 
         iterator
             .last()
+            .transpose()?
             .map(|(_, v)| -> Result<_, CompactFiltersError> {
                 let (header, _): (BlockHeader, Uint256) = SerializeDb::deserialize(&v)?;
 
@@ -690,8 +710,15 @@ impl CfStore {
         // FIXME: we have to filter manually because rocksdb sometimes returns stuff that doesn't
         // have the right prefix
         iterator
-            .filter(|(k, _)| k.starts_with(&prefix))
-            .map(|(_, data)| BundleEntry::deserialize(&data))
+            .filter_map(|item| {
+                let (k, data) = check_err!(item);
+
+                if !k.starts_with(&prefix) {
+                    None
+                } else {
+                    Some(BundleEntry::deserialize(&data))
+                }
+            })
             .collect::<Result<_, _>>()
     }
 
@@ -704,9 +731,16 @@ impl CfStore {
         // FIXME: we have to filter manually because rocksdb sometimes returns stuff that doesn't
         // have the right prefix
         iterator
-            .filter(|(k, _)| k.starts_with(&prefix))
+            .filter_map(|item| {
+                let (k, data) = check_err!(item);
+
+                if !k.starts_with(&prefix) {
+                    None
+                } else {
+                    Some(Ok(check_err!(BundleEntry::deserialize(&data)).1))
+                }
+            })
             .skip(1)
-            .map(|(_, data)| Ok::<_, CompactFiltersError>(BundleEntry::deserialize(&data)?.1))
             .collect::<Result<_, _>>()
     }
 
