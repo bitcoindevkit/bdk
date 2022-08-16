@@ -734,7 +734,9 @@ mod test {
     use rand::seq::SliceRandom;
     use rand::{Rng, SeedableRng};
 
-    const P2WPKH_SATISFACTION_SIZE: usize = 73 + 33 + 2 + 1;
+    // n. of items on witness (1WU) + signature len (1WU) + signature and sighash (72WU)
+    // + pubkey len (1WU) + pubkey (33WU) + script sig len (1 byte, 4WU)
+    const P2WPKH_SATISFACTION_SIZE: usize = 1 + 1 + 72 + 1 + 33 + 4;
 
     const FEE_AMOUNT: u64 = 50;
 
