@@ -158,6 +158,33 @@ pub trait Database: BatchOperations {
     ///
     /// It should insert and return `0` if not present in the database
     fn increment_last_index(&mut self, keychain: KeychainKind) -> Result<u32, Error>;
+
+    /// Delete a list of spent utxos from database. Delete all spent utxos if  list is `None`.
+    fn del_spent_utxos(
+        &mut self,
+        to_delete: Option<Vec<OutPoint>>,
+    ) -> Result<Vec<LocalUtxo>, Error> {
+        if let Some(to_delete) = to_delete {
+            let to_delete = to_delete
+                .iter()
+                .filter_map(|out| self.get_utxo(out).transpose())
+                .collect::<Result<Vec<_>, _>>()?;
+            let deleted_utxos = to_delete
+                .iter()
+                .filter(|utxo| utxo.is_spent)
+                .filter_map(|out| self.del_utxo(&out.outpoint).transpose())
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(deleted_utxos)
+        } else {
+            let deleted_utxos = self
+                .iter_utxos()?
+                .iter()
+                .filter(|utxo| utxo.is_spent)
+                .filter_map(|out| self.del_utxo(&out.outpoint).transpose())
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(deleted_utxos)
+        }
+    }
 }
 
 /// Trait for a database that supports batch operations
