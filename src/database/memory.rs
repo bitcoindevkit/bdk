@@ -486,7 +486,8 @@ macro_rules! populate_test_db {
     }};
     ($db:expr, $tx_meta:expr, $current_height:expr, (@coinbase $is_coinbase:expr)$(,)?) => {{
         use std::str::FromStr;
-        use $crate::database::BatchOperations;
+        use $crate::database::SyncTime;
+        use $crate::database::{BatchOperations, Database};
         let mut db = $db;
         let tx_meta = $tx_meta;
         let current_height: Option<u32> = $current_height;
@@ -512,13 +513,31 @@ macro_rules! populate_test_db {
         };
 
         let txid = tx.txid();
+        // Set Confirmation time only if current height is provided.
+        // panics if `tx_meta.min_confirmation` is Some, and current_height is None.
         let confirmation_time = tx_meta
             .min_confirmations
             .and_then(|v| if v == 0 { None } else { Some(v) })
             .map(|conf| $crate::BlockTime {
-                height: current_height.unwrap().checked_sub(conf as u32).unwrap() + 1,
+                height: current_height.expect("Current height is needed for testing transaction with min-confirmation values").checked_sub(conf as u32).unwrap() + 1,
                 timestamp: 0,
             });
+
+        // Set the database sync_time.
+        // Check if the current_height is less than already known sync height, apply the max
+        // If any of them is None, the other will be applied instead.
+        // If both are None, this will not be set.
+        if let Some(height) = db.get_sync_time().unwrap()
+                                .map(|sync_time| sync_time.block_time.height)
+                                .max(current_height) {
+            let sync_time = SyncTime {
+                block_time: BlockTime {
+                    height,
+                    timestamp: 0
+                }
+            };
+            db.set_sync_time(sync_time).unwrap();
+        }
 
         let tx_details = $crate::TransactionDetails {
             transaction: Some(tx.clone()),
