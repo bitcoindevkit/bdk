@@ -50,6 +50,7 @@ use bitcoincore_rpc::{Client, RpcApi};
 use log::{debug, info};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::ops::Deref;
 use std::path::PathBuf;
 use std::thread;
 use std::time::Duration;
@@ -65,6 +66,14 @@ pub struct RpcBlockchain {
     capabilities: HashSet<Capability>,
     /// Sync parameters.
     sync_params: RpcSyncParams,
+}
+
+impl Deref for RpcBlockchain {
+    type Target = Client;
+
+    fn deref(&self) -> &Self::Target {
+        &self.client
+    }
 }
 
 /// RpcBlockchain configuration options
