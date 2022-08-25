@@ -490,11 +490,10 @@ macro_rules! populate_test_db {
         let mut db = $db;
         let tx_meta = $tx_meta;
         let current_height: Option<u32> = $current_height;
-        let input = if $is_coinbase {
-            vec![$crate::bitcoin::TxIn::default()]
-        } else {
-            vec![]
-        };
+        let mut input = vec![$crate::bitcoin::TxIn::default()];
+        if !$is_coinbase {
+            input[0].previous_output.vout = 0;
+        }
         let tx = $crate::bitcoin::Transaction {
             version: 1,
             lock_time: 0,
