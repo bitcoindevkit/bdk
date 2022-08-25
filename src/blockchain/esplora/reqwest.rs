@@ -12,6 +12,7 @@
 //! Esplora by way of `reqwest` HTTP client.
 
 use std::collections::{HashMap, HashSet};
+use std::ops::Deref;
 
 use bitcoin::consensus::{deserialize, serialize};
 use bitcoin::hashes::hex::{FromHex, ToHex};
@@ -31,8 +32,9 @@ use crate::database::BatchDatabase;
 use crate::error::Error;
 use crate::FeeRate;
 
+/// Structure encapsulates Esplora client
 #[derive(Debug)]
-struct UrlClient {
+pub struct UrlClient {
     url: String,
     // We use the async client instead of the blocking one because it automatically uses `fetch`
     // when the target platform is wasm32.
@@ -98,6 +100,14 @@ impl Blockchain for EsploraBlockchain {
     fn estimate_fee(&self, target: usize) -> Result<FeeRate, Error> {
         let estimates = await_or_block!(self.url_client._get_fee_estimates())?;
         super::into_fee_rate(target, estimates)
+    }
+}
+
+impl Deref for EsploraBlockchain {
+    type Target = UrlClient;
+
+    fn deref(&self) -> &Self::Target {
+        &self.url_client
     }
 }
 

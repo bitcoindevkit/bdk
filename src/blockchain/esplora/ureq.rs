@@ -14,6 +14,7 @@
 use std::collections::{HashMap, HashSet};
 use std::io;
 use std::io::Read;
+use std::ops::Deref;
 use std::time::Duration;
 
 #[allow(unused_imports)]
@@ -33,8 +34,9 @@ use crate::database::BatchDatabase;
 use crate::error::Error;
 use crate::FeeRate;
 
+/// Structure encapsulates ureq Esplora client
 #[derive(Debug, Clone)]
-struct UrlClient {
+pub struct UrlClient {
     url: String,
     agent: Agent,
 }
@@ -95,6 +97,14 @@ impl Blockchain for EsploraBlockchain {
     fn estimate_fee(&self, target: usize) -> Result<FeeRate, Error> {
         let estimates = self.url_client._get_fee_estimates()?;
         super::into_fee_rate(target, estimates)
+    }
+}
+
+impl Deref for EsploraBlockchain {
+    type Target = UrlClient;
+
+    fn deref(&self) -> &Self::Target {
+        &self.url_client
     }
 }
 
