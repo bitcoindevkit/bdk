@@ -25,6 +25,7 @@
 //! ```
 
 use std::collections::{HashMap, HashSet};
+use std::ops::Deref;
 
 #[allow(unused_imports)]
 use log::{debug, error, info, trace};
@@ -76,6 +77,14 @@ impl Blockchain for ElectrumBlockchain {
         Ok(FeeRate::from_btc_per_kvb(
             self.client.estimate_fee(target)? as f32
         ))
+    }
+}
+
+impl Deref for ElectrumBlockchain {
+    type Target = Client;
+
+    fn deref(&self) -> &Self::Target {
+        &self.client
     }
 }
 
