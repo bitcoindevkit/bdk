@@ -1927,6 +1927,12 @@ pub(crate) mod test {
     const P2WPKH_FAKE_WITNESS_SIZE: usize = 106;
 
     #[test]
+    fn test_get_funded_wallet_balance() {
+        let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
+        assert_eq!(wallet.get_balance().unwrap().confirmed, 50000);
+    }
+
+    #[test]
     fn test_cache_addresses_fixed() {
         let db = MemoryDatabase::new();
         let wallet = Wallet::new(
@@ -2173,7 +2179,22 @@ pub(crate) mod test {
 
     #[test]
     fn test_create_tx_default_locktime() {
-        let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
+        let descriptors = testutils!(@descriptors (get_test_wpkh()));
+        let wallet = Wallet::new(
+            &descriptors.0,
+            None,
+            Network::Regtest,
+            AnyDatabase::Memory(MemoryDatabase::new()),
+        )
+        .unwrap();
+
+        let tx_meta = testutils! {
+                @tx ( (@external descriptors, 0) => 50_000 )
+        };
+
+        // Add the transaction to our db, but do not sync the db.
+        crate::populate_test_db!(wallet.database.borrow_mut(), tx_meta, None);
+
         let addr = wallet.get_address(New).unwrap();
         let mut builder = wallet.build_tx();
         builder.add_recipient(addr.script_pubkey(), 25_000);
@@ -2364,7 +2385,23 @@ pub(crate) mod test {
 
     #[test]
     fn test_create_tx_default_sequence() {
-        let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
+        let descriptors = testutils!(@descriptors (get_test_wpkh()));
+        let wallet = Wallet::new(
+            &descriptors.0,
+            None,
+            Network::Regtest,
+            AnyDatabase::Memory(MemoryDatabase::new()),
+        )
+        .unwrap();
+
+        let tx_meta = testutils! {
+                @tx ( (@external descriptors, 0) => 50_000 )
+        };
+
+        // Add the transaction to our db, but do not sync the db. Unsynced db
+        // should trigger the default sequence value for a new transaction as 0xFFFFFFFF
+        crate::populate_test_db!(wallet.database.borrow_mut(), tx_meta, None);
+
         let addr = wallet.get_address(New).unwrap();
         let mut builder = wallet.build_tx();
         builder.add_recipient(addr.script_pubkey(), 25_000);
@@ -2862,7 +2899,22 @@ pub(crate) mod test {
 
     #[test]
     fn test_create_tx_policy_path_no_csv() {
-        let (wallet, _, _) = get_funded_wallet(get_test_a_or_b_plus_csv());
+        let descriptors = testutils!(@descriptors (get_test_wpkh()));
+        let wallet = Wallet::new(
+            &descriptors.0,
+            None,
+            Network::Regtest,
+            AnyDatabase::Memory(MemoryDatabase::new()),
+        )
+        .unwrap();
+
+        let tx_meta = testutils! {
+                @tx ( (@external descriptors, 0) => 50_000 )
+        };
+
+        // Add the transaction to our db, but do not sync the db. Unsynced db
+        // should trigger the default sequence value for a new transaction as 0xFFFFFFFF
+        crate::populate_test_db!(wallet.database.borrow_mut(), tx_meta, None);
 
         let external_policy = wallet.policies(KeychainKind::External).unwrap().unwrap();
         let root_id = external_policy.id;
