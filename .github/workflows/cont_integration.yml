@@ -172,3 +172,32 @@ jobs:
         run: rustup update
       - name: Check fmt
         run: cargo fmt --all -- --config format_code_in_doc_comments=true --check
+
+  test_harware_wallet:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        rust:
+          - version: 1.60.0 # STABLE
+          - version: 1.56.1 # MSRV
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+    - name: Build simulator image
+      run: docker build -t hwi/ledger_emulator ./ci -f ci/Dockerfile.ledger
+    - name: Run simulator image
+      run: docker run --name simulator --network=host hwi/ledger_emulator &
+    - name: Install Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+    - name: Install python dependencies
+      run: pip install hwi==2.1.1 protobuf==3.20.1
+    - name: Set default toolchain
+      run: rustup default ${{ matrix.rust.version }}
+    - name: Set profile
+      run: rustup set profile minimal
+    - name: Update toolchain
+      run: rustup update
+    - name: Test
+      run: cargo test --features test-hardware-signer
