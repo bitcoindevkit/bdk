@@ -122,6 +122,6 @@ required-features = ["keys-bip39", "key-value-db", "rpc", "electrsd/bitcoind_22_
 [workspace]
 members = ["macros"]
 [package.metadata.docs.rs]
-features = ["compiler", "electrum", "esplora", "ureq", "compact_filters", "rpc", "key-value-db", "sqlite", "all-keys", "verify"]
+features = ["compiler", "electrum", "esplora", "use-esplora-ureq", "compact_filters", "rpc", "key-value-db", "sqlite", "all-keys", "verify", "hardware-signer"]
 # defines the configuration attribute `docsrs`
 rustdoc-args = ["--cfg", "docsrs"]
