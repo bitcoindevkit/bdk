@@ -454,7 +454,7 @@ impl<D: Database> CoinSelectionAlgorithm<D> for BranchAndBoundCoinSelection {
             .iter()
             .fold(0, |acc, x| acc + x.effective_value);
 
-        let cost_of_change = self.size_of_change as f32 * fee_rate.as_sat_vb();
+        let cost_of_change = self.size_of_change as f32 * fee_rate.as_sat_per_vb();
 
         // `curr_value` and `curr_available_value` are both the sum of *effective_values* of
         // the UTXOs. For the optional UTXOs (curr_available_value) we filter out UTXOs with
@@ -1360,7 +1360,8 @@ mod test {
         let curr_available_value = utxos.iter().fold(0, |acc, x| acc + x.effective_value);
 
         let size_of_change = 31;
-        let cost_of_change = size_of_change as f32 * fee_rate.as_sat_vb();
+        let cost_of_change = size_of_change as f32 * fee_rate.as_sat_per_vb();
+
         let drain_script = Script::default();
         let target_amount = 20_000 + FEE_AMOUNT;
         BranchAndBoundCoinSelection::new(size_of_change)
@@ -1389,7 +1390,7 @@ mod test {
         let curr_available_value = utxos.iter().fold(0, |acc, x| acc + x.effective_value);
 
         let size_of_change = 31;
-        let cost_of_change = size_of_change as f32 * fee_rate.as_sat_vb();
+        let cost_of_change = size_of_change as f32 * fee_rate.as_sat_per_vb();
         let target_amount = 20_000 + FEE_AMOUNT;
 
         let drain_script = Script::default();
@@ -1413,7 +1414,7 @@ mod test {
     fn test_bnb_function_almost_exact_match_with_fees() {
         let fee_rate = FeeRate::from_sat_per_vb(1.0);
         let size_of_change = 31;
-        let cost_of_change = size_of_change as f32 * fee_rate.as_sat_vb();
+        let cost_of_change = size_of_change as f32 * fee_rate.as_sat_per_vb();
 
         let utxos: Vec<_> = generate_same_value_utxos(50_000, 10)
             .into_iter()

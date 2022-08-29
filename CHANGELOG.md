@@ -5,6 +5,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+- Add capacity to create FeeRate from sats/kvbytes and sats/kwu.
+- Rename `as_sat_vb` to `as_sat_per_vb`. Move all `FeeRate` test to `types.rs`.
 
 ## [v0.21.0] - [v0.20.0]
 
@@ -18,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Change the meaning of the `fee_amount` field inside `CoinSelectionResult`: from now on the `fee_amount` will represent only the fees asociated with the utxos in the `selected` field of `CoinSelectionResult`.
 - New `RpcBlockchain` implementation with various fixes.
 - Return balance in separate categories, namely `confirmed`, `trusted_pending`, `untrusted_pending` & `immature`.
+
 
 ## [v0.20.0] - [v0.19.0]
 
