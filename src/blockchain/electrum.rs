@@ -337,15 +337,52 @@ mod test {
 
     use super::*;
     use crate::database::MemoryDatabase;
+    use crate::make_blockchain_tests;
     use crate::testutils::blockchain_tests::TestClient;
     use crate::testutils::configurable_blockchain_tests::ConfigurableBlockchainTester;
     use crate::wallet::{AddressIndex, Wallet};
+    use electrum_client::Client;
 
-    crate::bdk_blockchain_tests! {
-        fn test_instance(test_client: &TestClient) -> ElectrumBlockchain {
-            ElectrumBlockchain::from(Client::new(&test_client.electrsd.electrum_url).unwrap())
-        }
+    fn init_blockchain(test_client: &TestClient) -> ElectrumBlockchain {
+        ElectrumBlockchain::from(Client::new(&test_client.electrsd.electrum_url).unwrap())
     }
+
+    make_blockchain_tests![
+        init_blockchain,
+        tests(
+            test_sync_simple,
+            test_sync_stop_gap_20,
+            test_sync_before_and_after_receive,
+            test_sync_multiple_outputs_same_tx,
+            test_sync_receive_multi,
+            test_sync_address_reuse,
+            test_sync_receive_rbf_replaced,
+            test_sync_reorg_block,
+            test_sync_after_send,
+            test_sync_address_index_should_not_decrement,
+            test_sync_address_index_should_increment,
+            test_sync_double_receive,
+            test_sync_many_sends_to_a_single_address,
+            test_update_confirmation_time_after_generate,
+            test_sync_outgoing_from_scratch,
+            test_sync_long_change_chain,
+            test_sync_bump_fee_basic,
+            test_sync_bump_fee_remove_change,
+            test_sync_bump_fee_add_input_simple,
+            test_sync_bump_fee_add_input_no_change,
+            test_add_data,
+            test_sync_receive_coinbase,
+            test_send_to_bech32m_addr,
+            test_tx_chain,
+            test_double_spend,
+            test_send_receive_pkh,
+            test_taproot_script_spend,
+            test_sign_taproot_core_keyspend_psbt,
+            test_sign_taproot_core_scriptspend2_psbt,
+            test_sign_taproot_core_scriptspend3_psbt,
+            test_get_block_hash,
+        )
+    ];
 
     fn get_factory() -> (TestClient, Arc<ElectrumBlockchain>) {
         let test_client = TestClient::default();

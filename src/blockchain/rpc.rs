@@ -870,31 +870,78 @@ impl BlockchainFactory for RpcBlockchainFactory {
 
 #[cfg(test)]
 #[cfg(any(feature = "test-rpc", feature = "test-rpc-legacy"))]
-mod test {
+pub mod test {
     use super::*;
-    use crate::{
-        descriptor::{into_wallet_descriptor_checked, AsDerived},
-        testutils::blockchain_tests::TestClient,
-        wallet::utils::SecpCtx,
-    };
+    use crate::descriptor::into_wallet_descriptor_checked;
+    use crate::descriptor::AsDerived;
+    use crate::make_blockchain_tests;
+    use crate::testutils::blockchain_tests::TestClient;
+    use crate::wallet::utils::SecpCtx;
 
     use bitcoin::{Address, Network};
     use bitcoincore_rpc::RpcApi;
     use log::LevelFilter;
     use miniscript::DescriptorTrait;
 
-    crate::bdk_blockchain_tests! {
-        fn test_instance(test_client: &TestClient) -> RpcBlockchain {
-            let config = RpcConfig {
-                url: test_client.bitcoind.rpc_url(),
-                auth: Auth::Cookie { file: test_client.bitcoind.params.cookie_file.clone() },
-                network: Network::Regtest,
-                wallet_name: format!("client-wallet-test-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos() ),
-                sync_params: None,
-            };
-            RpcBlockchain::from_config(&config).unwrap()
-        }
+    pub fn init_blockchain(test_client: &TestClient) -> RpcBlockchain {
+        let config = RpcConfig {
+            url: test_client.bitcoind.rpc_url(),
+            auth: Auth::Cookie {
+                file: test_client.bitcoind.params.cookie_file.clone(),
+            },
+            network: Network::Regtest,
+            wallet_name: format!(
+                "client-wallet-test-{}",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ),
+            sync_params: Some(RpcSyncParams::default()),
+        };
+        RpcBlockchain::from_config(&config).unwrap()
     }
+
+    make_blockchain_tests![
+        init_blockchain,
+        tests(
+            test_sync_simple,
+            test_sync_stop_gap_20,
+            test_sync_before_and_after_receive,
+            test_sync_multiple_outputs_same_tx,
+            test_sync_receive_multi,
+            test_sync_address_reuse,
+            test_sync_receive_rbf_replaced,
+            test_sync_after_send,
+            test_sync_address_index_should_not_decrement,
+            test_sync_address_index_should_increment,
+            test_sync_double_receive,
+            test_sync_many_sends_to_a_single_address,
+            test_update_confirmation_time_after_generate,
+            test_sync_outgoing_from_scratch,
+            test_sync_long_change_chain,
+            test_sync_bump_fee_basic,
+            test_sync_bump_fee_add_input_simple,
+            test_sync_bump_fee_add_input_no_change,
+            test_sync_receive_coinbase,
+            test_double_spend,
+            test_tx_chain,
+            test_get_block_hash,
+        )
+    ];
+
+    #[cfg(not(feature = "test-rpc-legacy"))]
+    make_blockchain_tests![
+        init_blockchain,
+        tests(
+            test_send_to_bech32m_addr,
+            test_taproot_key_spend,
+            test_taproot_script_spend,
+            test_sign_taproot_core_keyspend_psbt,
+            test_sign_taproot_core_scriptspend2_psbt,
+            test_sign_taproot_core_scriptspend3_psbt,
+        )
+    ];
 
     fn get_factory() -> (TestClient, RpcBlockchainFactory) {
         let test_client = TestClient::default();
