@@ -49,6 +49,7 @@ pub(crate) mod utils;
 pub mod verify;
 
 #[cfg(feature = "hardware-signer")]
+#[cfg_attr(docsrs, doc(cfg(feature = "hardware-signer")))]
 pub mod hardwaresigner;
 
 pub use utils::IsDust;
