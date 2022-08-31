@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Change the meaning of the `fee_amount` field inside `CoinSelectionResult`: from now on the `fee_amount` will represent only the fees asociated with the utxos in the `selected` field of `CoinSelectionResult`.
 - New `RpcBlockchain` implementation with various fixes.
 - Return balance in separate categories, namely `confirmed`, `trusted_pending`, `untrusted_pending` & `immature`.
+- Transform testing macros into functions. For both Database and Blockchain tests.
+- Move testing macros and functions into their own module inside `testutils/helpers.rs`.
 
 ## [v0.20.0] - [v0.19.0]
 
