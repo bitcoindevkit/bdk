@@ -77,7 +77,7 @@ impl Deref for RpcBlockchain {
 }
 
 /// RpcBlockchain configuration options
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct RpcConfig {
     /// The bitcoin node url
     pub url: String,
@@ -96,7 +96,7 @@ pub struct RpcConfig {
 /// In general, BDK tries to sync `scriptPubKey`s cached in [`crate::database::Database`] with
 /// `scriptPubKey`s imported in the Bitcoin Core Wallet. These parameters are used for determining
 /// how the `importdescriptors` RPC calls are to be made.
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct RpcSyncParams {
     /// The minimum number of scripts to scan for on initial sync.
     pub start_script_count: usize,
@@ -373,7 +373,7 @@ impl<'a, D: BatchDatabase> DbState<'a, D> {
 
     /// Sync states of [BatchDatabase] and Core wallet.
     /// First we import all `scriptPubKey`s from database into core wallet
-    fn sync_with_core(&mut self, client: &Client, is_descriptor: bool) -> Result<&mut Self, Error> {
+    fn sync_with_core(&mut self, client: &Client, use_desc: bool) -> Result<&mut Self, Error> {
         // this tells Core wallet where to sync from for imported scripts
         let start_epoch = if self.params.force_start_time {
             self.params.start_time
@@ -385,7 +385,7 @@ impl<'a, D: BatchDatabase> DbState<'a, D> {
 
         // sync scriptPubKeys from Database to Core wallet
         let scripts_iter = self.ext_spks.iter().chain(&self.int_spks);
-        if is_descriptor {
+        if use_desc {
             import_descriptors(client, start_epoch, scripts_iter)?;
         } else {
             import_multi(client, start_epoch, scripts_iter)?;

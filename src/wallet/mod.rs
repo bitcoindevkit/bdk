@@ -143,7 +143,7 @@ pub enum AddressIndex {
 
 /// A derived address and the index it was found at
 /// For convenience this automatically derefs to `Address`
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct AddressInfo {
     /// Child index of this address
     pub index: u32,

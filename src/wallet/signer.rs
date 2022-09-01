@@ -720,7 +720,7 @@ pub struct SignOptions {
 }
 
 /// Customize which taproot script-path leaves the signer should sign.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TapLeavesOptions {
     /// The signer will sign all the leaves it has a key for.
     All,

@@ -296,7 +296,7 @@ impl<'a, 'b, D: Database> TxCache<'a, 'b, D> {
 }
 
 /// Configuration for an [`ElectrumBlockchain`]
-#[derive(Debug, serde::Deserialize, serde::Serialize, Clone, PartialEq)]
+#[derive(Debug, serde::Deserialize, serde::Serialize, Clone, PartialEq, Eq)]
 pub struct ElectrumBlockchainConfig {
     /// URL of the Electrum server (such as ElectrumX, Esplora, BWT) may start with `ssl://` or `tcp://` and include a port
     ///
