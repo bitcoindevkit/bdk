@@ -21,9 +21,9 @@ assignees: ''
 
 <--add notices from PRs merged since the prior release, see ["keep a changelog"]-->
 
-### Checklist 
+### Checklist
 
-Release numbering must follow [Semantic Versioning]. These steps assume the current `master` 
+Release numbering must follow [Semantic Versioning]. These steps assume the current `master`
 branch **development** version is *MAJOR.MINOR.0*.
 
 #### On the day of the feature freeze
@@ -37,34 +37,43 @@ Change the `master` branch to the next MINOR+1 version:
   - The commit message should be "Bump version to MAJOR.MINOR+1.0".
 - [ ] Create PR and merge the `bump_dev_MAJOR_MINOR+1` branch to `master`.
   - Title PR "Bump version to MAJOR.MINOR+1.0".
-  
+
 Create a new release branch and release candidate tag:
 
 - [ ] Double check that your local `master` is up-to-date with the upstream repo.
 - [ ] Create a new branch called `release/MAJOR.MINOR+1` from `master`.
+- [ ] Bump the `release/MAJOR.MINOR+1` branch to `MAJOR.MINOR+1.0-rc.1` version.
+  - Change the `Cargo.toml` version value to `MAJOR.MINOR+1.0-rc.1`.
+  - The commit message should be "Bump version to MAJOR.MINOR+1.0-rc.1".
 - [ ] Add a tag to the `HEAD` commit in the `release/MAJOR.MINOR+1` branch.
-  - The tag name should be `vMAJOR.MINOR+1.0-RC.1`
-  - Use message "Release MAJOR.MINOR+1.0 RC.1".  
+  - The tag name should be `vMAJOR.MINOR+1.0-rc.1`
+  - Use message "Release MAJOR.MINOR+1.0 rc.1".
   - Make sure the tag is signed, for extra safety use the explicit `--sign` flag.
 - [ ] Push the `release/MAJOR.MINOR` branch and new tag to the `bitcoindevkit/bdk` repo.
-  - Use `git push --tags` option to push the new `vMAJOR.MINOR+1.0-RC.1` tag.
-  
+  - Use `git push --tags` option to push the new `vMAJOR.MINOR+1.0-rc.1` tag.
+
 If any issues need to be fixed before the *MAJOR.MINOR+1.0* version is released:
 
 - [ ] Merge fix PRs to the `master` branch.
 - [ ] Git cherry-pick fix commits to the `release/MAJOR.MINOR+1` branch.
 - [ ] Verify fixes in `release/MAJOR.MINOR+1` branch.
+- [ ] Bump the `release/MAJOR.MINOR+1` branch to `MAJOR.MINOR+1.0-rc.x+1` version.
+  - Change the `Cargo.toml` version value to `MAJOR.MINOR+1.0-rc.x+1`.
+  - The commit message should be "Bump version to MAJOR.MINOR+1.0-rc.x+1".
 - [ ] Add a tag to the `HEAD` commit in the `release/MAJOR.MINOR+1` branch.
-  - The tag name should be `vMAJOR.MINOR+1.0-RC.x+1`, where x is the current release candidate number.
-  - Use tag message "Release MAJOR.MINOR+1.0 RC.x+1".  
+  - The tag name should be `vMAJOR.MINOR+1.0-rc.x+1`, where x is the current release candidate number.
+  - Use tag message "Release MAJOR.MINOR+1.0 rc.x+1".
   - Make sure the tag is signed, for extra safety use the explicit `--sign` flag.
 - [ ] Push the new tag to the `bitcoindevkit/bdk` repo.
-  - Use `git push --tags` option to push the new `vMAJOR.MINOR+1.0-RC.x+1` tag.
+  - Use `git push --tags` option to push the new `vMAJOR.MINOR+1.0-rc.x+1` tag.
 
 #### On the day of the release
 
 Tag and publish new release:
 
+- [ ] Bump the `release/MAJOR.MINOR+1` branch to `MAJOR.MINOR+1.0` version.
+  - Change the `Cargo.toml` version value to `MAJOR.MINOR+1.0`.
+  - The commit message should be "Bump version to MAJOR.MINOR+1.0".
 - [ ] Add a tag to the `HEAD` commit in the `release/MAJOR.MINOR+1` branch.
   - The tag name should be `vMAJOR.MINOR+1.0`
   - The first line of the tag message should be "Release MAJOR.MINOR+1.0".
