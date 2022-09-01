@@ -115,6 +115,8 @@ pub struct RpcSyncParams {
     pub force_start_time: bool,
     /// RPC poll rate (in seconds) to get state updates.
     pub poll_rate_sec: u64,
+    /// Page size for RPC calls (`importdescriptors`, `importmulti` and `listtransactions`).
+    pub page_size: usize,
 }
 
 impl Default for RpcSyncParams {
@@ -123,7 +125,8 @@ impl Default for RpcSyncParams {
             start_script_count: 100,
             start_time: 0,
             force_start_time: false,
-            poll_rate_sec: 3,
+            poll_rate_sec: 2,
+            page_size: 200,
         }
     }
 }
@@ -432,7 +435,7 @@ impl<'a, D: BatchDatabase> DbState<'a, D> {
 
         // sync scriptPubKeys from Database into Core wallet, starting from derivation indexes
         // defined in `import_params`
-        let (scripts_count, scripts_iter) = {
+        let scripts_iter = {
             let ext_spks = self
                 .ext_spks
                 .iter()
@@ -441,31 +444,25 @@ impl<'a, D: BatchDatabase> DbState<'a, D> {
                 .int_spks
                 .iter()
                 .skip(import_params.internal_start_index);
-
-            let scripts_count = ext_spks.len() + int_spks.len();
-            let scripts_iter = ext_spks.chain(int_spks);
-            println!("scripts count: {}", scripts_count);
-
-            (scripts_count, scripts_iter)
+            ext_spks.chain(int_spks)
         };
-
-        if scripts_count > 0 {
-            if use_desc {
-                import_descriptors(client, start_epoch, scripts_iter)?;
-            } else {
-                import_multi(client, start_epoch, scripts_iter)?;
-            }
-        }
-
-        await_wallet_scan(client, self.params.poll_rate_sec, self.prog)?;
+        paginated_import(
+            client,
+            use_desc,
+            start_epoch,
+            self.params.poll_rate_sec,
+            self.params.page_size,
+            scripts_iter,
+            self.prog,
+        )?;
+        // await_wallet_scan(client, self.params.poll_rate_sec, self.prog)?;
 
         // update import_params
         import_params.external_start_index = self.ext_spks.len();
         import_params.internal_start_index = self.int_spks.len();
 
         // obtain iterator of pagenated `listtransactions` RPC calls
-        const LIST_TX_PAGE_SIZE: usize = 100; // item count per page
-        let tx_iter = list_transactions(client, LIST_TX_PAGE_SIZE)?.filter(|item| {
+        let tx_iter = list_transactions(client, self.params.page_size)?.filter(|item| {
             // filter out conflicting transactions - only accept transactions that are already
             // confirmed, or exists in mempool
             let confirmed = item.info.confirmations > 0;
@@ -787,6 +784,39 @@ where
         }
     }
     Ok(())
+}
+
+fn paginated_import<'a, S>(
+    client: &Client,
+    use_desc: bool,
+    start_epoch: u64,
+    poll_rate_sec: u64,
+    page_size: usize,
+    scripts_iter: S,
+    progress: &dyn Progress,
+) -> Result<(), Error>
+where
+    S: Iterator<Item = &'a Script> + Clone,
+{
+    (0_usize..)
+        .step_by(page_size)
+        .map(|page_start| {
+            scripts_iter
+                .clone()
+                .skip(page_start)
+                .take(page_size)
+                .cloned()
+                .collect::<Vec<_>>()
+        })
+        .take_while(|scripts| !scripts.is_empty())
+        .try_for_each(|scripts| {
+            if use_desc {
+                import_descriptors(client, start_epoch, scripts.iter())?;
+            } else {
+                import_multi(client, start_epoch, scripts.iter())?;
+            }
+            await_wallet_scan(client, poll_rate_sec, progress)
+        })
 }
 
 /// Calls the `listtransactions` RPC method in `page_size`s and returns iterator of the tx results
