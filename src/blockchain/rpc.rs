@@ -98,11 +98,12 @@ pub struct RpcConfig {
 /// how the `importdescriptors` RPC calls are to be made.
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct RpcSyncParams {
-    /// The minimum number of scripts to scan for on initial sync.
+    /// The minimum number of scripts to scan for on the first sync.
     pub start_script_count: usize,
     /// Time in unix seconds in which initial sync will start scanning from (0 to start from genesis).
     pub start_time: u64,
-    /// Forces every sync to use `start_time` as import timestamp.
+    /// Forces every sync to use [`crate::database::SyncTime`] as import timestamp. The default
+    /// behavior is to use the last `sync_time` as the import timestamp.
     pub force_start_time: bool,
     /// RPC poll rate (in seconds) to get state updates.
     pub poll_rate_sec: u64,
