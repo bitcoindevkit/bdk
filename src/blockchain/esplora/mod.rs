@@ -97,7 +97,7 @@ impl fmt::Display for EsploraError {
 }
 
 /// Configuration for an [`EsploraBlockchain`]
-#[derive(Debug, serde::Deserialize, serde::Serialize, Clone, PartialEq)]
+#[derive(Debug, serde::Deserialize, serde::Serialize, Clone, PartialEq, Eq)]
 pub struct EsploraBlockchainConfig {
     /// Base URL of the esplora service
     ///

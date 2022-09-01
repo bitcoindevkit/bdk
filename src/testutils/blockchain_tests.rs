@@ -755,6 +755,12 @@ macro_rules! bdk_blockchain_tests {
 
                 blockchain.broadcast(&tx1).expect("broadcasting first");
                 blockchain.broadcast(&tx2).expect("broadcasting replacement");
+
+                // TODO @evanlinjin: Core's `listtransactions` RPC call does not return conflicting
+                // unconfirmed transactions (unless we re-import associated scriptPubKey/descriptor)
+                #[cfg(feature = "rpc")]
+                blockchain.replace_import_parameters(Default::default());
+
                 receiver_wallet.sync(&blockchain, SyncOptions::default()).expect("syncing receiver");
                 assert_eq!(receiver_wallet.get_balance().expect("balance").untrusted_pending, 49_000, "should have received coins once and only once");
             }
