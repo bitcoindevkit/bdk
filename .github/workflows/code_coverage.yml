@@ -10,7 +10,24 @@ jobs:
       RUSTFLAGS: "-Cinstrument-coverage"
       RUSTDOCFLAGS: "-Cinstrument-coverage"
       LLVM_PROFILE_FILE: "report-%p-%m.profraw"
-
+    strategy:
+      matrix:
+        features:
+          - default
+          - minimal
+          - all-keys
+          - minimal,use-esplora-ureq
+          - key-value-db
+          - electrum
+          - compact_filters
+          - esplora,ureq,key-value-db,electrum
+          - compiler
+          - rpc
+          - verify
+          - async-interface
+          - use-esplora-reqwest
+          - sqlite
+          - sqlite-bundled
     steps:
       - name: Checkout
         uses: actions/checkout@v2
@@ -37,19 +54,30 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
       - name: Install grcov
         run: if [[ ! -e ~/.cargo/bin/grcov ]]; then cargo install grcov; fi
-      - name: Test
+      - name: Test ${{ matrix.features }}
         run: cargo test --features default,minimal,all-keys,compact_filters,key-value-db,compiler,sqlite,sqlite-bundled,test-electrum,verify,test-rpc
       - name: Run grcov
         run: mkdir coverage; grcov . --binary-path ./target/debug/ -s . -t lcov --branch --ignore-not-existing --ignore '/*' -o ./coverage/lcov.info
       - name: Generate HTML coverage report
         run: genhtml -o coverage-report.html ./coverage/lcov.info
 
-      - name: Coveralls upload
+      - name: Coveralls Parallel upload
         uses: coverallsapp/github-action@master
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
+          flag-name: run-${{ matrix.features }}
+          parallel: true
       - name: Upload artifact
         uses: actions/upload-artifact@v2
         with:
           name: coverage-report
           path: coverage-report.html
+  finish:
+    needs: Codecov
+    runs-on: ubuntu-latest
+    steps:
+    - name: Coveralls Finished
+      uses: coverallsapp/github-action@master
+      with:
+        github-token: ${{ secrets.github_token }}
+        parallel-finished: true
