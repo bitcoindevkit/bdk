@@ -12,22 +12,17 @@ jobs:
       LLVM_PROFILE_FILE: "report-%p-%m.profraw"
     strategy:
       matrix:
-        features:
-          - default
-          - minimal
-          - all-keys
-          - minimal,use-esplora-ureq
-          - key-value-db
-          - electrum
-          - compact_filters
-          - esplora,ureq,key-value-db,electrum
-          - compiler
-          - rpc
-          - verify
-          - async-interface
-          - use-esplora-reqwest
-          - sqlite
-          - sqlite-bundled
+        blockchain:
+          - name: electrum
+            features: test-electrum,verify
+          - name: rpc
+            features: test-rpc
+          - name: rpc-legacy
+            features: test-rpc-legacy
+          - name: esplora
+            features: test-esplora,use-esplora-reqwest,verify
+          - name: esplora
+            features: test-esplora,use-esplora-ureq,verify
     steps:
       - name: Checkout
         uses: actions/checkout@v2
@@ -54,8 +49,8 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
       - name: Install grcov
         run: if [[ ! -e ~/.cargo/bin/grcov ]]; then cargo install grcov; fi
-      - name: Test ${{ matrix.features }}
-        run: cargo test --features default,minimal,all-keys,compact_filters,key-value-db,compiler,sqlite,sqlite-bundled,test-electrum,verify,test-rpc
+      - name: Test ${{ matrix.blockchain.name }}
+        run: cargo test --features compiler,verify,sqlite,sqlite-bundled,compact_filters,key-value-db,all-keys,keys-bip39,rpc,${{ matrix.blockchain.features }}
       - name: Run grcov
         run: mkdir coverage; grcov . --binary-path ./target/debug/ -s . -t lcov --branch --ignore-not-existing --ignore '/*' -o ./coverage/lcov.info
       - name: Generate HTML coverage report
