@@ -38,7 +38,7 @@ jobs:
       - name: Install grcov
         run: if [[ ! -e ~/.cargo/bin/grcov ]]; then cargo install grcov; fi
       - name: Test
-        run: cargo test --features default,minimal,all-keys,compact_filters,key-value-db,compiler,sqlite,sqlite-bundled,test-electrum,verify,test-rpc
+        run: cargo test --features all-keys,compact_filters,compiler,key-value-db,sqlite,sqlite-bundled,test-electrum,test-rpc,verify
       - name: Run grcov
         run: mkdir coverage; grcov . --binary-path ./target/debug/ -s . -t lcov --branch --ignore-not-existing --ignore '/*' -o ./coverage/lcov.info
       - name: Generate HTML coverage report
