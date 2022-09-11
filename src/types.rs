@@ -13,7 +13,7 @@ use std::convert::AsRef;
 use std::ops::Sub;
 
 use bitcoin::blockdata::transaction::{OutPoint, Transaction, TxOut};
-use bitcoin::{hash_types::Txid, util::psbt};
+use bitcoin::{hash_types::Txid, util::psbt, Script};
 
 use serde::{Deserialize, Serialize};
 
@@ -175,6 +175,18 @@ pub struct WeightedUtxo {
     pub satisfaction_weight: usize,
     /// The UTXO
     pub utxo: Utxo,
+}
+
+/// A wallet owned script_pubkey with the weight of the `witness` + `scriptSig` in [weight units]
+/// to spend from it.
+/// Useful to optimize reducing the waste metric in coin selection algorithms.
+/// [weight units]: <https://en.bitcoin.it/wiki/Weight_units>
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WeightedScriptPubkey {
+    /// The weight of the witness data and `scriptSig` expressed in [weight units].
+    pub satisfaction_weight: usize,
+    /// The script_pubkey
+    pub script_pubkey: Script,
 }
 
 #[derive(Debug, Clone, PartialEq)]
