@@ -744,11 +744,13 @@ impl BatchOperations for SqliteDatabase {
         include_raw: bool,
     ) -> Result<Option<TransactionDetails>, Error> {
         match self.select_transaction_details_by_txid(txid)? {
-            Some(transaction_details) => {
+            Some(mut transaction_details) => {
                 self.delete_transaction_details_by_txid(txid)?;
 
                 if include_raw {
                     self.delete_transaction_by_txid(txid)?;
+                } else {
+                    transaction_details.transaction = None;
                 }
                 Ok(Some(transaction_details))
             }
