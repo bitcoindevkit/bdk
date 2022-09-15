@@ -1196,7 +1196,12 @@ where
         }
     }
 
-    /// Try to finalize a PSBT
+    /// Finalize a PSBT, i.e., for each input determine if sufficient data is available to pass
+    /// validation and construct the respective `scriptSig` or `scriptWitness`. Please refer to
+    /// [BIP174](https://github.com/bitcoin/bips/blob/master/bip-0174.mediawiki#Input_Finalizer)
+    /// for further information.
+    ///
+    /// Returns `true` if the PSBT could be finalized, and `false` otherwise.
     ///
     /// The [`SignOptions`] can be used to tweak the behavior of the finalizer.
     pub fn finalize_psbt(
