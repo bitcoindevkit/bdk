@@ -32,7 +32,6 @@ async-trait = { version = "0.1", optional = true }
 rocksdb = { version = "0.14", default-features = false, features = ["snappy"], optional = true }
 cc = { version = ">=1.0.64", optional = true }
 socks = { version = "0.3", optional = true }
-lazy_static = { version = "1.4", optional = true }
 hwi = { version = "0.2.2", optional = true }
 
 bip39 = { version = "1.0.1", optional = true }
@@ -57,7 +56,7 @@ verify = ["bitcoinconsensus"]
 default = ["key-value-db", "electrum"]
 sqlite = ["rusqlite", "ahash"]
 sqlite-bundled = ["sqlite", "rusqlite/bundled"]
-compact_filters = ["rocksdb", "socks", "lazy_static", "cc"]
+compact_filters = ["rocksdb", "socks", "cc"]
 key-value-db = ["sled"]
 all-keys = ["keys-bip39"]
 keys-bip39 = ["bip39"]
