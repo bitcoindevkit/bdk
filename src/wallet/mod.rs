@@ -4965,6 +4965,29 @@ pub(crate) mod test {
     }
 
     #[test]
+    fn test_taproot_sign_using_non_witness_utxo() {
+        let (wallet, _, prev_txid) = get_funded_wallet(get_test_tr_single_sig());
+        let addr = wallet.get_address(New).unwrap();
+        let mut builder = wallet.build_tx();
+        builder.drain_to(addr.script_pubkey()).drain_wallet();
+        let (mut psbt, _) = builder.finish().unwrap();
+
+        psbt.inputs[0].witness_utxo = None;
+        psbt.inputs[0].non_witness_utxo = wallet.database().get_raw_tx(&prev_txid).unwrap();
+        assert!(
+            psbt.inputs[0].non_witness_utxo.is_some(),
+            "Previous tx should be present in the database"
+        );
+
+        let result = wallet.sign(&mut psbt, Default::default());
+        assert!(result.is_ok(), "Signing should have worked");
+        assert!(
+            result.unwrap(),
+            "Should finalize the input since we can produce signatures"
+        );
+    }
+
+    #[test]
     fn test_taproot_foreign_utxo() {
         let (wallet1, _, _) = get_funded_wallet(get_test_wpkh());
         let (wallet2, _, _) = get_funded_wallet(get_test_tr_single_sig());
