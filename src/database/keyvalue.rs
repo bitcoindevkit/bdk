@@ -492,4 +492,44 @@ mod test {
     fn test_sync_time() {
         crate::database::test::test_sync_time(get_tree());
     }
+
+    #[test]
+    fn test_iter_raw_txs() {
+        crate::database::test::test_iter_raw_txs(get_tree());
+    }
+
+    #[test]
+    fn test_del_path_from_script_pubkey() {
+        crate::database::test::test_del_path_from_script_pubkey(get_tree());
+    }
+
+    #[test]
+    fn test_iter_script_pubkeys() {
+        crate::database::test::test_iter_script_pubkeys(get_tree());
+    }
+
+    #[test]
+    fn test_del_utxo() {
+        crate::database::test::test_del_utxo(get_tree());
+    }
+
+    #[test]
+    fn test_del_raw_tx() {
+        crate::database::test::test_del_raw_tx(get_tree());
+    }
+
+    #[test]
+    fn test_del_tx() {
+        crate::database::test::test_del_tx(get_tree());
+    }
+
+    #[test]
+    fn test_del_last_index() {
+        crate::database::test::test_del_last_index(get_tree());
+    }
+
+    #[test]
+    fn test_check_descriptor_checksum() {
+        crate::database::test::test_check_descriptor_checksum(get_tree());
+    }
 }

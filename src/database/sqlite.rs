@@ -744,11 +744,13 @@ impl BatchOperations for SqliteDatabase {
         include_raw: bool,
     ) -> Result<Option<TransactionDetails>, Error> {
         match self.select_transaction_details_by_txid(txid)? {
-            Some(transaction_details) => {
+            Some(mut transaction_details) => {
                 self.delete_transaction_details_by_txid(txid)?;
 
                 if include_raw {
                     self.delete_transaction_by_txid(txid)?;
+                } else {
+                    transaction_details.transaction = None;
                 }
                 Ok(Some(transaction_details))
             }
@@ -1035,5 +1037,45 @@ pub mod test {
     #[test]
     fn test_txs() {
         crate::database::test::test_list_transaction(get_database());
+    }
+
+    #[test]
+    fn test_iter_raw_txs() {
+        crate::database::test::test_iter_raw_txs(get_database());
+    }
+
+    #[test]
+    fn test_del_path_from_script_pubkey() {
+        crate::database::test::test_del_path_from_script_pubkey(get_database());
+    }
+
+    #[test]
+    fn test_iter_script_pubkeys() {
+        crate::database::test::test_iter_script_pubkeys(get_database());
+    }
+
+    #[test]
+    fn test_del_utxo() {
+        crate::database::test::test_del_utxo(get_database());
+    }
+
+    #[test]
+    fn test_del_raw_tx() {
+        crate::database::test::test_del_raw_tx(get_database());
+    }
+
+    #[test]
+    fn test_del_tx() {
+        crate::database::test::test_del_tx(get_database());
+    }
+
+    #[test]
+    fn test_del_last_index() {
+        crate::database::test::test_del_last_index(get_database());
+    }
+
+    #[test]
+    fn test_check_descriptor_checksum() {
+        crate::database::test::test_check_descriptor_checksum(get_database());
     }
 }
