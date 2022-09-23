@@ -52,6 +52,11 @@ static MIGRATIONS: &[&str] = &[
     "DELETE FROM transactions;",
     "DELETE FROM utxos;",
     "DROP INDEX idx_txid_vout;",
+    "CREATE UNIQUE INDEX idx_utxos_txid_vout ON utxos(txid, vout);",
+    "ALTER TABLE utxos RENAME TO utxos_old;",
+    "CREATE TABLE utxos (value INTEGER, keychain TEXT, vout INTEGER, txid BLOB, script BLOB, is_spent BOOLEAN DEFAULT 0);",
+    "INSERT INTO utxos SELECT value, keychain, vout, txid, script, is_spent FROM utxos_old;",
+    "DROP TABLE utxos_old;",
     "CREATE UNIQUE INDEX idx_utxos_txid_vout ON utxos(txid, vout);"
 ];
 
@@ -916,8 +921,8 @@ impl BatchDatabase for SqliteDatabase {
 }
 
 pub fn get_connection<T: AsRef<Path>>(path: &T) -> Result<Connection, Error> {
-    let connection = Connection::open(path)?;
-    migrate(&connection)?;
+    let mut connection = Connection::open(path)?;
+    migrate(&mut connection)?;
     Ok(connection)
 }
 
@@ -952,28 +957,41 @@ pub fn set_schema_version(conn: &Connection, version: i32) -> rusqlite::Result<u
     )
 }
 
-pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
+pub fn migrate(conn: &mut Connection) -> Result<(), Error> {
     let version = get_schema_version(conn)?;
     let stmts = &MIGRATIONS[(version as usize)..];
-    let mut i: i32 = version;
 
-    if version == MIGRATIONS.len() as i32 {
+    // begin transaction, all migration statements and new schema version commit or rollback
+    let tx = conn.transaction()?;
+
+    // execute every statement and return `Some` new schema version
+    // if execution fails, return `Error::Rusqlite`
+    // if no statements executed returns `None`
+    let new_version = stmts
+        .iter()
+        .enumerate()
+        .map(|version_stmt| {
+            log::info!(
+                "executing db migration {}: `{}`",
+                version + version_stmt.0 as i32 + 1,
+                version_stmt.1
+            );
+            tx.execute(version_stmt.1, [])
+                // map result value to next migration version
+                .map(|_| version_stmt.0 as i32 + version + 1)
+        })
+        .last()
+        .transpose()?;
+
+    // if `Some` new statement version, set new schema version
+    if let Some(version) = new_version {
+        set_schema_version(&tx, version)?;
+    } else {
         log::info!("db up to date, no migration needed");
-        return Ok(());
     }
 
-    for stmt in stmts {
-        let res = conn.execute(stmt, []);
-        if res.is_err() {
-            println!("migration failed on:\n{}\n{:?}", stmt, res);
-            break;
-        }
-
-        i += 1;
-    }
-
-    set_schema_version(conn, i)?;
-
+    // commit transaction
+    tx.commit()?;
     Ok(())
 }
 
