@@ -680,5 +680,135 @@ pub mod test {
         assert!(res.is_err());
     }
 
+    pub fn test_del_spent_utxos<D: Database>(mut db: D) {
+        // Query database for utxos, to prove that it is empty
+        assert_eq!(db.iter_utxos().unwrap().len(), 0);
+
+        let (first_utxo, _second_utxo, third_utxo, fourth_utxo) =
+            setup_del_spent_utxo_test(&mut db);
+        // test that insertion was successful
+        assert_eq!(db.iter_utxos().unwrap().len(), 4);
+
+        // call del_spent_utxos with None
+        let mut res = db.del_spent_utxos(None).unwrap();
+        res.sort_by(|a, b| a.txout.value.cmp(&b.txout.value));
+        // verify that the spent ones has been deleted
+        assert_eq!(
+            res,
+            vec![first_utxo.clone(), third_utxo.clone(), fourth_utxo.clone()]
+        );
+        assert_eq!(db.iter_utxos().unwrap().len(), 1);
+        // re-insert the deleted utxo into database
+        db.set_utxo(&first_utxo).unwrap();
+        db.set_utxo(&third_utxo).unwrap();
+        db.set_utxo(&fourth_utxo).unwrap();
+
+        // call del_spent_utxos with vector of utxos
+        let mut res = db
+            .del_spent_utxos(Some(vec![first_utxo.outpoint, third_utxo.outpoint]))
+            .unwrap();
+        res.sort_by(|a, b| a.txout.value.cmp(&b.txout.value));
+        assert_eq!(res, vec![first_utxo.clone(), third_utxo.clone()]);
+        let utxos = db.iter_utxos().unwrap();
+        assert_eq!(utxos.len(), 2);
+        assert!(utxos.contains(&fourth_utxo));
+    }
+
+    fn setup_del_spent_utxo_test<D: Database>(
+        db: &mut D,
+    ) -> (LocalUtxo, LocalUtxo, LocalUtxo, LocalUtxo) {
+        // insert four utxos into database
+        let first_outpoint = OutPoint::from_str(
+            "c1b4e695098210a31fe02abffe9005cffc051bbe86ff33e173155bcbdc5821e3:0",
+        )
+        .unwrap();
+        let first_script = Script::from(
+            Vec::<u8>::from_hex("76a914db4d1141d0048b1ed15839d0b7a4c488cd368b0e88ac").unwrap(),
+        );
+        let first_txout = TxOut {
+            value: 133742,
+            script_pubkey: first_script,
+        };
+        let first_utxo = LocalUtxo {
+            txout: first_txout,
+            outpoint: first_outpoint,
+            keychain: KeychainKind::External,
+            is_spent: true,
+        };
+
+        db.set_utxo(&first_utxo).unwrap();
+
+        let second_outpoint = OutPoint::from_str(
+            "fc9e4f9c334d55c1dc535bd691a1c159b0f7314c54745522257a905e18a56779:1",
+        )
+        .unwrap();
+
+        let second_script = Script::from(
+            Vec::<u8>::from_hex("76a914824d8a679134215d6d21d25bde3cc63f89ec92eb88ac").unwrap(),
+        );
+
+        let second_txout = TxOut {
+            value: 2257563,
+            script_pubkey: second_script,
+        };
+
+        let second_utxo = LocalUtxo {
+            txout: second_txout,
+            outpoint: second_outpoint,
+            keychain: KeychainKind::External,
+            is_spent: false,
+        };
+
+        db.set_utxo(&second_utxo).unwrap();
+
+        let third_outpoint = OutPoint::from_str(
+            "26e14e606105b250e64849cc14a484ce58f0f7f7064e662862001661b726427b:1",
+        )
+        .unwrap();
+
+        let third_script = Script::from(
+            Vec::<u8>::from_hex("76a9140d5a9a6f7aae31ebb3b72bbfd05935de5765e0e688ac").unwrap(),
+        );
+
+        let third_txout = TxOut {
+            value: 1119096,
+            script_pubkey: third_script,
+        };
+
+        let third_utxo = LocalUtxo {
+            txout: third_txout,
+            outpoint: third_outpoint,
+            keychain: KeychainKind::External,
+            is_spent: true,
+        };
+
+        db.set_utxo(&third_utxo).unwrap();
+
+        let fourth_outpoint = OutPoint::from_str(
+            "d27cff02d45817a11ac01d0d93a2e439f2d643b5d8bc57f4f7f56aa571104e8c:0",
+        )
+        .unwrap();
+
+        let fourth_script = Script::from(
+            Vec::<u8>::from_hex("76a914899490496bfd1228e7ad5b0e156f1fc50a8f6f7688ac").unwrap(),
+        );
+
+        let fourth_txout = TxOut {
+            value: 36662433,
+            script_pubkey: fourth_script,
+        };
+
+        let fourth_utxo = LocalUtxo {
+            txout: fourth_txout,
+            outpoint: fourth_outpoint,
+            keychain: KeychainKind::External,
+            is_spent: true,
+        };
+
+        db.set_utxo(&fourth_utxo).unwrap();
+
+        (first_utxo, second_utxo, third_utxo, fourth_utxo)
+    }
+
     // TODO: more tests...
 }
