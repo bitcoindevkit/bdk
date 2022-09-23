@@ -103,6 +103,7 @@ use miniscript::{Legacy, MiniscriptKey, Segwitv0, Tap};
 
 use super::utils::SecpCtx;
 use crate::descriptor::{DescriptorMeta, XKeyUtils};
+use crate::psbt::PsbtUtils;
 
 /// Identifier of a signer in the `SignersContainers`. Used as a key to find the right signer among
 /// multiple of them
@@ -921,11 +922,8 @@ impl ComputeSighash for Tap {
             .unwrap_or_else(|| SchnorrSighashType::Default.into())
             .schnorr_hash_ty()
             .map_err(|_| SignerError::InvalidSighash)?;
-        let witness_utxos = psbt
-            .inputs
-            .iter()
-            .cloned()
-            .map(|i| i.witness_utxo)
+        let witness_utxos = (0..psbt.inputs.len())
+            .map(|i| psbt.get_utxo_for(i))
             .collect::<Vec<_>>();
         let mut all_witness_utxos = vec![];
 
