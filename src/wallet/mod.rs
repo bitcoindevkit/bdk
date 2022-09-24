@@ -2077,6 +2077,10 @@ pub(crate) mod test {
         "tr(cNJmN3fH9DDbDt131fQNkVakkpzawJBSeybCUNmP1BovpmGQ45xG,{pk(tprv8ZgxMBicQKsPdDArR4xSAECuVxeX1jwwSXR4ApKbkYgZiziDc4LdBy2WvJeGDfUSE4UT4hHhbgEwbdq8ajjUHiKDegkwrNU6V55CxcxonVN/*),pk(8aee2b8120a5f157f1223f72b5e62b825831a27a9fdf427db7cc697494d4a642)})"
     }
 
+    pub(crate) fn get_test_tr_dup_keys() -> &'static str {
+        "tr(cNJmN3fH9DDbDt131fQNkVakkpzawJBSeybCUNmP1BovpmGQ45xG,{pk(8aee2b8120a5f157f1223f72b5e62b825831a27a9fdf427db7cc697494d4a642),pk(8aee2b8120a5f157f1223f72b5e62b825831a27a9fdf427db7cc697494d4a642)})"
+    }
+
     macro_rules! assert_fee_rate {
         ($psbt:expr, $fees:expr, $fee_rate:expr $( ,@dust_change $( $dust_change:expr )* )* $( ,@add_signature $( $add_signature:expr )* )* ) => ({
             let psbt = $psbt.clone();
@@ -5553,5 +5557,20 @@ pub(crate) mod test {
 
         let finalized = wallet.sign(&mut psbt, Default::default()).unwrap();
         assert!(finalized);
+    }
+
+    #[test]
+    fn test_taproot_load_descriptor_duplicated_keys() {
+        // Added after issue https://github.com/bitcoindevkit/bdk/issues/760
+        //
+        // Having the same key in multiple taproot leaves is safe and should be accepted by BDK
+
+        let (wallet, _, _) = get_funded_wallet(get_test_tr_dup_keys());
+        let addr = wallet.get_address(New).unwrap();
+
+        assert_eq!(
+            addr.to_string(),
+            "bcrt1pvysh4nmh85ysrkpwtrr8q8gdadhgdejpy6f9v424a8v9htjxjhyqw9c5s5"
+        );
     }
 }

@@ -14,7 +14,7 @@
 //! This module contains generic utilities to work with descriptors, plus some re-exported types
 //! from [`miniscript`].
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 use std::ops::Deref;
 
 use bitcoin::util::bip32::{ChildNumber, DerivationPath, ExtendedPubKey, Fingerprint, KeySource};
@@ -222,23 +222,9 @@ pub(crate) fn into_wallet_descriptor_checked<T: IntoWalletDescriptor>(
         return Err(DescriptorError::HardenedDerivationXpub);
     }
 
-    // Ensure that there are no duplicated keys
-    let mut found_keys = HashSet::new();
-    let descriptor_contains_duplicated_keys = descriptor.for_any_key(|k| {
-        if let DescriptorPublicKey::XPub(xkey) = k.as_key() {
-            let fingerprint = xkey.root_fingerprint(secp);
-            if found_keys.contains(&fingerprint) {
-                return true;
-            }
-
-            found_keys.insert(fingerprint);
-        }
-
-        false
-    });
-    if descriptor_contains_duplicated_keys {
-        return Err(DescriptorError::DuplicatedKeys);
-    }
+    // Run miniscript's sanity check, which will look for duplicated keys and other potential
+    // issues
+    descriptor.sanity_check()?;
 
     Ok((descriptor, keymap))
 }
@@ -923,14 +909,10 @@ mod test {
             DescriptorError::HardenedDerivationXpub
         ));
 
-        let descriptor = "wsh(multi(2,tpubD6NzVbkrYhZ4XHndKkuB8FifXm8r5FQHwrN6oZuWCz13qb93rtgKvD4PQsqC4HP4yhV3tA2fqr2RbY5mNXfM7RxXUoeABoDtsFUq2zJq6YK/0/*,tpubD6NzVbkrYhZ4XHndKkuB8FifXm8r5FQHwrN6oZuWCz13qb93rtgKvD4PQsqC4HP4yhV3tA2fqr2RbY5mNXfM7RxXUoeABoDtsFUq2zJq6YK/1/*))";
+        let descriptor = "wsh(multi(2,tpubD6NzVbkrYhZ4XHndKkuB8FifXm8r5FQHwrN6oZuWCz13qb93rtgKvD4PQsqC4HP4yhV3tA2fqr2RbY5mNXfM7RxXUoeABoDtsFUq2zJq6YK/0/*,tpubD6NzVbkrYhZ4XHndKkuB8FifXm8r5FQHwrN6oZuWCz13qb93rtgKvD4PQsqC4HP4yhV3tA2fqr2RbY5mNXfM7RxXUoeABoDtsFUq2zJq6YK/0/*))";
         let result = into_wallet_descriptor_checked(descriptor, &secp, Network::Testnet);
 
         assert!(result.is_err());
-        assert!(matches!(
-            result.unwrap_err(),
-            DescriptorError::DuplicatedKeys
-        ));
     }
 
     #[test]

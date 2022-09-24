@@ -20,8 +20,6 @@ pub enum Error {
     InvalidDescriptorChecksum,
     /// The descriptor contains hardened derivation steps on public extended keys
     HardenedDerivationXpub,
-    /// The descriptor contains multiple keys with the same BIP32 fingerprint
-    DuplicatedKeys,
 
     /// Error thrown while working with [`keys`](crate::keys)
     Key(crate::keys::KeyError),
