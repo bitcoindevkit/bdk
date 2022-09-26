@@ -21,9 +21,9 @@ assignees: ''
 
 <--add notices from PRs merged since the prior release, see ["keep a changelog"]-->
 
-### Checklist  
+### Checklist
 
-Release numbering must follow [Semantic Versioning]. These steps assume the current `master` 
+Release numbering must follow [Semantic Versioning]. These steps assume the current `master`
 branch **development** version is *MAJOR.MINOR.PATCH*.
 
 ### On the day of the patch release
@@ -43,6 +43,9 @@ Cherry-pick, tag and publish new PATCH+1 release:
 - [ ] Merge fix PRs to the `master` branch.
 - [ ] Git cherry-pick fix commits to the `release/MAJOR.MINOR` branch to be patched.
 - [ ] Verify fixes in `release/MAJOR.MINOR` branch.
+- [ ] Bump the `release/MAJOR.MINOR.PATCH+1` branch to `MAJOR.MINOR.PATCH+1` version.
+  - Change the `Cargo.toml` version value to `MAJOR.MINOR.MINOR.PATCH+1`.
+  - The commit message should be "Bump version to MAJOR.MINOR.PATCH+1".
 - [ ] Add a tag to the `HEAD` commit in the `release/MAJOR.MINOR` branch.
   - The tag name should be `vMAJOR.MINOR.PATCH+1`
   - The first line of the tag message should be "Release MAJOR.MINOR.PATCH+1".
