@@ -11,7 +11,6 @@
 
 extern crate bdk;
 extern crate bitcoin;
-extern crate clap;
 extern crate log;
 extern crate miniscript;
 extern crate serde_json;
@@ -21,8 +20,6 @@ use std::str::FromStr;
 
 use log::info;
 
-use clap::{App, Arg};
-
 use bitcoin::Network;
 use miniscript::policy::Concrete;
 use miniscript::Descriptor;
@@ -31,75 +28,49 @@ use bdk::database::memory::MemoryDatabase;
 use bdk::wallet::AddressIndex::New;
 use bdk::{KeychainKind, Wallet};
 
+/// Miniscript policy is a high level abstraction of spending conditions. Defined in the
+/// rust-miscript library here  https://docs.rs/miniscript/7.0.0/miniscript/policy/index.html
+/// rust-miniscript provides a `compile()` function that can be used to compile any miniscript policy
+/// into a descriptor. This descriptor then in turn can be used in bdk a fully functioning wallet
+/// can be derived from the policy.
+///
+/// This example demonstrates the interaction between a bdk wallet and miniscript policy.
+
 fn main() -> Result<(), Box<dyn Error>> {
     env_logger::init_from_env(
         env_logger::Env::default().filter_or(env_logger::DEFAULT_FILTER_ENV, "info"),
     );
 
-    let matches = App::new("Miniscript Compiler")
-        .arg(
-            Arg::with_name("POLICY")
-                .help("Sets the spending policy to compile")
-                .required(true)
-                .index(1),
-        )
-        .arg(
-            Arg::with_name("TYPE")
-                .help("Sets the script type used to embed the compiled policy")
-                .required(true)
-                .index(2)
-                .possible_values(&["sh", "wsh", "sh-wsh"]),
-        )
-        .arg(
-            Arg::with_name("parsed_policy")
-                .long("parsed_policy")
-                .short("p")
-                .help("Also return the parsed spending policy in JSON format"),
-        )
-        .arg(
-            Arg::with_name("network")
-                .short("n")
-                .long("network")
-                .help("Sets the network")
-                .takes_value(true)
-                .default_value("testnet")
-                .possible_values(&["testnet", "regtest", "bitcoin", "signet"]),
-        )
-        .get_matches();
+    // We start with a generic miniscript policy string
+    let policy_str = "or(10@thresh(4,pk(029ffbe722b147f3035c87cb1c60b9a5947dd49c774cc31e94773478711a929ac0),pk(025f05815e3a1a8a83bfbb03ce016c9a2ee31066b98f567f6227df1d76ec4bd143),pk(025625f41e4a065efc06d5019cbbd56fe8c07595af1231e7cbc03fafb87ebb71ec),pk(02a27c8b850a00f67da3499b60562673dcf5fdfb82b7e17652a7ac54416812aefd),pk(03e618ec5f384d6e19ca9ebdb8e2119e5bef978285076828ce054e55c4daf473e2)),1@and(older(4209713),thresh(2,pk(03deae92101c790b12653231439f27b8897264125ecb2f46f48278603102573165),pk(033841045a531e1adf9910a6ec279589a90b3b8a904ee64ffd692bd08a8996c1aa),pk(02aebf2d10b040eb936a6f02f44ee82f8b34f5c1ccb20ff3949c2b28206b7c1068))))";
+    info!("Compiling policy: \n{}", policy_str);
 
-    let policy_str = matches.value_of("POLICY").unwrap();
-    info!("Compiling policy: {}", policy_str);
-
+    // Parse the string as a [`Concrete`] type miniscript policy.
     let policy = Concrete::<String>::from_str(policy_str)?;
 
-    let descriptor = match matches.value_of("TYPE").unwrap() {
-        "sh" => Descriptor::new_sh(policy.compile()?)?,
-        "wsh" => Descriptor::new_wsh(policy.compile()?)?,
-        "sh-wsh" => Descriptor::new_sh_wsh(policy.compile()?)?,
-        _ => panic!("Invalid type"),
-    };
+    // Create a `wsh` type descriptor from the policy.
+    // `policy.compile()` returns the resulting miniscript from the policy.
+    let descriptor = Descriptor::new_wsh(policy.compile()?)?;
 
-    info!("... Descriptor: {}", descriptor);
+    info!("Compiled into following Descriptor: \n{}", descriptor);
 
     let database = MemoryDatabase::new();
 
-    let network = matches
-        .value_of("network")
-        .map(Network::from_str)
-        .transpose()
-        .unwrap()
-        .unwrap_or(Network::Testnet);
-    let wallet = Wallet::new(&format!("{}", descriptor), None, network, database)?;
+    // Create a new wallet from this descriptor
+    let wallet = Wallet::new(&format!("{}", descriptor), None, Network::Regtest, database)?;
 
-    info!("... First address: {}", wallet.get_address(New)?);
+    info!(
+        "First derived address from the descriptor: \n{}",
+        wallet.get_address(New)?
+    );
 
-    if matches.is_present("parsed_policy") {
-        let spending_policy = wallet.policies(KeychainKind::External)?;
-        info!(
-            "... Spending policy:\n{}",
-            serde_json::to_string_pretty(&spending_policy)?
-        );
-    }
+    // BDK also has it's own `Policy` structure to represent the spending condition in a more
+    // human readable json format.
+    let spending_policy = wallet.policies(KeychainKind::External)?;
+    info!(
+        "The BDK spending policy: \n{}",
+        serde_json::to_string_pretty(&spending_policy)?
+    );
 
     Ok(())
 }
