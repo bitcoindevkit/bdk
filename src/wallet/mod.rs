@@ -1842,7 +1842,7 @@ where
             .to_string()
             .split_once('#')
             .unwrap()
-            .0
+            .1
             .to_string()
     }
 }
@@ -1937,6 +1937,22 @@ pub(crate) mod test {
     // Here, we push just once for simplicity, so we have to add an extra byte for the missing
     // OP_PUSH.
     const P2WPKH_FAKE_WITNESS_SIZE: usize = 106;
+
+    #[test]
+    fn test_descriptor_checksum() {
+        let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
+        let checksum = wallet.descriptor_checksum(KeychainKind::External);
+        assert_eq!(checksum.len(), 8);
+
+        let raw_descriptor = wallet
+            .descriptor
+            .to_string()
+            .split_once('#')
+            .unwrap()
+            .0
+            .to_string();
+        assert_eq!(get_checksum(&raw_descriptor).unwrap(), checksum);
+    }
 
     #[test]
     fn test_get_funded_wallet_balance() {
