@@ -20,16 +20,16 @@
 
 pub use esplora_client::Error as EsploraError;
 
-#[cfg(feature = "use-esplora-reqwest")]
+#[cfg(feature = "use-esplora-async")]
 mod reqwest;
 
-#[cfg(feature = "use-esplora-reqwest")]
+#[cfg(feature = "use-esplora-async")]
 pub use self::reqwest::*;
 
-#[cfg(feature = "use-esplora-ureq")]
+#[cfg(feature = "use-esplora-blocking")]
 mod ureq;
 
-#[cfg(feature = "use-esplora-ureq")]
+#[cfg(feature = "use-esplora-blocking")]
 pub use self::ureq::*;
 
 /// Configuration for an [`EsploraBlockchain`]
