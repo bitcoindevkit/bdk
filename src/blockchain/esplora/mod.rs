@@ -15,22 +15,22 @@
 //! depending on your needs (blocking or async respectively).
 //!
 //! Please note, to configure the Esplora HTTP client correctly use one of:
-//! Blocking:  --features='esplora,ureq'
-//! Async:     --features='async-interface,esplora,reqwest' --no-default-features
+//! Blocking:  --features='use-esplora-blocking'
+//! Async:     --features='async-interface,use-esplora-async' --no-default-features
 
 pub use esplora_client::Error as EsploraError;
 
 #[cfg(feature = "use-esplora-async")]
-mod reqwest;
+mod r#async;
 
 #[cfg(feature = "use-esplora-async")]
-pub use self::reqwest::*;
+pub use self::r#async::*;
 
 #[cfg(feature = "use-esplora-blocking")]
-mod ureq;
+mod blocking;
 
 #[cfg(feature = "use-esplora-blocking")]
-pub use self::ureq::*;
+pub use self::blocking::*;
 
 /// Configuration for an [`EsploraBlockchain`]
 #[derive(Debug, serde::Deserialize, serde::Serialize, Clone, PartialEq)]
