@@ -455,7 +455,7 @@ macro_rules! bdk_blockchain_tests {
                 assert!(wallet.database().deref().get_sync_time().unwrap().is_some(), "sync_time hasn't been updated");
 
                 assert_eq!(wallet.get_balance().unwrap().untrusted_pending, 50_000, "incorrect balance");
-                assert_eq!(wallet.list_unspent().unwrap()[0].keychain, KeychainKind::External, "incorrect keychain kind");
+                assert_eq!(wallet.iter_unspent().unwrap().next().unwrap().keychain, KeychainKind::External, "incorrect keychain kind");
 
                 let list_tx_item = &wallet.list_transactions(false).unwrap()[0];
                 assert_eq!(list_tx_item.txid, txid, "incorrect txid");
@@ -518,7 +518,7 @@ macro_rules! bdk_blockchain_tests {
 
                 assert_eq!(wallet.get_balance().unwrap().untrusted_pending, 105_000, "incorrect balance");
                 assert_eq!(wallet.list_transactions(false).unwrap().len(), 1, "incorrect number of txs");
-                assert_eq!(wallet.list_unspent().unwrap().len(), 3, "incorrect number of unspents");
+                assert_eq!(wallet.iter_unspent().unwrap().count(), 3, "incorrect number of unspents");
 
                 let list_tx_item = &wallet.list_transactions(false).unwrap()[0];
                 assert_eq!(list_tx_item.txid, txid, "incorrect txid");
@@ -542,7 +542,7 @@ macro_rules! bdk_blockchain_tests {
 
                 assert_eq!(wallet.get_balance().unwrap().untrusted_pending, 75_000, "incorrect balance");
                 assert_eq!(wallet.list_transactions(false).unwrap().len(), 2, "incorrect number of txs");
-                assert_eq!(wallet.list_unspent().unwrap().len(), 2, "incorrect number of unspent");
+                assert_eq!(wallet.iter_unspent().unwrap().count(), 2, "incorrect number of unspent");
             }
 
             #[test]
@@ -576,7 +576,7 @@ macro_rules! bdk_blockchain_tests {
 
                 assert_eq!(wallet.get_balance().unwrap().untrusted_pending, 50_000, "incorrect balance");
                 assert_eq!(wallet.list_transactions(false).unwrap().len(), 1, "incorrect number of txs");
-                assert_eq!(wallet.list_unspent().unwrap().len(), 1, "incorrect unspent");
+                assert_eq!(wallet.iter_unspent().unwrap().count(), 1, "incorrect unspent");
 
                 let list_tx_item = &wallet.list_transactions(false).unwrap()[0];
                 assert_eq!(list_tx_item.txid, txid, "incorrect txid");
@@ -590,7 +590,7 @@ macro_rules! bdk_blockchain_tests {
 
                 assert_eq!(wallet.get_balance().unwrap().untrusted_pending, 50_000, "incorrect balance after bump");
                 assert_eq!(wallet.list_transactions(false).unwrap().len(), 1, "incorrect number of txs after bump");
-                assert_eq!(wallet.list_unspent().unwrap().len(), 1, "incorrect unspent after bump");
+                assert_eq!(wallet.iter_unspent().unwrap().count(), 1, "incorrect unspent after bump");
 
                 let list_tx_item = &wallet.list_transactions(false).unwrap()[0];
                 assert_eq!(list_tx_item.txid, new_txid, "incorrect txid after bump");
@@ -613,7 +613,7 @@ macro_rules! bdk_blockchain_tests {
                 wallet.sync(&blockchain, SyncOptions::default()).unwrap();
                 assert_eq!(wallet.get_balance().unwrap().get_spendable(), 50_000, "incorrect balance");
                 assert_eq!(wallet.list_transactions(false).unwrap().len(), 1, "incorrect number of txs");
-                assert_eq!(wallet.list_unspent().unwrap().len(), 1, "incorrect number of unspents");
+                assert_eq!(wallet.iter_unspent().unwrap().count(), 1, "incorrect number of unspents");
 
                 let list_tx_item = &wallet.list_transactions(false).unwrap()[0];
                 assert_eq!(list_tx_item.txid, txid, "incorrect txid");
@@ -661,7 +661,7 @@ macro_rules! bdk_blockchain_tests {
                 assert_eq!(wallet.get_balance().unwrap().confirmed, details.received, "incorrect balance after send");
 
                 assert_eq!(wallet.list_transactions(false).unwrap().len(), 2, "incorrect number of txs");
-                assert_eq!(wallet.list_unspent().unwrap().len(), 1, "incorrect number of unspents");
+                assert_eq!(wallet.iter_unspent().unwrap().count(), 1, "incorrect number of unspents");
             }
 
             // Syncing wallet should not result in wallet address index to decrement.
@@ -1178,7 +1178,7 @@ macro_rules! bdk_blockchain_tests {
                 wallet.sync(&blockchain, SyncOptions::default()).unwrap();
                 assert_eq!(wallet.get_balance().unwrap().get_spendable(), details.received, "wallet has incorrect balance after send");
                 assert_eq!(wallet.list_transactions(false).unwrap().len(), 2, "wallet has incorrect number of txs");
-                assert_eq!(wallet.list_unspent().unwrap().len(), 1, "wallet has incorrect number of unspents");
+                assert_eq!(wallet.iter_unspent().unwrap().count(), 1, "wallet has incorrect number of unspents");
                 test_client.generate(1, None);
 
                 // 5. Verify 25_000 sats are received by test bitcoind node taproot wallet
@@ -1249,7 +1249,7 @@ macro_rules! bdk_blockchain_tests {
                 let initial_tx = psbt.extract_tx();
                 let _sent_txid = blockchain.broadcast(&initial_tx).unwrap();
                 wallet.sync(&blockchain, SyncOptions::default()).unwrap();
-                for utxo in wallet.list_unspent().unwrap() {
+                for utxo in wallet.iter_unspent().unwrap() {
                     // Making sure the TXO we just spent is not returned by list_unspent
                     assert!(utxo.outpoint != initial_tx.input[0].previous_output, "wallet displays spent txo in unspents");
                 }
@@ -1265,7 +1265,7 @@ macro_rules! bdk_blockchain_tests {
                 builder
                     .add_utxo(initial_tx.input[0].previous_output)
                     .expect("Can't manually add an UTXO spent");
-                for utxo in wallet.list_unspent().unwrap() {
+                for utxo in wallet.iter_unspent().unwrap() {
                     // Making sure the TXO we just spent is not returned by list_unspent
                     assert!(utxo.outpoint != initial_tx.input[0].previous_output, "wallet displays spent txo in unspents");
                 }
