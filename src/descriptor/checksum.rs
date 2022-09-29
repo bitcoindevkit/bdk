@@ -41,11 +41,20 @@ fn poly_mod(mut c: u64, val: u64) -> u64 {
     c
 }
 
-/// Computes the checksum bytes of a descriptor
-pub fn get_checksum_bytes(desc: &str) -> Result<[u8; 8], DescriptorError> {
+/// Computes the checksum bytes of a descriptor.
+/// `exclude_hash = true` ignores all data after the first '#' (inclusive).
+pub fn get_checksum_bytes(mut desc: &str, exclude_hash: bool) -> Result<[u8; 8], DescriptorError> {
     let mut c = 1;
     let mut cls = 0;
     let mut clscount = 0;
+
+    let mut original_checksum = None;
+    if exclude_hash {
+        if let Some(split) = desc.split_once('#') {
+            desc = split.0;
+            original_checksum = Some(split.1);
+        }
+    }
 
     for ch in desc.as_bytes() {
         let pos = INPUT_CHARSET
@@ -72,13 +81,20 @@ pub fn get_checksum_bytes(desc: &str) -> Result<[u8; 8], DescriptorError> {
         checksum[j] = CHECKSUM_CHARSET[((c >> (5 * (7 - j))) & 31) as usize];
     }
 
+    // if input data already had a checksum, check calculated checksum against original checksum
+    if let Some(original_checksum) = original_checksum {
+        if original_checksum.as_bytes() != &checksum {
+            return Err(DescriptorError::InvalidDescriptorChecksum);
+        }
+    }
+
     Ok(checksum)
 }
 
 /// Compute the checksum of a descriptor
 pub fn get_checksum(desc: &str) -> Result<String, DescriptorError> {
     // unsafe is okay here as the checksum only uses bytes in `CHECKSUM_CHARSET`
-    get_checksum_bytes(desc).map(|b| unsafe { String::from_utf8_unchecked(b.to_vec()) })
+    get_checksum_bytes(desc, true).map(|b| unsafe { String::from_utf8_unchecked(b.to_vec()) })
 }
 
 #[cfg(test)]
