@@ -605,7 +605,7 @@ where
         }
     }
 
-    pub(crate) fn create_tx<Cs: coin_selection::CoinSelectionAlgorithm<D>>(
+    pub(crate) fn create_tx<Cs: coin_selection::CoinSelectionAlgorithm>(
         &self,
         coin_selection: Cs,
         params: TxParams,
@@ -853,7 +853,6 @@ where
         };
 
         let coin_selection = coin_selection.coin_select(
-            self.database.borrow().deref(),
             required_utxos,
             optional_utxos,
             fee_rate,

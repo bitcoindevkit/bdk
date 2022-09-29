@@ -181,7 +181,7 @@ impl<'a, Cs: Clone, Ctx, D> Clone for TxBuilder<'a, D, Cs, Ctx> {
 }
 
 // methods supported by both contexts, for any CoinSelectionAlgorithm
-impl<'a, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderContext>
+impl<'a, D: BatchDatabase, Cs: CoinSelectionAlgorithm, Ctx: TxBuilderContext>
     TxBuilder<'a, D, Cs, Ctx>
 {
     /// Set a custom fee rate
@@ -505,7 +505,7 @@ impl<'a, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderContext>
     /// Overrides the [`DefaultCoinSelectionAlgorithm`](super::coin_selection::DefaultCoinSelectionAlgorithm).
     ///
     /// Note that this function consumes the builder and returns it so it is usually best to put this as the first call on the builder.
-    pub fn coin_selection<P: CoinSelectionAlgorithm<D>>(
+    pub fn coin_selection<P: CoinSelectionAlgorithm>(
         self,
         coin_selection: P,
     ) -> TxBuilder<'a, D, P, Ctx> {
@@ -571,7 +571,7 @@ impl<'a, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderContext>
     }
 }
 
-impl<'a, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>> TxBuilder<'a, D, Cs, CreateTx> {
+impl<'a, D: BatchDatabase, Cs: CoinSelectionAlgorithm> TxBuilder<'a, D, Cs, CreateTx> {
     /// Replace the recipients already added with a new list
     pub fn set_recipients(&mut self, recipients: Vec<(Script, u64)>) -> &mut Self {
         self.params.recipients = recipients;
