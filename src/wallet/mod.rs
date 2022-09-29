@@ -411,14 +411,22 @@ where
     ///
     /// Note that this method only operates on the internal database, which first needs to be
     /// [`Wallet::sync`] manually.
+    #[deprecated = "Use Wallet::iter_unspent"]
     pub fn list_unspent(&self) -> Result<Vec<LocalUtxo>, Error> {
+        self.iter_unspent().map(|iter| iter.collect())
+    }
+
+    /// Returns an iterator of unspent outputs (UTXOs) of this wallet.
+    ///
+    /// Note that this method only operates on the internal database, which first needs to be
+    /// [`Wallet::sync`] manually.
+    pub fn iter_unspent(&self) -> Result<impl Iterator<Item = LocalUtxo> + '_, Error> {
         Ok(self
             .database
             .borrow()
             .iter_utxos()?
             .into_iter()
-            .filter(|l| !l.is_spent)
-            .collect())
+            .filter(|l| !l.is_spent))
     }
 
     /// Returns the `UTXO` owned by this wallet corresponding to `outpoint` if it exists in the
@@ -474,7 +482,7 @@ where
         let mut trusted_pending = 0;
         let mut untrusted_pending = 0;
         let mut confirmed = 0;
-        let utxos = self.list_unspent()?;
+
         let database = self.database.borrow();
         let last_sync_height = match database
             .get_sync_time()?
@@ -484,7 +492,7 @@ where
             // None means database was never synced
             None => return Ok(Balance::default()),
         };
-        for u in utxos {
+        for u in self.iter_unspent()? {
             // Unwrap used since utxo set is created from database
             let tx = database
                 .get_tx(&u.outpoint.txid, true)?
@@ -1427,8 +1435,7 @@ where
 
     fn get_available_utxos(&self) -> Result<Vec<(LocalUtxo, usize)>, Error> {
         Ok(self
-            .list_unspent()?
-            .into_iter()
+            .iter_unspent()?
             .map(|utxo| {
                 let keychain = utxo.keychain;
                 (
@@ -3017,7 +3024,7 @@ pub(crate) mod test {
             get_funded_wallet("wpkh(cVbZ8ovhye9AoAHFsqobCf7LxbXDAECy9Kb8TZdfsDYMZGBUyCnm)");
 
         let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
-        let utxo = wallet2.list_unspent().unwrap().remove(0);
+        let utxo = wallet2.iter_unspent().unwrap().next().unwrap();
         let foreign_utxo_satisfaction = wallet2
             .get_descriptor_for_keychain(KeychainKind::External)
             .max_satisfaction_weight()
@@ -3082,7 +3089,7 @@ pub(crate) mod test {
     fn test_add_foreign_utxo_invalid_psbt_input() {
         let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
         let mut builder = wallet.build_tx();
-        let outpoint = wallet.list_unspent().unwrap()[0].outpoint;
+        let outpoint = wallet.iter_unspent().unwrap().next().unwrap().outpoint;
         let foreign_utxo_satisfaction = wallet
             .get_descriptor_for_keychain(KeychainKind::External)
             .max_satisfaction_weight()
@@ -3098,7 +3105,7 @@ pub(crate) mod test {
         let (wallet2, _, txid2) =
             get_funded_wallet("wpkh(cVbZ8ovhye9AoAHFsqobCf7LxbXDAECy9Kb8TZdfsDYMZGBUyCnm)");
 
-        let utxo2 = wallet2.list_unspent().unwrap().remove(0);
+        let utxo2 = wallet2.iter_unspent().unwrap().next().unwrap();
         let tx1 = wallet1
             .database
             .borrow()
@@ -3156,7 +3163,7 @@ pub(crate) mod test {
         let (wallet2, _, txid2) =
             get_funded_wallet("wpkh(cVbZ8ovhye9AoAHFsqobCf7LxbXDAECy9Kb8TZdfsDYMZGBUyCnm)");
         let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
-        let utxo2 = wallet2.list_unspent().unwrap().remove(0);
+        let utxo2 = wallet2.iter_unspent().unwrap().next().unwrap();
 
         let satisfaction_weight = wallet2
             .get_descriptor_for_keychain(KeychainKind::External)
@@ -3225,7 +3232,7 @@ pub(crate) mod test {
     fn test_get_psbt_input() {
         // this should grab a known good utxo and set the input
         let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
-        for utxo in wallet.list_unspent().unwrap() {
+        for utxo in wallet.iter_unspent().unwrap() {
             let psbt_input = wallet.get_psbt_input(utxo, None, false).unwrap();
             assert!(psbt_input.witness_utxo.is_some() || psbt_input.non_witness_utxo.is_some());
         }
@@ -5020,7 +5027,7 @@ pub(crate) mod test {
         let (wallet2, _, _) = get_funded_wallet(get_test_tr_single_sig());
 
         let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
-        let utxo = wallet2.list_unspent().unwrap().remove(0);
+        let utxo = wallet2.iter_unspent().unwrap().next().unwrap();
         let psbt_input = wallet2.get_psbt_input(utxo.clone(), None, false).unwrap();
         let foreign_utxo_satisfaction = wallet2
             .get_descriptor_for_keychain(KeychainKind::External)
