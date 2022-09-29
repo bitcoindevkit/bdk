@@ -88,7 +88,7 @@ impl IntoWalletDescriptor for &str {
         let descriptor = match self.split_once('#') {
             Some((desc, original_checksum)) => {
                 let checksum = get_checksum_bytes(desc, false)?;
-                if original_checksum.as_bytes() != &checksum {
+                if original_checksum.as_bytes() != checksum {
                     return Err(DescriptorError::InvalidDescriptorChecksum);
                 }
                 desc
