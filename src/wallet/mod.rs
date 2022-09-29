@@ -1957,15 +1957,10 @@ pub(crate) mod test {
         let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
         let checksum = wallet.descriptor_checksum(KeychainKind::External);
         assert_eq!(checksum.len(), 8);
-
-        let raw_descriptor = wallet
-            .descriptor
-            .to_string()
-            .split_once('#')
-            .unwrap()
-            .0
-            .to_string();
-        assert_eq!(get_checksum(&raw_descriptor).unwrap(), checksum);
+        assert_eq!(
+            get_checksum(&wallet.descriptor.to_string()).unwrap(),
+            checksum
+        );
     }
 
     #[test]
