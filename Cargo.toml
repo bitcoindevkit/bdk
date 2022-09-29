@@ -23,10 +23,9 @@ rand = "^0.7"
 # Optional dependencies
 sled = { version = "0.34", optional = true }
 electrum-client = { version = "0.11", optional = true }
+esplora-client = { version = "0.1.1", default-features = false, optional = true }
 rusqlite = { version = "0.27.0", optional = true }
 ahash = { version = "0.7.6", optional = true }
-reqwest = { version = "0.11", optional = true, default-features = false, features = ["json"] }
-ureq = { version = "~2.2.0", features = ["json"], optional = true }
 futures = { version = "0.3", optional = true }
 async-trait = { version = "0.1", optional = true }
 rocksdb = { version = "0.14", default-features = false, features = ["snappy"], optional = true }
@@ -69,23 +68,26 @@ hardware-signer = ["hwi"]
 #
 # - Users wanting asynchronous HTTP calls should enable `async-interface` to get
 #   access to the asynchronous method implementations. Then, if Esplora is wanted,
-#   enable `esplora` AND `reqwest` (`--features=use-esplora-reqwest`).
+#   enable the `use-esplora-async` feature.
 # - Users wanting blocking HTTP calls can use any of the other blockchain
 #   implementations (`compact_filters`, `electrum`, or `esplora`). Users wanting to
-#   use Esplora should enable `esplora` AND `ureq`  (`--features=use-esplora-ureq`).
+#   use Esplora should enable the `use-esplora-blocking` feature.
 #
 # WARNING: Please take care with the features below, various combinations will
 # fail to build. We cannot currently build `bdk` with `--all-features`.
 async-interface = ["async-trait"]
 electrum = ["electrum-client"]
 # MUST ALSO USE `--no-default-features`.
-use-esplora-reqwest = ["esplora", "reqwest", "reqwest/socks", "futures"]
-use-esplora-ureq = ["esplora", "ureq", "ureq/socks"]
+use-esplora-async = ["esplora", "esplora-client/async", "futures"]
+use-esplora-blocking = ["esplora", "esplora-client/blocking"]
+# Deprecated aliases
+use-esplora-reqwest = ["use-esplora-async"]
+use-esplora-ureq = ["use-esplora-blocking"]
 # Typical configurations will not need to use `esplora` feature directly.
 esplora = []
 
-# Use below feature with `use-esplora-reqwest` to enable reqwest default TLS support
-reqwest-default-tls = ["reqwest/default-tls"]
+# Use below feature with `use-esplora-async` to enable reqwest default TLS support
+reqwest-default-tls = ["esplora-client/async-https"]
 
 # Debug/Test features
 test-blockchains = ["bitcoincore-rpc", "electrum-client"]
@@ -129,6 +131,6 @@ required-features = ["electrum"]
 [workspace]
 members = ["macros"]
 [package.metadata.docs.rs]
-features = ["compiler", "electrum", "esplora", "use-esplora-ureq", "compact_filters", "rpc", "key-value-db", "sqlite", "all-keys", "verify", "hardware-signer"]
+features = ["compiler", "electrum", "esplora", "use-esplora-blocking", "compact_filters", "rpc", "key-value-db", "sqlite", "all-keys", "verify", "hardware-signer"]
 # defines the configuration attribute `docsrs`
 rustdoc-args = ["--cfg", "docsrs"]
