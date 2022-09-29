@@ -83,7 +83,7 @@ pub fn get_checksum_bytes(mut desc: &str, exclude_hash: bool) -> Result<[u8; 8],
 
     // if input data already had a checksum, check calculated checksum against original checksum
     if let Some(original_checksum) = original_checksum {
-        if original_checksum.as_bytes() != &checksum {
+        if original_checksum.as_bytes() != checksum {
             return Err(DescriptorError::InvalidDescriptorChecksum);
         }
     }
