@@ -38,6 +38,7 @@ use miniscript::ToPublicKey;
 use log::{debug, error, info, trace};
 
 pub mod address_validator;
+pub mod coin_control;
 pub mod coin_selection;
 pub mod export;
 pub mod signer;
@@ -78,6 +79,8 @@ use crate::signer::SignerError;
 use crate::testutils;
 use crate::types::*;
 use crate::wallet::coin_selection::Excess::{Change, NoChange};
+
+use self::coin_control::CoinFilterParams;
 
 const CACHE_ADDR_BATCH_SIZE: u32 = 100;
 const COINBASE_MATURITY: u32 = 100;
@@ -1462,6 +1465,22 @@ where
             .collect())
     }
 
+    /// Yes, we can!
+    pub fn available_utxos(
+        &self,
+        params: CoinFilterParams,
+    ) -> Result<impl Iterator<Item = LocalUtxo> + '_, Error> {
+        let db = self.database.borrow();
+
+        Ok(self.iter_unspent()?.filter(move |utxo| {
+            if let Ok(Some(tx)) = db.get_tx(&utxo.outpoint.txid, true) {
+                params.keep(&tx, &utxo.outpoint)
+            } else {
+                false
+            }
+        }))
+    }
+
     /// Given the options returns the list of utxos that must be used to form the
     /// transaction and any further that may be used if needed.
     #[allow(clippy::type_complexity)]
@@ -1472,7 +1491,7 @@ where
         unspendable: &HashSet<OutPoint>,
         manually_selected: Vec<WeightedUtxo>,
         must_use_all_available: bool,
-        manual_only: bool,
+        manual_only: bool, // We can just manually call `CoinSelector::select`, then `CoinSelector::finish`
         must_only_use_confirmed_tx: bool,
         current_height: Option<u32>,
     ) -> Result<(Vec<WeightedUtxo>, Vec<WeightedUtxo>), Error> {
