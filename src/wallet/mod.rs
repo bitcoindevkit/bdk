@@ -37,7 +37,6 @@ use miniscript::ToPublicKey;
 #[allow(unused_imports)]
 use log::{debug, error, info, trace};
 
-pub mod address_validator;
 pub mod coin_selection;
 pub mod export;
 pub mod signer;
@@ -54,8 +53,6 @@ pub mod hardwaresigner;
 
 pub use utils::IsDust;
 
-#[allow(deprecated)]
-use address_validator::AddressValidator;
 use coin_selection::DefaultCoinSelectionAlgorithm;
 use signer::{SignOptions, SignerOrdering, SignersContainer, TransactionSigner};
 use tx_builder::{BumpFee, CreateTx, FeePolicy, TxBuilder, TxParams};
@@ -99,9 +96,6 @@ pub struct Wallet<D> {
 
     signers: Arc<SignersContainer>,
     change_signers: Arc<SignersContainer>,
-
-    #[allow(deprecated)]
-    address_validators: Vec<Arc<dyn AddressValidator>>,
 
     network: Network,
 
@@ -236,7 +230,6 @@ where
             change_descriptor,
             signers,
             change_signers,
-            address_validators: Vec::new(),
             network,
             database: RefCell::new(database),
             secp,
@@ -550,24 +543,6 @@ where
             KeychainKind::External => Arc::clone(&self.signers),
             KeychainKind::Internal => Arc::clone(&self.change_signers),
         }
-    }
-
-    /// Add an address validator
-    ///
-    /// See [the `address_validator` module](address_validator) for an example.
-    #[deprecated]
-    #[allow(deprecated)]
-    pub fn add_address_validator(&mut self, validator: Arc<dyn AddressValidator>) {
-        self.address_validators.push(validator);
-    }
-
-    /// Get the address validators
-    ///
-    /// See [the `address_validator` module](address_validator).
-    #[deprecated]
-    #[allow(deprecated)]
-    pub fn get_address_validators(&self) -> &[Arc<dyn AddressValidator>] {
-        &self.address_validators
     }
 
     /// Start building a transaction.
@@ -1346,16 +1321,6 @@ where
             .is_none()
         {
             self.cache_addresses(keychain, index, CACHE_ADDR_BATCH_SIZE)?;
-        }
-
-        let derived_descriptor = descriptor.as_derived(index, &self.secp);
-
-        let hd_keypaths = derived_descriptor.get_hd_keypaths(&self.secp);
-        let script = derived_descriptor.script_pubkey();
-
-        for validator in &self.address_validators {
-            #[allow(deprecated)]
-            validator.validate(keychain, &hd_keypaths, &script)?;
         }
 
         Ok(index)

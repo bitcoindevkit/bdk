@@ -273,7 +273,6 @@ pub use descriptor::template;
 pub use descriptor::HdKeyPaths;
 pub use error::Error;
 pub use types::*;
-pub use wallet::address_validator;
 pub use wallet::signer;
 pub use wallet::signer::SignOptions;
 pub use wallet::tx_builder::TxBuilder;

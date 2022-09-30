@@ -12,7 +12,7 @@
 use std::fmt;
 
 use crate::bitcoin::Network;
-use crate::{descriptor, wallet, wallet::address_validator};
+use crate::{descriptor, wallet};
 use bitcoin::{OutPoint, Txid};
 
 /// Errors that can be thrown by the [`Wallet`](crate::wallet::Wallet)
@@ -99,8 +99,6 @@ pub enum Error {
 
     /// Error related to the parsing and usage of descriptors
     Descriptor(crate::descriptor::error::Error),
-    /// Error that can be returned to fail the validation of an address
-    AddressValidator(crate::wallet::address_validator::AddressValidatorError),
     /// Encoding error
     Encode(bitcoin::consensus::encode::Error),
     /// Miniscript error
@@ -181,7 +179,6 @@ macro_rules! impl_error {
 }
 
 impl_error!(descriptor::error::Error, Descriptor);
-impl_error!(address_validator::AddressValidatorError, AddressValidator);
 impl_error!(descriptor::policy::PolicyError, InvalidPolicyPathError);
 impl_error!(wallet::signer::SignerError, Signer);
 

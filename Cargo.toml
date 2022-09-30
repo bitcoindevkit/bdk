@@ -104,8 +104,6 @@ env_logger = "0.7"
 electrsd = "0.20"
 
 [[example]]
-name = "address_validator"
-[[example]]
 name = "compact_filters_balance"
 required-features = ["compact_filters"]
 
