@@ -240,3 +240,9 @@ impl From<crate::blockchain::esplora::EsploraError> for Error {
         Error::Esplora(Box::new(other))
     }
 }
+
+impl From<crate::bdk_core::SelectionFailure> for Error {
+    fn from(f: crate::bdk_core::SelectionFailure) -> Self {
+        Error::Generic(format!("bdk_core: {}", f))
+    }
+}

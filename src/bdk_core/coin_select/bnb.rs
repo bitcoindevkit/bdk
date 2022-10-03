@@ -173,6 +173,7 @@ impl<'c, 'f, S: Ord + Copy + Display> Iterator for BnbIter<'c, 'f, S> {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
 /// Determines how we should limit rounds of branch and bound.
 pub enum BnbLimit {
     /// Limit by round count.

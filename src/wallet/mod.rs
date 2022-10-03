@@ -76,9 +76,8 @@ use crate::descriptor::{
 use crate::error::Error;
 use crate::psbt::PsbtUtils;
 use crate::signer::SignerError;
-use crate::testutils;
 use crate::types::*;
-use crate::wallet::coin_selection::Excess::{Change, NoChange};
+use crate::{bdk_core, testutils};
 
 use self::coin_control::CoinFilterParams;
 
@@ -811,7 +810,6 @@ where
 
         // we keep it as a float while we accumulate it, and only round it at the end
         let mut outgoing: u64 = 0;
-        let mut received: u64 = 0;
 
         let recipients = params.recipients.iter().map(|(r, v)| (r, *v));
 
@@ -821,10 +819,6 @@ where
                 && !script_pubkey.is_provably_unspendable()
             {
                 return Err(Error::OutputBelowDustLimit(index));
-            }
-
-            if self.is_mine(script_pubkey)? {
-                received += value;
             }
 
             let new_out = TxOut {
@@ -877,81 +871,176 @@ where
                 .script_pubkey(),
         };
 
-        let coin_selection = coin_selection.coin_select(
-            required_utxos,
-            optional_utxos,
-            fee_rate,
-            outgoing + fee_amount,
-            &drain_script,
-        )?;
-        fee_amount += coin_selection.fee_amount;
-        let excess = &coin_selection.excess;
+        let drain_output = TxOut {
+            value: 0,
+            script_pubkey: drain_script.clone(),
+        };
 
-        tx.input = coin_selection
-            .selected
+        let drain_satisfaction_weight = self
+            .database
+            .borrow()
+            .get_path_from_script_pubkey(&drain_script)?
+            .map(|(keychain, _)| {
+                self._get_descriptor_for_keychain(keychain)
+                    .0
+                    .max_satisfaction_weight()
+            })
+            .transpose()?
+            .unwrap_or(0) as u32;
+
+        let cs_opts = bdk_core::CoinSelectorOpt {
+            target_value: if params.recipients.is_empty() {
+                None
+            } else {
+                Some(outgoing)
+            },
+            target_feerate: fee_rate.as_sat_per_vb() * 4.0, // sats/vb -> sats/wu
+            min_absolute_fee: fee_amount,
+            ..bdk_core::CoinSelectorOpt::fund_outputs(
+                &tx.output,
+                &drain_output,
+                drain_satisfaction_weight,
+            )
+        };
+
+        let raw_candidates = required_utxos
             .iter()
-            .map(|u| bitcoin::TxIn {
-                previous_output: u.outpoint(),
+            .chain(&optional_utxos)
+            .cloned()
+            .collect::<Vec<_>>();
+        let cs_candidates = required_utxos
+            .iter()
+            .chain(&optional_utxos)
+            .map(|utxo| {
+                bdk_core::WeightedValue::new(
+                    utxo.utxo.txout().value,
+                    utxo.satisfaction_weight as u32,
+                    utxo.utxo.txout().script_pubkey.is_witness_program(),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        let selector = {
+            let mut selector = bdk_core::CoinSelector::new(&cs_candidates, &cs_opts);
+            (0..required_utxos.len()).for_each(|index| {
+                selector.select(index);
+            });
+            selector
+        };
+
+        let selection = coin_selection.coin_select(&raw_candidates, selector)?;
+
+        // fee_amount += coin_selection.fee_amount;
+        // let excess = &coin_selection.excess;
+
+        tx.input = selection
+            .apply_selection(&raw_candidates)
+            .map(|utxo| bitcoin::TxIn {
+                previous_output: utxo.utxo.outpoint(),
                 script_sig: Script::default(),
                 sequence: n_sequence,
                 witness: Witness::new(),
             })
             .collect();
 
-        if tx.output.is_empty() {
-            // Uh oh, our transaction has no outputs.
-            // We allow this when:
-            // - We have a drain_to address and the utxos we must spend (this happens,
-            // for example, when we RBF)
-            // - We have a drain_to address and drain_wallet set
-            // Otherwise, we don't know who we should send the funds to, and how much
-            // we should send!
-            if params.drain_to.is_some() && (params.drain_wallet || !params.utxos.is_empty()) {
-                if let NoChange {
-                    dust_threshold,
-                    remaining_amount,
-                    change_fee,
-                } = excess
-                {
-                    return Err(Error::InsufficientFunds {
-                        needed: *dust_threshold,
-                        available: remaining_amount.saturating_sub(*change_fee),
-                    });
-                }
-            } else {
-                return Err(Error::NoRecipients);
-            }
+        let (_, excess_strategy) = selection.best_strategy();
+
+        if let Some(drain_value) = excess_strategy.drain_value {
+            tx.output.push(TxOut {
+                value: drain_value,
+                script_pubkey: drain_script,
+            });
         }
 
-        match excess {
-            NoChange {
-                remaining_amount, ..
-            } => fee_amount += remaining_amount,
-            Change { amount, fee } => {
-                if self.is_mine(&drain_script)? {
-                    received += amount;
-                }
-                fee_amount += fee;
+        // tx.input = coin_selection
+        //     .selected
+        //     .iter()
+        //     .map(|u| bitcoin::TxIn {
+        //         previous_output: u.outpoint(),
+        //         script_sig: Script::default(),
+        //         sequence: n_sequence,
+        //         witness: Witness::new(),
+        //     })
+        //     .collect();
 
-                // create drain output
-                let drain_output = TxOut {
-                    value: *amount,
-                    script_pubkey: drain_script,
-                };
+        // if tx.output.is_empty() {
+        //     // Uh oh, our transaction has no outputs.
+        //     // We allow this when:
+        //     // - We have a drain_to address and the utxos we must spend (this happens,
+        //     // for example, when we RBF)
+        //     // - We have a drain_to address and drain_wallet set
+        //     // Otherwise, we don't know who we should send the funds to, and how much
+        //     // we should send!
+        //     if params.drain_to.is_some() && (params.drain_wallet || !params.utxos.is_empty()) {
+        //         if let NoChange {
+        //             dust_threshold,
+        //             remaining_amount,
+        //             change_fee,
+        //         } = excess
+        //         {
+        //             return Err(Error::InsufficientFunds {
+        //                 needed: *dust_threshold,
+        //                 available: remaining_amount.saturating_sub(*change_fee),
+        //             });
+        //         }
+        //     } else {
+        //         return Err(Error::NoRecipients);
+        //     }
+        // }
 
-                // TODO: We should pay attention when adding a new output: this might increase
-                // the lenght of the "number of vouts" parameter by 2 bytes, potentially making
-                // our feerate too low
-                tx.output.push(drain_output);
-            }
-        };
+        // match excess {
+        //     NoChange {
+        //         remaining_amount, ..
+        //     } => fee_amount += remaining_amount,
+        //     Change { amount, fee } => {
+        //         if self.is_mine(&drain_script)? {
+        //             received += amount;
+        //         }
+        //         fee_amount += fee;
+
+        //         // create drain output
+        //         let drain_output = TxOut {
+        //             value: *amount,
+        //             script_pubkey: drain_script,
+        //         };
+
+        //         // TODO: We should pay attention when adding a new output: this might increase
+        //         // the lenght of the "number of vouts" parameter by 2 bytes, potentially making
+        //         // our feerate too low
+        //         tx.output.push(drain_output);
+        //     }
+        // };
 
         // sort input/outputs according to the chosen algorithm
         params.ordering.sort_tx(&mut tx);
 
         let txid = tx.txid();
-        let sent = coin_selection.local_selected_amount();
-        let psbt = self.complete_transaction(tx, coin_selection.selected, params)?;
+
+        let selected = selection
+            .apply_selection(&raw_candidates)
+            .map(|utxo| utxo.utxo.clone())
+            .collect::<Vec<_>>();
+
+        let sent = selected.iter().map(|utxo| utxo.txout().value).sum::<u64>();
+
+        let received = tx
+            .output
+            .iter()
+            .map(|txo| {
+                if self
+                    .database
+                    .borrow()
+                    .is_mine(&txo.script_pubkey)
+                    .unwrap_or(false)
+                {
+                    txo.value
+                } else {
+                    0
+                }
+            })
+            .sum::<u64>();
+
+        let psbt = self.complete_transaction(tx, selected, params)?;
 
         let transaction_details = TransactionDetails {
             transaction: None,
