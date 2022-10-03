@@ -45,11 +45,7 @@ impl CoinFilterParams {
         let raw_tx = tx.transaction.as_ref().expect("failed to obtain raw tx");
 
         if let Some(&keep) = self.manual.get(outpoint) {
-            if keep {
-                return true;
-            } else {
-                return false;
-            }
+            return keep;
         }
 
         if self.filter_unconfirmed && tx.confirmation_time.is_none() {
@@ -64,6 +60,6 @@ impl CoinFilterParams {
             return false;
         }
 
-        return true;
+        true
     }
 }
