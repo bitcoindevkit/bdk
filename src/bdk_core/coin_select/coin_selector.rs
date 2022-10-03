@@ -415,7 +415,7 @@ impl<'a> CoinSelector<'a> {
         }
 
         // with drain
-        if fee_with_drain > self.opts.min_absolute_fee
+        if fee_with_drain >= self.opts.min_absolute_fee
             && inputs_minus_outputs >= fee_with_drain + self.opts.min_drain_value
         {
             excess_strategies.insert(
