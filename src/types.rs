@@ -141,13 +141,13 @@ impl Sub for FeeRate {
 }
 
 /// Trait implemented by types that can be used to measure weight units.
-pub trait Vbytes {
+pub trait WeightUnits {
     /// Convert weight units to virtual bytes.
-    fn vbytes(self) -> f32;
+    fn to_vbytes(self) -> f32;
 }
 
-impl Vbytes for usize {
-    fn vbytes(self) -> f32 {
+impl WeightUnits for usize {
+    fn to_vbytes(self) -> f32 {
         // ref: https://github.com/bitcoin/bips/blob/master/bip-0141.mediawiki#transaction-size-calculations
         self as f32 / 4.0
     }

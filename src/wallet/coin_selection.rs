@@ -727,7 +727,7 @@ mod test {
     use super::*;
     use crate::database::{BatchOperations, MemoryDatabase};
     use crate::types::*;
-    use crate::wallet::Vbytes;
+    use crate::wallet::WeightUnits;
 
     use rand::rngs::StdRng;
     use rand::seq::SliceRandom;
@@ -1318,7 +1318,7 @@ mod test {
 
         assert_eq!(result.selected.len(), 1);
         assert_eq!(result.selected_amount(), 100_000);
-        let input_size = (TXIN_BASE_WEIGHT + P2WPKH_SATISFACTION_SIZE).vbytes();
+        let input_size = (TXIN_BASE_WEIGHT + P2WPKH_SATISFACTION_SIZE).to_vbytes();
         // the final fee rate should be exactly the same as the fee rate given
         assert!((1.0 - (result.fee_amount as f32 / input_size as f32)).abs() < f32::EPSILON);
     }
