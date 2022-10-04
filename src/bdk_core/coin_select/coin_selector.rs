@@ -26,6 +26,7 @@ impl WeightedValue {
     /// `satisfaction_weight` is the weight of `scriptSigLen + scriptSig + scriptWitnessLen +
     /// scriptWitness`.
     pub fn new(value: u64, satisfaction_weight: u32, is_segwit: bool) -> WeightedValue {
+        println!("- wv satisfaction weight: {}", satisfaction_weight);
         let weight = TXIN_BASE_WEIGHT + satisfaction_weight;
         WeightedValue {
             value,

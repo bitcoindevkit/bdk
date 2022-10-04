@@ -215,6 +215,7 @@ impl CoinSelectionAlgorithm for LargestFirstCoinSelection {
         let pool = {
             let mut pool = selector.unselected().collect::<Vec<_>>();
             pool.sort_unstable_by_key(|(_, candidate)| candidate.value);
+            pool.reverse();
             pool
         };
 
@@ -226,6 +227,7 @@ impl CoinSelectionAlgorithm for LargestFirstCoinSelection {
             }
 
             selector.select(index);
+            println!("selected: index={}, value={}", index, _candidate.value);
             selection = selector.finish();
         }
 

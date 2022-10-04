@@ -924,6 +924,17 @@ where
         };
 
         let selection = coin_selection.coin_select(&raw_candidates, selector)?;
+        let (_, excess_strategy) = selection.best_strategy();
+        println!(
+            "create_tx: weight={}, fee={}, feerate={}sats/wu",
+            excess_strategy.weight,
+            excess_strategy.fee,
+            excess_strategy.feerate()
+        );
+        println!(
+            "create_tx: feerate={}sats/vb",
+            excess_strategy.feerate() * 4.0
+        );
 
         // fee_amount += coin_selection.fee_amount;
         // let excess = &coin_selection.excess;
@@ -937,8 +948,6 @@ where
                 witness: Witness::new(),
             })
             .collect();
-
-        let (_, excess_strategy) = selection.best_strategy();
 
         if let Some(drain_value) = excess_strategy.drain_value {
             tx.output.push(TxOut {
@@ -1016,23 +1025,27 @@ where
             .map(|utxo| utxo.utxo.clone())
             .collect::<Vec<_>>();
 
-        let sent = selected.iter().map(|utxo| utxo.txout().value).sum::<u64>();
+        let sent = selected
+            .iter()
+            .filter(|utxo| {
+                self.database
+                    .borrow()
+                    .is_mine(&utxo.txout().script_pubkey)
+                    .unwrap_or(false)
+            })
+            .map(|utxo| utxo.txout().value)
+            .sum::<u64>();
 
         let received = tx
             .output
             .iter()
-            .map(|txo| {
-                if self
-                    .database
+            .filter(|txo| {
+                self.database
                     .borrow()
                     .is_mine(&txo.script_pubkey)
                     .unwrap_or(false)
-                {
-                    txo.value
-                } else {
-                    0
-                }
             })
+            .map(|txo| txo.value)
             .sum::<u64>();
 
         let psbt = self.complete_transaction(tx, selected, params)?;
@@ -2748,7 +2761,7 @@ pub(crate) mod test {
     }
 
     #[test]
-    #[should_panic(expected = "InsufficientFunds")]
+    // #[should_panic(expected = "InsufficientFunds")]
     fn test_create_tx_absolute_high_fee() {
         let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
         let addr = wallet.get_address(New).unwrap();
@@ -2757,7 +2770,10 @@ pub(crate) mod test {
             .drain_to(addr.script_pubkey())
             .drain_wallet()
             .fee_absolute(60_000);
-        let (_psbt, _details) = builder.finish().unwrap();
+        // let (_psbt, _details) = builder.finish().unwrap();
+        assert!(
+            matches!(builder.finish(), Err(Error::Generic(s)) if s.contains("insufficient coins"))
+        );
     }
 
     #[test]
@@ -2794,7 +2810,7 @@ pub(crate) mod test {
     }
 
     #[test]
-    #[should_panic(expected = "InsufficientFunds")]
+    // #[should_panic(expected = "InsufficientFunds")]
     fn test_create_tx_drain_to_dust_amount() {
         let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
         let addr = wallet.get_address(New).unwrap();
@@ -2804,7 +2820,10 @@ pub(crate) mod test {
             .drain_to(addr.script_pubkey())
             .drain_wallet()
             .fee_rate(FeeRate::from_sat_per_vb(455.0));
-        builder.finish().unwrap();
+        // builder.finish().unwrap();
+        assert!(
+            matches!(builder.finish(), Err(Error::Generic(s)) if s.contains("insufficient coins"))
+        );
     }
 
     #[test]
@@ -3050,7 +3069,7 @@ pub(crate) mod test {
     }
 
     #[test]
-    #[should_panic(expected = "InsufficientFunds")]
+    // #[should_panic(expected = "InsufficientFunds")]
     fn test_create_tx_manually_selected_insufficient() {
         let (wallet, descriptors, _) = get_funded_wallet(get_test_wpkh());
         let small_output_txid = crate::populate_test_db!(
@@ -3069,7 +3088,10 @@ pub(crate) mod test {
             })
             .unwrap()
             .manually_selected_only();
-        builder.finish().unwrap();
+        // builder.finish().unwrap();
+        assert!(
+            matches!(builder.finish(), Err(Error::Generic(s)) if s.contains("insufficient coins"))
+        );
     }
 
     #[test]
@@ -3788,7 +3810,7 @@ pub(crate) mod test {
     }
 
     #[test]
-    #[should_panic(expected = "InsufficientFunds")]
+    // #[should_panic(expected = "InsufficientFunds")]
     fn test_bump_fee_remove_output_manually_selected_only() {
         let (wallet, descriptors, _) = get_funded_wallet(get_test_wpkh());
         // receive an extra tx so that our wallet has two utxos. then we manually pick only one of
@@ -3836,11 +3858,15 @@ pub(crate) mod test {
         builder
             .manually_selected_only()
             .fee_rate(FeeRate::from_sat_per_vb(255.0));
-        builder.finish().unwrap();
+        // builder.finish().unwrap();
+        assert!(
+            matches!(builder.finish(), Err(Error::Generic(s)) if s.contains("insufficient coins"))
+        );
     }
 
     #[test]
     fn test_bump_fee_add_input() {
+        // funded wallet already has 50_000 utxo
         let (wallet, descriptors, _) = get_funded_wallet(get_test_wpkh());
         crate::populate_test_db!(
             wallet.database.borrow_mut(),
@@ -4262,7 +4288,7 @@ pub(crate) mod test {
     }
 
     #[test]
-    #[should_panic(expected = "InsufficientFunds")]
+    // #[should_panic(expected = "InsufficientFunds")]
     fn test_bump_fee_unconfirmed_inputs_only() {
         // We try to bump the fee, but:
         // - We can't reduce the change, as we have no change
@@ -4304,7 +4330,10 @@ pub(crate) mod test {
 
         let mut builder = wallet.build_fee_bump(txid).unwrap();
         builder.fee_rate(FeeRate::from_sat_per_vb(25.0));
-        builder.finish().unwrap();
+        assert!(
+            matches!(builder.finish(), Err(Error::Generic(s)) if s.contains("insufficient coins"))
+        );
+        // builder.finish().unwrap();
     }
 
     #[test]
@@ -5564,12 +5593,16 @@ pub(crate) mod test {
             .add_recipient(addr.script_pubkey(), balance.immature / 2)
             .current_height(confirmation_time);
         assert!(matches!(
-            builder.finish().unwrap_err(),
-            Error::InsufficientFunds {
-                needed: _,
-                available: 0
-            }
+            builder.finish(),
+            Err(Error::Generic(s)) if s.contains("insufficient coins")
         ));
+        // assert!(matches!(
+        //     builder.finish().unwrap_err(),
+        //     Error::InsufficientFunds {
+        //         needed: _,
+        //         available: 0
+        //     }
+        // ));
 
         // Still unspendable...
         let mut builder = wallet.build_tx();
@@ -5577,12 +5610,16 @@ pub(crate) mod test {
             .add_recipient(addr.script_pubkey(), balance.immature / 2)
             .current_height(not_yet_mature_time);
         assert!(matches!(
-            builder.finish().unwrap_err(),
-            Error::InsufficientFunds {
-                needed: _,
-                available: 0
-            }
+            builder.finish(),
+            Err(Error::Generic(s)) if s.contains("insufficient coins")
         ));
+        // assert!(matches!(
+        //     builder.finish().unwrap_err(),
+        //     Error::InsufficientFunds {
+        //         needed: _,
+        //         available: 0
+        //     }
+        // ));
 
         // ...Now the coinbase is mature :)
         let sync_time = SyncTime {
