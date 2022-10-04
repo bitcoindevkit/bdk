@@ -1551,12 +1551,18 @@ where
         Ok(self
             .iter_unspent()?
             .map(|utxo| {
-                let keychain = utxo.keychain;
+                let desc = self.get_descriptor_for_keychain(utxo.keychain);
+
+                // WORKAROUND: There is a bug in miniscript where they fail to take into
+                // consideration an `OP_PUSH..` (4 weight units) for `pkh` script types.
+                let workaround_weight = match desc.desc_type() {
+                    DescriptorType::Pkh => 4_usize,
+                    _ => 0_usize,
+                };
+
                 (
                     utxo,
-                    self.get_descriptor_for_keychain(keychain)
-                        .max_satisfaction_weight()
-                        .unwrap(),
+                    desc.max_satisfaction_weight().unwrap() + workaround_weight,
                 )
             })
             .collect())
