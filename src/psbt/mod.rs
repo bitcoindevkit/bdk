@@ -192,27 +192,15 @@ mod test {
         let mut builder = wallet.build_tx();
         builder.drain_to(addr.script_pubkey()).drain_wallet();
         builder.fee_rate(FeeRate::from_sat_per_vb(expected_fee_rate));
-        let (mut psbt, details) = builder.finish().unwrap();
+        let (mut psbt, _) = builder.finish().unwrap();
         let fee_amount = psbt.fee_amount();
         assert!(fee_amount.is_some());
-        let unfinalized_fee_rate = psbt.fee_rate().unwrap();
-        println!("unfinalized fee rate: {:?}", unfinalized_fee_rate);
 
+        let unfinalized_fee_rate = psbt.fee_rate().unwrap();
         let finalized = wallet.sign(&mut psbt, Default::default()).unwrap();
         assert!(finalized);
 
-        let tx = psbt.clone().extract_tx();
-        // println!("tx: {:#?}", tx);
-        println!("scriptSig weight: {}", tx.input[0].script_sig.len() * 4);
-        println!("weight: {}", tx.weight());
-        let vb = tx.weight() as f32 / 4.0;
-        println!("vbytes: {}", vb);
-        let fee = details.fee.unwrap_or(0);
-        println!("fee: {}", details.fee.unwrap_or(0));
-        println!("feerate: {} sats/vb", fee as f32 / vb);
-
         let finalized_fee_rate = psbt.fee_rate().unwrap();
-        println!("finalized fee rate: {:?}", finalized_fee_rate);
         assert!(finalized_fee_rate.as_sat_per_vb() >= expected_fee_rate);
         assert!(finalized_fee_rate.as_sat_per_vb() < unfinalized_fee_rate.as_sat_per_vb());
     }

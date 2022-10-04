@@ -216,6 +216,7 @@ impl CoinSelectionAlgorithm for LargestFirstCoinSelection {
             let mut pool = selector.unselected().collect::<Vec<_>>();
             pool.sort_unstable_by_key(|(_, candidate)| candidate.value);
             pool.reverse();
+            println!("pool: {:?}", pool);
             pool
         };
 
@@ -384,6 +385,8 @@ mod test {
     use bitcoin::{OutPoint, Script, TxOut};
 
     use super::*;
+    use crate::bdk_core::{CoinSelector, CoinSelectorOpt, WeightedValue};
+    use crate::database::{BatchOperations, MemoryDatabase};
     // use crate::database::{BatchOperations, MemoryDatabase};
     use crate::types::*;
     // use crate::wallet::WeightUnits;
@@ -419,12 +422,38 @@ mod test {
         }
     }
 
-    fn get_test_utxos() -> Vec<WeightedUtxo> {
-        vec![
+    fn get_test_utxos() -> (Vec<WeightedUtxo>, Vec<bdk_core::WeightedValue>) {
+        let utxos = vec![
             utxo(100_000, 0),
             utxo(FEE_AMOUNT as u64 - 40, 1),
             utxo(200_000, 2),
-        ]
+        ];
+
+        let candidates = utxos
+            .iter()
+            .map(|utxo| {
+                bdk_core::WeightedValue::new(
+                    utxo.utxo.txout().value,
+                    utxo.satisfaction_weight as u32,
+                    utxo.utxo.txout().script_pubkey.is_witness_program(),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        (utxos, candidates)
+    }
+
+    fn get_test_candidates(utxos: &[WeightedUtxo]) -> Vec<WeightedValue> {
+        utxos
+            .iter()
+            .map(|utxo| {
+                bdk_core::WeightedValue::new(
+                    utxo.utxo.txout().value,
+                    utxo.satisfaction_weight as u32,
+                    utxo.utxo.txout().script_pubkey.is_witness_program(),
+                )
+            })
+            .collect::<Vec<_>>()
     }
 
     fn setup_database_and_get_oldest_first_test_utxos<D: Database>(
@@ -531,183 +560,192 @@ mod test {
             .map(|u| u.utxo.txout().value)
             .sum()
     }
-    // fn test_largest_first_coin_selection_success() {
-    //     let utxos = get_test_utxos();
-    //     let drain_script = Script::default();
-    //     let target_amount = 250_000 + FEE_AMOUNT;
 
-    //     let result = LargestFirstCoinSelection::default()
-    //         .coin_select(
-    //             utxos,
-    //             vec![],
-    //             FeeRate::from_sat_per_vb(1.0),
-    //             target_amount,
-    //             &drain_script,
-    //         )
-    //         .unwrap();
+    fn new_opts(target_value: u64, feerate: f32, drain_script: Script) -> CoinSelectorOpt {
+        CoinSelectorOpt {
+            target_feerate: feerate,
+            ..CoinSelectorOpt::fund_outputs(
+                &[TxOut {
+                    value: target_value,
+                    script_pubkey: Script::default(),
+                }],
+                &TxOut {
+                    value: 0,
+                    script_pubkey: drain_script,
+                },
+                0,
+            )
+        }
+    }
 
-    //     assert_eq!(result.selected.len(), 3);
-    //     assert_eq!(result.selected_amount(), 300_010);
-    //     assert_eq!(result.fee_amount, 204)
-    // }
+    #[test]
+    fn test_largest_first_coin_selection_success() {
+        let (utxos, candidates) = get_test_utxos();
+        let target_amount = 250_000 + FEE_AMOUNT;
 
-    // #[test]
-    // fn test_largest_first_coin_selection_use_all() {
-    //     let utxos = get_test_utxos();
-    //     let drain_script = Script::default();
-    //     let target_amount = 20_000 + FEE_AMOUNT;
+        let opts = new_opts(target_amount, 0.25, Script::default());
+        let selector = bdk_core::CoinSelector::new(&candidates, &opts);
 
-    //     let result = LargestFirstCoinSelection::default()
-    //         .coin_select(
-    //             utxos,
-    //             vec![],
-    //             FeeRate::from_sat_per_vb(1.0),
-    //             target_amount,
-    //             &drain_script,
-    //         )
-    //         .unwrap();
+        let result = LargestFirstCoinSelection::default()
+            .coin_select(&utxos, selector)
+            .unwrap();
+        let (strategy_kind, strategy) = result.best_strategy();
+        println!("strategy_kind: {}", strategy_kind);
 
-    //     assert_eq!(result.selected.len(), 3);
-    //     assert_eq!(result.selected_amount(), 300_010);
-    //     assert_eq!(result.fee_amount, 204);
-    // }
+        assert_eq!(result.selected.len(), 2);
+        assert_eq!(strategy.fee, 164);
+    }
 
-    // #[test]
-    // fn test_largest_first_coin_selection_use_only_necessary() {
-    //     let utxos = get_test_utxos();
-    //     let drain_script = Script::default();
-    //     let target_amount = 20_000 + FEE_AMOUNT;
+    #[test]
+    fn test_largest_first_coin_selection_use_all() {
+        let (utxos, candidates) = get_test_utxos();
+        let target_amount = 20_000 + FEE_AMOUNT;
 
-    //     let result = LargestFirstCoinSelection::default()
-    //         .coin_select(
-    //             vec![],
-    //             utxos,
-    //             FeeRate::from_sat_per_vb(1.0),
-    //             target_amount,
-    //             &drain_script,
-    //         )
-    //         .unwrap();
+        let opts = new_opts(target_amount, 0.25, Script::default());
+        let mut selector = bdk_core::CoinSelector::new(&candidates, &opts);
+        selector.select_all();
 
-    //     assert_eq!(result.selected.len(), 1);
-    //     assert_eq!(result.selected_amount(), 200_000);
-    //     assert_eq!(result.fee_amount, 68);
-    // }
+        let result = LargestFirstCoinSelection::default()
+            .coin_select(&utxos, selector)
+            .unwrap();
+        let (_, strategy) = result.best_strategy();
 
-    // #[test]
-    // #[should_panic(expected = "InsufficientFunds")]
-    // fn test_largest_first_coin_selection_insufficient_funds() {
-    //     let utxos = get_test_utxos();
-    //     let drain_script = Script::default();
-    //     let target_amount = 500_000 + FEE_AMOUNT;
+        assert_eq!(result.selected.len(), 3);
+        // assert_eq!(result.selected_amount(), 300_010);
+        assert_eq!(strategy.fee, 232);
+    }
 
-    //     LargestFirstCoinSelection::default()
-    //         .coin_select(
-    //             vec![],
-    //             utxos,
-    //             FeeRate::from_sat_per_vb(1.0),
-    //             target_amount,
-    //             &drain_script,
-    //         )
-    //         .unwrap();
-    // }
+    #[test]
+    fn test_largest_first_coin_selection_use_only_necessary() {
+        let (utxos, candidates) = get_test_utxos();
+        let drain_script = Script::default();
+        let target_amount = 20_000 + FEE_AMOUNT;
 
-    // #[test]
-    // #[should_panic(expected = "InsufficientFunds")]
-    // fn test_largest_first_coin_selection_insufficient_funds_high_fees() {
-    //     let utxos = get_test_utxos();
-    //     let drain_script = Script::default();
-    //     let target_amount = 250_000 + FEE_AMOUNT;
+        let opts = new_opts(target_amount, 0.25, drain_script);
+        let selector = CoinSelector::new(&candidates, &opts);
 
-    //     LargestFirstCoinSelection::default()
-    //         .coin_select(
-    //             vec![],
-    //             utxos,
-    //             FeeRate::from_sat_per_vb(1000.0),
-    //             target_amount,
-    //             &drain_script,
-    //         )
-    //         .unwrap();
-    // }
+        let result = LargestFirstCoinSelection::default()
+            .coin_select(&utxos, selector)
+            .unwrap();
+        let (_, strategy) = result.best_strategy();
 
-    // #[test]
-    // fn test_oldest_first_coin_selection_success() {
-    //     let mut database = MemoryDatabase::default();
-    //     let utxos = setup_database_and_get_oldest_first_test_utxos(&mut database);
-    //     let drain_script = Script::default();
-    //     let target_amount = 180_000 + FEE_AMOUNT;
+        assert_eq!(result.selected.len(), 1);
+        // assert_eq!(result.selected_amount(), 200_000);
+        assert_eq!(strategy.fee, 96);
+    }
 
-    //     let result = OldestFirstCoinSelection::new(&database)
-    //         .coin_select(
-    //             vec![],
-    //             utxos,
-    //             FeeRate::from_sat_per_vb(1.0),
-    //             target_amount,
-    //             &drain_script,
-    //         )
-    //         .unwrap();
+    #[test]
+    fn test_largest_first_coin_selection_insufficient_funds() {
+        let (utxos, candidates) = get_test_utxos();
+        let drain_script = Script::default();
+        let target_amount = 500_000 + FEE_AMOUNT;
 
-    //     assert_eq!(result.selected.len(), 2);
-    //     assert_eq!(result.selected_amount(), 200_000);
-    //     assert_eq!(result.fee_amount, 136)
-    // }
+        let opts = new_opts(target_amount, 0.25, drain_script);
+        let selector = CoinSelector::new(&candidates, &opts);
 
-    // #[test]
-    // fn test_oldest_first_coin_selection_utxo_not_in_db_will_be_selected_last() {
-    //     // ensure utxos are from different tx
-    //     let utxo1 = utxo(120_000, 1);
-    //     let utxo2 = utxo(80_000, 2);
-    //     let utxo3 = utxo(300_000, 3);
-    //     let drain_script = Script::default();
+        let err = LargestFirstCoinSelection::default()
+            .coin_select(&utxos, selector)
+            .expect_err("should fail");
+        assert!(matches!(err, Error::Generic(s) if s.contains("insufficient coins")));
+    }
 
-    //     let mut database = MemoryDatabase::default();
+    #[test]
+    fn test_largest_first_coin_selection_insufficient_funds_high_fees() {
+        let (utxos, candidates) = get_test_utxos();
+        let drain_script = Script::default();
+        let target_amount = 250_000 + FEE_AMOUNT;
 
-    //     // add tx to DB so utxos are sorted by blocktime asc
-    //     // utxos will be selected by the following order
-    //     // utxo1(blockheight 1) -> utxo2(blockheight 2), utxo3 (not exist in DB)
-    //     // timestamp are all set as the same to ensure that only block height is used in sorting
-    //     let utxo1_tx_details = TransactionDetails {
-    //         transaction: None,
-    //         txid: utxo1.utxo.outpoint().txid,
-    //         received: 1,
-    //         sent: 0,
-    //         fee: None,
-    //         confirmation_time: Some(BlockTime {
-    //             height: 1,
-    //             timestamp: 1231006505,
-    //         }),
-    //     };
+        let opts = new_opts(target_amount, 1000.0 / 4.0, drain_script);
+        let selector = CoinSelector::new(&candidates, &opts);
 
-    //     let utxo2_tx_details = TransactionDetails {
-    //         transaction: None,
-    //         txid: utxo2.utxo.outpoint().txid,
-    //         received: 1,
-    //         sent: 0,
-    //         fee: None,
-    //         confirmation_time: Some(BlockTime {
-    //             height: 2,
-    //             timestamp: 1231006505,
-    //         }),
-    //     };
+        let err = LargestFirstCoinSelection::default()
+            .coin_select(&utxos, selector)
+            .expect_err("should fail");
+        assert!(matches!(err, Error::Generic(s) if s.contains("insufficient coins")));
+    }
 
-    //     database.set_tx(&utxo1_tx_details).unwrap();
-    //     database.set_tx(&utxo2_tx_details).unwrap();
+    #[test]
+    fn test_oldest_first_coin_selection_success() {
+        let mut database = MemoryDatabase::default();
+        let utxos = setup_database_and_get_oldest_first_test_utxos(&mut database);
+        let candidates = get_test_candidates(&utxos);
+        let drain_script = Script::default();
+        let target_amount = 180_000 + FEE_AMOUNT;
 
-    //     let target_amount = 180_000 + FEE_AMOUNT;
+        let opts = new_opts(target_amount, 0.25, drain_script);
+        let selector = CoinSelector::new(&candidates, &opts);
 
-    //     let result = OldestFirstCoinSelection::new(&database)
-    //         .coin_select(
-    //             vec![],
-    //             vec![utxo3, utxo1, utxo2],
-    //             FeeRate::from_sat_per_vb(1.0),
-    //             target_amount,
-    //             &drain_script,
-    //         )
-    //         .unwrap();
+        let result = OldestFirstCoinSelection::new(&database)
+            .coin_select(&utxos, selector)
+            .unwrap();
+        let (_, strategy) = result.best_strategy();
 
-    //     assert_eq!(result.selected.len(), 2);
-    //     assert_eq!(result.selected_amount(), 200_000);
-    //     assert_eq!(result.fee_amount, 136)
-    // }
+        assert_eq!(result.selected.len(), 2);
+        // assert_eq!(result.selected_amount(), 200_000);
+        assert!(strategy.feerate() >= 0.25);
+    }
+
+    #[test]
+    fn test_oldest_first_coin_selection_utxo_not_in_db_will_be_selected_last() {
+        // ensure utxos are from different tx
+        let utxo1 = utxo(120_000, 1);
+        let utxo2 = utxo(80_000, 2);
+        let utxo3 = utxo(300_000, 3);
+        let drain_script = Script::default();
+
+        let mut database = MemoryDatabase::default();
+
+        // add tx to DB so utxos are sorted by blocktime asc
+        // utxos will be selected by the following order
+        // utxo1(blockheight 1) -> utxo2(blockheight 2), utxo3 (not exist in DB)
+        // timestamp are all set as the same to ensure that only block height is used in sorting
+        let utxo1_tx_details = TransactionDetails {
+            transaction: None,
+            txid: utxo1.utxo.outpoint().txid,
+            received: 1,
+            sent: 0,
+            fee: None,
+            confirmation_time: Some(BlockTime {
+                height: 1,
+                timestamp: 1231006505,
+            }),
+        };
+
+        let utxo2_tx_details = TransactionDetails {
+            transaction: None,
+            txid: utxo2.utxo.outpoint().txid,
+            received: 1,
+            sent: 0,
+            fee: None,
+            confirmation_time: Some(BlockTime {
+                height: 2,
+                timestamp: 1231006505,
+            }),
+        };
+
+        database.set_tx(&utxo1_tx_details).unwrap();
+        database.set_tx(&utxo2_tx_details).unwrap();
+
+        let target_amount = 180_000 + FEE_AMOUNT;
+
+        let opts = new_opts(target_amount, 0.25, drain_script);
+        let utxos = vec![utxo3, utxo1, utxo2];
+        let candidates = get_test_candidates(&utxos);
+        let selector = CoinSelector::new(&candidates, &opts);
+
+        let result = OldestFirstCoinSelection::new(&database)
+            .coin_select(&utxos, selector)
+            .unwrap();
+        let (_, strategy) = result.best_strategy();
+
+        assert_eq!(result.selected.len(), 2);
+        let selected_sum = result
+            .apply_selection(&utxos)
+            .map(|u| u.utxo.txout().value)
+            .sum::<u64>();
+        assert_eq!(selected_sum, 200_000);
+        assert!(strategy.feerate() >= 0.25);
+    }
 
     // #[test]
     // fn test_oldest_first_coin_selection_use_all() {
