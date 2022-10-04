@@ -30,7 +30,7 @@ use bitcoin::{
     Txid, Witness,
 };
 
-use miniscript::descriptor::DescriptorTrait;
+use miniscript::descriptor::{DescriptorTrait, DescriptorType};
 use miniscript::psbt::PsbtInputSatisfier;
 use miniscript::ToPublicKey;
 
@@ -1014,13 +1014,21 @@ where
                     .borrow()
                     .get_path_from_script_pubkey(&txout.script_pubkey)?
                 {
-                    Some((keychain, _)) => (
-                        self._get_descriptor_for_keychain(keychain)
-                            .0
-                            .max_satisfaction_weight()
-                            .unwrap(),
-                        keychain,
-                    ),
+                    Some((keychain, _)) => {
+                        let (desc, _) = self._get_descriptor_for_keychain(keychain);
+
+                        // WORKAROUND: There is a bug in miniscript where they fail to take into
+                        // consideration an `OP_PUSH..` (4 weight units) for `pkh` script types.
+                        let workaround_weight = match desc.desc_type() {
+                            DescriptorType::Pkh => 4_usize,
+                            _ => 0_usize,
+                        };
+
+                        (
+                            desc.max_satisfaction_weight().unwrap() + workaround_weight,
+                            keychain,
+                        )
+                    }
                     None => {
                         // estimate the weight based on the scriptsig/witness size present in the
                         // original transaction
