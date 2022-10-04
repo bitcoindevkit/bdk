@@ -2657,7 +2657,7 @@ pub(crate) mod test {
         builder
             .drain_to(addr.script_pubkey())
             .drain_wallet()
-            .fee_rate(FeeRate::from_sat_per_vb(453.0));
+            .fee_rate(FeeRate::from_sat_per_vb(455.0));
         builder.finish().unwrap();
     }
 

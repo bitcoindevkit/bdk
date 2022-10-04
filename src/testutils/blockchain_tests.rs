@@ -1021,7 +1021,7 @@ macro_rules! bdk_blockchain_tests {
                 assert_eq!(details.received, 1_000 - details.fee.unwrap_or(0), "incorrect received after send");
 
                 let mut builder = wallet.build_fee_bump(details.txid).unwrap();
-                builder.fee_rate(FeeRate::from_sat_per_vb(123.0));
+                builder.fee_rate(FeeRate::from_sat_per_vb(124.0));
                 let (mut new_psbt, new_details) = builder.finish().unwrap();
                 println!("{:#?}", new_details);
 

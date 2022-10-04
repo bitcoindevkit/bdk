@@ -304,9 +304,8 @@ impl<D: Database> CoinSelectionAlgorithm<D> for OldestFirstCoinSelection {
 /// - `fee_rate`: required fee rate for the current selection
 /// - `drain_script`: script to consider change creation
 pub fn decide_change(remaining_amount: u64, fee_rate: FeeRate, drain_script: &Script) -> Excess {
-    // drain_output_len = size(len(script_pubkey)) + len(script_pubkey) + size(output_value)
-    let drain_output_len = serialize(drain_script).len() + 8usize;
-    let change_fee = fee_rate.fee_vb(drain_output_len);
+    let drain_output_len = serialize(drain_script).len() + 8_usize;
+    let change_fee = fee_rate.fee_vb(drain_output_len as f32);
     let drain_val = remaining_amount.saturating_sub(change_fee);
 
     if drain_val.is_dust(drain_script) {
