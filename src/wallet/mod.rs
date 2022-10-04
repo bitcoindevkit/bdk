@@ -768,7 +768,7 @@ where
             (Some(rbf), _) => rbf.get_value(),
         };
 
-        let (fee_rate, mut fee_amount) = match params
+        let (fee_rate, fee_amount) = match params
             .fee_policy
             .as_ref()
             .unwrap_or(&FeePolicy::FeeRate(FeeRate::default()))

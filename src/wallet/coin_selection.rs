@@ -188,7 +188,7 @@ pub trait CoinSelectionAlgorithm: std::fmt::Debug {
     #[allow(clippy::too_many_arguments)]
     fn coin_select(
         &self,
-        raw_candidates: &Vec<WeightedUtxo>,
+        raw_candidates: &[WeightedUtxo],
         selector: bdk_core::CoinSelector,
     ) -> Result<bdk_core::Selection, Error>;
 }
@@ -203,7 +203,7 @@ pub struct LargestFirstCoinSelection;
 impl CoinSelectionAlgorithm for LargestFirstCoinSelection {
     fn coin_select(
         &self,
-        _raw_candidates: &Vec<WeightedUtxo>,
+        _raw_candidates: &[WeightedUtxo],
         mut selector: bdk_core::CoinSelector,
     ) -> Result<bdk_core::Selection, Error> {
         log::debug!(
@@ -260,7 +260,7 @@ impl<'d, D> Debug for OldestFirstCoinSelection<'d, D> {
 impl<'d, D: Database> CoinSelectionAlgorithm for OldestFirstCoinSelection<'d, D> {
     fn coin_select(
         &self,
-        raw_candidates: &Vec<WeightedUtxo>,
+        raw_candidates: &[WeightedUtxo],
         mut selector: bdk_core::CoinSelector,
     ) -> Result<bdk_core::Selection, Error> {
         // query db and create a blockheight lookup table
@@ -340,7 +340,7 @@ impl BranchAndBoundCoinSelection {
 impl CoinSelectionAlgorithm for BranchAndBoundCoinSelection {
     fn coin_select(
         &self,
-        _raw_candidates: &Vec<WeightedUtxo>,
+        _raw_candidates: &[WeightedUtxo],
         mut selector: bdk_core::CoinSelector,
     ) -> Result<bdk_core::Selection, Error> {
         if let Some(final_selector) = bdk_core::coin_select_bnb(self.limit, selector.clone()) {
