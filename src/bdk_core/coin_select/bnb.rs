@@ -2,6 +2,10 @@ use std::fmt::Display;
 
 use super::*;
 
+/// Check our current selection (node), and returns the branching strategy, alongside a score
+/// (if the current selection is a candidate solution).
+pub type StrategyFn<'c, S> = dyn Fn(&Bnb<'c, S>) -> (BranchStrategy, Option<S>);
+
 /// Strategy in which we should branch.
 pub enum BranchStrategy {
     /// We continue exploring subtrees of this node, starting with the inclusion branch.
@@ -60,10 +64,7 @@ impl<'c, S: Ord> Bnb<'c, S> {
     ///
     /// `strategy` should assess our current selection/node and determine the branching strategy and
     /// whether this selection is a candidate solution (if so, return the score of the selection).
-    pub fn into_iter<'f>(
-        self,
-        strategy: &'f dyn Fn(&Self) -> (BranchStrategy, Option<S>),
-    ) -> BnbIter<'c, 'f, S> {
+    pub fn into_iter<'f>(self, strategy: &'f StrategyFn<'c, S>) -> BnbIter<'c, 'f, S> {
         BnbIter {
             state: self,
             done: false,
@@ -120,7 +121,7 @@ pub struct BnbIter<'c, 'f, S> {
 
     /// Check our current selection (node), and returns the branching strategy, alongside a score
     /// (if the current selection is a candidate solution).
-    strategy: &'f dyn Fn(&Bnb<'c, S>) -> (BranchStrategy, Option<S>),
+    strategy: &'f StrategyFn<'c, S>,
 }
 
 impl<'c, 'f, S: Ord + Copy + Display> Iterator for BnbIter<'c, 'f, S> {
@@ -239,7 +240,7 @@ where
     let upper_bound_abs = target_abs + (opts.drain_weight as f32 * opts.target_feerate) as u64;
     let upper_bound_eff = target_eff + opts.drain_waste();
 
-    let strategy = |bnb: &Bnb<i64>| -> (BranchStrategy, Option<i64>) {
+    let strategy = move |bnb: &Bnb<i64>| -> (BranchStrategy, Option<i64>) {
         let selected_abs = bnb.selection.selected_absolute_value();
         let selected_eff = bnb.selection.selected_effective_value();
 
@@ -270,7 +271,7 @@ where
         // early bailout optimization:
         // If the candidate at the previous position is NOT selected and has the same weight and
         // value as the current candidate, we can skip selecting the current candidate.
-        if !bnb.selection.is_empty() {
+        if bnb.pool_pos > 0 && !bnb.selection.is_empty() {
             let (_, candidate) = bnb.pool[bnb.pool_pos];
             let (prev_index, prev_candidate) = bnb.pool[bnb.pool_pos - 1];
 
