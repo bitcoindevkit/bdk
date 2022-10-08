@@ -983,7 +983,7 @@ mod test {
                 let txid =
                     test_client.receive(testutils! { @tx ( (@addr addr) => AMOUNT_PER_TX ) });
                 test_client.generate(1, None);
-                txid
+                txid.txid()
             })
             .collect::<Vec<_>>();
 
