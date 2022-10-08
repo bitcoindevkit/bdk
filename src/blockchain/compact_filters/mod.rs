@@ -68,6 +68,8 @@ mod peer;
 mod store;
 mod sync;
 
+pub mod nakamoto;
+
 use crate::blockchain::*;
 use crate::database::{BatchDatabase, BatchOperations, DatabaseUtils};
 use crate::error::Error;

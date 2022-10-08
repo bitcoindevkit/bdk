@@ -138,6 +138,9 @@ pub enum Error {
     #[cfg(feature = "compact_filters")]
     /// Compact filters client error)
     CompactFilters(crate::blockchain::compact_filters::CompactFiltersError),
+    #[cfg(feature = "compact_filters")]
+    /// CBF nakamoto error
+    Cbf(crate::blockchain::compact_filters::nakamoto::CbfError),
     #[cfg(feature = "key-value-db")]
     /// Sled database error
     Sled(sled::Error),
@@ -326,6 +329,16 @@ impl From<crate::blockchain::compact_filters::CompactFiltersError> for Error {
         match other {
             crate::blockchain::compact_filters::CompactFiltersError::Global(e) => *e,
             err => Error::CompactFilters(err),
+        }
+    }
+}
+
+#[cfg(feature = "compact_filters")]
+impl From<crate::blockchain::compact_filters::nakamoto::CbfError> for Error {
+    fn from(other: crate::blockchain::compact_filters::nakamoto::CbfError) -> Self {
+        match other {
+            crate::blockchain::compact_filters::nakamoto::CbfError::Global(e) => *e,
+            err => Error::Cbf(err),
         }
     }
 }

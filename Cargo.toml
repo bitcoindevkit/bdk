@@ -19,6 +19,7 @@ bitcoin = { version = "0.29.1", features = ["serde", "base64", "rand"] }
 serde = { version = "^1.0", features = ["derive"] }
 serde_json = { version = "^1.0" }
 rand = "^0.8"
+thiserror = "1.0"
 
 # Optional dependencies
 sled = { version = "0.34", optional = true }
@@ -39,6 +40,9 @@ bitcoinconsensus = { version = "0.19.0-3", optional = true }
 # Needed by bdk_blockchain_tests macro and the `rpc` feature
 bitcoincore-rpc = { version = "0.16", optional = true }
 
+# Nakamoto crates for the CBF blockchain
+nakamoto = { git = "https://github.com/cloudhead/nakamoto.git", rev = "14902d3d5cc9442cdda82419f0f24277d86b243b", optional = true }
+
 # Platform-specific dependencies
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { version = "1", features = ["rt", "macros"] }
@@ -55,7 +59,7 @@ verify = ["bitcoinconsensus"]
 default = ["key-value-db", "electrum"]
 sqlite = ["rusqlite", "ahash"]
 sqlite-bundled = ["sqlite", "rusqlite/bundled"]
-compact_filters = ["rocksdb", "socks", "cc"]
+compact_filters = ["rocksdb", "socks", "cc", "nakamoto"]
 key-value-db = ["sled"]
 all-keys = ["keys-bip39"]
 keys-bip39 = ["bip39"]
@@ -93,6 +97,7 @@ reqwest-default-tls = ["esplora-client/async-https"]
 test-blockchains = ["bitcoincore-rpc", "electrum-client"]
 test-electrum = ["electrum", "electrsd/electrs_0_8_10", "electrsd/bitcoind_22_0", "test-blockchains"]
 test-rpc = ["rpc", "electrsd/electrs_0_8_10", "electrsd/bitcoind_22_0", "test-blockchains"]
+test-cbf = ["compact_filters", "electrsd/electrs_0_8_10", "electrsd/bitcoind_22_0", "test-blockchains"]
 test-rpc-legacy = ["rpc", "electrsd/electrs_0_8_10", "electrsd/bitcoind_0_20_0", "test-blockchains"]
 test-esplora = ["electrsd/legacy", "electrsd/esplora_a33e97e1", "electrsd/bitcoind_22_0", "test-blockchains"]
 test-md-docs = ["electrum"]
