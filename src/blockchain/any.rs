@@ -84,7 +84,7 @@ pub enum AnyBlockchain {
     #[cfg(feature = "compact_filters")]
     #[cfg_attr(docsrs, doc(cfg(feature = "compact_filters")))]
     /// Compact filters client
-    CompactFilters(Box<compact_filters::CompactFiltersBlockchain>),
+    CompactFilters(Box<compact_filters::nakamoto::CbfBlockchain>),
     #[cfg(feature = "rpc")]
     #[cfg_attr(docsrs, doc(cfg(feature = "rpc")))]
     /// RPC client
@@ -158,7 +158,7 @@ impl WalletSync for AnyBlockchain {
 
 impl_from!(boxed electrum::ElectrumBlockchain, AnyBlockchain, Electrum, #[cfg(feature = "electrum")]);
 impl_from!(boxed esplora::EsploraBlockchain, AnyBlockchain, Esplora, #[cfg(feature = "esplora")]);
-impl_from!(boxed compact_filters::CompactFiltersBlockchain, AnyBlockchain, CompactFilters, #[cfg(feature = "compact_filters")]);
+impl_from!(boxed compact_filters::nakamoto::CbfBlockchain, AnyBlockchain, CompactFilters, #[cfg(feature = "compact_filters")]);
 impl_from!(boxed rpc::RpcBlockchain, AnyBlockchain, Rpc, #[cfg(feature = "rpc")]);
 
 /// Type that can contain any of the blockchain configurations defined by the library
@@ -210,7 +210,7 @@ pub enum AnyBlockchainConfig {
     #[cfg(feature = "compact_filters")]
     #[cfg_attr(docsrs, doc(cfg(feature = "compact_filters")))]
     /// Compact filters client
-    CompactFilters(compact_filters::CompactFiltersBlockchainConfig),
+    CompactFilters(compact_filters::nakamoto::CBFBlockchainConfig),
     #[cfg(feature = "rpc")]
     #[cfg_attr(docsrs, doc(cfg(feature = "rpc")))]
     /// RPC client configuration
@@ -232,7 +232,7 @@ impl ConfigurableBlockchain for AnyBlockchain {
             }
             #[cfg(feature = "compact_filters")]
             AnyBlockchainConfig::CompactFilters(inner) => AnyBlockchain::CompactFilters(Box::new(
-                compact_filters::CompactFiltersBlockchain::from_config(inner)?,
+                compact_filters::nakamoto::CbfBlockchain::from_config(inner)?,
             )),
             #[cfg(feature = "rpc")]
             AnyBlockchainConfig::Rpc(inner) => {
@@ -244,5 +244,5 @@ impl ConfigurableBlockchain for AnyBlockchain {
 
 impl_from!(electrum::ElectrumBlockchainConfig, AnyBlockchainConfig, Electrum, #[cfg(feature = "electrum")]);
 impl_from!(esplora::EsploraBlockchainConfig, AnyBlockchainConfig, Esplora, #[cfg(feature = "esplora")]);
-impl_from!(compact_filters::CompactFiltersBlockchainConfig, AnyBlockchainConfig, CompactFilters, #[cfg(feature = "compact_filters")]);
+impl_from!(compact_filters::nakamoto::CBFBlockchainConfig, AnyBlockchainConfig, CompactFilters, #[cfg(feature = "compact_filters")]);
 impl_from!(rpc::RpcConfig, AnyBlockchainConfig, Rpc, #[cfg(feature = "rpc")]);
