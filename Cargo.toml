@@ -126,6 +126,11 @@ name = "psbt_signer"
 path = "examples/psbt_signer.rs"
 required-features = ["electrum"]
 
+[[example]]
+name = "hardware_signer"
+path = "examples/hardware_signer.rs"
+required-features = ["electrum", "hardware-signer"]
+
 [workspace]
 members = ["macros"]
 [package.metadata.docs.rs]
