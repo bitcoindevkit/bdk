@@ -73,7 +73,7 @@ pub use self::esplora::EsploraBlockchain;
 pub mod compact_filters;
 
 #[cfg(feature = "compact_filters")]
-pub use self::compact_filters::CompactFiltersBlockchain;
+pub use self::compact_filters::nakamoto::CbfBlockchain;
 
 /// Capabilities that can be supported by a [`Blockchain`] backend
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

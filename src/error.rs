@@ -135,9 +135,9 @@ pub enum Error {
     #[cfg(feature = "esplora")]
     /// Esplora client error
     Esplora(Box<crate::blockchain::esplora::EsploraError>),
-    #[cfg(feature = "compact_filters")]
-    /// Compact filters client error)
-    CompactFilters(crate::blockchain::compact_filters::CompactFiltersError),
+    // #[cfg(feature = "compact_filters")]
+    // /// Compact filters client error)
+    // CompactFilters(crate::blockchain::compact_filters::CompactFiltersError),
     #[cfg(feature = "compact_filters")]
     /// CBF nakamoto error
     Cbf(crate::blockchain::compact_filters::nakamoto::CbfError),
@@ -323,15 +323,15 @@ impl_error!(bitcoincore_rpc::Error, Rpc);
 #[cfg(feature = "sqlite")]
 impl_error!(rusqlite::Error, Rusqlite);
 
-#[cfg(feature = "compact_filters")]
-impl From<crate::blockchain::compact_filters::CompactFiltersError> for Error {
-    fn from(other: crate::blockchain::compact_filters::CompactFiltersError) -> Self {
-        match other {
-            crate::blockchain::compact_filters::CompactFiltersError::Global(e) => *e,
-            err => Error::CompactFilters(err),
-        }
-    }
-}
+// #[cfg(feature = "compact_filters")]
+// impl From<crate::blockchain::compact_filters::CompactFiltersError> for Error {
+//     fn from(other: crate::blockchain::compact_filters::CompactFiltersError) -> Self {
+//         match other {
+//             crate::blockchain::compact_filters::CompactFiltersError::Global(e) => *e,
+//             err => Error::CompactFilters(err),
+//         }
+//     }
+// }
 
 #[cfg(feature = "compact_filters")]
 impl From<crate::blockchain::compact_filters::nakamoto::CbfError> for Error {
