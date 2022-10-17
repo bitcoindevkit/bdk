@@ -5524,6 +5524,7 @@ pub(crate) mod test {
                     SignOptions {
                         remove_partial_sigs: false,
                         try_finalize: false,
+                        allow_grinding: false,
                         ..Default::default()
                     },
                 )
@@ -5538,11 +5539,45 @@ pub(crate) mod test {
                 &mut psbt,
                 SignOptions {
                     remove_partial_sigs: false,
+                    allow_grinding: false,
                     ..Default::default()
                 },
             )
             .unwrap();
         // ...and checking that everything is fine
+        assert_fee_rate!(psbt, details.fee.unwrap_or(0), fee_rate);
+    }
+
+    #[test]
+    fn test_fee_rate_sign_grinding_low_r() {
+        // Our goal is to obtain a transaction with a signature with low-R (70 bytes)
+        // by setting the `allow_grinding` signing option as true.
+        // We then check that our fee rate and fee calculation is alright and that our
+        // signature is 70 bytes.
+        let (wallet, _, _) = get_funded_wallet("wpkh(tprv8ZgxMBicQKsPd3EupYiPRhaMooHKUHJxNsTfYuScep13go8QFfHdtkG9nRkFGb7busX4isf6X9dURGCoKgitaApQ6MupRhZMcELAxTBRJgS/*)");
+        let addr = wallet.get_address(New).unwrap();
+        let fee_rate = FeeRate::from_sat_per_vb(1.0);
+        let mut builder = wallet.build_tx();
+        builder
+            .drain_to(addr.script_pubkey())
+            .drain_wallet()
+            .fee_rate(fee_rate);
+        let (mut psbt, details) = builder.finish().unwrap();
+
+        wallet
+            .sign(
+                &mut psbt,
+                SignOptions {
+                    remove_partial_sigs: false,
+                    allow_grinding: true,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+
+        let key = psbt.inputs[0].partial_sigs.keys().next().unwrap();
+        let sig_len = psbt.inputs[0].partial_sigs[key].sig.serialize_der().len();
+        assert_eq!(sig_len, 70);
         assert_fee_rate!(psbt, details.fee.unwrap_or(0), fee_rate);
     }
 

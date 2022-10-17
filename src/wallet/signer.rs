@@ -472,6 +472,7 @@ impl InputSigner for SignerWrapper<PrivateKey> {
             hash,
             hash_ty,
             secp,
+            sign_options.allow_grinding,
         );
 
         Ok(())
@@ -485,9 +486,14 @@ fn sign_psbt_ecdsa(
     hash: bitcoin::Sighash,
     hash_ty: EcdsaSighashType,
     secp: &SecpCtx,
+    allow_grinding: bool,
 ) {
     let msg = &Message::from_slice(&hash.into_inner()[..]).unwrap();
-    let sig = secp.sign_ecdsa(msg, secret_key);
+    let sig = if allow_grinding {
+        secp.sign_ecdsa_low_r(msg, secret_key)
+    } else {
+        secp.sign_ecdsa(msg, secret_key)
+    };
     secp.verify_ecdsa(msg, &sig, &pubkey.inner)
         .expect("invalid or corrupted ecdsa signature");
 
@@ -718,6 +724,11 @@ pub struct SignOptions {
     ///
     /// Defaults to `true`, i.e., we always try to sign with the taproot internal key.
     pub sign_with_tap_internal_key: bool,
+
+    /// Whether we should grind ECDSA signature to ensure signing with low r
+    /// or not.
+    /// Defaults to `true`, i.e., we always grind ECDSA signature to sign with low r.
+    pub allow_grinding: bool,
 }
 
 /// Customize which taproot script-path leaves the signer should sign.
@@ -751,6 +762,7 @@ impl Default for SignOptions {
             try_finalize: true,
             tap_leaves_options: TapLeavesOptions::default(),
             sign_with_tap_internal_key: true,
+            allow_grinding: true,
         }
     }
 }
