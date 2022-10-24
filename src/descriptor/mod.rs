@@ -39,8 +39,8 @@ pub mod error;
 pub mod policy;
 pub mod template;
 
-pub use self::checksum::get_checksum;
-use self::checksum::get_checksum_bytes;
+pub use self::checksum::calc_checksum;
+use self::checksum::calc_checksum_bytes;
 pub use self::derived::{AsDerived, DerivedDescriptorKey};
 pub use self::error::Error as DescriptorError;
 pub use self::policy::Policy;
@@ -87,7 +87,7 @@ impl IntoWalletDescriptor for &str {
     ) -> Result<(ExtendedDescriptor, KeyMap), DescriptorError> {
         let descriptor = match self.split_once('#') {
             Some((desc, original_checksum)) => {
-                let checksum = get_checksum_bytes(desc, false)?;
+                let checksum = calc_checksum_bytes(desc)?;
                 if original_checksum.as_bytes() != checksum {
                     return Err(DescriptorError::InvalidDescriptorChecksum);
                 }

@@ -60,7 +60,7 @@ use crate::keys::ExtScriptContext;
 use crate::wallet::signer::{SignerId, SignersContainer};
 use crate::wallet::utils::{self, After, Older, SecpCtx};
 
-use super::checksum::get_checksum;
+use super::checksum::calc_checksum;
 use super::error::Error;
 use super::XKeyUtils;
 use bitcoin::util::psbt::{Input as PsbtInput, PartiallySignedTransaction as Psbt};
@@ -165,7 +165,7 @@ impl SatisfiableItem {
 
     /// Returns a unique id for the [`SatisfiableItem`]
     pub fn id(&self) -> String {
-        get_checksum(&serde_json::to_string(self).expect("Failed to serialize a SatisfiableItem"))
+        calc_checksum(&serde_json::to_string(self).expect("Failed to serialize a SatisfiableItem"))
             .expect("Failed to compute a SatisfiableItem id")
     }
 }

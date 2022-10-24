@@ -64,11 +64,11 @@ use utils::{check_nlocktime, check_nsequence_rbf, After, Older, SecpCtx};
 use crate::blockchain::{GetHeight, NoopProgress, Progress, WalletSync};
 use crate::database::memory::MemoryDatabase;
 use crate::database::{AnyDatabase, BatchDatabase, BatchOperations, DatabaseUtils, SyncTime};
-use crate::descriptor::checksum::get_checksum_bytes;
+use crate::descriptor::checksum::calc_checksum_bytes_internal;
 use crate::descriptor::derived::AsDerived;
 use crate::descriptor::policy::BuildSatisfaction;
 use crate::descriptor::{
-    get_checksum, into_wallet_descriptor_checked, DerivedDescriptor, DerivedDescriptorMeta,
+    calc_checksum, into_wallet_descriptor_checked, DerivedDescriptor, DerivedDescriptorMeta,
     DescriptorMeta, DescriptorScripts, ExtendedDescriptor, ExtractPolicy, IntoWalletDescriptor,
     Policy, XKeyUtils,
 };
@@ -248,12 +248,12 @@ where
     /// actual checksum, and the second time with the checksum of `descriptor+checksum`. The second
     /// check is necessary for backwards compatibility of a checksum-inception bug.
     fn db_checksum(db: &mut D, desc: &str, kind: KeychainKind) -> Result<(), Error> {
-        let checksum = get_checksum_bytes(desc, true)?;
+        let checksum = calc_checksum_bytes_internal(desc, true)?;
         if db.check_descriptor_checksum(kind, checksum).is_ok() {
             return Ok(());
         }
 
-        let checksum_inception = get_checksum_bytes(desc, false)?;
+        let checksum_inception = calc_checksum_bytes_internal(desc, false)?;
         db.check_descriptor_checksum(kind, checksum_inception)
     }
 
@@ -1878,14 +1878,14 @@ where
         .into_wallet_descriptor(secp, network)?
         .0
         .to_string();
-    let mut wallet_name = get_checksum(&descriptor[..descriptor.find('#').unwrap()])?;
+    let mut wallet_name = calc_checksum(&descriptor[..descriptor.find('#').unwrap()])?;
     if let Some(change_descriptor) = change_descriptor {
         let change_descriptor = change_descriptor
             .into_wallet_descriptor(secp, network)?
             .0
             .to_string();
         wallet_name.push_str(
-            get_checksum(&change_descriptor[..change_descriptor.find('#').unwrap()])?.as_str(),
+            calc_checksum(&change_descriptor[..change_descriptor.find('#').unwrap()])?.as_str(),
         );
     }
 
@@ -1958,7 +1958,7 @@ pub(crate) mod test {
         let checksum = wallet.descriptor_checksum(KeychainKind::External);
         assert_eq!(checksum.len(), 8);
         assert_eq!(
-            get_checksum(&wallet.descriptor.to_string()).unwrap(),
+            calc_checksum(&wallet.descriptor.to_string()).unwrap(),
             checksum
         );
     }
@@ -1968,8 +1968,8 @@ pub(crate) mod test {
         let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
         let desc = wallet.descriptor.to_string();
 
-        let checksum = get_checksum_bytes(&desc, true).unwrap();
-        let checksum_inception = get_checksum_bytes(&desc, false).unwrap();
+        let checksum = calc_checksum_bytes_internal(&desc, true).unwrap();
+        let checksum_inception = calc_checksum_bytes_internal(&desc, false).unwrap();
         let checksum_invalid = [b'q'; 8];
 
         let mut db = MemoryDatabase::new();
