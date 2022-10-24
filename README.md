@@ -171,6 +171,17 @@ cargo test --features test-electrum
 The other options are `test-esplora`, `test-rpc` or `test-rpc-legacy` which runs against an older version of Bitcoin Core.
 Note that `electrs` and `bitcoind` binaries are automatically downloaded (on mac and linux), to specify you already have installed binaries you must use `--no-default-features` and provide `BITCOIND_EXE` and `ELECTRS_EXE` as environment variables.
 
+## Running under WASM
+
+If you want to run this library under WASM you will probably have to add the following lines to you `Cargo.toml`:
+
+```toml
+[dependencies]
+getrandom = { version = "0.2", features = ["js"] }
+```
+
+This enables the `rand` crate to work in environments where JavaScript is available. See [this link](https://docs.rs/getrandom/0.2.8/getrandom/#webassembly-support) to learn more.
+
 ## License
 
 Licensed under either of

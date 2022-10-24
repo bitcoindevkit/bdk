@@ -703,7 +703,7 @@ impl TxOrdering {
                 #[cfg(not(test))]
                 let mut rng = rand::thread_rng();
                 #[cfg(test)]
-                let mut rng = rand::rngs::StdRng::seed_from_u64(0);
+                let mut rng = rand::rngs::StdRng::seed_from_u64(12345);
 
                 tx.output.shuffle(&mut rng);
             }
