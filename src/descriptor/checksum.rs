@@ -94,12 +94,12 @@ pub(crate) fn calc_checksum_bytes_internal(
     Ok(checksum)
 }
 
-/// Compute the checksum bytes of a descriptor, any existing checksum hash will be excluded from the calculation
+/// Compute the checksum bytes of a descriptor, excludes any existing checksum in the descriptor string from the calculation
 pub fn calc_checksum_bytes(desc: &str) -> Result<[u8; 8], DescriptorError> {
     calc_checksum_bytes_internal(desc, true)
 }
 
-/// Compute the checksum of a descriptor, any existing checksum hash will be excluded from the calculation
+/// Compute the checksum of a descriptor, excludes any existing checksum in the descriptor string from the calculation
 pub fn calc_checksum(desc: &str) -> Result<String, DescriptorError> {
     // unsafe is okay here as the checksum only uses bytes in `CHECKSUM_CHARSET`
     calc_checksum_bytes_internal(desc, true)
@@ -112,7 +112,7 @@ pub fn calc_checksum(desc: &str) -> Result<String, DescriptorError> {
 /// Compute the checksum bytes of a descriptor
 #[deprecated(
     since = "0.24.0",
-    note = "Use new `calc_checksum_bytes` function which excludes any existing hash before calculating the checksum hash bytes. See https://github.com/bitcoindevkit/bdk/pull/765."
+    note = "Use new `calc_checksum_bytes` function which excludes any existing checksum in the descriptor string before calculating the checksum hash bytes. See https://github.com/bitcoindevkit/bdk/pull/765."
 )]
 pub fn get_checksum_bytes(desc: &str) -> Result<[u8; 8], DescriptorError> {
     calc_checksum_bytes_internal(desc, false)
@@ -121,7 +121,7 @@ pub fn get_checksum_bytes(desc: &str) -> Result<[u8; 8], DescriptorError> {
 /// Compute the checksum of a descriptor
 #[deprecated(
     since = "0.24.0",
-    note = "Use new `calc_checksum` function which excludes any existing hash before calculating the checksum hash. See https://github.com/bitcoindevkit/bdk/pull/765."
+    note = "Use new `calc_checksum` function which excludes any existing checksum in the descriptor string before calculating the checksum hash. See https://github.com/bitcoindevkit/bdk/pull/765."
 )]
 pub fn get_checksum(desc: &str) -> Result<String, DescriptorError> {
     // unsafe is okay here as the checksum only uses bytes in `CHECKSUM_CHARSET`
@@ -153,6 +153,18 @@ mod test {
 
         let desc = "pkh(tpubD6NzVbkrYhZ4XHndKkuB8FifXm8r5FQHwrN6oZuWCz13qb93rtgKvD4PQsqC4HP4yhV3tA2fqr2RbY5mNXfM7RxXUoeABoDtsFUq2zJq6YK/44'/1'/0'/0/*)#lasegmfs";
         assert_eq!(calc_checksum(desc).unwrap(), "lasegmfs");
+
+        let desc = "wpkh(tprv8ZgxMBicQKsPdpkqS7Eair4YxjcuuvDPNYmKX3sCniCf16tHEVrjjiSXEkFRnUH77yXc6ZcwHHcLNfjdi5qUvw3VDfgYiH5mNsj5izuiu2N/1/2/*)#tqz0nc26";
+        assert!(matches!(
+            calc_checksum(desc).err(),
+            Some(DescriptorError::InvalidDescriptorChecksum)
+        ));
+
+        let desc = "pkh(tpubD6NzVbkrYhZ4XHndKkuB8FifXm8r5FQHwrN6oZuWCz13qb93rtgKvD4PQsqC4HP4yhV3tA2fqr2RbY5mNXfM7RxXUoeABoDtsFUq2zJq6YK/44'/1'/0'/0/*)#lasegmsf";
+        assert!(matches!(
+            calc_checksum(desc).err(),
+            Some(DescriptorError::InvalidDescriptorChecksum)
+        ));
     }
 
     #[test]

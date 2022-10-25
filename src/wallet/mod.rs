@@ -210,7 +210,6 @@ where
             KeychainKind::External,
         )?;
         let signers = Arc::new(SignersContainer::build(keymap, &descriptor, &secp));
-
         let (change_descriptor, change_signers) = match change_descriptor {
             Some(desc) => {
                 let (change_descriptor, change_keymap) =
