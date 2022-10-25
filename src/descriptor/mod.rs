@@ -15,24 +15,22 @@
 //! from [`miniscript`].
 
 use std::collections::BTreeMap;
-use std::ops::Deref;
 
 use bitcoin::util::bip32::{ChildNumber, DerivationPath, ExtendedPubKey, Fingerprint, KeySource};
 use bitcoin::util::{psbt, taproot};
 use bitcoin::{secp256k1, PublicKey, XOnlyPublicKey};
-use bitcoin::{Network, Script, TxOut};
+use bitcoin::{Network, TxOut};
 
-use miniscript::descriptor::{DescriptorType, InnerXKey, SinglePubKey};
+use miniscript::descriptor::{DefiniteDescriptorKey, DescriptorType, InnerXKey, SinglePubKey};
 pub use miniscript::{
     descriptor::DescriptorXKey, descriptor::KeyMap, descriptor::Wildcard, Descriptor,
     DescriptorPublicKey, Legacy, Miniscript, ScriptContext, Segwitv0,
 };
-use miniscript::{DescriptorTrait, ForEachKey, TranslatePk};
+use miniscript::{ForEachKey, MiniscriptKey, TranslatePk};
 
 use crate::descriptor::policy::BuildSatisfaction;
 
 pub mod checksum;
-pub mod derived;
 #[doc(hidden)]
 pub mod dsl;
 pub mod error;
@@ -40,7 +38,6 @@ pub mod policy;
 pub mod template;
 
 pub use self::checksum::get_checksum;
-pub use self::derived::{AsDerived, DerivedDescriptorKey};
 pub use self::error::Error as DescriptorError;
 pub use self::policy::Policy;
 use self::template::DescriptorTemplateOut;
@@ -52,7 +49,7 @@ use crate::wallet::utils::SecpCtx;
 pub type ExtendedDescriptor = Descriptor<DescriptorPublicKey>;
 
 /// Alias for a [`Descriptor`] that contains extended **derived** keys
-pub type DerivedDescriptor<'s> = Descriptor<DerivedDescriptorKey<'s>>;
+pub type DerivedDescriptor = Descriptor<DefiniteDescriptorKey>;
 
 /// Alias for the type of maps that represent derivation paths in a [`psbt::Input`] or
 /// [`psbt::Output`]
@@ -132,28 +129,76 @@ impl IntoWalletDescriptor for (ExtendedDescriptor, KeyMap) {
     ) -> Result<(ExtendedDescriptor, KeyMap), DescriptorError> {
         use crate::keys::DescriptorKey;
 
-        let check_key = |pk: &DescriptorPublicKey| {
-            let (pk, _, networks) = if self.0.is_witness() {
-                let descriptor_key: DescriptorKey<miniscript::Segwitv0> =
-                    pk.clone().into_descriptor_key()?;
-                descriptor_key.extract(secp)?
-            } else {
-                let descriptor_key: DescriptorKey<miniscript::Legacy> =
-                    pk.clone().into_descriptor_key()?;
-                descriptor_key.extract(secp)?
-            };
+        struct Translator<'s, 'd> {
+            secp: &'s SecpCtx,
+            descriptor: &'d ExtendedDescriptor,
+            network: Network,
+        }
 
-            if networks.contains(&network) {
-                Ok(pk)
-            } else {
-                Err(DescriptorError::Key(KeyError::InvalidNetwork))
+        impl<'s, 'd>
+            miniscript::Translator<DescriptorPublicKey, miniscript::DummyKey, DescriptorError>
+            for Translator<'s, 'd>
+        {
+            fn pk(
+                &mut self,
+                pk: &DescriptorPublicKey,
+            ) -> Result<miniscript::DummyKey, DescriptorError> {
+                let secp = &self.secp;
+
+                let (_, _, networks) = if self.descriptor.is_taproot() {
+                    let descriptor_key: DescriptorKey<miniscript::Tap> =
+                        pk.clone().into_descriptor_key()?;
+                    descriptor_key.extract(secp)?
+                } else if self.descriptor.is_witness() {
+                    let descriptor_key: DescriptorKey<miniscript::Segwitv0> =
+                        pk.clone().into_descriptor_key()?;
+                    descriptor_key.extract(secp)?
+                } else {
+                    let descriptor_key: DescriptorKey<miniscript::Legacy> =
+                        pk.clone().into_descriptor_key()?;
+                    descriptor_key.extract(secp)?
+                };
+
+                if networks.contains(&self.network) {
+                    Ok(miniscript::DummyKey)
+                } else {
+                    Err(DescriptorError::Key(KeyError::InvalidNetwork))
+                }
             }
-        };
+            fn sha256(
+                &mut self,
+                _sha256: &<DescriptorPublicKey as MiniscriptKey>::Sha256,
+            ) -> Result<miniscript::DummySha256Hash, DescriptorError> {
+                Ok(Default::default())
+            }
+            fn hash256(
+                &mut self,
+                _hash256: &<DescriptorPublicKey as MiniscriptKey>::Hash256,
+            ) -> Result<miniscript::DummyHash256Hash, DescriptorError> {
+                Ok(Default::default())
+            }
+            fn ripemd160(
+                &mut self,
+                _ripemd160: &<DescriptorPublicKey as MiniscriptKey>::Ripemd160,
+            ) -> Result<miniscript::DummyRipemd160Hash, DescriptorError> {
+                Ok(Default::default())
+            }
+            fn hash160(
+                &mut self,
+                _hash160: &<DescriptorPublicKey as MiniscriptKey>::Hash160,
+            ) -> Result<miniscript::DummyHash160Hash, DescriptorError> {
+                Ok(Default::default())
+            }
+        }
 
         // check the network for the keys
-        let translated = self.0.translate_pk(check_key, check_key)?;
+        self.0.translate_pk(&mut Translator {
+            secp,
+            network,
+            descriptor: &self.0,
+        })?;
 
-        Ok((translated, self.1))
+        Ok(self)
     }
 }
 
@@ -163,10 +208,17 @@ impl IntoWalletDescriptor for DescriptorTemplateOut {
         _secp: &SecpCtx,
         network: Network,
     ) -> Result<(ExtendedDescriptor, KeyMap), DescriptorError> {
-        let valid_networks = &self.2;
+        struct Translator {
+            network: Network,
+        }
 
-        let fix_key = |pk: &DescriptorPublicKey| {
-            if valid_networks.contains(&network) {
+        impl miniscript::Translator<DescriptorPublicKey, DescriptorPublicKey, DescriptorError>
+            for Translator
+        {
+            fn pk(
+                &mut self,
+                pk: &DescriptorPublicKey,
+            ) -> Result<DescriptorPublicKey, DescriptorError> {
                 // workaround for xpubs generated by other key types, like bip39: since when the
                 // conversion is made one network has to be chosen, what we generally choose
                 // "mainnet", but then override the set of valid networks to specify that all of
@@ -175,7 +227,7 @@ impl IntoWalletDescriptor for DescriptorTemplateOut {
                 let pk = match pk {
                     DescriptorPublicKey::XPub(ref xpub) => {
                         let mut xpub = xpub.clone();
-                        xpub.xkey.network = network;
+                        xpub.xkey.network = self.network;
 
                         DescriptorPublicKey::XPub(xpub)
                     }
@@ -183,13 +235,20 @@ impl IntoWalletDescriptor for DescriptorTemplateOut {
                 };
 
                 Ok(pk)
-            } else {
-                Err(DescriptorError::Key(KeyError::InvalidNetwork))
             }
-        };
+            miniscript::translate_hash_clone!(
+                DescriptorPublicKey,
+                DescriptorPublicKey,
+                DescriptorError
+            );
+        }
+
+        if !self.2.contains(&network) {
+            return Err(DescriptorError::Key(KeyError::InvalidNetwork));
+        }
 
         // fixup the network for keys that need it
-        let translated = self.0.translate_pk(fix_key, fix_key)?;
+        let translated = self.0.translate_pk(&mut Translator { network })?;
 
         Ok((translated, self.1))
     }
@@ -210,7 +269,7 @@ pub(crate) fn into_wallet_descriptor_checked<T: IntoWalletDescriptor>(
             derivation_path,
             wildcard,
             ..
-        }) = k.as_key()
+        }) = k
         {
             return *wildcard == Wildcard::Hardened
                 || derivation_path.into_iter().any(ChildNumber::is_hardened);
@@ -294,11 +353,6 @@ where
     }
 }
 
-pub(crate) trait DerivedDescriptorMeta {
-    fn get_hd_keypaths(&self, secp: &SecpCtx) -> HdKeyPaths;
-    fn get_tap_key_origins(&self, secp: &SecpCtx) -> TapKeyOrigins;
-}
-
 pub(crate) trait DescriptorMeta {
     fn is_witness(&self) -> bool;
     fn is_taproot(&self) -> bool;
@@ -307,63 +361,23 @@ pub(crate) trait DescriptorMeta {
         &self,
         hd_keypaths: &HdKeyPaths,
         secp: &'s SecpCtx,
-    ) -> Option<DerivedDescriptor<'s>>;
+    ) -> Option<DerivedDescriptor>;
     fn derive_from_tap_key_origins<'s>(
         &self,
         tap_key_origins: &TapKeyOrigins,
         secp: &'s SecpCtx,
-    ) -> Option<DerivedDescriptor<'s>>;
+    ) -> Option<DerivedDescriptor>;
     fn derive_from_psbt_key_origins<'s>(
         &self,
         key_origins: BTreeMap<Fingerprint, (&DerivationPath, SinglePubKey)>,
         secp: &'s SecpCtx,
-    ) -> Option<DerivedDescriptor<'s>>;
+    ) -> Option<DerivedDescriptor>;
     fn derive_from_psbt_input<'s>(
         &self,
         psbt_input: &psbt::Input,
         utxo: Option<TxOut>,
         secp: &'s SecpCtx,
-    ) -> Option<DerivedDescriptor<'s>>;
-}
-
-pub(crate) trait DescriptorScripts {
-    fn psbt_redeem_script(&self) -> Option<Script>;
-    fn psbt_witness_script(&self) -> Option<Script>;
-}
-
-impl<'s> DescriptorScripts for DerivedDescriptor<'s> {
-    fn psbt_redeem_script(&self) -> Option<Script> {
-        match self.desc_type() {
-            DescriptorType::ShWpkh => Some(self.explicit_script().unwrap()),
-            DescriptorType::ShWsh => Some(self.explicit_script().unwrap().to_v0_p2wsh()),
-            DescriptorType::Sh => Some(self.explicit_script().unwrap()),
-            DescriptorType::Bare => Some(self.explicit_script().unwrap()),
-            DescriptorType::ShSortedMulti => Some(self.explicit_script().unwrap()),
-            DescriptorType::ShWshSortedMulti => Some(self.explicit_script().unwrap().to_v0_p2wsh()),
-            DescriptorType::Pkh
-            | DescriptorType::Wpkh
-            | DescriptorType::Tr
-            | DescriptorType::Wsh
-            | DescriptorType::WshSortedMulti => None,
-        }
-    }
-
-    fn psbt_witness_script(&self) -> Option<Script> {
-        match self.desc_type() {
-            DescriptorType::Wsh => Some(self.explicit_script().unwrap()),
-            DescriptorType::ShWsh => Some(self.explicit_script().unwrap()),
-            DescriptorType::WshSortedMulti | DescriptorType::ShWshSortedMulti => {
-                Some(self.explicit_script().unwrap())
-            }
-            DescriptorType::Bare
-            | DescriptorType::Sh
-            | DescriptorType::Pkh
-            | DescriptorType::Wpkh
-            | DescriptorType::ShSortedMulti
-            | DescriptorType::Tr
-            | DescriptorType::ShWpkh => None,
-        }
-    }
+    ) -> Option<DerivedDescriptor>;
 }
 
 impl DescriptorMeta for ExtendedDescriptor {
@@ -387,7 +401,7 @@ impl DescriptorMeta for ExtendedDescriptor {
         let mut answer = Vec::new();
 
         self.for_each_key(|pk| {
-            if let DescriptorPublicKey::XPub(xpub) = pk.as_key() {
+            if let DescriptorPublicKey::XPub(xpub) = pk {
                 answer.push(xpub.clone());
             }
 
@@ -401,7 +415,7 @@ impl DescriptorMeta for ExtendedDescriptor {
         &self,
         key_origins: BTreeMap<Fingerprint, (&DerivationPath, SinglePubKey)>,
         secp: &'s SecpCtx,
-    ) -> Option<DerivedDescriptor<'s>> {
+    ) -> Option<DerivedDescriptor> {
         // Ensure that deriving `xpub` with `path` yields `expected`
         let verify_key = |xpub: &DescriptorXKey<ExtendedPubKey>,
                           path: &DerivationPath,
@@ -423,7 +437,7 @@ impl DescriptorMeta for ExtendedDescriptor {
 
         // using `for_any_key` should make this stop as soon as we return `true`
         self.for_any_key(|key| {
-            if let DescriptorPublicKey::XPub(xpub) = key.as_key().deref() {
+            if let DescriptorPublicKey::XPub(xpub) = key {
                 // Check if the key matches one entry in our `key_origins`. If it does, `matches()` will
                 // return the "prefix" that matched, so we remove that prefix from the full path
                 // found in `key_origins` and save it in `derive_path`. We expect this to be a derivation
@@ -481,14 +495,14 @@ impl DescriptorMeta for ExtendedDescriptor {
             false
         });
 
-        path_found.map(|path| self.as_derived(path, secp))
+        path_found.map(|path| self.at_derivation_index(path))
     }
 
     fn derive_from_hd_keypaths<'s>(
         &self,
         hd_keypaths: &HdKeyPaths,
         secp: &'s SecpCtx,
-    ) -> Option<DerivedDescriptor<'s>> {
+    ) -> Option<DerivedDescriptor> {
         // "Convert" an hd_keypaths map to the format required by `derive_from_psbt_key_origins`
         let key_origins = hd_keypaths
             .iter()
@@ -506,7 +520,7 @@ impl DescriptorMeta for ExtendedDescriptor {
         &self,
         tap_key_origins: &TapKeyOrigins,
         secp: &'s SecpCtx,
-    ) -> Option<DerivedDescriptor<'s>> {
+    ) -> Option<DerivedDescriptor> {
         // "Convert" a tap_key_origins map to the format required by `derive_from_psbt_key_origins`
         let key_origins = tap_key_origins
             .iter()
@@ -520,19 +534,19 @@ impl DescriptorMeta for ExtendedDescriptor {
         psbt_input: &psbt::Input,
         utxo: Option<TxOut>,
         secp: &'s SecpCtx,
-    ) -> Option<DerivedDescriptor<'s>> {
+    ) -> Option<DerivedDescriptor> {
         if let Some(derived) = self.derive_from_hd_keypaths(&psbt_input.bip32_derivation, secp) {
             return Some(derived);
         }
         if let Some(derived) = self.derive_from_tap_key_origins(&psbt_input.tap_key_origins, secp) {
             return Some(derived);
         }
-        if self.is_deriveable() {
+        if self.has_wildcard() {
             // We can't try to bruteforce the derivation index, exit here
             return None;
         }
 
-        let descriptor = self.as_derived_fixed(secp);
+        let descriptor = self.at_derivation_index(0);
         match descriptor.desc_type() {
             // TODO: add pk() here
             DescriptorType::Pkh
@@ -563,86 +577,6 @@ impl DescriptorMeta for ExtendedDescriptor {
             }
             _ => None,
         }
-    }
-}
-
-impl<'s> DerivedDescriptorMeta for DerivedDescriptor<'s> {
-    fn get_hd_keypaths(&self, secp: &SecpCtx) -> HdKeyPaths {
-        let mut answer = BTreeMap::new();
-        self.for_each_key(|key| {
-            if let DescriptorPublicKey::XPub(xpub) = key.as_key().deref() {
-                let derived_pubkey = xpub
-                    .xkey
-                    .derive_pub(secp, &xpub.derivation_path)
-                    .expect("Derivation can't fail");
-
-                answer.insert(
-                    derived_pubkey.public_key,
-                    (xpub.root_fingerprint(secp), xpub.full_path(&[])),
-                );
-            }
-
-            true
-        });
-
-        answer
-    }
-
-    fn get_tap_key_origins(&self, secp: &SecpCtx) -> TapKeyOrigins {
-        use miniscript::ToPublicKey;
-
-        let mut answer = BTreeMap::new();
-        let mut insert_path = |pk: &DerivedDescriptorKey<'_>, lh| {
-            let key_origin = match pk.deref() {
-                DescriptorPublicKey::XPub(xpub) => {
-                    Some((xpub.root_fingerprint(secp), xpub.full_path(&[])))
-                }
-                DescriptorPublicKey::SinglePub(_) => None,
-            };
-
-            // If this is the internal key, we only insert the key origin if it's not None.
-            // For keys found in the tap tree we always insert a key origin (because the signer
-            // looks for it to know which leaves to sign for), even though it may be None
-            match (lh, key_origin) {
-                (None, Some(ko)) => {
-                    answer
-                        .entry(pk.to_x_only_pubkey())
-                        .or_insert_with(|| (vec![], ko));
-                }
-                (Some(lh), origin) => {
-                    answer
-                        .entry(pk.to_x_only_pubkey())
-                        .or_insert_with(|| (vec![], origin.unwrap_or_default()))
-                        .0
-                        .push(lh);
-                }
-                _ => {}
-            }
-        };
-
-        if let Descriptor::Tr(tr) = &self {
-            // Internal key first, then iterate the scripts
-            insert_path(tr.internal_key(), None);
-
-            for (_, ms) in tr.iter_scripts() {
-                // Assume always the same leaf version
-                let leaf_hash = taproot::TapLeafHash::from_script(
-                    &ms.encode(),
-                    taproot::LeafVersion::TapScript,
-                );
-
-                for key in ms.iter_pk_pkh() {
-                    let key = match key {
-                        miniscript::miniscript::iter::PkPkh::PlainPubkey(pk) => pk,
-                        miniscript::miniscript::iter::PkPkh::HashedPubkey(pk) => pk,
-                    };
-
-                    insert_path(&key, Some(leaf_hash));
-                }
-            }
-        }
-
-        answer
     }
 }
 
@@ -917,7 +851,7 @@ mod test {
 
     #[test]
     fn test_sh_wsh_sortedmulti_redeemscript() {
-        use super::{AsDerived, DescriptorScripts};
+        use miniscript::psbt::PsbtInputExt;
 
         let secp = Secp256k1::new();
 
@@ -925,11 +859,16 @@ mod test {
         let (descriptor, _) =
             into_wallet_descriptor_checked(descriptor, &secp, Network::Testnet).unwrap();
 
-        let descriptor = descriptor.as_derived(0, &secp);
+        let descriptor = descriptor.at_derivation_index(0);
 
         let script = Script::from_str("5321022f533b667e2ea3b36e21961c9fe9dca340fbe0af5210173a83ae0337ab20a57621026bb53a98e810bd0ee61a0ed1164ba6c024786d76554e793e202dc6ce9c78c4ea2102d5b8a7d66a41ffdb6f4c53d61994022e886b4f45001fb158b95c9164d45f8ca3210324b75eead2c1f9c60e8adeb5e7009fec7a29afcdb30d829d82d09562fe8bae8521032d34f8932200833487bd294aa219dcbe000b9f9b3d824799541430009f0fa55121037468f8ea99b6c64788398b5ad25480cad08f4b0d65be54ce3a55fd206b5ae4722103f72d3d96663b0ea99b0aeb0d7f273cab11a8de37885f1dddc8d9112adb87169357ae").unwrap();
 
-        assert_eq!(descriptor.psbt_redeem_script(), Some(script.to_v0_p2wsh()));
-        assert_eq!(descriptor.psbt_witness_script(), Some(script));
+        let mut psbt_input = psbt::Input::default();
+        psbt_input
+            .update_with_descriptor_unchecked(&descriptor)
+            .unwrap();
+
+        assert_eq!(psbt_input.redeem_script, Some(script.to_v0_p2wsh()));
+        assert_eq!(psbt_input.witness_script, Some(script));
     }
 }

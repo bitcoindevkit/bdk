@@ -1,8 +1,18 @@
+// Bitcoin Dev Kit
+//
+// Copyright (c) 2020-2021 Bitcoin Dev Kit Developers
+//
+// This file is licensed under the Apache License, Version 2.0 <LICENSE-APACHE
+// or http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your option.
+// You may not use this file except in accordance with one or both of these
+// licenses.
+
 use crate::testutils::TestIncomingTx;
 use bitcoin::consensus::encode::{deserialize, serialize};
 use bitcoin::hashes::hex::{FromHex, ToHex};
 use bitcoin::hashes::sha256d;
-use bitcoin::{Address, Amount, Script, Transaction, Txid, Witness};
+use bitcoin::{Address, Amount, PackedLockTime, Script, Sequence, Transaction, Txid, Witness};
 pub use bitcoincore_rpc::bitcoincore_rpc_json::AddressType;
 pub use bitcoincore_rpc::{Auth, Client as RpcClient, RpcApi};
 use core::str::FromStr;
@@ -110,7 +120,7 @@ impl TestClient {
         if let Some(true) = meta_tx.replaceable {
             // for some reason core doesn't set this field right
             for input in &mut tx.input {
-                input.sequence = 0xFFFFFFFD;
+                input.sequence = Sequence(0xFFFFFFFD);
             }
         }
 
@@ -164,6 +174,7 @@ impl TestClient {
         use bitcoin::blockdata::script::Builder;
         use bitcoin::blockdata::transaction::{OutPoint, TxIn, TxOut};
         use bitcoin::hash_types::{BlockHash, TxMerkleNode};
+        use bitcoin::hashes::Hash;
 
         let block_template: serde_json::Value = self
             .call("getblocktemplate", &[json!({"rules": ["segwit"]})])
@@ -176,7 +187,7 @@ impl TestClient {
                 block_template["previousblockhash"].as_str().unwrap(),
             )
             .unwrap(),
-            merkle_root: TxMerkleNode::default(),
+            merkle_root: TxMerkleNode::all_zeros(),
             time: block_template["curtime"].as_u64().unwrap() as u32,
             bits: u32::from_str_radix(block_template["bits"].as_str().unwrap(), 16).unwrap(),
             nonce: 0,
@@ -184,15 +195,15 @@ impl TestClient {
         debug!("header: {:#?}", header);
 
         let height = block_template["height"].as_u64().unwrap() as i64;
-        let witness_reserved_value: Vec<u8> = sha256d::Hash::default().as_ref().into();
+        let witness_reserved_value: Vec<u8> = sha256d::Hash::all_zeros().as_ref().into();
         // burn block subsidy and fees, not a big deal
         let mut coinbase_tx = Transaction {
             version: 1,
-            lock_time: 0,
+            lock_time: PackedLockTime(0),
             input: vec![TxIn {
                 previous_output: OutPoint::null(),
                 script_sig: Builder::new().push_int(height).into_script(),
-                sequence: 0xFFFFFFFF,
+                sequence: Sequence(0xFFFFFFFF),
                 witness: Witness::from_vec(vec![witness_reserved_value]),
             }],
             output: vec![],
@@ -1184,7 +1195,7 @@ macro_rules! bdk_blockchain_tests {
                 // 5. Verify 25_000 sats are received by test bitcoind node taproot wallet
 
                 let taproot_balance = taproot_wallet_client.get_balance(None, None).unwrap();
-                assert_eq!(taproot_balance.as_sat(), 25_000, "node has incorrect taproot wallet balance");
+                assert_eq!(taproot_balance.to_sat(), 25_000, "node has incorrect taproot wallet balance");
             }
 
             #[test]

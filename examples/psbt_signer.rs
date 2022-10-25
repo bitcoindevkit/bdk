@@ -33,8 +33,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     let internal_secret_xkey = DescriptorSecretKey::from_str("[e9824965/84'/1'/0']tprv8fvem7qWxY3SGCQczQpRpqTKg455wf1zgixn6MZ4ze8gRfHjov5gXBQTadNfDgqs9ERbZZ3Bi1PNYrCCusFLucT39K525MWLpeURjHwUsfX/1/*").unwrap();
 
     let secp = Secp256k1::new();
-    let external_public_xkey = external_secret_xkey.as_public(&secp).unwrap();
-    let internal_public_xkey = internal_secret_xkey.as_public(&secp).unwrap();
+    let external_public_xkey = external_secret_xkey.to_public(&secp).unwrap();
+    let internal_public_xkey = internal_secret_xkey.to_public(&secp).unwrap();
 
     let signing_external_descriptor = descriptor!(wpkh(external_secret_xkey)).unwrap();
     let signing_internal_descriptor = descriptor!(wpkh(internal_secret_xkey)).unwrap();

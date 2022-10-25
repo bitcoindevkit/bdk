@@ -110,8 +110,7 @@ impl GetTx for EsploraBlockchain {
 
 impl GetBlockHash for EsploraBlockchain {
     fn get_block_hash(&self, height: u64) -> Result<BlockHash, Error> {
-        let block_header = self.url_client.get_header(height as u32)?;
-        Ok(block_header.block_hash())
+        Ok(self.url_client.get_block_hash(height as u32)?)
     }
 }
 

@@ -468,12 +468,10 @@ mod test {
     use std::str::FromStr;
 
     use super::*;
-    use crate::descriptor::derived::AsDerived;
     use crate::descriptor::{DescriptorError, DescriptorMeta};
     use crate::keys::ValidNetworks;
     use bitcoin::network::constants::Network::Regtest;
-    use bitcoin::secp256k1::Secp256k1;
-    use miniscript::descriptor::{DescriptorPublicKey, DescriptorTrait, KeyMap};
+    use miniscript::descriptor::{DescriptorPublicKey, KeyMap};
     use miniscript::Descriptor;
 
     // BIP44 `pkh(key/44'/{0,1}'/0'/{0,1}/*)`
@@ -517,17 +515,15 @@ mod test {
         is_fixed: bool,
         expected: &[&str],
     ) {
-        let secp = Secp256k1::new();
-
         let (desc, _key_map, _networks) = desc.unwrap();
         assert_eq!(desc.is_witness(), is_witness);
-        assert_eq!(!desc.is_deriveable(), is_fixed);
+        assert_eq!(!desc.has_wildcard(), is_fixed);
         for i in 0..expected.len() {
             let index = i as u32;
-            let child_desc = if !desc.is_deriveable() {
-                desc.as_derived_fixed(&secp)
+            let child_desc = if !desc.has_wildcard() {
+                desc.at_derivation_index(0)
             } else {
-                desc.as_derived(index, &secp)
+                desc.at_derivation_index(index)
             };
             let address = child_desc.address(Regtest).unwrap();
             assert_eq!(address.to_string(), *expected.get(i).unwrap());

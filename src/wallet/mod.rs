@@ -24,15 +24,13 @@ use std::sync::Arc;
 use bitcoin::secp256k1::Secp256k1;
 
 use bitcoin::consensus::encode::serialize;
-use bitcoin::util::{psbt, taproot};
+use bitcoin::util::psbt;
 use bitcoin::{
-    Address, EcdsaSighashType, Network, OutPoint, SchnorrSighashType, Script, Transaction, TxOut,
-    Txid, Witness,
+    Address, EcdsaSighashType, LockTime, Network, OutPoint, SchnorrSighashType, Script, Sequence,
+    Transaction, TxOut, Txid, Witness,
 };
 
-use miniscript::descriptor::DescriptorTrait;
-use miniscript::psbt::PsbtInputSatisfier;
-use miniscript::ToPublicKey;
+use miniscript::psbt::{PsbtExt, PsbtInputExt, PsbtInputSatisfier};
 
 #[allow(unused_imports)]
 use log::{debug, error, info, trace};
@@ -56,19 +54,17 @@ pub use utils::IsDust;
 use coin_selection::DefaultCoinSelectionAlgorithm;
 use signer::{SignOptions, SignerOrdering, SignersContainer, TransactionSigner};
 use tx_builder::{BumpFee, CreateTx, FeePolicy, TxBuilder, TxParams};
-use utils::{check_nlocktime, check_nsequence_rbf, After, Older, SecpCtx};
+use utils::{check_nsequence_rbf, After, Older, SecpCtx};
 
 use crate::blockchain::{GetHeight, NoopProgress, Progress, WalletSync};
 use crate::database::memory::MemoryDatabase;
 use crate::database::{AnyDatabase, BatchDatabase, BatchOperations, DatabaseUtils, SyncTime};
-use crate::descriptor::derived::AsDerived;
 use crate::descriptor::policy::BuildSatisfaction;
 use crate::descriptor::{
-    get_checksum, into_wallet_descriptor_checked, DerivedDescriptor, DerivedDescriptorMeta,
-    DescriptorMeta, DescriptorScripts, ExtendedDescriptor, ExtractPolicy, IntoWalletDescriptor,
-    Policy, XKeyUtils,
+    get_checksum, into_wallet_descriptor_checked, DerivedDescriptor, DescriptorMeta,
+    ExtendedDescriptor, ExtractPolicy, IntoWalletDescriptor, Policy, XKeyUtils,
 };
-use crate::error::Error;
+use crate::error::{Error, MiniscriptPsbtError};
 use crate::psbt::PsbtUtils;
 use crate::signer::SignerError;
 use crate::testutils;
@@ -137,7 +133,7 @@ pub enum AddressIndex {
 
 /// A derived address and the index it was found at
 /// For convenience this automatically derefs to `Address`
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct AddressInfo {
     /// Child index of this address
     pub index: u32,
@@ -247,7 +243,7 @@ where
 
         let address_result = self
             .get_descriptor_for_keychain(keychain)
-            .as_derived(incremented_index, &self.secp)
+            .at_derivation_index(incremented_index)
             .address(self.network);
 
         address_result
@@ -266,7 +262,7 @@ where
 
         let derived_key = self
             .get_descriptor_for_keychain(keychain)
-            .as_derived(current_index, &self.secp);
+            .at_derivation_index(current_index);
 
         let script_pubkey = derived_key.script_pubkey();
 
@@ -294,7 +290,7 @@ where
     // Return derived address for the descriptor of given [`KeychainKind`] at a specific index
     fn peek_address(&self, index: u32, keychain: KeychainKind) -> Result<AddressInfo, Error> {
         self.get_descriptor_for_keychain(keychain)
-            .as_derived(index, &self.secp)
+            .at_derivation_index(index)
             .address(self.network)
             .map(|address| AddressInfo {
                 index,
@@ -310,7 +306,7 @@ where
         self.set_index(keychain, index)?;
 
         self.get_descriptor_for_keychain(keychain)
-            .as_derived(index, &self.secp)
+            .at_derivation_index(index)
             .address(self.network)
             .map(|address| AddressInfo {
                 index,
@@ -359,7 +355,7 @@ where
     /// transaction output scripts.
     pub fn ensure_addresses_cached(&self, max_addresses: u32) -> Result<bool, Error> {
         let mut new_addresses_cached = false;
-        let max_address = match self.descriptor.is_deriveable() {
+        let max_address = match self.descriptor.has_wildcard() {
             false => 0,
             true => max_addresses,
         };
@@ -376,7 +372,7 @@ where
         }
 
         if let Some(change_descriptor) = &self.change_descriptor {
-            let max_address = match change_descriptor.is_deriveable() {
+            let max_address = match change_descriptor.has_wildcard() {
                 false => 0,
                 true => max_addresses,
             };
@@ -659,10 +655,9 @@ where
         // We use a match here instead of a map_or_else as it's way more readable :)
         let current_height = match params.current_height {
             // If they didn't tell us the current height, we assume it's the latest sync height.
-            None => self
-                .database()
-                .get_sync_time()?
-                .map(|sync_time| sync_time.block_time.height),
+            None => self.database().get_sync_time()?.map(|sync_time| {
+                LockTime::from_height(sync_time.block_time.height).expect("Invalid height")
+            }),
             h => h,
         };
 
@@ -672,24 +667,33 @@ where
                 // Fee sniping can be partially prevented by setting the timelock
                 // to current_height. If we don't know the current_height,
                 // we default to 0.
-                let fee_sniping_height = current_height.unwrap_or(0);
+                let fee_sniping_height = current_height.unwrap_or(LockTime::ZERO);
+
                 // We choose the biggest between the required nlocktime and the fee sniping
                 // height
-                std::cmp::max(requirements.timelock.unwrap_or(0), fee_sniping_height)
+                match requirements.timelock {
+                    // No requirement, just use the fee_sniping_height
+                    None => fee_sniping_height,
+                    // There's a block-based requirement, but the value is lower than the fee_sniping_height
+                    Some(value @ LockTime::Blocks(_)) if value < fee_sniping_height => fee_sniping_height,
+                    // There's a time-based requirement or a block-based requirement greater
+                    // than the fee_sniping_height use that value
+                    Some(value) => value,
+                }
             }
             // Specific nLockTime required and we have no constraints, so just set to that value
             Some(x) if requirements.timelock.is_none() => x,
             // Specific nLockTime required and it's compatible with the constraints
-            Some(x) if check_nlocktime(x, requirements.timelock.unwrap()) => x,
+            Some(x) if requirements.timelock.unwrap().is_same_unit(x) && x >= requirements.timelock.unwrap() => x,
             // Invalid nLockTime required
-            Some(x) => return Err(Error::Generic(format!("TxBuilder requested timelock of `{}`, but at least `{}` is required to spend from this script", x, requirements.timelock.unwrap())))
+            Some(x) => return Err(Error::Generic(format!("TxBuilder requested timelock of `{:?}`, but at least `{:?}` is required to spend from this script", x, requirements.timelock.unwrap())))
         };
 
         let n_sequence = match (params.rbf, requirements.csv) {
             // No RBF or CSV but there's an nLockTime, so the nSequence cannot be final
-            (None, None) if lock_time != 0 => 0xFFFFFFFE,
+            (None, None) if lock_time != LockTime::ZERO => Sequence::ENABLE_LOCKTIME_NO_RBF,
             // No RBF, CSV or nLockTime, make the transaction final
-            (None, None) => 0xFFFFFFFF,
+            (None, None) => Sequence::MAX,
 
             // No RBF requested, use the value from CSV. Note that this value is by definition
             // non-final, so even if a timelock is enabled this nSequence is fine, hence why we
@@ -697,7 +701,7 @@ where
             (None, Some(csv)) => csv,
 
             // RBF with a specific value but that value is too high
-            (Some(tx_builder::RbfValue::Value(rbf)), _) if rbf >= 0xFFFFFFFE => {
+            (Some(tx_builder::RbfValue::Value(rbf)), _) if !rbf.is_rbf() => {
                 return Err(Error::Generic(
                     "Cannot enable RBF with a nSequence >= 0xFFFFFFFE".into(),
                 ))
@@ -707,7 +711,7 @@ where
                 if !check_nsequence_rbf(rbf, csv) =>
             {
                 return Err(Error::Generic(format!(
-                    "Cannot enable RBF with nSequence `{}` given a required OP_CSV of `{}`",
+                    "Cannot enable RBF with nSequence `{:?}` given a required OP_CSV of `{:?}`",
                     rbf, csv
                 )))
             }
@@ -750,7 +754,7 @@ where
 
         let mut tx = Transaction {
             version,
-            lock_time,
+            lock_time: lock_time.into(),
             input: vec![],
             output: vec![],
         };
@@ -815,7 +819,7 @@ where
             params.drain_wallet,
             params.manually_selected_only,
             params.bumping_fee.is_some(), // we mandate confirmed transactions if we're bumping the fee
-            current_height,
+            current_height.map(LockTime::to_consensus_u32),
         )?;
 
         // get drain script
@@ -967,7 +971,11 @@ where
             Some(tx) => tx,
         };
         let mut tx = details.transaction.take().unwrap();
-        if !tx.input.iter().any(|txin| txin.sequence <= 0xFFFFFFFD) {
+        if !tx
+            .input
+            .iter()
+            .any(|txin| txin.sequence.to_consensus_u32() <= 0xFFFFFFFD)
+        {
             return Err(Error::IrreplaceableTransaction);
         }
 
@@ -1093,8 +1101,9 @@ where
         psbt: &mut psbt::PartiallySignedTransaction,
         sign_options: SignOptions,
     ) -> Result<bool, Error> {
-        // this helps us doing our job later
-        self.add_input_hd_keypaths(psbt)?;
+        // This adds all the PSBT metadata for the inputs, which will help us later figure out how
+        // to derive our keys
+        self.update_psbt_with_descriptor(psbt)?;
 
         // If we aren't allowed to use `witness_utxo`, ensure that every input (except p2tr and finalized ones)
         // has the `non_witness_utxo`
@@ -1295,21 +1304,18 @@ where
         }
     }
 
-    fn get_descriptor_for_txout(
-        &self,
-        txout: &TxOut,
-    ) -> Result<Option<DerivedDescriptor<'_>>, Error> {
+    fn get_descriptor_for_txout(&self, txout: &TxOut) -> Result<Option<DerivedDescriptor>, Error> {
         Ok(self
             .database
             .borrow()
             .get_path_from_script_pubkey(&txout.script_pubkey)?
             .map(|(keychain, child)| (self.get_descriptor_for_keychain(keychain), child))
-            .map(|(desc, child)| desc.as_derived(child, &self.secp)))
+            .map(|(desc, child)| desc.at_derivation_index(child)))
     }
 
     fn fetch_and_increment_index(&self, keychain: KeychainKind) -> Result<u32, Error> {
         let (descriptor, keychain) = self._get_descriptor_for_keychain(keychain);
-        let index = match descriptor.is_deriveable() {
+        let index = match descriptor.has_wildcard() {
             false => 0,
             true => self.database.borrow_mut().increment_last_index(keychain)?,
         };
@@ -1328,7 +1334,7 @@ where
 
     fn fetch_index(&self, keychain: KeychainKind) -> Result<u32, Error> {
         let (descriptor, keychain) = self._get_descriptor_for_keychain(keychain);
-        let index = match descriptor.is_deriveable() {
+        let index = match descriptor.has_wildcard() {
             false => Some(0),
             true => self.database.borrow_mut().get_last_index(keychain)?,
         };
@@ -1352,7 +1358,7 @@ where
         mut count: u32,
     ) -> Result<(), Error> {
         let (descriptor, keychain) = self._get_descriptor_for_keychain(keychain);
-        if !descriptor.is_deriveable() {
+        if !descriptor.has_wildcard() {
             if from > 0 {
                 return Ok(());
             }
@@ -1365,7 +1371,7 @@ where
         let start_time = time::Instant::new();
         for i in from..(from + count) {
             address_batch.set_script_pubkey(
-                &descriptor.as_derived(i, &self.secp).script_pubkey(),
+                &descriptor.at_derivation_index(i).script_pubkey(),
                 keychain,
                 i,
             )?;
@@ -1569,52 +1575,7 @@ where
             }
         }
 
-        // probably redundant but it doesn't hurt...
-        self.add_input_hd_keypaths(&mut psbt)?;
-
-        // add metadata for the outputs
-        for (psbt_output, tx_output) in psbt.outputs.iter_mut().zip(psbt.unsigned_tx.output.iter())
-        {
-            if let Some((keychain, child)) = self
-                .database
-                .borrow()
-                .get_path_from_script_pubkey(&tx_output.script_pubkey)?
-            {
-                let (desc, _) = self._get_descriptor_for_keychain(keychain);
-                let derived_descriptor = desc.as_derived(child, &self.secp);
-
-                if let miniscript::Descriptor::Tr(tr) = &derived_descriptor {
-                    let tap_tree = if tr.taptree().is_some() {
-                        let mut builder = taproot::TaprootBuilder::new();
-                        for (depth, ms) in tr.iter_scripts() {
-                            let script = ms.encode();
-                            builder = builder.add_leaf(depth, script).expect(
-                                "Computing spend data on a valid Tree should always succeed",
-                            );
-                        }
-                        Some(
-                            psbt::TapTree::from_builder(builder)
-                                .expect("The tree should always be valid"),
-                        )
-                    } else {
-                        None
-                    };
-                    psbt_output.tap_tree = tap_tree;
-                    psbt_output
-                        .tap_key_origins
-                        .append(&mut derived_descriptor.get_tap_key_origins(&self.secp));
-                    psbt_output.tap_internal_key = Some(tr.internal_key().to_x_only_pubkey());
-                } else {
-                    psbt_output
-                        .bip32_derivation
-                        .append(&mut derived_descriptor.get_hd_keypaths(&self.secp));
-                }
-                if params.include_output_redeem_witness_script {
-                    psbt_output.witness_script = derived_descriptor.psbt_witness_script();
-                    psbt_output.redeem_script = derived_descriptor.psbt_redeem_script();
-                };
-            }
-        }
+        self.update_psbt_with_descriptor(&mut psbt)?;
 
         Ok(psbt)
     }
@@ -1640,29 +1601,11 @@ where
         };
 
         let desc = self.get_descriptor_for_keychain(keychain);
-        let derived_descriptor = desc.as_derived(child, &self.secp);
+        let derived_descriptor = desc.at_derivation_index(child);
 
-        if let miniscript::Descriptor::Tr(tr) = &derived_descriptor {
-            psbt_input.tap_key_origins = derived_descriptor.get_tap_key_origins(&self.secp);
-            psbt_input.tap_internal_key = Some(tr.internal_key().to_x_only_pubkey());
-
-            let spend_info = tr.spend_info();
-            psbt_input.tap_merkle_root = spend_info.merkle_root();
-            psbt_input.tap_scripts = spend_info
-                .as_script_map()
-                .keys()
-                .filter_map(|script_ver| {
-                    spend_info
-                        .control_block(script_ver)
-                        .map(|cb| (cb, script_ver.clone()))
-                })
-                .collect();
-        } else {
-            psbt_input.bip32_derivation = derived_descriptor.get_hd_keypaths(&self.secp);
-        }
-
-        psbt_input.redeem_script = derived_descriptor.psbt_redeem_script();
-        psbt_input.witness_script = derived_descriptor.psbt_witness_script();
+        psbt_input
+            .update_with_descriptor_unchecked(&derived_descriptor)
+            .map_err(MiniscriptPsbtError::Conversion)?;
 
         let prev_output = utxo.outpoint;
         if let Some(prev_tx) = self.database.borrow().get_raw_tx(&prev_output.txid)? {
@@ -1676,38 +1619,47 @@ where
         Ok(psbt_input)
     }
 
-    fn add_input_hd_keypaths(
+    fn update_psbt_with_descriptor(
         &self,
         psbt: &mut psbt::PartiallySignedTransaction,
     ) -> Result<(), Error> {
-        let mut input_utxos = Vec::with_capacity(psbt.inputs.len());
-        for n in 0..psbt.inputs.len() {
-            input_utxos.push(psbt.get_utxo_for(n).clone());
-        }
+        // We need to borrow `psbt` mutably within the loops, so we have to allocate a vec for all
+        // the input utxos and outputs
+        //
+        // Clippy complains that the collect is not required, but that's wrong
+        #[allow(clippy::needless_collect)]
+        let utxos = (0..psbt.inputs.len())
+            .filter_map(|i| psbt.get_utxo_for(i).map(|utxo| (true, i, utxo)))
+            .chain(
+                psbt.unsigned_tx
+                    .output
+                    .iter()
+                    .enumerate()
+                    .map(|(i, out)| (false, i, out.clone())),
+            )
+            .collect::<Vec<_>>();
 
-        // try to add hd_keypaths if we've already seen the output
-        for (psbt_input, out) in psbt.inputs.iter_mut().zip(input_utxos.iter()) {
-            if let Some(out) = out {
-                if let Some((keychain, child)) = self
-                    .database
-                    .borrow()
-                    .get_path_from_script_pubkey(&out.script_pubkey)?
-                {
-                    debug!("Found descriptor {:?}/{}", keychain, child);
+        // Try to figure out the keychain and derivation for every input and output
+        for (is_input, index, out) in utxos.into_iter() {
+            if let Some((keychain, child)) = self
+                .database
+                .borrow()
+                .get_path_from_script_pubkey(&out.script_pubkey)?
+            {
+                debug!(
+                    "Found descriptor for input #{} {:?}/{}",
+                    index, keychain, child
+                );
 
-                    // merge hd_keypaths or tap_key_origins
-                    let desc = self.get_descriptor_for_keychain(keychain);
-                    if desc.is_taproot() {
-                        let mut tap_key_origins = desc
-                            .as_derived(child, &self.secp)
-                            .get_tap_key_origins(&self.secp);
-                        psbt_input.tap_key_origins.append(&mut tap_key_origins);
-                    } else {
-                        let mut hd_keypaths = desc
-                            .as_derived(child, &self.secp)
-                            .get_hd_keypaths(&self.secp);
-                        psbt_input.bip32_derivation.append(&mut hd_keypaths);
-                    }
+                let desc = self.get_descriptor_for_keychain(keychain);
+                let desc = desc.at_derivation_index(child);
+
+                if is_input {
+                    psbt.update_input_with_descriptor(index, &desc)
+                        .map_err(MiniscriptPsbtError::UtxoUpdate)?;
+                } else {
+                    psbt.update_output_with_descriptor(index, &desc)
+                        .map_err(MiniscriptPsbtError::OutputUpdate)?;
                 }
             }
         }
@@ -1746,12 +1698,12 @@ where
 
         // We need to ensure descriptor is derivable to fullfil "missing cache", otherwise we will
         // end up with an infinite loop
-        let is_deriveable = self.descriptor.is_deriveable()
+        let has_wildcard = self.descriptor.has_wildcard()
             && (self.change_descriptor.is_none()
-                || self.change_descriptor.as_ref().unwrap().is_deriveable());
+                || self.change_descriptor.as_ref().unwrap().has_wildcard());
 
         // Restrict max rounds in case of faulty "missing cache" implementation by blockchain
-        let max_rounds = if is_deriveable { 100 } else { 1 };
+        let max_rounds = if has_wildcard { 100 } else { 1 };
 
         for _ in 0..max_rounds {
             let sync_res =
@@ -1886,7 +1838,7 @@ pub fn get_funded_wallet(
 
 #[cfg(test)]
 pub(crate) mod test {
-    use bitcoin::{util::psbt, Network};
+    use bitcoin::{util::psbt, Network, PackedLockTime, Sequence};
 
     use crate::database::Database;
     use crate::types::KeychainKind;
@@ -2199,7 +2151,7 @@ pub(crate) mod test {
 
         // Since we never synced the wallet we don't have a last_sync_height
         // we could use to try to prevent fee sniping. We default to 0.
-        assert_eq!(psbt.unsigned_tx.lock_time, 0);
+        assert_eq!(psbt.unsigned_tx.lock_time, PackedLockTime(0));
     }
 
     #[test]
@@ -2224,7 +2176,7 @@ pub(crate) mod test {
         let (psbt, _) = builder.finish().unwrap();
 
         // current_height will override the last sync height
-        assert_eq!(psbt.unsigned_tx.lock_time, current_height);
+        assert_eq!(psbt.unsigned_tx.lock_time, PackedLockTime(current_height));
     }
 
     #[test]
@@ -2247,7 +2199,10 @@ pub(crate) mod test {
         let (psbt, _) = builder.finish().unwrap();
 
         // If there's no current_height we're left with using the last sync height
-        assert_eq!(psbt.unsigned_tx.lock_time, sync_time.block_time.height);
+        assert_eq!(
+            psbt.unsigned_tx.lock_time,
+            PackedLockTime(sync_time.block_time.height)
+        );
     }
 
     #[test]
@@ -2258,7 +2213,7 @@ pub(crate) mod test {
         builder.add_recipient(addr.script_pubkey(), 25_000);
         let (psbt, _) = builder.finish().unwrap();
 
-        assert_eq!(psbt.unsigned_tx.lock_time, 100_000);
+        assert_eq!(psbt.unsigned_tx.lock_time, PackedLockTime(100_000));
     }
 
     #[test]
@@ -2269,13 +2224,13 @@ pub(crate) mod test {
         builder
             .add_recipient(addr.script_pubkey(), 25_000)
             .current_height(630_001)
-            .nlocktime(630_000);
+            .nlocktime(LockTime::from_height(630_000).unwrap());
         let (psbt, _) = builder.finish().unwrap();
 
         // When we explicitly specify a nlocktime
         // we don't try any fee sniping prevention trick
         // (we ignore the current_height)
-        assert_eq!(psbt.unsigned_tx.lock_time, 630_000);
+        assert_eq!(psbt.unsigned_tx.lock_time, PackedLockTime(630_000));
     }
 
     #[test]
@@ -2285,15 +2240,15 @@ pub(crate) mod test {
         let mut builder = wallet.build_tx();
         builder
             .add_recipient(addr.script_pubkey(), 25_000)
-            .nlocktime(630_000);
+            .nlocktime(LockTime::from_height(630_000).unwrap());
         let (psbt, _) = builder.finish().unwrap();
 
-        assert_eq!(psbt.unsigned_tx.lock_time, 630_000);
+        assert_eq!(psbt.unsigned_tx.lock_time, PackedLockTime(630_000));
     }
 
     #[test]
     #[should_panic(
-        expected = "TxBuilder requested timelock of `50000`, but at least `100000` is required to spend from this script"
+        expected = "TxBuilder requested timelock of `Blocks(Height(50000))`, but at least `Blocks(Height(100000))` is required to spend from this script"
     )]
     fn test_create_tx_custom_locktime_incompatible_with_cltv() {
         let (wallet, _, _) = get_funded_wallet(get_test_single_sig_cltv());
@@ -2301,7 +2256,7 @@ pub(crate) mod test {
         let mut builder = wallet.build_tx();
         builder
             .add_recipient(addr.script_pubkey(), 25_000)
-            .nlocktime(50000);
+            .nlocktime(LockTime::from_height(50000).unwrap());
         builder.finish().unwrap();
     }
 
@@ -2313,7 +2268,7 @@ pub(crate) mod test {
         builder.add_recipient(addr.script_pubkey(), 25_000);
         let (psbt, _) = builder.finish().unwrap();
 
-        assert_eq!(psbt.unsigned_tx.input[0].sequence, 6);
+        assert_eq!(psbt.unsigned_tx.input[0].sequence, Sequence(6));
     }
 
     #[test]
@@ -2327,12 +2282,12 @@ pub(crate) mod test {
         let (psbt, _) = builder.finish().unwrap();
         // When CSV is enabled it takes precedence over the rbf value (unless forced by the user).
         // It will be set to the OP_CSV value, in this case 6
-        assert_eq!(psbt.unsigned_tx.input[0].sequence, 6);
+        assert_eq!(psbt.unsigned_tx.input[0].sequence, Sequence(6));
     }
 
     #[test]
     #[should_panic(
-        expected = "Cannot enable RBF with nSequence `3` given a required OP_CSV of `6`"
+        expected = "Cannot enable RBF with nSequence `Sequence(3)` given a required OP_CSV of `Sequence(6)`"
     )]
     fn test_create_tx_with_custom_rbf_csv() {
         let (wallet, _, _) = get_funded_wallet(get_test_single_sig_csv());
@@ -2340,7 +2295,7 @@ pub(crate) mod test {
         let mut builder = wallet.build_tx();
         builder
             .add_recipient(addr.script_pubkey(), 25_000)
-            .enable_rbf_with_sequence(3);
+            .enable_rbf_with_sequence(Sequence(3));
         builder.finish().unwrap();
     }
 
@@ -2352,7 +2307,7 @@ pub(crate) mod test {
         builder.add_recipient(addr.script_pubkey(), 25_000);
         let (psbt, _) = builder.finish().unwrap();
 
-        assert_eq!(psbt.unsigned_tx.input[0].sequence, 0xFFFFFFFE);
+        assert_eq!(psbt.unsigned_tx.input[0].sequence, Sequence(0xFFFFFFFE));
     }
 
     #[test]
@@ -2363,7 +2318,7 @@ pub(crate) mod test {
         let mut builder = wallet.build_tx();
         builder
             .add_recipient(addr.script_pubkey(), 25_000)
-            .enable_rbf_with_sequence(0xFFFFFFFE);
+            .enable_rbf_with_sequence(Sequence(0xFFFFFFFE));
         builder.finish().unwrap();
     }
 
@@ -2374,10 +2329,10 @@ pub(crate) mod test {
         let mut builder = wallet.build_tx();
         builder
             .add_recipient(addr.script_pubkey(), 25_000)
-            .enable_rbf_with_sequence(0xDEADBEEF);
+            .enable_rbf_with_sequence(Sequence(0xDEADBEEF));
         let (psbt, _) = builder.finish().unwrap();
 
-        assert_eq!(psbt.unsigned_tx.input[0].sequence, 0xDEADBEEF);
+        assert_eq!(psbt.unsigned_tx.input[0].sequence, Sequence(0xDEADBEEF));
     }
 
     #[test]
@@ -2404,7 +2359,7 @@ pub(crate) mod test {
         builder.add_recipient(addr.script_pubkey(), 25_000);
         let (psbt, _) = builder.finish().unwrap();
 
-        assert_eq!(psbt.unsigned_tx.input[0].sequence, 0xFFFFFFFF);
+        assert_eq!(psbt.unsigned_tx.input[0].sequence, Sequence(0xFFFFFFFF));
     }
 
     #[test]
@@ -2925,7 +2880,7 @@ pub(crate) mod test {
             .policy_path(path, KeychainKind::External);
         let (psbt, _) = builder.finish().unwrap();
 
-        assert_eq!(psbt.unsigned_tx.input[0].sequence, 0xFFFFFFFF);
+        assert_eq!(psbt.unsigned_tx.input[0].sequence, Sequence(0xFFFFFFFF));
     }
 
     #[test]
@@ -2944,7 +2899,7 @@ pub(crate) mod test {
             .policy_path(path, KeychainKind::External);
         let (psbt, _) = builder.finish().unwrap();
 
-        assert_eq!(psbt.unsigned_tx.input[0].sequence, 144);
+        assert_eq!(psbt.unsigned_tx.input[0].sequence, Sequence(144));
     }
 
     #[test]
@@ -4797,7 +4752,7 @@ pub(crate) mod test {
         let (wallet, _, _) = get_funded_wallet(get_test_tr_repeated_key());
         let addr = wallet.get_address(AddressIndex::New).unwrap();
 
-        let path = vec![("rn4nre9c".to_string(), vec![0])]
+        let path = vec![("e5mmg3xh".to_string(), vec![0])]
             .into_iter()
             .collect();
 
@@ -4807,48 +4762,50 @@ pub(crate) mod test {
             .policy_path(path, KeychainKind::External);
         let (psbt, _) = builder.finish().unwrap();
 
+        let mut input_key_origins = psbt.inputs[0]
+            .tap_key_origins
+            .clone()
+            .into_iter()
+            .collect::<Vec<_>>();
+        input_key_origins.sort();
+
         assert_eq!(
-            psbt.inputs[0]
-                .tap_key_origins
-                .clone()
-                .into_iter()
-                .collect::<Vec<_>>(),
-            vec![(
-                from_str!("2b0558078bec38694a84933d659303e2575dae7e91685911454115bfd64487e3"),
+            input_key_origins,
+            vec![
                 (
-                    vec![
-                        from_str!(
-                            "858ad7a7d7f270e2c490c4d6ba00c499e46b18fdd59ea3c2c47d20347110271e"
-                        ),
-                        from_str!(
-                            "f6e927ad4492c051fe325894a4f5f14538333b55a35f099876be42009ec8f903"
-                        )
-                    ],
-                    (Default::default(), Default::default())
+                    from_str!("b511bd5771e47ee27558b1765e87b541668304ec567721c7b880edc0a010da55"),
+                    (
+                        vec![],
+                        (FromStr::from_str("871fd295").unwrap(), vec![].into())
+                    )
+                ),
+                (
+                    from_str!("2b0558078bec38694a84933d659303e2575dae7e91685911454115bfd64487e3"),
+                    (
+                        vec![
+                            from_str!(
+                                "858ad7a7d7f270e2c490c4d6ba00c499e46b18fdd59ea3c2c47d20347110271e"
+                            ),
+                            from_str!(
+                                "f6e927ad4492c051fe325894a4f5f14538333b55a35f099876be42009ec8f903"
+                            ),
+                        ],
+                        (FromStr::from_str("ece52657").unwrap(), vec![].into())
+                    )
                 )
-            )],
+            ],
             "Wrong input tap_key_origins"
         );
+
+        let mut output_key_origins = psbt.outputs[0]
+            .tap_key_origins
+            .clone()
+            .into_iter()
+            .collect::<Vec<_>>();
+        output_key_origins.sort();
+
         assert_eq!(
-            psbt.outputs[0]
-                .tap_key_origins
-                .clone()
-                .into_iter()
-                .collect::<Vec<_>>(),
-            vec![(
-                from_str!("2b0558078bec38694a84933d659303e2575dae7e91685911454115bfd64487e3"),
-                (
-                    vec![
-                        from_str!(
-                            "858ad7a7d7f270e2c490c4d6ba00c499e46b18fdd59ea3c2c47d20347110271e"
-                        ),
-                        from_str!(
-                            "f6e927ad4492c051fe325894a4f5f14538333b55a35f099876be42009ec8f903"
-                        )
-                    ],
-                    (Default::default(), Default::default())
-                )
-            )],
+            input_key_origins, output_key_origins,
             "Wrong output tap_key_origins"
         );
     }
@@ -5100,7 +5057,7 @@ pub(crate) mod test {
     #[test]
     fn test_taproot_script_spend_sign_include_some_leaves() {
         use crate::signer::TapLeavesOptions;
-        use crate::wallet::taproot::TapLeafHash;
+        use bitcoin::util::taproot::TapLeafHash;
 
         let (wallet, _, _) = get_funded_wallet(get_test_tr_with_taptree_both_priv());
         let addr = wallet.get_address(AddressIndex::New).unwrap();
@@ -5142,7 +5099,7 @@ pub(crate) mod test {
     #[test]
     fn test_taproot_script_spend_sign_exclude_some_leaves() {
         use crate::signer::TapLeavesOptions;
-        use crate::wallet::taproot::TapLeafHash;
+        use bitcoin::util::taproot::TapLeafHash;
 
         let (wallet, _, _) = get_funded_wallet(get_test_tr_with_taptree_both_priv());
         let addr = wallet.get_address(AddressIndex::New).unwrap();

@@ -43,14 +43,17 @@ use std::fmt;
 use serde::ser::SerializeMap;
 use serde::{Serialize, Serializer};
 
-use bitcoin::hashes::*;
+use bitcoin::hashes::{hash160, ripemd160, sha256};
 use bitcoin::util::bip32::Fingerprint;
-use bitcoin::{PublicKey, XOnlyPublicKey};
+use bitcoin::{LockTime, PublicKey, Sequence, XOnlyPublicKey};
 
 use miniscript::descriptor::{
-    DescriptorPublicKey, DescriptorSinglePub, ShInner, SinglePubKey, SortedMultiVec, WshInner,
+    DescriptorPublicKey, ShInner, SinglePub, SinglePubKey, SortedMultiVec, WshInner,
 };
-use miniscript::{Descriptor, Miniscript, MiniscriptKey, Satisfier, ScriptContext, Terminal};
+use miniscript::hash256;
+use miniscript::{
+    Descriptor, Miniscript, Satisfier, ScriptContext, SigType, Terminal, ToPublicKey,
+};
 
 #[allow(unused_imports)]
 use log::{debug, error, info, trace};
@@ -58,7 +61,7 @@ use log::{debug, error, info, trace};
 use crate::descriptor::ExtractPolicy;
 use crate::keys::ExtScriptContext;
 use crate::wallet::signer::{SignerId, SignersContainer};
-use crate::wallet::utils::{self, After, Older, SecpCtx};
+use crate::wallet::utils::{After, Older, SecpCtx};
 
 use super::checksum::get_checksum;
 use super::error::Error;
@@ -81,11 +84,11 @@ pub enum PkOrF {
 impl PkOrF {
     fn from_key(k: &DescriptorPublicKey, secp: &SecpCtx) -> Self {
         match k {
-            DescriptorPublicKey::SinglePub(DescriptorSinglePub {
+            DescriptorPublicKey::Single(SinglePub {
                 key: SinglePubKey::FullKey(pk),
                 ..
             }) => PkOrF::Pubkey(*pk),
-            DescriptorPublicKey::SinglePub(DescriptorSinglePub {
+            DescriptorPublicKey::Single(SinglePub {
                 key: SinglePubKey::XOnly(pk),
                 ..
             }) => PkOrF::XOnlyPubkey(*pk),
@@ -111,7 +114,7 @@ pub enum SatisfiableItem {
     /// Double SHA256 preimage hash
     Hash256Preimage {
         /// The digest value
-        hash: sha256d::Hash,
+        hash: hash256::Hash,
     },
     /// RIPEMD160 preimage hash
     Ripemd160Preimage {
@@ -125,13 +128,13 @@ pub enum SatisfiableItem {
     },
     /// Absolute timeclock timestamp
     AbsoluteTimelock {
-        /// The timestamp value
-        value: u32,
+        /// The timelock value
+        value: LockTime,
     },
     /// Relative timelock locktime
     RelativeTimelock {
-        /// The locktime value
-        value: u32,
+        /// The timelock value
+        value: Sequence,
     },
     /// Multi-signature public keys with threshold count
     Multisig {
@@ -438,32 +441,30 @@ pub struct Policy {
 }
 
 /// An extra condition that must be satisfied but that is out of control of the user
-#[derive(Hash, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Default, Serialize)]
+/// TODO: use `bitcoin::LockTime` and `bitcoin::Sequence`
+#[derive(Hash, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Default, Serialize)]
 pub struct Condition {
     /// Optional CheckSequenceVerify condition
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub csv: Option<u32>,
+    pub csv: Option<Sequence>,
     /// Optional timelock condition
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub timelock: Option<u32>,
+    pub timelock: Option<LockTime>,
 }
 
 impl Condition {
-    fn merge_nlocktime(a: u32, b: u32) -> Result<u32, PolicyError> {
-        if (a < utils::BLOCKS_TIMELOCK_THRESHOLD) != (b < utils::BLOCKS_TIMELOCK_THRESHOLD) {
+    fn merge_nlocktime(a: LockTime, b: LockTime) -> Result<LockTime, PolicyError> {
+        if !a.is_same_unit(b) {
             Err(PolicyError::MixedTimelockUnits)
+        } else if a > b {
+            Ok(a)
         } else {
-            Ok(max(a, b))
+            Ok(b)
         }
     }
 
-    fn merge_nsequence(a: u32, b: u32) -> Result<u32, PolicyError> {
-        let mask = utils::SEQUENCE_LOCKTIME_TYPE_FLAG | utils::SEQUENCE_LOCKTIME_MASK;
-
-        let a = a & mask;
-        let b = b & mask;
-
-        if (a < utils::SEQUENCE_LOCKTIME_TYPE_FLAG) != (b < utils::SEQUENCE_LOCKTIME_TYPE_FLAG) {
+    fn merge_nsequence(a: Sequence, b: Sequence) -> Result<Sequence, PolicyError> {
+        if a.is_time_locked() != b.is_time_locked() {
             Err(PolicyError::MixedTimelockUnits)
         } else {
             Ok(max(a, b))
@@ -720,15 +721,18 @@ impl From<SatisfiableItem> for Policy {
 }
 
 fn signer_id(key: &DescriptorPublicKey, secp: &SecpCtx) -> SignerId {
+    // For consistency we always compute the key hash in "ecdsa" form (with the leading sign
+    // prefix) even if we are in a taproot descriptor. We just want some kind of unique identifier
+    // for a key, so it doesn't really matter how the identifier is computed.
     match key {
-        DescriptorPublicKey::SinglePub(DescriptorSinglePub {
+        DescriptorPublicKey::Single(SinglePub {
             key: SinglePubKey::FullKey(pk),
             ..
-        }) => pk.to_pubkeyhash().into(),
-        DescriptorPublicKey::SinglePub(DescriptorSinglePub {
+        }) => pk.to_pubkeyhash(SigType::Ecdsa).into(),
+        DescriptorPublicKey::Single(SinglePub {
             key: SinglePubKey::XOnly(pk),
             ..
-        }) => pk.to_pubkeyhash().into(),
+        }) => pk.to_pubkeyhash(SigType::Ecdsa).into(),
         DescriptorPublicKey::XPub(xpub) => xpub.root_fingerprint(secp).into(),
     }
 }
@@ -779,7 +783,7 @@ fn generic_sig_in_psbt<
 ) -> bool {
     //TODO check signature validity
     psbt.inputs.iter().all(|input| match key {
-        DescriptorPublicKey::SinglePub(DescriptorSinglePub { key, .. }) => check(input, key),
+        DescriptorPublicKey::Single(SinglePub { key, .. }) => check(input, key),
         DescriptorPublicKey::XPub(xpub) => {
             //TODO check actual derivation matches
             match extract(input, xpub.root_fingerprint(secp)) {
@@ -891,10 +895,13 @@ impl<Ctx: ScriptContext + 'static> ExtractPolicy for Miniscript<DescriptorPublic
                 Some(Ctx::make_signature(pubkey_hash, signers, build_sat, secp))
             }
             Terminal::After(value) => {
-                let mut policy: Policy = SatisfiableItem::AbsoluteTimelock { value: *value }.into();
+                let mut policy: Policy = SatisfiableItem::AbsoluteTimelock {
+                    value: value.into(),
+                }
+                .into();
                 policy.contribution = Satisfaction::Complete {
                     condition: Condition {
-                        timelock: Some(*value),
+                        timelock: Some(value.into()),
                         csv: None,
                     },
                 };
@@ -905,9 +912,11 @@ impl<Ctx: ScriptContext + 'static> ExtractPolicy for Miniscript<DescriptorPublic
                 } = build_sat
                 {
                     let after = After::new(Some(current_height), false);
-                    let after_sat = Satisfier::<bitcoin::PublicKey>::check_after(&after, *value);
-                    let inputs_sat = psbt_inputs_sat(psbt)
-                        .all(|sat| Satisfier::<bitcoin::PublicKey>::check_after(&sat, *value));
+                    let after_sat =
+                        Satisfier::<bitcoin::PublicKey>::check_after(&after, value.into());
+                    let inputs_sat = psbt_inputs_sat(psbt).all(|sat| {
+                        Satisfier::<bitcoin::PublicKey>::check_after(&sat, value.into())
+                    });
                     if after_sat && inputs_sat {
                         policy.satisfaction = policy.contribution.clone();
                     }
@@ -999,6 +1008,9 @@ impl<Ctx: ScriptContext + 'static> ExtractPolicy for Miniscript<DescriptorPublic
 
                 Policy::make_thresh(mapped, threshold)?
             }
+
+            // Unsupported
+            Terminal::RawPkH(_) => None,
         })
     }
 }
@@ -1124,14 +1136,12 @@ mod test {
     use crate::descriptor::{ExtractPolicy, IntoWalletDescriptor};
 
     use super::*;
-    use crate::descriptor::derived::AsDerived;
     use crate::descriptor::policy::SatisfiableItem::{EcdsaSignature, Multisig, Thresh};
     use crate::keys::{DescriptorKey, IntoDescriptorKey};
     use crate::wallet::signer::SignersContainer;
     use bitcoin::secp256k1::Secp256k1;
     use bitcoin::util::bip32;
     use bitcoin::Network;
-    use miniscript::DescriptorTrait;
     use std::str::FromStr;
     use std::sync::Arc;
 
@@ -1329,9 +1339,8 @@ mod test {
         let (wallet_desc, keymap) = desc
             .into_wallet_descriptor(&secp, Network::Testnet)
             .unwrap();
-        let single_key = wallet_desc.derive(0);
         let signers_container = Arc::new(SignersContainer::build(keymap, &wallet_desc, &secp));
-        let policy = single_key
+        let policy = wallet_desc
             .extract_policy(&signers_container, BuildSatisfaction::None, &secp)
             .unwrap()
             .unwrap();
@@ -1343,16 +1352,15 @@ mod test {
         let (wallet_desc, keymap) = desc
             .into_wallet_descriptor(&secp, Network::Testnet)
             .unwrap();
-        let single_key = wallet_desc.derive(0);
         let signers_container = Arc::new(SignersContainer::build(keymap, &wallet_desc, &secp));
-        let policy = single_key
+        let policy = wallet_desc
             .extract_policy(&signers_container, BuildSatisfaction::None, &secp)
             .unwrap()
             .unwrap();
 
-        assert!(matches!(&policy.item, EcdsaSignature(PkOrF::Fingerprint(f)) if f == &fingerprint));
+        assert!(matches!(policy.item, EcdsaSignature(PkOrF::Fingerprint(f)) if f == fingerprint));
         assert!(
-            matches!(&policy.contribution, Satisfaction::Complete {condition} if condition.csv == None && condition.timelock == None)
+            matches!(policy.contribution, Satisfaction::Complete {condition} if condition.csv == None && condition.timelock == None)
         );
     }
 
@@ -1368,21 +1376,20 @@ mod test {
         let (wallet_desc, keymap) = desc
             .into_wallet_descriptor(&secp, Network::Testnet)
             .unwrap();
-        let single_key = wallet_desc.derive(0);
         let signers_container = Arc::new(SignersContainer::build(keymap, &wallet_desc, &secp));
-        let policy = single_key
+        let policy = wallet_desc
             .extract_policy(&signers_container, BuildSatisfaction::None, &secp)
             .unwrap()
             .unwrap();
 
         assert!(
-            matches!(&policy.item, Multisig { keys, threshold } if threshold == &1
+            matches!(policy.item, Multisig { keys, threshold } if threshold == 1
             && keys[0] == PkOrF::Fingerprint(fingerprint0)
             && keys[1] == PkOrF::Fingerprint(fingerprint1))
         );
         assert!(
-            matches!(&policy.contribution, Satisfaction::PartialComplete { n, m, items, conditions, .. } if n == &2
-             && m == &1
+            matches!(policy.contribution, Satisfaction::PartialComplete { n, m, items, conditions, .. } if n == 2
+             && m == 1
              && items.len() == 2
              && conditions.contains_key(&vec![0])
              && conditions.contains_key(&vec![1])
@@ -1427,8 +1434,8 @@ mod test {
              && m == &2
              && items.len() == 3
              && conditions.get(&vec![0,1]).unwrap().iter().next().unwrap().csv.is_none()
-             && conditions.get(&vec![0,2]).unwrap().iter().next().unwrap().csv == Some(sequence)
-             && conditions.get(&vec![1,2]).unwrap().iter().next().unwrap().csv == Some(sequence)
+             && conditions.get(&vec![0,2]).unwrap().iter().next().unwrap().csv == Some(Sequence(sequence))
+             && conditions.get(&vec![1,2]).unwrap().iter().next().unwrap().csv == Some(Sequence(sequence))
             )
         );
     }
@@ -1574,7 +1581,7 @@ mod test {
             .unwrap();
 
         let addr = wallet_desc
-            .as_derived(0, &secp)
+            .at_derivation_index(0)
             .address(Network::Testnet)
             .unwrap();
         assert_eq!(
@@ -1646,7 +1653,7 @@ mod test {
         let signers_container = Arc::new(SignersContainer::build(keymap, &wallet_desc, &secp));
 
         let addr = wallet_desc
-            .as_derived(0, &secp)
+            .at_derivation_index(0)
             .address(Network::Testnet)
             .unwrap();
         assert_eq!(

@@ -101,25 +101,21 @@ impl TestIncomingTx {
 macro_rules! testutils {
     ( @external $descriptors:expr, $child:expr ) => ({
         use $crate::bitcoin::secp256k1::Secp256k1;
-        use $crate::miniscript::descriptor::{Descriptor, DescriptorPublicKey, DescriptorTrait};
-
-        use $crate::descriptor::AsDerived;
+        use $crate::miniscript::descriptor::{Descriptor, DescriptorPublicKey};
 
         let secp = Secp256k1::new();
 
         let parsed = Descriptor::<DescriptorPublicKey>::parse_descriptor(&secp, &$descriptors.0).expect("Failed to parse descriptor in `testutils!(@external)`").0;
-        parsed.as_derived($child, &secp).address(bitcoin::Network::Regtest).expect("No address form")
+        parsed.at_derivation_index($child).address(bitcoin::Network::Regtest).expect("No address form")
     });
     ( @internal $descriptors:expr, $child:expr ) => ({
         use $crate::bitcoin::secp256k1::Secp256k1;
-        use $crate::miniscript::descriptor::{Descriptor, DescriptorPublicKey, DescriptorTrait};
-
-        use $crate::descriptor::AsDerived;
+        use $crate::miniscript::descriptor::{Descriptor, DescriptorPublicKey};
 
         let secp = Secp256k1::new();
 
         let parsed = Descriptor::<DescriptorPublicKey>::parse_descriptor(&secp, &$descriptors.1.expect("Missing internal descriptor")).expect("Failed to parse descriptor in `testutils!(@internal)`").0;
-        parsed.as_derived($child, &secp).address($crate::bitcoin::Network::Regtest).expect("No address form")
+        parsed.at_derivation_index($child).address($crate::bitcoin::Network::Regtest).expect("No address form")
     });
     ( @e $descriptors:expr, $child:expr ) => ({ testutils!(@external $descriptors, $child) });
     ( @i $descriptors:expr, $child:expr ) => ({ testutils!(@internal $descriptors, $child) });
@@ -186,49 +182,50 @@ macro_rules! testutils {
     ( @descriptors ( $external_descriptor:expr ) $( ( $internal_descriptor:expr ) )? $( ( @keys $( $keys:tt )* ) )* ) => ({
         use std::str::FromStr;
         use std::collections::HashMap;
+        use std::convert::Infallible;
+
         use $crate::miniscript::descriptor::Descriptor;
         use $crate::miniscript::TranslatePk;
 
+        struct Translator {
+            keys: HashMap<&'static str, (String, Option<String>, Option<String>)>,
+            is_internal: bool,
+        }
+
+        impl $crate::miniscript::Translator<String, String, Infallible> for Translator {
+            fn pk(&mut self, pk: &String) -> Result<String, Infallible> {
+                match self.keys.get(pk.as_str()) {
+                    Some((key, ext_path, int_path)) => {
+                        let path = if self.is_internal { int_path } else { ext_path };
+                        Ok(format!("{}{}", key, path.clone().unwrap_or_default()))
+                    }
+                    None => Ok(pk.clone()),
+                }
+            }
+            fn sha256(&mut self, sha256: &String) -> Result<String, Infallible> { Ok(sha256.clone()) }
+            fn hash256(&mut self, hash256: &String) -> Result<String, Infallible> { Ok(hash256.clone()) }
+            fn ripemd160(&mut self, ripemd160: &String) -> Result<String, Infallible> { Ok(ripemd160.clone()) }
+            fn hash160(&mut self, hash160: &String) -> Result<String, Infallible> { Ok(hash160.clone()) }
+        }
+
         #[allow(unused_assignments, unused_mut)]
-        let mut keys: HashMap<&'static str, (String, Option<String>, Option<String>)> = HashMap::new();
+        let mut keys = HashMap::new();
         $(
             keys = testutils!{ @keys $( $keys )* };
         )*
 
-        let external: Descriptor<String> = FromStr::from_str($external_descriptor).unwrap();
-        let external: Descriptor<String> = external.translate_pk_infallible::<_, _>(|k| {
-            if let Some((key, ext_path, _)) = keys.get(&k.as_str()) {
-                format!("{}{}", key, ext_path.as_ref().unwrap_or(&"".into()))
-            } else {
-                k.clone()
-            }
-        }, |kh| {
-            if let Some((key, ext_path, _)) = keys.get(&kh.as_str()) {
-                format!("{}{}", key, ext_path.as_ref().unwrap_or(&"".into()))
-            } else {
-                kh.clone()
-            }
+        let mut translator = Translator { keys, is_internal: false };
 
-        });
+        let external: Descriptor<String> = FromStr::from_str($external_descriptor).unwrap();
+        let external = external.translate_pk(&mut translator).expect("Infallible conversion");
         let external = external.to_string();
 
-        let internal = None::<String>$(.or({
-            let string_internal: Descriptor<String> = FromStr::from_str($internal_descriptor).unwrap();
+        translator.is_internal = true;
 
-            let string_internal: Descriptor<String> = string_internal.translate_pk_infallible::<_, _>(|k| {
-                if let Some((key, _, int_path)) = keys.get(&k.as_str()) {
-                    format!("{}{}", key, int_path.as_ref().unwrap_or(&"".into()))
-                } else {
-                    k.clone()
-                }
-            }, |kh| {
-                if let Some((key, _, int_path)) = keys.get(&kh.as_str()) {
-                    format!("{}{}", key, int_path.as_ref().unwrap_or(&"".into()))
-                } else {
-                    kh.clone()
-                }
-            });
-            Some(string_internal.to_string())
+        let internal = None::<String>$(.or({
+            let internal: Descriptor<String> = FromStr::from_str($internal_descriptor).unwrap();
+            let internal = internal.translate_pk(&mut translator).expect("Infallible conversion");
+            Some(internal.to_string())
         }))?;
 
         (external, internal)

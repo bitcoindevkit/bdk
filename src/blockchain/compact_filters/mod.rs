@@ -479,7 +479,7 @@ impl WalletSync for CompactFiltersBlockchain {
 }
 
 /// Data to connect to a Bitcoin P2P peer
-#[derive(Debug, serde::Deserialize, serde::Serialize, Clone, PartialEq)]
+#[derive(Debug, serde::Deserialize, serde::Serialize, Clone, PartialEq, Eq)]
 pub struct BitcoinPeerConfig {
     /// Peer address such as 127.0.0.1:18333
     pub address: String,
@@ -490,7 +490,7 @@ pub struct BitcoinPeerConfig {
 }
 
 /// Configuration for a [`CompactFiltersBlockchain`]
-#[derive(Debug, serde::Deserialize, serde::Serialize, Clone, PartialEq)]
+#[derive(Debug, serde::Deserialize, serde::Serialize, Clone, PartialEq, Eq)]
 pub struct CompactFiltersBlockchainConfig {
     /// List of peers to try to connect to for asking headers and filters
     pub peers: Vec<BitcoinPeerConfig>,

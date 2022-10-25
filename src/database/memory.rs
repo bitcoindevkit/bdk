@@ -497,7 +497,7 @@ macro_rules! populate_test_db {
         }
         let tx = $crate::bitcoin::Transaction {
             version: 1,
-            lock_time: 0,
+            lock_time: bitcoin::PackedLockTime(0),
             input,
             output: tx_meta
                 .output
