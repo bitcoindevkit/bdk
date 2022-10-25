@@ -1,3 +1,13 @@
+// Bitcoin Dev Kit
+//
+// Copyright (c) 2022 Bitcoin Dev Kit Developers
+//
+// This file is licensed under the Apache License, Version 2.0 <LICENSE-APACHE
+// or http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your option.
+// You may not use this file except in accordance with one or both of these
+// licenses.
+
 /*!
 This models a how a sync happens where you have a server that you send your script pubkeys to and it
 returns associated transactions i.e. electrum.

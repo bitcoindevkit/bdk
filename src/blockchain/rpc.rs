@@ -1,7 +1,7 @@
 // Bitcoin Dev Kit
 // Written in 2021 by Riccardo Casatta <riccardo@casatta.it>
 //
-// Copyright (c) 2020-2021 Bitcoin Dev Kit Developers
+// Copyright (c) 2022 Bitcoin Dev Kit Developers
 //
 // This file is licensed under the Apache License, Version 2.0 <LICENSE-APACHE
 // or http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
