@@ -316,7 +316,6 @@ pub trait ExtractPolicy {
 }
 
 pub(crate) trait XKeyUtils {
-    fn full_path(&self, append: &[ChildNumber]) -> DerivationPath;
     fn root_fingerprint(&self, secp: &SecpCtx) -> Fingerprint;
 }
 
@@ -324,27 +323,6 @@ impl<T> XKeyUtils for DescriptorXKey<T>
 where
     T: InnerXKey,
 {
-    fn full_path(&self, append: &[ChildNumber]) -> DerivationPath {
-        let full_path = match self.origin {
-            Some((_, ref path)) => path
-                .into_iter()
-                .chain(self.derivation_path.into_iter())
-                .cloned()
-                .collect(),
-            None => self.derivation_path.clone(),
-        };
-
-        if self.wildcard != Wildcard::None {
-            full_path
-                .into_iter()
-                .chain(append.iter())
-                .cloned()
-                .collect()
-        } else {
-            full_path
-        }
-    }
-
     fn root_fingerprint(&self, secp: &SecpCtx) -> Fingerprint {
         match self.origin {
             Some((fingerprint, _)) => fingerprint,
