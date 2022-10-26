@@ -134,15 +134,11 @@ impl FullyNodedExport {
         let blockheight = match wallet.database.borrow().iter_txs(false) {
             _ if !include_blockheight => 0,
             Err(_) => 0,
-            Ok(txs) => {
-                let mut heights = txs
-                    .into_iter()
-                    .map(|tx| tx.confirmation_time.map(|c| c.height).unwrap_or(0))
-                    .collect::<Vec<_>>();
-                heights.sort_unstable();
-
-                *heights.last().unwrap_or(&0)
-            }
+            Ok(txs) => txs
+                .into_iter()
+                .filter_map(|tx| tx.confirmation_time.map(|c| c.height))
+                .min()
+                .unwrap_or(0),
         };
 
         let export = FullyNodedExport {
@@ -249,6 +245,22 @@ mod test {
             fee: Some(500),
             confirmation_time: Some(BlockTime {
                 timestamp: 12345678,
+                height: 5001,
+            }),
+        })
+        .unwrap();
+
+        db.set_tx(&TransactionDetails {
+            transaction: None,
+            txid: Txid::from_str(
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            )
+            .unwrap(),
+            received: 25_000,
+            sent: 0,
+            fee: Some(300),
+            confirmation_time: Some(BlockTime {
+                timestamp: 12345677,
                 height: 5000,
             }),
         })
