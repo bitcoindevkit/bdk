@@ -103,42 +103,42 @@ where
 }
 
 impl Encodable for BundleStatus {
-    fn consensus_encode<W: Write>(&self, mut e: W) -> Result<usize, std::io::Error> {
+    fn consensus_encode<W: Write + ?Sized>(&self, e: &mut W) -> Result<usize, std::io::Error> {
         let mut written = 0;
 
         match self {
             BundleStatus::Init => {
-                written += 0x00u8.consensus_encode(&mut e)?;
+                written += 0x00u8.consensus_encode(e)?;
             }
             BundleStatus::CfHeaders { cf_headers } => {
-                written += 0x01u8.consensus_encode(&mut e)?;
-                written += VarInt(cf_headers.len() as u64).consensus_encode(&mut e)?;
+                written += 0x01u8.consensus_encode(e)?;
+                written += VarInt(cf_headers.len() as u64).consensus_encode(e)?;
                 for header in cf_headers {
-                    written += header.consensus_encode(&mut e)?;
+                    written += header.consensus_encode(e)?;
                 }
             }
             BundleStatus::CFilters { cf_filters } => {
-                written += 0x02u8.consensus_encode(&mut e)?;
-                written += VarInt(cf_filters.len() as u64).consensus_encode(&mut e)?;
+                written += 0x02u8.consensus_encode(e)?;
+                written += VarInt(cf_filters.len() as u64).consensus_encode(e)?;
                 for filter in cf_filters {
-                    written += filter.consensus_encode(&mut e)?;
+                    written += filter.consensus_encode(e)?;
                 }
             }
             BundleStatus::Processed { cf_filters } => {
-                written += 0x03u8.consensus_encode(&mut e)?;
-                written += VarInt(cf_filters.len() as u64).consensus_encode(&mut e)?;
+                written += 0x03u8.consensus_encode(e)?;
+                written += VarInt(cf_filters.len() as u64).consensus_encode(e)?;
                 for filter in cf_filters {
-                    written += filter.consensus_encode(&mut e)?;
+                    written += filter.consensus_encode(e)?;
                 }
             }
             BundleStatus::Pruned => {
-                written += 0x04u8.consensus_encode(&mut e)?;
+                written += 0x04u8.consensus_encode(e)?;
             }
             BundleStatus::Tip { cf_filters } => {
-                written += 0x05u8.consensus_encode(&mut e)?;
-                written += VarInt(cf_filters.len() as u64).consensus_encode(&mut e)?;
+                written += 0x05u8.consensus_encode(e)?;
+                written += VarInt(cf_filters.len() as u64).consensus_encode(e)?;
                 for filter in cf_filters {
-                    written += filter.consensus_encode(&mut e)?;
+                    written += filter.consensus_encode(e)?;
                 }
             }
         }
@@ -148,51 +148,53 @@ impl Encodable for BundleStatus {
 }
 
 impl Decodable for BundleStatus {
-    fn consensus_decode<D: Read>(mut d: D) -> Result<Self, bitcoin::consensus::encode::Error> {
-        let byte_type = u8::consensus_decode(&mut d)?;
+    fn consensus_decode<D: Read + ?Sized>(
+        d: &mut D,
+    ) -> Result<Self, bitcoin::consensus::encode::Error> {
+        let byte_type = u8::consensus_decode(d)?;
         match byte_type {
             0x00 => Ok(BundleStatus::Init),
             0x01 => {
-                let num = VarInt::consensus_decode(&mut d)?;
+                let num = VarInt::consensus_decode(d)?;
                 let num = num.0 as usize;
 
                 let mut cf_headers = Vec::with_capacity(num);
                 for _ in 0..num {
-                    cf_headers.push(FilterHeader::consensus_decode(&mut d)?);
+                    cf_headers.push(FilterHeader::consensus_decode(d)?);
                 }
 
                 Ok(BundleStatus::CfHeaders { cf_headers })
             }
             0x02 => {
-                let num = VarInt::consensus_decode(&mut d)?;
+                let num = VarInt::consensus_decode(d)?;
                 let num = num.0 as usize;
 
                 let mut cf_filters = Vec::with_capacity(num);
                 for _ in 0..num {
-                    cf_filters.push(Vec::<u8>::consensus_decode(&mut d)?);
+                    cf_filters.push(Vec::<u8>::consensus_decode(d)?);
                 }
 
                 Ok(BundleStatus::CFilters { cf_filters })
             }
             0x03 => {
-                let num = VarInt::consensus_decode(&mut d)?;
+                let num = VarInt::consensus_decode(d)?;
                 let num = num.0 as usize;
 
                 let mut cf_filters = Vec::with_capacity(num);
                 for _ in 0..num {
-                    cf_filters.push(Vec::<u8>::consensus_decode(&mut d)?);
+                    cf_filters.push(Vec::<u8>::consensus_decode(d)?);
                 }
 
                 Ok(BundleStatus::Processed { cf_filters })
             }
             0x04 => Ok(BundleStatus::Pruned),
             0x05 => {
-                let num = VarInt::consensus_decode(&mut d)?;
+                let num = VarInt::consensus_decode(d)?;
                 let num = num.0 as usize;
 
                 let mut cf_filters = Vec::with_capacity(num);
                 for _ in 0..num {
-                    cf_filters.push(Vec::<u8>::consensus_decode(&mut d)?);
+                    cf_filters.push(Vec::<u8>::consensus_decode(d)?);
                 }
 
                 Ok(BundleStatus::Tip { cf_filters })
@@ -276,7 +278,11 @@ impl ChainStore<Full> {
     }
 
     pub fn start_snapshot(&self, from: usize) -> Result<ChainStore<Snapshot>, CompactFiltersError> {
-        let new_cf_name: String = thread_rng().sample_iter(&Alphanumeric).take(16).collect();
+        let new_cf_name: String = thread_rng()
+            .sample_iter(&Alphanumeric)
+            .map(|byte| byte as char)
+            .take(16)
+            .collect();
         let new_cf_name = format!("_headers:{}", new_cf_name);
 
         let mut write_store = self.store.write().unwrap();
@@ -647,7 +653,7 @@ impl CfStore {
                     &first_key,
                     (
                         BundleStatus::Init,
-                        filter.filter_header(&FilterHeader::from_hash(Default::default())),
+                        filter.filter_header(&FilterHeader::from_hash(Hash::all_zeros())),
                     )
                         .serialize(),
                 )?;

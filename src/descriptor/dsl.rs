@@ -700,10 +700,10 @@ macro_rules! fragment {
         $crate::keys::make_pkh($key, &secp)
     });
     ( after ( $value:expr ) ) => ({
-        $crate::impl_leaf_opcode_value!(After, $value)
+        $crate::impl_leaf_opcode_value!(After, $crate::bitcoin::PackedLockTime($value)) // TODO!! https://github.com/rust-bitcoin/rust-bitcoin/issues/1302
     });
     ( older ( $value:expr ) ) => ({
-        $crate::impl_leaf_opcode_value!(Older, $value)
+        $crate::impl_leaf_opcode_value!(Older, $crate::bitcoin::Sequence($value)) // TODO!!
     });
     ( sha256 ( $hash:expr ) ) => ({
         $crate::impl_leaf_opcode_value!(Sha256, $hash)
@@ -795,7 +795,7 @@ macro_rules! fragment {
 mod test {
     use bitcoin::hashes::hex::ToHex;
     use bitcoin::secp256k1::Secp256k1;
-    use miniscript::descriptor::{DescriptorPublicKey, DescriptorTrait, KeyMap};
+    use miniscript::descriptor::{DescriptorPublicKey, KeyMap};
     use miniscript::{Descriptor, Legacy, Segwitv0};
 
     use std::str::FromStr;
@@ -806,8 +806,6 @@ mod test {
     use bitcoin::util::bip32;
     use bitcoin::PrivateKey;
 
-    use crate::descriptor::derived::AsDerived;
-
     // test the descriptor!() macro
 
     // verify descriptor generates expected script(s) (if bare or pk) or address(es)
@@ -817,17 +815,15 @@ mod test {
         is_fixed: bool,
         expected: &[&str],
     ) {
-        let secp = Secp256k1::new();
-
         let (desc, _key_map, _networks) = desc.unwrap();
         assert_eq!(desc.is_witness(), is_witness);
-        assert_eq!(!desc.is_deriveable(), is_fixed);
+        assert_eq!(!desc.has_wildcard(), is_fixed);
         for i in 0..expected.len() {
             let index = i as u32;
-            let child_desc = if !desc.is_deriveable() {
-                desc.as_derived_fixed(&secp)
+            let child_desc = if !desc.has_wildcard() {
+                desc.at_derivation_index(0)
             } else {
-                desc.as_derived(index, &secp)
+                desc.at_derivation_index(index)
             };
             let address = child_desc.address(Regtest);
             if let Ok(address) = address {

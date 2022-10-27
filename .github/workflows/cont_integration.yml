@@ -154,7 +154,7 @@ jobs:
       - name: Update toolchain
         run: rustup update
       - name: Check
-        run: cargo check --target wasm32-unknown-unknown --features use-esplora-async --no-default-features
+        run: cargo check --target wasm32-unknown-unknown --features use-esplora-async,dev-getrandom-wasm --no-default-features
 
   fmt:
     name: Rust fmt

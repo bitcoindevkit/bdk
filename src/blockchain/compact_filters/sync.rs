@@ -14,6 +14,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use bitcoin::hash_types::{BlockHash, FilterHeader};
+use bitcoin::hashes::Hash;
 use bitcoin::network::message::NetworkMessage;
 use bitcoin::network::message_blockdata::GetHeadersMessage;
 use bitcoin::util::bip158::BlockFilter;
@@ -254,7 +255,7 @@ where
 
     peer.send(NetworkMessage::GetHeaders(GetHeadersMessage::new(
         locators_vec,
-        Default::default(),
+        Hash::all_zeros(),
     )))?;
     let (mut snapshot, mut last_hash) = if let NetworkMessage::Headers(headers) = peer
         .recv("headers", Some(Duration::from_secs(TIMEOUT_SECS)))?
@@ -276,7 +277,7 @@ where
     while sync_height < peer.get_version().start_height as usize {
         peer.send(NetworkMessage::GetHeaders(GetHeadersMessage::new(
             vec![last_hash],
-            Default::default(),
+            Hash::all_zeros(),
         )))?;
         if let NetworkMessage::Headers(headers) = peer
             .recv("headers", Some(Duration::from_secs(TIMEOUT_SECS)))?

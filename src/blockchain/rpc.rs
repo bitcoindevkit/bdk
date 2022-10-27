@@ -77,7 +77,7 @@ impl Deref for RpcBlockchain {
 }
 
 /// RpcBlockchain configuration options
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct RpcConfig {
     /// The bitcoin node url
     pub url: String,
@@ -96,7 +96,7 @@ pub struct RpcConfig {
 /// In general, BDK tries to sync `scriptPubKey`s cached in [`crate::database::Database`] with
 /// `scriptPubKey`s imported in the Bitcoin Core Wallet. These parameters are used for determining
 /// how the `importdescriptors` RPC calls are to be made.
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct RpcSyncParams {
     /// The minimum number of scripts to scan for on initial sync.
     pub start_script_count: usize,
@@ -167,7 +167,7 @@ impl Blockchain for RpcBlockchain {
             .estimate_smart_fee(target as u16, None)?
             .fee_rate
             .ok_or(Error::FeeRateUnavailable)?
-            .as_sat() as f64;
+            .to_sat() as f64;
 
         Ok(FeeRate::from_sat_per_vb((sat_per_kb / 1000f64) as f32))
     }
@@ -410,7 +410,12 @@ impl<'a, D: BatchDatabase> DbState<'a, D> {
                 updated = true;
                 TransactionDetails {
                     txid: tx_res.info.txid,
-                    ..Default::default()
+                    transaction: None,
+
+                    received: 0,
+                    sent: 0,
+                    fee: None,
+                    confirmation_time: None,
                 }
             });
 
@@ -430,7 +435,7 @@ impl<'a, D: BatchDatabase> DbState<'a, D> {
             // update fee (if needed)
             if let (None, Some(new_fee)) = (db_tx.fee, tx_res.detail.fee) {
                 updated = true;
-                db_tx.fee = Some(new_fee.as_sat().unsigned_abs());
+                db_tx.fee = Some(new_fee.to_sat().unsigned_abs());
             }
 
             // update confirmation time (if needed)
@@ -603,7 +608,7 @@ impl<'a, D: BatchDatabase> DbState<'a, D> {
         LocalUtxo {
             outpoint: OutPoint::new(entry.txid, entry.vout),
             txout: TxOut {
-                value: entry.amount.as_sat(),
+                value: entry.amount.to_sat(),
                 script_pubkey: entry.script_pub_key,
             },
             keychain,
@@ -873,15 +878,13 @@ impl BlockchainFactory for RpcBlockchainFactory {
 mod test {
     use super::*;
     use crate::{
-        descriptor::{into_wallet_descriptor_checked, AsDerived},
-        testutils::blockchain_tests::TestClient,
+        descriptor::into_wallet_descriptor_checked, testutils::blockchain_tests::TestClient,
         wallet::utils::SecpCtx,
     };
 
     use bitcoin::{Address, Network};
     use bitcoincore_rpc::RpcApi;
     use log::LevelFilter;
-    use miniscript::DescriptorTrait;
 
     crate::bdk_blockchain_tests! {
         fn test_instance(test_client: &TestClient) -> RpcBlockchain {
@@ -958,7 +961,7 @@ mod test {
 
         // generate scripts (1 tx per script)
         let scripts = (0..TX_COUNT)
-            .map(|index| desc.as_derived(index, &secp).script_pubkey())
+            .map(|index| desc.at_derivation_index(index).script_pubkey())
             .collect::<Vec<_>>();
 
         // import scripts and wait
