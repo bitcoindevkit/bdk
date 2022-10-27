@@ -75,7 +75,10 @@ impl Mempool {
     /// Look-up a transaction in the mempool given an [`Inventory`] request
     pub fn get_tx(&self, inventory: &Inventory) -> Option<Transaction> {
         let identifer = match inventory {
-            Inventory::Error | Inventory::Block(_) | Inventory::WitnessBlock(_) => return None,
+            Inventory::Error
+            | Inventory::Block(_)
+            | Inventory::WitnessBlock(_)
+            | Inventory::CompactBlock(_) => return None,
             Inventory::Transaction(txid) => TxIdentifier::Txid(*txid),
             Inventory::WitnessTransaction(txid) => TxIdentifier::Txid(*txid),
             Inventory::WTx(wtxid) => TxIdentifier::Wtxid(*wtxid),

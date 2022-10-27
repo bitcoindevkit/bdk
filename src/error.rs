@@ -12,7 +12,7 @@
 use std::fmt;
 
 use crate::bitcoin::Network;
-use crate::{descriptor, wallet, wallet::address_validator};
+use crate::{descriptor, wallet};
 use bitcoin::{OutPoint, Txid};
 
 /// Errors that can be thrown by the [`Wallet`](crate::wallet::Wallet)
@@ -99,12 +99,12 @@ pub enum Error {
 
     /// Error related to the parsing and usage of descriptors
     Descriptor(crate::descriptor::error::Error),
-    /// Error that can be returned to fail the validation of an address
-    AddressValidator(crate::wallet::address_validator::AddressValidatorError),
     /// Encoding error
     Encode(bitcoin::consensus::encode::Error),
     /// Miniscript error
     Miniscript(miniscript::Error),
+    /// Miniscript PSBT error
+    MiniscriptPsbt(MiniscriptPsbtError),
     /// BIP32 error
     Bip32(bitcoin::util::bip32::Error),
     /// An ECDSA error
@@ -149,6 +149,14 @@ pub enum Error {
     Rusqlite(rusqlite::Error),
 }
 
+/// Errors returned by miniscript when updating inconsistent PSBTs
+#[derive(Debug, Clone)]
+pub enum MiniscriptPsbtError {
+    Conversion(miniscript::descriptor::ConversionError),
+    UtxoUpdate(miniscript::psbt::UtxoUpdateError),
+    OutputUpdate(miniscript::psbt::OutputUpdateError),
+}
+
 /// Represents the last failed [`crate::blockchain::WalletSync`] sync attempt in which we were short
 /// on cached `scriptPubKey`s.
 #[derive(Debug)]
@@ -181,7 +189,6 @@ macro_rules! impl_error {
 }
 
 impl_error!(descriptor::error::Error, Descriptor);
-impl_error!(address_validator::AddressValidatorError, AddressValidator);
 impl_error!(descriptor::policy::PolicyError, InvalidPolicyPathError);
 impl_error!(wallet::signer::SignerError, Signer);
 
@@ -198,6 +205,7 @@ impl From<crate::keys::KeyError> for Error {
 
 impl_error!(bitcoin::consensus::encode::Error, Encode);
 impl_error!(miniscript::Error, Miniscript);
+impl_error!(MiniscriptPsbtError, MiniscriptPsbt);
 impl_error!(bitcoin::util::bip32::Error, Bip32);
 impl_error!(bitcoin::secp256k1::Error, Secp256k1);
 impl_error!(serde_json::Error, Json);

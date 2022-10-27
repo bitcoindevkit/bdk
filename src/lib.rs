@@ -203,6 +203,8 @@ pub extern crate miniscript;
 extern crate serde;
 #[macro_use]
 extern crate serde_json;
+#[cfg(feature = "hardware-signer")]
+pub extern crate hwi;
 
 #[cfg(all(feature = "reqwest", feature = "ureq"))]
 compile_error!("Features reqwest and ureq are mutually exclusive and cannot be enabled together");
@@ -237,6 +239,9 @@ pub extern crate bitcoincore_rpc;
 #[cfg(feature = "electrum")]
 pub extern crate electrum_client;
 
+#[cfg(feature = "esplora")]
+pub extern crate esplora_client;
+
 #[cfg(feature = "key-value-db")]
 pub extern crate sled;
 
@@ -260,7 +265,7 @@ pub mod descriptor;
 #[cfg(feature = "test-md-docs")]
 mod doctest;
 pub mod keys;
-pub(crate) mod psbt;
+pub mod psbt;
 pub(crate) mod types;
 pub mod wallet;
 
@@ -268,7 +273,6 @@ pub use descriptor::template;
 pub use descriptor::HdKeyPaths;
 pub use error::Error;
 pub use types::*;
-pub use wallet::address_validator;
 pub use wallet::signer;
 pub use wallet::signer::SignOptions;
 pub use wallet::tx_builder::TxBuilder;

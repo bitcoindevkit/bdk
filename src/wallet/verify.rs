@@ -29,6 +29,8 @@ use crate::error::Error;
 /// Depending on the [capabilities](crate::blockchain::Blockchain::get_capabilities) of the
 /// [`Blockchain`] backend, the method could fail when called with old "historical" transactions or
 /// with unconfirmed transactions that have been evicted from the backend's memory.
+///
+/// [`Blockchain`]: crate::blockchain::Blockchain
 pub fn verify_tx<D: Database, B: GetTx>(
     tx: &Transaction,
     database: &D,

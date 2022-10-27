@@ -11,7 +11,40 @@
 
 //! HWI Signer
 //!
-//! This module contains a simple implementation of a Custom signer for rust-hwi
+//! This module contains HWISigner, an implementation of a [TransactionSigner] to be
+//! used with hardware wallets.
+//! ```no_run
+//! # use bdk::bitcoin::Network;
+//! # use bdk::database::MemoryDatabase;
+//! # use bdk::signer::SignerOrdering;
+//! # use bdk::wallet::hardwaresigner::HWISigner;
+//! # use bdk::wallet::AddressIndex::New;
+//! # use bdk::{FeeRate, KeychainKind, SignOptions, SyncOptions, Wallet};
+//! # use hwi::{types::HWIChain, HWIClient};
+//! # use std::sync::Arc;
+//! #
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! let devices = HWIClient::enumerate()?;
+//! let first_device = devices.first().expect("No devices found!");
+//! let custom_signer = HWISigner::from_device(first_device, HWIChain::Test)?;
+//!
+//! # let mut wallet = Wallet::new(
+//! #     "",
+//! #     None,
+//! #     Network::Testnet,
+//! #     MemoryDatabase::default(),
+//! # )?;
+//! #
+//! // Adding the hardware signer to the BDK wallet
+//! wallet.add_signer(
+//!     KeychainKind::External,
+//!     SignerOrdering(200),
+//!     Arc::new(custom_signer),
+//! );
+//!
+//! # Ok(())
+//! # }
+//! ```
 
 use bitcoin::psbt::PartiallySignedTransaction;
 use bitcoin::secp256k1::{All, Secp256k1};

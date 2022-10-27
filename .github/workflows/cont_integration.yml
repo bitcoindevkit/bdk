@@ -17,16 +17,16 @@ jobs:
           - default
           - minimal
           - all-keys
-          - minimal,use-esplora-ureq
+          - minimal,use-esplora-blocking
           - key-value-db
           - electrum
           - compact_filters
-          - esplora,ureq,key-value-db,electrum
+          - use-esplora-blocking,key-value-db,electrum
           - compiler
           - rpc
           - verify
           - async-interface
-          - use-esplora-reqwest
+          - use-esplora-async
           - sqlite
           - sqlite-bundled
     steps:
@@ -100,10 +100,10 @@ jobs:
             features: test-rpc-legacy
           - name: esplora
             testprefix: esplora
-            features: test-esplora,use-esplora-reqwest,verify
+            features: test-esplora,use-esplora-async,verify
           - name: esplora
             testprefix: esplora
-            features: test-esplora,use-esplora-ureq,verify
+            features: test-esplora,use-esplora-blocking,verify
     steps:
       - name: Checkout
         uses: actions/checkout@v2
@@ -154,7 +154,7 @@ jobs:
       - name: Update toolchain
         run: rustup update
       - name: Check
-        run: cargo check --target wasm32-unknown-unknown --features use-esplora-reqwest --no-default-features
+        run: cargo check --target wasm32-unknown-unknown --features use-esplora-async,dev-getrandom-wasm --no-default-features
 
   fmt:
     name: Rust fmt

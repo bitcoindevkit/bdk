@@ -96,10 +96,10 @@ use bitcoin::{secp256k1, XOnlyPublicKey};
 use bitcoin::{EcdsaSighashType, PrivateKey, PublicKey, SchnorrSighashType, Script};
 
 use miniscript::descriptor::{
-    Descriptor, DescriptorPublicKey, DescriptorSecretKey, DescriptorSinglePriv, DescriptorXKey,
-    KeyMap, SinglePubKey,
+    Descriptor, DescriptorPublicKey, DescriptorSecretKey, DescriptorXKey, KeyMap, SinglePriv,
+    SinglePubKey,
 };
-use miniscript::{Legacy, MiniscriptKey, Segwitv0, Tap};
+use miniscript::{Legacy, Segwitv0, SigType, Tap, ToPublicKey};
 
 use super::utils::SecpCtx;
 use crate::descriptor::{DescriptorMeta, XKeyUtils};
@@ -369,11 +369,11 @@ impl InputSigner for SignerWrapper<DescriptorXKey<ExtendedPrivKey>> {
 
 impl SignerCommon for SignerWrapper<PrivateKey> {
     fn id(&self, secp: &SecpCtx) -> SignerId {
-        SignerId::from(self.public_key(secp).to_pubkeyhash())
+        SignerId::from(self.public_key(secp).to_pubkeyhash(SigType::Ecdsa))
     }
 
     fn descriptor_secret_key(&self) -> Option<DescriptorSecretKey> {
-        Some(DescriptorSecretKey::SinglePriv(DescriptorSinglePriv {
+        Some(DescriptorSecretKey::Single(SinglePriv {
             key: self.signer,
             origin: None,
         }))
@@ -472,6 +472,7 @@ impl InputSigner for SignerWrapper<PrivateKey> {
             hash,
             hash_ty,
             secp,
+            sign_options.allow_grinding,
         );
 
         Ok(())
@@ -485,9 +486,14 @@ fn sign_psbt_ecdsa(
     hash: bitcoin::Sighash,
     hash_ty: EcdsaSighashType,
     secp: &SecpCtx,
+    allow_grinding: bool,
 ) {
     let msg = &Message::from_slice(&hash.into_inner()[..]).unwrap();
-    let sig = secp.sign_ecdsa(msg, secret_key);
+    let sig = if allow_grinding {
+        secp.sign_ecdsa_low_r(msg, secret_key)
+    } else {
+        secp.sign_ecdsa(msg, secret_key)
+    };
     secp.verify_ecdsa(msg, &sig, &pubkey.inner)
         .expect("invalid or corrupted ecdsa signature");
 
@@ -511,13 +517,13 @@ fn sign_psbt_schnorr(
     let keypair = match leaf_hash {
         None => keypair
             .tap_tweak(secp, psbt_input.tap_merkle_root)
-            .into_inner(),
+            .to_inner(),
         Some(_) => keypair, // no tweak for script spend
     };
 
     let msg = &Message::from_slice(&hash.into_inner()[..]).unwrap();
     let sig = secp.sign_schnorr(msg, &keypair);
-    secp.verify_schnorr(&sig, msg, &XOnlyPublicKey::from_keypair(&keypair))
+    secp.verify_schnorr(&sig, msg, &XOnlyPublicKey::from_keypair(&keypair).0)
         .expect("invalid or corrupted schnorr signature");
 
     let final_signature = schnorr::SchnorrSig { sig, hash_ty };
@@ -570,7 +576,7 @@ impl SignersContainer {
         self.0
             .values()
             .filter_map(|signer| signer.descriptor_secret_key())
-            .filter_map(|secret| secret.as_public(secp).ok().map(|public| (public, secret)))
+            .filter_map(|secret| secret.to_public(secp).ok().map(|public| (public, secret)))
             .collect()
     }
 
@@ -595,8 +601,13 @@ impl SignersContainer {
             };
 
             match secret {
-                DescriptorSecretKey::SinglePriv(private_key) => container.add_external(
-                    SignerId::from(private_key.key.public_key(secp).to_pubkeyhash()),
+                DescriptorSecretKey::Single(private_key) => container.add_external(
+                    SignerId::from(
+                        private_key
+                            .key
+                            .public_key(secp)
+                            .to_pubkeyhash(SigType::Ecdsa),
+                    ),
                     SignerOrdering::default(),
                     Arc::new(SignerWrapper::new(private_key.key, ctx)),
                 ),
@@ -718,10 +729,15 @@ pub struct SignOptions {
     ///
     /// Defaults to `true`, i.e., we always try to sign with the taproot internal key.
     pub sign_with_tap_internal_key: bool,
+
+    /// Whether we should grind ECDSA signature to ensure signing with low r
+    /// or not.
+    /// Defaults to `true`, i.e., we always grind ECDSA signature to sign with low r.
+    pub allow_grinding: bool,
 }
 
 /// Customize which taproot script-path leaves the signer should sign.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TapLeavesOptions {
     /// The signer will sign all the leaves it has a key for.
     All,
@@ -751,6 +767,7 @@ impl Default for SignOptions {
             try_finalize: true,
             tap_leaves_options: TapLeavesOptions::default(),
             sign_with_tap_internal_key: true,
+            allow_grinding: true,
         }
     }
 }

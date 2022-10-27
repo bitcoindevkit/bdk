@@ -12,34 +12,18 @@
 //! Esplora by way of `ureq` HTTP client.
 
 use std::collections::{HashMap, HashSet};
-use std::io;
-use std::io::Read;
-use std::ops::Deref;
-use std::time::Duration;
 
 #[allow(unused_imports)]
 use log::{debug, error, info, trace};
 
-use ureq::{Agent, Proxy, Response};
+use bitcoin::{Transaction, Txid};
 
-use bitcoin::consensus::{deserialize, serialize};
-use bitcoin::hashes::hex::{FromHex, ToHex};
-use bitcoin::hashes::{sha256, Hash};
-use bitcoin::{BlockHeader, Script, Transaction, Txid};
+use esplora_client::{convert_fee_rate, BlockingClient, Builder, Tx};
 
-use super::api::Tx;
-use crate::blockchain::esplora::EsploraError;
 use crate::blockchain::*;
 use crate::database::BatchDatabase;
 use crate::error::Error;
 use crate::FeeRate;
-
-/// Structure encapsulates ureq Esplora client
-#[derive(Debug, Clone)]
-pub struct UrlClient {
-    url: String,
-    agent: Agent,
-}
 
 /// Structure that implements the logic to sync with Esplora
 ///
@@ -47,7 +31,7 @@ pub struct UrlClient {
 /// See the [`blockchain::esplora`](crate::blockchain::esplora) module for a usage example.
 #[derive(Debug)]
 pub struct EsploraBlockchain {
-    url_client: UrlClient,
+    url_client: BlockingClient,
     stop_gap: usize,
     concurrency: u8,
 }
@@ -55,20 +39,20 @@ pub struct EsploraBlockchain {
 impl EsploraBlockchain {
     /// Create a new instance of the client from a base URL and the `stop_gap`.
     pub fn new(base_url: &str, stop_gap: usize) -> Self {
+        let url_client = Builder::new(base_url)
+            .build_blocking()
+            .expect("Should never fail with no proxy and timeout");
+
+        Self::from_client(url_client, stop_gap)
+    }
+
+    /// Build a new instance given a client
+    pub fn from_client(url_client: BlockingClient, stop_gap: usize) -> Self {
         EsploraBlockchain {
-            url_client: UrlClient {
-                url: base_url.to_string(),
-                agent: Agent::new(),
-            },
+            url_client,
             concurrency: super::DEFAULT_CONCURRENT_REQUESTS,
             stop_gap,
         }
-    }
-
-    /// Set the inner `ureq` agent.
-    pub fn with_agent(mut self, agent: Agent) -> Self {
-        self.url_client.agent = agent;
-        self
     }
 
     /// Set the number of parallel requests the client can make.
@@ -90,18 +74,20 @@ impl Blockchain for EsploraBlockchain {
     }
 
     fn broadcast(&self, tx: &Transaction) -> Result<(), Error> {
-        self.url_client._broadcast(tx)?;
+        self.url_client.broadcast(tx)?;
         Ok(())
     }
 
     fn estimate_fee(&self, target: usize) -> Result<FeeRate, Error> {
-        let estimates = self.url_client._get_fee_estimates()?;
-        super::into_fee_rate(target, estimates)
+        let estimates = self.url_client.get_fee_estimates()?;
+        Ok(FeeRate::from_sat_per_vb(convert_fee_rate(
+            target, estimates,
+        )?))
     }
 }
 
 impl Deref for EsploraBlockchain {
-    type Target = UrlClient;
+    type Target = BlockingClient;
 
     fn deref(&self) -> &Self::Target {
         &self.url_client
@@ -112,20 +98,19 @@ impl StatelessBlockchain for EsploraBlockchain {}
 
 impl GetHeight for EsploraBlockchain {
     fn get_height(&self) -> Result<u32, Error> {
-        Ok(self.url_client._get_height()?)
+        Ok(self.url_client.get_height()?)
     }
 }
 
 impl GetTx for EsploraBlockchain {
     fn get_tx(&self, txid: &Txid) -> Result<Option<Transaction>, Error> {
-        Ok(self.url_client._get_tx(txid)?)
+        Ok(self.url_client.get_tx(txid)?)
     }
 }
 
 impl GetBlockHash for EsploraBlockchain {
     fn get_block_hash(&self, height: u64) -> Result<BlockHash, Error> {
-        let block_header = self.url_client._get_header(height as u32)?;
-        Ok(block_header.block_hash())
+        Ok(self.url_client.get_block_hash(height as u32)?)
     }
 }
 
@@ -151,7 +136,7 @@ impl WalletSync for EsploraBlockchain {
                         let client = self.url_client.clone();
                         // make each request in its own thread.
                         handles.push(std::thread::spawn(move || {
-                            let mut related_txs: Vec<Tx> = client._scripthash_txs(&script, None)?;
+                            let mut related_txs: Vec<Tx> = client.scripthash_txs(&script, None)?;
 
                             let n_confirmed =
                                 related_txs.iter().filter(|tx| tx.status.confirmed).count();
@@ -159,7 +144,7 @@ impl WalletSync for EsploraBlockchain {
                             // keep requesting to see if there's more.
                             if n_confirmed >= 25 {
                                 loop {
-                                    let new_related_txs: Vec<Tx> = client._scripthash_txs(
+                                    let new_related_txs: Vec<Tx> = client.scripthash_txs(
                                         &script,
                                         Some(related_txs.last().unwrap().txid),
                                     )?;
@@ -202,6 +187,7 @@ impl WalletSync for EsploraBlockchain {
                                 .get(txid)
                                 .expect("must be in index")
                                 .confirmation_time()
+                                .map(Into::into)
                         })
                         .collect();
                     conftime_req.satisfy(conftimes)?
@@ -226,173 +212,27 @@ impl WalletSync for EsploraBlockchain {
     }
 }
 
-impl UrlClient {
-    fn _get_tx(&self, txid: &Txid) -> Result<Option<Transaction>, EsploraError> {
-        let resp = self
-            .agent
-            .get(&format!("{}/tx/{}/raw", self.url, txid))
-            .call();
-
-        match resp {
-            Ok(resp) => Ok(Some(deserialize(&into_bytes(resp)?)?)),
-            Err(ureq::Error::Status(code, _)) => {
-                if is_status_not_found(code) {
-                    return Ok(None);
-                }
-                Err(EsploraError::HttpResponse(code))
-            }
-            Err(e) => Err(EsploraError::Ureq(e)),
-        }
-    }
-
-    fn _get_tx_no_opt(&self, txid: &Txid) -> Result<Transaction, EsploraError> {
-        match self._get_tx(txid) {
-            Ok(Some(tx)) => Ok(tx),
-            Ok(None) => Err(EsploraError::TransactionNotFound(*txid)),
-            Err(e) => Err(e),
-        }
-    }
-
-    fn _get_header(&self, block_height: u32) -> Result<BlockHeader, EsploraError> {
-        let resp = self
-            .agent
-            .get(&format!("{}/block-height/{}", self.url, block_height))
-            .call();
-
-        let bytes = match resp {
-            Ok(resp) => Ok(into_bytes(resp)?),
-            Err(ureq::Error::Status(code, _)) => Err(EsploraError::HttpResponse(code)),
-            Err(e) => Err(EsploraError::Ureq(e)),
-        }?;
-
-        let hash = std::str::from_utf8(&bytes)
-            .map_err(|_| EsploraError::HeaderHeightNotFound(block_height))?;
-
-        let resp = self
-            .agent
-            .get(&format!("{}/block/{}/header", self.url, hash))
-            .call();
-
-        match resp {
-            Ok(resp) => Ok(deserialize(&Vec::from_hex(&resp.into_string()?)?)?),
-            Err(ureq::Error::Status(code, _)) => Err(EsploraError::HttpResponse(code)),
-            Err(e) => Err(EsploraError::Ureq(e)),
-        }
-    }
-
-    fn _broadcast(&self, transaction: &Transaction) -> Result<(), EsploraError> {
-        let resp = self
-            .agent
-            .post(&format!("{}/tx", self.url))
-            .send_string(&serialize(transaction).to_hex());
-
-        match resp {
-            Ok(_) => Ok(()), // We do not return the txid?
-            Err(ureq::Error::Status(code, _)) => Err(EsploraError::HttpResponse(code)),
-            Err(e) => Err(EsploraError::Ureq(e)),
-        }
-    }
-
-    fn _get_height(&self) -> Result<u32, EsploraError> {
-        let resp = self
-            .agent
-            .get(&format!("{}/blocks/tip/height", self.url))
-            .call();
-
-        match resp {
-            Ok(resp) => Ok(resp.into_string()?.parse()?),
-            Err(ureq::Error::Status(code, _)) => Err(EsploraError::HttpResponse(code)),
-            Err(e) => Err(EsploraError::Ureq(e)),
-        }
-    }
-
-    fn _get_fee_estimates(&self) -> Result<HashMap<String, f64>, EsploraError> {
-        let resp = self
-            .agent
-            .get(&format!("{}/fee-estimates", self.url,))
-            .call();
-
-        let map = match resp {
-            Ok(resp) => {
-                let map: HashMap<String, f64> = resp.into_json()?;
-                Ok(map)
-            }
-            Err(ureq::Error::Status(code, _)) => Err(EsploraError::HttpResponse(code)),
-            Err(e) => Err(EsploraError::Ureq(e)),
-        }?;
-
-        Ok(map)
-    }
-
-    fn _scripthash_txs(
-        &self,
-        script: &Script,
-        last_seen: Option<Txid>,
-    ) -> Result<Vec<Tx>, EsploraError> {
-        let script_hash = sha256::Hash::hash(script.as_bytes()).into_inner().to_hex();
-        let url = match last_seen {
-            Some(last_seen) => format!(
-                "{}/scripthash/{}/txs/chain/{}",
-                self.url, script_hash, last_seen
-            ),
-            None => format!("{}/scripthash/{}/txs", self.url, script_hash),
-        };
-        Ok(self.agent.get(&url).call()?.into_json()?)
-    }
-}
-
-fn is_status_not_found(status: u16) -> bool {
-    status == 404
-}
-
-fn into_bytes(resp: Response) -> Result<Vec<u8>, io::Error> {
-    const BYTES_LIMIT: usize = 10 * 1_024 * 1_024;
-
-    let mut buf: Vec<u8> = vec![];
-    resp.into_reader()
-        .take((BYTES_LIMIT + 1) as u64)
-        .read_to_end(&mut buf)?;
-    if buf.len() > BYTES_LIMIT {
-        return Err(io::Error::new(
-            io::ErrorKind::Other,
-            "response too big for into_bytes",
-        ));
-    }
-
-    Ok(buf)
-}
-
 impl ConfigurableBlockchain for EsploraBlockchain {
     type Config = super::EsploraBlockchainConfig;
 
     fn from_config(config: &Self::Config) -> Result<Self, Error> {
-        let mut agent_builder = ureq::AgentBuilder::new();
+        let mut builder = Builder::new(config.base_url.as_str());
 
         if let Some(timeout) = config.timeout {
-            agent_builder = agent_builder.timeout(Duration::from_secs(timeout));
+            builder = builder.timeout(timeout);
         }
 
         if let Some(proxy) = &config.proxy {
-            agent_builder = agent_builder
-                .proxy(Proxy::new(proxy).map_err(|e| Error::Esplora(Box::new(e.into())))?);
+            builder = builder.proxy(proxy);
         }
 
-        let mut blockchain = EsploraBlockchain::new(config.base_url.as_str(), config.stop_gap)
-            .with_agent(agent_builder.build());
+        let mut blockchain =
+            EsploraBlockchain::from_client(builder.build_blocking()?, config.stop_gap);
 
         if let Some(concurrency) = config.concurrency {
             blockchain = blockchain.with_concurrency(concurrency);
         }
 
         Ok(blockchain)
-    }
-}
-
-impl From<ureq::Error> for EsploraError {
-    fn from(e: ureq::Error) -> Self {
-        match e {
-            ureq::Error::Status(code, _) => EsploraError::HttpResponse(code),
-            e => EsploraError::Ureq(e),
-        }
     }
 }

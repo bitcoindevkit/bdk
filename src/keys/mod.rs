@@ -24,8 +24,8 @@ use bitcoin::{Network, PrivateKey, PublicKey, XOnlyPublicKey};
 
 use miniscript::descriptor::{Descriptor, DescriptorXKey, Wildcard};
 pub use miniscript::descriptor::{
-    DescriptorPublicKey, DescriptorSecretKey, DescriptorSinglePriv, DescriptorSinglePub, KeyMap,
-    SinglePubKey, SortedMultiVec,
+    DescriptorPublicKey, DescriptorSecretKey, KeyMap, SinglePriv, SinglePub, SinglePubKey,
+    SortedMultiVec,
 };
 pub use miniscript::ScriptContext;
 use miniscript::{Miniscript, Terminal};
@@ -110,7 +110,7 @@ impl<Ctx: ScriptContext> DescriptorKey<Ctx> {
                 let mut key_map = KeyMap::with_capacity(1);
 
                 let public = secret
-                    .as_public(secp)
+                    .to_public(secp)
                     .map_err(|e| miniscript::Error::Unexpected(e.to_string()))?;
                 key_map.insert(public.clone(), secret);
 
@@ -224,8 +224,8 @@ impl<Ctx: ScriptContext + 'static> ExtScriptContext for Ctx {
 /// use bdk::bitcoin::PublicKey;
 ///
 /// use bdk::keys::{
-///     mainnet_network, DescriptorKey, DescriptorPublicKey, DescriptorSinglePub,
-///     IntoDescriptorKey, KeyError, ScriptContext, SinglePubKey,
+///     mainnet_network, DescriptorKey, DescriptorPublicKey, IntoDescriptorKey, KeyError,
+///     ScriptContext, SinglePub, SinglePubKey,
 /// };
 ///
 /// pub struct MyKeyType {
@@ -235,7 +235,7 @@ impl<Ctx: ScriptContext + 'static> ExtScriptContext for Ctx {
 /// impl<Ctx: ScriptContext> IntoDescriptorKey<Ctx> for MyKeyType {
 ///     fn into_descriptor_key(self) -> Result<DescriptorKey<Ctx>, KeyError> {
 ///         Ok(DescriptorKey::from_public(
-///             DescriptorPublicKey::SinglePub(DescriptorSinglePub {
+///             DescriptorPublicKey::Single(SinglePub {
 ///                 origin: None,
 ///                 key: SinglePubKey::FullKey(self.pubkey),
 ///             }),
@@ -842,7 +842,7 @@ impl<Ctx: ScriptContext> IntoDescriptorKey<Ctx> for DescriptorKey<Ctx> {
 impl<Ctx: ScriptContext> IntoDescriptorKey<Ctx> for DescriptorPublicKey {
     fn into_descriptor_key(self) -> Result<DescriptorKey<Ctx>, KeyError> {
         let networks = match self {
-            DescriptorPublicKey::SinglePub(_) => any_network(),
+            DescriptorPublicKey::Single(_) => any_network(),
             DescriptorPublicKey::XPub(DescriptorXKey { xkey, .. })
                 if xkey.network == Network::Bitcoin =>
             {
@@ -857,7 +857,7 @@ impl<Ctx: ScriptContext> IntoDescriptorKey<Ctx> for DescriptorPublicKey {
 
 impl<Ctx: ScriptContext> IntoDescriptorKey<Ctx> for PublicKey {
     fn into_descriptor_key(self) -> Result<DescriptorKey<Ctx>, KeyError> {
-        DescriptorPublicKey::SinglePub(DescriptorSinglePub {
+        DescriptorPublicKey::Single(SinglePub {
             key: SinglePubKey::FullKey(self),
             origin: None,
         })
@@ -867,7 +867,7 @@ impl<Ctx: ScriptContext> IntoDescriptorKey<Ctx> for PublicKey {
 
 impl<Ctx: ScriptContext> IntoDescriptorKey<Ctx> for XOnlyPublicKey {
     fn into_descriptor_key(self) -> Result<DescriptorKey<Ctx>, KeyError> {
-        DescriptorPublicKey::SinglePub(DescriptorSinglePub {
+        DescriptorPublicKey::Single(SinglePub {
             key: SinglePubKey::XOnly(self),
             origin: None,
         })
@@ -878,7 +878,7 @@ impl<Ctx: ScriptContext> IntoDescriptorKey<Ctx> for XOnlyPublicKey {
 impl<Ctx: ScriptContext> IntoDescriptorKey<Ctx> for DescriptorSecretKey {
     fn into_descriptor_key(self) -> Result<DescriptorKey<Ctx>, KeyError> {
         let networks = match &self {
-            DescriptorSecretKey::SinglePriv(sk) if sk.key.network == Network::Bitcoin => {
+            DescriptorSecretKey::Single(sk) if sk.key.network == Network::Bitcoin => {
                 mainnet_network()
             }
             DescriptorSecretKey::XPrv(DescriptorXKey { xkey, .. })
@@ -903,7 +903,7 @@ impl<Ctx: ScriptContext> IntoDescriptorKey<Ctx> for &'_ str {
 
 impl<Ctx: ScriptContext> IntoDescriptorKey<Ctx> for PrivateKey {
     fn into_descriptor_key(self) -> Result<DescriptorKey<Ctx>, KeyError> {
-        DescriptorSecretKey::SinglePriv(DescriptorSinglePriv {
+        DescriptorSecretKey::Single(SinglePriv {
             key: self,
             origin: None,
         })
