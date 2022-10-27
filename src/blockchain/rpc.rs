@@ -35,7 +35,7 @@ use crate::bitcoin::hashes::hex::ToHex;
 use crate::bitcoin::{Network, OutPoint, Transaction, TxOut, Txid};
 use crate::blockchain::*;
 use crate::database::{BatchDatabase, BatchOperations, DatabaseUtils};
-use crate::descriptor::get_checksum;
+use crate::descriptor::calc_checksum;
 use crate::error::MissingCachedScripts;
 use crate::{BlockTime, Error, FeeRate, KeychainKind, LocalUtxo, TransactionDetails};
 use bitcoin::Script;
@@ -806,7 +806,7 @@ fn is_wallet_descriptor(client: &Client) -> Result<bool, Error> {
 
 fn descriptor_from_script_pubkey(script: &Script) -> String {
     let desc = format!("raw({})", script.to_hex());
-    format!("{}#{}", desc, get_checksum(&desc).unwrap())
+    format!("{}#{}", desc, calc_checksum(&desc).unwrap())
 }
 
 /// Factory of [`RpcBlockchain`] instances, implements [`BlockchainFactory`]

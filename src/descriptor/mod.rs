@@ -37,7 +37,8 @@ pub mod error;
 pub mod policy;
 pub mod template;
 
-pub use self::checksum::get_checksum;
+pub use self::checksum::calc_checksum;
+use self::checksum::calc_checksum_bytes;
 pub use self::error::Error as DescriptorError;
 pub use self::policy::Policy;
 use self::template::DescriptorTemplateOut;
@@ -81,19 +82,15 @@ impl IntoWalletDescriptor for &str {
         secp: &SecpCtx,
         network: Network,
     ) -> Result<(ExtendedDescriptor, KeyMap), DescriptorError> {
-        let descriptor = if self.contains('#') {
-            let parts: Vec<&str> = self.splitn(2, '#').collect();
-            if !get_checksum(parts[0])
-                .ok()
-                .map(|computed| computed == parts[1])
-                .unwrap_or(false)
-            {
-                return Err(DescriptorError::InvalidDescriptorChecksum);
+        let descriptor = match self.split_once('#') {
+            Some((desc, original_checksum)) => {
+                let checksum = calc_checksum_bytes(desc)?;
+                if original_checksum.as_bytes() != checksum {
+                    return Err(DescriptorError::InvalidDescriptorChecksum);
+                }
+                desc
             }
-
-            parts[0]
-        } else {
-            self
+            None => self,
         };
 
         ExtendedDescriptor::parse_descriptor(secp, descriptor)?
