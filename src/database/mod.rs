@@ -46,6 +46,11 @@ pub use sqlite::SqliteDatabase;
 pub mod memory;
 pub use memory::MemoryDatabase;
 
+#[cfg(feature = "wasm-db")]
+pub mod localstorage;
+#[cfg(feature = "wasm-db")]
+pub use localstorage::LocalStorageDatabase;
+
 /// Blockchain state at the time of syncing
 ///
 /// Contains only the block time and height at the moment

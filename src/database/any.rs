@@ -68,6 +68,8 @@ macro_rules! impl_inner_method {
             $enum_name::Sled(inner) => inner.$name( $($args, )* ),
             #[cfg(feature = "sqlite")]
             $enum_name::Sqlite(inner) => inner.$name( $($args, )* ),
+            #[cfg(feature = "wasm-db")]
+            $enum_name::LocalStorage(inner) => inner.$name( $($args, )* ),
         }
     }
 }
@@ -89,11 +91,16 @@ pub enum AnyDatabase {
     #[cfg_attr(docsrs, doc(cfg(feature = "sqlite")))]
     /// Sqlite embedded database using [`rusqlite`]
     Sqlite(sqlite::SqliteDatabase),
+    #[cfg(feature = "wasm-db")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "wasm-db")))]
+    /// Browser LocalStorage database based on [`gloo_storage`]
+    LocalStorage(localstorage::LocalStorageDatabase),
 }
 
 impl_from!(memory::MemoryDatabase, AnyDatabase, Memory,);
 impl_from!(sled::Tree, AnyDatabase, Sled, #[cfg(feature = "key-value-db")]);
 impl_from!(sqlite::SqliteDatabase, AnyDatabase, Sqlite, #[cfg(feature = "sqlite")]);
+impl_from!(localstorage::LocalStorageDatabase, AnyDatabase, LocalStorage, #[cfg(feature = "wasm-db")]);
 
 /// Type that contains any of the [`BatchDatabase::Batch`] types defined by the library
 pub enum AnyBatch {
@@ -107,6 +114,10 @@ pub enum AnyBatch {
     #[cfg_attr(docsrs, doc(cfg(feature = "sqlite")))]
     /// Sqlite embedded database using [`rusqlite`]
     Sqlite(<sqlite::SqliteDatabase as BatchDatabase>::Batch),
+    #[cfg(feature = "wasm-db")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "wasm-db")))]
+    /// Browser LocalStorage database based on [`gloo_storage`]
+    LocalStorage(<gloo_storage::LocalStorage as BatchDatabase>::Batch),
 }
 
 impl_from!(
@@ -116,6 +127,7 @@ impl_from!(
 );
 impl_from!(<sled::Tree as BatchDatabase>::Batch, AnyBatch, Sled, #[cfg(feature = "key-value-db")]);
 impl_from!(<sqlite::SqliteDatabase as BatchDatabase>::Batch, AnyBatch, Sqlite, #[cfg(feature = "sqlite")]);
+impl_from!(<localstorage::LocalStorageDatabase as BatchDatabase>::Batch, AnyBatch, LocalStorage, #[cfg(feature = "wasm-db")]);
 
 impl BatchOperations for AnyDatabase {
     fn set_script_pubkey(
@@ -326,6 +338,8 @@ impl BatchDatabase for AnyDatabase {
             AnyDatabase::Sled(inner) => inner.begin_batch().into(),
             #[cfg(feature = "sqlite")]
             AnyDatabase::Sqlite(inner) => inner.begin_batch().into(),
+            #[cfg(feature = "wasm-db")]
+            AnyDatabase::LocalStorage(inner) => inner.begin_batch().into(),
         }
     }
     fn commit_batch(&mut self, batch: Self::Batch) -> Result<(), Error> {
@@ -344,6 +358,11 @@ impl BatchDatabase for AnyDatabase {
             AnyDatabase::Sqlite(db) => match batch {
                 AnyBatch::Sqlite(batch) => db.commit_batch(batch),
                 _ => unimplemented!("Other batch shouldn't be used with Sqlite db."),
+            },
+            #[cfg(feature = "wasm-db")]
+            AnyDatabase::LocalStorage(db) => match batch {
+                AnyBatch::LocalStorage(batch) => db.commit_batch(batch),
+                _ => unimplemented!("Other batch shouldn't be used with LocalStorage db."),
             },
         }
     }
@@ -402,6 +421,10 @@ pub enum AnyDatabaseConfig {
     #[cfg_attr(docsrs, doc(cfg(feature = "sqlite")))]
     /// Sqlite embedded database using [`rusqlite`]
     Sqlite(SqliteDbConfiguration),
+    #[cfg(feature = "wasm-db")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "wasm-db")))]
+    /// Browser LocalStorage database based on [`gloo_storage`]
+    LocalStorage(()),
 }
 
 impl ConfigurableDatabase for AnyDatabase {
@@ -418,6 +441,10 @@ impl ConfigurableDatabase for AnyDatabase {
             AnyDatabaseConfig::Sqlite(inner) => {
                 AnyDatabase::Sqlite(sqlite::SqliteDatabase::from_config(inner)?)
             }
+            #[cfg(feature = "wasm-db")]
+            AnyDatabaseConfig::LocalStorage(inner) => {
+                AnyDatabase::LocalStorage(localstorage::LocalStorageDatabase::from_config(inner)?)
+            }
         })
     }
 }
@@ -425,3 +452,4 @@ impl ConfigurableDatabase for AnyDatabase {
 impl_from!((), AnyDatabaseConfig, Memory,);
 impl_from!(SledDbConfiguration, AnyDatabaseConfig, Sled, #[cfg(feature = "key-value-db")]);
 impl_from!(SqliteDbConfiguration, AnyDatabaseConfig, Sqlite, #[cfg(feature = "sqlite")]);
+impl_from!((), AnyDatabaseConfig, LocalStorage, #[cfg(feature = "wasm-db")]);
