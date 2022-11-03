@@ -36,20 +36,22 @@
 //! # Ok::<(), bdk::Error>(())
 //! ```
 
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::default::Default;
 use std::marker::PhantomData;
+use std::rc::Rc;
 
 use bitcoin::util::psbt::{self, PartiallySignedTransaction as Psbt};
 use bitcoin::{LockTime, OutPoint, Script, Sequence, Transaction};
 
 use super::coin_selection::{CoinSelectionAlgorithm, DefaultCoinSelectionAlgorithm};
-use crate::{database::BatchDatabase, Error, Utxo, Wallet};
 use crate::{
     types::{FeeRate, KeychainKind, LocalUtxo, WeightedUtxo},
     TransactionDetails,
 };
+use crate::{Error, Utxo, Wallet};
 /// Context in which the [`TxBuilder`] is valid
 pub trait TxBuilderContext: std::fmt::Debug + Default + Clone {}
 
@@ -115,8 +117,8 @@ impl TxBuilderContext for BumpFee {}
 /// [`finish`]: Self::finish
 /// [`coin_selection`]: Self::coin_selection
 #[derive(Debug)]
-pub struct TxBuilder<'a, D, Cs, Ctx> {
-    pub(crate) wallet: &'a Wallet<D>,
+pub struct TxBuilder<'a, Cs, Ctx> {
+    pub(crate) wallet: Rc<RefCell<&'a mut Wallet>>,
     pub(crate) params: TxParams,
     pub(crate) coin_selection: Cs,
     pub(crate) phantom: PhantomData<Ctx>,
@@ -167,10 +169,10 @@ impl std::default::Default for FeePolicy {
     }
 }
 
-impl<'a, Cs: Clone, Ctx, D> Clone for TxBuilder<'a, D, Cs, Ctx> {
+impl<'a, Cs: Clone, Ctx> Clone for TxBuilder<'a, Cs, Ctx> {
     fn clone(&self) -> Self {
         TxBuilder {
-            wallet: self.wallet,
+            wallet: self.wallet.clone(),
             params: self.params.clone(),
             coin_selection: self.coin_selection.clone(),
             phantom: PhantomData,
@@ -179,9 +181,7 @@ impl<'a, Cs: Clone, Ctx, D> Clone for TxBuilder<'a, D, Cs, Ctx> {
 }
 
 // methods supported by both contexts, for any CoinSelectionAlgorithm
-impl<'a, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderContext>
-    TxBuilder<'a, D, Cs, Ctx>
-{
+impl<'a, Cs: CoinSelectionAlgorithm, Ctx: TxBuilderContext> TxBuilder<'a, Cs, Ctx> {
     /// Set a custom fee rate
     pub fn fee_rate(&mut self, fee_rate: FeeRate) -> &mut Self {
         self.params.fee_policy = Some(FeePolicy::FeeRate(fee_rate));
@@ -274,18 +274,21 @@ impl<'a, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderContext>
     /// These have priority over the "unspendable" utxos, meaning that if a utxo is present both in
     /// the "utxos" and the "unspendable" list, it will be spent.
     pub fn add_utxos(&mut self, outpoints: &[OutPoint]) -> Result<&mut Self, Error> {
-        let utxos = outpoints
-            .iter()
-            .map(|outpoint| self.wallet.get_utxo(*outpoint)?.ok_or(Error::UnknownUtxo))
-            .collect::<Result<Vec<_>, _>>()?;
+        {
+            let wallet = self.wallet.borrow();
+            let utxos = outpoints
+                .iter()
+                .map(|outpoint| wallet.get_utxo(*outpoint).ok_or(Error::UnknownUtxo))
+                .collect::<Result<Vec<_>, _>>()?;
 
-        for utxo in utxos {
-            let descriptor = self.wallet.get_descriptor_for_keychain(utxo.keychain);
-            let satisfaction_weight = descriptor.max_satisfaction_weight().unwrap();
-            self.params.utxos.push(WeightedUtxo {
-                satisfaction_weight,
-                utxo: Utxo::Local(utxo),
-            });
+            for utxo in utxos {
+                let descriptor = wallet.get_descriptor_for_keychain(utxo.keychain);
+                let satisfaction_weight = descriptor.max_satisfaction_weight().unwrap();
+                self.params.utxos.push(WeightedUtxo {
+                    satisfaction_weight,
+                    utxo: Utxo::Local(utxo),
+                });
+            }
         }
 
         Ok(self)
@@ -503,10 +506,10 @@ impl<'a, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderContext>
     /// Overrides the [`DefaultCoinSelectionAlgorithm`](super::coin_selection::DefaultCoinSelectionAlgorithm).
     ///
     /// Note that this function consumes the builder and returns it so it is usually best to put this as the first call on the builder.
-    pub fn coin_selection<P: CoinSelectionAlgorithm<D>>(
+    pub fn coin_selection<P: CoinSelectionAlgorithm>(
         self,
         coin_selection: P,
-    ) -> TxBuilder<'a, D, P, Ctx> {
+    ) -> TxBuilder<'a, P, Ctx> {
         TxBuilder {
             wallet: self.wallet,
             params: self.params,
@@ -521,7 +524,9 @@ impl<'a, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderContext>
     ///
     /// [`BIP174`]: https://github.com/bitcoin/bips/blob/master/bip-0174.mediawiki
     pub fn finish(self) -> Result<(Psbt, TransactionDetails), Error> {
-        self.wallet.create_tx(self.coin_selection, self.params)
+        self.wallet
+            .borrow_mut()
+            .create_tx(self.coin_selection, self.params)
     }
 
     /// Enable signaling RBF
@@ -569,7 +574,7 @@ impl<'a, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderContext>
     }
 }
 
-impl<'a, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>> TxBuilder<'a, D, Cs, CreateTx> {
+impl<'a, Cs: CoinSelectionAlgorithm> TxBuilder<'a, Cs, CreateTx> {
     /// Replace the recipients already added with a new list
     pub fn set_recipients(&mut self, recipients: Vec<(Script, u64)>) -> &mut Self {
         self.params.recipients = recipients;
@@ -640,7 +645,7 @@ impl<'a, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>> TxBuilder<'a, D, Cs, C
 }
 
 // methods supported only by bump_fee
-impl<'a, D: BatchDatabase> TxBuilder<'a, D, DefaultCoinSelectionAlgorithm, BumpFee> {
+impl<'a> TxBuilder<'a, DefaultCoinSelectionAlgorithm, BumpFee> {
     /// Explicitly tells the wallet that it is allowed to reduce the amount of the output matching this
     /// `script_pubkey` in order to bump the transaction fee. Without specifying this the wallet
     /// will attempt to find a change output to shrink instead.
@@ -788,6 +793,7 @@ mod test {
         };
     }
 
+    use bdk_chain::ConfirmationTime;
     use bitcoin::consensus::deserialize;
     use bitcoin::hashes::hex::FromHex;
 
@@ -867,6 +873,8 @@ mod test {
                 txout: Default::default(),
                 keychain: KeychainKind::External,
                 is_spent: false,
+                confirmation_time: ConfirmationTime::Unconfirmed,
+                derivation_index: 0,
             },
             LocalUtxo {
                 outpoint: OutPoint {
@@ -876,6 +884,11 @@ mod test {
                 txout: Default::default(),
                 keychain: KeychainKind::Internal,
                 is_spent: false,
+                confirmation_time: ConfirmationTime::Confirmed {
+                    height: 32,
+                    time: 42,
+                },
+                derivation_index: 1,
             },
         ]
     }

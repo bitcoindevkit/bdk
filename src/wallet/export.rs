@@ -61,12 +61,12 @@
 
 use std::str::FromStr;
 
+use bdk_chain::sparse_chain::ChainPosition;
 use serde::{Deserialize, Serialize};
 
 use miniscript::descriptor::{ShInner, WshInner};
 use miniscript::{Descriptor, ScriptContext, Terminal};
 
-use crate::database::BatchDatabase;
 use crate::types::KeychainKind;
 use crate::wallet::Wallet;
 
@@ -116,8 +116,8 @@ impl FullyNodedExport {
     ///
     /// If the database is empty or `include_blockheight` is false, the `blockheight` field
     /// returned will be `0`.
-    pub fn export_wallet<D: BatchDatabase>(
-        wallet: &Wallet<D>,
+    pub fn export_wallet(
+        wallet: &Wallet,
         label: &str,
         include_blockheight: bool,
     ) -> Result<Self, &'static str> {
@@ -131,14 +131,14 @@ impl FullyNodedExport {
         let descriptor = remove_checksum(descriptor);
         Self::is_compatible_with_core(&descriptor)?;
 
-        let blockheight = match wallet.database.borrow().iter_txs(false) {
-            _ if !include_blockheight => 0,
-            Err(_) => 0,
-            Ok(txs) => txs
-                .into_iter()
-                .filter_map(|tx| tx.confirmation_time.map(|c| c.height))
-                .min()
-                .unwrap_or(0),
+        let blockheight = if include_blockheight {
+            wallet
+                .transactions()
+                .next()
+                .and_then(|(pos, _)| pos.height().into())
+                .unwrap_or(0)
+        } else {
+            0
         };
 
         let export = FullyNodedExport {
@@ -147,11 +147,7 @@ impl FullyNodedExport {
             blockheight,
         };
 
-        let change_descriptor = match wallet
-            .public_descriptor(KeychainKind::Internal)
-            .map_err(|_| "Invalid change descriptor")?
-            .is_some()
-        {
+        let change_descriptor = match wallet.public_descriptor(KeychainKind::Internal).is_some() {
             false => None,
             true => {
                 let descriptor = wallet
@@ -223,50 +219,41 @@ impl FullyNodedExport {
 mod test {
     use std::str::FromStr;
 
-    use bitcoin::{Network, Txid};
+    use bdk_chain::{BlockId, ConfirmationTime};
+    use bitcoin::hashes::Hash;
+    use bitcoin::{BlockHash, Network, Transaction};
 
     use super::*;
-    use crate::database::{memory::MemoryDatabase, BatchOperations};
-    use crate::types::TransactionDetails;
     use crate::wallet::Wallet;
-    use crate::BlockTime;
 
-    fn get_test_db() -> MemoryDatabase {
-        let mut db = MemoryDatabase::new();
-        db.set_tx(&TransactionDetails {
-            transaction: None,
-            txid: Txid::from_str(
-                "4ddff1fa33af17f377f62b72357b43107c19110a8009b36fb832af505efed98a",
-            )
-            .unwrap(),
-
-            received: 100_000,
-            sent: 0,
-            fee: Some(500),
-            confirmation_time: Some(BlockTime {
-                timestamp: 12345678,
+    fn get_test_wallet(
+        descriptor: &str,
+        change_descriptor: Option<&str>,
+        network: Network,
+    ) -> Wallet {
+        let mut wallet = Wallet::new(descriptor, change_descriptor, network).unwrap();
+        let transaction = Transaction {
+            input: vec![],
+            output: vec![],
+            version: 0,
+            lock_time: bitcoin::PackedLockTime::ZERO,
+        };
+        wallet
+            .insert_checkpoint(BlockId {
                 height: 5001,
-            }),
-        })
-        .unwrap();
-
-        db.set_tx(&TransactionDetails {
-            transaction: None,
-            txid: Txid::from_str(
-                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                hash: BlockHash::all_zeros(),
+            })
+            .unwrap();
+        wallet
+            .insert_tx(
+                transaction,
+                ConfirmationTime::Confirmed {
+                    height: 5000,
+                    time: 0,
+                },
             )
-            .unwrap(),
-            received: 25_000,
-            sent: 0,
-            fee: Some(300),
-            confirmation_time: Some(BlockTime {
-                timestamp: 12345677,
-                height: 5000,
-            }),
-        })
-        .unwrap();
-
-        db
+            .unwrap();
+        wallet
     }
 
     #[test]
@@ -274,13 +261,7 @@ mod test {
         let descriptor = "wpkh(xprv9s21ZrQH143K4CTb63EaMxja1YiTnSEWKMbn23uoEnAzxjdUJRQkazCAtzxGm4LSoTSVTptoV9RbchnKPW9HxKtZumdyxyikZFDLhogJ5Uj/44'/0'/0'/0/*)";
         let change_descriptor = "wpkh(xprv9s21ZrQH143K4CTb63EaMxja1YiTnSEWKMbn23uoEnAzxjdUJRQkazCAtzxGm4LSoTSVTptoV9RbchnKPW9HxKtZumdyxyikZFDLhogJ5Uj/44'/0'/0'/1/*)";
 
-        let wallet = Wallet::new(
-            descriptor,
-            Some(change_descriptor),
-            Network::Bitcoin,
-            get_test_db(),
-        )
-        .unwrap();
+        let wallet = get_test_wallet(descriptor, Some(change_descriptor), Network::Bitcoin);
         let export = FullyNodedExport::export_wallet(&wallet, "Test Label", true).unwrap();
 
         assert_eq!(export.descriptor(), descriptor);
@@ -298,7 +279,7 @@ mod test {
 
         let descriptor = "wpkh(xprv9s21ZrQH143K4CTb63EaMxja1YiTnSEWKMbn23uoEnAzxjdUJRQkazCAtzxGm4LSoTSVTptoV9RbchnKPW9HxKtZumdyxyikZFDLhogJ5Uj/44'/0'/0'/0/*)";
 
-        let wallet = Wallet::new(descriptor, None, Network::Bitcoin, get_test_db()).unwrap();
+        let wallet = get_test_wallet(descriptor, None, Network::Bitcoin);
         FullyNodedExport::export_wallet(&wallet, "Test Label", true).unwrap();
     }
 
@@ -311,13 +292,7 @@ mod test {
         let descriptor = "wpkh(xprv9s21ZrQH143K4CTb63EaMxja1YiTnSEWKMbn23uoEnAzxjdUJRQkazCAtzxGm4LSoTSVTptoV9RbchnKPW9HxKtZumdyxyikZFDLhogJ5Uj/44'/0'/0'/0/*)";
         let change_descriptor = "wpkh(xprv9s21ZrQH143K4CTb63EaMxja1YiTnSEWKMbn23uoEnAzxjdUJRQkazCAtzxGm4LSoTSVTptoV9RbchnKPW9HxKtZumdyxyikZFDLhogJ5Uj/50'/0'/1/*)";
 
-        let wallet = Wallet::new(
-            descriptor,
-            Some(change_descriptor),
-            Network::Bitcoin,
-            get_test_db(),
-        )
-        .unwrap();
+        let wallet = get_test_wallet(descriptor, Some(change_descriptor), Network::Bitcoin);
         FullyNodedExport::export_wallet(&wallet, "Test Label", true).unwrap();
     }
 
@@ -334,13 +309,7 @@ mod test {
                                        [c98b1535/48'/0'/0'/2']tpubDCDi5W4sP6zSnzJeowy8rQDVhBdRARaPhK1axABi8V1661wEPeanpEXj4ZLAUEoikVtoWcyK26TKKJSecSfeKxwHCcRrge9k1ybuiL71z4a/1/*\
                                  ))";
 
-        let wallet = Wallet::new(
-            descriptor,
-            Some(change_descriptor),
-            Network::Testnet,
-            get_test_db(),
-        )
-        .unwrap();
+        let wallet = get_test_wallet(descriptor, Some(change_descriptor), Network::Testnet);
         let export = FullyNodedExport::export_wallet(&wallet, "Test Label", true).unwrap();
 
         assert_eq!(export.descriptor(), descriptor);
@@ -354,13 +323,7 @@ mod test {
         let descriptor = "wpkh(xprv9s21ZrQH143K4CTb63EaMxja1YiTnSEWKMbn23uoEnAzxjdUJRQkazCAtzxGm4LSoTSVTptoV9RbchnKPW9HxKtZumdyxyikZFDLhogJ5Uj/44'/0'/0'/0/*)";
         let change_descriptor = "wpkh(xprv9s21ZrQH143K4CTb63EaMxja1YiTnSEWKMbn23uoEnAzxjdUJRQkazCAtzxGm4LSoTSVTptoV9RbchnKPW9HxKtZumdyxyikZFDLhogJ5Uj/44'/0'/0'/1/*)";
 
-        let wallet = Wallet::new(
-            descriptor,
-            Some(change_descriptor),
-            Network::Bitcoin,
-            get_test_db(),
-        )
-        .unwrap();
+        let wallet = get_test_wallet(descriptor, Some(change_descriptor), Network::Bitcoin);
         let export = FullyNodedExport::export_wallet(&wallet, "Test Label", true).unwrap();
 
         assert_eq!(export.to_string(), "{\"descriptor\":\"wpkh(xprv9s21ZrQH143K4CTb63EaMxja1YiTnSEWKMbn23uoEnAzxjdUJRQkazCAtzxGm4LSoTSVTptoV9RbchnKPW9HxKtZumdyxyikZFDLhogJ5Uj/44\'/0\'/0\'/0/*)\",\"blockheight\":5000,\"label\":\"Test Label\"}");

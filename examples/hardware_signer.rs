@@ -46,7 +46,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         descriptors.receive[0].clone(),
         Some(descriptors.internal[0].clone()),
         Network::Testnet,
-        MemoryDatabase::default(),
     )?;
 
     // Adding the hardware signer to the BDK wallet
@@ -64,7 +63,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     wallet.sync(&blockchain, SyncOptions::default())?;
 
     // get deposit address
-    let deposit_address = wallet.get_address(AddressIndex::New)?;
+    let deposit_address = wallet.get_address(AddressIndex::New);
 
     let balance = wallet.get_balance()?;
     println!("Wallet balances in SATs: {}", balance);

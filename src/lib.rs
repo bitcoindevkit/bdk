@@ -91,9 +91,9 @@ fn main() -> Result<(), bdk::Error> {
 //!         MemoryDatabase::default(),
 //!     )?;
 //!
-//!     println!("Address #0: {}", wallet.get_address(New)?);
-//!     println!("Address #1: {}", wallet.get_address(New)?);
-//!     println!("Address #2: {}", wallet.get_address(New)?);
+//!     println!("Address #0: {}", wallet.get_address(New));
+//!     println!("Address #1: {}", wallet.get_address(New));
+//!     println!("Address #2: {}", wallet.get_address(New));
 //!
 //!     Ok(())
 //! }
@@ -124,7 +124,7 @@ fn main() -> Result<(), bdk::Error> {
 
     wallet.sync(&blockchain, SyncOptions::default())?;
 
-    let send_to = wallet.get_address(New)?;
+    let send_to = wallet.get_address(New);
     let (psbt, details) = {
         let mut builder =  wallet.build_tx();
         builder
@@ -187,83 +187,21 @@ fn main() -> Result<(), bdk::Error> {
 //! * `async-interface`: async functions in bdk traits
 //! * `keys-bip39`: [BIP-39](https://github.com/bitcoin/bips/blob/master/bip-0039.mediawiki) mnemonic codes for generating deterministic keys
 //!
-//! # Internal features
-//!
-//! These features do not expose any new API, but influence internal implementation aspects of
-//! BDK.
-//!
-//! * `compact_filters`: [`compact_filters`](crate::blockchain::compact_filters) client protocol for interacting with the bitcoin P2P network
-//! * `electrum`: [`electrum`](crate::blockchain::electrum) client protocol for interacting with electrum servers
-//! * `esplora`: [`esplora`](crate::blockchain::esplora) client protocol for interacting with blockstream [electrs](https://github.com/Blockstream/electrs) servers
-//! * `key-value-db`: key value [`database`](crate::database) based on [`sled`](crate::sled) for caching blockchain data
 
 pub extern crate bitcoin;
+#[cfg(feature = "hardware-signer")]
+pub extern crate hwi;
 extern crate log;
 pub extern crate miniscript;
 extern crate serde;
-#[macro_use]
 extern crate serde_json;
-#[cfg(feature = "hardware-signer")]
-pub extern crate hwi;
-
-#[cfg(all(feature = "reqwest", feature = "ureq"))]
-compile_error!("Features reqwest and ureq are mutually exclusive and cannot be enabled together");
-
-#[cfg(all(feature = "async-interface", feature = "electrum"))]
-compile_error!(
-    "Features async-interface and electrum are mutually exclusive and cannot be enabled together"
-);
-
-#[cfg(all(feature = "async-interface", feature = "ureq"))]
-compile_error!(
-    "Features async-interface and ureq are mutually exclusive and cannot be enabled together"
-);
-
-#[cfg(all(feature = "async-interface", feature = "compact_filters"))]
-compile_error!(
-    "Features async-interface and compact_filters are mutually exclusive and cannot be enabled together"
-);
 
 #[cfg(feature = "keys-bip39")]
 extern crate bip39;
 
-#[cfg(feature = "async-interface")]
-#[macro_use]
-extern crate async_trait;
-#[macro_use]
-extern crate bdk_macros;
-
-#[cfg(feature = "rpc")]
-pub extern crate bitcoincore_rpc;
-
-#[cfg(feature = "electrum")]
-pub extern crate electrum_client;
-
-#[cfg(feature = "esplora")]
-pub extern crate esplora_client;
-
-#[cfg(feature = "key-value-db")]
-pub extern crate sled;
-
-#[cfg(feature = "sqlite")]
-pub extern crate rusqlite;
-
-// We should consider putting this under a feature flag but we need the macro in doctests so we need
-// to wait until https://github.com/rust-lang/rust/issues/67295 is fixed.
-//
-// Stuff in here is too rough to document atm
-#[doc(hidden)]
-#[macro_use]
-pub mod testutils;
-
-#[cfg(test)]
-extern crate assert_matches;
-
 #[allow(unused_imports)]
 #[macro_use]
 pub(crate) mod error;
-pub mod blockchain;
-pub mod database;
 pub mod descriptor;
 #[cfg(feature = "test-md-docs")]
 mod doctest;
@@ -279,10 +217,11 @@ pub use types::*;
 pub use wallet::signer;
 pub use wallet::signer::SignOptions;
 pub use wallet::tx_builder::TxBuilder;
-pub use wallet::SyncOptions;
 pub use wallet::Wallet;
 
 /// Get the version of BDK at runtime
 pub fn version() -> &'static str {
     env!("CARGO_PKG_VERSION", "unknown")
 }
+
+pub use bdk_chain as chain;

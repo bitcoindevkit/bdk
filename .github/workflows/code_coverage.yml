@@ -38,13 +38,7 @@ jobs:
       - name: Install grcov
         run: if [[ ! -e ~/.cargo/bin/grcov ]]; then cargo install grcov; fi
       - name: Test
-        # WARNING: this is not testing the following features: test-esplora, test-hardware-signer, async-interface
-        # This is because some of our features are mutually exclusive, and generating various reports and
-        # merging them doesn't seem to be working very well.
-        # For more info, see:
-        # - https://github.com/bitcoindevkit/bdk/issues/696
-        # - https://github.com/bitcoindevkit/bdk/pull/748#issuecomment-1242721040
-        run: cargo test --features all-keys,compact_filters,compiler,key-value-db,sqlite,sqlite-bundled,test-electrum,test-rpc,verify
+        run: cargo test --all-features
       - name: Run grcov
         run: mkdir coverage; grcov . --binary-path ./target/debug/ -s . -t lcov --branch --ignore-not-existing --ignore '/*' -o ./coverage/lcov.info
       - name: Generate HTML coverage report

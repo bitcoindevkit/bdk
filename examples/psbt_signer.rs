@@ -47,26 +47,24 @@ fn main() -> Result<(), Box<dyn Error>> {
         ElectrumBlockchain::from(Client::new("ssl://electrum.blockstream.info:60002")?);
 
     // create watch only wallet
-    let watch_only_wallet: Wallet<MemoryDatabase> = Wallet::new(
+    let watch_only_wallet: Wallet = Wallet::new(
         watch_only_external_descriptor,
         Some(watch_only_internal_descriptor),
         Network::Testnet,
-        MemoryDatabase::default(),
     )?;
 
     // create signing wallet
-    let signing_wallet: Wallet<MemoryDatabase> = Wallet::new(
+    let signing_wallet: Wallet = Wallet::new(
         signing_external_descriptor,
         Some(signing_internal_descriptor),
         Network::Testnet,
-        MemoryDatabase::default(),
     )?;
 
     println!("Syncing watch only wallet.");
     watch_only_wallet.sync(&blockchain, SyncOptions::default())?;
 
     // get deposit address
-    let deposit_address = watch_only_wallet.get_address(AddressIndex::New)?;
+    let deposit_address = watch_only_wallet.get_address(AddressIndex::New);
 
     let balance = watch_only_wallet.get_balance()?;
     println!("Watch only wallet balances in SATs: {}", balance);
@@ -81,7 +79,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             "Wait for at least 10000 SATs of your wallet transactions to be confirmed...\nBe patient, this could take 10 mins or longer depending on how testnet is behaving."
         );
         for tx_details in watch_only_wallet
-            .list_transactions(false)?
+            .transactions()
             .iter()
             .filter(|txd| txd.received > 0 && txd.confirmation_time.is_none())
         {

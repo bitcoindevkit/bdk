@@ -81,9 +81,9 @@ impl PsbtUtils for Psbt {
 mod test {
     use crate::bitcoin::TxIn;
     use crate::psbt::Psbt;
+    use crate::wallet::test::{get_funded_wallet, get_test_wpkh};
     use crate::wallet::AddressIndex;
     use crate::wallet::AddressIndex::New;
-    use crate::wallet::{get_funded_wallet, test::get_test_wpkh};
     use crate::{psbt, FeeRate, SignOptions};
     use std::str::FromStr;
 
@@ -94,8 +94,8 @@ mod test {
     #[should_panic(expected = "InputIndexOutOfRange")]
     fn test_psbt_malformed_psbt_input_legacy() {
         let psbt_bip = Psbt::from_str(PSBT_STR).unwrap();
-        let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
-        let send_to = wallet.get_address(AddressIndex::New).unwrap();
+        let (mut wallet, _) = get_funded_wallet(get_test_wpkh());
+        let send_to = wallet.get_address(AddressIndex::New);
         let mut builder = wallet.build_tx();
         builder.add_recipient(send_to.script_pubkey(), 10_000);
         let (mut psbt, _) = builder.finish().unwrap();
@@ -111,8 +111,8 @@ mod test {
     #[should_panic(expected = "InputIndexOutOfRange")]
     fn test_psbt_malformed_psbt_input_segwit() {
         let psbt_bip = Psbt::from_str(PSBT_STR).unwrap();
-        let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
-        let send_to = wallet.get_address(AddressIndex::New).unwrap();
+        let (mut wallet, _) = get_funded_wallet(get_test_wpkh());
+        let send_to = wallet.get_address(AddressIndex::New);
         let mut builder = wallet.build_tx();
         builder.add_recipient(send_to.script_pubkey(), 10_000);
         let (mut psbt, _) = builder.finish().unwrap();
@@ -127,8 +127,8 @@ mod test {
     #[test]
     #[should_panic(expected = "InputIndexOutOfRange")]
     fn test_psbt_malformed_tx_input() {
-        let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
-        let send_to = wallet.get_address(AddressIndex::New).unwrap();
+        let (mut wallet, _) = get_funded_wallet(get_test_wpkh());
+        let send_to = wallet.get_address(AddressIndex::New);
         let mut builder = wallet.build_tx();
         builder.add_recipient(send_to.script_pubkey(), 10_000);
         let (mut psbt, _) = builder.finish().unwrap();
@@ -143,8 +143,8 @@ mod test {
     #[test]
     fn test_psbt_sign_with_finalized() {
         let psbt_bip = Psbt::from_str(PSBT_STR).unwrap();
-        let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
-        let send_to = wallet.get_address(AddressIndex::New).unwrap();
+        let (mut wallet, _) = get_funded_wallet(get_test_wpkh());
+        let send_to = wallet.get_address(AddressIndex::New);
         let mut builder = wallet.build_tx();
         builder.add_recipient(send_to.script_pubkey(), 10_000);
         let (mut psbt, _) = builder.finish().unwrap();
@@ -164,8 +164,8 @@ mod test {
 
         let expected_fee_rate = 1.2345;
 
-        let (wallet, _, _) = get_funded_wallet("wpkh(tprv8ZgxMBicQKsPd3EupYiPRhaMooHKUHJxNsTfYuScep13go8QFfHdtkG9nRkFGb7busX4isf6X9dURGCoKgitaApQ6MupRhZMcELAxTBRJgS/*)");
-        let addr = wallet.get_address(New).unwrap();
+        let (mut wallet, _) = get_funded_wallet("wpkh(tprv8ZgxMBicQKsPd3EupYiPRhaMooHKUHJxNsTfYuScep13go8QFfHdtkG9nRkFGb7busX4isf6X9dURGCoKgitaApQ6MupRhZMcELAxTBRJgS/*)");
+        let addr = wallet.get_address(New);
         let mut builder = wallet.build_tx();
         builder.drain_to(addr.script_pubkey()).drain_wallet();
         builder.fee_rate(FeeRate::from_sat_per_vb(expected_fee_rate));
@@ -189,8 +189,8 @@ mod test {
 
         let expected_fee_rate = 1.2345;
 
-        let (wallet, _, _) = get_funded_wallet("pkh(tprv8ZgxMBicQKsPd3EupYiPRhaMooHKUHJxNsTfYuScep13go8QFfHdtkG9nRkFGb7busX4isf6X9dURGCoKgitaApQ6MupRhZMcELAxTBRJgS/*)");
-        let addr = wallet.get_address(New).unwrap();
+        let (mut wallet, _) = get_funded_wallet("pkh(tprv8ZgxMBicQKsPd3EupYiPRhaMooHKUHJxNsTfYuScep13go8QFfHdtkG9nRkFGb7busX4isf6X9dURGCoKgitaApQ6MupRhZMcELAxTBRJgS/*)");
+        let addr = wallet.get_address(New);
         let mut builder = wallet.build_tx();
         builder.drain_to(addr.script_pubkey()).drain_wallet();
         builder.fee_rate(FeeRate::from_sat_per_vb(expected_fee_rate));
@@ -213,8 +213,8 @@ mod test {
 
         let expected_fee_rate = 1.2345;
 
-        let (wpkh_wallet, _, _) = get_funded_wallet("wpkh(tprv8ZgxMBicQKsPd3EupYiPRhaMooHKUHJxNsTfYuScep13go8QFfHdtkG9nRkFGb7busX4isf6X9dURGCoKgitaApQ6MupRhZMcELAxTBRJgS/*)");
-        let addr = wpkh_wallet.get_address(New).unwrap();
+        let (mut wpkh_wallet,  _) = get_funded_wallet("wpkh(tprv8ZgxMBicQKsPd3EupYiPRhaMooHKUHJxNsTfYuScep13go8QFfHdtkG9nRkFGb7busX4isf6X9dURGCoKgitaApQ6MupRhZMcELAxTBRJgS/*)");
+        let addr = wpkh_wallet.get_address(New);
         let mut builder = wpkh_wallet.build_tx();
         builder.drain_to(addr.script_pubkey()).drain_wallet();
         builder.fee_rate(FeeRate::from_sat_per_vb(expected_fee_rate));
@@ -225,8 +225,8 @@ mod test {
         assert!(wpkh_psbt.fee_amount().is_none());
         assert!(wpkh_psbt.fee_rate().is_none());
 
-        let (pkh_wallet, _, _) = get_funded_wallet("pkh(tprv8ZgxMBicQKsPd3EupYiPRhaMooHKUHJxNsTfYuScep13go8QFfHdtkG9nRkFGb7busX4isf6X9dURGCoKgitaApQ6MupRhZMcELAxTBRJgS/*)");
-        let addr = pkh_wallet.get_address(New).unwrap();
+        let (mut pkh_wallet,  _) = get_funded_wallet("pkh(tprv8ZgxMBicQKsPd3EupYiPRhaMooHKUHJxNsTfYuScep13go8QFfHdtkG9nRkFGb7busX4isf6X9dURGCoKgitaApQ6MupRhZMcELAxTBRJgS/*)");
+        let addr = pkh_wallet.get_address(New);
         let mut builder = pkh_wallet.build_tx();
         builder.drain_to(addr.script_pubkey()).drain_wallet();
         builder.fee_rate(FeeRate::from_sat_per_vb(expected_fee_rate));

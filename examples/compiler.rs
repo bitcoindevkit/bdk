@@ -24,7 +24,6 @@ use bitcoin::Network;
 use miniscript::policy::Concrete;
 use miniscript::Descriptor;
 
-use bdk::database::memory::MemoryDatabase;
 use bdk::wallet::AddressIndex::New;
 use bdk::{KeychainKind, Wallet};
 
@@ -54,14 +53,12 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     info!("Compiled into following Descriptor: \n{}", descriptor);
 
-    let database = MemoryDatabase::new();
-
     // Create a new wallet from this descriptor
-    let wallet = Wallet::new(&format!("{}", descriptor), None, Network::Regtest, database)?;
+    let wallet = Wallet::new(&format!("{}", descriptor), None, Network::Regtest)?;
 
     info!(
         "First derived address from the descriptor: \n{}",
-        wallet.get_address(New)?
+        wallet.get_address(New)
     );
 
     // BDK also has it's own `Policy` structure to represent the spending condition in a more
