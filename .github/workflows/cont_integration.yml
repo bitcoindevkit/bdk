@@ -14,21 +14,9 @@ jobs:
             clippy: true
           - version: 1.57.0 # MSRV
         features:
-          - default
-          - minimal
-          - all-keys
-          - minimal,use-esplora-blocking
-          - key-value-db
-          - electrum
-          - compact_filters
-          - use-esplora-blocking,key-value-db,electrum
-          - compiler
-          - rpc
-          - verify
-          - async-interface
-          - use-esplora-async
-          - sqlite
-          - sqlite-bundled
+          - --no-default-features
+          - --all-features
+          - --features=default
     steps:
       - name: checkout
         uses: actions/checkout@v2
@@ -81,47 +69,6 @@ jobs:
         run: rustup update
       - name: Test
         run: cargo test --features test-md-docs --no-default-features -- doctest::ReadmeDoctests
-
-  test-blockchains:
-    name: Blockchain ${{ matrix.blockchain.features }}
-    runs-on: ubuntu-20.04
-    strategy:
-      fail-fast: false
-      matrix:
-        blockchain:
-          - name: electrum
-            testprefix: blockchain::electrum::test
-            features: test-electrum,verify
-          - name: rpc
-            testprefix: blockchain::rpc::test
-            features: test-rpc
-          - name: rpc-legacy
-            testprefix: blockchain::rpc::test
-            features: test-rpc-legacy
-          - name: esplora
-            testprefix: esplora
-            features: test-esplora,use-esplora-async,verify
-          - name: esplora
-            testprefix: esplora
-            features: test-esplora,use-esplora-blocking,verify
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v2
-      - name: Cache
-        uses: actions/cache@v2
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ github.job }}-${{ hashFiles('**/Cargo.toml','**/Cargo.lock') }}
-      - name: Setup rust toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          override: true
-      - name: Test
-        run: cargo test --no-default-features --features ${{ matrix.blockchain.features }} ${{ matrix.blockchain.testprefix }}::bdk_blockchain_tests
 
   check-wasm:
     name: Check WASM
