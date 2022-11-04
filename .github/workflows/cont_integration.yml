@@ -52,12 +52,12 @@ jobs:
       - name: Update toolchain
         run: rustup update
       - name: Build
-        run: cargo build --features ${{ matrix.features }} --no-default-features
+        run: cargo build --features ${{ matrix.features }}
       - name: Clippy
         if: ${{ matrix.rust.clippy }}
-        run: cargo clippy --all-targets --features ${{ matrix.features }} --no-default-features -- -D warnings
+        run: cargo clippy --all-targets --features ${{ matrix.features }} -- -D warnings
       - name: Test
-        run: cargo test --features ${{ matrix.features }} --no-default-features
+        run: cargo test --features ${{ matrix.features }}
 
   test-readme-examples:
     name: Test README.md examples
