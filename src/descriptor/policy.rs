@@ -1197,7 +1197,7 @@ mod test {
 
         assert!(matches!(&policy.item, EcdsaSignature(PkOrF::Fingerprint(f)) if f == &fingerprint));
         assert!(
-            matches!(&policy.contribution, Satisfaction::Complete {condition} if condition.csv == None && condition.timelock == None)
+            matches!(&policy.contribution, Satisfaction::Complete {condition} if condition.csv.is_none() && condition.timelock.is_none())
         );
     }
 
@@ -1360,7 +1360,7 @@ mod test {
 
         assert!(matches!(policy.item, EcdsaSignature(PkOrF::Fingerprint(f)) if f == fingerprint));
         assert!(
-            matches!(policy.contribution, Satisfaction::Complete {condition} if condition.csv == None && condition.timelock == None)
+            matches!(policy.contribution, Satisfaction::Complete {condition} if condition.csv.is_none() && condition.timelock.is_none())
         );
     }
 
