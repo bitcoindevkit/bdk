@@ -59,7 +59,7 @@ use utils::{check_nsequence_rbf, After, Older, SecpCtx};
 use crate::blockchain::{GetHeight, NoopProgress, Progress, WalletSync};
 use crate::database::memory::MemoryDatabase;
 use crate::database::{AnyDatabase, BatchDatabase, BatchOperations, DatabaseUtils, SyncTime};
-use crate::descriptor::checksum::calc_checksum_bytes_internal;
+use crate::descriptor::checksum::calc_checksum_bytes;
 use crate::descriptor::policy::BuildSatisfaction;
 use crate::descriptor::{
     calc_checksum, into_wallet_descriptor_checked, DerivedDescriptor, DescriptorMeta,
@@ -221,17 +221,10 @@ where
         })
     }
 
-    /// This checks the checksum within [`BatchDatabase`] twice (if needed). The first time with the
-    /// actual checksum, and the second time with the checksum of `descriptor+checksum`. The second
-    /// check is necessary for backwards compatibility of a checksum-inception bug.
+    /// This checks the checksum within [`BatchDatabase`].
     fn db_checksum(db: &mut D, desc: &str, kind: KeychainKind) -> Result<(), Error> {
-        let checksum = calc_checksum_bytes_internal(desc, true)?;
-        if db.check_descriptor_checksum(kind, checksum).is_ok() {
-            return Ok(());
-        }
-
-        let checksum_inception = calc_checksum_bytes_internal(desc, false)?;
-        db.check_descriptor_checksum(kind, checksum_inception)
+        let checksum = calc_checksum_bytes(desc)?;
+        db.check_descriptor_checksum(kind, checksum)
     }
 
     /// Get the Bitcoin network the wallet is using.
@@ -1873,8 +1866,7 @@ pub(crate) mod test {
         let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
         let desc = wallet.descriptor.to_string();
 
-        let checksum = calc_checksum_bytes_internal(&desc, true).unwrap();
-        let checksum_inception = calc_checksum_bytes_internal(&desc, false).unwrap();
+        let checksum = calc_checksum_bytes(&desc).unwrap();
         let checksum_invalid = [b'q'; 8];
 
         let mut db = MemoryDatabase::new();
@@ -1882,12 +1874,6 @@ pub(crate) mod test {
             .expect("failed to save actual checksum");
         Wallet::db_checksum(&mut db, &desc, KeychainKind::External)
             .expect("db that uses actual checksum should be supported");
-
-        let mut db = MemoryDatabase::new();
-        db.check_descriptor_checksum(KeychainKind::External, checksum_inception)
-            .expect("failed to save checksum inception");
-        Wallet::db_checksum(&mut db, &desc, KeychainKind::External)
-            .expect("db that uses checksum inception should be supported");
 
         let mut db = MemoryDatabase::new();
         db.check_descriptor_checksum(KeychainKind::External, checksum_invalid)
