@@ -80,9 +80,6 @@ electrum = ["electrum-client"]
 # MUST ALSO USE `--no-default-features`.
 use-esplora-async = ["esplora", "esplora-client/async", "futures"]
 use-esplora-blocking = ["esplora", "esplora-client/blocking"]
-# Deprecated aliases
-use-esplora-reqwest = ["use-esplora-async"]
-use-esplora-ureq = ["use-esplora-blocking"]
 # Typical configurations will not need to use `esplora` feature directly.
 esplora = []
 
