@@ -256,12 +256,6 @@ pub struct BlockTime {
     pub timestamp: u64,
 }
 
-/// **DEPRECATED**: Confirmation time of a transaction
-///
-/// The structure has been renamed to `BlockTime`
-#[deprecated(note = "This structure has been renamed to `BlockTime`")]
-pub type ConfirmationTime = BlockTime;
-
 impl BlockTime {
     /// Returns `Some` `BlockTime` if both `height` and `timestamp` are `Some`
     pub fn new(height: Option<u32>, timestamp: Option<u64>) -> Option<Self> {
