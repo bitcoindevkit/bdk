@@ -70,10 +70,6 @@ use crate::database::BatchDatabase;
 use crate::types::KeychainKind;
 use crate::wallet::Wallet;
 
-/// Alias for [`FullyNodedExport`]
-#[deprecated(since = "0.18.0", note = "Please use [`FullyNodedExport`] instead")]
-pub type WalletExport = FullyNodedExport;
-
 /// Structure that contains the export of a wallet
 ///
 /// For a usage example see [this module](crate::wallet::export)'s documentation.
