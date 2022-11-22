@@ -1686,6 +1686,7 @@ where
     }
 
     /// Sync the internal database with the blockchain
+    #[allow(clippy::await_holding_refcell_ref)] // TODO this will be fixed in bdk 1.0
     #[maybe_async]
     pub fn sync<B: WalletSync + GetHeight>(
         &self,
