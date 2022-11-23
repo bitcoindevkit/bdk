@@ -21,7 +21,9 @@ use bitcoin::util::{psbt, taproot};
 use bitcoin::{secp256k1, PublicKey, XOnlyPublicKey};
 use bitcoin::{Network, TxOut};
 
-use miniscript::descriptor::{DefiniteDescriptorKey, DescriptorType, InnerXKey, SinglePubKey};
+use miniscript::descriptor::{
+    DefiniteDescriptorKey, DescriptorSecretKey, DescriptorType, InnerXKey, SinglePubKey,
+};
 pub use miniscript::{
     descriptor::DescriptorXKey, descriptor::KeyMap, descriptor::Wildcard, Descriptor,
     DescriptorPublicKey, Legacy, Miniscript, ScriptContext, Segwitv0,
@@ -240,14 +242,34 @@ impl IntoWalletDescriptor for DescriptorTemplateOut {
             );
         }
 
-        if !self.2.contains(&network) {
+        let (desc, keymap, networks) = self;
+
+        if !networks.contains(&network) {
             return Err(DescriptorError::Key(KeyError::InvalidNetwork));
         }
 
-        // fixup the network for keys that need it
-        let translated = self.0.translate_pk(&mut Translator { network })?;
+        // fixup the network for keys that need it in the descriptor
+        let translated = desc.translate_pk(&mut Translator { network })?;
+        // ...and in the key map
+        let fixed_keymap = keymap
+            .into_iter()
+            .map(|(mut k, mut v)| {
+                match (&mut k, &mut v) {
+                    (DescriptorPublicKey::XPub(xpub), DescriptorSecretKey::XPrv(xprv)) => {
+                        xpub.xkey.network = network;
+                        xprv.xkey.network = network;
+                    }
+                    (_, DescriptorSecretKey::Single(key)) => {
+                        key.key.network = network;
+                    }
+                    _ => {}
+                }
 
-        Ok((translated, self.1))
+                (k, v)
+            })
+            .collect();
+
+        Ok((translated, fixed_keymap))
     }
 }
 
@@ -682,23 +704,40 @@ mod test {
 
         let secp = Secp256k1::new();
 
-        let xpub = bip32::ExtendedPubKey::from_str("xpub6ERApfZwUNrhLCkDtcHTcxd75RbzS1ed54G1LkBUHQVHQKqhMkhgbmJbZRkrgZw4koxb5JaHWkY4ALHY2grBGRjaDMzQLcgJvLJuZZvRcEL").unwrap();
+        let xprv = bip32::ExtendedPrivKey::from_str("xprv9s21ZrQH143K3c3gF1DUWpWNr2SG2XrG8oYPpqYh7hoWsJy9NjabErnzriJPpnGHyKz5NgdXmq1KVbqS1r4NXdCoKitWg5e86zqXHa8kxyB").unwrap();
         let path = bip32::DerivationPath::from_str("m/0").unwrap();
 
         // here `to_descriptor_key` will set the valid networks for the key to only mainnet, since
         // we are using an "xpub"
-        let key = (xpub, path).into_descriptor_key().unwrap();
+        let key = (xprv, path.clone()).into_descriptor_key().unwrap();
         // override it with any. this happens in some key conversions, like bip39
         let key = key.override_valid_networks(any_network());
 
         // make a descriptor out of it
         let desc = crate::descriptor!(wpkh(key)).unwrap();
         // this should convert the key that supports "any_network" to the right network (testnet)
-        let (wallet_desc, _) = desc
+        let (wallet_desc, keymap) = desc
             .into_wallet_descriptor(&secp, Network::Testnet)
             .unwrap();
 
-        assert_eq!(wallet_desc.to_string(), "wpkh(tpubDEnoLuPdBep9bzw5LoGYpsxUQYheRQ9gcgrJhJEcdKFB9cWQRyYmkCyRoTqeD4tJYiVVgt6A3rN6rWn9RYhR9sBsGxji29LYWHuKKbdb1ev/0/*)#y8p7e8kk");
+        let mut xprv_testnet = xprv;
+        xprv_testnet.network = Network::Testnet;
+
+        let xpub_testnet = bip32::ExtendedPubKey::from_priv(&secp, &xprv_testnet);
+        let desc_pubkey = DescriptorPublicKey::XPub(DescriptorXKey {
+            xkey: xpub_testnet,
+            origin: None,
+            derivation_path: path,
+            wildcard: Wildcard::Unhardened,
+        });
+
+        assert_eq!(wallet_desc.to_string(), "wpkh(tpubD6NzVbkrYhZ4XtJzoDja5snUjBNQRP5B3f4Hyn1T1x6PVPxzzVjvw6nJx2D8RBCxog9GEVjZoyStfepTz7TtKoBVdkCtnc7VCJh9dD4RAU9/0/*)#a3svx0ha");
+        assert_eq!(
+            keymap
+                .get(&desc_pubkey)
+                .map(|key| key.to_public(&secp).unwrap()),
+            Some(desc_pubkey)
+        );
     }
 
     // test IntoWalletDescriptor trait from &str with and without checksum appended
