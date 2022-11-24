@@ -153,6 +153,11 @@ name = "esplora_backend_asynchronous"
 path = "examples/esplora_backend_asynchronous.rs"
 required-features = ["use-esplora-reqwest", "reqwest-default-tls", "async-interface"]
 
+[[example]]
+name = "mnemonic_to_descriptors"
+path = "examples/mnemonic_to_descriptors.rs"
+required-features = ["all-keys"]
+
 [workspace]
 members = ["macros"]
 [package.metadata.docs.rs]
