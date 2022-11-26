@@ -57,7 +57,10 @@ static MIGRATIONS: &[&str] = &[
     "CREATE TABLE utxos (value INTEGER, keychain TEXT, vout INTEGER, txid BLOB, script BLOB, is_spent BOOLEAN DEFAULT 0);",
     "INSERT INTO utxos SELECT value, keychain, vout, txid, script, is_spent FROM utxos_old;",
     "DROP TABLE utxos_old;",
-    "CREATE UNIQUE INDEX idx_utxos_txid_vout ON utxos(txid, vout);"
+    "CREATE UNIQUE INDEX idx_utxos_txid_vout ON utxos(txid, vout);",
+    // Fix issue https://github.com/bitcoindevkit/bdk/issues/801: drop duplicated script_pubkeys
+    // TODO "",
+    "CREATE UNIQUE INDEX idx_script_pks_unique ON script_pubkeys(keychain, child);",
 ];
 
 /// Sqlite database stored on filesystem
@@ -88,7 +91,7 @@ impl SqliteDatabase {
         child: u32,
         script: &[u8],
     ) -> Result<i64, Error> {
-        let mut statement = self.connection.prepare_cached("INSERT INTO script_pubkeys (keychain, child, script) VALUES (:keychain, :child, :script)")?;
+        let mut statement = self.connection.prepare_cached("INSERT OR REPLACE INTO script_pubkeys (keychain, child, script) VALUES (:keychain, :child, :script)")?;
         statement.execute(named_params! {
             ":keychain": keychain,
             ":child": child,
