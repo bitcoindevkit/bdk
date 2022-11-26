@@ -1099,4 +1099,44 @@ pub mod test {
     fn test_check_descriptor_checksum() {
         crate::database::test::test_check_descriptor_checksum(get_database());
     }
+
+    // Issue 801: https://github.com/bitcoindevkit/bdk/issues/801
+    #[test]
+    fn test_unique_spks() {
+        use crate::bitcoin::hashes::hex::FromHex;
+        use crate::database::*;
+
+        let mut db = get_database();
+
+        let script = Script::from(
+            Vec::<u8>::from_hex("76a91402306a7c23f3e8010de41e9e591348bb83f11daa88ac").unwrap(),
+        );
+        let path = 42;
+        let keychain = KeychainKind::External;
+
+        for _ in 0..100 {
+            db.set_script_pubkey(&script, keychain, path).unwrap();
+        }
+
+        let mut statement = db
+            .connection
+            .prepare_cached(
+                "select keychain,child,count(child) from script_pubkeys group by keychain,child;",
+            )
+            .unwrap();
+        let mut rows = statement.query([]).unwrap();
+        while let Some(row) = rows.next().unwrap() {
+            let keychain: String = row.get(0).unwrap();
+            let child: u32 = row.get(1).unwrap();
+            let count: usize = row.get(2).unwrap();
+
+            assert!(
+                count == 1,
+                "keychain={}, child={}, count={}",
+                keychain,
+                child,
+                count
+            );
+        }
+    }
 }
