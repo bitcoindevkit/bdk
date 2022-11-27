@@ -33,6 +33,7 @@ The `bdk` library aims to be the core building block for Bitcoin wallets of any 
 * It supports multiple blockchain backends and databases, allowing developers to choose exactly what's right for their projects.
 * It's built to be cross-platform: the core logic works on desktop, mobile, and even WebAssembly.
 * It's very easy to extend: developers can implement customized logic for blockchain backends, databases, signers, coin selection, and more, without having to fork and modify this library.
+* It's based on Rust.
 
 ## Examples
 
