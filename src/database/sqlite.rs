@@ -59,8 +59,15 @@ static MIGRATIONS: &[&str] = &[
     "DROP TABLE utxos_old;",
     "CREATE UNIQUE INDEX idx_utxos_txid_vout ON utxos(txid, vout);",
     // Fix issue https://github.com/bitcoindevkit/bdk/issues/801: drop duplicated script_pubkeys
-    // TODO "",
+    "ALTER TABLE script_pubkeys RENAME TO script_pubkeys_old;",
+    "DROP INDEX idx_keychain_child;",
+    "DROP INDEX idx_script;",
+    "CREATE TABLE script_pubkeys (keychain TEXT, child INTEGER, script BLOB);",
+    "CREATE INDEX idx_keychain_child ON script_pubkeys(keychain, child);",
+    "CREATE INDEX idx_script ON script_pubkeys(script);",
     "CREATE UNIQUE INDEX idx_script_pks_unique ON script_pubkeys(keychain, child);",
+    "INSERT OR REPLACE INTO script_pubkeys SELECT keychain, child, script FROM script_pubkeys_old;",
+    "DROP TABLE script_pubkeys_old;"
 ];
 
 /// Sqlite database stored on filesystem
