@@ -173,7 +173,7 @@ Note that `electrs` and `bitcoind` binaries are automatically downloaded (on mac
 
 ## Running under WASM
 
-If you want to run this library under WASM you will probably have to add the following lines to you `Cargo.toml`:
+If you want to run this library under WASM you will probably have to add the following lines to your `Cargo.toml`:
 
 ```toml
 [dependencies]
