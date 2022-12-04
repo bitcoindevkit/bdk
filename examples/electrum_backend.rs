@@ -8,13 +8,14 @@ use bdk::template::Bip84;
 use bdk::wallet::export::FullyNodedExport;
 use bdk::{KeychainKind, SyncOptions, Wallet};
 
-use bdk::electrum_client::Client;
+use bdk::electrum_client::{Client, ConfigBuilder, Socks5Config};
 use bdk::wallet::AddressIndex;
 use bitcoin::util::bip32;
 
 pub mod utils;
 
 use crate::utils::tx::build_signed_tx;
+use crate::utils::tor::{start_tor, use_tor};
 
 /// This will create a wallet from an xpriv and get the balance by connecting to an Electrum server.
 /// If enough amount is available, this will send a transaction to an address.
@@ -44,8 +45,22 @@ fn create_wallet(network: &Network, xpriv: &ExtendedPrivKey) -> Wallet<MemoryDat
 fn run(network: &Network, electrum_url: &str, xpriv: &str) {
     let xpriv = bip32::ExtendedPrivKey::from_str(xpriv).unwrap();
 
+    let client = if use_tor() {
+        let tor_addrs = start_tor(None);
+        let config = ConfigBuilder::new()
+            .validate_domain(false)
+            .socks5(Some(Socks5Config {
+                addr: tor_addrs.socks,
+                credentials: None,
+            })).unwrap()
+            .build();
+        Client::from_config(electrum_url, config).unwrap()
+    } else {
+        Client::new(electrum_url).unwrap()
+    };
+
     // Apparently it works only with Electrs (not EletrumX)
-    let blockchain = ElectrumBlockchain::from(Client::new(electrum_url).unwrap());
+    let blockchain = ElectrumBlockchain::from(client);
 
     let wallet = create_wallet(network, &xpriv);
 

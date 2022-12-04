@@ -12,6 +12,8 @@ use bitcoin::{
     util::bip32::{self, ExtendedPrivKey},
     Network,
 };
+use bdk::esplora_client::Builder;
+use crate::utils::tor::{start_tor, use_tor};
 
 pub mod utils;
 
@@ -47,7 +49,16 @@ fn create_wallet(network: &Network, xpriv: &ExtendedPrivKey) -> Wallet<MemoryDat
 fn run(network: &Network, esplora_url: &str, xpriv: &str) {
     let xpriv = bip32::ExtendedPrivKey::from_str(xpriv).unwrap();
 
-    let blockchain = EsploraBlockchain::new(esplora_url, 20);
+    let blockchain = if use_tor() {
+        let tor_addrs = start_tor(None);
+        let client = Builder::new(esplora_url)
+            .proxy(format!("socks5://{}", tor_addrs.socks).as_ref())
+            .build_blocking()
+            .expect("Should never fail with no proxy and timeout");
+        EsploraBlockchain::from_client(client, 20)
+    } else {
+        EsploraBlockchain::new(esplora_url, 20)
+    };
 
     let wallet = create_wallet(network, &xpriv);
 

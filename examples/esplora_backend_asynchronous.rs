@@ -1,21 +1,24 @@
 use std::str::FromStr;
 
-use bdk::blockchain::Blockchain;
+use bitcoin::{
+    Network,
+    util::bip32::{self, ExtendedPrivKey},
+};
+use esplora_client::Builder;
+
 use bdk::{
     blockchain::esplora::EsploraBlockchain,
     database::MemoryDatabase,
-    template::Bip84,
-    wallet::{export::FullyNodedExport, AddressIndex},
-    KeychainKind, SyncOptions, Wallet,
+    KeychainKind,
+    SyncOptions,
+    template::Bip84, wallet::{AddressIndex, export::FullyNodedExport}, Wallet,
 };
-use bitcoin::{
-    util::bip32::{self, ExtendedPrivKey},
-    Network,
-};
+use bdk::blockchain::Blockchain;
+
+use crate::utils::tor::{start_tor, use_tor};
+use crate::utils::tx::build_signed_tx;
 
 pub mod utils;
-
-use crate::utils::tx::build_signed_tx;
 
 /// This will create a wallet from an xpriv and get the balance by connecting to an Esplora server,
 /// using non blocking asynchronous calls with `reqwest`.
@@ -48,7 +51,16 @@ fn create_wallet(network: &Network, xpriv: &ExtendedPrivKey) -> Wallet<MemoryDat
 async fn run(network: &Network, esplora_url: &str, xpriv: &str) {
     let xpriv = bip32::ExtendedPrivKey::from_str(xpriv).unwrap();
 
-    let blockchain = EsploraBlockchain::new(esplora_url, 20);
+    let blockchain = if use_tor() {
+        let tor_addrs = start_tor(None);
+        let client = Builder::new(esplora_url)
+            .proxy(format!("socks5://{}", tor_addrs.socks).as_ref())
+            .build_async()
+            .expect("Should never fail with no proxy and timeout");
+        EsploraBlockchain::from_client(client, 20)
+    } else {
+        EsploraBlockchain::new(esplora_url, 20)
+    };
 
     let wallet = create_wallet(network, &xpriv);
 

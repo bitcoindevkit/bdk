@@ -18,16 +18,32 @@ use blockchain::compact_filters::CompactFiltersError;
 use log::info;
 use std::sync::Arc;
 
+pub mod utils;
+use crate::utils::tor::{start_tor, use_tor};
+
 /// This will return wallet balance using compact filters
 /// Requires a synced local bitcoin node 0.21 running on testnet with blockfilterindex=1 and peerblockfilters=1
 fn main() -> Result<(), CompactFiltersError> {
     env_logger::init();
     info!("start");
 
+    let tor_addrs = if use_tor() {
+        Some(start_tor(Some(18333)))
+    } else {
+        None
+    };
+
     let num_threads = 4;
     let mempool = Arc::new(Mempool::default());
     let peers = (0..num_threads)
-        .map(|_| Peer::connect("localhost:18333", Arc::clone(&mempool), Network::Testnet))
+        .map(|_| {if use_tor() {
+            let addr = &tor_addrs.as_ref().unwrap().hidden_service.as_ref().unwrap();
+            let proxy = &tor_addrs.as_ref().unwrap().socks;
+            info!("conecting to {} via {}", &addr, &proxy);
+            Peer::connect_proxy(addr.as_str(), &proxy, None,  Arc::clone(&mempool), Network::Testnet)
+        } else {
+            Peer::connect("localhost:18333", Arc::clone(&mempool), Network::Testnet)
+        }})
         .collect::<Result<_, _>>()?;
     let blockchain = CompactFiltersBlockchain::new(peers, "./wallet-filters", Some(500_000))?;
     info!("done {:?}", blockchain);
