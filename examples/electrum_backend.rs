@@ -14,8 +14,8 @@ use bitcoin::util::bip32;
 
 pub mod utils;
 
-use crate::utils::tx::build_signed_tx;
 use crate::utils::tor::{start_tor, use_tor};
+use crate::utils::tx::build_signed_tx;
 
 /// This will create a wallet from an xpriv and get the balance by connecting to an Electrum server.
 /// If enough amount is available, this will send a transaction to an address.
@@ -52,7 +52,8 @@ fn run(network: &Network, electrum_url: &str, xpriv: &str) {
             .socks5(Some(Socks5Config {
                 addr: tor_addrs.socks,
                 credentials: None,
-            })).unwrap()
+            }))
+            .unwrap()
             .build();
         Client::from_config(electrum_url, config).unwrap()
     } else {

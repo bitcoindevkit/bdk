@@ -1,6 +1,8 @@
 use std::str::FromStr;
 
+use crate::utils::tor::{start_tor, use_tor};
 use bdk::blockchain::Blockchain;
+use bdk::esplora_client::Builder;
 use bdk::{
     blockchain::esplora::EsploraBlockchain,
     database::MemoryDatabase,
@@ -12,8 +14,6 @@ use bitcoin::{
     util::bip32::{self, ExtendedPrivKey},
     Network,
 };
-use bdk::esplora_client::Builder;
-use crate::utils::tor::{start_tor, use_tor};
 
 pub mod utils;
 

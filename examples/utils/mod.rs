@@ -35,9 +35,9 @@ pub(crate) mod tor {
     use std::thread;
     use std::time::Duration;
 
-    use libtor::{HiddenServiceVersion, Tor, TorAddress, TorFlag};
     use libtor::LogDestination;
     use libtor::LogLevel;
+    use libtor::{HiddenServiceVersion, Tor, TorAddress, TorFlag};
 
     use std::env;
 
@@ -49,7 +49,7 @@ pub(crate) mod tor {
     pub fn use_tor() -> bool {
         match env::var("TOR") {
             Ok(val) => val == "1" || val == "true",
-            _ => false
+            _ => false,
         }
     }
 
@@ -58,7 +58,8 @@ pub(crate) mod tor {
 
         let data_dir = format!("{}/{}", env::temp_dir().display(), "bdk-tor-example");
         let log_file_name = format!("{}/{}", &data_dir, "log");
-        let hidden_service_dir = hidden_service_port.map(|port| format!("{}/{}-{}", &data_dir, "hs-dir", port));
+        let hidden_service_dir =
+            hidden_service_port.map(|port| format!("{}/{}-{}", &data_dir, "hs-dir", port));
 
         println!("Staring Tor in {}", &data_dir);
 
@@ -67,18 +68,29 @@ pub(crate) mod tor {
         if let Some(hs_port) = hidden_service_port {
             Tor::new()
                 .flag(TorFlag::DataDirectory(data_dir.into()))
-                .flag(TorFlag::LogTo(LogLevel::Notice, LogDestination::File(log_file_name.as_str().into())))
+                .flag(TorFlag::LogTo(
+                    LogLevel::Notice,
+                    LogDestination::File(log_file_name.as_str().into()),
+                ))
                 .flag(TorFlag::SocksPort(socks_port))
                 .flag(TorFlag::Custom("ExitPolicy reject *:*".into()))
                 .flag(TorFlag::Custom("BridgeRelay 0".into()))
-                .flag(TorFlag::HiddenServiceDir(hidden_service_dir.as_ref().unwrap().into()))
+                .flag(TorFlag::HiddenServiceDir(
+                    hidden_service_dir.as_ref().unwrap().into(),
+                ))
                 .flag(TorFlag::HiddenServiceVersion(HiddenServiceVersion::V3))
-                .flag(TorFlag::HiddenServicePort(TorAddress::Port(hs_port), None.into()))
+                .flag(TorFlag::HiddenServicePort(
+                    TorAddress::Port(hs_port),
+                    None.into(),
+                ))
                 .start_background()
         } else {
             Tor::new()
                 .flag(TorFlag::DataDirectory(data_dir.into()))
-                .flag(TorFlag::LogTo(LogLevel::Notice, LogDestination::File(log_file_name.as_str().into())))
+                .flag(TorFlag::LogTo(
+                    LogLevel::Notice,
+                    LogDestination::File(log_file_name.as_str().into()),
+                ))
                 .flag(TorFlag::SocksPort(socks_port))
                 .flag(TorFlag::Custom("ExitPolicy reject *:*".into()))
                 .flag(TorFlag::Custom("BridgeRelay 0".into()))
@@ -90,7 +102,10 @@ pub(crate) mod tor {
         while !started {
             tries += 1;
             if tries > 120 {
-                panic!("It took too long to start Tor. See {} for details", &log_file_name);
+                panic!(
+                    "It took too long to start Tor. See {} for details",
+                    &log_file_name
+                );
             }
 
             thread::sleep(Duration::from_millis(1000));
@@ -101,14 +116,23 @@ pub(crate) mod tor {
 
         TorAddresses {
             socks: format!("127.0.0.1:{}", socks_port),
-            hidden_service: hidden_service_port.map(|port| format!("{}:{}", get_onion_address(&hidden_service_dir.unwrap()), port)),
+            hidden_service: hidden_service_port.map(|port| {
+                format!(
+                    "{}:{}",
+                    get_onion_address(&hidden_service_dir.unwrap()),
+                    port
+                )
+            }),
         }
     }
 
     fn truncate_log(filename: &String) {
         let path = std::path::Path::new(filename);
         if path.exists() {
-            let file = File::options().write(true).open(path).expect("no such file");
+            let file = File::options()
+                .write(true)
+                .open(path)
+                .expect("no such file");
             file.set_len(0).expect("cannot set size to 0");
         }
     }

@@ -36,14 +36,22 @@ fn main() -> Result<(), CompactFiltersError> {
     let num_threads = 4;
     let mempool = Arc::new(Mempool::default());
     let peers = (0..num_threads)
-        .map(|_| {if use_tor() {
-            let addr = &tor_addrs.as_ref().unwrap().hidden_service.as_ref().unwrap();
-            let proxy = &tor_addrs.as_ref().unwrap().socks;
-            info!("conecting to {} via {}", &addr, &proxy);
-            Peer::connect_proxy(addr.as_str(), &proxy, None,  Arc::clone(&mempool), Network::Testnet)
-        } else {
-            Peer::connect("localhost:18333", Arc::clone(&mempool), Network::Testnet)
-        }})
+        .map(|_| {
+            if use_tor() {
+                let addr = &tor_addrs.as_ref().unwrap().hidden_service.as_ref().unwrap();
+                let proxy = &tor_addrs.as_ref().unwrap().socks;
+                info!("conecting to {} via {}", &addr, &proxy);
+                Peer::connect_proxy(
+                    addr.as_str(),
+                    &proxy,
+                    None,
+                    Arc::clone(&mempool),
+                    Network::Testnet,
+                )
+            } else {
+                Peer::connect("localhost:18333", Arc::clone(&mempool), Network::Testnet)
+            }
+        })
         .collect::<Result<_, _>>()?;
     let blockchain = CompactFiltersBlockchain::new(peers, "./wallet-filters", Some(500_000))?;
     info!("done {:?}", blockchain);

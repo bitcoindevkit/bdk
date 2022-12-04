@@ -1,19 +1,19 @@
 use std::str::FromStr;
 
 use bitcoin::{
-    Network,
     util::bip32::{self, ExtendedPrivKey},
+    Network,
 };
 use esplora_client::Builder;
 
+use bdk::blockchain::Blockchain;
 use bdk::{
     blockchain::esplora::EsploraBlockchain,
     database::MemoryDatabase,
-    KeychainKind,
-    SyncOptions,
-    template::Bip84, wallet::{AddressIndex, export::FullyNodedExport}, Wallet,
+    template::Bip84,
+    wallet::{export::FullyNodedExport, AddressIndex},
+    KeychainKind, SyncOptions, Wallet,
 };
-use bdk::blockchain::Blockchain;
 
 use crate::utils::tor::{start_tor, use_tor};
 use crate::utils::tx::build_signed_tx;
