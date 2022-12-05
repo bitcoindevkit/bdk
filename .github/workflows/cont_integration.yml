@@ -173,8 +173,8 @@ jobs:
       - name: Check fmt
         run: cargo fmt --all -- --config format_code_in_doc_comments=true --check
 
-  test_harware_wallet:
-    runs-on: ubuntu-latest
+  test_hardware_wallet:
+    runs-on: ubuntu-20.04
     strategy:
       matrix:
         rust:
