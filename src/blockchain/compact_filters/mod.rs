@@ -50,7 +50,6 @@
 //! ```
 
 use std::collections::HashSet;
-use std::fmt;
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -534,61 +533,64 @@ impl ConfigurableBlockchain for CompactFiltersBlockchain {
 }
 
 /// An error that can occur during sync with a [`CompactFiltersBlockchain`]
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum CompactFiltersError {
     /// A peer sent an invalid or unexpected response
+    #[error("A peer sent an invalid or unexpected response")]
     InvalidResponse,
     /// The headers returned are invalid
+    #[error("Invalid headers")]
     InvalidHeaders,
     /// The compact filter headers returned are invalid
+    #[error("Invalid filter header")]
     InvalidFilterHeader,
     /// The compact filter returned is invalid
+    #[error("Invalid filters")]
     InvalidFilter,
     /// The peer is missing a block in the valid chain
+    #[error("The peer is missing a block in the valid chain")]
     MissingBlock,
     /// Block hash at specified height not found
+    #[error("Block hash not found")]
     BlockHashNotFound,
     /// The data stored in the block filters storage are corrupted
+    #[error("The data stored in the block filters storage are corrupted")]
     DataCorruption,
 
     /// A peer is not connected
+    #[error("A peer is not connected")]
     NotConnected,
     /// A peer took too long to reply to one of our messages
+    #[error("A peer took too long to reply to one of our messages")]
     Timeout,
     /// The peer doesn't advertise the [`BLOOM`](bitcoin::network::constants::ServiceFlags::BLOOM) service flag
+    #[error("Peer doesn't advertise the BLOOM service flag")]
     PeerBloomDisabled,
 
     /// No peers have been specified
+    #[error("No peers have been specified")]
     NoPeers,
 
     /// Internal database error
-    Db(rocksdb::Error),
+    #[error("Internal database error: {0}")]
+    Db(#[from] rocksdb::Error),
     /// Internal I/O error
-    Io(std::io::Error),
+    #[error("Internal I/O error: {0}")]
+    Io(#[from] std::io::Error),
     /// Invalid BIP158 filter
-    Bip158(bitcoin::util::bip158::Error),
+    #[error("Invalid BIP158 filter: {0}")]
+    Bip158(#[from] bitcoin::util::bip158::Error),
     /// Internal system time error
-    Time(std::time::SystemTimeError),
+    #[error("Invalid system time: {0}")]
+    Time(#[from] std::time::SystemTimeError),
 
     /// Wrapper for [`crate::error::Error`]
+    #[error("Generic error: {0}")]
     Global(Box<crate::error::Error>),
 }
 
-impl fmt::Display for CompactFiltersError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self)
-    }
-}
-
-impl std::error::Error for CompactFiltersError {}
-
-impl_error!(rocksdb::Error, Db, CompactFiltersError);
-impl_error!(std::io::Error, Io, CompactFiltersError);
-impl_error!(bitcoin::util::bip158::Error, Bip158, CompactFiltersError);
-impl_error!(std::time::SystemTimeError, Time, CompactFiltersError);
-
 impl From<crate::error::Error> for CompactFiltersError {
     fn from(err: crate::error::Error) -> Self {
-        CompactFiltersError::Global(Box::new(err))
+        Self::Global(Box::new(err))
     }
 }

@@ -38,7 +38,6 @@
 
 use std::cmp::max;
 use std::collections::{BTreeMap, HashSet, VecDeque};
-use std::fmt;
 
 use serde::ser::SerializeMap;
 use serde::{Serialize, Serializer};
@@ -494,29 +493,27 @@ impl Condition {
 }
 
 /// Errors that can happen while extracting and manipulating policies
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum PolicyError {
     /// Not enough items are selected to satisfy a [`SatisfiableItem::Thresh`] or a [`SatisfiableItem::Multisig`]
+    #[error("Not enought items selected: {0}")]
     NotEnoughItemsSelected(String),
     /// Index out of range for an item to satisfy a [`SatisfiableItem::Thresh`] or a [`SatisfiableItem::Multisig`]
+    #[error("Index out of range: {0}")]
     IndexOutOfRange(usize),
     /// Can not add to an item that is [`Satisfaction::None`] or [`Satisfaction::Complete`]
+    #[error("Add on leaf")]
     AddOnLeaf,
     /// Can not add to an item that is [`Satisfaction::PartialComplete`]
+    #[error("Add on partial complete")]
     AddOnPartialComplete,
     /// Can not merge CSV or timelock values unless both are less than or both are equal or greater than 500_000_000
+    #[error("Mixed timelock units")]
     MixedTimelockUnits,
     /// Incompatible conditions (not currently used)
+    #[error("Incompatible conditions")]
     IncompatibleConditions,
 }
-
-impl fmt::Display for PolicyError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self)
-    }
-}
-
-impl std::error::Error for PolicyError {}
 
 impl Policy {
     fn new(item: SatisfiableItem) -> Self {

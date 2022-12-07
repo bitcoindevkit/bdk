@@ -12,33 +12,44 @@
 //! Descriptor errors
 
 /// Errors related to the parsing and usage of descriptors
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum Error {
     /// Invalid HD Key path, such as having a wildcard but a length != 1
+    #[error("Invalid HD key path")]
     InvalidHdKeyPath,
     /// The provided descriptor doesn't match its checksum
+    #[error("The provided descriptor doesn't match its checksum")]
     InvalidDescriptorChecksum,
     /// The descriptor contains hardened derivation steps on public extended keys
+    #[error("The descriptor contains hardened derivation steps on public extended keys")]
     HardenedDerivationXpub,
 
     /// Error thrown while working with [`keys`](crate::keys)
+    #[error("Key error: {0}")]
     Key(crate::keys::KeyError),
     /// Error while extracting and manipulating policies
-    Policy(crate::descriptor::policy::PolicyError),
+    #[error("Policy error: {0}")]
+    Policy(#[from] crate::descriptor::policy::PolicyError),
 
     /// Invalid byte found in the descriptor checksum
+    #[error("Invalid descriptor character: {0}")]
     InvalidDescriptorCharacter(u8),
 
     /// BIP32 error
-    Bip32(bitcoin::util::bip32::Error),
+    #[error("BIP32 error: {0}")]
+    Bip32(#[from] bitcoin::util::bip32::Error),
     /// Error during base58 decoding
-    Base58(bitcoin::util::base58::Error),
+    #[error("Base58 error: {0}")]
+    Base58(#[from] bitcoin::util::base58::Error),
     /// Key-related error
-    Pk(bitcoin::util::key::Error),
+    #[error("Key-related error: {0}")]
+    Pk(#[from] bitcoin::util::key::Error),
     /// Miniscript error
-    Miniscript(miniscript::Error),
+    #[error("Miniscript error: {0}")]
+    Miniscript(#[from] miniscript::Error),
     /// Hex decoding error
-    Hex(bitcoin::hashes::hex::Error),
+    #[error("Hex decoding error: {0}")]
+    Hex(#[from] bitcoin::hashes::hex::Error),
 }
 
 impl From<crate::keys::KeyError> for Error {
@@ -46,22 +57,7 @@ impl From<crate::keys::KeyError> for Error {
         match key_error {
             crate::keys::KeyError::Miniscript(inner) => Error::Miniscript(inner),
             crate::keys::KeyError::Bip32(inner) => Error::Bip32(inner),
-            e => Error::Key(e),
+            e => Self::Key(e),
         }
     }
 }
-
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self)
-    }
-}
-
-impl std::error::Error for Error {}
-
-impl_error!(bitcoin::util::bip32::Error, Bip32);
-impl_error!(bitcoin::util::base58::Error, Base58);
-impl_error!(bitcoin::util::key::Error, Pk);
-impl_error!(miniscript::Error, Miniscript);
-impl_error!(bitcoin::hashes::hex::Error, Hex);
-impl_error!(crate::descriptor::policy::PolicyError, Policy);

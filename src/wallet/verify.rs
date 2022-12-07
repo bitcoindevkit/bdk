@@ -12,7 +12,6 @@
 //! Verify transactions against the consensus rules
 
 use std::collections::HashMap;
-use std::fmt;
 
 use bitcoin::consensus::serialize;
 use bitcoin::{OutPoint, Transaction, Txid};
@@ -73,36 +72,37 @@ pub fn verify_tx<D: Database, B: GetTx>(
 }
 
 /// Error during validation of a tx agains the consensus rules
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum VerifyError {
     /// The transaction being spent is not available in the database or the blockchain client
+    #[error("The transaction being spent is not available in the database or the blockchain client: {0}")]
     MissingInputTx(Txid),
     /// The transaction being spent doesn't have the requested output
+    #[error("The transaction being spent doesn't have the requested output: {0}")]
     InvalidInput(OutPoint),
 
     /// Consensus error
+    #[error("Consensus error: {0:?}")]
     Consensus(bitcoinconsensus::Error),
 
     /// Generic error
     ///
     /// It has to be wrapped in a `Box` since `Error` has a variant that contains this enum
+    #[error("Generic error: {0}")]
     Global(Box<Error>),
 }
 
-impl fmt::Display for VerifyError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self)
+impl From<bitcoinconsensus::Error> for VerifyError {
+    fn from(e: bitcoinconsensus::Error) -> Self {
+        Self::Consensus(e)
     }
 }
-
-impl std::error::Error for VerifyError {}
 
 impl From<Error> for VerifyError {
     fn from(other: Error) -> Self {
-        VerifyError::Global(Box::new(other))
+        Self::Global(Box::new(other))
     }
 }
-impl_error!(bitcoinconsensus::Error, Consensus, VerifyError);
 
 #[cfg(test)]
 mod test {

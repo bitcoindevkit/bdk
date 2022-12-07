@@ -912,34 +912,29 @@ impl<Ctx: ScriptContext> IntoDescriptorKey<Ctx> for PrivateKey {
 }
 
 /// Errors thrown while working with [`keys`](crate::keys)
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum KeyError {
     /// The key cannot exist in the given script context
+    #[error("Invalid script context")]
     InvalidScriptContext,
     /// The key is not valid for the given network
+    #[error("Invalid network")]
     InvalidNetwork,
     /// The key has an invalid checksum
+    #[error("Invalid checksum")]
     InvalidChecksum,
 
     /// Custom error message
+    #[error("{0}")]
     Message(String),
 
     /// BIP32 error
-    Bip32(bitcoin::util::bip32::Error),
+    #[error("BIP32 error: {0}")]
+    Bip32(#[from] bitcoin::util::bip32::Error),
     /// Miniscript error
-    Miniscript(miniscript::Error),
+    #[error("Miniscript error: {0}")]
+    Miniscript(#[from] miniscript::Error),
 }
-
-impl_error!(miniscript::Error, Miniscript, KeyError);
-impl_error!(bitcoin::util::bip32::Error, Bip32, KeyError);
-
-impl std::fmt::Display for KeyError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self)
-    }
-}
-
-impl std::error::Error for KeyError {}
 
 #[cfg(test)]
 pub mod test {

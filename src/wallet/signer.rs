@@ -130,61 +130,55 @@ impl From<Fingerprint> for SignerId {
 }
 
 /// Signing error
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, thiserror::Error)]
 pub enum SignerError {
     /// The private key is missing for the required public key
+    #[error("Missing private key")]
     MissingKey,
     /// The private key in use has the right fingerprint but derives differently than expected
+    #[error(
+        "The private key in use has the right fingerprint but derives differently than expected"
+    )]
     InvalidKey,
     /// The user canceled the operation
+    #[error("The user canceled the operation")]
     UserCanceled,
     /// Input index is out of range
+    #[error("Input index out of range")]
     InputIndexOutOfRange,
     /// The `non_witness_utxo` field of the transaction is required to sign this input
+    #[error("Missing non-witness UTXO")]
     MissingNonWitnessUtxo,
     /// The `non_witness_utxo` specified is invalid
+    #[error("Invalid non-witness UTXO")]
     InvalidNonWitnessUtxo,
     /// The `witness_utxo` field of the transaction is required to sign this input
+    #[error("Missing witness UTXO")]
     MissingWitnessUtxo,
     /// The `witness_script` field of the transaction is required to sign this input
+    #[error("Missing witness script")]
     MissingWitnessScript,
     /// The fingerprint and derivation path are missing from the psbt input
+    #[error("Missing fingerprint and derivation path")]
     MissingHdKeypath,
     /// The psbt contains a non-`SIGHASH_ALL` sighash in one of its input and the user hasn't
     /// explicitly allowed them
     ///
     /// To enable signing transactions with non-standard sighashes set
     /// [`SignOptions::allow_all_sighashes`] to `true`.
+    #[error("The psbt contains a non standard sighash")]
     NonStandardSighash,
     /// Invalid SIGHASH for the signing context in use
+    #[error("Invalid SIGHASH for the signing context in use")]
     InvalidSighash,
     /// Error while computing the hash to sign
-    SighashError(sighash::Error),
+    #[error("Error while computing the hash to sign: {0}")]
+    SighashError(#[from] sighash::Error),
     /// Error while signing using hardware wallets
     #[cfg(feature = "hardware-signer")]
-    HWIError(hwi::error::Error),
+    #[error("Error while signing using hardware wallets: {0}")]
+    HWIError(#[from] hwi::error::Error),
 }
-
-#[cfg(feature = "hardware-signer")]
-impl From<hwi::error::Error> for SignerError {
-    fn from(e: hwi::error::Error) -> Self {
-        SignerError::HWIError(e)
-    }
-}
-
-impl From<sighash::Error> for SignerError {
-    fn from(e: sighash::Error) -> Self {
-        SignerError::SighashError(e)
-    }
-}
-
-impl fmt::Display for SignerError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self)
-    }
-}
-
-impl std::error::Error for SignerError {}
 
 /// Signing context
 ///
