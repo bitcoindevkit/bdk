@@ -107,7 +107,7 @@ pub enum Error {
     MiniscriptPsbt(MiniscriptPsbtError),
     /// BIP32 error
     Bip32(bitcoin::util::bip32::Error),
-    /// An ECDSA error
+    /// A secp256k1 error
     Secp256k1(bitcoin::secp256k1::Error),
     /// Error serializing or deserializing JSON data
     Json(serde_json::Error),
@@ -157,6 +157,18 @@ pub enum MiniscriptPsbtError {
     OutputUpdate(miniscript::psbt::OutputUpdateError),
 }
 
+impl fmt::Display for MiniscriptPsbtError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Conversion(err) => write!(f, "Conversion error: {}", err),
+            Self::UtxoUpdate(err) => write!(f, "UTXO update error: {}", err),
+            Self::OutputUpdate(err) => write!(f, "Output update error: {}", err),
+        }
+    }
+}
+
+impl std::error::Error for MiniscriptPsbtError {}
+
 /// Represents the last failed [`crate::blockchain::WalletSync`] sync attempt in which we were short
 /// on cached `scriptPubKey`s.
 #[derive(Debug)]
@@ -169,7 +181,93 @@ pub struct MissingCachedScripts {
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self)
+        match self {
+            Self::InvalidU32Bytes(_) => write!(
+                f,
+                "Wrong number of bytes found when trying to convert to u32"
+            ),
+            Self::Generic(err) => write!(f, "Generic error: {}", err),
+            Self::ScriptDoesntHaveAddressForm => write!(f, "Script doesn't have address form"),
+            Self::NoRecipients => write!(f, "Cannot build tx without recipients"),
+            Self::NoUtxosSelected => write!(f, "No UTXO selected"),
+            Self::OutputBelowDustLimit(limit) => {
+                write!(f, "Output below the dust limit: {}", limit)
+            }
+            Self::InsufficientFunds { needed, available } => write!(
+                f,
+                "Insufficient funds: {} sat available of {} sat needed",
+                available, needed
+            ),
+            Self::BnBTotalTriesExceeded => {
+                write!(f, "Branch and bound coin selection: total tries exceeded")
+            }
+            Self::BnBNoExactMatch => write!(f, "Branch and bound coin selection: not exact match"),
+            Self::UnknownUtxo => write!(f, "UTXO not found in the internal database"),
+            Self::TransactionNotFound => {
+                write!(f, "Transaction not found in the internal database")
+            }
+            Self::TransactionConfirmed => write!(f, "Transaction already confirmed"),
+            Self::IrreplaceableTransaction => write!(f, "Transaction can't be replaced"),
+            Self::FeeRateTooLow { required } => write!(
+                f,
+                "Fee rate too low: required {} sat/vbyte",
+                required.as_sat_per_vb()
+            ),
+            Self::FeeTooLow { required } => write!(f, "Fee to low: required {} sat", required),
+            Self::FeeRateUnavailable => write!(f, "Fee rate unavailable"),
+            Self::MissingKeyOrigin(err) => write!(f, "Missing key origin: {}", err),
+            Self::Key(err) => write!(f, "Key error: {}", err),
+            Self::ChecksumMismatch => write!(f, "Descriptor checksum mismatch"),
+            Self::SpendingPolicyRequired(keychain_kind) => {
+                write!(f, "Spending policy required: {:?}", keychain_kind)
+            }
+            Self::InvalidPolicyPathError(err) => write!(f, "Invalid policy path: {}", err),
+            Self::Signer(err) => write!(f, "Signer error: {}", err),
+            Self::InvalidNetwork { requested, found } => write!(
+                f,
+                "Invalid network: requested {} but found {}",
+                requested, found
+            ),
+            #[cfg(feature = "verify")]
+            Self::Verification(err) => write!(f, "Transaction verification error: {}", err),
+            Self::InvalidProgressValue(progress) => {
+                write!(f, "Invalid progress value: {}", progress)
+            }
+            Self::ProgressUpdateError => write!(
+                f,
+                "Progress update error (maybe the channel has been closed)"
+            ),
+            Self::InvalidOutpoint(outpoint) => write!(
+                f,
+                "Requested outpoint doesn't exist in the tx: {}",
+                outpoint
+            ),
+            Self::Descriptor(err) => write!(f, "Descriptor error: {}", err),
+            Self::Encode(err) => write!(f, "Encoding error: {}", err),
+            Self::Miniscript(err) => write!(f, "Miniscript error: {}", err),
+            Self::MiniscriptPsbt(err) => write!(f, "Miniscript PSBT error: {}", err),
+            Self::Bip32(err) => write!(f, "BIP32 error: {}", err),
+            Self::Secp256k1(err) => write!(f, "Secp256k1 error: {}", err),
+            Self::Json(err) => write!(f, "Serialize/Deserialize JSON error: {}", err),
+            Self::Hex(err) => write!(f, "Hex decoding error: {}", err),
+            Self::Psbt(err) => write!(f, "PSBT error: {}", err),
+            Self::PsbtParse(err) => write!(f, "Impossible to parse PSBT: {}", err),
+            Self::MissingCachedScripts(missing_cached_scripts) => {
+                write!(f, "Missing cached scripts: {:?}", missing_cached_scripts)
+            }
+            #[cfg(feature = "electrum")]
+            Self::Electrum(err) => write!(f, "Electrum client error: {}", err),
+            #[cfg(feature = "esplora")]
+            Self::Esplora(err) => write!(f, "Esplora client error: {}", err),
+            #[cfg(feature = "compact_filters")]
+            Self::CompactFilters(err) => write!(f, "Compact filters client error: {}", err),
+            #[cfg(feature = "key-value-db")]
+            Self::Sled(err) => write!(f, "Sled database error: {}", err),
+            #[cfg(feature = "rpc")]
+            Self::Rpc(err) => write!(f, "RPC client error: {}", err),
+            #[cfg(feature = "sqlite")]
+            Self::Rusqlite(err) => write!(f, "SQLite error: {}", err),
+        }
     }
 }
 
