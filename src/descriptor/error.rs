@@ -53,7 +53,26 @@ impl From<crate::keys::KeyError> for Error {
 
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self)
+        match self {
+            Self::InvalidHdKeyPath => write!(f, "Invalid HD key path"),
+            Self::InvalidDescriptorChecksum => {
+                write!(f, "The provided descriptor doesn't match its checksum")
+            }
+            Self::HardenedDerivationXpub => write!(
+                f,
+                "The descriptor contains hardened derivation steps on public extended keys"
+            ),
+            Self::Key(err) => write!(f, "Key error: {}", err),
+            Self::Policy(err) => write!(f, "Policy error: {}", err),
+            Self::InvalidDescriptorCharacter(char) => {
+                write!(f, "Invalid descriptor character: {}", char)
+            }
+            Self::Bip32(err) => write!(f, "BIP32 error: {}", err),
+            Self::Base58(err) => write!(f, "Base58 error: {}", err),
+            Self::Pk(err) => write!(f, "Key-related error: {}", err),
+            Self::Miniscript(err) => write!(f, "Miniscript error: {}", err),
+            Self::Hex(err) => write!(f, "Hex decoding error: {}", err),
+        }
     }
 }
 

@@ -935,7 +935,14 @@ impl_error!(bitcoin::util::bip32::Error, Bip32, KeyError);
 
 impl std::fmt::Display for KeyError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self)
+        match self {
+            Self::InvalidScriptContext => write!(f, "Invalid script context"),
+            Self::InvalidNetwork => write!(f, "Invalid network"),
+            Self::InvalidChecksum => write!(f, "Invalid checksum"),
+            Self::Message(err) => write!(f, "{}", err),
+            Self::Bip32(err) => write!(f, "BIP32 error: {}", err),
+            Self::Miniscript(err) => write!(f, "Miniscript error: {}", err),
+        }
     }
 }
 

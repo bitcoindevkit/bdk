@@ -180,7 +180,22 @@ impl From<sighash::Error> for SignerError {
 
 impl fmt::Display for SignerError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self)
+        match self {
+            Self::MissingKey => write!(f, "Missing private key"),
+            Self::InvalidKey => write!(f, "The private key in use has the right fingerprint but derives differently than expected"),
+            Self::UserCanceled => write!(f, "The user canceled the operation"),
+            Self::InputIndexOutOfRange => write!(f, "Input index out of range"),
+            Self::MissingNonWitnessUtxo => write!(f, "Missing non-witness UTXO"),
+            Self::InvalidNonWitnessUtxo => write!(f, "Invalid non-witness UTXO"),
+            Self::MissingWitnessUtxo => write!(f, "Missing witness UTXO"),
+            Self::MissingWitnessScript => write!(f, "Missing witness script"),
+            Self::MissingHdKeypath => write!(f, "Missing fingerprint and derivation path"),
+            Self::NonStandardSighash => write!(f, "The psbt contains a non standard sighash"),
+            Self::InvalidSighash => write!(f, "Invalid SIGHASH for the signing context in use"),
+            Self::SighashError(err) => write!(f, "Error while computing the hash to sign: {}", err),
+            #[cfg(feature = "hardware-signer")]
+            Self::HWIError(err) => write!(f, "Error while signing using hardware wallets: {}", err),
+        }
     }
 }
 
