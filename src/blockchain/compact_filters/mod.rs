@@ -51,6 +51,7 @@
 
 use std::collections::HashSet;
 use std::fmt;
+use std::ops::DerefMut;
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -274,7 +275,7 @@ impl WalletSync for CompactFiltersBlockchain {
     #[allow(clippy::mutex_atomic)] // Mutex is easier to understand than a CAS loop.
     fn wallet_setup<D: BatchDatabase>(
         &self,
-        database: &mut D,
+        database: &RefCell<D>,
         progress_update: Box<dyn Progress>,
     ) -> Result<(), Error> {
         let first_peer = &self.peers[0];
@@ -321,6 +322,9 @@ impl WalletSync for CompactFiltersBlockchain {
         info!("Synced headers to height: {}", synced_height);
 
         cf_sync.prepare_sync(Arc::clone(first_peer))?;
+
+        let mut database = database.borrow_mut();
+        let database = database.deref_mut();
 
         let all_scripts = Arc::new(
             database
