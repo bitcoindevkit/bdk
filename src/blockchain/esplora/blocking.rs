@@ -12,6 +12,7 @@
 //! Esplora by way of `ureq` HTTP client.
 
 use std::collections::{HashMap, HashSet};
+use std::ops::DerefMut;
 
 #[allow(unused_imports)]
 use log::{debug, error, info, trace};
@@ -117,10 +118,12 @@ impl GetBlockHash for EsploraBlockchain {
 impl WalletSync for EsploraBlockchain {
     fn wallet_setup<D: BatchDatabase>(
         &self,
-        database: &mut D,
+        database: &RefCell<D>,
         _progress_update: Box<dyn Progress>,
     ) -> Result<(), Error> {
         use crate::blockchain::script_sync::Request;
+        let mut database = database.borrow_mut();
+        let database = database.deref_mut();
         let mut request = script_sync::start(database, self.stop_gap)?;
         let mut tx_index: HashMap<Txid, Tx> = HashMap::new();
         let batch_update = loop {

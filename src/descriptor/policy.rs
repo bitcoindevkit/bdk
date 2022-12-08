@@ -1197,7 +1197,7 @@ mod test {
             .unwrap();
 
         assert_matches!(&policy.item, EcdsaSignature(PkOrF::Fingerprint(f)) if f == &fingerprint);
-        assert_matches!(&policy.contribution, Satisfaction::Complete {condition} if condition.csv == None && condition.timelock == None);
+        assert_matches!(&policy.contribution, Satisfaction::Complete {condition} if condition.csv.is_none() && condition.timelock.is_none());
     }
 
     // 2 pub keys descriptor, required 2 prv keys
@@ -1346,7 +1346,7 @@ mod test {
             .unwrap();
 
         assert_matches!(policy.item, EcdsaSignature(PkOrF::Fingerprint(f)) if f == fingerprint);
-        assert_matches!(policy.contribution, Satisfaction::Complete {condition} if condition.csv == None && condition.timelock == None);
+        assert_matches!(policy.contribution, Satisfaction::Complete {condition} if condition.csv.is_none() && condition.timelock.is_none());
     }
 
     // single key, 1 prv and 1 pub key descriptor, required 1 prv keys

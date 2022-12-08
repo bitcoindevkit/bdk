@@ -12,7 +12,7 @@
 //! Esplora by way of `reqwest` HTTP client.
 
 use std::collections::{HashMap, HashSet};
-use std::ops::Deref;
+use std::ops::{Deref, DerefMut};
 
 use bitcoin::{Transaction, Txid};
 
@@ -135,10 +135,12 @@ impl GetBlockHash for EsploraBlockchain {
 impl WalletSync for EsploraBlockchain {
     fn wallet_setup<D: BatchDatabase>(
         &self,
-        database: &mut D,
+        database: &RefCell<D>,
         _progress_update: Box<dyn Progress>,
     ) -> Result<(), Error> {
         use crate::blockchain::script_sync::Request;
+        let mut database = database.borrow_mut();
+        let database = database.deref_mut();
         let mut request = script_sync::start(database, self.stop_gap)?;
         let mut tx_index: HashMap<Txid, Tx> = HashMap::new();
 

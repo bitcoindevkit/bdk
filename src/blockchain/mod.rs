@@ -16,6 +16,7 @@
 //! [Compact Filters/Neutrino](crate::blockchain::compact_filters), along with a generalized trait
 //! [`Blockchain`] that can be implemented to build customized backends.
 
+use std::cell::RefCell;
 use std::collections::HashSet;
 use std::ops::Deref;
 use std::sync::mpsc::{channel, Receiver, Sender};
@@ -133,7 +134,7 @@ pub trait WalletSync {
     /// Populate the internal database with transactions and UTXOs
     fn wallet_setup<D: BatchDatabase>(
         &self,
-        database: &mut D,
+        database: &RefCell<D>,
         progress_update: Box<dyn Progress>,
     ) -> Result<(), Error>;
 
@@ -156,7 +157,7 @@ pub trait WalletSync {
     /// [`BatchOperations::del_utxo`]: crate::database::BatchOperations::del_utxo
     fn wallet_sync<D: BatchDatabase>(
         &self,
-        database: &mut D,
+        database: &RefCell<D>,
         progress_update: Box<dyn Progress>,
     ) -> Result<(), Error> {
         maybe_await!(self.wallet_setup(database, progress_update))
@@ -377,7 +378,7 @@ impl<T: GetBlockHash> GetBlockHash for Arc<T> {
 impl<T: WalletSync> WalletSync for Arc<T> {
     fn wallet_setup<D: BatchDatabase>(
         &self,
-        database: &mut D,
+        database: &RefCell<D>,
         progress_update: Box<dyn Progress>,
     ) -> Result<(), Error> {
         maybe_await!(self.deref().wallet_setup(database, progress_update))
@@ -385,7 +386,7 @@ impl<T: WalletSync> WalletSync for Arc<T> {
 
     fn wallet_sync<D: BatchDatabase>(
         &self,
-        database: &mut D,
+        database: &RefCell<D>,
         progress_update: Box<dyn Progress>,
     ) -> Result<(), Error> {
         maybe_await!(self.deref().wallet_sync(database, progress_update))
