@@ -136,7 +136,7 @@ impl CfSync {
 
                 let resp = peer.get_cf_headers(0x00, start_height as u32, stop_hash)?;
 
-                assert!(resp.previous_filter_header == checkpoint);
+                assert_eq!(resp.previous_filter_header, checkpoint);
                 status =
                     self.cf_store
                         .advance_to_cf_headers(index, checkpoint, resp.filter_hashes)?;

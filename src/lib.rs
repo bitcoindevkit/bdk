@@ -256,6 +256,9 @@ pub extern crate rusqlite;
 #[macro_use]
 pub mod testutils;
 
+#[cfg(test)]
+extern crate assert_matches;
+
 #[allow(unused_imports)]
 #[macro_use]
 pub(crate) mod error;

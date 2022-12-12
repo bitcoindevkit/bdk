@@ -108,6 +108,7 @@ impl_error!(bitcoinconsensus::Error, Consensus, VerifyError);
 mod test {
     use super::*;
     use crate::database::{BatchOperations, MemoryDatabase};
+    use assert_matches::assert_matches;
     use bitcoin::consensus::encode::deserialize;
     use bitcoin::hashes::hex::FromHex;
     use bitcoin::{Transaction, Txid};
@@ -137,9 +138,7 @@ mod test {
         }
 
         let result = verify_tx(&signed_tx, &database, &blockchain);
-        assert!(result.is_err(), "Should fail with missing input tx");
-        assert!(
-            matches!(result, Err(VerifyError::MissingInputTx(txid)) if txid == prev_tx.txid()),
+        assert_matches!(result, Err(VerifyError::MissingInputTx(txid)) if txid == prev_tx.txid(),
             "Error should be a `MissingInputTx` error"
         );
 
@@ -147,9 +146,9 @@ mod test {
         database.set_raw_tx(&prev_tx).unwrap();
 
         let result = verify_tx(&unsigned_tx, &database, &blockchain);
-        assert!(result.is_err(), "Should fail since the TX is unsigned");
-        assert!(
-            matches!(result, Err(VerifyError::Consensus(_))),
+        assert_matches!(
+            result,
+            Err(VerifyError::Consensus(_)),
             "Error should be a `Consensus` error"
         );
 

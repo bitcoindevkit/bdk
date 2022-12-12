@@ -23,7 +23,7 @@ pub trait ConfigurableBlockchainTester<B: ConfigurableBlockchain>: Sized {
         None
     }
 
-    /// Runs all avaliable tests.
+    /// Runs all available tests.
     fn run(&self) {
         let test_client = &mut TestClient::default();
 
