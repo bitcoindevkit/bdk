@@ -49,7 +49,7 @@ pub use memory::MemoryDatabase;
 /// Blockchain state at the time of syncing
 ///
 /// Contains only the block time and height at the moment
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SyncTime {
     /// Block timestamp and height at the time of sync
     pub block_time: BlockTime,
