@@ -172,7 +172,7 @@ cargo test --features test-electrum
 ```
 
 The other options are `test-esplora`, `test-rpc` or `test-rpc-legacy` which runs against an older version of Bitcoin Core.
-Note that `electrs` and `bitcoind` binaries are automatically downloaded (on mac and linux), to specify you already have installed binaries you must use `--no-default-features` and provide `BITCOIND_EXE` and `ELECTRS_EXE` as environment variables.
+Note that `electrs` and `bitcoind` binaries are automatically downloaded (on Mac and Linux), to specify you already have installed binaries you must use `--no-default-features` and provide `BITCOIND_EXE` and `ELECTRS_EXE` as environment variables.
 
 ## Running under WASM
 
