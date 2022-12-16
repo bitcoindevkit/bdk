@@ -281,9 +281,11 @@ impl<'a, 'b, D: Database> TxCache<'a, 'b, D> {
                 .client
                 .batch_transaction_get(need_fetch.clone())
                 .map_err(Error::Electrum)?;
-            for (tx, _txid) in txs.into_iter().zip(need_fetch) {
-                debug_assert_eq!(*_txid, tx.txid());
-                self.cache.insert(tx.txid(), tx);
+            let mut txs: HashMap<_, _> = txs.into_iter().map(|tx| (tx.txid(), tx)).collect();
+            for txid in need_fetch {
+                if let Some(tx) = txs.remove(txid) {
+                    self.cache.insert(*txid, tx);
+                }
             }
         }
 
