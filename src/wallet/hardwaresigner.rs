@@ -24,9 +24,12 @@
 //! # use std::sync::Arc;
 //! #
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! let devices = HWIClient::enumerate()?;
-//! let first_device = devices.first().expect("No devices found!");
-//! let custom_signer = HWISigner::from_device(first_device, HWIChain::Test)?;
+//! let mut devices = HWIClient::enumerate()?;
+//! if devices.is_empty() {
+//!     panic!("No devices found!");
+//! }
+//! let first_device = devices.remove(0)?;
+//! let custom_signer = HWISigner::from_device(&first_device, HWIChain::Test)?;
 //!
 //! # let mut wallet = Wallet::new(
 //! #     "",
