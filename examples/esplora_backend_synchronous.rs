@@ -22,7 +22,7 @@ use crate::utils::tx::build_signed_tx;
 /// If enough amount is available, this will send a transaction to an address.
 /// Otherwise, this will display a wallet address to receive funds.
 ///
-/// This can be run with `cargo run --features=use-esplora-ureq --example esplora_backend_synchronous`
+/// This can be run with `cargo run --features=use-esplora-blocking --example esplora_backend_synchronous`
 /// in the root folder.
 fn main() {
     let network = Network::Signet;

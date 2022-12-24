@@ -22,7 +22,7 @@ use crate::utils::tx::build_signed_tx;
 /// If enough amount is available, this will send a transaction to an address.
 /// Otherwise, this will display a wallet address to receive funds.
 ///
-/// This can be run with `cargo run --no-default-features --features="use-esplora-reqwest, reqwest-default-tls, async-interface" --example esplora_backend_asynchronous`
+/// This can be run with `cargo run --no-default-features --features="use-esplora-async reqwest-default-tls async-interface" --example esplora_backend_asynchronous`
 /// in the root folder.
 #[tokio::main(flavor = "current_thread")]
 async fn main() {

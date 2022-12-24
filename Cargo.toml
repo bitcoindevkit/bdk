@@ -153,7 +153,7 @@ required-features = ["use-esplora-blocking"]
 [[example]]
 name = "esplora_backend_asynchronous"
 path = "examples/esplora_backend_asynchronous.rs"
-required-features = ["use-esplora-reqwest", "reqwest-default-tls", "async-interface"]
+required-features = ["use-esplora-async", "reqwest-default-tls", "async-interface"]
 
 [[example]]
 name = "esplora_backend_with_tor"
