@@ -247,6 +247,20 @@ pub struct TransactionDetails {
     pub confirmation_time: Option<BlockTime>,
 }
 
+impl PartialOrd for TransactionDetails {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for TransactionDetails {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.confirmation_time
+            .cmp(&other.confirmation_time)
+            .then_with(|| self.txid.cmp(&other.txid))
+    }
+}
+
 /// Block height and timestamp of a block
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default)]
 pub struct BlockTime {
@@ -254,6 +268,20 @@ pub struct BlockTime {
     pub height: u32,
     /// confirmation block timestamp
     pub timestamp: u64,
+}
+
+impl PartialOrd for BlockTime {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for BlockTime {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.height
+            .cmp(&other.height)
+            .then_with(|| self.timestamp.cmp(&other.timestamp))
+    }
 }
 
 /// **DEPRECATED**: Confirmation time of a transaction
@@ -334,6 +362,95 @@ impl std::iter::Sum for Balance {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bitcoin::hashes::Hash;
+
+    #[test]
+    fn sort_block_time() {
+        let block_time_a = BlockTime {
+            height: 100,
+            timestamp: 100,
+        };
+
+        let block_time_b = BlockTime {
+            height: 100,
+            timestamp: 110,
+        };
+
+        let block_time_c = BlockTime {
+            height: 0,
+            timestamp: 0,
+        };
+
+        let mut vec = vec![
+            block_time_a.clone(),
+            block_time_b.clone(),
+            block_time_c.clone(),
+        ];
+        vec.sort();
+        let expected = vec![block_time_c, block_time_a, block_time_b];
+
+        assert_eq!(vec, expected)
+    }
+
+    #[test]
+    fn sort_tx_details() {
+        let block_time_a = BlockTime {
+            height: 100,
+            timestamp: 100,
+        };
+
+        let block_time_b = BlockTime {
+            height: 0,
+            timestamp: 0,
+        };
+
+        let tx_details_a = TransactionDetails {
+            transaction: None,
+            txid: Txid::from_inner([0; 32]),
+            received: 0,
+            sent: 0,
+            fee: None,
+            confirmation_time: None,
+        };
+
+        let tx_details_b = TransactionDetails {
+            transaction: None,
+            txid: Txid::from_inner([0; 32]),
+            received: 0,
+            sent: 0,
+            fee: None,
+            confirmation_time: Some(block_time_a),
+        };
+
+        let tx_details_c = TransactionDetails {
+            transaction: None,
+            txid: Txid::from_inner([0; 32]),
+            received: 0,
+            sent: 0,
+            fee: None,
+            confirmation_time: Some(block_time_b.clone()),
+        };
+
+        let tx_details_d = TransactionDetails {
+            transaction: None,
+            txid: Txid::from_inner([1; 32]),
+            received: 0,
+            sent: 0,
+            fee: None,
+            confirmation_time: Some(block_time_b),
+        };
+
+        let mut vec = vec![
+            tx_details_a.clone(),
+            tx_details_b.clone(),
+            tx_details_c.clone(),
+            tx_details_d.clone(),
+        ];
+        vec.sort();
+        let expected = vec![tx_details_a, tx_details_c, tx_details_d, tx_details_b];
+
+        assert_eq!(vec, expected)
+    }
 
     #[test]
     fn can_store_feerate_in_const() {

@@ -281,9 +281,11 @@ impl<'a, 'b, D: Database> TxCache<'a, 'b, D> {
                 .client
                 .batch_transaction_get(need_fetch.clone())
                 .map_err(Error::Electrum)?;
-            for (tx, _txid) in txs.into_iter().zip(need_fetch) {
-                debug_assert_eq!(*_txid, tx.txid());
-                self.cache.insert(tx.txid(), tx);
+            let mut txs: HashMap<_, _> = txs.into_iter().map(|tx| (tx.txid(), tx)).collect();
+            for txid in need_fetch {
+                if let Some(tx) = txs.remove(txid) {
+                    self.cache.insert(*txid, tx);
+                }
             }
         }
 
@@ -310,6 +312,8 @@ pub struct ElectrumBlockchainConfig {
     pub timeout: Option<u8>,
     /// Stop searching addresses for transactions after finding an unused gap of this length
     pub stop_gap: usize,
+    /// Validate the domain when using SSL
+    pub validate_domain: bool,
 }
 
 impl ConfigurableBlockchain for ElectrumBlockchain {
@@ -321,6 +325,7 @@ impl ConfigurableBlockchain for ElectrumBlockchain {
             .retry(config.retry)
             .timeout(config.timeout)?
             .socks5(socks5)?
+            .validate_domain(config.validate_domain)
             .build();
 
         Ok(ElectrumBlockchain {
@@ -415,6 +420,7 @@ mod test {
                     retry: 0,
                     timeout: None,
                     stop_gap: stop_gap,
+                    validate_domain: true,
                 })
             }
         }

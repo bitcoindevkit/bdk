@@ -235,14 +235,17 @@ impl<K: DerivableKey<Legacy>> DescriptorTemplate for Bip44<K> {
 /// )?;
 ///
 /// assert_eq!(wallet.get_address(New)?.to_string(), "miNG7dJTzJqNbFS19svRdTCisC65dsubtR");
-/// assert_eq!(wallet.public_descriptor(KeychainKind::External)?.unwrap().to_string(), "pkh([c55b303f/44'/0'/0']tpubDDDzQ31JkZB7VxUr9bjvBivDdqoFLrDPyLWtLapArAi51ftfmCb2DPxwLQzX65iNcXz1DGaVvyvo6JQ6rTU73r2gqdEo8uov9QKRb7nKCSU/0/*)#xgaaevjx");
+/// assert_eq!(wallet.public_descriptor(KeychainKind::External)?.unwrap().to_string(), "pkh([c55b303f/44'/1'/0']tpubDDDzQ31JkZB7VxUr9bjvBivDdqoFLrDPyLWtLapArAi51ftfmCb2DPxwLQzX65iNcXz1DGaVvyvo6JQ6rTU73r2gqdEo8uov9QKRb7nKCSU/0/*)#cfhumdqz");
 /// # Ok::<_, Box<dyn std::error::Error>>(())
 /// ```
 pub struct Bip44Public<K: DerivableKey<Legacy>>(pub K, pub bip32::Fingerprint, pub KeychainKind);
 
 impl<K: DerivableKey<Legacy>> DescriptorTemplate for Bip44Public<K> {
     fn build(self, network: Network) -> Result<DescriptorTemplateOut, DescriptorError> {
-        P2Pkh(legacy::make_bipxx_public(44, self.0, self.1, self.2)?).build(network)
+        P2Pkh(legacy::make_bipxx_public(
+            44, self.0, self.1, self.2, network,
+        )?)
+        .build(network)
     }
 }
 
@@ -311,14 +314,17 @@ impl<K: DerivableKey<Segwitv0>> DescriptorTemplate for Bip49<K> {
 /// )?;
 ///
 /// assert_eq!(wallet.get_address(New)?.to_string(), "2N3K4xbVAHoiTQSwxkZjWDfKoNC27pLkYnt");
-/// assert_eq!(wallet.public_descriptor(KeychainKind::External)?.unwrap().to_string(), "sh(wpkh([c55b303f/49'/0'/0']tpubDC49r947KGK52X5rBWS4BLs5m9SRY3pYHnvRrm7HcybZ3BfdEsGFyzCMzayi1u58eT82ZeyFZwH7DD6Q83E3fM9CpfMtmnTygnLfP59jL9L/0/*))#gsmdv4xr");
+/// assert_eq!(wallet.public_descriptor(KeychainKind::External)?.unwrap().to_string(), "sh(wpkh([c55b303f/49'/1'/0']tpubDC49r947KGK52X5rBWS4BLs5m9SRY3pYHnvRrm7HcybZ3BfdEsGFyzCMzayi1u58eT82ZeyFZwH7DD6Q83E3fM9CpfMtmnTygnLfP59jL9L/0/*))#3tka9g0q");
 /// # Ok::<_, Box<dyn std::error::Error>>(())
 /// ```
 pub struct Bip49Public<K: DerivableKey<Segwitv0>>(pub K, pub bip32::Fingerprint, pub KeychainKind);
 
 impl<K: DerivableKey<Segwitv0>> DescriptorTemplate for Bip49Public<K> {
     fn build(self, network: Network) -> Result<DescriptorTemplateOut, DescriptorError> {
-        P2Wpkh_P2Sh(segwit_v0::make_bipxx_public(49, self.0, self.1, self.2)?).build(network)
+        P2Wpkh_P2Sh(segwit_v0::make_bipxx_public(
+            49, self.0, self.1, self.2, network,
+        )?)
+        .build(network)
     }
 }
 
@@ -387,14 +393,17 @@ impl<K: DerivableKey<Segwitv0>> DescriptorTemplate for Bip84<K> {
 /// )?;
 ///
 /// assert_eq!(wallet.get_address(New)?.to_string(), "tb1qedg9fdlf8cnnqfd5mks6uz5w4kgpk2pr6y4qc7");
-/// assert_eq!(wallet.public_descriptor(KeychainKind::External)?.unwrap().to_string(), "wpkh([c55b303f/84\'/0\'/0\']tpubDC2Qwo2TFsaNC4ju8nrUJ9mqVT3eSgdmy1yPqhgkjwmke3PRXutNGRYAUo6RCHTcVQaDR3ohNU9we59brGHuEKPvH1ags2nevW5opEE9Z5Q/0/*)#nkk5dtkg");
+/// assert_eq!(wallet.public_descriptor(KeychainKind::External)?.unwrap().to_string(), "wpkh([c55b303f/84'/1'/0']tpubDC2Qwo2TFsaNC4ju8nrUJ9mqVT3eSgdmy1yPqhgkjwmke3PRXutNGRYAUo6RCHTcVQaDR3ohNU9we59brGHuEKPvH1ags2nevW5opEE9Z5Q/0/*)#dhu402yv");
 /// # Ok::<_, Box<dyn std::error::Error>>(())
 /// ```
 pub struct Bip84Public<K: DerivableKey<Segwitv0>>(pub K, pub bip32::Fingerprint, pub KeychainKind);
 
 impl<K: DerivableKey<Segwitv0>> DescriptorTemplate for Bip84Public<K> {
     fn build(self, network: Network) -> Result<DescriptorTemplateOut, DescriptorError> {
-        P2Wpkh(segwit_v0::make_bipxx_public(84, self.0, self.1, self.2)?).build(network)
+        P2Wpkh(segwit_v0::make_bipxx_public(
+            84, self.0, self.1, self.2, network,
+        )?)
+        .build(network)
     }
 }
 
@@ -440,6 +449,7 @@ macro_rules! expand_make_bipxx {
                 key: K,
                 parent_fingerprint: bip32::Fingerprint,
                 keychain: KeychainKind,
+                network: Network,
             ) -> Result<impl IntoDescriptorKey<$ctx>, DescriptorError> {
                 let derivation_path: bip32::DerivationPath = match keychain {
                     KeychainKind::External => vec![bip32::ChildNumber::from_normal_idx(0)?].into(),
@@ -448,7 +458,10 @@ macro_rules! expand_make_bipxx {
 
                 let source_path = bip32::DerivationPath::from(vec![
                     bip32::ChildNumber::from_hardened_idx(bip)?,
-                    bip32::ChildNumber::from_hardened_idx(0)?,
+                    match network {
+                        Network::Bitcoin => bip32::ChildNumber::from_hardened_idx(0)?,
+                        _ => bip32::ChildNumber::from_hardened_idx(1)?,
+                    },
                     bip32::ChildNumber::from_hardened_idx(0)?,
                 ]);
 
