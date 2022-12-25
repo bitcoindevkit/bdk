@@ -12,9 +12,6 @@ use bdk::{
     blockchain::esplora::EsploraBlockchain, database::MemoryDatabase, template::Bip84,
     KeychainKind, SyncOptions, Wallet,
 };
-
-pub mod utils;
-
 /// This will create a wallet from an xpriv and sync it by connecting to an Esplora server
 /// over Tor network, using blocking calls with `ureq`.
 ///
