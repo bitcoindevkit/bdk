@@ -5546,11 +5546,14 @@ pub(crate) mod test {
         use hwi::types::HWIChain;
         use hwi::HWIClient;
 
-        let devices = HWIClient::enumerate().unwrap();
-        let device = devices.first().expect("No devices found");
-        let client = HWIClient::get_client(device, true, HWIChain::Regtest).unwrap();
-        let descriptors = client.get_descriptors(None).unwrap();
-        let custom_signer = HWISigner::from_device(device, HWIChain::Regtest).unwrap();
+        let mut devices = HWIClient::enumerate().unwrap();
+        if devices.is_empty() {
+            panic!("No devices found!");
+        }
+        let device = devices.remove(0).unwrap();
+        let client = HWIClient::get_client(&device, true, HWIChain::Regtest).unwrap();
+        let descriptors = client.get_descriptors::<String>(None).unwrap();
+        let custom_signer = HWISigner::from_device(&device, HWIChain::Regtest).unwrap();
 
         let (mut wallet, _, _) = get_funded_wallet(&descriptors.internal[0]);
         wallet.add_signer(
