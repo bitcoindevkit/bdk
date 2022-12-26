@@ -69,7 +69,7 @@ pub fn start_tor() -> String {
     truncate_log(&log_file_name);
 
     Tor::new()
-        .flag(TorFlag::DataDirectory(data_dir.into()))
+        .flag(TorFlag::DataDirectory(data_dir))
         .flag(TorFlag::LogTo(
             LogLevel::Notice,
             LogDestination::File(log_file_name.as_str().into()),
