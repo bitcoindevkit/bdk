@@ -133,6 +133,7 @@ pub fn get_checksum(desc: &str) -> Result<String, DescriptorError> {
 mod test {
     use super::*;
     use crate::descriptor::calc_checksum;
+    use assert_matches::assert_matches;
 
     // test calc_checksum() function; it should return the same value as Bitcoin Core
     #[test]
@@ -155,16 +156,16 @@ mod test {
         assert_eq!(calc_checksum(desc).unwrap(), "lasegmfs");
 
         let desc = "wpkh(tprv8ZgxMBicQKsPdpkqS7Eair4YxjcuuvDPNYmKX3sCniCf16tHEVrjjiSXEkFRnUH77yXc6ZcwHHcLNfjdi5qUvw3VDfgYiH5mNsj5izuiu2N/1/2/*)#tqz0nc26";
-        assert!(matches!(
-            calc_checksum(desc).err(),
-            Some(DescriptorError::InvalidDescriptorChecksum)
-        ));
+        assert_matches!(
+            calc_checksum(desc),
+            Err(DescriptorError::InvalidDescriptorChecksum)
+        );
 
         let desc = "pkh(tpubD6NzVbkrYhZ4XHndKkuB8FifXm8r5FQHwrN6oZuWCz13qb93rtgKvD4PQsqC4HP4yhV3tA2fqr2RbY5mNXfM7RxXUoeABoDtsFUq2zJq6YK/44'/1'/0'/0/*)#lasegmsf";
-        assert!(matches!(
-            calc_checksum(desc).err(),
-            Some(DescriptorError::InvalidDescriptorChecksum)
-        ));
+        assert_matches!(
+            calc_checksum(desc),
+            Err(DescriptorError::InvalidDescriptorChecksum)
+        );
     }
 
     #[test]
@@ -172,9 +173,9 @@ mod test {
         let sparkle_heart = unsafe { std::str::from_utf8_unchecked(&[240, 159, 146, 150]) };
         let invalid_desc = format!("wpkh(tprv8ZgxMBicQKsPdpkqS7Eair4YxjcuuvDPNYmKX3sCniCf16tHEVrjjiSXEkFRnUH77yXc6ZcwHHcL{}fjdi5qUvw3VDfgYiH5mNsj5izuiu2N/1/2/*)", sparkle_heart);
 
-        assert!(matches!(
-            calc_checksum(&invalid_desc).err(),
-            Some(DescriptorError::InvalidDescriptorCharacter(invalid_char)) if invalid_char == sparkle_heart.as_bytes()[0]
-        ));
+        assert_matches!(
+            calc_checksum(&invalid_desc),
+            Err(DescriptorError::InvalidDescriptorCharacter(invalid_char)) if invalid_char == sparkle_heart.as_bytes()[0]
+        );
     }
 }

@@ -581,6 +581,7 @@ impl DescriptorMeta for ExtendedDescriptor {
 mod test {
     use std::str::FromStr;
 
+    use assert_matches::assert_matches;
     use bitcoin::consensus::encode::deserialize;
     use bitcoin::hashes::hex::FromHex;
     use bitcoin::secp256k1::Secp256k1;
@@ -763,17 +764,11 @@ mod test {
 
         let desc = "wpkh(tprv8ZgxMBicQKsPdpkqS7Eair4YxjcuuvDPNYmKX3sCniCf16tHEVrjjiSXEkFRnUH77yXc6ZcwHHcLNfjdi5qUvw3VDfgYiH5mNsj5izuiu2N/1/2/*)#67ju93jw"
             .into_wallet_descriptor(&secp, Network::Testnet);
-        assert!(matches!(
-            desc.err(),
-            Some(DescriptorError::InvalidDescriptorChecksum)
-        ));
+        assert_matches!(desc, Err(DescriptorError::InvalidDescriptorChecksum));
 
         let desc = "wpkh(tprv8ZgxMBicQKsPdpkqS7Eair4YxjcuuvDPNYmKX3sCniCf16tHEVrjjiSXEkFRnUH77yXc6ZcwHHcLNfjdi5qUvw3VDfgYiH5mNsj5izuiu2N/1/2/*)#67ju93jw"
             .into_wallet_descriptor(&secp, Network::Testnet);
-        assert!(matches!(
-            desc.err(),
-            Some(DescriptorError::InvalidDescriptorChecksum)
-        ));
+        assert_matches!(desc, Err(DescriptorError::InvalidDescriptorChecksum));
     }
 
     // test IntoWalletDescriptor trait from &str with keys from right and wrong network
@@ -807,17 +802,11 @@ mod test {
 
         let desc = "wpkh(tprv8ZgxMBicQKsPdpkqS7Eair4YxjcuuvDPNYmKX3sCniCf16tHEVrjjiSXEkFRnUH77yXc6ZcwHHcLNfjdi5qUvw3VDfgYiH5mNsj5izuiu2N/1/2/*)"
             .into_wallet_descriptor(&secp, Network::Bitcoin);
-        assert!(matches!(
-            desc.err(),
-            Some(DescriptorError::Key(KeyError::InvalidNetwork))
-        ));
+        assert_matches!(desc, Err(DescriptorError::Key(KeyError::InvalidNetwork)));
 
         let desc = "wpkh(tpubD6NzVbkrYhZ4XHndKkuB8FifXm8r5FQHwrN6oZuWCz13qb93rtgKvD4PQsqC4HP4yhV3tA2fqr2RbY5mNXfM7RxXUoeABoDtsFUq2zJq6YK/1/2/*)"
             .into_wallet_descriptor(&secp, Network::Bitcoin);
-        assert!(matches!(
-            desc.err(),
-            Some(DescriptorError::Key(KeyError::InvalidNetwork))
-        ));
+        assert_matches!(desc, Err(DescriptorError::Key(KeyError::InvalidNetwork)));
     }
 
     // test IntoWalletDescriptor trait from the output of the descriptor!() macro
@@ -851,11 +840,7 @@ mod test {
         let descriptor = "wpkh(tpubD6NzVbkrYhZ4XHndKkuB8FifXm8r5FQHwrN6oZuWCz13qb93rtgKvD4PQsqC4HP4yhV3tA2fqr2RbY5mNXfM7RxXUoeABoDtsFUq2zJq6YK/0'/1/2/*)";
         let result = into_wallet_descriptor_checked(descriptor, &secp, Network::Testnet);
 
-        assert!(result.is_err());
-        assert!(matches!(
-            result.unwrap_err(),
-            DescriptorError::HardenedDerivationXpub
-        ));
+        assert_matches!(result, Err(DescriptorError::HardenedDerivationXpub));
 
         let descriptor = "wsh(multi(2,tpubD6NzVbkrYhZ4XHndKkuB8FifXm8r5FQHwrN6oZuWCz13qb93rtgKvD4PQsqC4HP4yhV3tA2fqr2RbY5mNXfM7RxXUoeABoDtsFUq2zJq6YK/0/*,tpubD6NzVbkrYhZ4XHndKkuB8FifXm8r5FQHwrN6oZuWCz13qb93rtgKvD4PQsqC4HP4yhV3tA2fqr2RbY5mNXfM7RxXUoeABoDtsFUq2zJq6YK/0/*))";
         let result = into_wallet_descriptor_checked(descriptor, &secp, Network::Testnet);

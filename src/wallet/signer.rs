@@ -998,6 +998,7 @@ mod signers_container_tests {
     use crate::descriptor;
     use crate::descriptor::IntoWalletDescriptor;
     use crate::keys::{DescriptorKey, IntoDescriptorKey};
+    use assert_matches::assert_matches;
     use bitcoin::secp256k1::{All, Secp256k1};
     use bitcoin::util::bip32;
     use bitcoin::Network;
@@ -1067,17 +1068,17 @@ mod signers_container_tests {
         signers.add_external(id2.clone(), SignerOrdering(2), signer2.clone());
         signers.add_external(id3.clone(), SignerOrdering(3), signer3.clone());
 
-        assert!(matches!(signers.find(id1), Some(signer) if is_equal(signer, &signer1)));
-        assert!(matches!(signers.find(id2), Some(signer) if is_equal(signer, &signer2)));
-        assert!(matches!(signers.find(id3.clone()), Some(signer) if is_equal(signer, &signer3)));
+        assert_matches!(signers.find(id1), Some(signer) if is_equal(signer, &signer1));
+        assert_matches!(signers.find(id2), Some(signer) if is_equal(signer, &signer2));
+        assert_matches!(signers.find(id3.clone()), Some(signer) if is_equal(signer, &signer3));
 
         // The `signer4` has the same ID as `signer3` but lower ordering.
         // It should be found by `id3` instead of `signer3`.
         signers.add_external(id3.clone(), SignerOrdering(2), signer4.clone());
-        assert!(matches!(signers.find(id3), Some(signer) if is_equal(signer, &signer4)));
+        assert_matches!(signers.find(id3), Some(signer) if is_equal(signer, &signer4));
 
         // Can't find anything with ID that doesn't exist
-        assert!(matches!(signers.find(id_nonexistent), None));
+        assert_matches!(signers.find(id_nonexistent), None);
     }
 
     #[derive(Debug, Clone, Copy)]

@@ -1137,12 +1137,10 @@ pub mod test {
             let child: u32 = row.get(1).unwrap();
             let count: usize = row.get(2).unwrap();
 
-            assert!(
-                count == 1,
+            assert_eq!(
+                count, 1,
                 "keychain={}, child={}, count={}",
-                keychain,
-                child,
-                count
+                keychain, child, count
             );
         }
     }

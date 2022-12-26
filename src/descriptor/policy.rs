@@ -1139,6 +1139,7 @@ mod test {
     use crate::descriptor::policy::SatisfiableItem::{EcdsaSignature, Multisig, Thresh};
     use crate::keys::{DescriptorKey, IntoDescriptorKey};
     use crate::wallet::signer::SignersContainer;
+    use assert_matches::assert_matches;
     use bitcoin::secp256k1::Secp256k1;
     use bitcoin::util::bip32;
     use bitcoin::Network;
@@ -1182,8 +1183,8 @@ mod test {
             .unwrap()
             .unwrap();
 
-        assert!(matches!(&policy.item, EcdsaSignature(PkOrF::Fingerprint(f)) if f == &fingerprint));
-        assert!(matches!(&policy.contribution, Satisfaction::None));
+        assert_matches!(&policy.item, EcdsaSignature(PkOrF::Fingerprint(f)) if f == &fingerprint);
+        assert_matches!(&policy.contribution, Satisfaction::None);
 
         let desc = descriptor!(wpkh(prvkey)).unwrap();
         let (wallet_desc, keymap) = desc
@@ -1195,10 +1196,8 @@ mod test {
             .unwrap()
             .unwrap();
 
-        assert!(matches!(&policy.item, EcdsaSignature(PkOrF::Fingerprint(f)) if f == &fingerprint));
-        assert!(
-            matches!(&policy.contribution, Satisfaction::Complete {condition} if condition.csv == None && condition.timelock == None)
-        );
+        assert_matches!(&policy.item, EcdsaSignature(PkOrF::Fingerprint(f)) if f == &fingerprint);
+        assert_matches!(&policy.contribution, Satisfaction::Complete {condition} if condition.csv == None && condition.timelock == None);
     }
 
     // 2 pub keys descriptor, required 2 prv keys
@@ -1217,19 +1216,16 @@ mod test {
             .unwrap()
             .unwrap();
 
-        assert!(
-            matches!(&policy.item, Multisig { keys, threshold } if threshold == &2usize
+        assert_matches!(&policy.item, Multisig { keys, threshold } if threshold == &2usize
             && keys[0] == PkOrF::Fingerprint(fingerprint0)
-            && keys[1] == PkOrF::Fingerprint(fingerprint1))
+            && keys[1] == PkOrF::Fingerprint(fingerprint1)
         );
         // TODO should this be "Satisfaction::None" since we have no prv keys?
         // TODO should items and conditions not be empty?
-        assert!(
-            matches!(&policy.contribution, Satisfaction::Partial { n, m, items, conditions, ..} if n == &2usize
+        assert_matches!(&policy.contribution, Satisfaction::Partial { n, m, items, conditions, ..} if n == &2usize
             && m == &2usize
             && items.is_empty()
             && conditions.is_empty()
-            )
         );
     }
 
@@ -1248,18 +1244,15 @@ mod test {
             .extract_policy(&signers_container, BuildSatisfaction::None, &secp)
             .unwrap()
             .unwrap();
-        assert!(
-            matches!(&policy.item, Multisig { keys, threshold } if threshold == &2usize
+        assert_matches!(&policy.item, Multisig { keys, threshold } if threshold == &2usize
             && keys[0] == PkOrF::Fingerprint(fingerprint0)
-            && keys[1] == PkOrF::Fingerprint(fingerprint1))
+            && keys[1] == PkOrF::Fingerprint(fingerprint1)
         );
 
-        assert!(
-            matches!(&policy.contribution, Satisfaction::Partial { n, m, items, conditions, ..} if n == &2usize
+        assert_matches!(&policy.contribution, Satisfaction::Partial { n, m, items, conditions, ..} if n == &2usize
              && m == &2usize
              && items.len() == 1
              && conditions.contains_key(&0)
-            )
         );
     }
 
@@ -1281,18 +1274,15 @@ mod test {
             .unwrap()
             .unwrap();
 
-        assert!(
-            matches!(&policy.item, Multisig { keys, threshold } if threshold == &1
+        assert_matches!(&policy.item, Multisig { keys, threshold } if threshold == &1
             && keys[0] == PkOrF::Fingerprint(fingerprint0)
-            && keys[1] == PkOrF::Fingerprint(fingerprint1))
+            && keys[1] == PkOrF::Fingerprint(fingerprint1)
         );
-        assert!(
-            matches!(&policy.contribution, Satisfaction::PartialComplete { n, m, items, conditions, .. } if n == &2
+        assert_matches!(&policy.contribution, Satisfaction::PartialComplete { n, m, items, conditions, .. } if n == &2
              && m == &1
              && items.len() == 2
              && conditions.contains_key(&vec![0])
              && conditions.contains_key(&vec![1])
-            )
         );
     }
 
@@ -1313,18 +1303,15 @@ mod test {
             .unwrap()
             .unwrap();
 
-        assert!(
-            matches!(&policy.item, Multisig { keys, threshold } if threshold == &2
+        assert_matches!(&policy.item, Multisig { keys, threshold } if threshold == &2
             && keys[0] == PkOrF::Fingerprint(fingerprint0)
-            && keys[1] == PkOrF::Fingerprint(fingerprint1))
+            && keys[1] == PkOrF::Fingerprint(fingerprint1)
         );
 
-        assert!(
-            matches!(&policy.contribution, Satisfaction::PartialComplete { n, m, items, conditions, .. } if n == &2
+        assert_matches!(&policy.contribution, Satisfaction::PartialComplete { n, m, items, conditions, .. } if n == &2
              && m == &2
              && items.len() == 2
              && conditions.contains_key(&vec![0,1])
-            )
         );
     }
 
@@ -1345,8 +1332,8 @@ mod test {
             .unwrap()
             .unwrap();
 
-        assert!(matches!(&policy.item, EcdsaSignature(PkOrF::Fingerprint(f)) if f == &fingerprint));
-        assert!(matches!(&policy.contribution, Satisfaction::None));
+        assert_matches!(&policy.item, EcdsaSignature(PkOrF::Fingerprint(f)) if f == &fingerprint);
+        assert_matches!(&policy.contribution, Satisfaction::None);
 
         let desc = descriptor!(wpkh(prvkey)).unwrap();
         let (wallet_desc, keymap) = desc
@@ -1358,10 +1345,8 @@ mod test {
             .unwrap()
             .unwrap();
 
-        assert!(matches!(policy.item, EcdsaSignature(PkOrF::Fingerprint(f)) if f == fingerprint));
-        assert!(
-            matches!(policy.contribution, Satisfaction::Complete {condition} if condition.csv == None && condition.timelock == None)
-        );
+        assert_matches!(policy.item, EcdsaSignature(PkOrF::Fingerprint(f)) if f == fingerprint);
+        assert_matches!(policy.contribution, Satisfaction::Complete {condition} if condition.csv == None && condition.timelock == None);
     }
 
     // single key, 1 prv and 1 pub key descriptor, required 1 prv keys
@@ -1382,18 +1367,15 @@ mod test {
             .unwrap()
             .unwrap();
 
-        assert!(
-            matches!(policy.item, Multisig { keys, threshold } if threshold == 1
+        assert_matches!(policy.item, Multisig { keys, threshold } if threshold == 1
             && keys[0] == PkOrF::Fingerprint(fingerprint0)
-            && keys[1] == PkOrF::Fingerprint(fingerprint1))
+            && keys[1] == PkOrF::Fingerprint(fingerprint1)
         );
-        assert!(
-            matches!(policy.contribution, Satisfaction::PartialComplete { n, m, items, conditions, .. } if n == 2
+        assert_matches!(policy.contribution, Satisfaction::PartialComplete { n, m, items, conditions, .. } if n == 2
              && m == 1
              && items.len() == 2
              && conditions.contains_key(&vec![0])
              && conditions.contains_key(&vec![1])
-            )
         );
     }
 
@@ -1425,18 +1407,14 @@ mod test {
             .unwrap()
             .unwrap();
 
-        assert!(
-            matches!(&policy.item, Thresh { items, threshold } if items.len() == 3 && threshold == &2)
-        );
+        assert_matches!(&policy.item, Thresh { items, threshold } if items.len() == 3 && threshold == &2);
 
-        assert!(
-            matches!(&policy.contribution, Satisfaction::PartialComplete { n, m, items, conditions, .. } if n == &3
+        assert_matches!(&policy.contribution, Satisfaction::PartialComplete { n, m, items, conditions, .. } if n == &3
              && m == &2
              && items.len() == 3
              && conditions.get(&vec![0,1]).unwrap().iter().next().unwrap().csv.is_none()
              && conditions.get(&vec![0,2]).unwrap().iter().next().unwrap().csv == Some(Sequence(sequence))
              && conditions.get(&vec![1,2]).unwrap().iter().next().unwrap().csv == Some(Sequence(sequence))
-            )
         );
     }
 
@@ -1599,11 +1577,9 @@ mod test {
             .unwrap();
         //println!("{}", serde_json::to_string(&policy_alice_psbt).unwrap());
 
-        assert!(
-            matches!(&policy_alice_psbt.satisfaction, Satisfaction::Partial { n, m, items, .. } if n == &2
+        assert_matches!(&policy_alice_psbt.satisfaction, Satisfaction::Partial { n, m, items, .. } if n == &2
              && m == &2
              && items == &vec![0]
-            )
         );
 
         let psbt = Psbt::from_str(BOB_SIGNED_PSBT).unwrap();
@@ -1613,11 +1589,9 @@ mod test {
             .unwrap();
         //println!("{}", serde_json::to_string(&policy_bob_psbt).unwrap());
 
-        assert!(
-            matches!(&policy_bob_psbt.satisfaction, Satisfaction::Partial { n, m, items, .. } if n == &2
+        assert_matches!(&policy_bob_psbt.satisfaction, Satisfaction::Partial { n, m, items, .. } if n == &2
              && m == &2
              && items == &vec![1]
-            )
         );
 
         let psbt = Psbt::from_str(ALICE_BOB_SIGNED_PSBT).unwrap();
@@ -1625,11 +1599,9 @@ mod test {
             .extract_policy(&signers_container, BuildSatisfaction::Psbt(&psbt), &secp)
             .unwrap()
             .unwrap();
-        assert!(
-            matches!(&policy_alice_bob_psbt.satisfaction, Satisfaction::PartialComplete { n, m, items, .. } if n == &2
+        assert_matches!(&policy_alice_bob_psbt.satisfaction, Satisfaction::PartialComplete { n, m, items, .. } if n == &2
              && m == &2
              && items == &vec![0, 1]
-            )
         );
     }
 
@@ -1673,11 +1645,9 @@ mod test {
             .extract_policy(&signers_container, build_sat, &secp)
             .unwrap()
             .unwrap();
-        assert!(
-            matches!(&policy.satisfaction, Satisfaction::Partial { n, m, items, .. } if n == &3
+        assert_matches!(&policy.satisfaction, Satisfaction::Partial { n, m, items, .. } if n == &3
              && m == &2
              && items.is_empty()
-            )
         );
         //println!("{}", serde_json::to_string(&policy).unwrap());
 
@@ -1691,11 +1661,9 @@ mod test {
             .extract_policy(&signers_container, build_sat_expired, &secp)
             .unwrap()
             .unwrap();
-        assert!(
-            matches!(&policy_expired.satisfaction, Satisfaction::Partial { n, m, items, .. } if n == &3
+        assert_matches!(&policy_expired.satisfaction, Satisfaction::Partial { n, m, items, .. } if n == &3
              && m == &2
              && items == &vec![0]
-            )
         );
         //println!("{}", serde_json::to_string(&policy_expired).unwrap());
 
@@ -1711,11 +1679,9 @@ mod test {
             .extract_policy(&signers_container, build_sat_expired_signed, &secp)
             .unwrap()
             .unwrap();
-        assert!(
-            matches!(&policy_expired_signed.satisfaction, Satisfaction::PartialComplete { n, m, items, .. } if n == &3
+        assert_matches!(&policy_expired_signed.satisfaction, Satisfaction::PartialComplete { n, m, items, .. } if n == &3
              && m == &2
              && items == &vec![0, 1]
-            )
         );
         //println!("{}", serde_json::to_string(&policy_expired_signed).unwrap());
     }
@@ -1790,12 +1756,8 @@ mod test {
             .unwrap()
             .unwrap();
 
-        assert!(
-            matches!(policy.item, SatisfiableItem::Thresh { ref items, threshold: 1 } if items.len() == 2)
-        );
-        assert!(
-            matches!(policy.contribution, Satisfaction::PartialComplete { n: 2, m: 1, items, .. } if items == vec![1])
-        );
+        assert_matches!(policy.item, SatisfiableItem::Thresh { ref items, threshold: 1 } if items.len() == 2);
+        assert_matches!(policy.contribution, Satisfaction::PartialComplete { n: 2, m: 1, items, .. } if items == vec![1]);
 
         let alice_sig = SatisfiableItem::SchnorrSignature(PkOrF::Fingerprint(alice_fing));
         let bob_sig = SatisfiableItem::SchnorrSignature(PkOrF::Fingerprint(bob_fing));
@@ -1887,19 +1849,11 @@ mod test {
             .unwrap()
             .unwrap();
 
-        assert!(
-            matches!(policy_unsigned.item, SatisfiableItem::Thresh { ref items, threshold: 1 } if items.len() == 2)
-        );
-        assert!(
-            matches!(policy_unsigned.satisfaction, Satisfaction::Partial { n: 2, m: 1, items, .. } if items.is_empty())
-        );
+        assert_matches!(policy_unsigned.item, SatisfiableItem::Thresh { ref items, threshold: 1 } if items.len() == 2);
+        assert_matches!(policy_unsigned.satisfaction, Satisfaction::Partial { n: 2, m: 1, items, .. } if items.is_empty());
 
-        assert!(
-            matches!(policy_signed.item, SatisfiableItem::Thresh { ref items, threshold: 1 } if items.len() == 2)
-        );
-        assert!(
-            matches!(policy_signed.satisfaction, Satisfaction::PartialComplete { n: 2, m: 1, items, .. } if items == vec![0, 1])
-        );
+        assert_matches!(policy_signed.item, SatisfiableItem::Thresh { ref items, threshold: 1 } if items.len() == 2);
+        assert_matches!(policy_signed.satisfaction, Satisfaction::PartialComplete { n: 2, m: 1, items, .. } if items == vec![0, 1]);
 
         let satisfied_items = match policy_signed.item {
             SatisfiableItem::Thresh { items, .. } => items,
