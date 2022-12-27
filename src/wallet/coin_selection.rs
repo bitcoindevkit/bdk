@@ -102,11 +102,11 @@ use crate::{error::Error, Utxo};
 use bitcoin::consensus::encode::serialize;
 use bitcoin::Script;
 
+#[cfg(test)]
+use assert_matches::assert_matches;
 use rand::seq::SliceRandom;
 #[cfg(not(test))]
 use rand::thread_rng;
-#[cfg(test)]
-use rand::{rngs::StdRng, SeedableRng};
 use std::collections::HashMap;
 use std::convert::TryInto;
 
@@ -671,6 +671,7 @@ impl BranchAndBoundCoinSelection {
         optional_utxos.shuffle(&mut thread_rng());
         #[cfg(test)]
         {
+            use rand::{rngs::StdRng, SeedableRng};
             let seed = [0; 32];
             let mut rng: StdRng = SeedableRng::from_seed(seed);
             optional_utxos.shuffle(&mut rng);
@@ -1522,24 +1523,22 @@ mod test {
         let database = MemoryDatabase::default();
         let drain_script = Script::default();
 
-        let err = BranchAndBoundCoinSelection::default()
-            .coin_select(
-                &database,
-                vec![],
-                utxos,
-                FeeRate::from_sat_per_vb(10.0),
-                500_000,
-                &drain_script,
-            )
-            .unwrap_err();
+        let selection = BranchAndBoundCoinSelection::default().coin_select(
+            &database,
+            vec![],
+            utxos,
+            FeeRate::from_sat_per_vb(10.0),
+            500_000,
+            &drain_script,
+        );
 
-        assert!(matches!(
-            err,
-            Error::InsufficientFunds {
+        assert_matches!(
+            selection,
+            Err(Error::InsufficientFunds {
                 available: 300_000,
                 ..
-            }
-        ));
+            })
+        );
     }
 
     #[test]
@@ -1552,24 +1551,22 @@ mod test {
             .into_iter()
             .partition(|u| matches!(u, WeightedUtxo { utxo, .. } if utxo.txout().value < 1000));
 
-        let err = BranchAndBoundCoinSelection::default()
-            .coin_select(
-                &database,
-                required,
-                optional,
-                FeeRate::from_sat_per_vb(10.0),
-                500_000,
-                &drain_script,
-            )
-            .unwrap_err();
+        let selection = BranchAndBoundCoinSelection::default().coin_select(
+            &database,
+            required,
+            optional,
+            FeeRate::from_sat_per_vb(10.0),
+            500_000,
+            &drain_script,
+        );
 
-        assert!(matches!(
-            err,
-            Error::InsufficientFunds {
+        assert_matches!(
+            selection,
+            Err(Error::InsufficientFunds {
                 available: 300_010,
                 ..
-            }
-        ));
+            })
+        );
     }
 
     #[test]
@@ -1578,23 +1575,21 @@ mod test {
         let database = MemoryDatabase::default();
         let drain_script = Script::default();
 
-        let err = BranchAndBoundCoinSelection::default()
-            .coin_select(
-                &database,
-                utxos,
-                vec![],
-                FeeRate::from_sat_per_vb(10_000.0),
-                500_000,
-                &drain_script,
-            )
-            .unwrap_err();
+        let selection = BranchAndBoundCoinSelection::default().coin_select(
+            &database,
+            utxos,
+            vec![],
+            FeeRate::from_sat_per_vb(10_000.0),
+            500_000,
+            &drain_script,
+        );
 
-        assert!(matches!(
-            err,
-            Error::InsufficientFunds {
+        assert_matches!(
+            selection,
+            Err(Error::InsufficientFunds {
                 available: 300_010,
                 ..
-            }
-        ));
+            })
+        );
     }
 }

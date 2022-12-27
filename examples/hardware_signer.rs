@@ -2,6 +2,7 @@ use bdk::bitcoin::{Address, Network};
 use bdk::blockchain::{Blockchain, ElectrumBlockchain};
 use bdk::database::MemoryDatabase;
 use bdk::hwi::{types::HWIChain, HWIClient};
+use bdk::miniscript::{Descriptor, DescriptorPublicKey};
 use bdk::signer::SignerOrdering;
 use bdk::wallet::{hardwaresigner::HWISigner, AddressIndex};
 use bdk::{FeeRate, KeychainKind, SignOptions, SyncOptions, Wallet};
@@ -23,26 +24,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Hold tight, I'm connecting to your hardware wallet...");
 
     // Listing all the available hardware wallet devices...
-    let devices = HWIClient::enumerate()?;
-    let first_device = devices
-        .first()
-        .expect("No devices found. Either plug in a hardware wallet, or start a simulator.");
+    let mut devices = HWIClient::enumerate()?;
+    if devices.is_empty() {
+        panic!("No devices found. Either plug in a hardware wallet, or start a simulator.");
+    }
+    let first_device = devices.remove(0)?;
     // ...and creating a client out of the first one
-    let client = HWIClient::get_client(first_device, true, HWIChain::Test)?;
+    let client = HWIClient::get_client(&first_device, true, HWIChain::Test)?;
     println!("Look what I found, a {}!", first_device.model);
 
     // Getting the HW's public descriptors
-    let descriptors = client.get_descriptors(None)?;
+    let descriptors = client.get_descriptors::<Descriptor<DescriptorPublicKey>>(None)?;
     println!(
         "The hardware wallet's descriptor is: {}",
         descriptors.receive[0]
     );
 
     // Creating a custom signer from the device
-    let custom_signer = HWISigner::from_device(first_device, HWIChain::Test)?;
+    let custom_signer = HWISigner::from_device(&first_device, HWIChain::Test)?;
     let mut wallet = Wallet::new(
-        &descriptors.receive[0],
-        Some(&descriptors.internal[0]),
+        descriptors.receive[0].clone(),
+        Some(descriptors.internal[0].clone()),
         Network::Testnet,
         MemoryDatabase::default(),
     )?;
