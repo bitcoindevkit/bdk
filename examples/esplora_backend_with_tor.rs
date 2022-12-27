@@ -34,7 +34,7 @@ fn main() {
         .proxy(&format!("socks5://{}", socks_addr))
         .timeout(120) // seconds
         .build_blocking()
-        .expect("Should never fail with no proxy and timeout");
+        .unwrap();
 
     println!(
         "Connecting to {} via SOCKS5 proxy {}",
