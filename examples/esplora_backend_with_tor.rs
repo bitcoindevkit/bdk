@@ -12,6 +12,12 @@ use bdk::{
     blockchain::esplora::EsploraBlockchain, database::MemoryDatabase, template::Bip84,
     KeychainKind, SyncOptions, Wallet,
 };
+use bdk::wallet::AddressIndex;
+
+pub mod utils;
+
+use crate::utils::tx::build_signed_tx;
+
 /// This will create a wallet from an xpriv and sync it by connecting to an Esplora server
 /// over Tor network, using blocking calls with `ureq`.
 ///
@@ -56,6 +62,34 @@ fn main() {
     wallet.sync(&blockchain, SyncOptions::default()).unwrap();
 
     println!("Done!");
+
+    let address = wallet.get_address(AddressIndex::New).unwrap().address;
+
+    println!("address: {}", address);
+
+    let balance = wallet.get_balance().unwrap();
+
+    println!("Available coins in BDK wallet : {} sats", balance);
+
+    if balance.confirmed > 10500 {
+        // the wallet sends the amount to itself.
+        let recipient_address = wallet
+            .get_address(AddressIndex::New)
+            .unwrap()
+            .address
+            .to_string();
+
+        let amount = 9359;
+
+        let tx = build_signed_tx(&wallet, &recipient_address, amount);
+
+        blockchain.broadcast(&tx).unwrap();
+
+        println!("tx id: {}", tx.txid());
+    } else {
+        println!("Insufficient Funds. Fund the wallet with the address above");
+    }
+
 }
 
 pub fn start_tor() -> String {
