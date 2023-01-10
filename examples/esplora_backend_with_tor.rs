@@ -21,8 +21,26 @@ use crate::utils::tx::build_signed_tx;
 /// This will create a wallet from an xpriv and sync it by connecting to an Esplora server
 /// over Tor network, using blocking calls with `ureq`.
 ///
-/// This can be run with `cargo run --features="use-esplora-blocking" --example esplora_backend_with_tor`
+/// This can be run with `cargo run --features="use-esplora-blocking libtor" --example esplora_backend_with_tor`
 /// in the root folder.
+///
+/// Note, that libtor requires a C compiler and C build tools.
+///
+/// Here is how to install them on Ubuntu:
+/// ```
+/// sudo apt install autoconf automake clang file libtool openssl pkg-config
+/// ```
+/// And here is how to install them on Mac OS X:
+/// ```
+/// xcode-select --install
+/// brew install autoconf
+/// brew install automake
+/// brew install libtool
+/// brew install openssl
+/// brew install pkg-config
+/// export LDFLAGS="-L/opt/homebrew/opt/openssl/lib"
+/// export CPPFLAGS="-I/opt/homebrew/opt/openssl/include"
+/// ```
 fn main() {
     let network = Network::Testnet;
 
