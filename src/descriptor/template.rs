@@ -418,7 +418,7 @@ macro_rules! expand_make_bipxx {
                 keychain: KeychainKind,
                 network: Network,
             ) -> Result<impl IntoDescriptorKey<$ctx>, DescriptorError> {
-                let mut derivation_path = Vec::with_capacity(4);
+                let mut derivation_path = alloc::vec::Vec::with_capacity(4);
                 derivation_path.push(bip32::ChildNumber::from_hardened_idx(bip)?);
 
                 match network {
@@ -478,7 +478,8 @@ expand_make_bipxx!(segwit_v0, Segwitv0);
 mod test {
     // test existing descriptor templates, make sure they are expanded to the right descriptors
 
-    use std::str::FromStr;
+    use alloc::{string::ToString, vec::Vec};
+    use core::str::FromStr;
 
     use super::*;
     use crate::descriptor::{DescriptorError, DescriptorMeta};

@@ -99,16 +99,16 @@ use crate::wallet::utils::IsDust;
 use crate::WeightedUtxo;
 use crate::{error::Error, Utxo};
 
+use alloc::vec::Vec;
 use bitcoin::consensus::encode::serialize;
 use bitcoin::Script;
 
 #[cfg(test)]
 use assert_matches::assert_matches;
+use core::convert::TryInto;
 use rand::seq::SliceRandom;
 #[cfg(not(test))]
 use rand::thread_rng;
-#[cfg(test)]
-use std::convert::TryInto;
 
 /// Default coin selection algorithm used by [`TxBuilder`](super::tx_builder::TxBuilder) if not
 /// overridden
@@ -177,7 +177,7 @@ impl CoinSelectionResult {
 /// selection algorithm when it creates transactions.
 ///
 /// For an example see [this module](crate::wallet::coin_selection)'s documentation.
-pub trait CoinSelectionAlgorithm: std::fmt::Debug {
+pub trait CoinSelectionAlgorithm: core::fmt::Debug {
     /// Perform the coin selection
     ///
     /// - `database`: a reference to the wallet's database that can be used to lookup additional
@@ -695,7 +695,7 @@ impl BranchAndBoundCoinSelection {
 
 #[cfg(test)]
 mod test {
-    use std::str::FromStr;
+    use core::str::FromStr;
 
     use bdk_chain::ConfirmationTime;
     use bitcoin::{OutPoint, Script, TxOut};

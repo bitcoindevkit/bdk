@@ -9,8 +9,9 @@
 // You may not use this file except in accordance with one or both of these
 // licenses.
 
-use std::convert::AsRef;
-use std::ops::Sub;
+use alloc::boxed::Box;
+use core::convert::AsRef;
+use core::ops::Sub;
 
 use bdk_chain::ConfirmationTime;
 use bitcoin::blockdata::transaction::{OutPoint, Transaction, TxOut};
@@ -124,7 +125,7 @@ impl FeeRate {
     }
 }
 
-impl std::default::Default for FeeRate {
+impl Default for FeeRate {
     fn default() -> Self {
         FeeRate::default_min_relay_fee()
     }
@@ -249,13 +250,13 @@ pub struct TransactionDetails {
 }
 
 impl PartialOrd for TransactionDetails {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
 
 impl Ord for TransactionDetails {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
         self.confirmation_time
             .cmp(&other.confirmation_time)
             .then_with(|| self.txid.cmp(&other.txid))
@@ -287,8 +288,8 @@ impl Balance {
     }
 }
 
-impl std::fmt::Display for Balance {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for Balance {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(
             f,
             "{{ immature: {}, trusted_pending: {}, untrusted_pending: {}, confirmed: {} }}",
@@ -297,7 +298,7 @@ impl std::fmt::Display for Balance {
     }
 }
 
-impl std::ops::Add for Balance {
+impl core::ops::Add for Balance {
     type Output = Self;
 
     fn add(self, other: Self) -> Self {
@@ -310,7 +311,7 @@ impl std::ops::Add for Balance {
     }
 }
 
-impl std::iter::Sum for Balance {
+impl core::iter::Sum for Balance {
     fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
         iter.fold(
             Balance {

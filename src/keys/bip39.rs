@@ -14,6 +14,7 @@
 // TODO: maybe write our own implementation of bip39? Seems stupid to have an extra dependency for
 // something that should be fairly simple to re-implement.
 
+use alloc::string::String;
 use bitcoin::util::bip32;
 use bitcoin::Network;
 
@@ -150,7 +151,8 @@ impl<Ctx: ScriptContext> GeneratableKey<Ctx> for Mnemonic {
 
 #[cfg(test)]
 mod test {
-    use std::str::FromStr;
+    use alloc::string::ToString;
+    use core::str::FromStr;
 
     use bitcoin::util::bip32;
 

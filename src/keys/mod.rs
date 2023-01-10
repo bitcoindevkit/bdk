@@ -11,11 +11,13 @@
 
 //! Key formats
 
-use std::any::TypeId;
-use std::collections::HashSet;
-use std::marker::PhantomData;
-use std::ops::Deref;
-use std::str::FromStr;
+use crate::collections::HashSet;
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
+use core::any::TypeId;
+use core::marker::PhantomData;
+use core::ops::Deref;
+use core::str::FromStr;
 
 use bitcoin::secp256k1::{self, Secp256k1, Signing};
 
@@ -277,7 +279,7 @@ impl<Ctx: ScriptContext + 'static> ExtScriptContext for Ctx {
 ///
 /// ```compile_fail
 /// use bdk::bitcoin::PublicKey;
-/// use std::str::FromStr;
+/// use core::str::FromStr;
 ///
 /// use bdk::keys::{DescriptorKey, IntoDescriptorKey, KeyError};
 ///
@@ -619,7 +621,7 @@ pub trait GeneratableKey<Ctx: ScriptContext>: Sized {
     /// Extra options required by the `generate_with_entropy`
     type Options;
     /// Returned error in case of failure
-    type Error: std::fmt::Debug;
+    type Error: core::fmt::Debug;
 
     /// Generate a key given the extra options and the entropy
     fn generate_with_entropy(
@@ -946,6 +948,7 @@ impl std::fmt::Display for KeyError {
     }
 }
 
+#[cfg(feature = "std")]
 impl std::error::Error for KeyError {}
 
 #[cfg(test)]

@@ -9,11 +9,11 @@
 // You may not use this file except in accordance with one or both of these
 // licenses.
 
-use std::fmt;
-
 use crate::bitcoin::Network;
 use crate::{descriptor, wallet};
+use alloc::{string::String, vec::Vec};
 use bitcoin::{OutPoint, Txid};
+use core::fmt;
 
 /// Errors that can be thrown by the [`Wallet`](crate::wallet::Wallet)
 #[derive(Debug)]
@@ -249,6 +249,7 @@ impl fmt::Display for Error {
     }
 }
 
+#[cfg(feature = "std")]
 impl std::error::Error for Error {}
 
 macro_rules! impl_error {
@@ -256,7 +257,7 @@ macro_rules! impl_error {
         impl_error!($from, $to, Error);
     };
     ( $from:ty, $to:ident, $impl_for:ty ) => {
-        impl std::convert::From<$from> for $impl_for {
+        impl core::convert::From<$from> for $impl_for {
             fn from(err: $from) -> Self {
                 <$impl_for>::$to(err)
             }

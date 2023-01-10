@@ -8,7 +8,7 @@
 // <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your option.
 // You may not use this file except in accordance with one or both of these
 // licenses.
-
+//
 // rustdoc will warn if there are missing docs
 #![warn(missing_docs)]
 // only enables the `doc_cfg` feature when
@@ -147,7 +147,7 @@ fn main() -> Result<(), bdk::Error> {
 //! ## Sign a transaction
 //!
 //! ```no_run
-//! use std::str::FromStr;
+//! use core::str::FromStr;
 //!
 //! use bitcoin::util::psbt::PartiallySignedTransaction as Psbt;
 //!
@@ -188,6 +188,14 @@ fn main() -> Result<(), bdk::Error> {
 //! * `keys-bip39`: [BIP-39](https://github.com/bitcoin/bips/blob/master/bip-0039.mediawiki) mnemonic codes for generating deterministic keys
 //!
 
+#![no_std]
+#[cfg(feature = "std")]
+#[macro_use]
+extern crate std;
+
+#[macro_use]
+extern crate alloc;
+
 pub extern crate bitcoin;
 #[cfg(feature = "hardware-signer")]
 pub extern crate hwi;
@@ -225,3 +233,4 @@ pub fn version() -> &'static str {
 }
 
 pub use bdk_chain as chain;
+pub(crate) use bdk_chain::collections;

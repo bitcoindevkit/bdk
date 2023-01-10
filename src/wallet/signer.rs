@@ -15,8 +15,8 @@
 //! through the [`Wallet::add_signer`](super::Wallet::add_signer) function.
 //!
 //! ```
-//! # use std::sync::Arc;
-//! # use std::str::FromStr;
+//! # use alloc::sync::Arc;
+//! # use core::str::FromStr;
 //! # use bitcoin::secp256k1::{Secp256k1, All};
 //! # use bitcoin::*;
 //! # use bitcoin::util::psbt;
@@ -80,11 +80,12 @@
 //! # Ok::<_, bdk::Error>(())
 //! ```
 
-use std::cmp::Ordering;
-use std::collections::BTreeMap;
-use std::fmt;
-use std::ops::{Bound::Included, Deref};
-use std::sync::Arc;
+use crate::collections::BTreeMap;
+use alloc::sync::Arc;
+use alloc::vec::Vec;
+use core::cmp::Ordering;
+use core::fmt;
+use core::ops::{Bound::Included, Deref};
 
 use bitcoin::blockdata::opcodes;
 use bitcoin::blockdata::script::Builder as ScriptBuilder;
@@ -199,6 +200,7 @@ impl fmt::Display for SignerError {
     }
 }
 
+#[cfg(feature = "std")]
 impl std::error::Error for SignerError {}
 
 /// Signing context
@@ -560,7 +562,7 @@ fn sign_psbt_schnorr(
 #[derive(Debug, Clone, PartialOrd, PartialEq, Ord, Eq)]
 pub struct SignerOrdering(pub usize);
 
-impl std::default::Default for SignerOrdering {
+impl Default for SignerOrdering {
     fn default() -> Self {
         SignerOrdering(100)
     }
@@ -1017,8 +1019,8 @@ mod signers_container_tests {
     use bitcoin::secp256k1::{All, Secp256k1};
     use bitcoin::util::bip32;
     use bitcoin::Network;
+    use core::str::FromStr;
     use miniscript::ScriptContext;
-    use std::str::FromStr;
 
     fn is_equal(this: &Arc<dyn TransactionSigner>, that: &Arc<DummySigner>) -> bool {
         let secp = Secp256k1::new();
