@@ -19,7 +19,7 @@ use syn::{parse, ImplItemMethod, ItemImpl, ItemTrait, Token};
 
 fn add_async_trait(mut parsed: ItemTrait) -> TokenStream {
     let output = quote! {
-        #[cfg(all(not(target_arch = "wasm32"), not(feature = "async-interface")))]
+        #[cfg(not(feature = "async-interface"))]
         #parsed
     };
 
@@ -32,7 +32,7 @@ fn add_async_trait(mut parsed: ItemTrait) -> TokenStream {
     let output = quote! {
         #output
 
-        #[cfg(any(target_arch = "wasm32", feature = "async-interface"))]
+        #[cfg(feature = "async-interface")]
         #[async_trait(?Send)]
         #parsed
     };
@@ -42,7 +42,7 @@ fn add_async_trait(mut parsed: ItemTrait) -> TokenStream {
 
 fn add_async_method(mut parsed: ImplItemMethod) -> TokenStream {
     let output = quote! {
-        #[cfg(all(not(target_arch = "wasm32"), not(feature = "async-interface")))]
+        #[cfg(not(feature = "async-interface"))]
         #parsed
     };
 
@@ -51,7 +51,7 @@ fn add_async_method(mut parsed: ImplItemMethod) -> TokenStream {
     let output = quote! {
         #output
 
-        #[cfg(any(target_arch = "wasm32", feature = "async-interface"))]
+        #[cfg(feature = "async-interface")]
         #parsed
     };
 
@@ -60,7 +60,7 @@ fn add_async_method(mut parsed: ImplItemMethod) -> TokenStream {
 
 fn add_async_impl_trait(mut parsed: ItemImpl) -> TokenStream {
     let output = quote! {
-        #[cfg(all(not(target_arch = "wasm32"), not(feature = "async-interface")))]
+        #[cfg(not(feature = "async-interface"))]
         #parsed
     };
 
@@ -73,7 +73,7 @@ fn add_async_impl_trait(mut parsed: ItemImpl) -> TokenStream {
     let output = quote! {
         #output
 
-        #[cfg(any(target_arch = "wasm32", feature = "async-interface"))]
+        #[cfg(feature = "async-interface")]
         #[async_trait(?Send)]
         #parsed
     };
@@ -81,7 +81,7 @@ fn add_async_impl_trait(mut parsed: ItemImpl) -> TokenStream {
     output.into()
 }
 
-/// Makes a method or every method of a trait "async" only if the target_arch is "wasm32"
+/// Makes a method or every method of a trait `async`, if the `async-interface` feature is enabled.
 ///
 /// Requires the `async-trait` crate as a dependency whenever this attribute is used on a trait
 /// definition or trait implementation.
@@ -101,18 +101,18 @@ pub fn maybe_async(_attr: TokenStream, item: TokenStream) -> TokenStream {
     }
 }
 
-/// Awaits if target_arch is "wasm32", does nothing otherwise
+/// Awaits, if the `async-interface` feature is enabled.
 #[proc_macro]
 pub fn maybe_await(expr: TokenStream) -> TokenStream {
     let expr: proc_macro2::TokenStream = expr.into();
     let quoted = quote! {
         {
-            #[cfg(all(not(target_arch = "wasm32"), not(feature = "async-interface")))]
+            #[cfg(not(feature = "async-interface"))]
             {
                 #expr
             }
 
-            #[cfg(any(target_arch = "wasm32", feature = "async-interface"))]
+            #[cfg(feature = "async-interface")]
             {
                 #expr.await
             }
@@ -122,20 +122,20 @@ pub fn maybe_await(expr: TokenStream) -> TokenStream {
     quoted.into()
 }
 
-/// Awaits if target_arch is "wasm32", uses `tokio::Runtime::block_on()` otherwise
+/// Awaits, if the `async-interface` feature is enabled, uses `tokio::Runtime::block_on()` otherwise
 ///
-/// Requires the `tokio` crate as a dependecy with `rt-core` or `rt-threaded` to build on non-wasm32 platforms.
+/// Requires the `tokio` crate as a dependecy with `rt-core` or `rt-threaded` to build.
 #[proc_macro]
 pub fn await_or_block(expr: TokenStream) -> TokenStream {
     let expr: proc_macro2::TokenStream = expr.into();
     let quoted = quote! {
         {
-            #[cfg(all(not(target_arch = "wasm32"), not(feature = "async-interface")))]
+            #[cfg(not(feature = "async-interface"))]
             {
                 tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(#expr)
             }
 
-            #[cfg(any(target_arch = "wasm32", feature = "async-interface"))]
+            #[cfg(feature = "async-interface")]
             {
                 #expr.await
             }
