@@ -59,8 +59,9 @@
 //! # Ok::<_, bdk::Error>(())
 //! ```
 
-use std::str::FromStr;
+use core::str::FromStr;
 
+use alloc::string::{String, ToString};
 use bdk_chain::sparse_chain::ChainPosition;
 use serde::{Deserialize, Serialize};
 
@@ -217,7 +218,7 @@ impl FullyNodedExport {
 
 #[cfg(test)]
 mod test {
-    use std::str::FromStr;
+    use core::str::FromStr;
 
     use bdk_chain::{BlockId, ConfirmationTime};
     use bitcoin::hashes::Hash;

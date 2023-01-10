@@ -120,7 +120,7 @@ mod test {
 
     use super::{check_nsequence_rbf, IsDust};
     use crate::bitcoin::{Address, Sequence};
-    use std::str::FromStr;
+    use core::str::FromStr;
 
     #[test]
     fn test_is_dust() {

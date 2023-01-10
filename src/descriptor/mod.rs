@@ -14,7 +14,9 @@
 //! This module contains generic utilities to work with descriptors, plus some re-exported types
 //! from [`miniscript`].
 
-use std::collections::BTreeMap;
+use crate::collections::BTreeMap;
+use alloc::string::String;
+use alloc::vec::Vec;
 
 use bitcoin::util::bip32::{ChildNumber, DerivationPath, ExtendedPubKey, Fingerprint, KeySource};
 use bitcoin::util::{psbt, taproot};
@@ -581,7 +583,8 @@ impl DescriptorMeta for ExtendedDescriptor {
 
 #[cfg(test)]
 mod test {
-    use std::str::FromStr;
+    use alloc::string::ToString;
+    use core::str::FromStr;
 
     use assert_matches::assert_matches;
     use bitcoin::consensus::encode::deserialize;

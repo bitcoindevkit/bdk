@@ -5,15 +5,15 @@ use bitcoin::{Address, PackedLockTime, Script, Sequence, Transaction, Txid, Witn
 pub use bitcoincore_rpc::bitcoincore_rpc_json::AddressType;
 use bitcoincore_rpc::jsonrpc::serde_json::{self, json};
 pub use bitcoincore_rpc::{Auth, Client as RpcClient, Error as RpcError, RpcApi};
+use core::ops::Deref;
 use core::str::FromStr;
+use core::time::Duration;
 use electrsd::bitcoind::BitcoinD;
 use electrsd::{bitcoind, ElectrsD};
 pub use electrum_client::{Client as ElectrumClient, ElectrumApi};
 #[allow(unused_imports)]
 use log::{debug, error, info, log_enabled, trace, Level};
 use std::env;
-use std::ops::Deref;
-use std::time::Duration;
 
 pub struct TestClient {
     pub bitcoind: BitcoinD,

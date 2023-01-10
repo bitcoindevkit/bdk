@@ -12,6 +12,7 @@
 //! Additional functions on the `rust-bitcoin` `PartiallySignedTransaction` structure.
 
 use crate::FeeRate;
+use alloc::vec::Vec;
 use bitcoin::util::psbt::PartiallySignedTransaction as Psbt;
 use bitcoin::TxOut;
 
@@ -85,7 +86,7 @@ mod test {
     use crate::wallet::AddressIndex;
     use crate::wallet::AddressIndex::New;
     use crate::{psbt, FeeRate, SignOptions};
-    use std::str::FromStr;
+    use core::str::FromStr;
 
     // from bip 174
     const PSBT_STR: &str = "cHNidP8BAKACAAAAAqsJSaCMWvfEm4IS9Bfi8Vqz9cM9zxU4IagTn4d6W3vkAAAAAAD+////qwlJoIxa98SbghL0F+LxWrP1wz3PFTghqBOfh3pbe+QBAAAAAP7///8CYDvqCwAAAAAZdqkUdopAu9dAy+gdmI5x3ipNXHE5ax2IrI4kAAAAAAAAGXapFG9GILVT+glechue4O/p+gOcykWXiKwAAAAAAAEHakcwRAIgR1lmF5fAGwNrJZKJSGhiGDR9iYZLcZ4ff89X0eURZYcCIFMJ6r9Wqk2Ikf/REf3xM286KdqGbX+EhtdVRs7tr5MZASEDXNxh/HupccC1AaZGoqg7ECy0OIEhfKaC3Ibi1z+ogpIAAQEgAOH1BQAAAAAXqRQ1RebjO4MsRwUPJNPuuTycA5SLx4cBBBYAFIXRNTfy4mVAWjTbr6nj3aAfuCMIAAAA";

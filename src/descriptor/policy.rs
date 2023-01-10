@@ -36,9 +36,11 @@
 //! # Ok::<(), bdk::Error>(())
 //! ```
 
-use std::cmp::max;
-use std::collections::{BTreeMap, HashSet, VecDeque};
-use std::fmt;
+use crate::collections::{BTreeMap, HashSet, VecDeque};
+use alloc::string::String;
+use alloc::vec::Vec;
+use core::cmp::max;
+use core::fmt;
 
 use serde::ser::SerializeMap;
 use serde::{Serialize, Serializer};
@@ -523,6 +525,7 @@ impl fmt::Display for PolicyError {
     }
 }
 
+#[cfg(feature = "std")]
 impl std::error::Error for PolicyError {}
 
 impl Policy {
@@ -1146,12 +1149,12 @@ mod test {
     use crate::descriptor::policy::SatisfiableItem::{EcdsaSignature, Multisig, Thresh};
     use crate::keys::{DescriptorKey, IntoDescriptorKey};
     use crate::wallet::signer::SignersContainer;
+    use alloc::{string::ToString, sync::Arc};
     use assert_matches::assert_matches;
     use bitcoin::secp256k1::Secp256k1;
     use bitcoin::util::bip32;
     use bitcoin::Network;
-    use std::str::FromStr;
-    use std::sync::Arc;
+    use core::str::FromStr;
 
     const TPRV0_STR:&str = "tprv8ZgxMBicQKsPdZXrcHNLf5JAJWFAoJ2TrstMRdSKtEggz6PddbuSkvHKM9oKJyFgZV1B7rw8oChspxyYbtmEXYyg1AjfWbL3ho3XHDpHRZf";
     const TPRV1_STR:&str = "tprv8ZgxMBicQKsPdpkqS7Eair4YxjcuuvDPNYmKX3sCniCf16tHEVrjjiSXEkFRnUH77yXc6ZcwHHcLNfjdi5qUvw3VDfgYiH5mNsj5izuiu2N";
@@ -1444,12 +1447,12 @@ mod test {
             .into_wallet_descriptor(&secp, Network::Testnet)
             .unwrap();
         let signers_container = Arc::new(SignersContainer::build(keymap, &wallet_desc, &secp));
-        let policy = wallet_desc
+        let _policy = wallet_desc
             .extract_policy(&signers_container, BuildSatisfaction::None, &secp)
             .unwrap()
             .unwrap();
-        println!("desc policy = {:?}", policy); // TODO remove
-                                                // TODO how should this fail with mixed timelocks?
+        // println!("desc policy = {:?}", policy); // TODO remove
+        // TODO how should this fail with mixed timelocks?
     }
 
     // - multiple timelocks of the same type should be correctly merged together
@@ -1469,12 +1472,12 @@ mod test {
             .into_wallet_descriptor(&secp, Network::Testnet)
             .unwrap();
         let signers_container = Arc::new(SignersContainer::build(keymap, &wallet_desc, &secp));
-        let policy = wallet_desc
+        let _policy = wallet_desc
             .extract_policy(&signers_container, BuildSatisfaction::None, &secp)
             .unwrap()
             .unwrap();
-        println!("desc policy = {:?}", policy); // TODO remove
-                                                // TODO how should this merge timelocks?
+        // println!("desc policy = {:?}", policy); // TODO remove
+        // TODO how should this merge timelocks?
         let (prvkey1, _pubkey1, _fingerprint1) = setup_keys(TPRV0_STR, PATH, &secp);
         let locktime_seconds0 = 500000100;
         let locktime_seconds1 = 500000200;
@@ -1487,12 +1490,12 @@ mod test {
             .into_wallet_descriptor(&secp, Network::Testnet)
             .unwrap();
         let signers_container = Arc::new(SignersContainer::build(keymap, &wallet_desc, &secp));
-        let policy = wallet_desc
+        let _policy = wallet_desc
             .extract_policy(&signers_container, BuildSatisfaction::None, &secp)
             .unwrap()
             .unwrap();
 
-        println!("desc policy = {:?}", policy); // TODO remove
+        // println!("desc policy = {:?}", policy); // TODO remove
 
         // TODO how should this merge timelocks?
     }

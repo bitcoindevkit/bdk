@@ -76,6 +76,7 @@ impl std::fmt::Display for Error {
     }
 }
 
+#[cfg(feature = "std")]
 impl std::error::Error for Error {}
 
 impl_error!(bitcoin::util::bip32::Error, Bip32);

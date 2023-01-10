@@ -23,7 +23,7 @@ macro_rules! impl_top_level_sh {
     };
 
     ( $inner_struct:ident, $constructor:ident, $sortedmulti_constructor:ident, $ctx:ident, sortedmulti $( $inner:tt )* ) => {{
-        use std::marker::PhantomData;
+        use core::marker::PhantomData;
 
         use $crate::miniscript::descriptor::{$inner_struct, Descriptor, DescriptorPublicKey};
         use $crate::miniscript::$ctx;
@@ -35,7 +35,7 @@ macro_rules! impl_top_level_sh {
         $crate::impl_sortedmulti!(build_desc, sortedmulti $( $inner )*)
     }};
     ( $inner_struct:ident, $constructor:ident, $sortedmulti_constructor:ident, $ctx:ident, sortedmulti_vec $( $inner:tt )* ) => {{
-        use std::marker::PhantomData;
+        use core::marker::PhantomData;
 
         use $crate::miniscript::descriptor::{$inner_struct, Descriptor, DescriptorPublicKey};
         use $crate::miniscript::$ctx;
@@ -203,8 +203,8 @@ macro_rules! impl_node_opcode_two {
                 a_keymap.extend(b_keymap.into_iter());
 
                 let minisc = $crate::miniscript::Miniscript::from_ast($crate::miniscript::miniscript::decode::Terminal::$terminal_variant(
-                    std::sync::Arc::new(a_minisc),
-                    std::sync::Arc::new(b_minisc),
+                    alloc::sync::Arc::new(a_minisc),
+                    alloc::sync::Arc::new(b_minisc),
                 ))?;
 
                 minisc.check_miniscript()?;
@@ -234,9 +234,9 @@ macro_rules! impl_node_opcode_three {
                 let networks = $crate::keys::merge_networks(&networks, &c_networks);
 
                 let minisc = $crate::miniscript::Miniscript::from_ast($crate::miniscript::miniscript::decode::Terminal::$terminal_variant(
-                    std::sync::Arc::new(a_minisc),
-                    std::sync::Arc::new(b_minisc),
-                    std::sync::Arc::new(c_minisc),
+                    alloc::sync::Arc::new(a_minisc),
+                    alloc::sync::Arc::new(b_minisc),
+                    alloc::sync::Arc::new(c_minisc),
                 ))?;
 
                 minisc.check_miniscript()?;
@@ -263,7 +263,7 @@ macro_rules! impl_sortedmulti {
             )*
         ];
 
-        keys.into_iter().collect::<Result<Vec<_>, _>>()
+        keys.into_iter().collect::<Result<alloc::vec::Vec<_>, _>>()
             .map_err($crate::descriptor::DescriptorError::Key)
             .and_then(|keys| $crate::keys::make_sortedmulti($thresh, keys, $build_desc, &secp))
     });
@@ -274,7 +274,7 @@ macro_rules! impl_sortedmulti {
 #[macro_export]
 macro_rules! parse_tap_tree {
     ( @merge $tree_a:expr, $tree_b:expr) => {{
-        use std::sync::Arc;
+        use alloc::sync::Arc;
         use $crate::miniscript::descriptor::TapTree;
 
         $tree_a
@@ -318,7 +318,7 @@ macro_rules! parse_tap_tree {
 
     // Single leaf
     ( $op:ident ( $( $minisc:tt )* ) ) => {{
-        use std::sync::Arc;
+        use alloc::sync::Arc;
         use $crate::miniscript::descriptor::TapTree;
 
         $crate::fragment!( $op ( $( $minisc )* ) )
@@ -337,7 +337,7 @@ macro_rules! apply_modifier {
             .and_then(|(minisc, keymap, networks)| {
                 let minisc = $crate::miniscript::Miniscript::from_ast(
                     $crate::miniscript::miniscript::decode::Terminal::$terminal_variant(
-                        std::sync::Arc::new(minisc),
+                        alloc::sync::Arc::new(minisc),
                     ),
                 )?;
 
@@ -374,8 +374,8 @@ macro_rules! apply_modifier {
         $inner.and_then(|(a_minisc, a_keymap, a_networks)| {
             $crate::impl_leaf_opcode_value_two!(
                 AndV,
-                std::sync::Arc::new(a_minisc),
-                std::sync::Arc::new($crate::fragment!(true).unwrap().0)
+                alloc::sync::Arc::new(a_minisc),
+                alloc::sync::Arc::new($crate::fragment!(true).unwrap().0)
             )
             .map(|(minisc, _, _)| (minisc, a_keymap, a_networks))
         })
@@ -384,8 +384,8 @@ macro_rules! apply_modifier {
         $inner.and_then(|(a_minisc, a_keymap, a_networks)| {
             $crate::impl_leaf_opcode_value_two!(
                 OrI,
-                std::sync::Arc::new($crate::fragment!(false).unwrap().0),
-                std::sync::Arc::new(a_minisc)
+                alloc::sync::Arc::new($crate::fragment!(false).unwrap().0),
+                alloc::sync::Arc::new(a_minisc)
             )
             .map(|(minisc, _, _)| (minisc, a_keymap, a_networks))
         })
@@ -394,8 +394,8 @@ macro_rules! apply_modifier {
         $inner.and_then(|(a_minisc, a_keymap, a_networks)| {
             $crate::impl_leaf_opcode_value_two!(
                 OrI,
-                std::sync::Arc::new(a_minisc),
-                std::sync::Arc::new($crate::fragment!(false).unwrap().0)
+                alloc::sync::Arc::new(a_minisc),
+                alloc::sync::Arc::new($crate::fragment!(false).unwrap().0)
             )
             .map(|(minisc, _, _)| (minisc, a_keymap, a_networks))
         })
@@ -599,7 +599,7 @@ macro_rules! group_multi_keys {
             )*
         ];
 
-        keys.into_iter().collect::<Result<Vec<_>, _>>()
+        keys.into_iter().collect::<Result<alloc::vec::Vec<_>, _>>()
             .map_err($crate::descriptor::DescriptorError::Key)
     }};
 }
@@ -744,8 +744,8 @@ macro_rules! fragment {
     ( thresh_vec ( $thresh:expr, $items:expr ) ) => ({
         use $crate::miniscript::descriptor::KeyMap;
 
-        let (items, key_maps_networks): (Vec<_>, Vec<_>) = $items.into_iter().map(|(a, b, c)| (a, (b, c))).unzip();
-        let items = items.into_iter().map(std::sync::Arc::new).collect();
+        let (items, key_maps_networks): (alloc::vec::Vec<_>, alloc::vec::Vec<_>) = $items.into_iter().map(|(a, b, c)| (a, (b, c))).unzip();
+        let items = items.into_iter().map(alloc::sync::Arc::new).collect();
 
         let (key_maps, valid_networks) = key_maps_networks.into_iter().fold((KeyMap::default(), $crate::keys::any_network()), |(mut keys_acc, net_acc), (key, net)| {
             keys_acc.extend(key.into_iter());
@@ -760,7 +760,7 @@ macro_rules! fragment {
     ( thresh ( $thresh:expr, $( $inner:tt )* ) ) => ({
         let items = $crate::fragment_internal!( @v $( $inner )* );
 
-        items.into_iter().collect::<Result<Vec<_>, _>>()
+        items.into_iter().collect::<Result<alloc::vec::Vec<_>, _>>()
             .and_then(|items| $crate::fragment!(thresh_vec($thresh, items)))
     });
     ( multi_vec ( $thresh:expr, $keys:expr ) ) => ({
@@ -793,12 +793,13 @@ macro_rules! fragment {
 
 #[cfg(test)]
 mod test {
+    use alloc::string::ToString;
     use bitcoin::hashes::hex::ToHex;
     use bitcoin::secp256k1::Secp256k1;
     use miniscript::descriptor::{DescriptorPublicKey, KeyMap};
     use miniscript::{Descriptor, Legacy, Segwitv0};
 
-    use std::str::FromStr;
+    use core::str::FromStr;
 
     use crate::descriptor::{DescriptorError, DescriptorMeta};
     use crate::keys::{DescriptorKey, IntoDescriptorKey, ValidNetworks};

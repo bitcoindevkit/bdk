@@ -15,6 +15,7 @@
 //! checksum of a descriptor
 
 use crate::descriptor::DescriptorError;
+use alloc::string::String;
 
 const INPUT_CHARSET: &[u8] = b"0123456789()[],'/*abcdefgh@:$%{}IJKLMNOPQRSTUVWXYZ&+-.;<=>?!^_|~ijklmnopqrstuvwxyzABCDEFGH`#\"\\ ";
 const CHECKSUM_CHARSET: &[u8] = b"qpzry9x8gf2tvdw0s3jn54khce6mua7l";
@@ -170,7 +171,7 @@ mod test {
 
     #[test]
     fn test_calc_checksum_invalid_character() {
-        let sparkle_heart = unsafe { std::str::from_utf8_unchecked(&[240, 159, 146, 150]) };
+        let sparkle_heart = unsafe { core::str::from_utf8_unchecked(&[240, 159, 146, 150]) };
         let invalid_desc = format!("wpkh(tprv8ZgxMBicQKsPdpkqS7Eair4YxjcuuvDPNYmKX3sCniCf16tHEVrjjiSXEkFRnUH77yXc6ZcwHHcL{}fjdi5qUvw3VDfgYiH5mNsj5izuiu2N/1/2/*)", sparkle_heart);
 
         assert_matches!(

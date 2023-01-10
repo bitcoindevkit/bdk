@@ -12,14 +12,18 @@
 //! Wallet
 //!
 //! This module defines the [`Wallet`] structure.
-use bdk_chain::chain_graph;
-use bdk_chain::{keychain::KeychainTracker, sparse_chain, BlockId, ConfirmationTime};
+use crate::collections::{BTreeMap, HashMap, HashSet};
+use alloc::{
+    boxed::Box,
+    string::{String, ToString},
+    sync::Arc,
+    vec::Vec,
+};
+use bdk_chain::{keychain::KeychainTracker, sparse_chain, BlockId, ConfirmationTime, chain_graph};
 use bitcoin::secp256k1::Secp256k1;
+use core::fmt;
+use core::ops::Deref;
 use core::convert::TryInto;
-use std::collections::{BTreeMap, HashMap, HashSet};
-use std::fmt;
-use std::ops::Deref;
-use std::sync::Arc;
 
 use bitcoin::consensus::encode::serialize;
 use bitcoin::util::psbt;
@@ -551,7 +555,7 @@ impl Wallet {
     /// [`TxBuilder`]: crate::TxBuilder
     pub fn build_tx(&mut self) -> TxBuilder<'_, DefaultCoinSelectionAlgorithm, CreateTx> {
         TxBuilder {
-            wallet: std::rc::Rc::new(core::cell::RefCell::new(self)),
+            wallet: alloc::rc::Rc::new(core::cell::RefCell::new(self)),
             params: TxParams::default(),
             coin_selection: DefaultCoinSelectionAlgorithm::default(),
             phantom: core::marker::PhantomData,
@@ -1067,7 +1071,7 @@ impl Wallet {
         };
 
         Ok(TxBuilder {
-            wallet: std::rc::Rc::new(std::cell::RefCell::new(self)),
+            wallet: alloc::rc::Rc::new(core::cell::RefCell::new(self)),
             params,
             coin_selection: DefaultCoinSelectionAlgorithm::default(),
             phantom: core::marker::PhantomData,
@@ -1846,7 +1850,7 @@ pub(crate) mod test {
 
     macro_rules! from_str {
         ($e:expr, $t:ty) => {{
-            use std::str::FromStr;
+            use core::str::FromStr;
             <$t>::from_str($e).unwrap()
         }};
 
@@ -2344,7 +2348,7 @@ pub(crate) mod test {
     #[test]
     fn test_create_tx_input_hd_keypaths() {
         use bitcoin::util::bip32::{DerivationPath, Fingerprint};
-        use std::str::FromStr;
+        use core::str::FromStr;
 
         let (mut wallet, _) = get_funded_wallet("wpkh([d34db33f/44'/0'/0']tpubDEnoLuPdBep9bzw5LoGYpsxUQYheRQ9gcgrJhJEcdKFB9cWQRyYmkCyRoTqeD4tJYiVVgt6A3rN6rWn9RYhR9sBsGxji29LYWHuKKbdb1ev/0/*)");
         let addr = wallet.get_address(New);
@@ -2365,7 +2369,7 @@ pub(crate) mod test {
     #[test]
     fn test_create_tx_output_hd_keypaths() {
         use bitcoin::util::bip32::{DerivationPath, Fingerprint};
-        use std::str::FromStr;
+        use core::str::FromStr;
 
         let (mut wallet, _) = get_funded_wallet("wpkh([d34db33f/44'/0'/0']tpubDEnoLuPdBep9bzw5LoGYpsxUQYheRQ9gcgrJhJEcdKFB9cWQRyYmkCyRoTqeD4tJYiVVgt6A3rN6rWn9RYhR9sBsGxji29LYWHuKKbdb1ev/0/*)");
 
@@ -4118,8 +4122,8 @@ pub(crate) mod test {
 
     #[test]
     fn test_get_address_no_reuse_single_descriptor() {
+        use crate::collections::HashSet;
         use crate::descriptor::template::Bip84;
-        use std::collections::HashSet;
 
         let key = bitcoin::util::bip32::ExtendedPrivKey::from_str("tprv8ZgxMBicQKsPcx5nBGsR63Pe8KnRUqmbJNENAfGftF3yuXoMMoVJJcYeUw5eVkm9WBPjWYt6HMWYJNesB5HaNVBaFc1M6dRjWSYnmewUMYy").unwrap();
         let mut wallet =

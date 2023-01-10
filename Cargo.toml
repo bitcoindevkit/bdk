@@ -35,6 +35,8 @@ getrandom = "0.2"
 js-sys = "0.3"
 
 [features]
+default = ["std"]
+std = []
 compiler = ["miniscript/compiler"]
 all-keys = ["keys-bip39"]
 keys-bip39 = ["bip39"]
@@ -66,6 +68,7 @@ required-features = ["compiler"]
 [[example]]
 name = "policy"
 path = "examples/policy.rs"
+required-features = ["std"]
 
 [[example]]
 name = "mnemonic_to_descriptors"

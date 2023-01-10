@@ -36,12 +36,11 @@
 //! # Ok::<(), bdk::Error>(())
 //! ```
 
-use std::cell::RefCell;
-use std::collections::BTreeMap;
-use std::collections::HashSet;
-use std::default::Default;
-use std::marker::PhantomData;
-use std::rc::Rc;
+use crate::collections::BTreeMap;
+use crate::collections::HashSet;
+use alloc::{boxed::Box, rc::Rc, string::String, vec::Vec};
+use core::cell::RefCell;
+use core::marker::PhantomData;
 
 use bitcoin::util::psbt::{self, PartiallySignedTransaction as Psbt};
 use bitcoin::{LockTime, OutPoint, Script, Sequence, Transaction};
@@ -53,7 +52,7 @@ use crate::{
 };
 use crate::{Error, Utxo, Wallet};
 /// Context in which the [`TxBuilder`] is valid
-pub trait TxBuilderContext: std::fmt::Debug + Default + Clone {}
+pub trait TxBuilderContext: core::fmt::Debug + Default + Clone {}
 
 /// Marker type to indicate the [`TxBuilder`] is being used to create a new transaction (as opposed
 /// to bumping the fee of an existing one).
@@ -163,7 +162,7 @@ pub(crate) enum FeePolicy {
     FeeAmount(u64),
 }
 
-impl std::default::Default for FeePolicy {
+impl Default for FeePolicy {
     fn default() -> Self {
         FeePolicy::FeeRate(FeeRate::default_min_relay_fee())
     }
@@ -827,7 +826,7 @@ mod test {
 
     #[test]
     fn test_output_ordering_bip69() {
-        use std::str::FromStr;
+        use core::str::FromStr;
 
         let original_tx = ordering_test_tx!();
         let mut tx = original_tx;
