@@ -5,18 +5,19 @@ use std::time::Duration;
 use std::{env, thread};
 
 use bitcoin::{util::bip32, Network};
-use esplora_client::Builder;
 use libtor::{LogDestination, LogLevel, Tor, TorFlag};
 
-use bdk::{
-    blockchain::esplora::EsploraBlockchain, database::MemoryDatabase, template::Bip84,
-    KeychainKind, SyncOptions, Wallet,
-};
+use bdk::blockchain::esplora::EsploraBlockchain;
+use bdk::blockchain::esplora::EsploraBlockchainConfig;
+use bdk::blockchain::ConfigurableBlockchain;
+use bdk::database::MemoryDatabase;
+use bdk::template::Bip84;
 use bdk::wallet::AddressIndex;
-
-pub mod utils;
+use bdk::{KeychainKind, SyncOptions, Wallet};
 
 use crate::utils::tx::build_signed_tx;
+
+pub mod utils;
 
 /// This will create a wallet from an xpriv and sync it by connecting to an Esplora server
 /// over Tor network, using blocking calls with `ureq`.
@@ -54,18 +55,20 @@ fn main() {
 
     let socks_addr = start_tor();
 
-    let client = Builder::new(esplora_url)
-        .proxy(&format!("socks5://{}", socks_addr))
-        .timeout(120) // seconds
-        .build_blocking()
-        .unwrap();
-
     println!(
         "Connecting to {} via SOCKS5 proxy {}",
         &esplora_url, &socks_addr
     );
 
-    let blockchain = EsploraBlockchain::from_client(client, 20);
+    let esplora_config = EsploraBlockchainConfig {
+        base_url: esplora_url.into(),
+        concurrency: None,
+        proxy: Some(format!("socks5://{}", socks_addr)),
+        stop_gap: 20,
+        timeout: Some(120),
+    };
+
+    let blockchain = EsploraBlockchain::from_config(&esplora_config).unwrap();
 
     let wallet = Wallet::new(
         Bip84(xpriv, KeychainKind::External),
@@ -107,7 +110,6 @@ fn main() {
     } else {
         println!("Insufficient Funds. Fund the wallet with the address above");
     }
-
 }
 
 pub fn start_tor() -> String {
