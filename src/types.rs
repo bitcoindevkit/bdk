@@ -230,7 +230,6 @@ pub struct TransactionDetails {
     pub transaction: Option<Transaction>,
     /// Transaction id
     pub txid: Txid,
-
     /// Received value (sats)
     /// Sum of owned outputs of this transaction.
     pub received: u64,
@@ -242,7 +241,7 @@ pub struct TransactionDetails {
     /// Server backend, but it could be `None` with a Bitcoin RPC node without txindex that receive
     /// funds while offline.
     pub fee: Option<u64>,
-    /// If the transaction is confirmed, contains height and timestamp of the block containing the
+    /// If the transaction is confirmed, contains height and Unix timestamp of the block containing the
     /// transaction, unconfirmed transaction contains `None`.
     pub confirmation_time: Option<BlockTime>,
 }

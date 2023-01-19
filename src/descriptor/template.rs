@@ -287,7 +287,7 @@ impl<K: DerivableKey<Segwitv0>> DescriptorTemplate for Bip49<K> {
 
 /// BIP49 public template. Expands to `sh(wpkh(key/{0,1}/*))`
 ///
-/// This assumes that the key used has already been derived with `m/49'/0'/0'`.
+/// This assumes that the key used has already been derived with `m/49'/0'/0'` for Mainnet or `m/49'/1'/0'` for Testnet.
 ///
 /// This template requires the parent fingerprint to populate correctly the metadata of PSBTs.
 ///
@@ -366,7 +366,7 @@ impl<K: DerivableKey<Segwitv0>> DescriptorTemplate for Bip84<K> {
 
 /// BIP84 public template. Expands to `wpkh(key/{0,1}/*)`
 ///
-/// This assumes that the key used has already been derived with `m/84'/0'/0'`.
+/// This assumes that the key used has already been derived with `m/84'/0'/0'` for Mainnet or `m/84'/1'/0'` for Testnet.
 ///
 /// This template requires the parent fingerprint to populate correctly the metadata of PSBTs.
 ///
