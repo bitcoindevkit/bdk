@@ -132,7 +132,7 @@ pub enum AddressIndex {
     Reset(u32),
 }
 
-/// A derived address and the index it was found at
+/// A derived address and the index it was found at.
 /// For convenience this automatically derefs to `Address`
 #[derive(Debug, PartialEq, Eq)]
 pub struct AddressInfo {

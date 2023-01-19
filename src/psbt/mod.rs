@@ -22,7 +22,7 @@ pub trait PsbtUtils {
     /// Get the `TxOut` for the specified input index, if it doesn't exist in the PSBT `None` is returned.
     fn get_utxo_for(&self, input_index: usize) -> Option<TxOut>;
 
-    /// The total transaction fee amount, sum of input amounts minus sum of output amounts, in Sats.
+    /// The total transaction fee amount, sum of input amounts minus sum of output amounts, in sats.
     /// If the PSBT is missing a TxOut for an input returns None.
     fn fee_amount(&self) -> Option<u64>;
 
