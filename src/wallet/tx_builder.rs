@@ -123,9 +123,8 @@ pub struct TxBuilder<'a, D, Cs, Ctx> {
 }
 
 /// The parameters for transaction creation sans coin selection algorithm.
-//TODO: TxParams should eventually be exposed publicly.
 #[derive(Default, Debug, Clone)]
-pub(crate) struct TxParams {
+pub struct TxParams {
     pub(crate) recipients: Vec<(Script, u64)>,
     pub(crate) drain_wallet: bool,
     pub(crate) drain_to: Option<Script>,
@@ -566,6 +565,11 @@ impl<'a, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderContext>
     pub fn allow_dust(&mut self, allow_dust: bool) -> &mut Self {
         self.params.allow_dust = allow_dust;
         self
+    }
+
+    /// Retrieve the loaded transaction parameters.
+    pub fn get_params(&self) -> TxParams {
+        self.params.clone()
     }
 }
 
