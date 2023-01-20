@@ -123,7 +123,7 @@ pub struct TxBuilder<'a, D, Cs, Ctx> {
 }
 
 /// The parameters for transaction creation sans coin selection algorithm.
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug, Clone, PartialEq)]
 pub struct TxParams {
     pub(crate) recipients: Vec<(Script, u64)>,
     pub(crate) drain_wallet: bool,
@@ -148,13 +148,13 @@ pub struct TxParams {
     pub(crate) allow_dust: bool,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct PreviousFee {
     pub absolute: u64,
     pub rate: f32,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum FeePolicy {
     FeeRate(FeeRate),
     FeeAmount(u64),
