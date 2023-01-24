@@ -25,7 +25,7 @@
 //! ```
 
 use std::collections::{HashMap, HashSet};
-use std::ops::Deref;
+use std::ops::{Deref, DerefMut};
 
 #[allow(unused_imports)]
 use log::{debug, error, info, trace};
@@ -117,9 +117,11 @@ impl GetBlockHash for ElectrumBlockchain {
 impl WalletSync for ElectrumBlockchain {
     fn wallet_setup<D: BatchDatabase>(
         &self,
-        database: &mut D,
+        database: &RefCell<D>,
         _progress_update: Box<dyn Progress>,
     ) -> Result<(), Error> {
+        let mut database = database.borrow_mut();
+        let database = database.deref_mut();
         let mut request = script_sync::start(database, self.stop_gap)?;
         let mut block_times = HashMap::<u32, u32>::new();
         let mut txid_to_height = HashMap::<Txid, u32>::new();

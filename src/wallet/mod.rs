@@ -17,7 +17,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::collections::{BTreeMap, HashSet};
 use std::fmt;
-use std::ops::{Deref, DerefMut};
+use std::ops::Deref;
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -1719,14 +1719,11 @@ where
         let max_rounds = if has_wildcard { 100 } else { 1 };
 
         for _ in 0..max_rounds {
-            let sync_res =
-                if run_setup {
-                    maybe_await!(blockchain
-                        .wallet_setup(self.database.borrow_mut().deref_mut(), new_progress()))
-                } else {
-                    maybe_await!(blockchain
-                        .wallet_sync(self.database.borrow_mut().deref_mut(), new_progress()))
-                };
+            let sync_res = if run_setup {
+                maybe_await!(blockchain.wallet_setup(&self.database, new_progress()))
+            } else {
+                maybe_await!(blockchain.wallet_sync(&self.database, new_progress()))
+            };
 
             // If the error is the special `MissingCachedScripts` error, we return the number of
             // scripts we should ensure cached.

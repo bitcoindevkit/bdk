@@ -233,7 +233,7 @@ impl ChainStore<Full> {
             batch.put_cf(
                 cf_handle,
                 StoreEntry::BlockHeaderIndex(Some(genesis.block_hash())).get_key(),
-                &0usize.to_be_bytes(),
+                0usize.to_be_bytes(),
             );
             store.write(batch)?;
         }
@@ -302,7 +302,7 @@ impl ChainStore<Full> {
         batch.put_cf(
             new_cf_handle,
             StoreEntry::BlockHeaderIndex(Some(header.block_hash())).get_key(),
-            &from.to_be_bytes(),
+            from.to_be_bytes(),
         );
         batch.put_cf(
             new_cf_handle,
@@ -584,7 +584,7 @@ impl<T: StoreType> ChainStore<T> {
             batch.put_cf(
                 cf_handle,
                 StoreEntry::BlockHeaderIndex(Some(header.block_hash())).get_key(),
-                &(height).to_be_bytes(),
+                (height).to_be_bytes(),
             );
             batch.put_cf(
                 cf_handle,

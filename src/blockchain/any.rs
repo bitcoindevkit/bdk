@@ -131,7 +131,7 @@ impl GetBlockHash for AnyBlockchain {
 impl WalletSync for AnyBlockchain {
     fn wallet_sync<D: BatchDatabase>(
         &self,
-        database: &mut D,
+        database: &RefCell<D>,
         progress_update: Box<dyn Progress>,
     ) -> Result<(), Error> {
         maybe_await!(impl_inner_method!(
@@ -144,7 +144,7 @@ impl WalletSync for AnyBlockchain {
 
     fn wallet_setup<D: BatchDatabase>(
         &self,
-        database: &mut D,
+        database: &RefCell<D>,
         progress_update: Box<dyn Progress>,
     ) -> Result<(), Error> {
         maybe_await!(impl_inner_method!(
