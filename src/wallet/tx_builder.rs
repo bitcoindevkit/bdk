@@ -123,9 +123,8 @@ pub struct TxBuilder<'a, D, Cs, Ctx> {
 }
 
 /// The parameters for transaction creation sans coin selection algorithm.
-//TODO: TxParams should eventually be exposed publicly.
-#[derive(Default, Debug, Clone)]
-pub(crate) struct TxParams {
+#[derive(Default, Debug, Clone, PartialEq)]
+pub struct TxParams {
     pub(crate) recipients: Vec<(Script, u64)>,
     pub(crate) drain_wallet: bool,
     pub(crate) drain_to: Option<Script>,
@@ -149,13 +148,13 @@ pub(crate) struct TxParams {
     pub(crate) allow_dust: bool,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct PreviousFee {
     pub absolute: u64,
     pub rate: f32,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum FeePolicy {
     FeeRate(FeeRate),
     FeeAmount(u64),
@@ -567,6 +566,11 @@ impl<'a, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderContext>
         self.params.allow_dust = allow_dust;
         self
     }
+
+    /// Retrieve the loaded transaction parameters.
+    pub fn get_params(&self) -> TxParams {
+        self.params.clone()
+    }
 }
 
 impl<'a, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>> TxBuilder<'a, D, Cs, CreateTx> {
@@ -788,6 +792,7 @@ mod test {
         };
     }
 
+    use crate::{bitcoin::Network, database::MemoryDatabase};
     use bitcoin::consensus::deserialize;
     use bitcoin::hashes::hex::FromHex;
 
@@ -919,5 +924,53 @@ mod test {
     fn test_default_tx_version_1() {
         let version = Version::default();
         assert_eq!(version.0, 1);
+    }
+
+    #[test]
+    fn test_get_params() {
+        let wallet = Wallet::new(
+            "wpkh([c258d2e4/84h/1h/0h]tpubDDYkZojQFQjht8Tm4jsS3iuEmKjTiEGjG6KnuFNKKJb5A6ZUCUZKdvLdSDWofKi4ToRCwb9poe1XdqfUnP4jaJjCB2Zwv11ZLgSbnZSNecE/0/*)",
+            Some("wpkh([c258d2e4/84h/1h/0h]tpubDDYkZojQFQjht8Tm4jsS3iuEmKjTiEGjG6KnuFNKKJb5A6ZUCUZKdvLdSDWofKi4ToRCwb9poe1XdqfUnP4jaJjCB2Zwv11ZLgSbnZSNecE/1/*)"),
+            Network::Testnet,
+            MemoryDatabase::default(),
+        );
+        let hash_set: HashSet<bitcoin::OutPoint> = HashSet::default();
+        let tx_test_params: TxParams = TxParams {
+            recipients: vec![],
+            drain_wallet: false,
+            drain_to: None,
+            fee_policy: None,
+            internal_policy_path: None,
+            external_policy_path: None,
+            utxos: vec![],
+            unspendable: hash_set,
+            manually_selected_only: false,
+            sighash: None,
+            ordering: TxOrdering::Shuffle,
+            locktime: None,
+            rbf: Some(RbfValue::Default),
+            version: None,
+            change_policy: ChangeSpendPolicy::ChangeForbidden,
+            only_witness_utxo: false,
+            add_global_xpubs: false,
+            include_output_redeem_witness_script: false,
+            bumping_fee: None,
+            current_height: None,
+            allow_dust: false,
+        };
+
+        let mut tx_builder_test = wallet
+            .as_ref()
+            .expect("Failed to build transaction: Invalid reference to wallet object")
+            .build_tx();
+        tx_builder_test
+            // Add some tx config:
+            // Only spend non-change outputs
+            .do_not_spend_change()
+            // Turn on RBF signaling
+            .enable_rbf();
+
+        let tx_params = tx_builder_test.get_params();
+        assert_eq!(tx_params, tx_test_params);
     }
 }
