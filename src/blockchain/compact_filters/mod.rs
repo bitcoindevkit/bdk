@@ -580,7 +580,27 @@ pub enum CompactFiltersError {
 
 impl fmt::Display for CompactFiltersError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self)
+        match self {
+            Self::InvalidResponse => write!(f, "A peer sent an invalid or unexpected response"),
+            Self::InvalidHeaders => write!(f, "Invalid headers"),
+            Self::InvalidFilterHeader => write!(f, "Invalid filter header"),
+            Self::InvalidFilter => write!(f, "Invalid filters"),
+            Self::MissingBlock => write!(f, "The peer is missing a block in the valid chain"),
+            Self::BlockHashNotFound => write!(f, "Block hash not found"),
+            Self::DataCorruption => write!(
+                f,
+                "The data stored in the block filters storage are corrupted"
+            ),
+            Self::NotConnected => write!(f, "A peer is not connected"),
+            Self::Timeout => write!(f, "A peer took too long to reply to one of our messages"),
+            Self::PeerBloomDisabled => write!(f, "Peer doesn't advertise the BLOOM service flag"),
+            Self::NoPeers => write!(f, "No peers have been specified"),
+            Self::Db(err) => write!(f, "Internal database error: {}", err),
+            Self::Io(err) => write!(f, "Internal I/O error: {}", err),
+            Self::Bip158(err) => write!(f, "Invalid BIP158 filter: {}", err),
+            Self::Time(err) => write!(f, "Invalid system time: {}", err),
+            Self::Global(err) => write!(f, "Generic error: {}", err),
+        }
     }
 }
 

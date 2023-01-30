@@ -91,7 +91,12 @@ pub enum VerifyError {
 
 impl fmt::Display for VerifyError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self)
+        match self {
+            Self::MissingInputTx(txid) => write!(f, "The transaction being spent is not available in the database or the blockchain client: {}", txid),
+            Self::InvalidInput(outpoint) => write!(f, "The transaction being spent doesn't have the requested output: {}", outpoint),
+            Self::Consensus(err) => write!(f, "Consensus error: {:?}", err),
+            Self::Global(err) => write!(f, "Generic error: {}", err),
+        }
     }
 }
 
