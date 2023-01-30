@@ -1,13 +1,126 @@
 # Changelog
-All notable changes to this project prior to release **0.22.0** are documented in this file. Future
-changelog information can be found in each release's git tag and can be viewed with `git tag -ln100 "v*"`.
-Changelog info is also documented on the [GitHub releases](https://github.com/bitcoindevkit/bdk/releases)
-page. See [DEVELOPMENT_CYCLE.md](DEVELOPMENT_CYCLE.md) for more details.
+
+All notable changes to this project can be found here and in each release's git tag and can be viewed with `git tag -ln100 "v*"`. See also [DEVELOPMENT_CYCLE.md](DEVELOPMENT_CYCLE.md) for more details.
+
+Contributors do not need to change this file but do need to add changelog details in their PR descriptions. The person making the next release will collect changelog details from included PRs and edit this file prior to each release.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [v0.21.0] - [v0.20.0]
+## [Unreleased]
+
+## [v0.26.0]
+
+### Summary
+
+This release improves Fulcrum electrum server compatibility and fixes public descriptor template key origin paths. We also snuck in small enhancements to configure the electrum client to validate the domain using SSL and sort TransactionDetails by block height and timestamp.
+  
+### Fixed
+  
+- Make electrum blockchain client `save_tx` function order independent to work with Fulcrum servers. #808
+- Fix wrong testnet key origin path in public descriptor templates. #818
+- Make README.md code examples compile without errors. #820
+
+### Changed
+
+- Bump `hwi` dependency to `0.4.0`. #825
+- Bump `esplora-client` dependency to `0.3` #830
+
+### Added
+  
+- For electrum blockchain client, allow user to configure whether to validate the domain using SSL. #805
+- Implement ordering for `TransactionDetails`. #812
+
+## [v0.25.0]
+
+### Summary
+
+This release fixes slow sync time and big script_pubkeys table with SQLite, the wallet rescan height for the FullyNodedExport and setting the network for keys in the KeyMap when using descriptor templates. Also added are new blockchain and mnemonic examples.
+  
+### Fixed
+  
+- Slow sync time and big script_pubkeys table with SQLite.
+- Wallet rescan height for the FullyNodedExport.
+- Setting the network for keys in the KeyMap when using descriptor templates.
+  
+### Added
+  
+- Examples for connecting to Esplora, Electrum Server, Neutrino and Bitcoin Core.
+- Example for using a mnemonic in a descriptors.
+
+## [v0.24.0]
+
+### Summary
+
+This release contains important dependency updates for `rust-bitcoin` to `0.29` and `rust-miniscript` to `8.0`, plus related crates that also depend on the latest version of `rust-bitcoin`. The release also includes a breaking change to the BDK signer which now produces low-R signatures by default, saving one byte. A bug was found in the `get_checksum` and `get_checksum_bytes` functions, which are now deprecated in favor of fixed versions called `calc_checksum` and `calc_checksum_bytes`. And finally a new `hardware-signer` features was added that re-exports the `hwi` crate, along with a new `hardware_signers.rs` example file.
+   
+### Changed
+
+- Updated dependency versions for `rust-bitcoin` to `0.29` and `rust-miniscript` to `8.0`, plus all related crates. @afilini #770
+- BDK Signer now produces low-R signatures by default, saving one byte. If you want to preserve the original behavior, set allow_grinding in the SignOptions to false. @vladimirfomene #779
+- Deprecated `get_checksum`and `get_checksum_bytes` due to bug where they calculates the checksum of a descriptor that already has a checksum.  Use `calc_checksum` and `calc_checksum_bytes` instead. @evanlinjin #765
+- Remove deprecated "address validators". @afilini #770
+  
+### Added
+
+- New `calc_checksum` and `calc_checksum_bytes`, replace deprecated `get_checksum` and `get_checksum_bytes`. @evanlinjin #765
+- Re-export the hwi crate when the feature hardware-signer is on.  @danielabrozzoni #758
+- New examples/hardware_signer.rs. @danielabrozzoni #758
+- Make psbt module public to expose PsbtUtils trait to downstream projects. @notmandatory #782
+
+## [v0.23.0]
+
+### Summary
+
+This release brings new utilities functions on PSBTs like `fee_amount()` and `fee_rate()` and migrates BDK to use our new external esplora client library.
+As always many bug fixes, docs and tests improvement are also included.
+
+### Changed
+
+- Update electrum-client to 0.11.0 by @afilini in https://github.com/bitcoindevkit/bdk/pull/737
+- Change configs for source-base code coverage by @wszdexdrf in https://github.com/bitcoindevkit/bdk/pull/708
+- Improve docs regarding PSBT finalization by @tnull in https://github.com/bitcoindevkit/bdk/pull/753
+- Update compiler example to a Policy example by @rajarshimaitra in https://github.com/bitcoindevkit/bdk/pull/730
+- Fix the release process by @afilini in https://github.com/bitcoindevkit/bdk/pull/754
+- Remove redundant duplicated keys check by @afilini in https://github.com/bitcoindevkit/bdk/pull/761
+- Remove genesis_block lazy initialization by @shobitb in https://github.com/bitcoindevkit/bdk/pull/756
+- Fix `Wallet::descriptor_checksum` to actually return the checksum by @evanlinjin in https://github.com/bitcoindevkit/bdk/pull/763
+- Use the esplora client crate by @afilini in https://github.com/bitcoindevkit/bdk/pull/764
+
+### Added
+
+- Run code coverage on every PR by @danielabrozzoni in https://github.com/bitcoindevkit/bdk/pull/747
+- Add psbt_signer.rs example by @notmandatory in https://github.com/bitcoindevkit/bdk/pull/744
+- Add fee_amount() and fee_rate() functions to PsbtUtils trait by @notmandatory in https://github.com/bitcoindevkit/bdk/pull/728
+- Add tests to improve coverage by @vladimirfomene in https://github.com/bitcoindevkit/bdk/pull/745
+- Enable signing taproot transactions with only `non_witness_utxos` by @afilini in https://github.com/bitcoindevkit/bdk/pull/757
+- Add datatype for is_spent sqlite column by @vladimirfomene in https://github.com/bitcoindevkit/bdk/pull/713
+- Add vscode filter to gitignore by @evanlinjin in https://github.com/bitcoindevkit/bdk/pull/762
+
+## [v0.22.0]
+
+### Summary
+
+This release brings support for hardware signers on desktop through the HWI library.
+It also includes fixes and improvements which are part of our ongoing effort of integrating
+BDK and LDK together.
+
+### Changed
+
+- FeeRate function name as_sat_vb to as_sat_per_vb. #678
+- Verify signatures after signing. #718
+- Dependency electrum-client to 0.11.0. #737
+
+### Added
+  
+- Functions to create FeeRate from sats/kvbytes and sats/kwu. #678
+- Custom hardware wallet signer HwiSigner in wallet::hardwaresigner module. #682
+- Function allow_dust on TxBuilder. #689
+- Implementation of Deref<Target=UrlClient> for EsploraBlockchain. #722
+- Implementation of Deref<Target=Client> for ElectrumBlockchain #705
+- Implementation of Deref<Target=Client> for RpcBlockchain. #731
+
+## [v0.21.0]
 
 - Add `descriptor::checksum::get_checksum_bytes` method.
 - Add `Excess` enum to handle remaining amount after coin selection.
@@ -20,7 +133,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New `RpcBlockchain` implementation with various fixes.
 - Return balance in separate categories, namely `confirmed`, `trusted_pending`, `untrusted_pending` & `immature`.
 
-## [v0.20.0] - [v0.19.0]
+## [v0.20.0]
 
 - New MSRV set to `1.56.1`
 - Fee sniping discouraging through nLockTime - if the user specifies a `current_height`, we use that as a nlocktime, otherwise we use the last sync height (or 0 if we never synced)
@@ -31,7 +144,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Deprecate `AddressValidator`
 - Fix Electrum wallet sync potentially causing address index decrement - compare proposed index and current index before applying batch operations during sync.
 
-## [v0.19.0] - [v0.18.0]
+## [v0.19.0]
 
 - added `OldestFirstCoinSelection` impl to `CoinSelectionAlgorithm`
 - New MSRV set to `1.56`
@@ -47,7 +160,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Support for `tr()` descriptors in the `descriptor!()` macro
 - Add support for Bitcoin Core 23.0 when using the `rpc` blockchain
 
-## [v0.18.0] - [v0.17.0]
+## [v0.18.0]
 
 - Add `sqlite-bundled` feature for deployments that need a bundled version of sqlite, i.e. for mobile platforms.
 - Added `Wallet::get_signers()`, `Wallet::descriptor_checksum()` and `Wallet::get_address_validators()`, exposed the `AsDerived` trait.
@@ -57,7 +170,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Rename `WalletExport` to `FullyNodedExport`, deprecate the former.
 - Bump `miniscript` dependency version to `^6.1`.
 
-## [v0.17.0] - [v0.16.1]
+## [v0.17.0]
 
 - Removed default verification from `wallet::sync`. sync-time verification is added in `script_sync` and is activated by `verify` feature flag.
 - `verify` flag removed from `TransactionDetails`.
@@ -78,45 +191,45 @@ To decouple the `Wallet` from the `Blockchain` we've made major changes:
 - Removed `max_addresses` sync parameter which determined how many addresses to cache before syncing since this can just be done with `ensure_addresses_cached`.
 - remove `flush` method from the `Database` trait.
 
-## [v0.16.1] - [v0.16.0]
+## [v0.16.1]
 
 - Pin tokio dependency version to ~1.14 to prevent errors due to their new MSRV 1.49.0
 
-## [v0.16.0] - [v0.15.0]
+## [v0.16.0]
 
 - Disable `reqwest` default features.
 - Added `reqwest-default-tls` feature: Use this to restore the TLS defaults of reqwest if you don't want to add a dependency to it in your own manifest.
 - Use dust_value from rust-bitcoin
 - Fixed generating WIF in the correct network format.
 
-## [v0.15.0] - [v0.14.0]
+## [v0.15.0]
 
 - Overhauled sync logic for electrum and esplora.
 - Unify ureq and reqwest esplora backends to have the same configuration parameters. This means reqwest now has a timeout parameter and ureq has a concurrency parameter.
 - Fixed esplora fee estimation.
 
-## [v0.14.0] - [v0.13.0]
+## [v0.14.0]
 
 - BIP39 implementation dependency, in `keys::bip39` changed from tiny-bip39 to rust-bip39.
 - Add new method on the `TxBuilder` to embed data in the transaction via `OP_RETURN`. To allow that a fix to check the dust only on spendable output has been introduced.
 - Update the `Database` trait to store the last sync timestamp and block height
 - Rename `ConfirmationTime` to `BlockTime`
 
-## [v0.13.0] - [v0.12.0]
+## [v0.13.0]
 
 - Exposed `get_tx()` method from `Database` to `Wallet`.
 
-## [v0.12.0] - [v0.11.0]
+## [v0.12.0]
 
 - Activate `miniscript/use-serde` feature to allow consumers of the library to access it via the re-exported `miniscript` crate.
 - Add support for proxies in `EsploraBlockchain`
 - Added `SqliteDatabase` that implements `Database` backed by a sqlite database using `rusqlite` crate.
 
-## [v0.11.0] - [v0.10.0]
+## [v0.11.0]
 
 - Added `flush` method to the `Database` trait to explicitly flush to disk latest changes on the db.
 
-## [v0.10.0] - [v0.9.0]
+## [v0.10.0]
 
 - Added `RpcBlockchain` in the `AnyBlockchain` struct to allow using Rpc backend where `AnyBlockchain` is used (eg `bdk-cli`)
 - Removed hard dependency on `tokio`.
@@ -130,21 +243,21 @@ To decouple the `Wallet` from the `Blockchain` we've made major changes:
 - Removed `stop_gap` from `Blockchain` trait and added it to only `ElectrumBlockchain` and `EsploraBlockchain` structs.
 - Added a `ureq` backend for use when not using feature `async-interface` or target WASM. `ureq` is a blocking HTTP client.
 
-## [v0.9.0] - [v0.8.0]
+## [v0.9.0]
 
 ### Wallet
 
 - Added Bitcoin core RPC added as blockchain backend
 - Added a `verify` feature that can be enable to verify the unconfirmed txs we download against the consensus rules
 
-## [v0.8.0] - [v0.7.0]
+## [v0.8.0]
 
 ### Wallet
 - Added an option that must be explicitly enabled to allow signing using non-`SIGHASH_ALL` sighashes (#350)
 #### Changed
 `get_address` now returns an `AddressInfo` struct that includes the index and derefs to `Address`.
 
-## [v0.7.0] - [v0.6.0]
+## [v0.7.0]
 
 ### Policy
 #### Changed
@@ -159,7 +272,7 @@ Timelocks are considered (optionally) in building the `satisfaction` field
 - Require and validate `non_witness_utxo` for SegWit signatures by default, can be adjusted with `SignOptions`
 - Replace the opt-in builder option `force_non_witness_utxo` with the opposite `only_witness_utxo`. From now on we will provide the `non_witness_utxo`, unless explicitly asked not to.
 
-## [v0.6.0] - [v0.5.1]
+## [v0.6.0]
 
 ### Misc
 #### Changed
@@ -183,13 +296,13 @@ Timelocks are considered (optionally) in building the `satisfaction` field
 #### Fixed
 - Fixed `coin_select` calculation for UTXOs where `value < fee` that caused over-/underflow errors.
 
-## [v0.5.1] - [v0.5.0]
+## [v0.5.1]
 
 ### Misc
 #### Changed
 - Pin `hyper` to `=0.14.4` to make it compile on Rust 1.45
 
-## [v0.5.0] - [v0.4.0]
+## [v0.5.0]
 
 ### Misc
 #### Changed
@@ -199,7 +312,7 @@ Timelocks are considered (optionally) in building the `satisfaction` field
 #### Changed
 - `FeeRate` constructors `from_sat_per_vb` and `default_min_relay_fee` are now `const` functions
 
-## [v0.4.0] - [v0.3.0]
+## [v0.4.0]
 
 ### Keys
 #### Changed
@@ -228,7 +341,7 @@ Timelocks are considered (optionally) in building the `satisfaction` field
 - Removed unneeded `Result<(), PolicyError>` return type for `Satisfaction::finalize()`
 - Removed the `TooManyItemsSelected` policy error (see commit message for more details)
 
-## [v0.3.0] - [v0.2.0]
+## [v0.3.0]
 
 ### Descriptor
 #### Changed
@@ -265,7 +378,7 @@ final transaction is created by calling `finish` on the builder.
 #### Changed
 - Remove `cli.rs` module, `cli-utils` feature and `repl.rs` example; moved to new [`bdk-cli`](https://github.com/bitcoindevkit/bdk-cli) repository
 
-## [v0.2.0] - [0.1.0-beta.1]
+## [v0.2.0]
 
 ### Project
 #### Added
@@ -493,3 +606,9 @@ final transaction is created by calling `finish` on the builder.
 [v0.19.0]: https://github.com/bitcoindevkit/bdk/compare/v0.18.0...v0.19.0
 [v0.20.0]: https://github.com/bitcoindevkit/bdk/compare/v0.19.0...v0.20.0
 [v0.21.0]: https://github.com/bitcoindevkit/bdk/compare/v0.20.0...v0.21.0
+[v0.22.0]: https://github.com/bitcoindevkit/bdk/compare/v0.21.0...v0.22.0
+[v0.23.0]: https://github.com/bitcoindevkit/bdk/compare/v0.22.0...v0.23.0
+[v0.24.0]: https://github.com/bitcoindevkit/bdk/compare/v0.23.0...v0.24.0
+[v0.25.0]: https://github.com/bitcoindevkit/bdk/compare/v0.24.0...v0.25.0
+[v0.26.0]: https://github.com/bitcoindevkit/bdk/compare/v0.25.0...v0.26.0
+[Unreleased]: https://github.com/bitcoindevkit/bdk/compare/v0.26.0...HEAD
