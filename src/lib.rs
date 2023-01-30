@@ -227,7 +227,7 @@ compile_error!(
 #[cfg(feature = "keys-bip39")]
 extern crate bip39;
 
-#[cfg(any(target_arch = "wasm32", feature = "async-interface"))]
+#[cfg(feature = "async-interface")]
 #[macro_use]
 extern crate async_trait;
 #[macro_use]

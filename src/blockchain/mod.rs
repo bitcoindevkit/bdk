@@ -249,11 +249,8 @@ pub trait BlockchainFactory {
     /// operations to build a blockchain for a given wallet, so if a wallet needs to be synced
     /// often it's recommended to use [`BlockchainFactory::build_for_wallet`] to reuse the same
     /// blockchain multiple times.
-    #[cfg(not(any(target_arch = "wasm32", feature = "async-interface")))]
-    #[cfg_attr(
-        docsrs,
-        doc(cfg(not(any(target_arch = "wasm32", feature = "async-interface"))))
-    )]
+    #[cfg(not(feature = "async-interface"))]
+    #[cfg_attr(docsrs, doc(cfg(not(feature = "async-interface"))))]
     fn sync_wallet<D: BatchDatabase>(
         &self,
         wallet: &Wallet<D>,
