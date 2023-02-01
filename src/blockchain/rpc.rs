@@ -621,7 +621,7 @@ impl<'a, D: BatchDatabase> DbState<'a, D> {
 
     /// Prepare db batch operations.
     fn as_db_batch(&self) -> Result<D::Batch, Error> {
-        let mut batch = self.db.begin_batch();
+        let mut batch = self.db.begin_batch()?;
         let mut del_txs = 0_u32;
 
         // delete stale (not retained) txs from db

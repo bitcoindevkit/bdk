@@ -319,13 +319,13 @@ impl BatchOperations for AnyBatch {
 impl BatchDatabase for AnyDatabase {
     type Batch = AnyBatch;
 
-    fn begin_batch(&self) -> Self::Batch {
+    fn begin_batch(&self) -> Result<Self::Batch, Error> {
         match self {
-            AnyDatabase::Memory(inner) => inner.begin_batch().into(),
+            AnyDatabase::Memory(inner) => inner.begin_batch().map(Into::into),
             #[cfg(feature = "key-value-db")]
-            AnyDatabase::Sled(inner) => inner.begin_batch().into(),
+            AnyDatabase::Sled(inner) => inner.begin_batch().map(Into::into),
             #[cfg(feature = "sqlite")]
-            AnyDatabase::Sqlite(inner) => inner.begin_batch().into(),
+            AnyDatabase::Sqlite(inner) => inner.begin_batch().map(Into::into),
         }
     }
     fn commit_batch(&mut self, batch: Self::Batch) -> Result<(), Error> {

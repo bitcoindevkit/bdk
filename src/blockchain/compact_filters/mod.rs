@@ -151,7 +151,7 @@ impl CompactFiltersBlockchain {
         internal_max_deriv: &mut Option<u32>,
         external_max_deriv: &mut Option<u32>,
     ) -> Result<(), Error> {
-        let mut updates = database.begin_batch();
+        let mut updates = database.begin_batch()?;
 
         let mut incoming: u64 = 0;
         let mut outgoing: u64 = 0;
@@ -410,7 +410,7 @@ impl WalletSync for CompactFiltersBlockchain {
             "Dropping transactions newer than `last_synced_block` = {}",
             last_synced_block
         );
-        let mut updates = database.begin_batch();
+        let mut updates = database.begin_batch()?;
         for details in database.iter_txs(false)? {
             match details.confirmation_time {
                 Some(c) if (c.height as usize) < last_synced_block => continue,

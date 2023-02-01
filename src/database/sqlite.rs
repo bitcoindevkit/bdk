@@ -918,10 +918,10 @@ impl Database for SqliteDatabase {
 impl BatchDatabase for SqliteDatabase {
     type Batch = SqliteDatabase;
 
-    fn begin_batch(&self) -> Self::Batch {
+    fn begin_batch(&self) -> Result<Self::Batch, Error> {
         let db = SqliteDatabase::new(self.path.clone());
-        db.connection.execute("BEGIN TRANSACTION", []).unwrap();
-        db
+        db.connection.execute("BEGIN TRANSACTION", [])?;
+        Ok(db)
     }
 
     fn commit_batch(&mut self, batch: Self::Batch) -> Result<(), Error> {

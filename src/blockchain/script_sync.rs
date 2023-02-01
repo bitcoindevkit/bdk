@@ -364,7 +364,7 @@ impl<'a, D: BatchDatabase> State<'a, D> {
             })
             .collect::<Result<Vec<(KeychainKind, u32)>, _>>()?;
 
-        let mut batch = self.db.begin_batch();
+        let mut batch = self.db.begin_batch()?;
 
         // Delete old txs that no longer exist
         for txid in txids_to_delete {

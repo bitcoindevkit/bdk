@@ -454,8 +454,8 @@ impl Database for MemoryDatabase {
 impl BatchDatabase for MemoryDatabase {
     type Batch = Self;
 
-    fn begin_batch(&self) -> Self::Batch {
-        MemoryDatabase::new()
+    fn begin_batch(&self) -> Result<Self::Batch, Error> {
+        Ok(MemoryDatabase::new())
     }
 
     fn commit_batch(&mut self, mut batch: Self::Batch) -> Result<(), Error> {

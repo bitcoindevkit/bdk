@@ -1379,7 +1379,7 @@ where
             count = 1;
         }
 
-        let mut address_batch = self.database.borrow().begin_batch();
+        let mut address_batch = self.database.borrow().begin_batch()?;
 
         let start_time = time::Instant::new();
         for i in from..(from + count) {

@@ -393,8 +393,8 @@ fn ivec_to_u32(b: sled::IVec) -> Result<u32, Error> {
 impl BatchDatabase for Tree {
     type Batch = sled::Batch;
 
-    fn begin_batch(&self) -> Self::Batch {
-        sled::Batch::default()
+    fn begin_batch(&self) -> Result<Self::Batch, Error> {
+        Ok(sled::Batch::default())
     }
 
     fn commit_batch(&mut self, batch: Self::Batch) -> Result<(), Error> {

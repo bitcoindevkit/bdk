@@ -168,7 +168,7 @@ pub trait BatchDatabase: Database {
     type Batch: BatchOperations;
 
     /// Create a new batch container
-    fn begin_batch(&self) -> Self::Batch;
+    fn begin_batch(&self) -> Result<Self::Batch, Error>;
     /// Consume and apply a batch of operations
     fn commit_batch(&mut self, batch: Self::Batch) -> Result<(), Error>;
 }
@@ -243,7 +243,7 @@ pub mod test {
     }
 
     pub fn test_batch_script_pubkey<D: BatchDatabase>(mut db: D) {
-        let mut batch = db.begin_batch();
+        let mut batch = db.begin_batch().unwrap();
 
         let script = Script::from(
             Vec::<u8>::from_hex("76a91402306a7c23f3e8010de41e9e591348bb83f11daa88ac").unwrap(),
