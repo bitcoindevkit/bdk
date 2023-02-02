@@ -40,7 +40,7 @@ pub mod bip39;
 /// Set of valid networks for a key
 pub type ValidNetworks = HashSet<Network>;
 
-/// Create a set containing mainnet, testnet and regtest
+/// Create a set containing mainnet, testnet, signet, and regtest
 pub fn any_network() -> ValidNetworks {
     vec![
         Network::Bitcoin,
@@ -95,7 +95,7 @@ impl<Ctx: ScriptContext> DescriptorKey<Ctx> {
     }
 
     // This method is used internally by `bdk::fragment!` and `bdk::descriptor!`. It has to be
-    // public because it is effectively called by external crates, once the macros are expanded,
+    // public because it is effectively called by external crates once the macros are expanded,
     // but since it is not meant to be part of the public api we hide it from the docs.
     #[doc(hidden)]
     pub fn extract(
@@ -375,7 +375,7 @@ impl<Ctx: ScriptContext> From<bip32::ExtendedPrivKey> for ExtendedKey<Ctx> {
 /// `(DerivableKey, KeySource, DerivationPath)` tuples.
 ///
 /// For key types that don't encode any indication about the path to use (like bip39), it's
-/// generally recommended to implemented this trait instead of [`IntoDescriptorKey`]. The same
+/// generally recommended to implement this trait instead of [`IntoDescriptorKey`]. The same
 /// rules regarding script context and valid networks apply.
 ///
 /// ## Examples
