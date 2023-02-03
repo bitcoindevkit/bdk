@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.27.0]
+
+### Summary
+
+A maintenance release with a bump in project MSRV to 1.57.0, updated dependence and a few developer oriented improvements. Improvements include  better error formatting, don't default to async/await for wasm32 and adding derived PartialEq and Eq on SyncTime.
+
+### Changed
+
+- Improve display error formatting #814
+- Don't default to use async/await on wasm32 #831
+- Project MSRV changed from 1.56.1 to 1.57.0 #842
+- Update rust-miniscript dependency to latest bug fix release 9.0 #844
+
+### Added
+
+- Derive PartialEq, Eq on SyncTime #837
+
 ## [v0.26.0]
 
 ### Summary
@@ -611,4 +628,5 @@ final transaction is created by calling `finish` on the builder.
 [v0.24.0]: https://github.com/bitcoindevkit/bdk/compare/v0.23.0...v0.24.0
 [v0.25.0]: https://github.com/bitcoindevkit/bdk/compare/v0.24.0...v0.25.0
 [v0.26.0]: https://github.com/bitcoindevkit/bdk/compare/v0.25.0...v0.26.0
-[Unreleased]: https://github.com/bitcoindevkit/bdk/compare/v0.26.0...HEAD
+[v0.27.0]: https://github.com/bitcoindevkit/bdk/compare/v0.26.0...v0.27.0
+[Unreleased]: https://github.com/bitcoindevkit/bdk/compare/v0.27.0...HEAD
