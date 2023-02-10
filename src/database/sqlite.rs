@@ -97,7 +97,7 @@ impl SqliteDatabase {
         keychain: String,
         child: u32,
         script: &[u8],
-    ) -> Result<i64, Error> {
+    ) -> Result<(), Error> {
         let mut statement = self.connection.prepare_cached("INSERT OR REPLACE INTO script_pubkeys (keychain, child, script) VALUES (:keychain, :child, :script)")?;
         statement.execute(named_params! {
             ":keychain": keychain,
@@ -105,7 +105,7 @@ impl SqliteDatabase {
             ":script": script
         })?;
 
-        Ok(self.connection.last_insert_rowid())
+        Ok(())
     }
     fn insert_utxo(
         &self,
@@ -115,7 +115,7 @@ impl SqliteDatabase {
         txid: &[u8],
         script: &[u8],
         is_spent: bool,
-    ) -> Result<i64, Error> {
+    ) -> Result<(), Error> {
         let mut statement = self.connection.prepare_cached("INSERT INTO utxos (value, keychain, vout, txid, script, is_spent) VALUES (:value, :keychain, :vout, :txid, :script, :is_spent) ON CONFLICT(txid, vout) DO UPDATE SET value=:value, keychain=:keychain, script=:script, is_spent=:is_spent")?;
         statement.execute(named_params! {
             ":value": value,
@@ -126,9 +126,9 @@ impl SqliteDatabase {
             ":is_spent": is_spent,
         })?;
 
-        Ok(self.connection.last_insert_rowid())
+        Ok(())
     }
-    fn insert_transaction(&self, txid: &[u8], raw_tx: &[u8]) -> Result<i64, Error> {
+    fn insert_transaction(&self, txid: &[u8], raw_tx: &[u8]) -> Result<(), Error> {
         let mut statement = self
             .connection
             .prepare_cached("INSERT INTO transactions (txid, raw_tx) VALUES (:txid, :raw_tx)")?;
@@ -137,7 +137,7 @@ impl SqliteDatabase {
             ":raw_tx": raw_tx,
         })?;
 
-        Ok(self.connection.last_insert_rowid())
+        Ok(())
     }
 
     fn update_transaction(&self, txid: &[u8], raw_tx: &[u8]) -> Result<(), Error> {
@@ -153,7 +153,7 @@ impl SqliteDatabase {
         Ok(())
     }
 
-    fn insert_transaction_details(&self, transaction: &TransactionDetails) -> Result<i64, Error> {
+    fn insert_transaction_details(&self, transaction: &TransactionDetails) -> Result<(), Error> {
         let (timestamp, height) = match &transaction.confirmation_time {
             Some(confirmation_time) => (
                 Some(confirmation_time.timestamp),
@@ -175,7 +175,7 @@ impl SqliteDatabase {
             ":height": height,
         })?;
 
-        Ok(self.connection.last_insert_rowid())
+        Ok(())
     }
 
     fn update_transaction_details(&self, transaction: &TransactionDetails) -> Result<(), Error> {
@@ -203,7 +203,7 @@ impl SqliteDatabase {
         Ok(())
     }
 
-    fn insert_last_derivation_index(&self, keychain: String, value: u32) -> Result<i64, Error> {
+    fn insert_last_derivation_index(&self, keychain: String, value: u32) -> Result<(), Error> {
         let mut statement = self.connection.prepare_cached(
             "INSERT INTO last_derivation_indices (keychain, value) VALUES (:keychain, :value)",
         )?;
@@ -213,10 +213,10 @@ impl SqliteDatabase {
             ":value": value,
         })?;
 
-        Ok(self.connection.last_insert_rowid())
+        Ok(())
     }
 
-    fn insert_checksum(&self, keychain: String, checksum: &[u8]) -> Result<i64, Error> {
+    fn insert_checksum(&self, keychain: String, checksum: &[u8]) -> Result<(), Error> {
         let mut statement = self.connection.prepare_cached(
             "INSERT INTO checksums (keychain, checksum) VALUES (:keychain, :checksum)",
         )?;
@@ -225,7 +225,7 @@ impl SqliteDatabase {
             ":checksum": checksum,
         })?;
 
-        Ok(self.connection.last_insert_rowid())
+        Ok(())
     }
 
     fn update_last_derivation_index(&self, keychain: String, value: u32) -> Result<(), Error> {
@@ -241,7 +241,7 @@ impl SqliteDatabase {
         Ok(())
     }
 
-    fn update_sync_time(&self, data: SyncTime) -> Result<i64, Error> {
+    fn update_sync_time(&self, data: SyncTime) -> Result<(), Error> {
         let mut statement = self.connection.prepare_cached(
             "INSERT INTO sync_time (id, height, timestamp) VALUES (0, :height, :timestamp) ON CONFLICT(id) DO UPDATE SET height=:height, timestamp=:timestamp WHERE id = 0",
         )?;
@@ -251,7 +251,7 @@ impl SqliteDatabase {
             ":timestamp": data.block_time.timestamp,
         })?;
 
-        Ok(self.connection.last_insert_rowid())
+        Ok(())
     }
 
     fn select_script_pubkeys(&self) -> Result<Vec<Script>, Error> {
