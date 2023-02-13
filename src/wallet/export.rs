@@ -182,9 +182,9 @@ impl FullyNodedExport {
             }
         }
 
-        // pkh(), wpkh(), sh(wpkh()) are always fine, as well as multi() and sortedmulti()
+        // pkh(), wpkh(), tr() and sh(wpkh()) are always fine, as well as multi() and sortedmulti()
         match Descriptor::<String>::from_str(descriptor).map_err(|_| "Invalid descriptor")? {
-            Descriptor::Pkh(_) | Descriptor::Wpkh(_) => Ok(()),
+            Descriptor::Pkh(_) | Descriptor::Wpkh(_) | Descriptor::Tr(_) => Ok(()),
             Descriptor::Sh(sh) => match sh.as_inner() {
                 ShInner::Wpkh(_) => Ok(()),
                 ShInner::SortedMulti(_) => Ok(()),
