@@ -678,20 +678,43 @@ where
             })
             .collect(),
     );
-    for v in client.call::<Vec<Value>>("importdescriptors", &[requests])? {
-        match v["success"].as_bool() {
-            Some(true) => continue,
-            Some(false) => {
-                return Err(Error::Generic(
-                    v["error"]["message"]
-                        .as_str()
-                        .map_or("unknown error".into(), ToString::to_string),
-                ))
-            }
-            _ => return Err(Error::Generic("Unexpected response form Core".to_string())),
-        }
-    }
-    Ok(())
+
+    client
+        .call::<Vec<Value>>("importdescriptors", &[requests])
+        .map_or_else(
+            |e| {
+                // While rescaning a new wallet from genesis, core rpc sometimes throw "Resource Temporarily Unavailable" Transport error.
+                // This doesn't stop the sync, so it's safe to ignore.
+                // See: https://github.com/bitcoindevkit/bdk/issues/859
+                if let bitcoincore_rpc::Error::JsonRpc(
+                    bitcoincore_rpc::jsonrpc::Error::Transport(_),
+                ) = e
+                {
+                    debug!("Resource Temporarily Unavailable, carrying on!!");
+                    Ok(())
+                } else {
+                    Err(e.into())
+                }
+            },
+            |result| {
+                for v in result {
+                    match v["success"].as_bool() {
+                        Some(true) => continue,
+                        Some(false) => {
+                            return Err(Error::Generic(
+                                v["error"]["message"]
+                                    .as_str()
+                                    .map_or("unknown error".into(), ToString::to_string),
+                            ))
+                        }
+                        _ => {
+                            return Err(Error::Generic("Unexpected response form Core".to_string()))
+                        }
+                    }
+                }
+                Ok(())
+            },
+        )
 }
 
 fn import_multi<'a, S>(client: &Client, start_epoch: u64, scripts_iter: S) -> Result<(), Error>
