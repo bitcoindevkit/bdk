@@ -23,6 +23,7 @@ A maintenance release with a bump in project MSRV to 1.57.0, updated dependence 
 - Don't default to use async/await on wasm32 #831
 - Project MSRV changed from 1.56.1 to 1.57.0 #842
 - Update rust-miniscript dependency to latest bug fix release 9.0 #844
+- New `tx_builder` `get_params` method #839
 
 ### Added
 
@@ -711,11 +712,5 @@ final transaction is created by calling `finish` on the builder.
 [v0.24.0]: https://github.com/bitcoindevkit/bdk/compare/v0.23.0...v0.24.0
 [v0.25.0]: https://github.com/bitcoindevkit/bdk/compare/v0.24.0...v0.25.0
 [v0.26.0]: https://github.com/bitcoindevkit/bdk/compare/v0.25.0...v0.26.0
-
-<<<<<<< HEAD
-[unreleased]: https://github.com/bitcoindevkit/bdk/compare/v0.26.0...HEAD
-=======
 [v0.27.0]: https://github.com/bitcoindevkit/bdk/compare/v0.26.0...v0.27.0
-[Unreleased]: https://github.com/bitcoindevkit/bdk/compare/v0.27.0...HEAD
-
-> > > > > > > e83bb7c (Bump version to 0.27.0)
+[unreleased]: https://github.com/bitcoindevkit/bdk/compare/v0.27.0...HEAD
