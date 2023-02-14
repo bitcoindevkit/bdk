@@ -34,6 +34,7 @@ Change the `master` branch to the new PATCH+1 version:
 - [ ] Create a new PR branch called `bump_dev_MAJOR_MINOR_PATCH+1`, eg. `bump_dev_0_22_1`.
 - [ ] Bump the `bump_dev_MAJOR_MINOR` branch to the next development PATCH+1 version.
   - Change the `Cargo.toml` version value to `MAJOR.MINOR.PATCH+1`.
+  - Update the `CHANGELOG.md` file.
   - The commit message should be "Bump version to MAJOR.MINOR.PATCH+1".
 - [ ] Create PR and merge the `bump_dev_MAJOR_MINOR_PATCH+1` branch to `master`.
   - Title PR "Bump version to MAJOR.MINOR.PATCH+1".
