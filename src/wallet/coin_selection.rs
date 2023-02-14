@@ -112,10 +112,7 @@ use rand::thread_rng;
 
 /// Default coin selection algorithm used by [`TxBuilder`](super::tx_builder::TxBuilder) if not
 /// overridden
-#[cfg(not(test))]
 pub type DefaultCoinSelectionAlgorithm = BranchAndBoundCoinSelection;
-#[cfg(test)]
-pub type DefaultCoinSelectionAlgorithm = LargestFirstCoinSelection; // make the tests more predictable
 
 // Base weight of a Txin, not counting the weight needed for satisfying it.
 // prev_txid (32 bytes) + prev_vout (4 bytes) + sequence (4 bytes)
@@ -373,7 +370,7 @@ impl OutputGroup {
 /// Branch and bound coin selection
 ///
 /// Code adapted from Bitcoin Core's implementation and from Mark Erhardt Master's Thesis: <http://murch.one/wp-content/uploads/2016/11/erhardt2016coinselection.pdf>
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BranchAndBoundCoinSelection {
     size_of_change: u64,
 }
