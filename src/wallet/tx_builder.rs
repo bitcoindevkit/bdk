@@ -46,6 +46,7 @@ use bitcoin::util::psbt::{self, PartiallySignedTransaction as Psbt};
 use bitcoin::{LockTime, OutPoint, Script, Sequence, Transaction};
 
 use super::coin_selection::{CoinSelectionAlgorithm, DefaultCoinSelectionAlgorithm};
+use super::persist;
 use crate::{
     types::{FeeRate, KeychainKind, LocalUtxo, WeightedUtxo},
     TransactionDetails,
@@ -116,8 +117,8 @@ impl TxBuilderContext for BumpFee {}
 /// [`finish`]: Self::finish
 /// [`coin_selection`]: Self::coin_selection
 #[derive(Debug)]
-pub struct TxBuilder<'a, Cs, Ctx> {
-    pub(crate) wallet: Rc<RefCell<&'a mut Wallet>>,
+pub struct TxBuilder<'a, D, Cs, Ctx> {
+    pub(crate) wallet: Rc<RefCell<&'a mut Wallet<D>>>,
     pub(crate) params: TxParams,
     pub(crate) coin_selection: Cs,
     pub(crate) phantom: PhantomData<Ctx>,
@@ -168,7 +169,7 @@ impl Default for FeePolicy {
     }
 }
 
-impl<'a, Cs: Clone, Ctx> Clone for TxBuilder<'a, Cs, Ctx> {
+impl<'a, D, Cs: Clone, Ctx> Clone for TxBuilder<'a, D, Cs, Ctx> {
     fn clone(&self) -> Self {
         TxBuilder {
             wallet: self.wallet.clone(),
@@ -180,7 +181,7 @@ impl<'a, Cs: Clone, Ctx> Clone for TxBuilder<'a, Cs, Ctx> {
 }
 
 // methods supported by both contexts, for any CoinSelectionAlgorithm
-impl<'a, Cs: CoinSelectionAlgorithm, Ctx: TxBuilderContext> TxBuilder<'a, Cs, Ctx> {
+impl<'a, D, Cs: CoinSelectionAlgorithm, Ctx: TxBuilderContext> TxBuilder<'a, D, Cs, Ctx> {
     /// Set a custom fee rate
     pub fn fee_rate(&mut self, fee_rate: FeeRate) -> &mut Self {
         self.params.fee_policy = Some(FeePolicy::FeeRate(fee_rate));
@@ -508,7 +509,7 @@ impl<'a, Cs: CoinSelectionAlgorithm, Ctx: TxBuilderContext> TxBuilder<'a, Cs, Ct
     pub fn coin_selection<P: CoinSelectionAlgorithm>(
         self,
         coin_selection: P,
-    ) -> TxBuilder<'a, P, Ctx> {
+    ) -> TxBuilder<'a, D, P, Ctx> {
         TxBuilder {
             wallet: self.wallet,
             params: self.params,
@@ -522,7 +523,10 @@ impl<'a, Cs: CoinSelectionAlgorithm, Ctx: TxBuilderContext> TxBuilder<'a, Cs, Ct
     /// Returns the [`BIP174`] "PSBT" and summary details about the transaction.
     ///
     /// [`BIP174`]: https://github.com/bitcoin/bips/blob/master/bip-0174.mediawiki
-    pub fn finish(self) -> Result<(Psbt, TransactionDetails), Error> {
+    pub fn finish(self) -> Result<(Psbt, TransactionDetails), Error>
+    where
+        D: persist::Backend,
+    {
         self.wallet
             .borrow_mut()
             .create_tx(self.coin_selection, self.params)
@@ -573,7 +577,7 @@ impl<'a, Cs: CoinSelectionAlgorithm, Ctx: TxBuilderContext> TxBuilder<'a, Cs, Ct
     }
 }
 
-impl<'a, Cs: CoinSelectionAlgorithm> TxBuilder<'a, Cs, CreateTx> {
+impl<'a, D, Cs: CoinSelectionAlgorithm> TxBuilder<'a, D, Cs, CreateTx> {
     /// Replace the recipients already added with a new list
     pub fn set_recipients(&mut self, recipients: Vec<(Script, u64)>) -> &mut Self {
         self.params.recipients = recipients;
@@ -644,7 +648,7 @@ impl<'a, Cs: CoinSelectionAlgorithm> TxBuilder<'a, Cs, CreateTx> {
 }
 
 // methods supported only by bump_fee
-impl<'a> TxBuilder<'a, DefaultCoinSelectionAlgorithm, BumpFee> {
+impl<'a, D> TxBuilder<'a, D, DefaultCoinSelectionAlgorithm, BumpFee> {
     /// Explicitly tells the wallet that it is allowed to reduce the amount of the output matching this
     /// `script_pubkey` in order to bump the transaction fee. Without specifying this the wallet
     /// will attempt to find a change output to shrink instead.
@@ -699,14 +703,8 @@ impl TxOrdering {
             TxOrdering::Untouched => {}
             TxOrdering::Shuffle => {
                 use rand::seq::SliceRandom;
-                #[cfg(test)]
-                use rand::SeedableRng;
-
-                #[cfg(not(test))]
                 let mut rng = rand::thread_rng();
-                #[cfg(test)]
-                let mut rng = rand::rngs::StdRng::seed_from_u64(12345);
-
+                tx.input.shuffle(&mut rng);
                 tx.output.shuffle(&mut rng);
             }
             TxOrdering::Bip69Lexicographic => {
@@ -818,10 +816,20 @@ mod test {
         let original_tx = ordering_test_tx!();
         let mut tx = original_tx.clone();
 
-        TxOrdering::Shuffle.sort_tx(&mut tx);
+        (0..40)
+            .find(|_| {
+                TxOrdering::Shuffle.sort_tx(&mut tx);
+                original_tx.input != tx.input
+            })
+            .expect("it should have moved the inputs at least once");
 
-        assert_eq!(original_tx.input, tx.input);
-        assert_ne!(original_tx.output, tx.output);
+        let mut tx = original_tx.clone();
+        (0..40)
+            .find(|_| {
+                TxOrdering::Shuffle.sort_tx(&mut tx);
+                original_tx.output != tx.output
+            })
+            .expect("it should have moved the outputs at least once");
     }
 
     #[test]

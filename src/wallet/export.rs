@@ -117,8 +117,8 @@ impl FullyNodedExport {
     ///
     /// If the database is empty or `include_blockheight` is false, the `blockheight` field
     /// returned will be `0`.
-    pub fn export_wallet(
-        wallet: &Wallet,
+    pub fn export_wallet<D>(
+        wallet: &Wallet<D>,
         label: &str,
         include_blockheight: bool,
     ) -> Result<Self, &'static str> {
@@ -231,8 +231,8 @@ mod test {
         descriptor: &str,
         change_descriptor: Option<&str>,
         network: Network,
-    ) -> Wallet {
-        let mut wallet = Wallet::new(descriptor, change_descriptor, network).unwrap();
+    ) -> Wallet<()> {
+        let mut wallet = Wallet::new(descriptor, change_descriptor, (), network).unwrap();
         let transaction = Transaction {
             input: vec![],
             output: vec![],

@@ -19,9 +19,12 @@ use alloc::{
     sync::Arc,
     vec::Vec,
 };
-use bdk_chain::{chain_graph, keychain::KeychainTracker, sparse_chain, BlockId, ConfirmationTime};
+use bdk_chain::{
+    chain_graph,
+    keychain::{KeychainChangeSet, KeychainScan, KeychainTracker},
+    sparse_chain, BlockId, ConfirmationTime, IntoOwned,
+};
 use bitcoin::secp256k1::Secp256k1;
-use core::convert::TryInto;
 use core::fmt;
 use core::ops::Deref;
 
@@ -46,6 +49,7 @@ pub(crate) mod utils;
 #[cfg(feature = "hardware-signer")]
 #[cfg_attr(docsrs, doc(cfg(feature = "hardware-signer")))]
 pub mod hardwaresigner;
+pub mod persist;
 
 pub use utils::IsDust;
 
@@ -58,7 +62,7 @@ use utils::{check_nsequence_rbf, After, Older, SecpCtx};
 use crate::descriptor::policy::BuildSatisfaction;
 use crate::descriptor::{
     calc_checksum, into_wallet_descriptor_checked, DerivedDescriptor, DescriptorMeta,
-    ExtendedDescriptor, ExtractPolicy, IntoWalletDescriptor, Policy, SpkIter, XKeyUtils,
+    ExtendedDescriptor, ExtractPolicy, IntoWalletDescriptor, Policy, XKeyUtils,
 };
 use crate::error::{Error, MiniscriptPsbtError};
 use crate::psbt::PsbtUtils;
@@ -80,15 +84,22 @@ const COINBASE_MATURITY: u32 = 100;
 /// [`Database`]: crate::database::Database
 /// [`signer`]: crate::signer
 #[derive(Debug)]
-pub struct Wallet {
+pub struct Wallet<D = ()> {
     signers: Arc<SignersContainer>,
     change_signers: Arc<SignersContainer>,
     keychain_tracker: KeychainTracker<KeychainKind, ConfirmationTime>,
-
+    persist: persist::Persist<D>,
     network: Network,
-
     secp: SecpCtx,
 }
+
+/// The update to a [`Wallet`] used in [Wallet::apply_update]. This is usually returned from blockchain data sources.
+/// The type parameter `T` indicates the kind of transaction contained in the update. It's usually a [`bitcoin::Transaction`].
+pub type Update<T> = KeychainScan<KeychainKind, ConfirmationTime, T>;
+/// Error indicating that something was wrong with an [`Update<T>`].
+pub type UpdateError = chain_graph::UpdateError<ConfirmationTime>;
+/// The changeset produced internally by applying an update
+pub(crate) type ChangeSet = KeychainChangeSet<KeychainKind, ConfirmationTime, Transaction>;
 
 /// The address index selection strategy to use to derived an address from the wallet's external
 /// descriptor. See [`Wallet::get_address`]. If you're unsure which one to use use `WalletIndex::New`.
@@ -139,18 +150,62 @@ impl fmt::Display for AddressInfo {
 }
 
 impl Wallet {
-    /// Create a wallet.
-    ///
-    /// The only way this can fail is if the descriptors passed in do not match the checksums in `database`.
-    pub fn new<E: IntoWalletDescriptor>(
+    /// Creates a wallet that does not persist data.
+    pub fn new_no_persist<E: IntoWalletDescriptor>(
         descriptor: E,
         change_descriptor: Option<E>,
         network: Network,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, crate::descriptor::DescriptorError> {
+        Self::new(descriptor, change_descriptor, (), network).map_err(|e| match e {
+            NewError::Descriptor(e) => e,
+            NewError::Persist(_) => unreachable!("no persistence so it can't fail"),
+        })
+    }
+}
+
+#[derive(Debug)]
+/// Error returned from [`Wallet::new`]
+pub enum NewError<P> {
+    /// There was problem with the descriptors passed in
+    Descriptor(crate::descriptor::DescriptorError),
+    /// We were unable to load the wallet's data from the persistance backend
+    Persist(P),
+}
+
+impl<P> core::fmt::Display for NewError<P>
+where
+    P: core::fmt::Display,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            NewError::Descriptor(e) => e.fmt(f),
+            NewError::Persist(e) => {
+                write!(f, "failed to load wallet from persistance backend: {}", e)
+            }
+        }
+    }
+}
+
+#[cfg(feautre = "std")]
+impl<P: core::fmt::Display> std::error::Error for NewError<P> {}
+
+impl<D> Wallet<D> {
+    /// Create a wallet from a `descriptor` (and an optional `change_descriptor`) and load related
+    /// transaction data from `db`.
+    pub fn new<E: IntoWalletDescriptor>(
+        descriptor: E,
+        change_descriptor: Option<E>,
+        mut db: D,
+        network: Network,
+    ) -> Result<Self, NewError<D::LoadError>>
+    where
+        D: persist::Backend,
+    {
         let secp = Secp256k1::new();
 
         let mut keychain_tracker = KeychainTracker::default();
-        let (descriptor, keymap) = into_wallet_descriptor_checked(descriptor, &secp, network)?;
+        let (descriptor, keymap) = into_wallet_descriptor_checked(descriptor, &secp, network)
+            .map_err(NewError::Descriptor)?;
         keychain_tracker
             .txout_index
             .add_keychain(KeychainKind::External, descriptor.clone());
@@ -158,7 +213,8 @@ impl Wallet {
         let change_signers = match change_descriptor {
             Some(desc) => {
                 let (change_descriptor, change_keymap) =
-                    into_wallet_descriptor_checked(desc, &secp, network)?;
+                    into_wallet_descriptor_checked(desc, &secp, network)
+                        .map_err(NewError::Descriptor)?;
 
                 let change_signers = Arc::new(SignersContainer::build(
                     change_keymap,
@@ -175,10 +231,16 @@ impl Wallet {
             None => Arc::new(SignersContainer::new()),
         };
 
+        db.load_into_keychain_tracker(&mut keychain_tracker)
+            .map_err(NewError::Persist)?;
+
+        let persist = persist::Persist::new(db);
+
         Ok(Wallet {
             signers,
             change_signers,
             network,
+            persist,
             secp,
             keychain_tracker,
         })
@@ -194,55 +256,13 @@ impl Wallet {
         self.keychain_tracker.txout_index.keychains()
     }
 
-    // Return a newly derived address for the specified `keychain`.
-    fn get_new_address(&mut self, keychain: KeychainKind) -> AddressInfo {
-        let ((index, spk), _) = self.keychain_tracker.txout_index.reveal_next_spk(&keychain);
-        let address =
-            Address::from_script(&spk, self.network).expect("descriptor must have address form");
-
-        AddressInfo {
-            address,
-            index,
-            keychain,
-        }
-    }
-
-    // Return the the last previously derived address for `keychain` if it has not been used in a
-    // received transaction. Otherwise return a new address using [`Wallet::get_new_address`].
-    fn get_unused_address(&mut self, keychain: KeychainKind) -> AddressInfo {
-        let index = self.derivation_index(KeychainKind::External);
-
-        match index {
-            Some(index)
-                if !self
-                    .keychain_tracker
-                    .txout_index
-                    .is_used(&(keychain, index)) =>
-            {
-                self.peek_address(index, keychain)
-            }
-            _ => self.get_new_address(keychain),
-        }
-    }
-
-    // Return derived address for the descriptor of given [`KeychainKind`] at a specific index
-    fn peek_address(&self, index: u32, keychain: KeychainKind) -> AddressInfo {
-        let address = self
-            .get_descriptor_for_keychain(keychain)
-            .at_derivation_index(index)
-            .address(self.network)
-            .expect("descriptor must have address form");
-        AddressInfo {
-            index,
-            address,
-            keychain,
-        }
-    }
-
     /// Return a derived address using the external descriptor, see [`AddressIndex`] for
     /// available address index selection strategies. If none of the keys in the descriptor are derivable
     /// (i.e. does not end with /*) then the same address will always be returned for any [`AddressIndex`].
-    pub fn get_address(&mut self, address_index: AddressIndex) -> AddressInfo {
+    pub fn get_address(&mut self, address_index: AddressIndex) -> AddressInfo
+    where
+        D: persist::Backend,
+    {
         self._get_address(address_index, KeychainKind::External)
     }
 
@@ -253,19 +273,53 @@ impl Wallet {
     /// see [`AddressIndex`] for available address index selection strategies. If none of the keys
     /// in the descriptor are derivable (i.e. does not end with /*) then the same address will always
     /// be returned for any [`AddressIndex`].
-    pub fn get_internal_address(&mut self, address_index: AddressIndex) -> AddressInfo {
+    pub fn get_internal_address(&mut self, address_index: AddressIndex) -> AddressInfo
+    where
+        D: persist::Backend,
+    {
         self._get_address(address_index, KeychainKind::Internal)
     }
 
-    fn _get_address(&mut self, address_index: AddressIndex, keychain: KeychainKind) -> AddressInfo {
-        // TODO: Fix this mess!
-        let _keychain = self.map_keychain(keychain);
-        let mut info = match address_index {
-            AddressIndex::New => self.get_new_address(_keychain),
-            AddressIndex::LastUnused => self.get_unused_address(_keychain),
-            AddressIndex::Peek(index) => self.peek_address(index, _keychain),
+    fn _get_address(&mut self, address_index: AddressIndex, keychain: KeychainKind) -> AddressInfo
+    where
+        D: persist::Backend,
+    {
+        let keychain = self.map_keychain(keychain);
+        let txout_index = &mut self.keychain_tracker.txout_index;
+        let (index, spk) = match address_index {
+            AddressIndex::New => {
+                let ((index, spk), changeset) = txout_index.reveal_next_spk(&keychain);
+                let spk = spk.clone();
+
+                self.persist.stage(changeset.into());
+                self.persist.commit().expect("TODO");
+                (index, spk)
+            }
+            AddressIndex::LastUnused => {
+                let index = txout_index.last_revealed_index(&keychain);
+                match index {
+                    Some(index) if !txout_index.is_used(&(keychain, index)) => (
+                        index,
+                        txout_index
+                            .spk_at_index(&(keychain, index))
+                            .expect("must exist")
+                            .clone(),
+                    ),
+                    _ => return self._get_address(AddressIndex::New, keychain),
+                }
+            }
+            AddressIndex::Peek(index) => txout_index
+                .spks_of_keychain(&keychain)
+                .take(index as usize + 1)
+                .last()
+                .unwrap(),
         };
-        info.keychain = keychain;
+        let info = AddressInfo {
+            index,
+            address: Address::from_script(&spk, self.network)
+                .expect("descriptor must have address form"),
+            keychain,
+        };
         info
     }
 
@@ -295,7 +349,7 @@ impl Wallet {
             .collect()
     }
 
-    /// Iterate over all checkpoints.
+    /// Get all the checkpoints the wallet is currently storing indexed by height.
     pub fn checkpoints(&self) -> &BTreeMap<u32, BlockHash> {
         self.keychain_tracker.chain().checkpoints()
     }
@@ -305,13 +359,35 @@ impl Wallet {
         self.keychain_tracker.chain().latest_checkpoint()
     }
 
-    /// Create an iterator over all the script pubkeys starting at index 0 for a particular
-    /// keychain.
-    pub fn iter_all_script_pubkeys(&self, keychain: KeychainKind) -> SpkIter {
-        SpkIter::new(self.get_descriptor_for_keychain(keychain).clone())
+    /// Returns a iterators of all the script pubkeys for the `Internal` and External` variants in `KeychainKind`.
+    ///
+    /// This is inteded to be used when doing a full scan of your addresses (e.g. after restoring
+    /// from seed words). You pass the `BTreeMap` of iterators to a blockchain data source (e.g.
+    /// electrum server) which will go through each address until it reaches a *stop grap*.
+    ///
+    /// Note carefully that iterators go over **all** script pubkeys on the keychains (not what
+    /// script pubkeys the wallet is storing internally).
+    pub fn spks_of_all_keychains(
+        &self,
+    ) -> BTreeMap<KeychainKind, impl Iterator<Item = (u32, Script)> + Clone> {
+        self.keychain_tracker.txout_index.spks_of_all_keychains()
     }
 
-    /// Returns the `UTXO` owned by this wallet corresponding to `outpoint` if it exists in the
+    /// Gets an iterator over all the script pubkeys in a single keychain.
+    ///
+    /// See [`spks_of_all_keychains`] for more documentation
+    ///
+    /// [`spks_of_all_keychains`]: Self::spks_of_all_keychains
+    pub fn spks_of_keychain(
+        &self,
+        keychain: KeychainKind,
+    ) -> impl Iterator<Item = (u32, Script)> + Clone {
+        self.keychain_tracker
+            .txout_index
+            .spks_of_keychain(&keychain)
+    }
+
+    /// Returns the utxo owned by this wallet corresponding to `outpoint` if it exists in the
     /// wallet's database.
     pub fn get_utxo(&self, op: OutPoint) -> Option<LocalUtxo> {
         self.keychain_tracker
@@ -390,24 +466,46 @@ impl Wallet {
         })
     }
 
-    /// Add a new checkpoint to the wallet
+    /// Add a new checkpoint to the wallet's internal view of the chain.
+    /// This stages but does not [`commit`] the change.
+    ///
+    /// Returns whether anything changed with the insertion (e.g. `false` if checkpoint was already
+    /// there).
+    ///
+    /// [`commit`]: Self::commit
     pub fn insert_checkpoint(
         &mut self,
         block_id: BlockId,
     ) -> Result<bool, sparse_chain::InsertCheckpointError> {
-        Ok(!self
-            .keychain_tracker
-            .insert_checkpoint(block_id)?
-            .is_empty())
+        let changeset = self.keychain_tracker.insert_checkpoint(block_id)?;
+        let changed = changeset.is_empty();
+        self.persist.stage(changeset);
+        Ok(changed)
     }
 
-    /// Add a transaction to the wallet. Will only work if height <= latest checkpoint
+    /// Add a transaction to the wallet's internal view of the chain.
+    /// This stages but does not [`commit`] the change.
+    ///
+    /// There are a number reasons `tx` could be rejected with an `Err(_)`. The most important one
+    /// is that the transaction is at a height that is greater than [`latest_checkpoint`]. Therefore
+    /// you should use [`insert_checkpoint`] to insert new checkpoints before manually inserting new
+    /// transactions.
+    ///
+    /// Returns whether anything changed with the transaction insertion (e.g. `false` if the
+    /// transaction was already inserted at the same position).
+    ///
+    /// [`commit`]: Self::commit
+    /// [`latest_checkpoint`]: Self::latest_checkpoint
+    /// [`insert_checkpoint`]: Self::insert_checkpoint
     pub fn insert_tx(
         &mut self,
         tx: Transaction,
         position: ConfirmationTime,
     ) -> Result<bool, chain_graph::InsertTxError<ConfirmationTime>> {
-        Ok(!self.keychain_tracker.insert_tx(tx, position)?.is_empty())
+        let changeset = self.keychain_tracker.insert_tx(tx, position)?;
+        let changed = changeset.is_empty();
+        self.persist.stage(changeset);
+        Ok(changed)
     }
 
     #[deprecated(note = "use Wallet::transactions instead")]
@@ -426,17 +524,9 @@ impl Wallet {
         &self,
     ) -> impl DoubleEndedIterator<Item = (ConfirmationTime, &Transaction)> + '_ {
         self.keychain_tracker
-            .chain()
-            .txids()
-            .map(move |&(pos, txid)| {
-                (
-                    pos,
-                    self.keychain_tracker
-                        .graph()
-                        .get_tx(txid)
-                        .expect("must exist"),
-                )
-            })
+            .chain_graph()
+            .transactions_in_chain()
+            .map(|(pos, tx)| (*pos, tx))
     }
 
     /// Return the balance, separated into available, trusted-pending, untrusted-pending and immature
@@ -512,7 +602,7 @@ impl Wallet {
     /// # use bdk::{Wallet, KeychainKind};
     /// # use bdk::bitcoin::Network;
     /// # use bdk::database::MemoryDatabase;
-    /// let wallet = Wallet::new("wpkh(tprv8ZgxMBicQKsPe73PBRSmNbTfbcsZnwWhz5eVmhHpi31HW29Z7mc9B4cWGRQzopNUzZUT391DeDJxL2PefNunWyLgqCKRMDkU1s2s8bAfoSk/84'/0'/0'/0/*)", None, Network::Testnet, MemoryDatabase::new())?;
+    /// let wallet = Wallet::new_no_persist("wpkh(tprv8ZgxMBicQKsPe73PBRSmNbTfbcsZnwWhz5eVmhHpi31HW29Z7mc9B4cWGRQzopNUzZUT391DeDJxL2PefNunWyLgqCKRMDkU1s2s8bAfoSk/84'/0'/0'/0/*)", None, Network::Testnet, MemoryDatabase::new())?;
     /// for secret_key in wallet.get_signers(KeychainKind::External).signers().iter().filter_map(|s| s.descriptor_secret_key()) {
     ///     // secret_key: tprv8ZgxMBicQKsPe73PBRSmNbTfbcsZnwWhz5eVmhHpi31HW29Z7mc9B4cWGRQzopNUzZUT391DeDJxL2PefNunWyLgqCKRMDkU1s2s8bAfoSk/84'/0'/0'/0/*
     ///     println!("secret_key: {}", secret_key);
@@ -553,7 +643,7 @@ impl Wallet {
     /// ```
     ///
     /// [`TxBuilder`]: crate::TxBuilder
-    pub fn build_tx(&mut self) -> TxBuilder<'_, DefaultCoinSelectionAlgorithm, CreateTx> {
+    pub fn build_tx(&mut self) -> TxBuilder<'_, D, DefaultCoinSelectionAlgorithm, CreateTx> {
         TxBuilder {
             wallet: alloc::rc::Rc::new(core::cell::RefCell::new(self)),
             params: TxParams::default(),
@@ -566,7 +656,10 @@ impl Wallet {
         &mut self,
         coin_selection: Cs,
         params: TxParams,
-    ) -> Result<(psbt::PartiallySignedTransaction, TransactionDetails), Error> {
+    ) -> Result<(psbt::PartiallySignedTransaction, TransactionDetails), Error>
+    where
+        D: persist::Backend,
+    {
         let external_descriptor = self
             .keychain_tracker
             .txout_index
@@ -824,10 +917,20 @@ impl Wallet {
         // get drain script
         let drain_script = match params.drain_to {
             Some(ref drain_recipient) => drain_recipient.clone(),
-            None => self
-                .get_internal_address(AddressIndex::New)
-                .address
-                .script_pubkey(),
+            None => {
+                let change_keychain = self.map_keychain(KeychainKind::Internal);
+                let ((index, spk), changeset) = self
+                    .keychain_tracker
+                    .txout_index
+                    .next_unused_spk(&change_keychain);
+                let spk = spk.clone();
+                self.keychain_tracker
+                    .txout_index
+                    .mark_used(&change_keychain, index);
+                self.persist.stage(changeset.into());
+                self.persist.commit().expect("TODO");
+                spk
+            }
         };
 
         let coin_selection = coin_selection.coin_select(
@@ -961,7 +1064,7 @@ impl Wallet {
     pub fn build_fee_bump(
         &mut self,
         txid: Txid,
-    ) -> Result<TxBuilder<'_, DefaultCoinSelectionAlgorithm, BumpFee>, Error> {
+    ) -> Result<TxBuilder<'_, D, DefaultCoinSelectionAlgorithm, BumpFee>, Error> {
         let graph = self.keychain_tracker.graph();
         let txout_index = &self.keychain_tracker.txout_index;
         let tx_and_height = self.keychain_tracker.chain_graph().get_tx_in_chain(txid);
@@ -981,11 +1084,12 @@ impl Wallet {
             return Err(Error::IrreplaceableTransaction);
         }
 
-        let fee = graph
-            .calculate_fee(&tx)
-            .ok_or(Error::FeeRateUnavailable)?
-            .try_into()
-            .map_err(|_| Error::FeeRateUnavailable)?;
+        let fee = graph.calculate_fee(&tx).ok_or(Error::FeeRateUnavailable)?;
+        if fee < 0 {
+            // It's available but it's wrong so let's say it's unavailable
+            return Err(Error::FeeRateUnavailable)?;
+        }
+        let fee = fee as u64;
         let feerate = FeeRate::from_wu(fee, tx.weight());
 
         // remove the inputs from the tx and process them
@@ -1607,6 +1711,39 @@ impl Wallet {
             .unwrap()
             .1
             .to_string()
+    }
+
+    /// Applies an update to the wallet and stages the changes (but does not [`commit`] them).
+    ///
+    /// Usually you create an `update` by interacting with some blockchain data source and inserting
+    /// transactions related to your wallet into it.
+    ///
+    /// [`commit`]: Self::commit
+    pub fn apply_udpate<Tx>(&mut self, update: Update<Tx>) -> Result<(), UpdateError>
+    where
+        D: persist::Backend,
+        Tx: IntoOwned<Transaction> + Clone,
+    {
+        let changeset = self.keychain_tracker.apply_update(update)?;
+        self.persist.stage(changeset);
+        Ok(())
+    }
+
+    /// Commits all curently [`staged`] changed to the persistence backend returning and error when this fails.
+    ///
+    /// [`staged`]: Self::staged
+    pub fn commit(&mut self) -> Result<(), D::WriteError>
+    where
+        D: persist::Backend,
+    {
+        self.persist.commit()
+    }
+
+    /// Returns the changes that will be staged with the next call to [`commit`].
+    ///
+    /// [`commit`]: Self::commit
+    pub fn staged(&self) -> &ChangeSet {
+        self.persist.staged()
     }
 }
 
