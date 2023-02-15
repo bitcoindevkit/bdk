@@ -19,6 +19,7 @@ use alloc::{
     sync::Arc,
     vec::Vec,
 };
+pub use bdk_chain::keychain::Balance;
 use bdk_chain::{
     chain_graph,
     keychain::{KeychainChangeSet, KeychainScan, KeychainTracker},
@@ -542,46 +543,10 @@ impl<D> Wallet<D> {
     /// Note that this method only operates on the internal database, which first needs to be
     /// [`Wallet::sync`] manually.
     pub fn get_balance(&self) -> Balance {
-        let mut immature = 0;
-        let mut trusted_pending = 0;
-        let mut untrusted_pending = 0;
-        let mut confirmed = 0;
-        let last_sync_height = match self.keychain_tracker.chain().latest_checkpoint() {
-            Some(last_sync_height) => last_sync_height.height,
-            // TODO: update this when we're allowed to add arbitary stuff to the mempool
-            None => return Balance::default(),
-        };
-
-        for ((keychain, _), utxo) in self.keychain_tracker.full_utxos() {
-            let confirmation_time = utxo.chain_position;
-            let is_coinbase = self
-                .keychain_tracker
-                .graph()
-                .get_tx(utxo.outpoint.txid)
-                .expect("must exist")
-                .is_coin_base();
-
-            match confirmation_time {
-                ConfirmationTime::Confirmed { height, .. } => {
-                    if is_coinbase && last_sync_height - height < COINBASE_MATURITY {
-                        immature += utxo.txout.value;
-                    } else {
-                        confirmed += utxo.txout.value;
-                    }
-                }
-                ConfirmationTime::Unconfirmed => match keychain {
-                    KeychainKind::External => untrusted_pending += utxo.txout.value,
-                    KeychainKind::Internal => trusted_pending += utxo.txout.value,
-                },
-            }
-        }
-
-        Balance {
-            immature,
-            trusted_pending,
-            untrusted_pending,
-            confirmed,
-        }
+        self.keychain_tracker.balance(|keychain| match keychain {
+            KeychainKind::External => false,
+            KeychainKind::Internal => true,
+        })
     }
 
     /// Add an external signer
