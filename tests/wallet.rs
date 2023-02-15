@@ -3240,3 +3240,72 @@ fn test_taproot_load_descriptor_duplicated_keys() {
         "bcrt1pvysh4nmh85ysrkpwtrr8q8gdadhgdejpy6f9v424a8v9htjxjhyqw9c5s5"
     );
 }
+
+#[test]
+/// The wallet should re-use previously allocated change addresses when the tx using them is cancelled
+fn test_tx_cancellation() {
+    macro_rules! new_tx {
+        ($wallet:expr) => {{
+            let addr = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap();
+            let mut builder = $wallet.build_tx();
+            builder.add_recipient(addr.script_pubkey(), 10_000);
+
+            let (psbt, _) = builder.finish().unwrap();
+
+            psbt
+        }};
+    }
+
+    let (mut wallet, _) =
+        get_funded_wallet_with_change(get_test_wpkh(), Some(get_test_tr_single_sig_xprv()));
+
+    let psbt1 = new_tx!(wallet);
+    let change_derivation_1 = psbt1
+        .unsigned_tx
+        .output
+        .iter()
+        .find_map(|txout| wallet.derivation_of_spk(&txout.script_pubkey))
+        .unwrap();
+    assert_eq!(change_derivation_1, (KeychainKind::Internal, 0));
+
+    let psbt2 = new_tx!(wallet);
+
+    let change_derivation_2 = psbt2
+        .unsigned_tx
+        .output
+        .iter()
+        .find_map(|txout| wallet.derivation_of_spk(&txout.script_pubkey))
+        .unwrap();
+    assert_eq!(change_derivation_2, (KeychainKind::Internal, 1));
+
+    wallet.cancel_tx(&psbt1.extract_tx());
+
+    let psbt3 = new_tx!(wallet);
+    let change_derivation_3 = psbt3
+        .unsigned_tx
+        .output
+        .iter()
+        .find_map(|txout| wallet.derivation_of_spk(&txout.script_pubkey))
+        .unwrap();
+    assert_eq!(change_derivation_3, (KeychainKind::Internal, 0));
+
+    let psbt3 = new_tx!(wallet);
+    let change_derivation_3 = psbt3
+        .unsigned_tx
+        .output
+        .iter()
+        .find_map(|txout| wallet.derivation_of_spk(&txout.script_pubkey))
+        .unwrap();
+    assert_eq!(change_derivation_3, (KeychainKind::Internal, 2));
+
+    wallet.cancel_tx(&psbt3.extract_tx());
+
+    let psbt3 = new_tx!(wallet);
+    let change_derivation_4 = psbt3
+        .unsigned_tx
+        .output
+        .iter()
+        .find_map(|txout| wallet.derivation_of_spk(&txout.script_pubkey))
+        .unwrap();
+    assert_eq!(change_derivation_4, (KeychainKind::Internal, 2));
+}

@@ -331,6 +331,13 @@ impl<D> Wallet<D> {
             .is_some()
     }
 
+    /// Finds how the wallet derived the script pubkey `spk`.
+    ///
+    /// Will only return `Some(_)` if the wallet has given out the spk.
+    pub fn derivation_of_spk(&self, spk: &Script) -> Option<(KeychainKind, u32)> {
+        self.keychain_tracker.txout_index.index_of_spk(spk).copied()
+    }
+
     /// Return the list of unspent outputs of this wallet
     ///
     /// Note that this method only operates on the internal database, which first needs to be
@@ -1403,6 +1410,22 @@ impl<D> Wallet<D> {
     /// The index of the next address that you would get if you were to ask the wallet for a new address
     pub fn next_derivation_index(&self, keychain: KeychainKind) -> u32 {
         self.keychain_tracker.txout_index.next_index(&keychain).0
+    }
+
+    /// Informs the wallet that you no longer intend to broadcast a tx that was built from it.
+    ///
+    /// This frees up the change address used when creating the tx for use in future transactions.
+    ///
+    // TODO: Make this free up reserved utxos when that's implemented
+    pub fn cancel_tx(&mut self, tx: &Transaction) {
+        let txout_index = &mut self.keychain_tracker.txout_index;
+        for txout in &tx.output {
+            if let Some(&(keychain, index)) = txout_index.index_of_spk(&txout.script_pubkey) {
+                // NOTE: unmark_used will **not** make something unused if it has actually been used
+                // by a tx in the tracker. It only removes the superficial marking.
+                txout_index.unmark_used(&keychain, index);
+            }
+        }
     }
 
     fn map_keychain(&self, keychain: KeychainKind) -> KeychainKind {
