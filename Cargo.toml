@@ -37,6 +37,7 @@ js-sys = "0.3"
 [features]
 default = ["std"]
 std = []
+file-store = [ "std", "bdk_chain/file_store"]
 compiler = ["miniscript/compiler"]
 all-keys = ["keys-bip39"]
 keys-bip39 = ["bip39"]

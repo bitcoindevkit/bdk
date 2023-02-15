@@ -6,7 +6,7 @@ use bitcoin::{BlockHash, Network, Transaction, TxOut};
 
 /// Return a fake wallet that appears to be funded for testing.
 pub fn get_funded_wallet(descriptor: &str) -> (Wallet, bitcoin::Txid) {
-    let mut wallet = Wallet::new(descriptor, None, Network::Regtest).unwrap();
+    let mut wallet = Wallet::new_no_persist(descriptor, None, Network::Regtest).unwrap();
     let address = wallet.get_address(AddressIndex::New).address;
 
     let tx = Transaction {

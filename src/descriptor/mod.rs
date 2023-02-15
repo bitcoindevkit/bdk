@@ -39,9 +39,7 @@ pub mod checksum;
 pub mod dsl;
 pub mod error;
 pub mod policy;
-mod spk_iter;
 pub mod template;
-pub use spk_iter::SpkIter;
 
 pub use self::checksum::calc_checksum;
 use self::checksum::calc_checksum_bytes;
