@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.27.1]
+
+### Summary
+
+Fixes [RUSTSEC-2022-0090], this issue is only applicable if you are using the optional sqlite database feature.
+
+[RUSTSEC-2022-0090]: https://rustsec.org/advisories/RUSTSEC-2022-0090
+
+### Changed
+
+- Update optional sqlite dependency from 0.27.0 to 0.28.0. #867
+
 ## [v0.27.0]
 
 ### Summary
@@ -629,4 +641,5 @@ final transaction is created by calling `finish` on the builder.
 [v0.25.0]: https://github.com/bitcoindevkit/bdk/compare/v0.24.0...v0.25.0
 [v0.26.0]: https://github.com/bitcoindevkit/bdk/compare/v0.25.0...v0.26.0
 [v0.27.0]: https://github.com/bitcoindevkit/bdk/compare/v0.26.0...v0.27.0
-[Unreleased]: https://github.com/bitcoindevkit/bdk/compare/v0.27.0...HEAD
+[v0.27.1]: https://github.com/bitcoindevkit/bdk/compare/v0.27.0...v0.27.1
+[Unreleased]: https://github.com/bitcoindevkit/bdk/compare/v0.27.1...HEAD
