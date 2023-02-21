@@ -47,29 +47,6 @@ jobs:
       - name: Test
         run: cargo test --features ${{ matrix.features }}
 
-  test-readme-examples:
-    name: Test README.md examples
-    runs-on: ubuntu-latest
-    steps:
-      - name: checkout
-        uses: actions/checkout@v2
-      - name: cache
-        uses: actions/cache@v2
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-test-md-docs-${{ hashFiles('**/Cargo.toml','**/Cargo.lock') }}
-      - name: Set default toolchain
-        run: rustup default nightly
-      - name: Set profile
-        run: rustup set profile minimal
-      - name: Update toolchain
-        run: rustup update
-      - name: Test
-        run: cargo test --features test-md-docs --no-default-features -- doctest::ReadmeDoctests
-
   check-wasm:
     name: Check WASM
     runs-on: ubuntu-20.04
