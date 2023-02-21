@@ -19,7 +19,7 @@
 //! # use bdk::*;
 //! # use bdk::wallet::tx_builder::CreateTx;
 //! # let to_address = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap();
-//! # let wallet = doctest_wallet!();
+//! # let mut wallet = doctest_wallet!();
 //! // create a TxBuilder from a wallet
 //! let mut tx_builder = wallet.build_tx();
 //!
@@ -80,7 +80,7 @@ impl TxBuilderContext for BumpFee {}
 /// # use bdk::wallet::tx_builder::*;
 /// # use bitcoin::*;
 /// # use core::str::FromStr;
-/// # let wallet = doctest_wallet!();
+/// # let mut wallet = doctest_wallet!();
 /// # let addr1 = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap();
 /// # let addr2 = addr1.clone();
 /// // chaining
@@ -242,7 +242,7 @@ impl<'a, D, Cs: CoinSelectionAlgorithm, Ctx: TxBuilderContext> TxBuilder<'a, D, 
     /// # use bitcoin::*;
     /// # use bdk::*;
     /// # let to_address = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap();
-    /// # let wallet = doctest_wallet!();
+    /// # let mut wallet = doctest_wallet!();
     /// let mut path = BTreeMap::new();
     /// path.insert("aabbccdd".to_string(), vec![0, 1]);
     ///
@@ -623,7 +623,7 @@ impl<'a, D, Cs: CoinSelectionAlgorithm> TxBuilder<'a, D, Cs, CreateTx> {
     /// # use bdk::*;
     /// # use bdk::wallet::tx_builder::CreateTx;
     /// # let to_address = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap();
-    /// # let wallet = doctest_wallet!();
+    /// # let mut wallet = doctest_wallet!();
     /// let mut tx_builder = wallet.build_tx();
     ///
     /// tx_builder

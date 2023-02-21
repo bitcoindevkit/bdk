@@ -31,64 +31,18 @@
 //! * It is built to be cross-platform: the core logic works on desktop, mobile, and even WebAssembly.
 //! * It is very easy to extend: developers can implement customized logic for blockchain backends, databases, signers, coin selection, and more, without having to fork and modify this library.
 //!
-//! # A Tour of BDK
-//!
-//! BDK consists of a number of modules that provide a range of functionality
-//! essential for implementing descriptor based Bitcoin wallet applications in Rust. In this
-//! section, we will take a brief tour of BDK, summarizing the major APIs and
-//! their uses.
-//!
-//! The easiest way to get started is to add bdk to your dependencies with the default features.
-//! The default features include a simple key-value database ([`sled`](sled)) to cache
-//! blockchain data and an [electrum](https://docs.rs/electrum-client/) blockchain client to
-//! interact with the bitcoin P2P network.
-//!
-//! # Examples
-#![cfg_attr(
-    feature = "electrum",
-    doc = r##"
-## Sync the balance of a descriptor
-
-```no_run
-use bdk::{Wallet, SyncOptions};
-use bdk::database::MemoryDatabase;
-use bdk::blockchain::ElectrumBlockchain;
-use bdk::electrum_client::Client;
-
-fn main() -> Result<(), bdk::Error> {
-    let client = Client::new("ssl://electrum.blockstream.info:60002")?;
-    let blockchain = ElectrumBlockchain::from(client);
-    let wallet = Wallet::new(
-        "wpkh([c258d2e4/84h/1h/0h]tpubDDYkZojQFQjht8Tm4jsS3iuEmKjTiEGjG6KnuFNKKJb5A6ZUCUZKdvLdSDWofKi4ToRCwb9poe1XdqfUnP4jaJjCB2Zwv11ZLgSbnZSNecE/0/*)",
-        Some("wpkh([c258d2e4/84h/1h/0h]tpubDDYkZojQFQjht8Tm4jsS3iuEmKjTiEGjG6KnuFNKKJb5A6ZUCUZKdvLdSDWofKi4ToRCwb9poe1XdqfUnP4jaJjCB2Zwv11ZLgSbnZSNecE/1/*)"),
-        bitcoin::Network::Testnet,
-        MemoryDatabase::default(),
-    )?;
-
-    wallet.sync(&blockchain, SyncOptions::default())?;
-
-    println!("Descriptor balance: {} SAT", wallet.get_balance()?);
-
-    Ok(())
-}
-```
-"##
-)]
-//!
 //! ## Generate a few addresses
 //!
 //! ### Example
 //! ```
 //! use bdk::{Wallet};
-//! use bdk::database::MemoryDatabase;
 //! use bdk::wallet::AddressIndex::New;
 //!
 //! fn main() -> Result<(), bdk::Error> {
-//! let wallet = Wallet::new(
-//!         "wpkh([c258d2e4/84h/1h/0h]tpubDDYkZojQFQjht8Tm4jsS3iuEmKjTiEGjG6KnuFNKKJb5A6ZUCUZKdvLdSDWofKi4ToRCwb9poe1XdqfUnP4jaJjCB2Zwv11ZLgSbnZSNecE/0/*)",
-//!         Some("wpkh([c258d2e4/84h/1h/0h]tpubDDYkZojQFQjht8Tm4jsS3iuEmKjTiEGjG6KnuFNKKJb5A6ZUCUZKdvLdSDWofKi4ToRCwb9poe1XdqfUnP4jaJjCB2Zwv11ZLgSbnZSNecE/1/*)"),
-//!         bitcoin::Network::Testnet,
-//!         MemoryDatabase::default(),
+//!     let mut wallet = Wallet::new_no_persist(
+//!          "wpkh([c258d2e4/84h/1h/0h]tpubDDYkZojQFQjht8Tm4jsS3iuEmKjTiEGjG6KnuFNKKJb5A6ZUCUZKdvLdSDWofKi4ToRCwb9poe1XdqfUnP4jaJjCB2Zwv11ZLgSbnZSNecE/0/*)",
+//!          Some("wpkh([c258d2e4/84h/1h/0h]tpubDDYkZojQFQjht8Tm4jsS3iuEmKjTiEGjG6KnuFNKKJb5A6ZUCUZKdvLdSDWofKi4ToRCwb9poe1XdqfUnP4jaJjCB2Zwv11ZLgSbnZSNecE/1/*)"),
+//!          bitcoin::Network::Testnet,
 //!     )?;
 //!
 //!     println!("Address #0: {}", wallet.get_address(New));
@@ -98,52 +52,6 @@ fn main() -> Result<(), bdk::Error> {
 //!     Ok(())
 //! }
 //! ```
-#![cfg_attr(
-    feature = "electrum",
-    doc = r##"
-## Create a transaction
-
-```no_run
-use bdk::{FeeRate, Wallet, SyncOptions};
-use bdk::database::MemoryDatabase;
-use bdk::blockchain::ElectrumBlockchain;
-use bdk::electrum_client::Client;
-
-use bitcoin::consensus::serialize;
-use bdk::wallet::AddressIndex::New;
-
-fn main() -> Result<(), bdk::Error> {
-    let client = Client::new("ssl://electrum.blockstream.info:60002")?;
-    let wallet = Wallet::new(
-        "wpkh([c258d2e4/84h/1h/0h]tpubDDYkZojQFQjht8Tm4jsS3iuEmKjTiEGjG6KnuFNKKJb5A6ZUCUZKdvLdSDWofKi4ToRCwb9poe1XdqfUnP4jaJjCB2Zwv11ZLgSbnZSNecE/0/*)",
-        Some("wpkh([c258d2e4/84h/1h/0h]tpubDDYkZojQFQjht8Tm4jsS3iuEmKjTiEGjG6KnuFNKKJb5A6ZUCUZKdvLdSDWofKi4ToRCwb9poe1XdqfUnP4jaJjCB2Zwv11ZLgSbnZSNecE/1/*)"),
-        bitcoin::Network::Testnet,
-        MemoryDatabase::default(),
-    )?;
-    let blockchain = ElectrumBlockchain::from(client);
-
-    wallet.sync(&blockchain, SyncOptions::default())?;
-
-    let send_to = wallet.get_address(New);
-    let (psbt, details) = {
-        let mut builder =  wallet.build_tx();
-        builder
-            .add_recipient(send_to.script_pubkey(), 50_000)
-            .enable_rbf()
-            .do_not_spend_change()
-            .fee_rate(FeeRate::from_sat_per_vb(5.0));
-        builder.finish()?
-    };
-
-    println!("Transaction details: {:#?}", details);
-    println!("Unsigned PSBT: {}", &psbt);
-
-    Ok(())
-}
-```
-"##
-)]
-//!
 //! ## Sign a transaction
 //!
 //! ```no_run
@@ -152,14 +60,12 @@ fn main() -> Result<(), bdk::Error> {
 //! use bitcoin::util::psbt::PartiallySignedTransaction as Psbt;
 //!
 //! use bdk::{Wallet, SignOptions};
-//! use bdk::database::MemoryDatabase;
 //!
 //! fn main() -> Result<(), bdk::Error> {
-//!     let wallet = Wallet::new(
+//!     let wallet = Wallet::new_no_persist(
 //!         "wpkh([c258d2e4/84h/1h/0h]tprv8griRPhA7342zfRyB6CqeKF8CJDXYu5pgnj1cjL1u2ngKcJha5jjTRimG82ABzJQ4MQe71CV54xfn25BbhCNfEGGJZnxvCDQCd6JkbvxW6h/0/*)",
 //!         Some("wpkh([c258d2e4/84h/1h/0h]tprv8griRPhA7342zfRyB6CqeKF8CJDXYu5pgnj1cjL1u2ngKcJha5jjTRimG82ABzJQ4MQe71CV54xfn25BbhCNfEGGJZnxvCDQCd6JkbvxW6h/1/*)"),
 //!         bitcoin::Network::Testnet,
-//!         MemoryDatabase::default(),
 //!     )?;
 //!
 //!     let psbt = "...";
@@ -193,8 +99,9 @@ fn main() -> Result<(), bdk::Error> {
 #[macro_use]
 extern crate std;
 
+#[doc(hidden)]
 #[macro_use]
-extern crate alloc;
+pub extern crate alloc;
 
 pub extern crate bitcoin;
 #[cfg(feature = "hardware-signer")]

@@ -15,7 +15,6 @@
 //! used with hardware wallets.
 //! ```no_run
 //! # use bdk::bitcoin::Network;
-//! # use bdk::database::MemoryDatabase;
 //! # use bdk::signer::SignerOrdering;
 //! # use bdk::wallet::hardwaresigner::HWISigner;
 //! # use bdk::wallet::AddressIndex::New;
@@ -31,11 +30,10 @@
 //! let first_device = devices.remove(0)?;
 //! let custom_signer = HWISigner::from_device(&first_device, HWIChain::Test)?;
 //!
-//! # let mut wallet = Wallet::new(
+//! # let mut wallet = Wallet::new_no_persist(
 //! #     "",
 //! #     None,
 //! #     Network::Testnet,
-//! #     MemoryDatabase::default(),
 //! # )?;
 //! #
 //! // Adding the hardware signer to the BDK wallet

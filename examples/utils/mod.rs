@@ -2,11 +2,11 @@ pub(crate) mod tx {
 
     use std::str::FromStr;
 
-    use bdk::{database::BatchDatabase, SignOptions, Wallet};
+    use bdk::{SignOptions, Wallet, persist};
     use bitcoin::{Address, Transaction};
 
-    pub fn build_signed_tx<D: BatchDatabase>(
-        wallet: &Wallet<D>,
+    pub fn build_signed_tx<()>(
+        wallet: &Wallet<()>,
         recipient_address: &str,
         amount: u64,
     ) -> Transaction {
@@ -14,6 +14,7 @@ pub(crate) mod tx {
         let mut tx_builder = wallet.build_tx();
 
         let to_address = Address::from_str(recipient_address).unwrap();
+
 
         // Set recipient of the transaction
         tx_builder.set_recipients(vec![(to_address.script_pubkey(), amount)]);

@@ -20,7 +20,6 @@
 //! ```
 //! # use std::str::FromStr;
 //! # use bitcoin::*;
-//! # use bdk::database::*;
 //! # use bdk::wallet::export::*;
 //! # use bdk::*;
 //! let import = r#"{
@@ -30,11 +29,10 @@
 //! }"#;
 //!
 //! let import = FullyNodedExport::from_str(import)?;
-//! let wallet = Wallet::new(
+//! let wallet = Wallet::new_no_persist(
 //!     &import.descriptor(),
 //!     import.change_descriptor().as_ref(),
 //!     Network::Testnet,
-//!     MemoryDatabase::default(),
 //! )?;
 //! # Ok::<_, bdk::Error>(())
 //! ```
@@ -42,14 +40,12 @@
 //! ### Export a `Wallet`
 //! ```
 //! # use bitcoin::*;
-//! # use bdk::database::*;
 //! # use bdk::wallet::export::*;
 //! # use bdk::*;
-//! let wallet = Wallet::new(
+//! let wallet = Wallet::new_no_persist(
 //!     "wpkh([c258d2e4/84h/1h/0h]tpubDD3ynpHgJQW8VvWRzQ5WFDCrs4jqVFGHB3vLC3r49XHJSqP8bHKdK4AriuUKLccK68zfzowx7YhmDN8SiSkgCDENUFx9qVw65YyqM78vyVe/0/*)",
 //!     Some("wpkh([c258d2e4/84h/1h/0h]tpubDD3ynpHgJQW8VvWRzQ5WFDCrs4jqVFGHB3vLC3r49XHJSqP8bHKdK4AriuUKLccK68zfzowx7YhmDN8SiSkgCDENUFx9qVw65YyqM78vyVe/1/*)"),
 //!     Network::Testnet,
-//!     MemoryDatabase::default()
 //! )?;
 //! let export = FullyNodedExport::export_wallet(&wallet, "exported wallet", true)
 //!     .map_err(ToString::to_string)
@@ -232,7 +228,7 @@ mod test {
         change_descriptor: Option<&str>,
         network: Network,
     ) -> Wallet<()> {
-        let mut wallet = Wallet::new(descriptor, change_descriptor, (), network).unwrap();
+        let mut wallet = Wallet::new_no_persist(descriptor, change_descriptor, network).unwrap();
         let transaction = Transaction {
             input: vec![],
             output: vec![],
