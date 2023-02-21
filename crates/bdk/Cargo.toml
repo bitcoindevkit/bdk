@@ -38,6 +38,7 @@ compiler = ["miniscript/compiler"]
 all-keys = ["keys-bip39"]
 keys-bip39 = ["bip39"]
 hardware-signer = ["hwi"]
+test-hardware-signer = ["hardware-signer"]
 
 [dev-dependencies]
 lazy_static = "1.4"
