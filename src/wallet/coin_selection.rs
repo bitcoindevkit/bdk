@@ -101,12 +101,8 @@ use alloc::vec::Vec;
 use bitcoin::consensus::encode::serialize;
 use bitcoin::Script;
 
-#[cfg(test)]
-use assert_matches::assert_matches;
 use core::convert::TryInto;
 use rand::seq::SliceRandom;
-#[cfg(not(test))]
-use rand::thread_rng;
 
 /// Default coin selection algorithm used by [`TxBuilder`](super::tx_builder::TxBuilder) if not
 /// overridden
@@ -635,16 +631,7 @@ impl BranchAndBoundCoinSelection {
         drain_script: &Script,
         fee_rate: FeeRate,
     ) -> CoinSelectionResult {
-        #[cfg(not(test))]
-        optional_utxos.shuffle(&mut thread_rng());
-        #[cfg(test)]
-        {
-            use rand::{rngs::StdRng, SeedableRng};
-            let seed = [0; 32];
-            let mut rng: StdRng = SeedableRng::from_seed(seed);
-            optional_utxos.shuffle(&mut rng);
-        }
-
+        optional_utxos.shuffle(&mut rand::thread_rng());
         let selected_utxos = optional_utxos.into_iter().fold(
             (curr_value, vec![]),
             |(mut amount, mut utxos), utxo| {
@@ -690,6 +677,7 @@ impl BranchAndBoundCoinSelection {
 
 #[cfg(test)]
 mod test {
+    use assert_matches::assert_matches;
     use core::str::FromStr;
 
     use bdk_chain::ConfirmationTime;

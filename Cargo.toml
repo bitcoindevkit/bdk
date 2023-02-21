@@ -26,10 +26,6 @@ rand = "^0.8"
 hwi = { version = "0.5", optional = true, features = [ "use-miniscript"] }
 bip39 = { version = "1.0.1", optional = true }
 
-# Platform-specific dependencies
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-tokio = { version = "1", features = ["rt", "macros"] }
-
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = "0.2"
 js-sys = "0.3"
@@ -58,8 +54,6 @@ env_logger = "0.7"
 # Move back to importing from rust-bitcoin once https://github.com/rust-bitcoin/rust-bitcoin/pull/1342 is released
 base64 = "^0.13"
 assert_matches = "1.5.0"
-# zip versions after 0.6.3 don't work with our MSRV 1.57.0
-zip = "=0.6.3"
 
 [[example]]
 name = "miniscriptc"
@@ -76,9 +70,7 @@ name = "mnemonic_to_descriptors"
 path = "examples/mnemonic_to_descriptors.rs"
 required-features = ["all-keys"]
 
-[workspace]
-members = ["bdk_test_client"]
 [package.metadata.docs.rs]
-all-feautres = true
+all-features = true
 # defines the configuration attribute `docsrs`
 rustdoc-args = ["--cfg", "docsrs"]
