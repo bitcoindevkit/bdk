@@ -40,12 +40,12 @@ jobs:
       - name: Update toolchain
         run: rustup update
       - name: Build
-        run: cargo build --features ${{ matrix.features }}
+        run: cargo build ${{ matrix.features }}
       - name: Clippy
         if: ${{ matrix.rust.clippy }}
         run: cargo clippy --all-targets --features ${{ matrix.features }} -- -D warnings
       - name: Test
-        run: cargo test --features ${{ matrix.features }}
+        run: cargo test ${{ matrix.features }}
 
   check-wasm:
     name: Check WASM
