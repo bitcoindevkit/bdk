@@ -495,6 +495,8 @@ macro_rules! apply_modifier {
 /// let (descriptor, key_map, networks) = bdk::descriptor!(wpkh(my_key))?;
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
+///
+/// [`Vec`]: alloc::vec::Vec
 #[macro_export]
 macro_rules! descriptor {
     ( bare ( $( $minisc:tt )* ) ) => ({
