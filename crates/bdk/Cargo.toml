@@ -8,7 +8,7 @@ description = "A modern, lightweight, descriptor-based wallet library"
 keywords = ["bitcoin", "wallet", "descriptor", "psbt"]
 readme = "README.md"
 license = "MIT OR Apache-2.0"
-authors.workspace = true
+authors = ["Bitcoin Dev Kit Developers"]
 edition = "2018"
 
 
