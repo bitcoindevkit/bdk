@@ -336,9 +336,6 @@ impl<D> Wallet<D> {
     }
 
     /// Return the list of unspent outputs of this wallet
-    ///
-    /// Note that this method only operates on the internal database, which first needs to be
-    /// [`Wallet::sync`] manually.
     pub fn list_unspent(&self) -> Vec<LocalUtxo> {
         self.keychain_tracker
             .full_utxos()
@@ -416,9 +413,6 @@ impl<D> Wallet<D> {
     ///
     /// Optionally fill the [`TransactionDetails::transaction`] field with the raw transaction if
     /// `include_raw` is `true`.
-    ///
-    /// Note that this method only operates on the internal database, which first needs to be
-    /// [`Wallet::sync`] manually.
     pub fn get_tx(&self, txid: Txid, include_raw: bool) -> Option<TransactionDetails> {
         let (&confirmation_time, tx) = self.keychain_tracker.chain_graph().get_tx_in_chain(txid)?;
         let graph = self.keychain_tracker.graph();
@@ -535,9 +529,6 @@ impl<D> Wallet<D> {
 
     /// Return the balance, separated into available, trusted-pending, untrusted-pending and immature
     /// values.
-    ///
-    /// Note that this method only operates on the internal database, which first needs to be
-    /// [`Wallet::sync`] manually.
     pub fn get_balance(&self) -> Balance {
         self.keychain_tracker.balance(|keychain| match keychain {
             KeychainKind::External => false,
