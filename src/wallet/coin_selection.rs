@@ -27,7 +27,6 @@
 //! # use std::str::FromStr;
 //! # use bitcoin::*;
 //! # use bdk::wallet::{self, coin_selection::*};
-//! # use bdk::database::Database;
 //! # use bdk::*;
 //! # use bdk::wallet::coin_selection::decide_change;
 //! # const TXIN_BASE_WEIGHT: usize = (32 + 4 + 4) * 4;
@@ -37,7 +36,6 @@
 //! impl CoinSelectionAlgorithm for AlwaysSpendEverything {
 //!     fn coin_select(
 //!         &self,
-//!         database: &D,
 //!         required_utxos: Vec<WeightedUtxo>,
 //!         optional_utxos: Vec<WeightedUtxo>,
 //!         fee_rate: FeeRate,
@@ -79,7 +77,7 @@
 //!     }
 //! }
 //!
-//! # let wallet = doctest_wallet!();
+//! # let mut wallet = doctest_wallet!();
 //! // create wallet, sync, ...
 //!
 //! let to_address = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap();

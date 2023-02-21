@@ -21,7 +21,6 @@
 //! # use bitcoin::*;
 //! # use bitcoin::util::psbt;
 //! # use bdk::signer::*;
-//! # use bdk::database::*;
 //! # use bdk::*;
 //! # #[derive(Debug)]
 //! # struct CustomHSM;
@@ -70,7 +69,7 @@
 //! let custom_signer = CustomSigner::connect();
 //!
 //! let descriptor = "wpkh(tpubD6NzVbkrYhZ4Xferm7Pz4VnjdcDPFyjVu5K4iZXQ4pVN8Cks4pHVowTBXBKRhX64pkRyJZJN5xAKj4UDNnLPb5p2sSKXhewoYx5GbTdUFWq/*)";
-//! let mut wallet = Wallet::new(descriptor, None, Network::Testnet, MemoryDatabase::default())?;
+//! let mut wallet = Wallet::new_no_persist(descriptor, None, Network::Testnet)?;
 //! wallet.add_signer(
 //!     KeychainKind::External,
 //!     SignerOrdering(200),

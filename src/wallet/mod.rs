@@ -25,17 +25,15 @@ use bdk_chain::{
     keychain::{KeychainChangeSet, KeychainScan, KeychainTracker},
     sparse_chain, BlockId, ConfirmationTime, IntoOwned,
 };
-use bitcoin::secp256k1::Secp256k1;
-use core::fmt;
-use core::ops::Deref;
-
 use bitcoin::consensus::encode::serialize;
+use bitcoin::secp256k1::Secp256k1;
 use bitcoin::util::psbt;
 use bitcoin::{
     Address, BlockHash, EcdsaSighashType, LockTime, Network, OutPoint, SchnorrSighashType, Script,
     Sequence, Transaction, TxOut, Txid, Witness,
 };
-
+use core::fmt;
+use core::ops::Deref;
 use miniscript::psbt::{PsbtExt, PsbtInputExt, PsbtInputSatisfier};
 
 #[allow(unused_imports)]
@@ -79,10 +77,8 @@ const COINBASE_MATURITY: u32 = 100;
 /// Its main components are:
 ///
 /// 1. output *descriptors* from which it can derive addresses.
-/// 2. A [`Database`] where it tracks transactions and utxos related to the descriptors.
-/// 3. [`signer`]s that can contribute signatures to addresses instantiated from the descriptors.
+/// 2. [`signer`]s that can contribute signatures to addresses instantiated from the descriptors.
 ///
-/// [`Database`]: crate::database::Database
 /// [`signer`]: crate::signer
 #[derive(Debug)]
 pub struct Wallet<D = ()> {
@@ -573,8 +569,7 @@ impl<D> Wallet<D> {
     /// ```
     /// # use bdk::{Wallet, KeychainKind};
     /// # use bdk::bitcoin::Network;
-    /// # use bdk::database::MemoryDatabase;
-    /// let wallet = Wallet::new_no_persist("wpkh(tprv8ZgxMBicQKsPe73PBRSmNbTfbcsZnwWhz5eVmhHpi31HW29Z7mc9B4cWGRQzopNUzZUT391DeDJxL2PefNunWyLgqCKRMDkU1s2s8bAfoSk/84'/0'/0'/0/*)", None, Network::Testnet, MemoryDatabase::new())?;
+    /// let wallet = Wallet::new_no_persist("wpkh(tprv8ZgxMBicQKsPe73PBRSmNbTfbcsZnwWhz5eVmhHpi31HW29Z7mc9B4cWGRQzopNUzZUT391DeDJxL2PefNunWyLgqCKRMDkU1s2s8bAfoSk/84'/0'/0'/0/*)", None, Network::Testnet)?;
     /// for secret_key in wallet.get_signers(KeychainKind::External).signers().iter().filter_map(|s| s.descriptor_secret_key()) {
     ///     // secret_key: tprv8ZgxMBicQKsPe73PBRSmNbTfbcsZnwWhz5eVmhHpi31HW29Z7mc9B4cWGRQzopNUzZUT391DeDJxL2PefNunWyLgqCKRMDkU1s2s8bAfoSk/84'/0'/0'/0/*
     ///     println!("secret_key: {}", secret_key);
@@ -599,9 +594,8 @@ impl<D> Wallet<D> {
     /// # use std::str::FromStr;
     /// # use bitcoin::*;
     /// # use bdk::*;
-    /// # use bdk::database::*;
     /// # let descriptor = "wpkh(tpubD6NzVbkrYhZ4Xferm7Pz4VnjdcDPFyjVu5K4iZXQ4pVN8Cks4pHVowTBXBKRhX64pkRyJZJN5xAKj4UDNnLPb5p2sSKXhewoYx5GbTdUFWq/*)";
-    /// # let wallet = doctest_wallet!();
+    /// # let mut wallet = doctest_wallet!();
     /// # let to_address = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap();
     /// let (psbt, details) = {
     ///    let mut builder =  wallet.build_tx();
@@ -1006,9 +1000,8 @@ impl<D> Wallet<D> {
     /// # use std::str::FromStr;
     /// # use bitcoin::*;
     /// # use bdk::*;
-    /// # use bdk::database::*;
     /// # let descriptor = "wpkh(tpubD6NzVbkrYhZ4Xferm7Pz4VnjdcDPFyjVu5K4iZXQ4pVN8Cks4pHVowTBXBKRhX64pkRyJZJN5xAKj4UDNnLPb5p2sSKXhewoYx5GbTdUFWq/*)";
-    /// # let wallet = doctest_wallet!();
+    /// # let mut wallet = doctest_wallet!();
     /// # let to_address = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap();
     /// let (mut psbt, _) = {
     ///     let mut builder = wallet.build_tx();
@@ -1168,9 +1161,8 @@ impl<D> Wallet<D> {
     /// # use std::str::FromStr;
     /// # use bitcoin::*;
     /// # use bdk::*;
-    /// # use bdk::database::*;
     /// # let descriptor = "wpkh(tpubD6NzVbkrYhZ4Xferm7Pz4VnjdcDPFyjVu5K4iZXQ4pVN8Cks4pHVowTBXBKRhX64pkRyJZJN5xAKj4UDNnLPb5p2sSKXhewoYx5GbTdUFWq/*)";
-    /// # let wallet = doctest_wallet!();
+    /// # let mut wallet = doctest_wallet!();
     /// # let to_address = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap();
     /// let (mut psbt, _) = {
     ///     let mut builder = wallet.build_tx();
@@ -1380,7 +1372,6 @@ impl<D> Wallet<D> {
     /// Informs the wallet that you no longer intend to broadcast a tx that was built from it.
     ///
     /// This frees up the change address used when creating the tx for use in future transactions.
-    ///
     // TODO: Make this free up reserved utxos when that's implemented
     pub fn cancel_tx(&mut self, tx: &Transaction) {
         let txout_index = &mut self.keychain_tracker.txout_index;
@@ -1397,7 +1388,7 @@ impl<D> Wallet<D> {
         if keychain == KeychainKind::Internal
             && self.public_descriptor(KeychainKind::Internal).is_none()
         {
-            return KeychainKind::External;
+            KeychainKind::External
         } else {
             keychain
         }
@@ -1764,4 +1755,41 @@ where
     }
 
     Ok(wallet_name)
+}
+
+#[macro_export]
+#[doc(hidden)]
+/// Macro for getting a wallet for use in a doctest
+macro_rules! doctest_wallet {
+    () => {{
+        use $crate::bitcoin::{BlockHash, Transaction, PackedLockTime, TxOut, Network, hashes::Hash};
+        use $crate::chain::{ConfirmationTime, BlockId};
+        use $crate::wallet::{AddressIndex, Wallet};
+        let descriptor = "tr([73c5da0a/86'/0'/0']tprv8fMn4hSKPRC1oaCPqxDb1JWtgkpeiQvZhsr8W2xuy3GEMkzoArcAWTfJxYb6Wj8XNNDWEjfYKK4wGQXh3ZUXhDF2NcnsALpWTeSwarJt7Vc/0/*)";
+        let change_descriptor = "tr([73c5da0a/86'/0'/0']tprv8fMn4hSKPRC1oaCPqxDb1JWtgkpeiQvZhsr8W2xuy3GEMkzoArcAWTfJxYb6Wj8XNNDWEjfYKK4wGQXh3ZUXhDF2NcnsALpWTeSwarJt7Vc/1/*)";
+
+        let mut wallet = Wallet::new_no_persist(
+            descriptor,
+            Some(change_descriptor),
+            Network::Regtest,
+        )
+        .unwrap();
+        let address = wallet.get_address(AddressIndex::New).address;
+        let tx = Transaction {
+            version: 1,
+            lock_time: PackedLockTime(0),
+            input: vec![],
+            output: vec![TxOut {
+                value: 500_000,
+                script_pubkey: address.script_pubkey(),
+            }],
+        };
+        let _ = wallet.insert_checkpoint(BlockId { height: 1_000, hash: BlockHash::all_zeros() });
+        let _ = wallet.insert_tx(tx.clone(), ConfirmationTime::Confirmed {
+            height: 500,
+            time: 50_000
+        });
+
+        wallet
+    }}
 }

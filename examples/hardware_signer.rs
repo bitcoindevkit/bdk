@@ -1,6 +1,5 @@
 use bdk::bitcoin::{Address, Network};
 use bdk::blockchain::{Blockchain, ElectrumBlockchain};
-use bdk::database::MemoryDatabase;
 use bdk::hwi::{types::HWIChain, HWIClient};
 use bdk::miniscript::{Descriptor, DescriptorPublicKey};
 use bdk::signer::SignerOrdering;
@@ -42,7 +41,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Creating a custom signer from the device
     let custom_signer = HWISigner::from_device(&first_device, HWIChain::Test)?;
-    let mut wallet = Wallet::new(
+    let mut wallet = Wallet::new_no_persist(
         descriptors.receive[0].clone(),
         Some(descriptors.internal[0].clone()),
         Network::Testnet,
