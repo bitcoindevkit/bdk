@@ -6,6 +6,8 @@
 //!
 //! Note that `Wallet` does not read this persisted data during operation since it always has a copy
 //! in memory
+//!
+//! [`Wallet`]: crate::Wallet
 use crate::KeychainKind;
 use bdk_chain::{keychain::KeychainTracker, ConfirmationTime};
 
@@ -13,6 +15,8 @@ use bdk_chain::{keychain::KeychainTracker, ConfirmationTime};
 /// persisted. Not all changes made to the [`Wallet`] need to be written to disk right away so you
 /// can use [`Persist::stage`] to *stage* it first and then [`Persist::commit`] to finally write it
 /// to disk.
+///
+/// [`Wallet`]: crate::Wallet
 #[derive(Debug)]
 pub struct Persist<P> {
     backend: P,

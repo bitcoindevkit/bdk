@@ -462,12 +462,11 @@ impl<Ctx: ScriptContext> From<bip32::ExtendedPrivKey> for ExtendedKey<Ctx> {
 /// [`ExtendedPubKey`]: (bip32::ExtendedPubKey)
 pub trait DerivableKey<Ctx: ScriptContext = miniscript::Legacy>: Sized {
     /// Consume `self` and turn it into an [`ExtendedKey`]
-    ///
-    /// This can be used to get direct access to `xprv`s and `xpub`s for types that implement this trait,
-    /// like [`Mnemonic`](bip39::Mnemonic) when the `keys-bip39` feature is enabled.
     #[cfg_attr(
         feature = "keys-bip39",
         doc = r##"
+This can be used to get direct access to `xprv`s and `xpub`s for types that implement this trait,
+like [`Mnemonic`](bip39::Mnemonic) when the `keys-bip39` feature is enabled.
 ```rust
 use bdk::bitcoin::Network;
 use bdk::keys::{DerivableKey, ExtendedKey};

@@ -90,7 +90,7 @@ pub struct Wallet<D = ()> {
     secp: SecpCtx,
 }
 
-/// The update to a [`Wallet`] used in [Wallet::apply_update]. This is usually returned from blockchain data sources.
+/// The update to a [`Wallet`] used in [`Wallet::apply_update`]. This is usually returned from blockchain data sources.
 /// The type parameter `T` indicates the kind of transaction contained in the update. It's usually a [`bitcoin::Transaction`].
 pub type Update<T> = KeychainScan<KeychainKind, ConfirmationTime, T>;
 /// Error indicating that something was wrong with an [`Update<T>`].
@@ -1689,7 +1689,7 @@ impl<D> Wallet<D> {
     /// transactions related to your wallet into it.
     ///
     /// [`commit`]: Self::commit
-    pub fn apply_udpate<Tx>(&mut self, update: Update<Tx>) -> Result<(), UpdateError>
+    pub fn apply_update<Tx>(&mut self, update: Update<Tx>) -> Result<(), UpdateError>
     where
         D: persist::Backend,
         Tx: IntoOwned<Transaction> + Clone,

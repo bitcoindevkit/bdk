@@ -24,7 +24,9 @@ jobs:
       - name: Update toolchain
         run: rustup update
       - name: Build docs
-        run: cargo rustdoc --verbose --all-features -- --cfg docsrs -Dwarnings
+        run: cargo doc --no-deps
+        env:
+          RUSTDOCFLAGS: '--cfg docsrs -Dwarnings'
       - name: Upload artifact
         uses: actions/upload-artifact@v2
         with:
