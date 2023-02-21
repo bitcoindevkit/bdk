@@ -92,7 +92,6 @@
 //! * `all-keys`: all features for working with bitcoin keys
 //! * `async-interface`: async functions in bdk traits
 //! * `keys-bip39`: [BIP-39](https://github.com/bitcoin/bips/blob/master/bip-0039.mediawiki) mnemonic codes for generating deterministic keys
-//!
 
 #![no_std]
 #[cfg(feature = "std")]
