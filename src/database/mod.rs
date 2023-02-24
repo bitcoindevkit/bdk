@@ -487,7 +487,7 @@ pub mod test {
 
         assert!(res.is_none());
 
-        let _res = db.set_script_pubkey(&script, keychain, path);
+        db.set_script_pubkey(&script, keychain, path).unwrap();
         let (chain, child) = db.del_path_from_script_pubkey(&script).unwrap().unwrap();
 
         assert_eq!(chain, keychain);
@@ -620,13 +620,13 @@ pub mod test {
     pub fn test_del_last_index<D: Database>(mut db: D) {
         let keychain = KeychainKind::External;
 
-        let _res = db.increment_last_index(keychain);
+        db.increment_last_index(keychain).unwrap();
 
         let res = db.get_last_index(keychain).unwrap().unwrap();
 
         assert_eq!(res, 0);
 
-        let _res = db.increment_last_index(keychain);
+        db.increment_last_index(keychain).unwrap();
 
         let res = db.del_last_index(keychain).unwrap().unwrap();
 
@@ -640,7 +640,7 @@ pub mod test {
         // insert checksum associated to keychain
         let checksum = "1cead456".as_bytes();
         let keychain = KeychainKind::External;
-        let _res = db.check_descriptor_checksum(keychain, checksum);
+        db.check_descriptor_checksum(keychain, checksum).unwrap();
 
         // check if `check_descriptor_checksum` throws
         // `Error::ChecksumMismatch` error if the
