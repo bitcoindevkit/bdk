@@ -283,11 +283,17 @@ pub struct CBFBlockchainConfig {
     pub network: bitcoin::Network,
     /// Optional custom datadir for CBF Client
     pub datadir: Option<PathBuf>,
+    /// Initial Peer List
+    pub peers: Vec<SocketAddr>,
 }
 
 impl CbfBlockchain {
     /// Create a new CBF node which runs at the background.
-    pub fn new(network: bitcoin::Network, datadir: Option<PathBuf>) -> Result<Self, CbfError> {
+    pub fn new(
+        network: bitcoin::Network,
+        datadir: Option<PathBuf>,
+        peers: Vec<SocketAddr>,
+    ) -> Result<Self, CbfError> {
         let root = if let Some(dir) = datadir {
             dir
         } else {
@@ -306,6 +312,13 @@ impl CbfBlockchain {
             cbf_client.run(client_cfg).unwrap();
         });
         let receiver = client_handle.events();
+
+        for peer in peers {
+            let peer_link = client_handle
+                .connect(peer)
+                .map_err(nakamoto::client::Error::from)?;
+            debug!("New peer connected : {:?}", peer_link);
+        }
 
         Ok(Self {
             receiver,
@@ -333,18 +346,18 @@ impl CbfBlockchain {
         self.fee_data.set(data)
     }
 
-    /// Connect the client with a specific peer.
-    pub fn add_peers(&self, peers: Vec<SocketAddr>) -> Result<Vec<SocketAddr>, CbfError> {
-        let mut connected_peers = vec![];
-        for peer in peers {
-            let _ = self
-                .client_handle
-                .connect(peer)
-                .map_err(nakamoto::client::Error::from)?;
-            connected_peers.push(peer);
-        }
-        Ok(connected_peers)
-    }
+    // /// Connect the client with a specific peer.
+    // pub fn add_peers(&self, peers: Vec<SocketAddr>) -> Result<Vec<SocketAddr>, CbfError> {
+    //     let mut connected_peers = vec![];
+    //     for peer in peers {
+    //         let _ = self
+    //             .client_handle
+    //             .connect(peer)
+    //             .map_err(nakamoto::client::Error::from)?;
+    //         connected_peers.push(peer);
+    //     }
+    //     Ok(connected_peers)
+    // }
 
     /// Disconnect the client from a specific peer
     pub fn diconnect(&self, peer: SocketAddr) {
@@ -657,7 +670,11 @@ impl ConfigurableBlockchain for CbfBlockchain {
     type Config = CBFBlockchainConfig;
 
     fn from_config(config: &Self::Config) -> Result<Self, crate::Error> {
-        Ok(Self::new(config.network, config.datadir.clone())?)
+        Ok(Self::new(
+            config.network,
+            config.datadir.clone(),
+            config.peers,
+        )?)
     }
 }
 
@@ -680,14 +697,19 @@ mod test {
 
             let mut root = std::env::temp_dir();
             root = root.join(addrs);
-            let cbf_node = CbfBlockchain::new(Network::Regtest, Some(root)).unwrap();
 
             let bitcoind_p2p_port = test_client
-                .bitcoind
-                .params
-                .p2p_socket
-                .expect("Bitcoin P2P Port should be available");
-            cbf_node.add_peers(vec![bitcoind_p2p_port.into()]).unwrap();
+            .bitcoind
+            .params
+            .p2p_socket
+            .expect("Bitcoin P2P Port should be available");
+
+            let config = CBFBlockchainConfig {
+                network: Network::Regtest,
+                datadir: Some(root),
+                peers: vec![bitcoind_p2p_port.into()]
+            };
+            let cbf_node = CbfBlockchain::from_config(&config).unwrap();
 
             cbf_node
         }
