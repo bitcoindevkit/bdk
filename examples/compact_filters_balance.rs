@@ -41,6 +41,4 @@
 // }
 
 // TODO make a nakamoto example
-fn main() {
-
-}
+fn main() {}

@@ -1,31 +1,31 @@
-// // // Bitcoin Dev Kit
-// // // Written in 2020 by Alekos Filini <alekos.filini@gmail.com>
-// // //
-// // // Copyright (c) 2020-2021 Bitcoin Dev Kit Developers
-// // //
-// // // This file is licensed under the Apache License, Version 2.0 <LICENSE-APACHE
-// // // or http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// // // <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your option.
-// // // You may not use this file except in accordance with one or both of these
-// // // licenses.
+// Bitcoin Dev Kit
+// Written in 2020 by Alekos Filini <alekos.filini@gmail.com>
+//
+// Copyright (c) 2020-2021 Bitcoin Dev Kit Developers
+//
+// This file is licensed under the Apache License, Version 2.0 <LICENSE-APACHE
+// or http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your option.
+// You may not use this file except in accordance with one or both of these
+// licenses.
 
-// //! Compact Filters
-// //!
-// //! This module contains a multithreaded implementation of an [`Blockchain`] backend that
-// //! uses BIP157 (aka "Neutrino") to populate the wallet's [database](crate::database::Database)
-// //! by downloading compact filters from the P2P network.
-// //!
-// //! Since there are currently very few peers "in the wild" that advertise the required service
-// //! flag, this implementation requires that one or more known peers are provided by the user.
-// //! No dns or other kinds of peer discovery are done internally.
-// //!
-// //! Moreover, this module doesn't currently support detecting and resolving conflicts between
-// //! messages received by different peers. Thus, it's recommended to use this module by only
-// //! connecting to a single peer at a time, optionally by opening multiple connections if it's
-// //! desirable to use multiple threads at once to sync in parallel.
-// //!
-// //! This is an **EXPERIMENTAL** feature, API and other major changes are expected.
-// //!
+//! Compact Filters
+//!
+//! This module contains a multithreaded implementation of an [`Blockchain`] backend that
+//! uses BIP157 (aka "Neutrino") to populate the wallet's [database](crate::database::Database)
+//! by downloading compact filters from the P2P network.
+//!
+//! Since there are currently very few peers "in the wild" that advertise the required service
+//! flag, this implementation requires that one or more known peers are provided by the user.
+//! No dns or other kinds of peer discovery are done internally.
+//!
+//! Moreover, this module doesn't currently support detecting and resolving conflicts between
+//! messages received by different peers. Thus, it's recommended to use this module by only
+//! connecting to a single peer at a time, optionally by opening multiple connections if it's
+//! desirable to use multiple threads at once to sync in parallel.
+//!
+//! This is an **EXPERIMENTAL** feature, API and other major changes are expected.
+//!
 // //! ## Example
 // //!
 // //! ```no_run
@@ -68,7 +68,7 @@
 // // mod store;
 // // mod sync;
 
-// pub mod nakamoto;
+pub mod nakamoto;
 
 // use crate::blockchain::*;
 // use crate::database::{BatchDatabase, BatchOperations, DatabaseUtils};

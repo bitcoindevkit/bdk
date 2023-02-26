@@ -24,16 +24,23 @@ use crate::database::{BatchDatabase, BatchOperations, DatabaseUtils};
 use crate::{BlockTime, FeeRate, KeychainKind, LocalUtxo, TransactionDetails};
 use bitcoin::{Block, OutPoint, Script, Transaction, Txid};
 use log::{debug, info};
+use nakamoto::p2p::fsm::fees::FeeEstimate;
 use nakamoto::{
     client::{
-        chan::Receiver, handle::Handle, protocol, protocol::fees::FeeEstimate, spv::TxStatus,
-        Client, Config, Event, Handle as ClientHandle,
+        chan::Receiver,
+        handle::Handle,
+        Client,
+        Config,
+        Event,
+        Handle as ClientHandle,
+        //event::TxStatus
     },
     net::poll::Waker,
 };
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
+use std::ops::DerefMut;
 use std::path::PathBuf;
 use std::time::Duration;
 use std::{net::TcpStream, thread};
@@ -50,7 +57,7 @@ pub enum CbfError {
 
     /// Nakamoto client error
     #[error(transparent)]
-    Nakamoto(#[from] nakamoto::client::error::Error),
+    Nakamoto(#[from] nakamoto::client::Error),
 }
 
 impl From<crate::error::Error> for CbfError {
@@ -288,12 +295,9 @@ impl CbfBlockchain {
         };
         let cbf_client = Client::<Reactor>::new()?;
         let client_cfg = Config {
+            network: network.into(),
             listen: vec![], // Don't listen for incoming connections.
             root,
-            protocol: protocol::Config {
-                network: network.into(),
-                ..protocol::Config::default()
-            },
             ..Config::default()
         };
 
@@ -301,7 +305,7 @@ impl CbfBlockchain {
         thread::spawn(|| {
             cbf_client.run(client_cfg).unwrap();
         });
-        let receiver = client_handle.subscribe();
+        let receiver = client_handle.events();
 
         Ok(Self {
             receiver,
@@ -472,9 +476,11 @@ impl GetHeight for CbfBlockchain {
 impl WalletSync for CbfBlockchain {
     fn wallet_setup<D: BatchDatabase>(
         &self,
-        database: &mut D,
+        database: &RefCell<D>,
         progress_update: Box<dyn crate::blockchain::Progress>,
     ) -> Result<(), crate::Error> {
+        let mut database = database.borrow_mut();
+        let database = database.deref_mut();
         let db_scripts = database.iter_script_pubkeys(None)?;
         self.client_handle
             .watch(db_scripts.iter().cloned())
@@ -509,27 +515,27 @@ impl WalletSync for CbfBlockchain {
                 Event::BlockConnected { hash, height, .. } => {
                     debug!("New Block Found : {} at {}", hash, height);
                 }
-                // Event::BlockDisconnected { height, .. } => {
-                //     let db_txs = database
-                //         .iter_txs(false)?
-                //         .iter()
-                //         .filter_map(|tx_details| {
-                //             if let Some(block_time) = &tx_details.confirmation_time {
-                //                 if block_time.height == height as u32 {
-                //                     Some(tx_details.txid)
-                //                 } else {
-                //                     None
-                //                 }
-                //             } else {
-                //                 None
-                //             }
-                //         })
-                //         .collect::<HashSet<_>>();
+                Event::BlockDisconnected { height, .. } => {
+                    let db_txs = database
+                        .iter_txs(false)?
+                        .iter()
+                        .filter_map(|tx_details| {
+                            if let Some(block_time) = &tx_details.confirmation_time {
+                                if block_time.height == height as u32 {
+                                    Some(tx_details.txid)
+                                } else {
+                                    None
+                                }
+                            } else {
+                                None
+                            }
+                        })
+                        .collect::<HashSet<_>>();
 
-                //     for txid in db_txs {
-                //         unconfirm_tx(database, &txid)?;
-                //     }
-                // }
+                    for txid in db_txs {
+                        unconfirm_tx(database, &txid)?;
+                    }
+                }
                 Event::BlockMatched {
                     hash: _,
                     header,
@@ -568,33 +574,33 @@ impl WalletSync for CbfBlockchain {
                 Event::FeeEstimated { height, fees, .. } => {
                     self.add_fee_data(height as u32, fees);
                 }
-                Event::TxStatusChanged { txid, status } => {
-                    match status {
-                        TxStatus::Unconfirmed => {
-                            debug!("txid:{}, status : Broadcasted", txid);
-                        }
-                        TxStatus::Acknowledged { peer } => {
-                            debug!("txid: {}, status : ACK by {}", txid, peer);
-                        }
-                        TxStatus::Confirmed { height, .. } => {
-                            debug!("txid: {}, status : Confirmed at {}", txid, height);
-                        }
-                        TxStatus::Reverted => {
-                            debug!("Transaction reverted due to reorg: txid : {}", txid);
-                            let _ = unconfirm_tx(database, &txid)?;
-                        }
-                        TxStatus::Stale { replaced_by, block } => {
-                            debug!(
-                                "txid: {}, status : Replaced by : txid {} at blockhash {}",
-                                txid, replaced_by, block
-                            );
-                            let tx = database.get_tx(&replaced_by, true)?.expect(
-                                "Wallet transaction got replaced by unknown foreign transaction",
-                            ); // TODO: Handle the case when we don't have the overriding transaction
-                            delete_tx(database, &tx.txid)?;
-                        }
-                    }
-                }
+                // Event::TxStatusChanged { txid, status } => {
+                //     match status {
+                //         TxStatus::Unconfirmed => {
+                //             debug!("txid:{}, status : Broadcasted", txid);
+                //         }
+                //         TxStatus::Acknowledged { peer } => {
+                //             debug!("txid: {}, status : ACK by {}", txid, peer);
+                //         }
+                //         TxStatus::Confirmed { height, .. } => {
+                //             debug!("txid: {}, status : Confirmed at {}", txid, height);
+                //         }
+                //         TxStatus::Reverted => {
+                //             debug!("Transaction reverted due to reorg: txid : {}", txid);
+                //             let _ = unconfirm_tx(database, &txid)?;
+                //         }
+                //         TxStatus::Stale { replaced_by, block } => {
+                //             debug!(
+                //                 "txid: {}, status : Replaced by : txid {} at blockhash {}",
+                //                 txid, replaced_by, block
+                //             );
+                //             let tx = database.get_tx(&replaced_by, true)?.expect(
+                //                 "Wallet transaction got replaced by unknown foreign transaction",
+                //             ); // TODO: Handle the case when we don't have the overriding transaction
+                //             delete_tx(database, &tx.txid)?;
+                //         }
+                //     }
+                // }
                 Event::Synced { height, tip } => {
                     debug!("Sync Status : {}:{}", height, tip);
                     progress_update.update(
