@@ -703,6 +703,7 @@ impl TxOrdering {
                 #[cfg(test)]
                 let mut rng = rand::rngs::StdRng::seed_from_u64(12345);
 
+                tx.input.shuffle(&mut rng);
                 tx.output.shuffle(&mut rng);
             }
             TxOrdering::Bip69Lexicographic => {
@@ -815,7 +816,7 @@ mod test {
 
         TxOrdering::Shuffle.sort_tx(&mut tx);
 
-        assert_eq!(original_tx.input, tx.input);
+        assert_ne!(original_tx.input, tx.input);
         assert_ne!(original_tx.output, tx.output);
     }
 
