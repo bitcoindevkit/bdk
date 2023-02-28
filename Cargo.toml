@@ -112,6 +112,8 @@ base64 = "^0.13"
 assert_matches = "1.5.0"
 # zip versions after 0.6.3 don't work with our MSRV 1.57.0
 zip = "=0.6.3"
+# base64ct versions at 1.6.0 and higher have MSRV 1.60.0
+base64ct = "<1.6.0"
 
 [[example]]
 name = "compact_filters_balance"
