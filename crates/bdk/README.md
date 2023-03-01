@@ -24,17 +24,25 @@
   </h4>
 </div>
 
-## About
+## `bdk`
 
-The `bdk` library aims to be the core building block for Bitcoin wallets of any kind.
+The `bdk` crate provides the `Wallet` type which provides a high level interface to most of the low level mechanisms included in `bdk`.
+`Wallet` is the appropriate starting point for many simple applications as well as a good demonstration of how to use the other mechanisms to construct a wallet.
+It's simple. It has an external and internal keychain which both defined by two [miniscript descriptors][`rust-miniscript`] and uses them to generate addresses.
+When you give it chain data it also uses the descriptors to find transaction outputs owned by them.
+From there you can create transactions to spend the funds and even sign them
+For more information see [`Wallet`'s documentation](https://docs.rs/bdk/latest/bdk/wallet/struct.Wallet.html).
 
-* It uses [Miniscript](https://github.com/rust-bitcoin/rust-miniscript) to support descriptors with generalized conditions. This exact same library can be used to build
-  single-sig wallets, multisigs, timelocked contracts and more.
-* It supports multiple blockchain backends and databases, allowing developers to choose exactly what's right for their projects.
-* It's built to be cross-platform: the core logic works on desktop, mobile, and even WebAssembly.
-* It's very easy to extend: developers can implement customized logic for blockchain backends, databases, signers, coin selection, and more, without having to fork and modify this library.
+### Chain data
 
-<!-- ## Examples -->
+In order to get the chain data for `Wallet` to consume you have to put it into particular form.
+Right now this the [`KeychainScan`] which defined in `bdk_chain`.
+
+This can be created manually or from some of the chain data libraries provided in the `bdk` repo like [`bdk_esplora`] and [`bdk_electrum`].
+
+See [`example-crates`] for examples on how to do this.
+
+TODO: make a short `no_run` example here
 
 <!-- ### Sync the balance of a descriptor -->
 
@@ -60,7 +68,6 @@ The `bdk` library aims to be the core building block for Bitcoin wallets of any 
 <!--     Ok(()) -->
 <!-- } -->
 <!-- ``` -->
-
 <!-- ### Generate a few addresses -->
 
 <!-- ```rust -->
@@ -157,25 +164,14 @@ The `bdk` library aims to be the core building block for Bitcoin wallets of any 
 cargo test
 ```
 
-## Running under WASM
-
-If you want to run this library under WASM you will probably have to add the following lines to you `Cargo.toml`:
-
-```toml
-[dependencies]
-getrandom = { version = "0.2", features = ["js"] }
-```
-
-This enables the `rand` crate to work in environments where JavaScript is available. See [this link](https://docs.rs/getrandom/0.2.8/getrandom/#webassembly-support) to learn more.
-
 ## License
 
 Licensed under either of
 
  * Apache License, Version 2.0
-   ([LICENSE-APACHE](LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
+   ([LICENSE-APACHE](LICENSE-APACHE) or <https://www.apache.org/licenses/LICENSE-2.0>)
  * MIT license
-   ([LICENSE-MIT](LICENSE-MIT) or http://opensource.org/licenses/MIT)
+   ([LICENSE-MIT](LICENSE-MIT) or <https://opensource.org/licenses/MIT>)
 
 at your option.
 
@@ -184,3 +180,9 @@ at your option.
 Unless you explicitly state otherwise, any contribution intentionally submitted
 for inclusion in the work by you, as defined in the Apache-2.0 license, shall be
 dual licensed as above, without any additional terms or conditions.
+
+[`bdk_chain`]: https://docs.rs/bdk_chain/latest
+[`bdk_electrum`]: https://docs.rs/bdk_electrum/latest
+[`bdk_esplora`]: https://docs.rs/bdk_esplora/latest
+[`KeychainScan`]: https://docs.rs/bdk_chain/latest/bdk_chain/keychain/struct.KeychainScan.html
+[`rust-miniscript`]: https://docs.rs/miniscript/latest/miniscript/index.html
