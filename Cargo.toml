@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "crates/bdk",
+    "crates/bdk_chain",
     "example-crates/esplora-wallet",
     "example-crates/electrum-wallet",
 ]
