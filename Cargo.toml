@@ -2,6 +2,7 @@
 members = [
     "crates/bdk",
     "crates/bdk_chain",
+    "crates/bdk_file_store",
     "example-crates/esplora-wallet",
     "example-crates/electrum-wallet",
 ]
