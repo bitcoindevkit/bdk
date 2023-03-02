@@ -3,6 +3,7 @@ name = "bdk_file_store"
 version = "0.0.1"
 edition = "2021"
 license = "MIT OR Apache-2.0"
+repository = "https://github.com/bitcoindevkit/bdk"
 
 [dependencies]
 bdk_chain = { path = "../chain", version = "0.3", features = [ "serde", "miniscript" ] }
