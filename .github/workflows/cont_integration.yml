@@ -10,7 +10,7 @@ jobs:
     strategy:
       matrix:
         rust:
-          - version: 1.65.0 # STABLE
+          - version: 1.67.0 # STABLE
             clippy: true
           - version: 1.57.0 # MSRV
         features:
