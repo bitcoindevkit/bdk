@@ -89,16 +89,16 @@ fn new_fails_if_file_is_too_short() {
 
 #[test]
 fn new_fails_if_magic_bytes_are_invalid() {
-    let invalid_magic_mnemonic = "ldkfs0000000";
+    let invalid_magic_bytes = "ldkfs0000000";
 
     let path = TempPath::new();
     path.open()
-        .write_all(invalid_magic_mnemonic.as_bytes())
+        .write_all(invalid_magic_bytes.as_bytes())
         .expect("should write");
 
     match KeychainStore::<TestKeychain, TxHeight, Transaction>::new(path.open()) {
         Err(FileError::InvalidMagicBytes(b)) => {
-            assert_eq!(b, invalid_magic_mnemonic.as_bytes())
+            assert_eq!(b, invalid_magic_bytes.as_bytes())
         }
         unexpected => panic!("unexpected result: {:?}", unexpected),
     };
