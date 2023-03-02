@@ -1,11 +1,11 @@
 [package]
-name = "bdk_electrum"
+name = "bdk_esplora"
 version = "0.1.0"
 edition = "2021"
 homepage = "https://bitcoindevkit.org"
 repository = "https://github.com/LLFourn/bdk_core_staging"
-documentation = "https://docs.rs/bdk_electrum"
-description = "Fetch data from electrum in the form BDK accepts"
+documentation = "https://docs.rs/bdk_esplora"
+description = "Fetch data from esplora in the form that accepts"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
 
@@ -13,4 +13,4 @@ readme = "README.md"
 
 [dependencies]
 bdk_chain = { path = "../chain", version = "0.3", features = ["serde", "miniscript"] }
-electrum-client = { version = "0.12" }
+esplora-client = { version = "0.3" }

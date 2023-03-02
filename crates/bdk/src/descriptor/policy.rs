@@ -32,7 +32,7 @@
 //!
 //! let signers = Arc::new(SignersContainer::build(key_map, &extended_desc, &secp));
 //! let policy = extended_desc.extract_policy(&signers, BuildSatisfaction::None, &secp)?;
-//! println!("policy: {}", serde_json::to_string(&policy)?);
+//! println!("policy: {}", serde_json::to_string(&policy).unwrap());
 //! # Ok::<(), bdk::Error>(())
 //! ```
 

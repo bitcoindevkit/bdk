@@ -34,7 +34,7 @@
 //!     import.change_descriptor().as_ref(),
 //!     Network::Testnet,
 //! )?;
-//! # Ok::<_, bdk::Error>(())
+//! # Ok::<_, Box<dyn std::error::Error>>(())
 //! ```
 //!
 //! ### Export a `Wallet`
@@ -47,12 +47,10 @@
 //!     Some("wpkh([c258d2e4/84h/1h/0h]tpubDD3ynpHgJQW8VvWRzQ5WFDCrs4jqVFGHB3vLC3r49XHJSqP8bHKdK4AriuUKLccK68zfzowx7YhmDN8SiSkgCDENUFx9qVw65YyqM78vyVe/1/*)"),
 //!     Network::Testnet,
 //! )?;
-//! let export = FullyNodedExport::export_wallet(&wallet, "exported wallet", true)
-//!     .map_err(ToString::to_string)
-//!     .map_err(bdk::Error::Generic)?;
+//! let export = FullyNodedExport::export_wallet(&wallet, "exported wallet", true).unwrap();
 //!
 //! println!("Exported: {}", export.to_string());
-//! # Ok::<_, bdk::Error>(())
+//! # Ok::<_, Box<dyn std::error::Error>>(())
 //! ```
 
 use core::str::FromStr;

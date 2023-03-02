@@ -1,11 +1,16 @@
 [workspace]
 members = [
     "crates/bdk",
-    "crates/bdk_chain",
-    "crates/bdk_file_store",
-    "crates/bdk_electrum",
+    "crates/chain",
+    "crates/file_store",
+    "crates/electrum",
     "example-crates/esplora-wallet",
     "example-crates/electrum-wallet",
+    "example-crates/keychain_tracker_electrum_example",
+    "example-crates/keychain_tracker_esplora_example",
+    "example-crates/keychain_tracker_example_cli",
+    "nursery/tmp_plan",
+    "nursery/coin_select"
 ]
 
 [workspace.package]
