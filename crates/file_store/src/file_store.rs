@@ -81,7 +81,7 @@ where
     ///
     /// **WARNING**: This method changes the write position in the underlying file. You should
     /// always iterate over all entries until `None` is returned if you want your next write to go
-    /// at the end, otherwise you writing over existing enties.
+    /// at the end, otherwise you will write over existing enties.
     pub fn iter_changesets(
         &mut self,
     ) -> Result<EntryIter<'_, KeychainChangeSet<K, P, T>>, io::Error> {
