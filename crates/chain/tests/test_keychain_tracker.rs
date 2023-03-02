@@ -69,8 +69,8 @@ fn test_balance() {
     let mut tracker = KeychainTracker::<Keychain, TxHeight>::default();
     let one = Descriptor::from_str("tr([73c5da0a/86'/0'/0']xpub6BgBgsespWvERF3LHQu6CnqdvfEvtMcQjYrcRzx53QJjSxarj2afYWcLteoGVky7D3UKDP9QyrLprQ3VCECoY49yfdDEHGCtMMj92pReUsQ/0/*)#rg247h69").unwrap();
     let two = Descriptor::from_str("tr([73c5da0a/86'/0'/0']xpub6BgBgsespWvERF3LHQu6CnqdvfEvtMcQjYrcRzx53QJjSxarj2afYWcLteoGVky7D3UKDP9QyrLprQ3VCECoY49yfdDEHGCtMMj92pReUsQ/1/*)#ju05rz2a").unwrap();
-    tracker.add_keychain(Keychain::One, one.clone());
-    tracker.add_keychain(Keychain::Two, two.clone());
+    tracker.add_keychain(Keychain::One, one);
+    tracker.add_keychain(Keychain::Two, two);
 
     let tx1 = Transaction {
         version: 0x01,
@@ -126,9 +126,9 @@ fn test_balance() {
         })
         .unwrap();
 
-    let should_trust = |keychain: &Keychain| match keychain {
-        &Keychain::One => false,
-        &Keychain::Two => true,
+    let should_trust = |keychain: &Keychain| match *keychain {
+        Keychain::One => false,
+        Keychain::Two => true,
     };
 
     assert_eq!(tracker.balance(should_trust), Balance::default());
@@ -172,9 +172,7 @@ fn test_balance() {
         }
     );
 
-    let _ = tracker
-        .insert_tx(tx1.clone(), TxHeight::Confirmed(1))
-        .unwrap();
+    let _ = tracker.insert_tx(tx1, TxHeight::Confirmed(1)).unwrap();
 
     assert_eq!(
         tracker.balance(should_trust),
@@ -186,9 +184,7 @@ fn test_balance() {
         }
     );
 
-    let _ = tracker
-        .insert_tx(tx2.clone(), TxHeight::Confirmed(2))
-        .unwrap();
+    let _ = tracker.insert_tx(tx2, TxHeight::Confirmed(2)).unwrap();
 
     assert_eq!(
         tracker.balance(should_trust),

@@ -356,26 +356,26 @@ pub(crate) trait DescriptorMeta {
     fn is_witness(&self) -> bool;
     fn is_taproot(&self) -> bool;
     fn get_extended_keys(&self) -> Vec<DescriptorXKey<ExtendedPubKey>>;
-    fn derive_from_hd_keypaths<'s>(
+    fn derive_from_hd_keypaths(
         &self,
         hd_keypaths: &HdKeyPaths,
-        secp: &'s SecpCtx,
+        secp: &SecpCtx,
     ) -> Option<DerivedDescriptor>;
-    fn derive_from_tap_key_origins<'s>(
+    fn derive_from_tap_key_origins(
         &self,
         tap_key_origins: &TapKeyOrigins,
-        secp: &'s SecpCtx,
+        secp: &SecpCtx,
     ) -> Option<DerivedDescriptor>;
-    fn derive_from_psbt_key_origins<'s>(
+    fn derive_from_psbt_key_origins(
         &self,
         key_origins: BTreeMap<Fingerprint, (&DerivationPath, SinglePubKey)>,
-        secp: &'s SecpCtx,
+        secp: &SecpCtx,
     ) -> Option<DerivedDescriptor>;
-    fn derive_from_psbt_input<'s>(
+    fn derive_from_psbt_input(
         &self,
         psbt_input: &psbt::Input,
         utxo: Option<TxOut>,
-        secp: &'s SecpCtx,
+        secp: &SecpCtx,
     ) -> Option<DerivedDescriptor>;
 }
 
@@ -410,10 +410,10 @@ impl DescriptorMeta for ExtendedDescriptor {
         answer
     }
 
-    fn derive_from_psbt_key_origins<'s>(
+    fn derive_from_psbt_key_origins(
         &self,
         key_origins: BTreeMap<Fingerprint, (&DerivationPath, SinglePubKey)>,
-        secp: &'s SecpCtx,
+        secp: &SecpCtx,
     ) -> Option<DerivedDescriptor> {
         // Ensure that deriving `xpub` with `path` yields `expected`
         let verify_key = |xpub: &DescriptorXKey<ExtendedPubKey>,
@@ -497,10 +497,10 @@ impl DescriptorMeta for ExtendedDescriptor {
         path_found.map(|path| self.at_derivation_index(path))
     }
 
-    fn derive_from_hd_keypaths<'s>(
+    fn derive_from_hd_keypaths(
         &self,
         hd_keypaths: &HdKeyPaths,
-        secp: &'s SecpCtx,
+        secp: &SecpCtx,
     ) -> Option<DerivedDescriptor> {
         // "Convert" an hd_keypaths map to the format required by `derive_from_psbt_key_origins`
         let key_origins = hd_keypaths
@@ -515,10 +515,10 @@ impl DescriptorMeta for ExtendedDescriptor {
         self.derive_from_psbt_key_origins(key_origins, secp)
     }
 
-    fn derive_from_tap_key_origins<'s>(
+    fn derive_from_tap_key_origins(
         &self,
         tap_key_origins: &TapKeyOrigins,
-        secp: &'s SecpCtx,
+        secp: &SecpCtx,
     ) -> Option<DerivedDescriptor> {
         // "Convert" a tap_key_origins map to the format required by `derive_from_psbt_key_origins`
         let key_origins = tap_key_origins
@@ -528,11 +528,11 @@ impl DescriptorMeta for ExtendedDescriptor {
         self.derive_from_psbt_key_origins(key_origins, secp)
     }
 
-    fn derive_from_psbt_input<'s>(
+    fn derive_from_psbt_input(
         &self,
         psbt_input: &psbt::Input,
         utxo: Option<TxOut>,
-        secp: &'s SecpCtx,
+        secp: &SecpCtx,
     ) -> Option<DerivedDescriptor> {
         if let Some(derived) = self.derive_from_hd_keypaths(&psbt_input.bip32_derivation, secp) {
             return Some(derived);

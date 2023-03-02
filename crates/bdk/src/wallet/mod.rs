@@ -311,13 +311,12 @@ impl<D> Wallet<D> {
                 .last()
                 .unwrap(),
         };
-        let info = AddressInfo {
+        AddressInfo {
             index,
             address: Address::from_script(&spk, self.network)
                 .expect("descriptor must have address form"),
             keychain,
-        };
-        info
+        }
     }
 
     /// Return whether or not a `script` is part of this wallet (either internal or external)
@@ -342,7 +341,7 @@ impl<D> Wallet<D> {
             .map(|(&(keychain, derivation_index), utxo)| LocalUtxo {
                 outpoint: utxo.outpoint,
                 txout: utxo.txout,
-                keychain: keychain.clone(),
+                keychain,
                 is_spent: false,
                 derivation_index,
                 confirmation_time: utxo.chain_position,
@@ -1288,8 +1287,7 @@ impl<D> Wallet<D> {
             // - If that also fails, it will try it on the internal descriptor, if present
             let desc = psbt
                 .get_utxo_for(n)
-                .map(|txout| self.get_descriptor_for_txout(&txout))
-                .flatten()
+                .and_then(|txout| self.get_descriptor_for_txout(&txout))
                 .or_else(|| {
                     self.keychain_tracker
                         .txout_index

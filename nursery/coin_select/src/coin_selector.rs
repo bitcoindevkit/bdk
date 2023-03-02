@@ -341,7 +341,7 @@ impl<'a> CoinSelector<'a> {
                 })
             })?;
 
-            (selected - target_value) as u64
+            selected - target_value
         };
 
         let fee_without_drain = fee_without_drain.max(self.opts.min_absolute_fee);
@@ -427,17 +427,16 @@ pub struct SelectionError {
 
 impl core::fmt::Display for SelectionError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
-            SelectionError {
-                selected,
-                missing,
-                constraint,
-            } => write!(
-                f,
-                "insufficient coins selected; selected={}, missing={}, unsatisfied_constraint={:?}",
-                selected, missing, constraint
-            ),
-        }
+        let SelectionError {
+            selected,
+            missing,
+            constraint,
+        } = self;
+        write!(
+            f,
+            "insufficient coins selected; selected={}, missing={}, unsatisfied_constraint={:?}",
+            selected, missing, constraint
+        )
     }
 }
 

@@ -227,7 +227,7 @@ where
                 false => Keychain::External,
             };
             for (index, spk) in txout_index.revealed_spks_of_keychain(&target_keychain) {
-                let address = Address::from_script(&spk, network)
+                let address = Address::from_script(spk, network)
                     .expect("should always be able to derive address");
                 println!(
                     "{:?} {} used:{}",
@@ -271,6 +271,7 @@ pub fn run_txo_cmd<K: Debug + Clone + Ord, P: ChainPosition>(
             unconfirmed,
         } => {
             let tracker = tracker.lock().unwrap();
+            #[allow(clippy::type_complexity)] // FIXME
             let txouts: Box<dyn Iterator<Item = (&(K, u32), FullTxOut<P>)>> = match (unspent, spent)
             {
                 (true, false) => Box::new(tracker.full_utxos()),
@@ -282,6 +283,7 @@ pub fn run_txo_cmd<K: Debug + Clone + Ord, P: ChainPosition>(
                 _ => Box::new(tracker.full_txouts()),
             };
 
+            #[allow(clippy::type_complexity)] // FIXME
             let txouts: Box<dyn Iterator<Item = (&(K, u32), FullTxOut<P>)>> =
                 match (confirmed, unconfirmed) {
                     (true, false) => Box::new(
@@ -310,6 +312,7 @@ pub fn run_txo_cmd<K: Debug + Clone + Ord, P: ChainPosition>(
     }
 }
 
+#[allow(clippy::type_complexity)] // FIXME
 pub fn create_tx<P: ChainPosition>(
     value: u64,
     address: Address,
@@ -482,7 +485,7 @@ pub fn create_tx<P: ChainPosition>(
         assert!(
             requirements.signatures.sign_with_keymap(
                 i,
-                &keymap,
+                keymap,
                 &sighash_prevouts,
                 None,
                 None,
@@ -539,13 +542,13 @@ where
 {
     match command {
         // TODO: Make these functions return stuffs
-        Commands::Address { addr_cmd } => run_address_cmd(&tracker, &store, addr_cmd, network),
+        Commands::Address { addr_cmd } => run_address_cmd(tracker, store, addr_cmd, network),
         Commands::Balance => {
-            run_balance_cmd(&tracker);
+            run_balance_cmd(tracker);
             Ok(())
         }
         Commands::TxOut { txout_cmd } => {
-            run_txo_cmd(txout_cmd, &tracker, network);
+            run_txo_cmd(txout_cmd, tracker, network);
             Ok(())
         }
         Commands::Send {
@@ -557,7 +560,7 @@ where
                 // take mutable ref to construct tx -- it is only open for a short time while building it.
                 let tracker = &mut *tracker.lock().unwrap();
                 let (transaction, change_info) =
-                    create_tx(value, address, coin_select, tracker, &keymap)?;
+                    create_tx(value, address, coin_select, tracker, keymap)?;
 
                 if let Some((change_derivation_changes, (change_keychain, index))) = change_info {
                     // We must first persist to disk the fact that we've got a new address from the
@@ -605,7 +608,7 @@ where
                         // We failed to broadcast so allow our change address to be used in the future
                         tracker.txout_index.unmark_used(&keychain, index);
                     }
-                    Err(e.into())
+                    Err(e)
                 }
             }
         }
@@ -615,6 +618,7 @@ where
     }
 }
 
+#[allow(clippy::type_complexity)] // FIXME
 pub fn init<C: clap::Subcommand, P>() -> anyhow::Result<(
     Args<C>,
     KeyMap,

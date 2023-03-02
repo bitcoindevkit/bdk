@@ -4,7 +4,6 @@ use bdk_chain::{
     TxHeight,
 };
 use bdk_file_store::{FileError, IterError, KeychainStore, MAGIC_BYTES, MAGIC_BYTES_LEN};
-use serde;
 use std::{
     io::{Read, Write},
     vec::Vec,

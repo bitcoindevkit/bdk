@@ -264,7 +264,7 @@ where
     }
 
     /// Calculates the difference between self and `update` in the form of a [`ChangeSet`].
-    pub fn determine_changeset<'a, T2>(
+    pub fn determine_changeset<T2>(
         &self,
         update: &ChainGraph<P, T2>,
     ) -> Result<ChangeSet<P, T>, UpdateError<P>>
@@ -366,7 +366,7 @@ where
                         // evicted, return error
                         return Err(UnresolvableConflict {
                             already_confirmed_tx: (conflicting_pos.clone(), conflicting_txid),
-                            update_tx: (update_pos.clone(), update_txid),
+                            update_tx: (update_pos, update_txid),
                         });
                     }
                     TxHeight::Unconfirmed => {
@@ -516,7 +516,7 @@ impl<P: core::fmt::Debug> core::fmt::Display for NewError<P> {
                 f,
                 "missing full transactions for {}",
                 missing
-                    .into_iter()
+                    .iter()
                     .map(|txid| txid.to_string())
                     .collect::<Vec<_>>()
                     .join(", ")

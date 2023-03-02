@@ -97,9 +97,8 @@ pub trait ElectrumExt {
 impl ElectrumExt for Client {
     fn get_tip(&self) -> Result<(u32, BlockHash), Error> {
         // TODO: unsubscribe when added to the client, or is there a better call to use here?
-        Ok(self
-            .block_headers_subscribe()
-            .map(|data| (data.height as u32, data.header.block_hash()))?)
+        self.block_headers_subscribe()
+            .map(|data| (data.height as u32, data.header.block_hash()))
     }
 
     fn scan<K: Ord + Clone>(
@@ -139,7 +138,7 @@ impl ElectrumExt for Client {
                         batch_size,
                     ) {
                         Err(InternalError::Reorg) => continue,
-                        Err(InternalError::ElectrumError(e)) => return Err(e.into()),
+                        Err(InternalError::ElectrumError(e)) => return Err(e),
                         Ok(mut spks) => scanned_spks.append(&mut spks),
                     };
                 }
@@ -152,7 +151,7 @@ impl ElectrumExt for Client {
                         batch_size,
                     ) {
                         Err(InternalError::Reorg) => continue,
-                        Err(InternalError::ElectrumError(e)) => return Err(e.into()),
+                        Err(InternalError::ElectrumError(e)) => return Err(e),
                         Ok(spks) => scanned_spks.extend(
                             spks.into_iter()
                                 .map(|(spk_i, spk)| ((keychain.clone(), spk_i), spk)),
@@ -163,13 +162,13 @@ impl ElectrumExt for Client {
 
             match populate_with_txids(self, &mut update, &mut txids.iter().cloned()) {
                 Err(InternalError::Reorg) => continue,
-                Err(InternalError::ElectrumError(e)) => return Err(e.into()),
+                Err(InternalError::ElectrumError(e)) => return Err(e),
                 Ok(_) => {}
             }
 
             match populate_with_outpoints(self, &mut update, &mut outpoints.iter().cloned()) {
                 Err(InternalError::Reorg) => continue,
-                Err(InternalError::ElectrumError(e)) => return Err(e.into()),
+                Err(InternalError::ElectrumError(e)) => return Err(e),
                 Ok(_txs) => { /* [TODO] cache full txs to reduce bandwidth */ }
             }
 
@@ -284,7 +283,7 @@ impl<K: Ord + Clone + Debug> ElectrumUpdate<K, TxHeight> {
             .into_iter()
             .zip(
                 client
-                    .batch_block_header(heights.clone())?
+                    .batch_block_header(heights)?
                     .into_iter()
                     .map(|bh| bh.time as u64),
             )
@@ -307,7 +306,7 @@ impl<K: Ord + Clone + Debug> ElectrumUpdate<K, TxHeight> {
 
         Ok(ElectrumUpdate {
             chain_update: new_update,
-            last_active_indices: self.last_active_indices.clone(),
+            last_active_indices: self.last_active_indices,
         })
     }
 }
@@ -320,15 +319,15 @@ enum InternalError {
 
 impl From<electrum_client::Error> for InternalError {
     fn from(value: electrum_client::Error) -> Self {
-        Self::ElectrumError(value.into())
+        Self::ElectrumError(value)
     }
 }
 
 fn get_tip(client: &Client) -> Result<(u32, BlockHash), Error> {
     // TODO: unsubscribe when added to the client, or is there a better call to use here?
-    Ok(client
+    client
         .block_headers_subscribe()
-        .map(|data| (data.height as u32, data.header.block_hash()))?)
+        .map(|data| (data.height as u32, data.header.block_hash()))
 }
 
 /// Prepare an update sparsechain "template" based on the checkpoints of the `local_chain`.

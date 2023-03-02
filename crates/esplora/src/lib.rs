@@ -34,6 +34,7 @@ pub trait EsploraExt {
     /// parallel.
     ///
     /// [`ChainPosition`]: bdk_chain::sparse_chain::ChainPosition
+    #[allow(clippy::result_large_err)] // FIXME
     fn scan<K: Ord + Clone>(
         &self,
         local_chain: &BTreeMap<u32, BlockHash>,
@@ -47,6 +48,7 @@ pub trait EsploraExt {
     /// Convenience method to call [`scan`] without requiring a keychain.
     ///
     /// [`scan`]: EsploraExt::scan
+    #[allow(clippy::result_large_err)] // FIXME
     fn scan_without_keychain(
         &self,
         local_chain: &BTreeMap<u32, BlockHash>,
@@ -127,13 +129,12 @@ impl EsploraExt for esplora_client::BlockingClient {
             let mut spks = spks.into_iter();
             let mut last_active_index = None;
             let mut empty_scripts = 0;
+            type IndexWithTxs = (u32, Vec<esplora_client::Tx>);
 
             loop {
                 let handles = (0..parallel_requests)
                     .filter_map(
-                        |_| -> Option<
-                            std::thread::JoinHandle<Result<(u32, Vec<esplora_client::Tx>), _>>,
-                        > {
+                        |_| -> Option<std::thread::JoinHandle<Result<IndexWithTxs, _>>> {
                             let (index, script) = spks.next()?;
                             let client = self.clone();
                             Some(std::thread::spawn(move || {

@@ -145,12 +145,12 @@ where
 
     /// Returns a reference to the internal [`TxGraph`] (which is part of the [`ChainGraph`]).
     pub fn graph(&self) -> &TxGraph<T> {
-        &self.chain_graph().graph()
+        self.chain_graph().graph()
     }
 
     /// Returns a reference to the internal [`SparseChain`] (which is part of the [`ChainGraph`]).
     pub fn chain(&self) -> &SparseChain<P> {
-        &self.chain_graph().chain()
+        self.chain_graph().chain()
     }
 
     /// Determines the changes as result of inserting `block_id` (a height and block hash) into the

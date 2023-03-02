@@ -128,10 +128,10 @@ fn insert_tx_graph_keeps_track_of_spend() {
     let _ = graph1.insert_tx(tx2.clone());
 
     let _ = graph2.insert_tx(tx2.clone());
-    let _ = graph2.insert_tx(tx1.clone());
+    let _ = graph2.insert_tx(tx1);
 
     assert_eq!(
-        &*graph1.outspends(op),
+        graph1.outspends(op),
         &iter::once(tx2.txid()).collect::<HashSet<_>>()
     );
     assert_eq!(graph2.outspends(op), graph1.outspends(op));
@@ -173,7 +173,7 @@ fn insert_tx_displaces_txouts() {
             vout: 0,
         },
         TxOut {
-            value: 1337_000,
+            value: 1_337_000,
             script_pubkey: Script::default(),
         },
     );
@@ -231,7 +231,7 @@ fn insert_txout_does_not_displace_tx() {
             vout: 0,
         },
         TxOut {
-            value: 1337_000,
+            value: 1_337_000,
             script_pubkey: Script::default(),
         },
     );

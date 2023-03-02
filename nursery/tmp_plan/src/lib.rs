@@ -1,5 +1,6 @@
 #![allow(unused)]
 #![allow(missing_docs)]
+#![allow(clippy::all)] // FIXME
 //! A spending plan or *plan* for short is a representation of a particular spending path on a
 //! descriptor. This allows us to analayze a choice of spending path without producing any
 //! signatures or other witness data for it.

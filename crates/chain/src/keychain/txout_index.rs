@@ -10,7 +10,7 @@ use core::{fmt::Debug, ops::Deref};
 use super::DerivationAdditions;
 
 /// Maximum [BIP32](https://bips.xyz/32) derivation index.
-pub const BIP32_MAX_INDEX: u32 = 1 << 31 - 1;
+pub const BIP32_MAX_INDEX: u32 = (1 << 31) - 1;
 
 /// A convenient wrapper around [`SpkTxOutIndex`] that relates script pubkeys to miniscript public
 /// [`Descriptor`]s.
@@ -162,7 +162,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     pub fn set_lookahead_for_all(&mut self, lookahead: u32) {
         for keychain in &self.keychains.keys().cloned().collect::<Vec<_>>() {
             self.lookahead.insert(keychain.clone(), lookahead);
-            self.replenish_lookahead(&keychain);
+            self.replenish_lookahead(keychain);
         }
     }
 
@@ -348,7 +348,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
         let mut spks = BTreeMap::new();
 
         for (keychain, &index) in keychains {
-            let (new_spks, new_additions) = self.reveal_to_target(&keychain, index);
+            let (new_spks, new_additions) = self.reveal_to_target(keychain, index);
             if !new_additions.is_empty() {
                 spks.insert(keychain.clone(), new_spks);
                 additions.append(new_additions);

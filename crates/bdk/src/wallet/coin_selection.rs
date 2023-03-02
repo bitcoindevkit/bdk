@@ -723,7 +723,7 @@ mod test {
     fn get_test_utxos() -> Vec<WeightedUtxo> {
         vec![
             utxo(100_000, 0, ConfirmationTime::Unconfirmed),
-            utxo(FEE_AMOUNT as u64 - 40, 1, ConfirmationTime::Unconfirmed),
+            utxo(FEE_AMOUNT - 40, 1, ConfirmationTime::Unconfirmed),
             utxo(200_000, 2, ConfirmationTime::Unconfirmed),
         ]
     }

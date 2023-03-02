@@ -6,7 +6,7 @@ use bdk_chain::{
 };
 pub use file_store::*;
 
-impl<'de, K, P> PersistBackend<K, P> for KeychainStore<K, P>
+impl<K, P> PersistBackend<K, P> for KeychainStore<K, P>
 where
     K: Ord + Clone + core::fmt::Debug,
     P: ChainPosition,

@@ -153,7 +153,7 @@ fn main() -> anyhow::Result<()> {
                     .txout_index
                     .all_spks()
                     .iter()
-                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .map(|(k, v)| (*k, v.clone()))
                     .collect::<Vec<_>>();
                 spks = Box::new(spks.chain(all_spks.into_iter().map(|(index, script)| {
                     eprintln!("scanning {:?}", index);
@@ -164,7 +164,7 @@ fn main() -> anyhow::Result<()> {
                 let unused_spks = tracker
                     .txout_index
                     .unused_spks(..)
-                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .map(|(k, v)| (*k, v.clone()))
                     .collect::<Vec<_>>();
                 spks = Box::new(spks.chain(unused_spks.into_iter().map(|(index, script)| {
                     eprintln!(

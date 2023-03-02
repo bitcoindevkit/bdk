@@ -12,10 +12,7 @@ pub enum BranchStrategy {
 
 impl BranchStrategy {
     pub fn will_continue(&self) -> bool {
-        match self {
-            Self::Continue | Self::SkipInclusion => true,
-            _ => false,
-        }
+        matches!(self, Self::Continue | Self::SkipInclusion)
     }
 }
 
@@ -69,23 +66,20 @@ impl<'c, S: Ord> Bnb<'c, S> {
     /// Attempt to backtrack to the previously selected node's omission branch, return false
     /// otherwise (no more solutions).
     pub fn backtrack(&mut self) -> bool {
-        (0..self.pool_pos)
-            .rev()
-            .find(|&pos| {
-                let (index, candidate) = self.pool[pos];
+        (0..self.pool_pos).rev().any(|pos| {
+            let (index, candidate) = self.pool[pos];
 
-                if self.selection.is_selected(index) {
-                    // deselect last `pos`, so next round will check omission branch
-                    self.pool_pos = pos;
-                    self.selection.deselect(index);
-                    return true;
-                } else {
-                    self.rem_abs += candidate.value;
-                    self.rem_eff += candidate.effective_value(self.selection.opts.target_feerate);
-                    return false;
-                }
-            })
-            .is_some()
+            if self.selection.is_selected(index) {
+                // deselect last `pos`, so next round will check omission branch
+                self.pool_pos = pos;
+                self.selection.deselect(index);
+                true
+            } else {
+                self.rem_abs += candidate.value;
+                self.rem_eff += candidate.effective_value(self.selection.opts.target_feerate);
+                false
+            }
+        })
     }
 
     /// Continue down this branch, skip inclusion branch if specified.
@@ -106,7 +100,7 @@ impl<'c, S: Ord> Bnb<'c, S> {
             self.best_score = score;
             return true;
         }
-        return false;
+        false
     }
 }
 
@@ -277,7 +271,7 @@ where
         }
 
         // check out inclusion branch first
-        return (BranchStrategy::Continue, None);
+        (BranchStrategy::Continue, None)
     };
 
     // determine sum of absolute and effective values for current selection

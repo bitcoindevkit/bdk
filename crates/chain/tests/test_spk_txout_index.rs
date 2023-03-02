@@ -42,10 +42,10 @@ fn spk_txout_sent_and_received() {
         output: vec![
             TxOut {
                 value: 20_000,
-                script_pubkey: spk2.clone(),
+                script_pubkey: spk2,
             },
             TxOut {
-                script_pubkey: spk1.clone(),
+                script_pubkey: spk1,
                 value: 30_000,
             },
         ],
@@ -62,15 +62,15 @@ fn mark_used() {
 
     let mut spk_index = SpkTxOutIndex::default();
     spk_index.insert_spk(1, spk1.clone());
-    spk_index.insert_spk(2, spk2.clone());
+    spk_index.insert_spk(2, spk2);
 
-    assert_eq!(spk_index.is_used(&1), false);
+    assert!(!spk_index.is_used(&1));
     spk_index.mark_used(&1);
-    assert_eq!(spk_index.is_used(&1), true);
+    assert!(spk_index.is_used(&1));
     spk_index.unmark_used(&1);
-    assert_eq!(spk_index.is_used(&1), false);
+    assert!(!spk_index.is_used(&1));
     spk_index.mark_used(&1);
-    assert_eq!(spk_index.is_used(&1), true);
+    assert!(spk_index.is_used(&1));
 
     let tx1 = Transaction {
         version: 0x02,
@@ -78,15 +78,14 @@ fn mark_used() {
         input: vec![],
         output: vec![TxOut {
             value: 42_000,
-            script_pubkey: spk1.clone(),
+            script_pubkey: spk1,
         }],
     };
 
     spk_index.scan(&tx1);
     spk_index.unmark_used(&1);
-    assert_eq!(
+    assert!(
         spk_index.is_used(&1),
-        true,
         "even though we unmark_used it doesn't matter because there was a tx scanned that used it"
     );
 }
@@ -94,8 +93,8 @@ fn mark_used() {
 #[test]
 fn unmark_used_does_not_result_in_invalid_representation() {
     let mut spk_index = SpkTxOutIndex::default();
-    assert_eq!(spk_index.unmark_used(&0), false);
-    assert_eq!(spk_index.unmark_used(&1), false);
-    assert_eq!(spk_index.unmark_used(&2), false);
+    assert!(!spk_index.unmark_used(&0));
+    assert!(!spk_index.unmark_used(&1));
+    assert!(!spk_index.unmark_used(&2));
     assert!(spk_index.unused_spks(..).collect::<Vec<_>>().is_empty());
 }

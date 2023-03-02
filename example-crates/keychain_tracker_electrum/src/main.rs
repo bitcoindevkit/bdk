@@ -48,7 +48,7 @@ pub struct ScanOptions {
 }
 
 fn main() -> anyhow::Result<()> {
-    let (args, keymap, mut tracker, mut db) = cli::init::<ElectrumCommands, _>()?;
+    let (args, keymap, tracker, db) = cli::init::<ElectrumCommands, _>()?;
 
     let electrum_url = match args.network {
         Network::Bitcoin => "ssl://electrum.blockstream.info:50002",
@@ -57,10 +57,7 @@ fn main() -> anyhow::Result<()> {
         Network::Signet => "tcp://signet-electrumx.wakiyamap.dev:50001",
     };
     let config = electrum_client::Config::builder()
-        .validate_domain(match args.network {
-            Network::Bitcoin => true,
-            _ => false,
-        })
+        .validate_domain(matches!(args.network, Network::Bitcoin))
         .build();
 
     let client = electrum_client::Client::from_config(electrum_url, config)?;
@@ -74,8 +71,8 @@ fn main() -> anyhow::Result<()> {
                     let _txid = client.transaction_broadcast(transaction)?;
                     Ok(())
                 },
-                &mut tracker,
-                &mut db,
+                &tracker,
+                &db,
                 args.network,
                 &keymap,
             )
@@ -148,7 +145,7 @@ fn main() -> anyhow::Result<()> {
                     .txout_index
                     .all_spks()
                     .iter()
-                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .map(|(k, v)| (*k, v.clone()))
                     .collect::<Vec<_>>();
                 spks = Box::new(spks.chain(all_spks.into_iter().map(|(index, script)| {
                     eprintln!("scanning {:?}", index);
@@ -159,7 +156,7 @@ fn main() -> anyhow::Result<()> {
                 let unused_spks = tracker
                     .txout_index
                     .unused_spks(..)
-                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .map(|(k, v)| (*k, v.clone()))
                     .collect::<Vec<_>>();
                 spks = Box::new(spks.chain(unused_spks.into_iter().map(|(index, script)| {
                     eprintln!(

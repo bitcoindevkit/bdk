@@ -463,12 +463,13 @@ impl<P: ChainPosition> SparseChain<P> {
     where
         C: IntoIterator<Item = BlockId>,
     {
-        let mut chain = Self::default();
-        chain.checkpoints = checkpoints
-            .into_iter()
-            .map(|block_id| block_id.into())
-            .collect();
-        chain
+        Self {
+            checkpoints: checkpoints
+                .into_iter()
+                .map(|block_id| block_id.into())
+                .collect(),
+            ..Default::default()
+        }
     }
 
     /// Get the checkpoint for the last known tip.

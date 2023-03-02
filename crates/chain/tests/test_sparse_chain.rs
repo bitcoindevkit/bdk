@@ -147,8 +147,8 @@ fn invalidate_a_checkpoint_and_try_and_move_tx_when_it_wasnt_within_invalidation
         chain1.determine_changeset(&chain2),
         Err(UpdateError::TxInconsistent {
             txid: h!("tx0"),
-            original_pos: TxHeight::Confirmed(0).into(),
-            update_pos: TxHeight::Confirmed(1).into(),
+            original_pos: TxHeight::Confirmed(0),
+            update_pos: TxHeight::Confirmed(1),
         })
     );
 }

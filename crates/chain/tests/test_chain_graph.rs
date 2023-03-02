@@ -186,7 +186,7 @@ fn update_evicts_conflicting_tx() {
             let _ = cg.insert_checkpoint(cp_a).expect("should insert cp");
             let _ = cg.insert_checkpoint(cp_b).expect("should insert cp");
             let _ = cg
-                .insert_tx(tx_a.clone(), TxHeight::Confirmed(0))
+                .insert_tx(tx_a, TxHeight::Confirmed(0))
                 .expect("should insert tx");
             let _ = cg
                 .insert_tx(tx_b.clone(), TxHeight::Confirmed(1))
@@ -213,7 +213,7 @@ fn update_evicts_conflicting_tx() {
                 .into(),
             },
             graph: tx_graph::Additions {
-                tx: [tx_b2.clone()].into(),
+                tx: [tx_b2].into(),
                 txout: [].into(),
             },
         };
@@ -460,7 +460,7 @@ fn test_apply_changes_reintroduce_tx() {
         let mut cg = ChainGraph::default();
         let _ = cg.insert_checkpoint(block1).unwrap();
         let _ = cg.insert_checkpoint(block2a).unwrap();
-        let _ = cg.insert_tx(tx1.clone(), TxHeight::Confirmed(1)).unwrap();
+        let _ = cg.insert_tx(tx1, TxHeight::Confirmed(1)).unwrap();
         let _ = cg.insert_tx(tx2a.clone(), TxHeight::Confirmed(2)).unwrap();
         cg
     };
@@ -647,7 +647,7 @@ fn test_evict_descendants() {
     );
 
     let err = cg
-        .insert_tx_preview(tx_conflict.clone(), TxHeight::Unconfirmed)
+        .insert_tx_preview(tx_conflict, TxHeight::Unconfirmed)
         .expect_err("must fail due to conflicts");
     assert!(matches!(err, InsertTxError::UnresolvableConflict(_)));
 }

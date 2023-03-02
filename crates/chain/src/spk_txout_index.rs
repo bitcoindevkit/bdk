@@ -248,7 +248,7 @@ impl<I: Clone + Ord> SpkTxOutIndex<I> {
         if self.outputs_in_range(index..=index).next().is_some() {
             return false;
         }
-        return self.unused.insert(index.clone());
+        self.unused.insert(index.clone())
     }
 
     /// Returns the index associated with the script pubkey.
@@ -300,13 +300,11 @@ impl<I: Clone + Ord> SpkTxOutIndex<I> {
         let input_matches = tx
             .input
             .iter()
-            .find(|input| self.txouts.contains_key(&input.previous_output))
-            .is_some();
+            .any(|input| self.txouts.contains_key(&input.previous_output));
         let output_matches = tx
             .output
             .iter()
-            .find(|output| self.spk_indices.contains_key(&output.script_pubkey))
-            .is_some();
+            .any(|output| self.spk_indices.contains_key(&output.script_pubkey));
         input_matches || output_matches
     }
 }

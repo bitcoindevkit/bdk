@@ -276,7 +276,7 @@ impl<T: AsTransaction + Ord + Clone> TxGraph<T> {
     ///
     /// The [`Additions`] would be the set difference of `update` and `self` (transactions that
     /// exist in `update` but not in `self`).
-    pub fn determine_additions<'a, T2>(&self, update: &'a TxGraph<T2>) -> Additions<T>
+    pub fn determine_additions<T2>(&self, update: &TxGraph<T2>) -> Additions<T>
     where
         T2: IntoOwned<T> + Clone,
     {
@@ -299,7 +299,7 @@ impl<T: AsTransaction + Ord + Clone> TxGraph<T> {
                     for (&vout, update_txout) in partial {
                         let outpoint = OutPoint::new(txid, vout);
 
-                        if self.get_txout(outpoint) != Some(&update_txout) {
+                        if self.get_txout(outpoint) != Some(update_txout) {
                             additions.txout.insert(outpoint, update_txout.clone());
                         }
                     }
@@ -627,7 +627,7 @@ where
         };
 
         self.populate_stack(op_spends + 1, txid);
-        return Some(item);
+        Some(item)
     }
 }
 

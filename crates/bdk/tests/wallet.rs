@@ -1544,7 +1544,7 @@ fn test_bump_fee_add_input() {
         }],
     };
     wallet
-        .insert_tx(init_tx.clone(), wallet.transactions().last().unwrap().0)
+        .insert_tx(init_tx, wallet.transactions().last().unwrap().0)
         .unwrap();
 
     let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
