@@ -43,7 +43,7 @@ jobs:
         run: cargo build ${{ matrix.features }}
       - name: Clippy
         if: ${{ matrix.rust.clippy }}
-        run: cargo clippy --all-targets --features ${{ matrix.features }} -- -D warnings
+        run: cargo clippy --all-targets ${{ matrix.features }} -- -D warnings
       - name: Test
         run: cargo test ${{ matrix.features }}
 
