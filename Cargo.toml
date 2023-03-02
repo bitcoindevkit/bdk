@@ -4,11 +4,11 @@ members = [
     "crates/chain",
     "crates/file_store",
     "crates/electrum",
-    "example-crates/esplora-wallet",
-    "example-crates/electrum-wallet",
-    "example-crates/keychain_tracker_electrum_example",
-    "example-crates/keychain_tracker_esplora_example",
+    "example-crates/keychain_tracker_electrum",
+    "example-crates/keychain_tracker_esplora",
     "example-crates/keychain_tracker_example_cli",
+    "example-crates/wallet_electrum",
+    "example-crates/wallet_esplora",
     "nursery/tmp_plan",
     "nursery/coin_select"
 ]
