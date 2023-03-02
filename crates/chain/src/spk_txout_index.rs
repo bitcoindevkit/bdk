@@ -195,11 +195,11 @@ impl<I: Clone + Ord> SpkTxOutIndex<I> {
     /// # use bdk_chain::SpkTxOutIndex;
     ///
     /// // imagine our spks are indexed like (keychain, derivation_index).
-    /// let txout_index = SpkTxOutIndex::<(u32,u32)>::default();
+    /// let txout_index = SpkTxOutIndex::<(u32, u32)>::default();
     /// let all_unused_spks = txout_index.unused_spks(..);
     /// let change_index = 1;
-    /// let unused_change_spks = txout_index
-    ///     .unused_spks((change_index, u32::MIN)..(change_index, u32::MAX));
+    /// let unused_change_spks =
+    ///     txout_index.unused_spks((change_index, u32::MIN)..(change_index, u32::MAX));
     /// ```
     pub fn unused_spks<R>(&self, range: R) -> impl DoubleEndedIterator<Item = (&I, &Script)>
     where

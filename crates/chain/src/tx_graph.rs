@@ -52,7 +52,6 @@
 //! let additions = graph.apply_update(update);
 //! assert!(additions.is_empty());
 //! ```
-//!
 use crate::{collections::*, AsTransaction, ForEachTxOut, IntoOwned};
 use alloc::vec::Vec;
 use bitcoin::{OutPoint, Transaction, TxOut, Txid};

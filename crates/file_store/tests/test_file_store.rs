@@ -5,11 +5,11 @@ use bdk_chain::{
 };
 use bdk_file_store::{FileError, IterError, KeychainStore, MAGIC_BYTES, MAGIC_BYTES_LEN};
 use serde;
-use tempfile::NamedTempFile;
 use std::{
     io::{Read, Write},
     vec::Vec,
 };
+use tempfile::NamedTempFile;
 #[derive(
     Debug, Clone, Copy, PartialOrd, Ord, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
 )]
@@ -49,8 +49,7 @@ fn new_fails_if_magic_bytes_are_invalid() {
     let invalid_magic_bytes = "ldkfs0000000";
 
     let mut file = NamedTempFile::new().unwrap();
-    file
-        .write_all(invalid_magic_bytes.as_bytes())
+    file.write_all(invalid_magic_bytes.as_bytes())
         .expect("should write");
 
     match KeychainStore::<TestKeychain, TxHeight, Transaction>::new(file.reopen().unwrap()) {
@@ -83,8 +82,9 @@ fn append_changeset_truncates_invalid_bytes() {
     let mut file = NamedTempFile::new().unwrap();
     file.write_all(&data).expect("should write");
 
-    let mut store = KeychainStore::<TestKeychain, TxHeight, Transaction>::new(file.reopen().unwrap())
-        .expect("should open");
+    let mut store =
+        KeychainStore::<TestKeychain, TxHeight, Transaction>::new(file.reopen().unwrap())
+            .expect("should open");
     match store.iter_changesets().expect("seek should succeed").next() {
         Some(Err(IterError::Bincode(_))) => {}
         unexpected_res => panic!("unexpected result: {:?}", unexpected_res),
@@ -96,7 +96,10 @@ fn append_changeset_truncates_invalid_bytes() {
 
     let got_bytes = {
         let mut buf = Vec::new();
-        file.reopen().unwrap().read_to_end(&mut buf).expect("should read");
+        file.reopen()
+            .unwrap()
+            .read_to_end(&mut buf)
+            .expect("should read");
         buf
     };
 

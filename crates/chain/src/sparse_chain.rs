@@ -24,8 +24,14 @@
 //! /* Updating an empty sparsechain will always succeed */
 //!
 //! let update = SparseChain::from_checkpoints(vec![
-//!     BlockId { height: 1, hash: hash_a },
-//!     BlockId { height: 2, hash: hash_b },
+//!     BlockId {
+//!         height: 1,
+//!         hash: hash_a,
+//!     },
+//!     BlockId {
+//!         height: 2,
+//!         hash: hash_b,
+//!     },
 //! ]);
 //! let _ = chain
 //!     .apply_update(update)
@@ -34,8 +40,14 @@
 //! /* To update a non-empty sparsechain, the update must connect */
 //!
 //! let update = SparseChain::from_checkpoints(vec![
-//!     BlockId { height: 2, hash: hash_b },
-//!     BlockId { height: 3, hash: hash_c },
+//!     BlockId {
+//!         height: 2,
+//!         hash: hash_b,
+//!     },
+//!     BlockId {
+//!         height: 3,
+//!         hash: hash_c,
+//!     },
 //! ]);
 //! let _ = chain
 //!     .apply_update(update)
@@ -56,17 +68,29 @@
 //! # let hash_d = new_hash::<BlockHash>("d");
 //! // our sparsechain has 2 checkpoints
 //! let chain = SparseChain::<TxHeight>::from_checkpoints(vec![
-//!     BlockId { height: 1, hash: hash_a },
-//!     BlockId { height: 2, hash: hash_b },
+//!     BlockId {
+//!         height: 1,
+//!         hash: hash_a,
+//!     },
+//!     BlockId {
+//!         height: 2,
+//!         hash: hash_b,
+//!     },
 //! ]);
 //!
 //! /* Example of an ambiguous update that does not fully connect */
 //!
 //! let ambiguous_update = SparseChain::from_checkpoints(vec![
 //!     // the update sort of "connects" at checkpoint 1, but...
-//!     BlockId { height: 1, hash: hash_a },
+//!     BlockId {
+//!         height: 1,
+//!         hash: hash_a,
+//!     },
 //!     // we cannot determine whether checkpoint 3 connects with checkpoint 2
-//!     BlockId { height: 3, hash: hash_c },
+//!     BlockId {
+//!         height: 3,
+//!         hash: hash_c,
+//!     },
 //! ]);
 //! let _ = chain
 //!     .determine_changeset(&ambiguous_update)
@@ -76,8 +100,14 @@
 //!
 //! let disconnected_update = SparseChain::from_checkpoints(vec![
 //!     // the last checkpoint in chain is 2, so 3 and 4 do not connect
-//!     BlockId { height: 3, hash: hash_c },
-//!     BlockId { height: 4, hash: hash_d },
+//!     BlockId {
+//!         height: 3,
+//!         hash: hash_c,
+//!     },
+//!     BlockId {
+//!         height: 4,
+//!         hash: hash_d,
+//!     },
 //! ]);
 //! let _ = chain
 //!     .determine_changeset(&disconnected_update)
@@ -97,14 +127,21 @@
 //! # let hash_c = new_hash::<BlockHash>("c");
 //! # let hash_d = new_hash::<BlockHash>("d");
 //! // our chain has a single checkpoint at height 11
-//! let mut chain = SparseChain::<TxHeight>::from_checkpoints(vec![
-//!     BlockId { height: 11, hash: hash_a },
-//! ]);
+//! let mut chain = SparseChain::<TxHeight>::from_checkpoints(vec![BlockId {
+//!     height: 11,
+//!     hash: hash_a,
+//! }]);
 //!
 //! // we detect a reorg at height 11, and we introduce a new checkpoint at height 12
 //! let update = SparseChain::from_checkpoints(vec![
-//!     BlockId { height: 11, hash: hash_b },
-//!     BlockId { height: 12, hash: hash_c },
+//!     BlockId {
+//!         height: 11,
+//!         hash: hash_b,
+//!     },
+//!     BlockId {
+//!         height: 12,
+//!         hash: hash_c,
+//!     },
 //! ]);
 //! let _ = chain
 //!     .apply_update(update)
@@ -114,8 +151,14 @@
 //! // we detect another reorg, this time at height 12...
 //! let update = SparseChain::from_checkpoints(vec![
 //!     // we connect at checkpoint 11 as this is our "point of agreement"
-//!     BlockId { height: 11, hash: hash_b },
-//!     BlockId { height: 12, hash: hash_d },
+//!     BlockId {
+//!         height: 11,
+//!         hash: hash_b,
+//!     },
+//!     BlockId {
+//!         height: 12,
+//!         hash: hash_d,
+//!     },
 //! ]);
 //! let _ = chain
 //!     .apply_update(update)
@@ -166,48 +209,102 @@
 //! }
 //!
 //! impl Default for TxPosition {
-//!     fn default() -> Self { Self::Unconfirmed }
+//!     fn default() -> Self {
+//!         Self::Unconfirmed
+//!     }
 //! }
 //!
 //! impl ChainPosition for TxPosition {
 //!     fn height(&self) -> TxHeight {
 //!         match self {
-//!             Self::Confirmed{ height, .. } => TxHeight::Confirmed(*height),
+//!             Self::Confirmed { height, .. } => TxHeight::Confirmed(*height),
 //!             Self::Unconfirmed => TxHeight::Unconfirmed,
 //!         }
 //!     }
 //!
 //!     fn max_ord_of_height(height: TxHeight) -> Self {
 //!         match height {
-//!             TxHeight::Confirmed(height) => Self::Confirmed{ height, position: u32::MAX },
+//!             TxHeight::Confirmed(height) => Self::Confirmed {
+//!                 height,
+//!                 position: u32::MAX,
+//!             },
 //!             TxHeight::Unconfirmed => Self::Unconfirmed,
 //!         }
 //!     }
 //!
 //!     fn min_ord_of_height(height: TxHeight) -> Self {
 //!         match height {
-//!             TxHeight::Confirmed(height) => Self::Confirmed{ height, position: u32::MIN },
+//!             TxHeight::Confirmed(height) => Self::Confirmed {
+//!                 height,
+//!                 position: u32::MIN,
+//!             },
 //!             TxHeight::Unconfirmed => Self::Unconfirmed,
 //!         }
 //!     }
 //! }
 //!
 //! let mut chain = SparseChain::<TxPosition>::default();
-//! let _ = chain.insert_checkpoint(BlockId { height: 10, hash: hash_a }).unwrap();
-//! let _ = chain.insert_tx(txid_1, TxPosition::Confirmed{ height: 9, position: 4321 }).unwrap();
-//! let _ = chain.insert_tx(txid_2, TxPosition::Confirmed{ height: 9, position: 1234 }).unwrap();
-//! let _ = chain.insert_tx(txid_3, TxPosition::Confirmed{ height: 10, position: 321 }).unwrap();
+//! let _ = chain
+//!     .insert_checkpoint(BlockId {
+//!         height: 10,
+//!         hash: hash_a,
+//!     })
+//!     .unwrap();
+//! let _ = chain
+//!     .insert_tx(
+//!         txid_1,
+//!         TxPosition::Confirmed {
+//!             height: 9,
+//!             position: 4321,
+//!         },
+//!     )
+//!     .unwrap();
+//! let _ = chain
+//!     .insert_tx(
+//!         txid_2,
+//!         TxPosition::Confirmed {
+//!             height: 9,
+//!             position: 1234,
+//!         },
+//!     )
+//!     .unwrap();
+//! let _ = chain
+//!     .insert_tx(
+//!         txid_3,
+//!         TxPosition::Confirmed {
+//!             height: 10,
+//!             position: 321,
+//!         },
+//!     )
+//!     .unwrap();
 //!
 //! // transactions are ordered correctly
 //! assert_eq!(
 //!     chain.txids().collect::<Vec<_>>(),
 //!     vec![
-//!         &(TxPosition::Confirmed{ height: 9, position: 1234 }, txid_2),
-//!         &(TxPosition::Confirmed{ height: 9, position: 4321 }, txid_1),
-//!         &(TxPosition::Confirmed{ height: 10, position: 321 }, txid_3),
+//!         &(
+//!             TxPosition::Confirmed {
+//!                 height: 9,
+//!                 position: 1234
+//!             },
+//!             txid_2
+//!         ),
+//!         &(
+//!             TxPosition::Confirmed {
+//!                 height: 9,
+//!                 position: 4321
+//!             },
+//!             txid_1
+//!         ),
+//!         &(
+//!             TxPosition::Confirmed {
+//!                 height: 10,
+//!                 position: 321
+//!             },
+//!             txid_3
+//!         ),
 //!     ],
 //! );
-//!
 //! ```
 use core::{
     fmt::Debug,
@@ -853,7 +950,7 @@ impl<P: ChainPosition> SparseChain<P> {
             .iter()
             .filter(|(&txid, pos)| {
                 pos.is_some() /*it was not a deletion*/ &&
-                self.tx_position(txid).is_none() /*we don't have the txid already*/
+                self.tx_position(txid).is_none() /* we don't have the txid already */
             })
             .map(|(&txid, _)| txid)
     }
