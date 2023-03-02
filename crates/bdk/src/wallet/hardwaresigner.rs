@@ -18,7 +18,7 @@
 //! # use bdk::signer::SignerOrdering;
 //! # use bdk::wallet::hardwaresigner::HWISigner;
 //! # use bdk::wallet::AddressIndex::New;
-//! # use bdk::{FeeRate, KeychainKind, SignOptions, SyncOptions, Wallet};
+//! # use bdk::{FeeRate, KeychainKind, SignOptions, Wallet};
 //! # use hwi::{types::HWIChain, HWIClient};
 //! # use std::sync::Arc;
 //! #
