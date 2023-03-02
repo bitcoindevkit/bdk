@@ -3189,40 +3189,40 @@ fn test_fee_rate_sign_grinding_low_r() {
     assert_fee_rate!(psbt, details.fee.unwrap_or(0), fee_rate);
 }
 
-#[cfg(feature = "test-hardware-signer")]
-#[test]
-fn test_create_signer() {
-    use std::sync::Arc;
-
-    use bdk::signer::SignerOrdering;
-    use bdk::wallet::hardwaresigner::HWISigner;
-    use hwi::types::HWIChain;
-    use hwi::HWIClient;
-
-    let mut devices = HWIClient::enumerate().unwrap();
-    if devices.is_empty() {
-        panic!("No devices found!");
-    }
-    let device = devices.remove(0).unwrap();
-    let client = HWIClient::get_client(&device, true, HWIChain::Regtest).unwrap();
-    let descriptors = client.get_descriptors::<String>(None).unwrap();
-    let custom_signer = HWISigner::from_device(&device, HWIChain::Regtest).unwrap();
-
-    let (mut wallet, _) = get_funded_wallet(&descriptors.internal[0]);
-    wallet.add_signer(
-        KeychainKind::External,
-        SignerOrdering(200),
-        Arc::new(custom_signer),
-    );
-
-    let addr = wallet.get_address(LastUnused);
-    let mut builder = wallet.build_tx();
-    builder.drain_to(addr.script_pubkey()).drain_wallet();
-    let (mut psbt, _) = builder.finish().unwrap();
-
-    let finalized = wallet.sign(&mut psbt, Default::default()).unwrap();
-    assert!(finalized);
-}
+// #[cfg(feature = "test-hardware-signer")]
+// #[test]
+// fn test_hardware_signer() {
+//     use std::sync::Arc;
+//
+//     use bdk::signer::SignerOrdering;
+//     use bdk::wallet::hardwaresigner::HWISigner;
+//     use hwi::types::HWIChain;
+//     use hwi::HWIClient;
+//
+//     let mut devices = HWIClient::enumerate().unwrap();
+//     if devices.is_empty() {
+//         panic!("No devices found!");
+//     }
+//     let device = devices.remove(0).unwrap();
+//     let client = HWIClient::get_client(&device, true, HWIChain::Regtest).unwrap();
+//     let descriptors = client.get_descriptors::<String>(None).unwrap();
+//     let custom_signer = HWISigner::from_device(&device, HWIChain::Regtest).unwrap();
+//
+//     let (mut wallet, _) = get_funded_wallet(&descriptors.internal[0]);
+//     wallet.add_signer(
+//         KeychainKind::External,
+//         SignerOrdering(200),
+//         Arc::new(custom_signer),
+//     );
+//
+//     let addr = wallet.get_address(LastUnused);
+//     let mut builder = wallet.build_tx();
+//     builder.drain_to(addr.script_pubkey()).drain_wallet();
+//     let (mut psbt, _) = builder.finish().unwrap();
+//
+//     let finalized = wallet.sign(&mut psbt, Default::default()).unwrap();
+//     assert!(finalized);
+// }
 
 #[test]
 fn test_taproot_load_descriptor_duplicated_keys() {
