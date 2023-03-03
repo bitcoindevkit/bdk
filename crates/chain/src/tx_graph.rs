@@ -419,7 +419,7 @@ impl<T> TxGraph<T> {
         tx.input
             .iter()
             .enumerate()
-            .filter_map(|(vin, txin)| self.spends.get(&txin.previous_output).zip(Some(vin)))
+            .filter_map(move |(vin, txin)| self.spends.get(&txin.previous_output).zip(Some(vin)))
             .flat_map(|(spends, vin)| core::iter::repeat(vin).zip(spends.iter().cloned()))
             .filter(move |(_, conflicting_txid)| *conflicting_txid != txid)
     }
@@ -474,7 +474,7 @@ impl<T> Additions<T> {
                     .output
                     .iter()
                     .enumerate()
-                    .map(|(vout, txout)| (OutPoint::new(tx.as_tx().txid(), vout as _), txout))
+                    .map(move |(vout, txout)| (OutPoint::new(tx.as_tx().txid(), vout as _), txout))
             })
             .chain(self.txout.iter().map(|(op, txout)| (*op, txout)))
     }

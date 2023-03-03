@@ -125,7 +125,7 @@ where
     pub fn full_txouts(&self) -> impl Iterator<Item = (&(K, u32), FullTxOut<P>)> + '_ {
         self.txout_index
             .txouts()
-            .filter_map(|(spk_i, op, _)| Some((spk_i, self.chain_graph.full_txout(op)?)))
+            .filter_map(move |(spk_i, op, _)| Some((spk_i, self.chain_graph.full_txout(op)?)))
     }
 
     /// Iterates through [`FullTxOut`]s that are unspent outputs.

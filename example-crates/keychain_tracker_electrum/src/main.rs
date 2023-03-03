@@ -62,7 +62,7 @@ fn main() -> anyhow::Result<()> {
 
     let client = electrum_client::Client::from_config(electrum_url, config)?;
 
-    let electrum_cmd = match args.command {
+    let electrum_cmd = match args.command.clone() {
         cli::Commands::ChainSpecific(electrum_cmd) => electrum_cmd,
         general_command => {
             return cli::handle_commands(

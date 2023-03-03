@@ -23,7 +23,7 @@ pub struct Persist<K, P, B> {
     stage: keychain::KeychainChangeSet<K, P>,
 }
 
-impl<K, P, B: PersistBackend<K, P>> Persist<K, P, B> {
+impl<K, P, B> Persist<K, P, B> {
     /// Create a new `Persist` from a [`PersistBackend`].
     pub fn new(backend: B) -> Self {
         Self {
@@ -51,7 +51,10 @@ impl<K, P, B: PersistBackend<K, P>> Persist<K, P, B> {
     /// Commit the staged changes to the underlying persistence backend.
     ///
     /// Retuns a backend defined error if this fails
-    pub fn commit(&mut self) -> Result<(), B::WriteError> {
+    pub fn commit(&mut self) -> Result<(), B::WriteError>
+    where
+        B: PersistBackend<K, P>,
+    {
         self.backend.append_changeset(&self.stage)?;
         self.stage = Default::default();
         Ok(())

@@ -423,7 +423,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
                         Cow::Owned(descriptor.clone()),
                         next_reveal_index..index + 1,
                     ),
-                    DerivationAdditions([(keychain.clone(), index)].into()),
+                    DerivationAdditions(core::iter::once((keychain.clone(), index)).collect()),
                 )
             }
             None => (
@@ -575,11 +575,17 @@ where
         .take_while(move |&index| has_wildcard || index == 0)
         // we can only iterate over non-hardened indices
         .take_while(|&index| index <= BIP32_MAX_INDEX)
-        // take until failure
-        .map_while(move |index| {
-            descriptor
-                .derived_descriptor(&secp, index)
-                .map(|desc| (index, desc.script_pubkey()))
-                .ok()
-        })
+        .map(
+            move |index| -> Result<_, miniscript::descriptor::ConversionError> {
+                Ok((
+                    index,
+                    descriptor
+                        .at_derivation_index(index)
+                        .derived_descriptor(&secp)?
+                        .script_pubkey(),
+                ))
+            },
+        )
+        .take_while(Result::is_ok)
+        .map(Result::unwrap)
 }

@@ -949,7 +949,7 @@ impl<P: ChainPosition> SparseChain<P> {
         changeset
             .txids
             .iter()
-            .filter(|(&txid, pos)| {
+            .filter(move |(&txid, pos)| {
                 pos.is_some() /*it was not a deletion*/ &&
                 self.tx_position(txid).is_none() /* we don't have the txid already */
             })

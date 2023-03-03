@@ -9,8 +9,8 @@ keywords = ["bitcoin", "wallet", "descriptor", "psbt"]
 readme = "README.md"
 license = "MIT OR Apache-2.0"
 authors = ["Bitcoin Dev Kit Developers"]
-edition = "2018"
-
+edition = "2021"
+rust-version = "1.57"
 
 [dependencies]
 log = "^0.4"

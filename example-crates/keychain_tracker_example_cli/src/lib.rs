@@ -675,7 +675,7 @@ pub fn planned_utxos<'a, AK: bdk_tmp_plan::CanDerive + Clone, P: ChainPosition>(
 ) -> impl Iterator<Item = (bdk_tmp_plan::Plan<AK>, FullTxOut<P>)> + 'a {
     tracker
         .full_utxos()
-        .filter_map(|((keychain, derivation_index), full_txout)| {
+        .filter_map(move |((keychain, derivation_index), full_txout)| {
             Some((
                 bdk_tmp_plan::plan_satisfaction(
                     &tracker

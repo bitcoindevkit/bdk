@@ -294,7 +294,7 @@ where
         &'a self,
         tx: &'a Transaction,
     ) -> impl Iterator<Item = (&'a P, Txid)> + 'a {
-        self.graph.walk_conflicts(tx, |_, conflict_txid| {
+        self.graph.walk_conflicts(tx, move |_, conflict_txid| {
             self.chain
                 .tx_position(conflict_txid)
                 .map(|conflict_pos| (conflict_pos, conflict_txid))
@@ -309,39 +309,42 @@ where
         &self,
         changeset: &mut ChangeSet<P, T>,
     ) -> Result<(), UnresolvableConflict<P>> {
-        let chain_conflicts = changeset
-            .chain
-            .txids
-            .iter()
-            // we want to find new txid additions by the changeset (all txid entries in the
-            // changeset with Some(position_change))
-            .filter_map(|(&txid, pos_change)| pos_change.as_ref().map(|pos| (txid, pos)))
-            // we don't care about txids that move, only newly added txids
-            .filter(|&(txid, _)| self.chain.tx_position(txid).is_none())
-            // full tx should exist (either in graph, or additions)
-            .filter_map(|(txid, pos)| {
-                let full_tx = self
+        let mut chain_conflicts = vec![];
+
+        for (&txid, pos_change) in &changeset.chain.txids {
+            let pos = match pos_change {
+                Some(pos) => {
+                    // Ignore txs that are still in the chain -- we only care about new ones
+                    if self.chain.tx_position(txid).is_some() {
+                        continue;
+                    }
+                    pos
+                }
+                // Ignore txids that are being delted by the change (they can't conflict)
+                None => continue,
+            };
+
+            let mut full_tx = self.graph.get_tx(txid);
+
+            if full_tx.is_none() {
+                full_tx = changeset
                     .graph
-                    .get_tx(txid)
-                    .or_else(|| {
-                        changeset
-                            .graph
-                            .tx
-                            .iter()
-                            .find(|tx| tx.as_tx().txid() == txid)
-                    })
-                    .map(|tx| (txid, tx, pos));
-                debug_assert!(full_tx.is_some(), "should have full tx at this point");
-                full_tx
-            })
-            .flat_map(|(new_txid, new_tx, new_pos)| {
-                self.tx_conflicts_in_chain(new_tx.as_tx()).map(
-                    move |(conflict_pos, conflict_txid)| {
-                        (new_pos.clone(), new_txid, conflict_pos, conflict_txid)
-                    },
-                )
-            })
-            .collect::<Vec<_>>();
+                    .tx
+                    .iter()
+                    .find(|tx| tx.as_tx().txid() == txid)
+            }
+
+            debug_assert!(full_tx.is_some(), "should have full tx at this point");
+
+            let full_tx = match full_tx {
+                Some(full_tx) => full_tx,
+                None => continue,
+            };
+
+            for (conflict_pos, conflict_txid) in self.tx_conflicts_in_chain(full_tx.as_tx()) {
+                chain_conflicts.push((pos.clone(), txid, conflict_pos, conflict_txid))
+            }
+        }
 
         for (update_pos, update_txid, conflicting_pos, conflicting_txid) in chain_conflicts {
             // We have found a tx that conflicts with our update txid. Only allow this when the
@@ -411,7 +414,7 @@ where
     pub fn transactions_in_chain(&self) -> impl DoubleEndedIterator<Item = (&P, &T)> {
         self.chain
             .txids()
-            .map(|(pos, txid)| (pos, self.graph.get_tx(*txid).expect("must exist")))
+            .map(move |(pos, txid)| (pos, self.graph.get_tx(*txid).expect("must exist")))
     }
 
     /// Finds the transaction in the chain that spends `outpoint` given the input/output
