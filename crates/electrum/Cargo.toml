@@ -12,5 +12,5 @@ readme = "README.md"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-bdk_chain = { path = "../chain", version = "0.3", features = ["serde", "miniscript"] }
+bdk_chain = { path = "../chain", version = "0.3.1", features = ["serde", "miniscript"] }
 electrum-client = { version = "0.12" }
