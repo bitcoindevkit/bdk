@@ -182,8 +182,8 @@ where
     }
 }
 
-#[cfg(feautre = "std")]
-impl<P: core::fmt::Display> std::error::Error for NewError<P> {}
+#[cfg(feature = "std")]
+impl<P: core::fmt::Display + core::fmt::Debug> std::error::Error for NewError<P> {}
 
 impl<D> Wallet<D> {
     /// Create a wallet from a `descriptor` (and an optional `change_descriptor`) and load related
