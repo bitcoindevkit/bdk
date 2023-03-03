@@ -56,7 +56,7 @@ pub use txout_index::*;
     )
 )]
 #[must_use]
-pub struct DerivationAdditions<K>(BTreeMap<K, u32>);
+pub struct DerivationAdditions<K>(pub BTreeMap<K, u32>);
 
 impl<K> DerivationAdditions<K> {
     /// Returns whether the additions are empty.

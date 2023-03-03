@@ -7,6 +7,7 @@ use bdk_chain::{
     keychain::{KeychainChangeSet, KeychainTracker},
     sparse_chain, AsTransaction,
 };
+use bincode::{DefaultOptions, Options};
 use core::marker::PhantomData;
 use std::{
     fs::{File, OpenOptions},
@@ -15,10 +16,10 @@ use std::{
 };
 
 /// BDK File Store magic bytes length.
-pub const MAGIC_BYTES_LEN: usize = 12;
+const MAGIC_BYTES_LEN: usize = 12;
 
 /// BDK File Store magic bytes.
-pub const MAGIC_BYTES: [u8; MAGIC_BYTES_LEN] = [98, 100, 107, 102, 115, 48, 48, 48, 48, 48, 48, 48];
+const MAGIC_BYTES: [u8; MAGIC_BYTES_LEN] = [98, 100, 107, 102, 115, 48, 48, 48, 48, 48, 48, 48];
 
 /// Persists an append only list of `KeychainChangeSet<K,P>` to a single file.
 /// [`KeychainChangeSet<K,P>`] record the changes made to a [`KeychainTracker<K,P>`].
@@ -26,6 +27,10 @@ pub const MAGIC_BYTES: [u8; MAGIC_BYTES_LEN] = [98, 100, 107, 102, 115, 48, 48, 
 pub struct KeychainStore<K, P, T = Transaction> {
     db_file: File,
     changeset_type_params: core::marker::PhantomData<(K, P, T)>,
+}
+
+fn bincode() -> impl bincode::Options {
+    DefaultOptions::new().with_varint_encoding()
 }
 
 impl<K, P, T> KeychainStore<K, P, T>
@@ -58,7 +63,7 @@ where
 
     /// Creates or loads a a store from `db_path`. If no file exists there it will be created.
     pub fn new_from_path<D: AsRef<Path>>(db_path: D) -> Result<Self, FileError> {
-        let already_exists = db_path.as_ref().try_exists()?;
+        let already_exists = db_path.as_ref().exists();
 
         let mut db_file = OpenOptions::new()
             .read(true)
@@ -143,15 +148,12 @@ where
             return Ok(());
         }
 
-        bincode::encode_into_std_write(
-            bincode::serde::Compat(changeset),
-            &mut self.db_file,
-            bincode::config::standard(),
-        )
-        .map_err(|e| match e {
-            bincode::error::EncodeError::Io { inner, .. } => inner,
-            unexpected_err => panic!("unexpected bincode error: {}", unexpected_err),
-        })?;
+        bincode()
+            .serialize_into(&mut self.db_file, changeset)
+            .map_err(|e| match *e {
+                bincode::ErrorKind::Io(inner) => inner,
+                unexpected_err => panic!("unexpected bincode error: {}", unexpected_err),
+            })?;
 
         // truncate file after this changeset addition
         // if this is not done, data after this changeset may represent valid changesets, however
@@ -205,7 +207,7 @@ pub enum IterError {
     /// Failure to read from file.
     Io(io::Error),
     /// Failure to decode data from file.
-    Bincode(bincode::error::DecodeError),
+    Bincode(bincode::ErrorKind),
 }
 
 impl core::fmt::Display for IterError {
@@ -251,10 +253,10 @@ where
         let result = (|| {
             let pos = self.db_file.stream_position()?;
 
-            match bincode::decode_from_std_read(self.db_file, bincode::config::standard()) {
-                Ok(bincode::serde::Compat(changeset)) => Ok(Some(changeset)),
+            match bincode().deserialize_from(&mut self.db_file) {
+                Ok(changeset) => Ok(Some(changeset)),
                 Err(e) => {
-                    if let bincode::error::DecodeError::Io { inner, .. } = &e {
+                    if let bincode::ErrorKind::Io(inner) = &*e {
                         if inner.kind() == io::ErrorKind::UnexpectedEof {
                             let eof = self.db_file.seek(io::SeekFrom::End(0))?;
                             if pos == eof {
@@ -264,7 +266,7 @@ where
                     }
 
                     self.db_file.seek(io::SeekFrom::Start(pos))?;
-                    Err(IterError::Bincode(e))
+                    Err(IterError::Bincode(*e))
                 }
             }
         })();
@@ -282,5 +284,127 @@ where
 impl From<io::Error> for IterError {
     fn from(value: io::Error) -> Self {
         IterError::Io(value)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use bdk_chain::{
+        bitcoin::Transaction,
+        keychain::{DerivationAdditions, KeychainChangeSet},
+        TxHeight,
+    };
+    use std::{
+        io::{Read, Write},
+        vec::Vec,
+    };
+    use tempfile::NamedTempFile;
+    #[derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialOrd,
+        Ord,
+        PartialEq,
+        Eq,
+        Hash,
+        serde::Serialize,
+        serde::Deserialize,
+    )]
+    enum TestKeychain {
+        External,
+        Internal,
+    }
+
+    impl core::fmt::Display for TestKeychain {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self {
+                Self::External => write!(f, "external"),
+                Self::Internal => write!(f, "internal"),
+            }
+        }
+    }
+
+    #[test]
+    fn magic_bytes() {
+        assert_eq!(&MAGIC_BYTES, "bdkfs0000000".as_bytes());
+    }
+
+    #[test]
+    fn new_fails_if_file_is_too_short() {
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(&MAGIC_BYTES[..MAGIC_BYTES_LEN - 1])
+            .expect("should write");
+
+        match KeychainStore::<TestKeychain, TxHeight, Transaction>::new(file.reopen().unwrap()) {
+            Err(FileError::Io(e)) => assert_eq!(e.kind(), std::io::ErrorKind::UnexpectedEof),
+            unexpected => panic!("unexpected result: {:?}", unexpected),
+        };
+    }
+
+    #[test]
+    fn new_fails_if_magic_bytes_are_invalid() {
+        let invalid_magic_bytes = "ldkfs0000000";
+
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(invalid_magic_bytes.as_bytes())
+            .expect("should write");
+
+        match KeychainStore::<TestKeychain, TxHeight, Transaction>::new(file.reopen().unwrap()) {
+            Err(FileError::InvalidMagicBytes(b)) => {
+                assert_eq!(b, invalid_magic_bytes.as_bytes())
+            }
+            unexpected => panic!("unexpected result: {:?}", unexpected),
+        };
+    }
+
+    #[test]
+    fn append_changeset_truncates_invalid_bytes() {
+        // initial data to write to file (magic bytes + invalid data)
+        let mut data = [255_u8; 2000];
+        data[..MAGIC_BYTES_LEN].copy_from_slice(&MAGIC_BYTES);
+
+        let changeset = KeychainChangeSet {
+            derivation_indices: DerivationAdditions(
+                vec![(TestKeychain::External, 42)].into_iter().collect(),
+            ),
+            chain_graph: Default::default(),
+        };
+
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(&data).expect("should write");
+
+        let mut store =
+            KeychainStore::<TestKeychain, TxHeight, Transaction>::new(file.reopen().unwrap())
+                .expect("should open");
+        match store.iter_changesets().expect("seek should succeed").next() {
+            Some(Err(IterError::Bincode(_))) => {}
+            unexpected_res => panic!("unexpected result: {:?}", unexpected_res),
+        }
+
+        store.append_changeset(&changeset).expect("should append");
+
+        drop(store);
+
+        let got_bytes = {
+            let mut buf = Vec::new();
+            file.reopen()
+                .unwrap()
+                .read_to_end(&mut buf)
+                .expect("should read");
+            buf
+        };
+
+        let expected_bytes = {
+            let mut buf = MAGIC_BYTES.to_vec();
+            DefaultOptions::new()
+                .with_varint_encoding()
+                .serialize_into(&mut buf, &changeset)
+                .expect("should encode");
+            buf
+        };
+
+        assert_eq!(got_bytes, expected_bytes);
     }
 }

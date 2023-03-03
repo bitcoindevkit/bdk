@@ -24,7 +24,6 @@ bdk_chain = { path = "../chain", version = "0.3.1", features = ["miniscript", "s
 # Optional dependencies
 hwi = { version = "0.5", optional = true, features = [ "use-miniscript"] }
 bip39 = { version = "1.0.1", optional = true }
-bdk_file_store = { path = "../file_store", version = "0.0.1", optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = "0.2"
@@ -34,7 +33,6 @@ js-sys = "0.3"
 [features]
 default = ["std"]
 std = []
-file-store = [ "std", "bdk_file_store"]
 compiler = ["miniscript/compiler"]
 all-keys = ["keys-bip39"]
 keys-bip39 = ["bip39"]
