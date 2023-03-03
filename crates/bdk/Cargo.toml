@@ -39,6 +39,12 @@ keys-bip39 = ["bip39"]
 hardware-signer = ["hwi"]
 test-hardware-signer = ["hardware-signer"]
 
+
+# This feature is used to run `cargo check` in our CI targeting wasm. It's not recommended
+# for libraries to explicitly include the "getrandom/js" feature, so we only do it when
+# necessary for running our CI. See: https://docs.rs/getrandom/0.2.8/getrandom/#webassembly-support
+dev-getrandom-wasm = ["getrandom/js"]
+
 [dev-dependencies]
 lazy_static = "1.4"
 env_logger = "0.7"

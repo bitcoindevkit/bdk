@@ -77,6 +77,7 @@ pub trait EsploraExt {
     }
 }
 
+#[cfg(feature = "blocking")]
 impl EsploraExt for esplora_client::BlockingClient {
     fn scan<K: Ord + Clone>(
         &self,
@@ -300,5 +301,20 @@ fn map_confirmation_time(tx_status: &TxStatus, height_at_start: u32) -> Confirma
             ConfirmationTime::Confirmed { height, time }
         }
         _ => ConfirmationTime::Unconfirmed,
+    }
+}
+
+#[cfg(feature = "async")]
+impl EsploraExt for esplora_client::AsyncClient {
+    fn scan<K: Ord + Clone>(
+        &self,
+        _local_chain: &BTreeMap<u32, BlockHash>,
+        _keychain_spks: BTreeMap<K, impl IntoIterator<Item = (u32, Script)>>,
+        _txids: impl IntoIterator<Item = Txid>,
+        _outpoints: impl IntoIterator<Item = OutPoint>,
+        _stop_gap: usize,
+        _parallel_requests: usize,
+    ) -> Result<KeychainScan<K, ConfirmationTime>, Error> {
+        todo!()
     }
 }

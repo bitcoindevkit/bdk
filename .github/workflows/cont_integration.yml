@@ -77,8 +77,12 @@ jobs:
         run: rustup target add wasm32-unknown-unknown
       - name: Update toolchain
         run: rustup update
-      - name: Check
-        run: cargo check --target wasm32-unknown-unknown --features async-interface,use-esplora-async,dev-getrandom-wasm --no-default-features
+      - name: Check bdk
+        working-directory: ./crates/bdk
+        run: cargo check --target wasm32-unknown-unknown --features dev-getrandom-wasm
+      - name: Check esplora
+        working-directory: ./crates/esplora
+        run: cargo check --target wasm32-unknown-unknown --features async --no-default-features
 
   fmt:
     name: Rust fmt
