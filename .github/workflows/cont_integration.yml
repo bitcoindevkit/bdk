@@ -30,15 +30,13 @@ jobs:
             ~/.cargo/git
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('.cache_key') }}-${{ hashFiles('**/Cargo.toml','**/Cargo.lock') }}
-      - name: Set default toolchain
-        run: rustup default ${{ matrix.rust.version }}
-      - name: Set profile
-        run: rustup set profile minimal
-      - name: Add clippy
-        if: ${{ matrix.rust.clippy }}
-        run: rustup component add clippy
-      - name: Update toolchain
-        run: rustup update
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+            toolchain: ${{ matrix.rust.version }}
+            override: true
+            components: clippy
+            profile: minimal
       - name: Build
         run: cargo build ${{ matrix.features }}
       - name: Clippy
@@ -69,14 +67,13 @@ jobs:
       - run: sudo apt-add-repository "deb http://apt.llvm.org/focal/ llvm-toolchain-focal-10 main" || exit 1
       - run: sudo apt-get update || exit 1
       - run: sudo apt-get install -y libclang-common-10-dev clang-10 libc6-dev-i386 || exit 1
-      - name: Set default toolchain
-        run: rustup default 1.65.0 # STABLE
-      - name: Set profile
-        run: rustup set profile minimal
-      - name: Add target wasm32
-        run: rustup target add wasm32-unknown-unknown
-      - name: Update toolchain
-        run: rustup update
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+            toolchain: "1.65.0"
+            override: true
+            profile: minimal
+            target: "wasm32-unknown-unknown"
       - name: Check bdk
         working-directory: ./crates/bdk
         run: cargo check --target wasm32-unknown-unknown --features dev-getrandom-wasm
@@ -90,13 +87,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v2
-      - name: Set default toolchain
-        run: rustup default nightly
-      - name: Set profile
-        run: rustup set profile minimal
-      - name: Add rustfmt
-        run: rustup component add rustfmt
-      - name: Update toolchain
-        run: rustup update
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+            toolchain: "1.65.0"
+            override: true
+            profile: minimal
+            components: rustfmt
       - name: Check fmt
         run: cargo fmt --all -- --config format_code_in_doc_comments=true --check

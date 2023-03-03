@@ -16,16 +16,13 @@ jobs:
         uses: actions/checkout@v2
       - name: Install lcov tools
         run: sudo apt-get install lcov -y
-      - name: Install rustup
-        run: curl https://sh.rustup.rs -sSf | sh -s -- -y
-      - name: Set default toolchain
-        run: rustup default nightly
-      - name: Set profile
-        run: rustup set profile minimal
-      - name: Add llvm tools
-        run: rustup component add llvm-tools-preview
-      - name: Update toolchain
-        run: rustup update
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+            toolchain: "1.65.0"
+            override: true
+            profile: minimal
+            components: llvm-tools-preview
       - name: Cache cargo
         uses: actions/cache@v3
         with:
@@ -53,7 +50,6 @@ jobs:
         run: mkdir coverage; grcov . --binary-path ./target/debug/ -s . -t lcov --branch --ignore-not-existing --ignore '/*' -o ./coverage/lcov.info
       - name: Generate HTML coverage report
         run: genhtml -o coverage-report.html ./coverage/lcov.info
-
       - name: Coveralls upload
         uses: coverallsapp/github-action@master
         with:
