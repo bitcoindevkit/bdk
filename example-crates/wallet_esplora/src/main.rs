@@ -13,7 +13,8 @@ const STOP_GAP: usize = 50;
 const PARALLEL_REQUESTS: usize = 5;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let db = KeychainStore::new_from_path("/tmp/bdk-esplora-example")?;
+    let db_path = std::env::temp_dir().join("bdk-esplora-example");
+    let db = KeychainStore::new_from_path(db_path)?;
     let external_descriptor = "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/84'/0'/0'/0/*)";
     let internal_descriptor = "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/84'/0'/0'/1/*)";
 
