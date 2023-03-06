@@ -8,6 +8,7 @@ use bdk_esplora::EsploraExt;
 use bdk_file_store::KeychainStore;
 use std::str::FromStr;
 
+const SEND_AMOUNT: u64 = 5000;
 const STOP_GAP: usize = 50;
 const PARALLEL_REQUESTS: usize = 5;
 
@@ -58,7 +59,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut tx_builder = wallet.build_tx();
     tx_builder
-        .add_recipient(faucet_address.script_pubkey(), (balance.total()) / 5)
+        .add_recipient(faucet_address.script_pubkey(), SEND_AMOUNT)
         .enable_rbf();
 
     let (mut psbt, _) = tx_builder.finish()?;
