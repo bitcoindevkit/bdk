@@ -19,9 +19,8 @@ use crate::{
     collections::BTreeMap,
     sparse_chain::ChainPosition,
     tx_graph::TxGraph,
-    AsTransaction, ForEachTxOut,
+    ForEachTxOut,
 };
-use bitcoin::Transaction;
 
 #[cfg(feature = "miniscript")]
 pub mod persist;
@@ -100,14 +99,14 @@ impl<K> AsRef<BTreeMap<K, u32>> for DerivationAdditions<K> {
 
 #[derive(Clone, Debug, PartialEq)]
 /// An update that includes the last active indexes of each keychain.
-pub struct KeychainScan<K, P, T = Transaction> {
+pub struct KeychainScan<K, P> {
     /// The update data in the form of a chain that could be applied
-    pub update: ChainGraph<P, T>,
+    pub update: ChainGraph<P>,
     /// The last active indexes of each keychain
     pub last_active_indices: BTreeMap<K, u32>,
 }
 
-impl<K, P, T> Default for KeychainScan<K, P, T> {
+impl<K, P> Default for KeychainScan<K, P> {
     fn default() -> Self {
         Self {
             update: Default::default(),
@@ -116,8 +115,8 @@ impl<K, P, T> Default for KeychainScan<K, P, T> {
     }
 }
 
-impl<K, P, T> From<ChainGraph<P, T>> for KeychainScan<K, P, T> {
-    fn from(update: ChainGraph<P, T>) -> Self {
+impl<K, P> From<ChainGraph<P>> for KeychainScan<K, P> {
+    fn from(update: ChainGraph<P>) -> Self {
         KeychainScan {
             update,
             last_active_indices: Default::default(),
@@ -135,20 +134,20 @@ impl<K, P, T> From<ChainGraph<P, T>> for KeychainScan<K, P, T> {
     serde(
         crate = "serde_crate",
         bound(
-            deserialize = "K: Ord + serde::Deserialize<'de>, P: serde::Deserialize<'de>, T: Ord + serde::Deserialize<'de>",
-            serialize = "K: Ord + serde::Serialize, P: serde::Serialize, T: Ord+ serde::Serialize"
+            deserialize = "K: Ord + serde::Deserialize<'de>, P: serde::Deserialize<'de>",
+            serialize = "K: Ord + serde::Serialize, P: serde::Serialize"
         )
     )
 )]
 #[must_use]
-pub struct KeychainChangeSet<K, P, T = Transaction> {
+pub struct KeychainChangeSet<K, P> {
     /// The changes in local keychain derivation indices
     pub derivation_indices: DerivationAdditions<K>,
     /// The changes that have occurred in the blockchain
-    pub chain_graph: chain_graph::ChangeSet<P, T>,
+    pub chain_graph: chain_graph::ChangeSet<P>,
 }
 
-impl<K, P, T> Default for KeychainChangeSet<K, P, T> {
+impl<K, P> Default for KeychainChangeSet<K, P> {
     fn default() -> Self {
         Self {
             chain_graph: Default::default(),
@@ -157,7 +156,7 @@ impl<K, P, T> Default for KeychainChangeSet<K, P, T> {
     }
 }
 
-impl<K, P, T> KeychainChangeSet<K, P, T> {
+impl<K, P> KeychainChangeSet<K, P> {
     /// Returns whether the [`KeychainChangeSet`] is empty (no changes recorded).
     pub fn is_empty(&self) -> bool {
         self.chain_graph.is_empty() && self.derivation_indices.is_empty()
@@ -168,19 +167,18 @@ impl<K, P, T> KeychainChangeSet<K, P, T> {
     ///
     /// Note the derivation indices cannot be decreased so `other` will only change the derivation
     /// index for a keychain if it's entry is higher than the one in `self`.
-    pub fn append(&mut self, other: KeychainChangeSet<K, P, T>)
+    pub fn append(&mut self, other: KeychainChangeSet<K, P>)
     where
         K: Ord,
         P: ChainPosition,
-        T: Ord,
     {
         self.derivation_indices.append(other.derivation_indices);
         self.chain_graph.append(other.chain_graph);
     }
 }
 
-impl<K, P, T> From<chain_graph::ChangeSet<P, T>> for KeychainChangeSet<K, P, T> {
-    fn from(changeset: chain_graph::ChangeSet<P, T>) -> Self {
+impl<K, P> From<chain_graph::ChangeSet<P>> for KeychainChangeSet<K, P> {
+    fn from(changeset: chain_graph::ChangeSet<P>) -> Self {
         Self {
             chain_graph: changeset,
             ..Default::default()
@@ -188,7 +186,7 @@ impl<K, P, T> From<chain_graph::ChangeSet<P, T>> for KeychainChangeSet<K, P, T> 
     }
 }
 
-impl<K, P, T> From<DerivationAdditions<K>> for KeychainChangeSet<K, P, T> {
+impl<K, P> From<DerivationAdditions<K>> for KeychainChangeSet<K, P> {
     fn from(additions: DerivationAdditions<K>) -> Self {
         Self {
             derivation_indices: additions,
@@ -197,13 +195,13 @@ impl<K, P, T> From<DerivationAdditions<K>> for KeychainChangeSet<K, P, T> {
     }
 }
 
-impl<K, P, T> AsRef<TxGraph<T>> for KeychainScan<K, P, T> {
-    fn as_ref(&self) -> &TxGraph<T> {
+impl<K, P> AsRef<TxGraph> for KeychainScan<K, P> {
+    fn as_ref(&self) -> &TxGraph {
         self.update.graph()
     }
 }
 
-impl<K, P, T: AsTransaction> ForEachTxOut for KeychainChangeSet<K, P, T> {
+impl<K, P> ForEachTxOut for KeychainChangeSet<K, P> {
     fn for_each_txout(&self, f: impl FnMut((bitcoin::OutPoint, &bitcoin::TxOut))) {
         self.chain_graph.for_each_txout(f)
     }
@@ -267,8 +265,6 @@ impl core::ops::Add for Balance {
 
 #[cfg(test)]
 mod test {
-    use bitcoin::Transaction;
-
     use crate::TxHeight;
 
     use super::*;
@@ -291,12 +287,12 @@ mod test {
         rhs_di.insert(Keychain::Four, 4);
         let mut lhs = KeychainChangeSet {
             derivation_indices: DerivationAdditions(lhs_di),
-            chain_graph: chain_graph::ChangeSet::<TxHeight, Transaction>::default(),
+            chain_graph: chain_graph::ChangeSet::<TxHeight>::default(),
         };
 
         let rhs = KeychainChangeSet {
             derivation_indices: DerivationAdditions(rhs_di),
-            chain_graph: chain_graph::ChangeSet::<TxHeight, Transaction>::default(),
+            chain_graph: chain_graph::ChangeSet::<TxHeight>::default(),
         };
 
         lhs.append(rhs);

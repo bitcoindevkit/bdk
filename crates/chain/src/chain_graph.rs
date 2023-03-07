@@ -3,7 +3,7 @@ use crate::{
     collections::HashSet,
     sparse_chain::{self, ChainPosition, SparseChain},
     tx_graph::{self, TxGraph},
-    AsTransaction, BlockId, ForEachTxOut, FullTxOut, IntoOwned, TxHeight,
+    BlockId, ForEachTxOut, FullTxOut, TxHeight,
 };
 use alloc::{string::ToString, vec::Vec};
 use bitcoin::{OutPoint, Transaction, TxOut, Txid};
@@ -25,12 +25,12 @@ use core::fmt::Debug;
 /// `graph` but not the other way around. Transactions may fall out of the *chain* (via re-org or
 /// mempool eviction) but will remain in the *graph*.
 #[derive(Clone, Debug, PartialEq)]
-pub struct ChainGraph<P = TxHeight, T = Transaction> {
+pub struct ChainGraph<P = TxHeight> {
     chain: SparseChain<P>,
-    graph: TxGraph<T>,
+    graph: TxGraph,
 }
 
-impl<P, T> Default for ChainGraph<P, T> {
+impl<P> Default for ChainGraph<P> {
     fn default() -> Self {
         Self {
             chain: Default::default(),
@@ -39,40 +39,39 @@ impl<P, T> Default for ChainGraph<P, T> {
     }
 }
 
-impl<P, T> AsRef<SparseChain<P>> for ChainGraph<P, T> {
+impl<P> AsRef<SparseChain<P>> for ChainGraph<P> {
     fn as_ref(&self) -> &SparseChain<P> {
         &self.chain
     }
 }
 
-impl<P, T> AsRef<TxGraph<T>> for ChainGraph<P, T> {
-    fn as_ref(&self) -> &TxGraph<T> {
+impl<P> AsRef<TxGraph> for ChainGraph<P> {
+    fn as_ref(&self) -> &TxGraph {
         &self.graph
     }
 }
 
-impl<P, T> AsRef<ChainGraph<P, T>> for ChainGraph<P, T> {
-    fn as_ref(&self) -> &ChainGraph<P, T> {
+impl<P> AsRef<ChainGraph<P>> for ChainGraph<P> {
+    fn as_ref(&self) -> &ChainGraph<P> {
         self
     }
 }
 
-impl<P, T> ChainGraph<P, T> {
+impl<P> ChainGraph<P> {
     /// Returns a reference to the internal [`SparseChain`].
     pub fn chain(&self) -> &SparseChain<P> {
         &self.chain
     }
 
     /// Returns a reference to the internal [`TxGraph`].
-    pub fn graph(&self) -> &TxGraph<T> {
+    pub fn graph(&self) -> &TxGraph {
         &self.graph
     }
 }
 
-impl<P, T> ChainGraph<P, T>
+impl<P> ChainGraph<P>
 where
     P: ChainPosition,
-    T: AsTransaction + Clone + Ord,
 {
     /// Create a new chain graph from a `chain` and a `graph`.
     ///
@@ -82,14 +81,12 @@ where
     /// transaction in `graph`.
     /// 2. The `chain` has two transactions that allegedly in it but they conflict in the `graph`
     /// (so could not possibly be in the same chain).
-    pub fn new(chain: SparseChain<P>, graph: TxGraph<T>) -> Result<Self, NewError<P>> {
+    pub fn new(chain: SparseChain<P>, graph: TxGraph) -> Result<Self, NewError<P>> {
         let mut missing = HashSet::default();
         for (pos, txid) in chain.txids() {
             if let Some(tx) = graph.get_tx(*txid) {
                 let conflict = graph
-                    .walk_conflicts(tx.as_tx(), |_, txid| {
-                        Some((chain.tx_position(txid)?.clone(), txid))
-                    })
+                    .walk_conflicts(tx, |_, txid| Some((chain.tx_position(txid)?.clone(), txid)))
                     .next();
                 if let Some((conflict_pos, conflict)) = conflict {
                     return Err(NewError::Conflict {
@@ -128,8 +125,8 @@ where
     pub fn inflate_update(
         &self,
         update: SparseChain<P>,
-        new_txs: impl IntoIterator<Item = T>,
-    ) -> Result<ChainGraph<P, T>, NewError<P>> {
+        new_txs: impl IntoIterator<Item = Transaction>,
+    ) -> Result<ChainGraph<P>, NewError<P>> {
         let mut inflated_chain = SparseChain::default();
         let mut inflated_graph = TxGraph::default();
 
@@ -188,7 +185,7 @@ where
 
     /// Determines the changes required to invalidate checkpoints `from_height` (inclusive) and
     /// above. Displaced transactions will have their positions moved to [`TxHeight::Unconfirmed`].
-    pub fn invalidate_checkpoints_preview(&self, from_height: u32) -> ChangeSet<P, T> {
+    pub fn invalidate_checkpoints_preview(&self, from_height: u32) -> ChangeSet<P> {
         ChangeSet {
             chain: self.chain.invalidate_checkpoints_preview(from_height),
             ..Default::default()
@@ -200,9 +197,9 @@ where
     ///
     /// This is equivalent to calling [`Self::invalidate_checkpoints_preview`] and
     /// [`Self::apply_changeset`] in sequence.
-    pub fn invalidate_checkpoints(&mut self, from_height: u32) -> ChangeSet<P, T>
+    pub fn invalidate_checkpoints(&mut self, from_height: u32) -> ChangeSet<P>
     where
-        ChangeSet<P, T>: Clone,
+        ChangeSet<P>: Clone,
     {
         let changeset = self.invalidate_checkpoints_preview(from_height);
         self.apply_changeset(changeset.clone());
@@ -213,7 +210,7 @@ where
     ///
     /// This does not necessarily mean that it is *confirmed* in the blockchain, it might just be in
     /// the unconfirmed transaction list within the [`SparseChain`].
-    pub fn get_tx_in_chain(&self, txid: Txid) -> Option<(&P, &T)> {
+    pub fn get_tx_in_chain(&self, txid: Txid) -> Option<(&P, &Transaction)> {
         let position = self.chain.tx_position(txid)?;
         let full_tx = self.graph.get_tx(txid).expect("must exist");
         Some((position, full_tx))
@@ -224,9 +221,13 @@ where
     ///
     /// If inserting it into the chain `position` will result in conflicts, the returned
     /// [`ChangeSet`] should evict conflicting transactions.
-    pub fn insert_tx_preview(&self, tx: T, pos: P) -> Result<ChangeSet<P, T>, InsertTxError<P>> {
+    pub fn insert_tx_preview(
+        &self,
+        tx: Transaction,
+        pos: P,
+    ) -> Result<ChangeSet<P>, InsertTxError<P>> {
         let mut changeset = ChangeSet {
-            chain: self.chain.insert_tx_preview(tx.as_tx().txid(), pos)?,
+            chain: self.chain.insert_tx_preview(tx.txid(), pos)?,
             graph: self.graph.insert_tx_preview(tx),
         };
         self.fix_conflicts(&mut changeset)?;
@@ -237,14 +238,14 @@ where
     ///
     /// This is equivalent to calling [`Self::insert_tx_preview`] and [`Self::apply_changeset`] in
     /// sequence.
-    pub fn insert_tx(&mut self, tx: T, pos: P) -> Result<ChangeSet<P, T>, InsertTxError<P>> {
+    pub fn insert_tx(&mut self, tx: Transaction, pos: P) -> Result<ChangeSet<P>, InsertTxError<P>> {
         let changeset = self.insert_tx_preview(tx, pos)?;
         self.apply_changeset(changeset.clone());
         Ok(changeset)
     }
 
     /// Determines the changes required to insert a [`TxOut`] into the internal [`TxGraph`].
-    pub fn insert_txout_preview(&self, outpoint: OutPoint, txout: TxOut) -> ChangeSet<P, T> {
+    pub fn insert_txout_preview(&self, outpoint: OutPoint, txout: TxOut) -> ChangeSet<P> {
         ChangeSet {
             chain: Default::default(),
             graph: self.graph.insert_txout_preview(outpoint, txout),
@@ -255,7 +256,7 @@ where
     ///
     /// This is equivalent to calling [`Self::insert_txout_preview`] and [`Self::apply_changeset`]
     /// in sequence.
-    pub fn insert_txout(&mut self, outpoint: OutPoint, txout: TxOut) -> ChangeSet<P, T> {
+    pub fn insert_txout(&mut self, outpoint: OutPoint, txout: TxOut) -> ChangeSet<P> {
         let changeset = self.insert_txout_preview(outpoint, txout);
         self.apply_changeset(changeset.clone());
         changeset
@@ -269,7 +270,7 @@ where
     pub fn insert_checkpoint_preview(
         &self,
         block_id: BlockId,
-    ) -> Result<ChangeSet<P, T>, InsertCheckpointError> {
+    ) -> Result<ChangeSet<P>, InsertCheckpointError> {
         self.chain
             .insert_checkpoint_preview(block_id)
             .map(|chain_changeset| ChangeSet {
@@ -285,20 +286,17 @@ where
     pub fn insert_checkpoint(
         &mut self,
         block_id: BlockId,
-    ) -> Result<ChangeSet<P, T>, InsertCheckpointError> {
+    ) -> Result<ChangeSet<P>, InsertCheckpointError> {
         let changeset = self.insert_checkpoint_preview(block_id)?;
         self.apply_changeset(changeset.clone());
         Ok(changeset)
     }
 
     /// Calculates the difference between self and `update` in the form of a [`ChangeSet`].
-    pub fn determine_changeset<T2>(
+    pub fn determine_changeset(
         &self,
-        update: &ChainGraph<P, T2>,
-    ) -> Result<ChangeSet<P, T>, UpdateError<P>>
-    where
-        T2: IntoOwned<T> + Clone,
-    {
+        update: &ChainGraph<P>,
+    ) -> Result<ChangeSet<P>, UpdateError<P>> {
         let chain_changeset = self
             .chain
             .determine_changeset(&update.chain)
@@ -333,10 +331,7 @@ where
     ///
     /// **WARNING:** If there are any missing full txs, conflict resolution will not be complete. In
     /// debug mode, this will result in panic.
-    fn fix_conflicts(
-        &self,
-        changeset: &mut ChangeSet<P, T>,
-    ) -> Result<(), UnresolvableConflict<P>> {
+    fn fix_conflicts(&self, changeset: &mut ChangeSet<P>) -> Result<(), UnresolvableConflict<P>> {
         let mut chain_conflicts = vec![];
 
         for (&txid, pos_change) in &changeset.chain.txids {
@@ -355,11 +350,7 @@ where
             let mut full_tx = self.graph.get_tx(txid);
 
             if full_tx.is_none() {
-                full_tx = changeset
-                    .graph
-                    .tx
-                    .iter()
-                    .find(|tx| tx.as_tx().txid() == txid)
+                full_tx = changeset.graph.tx.iter().find(|tx| tx.txid() == txid)
             }
 
             debug_assert!(full_tx.is_some(), "should have full tx at this point");
@@ -369,7 +360,7 @@ where
                 None => continue,
             };
 
-            for (conflict_pos, conflict_txid) in self.tx_conflicts_in_chain(full_tx.as_tx()) {
+            for (conflict_pos, conflict_txid) in self.tx_conflicts_in_chain(full_tx) {
                 chain_conflicts.push((pos.clone(), txid, conflict_pos, conflict_txid))
             }
         }
@@ -416,17 +407,14 @@ where
     ///
     /// **Warning** this method assumes the changeset is assumed to be correctly formed. If it isn't
     /// then the chain graph may not behave correctly in the future and may panic unexpectedly.
-    pub fn apply_changeset(&mut self, changeset: ChangeSet<P, T>) {
+    pub fn apply_changeset(&mut self, changeset: ChangeSet<P>) {
         self.chain.apply_changeset(changeset.chain);
         self.graph.apply_additions(changeset.graph);
     }
 
     /// Applies the `update` chain graph. Note this is shorthand for calling
     /// [`Self::determine_changeset()`] and [`Self::apply_changeset()`] in sequence.
-    pub fn apply_update<T2: IntoOwned<T> + Clone>(
-        &mut self,
-        update: ChainGraph<P, T2>,
-    ) -> Result<ChangeSet<P, T>, UpdateError<P>> {
+    pub fn apply_update(&mut self, update: ChainGraph<P>) -> Result<ChangeSet<P>, UpdateError<P>> {
         let changeset = self.determine_changeset(&update)?;
         self.apply_changeset(changeset.clone());
         Ok(changeset)
@@ -439,7 +427,7 @@ where
 
     /// Iterate over the full transactions and their position in the chain ordered by their position
     /// in ascending order.
-    pub fn transactions_in_chain(&self) -> impl DoubleEndedIterator<Item = (&P, &T)> {
+    pub fn transactions_in_chain(&self) -> impl DoubleEndedIterator<Item = (&P, &Transaction)> {
         self.chain
             .txids()
             .map(move |(pos, txid)| (pos, self.graph.get_tx(*txid).expect("must exist")))
@@ -468,18 +456,18 @@ where
     serde(
         crate = "serde_crate",
         bound(
-            deserialize = "P: serde::Deserialize<'de>, T: Ord + serde::Deserialize<'de>",
-            serialize = "P: serde::Serialize, T: Ord + serde::Serialize"
+            deserialize = "P: serde::Deserialize<'de>",
+            serialize = "P: serde::Serialize"
         )
     )
 )]
 #[must_use]
-pub struct ChangeSet<P, T> {
+pub struct ChangeSet<P> {
     pub chain: sparse_chain::ChangeSet<P>,
-    pub graph: tx_graph::Additions<T>,
+    pub graph: tx_graph::Additions,
 }
 
-impl<P, T> ChangeSet<P, T> {
+impl<P> ChangeSet<P> {
     /// Returns `true` if this [`ChangeSet`] records no changes.
     pub fn is_empty(&self) -> bool {
         self.chain.is_empty() && self.graph.is_empty()
@@ -495,17 +483,16 @@ impl<P, T> ChangeSet<P, T> {
 
     /// Appends the changes in `other` into self such that applying `self` afterwards has the same
     /// effect as sequentially applying the original `self` and `other`.
-    pub fn append(&mut self, other: ChangeSet<P, T>)
+    pub fn append(&mut self, other: ChangeSet<P>)
     where
         P: ChainPosition,
-        T: Ord,
     {
         self.chain.append(other.chain);
         self.graph.append(other.graph);
     }
 }
 
-impl<P, T> Default for ChangeSet<P, T> {
+impl<P> Default for ChangeSet<P> {
     fn default() -> Self {
         Self {
             chain: Default::default(),
@@ -514,13 +501,13 @@ impl<P, T> Default for ChangeSet<P, T> {
     }
 }
 
-impl<P, T: AsTransaction> ForEachTxOut for ChainGraph<P, T> {
+impl<P> ForEachTxOut for ChainGraph<P> {
     fn for_each_txout(&self, f: impl FnMut((OutPoint, &TxOut))) {
         self.graph.for_each_txout(f)
     }
 }
 
-impl<P, T: AsTransaction> ForEachTxOut for ChangeSet<P, T> {
+impl<P> ForEachTxOut for ChangeSet<P> {
     fn for_each_txout(&self, f: impl FnMut((OutPoint, &TxOut))) {
         self.graph.for_each_txout(f)
     }

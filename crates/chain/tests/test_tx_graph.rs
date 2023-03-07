@@ -35,7 +35,7 @@ fn insert_txouts() {
     )];
 
     let mut graph = {
-        let mut graph = TxGraph::<Transaction>::default();
+        let mut graph = TxGraph::default();
         for (outpoint, txout) in &original_ops {
             assert_eq!(
                 graph.insert_txout(*outpoint, txout.clone()),
@@ -49,7 +49,7 @@ fn insert_txouts() {
     };
 
     let update = {
-        let mut graph = TxGraph::<Transaction>::default();
+        let mut graph = TxGraph::default();
         for (outpoint, txout) in &update_ops {
             assert_eq!(
                 graph.insert_txout(*outpoint, txout.clone()),
@@ -362,7 +362,7 @@ fn test_calculate_fee_on_coinbase() {
         output: vec![TxOut::default()],
     };
 
-    let graph = TxGraph::<Transaction>::default();
+    let graph = TxGraph::default();
 
     assert_eq!(graph.calculate_fee(&tx), Some(0));
 }

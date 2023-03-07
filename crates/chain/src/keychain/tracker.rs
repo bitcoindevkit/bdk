@@ -7,7 +7,7 @@ use crate::{
     keychain::{KeychainChangeSet, KeychainScan, KeychainTxOutIndex},
     sparse_chain::{self, SparseChain},
     tx_graph::TxGraph,
-    AsTransaction, BlockId, FullTxOut, IntoOwned, TxHeight,
+    BlockId, FullTxOut, TxHeight,
 };
 
 use super::{Balance, DerivationAdditions};
@@ -17,17 +17,16 @@ use super::{Balance, DerivationAdditions};
 /// The [`KeychainTracker`] atomically updates its [`KeychainTxOutIndex`] whenever new chain data is
 /// incorporated into its internal [`ChainGraph`].
 #[derive(Clone, Debug)]
-pub struct KeychainTracker<K, P, T = Transaction> {
+pub struct KeychainTracker<K, P> {
     /// Index between script pubkeys to transaction outputs
     pub txout_index: KeychainTxOutIndex<K>,
-    chain_graph: ChainGraph<P, T>,
+    chain_graph: ChainGraph<P>,
 }
 
-impl<K, P, T> KeychainTracker<K, P, T>
+impl<K, P> KeychainTracker<K, P>
 where
     P: sparse_chain::ChainPosition,
     K: Ord + Clone + core::fmt::Debug,
-    T: AsTransaction + Clone + Ord,
 {
     /// Add a keychain to the tracker's `txout_index` with a descriptor to derive addresses for it.
     /// This is just shorthand for calling [`KeychainTxOutIndex::add_keychain`] on the internal
@@ -63,13 +62,10 @@ where
     ///
     /// Internally, we call [`ChainGraph::determine_changeset`] and also determine the additions of
     /// [`KeychainTxOutIndex`].
-    pub fn determine_changeset<T2>(
+    pub fn determine_changeset(
         &self,
-        scan: &KeychainScan<K, P, T2>,
-    ) -> Result<KeychainChangeSet<K, P, T>, chain_graph::UpdateError<P>>
-    where
-        T2: IntoOwned<T> + Clone,
-    {
+        scan: &KeychainScan<K, P>,
+    ) -> Result<KeychainChangeSet<K, P>, chain_graph::UpdateError<P>> {
         // TODO: `KeychainTxOutIndex::determine_additions`
         let mut derivation_indices = scan.last_active_indices.clone();
         derivation_indices.retain(|keychain, index| {
@@ -91,13 +87,10 @@ where
     ///
     /// [`determine_changeset`]: Self::determine_changeset
     /// [`apply_changeset`]: Self::apply_changeset
-    pub fn apply_update<T2>(
+    pub fn apply_update(
         &mut self,
-        scan: KeychainScan<K, P, T2>,
-    ) -> Result<KeychainChangeSet<K, P, T>, chain_graph::UpdateError<P>>
-    where
-        T2: IntoOwned<T> + Clone,
-    {
+        scan: KeychainScan<K, P>,
+    ) -> Result<KeychainChangeSet<K, P>, chain_graph::UpdateError<P>> {
         let changeset = self.determine_changeset(&scan)?;
         self.apply_changeset(changeset.clone());
         Ok(changeset)
@@ -107,7 +100,7 @@ where
     ///
     /// Internally, this calls [`KeychainTxOutIndex::apply_additions`] and
     /// [`ChainGraph::apply_changeset`] in sequence.
-    pub fn apply_changeset(&mut self, changeset: KeychainChangeSet<K, P, T>) {
+    pub fn apply_changeset(&mut self, changeset: KeychainChangeSet<K, P>) {
         let KeychainChangeSet {
             derivation_indices,
             chain_graph,
@@ -139,12 +132,12 @@ where
     }
 
     /// Returns a reference to the internal [`ChainGraph`].
-    pub fn chain_graph(&self) -> &ChainGraph<P, T> {
+    pub fn chain_graph(&self) -> &ChainGraph<P> {
         &self.chain_graph
     }
 
     /// Returns a reference to the internal [`TxGraph`] (which is part of the [`ChainGraph`]).
-    pub fn graph(&self) -> &TxGraph<T> {
+    pub fn graph(&self) -> &TxGraph {
         self.chain_graph().graph()
     }
 
@@ -166,7 +159,7 @@ where
     pub fn insert_checkpoint_preview(
         &self,
         block_id: BlockId,
-    ) -> Result<KeychainChangeSet<K, P, T>, chain_graph::InsertCheckpointError> {
+    ) -> Result<KeychainChangeSet<K, P>, chain_graph::InsertCheckpointError> {
         Ok(KeychainChangeSet {
             chain_graph: self.chain_graph.insert_checkpoint_preview(block_id)?,
             ..Default::default()
@@ -183,7 +176,7 @@ where
     pub fn insert_checkpoint(
         &mut self,
         block_id: BlockId,
-    ) -> Result<KeychainChangeSet<K, P, T>, chain_graph::InsertCheckpointError> {
+    ) -> Result<KeychainChangeSet<K, P>, chain_graph::InsertCheckpointError> {
         let changeset = self.insert_checkpoint_preview(block_id)?;
         self.apply_changeset(changeset.clone());
         Ok(changeset)
@@ -196,9 +189,9 @@ where
     /// responsible for persisting these changes to disk if you need to restore them.
     pub fn insert_tx_preview(
         &self,
-        tx: T,
+        tx: Transaction,
         pos: P,
-    ) -> Result<KeychainChangeSet<K, P, T>, chain_graph::InsertTxError<P>> {
+    ) -> Result<KeychainChangeSet<K, P>, chain_graph::InsertTxError<P>> {
         Ok(KeychainChangeSet {
             chain_graph: self.chain_graph.insert_tx_preview(tx, pos)?,
             ..Default::default()
@@ -214,9 +207,9 @@ where
     /// [`apply_changeset`]: Self::apply_changeset
     pub fn insert_tx(
         &mut self,
-        tx: T,
+        tx: Transaction,
         pos: P,
-    ) -> Result<KeychainChangeSet<K, P, T>, chain_graph::InsertTxError<P>> {
+    ) -> Result<KeychainChangeSet<K, P>, chain_graph::InsertTxError<P>> {
         let changeset = self.insert_tx_preview(tx, pos)?;
         self.apply_changeset(changeset.clone());
         Ok(changeset)

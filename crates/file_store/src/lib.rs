@@ -1,6 +1,5 @@
 mod file_store;
 use bdk_chain::{
-    bitcoin::Transaction,
     keychain::{KeychainChangeSet, KeychainTracker, PersistBackend},
     sparse_chain::ChainPosition,
 };
@@ -10,7 +9,7 @@ impl<K, P> PersistBackend<K, P> for KeychainStore<K, P>
 where
     K: Ord + Clone + core::fmt::Debug,
     P: ChainPosition,
-    KeychainChangeSet<K, P, Transaction>: serde::Serialize + serde::de::DeserializeOwned,
+    KeychainChangeSet<K, P>: serde::Serialize + serde::de::DeserializeOwned,
 {
     type WriteError = std::io::Error;
 

@@ -32,7 +32,7 @@ use bdk_chain::{
     keychain::KeychainScan,
     sparse_chain::{self, ChainPosition, SparseChain},
     tx_graph::TxGraph,
-    AsTransaction, BlockId, ConfirmationTime, TxHeight,
+    BlockId, ConfirmationTime, TxHeight,
 };
 pub use electrum_client;
 use electrum_client::{Client, ElectrumApi, Error};
@@ -228,10 +228,9 @@ impl<K: Ord + Clone + Debug, P: ChainPosition> ElectrumUpdate<K, P> {
     /// Return a list of missing full transactions that are required to [`inflate_update`].
     ///
     /// [`inflate_update`]: bdk_chain::chain_graph::ChainGraph::inflate_update
-    pub fn missing_full_txs<T, G>(&self, graph: G) -> Vec<&Txid>
+    pub fn missing_full_txs<G>(&self, graph: G) -> Vec<&Txid>
     where
-        T: AsTransaction,
-        G: AsRef<TxGraph<T>>,
+        G: AsRef<TxGraph>,
     {
         self.chain_update
             .txids()
@@ -244,14 +243,13 @@ impl<K: Ord + Clone + Debug, P: ChainPosition> ElectrumUpdate<K, P> {
     /// `tracker`.
     ///
     /// This will fail if there are missing full transactions not provided via `new_txs`.
-    pub fn into_keychain_scan<T, CG>(
+    pub fn into_keychain_scan<CG>(
         self,
-        new_txs: Vec<T>,
+        new_txs: Vec<Transaction>,
         chain_graph: &CG,
-    ) -> Result<KeychainScan<K, P, T>, chain_graph::NewError<P>>
+    ) -> Result<KeychainScan<K, P>, chain_graph::NewError<P>>
     where
-        T: AsTransaction + Clone + Ord,
-        CG: AsRef<ChainGraph<P, T>>,
+        CG: AsRef<ChainGraph<P>>,
     {
         Ok(KeychainScan {
             update: chain_graph

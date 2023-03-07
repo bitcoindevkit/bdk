@@ -23,7 +23,7 @@ pub use bdk_chain::keychain::Balance;
 use bdk_chain::{
     chain_graph,
     keychain::{persist, KeychainChangeSet, KeychainScan, KeychainTracker},
-    sparse_chain, BlockId, ConfirmationTime, IntoOwned,
+    sparse_chain, BlockId, ConfirmationTime,
 };
 use bitcoin::consensus::encode::serialize;
 use bitcoin::secp256k1::Secp256k1;
@@ -91,11 +91,11 @@ pub struct Wallet<D = ()> {
 
 /// The update to a [`Wallet`] used in [`Wallet::apply_update`]. This is usually returned from blockchain data sources.
 /// The type parameter `T` indicates the kind of transaction contained in the update. It's usually a [`bitcoin::Transaction`].
-pub type Update<T> = KeychainScan<KeychainKind, ConfirmationTime, T>;
+pub type Update = KeychainScan<KeychainKind, ConfirmationTime>;
 /// Error indicating that something was wrong with an [`Update<T>`].
 pub type UpdateError = chain_graph::UpdateError<ConfirmationTime>;
 /// The changeset produced internally by applying an update
-pub(crate) type ChangeSet = KeychainChangeSet<KeychainKind, ConfirmationTime, Transaction>;
+pub(crate) type ChangeSet = KeychainChangeSet<KeychainKind, ConfirmationTime>;
 
 /// The address index selection strategy to use to derived an address from the wallet's external
 /// descriptor. See [`Wallet::get_address`]. If you're unsure which one to use use `WalletIndex::New`.
@@ -1686,10 +1686,9 @@ impl<D> Wallet<D> {
     /// transactions related to your wallet into it.
     ///
     /// [`commit`]: Self::commit
-    pub fn apply_update<Tx>(&mut self, update: Update<Tx>) -> Result<(), UpdateError>
+    pub fn apply_update(&mut self, update: Update) -> Result<(), UpdateError>
     where
         D: persist::PersistBackend<KeychainKind, ConfirmationTime>,
-        Tx: IntoOwned<Transaction> + Clone,
     {
         let changeset = self.keychain_tracker.apply_update(update)?;
         self.persist.stage(changeset);

@@ -124,7 +124,7 @@ fn update_evicts_conflicting_tx() {
             cg
         };
 
-        let changeset = ChangeSet::<TxHeight, Transaction> {
+        let changeset = ChangeSet::<TxHeight> {
             chain: sparse_chain::ChangeSet {
                 checkpoints: Default::default(),
                 txids: [
@@ -203,7 +203,7 @@ fn update_evicts_conflicting_tx() {
             cg
         };
 
-        let changeset = ChangeSet::<TxHeight, Transaction> {
+        let changeset = ChangeSet::<TxHeight> {
             chain: sparse_chain::ChangeSet {
                 checkpoints: [(1, Some(h!("B'")))].into(),
                 txids: [
@@ -287,7 +287,7 @@ fn chain_graph_new_missing() {
 
     let new_graph = ChainGraph::new(update.clone(), graph.clone()).unwrap();
     let expected_graph = {
-        let mut cg = ChainGraph::<TxHeight, Transaction>::default();
+        let mut cg = ChainGraph::<TxHeight>::default();
         let _ = cg
             .insert_checkpoint(update.latest_checkpoint().unwrap())
             .unwrap();
