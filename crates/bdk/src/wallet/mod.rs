@@ -1711,6 +1711,28 @@ impl<D> Wallet<D> {
     pub fn staged(&self) -> &ChangeSet {
         self.persist.staged()
     }
+
+    /// Get a reference to the inner [`TxGraph`](bdk_chain::tx_graph::TxGraph).
+    pub fn as_graph(&self) -> &bdk_chain::tx_graph::TxGraph {
+        self.keychain_tracker.graph()
+    }
+
+    /// Get a reference to the inner [`ChainGraph`](bdk_chain::chain_graph::ChainGraph).
+    pub fn as_chain_graph(&self) -> &bdk_chain::chain_graph::ChainGraph<ConfirmationTime> {
+        self.keychain_tracker.chain_graph()
+    }
+}
+
+impl<D> AsRef<bdk_chain::tx_graph::TxGraph> for Wallet<D> {
+    fn as_ref(&self) -> &bdk_chain::tx_graph::TxGraph {
+        self.keychain_tracker.graph()
+    }
+}
+
+impl<D> AsRef<bdk_chain::chain_graph::ChainGraph<ConfirmationTime>> for Wallet<D> {
+    fn as_ref(&self) -> &bdk_chain::chain_graph::ChainGraph<ConfirmationTime> {
+        self.keychain_tracker.chain_graph()
+    }
 }
 
 /// Deterministically generate a unique name given the descriptors defining the wallet
