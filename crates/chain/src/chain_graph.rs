@@ -5,7 +5,7 @@ use crate::{
     tx_graph::{self, TxGraph},
     AsTransaction, BlockId, ForEachTxOut, FullTxOut, IntoOwned, TxHeight,
 };
-use alloc::{borrow::Cow, string::ToString, vec::Vec};
+use alloc::{string::ToString, vec::Vec};
 use bitcoin::{OutPoint, Transaction, TxOut, Txid};
 use core::fmt::Debug;
 
@@ -129,19 +129,47 @@ where
         &self,
         update: SparseChain<P>,
         new_txs: impl IntoIterator<Item = T>,
-    ) -> Result<ChainGraph<P, Cow<T>>, NewError<P>> {
+    ) -> Result<ChainGraph<P, T>, NewError<P>> {
+        let mut inflated_chain = SparseChain::default();
         let mut inflated_graph = TxGraph::default();
-        for (_, txid) in update.txids() {
-            if let Some(tx) = self.graph.get_tx(*txid) {
-                let _ = inflated_graph.insert_tx(Cow::Borrowed(tx));
+
+        for (height, hash) in update.checkpoints().clone().into_iter() {
+            let _ = inflated_chain
+                .insert_checkpoint(BlockId { height, hash })
+                .expect("must insert");
+        }
+
+        // [TODO] @evanlinjin: These need better comments
+        // - copy transactions that have changed positions into the graph
+        // - add new transactions to inflated chain
+        for (pos, txid) in update.txids() {
+            match self.chain.tx_position(*txid) {
+                Some(original_pos) => {
+                    if original_pos != pos {
+                        let tx = self
+                            .graph
+                            .get_tx(*txid)
+                            .expect("tx must exist as it is referenced in sparsechain")
+                            .clone();
+                        let _ = inflated_chain
+                            .insert_tx(*txid, pos.clone())
+                            .expect("must insert since this was already in update");
+                        let _ = inflated_graph.insert_tx(tx);
+                    }
+                }
+                None => {
+                    let _ = inflated_chain
+                        .insert_tx(*txid, pos.clone())
+                        .expect("must insert since this was already in update");
+                }
             }
         }
 
         for tx in new_txs {
-            let _ = inflated_graph.insert_tx(Cow::Owned(tx));
+            let _ = inflated_graph.insert_tx(tx);
         }
 
-        ChainGraph::new(update, inflated_graph)
+        ChainGraph::new(inflated_chain, inflated_graph)
     }
 
     /// Sets the checkpoint limit.

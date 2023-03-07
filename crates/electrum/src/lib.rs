@@ -21,7 +21,6 @@
 //! [`bdk_electrum_example`]: https://github.com/LLFourn/bdk_core_staging/tree/master/bdk_electrum_example
 
 use std::{
-    borrow::Cow,
     collections::{BTreeMap, HashMap},
     fmt::Debug,
 };
@@ -249,7 +248,7 @@ impl<K: Ord + Clone + Debug, P: ChainPosition> ElectrumUpdate<K, P> {
         self,
         new_txs: Vec<T>,
         chain_graph: &CG,
-    ) -> Result<KeychainScan<K, P, Cow<T>>, chain_graph::NewError<P>>
+    ) -> Result<KeychainScan<K, P, T>, chain_graph::NewError<P>>
     where
         T: AsTransaction + Clone + Ord,
         CG: AsRef<ChainGraph<P, T>>,
