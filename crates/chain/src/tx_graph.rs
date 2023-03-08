@@ -62,7 +62,7 @@ use core::ops::RangeInclusive;
 /// See the [module-level documentation] for more.
 ///
 /// [module-level documentation]: crate::tx_graph
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Default)]
 pub struct TxGraph {
     txs: HashMap<Txid, TxNode>,
     spends: BTreeMap<OutPoint, HashSet<Txid>>,
@@ -70,16 +70,6 @@ pub struct TxGraph {
     // This atrocity exists so that `TxGraph::outspends()` can return a reference.
     // FIXME: This can be removed once `HashSet::new` is a const fn.
     empty_outspends: HashSet<Txid>,
-}
-
-impl Default for TxGraph {
-    fn default() -> Self {
-        Self {
-            txs: Default::default(),
-            spends: Default::default(),
-            empty_outspends: Default::default(),
-        }
-    }
 }
 
 /// Node of a [`TxGraph`]. This can either be a whole transaction, or a partial transaction (where
@@ -423,7 +413,7 @@ impl TxGraph {
 /// Refer to [module-level documentation] for more.
 ///
 /// [module-level documentation]: crate::tx_graph
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 #[cfg_attr(
     feature = "serde",
     derive(serde::Deserialize, serde::Serialize),
@@ -459,15 +449,6 @@ impl Additions {
     pub fn append(&mut self, mut other: Additions) {
         self.tx.append(&mut other.tx);
         self.txout.append(&mut other.txout);
-    }
-}
-
-impl Default for Additions {
-    fn default() -> Self {
-        Self {
-            tx: Default::default(),
-            txout: Default::default(),
-        }
     }
 }
 
