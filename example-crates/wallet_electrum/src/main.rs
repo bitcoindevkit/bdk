@@ -1,4 +1,4 @@
-use std::str::FromStr;
+use std::{io::Write, str::FromStr};
 
 use bdk::{
     bitcoin::{Address, Network},
@@ -35,12 +35,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let balance = wallet.get_balance();
     println!("Wallet balance before syncing: {} sats", balance.total());
 
-    println!("Syncing...");
+    print!("Syncing...");
     // Scanning the chain...
     let electrum_url = "ssl://electrum.blockstream.info:60002";
     let client = electrum_client::Client::new(electrum_url)?;
     let local_chain = wallet.checkpoints();
-    let spks = wallet.spks_of_all_keychains();
+    let spks = wallet
+        .spks_of_all_keychains()
+        .into_iter()
+        .map(|(k, spks)| {
+            let mut first = true;
+            (
+                k,
+                spks.inspect(move |(spk_i, _)| {
+                    if first {
+                        first = false;
+                        print!("\nScanning keychain [{:?}]:", k);
+                    }
+                    print!(" {}", spk_i);
+                    let _ = std::io::stdout().flush();
+                }),
+            )
+        })
+        .collect();
     let electrum_update = client
         .scan(
             local_chain,
@@ -51,6 +68,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             BATCH_SIZE,
         )?
         .into_confirmation_time_update(&client)?;
+    println!();
     let new_txs = client.batch_transaction_get(electrum_update.missing_full_txs(&wallet))?;
     let update = electrum_update.into_keychain_scan(new_txs, &wallet)?;
     wallet.apply_update(update)?;

@@ -6,7 +6,7 @@ use bdk::{
 use bdk_esplora::esplora_client;
 use bdk_esplora::EsploraExt;
 use bdk_file_store::KeychainStore;
-use std::str::FromStr;
+use std::{io::Write, str::FromStr};
 
 const SEND_AMOUNT: u64 = 5000;
 const STOP_GAP: usize = 50;
@@ -31,12 +31,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let balance = wallet.get_balance();
     println!("Wallet balance before syncing: {} sats", balance.total());
 
-    println!("Syncing...");
+    print!("Syncing...");
     // Scanning the chain...
     let esplora_url = "https://mempool.space/testnet/api";
     let client = esplora_client::Builder::new(esplora_url).build_blocking()?;
-    let spks = wallet.spks_of_all_keychains();
     let checkpoints = wallet.checkpoints();
+    let spks = wallet
+        .spks_of_all_keychains()
+        .into_iter()
+        .map(|(k, spks)| {
+            let mut first = true;
+            (
+                k,
+                spks.inspect(move |(spk_i, _)| {
+                    if first {
+                        first = false;
+                        print!("\nScanning keychain [{:?}]:", k);
+                    }
+                    print!(" {}", spk_i);
+                    let _ = std::io::stdout().flush();
+                }),
+            )
+        })
+        .collect();
     let update = client.scan(
         checkpoints,
         spks,
@@ -45,6 +62,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         STOP_GAP,
         PARALLEL_REQUESTS,
     )?;
+    println!();
     wallet.apply_update(update)?;
     wallet.commit()?;
 
