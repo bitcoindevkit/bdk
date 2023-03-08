@@ -69,8 +69,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let balance = wallet.get_balance();
     println!("Wallet balance after syncing: {} sats", balance.total());
 
-    if balance.total() == 0 {
-        println!("Please send some coins to the receiving address");
+    if balance.total() < SEND_AMOUNT {
+        println!(
+            "Please send at least {} sats to the receiving address",
+            SEND_AMOUNT
+        );
         std::process::exit(0);
     }
 
