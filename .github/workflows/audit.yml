@@ -5,6 +5,10 @@ on:
     paths:
       - '**/Cargo.toml'
       - '**/Cargo.lock'
+  pull_request:
+    paths:
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
   schedule:
     - cron: '0 0 * * 0' # Once per week
 
