@@ -1,7 +1,7 @@
 <div align="center">
   <h1>BDK</h1>
 
-  <img src="./static/bdk.png" width="220" />
+  <img src="https://raw.githubusercontent.com/bitcoindevkit/bdk/master/static/bdk.png" width="220" />
 
   <p>
     <strong>A modern, lightweight, descriptor-based wallet library written in Rust!</strong>
@@ -26,23 +26,61 @@
 
 ## `bdk`
 
-The `bdk` crate provides the `Wallet` type which provides a high level interface to most of the low level mechanisms included in `bdk`.
-`Wallet` is the appropriate starting point for many simple applications as well as a good demonstration of how to use the other mechanisms to construct a wallet.
-It's simple. It has an external and internal keychain which both defined by two [miniscript descriptors][`rust-miniscript`] and uses them to generate addresses.
-When you give it chain data it also uses the descriptors to find transaction outputs owned by them.
-From there you can create transactions to spend the funds and even sign them
-For more information see [`Wallet`'s documentation](https://docs.rs/bdk/latest/bdk/wallet/struct.Wallet.html).
+The `bdk` crate provides the [`Wallet`](`crate::Wallet`) type which is a simple, high-level
+interface built from the low-level components of [`bdk_chain`]. `Wallet` is a good starting point
+for many simple applications as well as a good demonstration of how to use the other mechanisms to
+construct a wallet. It has two keychains (external and internal) which are defined by
+[miniscript descriptors][`rust-miniscript`] and uses them to generate addresses. When you give it
+chain data it also uses the descriptors to find transaction outputs owned by them. From there, you
+can create and sign transactions.
 
-### Chain data
+For more information, see the [`Wallet`'s documentation](https://docs.rs/bdk/latest/bdk/wallet/struct.Wallet.html).
 
-In order to get the chain data for `Wallet` to consume you have to put it into particular form.
-Right now this the [`KeychainScan`] which defined in `bdk_chain`.
+### Blockchain data
 
-This can be created manually or from some of the chain data libraries provided in the `bdk` repo like [`bdk_esplora`] and [`bdk_electrum`].
+In order to get blockchain data for `Wallet` to consume, you have to put it into particular form.
+Right now this is [`KeychainScan`] which is defined in [`bdk_chain`].
 
-See [`example-crates`] for examples on how to do this.
+This can be created manually or from blockchain-scanning crates.
 
-TODO: make a short `no_run` example here
+**Blockchain Data Sources**
+
+* [`bdk_esplora`]: Grabs blockchain data from Esplora for updating BDK structures.
+* [`bdk_electrum`]: Grabs blockchain data from Electrum for updating BDK structures.
+
+**Examples**
+
+* [`example-crates/wallet_esplora`]
+* [`example-crates/wallet_electrum`]
+
+### Persistence
+
+To persist the `Wallet` on disk, `Wallet` needs to be constructed with a
+[`Persist`](`bdk_chain::keychain::persist::Persist`) implementation.
+
+**Implementations**
+
+* [`bdk_file_store`]: a simple flat-file implementation of `Persist`.
+
+**Example**
+
+```rust,no_run
+use bdk::{bitcoin::Network, wallet::{AddressIndex, Wallet}};
+
+fn main() {
+    // a type that implements `Persist`
+    let db = ();
+
+    let descriptor = "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/84'/0'/0'/0/*)";
+    let mut wallet = Wallet::new(descriptor, None, db, Network::Testnet).expect("should create");
+
+    // get a new address (this increments revealed derivation index)
+    println!("revealed address: {}", wallet.get_address(AddressIndex::New));
+    println!("staged changes: {:?}", wallet.staged());
+    // persist changes
+    wallet.commit().expect("must save");
+}
+```
 
 <!-- ### Sync the balance of a descriptor -->
 
@@ -182,6 +220,7 @@ for inclusion in the work by you, as defined in the Apache-2.0 license, shall be
 dual licensed as above, without any additional terms or conditions.
 
 [`bdk_chain`]: https://docs.rs/bdk_chain/latest
+[`bdk_file_store`]: https://docs.rs/bdk_file_store/latest
 [`bdk_electrum`]: https://docs.rs/bdk_electrum/latest
 [`bdk_esplora`]: https://docs.rs/bdk_esplora/latest
 [`KeychainScan`]: https://docs.rs/bdk_chain/latest/bdk_chain/keychain/struct.KeychainScan.html
