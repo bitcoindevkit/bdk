@@ -1,3 +1,4 @@
+#![doc = include_str!("../README.md")]
 mod file_store;
 use bdk_chain::{
     keychain::{KeychainChangeSet, KeychainTracker, PersistBackend},

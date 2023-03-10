@@ -4,6 +4,10 @@ version = "0.0.1"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/bitcoindevkit/bdk"
+documentation = "https://docs.rs/bdk_file_store"
+keywords = ["bitcoin", "persist", "persistence", "bdk", "file", "store"]
+authors = ["Bitcoin Dev Kit Developers"]
+readme = "README.md"
 
 [dependencies]
 bdk_chain = { path = "../chain", version = "0.3.1", features = [ "serde", "miniscript" ] }

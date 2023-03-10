@@ -1,8 +1,4 @@
-//! This crate is used for updating structures of [`bdk_chain`] with data from an esplora server.
-//!
-//! The star of the show is the  [`EsploraExt::scan`] method which scans for relevant
-//! blockchain data (via esplora) and outputs a [`KeychainScan`](bdk_chain::keychain::KeychainScan).
-
+#![doc = include_str!("../README.md")]
 use bdk_chain::ConfirmationTime;
 use esplora_client::TxStatus;
 
