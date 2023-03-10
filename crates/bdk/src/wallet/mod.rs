@@ -1408,7 +1408,6 @@ impl<D> Wallet<D> {
 
     /// Given the options returns the list of utxos that must be used to form the
     /// transaction and any further that may be used if needed.
-    #[allow(clippy::type_complexity)]
     #[allow(clippy::too_many_arguments)]
     fn preselect_utxos(
         &self,
