@@ -22,15 +22,12 @@ For async-only (with https):
 bdk_esplora = { version = "0.1", features = ["async-https"] }
 ```
 
-To use the extension trait:
-
-```rust,no_run
+To use the extension traits:
+```rust
 // for blocking
 use bdk_esplora::EsploraExt;
 // for async
 use bdk_esplora::EsploraAsyncExt;
 ```
 
-<!-- BDK Esplora client library for updating the `bdk_chain` structures. -->
-
-<!-- [`esplora_client`]: https://docs.rs/esplora-client/latest -->
+For full examples, refer to [`example-crates/wallet_esplora`](https://github.com/bitcoindevkit/bdk/tree/master/example-crates/wallet_esplora) (blocking) and [`example-crates/wallet_esplora_async`](https://github.com/bitcoindevkit/bdk/tree/master/example-crates/wallet_esplora_async).

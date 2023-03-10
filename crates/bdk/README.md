@@ -64,7 +64,7 @@ To persist the `Wallet` on disk, `Wallet` needs to be constructed with a
 
 **Example**
 
-```rust,no_run
+```rust
 use bdk::{bitcoin::Network, wallet::{AddressIndex, Wallet}};
 
 fn main() {
