@@ -309,7 +309,7 @@ fn map_confirmation_time(tx_status: &TxStatus, height_at_start: u32) -> Confirma
 }
 
 #[cfg(feature = "async")]
-#[async_trait(?Send)]
+#[async_trait]
 pub trait EsploraAsyncExt {
     /// Scan the blockchain (via esplora) for the data specified and returns a [`KeychainScan`].
     ///
@@ -325,12 +325,15 @@ pub trait EsploraAsyncExt {
     ///
     /// [`ChainPosition`]: bdk_chain::sparse_chain::ChainPosition
     #[allow(clippy::result_large_err)] // FIXME
-    async fn scan<K: Ord + Clone>(
+    async fn scan<K: Ord + Clone + Send>(
         &self,
         local_chain: &BTreeMap<u32, BlockHash>,
-        keychain_spks: BTreeMap<K, impl IntoIterator<Item = (u32, Script)>>,
-        txids: impl IntoIterator<Item = Txid>,
-        outpoints: impl IntoIterator<Item = OutPoint>,
+        keychain_spks: BTreeMap<
+            K,
+            impl IntoIterator<IntoIter = impl Iterator<Item = (u32, Script)> + Send> + Send,
+        >,
+        txids: impl IntoIterator<IntoIter = impl Iterator<Item = Txid> + Send> + Send,
+        outpoints: impl IntoIterator<IntoIter = impl Iterator<Item = OutPoint> + Send> + Send,
         stop_gap: usize,
         parallel_requests: usize,
     ) -> Result<KeychainScan<K, ConfirmationTime>, Error>;
@@ -342,9 +345,9 @@ pub trait EsploraAsyncExt {
     async fn scan_without_keychain(
         &self,
         local_chain: &BTreeMap<u32, BlockHash>,
-        misc_spks: impl IntoIterator<Item = Script>,
-        txids: impl IntoIterator<Item = Txid>,
-        outpoints: impl IntoIterator<Item = OutPoint>,
+        misc_spks: impl IntoIterator<IntoIter = impl Iterator<Item = Script> + Send> + Send,
+        txids: impl IntoIterator<IntoIter = impl Iterator<Item = Txid> + Send> + Send,
+        outpoints: impl IntoIterator<IntoIter = impl Iterator<Item = OutPoint> + Send> + Send,
         parallel_requests: usize,
     ) -> Result<ChainGraph<ConfirmationTime>, Error> {
         let wallet_scan = self
@@ -370,17 +373,23 @@ pub trait EsploraAsyncExt {
 }
 
 #[cfg(feature = "async")]
-#[async_trait(?Send)]
+#[async_trait]
 impl EsploraAsyncExt for esplora_client::AsyncClient {
-    async fn scan<K: Ord + Clone>(
+    #[allow(clippy::result_large_err)] // FIXME
+    async fn scan<K: Ord + Clone + Send>(
         &self,
         local_chain: &BTreeMap<u32, BlockHash>,
-        keychain_spks: BTreeMap<K, impl IntoIterator<Item = (u32, Script)>>,
-        txids: impl IntoIterator<Item = Txid>,
-        outpoints: impl IntoIterator<Item = OutPoint>,
+        keychain_spks: BTreeMap<
+            K,
+            impl IntoIterator<IntoIter = impl Iterator<Item = (u32, Script)> + Send> + Send,
+        >,
+        txids: impl IntoIterator<IntoIter = impl Iterator<Item = Txid> + Send> + Send,
+        outpoints: impl IntoIterator<IntoIter = impl Iterator<Item = OutPoint> + Send> + Send,
         stop_gap: usize,
         parallel_requests: usize,
     ) -> Result<KeychainScan<K, ConfirmationTime>, Error> {
+        let txids = txids.into_iter();
+        let outpoints = outpoints.into_iter();
         let parallel_requests = parallel_requests.max(1);
         let mut scan = KeychainScan::default();
         let update = &mut scan.update;
@@ -502,7 +511,7 @@ impl EsploraAsyncExt for esplora_client::AsyncClient {
             }
         }
 
-        for txid in txids.into_iter() {
+        for txid in txids {
             let (tx, tx_status) =
                 match (self.get_tx(&txid).await?, self.get_tx_status(&txid).await?) {
                     (Some(tx), Some(tx_status)) => (tx, tx_status),
@@ -525,7 +534,7 @@ impl EsploraAsyncExt for esplora_client::AsyncClient {
             }
         }
 
-        for op in outpoints.into_iter() {
+        for op in outpoints {
             let mut op_txs = Vec::with_capacity(2);
             if let (Some(tx), Some(tx_status)) = (
                 self.get_tx(&op.txid).await?,
