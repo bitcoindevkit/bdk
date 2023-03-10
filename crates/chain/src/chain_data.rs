@@ -5,7 +5,7 @@ use crate::{
     COINBASE_MATURITY,
 };
 
-/// Represents the height in which a transaction is confirmed at.
+/// Represents the height at which a transaction is confirmed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(
     feature = "serde",
@@ -70,7 +70,7 @@ impl TxHeight {
     }
 }
 
-/// Block height and timestamp in which a transaction is confirmed in.
+/// Block height and timestamp at which a transaction is confirmed.
 #[derive(Debug, Clone, PartialEq, Eq, Copy, PartialOrd, Ord, core::hash::Hash)]
 #[cfg_attr(
     feature = "serde",
@@ -117,7 +117,7 @@ impl ConfirmationTime {
     }
 }
 
-/// A reference to a block in the cannonical chain.
+/// A reference to a block in the canonical chain.
 #[derive(Debug, Clone, PartialEq, Eq, Copy, PartialOrd, Ord)]
 #[cfg_attr(
     feature = "serde",
@@ -125,9 +125,9 @@ impl ConfirmationTime {
     serde(crate = "serde_crate")
 )]
 pub struct BlockId {
-    /// The height the block was confirmed at
+    /// The height of the block.
     pub height: u32,
-    /// The hash of the block
+    /// The hash of the block.
     pub hash: BlockHash,
 }
 
@@ -161,18 +161,18 @@ impl From<(&u32, &BlockHash)> for BlockId {
     }
 }
 
-/// A `TxOut` with as much data as we can retreive about it
+/// A `TxOut` with as much data as we can retrieve about it
 #[derive(Debug, Clone, PartialEq)]
 pub struct FullTxOut<I> {
-    /// The location of the `TxOut`
+    /// The location of the `TxOut`.
     pub outpoint: OutPoint,
-    /// The `TxOut`
+    /// The `TxOut`.
     pub txout: TxOut,
     /// The position of the transaction in `outpoint` in the overall chain.
     pub chain_position: I,
     /// The txid and chain position of the transaction (if any) that has spent this output.
     pub spent_by: Option<(I, Txid)>,
-    /// Whether this output is on a coinbase transaction
+    /// Whether this output is on a coinbase transaction.
     pub is_on_coinbase: bool,
 }
 
@@ -180,7 +180,7 @@ impl<I: ChainPosition> FullTxOut<I> {
     /// Whether the utxo is/was/will be spendable at `height`.
     ///
     /// It is spendable if it is not an immature coinbase output and no spending tx has been
-    /// confirmed by that heigt.
+    /// confirmed by that height.
     pub fn is_spendable_at(&self, height: u32) -> bool {
         if !self.is_mature(height) {
             return false;
@@ -215,4 +215,4 @@ impl<I: ChainPosition> FullTxOut<I> {
     }
 }
 
-// TOOD: make test
+// TODO: make test

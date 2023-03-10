@@ -10,7 +10,7 @@ pub struct WeightedValue {
     /// `txin` fields: `prevout`, `nSequence`, `scriptSigLen`, `scriptSig`, `scriptWitnessLen`,
     /// `scriptWitness` should all be included.
     pub weight: u32,
-    /// Total number of inputs; so we can calculate extra `varint` weight due to `vin` len changes.
+    /// The total number of inputs; so we can calculate extra `varint` weight due to `vin` length changes.
     pub input_count: usize,
     /// Whether this [`WeightedValue`] contains at least one segwit spend.
     pub is_segwit: bool,
@@ -33,7 +33,7 @@ impl WeightedValue {
 
     /// Effective value of this input candidate: `actual_value - input_weight * feerate (sats/wu)`.
     pub fn effective_value(&self, effective_feerate: f32) -> i64 {
-        // We prefer undershooting the candidate's effective value (so we over estimate the fee of a
+        // We prefer undershooting the candidate's effective value (so we over-estimate the fee of a
         // candidate). If we overshoot the candidate's effective value, it may be possible to find a
         // solution which does not meet the target feerate.
         self.value as i64 - (self.weight as f32 * effective_feerate).ceil() as i64
@@ -43,8 +43,8 @@ impl WeightedValue {
 #[derive(Debug, Clone, Copy)]
 pub struct CoinSelectorOpt {
     /// The value we need to select.
-    /// If the value is `None` then the selection will be complete if it can pay for the drain
-    /// output and satisfy the other constraints (e.g. minimum fees).
+    /// If the value is `None`, then the selection will be complete if it can pay for the drain
+    /// output and satisfy the other constraints (e.g., minimum fees).
     pub target_value: Option<u64>,
     /// Additional leeway for the target value.
     pub max_extra_target: u64, // TODO: Maybe out of scope here?
@@ -53,10 +53,10 @@ pub struct CoinSelectorOpt {
     pub target_feerate: f32,
     /// The feerate
     pub long_term_feerate: Option<f32>, // TODO: Maybe out of scope? (waste)
-    /// The minimum absolute fee. I.e. needed for RBF.
+    /// The minimum absolute fee. I.e., needed for RBF.
     pub min_absolute_fee: u64,
 
-    /// The weight of the template transaction including fixed fields and outputs.
+    /// The weight of the template transaction, including fixed fields and outputs.
     pub base_weight: u32,
     /// Additional weight if we include the drain (change) output.
     pub drain_weight: u32,
@@ -130,7 +130,7 @@ impl CoinSelectorOpt {
     }
 }
 
-/// [`CoinSelector`] is responsible for selecting and deselecting from a set of canididates.
+/// [`CoinSelector`] selects and deselects from a set of candidates.
 #[derive(Debug, Clone)]
 pub struct CoinSelector<'a> {
     pub opts: &'a CoinSelectorOpt,
@@ -303,7 +303,7 @@ impl<'a> CoinSelector<'a> {
             let target_value = self.opts.target_value.unwrap_or(0);
             let selected = self.selected_absolute_value();
 
-            // find the largest unsatisfied constraint (if any), and return error of that constraint
+            // find the largest unsatisfied constraint (if any), and return the error of that constraint
             // "selected" should always be greater than or equal to these selected values
             [
                 (
@@ -321,8 +321,7 @@ impl<'a> CoinSelector<'a> {
                 (
                     SelectionConstraint::MinDrainValue,
                     // when we have no target value (hence no recipient txouts), we need to ensure
-                    // the selected amount can satisfy requirements for a drain output (so we at
-                    // least have one txout)
+                    // the selected amount can satisfy requirements for a drain output (so we at least have one txout)
                     if self.opts.target_value.is_none() {
                         (fee_with_drain + self.opts.min_drain_value).saturating_sub(selected)
                     } else {
@@ -354,8 +353,8 @@ impl<'a> CoinSelector<'a> {
         let mut excess_strategies = HashMap::new();
 
         // only allow `ToFee` and `ToRecipient` excess strategies when we have a `target_value`,
-        // otherwise we will result in a result with no txouts, or attempt to add value to an output
-        // that does not exist
+        // otherwise, we will result in a result with no txouts, or attempt to add value to an output
+        // that does not exist.
         if self.opts.target_value.is_some() {
             // no drain, excess to fee
             excess_strategies.insert(
@@ -369,7 +368,7 @@ impl<'a> CoinSelector<'a> {
                 },
             );
 
-            // no drain, excess to recipient
+            // no drain, send the excess to the recipient
             // if `excess == 0`, this result will be the same as the previous, so don't consider it
             // if `max_extra_target == 0`, there is no leeway for this strategy
             if excess_without_drain > 0 && self.opts.max_extra_target > 0 {
@@ -407,7 +406,7 @@ impl<'a> CoinSelector<'a> {
 
         debug_assert!(
             !excess_strategies.is_empty(),
-            "should have at least one excess strategy"
+            "should have at least one excess strategy."
         );
 
         Ok(Selection {
@@ -529,7 +528,7 @@ mod test {
 
     use super::{CoinSelector, CoinSelectorOpt, WeightedValue};
 
-    /// Ensure `target_value` is respected. Can't have no disrespect.
+    /// Ensure `target_value` is respected. Can't have any disrespect.
     #[test]
     fn target_value_respected() {
         let target_value = 1000_u64;
@@ -611,6 +610,6 @@ mod test {
     /// TODO: Tests to add:
     /// * `finish` should ensure at least `target_value` is selected.
     /// * actual feerate should be equal or higher than `target_feerate`.
-    /// * actual drain value should be equal or higher than `min_drain_value` (or else no drain).
+    /// * actual drain value should be equal to or higher than `min_drain_value` (or else no drain).
     fn _todo() {}
 }

@@ -20,7 +20,7 @@ pub trait EsploraAsyncExt {
     ///
     /// - `local_chain`: the most recent block hashes present locally
     /// - `keychain_spks`: keychains that we want to scan transactions for
-    /// - `txids`: transactions that we want updated [`ChainPosition`]s for
+    /// - `txids`: transactions for which we want updated [`ChainPosition`]s
     /// - `outpoints`: transactions associated with these outpoints (residing, spending) that we
     ///     want to included in the update
     ///
@@ -120,7 +120,7 @@ impl EsploraAsyncExt for esplora_client::AsyncClient {
         if let Err(failure) = update.insert_checkpoint(tip_at_start) {
             match failure {
                 sparse_chain::InsertCheckpointError::HashNotMatching { .. } => {
-                    // there has been a re-org before we started scanning. We haven't consumed any iterators so it's safe to recursively call.
+                    // there was a re-org before we started scanning. We haven't consumed any iterators, so calling this function recursively is safe.
                     return EsploraAsyncExt::scan(
                         self,
                         local_chain,
@@ -151,7 +151,7 @@ impl EsploraAsyncExt for esplora_client::AsyncClient {
 
                             let n_confirmed =
                                 related_txs.iter().filter(|tx| tx.status.confirmed).count();
-                            // esplora pages on 25 confirmed transactions. If there's 25 or more we
+                            // esplora pages on 25 confirmed transactions. If there are 25 or more we
                             // keep requesting to see if there's more.
                             if n_confirmed >= 25 {
                                 loop {
@@ -200,7 +200,7 @@ impl EsploraAsyncExt for esplora_client::AsyncClient {
                                 }
                                 InsertTxError::Chain(TxMovedUnexpectedly { .. })
                                 | InsertTxError::UnresolvableConflict(_) => {
-                                    /* implies reorg during scan. We deal with that below */
+                                    /* implies reorg during a scan. We deal with that below */
                                 }
                             }
                         }
@@ -234,7 +234,7 @@ impl EsploraAsyncExt for esplora_client::AsyncClient {
                     }
                     InsertTxError::Chain(TxMovedUnexpectedly { .. })
                     | InsertTxError::UnresolvableConflict(_) => {
-                        /* implies reorg during scan. We deal with that below */
+                        /* implies reorg during a scan. We deal with that below */
                     }
                 }
             }
@@ -270,7 +270,7 @@ impl EsploraAsyncExt for esplora_client::AsyncClient {
                         }
                         InsertTxError::Chain(TxMovedUnexpectedly { .. })
                         | InsertTxError::UnresolvableConflict(_) => {
-                            /* implies reorg during scan. We deal with that below */
+                            /* implies reorg during a scan. We deal with that below */
                         }
                     }
                 }
@@ -286,7 +286,7 @@ impl EsploraAsyncExt for esplora_client::AsyncClient {
         };
 
         if reorg_occurred {
-            // A reorg occurred so lets find out where all the txids we found are in the chain now.
+            // A reorg occurred, so let's find out where all the txids we found are in the chain now.
             // XXX: collect required because of weird type naming issues
             let txids_found = update
                 .chain()

@@ -1,9 +1,9 @@
 //! Module for structures that maintain sparse (purposely incomplete) snapshots of blockchain data.
 //!
 //! [`SparseChain`] stores [`Txid`]s ordered by an index that implements [`ChainPosition`] (this
-//! represents the transaction's position in the blockchain, by default [`TxHeight`] is used).
+//! represents the transaction's position in the blockchain; by default, [`TxHeight`] is used).
 //! [`SparseChain`] also contains "checkpoints" which relate block height to block hash. Changes to
-//! a [`SparseChain`] are reported by returning [`ChangeSet`]s.
+//! a [`SparseChain`] is reported by returning [`ChangeSet`]s.
 //!
 //! # Updating [`SparseChain`]
 //!
@@ -66,7 +66,7 @@
 //! # let hash_b = new_hash::<BlockHash>("b");
 //! # let hash_c = new_hash::<BlockHash>("c");
 //! # let hash_d = new_hash::<BlockHash>("d");
-//! // our sparsechain has 2 checkpoints
+//! // our sparsechain has two checkpoints
 //! let chain = SparseChain::<TxHeight>::from_checkpoints(vec![
 //!     BlockId {
 //!         height: 1,
@@ -99,7 +99,7 @@
 //! /* Example of an update that completely misses the point */
 //!
 //! let disconnected_update = SparseChain::from_checkpoints(vec![
-//!     // the last checkpoint in chain is 2, so 3 and 4 do not connect
+//!     // the last checkpoint in the chain is 2, so 3 and 4 do not connect
 //!     BlockId {
 //!         height: 3,
 //!         hash: hash_c,
@@ -126,7 +126,7 @@
 //! # let hash_b = new_hash::<BlockHash>("b");
 //! # let hash_c = new_hash::<BlockHash>("c");
 //! # let hash_d = new_hash::<BlockHash>("d");
-//! // our chain has a single checkpoint at height 11
+//! // our chain has a single checkpoint at height 11.
 //! let mut chain = SparseChain::<TxHeight>::from_checkpoints(vec![BlockId {
 //!     height: 11,
 //!     hash: hash_a,
@@ -147,10 +147,10 @@
 //!     .apply_update(update)
 //!     .expect("we can evict/replace checkpoint 11 since it is the only checkpoint");
 //!
-//! // now our `chain` has 2 checkpoints (11:hash_b & 12:hash_c)
-//! // we detect another reorg, this time at height 12...
+//! // now our `chain` has two checkpoints (11:hash_b & 12:hash_c)
+//! // we detect another reorg, this time at height 12.
 //! let update = SparseChain::from_checkpoints(vec![
-//!     // we connect at checkpoint 11 as this is our "point of agreement"
+//!     // we connect at checkpoint 11 as this is our "point of agreement".
 //!     BlockId {
 //!         height: 11,
 //!         hash: hash_b,
@@ -187,10 +187,10 @@
 //! # Custom [`ChainPosition`]
 //!
 //! [`SparseChain`] maintains a list of txids ordered by [`ChainPosition`]. By default, [`TxHeight`]
-//! is used, however additional data can be incorporated into the implementation.
+//! is used; however, additional data can be incorporated into the implementation.
 //!
 //! For example, we can have "perfect ordering" of transactions if our positional index is a
-//! combination of block height and transaction position in block.
+//! combination of block height and transaction position in a block.
 //!
 //! ```
 //! # use bdk_chain::{BlockId, TxHeight, sparse_chain::*, example_utils::*};
@@ -337,7 +337,7 @@ pub struct SparseChain<P = TxHeight> {
     ordered_txids: BTreeSet<(P, Txid)>,
     /// Confirmation heights of txids.
     txid_to_pos: HashMap<Txid, P>,
-    /// Limit number of checkpoints.
+    /// Limit the number of checkpoints.
     checkpoint_limit: Option<usize>,
 }
 
@@ -361,13 +361,13 @@ impl<P> Default for SparseChain<P> {
 /// Represents a failure when trying to insert a [`Txid`] into [`SparseChain`].
 #[derive(Clone, Debug, PartialEq)]
 pub enum InsertTxError<P> {
-    /// Occurs when the [`Txid`] is to be inserted at a hight higher than the [`SparseChain`]'s tip.
+    /// Occurs when the [`Txid`] is to be inserted at a height higher than the [`SparseChain`]'s tip.
     TxTooHigh {
         txid: Txid,
         tx_height: u32,
         tip_height: Option<u32>,
     },
-    /// Occurs when the [`Txid`] is already in the [`SparseChain`] and the insertion would result in
+    /// Occurs when the [`Txid`] is already in the [`SparseChain`], and the insertion would result in
     /// an unexpected move in [`ChainPosition`].
     TxMovedUnexpectedly {
         txid: Txid,
@@ -407,7 +407,7 @@ impl<P: core::fmt::Debug> std::error::Error for InsertTxError<P> {}
 /// Represents a failure when trying to insert a checkpoint into [`SparseChain`].
 #[derive(Clone, Debug, PartialEq)]
 pub enum InsertCheckpointError {
-    /// Occurs when checkpoint of the same height already exists with a different [`BlockHash`].
+    /// Occurs when a checkpoint of the same height already exists with a different [`BlockHash`].
     HashNotMatching {
         height: u32,
         original_hash: BlockHash,
@@ -431,7 +431,7 @@ pub enum UpdateError<P = TxHeight> {
     /// connect to the existing chain. This error case contains the checkpoint height to include so
     /// that the chains can connect.
     NotConnected(u32),
-    /// The update contains inconsistent tx states (e.g. it changed the transaction's height). This
+    /// The update contains inconsistent tx states (e.g., it changed the transaction's height). This
     /// error is usually the inconsistency found.
     TxInconsistent {
         txid: Txid,
@@ -489,7 +489,7 @@ impl<P: ChainPosition> SparseChain<P> {
 
     /// Return the [`ChainPosition`] of a `txid`.
     ///
-    /// This returns [`None`] if the transation does not exist.
+    /// This returns [`None`] if the transaction does not exist.
     pub fn tx_position(&self, txid: Txid) -> Option<&P> {
         self.txid_to_pos.get(&txid)
     }
@@ -518,8 +518,8 @@ impl<P: ChainPosition> SparseChain<P> {
     /// but different hash. Invalidated checkpoints result in invalidated transactions becoming
     /// "unconfirmed".
     ///
-    /// An error will be returned if an update will result in inconsistencies or if the update does
-    /// not properly connect with `self`.
+    /// An error will be returned if an update results in inconsistencies or if the update does
+    /// not correctly connect with `self`.
     ///
     /// Refer to [module-level documentation] for more.
     ///
@@ -536,7 +536,7 @@ impl<P: ChainPosition> SparseChain<P> {
 
         // the lower bound of the invalidation range
         let invalid_lb = if last_update_cp.is_none() || last_update_cp == agreement_point {
-            // if agreement point is the last update checkpoint, or there is no update checkpoints,
+            // if the agreement point is the last update checkpoint, or there are no update checkpoints,
             // no invalidation is required
             u32::MAX
         } else {
@@ -569,7 +569,7 @@ impl<P: ChainPosition> SparseChain<P> {
             }
         }
 
-        // create initial change-set, based on checkpoints and txids that are to be "invalidated"
+        // create initial change-set based on checkpoints and txids that are to be "invalidated".
         let mut changeset = invalid_from
             .map(|from_height| self.invalidate_checkpoints_preview(from_height))
             .unwrap_or_default();
@@ -725,7 +725,7 @@ impl<P: ChainPosition> SparseChain<P> {
 
     /// Determines the resultant [`ChangeSet`] if [`Txid`] was inserted at position `pos`.
     ///
-    /// Changes to the [`Txid`]'s position is allowed (under the rules noted in
+    /// Changes to the [`Txid`]'s position are allowed (under the rules noted in
     /// [module-level documentation]) and will be reflected in the [`ChangeSet`].
     ///
     /// [module-level documentation]: crate::sparse_chain
@@ -815,7 +815,7 @@ impl<P: ChainPosition> SparseChain<P> {
 
     /// Insert a checkpoint ([`BlockId`]).
     ///
-    /// This is equivilant to calling [`insert_checkpoint_preview`] and [`apply_changeset`] in
+    /// This is equivalent to calling [`insert_checkpoint_preview`] and [`apply_changeset`] in
     /// sequence.
     ///
     /// [`insert_checkpoint_preview`]: Self::insert_checkpoint_preview
@@ -870,7 +870,7 @@ impl<P: ChainPosition> SparseChain<P> {
         ))
     }
 
-    /// Iterate over a sub-range of positioned [`Txid`]s, where the range is define by [`TxHeight`]
+    /// Iterate over a sub-range of positioned [`Txid`]s, where the range is defined by [`TxHeight`]
     /// only.
     pub fn range_txids_by_height<R>(
         &self,
@@ -955,7 +955,7 @@ impl<P: ChainPosition> SparseChain<P> {
     fn prune_checkpoints(&mut self) -> Option<BTreeMap<u32, BlockHash>> {
         let limit = self.checkpoint_limit?;
 
-        // find last height to be pruned
+        // find the last height to be pruned
         let last_height = *self.checkpoints.keys().rev().nth(limit)?;
         // first height to be kept
         let keep_height = last_height + 1;
@@ -1010,7 +1010,7 @@ impl<I> Default for ChangeSet<I> {
 }
 
 impl<P> ChangeSet<P> {
-    /// Appends the changes in `other` into self such that applying `self` afterwards has the same
+    /// Appends the changes of `other` into self such that applying `self` afterward has the same
     /// effect as sequentially applying the original `self` and `other`.
     pub fn append(&mut self, mut other: Self)
     where
@@ -1034,16 +1034,16 @@ fn max_txid() -> Txid {
     Txid::from_inner([0xff; 32])
 }
 
-/// Represents an position in which transactions are ordered in [`SparseChain`].
+/// Represents a position in which transactions are ordered in [`SparseChain`].
 ///
 /// [`ChainPosition`] implementations must be [`Ord`] by [`TxHeight`] first.
 pub trait ChainPosition:
     core::fmt::Debug + Clone + Eq + PartialOrd + Ord + core::hash::Hash + Send + Sync + 'static
 {
-    /// Get the transaction height of the positon.
+    /// Get the transaction height of the position.
     fn height(&self) -> TxHeight;
 
-    /// Get the positon's upper bound of a given height.
+    /// Get the position's upper bound of a given height.
     fn max_ord_of_height(height: TxHeight) -> Self;
 
     /// Get the position's lower bound of a given height.

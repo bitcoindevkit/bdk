@@ -52,7 +52,7 @@ pub trait ElectrumExt {
     ///
     /// - `local_chain`: the most recent block hashes present locally
     /// - `keychain_spks`: keychains that we want to scan transactions for
-    /// - `txids`: transactions that we want updated [`ChainPosition`]s for
+    /// - `txids`: transactions for which we want the updated [`ChainPosition`]s
     /// - `outpoints`: transactions associated with these outpoints (residing, spending) that we
     ///     want to included in the update
     fn scan<K: Ord + Clone>(
@@ -205,7 +205,7 @@ impl ElectrumExt for Client {
 pub struct ElectrumUpdate<K, P> {
     /// The internal [`SparseChain`] update.
     pub chain_update: SparseChain<P>,
-    /// The last keychain script pubkey indices which had transaction histories.
+    /// The last keychain script pubkey indices, which had transaction histories.
     pub last_active_indices: BTreeMap<K, u32>,
 }
 
@@ -239,7 +239,7 @@ impl<K: Ord + Clone + Debug, P: ChainPosition> ElectrumUpdate<K, P> {
             .collect()
     }
 
-    /// Transform the [`ElectrumUpdate`] into a [`KeychainScan`] which can be applied to a
+    /// Transform the [`ElectrumUpdate`] into a [`KeychainScan`], which can be applied to a
     /// `tracker`.
     ///
     /// This will fail if there are missing full transactions not provided via `new_txs`.
@@ -334,7 +334,7 @@ fn prepare_update(
 ) -> Result<SparseChain, Error> {
     let mut update = SparseChain::default();
 
-    // Find local chain block that is still there so our update can connect to the local chain.
+    // Find the local chain block that is still there so our update can connect to the local chain.
     for (&existing_height, &existing_hash) in local_chain.iter().rev() {
         // TODO: a batch request may be safer, as a reorg that happens when we are obtaining
         //       `block_header`s will result in inconsistencies
@@ -351,7 +351,7 @@ fn prepare_update(
         }
     }
 
-    // Insert the new tip so new transactions will be accepted into the sparse chain.
+    // Insert the new tip so new transactions will be accepted into the sparsechain.
     let tip = {
         let (height, hash) = get_tip(client)?;
         BlockId { height, hash }
@@ -369,10 +369,10 @@ fn prepare_update(
     Ok(update)
 }
 
-/// This atrocity is required because electrum thinks height of 0 means "unconfirmed", but there is
+/// This atrocity is required because electrum thinks a height of 0 means "unconfirmed", but there is
 /// such thing as a genesis block.
 ///
-/// We contain an expection for the genesis coinbase txid to always have a chain position of
+/// We contain an expectation for the genesis coinbase txid to always have a chain position of
 /// [`TxHeight::Confirmed(0)`].
 fn determine_tx_height(raw_height: i32, tip_height: u32, txid: Txid) -> TxHeight {
     if txid
@@ -405,8 +405,8 @@ fn determine_tx_height(raw_height: i32, tip_height: u32, txid: Txid) -> TxHeight
 /// of the provided `outpoints` (this is the tx which contains the outpoint and the one spending the
 /// outpoint).
 ///
-/// Unfortunately this is awkward to implement as electrum does not provide such an API. Instead, we
-/// will get the tx history of the outpoint's spk, and try to find the containing tx and the
+/// Unfortunately, this is awkward to implement as electrum does not provide such an API. Instead, we
+/// will get the tx history of the outpoint's spk and try to find the containing tx and the
 /// spending tx.
 fn populate_with_outpoints(
     client: &Client,
@@ -527,7 +527,7 @@ fn populate_with_txids(
 }
 
 /// Populate an update [`SparseChain`] with transactions (and associated block positions) from
-/// the transaction history of the provided `spks`.
+/// the transaction history of the provided `spk`s.
 fn populate_with_spks<K, I, S>(
     client: &Client,
     update: &mut SparseChain,

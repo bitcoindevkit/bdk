@@ -13,26 +13,26 @@ use std::{collections::BTreeMap, fmt::Debug, io, io::Write};
 
 #[derive(Subcommand, Debug, Clone)]
 enum ElectrumCommands {
-    /// Scans the addresses in the wallet using esplora API.
+    /// Scans the addresses in the wallet using the esplora API.
     Scan {
-        /// When a gap this large has been found for a keychain it will stop.
+        /// When a gap this large has been found for a keychain, it will stop.
         #[clap(long, default_value = "5")]
         stop_gap: usize,
         #[clap(flatten)]
         scan_options: ScanOptions,
     },
-    /// Scans particular addresses using esplora API
+    /// Scans particular addresses using the esplora API.
     Sync {
-        /// Scan all the unused addresses
+        /// Scan all the unused addresses.
         #[clap(long)]
         unused_spks: bool,
-        /// Scan every address that you have derived
+        /// Scan every address that you have derived.
         #[clap(long)]
         all_spks: bool,
-        /// Scan unspent outpoints for spends or changes to confirmation status of residing tx
+        /// Scan unspent outpoints for spends or changes to confirmation status of residing tx.
         #[clap(long)]
         utxos: bool,
-        /// Scan unconfirmed transactions for updates
+        /// Scan unconfirmed transactions for updates.
         #[clap(long)]
         unconfirmed: bool,
         #[clap(flatten)]
@@ -42,7 +42,7 @@ enum ElectrumCommands {
 
 #[derive(Parser, Debug, Clone, PartialEq)]
 pub struct ScanOptions {
-    /// Set batch size for each script_history call to electrum client
+    /// Set batch size for each script_history call to electrum client.
     #[clap(long, default_value = "25")]
     pub batch_size: usize,
 }
