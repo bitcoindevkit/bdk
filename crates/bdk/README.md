@@ -50,13 +50,13 @@ This can be created manually or from blockchain-scanning crates.
 
 **Examples**
 
-* [`example-crates/wallet_esplora`]
-* [`example-crates/wallet_electrum`]
+* [`example-crates/wallet_esplora`](https://github.com/bitcoindevkit/bdk/tree/master/example-crates/wallet_esplora)
+* [`example-crates/wallet_electrum`](https://github.com/bitcoindevkit/bdk/tree/master/example-crates/wallet_electrum)
 
 ### Persistence
 
 To persist the `Wallet` on disk, `Wallet` needs to be constructed with a
-[`Persist`](`bdk_chain::keychain::persist::Persist`) implementation.
+[`Persist`](https://docs.rs/bdk_chain/latest/bdk_chain/keychain/struct.KeychainPersist.html) implementation.
 
 **Implementations**
 

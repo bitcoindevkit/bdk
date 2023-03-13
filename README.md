@@ -51,3 +51,4 @@ Fully working examples of how to use these components are in `/example-crates`
 [`rust-miniscript`]: https://github.com/rust-bitcoin/rust-miniscript
 [`rust-bitcoin`]: https://github.com/rust-bitcoin/rust-bitcoin
 [`esplora-client`]: https://docs.rs/esplora-client/0.3.0/esplora_client/
+[`electrum-client`]: https://docs.rs/electrum-client/0.13.0/electrum_client/
