@@ -10,118 +10,27 @@ jobs:
     strategy:
       matrix:
         rust:
-          - version: 1.65.0 # STABLE
+          - version: stable
             clippy: true
           - version: 1.57.0 # MSRV
         features:
-          - default
-          - minimal
-          - all-keys
-          - minimal,use-esplora-blocking
-          - key-value-db
-          - electrum
-          - compact_filters
-          - use-esplora-blocking,key-value-db,electrum
-          - compiler
-          - rpc
-          - verify
-          - async-interface
-          - use-esplora-async
-          - sqlite
-          - sqlite-bundled
+          - --no-default-features
+          - --all-features
     steps:
       - name: checkout
         uses: actions/checkout@v2
-      - name: Generate cache key
-        run: echo "${{ matrix.rust.version }} ${{ matrix.features }}" | tee .cache_key
-      - name: cache
-        uses: actions/cache@v2
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('.cache_key') }}-${{ hashFiles('**/Cargo.toml','**/Cargo.lock') }}
-      - name: Set default toolchain
-        run: rustup default ${{ matrix.rust.version }}
-      - name: Set profile
-        run: rustup set profile minimal
-      - name: Add clippy
-        if: ${{ matrix.rust.clippy }}
-        run: rustup component add clippy
-      - name: Update toolchain
-        run: rustup update
-      - name: Build
-        run: cargo build --features ${{ matrix.features }} --no-default-features
-      - name: Clippy
-        if: ${{ matrix.rust.clippy }}
-        run: cargo clippy --all-targets --features ${{ matrix.features }} --no-default-features -- -D warnings
-      - name: Test
-        run: cargo test --features ${{ matrix.features }} --no-default-features
-
-  test-readme-examples:
-    name: Test README.md examples
-    runs-on: ubuntu-latest
-    steps:
-      - name: checkout
-        uses: actions/checkout@v2
-      - name: cache
-        uses: actions/cache@v2
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-test-md-docs-${{ hashFiles('**/Cargo.toml','**/Cargo.lock') }}
-      - name: Set default toolchain
-        run: rustup default nightly
-      - name: Set profile
-        run: rustup set profile minimal
-      - name: Update toolchain
-        run: rustup update
-      - name: Test
-        run: cargo test --features test-md-docs --no-default-features -- doctest::ReadmeDoctests
-
-  test-blockchains:
-    name: Blockchain ${{ matrix.blockchain.features }}
-    runs-on: ubuntu-20.04
-    strategy:
-      fail-fast: false
-      matrix:
-        blockchain:
-          - name: electrum
-            testprefix: blockchain::electrum::test
-            features: test-electrum,verify
-          - name: rpc
-            testprefix: blockchain::rpc::test
-            features: test-rpc
-          - name: rpc-legacy
-            testprefix: blockchain::rpc::test
-            features: test-rpc-legacy
-          - name: esplora
-            testprefix: esplora
-            features: test-esplora,use-esplora-async,verify
-          - name: esplora
-            testprefix: esplora
-            features: test-esplora,use-esplora-blocking,verify
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v2
-      - name: Cache
-        uses: actions/cache@v2
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ github.job }}-${{ hashFiles('**/Cargo.toml','**/Cargo.lock') }}
-      - name: Setup rust toolchain
+      - name: Install Rust toolchain
         uses: actions-rs/toolchain@v1
         with:
-          toolchain: stable
-          override: true
+            toolchain: ${{ matrix.rust.version }}
+            override: true
+            profile: minimal
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2.2.1
+      - name: Build
+        run: cargo build ${{ matrix.features }}
       - name: Test
-        run: cargo test --no-default-features --features ${{ matrix.blockchain.features }} ${{ matrix.blockchain.testprefix }}::bdk_blockchain_tests
+        run: cargo test ${{ matrix.features }}
 
   check-wasm:
     name: Check WASM
@@ -132,29 +41,26 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v2
-      - name: Cache
-        uses: actions/cache@v2
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ github.job }}-${{ hashFiles('**/Cargo.toml','**/Cargo.lock') }}
         # Install a recent version of clang that supports wasm32
       - run: wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add - || exit 1
       - run: sudo apt-add-repository "deb http://apt.llvm.org/focal/ llvm-toolchain-focal-10 main" || exit 1
       - run: sudo apt-get update || exit 1
       - run: sudo apt-get install -y libclang-common-10-dev clang-10 libc6-dev-i386 || exit 1
-      - name: Set default toolchain
-        run: rustup default 1.65.0 # STABLE
-      - name: Set profile
-        run: rustup set profile minimal
-      - name: Add target wasm32
-        run: rustup target add wasm32-unknown-unknown
-      - name: Update toolchain
-        run: rustup update
-      - name: Check
-        run: cargo check --target wasm32-unknown-unknown --features async-interface,use-esplora-async,dev-getrandom-wasm --no-default-features
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+            toolchain: stable
+            override: true
+            profile: minimal
+            target: "wasm32-unknown-unknown"
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2.2.1
+      - name: Check bdk
+        working-directory: ./crates/bdk
+        run: cargo check --target wasm32-unknown-unknown --features dev-getrandom-wasm
+      - name: Check esplora
+        working-directory: ./crates/esplora
+        run: cargo check --target wasm32-unknown-unknown --features async --no-default-features
 
   fmt:
     name: Rust fmt
@@ -162,42 +68,30 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v2
-      - name: Set default toolchain
-        run: rustup default nightly
-      - name: Set profile
-        run: rustup set profile minimal
-      - name: Add rustfmt
-        run: rustup component add rustfmt
-      - name: Update toolchain
-        run: rustup update
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+            toolchain: stable
+            override: true
+            profile: minimal
+            components: rustfmt
       - name: Check fmt
         run: cargo fmt --all -- --config format_code_in_doc_comments=true --check
 
-  test_hardware_wallet:
-    runs-on: ubuntu-20.04
-    strategy:
-      matrix:
-        rust:
-          - version: 1.65.0 # STABLE
-          - version: 1.57.0 # MSRV
+  clippy_check:
+    runs-on: ubuntu-latest
     steps:
-    - name: Checkout
-      uses: actions/checkout@v3
-    - name: Build simulator image
-      run: docker build -t hwi/ledger_emulator ./ci -f ci/Dockerfile.ledger
-    - name: Run simulator image
-      run: docker run --name simulator --network=host hwi/ledger_emulator &
-    - name: Install Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.9'
-    - name: Install python dependencies
-      run: pip install hwi==2.1.1 protobuf==3.20.1
-    - name: Set default toolchain
-      run: rustup default ${{ matrix.rust.version }}
-    - name: Set profile
-      run: rustup set profile minimal
-    - name: Update toolchain
-      run: rustup update
-    - name: Test
-      run: cargo test --features test-hardware-signer
+      - uses: actions/checkout@v1
+      - uses: actions-rs/toolchain@v1
+        with:
+            # we pin clippy instead of using "stable" so that our CI doesn't break
+            # at each new cargo release
+            toolchain: "1.67.0"
+            components: clippy
+            override: true
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2.2.1
+      - uses: actions-rs/clippy-check@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          args: --all-features --all-targets -- -D warnings

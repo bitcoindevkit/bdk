@@ -1,0 +1,12 @@
+[package]
+name = "bdk-esplora-wallet-example"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+bdk = { path = "../../crates/bdk" }
+bdk_esplora = { path = "../../crates/esplora", features = ["blocking"] }
+bdk_file_store = { path = "../../crates/file_store" }

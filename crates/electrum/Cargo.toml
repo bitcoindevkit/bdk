@@ -1,0 +1,16 @@
+[package]
+name = "bdk_electrum"
+version = "0.1.0"
+edition = "2021"
+homepage = "https://bitcoindevkit.org"
+repository = "https://github.com/bitcoindevkit/bdk"
+documentation = "https://docs.rs/bdk_electrum"
+description = "Fetch data from electrum in the form BDK accepts"
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+bdk_chain = { path = "../chain", version = "0.3.1", features = ["serde", "miniscript"] }
+electrum-client = { version = "0.12" }
