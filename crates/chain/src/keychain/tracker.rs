@@ -28,7 +28,7 @@ where
     P: sparse_chain::ChainPosition,
     K: Ord + Clone + core::fmt::Debug,
 {
-    /// Add a keychain to the tracker's `txout_index` with a descriptor to derive addresses for it.
+    /// Add a keychain to the tracker's `txout_index` with a descriptor to derive addresses.
     /// This is just shorthand for calling [`KeychainTxOutIndex::add_keychain`] on the internal
     /// `txout_index`.
     ///
@@ -83,7 +83,7 @@ where
 
     /// Directly applies a [`KeychainScan`] on [`KeychainTracker`].
     ///
-    /// This is equivilant to calling [`determine_changeset`] and [`apply_changeset`] in sequence.
+    /// This is equivalent to calling [`determine_changeset`] and [`apply_changeset`] in sequence.
     ///
     /// [`determine_changeset`]: Self::determine_changeset
     /// [`apply_changeset`]: Self::apply_changeset
@@ -146,11 +146,11 @@ where
         self.chain_graph().chain()
     }
 
-    /// Determines the changes as result of inserting `block_id` (a height and block hash) into the
+    /// Determines the changes as a result of inserting `block_id` (a height and block hash) into the
     /// tracker.
     ///
     /// The caller is responsible for guaranteeing that a block exists at that height. If a
-    /// checkpoint already exists at that height with a different hash this will return an error.
+    /// checkpoint already exists at that height with a different hash; this will return an error.
     /// Otherwise it will return `Ok(true)` if the checkpoint didn't already exist or `Ok(false)`
     /// if it did.
     ///
@@ -182,7 +182,7 @@ where
         Ok(changeset)
     }
 
-    /// Determines the changes as result of inserting a transaction into the inner [`ChainGraph`]
+    /// Determines the changes as a result of inserting a transaction into the inner [`ChainGraph`]
     /// and optionally into the inner chain at `position`.
     ///
     /// **Warning**: This function modifies the internal state of the chain graph. You are
@@ -201,7 +201,7 @@ where
     /// Directly insert a transaction into the inner [`ChainGraph`] and optionally into the inner
     /// chain at `position`.
     ///
-    /// This is equivilant of calling [`insert_tx_preview`] and [`apply_changeset`] in sequence.
+    /// This is equivalent of calling [`insert_tx_preview`] and [`apply_changeset`] in sequence.
     ///
     /// [`insert_tx_preview`]: Self::insert_tx_preview
     /// [`apply_changeset`]: Self::apply_changeset
@@ -215,15 +215,15 @@ where
         Ok(changeset)
     }
 
-    /// Returns the *balance* of the keychain i.e. the value of unspent transaction outputs tracked.
+    /// Returns the *balance* of the keychain, i.e., the value of unspent transaction outputs tracked.
     ///
     /// The caller provides a `should_trust` predicate which must decide whether the value of
     /// unconfirmed outputs on this keychain are guaranteed to be realized or not. For example:
     ///
-    /// - For an *internal* (change) keychain `should_trust` should in general be `true` since even if
-    /// you lose an internal output due to eviction you will always gain back the value from whatever output the
-    /// unconfirmed transaction was spending (since that output is presumeably from your wallet).
-    /// - For an *external* keychain you might want `should_trust` to return  `false` since someone may cancel (by double spending)
+    /// - For an *internal* (change) keychain, `should_trust` should generally be `true` since even if
+    /// you lose an internal output due to eviction, you will always gain back the value from whatever output the
+    /// unconfirmed transaction was spending (since that output is presumably from your wallet).
+    /// - For an *external* keychain, you might want `should_trust` to return  `false` since someone may cancel (by double spending)
     /// a payment made to addresses on that keychain.
     ///
     /// When in doubt set `should_trust` to return false. This doesn't do anything other than change

@@ -1,12 +1,12 @@
-//! Module for keychain based structures.
+//! Module for keychain related structures.
 //!
-//! A keychain here is a set of application defined indexes for a minscript descriptor where we can
+//! A keychain here is a set of application-defined indexes for a miniscript descriptor where we can
 //! derive script pubkeys at a particular derivation index. The application's index is simply
 //! anything that implements `Ord`.
 //!
 //! [`KeychainTxOutIndex`] indexes script pubkeys of keychains and scans in relevant outpoints (that
 //! has a `txout` containing an indexed script pubkey). Internally, this uses [`SpkTxOutIndex`], but
-//! also maintains "revealed" and "lookahead" index count per keychain.
+//! also maintains "revealed" and "lookahead" index counts per keychain.
 //!
 //! [`KeychainTracker`] combines [`ChainGraph`] and [`KeychainTxOutIndex`] and enforces atomic
 //! changes between both these structures. [`KeychainScan`] is a structure used to update to
@@ -63,7 +63,7 @@ impl<K> DerivationAdditions<K> {
         self.0.is_empty()
     }
 
-    /// Get the inner map of keychain to its new derivation index.
+    /// Get the inner map of the keychain to its new derivation index.
     pub fn as_inner(&self) -> &BTreeMap<K, u32> {
         &self.0
     }
@@ -72,8 +72,8 @@ impl<K> DerivationAdditions<K> {
 impl<K: Ord> DerivationAdditions<K> {
     /// Append another [`DerivationAdditions`] into self.
     ///
-    /// If keychain already exists, increases the index when other's index > self's index.
-    /// If keychain did not exist, append the new keychain.
+    /// If the keychain already exists, increase the index when the other's index > self's index.
+    /// If the keychain did not exist, append the new keychain.
     pub fn append(&mut self, mut other: Self) {
         self.0.iter_mut().for_each(|(key, index)| {
             if let Some(other_index) = other.0.remove(key) {
@@ -162,11 +162,11 @@ impl<K, P> KeychainChangeSet<K, P> {
         self.chain_graph.is_empty() && self.derivation_indices.is_empty()
     }
 
-    /// Appends the changes in `other` into `self` such that applying `self` afterwards has the same
+    /// Appends the changes in `other` into `self` such that applying `self` afterward has the same
     /// effect as sequentially applying the original `self` and `other`.
     ///
-    /// Note the derivation indices cannot be decreased so `other` will only change the derivation
-    /// index for a keychain if it's entry is higher than the one in `self`.
+    /// Note the derivation indices cannot be decreased, so `other` will only change the derivation
+    /// index for a keychain, if it's value is higher than the one in `self`.
     pub fn append(&mut self, other: KeychainChangeSet<K, P>)
     where
         K: Ord,
@@ -207,7 +207,7 @@ impl<K, P> ForEachTxOut for KeychainChangeSet<K, P> {
     }
 }
 
-/// Balance differentiated in various categories.
+/// Balance, differentiated into various categories.
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
 #[cfg_attr(
     feature = "serde",
@@ -297,13 +297,13 @@ mod test {
 
         lhs.append(rhs);
 
-        // Exiting index doesn't update if new index in `other` is lower than `self`
+        // Exiting index doesn't update if the new index in `other` is lower than `self`.
         assert_eq!(lhs.derivation_indices.0.get(&Keychain::One), Some(&7));
-        // Existing index updates if new index in `other` is higher than `self.
+        // Existing index updates if the new index in `other` is higher than `self`.
         assert_eq!(lhs.derivation_indices.0.get(&Keychain::Two), Some(&5));
-        // Existing index unchanged, if keychain doesn't exist in `other`
+        // Existing index is unchanged if keychain doesn't exist in `other`.
         assert_eq!(lhs.derivation_indices.0.get(&Keychain::Three), Some(&3));
-        // New keychain gets added if keychain is in `other`, but not in `self`.
+        // New keychain gets added if the keychain is in `other` but not in `self`.
         assert_eq!(lhs.derivation_indices.0.get(&Keychain::Four), Some(&4));
     }
 }

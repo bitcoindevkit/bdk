@@ -11,14 +11,14 @@ use core::fmt::Debug;
 
 /// A consistent combination of a [`SparseChain<P>`] and a [`TxGraph<T>`].
 ///
-/// `SparseChain` only keeps track of transaction ids and their position in the chain but you often
-/// want to store the full transactions as well. Additionally you want to make sure that everything
+/// `SparseChain` only keeps track of transaction ids and their position in the chain, but you often
+/// want to store the full transactions as well. Additionally, you want to make sure that everything
 /// in the chain is consistent with the full transaction data. `ChainGraph` enforces these two
 /// invariants:
 ///
 /// 1. Every transaction that is in the chain is also in the graph (you always have the full
 /// transaction).
-/// 2. No transactions in the chain conflict with each other i.e. they don't double spend each
+/// 2. No transactions in the chain conflict with each other, i.e., they don't double spend each
 /// other or have ancestors that double spend each other.
 ///
 /// Note that the `ChainGraph` guarantees a 1:1 mapping between transactions in the `chain` and
@@ -79,7 +79,7 @@ where
     ///
     /// 1. There is a transaction in the `chain` that does not have its corresponding full
     /// transaction in `graph`.
-    /// 2. The `chain` has two transactions that allegedly in it but they conflict in the `graph`
+    /// 2. The `chain` has two transactions that are allegedly in it, but they conflict in the `graph`
     /// (so could not possibly be in the same chain).
     pub fn new(chain: SparseChain<P>, graph: TxGraph) -> Result<Self, NewError<P>> {
         let mut missing = HashSet::default();
@@ -112,8 +112,8 @@ where
     /// got it from `self`.
     ///
     /// This is useful when interacting with services like an electrum server which returns a list
-    /// of txids and heights when calling [`script_get_history`] which can easily be inserted into a
-    /// [`SparseChain<TxHeight>`][`SparseChain`]. From there you need to figure out which full
+    /// of txids and heights when calling [`script_get_history`], which can easily be inserted into a
+    /// [`SparseChain<TxHeight>`][`SparseChain`]. From there, you need to figure out which full
     /// transactions you are missing in your chain graph and form `new_txs`. You then use
     /// `inflate_update` to turn this into an update `ChainGraph<P, Cow<Transaction>>` and finally
     /// use [`determine_changeset`] to generate the changeset from it.
@@ -138,7 +138,7 @@ where
 
         // [TODO] @evanlinjin: These need better comments
         // - copy transactions that have changed positions into the graph
-        // - add new transactions to inflated chain
+        // - add new transactions to an inflated chain
         for (pos, txid) in update.txids() {
             match self.chain.tx_position(*txid) {
                 Some(original_pos) => {
@@ -169,7 +169,7 @@ where
         ChainGraph::new(inflated_chain, inflated_graph)
     }
 
-    /// Sets the checkpoint limit.
+    /// Gets the checkpoint limit.
     ///
     /// Refer to [`SparseChain::checkpoint_limit`] for more.
     pub fn checkpoint_limit(&self) -> Option<usize> {
@@ -206,9 +206,9 @@ where
         changeset
     }
 
-    /// Get a transaction that is currently in the underlying [`SparseChain`].
+    /// Get a transaction currently in the underlying [`SparseChain`].
     ///
-    /// This does not necessarily mean that it is *confirmed* in the blockchain, it might just be in
+    /// This does not necessarily mean that it is *confirmed* in the blockchain; it might just be in
     /// the unconfirmed transaction list within the [`SparseChain`].
     pub fn get_tx_in_chain(&self, txid: Txid) -> Option<(&P, &Transaction)> {
         let position = self.chain.tx_position(txid)?;
@@ -234,7 +234,7 @@ where
         Ok(changeset)
     }
 
-    /// Inserts [`Transaction`] at given chain position.
+    /// Inserts [`Transaction`] at the given chain position.
     ///
     /// This is equivalent to calling [`Self::insert_tx_preview`] and [`Self::apply_changeset`] in
     /// sequence.
@@ -265,8 +265,7 @@ where
     /// Determines the changes required to insert a `block_id` (a height and block hash) into the
     /// chain.
     ///
-    /// If a checkpoint already exists at that height with a different hash this will return
-    /// an error.
+    /// If a checkpoint with a different hash already exists at that height, this will return an error.
     pub fn insert_checkpoint_preview(
         &self,
         block_id: BlockId,
@@ -312,7 +311,7 @@ where
     }
 
     /// Given a transaction, return an iterator of `txid`s that conflict with it (spends at least
-    /// one of the same inputs). This includes all descendants of conflicting transactions.
+    /// one of the same inputs). This iterator includes all descendants of conflicting transactions.
     ///
     /// This method only returns conflicts that exist in the [`SparseChain`] as transactions that
     /// are not included in [`SparseChain`] are already considered as evicted.
@@ -343,7 +342,7 @@ where
                     }
                     pos
                 }
-                // Ignore txids that are being delted by the change (they can't conflict)
+                // Ignore txids that are being deleted by the change (they can't conflict)
                 None => continue,
             };
 
@@ -370,7 +369,7 @@ where
             // conflicting tx will be positioned as "unconfirmed" after the update is applied.
             // If so, we will modify the changeset to evict the conflicting txid.
 
-            // determine the position of the conflicting txid after current changeset is applied
+            // determine the position of the conflicting txid after the current changeset is applied
             let conflicting_new_pos = changeset
                 .chain
                 .txids
@@ -384,7 +383,7 @@ where
                 }
                 Some(existing_new_pos) => match existing_new_pos.height() {
                     TxHeight::Confirmed(_) => {
-                        // the new postion of the conflicting tx is "confirmed", therefore cannot be
+                        // the new position of the conflicting tx is "confirmed", therefore cannot be
                         // evicted, return error
                         return Err(UnresolvableConflict {
                             already_confirmed_tx: (conflicting_pos.clone(), conflicting_txid),
@@ -405,8 +404,8 @@ where
 
     /// Applies `changeset` to `self`.
     ///
-    /// **Warning** this method assumes the changeset is assumed to be correctly formed. If it isn't
-    /// then the chain graph may not behave correctly in the future and may panic unexpectedly.
+    /// **Warning** this method assumes that the changeset is correctly formed. If it is not, the
+    /// chain graph may behave incorrectly in the future and panic unexpectedly.
     pub fn apply_changeset(&mut self, changeset: ChangeSet<P>) {
         self.chain.apply_changeset(changeset.chain);
         self.graph.apply_additions(changeset.graph);
@@ -433,9 +432,11 @@ where
             .map(move |(pos, txid)| (pos, self.graph.get_tx(*txid).expect("must exist")))
     }
 
-    /// Finds the transaction in the chain that spends `outpoint` given the input/output
-    /// relationships in `graph`. Note that the transaction including `outpoint` does not need to be
-    /// in the `graph` or the `chain` for this to return `Some(_)`.
+    /// Find the transaction in the chain that spends `outpoint`.
+    ///
+    /// This uses the input/output relationships in the internal `graph`. Note that the transaction
+    /// which includes `outpoint` does not need to be in the `graph` or the `chain` for this to
+    /// return `Some(_)`.
     pub fn spent_by(&self, outpoint: OutPoint) -> Option<(&P, Txid)> {
         self.chain.spent_by(&self.graph, outpoint)
     }
@@ -481,7 +482,7 @@ impl<P> ChangeSet<P> {
             .any(|(_, new_pos)| new_pos.is_none())
     }
 
-    /// Appends the changes in `other` into self such that applying `self` afterwards has the same
+    /// Appends the changes in `other` into self such that applying `self` afterward has the same
     /// effect as sequentially applying the original `self` and `other`.
     pub fn append(&mut self, other: ChangeSet<P>)
     where

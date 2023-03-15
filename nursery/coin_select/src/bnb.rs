@@ -4,7 +4,7 @@ use super::*;
 pub enum BranchStrategy {
     /// We continue exploring subtrees of this node, starting with the inclusion branch.
     Continue,
-    /// We continue exploring ONY the omission branch of this node, skipping the inclusion branch.
+    /// We continue exploring ONLY the omission branch of this node, skipping the inclusion branch.
     SkipInclusion,
     /// We skip both the inclusion and omission branches of this node.
     SkipBoth,
@@ -54,7 +54,7 @@ impl<'c, S: Ord> Bnb<'c, S> {
     /// Turns our [`Bnb`] state into an iterator.
     ///
     /// `strategy` should assess our current selection/node and determine the branching strategy and
-    /// whether this selection is a candidate solution (if so, return the score of the selection).
+    /// whether this selection is a candidate solution (if so, return the selection score).
     pub fn into_iter<'f>(self, strategy: &'f DecideStrategy<'c, S>) -> BnbIter<'c, 'f, S> {
         BnbIter {
             state: self,
@@ -70,7 +70,7 @@ impl<'c, S: Ord> Bnb<'c, S> {
             let (index, candidate) = self.pool[pos];
 
             if self.selection.is_selected(index) {
-                // deselect last `pos`, so next round will check omission branch
+                // deselect the last `pos`, so the next round will check the omission branch
                 self.pool_pos = pos;
                 self.selection.deselect(index);
                 true
@@ -82,7 +82,7 @@ impl<'c, S: Ord> Bnb<'c, S> {
         })
     }
 
-    /// Continue down this branch, skip inclusion branch if specified.
+    /// Continue down this branch and skip the inclusion branch if specified.
     pub fn forward(&mut self, skip: bool) {
         let (index, candidate) = self.pool[self.pool_pos];
         self.rem_abs -= candidate.value;
@@ -93,7 +93,7 @@ impl<'c, S: Ord> Bnb<'c, S> {
         }
     }
 
-    /// Compare advertised score with current best. New best will be the smaller value. Return true
+    /// Compare the advertised score with the current best. The new best will be the smaller value. Return true
     /// if best is replaced.
     pub fn advertise_new_score(&mut self, score: S) -> bool {
         if score <= self.best_score {
@@ -108,7 +108,7 @@ pub struct BnbIter<'c, 'f, S> {
     state: Bnb<'c, S>,
     done: bool,
 
-    /// Check our current selection (node), and returns the branching strategy, alongside a score
+    /// Check our current selection (node) and returns the branching strategy alongside a score
     /// (if the current selection is a candidate solution).
     strategy: &'f DecideStrategy<'c, S>,
 }
@@ -133,7 +133,7 @@ impl<'c, 'f, S: Ord + Copy + Display> Iterator for BnbIter<'c, 'f, S> {
 
         debug_assert!(
             !strategy.will_continue() || self.state.pool_pos < self.state.pool.len(),
-            "Faulty strategy implementation! Strategy suggested that we continue traversing, however we have already reached the end of the candidates pool! pool_len={}, pool_pos={}",
+            "Faulty strategy implementation! Strategy suggested that we continue traversing, however, we have already reached the end of the candidates pool! pool_len={}, pool_pos={}",
             self.state.pool.len(), self.state.pool_pos,
         );
 
@@ -187,15 +187,15 @@ impl From<core::time::Duration> for BnbLimit {
 /// in Bitcoin Core).
 ///
 /// The differences are as follows:
-/// * In additional to working with effective values, we also work with absolute values.
-///   This way, we can use bounds of absolute values to enforce `min_absolute_fee` (which is used by
+/// * In addition to working with effective values, we also work with absolute values.
+///   This way, we can use bounds of the absolute values to enforce `min_absolute_fee` (which is used by
 ///   RBF), and `max_extra_target` (which can be used to increase the possible solution set, given
 ///   that the sender is okay with sending extra to the receiver).
 ///
 /// Murch's Master Thesis: <https://murch.one/wp-content/uploads/2016/11/erhardt2016coinselection.pdf>
 /// Bitcoin Core Implementation: <https://github.com/bitcoin/bitcoin/blob/23.x/src/wallet/coinselection.cpp#L65>
 ///
-/// TODO: Another optimization we could do is figure out candidate with smallest waste, and
+/// TODO: Another optimization we could do is figure out candidates with the smallest waste, and
 /// if we find a result with waste equal to this, we can just break.
 pub fn coin_select_bnb<L>(limit: L, selector: CoinSelector) -> Option<CoinSelector>
 where
@@ -203,7 +203,7 @@ where
 {
     let opts = selector.opts;
 
-    // prepare pool of candidates to select from:
+    // prepare the pool of candidates to select from:
     // * filter out candidates with negative/zero effective values
     // * sort candidates by descending effective value
     let pool = {
@@ -231,12 +231,12 @@ where
         let selected_abs = bnb.selection.selected_absolute_value();
         let selected_eff = bnb.selection.selected_effective_value();
 
-        // backtrack if remaining value is not enough to reach target
+        // backtrack if the remaining value is not enough to reach the target
         if selected_abs + bnb.rem_abs < target_abs || selected_eff + bnb.rem_eff < target_eff {
             return (BranchStrategy::SkipBoth, None);
         }
 
-        // backtrack if selected value already surpassed upper bounds
+        // backtrack if the selected value has already surpassed upper bounds
         if selected_abs > upper_bound_abs && selected_eff > upper_bound_eff {
             return (BranchStrategy::SkipBoth, None);
         }
@@ -244,7 +244,7 @@ where
         let selected_waste = bnb.selection.selected_waste();
 
         // when feerate decreases, waste without excess is guaranteed to increase with each
-        // selection. So if we have already surpassed best score, we can backtrack.
+        // selection. So if we have already surpassed the best score, we can backtrack.
         if feerate_decreases && selected_waste > bnb.best_score {
             return (BranchStrategy::SkipBoth, None);
         }
@@ -270,11 +270,11 @@ where
             }
         }
 
-        // check out inclusion branch first
+        // check out the inclusion branch first
         (BranchStrategy::Continue, None)
     };
 
-    // determine sum of absolute and effective values for current selection
+    // determine the sum of absolute and effective values for the current selection
     let (selected_abs, selected_eff) = selector.selected().fold((0, 0), |(abs, eff), (_, c)| {
         (
             abs + c.value,
@@ -376,7 +376,7 @@ mod test {
         );
     }
 
-    /// `cost_of_change` acts as the upper-bound in Bnb, we check whether these boundaries are
+    /// `cost_of_change` acts as the upper-bound in Bnb; we check whether these boundaries are
     /// enforced in code
     #[test]
     fn cost_of_change() {
@@ -412,7 +412,7 @@ mod test {
             (lowest_opts, highest_opts)
         };
 
-        // test lowest possible target we are able to select
+        // test lowest possible target we can select
         let lowest_eval = evaluate_bnb(CoinSelector::new(&candidates, &lowest_opts), 10_000);
         assert!(lowest_eval.is_ok());
         let lowest_eval = lowest_eval.unwrap();
@@ -426,7 +426,7 @@ mod test {
             0.0
         );
 
-        // test highest possible target we are able to select
+        // test the highest possible target we can select
         let highest_eval = evaluate_bnb(CoinSelector::new(&candidates, &highest_opts), 10_000);
         assert!(highest_eval.is_ok());
         let highest_eval = highest_eval.unwrap();
@@ -587,8 +587,8 @@ mod test {
         });
     }
 
-    /// For a decreasing feerate (longterm feerate is lower than effective feerate), we should
-    /// select less. For increasing feerate (longterm feerate is higher than effective feerate), we
+    /// For a decreasing feerate (long-term feerate is lower than effective feerate), we should
+    /// select less. For increasing feerate (long-term feerate is higher than effective feerate), we
     /// should select more.
     #[test]
     fn feerate_difference() {
@@ -639,7 +639,7 @@ mod test {
     ///     * We should only have `ExcessStrategy::ToDrain` when `drain_value >= min_drain_value`.
     /// * Fuzz
     ///     * Solution feerate should never be lower than target feerate
-    ///     * Solution fee should never be lower than `min_absolute_fee`
+    ///     * Solution fee should never be lower than `min_absolute_fee`.
     ///     * Preselected should always remain selected
     fn _todo() {}
 }

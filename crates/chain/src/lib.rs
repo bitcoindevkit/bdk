@@ -1,18 +1,18 @@
 //! This crate is a collection of core structures for [Bitcoin Dev Kit] (alpha release).
 //!
-//! The goal of this crate is give wallets the mechanisms needed to:
+//! The goal of this crate is to give wallets the mechanisms needed to:
 //!
 //! 1. Figure out what data they need to fetch.
-//! 2. Process that data in a way that never leads to inconsistent states.
-//! 3. Fully index that data and expose it so that it can be consumed without friction.
+//! 2. Process the data in a way that never leads to inconsistent states.
+//! 3. Fully index that data and expose it to be consumed without friction.
 //!
 //! Our design goals for these mechanisms are:
 //!
 //! 1. Data source agnostic -- nothing in `bdk_chain` cares about where you get data from or whether
-//!    you do it synchronously or asynchronously. If you know a fact about the blockchain you can just
-//!    tell `bdk_chain`'s APIs about it and that information will be integrated if it can be done
+//!    you do it synchronously or asynchronously. If you know a fact about the blockchain, you can just
+//!    tell `bdk_chain`'s APIs about it, and that information will be integrated, if it can be done
 //!    consistently.
-//! 2. Error free APIs.
+//! 2. Error-free APIs.
 //! 3. Data persistence agnostic -- `bdk_chain` does not care where you cache on-chain data, what you
 //!    cache or how you fetch it.
 //!
@@ -67,14 +67,14 @@ pub mod collections {
     pub use alloc::collections::{btree_map as hash_map, *};
 }
 
-// When we have std use `std`'s all collections
+// When we have std, use `std`'s all collections
 #[cfg(all(feature = "std", not(feature = "hashbrown")))]
 #[doc(hidden)]
 pub mod collections {
     pub use std::collections::{hash_map, *};
 }
 
-// With special feature `hashbrown` use `hashbrown`'s hash collections, and else from `alloc`.
+// With this special feature `hashbrown`, use `hashbrown`'s hash collections, and else from `alloc`.
 #[cfg(feature = "hashbrown")]
 #[doc(hidden)]
 pub mod collections {
@@ -85,5 +85,5 @@ pub mod collections {
     pub use hashbrown::hash_map;
 }
 
-/// How many confirmations are needed for a coinbase output to be spent
+/// How many confirmations are needed f or a coinbase output to be spent.
 pub const COINBASE_MATURITY: u32 = 100;

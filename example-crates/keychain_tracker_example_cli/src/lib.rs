@@ -51,20 +51,20 @@ pub struct Args<C: clap::Subcommand> {
 pub enum Commands<C: clap::Subcommand> {
     #[clap(flatten)]
     ChainSpecific(C),
-    /// Address generation and inspection
+    /// Address generation and inspection.
     Address {
         #[clap(subcommand)]
         addr_cmd: AddressCmd,
     },
-    /// Get the wallet balance
+    /// Get the wallet balance.
     Balance,
-    /// TxOut related commands
+    /// TxOut related commands.
     #[clap(name = "txout")]
     TxOut {
         #[clap(subcommand)]
         txout_cmd: TxOutCmd,
     },
-    /// Send coins to an address
+    /// Send coins to an address.
     Send {
         value: u64,
         address: Address,
@@ -123,9 +123,9 @@ impl core::fmt::Display for CoinSelectionAlgo {
 
 #[derive(Subcommand, Debug, Clone)]
 pub enum AddressCmd {
-    /// Get the next unused address
+    /// Get the next unused address.
     Next,
-    /// Get a new address regardless if the existing ones haven't been used
+    /// Get a new address regardless of the existing unused addresses.
     New,
     /// List all addresses
     List {
@@ -138,16 +138,16 @@ pub enum AddressCmd {
 #[derive(Subcommand, Debug, Clone)]
 pub enum TxOutCmd {
     List {
-        /// Return only spent outputs
+        /// Return only spent outputs.
         #[clap(short, long)]
         spent: bool,
-        /// Return only unspent outputs
+        /// Return only unspent outputs.
         #[clap(short, long)]
         unspent: bool,
-        /// Return only confirmed outputs
+        /// Return only confirmed outputs.
         #[clap(long)]
         confirmed: bool,
-        /// Return only unconfirmed outputs
+        /// Return only unconfirmed outputs.
         #[clap(long)]
         unconfirmed: bool,
     },
@@ -170,7 +170,7 @@ impl core::fmt::Display for Keychain {
     }
 }
 
-/// A structure defining output of a AddressCmd execution.
+/// A structure defining the output of an [`AddressCmd`]` execution.
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct AddrsOutput {
     keychain: String,
@@ -348,7 +348,7 @@ pub fn create_tx<P: ChainPosition>(
         CoinSelectionAlgo::BranchAndBound => {}
     }
 
-    // turn the txos we chose into a weight and value
+    // turn the txos we chose into weight and value
     let wv_candidates = candidates
         .iter()
         .map(|(plan, utxo)| {
@@ -420,7 +420,7 @@ pub fn create_tx<P: ChainPosition>(
     let mut coin_selector = CoinSelector::new(&wv_candidates, &cs_opts);
 
     // just select coins in the order provided until we have enough
-    // only use first result (least waste)
+    // only use the first result (least waste)
     let selection = match coin_select {
         CoinSelectionAlgo::BranchAndBound => {
             coin_select_bnb(Duration::from_secs(10), coin_selector.clone())
@@ -435,7 +435,7 @@ pub fn create_tx<P: ChainPosition>(
 
     if let Some(drain_value) = selection_meta.drain_value {
         change_output.value = drain_value;
-        // if the selection tells us to use change and the change value is sufficient we add it as an output
+        // if the selection tells us to use change and the change value is sufficient, we add it as an output
         outputs.push(change_output)
     }
 
@@ -464,7 +464,7 @@ pub fn create_tx<P: ChainPosition>(
         .collect::<Vec<_>>();
     let sighash_prevouts = Prevouts::All(&prevouts);
 
-    // first set tx values for plan so that we don't change them while signing
+    // first, set tx values for the plan so that we don't change them while signing
     for (i, (plan, _)) in selected_txos.iter().enumerate() {
         if let Some(sequence) = plan.required_sequence() {
             transaction.input[i].sequence = sequence
@@ -480,7 +480,7 @@ pub fn create_tx<P: ChainPosition>(
         let mut auth_data = bdk_tmp_plan::SatisfactionMaterial::default();
         assert!(
             !requirements.requires_hash_preimages(),
-            "can't have hash pre-images since we didn't provide any"
+            "can't have hash pre-images since we didn't provide any."
         );
         assert!(
             requirements.signatures.sign_with_keymap(
@@ -493,7 +493,7 @@ pub fn create_tx<P: ChainPosition>(
                 &mut auth_data,
                 &Secp256k1::default(),
             )?,
-            "we should have signed with this input"
+            "we should have signed with this input."
         );
 
         match plan.try_complete(&auth_data) {
@@ -511,7 +511,7 @@ pub fn create_tx<P: ChainPosition>(
             }
             bdk_tmp_plan::PlanState::Incomplete(_) => {
                 return Err(anyhow!(
-                    "we weren't able to complete the plan with our keys"
+                    "we weren't able to complete the plan with our keys."
                 ));
             }
         }
@@ -529,8 +529,8 @@ pub fn create_tx<P: ChainPosition>(
 pub fn handle_commands<C: clap::Subcommand, P>(
     command: Commands<C>,
     broadcast: impl FnOnce(&Transaction) -> Result<()>,
-    // we Mutexes around these not because we need them for a simple CLI app but to demonsrate how
-    // all the stuff we're doing can be thread safe and also not keep locks up over an IO bound.
+    // we Mutex around these not because we need them for a simple CLI app but to demonstrate how
+    // all the stuff we're doing can be made thread-safe and not keep locks up over an IO bound.
     tracker: &Mutex<KeychainTracker<Keychain, P>>,
     store: &Mutex<KeychainStore<Keychain, P>>,
     network: Network,
@@ -565,7 +565,7 @@ where
                 if let Some((change_derivation_changes, (change_keychain, index))) = change_info {
                     // We must first persist to disk the fact that we've got a new address from the
                     // change keychain so future scans will find the tx we're about to broadcast.
-                    // If we're unable to persist this then we don't want to broadcast.
+                    // If we're unable to persist this, then we don't want to broadcast.
                     let store = &mut *store.lock().unwrap();
                     store.append_changeset(&change_derivation_changes.into())?;
 
@@ -586,15 +586,15 @@ where
                     match tracker.insert_tx(transaction.clone(), P::unconfirmed()) {
                         Ok(changeset) => {
                             let store = &mut *store.lock().unwrap();
-                            // We know the tx is at least unconfirmed now. Note if persisting here
-                            // fails it's not a big deal since we can always find it again form
+                            // We know the tx is at least unconfirmed now. Note if persisting here fails,
+                            // it's not a big deal since we can always find it again form
                             // blockchain.
                             store.append_changeset(&changeset)?;
                             Ok(())
                         }
                         Err(e) => match e {
                             InsertTxError::Chain(e) => match e {
-                                // TODO: add insert_unconfirmed_tx to chain graph and sparse chain
+                                // TODO: add insert_unconfirmed_tx to the chaingraph and sparsechain
                                 sparse_chain::InsertTxError::TxTooHigh { .. } => unreachable!("we are inserting at unconfirmed position"),
                                 sparse_chain::InsertTxError::TxMovedUnexpectedly { txid, original_pos, ..} => Err(anyhow!("the tx we created {} has already been confirmed at block {:?}", txid, original_pos)),
                             },
@@ -605,7 +605,7 @@ where
                 Err(e) => {
                     let tracker = &mut *tracker.lock().unwrap();
                     if let Some((keychain, index)) = change_index {
-                        // We failed to broadcast so allow our change address to be used in the future
+                        // We failed to broadcast, so allow our change address to be used in the future
                         tracker.txout_index.unmark_used(&keychain, index);
                     }
                     Err(e)
@@ -622,8 +622,8 @@ where
 pub fn init<C: clap::Subcommand, P>() -> anyhow::Result<(
     Args<C>,
     KeyMap,
-    // These don't need to have mutexes around them but we want the cli example code to make it obvious how they
-    // are thread safe so this forces the example developer to show where they would lock and unlock things.
+    // These don't need to have mutexes around them, but we want the cli example code to make it obvious how they
+    // are thread-safe, forcing the example developers to show where they would lock and unlock things.
     Mutex<KeychainTracker<Keychain, P>>,
     Mutex<KeychainStore<Keychain, P>>,
 )>

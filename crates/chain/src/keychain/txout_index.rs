@@ -17,9 +17,9 @@ pub const BIP32_MAX_INDEX: u32 = (1 << 31) - 1;
 ///
 /// Descriptors are referenced by the provided keychain generic (`K`).
 ///
-/// Script pubkeys for a descriptor are revealed chronologically from index 0. I.e. If the last
-/// revealed index of a descriptor is 5, scripts of indices 0 to 4 are guaranteed to already be
-/// revealed. In addition to revealed scripts, we have a `lookahead` parameter for each keychain
+/// Script pubkeys for a descriptor are revealed chronologically from index 0. I.e., If the last
+/// revealed index of a descriptor is 5; scripts of indices 0 to 4 are guaranteed to be already
+/// revealed. In addition to revealed scripts, we have a `lookahead` parameter for each keychain,
 /// which defines the number of script pubkeys to store ahead of the last revealed index.
 ///
 /// Methods that could update the last revealed index will return [`DerivationAdditions`] to report
@@ -95,12 +95,12 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     /// the script pubkey's keychain and the [`DerivationAdditions`] returned will reflect the
     /// change.
     ///
-    /// Typically this method is used in two situations:
+    /// Typically, this method is used in two situations:
     ///
-    /// 1. After loading transaction data from disk you may scan over all the txouts to restore all
+    /// 1. After loading transaction data from the disk, you may scan over all the txouts to restore all
     /// your txouts.
-    /// 2. When getting new data from the chain you usually scan it before incorporating it into
-    /// your chain state (i.e. `SparseChain`, `ChainGraph`).
+    /// 2. When getting new data from the chain, you usually scan it before incorporating it into
+    /// your chain state (i.e., `SparseChain`, `ChainGraph`).
     ///
     /// See [`ForEachTxout`] for the types that support this.
     ///
@@ -113,7 +113,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
 
     /// Scan a single outpoint for a matching script pubkey.
     ///
-    /// If it matches the index will store and index it.
+    /// If it matches, this will store and index it.
     pub fn scan_txout(&mut self, op: OutPoint, txout: &TxOut) -> DerivationAdditions<K> {
         match self.inner.scan_txout(op, txout).cloned() {
             Some((keychain, index)) => self.reveal_to_target(&keychain, index).1,
@@ -126,12 +126,12 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
         &self.inner
     }
 
-    /// Return a reference to the internal map of keychain to descriptors.
+    /// Return a reference to the internal map of the keychain to descriptors.
     pub fn keychains(&self) -> &BTreeMap<K, Descriptor<DescriptorPublicKey>> {
         &self.keychains
     }
 
-    /// Add a keychain to the tracker's `txout_index` with a descriptor to derive addresses for it.
+    /// Add a keychain to the tracker's `txout_index` with a descriptor to derive addresses.
     ///
     /// Adding a keychain means you will be able to derive new script pubkeys under that keychain
     /// and the txout index will discover transaction outputs with those script pubkeys.
@@ -149,7 +149,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
 
     /// Return the lookahead setting for each keychain.
     ///
-    /// Refer to [`set_lookahead`] for a deeper explanation on `lookahead`.
+    /// Refer to [`set_lookahead`] for a deeper explanation of the `lookahead`.
     ///
     /// [`set_lookahead`]: Self::set_lookahead
     pub fn lookaheads(&self) -> &BTreeMap<K, u32> {
@@ -173,7 +173,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     ///
     /// # Panics
     ///
-    /// This will panic if `keychain` does not exist.
+    /// This will panic if the `keychain` does not exist.
     ///
     /// [`scan`]: Self::scan
     /// [`scan_txout`]: Self::scan_txout
@@ -249,12 +249,12 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
             .collect()
     }
 
-    /// Generates a script pubkey iterator for the given `keychain`'s descriptor (if exists). The
+    /// Generates a script pubkey iterator for the given `keychain`'s descriptor (if it exists). The
     /// iterator iterates over all derivable scripts of the keychain's descriptor.
     ///
     /// # Panics
     ///
-    /// This will panic if `keychain` does not exist.
+    /// This will panic if the `keychain` does not exist.
     pub fn spks_of_keychain(&self, keychain: &K) -> impl Iterator<Item = (u32, Script)> + Clone {
         let descriptor = self
             .keychains
@@ -288,7 +288,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
             .map(|((_, derivation_index), spk)| (*derivation_index, spk))
     }
 
-    /// Get the next derivation index for `keychain`. This is the index after the last revealed
+    /// Get the next derivation index for `keychain`. The next index is the index after the last revealed
     /// derivation index.
     ///
     /// The second field in the returned tuple represents whether the next derivation index is new.
@@ -306,20 +306,20 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
         let descriptor = self.keychains.get(keychain).expect("keychain must exist");
         let last_index = self.last_revealed.get(keychain).cloned();
 
-        // we can only get the next index if wildcard exists
+        // we can only get the next index if the wildcard exists.
         let has_wildcard = descriptor.has_wildcard();
 
         match last_index {
-            // if there is no index, next_index is always 0
+            // if there is no index, next_index is always 0.
             None => (0, true),
-            // descriptors without wildcards can only have one index
+            // descriptors without wildcards can only have one index.
             Some(_) if !has_wildcard => (0, false),
-            // derivation index must be < 2^31 (BIP-32)
+            // derivation index must be < 2^31 (BIP-32).
             Some(index) if index > BIP32_MAX_INDEX => {
                 unreachable!("index is out of bounds")
             }
             Some(index) if index == BIP32_MAX_INDEX => (index, false),
-            // get next derivation index
+            // get the next derivation index.
             Some(index) => (index + 1, true),
         }
     }
@@ -361,13 +361,13 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     /// Reveals script pubkeys of the `keychain`'s descriptor **up to and including** the
     /// `target_index`.
     ///
-    /// If the `target_index` cannot be reached (due to the descriptor having no wildcard, and/or
-    /// the `target_index` is in the hardened index range), this method will do a best-effort and
+    /// If the `target_index` cannot be reached (due to the descriptor having no wildcard and/or
+    /// the `target_index` is in the hardened index range), this method will make a best-effort and
     /// reveal up to the last possible index.
     ///
-    /// This returns an iterator of newly revealed indices (along side their scripts), and a
-    /// [`DerivationAdditions`] which reports updates to the latest revealed index. If no new script
-    /// pubkeys are revealed, both of these will be empty.
+    /// This returns an iterator of newly revealed indices (alongside their scripts) and a
+    /// [`DerivationAdditions`], which reports updates to the latest revealed index. If no new script
+    /// pubkeys are revealed, then both of these will be empty.
     ///
     /// # Panics
     ///
@@ -385,12 +385,12 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
         let next_reveal_index = self.last_revealed.get(keychain).map_or(0, |v| *v + 1);
         let lookahead = self.lookahead.get(keychain).map_or(0, |v| *v);
 
-        // if we are able to reveal new indexes, the latest revealed index goes here
+        // if we can reveal new indexes, the latest revealed index goes here
         let mut revealed_index = None;
 
-        // if target is already surpassed, we have nothing to reveal
+        // if the target is already surpassed, we have nothing to reveal
         if next_reveal_index <= target_index
-            // if target is already stored (due to lookahead), this can be our new revealed index
+            // if the target is already stored (due to lookahead), this can be our newly revealed index
             && target_index < next_reveal_index + lookahead
         {
             revealed_index = Some(target_index);
@@ -460,13 +460,13 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
         ((next_index, script), additions)
     }
 
-    /// Gets the next unused script pubkey in the keychain. I.e. the script pubkey with the lowest
+    /// Gets the next unused script pubkey in the keychain. I.e., the script pubkey with the lowest
     /// index that has not been used yet.
     ///
     /// This will derive and reveal a new script pubkey if no more unused script pubkeys exist.
     ///
-    /// If the descriptor has no wildcard and already has a used script pubkey, or if a descriptor
-    /// has used all scripts up to the derivation bounds, the last derived script pubkey will be
+    /// If the descriptor has no wildcard and already has a used script pubkey or if a descriptor
+    /// has used all scripts up to the derivation bounds, then the last derived script pubkey will be
     /// returned.
     ///
     /// # Panics
@@ -487,10 +487,10 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
         }
     }
 
-    /// Marks the script pubkey at `index` as used even though it hasn't seen an output with it.
+    /// Marks the script pubkey at `index` as used even though the tracker hasn't seen an output with it.
     /// This only has an effect when the `index` had been added to `self` already and was unused.
     ///
-    /// Returns whether the `index` was originally present as `unused`.
+    /// Returns whether the `index` was initially present as `unused`.
     ///
     /// This is useful when you want to reserve a script pubkey for something but don't want to add
     /// the transaction output using it to the index yet. Other callers will consider `index` on
@@ -504,7 +504,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     /// Undoes the effect of [`mark_used`]. Returns whether the `index` is inserted back into
     /// `unused`.
     ///
-    /// Note that if `self` has scanned an output with this script pubkey then this will have no
+    /// Note that if `self` has scanned an output with this script pubkey, then this will have no
     /// effect.
     ///
     /// [`mark_used`]: Self::mark_used
@@ -512,7 +512,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
         self.inner.unmark_used(&(keychain.clone(), index))
     }
 
-    /// Iterates over all unused script pubkeys for a `keychain` that have been stored in the index.
+    /// Iterates over all unused script pubkeys for a `keychain` stored in the index.
     pub fn unused_spks_of_keychain(
         &self,
         keychain: &K,
