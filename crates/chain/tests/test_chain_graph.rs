@@ -12,6 +12,10 @@ use bitcoin::{OutPoint, PackedLockTime, Script, Sequence, Transaction, TxIn, TxO
 
 #[test]
 fn test_spent_by() {
+    // Creating three transactions:
+    // tx1
+    // tx2: spends from `op` (tx1.txid():0)
+    // tx3: spends from `op` (tx1.txid():0)
     let tx1 = Transaction {
         version: 0x01,
         lock_time: PackedLockTime(0),
@@ -43,6 +47,9 @@ fn test_spent_by() {
         output: vec![],
     };
 
+    // We create two checkpoints:
+    // - cg1, containing tx1 and tx2
+    // - cg2, containing tx1 and tx3
     let mut cg1 = ChainGraph::default();
     let _ = cg1
         .insert_tx(tx1, TxHeight::Unconfirmed)
@@ -55,6 +62,7 @@ fn test_spent_by() {
         .insert_tx(tx3.clone(), TxHeight::Unconfirmed)
         .expect("should insert");
 
+    // We query cg1 and cg2 to get the tx spending `op`
     assert_eq!(cg1.spent_by(op), Some((&TxHeight::Unconfirmed, tx2.txid())));
     assert_eq!(cg2.spent_by(op), Some((&TxHeight::Unconfirmed, tx3.txid())));
 }
@@ -650,4 +658,57 @@ fn test_evict_descendants() {
         .insert_tx_preview(tx_conflict, TxHeight::Unconfirmed)
         .expect_err("must fail due to conflicts");
     assert!(matches!(err, InsertTxError::UnresolvableConflict(_)));
+}
+
+#[test]
+fn test_chain_graph_relevant_changeset() {
+    let tx_a = Transaction {
+        version: 0x01,
+        lock_time: PackedLockTime(0),
+        input: vec![],
+        output: vec![TxOut::default()],
+    };
+
+    let tx_b = Transaction {
+        version: 0x01,
+        lock_time: PackedLockTime(0),
+        input: vec![TxIn {
+            previous_output: OutPoint::new(tx_a.txid(), 0),
+            script_sig: Script::new(),
+            sequence: Sequence::default(),
+            witness: Witness::new(),
+        }],
+        output: vec![TxOut::default()],
+    };
+
+    let cg1 = ChainGraph::default();
+
+    // cg2 has two txs, but only tx_a is relevant
+    let cg2 = {
+        let mut cg = ChainGraph::default();
+        let _ = cg
+            .insert_tx(tx_a.clone(), TxHeight::Unconfirmed)
+            .expect("should insert tx");
+        let _ = cg
+            .insert_tx(tx_b, TxHeight::Unconfirmed)
+            .expect("should insert tx");
+        cg
+    };
+
+    let changeset = ChangeSet::<TxHeight> {
+        chain: sparse_chain::ChangeSet {
+            checkpoints: Default::default(),
+            txids: [(tx_a.txid(), Some(TxHeight::Unconfirmed))].into(),
+        },
+        graph: tx_graph::Additions {
+            tx: [tx_a.clone()].into(),
+            txout: [].into(),
+        },
+    };
+
+    assert_eq!(
+        cg1.determine_relevant_changeset(cg2, |tx: &Transaction| { tx.txid() == tx_a.txid() }),
+        Ok(changeset),
+        "tx_b shouldn't be in the txgraph",
+    );
 }
