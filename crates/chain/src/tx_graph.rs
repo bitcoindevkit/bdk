@@ -289,6 +289,23 @@ impl TxGraph {
         additions
     }
 
+    /// Previews the resultant relevant [`Additions`] when [`Self`] is updated against the `update` graph.
+    ///
+    /// The [`Additions`] would be the set difference of the relevant `update` and `self` (transactions that
+    /// exist in `update` and are relevant, but not in `self`).
+    pub fn determine_relevant_additions<F>(&self, mut update: TxGraph, is_relevant: F) -> Additions
+    where
+        F: Fn(&Transaction) -> bool,
+    {
+        // TODO: this always considers partial txs as relevant
+        update.txs.retain(|_, tx_node| match tx_node {
+            TxNode::Whole(tx) => is_relevant(tx),
+            _ => true,
+        });
+
+        self.determine_additions(&update)
+    }
+
     /// Returns the resultant [`Additions`] if the given transaction is inserted. Does not actually
     /// mutate [`Self`].
     ///
