@@ -15,10 +15,6 @@ members = [
     "nursery/coin_select"
 ]
 
-#exclude = [
-#    "example-crates/wallet_esplora_tor",
-#]
-
 default-members = [
     "crates/bdk",
     "crates/chain",
