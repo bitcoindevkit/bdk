@@ -12,6 +12,13 @@ use futures::stream::{FuturesOrdered, TryStreamExt};
 
 use crate::map_confirmation_time;
 
+/// Trait to extend [`esplora_client::AsyncClient`] functionality.
+///
+/// This is the async version of [`EsploraExt`]. Refer to
+/// [crate-level documentation] for more.
+///
+/// [`EsploraExt`]: crate::EsploraExt
+/// [crate-level documentation]: crate
 #[cfg(feature = "async")]
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
