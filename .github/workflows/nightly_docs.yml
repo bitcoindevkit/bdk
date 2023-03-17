@@ -9,22 +9,18 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@v2
-      - name: Setup cache
-        uses: actions/cache@v2
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: nightly-docs-${{ hashFiles('**/Cargo.toml','**/Cargo.lock') }}
       - name: Set default toolchain
         run: rustup default nightly-2022-12-14
       - name: Set profile
         run: rustup set profile minimal
       - name: Update toolchain
         run: rustup update
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2.2.1
       - name: Build docs
-        run: cargo rustdoc --verbose --features=compiler,electrum,esplora,use-esplora-blocking,compact_filters,rpc,key-value-db,sqlite,all-keys,verify,hardware-signer -- --cfg docsrs -Dwarnings
+        run: cargo doc --no-deps
+        env:
+          RUSTDOCFLAGS: '--cfg docsrs -Dwarnings'
       - name: Upload artifact
         uses: actions/upload-artifact@v2
         with:

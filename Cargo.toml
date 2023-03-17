@@ -1,175 +1,38 @@
-[package]
-name = "bdk"
-version = "0.26.0"
-edition = "2018"
-authors = ["Alekos Filini <alekos.filini@gmail.com>", "Riccardo Casatta <riccardo@casatta.it>"]
-homepage = "https://bitcoindevkit.org"
-repository = "https://github.com/bitcoindevkit/bdk"
-documentation = "https://docs.rs/bdk"
-description = "A modern, lightweight, descriptor-based wallet library"
-keywords = ["bitcoin", "wallet", "descriptor", "psbt"]
-readme = "README.md"
-license = "MIT OR Apache-2.0"
-
-[dependencies]
-bdk-macros = "^0.6"
-log = "^0.4"
-miniscript = { version = "8.0", features = ["serde"] }
-bitcoin = { version = "0.29.1", features = ["serde", "base64", "rand"] }
-serde = { version = "^1.0", features = ["derive"] }
-serde_json = { version = "^1.0" }
-rand = "^0.8"
-
-# Optional dependencies
-sled = { version = "0.34", optional = true }
-electrum-client = { version = "0.12", optional = true }
-esplora-client = { version = "0.3", default-features = false, optional = true }
-rusqlite = { version = "0.27.0", optional = true }
-ahash = { version = "0.7.6", optional = true }
-futures = { version = "0.3", optional = true }
-async-trait = { version = "0.1", optional = true }
-rocksdb = { version = "0.14", default-features = false, features = ["snappy"], optional = true }
-cc = { version = ">=1.0.64", optional = true }
-socks = { version = "0.3", optional = true }
-hwi = { version = "0.4.0", optional = true, features = [ "use-miniscript"] }
-
-bip39 = { version = "1.0.1", optional = true }
-bitcoinconsensus = { version = "0.19.0-3", optional = true }
-
-# Needed by bdk_blockchain_tests macro and the `rpc` feature
-bitcoincore-rpc = { version = "0.16", optional = true }
-
-# Needed by esplora_backend_with_tor example
-libtor = { version = "47.8.0+0.4.7.x", optional = true }
-
-# Platform-specific dependencies
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-tokio = { version = "1", features = ["rt", "macros"] }
-
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-getrandom = "0.2"
-async-trait = "0.1"
-js-sys = "0.3"
-
-[features]
-minimal = []
-compiler = ["miniscript/compiler"]
-verify = ["bitcoinconsensus"]
-default = ["key-value-db", "electrum"]
-sqlite = ["rusqlite", "ahash"]
-sqlite-bundled = ["sqlite", "rusqlite/bundled"]
-compact_filters = ["rocksdb", "socks", "cc"]
-key-value-db = ["sled"]
-all-keys = ["keys-bip39"]
-keys-bip39 = ["bip39"]
-rpc = ["bitcoincore-rpc"]
-hardware-signer = ["hwi"]
-
-# We currently provide mulitple implementations of `Blockchain`, all are
-# blocking except for the `EsploraBlockchain` which can be either async or
-# blocking, depending on the HTTP client in use.
-#
-# - Users wanting asynchronous HTTP calls should enable `async-interface` to get
-#   access to the asynchronous method implementations. Then, if Esplora is wanted,
-#   enable the `use-esplora-async` feature.
-# - Users wanting blocking HTTP calls can use any of the other blockchain
-#   implementations (`compact_filters`, `electrum`, or `esplora`). Users wanting to
-#   use Esplora should enable the `use-esplora-blocking` feature.
-#
-# WARNING: Please take care with the features below, various combinations will
-# fail to build. We cannot currently build `bdk` with `--all-features`.
-async-interface = ["async-trait"]
-electrum = ["electrum-client"]
-# MUST ALSO USE `--no-default-features`.
-use-esplora-async = ["esplora", "esplora-client/async", "futures"]
-use-esplora-blocking = ["esplora", "esplora-client/blocking"]
-# Deprecated aliases
-use-esplora-reqwest = ["use-esplora-async"]
-use-esplora-ureq = ["use-esplora-blocking"]
-# Typical configurations will not need to use `esplora` feature directly.
-esplora = []
-
-# Use below feature with `use-esplora-async` to enable reqwest default TLS support
-reqwest-default-tls = ["esplora-client/async-https"]
-
-# Debug/Test features
-test-blockchains = ["bitcoincore-rpc", "electrum-client"]
-test-electrum = ["electrum", "electrsd/electrs_0_8_10", "electrsd/bitcoind_22_0", "test-blockchains"]
-test-rpc = ["rpc", "electrsd/electrs_0_8_10", "electrsd/bitcoind_22_0", "test-blockchains"]
-test-rpc-legacy = ["rpc", "electrsd/electrs_0_8_10", "electrsd/bitcoind_0_20_0", "test-blockchains"]
-test-esplora = ["electrsd/legacy", "electrsd/esplora_a33e97e1", "electrsd/bitcoind_22_0", "test-blockchains"]
-test-md-docs = ["electrum"]
-test-hardware-signer = ["hardware-signer"]
-
-# This feature is used to run `cargo check` in our CI targeting wasm. It's not recommended
-# for libraries to explicitly include the "getrandom/js" feature, so we only do it when
-# necessary for running our CI. See: https://docs.rs/getrandom/0.2.8/getrandom/#webassembly-support
-dev-getrandom-wasm = ["getrandom/js"]
-
-[dev-dependencies]
-lazy_static = "1.4"
-env_logger = "0.7"
-electrsd = "0.21"
-# Move back to importing from rust-bitcoin once https://github.com/rust-bitcoin/rust-bitcoin/pull/1342 is released
-base64 = "^0.13"
-assert_matches = "1.5.0"
-
-[[example]]
-name = "compact_filters_balance"
-required-features = ["compact_filters"]
-
-[[example]]
-name = "miniscriptc"
-path = "examples/compiler.rs"
-required-features = ["compiler"]
-
-[[example]]
-name = "policy"
-path = "examples/policy.rs"
-
-[[example]]
-name = "rpcwallet"
-path = "examples/rpcwallet.rs"
-required-features = ["keys-bip39", "key-value-db", "rpc", "electrsd/bitcoind_22_0"]
-
-[[example]]
-name = "psbt_signer"
-path = "examples/psbt_signer.rs"
-required-features = ["electrum"]
-
-[[example]]
-name = "hardware_signer"
-path = "examples/hardware_signer.rs"
-required-features = ["electrum", "hardware-signer"]
-
-[[example]]
-name = "electrum_backend"
-path = "examples/electrum_backend.rs"
-required-features = ["electrum"]
-
-[[example]]
-name = "esplora_backend_synchronous"
-path = "examples/esplora_backend_synchronous.rs"
-required-features = ["use-esplora-blocking"]
-
-[[example]]
-name = "esplora_backend_asynchronous"
-path = "examples/esplora_backend_asynchronous.rs"
-required-features = ["use-esplora-async", "reqwest-default-tls", "async-interface"]
-
-[[example]]
-name = "esplora_backend_with_tor"
-path = "examples/esplora_backend_with_tor.rs"
-required-features = ["use-esplora-blocking", "libtor"]
-
-[[example]]
-name = "mnemonic_to_descriptors"
-path = "examples/mnemonic_to_descriptors.rs"
-required-features = ["all-keys"]
-
 [workspace]
-members = ["macros"]
-[package.metadata.docs.rs]
-features = ["compiler", "electrum", "esplora", "use-esplora-blocking", "compact_filters", "rpc", "key-value-db", "sqlite", "all-keys", "verify", "hardware-signer"]
-# defines the configuration attribute `docsrs`
-rustdoc-args = ["--cfg", "docsrs"]
+members = [
+    "crates/bdk",
+    "crates/chain",
+    "crates/file_store",
+    "crates/electrum",
+    "example-crates/keychain_tracker_electrum",
+    "example-crates/keychain_tracker_esplora",
+    "example-crates/keychain_tracker_example_cli",
+    "example-crates/wallet_electrum",
+    "example-crates/wallet_esplora",
+    "example-crates/wallet_esplora_async",
+    "example-crates/wallet_esplora_tor",
+    "nursery/tmp_plan",
+    "nursery/coin_select"
+]
+
+#exclude = [
+#    "example-crates/wallet_esplora_tor",
+#]
+
+default-members = [
+    "crates/bdk",
+    "crates/chain",
+    "crates/file_store",
+    "crates/electrum",
+    "example-crates/keychain_tracker_electrum",
+    "example-crates/keychain_tracker_esplora",
+    "example-crates/keychain_tracker_example_cli",
+    "example-crates/wallet_electrum",
+    "example-crates/wallet_esplora",
+    "example-crates/wallet_esplora_async",
+    "nursery/tmp_plan",
+    "nursery/coin_select"
+]
+
+[workspace.package]
+authors = ["Bitcoin Dev Kit Developers"]
