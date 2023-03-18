@@ -63,7 +63,7 @@ pub struct KeychainTxOutIndex<K> {
     inner: SpkTxOutIndex<(K, u32)>,
     // descriptors of each keychain
     keychains: BTreeMap<K, Descriptor<DescriptorPublicKey>>,
-    // last stored indexes
+    // last revealed indexes
     last_revealed: BTreeMap<K, u32>,
     // lookahead settings for each keychain
     lookahead: BTreeMap<K, u32>,
@@ -381,40 +381,39 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
         let has_wildcard = descriptor.has_wildcard();
 
         let target_index = if has_wildcard { target_index } else { 0 };
-        let next_store_index = self.next_store_index(keychain);
         let next_reveal_index = self.last_revealed.get(keychain).map_or(0, |v| *v + 1);
         let lookahead = self.lookahead.get(keychain).map_or(0, |v| *v);
 
-        // if we can reveal new indexes, the latest revealed index goes here
-        let mut revealed_index = None;
+        debug_assert_eq!(
+            next_reveal_index + lookahead,
+            self.next_store_index(keychain)
+        );
 
-        // if the target is already surpassed, we have nothing to reveal
-        if next_reveal_index <= target_index
-            // if the target is already stored (due to lookahead), this can be our newly revealed index
-            && target_index < next_reveal_index + lookahead
-        {
-            revealed_index = Some(target_index);
+        // if we need to reveal new indices, the latest revealed index goes here
+        let mut reveal_to_index = None;
+
+        // if the target is not yet revealed, but is already stored (due to lookahead), we need to
+        // set the `reveal_to_index` as target here (as the `for` loop below only updates
+        // `reveal_to_index` for indexes that are NOT stored)
+        if next_reveal_index <= target_index && target_index < next_reveal_index + lookahead {
+            reveal_to_index = Some(target_index);
         }
 
         // we range over indexes that are not stored
         let range = next_reveal_index + lookahead..=target_index + lookahead;
-
         for (new_index, new_spk) in range_descriptor_spks(Cow::Borrowed(descriptor), range) {
-            // no need to store if already stored
-            if new_index >= next_store_index {
-                let _inserted = self
-                    .inner
-                    .insert_spk((keychain.clone(), new_index), new_spk);
-                debug_assert!(_inserted, "must not have existing spk",);
-            }
+            let _inserted = self
+                .inner
+                .insert_spk((keychain.clone(), new_index), new_spk);
+            debug_assert!(_inserted, "must not have existing spk",);
 
             // everything after `target_index` is stored for lookahead only
             if new_index <= target_index {
-                revealed_index = Some(new_index);
+                reveal_to_index = Some(new_index);
             }
         }
 
-        match revealed_index {
+        match reveal_to_index {
             Some(index) => {
                 let _old_index = self.last_revealed.insert(keychain.clone(), index);
                 debug_assert!(_old_index < Some(index));

@@ -7,7 +7,7 @@ use bdk_chain::{
     keychain::{DerivationAdditions, KeychainTxOutIndex},
 };
 
-use bitcoin::{secp256k1::Secp256k1, Script, Transaction, TxOut};
+use bitcoin::{secp256k1::Secp256k1, OutPoint, Script, Transaction, TxOut};
 use miniscript::{Descriptor, DescriptorPublicKey};
 
 #[derive(Clone, Debug, PartialEq, Eq, Ord, PartialOrd)]
@@ -210,13 +210,54 @@ fn test_lookahead() {
             last_internal_index as usize + 1,
         );
     }
+}
 
-    // when:
-    // - scanning txouts with spks above last stored index
-    // expect:
-    // - cached scripts count should increase as expected
-    // - last stored index should increase as expected
-    // TODO!
+// when:
+// - scanning txouts with spks above last stored index
+// expect:
+// - last revealed index should increase as expected
+// - last used index should change as expected
+#[test]
+fn test_scan_with_lookahead() {
+    let (mut txout_index, external_desc, _) = init_txout_index();
+    txout_index.set_lookahead_for_all(10);
+
+    let spks: BTreeMap<u32, Script> = [0, 10, 20, 30]
+        .into_iter()
+        .map(|i| (i, external_desc.at_derivation_index(i).script_pubkey()))
+        .collect();
+
+    for (&spk_i, spk) in &spks {
+        let op = OutPoint::new(h!("fake tx"), spk_i);
+        let txout = TxOut {
+            script_pubkey: spk.clone(),
+            value: 0,
+        };
+
+        let additions = txout_index.scan_txout(op, &txout);
+        assert_eq!(
+            additions.as_inner(),
+            &[(TestKeychain::External, spk_i)].into()
+        );
+        assert_eq!(
+            txout_index.last_revealed_index(&TestKeychain::External),
+            Some(spk_i)
+        );
+        assert_eq!(
+            txout_index.last_used_index(&TestKeychain::External),
+            Some(spk_i)
+        );
+    }
+
+    // now try with index 41 (lookahead surpassed), we expect that the txout to not be indexed
+    let spk_41 = external_desc.at_derivation_index(41).script_pubkey();
+    let op = OutPoint::new(h!("fake tx"), 41);
+    let txout = TxOut {
+        script_pubkey: spk_41,
+        value: 0,
+    };
+    let additions = txout_index.scan_txout(op, &txout);
+    assert!(additions.is_empty());
 }
 
 #[test]
