@@ -28,7 +28,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let address = wallet.get_address(AddressIndex::New);
     println!("Generated Address: {}", address);
 
-    let balance = wallet.get_balance();
+    let balance = wallet.get_balance(false);
     println!("Wallet balance before syncing: {} sats", balance.total());
 
     print!("Syncing...");
@@ -66,7 +66,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     wallet.apply_update(update)?;
     wallet.commit()?;
 
-    let balance = wallet.get_balance();
+    let balance = wallet.get_balance(false);
     println!("Wallet balance after syncing: {} sats", balance.total());
 
     if balance.total() < SEND_AMOUNT {

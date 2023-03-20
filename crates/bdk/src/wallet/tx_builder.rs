@@ -97,6 +97,7 @@ impl TxBuilderContext for BumpFee {}
 /// // non-chaining
 /// let (psbt2, details) = {
 ///     let mut builder = wallet.build_tx();
+///     builder.include_reserved_utxos(true);
 ///     builder.ordering(TxOrdering::Untouched);
 ///     for addr in &[addr1, addr2] {
 ///         builder.add_recipient(addr.script_pubkey(), 50_000);
@@ -150,6 +151,7 @@ pub(crate) struct TxParams {
     pub(crate) bumping_fee: Option<PreviousFee>,
     pub(crate) current_height: Option<LockTime>,
     pub(crate) allow_dust: bool,
+    pub(crate) include_reserved_utxos: bool,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -274,12 +276,20 @@ impl<'a, D, Cs: CoinSelectionAlgorithm, Ctx: TxBuilderContext> TxBuilder<'a, D, 
     ///
     /// These have priority over the "unspendable" utxos, meaning that if a utxo is present both in
     /// the "utxos" and the "unspendable" list, it will be spent.
-    pub fn add_utxos(&mut self, outpoints: &[OutPoint]) -> Result<&mut Self, Error> {
+    pub fn add_utxos(
+        &mut self,
+        outpoints: &[OutPoint],
+        include_reserved_utxos: bool,
+    ) -> Result<&mut Self, Error> {
         {
             let wallet = self.wallet.borrow();
             let utxos = outpoints
                 .iter()
-                .map(|outpoint| wallet.get_utxo(*outpoint).ok_or(Error::UnknownUtxo))
+                .map(|outpoint| {
+                    wallet
+                        .get_utxo(*outpoint, include_reserved_utxos)
+                        .ok_or(Error::UnknownUtxo)
+                })
                 .collect::<Result<Vec<_>, _>>()?;
 
             for utxo in utxos {
@@ -299,8 +309,12 @@ impl<'a, D, Cs: CoinSelectionAlgorithm, Ctx: TxBuilderContext> TxBuilder<'a, D, 
     ///
     /// These have priority over the "unspendable" utxos, meaning that if a utxo is present both in
     /// the "utxos" and the "unspendable" list, it will be spent.
-    pub fn add_utxo(&mut self, outpoint: OutPoint) -> Result<&mut Self, Error> {
-        self.add_utxos(&[outpoint])
+    pub fn add_utxo(
+        &mut self,
+        outpoint: OutPoint,
+        include_reserved_utxos: bool,
+    ) -> Result<&mut Self, Error> {
+        self.add_utxos(&[outpoint], include_reserved_utxos)
     }
 
     /// Add a foreign UTXO i.e. a UTXO not owned by this wallet.
@@ -574,6 +588,13 @@ impl<'a, D, Cs: CoinSelectionAlgorithm, Ctx: TxBuilderContext> TxBuilder<'a, D, 
     /// **Note**: by avoiding a dust limit check you may end up with a transaction that is non-standard.
     pub fn allow_dust(&mut self, allow_dust: bool) -> &mut Self {
         self.params.allow_dust = allow_dust;
+        self
+    }
+
+    /// Specifies whether UTXOs used by previously built but not yet broadcasted
+    /// transactions can be used in the current transaction building process
+    pub fn include_reserved_utxos(&mut self, include_reserved_utxos: bool) -> &mut Self {
+        self.params.include_reserved_utxos = include_reserved_utxos;
         self
     }
 }

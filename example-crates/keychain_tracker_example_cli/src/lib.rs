@@ -57,7 +57,10 @@ pub enum Commands<C: clap::Subcommand> {
         addr_cmd: AddressCmd,
     },
     /// Get the wallet balance.
-    Balance,
+    Balance {
+        #[clap(long)]
+        include_reserved_utxos: bool,
+    },
     /// TxOut related commands.
     #[clap(name = "txout")]
     TxOut {
@@ -67,6 +70,8 @@ pub enum Commands<C: clap::Subcommand> {
     /// Send coins to an address.
     Send {
         value: u64,
+        #[clap(long)]
+        include_reserved_utxos: bool,
         address: Address,
         #[clap(short, default_value = "largest-first")]
         coin_select: CoinSelectionAlgo,
@@ -241,18 +246,21 @@ where
     }
 }
 
-pub fn run_balance_cmd<P: ChainPosition>(tracker: &Mutex<KeychainTracker<Keychain, P>>) {
+pub fn run_balance_cmd<P: ChainPosition>(
+    tracker: &Mutex<KeychainTracker<Keychain, P>>,
+    include_reserved_utxos: bool,
+) {
     let tracker = tracker.lock().unwrap();
-    let (confirmed, unconfirmed) =
-        tracker
-            .full_utxos()
-            .fold((0, 0), |(confirmed, unconfirmed), (_, utxo)| {
-                if utxo.chain_position.height().is_confirmed() {
-                    (confirmed + utxo.txout.value, unconfirmed)
-                } else {
-                    (confirmed, unconfirmed + utxo.txout.value)
-                }
-            });
+    let (confirmed, unconfirmed) = tracker.full_utxos(include_reserved_utxos).fold(
+        (0, 0),
+        |(confirmed, unconfirmed), (_, utxo)| {
+            if utxo.chain_position.height().is_confirmed() {
+                (confirmed + utxo.txout.value, unconfirmed)
+            } else {
+                (confirmed, unconfirmed + utxo.txout.value)
+            }
+        },
+    );
 
     println!("confirmed: {}", confirmed);
     println!("unconfirmed: {}", unconfirmed);
@@ -274,7 +282,7 @@ pub fn run_txo_cmd<K: Debug + Clone + Ord, P: ChainPosition>(
             #[allow(clippy::type_complexity)] // FIXME
             let txouts: Box<dyn Iterator<Item = (&(K, u32), FullTxOut<P>)>> = match (unspent, spent)
             {
-                (true, false) => Box::new(tracker.full_utxos()),
+                (true, false) => Box::new(tracker.full_utxos(false)),
                 (false, true) => Box::new(
                     tracker
                         .full_txouts()
@@ -315,6 +323,7 @@ pub fn run_txo_cmd<K: Debug + Clone + Ord, P: ChainPosition>(
 #[allow(clippy::type_complexity)] // FIXME
 pub fn create_tx<P: ChainPosition>(
     value: u64,
+    include_reserved_utxos: bool,
     address: Address,
     coin_select: CoinSelectionAlgo,
     keychain_tracker: &mut KeychainTracker<Keychain, P>,
@@ -331,7 +340,8 @@ pub fn create_tx<P: ChainPosition>(
     };
 
     // TODO use planning module
-    let mut candidates = planned_utxos(keychain_tracker, &assets).collect::<Vec<_>>();
+    let mut candidates =
+        planned_utxos(keychain_tracker, &assets, include_reserved_utxos).collect::<Vec<_>>();
 
     // apply coin selection algorithm
     match coin_select {
@@ -543,8 +553,10 @@ where
     match command {
         // TODO: Make these functions return stuffs
         Commands::Address { addr_cmd } => run_address_cmd(tracker, store, addr_cmd, network),
-        Commands::Balance => {
-            run_balance_cmd(tracker);
+        Commands::Balance {
+            include_reserved_utxos,
+        } => {
+            run_balance_cmd(tracker, include_reserved_utxos);
             Ok(())
         }
         Commands::TxOut { txout_cmd } => {
@@ -553,14 +565,21 @@ where
         }
         Commands::Send {
             value,
+            include_reserved_utxos,
             address,
             coin_select,
         } => {
             let (transaction, change_index) = {
                 // take mutable ref to construct tx -- it is only open for a short time while building it.
                 let tracker = &mut *tracker.lock().unwrap();
-                let (transaction, change_info) =
-                    create_tx(value, address, coin_select, tracker, keymap)?;
+                let (transaction, change_info) = create_tx(
+                    value,
+                    include_reserved_utxos,
+                    address,
+                    coin_select,
+                    tracker,
+                    keymap,
+                )?;
 
                 if let Some((change_derivation_changes, (change_keychain, index))) = change_info {
                     // We must first persist to disk the fact that we've got a new address from the
@@ -672,10 +691,10 @@ where
 pub fn planned_utxos<'a, AK: bdk_tmp_plan::CanDerive + Clone, P: ChainPosition>(
     tracker: &'a KeychainTracker<Keychain, P>,
     assets: &'a bdk_tmp_plan::Assets<AK>,
+    include_reserved_utxos: bool,
 ) -> impl Iterator<Item = (bdk_tmp_plan::Plan<AK>, FullTxOut<P>)> + 'a {
-    tracker
-        .full_utxos()
-        .filter_map(move |((keychain, derivation_index), full_txout)| {
+    tracker.full_utxos(include_reserved_utxos).filter_map(
+        move |((keychain, derivation_index), full_txout)| {
             Some((
                 bdk_tmp_plan::plan_satisfaction(
                     &tracker
@@ -688,5 +707,6 @@ pub fn planned_utxos<'a, AK: bdk_tmp_plan::CanDerive + Clone, P: ChainPosition>(
                 )?,
                 full_txout,
             ))
-        })
+        },
+    )
 }

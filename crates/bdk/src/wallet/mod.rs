@@ -334,9 +334,9 @@ impl<D> Wallet<D> {
     }
 
     /// Return the list of unspent outputs of this wallet
-    pub fn list_unspent(&self) -> Vec<LocalUtxo> {
+    pub fn list_unspent(&self, include_reserved_utxos: bool) -> Vec<LocalUtxo> {
         self.keychain_tracker
-            .full_utxos()
+            .full_utxos(include_reserved_utxos)
             .map(|(&(keychain, derivation_index), utxo)| LocalUtxo {
                 outpoint: utxo.outpoint,
                 txout: utxo.txout,
@@ -388,9 +388,9 @@ impl<D> Wallet<D> {
 
     /// Returns the utxo owned by this wallet corresponding to `outpoint` if it exists in the
     /// wallet's database.
-    pub fn get_utxo(&self, op: OutPoint) -> Option<LocalUtxo> {
+    pub fn get_utxo(&self, op: OutPoint, include_reserved_utxos: bool) -> Option<LocalUtxo> {
         self.keychain_tracker
-            .full_utxos()
+            .full_utxos(include_reserved_utxos)
             .find_map(|(&(keychain, derivation_index), txo)| {
                 if op == txo.outpoint {
                     Some(LocalUtxo {
@@ -527,11 +527,12 @@ impl<D> Wallet<D> {
 
     /// Return the balance, separated into available, trusted-pending, untrusted-pending and immature
     /// values.
-    pub fn get_balance(&self) -> Balance {
-        self.keychain_tracker.balance(|keychain| match keychain {
-            KeychainKind::External => false,
-            KeychainKind::Internal => true,
-        })
+    pub fn get_balance(&self, include_reserved_utxos: bool) -> Balance {
+        self.keychain_tracker
+            .balance(include_reserved_utxos, |keychain| match keychain {
+                KeychainKind::External => false,
+                KeychainKind::Internal => true,
+            })
     }
 
     /// Add an external signer
@@ -866,6 +867,7 @@ impl<D> Wallet<D> {
             params.drain_wallet,
             params.manually_selected_only,
             params.bumping_fee.is_some(), // we mandate confirmed transactions if we're bumping the fee
+            params.include_reserved_utxos,
             current_height.map(LockTime::to_consensus_u32),
         );
 
@@ -908,6 +910,10 @@ impl<D> Wallet<D> {
                 witness: Witness::new(),
             })
             .collect();
+
+        coin_selection.selected.iter().for_each(|u| {
+            let _ = self.keychain_tracker.mark_reserved(u.outpoint());
+        });
 
         if tx.output.is_empty() {
             // Uh oh, our transaction has no outputs.
@@ -1370,6 +1376,13 @@ impl<D> Wallet<D> {
                 txout_index.unmark_used(&keychain, index);
             }
         }
+
+        // release all the UTXOs that were reserved by this transaction
+        tx.input.iter().for_each(|input| {
+            let _ = self
+                .keychain_tracker
+                .unmark_reserved(&input.previous_output);
+        });
     }
 
     fn map_keychain(&self, keychain: KeychainKind) -> KeychainKind {
@@ -1391,8 +1404,8 @@ impl<D> Wallet<D> {
         Some(descriptor.at_derivation_index(child))
     }
 
-    fn get_available_utxos(&self) -> Vec<(LocalUtxo, usize)> {
-        self.list_unspent()
+    fn get_available_utxos(&self, include_reserved_utxos: bool) -> Vec<(LocalUtxo, usize)> {
+        self.list_unspent(include_reserved_utxos)
             .into_iter()
             .map(|utxo| {
                 let keychain = utxo.keychain;
@@ -1417,11 +1430,12 @@ impl<D> Wallet<D> {
         must_use_all_available: bool,
         manual_only: bool,
         must_only_use_confirmed_tx: bool,
+        include_reserved_utxos: bool,
         current_height: Option<u32>,
     ) -> (Vec<WeightedUtxo>, Vec<WeightedUtxo>) {
         //    must_spend <- manually selected utxos
         //    may_spend  <- all other available utxos
-        let mut may_spend = self.get_available_utxos();
+        let mut may_spend = self.get_available_utxos(include_reserved_utxos);
 
         may_spend.retain(|may_spend| {
             !manually_selected

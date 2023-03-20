@@ -63,14 +63,14 @@ fn test_balance() {
     use core::str::FromStr;
     #[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd)]
     enum Keychain {
-        One,
-        Two,
+        External,
+        Internal,
     }
     let mut tracker = KeychainTracker::<Keychain, TxHeight>::default();
-    let one = Descriptor::from_str("tr([73c5da0a/86'/0'/0']xpub6BgBgsespWvERF3LHQu6CnqdvfEvtMcQjYrcRzx53QJjSxarj2afYWcLteoGVky7D3UKDP9QyrLprQ3VCECoY49yfdDEHGCtMMj92pReUsQ/0/*)#rg247h69").unwrap();
-    let two = Descriptor::from_str("tr([73c5da0a/86'/0'/0']xpub6BgBgsespWvERF3LHQu6CnqdvfEvtMcQjYrcRzx53QJjSxarj2afYWcLteoGVky7D3UKDP9QyrLprQ3VCECoY49yfdDEHGCtMMj92pReUsQ/1/*)#ju05rz2a").unwrap();
-    tracker.add_keychain(Keychain::One, one);
-    tracker.add_keychain(Keychain::Two, two);
+    let external = Descriptor::from_str("tr([73c5da0a/86'/0'/0']xpub6BgBgsespWvERF3LHQu6CnqdvfEvtMcQjYrcRzx53QJjSxarj2afYWcLteoGVky7D3UKDP9QyrLprQ3VCECoY49yfdDEHGCtMMj92pReUsQ/0/*)#rg247h69").unwrap();
+    let internal = Descriptor::from_str("tr([73c5da0a/86'/0'/0']xpub6BgBgsespWvERF3LHQu6CnqdvfEvtMcQjYrcRzx53QJjSxarj2afYWcLteoGVky7D3UKDP9QyrLprQ3VCECoY49yfdDEHGCtMMj92pReUsQ/1/*)#ju05rz2a").unwrap();
+    tracker.add_keychain(Keychain::External, external);
+    tracker.add_keychain(Keychain::Internal, internal);
 
     let tx1 = Transaction {
         version: 0x01,
@@ -80,7 +80,7 @@ fn test_balance() {
             value: 13_000,
             script_pubkey: tracker
                 .txout_index
-                .reveal_next_spk(&Keychain::One)
+                .reveal_next_spk(&Keychain::External)
                 .0
                  .1
                 .clone(),
@@ -95,7 +95,7 @@ fn test_balance() {
             value: 7_000,
             script_pubkey: tracker
                 .txout_index
-                .reveal_next_spk(&Keychain::Two)
+                .reveal_next_spk(&Keychain::Internal)
                 .0
                  .1
                 .clone(),
@@ -110,7 +110,7 @@ fn test_balance() {
             value: 11_000,
             script_pubkey: tracker
                 .txout_index
-                .reveal_next_spk(&Keychain::Two)
+                .reveal_next_spk(&Keychain::Internal)
                 .0
                  .1
                 .clone(),
@@ -127,18 +127,18 @@ fn test_balance() {
         .unwrap();
 
     let should_trust = |keychain: &Keychain| match *keychain {
-        Keychain::One => false,
-        Keychain::Two => true,
+        Keychain::External => false,
+        Keychain::Internal => true,
     };
 
-    assert_eq!(tracker.balance(should_trust), Balance::default());
+    assert_eq!(tracker.balance(true, should_trust), Balance::default());
 
     let _ = tracker
         .insert_tx(tx1.clone(), TxHeight::Unconfirmed)
         .unwrap();
 
     assert_eq!(
-        tracker.balance(should_trust),
+        tracker.balance(true, should_trust),
         Balance {
             untrusted_pending: 13_000,
             ..Default::default()
@@ -150,7 +150,7 @@ fn test_balance() {
         .unwrap();
 
     assert_eq!(
-        tracker.balance(should_trust),
+        tracker.balance(true, should_trust),
         Balance {
             trusted_pending: 7_000,
             untrusted_pending: 13_000,
@@ -163,7 +163,7 @@ fn test_balance() {
         .unwrap();
 
     assert_eq!(
-        tracker.balance(should_trust),
+        tracker.balance(true, should_trust),
         Balance {
             trusted_pending: 7_000,
             untrusted_pending: 13_000,
@@ -175,7 +175,7 @@ fn test_balance() {
     let _ = tracker.insert_tx(tx1, TxHeight::Confirmed(1)).unwrap();
 
     assert_eq!(
-        tracker.balance(should_trust),
+        tracker.balance(true, should_trust),
         Balance {
             trusted_pending: 7_000,
             untrusted_pending: 0,
@@ -187,7 +187,7 @@ fn test_balance() {
     let _ = tracker.insert_tx(tx2, TxHeight::Confirmed(2)).unwrap();
 
     assert_eq!(
-        tracker.balance(should_trust),
+        tracker.balance(true, should_trust),
         Balance {
             trusted_pending: 0,
             untrusted_pending: 0,
@@ -204,7 +204,7 @@ fn test_balance() {
         .unwrap();
 
     assert_eq!(
-        tracker.balance(should_trust),
+        tracker.balance(true, should_trust),
         Balance {
             trusted_pending: 0,
             untrusted_pending: 0,
@@ -221,7 +221,7 @@ fn test_balance() {
         .unwrap();
 
     assert_eq!(
-        tracker.balance(should_trust),
+        tracker.balance(true, should_trust),
         Balance {
             trusted_pending: 0,
             untrusted_pending: 0,
@@ -230,10 +230,10 @@ fn test_balance() {
         }
     );
 
-    assert_eq!(tracker.balance_at(0), 0);
-    assert_eq!(tracker.balance_at(1), 13_000);
-    assert_eq!(tracker.balance_at(2), 20_000);
-    assert_eq!(tracker.balance_at(98), 20_000);
-    assert_eq!(tracker.balance_at(99), 31_000);
-    assert_eq!(tracker.balance_at(100), 31_000);
+    assert_eq!(tracker.balance_at(true, 0), 0);
+    assert_eq!(tracker.balance_at(true, 1), 13_000);
+    assert_eq!(tracker.balance_at(true, 2), 20_000);
+    assert_eq!(tracker.balance_at(true, 98), 20_000);
+    assert_eq!(tracker.balance_at(true, 99), 31_000);
+    assert_eq!(tracker.balance_at(true, 100), 31_000);
 }
