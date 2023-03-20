@@ -3323,3 +3323,91 @@ fn test_tx_cancellation() {
         .unwrap();
     assert_eq!(change_derivation_4, (KeychainKind::Internal, 2));
 }
+
+#[test]
+fn test_utxo_reservation() {
+    // create wallet and fund it.
+    let (mut wallet, _) = get_funded_wallet(get_test_wpkh());
+    let addr = wallet.get_address(New);
+
+    // this transaction creates more utxos necessary for testing utxo reservation
+    let mut builder = wallet.build_tx();
+    builder.add_recipient(addr.script_pubkey(), 10000);
+    let (psbt, _) = builder.finish().unwrap();
+
+    let tx1 = psbt.extract_tx();
+
+    wallet
+        .insert_checkpoint(BlockId {
+            height: 1_001,
+            hash: BlockHash::all_zeros(),
+        })
+        .unwrap();
+    wallet
+        .insert_tx(
+            tx1.clone(),
+            ConfirmationTime::Confirmed {
+                height: 1_001,
+                time: 110,
+            },
+        )
+        .unwrap();
+
+    let addr = wallet.get_address(New);
+    let mut builder = wallet.build_tx();
+    builder.add_recipient(addr.script_pubkey(), 1000);
+    let (psbt, _) = builder.finish().unwrap();
+    let tx2 = psbt.extract_tx();
+
+    let available_utxos = wallet
+        .list_unspent(false)
+        .iter()
+        .map(|u| u.outpoint)
+        .collect::<Vec<_>>();
+
+    //check that every input is not in available utxos
+    for input in &tx2.input {
+        assert!(!available_utxos.contains(&input.previous_output));
+    }
+
+    let addr = wallet.get_address(New);
+    let mut builder = wallet.build_tx();
+    builder.add_recipient(addr.script_pubkey(), 1000);
+    let (psbt, _) = builder.finish().unwrap();
+    let tx3 = psbt.extract_tx();
+
+    let available_utxos = wallet
+        .list_unspent(false)
+        .iter()
+        .map(|u| u.outpoint)
+        .collect::<Vec<_>>();
+
+    //check that every input is not in available utxos
+    for input in &tx3.input {
+        assert!(!available_utxos.contains(&input.previous_output));
+    }
+
+    wallet.cancel_tx(&tx2);
+    let available_utxos = wallet
+        .list_unspent(false)
+        .iter()
+        .map(|u| u.outpoint)
+        .collect::<Vec<_>>();
+
+    // check if reserved utxos are returned to utxo set after transaction cancellation
+    for input in &tx2.input {
+        assert!(available_utxos.contains(&input.previous_output));
+    }
+
+    wallet.cancel_tx(&tx3);
+    let available_utxos = wallet
+        .list_unspent(false)
+        .iter()
+        .map(|u| u.outpoint)
+        .collect::<Vec<_>>();
+
+    // check if reserved utxos are returned to utxo set after transaction cancellation
+    for input in &tx3.input {
+        assert!(available_utxos.contains(&input.previous_output));
+    }
+}
