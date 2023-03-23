@@ -1,0 +1,10 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc b526e3a05e5dffce95e0cf357f68d6819b5b92a1c4abd79fd8fe0e2582521352 # shrinks to num_inputs = 45, target = 16494, feerate = 3.0291684, min_fee = 0, base_weight = 155, long_term_feerate_diff = -0.70271873, change_weight = 58, change_spend_weight = 82
+cc f3c37a516004e7eda9183816d72bede9084ce678830d6582f2d63306f618adee # shrinks to num_inputs = 40, target = 6598, feerate = 8.487553, min_fee = 221, base_weight = 126, long_term_feerate_diff = 3.3214626, change_weight = 18, change_spend_weight = 18
+cc a6d03a6d93eb8d5a082d69a3d1677695377823acafe3dba954ac86519accf152 # shrinks to num_inputs = 49, target = 2917, feerate = 9.786607, min_fee = 0, base_weight = 4, long_term_feerate_diff = -0.75053596, change_weight = 77, change_spend_weight = 81
+cc a1eccddab6d7da9677575154a27a1e49b391041ed9e32b9bf937efd72ef0ab03 # shrinks to num_inputs = 12, target = 3988, feerate = 4.3125916, min_fee = 453, base_weight = 0, long_term_feerate_diff = -0.018570423, change_weight = 15, change_spend_weight = 32

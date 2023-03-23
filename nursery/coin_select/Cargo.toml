@@ -1,11 +1,11 @@
 [package]
 name = "bdk_coin_select"
-version = "0.0.1"
-authors = [ "LLFourn <lloyd.fourn@gmail.com>" ]
+version = "0.1.0"
+edition = "2021"
 
 [dependencies]
-bdk_chain = { path = "../../crates/chain" }
+# No dependencies! Don't add any please!
 
-[features]
-default = ["std"]
-std = []
+[dev-dependencies]
+rand = "0.8"
+proptest = "1"
