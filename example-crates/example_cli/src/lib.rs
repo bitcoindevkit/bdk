@@ -1,9 +1,9 @@
 pub use anyhow;
 use anyhow::Context;
-use bdk_coin_select::{coin_select_bnb, CoinSelector, CoinSelectorOpt, WeightedValue};
+use bdk_coin_select::{Candidate, CoinSelector};
 use bdk_file_store::Store;
 use serde::{de::DeserializeOwned, Serialize};
-use std::{cmp::Reverse, collections::HashMap, path::PathBuf, sync::Mutex, time::Duration};
+use std::{cmp::Reverse, collections::HashMap, path::PathBuf, sync::Mutex};
 
 use bdk_chain::{
     bitcoin::{
@@ -17,7 +17,7 @@ use bdk_chain::{
         descriptor::{DescriptorSecretKey, KeyMap},
         Descriptor, DescriptorPublicKey,
     },
-    Anchor, Append, ChainOracle, DescriptorExt, FullTxOut, Persist, PersistBackend,
+    Anchor, Append, ChainOracle, FullTxOut, Persist, PersistBackend,
 };
 pub use bdk_file_store;
 pub use clap;
@@ -208,39 +208,18 @@ where
     };
 
     // TODO use planning module
-    let mut candidates = planned_utxos(graph, chain, &assets)?;
-
-    // apply coin selection algorithm
-    match cs_algorithm {
-        CoinSelectionAlgo::LargestFirst => {
-            candidates.sort_by_key(|(_, utxo)| Reverse(utxo.txout.value))
-        }
-        CoinSelectionAlgo::SmallestFirst => candidates.sort_by_key(|(_, utxo)| utxo.txout.value),
-        CoinSelectionAlgo::OldestFirst => {
-            candidates.sort_by_key(|(_, utxo)| utxo.chain_position.clone())
-        }
-        CoinSelectionAlgo::NewestFirst => {
-            candidates.sort_by_key(|(_, utxo)| Reverse(utxo.chain_position.clone()))
-        }
-        CoinSelectionAlgo::BranchAndBound => {}
-    }
-
+    let raw_candidates = planned_utxos(graph, chain, &assets)?;
     // turn the txos we chose into weight and value
-    let wv_candidates = candidates
+    let candidates = raw_candidates
         .iter()
         .map(|(plan, utxo)| {
-            WeightedValue::new(
+            Candidate::new(
                 utxo.txout.value,
                 plan.expected_weight() as _,
                 plan.witness_version().is_some(),
             )
         })
-        .collect();
-
-    let mut outputs = vec![TxOut {
-        value,
-        script_pubkey: address.script_pubkey(),
-    }];
+        .collect::<Vec<_>>();
 
     let internal_keychain = if graph.index.keychains().get(&Keychain::Internal).is_some() {
         Keychain::Internal
@@ -253,7 +232,7 @@ where
     changeset.append(change_changeset);
 
     // Clone to drop the immutable reference.
-    let change_script = change_script.into();
+    let change_script = change_script.to_owned();
 
     let change_plan = bdk_tmp_plan::plan_satisfaction(
         &graph
@@ -267,50 +246,6 @@ where
     )
     .expect("failed to obtain change plan");
 
-    let mut change_output = TxOut {
-        value: 0,
-        script_pubkey: change_script,
-    };
-
-    let cs_opts = CoinSelectorOpt {
-        target_feerate: 0.5,
-        min_drain_value: graph
-            .index
-            .keychains()
-            .get(&internal_keychain)
-            .expect("must exist")
-            .dust_value(),
-        ..CoinSelectorOpt::fund_outputs(
-            &outputs,
-            &change_output,
-            change_plan.expected_weight() as u32,
-        )
-    };
-
-    // TODO: How can we make it easy to shuffle in order of inputs and outputs here?
-    // apply coin selection by saying we need to fund these outputs
-    let mut coin_selector = CoinSelector::new(&wv_candidates, &cs_opts);
-
-    // just select coins in the order provided until we have enough
-    // only use the first result (least waste)
-    let selection = match cs_algorithm {
-        CoinSelectionAlgo::BranchAndBound => {
-            coin_select_bnb(Duration::from_secs(10), coin_selector.clone())
-                .map_or_else(|| coin_selector.select_until_finished(), |cs| cs.finish())?
-        }
-        _ => coin_selector.select_until_finished()?,
-    };
-    let (_, selection_meta) = selection.best_strategy();
-
-    // get the selected utxos
-    let selected_txos = selection.apply_selection(&candidates).collect::<Vec<_>>();
-
-    if let Some(drain_value) = selection_meta.drain_value {
-        change_output.value = drain_value;
-        // if the selection tells us to use change and the change value is sufficient, we add it as an output
-        outputs.push(change_output)
-    }
-
     let mut transaction = Transaction {
         version: 0x02,
         // because the temporary planning module does not support timelocks, we can use the chain
@@ -319,16 +254,105 @@ where
             .get_chain_tip()?
             .and_then(|block_id| absolute::LockTime::from_height(block_id.height).ok())
             .unwrap_or(absolute::LockTime::ZERO),
-        input: selected_txos
-            .iter()
-            .map(|(_, utxo)| TxIn {
-                previous_output: utxo.outpoint,
-                sequence: Sequence::ENABLE_RBF_NO_LOCKTIME,
-                ..Default::default()
-            })
-            .collect(),
-        output: outputs,
+        input: vec![],
+        output: vec![TxOut {
+            value,
+            script_pubkey: address.script_pubkey(),
+        }],
     };
+
+    let target = bdk_coin_select::Target {
+        feerate: bdk_coin_select::FeeRate::from_sat_per_vb(1.0),
+        min_fee: 0,
+        value: transaction.output.iter().map(|txo| txo.value).sum(),
+    };
+
+    let drain = bdk_coin_select::Drain {
+        weight: {
+            // we calculate the weight difference of including the drain output in the base tx
+            // this method will detect varint size changes of txout count
+            let tx_weight = transaction.weight();
+            let tx_weight_with_drain = {
+                let mut tx = transaction.clone();
+                tx.output.push(TxOut {
+                    script_pubkey: change_script.clone(),
+                    ..Default::default()
+                });
+                tx.weight()
+            };
+            (tx_weight_with_drain - tx_weight).to_wu() as u32 - 1
+        },
+        value: 0,
+        spend_weight: change_plan.expected_weight() as u32,
+    };
+    let long_term_feerate = bdk_coin_select::FeeRate::from_sat_per_wu(0.25);
+    let drain_policy = bdk_coin_select::change_policy::min_waste(drain, long_term_feerate);
+
+    let mut selector = CoinSelector::new(&candidates, transaction.weight().to_wu() as u32);
+    match cs_algorithm {
+        CoinSelectionAlgo::BranchAndBound => {
+            let metric = bdk_coin_select::metrics::Waste {
+                target,
+                long_term_feerate,
+                change_policy: &drain_policy,
+            };
+            let (final_selection, _score) = selector
+                .branch_and_bound(metric)
+                .take(50_000)
+                // we only process viable solutions
+                .flatten()
+                .reduce(|(best_sol, best_score), (curr_sol, curr_score)| {
+                    // we are reducing waste
+                    if curr_score < best_score {
+                        (curr_sol, curr_score)
+                    } else {
+                        (best_sol, best_score)
+                    }
+                })
+                .ok_or(anyhow::format_err!("no bnb solution found"))?;
+            selector = final_selection;
+        }
+        cs_algorithm => {
+            match cs_algorithm {
+                CoinSelectionAlgo::LargestFirst => {
+                    selector.sort_candidates_by_key(|(_, c)| Reverse(c.value))
+                }
+                CoinSelectionAlgo::SmallestFirst => {
+                    selector.sort_candidates_by_key(|(_, c)| c.value)
+                }
+                CoinSelectionAlgo::OldestFirst => selector
+                    .sort_candidates_by_key(|(i, _)| raw_candidates[i].1.chain_position.clone()),
+                CoinSelectionAlgo::NewestFirst => selector.sort_candidates_by_key(|(i, _)| {
+                    Reverse(raw_candidates[i].1.chain_position.clone())
+                }),
+                CoinSelectionAlgo::BranchAndBound => unreachable!("bnb variant is matched already"),
+            }
+            selector.select_until_target_met(target, drain)?
+        }
+    };
+
+    // get the selected utxos
+    let selected_txos = selector
+        .apply_selection(&raw_candidates)
+        .collect::<Vec<_>>();
+
+    let drain = drain_policy(&selector, target);
+    if drain.is_some() {
+        transaction.output.push(TxOut {
+            value: drain.value,
+            script_pubkey: change_script,
+        });
+    }
+
+    // fill transaction inputs
+    transaction.input = selected_txos
+        .iter()
+        .map(|(_, utxo)| TxIn {
+            previous_output: utxo.outpoint,
+            sequence: Sequence::ENABLE_RBF_NO_LOCKTIME,
+            ..Default::default()
+        })
+        .collect();
 
     let prevouts = selected_txos
         .iter()
@@ -389,7 +413,7 @@ where
         }
     }
 
-    let change_info = if selection_meta.drain_value.is_some() {
+    let change_info = if drain.is_some() {
         Some((changeset, (internal_keychain, change_index)))
     } else {
         None
