@@ -1,10 +1,15 @@
-#[no_std]
+#![no_std]
 #[allow(unused)]
 #[macro_use]
 extern crate alloc;
 
+#[cfg(feature = "std")]
+#[allow(unused)]
+#[macro_use]
+extern crate std;
+
 mod coin_selector;
-pub mod ord_float;
+pub mod float;
 pub use coin_selector::*;
 
 pub mod bnb;

@@ -1,3 +1,5 @@
+#[allow(unused)] // some bug in <= 1.48.0 sees this as unused when it isn't
+use crate::float::FloatExt;
 use crate::{CoinSelector, Drain, FeeRate, Target};
 use core::convert::TryInto;
 

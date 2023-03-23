@@ -2,6 +2,7 @@
 name = "bdk_coin_select"
 version = "0.1.0"
 edition = "2018"
+license = "MIT OR Apache-2.0"
 
 [dependencies]
 # No dependencies! Don't add any please!
@@ -9,3 +10,7 @@ edition = "2018"
 [dev-dependencies]
 rand = "0.8"
 proptest = "1"
+
+[features]
+default = ["std"]
+std = []

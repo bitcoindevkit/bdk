@@ -1,8 +1,21 @@
 use super::change_lower_bound;
-use crate::{
-    bnb::BnBMetric, ord_float::Ordf32, CoinSelector, Drain, FeeRate, Target, WeightedValue,
-};
+use crate::{bnb::BnBMetric, float::Ordf32, CoinSelector, Drain, FeeRate, Target, WeightedValue};
 
+/// The "waste" metric used by bitcoin core.
+///
+/// See this [great
+/// explanation](https://bitcoin.stackexchange.com/questions/113622/what-does-waste-metric-mean-in-the-context-of-coin-selection) for an understanding of the waste metric.
+///
+/// ## WARNING: Waste metric considered wasteful
+///
+/// Note that bitcoin core at the time of writing use the waste metric to
+///
+/// 1. minimise the waste while searching for changeless solutions.
+/// 2. It tiebreaks multiple valid selections from different algorithms (which do not try and minimise waste) with waste.
+///
+/// This is **very** different from minimising waste in general which is what this metric will do when used in [`CoinSelector::branch_and_bound`].
+/// The waste metric tends to over consolidate funds. If the `long_term_feerate` is even slightly
+/// higher than the current feerate (specified in `target`) it will select all your coins!
 pub struct Waste<'c, C> {
     pub target: Target,
     pub long_term_feerate: FeeRate,
@@ -25,6 +38,14 @@ where
     }
 
     fn bound<'a>(&mut self, cs: &CoinSelector<'a>) -> Option<Self::Score> {
+        // Welcome my bretheren. This dungeon was authored by Lloyd Fournier A.K.A "LLFourn" with
+        // the assistance of chat GPT and the developers of the IOTA cryptocurrency. There are
+        // comments trying to make sense of the logic here but it's really just me pretending I know
+        // what's going on. I have tried to simplify the logic here many times but always end up
+        // making it fail proptests.
+        //
+        // Don't be afraid. This function is a "heuristic" lower bound. It doesn't need to be super
+        // duper correct. In testing it seems to come up with pretty good results pretty fast.
         let rate_diff = self.target.feerate.spwu() - self.long_term_feerate.spwu();
         // whether from this coin selection it's possible to avoid change
         let change_lower_bound = change_lower_bound(&cs, self.target, &self.change_policy);

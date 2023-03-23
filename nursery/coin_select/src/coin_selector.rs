@@ -1,5 +1,7 @@
 use super::*;
-use crate::{bnb::BnBMetric, ord_float::Ordf32, FeeRate};
+#[allow(unused)] // some bug in <= 1.48.0 sees this as unused when it isn't
+use crate::float::FloatExt;
+use crate::{bnb::BnBMetric, float::Ordf32, FeeRate};
 use alloc::{borrow::Cow, collections::BTreeSet, vec::Vec};
 
 /// A [`WeightedValue`] represents an input candidate for [`CoinSelector`]. This can either be a
@@ -38,37 +40,58 @@ impl WeightedValue {
         Ordf32(self.value as f32 - (self.weight as f32 * feerate.spwu()))
     }
 
+    /// Value per weight unit
     pub fn value_pwu(&self) -> Ordf32 {
         Ordf32(self.value as f32 / self.weight as f32)
     }
 }
 
+/// A drain (A.K.A. change) output.
+/// Technically it could represent multiple outputs.
+///
+/// These are usually created by a [`change_policy`].
+///
+/// [`change_policy`]: crate::change_policy
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
 pub struct Drain {
+    /// The weight of adding this drain
     pub weight: u32,
+    /// The value that should be assigned to the drain
     pub value: u64,
+    /// The weight of spending this drain
     pub spend_weight: u32,
 }
 
 impl Drain {
+    /// A drian representing no drain at all.
     pub fn none() -> Self {
         Self::default()
     }
 
+    /// is the "none" drain
     pub fn is_none(&self) -> bool {
         self == &Drain::none()
     }
 
+    /// Is not the "none" drain
     pub fn is_some(&self) -> bool {
         !self.is_none()
     }
 
+    /// The waste of adding this drain to a transaction according to the [waste metric].
+    ///
+    /// [waste metric]; https://bitcoin.stackexchange.com/questions/113622/what-does-waste-metric-mean-in-the-context-of-coin-selection
     pub fn waste(&self, feerate: FeeRate, long_term_feerate: FeeRate) -> f32 {
         self.weight as f32 * feerate.spwu() + self.spend_weight as f32 * long_term_feerate.spwu()
     }
 }
 
 /// [`CoinSelector`] is responsible for selecting and deselecting from a set of canididates.
+///
+/// You can do this manually by calling methods like [`select`] or automatically with methods like [`branch_and_bound`].
+///
+/// [`select`]: CoinSelector::select
+/// [`branch_and_bound`]: CoinSelector::branch_and_bound
 #[derive(Debug, Clone)]
 pub struct CoinSelector<'a> {
     base_weight: u32,
@@ -78,10 +101,14 @@ pub struct CoinSelector<'a> {
     candidate_order: Cow<'a, Vec<usize>>,
 }
 
+/// A target value to select for along with feerate constraints.
 #[derive(Debug, Clone, Copy)]
 pub struct Target {
+    /// The minimum feerate that the selection must have
     pub feerate: FeeRate,
+    /// The minimum fee the selection must have
     pub min_fee: u64,
+    /// The minmum value that should be left for the output
     pub value: u64,
 }
 
@@ -96,7 +123,15 @@ impl Default for Target {
 }
 
 impl<'a> CoinSelector<'a> {
+    /// Creates a new coin selector from some candidate inputs and a `base_weight`.
+    ///
+    /// The `base_weight` is the weight of the transaction without any inputs and without a change
+    /// output.
+    ///
+    /// Note that methods in `CoinSelector` will refer to inputs by the index in the `candidates`
+    /// slice you pass in.
     // TODO: constructor should be number of outputs and output weight instead so we can keep track
+    // of varint number of outputs
     pub fn new(candidates: &'a [WeightedValue], base_weight: u32) -> Self {
         Self {
             base_weight,
@@ -107,6 +142,8 @@ impl<'a> CoinSelector<'a> {
         }
     }
 
+    /// Iterate over all the candidates in their currently sorted order. Each item has the original
+    /// index with the candidate.
     pub fn candidates(
         &self,
     ) -> impl DoubleEndedIterator<Item = (usize, WeightedValue)> + ExactSizeIterator + '_ {
@@ -115,23 +152,33 @@ impl<'a> CoinSelector<'a> {
             .map(move |i| (*i, self.candidates[*i]))
     }
 
+    /// Get the candidate at `index`. `index` refers to its position in the original `candidates` slice passed
+    /// into [`CoinSelector::new`].
     pub fn candidate(&self, index: usize) -> WeightedValue {
         self.candidates[index]
     }
 
+    /// Deselect a candidate at `index`. `index` refers to its position in the original `candidates` slice passed
+    /// into [`CoinSelector::new`].
     pub fn deselect(&mut self, index: usize) -> bool {
         self.selected.to_mut().remove(&index)
     }
 
+    /// Convienince method to pick elements of a slice by the indexes that are currently selected.
+    /// Obviously the slice must represent the inputs ordered in the same way as when they were
+    /// passed to `Candidates::new`.
     pub fn apply_selection<T>(&self, candidates: &'a [T]) -> impl Iterator<Item = &'a T> + '_ {
         self.selected.iter().map(move |i| &candidates[*i])
     }
 
+    /// Select the input at `index`. `index` refers to its position in the original `candidates` slice passed
+    /// into [`CoinSelector::new`].
     pub fn select(&mut self, index: usize) -> bool {
         assert!(index < self.candidates.len());
         self.selected.to_mut().insert(index)
     }
 
+    /// Select the next unselected candidate in the sorted order fo the candidates.
     pub fn select_next(&mut self) -> bool {
         let next = self.unselected_indexes().next();
         if let Some(next) = next {
@@ -142,24 +189,51 @@ impl<'a> CoinSelector<'a> {
         }
     }
 
+    /// Ban an input from being selected. Banning the input means it won't show up in [`unselected`]
+    /// or [`unselected_indexes`]. Note it can still be manually selected.
+    ///
+    /// `index` refers to its position in the original `candidates` slice passed into [`CoinSelector::new`].
+    ///
+    /// [`unselected`]: Self::unselected
+    /// [`unselected_indexes`]: Self::unselected_indexes
     pub fn ban(&mut self, index: usize) {
         self.banned.to_mut().insert(index);
     }
 
+    /// Gets the list of inputs that have been banned by [`ban`].
+    ///
+    /// [`ban`]: Self::ban
     pub fn banned(&self) -> &BTreeSet<usize> {
         &self.banned
     }
 
+    /// Is the input at `index` selected. `index` refers to its position in the original
+    /// `candidates` slice passed into [`CoinSelector::new`].
     pub fn is_selected(&self, index: usize) -> bool {
         self.selected.contains(&index)
     }
 
+    /// Is meeting this `target` possible with the current selection with this `drain` (i.e. change output).
+    /// Note this will respect [`ban`]ned candidates.
+    ///
+    /// This simply selects all effective inputs at the target's feerate and checks whether we have
+    /// enough value.
+    ///
+    /// [`ban`]: Self::ban
     pub fn is_selection_possible(&self, target: Target, drain: Drain) -> bool {
         let mut test = self.clone();
         test.select_all_effective(target.feerate);
         test.is_target_met(target, drain)
     }
 
+    /// Is meeting the target *plausible* with this `change_policy`.
+    /// Note this will respect [`ban`]ned candidates.
+    ///
+    /// This is very similar to [`is_selection_possible`] except that you pass in a change policy.
+    /// This method will give the right answer as long as `change_policy` is monotone but otherwise
+    /// can it can give false negatives.
+    ///
+    /// [`is_selection_possible`]: Self::is_selection_possible
     pub fn is_selection_plausible_with_change_policy(
         &self,
         target: Target,
@@ -170,6 +244,7 @@ impl<'a> CoinSelector<'a> {
         test.is_target_met(target, change_policy(&test, target))
     }
 
+    /// Returns true if no candidates have been selected.
     pub fn is_empty(&self) -> bool {
         self.selected.is_empty()
     }
@@ -411,7 +486,7 @@ impl<'a> DoubleEndedIterator for SelectIter<'a> {
 }
 
 impl<'a> core::fmt::Display for CoinSelector<'a> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "[")?;
         let mut candidates = self.candidates().peekable();
 

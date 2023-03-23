@@ -1,4 +1,4 @@
-use crate::ord_float::Ordf32;
+use crate::float::Ordf32;
 use core::ops::{Add, Sub};
 
 /// Fee rate

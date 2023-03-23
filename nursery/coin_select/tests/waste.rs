@@ -1,6 +1,5 @@
-#[cfg(test)]
 use bdk_coin_select::{
-    change_policy, metrics::Waste, ord_float::Ordf32, CoinSelector, Drain, FeeRate, Target,
+    change_policy, float::Ordf32, metrics::Waste, CoinSelector, Drain, FeeRate, Target,
     WeightedValue,
 };
 use proptest::{
