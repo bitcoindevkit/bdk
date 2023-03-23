@@ -1,4 +1,5 @@
 use crate::{CoinSelector, Drain, FeeRate, Target};
+use core::convert::TryInto;
 
 /// Add a change output if the value it would receive is greater than or equal to `min_value`.
 ///

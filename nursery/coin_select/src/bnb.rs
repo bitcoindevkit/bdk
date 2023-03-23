@@ -93,8 +93,8 @@ impl<'a, M: BnBMetric> BnbIter<'a, M> {
         let mut exclusion_cs = cs.clone();
         exclusion_cs.ban(next_unselected);
 
-        for (child_cs, is_exclusion) in [(&inclusion_cs, false), (&exclusion_cs, true)] {
-            self.consider_adding_to_queue(child_cs, is_exclusion)
+        for (child_cs, is_exclusion) in &[(&inclusion_cs, false), (&exclusion_cs, true)] {
+            self.consider_adding_to_queue(child_cs, *is_exclusion)
         }
     }
 }

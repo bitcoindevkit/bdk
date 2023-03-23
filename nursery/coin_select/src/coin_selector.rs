@@ -112,7 +112,7 @@ impl<'a> CoinSelector<'a> {
     ) -> impl DoubleEndedIterator<Item = (usize, WeightedValue)> + ExactSizeIterator + '_ {
         self.candidate_order
             .iter()
-            .map(|i| (*i, self.candidates[*i]))
+            .map(move |i| (*i, self.candidates[*i]))
     }
 
     pub fn candidate(&self, index: usize) -> WeightedValue {
@@ -124,7 +124,7 @@ impl<'a> CoinSelector<'a> {
     }
 
     pub fn apply_selection<T>(&self, candidates: &'a [T]) -> impl Iterator<Item = &'a T> + '_ {
-        self.selected.iter().map(|i| &candidates[*i])
+        self.selected.iter().map(move |i| &candidates[*i])
     }
 
     pub fn select(&mut self, index: usize) -> bool {
@@ -266,7 +266,8 @@ impl<'a> CoinSelector<'a> {
         F: FnMut((usize, WeightedValue), (usize, WeightedValue)) -> core::cmp::Ordering,
     {
         let order = self.candidate_order.to_mut();
-        order.sort_by(|a, b| cmp((*a, self.candidates[*a]), (*b, self.candidates[*b])))
+        let candidates = &self.candidates;
+        order.sort_by(|a, b| cmp((*a, candidates[*a]), (*b, candidates[*b])))
     }
 
     pub fn sort_candidates_by_key<F, K>(&mut self, mut key_fn: F)
@@ -310,11 +311,12 @@ impl<'a> CoinSelector<'a> {
     pub fn selected(&self) -> impl ExactSizeIterator<Item = (usize, WeightedValue)> + '_ {
         self.selected
             .iter()
-            .map(|&index| (index, self.candidates[index]))
+            .map(move |&index| (index, self.candidates[index]))
     }
 
     pub fn unselected(&self) -> impl DoubleEndedIterator<Item = (usize, WeightedValue)> + '_ {
-        self.unselected_indexes().map(|i| (i, self.candidates[i]))
+        self.unselected_indexes()
+            .map(move |i| (i, self.candidates[i]))
     }
 
     pub fn selected_indexes(&self) -> &BTreeSet<usize> {
@@ -324,7 +326,7 @@ impl<'a> CoinSelector<'a> {
     pub fn unselected_indexes(&self) -> impl DoubleEndedIterator<Item = usize> + '_ {
         self.candidate_order
             .iter()
-            .filter(|index| !(self.selected.contains(index) || self.banned.contains(index)))
+            .filter(move |index| !(self.selected.contains(index) || self.banned.contains(index)))
             .map(|index| *index)
     }
 
