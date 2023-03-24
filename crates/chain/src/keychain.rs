@@ -19,7 +19,7 @@ use crate::{
     collections::BTreeMap,
     sparse_chain::ChainPosition,
     tx_graph::TxGraph,
-    ForEachTxOut,
+    ForEachTxOut, TxIndexAdditions,
 };
 
 #[cfg(feature = "miniscript")]
@@ -82,6 +82,12 @@ impl<K: Ord> DerivationAdditions<K> {
         });
 
         self.0.append(&mut other.0);
+    }
+}
+
+impl<K: Ord> TxIndexAdditions for DerivationAdditions<K> {
+    fn append_additions(&mut self, other: Self) {
+        self.append(other)
     }
 }
 

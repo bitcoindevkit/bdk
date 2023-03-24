@@ -1,3 +1,4 @@
+use alloc::collections::BTreeSet;
 use bitcoin::{Block, BlockHash, OutPoint, Transaction, TxOut};
 
 use crate::BlockId;
@@ -44,8 +45,79 @@ pub trait BlockAnchor:
     fn anchor_block(&self) -> BlockId;
 }
 
+impl<A: BlockAnchor> BlockAnchor for &'static A {
+    fn anchor_block(&self) -> BlockId {
+        <A as BlockAnchor>::anchor_block(self)
+    }
+}
+
 impl BlockAnchor for (u32, BlockHash) {
     fn anchor_block(&self) -> BlockId {
         (*self).into()
     }
+}
+
+/// Represents a service that tracks the best chain history.
+pub trait ChainOracle {
+    /// Error type.
+    type Error: core::fmt::Debug;
+
+    /// Returns the block hash (if any) of the given `height`.
+    fn get_block_in_best_chain(&self, height: u32) -> Result<Option<BlockHash>, Self::Error>;
+
+    /// Determines whether the block of [`BlockId`] exists in the best chain.
+    fn is_block_in_best_chain(&self, block_id: BlockId) -> Result<bool, Self::Error> {
+        Ok(matches!(self.get_block_in_best_chain(block_id.height)?, Some(h) if h == block_id.hash))
+    }
+}
+
+impl<C: ChainOracle> ChainOracle for &C {
+    type Error = C::Error;
+
+    fn get_block_in_best_chain(&self, height: u32) -> Result<Option<BlockHash>, Self::Error> {
+        <C as ChainOracle>::get_block_in_best_chain(self, height)
+    }
+
+    fn is_block_in_best_chain(&self, block_id: BlockId) -> Result<bool, Self::Error> {
+        <C as ChainOracle>::is_block_in_best_chain(self, block_id)
+    }
+}
+
+/// Represents changes to a [`TxIndex`] implementation.
+pub trait TxIndexAdditions: Default {
+    /// Append `other` on top of `self`.
+    fn append_additions(&mut self, other: Self);
+}
+
+impl<I: Ord> TxIndexAdditions for BTreeSet<I> {
+    fn append_additions(&mut self, mut other: Self) {
+        self.append(&mut other);
+    }
+}
+
+/// Represents an index of transaction data.
+pub trait TxIndex {
+    /// The resultant "additions" when new transaction data is indexed.
+    type Additions: TxIndexAdditions;
+
+    /// Scan and index the given `outpoint` and `txout`.
+    fn index_txout(&mut self, outpoint: OutPoint, txout: &TxOut) -> Self::Additions;
+
+    /// Scan and index the given transaction.
+    fn index_tx(&mut self, tx: &Transaction) -> Self::Additions {
+        let txid = tx.txid();
+        tx.output
+            .iter()
+            .enumerate()
+            .map(|(vout, txout)| self.index_txout(OutPoint::new(txid, vout as _), txout))
+            .reduce(|mut acc, other| {
+                acc.append_additions(other);
+                acc
+            })
+            .unwrap_or_default()
+    }
+
+    /// A transaction is relevant if it contains a txout with a script_pubkey that we own, or if it
+    /// spends an already-indexed outpoint that we have previously indexed.
+    fn is_tx_relevant(&self, tx: &Transaction) -> bool;
 }

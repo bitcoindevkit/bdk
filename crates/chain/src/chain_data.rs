@@ -5,6 +5,15 @@ use crate::{
     BlockAnchor, COINBASE_MATURITY,
 };
 
+/// Represents an observation of some chain data.
+#[derive(Debug, Clone, Copy)]
+pub enum Observation<A> {
+    /// The chain data is seen in a block identified by `A`.
+    InBlock(A),
+    /// The chain data is seen at this given unix timestamp.
+    SeenAt(u64),
+}
+
 /// Represents the height at which a transaction is confirmed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(

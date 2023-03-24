@@ -55,7 +55,10 @@
 //! assert!(additions.is_empty());
 //! ```
 
-use crate::{collections::*, BlockAnchor, BlockId, ForEachTxOut};
+use crate::{
+    collections::*, BlockAnchor, BlockId, ChainOracle, ForEachTxOut, Observation, TxIndex,
+    TxIndexAdditions,
+};
 use alloc::vec::Vec;
 use bitcoin::{OutPoint, Transaction, TxOut, Txid};
 use core::ops::{Deref, RangeInclusive};
@@ -207,6 +210,12 @@ impl<A> TxGraph<A> {
                 .map(|(vout, txout)| (*vout, txout))
                 .collect::<BTreeMap<_, _>>(),
         })
+    }
+
+    pub fn get_anchors_and_last_seen(&self, txid: Txid) -> Option<(&BTreeSet<A>, u64)> {
+        self.txs
+            .get(&txid)
+            .map(|(_, anchors, last_seen)| (anchors, *last_seen))
     }
 
     /// Calculates the fee of a given transaction. Returns 0 if `tx` is a coinbase transaction.
@@ -462,6 +471,75 @@ impl<A: BlockAnchor> TxGraph<A> {
         *update_last_seen = seen_at;
         self.determine_additions(&update)
     }
+
+    /// Determines whether a transaction of `txid` is in the best chain.
+    ///
+    /// TODO: Also return conflicting tx list, ordered by last_seen.
+    pub fn is_txid_in_best_chain<C>(&self, chain: C, txid: Txid) -> Result<bool, C::Error>
+    where
+        C: ChainOracle,
+    {
+        let (tx_node, anchors, &last_seen) = match self.txs.get(&txid) {
+            Some((tx, anchors, last_seen)) if !(anchors.is_empty() && *last_seen == 0) => {
+                (tx, anchors, last_seen)
+            }
+            _ => return Ok(false),
+        };
+
+        for block_id in anchors.iter().map(A::anchor_block) {
+            if chain.is_block_in_best_chain(block_id)? {
+                return Ok(true);
+            }
+        }
+
+        // The tx is not anchored to a block which is in the best chain, let's check whether we can
+        // ignore it by checking conflicts!
+        let tx = match tx_node {
+            TxNode::Whole(tx) => tx,
+            TxNode::Partial(_) => {
+                // [TODO] Unfortunately, we can't iterate over conflicts of partial txs right now!
+                // [TODO] So we just assume the partial tx does not exist in the best chain :/
+                return Ok(false);
+            }
+        };
+
+        // [TODO] Is this logic correct? I do not think so, but it should be good enough for now!
+        let mut latest_last_seen = 0_u64;
+        for conflicting_tx in self.walk_conflicts(tx, |_, txid| self.get_tx(txid)) {
+            for block_id in conflicting_tx.anchors.iter().map(A::anchor_block) {
+                if chain.is_block_in_best_chain(block_id)? {
+                    // conflicting tx is in best chain, so the current tx cannot be in best chain!
+                    return Ok(false);
+                }
+            }
+            if conflicting_tx.last_seen > latest_last_seen {
+                latest_last_seen = conflicting_tx.last_seen;
+            }
+        }
+        if last_seen >= latest_last_seen {
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
+    /// Return true if `outpoint` exists in best chain and is unspent.
+    pub fn is_unspent<C>(&self, chain: C, outpoint: OutPoint) -> Result<bool, C::Error>
+    where
+        C: ChainOracle,
+    {
+        if !self.is_txid_in_best_chain(&chain, outpoint.txid)? {
+            return Ok(false);
+        }
+        if let Some(spends) = self.spends.get(&outpoint) {
+            for &txid in spends {
+                if self.is_txid_in_best_chain(&chain, txid)? {
+                    return Ok(false);
+                }
+            }
+        }
+        Ok(true)
+    }
 }
 
 impl<A> TxGraph<A> {
@@ -565,6 +643,108 @@ impl<A> TxGraph<A> {
     /// Whether the graph has any transactions or outputs in it.
     pub fn is_empty(&self) -> bool {
         self.txs.is_empty()
+    }
+}
+
+pub struct IndexedAdditions<A, D> {
+    pub graph_additions: Additions<A>,
+    pub index_delta: D,
+}
+
+impl<A, D: Default> Default for IndexedAdditions<A, D> {
+    fn default() -> Self {
+        Self {
+            graph_additions: Default::default(),
+            index_delta: Default::default(),
+        }
+    }
+}
+
+impl<A: BlockAnchor, D: TxIndexAdditions> TxIndexAdditions for IndexedAdditions<A, D> {
+    fn append_additions(&mut self, other: Self) {
+        let Self {
+            graph_additions,
+            index_delta,
+        } = other;
+        self.graph_additions.append(graph_additions);
+        self.index_delta.append_additions(index_delta);
+    }
+}
+
+pub struct IndexedTxGraph<A, I> {
+    graph: TxGraph<A>,
+    index: I,
+}
+
+impl<A, I: Default> Default for IndexedTxGraph<A, I> {
+    fn default() -> Self {
+        Self {
+            graph: Default::default(),
+            index: Default::default(),
+        }
+    }
+}
+
+impl<A: BlockAnchor, I: TxIndex> IndexedTxGraph<A, I> {
+    pub fn insert_txout(
+        &mut self,
+        outpoint: OutPoint,
+        txout: &TxOut,
+        observation: Observation<A>,
+    ) -> IndexedAdditions<A, I::Additions> {
+        IndexedAdditions {
+            graph_additions: {
+                let mut graph_additions = self.graph.insert_txout(outpoint, txout.clone());
+                graph_additions.append(match observation {
+                    Observation::InBlock(anchor) => self.graph.insert_anchor(outpoint.txid, anchor),
+                    Observation::SeenAt(seen_at) => {
+                        self.graph.insert_seen_at(outpoint.txid, seen_at)
+                    }
+                });
+                graph_additions
+            },
+            index_delta: <I as TxIndex>::index_txout(&mut self.index, outpoint, txout),
+        }
+    }
+
+    pub fn insert_tx(
+        &mut self,
+        tx: &Transaction,
+        observation: Observation<A>,
+    ) -> IndexedAdditions<A, I::Additions> {
+        let txid = tx.txid();
+        IndexedAdditions {
+            graph_additions: {
+                let mut graph_additions = self.graph.insert_tx(tx.clone());
+                graph_additions.append(match observation {
+                    Observation::InBlock(anchor) => self.graph.insert_anchor(txid, anchor),
+                    Observation::SeenAt(seen_at) => self.graph.insert_seen_at(txid, seen_at),
+                });
+                graph_additions
+            },
+            index_delta: <I as TxIndex>::index_tx(&mut self.index, tx),
+        }
+    }
+
+    pub fn filter_and_insert_txs<'t, T>(
+        &mut self,
+        txs: T,
+        observation: Observation<A>,
+    ) -> IndexedAdditions<A, I::Additions>
+    where
+        T: Iterator<Item = &'t Transaction>,
+    {
+        txs.filter_map(|tx| {
+            if self.index.is_tx_relevant(tx) {
+                Some(self.insert_tx(tx, observation.clone()))
+            } else {
+                None
+            }
+        })
+        .fold(IndexedAdditions::default(), |mut acc, other| {
+            acc.append_additions(other);
+            acc
+        })
     }
 }
 

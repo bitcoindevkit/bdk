@@ -311,7 +311,7 @@ use core::{
     ops::{Bound, RangeBounds},
 };
 
-use crate::{collections::*, tx_graph::TxGraph, BlockId, FullTxOut, TxHeight};
+use crate::{collections::*, tx_graph::TxGraph, BlockId, ChainOracle, FullTxOut, TxHeight};
 use bitcoin::{hashes::Hash, BlockHash, OutPoint, Txid};
 
 /// This is a non-monotone structure that tracks relevant [`Txid`]s that are ordered by chain
@@ -455,6 +455,14 @@ impl<P: core::fmt::Debug> core::fmt::Display for UpdateError<P> {
 
 #[cfg(feature = "std")]
 impl<P: core::fmt::Debug> std::error::Error for UpdateError<P> {}
+
+impl<P: ChainPosition> ChainOracle for SparseChain<P> {
+    type Error = ();
+
+    fn get_block_in_best_chain(&self, height: u32) -> Result<Option<BlockHash>, Self::Error> {
+        Ok(self.checkpoint_at(height).map(|b| b.hash))
+    }
+}
 
 impl<P: ChainPosition> SparseChain<P> {
     /// Creates a new chain from a list of block hashes and heights. The caller must guarantee they

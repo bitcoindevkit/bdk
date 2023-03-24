@@ -2,7 +2,7 @@ use core::ops::RangeBounds;
 
 use crate::{
     collections::{hash_map::Entry, BTreeMap, BTreeSet, HashMap},
-    ForEachTxOut,
+    ForEachTxOut, TxIndex,
 };
 use bitcoin::{self, OutPoint, Script, Transaction, TxOut, Txid};
 
@@ -49,6 +49,25 @@ impl<I> Default for SpkTxOutIndex<I> {
             spk_txouts: Default::default(),
             unused: Default::default(),
         }
+    }
+}
+
+impl<I: Clone + Ord> TxIndex for SpkTxOutIndex<I> {
+    type Additions = BTreeSet<I>;
+
+    fn index_txout(&mut self, outpoint: OutPoint, txout: &TxOut) -> Self::Additions {
+        self.scan_txout(outpoint, txout)
+            .cloned()
+            .into_iter()
+            .collect()
+    }
+
+    fn index_tx(&mut self, tx: &Transaction) -> Self::Additions {
+        self.scan(tx)
+    }
+
+    fn is_tx_relevant(&self, tx: &Transaction) -> bool {
+        self.is_relevant(tx)
     }
 }
 
