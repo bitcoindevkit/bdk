@@ -1,0 +1,9 @@
+[package]
+name = "wallet_rpc_example"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bdk = { path = "../../crates/bdk" }
+bdk_rpc_wallet = { path = "../../crates/rpcwallet" }
+bdk_file_store = { path = "../../crates/file_store" }
