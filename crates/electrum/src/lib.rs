@@ -32,7 +32,7 @@ use bdk_chain::{
     keychain::KeychainScan,
     sparse_chain::{self, ChainPosition, SparseChain},
     tx_graph::TxGraph,
-    BlockId, ConfirmationTime, TxHeight,
+    BlockAnchor, BlockId, ConfirmationTime, TxHeight,
 };
 pub use electrum_client;
 use electrum_client::{Client, ElectrumApi, Error};
@@ -243,13 +243,14 @@ impl<K: Ord + Clone + Debug, P: ChainPosition> ElectrumUpdate<K, P> {
     /// `tracker`.
     ///
     /// This will fail if there are missing full transactions not provided via `new_txs`.
-    pub fn into_keychain_scan<CG>(
+    pub fn into_keychain_scan<CG, A>(
         self,
         new_txs: Vec<Transaction>,
         chain_graph: &CG,
-    ) -> Result<KeychainScan<K, P>, chain_graph::NewError<P>>
+    ) -> Result<KeychainScan<K, A, P>, chain_graph::NewError<P>>
     where
-        CG: AsRef<ChainGraph<P>>,
+        CG: AsRef<ChainGraph<A, P>>,
+        A: BlockAnchor,
     {
         Ok(KeychainScan {
             update: chain_graph

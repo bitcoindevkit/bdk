@@ -1,4 +1,6 @@
-use bitcoin::{Block, OutPoint, Transaction, TxOut};
+use bitcoin::{Block, BlockHash, OutPoint, Transaction, TxOut};
+
+use crate::BlockId;
 
 /// Trait to do something with every txout contained in a structure.
 ///
@@ -29,5 +31,21 @@ impl ForEachTxOut for Transaction {
                 txout,
             ))
         }
+    }
+}
+
+/// Trait that "anchors" blockchain data in a specific block of height and hash.
+///
+/// This trait is typically associated with blockchain data such as transactions.
+pub trait BlockAnchor:
+    core::fmt::Debug + Clone + Eq + PartialOrd + Ord + core::hash::Hash + Send + Sync + 'static
+{
+    /// Returns the [`BlockId`] that the associated blockchain data is "anchored" in.
+    fn anchor_block(&self) -> BlockId;
+}
+
+impl BlockAnchor for (u32, BlockHash) {
+    fn anchor_block(&self) -> BlockId {
+        (*self).into()
     }
 }

@@ -4,7 +4,7 @@
 //! [`KeychainChangeSet`]s which can be used to restore a [`KeychainTracker`].
 use bdk_chain::{
     keychain::{KeychainChangeSet, KeychainTracker},
-    sparse_chain,
+    sparse_chain, BlockAnchor,
 };
 use bincode::{DefaultOptions, Options};
 use core::marker::PhantomData;
@@ -23,20 +23,21 @@ const MAGIC_BYTES: [u8; MAGIC_BYTES_LEN] = [98, 100, 107, 102, 115, 48, 48, 48, 
 /// Persists an append only list of `KeychainChangeSet<K,P>` to a single file.
 /// [`KeychainChangeSet<K,P>`] record the changes made to a [`KeychainTracker<K,P>`].
 #[derive(Debug)]
-pub struct KeychainStore<K, P> {
+pub struct KeychainStore<K, A, P> {
     db_file: File,
-    changeset_type_params: core::marker::PhantomData<(K, P)>,
+    changeset_type_params: core::marker::PhantomData<(K, A, P)>,
 }
 
 fn bincode() -> impl bincode::Options {
     DefaultOptions::new().with_varint_encoding()
 }
 
-impl<K, P> KeychainStore<K, P>
+impl<K, A, P> KeychainStore<K, A, P>
 where
     K: Ord + Clone + core::fmt::Debug,
+    A: BlockAnchor,
     P: sparse_chain::ChainPosition,
-    KeychainChangeSet<K, P>: serde::Serialize + serde::de::DeserializeOwned,
+    KeychainChangeSet<K, A, P>: serde::Serialize + serde::de::DeserializeOwned,
 {
     /// Creates a new store from a [`File`].
     ///
@@ -85,7 +86,9 @@ where
     /// **WARNING**: This method changes the write position in the underlying file. You should
     /// always iterate over all entries until `None` is returned if you want your next write to go
     /// at the end; otherwise, you will write over existing entries.
-    pub fn iter_changesets(&mut self) -> Result<EntryIter<'_, KeychainChangeSet<K, P>>, io::Error> {
+    pub fn iter_changesets(
+        &mut self,
+    ) -> Result<EntryIter<'_, KeychainChangeSet<K, A, P>>, io::Error> {
         self.db_file
             .seek(io::SeekFrom::Start(MAGIC_BYTES_LEN as _))?;
 
@@ -104,7 +107,7 @@ where
     ///
     /// **WARNING**: This method changes the write position of the underlying file. The next
     /// changeset will be written over the erroring entry (or the end of the file if none existed).
-    pub fn aggregate_changeset(&mut self) -> (KeychainChangeSet<K, P>, Result<(), IterError>) {
+    pub fn aggregate_changeset(&mut self) -> (KeychainChangeSet<K, A, P>, Result<(), IterError>) {
         let mut changeset = KeychainChangeSet::default();
         let result = (|| {
             let iter_changeset = self.iter_changesets()?;
@@ -124,7 +127,7 @@ where
     /// changeset will be written over the erroring entry (or the end of the file if none existed).
     pub fn load_into_keychain_tracker(
         &mut self,
-        tracker: &mut KeychainTracker<K, P>,
+        tracker: &mut KeychainTracker<K, A, P>,
     ) -> Result<(), IterError> {
         for changeset in self.iter_changesets()? {
             tracker.apply_changeset(changeset?)
@@ -138,7 +141,7 @@ where
     /// directly after the appended changeset.
     pub fn append_changeset(
         &mut self,
-        changeset: &KeychainChangeSet<K, P>,
+        changeset: &KeychainChangeSet<K, A, P>,
     ) -> Result<(), io::Error> {
         if changeset.is_empty() {
             return Ok(());
@@ -288,7 +291,7 @@ mod test {
     use super::*;
     use bdk_chain::{
         keychain::{DerivationAdditions, KeychainChangeSet},
-        TxHeight,
+        BlockId, TxHeight,
     };
     use std::{
         io::{Read, Write},
@@ -332,7 +335,7 @@ mod test {
         file.write_all(&MAGIC_BYTES[..MAGIC_BYTES_LEN - 1])
             .expect("should write");
 
-        match KeychainStore::<TestKeychain, TxHeight>::new(file.reopen().unwrap()) {
+        match KeychainStore::<TestKeychain, BlockId, TxHeight>::new(file.reopen().unwrap()) {
             Err(FileError::Io(e)) => assert_eq!(e.kind(), std::io::ErrorKind::UnexpectedEof),
             unexpected => panic!("unexpected result: {:?}", unexpected),
         };
@@ -346,7 +349,7 @@ mod test {
         file.write_all(invalid_magic_bytes.as_bytes())
             .expect("should write");
 
-        match KeychainStore::<TestKeychain, TxHeight>::new(file.reopen().unwrap()) {
+        match KeychainStore::<TestKeychain, BlockId, TxHeight>::new(file.reopen().unwrap()) {
             Err(FileError::InvalidMagicBytes(b)) => {
                 assert_eq!(b, invalid_magic_bytes.as_bytes())
             }
@@ -370,8 +373,9 @@ mod test {
         let mut file = NamedTempFile::new().unwrap();
         file.write_all(&data).expect("should write");
 
-        let mut store = KeychainStore::<TestKeychain, TxHeight>::new(file.reopen().unwrap())
-            .expect("should open");
+        let mut store =
+            KeychainStore::<TestKeychain, BlockId, TxHeight>::new(file.reopen().unwrap())
+                .expect("should open");
         match store.iter_changesets().expect("seek should succeed").next() {
             Some(Err(IterError::Bincode(_))) => {}
             unexpected_res => panic!("unexpected result: {:?}", unexpected_res),

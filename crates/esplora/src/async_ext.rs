@@ -48,7 +48,7 @@ pub trait EsploraAsyncExt {
         outpoints: impl IntoIterator<IntoIter = impl Iterator<Item = OutPoint> + Send> + Send,
         stop_gap: usize,
         parallel_requests: usize,
-    ) -> Result<KeychainScan<K, ConfirmationTime>, Error>;
+    ) -> Result<KeychainScan<K, BlockId, ConfirmationTime>, Error>;
 
     /// Convenience method to call [`scan`] without requiring a keychain.
     ///
@@ -61,7 +61,7 @@ pub trait EsploraAsyncExt {
         txids: impl IntoIterator<IntoIter = impl Iterator<Item = Txid> + Send> + Send,
         outpoints: impl IntoIterator<IntoIter = impl Iterator<Item = OutPoint> + Send> + Send,
         parallel_requests: usize,
-    ) -> Result<ChainGraph<ConfirmationTime>, Error> {
+    ) -> Result<ChainGraph<BlockId, ConfirmationTime>, Error> {
         let wallet_scan = self
             .scan(
                 local_chain,
@@ -100,7 +100,7 @@ impl EsploraAsyncExt for esplora_client::AsyncClient {
         outpoints: impl IntoIterator<IntoIter = impl Iterator<Item = OutPoint> + Send> + Send,
         stop_gap: usize,
         parallel_requests: usize,
-    ) -> Result<KeychainScan<K, ConfirmationTime>, Error> {
+    ) -> Result<KeychainScan<K, BlockId, ConfirmationTime>, Error> {
         let txids = txids.into_iter();
         let outpoints = outpoints.into_iter();
         let parallel_requests = parallel_requests.max(1);

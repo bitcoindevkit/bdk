@@ -2,7 +2,7 @@ use bitcoin::{hashes::Hash, BlockHash, OutPoint, TxOut, Txid};
 
 use crate::{
     sparse_chain::{self, ChainPosition},
-    COINBASE_MATURITY,
+    BlockAnchor, COINBASE_MATURITY,
 };
 
 /// Represents the height at which a transaction is confirmed.
@@ -118,7 +118,7 @@ impl ConfirmationTime {
 }
 
 /// A reference to a block in the canonical chain.
-#[derive(Debug, Clone, PartialEq, Eq, Copy, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy, PartialOrd, Ord, core::hash::Hash)]
 #[cfg_attr(
     feature = "serde",
     derive(serde::Deserialize, serde::Serialize),
@@ -137,6 +137,12 @@ impl Default for BlockId {
             height: Default::default(),
             hash: BlockHash::from_inner([0u8; 32]),
         }
+    }
+}
+
+impl BlockAnchor for BlockId {
+    fn anchor_block(&self) -> BlockId {
+        *self
     }
 }
 

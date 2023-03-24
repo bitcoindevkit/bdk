@@ -49,7 +49,7 @@ pub struct ScanOptions {
 }
 
 fn main() -> anyhow::Result<()> {
-    let (args, keymap, keychain_tracker, db) = cli::init::<EsploraCommands, _>()?;
+    let (args, keymap, keychain_tracker, db) = cli::init::<EsploraCommands, _, _>()?;
     let esplora_url = match args.network {
         Network::Bitcoin => "https://mempool.space/api",
         Network::Testnet => "https://mempool.space/testnet/api",

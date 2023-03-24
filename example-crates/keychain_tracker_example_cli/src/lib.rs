@@ -13,7 +13,7 @@ use bdk_chain::{
         Descriptor, DescriptorPublicKey,
     },
     sparse_chain::{self, ChainPosition},
-    DescriptorExt, FullTxOut,
+    BlockAnchor, DescriptorExt, FullTxOut,
 };
 use bdk_coin_select::{coin_select_bnb, CoinSelector, CoinSelectorOpt, WeightedValue};
 use bdk_file_store::KeychainStore;
@@ -179,15 +179,16 @@ pub struct AddrsOutput {
     used: bool,
 }
 
-pub fn run_address_cmd<P>(
-    tracker: &Mutex<KeychainTracker<Keychain, P>>,
-    db: &Mutex<KeychainStore<Keychain, P>>,
+pub fn run_address_cmd<A, P>(
+    tracker: &Mutex<KeychainTracker<Keychain, A, P>>,
+    db: &Mutex<KeychainStore<Keychain, A, P>>,
     addr_cmd: AddressCmd,
     network: Network,
 ) -> Result<()>
 where
+    A: bdk_chain::BlockAnchor,
     P: bdk_chain::sparse_chain::ChainPosition,
-    KeychainChangeSet<Keychain, P>: serde::Serialize + serde::de::DeserializeOwned,
+    KeychainChangeSet<Keychain, A, P>: serde::Serialize + serde::de::DeserializeOwned,
 {
     let mut tracker = tracker.lock().unwrap();
     let txout_index = &mut tracker.txout_index;
@@ -241,7 +242,9 @@ where
     }
 }
 
-pub fn run_balance_cmd<P: ChainPosition>(tracker: &Mutex<KeychainTracker<Keychain, P>>) {
+pub fn run_balance_cmd<A: BlockAnchor, P: ChainPosition>(
+    tracker: &Mutex<KeychainTracker<Keychain, A, P>>,
+) {
     let tracker = tracker.lock().unwrap();
     let (confirmed, unconfirmed) =
         tracker
@@ -258,9 +261,9 @@ pub fn run_balance_cmd<P: ChainPosition>(tracker: &Mutex<KeychainTracker<Keychai
     println!("unconfirmed: {}", unconfirmed);
 }
 
-pub fn run_txo_cmd<K: Debug + Clone + Ord, P: ChainPosition>(
+pub fn run_txo_cmd<K: Debug + Clone + Ord, A: BlockAnchor, P: ChainPosition>(
     txout_cmd: TxOutCmd,
-    tracker: &Mutex<KeychainTracker<K, P>>,
+    tracker: &Mutex<KeychainTracker<K, A, P>>,
     network: Network,
 ) {
     match txout_cmd {
@@ -313,11 +316,11 @@ pub fn run_txo_cmd<K: Debug + Clone + Ord, P: ChainPosition>(
 }
 
 #[allow(clippy::type_complexity)] // FIXME
-pub fn create_tx<P: ChainPosition>(
+pub fn create_tx<A: BlockAnchor, P: ChainPosition>(
     value: u64,
     address: Address,
     coin_select: CoinSelectionAlgo,
-    keychain_tracker: &mut KeychainTracker<Keychain, P>,
+    keychain_tracker: &mut KeychainTracker<Keychain, A, P>,
     keymap: &HashMap<DescriptorPublicKey, DescriptorSecretKey>,
 ) -> Result<(
     Transaction,
@@ -526,19 +529,20 @@ pub fn create_tx<P: ChainPosition>(
     Ok((transaction, change_info))
 }
 
-pub fn handle_commands<C: clap::Subcommand, P>(
+pub fn handle_commands<C: clap::Subcommand, A, P>(
     command: Commands<C>,
     broadcast: impl FnOnce(&Transaction) -> Result<()>,
     // we Mutex around these not because we need them for a simple CLI app but to demonstrate how
     // all the stuff we're doing can be made thread-safe and not keep locks up over an IO bound.
-    tracker: &Mutex<KeychainTracker<Keychain, P>>,
-    store: &Mutex<KeychainStore<Keychain, P>>,
+    tracker: &Mutex<KeychainTracker<Keychain, A, P>>,
+    store: &Mutex<KeychainStore<Keychain, A, P>>,
     network: Network,
     keymap: &HashMap<DescriptorPublicKey, DescriptorSecretKey>,
 ) -> Result<()>
 where
+    A: BlockAnchor,
     P: ChainPosition,
-    KeychainChangeSet<Keychain, P>: serde::Serialize + serde::de::DeserializeOwned,
+    KeychainChangeSet<Keychain, A, P>: serde::Serialize + serde::de::DeserializeOwned,
 {
     match command {
         // TODO: Make these functions return stuffs
@@ -619,17 +623,18 @@ where
 }
 
 #[allow(clippy::type_complexity)] // FIXME
-pub fn init<C: clap::Subcommand, P>() -> anyhow::Result<(
+pub fn init<C: clap::Subcommand, A, P>() -> anyhow::Result<(
     Args<C>,
     KeyMap,
     // These don't need to have mutexes around them, but we want the cli example code to make it obvious how they
     // are thread-safe, forcing the example developers to show where they would lock and unlock things.
-    Mutex<KeychainTracker<Keychain, P>>,
-    Mutex<KeychainStore<Keychain, P>>,
+    Mutex<KeychainTracker<Keychain, A, P>>,
+    Mutex<KeychainStore<Keychain, A, P>>,
 )>
 where
+    A: BlockAnchor,
     P: sparse_chain::ChainPosition,
-    KeychainChangeSet<Keychain, P>: serde::Serialize + serde::de::DeserializeOwned,
+    KeychainChangeSet<Keychain, A, P>: serde::Serialize + serde::de::DeserializeOwned,
 {
     let args = Args::<C>::parse();
     let secp = Secp256k1::default();
@@ -655,7 +660,7 @@ where
             .add_keychain(Keychain::Internal, internal_descriptor);
     };
 
-    let mut db = KeychainStore::<Keychain, P>::new_from_path(args.db_path.as_path())?;
+    let mut db = KeychainStore::<Keychain, A, P>::new_from_path(args.db_path.as_path())?;
 
     if let Err(e) = db.load_into_keychain_tracker(&mut tracker) {
         match tracker.chain().latest_checkpoint()  {
@@ -669,8 +674,8 @@ where
     Ok((args, keymap, Mutex::new(tracker), Mutex::new(db)))
 }
 
-pub fn planned_utxos<'a, AK: bdk_tmp_plan::CanDerive + Clone, P: ChainPosition>(
-    tracker: &'a KeychainTracker<Keychain, P>,
+pub fn planned_utxos<'a, AK: bdk_tmp_plan::CanDerive + Clone, A: BlockAnchor, P: ChainPosition>(
+    tracker: &'a KeychainTracker<Keychain, A, P>,
     assets: &'a bdk_tmp_plan::Assets<AK>,
 ) -> impl Iterator<Item = (bdk_tmp_plan::Plan<AK>, FullTxOut<P>)> + 'a {
     tracker

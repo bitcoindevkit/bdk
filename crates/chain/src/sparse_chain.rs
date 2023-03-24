@@ -899,7 +899,7 @@ impl<P: ChainPosition> SparseChain<P> {
     /// Attempt to retrieve a [`FullTxOut`] of the given `outpoint`.
     ///
     /// This will return `Some` only if the output's transaction is in both `self` and `graph`.
-    pub fn full_txout(&self, graph: &TxGraph, outpoint: OutPoint) -> Option<FullTxOut<P>> {
+    pub fn full_txout<A>(&self, graph: &TxGraph<A>, outpoint: OutPoint) -> Option<FullTxOut<P>> {
         let chain_pos = self.tx_position(outpoint.txid)?;
 
         let tx = graph.get_tx(outpoint.txid)?;
@@ -972,7 +972,7 @@ impl<P: ChainPosition> SparseChain<P> {
     ///
     /// Note that the transaction including `outpoint` does not need to be in the `graph` or the
     /// `chain` for this to return `Some`.
-    pub fn spent_by(&self, graph: &TxGraph, outpoint: OutPoint) -> Option<(&P, Txid)> {
+    pub fn spent_by<A>(&self, graph: &TxGraph<A>, outpoint: OutPoint) -> Option<(&P, Txid)> {
         graph
             .outspends(outpoint)
             .iter()

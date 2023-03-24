@@ -1,14 +1,18 @@
 #[macro_use]
 mod common;
 
+use std::collections::BTreeSet;
+
 use bdk_chain::{
     chain_graph::*,
     collections::HashSet,
     sparse_chain,
-    tx_graph::{self, TxGraph},
+    tx_graph::{self, GraphedTx, TxGraph},
     BlockId, TxHeight,
 };
-use bitcoin::{OutPoint, PackedLockTime, Script, Sequence, Transaction, TxIn, TxOut, Witness};
+use bitcoin::{
+    BlockHash, OutPoint, PackedLockTime, Script, Sequence, Transaction, TxIn, TxOut, Witness,
+};
 
 #[test]
 fn test_spent_by() {
@@ -43,7 +47,7 @@ fn test_spent_by() {
         output: vec![],
     };
 
-    let mut cg1 = ChainGraph::default();
+    let mut cg1 = ChainGraph::<(u32, BlockHash), _>::default();
     let _ = cg1
         .insert_tx(tx1, TxHeight::Unconfirmed)
         .expect("should insert");
@@ -124,7 +128,7 @@ fn update_evicts_conflicting_tx() {
             cg
         };
 
-        let changeset = ChangeSet::<TxHeight> {
+        let changeset = ChangeSet::<(u32, BlockHash), TxHeight> {
             chain: sparse_chain::ChangeSet {
                 checkpoints: Default::default(),
                 txids: [
@@ -133,9 +137,10 @@ fn update_evicts_conflicting_tx() {
                 ]
                 .into(),
             },
-            graph: tx_graph::Additions {
+            graph: tx_graph::Additions::<(u32, BlockHash)> {
                 tx: [tx_b2.clone()].into(),
                 txout: [].into(),
+                ..Default::default()
             },
         };
         assert_eq!(
@@ -149,7 +154,7 @@ fn update_evicts_conflicting_tx() {
 
     {
         let cg1 = {
-            let mut cg = ChainGraph::default();
+            let mut cg = ChainGraph::<(u32, BlockHash), _>::default();
             let _ = cg.insert_checkpoint(cp_a).expect("should insert cp");
             let _ = cg.insert_checkpoint(cp_b).expect("should insert cp");
             let _ = cg
@@ -203,7 +208,7 @@ fn update_evicts_conflicting_tx() {
             cg
         };
 
-        let changeset = ChangeSet::<TxHeight> {
+        let changeset = ChangeSet::<(u32, BlockHash), TxHeight> {
             chain: sparse_chain::ChangeSet {
                 checkpoints: [(1, Some(h!("B'")))].into(),
                 txids: [
@@ -212,9 +217,10 @@ fn update_evicts_conflicting_tx() {
                 ]
                 .into(),
             },
-            graph: tx_graph::Additions {
+            graph: tx_graph::Additions::<(u32, BlockHash)> {
                 tx: [tx_b2].into(),
                 txout: [].into(),
+                ..Default::default()
             },
         };
         assert_eq!(
@@ -250,7 +256,7 @@ fn chain_graph_new_missing() {
             (tx_b.txid(), TxHeight::Confirmed(0))
         ]
     );
-    let mut graph = TxGraph::default();
+    let mut graph = TxGraph::<(u32, BlockHash)>::default();
 
     let mut expected_missing = HashSet::new();
     expected_missing.insert(tx_a.txid());
@@ -287,7 +293,7 @@ fn chain_graph_new_missing() {
 
     let new_graph = ChainGraph::new(update.clone(), graph.clone()).unwrap();
     let expected_graph = {
-        let mut cg = ChainGraph::<TxHeight>::default();
+        let mut cg = ChainGraph::<(u32, BlockHash), TxHeight>::default();
         let _ = cg
             .insert_checkpoint(update.latest_checkpoint().unwrap())
             .unwrap();
@@ -342,7 +348,7 @@ fn chain_graph_new_conflicts() {
         ]
     );
 
-    let graph = TxGraph::new([tx_a, tx_b, tx_b2]);
+    let graph = TxGraph::<(u32, BlockHash)>::new([tx_a, tx_b, tx_b2]);
 
     assert!(matches!(
         ChainGraph::new(chain, graph),
@@ -352,7 +358,7 @@ fn chain_graph_new_conflicts() {
 
 #[test]
 fn test_get_tx_in_chain() {
-    let mut cg = ChainGraph::default();
+    let mut cg = ChainGraph::<(u32, BlockHash), _>::default();
     let tx = Transaction {
         version: 0x01,
         lock_time: PackedLockTime(0),
@@ -363,13 +369,21 @@ fn test_get_tx_in_chain() {
     let _ = cg.insert_tx(tx.clone(), TxHeight::Unconfirmed).unwrap();
     assert_eq!(
         cg.get_tx_in_chain(tx.txid()),
-        Some((&TxHeight::Unconfirmed, &tx))
+        Some((
+            &TxHeight::Unconfirmed,
+            GraphedTx {
+                txid: tx.txid(),
+                tx: &tx,
+                anchors: &BTreeSet::new(),
+                last_seen: 0
+            }
+        ))
     );
 }
 
 #[test]
 fn test_iterate_transactions() {
-    let mut cg = ChainGraph::default();
+    let mut cg = ChainGraph::<BlockId, _>::default();
     let txs = (0..3)
         .map(|i| Transaction {
             version: i,
@@ -395,9 +409,18 @@ fn test_iterate_transactions() {
     assert_eq!(
         cg.transactions_in_chain().collect::<Vec<_>>(),
         vec![
-            (&TxHeight::Confirmed(0), &txs[2]),
-            (&TxHeight::Confirmed(1), &txs[0]),
-            (&TxHeight::Unconfirmed, &txs[1]),
+            (
+                &TxHeight::Confirmed(0),
+                GraphedTx::from_tx(&txs[2], &BTreeSet::new())
+            ),
+            (
+                &TxHeight::Confirmed(1),
+                GraphedTx::from_tx(&txs[0], &BTreeSet::new())
+            ),
+            (
+                &TxHeight::Unconfirmed,
+                GraphedTx::from_tx(&txs[1], &BTreeSet::new())
+            ),
         ]
     );
 }
@@ -457,7 +480,7 @@ fn test_apply_changes_reintroduce_tx() {
 
     // block1, block2a, tx1, tx2a
     let mut cg = {
-        let mut cg = ChainGraph::default();
+        let mut cg = ChainGraph::<(u32, BlockHash), _>::default();
         let _ = cg.insert_checkpoint(block1).unwrap();
         let _ = cg.insert_checkpoint(block2a).unwrap();
         let _ = cg.insert_tx(tx1, TxHeight::Confirmed(1)).unwrap();
@@ -613,7 +636,7 @@ fn test_evict_descendants() {
     let txid_conflict = tx_conflict.txid();
 
     let cg = {
-        let mut cg = ChainGraph::<TxHeight>::default();
+        let mut cg = ChainGraph::<(u32, BlockHash), TxHeight>::default();
         let _ = cg.insert_checkpoint(block_1);
         let _ = cg.insert_checkpoint(block_2a);
         let _ = cg.insert_tx(tx_1, TxHeight::Confirmed(1));
@@ -625,7 +648,7 @@ fn test_evict_descendants() {
     };
 
     let update = {
-        let mut cg = ChainGraph::<TxHeight>::default();
+        let mut cg = ChainGraph::<(u32, BlockHash), TxHeight>::default();
         let _ = cg.insert_checkpoint(block_1);
         let _ = cg.insert_checkpoint(block_2b);
         let _ = cg.insert_tx(tx_conflict.clone(), TxHeight::Confirmed(2));

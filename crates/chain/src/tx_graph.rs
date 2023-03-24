@@ -15,12 +15,13 @@
 //! of the changes to [`TxGraph`].
 //!
 //! ```
+//! # use bdk_chain::BlockId;
 //! # use bdk_chain::tx_graph::TxGraph;
 //! # use bdk_chain::example_utils::*;
 //! # use bitcoin::Transaction;
 //! # let tx_a = tx_from_hex(RAW_TX_1);
 //! # let tx_b = tx_from_hex(RAW_TX_2);
-//! let mut graph = TxGraph::default();
+//! let mut graph = TxGraph::<BlockId>::default();
 //!
 //! // preview a transaction insertion (not actually inserted)
 //! let additions = graph.insert_tx_preview(tx_a);
@@ -34,12 +35,13 @@
 //! A [`TxGraph`] can also be updated with another [`TxGraph`].
 //!
 //! ```
+//! # use bdk_chain::BlockId;
 //! # use bdk_chain::tx_graph::TxGraph;
 //! # use bdk_chain::example_utils::*;
 //! # use bitcoin::Transaction;
 //! # let tx_a = tx_from_hex(RAW_TX_1);
 //! # let tx_b = tx_from_hex(RAW_TX_2);
-//! let mut graph = TxGraph::default();
+//! let mut graph = TxGraph::<BlockId>::default();
 //! let update = TxGraph::new(vec![tx_a, tx_b]);
 //!
 //! // preview additions as the result of the update
@@ -52,28 +54,76 @@
 //! let additions = graph.apply_update(update);
 //! assert!(additions.is_empty());
 //! ```
-use crate::{collections::*, ForEachTxOut};
+
+use crate::{collections::*, BlockAnchor, BlockId, ForEachTxOut};
 use alloc::vec::Vec;
 use bitcoin::{OutPoint, Transaction, TxOut, Txid};
-use core::ops::RangeInclusive;
+use core::ops::{Deref, RangeInclusive};
 
 /// A graph of transactions and spends.
 ///
 /// See the [module-level documentation] for more.
 ///
 /// [module-level documentation]: crate::tx_graph
-#[derive(Clone, Debug, PartialEq, Default)]
-pub struct TxGraph {
-    txs: HashMap<Txid, TxNode>,
+#[derive(Clone, Debug, PartialEq)]
+pub struct TxGraph<A = BlockId> {
+    // all transactions that the graph is aware of in format: `(tx_node, tx_anchors, tx_last_seen)`
+    txs: HashMap<Txid, (TxNode, BTreeSet<A>, u64)>,
     spends: BTreeMap<OutPoint, HashSet<Txid>>,
+    anchors: BTreeSet<(A, Txid)>,
 
     // This atrocity exists so that `TxGraph::outspends()` can return a reference.
     // FIXME: This can be removed once `HashSet::new` is a const fn.
     empty_outspends: HashSet<Txid>,
 }
 
-/// Node of a [`TxGraph`]. This can either be a whole transaction, or a partial transaction (where
-/// we only have select outputs).
+impl<A> Default for TxGraph<A> {
+    fn default() -> Self {
+        Self {
+            txs: Default::default(),
+            spends: Default::default(),
+            anchors: Default::default(),
+            empty_outspends: Default::default(),
+        }
+    }
+}
+
+/// An outward-facing view of a transaction that resides in a [`TxGraph`].
+#[derive(Clone, Debug, PartialEq)]
+pub struct GraphedTx<'a, T, A> {
+    /// Txid of the transaction.
+    pub txid: Txid,
+    /// A partial or full representation of the transaction.
+    pub tx: &'a T,
+    /// The blocks that the transaction is "anchored" in.
+    pub anchors: &'a BTreeSet<A>,
+    /// The last-seen unix timestamp of the transaction.
+    pub last_seen: u64,
+}
+
+impl<'a, T, A> Deref for GraphedTx<'a, T, A> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        self.tx
+    }
+}
+
+impl<'a, A> GraphedTx<'a, Transaction, A> {
+    pub fn from_tx(tx: &'a Transaction, anchors: &'a BTreeSet<A>) -> Self {
+        Self {
+            txid: tx.txid(),
+            tx,
+            anchors,
+            last_seen: 0,
+        }
+    }
+}
+
+/// Internal representation of a transaction node of a [`TxGraph`].
+///
+/// This can either be a whole transaction, or a partial transaction (where we only have select
+/// outputs).
 #[derive(Clone, Debug, PartialEq)]
 enum TxNode {
     Whole(Transaction),
@@ -86,10 +136,10 @@ impl Default for TxNode {
     }
 }
 
-impl TxGraph {
+impl<A> TxGraph<A> {
     /// Iterate over all tx outputs known by [`TxGraph`].
     pub fn all_txouts(&self) -> impl Iterator<Item = (OutPoint, &TxOut)> {
-        self.txs.iter().flat_map(|(txid, tx)| match tx {
+        self.txs.iter().flat_map(|(txid, (tx, _, _))| match tx {
             TxNode::Whole(tx) => tx
                 .output
                 .iter()
@@ -104,11 +154,18 @@ impl TxGraph {
     }
 
     /// Iterate over all full transactions in the graph.
-    pub fn full_transactions(&self) -> impl Iterator<Item = &Transaction> {
-        self.txs.iter().filter_map(|(_, tx)| match tx {
-            TxNode::Whole(tx) => Some(tx),
-            TxNode::Partial(_) => None,
-        })
+    pub fn full_transactions(&self) -> impl Iterator<Item = GraphedTx<'_, Transaction, A>> {
+        self.txs
+            .iter()
+            .filter_map(|(&txid, (tx, anchors, last_seen))| match tx {
+                TxNode::Whole(tx) => Some(GraphedTx {
+                    txid,
+                    tx,
+                    anchors,
+                    last_seen: *last_seen,
+                }),
+                TxNode::Partial(_) => None,
+            })
     }
 
     /// Get a transaction by txid. This only returns `Some` for full transactions.
@@ -116,16 +173,21 @@ impl TxGraph {
     /// Refer to [`get_txout`] for getting a specific [`TxOut`].
     ///
     /// [`get_txout`]: Self::get_txout
-    pub fn get_tx(&self, txid: Txid) -> Option<&Transaction> {
-        match self.txs.get(&txid)? {
-            TxNode::Whole(tx) => Some(tx),
-            TxNode::Partial(_) => None,
+    pub fn get_tx(&self, txid: Txid) -> Option<GraphedTx<'_, Transaction, A>> {
+        match &self.txs.get(&txid)? {
+            (TxNode::Whole(tx), anchors, last_seen) => Some(GraphedTx {
+                txid,
+                tx,
+                anchors,
+                last_seen: *last_seen,
+            }),
+            _ => None,
         }
     }
 
     /// Obtains a single tx output (if any) at the specified outpoint.
     pub fn get_txout(&self, outpoint: OutPoint) -> Option<&TxOut> {
-        match self.txs.get(&outpoint.txid)? {
+        match &self.txs.get(&outpoint.txid)?.0 {
             TxNode::Whole(tx) => tx.output.get(outpoint.vout as usize),
             TxNode::Partial(txouts) => txouts.get(&outpoint.vout),
         }
@@ -133,7 +195,7 @@ impl TxGraph {
 
     /// Returns a [`BTreeMap`] of vout to output of the provided `txid`.
     pub fn txouts(&self, txid: Txid) -> Option<BTreeMap<u32, &TxOut>> {
-        Some(match self.txs.get(&txid)? {
+        Some(match &self.txs.get(&txid)?.0 {
             TxNode::Whole(tx) => tx
                 .output
                 .iter()
@@ -178,7 +240,7 @@ impl TxGraph {
     }
 }
 
-impl TxGraph {
+impl<A: BlockAnchor> TxGraph<A> {
     /// Construct a new [`TxGraph`] from a list of transactions.
     pub fn new(txs: impl IntoIterator<Item = Transaction>) -> Self {
         let mut new = Self::default();
@@ -187,11 +249,12 @@ impl TxGraph {
         }
         new
     }
+
     /// Inserts the given [`TxOut`] at [`OutPoint`].
     ///
     /// Note this will ignore the action if we already have the full transaction that the txout is
     /// alleged to be on (even if it doesn't match it!).
-    pub fn insert_txout(&mut self, outpoint: OutPoint, txout: TxOut) -> Additions {
+    pub fn insert_txout(&mut self, outpoint: OutPoint, txout: TxOut) -> Additions<A> {
         let additions = self.insert_txout_preview(outpoint, txout);
         self.apply_additions(additions.clone());
         additions
@@ -200,8 +263,35 @@ impl TxGraph {
     /// Inserts the given transaction into [`TxGraph`].
     ///
     /// The [`Additions`] returned will be empty if `tx` already exists.
-    pub fn insert_tx(&mut self, tx: Transaction) -> Additions {
+    pub fn insert_tx(&mut self, tx: Transaction) -> Additions<A> {
         let additions = self.insert_tx_preview(tx);
+        self.apply_additions(additions.clone());
+        additions
+    }
+
+    /// Inserts the given `anchor` into [`TxGraph`].
+    ///
+    /// This is equivalent to calling [`insert_anchor_preview`] and [`apply_additions`] in sequence.
+    /// The [`Additions`] returned will be empty if graph already knows that `txid` exists in
+    /// `anchor`.
+    ///
+    /// [`insert_anchor_preview`]: Self::insert_anchor_preview
+    /// [`apply_additions`]: Self::apply_additions
+    pub fn insert_anchor(&mut self, txid: Txid, anchor: A) -> Additions<A> {
+        let additions = self.insert_anchor_preview(txid, anchor);
+        self.apply_additions(additions.clone());
+        additions
+    }
+
+    /// Inserts the given `seen_at` into [`TxGraph`].
+    ///
+    /// This is equivalent to calling [`insert_seen_at_preview`] and [`apply_additions`] in
+    /// sequence.
+    ///
+    /// [`insert_seen_at_preview`]: Self::insert_seen_at_preview
+    /// [`apply_additions`]: Self::apply_additions
+    pub fn insert_seen_at(&mut self, txid: Txid, seen_at: u64) -> Additions<A> {
+        let additions = self.insert_seen_at_preview(txid, seen_at);
         self.apply_additions(additions.clone());
         additions
     }
@@ -211,14 +301,14 @@ impl TxGraph {
     ///
     /// The returned [`Additions`] is the set difference between `update` and `self` (transactions that
     /// exist in `update` but not in `self`).
-    pub fn apply_update(&mut self, update: TxGraph) -> Additions {
+    pub fn apply_update(&mut self, update: TxGraph<A>) -> Additions<A> {
         let additions = self.determine_additions(&update);
         self.apply_additions(additions.clone());
         additions
     }
 
     /// Applies [`Additions`] to [`TxGraph`].
-    pub fn apply_additions(&mut self, additions: Additions) {
+    pub fn apply_additions(&mut self, additions: Additions<A>) {
         for tx in additions.tx {
             let txid = tx.txid();
 
@@ -232,12 +322,21 @@ impl TxGraph {
                     self.spends.entry(outpoint).or_default().insert(txid);
                 });
 
-            if let Some(TxNode::Whole(old_tx)) = self.txs.insert(txid, TxNode::Whole(tx)) {
-                debug_assert_eq!(
-                    old_tx.txid(),
-                    txid,
-                    "old tx of the same txid should not be different."
-                );
+            match self.txs.get_mut(&txid) {
+                Some((tx_node @ TxNode::Partial(_), _, _)) => {
+                    *tx_node = TxNode::Whole(tx);
+                }
+                Some((TxNode::Whole(tx), _, _)) => {
+                    debug_assert_eq!(
+                        tx.txid(),
+                        txid,
+                        "tx should produce txid that is same as key"
+                    );
+                }
+                None => {
+                    self.txs
+                        .insert(txid, (TxNode::Whole(tx), BTreeSet::new(), 0));
+                }
             }
         }
 
@@ -245,13 +344,27 @@ impl TxGraph {
             let tx_entry = self
                 .txs
                 .entry(outpoint.txid)
-                .or_insert_with(TxNode::default);
+                .or_insert_with(Default::default);
 
             match tx_entry {
-                TxNode::Whole(_) => { /* do nothing since we already have full tx */ }
-                TxNode::Partial(txouts) => {
+                (TxNode::Whole(_), _, _) => { /* do nothing since we already have full tx */ }
+                (TxNode::Partial(txouts), _, _) => {
                     txouts.insert(outpoint.vout, txout);
                 }
+            }
+        }
+
+        for (anchor, txid) in additions.anchors {
+            if self.anchors.insert((anchor.clone(), txid)) {
+                let (_, anchors, _) = self.txs.entry(txid).or_insert_with(Default::default);
+                anchors.insert(anchor);
+            }
+        }
+
+        for (txid, new_last_seen) in additions.last_seen {
+            let (_, _, last_seen) = self.txs.entry(txid).or_insert_with(Default::default);
+            if new_last_seen > *last_seen {
+                *last_seen = new_last_seen;
             }
         }
     }
@@ -260,31 +373,45 @@ impl TxGraph {
     ///
     /// The [`Additions`] would be the set difference between `update` and `self` (transactions that
     /// exist in `update` but not in `self`).
-    pub fn determine_additions(&self, update: &TxGraph) -> Additions {
+    pub fn determine_additions(&self, update: &TxGraph<A>) -> Additions<A> {
         let mut additions = Additions::default();
 
-        for (&txid, update_tx) in &update.txs {
-            if self.get_tx(txid).is_some() {
-                continue;
-            }
-
-            match update_tx {
-                TxNode::Whole(tx) => {
-                    if matches!(self.txs.get(&txid), None | Some(TxNode::Partial(_))) {
-                        additions.tx.insert(tx.clone());
-                    }
+        for (&txid, (update_tx_node, _, update_last_seen)) in &update.txs {
+            let prev_last_seen: u64 = match (self.txs.get(&txid), update_tx_node) {
+                (None, TxNode::Whole(update_tx)) => {
+                    additions.tx.insert(update_tx.clone());
+                    0
                 }
-                TxNode::Partial(partial) => {
-                    for (&vout, update_txout) in partial {
-                        let outpoint = OutPoint::new(txid, vout);
-
-                        if self.get_txout(outpoint) != Some(update_txout) {
-                            additions.txout.insert(outpoint, update_txout.clone());
-                        }
-                    }
+                (None, TxNode::Partial(update_txos)) => {
+                    additions.txout.extend(
+                        update_txos
+                            .iter()
+                            .map(|(&vout, txo)| (OutPoint::new(txid, vout), txo.clone())),
+                    );
+                    0
                 }
+                (Some((TxNode::Whole(_), _, last_seen)), _) => *last_seen,
+                (Some((TxNode::Partial(_), _, last_seen)), TxNode::Whole(update_tx)) => {
+                    additions.tx.insert(update_tx.clone());
+                    *last_seen
+                }
+                (Some((TxNode::Partial(txos), _, last_seen)), TxNode::Partial(update_txos)) => {
+                    additions.txout.extend(
+                        update_txos
+                            .iter()
+                            .filter(|(vout, _)| !txos.contains_key(*vout))
+                            .map(|(&vout, txo)| (OutPoint::new(txid, vout), txo.clone())),
+                    );
+                    *last_seen
+                }
+            };
+
+            if *update_last_seen > prev_last_seen {
+                additions.last_seen.insert(txid, *update_last_seen);
             }
         }
+
+        additions.anchors = update.anchors.difference(&self.anchors).cloned().collect();
 
         additions
     }
@@ -293,9 +420,11 @@ impl TxGraph {
     /// mutate [`Self`].
     ///
     /// The [`Additions`] result will be empty if `tx` already exists in `self`.
-    pub fn insert_tx_preview(&self, tx: Transaction) -> Additions {
+    pub fn insert_tx_preview(&self, tx: Transaction) -> Additions<A> {
         let mut update = Self::default();
-        update.txs.insert(tx.txid(), TxNode::Whole(tx));
+        update
+            .txs
+            .insert(tx.txid(), (TxNode::Whole(tx), BTreeSet::new(), 0));
         self.determine_additions(&update)
     }
 
@@ -304,17 +433,38 @@ impl TxGraph {
     ///
     /// The [`Additions`] result will be empty if the `outpoint` (or a full transaction containing
     /// the `outpoint`) already existed in `self`.
-    pub fn insert_txout_preview(&self, outpoint: OutPoint, txout: TxOut) -> Additions {
+    pub fn insert_txout_preview(&self, outpoint: OutPoint, txout: TxOut) -> Additions<A> {
         let mut update = Self::default();
         update.txs.insert(
             outpoint.txid,
-            TxNode::Partial([(outpoint.vout, txout)].into()),
+            (
+                TxNode::Partial([(outpoint.vout, txout)].into()),
+                BTreeSet::new(),
+                0,
+            ),
         );
+        self.determine_additions(&update)
+    }
+
+    /// Returns the resultant [`Additions`] if the `txid` is set in `anchor`.
+    pub fn insert_anchor_preview(&self, txid: Txid, anchor: A) -> Additions<A> {
+        let mut update = Self::default();
+        update.anchors.insert((anchor, txid));
+        self.determine_additions(&update)
+    }
+
+    /// Returns the resultant [`Additions`] if the `txid` is set to `seen_at`.
+    ///
+    /// Note that [`TxGraph`] only keeps track of the lastest `seen_at`.
+    pub fn insert_seen_at_preview(&self, txid: Txid, seen_at: u64) -> Additions<A> {
+        let mut update = Self::default();
+        let (_, _, update_last_seen) = update.txs.entry(txid).or_default();
+        *update_last_seen = seen_at;
         self.determine_additions(&update)
     }
 }
 
-impl TxGraph {
+impl<A> TxGraph<A> {
     /// The transactions spending from this output.
     ///
     /// `TxGraph` allows conflicting transactions within the graph. Obviously the transactions in
@@ -344,11 +494,20 @@ impl TxGraph {
     }
 
     /// Iterate over all partial transactions (outputs only) in the graph.
-    pub fn partial_transactions(&self) -> impl Iterator<Item = (Txid, &BTreeMap<u32, TxOut>)> {
-        self.txs.iter().filter_map(|(txid, tx)| match tx {
-            TxNode::Whole(_) => None,
-            TxNode::Partial(partial) => Some((*txid, partial)),
-        })
+    pub fn partial_transactions(
+        &self,
+    ) -> impl Iterator<Item = GraphedTx<'_, BTreeMap<u32, TxOut>, A>> {
+        self.txs
+            .iter()
+            .filter_map(|(&txid, (tx, anchors, last_seen))| match tx {
+                TxNode::Whole(_) => None,
+                TxNode::Partial(partial) => Some(GraphedTx {
+                    txid,
+                    tx: partial,
+                    anchors,
+                    last_seen: *last_seen,
+                }),
+            })
     }
 
     /// Creates an iterator that filters and maps descendants from the starting `txid`.
@@ -361,7 +520,7 @@ impl TxGraph {
     ///
     /// The supplied closure returns an `Option<T>`, allowing the caller to map each node it vists
     /// and decide whether to visit descendants.
-    pub fn walk_descendants<'g, F, O>(&'g self, txid: Txid, walk_map: F) -> TxDescendants<F>
+    pub fn walk_descendants<'g, F, O>(&'g self, txid: Txid, walk_map: F) -> TxDescendants<A, F>
     where
         F: FnMut(usize, Txid) -> Option<O> + 'g,
     {
@@ -372,7 +531,11 @@ impl TxGraph {
     /// descendants of directly-conflicting transactions, which are also considered conflicts).
     ///
     /// Refer to [`Self::walk_descendants`] for `walk_map` usage.
-    pub fn walk_conflicts<'g, F, O>(&'g self, tx: &'g Transaction, walk_map: F) -> TxDescendants<F>
+    pub fn walk_conflicts<'g, F, O>(
+        &'g self,
+        tx: &'g Transaction,
+        walk_map: F,
+    ) -> TxDescendants<A, F>
     where
         F: FnMut(usize, Txid) -> Option<O> + 'g,
     {
@@ -413,19 +576,38 @@ impl TxGraph {
 /// Refer to [module-level documentation] for more.
 ///
 /// [module-level documentation]: crate::tx_graph
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(
     feature = "serde",
     derive(serde::Deserialize, serde::Serialize),
-    serde(crate = "serde_crate")
+    serde(
+        crate = "serde_crate",
+        bound(
+            deserialize = "A: Ord + serde::Deserialize<'de>",
+            serialize = "A: Ord + serde::Serialize",
+        )
+    )
 )]
 #[must_use]
-pub struct Additions {
+pub struct Additions<A = BlockId> {
     pub tx: BTreeSet<Transaction>,
     pub txout: BTreeMap<OutPoint, TxOut>,
+    pub anchors: BTreeSet<(A, Txid)>,
+    pub last_seen: BTreeMap<Txid, u64>,
 }
 
-impl Additions {
+impl<A> Default for Additions<A> {
+    fn default() -> Self {
+        Self {
+            tx: Default::default(),
+            txout: Default::default(),
+            anchors: Default::default(),
+            last_seen: Default::default(),
+        }
+    }
+}
+
+impl<A> Additions<A> {
     /// Returns true if the [`Additions`] is empty (no transactions or txouts).
     pub fn is_empty(&self) -> bool {
         self.tx.is_empty() && self.txout.is_empty()
@@ -446,25 +628,25 @@ impl Additions {
 
     /// Appends the changes in `other` into self such that applying `self` afterward has the same
     /// effect as sequentially applying the original `self` and `other`.
-    pub fn append(&mut self, mut other: Additions) {
+    pub fn append(&mut self, mut other: Additions<A>) {
         self.tx.append(&mut other.tx);
         self.txout.append(&mut other.txout);
     }
 }
 
-impl AsRef<TxGraph> for TxGraph {
-    fn as_ref(&self) -> &TxGraph {
+impl<A> AsRef<TxGraph<A>> for TxGraph<A> {
+    fn as_ref(&self) -> &TxGraph<A> {
         self
     }
 }
 
-impl ForEachTxOut for Additions {
+impl<A> ForEachTxOut for Additions<A> {
     fn for_each_txout(&self, f: impl FnMut((OutPoint, &TxOut))) {
         self.txouts().for_each(f)
     }
 }
 
-impl ForEachTxOut for TxGraph {
+impl<A> ForEachTxOut for TxGraph<A> {
     fn for_each_txout(&self, f: impl FnMut((OutPoint, &TxOut))) {
         self.all_txouts().for_each(f)
     }
@@ -475,17 +657,17 @@ impl ForEachTxOut for TxGraph {
 /// This `struct` is created by the [`walk_descendants`] method of [`TxGraph`].
 ///
 /// [`walk_descendants`]: TxGraph::walk_descendants
-pub struct TxDescendants<'g, F> {
-    graph: &'g TxGraph,
+pub struct TxDescendants<'g, A, F> {
+    graph: &'g TxGraph<A>,
     visited: HashSet<Txid>,
     stack: Vec<(usize, Txid)>,
     filter_map: F,
 }
 
-impl<'g, F> TxDescendants<'g, F> {
+impl<'g, A, F> TxDescendants<'g, A, F> {
     /// Creates a `TxDescendants` that includes the starting `txid` when iterating.
     #[allow(unused)]
-    pub(crate) fn new_include_root(graph: &'g TxGraph, txid: Txid, filter_map: F) -> Self {
+    pub(crate) fn new_include_root(graph: &'g TxGraph<A>, txid: Txid, filter_map: F) -> Self {
         Self {
             graph,
             visited: Default::default(),
@@ -495,7 +677,7 @@ impl<'g, F> TxDescendants<'g, F> {
     }
 
     /// Creates a `TxDescendants` that excludes the starting `txid` when iterating.
-    pub(crate) fn new_exclude_root(graph: &'g TxGraph, txid: Txid, filter_map: F) -> Self {
+    pub(crate) fn new_exclude_root(graph: &'g TxGraph<A>, txid: Txid, filter_map: F) -> Self {
         let mut descendants = Self {
             graph,
             visited: Default::default(),
@@ -508,7 +690,11 @@ impl<'g, F> TxDescendants<'g, F> {
 
     /// Creates a `TxDescendants` from multiple starting transactions that include the starting
     /// `txid`s when iterating.
-    pub(crate) fn from_multiple_include_root<I>(graph: &'g TxGraph, txids: I, filter_map: F) -> Self
+    pub(crate) fn from_multiple_include_root<I>(
+        graph: &'g TxGraph<A>,
+        txids: I,
+        filter_map: F,
+    ) -> Self
     where
         I: IntoIterator<Item = Txid>,
     {
@@ -523,7 +709,11 @@ impl<'g, F> TxDescendants<'g, F> {
     /// Creates a `TxDescendants` from multiple starting transactions that excludes the starting
     /// `txid`s when iterating.
     #[allow(unused)]
-    pub(crate) fn from_multiple_exclude_root<I>(graph: &'g TxGraph, txids: I, filter_map: F) -> Self
+    pub(crate) fn from_multiple_exclude_root<I>(
+        graph: &'g TxGraph<A>,
+        txids: I,
+        filter_map: F,
+    ) -> Self
     where
         I: IntoIterator<Item = Txid>,
     {
@@ -540,7 +730,7 @@ impl<'g, F> TxDescendants<'g, F> {
     }
 }
 
-impl<'g, F> TxDescendants<'g, F> {
+impl<'g, A, F> TxDescendants<'g, A, F> {
     fn populate_stack(&mut self, depth: usize, txid: Txid) {
         let spend_paths = self
             .graph
@@ -552,7 +742,7 @@ impl<'g, F> TxDescendants<'g, F> {
     }
 }
 
-impl<'g, F, O> Iterator for TxDescendants<'g, F>
+impl<'g, A, F, O> Iterator for TxDescendants<'g, A, F>
 where
     F: FnMut(usize, Txid) -> Option<O>,
 {

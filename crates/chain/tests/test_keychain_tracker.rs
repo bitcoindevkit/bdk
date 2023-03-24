@@ -1,19 +1,22 @@
 #![cfg(feature = "miniscript")]
 #[macro_use]
 mod common;
+use std::collections::BTreeSet;
+
 use bdk_chain::{
     keychain::{Balance, KeychainTracker},
     miniscript::{
         bitcoin::{secp256k1::Secp256k1, OutPoint, PackedLockTime, Transaction, TxOut},
         Descriptor,
     },
+    tx_graph::GraphedTx,
     BlockId, ConfirmationTime, TxHeight,
 };
-use bitcoin::TxIn;
+use bitcoin::{BlockHash, TxIn};
 
 #[test]
 fn test_insert_tx() {
-    let mut tracker = KeychainTracker::default();
+    let mut tracker = KeychainTracker::<_, BlockId, _>::default();
     let secp = Secp256k1::new();
     let (descriptor, _) = Descriptor::parse_descriptor(&secp, "tr([73c5da0a/86'/0'/0']xprv9xgqHN7yz9MwCkxsBPN5qetuNdQSUttZNKw1dcYTV4mkaAFiBVGQziHs3NRSWMkCzvgjEe3n9xV8oYywvM8at9yRqyaZVz6TYYhX98VjsUk/0/*)").unwrap();
     tracker.add_keychain((), descriptor.clone());
@@ -40,7 +43,10 @@ fn test_insert_tx() {
             .chain_graph()
             .transactions_in_chain()
             .collect::<Vec<_>>(),
-        vec![(&ConfirmationTime::Unconfirmed, &tx)]
+        vec![(
+            &ConfirmationTime::Unconfirmed,
+            GraphedTx::from_tx(&tx, &BTreeSet::new())
+        )]
     );
 
     assert_eq!(
@@ -66,7 +72,7 @@ fn test_balance() {
         One,
         Two,
     }
-    let mut tracker = KeychainTracker::<Keychain, TxHeight>::default();
+    let mut tracker = KeychainTracker::<Keychain, (u32, BlockHash), TxHeight>::default();
     let one = Descriptor::from_str("tr([73c5da0a/86'/0'/0']xpub6BgBgsespWvERF3LHQu6CnqdvfEvtMcQjYrcRzx53QJjSxarj2afYWcLteoGVky7D3UKDP9QyrLprQ3VCECoY49yfdDEHGCtMMj92pReUsQ/0/*)#rg247h69").unwrap();
     let two = Descriptor::from_str("tr([73c5da0a/86'/0'/0']xpub6BgBgsespWvERF3LHQu6CnqdvfEvtMcQjYrcRzx53QJjSxarj2afYWcLteoGVky7D3UKDP9QyrLprQ3VCECoY49yfdDEHGCtMMj92pReUsQ/1/*)#ju05rz2a").unwrap();
     tracker.add_keychain(Keychain::One, one);
