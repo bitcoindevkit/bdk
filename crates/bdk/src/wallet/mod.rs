@@ -372,6 +372,21 @@ impl<D> Wallet<D> {
         self.keychain_tracker.txout_index.spks_of_all_keychains()
     }
 
+    /// Returns an iterator over all the stored script pubkeys tracked by the internal tracker.
+    ///
+    /// This is intended to be used in scans where we only want to watch for specific addresses
+    /// stored by the tracker. Example, RPC Wallet syncing. This is useful when we want to scan
+    /// for only existing spks and do not wish to derive new ones.
+    ///
+    /// Note carefully, if any keychain has balances at spk index beyond what is stored in the tracker,
+    /// this shouldn't be used for syncing. Ex: restoring the wallet data from seed words.
+    /// Use [`spks_of_all_keychains`] with electrum or esplora syncing in such cases.
+    ///
+    /// [`spks_of_all_keychains`]: Self::spks_of_all_keychains
+    pub fn dump_spks(&self) -> impl Iterator<Item = (&(KeychainKind, u32), &Script)> {
+        self.keychain_tracker.txout_index.inner().all_spks().iter()
+    }
+
     /// Gets an iterator over all the script pubkeys in a single keychain.
     ///
     /// See [`spks_of_all_keychains`] for more documentation
