@@ -9,7 +9,7 @@ use bdk_chain::{
         bitcoin::{secp256k1::Secp256k1, OutPoint, PackedLockTime, Transaction, TxOut},
         Descriptor,
     },
-    tx_graph::GraphedTx,
+    tx_graph::TxInGraph,
     BlockId, ConfirmationTime, TxHeight,
 };
 use bitcoin::{BlockHash, TxIn};
@@ -45,7 +45,7 @@ fn test_insert_tx() {
             .collect::<Vec<_>>(),
         vec![(
             &ConfirmationTime::Unconfirmed,
-            GraphedTx::from_tx(&tx, &BTreeSet::new())
+            TxInGraph::from_tx(&tx, &BTreeSet::new())
         )]
     );
 

@@ -1,4 +1,4 @@
-use alloc::collections::BTreeSet;
+use alloc::collections::{BTreeMap, BTreeSet};
 use bitcoin::{Block, BlockHash, OutPoint, Transaction, TxOut};
 
 use crate::BlockId;
@@ -100,6 +100,8 @@ pub trait TxIndex {
     /// The resultant "additions" when new transaction data is indexed.
     type Additions: TxIndexAdditions;
 
+    type SpkIndex: Ord;
+
     /// Scan and index the given `outpoint` and `txout`.
     fn index_txout(&mut self, outpoint: OutPoint, txout: &TxOut) -> Self::Additions;
 
@@ -120,4 +122,7 @@ pub trait TxIndex {
     /// A transaction is relevant if it contains a txout with a script_pubkey that we own, or if it
     /// spends an already-indexed outpoint that we have previously indexed.
     fn is_tx_relevant(&self, tx: &Transaction) -> bool;
+
+    /// Lists all relevant txouts known by the index.
+    fn relevant_txouts(&self) -> &BTreeMap<OutPoint, (Self::SpkIndex, TxOut)>;
 }

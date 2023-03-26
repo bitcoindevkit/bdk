@@ -56,8 +56,8 @@
 //! ```
 
 use crate::{
-    collections::*, BlockAnchor, BlockId, ChainOracle, ForEachTxOut, Observation, TxIndex,
-    TxIndexAdditions,
+    collections::*, sparse_chain::ChainPosition, BlockAnchor, BlockId, ChainOracle, ForEachTxOut,
+    FullTxOut, ObservedIn, TxIndex, TxIndexAdditions,
 };
 use alloc::vec::Vec;
 use bitcoin::{OutPoint, Transaction, TxOut, Txid};
@@ -91,9 +91,12 @@ impl<A> Default for TxGraph<A> {
     }
 }
 
+// pub type InChainTx<'a, T, A> = (ObservedIn<&'a A>, TxInGraph<'a, T, A>);
+// pub type InChainTxOut<'a, I, A> = (&'a I, FullTxOut<ObservedIn<&'a A>>);
+
 /// An outward-facing view of a transaction that resides in a [`TxGraph`].
-#[derive(Clone, Debug, PartialEq)]
-pub struct GraphedTx<'a, T, A> {
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct TxInGraph<'a, T, A> {
     /// Txid of the transaction.
     pub txid: Txid,
     /// A partial or full representation of the transaction.
@@ -104,7 +107,7 @@ pub struct GraphedTx<'a, T, A> {
     pub last_seen: u64,
 }
 
-impl<'a, T, A> Deref for GraphedTx<'a, T, A> {
+impl<'a, T, A> Deref for TxInGraph<'a, T, A> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -112,7 +115,7 @@ impl<'a, T, A> Deref for GraphedTx<'a, T, A> {
     }
 }
 
-impl<'a, A> GraphedTx<'a, Transaction, A> {
+impl<'a, A> TxInGraph<'a, Transaction, A> {
     pub fn from_tx(tx: &'a Transaction, anchors: &'a BTreeSet<A>) -> Self {
         Self {
             txid: tx.txid(),
@@ -121,6 +124,18 @@ impl<'a, A> GraphedTx<'a, Transaction, A> {
             last_seen: 0,
         }
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct TxInChain<'a, T, A> {
+    pub observed_in: ObservedIn<&'a A>,
+    pub tx: TxInGraph<'a, T, A>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct TxOutInChain<'a, I, A> {
+    pub spk_index: &'a I,
+    pub txout: FullTxOut<ObservedIn<&'a A>>,
 }
 
 /// Internal representation of a transaction node of a [`TxGraph`].
@@ -157,11 +172,11 @@ impl<A> TxGraph<A> {
     }
 
     /// Iterate over all full transactions in the graph.
-    pub fn full_transactions(&self) -> impl Iterator<Item = GraphedTx<'_, Transaction, A>> {
+    pub fn full_transactions(&self) -> impl Iterator<Item = TxInGraph<'_, Transaction, A>> {
         self.txs
             .iter()
             .filter_map(|(&txid, (tx, anchors, last_seen))| match tx {
-                TxNode::Whole(tx) => Some(GraphedTx {
+                TxNode::Whole(tx) => Some(TxInGraph {
                     txid,
                     tx,
                     anchors,
@@ -176,9 +191,9 @@ impl<A> TxGraph<A> {
     /// Refer to [`get_txout`] for getting a specific [`TxOut`].
     ///
     /// [`get_txout`]: Self::get_txout
-    pub fn get_tx(&self, txid: Txid) -> Option<GraphedTx<'_, Transaction, A>> {
+    pub fn get_tx(&self, txid: Txid) -> Option<TxInGraph<'_, Transaction, A>> {
         match &self.txs.get(&txid)? {
-            (TxNode::Whole(tx), anchors, last_seen) => Some(GraphedTx {
+            (TxNode::Whole(tx), anchors, last_seen) => Some(TxInGraph {
                 txid,
                 tx,
                 anchors,
@@ -210,12 +225,6 @@ impl<A> TxGraph<A> {
                 .map(|(vout, txout)| (*vout, txout))
                 .collect::<BTreeMap<_, _>>(),
         })
-    }
-
-    pub fn get_anchors_and_last_seen(&self, txid: Txid) -> Option<(&BTreeSet<A>, u64)> {
-        self.txs
-            .get(&txid)
-            .map(|(_, anchors, last_seen)| (anchors, *last_seen))
     }
 
     /// Calculates the fee of a given transaction. Returns 0 if `tx` is a coinbase transaction.
@@ -472,10 +481,22 @@ impl<A: BlockAnchor> TxGraph<A> {
         self.determine_additions(&update)
     }
 
+    /// Get all heights that are relevant to the graph.
+    pub fn relevant_heights(&self) -> BTreeSet<u32> {
+        self.anchors
+            .iter()
+            .map(|(a, _)| a.anchor_block().height)
+            .collect()
+    }
+
     /// Determines whether a transaction of `txid` is in the best chain.
     ///
     /// TODO: Also return conflicting tx list, ordered by last_seen.
-    pub fn is_txid_in_best_chain<C>(&self, chain: C, txid: Txid) -> Result<bool, C::Error>
+    pub fn get_position_in_chain<C>(
+        &self,
+        chain: C,
+        txid: Txid,
+    ) -> Result<Option<ObservedIn<&A>>, C::Error>
     where
         C: ChainOracle,
     {
@@ -483,12 +504,12 @@ impl<A: BlockAnchor> TxGraph<A> {
             Some((tx, anchors, last_seen)) if !(anchors.is_empty() && *last_seen == 0) => {
                 (tx, anchors, last_seen)
             }
-            _ => return Ok(false),
+            _ => return Ok(None),
         };
 
-        for block_id in anchors.iter().map(A::anchor_block) {
-            if chain.is_block_in_best_chain(block_id)? {
-                return Ok(true);
+        for anchor in anchors {
+            if chain.is_block_in_best_chain(anchor.anchor_block())? {
+                return Ok(Some(ObservedIn::Block(anchor)));
             }
         }
 
@@ -499,7 +520,7 @@ impl<A: BlockAnchor> TxGraph<A> {
             TxNode::Partial(_) => {
                 // [TODO] Unfortunately, we can't iterate over conflicts of partial txs right now!
                 // [TODO] So we just assume the partial tx does not exist in the best chain :/
-                return Ok(false);
+                return Ok(None);
             }
         };
 
@@ -509,7 +530,7 @@ impl<A: BlockAnchor> TxGraph<A> {
             for block_id in conflicting_tx.anchors.iter().map(A::anchor_block) {
                 if chain.is_block_in_best_chain(block_id)? {
                     // conflicting tx is in best chain, so the current tx cannot be in best chain!
-                    return Ok(false);
+                    return Ok(None);
                 }
             }
             if conflicting_tx.last_seen > latest_last_seen {
@@ -517,28 +538,47 @@ impl<A: BlockAnchor> TxGraph<A> {
             }
         }
         if last_seen >= latest_last_seen {
-            Ok(true)
+            Ok(Some(ObservedIn::Mempool(last_seen)))
         } else {
-            Ok(false)
+            Ok(None)
         }
     }
 
-    /// Return true if `outpoint` exists in best chain and is unspent.
-    pub fn is_unspent<C>(&self, chain: C, outpoint: OutPoint) -> Result<bool, C::Error>
+    pub fn get_spend_in_chain<C>(
+        &self,
+        chain: C,
+        outpoint: OutPoint,
+    ) -> Result<Option<(ObservedIn<&A>, Txid)>, C::Error>
     where
         C: ChainOracle,
     {
-        if !self.is_txid_in_best_chain(&chain, outpoint.txid)? {
-            return Ok(false);
+        if self.get_position_in_chain(&chain, outpoint.txid)?.is_none() {
+            return Ok(None);
         }
         if let Some(spends) = self.spends.get(&outpoint) {
             for &txid in spends {
-                if self.is_txid_in_best_chain(&chain, txid)? {
-                    return Ok(false);
+                if let Some(observed_at) = self.get_position_in_chain(&chain, txid)? {
+                    return Ok(Some((observed_at, txid)));
                 }
             }
         }
-        Ok(true)
+        Ok(None)
+    }
+
+    pub fn transactions_in_chain<C>(
+        &self,
+        chain: C,
+    ) -> Result<BTreeSet<TxInChain<'_, Transaction, A>>, C::Error>
+    where
+        C: ChainOracle,
+    {
+        self.full_transactions()
+            .filter_map(|tx| {
+                self.get_position_in_chain(&chain, tx.txid)
+                    .map(|v| v.map(|observed_in| TxInChain { observed_in, tx }))
+                    .transpose()
+            })
+            .collect()
     }
 }
 
@@ -574,12 +614,12 @@ impl<A> TxGraph<A> {
     /// Iterate over all partial transactions (outputs only) in the graph.
     pub fn partial_transactions(
         &self,
-    ) -> impl Iterator<Item = GraphedTx<'_, BTreeMap<u32, TxOut>, A>> {
+    ) -> impl Iterator<Item = TxInGraph<'_, BTreeMap<u32, TxOut>, A>> {
         self.txs
             .iter()
             .filter_map(|(&txid, (tx, anchors, last_seen))| match tx {
                 TxNode::Whole(_) => None,
-                TxNode::Partial(partial) => Some(GraphedTx {
+                TxNode::Partial(partial) => Some(TxInGraph {
                     txid,
                     tx: partial,
                     anchors,
@@ -686,18 +726,29 @@ impl<A, I: Default> Default for IndexedTxGraph<A, I> {
 }
 
 impl<A: BlockAnchor, I: TxIndex> IndexedTxGraph<A, I> {
+    /// Get a reference of the internal transaction graph.
+    pub fn graph(&self) -> &TxGraph<A> {
+        &self.graph
+    }
+
+    /// Get a reference of the internal transaction index.
+    pub fn index(&self) -> &I {
+        &self.index
+    }
+
+    /// Insert a `txout` that exists in `outpoint` with the given `observation`.
     pub fn insert_txout(
         &mut self,
         outpoint: OutPoint,
         txout: &TxOut,
-        observation: Observation<A>,
+        observation: ObservedIn<A>,
     ) -> IndexedAdditions<A, I::Additions> {
         IndexedAdditions {
             graph_additions: {
                 let mut graph_additions = self.graph.insert_txout(outpoint, txout.clone());
                 graph_additions.append(match observation {
-                    Observation::InBlock(anchor) => self.graph.insert_anchor(outpoint.txid, anchor),
-                    Observation::SeenAt(seen_at) => {
+                    ObservedIn::Block(anchor) => self.graph.insert_anchor(outpoint.txid, anchor),
+                    ObservedIn::Mempool(seen_at) => {
                         self.graph.insert_seen_at(outpoint.txid, seen_at)
                     }
                 });
@@ -710,15 +761,15 @@ impl<A: BlockAnchor, I: TxIndex> IndexedTxGraph<A, I> {
     pub fn insert_tx(
         &mut self,
         tx: &Transaction,
-        observation: Observation<A>,
+        observation: ObservedIn<A>,
     ) -> IndexedAdditions<A, I::Additions> {
         let txid = tx.txid();
         IndexedAdditions {
             graph_additions: {
                 let mut graph_additions = self.graph.insert_tx(tx.clone());
                 graph_additions.append(match observation {
-                    Observation::InBlock(anchor) => self.graph.insert_anchor(txid, anchor),
-                    Observation::SeenAt(seen_at) => self.graph.insert_seen_at(txid, seen_at),
+                    ObservedIn::Block(anchor) => self.graph.insert_anchor(txid, anchor),
+                    ObservedIn::Mempool(seen_at) => self.graph.insert_seen_at(txid, seen_at),
                 });
                 graph_additions
             },
@@ -729,7 +780,7 @@ impl<A: BlockAnchor, I: TxIndex> IndexedTxGraph<A, I> {
     pub fn filter_and_insert_txs<'t, T>(
         &mut self,
         txs: T,
-        observation: Observation<A>,
+        observation: ObservedIn<A>,
     ) -> IndexedAdditions<A, I::Additions>
     where
         T: Iterator<Item = &'t Transaction>,
@@ -745,6 +796,81 @@ impl<A: BlockAnchor, I: TxIndex> IndexedTxGraph<A, I> {
             acc.append_additions(other);
             acc
         })
+    }
+
+    pub fn relevant_heights(&self) -> BTreeSet<u32> {
+        self.graph.relevant_heights()
+    }
+
+    pub fn txs_in_chain<C>(
+        &self,
+        chain: C,
+    ) -> Result<BTreeSet<TxInChain<'_, Transaction, A>>, C::Error>
+    where
+        C: ChainOracle,
+    {
+        let mut tx_set = self.graph.transactions_in_chain(chain)?;
+        tx_set.retain(|tx| self.index.is_tx_relevant(&tx.tx));
+        Ok(tx_set)
+    }
+
+    pub fn txouts_in_chain<C>(
+        &self,
+        chain: C,
+    ) -> Result<Vec<TxOutInChain<'_, I::SpkIndex, A>>, C::Error>
+    where
+        C: ChainOracle,
+        ObservedIn<A>: ChainPosition,
+    {
+        self.index
+            .relevant_txouts()
+            .iter()
+            .filter_map(|(op, (spk_i, txout))| -> Option<Result<_, C::Error>> {
+                let graph_tx = self.graph.get_tx(op.txid)?;
+
+                let is_on_coinbase = graph_tx.is_coin_base();
+
+                let chain_position = match self.graph.get_position_in_chain(&chain, op.txid) {
+                    Ok(Some(observed_at)) => observed_at,
+                    Ok(None) => return None,
+                    Err(err) => return Some(Err(err)),
+                };
+
+                let spent_by = match self.graph.get_spend_in_chain(&chain, *op) {
+                    Ok(spent_by) => spent_by,
+                    Err(err) => return Some(Err(err)),
+                };
+
+                let full_txout = FullTxOut {
+                    outpoint: *op,
+                    txout: txout.clone(),
+                    chain_position,
+                    spent_by,
+                    is_on_coinbase,
+                };
+
+                let txout_in_chain = TxOutInChain {
+                    spk_index: spk_i,
+                    txout: full_txout,
+                };
+
+                Some(Ok(txout_in_chain))
+            })
+            .collect()
+    }
+
+    /// Return relevant unspents.
+    pub fn utxos_in_chain<C>(
+        &self,
+        chain: C,
+    ) -> Result<Vec<TxOutInChain<'_, I::SpkIndex, A>>, C::Error>
+    where
+        C: ChainOracle,
+        ObservedIn<A>: ChainPosition,
+    {
+        let mut txouts = self.txouts_in_chain(chain)?;
+        txouts.retain(|txo| txo.txout.spent_by.is_none());
+        Ok(txouts)
     }
 }
 

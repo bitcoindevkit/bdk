@@ -7,7 +7,7 @@ use bdk_chain::{
     chain_graph::*,
     collections::HashSet,
     sparse_chain,
-    tx_graph::{self, GraphedTx, TxGraph},
+    tx_graph::{self, TxGraph, TxInGraph},
     BlockId, TxHeight,
 };
 use bitcoin::{
@@ -371,7 +371,7 @@ fn test_get_tx_in_chain() {
         cg.get_tx_in_chain(tx.txid()),
         Some((
             &TxHeight::Unconfirmed,
-            GraphedTx {
+            TxInGraph {
                 txid: tx.txid(),
                 tx: &tx,
                 anchors: &BTreeSet::new(),
@@ -411,15 +411,15 @@ fn test_iterate_transactions() {
         vec![
             (
                 &TxHeight::Confirmed(0),
-                GraphedTx::from_tx(&txs[2], &BTreeSet::new())
+                TxInGraph::from_tx(&txs[2], &BTreeSet::new())
             ),
             (
                 &TxHeight::Confirmed(1),
-                GraphedTx::from_tx(&txs[0], &BTreeSet::new())
+                TxInGraph::from_tx(&txs[0], &BTreeSet::new())
             ),
             (
                 &TxHeight::Unconfirmed,
-                GraphedTx::from_tx(&txs[1], &BTreeSet::new())
+                TxInGraph::from_tx(&txs[1], &BTreeSet::new())
             ),
         ]
     );

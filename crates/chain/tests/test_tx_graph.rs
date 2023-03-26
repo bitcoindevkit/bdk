@@ -2,7 +2,7 @@
 mod common;
 use bdk_chain::{
     collections::*,
-    tx_graph::{Additions, GraphedTx, TxGraph},
+    tx_graph::{Additions, TxGraph, TxInGraph},
     BlockId,
 };
 use bitcoin::{
@@ -157,7 +157,7 @@ fn insert_tx_can_retrieve_full_tx_from_graph() {
     let _ = graph.insert_tx(tx.clone());
     assert_eq!(
         graph.get_tx(tx.txid()),
-        Some(GraphedTx::from_tx(&tx, &BTreeSet::new()))
+        Some(TxInGraph::from_tx(&tx, &BTreeSet::new()))
     );
 }
 

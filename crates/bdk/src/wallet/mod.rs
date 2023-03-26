@@ -24,7 +24,7 @@ use bdk_chain::{
     chain_graph,
     keychain::{persist, KeychainChangeSet, KeychainScan, KeychainTracker},
     sparse_chain,
-    tx_graph::GraphedTx,
+    tx_graph::TxInGraph,
     BlockId, ConfirmationTime,
 };
 use bitcoin::consensus::encode::serialize;
@@ -524,7 +524,7 @@ impl<D> Wallet<D> {
     /// unconfirmed transactions last.
     pub fn transactions(
         &self,
-    ) -> impl DoubleEndedIterator<Item = (ConfirmationTime, GraphedTx<'_, Transaction, BlockId>)> + '_
+    ) -> impl DoubleEndedIterator<Item = (ConfirmationTime, TxInGraph<'_, Transaction, BlockId>)> + '_
     {
         self.keychain_tracker
             .chain_graph()

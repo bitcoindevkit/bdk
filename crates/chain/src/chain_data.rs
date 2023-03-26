@@ -6,12 +6,41 @@ use crate::{
 };
 
 /// Represents an observation of some chain data.
-#[derive(Debug, Clone, Copy)]
-pub enum Observation<A> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, core::hash::Hash)]
+pub enum ObservedIn<A> {
     /// The chain data is seen in a block identified by `A`.
-    InBlock(A),
-    /// The chain data is seen at this given unix timestamp.
-    SeenAt(u64),
+    Block(A),
+    /// The chain data is seen in mempool at this given timestamp.
+    Mempool(u64),
+}
+
+impl ChainPosition for ObservedIn<BlockId> {
+    fn height(&self) -> TxHeight {
+        match self {
+            ObservedIn::Block(block_id) => TxHeight::Confirmed(block_id.height),
+            ObservedIn::Mempool(_) => TxHeight::Unconfirmed,
+        }
+    }
+
+    fn max_ord_of_height(height: TxHeight) -> Self {
+        match height {
+            TxHeight::Confirmed(height) => ObservedIn::Block(BlockId {
+                height,
+                hash: Hash::from_inner([u8::MAX; 32]),
+            }),
+            TxHeight::Unconfirmed => Self::Mempool(u64::MAX),
+        }
+    }
+
+    fn min_ord_of_height(height: TxHeight) -> Self {
+        match height {
+            TxHeight::Confirmed(height) => ObservedIn::Block(BlockId {
+                height,
+                hash: Hash::from_inner([u8::MIN; 32]),
+            }),
+            TxHeight::Unconfirmed => Self::Mempool(u64::MIN),
+        }
+    }
 }
 
 /// Represents the height at which a transaction is confirmed.
@@ -177,7 +206,7 @@ impl From<(&u32, &BlockHash)> for BlockId {
 }
 
 /// A `TxOut` with as much data as we can retrieve about it
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct FullTxOut<I> {
     /// The location of the `TxOut`.
     pub outpoint: OutPoint,

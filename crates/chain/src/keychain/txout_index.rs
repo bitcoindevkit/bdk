@@ -88,8 +88,10 @@ impl<K> Deref for KeychainTxOutIndex<K> {
     }
 }
 
-impl<K: Clone + Ord + Debug> TxIndex for KeychainTxOutIndex<K> {
+impl<K: Clone + Ord + Debug + 'static> TxIndex for KeychainTxOutIndex<K> {
     type Additions = DerivationAdditions<K>;
+
+    type SpkIndex = (K, u32);
 
     fn index_txout(&mut self, outpoint: OutPoint, txout: &TxOut) -> Self::Additions {
         self.scan_txout(outpoint, txout)
@@ -101,6 +103,10 @@ impl<K: Clone + Ord + Debug> TxIndex for KeychainTxOutIndex<K> {
 
     fn is_tx_relevant(&self, tx: &bitcoin::Transaction) -> bool {
         self.is_relevant(tx)
+    }
+
+    fn relevant_txouts(&self) -> &BTreeMap<OutPoint, (Self::SpkIndex, TxOut)> {
+        self.inner.relevant_txouts()
     }
 }
 

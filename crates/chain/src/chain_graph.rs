@@ -2,7 +2,7 @@
 use crate::{
     collections::HashSet,
     sparse_chain::{self, ChainPosition, SparseChain},
-    tx_graph::{self, GraphedTx, TxGraph},
+    tx_graph::{self, TxGraph, TxInGraph},
     BlockAnchor, BlockId, ForEachTxOut, FullTxOut, TxHeight,
 };
 use alloc::{string::ToString, vec::Vec};
@@ -213,7 +213,7 @@ where
     ///
     /// This does not necessarily mean that it is *confirmed* in the blockchain; it might just be in
     /// the unconfirmed transaction list within the [`SparseChain`].
-    pub fn get_tx_in_chain(&self, txid: Txid) -> Option<(&P, GraphedTx<'_, Transaction, A>)> {
+    pub fn get_tx_in_chain(&self, txid: Txid) -> Option<(&P, TxInGraph<'_, Transaction, A>)> {
         let position = self.chain.tx_position(txid)?;
         let graphed_tx = self.graph.get_tx(txid).expect("must exist");
         Some((position, graphed_tx))
@@ -441,7 +441,7 @@ where
     /// in ascending order.
     pub fn transactions_in_chain(
         &self,
-    ) -> impl DoubleEndedIterator<Item = (&P, GraphedTx<'_, Transaction, A>)> {
+    ) -> impl DoubleEndedIterator<Item = (&P, TxInGraph<'_, Transaction, A>)> {
         self.chain
             .txids()
             .map(move |(pos, txid)| (pos, self.graph.get_tx(*txid).expect("must exist")))
