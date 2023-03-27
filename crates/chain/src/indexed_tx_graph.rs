@@ -22,6 +22,7 @@ pub struct TxOutInChain<'a, I, A> {
     pub txout: FullTxOut<ObservedIn<&'a A>>,
 }
 
+#[must_use]
 pub struct IndexedAdditions<A, D> {
     pub graph_additions: Additions<A>,
     pub index_delta: D,
@@ -83,8 +84,17 @@ impl<A: BlockAnchor, I: TxIndex> IndexedTxGraph<A, I> {
             graph_additions,
             index_delta,
         } = additions;
-        self.graph.apply_additions(graph_additions);
+
         self.index.apply_additions(index_delta);
+
+        for tx in &graph_additions.tx {
+            self.index.index_tx(tx);
+        }
+        for (&outpoint, txout) in &graph_additions.txout {
+            self.index.index_txout(outpoint, txout);
+        }
+
+        self.graph.apply_additions(graph_additions);
     }
 
     /// Insert a `txout` that exists in `outpoint` with the given `observation`.
