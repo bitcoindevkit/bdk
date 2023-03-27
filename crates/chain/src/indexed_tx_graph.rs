@@ -71,6 +71,21 @@ impl<A: BlockAnchor, I: TxIndex> IndexedTxGraph<A, I> {
         &self.index
     }
 
+    /// Get a mutable reference to the internal transaction index.
+    pub fn mut_index(&mut self) -> &mut I {
+        &mut self.index
+    }
+
+    /// Applies the [`IndexedAdditions`] to the [`IndexedTxGraph`].
+    pub fn apply_additions(&mut self, additions: IndexedAdditions<A, I::Additions>) {
+        let IndexedAdditions {
+            graph_additions,
+            index_delta,
+        } = additions;
+        self.graph.apply_additions(graph_additions);
+        self.index.apply_additions(index_delta);
+    }
+
     /// Insert a `txout` that exists in `outpoint` with the given `observation`.
     pub fn insert_txout(
         &mut self,

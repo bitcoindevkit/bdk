@@ -119,6 +119,9 @@ pub trait TxIndex {
             .unwrap_or_default()
     }
 
+    /// Apply additions to itself.
+    fn apply_additions(&mut self, additions: Self::Additions);
+
     /// A transaction is relevant if it contains a txout with a script_pubkey that we own, or if it
     /// spends an already-indexed outpoint that we have previously indexed.
     fn is_tx_relevant(&self, tx: &Transaction) -> bool;

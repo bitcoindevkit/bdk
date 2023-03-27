@@ -68,6 +68,10 @@ impl<I: Clone + Ord + 'static> TxIndex for SpkTxOutIndex<I> {
         self.scan(tx)
     }
 
+    fn apply_additions(&mut self, _additions: Self::Additions) {
+        // This applies nothing.
+    }
+
     fn is_tx_relevant(&self, tx: &Transaction) -> bool {
         self.is_relevant(tx)
     }

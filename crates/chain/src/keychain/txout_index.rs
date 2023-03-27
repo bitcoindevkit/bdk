@@ -101,6 +101,10 @@ impl<K: Clone + Ord + Debug + 'static> TxIndex for KeychainTxOutIndex<K> {
         self.scan(tx)
     }
 
+    fn apply_additions(&mut self, additions: Self::Additions) {
+        self.apply_additions(additions)
+    }
+
     fn is_tx_relevant(&self, tx: &bitcoin::Transaction) -> bool {
         self.is_relevant(tx)
     }
