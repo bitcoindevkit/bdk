@@ -61,7 +61,10 @@ use crate::{
 };
 use alloc::vec::Vec;
 use bitcoin::{OutPoint, Transaction, TxOut, Txid};
-use core::ops::{Deref, RangeInclusive};
+use core::{
+    convert::Infallible,
+    ops::{Deref, RangeInclusive},
+};
 
 /// A graph of transactions and spends.
 ///
@@ -492,7 +495,7 @@ impl<A: BlockAnchor> TxGraph<A> {
     /// Determines whether a transaction of `txid` is in the best chain.
     ///
     /// TODO: Also return conflicting tx list, ordered by last_seen.
-    pub fn get_position_in_chain<C>(
+    pub fn try_get_chain_position<C>(
         &self,
         chain: C,
         txid: Txid,
@@ -544,7 +547,15 @@ impl<A: BlockAnchor> TxGraph<A> {
         }
     }
 
-    pub fn get_spend_in_chain<C>(
+    pub fn get_chain_position<C>(&self, chain: C, txid: Txid) -> Option<ObservedIn<&A>>
+    where
+        C: ChainOracle<Error = Infallible>,
+    {
+        self.try_get_chain_position(chain, txid)
+            .expect("error is infallible")
+    }
+
+    pub fn try_get_spend_in_chain<C>(
         &self,
         chain: C,
         outpoint: OutPoint,
@@ -552,12 +563,15 @@ impl<A: BlockAnchor> TxGraph<A> {
     where
         C: ChainOracle,
     {
-        if self.get_position_in_chain(&chain, outpoint.txid)?.is_none() {
+        if self
+            .try_get_chain_position(&chain, outpoint.txid)?
+            .is_none()
+        {
             return Ok(None);
         }
         if let Some(spends) = self.spends.get(&outpoint) {
             for &txid in spends {
-                if let Some(observed_at) = self.get_position_in_chain(&chain, txid)? {
+                if let Some(observed_at) = self.try_get_chain_position(&chain, txid)? {
                     return Ok(Some((observed_at, txid)));
                 }
             }
@@ -565,20 +579,12 @@ impl<A: BlockAnchor> TxGraph<A> {
         Ok(None)
     }
 
-    pub fn transactions_in_chain<C>(
-        &self,
-        chain: C,
-    ) -> Result<BTreeSet<TxInChain<'_, Transaction, A>>, C::Error>
+    pub fn get_chain_spend<C>(&self, chain: C, outpoint: OutPoint) -> Option<(ObservedIn<&A>, Txid)>
     where
-        C: ChainOracle,
+        C: ChainOracle<Error = Infallible>,
     {
-        self.full_transactions()
-            .filter_map(|tx| {
-                self.get_position_in_chain(&chain, tx.txid)
-                    .map(|v| v.map(|observed_in| TxInChain { observed_in, tx }))
-                    .transpose()
-            })
-            .collect()
+        self.try_get_spend_in_chain(chain, outpoint)
+            .expect("error is infallible")
     }
 }
 
@@ -802,41 +808,56 @@ impl<A: BlockAnchor, I: TxIndex> IndexedTxGraph<A, I> {
         self.graph.relevant_heights()
     }
 
-    pub fn txs_in_chain<C>(
-        &self,
+    pub fn try_list_chain_txs<'a, C>(
+        &'a self,
         chain: C,
-    ) -> Result<BTreeSet<TxInChain<'_, Transaction, A>>, C::Error>
+    ) -> impl Iterator<Item = Result<TxInChain<'a, Transaction, A>, C::Error>>
     where
-        C: ChainOracle,
+        C: ChainOracle + 'a,
     {
-        let mut tx_set = self.graph.transactions_in_chain(chain)?;
-        tx_set.retain(|tx| self.index.is_tx_relevant(&tx.tx));
-        Ok(tx_set)
+        self.graph
+            .full_transactions()
+            .filter(|tx| self.index.is_tx_relevant(tx))
+            .filter_map(move |tx| {
+                self.graph
+                    .try_get_chain_position(&chain, tx.txid)
+                    .map(|v| v.map(|observed_in| TxInChain { observed_in, tx }))
+                    .transpose()
+            })
     }
 
-    pub fn txouts_in_chain<C>(
-        &self,
+    pub fn list_chain_txs<'a, C>(
+        &'a self,
         chain: C,
-    ) -> Result<Vec<TxOutInChain<'_, I::SpkIndex, A>>, C::Error>
+    ) -> impl Iterator<Item = TxInChain<'a, Transaction, A>>
     where
-        C: ChainOracle,
+        C: ChainOracle<Error = Infallible> + 'a,
+    {
+        self.try_list_chain_txs(chain)
+            .map(|r| r.expect("error is infallible"))
+    }
+
+    pub fn try_list_chain_txouts<'a, C>(
+        &'a self,
+        chain: C,
+    ) -> impl Iterator<Item = Result<TxOutInChain<'a, I::SpkIndex, A>, C::Error>>
+    where
+        C: ChainOracle + 'a,
         ObservedIn<A>: ChainPosition,
     {
-        self.index
-            .relevant_txouts()
-            .iter()
-            .filter_map(|(op, (spk_i, txout))| -> Option<Result<_, C::Error>> {
+        self.index.relevant_txouts().iter().filter_map(
+            move |(op, (spk_i, txout))| -> Option<Result<_, C::Error>> {
                 let graph_tx = self.graph.get_tx(op.txid)?;
 
                 let is_on_coinbase = graph_tx.is_coin_base();
 
-                let chain_position = match self.graph.get_position_in_chain(&chain, op.txid) {
+                let chain_position = match self.graph.try_get_chain_position(&chain, op.txid) {
                     Ok(Some(observed_at)) => observed_at,
                     Ok(None) => return None,
                     Err(err) => return Some(Err(err)),
                 };
 
-                let spent_by = match self.graph.get_spend_in_chain(&chain, *op) {
+                let spent_by = match self.graph.try_get_spend_in_chain(&chain, *op) {
                     Ok(spent_by) => spent_by,
                     Err(err) => return Some(Err(err)),
                 };
@@ -855,22 +876,45 @@ impl<A: BlockAnchor, I: TxIndex> IndexedTxGraph<A, I> {
                 };
 
                 Some(Ok(txout_in_chain))
-            })
-            .collect()
+            },
+        )
+    }
+
+    pub fn list_chain_txouts<'a, C>(
+        &'a self,
+        chain: C,
+    ) -> impl Iterator<Item = TxOutInChain<'a, I::SpkIndex, A>>
+    where
+        C: ChainOracle<Error = Infallible> + 'a,
+        ObservedIn<A>: ChainPosition,
+    {
+        self.try_list_chain_txouts(chain)
+            .map(|r| r.expect("error in infallible"))
     }
 
     /// Return relevant unspents.
-    pub fn utxos_in_chain<C>(
-        &self,
+    pub fn try_list_chain_utxos<'a, C>(
+        &'a self,
         chain: C,
-    ) -> Result<Vec<TxOutInChain<'_, I::SpkIndex, A>>, C::Error>
+    ) -> impl Iterator<Item = Result<TxOutInChain<'a, I::SpkIndex, A>, C::Error>>
     where
-        C: ChainOracle,
+        C: ChainOracle + 'a,
         ObservedIn<A>: ChainPosition,
     {
-        let mut txouts = self.txouts_in_chain(chain)?;
-        txouts.retain(|txo| txo.txout.spent_by.is_none());
-        Ok(txouts)
+        self.try_list_chain_txouts(chain)
+            .filter(|r| !matches!(r, Ok(txo) if txo.txout.spent_by.is_none()))
+    }
+
+    pub fn list_chain_utxos<'a, C>(
+        &'a self,
+        chain: C,
+    ) -> impl Iterator<Item = TxOutInChain<'a, I::SpkIndex, A>>
+    where
+        C: ChainOracle<Error = Infallible> + 'a,
+        ObservedIn<A>: ChainPosition,
+    {
+        self.try_list_chain_utxos(chain)
+            .map(|r| r.expect("error is infallible"))
     }
 }
 
