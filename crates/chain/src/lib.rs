@@ -24,6 +24,7 @@ mod spk_txout_index;
 pub use spk_txout_index::*;
 mod chain_data;
 pub use chain_data::*;
+pub mod indexed_tx_graph;
 pub mod keychain;
 pub mod sparse_chain;
 mod tx_data_traits;
