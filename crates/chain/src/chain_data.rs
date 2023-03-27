@@ -14,6 +14,15 @@ pub enum ObservedIn<A> {
     Mempool(u64),
 }
 
+impl<A: Clone> ObservedIn<&A> {
+    pub fn into_owned(self) -> ObservedIn<A> {
+        match self {
+            ObservedIn::Block(a) => ObservedIn::Block(a.clone()),
+            ObservedIn::Mempool(last_seen) => ObservedIn::Mempool(last_seen),
+        }
+    }
+}
+
 impl ChainPosition for ObservedIn<BlockId> {
     fn height(&self) -> TxHeight {
         match self {
@@ -256,6 +265,18 @@ impl<I: ChainPosition> FullTxOut<I> {
         }
 
         true
+    }
+}
+
+impl<A: Clone> FullTxOut<ObservedIn<&A>> {
+    pub fn into_owned(self) -> FullTxOut<ObservedIn<A>> {
+        FullTxOut {
+            outpoint: self.outpoint,
+            txout: self.txout,
+            chain_position: self.chain_position.into_owned(),
+            spent_by: self.spent_by.map(|(o, txid)| (o.into_owned(), txid)),
+            is_on_coinbase: self.is_on_coinbase,
+        }
     }
 }
 

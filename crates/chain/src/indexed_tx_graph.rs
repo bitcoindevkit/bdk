@@ -4,6 +4,7 @@ use alloc::collections::BTreeSet;
 use bitcoin::{OutPoint, Transaction, TxOut};
 
 use crate::{
+    keychain::Balance,
     sparse_chain::ChainPosition,
     tx_graph::{Additions, TxGraph, TxInGraph},
     BlockAnchor, ChainOracle, FullTxOut, ObservedIn, TxIndex, TxIndexAdditions,
@@ -259,5 +260,87 @@ impl<A: BlockAnchor, I: TxIndex> IndexedTxGraph<A, I> {
     {
         self.try_list_chain_utxos(chain)
             .map(|r| r.expect("error is infallible"))
+    }
+
+    pub fn try_balance<C, F>(
+        &self,
+        chain: C,
+        tip: u32,
+        mut should_trust: F,
+    ) -> Result<Balance, C::Error>
+    where
+        C: ChainOracle,
+        ObservedIn<A>: ChainPosition + Clone,
+        F: FnMut(&I::SpkIndex) -> bool,
+    {
+        let mut immature = 0;
+        let mut trusted_pending = 0;
+        let mut untrusted_pending = 0;
+        let mut confirmed = 0;
+
+        for res in self.try_list_chain_txouts(&chain) {
+            let TxOutInChain { spk_index, txout } = res?;
+            let txout = txout.into_owned();
+
+            match &txout.chain_position {
+                ObservedIn::Block(_) => {
+                    if txout.is_on_coinbase {
+                        if txout.is_mature(tip) {
+                            confirmed += txout.txout.value;
+                        } else {
+                            immature += txout.txout.value;
+                        }
+                    }
+                }
+                ObservedIn::Mempool(_) => {
+                    if should_trust(spk_index) {
+                        trusted_pending += txout.txout.value;
+                    } else {
+                        untrusted_pending += txout.txout.value;
+                    }
+                }
+            }
+        }
+
+        Ok(Balance {
+            immature,
+            trusted_pending,
+            untrusted_pending,
+            confirmed,
+        })
+    }
+
+    pub fn balance<C, F>(&self, chain: C, tip: u32, should_trust: F) -> Balance
+    where
+        C: ChainOracle<Error = Infallible>,
+        ObservedIn<A>: ChainPosition + Clone,
+        F: FnMut(&I::SpkIndex) -> bool,
+    {
+        self.try_balance(chain, tip, should_trust)
+            .expect("error is infallible")
+    }
+
+    pub fn try_balance_at<C>(&self, chain: C, height: u32) -> Result<u64, C::Error>
+    where
+        C: ChainOracle,
+        ObservedIn<A>: ChainPosition + Clone,
+    {
+        let mut sum = 0;
+        for res in self.try_list_chain_txouts(chain) {
+            let txo = res?.txout.into_owned();
+            if txo.is_spendable_at(height) {
+                sum += txo.txout.value;
+            }
+        }
+        Ok(sum)
+    }
+
+    pub fn balance_at<C>(&self, chain: C, height: u32) -> u64
+    where
+        C: ChainOracle<Error = Infallible>,
+        ObservedIn<A>: ChainPosition + Clone,
+    {
+        self.try_balance_at(chain, height)
+            .expect("error is infallible")
     }
 }
