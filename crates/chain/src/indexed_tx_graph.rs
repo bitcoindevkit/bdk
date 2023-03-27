@@ -73,7 +73,7 @@ impl<A: BlockAnchor, I: TxIndex> IndexedTxGraph<A, I> {
     }
 
     /// Get a mutable reference to the internal transaction index.
-    pub fn mut_index(&mut self) -> &mut I {
+    pub fn index_mut(&mut self) -> &mut I {
         &mut self.index
     }
 
