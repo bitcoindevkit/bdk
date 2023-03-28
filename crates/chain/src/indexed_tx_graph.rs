@@ -9,22 +9,33 @@ use crate::{
     BlockAnchor, ChainOracle, FullTxOut, ObservedIn, TxIndex, TxIndexAdditions,
 };
 
+/// An outwards-facing view of a transaction that is part of the *best chain*'s history.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct TxInChain<'a, T, A> {
+    /// Where the transaction is observed (in a block or in mempool).
     pub observed_in: ObservedIn<&'a A>,
+    /// The transaction with anchors and last seen timestamp.
     pub tx: TxInGraph<'a, T, A>,
 }
 
+/// An outwards-facing view of a relevant txout that is part of the *best chain*'s history.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct TxOutInChain<'a, I, A> {
+    /// The custom index of the txout's script pubkey.
     pub spk_index: &'a I,
+    /// The full txout.
     pub txout: FullTxOut<ObservedIn<&'a A>>,
 }
 
+/// A structure that represents changes to an [`IndexedTxGraph`].
+#[derive(Clone, Debug, PartialEq)]
 #[must_use]
 pub struct IndexedAdditions<A, D> {
+    /// [`TxGraph`] additions.
     pub graph_additions: Additions<A>,
+    /// [`TxIndex`] additions.
     pub index_delta: D,
+    /// Last block height witnessed (if any).
     pub last_height: Option<u32>,
 }
 
