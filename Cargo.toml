@@ -52,7 +52,10 @@ js-sys = "0.3"
 minimal = []
 compiler = ["miniscript/compiler"]
 verify = ["bitcoinconsensus"]
-default = ["key-value-db", "electrum"]
+default = ["std", "key-value-db", "electrum"]
+# std feature is always required unless building for wasm32-unknown-unknown target
+# if building for wasm user must add dependencies bitcoin/no-std,miniscript/no-std
+std = ["bitcoin/std", "miniscript/std"]
 sqlite = ["rusqlite", "ahash"]
 sqlite-bundled = ["sqlite", "rusqlite/bundled"]
 compact_filters = ["rocksdb", "socks", "cc"]
