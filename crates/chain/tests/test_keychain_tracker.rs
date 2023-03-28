@@ -12,11 +12,11 @@ use bdk_chain::{
     tx_graph::TxInGraph,
     BlockId, ConfirmationTime, TxHeight,
 };
-use bitcoin::{BlockHash, TxIn};
+use bitcoin::TxIn;
 
 #[test]
 fn test_insert_tx() {
-    let mut tracker = KeychainTracker::<_, BlockId, _>::default();
+    let mut tracker = KeychainTracker::default();
     let secp = Secp256k1::new();
     let (descriptor, _) = Descriptor::parse_descriptor(&secp, "tr([73c5da0a/86'/0'/0']xprv9xgqHN7yz9MwCkxsBPN5qetuNdQSUttZNKw1dcYTV4mkaAFiBVGQziHs3NRSWMkCzvgjEe3n9xV8oYywvM8at9yRqyaZVz6TYYhX98VjsUk/0/*)").unwrap();
     tracker.add_keychain((), descriptor.clone());
@@ -72,7 +72,7 @@ fn test_balance() {
         One,
         Two,
     }
-    let mut tracker = KeychainTracker::<Keychain, (u32, BlockHash), TxHeight>::default();
+    let mut tracker = KeychainTracker::default();
     let one = Descriptor::from_str("tr([73c5da0a/86'/0'/0']xpub6BgBgsespWvERF3LHQu6CnqdvfEvtMcQjYrcRzx53QJjSxarj2afYWcLteoGVky7D3UKDP9QyrLprQ3VCECoY49yfdDEHGCtMMj92pReUsQ/0/*)#rg247h69").unwrap();
     let two = Descriptor::from_str("tr([73c5da0a/86'/0'/0']xpub6BgBgsespWvERF3LHQu6CnqdvfEvtMcQjYrcRzx53QJjSxarj2afYWcLteoGVky7D3UKDP9QyrLprQ3VCECoY49yfdDEHGCtMMj92pReUsQ/1/*)#ju05rz2a").unwrap();
     tracker.add_keychain(Keychain::One, one);

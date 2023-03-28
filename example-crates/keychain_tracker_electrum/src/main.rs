@@ -48,7 +48,7 @@ pub struct ScanOptions {
 }
 
 fn main() -> anyhow::Result<()> {
-    let (args, keymap, tracker, db) = cli::init::<ElectrumCommands, _, _>()?;
+    let (args, keymap, tracker, db) = cli::init::<ElectrumCommands, _>()?;
 
     let electrum_url = match args.network {
         Network::Bitcoin => "ssl://electrum.blockstream.info:50002",

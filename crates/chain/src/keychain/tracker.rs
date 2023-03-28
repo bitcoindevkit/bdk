@@ -17,16 +17,15 @@ use super::{Balance, DerivationAdditions};
 /// The [`KeychainTracker`] atomically updates its [`KeychainTxOutIndex`] whenever new chain data is
 /// incorporated into its internal [`ChainGraph`].
 #[derive(Clone, Debug)]
-pub struct KeychainTracker<K, A, P> {
+pub struct KeychainTracker<K, P> {
     /// Index between script pubkeys to transaction outputs
     pub txout_index: KeychainTxOutIndex<K>,
-    chain_graph: ChainGraph<A, P>,
+    chain_graph: ChainGraph<P>,
 }
 
-impl<K, A, P> KeychainTracker<K, A, P>
+impl<K, P> KeychainTracker<K, P>
 where
     P: sparse_chain::ChainPosition,
-    A: crate::BlockAnchor,
     K: Ord + Clone + core::fmt::Debug,
 {
     /// Add a keychain to the tracker's `txout_index` with a descriptor to derive addresses.
@@ -65,8 +64,8 @@ where
     /// [`KeychainTxOutIndex`].
     pub fn determine_changeset(
         &self,
-        scan: &KeychainScan<K, A, P>,
-    ) -> Result<KeychainChangeSet<K, A, P>, chain_graph::UpdateError<P>> {
+        scan: &KeychainScan<K, P>,
+    ) -> Result<KeychainChangeSet<K, P>, chain_graph::UpdateError<P>> {
         // TODO: `KeychainTxOutIndex::determine_additions`
         let mut derivation_indices = scan.last_active_indices.clone();
         derivation_indices.retain(|keychain, index| {
@@ -90,8 +89,8 @@ where
     /// [`apply_changeset`]: Self::apply_changeset
     pub fn apply_update(
         &mut self,
-        scan: KeychainScan<K, A, P>,
-    ) -> Result<KeychainChangeSet<K, A, P>, chain_graph::UpdateError<P>> {
+        scan: KeychainScan<K, P>,
+    ) -> Result<KeychainChangeSet<K, P>, chain_graph::UpdateError<P>> {
         let changeset = self.determine_changeset(&scan)?;
         self.apply_changeset(changeset.clone());
         Ok(changeset)
@@ -101,7 +100,7 @@ where
     ///
     /// Internally, this calls [`KeychainTxOutIndex::apply_additions`] and
     /// [`ChainGraph::apply_changeset`] in sequence.
-    pub fn apply_changeset(&mut self, changeset: KeychainChangeSet<K, A, P>) {
+    pub fn apply_changeset(&mut self, changeset: KeychainChangeSet<K, P>) {
         let KeychainChangeSet {
             derivation_indices,
             chain_graph,
@@ -133,12 +132,12 @@ where
     }
 
     /// Returns a reference to the internal [`ChainGraph`].
-    pub fn chain_graph(&self) -> &ChainGraph<A, P> {
+    pub fn chain_graph(&self) -> &ChainGraph<P> {
         &self.chain_graph
     }
 
     /// Returns a reference to the internal [`TxGraph`] (which is part of the [`ChainGraph`]).
-    pub fn graph(&self) -> &TxGraph<A> {
+    pub fn graph(&self) -> &TxGraph {
         self.chain_graph().graph()
     }
 
@@ -160,7 +159,7 @@ where
     pub fn insert_checkpoint_preview(
         &self,
         block_id: BlockId,
-    ) -> Result<KeychainChangeSet<K, A, P>, chain_graph::InsertCheckpointError> {
+    ) -> Result<KeychainChangeSet<K, P>, chain_graph::InsertCheckpointError> {
         Ok(KeychainChangeSet {
             chain_graph: self.chain_graph.insert_checkpoint_preview(block_id)?,
             ..Default::default()
@@ -177,7 +176,7 @@ where
     pub fn insert_checkpoint(
         &mut self,
         block_id: BlockId,
-    ) -> Result<KeychainChangeSet<K, A, P>, chain_graph::InsertCheckpointError> {
+    ) -> Result<KeychainChangeSet<K, P>, chain_graph::InsertCheckpointError> {
         let changeset = self.insert_checkpoint_preview(block_id)?;
         self.apply_changeset(changeset.clone());
         Ok(changeset)
@@ -192,7 +191,7 @@ where
         &self,
         tx: Transaction,
         pos: P,
-    ) -> Result<KeychainChangeSet<K, A, P>, chain_graph::InsertTxError<P>> {
+    ) -> Result<KeychainChangeSet<K, P>, chain_graph::InsertTxError<P>> {
         Ok(KeychainChangeSet {
             chain_graph: self.chain_graph.insert_tx_preview(tx, pos)?,
             ..Default::default()
@@ -210,7 +209,7 @@ where
         &mut self,
         tx: Transaction,
         pos: P,
-    ) -> Result<KeychainChangeSet<K, A, P>, chain_graph::InsertTxError<P>> {
+    ) -> Result<KeychainChangeSet<K, P>, chain_graph::InsertTxError<P>> {
         let changeset = self.insert_tx_preview(tx, pos)?;
         self.apply_changeset(changeset.clone());
         Ok(changeset)
@@ -281,7 +280,7 @@ where
     }
 }
 
-impl<K, A, P> Default for KeychainTracker<K, A, P> {
+impl<K, P> Default for KeychainTracker<K, P> {
     fn default() -> Self {
         Self {
             txout_index: Default::default(),
@@ -290,20 +289,20 @@ impl<K, A, P> Default for KeychainTracker<K, A, P> {
     }
 }
 
-impl<K, A, P> AsRef<SparseChain<P>> for KeychainTracker<K, A, P> {
+impl<K, P> AsRef<SparseChain<P>> for KeychainTracker<K, P> {
     fn as_ref(&self) -> &SparseChain<P> {
         self.chain_graph.chain()
     }
 }
 
-impl<K, A, P> AsRef<TxGraph<A>> for KeychainTracker<K, A, P> {
-    fn as_ref(&self) -> &TxGraph<A> {
+impl<K, P> AsRef<TxGraph> for KeychainTracker<K, P> {
+    fn as_ref(&self) -> &TxGraph {
         self.chain_graph.graph()
     }
 }
 
-impl<K, A, P> AsRef<ChainGraph<A, P>> for KeychainTracker<K, A, P> {
-    fn as_ref(&self) -> &ChainGraph<A, P> {
+impl<K, P> AsRef<ChainGraph<P>> for KeychainTracker<K, P> {
+    fn as_ref(&self) -> &ChainGraph<P> {
         &self.chain_graph
     }
 }

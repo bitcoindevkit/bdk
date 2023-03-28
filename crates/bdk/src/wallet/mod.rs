@@ -85,19 +85,19 @@ const COINBASE_MATURITY: u32 = 100;
 pub struct Wallet<D = ()> {
     signers: Arc<SignersContainer>,
     change_signers: Arc<SignersContainer>,
-    keychain_tracker: KeychainTracker<KeychainKind, BlockId, ConfirmationTime>,
-    persist: persist::Persist<KeychainKind, BlockId, ConfirmationTime, D>,
+    keychain_tracker: KeychainTracker<KeychainKind, ConfirmationTime>,
+    persist: persist::Persist<KeychainKind, ConfirmationTime, D>,
     network: Network,
     secp: SecpCtx,
 }
 
 /// The update to a [`Wallet`] used in [`Wallet::apply_update`]. This is usually returned from blockchain data sources.
 /// The type parameter `T` indicates the kind of transaction contained in the update. It's usually a [`bitcoin::Transaction`].
-pub type Update = KeychainScan<KeychainKind, BlockId, ConfirmationTime>;
+pub type Update = KeychainScan<KeychainKind, ConfirmationTime>;
 /// Error indicating that something was wrong with an [`Update<T>`].
 pub type UpdateError = chain_graph::UpdateError<ConfirmationTime>;
 /// The changeset produced internally by applying an update
-pub(crate) type ChangeSet = KeychainChangeSet<KeychainKind, BlockId, ConfirmationTime>;
+pub(crate) type ChangeSet = KeychainChangeSet<KeychainKind, ConfirmationTime>;
 
 /// The address index selection strategy to use to derived an address from the wallet's external
 /// descriptor. See [`Wallet::get_address`]. If you're unsure which one to use use `WalletIndex::New`.
@@ -197,7 +197,7 @@ impl<D> Wallet<D> {
         network: Network,
     ) -> Result<Self, NewError<D::LoadError>>
     where
-        D: persist::PersistBackend<KeychainKind, BlockId, ConfirmationTime>,
+        D: persist::PersistBackend<KeychainKind, ConfirmationTime>,
     {
         let secp = Secp256k1::new();
 
@@ -259,7 +259,7 @@ impl<D> Wallet<D> {
     /// (i.e. does not end with /*) then the same address will always be returned for any [`AddressIndex`].
     pub fn get_address(&mut self, address_index: AddressIndex) -> AddressInfo
     where
-        D: persist::PersistBackend<KeychainKind, BlockId, ConfirmationTime>,
+        D: persist::PersistBackend<KeychainKind, ConfirmationTime>,
     {
         self._get_address(address_index, KeychainKind::External)
     }
@@ -273,14 +273,14 @@ impl<D> Wallet<D> {
     /// be returned for any [`AddressIndex`].
     pub fn get_internal_address(&mut self, address_index: AddressIndex) -> AddressInfo
     where
-        D: persist::PersistBackend<KeychainKind, BlockId, ConfirmationTime>,
+        D: persist::PersistBackend<KeychainKind, ConfirmationTime>,
     {
         self._get_address(address_index, KeychainKind::Internal)
     }
 
     fn _get_address(&mut self, address_index: AddressIndex, keychain: KeychainKind) -> AddressInfo
     where
-        D: persist::PersistBackend<KeychainKind, BlockId, ConfirmationTime>,
+        D: persist::PersistBackend<KeychainKind, ConfirmationTime>,
     {
         let keychain = self.map_keychain(keychain);
         let txout_index = &mut self.keychain_tracker.txout_index;
@@ -620,7 +620,7 @@ impl<D> Wallet<D> {
         params: TxParams,
     ) -> Result<(psbt::PartiallySignedTransaction, TransactionDetails), Error>
     where
-        D: persist::PersistBackend<KeychainKind, BlockId, ConfirmationTime>,
+        D: persist::PersistBackend<KeychainKind, ConfirmationTime>,
     {
         let external_descriptor = self
             .keychain_tracker
@@ -1694,7 +1694,7 @@ impl<D> Wallet<D> {
     /// [`commit`]: Self::commit
     pub fn apply_update(&mut self, update: Update) -> Result<(), UpdateError>
     where
-        D: persist::PersistBackend<KeychainKind, BlockId, ConfirmationTime>,
+        D: persist::PersistBackend<KeychainKind, ConfirmationTime>,
     {
         let changeset = self.keychain_tracker.apply_update(update)?;
         self.persist.stage(changeset);
@@ -1706,7 +1706,7 @@ impl<D> Wallet<D> {
     /// [`staged`]: Self::staged
     pub fn commit(&mut self) -> Result<(), D::WriteError>
     where
-        D: persist::PersistBackend<KeychainKind, BlockId, ConfirmationTime>,
+        D: persist::PersistBackend<KeychainKind, ConfirmationTime>,
     {
         self.persist.commit()
     }
@@ -1724,7 +1724,7 @@ impl<D> Wallet<D> {
     }
 
     /// Get a reference to the inner [`ChainGraph`](bdk_chain::chain_graph::ChainGraph).
-    pub fn as_chain_graph(&self) -> &bdk_chain::chain_graph::ChainGraph<BlockId, ConfirmationTime> {
+    pub fn as_chain_graph(&self) -> &bdk_chain::chain_graph::ChainGraph<ConfirmationTime> {
         self.keychain_tracker.chain_graph()
     }
 }
@@ -1735,8 +1735,8 @@ impl<D> AsRef<bdk_chain::tx_graph::TxGraph> for Wallet<D> {
     }
 }
 
-impl<D> AsRef<bdk_chain::chain_graph::ChainGraph<BlockId, ConfirmationTime>> for Wallet<D> {
-    fn as_ref(&self) -> &bdk_chain::chain_graph::ChainGraph<BlockId, ConfirmationTime> {
+impl<D> AsRef<bdk_chain::chain_graph::ChainGraph<ConfirmationTime>> for Wallet<D> {
+    fn as_ref(&self) -> &bdk_chain::chain_graph::ChainGraph<ConfirmationTime> {
         self.keychain_tracker.chain_graph()
     }
 }
