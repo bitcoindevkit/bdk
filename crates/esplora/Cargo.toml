@@ -17,6 +17,15 @@ esplora-client = { version = "0.3", default-features = false }
 async-trait = { version = "0.1.66", optional = true }
 futures = { version = "0.3.26", optional = true }
 
+[dev-dependencies]
+electrsd = { version = "0.22", features = ["legacy", "esplora_a33e97e1", "bitcoind_22_0"] }
+tokio = { version = "1.20.1", features = ["full"] }
+anyhow = "1"
+# zip versions after 0.6.3 don't work with our MSRV 1.57.0
+zip = "=0.6.3"
+# base64ct versions at 1.6.0 and higher have MSRV 1.60.0
+base64ct = "<1.6.0"
+
 [features]
 default = ["async-https", "blocking"]
 async = ["async-trait", "futures", "esplora-client/async"]
