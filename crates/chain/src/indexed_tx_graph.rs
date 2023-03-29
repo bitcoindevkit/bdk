@@ -68,7 +68,7 @@ impl<A: BlockAnchor, D: TxIndexAdditions> TxIndexAdditions for IndexedAdditions<
 
 pub struct IndexedTxGraph<A, I> {
     graph: TxGraph<A>,
-    index: I,
+    index: I, // [TODO] Make public
     last_height: u32,
 }
 
@@ -219,6 +219,7 @@ impl<A: BlockAnchor, I: TxIndex> IndexedTxGraph<A, I> {
         self.last_height
     }
 
+    // [TODO] Have to methods, one for relevant-only, and one for any. Have one in `TxGraph`.
     pub fn try_list_chain_txs<'a, C>(
         &'a self,
         chain: C,

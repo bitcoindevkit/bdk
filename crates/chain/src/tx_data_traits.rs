@@ -58,6 +58,10 @@ impl BlockAnchor for (u32, BlockHash) {
 }
 
 /// Represents a service that tracks the best chain history.
+/// TODO: How do we ensure the chain oracle is consistent across a single call?
+/// * We need to somehow lock the data! What if the ChainOracle is remote?
+/// * Get tip method! And check the tip still exists at the end! And every internal call
+///   does not go beyond the initial tip.
 pub trait ChainOracle {
     /// Error type.
     type Error: core::fmt::Debug;
@@ -71,6 +75,8 @@ pub trait ChainOracle {
     }
 }
 
+// [TODO] We need stuff for smart pointers. Maybe? How does rust lib do this?
+// Box<dyn ChainOracle>, Arc<dyn ChainOracle> ????? I will figure it out
 impl<C: ChainOracle> ChainOracle for &C {
     type Error = C::Error;
 

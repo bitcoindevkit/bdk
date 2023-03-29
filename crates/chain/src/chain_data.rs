@@ -11,6 +11,7 @@ pub enum ObservedIn<A> {
     /// The chain data is seen in a block identified by `A`.
     Block(A),
     /// The chain data is seen in mempool at this given timestamp.
+    /// TODO: Call this `Unconfirmed`.
     Mempool(u64),
 }
 
