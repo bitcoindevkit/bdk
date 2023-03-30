@@ -524,7 +524,7 @@ impl<D> Wallet<D> {
     /// unconfirmed transactions last.
     pub fn transactions(
         &self,
-    ) -> impl DoubleEndedIterator<Item = (ConfirmationTime, TxInGraph<'_, Transaction, BlockId>)> + '_
+    ) -> impl DoubleEndedIterator<Item = (ConfirmationTime, TxInGraph<'_, Transaction, ()>)> + '_
     {
         self.keychain_tracker
             .chain_graph()

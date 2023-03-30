@@ -27,7 +27,7 @@ use core::fmt::Debug;
 #[derive(Clone, Debug, PartialEq)]
 pub struct ChainGraph<P = TxHeight> {
     chain: SparseChain<P>,
-    graph: TxGraph<BlockId>,
+    graph: TxGraph,
 }
 
 impl<P> Default for ChainGraph<P> {
@@ -45,8 +45,8 @@ impl<P> AsRef<SparseChain<P>> for ChainGraph<P> {
     }
 }
 
-impl<P> AsRef<TxGraph<BlockId>> for ChainGraph<P> {
-    fn as_ref(&self) -> &TxGraph<BlockId> {
+impl<P> AsRef<TxGraph> for ChainGraph<P> {
+    fn as_ref(&self) -> &TxGraph {
         &self.graph
     }
 }
@@ -64,7 +64,7 @@ impl<P> ChainGraph<P> {
     }
 
     /// Returns a reference to the internal [`TxGraph`].
-    pub fn graph(&self) -> &TxGraph<BlockId> {
+    pub fn graph(&self) -> &TxGraph {
         &self.graph
     }
 }
@@ -81,7 +81,7 @@ where
     /// transaction in `graph`.
     /// 2. The `chain` has two transactions that are allegedly in it, but they conflict in the `graph`
     /// (so could not possibly be in the same chain).
-    pub fn new(chain: SparseChain<P>, graph: TxGraph<BlockId>) -> Result<Self, NewError<P>> {
+    pub fn new(chain: SparseChain<P>, graph: TxGraph) -> Result<Self, NewError<P>> {
         let mut missing = HashSet::default();
         for (pos, txid) in chain.txids() {
             if let Some(graphed_tx) = graph.get_tx(*txid) {
@@ -212,7 +212,7 @@ where
     ///
     /// This does not necessarily mean that it is *confirmed* in the blockchain; it might just be in
     /// the unconfirmed transaction list within the [`SparseChain`].
-    pub fn get_tx_in_chain(&self, txid: Txid) -> Option<(&P, TxInGraph<'_, Transaction, BlockId>)> {
+    pub fn get_tx_in_chain(&self, txid: Txid) -> Option<(&P, TxInGraph<'_, Transaction, ()>)> {
         let position = self.chain.tx_position(txid)?;
         let graphed_tx = self.graph.get_tx(txid).expect("must exist");
         Some((position, graphed_tx))
@@ -430,7 +430,7 @@ where
     /// in ascending order.
     pub fn transactions_in_chain(
         &self,
-    ) -> impl DoubleEndedIterator<Item = (&P, TxInGraph<'_, Transaction, BlockId>)> {
+    ) -> impl DoubleEndedIterator<Item = (&P, TxInGraph<'_, Transaction, ()>)> {
         self.chain
             .txids()
             .map(move |(pos, txid)| (pos, self.graph.get_tx(*txid).expect("must exist")))
@@ -469,7 +469,7 @@ where
 #[must_use]
 pub struct ChangeSet<P> {
     pub chain: sparse_chain::ChangeSet<P>,
-    pub graph: tx_graph::Additions<BlockId>,
+    pub graph: tx_graph::Additions<()>,
 }
 
 impl<P> ChangeSet<P> {
