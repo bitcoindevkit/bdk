@@ -23,9 +23,7 @@ pub use bdk_chain::keychain::Balance;
 use bdk_chain::{
     chain_graph,
     keychain::{persist, KeychainChangeSet, KeychainScan, KeychainTracker},
-    sparse_chain,
-    tx_graph::TxInGraph,
-    BlockId, ConfirmationTime,
+    sparse_chain, BlockId, ConfirmationTime,
 };
 use bitcoin::consensus::encode::serialize;
 use bitcoin::secp256k1::Secp256k1;
@@ -455,11 +453,7 @@ impl<D> Wallet<D> {
         let fee = inputs.map(|inputs| inputs.saturating_sub(outputs));
 
         Some(TransactionDetails {
-            transaction: if include_raw {
-                Some(tx.tx.clone())
-            } else {
-                None
-            },
+            transaction: if include_raw { Some(tx.clone()) } else { None },
             txid,
             received,
             sent,
@@ -524,8 +518,7 @@ impl<D> Wallet<D> {
     /// unconfirmed transactions last.
     pub fn transactions(
         &self,
-    ) -> impl DoubleEndedIterator<Item = (ConfirmationTime, TxInGraph<'_, Transaction, ()>)> + '_
-    {
+    ) -> impl DoubleEndedIterator<Item = (ConfirmationTime, &Transaction)> + '_ {
         self.keychain_tracker
             .chain_graph()
             .transactions_in_chain()
@@ -1034,7 +1027,7 @@ impl<D> Wallet<D> {
             Some((ConfirmationTime::Confirmed { .. }, _tx)) => {
                 return Err(Error::TransactionConfirmed)
             }
-            Some((_, tx)) => tx.tx.clone(),
+            Some((_, tx)) => tx.clone(),
         };
 
         if !tx
@@ -1092,7 +1085,7 @@ impl<D> Wallet<D> {
                                 outpoint: txin.previous_output,
                                 psbt_input: Box::new(psbt::Input {
                                     witness_utxo: Some(txout.clone()),
-                                    non_witness_utxo: Some(prev_tx.tx.clone()),
+                                    non_witness_utxo: Some(prev_tx.clone()),
                                     ..Default::default()
                                 }),
                             },
@@ -1620,7 +1613,7 @@ impl<D> Wallet<D> {
                 psbt_input.witness_utxo = Some(prev_tx.output[prev_output.vout as usize].clone());
             }
             if !desc.is_taproot() && (!desc.is_witness() || !only_witness_utxo) {
-                psbt_input.non_witness_utxo = Some(prev_tx.tx.clone());
+                psbt_input.non_witness_utxo = Some(prev_tx.clone());
             }
         }
         Ok(psbt_input)

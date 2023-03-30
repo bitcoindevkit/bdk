@@ -2,12 +2,9 @@
 mod common;
 use bdk_chain::{
     collections::*,
-    tx_graph::{Additions, TxGraph, TxInGraph},
-    BlockId,
+    tx_graph::{Additions, TxGraph},
 };
-use bitcoin::{
-    hashes::Hash, BlockHash, OutPoint, PackedLockTime, Script, Transaction, TxIn, TxOut, Txid,
-};
+use bitcoin::{hashes::Hash, OutPoint, PackedLockTime, Script, Transaction, TxIn, TxOut, Txid};
 use core::iter;
 
 #[test]
@@ -38,7 +35,7 @@ fn insert_txouts() {
     )];
 
     let mut graph = {
-        let mut graph = TxGraph::<(u32, BlockHash)>::default();
+        let mut graph = TxGraph::<()>::default();
         for (outpoint, txout) in &original_ops {
             assert_eq!(
                 graph.insert_txout(*outpoint, txout.clone()),
@@ -94,7 +91,7 @@ fn insert_tx_graph_doesnt_count_coinbase_as_spent() {
         output: vec![],
     };
 
-    let mut graph = TxGraph::<(u32, BlockHash)>::default();
+    let mut graph = TxGraph::<()>::default();
     let _ = graph.insert_tx(tx);
     assert!(graph.outspends(OutPoint::null()).is_empty());
     assert!(graph.tx_outspends(Txid::all_zeros()).next().is_none());
@@ -124,8 +121,8 @@ fn insert_tx_graph_keeps_track_of_spend() {
         output: vec![],
     };
 
-    let mut graph1 = TxGraph::<(u32, BlockHash)>::default();
-    let mut graph2 = TxGraph::<(u32, BlockHash)>::default();
+    let mut graph1 = TxGraph::<()>::default();
+    let mut graph2 = TxGraph::<()>::default();
 
     // insert in different order
     let _ = graph1.insert_tx(tx1.clone());
@@ -153,17 +150,14 @@ fn insert_tx_can_retrieve_full_tx_from_graph() {
         output: vec![TxOut::default()],
     };
 
-    let mut graph = TxGraph::<BlockId>::default();
+    let mut graph = TxGraph::<()>::default();
     let _ = graph.insert_tx(tx.clone());
-    assert_eq!(
-        graph.get_tx(tx.txid()),
-        Some(TxInGraph::from_tx(&tx, &BTreeSet::new()))
-    );
+    assert_eq!(graph.get_tx(tx.txid()), Some(&tx));
 }
 
 #[test]
 fn insert_tx_displaces_txouts() {
-    let mut tx_graph = TxGraph::<(u32, BlockHash)>::default();
+    let mut tx_graph = TxGraph::<()>::default();
     let tx = Transaction {
         version: 0x01,
         lock_time: PackedLockTime(0),
@@ -219,7 +213,7 @@ fn insert_tx_displaces_txouts() {
 
 #[test]
 fn insert_txout_does_not_displace_tx() {
-    let mut tx_graph = TxGraph::<(u32, BlockHash)>::default();
+    let mut tx_graph = TxGraph::<()>::default();
     let tx = Transaction {
         version: 0x01,
         lock_time: PackedLockTime(0),
@@ -275,7 +269,7 @@ fn insert_txout_does_not_displace_tx() {
 
 #[test]
 fn test_calculate_fee() {
-    let mut graph = TxGraph::<(u32, BlockHash)>::default();
+    let mut graph = TxGraph::<()>::default();
     let intx1 = Transaction {
         version: 0x01,
         lock_time: PackedLockTime(0),
@@ -369,7 +363,7 @@ fn test_calculate_fee_on_coinbase() {
         output: vec![TxOut::default()],
     };
 
-    let graph = TxGraph::<(u32, BlockHash)>::default();
+    let graph = TxGraph::<()>::default();
 
     assert_eq!(graph.calculate_fee(&tx), Some(0));
 }
@@ -411,7 +405,7 @@ fn test_conflicting_descendants() {
     let txid_a = tx_a.txid();
     let txid_b = tx_b.txid();
 
-    let mut graph = TxGraph::<(u32, BlockHash)>::default();
+    let mut graph = TxGraph::<()>::default();
     let _ = graph.insert_tx(tx_a);
     let _ = graph.insert_tx(tx_b);
 
@@ -487,7 +481,7 @@ fn test_descendants_no_repeat() {
         })
         .collect::<Vec<_>>();
 
-    let mut graph = TxGraph::<(u32, BlockHash)>::default();
+    let mut graph = TxGraph::<()>::default();
     let mut expected_txids = BTreeSet::new();
 
     // these are NOT descendants of `tx_a`

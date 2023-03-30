@@ -1,13 +1,11 @@
 #[macro_use]
 mod common;
 
-use std::collections::BTreeSet;
-
 use bdk_chain::{
     chain_graph::*,
     collections::HashSet,
     sparse_chain,
-    tx_graph::{self, TxGraph, TxInGraph},
+    tx_graph::{self, TxGraph},
     BlockId, TxHeight,
 };
 use bitcoin::{OutPoint, PackedLockTime, Script, Sequence, Transaction, TxIn, TxOut, Witness};
@@ -367,15 +365,7 @@ fn test_get_tx_in_chain() {
     let _ = cg.insert_tx(tx.clone(), TxHeight::Unconfirmed).unwrap();
     assert_eq!(
         cg.get_tx_in_chain(tx.txid()),
-        Some((
-            &TxHeight::Unconfirmed,
-            TxInGraph {
-                txid: tx.txid(),
-                tx: &tx,
-                anchors: &BTreeSet::new(),
-                last_seen: 0
-            }
-        ))
+        Some((&TxHeight::Unconfirmed, &tx,))
     );
 }
 
@@ -407,18 +397,9 @@ fn test_iterate_transactions() {
     assert_eq!(
         cg.transactions_in_chain().collect::<Vec<_>>(),
         vec![
-            (
-                &TxHeight::Confirmed(0),
-                TxInGraph::from_tx(&txs[2], &BTreeSet::new())
-            ),
-            (
-                &TxHeight::Confirmed(1),
-                TxInGraph::from_tx(&txs[0], &BTreeSet::new())
-            ),
-            (
-                &TxHeight::Unconfirmed,
-                TxInGraph::from_tx(&txs[1], &BTreeSet::new())
-            ),
+            (&TxHeight::Confirmed(0), &txs[2],),
+            (&TxHeight::Confirmed(1), &txs[0],),
+            (&TxHeight::Unconfirmed, &txs[1],),
         ]
     );
 }

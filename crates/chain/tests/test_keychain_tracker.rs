@@ -1,7 +1,6 @@
 #![cfg(feature = "miniscript")]
 #[macro_use]
 mod common;
-use std::collections::BTreeSet;
 
 use bdk_chain::{
     keychain::{Balance, KeychainTracker},
@@ -9,7 +8,6 @@ use bdk_chain::{
         bitcoin::{secp256k1::Secp256k1, OutPoint, PackedLockTime, Transaction, TxOut},
         Descriptor,
     },
-    tx_graph::TxInGraph,
     BlockId, ConfirmationTime, TxHeight,
 };
 use bitcoin::TxIn;
@@ -43,10 +41,7 @@ fn test_insert_tx() {
             .chain_graph()
             .transactions_in_chain()
             .collect::<Vec<_>>(),
-        vec![(
-            &ConfirmationTime::Unconfirmed,
-            TxInGraph::from_tx(&tx, &BTreeSet::new())
-        )]
+        vec![(&ConfirmationTime::Unconfirmed, &tx,)]
     );
 
     assert_eq!(

@@ -5,7 +5,7 @@ use bitcoin::{OutPoint, Transaction, TxOut};
 use crate::{
     keychain::Balance,
     sparse_chain::ChainPosition,
-    tx_graph::{Additions, TxGraph, TxInGraph},
+    tx_graph::{Additions, TxGraph, TxNode},
     BlockAnchor, ChainOracle, FullTxOut, ObservedIn, TxIndex, TxIndexAdditions,
 };
 
@@ -15,7 +15,7 @@ pub struct TxInChain<'a, T, A> {
     /// Where the transaction is observed (in a block or in mempool).
     pub observed_in: ObservedIn<&'a A>,
     /// The transaction with anchors and last seen timestamp.
-    pub tx: TxInGraph<'a, T, A>,
+    pub tx: TxNode<'a, T, A>,
 }
 
 /// An outwards-facing view of a relevant txout that is part of the *best chain*'s history.

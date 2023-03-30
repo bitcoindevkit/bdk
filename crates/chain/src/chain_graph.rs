@@ -2,7 +2,7 @@
 use crate::{
     collections::HashSet,
     sparse_chain::{self, ChainPosition, SparseChain},
-    tx_graph::{self, TxGraph, TxInGraph},
+    tx_graph::{self, TxGraph},
     BlockId, ForEachTxOut, FullTxOut, TxHeight,
 };
 use alloc::{string::ToString, vec::Vec};
@@ -84,11 +84,9 @@ where
     pub fn new(chain: SparseChain<P>, graph: TxGraph) -> Result<Self, NewError<P>> {
         let mut missing = HashSet::default();
         for (pos, txid) in chain.txids() {
-            if let Some(graphed_tx) = graph.get_tx(*txid) {
+            if let Some(tx) = graph.get_tx(*txid) {
                 let conflict = graph
-                    .walk_conflicts(graphed_tx.tx, |_, txid| {
-                        Some((chain.tx_position(txid)?.clone(), txid))
-                    })
+                    .walk_conflicts(tx, |_, txid| Some((chain.tx_position(txid)?.clone(), txid)))
                     .next();
                 if let Some((conflict_pos, conflict)) = conflict {
                     return Err(NewError::Conflict {
@@ -145,7 +143,7 @@ where
             match self.chain.tx_position(*txid) {
                 Some(original_pos) => {
                     if original_pos != pos {
-                        let graphed_tx = self
+                        let tx = self
                             .graph
                             .get_tx(*txid)
                             .expect("tx must exist as it is referenced in sparsechain")
@@ -153,7 +151,7 @@ where
                         let _ = inflated_chain
                             .insert_tx(*txid, pos.clone())
                             .expect("must insert since this was already in update");
-                        let _ = inflated_graph.insert_tx(graphed_tx.tx.clone());
+                        let _ = inflated_graph.insert_tx(tx.clone());
                     }
                 }
                 None => {
@@ -212,10 +210,10 @@ where
     ///
     /// This does not necessarily mean that it is *confirmed* in the blockchain; it might just be in
     /// the unconfirmed transaction list within the [`SparseChain`].
-    pub fn get_tx_in_chain(&self, txid: Txid) -> Option<(&P, TxInGraph<'_, Transaction, ()>)> {
+    pub fn get_tx_in_chain(&self, txid: Txid) -> Option<(&P, &Transaction)> {
         let position = self.chain.tx_position(txid)?;
-        let graphed_tx = self.graph.get_tx(txid).expect("must exist");
-        Some((position, graphed_tx))
+        let tx = self.graph.get_tx(txid).expect("must exist");
+        Some((position, tx))
     }
 
     /// Determines the changes required to insert a transaction into the inner [`ChainGraph`] and
@@ -348,7 +346,7 @@ where
                 None => continue,
             };
 
-            let mut full_tx = self.graph.get_tx(txid).map(|tx| tx.tx);
+            let mut full_tx = self.graph.get_tx(txid);
 
             if full_tx.is_none() {
                 full_tx = changeset.graph.tx.iter().find(|tx| tx.txid() == txid)
@@ -428,9 +426,7 @@ where
 
     /// Iterate over the full transactions and their position in the chain ordered by their position
     /// in ascending order.
-    pub fn transactions_in_chain(
-        &self,
-    ) -> impl DoubleEndedIterator<Item = (&P, TxInGraph<'_, Transaction, ()>)> {
+    pub fn transactions_in_chain(&self) -> impl DoubleEndedIterator<Item = (&P, &Transaction)> {
         self.chain
             .txids()
             .map(move |(pos, txid)| (pos, self.graph.get_tx(*txid).expect("must exist")))

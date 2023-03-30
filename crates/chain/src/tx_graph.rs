@@ -71,7 +71,7 @@ use core::{
 #[derive(Clone, Debug, PartialEq)]
 pub struct TxGraph<A = ()> {
     // all transactions that the graph is aware of in format: `(tx_node, tx_anchors, tx_last_seen)`
-    txs: HashMap<Txid, (TxNode, BTreeSet<A>, u64)>,
+    txs: HashMap<Txid, (TxNodeInternal, BTreeSet<A>, u64)>,
     spends: BTreeMap<OutPoint, HashSet<Txid>>,
     anchors: BTreeSet<(A, Txid)>,
 
@@ -94,9 +94,9 @@ impl<A> Default for TxGraph<A> {
 // pub type InChainTx<'a, T, A> = (ObservedIn<&'a A>, TxInGraph<'a, T, A>);
 // pub type InChainTxOut<'a, I, A> = (&'a I, FullTxOut<ObservedIn<&'a A>>);
 
-/// An outward-facing view of a transaction that resides in a [`TxGraph`].
+/// An outward-facing view of a transaction node that resides in a [`TxGraph`].
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub struct TxInGraph<'a, T, A> {
+pub struct TxNode<'a, T, A> {
     /// Txid of the transaction.
     pub txid: Txid,
     /// A partial or full representation of the transaction.
@@ -107,7 +107,7 @@ pub struct TxInGraph<'a, T, A> {
     pub last_seen: u64,
 }
 
-impl<'a, T, A> Deref for TxInGraph<'a, T, A> {
+impl<'a, T, A> Deref for TxNode<'a, T, A> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -115,7 +115,7 @@ impl<'a, T, A> Deref for TxInGraph<'a, T, A> {
     }
 }
 
-impl<'a, A> TxInGraph<'a, Transaction, A> {
+impl<'a, A> TxNode<'a, Transaction, A> {
     pub fn from_tx(tx: &'a Transaction, anchors: &'a BTreeSet<A>) -> Self {
         Self {
             txid: tx.txid(),
@@ -131,12 +131,12 @@ impl<'a, A> TxInGraph<'a, Transaction, A> {
 /// This can either be a whole transaction, or a partial transaction (where we only have select
 /// outputs).
 #[derive(Clone, Debug, PartialEq)]
-enum TxNode {
+enum TxNodeInternal {
     Whole(Transaction),
     Partial(BTreeMap<u32, TxOut>),
 }
 
-impl Default for TxNode {
+impl Default for TxNodeInternal {
     fn default() -> Self {
         Self::Partial(BTreeMap::new())
     }
@@ -146,13 +146,13 @@ impl<A> TxGraph<A> {
     /// Iterate over all tx outputs known by [`TxGraph`].
     pub fn all_txouts(&self) -> impl Iterator<Item = (OutPoint, &TxOut)> {
         self.txs.iter().flat_map(|(txid, (tx, _, _))| match tx {
-            TxNode::Whole(tx) => tx
+            TxNodeInternal::Whole(tx) => tx
                 .output
                 .iter()
                 .enumerate()
                 .map(|(vout, txout)| (OutPoint::new(*txid, vout as _), txout))
                 .collect::<Vec<_>>(),
-            TxNode::Partial(txouts) => txouts
+            TxNodeInternal::Partial(txouts) => txouts
                 .iter()
                 .map(|(vout, txout)| (OutPoint::new(*txid, *vout as _), txout))
                 .collect::<Vec<_>>(),
@@ -160,17 +160,17 @@ impl<A> TxGraph<A> {
     }
 
     /// Iterate over all full transactions in the graph.
-    pub fn full_transactions(&self) -> impl Iterator<Item = TxInGraph<'_, Transaction, A>> {
+    pub fn full_transactions(&self) -> impl Iterator<Item = TxNode<'_, Transaction, A>> {
         self.txs
             .iter()
             .filter_map(|(&txid, (tx, anchors, last_seen))| match tx {
-                TxNode::Whole(tx) => Some(TxInGraph {
+                TxNodeInternal::Whole(tx) => Some(TxNode {
                     txid,
                     tx,
                     anchors,
                     last_seen: *last_seen,
                 }),
-                TxNode::Partial(_) => None,
+                TxNodeInternal::Partial(_) => None,
             })
     }
 
@@ -179,9 +179,14 @@ impl<A> TxGraph<A> {
     /// Refer to [`get_txout`] for getting a specific [`TxOut`].
     ///
     /// [`get_txout`]: Self::get_txout
-    pub fn get_tx(&self, txid: Txid) -> Option<TxInGraph<'_, Transaction, A>> {
+    pub fn get_tx(&self, txid: Txid) -> Option<&Transaction> {
+        self.get_tx_node(txid).map(|n| n.tx)
+    }
+
+    /// Get a transaction node by txid. This only returns `Some` for full transactions.
+    pub fn get_tx_node(&self, txid: Txid) -> Option<TxNode<'_, Transaction, A>> {
         match &self.txs.get(&txid)? {
-            (TxNode::Whole(tx), anchors, last_seen) => Some(TxInGraph {
+            (TxNodeInternal::Whole(tx), anchors, last_seen) => Some(TxNode {
                 txid,
                 tx,
                 anchors,
@@ -194,21 +199,21 @@ impl<A> TxGraph<A> {
     /// Obtains a single tx output (if any) at the specified outpoint.
     pub fn get_txout(&self, outpoint: OutPoint) -> Option<&TxOut> {
         match &self.txs.get(&outpoint.txid)?.0 {
-            TxNode::Whole(tx) => tx.output.get(outpoint.vout as usize),
-            TxNode::Partial(txouts) => txouts.get(&outpoint.vout),
+            TxNodeInternal::Whole(tx) => tx.output.get(outpoint.vout as usize),
+            TxNodeInternal::Partial(txouts) => txouts.get(&outpoint.vout),
         }
     }
 
     /// Returns a [`BTreeMap`] of vout to output of the provided `txid`.
     pub fn txouts(&self, txid: Txid) -> Option<BTreeMap<u32, &TxOut>> {
         Some(match &self.txs.get(&txid)?.0 {
-            TxNode::Whole(tx) => tx
+            TxNodeInternal::Whole(tx) => tx
                 .output
                 .iter()
                 .enumerate()
                 .map(|(vout, txout)| (vout as u32, txout))
                 .collect::<BTreeMap<_, _>>(),
-            TxNode::Partial(txouts) => txouts
+            TxNodeInternal::Partial(txouts) => txouts
                 .iter()
                 .map(|(vout, txout)| (*vout, txout))
                 .collect::<BTreeMap<_, _>>(),
@@ -276,12 +281,12 @@ impl<A> TxGraph<A> {
     /// Iterate over all partial transactions (outputs only) in the graph.
     pub fn partial_transactions(
         &self,
-    ) -> impl Iterator<Item = TxInGraph<'_, BTreeMap<u32, TxOut>, A>> {
+    ) -> impl Iterator<Item = TxNode<'_, BTreeMap<u32, TxOut>, A>> {
         self.txs
             .iter()
             .filter_map(|(&txid, (tx, anchors, last_seen))| match tx {
-                TxNode::Whole(_) => None,
-                TxNode::Partial(partial) => Some(TxInGraph {
+                TxNodeInternal::Whole(_) => None,
+                TxNodeInternal::Partial(partial) => Some(TxNode {
                     txid,
                     tx: partial,
                     anchors,
@@ -368,7 +373,7 @@ impl<A: Clone + Ord> TxGraph<A> {
         update.txs.insert(
             outpoint.txid,
             (
-                TxNode::Partial([(outpoint.vout, txout)].into()),
+                TxNodeInternal::Partial([(outpoint.vout, txout)].into()),
                 BTreeSet::new(),
                 0,
             ),
@@ -394,7 +399,7 @@ impl<A: Clone + Ord> TxGraph<A> {
         let mut update = Self::default();
         update
             .txs
-            .insert(tx.txid(), (TxNode::Whole(tx), BTreeSet::new(), 0));
+            .insert(tx.txid(), (TxNodeInternal::Whole(tx), BTreeSet::new(), 0));
         self.determine_additions(&update)
     }
 
@@ -478,10 +483,10 @@ impl<A: Clone + Ord> TxGraph<A> {
                 });
 
             match self.txs.get_mut(&txid) {
-                Some((tx_node @ TxNode::Partial(_), _, _)) => {
-                    *tx_node = TxNode::Whole(tx);
+                Some((tx_node @ TxNodeInternal::Partial(_), _, _)) => {
+                    *tx_node = TxNodeInternal::Whole(tx);
                 }
-                Some((TxNode::Whole(tx), _, _)) => {
+                Some((TxNodeInternal::Whole(tx), _, _)) => {
                     debug_assert_eq!(
                         tx.txid(),
                         txid,
@@ -490,7 +495,7 @@ impl<A: Clone + Ord> TxGraph<A> {
                 }
                 None => {
                     self.txs
-                        .insert(txid, (TxNode::Whole(tx), BTreeSet::new(), 0));
+                        .insert(txid, (TxNodeInternal::Whole(tx), BTreeSet::new(), 0));
                 }
             }
         }
@@ -502,8 +507,9 @@ impl<A: Clone + Ord> TxGraph<A> {
                 .or_insert_with(Default::default);
 
             match tx_entry {
-                (TxNode::Whole(_), _, _) => { /* do nothing since we already have full tx */ }
-                (TxNode::Partial(txouts), _, _) => {
+                (TxNodeInternal::Whole(_), _, _) => { /* do nothing since we already have full tx */
+                }
+                (TxNodeInternal::Partial(txouts), _, _) => {
                     txouts.insert(outpoint.vout, txout);
                 }
             }
@@ -533,11 +539,11 @@ impl<A: Clone + Ord> TxGraph<A> {
 
         for (&txid, (update_tx_node, _, update_last_seen)) in &update.txs {
             let prev_last_seen: u64 = match (self.txs.get(&txid), update_tx_node) {
-                (None, TxNode::Whole(update_tx)) => {
+                (None, TxNodeInternal::Whole(update_tx)) => {
                     additions.tx.insert(update_tx.clone());
                     0
                 }
-                (None, TxNode::Partial(update_txos)) => {
+                (None, TxNodeInternal::Partial(update_txos)) => {
                     additions.txout.extend(
                         update_txos
                             .iter()
@@ -545,12 +551,18 @@ impl<A: Clone + Ord> TxGraph<A> {
                     );
                     0
                 }
-                (Some((TxNode::Whole(_), _, last_seen)), _) => *last_seen,
-                (Some((TxNode::Partial(_), _, last_seen)), TxNode::Whole(update_tx)) => {
+                (Some((TxNodeInternal::Whole(_), _, last_seen)), _) => *last_seen,
+                (
+                    Some((TxNodeInternal::Partial(_), _, last_seen)),
+                    TxNodeInternal::Whole(update_tx),
+                ) => {
                     additions.tx.insert(update_tx.clone());
                     *last_seen
                 }
-                (Some((TxNode::Partial(txos), _, last_seen)), TxNode::Partial(update_txos)) => {
+                (
+                    Some((TxNodeInternal::Partial(txos), _, last_seen)),
+                    TxNodeInternal::Partial(update_txos),
+                ) => {
                     additions.txout.extend(
                         update_txos
                             .iter()
@@ -608,8 +620,8 @@ impl<A: BlockAnchor> TxGraph<A> {
         // The tx is not anchored to a block which is in the best chain, let's check whether we can
         // ignore it by checking conflicts!
         let tx = match tx_node {
-            TxNode::Whole(tx) => tx,
-            TxNode::Partial(_) => {
+            TxNodeInternal::Whole(tx) => tx,
+            TxNodeInternal::Partial(_) => {
                 // [TODO] Unfortunately, we can't iterate over conflicts of partial txs right now!
                 // [TODO] So we just assume the partial tx does not exist in the best chain :/
                 return Ok(None);
@@ -618,7 +630,7 @@ impl<A: BlockAnchor> TxGraph<A> {
 
         // [TODO] Is this logic correct? I do not think so, but it should be good enough for now!
         let mut latest_last_seen = 0_u64;
-        for conflicting_tx in self.walk_conflicts(tx, |_, txid| self.get_tx(txid)) {
+        for conflicting_tx in self.walk_conflicts(tx, |_, txid| self.get_tx_node(txid)) {
             for block_id in conflicting_tx.anchors.iter().map(A::anchor_block) {
                 if chain.is_block_in_best_chain(block_id)? {
                     // conflicting tx is in best chain, so the current tx cannot be in best chain!
