@@ -103,8 +103,8 @@ pub struct TxNode<'a, T, A> {
     pub tx: &'a T,
     /// The blocks that the transaction is "anchored" in.
     pub anchors: &'a BTreeSet<A>,
-    /// The last-seen unix timestamp of the transaction.
-    pub last_seen: u64,
+    /// The last-seen unix timestamp of the transaction as unconfirmed.
+    pub last_seen_unconfirmed: u64,
 }
 
 impl<'a, T, A> Deref for TxNode<'a, T, A> {
@@ -121,7 +121,7 @@ impl<'a, A> TxNode<'a, Transaction, A> {
             txid: tx.txid(),
             tx,
             anchors,
-            last_seen: 0,
+            last_seen_unconfirmed: 0,
         }
     }
 }
@@ -168,7 +168,7 @@ impl<A> TxGraph<A> {
                     txid,
                     tx,
                     anchors,
-                    last_seen: *last_seen,
+                    last_seen_unconfirmed: *last_seen,
                 }),
                 TxNodeInternal::Partial(_) => None,
             })
@@ -190,7 +190,7 @@ impl<A> TxGraph<A> {
                 txid,
                 tx,
                 anchors,
-                last_seen: *last_seen,
+                last_seen_unconfirmed: *last_seen,
             }),
             _ => None,
         }
@@ -290,7 +290,7 @@ impl<A> TxGraph<A> {
                     txid,
                     tx: partial,
                     anchors,
-                    last_seen: *last_seen,
+                    last_seen_unconfirmed: *last_seen,
                 }),
             })
     }
@@ -628,8 +628,8 @@ impl<A: BlockAnchor> TxGraph<A> {
             }
         };
 
-        // [TODO] Is this logic correct? I do not think so, but it should be good enough for now!
-        let mut latest_last_seen = 0_u64;
+        // If a conflicting tx is in the best chain, or has `last_seen` higher than this tx, then
+        // this tx cannot exist in the best chain
         for conflicting_tx in self.walk_conflicts(tx, |_, txid| self.get_tx_node(txid)) {
             for block_id in conflicting_tx.anchors.iter().map(A::anchor_block) {
                 if chain.is_block_in_best_chain(block_id)? {
@@ -637,15 +637,12 @@ impl<A: BlockAnchor> TxGraph<A> {
                     return Ok(None);
                 }
             }
-            if conflicting_tx.last_seen > latest_last_seen {
-                latest_last_seen = conflicting_tx.last_seen;
+            if conflicting_tx.last_seen_unconfirmed > last_seen {
+                return Ok(None);
             }
         }
-        if last_seen >= latest_last_seen {
-            Ok(Some(ObservedIn::Mempool(last_seen)))
-        } else {
-            Ok(None)
-        }
+
+        Ok(Some(ObservedIn::Mempool(last_seen)))
     }
 
     pub fn get_chain_position<C>(&self, chain: C, txid: Txid) -> Option<ObservedIn<&A>>
