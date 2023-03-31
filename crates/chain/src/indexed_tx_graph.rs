@@ -58,8 +58,9 @@ impl<A: BlockAnchor, IA: AddAssign> AddAssign for IndexedAdditions<A, IA> {
 }
 
 pub struct IndexedTxGraph<A, I> {
+    /// Transaction index.
+    pub index: I,
     graph: TxGraph<A>,
-    index: I, // [TODO] Make public
     last_height: u32,
 }
 
@@ -77,16 +78,6 @@ impl<A: BlockAnchor, I: TxIndex> IndexedTxGraph<A, I> {
     /// Get a reference of the internal transaction graph.
     pub fn graph(&self) -> &TxGraph<A> {
         &self.graph
-    }
-
-    /// Get a reference of the internal transaction index.
-    pub fn index(&self) -> &I {
-        &self.index
-    }
-
-    /// Get a mutable reference to the internal transaction index.
-    pub fn index_mut(&mut self) -> &mut I {
-        &mut self.index
     }
 
     /// Applies the [`IndexedAdditions`] to the [`IndexedTxGraph`].

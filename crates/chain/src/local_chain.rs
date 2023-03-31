@@ -1,6 +1,9 @@
-use core::convert::Infallible;
+use core::{convert::Infallible, ops::Deref};
 
-use alloc::{collections::BTreeMap, vec::Vec};
+use alloc::{
+    collections::{BTreeMap, BTreeSet},
+    vec::Vec,
+};
 use bitcoin::BlockHash;
 
 use crate::{BlockId, ChainOracle};
@@ -104,10 +107,51 @@ impl LocalChain {
         }
         Ok(ChangeSet(changeset))
     }
+
+    /// Applies the given `changeset`.
+    pub fn apply_changeset(&mut self, mut changeset: ChangeSet) {
+        self.blocks.append(&mut changeset.0)
+    }
+
+    /// Updates [`LocalChain`] with an update [`LocalChain`].
+    ///
+    /// This is equivilant to calling [`determine_changeset`] and [`apply_changeset`] in sequence.
+    ///
+    /// [`determine_changeset`]: Self::determine_changeset
+    /// [`apply_changeset`]: Self::apply_changeset
+    pub fn apply_update(&mut self, update: Self) -> Result<ChangeSet, UpdateError> {
+        let changeset = self.determine_changeset(&update)?;
+        self.apply_changeset(changeset.clone());
+        Ok(changeset)
+    }
+
+    pub fn initial_changeset(&self) -> ChangeSet {
+        ChangeSet(self.blocks.clone())
+    }
+
+    pub fn heights(&self) -> BTreeSet<u32> {
+        self.blocks.keys().cloned().collect()
+    }
 }
 
-#[derive(Debug, Default)]
+/// This is the return value of [`determine_changeset`] and represents changes to [`LocalChain`].
+///
+/// [`determine_changeset`]: LocalChain::determine_changeset
+#[derive(Debug, Default, Clone, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Deserialize, serde::Serialize),
+    serde(crate = "serde_crate")
+)]
 pub struct ChangeSet(pub BTreeMap<u32, BlockHash>);
+
+impl Deref for ChangeSet {
+    type Target = BTreeMap<u32, BlockHash>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 /// Represents an update failure of [`LocalChain`].j
 #[derive(Clone, Debug, PartialEq)]
