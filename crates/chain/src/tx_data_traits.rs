@@ -1,5 +1,4 @@
-use alloc::collections::{BTreeMap, BTreeSet};
-use bitcoin::{Block, BlockHash, OutPoint, Transaction, TxOut};
+use bitcoin::{Block, BlockHash, OutPoint, Script, Transaction, TxOut};
 
 use crate::BlockId;
 
@@ -89,41 +88,16 @@ impl<C: ChainOracle> ChainOracle for &C {
     }
 }
 
-/// Represents changes to a [`TxIndex`] implementation.
-pub trait TxIndexAdditions: Default {
-    /// Append `other` on top of `self`.
-    fn append_additions(&mut self, other: Self);
-}
-
-impl<I: Ord> TxIndexAdditions for BTreeSet<I> {
-    fn append_additions(&mut self, mut other: Self) {
-        self.append(&mut other);
-    }
-}
-
 /// Represents an index of transaction data.
 pub trait TxIndex {
     /// The resultant "additions" when new transaction data is indexed.
-    type Additions: TxIndexAdditions;
-
-    type SpkIndex: Ord;
+    type Additions;
 
     /// Scan and index the given `outpoint` and `txout`.
     fn index_txout(&mut self, outpoint: OutPoint, txout: &TxOut) -> Self::Additions;
 
     /// Scan and index the given transaction.
-    fn index_tx(&mut self, tx: &Transaction) -> Self::Additions {
-        let txid = tx.txid();
-        tx.output
-            .iter()
-            .enumerate()
-            .map(|(vout, txout)| self.index_txout(OutPoint::new(txid, vout as _), txout))
-            .reduce(|mut acc, other| {
-                acc.append_additions(other);
-                acc
-            })
-            .unwrap_or_default()
-    }
+    fn index_tx(&mut self, tx: &Transaction) -> Self::Additions;
 
     /// Apply additions to itself.
     fn apply_additions(&mut self, additions: Self::Additions);
@@ -132,6 +106,6 @@ pub trait TxIndex {
     /// spends an already-indexed outpoint that we have previously indexed.
     fn is_tx_relevant(&self, tx: &Transaction) -> bool;
 
-    /// Lists all relevant txouts known by the index.
-    fn relevant_txouts(&self) -> &BTreeMap<OutPoint, (Self::SpkIndex, TxOut)>;
+    /// Returns whether the script pubkey is owned by us.
+    fn is_spk_owned(&self, spk: &Script) -> bool;
 }

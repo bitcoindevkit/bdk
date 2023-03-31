@@ -53,19 +53,16 @@ impl<I> Default for SpkTxOutIndex<I> {
 }
 
 impl<I: Clone + Ord + 'static> TxIndex for SpkTxOutIndex<I> {
-    type Additions = BTreeSet<I>;
-
-    type SpkIndex = I;
+    type Additions = ();
 
     fn index_txout(&mut self, outpoint: OutPoint, txout: &TxOut) -> Self::Additions {
-        self.scan_txout(outpoint, txout)
-            .cloned()
-            .into_iter()
-            .collect()
+        self.scan_txout(outpoint, txout);
+        Default::default()
     }
 
     fn index_tx(&mut self, tx: &Transaction) -> Self::Additions {
-        self.scan(tx)
+        self.scan(tx);
+        Default::default()
     }
 
     fn apply_additions(&mut self, _additions: Self::Additions) {
@@ -76,8 +73,8 @@ impl<I: Clone + Ord + 'static> TxIndex for SpkTxOutIndex<I> {
         self.is_relevant(tx)
     }
 
-    fn relevant_txouts(&self) -> &BTreeMap<OutPoint, (Self::SpkIndex, TxOut)> {
-        &self.txouts
+    fn is_spk_owned(&self, spk: &Script) -> bool {
+        self.index_of_spk(spk).is_some()
     }
 }
 

@@ -14,12 +14,14 @@
 //! [`KeychainChangeSet`]s.
 //!
 //! [`SpkTxOutIndex`]: crate::SpkTxOutIndex
+use core::ops::AddAssign;
+
 use crate::{
     chain_graph::{self, ChainGraph},
     collections::BTreeMap,
     sparse_chain::ChainPosition,
     tx_graph::TxGraph,
-    ForEachTxOut, TxIndexAdditions,
+    ForEachTxOut,
 };
 
 #[cfg(feature = "miniscript")]
@@ -85,9 +87,9 @@ impl<K: Ord> DerivationAdditions<K> {
     }
 }
 
-impl<K: Ord> TxIndexAdditions for DerivationAdditions<K> {
-    fn append_additions(&mut self, other: Self) {
-        self.append(other)
+impl<K: Ord> AddAssign for DerivationAdditions<K> {
+    fn add_assign(&mut self, rhs: Self) {
+        self.append(rhs)
     }
 }
 

@@ -91,8 +91,6 @@ impl<K> Deref for KeychainTxOutIndex<K> {
 impl<K: Clone + Ord + Debug + 'static> TxIndex for KeychainTxOutIndex<K> {
     type Additions = DerivationAdditions<K>;
 
-    type SpkIndex = (K, u32);
-
     fn index_txout(&mut self, outpoint: OutPoint, txout: &TxOut) -> Self::Additions {
         self.scan_txout(outpoint, txout)
     }
@@ -109,8 +107,8 @@ impl<K: Clone + Ord + Debug + 'static> TxIndex for KeychainTxOutIndex<K> {
         self.is_relevant(tx)
     }
 
-    fn relevant_txouts(&self) -> &BTreeMap<OutPoint, (Self::SpkIndex, TxOut)> {
-        self.inner.relevant_txouts()
+    fn is_spk_owned(&self, spk: &Script) -> bool {
+        self.index_of_spk(spk).is_some()
     }
 }
 

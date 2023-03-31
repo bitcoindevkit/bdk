@@ -1,12 +1,12 @@
-use core::convert::Infallible;
+use core::{convert::Infallible, ops::AddAssign};
 
-use bitcoin::{OutPoint, Transaction, TxOut};
+use bitcoin::{OutPoint, Script, Transaction, TxOut};
 
 use crate::{
     keychain::Balance,
     sparse_chain::ChainPosition,
     tx_graph::{Additions, TxGraph, TxNode},
-    BlockAnchor, ChainOracle, FullTxOut, ObservedIn, TxIndex, TxIndexAdditions,
+    BlockAnchor, ChainOracle, FullTxOut, ObservedIn, TxIndex,
 };
 
 /// An outwards-facing view of a transaction that is part of the *best chain*'s history.
@@ -18,46 +18,37 @@ pub struct TxInChain<'a, T, A> {
     pub tx: TxNode<'a, T, A>,
 }
 
-/// An outwards-facing view of a relevant txout that is part of the *best chain*'s history.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub struct TxOutInChain<'a, I, A> {
-    /// The custom index of the txout's script pubkey.
-    pub spk_index: &'a I,
-    /// The full txout.
-    pub txout: FullTxOut<ObservedIn<&'a A>>,
-}
-
 /// A structure that represents changes to an [`IndexedTxGraph`].
 #[derive(Clone, Debug, PartialEq)]
 #[must_use]
-pub struct IndexedAdditions<A, D> {
+pub struct IndexedAdditions<A, IA> {
     /// [`TxGraph`] additions.
     pub graph_additions: Additions<A>,
     /// [`TxIndex`] additions.
-    pub index_delta: D,
+    pub index_additions: IA,
     /// Last block height witnessed (if any).
     pub last_height: Option<u32>,
 }
 
-impl<A, D: Default> Default for IndexedAdditions<A, D> {
+impl<A, IA: Default> Default for IndexedAdditions<A, IA> {
     fn default() -> Self {
         Self {
             graph_additions: Default::default(),
-            index_delta: Default::default(),
+            index_additions: Default::default(),
             last_height: None,
         }
     }
 }
 
-impl<A: BlockAnchor, D: TxIndexAdditions> TxIndexAdditions for IndexedAdditions<A, D> {
-    fn append_additions(&mut self, other: Self) {
+impl<A: BlockAnchor, IA: AddAssign> AddAssign for IndexedAdditions<A, IA> {
+    fn add_assign(&mut self, rhs: Self) {
         let Self {
             graph_additions,
-            index_delta,
+            index_additions: index_delta,
             last_height,
-        } = other;
+        } = rhs;
         self.graph_additions.append(graph_additions);
-        self.index_delta.append_additions(index_delta);
+        self.index_additions += index_delta;
         if self.last_height < last_height {
             let last_height =
                 last_height.expect("must exist as it is larger than self.last_height");
@@ -102,11 +93,11 @@ impl<A: BlockAnchor, I: TxIndex> IndexedTxGraph<A, I> {
     pub fn apply_additions(&mut self, additions: IndexedAdditions<A, I::Additions>) {
         let IndexedAdditions {
             graph_additions,
-            index_delta,
+            index_additions,
             last_height,
         } = additions;
 
-        self.index.apply_additions(index_delta);
+        self.index.apply_additions(index_additions);
 
         for tx in &graph_additions.tx {
             self.index.index_tx(tx);
@@ -122,16 +113,23 @@ impl<A: BlockAnchor, I: TxIndex> IndexedTxGraph<A, I> {
         }
     }
 
-    /// Insert a block height that the chain source has scanned up to.
-    pub fn insert_height(&mut self, tip: u32) -> IndexedAdditions<A, I::Additions> {
+    fn insert_height_internal(&mut self, tip: u32) -> Option<u32> {
         if self.last_height < tip {
             self.last_height = tip;
-            IndexedAdditions {
-                last_height: Some(tip),
-                ..Default::default()
-            }
+            Some(tip)
         } else {
-            IndexedAdditions::default()
+            None
+        }
+    }
+
+    /// Insert a block height that the chain source has scanned up to.
+    pub fn insert_height(&mut self, tip: u32) -> IndexedAdditions<A, I::Additions>
+    where
+        I::Additions: Default,
+    {
+        IndexedAdditions {
+            last_height: self.insert_height_internal(tip),
+            ..Default::default()
         }
     }
 
@@ -142,12 +140,12 @@ impl<A: BlockAnchor, I: TxIndex> IndexedTxGraph<A, I> {
         txout: &TxOut,
         observation: ObservedIn<A>,
     ) -> IndexedAdditions<A, I::Additions> {
-        let mut additions = match &observation {
-            ObservedIn::Block(anchor) => self.insert_height(anchor.anchor_block().height),
-            ObservedIn::Mempool(_) => IndexedAdditions::default(),
+        let last_height = match &observation {
+            ObservedIn::Block(anchor) => self.insert_height_internal(anchor.anchor_block().height),
+            ObservedIn::Mempool(_) => None,
         };
 
-        additions.append_additions(IndexedAdditions {
+        IndexedAdditions {
             graph_additions: {
                 let mut graph_additions = self.graph.insert_txout(outpoint, txout.clone());
                 graph_additions.append(match observation {
@@ -158,11 +156,9 @@ impl<A: BlockAnchor, I: TxIndex> IndexedTxGraph<A, I> {
                 });
                 graph_additions
             },
-            index_delta: <I as TxIndex>::index_txout(&mut self.index, outpoint, txout),
-            last_height: None,
-        });
-
-        additions
+            index_additions: <I as TxIndex>::index_txout(&mut self.index, outpoint, txout),
+            last_height,
+        }
     }
 
     pub fn insert_tx(
@@ -172,12 +168,12 @@ impl<A: BlockAnchor, I: TxIndex> IndexedTxGraph<A, I> {
     ) -> IndexedAdditions<A, I::Additions> {
         let txid = tx.txid();
 
-        let mut additions = match &observation {
-            ObservedIn::Block(anchor) => self.insert_height(anchor.anchor_block().height),
-            ObservedIn::Mempool(_) => IndexedAdditions::default(),
+        let last_height = match &observation {
+            ObservedIn::Block(anchor) => self.insert_height_internal(anchor.anchor_block().height),
+            ObservedIn::Mempool(_) => None,
         };
 
-        additions.append_additions(IndexedAdditions {
+        IndexedAdditions {
             graph_additions: {
                 let mut graph_additions = self.graph.insert_tx(tx.clone());
                 graph_additions.append(match observation {
@@ -186,11 +182,9 @@ impl<A: BlockAnchor, I: TxIndex> IndexedTxGraph<A, I> {
                 });
                 graph_additions
             },
-            index_delta: <I as TxIndex>::index_tx(&mut self.index, tx),
-            last_height: None,
-        });
-
-        additions
+            index_additions: <I as TxIndex>::index_tx(&mut self.index, tx),
+            last_height,
+        }
     }
 
     pub fn filter_and_insert_txs<'t, T>(
@@ -200,6 +194,7 @@ impl<A: BlockAnchor, I: TxIndex> IndexedTxGraph<A, I> {
     ) -> IndexedAdditions<A, I::Additions>
     where
         T: Iterator<Item = &'t Transaction>,
+        I::Additions: Default + AddAssign,
     {
         txs.filter_map(|tx| {
             if self.index.is_tx_relevant(tx) {
@@ -209,7 +204,7 @@ impl<A: BlockAnchor, I: TxIndex> IndexedTxGraph<A, I> {
             }
         })
         .fold(IndexedAdditions::default(), |mut acc, other| {
-            acc.append_additions(other);
+            acc += other;
             acc
         })
     }
@@ -252,50 +247,47 @@ impl<A: BlockAnchor, I: TxIndex> IndexedTxGraph<A, I> {
     pub fn try_list_chain_txouts<'a, C>(
         &'a self,
         chain: C,
-    ) -> impl Iterator<Item = Result<TxOutInChain<'a, I::SpkIndex, A>, C::Error>>
+    ) -> impl Iterator<Item = Result<FullTxOut<ObservedIn<A>>, C::Error>> + 'a
     where
         C: ChainOracle + 'a,
         ObservedIn<A>: ChainPosition,
     {
-        self.index.relevant_txouts().iter().filter_map(
-            move |(op, (spk_i, txout))| -> Option<Result<_, C::Error>> {
+        self.graph
+            .all_txouts()
+            .filter(|(_, txo)| self.index.is_spk_owned(&txo.script_pubkey))
+            .filter_map(move |(op, txout)| -> Option<Result<_, C::Error>> {
                 let graph_tx = self.graph.get_tx(op.txid)?;
 
                 let is_on_coinbase = graph_tx.is_coin_base();
 
                 let chain_position = match self.graph.try_get_chain_position(&chain, op.txid) {
-                    Ok(Some(observed_at)) => observed_at,
+                    Ok(Some(observed_at)) => observed_at.into_owned(),
                     Ok(None) => return None,
                     Err(err) => return Some(Err(err)),
                 };
 
-                let spent_by = match self.graph.try_get_spend_in_chain(&chain, *op) {
-                    Ok(spent_by) => spent_by,
+                let spent_by = match self.graph.try_get_spend_in_chain(&chain, op) {
+                    Ok(Some((obs, txid))) => Some((obs.into_owned(), txid)),
+                    Ok(None) => None,
                     Err(err) => return Some(Err(err)),
                 };
 
                 let full_txout = FullTxOut {
-                    outpoint: *op,
+                    outpoint: op,
                     txout: txout.clone(),
                     chain_position,
                     spent_by,
                     is_on_coinbase,
                 };
 
-                let txout_in_chain = TxOutInChain {
-                    spk_index: spk_i,
-                    txout: full_txout,
-                };
-
-                Some(Ok(txout_in_chain))
-            },
-        )
+                Some(Ok(full_txout))
+            })
     }
 
     pub fn list_chain_txouts<'a, C>(
         &'a self,
         chain: C,
-    ) -> impl Iterator<Item = TxOutInChain<'a, I::SpkIndex, A>>
+    ) -> impl Iterator<Item = FullTxOut<ObservedIn<A>>> + 'a
     where
         C: ChainOracle<Error = Infallible> + 'a,
         ObservedIn<A>: ChainPosition,
@@ -308,19 +300,19 @@ impl<A: BlockAnchor, I: TxIndex> IndexedTxGraph<A, I> {
     pub fn try_list_chain_utxos<'a, C>(
         &'a self,
         chain: C,
-    ) -> impl Iterator<Item = Result<TxOutInChain<'a, I::SpkIndex, A>, C::Error>>
+    ) -> impl Iterator<Item = Result<FullTxOut<ObservedIn<A>>, C::Error>> + 'a
     where
         C: ChainOracle + 'a,
         ObservedIn<A>: ChainPosition,
     {
         self.try_list_chain_txouts(chain)
-            .filter(|r| !matches!(r, Ok(txo) if txo.txout.spent_by.is_none()))
+            .filter(|r| !matches!(r, Ok(txo) if txo.spent_by.is_none()))
     }
 
     pub fn list_chain_utxos<'a, C>(
         &'a self,
         chain: C,
-    ) -> impl Iterator<Item = TxOutInChain<'a, I::SpkIndex, A>>
+    ) -> impl Iterator<Item = FullTxOut<ObservedIn<A>>> + 'a
     where
         C: ChainOracle<Error = Infallible> + 'a,
         ObservedIn<A>: ChainPosition,
@@ -338,7 +330,7 @@ impl<A: BlockAnchor, I: TxIndex> IndexedTxGraph<A, I> {
     where
         C: ChainOracle,
         ObservedIn<A>: ChainPosition + Clone,
-        F: FnMut(&I::SpkIndex) -> bool,
+        F: FnMut(&Script) -> bool,
     {
         let mut immature = 0;
         let mut trusted_pending = 0;
@@ -346,8 +338,7 @@ impl<A: BlockAnchor, I: TxIndex> IndexedTxGraph<A, I> {
         let mut confirmed = 0;
 
         for res in self.try_list_chain_txouts(&chain) {
-            let TxOutInChain { spk_index, txout } = res?;
-            let txout = txout.into_owned();
+            let txout = res?;
 
             match &txout.chain_position {
                 ObservedIn::Block(_) => {
@@ -360,7 +351,7 @@ impl<A: BlockAnchor, I: TxIndex> IndexedTxGraph<A, I> {
                     }
                 }
                 ObservedIn::Mempool(_) => {
-                    if should_trust(spk_index) {
+                    if should_trust(&txout.txout.script_pubkey) {
                         trusted_pending += txout.txout.value;
                     } else {
                         untrusted_pending += txout.txout.value;
@@ -381,7 +372,7 @@ impl<A: BlockAnchor, I: TxIndex> IndexedTxGraph<A, I> {
     where
         C: ChainOracle<Error = Infallible>,
         ObservedIn<A>: ChainPosition + Clone,
-        F: FnMut(&I::SpkIndex) -> bool,
+        F: FnMut(&Script) -> bool,
     {
         self.try_balance(chain, tip, should_trust)
             .expect("error is infallible")
@@ -393,8 +384,8 @@ impl<A: BlockAnchor, I: TxIndex> IndexedTxGraph<A, I> {
         ObservedIn<A>: ChainPosition + Clone,
     {
         let mut sum = 0;
-        for res in self.try_list_chain_txouts(chain) {
-            let txo = res?.txout.into_owned();
+        for txo_res in self.try_list_chain_txouts(chain) {
+            let txo = txo_res?;
             if txo.is_spendable_at(height) {
                 sum += txo.txout.value;
             }
