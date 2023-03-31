@@ -20,6 +20,17 @@ pub struct TxInChain<'a, T, A> {
 
 /// A structure that represents changes to an [`IndexedTxGraph`].
 #[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Deserialize, serde::Serialize),
+    serde(
+        crate = "serde_crate",
+        bound(
+            deserialize = "A: Ord + serde::Deserialize<'de>, IA: serde::Deserialize<'de>",
+            serialize = "A: Ord + serde::Serialize, IA: serde::Serialize"
+        )
+    )
+)]
 #[must_use]
 pub struct IndexedAdditions<A, IA> {
     /// [`TxGraph`] additions.
