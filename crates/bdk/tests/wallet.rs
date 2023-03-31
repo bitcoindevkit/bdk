@@ -926,6 +926,25 @@ fn test_create_tx_policy_path_use_csv() {
 }
 
 #[test]
+fn test_create_tx_policy_path_ignored_subtree_with_csv() {
+    let (mut wallet, _) = get_funded_wallet("wsh(or_d(pk(cRjo6jqfVNP33HhSS76UhXETZsGTZYx8FMFvR9kpbtCSV1PmdZdu),or_i(and_v(v:pkh(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW),older(30)),and_v(v:pkh(cMnkdebixpXMPfkcNEjjGin7s94hiehAH4mLbYkZoh9KSiNNmqC8),older(90)))))");
+
+    let external_policy = wallet.policies(KeychainKind::External).unwrap().unwrap();
+    let root_id = external_policy.id;
+    // child #0 is pk(cRjo6jqfVNP33HhSS76UhXETZsGTZYx8FMFvR9kpbtCSV1PmdZdu)
+    let path = vec![(root_id, vec![0])].into_iter().collect();
+
+    let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
+    let mut builder = wallet.build_tx();
+    builder
+        .add_recipient(addr.script_pubkey(), 30_000)
+        .policy_path(path, KeychainKind::External);
+    let (psbt, _) = builder.finish().unwrap();
+
+    assert_eq!(psbt.unsigned_tx.input[0].sequence, Sequence(0xFFFFFFFE));
+}
+
+#[test]
 fn test_create_tx_global_xpubs_with_origin() {
     use bitcoin::hashes::hex::FromHex;
     use bitcoin::util::bip32;
