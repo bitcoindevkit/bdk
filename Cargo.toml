@@ -7,6 +7,7 @@ members = [
     "example-crates/keychain_tracker_electrum",
     "example-crates/keychain_tracker_esplora",
     "example-crates/keychain_tracker_example_cli",
+    "example-crates/indexed_tx_graph_example_cli",
     "example-crates/wallet_electrum",
     "example-crates/wallet_esplora",
     "example-crates/wallet_esplora_async",
