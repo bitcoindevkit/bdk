@@ -22,6 +22,14 @@ pub struct LocalChain {
 impl ChainOracle for LocalChain {
     type Error = Infallible;
 
+    fn get_tip_in_best_chain(&self) -> Result<Option<BlockId>, Self::Error> {
+        Ok(self
+            .blocks
+            .iter()
+            .last()
+            .map(|(&height, &hash)| BlockId { height, hash }))
+    }
+
     fn get_block_in_best_chain(&self, height: u32) -> Result<Option<BlockHash>, Self::Error> {
         Ok(self.blocks.get(&height).cloned())
     }
@@ -153,7 +161,7 @@ impl Deref for ChangeSet {
     }
 }
 
-/// Represents an update failure of [`LocalChain`].j
+/// Represents an update failure of [`LocalChain`].
 #[derive(Clone, Debug, PartialEq)]
 pub enum UpdateError {
     /// The update cannot be applied to the chain because the chain suffix it represents did not

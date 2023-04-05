@@ -307,6 +307,7 @@
 //! );
 //! ```
 use core::{
+    convert::Infallible,
     fmt::Debug,
     ops::{Bound, RangeBounds},
 };
@@ -457,7 +458,15 @@ impl<P: core::fmt::Debug> core::fmt::Display for UpdateError<P> {
 impl<P: core::fmt::Debug> std::error::Error for UpdateError<P> {}
 
 impl<P: ChainPosition> ChainOracle for SparseChain<P> {
-    type Error = ();
+    type Error = Infallible;
+
+    fn get_tip_in_best_chain(&self) -> Result<Option<BlockId>, Self::Error> {
+        Ok(self
+            .checkpoints
+            .iter()
+            .last()
+            .map(|(&height, &hash)| BlockId { height, hash }))
+    }
 
     fn get_block_in_best_chain(&self, height: u32) -> Result<Option<BlockHash>, Self::Error> {
         Ok(self.checkpoint_at(height).map(|b| b.hash))

@@ -56,38 +56,6 @@ impl BlockAnchor for (u32, BlockHash) {
     }
 }
 
-/// Represents a service that tracks the best chain history.
-/// TODO: How do we ensure the chain oracle is consistent across a single call?
-/// * We need to somehow lock the data! What if the ChainOracle is remote?
-/// * Get tip method! And check the tip still exists at the end! And every internal call
-///   does not go beyond the initial tip.
-pub trait ChainOracle {
-    /// Error type.
-    type Error: core::fmt::Debug;
-
-    /// Returns the block hash (if any) of the given `height`.
-    fn get_block_in_best_chain(&self, height: u32) -> Result<Option<BlockHash>, Self::Error>;
-
-    /// Determines whether the block of [`BlockId`] exists in the best chain.
-    fn is_block_in_best_chain(&self, block_id: BlockId) -> Result<bool, Self::Error> {
-        Ok(matches!(self.get_block_in_best_chain(block_id.height)?, Some(h) if h == block_id.hash))
-    }
-}
-
-// [TODO] We need stuff for smart pointers. Maybe? How does rust lib do this?
-// Box<dyn ChainOracle>, Arc<dyn ChainOracle> ????? I will figure it out
-impl<C: ChainOracle> ChainOracle for &C {
-    type Error = C::Error;
-
-    fn get_block_in_best_chain(&self, height: u32) -> Result<Option<BlockHash>, Self::Error> {
-        <C as ChainOracle>::get_block_in_best_chain(self, height)
-    }
-
-    fn is_block_in_best_chain(&self, block_id: BlockId) -> Result<bool, Self::Error> {
-        <C as ChainOracle>::is_block_in_best_chain(self, block_id)
-    }
-}
-
 /// Represents an index of transaction data.
 pub trait TxIndex {
     /// The resultant "additions" when new transaction data is indexed.

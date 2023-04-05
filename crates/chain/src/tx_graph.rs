@@ -586,11 +586,12 @@ impl<A: Clone + Ord> TxGraph<A> {
 
 impl<A: BlockAnchor> TxGraph<A> {
     /// Get all heights that are relevant to the graph.
-    pub fn relevant_heights(&self) -> BTreeSet<u32> {
+    pub fn relevant_heights(&self) -> impl Iterator<Item = u32> + '_ {
+        let mut visited = HashSet::new();
         self.anchors
             .iter()
             .map(|(a, _)| a.anchor_block().height)
-            .collect()
+            .filter(move |&h| visited.insert(h))
     }
 
     /// Determines whether a transaction of `txid` is in the best chain.

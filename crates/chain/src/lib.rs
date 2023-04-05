@@ -31,6 +31,8 @@ pub mod sparse_chain;
 mod tx_data_traits;
 pub mod tx_graph;
 pub use tx_data_traits::*;
+mod chain_oracle;
+pub use chain_oracle::*;
 
 #[doc(hidden)]
 pub mod example_utils;
