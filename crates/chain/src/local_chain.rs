@@ -82,16 +82,16 @@ impl LocalChain {
         };
 
         // the first block's height to invalidate in the local chain
-        let invalidate_from = self.blocks.range(invalidate_lb..).next().map(|(&h, _)| h);
+        let invalidate_from_height = self.blocks.range(invalidate_lb..).next().map(|(&h, _)| h);
 
         // the first block of height to invalidate (if any) should be represented in the update
-        if let Some(first_invalid) = invalidate_from {
-            if !update.contains_key(&first_invalid) {
-                return Err(UpdateError::NotConnected(first_invalid));
+        if let Some(first_invalid_height) = invalidate_from_height {
+            if !update.contains_key(&first_invalid_height) {
+                return Err(UpdateError::NotConnected(first_invalid_height));
             }
         }
 
-        let invalidated_heights = invalidate_from
+        let invalidated_heights = invalidate_from_height
             .into_iter()
             .flat_map(|from_height| self.blocks.range(from_height..).map(|(h, _)| h));
 

@@ -190,7 +190,7 @@ impl<A: BlockAnchor, I: TxIndex> IndexedTxGraph<A, I> {
         }
     }
 
-    pub fn filter_and_insert_txs<'t, T>(
+    pub fn insert_relevant_txs<'t, T>(
         &mut self,
         txs: T,
         observation: ObservedAs<A>,

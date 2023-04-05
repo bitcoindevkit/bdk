@@ -21,7 +21,7 @@
 //! # use bitcoin::Transaction;
 //! # let tx_a = tx_from_hex(RAW_TX_1);
 //! # let tx_b = tx_from_hex(RAW_TX_2);
-//! let mut graph = TxGraph::<BlockId>::default();
+//! let mut graph: TxGraph = TxGraph::default();
 //!
 //! // preview a transaction insertion (not actually inserted)
 //! let additions = graph.insert_tx_preview(tx_a);
