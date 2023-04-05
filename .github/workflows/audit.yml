@@ -2,6 +2,9 @@ name: Audit
 
 on:
   push:
+    branches:
+      - 'master'
+      - 'release/*'
     paths:
       - '**/Cargo.toml'
       - '**/Cargo.lock'

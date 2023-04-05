@@ -9,16 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [v0.27.2]
+## [v0.28.0]
 
 ### Summary
 
-Disable default-features for rust-bitcoin and rust-miniscript dependencies, and for rust-esplora-client optional dependency.
+Disable default-features for rust-bitcoin and rust-miniscript dependencies, and for rust-esplora-client optional dependency. New default `std` feature must be enabled unless building for wasm.
 
 ### Changed
 
--  Set default-features = false for rust-bitcoin and rust-miniscript #882
--  Update esplora client dependency to version 0.4 #884
+- Bump bip39 crate to v2.0.0 #875
+- Set default-features = false for rust-bitcoin and rust-miniscript #882
+- Update esplora client dependency to version 0.4 #884
+- Added new `std` feature as part of default features #930
 
 ## [v0.27.1]
 
@@ -653,5 +655,5 @@ final transaction is created by calling `finish` on the builder.
 [v0.26.0]: https://github.com/bitcoindevkit/bdk/compare/v0.25.0...v0.26.0
 [v0.27.0]: https://github.com/bitcoindevkit/bdk/compare/v0.26.0...v0.27.0
 [v0.27.1]: https://github.com/bitcoindevkit/bdk/compare/v0.27.0...v0.27.1
-[v0.27.2]: https://github.com/bitcoindevkit/bdk/compare/v0.27.1...v0.27.2
-[Unreleased]: https://github.com/bitcoindevkit/bdk/compare/v0.27.2...HEAD
+[v0.28.0]: https://github.com/bitcoindevkit/bdk/compare/v0.27.1...v0.28.0
+[Unreleased]: https://github.com/bitcoindevkit/bdk/compare/v0.28.0...HEAD
