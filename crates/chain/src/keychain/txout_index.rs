@@ -105,12 +105,12 @@ impl<K: Clone + Ord + Debug + 'static> TxIndex for KeychainTxOutIndex<K> {
         self.apply_additions(additions)
     }
 
-    fn is_tx_relevant(&self, tx: &bitcoin::Transaction) -> bool {
-        self.is_relevant(tx)
+    fn is_txout_relevant(&self, _outpoint: OutPoint, txout: &TxOut) -> bool {
+        self.index_of_spk(&txout.script_pubkey).is_some()
     }
 
-    fn is_spk_owned(&self, spk: &Script) -> bool {
-        self.index_of_spk(spk).is_some()
+    fn is_tx_relevant(&self, tx: &bitcoin::Transaction) -> bool {
+        self.is_relevant(tx)
     }
 }
 

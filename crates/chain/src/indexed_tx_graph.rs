@@ -261,7 +261,7 @@ impl<A: BlockAnchor, I: TxIndex> IndexedTxGraph<A, I> {
     {
         self.graph
             .all_txouts()
-            .filter(|(_, txo)| self.index.is_spk_owned(&txo.script_pubkey))
+            .filter(|&(op, txo)| self.index.is_txout_relevant(op, txo))
             .filter_map(move |(op, txout)| -> Option<Result<_, C::Error>> {
                 let graph_tx = self.graph.get_tx(op.txid)?;
 

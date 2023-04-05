@@ -1,4 +1,4 @@
-use bitcoin::{Block, BlockHash, OutPoint, Script, Transaction, TxOut};
+use bitcoin::{Block, BlockHash, OutPoint, Transaction, TxOut};
 
 use crate::BlockId;
 
@@ -80,10 +80,9 @@ pub trait TxIndex {
     /// Apply additions to itself.
     fn apply_additions(&mut self, additions: Self::Additions);
 
-    /// A transaction is relevant if it contains a txout with a script_pubkey that we own, or if it
-    /// spends an already-indexed outpoint that we have previously indexed.
-    fn is_tx_relevant(&self, tx: &Transaction) -> bool;
+    /// Returns whether the txout is marked as relevant in the index.
+    fn is_txout_relevant(&self, outpoint: OutPoint, txout: &TxOut) -> bool;
 
-    /// Returns whether the script pubkey is owned by us.
-    fn is_spk_owned(&self, spk: &Script) -> bool;
+    /// Returns whether the transaction is marked as relevant in the index.
+    fn is_tx_relevant(&self, tx: &Transaction) -> bool;
 }

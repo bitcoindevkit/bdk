@@ -41,7 +41,7 @@
 //! # use bitcoin::Transaction;
 //! # let tx_a = tx_from_hex(RAW_TX_1);
 //! # let tx_b = tx_from_hex(RAW_TX_2);
-//! let mut graph = TxGraph::<BlockId>::default();
+//! let mut graph: TxGraph = TxGraph::default();
 //! let update = TxGraph::new(vec![tx_a, tx_b]);
 //!
 //! // preview additions as the result of the update

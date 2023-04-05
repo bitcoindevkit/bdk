@@ -69,12 +69,12 @@ impl<I: Clone + Ord + 'static> TxIndex for SpkTxOutIndex<I> {
         // This applies nothing.
     }
 
-    fn is_tx_relevant(&self, tx: &Transaction) -> bool {
-        self.is_relevant(tx)
+    fn is_txout_relevant(&self, _outpoint: OutPoint, txout: &TxOut) -> bool {
+        self.index_of_spk(&txout.script_pubkey).is_some()
     }
 
-    fn is_spk_owned(&self, spk: &Script) -> bool {
-        self.index_of_spk(spk).is_some()
+    fn is_tx_relevant(&self, tx: &Transaction) -> bool {
+        self.is_relevant(tx)
     }
 }
 
