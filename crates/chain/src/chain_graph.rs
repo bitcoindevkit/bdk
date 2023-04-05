@@ -151,7 +151,7 @@ where
                         let _ = inflated_chain
                             .insert_tx(*txid, pos.clone())
                             .expect("must insert since this was already in update");
-                        let _ = inflated_graph.insert_tx(tx.clone());
+                        let _ = inflated_graph.insert_tx(tx);
                     }
                 }
                 None => {
@@ -212,8 +212,8 @@ where
     /// the unconfirmed transaction list within the [`SparseChain`].
     pub fn get_tx_in_chain(&self, txid: Txid) -> Option<(&P, &Transaction)> {
         let position = self.chain.tx_position(txid)?;
-        let tx = self.graph.get_tx(txid).expect("must exist");
-        Some((position, tx))
+        let full_tx = self.graph.get_tx(txid).expect("must exist");
+        Some((position, full_tx))
     }
 
     /// Determines the changes required to insert a transaction into the inner [`ChainGraph`] and

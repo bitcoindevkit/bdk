@@ -4,16 +4,15 @@ use bitcoin::{OutPoint, Script, Transaction, TxOut};
 
 use crate::{
     keychain::Balance,
-    sparse_chain::ChainPosition,
     tx_graph::{Additions, TxGraph, TxNode},
-    BlockAnchor, ChainOracle, FullTxOut, ObservedIn, TxIndex,
+    BlockAnchor, ChainOracle, FullTxOut, ObservedAs, TxIndex,
 };
 
 /// An outwards-facing view of a transaction that is part of the *best chain*'s history.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub struct TxInChain<'a, T, A> {
+pub struct CanonicalTx<'a, T, A> {
     /// Where the transaction is observed (in a block or in mempool).
-    pub observed_in: ObservedIn<&'a A>,
+    pub observed_as: ObservedAs<&'a A>,
     /// The transaction with anchors and last seen timestamp.
     pub tx: TxNode<'a, T, A>,
 }
@@ -140,19 +139,23 @@ impl<A: BlockAnchor, I: TxIndex> IndexedTxGraph<A, I> {
         &mut self,
         outpoint: OutPoint,
         txout: &TxOut,
-        observation: ObservedIn<A>,
+        observation: ObservedAs<A>,
     ) -> IndexedAdditions<A, I::Additions> {
         let last_height = match &observation {
-            ObservedIn::Block(anchor) => self.insert_height_internal(anchor.anchor_block().height),
-            ObservedIn::Mempool(_) => None,
+            ObservedAs::Confirmed(anchor) => {
+                self.insert_height_internal(anchor.anchor_block().height)
+            }
+            ObservedAs::Unconfirmed(_) => None,
         };
 
         IndexedAdditions {
             graph_additions: {
                 let mut graph_additions = self.graph.insert_txout(outpoint, txout.clone());
                 graph_additions.append(match observation {
-                    ObservedIn::Block(anchor) => self.graph.insert_anchor(outpoint.txid, anchor),
-                    ObservedIn::Mempool(seen_at) => {
+                    ObservedAs::Confirmed(anchor) => {
+                        self.graph.insert_anchor(outpoint.txid, anchor)
+                    }
+                    ObservedAs::Unconfirmed(seen_at) => {
                         self.graph.insert_seen_at(outpoint.txid, seen_at)
                     }
                 });
@@ -166,21 +169,23 @@ impl<A: BlockAnchor, I: TxIndex> IndexedTxGraph<A, I> {
     pub fn insert_tx(
         &mut self,
         tx: &Transaction,
-        observation: ObservedIn<A>,
+        observation: ObservedAs<A>,
     ) -> IndexedAdditions<A, I::Additions> {
         let txid = tx.txid();
 
         let last_height = match &observation {
-            ObservedIn::Block(anchor) => self.insert_height_internal(anchor.anchor_block().height),
-            ObservedIn::Mempool(_) => None,
+            ObservedAs::Confirmed(anchor) => {
+                self.insert_height_internal(anchor.anchor_block().height)
+            }
+            ObservedAs::Unconfirmed(_) => None,
         };
 
         IndexedAdditions {
             graph_additions: {
                 let mut graph_additions = self.graph.insert_tx(tx.clone());
                 graph_additions.append(match observation {
-                    ObservedIn::Block(anchor) => self.graph.insert_anchor(txid, anchor),
-                    ObservedIn::Mempool(seen_at) => self.graph.insert_seen_at(txid, seen_at),
+                    ObservedAs::Confirmed(anchor) => self.graph.insert_anchor(txid, anchor),
+                    ObservedAs::Unconfirmed(seen_at) => self.graph.insert_seen_at(txid, seen_at),
                 });
                 graph_additions
             },
@@ -192,7 +197,7 @@ impl<A: BlockAnchor, I: TxIndex> IndexedTxGraph<A, I> {
     pub fn filter_and_insert_txs<'t, T>(
         &mut self,
         txs: T,
-        observation: ObservedIn<A>,
+        observation: ObservedAs<A>,
     ) -> IndexedAdditions<A, I::Additions>
     where
         T: Iterator<Item = &'t Transaction>,
@@ -220,7 +225,7 @@ impl<A: BlockAnchor, I: TxIndex> IndexedTxGraph<A, I> {
     pub fn try_list_chain_txs<'a, C>(
         &'a self,
         chain: C,
-    ) -> impl Iterator<Item = Result<TxInChain<'a, Transaction, A>, C::Error>>
+    ) -> impl Iterator<Item = Result<CanonicalTx<'a, Transaction, A>, C::Error>>
     where
         C: ChainOracle + 'a,
     {
@@ -230,7 +235,12 @@ impl<A: BlockAnchor, I: TxIndex> IndexedTxGraph<A, I> {
             .filter_map(move |tx| {
                 self.graph
                     .try_get_chain_position(&chain, tx.txid)
-                    .map(|v| v.map(|observed_in| TxInChain { observed_in, tx }))
+                    .map(|v| {
+                        v.map(|observed_in| CanonicalTx {
+                            observed_as: observed_in,
+                            tx,
+                        })
+                    })
                     .transpose()
             })
     }
@@ -238,7 +248,7 @@ impl<A: BlockAnchor, I: TxIndex> IndexedTxGraph<A, I> {
     pub fn list_chain_txs<'a, C>(
         &'a self,
         chain: C,
-    ) -> impl Iterator<Item = TxInChain<'a, Transaction, A>>
+    ) -> impl Iterator<Item = CanonicalTx<'a, Transaction, A>>
     where
         C: ChainOracle<Error = Infallible> + 'a,
     {
@@ -249,10 +259,9 @@ impl<A: BlockAnchor, I: TxIndex> IndexedTxGraph<A, I> {
     pub fn try_list_chain_txouts<'a, C>(
         &'a self,
         chain: C,
-    ) -> impl Iterator<Item = Result<FullTxOut<ObservedIn<A>>, C::Error>> + 'a
+    ) -> impl Iterator<Item = Result<FullTxOut<ObservedAs<A>>, C::Error>> + 'a
     where
         C: ChainOracle + 'a,
-        ObservedIn<A>: ChainPosition,
     {
         self.graph
             .all_txouts()
@@ -263,13 +272,13 @@ impl<A: BlockAnchor, I: TxIndex> IndexedTxGraph<A, I> {
                 let is_on_coinbase = graph_tx.is_coin_base();
 
                 let chain_position = match self.graph.try_get_chain_position(&chain, op.txid) {
-                    Ok(Some(observed_at)) => observed_at.into_owned(),
+                    Ok(Some(observed_at)) => observed_at.cloned(),
                     Ok(None) => return None,
                     Err(err) => return Some(Err(err)),
                 };
 
                 let spent_by = match self.graph.try_get_spend_in_chain(&chain, op) {
-                    Ok(Some((obs, txid))) => Some((obs.into_owned(), txid)),
+                    Ok(Some((obs, txid))) => Some((obs.cloned(), txid)),
                     Ok(None) => None,
                     Err(err) => return Some(Err(err)),
                 };
@@ -289,10 +298,9 @@ impl<A: BlockAnchor, I: TxIndex> IndexedTxGraph<A, I> {
     pub fn list_chain_txouts<'a, C>(
         &'a self,
         chain: C,
-    ) -> impl Iterator<Item = FullTxOut<ObservedIn<A>>> + 'a
+    ) -> impl Iterator<Item = FullTxOut<ObservedAs<A>>> + 'a
     where
         C: ChainOracle<Error = Infallible> + 'a,
-        ObservedIn<A>: ChainPosition,
     {
         self.try_list_chain_txouts(chain)
             .map(|r| r.expect("error in infallible"))
@@ -302,10 +310,9 @@ impl<A: BlockAnchor, I: TxIndex> IndexedTxGraph<A, I> {
     pub fn try_list_chain_utxos<'a, C>(
         &'a self,
         chain: C,
-    ) -> impl Iterator<Item = Result<FullTxOut<ObservedIn<A>>, C::Error>> + 'a
+    ) -> impl Iterator<Item = Result<FullTxOut<ObservedAs<A>>, C::Error>> + 'a
     where
         C: ChainOracle + 'a,
-        ObservedIn<A>: ChainPosition,
     {
         self.try_list_chain_txouts(chain)
             .filter(|r| !matches!(r, Ok(txo) if txo.spent_by.is_none()))
@@ -314,10 +321,9 @@ impl<A: BlockAnchor, I: TxIndex> IndexedTxGraph<A, I> {
     pub fn list_chain_utxos<'a, C>(
         &'a self,
         chain: C,
-    ) -> impl Iterator<Item = FullTxOut<ObservedIn<A>>> + 'a
+    ) -> impl Iterator<Item = FullTxOut<ObservedAs<A>>> + 'a
     where
         C: ChainOracle<Error = Infallible> + 'a,
-        ObservedIn<A>: ChainPosition,
     {
         self.try_list_chain_utxos(chain)
             .map(|r| r.expect("error is infallible"))
@@ -331,7 +337,6 @@ impl<A: BlockAnchor, I: TxIndex> IndexedTxGraph<A, I> {
     ) -> Result<Balance, C::Error>
     where
         C: ChainOracle,
-        ObservedIn<A>: ChainPosition + Clone,
         F: FnMut(&Script) -> bool,
     {
         let mut immature = 0;
@@ -343,16 +348,16 @@ impl<A: BlockAnchor, I: TxIndex> IndexedTxGraph<A, I> {
             let txout = res?;
 
             match &txout.chain_position {
-                ObservedIn::Block(_) => {
+                ObservedAs::Confirmed(_) => {
                     if txout.is_on_coinbase {
-                        if txout.is_mature(tip) {
+                        if txout.is_observed_as_mature(tip) {
                             confirmed += txout.txout.value;
                         } else {
                             immature += txout.txout.value;
                         }
                     }
                 }
-                ObservedIn::Mempool(_) => {
+                ObservedAs::Unconfirmed(_) => {
                     if should_trust(&txout.txout.script_pubkey) {
                         trusted_pending += txout.txout.value;
                     } else {
@@ -373,7 +378,6 @@ impl<A: BlockAnchor, I: TxIndex> IndexedTxGraph<A, I> {
     pub fn balance<C, F>(&self, chain: C, tip: u32, should_trust: F) -> Balance
     where
         C: ChainOracle<Error = Infallible>,
-        ObservedIn<A>: ChainPosition + Clone,
         F: FnMut(&Script) -> bool,
     {
         self.try_balance(chain, tip, should_trust)
@@ -383,12 +387,11 @@ impl<A: BlockAnchor, I: TxIndex> IndexedTxGraph<A, I> {
     pub fn try_balance_at<C>(&self, chain: C, height: u32) -> Result<u64, C::Error>
     where
         C: ChainOracle,
-        ObservedIn<A>: ChainPosition + Clone,
     {
         let mut sum = 0;
         for txo_res in self.try_list_chain_txouts(chain) {
             let txo = txo_res?;
-            if txo.is_spendable_at(height) {
+            if txo.is_observed_as_spendable(height) {
                 sum += txo.txout.value;
             }
         }
@@ -398,7 +401,6 @@ impl<A: BlockAnchor, I: TxIndex> IndexedTxGraph<A, I> {
     pub fn balance_at<C>(&self, chain: C, height: u32) -> u64
     where
         C: ChainOracle<Error = Infallible>,
-        ObservedIn<A>: ChainPosition + Clone,
     {
         self.try_balance_at(chain, height)
             .expect("error is infallible")

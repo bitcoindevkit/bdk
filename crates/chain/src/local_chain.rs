@@ -123,7 +123,7 @@ impl LocalChain {
 
     /// Updates [`LocalChain`] with an update [`LocalChain`].
     ///
-    /// This is equivilant to calling [`determine_changeset`] and [`apply_changeset`] in sequence.
+    /// This is equivalent to calling [`determine_changeset`] and [`apply_changeset`] in sequence.
     ///
     /// [`determine_changeset`]: Self::determine_changeset
     /// [`apply_changeset`]: Self::apply_changeset

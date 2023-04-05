@@ -55,7 +55,7 @@
 //! assert!(additions.is_empty());
 //! ```
 
-use crate::{collections::*, BlockAnchor, ChainOracle, ForEachTxOut, ObservedIn};
+use crate::{collections::*, BlockAnchor, ChainOracle, ForEachTxOut, ObservedAs};
 use alloc::vec::Vec;
 use bitcoin::{OutPoint, Transaction, TxOut, Txid};
 use core::{
@@ -91,10 +91,7 @@ impl<A> Default for TxGraph<A> {
     }
 }
 
-// pub type InChainTx<'a, T, A> = (ObservedIn<&'a A>, TxInGraph<'a, T, A>);
-// pub type InChainTxOut<'a, I, A> = (&'a I, FullTxOut<ObservedIn<&'a A>>);
-
-/// An outward-facing view of a transaction node that resides in a [`TxGraph`].
+/// An outward-facing representation of a (transaction) node in the [`TxGraph`].
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct TxNode<'a, T, A> {
     /// Txid of the transaction.
@@ -601,7 +598,7 @@ impl<A: BlockAnchor> TxGraph<A> {
         &self,
         chain: C,
         txid: Txid,
-    ) -> Result<Option<ObservedIn<&A>>, C::Error>
+    ) -> Result<Option<ObservedAs<&A>>, C::Error>
     where
         C: ChainOracle,
     {
@@ -614,7 +611,7 @@ impl<A: BlockAnchor> TxGraph<A> {
 
         for anchor in anchors {
             if chain.is_block_in_best_chain(anchor.anchor_block())? {
-                return Ok(Some(ObservedIn::Block(anchor)));
+                return Ok(Some(ObservedAs::Confirmed(anchor)));
             }
         }
 
@@ -643,10 +640,10 @@ impl<A: BlockAnchor> TxGraph<A> {
             }
         }
 
-        Ok(Some(ObservedIn::Mempool(last_seen)))
+        Ok(Some(ObservedAs::Unconfirmed(last_seen)))
     }
 
-    pub fn get_chain_position<C>(&self, chain: C, txid: Txid) -> Option<ObservedIn<&A>>
+    pub fn get_chain_position<C>(&self, chain: C, txid: Txid) -> Option<ObservedAs<&A>>
     where
         C: ChainOracle<Error = Infallible>,
     {
@@ -658,7 +655,7 @@ impl<A: BlockAnchor> TxGraph<A> {
         &self,
         chain: C,
         outpoint: OutPoint,
-    ) -> Result<Option<(ObservedIn<&A>, Txid)>, C::Error>
+    ) -> Result<Option<(ObservedAs<&A>, Txid)>, C::Error>
     where
         C: ChainOracle,
     {
@@ -678,7 +675,7 @@ impl<A: BlockAnchor> TxGraph<A> {
         Ok(None)
     }
 
-    pub fn get_chain_spend<C>(&self, chain: C, outpoint: OutPoint) -> Option<(ObservedIn<&A>, Txid)>
+    pub fn get_chain_spend<C>(&self, chain: C, outpoint: OutPoint) -> Option<(ObservedAs<&A>, Txid)>
     where
         C: ChainOracle<Error = Infallible>,
     {

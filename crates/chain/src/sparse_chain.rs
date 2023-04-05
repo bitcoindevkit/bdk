@@ -457,7 +457,7 @@ impl<P: core::fmt::Debug> core::fmt::Display for UpdateError<P> {
 #[cfg(feature = "std")]
 impl<P: core::fmt::Debug> std::error::Error for UpdateError<P> {}
 
-impl<P: ChainPosition> ChainOracle for SparseChain<P> {
+impl<P> ChainOracle for SparseChain<P> {
     type Error = Infallible;
 
     fn get_tip_in_best_chain(&self) -> Result<Option<BlockId>, Self::Error> {
@@ -473,7 +473,7 @@ impl<P: ChainPosition> ChainOracle for SparseChain<P> {
     }
 }
 
-impl<P: ChainPosition> SparseChain<P> {
+impl<P> SparseChain<P> {
     /// Creates a new chain from a list of block hashes and heights. The caller must guarantee they
     /// are in the same chain.
     pub fn from_checkpoints<C>(checkpoints: C) -> Self
@@ -504,13 +504,6 @@ impl<P: ChainPosition> SparseChain<P> {
             .map(|&hash| BlockId { height, hash })
     }
 
-    /// Return the [`ChainPosition`] of a `txid`.
-    ///
-    /// This returns [`None`] if the transaction does not exist.
-    pub fn tx_position(&self, txid: Txid) -> Option<&P> {
-        self.txid_to_pos.get(&txid)
-    }
-
     /// Return a [`BTreeMap`] of all checkpoints (block hashes by height).
     pub fn checkpoints(&self) -> &BTreeMap<u32, BlockHash> {
         &self.checkpoints
@@ -524,6 +517,47 @@ impl<P: ChainPosition> SparseChain<P> {
         self.checkpoints
             .range(range)
             .map(|(&height, &hash)| BlockId { height, hash })
+    }
+
+    /// Returns the value set as the checkpoint limit.
+    ///
+    /// Refer to [`set_checkpoint_limit`].
+    ///
+    /// [`set_checkpoint_limit`]: Self::set_checkpoint_limit
+    pub fn checkpoint_limit(&self) -> Option<usize> {
+        self.checkpoint_limit
+    }
+
+    /// Set the checkpoint limit.
+    ///
+    /// The checkpoint limit restricts the number of checkpoints that can be stored in [`Self`].
+    /// Oldest checkpoints are pruned first.
+    pub fn set_checkpoint_limit(&mut self, limit: Option<usize>) {
+        self.checkpoint_limit = limit;
+        self.prune_checkpoints();
+    }
+
+    fn prune_checkpoints(&mut self) -> Option<BTreeMap<u32, BlockHash>> {
+        let limit = self.checkpoint_limit?;
+
+        // find the last height to be pruned
+        let last_height = *self.checkpoints.keys().rev().nth(limit)?;
+        // first height to be kept
+        let keep_height = last_height + 1;
+
+        let mut split = self.checkpoints.split_off(&keep_height);
+        core::mem::swap(&mut self.checkpoints, &mut split);
+
+        Some(split)
+    }
+}
+
+impl<P: ChainPosition> SparseChain<P> {
+    /// Return the [`ChainPosition`] of a `txid`.
+    ///
+    /// This returns [`None`] if the transaction does not exist.
+    pub fn tx_position(&self, txid: Txid) -> Option<&P> {
+        self.txid_to_pos.get(&txid)
     }
 
     /// Preview changes of updating [`Self`] with another chain that connects to it.
@@ -936,24 +970,6 @@ impl<P: ChainPosition> SparseChain<P> {
         })
     }
 
-    /// Returns the value set as the checkpoint limit.
-    ///
-    /// Refer to [`set_checkpoint_limit`].
-    ///
-    /// [`set_checkpoint_limit`]: Self::set_checkpoint_limit
-    pub fn checkpoint_limit(&self) -> Option<usize> {
-        self.checkpoint_limit
-    }
-
-    /// Set the checkpoint limit.
-    ///
-    /// The checkpoint limit restricts the number of checkpoints that can be stored in [`Self`].
-    /// Oldest checkpoints are pruned first.
-    pub fn set_checkpoint_limit(&mut self, limit: Option<usize>) {
-        self.checkpoint_limit = limit;
-        self.prune_checkpoints();
-    }
-
     /// Return [`Txid`]s that would be added to the sparse chain if this `changeset` was applied.
     pub fn changeset_additions<'a>(
         &'a self,
@@ -967,20 +983,6 @@ impl<P: ChainPosition> SparseChain<P> {
                 self.tx_position(txid).is_none() /* we don't have the txid already */
             })
             .map(|(&txid, _)| txid)
-    }
-
-    fn prune_checkpoints(&mut self) -> Option<BTreeMap<u32, BlockHash>> {
-        let limit = self.checkpoint_limit?;
-
-        // find the last height to be pruned
-        let last_height = *self.checkpoints.keys().rev().nth(limit)?;
-        // first height to be kept
-        let keep_height = last_height + 1;
-
-        let mut split = self.checkpoints.split_off(&keep_height);
-        core::mem::swap(&mut self.checkpoints, &mut split);
-
-        Some(split)
     }
 
     /// Finds the transaction in the chain that spends `outpoint`.
