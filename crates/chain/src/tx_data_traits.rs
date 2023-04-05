@@ -56,6 +56,16 @@ impl BlockAnchor for (u32, BlockHash) {
     }
 }
 
+/// Trait that makes an object appendable.
+pub trait Append {
+    /// Append another object of the same type onto `self`.
+    fn append(&mut self, other: Self);
+}
+
+impl Append for () {
+    fn append(&mut self, _other: Self) {}
+}
+
 /// Represents an index of transaction data.
 pub trait TxIndex {
     /// The resultant "additions" when new transaction data is indexed.

@@ -1,11 +1,11 @@
-use core::{convert::Infallible, ops::AddAssign};
+use core::convert::Infallible;
 
 use bitcoin::{OutPoint, Script, Transaction, TxOut};
 
 use crate::{
     keychain::Balance,
     tx_graph::{Additions, TxGraph, TxNode},
-    BlockAnchor, ChainOracle, FullTxOut, ObservedAs, TxIndex,
+    Append, BlockAnchor, ChainOracle, FullTxOut, ObservedAs, TxIndex,
 };
 
 /// An outwards-facing view of a transaction that is part of the *best chain*'s history.
@@ -50,18 +50,14 @@ impl<A, IA: Default> Default for IndexedAdditions<A, IA> {
     }
 }
 
-impl<A: BlockAnchor, IA: AddAssign> AddAssign for IndexedAdditions<A, IA> {
-    fn add_assign(&mut self, rhs: Self) {
-        let Self {
-            graph_additions,
-            index_additions: index_delta,
-            last_height,
-        } = rhs;
-        self.graph_additions.append(graph_additions);
-        self.index_additions += index_delta;
-        if self.last_height < last_height {
-            let last_height =
-                last_height.expect("must exist as it is larger than self.last_height");
+impl<A: BlockAnchor, IA: Append> Append for IndexedAdditions<A, IA> {
+    fn append(&mut self, other: Self) {
+        self.graph_additions.append(other.graph_additions);
+        self.index_additions.append(other.index_additions);
+        if self.last_height < other.last_height {
+            let last_height = other
+                .last_height
+                .expect("must exist as it is larger than self.last_height");
             self.last_height.replace(last_height);
         }
     }
@@ -201,7 +197,7 @@ impl<A: BlockAnchor, I: TxIndex> IndexedTxGraph<A, I> {
     ) -> IndexedAdditions<A, I::Additions>
     where
         T: Iterator<Item = &'t Transaction>,
-        I::Additions: Default + AddAssign,
+        I::Additions: Default + Append,
     {
         txs.filter_map(|tx| {
             if self.index.is_tx_relevant(tx) {
@@ -211,7 +207,7 @@ impl<A: BlockAnchor, I: TxIndex> IndexedTxGraph<A, I> {
             }
         })
         .fold(IndexedAdditions::default(), |mut acc, other| {
-            acc += other;
+            acc.append(other);
             acc
         })
     }

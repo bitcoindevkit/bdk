@@ -7,6 +7,8 @@ use alloc::{borrow::Cow, vec::Vec};
 use bitcoin::{secp256k1::Secp256k1, OutPoint, Script, TxOut};
 use core::{fmt::Debug, ops::Deref};
 
+use crate::Append;
+
 use super::DerivationAdditions;
 
 /// Maximum [BIP32](https://bips.xyz/32) derivation index.
