@@ -34,9 +34,12 @@ impl ForEachTxOut for Transaction {
     }
 }
 
-/// Trait that "anchors" blockchain data in a specific block of height and hash.
+/// Trait that "anchors" blockchain data to a specific block of height and hash.
 ///
-/// This trait is typically associated with blockchain data such as transactions.
+/// I.e. If transaction A is anchored in block B, then if block B is in the best chain, we can
+/// assume that transaction A is also confirmed in the best chain. This does not necessarily mean
+/// that transaction A is confirmed in block B. It could also mean transaction A is confirmed in a
+/// parent block of B.
 pub trait BlockAnchor:
     core::fmt::Debug + Clone + Eq + PartialOrd + Ord + core::hash::Hash + Send + Sync + 'static
 {
