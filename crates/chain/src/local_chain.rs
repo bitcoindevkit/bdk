@@ -67,6 +67,13 @@ impl LocalChain {
             .map(|(&height, &hash)| BlockId { height, hash })
     }
 
+    /// Get a block at the given height.
+    pub fn get_block(&self, height: u32) -> Option<BlockId> {
+        self.blocks
+            .get(&height)
+            .map(|&hash| BlockId { height, hash })
+    }
+
     /// This is like the sparsechain's logic, expect we must guarantee that all invalidated heights
     /// are to be re-filled.
     pub fn determine_changeset(&self, update: &Self) -> Result<ChangeSet, UpdateNotConnectedError> {
