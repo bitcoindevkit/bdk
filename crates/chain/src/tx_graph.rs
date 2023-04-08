@@ -596,7 +596,7 @@ impl<A: BlockAnchor> TxGraph<A> {
     /// TODO: Also return conflicting tx list, ordered by last_seen.
     pub fn try_get_chain_position<C>(
         &self,
-        chain: C,
+        chain: &C,
         txid: Txid,
     ) -> Result<Option<ObservedAs<&A>>, C::Error>
     where
@@ -643,7 +643,7 @@ impl<A: BlockAnchor> TxGraph<A> {
         Ok(Some(ObservedAs::Unconfirmed(last_seen)))
     }
 
-    pub fn get_chain_position<C>(&self, chain: C, txid: Txid) -> Option<ObservedAs<&A>>
+    pub fn get_chain_position<C>(&self, chain: &C, txid: Txid) -> Option<ObservedAs<&A>>
     where
         C: ChainOracle<Error = Infallible>,
     {
@@ -653,7 +653,7 @@ impl<A: BlockAnchor> TxGraph<A> {
 
     pub fn try_get_spend_in_chain<C>(
         &self,
-        chain: C,
+        chain: &C,
         outpoint: OutPoint,
     ) -> Result<Option<(ObservedAs<&A>, Txid)>, C::Error>
     where
@@ -675,7 +675,11 @@ impl<A: BlockAnchor> TxGraph<A> {
         Ok(None)
     }
 
-    pub fn get_chain_spend<C>(&self, chain: C, outpoint: OutPoint) -> Option<(ObservedAs<&A>, Txid)>
+    pub fn get_chain_spend<C>(
+        &self,
+        chain: &C,
+        outpoint: OutPoint,
+    ) -> Option<(ObservedAs<&A>, Txid)>
     where
         C: ChainOracle<Error = Infallible>,
     {

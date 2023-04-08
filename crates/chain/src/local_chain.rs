@@ -47,6 +47,12 @@ impl From<LocalChain> for BTreeMap<u32, BlockHash> {
     }
 }
 
+impl From<BTreeMap<u32, BlockHash>> for LocalChain {
+    fn from(blocks: BTreeMap<u32, BlockHash>) -> Self {
+        Self { blocks }
+    }
+}
+
 impl LocalChain {
     pub fn tip(&self) -> Option<BlockId> {
         self.blocks
