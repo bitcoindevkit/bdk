@@ -1,12 +1,9 @@
 use core::{convert::Infallible, ops::Deref};
 
-use alloc::{
-    collections::{BTreeMap, BTreeSet},
-    vec::Vec,
-};
+use alloc::collections::{BTreeMap, BTreeSet};
 use bitcoin::BlockHash;
 
-use crate::{BlockId, ChainOracle};
+use crate::{Append, BlockId, ChainOracle};
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct LocalChain {
@@ -56,6 +53,12 @@ impl From<LocalChain> for BTreeMap<u32, BlockHash> {
     }
 }
 
+impl From<BTreeMap<u32, BlockHash>> for LocalChain {
+    fn from(value: BTreeMap<u32, BlockHash>) -> Self {
+        Self { blocks: value }
+    }
+}
+
 impl LocalChain {
     pub fn tip(&self) -> Option<BlockId> {
         self.blocks
@@ -66,10 +69,7 @@ impl LocalChain {
 
     /// This is like the sparsechain's logic, expect we must guarantee that all invalidated heights
     /// are to be re-filled.
-    pub fn determine_changeset<U>(&self, update: &U) -> Result<ChangeSet, UpdateError>
-    where
-        U: AsRef<BTreeMap<u32, BlockHash>>,
-    {
+    pub fn determine_changeset(&self, update: &Self) -> Result<ChangeSet, UpdateNotConnectedError> {
         let update = update.as_ref();
         let update_tip = match update.keys().last().cloned() {
             Some(tip) => tip,
@@ -96,23 +96,8 @@ impl LocalChain {
         // the first block of height to invalidate (if any) should be represented in the update
         if let Some(first_invalid_height) = invalidate_from_height {
             if !update.contains_key(&first_invalid_height) {
-                return Err(UpdateError::NotConnected(first_invalid_height));
+                return Err(UpdateNotConnectedError(first_invalid_height));
             }
-        }
-
-        let invalidated_heights = invalidate_from_height
-            .into_iter()
-            .flat_map(|from_height| self.blocks.range(from_height..).map(|(h, _)| h));
-
-        // invalidated heights must all exist in the update
-        let mut missing_heights = Vec::<u32>::new();
-        for invalidated_height in invalidated_heights {
-            if !update.contains_key(invalidated_height) {
-                missing_heights.push(*invalidated_height);
-            }
-        }
-        if !missing_heights.is_empty() {
-            return Err(UpdateError::MissingHeightsInUpdate(missing_heights));
         }
 
         let mut changeset = BTreeMap::<u32, BlockHash>::new();
@@ -136,7 +121,7 @@ impl LocalChain {
     ///
     /// [`determine_changeset`]: Self::determine_changeset
     /// [`apply_changeset`]: Self::apply_changeset
-    pub fn apply_update(&mut self, update: Self) -> Result<ChangeSet, UpdateError> {
+    pub fn apply_update(&mut self, update: Self) -> Result<ChangeSet, UpdateNotConnectedError> {
         let changeset = self.determine_changeset(&update)?;
         self.apply_changeset(changeset.clone());
         Ok(changeset)
@@ -160,7 +145,7 @@ impl LocalChain {
     derive(serde::Deserialize, serde::Serialize),
     serde(crate = "serde_crate")
 )]
-pub struct ChangeSet(pub BTreeMap<u32, BlockHash>);
+pub struct ChangeSet(pub(crate) BTreeMap<u32, BlockHash>);
 
 impl Deref for ChangeSet {
     type Target = BTreeMap<u32, BlockHash>;
@@ -170,32 +155,30 @@ impl Deref for ChangeSet {
     }
 }
 
-/// Represents an update failure of [`LocalChain`].
-#[derive(Clone, Debug, PartialEq)]
-pub enum UpdateError {
-    /// The update cannot be applied to the chain because the chain suffix it represents did not
-    /// connect to the existing chain. This error case contains the checkpoint height to include so
-    /// that the chains can connect.
-    NotConnected(u32),
-    /// If the update results in displacements of original blocks, the update should include all new
-    /// block hashes that have displaced the original block hashes. This error case contains the
-    /// heights of all missing block hashes in the update.
-    MissingHeightsInUpdate(Vec<u32>),
-}
-
-impl core::fmt::Display for UpdateError {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
-            UpdateError::NotConnected(heights) => write!(
-                f,
-                "the update cannot connect with the chain, try include blockhash at height {}",
-                heights
-            ),
-            UpdateError::MissingHeightsInUpdate(missing_heights) => write!(
-                f,
-                "block hashes of these heights must be included in the update to succeed: {:?}",
-                missing_heights
-            ),
-        }
+impl Append for ChangeSet {
+    fn append(&mut self, mut other: Self) {
+        BTreeMap::append(&mut self.0, &mut other.0)
     }
 }
+
+/// Represents an update failure of [`LocalChain`] due to the update not connecting to the original
+/// chain.
+///
+/// The update cannot be applied to the chain because the chain suffix it represents did not
+/// connect to the existing chain. This error case contains the checkpoint height to include so
+/// that the chains can connect.
+#[derive(Clone, Debug, PartialEq)]
+pub struct UpdateNotConnectedError(u32);
+
+impl core::fmt::Display for UpdateNotConnectedError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(
+            f,
+            "the update cannot connect with the chain, try include block at height {}",
+            self.0
+        )
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for UpdateNotConnectedError {}
