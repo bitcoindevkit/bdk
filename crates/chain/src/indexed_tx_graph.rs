@@ -36,8 +36,6 @@ pub struct IndexedAdditions<A, IA> {
     pub graph_additions: Additions<A>,
     /// [`TxIndex`] additions.
     pub index_additions: IA,
-    /// Last block height witnessed (if any).
-    pub last_height: Option<u32>,
 }
 
 impl<A, IA: Default> Default for IndexedAdditions<A, IA> {
@@ -45,7 +43,6 @@ impl<A, IA: Default> Default for IndexedAdditions<A, IA> {
         Self {
             graph_additions: Default::default(),
             index_additions: Default::default(),
-            last_height: None,
         }
     }
 }
@@ -54,13 +51,6 @@ impl<A: BlockAnchor, IA: Append> Append for IndexedAdditions<A, IA> {
     fn append(&mut self, other: Self) {
         self.graph_additions.append(other.graph_additions);
         self.index_additions.append(other.index_additions);
-        if self.last_height < other.last_height {
-            self.last_height = Some(
-                other
-                    .last_height
-                    .expect("must exist as it is larger than self.last_height"),
-            );
-        }
     }
 }
 
@@ -68,7 +58,6 @@ pub struct IndexedTxGraph<A, I> {
     /// Transaction index.
     pub index: I,
     graph: TxGraph<A>,
-    last_height: u32,
 }
 
 impl<A, I: Default> Default for IndexedTxGraph<A, I> {
@@ -76,7 +65,6 @@ impl<A, I: Default> Default for IndexedTxGraph<A, I> {
         Self {
             graph: Default::default(),
             index: Default::default(),
-            last_height: u32::MIN,
         }
     }
 }
@@ -92,7 +80,6 @@ impl<A: BlockAnchor, I: TxIndex> IndexedTxGraph<A, I> {
         let IndexedAdditions {
             graph_additions,
             index_additions,
-            last_height,
         } = additions;
 
         self.index.apply_additions(index_additions);
@@ -105,30 +92,6 @@ impl<A: BlockAnchor, I: TxIndex> IndexedTxGraph<A, I> {
         }
 
         self.graph.apply_additions(graph_additions);
-
-        if let Some(height) = last_height {
-            self.last_height = height;
-        }
-    }
-
-    fn insert_height_internal(&mut self, tip: u32) -> Option<u32> {
-        if self.last_height < tip {
-            self.last_height = tip;
-            Some(tip)
-        } else {
-            None
-        }
-    }
-
-    /// Insert a block height that the chain source has scanned up to.
-    pub fn insert_height(&mut self, tip: u32) -> IndexedAdditions<A, I::Additions>
-    where
-        I::Additions: Default,
-    {
-        IndexedAdditions {
-            last_height: self.insert_height_internal(tip),
-            ..Default::default()
-        }
     }
 
     /// Insert a `txout` that exists in `outpoint` with the given `observation`.
@@ -138,13 +101,6 @@ impl<A: BlockAnchor, I: TxIndex> IndexedTxGraph<A, I> {
         txout: &TxOut,
         observation: ObservedAs<A>,
     ) -> IndexedAdditions<A, I::Additions> {
-        let last_height = match &observation {
-            ObservedAs::Confirmed(anchor) => {
-                self.insert_height_internal(anchor.anchor_block().height)
-            }
-            ObservedAs::Unconfirmed(_) => None,
-        };
-
         IndexedAdditions {
             graph_additions: {
                 let mut graph_additions = self.graph.insert_txout(outpoint, txout.clone());
@@ -159,7 +115,6 @@ impl<A: BlockAnchor, I: TxIndex> IndexedTxGraph<A, I> {
                 graph_additions
             },
             index_additions: <I as TxIndex>::index_txout(&mut self.index, outpoint, txout),
-            last_height,
         }
     }
 
@@ -169,13 +124,6 @@ impl<A: BlockAnchor, I: TxIndex> IndexedTxGraph<A, I> {
         observation: ObservedAs<A>,
     ) -> IndexedAdditions<A, I::Additions> {
         let txid = tx.txid();
-
-        let last_height = match &observation {
-            ObservedAs::Confirmed(anchor) => {
-                self.insert_height_internal(anchor.anchor_block().height)
-            }
-            ObservedAs::Unconfirmed(_) => None,
-        };
 
         IndexedAdditions {
             graph_additions: {
@@ -187,7 +135,6 @@ impl<A: BlockAnchor, I: TxIndex> IndexedTxGraph<A, I> {
                 graph_additions
             },
             index_additions: <I as TxIndex>::index_tx(&mut self.index, tx),
-            last_height,
         }
     }
 
@@ -211,11 +158,6 @@ impl<A: BlockAnchor, I: TxIndex> IndexedTxGraph<A, I> {
             acc.append(other);
             acc
         })
-    }
-
-    /// Get the last block height that we are synced up to.
-    pub fn last_height(&self) -> u32 {
-        self.last_height
     }
 
     // [TODO] Have to methods, one for relevant-only, and one for any. Have one in `TxGraph`.
