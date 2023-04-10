@@ -55,10 +55,11 @@ impl<A: BlockAnchor, IA: Append> Append for IndexedAdditions<A, IA> {
         self.graph_additions.append(other.graph_additions);
         self.index_additions.append(other.index_additions);
         if self.last_height < other.last_height {
-            let last_height = other
-                .last_height
-                .expect("must exist as it is larger than self.last_height");
-            self.last_height.replace(last_height);
+            self.last_height = Some(
+                other
+                    .last_height
+                    .expect("must exist as it is larger than self.last_height"),
+            );
         }
     }
 }

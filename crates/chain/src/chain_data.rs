@@ -271,6 +271,8 @@ impl<A: BlockAnchor> FullTxOut<ObservedAs<A>> {
 
     /// Whether the utxo is/was/will be spendable with chain `tip`.
     ///
+    /// Currently this method does not take into account the locktime.
+    ///
     /// This is the alternative version of [`is_spendable_at`] which depends on `chain_position`
     /// being a [`ObservedAs<A>`] where `A` implements [`BlockAnchor`].
     ///
@@ -286,7 +288,6 @@ impl<A: BlockAnchor> FullTxOut<ObservedAs<A>> {
                     return false;
                 }
             }
-            // [TODO] Why are unconfirmed txs always considered unspendable here?
             ObservedAs::Unconfirmed(_) => return false,
         };
 
