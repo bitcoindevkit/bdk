@@ -55,7 +55,7 @@
 //! assert!(additions.is_empty());
 //! ```
 
-use crate::{collections::*, BlockAnchor, ChainOracle, ForEachTxOut, ObservedAs};
+use crate::{collections::*, BlockAnchor, BlockId, ChainOracle, ForEachTxOut, ObservedAs};
 use alloc::vec::Vec;
 use bitcoin::{OutPoint, Transaction, TxOut, Txid};
 use core::{
@@ -596,7 +596,8 @@ impl<A: BlockAnchor> TxGraph<A> {
     /// TODO: Also return conflicting tx list, ordered by last_seen.
     pub fn try_get_chain_position<C>(
         &self,
-        chain: C,
+        chain: &C,
+        static_block: BlockId,
         txid: Txid,
     ) -> Result<Option<ObservedAs<&A>>, C::Error>
     where
@@ -610,8 +611,28 @@ impl<A: BlockAnchor> TxGraph<A> {
         };
 
         for anchor in anchors {
-            if chain.is_block_in_best_chain(anchor.anchor_block())? {
-                return Ok(Some(ObservedAs::Confirmed(anchor)));
+            match chain.is_block_in_chain(anchor.anchor_block(), static_block)? {
+                Some(true) => return Ok(Some(ObservedAs::Confirmed(anchor))),
+                Some(false) => continue,
+                // if we cannot determine whether block is in the best chain, we can check whether
+                // a spending transaction is confirmed in best chain, and if so, it is guaranteed
+                // that the tx being spent (this tx) is in the best chain
+                None => {
+                    let spending_anchors = self
+                        .spends
+                        .range(OutPoint::new(txid, u32::MIN)..=OutPoint::new(txid, u32::MAX))
+                        .flat_map(|(_, spending_txids)| spending_txids)
+                        .filter_map(|spending_txid| self.txs.get(spending_txid))
+                        .flat_map(|(_, spending_anchors, _)| spending_anchors);
+                    for spending_anchor in spending_anchors {
+                        match chain
+                            .is_block_in_chain(spending_anchor.anchor_block(), static_block)?
+                        {
+                            Some(true) => return Ok(Some(ObservedAs::Confirmed(anchor))),
+                            _ => continue,
+                        }
+                    }
+                }
             }
         }
 
@@ -620,8 +641,7 @@ impl<A: BlockAnchor> TxGraph<A> {
         let tx = match tx_node {
             TxNodeInternal::Whole(tx) => tx,
             TxNodeInternal::Partial(_) => {
-                // [TODO] Unfortunately, we can't iterate over conflicts of partial txs right now!
-                // [TODO] So we just assume the partial tx does not exist in the best chain :/
+                // Partial transactions (outputs only) cannot have conflicts.
                 return Ok(None);
             }
         };
@@ -629,8 +649,8 @@ impl<A: BlockAnchor> TxGraph<A> {
         // If a conflicting tx is in the best chain, or has `last_seen` higher than this tx, then
         // this tx cannot exist in the best chain
         for conflicting_tx in self.walk_conflicts(tx, |_, txid| self.get_tx_node(txid)) {
-            for block_id in conflicting_tx.anchors.iter().map(A::anchor_block) {
-                if chain.is_block_in_best_chain(block_id)? {
+            for block in conflicting_tx.anchors.iter().map(A::anchor_block) {
+                if chain.is_block_in_chain(block, static_block)? == Some(true) {
                     // conflicting tx is in best chain, so the current tx cannot be in best chain!
                     return Ok(None);
                 }
@@ -643,31 +663,37 @@ impl<A: BlockAnchor> TxGraph<A> {
         Ok(Some(ObservedAs::Unconfirmed(last_seen)))
     }
 
-    pub fn get_chain_position<C>(&self, chain: C, txid: Txid) -> Option<ObservedAs<&A>>
+    pub fn get_chain_position<C>(
+        &self,
+        chain: &C,
+        static_block: BlockId,
+        txid: Txid,
+    ) -> Option<ObservedAs<&A>>
     where
         C: ChainOracle<Error = Infallible>,
     {
-        self.try_get_chain_position(chain, txid)
+        self.try_get_chain_position(chain, static_block, txid)
             .expect("error is infallible")
     }
 
     pub fn try_get_spend_in_chain<C>(
         &self,
-        chain: C,
+        chain: &C,
+        static_block: BlockId,
         outpoint: OutPoint,
     ) -> Result<Option<(ObservedAs<&A>, Txid)>, C::Error>
     where
         C: ChainOracle,
     {
         if self
-            .try_get_chain_position(&chain, outpoint.txid)?
+            .try_get_chain_position(chain, static_block, outpoint.txid)?
             .is_none()
         {
             return Ok(None);
         }
         if let Some(spends) = self.spends.get(&outpoint) {
             for &txid in spends {
-                if let Some(observed_at) = self.try_get_chain_position(&chain, txid)? {
+                if let Some(observed_at) = self.try_get_chain_position(chain, static_block, txid)? {
                     return Ok(Some((observed_at, txid)));
                 }
             }
@@ -675,11 +701,16 @@ impl<A: BlockAnchor> TxGraph<A> {
         Ok(None)
     }
 
-    pub fn get_chain_spend<C>(&self, chain: C, outpoint: OutPoint) -> Option<(ObservedAs<&A>, Txid)>
+    pub fn get_chain_spend<C>(
+        &self,
+        chain: &C,
+        static_block: BlockId,
+        outpoint: OutPoint,
+    ) -> Option<(ObservedAs<&A>, Txid)>
     where
         C: ChainOracle<Error = Infallible>,
     {
-        self.try_get_spend_in_chain(chain, outpoint)
+        self.try_get_spend_in_chain(chain, static_block, outpoint)
             .expect("error is infallible")
     }
 }

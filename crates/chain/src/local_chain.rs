@@ -22,16 +22,25 @@ pub struct LocalChain {
 impl ChainOracle for LocalChain {
     type Error = Infallible;
 
-    fn get_tip_in_best_chain(&self) -> Result<Option<BlockId>, Self::Error> {
-        Ok(self
-            .blocks
-            .iter()
-            .last()
-            .map(|(&height, &hash)| BlockId { height, hash }))
-    }
-
-    fn get_block_in_best_chain(&self, height: u32) -> Result<Option<BlockHash>, Self::Error> {
-        Ok(self.blocks.get(&height).cloned())
+    fn is_block_in_chain(
+        &self,
+        block: BlockId,
+        static_block: BlockId,
+    ) -> Result<Option<bool>, Self::Error> {
+        if block.height > static_block.height {
+            return Ok(None);
+        }
+        Ok(
+            match (
+                self.blocks.get(&block.height),
+                self.blocks.get(&static_block.height),
+            ) {
+                (Some(&hash), Some(&static_hash)) => {
+                    Some(hash == block.hash && static_hash == static_block.hash)
+                }
+                _ => None,
+            },
+        )
     }
 }
 

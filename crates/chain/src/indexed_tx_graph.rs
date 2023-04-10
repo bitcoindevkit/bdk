@@ -5,7 +5,7 @@ use bitcoin::{OutPoint, Script, Transaction, TxOut};
 use crate::{
     keychain::Balance,
     tx_graph::{Additions, TxGraph, TxNode},
-    Append, BlockAnchor, ChainOracle, FullTxOut, ObservedAs, TxIndex,
+    Append, BlockAnchor, BlockId, ChainOracle, FullTxOut, ObservedAs, TxIndex,
 };
 
 /// An outwards-facing view of a transaction that is part of the *best chain*'s history.
@@ -220,7 +220,8 @@ impl<A: BlockAnchor, I: TxIndex> IndexedTxGraph<A, I> {
     // [TODO] Have to methods, one for relevant-only, and one for any. Have one in `TxGraph`.
     pub fn try_list_chain_txs<'a, C>(
         &'a self,
-        chain: C,
+        chain: &'a C,
+        static_block: BlockId,
     ) -> impl Iterator<Item = Result<CanonicalTx<'a, Transaction, A>, C::Error>>
     where
         C: ChainOracle + 'a,
@@ -230,7 +231,7 @@ impl<A: BlockAnchor, I: TxIndex> IndexedTxGraph<A, I> {
             .filter(|tx| self.index.is_tx_relevant(tx))
             .filter_map(move |tx| {
                 self.graph
-                    .try_get_chain_position(&chain, tx.txid)
+                    .try_get_chain_position(chain, static_block, tx.txid)
                     .map(|v| {
                         v.map(|observed_in| CanonicalTx {
                             observed_as: observed_in,
@@ -243,18 +244,20 @@ impl<A: BlockAnchor, I: TxIndex> IndexedTxGraph<A, I> {
 
     pub fn list_chain_txs<'a, C>(
         &'a self,
-        chain: C,
+        chain: &'a C,
+        static_block: BlockId,
     ) -> impl Iterator<Item = CanonicalTx<'a, Transaction, A>>
     where
         C: ChainOracle<Error = Infallible> + 'a,
     {
-        self.try_list_chain_txs(chain)
+        self.try_list_chain_txs(chain, static_block)
             .map(|r| r.expect("error is infallible"))
     }
 
     pub fn try_list_chain_txouts<'a, C>(
         &'a self,
-        chain: C,
+        chain: &'a C,
+        static_block: BlockId,
     ) -> impl Iterator<Item = Result<FullTxOut<ObservedAs<A>>, C::Error>> + 'a
     where
         C: ChainOracle + 'a,
@@ -267,13 +270,17 @@ impl<A: BlockAnchor, I: TxIndex> IndexedTxGraph<A, I> {
 
                 let is_on_coinbase = graph_tx.is_coin_base();
 
-                let chain_position = match self.graph.try_get_chain_position(&chain, op.txid) {
-                    Ok(Some(observed_at)) => observed_at.cloned(),
-                    Ok(None) => return None,
-                    Err(err) => return Some(Err(err)),
-                };
+                let chain_position =
+                    match self
+                        .graph
+                        .try_get_chain_position(chain, static_block, op.txid)
+                    {
+                        Ok(Some(observed_at)) => observed_at.cloned(),
+                        Ok(None) => return None,
+                        Err(err) => return Some(Err(err)),
+                    };
 
-                let spent_by = match self.graph.try_get_spend_in_chain(&chain, op) {
+                let spent_by = match self.graph.try_get_spend_in_chain(chain, static_block, op) {
                     Ok(Some((obs, txid))) => Some((obs.cloned(), txid)),
                     Ok(None) => None,
                     Err(err) => return Some(Err(err)),
@@ -293,41 +300,45 @@ impl<A: BlockAnchor, I: TxIndex> IndexedTxGraph<A, I> {
 
     pub fn list_chain_txouts<'a, C>(
         &'a self,
-        chain: C,
+        chain: &'a C,
+        static_block: BlockId,
     ) -> impl Iterator<Item = FullTxOut<ObservedAs<A>>> + 'a
     where
         C: ChainOracle<Error = Infallible> + 'a,
     {
-        self.try_list_chain_txouts(chain)
+        self.try_list_chain_txouts(chain, static_block)
             .map(|r| r.expect("error in infallible"))
     }
 
     /// Return relevant unspents.
     pub fn try_list_chain_utxos<'a, C>(
         &'a self,
-        chain: C,
+        chain: &'a C,
+        static_block: BlockId,
     ) -> impl Iterator<Item = Result<FullTxOut<ObservedAs<A>>, C::Error>> + 'a
     where
         C: ChainOracle + 'a,
     {
-        self.try_list_chain_txouts(chain)
+        self.try_list_chain_txouts(chain, static_block)
             .filter(|r| !matches!(r, Ok(txo) if txo.spent_by.is_none()))
     }
 
     pub fn list_chain_utxos<'a, C>(
         &'a self,
-        chain: C,
+        chain: &'a C,
+        static_block: BlockId,
     ) -> impl Iterator<Item = FullTxOut<ObservedAs<A>>> + 'a
     where
         C: ChainOracle<Error = Infallible> + 'a,
     {
-        self.try_list_chain_utxos(chain)
+        self.try_list_chain_utxos(chain, static_block)
             .map(|r| r.expect("error is infallible"))
     }
 
     pub fn try_balance<C, F>(
         &self,
-        chain: C,
+        chain: &C,
+        static_block: BlockId,
         tip: u32,
         mut should_trust: F,
     ) -> Result<Balance, C::Error>
@@ -340,13 +351,13 @@ impl<A: BlockAnchor, I: TxIndex> IndexedTxGraph<A, I> {
         let mut untrusted_pending = 0;
         let mut confirmed = 0;
 
-        for res in self.try_list_chain_txouts(&chain) {
+        for res in self.try_list_chain_txouts(chain, static_block) {
             let txout = res?;
 
             match &txout.chain_position {
                 ObservedAs::Confirmed(_) => {
                     if txout.is_on_coinbase {
-                        if txout.is_observed_as_mature(tip) {
+                        if txout.is_observed_as_confirmed_and_mature(tip) {
                             confirmed += txout.txout.value;
                         } else {
                             immature += txout.txout.value;
@@ -371,34 +382,45 @@ impl<A: BlockAnchor, I: TxIndex> IndexedTxGraph<A, I> {
         })
     }
 
-    pub fn balance<C, F>(&self, chain: C, tip: u32, should_trust: F) -> Balance
+    pub fn balance<C, F>(
+        &self,
+        chain: &C,
+        static_block: BlockId,
+        tip: u32,
+        should_trust: F,
+    ) -> Balance
     where
         C: ChainOracle<Error = Infallible>,
         F: FnMut(&Script) -> bool,
     {
-        self.try_balance(chain, tip, should_trust)
+        self.try_balance(chain, static_block, tip, should_trust)
             .expect("error is infallible")
     }
 
-    pub fn try_balance_at<C>(&self, chain: C, height: u32) -> Result<u64, C::Error>
+    pub fn try_balance_at<C>(
+        &self,
+        chain: &C,
+        static_block: BlockId,
+        height: u32,
+    ) -> Result<u64, C::Error>
     where
         C: ChainOracle,
     {
         let mut sum = 0;
-        for txo_res in self.try_list_chain_txouts(chain) {
+        for txo_res in self.try_list_chain_txouts(chain, static_block) {
             let txo = txo_res?;
-            if txo.is_observed_as_spendable(height) {
+            if txo.is_observed_as_confirmed_and_spendable(height) {
                 sum += txo.txout.value;
             }
         }
         Ok(sum)
     }
 
-    pub fn balance_at<C>(&self, chain: C, height: u32) -> u64
+    pub fn balance_at<C>(&self, chain: &C, static_block: BlockId, height: u32) -> u64
     where
         C: ChainOracle<Error = Infallible>,
     {
-        self.try_balance_at(chain, height)
+        self.try_balance_at(chain, static_block, height)
             .expect("error is infallible")
     }
 }

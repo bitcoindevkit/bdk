@@ -248,7 +248,7 @@ impl<A: BlockAnchor> FullTxOut<ObservedAs<A>> {
     /// [`ObservedAs<A>`] where `A` implements [`BlockAnchor`].
     ///
     /// [`is_mature`]: Self::is_mature
-    pub fn is_observed_as_mature(&self, tip: u32) -> bool {
+    pub fn is_observed_as_confirmed_and_mature(&self, tip: u32) -> bool {
         if !self.is_on_coinbase {
             return false;
         }
@@ -275,8 +275,8 @@ impl<A: BlockAnchor> FullTxOut<ObservedAs<A>> {
     /// being a [`ObservedAs<A>`] where `A` implements [`BlockAnchor`].
     ///
     /// [`is_spendable_at`]: Self::is_spendable_at
-    pub fn is_observed_as_spendable(&self, tip: u32) -> bool {
-        if !self.is_observed_as_mature(tip) {
+    pub fn is_observed_as_confirmed_and_spendable(&self, tip: u32) -> bool {
+        if !self.is_observed_as_confirmed_and_mature(tip) {
             return false;
         }
 
