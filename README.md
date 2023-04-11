@@ -28,8 +28,8 @@
 
 ## About
 
-The `bdk` libraries aims to provide well engineered and reviewed components for Bitcoin based applications.
-It is built upon the excellent [`rust-bitcoin`] and [`rust-miniscript`] crates.
+The `bdk` library aims to provide well-engineered and reviewed components for Bitcoin-based applications.
+It is built upon excellent [`rust-bitcoin`] and [`rust-miniscript`] crates.
 
 > ⚠ The Bitcoin Dev Kit developers are in the process of releasing a `v1.0` which is a fundamental re-write of how the library works.
 > See for some background on this project: https://bitcoindevkit.org/blog/road-to-bdk-1/ (ignore the timeline 😁)
@@ -39,7 +39,7 @@ It is built upon the excellent [`rust-bitcoin`] and [`rust-miniscript`] crates.
 
 The project is split up into several crates in the `/crates` directory:
 
-- [`bdk`](./crates/bdk): Contains the central high level `Wallet` type that is built from the low-level mechanisms provided by the other components
+- [`bdk`](./crates/bdk): Contains the central high-level `Wallet` type that is built from the low-level mechanisms provided by the other components
 - [`chain`](./crates/chain): Tools for storing and indexing chain data
 - [`file_store`](./crates/file_store): A (experimental) persistence backend for storing chain data in a single file.
 - [`esplora`](./crates/esplora): Extends the [`esplora-client`] crate with methods to fetch chain data from an esplora HTTP server in the form that [`bdk_chain`] and `Wallet` can consume.
