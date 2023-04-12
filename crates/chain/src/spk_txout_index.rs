@@ -2,7 +2,8 @@ use core::ops::RangeBounds;
 
 use crate::{
     collections::{hash_map::Entry, BTreeMap, BTreeSet, HashMap},
-    ForEachTxOut, TxIndex,
+    indexed_tx_graph::TxIndex,
+    ForEachTxOut,
 };
 use bitcoin::{self, OutPoint, Script, Transaction, TxOut, Txid};
 

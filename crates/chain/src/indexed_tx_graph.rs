@@ -5,54 +5,8 @@ use bitcoin::{OutPoint, Script, Transaction, TxOut};
 use crate::{
     keychain::Balance,
     tx_graph::{Additions, TxGraph, TxNode},
-    Append, BlockAnchor, BlockId, ChainOracle, FullTxOut, ObservedAs, TxIndex,
+    Append, BlockAnchor, BlockId, ChainOracle, FullTxOut, ObservedAs,
 };
-
-/// An outwards-facing view of a transaction that is part of the *best chain*'s history.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub struct CanonicalTx<'a, T, A> {
-    /// Where the transaction is observed (in a block or in mempool).
-    pub observed_as: ObservedAs<&'a A>,
-    /// The transaction with anchors and last seen timestamp.
-    pub tx: TxNode<'a, T, A>,
-}
-
-/// A structure that represents changes to an [`IndexedTxGraph`].
-#[derive(Clone, Debug, PartialEq)]
-#[cfg_attr(
-    feature = "serde",
-    derive(serde::Deserialize, serde::Serialize),
-    serde(
-        crate = "serde_crate",
-        bound(
-            deserialize = "A: Ord + serde::Deserialize<'de>, IA: serde::Deserialize<'de>",
-            serialize = "A: Ord + serde::Serialize, IA: serde::Serialize"
-        )
-    )
-)]
-#[must_use]
-pub struct IndexedAdditions<A, IA> {
-    /// [`TxGraph`] additions.
-    pub graph_additions: Additions<A>,
-    /// [`TxIndex`] additions.
-    pub index_additions: IA,
-}
-
-impl<A, IA: Default> Default for IndexedAdditions<A, IA> {
-    fn default() -> Self {
-        Self {
-            graph_additions: Default::default(),
-            index_additions: Default::default(),
-        }
-    }
-}
-
-impl<A: BlockAnchor, IA: Append> Append for IndexedAdditions<A, IA> {
-    fn append(&mut self, other: Self) {
-        self.graph_additions.append(other.graph_additions);
-        self.index_additions.append(other.index_additions);
-    }
-}
 
 pub struct IndexedTxGraph<A, I> {
     /// Transaction index.
@@ -367,3 +321,72 @@ impl<A: BlockAnchor, I: TxIndex> IndexedTxGraph<A, I> {
             .expect("error is infallible")
     }
 }
+
+/// A structure that represents changes to an [`IndexedTxGraph`].
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Deserialize, serde::Serialize),
+    serde(
+        crate = "serde_crate",
+        bound(
+            deserialize = "A: Ord + serde::Deserialize<'de>, IA: serde::Deserialize<'de>",
+            serialize = "A: Ord + serde::Serialize, IA: serde::Serialize"
+        )
+    )
+)]
+#[must_use]
+pub struct IndexedAdditions<A, IA> {
+    /// [`TxGraph`] additions.
+    pub graph_additions: Additions<A>,
+    /// [`TxIndex`] additions.
+    pub index_additions: IA,
+}
+
+impl<A, IA: Default> Default for IndexedAdditions<A, IA> {
+    fn default() -> Self {
+        Self {
+            graph_additions: Default::default(),
+            index_additions: Default::default(),
+        }
+    }
+}
+
+impl<A: BlockAnchor, IA: Append> Append for IndexedAdditions<A, IA> {
+    fn append(&mut self, other: Self) {
+        self.graph_additions.append(other.graph_additions);
+        self.index_additions.append(other.index_additions);
+    }
+}
+
+/// An outwards-facing view of a transaction that is part of the *best chain*'s history.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct CanonicalTx<'a, T, A> {
+    /// Where the transaction is observed (in a block or in mempool).
+    pub observed_as: ObservedAs<&'a A>,
+    /// The transaction with anchors and last seen timestamp.
+    pub tx: TxNode<'a, T, A>,
+}
+
+/// Represents an index of transaction data.
+pub trait TxIndex {
+    /// The resultant "additions" when new transaction data is indexed.
+    type Additions;
+
+    /// Scan and index the given `outpoint` and `txout`.
+    fn index_txout(&mut self, outpoint: OutPoint, txout: &TxOut) -> Self::Additions;
+
+    /// Scan and index the given transaction.
+    fn index_tx(&mut self, tx: &Transaction) -> Self::Additions;
+
+    /// Apply additions to itself.
+    fn apply_additions(&mut self, additions: Self::Additions);
+
+    /// Returns whether the txout is marked as relevant in the index.
+    fn is_txout_relevant(&self, outpoint: OutPoint, txout: &TxOut) -> bool;
+
+    /// Returns whether the transaction is marked as relevant in the index.
+    fn is_tx_relevant(&self, tx: &Transaction) -> bool;
+}
+
+pub trait SpkIndex: TxIndex {}

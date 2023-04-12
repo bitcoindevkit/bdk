@@ -1,7 +1,8 @@
 use crate::{
     collections::*,
+    indexed_tx_graph::TxIndex,
     miniscript::{Descriptor, DescriptorPublicKey},
-    ForEachTxOut, SpkTxOutIndex, TxIndex,
+    ForEachTxOut, SpkTxOutIndex,
 };
 use alloc::{borrow::Cow, vec::Vec};
 use bitcoin::{secp256k1::Secp256k1, OutPoint, Script, TxOut};

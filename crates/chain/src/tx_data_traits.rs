@@ -68,24 +68,3 @@ pub trait Append {
 impl Append for () {
     fn append(&mut self, _other: Self) {}
 }
-
-/// Represents an index of transaction data.
-pub trait TxIndex {
-    /// The resultant "additions" when new transaction data is indexed.
-    type Additions;
-
-    /// Scan and index the given `outpoint` and `txout`.
-    fn index_txout(&mut self, outpoint: OutPoint, txout: &TxOut) -> Self::Additions;
-
-    /// Scan and index the given transaction.
-    fn index_tx(&mut self, tx: &Transaction) -> Self::Additions;
-
-    /// Apply additions to itself.
-    fn apply_additions(&mut self, additions: Self::Additions);
-
-    /// Returns whether the txout is marked as relevant in the index.
-    fn is_txout_relevant(&self, outpoint: OutPoint, txout: &TxOut) -> bool;
-
-    /// Returns whether the transaction is marked as relevant in the index.
-    fn is_tx_relevant(&self, tx: &Transaction) -> bool;
-}
