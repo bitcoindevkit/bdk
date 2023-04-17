@@ -1,6 +1,6 @@
 use crate::{
     collections::*,
-    indexed_tx_graph::TxIndex,
+    indexed_tx_graph::Indexer,
     miniscript::{Descriptor, DescriptorPublicKey},
     ForEachTxOut, SpkTxOutIndex,
 };
@@ -91,7 +91,7 @@ impl<K> Deref for KeychainTxOutIndex<K> {
     }
 }
 
-impl<K: Clone + Ord + Debug + 'static> TxIndex for KeychainTxOutIndex<K> {
+impl<K: Clone + Ord + Debug + 'static> Indexer for KeychainTxOutIndex<K> {
     type Additions = DerivationAdditions<K>;
 
     fn index_txout(&mut self, outpoint: OutPoint, txout: &TxOut) -> Self::Additions {
@@ -104,10 +104,6 @@ impl<K: Clone + Ord + Debug + 'static> TxIndex for KeychainTxOutIndex<K> {
 
     fn apply_additions(&mut self, additions: Self::Additions) {
         self.apply_additions(additions)
-    }
-
-    fn is_txout_relevant(&self, _outpoint: OutPoint, txout: &TxOut) -> bool {
-        self.index_of_spk(&txout.script_pubkey).is_some()
     }
 
     fn is_tx_relevant(&self, tx: &bitcoin::Transaction) -> bool {

@@ -1,13 +1,16 @@
 use core::convert::Infallible;
 
-use bitcoin::{OutPoint, Script, Transaction, TxOut};
+use bitcoin::{OutPoint, Script, Transaction, TxOut, Txid};
 
 use crate::{
     keychain::Balance,
-    tx_graph::{Additions, TxGraph, TxNode},
-    Append, BlockAnchor, BlockId, ChainOracle, FullTxOut, ObservedAs,
+    tx_graph::{Additions, CanonicalTx, TxGraph},
+    Anchor, Append, BlockId, ChainOracle, ConfirmationHeight, FullTxOut, ObservedAs,
 };
 
+/// A struct that combines [`TxGraph`] and an [`Indexer`] implementation.
+///
+/// This structure ensures that [`TxGraph`] and [`Indexer`] are updated atomically.
 pub struct IndexedTxGraph<A, I> {
     /// Transaction index.
     pub index: I,
@@ -23,7 +26,7 @@ impl<A, I: Default> Default for IndexedTxGraph<A, I> {
     }
 }
 
-impl<A: BlockAnchor, I: TxIndex> IndexedTxGraph<A, I> {
+impl<A: Anchor, I: Indexer> IndexedTxGraph<A, I> {
     /// Get a reference of the internal transaction graph.
     pub fn graph(&self) -> &TxGraph<A> {
         &self.graph
@@ -47,195 +50,191 @@ impl<A: BlockAnchor, I: TxIndex> IndexedTxGraph<A, I> {
 
         self.graph.apply_additions(graph_additions);
     }
+}
 
-    /// Insert a `txout` that exists in `outpoint` with the given `observation`.
+impl<A: Anchor, I: Indexer> IndexedTxGraph<A, I>
+where
+    I::Additions: Default + Append,
+{
+    /// Apply an `update` directly.
+    ///
+    /// `update` is a [`TxGraph<A>`] and the resultant changes is returned as [`IndexedAdditions`].
+    pub fn apply_update(&mut self, update: TxGraph<A>) -> IndexedAdditions<A, I::Additions> {
+        let graph_additions = self.graph.apply_update(update);
+
+        let mut index_additions = I::Additions::default();
+        for added_tx in &graph_additions.tx {
+            index_additions.append(self.index.index_tx(added_tx));
+        }
+        for (&added_outpoint, added_txout) in &graph_additions.txout {
+            index_additions.append(self.index.index_txout(added_outpoint, added_txout));
+        }
+
+        IndexedAdditions {
+            graph_additions,
+            index_additions,
+        }
+    }
+
+    /// Insert a floating `txout` of given `outpoint`.
     pub fn insert_txout(
         &mut self,
         outpoint: OutPoint,
         txout: &TxOut,
-        observation: ObservedAs<A>,
     ) -> IndexedAdditions<A, I::Additions> {
-        IndexedAdditions {
-            graph_additions: {
-                let mut graph_additions = self.graph.insert_txout(outpoint, txout.clone());
-                graph_additions.append(match observation {
-                    ObservedAs::Confirmed(anchor) => {
-                        self.graph.insert_anchor(outpoint.txid, anchor)
-                    }
-                    ObservedAs::Unconfirmed(seen_at) => {
-                        self.graph.insert_seen_at(outpoint.txid, seen_at)
-                    }
-                });
-                graph_additions
-            },
-            index_additions: <I as TxIndex>::index_txout(&mut self.index, outpoint, txout),
-        }
+        let mut update = TxGraph::<A>::default();
+        let _ = update.insert_txout(outpoint, txout.clone());
+        self.apply_update(update)
     }
 
+    /// Insert and index a transaction into the graph.
+    ///
+    /// `anchors` can be provided to anchor the transaction to various blocks. `seen_at` is a
+    /// unix timestamp of when the transaction is last seen.
     pub fn insert_tx(
         &mut self,
         tx: &Transaction,
-        observation: ObservedAs<A>,
+        anchors: impl IntoIterator<Item = A>,
+        seen_at: Option<u64>,
     ) -> IndexedAdditions<A, I::Additions> {
         let txid = tx.txid();
 
-        IndexedAdditions {
-            graph_additions: {
-                let mut graph_additions = self.graph.insert_tx(tx.clone());
-                graph_additions.append(match observation {
-                    ObservedAs::Confirmed(anchor) => self.graph.insert_anchor(txid, anchor),
-                    ObservedAs::Unconfirmed(seen_at) => self.graph.insert_seen_at(txid, seen_at),
-                });
-                graph_additions
-            },
-            index_additions: <I as TxIndex>::index_tx(&mut self.index, tx),
+        let mut update = TxGraph::<A>::default();
+        if self.graph.get_tx(txid).is_none() {
+            let _ = update.insert_tx(tx.clone());
         }
+        for anchor in anchors.into_iter() {
+            let _ = update.insert_anchor(txid, anchor);
+        }
+        if let Some(seen_at) = seen_at {
+            let _ = update.insert_seen_at(txid, seen_at);
+        }
+
+        self.apply_update(update)
     }
 
+    /// Insert relevant transactions from the given `txs` iterator.
+    ///
+    /// Relevancy is determined by the [`Indexer::is_tx_relevant`] implementation of `I`. Irrelevant
+    /// transactions in `txs` will be ignored.
+    ///
+    /// `anchors` can be provided to anchor the transactions to blocks. `seen_at` is a unix
+    /// timestamp of when the transactions are last seen.
     pub fn insert_relevant_txs<'t, T>(
         &mut self,
         txs: T,
-        observation: ObservedAs<A>,
+        anchors: impl IntoIterator<Item = A> + Clone,
+        seen_at: Option<u64>,
     ) -> IndexedAdditions<A, I::Additions>
     where
         T: Iterator<Item = &'t Transaction>,
-        I::Additions: Default + Append,
     {
-        txs.filter_map(|tx| {
-            if self.index.is_tx_relevant(tx) {
-                Some(self.insert_tx(tx, observation.clone()))
-            } else {
-                None
-            }
+        txs.filter_map(|tx| match self.index.is_tx_relevant(tx) {
+            true => Some(self.insert_tx(tx, anchors.clone(), seen_at)),
+            false => None,
         })
-        .fold(IndexedAdditions::default(), |mut acc, other| {
+        .fold(Default::default(), |mut acc, other| {
             acc.append(other);
             acc
         })
     }
+}
 
-    // [TODO] Have to methods, one for relevant-only, and one for any. Have one in `TxGraph`.
-    pub fn try_list_chain_txs<'a, C>(
+impl<A: Anchor, I: OwnedIndexer> IndexedTxGraph<A, I> {
+    pub fn try_list_owned_txs<'a, C>(
         &'a self,
         chain: &'a C,
-        static_block: BlockId,
+        chain_tip: BlockId,
     ) -> impl Iterator<Item = Result<CanonicalTx<'a, Transaction, A>, C::Error>>
     where
         C: ChainOracle + 'a,
     {
         self.graph
-            .full_transactions()
-            .filter(|tx| self.index.is_tx_relevant(tx))
-            .filter_map(move |tx| {
+            .full_txs()
+            .filter(|node| tx_alters_owned_utxo_set(&self.graph, &self.index, node.txid, node.tx))
+            .filter_map(move |tx_node| {
                 self.graph
-                    .try_get_chain_position(chain, static_block, tx.txid)
+                    .try_get_chain_position(chain, chain_tip, tx_node.txid)
                     .map(|v| {
-                        v.map(|observed_in| CanonicalTx {
-                            observed_as: observed_in,
-                            tx,
+                        v.map(|observed_as| CanonicalTx {
+                            observed_as,
+                            node: tx_node,
                         })
                     })
                     .transpose()
             })
     }
 
-    pub fn list_chain_txs<'a, C>(
+    pub fn list_owned_txs<'a, C>(
         &'a self,
         chain: &'a C,
-        static_block: BlockId,
+        chain_tip: BlockId,
     ) -> impl Iterator<Item = CanonicalTx<'a, Transaction, A>>
     where
         C: ChainOracle<Error = Infallible> + 'a,
     {
-        self.try_list_chain_txs(chain, static_block)
-            .map(|r| r.expect("error is infallible"))
+        self.try_list_owned_txs(chain, chain_tip)
+            .map(|r| r.expect("chain oracle is infallible"))
     }
 
-    pub fn try_list_chain_txouts<'a, C>(
+    pub fn try_list_owned_txouts<'a, C>(
         &'a self,
         chain: &'a C,
-        static_block: BlockId,
+        chain_tip: BlockId,
     ) -> impl Iterator<Item = Result<FullTxOut<ObservedAs<A>>, C::Error>> + 'a
     where
         C: ChainOracle + 'a,
     {
-        self.graph
-            .all_txouts()
-            .filter(|&(op, txo)| self.index.is_txout_relevant(op, txo))
-            .filter_map(move |(op, txout)| -> Option<Result<_, C::Error>> {
-                let graph_tx = self.graph.get_tx(op.txid)?;
-
-                let is_on_coinbase = graph_tx.is_coin_base();
-
-                let chain_position =
-                    match self
-                        .graph
-                        .try_get_chain_position(chain, static_block, op.txid)
-                    {
-                        Ok(Some(observed_at)) => observed_at.cloned(),
-                        Ok(None) => return None,
-                        Err(err) => return Some(Err(err)),
-                    };
-
-                let spent_by = match self.graph.try_get_spend_in_chain(chain, static_block, op) {
-                    Ok(Some((obs, txid))) => Some((obs.cloned(), txid)),
-                    Ok(None) => None,
-                    Err(err) => return Some(Err(err)),
-                };
-
-                let full_txout = FullTxOut {
-                    outpoint: op,
-                    txout: txout.clone(),
-                    chain_position,
-                    spent_by,
-                    is_on_coinbase,
-                };
-
-                Some(Ok(full_txout))
+        self.graph()
+            .try_list_chain_txouts(chain, chain_tip, |_, txout| {
+                self.index.is_spk_owned(&txout.script_pubkey)
             })
     }
 
-    pub fn list_chain_txouts<'a, C>(
+    pub fn list_owned_txouts<'a, C>(
         &'a self,
         chain: &'a C,
-        static_block: BlockId,
+        chain_tip: BlockId,
     ) -> impl Iterator<Item = FullTxOut<ObservedAs<A>>> + 'a
     where
-        C: ChainOracle<Error = Infallible> + 'a,
+        C: ChainOracle + 'a,
     {
-        self.try_list_chain_txouts(chain, static_block)
-            .map(|r| r.expect("error in infallible"))
+        self.try_list_owned_txouts(chain, chain_tip)
+            .map(|r| r.expect("oracle is infallible"))
     }
 
-    /// Return relevant unspents.
-    pub fn try_list_chain_utxos<'a, C>(
+    pub fn try_list_owned_unspents<'a, C>(
         &'a self,
         chain: &'a C,
-        static_block: BlockId,
+        chain_tip: BlockId,
     ) -> impl Iterator<Item = Result<FullTxOut<ObservedAs<A>>, C::Error>> + 'a
     where
         C: ChainOracle + 'a,
     {
-        self.try_list_chain_txouts(chain, static_block)
-            .filter(|r| !matches!(r, Ok(txo) if txo.spent_by.is_none()))
+        self.graph()
+            .try_list_chain_unspents(chain, chain_tip, |_, txout| {
+                self.index.is_spk_owned(&txout.script_pubkey)
+            })
     }
 
-    pub fn list_chain_utxos<'a, C>(
+    pub fn list_owned_unspents<'a, C>(
         &'a self,
         chain: &'a C,
-        static_block: BlockId,
+        chain_tip: BlockId,
     ) -> impl Iterator<Item = FullTxOut<ObservedAs<A>>> + 'a
     where
-        C: ChainOracle<Error = Infallible> + 'a,
+        C: ChainOracle + 'a,
     {
-        self.try_list_chain_utxos(chain, static_block)
-            .map(|r| r.expect("error is infallible"))
+        self.try_list_owned_unspents(chain, chain_tip)
+            .map(|r| r.expect("oracle is infallible"))
     }
+}
 
+impl<A: Anchor + ConfirmationHeight, I: OwnedIndexer> IndexedTxGraph<A, I> {
     pub fn try_balance<C, F>(
         &self,
         chain: &C,
-        static_block: BlockId,
+        chain_tip: BlockId,
         tip: u32,
         mut should_trust: F,
     ) -> Result<Balance, C::Error>
@@ -248,13 +247,13 @@ impl<A: BlockAnchor, I: TxIndex> IndexedTxGraph<A, I> {
         let mut untrusted_pending = 0;
         let mut confirmed = 0;
 
-        for res in self.try_list_chain_txouts(chain, static_block) {
+        for res in self.try_list_owned_txouts(chain, chain_tip) {
             let txout = res?;
 
             match &txout.chain_position {
-                ObservedAs::Confirmed(_) => {
+                ObservedAs::Confirmed(_) | ObservedAs::ConfirmedImplicit(_) => {
                     if txout.is_on_coinbase {
-                        if txout.is_observed_as_confirmed_and_mature(tip) {
+                        if txout.is_observed_as_mature(tip) {
                             confirmed += txout.txout.value;
                         } else {
                             immature += txout.txout.value;
@@ -304,7 +303,10 @@ impl<A: BlockAnchor, I: TxIndex> IndexedTxGraph<A, I> {
         C: ChainOracle,
     {
         let mut sum = 0;
-        for txo_res in self.try_list_chain_txouts(chain, static_block) {
+        for txo_res in self
+            .graph()
+            .try_list_chain_txouts(chain, static_block, |_, _| true)
+        {
             let txo = txo_res?;
             if txo.is_observed_as_confirmed_and_spendable(height) {
                 sum += txo.txout.value;
@@ -339,7 +341,7 @@ impl<A: BlockAnchor, I: TxIndex> IndexedTxGraph<A, I> {
 pub struct IndexedAdditions<A, IA> {
     /// [`TxGraph`] additions.
     pub graph_additions: Additions<A>,
-    /// [`TxIndex`] additions.
+    /// [`Indexer`] additions.
     pub index_additions: IA,
 }
 
@@ -352,24 +354,15 @@ impl<A, IA: Default> Default for IndexedAdditions<A, IA> {
     }
 }
 
-impl<A: BlockAnchor, IA: Append> Append for IndexedAdditions<A, IA> {
+impl<A: Anchor, IA: Append> Append for IndexedAdditions<A, IA> {
     fn append(&mut self, other: Self) {
         self.graph_additions.append(other.graph_additions);
         self.index_additions.append(other.index_additions);
     }
 }
 
-/// An outwards-facing view of a transaction that is part of the *best chain*'s history.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub struct CanonicalTx<'a, T, A> {
-    /// Where the transaction is observed (in a block or in mempool).
-    pub observed_as: ObservedAs<&'a A>,
-    /// The transaction with anchors and last seen timestamp.
-    pub tx: TxNode<'a, T, A>,
-}
-
-/// Represents an index of transaction data.
-pub trait TxIndex {
+/// Represents a structure that can index transaction data.
+pub trait Indexer {
     /// The resultant "additions" when new transaction data is indexed.
     type Additions;
 
@@ -382,11 +375,30 @@ pub trait TxIndex {
     /// Apply additions to itself.
     fn apply_additions(&mut self, additions: Self::Additions);
 
-    /// Returns whether the txout is marked as relevant in the index.
-    fn is_txout_relevant(&self, outpoint: OutPoint, txout: &TxOut) -> bool;
-
-    /// Returns whether the transaction is marked as relevant in the index.
+    /// Determines whether the transaction should be included in the index.
     fn is_tx_relevant(&self, tx: &Transaction) -> bool;
 }
 
-pub trait SpkIndex: TxIndex {}
+/// A trait that extends [`Indexer`] to also index "owned" script pubkeys.
+pub trait OwnedIndexer: Indexer {
+    /// Determines whether a given script pubkey (`spk`) is owned.
+    fn is_spk_owned(&self, spk: &Script) -> bool;
+}
+
+fn tx_alters_owned_utxo_set<A, I>(
+    graph: &TxGraph<A>,
+    index: &I,
+    txid: Txid,
+    tx: &Transaction,
+) -> bool
+where
+    A: Anchor,
+    I: OwnedIndexer,
+{
+    let prev_spends = (0..tx.input.len() as u32)
+        .map(|vout| OutPoint { txid, vout })
+        .filter_map(|op| graph.get_txout(op));
+    prev_spends
+        .chain(&tx.output)
+        .any(|txout| index.is_spk_owned(&txout.script_pubkey))
+}

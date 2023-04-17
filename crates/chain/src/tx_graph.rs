@@ -55,7 +55,7 @@
 //! assert!(additions.is_empty());
 //! ```
 
-use crate::{collections::*, BlockAnchor, BlockId, ChainOracle, ForEachTxOut, ObservedAs};
+use crate::{collections::*, Anchor, BlockId, ChainOracle, ForEachTxOut, FullTxOut, ObservedAs};
 use alloc::vec::Vec;
 use bitcoin::{OutPoint, Transaction, TxOut, Txid};
 use core::{
@@ -91,7 +91,7 @@ impl<A> Default for TxGraph<A> {
     }
 }
 
-/// An outward-facing representation of a (transaction) node in the [`TxGraph`].
+/// An outward-facing view of a (transaction) node in the [`TxGraph`].
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct TxNode<'a, T, A> {
     /// Txid of the transaction.
@@ -139,8 +139,19 @@ impl Default for TxNodeInternal {
     }
 }
 
+/// An outwards-facing view of a transaction that is part of the *best chain*'s history.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct CanonicalTx<'a, T, A> {
+    /// How the transaction is observed as (confirmed or unconfirmed).
+    pub observed_as: ObservedAs<&'a A>,
+    /// The transaction node (as part of the graph).
+    pub node: TxNode<'a, T, A>,
+}
+
 impl<A> TxGraph<A> {
     /// Iterate over all tx outputs known by [`TxGraph`].
+    ///
+    /// This includes txouts of both full transactions as well as floating transactions.
     pub fn all_txouts(&self) -> impl Iterator<Item = (OutPoint, &TxOut)> {
         self.txs.iter().flat_map(|(txid, (tx, _, _))| match tx {
             TxNodeInternal::Whole(tx) => tx
@@ -156,8 +167,26 @@ impl<A> TxGraph<A> {
         })
     }
 
+    /// Iterate over floating txouts known by [`TxGraph`].
+    ///
+    /// Floating txouts are txouts that do not have the residing full transaction contained in the
+    /// graph.
+    pub fn floating_txouts(&self) -> impl Iterator<Item = (OutPoint, &TxOut)> {
+        self.txs
+            .iter()
+            .filter_map(|(txid, (tx_node, _, _))| match tx_node {
+                TxNodeInternal::Whole(_) => None,
+                TxNodeInternal::Partial(txouts) => Some(
+                    txouts
+                        .iter()
+                        .map(|(&vout, txout)| (OutPoint::new(*txid, vout), txout)),
+                ),
+            })
+            .flatten()
+    }
+
     /// Iterate over all full transactions in the graph.
-    pub fn full_transactions(&self) -> impl Iterator<Item = TxNode<'_, Transaction, A>> {
+    pub fn full_txs(&self) -> impl Iterator<Item = TxNode<'_, Transaction, A>> {
         self.txs
             .iter()
             .filter_map(|(&txid, (tx, anchors, last_seen))| match tx {
@@ -201,8 +230,10 @@ impl<A> TxGraph<A> {
         }
     }
 
+    /// Returns known outputs of a given `txid`.
+    ///
     /// Returns a [`BTreeMap`] of vout to output of the provided `txid`.
-    pub fn txouts(&self, txid: Txid) -> Option<BTreeMap<u32, &TxOut>> {
+    pub fn tx_outputs(&self, txid: Txid) -> Option<BTreeMap<u32, &TxOut>> {
         Some(match &self.txs.get(&txid)?.0 {
             TxNodeInternal::Whole(tx) => tx
                 .output
@@ -251,7 +282,7 @@ impl<A> TxGraph<A> {
     ///
     /// `TxGraph` allows conflicting transactions within the graph. Obviously the transactions in
     /// the returned set will never be in the same active-chain.
-    pub fn outspends(&self, outpoint: OutPoint) -> &HashSet<Txid> {
+    pub fn output_spends(&self, outpoint: OutPoint) -> &HashSet<Txid> {
         self.spends.get(&outpoint).unwrap_or(&self.empty_outspends)
     }
 
@@ -261,7 +292,7 @@ impl<A> TxGraph<A> {
     ///
     /// - `vout` is the provided `txid`'s outpoint that is being spent
     /// - `txid-set` is the set of txids spending the `vout`.
-    pub fn tx_outspends(
+    pub fn tx_spends(
         &self,
         txid: Txid,
     ) -> impl DoubleEndedIterator<Item = (u32, &HashSet<Txid>)> + '_ {
@@ -273,23 +304,6 @@ impl<A> TxGraph<A> {
         self.spends
             .range(start..=end)
             .map(|(outpoint, spends)| (outpoint.vout, spends))
-    }
-
-    /// Iterate over all partial transactions (outputs only) in the graph.
-    pub fn partial_transactions(
-        &self,
-    ) -> impl Iterator<Item = TxNode<'_, BTreeMap<u32, TxOut>, A>> {
-        self.txs
-            .iter()
-            .filter_map(|(&txid, (tx, anchors, last_seen))| match tx {
-                TxNodeInternal::Whole(_) => None,
-                TxNodeInternal::Partial(partial) => Some(TxNode {
-                    txid,
-                    tx: partial,
-                    anchors,
-                    last_seen_unconfirmed: *last_seen,
-                }),
-            })
     }
 
     /// Creates an iterator that filters and maps descendants from the starting `txid`.
@@ -363,6 +377,9 @@ impl<A: Clone + Ord> TxGraph<A> {
     /// Returns the resultant [`Additions`] if the given `txout` is inserted at `outpoint`. Does not
     /// mutate `self`.
     ///
+    /// Inserting floating txouts are useful for determining fee/feerate of transactions we care
+    /// about.
+    ///
     /// The [`Additions`] result will be empty if the `outpoint` (or a full transaction containing
     /// the `outpoint`) already existed in `self`.
     pub fn insert_txout_preview(&self, outpoint: OutPoint, txout: TxOut) -> Additions<A> {
@@ -380,8 +397,10 @@ impl<A: Clone + Ord> TxGraph<A> {
 
     /// Inserts the given [`TxOut`] at [`OutPoint`].
     ///
-    /// Note this will ignore the action if we already have the full transaction that the txout is
-    /// alleged to be on (even if it doesn't match it!).
+    /// This is equivalent to calling [`insert_txout_preview`] and [`apply_additions`] in sequence.
+    ///
+    /// [`insert_txout_preview`]: Self::insert_txout_preview
+    /// [`apply_additions`]: Self::apply_additions
     pub fn insert_txout(&mut self, outpoint: OutPoint, txout: TxOut) -> Additions<A> {
         let additions = self.insert_txout_preview(outpoint, txout);
         self.apply_additions(additions.clone());
@@ -581,7 +600,7 @@ impl<A: Clone + Ord> TxGraph<A> {
     }
 }
 
-impl<A: BlockAnchor> TxGraph<A> {
+impl<A: Anchor> TxGraph<A> {
     /// Get all heights that are relevant to the graph.
     pub fn relevant_heights(&self) -> impl Iterator<Item = u32> + '_ {
         let mut visited = HashSet::new();
@@ -591,13 +610,21 @@ impl<A: BlockAnchor> TxGraph<A> {
             .filter(move |&h| visited.insert(h))
     }
 
-    /// Determines whether a transaction of `txid` is in the best chain.
+    /// Get the position of the transaction in `chain` with tip `chain_tip`.
     ///
-    /// TODO: Also return conflicting tx list, ordered by last_seen.
+    /// If the given transaction of `txid` does not exist in the chain of `chain_tip`, `None` is
+    /// returned.
+    ///
+    /// # Error
+    ///
+    /// An error will occur if the [`ChainOracle`] implementation (`chain`) fails. If the
+    /// [`ChainOracle`] is infallible, [`get_chain_position`] can be used instead.
+    ///
+    /// [`get_chain_position`]: Self::get_chain_position
     pub fn try_get_chain_position<C>(
         &self,
         chain: &C,
-        static_block: BlockId,
+        chain_tip: BlockId,
         txid: Txid,
     ) -> Result<Option<ObservedAs<&A>>, C::Error>
     where
@@ -611,28 +638,27 @@ impl<A: BlockAnchor> TxGraph<A> {
         };
 
         for anchor in anchors {
-            match chain.is_block_in_chain(anchor.anchor_block(), static_block)? {
+            match chain.is_block_in_chain(anchor.anchor_block(), chain_tip)? {
                 Some(true) => return Ok(Some(ObservedAs::Confirmed(anchor))),
-                Some(false) => continue,
-                // if we cannot determine whether block is in the best chain, we can check whether
-                // a spending transaction is confirmed in best chain, and if so, it is guaranteed
-                // that the tx being spent (this tx) is in the best chain
-                None => {
-                    let spending_anchors = self
-                        .spends
-                        .range(OutPoint::new(txid, u32::MIN)..=OutPoint::new(txid, u32::MAX))
-                        .flat_map(|(_, spending_txids)| spending_txids)
-                        .filter_map(|spending_txid| self.txs.get(spending_txid))
-                        .flat_map(|(_, spending_anchors, _)| spending_anchors);
-                    for spending_anchor in spending_anchors {
-                        match chain
-                            .is_block_in_chain(spending_anchor.anchor_block(), static_block)?
-                        {
-                            Some(true) => return Ok(Some(ObservedAs::Confirmed(anchor))),
-                            _ => continue,
-                        }
-                    }
-                }
+                _ => continue,
+            }
+        }
+
+        // If we cannot determine whether tx is in best chain, we can check whether a spending tx is
+        // confirmed and in best chain, and if so, it is guaranteed that this tx is in the best
+        // chain.
+        //
+        // [TODO] This logic is incomplete as we do not check spends of spends.
+        let spending_anchors = self
+            .spends
+            .range(OutPoint::new(txid, u32::MIN)..=OutPoint::new(txid, u32::MAX))
+            .flat_map(|(_, spending_txids)| spending_txids)
+            .filter_map(|spending_txid| self.txs.get(spending_txid))
+            .flat_map(|(_, spending_anchors, _)| spending_anchors);
+        for spending_anchor in spending_anchors {
+            match chain.is_block_in_chain(spending_anchor.anchor_block(), chain_tip)? {
+                Some(true) => return Ok(Some(ObservedAs::ConfirmedImplicit(spending_anchor))),
+                _ => continue,
             }
         }
 
@@ -650,7 +676,7 @@ impl<A: BlockAnchor> TxGraph<A> {
         // this tx cannot exist in the best chain
         for conflicting_tx in self.walk_conflicts(tx, |_, txid| self.get_tx_node(txid)) {
             for block in conflicting_tx.anchors.iter().map(A::anchor_block) {
-                if chain.is_block_in_chain(block, static_block)? == Some(true) {
+                if chain.is_block_in_chain(block, chain_tip)? == Some(true) {
                     // conflicting tx is in best chain, so the current tx cannot be in best chain!
                     return Ok(None);
                 }
@@ -663,37 +689,54 @@ impl<A: BlockAnchor> TxGraph<A> {
         Ok(Some(ObservedAs::Unconfirmed(last_seen)))
     }
 
+    /// Get the position of the transaction in `chain` with tip `chain_tip`.
+    ///
+    /// This is the infallible version of [`try_get_chain_position`].
+    ///
+    /// [`try_get_chain_position`]: Self::try_get_chain_position
     pub fn get_chain_position<C>(
         &self,
         chain: &C,
-        static_block: BlockId,
+        chain_tip: BlockId,
         txid: Txid,
     ) -> Option<ObservedAs<&A>>
     where
         C: ChainOracle<Error = Infallible>,
     {
-        self.try_get_chain_position(chain, static_block, txid)
+        self.try_get_chain_position(chain, chain_tip, txid)
             .expect("error is infallible")
     }
 
-    pub fn try_get_spend_in_chain<C>(
+    /// Get the txid of the spending transaction and where the spending transaction is observed in
+    /// the `chain` of `chain_tip`.
+    ///
+    /// If no in-chain transaction spends `outpoint`, `None` will be returned.
+    ///
+    /// # Error
+    ///
+    /// An error will occur only if the [`ChainOracle`] implementation (`chain`) fails.
+    ///
+    /// If the [`ChainOracle`] is infallible, [`get_chain_spend`] can be used instead.
+    ///
+    /// [`get_chain_spend`]: Self::get_chain_spend
+    pub fn try_get_chain_spend<C>(
         &self,
         chain: &C,
-        static_block: BlockId,
+        chain_tip: BlockId,
         outpoint: OutPoint,
     ) -> Result<Option<(ObservedAs<&A>, Txid)>, C::Error>
     where
         C: ChainOracle,
     {
         if self
-            .try_get_chain_position(chain, static_block, outpoint.txid)?
+            .try_get_chain_position(chain, chain_tip, outpoint.txid)?
             .is_none()
         {
             return Ok(None);
         }
         if let Some(spends) = self.spends.get(&outpoint) {
             for &txid in spends {
-                if let Some(observed_at) = self.try_get_chain_position(chain, static_block, txid)? {
+                if let Some(observed_at) = self.try_get_chain_position(chain, chain_tip, txid)? {
                     return Ok(Some((observed_at, txid)));
                 }
             }
@@ -701,6 +744,12 @@ impl<A: BlockAnchor> TxGraph<A> {
         Ok(None)
     }
 
+    /// Get the txid of the spending transaction and where the spending transaction is observed in
+    /// the `chain` of `chain_tip`.
+    ///
+    /// This is the infallible version of [`try_get_chain_spend`]
+    ///
+    /// [`try_get_chain_spend`]: Self::try_get_chain_spend
     pub fn get_chain_spend<C>(
         &self,
         chain: &C,
@@ -710,8 +759,185 @@ impl<A: BlockAnchor> TxGraph<A> {
     where
         C: ChainOracle<Error = Infallible>,
     {
-        self.try_get_spend_in_chain(chain, static_block, outpoint)
+        self.try_get_chain_spend(chain, static_block, outpoint)
             .expect("error is infallible")
+    }
+
+    /// List graph transactions that are in `chain` with `chain_tip`.
+    ///
+    /// Each transaction is represented as a [`CanonicalTx`] that contains where the transaction is
+    /// observed in-chain, and the [`TxNode`].
+    ///
+    /// # Error
+    ///
+    /// If the [`ChainOracle`] implementation (`chain`) fails, an error will be returned with the
+    /// returned item.
+    ///
+    /// If the [`ChainOracle`] is infallible, [`list_chain_txs`] can be used instead.
+    ///
+    /// [`list_chain_txs`]: Self::list_chain_txs
+    pub fn try_list_chain_txs<'a, C>(
+        &'a self,
+        chain: &'a C,
+        chain_tip: BlockId,
+    ) -> impl Iterator<Item = Result<CanonicalTx<'a, Transaction, A>, C::Error>>
+    where
+        C: ChainOracle + 'a,
+    {
+        self.full_txs().filter_map(move |tx| {
+            self.try_get_chain_position(chain, chain_tip, tx.txid)
+                .map(|v| {
+                    v.map(|observed_in| CanonicalTx {
+                        observed_as: observed_in,
+                        node: tx,
+                    })
+                })
+                .transpose()
+        })
+    }
+
+    /// List graph transactions that are in `chain` with `chain_tip`.
+    ///
+    /// This is the infallible version of [`try_list_chain_txs`].
+    ///
+    /// [`try_list_chain_txs`]: Self::try_list_chain_txs
+    pub fn list_chain_txs<'a, C>(
+        &'a self,
+        chain: &'a C,
+        chain_tip: BlockId,
+    ) -> impl Iterator<Item = CanonicalTx<'a, Transaction, A>>
+    where
+        C: ChainOracle + 'a,
+    {
+        self.try_list_chain_txs(chain, chain_tip)
+            .map(|r| r.expect("oracle is infallible"))
+    }
+
+    /// List outputs that are in `chain` with `chain_tip`.
+    ///
+    /// Floating ouputs are not iterated over.
+    ///
+    /// The `filter_predicate` should return true for outputs that we wish to iterate over.
+    ///
+    /// # Error
+    ///
+    /// A returned item can error if the [`ChainOracle`] implementation (`chain`) fails.
+    ///
+    /// If the [`ChainOracle`] is infallible, [`list_chain_txouts`] can be used instead.
+    ///
+    /// [`list_chain_txouts`]: Self::list_chain_txouts
+    pub fn try_list_chain_txouts<'a, C, P>(
+        &'a self,
+        chain: &'a C,
+        chain_tip: BlockId,
+        mut filter_predicate: P,
+    ) -> impl Iterator<Item = Result<FullTxOut<ObservedAs<A>>, C::Error>> + 'a
+    where
+        C: ChainOracle + 'a,
+        P: FnMut(OutPoint, &TxOut) -> bool + 'a,
+    {
+        self.try_list_chain_txs(chain, chain_tip)
+            .flat_map(move |tx_res| match tx_res {
+                Ok(canonical_tx) => canonical_tx
+                    .node
+                    .output
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(vout, txout)| {
+                        let outpoint = OutPoint::new(canonical_tx.node.txid, vout as _);
+                        if filter_predicate(outpoint, txout) {
+                            Some(Ok((outpoint, txout.clone(), canonical_tx.clone())))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect::<Vec<_>>(),
+                Err(err) => vec![Err(err)],
+            })
+            .map(move |res| -> Result<_, C::Error> {
+                let (
+                    outpoint,
+                    txout,
+                    CanonicalTx {
+                        observed_as,
+                        node: tx_node,
+                    },
+                ) = res?;
+                let chain_position = observed_as.cloned();
+                let spent_by = self
+                    .try_get_chain_spend(chain, chain_tip, outpoint)?
+                    .map(|(obs_as, txid)| (obs_as.cloned(), txid));
+                let is_on_coinbase = tx_node.tx.is_coin_base();
+                Ok(FullTxOut {
+                    outpoint,
+                    txout,
+                    chain_position,
+                    spent_by,
+                    is_on_coinbase,
+                })
+            })
+    }
+
+    /// List outputs that are in `chain` with `chain_tip`.
+    ///
+    /// This is the infallible version of [`try_list_chain_txouts`].
+    ///
+    /// [`try_list_chain_txouts`]: Self::try_list_chain_txouts
+    pub fn list_chain_txouts<'a, C, P>(
+        &'a self,
+        chain: &'a C,
+        chain_tip: BlockId,
+        filter_predicate: P,
+    ) -> impl Iterator<Item = FullTxOut<ObservedAs<A>>> + 'a
+    where
+        C: ChainOracle<Error = Infallible> + 'a,
+        P: FnMut(OutPoint, &TxOut) -> bool + 'a,
+    {
+        self.try_list_chain_txouts(chain, chain_tip, filter_predicate)
+            .map(|r| r.expect("error in infallible"))
+    }
+
+    /// List unspent outputs (UTXOs) that are in `chain` with `chain_tip`.
+    ///
+    /// Floating outputs are not iterated over.
+    ///
+    /// # Error
+    ///
+    /// An item can be an error if the [`ChainOracle`] implementation fails. If the oracle is
+    /// infallible, [`list_chain_unspents`] can be used instead.
+    ///
+    /// [`list_chain_unspents`]: Self::list_chain_unspents
+    pub fn try_list_chain_unspents<'a, C, P>(
+        &'a self,
+        chain: &'a C,
+        chain_tip: BlockId,
+        filter_txout: P,
+    ) -> impl Iterator<Item = Result<FullTxOut<ObservedAs<A>>, C::Error>> + 'a
+    where
+        C: ChainOracle + 'a,
+        P: FnMut(OutPoint, &TxOut) -> bool + 'a,
+    {
+        self.try_list_chain_txouts(chain, chain_tip, filter_txout)
+            .filter(|r| !matches!(r, Ok(txo) if txo.spent_by.is_none()))
+    }
+
+    /// List unspent outputs (UTXOs) that are in `chain` with `chain_tip`.
+    ///
+    /// This is the infallible version of [`try_list_chain_unspents`].
+    ///
+    /// [`try_list_chain_unspents`]: Self::try_list_chain_unspents
+    pub fn list_chain_unspents<'a, C, P>(
+        &'a self,
+        chain: &'a C,
+        static_block: BlockId,
+        filter_txout: P,
+    ) -> impl Iterator<Item = FullTxOut<ObservedAs<A>>> + 'a
+    where
+        C: ChainOracle<Error = Infallible> + 'a,
+        P: FnMut(OutPoint, &TxOut) -> bool + 'a,
+    {
+        self.try_list_chain_unspents(chain, static_block, filter_txout)
+            .map(|r| r.expect("error is infallible"))
     }
 }
 

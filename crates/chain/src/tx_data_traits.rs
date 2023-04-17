@@ -40,23 +40,32 @@ impl ForEachTxOut for Transaction {
 /// assume that transaction A is also confirmed in the best chain. This does not necessarily mean
 /// that transaction A is confirmed in block B. It could also mean transaction A is confirmed in a
 /// parent block of B.
-pub trait BlockAnchor:
+pub trait Anchor:
     core::fmt::Debug + Clone + Eq + PartialOrd + Ord + core::hash::Hash + Send + Sync + 'static
 {
     /// Returns the [`BlockId`] that the associated blockchain data is "anchored" in.
     fn anchor_block(&self) -> BlockId;
 }
 
-impl<A: BlockAnchor> BlockAnchor for &'static A {
+impl<A: Anchor> Anchor for &'static A {
     fn anchor_block(&self) -> BlockId {
-        <A as BlockAnchor>::anchor_block(self)
+        <A as Anchor>::anchor_block(self)
     }
 }
 
-impl BlockAnchor for (u32, BlockHash) {
+impl Anchor for (u32, BlockHash) {
     fn anchor_block(&self) -> BlockId {
         (*self).into()
     }
+}
+
+/// A trait that returns a confirmation height.
+///
+/// This is typically used to provide an [`Anchor`] implementation the exact confirmation height of
+/// the data being anchored.
+pub trait ConfirmationHeight {
+    /// Returns the confirmation height.
+    fn confirmation_height(&self) -> u32;
 }
 
 /// Trait that makes an object appendable.

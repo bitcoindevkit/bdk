@@ -149,12 +149,12 @@ fn insert_txouts() {
     // Apply addition and check the new graph counts.
     graph.apply_additions(additions);
     assert_eq!(graph.all_txouts().count(), 4);
-    assert_eq!(graph.full_transactions().count(), 1);
-    assert_eq!(graph.partial_transactions().count(), 2);
+    assert_eq!(graph.full_txs().count(), 1);
+    assert_eq!(graph.floating_txouts().count(), 3);
 
     // Check TxOuts are fetched correctly from the graph.
     assert_eq!(
-        graph.txouts(h!("tx1")).expect("should exists"),
+        graph.tx_outputs(h!("tx1")).expect("should exists"),
         [
             (
                 1u32,
@@ -175,7 +175,7 @@ fn insert_txouts() {
     );
 
     assert_eq!(
-        graph.txouts(update_txs.txid()).expect("should exists"),
+        graph.tx_outputs(update_txs.txid()).expect("should exists"),
         [(
             0u32,
             &TxOut {
@@ -201,8 +201,8 @@ fn insert_tx_graph_doesnt_count_coinbase_as_spent() {
 
     let mut graph = TxGraph::<()>::default();
     let _ = graph.insert_tx(tx);
-    assert!(graph.outspends(OutPoint::null()).is_empty());
-    assert!(graph.tx_outspends(Txid::all_zeros()).next().is_none());
+    assert!(graph.output_spends(OutPoint::null()).is_empty());
+    assert!(graph.tx_spends(Txid::all_zeros()).next().is_none());
 }
 
 #[test]
@@ -240,10 +240,10 @@ fn insert_tx_graph_keeps_track_of_spend() {
     let _ = graph2.insert_tx(tx1);
 
     assert_eq!(
-        graph1.outspends(op),
+        graph1.output_spends(op),
         &iter::once(tx2.txid()).collect::<HashSet<_>>()
     );
-    assert_eq!(graph2.outspends(op), graph1.outspends(op));
+    assert_eq!(graph2.output_spends(op), graph1.output_spends(op));
 }
 
 #[test]

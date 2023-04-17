@@ -2,16 +2,19 @@ use bitcoin::{hashes::Hash, BlockHash, OutPoint, TxOut, Txid};
 
 use crate::{
     sparse_chain::{self, ChainPosition},
-    BlockAnchor, COINBASE_MATURITY,
+    Anchor, ConfirmationHeight, COINBASE_MATURITY,
 };
 
 /// Represents an observation of some chain data.
 ///
-/// The generic `A` should be a [`BlockAnchor`] implementation.
+/// The generic `A` should be a [`Anchor`] implementation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, core::hash::Hash)]
 pub enum ObservedAs<A> {
     /// The chain data is seen as confirmed, and in anchored by `A`.
     Confirmed(A),
+    /// The chain data is assumed to be confirmed, because a transaction that spends it is anchored
+    /// by `A`.
+    ConfirmedImplicit(A),
     /// The chain data is seen in mempool at this given timestamp.
     Unconfirmed(u64),
 }
@@ -20,6 +23,7 @@ impl<A: Clone> ObservedAs<&A> {
     pub fn cloned(self) -> ObservedAs<A> {
         match self {
             ObservedAs::Confirmed(a) => ObservedAs::Confirmed(a.clone()),
+            ObservedAs::ConfirmedImplicit(a) => ObservedAs::ConfirmedImplicit(a.clone()),
             ObservedAs::Unconfirmed(last_seen) => ObservedAs::Unconfirmed(last_seen),
         }
     }
@@ -160,7 +164,7 @@ impl Default for BlockId {
     }
 }
 
-impl BlockAnchor for BlockId {
+impl Anchor for BlockId {
     fn anchor_block(&self) -> BlockId {
         *self
     }
@@ -241,20 +245,23 @@ impl<P: ChainPosition> FullTxOut<P> {
     }
 }
 
-impl<A: BlockAnchor> FullTxOut<ObservedAs<A>> {
+impl<A: Anchor + ConfirmationHeight> FullTxOut<ObservedAs<A>> {
     /// Whether the `txout` is considered mature.
     ///
     /// This is the alternative version of [`is_mature`] which depends on `chain_position` being a
-    /// [`ObservedAs<A>`] where `A` implements [`BlockAnchor`].
+    /// [`ObservedAs<A>`] where `A` implements [`Anchor`].
     ///
     /// [`is_mature`]: Self::is_mature
-    pub fn is_observed_as_confirmed_and_mature(&self, tip: u32) -> bool {
+    pub fn is_observed_as_mature(&self, tip: u32) -> bool {
         if !self.is_on_coinbase {
             return false;
         }
 
         let tx_height = match &self.chain_position {
-            ObservedAs::Confirmed(anchor) => anchor.anchor_block().height,
+            ObservedAs::Confirmed(anchor) => anchor.confirmation_height(),
+            // although we do not know the exact confirm height, the returned height here is the
+            // "upper bound" so only false-negatives are possible
+            ObservedAs::ConfirmedImplicit(anchor) => anchor.confirmation_height(),
             ObservedAs::Unconfirmed(_) => {
                 debug_assert!(false, "coinbase tx can never be unconfirmed");
                 return false;
@@ -274,22 +281,24 @@ impl<A: BlockAnchor> FullTxOut<ObservedAs<A>> {
     /// Currently this method does not take into account the locktime.
     ///
     /// This is the alternative version of [`is_spendable_at`] which depends on `chain_position`
-    /// being a [`ObservedAs<A>`] where `A` implements [`BlockAnchor`].
+    /// being a [`ObservedAs<A>`] where `A` implements [`Anchor`].
     ///
     /// [`is_spendable_at`]: Self::is_spendable_at
     pub fn is_observed_as_confirmed_and_spendable(&self, tip: u32) -> bool {
-        if !self.is_observed_as_confirmed_and_mature(tip) {
+        if !self.is_observed_as_mature(tip) {
             return false;
         }
 
-        match &self.chain_position {
-            ObservedAs::Confirmed(anchor) => {
-                if anchor.anchor_block().height > tip {
-                    return false;
-                }
-            }
+        let confirmation_height = match &self.chain_position {
+            ObservedAs::Confirmed(anchor) => anchor.confirmation_height(),
+            // although we do not know the exact confirm height, the returned height here is the
+            // "upper bound" so only false-negatives are possible
+            ObservedAs::ConfirmedImplicit(anchor) => anchor.confirmation_height(),
             ObservedAs::Unconfirmed(_) => return false,
         };
+        if confirmation_height > tip {
+            return false;
+        }
 
         // if the spending tx is confirmed within tip height, the txout is no longer spendable
         if let Some((ObservedAs::Confirmed(spending_anchor), _)) = &self.spent_by {

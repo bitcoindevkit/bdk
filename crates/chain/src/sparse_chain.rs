@@ -997,7 +997,7 @@ impl<P: ChainPosition> SparseChain<P> {
     /// `chain` for this to return `Some`.
     pub fn spent_by<A>(&self, graph: &TxGraph<A>, outpoint: OutPoint) -> Option<(&P, Txid)> {
         graph
-            .outspends(outpoint)
+            .output_spends(outpoint)
             .iter()
             .find_map(|&txid| Some((self.tx_position(txid)?, txid)))
     }
