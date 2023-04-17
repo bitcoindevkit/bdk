@@ -195,7 +195,7 @@ impl<D> Wallet<D> {
         network: Network,
     ) -> Result<Self, NewError<D::LoadError>>
     where
-        D: persist::PersistBackend<KeychainKind, ConfirmationTime>,
+        D: persist::PersistBackendOld<KeychainKind, ConfirmationTime>,
     {
         let secp = Secp256k1::new();
 
@@ -257,7 +257,7 @@ impl<D> Wallet<D> {
     /// (i.e. does not end with /*) then the same address will always be returned for any [`AddressIndex`].
     pub fn get_address(&mut self, address_index: AddressIndex) -> AddressInfo
     where
-        D: persist::PersistBackend<KeychainKind, ConfirmationTime>,
+        D: persist::PersistBackendOld<KeychainKind, ConfirmationTime>,
     {
         self._get_address(address_index, KeychainKind::External)
     }
@@ -271,14 +271,14 @@ impl<D> Wallet<D> {
     /// be returned for any [`AddressIndex`].
     pub fn get_internal_address(&mut self, address_index: AddressIndex) -> AddressInfo
     where
-        D: persist::PersistBackend<KeychainKind, ConfirmationTime>,
+        D: persist::PersistBackendOld<KeychainKind, ConfirmationTime>,
     {
         self._get_address(address_index, KeychainKind::Internal)
     }
 
     fn _get_address(&mut self, address_index: AddressIndex, keychain: KeychainKind) -> AddressInfo
     where
-        D: persist::PersistBackend<KeychainKind, ConfirmationTime>,
+        D: persist::PersistBackendOld<KeychainKind, ConfirmationTime>,
     {
         let keychain = self.map_keychain(keychain);
         let txout_index = &mut self.keychain_tracker.txout_index;
@@ -613,7 +613,7 @@ impl<D> Wallet<D> {
         params: TxParams,
     ) -> Result<(psbt::PartiallySignedTransaction, TransactionDetails), Error>
     where
-        D: persist::PersistBackend<KeychainKind, ConfirmationTime>,
+        D: persist::PersistBackendOld<KeychainKind, ConfirmationTime>,
     {
         let external_descriptor = self
             .keychain_tracker
@@ -1687,7 +1687,7 @@ impl<D> Wallet<D> {
     /// [`commit`]: Self::commit
     pub fn apply_update(&mut self, update: Update) -> Result<(), UpdateError>
     where
-        D: persist::PersistBackend<KeychainKind, ConfirmationTime>,
+        D: persist::PersistBackendOld<KeychainKind, ConfirmationTime>,
     {
         let changeset = self.keychain_tracker.apply_update(update)?;
         self.persist.stage(changeset);
@@ -1699,7 +1699,7 @@ impl<D> Wallet<D> {
     /// [`staged`]: Self::staged
     pub fn commit(&mut self) -> Result<(), D::WriteError>
     where
-        D: persist::PersistBackend<KeychainKind, ConfirmationTime>,
+        D: persist::PersistBackendOld<KeychainKind, ConfirmationTime>,
     {
         self.persist.commit()
     }

@@ -1,12 +1,16 @@
 #![doc = include_str!("../README.md")]
-mod file_store;
+mod keychain_file_store;
+mod Indexed_file_store;
+use Indexed_file_store::IndexedTxGraphStore;
 use bdk_chain::{
-    keychain::{KeychainChangeSet, KeychainTracker, PersistBackend},
-    sparse_chain::ChainPosition,
+    keychain::{KeychainChangeSet, KeychainTracker, PersistBackendOld},
+    sparse_chain::ChainPosition, BlockAnchor, Append, Empty, TxIndex, indexed_tx_graph::{IndexedAdditions, IndexedTxGraph},
 };
-pub use file_store::*;
 
-impl<K, P> PersistBackend<K, P> for KeychainStore<K, P>
+use bdk_chain::persist::PersistBackend;
+use keychain_file_store::{KeychainStore, IterError};
+
+impl<K, P> PersistBackendOld<K, P> for KeychainStore<K, P>
 where
     K: Ord + Clone + core::fmt::Debug,
     P: ChainPosition,
@@ -30,3 +34,30 @@ where
         KeychainStore::load_into_keychain_tracker(self, tracker)
     }
 }
+
+impl<BA, A, T> PersistBackend<A, T> for IndexedTxGraphStore<BA, A, T>
+where
+    BA: BlockAnchor,
+    A: Append + Default + Empty,
+    T: TxIndex + TxIndex<Additions = A>,
+    IndexedAdditions<BA, A>: serde::Serialize + serde::de::DeserializeOwned,
+{
+    type WriteError = std::io::Error;
+
+    type LoadError = Indexed_file_store::IterError;
+
+    fn append(
+        &mut self,
+        changeset: &A,
+    ) -> Result<(), Self::WriteError> {
+        IndexedTxGraphStore::append_addition(self, changeset)
+    }
+
+    fn load(
+        &mut self,
+        tracker: &mut T,
+    ) -> Result<(), Self::LoadError> {
+        IndexedTxGraphStore::load_into_indexed_tx_graph(self, tracker)
+    }
+}
+

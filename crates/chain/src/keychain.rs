@@ -20,7 +20,7 @@ use crate::{
     collections::BTreeMap,
     sparse_chain::ChainPosition,
     tx_graph::TxGraph,
-    Append, ForEachTxOut,
+    Append, ForEachTxOut, Empty,
 };
 
 #[cfg(feature = "miniscript")]
@@ -83,6 +83,12 @@ impl<K: Ord> Append for DerivationAdditions<K> {
         });
 
         self.0.append(&mut other.0);
+    }
+}
+
+impl<K: Ord> Empty for DerivationAdditions<K> {
+    fn is_empty(&self) -> bool {
+        self.is_empty()
     }
 }
 

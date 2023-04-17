@@ -69,6 +69,14 @@ impl Append for () {
     fn append(&mut self, _other: Self) {}
 }
 
+pub trait Empty {
+    fn is_empty(&self) -> bool;
+}
+
+impl Empty for () {
+    fn is_empty(&self) -> bool { true }
+}
+
 /// Represents an index of transaction data.
 pub trait TxIndex {
     /// The resultant "additions" when new transaction data is indexed.

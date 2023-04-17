@@ -5,7 +5,7 @@ use bitcoin::{OutPoint, Script, Transaction, TxOut};
 use crate::{
     keychain::Balance,
     tx_graph::{Additions, TxGraph, TxNode},
-    Append, BlockAnchor, BlockId, ChainOracle, FullTxOut, ObservedAs, TxIndex,
+    Append, BlockAnchor, ChainOracle, FullTxOut, ObservedAs, TxIndex, Empty, BlockId,
 };
 
 /// An outwards-facing view of a transaction that is part of the *best chain*'s history.
@@ -51,6 +51,12 @@ impl<A: BlockAnchor, IA: Append> Append for IndexedAdditions<A, IA> {
     fn append(&mut self, other: Self) {
         self.graph_additions.append(other.graph_additions);
         self.index_additions.append(other.index_additions);
+    }
+}
+
+impl<A: BlockAnchor, IA: Empty> Empty for IndexedAdditions<A, IA> {
+    fn is_empty(&self) -> bool {
+        self.graph_additions.is_empty() && self.is_empty()
     }
 }
 

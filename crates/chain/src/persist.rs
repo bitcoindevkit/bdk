@@ -9,7 +9,7 @@
 //!
 //! [`KeychainTracker`]: crate::keychain::KeychainTracker
 
-use crate::{keychain, sparse_chain::ChainPosition};
+use crate::Append;
 
 /// `Persist` wraps a [`PersistBackend`] to create a convenient staging area for changes before they
 /// are persisted. Not all changes made to the [`KeychainTracker`] need to be written to disk right
@@ -18,33 +18,37 @@ use crate::{keychain, sparse_chain::ChainPosition};
 ///
 /// [`KeychainTracker`]: keychain::KeychainTracker
 #[derive(Debug)]
-pub struct Persist<K, P, B> {
+pub struct Persist<A, B, T> {
     backend: B,
-    stage: keychain::KeychainChangeSet<K, P>,
+    stage: A,
+    phanton_data: core::marker::PhantomData<T>
 }
 
-impl<K, P, B> Persist<K, P, B> {
+impl<A, B, T> Persist<A, B, T> {
     /// Create a new `Persist` from a [`PersistBackend`].
-    pub fn new(backend: B) -> Self {
+    pub fn new(backend: B) -> Self
+    where
+        A: Default
+    {
         Self {
             backend,
             stage: Default::default(),
+            phanton_data: Default::default()
         }
     }
 
     /// Stage a `changeset` to later persistence with [`commit`].
     ///
     /// [`commit`]: Self::commit
-    pub fn stage(&mut self, changeset: keychain::KeychainChangeSet<K, P>)
+    pub fn stage(&mut self, addition: A)
     where
-        K: Ord,
-        P: ChainPosition,
+        A: Append
     {
-        self.stage.append(changeset)
+        self.stage.append(addition)
     }
 
     /// Get the changes that haven't been committed yet
-    pub fn staged(&self) -> &keychain::KeychainChangeSet<K, P> {
+    pub fn staged(&self) -> &A {
         &self.stage
     }
 
@@ -53,16 +57,20 @@ impl<K, P, B> Persist<K, P, B> {
     /// Returns a backend-defined error if this fails.
     pub fn commit(&mut self) -> Result<(), B::WriteError>
     where
-        B: PersistBackendOld<K, P>,
+        B: PersistBackend<A, T>,
+        A: Default + Append
     {
-        self.backend.append_changeset(&self.stage)?;
+        self.backend.append(&self.stage)?;
         self.stage = Default::default();
         Ok(())
     }
 }
 
 /// A persistence backend for [`Persist`].
-pub trait PersistBackendOld<K, P> {
+pub trait PersistBackend<A, T>
+where
+    A: Append
+ {
     /// The error the backend returns when it fails to write.
     type WriteError: core::fmt::Debug;
 
@@ -77,31 +85,34 @@ pub trait PersistBackendOld<K, P> {
     /// changesets had been applied sequentially.
     ///
     /// [`load_into_keychain_tracker`]: Self::load_into_keychain_tracker
-    fn append_changeset(
+    fn append(
         &mut self,
-        changeset: &keychain::KeychainChangeSet<K, P>,
+        additions: &A,
     ) -> Result<(), Self::WriteError>;
 
     /// Applies all the changesets the backend has received to `tracker`.
-    fn load_into_keychain_tracker(
+    fn load(
         &mut self,
-        tracker: &mut keychain::KeychainTracker<K, P>,
+        tracker: &mut T,
     ) -> Result<(), Self::LoadError>;
 }
 
-impl<K, P> PersistBackendOld<K, P> for () {
+impl<A, T> PersistBackend<A, T> for ()
+where
+    A: Append
+{
     type WriteError = ();
     type LoadError = ();
 
-    fn append_changeset(
+    fn append(
         &mut self,
-        _changeset: &keychain::KeychainChangeSet<K, P>,
+        _additions: &A,
     ) -> Result<(), Self::WriteError> {
         Ok(())
     }
-    fn load_into_keychain_tracker(
+    fn load(
         &mut self,
-        _tracker: &mut keychain::KeychainTracker<K, P>,
+        _tracker: &mut T,
     ) -> Result<(), Self::LoadError> {
         Ok(())
     }

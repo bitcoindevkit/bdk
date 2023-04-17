@@ -526,7 +526,7 @@ impl<'a, D, Cs: CoinSelectionAlgorithm, Ctx: TxBuilderContext> TxBuilder<'a, D, 
     /// [`BIP174`]: https://github.com/bitcoin/bips/blob/master/bip-0174.mediawiki
     pub fn finish(self) -> Result<(Psbt, TransactionDetails), Error>
     where
-        D: persist::PersistBackend<KeychainKind, ConfirmationTime>,
+        D: persist::PersistBackendOld<KeychainKind, ConfirmationTime>,
     {
         self.wallet
             .borrow_mut()

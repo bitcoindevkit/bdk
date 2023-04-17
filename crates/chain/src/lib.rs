@@ -33,6 +33,7 @@ pub mod tx_graph;
 pub use tx_data_traits::*;
 mod chain_oracle;
 pub use chain_oracle::*;
+pub mod persist;
 
 #[doc(hidden)]
 pub mod example_utils;
