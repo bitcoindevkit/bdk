@@ -1,21 +1,23 @@
-use core::{convert::Infallible, ops::Deref};
+use core::convert::Infallible;
 
 use alloc::collections::{BTreeMap, BTreeSet};
 use bitcoin::BlockHash;
 
 use crate::{Append, BlockId, ChainOracle};
 
+/// This is a local implementation of [`ChainOracle`].
+///
+/// TODO: We need a cache/snapshot thing for chain oracle.
+/// * Minimize calls to remotes.
+/// * Can we cache it forever? Should we drop stuff?
+/// * Assume anything deeper than (i.e. 10) blocks won't be reorged.
+/// * Is this a cache on txs or block? or both?
+/// TODO: Parents of children are confirmed if children are confirmed.
 #[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct LocalChain {
     blocks: BTreeMap<u32, BlockHash>,
 }
 
-// [TODO] We need a cache/snapshot thing for chain oracle.
-// * Minimize calls to remotes.
-// * Can we cache it forever? Should we drop stuff?
-// * Assume anything deeper than (i.e. 10) blocks won't be reorged.
-// * Is this a cache on txs or block? or both?
-// [TODO] Parents of children are confirmed if children are confirmed.
 impl ChainOracle for LocalChain {
     type Error = Infallible;
 
@@ -114,12 +116,12 @@ impl LocalChain {
                 changeset.insert(*height, *new_hash);
             }
         }
-        Ok(ChangeSet(changeset))
+        Ok(changeset)
     }
 
     /// Applies the given `changeset`.
     pub fn apply_changeset(&mut self, mut changeset: ChangeSet) {
-        self.blocks.append(&mut changeset.0)
+        self.blocks.append(&mut changeset)
     }
 
     /// Updates [`LocalChain`] with an update [`LocalChain`].
@@ -135,7 +137,7 @@ impl LocalChain {
     }
 
     pub fn initial_changeset(&self) -> ChangeSet {
-        ChangeSet(self.blocks.clone())
+        self.blocks.clone()
     }
 
     pub fn heights(&self) -> BTreeSet<u32> {
@@ -146,25 +148,11 @@ impl LocalChain {
 /// This is the return value of [`determine_changeset`] and represents changes to [`LocalChain`].
 ///
 /// [`determine_changeset`]: LocalChain::determine_changeset
-#[derive(Debug, Default, Clone, PartialEq)]
-#[cfg_attr(
-    feature = "serde",
-    derive(serde::Deserialize, serde::Serialize),
-    serde(crate = "serde_crate")
-)]
-pub struct ChangeSet(pub(crate) BTreeMap<u32, BlockHash>);
-
-impl Deref for ChangeSet {
-    type Target = BTreeMap<u32, BlockHash>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
+type ChangeSet = BTreeMap<u32, BlockHash>;
 
 impl Append for ChangeSet {
     fn append(&mut self, mut other: Self) {
-        BTreeMap::append(&mut self.0, &mut other.0)
+        BTreeMap::append(self, &mut other)
     }
 }
 

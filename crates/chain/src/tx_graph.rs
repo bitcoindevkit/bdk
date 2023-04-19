@@ -644,24 +644,6 @@ impl<A: Anchor> TxGraph<A> {
             }
         }
 
-        // If we cannot determine whether tx is in best chain, we can check whether a spending tx is
-        // confirmed and in best chain, and if so, it is guaranteed that this tx is in the best
-        // chain.
-        //
-        // [TODO] This logic is incomplete as we do not check spends of spends.
-        let spending_anchors = self
-            .spends
-            .range(OutPoint::new(txid, u32::MIN)..=OutPoint::new(txid, u32::MAX))
-            .flat_map(|(_, spending_txids)| spending_txids)
-            .filter_map(|spending_txid| self.txs.get(spending_txid))
-            .flat_map(|(_, spending_anchors, _)| spending_anchors);
-        for spending_anchor in spending_anchors {
-            match chain.is_block_in_chain(spending_anchor.anchor_block(), chain_tip)? {
-                Some(true) => return Ok(Some(ObservedAs::ConfirmedImplicit(spending_anchor))),
-                _ => continue,
-            }
-        }
-
         // The tx is not anchored to a block which is in the best chain, let's check whether we can
         // ignore it by checking conflicts!
         let tx = match tx_node {

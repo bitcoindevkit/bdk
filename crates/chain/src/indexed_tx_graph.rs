@@ -251,7 +251,7 @@ impl<A: Anchor + ConfirmationHeight, I: OwnedIndexer> IndexedTxGraph<A, I> {
             let txout = res?;
 
             match &txout.chain_position {
-                ObservedAs::Confirmed(_) | ObservedAs::ConfirmedImplicit(_) => {
+                ObservedAs::Confirmed(_) => {
                     if txout.is_on_coinbase {
                         if txout.is_observed_as_mature(tip) {
                             confirmed += txout.txout.value;

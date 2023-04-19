@@ -12,9 +12,6 @@ use crate::{
 pub enum ObservedAs<A> {
     /// The chain data is seen as confirmed, and in anchored by `A`.
     Confirmed(A),
-    /// The chain data is assumed to be confirmed, because a transaction that spends it is anchored
-    /// by `A`.
-    ConfirmedImplicit(A),
     /// The chain data is seen in mempool at this given timestamp.
     Unconfirmed(u64),
 }
@@ -23,7 +20,6 @@ impl<A: Clone> ObservedAs<&A> {
     pub fn cloned(self) -> ObservedAs<A> {
         match self {
             ObservedAs::Confirmed(a) => ObservedAs::Confirmed(a.clone()),
-            ObservedAs::ConfirmedImplicit(a) => ObservedAs::ConfirmedImplicit(a.clone()),
             ObservedAs::Unconfirmed(last_seen) => ObservedAs::Unconfirmed(last_seen),
         }
     }
@@ -259,9 +255,6 @@ impl<A: Anchor + ConfirmationHeight> FullTxOut<ObservedAs<A>> {
 
         let tx_height = match &self.chain_position {
             ObservedAs::Confirmed(anchor) => anchor.confirmation_height(),
-            // although we do not know the exact confirm height, the returned height here is the
-            // "upper bound" so only false-negatives are possible
-            ObservedAs::ConfirmedImplicit(anchor) => anchor.confirmation_height(),
             ObservedAs::Unconfirmed(_) => {
                 debug_assert!(false, "coinbase tx can never be unconfirmed");
                 return false;
@@ -291,9 +284,6 @@ impl<A: Anchor + ConfirmationHeight> FullTxOut<ObservedAs<A>> {
 
         let confirmation_height = match &self.chain_position {
             ObservedAs::Confirmed(anchor) => anchor.confirmation_height(),
-            // although we do not know the exact confirm height, the returned height here is the
-            // "upper bound" so only false-negatives are possible
-            ObservedAs::ConfirmedImplicit(anchor) => anchor.confirmation_height(),
             ObservedAs::Unconfirmed(_) => return false,
         };
         if confirmation_height > tip {
