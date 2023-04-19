@@ -602,7 +602,7 @@ impl<A: Clone + Ord> TxGraph<A> {
 
 impl<A: Anchor> TxGraph<A> {
     /// Get all heights that are relevant to the graph.
-    pub fn relevant_heights(&self) -> impl Iterator<Item = u32> + '_ {
+    pub fn relevant_heights(&self) -> impl DoubleEndedIterator<Item = u32> + '_ {
         let mut visited = HashSet::new();
         self.anchors
             .iter()

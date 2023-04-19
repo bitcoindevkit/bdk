@@ -10,6 +10,7 @@ use bitcoin::{
     hashes::Hash, BlockHash, OutPoint, PackedLockTime, Script, Transaction, TxIn, TxOut, Txid,
 };
 use core::iter;
+use std::vec;
 
 #[test]
 fn insert_txouts() {
@@ -780,4 +781,71 @@ fn test_chain_spends() {
     assert!(graph
         .get_chain_position(&local_chain, tip, tx_2.txid())
         .is_none());
+}
+
+#[test]
+fn test_relevant_heights() {
+    let mut graph = TxGraph::<BlockId>::default();
+
+    let tx1 = common::new_tx(1);
+    let tx2 = common::new_tx(2);
+
+    let _ = graph.insert_tx(tx1.clone());
+    assert_eq!(
+        graph.relevant_heights().collect::<Vec<_>>(),
+        vec![],
+        "no anchors in graph"
+    );
+
+    let _ = graph.insert_anchor(
+        tx1.txid(),
+        BlockId {
+            height: 3,
+            hash: h!("3a"),
+        },
+    );
+    assert_eq!(
+        graph.relevant_heights().collect::<Vec<_>>(),
+        vec![3],
+        "one anchor at height 3"
+    );
+
+    let _ = graph.insert_anchor(
+        tx1.txid(),
+        BlockId {
+            height: 3,
+            hash: h!("3b"),
+        },
+    );
+    assert_eq!(
+        graph.relevant_heights().collect::<Vec<_>>(),
+        vec![3],
+        "introducing duplicate anchor at height 3, must not iterate over duplicate heights"
+    );
+
+    let _ = graph.insert_anchor(
+        tx1.txid(),
+        BlockId {
+            height: 4,
+            hash: h!("4a"),
+        },
+    );
+    assert_eq!(
+        graph.relevant_heights().collect::<Vec<_>>(),
+        vec![3, 4],
+        "anchors in height 3 and now 4"
+    );
+
+    let _ = graph.insert_anchor(
+        tx2.txid(),
+        BlockId {
+            height: 5,
+            hash: h!("5a"),
+        },
+    );
+    assert_eq!(
+        graph.relevant_heights().collect::<Vec<_>>(),
+        vec![3, 4, 5],
+        "anchor for non-existant tx is inserted at height 5, must still be in relevant heights",
+    );
 }
