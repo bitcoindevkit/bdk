@@ -62,6 +62,15 @@ impl From<BTreeMap<u32, BlockHash>> for LocalChain {
 }
 
 impl LocalChain {
+    pub fn from_blocks<B>(blocks: B) -> Self
+    where
+        B: IntoIterator<Item = BlockId>,
+    {
+        Self {
+            blocks: blocks.into_iter().map(|b| (b.height, b.hash)).collect(),
+        }
+    }
+
     pub fn tip(&self) -> Option<BlockId> {
         self.blocks
             .iter()
@@ -109,19 +118,37 @@ impl LocalChain {
             }
         }
 
-        let mut changeset = BTreeMap::<u32, BlockHash>::new();
-        for (height, new_hash) in update {
+        let mut changeset: BTreeMap<u32, Option<BlockHash>> = match invalidate_from_height {
+            Some(first_invalid_height) => {
+                // the first block of height to invalidate should be represented in the update
+                if !update.contains_key(&first_invalid_height) {
+                    return Err(UpdateNotConnectedError(first_invalid_height));
+                }
+                self.blocks
+                    .range(first_invalid_height..)
+                    .map(|(height, _)| (*height, None))
+                    .collect()
+            }
+            None => BTreeMap::new(),
+        };
+        for (height, update_hash) in update {
             let original_hash = self.blocks.get(height);
-            if Some(new_hash) != original_hash {
-                changeset.insert(*height, *new_hash);
+            if Some(update_hash) != original_hash {
+                changeset.insert(*height, Some(*update_hash));
             }
         }
+
         Ok(changeset)
     }
 
     /// Applies the given `changeset`.
-    pub fn apply_changeset(&mut self, mut changeset: ChangeSet) {
-        self.blocks.append(&mut changeset)
+    pub fn apply_changeset(&mut self, changeset: ChangeSet) {
+        for (height, blockhash) in changeset {
+            match blockhash {
+                Some(blockhash) => self.blocks.insert(height, blockhash),
+                None => self.blocks.remove(&height),
+            };
+        }
     }
 
     /// Updates [`LocalChain`] with an update [`LocalChain`].
@@ -137,7 +164,10 @@ impl LocalChain {
     }
 
     pub fn initial_changeset(&self) -> ChangeSet {
-        self.blocks.clone()
+        self.blocks
+            .iter()
+            .map(|(&height, &hash)| (height, Some(hash)))
+            .collect()
     }
 
     pub fn heights(&self) -> BTreeSet<u32> {
@@ -148,7 +178,7 @@ impl LocalChain {
 /// This is the return value of [`determine_changeset`] and represents changes to [`LocalChain`].
 ///
 /// [`determine_changeset`]: LocalChain::determine_changeset
-type ChangeSet = BTreeMap<u32, BlockHash>;
+pub type ChangeSet = BTreeMap<u32, Option<BlockHash>>;
 
 impl Append for ChangeSet {
     fn append(&mut self, mut other: Self) {
@@ -163,7 +193,7 @@ impl Append for ChangeSet {
 /// connect to the existing chain. This error case contains the checkpoint height to include so
 /// that the chains can connect.
 #[derive(Clone, Debug, PartialEq)]
-pub struct UpdateNotConnectedError(u32);
+pub struct UpdateNotConnectedError(pub u32);
 
 impl core::fmt::Display for UpdateNotConnectedError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
