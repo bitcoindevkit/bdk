@@ -603,11 +603,17 @@ impl<A: Clone + Ord> TxGraph<A> {
 impl<A: Anchor> TxGraph<A> {
     /// Get all heights that are relevant to the graph.
     pub fn relevant_heights(&self) -> impl DoubleEndedIterator<Item = u32> + '_ {
-        let mut visited = HashSet::new();
+        let mut last_height = Option::<u32>::None;
         self.anchors
             .iter()
             .map(|(a, _)| a.anchor_block().height)
-            .filter(move |&h| visited.insert(h))
+            .filter(move |&height| {
+                let is_unique = Some(height) != last_height;
+                if is_unique {
+                    last_height = Some(height);
+                }
+                is_unique
+            })
     }
 
     /// Get the position of the transaction in `chain` with tip `chain_tip`.
