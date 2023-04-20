@@ -3,8 +3,8 @@
 //! The star of the show is [`KeychainStore`], which maintains an append-only file of
 //! [`KeychainChangeSet`]s which can be used to restore a [`KeychainTracker`].
 use bdk_chain::{
-    keychain::{KeychainChangeSet, KeychainTracker},
-    sparse_chain,
+    keychain::{KeychainChangeSet, KeychainTracker, PersistBackend},
+    sparse_chain::{self, ChainPosition},
 };
 use bincode::Options;
 use std::{
@@ -164,6 +164,31 @@ where
         }
 
         Ok(())
+    }
+}
+
+impl<K, P> PersistBackend<K, P> for KeychainStore<K, P>
+where
+    K: Ord + Clone + core::fmt::Debug,
+    P: ChainPosition,
+    KeychainChangeSet<K, P>: serde::Serialize + serde::de::DeserializeOwned,
+{
+    type WriteError = std::io::Error;
+
+    type LoadError = IterError;
+
+    fn append_changeset(
+        &mut self,
+        changeset: &KeychainChangeSet<K, P>,
+    ) -> Result<(), Self::WriteError> {
+        KeychainStore::append_changeset(self, changeset)
+    }
+
+    fn load_into_keychain_tracker(
+        &mut self,
+        tracker: &mut KeychainTracker<K, P>,
+    ) -> Result<(), Self::LoadError> {
+        KeychainStore::load_into_keychain_tracker(self, tracker)
     }
 }
 

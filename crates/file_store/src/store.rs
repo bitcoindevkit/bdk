@@ -5,7 +5,7 @@ use std::{
     path::Path,
 };
 
-use bdk_chain::Append;
+use bdk_chain::{Append, PersistBackend};
 use bincode::Options;
 
 use crate::{bincode_options, EntryIter, FileError, IterError};
@@ -135,6 +135,17 @@ where
         self.db_file.set_len(pos)?;
 
         Ok(())
+    }
+}
+
+impl<T, C> PersistBackend<C> for Store<T, C>
+where
+    C: Default + Append + serde::Serialize + serde::de::DeserializeOwned,
+{
+    type WriteError = std::io::Error;
+
+    fn write_changes(&mut self, changeset: &C) -> Result<(), Self::WriteError> {
+        Store::append_changeset(self, changeset)
     }
 }
 
