@@ -1,10 +1,17 @@
 #![doc = include_str!("../README.md")]
-mod file_store;
+mod entry_iter;
+mod keychain_store;
 use bdk_chain::{
     keychain::{KeychainChangeSet, KeychainTracker, PersistBackend},
     sparse_chain::ChainPosition,
 };
-pub use file_store::*;
+use bincode::{DefaultOptions, Options};
+pub use entry_iter::*;
+pub use keychain_store::*;
+
+pub(crate) fn bincode_options() -> impl bincode::Options {
+    DefaultOptions::new().with_varint_encoding()
+}
 
 impl<K, P> PersistBackend<K, P> for KeychainStore<K, P>
 where
