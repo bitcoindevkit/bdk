@@ -187,6 +187,31 @@ impl From<(&u32, &BlockHash)> for BlockId {
     }
 }
 
+/// An [`Anchor`] implementation that also records the exact confirmation height of the transaction.
+#[derive(Debug, Default, Clone, PartialEq, Eq, Copy, PartialOrd, Ord, core::hash::Hash)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Deserialize, serde::Serialize),
+    serde(crate = "serde_crate")
+)]
+pub struct ConfirmationHeightAnchor {
+    /// The anchor block.
+    pub anchor_block: BlockId,
+
+    /// The exact confirmation height of the transaction (if any).
+    pub confirmation_height: Option<u32>,
+}
+
+impl Anchor for ConfirmationHeightAnchor {
+    fn anchor_block(&self) -> BlockId {
+        self.anchor_block
+    }
+
+    fn confirmation_height_upper_bound(&self) -> u32 {
+        self.confirmation_height.unwrap_or(self.anchor_block.height)
+    }
+}
+
 /// A `TxOut` with as much data as we can retrieve about it
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct FullTxOut<P> {
