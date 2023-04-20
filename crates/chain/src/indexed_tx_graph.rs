@@ -120,15 +120,12 @@ where
     ///
     /// `anchors` can be provided to anchor the transactions to blocks. `seen_at` is a unix
     /// timestamp of when the transactions are last seen.
-    pub fn insert_relevant_txs<'t, T>(
+    pub fn insert_relevant_txs<'t, T: Iterator<Item = &'t Transaction>>(
         &mut self,
         txs: T,
         anchors: impl IntoIterator<Item = A> + Clone,
         seen_at: Option<u64>,
-    ) -> IndexedAdditions<A, I::Additions>
-    where
-        T: Iterator<Item = &'t Transaction>,
-    {
+    ) -> IndexedAdditions<A, I::Additions> {
         txs.filter_map(|tx| match self.index.is_tx_relevant(tx) {
             true => Some(self.insert_tx(tx, anchors.clone(), seen_at)),
             false => None,
@@ -141,14 +138,11 @@ where
 }
 
 impl<A: Anchor, I: OwnedIndexer> IndexedTxGraph<A, I> {
-    pub fn try_list_owned_txs<'a, C>(
+    pub fn try_list_owned_txs<'a, C: ChainOracle + 'a>(
         &'a self,
         chain: &'a C,
         chain_tip: BlockId,
-    ) -> impl Iterator<Item = Result<CanonicalTx<'a, Transaction, A>, C::Error>>
-    where
-        C: ChainOracle + 'a,
-    {
+    ) -> impl Iterator<Item = Result<CanonicalTx<'a, Transaction, A>, C::Error>> {
         self.graph
             .full_txs()
             .filter(|node| tx_alters_owned_utxo_set(&self.graph, &self.index, node.txid, node.tx))
@@ -165,55 +159,55 @@ impl<A: Anchor, I: OwnedIndexer> IndexedTxGraph<A, I> {
             })
     }
 
-    pub fn list_owned_txs<'a, C>(
+    pub fn list_owned_txs<'a, C: ChainOracle<Error = Infallible> + 'a>(
         &'a self,
         chain: &'a C,
         chain_tip: BlockId,
-    ) -> impl Iterator<Item = CanonicalTx<'a, Transaction, A>>
-    where
-        C: ChainOracle<Error = Infallible> + 'a,
-    {
+    ) -> impl Iterator<Item = CanonicalTx<'a, Transaction, A>> {
         self.try_list_owned_txs(chain, chain_tip)
             .map(|r| r.expect("chain oracle is infallible"))
     }
 
-    pub fn try_list_owned_txouts<'a, C>(
+    pub fn try_list_owned_txouts<'a, C: ChainOracle + 'a>(
         &'a self,
         chain: &'a C,
         chain_tip: BlockId,
-    ) -> impl Iterator<Item = Result<FullTxOut<ObservedAs<A>>, C::Error>> + 'a
-    where
-        C: ChainOracle + 'a,
-    {
+    ) -> impl Iterator<Item = Result<FullTxOut<ObservedAs<A>>, C::Error>> + 'a {
         self.graph()
-            .try_list_chain_txouts(chain, chain_tip, |_, txout| {
-                self.index.is_spk_owned(&txout.script_pubkey)
+            .try_list_chain_txouts(chain, chain_tip)
+            .filter(|r| {
+                if let Ok(full_txout) = r {
+                    if !self.index.is_spk_owned(&full_txout.txout.script_pubkey) {
+                        return false;
+                    }
+                }
+                true
             })
     }
 
-    pub fn list_owned_txouts<'a, C>(
+    pub fn list_owned_txouts<'a, C: ChainOracle + 'a>(
         &'a self,
         chain: &'a C,
         chain_tip: BlockId,
-    ) -> impl Iterator<Item = FullTxOut<ObservedAs<A>>> + 'a
-    where
-        C: ChainOracle + 'a,
-    {
+    ) -> impl Iterator<Item = FullTxOut<ObservedAs<A>>> + 'a {
         self.try_list_owned_txouts(chain, chain_tip)
             .map(|r| r.expect("oracle is infallible"))
     }
 
-    pub fn try_list_owned_unspents<'a, C>(
+    pub fn try_list_owned_unspents<'a, C: ChainOracle + 'a>(
         &'a self,
         chain: &'a C,
         chain_tip: BlockId,
-    ) -> impl Iterator<Item = Result<FullTxOut<ObservedAs<A>>, C::Error>> + 'a
-    where
-        C: ChainOracle + 'a,
-    {
+    ) -> impl Iterator<Item = Result<FullTxOut<ObservedAs<A>>, C::Error>> + 'a {
         self.graph()
-            .try_list_chain_unspents(chain, chain_tip, |_, txout| {
-                self.index.is_spk_owned(&txout.script_pubkey)
+            .try_list_chain_unspents(chain, chain_tip)
+            .filter(|r| {
+                if let Ok(full_txout) = r {
+                    if !self.index.is_spk_owned(&full_txout.txout.script_pubkey) {
+                        return false;
+                    }
+                }
+                true
             })
     }
 
@@ -278,35 +272,26 @@ impl<A: Anchor + ConfirmationHeight, I: OwnedIndexer> IndexedTxGraph<A, I> {
         })
     }
 
-    pub fn balance<C, F>(
-        &self,
-        chain: &C,
-        static_block: BlockId,
-        tip: u32,
-        should_trust: F,
-    ) -> Balance
+    pub fn balance<C, F>(&self, chain: &C, chain_tip: BlockId, tip: u32, should_trust: F) -> Balance
     where
         C: ChainOracle<Error = Infallible>,
         F: FnMut(&Script) -> bool,
     {
-        self.try_balance(chain, static_block, tip, should_trust)
+        self.try_balance(chain, chain_tip, tip, should_trust)
             .expect("error is infallible")
     }
 
     pub fn try_balance_at<C>(
         &self,
         chain: &C,
-        static_block: BlockId,
+        chain_tip: BlockId,
         height: u32,
     ) -> Result<u64, C::Error>
     where
         C: ChainOracle,
     {
         let mut sum = 0;
-        for txo_res in self
-            .graph()
-            .try_list_chain_txouts(chain, static_block, |_, _| true)
-        {
+        for txo_res in self.try_list_owned_unspents(chain, chain_tip) {
             let txo = txo_res?;
             if txo.is_observed_as_confirmed_and_spendable(height) {
                 sum += txo.txout.value;
@@ -315,11 +300,11 @@ impl<A: Anchor + ConfirmationHeight, I: OwnedIndexer> IndexedTxGraph<A, I> {
         Ok(sum)
     }
 
-    pub fn balance_at<C>(&self, chain: &C, static_block: BlockId, height: u32) -> u64
+    pub fn balance_at<C>(&self, chain: &C, chain_tip: BlockId, height: u32) -> u64
     where
         C: ChainOracle<Error = Infallible>,
     {
-        self.try_balance_at(chain, static_block, height)
+        self.try_balance_at(chain, chain_tip, height)
             .expect("error is infallible")
     }
 }

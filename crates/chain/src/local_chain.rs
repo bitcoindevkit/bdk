@@ -3,7 +3,7 @@ use core::convert::Infallible;
 use alloc::collections::{BTreeMap, BTreeSet};
 use bitcoin::BlockHash;
 
-use crate::{Append, BlockId, ChainOracle};
+use crate::{BlockId, ChainOracle};
 
 /// This is a local implementation of [`ChainOracle`].
 ///
@@ -179,12 +179,6 @@ impl LocalChain {
 ///
 /// [`determine_changeset`]: LocalChain::determine_changeset
 pub type ChangeSet = BTreeMap<u32, Option<BlockHash>>;
-
-impl Append for ChangeSet {
-    fn append(&mut self, mut other: Self) {
-        BTreeMap::append(self, &mut other)
-    }
-}
 
 /// Represents an update failure of [`LocalChain`] due to the update not connecting to the original
 /// chain.

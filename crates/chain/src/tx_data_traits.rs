@@ -1,6 +1,7 @@
-use bitcoin::{Block, BlockHash, OutPoint, Transaction, TxOut};
-
+use crate::collections::BTreeMap;
+use crate::collections::BTreeSet;
 use crate::BlockId;
+use bitcoin::{Block, BlockHash, OutPoint, Transaction, TxOut};
 
 /// Trait to do something with every txout contained in a structure.
 ///
@@ -76,4 +77,16 @@ pub trait Append {
 
 impl Append for () {
     fn append(&mut self, _other: Self) {}
+}
+
+impl<K: Ord, V> Append for BTreeMap<K, V> {
+    fn append(&mut self, mut other: Self) {
+        BTreeMap::append(self, &mut other)
+    }
+}
+
+impl<T: Ord> Append for BTreeSet<T> {
+    fn append(&mut self, mut other: Self) {
+        BTreeSet::append(self, &mut other)
+    }
 }

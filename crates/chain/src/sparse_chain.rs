@@ -307,12 +307,11 @@
 //! );
 //! ```
 use core::{
-    convert::Infallible,
     fmt::Debug,
     ops::{Bound, RangeBounds},
 };
 
-use crate::{collections::*, tx_graph::TxGraph, BlockId, ChainOracle, FullTxOut, TxHeight};
+use crate::{collections::*, tx_graph::TxGraph, BlockId, FullTxOut, TxHeight};
 use bitcoin::{hashes::Hash, BlockHash, OutPoint, Txid};
 
 /// This is a non-monotone structure that tracks relevant [`Txid`]s that are ordered by chain
@@ -456,26 +455,6 @@ impl<P: core::fmt::Debug> core::fmt::Display for UpdateError<P> {
 
 #[cfg(feature = "std")]
 impl<P: core::fmt::Debug> std::error::Error for UpdateError<P> {}
-
-impl<P> ChainOracle for SparseChain<P> {
-    type Error = Infallible;
-
-    fn is_block_in_chain(
-        &self,
-        block: BlockId,
-        static_block: BlockId,
-    ) -> Result<Option<bool>, Self::Error> {
-        Ok(
-            match (
-                self.checkpoint_at(block.height),
-                self.checkpoint_at(static_block.height),
-            ) {
-                (Some(b), Some(static_b)) => Some(b == block && static_b == static_block),
-                _ => None,
-            },
-        )
-    }
-}
 
 impl<P> SparseChain<P> {
     /// Creates a new chain from a list of block hashes and heights. The caller must guarantee they
