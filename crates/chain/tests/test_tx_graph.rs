@@ -202,7 +202,7 @@ fn insert_tx_graph_doesnt_count_coinbase_as_spent() {
 
     let mut graph = TxGraph::<()>::default();
     let _ = graph.insert_tx(tx);
-    assert!(graph.output_spends(OutPoint::null()).is_empty());
+    assert!(graph.outspends(OutPoint::null()).is_empty());
     assert!(graph.tx_spends(Txid::all_zeros()).next().is_none());
 }
 
@@ -241,10 +241,10 @@ fn insert_tx_graph_keeps_track_of_spend() {
     let _ = graph2.insert_tx(tx1);
 
     assert_eq!(
-        graph1.output_spends(op),
+        graph1.outspends(op),
         &iter::once(tx2.txid()).collect::<HashSet<_>>()
     );
-    assert_eq!(graph2.output_spends(op), graph1.output_spends(op));
+    assert_eq!(graph2.outspends(op), graph1.outspends(op));
 }
 
 #[test]

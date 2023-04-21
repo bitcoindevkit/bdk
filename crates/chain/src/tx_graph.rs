@@ -282,7 +282,7 @@ impl<A> TxGraph<A> {
     ///
     /// `TxGraph` allows conflicting transactions within the graph. Obviously the transactions in
     /// the returned set will never be in the same active-chain.
-    pub fn output_spends(&self, outpoint: OutPoint) -> &HashSet<Txid> {
+    pub fn outspends(&self, outpoint: OutPoint) -> &HashSet<Txid> {
         self.spends.get(&outpoint).unwrap_or(&self.empty_outspends)
     }
 
