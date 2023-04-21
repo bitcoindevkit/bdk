@@ -151,7 +151,7 @@ fn insert_tx_can_retrieve_full_tx_from_graph() {
 
     let mut graph = TxGraph::default();
     let _ = graph.insert_tx(tx.clone());
-    assert_eq!(graph.get_tx(tx.txid()), Some(&tx));
+    assert_eq!(graph.get_tx(&tx.txid()), Some(&tx));
 }
 
 #[test]

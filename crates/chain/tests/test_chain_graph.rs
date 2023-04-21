@@ -362,7 +362,7 @@ fn test_get_tx_in_chain() {
 
     let _ = cg.insert_tx(tx.clone(), TxHeight::Unconfirmed).unwrap();
     assert_eq!(
-        cg.get_tx_in_chain(tx.txid()),
+        cg.get_tx_in_chain(&tx.txid()),
         Some((&TxHeight::Unconfirmed, &tx))
     );
 }

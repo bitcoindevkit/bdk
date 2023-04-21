@@ -116,8 +116,8 @@ impl TxGraph {
     /// Refer to [`get_txout`] for getting a specific [`TxOut`].
     ///
     /// [`get_txout`]: Self::get_txout
-    pub fn get_tx(&self, txid: Txid) -> Option<&Transaction> {
-        match self.txs.get(&txid)? {
+    pub fn get_tx(&self, txid: &Txid) -> Option<&Transaction> {
+        match self.txs.get(txid)? {
             TxNode::Whole(tx) => Some(tx),
             TxNode::Partial(_) => None,
         }
@@ -264,7 +264,7 @@ impl TxGraph {
         let mut additions = Additions::default();
 
         for (&txid, update_tx) in &update.txs {
-            if self.get_tx(txid).is_some() {
+            if self.get_tx(&txid).is_some() {
                 continue;
             }
 

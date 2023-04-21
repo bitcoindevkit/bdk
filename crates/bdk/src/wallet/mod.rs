@@ -412,7 +412,8 @@ impl<D> Wallet<D> {
     /// Optionally fill the [`TransactionDetails::transaction`] field with the raw transaction if
     /// `include_raw` is `true`.
     pub fn get_tx(&self, txid: Txid, include_raw: bool) -> Option<TransactionDetails> {
-        let (&confirmation_time, tx) = self.keychain_tracker.chain_graph().get_tx_in_chain(txid)?;
+        let (&confirmation_time, tx) =
+            self.keychain_tracker.chain_graph().get_tx_in_chain(&txid)?;
         let graph = self.keychain_tracker.graph();
         let txout_index = &self.keychain_tracker.txout_index;
 
@@ -1021,7 +1022,7 @@ impl<D> Wallet<D> {
     ) -> Result<TxBuilder<'_, D, DefaultCoinSelectionAlgorithm, BumpFee>, Error> {
         let graph = self.keychain_tracker.graph();
         let txout_index = &self.keychain_tracker.txout_index;
-        let tx_and_height = self.keychain_tracker.chain_graph().get_tx_in_chain(txid);
+        let tx_and_height = self.keychain_tracker.chain_graph().get_tx_in_chain(&txid);
         let mut tx = match tx_and_height {
             None => return Err(Error::TransactionNotFound),
             Some((ConfirmationTime::Confirmed { .. }, _tx)) => {
@@ -1054,7 +1055,7 @@ impl<D> Wallet<D> {
                 let (&confirmation_time, prev_tx) = self
                     .keychain_tracker
                     .chain_graph()
-                    .get_tx_in_chain(txin.previous_output.txid)
+                    .get_tx_in_chain(&txin.previous_output.txid)
                     .ok_or(Error::UnknownUtxo)?;
                 let txout = &prev_tx.output[txin.previous_output.vout as usize];
 
@@ -1261,7 +1262,7 @@ impl<D> Wallet<D> {
             let confirmation_height = self
                 .keychain_tracker
                 .chain()
-                .tx_position(input.previous_output.txid)
+                .tx_position(&input.previous_output.txid)
                 .map(|conftime| match conftime {
                     &ConfirmationTime::Confirmed { height, .. } => height,
                     ConfirmationTime::Unconfirmed => u32::MAX,
@@ -1440,7 +1441,7 @@ impl<D> Wallet<D> {
             .iter()
             .map(|u| {
                 let txid = u.0.outpoint.txid;
-                let tx = self.keychain_tracker.chain_graph().get_tx_in_chain(txid);
+                let tx = self.keychain_tracker.chain_graph().get_tx_in_chain(&txid);
                 match tx {
                     // We don't have the tx in the db for some reason,
                     // so we can't know for sure if it's mature or not.
@@ -1608,7 +1609,7 @@ impl<D> Wallet<D> {
             .map_err(MiniscriptPsbtError::Conversion)?;
 
         let prev_output = utxo.outpoint;
-        if let Some(prev_tx) = self.keychain_tracker.graph().get_tx(prev_output.txid) {
+        if let Some(prev_tx) = self.keychain_tracker.graph().get_tx(&prev_output.txid) {
             if desc.is_witness() || desc.is_taproot() {
                 psbt_input.witness_utxo = Some(prev_tx.output[prev_output.vout as usize].clone());
             }

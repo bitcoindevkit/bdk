@@ -760,7 +760,7 @@ fn change_tx_position_from_unconfirmed_to_confirmed() {
 
     let _ = chain.insert_tx(txid, TxHeight::Unconfirmed).unwrap();
 
-    assert_eq!(chain.tx_position(txid), Some(&TxHeight::Unconfirmed));
+    assert_eq!(chain.tx_position(&txid), Some(&TxHeight::Unconfirmed));
     let _ = chain
         .insert_checkpoint(BlockId {
             height: 0,
@@ -769,5 +769,5 @@ fn change_tx_position_from_unconfirmed_to_confirmed() {
         .unwrap();
     let _ = chain.insert_tx(txid, TxHeight::Confirmed(0)).unwrap();
 
-    assert_eq!(chain.tx_position(txid), Some(&TxHeight::Confirmed(0)));
+    assert_eq!(chain.tx_position(&txid), Some(&TxHeight::Confirmed(0)));
 }

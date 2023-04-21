@@ -234,7 +234,7 @@ impl<K: Ord + Clone + Debug, P: ChainPosition> ElectrumUpdate<K, P> {
     {
         self.chain_update
             .txids()
-            .filter(|(_, txid)| graph.as_ref().get_tx(*txid).is_none())
+            .filter(|(_, txid)| graph.as_ref().get_tx(txid).is_none())
             .map(|(_, txid)| txid)
             .collect()
     }

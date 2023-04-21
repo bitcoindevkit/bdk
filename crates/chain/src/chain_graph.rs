@@ -84,9 +84,11 @@ where
     pub fn new(chain: SparseChain<P>, graph: TxGraph) -> Result<Self, NewError<P>> {
         let mut missing = HashSet::default();
         for (pos, txid) in chain.txids() {
-            if let Some(tx) = graph.get_tx(*txid) {
+            if let Some(tx) = graph.get_tx(txid) {
                 let conflict = graph
-                    .walk_conflicts(tx, |_, txid| Some((chain.tx_position(txid)?.clone(), txid)))
+                    .walk_conflicts(tx, |_, txid| {
+                        Some((chain.tx_position(&txid)?.clone(), txid))
+                    })
                     .next();
                 if let Some((conflict_pos, conflict)) = conflict {
                     return Err(NewError::Conflict {
@@ -140,12 +142,12 @@ where
         // - copy transactions that have changed positions into the graph
         // - add new transactions to an inflated chain
         for (pos, txid) in update.txids() {
-            match self.chain.tx_position(*txid) {
+            match self.chain.tx_position(txid) {
                 Some(original_pos) => {
                     if original_pos != pos {
                         let tx = self
                             .graph
-                            .get_tx(*txid)
+                            .get_tx(txid)
                             .expect("tx must exist as it is referenced in sparsechain")
                             .clone();
                         let _ = inflated_chain
@@ -210,7 +212,7 @@ where
     ///
     /// This does not necessarily mean that it is *confirmed* in the blockchain; it might just be in
     /// the unconfirmed transaction list within the [`SparseChain`].
-    pub fn get_tx_in_chain(&self, txid: Txid) -> Option<(&P, &Transaction)> {
+    pub fn get_tx_in_chain(&self, txid: &Txid) -> Option<(&P, &Transaction)> {
         let position = self.chain.tx_position(txid)?;
         let full_tx = self.graph.get_tx(txid).expect("must exist");
         Some((position, full_tx))
@@ -321,7 +323,7 @@ where
     ) -> impl Iterator<Item = (&'a P, Txid)> + 'a {
         self.graph.walk_conflicts(tx, move |_, conflict_txid| {
             self.chain
-                .tx_position(conflict_txid)
+                .tx_position(&conflict_txid)
                 .map(|conflict_pos| (conflict_pos, conflict_txid))
         })
     }
@@ -337,7 +339,7 @@ where
             let pos = match pos_change {
                 Some(pos) => {
                     // Ignore txs that are still in the chain -- we only care about new ones
-                    if self.chain.tx_position(txid).is_some() {
+                    if self.chain.tx_position(&txid).is_some() {
                         continue;
                     }
                     pos
@@ -346,7 +348,7 @@ where
                 None => continue,
             };
 
-            let mut full_tx = self.graph.get_tx(txid);
+            let mut full_tx = self.graph.get_tx(&txid);
 
             if full_tx.is_none() {
                 full_tx = changeset.graph.tx.iter().find(|tx| tx.txid() == txid)
@@ -429,7 +431,7 @@ where
     pub fn transactions_in_chain(&self) -> impl DoubleEndedIterator<Item = (&P, &Transaction)> {
         self.chain
             .txids()
-            .map(move |(pos, txid)| (pos, self.graph.get_tx(*txid).expect("must exist")))
+            .map(move |(pos, txid)| (pos, self.graph.get_tx(txid).expect("must exist")))
     }
 
     /// Find the transaction in the chain that spends `outpoint`.

@@ -490,8 +490,8 @@ impl<P: ChainPosition> SparseChain<P> {
     /// Return the [`ChainPosition`] of a `txid`.
     ///
     /// This returns [`None`] if the transaction does not exist.
-    pub fn tx_position(&self, txid: Txid) -> Option<&P> {
-        self.txid_to_pos.get(&txid)
+    pub fn tx_position(&self, txid: &Txid) -> Option<&P> {
+        self.txid_to_pos.get(txid)
     }
 
     /// Return a [`BTreeMap`] of all checkpoints (block hashes by height).
@@ -900,9 +900,9 @@ impl<P: ChainPosition> SparseChain<P> {
     ///
     /// This will return `Some` only if the output's transaction is in both `self` and `graph`.
     pub fn full_txout(&self, graph: &TxGraph, outpoint: OutPoint) -> Option<FullTxOut<P>> {
-        let chain_pos = self.tx_position(outpoint.txid)?;
+        let chain_pos = self.tx_position(&outpoint.txid)?;
 
-        let tx = graph.get_tx(outpoint.txid)?;
+        let tx = graph.get_tx(&outpoint.txid)?;
         let is_on_coinbase = tx.is_coin_base();
         let txout = tx.output.get(outpoint.vout as usize)?.clone();
 
@@ -947,7 +947,7 @@ impl<P: ChainPosition> SparseChain<P> {
             .iter()
             .filter(move |(&txid, pos)| {
                 pos.is_some() /*it was not a deletion*/ &&
-                self.tx_position(txid).is_none() /* we don't have the txid already */
+                self.tx_position(&txid).is_none() /* we don't have the txid already */
             })
             .map(|(&txid, _)| txid)
     }
@@ -976,7 +976,7 @@ impl<P: ChainPosition> SparseChain<P> {
         graph
             .outspends(outpoint)
             .iter()
-            .find_map(|&txid| Some((self.tx_position(txid)?, txid)))
+            .find_map(|&txid| Some((self.tx_position(&txid)?, txid)))
     }
 
     /// Returns whether the sparse chain contains any checkpoints or transactions.
