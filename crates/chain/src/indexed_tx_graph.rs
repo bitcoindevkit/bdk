@@ -1,11 +1,11 @@
 use core::convert::Infallible;
 
 use alloc::vec::Vec;
-use bitcoin::{OutPoint, Script, Transaction, TxOut, Txid};
+use bitcoin::{OutPoint, Script, Transaction, TxOut};
 
 use crate::{
     keychain::Balance,
-    tx_graph::{Additions, CanonicalTx, TxGraph},
+    tx_graph::{Additions, TxGraph},
     Anchor, Append, BlockId, ChainOracle, FullTxOut, ObservedAs,
 };
 
@@ -153,36 +153,6 @@ where
 }
 
 impl<A: Anchor, I: OwnedIndexer> IndexedTxGraph<A, I> {
-    pub fn try_list_owned_txs<'a, C: ChainOracle + 'a>(
-        &'a self,
-        chain: &'a C,
-        chain_tip: BlockId,
-    ) -> impl Iterator<Item = Result<CanonicalTx<'a, Transaction, A>, C::Error>> {
-        self.graph
-            .full_txs()
-            .filter(|node| tx_alters_owned_utxo_set(&self.graph, &self.index, node.txid, node.tx))
-            .filter_map(move |tx_node| {
-                self.graph
-                    .try_get_chain_position(chain, chain_tip, tx_node.txid)
-                    .map(|v| {
-                        v.map(|observed_as| CanonicalTx {
-                            observed_as,
-                            node: tx_node,
-                        })
-                    })
-                    .transpose()
-            })
-    }
-
-    pub fn list_owned_txs<'a, C: ChainOracle<Error = Infallible> + 'a>(
-        &'a self,
-        chain: &'a C,
-        chain_tip: BlockId,
-    ) -> impl Iterator<Item = CanonicalTx<'a, Transaction, A>> {
-        self.try_list_owned_txs(chain, chain_tip)
-            .map(|r| r.expect("chain oracle is infallible"))
-    }
-
     pub fn try_list_owned_txouts<'a, C: ChainOracle + 'a>(
         &'a self,
         chain: &'a C,
@@ -355,22 +325,4 @@ pub trait Indexer {
 pub trait OwnedIndexer: Indexer {
     /// Determines whether a given script pubkey (`spk`) is owned.
     fn is_spk_owned(&self, spk: &Script) -> bool;
-}
-
-fn tx_alters_owned_utxo_set<A, I>(
-    graph: &TxGraph<A>,
-    index: &I,
-    txid: Txid,
-    tx: &Transaction,
-) -> bool
-where
-    A: Anchor,
-    I: OwnedIndexer,
-{
-    let prev_spends = (0..tx.input.len() as u32)
-        .map(|vout| OutPoint { txid, vout })
-        .filter_map(|op| graph.get_txout(op));
-    prev_spends
-        .chain(&tx.output)
-        .any(|txout| index.is_spk_owned(&txout.script_pubkey))
 }
