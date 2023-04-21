@@ -2,7 +2,7 @@ use bitcoin::{hashes::Hash, BlockHash, OutPoint, TxOut, Txid};
 
 use crate::{
     sparse_chain::{self, ChainPosition},
-    Anchor, ConfirmationHeight, COINBASE_MATURITY,
+    Anchor, COINBASE_MATURITY,
 };
 
 /// Represents an observation of some chain data.
@@ -241,20 +241,20 @@ impl<P: ChainPosition> FullTxOut<P> {
     }
 }
 
-impl<A: Anchor + ConfirmationHeight> FullTxOut<ObservedAs<A>> {
+impl<A: Anchor> FullTxOut<ObservedAs<A>> {
     /// Whether the `txout` is considered mature.
     ///
     /// This is the alternative version of [`is_mature`] which depends on `chain_position` being a
     /// [`ObservedAs<A>`] where `A` implements [`Anchor`].
     ///
     /// [`is_mature`]: Self::is_mature
-    pub fn is_observed_as_mature(&self, tip: u32) -> bool {
+    pub fn is_mature(&self, tip: u32) -> bool {
         if !self.is_on_coinbase {
-            return false;
+            return true;
         }
 
         let tx_height = match &self.chain_position {
-            ObservedAs::Confirmed(anchor) => anchor.confirmation_height(),
+            ObservedAs::Confirmed(anchor) => anchor.confirmation_height_upper_bound(),
             ObservedAs::Unconfirmed(_) => {
                 debug_assert!(false, "coinbase tx can never be unconfirmed");
                 return false;
@@ -271,19 +271,19 @@ impl<A: Anchor + ConfirmationHeight> FullTxOut<ObservedAs<A>> {
 
     /// Whether the utxo is/was/will be spendable with chain `tip`.
     ///
-    /// Currently this method does not take into account the locktime.
+    /// This method does not take into account the locktime.
     ///
     /// This is the alternative version of [`is_spendable_at`] which depends on `chain_position`
     /// being a [`ObservedAs<A>`] where `A` implements [`Anchor`].
     ///
     /// [`is_spendable_at`]: Self::is_spendable_at
-    pub fn is_observed_as_confirmed_and_spendable(&self, tip: u32) -> bool {
-        if !self.is_observed_as_mature(tip) {
+    pub fn is_confirmed_and_spendable(&self, tip: u32) -> bool {
+        if !self.is_mature(tip) {
             return false;
         }
 
         let confirmation_height = match &self.chain_position {
-            ObservedAs::Confirmed(anchor) => anchor.confirmation_height(),
+            ObservedAs::Confirmed(anchor) => anchor.confirmation_height_upper_bound(),
             ObservedAs::Unconfirmed(_) => return false,
         };
         if confirmation_height > tip {

@@ -1,11 +1,12 @@
 use core::convert::Infallible;
 
+use alloc::vec::Vec;
 use bitcoin::{OutPoint, Script, Transaction, TxOut, Txid};
 
 use crate::{
     keychain::Balance,
     tx_graph::{Additions, CanonicalTx, TxGraph},
-    Anchor, Append, BlockId, ChainOracle, ConfirmationHeight, FullTxOut, ObservedAs,
+    Anchor, Append, BlockId, ChainOracle, FullTxOut, ObservedAs,
 };
 
 /// A struct that combines [`TxGraph`] and an [`Indexer`] implementation.
@@ -120,20 +121,34 @@ where
     ///
     /// `anchors` can be provided to anchor the transactions to blocks. `seen_at` is a unix
     /// timestamp of when the transactions are last seen.
-    pub fn insert_relevant_txs<'t, T: Iterator<Item = &'t Transaction>>(
+    pub fn insert_relevant_txs<'t>(
         &mut self,
-        txs: T,
+        txs: impl IntoIterator<Item = &'t Transaction>,
         anchors: impl IntoIterator<Item = A> + Clone,
         seen_at: Option<u64>,
     ) -> IndexedAdditions<A, I::Additions> {
-        txs.filter_map(|tx| match self.index.is_tx_relevant(tx) {
-            true => Some(self.insert_tx(tx, anchors.clone(), seen_at)),
-            false => None,
-        })
-        .fold(Default::default(), |mut acc, other| {
-            acc.append(other);
-            acc
-        })
+        // As mentioned by @LLFourn: This algorithm requires the transactions to be topologically
+        // sorted because most indexers cannot decide whether something is relevant unless you have
+        // first inserted its ancestors in the index. We can fix this if we instead do this:
+        // 1. insert all txs into the index. If they are irrelevant then that's fine it will just
+        //    not store anything about them.
+        // 2. decide whether to insert them into the graph depending on whether `is_tx_relevant`
+        //    returns true or not. (in a second loop).
+        let txs = txs
+            .into_iter()
+            .inspect(|tx| {
+                let _ = self.index.index_tx(tx);
+            })
+            .collect::<Vec<_>>();
+        txs.into_iter()
+            .filter_map(|tx| match self.index.is_tx_relevant(tx) {
+                true => Some(self.insert_tx(tx, anchors.clone(), seen_at)),
+                false => None,
+            })
+            .fold(Default::default(), |mut acc, other| {
+                acc.append(other);
+                acc
+            })
     }
 }
 
@@ -222,32 +237,31 @@ impl<A: Anchor, I: OwnedIndexer> IndexedTxGraph<A, I> {
         self.try_list_owned_unspents(chain, chain_tip)
             .map(|r| r.expect("oracle is infallible"))
     }
-}
 
-impl<A: Anchor + ConfirmationHeight, I: OwnedIndexer> IndexedTxGraph<A, I> {
     pub fn try_balance<C, F>(
         &self,
         chain: &C,
         chain_tip: BlockId,
-        tip: u32,
         mut should_trust: F,
     ) -> Result<Balance, C::Error>
     where
         C: ChainOracle,
         F: FnMut(&Script) -> bool,
     {
+        let tip_height = chain_tip.anchor_block().height;
+
         let mut immature = 0;
         let mut trusted_pending = 0;
         let mut untrusted_pending = 0;
         let mut confirmed = 0;
 
-        for res in self.try_list_owned_txouts(chain, chain_tip) {
+        for res in self.try_list_owned_unspents(chain, chain_tip) {
             let txout = res?;
 
             match &txout.chain_position {
                 ObservedAs::Confirmed(_) => {
                     if txout.is_on_coinbase {
-                        if txout.is_observed_as_mature(tip) {
+                        if txout.is_mature(tip_height) {
                             confirmed += txout.txout.value;
                         } else {
                             immature += txout.txout.value;
@@ -272,39 +286,12 @@ impl<A: Anchor + ConfirmationHeight, I: OwnedIndexer> IndexedTxGraph<A, I> {
         })
     }
 
-    pub fn balance<C, F>(&self, chain: &C, chain_tip: BlockId, tip: u32, should_trust: F) -> Balance
+    pub fn balance<C, F>(&self, chain: &C, chain_tip: BlockId, should_trust: F) -> Balance
     where
         C: ChainOracle<Error = Infallible>,
         F: FnMut(&Script) -> bool,
     {
-        self.try_balance(chain, chain_tip, tip, should_trust)
-            .expect("error is infallible")
-    }
-
-    pub fn try_balance_at<C>(
-        &self,
-        chain: &C,
-        chain_tip: BlockId,
-        height: u32,
-    ) -> Result<u64, C::Error>
-    where
-        C: ChainOracle,
-    {
-        let mut sum = 0;
-        for txo_res in self.try_list_owned_unspents(chain, chain_tip) {
-            let txo = txo_res?;
-            if txo.is_observed_as_confirmed_and_spendable(height) {
-                sum += txo.txout.value;
-            }
-        }
-        Ok(sum)
-    }
-
-    pub fn balance_at<C>(&self, chain: &C, chain_tip: BlockId, height: u32) -> u64
-    where
-        C: ChainOracle<Error = Infallible>,
-    {
-        self.try_balance_at(chain, chain_tip, height)
+        self.try_balance(chain, chain_tip, should_trust)
             .expect("error is infallible")
     }
 }

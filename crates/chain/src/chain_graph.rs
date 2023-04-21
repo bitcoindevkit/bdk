@@ -465,7 +465,7 @@ where
 #[must_use]
 pub struct ChangeSet<P> {
     pub chain: sparse_chain::ChangeSet<P>,
-    pub graph: tx_graph::Additions<()>,
+    pub graph: tx_graph::Additions,
 }
 
 impl<P> ChangeSet<P> {

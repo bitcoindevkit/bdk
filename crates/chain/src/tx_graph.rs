@@ -908,7 +908,7 @@ impl<A: Anchor> TxGraph<A> {
     )
 )]
 #[must_use]
-pub struct Additions<A> {
+pub struct Additions<A = ()> {
     pub tx: BTreeSet<Transaction>,
     pub txout: BTreeMap<OutPoint, TxOut>,
     pub anchors: BTreeSet<(A, Txid)>,
