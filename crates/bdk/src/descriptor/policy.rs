@@ -39,7 +39,7 @@
 use crate::collections::{BTreeMap, HashSet, VecDeque};
 use alloc::string::String;
 use alloc::vec::Vec;
-use core::cmp::max;
+use core::cmp::{max, Ordering};
 use core::fmt;
 
 use serde::ser::SerializeMap;
@@ -492,6 +492,16 @@ impl Condition {
     /// Returns `true` if there are no extra conditions to verify
     pub fn is_null(&self) -> bool {
         self.csv.is_none() && self.timelock.is_none()
+    }
+}
+
+impl Ord for Condition {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.csv.cmp(&other.csv).then_with(|| {
+            self.timelock
+                .map(|t| t.to_consensus_u32())
+                .cmp(&other.timelock.map(|t| t.to_consensus_u32()))
+        })
     }
 }
 
