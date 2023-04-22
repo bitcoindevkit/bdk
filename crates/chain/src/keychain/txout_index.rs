@@ -91,7 +91,7 @@ impl<K> Deref for KeychainTxOutIndex<K> {
     }
 }
 
-impl<K: Clone + Ord + Debug + 'static> Indexer for KeychainTxOutIndex<K> {
+impl<K: Clone + Ord + Debug> Indexer for KeychainTxOutIndex<K> {
     type Additions = DerivationAdditions<K>;
 
     fn index_txout(&mut self, outpoint: OutPoint, txout: &TxOut) -> Self::Additions {
@@ -111,9 +111,9 @@ impl<K: Clone + Ord + Debug + 'static> Indexer for KeychainTxOutIndex<K> {
     }
 }
 
-impl<K: Clone + Ord + Debug + 'static> OwnedIndexer for KeychainTxOutIndex<K> {
+impl<K: Clone + Ord + Debug> OwnedIndexer for KeychainTxOutIndex<K> {
     fn is_spk_owned(&self, spk: &Script) -> bool {
-        self.inner().is_spk_owned(spk)
+        self.index_of_spk(spk).is_some()
     }
 }
 

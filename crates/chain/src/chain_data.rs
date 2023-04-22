@@ -16,6 +16,15 @@ pub enum ObservedAs<A> {
     Unconfirmed(u64),
 }
 
+impl<A> ObservedAs<A> {
+    pub fn is_confirmed(&self) -> bool {
+        match self {
+            ObservedAs::Confirmed(_) => true,
+            ObservedAs::Unconfirmed(_) => false,
+        }
+    }
+}
+
 impl<A: Clone> ObservedAs<&A> {
     pub fn cloned(self) -> ObservedAs<A> {
         match self {
