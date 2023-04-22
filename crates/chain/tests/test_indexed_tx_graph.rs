@@ -61,7 +61,7 @@ fn insert_relevant_txs() {
     let txs = [tx_c, tx_b, tx_a];
 
     assert_eq!(
-        graph.insert_relevant_txs(&txs, None, None),
+        graph.insert_relevant_txs(txs.iter().map(|tx| (tx, None)), None),
         IndexedAdditions {
             graph_additions: Additions {
                 tx: txs.into(),

@@ -117,14 +117,13 @@ where
     /// Insert relevant transactions from the given `txs` iterator.
     ///
     /// Relevancy is determined by the [`Indexer::is_tx_relevant`] implementation of `I`. Irrelevant
-    /// transactions in `txs` will be ignored. Also, `txs` does not need to be in topological order.
+    /// transactions in `txs` will be ignored. `txs` do not need to be in topological order.
     ///
     /// `anchors` can be provided to anchor the transactions to blocks. `seen_at` is a unix
     /// timestamp of when the transactions are last seen.
     pub fn insert_relevant_txs<'t>(
         &mut self,
-        txs: impl IntoIterator<Item = &'t Transaction>,
-        anchors: impl IntoIterator<Item = A> + Clone,
+        txs: impl IntoIterator<Item = (&'t Transaction, impl IntoIterator<Item = A>)>,
         seen_at: Option<u64>,
     ) -> IndexedAdditions<A, I::Additions> {
         // The algorithm below allows for non-topologically ordered transactions by using two loops.
@@ -135,15 +134,15 @@ where
         //    returns true or not. (in a second loop).
         let mut additions = IndexedAdditions::<A, I::Additions>::default();
         let mut transactions = Vec::new();
-        for tx in txs.into_iter() {
+        for (tx, anchors) in txs.into_iter() {
             additions.index_additions.append(self.index.index_tx(tx));
-            transactions.push(tx);
+            transactions.push((tx, anchors));
         }
         additions.append(
             transactions
                 .into_iter()
-                .filter_map(|tx| match self.index.is_tx_relevant(tx) {
-                    true => Some(self.insert_tx(tx, anchors.clone(), seen_at)),
+                .filter_map(|(tx, anchors)| match self.index.is_tx_relevant(tx) {
+                    true => Some(self.insert_tx(tx, anchors, seen_at)),
                     false => None,
                 })
                 .fold(Default::default(), |mut acc, other| {
