@@ -117,7 +117,7 @@ where
     /// Insert relevant transactions from the given `txs` iterator.
     ///
     /// Relevancy is determined by the [`Indexer::is_tx_relevant`] implementation of `I`. Irrelevant
-    /// transactions in `txs` will be ignored.
+    /// transactions in `txs` will be ignored. Also, `txs` does not need to be in topological order.
     ///
     /// `anchors` can be provided to anchor the transactions to blocks. `seen_at` is a unix
     /// timestamp of when the transactions are last seen.
@@ -127,28 +127,31 @@ where
         anchors: impl IntoIterator<Item = A> + Clone,
         seen_at: Option<u64>,
     ) -> IndexedAdditions<A, I::Additions> {
-        // As mentioned by @LLFourn: This algorithm requires the transactions to be topologically
-        // sorted because most indexers cannot decide whether something is relevant unless you have
-        // first inserted its ancestors in the index. We can fix this if we instead do this:
+        // The algorithm below allows for non-topologically ordered transactions by using two loops.
+        // This is achieved by:
         // 1. insert all txs into the index. If they are irrelevant then that's fine it will just
         //    not store anything about them.
         // 2. decide whether to insert them into the graph depending on whether `is_tx_relevant`
         //    returns true or not. (in a second loop).
-        let txs = txs
-            .into_iter()
-            .inspect(|tx| {
-                let _ = self.index.index_tx(tx);
-            })
-            .collect::<Vec<_>>();
-        txs.into_iter()
-            .filter_map(|tx| match self.index.is_tx_relevant(tx) {
-                true => Some(self.insert_tx(tx, anchors.clone(), seen_at)),
-                false => None,
-            })
-            .fold(Default::default(), |mut acc, other| {
-                acc.append(other);
-                acc
-            })
+        let mut additions = IndexedAdditions::<A, I::Additions>::default();
+        let mut transactions = Vec::new();
+        for tx in txs.into_iter() {
+            additions.index_additions.append(self.index.index_tx(tx));
+            transactions.push(tx);
+        }
+        additions.append(
+            transactions
+                .into_iter()
+                .filter_map(|tx| match self.index.is_tx_relevant(tx) {
+                    true => Some(self.insert_tx(tx, anchors.clone(), seen_at)),
+                    false => None,
+                })
+                .fold(Default::default(), |mut acc, other| {
+                    acc.append(other);
+                    acc
+                }),
+        );
+        additions
     }
 }
 
@@ -170,7 +173,7 @@ impl<A: Anchor, I: OwnedIndexer> IndexedTxGraph<A, I> {
             })
     }
 
-    pub fn list_owned_txouts<'a, C: ChainOracle + 'a>(
+    pub fn list_owned_txouts<'a, C: ChainOracle<Error = Infallible> + 'a>(
         &'a self,
         chain: &'a C,
         chain_tip: BlockId,
@@ -196,14 +199,11 @@ impl<A: Anchor, I: OwnedIndexer> IndexedTxGraph<A, I> {
             })
     }
 
-    pub fn list_owned_unspents<'a, C>(
+    pub fn list_owned_unspents<'a, C: ChainOracle<Error = Infallible> + 'a>(
         &'a self,
         chain: &'a C,
         chain_tip: BlockId,
-    ) -> impl Iterator<Item = FullTxOut<ObservedAs<A>>> + 'a
-    where
-        C: ChainOracle + 'a,
-    {
+    ) -> impl Iterator<Item = FullTxOut<ObservedAs<A>>> + 'a {
         self.try_list_owned_unspents(chain, chain_tip)
             .map(|r| r.expect("oracle is infallible"))
     }

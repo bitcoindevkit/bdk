@@ -2,10 +2,12 @@ mod common;
 
 use bdk_chain::{
     indexed_tx_graph::{IndexedAdditions, IndexedTxGraph},
+    keychain::{DerivationAdditions, KeychainTxOutIndex},
     tx_graph::Additions,
-    BlockId, SpkTxOutIndex,
+    BlockId,
 };
-use bitcoin::{hashes::hex::FromHex, OutPoint, Script, Transaction, TxIn, TxOut};
+use bitcoin::{secp256k1::Secp256k1, OutPoint, Transaction, TxIn, TxOut};
+use miniscript::Descriptor;
 
 /// Ensure [`IndexedTxGraph::insert_relevant_txs`] can successfully index transactions NOT presented
 /// in topological order.
@@ -16,13 +18,15 @@ use bitcoin::{hashes::hex::FromHex, OutPoint, Script, Transaction, TxIn, TxOut};
 /// agnostic.
 #[test]
 fn insert_relevant_txs() {
-    let mut graph = IndexedTxGraph::<BlockId, SpkTxOutIndex<u32>>::default();
+    const DESCRIPTOR: &str = "tr([73c5da0a/86'/0'/0']xprv9xgqHN7yz9MwCkxsBPN5qetuNdQSUttZNKw1dcYTV4mkaAFiBVGQziHs3NRSWMkCzvgjEe3n9xV8oYywvM8at9yRqyaZVz6TYYhX98VjsUk/0/*)";
+    let (descriptor, _) = Descriptor::parse_descriptor(&Secp256k1::signing_only(), DESCRIPTOR)
+        .expect("must be valid");
+    let spk_0 = descriptor.at_derivation_index(0).script_pubkey();
+    let spk_1 = descriptor.at_derivation_index(9).script_pubkey();
 
-    // insert some spks
-    let spk_0 = Script::from_hex("0014034f9515cace31713707dff8194b8f550eb6d336").unwrap();
-    let spk_1 = Script::from_hex("0014beaa39ab2b4f47995c77107d8c3f481d3bd33941").unwrap();
-    graph.index.insert_spk(0, spk_0.clone());
-    graph.index.insert_spk(1, spk_1.clone());
+    let mut graph = IndexedTxGraph::<BlockId, KeychainTxOutIndex<()>>::default();
+    graph.index.add_keychain((), descriptor);
+    graph.index.set_lookahead(&(), 10);
 
     let tx_a = Transaction {
         output: vec![
@@ -63,7 +67,7 @@ fn insert_relevant_txs() {
                 tx: txs.into(),
                 ..Default::default()
             },
-            ..Default::default()
+            index_additions: DerivationAdditions([((), 9_u32)].into()),
         }
     )
 }
