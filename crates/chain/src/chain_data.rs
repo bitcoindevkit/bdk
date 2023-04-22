@@ -247,23 +247,25 @@ impl<A: Anchor> FullTxOut<ObservedAs<A>> {
     /// This is the alternative version of [`is_mature`] which depends on `chain_position` being a
     /// [`ObservedAs<A>`] where `A` implements [`Anchor`].
     ///
+    /// Depending on the implementation of [`confirmation_height_upper_bound`] in [`Anchor`], this
+    /// method may return false-negatives. In other words, interpretted confirmation count may be
+    /// less than the actual value.
+    ///
     /// [`is_mature`]: Self::is_mature
+    /// [`confirmation_height_upper_bound`]: Anchor::confirmation_height_upper_bound
     pub fn is_mature(&self, tip: u32) -> bool {
-        if !self.is_on_coinbase {
-            return true;
-        }
-
-        let tx_height = match &self.chain_position {
-            ObservedAs::Confirmed(anchor) => anchor.confirmation_height_upper_bound(),
-            ObservedAs::Unconfirmed(_) => {
-                debug_assert!(false, "coinbase tx can never be unconfirmed");
+        if self.is_on_coinbase {
+            let tx_height = match &self.chain_position {
+                ObservedAs::Confirmed(anchor) => anchor.confirmation_height_upper_bound(),
+                ObservedAs::Unconfirmed(_) => {
+                    debug_assert!(false, "coinbase tx can never be unconfirmed");
+                    return false;
+                }
+            };
+            let age = tip.saturating_sub(tx_height);
+            if age + 1 < COINBASE_MATURITY {
                 return false;
             }
-        };
-
-        let age = tip.saturating_sub(tx_height);
-        if age + 1 < COINBASE_MATURITY {
-            return false;
         }
 
         true
@@ -276,7 +278,12 @@ impl<A: Anchor> FullTxOut<ObservedAs<A>> {
     /// This is the alternative version of [`is_spendable_at`] which depends on `chain_position`
     /// being a [`ObservedAs<A>`] where `A` implements [`Anchor`].
     ///
+    /// Depending on the implementation of [`confirmation_height_upper_bound`] in [`Anchor`], this
+    /// method may return false-negatives. In other words, interpretted confirmation count may be
+    /// less than the actual value.
+    ///
     /// [`is_spendable_at`]: Self::is_spendable_at
+    /// [`confirmation_height_upper_bound`]: Anchor::confirmation_height_upper_bound
     pub fn is_confirmed_and_spendable(&self, tip: u32) -> bool {
         if !self.is_mature(tip) {
             return false;
@@ -300,5 +307,3 @@ impl<A: Anchor> FullTxOut<ObservedAs<A>> {
         true
     }
 }
-
-// TODO: make test
