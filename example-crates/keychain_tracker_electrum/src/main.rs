@@ -173,7 +173,7 @@ fn main() -> anyhow::Result<()> {
 
             if utxos {
                 let utxos = tracker
-                    .full_utxos()
+                    .full_utxos(false)
                     .map(|(_, utxo)| utxo)
                     .collect::<Vec<_>>();
                 outpoints = Box::new(

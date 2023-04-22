@@ -1,4 +1,4 @@
-use bitcoin::Transaction;
+use bitcoin::{OutPoint, Transaction};
 use miniscript::{Descriptor, DescriptorPublicKey};
 
 use crate::{
@@ -21,6 +21,8 @@ pub struct KeychainTracker<K, P> {
     /// Index between script pubkeys to transaction outputs
     pub txout_index: KeychainTxOutIndex<K>,
     chain_graph: ChainGraph<P>,
+    /// UTXOs reserved by transactions as inputs
+    reserved: HashSet<OutPoint>,
 }
 
 impl<K, P> KeychainTracker<K, P>
@@ -126,9 +128,17 @@ where
     /// Refer to [`full_txouts`] for more.
     ///
     /// [`full_txouts`]: Self::full_txouts
-    pub fn full_utxos(&self) -> impl Iterator<Item = (&(K, u32), FullTxOut<P>)> + '_ {
-        self.full_txouts()
-            .filter(|(_, txout)| txout.spent_by.is_none())
+    pub fn full_utxos(
+        &self,
+        include_reserved_utxos: bool,
+    ) -> impl Iterator<Item = (&(K, u32), FullTxOut<P>)> + '_ {
+        self.full_txouts().filter(move |(_, txout)| {
+            if include_reserved_utxos {
+                txout.spent_by.is_none()
+            } else {
+                txout.spent_by.is_none() && !self.reserved.contains(&txout.outpoint)
+            }
+        })
     }
 
     /// Returns a reference to the internal [`ChainGraph`].
@@ -228,13 +238,17 @@ where
     ///
     /// When in doubt set `should_trust` to return false. This doesn't do anything other than change
     /// where the unconfirmed output's value is accounted for in `Balance`.
-    pub fn balance(&self, mut should_trust: impl FnMut(&K) -> bool) -> Balance {
+    pub fn balance(
+        &self,
+        include_reserved_utxos: bool,
+        mut should_trust: impl FnMut(&K) -> bool,
+    ) -> Balance {
         let mut immature = 0;
         let mut trusted_pending = 0;
         let mut untrusted_pending = 0;
         let mut confirmed = 0;
         let last_sync_height = self.chain().latest_checkpoint().map(|latest| latest.height);
-        for ((keychain, _), utxo) in self.full_utxos() {
+        for ((keychain, _), utxo) in self.full_utxos(include_reserved_utxos) {
             let chain_position = &utxo.chain_position;
 
             match chain_position.height() {
@@ -272,11 +286,42 @@ where
 
     /// Returns the balance of all spendable confirmed unspent outputs of this tracker at a
     /// particular height.
-    pub fn balance_at(&self, height: u32) -> u64 {
+    pub fn balance_at(&self, include_reserved_utxos: bool, height: u32) -> u64 {
         self.full_txouts()
-            .filter(|(_, full_txout)| full_txout.is_spendable_at(height))
+            .filter(|(_, full_txout)| {
+                if include_reserved_utxos {
+                    full_txout.is_spendable_at(height)
+                } else {
+                    full_txout.is_spendable_at(height)
+                        && !self.reserved.contains(&full_txout.outpoint)
+                }
+            })
             .map(|(_, full_txout)| full_txout.txout.value)
             .sum()
+    }
+
+    /// Returns boolean saying if or not the outpoint has been added to reserved UTXOs.
+    ///
+    /// Marks a UTXO(`outpoint`) as reserved by adding it to a set of utxos used
+    /// by transactions that have been created but not yet broadcasted.
+    /// Once a utxo is marked as reserved by a particular transaction either
+    /// during/after the transaction building process, it cannot be used for
+    /// building another transaction.
+    ///
+    /// This is useful in a scenario where you are creating a sequence of
+    /// transactions and you don't want utxos to be re-used as inputs
+    /// across transactions.
+    ///
+    /// A UTXO will be considered reserved until it is released by [`Self::unmark_reserved`]
+    /// to the wallet's UTXO pool.
+    pub fn mark_reserved(&mut self, outpoint: OutPoint) -> bool {
+        self.reserved.insert(outpoint)
+    }
+
+    /// Undoes the effect of [`Self::mark_reserved`]. Returns whether `outpoint`
+    /// has been removed from `reserved`
+    pub fn unmark_reserved(&mut self, outpoint: &OutPoint) -> bool {
+        self.reserved.remove(outpoint)
     }
 }
 
@@ -285,6 +330,7 @@ impl<K, P> Default for KeychainTracker<K, P> {
         Self {
             txout_index: Default::default(),
             chain_graph: Default::default(),
+            reserved: Default::default(),
         }
     }
 }

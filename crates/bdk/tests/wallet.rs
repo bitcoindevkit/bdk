@@ -89,7 +89,7 @@ fn test_descriptor_checksum() {
 #[test]
 fn test_get_funded_wallet_balance() {
     let (wallet, _) = get_funded_wallet(get_test_wpkh());
-    assert_eq!(wallet.get_balance().confirmed, 50000);
+    assert_eq!(wallet.get_balance(false).confirmed, 50000);
 }
 
 macro_rules! assert_fee_rate {
@@ -435,14 +435,14 @@ fn test_create_tx_drain_to_and_utxos() {
     let (mut wallet, _) = get_funded_wallet(get_test_wpkh());
     let addr = wallet.get_address(New);
     let utxos: Vec<_> = wallet
-        .list_unspent()
+        .list_unspent(false)
         .into_iter()
         .map(|u| u.outpoint)
         .collect();
     let mut builder = wallet.build_tx();
     builder
         .drain_to(addr.script_pubkey())
-        .add_utxos(&utxos)
+        .add_utxos(&utxos, true)
         .unwrap();
     let (psbt, details) = builder.finish().unwrap();
 
@@ -818,10 +818,13 @@ fn test_create_tx_add_utxo() {
     let mut builder = wallet.build_tx();
     builder
         .add_recipient(addr.script_pubkey(), 30_000)
-        .add_utxo(OutPoint {
-            txid: small_output_tx.txid(),
-            vout: 0,
-        })
+        .add_utxo(
+            OutPoint {
+                txid: small_output_tx.txid(),
+                vout: 0,
+            },
+            false,
+        )
         .unwrap();
     let (psbt, details) = builder.finish().unwrap();
 
@@ -855,10 +858,13 @@ fn test_create_tx_manually_selected_insufficient() {
     let mut builder = wallet.build_tx();
     builder
         .add_recipient(addr.script_pubkey(), 30_000)
-        .add_utxo(OutPoint {
-            txid: small_output_tx.txid(),
-            vout: 0,
-        })
+        .add_utxo(
+            OutPoint {
+                txid: small_output_tx.txid(),
+                vout: 0,
+            },
+            false,
+        )
         .unwrap()
         .manually_selected_only();
     builder.finish().unwrap();
@@ -972,7 +978,7 @@ fn test_add_foreign_utxo() {
         get_funded_wallet("wpkh(cVbZ8ovhye9AoAHFsqobCf7LxbXDAECy9Kb8TZdfsDYMZGBUyCnm)");
 
     let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
-    let utxo = wallet2.list_unspent().remove(0);
+    let utxo = wallet2.list_unspent(false).remove(0);
     let foreign_utxo_satisfaction = wallet2
         .get_descriptor_for_keychain(KeychainKind::External)
         .max_satisfaction_weight()
@@ -1036,7 +1042,7 @@ fn test_add_foreign_utxo() {
 #[should_panic(expected = "Generic(\"Foreign utxo missing witness_utxo or non_witness_utxo\")")]
 fn test_add_foreign_utxo_invalid_psbt_input() {
     let (mut wallet, _) = get_funded_wallet(get_test_wpkh());
-    let outpoint = wallet.list_unspent()[0].outpoint;
+    let outpoint = wallet.list_unspent(false)[0].outpoint;
     let foreign_utxo_satisfaction = wallet
         .get_descriptor_for_keychain(KeychainKind::External)
         .max_satisfaction_weight()
@@ -1054,7 +1060,7 @@ fn test_add_foreign_utxo_where_outpoint_doesnt_match_psbt_input() {
     let (wallet2, txid2) =
         get_funded_wallet("wpkh(cVbZ8ovhye9AoAHFsqobCf7LxbXDAECy9Kb8TZdfsDYMZGBUyCnm)");
 
-    let utxo2 = wallet2.list_unspent().remove(0);
+    let utxo2 = wallet2.list_unspent(false).remove(0);
     let tx1 = wallet1.get_tx(txid1, true).unwrap().transaction.unwrap();
     let tx2 = wallet2.get_tx(txid2, true).unwrap().transaction.unwrap();
 
@@ -1098,7 +1104,7 @@ fn test_add_foreign_utxo_only_witness_utxo() {
     let (wallet2, txid2) =
         get_funded_wallet("wpkh(cVbZ8ovhye9AoAHFsqobCf7LxbXDAECy9Kb8TZdfsDYMZGBUyCnm)");
     let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
-    let utxo2 = wallet2.list_unspent().remove(0);
+    let utxo2 = wallet2.list_unspent(false).remove(0);
 
     let satisfaction_weight = wallet2
         .get_descriptor_for_keychain(KeychainKind::External)
@@ -1106,6 +1112,7 @@ fn test_add_foreign_utxo_only_witness_utxo() {
         .unwrap();
 
     let mut builder = wallet1.build_tx();
+    builder.include_reserved_utxos(true);
     builder.add_recipient(addr.script_pubkey(), 60_000);
 
     {
@@ -1160,7 +1167,7 @@ fn test_add_foreign_utxo_only_witness_utxo() {
 fn test_get_psbt_input() {
     // this should grab a known good utxo and set the input
     let (wallet, _) = get_funded_wallet(get_test_wpkh());
-    for utxo in wallet.list_unspent() {
+    for utxo in wallet.list_unspent(false) {
         let psbt_input = wallet.get_psbt_input(utxo, None, false).unwrap();
         assert!(psbt_input.witness_utxo.is_some() || psbt_input.non_witness_utxo.is_some());
     }
@@ -1478,10 +1485,13 @@ fn test_bump_fee_drain_wallet() {
     let mut builder = wallet.build_tx();
     builder
         .drain_to(addr.script_pubkey())
-        .add_utxo(OutPoint {
-            txid: tx.txid(),
-            vout: 0,
-        })
+        .add_utxo(
+            OutPoint {
+                txid: tx.txid(),
+                vout: 0,
+            },
+            false,
+        )
         .unwrap()
         .manually_selected_only()
         .enable_rbf();
@@ -1533,7 +1543,7 @@ fn test_bump_fee_remove_output_manually_selected_only() {
     let mut builder = wallet.build_tx();
     builder
         .drain_to(addr.script_pubkey())
-        .add_utxo(outpoint)
+        .add_utxo(outpoint, false)
         .unwrap()
         .manually_selected_only()
         .enable_rbf();
@@ -1660,7 +1670,7 @@ fn test_bump_fee_no_change_add_input_and_change() {
     let mut builder = wallet.build_tx();
     builder
         .drain_to(addr.script_pubkey())
-        .add_utxo(op)
+        .add_utxo(op, false)
         .unwrap()
         .manually_selected_only()
         .enable_rbf();
@@ -1790,7 +1800,7 @@ fn test_bump_fee_force_add_input() {
     // the addition of an extra input with `add_utxo()`
     let mut builder = wallet.build_fee_bump(txid).unwrap();
     builder
-        .add_utxo(incoming_op)
+        .add_utxo(incoming_op, false)
         .unwrap()
         .fee_rate(FeeRate::from_sat_per_vb(5.0));
     let (psbt, details) = builder.finish().unwrap();
@@ -1845,7 +1855,10 @@ fn test_bump_fee_absolute_force_add_input() {
     // the new fee_rate is low enough that just reducing the change would be fine, but we force
     // the addition of an extra input with `add_utxo()`
     let mut builder = wallet.build_fee_bump(txid).unwrap();
-    builder.add_utxo(incoming_op).unwrap().fee_absolute(250);
+    builder
+        .add_utxo(incoming_op, false)
+        .unwrap()
+        .fee_absolute(250);
     let (psbt, details) = builder.finish().unwrap();
 
     assert_eq!(details.sent, original_details.sent + 25_000);
@@ -1956,7 +1969,7 @@ fn test_fee_amount_negative_drain_val() {
     let mut builder = wallet.build_tx();
     builder
         .add_recipient(send_to.script_pubkey(), 8630)
-        .add_utxo(incoming_op)
+        .add_utxo(incoming_op, false)
         .unwrap()
         .enable_rbf()
         .fee_rate(fee_rate);
@@ -2128,6 +2141,7 @@ fn test_remove_partial_sigs_after_finalize_sign_option() {
     for remove_partial_sigs in &[true, false] {
         let addr = wallet.get_address(New);
         let mut builder = wallet.build_tx();
+        builder.include_reserved_utxos(true);
         builder.drain_to(addr.script_pubkey()).drain_wallet();
         let mut psbt = builder.finish().unwrap().0;
 
@@ -2158,6 +2172,7 @@ fn test_try_finalize_sign_option() {
     for try_finalize in &[true, false] {
         let addr = wallet.get_address(New);
         let mut builder = wallet.build_tx();
+        builder.include_reserved_utxos(true);
         builder.drain_to(addr.script_pubkey()).drain_wallet();
         let mut psbt = builder.finish().unwrap().0;
 
@@ -2660,7 +2675,7 @@ fn test_taproot_foreign_utxo() {
     let (wallet2, _) = get_funded_wallet(get_test_tr_single_sig());
 
     let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
-    let utxo = wallet2.list_unspent().remove(0);
+    let utxo = wallet2.list_unspent(false).remove(0);
     let psbt_input = wallet2.get_psbt_input(utxo.clone(), None, false).unwrap();
     let foreign_utxo_satisfaction = wallet2
         .get_descriptor_for_keychain(KeychainKind::External)
@@ -3028,7 +3043,7 @@ fn test_spend_coinbase() {
     let not_yet_mature_time = confirmation_height + COINBASE_MATURITY - 1;
     let maturity_time = confirmation_height + COINBASE_MATURITY;
 
-    let balance = wallet.get_balance();
+    let balance = wallet.get_balance(false);
     assert_eq!(
         balance,
         Balance {
@@ -3073,7 +3088,7 @@ fn test_spend_coinbase() {
             hash: BlockHash::all_zeros(),
         })
         .unwrap();
-    let balance = wallet.get_balance();
+    let balance = wallet.get_balance(false);
     assert_eq!(
         balance,
         Balance {
@@ -3266,6 +3281,7 @@ fn test_tx_cancellation() {
             let addr = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap();
             let mut builder = $wallet.build_tx();
             builder.add_recipient(addr.script_pubkey(), 10_000);
+            builder.include_reserved_utxos(true);
 
             let (psbt, _) = builder.finish().unwrap();
 
@@ -3325,4 +3341,92 @@ fn test_tx_cancellation() {
         .find_map(|txout| wallet.derivation_of_spk(&txout.script_pubkey))
         .unwrap();
     assert_eq!(change_derivation_4, (KeychainKind::Internal, 2));
+}
+
+#[test]
+fn test_utxo_reservation() {
+    // create wallet and fund it.
+    let (mut wallet, _) = get_funded_wallet(get_test_wpkh());
+    let addr = wallet.get_address(New);
+
+    // this transaction creates more utxos necessary for testing utxo reservation
+    let mut builder = wallet.build_tx();
+    builder.add_recipient(addr.script_pubkey(), 10000);
+    let (psbt, _) = builder.finish().unwrap();
+
+    let tx1 = psbt.extract_tx();
+
+    wallet
+        .insert_checkpoint(BlockId {
+            height: 1_001,
+            hash: BlockHash::all_zeros(),
+        })
+        .unwrap();
+    wallet
+        .insert_tx(
+            tx1.clone(),
+            ConfirmationTime::Confirmed {
+                height: 1_001,
+                time: 110,
+            },
+        )
+        .unwrap();
+
+    let addr = wallet.get_address(New);
+    let mut builder = wallet.build_tx();
+    builder.add_recipient(addr.script_pubkey(), 1000);
+    let (psbt, _) = builder.finish().unwrap();
+    let tx2 = psbt.extract_tx();
+
+    let available_utxos = wallet
+        .list_unspent(false)
+        .iter()
+        .map(|u| u.outpoint)
+        .collect::<Vec<_>>();
+
+    //check that every input is not in available utxos
+    for input in &tx2.input {
+        assert!(!available_utxos.contains(&input.previous_output));
+    }
+
+    let addr = wallet.get_address(New);
+    let mut builder = wallet.build_tx();
+    builder.add_recipient(addr.script_pubkey(), 1000);
+    let (psbt, _) = builder.finish().unwrap();
+    let tx3 = psbt.extract_tx();
+
+    let available_utxos = wallet
+        .list_unspent(false)
+        .iter()
+        .map(|u| u.outpoint)
+        .collect::<Vec<_>>();
+
+    //check that every input is not in available utxos
+    for input in &tx3.input {
+        assert!(!available_utxos.contains(&input.previous_output));
+    }
+
+    wallet.cancel_tx(&tx2);
+    let available_utxos = wallet
+        .list_unspent(false)
+        .iter()
+        .map(|u| u.outpoint)
+        .collect::<Vec<_>>();
+
+    // check if reserved utxos are returned to utxo set after transaction cancellation
+    for input in &tx2.input {
+        assert!(available_utxos.contains(&input.previous_output));
+    }
+
+    wallet.cancel_tx(&tx3);
+    let available_utxos = wallet
+        .list_unspent(false)
+        .iter()
+        .map(|u| u.outpoint)
+        .collect::<Vec<_>>();
+
+    // check if reserved utxos are returned to utxo set after transaction cancellation
+    for input in &tx3.input {
+        assert!(available_utxos.contains(&input.previous_output));
+    }
 }
