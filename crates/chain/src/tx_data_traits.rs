@@ -81,3 +81,11 @@ impl<T: Ord> Append for BTreeSet<T> {
         BTreeSet::append(self, &mut other)
     }
 }
+
+impl<T: Ord> Append for Option<T> {
+    fn append(&mut self, other: Self) {
+        if *self < other {
+            *self = other;
+        }
+    }
+}
