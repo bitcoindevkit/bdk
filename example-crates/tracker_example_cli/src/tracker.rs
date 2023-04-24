@@ -3,11 +3,11 @@ use std::fmt::Debug;
 use bdk_chain::{
     indexed_tx_graph::{IndexedAdditions, IndexedTxGraph},
     keychain::{DerivationAdditions, KeychainTxOutIndex},
-    Anchor, Append, BlockId, ChainOracle, FullTxOut, LoadablePersistBackend, ObservedAs,
+    Anchor, Append, BlockId, ChainOracle, FullTxOut, Loadable, ObservedAs,
 };
-use bdk_file_store::{IterError, Store};
+use bdk_file_store::Store;
 
-pub type TrackerStore<A, K> = Store<Tracker<A, K>, ChangeSet<A, K>>;
+pub type TrackerStore<A, K> = Store<Tracker<A, K>>;
 
 #[derive(Default)]
 pub struct Tracker<A, K> {
@@ -118,16 +118,10 @@ impl<A, K> From<DerivationAdditions<K>> for ChangeSet<A, K> {
     }
 }
 
-impl<A, K> LoadablePersistBackend<Tracker<A, K>, ChangeSet<A, K>> for TrackerStore<A, K>
-where
-    A: Anchor + Default + serde::de::DeserializeOwned + serde::Serialize,
-    K: Default + Ord + Clone + Debug + serde::de::DeserializeOwned + serde::Serialize,
-{
-    type LoadError = IterError;
+impl<A: Default + Anchor, K: Default + Clone + Ord + Debug> Loadable for Tracker<A, K> {
+    type ChangeSet = ChangeSet<A, K>;
 
-    fn load_into_tracker(&mut self, tracker: &mut Tracker<A, K>) -> Result<(), Self::LoadError> {
-        let (changeset, res) = self.aggregate_changesets();
-        tracker.apply_changeset(changeset);
-        res
+    fn load_changeset(&mut self, changeset: Self::ChangeSet) {
+        self.apply_changeset(changeset)
     }
 }

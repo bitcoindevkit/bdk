@@ -5,7 +5,7 @@ use std::{
     path::Path,
 };
 
-use bdk_chain::{Append, PersistBackend};
+use bdk_chain::{Append, Loadable, PersistBackend};
 use bincode::Options;
 
 use crate::{bincode_options, EntryIter, FileError, IterError};
@@ -14,15 +14,16 @@ use crate::{bincode_options, EntryIter, FileError, IterError};
 ///
 /// The changesets are the results of altering a tracker implementation (`T`).
 #[derive(Debug)]
-pub struct Store<T, C> {
+pub struct Store<T> {
     magic: &'static [u8],
     db_file: File,
-    marker: PhantomData<(T, C)>,
+    marker: PhantomData<T>,
 }
 
-impl<T, C> Store<T, C>
+impl<T> Store<T>
 where
-    C: Append + Default + serde::Serialize + serde::de::DeserializeOwned,
+    T: Loadable,
+    T::ChangeSet: serde::Serialize + serde::de::DeserializeOwned,
 {
     /// Creates a new store from a [`File`].
     ///
@@ -80,7 +81,7 @@ where
     /// **WARNING**: This method changes the write position in the underlying file. You should
     /// always iterate over all entries until `None` is returned if you want your next write to go
     /// at the end; otherwise, you will write over existing entries.
-    pub fn iter_changesets(&mut self) -> Result<EntryIter<'_, C>, io::Error> {
+    pub fn iter_changesets(&mut self) -> Result<EntryIter<'_, T::ChangeSet>, io::Error> {
         self.db_file
             .seek(io::SeekFrom::Start(self.magic.len() as _))?;
 
@@ -99,8 +100,8 @@ where
     ///
     /// **WARNING**: This method changes the write position of the underlying file. The next
     /// changeset will be written over the erroring entry (or the end of the file if none existed).
-    pub fn aggregate_changesets(&mut self) -> (C, Result<(), IterError>) {
-        let mut changeset = C::default();
+    pub fn aggregate_changesets(&mut self) -> (T::ChangeSet, Result<(), IterError>) {
+        let mut changeset = T::ChangeSet::default();
         let result = (|| {
             let iter_changeset = self.iter_changesets()?;
             for next_changeset in iter_changeset {
@@ -120,7 +121,7 @@ where
     ///
     /// **WARNING**: This method does not detect whether the changeset is empty or not, and will
     /// append an empty changeset to the file (not catastrophic, just a waste of space).
-    pub fn append_changeset(&mut self, changeset: &C) -> Result<(), io::Error> {
+    pub fn append_changeset(&mut self, changeset: &T::ChangeSet) -> Result<(), io::Error> {
         bincode_options()
             .serialize_into(&mut self.db_file, changeset)
             .map_err(|e| match *e {
@@ -138,14 +139,22 @@ where
     }
 }
 
-impl<T, C> PersistBackend<C> for Store<T, C>
+impl<T> PersistBackend<T> for Store<T>
 where
-    C: Default + Append + serde::Serialize + serde::de::DeserializeOwned,
+    T: Loadable,
+    T::ChangeSet: serde::de::DeserializeOwned + serde::Serialize,
 {
     type WriteError = std::io::Error;
+    type LoadError = IterError;
 
-    fn write_changes(&mut self, changeset: &C) -> Result<(), Self::WriteError> {
+    fn write_changes(&mut self, changeset: &T::ChangeSet) -> Result<(), Self::WriteError> {
         Store::append_changeset(self, changeset)
+    }
+
+    fn load_into_tracker(&mut self, tracker: &mut T) -> Result<(), Self::LoadError> {
+        let (changeset, result) = self.aggregate_changesets();
+        tracker.load_changeset(changeset);
+        result
     }
 }
 
@@ -201,13 +210,22 @@ mod test {
         }
     }
 
+    #[derive(Debug)]
+    struct TestTracker;
+
+    impl Loadable for TestTracker {
+        type ChangeSet = TestChangeSet;
+
+        fn load_changeset(&mut self, _changeset: Self::ChangeSet) {}
+    }
+
     #[test]
     fn new_fails_if_file_is_too_short() {
         let mut file = NamedTempFile::new().unwrap();
         file.write_all(&TEST_MAGIC_BYTES[..TEST_MAGIC_BYTES_LEN - 1])
             .expect("should write");
 
-        match Store::<(), TestChangeSet>::new(&TEST_MAGIC_BYTES, file.reopen().unwrap()) {
+        match Store::<TestTracker>::new(&TEST_MAGIC_BYTES, file.reopen().unwrap()) {
             Err(FileError::Io(e)) => assert_eq!(e.kind(), std::io::ErrorKind::UnexpectedEof),
             unexpected => panic!("unexpected result: {:?}", unexpected),
         };
@@ -221,7 +239,7 @@ mod test {
         file.write_all(invalid_magic_bytes.as_bytes())
             .expect("should write");
 
-        match Store::<(), TestChangeSet>::new(&TEST_MAGIC_BYTES, file.reopen().unwrap()) {
+        match Store::<TestTracker>::new(&TEST_MAGIC_BYTES, file.reopen().unwrap()) {
             Err(FileError::InvalidMagicBytes { got, .. }) => {
                 assert_eq!(got, invalid_magic_bytes.as_bytes())
             }
@@ -242,7 +260,7 @@ mod test {
         let mut file = NamedTempFile::new().unwrap();
         file.write_all(&data).expect("should write");
 
-        let mut store = Store::<(), TestChangeSet>::new(&TEST_MAGIC_BYTES, file.reopen().unwrap())
+        let mut store = Store::<TestTracker>::new(&TEST_MAGIC_BYTES, file.reopen().unwrap())
             .expect("should open");
         match store.iter_changesets().expect("seek should succeed").next() {
             Some(Err(IterError::Bincode(_))) => {}

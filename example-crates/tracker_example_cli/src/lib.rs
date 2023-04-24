@@ -693,7 +693,7 @@ where
     C: ChainOracle,
     C::Error: std::error::Error + Send + Sync + 'static,
 {
-    use bdk_chain::LoadablePersistBackend;
+    use bdk_chain::PersistBackend;
 
     let args = Args::<S>::parse();
     let secp = Secp256k1::default();
