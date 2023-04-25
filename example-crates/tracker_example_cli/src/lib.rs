@@ -1,5 +1,4 @@
 mod tracker;
-use anyhow::anyhow;
 use bdk_chain::{
     bitcoin::{
         psbt::Prevouts, secp256k1::Secp256k1, util::sighash::SighashCache, Address, LockTime,
@@ -16,6 +15,7 @@ use bdk_coin_select::{coin_select_bnb, CoinSelector, CoinSelectorOpt, WeightedVa
 use clap::{Parser, Subcommand};
 use std::{cmp::Reverse, collections::HashMap, path::PathBuf, sync::Mutex, time::Duration};
 
+pub use anyhow;
 pub use bdk_file_store;
 pub use clap;
 pub use tracker::*;
@@ -117,7 +117,12 @@ impl core::str::FromStr for CoinSelectionAlgo {
             "oldest-first" => OldestFirst,
             "newest-first" => NewestFirst,
             "bnb" => BranchAndBound,
-            unknown => return Err(anyhow!("unknown coin selection algorithm '{}'", unknown)),
+            unknown => {
+                return Err(anyhow::anyhow!(
+                    "unknown coin selection algorithm '{}'",
+                    unknown
+                ))
+            }
         })
     }
 }
@@ -533,7 +538,7 @@ where
                 }
             }
             bdk_tmp_plan::PlanState::Incomplete(_) => {
-                return Err(anyhow!(
+                return Err(anyhow::anyhow!(
                     "we weren't able to complete the plan with our keys."
                 ));
             }

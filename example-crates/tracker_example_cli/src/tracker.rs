@@ -1,9 +1,11 @@
-use std::fmt::Debug;
+use std::{convert::Infallible, fmt::Debug};
 
 use bdk_chain::{
+    bitcoin::Transaction,
     indexed_tx_graph::{IndexedAdditions, IndexedTxGraph},
     keychain::{DerivationAdditions, KeychainTxOutIndex},
     local_chain::{self, LocalChain},
+    tx_graph::CanonicalTx,
     Anchor, Append, BlockId, ChainOracle, FullTxOut, Loadable, ObservedAs,
 };
 use bdk_file_store::Store;
@@ -82,6 +84,41 @@ impl<A: Anchor, K: Clone + Ord + Debug, C: ChainOracle> Tracker<A, K, C> {
             }
             true
         })
+    }
+
+    pub fn try_list_txs(
+        &self,
+        chain_tip: BlockId,
+    ) -> impl Iterator<Item = Result<CanonicalTx<Transaction, A>, C::Error>> {
+        self.indexed_graph
+            .graph()
+            .try_list_chain_txs(&self.chain, chain_tip)
+    }
+}
+
+impl<A: Anchor, K: Clone + Ord + Debug, C: ChainOracle<Error = Infallible>> Tracker<A, K, C> {
+    pub fn list_owned_txouts(
+        &self,
+        chain_tip: BlockId,
+    ) -> impl Iterator<Item = (&(K, u32), FullTxOut<ObservedAs<A>>)> {
+        self.try_list_owned_txouts(chain_tip)
+            .map(|r| r.expect("oracle is infallible"))
+    }
+
+    pub fn list_owned_unspents(
+        &self,
+        chain_tip: BlockId,
+    ) -> impl Iterator<Item = (&(K, u32), FullTxOut<ObservedAs<A>>)> {
+        self.try_list_owned_unspents(chain_tip)
+            .map(|r| r.expect("oracle is infallible"))
+    }
+
+    pub fn list_txs(
+        &self,
+        chain_tip: BlockId,
+    ) -> impl Iterator<Item = CanonicalTx<Transaction, A>> {
+        self.try_list_txs(chain_tip)
+            .map(|r| r.expect("oracle is infallible"))
     }
 }
 

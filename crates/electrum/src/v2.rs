@@ -1,15 +1,20 @@
 use bdk_chain::{
     bitcoin::{hashes::hex::FromHex, BlockHash, OutPoint, Script, Transaction, Txid},
-    indexed_tx_graph::{IndexedAdditions, IndexedTxGraph, Indexer},
+    indexed_tx_graph::{IndexedAdditions, IndexedTxGraph},
+    keychain::{DerivationAdditions, KeychainTxOutIndex},
     local_chain::{self, LocalChain, UpdateNotConnectedError},
     tx_graph::TxGraph,
     Anchor, Append, BlockId, ConfirmationHeightAnchor,
 };
 use electrum_client::{Client, ElectrumApi, Error};
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::{
+    collections::{BTreeMap, BTreeSet, HashMap},
+    fmt::Debug,
+};
 
 use crate::InternalError;
 
+#[derive(Debug)]
 pub struct ElectrumUpdate<G, K> {
     pub graph_update: G,
     pub chain_update: LocalChain,
@@ -29,10 +34,10 @@ impl<G: Default, K> Default for ElectrumUpdate<G, K> {
 pub type IntermediaryElectrumUpdate<A, K> = ElectrumUpdate<HashMap<Txid, BTreeSet<A>>, K>;
 
 impl<'a, A: Anchor, K> IntermediaryElectrumUpdate<A, K> {
-    pub fn missing_full_txs<G>(&'a self, graph: G) -> impl Iterator<Item = &'a Txid> + 'a
-    where
-        G: AsRef<TxGraph> + 'a,
-    {
+    pub fn missing_full_txs(
+        &'a self,
+        graph: &'a TxGraph<A>,
+    ) -> impl Iterator<Item = &'a Txid> + 'a {
         self.graph_update
             .keys()
             .filter(move |&&txid| graph.as_ref().get_tx(txid).is_none())
@@ -61,17 +66,30 @@ impl<'a, A: Anchor, K> IntermediaryElectrumUpdate<A, K> {
 
 pub type FinalElectrumUpdate<A, K> = ElectrumUpdate<TxGraph<A>, K>;
 
-impl<A: Anchor, K> FinalElectrumUpdate<A, K> {
-    pub fn apply<I: Indexer>(
+impl<A: Anchor, K: Ord + Clone + Debug> FinalElectrumUpdate<A, K> {
+    pub fn apply(
         self,
-        indexed_graph: &mut IndexedTxGraph<A, I>,
+        indexed_graph: &mut IndexedTxGraph<A, KeychainTxOutIndex<K>>,
         chain: &mut LocalChain,
-    ) -> Result<(IndexedAdditions<A, I::Additions>, local_chain::ChangeSet), UpdateNotConnectedError>
-    where
-        I::Additions: Default + Append,
-    {
-        let additions = indexed_graph.apply_update(self.graph_update);
+    ) -> Result<
+        (
+            IndexedAdditions<A, DerivationAdditions<K>>,
+            local_chain::ChangeSet,
+        ),
+        UpdateNotConnectedError,
+    > {
+        let (_, derivation_additions) = indexed_graph
+            .index
+            .reveal_to_target_multi(&self.keychain_update);
+
+        let additions = {
+            let mut additions = indexed_graph.apply_update(self.graph_update);
+            additions.index_additions.append(derivation_additions);
+            additions
+        };
+
         let changeset = chain.apply_update(self.chain_update)?;
+
         Ok((additions, changeset))
     }
 }
