@@ -20,12 +20,6 @@
 //! [`batch_transaction_get`]: ElectrumApi::batch_transaction_get
 //! [`bdk_electrum_example`]: https://github.com/LLFourn/bdk_core_staging/tree/master/bdk_electrum_example
 
-use std::{
-    collections::{BTreeMap, HashMap},
-    fmt::Debug,
-};
-
-pub use bdk_chain;
 use bdk_chain::{
     bitcoin::{hashes::hex::FromHex, BlockHash, OutPoint, Script, Transaction, Txid},
     chain_graph::{self, ChainGraph},
@@ -34,8 +28,15 @@ use bdk_chain::{
     tx_graph::TxGraph,
     BlockId, ConfirmationTime, TxHeight,
 };
-pub use electrum_client;
 use electrum_client::{Client, ElectrumApi, Error};
+use std::{
+    collections::{BTreeMap, HashMap},
+    fmt::Debug,
+};
+
+pub mod v2;
+pub use bdk_chain;
+pub use electrum_client;
 
 /// Trait to extend [`electrum_client::Client`] functionality.
 ///
