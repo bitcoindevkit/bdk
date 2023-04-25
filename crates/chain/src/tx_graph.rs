@@ -947,9 +947,14 @@ impl<A> Additions<A> {
 
     /// Appends the changes in `other` into self such that applying `self` afterward has the same
     /// effect as sequentially applying the original `self` and `other`.
-    pub fn append(&mut self, mut other: Additions<A>) {
+    pub fn append(&mut self, mut other: Additions<A>)
+    where
+        A: Ord,
+    {
         self.tx.append(&mut other.tx);
         self.txout.append(&mut other.txout);
+        self.anchors.append(&mut other.anchors);
+        self.last_seen.append(&mut other.last_seen);
     }
 }
 
