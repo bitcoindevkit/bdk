@@ -178,6 +178,30 @@ impl LocalChain {
             .collect()
     }
 
+    pub fn insert_block(
+        &mut self,
+        block_id: BlockId,
+    ) -> Result<ChangeSet, InsertBlockNotMatchingError> {
+        let mut update = Self::default();
+
+        if let Some(block_id) = self.tip() {
+            let _old_hash = update.blocks.insert(block_id.height, block_id.hash);
+            debug_assert!(_old_hash.is_none());
+        }
+
+        if let Some(original_hash) = update.blocks.insert(block_id.height, block_id.hash) {
+            if original_hash != block_id.hash {
+                return Err(InsertBlockNotMatchingError {
+                    height: block_id.height,
+                    original_hash,
+                    update_hash: block_id.hash,
+                });
+            }
+        }
+
+        Ok(self.apply_update(update).expect("should always connect"))
+    }
+
     pub fn heights(&self) -> BTreeSet<u32> {
         self.blocks.keys().cloned().collect()
     }
@@ -209,3 +233,24 @@ impl core::fmt::Display for UpdateNotConnectedError {
 
 #[cfg(feature = "std")]
 impl std::error::Error for UpdateNotConnectedError {}
+
+/// Represents a failure when trying to insert a checkpoint into [`LocalChain`].
+#[derive(Clone, Debug, PartialEq)]
+pub struct InsertBlockNotMatchingError {
+    pub height: u32,
+    pub original_hash: BlockHash,
+    pub update_hash: BlockHash,
+}
+
+impl core::fmt::Display for InsertBlockNotMatchingError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(
+            f,
+            "failed to insert block at height {} as blockhashes conflict: original={}, update={}",
+            self.height, self.original_hash, self.update_hash
+        )
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for InsertBlockNotMatchingError {}
