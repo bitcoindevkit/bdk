@@ -993,4 +993,30 @@ pub mod test {
 
         assert_eq!(xprv.network, Network::Testnet);
     }
+
+    #[test]
+    fn test_script_context_enum() {
+        let legacy_script = ScriptContextEnum::Legacy;
+        let segwitv0_script = ScriptContextEnum::Segwitv0;
+        let tap_script = ScriptContextEnum::Tap;
+        assert_eq!(legacy_script.is_legacy(), true);
+        assert_eq!(segwitv0_script.is_segwit_v0(), true);
+        assert_eq!(tap_script.is_taproot(), true);
+        assert_eq!(segwitv0_script.is_taproot(), false);
+    }
+
+    #[test]
+    fn test_extendedkey() {
+        let secp = Secp256k1::new();
+        let xprivkey: bip32::ExtendedPrivKey =
+            bip32::ExtendedPrivKey::new_master(Network::Testnet, &[0, 0, 0, 0, 1]).unwrap();
+        let xpubkey: bip32::ExtendedPubKey = bip32::ExtendedPubKey::from_priv(&secp, &xprivkey);
+        let xkey1: ExtendedKey = xprivkey.into();
+        let xkey2: ExtendedKey = xpubkey.into();
+
+        assert_eq!(xkey1.has_secret(), true);
+        assert_eq!(xkey2.has_secret(), false);
+        assert_eq!(xkey1.into_xpub(Network::Testnet, &secp) == xpubkey, true);
+        assert_eq!(xkey2.into_xpub(Network::Testnet, &secp) == xpubkey, true);
+    }
 }
