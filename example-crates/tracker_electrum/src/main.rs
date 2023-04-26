@@ -19,6 +19,7 @@ use tracker_example_cli::{
 };
 
 const DB_MAGIC: &[u8] = b"bdk_example_electrum";
+const DB_PATH: &str = ".bdk_electrum_example.db";
 
 #[derive(Subcommand, Debug, Clone)]
 enum ElectrumCommands {
@@ -59,6 +60,7 @@ pub struct ScanOptions {
 fn main() -> anyhow::Result<()> {
     let (args, keymap, tracker, db) = cli::init::<ElectrumCommands, ConfirmationHeightAnchor, _>(
         DB_MAGIC,
+        DB_PATH,
         cli::Tracker::new_local(),
     )?;
 

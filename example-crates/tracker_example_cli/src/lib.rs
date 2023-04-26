@@ -674,6 +674,7 @@ where
 #[allow(clippy::type_complexity)] // FIXME
 pub fn init<S: clap::Subcommand, A: Anchor, C: ChainOracle + Loadable>(
     db_magic: &'static [u8],
+    db_default_path: &str,
     mut tracker: Tracker<A, Keychain, C>,
 ) -> anyhow::Result<(
     Args<S>,
@@ -689,6 +690,10 @@ where
         serde::de::DeserializeOwned + serde::Serialize,
 {
     use bdk_chain::PersistBackend;
+
+    if std::env::var("BDK_DB_PATH").is_err() {
+        std::env::set_var("BDK_DB_PATH", db_default_path);
+    }
 
     let args = Args::<S>::parse();
     let secp = Secp256k1::default();
