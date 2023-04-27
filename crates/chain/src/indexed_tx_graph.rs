@@ -229,12 +229,10 @@ impl<A: Anchor, I: OwnedIndexer> IndexedTxGraph<A, I> {
 
             match &txout.chain_position {
                 ObservedAs::Confirmed(_) => {
-                    if txout.is_on_coinbase {
-                        if txout.is_mature(tip_height) {
-                            confirmed += txout.txout.value;
-                        } else {
-                            immature += txout.txout.value;
-                        }
+                    if txout.is_confirmed_and_spendable(tip_height) {
+                        confirmed += txout.txout.value;
+                    } else if !txout.is_mature(tip_height) {
+                        immature += txout.txout.value;
                     }
                 }
                 ObservedAs::Unconfirmed(_) => {
