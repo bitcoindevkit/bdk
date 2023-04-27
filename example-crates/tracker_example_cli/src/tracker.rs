@@ -6,31 +6,41 @@ use bdk_chain::{
     keychain::{DerivationAdditions, KeychainTxOutIndex},
     local_chain::{self, LocalChain},
     tx_graph::CanonicalTx,
-    Anchor, Append, BlockId, ChainOracle, FullTxOut, Loadable, ObservedAs,
+    Anchor, Append, BlockId, ChainOracle, FullTxOut, ObservedAs, PersistBackend,
 };
-use bdk_file_store::Store;
+use bdk_file_store::{IterError, Store};
+
+use crate::{RemoteChain, RemoteChainChangeSet};
 
 /// Structure for persisting [`Tracker`] data.
-pub type TrackerStore<A, K, C> = Store<Tracker<A, K, C>>;
+pub type TrackerStore<K, A, B, C> = Store<Tracker<K, A, B>, ChangeSet<K, A, C>>;
+
+pub type LocalTracker<K, A> = Tracker<K, A, LocalChain>;
+pub type LocalTrackerStore<K, A> = TrackerStore<K, A, LocalChain, local_chain::ChangeSet>;
+pub type LocalTrackerChangeSet<K, A> = ChangeSet<K, A, local_chain::ChangeSet>;
+
+pub type RemoteTracker<K, A, O> = Tracker<K, A, RemoteChain<O>>;
+pub type RemoteTrackerStore<K, A, O> = TrackerStore<K, A, RemoteChain<O>, RemoteChainChangeSet>;
+pub type RemoteTrackerChangeSet<K, A> = ChangeSet<K, A, RemoteChainChangeSet>;
 
 /// An in-memory representation of chain data that we are tracking.
 ///
 /// * `A` is the [`Anchor`] implementation.
 /// * `K` is our keychain identifier.
-/// * `C` is the representation of the best chain history. This can either be a [`LocalChain`] or a
-/// remote [`ChainOracle`] implementation.
+/// * `B` is the representation of the best chain history. This can either be a [`LocalChain`] or a
+/// [`RemoteChain`] (which wraps a remote [`ChainOracle`] implementation).
 ///
 /// [`Tracker`] can be constructed with [`new_local`] or [`new_remote`] (depending on the
 /// chain-history type).
 ///
 /// [`new_local`]: Self::new_local
 /// [`new_remote`]: Self::new_remote
-pub struct Tracker<A, K, C = LocalChain> {
+pub struct Tracker<K, A, B> {
     pub indexed_graph: IndexedTxGraph<A, KeychainTxOutIndex<K>>,
-    pub chain: C,
+    pub chain: B,
 }
 
-impl<A, K> Tracker<A, K, LocalChain> {
+impl<K, A> LocalTracker<K, A> {
     /// New [`Tracker`] with a [`LocalChain`] as the best-chain representation.
     pub fn new_local() -> Self {
         Self {
@@ -40,24 +50,24 @@ impl<A, K> Tracker<A, K, LocalChain> {
     }
 }
 
-impl<A, K, O: ChainOracle> Tracker<A, K, RemoteChain<O>> {
+impl<K, A, O: ChainOracle> RemoteTracker<K, A, O> {
     /// New [`Tracker`] with a remote [`ChainOracle`] as the best-chain representation.
     pub fn new_remote(oracle: O) -> Self {
         Self {
             indexed_graph: Default::default(),
-            chain: RemoteChain {
-                oracle,
-                last_seen_height: None,
-            },
+            chain: RemoteChain::new(oracle),
         }
     }
 }
 
-impl<A: Anchor, K: Clone + Ord + Debug, C: ChainOracle> Tracker<A, K, C> {
+impl<K, A: Anchor, B: ChainOracle> Tracker<K, A, B>
+where
+    K: Clone + Ord + Debug,
+{
     pub fn try_list_owned_txouts(
         &self,
         chain_tip: BlockId,
-    ) -> impl Iterator<Item = Result<(&(K, u32), FullTxOut<ObservedAs<A>>), C::Error>> {
+    ) -> impl Iterator<Item = Result<(&(K, u32), FullTxOut<ObservedAs<A>>), B::Error>> {
         self.indexed_graph
             .graph()
             .try_list_chain_txouts(&self.chain, chain_tip)
@@ -75,7 +85,7 @@ impl<A: Anchor, K: Clone + Ord + Debug, C: ChainOracle> Tracker<A, K, C> {
     pub fn try_list_owned_unspents(
         &self,
         chain_tip: BlockId,
-    ) -> impl Iterator<Item = Result<(&(K, u32), FullTxOut<ObservedAs<A>>), C::Error>> {
+    ) -> impl Iterator<Item = Result<(&(K, u32), FullTxOut<ObservedAs<A>>), B::Error>> {
         self.try_list_owned_txouts(chain_tip).filter(|r| {
             if let Ok((_, full_txo)) = r {
                 if full_txo.spent_by.is_some() {
@@ -89,14 +99,17 @@ impl<A: Anchor, K: Clone + Ord + Debug, C: ChainOracle> Tracker<A, K, C> {
     pub fn try_list_txs(
         &self,
         chain_tip: BlockId,
-    ) -> impl Iterator<Item = Result<CanonicalTx<Transaction, A>, C::Error>> {
+    ) -> impl Iterator<Item = Result<CanonicalTx<Transaction, A>, B::Error>> {
         self.indexed_graph
             .graph()
             .try_list_chain_txs(&self.chain, chain_tip)
     }
 }
 
-impl<A: Anchor, K: Clone + Ord + Debug, C: ChainOracle<Error = Infallible>> Tracker<A, K, C> {
+impl<K, A: Anchor, B: ChainOracle<Error = Infallible>> Tracker<K, A, B>
+where
+    K: Clone + Ord + Debug,
+{
     pub fn list_owned_txouts(
         &self,
         chain_tip: BlockId,
@@ -122,27 +135,79 @@ impl<A: Anchor, K: Clone + Ord + Debug, C: ChainOracle<Error = Infallible>> Trac
     }
 }
 
-impl<A: Anchor, K: Default + Clone + Ord + Debug, C: Loadable> Loadable for Tracker<A, K, C> {
-    type ChangeSet = ChangeSet<A, K, C::ChangeSet>;
+impl<K, A> PersistBackend<LocalTracker<K, A>, LocalTrackerChangeSet<K, A>>
+    for LocalTrackerStore<K, A>
+where
+    K: Clone + Ord + Debug + serde::Serialize + serde::de::DeserializeOwned,
+    A: Anchor + serde::Serialize + serde::de::DeserializeOwned,
+{
+    type WriteError = std::io::Error;
 
-    fn load_changeset(&mut self, changeset: Self::ChangeSet) {
-        self.indexed_graph
+    type LoadError = IterError;
+
+    fn write_changes(
+        &mut self,
+        changeset: &LocalTrackerChangeSet<K, A>,
+    ) -> Result<(), Self::WriteError> {
+        self.append_changeset(changeset)
+    }
+
+    fn load_into_tracker(
+        &mut self,
+        tracker: &mut LocalTracker<K, A>,
+    ) -> Result<(), Self::LoadError> {
+        let (changeset, result) = self.aggregate_changesets();
+        tracker
+            .indexed_graph
             .apply_additions(changeset.indexed_graph_additions);
-        self.chain.load_changeset(changeset.chain_changeset);
+        tracker.chain.apply_changeset(changeset.chain_changeset);
+        result
     }
 }
 
+impl<K, A, O> PersistBackend<RemoteTracker<K, A, O>, RemoteTrackerChangeSet<K, A>>
+    for RemoteTrackerStore<K, A, O>
+where
+    K: Clone + Ord + Debug + serde::Serialize + serde::de::DeserializeOwned,
+    A: Anchor + serde::Serialize + serde::de::DeserializeOwned,
+    O: ChainOracle,
+{
+    type WriteError = std::io::Error;
+
+    type LoadError = IterError;
+
+    fn write_changes(
+        &mut self,
+        changeset: &RemoteTrackerChangeSet<K, A>,
+    ) -> Result<(), Self::WriteError> {
+        self.append_changeset(changeset)
+    }
+
+    fn load_into_tracker(
+        &mut self,
+        tracker: &mut RemoteTracker<K, A, O>,
+    ) -> Result<(), Self::LoadError> {
+        let (changeset, result) = self.aggregate_changesets();
+        tracker
+            .indexed_graph
+            .apply_additions(changeset.indexed_graph_additions);
+        tracker.chain.apply_changeset(changeset.chain_changeset);
+        result
+    }
+}
+
+/// A structure that represents changes to [`Tracker`].
 #[derive(Debug, PartialEq, serde::Deserialize, serde::Serialize)]
 #[serde(bound(
     deserialize = "A: Ord + serde::Deserialize<'de>, K: Ord + serde::Deserialize<'de>, C: Ord + serde::Deserialize<'de>",
     serialize = "A: Ord + serde::Serialize, K: Ord + serde::Serialize, C: Ord + serde::Serialize",
 ))]
-pub struct ChangeSet<A, K, C = local_chain::ChangeSet> {
+pub struct ChangeSet<K, A, C> {
     pub indexed_graph_additions: IndexedAdditions<A, DerivationAdditions<K>>,
     pub chain_changeset: C,
 }
 
-impl<A, K, C: Default> Default for ChangeSet<A, K, C> {
+impl<K, A, C: Default> Default for ChangeSet<K, A, C> {
     fn default() -> Self {
         Self {
             indexed_graph_additions: Default::default(),
@@ -151,7 +216,7 @@ impl<A, K, C: Default> Default for ChangeSet<A, K, C> {
     }
 }
 
-impl<A: Anchor, K: Ord, C: Append> Append for ChangeSet<A, K, C> {
+impl<K: Ord, A: Anchor, C: Append> Append for ChangeSet<K, A, C> {
     fn append(&mut self, other: Self) {
         Append::append(
             &mut self.indexed_graph_additions,
@@ -161,7 +226,7 @@ impl<A: Anchor, K: Ord, C: Append> Append for ChangeSet<A, K, C> {
     }
 }
 
-impl<A, K, C: Default> From<IndexedAdditions<A, DerivationAdditions<K>>> for ChangeSet<A, K, C> {
+impl<K, A, C: Default> From<IndexedAdditions<A, DerivationAdditions<K>>> for ChangeSet<K, A, C> {
     fn from(inner_additions: IndexedAdditions<A, DerivationAdditions<K>>) -> Self {
         Self {
             indexed_graph_additions: inner_additions,
@@ -170,7 +235,7 @@ impl<A, K, C: Default> From<IndexedAdditions<A, DerivationAdditions<K>>> for Cha
     }
 }
 
-impl<A, K, C: Default> From<DerivationAdditions<K>> for ChangeSet<A, K, C> {
+impl<K, A, C: Default> From<DerivationAdditions<K>> for ChangeSet<K, A, C> {
     fn from(index_additions: DerivationAdditions<K>) -> Self {
         Self {
             indexed_graph_additions: IndexedAdditions {
@@ -182,7 +247,7 @@ impl<A, K, C: Default> From<DerivationAdditions<K>> for ChangeSet<A, K, C> {
     }
 }
 
-impl<A, K> From<local_chain::ChangeSet> for ChangeSet<A, K, local_chain::ChangeSet> {
+impl<K, A> From<local_chain::ChangeSet> for ChangeSet<K, A, local_chain::ChangeSet> {
     fn from(chain_changeset: local_chain::ChangeSet) -> Self {
         Self {
             indexed_graph_additions: Default::default(),
@@ -191,59 +256,11 @@ impl<A, K> From<local_chain::ChangeSet> for ChangeSet<A, K, local_chain::ChangeS
     }
 }
 
-impl<A, K> From<Option<u32>> for ChangeSet<A, K, Option<u32>> {
+impl<K, A> From<Option<u32>> for ChangeSet<K, A, Option<u32>> {
     fn from(chain_changeset: Option<u32>) -> Self {
         Self {
             indexed_graph_additions: Default::default(),
             chain_changeset,
         }
-    }
-}
-
-/// Contains a remote best-chain representation alongside the last-seen block's height.
-///
-/// The last-seen block height is persisted locally and can be used to determine which height to
-/// start syncing from for block-by-block chain sources.
-pub struct RemoteChain<O> {
-    oracle: O,
-    last_seen_height: Option<u32>,
-}
-
-impl<O> RemoteChain<O> {
-    pub fn inner(&self) -> &O {
-        &self.oracle
-    }
-
-    pub fn last_seen_height(&self) -> Option<u32> {
-        self.last_seen_height
-    }
-
-    pub fn update_last_seen_height(&mut self, last_seen_height: Option<u32>) -> Option<u32> {
-        if self.last_seen_height < last_seen_height {
-            self.last_seen_height = last_seen_height;
-            last_seen_height
-        } else {
-            None
-        }
-    }
-}
-
-impl<O> Loadable for RemoteChain<O> {
-    type ChangeSet = Option<u32>;
-
-    fn load_changeset(&mut self, changeset: Self::ChangeSet) {
-        self.last_seen_height.append(changeset)
-    }
-}
-
-impl<O: ChainOracle> ChainOracle for RemoteChain<O> {
-    type Error = O::Error;
-
-    fn is_block_in_chain(
-        &self,
-        block: BlockId,
-        static_block: BlockId,
-    ) -> Result<Option<bool>, Self::Error> {
-        self.oracle.is_block_in_chain(block, static_block)
     }
 }

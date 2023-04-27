@@ -1,3 +1,4 @@
+mod remote_chain;
 mod tracker;
 use bdk_chain::{
     bitcoin::{
@@ -9,7 +10,7 @@ use bdk_chain::{
         descriptor::{DescriptorSecretKey, KeyMap},
         Descriptor, DescriptorPublicKey,
     },
-    Anchor, Append, BlockId, ChainOracle, DescriptorExt, FullTxOut, Loadable, ObservedAs,
+    Anchor, Append, BlockId, ChainOracle, DescriptorExt, FullTxOut, ObservedAs, PersistBackend,
 };
 use bdk_coin_select::{coin_select_bnb, CoinSelector, CoinSelectorOpt, WeightedValue};
 use clap::{Parser, Subcommand};
@@ -18,6 +19,7 @@ use std::{cmp::Reverse, collections::HashMap, path::PathBuf, sync::Mutex, time::
 pub use anyhow;
 pub use bdk_file_store;
 pub use clap;
+pub use remote_chain::*;
 pub use tracker::*;
 
 #[derive(
@@ -185,15 +187,14 @@ pub struct AddrsOutput {
     used: bool,
 }
 
-pub fn run_address_cmd<A: Anchor, C: ChainOracle + Loadable>(
-    tracker: &Mutex<Tracker<A, Keychain, C>>,
-    db: &Mutex<TrackerStore<A, Keychain, C>>,
+pub fn run_address_cmd<A: Anchor, B: ChainOracle, C: Default>(
+    tracker: &Mutex<Tracker<Keychain, A, B>>,
+    db: &Mutex<TrackerStore<Keychain, A, B, C>>,
     addr_cmd: AddressCmd,
     network: Network,
 ) -> anyhow::Result<()>
 where
-    <Tracker<A, Keychain, C> as Loadable>::ChangeSet:
-        serde::de::DeserializeOwned + serde::Serialize,
+    tracker::ChangeSet<Keychain, A, C>: Append + serde::Serialize + serde::de::DeserializeOwned,
 {
     let mut tracker = tracker.lock().unwrap();
     let txout_index = &mut tracker.indexed_graph.index;
@@ -247,17 +248,17 @@ where
     }
 }
 
-pub fn run_balance_cmd<A: Anchor, C: ChainOracle>(
-    tracker: &Mutex<Tracker<A, Keychain, C>>,
+pub fn run_balance_cmd<A: Anchor, B: ChainOracle>(
+    tracker: &Mutex<Tracker<Keychain, A, B>>,
     chain_tip: BlockId,
 ) -> anyhow::Result<()>
 where
-    <C as ChainOracle>::Error: std::error::Error + Send + Sync + 'static,
+    <B as ChainOracle>::Error: std::error::Error + Send + Sync + 'static,
 {
     let tracker = tracker.lock().unwrap();
     let utxos = tracker
         .try_list_owned_unspents(chain_tip)
-        .collect::<Result<Vec<_>, C::Error>>()?;
+        .collect::<Result<Vec<_>, B::Error>>()?;
 
     let (confirmed, unconfirmed) =
         utxos
@@ -278,14 +279,14 @@ where
     Ok(())
 }
 
-pub fn run_txo_cmd<A: Anchor, C: ChainOracle>(
+pub fn run_txo_cmd<A: Anchor, B: ChainOracle>(
     txout_cmd: TxOutCmd,
-    tracker: &Mutex<Tracker<A, Keychain, C>>,
+    tracker: &Mutex<Tracker<Keychain, A, B>>,
     chain_tip: BlockId,
     network: Network,
 ) -> anyhow::Result<()>
 where
-    <C as ChainOracle>::Error: std::error::Error + Send + Sync + 'static,
+    <B as ChainOracle>::Error: std::error::Error + Send + Sync + 'static,
 {
     match txout_cmd {
         TxOutCmd::List {
@@ -335,11 +336,11 @@ where
 }
 
 #[allow(clippy::type_complexity)] // FIXME
-pub fn create_tx<A: Anchor, C: ChainOracle>(
+pub fn create_tx<A: Anchor, B: ChainOracle>(
     value: u64,
     address: Address,
     coin_select: CoinSelectionAlgo,
-    tracker: &mut Tracker<A, Keychain, C>,
+    tracker: &mut Tracker<Keychain, A, B>,
     chain_tip: BlockId,
     keymap: &HashMap<DescriptorPublicKey, DescriptorSecretKey>,
 ) -> anyhow::Result<(
@@ -347,7 +348,7 @@ pub fn create_tx<A: Anchor, C: ChainOracle>(
     Option<(DerivationAdditions<Keychain>, (Keychain, u32))>,
 )>
 where
-    <C as ChainOracle>::Error: std::error::Error + Send + Sync + 'static,
+    <B as ChainOracle>::Error: std::error::Error + Send + Sync + 'static,
 {
     let mut additions = DerivationAdditions::default();
 
@@ -358,7 +359,7 @@ where
 
     // TODO use planning module
     let mut candidates =
-        planned_utxos(tracker, chain_tip, &assets).collect::<Result<Vec<_>, C::Error>>()?;
+        planned_utxos(tracker, chain_tip, &assets).collect::<Result<Vec<_>, B::Error>>()?;
 
     // apply coin selection algorithm
     match coin_select {
@@ -554,13 +555,13 @@ where
     Ok((transaction, change_info))
 }
 
-pub fn planned_utxos<'a, AK: bdk_tmp_plan::CanDerive + Clone, A: Anchor, C: ChainOracle>(
-    tracker: &'a Tracker<A, Keychain, C>,
+pub fn planned_utxos<'a, AK: bdk_tmp_plan::CanDerive + Clone, A: Anchor, B: ChainOracle>(
+    tracker: &'a Tracker<Keychain, A, B>,
     chain_tip: BlockId,
     assets: &'a bdk_tmp_plan::Assets<AK>,
-) -> impl Iterator<Item = Result<(bdk_tmp_plan::Plan<AK>, FullTxOut<ObservedAs<A>>), C::Error>> + 'a
+) -> impl Iterator<Item = Result<(bdk_tmp_plan::Plan<AK>, FullTxOut<ObservedAs<A>>), B::Error>> + 'a
 where
-    <C as ChainOracle>::Error: std::error::Error + Send + Sync + 'static,
+    <B as ChainOracle>::Error: std::error::Error + Send + Sync + 'static,
 {
     tracker
         .try_list_owned_unspents(chain_tip)
@@ -581,21 +582,20 @@ where
 }
 
 #[allow(clippy::too_many_arguments)] // FIXME
-pub fn handle_commands<S: clap::Subcommand, A: Anchor, C: ChainOracle + Loadable>(
+pub fn handle_commands<S: clap::Subcommand, A: Anchor, B: ChainOracle, C: Default>(
     command: Commands<S>,
     broadcast: impl FnOnce(&Transaction) -> anyhow::Result<()>,
     // we Mutex around these not because we need them for a simple CLI app but to demonstrate how
     // all the stuff we're doing can be made thread-safe and not keep locks up over an IO bound.
-    tracker: &Mutex<Tracker<A, Keychain, C>>,
-    store: &Mutex<TrackerStore<A, Keychain, C>>,
+    tracker: &Mutex<Tracker<Keychain, A, B>>,
+    store: &Mutex<TrackerStore<Keychain, A, B, C>>,
     chain_tip: BlockId,
     network: Network,
     keymap: &HashMap<DescriptorPublicKey, DescriptorSecretKey>,
 ) -> anyhow::Result<()>
 where
-    <C as ChainOracle>::Error: std::error::Error + Send + Sync + 'static,
-    <Tracker<A, Keychain, C> as Loadable>::ChangeSet:
-        serde::de::DeserializeOwned + serde::Serialize,
+    <B as ChainOracle>::Error: std::error::Error + Send + Sync + 'static,
+    tracker::ChangeSet<Keychain, A, C>: Append + serde::Serialize + serde::de::DeserializeOwned,
 {
     match command {
         // TODO: Make these functions return stuffs
@@ -672,25 +672,24 @@ where
 }
 
 #[allow(clippy::type_complexity)] // FIXME
-pub fn init<S: clap::Subcommand, A: Anchor, C: ChainOracle + Loadable>(
+pub fn init<S: clap::Subcommand, A: Anchor, B: ChainOracle, C: Default>(
     db_magic: &'static [u8],
     db_default_path: &str,
-    mut tracker: Tracker<A, Keychain, C>,
+    mut tracker: Tracker<Keychain, A, B>,
 ) -> anyhow::Result<(
     Args<S>,
     KeyMap,
     // These don't need to have mutexes around them, but we want the cli example code to make it obvious how they
     // are thread-safe, forcing the example developers to show where they would lock and unlock things.
-    Mutex<Tracker<A, Keychain, C>>,
-    Mutex<TrackerStore<A, Keychain, C>>,
+    Mutex<Tracker<Keychain, A, B>>,
+    Mutex<TrackerStore<Keychain, A, B, C>>,
 )>
 where
-    <C as ChainOracle>::Error: std::error::Error + Send + Sync + 'static,
-    <Tracker<A, Keychain, C> as Loadable>::ChangeSet:
-        serde::de::DeserializeOwned + serde::Serialize,
+    <B as ChainOracle>::Error: std::error::Error + Send + Sync + 'static,
+    tracker::ChangeSet<Keychain, A, C>: Append + serde::Serialize + serde::de::DeserializeOwned,
+    TrackerStore<Keychain, A, B, C>:
+        PersistBackend<Tracker<Keychain, A, B>, ChangeSet<Keychain, A, C>>,
 {
-    use bdk_chain::PersistBackend;
-
     if std::env::var("BDK_DB_PATH").is_err() {
         std::env::set_var("BDK_DB_PATH", db_default_path);
     }
@@ -718,7 +717,8 @@ where
             .add_keychain(Keychain::Internal, internal_descriptor);
     };
 
-    let mut db = TrackerStore::<A, Keychain, C>::new_from_path(db_magic, args.db_path.as_path())?;
+    let mut db =
+        TrackerStore::<Keychain, A, B, C>::new_from_path(db_magic, args.db_path.as_path())?;
 
     if let Err(e) = db.load_into_tracker(&mut tracker) {
         // [TODO] Should we introduce a `TipChainOracle` trait?
@@ -727,7 +727,7 @@ where
         //     None => eprintln!("Failed to load any checkpoints from {}: {}", args.db_path.display(), e),
         // }
         eprintln!(
-            "Failed to load changesets from {}: {}",
+            "Failed to load changesets from {}: {:?}",
             args.db_path.display(),
             e
         );

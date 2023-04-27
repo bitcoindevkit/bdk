@@ -8,16 +8,16 @@ use crate::Append;
 /// Not all changes to the tracker, which is an in-memory representation of wallet/blockchain
 /// data, needs to be written to disk right away, so [`Persist::stage`] can be used to *stage*
 /// changes first and then [`Persist::commit`] can be used to write changes to disk.
-pub struct Persist<T, C, B> {
+pub struct Persist<B, T, C> {
     backend: B,
     stage: C,
     marker: PhantomData<T>,
 }
 
-impl<T, B> Persist<T, T::ChangeSet, B>
+impl<B, T, C> Persist<B, T, C>
 where
-    T: Loadable,
-    B: PersistBackend<T>,
+    B: PersistBackend<T, C>,
+    C: Default + Append,
 {
     /// Create a new [`Persist`] from [`PersistBackend`].
     pub fn new(backend: B) -> Self {
@@ -31,12 +31,12 @@ where
     /// Stage a `changeset` to be commited later with [`commit`].
     ///
     /// [`commit`]: Self::commit
-    pub fn stage(&mut self, changeset: T::ChangeSet) {
+    pub fn stage(&mut self, changeset: C) {
         self.stage.append(changeset)
     }
 
     /// Get the changes that have not been commited yet.
-    pub fn staged(&self) -> &T::ChangeSet {
+    pub fn staged(&self) -> &C {
         &self.stage
     }
 
@@ -44,7 +44,7 @@ where
     ///
     /// Returns a backend-defined error if this fails.
     pub fn commit(&mut self) -> Result<(), B::WriteError> {
-        let mut temp = T::ChangeSet::default();
+        let mut temp = C::default();
         core::mem::swap(&mut temp, &mut self.stage);
         self.backend.write_changes(&temp)
     }
@@ -53,7 +53,7 @@ where
 /// A persistence backend for [`Persist`].
 ///
 /// `T` represents the tracker, the in-memory data structure which we wish to persist.
-pub trait PersistBackend<T: Loadable> {
+pub trait PersistBackend<T, C> {
     /// The error the backend returns when it fails to write.
     type WriteError: core::fmt::Debug;
 
@@ -68,29 +68,21 @@ pub trait PersistBackend<T: Loadable> {
     /// changesets had been applied sequentially.
     ///
     /// [`load_into_tracker`]: Self::load_into_tracker
-    fn write_changes(&mut self, changeset: &T::ChangeSet) -> Result<(), Self::WriteError>;
+    fn write_changes(&mut self, changeset: &C) -> Result<(), Self::WriteError>;
 
     /// Loads all data from the persistence backend into `tracker`.
     fn load_into_tracker(&mut self, tracker: &mut T) -> Result<(), Self::LoadError>;
 }
 
-impl<T: Loadable> PersistBackend<T> for () {
+impl<T, C> PersistBackend<T, C> for () {
     type WriteError = ();
     type LoadError = ();
 
-    fn write_changes(&mut self, _changeset: &T::ChangeSet) -> Result<(), Self::WriteError> {
+    fn write_changes(&mut self, _changeset: &C) -> Result<(), Self::WriteError> {
         Ok(())
     }
 
     fn load_into_tracker(&mut self, _tracker: &mut T) -> Result<(), Self::LoadError> {
         Ok(())
     }
-}
-
-/// A trait that represents a structure which can be loaded with changesets.
-pub trait Loadable {
-    /// The changeset to be loaded into `self`.
-    type ChangeSet: Default + Append;
-    /// Loads the `changeset` into `self`.
-    fn load_changeset(&mut self, changeset: Self::ChangeSet);
 }

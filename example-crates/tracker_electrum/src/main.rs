@@ -58,7 +58,7 @@ pub struct ScanOptions {
 }
 
 fn main() -> anyhow::Result<()> {
-    let (args, keymap, tracker, db) = cli::init::<ElectrumCommands, ConfirmationHeightAnchor, _>(
+    let (args, keymap, tracker, db) = cli::init::<ElectrumCommands, ConfirmationHeightAnchor, _, _>(
         DB_MAGIC,
         DB_PATH,
         cli::Tracker::new_local(),

@@ -3,7 +3,7 @@ use core::convert::Infallible;
 use alloc::collections::{BTreeMap, BTreeSet};
 use bitcoin::BlockHash;
 
-use crate::{BlockId, ChainOracle, Loadable};
+use crate::{BlockId, ChainOracle};
 
 /// This is a local implementation of [`ChainOracle`].
 ///
@@ -40,14 +40,6 @@ impl ChainOracle for LocalChain {
                 _ => None,
             },
         )
-    }
-}
-
-impl Loadable for LocalChain {
-    type ChangeSet = ChangeSet;
-
-    fn load_changeset(&mut self, changeset: Self::ChangeSet) {
-        self.apply_changeset(changeset)
     }
 }
 
