@@ -235,6 +235,8 @@ impl<A: Anchor, I: OwnedIndexer> IndexedTxGraph<A, I> {
                         } else {
                             immature += txout.txout.value;
                         }
+                    } else if txout.is_confirmed_and_spendable(tip_height) {
+                        confirmed += txout.txout.value;
                     }
                 }
                 ObservedAs::Unconfirmed(_) => {

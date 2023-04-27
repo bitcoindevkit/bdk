@@ -869,7 +869,7 @@ impl<A: Anchor> TxGraph<A> {
         chain_tip: BlockId,
     ) -> impl Iterator<Item = Result<FullTxOut<ObservedAs<A>>, C::Error>> + 'a {
         self.try_list_chain_txouts(chain, chain_tip)
-            .filter(|r| !matches!(r, Ok(txo) if txo.spent_by.is_none()))
+            .filter(|r| matches!(r, Ok(txo) if txo.spent_by.is_none()))
     }
 
     /// List unspent outputs (UTXOs) that are in `chain` with `chain_tip`.
