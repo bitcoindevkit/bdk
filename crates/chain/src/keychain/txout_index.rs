@@ -1,6 +1,6 @@
 use crate::{
     collections::*,
-    indexed_tx_graph::Indexer,
+    indexed_tx_graph::{Indexer, OwnedIndexer},
     miniscript::{Descriptor, DescriptorPublicKey},
     ForEachTxOut, SpkTxOutIndex,
 };
@@ -108,6 +108,12 @@ impl<K: Clone + Ord + Debug + 'static> Indexer for KeychainTxOutIndex<K> {
 
     fn is_tx_relevant(&self, tx: &bitcoin::Transaction) -> bool {
         self.is_relevant(tx)
+    }
+}
+
+impl<K: Clone + Ord + Debug + 'static> OwnedIndexer for KeychainTxOutIndex<K> {
+    fn is_spk_owned(&self, spk: &Script) -> bool {
+        self.inner().is_spk_owned(spk)
     }
 }
 
