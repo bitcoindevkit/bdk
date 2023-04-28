@@ -1,11 +1,14 @@
 use crate::{
     collections::*,
+    indexed_tx_graph::{Indexer, OwnedIndexer},
     miniscript::{Descriptor, DescriptorPublicKey},
     ForEachTxOut, SpkTxOutIndex,
 };
 use alloc::{borrow::Cow, vec::Vec};
 use bitcoin::{secp256k1::Secp256k1, OutPoint, Script, TxOut};
 use core::{fmt::Debug, ops::Deref};
+
+use crate::Append;
 
 use super::DerivationAdditions;
 
@@ -85,6 +88,32 @@ impl<K> Deref for KeychainTxOutIndex<K> {
 
     fn deref(&self) -> &Self::Target {
         &self.inner
+    }
+}
+
+impl<K: Clone + Ord + Debug + 'static> Indexer for KeychainTxOutIndex<K> {
+    type Additions = DerivationAdditions<K>;
+
+    fn index_txout(&mut self, outpoint: OutPoint, txout: &TxOut) -> Self::Additions {
+        self.scan_txout(outpoint, txout)
+    }
+
+    fn index_tx(&mut self, tx: &bitcoin::Transaction) -> Self::Additions {
+        self.scan(tx)
+    }
+
+    fn apply_additions(&mut self, additions: Self::Additions) {
+        self.apply_additions(additions)
+    }
+
+    fn is_tx_relevant(&self, tx: &bitcoin::Transaction) -> bool {
+        self.is_relevant(tx)
+    }
+}
+
+impl<K: Clone + Ord + Debug + 'static> OwnedIndexer for KeychainTxOutIndex<K> {
+    fn is_spk_owned(&self, spk: &Script) -> bool {
+        self.inner().is_spk_owned(spk)
     }
 }
 

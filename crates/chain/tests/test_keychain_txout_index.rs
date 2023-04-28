@@ -293,7 +293,6 @@ fn test_wildcard_derivations() {
     let _ = txout_index.reveal_to_target(&TestKeychain::External, 25);
 
     (0..=15)
-        .into_iter()
         .chain(vec![17, 20, 23].into_iter())
         .for_each(|index| assert!(txout_index.mark_used(&TestKeychain::External, index)));
 
@@ -310,7 +309,7 @@ fn test_wildcard_derivations() {
 
     // - Use all the derived till 26.
     // - next_unused() = ((27, <spk>), DerivationAdditions)
-    (0..=26).into_iter().for_each(|index| {
+    (0..=26).for_each(|index| {
         txout_index.mark_used(&TestKeychain::External, index);
     });
 

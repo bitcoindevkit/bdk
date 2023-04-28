@@ -1,6 +1,7 @@
 #![cfg(feature = "miniscript")]
 #[macro_use]
 mod common;
+
 use bdk_chain::{
     keychain::{Balance, KeychainTracker},
     miniscript::{
@@ -40,7 +41,7 @@ fn test_insert_tx() {
             .chain_graph()
             .transactions_in_chain()
             .collect::<Vec<_>>(),
-        vec![(&ConfirmationTime::Unconfirmed, &tx)]
+        vec![(&ConfirmationTime::Unconfirmed, &tx,)]
     );
 
     assert_eq!(
@@ -66,7 +67,7 @@ fn test_balance() {
         One,
         Two,
     }
-    let mut tracker = KeychainTracker::<Keychain, TxHeight>::default();
+    let mut tracker = KeychainTracker::default();
     let one = Descriptor::from_str("tr([73c5da0a/86'/0'/0']xpub6BgBgsespWvERF3LHQu6CnqdvfEvtMcQjYrcRzx53QJjSxarj2afYWcLteoGVky7D3UKDP9QyrLprQ3VCECoY49yfdDEHGCtMMj92pReUsQ/0/*)#rg247h69").unwrap();
     let two = Descriptor::from_str("tr([73c5da0a/86'/0'/0']xpub6BgBgsespWvERF3LHQu6CnqdvfEvtMcQjYrcRzx53QJjSxarj2afYWcLteoGVky7D3UKDP9QyrLprQ3VCECoY49yfdDEHGCtMMj92pReUsQ/1/*)#ju05rz2a").unwrap();
     tracker.add_keychain(Keychain::One, one);
