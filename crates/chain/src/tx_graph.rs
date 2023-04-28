@@ -55,7 +55,9 @@
 //! assert!(additions.is_empty());
 //! ```
 
-use crate::{collections::*, Anchor, BlockId, ChainOracle, ForEachTxOut, FullTxOut, ObservedAs};
+use crate::{
+    collections::*, Anchor, Append, BlockId, ChainOracle, ForEachTxOut, FullTxOut, ObservedAs,
+};
 use alloc::vec::Vec;
 use bitcoin::{OutPoint, Transaction, TxOut, Txid};
 use core::{
@@ -109,17 +111,6 @@ impl<'a, T, A> Deref for TxNode<'a, T, A> {
 
     fn deref(&self) -> &Self::Target {
         self.tx
-    }
-}
-
-impl<'a, A> TxNode<'a, Transaction, A> {
-    pub fn from_tx(tx: &'a Transaction, anchors: &'a BTreeSet<A>) -> Self {
-        Self {
-            txid: tx.txid(),
-            tx,
-            anchors,
-            last_seen_unconfirmed: 0,
-        }
     }
 }
 
@@ -602,7 +593,7 @@ impl<A: Clone + Ord> TxGraph<A> {
 
 impl<A: Anchor> TxGraph<A> {
     /// Get all heights that are relevant to the graph.
-    pub fn relevant_heights(&self) -> impl DoubleEndedIterator<Item = u32> + '_ {
+    pub fn relevant_heights(&self) -> impl Iterator<Item = u32> + '_ {
         let mut last_height = Option::<u32>::None;
         self.anchors
             .iter()
@@ -944,17 +935,22 @@ impl<A> Additions<A> {
             })
             .chain(self.txout.iter().map(|(op, txout)| (*op, txout)))
     }
+}
 
-    /// Appends the changes in `other` into self such that applying `self` afterward has the same
-    /// effect as sequentially applying the original `self` and `other`.
-    pub fn append(&mut self, mut other: Additions<A>)
-    where
-        A: Ord,
-    {
+impl<A: Ord> Append for Additions<A> {
+    fn append(&mut self, mut other: Self) {
         self.tx.append(&mut other.tx);
         self.txout.append(&mut other.txout);
         self.anchors.append(&mut other.anchors);
-        self.last_seen.append(&mut other.last_seen);
+
+        // last_seen timestamps should only increase
+        self.last_seen.extend(
+            other
+                .last_seen
+                .into_iter()
+                .filter(|(txid, update_ls)| self.last_seen.get(txid) < Some(update_ls))
+                .collect::<Vec<_>>(),
+        );
     }
 }
 

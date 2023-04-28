@@ -3,7 +3,7 @@ use crate::{
     collections::HashSet,
     sparse_chain::{self, ChainPosition, SparseChain},
     tx_graph::{self, TxGraph},
-    BlockId, ForEachTxOut, FullTxOut, TxHeight,
+    Append, BlockId, ForEachTxOut, FullTxOut, TxHeight,
 };
 use alloc::{string::ToString, vec::Vec};
 use bitcoin::{OutPoint, Transaction, TxOut, Txid};

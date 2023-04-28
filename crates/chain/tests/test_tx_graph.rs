@@ -4,7 +4,7 @@ use bdk_chain::{
     collections::*,
     local_chain::LocalChain,
     tx_graph::{Additions, TxGraph},
-    BlockId, ObservedAs,
+    Append, BlockId, ObservedAs,
 };
 use bitcoin::{
     hashes::Hash, BlockHash, OutPoint, PackedLockTime, Script, Transaction, TxIn, TxOut, Txid,
@@ -848,4 +848,35 @@ fn test_relevant_heights() {
         vec![3, 4, 5],
         "anchor for non-existant tx is inserted at height 5, must still be in relevant heights",
     );
+}
+
+/// Ensure that `last_seen` values only increase during [`Append::append`].
+#[test]
+fn test_additions_last_seen_append() {
+    let txid: Txid = h!("test txid");
+
+    let test_cases: &[(Option<u64>, Option<u64>)] = &[
+        (Some(5), Some(6)),
+        (Some(5), Some(5)),
+        (Some(6), Some(5)),
+        (None, Some(5)),
+        (Some(5), None),
+    ];
+
+    for (original_ls, update_ls) in test_cases {
+        let mut original = Additions::<()> {
+            last_seen: original_ls.map(|ls| (txid, ls)).into_iter().collect(),
+            ..Default::default()
+        };
+        let update = Additions::<()> {
+            last_seen: update_ls.map(|ls| (txid, ls)).into_iter().collect(),
+            ..Default::default()
+        };
+
+        original.append(update);
+        assert_eq!(
+            &original.last_seen.get(&txid).cloned(),
+            Ord::max(original_ls, update_ls),
+        );
+    }
 }
