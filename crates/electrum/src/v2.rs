@@ -3,18 +3,18 @@ use bdk_chain::{
     indexed_tx_graph::{IndexedAdditions, IndexedTxGraph},
     keychain::{DerivationAdditions, KeychainTxOutIndex},
     local_chain::{self, LocalChain, UpdateNotConnectedError},
-    tx_graph::TxGraph,
-    Anchor, Append, BlockId, ConfirmationHeightAnchor,
+    tx_graph::{self, TxGraph},
+    Anchor, Append, BlockId, ConfirmationHeightAnchor, ConfirmationTimeAnchor,
 };
 use electrum_client::{Client, ElectrumApi, Error};
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     fmt::Debug,
 };
 
 use crate::InternalError;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ElectrumUpdate<G, K> {
     pub graph_update: G,
     pub chain_update: LocalChain,
@@ -34,9 +34,9 @@ impl<G: Default, K> Default for ElectrumUpdate<G, K> {
 pub type IntermediaryElectrumUpdate<A, K> = ElectrumUpdate<HashMap<Txid, BTreeSet<A>>, K>;
 
 impl<'a, A: Anchor, K> IntermediaryElectrumUpdate<A, K> {
-    pub fn missing_full_txs(
+    pub fn missing_full_txs<A2>(
         &'a self,
-        graph: &'a TxGraph<A>,
+        graph: &'a TxGraph<A2>,
     ) -> impl Iterator<Item = &'a Txid> + 'a {
         self.graph_update
             .keys()
@@ -56,6 +56,7 @@ impl<'a, A: Anchor, K> IntermediaryElectrumUpdate<A, K> {
                 let _ = graph_update.insert_anchor(txid, anchor);
             }
         }
+        dbg!(graph_update.full_txs().count());
         FinalElectrumUpdate {
             graph_update,
             chain_update: self.chain_update,
@@ -65,6 +66,69 @@ impl<'a, A: Anchor, K> IntermediaryElectrumUpdate<A, K> {
 }
 
 pub type FinalElectrumUpdate<A, K> = ElectrumUpdate<TxGraph<A>, K>;
+
+impl<K: Ord + Clone + Debug> FinalElectrumUpdate<ConfirmationHeightAnchor, K> {
+    pub fn into_confirmation_time_update(
+        self,
+        client: &Client,
+    ) -> Result<FinalElectrumUpdate<ConfirmationTimeAnchor, K>, Error> {
+        let relevant_heights = {
+            let mut visited_heights = HashSet::new();
+            self.graph_update
+                .all_anchors()
+                .map(|(a, _)| a.confirmation_height_upper_bound())
+                .filter(move |&h| visited_heights.insert(h))
+                .collect::<Vec<_>>()
+        };
+
+        // [TODO] We need to check whether block hashes is "anchored" to our anchor.
+        let height_to_time = relevant_heights
+            .clone()
+            .into_iter()
+            .zip(
+                client
+                    .batch_block_header(relevant_heights)?
+                    .into_iter()
+                    .map(|bh| bh.time as u64),
+            )
+            .collect::<HashMap<u32, u64>>();
+
+        let graph_additions = {
+            let old_additions = TxGraph::default().determine_additions(&self.graph_update);
+            tx_graph::Additions {
+                tx: old_additions.tx,
+                txout: old_additions.txout,
+                last_seen: old_additions.last_seen,
+                anchors: old_additions
+                    .anchors
+                    .into_iter()
+                    .map(|(height_anchor, txid)| {
+                        let confirmation_height = dbg!(height_anchor
+                            .confirmation_height
+                            .expect("must have confirmation height"));
+                        let confirmation_time = height_to_time[&confirmation_height];
+                        let time_anchor = ConfirmationTimeAnchor {
+                            anchor_block: height_anchor.anchor_block,
+                            confirmation_height,
+                            confirmation_time,
+                        };
+                        (time_anchor, txid)
+                    })
+                    .collect(),
+            }
+        };
+
+        Ok(FinalElectrumUpdate {
+            graph_update: {
+                let mut graph = TxGraph::default();
+                graph.apply_additions(graph_additions);
+                graph
+            },
+            chain_update: self.chain_update,
+            keychain_update: self.keychain_update,
+        })
+    }
+}
 
 impl<A: Anchor, K: Ord + Clone + Debug> FinalElectrumUpdate<A, K> {
     pub fn apply(
@@ -91,6 +155,27 @@ impl<A: Anchor, K: Ord + Clone + Debug> FinalElectrumUpdate<A, K> {
         let changeset = chain.apply_update(self.chain_update)?;
 
         Ok((additions, changeset))
+    }
+}
+
+#[cfg(feature = "wallet")]
+impl FinalElectrumUpdate<ConfirmationTimeAnchor, bdk::KeychainKind> {
+    pub fn apply_to_tracker(
+        self,
+        tracker: &mut bdk::wallet::Tracker,
+    ) -> Result<bdk::wallet::ChangeSet, UpdateNotConnectedError> {
+        Ok(bdk::wallet::ChangeSet {
+            indexed_additions: {
+                let mut additions = tracker.indexed_graph.apply_update(self.graph_update);
+                let (_, derivation_additions) = tracker
+                    .indexed_graph
+                    .index
+                    .reveal_to_target_multi(&self.keychain_update);
+                additions.index_additions.append(derivation_additions);
+                additions
+            },
+            chain_changeset: tracker.chain.apply_update(self.chain_update)?,
+        })
     }
 }
 

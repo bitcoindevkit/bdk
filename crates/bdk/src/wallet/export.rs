@@ -226,6 +226,11 @@ mod test {
         change_descriptor: Option<&str>,
         network: Network,
     ) -> Wallet<()> {
+        let anchor_block = BlockId {
+            height: 5001,
+            hash: BlockHash::all_zeros(),
+        };
+
         let mut wallet = Wallet::new_no_persist(descriptor, change_descriptor, network).unwrap();
         let transaction = Transaction {
             input: vec![],
@@ -233,12 +238,7 @@ mod test {
             version: 0,
             lock_time: bitcoin::PackedLockTime::ZERO,
         };
-        wallet
-            .insert_checkpoint(BlockId {
-                height: 5001,
-                hash: BlockHash::all_zeros(),
-            })
-            .unwrap();
+        wallet.insert_checkpoint(anchor_block).unwrap();
         wallet
             .insert_tx(
                 transaction,
@@ -246,6 +246,7 @@ mod test {
                     height: 5000,
                     time: 0,
                 },
+                None,
             )
             .unwrap();
         wallet

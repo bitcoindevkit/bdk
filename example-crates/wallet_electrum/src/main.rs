@@ -1,4 +1,4 @@
-use std::{io::Write, str::FromStr};
+use std::{io::Write, str::FromStr, time::UNIX_EPOCH};
 
 use bdk::{
     bitcoin::{Address, Network},
@@ -6,19 +6,20 @@ use bdk::{
 };
 use bdk_electrum::{
     electrum_client::{self, ElectrumApi},
-    ElectrumExt,
+    v2::ElectrumExt,
 };
-use bdk_file_store::KeychainStore;
+use bdk_file_store::Store;
 
 const SEND_AMOUNT: u64 = 5000;
 const STOP_GAP: usize = 50;
 const BATCH_SIZE: usize = 5;
+const DB_MAGIC: &[u8] = b"example-crates/wallet_electrum";
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Hello, world!");
 
     let db_path = std::env::temp_dir().join("bdk-electrum-example");
-    let db = KeychainStore::new_from_path(db_path)?;
+    let db = Store::new_from_path(DB_MAGIC, db_path)?;
     let external_descriptor = "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/84'/0'/0'/0/*)";
     let internal_descriptor = "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/84'/0'/0'/1/*)";
 
@@ -58,20 +59,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             )
         })
         .collect();
-    let electrum_update = client
-        .scan(
-            local_chain,
-            spks,
-            core::iter::empty(),
-            core::iter::empty(),
-            STOP_GAP,
-            BATCH_SIZE,
-        )?
-        .into_confirmation_time_update(&client)?;
+    let electrum_update = client.scan(
+        local_chain,
+        spks,
+        core::iter::empty(),
+        core::iter::empty(),
+        STOP_GAP,
+        BATCH_SIZE,
+    )?;
     println!();
-    let new_txs = client.batch_transaction_get(electrum_update.missing_full_txs(&wallet))?;
-    let update = electrum_update.into_keychain_scan(new_txs, &wallet)?;
-    wallet.apply_update(update)?;
+
+    let missing_txs = electrum_update
+        .missing_full_txs(wallet.tracker().graph())
+        .collect::<Vec<_>>();
+    let new_txs = client.batch_transaction_get(missing_txs)?;
+
+    let now = UNIX_EPOCH
+        .elapsed()
+        .expect("must get system time")
+        .as_secs();
+
+    let update = electrum_update
+        .finalize(Some(now), new_txs)
+        .into_confirmation_time_update(&client)?;
+
+    // update.
+    wallet.update(|tracker| update.clone().apply_to_tracker(tracker))?;
     wallet.commit()?;
 
     let balance = wallet.get_balance();

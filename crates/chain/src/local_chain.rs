@@ -85,6 +85,10 @@ impl LocalChain {
             .map(|&hash| BlockId { height, hash })
     }
 
+    pub fn all_blocks(&self) -> &BTreeMap<u32, BlockHash> {
+        &self.blocks
+    }
+
     /// This is like the sparsechain's logic, expect we must guarantee that all invalidated heights
     /// are to be re-filled.
     pub fn determine_changeset(&self, update: &Self) -> Result<ChangeSet, UpdateNotConnectedError> {

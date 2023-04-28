@@ -1,6 +1,6 @@
 #![allow(unused)]
 use bdk::{wallet::AddressIndex, Wallet};
-use bdk_chain::{BlockId, ConfirmationTime};
+use bdk_chain::{BlockId, ConfirmationTime, ConfirmationTimeAnchor};
 use bitcoin::hashes::Hash;
 use bitcoin::{BlockHash, Network, Transaction, TxOut};
 
@@ -9,6 +9,10 @@ pub fn get_funded_wallet_with_change(
     descriptor: &str,
     change: Option<&str>,
 ) -> (Wallet, bitcoin::Txid) {
+    let anchor_block = BlockId {
+        height: 1_000,
+        hash: BlockHash::all_zeros(),
+    };
     let mut wallet = Wallet::new_no_persist(descriptor, change, Network::Regtest).unwrap();
     let address = wallet.get_address(AddressIndex::New).address;
 
@@ -22,19 +26,15 @@ pub fn get_funded_wallet_with_change(
         }],
     };
 
-    wallet
-        .insert_checkpoint(BlockId {
-            height: 1_000,
-            hash: BlockHash::all_zeros(),
-        })
-        .unwrap();
+    wallet.insert_checkpoint(anchor_block).unwrap();
     wallet
         .insert_tx(
             tx.clone(),
             ConfirmationTime::Confirmed {
-                height: 1_000,
+                height: 1000,
                 time: 100,
             },
+            None,
         )
         .unwrap();
 

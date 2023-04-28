@@ -8,6 +8,7 @@ use crate::Append;
 /// Not all changes to the tracker, which is an in-memory representation of wallet/blockchain
 /// data, needs to be written to disk right away, so [`Persist::stage`] can be used to *stage*
 /// changes first and then [`Persist::commit`] can be used to write changes to disk.
+#[derive(Debug)]
 pub struct Persist<B, T, C> {
     backend: B,
     stage: C,

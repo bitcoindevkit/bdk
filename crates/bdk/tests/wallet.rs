@@ -44,6 +44,7 @@ fn receive_output(wallet: &mut Wallet, value: u64, height: TxHeight) -> OutPoint
                 },
                 TxHeight::Unconfirmed => ConfirmationTime::Unconfirmed,
             },
+            None,
         )
         .unwrap();
 
@@ -811,7 +812,7 @@ fn test_create_tx_add_utxo() {
         lock_time: PackedLockTime(0),
     };
     wallet
-        .insert_tx(small_output_tx.clone(), ConfirmationTime::Unconfirmed)
+        .insert_tx(small_output_tx.clone(), ConfirmationTime::Unconfirmed, None)
         .unwrap();
 
     let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
@@ -848,7 +849,7 @@ fn test_create_tx_manually_selected_insufficient() {
     };
 
     wallet
-        .insert_tx(small_output_tx.clone(), ConfirmationTime::Unconfirmed)
+        .insert_tx(small_output_tx.clone(), ConfirmationTime::Unconfirmed, None)
         .unwrap();
 
     let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
@@ -889,7 +890,9 @@ fn test_create_tx_policy_path_no_csv() {
             script_pubkey: wallet.get_address(New).script_pubkey(),
         }],
     };
-    wallet.insert_tx(tx, ConfirmationTime::Unconfirmed).unwrap();
+    wallet
+        .insert_tx(tx, ConfirmationTime::Unconfirmed, None)
+        .unwrap();
 
     let external_policy = wallet.policies(KeychainKind::External).unwrap().unwrap();
     let root_id = external_policy.id;
@@ -1214,7 +1217,9 @@ fn test_bump_fee_irreplaceable_tx() {
 
     let tx = psbt.extract_tx();
     let txid = tx.txid();
-    wallet.insert_tx(tx, ConfirmationTime::Unconfirmed).unwrap();
+    wallet
+        .insert_tx(tx, ConfirmationTime::Unconfirmed, None)
+        .unwrap();
     wallet.build_fee_bump(txid).unwrap().finish().unwrap();
 }
 
@@ -1237,6 +1242,7 @@ fn test_bump_fee_confirmed_tx() {
                 height: 42,
                 time: 42_000,
             },
+            None,
         )
         .unwrap();
 
@@ -1257,7 +1263,9 @@ fn test_bump_fee_low_fee_rate() {
     let tx = psbt.extract_tx();
     let txid = tx.txid();
 
-    wallet.insert_tx(tx, ConfirmationTime::Unconfirmed).unwrap();
+    wallet
+        .insert_tx(tx, ConfirmationTime::Unconfirmed, None)
+        .unwrap();
 
     let mut builder = wallet.build_fee_bump(txid).unwrap();
     builder.fee_rate(FeeRate::from_sat_per_vb(1.0));
@@ -1278,7 +1286,9 @@ fn test_bump_fee_low_abs() {
     let tx = psbt.extract_tx();
     let txid = tx.txid();
 
-    wallet.insert_tx(tx, ConfirmationTime::Unconfirmed).unwrap();
+    wallet
+        .insert_tx(tx, ConfirmationTime::Unconfirmed, None)
+        .unwrap();
 
     let mut builder = wallet.build_fee_bump(txid).unwrap();
     builder.fee_absolute(10);
@@ -1298,7 +1308,9 @@ fn test_bump_fee_zero_abs() {
 
     let tx = psbt.extract_tx();
     let txid = tx.txid();
-    wallet.insert_tx(tx, ConfirmationTime::Unconfirmed).unwrap();
+    wallet
+        .insert_tx(tx, ConfirmationTime::Unconfirmed, None)
+        .unwrap();
 
     let mut builder = wallet.build_fee_bump(txid).unwrap();
     builder.fee_absolute(0);
@@ -1316,7 +1328,9 @@ fn test_bump_fee_reduce_change() {
     let (psbt, original_details) = builder.finish().unwrap();
     let tx = psbt.extract_tx();
     let txid = tx.txid();
-    wallet.insert_tx(tx, ConfirmationTime::Unconfirmed).unwrap();
+    wallet
+        .insert_tx(tx, ConfirmationTime::Unconfirmed, None)
+        .unwrap();
 
     let mut builder = wallet.build_fee_bump(txid).unwrap();
     builder.fee_rate(FeeRate::from_sat_per_vb(2.5)).enable_rbf();
@@ -1401,7 +1415,9 @@ fn test_bump_fee_reduce_single_recipient() {
     let (psbt, original_details) = builder.finish().unwrap();
     let tx = psbt.extract_tx();
     let txid = tx.txid();
-    wallet.insert_tx(tx, ConfirmationTime::Unconfirmed).unwrap();
+    wallet
+        .insert_tx(tx, ConfirmationTime::Unconfirmed, None)
+        .unwrap();
 
     let mut builder = wallet.build_fee_bump(txid).unwrap();
     builder
@@ -1432,7 +1448,9 @@ fn test_bump_fee_absolute_reduce_single_recipient() {
     let (psbt, original_details) = builder.finish().unwrap();
     let tx = psbt.extract_tx();
     let txid = tx.txid();
-    wallet.insert_tx(tx, ConfirmationTime::Unconfirmed).unwrap();
+    assert!(wallet
+        .insert_tx(tx, ConfirmationTime::Unconfirmed, None)
+        .expect("can insert tx"));
 
     let mut builder = wallet.build_fee_bump(txid).unwrap();
     builder
@@ -1471,6 +1489,7 @@ fn test_bump_fee_drain_wallet() {
                 height: wallet.latest_checkpoint().unwrap().height,
                 time: 42_000,
             },
+            None,
         )
         .unwrap();
     let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
@@ -1488,7 +1507,9 @@ fn test_bump_fee_drain_wallet() {
     let (psbt, original_details) = builder.finish().unwrap();
     let tx = psbt.extract_tx();
     let txid = tx.txid();
-    wallet.insert_tx(tx, ConfirmationTime::Unconfirmed).unwrap();
+    wallet
+        .insert_tx(tx, ConfirmationTime::Unconfirmed, None)
+        .unwrap();
     assert_eq!(original_details.sent, 25_000);
 
     // for the new feerate, it should be enough to reduce the output, but since we specify
@@ -1523,7 +1544,11 @@ fn test_bump_fee_remove_output_manually_selected_only() {
         }],
     };
     wallet
-        .insert_tx(init_tx.clone(), wallet.transactions().last().unwrap().0)
+        .insert_tx(
+            init_tx.clone(),
+            wallet.transactions().last().unwrap().0,
+            None,
+        )
         .unwrap();
     let outpoint = OutPoint {
         txid: init_tx.txid(),
@@ -1540,7 +1565,9 @@ fn test_bump_fee_remove_output_manually_selected_only() {
     let (psbt, original_details) = builder.finish().unwrap();
     let tx = psbt.extract_tx();
     let txid = tx.txid();
-    wallet.insert_tx(tx, ConfirmationTime::Unconfirmed).unwrap();
+    wallet
+        .insert_tx(tx, ConfirmationTime::Unconfirmed, None)
+        .unwrap();
     assert_eq!(original_details.sent, 25_000);
 
     let mut builder = wallet.build_fee_bump(txid).unwrap();
@@ -1563,7 +1590,7 @@ fn test_bump_fee_add_input() {
         }],
     };
     wallet
-        .insert_tx(init_tx, wallet.transactions().last().unwrap().0)
+        .insert_tx(init_tx, wallet.transactions().last().unwrap().0, None)
         .unwrap();
 
     let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
@@ -1574,7 +1601,9 @@ fn test_bump_fee_add_input() {
     let (psbt, original_details) = builder.finish().unwrap();
     let tx = psbt.extract_tx();
     let txid = tx.txid();
-    wallet.insert_tx(tx, ConfirmationTime::Unconfirmed).unwrap();
+    wallet
+        .insert_tx(tx, ConfirmationTime::Unconfirmed, None)
+        .unwrap();
 
     let mut builder = wallet.build_fee_bump(txid).unwrap();
     builder.fee_rate(FeeRate::from_sat_per_vb(50.0));
@@ -1618,7 +1647,9 @@ fn test_bump_fee_absolute_add_input() {
     let (psbt, original_details) = builder.finish().unwrap();
     let tx = psbt.extract_tx();
     let txid = tx.txid();
-    wallet.insert_tx(tx, ConfirmationTime::Unconfirmed).unwrap();
+    wallet
+        .insert_tx(tx, ConfirmationTime::Unconfirmed, None)
+        .unwrap();
 
     let mut builder = wallet.build_fee_bump(txid).unwrap();
     builder.fee_absolute(6_000);
@@ -1668,7 +1699,9 @@ fn test_bump_fee_no_change_add_input_and_change() {
 
     let tx = psbt.extract_tx();
     let txid = tx.txid();
-    wallet.insert_tx(tx, ConfirmationTime::Unconfirmed).unwrap();
+    wallet
+        .insert_tx(tx, ConfirmationTime::Unconfirmed, None)
+        .unwrap();
 
     // now bump the fees without using `allow_shrinking`. the wallet should add an
     // extra input and a change output, and leave the original output untouched
@@ -1724,7 +1757,9 @@ fn test_bump_fee_add_input_change_dust() {
     assert_eq!(tx.input.len(), 1);
     assert_eq!(tx.output.len(), 2);
     let txid = tx.txid();
-    wallet.insert_tx(tx, ConfirmationTime::Unconfirmed).unwrap();
+    wallet
+        .insert_tx(tx, ConfirmationTime::Unconfirmed, None)
+        .unwrap();
 
     let mut builder = wallet.build_fee_bump(txid).unwrap();
     // We set a fee high enough that during rbf we are forced to add
@@ -1784,7 +1819,7 @@ fn test_bump_fee_force_add_input() {
         txin.witness.push([0x00; P2WPKH_FAKE_WITNESS_SIZE]); // fake signature
     }
     wallet
-        .insert_tx(tx.clone(), ConfirmationTime::Unconfirmed)
+        .insert_tx(tx.clone(), ConfirmationTime::Unconfirmed, None)
         .unwrap();
     // the new fee_rate is low enough that just reducing the change would be fine, but we force
     // the addition of an extra input with `add_utxo()`
@@ -1839,7 +1874,7 @@ fn test_bump_fee_absolute_force_add_input() {
         txin.witness.push([0x00; P2WPKH_FAKE_WITNESS_SIZE]); // fake signature
     }
     wallet
-        .insert_tx(tx.clone(), ConfirmationTime::Unconfirmed)
+        .insert_tx(tx.clone(), ConfirmationTime::Unconfirmed, None)
         .unwrap();
 
     // the new fee_rate is low enough that just reducing the change would be fine, but we force
@@ -1899,7 +1934,9 @@ fn test_bump_fee_unconfirmed_inputs_only() {
     for txin in &mut tx.input {
         txin.witness.push([0x00; P2WPKH_FAKE_WITNESS_SIZE]); // fake signature
     }
-    wallet.insert_tx(tx, ConfirmationTime::Unconfirmed).unwrap();
+    wallet
+        .insert_tx(tx, ConfirmationTime::Unconfirmed, None)
+        .unwrap();
     let mut builder = wallet.build_fee_bump(txid).unwrap();
     builder.fee_rate(FeeRate::from_sat_per_vb(25.0));
     builder.finish().unwrap();
@@ -1928,7 +1965,9 @@ fn test_bump_fee_unconfirmed_input() {
     for txin in &mut tx.input {
         txin.witness.push([0x00; P2WPKH_FAKE_WITNESS_SIZE]); // fake signature
     }
-    wallet.insert_tx(tx, ConfirmationTime::Unconfirmed).unwrap();
+    wallet
+        .insert_tx(tx, ConfirmationTime::Unconfirmed, None)
+        .unwrap();
 
     let mut builder = wallet.build_fee_bump(txid).unwrap();
     builder
@@ -3022,6 +3061,7 @@ fn test_spend_coinbase() {
                 height: confirmation_height,
                 time: 30_000,
             },
+            None,
         )
         .unwrap();
 

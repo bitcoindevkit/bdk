@@ -10,6 +10,26 @@ use bincode::Options;
 
 use crate::{bincode_options, EntryIter, FileError, IterError};
 
+#[cfg(feature = "wallet")]
+use bdk::wallet::{ChangeSet, Tracker};
+
+#[cfg(feature = "wallet")]
+impl bdk_chain::PersistBackend<Tracker, ChangeSet> for Store<Tracker, ChangeSet> {
+    type WriteError = std::io::Error;
+
+    type LoadError = IterError;
+
+    fn write_changes(&mut self, changeset: &ChangeSet) -> Result<(), Self::WriteError> {
+        self.append_changeset(changeset)
+    }
+
+    fn load_into_tracker(&mut self, tracker: &mut Tracker) -> Result<(), Self::LoadError> {
+        let (changeset, result) = self.aggregate_changesets();
+        tracker.apply_changeset(changeset);
+        result
+    }
+}
+
 /// Persists an append-only list of changesets (`C`) to a single file.
 ///
 /// The changesets are the results of altering a tracker implementation (`T`).

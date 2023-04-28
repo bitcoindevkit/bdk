@@ -12,6 +12,7 @@ use crate::{
 /// A struct that combines [`TxGraph`] and an [`Indexer`] implementation.
 ///
 /// This structure ensures that [`TxGraph`] and [`Indexer`] are updated atomically.
+#[derive(Debug)]
 pub struct IndexedTxGraph<A, I> {
     /// Transaction index.
     pub index: I,

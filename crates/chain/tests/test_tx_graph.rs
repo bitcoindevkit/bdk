@@ -717,10 +717,11 @@ fn test_chain_spends() {
         ObservedAs::Confirmed(&local_chain.get_block(95).expect("block expected"))
     );
 
-    // As long the unconfirmed tx isn't marked as seen, chain_spend will return None.
-    assert!(graph
-        .get_chain_spend(&local_chain, tip, OutPoint::new(tx_0.txid(), 1))
-        .is_none());
+    // Even if seen is 0, chain_spend will still return some
+    assert_eq!(
+        graph.get_chain_spend(&local_chain, tip, OutPoint::new(tx_0.txid(), 1)),
+        Some((ObservedAs::Unconfirmed(0), tx_2.txid()))
+    );
 
     // Mark the unconfirmed as seen and check correct ObservedAs status is returned.
     let _ = graph.insert_seen_at(tx_2.txid(), 1234567);
