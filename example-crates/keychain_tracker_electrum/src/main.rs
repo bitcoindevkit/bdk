@@ -4,12 +4,14 @@ use bdk_electrum::{
     electrum_client::{self, ElectrumApi},
     ElectrumExt, ElectrumUpdate,
 };
-use keychain_tracker_example_cli::{
+use indexed_tx_graph_example_cli::{
     self as cli,
     anyhow::{self, Context},
     clap::{self, Parser, Subcommand},
 };
 use std::{collections::BTreeMap, fmt::Debug, io, io::Write};
+use std::sync::Mutex;
+use bdk_chain::local_chain::LocalChain;
 
 #[derive(Subcommand, Debug, Clone)]
 enum ElectrumCommands {
@@ -48,7 +50,7 @@ pub struct ScanOptions {
 }
 
 fn main() -> anyhow::Result<()> {
-    let (args, keymap, tracker, db) = cli::init::<ElectrumCommands, _>()?;
+    let (args, keymap, indexed_tx_graph/*, db*/) = cli::init::<ElectrumCommands, _>()?;
 
     let electrum_url = match args.network {
         Network::Bitcoin => "ssl://electrum.blockstream.info:50002",
@@ -61,6 +63,8 @@ fn main() -> anyhow::Result<()> {
         .build();
 
     let client = electrum_client::Client::from_config(electrum_url, config)?;
+    
+    let local_chain = Mutex::new(LocalChain::default());
 
     let electrum_cmd = match args.command.clone() {
         cli::Commands::ChainSpecific(electrum_cmd) => electrum_cmd,
@@ -71,8 +75,9 @@ fn main() -> anyhow::Result<()> {
                     let _txid = client.transaction_broadcast(transaction)?;
                     Ok(())
                 },
-                &tracker,
-                &db,
+                &indexed_tx_graph,
+//                &db,
+                &local_chain,
                 args.network,
                 &keymap,
             )
@@ -84,12 +89,12 @@ fn main() -> anyhow::Result<()> {
             stop_gap,
             scan_options: scan_option,
         } => {
-            let (spk_iterators, local_chain) = {
-                // Get a short lock on the tracker to get the spks iterators
+            let (keychain_spks, tx_graph) = {
+                // Get a short lock on the indexed_tx_graph to get the spks iterators
                 // and local chain state
-                let tracker = &*tracker.lock().unwrap();
-                let spk_iterators = tracker
-                    .txout_index
+                let locked_indexed_tx_graph = &*indexed_tx_graph.lock().unwrap();
+                let spk_iterators = locked_indexed_tx_graph
+                    .index
                     .spks_of_all_keychains()
                     .into_iter()
                     .map(|(keychain, iter)| {
@@ -106,14 +111,15 @@ fn main() -> anyhow::Result<()> {
                         (keychain, spk_iter)
                     })
                     .collect::<BTreeMap<_, _>>();
-                let local_chain = tracker.chain().checkpoints().clone();
-                (spk_iterators, local_chain)
+                let tx_graph = locked_indexed_tx_graph.graph().clone();
+                (spk_iterators, tx_graph)
             };
 
+            let unlocked_local_chain = *local_chain.lock().unwrap();
             // we scan the spks **without** a lock on the tracker
             client.scan(
-                &local_chain,
-                spk_iterators,
+                &unlocked_local_chain,
+                keychain_spks,
                 core::iter::empty(),
                 core::iter::empty(),
                 stop_gap,
@@ -128,7 +134,7 @@ fn main() -> anyhow::Result<()> {
             scan_options,
         } => {
             // Get a short lock on the tracker to get the spks we're interested in
-            let tracker = tracker.lock().unwrap();
+            let tracker = indexed_tx_graph.lock().unwrap();
 
             if !(all_spks || unused_spks || utxos || unconfirmed) {
                 unused_spks = true;
@@ -223,7 +229,7 @@ fn main() -> anyhow::Result<()> {
         }
     };
 
-    let missing_txids = response.missing_full_txs(&*tracker.lock().unwrap());
+    let missing_txids = response.missing_full_txs(&*indexed_tx_graph.lock().unwrap());
 
     // fetch the missing full transactions **without** a lock on the tracker
     let new_txs = client
@@ -232,13 +238,13 @@ fn main() -> anyhow::Result<()> {
 
     {
         // Get a final short lock to apply the changes
-        let mut tracker = tracker.lock().unwrap();
+        let mut locked_index_tx_graph = indexed_tx_graph.lock().unwrap();
         let changeset = {
-            let scan = response.into_keychain_scan(new_txs, &*tracker)?;
-            tracker.determine_changeset(&scan)?
+            let scan = response.into_keychain_scan(new_txs, &*locked_index_tx_graph)?;
+            locked_index_tx_graph.determine_changeset(&scan)?
         };
-        db.lock().unwrap().append_changeset(&changeset)?;
-        tracker.apply_changeset(changeset);
+//        db.lock().unwrap().append_changeset(&changeset)?;
+        locked_index_tx_graph.apply_changeset(changeset);
     };
 
     Ok(())

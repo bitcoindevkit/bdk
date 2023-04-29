@@ -5,7 +5,7 @@ use bdk_esplora::EsploraExt;
 
 use std::io::{self, Write};
 
-use keychain_tracker_example_cli::{
+use indexed_tx_graph_example_cli::{
     self as cli,
     anyhow::{self, Context},
     clap::{self, Parser, Subcommand},
@@ -49,7 +49,8 @@ pub struct ScanOptions {
 }
 
 fn main() -> anyhow::Result<()> {
-    let (args, keymap, keychain_tracker, db) = cli::init::<EsploraCommands, _>()?;
+    let (args, keymap, indexed_tx_graph/*, db*/) = cli::init::<EsploraCommands, _>()?;
+    
     let esplora_url = match args.network {
         Network::Bitcoin => "https://mempool.space/api",
         Network::Testnet => "https://mempool.space/testnet/api",
@@ -58,6 +59,8 @@ fn main() -> anyhow::Result<()> {
     };
 
     let client = esplora_client::Builder::new(esplora_url).build_blocking()?;
+    
+    let chain_oracle = client;
 
     let esplora_cmd = match args.command {
         cli::Commands::ChainSpecific(esplora_cmd) => esplora_cmd,
@@ -65,10 +68,11 @@ fn main() -> anyhow::Result<()> {
             return cli::handle_commands(
                 general_command,
                 |transaction| Ok(client.broadcast(transaction)?),
-                &keychain_tracker,
-                &db,
-                args.network,
-                &keymap,
+                &indexed_tx_graph,
+                &chain_oracle,
+//                &db,
+//                args.network,
+//                &keymap,
             )
         }
     };
@@ -81,7 +85,7 @@ fn main() -> anyhow::Result<()> {
             let (spk_iterators, local_chain) = {
                 // Get a short lock on the tracker to get the spks iterators
                 // and local chain state
-                let tracker = &*keychain_tracker.lock().unwrap();
+                let tracker = &*indexed_tx_graph.lock().unwrap();
                 let spk_iterators = tracker
                     .txout_index
                     .spks_of_all_keychains()
@@ -122,7 +126,7 @@ fn main() -> anyhow::Result<()> {
 
             {
                 // we take a short lock to apply results to tracker and db
-                let tracker = &mut *keychain_tracker.lock().unwrap();
+                let tracker = &mut *indexed_tx_graph.lock().unwrap();
                 let db = &mut *db.lock().unwrap();
                 let changeset = tracker.apply_update(wallet_scan)?;
                 db.append_changeset(&changeset)?;
@@ -136,7 +140,7 @@ fn main() -> anyhow::Result<()> {
             scan_options,
         } => {
             // Get a short lock on the tracker to get the spks we're interested in
-            let tracker = keychain_tracker.lock().unwrap();
+            let tracker = indexed_tx_graph.lock().unwrap();
 
             if !(all_spks || unused_spks || utxos || unconfirmed) {
                 unused_spks = true;
@@ -229,7 +233,7 @@ fn main() -> anyhow::Result<()> {
 
             {
                 // we take a short lock to apply the results to the tracker and db
-                let tracker = &mut *keychain_tracker.lock().unwrap();
+                let tracker = &mut *indexed_tx_graph.lock().unwrap();
                 let changeset = tracker.apply_update(scan.into())?;
                 let db = &mut *db.lock().unwrap();
                 db.append_changeset(&changeset)?;

@@ -8,4 +8,4 @@ edition = "2021"
 [dependencies]
 bdk_chain = { path = "../../crates/chain", features = ["serde", "miniscript"] }
 bdk_esplora = { path = "../../crates/esplora" }
-keychain_tracker_example_cli = { path = "../keychain_tracker_example_cli" }
+indexed_tx_graph_example_cli = { path = "../indexed_tx_graph_example_cli" }
