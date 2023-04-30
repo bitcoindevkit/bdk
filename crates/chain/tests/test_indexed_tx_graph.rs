@@ -68,7 +68,7 @@ fn insert_relevant_txs() {
         graph.insert_relevant_txs(txs.iter().map(|tx| (tx, None)), None),
         IndexedAdditions {
             graph_additions: Additions {
-                tx: txs.into(),
+                txs: txs.into(),
                 ..Default::default()
             },
             index_additions: DerivationAdditions([((), 9_u32)].into()),

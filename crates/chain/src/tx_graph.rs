@@ -482,7 +482,7 @@ impl<A: Clone + Ord> TxGraph<A> {
 
     /// Applies [`Additions`] to [`TxGraph`].
     pub fn apply_additions(&mut self, additions: Additions<A>) {
-        for tx in additions.tx {
+        for tx in additions.txs {
             let txid = tx.txid();
 
             tx.input
@@ -513,7 +513,7 @@ impl<A: Clone + Ord> TxGraph<A> {
             }
         }
 
-        for (outpoint, txout) in additions.txout {
+        for (outpoint, txout) in additions.txouts {
             let tx_entry = self
                 .txs
                 .entry(outpoint.txid)
@@ -553,11 +553,11 @@ impl<A: Clone + Ord> TxGraph<A> {
         for (&txid, (update_tx_node, _, update_last_seen)) in &update.txs {
             let prev_last_seen: u64 = match (self.txs.get(&txid), update_tx_node) {
                 (None, TxNodeInternal::Whole(update_tx)) => {
-                    additions.tx.insert(update_tx.clone());
+                    additions.txs.insert(update_tx.clone());
                     0
                 }
                 (None, TxNodeInternal::Partial(update_txos)) => {
-                    additions.txout.extend(
+                    additions.txouts.extend(
                         update_txos
                             .iter()
                             .map(|(&vout, txo)| (OutPoint::new(txid, vout), txo.clone())),
@@ -569,14 +569,14 @@ impl<A: Clone + Ord> TxGraph<A> {
                     Some((TxNodeInternal::Partial(_), _, last_seen)),
                     TxNodeInternal::Whole(update_tx),
                 ) => {
-                    additions.tx.insert(update_tx.clone());
+                    additions.txs.insert(update_tx.clone());
                     *last_seen
                 }
                 (
                     Some((TxNodeInternal::Partial(txos), _, last_seen)),
                     TxNodeInternal::Partial(update_txos),
                 ) => {
-                    additions.txout.extend(
+                    additions.txouts.extend(
                         update_txos
                             .iter()
                             .filter(|(vout, _)| !txos.contains_key(*vout))
@@ -983,8 +983,8 @@ impl<A: Anchor> TxGraph<A> {
 )]
 #[must_use]
 pub struct Additions<A = ()> {
-    pub tx: BTreeSet<Transaction>,
-    pub txout: BTreeMap<OutPoint, TxOut>,
+    pub txs: BTreeSet<Transaction>,
+    pub txouts: BTreeMap<OutPoint, TxOut>,
     pub anchors: BTreeSet<(A, Txid)>,
     pub last_seen: BTreeMap<Txid, u64>,
 }
@@ -992,8 +992,8 @@ pub struct Additions<A = ()> {
 impl<A> Default for Additions<A> {
     fn default() -> Self {
         Self {
-            tx: Default::default(),
-            txout: Default::default(),
+            txs: Default::default(),
+            txouts: Default::default(),
             anchors: Default::default(),
             last_seen: Default::default(),
         }
@@ -1003,12 +1003,12 @@ impl<A> Default for Additions<A> {
 impl<A> Additions<A> {
     /// Returns true if the [`Additions`] is empty (no transactions or txouts).
     pub fn is_empty(&self) -> bool {
-        self.tx.is_empty() && self.txout.is_empty()
+        self.txs.is_empty() && self.txouts.is_empty()
     }
 
     /// Iterates over all outpoints contained within [`Additions`].
     pub fn txouts(&self) -> impl Iterator<Item = (OutPoint, &TxOut)> {
-        self.tx
+        self.txs
             .iter()
             .flat_map(|tx| {
                 tx.output
@@ -1016,14 +1016,14 @@ impl<A> Additions<A> {
                     .enumerate()
                     .map(move |(vout, txout)| (OutPoint::new(tx.txid(), vout as _), txout))
             })
-            .chain(self.txout.iter().map(|(op, txout)| (*op, txout)))
+            .chain(self.txouts.iter().map(|(op, txout)| (*op, txout)))
     }
 }
 
 impl<A: Ord> Append for Additions<A> {
     fn append(&mut self, mut other: Self) {
-        self.tx.append(&mut other.tx);
-        self.txout.append(&mut other.txout);
+        self.txs.append(&mut other.txs);
+        self.txouts.append(&mut other.txouts);
         self.anchors.append(&mut other.anchors);
 
         // last_seen timestamps should only increase
@@ -1037,8 +1037,8 @@ impl<A: Ord> Append for Additions<A> {
     }
 
     fn is_empty(&self) -> bool {
-        self.tx.is_empty()
-            && self.txout.is_empty()
+        self.txs.is_empty()
+            && self.txouts.is_empty()
             && self.anchors.is_empty()
             && self.last_seen.is_empty()
     }
