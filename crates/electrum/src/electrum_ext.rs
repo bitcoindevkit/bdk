@@ -101,8 +101,8 @@ impl<K> ElectrumUpdate<K, ConfirmationHeightAnchor> {
         let graph_additions = {
             let old_additions = TxGraph::default().determine_additions(&update.graph);
             tx_graph::Additions {
-                tx: old_additions.tx,
-                txout: old_additions.txout,
+                txs: old_additions.txs,
+                txouts: old_additions.txouts,
                 last_seen: old_additions.last_seen,
                 anchors: old_additions
                     .anchors
