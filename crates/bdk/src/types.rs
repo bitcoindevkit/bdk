@@ -114,6 +114,11 @@ impl FeeRate {
         self.0
     }
 
+    /// Return the value as satoshi/kwu
+    pub fn sat_per_kwu(&self) -> f32 {
+        self.0 * 250.0_f32
+    }
+
     /// Calculate absolute fee in Satoshis using size in weight units.
     pub fn fee_wu(&self, wu: usize) -> u64 {
         self.fee_vb(wu.vbytes())
@@ -329,5 +334,6 @@ mod tests {
     fn test_fee_from_sat_per_kwu() {
         let fee = FeeRate::from_sat_per_kwu(250.0);
         assert!((fee.as_sat_per_vb() - 1.0).abs() < f32::EPSILON);
+        assert_eq!(fee.sat_per_kwu(), 250.0);
     }
 }
