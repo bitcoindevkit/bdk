@@ -43,6 +43,10 @@ pub use miniscript;
 mod descriptor_ext;
 #[cfg(feature = "miniscript")]
 pub use descriptor_ext::DescriptorExt;
+#[cfg(feature = "miniscript")]
+mod spk_iter;
+#[cfg(feature = "miniscript")]
+pub use spk_iter::*;
 
 #[allow(unused_imports)]
 #[macro_use]
