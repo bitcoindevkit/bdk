@@ -3,7 +3,7 @@ use core::convert::Infallible;
 use alloc::collections::{BTreeMap, BTreeSet};
 use bitcoin::BlockHash;
 
-use crate::{BlockId, ChainOracle};
+use crate::{tracker::LastSeenBlock, BlockId, ChainOracle};
 
 /// This is a local implementation of [`ChainOracle`].
 ///
@@ -16,6 +16,12 @@ use crate::{BlockId, ChainOracle};
 #[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct LocalChain {
     blocks: BTreeMap<u32, BlockHash>,
+}
+
+impl LastSeenBlock for LocalChain {
+    fn last_seen_block(&self) -> Option<BlockId> {
+        self.tip()
+    }
 }
 
 impl ChainOracle for LocalChain {

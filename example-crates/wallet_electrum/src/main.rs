@@ -79,12 +79,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .expect("must get system time")
         .as_secs();
 
-    let update = electrum_update
-        .finalize(Some(now), new_txs)
-        .into_confirmation_time_update(&client)?;
+    let update = electrum_update.finalize_as_confirmation_time(&client, Some(now), new_txs)?;
 
     // update.
-    wallet.update(|tracker| update.clone().apply_to_tracker(tracker))?;
+    wallet.apply_update(update)?;
     wallet.commit()?;
 
     let balance = wallet.get_balance();

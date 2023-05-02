@@ -27,16 +27,14 @@ pub fn get_funded_wallet_with_change(
     };
 
     wallet.insert_checkpoint(anchor_block).unwrap();
-    wallet
-        .insert_tx(
-            tx.clone(),
-            ConfirmationTime::Confirmed {
-                height: 1000,
-                time: 100,
-            },
-            None,
-        )
-        .unwrap();
+    wallet.insert_tx(
+        &tx,
+        ConfirmationTime::Confirmed {
+            height: 1000,
+            time: 100,
+        },
+        None,
+    );
 
     (wallet, tx.txid())
 }

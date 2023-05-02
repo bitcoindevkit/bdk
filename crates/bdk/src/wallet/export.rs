@@ -239,16 +239,14 @@ mod test {
             lock_time: bitcoin::PackedLockTime::ZERO,
         };
         wallet.insert_checkpoint(anchor_block).unwrap();
-        wallet
-            .insert_tx(
-                transaction,
-                ConfirmationTime::Confirmed {
-                    height: 5000,
-                    time: 0,
-                },
-                None,
-            )
-            .unwrap();
+        assert!(wallet.insert_tx(
+            &transaction,
+            ConfirmationTime::Confirmed {
+                height: 5000,
+                time: 0,
+            },
+            None,
+        ));
         wallet
     }
 

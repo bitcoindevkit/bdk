@@ -21,11 +21,14 @@ use alloc::{
 };
 pub use bdk_chain::keychain::Balance;
 use bdk_chain::{
-    local_chain, BlockId, ConfirmationTime, ConfirmationTimeAnchor, Persist, PersistBackend,
+    indexed_tx_graph::IndexedAdditions,
+    local_chain,
+    tracker::{LocalChangeSet, LocalTracker, LocalUpdate},
+    BlockId, ConfirmationTime, ConfirmationTimeAnchor, Persist, PersistBackend,
 };
-use bitcoin::consensus::encode::serialize;
 use bitcoin::secp256k1::Secp256k1;
 use bitcoin::util::psbt;
+use bitcoin::{consensus::encode::serialize, hashes::Hash};
 use bitcoin::{
     Address, BlockHash, EcdsaSighashType, LockTime, Network, OutPoint, SchnorrSighashType, Script,
     Sequence, Transaction, TxOut, Txid, Witness,
@@ -40,7 +43,7 @@ use log::{debug, error, info, trace};
 pub mod coin_selection;
 pub mod export;
 pub mod signer;
-mod tracker;
+// mod tracker;
 pub mod tx_builder;
 pub(crate) mod utils;
 
@@ -48,7 +51,7 @@ pub(crate) mod utils;
 #[cfg_attr(docsrs, doc(cfg(feature = "hardware-signer")))]
 pub mod hardwaresigner;
 
-pub use tracker::*;
+// pub use tracker::*;
 pub use utils::IsDust;
 
 #[allow(deprecated)]
@@ -83,11 +86,15 @@ const COINBASE_MATURITY: u32 = 100;
 pub struct Wallet<D = ()> {
     signers: Arc<SignersContainer>,
     change_signers: Arc<SignersContainer>,
-    tracker: Tracker,
-    persist: Persist<D, Tracker, ChangeSet>,
+    tracker: WalletTracker,
+    persist: Persist<D, WalletTracker, WalletChangeSet>,
     network: Network,
     secp: SecpCtx,
 }
+
+type WalletTracker = LocalTracker<KeychainKind, ConfirmationTimeAnchor>;
+type WalletChangeSet = LocalChangeSet<KeychainKind, ConfirmationTimeAnchor>;
+pub type WalletUpdate = LocalUpdate<KeychainKind, ConfirmationTimeAnchor>;
 
 // /// The update to a [`Wallet`] used in [`Wallet::apply_update`]. This is usually returned from blockchain data sources.
 // /// The type parameter `T` indicates the kind of transaction contained in the update. It's usually a [`bitcoin::Transaction`].
@@ -183,7 +190,10 @@ where
 #[cfg(feature = "std")]
 impl<P: core::fmt::Display + core::fmt::Debug> std::error::Error for NewError<P> {}
 
-impl<D> Wallet<D> {
+impl<D> Wallet<D>
+where
+    D: PersistBackend<WalletTracker, WalletChangeSet>,
+{
     /// Create a wallet from a `descriptor` (and an optional `change_descriptor`) and load related
     /// transaction data from `db`.
     pub fn new<E: IntoWalletDescriptor>(
@@ -191,18 +201,13 @@ impl<D> Wallet<D> {
         change_descriptor: Option<E>,
         mut db: D,
         network: Network,
-    ) -> Result<Self, NewError<D::LoadError>>
-    where
-        D: PersistBackend<Tracker, ChangeSet>,
-    {
+    ) -> Result<Self, NewError<D::LoadError>> {
         let secp = Secp256k1::new();
-        let mut tracker = Tracker::default();
+        let mut tracker_keychains = Vec::new();
 
         let (descriptor, keymap) = into_wallet_descriptor_checked(descriptor, &secp, network)
             .map_err(NewError::Descriptor)?;
-        tracker
-            .index_mut()
-            .add_keychain(KeychainKind::External, descriptor.clone());
+        tracker_keychains.push((KeychainKind::External, descriptor.clone()));
         let signers = Arc::new(SignersContainer::build(keymap, &descriptor, &secp));
 
         let change_signers = match change_descriptor {
@@ -217,14 +222,14 @@ impl<D> Wallet<D> {
                     &secp,
                 ));
 
-                tracker
-                    .index_mut()
-                    .add_keychain(KeychainKind::Internal, change_descriptor);
-
+                tracker_keychains.push((KeychainKind::Internal, change_descriptor));
                 change_signers
             }
             None => Arc::new(SignersContainer::new()),
         };
+
+        let mut tracker =
+            WalletTracker::new_local(BlockHash::from_inner([0_u8; 32]), tracker_keychains);
 
         db.load_into_tracker(&mut tracker)
             .map_err(NewError::Persist)?;
@@ -241,23 +246,10 @@ impl<D> Wallet<D> {
         })
     }
 
-    /// Get the Bitcoin network the wallet is using.
-    pub fn network(&self) -> Network {
-        self.network
-    }
-
-    /// Iterator over all keychains in this wallet
-    pub fn keychanins(&self) -> &BTreeMap<KeychainKind, ExtendedDescriptor> {
-        self.tracker.index().keychains()
-    }
-
     /// Return a derived address using the external descriptor, see [`AddressIndex`] for
     /// available address index selection strategies. If none of the keys in the descriptor are derivable
     /// (i.e. does not end with /*) then the same address will always be returned for any [`AddressIndex`].
-    pub fn get_address(&mut self, address_index: AddressIndex) -> AddressInfo
-    where
-        D: PersistBackend<Tracker, ChangeSet>,
-    {
+    pub fn get_address(&mut self, address_index: AddressIndex) -> AddressInfo {
         self._get_address(address_index, KeychainKind::External)
     }
 
@@ -268,27 +260,27 @@ impl<D> Wallet<D> {
     /// see [`AddressIndex`] for available address index selection strategies. If none of the keys
     /// in the descriptor are derivable (i.e. does not end with /*) then the same address will always
     /// be returned for any [`AddressIndex`].
-    pub fn get_internal_address(&mut self, address_index: AddressIndex) -> AddressInfo
-    where
-        D: PersistBackend<Tracker, ChangeSet>,
-    {
+    pub fn get_internal_address(&mut self, address_index: AddressIndex) -> AddressInfo {
         self._get_address(address_index, KeychainKind::Internal)
     }
 
-    fn _get_address(&mut self, address_index: AddressIndex, keychain: KeychainKind) -> AddressInfo
-    where
-        D: PersistBackend<Tracker, ChangeSet>,
-    {
+    fn _get_address(&mut self, address_index: AddressIndex, keychain: KeychainKind) -> AddressInfo {
         let keychain = self.map_keychain(keychain);
         let txout_index = self.tracker.index_mut();
         let (index, spk) = match address_index {
             AddressIndex::New => {
-                let ((index, spk), changeset) = txout_index.reveal_next_spk(&keychain);
-                let spk = spk.clone();
+                let ((index, spk), index_additions) = txout_index.reveal_next_spk(&keychain);
 
-                self.persist.stage(changeset.into());
+                self.persist.stage(WalletChangeSet {
+                    indexed_additions: IndexedAdditions {
+                        index_additions,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                });
+
                 self.persist.commit().expect("TODO");
-                (index, spk)
+                (index, spk.clone())
             }
             AddressIndex::LastUnused => {
                 let index = txout_index.last_revealed_index(&keychain);
@@ -317,175 +309,6 @@ impl<D> Wallet<D> {
         }
     }
 
-    /// Return whether or not a `script` is part of this wallet (either internal or external)
-    pub fn is_mine(&self, script: &Script) -> bool {
-        self.tracker.index().index_of_spk(script).is_some()
-    }
-
-    /// Finds how the wallet derived the script pubkey `spk`.
-    ///
-    /// Will only return `Some(_)` if the wallet has given out the spk.
-    pub fn derivation_of_spk(&self, spk: &Script) -> Option<(KeychainKind, u32)> {
-        self.tracker.index().index_of_spk(spk).copied()
-    }
-
-    /// Return the list of unspent outputs of this wallet
-    pub fn list_unspent(&self) -> Vec<LocalUtxo> {
-        self.tracker
-            .list_owned_unspents()
-            .map(|(&(keychain, derivation_index), utxo)| LocalUtxo {
-                outpoint: utxo.outpoint,
-                txout: utxo.txout,
-                keychain,
-                is_spent: false,
-                derivation_index,
-                confirmation_time: match utxo.chain_position {
-                    bdk_chain::ObservedAs::Confirmed(a) => ConfirmationTime::Confirmed {
-                        height: a.confirmation_height,
-                        time: a.confirmation_time,
-                    },
-                    bdk_chain::ObservedAs::Unconfirmed(_) => ConfirmationTime::Unconfirmed,
-                },
-            })
-            .collect()
-    }
-
-    /// Get all the checkpoints the wallet is currently storing indexed by height.
-    pub fn checkpoints(&self) -> &BTreeMap<u32, BlockHash> {
-        self.tracker.chain().all_blocks()
-    }
-
-    /// Returns the latest checkpoint.
-    pub fn latest_checkpoint(&self) -> Option<BlockId> {
-        self.tracker.chain().tip()
-    }
-
-    /// Returns a iterators of all the script pubkeys for the `Internal` and External` variants in `KeychainKind`.
-    ///
-    /// This is inteded to be used when doing a full scan of your addresses (e.g. after restoring
-    /// from seed words). You pass the `BTreeMap` of iterators to a blockchain data source (e.g.
-    /// electrum server) which will go through each address until it reaches a *stop grap*.
-    ///
-    /// Note carefully that iterators go over **all** script pubkeys on the keychains (not what
-    /// script pubkeys the wallet is storing internally).
-    pub fn spks_of_all_keychains(
-        &self,
-    ) -> BTreeMap<KeychainKind, impl Iterator<Item = (u32, Script)> + Clone> {
-        self.tracker.index().spks_of_all_keychains()
-    }
-
-    /// Gets an iterator over all the script pubkeys in a single keychain.
-    ///
-    /// See [`spks_of_all_keychains`] for more documentation
-    ///
-    /// [`spks_of_all_keychains`]: Self::spks_of_all_keychains
-    pub fn spks_of_keychain(
-        &self,
-        keychain: KeychainKind,
-    ) -> impl Iterator<Item = (u32, Script)> + Clone {
-        self.tracker.index().spks_of_keychain(&keychain)
-    }
-
-    /// Returns the utxo owned by this wallet corresponding to `outpoint` if it exists in the
-    /// wallet's database.
-    pub fn get_utxo(&self, op: OutPoint) -> Option<LocalUtxo> {
-        self.tracker
-            .list_owned_unspents()
-            .find_map(|(&(keychain, derivation_index), txo)| {
-                if op == txo.outpoint {
-                    Some(LocalUtxo {
-                        outpoint: txo.outpoint,
-                        txout: txo.txout,
-                        keychain,
-                        is_spent: txo.spent_by.is_none(),
-                        derivation_index,
-                        confirmation_time: match txo.chain_position {
-                            bdk_chain::ObservedAs::Confirmed(a) => ConfirmationTime::Confirmed {
-                                height: a.confirmation_height,
-                                time: a.confirmation_time,
-                            },
-                            bdk_chain::ObservedAs::Unconfirmed(_) => ConfirmationTime::Unconfirmed,
-                        },
-                    })
-                } else {
-                    None
-                }
-            })
-    }
-
-    /// Return a single transactions made and received by the wallet
-    ///
-    /// Optionally fill the [`TransactionDetails::transaction`] field with the raw transaction if
-    /// `include_raw` is `true`.
-    pub fn get_tx(&self, txid: Txid, include_raw: bool) -> Option<TransactionDetails> {
-        let chain_tip = self.tracker.chain().tip().unwrap_or_default();
-
-        let raw_tx = self.tracker.graph().get_tx(txid)?;
-        let pos = self
-            .tracker
-            .graph()
-            .get_chain_position(self.tracker.chain(), chain_tip, txid)?;
-
-        // let (&confirmation_time, tx) = self.keychain_tracker.chain_graph().get_tx_in_chain(txid)?;
-        let graph = self.tracker.graph();
-        let txout_index = self.tracker.index();
-
-        let received = raw_tx
-            .output
-            .iter()
-            .map(|txout| {
-                if txout_index.index_of_spk(&txout.script_pubkey).is_some() {
-                    txout.value
-                } else {
-                    0
-                }
-            })
-            .sum();
-
-        let sent = raw_tx
-            .input
-            .iter()
-            .map(|txin| {
-                if let Some((_, txout)) = txout_index.txout(txin.previous_output) {
-                    txout.value
-                } else {
-                    0
-                }
-            })
-            .sum();
-
-        let inputs = raw_tx
-            .input
-            .iter()
-            .map(|txin| {
-                graph
-                    .get_txout(txin.previous_output)
-                    .map(|txout| txout.value)
-            })
-            .sum::<Option<u64>>();
-        let outputs = raw_tx.output.iter().map(|txout| txout.value).sum();
-        let fee = inputs.map(|inputs| inputs.saturating_sub(outputs));
-
-        Some(TransactionDetails {
-            transaction: if include_raw {
-                Some(raw_tx.clone())
-            } else {
-                None
-            },
-            txid,
-            received,
-            sent,
-            fee,
-            confirmation_time: match pos {
-                bdk_chain::ObservedAs::Confirmed(a) => ConfirmationTime::Confirmed {
-                    height: a.confirmation_height,
-                    time: a.confirmation_time,
-                },
-                bdk_chain::ObservedAs::Unconfirmed(_) => ConfirmationTime::Unconfirmed,
-            },
-        })
-    }
-
     /// Add a new checkpoint to the wallet's internal view of the chain.
     /// This stages but does not [`commit`] the change.
     ///
@@ -496,10 +319,7 @@ impl<D> Wallet<D> {
     pub fn insert_checkpoint(
         &mut self,
         block_id: BlockId,
-    ) -> Result<bool, local_chain::InsertBlockNotMatchingError>
-    where
-        D: PersistBackend<Tracker, ChangeSet>,
-    {
+    ) -> Result<bool, local_chain::InsertBlockNotMatchingError> {
         let changeset = self.tracker.insert_block(block_id)?;
         let changed = changeset.is_empty();
         if changed {
@@ -524,13 +344,10 @@ impl<D> Wallet<D> {
     /// [`insert_checkpoint`]: Self::insert_checkpoint
     pub fn insert_tx(
         &mut self,
-        tx: Transaction,
+        tx: &Transaction,
         pos: ConfirmationTime,
         last_seen: Option<u64>,
-    ) -> Result<bool, InsertTxInvalidAnchorError>
-    where
-        D: PersistBackend<Tracker, ChangeSet>,
-    {
+    ) -> bool {
         // [TODO] This is not okay!
         let anchor_block = self.tracker.chain().tip().unwrap_or_default();
         let anchor = match pos {
@@ -544,127 +361,19 @@ impl<D> Wallet<D> {
             _ => None,
         };
 
-        let changeset = self.tracker.insert_tx(tx, anchor, last_seen)?;
+        let changeset: WalletChangeSet = self.tracker.insert_tx(tx, anchor, last_seen);
         let changed = !changeset.is_empty();
         if changed {
             self.persist.stage(changeset);
         }
-        Ok(changed)
-    }
-
-    #[deprecated(note = "use Wallet::transactions instead")]
-    /// Deprecated. use `Wallet::transactions` instead.
-    pub fn list_transactions(&self, include_raw: bool) -> Vec<TransactionDetails> {
-        self.tracker
-            .list_transactions()
-            .map(|tx| self.get_tx(tx.node.txid, include_raw).expect("must exist"))
-            .collect()
-    }
-
-    /// Iterate over the transactions in the wallet in order of ascending confirmation time with
-    /// unconfirmed transactions last.
-    pub fn transactions(&self) -> impl Iterator<Item = (ConfirmationTime, &Transaction)> + '_ {
-        self.tracker.list_transactions().map(|canonical_tx| {
-            (
-                match canonical_tx.observed_as {
-                    bdk_chain::ObservedAs::Confirmed(a) => ConfirmationTime::Confirmed {
-                        height: a.confirmation_height,
-                        time: a.confirmation_time,
-                    },
-                    bdk_chain::ObservedAs::Unconfirmed(_) => ConfirmationTime::Unconfirmed,
-                },
-                canonical_tx.node.tx,
-            )
-        })
-    }
-
-    /// Return the balance, separated into available, trusted-pending, untrusted-pending and immature
-    /// values.
-    pub fn get_balance(&self) -> Balance {
-        self.tracker.balance()
-    }
-
-    /// Add an external signer
-    ///
-    /// See [the `signer` module](signer) for an example.
-    pub fn add_signer(
-        &mut self,
-        keychain: KeychainKind,
-        ordering: SignerOrdering,
-        signer: Arc<dyn TransactionSigner>,
-    ) {
-        let signers = match keychain {
-            KeychainKind::External => Arc::make_mut(&mut self.signers),
-            KeychainKind::Internal => Arc::make_mut(&mut self.change_signers),
-        };
-
-        signers.add_external(signer.id(&self.secp), ordering, signer);
-    }
-
-    /// Get the signers
-    ///
-    /// ## Example
-    ///
-    /// ```
-    /// # use bdk::{Wallet, KeychainKind};
-    /// # use bdk::bitcoin::Network;
-    /// let wallet = Wallet::new_no_persist("wpkh(tprv8ZgxMBicQKsPe73PBRSmNbTfbcsZnwWhz5eVmhHpi31HW29Z7mc9B4cWGRQzopNUzZUT391DeDJxL2PefNunWyLgqCKRMDkU1s2s8bAfoSk/84'/0'/0'/0/*)", None, Network::Testnet)?;
-    /// for secret_key in wallet.get_signers(KeychainKind::External).signers().iter().filter_map(|s| s.descriptor_secret_key()) {
-    ///     // secret_key: tprv8ZgxMBicQKsPe73PBRSmNbTfbcsZnwWhz5eVmhHpi31HW29Z7mc9B4cWGRQzopNUzZUT391DeDJxL2PefNunWyLgqCKRMDkU1s2s8bAfoSk/84'/0'/0'/0/*
-    ///     println!("secret_key: {}", secret_key);
-    /// }
-    ///
-    /// Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
-    pub fn get_signers(&self, keychain: KeychainKind) -> Arc<SignersContainer> {
-        match keychain {
-            KeychainKind::External => Arc::clone(&self.signers),
-            KeychainKind::Internal => Arc::clone(&self.change_signers),
-        }
-    }
-
-    /// Start building a transaction.
-    ///
-    /// This returns a blank [`TxBuilder`] from which you can specify the parameters for the transaction.
-    ///
-    /// ## Example
-    ///
-    /// ```
-    /// # use std::str::FromStr;
-    /// # use bitcoin::*;
-    /// # use bdk::*;
-    /// # let descriptor = "wpkh(tpubD6NzVbkrYhZ4Xferm7Pz4VnjdcDPFyjVu5K4iZXQ4pVN8Cks4pHVowTBXBKRhX64pkRyJZJN5xAKj4UDNnLPb5p2sSKXhewoYx5GbTdUFWq/*)";
-    /// # let mut wallet = doctest_wallet!();
-    /// # let to_address = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap();
-    /// let (psbt, details) = {
-    ///    let mut builder =  wallet.build_tx();
-    ///    builder
-    ///        .add_recipient(to_address.script_pubkey(), 50_000);
-    ///    builder.finish()?
-    /// };
-    ///
-    /// // sign and broadcast ...
-    /// # Ok::<(), bdk::Error>(())
-    /// ```
-    ///
-    /// [`TxBuilder`]: crate::TxBuilder
-    pub fn build_tx(&mut self) -> TxBuilder<'_, D, DefaultCoinSelectionAlgorithm, CreateTx> {
-        TxBuilder {
-            wallet: alloc::rc::Rc::new(core::cell::RefCell::new(self)),
-            params: TxParams::default(),
-            coin_selection: DefaultCoinSelectionAlgorithm::default(),
-            phantom: core::marker::PhantomData,
-        }
+        changed
     }
 
     pub(crate) fn create_tx<Cs: coin_selection::CoinSelectionAlgorithm>(
         &mut self,
         coin_selection: Cs,
         params: TxParams,
-    ) -> Result<(psbt::PartiallySignedTransaction, TransactionDetails), Error>
-    where
-        D: PersistBackend<Tracker, ChangeSet>,
-    {
+    ) -> Result<(psbt::PartiallySignedTransaction, TransactionDetails), Error> {
         let external_descriptor = self
             .tracker
             .index()
@@ -924,11 +633,17 @@ impl<D> Wallet<D> {
             Some(ref drain_recipient) => drain_recipient.clone(),
             None => {
                 let change_keychain = self.map_keychain(KeychainKind::Internal);
-                let ((index, spk), changeset) =
+                let ((index, spk), index_additions) =
                     self.tracker.index_mut().next_unused_spk(&change_keychain);
                 let spk = spk.clone();
                 self.tracker.index_mut().mark_used(&change_keychain, index);
-                self.persist.stage(changeset.into());
+                self.persist.stage(WalletChangeSet {
+                    indexed_additions: IndexedAdditions {
+                        index_additions,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                });
                 self.persist.commit().expect("TODO");
                 spk
             }
@@ -1022,6 +737,322 @@ impl<D> Wallet<D> {
         Ok((psbt, transaction_details))
     }
 
+    /// Commits all curently [`staged`] changed to the persistence backend returning and error when this fails.
+    ///
+    /// [`staged`]: Self::staged
+    pub fn commit(&mut self) -> Result<(), D::WriteError> {
+        self.persist.commit()
+    }
+
+    /// Returns the changes that will be staged with the next call to [`commit`].
+    ///
+    /// [`commit`]: Self::commit
+    pub fn staged(&self) -> &WalletChangeSet {
+        self.persist.staged()
+    }
+
+    /// Applies an update to the wallet and stages the changes (but does not [`commit`] them).
+    ///
+    /// Usually you create an `update` by interacting with some blockchain data source and inserting
+    /// transactions related to your wallet into it.
+    ///
+    /// [`commit`]: Self::commit
+    pub fn apply_update(
+        &mut self,
+        update: WalletUpdate,
+    ) -> Result<(), local_chain::UpdateNotConnectedError> {
+        let (changeset, result) = self.tracker.apply_update(update);
+        self.persist.stage(changeset);
+        result
+    }
+}
+
+impl<D> Wallet<D> {
+    /// Get the Bitcoin network the wallet is using.
+    pub fn network(&self) -> Network {
+        self.network
+    }
+
+    /// Iterator over all keychains in this wallet
+    pub fn keychains(&self) -> &BTreeMap<KeychainKind, ExtendedDescriptor> {
+        self.tracker.index().keychains()
+    }
+
+    /// Get all the checkpoints the wallet is currently storing indexed by height.
+    pub fn checkpoints(&self) -> &BTreeMap<u32, BlockHash> {
+        self.tracker.chain().all_blocks()
+    }
+
+    /// Returns the latest checkpoint.
+    pub fn latest_checkpoint(&self) -> Option<BlockId> {
+        self.tracker.chain().tip()
+    }
+
+    /// Return whether or not a `script` is part of this wallet (either internal or external)
+    pub fn is_mine(&self, script: &Script) -> bool {
+        self.tracker.index().index_of_spk(script).is_some()
+    }
+
+    /// Finds how the wallet derived the script pubkey `spk`.
+    ///
+    /// Will only return `Some(_)` if the wallet has given out the spk.
+    pub fn derivation_of_spk(&self, spk: &Script) -> Option<(KeychainKind, u32)> {
+        self.tracker.index().index_of_spk(spk).copied()
+    }
+
+    /// Returns a iterators of all the script pubkeys for the `Internal` and External` variants in `KeychainKind`.
+    ///
+    /// This is inteded to be used when doing a full scan of your addresses (e.g. after restoring
+    /// from seed words). You pass the `BTreeMap` of iterators to a blockchain data source (e.g.
+    /// electrum server) which will go through each address until it reaches a *stop grap*.
+    ///
+    /// Note carefully that iterators go over **all** script pubkeys on the keychains (not what
+    /// script pubkeys the wallet is storing internally).
+    pub fn spks_of_all_keychains(
+        &self,
+    ) -> BTreeMap<KeychainKind, impl Iterator<Item = (u32, Script)> + Clone> {
+        self.tracker.index().spks_of_all_keychains()
+    }
+
+    /// Gets an iterator over all the script pubkeys in a single keychain.
+    ///
+    /// See [`spks_of_all_keychains`] for more documentation
+    ///
+    /// [`spks_of_all_keychains`]: Self::spks_of_all_keychains
+    pub fn spks_of_keychain(
+        &self,
+        keychain: KeychainKind,
+    ) -> impl Iterator<Item = (u32, Script)> + Clone {
+        self.tracker.index().spks_of_keychain(&keychain)
+    }
+
+    /// Return the list of unspent outputs of this wallet
+    pub fn list_unspent(&self) -> Vec<LocalUtxo> {
+        self.tracker
+            .list_owned_unspents()
+            .map(|(&(keychain, derivation_index), utxo)| LocalUtxo {
+                outpoint: utxo.outpoint,
+                txout: utxo.txout,
+                keychain,
+                is_spent: false,
+                derivation_index,
+                confirmation_time: match utxo.chain_position {
+                    bdk_chain::ObservedAs::Confirmed(a) => ConfirmationTime::Confirmed {
+                        height: a.confirmation_height,
+                        time: a.confirmation_time,
+                    },
+                    bdk_chain::ObservedAs::Unconfirmed(_) => ConfirmationTime::Unconfirmed,
+                },
+            })
+            .collect()
+    }
+
+    /// Returns the utxo owned by this wallet corresponding to `outpoint` if it exists in the
+    /// wallet's database.
+    pub fn get_utxo(&self, op: OutPoint) -> Option<LocalUtxo> {
+        self.tracker
+            .list_owned_unspents()
+            .find_map(|(&(keychain, derivation_index), txo)| {
+                if op == txo.outpoint {
+                    Some(LocalUtxo {
+                        outpoint: txo.outpoint,
+                        txout: txo.txout,
+                        keychain,
+                        is_spent: txo.spent_by.is_none(),
+                        derivation_index,
+                        confirmation_time: match txo.chain_position {
+                            bdk_chain::ObservedAs::Confirmed(a) => ConfirmationTime::Confirmed {
+                                height: a.confirmation_height,
+                                time: a.confirmation_time,
+                            },
+                            bdk_chain::ObservedAs::Unconfirmed(_) => ConfirmationTime::Unconfirmed,
+                        },
+                    })
+                } else {
+                    None
+                }
+            })
+    }
+
+    /// Return a single transactions made and received by the wallet
+    ///
+    /// Optionally fill the [`TransactionDetails::transaction`] field with the raw transaction if
+    /// `include_raw` is `true`.
+    pub fn get_tx(&self, txid: Txid, include_raw: bool) -> Option<TransactionDetails> {
+        let chain_tip = self.tracker.chain().tip().unwrap_or_default();
+
+        let raw_tx = self.tracker.graph().get_tx(txid)?;
+        let pos = self
+            .tracker
+            .graph()
+            .get_chain_position(self.tracker.chain(), chain_tip, txid)?;
+
+        // let (&confirmation_time, tx) = self.keychain_tracker.chain_graph().get_tx_in_chain(txid)?;
+        let graph = self.tracker.graph();
+        let txout_index = self.tracker.index();
+
+        let received = raw_tx
+            .output
+            .iter()
+            .map(|txout| {
+                if txout_index.index_of_spk(&txout.script_pubkey).is_some() {
+                    txout.value
+                } else {
+                    0
+                }
+            })
+            .sum();
+
+        let sent = raw_tx
+            .input
+            .iter()
+            .map(|txin| {
+                if let Some((_, txout)) = txout_index.txout(txin.previous_output) {
+                    txout.value
+                } else {
+                    0
+                }
+            })
+            .sum();
+
+        let inputs = raw_tx
+            .input
+            .iter()
+            .map(|txin| {
+                graph
+                    .get_txout(txin.previous_output)
+                    .map(|txout| txout.value)
+            })
+            .sum::<Option<u64>>();
+        let outputs = raw_tx.output.iter().map(|txout| txout.value).sum();
+        let fee = inputs.map(|inputs| inputs.saturating_sub(outputs));
+
+        Some(TransactionDetails {
+            transaction: if include_raw {
+                Some(raw_tx.clone())
+            } else {
+                None
+            },
+            txid,
+            received,
+            sent,
+            fee,
+            confirmation_time: match pos {
+                bdk_chain::ObservedAs::Confirmed(a) => ConfirmationTime::Confirmed {
+                    height: a.confirmation_height,
+                    time: a.confirmation_time,
+                },
+                bdk_chain::ObservedAs::Unconfirmed(_) => ConfirmationTime::Unconfirmed,
+            },
+        })
+    }
+
+    #[deprecated(note = "use Wallet::transactions instead")]
+    /// Deprecated. use `Wallet::transactions` instead.
+    pub fn list_transactions(&self, include_raw: bool) -> Vec<TransactionDetails> {
+        self.tracker
+            .list_transactions()
+            .map(|tx| self.get_tx(tx.node.txid, include_raw).expect("must exist"))
+            .collect()
+    }
+
+    /// Iterate over the transactions in the wallet in order of ascending confirmation time with
+    /// unconfirmed transactions last.
+    pub fn transactions(&self) -> impl Iterator<Item = (ConfirmationTime, &Transaction)> + '_ {
+        self.tracker.list_transactions().map(|canonical_tx| {
+            (
+                match canonical_tx.observed_as {
+                    bdk_chain::ObservedAs::Confirmed(a) => ConfirmationTime::Confirmed {
+                        height: a.confirmation_height,
+                        time: a.confirmation_time,
+                    },
+                    bdk_chain::ObservedAs::Unconfirmed(_) => ConfirmationTime::Unconfirmed,
+                },
+                canonical_tx.node.tx,
+            )
+        })
+    }
+
+    /// Return the balance, separated into available, trusted-pending, untrusted-pending and immature
+    /// values.
+    pub fn get_balance(&self) -> Balance {
+        self.tracker
+            .balance(|&keychain| keychain == KeychainKind::Internal)
+    }
+
+    /// Add an external signer
+    ///
+    /// See [the `signer` module](signer) for an example.
+    pub fn add_signer(
+        &mut self,
+        keychain: KeychainKind,
+        ordering: SignerOrdering,
+        signer: Arc<dyn TransactionSigner>,
+    ) {
+        let signers = match keychain {
+            KeychainKind::External => Arc::make_mut(&mut self.signers),
+            KeychainKind::Internal => Arc::make_mut(&mut self.change_signers),
+        };
+
+        signers.add_external(signer.id(&self.secp), ordering, signer);
+    }
+
+    /// Get the signers
+    ///
+    /// ## Example
+    ///
+    /// ```
+    /// # use bdk::{Wallet, KeychainKind};
+    /// # use bdk::bitcoin::Network;
+    /// let wallet = Wallet::new_no_persist("wpkh(tprv8ZgxMBicQKsPe73PBRSmNbTfbcsZnwWhz5eVmhHpi31HW29Z7mc9B4cWGRQzopNUzZUT391DeDJxL2PefNunWyLgqCKRMDkU1s2s8bAfoSk/84'/0'/0'/0/*)", None, Network::Testnet)?;
+    /// for secret_key in wallet.get_signers(KeychainKind::External).signers().iter().filter_map(|s| s.descriptor_secret_key()) {
+    ///     // secret_key: tprv8ZgxMBicQKsPe73PBRSmNbTfbcsZnwWhz5eVmhHpi31HW29Z7mc9B4cWGRQzopNUzZUT391DeDJxL2PefNunWyLgqCKRMDkU1s2s8bAfoSk/84'/0'/0'/0/*
+    ///     println!("secret_key: {}", secret_key);
+    /// }
+    ///
+    /// Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn get_signers(&self, keychain: KeychainKind) -> Arc<SignersContainer> {
+        match keychain {
+            KeychainKind::External => Arc::clone(&self.signers),
+            KeychainKind::Internal => Arc::clone(&self.change_signers),
+        }
+    }
+
+    /// Start building a transaction.
+    ///
+    /// This returns a blank [`TxBuilder`] from which you can specify the parameters for the transaction.
+    ///
+    /// ## Example
+    ///
+    /// ```
+    /// # use std::str::FromStr;
+    /// # use bitcoin::*;
+    /// # use bdk::*;
+    /// # let descriptor = "wpkh(tpubD6NzVbkrYhZ4Xferm7Pz4VnjdcDPFyjVu5K4iZXQ4pVN8Cks4pHVowTBXBKRhX64pkRyJZJN5xAKj4UDNnLPb5p2sSKXhewoYx5GbTdUFWq/*)";
+    /// # let mut wallet = doctest_wallet!();
+    /// # let to_address = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap();
+    /// let (psbt, details) = {
+    ///    let mut builder =  wallet.build_tx();
+    ///    builder
+    ///        .add_recipient(to_address.script_pubkey(), 50_000);
+    ///    builder.finish()?
+    /// };
+    ///
+    /// // sign and broadcast ...
+    /// # Ok::<(), bdk::Error>(())
+    /// ```
+    ///
+    /// [`TxBuilder`]: crate::TxBuilder
+    pub fn build_tx(&mut self) -> TxBuilder<'_, D, DefaultCoinSelectionAlgorithm, CreateTx> {
+        TxBuilder {
+            wallet: alloc::rc::Rc::new(core::cell::RefCell::new(self)),
+            params: TxParams::default(),
+            coin_selection: DefaultCoinSelectionAlgorithm::default(),
+            phantom: core::marker::PhantomData,
+        }
+    }
+
     /// Bump the fee of a transaction previously created with this wallet.
     ///
     /// Returns an error if the transaction is already confirmed or doesn't explicitly signal
@@ -1067,7 +1098,7 @@ impl<D> Wallet<D> {
     ) -> Result<TxBuilder<'_, D, DefaultCoinSelectionAlgorithm, BumpFee>, Error> {
         let graph = self.tracker.graph();
         let txout_index = &self.tracker.index();
-        let tx_and_height = self.tracker.get_tx(txid);
+        let tx_and_height = self.tracker.get_transaction(txid);
         let mut tx = match tx_and_height {
             None => return Err(Error::TransactionNotFound),
             Some(canonical_tx) => match canonical_tx.observed_as {
@@ -1099,7 +1130,7 @@ impl<D> Wallet<D> {
             .map(|txin| -> Result<_, Error> {
                 let canonical_prev_tx = self
                     .tracker
-                    .get_tx(txin.previous_output.txid)
+                    .get_transaction(txin.previous_output.txid)
                     .ok_or(Error::UnknownUtxo)?;
                 let confirmation_time = match canonical_prev_tx.observed_as {
                     bdk_chain::ObservedAs::Confirmed(a) => ConfirmationTime::Confirmed {
@@ -1189,7 +1220,6 @@ impl<D> Wallet<D> {
             phantom: core::marker::PhantomData,
         })
     }
-
     /// Sign a transaction with all the wallet's signers, in the order specified by every signer's
     /// [`SignerOrdering`]. This function returns the `Result` type with an encapsulated `bool` that has the value true if the PSBT was finalized, or false otherwise.
     ///
@@ -1312,13 +1342,13 @@ impl<D> Wallet<D> {
             if psbt_input.final_script_sig.is_some() || psbt_input.final_script_witness.is_some() {
                 continue;
             }
-            let confirmation_height =
-                self.tracker
-                    .get_tx(input.previous_output.txid)
-                    .map(|tx| match tx.observed_as {
-                        bdk_chain::ObservedAs::Confirmed(a) => a.confirmation_height,
-                        bdk_chain::ObservedAs::Unconfirmed(_) => u32::MAX,
-                    });
+            let confirmation_height = self
+                .tracker
+                .get_transaction(input.previous_output.txid)
+                .map(|tx| match tx.observed_as {
+                    bdk_chain::ObservedAs::Confirmed(a) => a.confirmation_height,
+                    bdk_chain::ObservedAs::Unconfirmed(_) => u32::MAX,
+                });
             let last_sync_height = self.tracker.chain().tip().map(|block_id| block_id.height);
             let current_height = sign_options.assume_height.or(last_sync_height);
 
@@ -1484,7 +1514,7 @@ impl<D> Wallet<D> {
             .iter()
             .map(|u| {
                 let txid = u.0.outpoint.txid;
-                let tx = self.tracker.get_tx(txid);
+                let tx = self.tracker.get_transaction(txid);
                 match tx {
                     // We don't have the tx in the db for some reason,
                     // so we can't know for sure if it's mature or not.
@@ -1562,7 +1592,7 @@ impl<D> Wallet<D> {
 
         if params.add_global_xpubs {
             let all_xpubs = self
-                .keychanins()
+                .keychains()
                 .iter()
                 .flat_map(|(_, desc)| desc.get_extended_keys())
                 .collect::<Vec<_>>();
@@ -1730,61 +1760,12 @@ impl<D> Wallet<D> {
             .to_string()
     }
 
-    // /// Applies an update to the wallet and stages the changes (but does not [`commit`] them).
-    // ///
-    // /// Usually you create an `update` by interacting with some blockchain data source and inserting
-    // /// transactions related to your wallet into it.
-    // ///
-    // /// [`commit`]: Self::commit
-    // pub fn apply_update(&mut self, update: Update) -> Result<(), UpdateError>
-    // where
-    //     D: PersistBackend<Tracker, ChangeSet>,
-    // {
-    //     let changeset = self.tracker.apply_update(update)?;
-    //     self.persist.stage(changeset);
-    //     Ok(())
-    // }
-
-    /// Commits all curently [`staged`] changed to the persistence backend returning and error when this fails.
-    ///
-    /// [`staged`]: Self::staged
-    pub fn commit(&mut self) -> Result<(), D::WriteError>
-    where
-        D: PersistBackend<Tracker, ChangeSet>,
-    {
-        self.persist.commit()
-    }
-
-    /// Returns the changes that will be staged with the next call to [`commit`].
-    ///
-    /// [`commit`]: Self::commit
-    pub fn staged(&self) -> &ChangeSet
-    where
-        D: PersistBackend<Tracker, ChangeSet>,
-    {
-        self.persist.staged()
-    }
-
-    pub fn tracker(&self) -> &Tracker {
+    pub fn tracker(&self) -> &WalletTracker {
         &self.tracker
     }
 
-    pub fn tracker_mut(&mut self) -> &mut Tracker {
+    pub fn tracker_mut(&mut self) -> &mut WalletTracker {
         &mut self.tracker
-    }
-
-    pub fn update<F, E>(&mut self, mut f: F) -> Result<bool, E>
-    where
-        D: PersistBackend<Tracker, ChangeSet>,
-        F: FnMut(&mut Tracker) -> Result<ChangeSet, E>,
-    {
-        let changeset = f(&mut self.tracker)?;
-        if changeset.is_empty() {
-            return Ok(false);
-        }
-
-        self.persist.stage(changeset);
-        Ok(true)
     }
 }
 
@@ -1859,7 +1840,7 @@ macro_rules! doctest_wallet {
             }],
         };
         let _ = wallet.insert_checkpoint(BlockId { height: 1_000, hash: BlockHash::all_zeros() });
-        let _ = wallet.insert_tx(tx.clone(), ConfirmationTime::Confirmed {
+        let _ = wallet.insert_tx(&tx, ConfirmationTime::Confirmed {
             height: 500,
             time: 50_000
         }, None);

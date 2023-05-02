@@ -6,7 +6,7 @@ use std::{
 
 use bdk_chain::{
     bitcoin::{Address, BlockHash, Network, OutPoint, Txid},
-    Append, ConfirmationHeightAnchor,
+    ConfirmationHeightAnchor,
 };
 use bdk_electrum::{
     electrum_client::{self, ElectrumApi},
@@ -58,11 +58,8 @@ pub struct ScanOptions {
 }
 
 fn main() -> anyhow::Result<()> {
-    let (args, keymap, tracker, db) = cli::init::<ElectrumCommands, ConfirmationHeightAnchor, _, _>(
-        DB_MAGIC,
-        DB_PATH,
-        cli::Tracker::new_local(),
-    )?;
+    let (args, keymap, tracker, db) =
+        cli::init_local::<ElectrumCommands, ConfirmationHeightAnchor>(DB_MAGIC, DB_PATH)?;
 
     let electrum_url = match args.network {
         Network::Bitcoin => "ssl://electrum.blockstream.info:50002",
@@ -77,7 +74,7 @@ fn main() -> anyhow::Result<()> {
     let client = electrum_client::Client::from_config(electrum_url, config)?;
 
     // [TODO]: Use genesis block based on network!
-    let chain_tip = tracker.lock().unwrap().chain.tip().unwrap_or_default();
+    let chain_tip = tracker.lock().unwrap().chain().tip().unwrap_or_default();
 
     let electrum_cmd = match args.command.clone() {
         cli::Commands::ChainSpecific(electrum_cmd) => electrum_cmd,
@@ -105,8 +102,7 @@ fn main() -> anyhow::Result<()> {
             let (spk_iters, local_chain) = {
                 let tracker = &*tracker.lock().unwrap();
                 let spk_iters = tracker
-                    .indexed_graph
-                    .index
+                    .index()
                     .spks_of_all_keychains()
                     .into_iter()
                     .map(|(keychain, iter)| {
@@ -123,7 +119,7 @@ fn main() -> anyhow::Result<()> {
                         (keychain, spk_iter)
                     })
                     .collect::<BTreeMap<_, _>>();
-                let local_chain: BTreeMap<u32, BlockHash> = tracker.chain.clone().into();
+                let local_chain: BTreeMap<u32, BlockHash> = tracker.chain().clone().into();
                 (spk_iters, local_chain)
             };
 
@@ -157,7 +153,7 @@ fn main() -> anyhow::Result<()> {
             let mut spks: Box<dyn Iterator<Item = bdk_chain::bitcoin::Script>> =
                 Box::new(core::iter::empty());
             if all_spks {
-                let index = &tracker.indexed_graph.index;
+                let index = tracker.index();
                 let all_spks = index
                     .all_spks()
                     .iter()
@@ -169,7 +165,7 @@ fn main() -> anyhow::Result<()> {
                 })));
             }
             if unused_spks {
-                let index = &tracker.indexed_graph.index;
+                let index = tracker.index();
                 let unused_spks = index
                     .unused_spks(..)
                     .map(|(k, v)| (*k, v.clone()))
@@ -189,7 +185,7 @@ fn main() -> anyhow::Result<()> {
 
             if utxos {
                 let utxos = tracker
-                    .list_owned_unspents(chain_tip)
+                    .list_owned_unspents()
                     .map(|(_, utxo)| utxo)
                     .collect::<Vec<_>>();
                 outpoints = Box::new(
@@ -209,7 +205,7 @@ fn main() -> anyhow::Result<()> {
 
             if unconfirmed {
                 let unconfirmed_txids = tracker
-                    .list_txs(chain_tip)
+                    .list_transactions()
                     .filter(|ctx| !ctx.observed_as.is_confirmed())
                     .map(|ctx| ctx.node.txid)
                     .collect::<Vec<_>>();
@@ -219,7 +215,7 @@ fn main() -> anyhow::Result<()> {
                 }));
             }
 
-            let local_chain: BTreeMap<u32, BlockHash> = tracker.chain.clone().into();
+            let local_chain: BTreeMap<u32, BlockHash> = tracker.chain().clone().into();
             drop(tracker);
 
             let update = client.scan_without_keychain(
@@ -241,7 +237,7 @@ fn main() -> anyhow::Result<()> {
     let missing_txids = {
         let tracker = &*tracker.lock().unwrap();
         response
-            .missing_full_txs(tracker.indexed_graph.graph())
+            .missing_full_txs(tracker.graph())
             .cloned()
             .collect::<Vec<_>>()
     };
@@ -258,16 +254,12 @@ fn main() -> anyhow::Result<()> {
         let tracker = &mut *tracker.lock().unwrap();
         let db = &mut *db.lock().unwrap();
 
-        let (additions, changeset) =
-            update.apply(&mut tracker.indexed_graph, &mut tracker.chain)?;
-
-        let mut tracker_changeset = cli::ChangeSet::default();
-        tracker_changeset.append(additions.into());
-        tracker_changeset.append(changeset.into());
+        let (tracker_changeset, result) = tracker.apply_update(update);
 
         // [TODO] How do we check if changeset is empty?
         // [TODO] When should we flush?
         db.write_changes(&tracker_changeset)?;
+        result?;
     }
 
     Ok(())

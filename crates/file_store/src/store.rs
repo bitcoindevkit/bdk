@@ -1,29 +1,65 @@
 use std::{
+    fmt::Debug,
     fs::{File, OpenOptions},
     io::{self, Read, Seek, Write},
     marker::PhantomData,
     path::Path,
 };
 
-use bdk_chain::Append;
+use bdk_chain::{
+    tracker::{ChangeSet, LocalChangeSet, LocalTracker, RemoteChangeSet, RemoteTracker, Tracker},
+    Anchor, Append, ChainOracle, PersistBackend,
+};
 use bincode::Options;
 
 use crate::{bincode_options, EntryIter, FileError, IterError};
 
-#[cfg(feature = "wallet")]
-use bdk::wallet::{ChangeSet, Tracker};
+pub type TrackerStore<K, A, C, CC> = Store<Tracker<K, A, C>, ChangeSet<K, A, CC>>;
+pub type LocalTrackerStore<K, A> = Store<LocalTracker<K, A>, LocalChangeSet<K, A>>;
+pub type RemoteTrackerStore<K, A, O> = Store<RemoteTracker<K, A, O>, RemoteChangeSet<K, A>>;
 
-#[cfg(feature = "wallet")]
-impl bdk_chain::PersistBackend<Tracker, ChangeSet> for Store<Tracker, ChangeSet> {
+impl<K, A> PersistBackend<LocalTracker<K, A>, LocalChangeSet<K, A>> for LocalTrackerStore<K, A>
+where
+    K: serde::de::DeserializeOwned + serde::Serialize + Debug + Clone + Ord,
+    A: serde::de::DeserializeOwned + serde::Serialize + Anchor,
+{
     type WriteError = std::io::Error;
 
     type LoadError = IterError;
 
-    fn write_changes(&mut self, changeset: &ChangeSet) -> Result<(), Self::WriteError> {
+    fn write_changes(&mut self, changeset: &LocalChangeSet<K, A>) -> Result<(), Self::WriteError> {
         self.append_changeset(changeset)
     }
 
-    fn load_into_tracker(&mut self, tracker: &mut Tracker) -> Result<(), Self::LoadError> {
+    fn load_into_tracker(
+        &mut self,
+        tracker: &mut LocalTracker<K, A>,
+    ) -> Result<(), Self::LoadError> {
+        let (changeset, result) = self.aggregate_changesets();
+        tracker.apply_changeset(changeset);
+        result
+    }
+}
+
+impl<K, A, O> PersistBackend<RemoteTracker<K, A, O>, RemoteChangeSet<K, A>>
+    for RemoteTrackerStore<K, A, O>
+where
+    K: serde::de::DeserializeOwned + serde::Serialize + Debug + Clone + Ord,
+    A: serde::de::DeserializeOwned + serde::Serialize + Anchor,
+    O: ChainOracle,
+{
+    type WriteError = std::io::Error;
+
+    type LoadError = IterError;
+
+    fn write_changes(&mut self, changeset: &RemoteChangeSet<K, A>) -> Result<(), Self::WriteError> {
+        self.append_changeset(changeset)
+    }
+
+    fn load_into_tracker(
+        &mut self,
+        tracker: &mut RemoteTracker<K, A, O>,
+    ) -> Result<(), Self::LoadError> {
         let (changeset, result) = self.aggregate_changesets();
         tracker.apply_changeset(changeset);
         result

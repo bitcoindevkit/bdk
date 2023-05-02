@@ -1,26 +1,28 @@
-mod remote_chain;
-mod tracker;
 use bdk_chain::{
     bitcoin::{
-        psbt::Prevouts, secp256k1::Secp256k1, util::sighash::SighashCache, Address, LockTime,
-        Network, Sequence, Transaction, TxIn, TxOut,
+        hashes::Hash,
+        psbt::Prevouts,
+        secp256k1::{self, Secp256k1},
+        util::sighash::SighashCache,
+        Address, BlockHash, LockTime, Network, Sequence, Transaction, TxIn, TxOut,
     },
+    indexed_tx_graph::IndexedAdditions,
     keychain::DerivationAdditions,
     miniscript::{
         descriptor::{DescriptorSecretKey, KeyMap},
         Descriptor, DescriptorPublicKey,
     },
+    tracker::{ChangeSet, LastSeenBlock, LocalTracker, RemoteTracker, Tracker},
     Anchor, Append, BlockId, ChainOracle, DescriptorExt, FullTxOut, ObservedAs, PersistBackend,
 };
 use bdk_coin_select::{coin_select_bnb, CoinSelector, CoinSelectorOpt, WeightedValue};
+use bdk_file_store::{LocalTrackerStore, RemoteTrackerStore, TrackerStore};
 use clap::{Parser, Subcommand};
 use std::{cmp::Reverse, collections::HashMap, path::PathBuf, sync::Mutex, time::Duration};
 
 pub use anyhow;
 pub use bdk_file_store;
 pub use clap;
-pub use remote_chain::*;
-pub use tracker::*;
 
 #[derive(
     Debug, Clone, Copy, PartialOrd, Ord, PartialEq, Eq, serde::Deserialize, serde::Serialize,
@@ -65,6 +67,32 @@ pub struct Args<C: clap::Subcommand> {
 
     #[clap(subcommand)]
     pub command: Commands<C>,
+}
+
+impl<C: clap::Subcommand> Args<C> {
+    #[allow(clippy::type_complexity)] // FIXME
+    pub fn prepare_keychains<SC: secp256k1::Signing>(
+        &self,
+        secp: &Secp256k1<SC>,
+    ) -> anyhow::Result<(Vec<(Keychain, Descriptor<DescriptorPublicKey>)>, KeyMap)> {
+        let mut tracker_keychains = Vec::new();
+
+        let (descriptor, mut keymap) =
+            Descriptor::<DescriptorPublicKey>::parse_descriptor(secp, &self.descriptor)?;
+        tracker_keychains.push((Keychain::External, descriptor));
+
+        if let Some((internal_descriptor, internal_keymap)) = self
+            .change_descriptor
+            .as_ref()
+            .map(|desc_str| Descriptor::<DescriptorPublicKey>::parse_descriptor(secp, desc_str))
+            .transpose()?
+        {
+            keymap.extend(internal_keymap);
+            tracker_keychains.push((Keychain::Internal, internal_descriptor));
+        }
+
+        Ok((tracker_keychains, keymap))
+    }
 }
 
 #[derive(Subcommand, Debug, Clone)]
@@ -194,10 +222,10 @@ pub fn run_address_cmd<A: Anchor, B: ChainOracle, C: Default>(
     network: Network,
 ) -> anyhow::Result<()>
 where
-    tracker::ChangeSet<Keychain, A, C>: Append + serde::Serialize + serde::de::DeserializeOwned,
+    ChangeSet<Keychain, A, C>: Append + serde::Serialize + serde::de::DeserializeOwned,
 {
     let mut tracker = tracker.lock().unwrap();
-    let txout_index = &mut tracker.indexed_graph.index;
+    let txout_index = tracker.index_mut();
 
     let addr_cmd_output = match addr_cmd {
         AddressCmd::Next => Some(txout_index.next_unused_spk(&Keychain::External)),
@@ -208,7 +236,13 @@ where
     if let Some(((index, spk), additions)) = addr_cmd_output {
         let mut db = db.lock().unwrap();
         // update database since we're about to give out a new address
-        db.append_changeset(&additions.into())?;
+        db.append_changeset(&ChangeSet {
+            indexed_additions: IndexedAdditions {
+                index_additions: additions,
+                ..Default::default()
+            },
+            ..Default::default()
+        })?;
 
         let spk = spk.clone();
         let address =
@@ -248,16 +282,15 @@ where
     }
 }
 
-pub fn run_balance_cmd<A: Anchor, B: ChainOracle>(
+pub fn run_balance_cmd<A: Anchor, B: ChainOracle + LastSeenBlock>(
     tracker: &Mutex<Tracker<Keychain, A, B>>,
-    chain_tip: BlockId,
 ) -> anyhow::Result<()>
 where
     <B as ChainOracle>::Error: std::error::Error + Send + Sync + 'static,
 {
     let tracker = tracker.lock().unwrap();
     let utxos = tracker
-        .try_list_owned_unspents(chain_tip)
+        .try_list_owned_unspents()
         .collect::<Result<Vec<_>, B::Error>>()?;
 
     let (confirmed, unconfirmed) =
@@ -279,10 +312,9 @@ where
     Ok(())
 }
 
-pub fn run_txo_cmd<A: Anchor, B: ChainOracle>(
+pub fn run_txo_cmd<A: Anchor, B: ChainOracle + LastSeenBlock>(
     txout_cmd: TxOutCmd,
     tracker: &Mutex<Tracker<Keychain, A, B>>,
-    chain_tip: BlockId,
     network: Network,
 ) -> anyhow::Result<()>
 where
@@ -298,7 +330,7 @@ where
             let tracker = tracker.lock().unwrap();
 
             let txouts = tracker
-                .try_list_owned_txouts(chain_tip)
+                .try_list_owned_txouts()
                 .filter(|r| match r {
                     Ok((_, full_txo)) => match (unspent, spent) {
                         (true, false) => full_txo.spent_by.is_none(),
@@ -336,7 +368,7 @@ where
 }
 
 #[allow(clippy::type_complexity)] // FIXME
-pub fn create_tx<A: Anchor, B: ChainOracle>(
+pub fn create_tx<A: Anchor, B: ChainOracle + LastSeenBlock>(
     value: u64,
     address: Address,
     coin_select: CoinSelectionAlgo,
@@ -358,8 +390,7 @@ where
     };
 
     // TODO use planning module
-    let mut candidates =
-        planned_utxos(tracker, chain_tip, &assets).collect::<Result<Vec<_>, B::Error>>()?;
+    let mut candidates = planned_utxos(tracker, &assets).collect::<Result<Vec<_>, B::Error>>()?;
 
     // apply coin selection algorithm
     match coin_select {
@@ -394,8 +425,7 @@ where
     }];
 
     let internal_keychain = if tracker
-        .indexed_graph
-        .index
+        .index()
         .keychains()
         .get(&Keychain::Internal)
         .is_some()
@@ -405,10 +435,8 @@ where
         Keychain::External
     };
 
-    let ((change_index, change_script), change_additions) = tracker
-        .indexed_graph
-        .index
-        .next_unused_spk(&internal_keychain);
+    let ((change_index, change_script), change_additions) =
+        tracker.index_mut().next_unused_spk(&internal_keychain);
     additions.append(change_additions);
 
     // Clone to drop the immutable reference.
@@ -416,8 +444,7 @@ where
 
     let change_plan = bdk_tmp_plan::plan_satisfaction(
         &tracker
-            .indexed_graph
-            .index
+            .index()
             .keychains()
             .get(&internal_keychain)
             .expect("must exist")
@@ -434,8 +461,7 @@ where
     let cs_opts = CoinSelectorOpt {
         target_feerate: 0.5,
         min_drain_value: tracker
-            .indexed_graph
-            .index
+            .index()
             .keychains()
             .get(&internal_keychain)
             .expect("must exist")
@@ -555,34 +581,35 @@ where
     Ok((transaction, change_info))
 }
 
-pub fn planned_utxos<'a, AK: bdk_tmp_plan::CanDerive + Clone, A: Anchor, B: ChainOracle>(
+pub fn planned_utxos<
+    'a,
+    AK: bdk_tmp_plan::CanDerive + Clone,
+    A: Anchor,
+    B: ChainOracle + LastSeenBlock,
+>(
     tracker: &'a Tracker<Keychain, A, B>,
-    chain_tip: BlockId,
     assets: &'a bdk_tmp_plan::Assets<AK>,
 ) -> impl Iterator<Item = Result<(bdk_tmp_plan::Plan<AK>, FullTxOut<ObservedAs<A>>), B::Error>> + 'a
 where
     <B as ChainOracle>::Error: std::error::Error + Send + Sync + 'static,
 {
-    tracker
-        .try_list_owned_unspents(chain_tip)
-        .filter_map(|r| match r {
-            Ok(((keychain, derivation_index), full_txo)) => {
-                let desc = tracker
-                    .indexed_graph
-                    .index
-                    .keychains()
-                    .get(keychain)
-                    .expect("must exist")
-                    .at_derivation_index(*derivation_index);
-                let plan = bdk_tmp_plan::plan_satisfaction(&desc, assets)?;
-                Some(Ok((plan, full_txo)))
-            }
-            Err(err) => Some(Err(err)),
-        })
+    tracker.try_list_owned_unspents().filter_map(|r| match r {
+        Ok(((keychain, derivation_index), full_txo)) => {
+            let desc = tracker
+                .index()
+                .keychains()
+                .get(keychain)
+                .expect("must exist")
+                .at_derivation_index(*derivation_index);
+            let plan = bdk_tmp_plan::plan_satisfaction(&desc, assets)?;
+            Some(Ok((plan, full_txo)))
+        }
+        Err(err) => Some(Err(err)),
+    })
 }
 
 #[allow(clippy::too_many_arguments)] // FIXME
-pub fn handle_commands<S: clap::Subcommand, A: Anchor, B: ChainOracle, C: Default>(
+pub fn handle_commands<S: clap::Subcommand, A: Anchor, B: ChainOracle + LastSeenBlock, C: Default>(
     command: Commands<S>,
     broadcast: impl FnOnce(&Transaction) -> anyhow::Result<()>,
     // we Mutex around these not because we need them for a simple CLI app but to demonstrate how
@@ -595,13 +622,13 @@ pub fn handle_commands<S: clap::Subcommand, A: Anchor, B: ChainOracle, C: Defaul
 ) -> anyhow::Result<()>
 where
     <B as ChainOracle>::Error: std::error::Error + Send + Sync + 'static,
-    tracker::ChangeSet<Keychain, A, C>: Append + serde::Serialize + serde::de::DeserializeOwned,
+    ChangeSet<Keychain, A, C>: Append + serde::Serialize + serde::de::DeserializeOwned,
 {
     match command {
         // TODO: Make these functions return stuffs
         Commands::Address { addr_cmd } => run_address_cmd(tracker, store, addr_cmd, network),
-        Commands::Balance => run_balance_cmd(tracker, chain_tip),
-        Commands::TxOut { txout_cmd } => run_txo_cmd(txout_cmd, tracker, chain_tip, network),
+        Commands::Balance => run_balance_cmd(tracker),
+        Commands::TxOut { txout_cmd } => run_txo_cmd(txout_cmd, tracker, network),
         Commands::Send {
             value,
             address,
@@ -619,15 +646,18 @@ where
                     // change keychain so future scans will find the tx we're about to broadcast.
                     // If we're unable to persist this, then we don't want to broadcast.
                     let store = &mut *store.lock().unwrap();
-                    store.append_changeset(&change_derivation_changes.into())?;
+                    store.append_changeset(&ChangeSet {
+                        indexed_additions: IndexedAdditions {
+                            index_additions: change_derivation_changes,
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    })?;
 
                     // We don't want other callers/threads to use this address while we're using it
                     // but we also don't want to scan the tx we just created because it's not
                     // technically in the blockchain yet.
-                    tracker
-                        .indexed_graph
-                        .index
-                        .mark_used(&change_keychain, index);
+                    tracker.index_mut().mark_used(&change_keychain, index);
                     (transaction, Some((change_keychain, index)))
                 } else {
                     (transaction, None)
@@ -640,18 +670,15 @@ where
                     let now = std::time::SystemTime::elapsed(&std::time::UNIX_EPOCH).unwrap();
 
                     let mut tracker = tracker.lock().unwrap();
-                    let additions =
-                        tracker
-                            .indexed_graph
-                            .insert_tx(&transaction, None, Some(now.as_secs()));
-                    if !additions.graph_additions.is_empty()
-                        || !additions.index_additions.is_empty()
+                    let additions = tracker.insert_tx(&transaction, None, Some(now.as_secs()));
+                    if !additions.indexed_additions.index_additions.is_empty()
+                        || !additions.indexed_additions.graph_additions.is_empty()
                     {
                         let store = &mut *store.lock().unwrap();
                         // We know the tx is at least unconfirmed now. Note if persisting here fails,
                         // it's not a big deal since we can always find it again form
                         // blockchain.
-                        store.append_changeset(&additions.into())?;
+                        store.append_changeset(&additions)?;
                     }
                     Ok(())
                 }
@@ -659,7 +686,7 @@ where
                     let tracker = &mut *tracker.lock().unwrap();
                     if let Some((keychain, index)) = change_index {
                         // We failed to broadcast, so allow our change address to be used in the future
-                        tracker.indexed_graph.index.unmark_used(&keychain, index);
+                        tracker.index_mut().unmark_used(&keychain, index);
                     }
                     Err(e)
                 }
@@ -672,60 +699,73 @@ where
 }
 
 #[allow(clippy::type_complexity)] // FIXME
-pub fn init<S: clap::Subcommand, A: Anchor, B: ChainOracle, C: Default>(
+pub fn init_local<S: clap::Subcommand, A: Anchor>(
     db_magic: &'static [u8],
     db_default_path: &str,
-    mut tracker: Tracker<Keychain, A, B>,
 ) -> anyhow::Result<(
     Args<S>,
     KeyMap,
-    // These don't need to have mutexes around them, but we want the cli example code to make it obvious how they
-    // are thread-safe, forcing the example developers to show where they would lock and unlock things.
-    Mutex<Tracker<Keychain, A, B>>,
-    Mutex<TrackerStore<Keychain, A, B, C>>,
+    Mutex<LocalTracker<Keychain, A>>,
+    Mutex<LocalTrackerStore<Keychain, A>>,
 )>
 where
-    <B as ChainOracle>::Error: std::error::Error + Send + Sync + 'static,
-    tracker::ChangeSet<Keychain, A, C>: Append + serde::Serialize + serde::de::DeserializeOwned,
-    TrackerStore<Keychain, A, B, C>:
-        PersistBackend<Tracker<Keychain, A, B>, ChangeSet<Keychain, A, C>>,
+    A: serde::Serialize + serde::de::DeserializeOwned,
 {
     if std::env::var("BDK_DB_PATH").is_err() {
         std::env::set_var("BDK_DB_PATH", db_default_path);
     }
-
     let args = Args::<S>::parse();
     let secp = Secp256k1::default();
-    let (descriptor, mut keymap) =
-        Descriptor::<DescriptorPublicKey>::parse_descriptor(&secp, &args.descriptor)?;
+    let (tracker_keychains, keymap) = args.prepare_keychains(&secp)?;
 
-    tracker
-        .indexed_graph
-        .index
-        .add_keychain(Keychain::External, descriptor);
-
-    let internal = args
-        .change_descriptor
-        .clone()
-        .map(|descriptor| Descriptor::<DescriptorPublicKey>::parse_descriptor(&secp, &descriptor))
-        .transpose()?;
-    if let Some((internal_descriptor, internal_keymap)) = internal {
-        keymap.extend(internal_keymap);
-        tracker
-            .indexed_graph
-            .index
-            .add_keychain(Keychain::Internal, internal_descriptor);
-    };
-
-    let mut db =
-        TrackerStore::<Keychain, A, B, C>::new_from_path(db_magic, args.db_path.as_path())?;
+    let mut tracker = LocalTracker::<Keychain, A>::new_local(
+        BlockHash::from_inner([0_u8; 32]),
+        tracker_keychains,
+    );
+    let mut db = LocalTrackerStore::<Keychain, A>::new_from_path(db_magic, args.db_path.as_path())?;
 
     if let Err(e) = db.load_into_tracker(&mut tracker) {
-        // [TODO] Should we introduce a `TipChainOracle` trait?
-        // match tracker.last_seen_height()  {
-        //     Some(tip) => eprintln!("Failed to load all changesets from {}. Last checkpoint was at height {}. Error: {}", args.db_path.display(), tip, e),
-        //     None => eprintln!("Failed to load any checkpoints from {}: {}", args.db_path.display(), e),
-        // }
+        eprintln!(
+            "Failed to load changesets from {}: {:?}",
+            args.db_path.display(),
+            e
+        );
+        eprintln!("⚠ Consider running a rescan of chain data.");
+    }
+
+    Ok((args, keymap, Mutex::new(tracker), Mutex::new(db)))
+}
+
+#[allow(clippy::type_complexity)] // FIXME
+pub fn init_remote<S: clap::Subcommand, A: Anchor, O: ChainOracle>(
+    db_magic: &'static [u8],
+    db_default_path: &str,
+    oracle: O,
+) -> anyhow::Result<(
+    Args<S>,
+    KeyMap,
+    Mutex<RemoteTracker<Keychain, A, O>>,
+    Mutex<RemoteTrackerStore<Keychain, A, O>>,
+)>
+where
+    A: serde::Serialize + serde::de::DeserializeOwned,
+{
+    if std::env::var("BDK_DB_PATH").is_err() {
+        std::env::set_var("BDK_DB_PATH", db_default_path);
+    }
+    let args = Args::<S>::parse();
+    let secp = Secp256k1::default();
+    let (tracker_keychains, keymap) = args.prepare_keychains(&secp)?;
+
+    let mut tracker = RemoteTracker::<Keychain, A, O>::new_remote(
+        BlockHash::from_inner([0_u8; 32]),
+        tracker_keychains,
+        oracle,
+    );
+    let mut db =
+        RemoteTrackerStore::<Keychain, A, O>::new_from_path(db_magic, args.db_path.as_path())?;
+
+    if let Err(e) = db.load_into_tracker(&mut tracker) {
         eprintln!(
             "Failed to load changesets from {}: {:?}",
             args.db_path.display(),

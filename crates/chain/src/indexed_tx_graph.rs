@@ -28,12 +28,14 @@ impl<A, I: Default> Default for IndexedTxGraph<A, I> {
     }
 }
 
-impl<A: Anchor, I: Indexer> IndexedTxGraph<A, I> {
+impl<A, I> IndexedTxGraph<A, I> {
     /// Get a reference of the internal transaction graph.
     pub fn graph(&self) -> &TxGraph<A> {
         &self.graph
     }
+}
 
+impl<A: Anchor, I: Indexer> IndexedTxGraph<A, I> {
     /// Applies the [`IndexedAdditions`] to the [`IndexedTxGraph`].
     pub fn apply_additions(&mut self, additions: IndexedAdditions<A, I::Additions>) {
         let IndexedAdditions {

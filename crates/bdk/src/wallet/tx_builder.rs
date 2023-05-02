@@ -47,8 +47,8 @@ use bitcoin::util::psbt::{self, PartiallySignedTransaction as Psbt};
 use bitcoin::{LockTime, OutPoint, Script, Sequence, Transaction};
 
 use super::coin_selection::{CoinSelectionAlgorithm, DefaultCoinSelectionAlgorithm};
-use super::ChangeSet;
-use super::Tracker;
+use super::WalletChangeSet;
+use super::WalletTracker;
 use crate::{
     types::{FeeRate, KeychainKind, LocalUtxo, WeightedUtxo},
     TransactionDetails,
@@ -527,7 +527,7 @@ impl<'a, D, Cs: CoinSelectionAlgorithm, Ctx: TxBuilderContext> TxBuilder<'a, D, 
     /// [`BIP174`]: https://github.com/bitcoin/bips/blob/master/bip-0174.mediawiki
     pub fn finish(self) -> Result<(Psbt, TransactionDetails), Error>
     where
-        D: PersistBackend<Tracker, ChangeSet>,
+        D: PersistBackend<WalletTracker, WalletChangeSet>,
     {
         self.wallet
             .borrow_mut()

@@ -1,10 +1,9 @@
 use bdk_chain::{
     bitcoin::{hashes::hex::FromHex, BlockHash, OutPoint, Script, Transaction, Txid},
-    indexed_tx_graph::{IndexedAdditions, IndexedTxGraph},
-    keychain::{DerivationAdditions, KeychainTxOutIndex},
-    local_chain::{self, LocalChain, UpdateNotConnectedError},
+    local_chain::LocalChain,
+    tracker::LocalUpdate,
     tx_graph::{self, TxGraph},
-    Anchor, Append, BlockId, ConfirmationHeightAnchor, ConfirmationTimeAnchor,
+    Anchor, BlockId, ConfirmationHeightAnchor, ConfirmationTimeAnchor,
 };
 use electrum_client::{Client, ElectrumApi, Error};
 use std::{
@@ -15,13 +14,13 @@ use std::{
 use crate::InternalError;
 
 #[derive(Debug, Clone)]
-pub struct ElectrumUpdate<G, K> {
-    pub graph_update: G,
+pub struct ElectrumUpdate<K, A> {
+    pub graph_update: HashMap<Txid, BTreeSet<A>>,
     pub chain_update: LocalChain,
     pub keychain_update: BTreeMap<K, u32>,
 }
 
-impl<G: Default, K> Default for ElectrumUpdate<G, K> {
+impl<K, A> Default for ElectrumUpdate<K, A> {
     fn default() -> Self {
         Self {
             graph_update: Default::default(),
@@ -31,9 +30,7 @@ impl<G: Default, K> Default for ElectrumUpdate<G, K> {
     }
 }
 
-pub type IntermediaryElectrumUpdate<A, K> = ElectrumUpdate<HashMap<Txid, BTreeSet<A>>, K>;
-
-impl<'a, A: Anchor, K> IntermediaryElectrumUpdate<A, K> {
+impl<'a, K, A: Anchor> ElectrumUpdate<K, A> {
     pub fn missing_full_txs<A2>(
         &'a self,
         graph: &'a TxGraph<A2>,
@@ -43,7 +40,7 @@ impl<'a, A: Anchor, K> IntermediaryElectrumUpdate<A, K> {
             .filter(move |&&txid| graph.as_ref().get_tx(txid).is_none())
     }
 
-    pub fn finalize<T>(self, seen_at: Option<u64>, new_txs: T) -> FinalElectrumUpdate<A, K>
+    pub fn finalize<T>(self, seen_at: Option<u64>, new_txs: T) -> LocalUpdate<K, A>
     where
         T: IntoIterator<Item = Transaction>,
     {
@@ -57,24 +54,31 @@ impl<'a, A: Anchor, K> IntermediaryElectrumUpdate<A, K> {
             }
         }
         dbg!(graph_update.full_txs().count());
-        FinalElectrumUpdate {
+        LocalUpdate {
+            index_update: self.keychain_update,
             graph_update,
             chain_update: self.chain_update,
-            keychain_update: self.keychain_update,
         }
     }
 }
 
-pub type FinalElectrumUpdate<A, K> = ElectrumUpdate<TxGraph<A>, K>;
-
-impl<K: Ord + Clone + Debug> FinalElectrumUpdate<ConfirmationHeightAnchor, K> {
-    pub fn into_confirmation_time_update(
+impl<K> ElectrumUpdate<K, ConfirmationHeightAnchor> {
+    pub fn finalize_as_confirmation_time<T>(
         self,
         client: &Client,
-    ) -> Result<FinalElectrumUpdate<ConfirmationTimeAnchor, K>, Error> {
+        seen_at: Option<u64>,
+        new_txs: T,
+    ) -> Result<LocalUpdate<K, ConfirmationTimeAnchor>, Error>
+    where
+        T: IntoIterator<Item = Transaction>,
+    {
+        let update = self.finalize(seen_at, new_txs);
+        let update_tip = update.chain_update.tip().expect("must have tip");
+
         let relevant_heights = {
             let mut visited_heights = HashSet::new();
-            self.graph_update
+            update
+                .graph_update
                 .all_anchors()
                 .map(|(a, _)| a.confirmation_height_upper_bound())
                 .filter(move |&h| visited_heights.insert(h))
@@ -94,7 +98,7 @@ impl<K: Ord + Clone + Debug> FinalElectrumUpdate<ConfirmationHeightAnchor, K> {
             .collect::<HashMap<u32, u64>>();
 
         let graph_additions = {
-            let old_additions = TxGraph::default().determine_additions(&self.graph_update);
+            let old_additions = TxGraph::default().determine_additions(&update.graph_update);
             tx_graph::Additions {
                 tx: old_additions.tx,
                 txout: old_additions.txout,
@@ -118,63 +122,22 @@ impl<K: Ord + Clone + Debug> FinalElectrumUpdate<ConfirmationHeightAnchor, K> {
             }
         };
 
-        Ok(FinalElectrumUpdate {
+        if update_tip.hash != client.block_header(update_tip.height as _)?.block_hash() {
+            // [TODO] We should alter the logic so we won't have to return an error
+            return Err(Error::Message(format!(
+                "tip changed during update: update_tip={:?}",
+                update_tip
+            )));
+        }
+
+        Ok(LocalUpdate {
+            index_update: update.index_update,
             graph_update: {
                 let mut graph = TxGraph::default();
                 graph.apply_additions(graph_additions);
                 graph
             },
-            chain_update: self.chain_update,
-            keychain_update: self.keychain_update,
-        })
-    }
-}
-
-impl<A: Anchor, K: Ord + Clone + Debug> FinalElectrumUpdate<A, K> {
-    pub fn apply(
-        self,
-        indexed_graph: &mut IndexedTxGraph<A, KeychainTxOutIndex<K>>,
-        chain: &mut LocalChain,
-    ) -> Result<
-        (
-            IndexedAdditions<A, DerivationAdditions<K>>,
-            local_chain::ChangeSet,
-        ),
-        UpdateNotConnectedError,
-    > {
-        let (_, derivation_additions) = indexed_graph
-            .index
-            .reveal_to_target_multi(&self.keychain_update);
-
-        let additions = {
-            let mut additions = indexed_graph.apply_update(self.graph_update);
-            additions.index_additions.append(derivation_additions);
-            additions
-        };
-
-        let changeset = chain.apply_update(self.chain_update)?;
-
-        Ok((additions, changeset))
-    }
-}
-
-#[cfg(feature = "wallet")]
-impl FinalElectrumUpdate<ConfirmationTimeAnchor, bdk::KeychainKind> {
-    pub fn apply_to_tracker(
-        self,
-        tracker: &mut bdk::wallet::Tracker,
-    ) -> Result<bdk::wallet::ChangeSet, UpdateNotConnectedError> {
-        Ok(bdk::wallet::ChangeSet {
-            indexed_additions: {
-                let mut additions = tracker.indexed_graph.apply_update(self.graph_update);
-                let (_, derivation_additions) = tracker
-                    .indexed_graph
-                    .index
-                    .reveal_to_target_multi(&self.keychain_update);
-                additions.index_additions.append(derivation_additions);
-                additions
-            },
-            chain_changeset: tracker.chain.apply_update(self.chain_update)?,
+            chain_update: update.chain_update,
         })
     }
 }
@@ -190,7 +153,7 @@ pub trait ElectrumExt<A> {
         outpoints: impl IntoIterator<Item = OutPoint>,
         stop_gap: usize,
         batch_size: usize,
-    ) -> Result<IntermediaryElectrumUpdate<A, K>, Error>;
+    ) -> Result<ElectrumUpdate<K, A>, Error>;
 
     fn scan_without_keychain(
         &self,
@@ -199,7 +162,7 @@ pub trait ElectrumExt<A> {
         txids: impl IntoIterator<Item = Txid>,
         outpoints: impl IntoIterator<Item = OutPoint>,
         batch_size: usize,
-    ) -> Result<IntermediaryElectrumUpdate<A, ()>, Error> {
+    ) -> Result<ElectrumUpdate<(), A>, Error> {
         let spk_iter = misc_spks
             .into_iter()
             .enumerate()
@@ -231,7 +194,7 @@ impl ElectrumExt<ConfirmationHeightAnchor> for Client {
         outpoints: impl IntoIterator<Item = OutPoint>,
         stop_gap: usize,
         batch_size: usize,
-    ) -> Result<IntermediaryElectrumUpdate<ConfirmationHeightAnchor, K>, Error> {
+    ) -> Result<ElectrumUpdate<K, ConfirmationHeightAnchor>, Error> {
         let mut request_spks = keychain_spks
             .into_iter()
             .map(|(k, s)| (k, s.into_iter()))
@@ -242,7 +205,7 @@ impl ElectrumExt<ConfirmationHeightAnchor> for Client {
         let outpoints = outpoints.into_iter().collect::<Vec<_>>();
 
         let update = loop {
-            let mut update = IntermediaryElectrumUpdate::<ConfirmationHeightAnchor, K> {
+            let mut update = ElectrumUpdate::<K, ConfirmationHeightAnchor> {
                 chain_update: prepare_chain_update(self, local_chain)?,
                 ..Default::default()
             };
@@ -404,7 +367,7 @@ fn determine_tx_anchor(
 fn populate_with_outpoints<K>(
     client: &Client,
     anchor_block: BlockId,
-    update: &mut IntermediaryElectrumUpdate<ConfirmationHeightAnchor, K>,
+    update: &mut ElectrumUpdate<K, ConfirmationHeightAnchor>,
     outpoints: &mut impl Iterator<Item = OutPoint>,
 ) -> Result<HashMap<Txid, Transaction>, InternalError> {
     let mut full_txs = HashMap::new();
@@ -466,7 +429,7 @@ fn populate_with_outpoints<K>(
 fn populate_with_txids<K>(
     client: &Client,
     anchor_block: BlockId,
-    update: &mut IntermediaryElectrumUpdate<ConfirmationHeightAnchor, K>,
+    update: &mut ElectrumUpdate<K, ConfirmationHeightAnchor>,
     txids: &mut impl Iterator<Item = Txid>,
 ) -> Result<(), InternalError> {
     for txid in txids {
@@ -502,7 +465,7 @@ fn populate_with_txids<K>(
 fn populate_with_spks<K, I: Ord + Clone>(
     client: &Client,
     anchor_block: BlockId,
-    update: &mut IntermediaryElectrumUpdate<ConfirmationHeightAnchor, K>,
+    update: &mut ElectrumUpdate<K, ConfirmationHeightAnchor>,
     spks: &mut impl Iterator<Item = (I, Script)>,
     stop_gap: usize,
     batch_size: usize,
