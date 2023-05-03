@@ -624,11 +624,9 @@ impl<A: Anchor> TxGraph<A> {
         chain_tip: BlockId,
         txid: Txid,
     ) -> Result<Option<ObservedAs<&A>>, C::Error> {
-        let (tx_node, anchors, &last_seen) = match self.txs.get(&txid) {
-            Some((tx, anchors, last_seen)) if !(anchors.is_empty() && *last_seen == 0) => {
-                (tx, anchors, last_seen)
-            }
-            _ => return Ok(None),
+        let (tx_node, anchors, last_seen) = match self.txs.get(&txid) {
+            Some(v) => v,
+            None => return Ok(None),
         };
 
         for anchor in anchors {
@@ -657,12 +655,12 @@ impl<A: Anchor> TxGraph<A> {
                     return Ok(None);
                 }
             }
-            if conflicting_tx.last_seen_unconfirmed > last_seen {
+            if conflicting_tx.last_seen_unconfirmed > *last_seen {
                 return Ok(None);
             }
         }
 
-        Ok(Some(ObservedAs::Unconfirmed(last_seen)))
+        Ok(Some(ObservedAs::Unconfirmed(*last_seen)))
     }
 
     /// Get the position of the transaction in `chain` with tip `chain_tip`.
