@@ -1,6 +1,15 @@
+use std::collections::BTreeMap;
+
+use bdk_chain::{
+    indexed_tx_graph::IndexedTxGraph, keychain::KeychainTxOutIndex, local_chain::LocalChain,
+    ConfirmationHeightAnchor, SpkIterator,
+};
+use bitcoin::{secp256k1::Secp256k1, BlockHash, OutPoint, Transaction, TxIn, TxOut};
+use miniscript::{Descriptor, DescriptorPublicKey};
+
 #[allow(unused_macros)]
 macro_rules! h {
-    ($index:literal) => {{
+    ($index:expr) => {{
         bitcoin::hashes::Hash::hash($index.as_bytes())
     }};
 }
@@ -65,4 +74,64 @@ pub fn new_tx(lt: u32) -> bitcoin::Transaction {
         input: vec![],
         output: vec![],
     }
+}
+
+#[allow(unused)]
+pub fn single_descriptor_setup() -> (
+    LocalChain,
+    IndexedTxGraph<ConfirmationHeightAnchor, KeychainTxOutIndex<()>>,
+    Descriptor<DescriptorPublicKey>,
+) {
+    let local_chain = (0..10)
+        .map(|i| (i as u32, h!(format!("Block {}", i))))
+        .collect::<BTreeMap<u32, BlockHash>>();
+    let local_chain = LocalChain::from(local_chain);
+
+    let (desc_1, _) = Descriptor::parse_descriptor(&Secp256k1::signing_only(), "tr(tprv8ZgxMBicQKsPd3krDUsBAmtnRsK3rb8u5yi1zhQgMhF1tR8MW7xfE4rnrbbsrbPR52e7rKapu6ztw1jXveJSCGHEriUGZV7mCe88duLp5pj/86'/1'/0'/0/*)").unwrap();
+
+    let mut graph = IndexedTxGraph::<ConfirmationHeightAnchor, KeychainTxOutIndex<()>>::default();
+
+    graph.index.add_keychain((), desc_1.clone());
+    graph.index.set_lookahead_for_all(100);
+
+    (local_chain, graph, desc_1)
+}
+
+#[allow(unused)]
+pub fn setup_conflicts(
+    spk_iter: &mut SpkIterator<&Descriptor<DescriptorPublicKey>>,
+) -> (Transaction, Transaction, Transaction) {
+    let tx1 = Transaction {
+        output: vec![TxOut {
+            script_pubkey: spk_iter.next().unwrap().1,
+            value: 10000,
+        }],
+        ..new_tx(0)
+    };
+
+    let tx_conflict_1 = Transaction {
+        input: vec![TxIn {
+            previous_output: OutPoint::new(tx1.txid(), 0),
+            ..Default::default()
+        }],
+        output: vec![TxOut {
+            script_pubkey: spk_iter.next().unwrap().1,
+            value: 20000,
+        }],
+        ..new_tx(0)
+    };
+
+    let tx_conflict_2 = Transaction {
+        input: vec![TxIn {
+            previous_output: OutPoint::new(tx1.txid(), 0),
+            ..Default::default()
+        }],
+        output: vec![TxOut {
+            script_pubkey: spk_iter.next().unwrap().1,
+            value: 30000,
+        }],
+        ..new_tx(0)
+    };
+
+    (tx1, tx_conflict_1, tx_conflict_2)
 }

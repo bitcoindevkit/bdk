@@ -8,7 +8,7 @@ use bdk_chain::{
     keychain::{Balance, DerivationAdditions, KeychainTxOutIndex},
     local_chain::LocalChain,
     tx_graph::Additions,
-    BlockId, ConfirmationHeightAnchor, ObservedAs,
+    BlockId, ConfirmationHeightAnchor, ObservedAs, SpkIterator,
 };
 use bitcoin::{secp256k1::Secp256k1, BlockHash, OutPoint, Script, Transaction, TxIn, TxOut};
 use miniscript::Descriptor;
@@ -451,4 +451,265 @@ fn test_list_owned_txouts() {
             }
         );
     }
+}
+
+/// Check conflicts between two in mempool transactions. Tx with older `seen_at` is filtered out.
+#[test]
+fn test_unconfirmed_conflicts() {
+    let (local_chain, mut graph, desc) = common::single_descriptor_setup();
+    let mut spk_iter = SpkIterator::new(&desc);
+    let (parent_tx, tx_conflict_1, tx_conflict_2) = common::setup_conflicts(&mut spk_iter);
+
+    // Parent tx is confirmed at height 2.
+    let _ = graph.insert_relevant_txs(
+        [&parent_tx].iter().map(|tx| {
+            (
+                *tx,
+                [ConfirmationHeightAnchor {
+                    anchor_block: (2, *local_chain.blocks().get(&2).unwrap()).into(),
+                    confirmation_height: 2,
+                }],
+            )
+        }),
+        None,
+    );
+
+    // Conflict 1 is seen at 100
+    let _ = graph.insert_relevant_txs([&tx_conflict_1].iter().map(|tx| (*tx, None)), Some(100));
+
+    // Conflict 2 is seen at 200
+    let _ = graph.insert_relevant_txs([&tx_conflict_2].iter().map(|tx| (*tx, None)), Some(200));
+
+    let txout_confirmations = graph
+        .list_owned_txouts(&local_chain, local_chain.tip().unwrap())
+        .map(|txout| txout.chain_position)
+        .collect::<BTreeSet<_>>();
+
+    let mut utxos = graph
+        .list_owned_unspents(&local_chain, local_chain.tip().unwrap())
+        .collect::<Vec<_>>();
+
+    // We only have 2 txouts. The confirmed `tx_1` and latest `tx_conflict_2`
+    assert_eq!(txout_confirmations.len(), 2);
+    assert_eq!(
+        txout_confirmations,
+        [
+            ObservedAs::Confirmed(ConfirmationHeightAnchor {
+                anchor_block: (2u32, *local_chain.blocks().get(&2).unwrap()).into(),
+                confirmation_height: 2
+            }),
+            ObservedAs::Unconfirmed(200)
+        ]
+        .into()
+    );
+
+    // We only have one utxo. The latest `tx_conflict_2`.
+    assert_eq!(
+        utxos.pop().unwrap().chain_position,
+        ObservedAs::Unconfirmed(200)
+    );
+}
+
+/// Check conflict between mempool and orphaned block. Tx in orphaned block is filtered out.
+#[test]
+fn test_orphaned_conflicts() {
+    let (local_chain, mut graph, desc) = common::single_descriptor_setup();
+    let mut spk_iter = SpkIterator::new(&desc);
+    let (parent_tx, tx_conflict_1, tx_conflict_2) = common::setup_conflicts(&mut spk_iter);
+
+    // Parent tx confirmed at height 2.
+    let _ = graph.insert_relevant_txs(
+        [&parent_tx].iter().map(|tx| {
+            (
+                *tx,
+                [ConfirmationHeightAnchor {
+                    anchor_block: (2, *local_chain.blocks().get(&2).unwrap()).into(),
+                    confirmation_height: 2,
+                }],
+            )
+        }),
+        None,
+    );
+
+    // Ophaned block at height 5.
+    let orphaned_block = BlockId {
+        hash: h!("Orphaned Block"),
+        height: 5,
+    };
+
+    // 1st conflicting tx is in mempool.
+    let _ = graph.insert_relevant_txs([&tx_conflict_1].iter().map(|tx| (*tx, None)), Some(100));
+
+    // Second conflicting tx is in orphaned block.
+    let _ = graph.insert_relevant_txs(
+        [&tx_conflict_2].iter().map(|tx| {
+            (
+                *tx,
+                [ConfirmationHeightAnchor {
+                    anchor_block: orphaned_block,
+                    confirmation_height: 5,
+                }],
+            )
+        }),
+        None,
+    );
+
+    let txout_confirmations = graph
+        .list_owned_txouts(&local_chain, local_chain.tip().unwrap())
+        .map(|txout| txout.chain_position)
+        .collect::<BTreeSet<_>>();
+
+    let mut utxos = graph
+        .list_owned_unspents(&local_chain, local_chain.tip().unwrap())
+        .collect::<Vec<_>>();
+
+    // We only have the mempool tx. Conflicting orphaned is ignored.
+    assert_eq!(txout_confirmations.len(), 2);
+    assert_eq!(
+        txout_confirmations,
+        [
+            ObservedAs::Confirmed(ConfirmationHeightAnchor {
+                anchor_block: (2u32, *local_chain.blocks().get(&2).unwrap()).into(),
+                confirmation_height: 2
+            }),
+            ObservedAs::Unconfirmed(100)
+        ]
+        .into()
+    );
+
+    // We only have one utxo and its in mempool.
+    assert_eq!(
+        utxos.pop().unwrap().chain_position,
+        ObservedAs::Unconfirmed(100)
+    );
+}
+
+/// Check conflicts between mempool and confirmed tx. Mempool tx is filtered out.
+#[test]
+fn test_confirmed_conflicts() {
+    let (local_chain, mut graph, desc) = common::single_descriptor_setup();
+    let mut spk_iter = SpkIterator::new(&desc);
+    let (parent_tx, tx_conflict_1, tx_conflict_2) = common::setup_conflicts(&mut spk_iter);
+
+    // Parent confirms at height 2.
+    let _ = graph.insert_relevant_txs(
+        [&parent_tx].iter().map(|tx| {
+            (
+                *tx,
+                [ConfirmationHeightAnchor {
+                    anchor_block: (2, *local_chain.blocks().get(&2).unwrap()).into(),
+                    confirmation_height: 2,
+                }],
+            )
+        }),
+        None,
+    );
+
+    // `tx_conflict_1` is in mempool.
+    let _ = graph.insert_relevant_txs([&tx_conflict_1].iter().map(|tx| (*tx, None)), Some(100));
+
+    // `tx_conflict_2` is in orphaned block at height 5.
+    let _ = graph.insert_relevant_txs(
+        [&tx_conflict_2].iter().map(|tx| {
+            (
+                *tx,
+                [ConfirmationHeightAnchor {
+                    anchor_block: (2, *local_chain.blocks().get(&2).unwrap()).into(),
+                    confirmation_height: 2,
+                }],
+            )
+        }),
+        None,
+    );
+
+    let txout_confirmations = graph
+        .list_owned_txouts(&local_chain, local_chain.tip().unwrap())
+        .map(|txout| txout.chain_position)
+        .collect::<BTreeSet<_>>();
+
+    let mut utxos = graph
+        .list_owned_unspents(&local_chain, local_chain.tip().unwrap())
+        .collect::<Vec<_>>();
+
+    // We only have 1 txout. Confirmed at block 2.
+    assert_eq!(txout_confirmations.len(), 1);
+    assert_eq!(
+        txout_confirmations,
+        [ObservedAs::Confirmed(ConfirmationHeightAnchor {
+            anchor_block: (2, *local_chain.blocks().get(&2).unwrap()).into(),
+            confirmation_height: 2
+        })]
+        .into()
+    );
+
+    // We only have one utxo, confirmed at block 2.
+    assert_eq!(
+        utxos.pop().unwrap().chain_position,
+        ObservedAs::Confirmed(ConfirmationHeightAnchor {
+            anchor_block: (2u32, *local_chain.blocks().get(&2).unwrap()).into(),
+            confirmation_height: 2
+        }),
+    );
+}
+
+/// Test conflicts for two mempool tx, with same `seen_at` time.
+#[test]
+fn test_unconfirmed_conflicts_at_same_last_seen() {
+    let (local_chain, mut graph, desc) = common::single_descriptor_setup();
+    let mut spk_iter = SpkIterator::new(&desc);
+    let (parent_tx, tx_conflict_1, tx_conflict_2) = common::setup_conflicts(&mut spk_iter);
+
+    // Parent confirms at height 2.
+    let _ = graph.insert_relevant_txs(
+        [&parent_tx].iter().map(|tx| {
+            (
+                *tx,
+                [ConfirmationHeightAnchor {
+                    anchor_block: (2, *local_chain.blocks().get(&2).unwrap()).into(),
+                    confirmation_height: 2,
+                }],
+            )
+        }),
+        None,
+    );
+
+    // Both conflicts are in mempool at same `seen_at`
+    let _ = graph.insert_relevant_txs(
+        [&tx_conflict_1, &tx_conflict_2]
+            .iter()
+            .map(|tx| (*tx, None)),
+        Some(100),
+    );
+
+    let txouts = graph
+        .list_owned_txouts(&local_chain, local_chain.tip().unwrap())
+        .collect::<Vec<_>>();
+
+    let utxos = graph
+        .list_owned_unspents(&local_chain, local_chain.tip().unwrap())
+        .collect::<Vec<_>>();
+
+    // FIXME: Currently both the mempool tx are indexed and listed out. This can happen in case of RBF fee bumps,
+    // when both the txs are observed at a single sync time. This can be resolved by checking the input's nSequence.
+    // Additionally in case of non RBF conflicts at same `seen_at`, conflicting txids can be reported back for filtering
+    // out in higher layers. This is similar to what core rpc does in case of unresolvable conflicts.
+
+    // We have two in mempool txouts. Both at same chain position.
+    assert_eq!(txouts.len(), 3);
+    assert_eq!(
+        txouts
+            .iter()
+            .filter(|txout| matches!(txout.chain_position, ObservedAs::Unconfirmed(100)))
+            .count(),
+        2
+    );
+
+    // We have two mempool utxos both at same chain position.
+    assert_eq!(
+        utxos
+            .iter()
+            .filter(|txout| matches!(txout.chain_position, ObservedAs::Unconfirmed(100)))
+            .count(),
+        2
+    );
 }
