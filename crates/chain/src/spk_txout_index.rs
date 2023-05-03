@@ -53,7 +53,7 @@ impl<I> Default for SpkTxOutIndex<I> {
     }
 }
 
-impl<I: Clone + Ord + 'static> Indexer for SpkTxOutIndex<I> {
+impl<I: Clone + Ord> Indexer for SpkTxOutIndex<I> {
     type Additions = ();
 
     fn index_txout(&mut self, outpoint: OutPoint, txout: &TxOut) -> Self::Additions {
