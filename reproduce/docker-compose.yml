@@ -1,0 +1,8 @@
+version: "3"
+services:
+  bitcoind:
+    image: lncm/bitcoind:v24.0.1
+    ports:
+      - "18443:18443"
+    volumes:
+      - ./bitcoin.conf:/data/.bitcoin/bitcoin.conf
