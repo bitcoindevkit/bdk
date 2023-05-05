@@ -6,13 +6,6 @@ use bitcoin::BlockHash;
 use crate::{BlockId, ChainOracle};
 
 /// This is a local implementation of [`ChainOracle`].
-///
-/// TODO: We need a cache/snapshot thing for chain oracle.
-/// * Minimize calls to remotes.
-/// * Can we cache it forever? Should we drop stuff?
-/// * Assume anything deeper than (i.e. 10) blocks won't be reorged.
-/// * Is this a cache on txs or block? or both?
-/// TODO: Parents of children are confirmed if children are confirmed.
 #[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct LocalChain {
     blocks: BTreeMap<u32, BlockHash>,
@@ -71,6 +64,11 @@ impl LocalChain {
         }
     }
 
+    /// Get a reference to the inner map of block height to hash.
+    pub fn inner(&self) -> &BTreeMap<u32, BlockHash> {
+        &self.blocks
+    }
+
     pub fn tip(&self) -> Option<BlockId> {
         self.blocks
             .iter()
@@ -78,11 +76,9 @@ impl LocalChain {
             .map(|(&height, &hash)| BlockId { height, hash })
     }
 
-    /// Get a block at the given height.
-    pub fn get_block(&self, height: u32) -> Option<BlockId> {
-        self.blocks
-            .get(&height)
-            .map(|&hash| BlockId { height, hash })
+    /// Get a [`BlockHash`] at the given height.
+    pub fn get_blockhash(&self, height: u32) -> Option<BlockHash> {
+        self.blocks.get(&height).cloned()
     }
 
     /// This is like the sparsechain's logic, expect we must guarantee that all invalidated heights

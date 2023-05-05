@@ -8,7 +8,7 @@ use bdk_chain::{
     keychain::{Balance, DerivationAdditions, KeychainTxOutIndex},
     local_chain::LocalChain,
     tx_graph::Additions,
-    ConfirmationHeightAnchor, ObservedAs,
+    BlockId, ConfirmationHeightAnchor, ObservedAs,
 };
 use bitcoin::{secp256k1::Secp256k1, BlockHash, OutPoint, Script, Transaction, TxIn, TxOut};
 use miniscript::Descriptor;
@@ -208,10 +208,12 @@ fn test_list_owned_txouts() {
 
     let _ = graph.insert_relevant_txs(
         [&tx1, &tx2, &tx3, &tx6].iter().enumerate().map(|(i, tx)| {
+            let height = i as u32;
             (
                 *tx,
                 local_chain
-                    .get_block(i as u32)
+                    .get_blockhash(height)
+                    .map(|hash| BlockId { height, hash })
                     .map(|anchor_block| ConfirmationHeightAnchor {
                         anchor_block,
                         confirmation_height: anchor_block.height,
@@ -225,18 +227,34 @@ fn test_list_owned_txouts() {
 
     // A helper lambda to extract and filter data from the graph.
     let fetch =
-        |ht: u32, graph: &IndexedTxGraph<ConfirmationHeightAnchor, KeychainTxOutIndex<String>>| {
+        |height: u32,
+         graph: &IndexedTxGraph<ConfirmationHeightAnchor, KeychainTxOutIndex<String>>| {
             let txouts = graph
-                .list_owned_txouts(&local_chain, local_chain.get_block(ht).unwrap())
+                .list_owned_txouts(
+                    &local_chain,
+                    local_chain
+                        .get_blockhash(height)
+                        .map(|hash| BlockId { height, hash })
+                        .unwrap(),
+                )
                 .collect::<Vec<_>>();
 
             let utxos = graph
-                .list_owned_unspents(&local_chain, local_chain.get_block(ht).unwrap())
+                .list_owned_unspents(
+                    &local_chain,
+                    local_chain
+                        .get_blockhash(height)
+                        .map(|hash| BlockId { height, hash })
+                        .unwrap(),
+                )
                 .collect::<Vec<_>>();
 
             let balance = graph.balance(
                 &local_chain,
-                local_chain.get_block(ht).unwrap(),
+                local_chain
+                    .get_blockhash(height)
+                    .map(|hash| BlockId { height, hash })
+                    .unwrap(),
                 |spk: &Script| trusted_spks.contains(spk),
             );
 
