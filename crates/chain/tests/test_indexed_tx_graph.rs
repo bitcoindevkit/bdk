@@ -212,8 +212,9 @@ fn test_list_owned_txouts() {
             (
                 *tx,
                 local_chain
-                    .get_blockhash(height)
-                    .map(|hash| BlockId { height, hash })
+                    .blocks()
+                    .get(&height)
+                    .map(|&hash| BlockId { height, hash })
                     .map(|anchor_block| ConfirmationHeightAnchor {
                         anchor_block,
                         confirmation_height: anchor_block.height,
@@ -229,34 +230,22 @@ fn test_list_owned_txouts() {
     let fetch =
         |height: u32,
          graph: &IndexedTxGraph<ConfirmationHeightAnchor, KeychainTxOutIndex<String>>| {
+            let chain_tip = local_chain
+                .blocks()
+                .get(&height)
+                .map(|&hash| BlockId { height, hash })
+                .expect("block must exist");
             let txouts = graph
-                .list_owned_txouts(
-                    &local_chain,
-                    local_chain
-                        .get_blockhash(height)
-                        .map(|hash| BlockId { height, hash })
-                        .unwrap(),
-                )
+                .list_owned_txouts(&local_chain, chain_tip)
                 .collect::<Vec<_>>();
 
             let utxos = graph
-                .list_owned_unspents(
-                    &local_chain,
-                    local_chain
-                        .get_blockhash(height)
-                        .map(|hash| BlockId { height, hash })
-                        .unwrap(),
-                )
+                .list_owned_unspents(&local_chain, chain_tip)
                 .collect::<Vec<_>>();
 
-            let balance = graph.balance(
-                &local_chain,
-                local_chain
-                    .get_blockhash(height)
-                    .map(|hash| BlockId { height, hash })
-                    .unwrap(),
-                |spk: &Script| trusted_spks.contains(spk),
-            );
+            let balance = graph.balance(&local_chain, chain_tip, |spk: &Script| {
+                trusted_spks.contains(spk)
+            });
 
             assert_eq!(txouts.len(), 5);
             assert_eq!(utxos.len(), 4);

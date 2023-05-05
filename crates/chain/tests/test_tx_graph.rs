@@ -694,7 +694,6 @@ fn test_chain_spends() {
         .iter()
         .zip([&tx_0, &tx_1].into_iter())
         .for_each(|(ht, tx)| {
-            // let block_id = local_chain.get_block(*ht).expect("block expected");
             let _ = graph.insert_anchor(
                 tx.txid(),
                 ConfirmationHeightAnchor {

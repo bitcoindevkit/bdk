@@ -10,12 +10,13 @@ pub trait ChainOracle {
     /// Error type.
     type Error: core::fmt::Debug;
 
-    /// Determines whether `block` of [`BlockId`] exists as an ancestor of `static_block`.
+    /// Determines whether `block` of [`BlockId`] exists as an ancestor of `chain_tip`.
     ///
-    /// If `None` is returned, it means the implementation cannot determine whether `block` exists.
+    /// If `None` is returned, it means the implementation cannot determine whether `block` exists
+    /// under `chain_tip`.
     fn is_block_in_chain(
         &self,
         block: BlockId,
-        static_block: BlockId,
+        chain_tip: BlockId,
     ) -> Result<Option<bool>, Self::Error>;
 }

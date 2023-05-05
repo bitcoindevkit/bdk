@@ -64,8 +64,8 @@ impl LocalChain {
         }
     }
 
-    /// Get a reference to the inner map of block height to hash.
-    pub fn inner(&self) -> &BTreeMap<u32, BlockHash> {
+    /// Get a reference to a map of block height to hash.
+    pub fn blocks(&self) -> &BTreeMap<u32, BlockHash> {
         &self.blocks
     }
 
@@ -74,11 +74,6 @@ impl LocalChain {
             .iter()
             .last()
             .map(|(&height, &hash)| BlockId { height, hash })
-    }
-
-    /// Get a [`BlockHash`] at the given height.
-    pub fn get_blockhash(&self, height: u32) -> Option<BlockHash> {
-        self.blocks.get(&height).cloned()
     }
 
     /// This is like the sparsechain's logic, expect we must guarantee that all invalidated heights
