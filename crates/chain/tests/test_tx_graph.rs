@@ -4,7 +4,7 @@ use bdk_chain::{
     collections::*,
     local_chain::LocalChain,
     tx_graph::{Additions, TxGraph},
-    Append, BlockId, ObservedAs,
+    Append, BlockId, ConfirmationHeightAnchor, ObservedAs,
 };
 use bitcoin::{
     hashes::Hash, BlockHash, OutPoint, PackedLockTime, Script, Transaction, TxIn, TxOut, Txid,
@@ -684,7 +684,7 @@ fn test_chain_spends() {
         ..common::new_tx(0)
     };
 
-    let mut graph = TxGraph::<BlockId>::default();
+    let mut graph = TxGraph::<ConfirmationHeightAnchor>::default();
 
     let _ = graph.insert_tx(tx_0.clone());
     let _ = graph.insert_tx(tx_1.clone());
@@ -694,33 +694,42 @@ fn test_chain_spends() {
         .iter()
         .zip([&tx_0, &tx_1].into_iter())
         .for_each(|(ht, tx)| {
-            let block_id = local_chain.get_block(*ht).expect("block expected");
-            let _ = graph.insert_anchor(tx.txid(), block_id);
+            let _ = graph.insert_anchor(
+                tx.txid(),
+                ConfirmationHeightAnchor {
+                    anchor_block: tip,
+                    confirmation_height: *ht,
+                },
+            );
         });
 
     // Assert that confirmed spends are returned correctly.
     assert_eq!(
-        graph
-            .get_chain_spend(&local_chain, tip, OutPoint::new(tx_0.txid(), 0))
-            .unwrap(),
-        (
-            ObservedAs::Confirmed(&local_chain.get_block(98).expect("block expected")),
-            tx_1.txid()
-        )
+        graph.get_chain_spend(&local_chain, tip, OutPoint::new(tx_0.txid(), 0)),
+        Some((
+            ObservedAs::Confirmed(&ConfirmationHeightAnchor {
+                anchor_block: tip,
+                confirmation_height: 98
+            }),
+            tx_1.txid(),
+        )),
     );
 
     // Check if chain position is returned correctly.
     assert_eq!(
-        graph
-            .get_chain_position(&local_chain, tip, tx_0.txid())
-            .expect("position expected"),
-        ObservedAs::Confirmed(&local_chain.get_block(95).expect("block expected"))
+        graph.get_chain_position(&local_chain, tip, tx_0.txid()),
+        // Some(ObservedAs::Confirmed(&local_chain.get_block(95).expect("block expected"))),
+        Some(ObservedAs::Confirmed(&ConfirmationHeightAnchor {
+            anchor_block: tip,
+            confirmation_height: 95
+        }))
     );
 
-    // As long the unconfirmed tx isn't marked as seen, chain_spend will return None.
-    assert!(graph
-        .get_chain_spend(&local_chain, tip, OutPoint::new(tx_0.txid(), 1))
-        .is_none());
+    // Even if unconfirmed tx has a last_seen of 0, it can still be part of a chain spend.
+    assert_eq!(
+        graph.get_chain_spend(&local_chain, tip, OutPoint::new(tx_0.txid(), 1)),
+        Some((ObservedAs::Unconfirmed(0), tx_2.txid())),
+    );
 
     // Mark the unconfirmed as seen and check correct ObservedAs status is returned.
     let _ = graph.insert_seen_at(tx_2.txid(), 1234567);
@@ -781,73 +790,6 @@ fn test_chain_spends() {
     assert!(graph
         .get_chain_position(&local_chain, tip, tx_2.txid())
         .is_none());
-}
-
-#[test]
-fn test_relevant_heights() {
-    let mut graph = TxGraph::<BlockId>::default();
-
-    let tx1 = common::new_tx(1);
-    let tx2 = common::new_tx(2);
-
-    let _ = graph.insert_tx(tx1.clone());
-    assert_eq!(
-        graph.relevant_heights().collect::<Vec<_>>(),
-        vec![],
-        "no anchors in graph"
-    );
-
-    let _ = graph.insert_anchor(
-        tx1.txid(),
-        BlockId {
-            height: 3,
-            hash: h!("3a"),
-        },
-    );
-    assert_eq!(
-        graph.relevant_heights().collect::<Vec<_>>(),
-        vec![3],
-        "one anchor at height 3"
-    );
-
-    let _ = graph.insert_anchor(
-        tx1.txid(),
-        BlockId {
-            height: 3,
-            hash: h!("3b"),
-        },
-    );
-    assert_eq!(
-        graph.relevant_heights().collect::<Vec<_>>(),
-        vec![3],
-        "introducing duplicate anchor at height 3, must not iterate over duplicate heights"
-    );
-
-    let _ = graph.insert_anchor(
-        tx1.txid(),
-        BlockId {
-            height: 4,
-            hash: h!("4a"),
-        },
-    );
-    assert_eq!(
-        graph.relevant_heights().collect::<Vec<_>>(),
-        vec![3, 4],
-        "anchors in height 3 and now 4"
-    );
-
-    let _ = graph.insert_anchor(
-        tx2.txid(),
-        BlockId {
-            height: 5,
-            hash: h!("5a"),
-        },
-    );
-    assert_eq!(
-        graph.relevant_heights().collect::<Vec<_>>(),
-        vec![3, 4, 5],
-        "anchor for non-existant tx is inserted at height 5, must still be in relevant heights",
-    );
 }
 
 /// Ensure that `last_seen` values only increase during [`Append::append`].

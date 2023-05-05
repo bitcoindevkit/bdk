@@ -349,6 +349,11 @@ impl<A> TxGraph<A> {
             .filter(move |(_, conflicting_txid)| *conflicting_txid != txid)
     }
 
+    /// Get all transaction anchors known by [`TxGraph`].
+    pub fn all_anchors(&self) -> &BTreeSet<(A, Txid)> {
+        &self.anchors
+    }
+
     /// Whether the graph has any transactions or outputs in it.
     pub fn is_empty(&self) -> bool {
         self.txs.is_empty()
@@ -592,21 +597,6 @@ impl<A: Clone + Ord> TxGraph<A> {
 }
 
 impl<A: Anchor> TxGraph<A> {
-    /// Get all heights that are relevant to the graph.
-    pub fn relevant_heights(&self) -> impl Iterator<Item = u32> + '_ {
-        let mut last_height = Option::<u32>::None;
-        self.anchors
-            .iter()
-            .map(|(a, _)| a.anchor_block().height)
-            .filter(move |&height| {
-                let is_unique = Some(height) != last_height;
-                if is_unique {
-                    last_height = Some(height);
-                }
-                is_unique
-            })
-    }
-
     /// Get the position of the transaction in `chain` with tip `chain_tip`.
     ///
     /// If the given transaction of `txid` does not exist in the chain of `chain_tip`, `None` is
@@ -624,11 +614,9 @@ impl<A: Anchor> TxGraph<A> {
         chain_tip: BlockId,
         txid: Txid,
     ) -> Result<Option<ObservedAs<&A>>, C::Error> {
-        let (tx_node, anchors, &last_seen) = match self.txs.get(&txid) {
-            Some((tx, anchors, last_seen)) if !(anchors.is_empty() && *last_seen == 0) => {
-                (tx, anchors, last_seen)
-            }
-            _ => return Ok(None),
+        let (tx_node, anchors, last_seen) = match self.txs.get(&txid) {
+            Some(v) => v,
+            None => return Ok(None),
         };
 
         for anchor in anchors {
@@ -657,12 +645,12 @@ impl<A: Anchor> TxGraph<A> {
                     return Ok(None);
                 }
             }
-            if conflicting_tx.last_seen_unconfirmed > last_seen {
+            if conflicting_tx.last_seen_unconfirmed > *last_seen {
                 return Ok(None);
             }
         }
 
-        Ok(Some(ObservedAs::Unconfirmed(last_seen)))
+        Ok(Some(ObservedAs::Unconfirmed(*last_seen)))
     }
 
     /// Get the position of the transaction in `chain` with tip `chain_tip`.

@@ -1,4 +1,7 @@
-use bdk_chain::local_chain::{LocalChain, UpdateNotConnectedError};
+use bdk_chain::local_chain::{
+    ChangeSet, InsertBlockNotMatchingError, LocalChain, UpdateNotConnectedError,
+};
+use bitcoin::BlockHash;
 
 #[macro_use]
 mod common;
@@ -164,4 +167,62 @@ fn invalidation_but_no_connection() {
         chain1.determine_changeset(&chain2),
         Err(UpdateNotConnectedError(0))
     )
+}
+
+#[test]
+fn insert_block() {
+    struct TestCase {
+        original: LocalChain,
+        insert: (u32, BlockHash),
+        expected_result: Result<ChangeSet, InsertBlockNotMatchingError>,
+        expected_final: LocalChain,
+    }
+
+    let test_cases = [
+        TestCase {
+            original: local_chain![],
+            insert: (5, h!("block5")),
+            expected_result: Ok([(5, Some(h!("block5")))].into()),
+            expected_final: local_chain![(5, h!("block5"))],
+        },
+        TestCase {
+            original: local_chain![(3, h!("A"))],
+            insert: (4, h!("B")),
+            expected_result: Ok([(4, Some(h!("B")))].into()),
+            expected_final: local_chain![(3, h!("A")), (4, h!("B"))],
+        },
+        TestCase {
+            original: local_chain![(4, h!("B"))],
+            insert: (3, h!("A")),
+            expected_result: Ok([(3, Some(h!("A")))].into()),
+            expected_final: local_chain![(3, h!("A")), (4, h!("B"))],
+        },
+        TestCase {
+            original: local_chain![(2, h!("K"))],
+            insert: (2, h!("K")),
+            expected_result: Ok([].into()),
+            expected_final: local_chain![(2, h!("K"))],
+        },
+        TestCase {
+            original: local_chain![(2, h!("K"))],
+            insert: (2, h!("J")),
+            expected_result: Err(InsertBlockNotMatchingError {
+                height: 2,
+                original_hash: h!("K"),
+                update_hash: h!("J"),
+            }),
+            expected_final: local_chain![(2, h!("K"))],
+        },
+    ];
+
+    for (i, t) in test_cases.into_iter().enumerate() {
+        let mut chain = t.original;
+        assert_eq!(
+            chain.insert_block(t.insert.into()),
+            t.expected_result,
+            "[{}] unexpected result when inserting block",
+            i,
+        );
+        assert_eq!(chain, t.expected_final, "[{}] unexpected final chain", i,);
+    }
 }

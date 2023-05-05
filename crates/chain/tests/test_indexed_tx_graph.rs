@@ -8,7 +8,7 @@ use bdk_chain::{
     keychain::{Balance, DerivationAdditions, KeychainTxOutIndex},
     local_chain::LocalChain,
     tx_graph::Additions,
-    BlockId, ObservedAs,
+    BlockId, ConfirmationHeightAnchor, ObservedAs,
 };
 use bitcoin::{secp256k1::Secp256k1, BlockHash, OutPoint, Script, Transaction, TxIn, TxOut};
 use miniscript::Descriptor;
@@ -28,7 +28,7 @@ fn insert_relevant_txs() {
     let spk_0 = descriptor.at_derivation_index(0).script_pubkey();
     let spk_1 = descriptor.at_derivation_index(9).script_pubkey();
 
-    let mut graph = IndexedTxGraph::<BlockId, KeychainTxOutIndex<()>>::default();
+    let mut graph = IndexedTxGraph::<ConfirmationHeightAnchor, KeychainTxOutIndex<()>>::default();
     graph.index.add_keychain((), descriptor);
     graph.index.set_lookahead(&(), 10);
 
@@ -118,7 +118,8 @@ fn test_list_owned_txouts() {
     let (desc_1, _) = Descriptor::parse_descriptor(&Secp256k1::signing_only(), "tr(tprv8ZgxMBicQKsPd3krDUsBAmtnRsK3rb8u5yi1zhQgMhF1tR8MW7xfE4rnrbbsrbPR52e7rKapu6ztw1jXveJSCGHEriUGZV7mCe88duLp5pj/86'/1'/0'/0/*)").unwrap();
     let (desc_2, _) = Descriptor::parse_descriptor(&Secp256k1::signing_only(), "tr(tprv8ZgxMBicQKsPd3krDUsBAmtnRsK3rb8u5yi1zhQgMhF1tR8MW7xfE4rnrbbsrbPR52e7rKapu6ztw1jXveJSCGHEriUGZV7mCe88duLp5pj/86'/1'/0'/1/*)").unwrap();
 
-    let mut graph = IndexedTxGraph::<BlockId, KeychainTxOutIndex<String>>::default();
+    let mut graph =
+        IndexedTxGraph::<ConfirmationHeightAnchor, KeychainTxOutIndex<String>>::default();
 
     graph.index.add_keychain("keychain_1".into(), desc_1);
     graph.index.add_keychain("keychain_2".into(), desc_2);
@@ -206,86 +207,101 @@ fn test_list_owned_txouts() {
     // For unconfirmed txs we pass in `None`.
 
     let _ = graph.insert_relevant_txs(
-        [&tx1, &tx2, &tx3, &tx6]
-            .iter()
-            .enumerate()
-            .map(|(i, tx)| (*tx, [local_chain.get_block(i as u32).unwrap()])),
+        [&tx1, &tx2, &tx3, &tx6].iter().enumerate().map(|(i, tx)| {
+            let height = i as u32;
+            (
+                *tx,
+                local_chain
+                    .blocks()
+                    .get(&height)
+                    .map(|&hash| BlockId { height, hash })
+                    .map(|anchor_block| ConfirmationHeightAnchor {
+                        anchor_block,
+                        confirmation_height: anchor_block.height,
+                    }),
+            )
+        }),
         None,
     );
 
     let _ = graph.insert_relevant_txs([&tx4, &tx5].iter().map(|tx| (*tx, None)), Some(100));
 
     // A helper lambda to extract and filter data from the graph.
-    let fetch = |ht: u32, graph: &IndexedTxGraph<BlockId, KeychainTxOutIndex<String>>| {
-        let txouts = graph
-            .list_owned_txouts(&local_chain, local_chain.get_block(ht).unwrap())
-            .collect::<Vec<_>>();
+    let fetch =
+        |height: u32,
+         graph: &IndexedTxGraph<ConfirmationHeightAnchor, KeychainTxOutIndex<String>>| {
+            let chain_tip = local_chain
+                .blocks()
+                .get(&height)
+                .map(|&hash| BlockId { height, hash })
+                .expect("block must exist");
+            let txouts = graph
+                .list_owned_txouts(&local_chain, chain_tip)
+                .collect::<Vec<_>>();
 
-        let utxos = graph
-            .list_owned_unspents(&local_chain, local_chain.get_block(ht).unwrap())
-            .collect::<Vec<_>>();
+            let utxos = graph
+                .list_owned_unspents(&local_chain, chain_tip)
+                .collect::<Vec<_>>();
 
-        let balance = graph.balance(
-            &local_chain,
-            local_chain.get_block(ht).unwrap(),
-            |spk: &Script| trusted_spks.contains(spk),
-        );
+            let balance = graph.balance(&local_chain, chain_tip, |spk: &Script| {
+                trusted_spks.contains(spk)
+            });
 
-        assert_eq!(txouts.len(), 5);
-        assert_eq!(utxos.len(), 4);
+            assert_eq!(txouts.len(), 5);
+            assert_eq!(utxos.len(), 4);
 
-        let confirmed_txouts_txid = txouts
-            .iter()
-            .filter_map(|full_txout| {
-                if matches!(full_txout.chain_position, ObservedAs::Confirmed(_)) {
-                    Some(full_txout.outpoint.txid)
-                } else {
-                    None
-                }
-            })
-            .collect::<BTreeSet<_>>();
+            let confirmed_txouts_txid = txouts
+                .iter()
+                .filter_map(|full_txout| {
+                    if matches!(full_txout.chain_position, ObservedAs::Confirmed(_)) {
+                        Some(full_txout.outpoint.txid)
+                    } else {
+                        None
+                    }
+                })
+                .collect::<BTreeSet<_>>();
 
-        let unconfirmed_txouts_txid = txouts
-            .iter()
-            .filter_map(|full_txout| {
-                if matches!(full_txout.chain_position, ObservedAs::Unconfirmed(_)) {
-                    Some(full_txout.outpoint.txid)
-                } else {
-                    None
-                }
-            })
-            .collect::<BTreeSet<_>>();
+            let unconfirmed_txouts_txid = txouts
+                .iter()
+                .filter_map(|full_txout| {
+                    if matches!(full_txout.chain_position, ObservedAs::Unconfirmed(_)) {
+                        Some(full_txout.outpoint.txid)
+                    } else {
+                        None
+                    }
+                })
+                .collect::<BTreeSet<_>>();
 
-        let confirmed_utxos_txid = utxos
-            .iter()
-            .filter_map(|full_txout| {
-                if matches!(full_txout.chain_position, ObservedAs::Confirmed(_)) {
-                    Some(full_txout.outpoint.txid)
-                } else {
-                    None
-                }
-            })
-            .collect::<BTreeSet<_>>();
+            let confirmed_utxos_txid = utxos
+                .iter()
+                .filter_map(|full_txout| {
+                    if matches!(full_txout.chain_position, ObservedAs::Confirmed(_)) {
+                        Some(full_txout.outpoint.txid)
+                    } else {
+                        None
+                    }
+                })
+                .collect::<BTreeSet<_>>();
 
-        let unconfirmed_utxos_txid = utxos
-            .iter()
-            .filter_map(|full_txout| {
-                if matches!(full_txout.chain_position, ObservedAs::Unconfirmed(_)) {
-                    Some(full_txout.outpoint.txid)
-                } else {
-                    None
-                }
-            })
-            .collect::<BTreeSet<_>>();
+            let unconfirmed_utxos_txid = utxos
+                .iter()
+                .filter_map(|full_txout| {
+                    if matches!(full_txout.chain_position, ObservedAs::Unconfirmed(_)) {
+                        Some(full_txout.outpoint.txid)
+                    } else {
+                        None
+                    }
+                })
+                .collect::<BTreeSet<_>>();
 
-        (
-            confirmed_txouts_txid,
-            unconfirmed_txouts_txid,
-            confirmed_utxos_txid,
-            unconfirmed_utxos_txid,
-            balance,
-        )
-    };
+            (
+                confirmed_txouts_txid,
+                unconfirmed_txouts_txid,
+                confirmed_utxos_txid,
+                unconfirmed_utxos_txid,
+                balance,
+            )
+        };
 
     // ----- TEST BLOCK -----
 

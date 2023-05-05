@@ -12,6 +12,7 @@ use crate::{
 /// A struct that combines [`TxGraph`] and an [`Indexer`] implementation.
 ///
 /// This structure ensures that [`TxGraph`] and [`Indexer`] are updated atomically.
+#[derive(Debug)]
 pub struct IndexedTxGraph<A, I> {
     /// Transaction index.
     pub index: I,
@@ -27,12 +28,14 @@ impl<A, I: Default> Default for IndexedTxGraph<A, I> {
     }
 }
 
-impl<A: Anchor, I: Indexer> IndexedTxGraph<A, I> {
+impl<A, I> IndexedTxGraph<A, I> {
     /// Get a reference of the internal transaction graph.
     pub fn graph(&self) -> &TxGraph<A> {
         &self.graph
     }
+}
 
+impl<A: Anchor, I: Indexer> IndexedTxGraph<A, I> {
     /// Applies the [`IndexedAdditions`] to the [`IndexedTxGraph`].
     pub fn apply_additions(&mut self, additions: IndexedAdditions<A, I::Additions>) {
         let IndexedAdditions {
@@ -217,7 +220,7 @@ impl<A: Anchor, I: OwnedIndexer> IndexedTxGraph<A, I> {
         C: ChainOracle,
         F: FnMut(&Script) -> bool,
     {
-        let tip_height = chain_tip.anchor_block().height;
+        let tip_height = chain_tip.height;
 
         let mut immature = 0;
         let mut trusted_pending = 0;

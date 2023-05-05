@@ -6,13 +6,6 @@ use bitcoin::BlockHash;
 use crate::{BlockId, ChainOracle};
 
 /// This is a local implementation of [`ChainOracle`].
-///
-/// TODO: We need a cache/snapshot thing for chain oracle.
-/// * Minimize calls to remotes.
-/// * Can we cache it forever? Should we drop stuff?
-/// * Assume anything deeper than (i.e. 10) blocks won't be reorged.
-/// * Is this a cache on txs or block? or both?
-/// TODO: Parents of children are confirmed if children are confirmed.
 #[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct LocalChain {
     blocks: BTreeMap<u32, BlockHash>,
@@ -71,18 +64,16 @@ impl LocalChain {
         }
     }
 
+    /// Get a reference to a map of block height to hash.
+    pub fn blocks(&self) -> &BTreeMap<u32, BlockHash> {
+        &self.blocks
+    }
+
     pub fn tip(&self) -> Option<BlockId> {
         self.blocks
             .iter()
             .last()
             .map(|(&height, &hash)| BlockId { height, hash })
-    }
-
-    /// Get a block at the given height.
-    pub fn get_block(&self, height: u32) -> Option<BlockId> {
-        self.blocks
-            .get(&height)
-            .map(|&hash| BlockId { height, hash })
     }
 
     /// This is like the sparsechain's logic, expect we must guarantee that all invalidated heights
@@ -173,6 +164,31 @@ impl LocalChain {
     pub fn heights(&self) -> BTreeSet<u32> {
         self.blocks.keys().cloned().collect()
     }
+
+    /// Insert a block of [`BlockId`] into the [`LocalChain`].
+    ///
+    /// # Error
+    ///
+    /// If the insertion height already contains a block, and the block has a different blockhash,
+    /// this will result in an [`InsertBlockNotMatchingError`].
+    pub fn insert_block(
+        &mut self,
+        block_id: BlockId,
+    ) -> Result<ChangeSet, InsertBlockNotMatchingError> {
+        let mut update = Self::from_blocks(self.tip());
+
+        if let Some(original_hash) = update.blocks.insert(block_id.height, block_id.hash) {
+            if original_hash != block_id.hash {
+                return Err(InsertBlockNotMatchingError {
+                    height: block_id.height,
+                    original_hash,
+                    update_hash: block_id.hash,
+                });
+            }
+        }
+
+        Ok(self.apply_update(update).expect("should always connect"))
+    }
 }
 
 /// This is the return value of [`determine_changeset`] and represents changes to [`LocalChain`].
@@ -201,3 +217,24 @@ impl core::fmt::Display for UpdateNotConnectedError {
 
 #[cfg(feature = "std")]
 impl std::error::Error for UpdateNotConnectedError {}
+
+/// Represents a failure when trying to insert a checkpoint into [`LocalChain`].
+#[derive(Clone, Debug, PartialEq)]
+pub struct InsertBlockNotMatchingError {
+    pub height: u32,
+    pub original_hash: BlockHash,
+    pub update_hash: BlockHash,
+}
+
+impl core::fmt::Display for InsertBlockNotMatchingError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(
+            f,
+            "failed to insert block at height {} as blockhashes conflict: original={}, update={}",
+            self.height, self.original_hash, self.update_hash
+        )
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for InsertBlockNotMatchingError {}
