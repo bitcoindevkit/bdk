@@ -3,7 +3,8 @@ use bdk::descriptor::calc_checksum;
 use bdk::signer::{SignOptions, SignerError};
 use bdk::wallet::coin_selection::LargestFirstCoinSelection;
 use bdk::wallet::AddressIndex::*;
-use bdk::wallet::{AddressIndex, AddressInfo, Balance, Wallet};
+use bdk::wallet::{AddressIndex, AddressInfo, Wallet};
+use bdk::Balance;
 use bdk::Error;
 use bdk::FeeRate;
 use bdk::KeychainKind;
@@ -437,7 +438,7 @@ fn test_create_tx_drain_to_and_utxos() {
     let utxos: Vec<_> = wallet
         .list_unspent()
         .into_iter()
-        .map(|u| u.outpoint)
+        .map(|(u, _)| u.outpoint)
         .collect();
     let mut builder = wallet.build_tx();
     builder
@@ -972,9 +973,10 @@ fn test_add_foreign_utxo() {
         get_funded_wallet("wpkh(cVbZ8ovhye9AoAHFsqobCf7LxbXDAECy9Kb8TZdfsDYMZGBUyCnm)");
 
     let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
-    let utxo = wallet2.list_unspent().remove(0);
+    let (utxo, _) = wallet2.list_unspent().remove(0);
     let foreign_utxo_satisfaction = wallet2
         .get_descriptor_for_keychain(KeychainKind::External)
+        .unwrap()
         .max_satisfaction_weight()
         .unwrap();
 
@@ -1036,9 +1038,10 @@ fn test_add_foreign_utxo() {
 #[should_panic(expected = "Generic(\"Foreign utxo missing witness_utxo or non_witness_utxo\")")]
 fn test_add_foreign_utxo_invalid_psbt_input() {
     let (mut wallet, _) = get_funded_wallet(get_test_wpkh());
-    let outpoint = wallet.list_unspent()[0].outpoint;
+    let outpoint = wallet.list_unspent()[0].0.outpoint;
     let foreign_utxo_satisfaction = wallet
         .get_descriptor_for_keychain(KeychainKind::External)
+        .unwrap()
         .max_satisfaction_weight()
         .unwrap();
 
@@ -1054,12 +1057,13 @@ fn test_add_foreign_utxo_where_outpoint_doesnt_match_psbt_input() {
     let (wallet2, txid2) =
         get_funded_wallet("wpkh(cVbZ8ovhye9AoAHFsqobCf7LxbXDAECy9Kb8TZdfsDYMZGBUyCnm)");
 
-    let utxo2 = wallet2.list_unspent().remove(0);
+    let (utxo2, _) = wallet2.list_unspent().remove(0);
     let tx1 = wallet1.get_tx(txid1, true).unwrap().transaction.unwrap();
     let tx2 = wallet2.get_tx(txid2, true).unwrap().transaction.unwrap();
 
     let satisfaction_weight = wallet2
         .get_descriptor_for_keychain(KeychainKind::External)
+        .unwrap()
         .max_satisfaction_weight()
         .unwrap();
 
@@ -1098,10 +1102,11 @@ fn test_add_foreign_utxo_only_witness_utxo() {
     let (wallet2, txid2) =
         get_funded_wallet("wpkh(cVbZ8ovhye9AoAHFsqobCf7LxbXDAECy9Kb8TZdfsDYMZGBUyCnm)");
     let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
-    let utxo2 = wallet2.list_unspent().remove(0);
+    let (utxo2, _) = wallet2.list_unspent().remove(0);
 
     let satisfaction_weight = wallet2
         .get_descriptor_for_keychain(KeychainKind::External)
+        .unwrap()
         .max_satisfaction_weight()
         .unwrap();
 
@@ -1160,7 +1165,7 @@ fn test_add_foreign_utxo_only_witness_utxo() {
 fn test_get_psbt_input() {
     // this should grab a known good utxo and set the input
     let (wallet, _) = get_funded_wallet(get_test_wpkh());
-    for utxo in wallet.list_unspent() {
+    for (utxo, _) in wallet.list_unspent() {
         let psbt_input = wallet.get_psbt_input(utxo, None, false).unwrap();
         assert!(psbt_input.witness_utxo.is_some() || psbt_input.non_witness_utxo.is_some());
     }
@@ -2660,10 +2665,11 @@ fn test_taproot_foreign_utxo() {
     let (wallet2, _) = get_funded_wallet(get_test_tr_single_sig());
 
     let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
-    let utxo = wallet2.list_unspent().remove(0);
+    let (utxo, _) = wallet2.list_unspent().remove(0);
     let psbt_input = wallet2.get_psbt_input(utxo.clone(), None, false).unwrap();
     let foreign_utxo_satisfaction = wallet2
         .get_descriptor_for_keychain(KeychainKind::External)
+        .unwrap()
         .max_satisfaction_weight()
         .unwrap();
 
