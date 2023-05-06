@@ -712,7 +712,6 @@ mod test {
                     value,
                     script_pubkey: Script::new(),
                 },
-                keychain: KeychainKind::External,
                 is_spent: false,
                 derivation_index: 42,
                 confirmation_time,
@@ -771,7 +770,6 @@ mod test {
                         value: rng.gen_range(0..200000000),
                         script_pubkey: Script::new(),
                     },
-                    keychain: KeychainKind::External,
                     is_spent: false,
                     derivation_index: rng.next_u32(),
                     confirmation_time: if rng.gen_bool(0.5) {
@@ -800,7 +798,6 @@ mod test {
                     value: utxos_value,
                     script_pubkey: Script::new(),
                 },
-                keychain: KeychainKind::External,
                 is_spent: false,
                 derivation_index: 42,
                 confirmation_time: ConfirmationTime::Unconfirmed,
