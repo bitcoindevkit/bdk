@@ -41,6 +41,7 @@ use crate::collections::HashSet;
 use alloc::{boxed::Box, rc::Rc, string::String, vec::Vec};
 use bdk_chain::ConfirmationTime;
 use core::cell::RefCell;
+use core::fmt::Debug;
 use core::marker::PhantomData;
 
 use bitcoin::util::psbt::{self, PartiallySignedTransaction as Psbt};
@@ -119,7 +120,7 @@ impl TxBuilderContext for BumpFee {}
 /// [`coin_selection`]: Self::coin_selection
 #[derive(Debug)]
 pub struct TxBuilder<'a, D, Cs, Ctx> {
-    pub(crate) wallet: Rc<RefCell<&'a mut Wallet<D>>>,
+    pub(crate) wallet: Rc<RefCell<&'a mut Wallet<D, KeychainKind>>>,
     pub(crate) params: TxParams,
     pub(crate) coin_selection: Cs,
     pub(crate) phantom: PhantomData<Ctx>,
@@ -282,8 +283,9 @@ impl<'a, D, Cs: CoinSelectionAlgorithm, Ctx: TxBuilderContext> TxBuilder<'a, D, 
                 .map(|outpoint| wallet.get_utxo(*outpoint).ok_or(Error::UnknownUtxo))
                 .collect::<Result<Vec<_>, _>>()?;
 
-            for utxo in utxos {
-                let descriptor = wallet.get_descriptor_for_keychain(utxo.keychain);
+            for (utxo, keychain) in utxos {
+                //TODO: handle the case where get_descriptor_for_keychain returns None
+                let descriptor = wallet.get_descriptor_for_keychain(keychain).unwrap();
                 let satisfaction_weight = descriptor.max_satisfaction_weight().unwrap();
                 self.params.utxos.push(WeightedUtxo {
                     satisfaction_weight,
@@ -766,13 +768,18 @@ impl Default for ChangeSpendPolicy {
     }
 }
 
-impl ChangeSpendPolicy {
-    pub(crate) fn is_satisfied_by(&self, utxo: &LocalUtxo) -> bool {
-        match self {
-            ChangeSpendPolicy::ChangeAllowed => true,
-            ChangeSpendPolicy::OnlyChange => utxo.keychain == KeychainKind::Internal,
-            ChangeSpendPolicy::ChangeForbidden => utxo.keychain == KeychainKind::External,
-        }
+// This is written as a stand alone function because we don't want
+// `ChangeSpendPolicy` to be generic over K.
+pub(crate) fn is_satisfied_by<K: Debug + Clone + Ord>(
+    change_spend_policy: ChangeSpendPolicy,
+    utxo: (&LocalUtxo, K),
+    external_keychains: &[K],
+    change_keychains: &[K],
+) -> bool {
+    match change_spend_policy {
+        ChangeSpendPolicy::ChangeAllowed => true,
+        ChangeSpendPolicy::OnlyChange => change_keychains.contains(&utxo.1),
+        ChangeSpendPolicy::ChangeForbidden => external_keychains.contains(&utxo.1),
     }
 }
 
@@ -869,35 +876,39 @@ mod test {
         assert_eq!(tx.output[2].script_pubkey, From::from(vec![0xAA, 0xEE]));
     }
 
-    fn get_test_utxos() -> Vec<LocalUtxo> {
+    fn get_test_utxos() -> Vec<(LocalUtxo, KeychainKind)> {
         use bitcoin::hashes::Hash;
 
         vec![
-            LocalUtxo {
-                outpoint: OutPoint {
-                    txid: bitcoin::Txid::from_inner([0; 32]),
-                    vout: 0,
+            (
+                LocalUtxo {
+                    outpoint: OutPoint {
+                        txid: bitcoin::Txid::from_inner([0; 32]),
+                        vout: 0,
+                    },
+                    txout: Default::default(),
+                    is_spent: false,
+                    confirmation_time: ConfirmationTime::Unconfirmed,
+                    derivation_index: 0,
                 },
-                txout: Default::default(),
-                keychain: KeychainKind::External,
-                is_spent: false,
-                confirmation_time: ConfirmationTime::Unconfirmed,
-                derivation_index: 0,
-            },
-            LocalUtxo {
-                outpoint: OutPoint {
-                    txid: bitcoin::Txid::from_inner([0; 32]),
-                    vout: 1,
+                KeychainKind::External,
+            ),
+            (
+                LocalUtxo {
+                    outpoint: OutPoint {
+                        txid: bitcoin::Txid::from_inner([0; 32]),
+                        vout: 1,
+                    },
+                    txout: Default::default(),
+                    is_spent: false,
+                    confirmation_time: ConfirmationTime::Confirmed {
+                        height: 32,
+                        time: 42,
+                    },
+                    derivation_index: 1,
                 },
-                txout: Default::default(),
-                keychain: KeychainKind::Internal,
-                is_spent: false,
-                confirmation_time: ConfirmationTime::Confirmed {
-                    height: 32,
-                    time: 42,
-                },
-                derivation_index: 1,
-            },
+                KeychainKind::Internal,
+            ),
         ]
     }
 
@@ -906,7 +917,14 @@ mod test {
         let change_spend_policy = ChangeSpendPolicy::default();
         let filtered = get_test_utxos()
             .into_iter()
-            .filter(|u| change_spend_policy.is_satisfied_by(u))
+            .filter(|(u, k)| {
+                is_satisfied_by(
+                    change_spend_policy,
+                    (u, *k),
+                    &[KeychainKind::External],
+                    &[KeychainKind::Internal],
+                )
+            })
             .count();
 
         assert_eq!(filtered, 2);
@@ -917,11 +935,18 @@ mod test {
         let change_spend_policy = ChangeSpendPolicy::ChangeForbidden;
         let filtered = get_test_utxos()
             .into_iter()
-            .filter(|u| change_spend_policy.is_satisfied_by(u))
+            .filter(|(u, k)| {
+                is_satisfied_by(
+                    change_spend_policy,
+                    (u, *k),
+                    &[KeychainKind::External],
+                    &[KeychainKind::Internal],
+                )
+            })
             .collect::<Vec<_>>();
 
         assert_eq!(filtered.len(), 1);
-        assert_eq!(filtered[0].keychain, KeychainKind::External);
+        assert_eq!(filtered[0].1, KeychainKind::External);
     }
 
     #[test]
@@ -929,11 +954,18 @@ mod test {
         let change_spend_policy = ChangeSpendPolicy::OnlyChange;
         let filtered = get_test_utxos()
             .into_iter()
-            .filter(|u| change_spend_policy.is_satisfied_by(u))
+            .filter(|(u, k)| {
+                is_satisfied_by(
+                    change_spend_policy,
+                    (u, *k),
+                    &[KeychainKind::External],
+                    &[KeychainKind::Internal],
+                )
+            })
             .collect::<Vec<_>>();
 
         assert_eq!(filtered.len(), 1);
-        assert_eq!(filtered[0].keychain, KeychainKind::Internal);
+        assert_eq!(filtered[0].1, KeychainKind::Internal);
     }
 
     #[test]
