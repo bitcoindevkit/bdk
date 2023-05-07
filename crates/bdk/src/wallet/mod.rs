@@ -695,10 +695,12 @@ where
             .collect::<Vec<_>>()
     }
 
-    /// Returns the [`Balance`] of the given keychain. Unconfirmed balance is considered "trusted".
-    pub fn get_balance_by_keychain(&self, keychain: &K) -> Balance {
+    /// Returns the [`Balance`] of the given keychain.
+    /// If `should_trust` is `true`, unconfirmed balance will be reported as `trusted_pending`.
+    pub fn get_balance_by_keychain(&self, keychain: &K, should_trust: bool) -> Balance {
         let mut immature = 0;
         let mut trusted_pending = 0;
+        let mut untrusted_pending = 0;
         let mut confirmed = 0;
         let last_sync_height = self
             .keychain_tracker
@@ -728,7 +730,11 @@ where
                     }
                 }
                 TxHeight::Unconfirmed => {
-                    trusted_pending += utxo.txout.value;
+                    if should_trust {
+                        trusted_pending += utxo.txout.value;
+                    } else {
+                        untrusted_pending += utxo.txout.value;
+                    }
                 }
             }
         }
@@ -736,7 +742,7 @@ where
         Balance {
             immature,
             trusted_pending,
-            untrusted_pending: 0,
+            untrusted_pending,
             confirmed,
         }
     }
@@ -744,10 +750,10 @@ where
     /// Returns the [`Balance`] of a given list of keychains.
     ///
     /// The `should_trust` predicated can be used if user wishes to categorize the unconfirmed balance among "trusted" and
-    /// "untrusted" sources. This typically useful when a wallet is receiving into *external* keychains and which receives funds
+    /// "untrusted" sources. This is typically useful when a wallet is receiving into *external* keychains and which receives funds
     /// from external wallets, not controlled by the user.
     ///
-    /// When this categorization is not needed, passing in `should_trust : false` will default to all keychain balances being
+    /// When this categorization is not needed, passing in `should_trust : true` will default to all keychain balances being
     /// "trusted".
     pub fn get_balance_for_keychains(
         &self,
@@ -755,11 +761,7 @@ where
         should_trust: impl Fn(&K) -> bool,
     ) -> Balance {
         keychains.into_iter().fold(Balance::default(), |acc, k| {
-            let mut balance = self.get_balance_by_keychain(&k);
-            if !should_trust(&k) {
-                balance.make_untrusted();
-            }
-            acc + balance
+            acc + self.get_balance_by_keychain(&k, should_trust(&k))
         })
     }
 
@@ -1376,7 +1378,7 @@ where
     }
 
     /// Iterator over all keychains in this wallet
-    pub fn keychanins(&self) -> &BTreeMap<K, ExtendedDescriptor> {
+    pub fn keychains(&self) -> &BTreeMap<K, ExtendedDescriptor> {
         self.keychain_tracker.txout_index.keychains()
     }
 
@@ -1684,7 +1686,7 @@ where
 
         if params.add_global_xpubs {
             let all_xpubs = self
-                .keychanins()
+                .keychains()
                 .iter()
                 .flat_map(|(_, desc)| desc.get_extended_keys())
                 .collect::<Vec<_>>();

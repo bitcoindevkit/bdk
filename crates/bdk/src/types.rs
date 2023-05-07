@@ -291,11 +291,6 @@ impl Balance {
     pub fn total(&self) -> u64 {
         self.confirmed + self.trusted_pending + self.untrusted_pending + self.immature
     }
-
-    pub fn make_untrusted(&mut self) {
-        self.untrusted_pending += self.trusted_pending;
-        self.trusted_pending = 0;
-    }
 }
 
 impl core::fmt::Display for Balance {
