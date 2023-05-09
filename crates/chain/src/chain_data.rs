@@ -137,6 +137,18 @@ impl ConfirmationTime {
     }
 }
 
+impl From<ObservedAs<ConfirmationTimeAnchor>> for ConfirmationTime {
+    fn from(observed_as: ObservedAs<ConfirmationTimeAnchor>) -> Self {
+        match observed_as {
+            ObservedAs::Confirmed(a) => Self::Confirmed {
+                height: a.confirmation_height,
+                time: a.confirmation_time,
+            },
+            ObservedAs::Unconfirmed(_) => Self::Unconfirmed,
+        }
+    }
+}
+
 /// A reference to a block in the canonical chain.
 #[derive(Debug, Clone, PartialEq, Eq, Copy, PartialOrd, Ord, core::hash::Hash)]
 #[cfg_attr(
