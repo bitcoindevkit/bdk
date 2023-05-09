@@ -84,6 +84,10 @@ impl<K: Ord> Append for DerivationAdditions<K> {
 
         self.0.append(&mut other.0);
     }
+
+    fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
 }
 
 impl<K> Default for DerivationAdditions<K> {
