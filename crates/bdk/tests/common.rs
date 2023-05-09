@@ -35,6 +35,7 @@ pub fn get_funded_wallet_with_change(
                 height: 1_000,
                 time: 100,
             },
+            None,
         )
         .unwrap();
 

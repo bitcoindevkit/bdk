@@ -56,7 +56,6 @@
 use core::str::FromStr;
 
 use alloc::string::{String, ToString};
-use bdk_chain::sparse_chain::ChainPosition;
 use serde::{Deserialize, Serialize};
 
 use miniscript::descriptor::{ShInner, WshInner};
@@ -130,8 +129,10 @@ impl FullyNodedExport {
             wallet
                 .transactions()
                 .next()
-                .and_then(|(pos, _)| pos.height().into())
-                .unwrap_or(0)
+                .map_or(0, |canonical_tx| match canonical_tx.observed_as {
+                    bdk_chain::ObservedAs::Confirmed(a) => a.confirmation_height,
+                    bdk_chain::ObservedAs::Unconfirmed(_) => 0,
+                })
         } else {
             0
         };
@@ -246,6 +247,7 @@ mod test {
                     height: 5000,
                     time: 0,
                 },
+                None,
             )
             .unwrap();
         wallet
