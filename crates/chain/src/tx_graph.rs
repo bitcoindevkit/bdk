@@ -56,10 +56,11 @@
 //! ```
 
 use crate::{
-    collections::*, Anchor, Append, BlockId, ChainOracle, ForEachTxOut, FullTxOut, ObservedAs,
+    collections::*, keychain::Balance, Anchor, Append, BlockId, ChainOracle, ForEachTxOut,
+    FullTxOut, ObservedAs,
 };
 use alloc::vec::Vec;
-use bitcoin::{OutPoint, Transaction, TxOut, Txid};
+use bitcoin::{OutPoint, Script, Transaction, TxOut, Txid};
 use core::{
     convert::Infallible,
     ops::{Deref, RangeInclusive},
@@ -762,107 +763,190 @@ impl<A: Anchor> TxGraph<A> {
             .map(|r| r.expect("oracle is infallible"))
     }
 
-    /// List outputs that are in `chain` with `chain_tip`.
+    /// Get a filtered list of outputs from the given `outpoints` that are in `chain` with
+    /// `chain_tip`.
     ///
-    /// Floating ouputs are not iterated over.
+    /// `outpoints` is a list of outpoints we are interested in, coupled with the associated txout's
+    /// script pubkey index (`S`).
     ///
-    /// The `filter_predicate` should return true for outputs that we wish to iterate over.
-    ///
-    /// # Error
-    ///
-    /// A returned item can error if the [`ChainOracle`] implementation (`chain`) fails.
-    ///
-    /// If the [`ChainOracle`] is infallible, [`list_chain_txouts`] can be used instead.
-    ///
-    /// [`list_chain_txouts`]: Self::list_chain_txouts
-    pub fn try_list_chain_txouts<'a, C: ChainOracle + 'a>(
-        &'a self,
-        chain: &'a C,
-        chain_tip: BlockId,
-    ) -> impl Iterator<Item = Result<FullTxOut<ObservedAs<A>>, C::Error>> + 'a {
-        self.try_list_chain_txs(chain, chain_tip)
-            .flat_map(move |tx_res| match tx_res {
-                Ok(canonical_tx) => canonical_tx
-                    .node
-                    .output
-                    .iter()
-                    .enumerate()
-                    .map(|(vout, txout)| {
-                        let outpoint = OutPoint::new(canonical_tx.node.txid, vout as _);
-                        Ok((outpoint, txout.clone(), canonical_tx.clone()))
-                    })
-                    .collect::<Vec<_>>(),
-                Err(err) => vec![Err(err)],
-            })
-            .map(move |res| -> Result<_, C::Error> {
-                let (
-                    outpoint,
-                    txout,
-                    CanonicalTx {
-                        observed_as,
-                        node: tx_node,
-                    },
-                ) = res?;
-                let chain_position = observed_as.cloned();
-                let spent_by = self
-                    .try_get_chain_spend(chain, chain_tip, outpoint)?
-                    .map(|(obs_as, txid)| (obs_as.cloned(), txid));
-                let is_on_coinbase = tx_node.tx.is_coin_base();
-                Ok(FullTxOut {
-                    outpoint,
-                    txout,
-                    chain_position,
-                    spent_by,
-                    is_on_coinbase,
-                })
-            })
-    }
-
-    /// List outputs that are in `chain` with `chain_tip`.
-    ///
-    /// This is the infallible version of [`try_list_chain_txouts`].
-    ///
-    /// [`try_list_chain_txouts`]: Self::try_list_chain_txouts
-    pub fn list_chain_txouts<'a, C: ChainOracle<Error = Infallible> + 'a>(
-        &'a self,
-        chain: &'a C,
-        chain_tip: BlockId,
-    ) -> impl Iterator<Item = FullTxOut<ObservedAs<A>>> + 'a {
-        self.try_list_chain_txouts(chain, chain_tip)
-            .map(|r| r.expect("error in infallible"))
-    }
-
-    /// List unspent outputs (UTXOs) that are in `chain` with `chain_tip`.
-    ///
-    /// Floating outputs are not iterated over.
+    /// Floating outputs are ignored.
     ///
     /// # Error
     ///
-    /// An item can be an error if the [`ChainOracle`] implementation fails. If the oracle is
-    /// infallible, [`list_chain_unspents`] can be used instead.
+    /// An [`Iterator::Item`] can be an [`Err`] if the [`ChainOracle`] implementation (`chain`)
+    /// fails.
     ///
-    /// [`list_chain_unspents`]: Self::list_chain_unspents
-    pub fn try_list_chain_unspents<'a, C: ChainOracle + 'a>(
+    /// If the [`ChainOracle`] implementation is infallible, [`filter_chain_txouts`] can be used
+    /// instead.
+    ///
+    /// [`filter_chain_txouts`]: Self::filter_chain_txouts
+    pub fn try_filter_chain_txouts<'a, C: ChainOracle + 'a, S: Clone + 'a>(
         &'a self,
         chain: &'a C,
         chain_tip: BlockId,
-    ) -> impl Iterator<Item = Result<FullTxOut<ObservedAs<A>>, C::Error>> + 'a {
-        self.try_list_chain_txouts(chain, chain_tip)
-            .filter(|r| matches!(r, Ok(txo) if txo.spent_by.is_none()))
+        outpoints: impl IntoIterator<Item = (S, OutPoint)> + 'a,
+    ) -> impl Iterator<Item = Result<(S, FullTxOut<ObservedAs<A>>), C::Error>> + 'a {
+        outpoints
+            .into_iter()
+            .map(
+                move |(spk_i, op)| -> Result<Option<(S, FullTxOut<_>)>, C::Error> {
+                    let tx_node = match self.get_tx_node(op.txid) {
+                        Some(n) => n,
+                        None => return Ok(None),
+                    };
+
+                    let txout = match tx_node.tx.output.get(op.vout as usize) {
+                        Some(txout) => txout.clone(),
+                        None => return Ok(None),
+                    };
+
+                    let chain_position =
+                        match self.try_get_chain_position(chain, chain_tip, op.txid)? {
+                            Some(pos) => pos.cloned(),
+                            None => return Ok(None),
+                        };
+
+                    let spent_by = self
+                        .try_get_chain_spend(chain, chain_tip, op)?
+                        .map(|(a, txid)| (a.cloned(), txid));
+
+                    Ok(Some((
+                        spk_i,
+                        FullTxOut {
+                            outpoint: op,
+                            txout,
+                            chain_position,
+                            spent_by,
+                            is_on_coinbase: tx_node.tx.is_coin_base(),
+                        },
+                    )))
+                },
+            )
+            .filter_map(Result::transpose)
     }
 
-    /// List unspent outputs (UTXOs) that are in `chain` with `chain_tip`.
+    /// Get a filtered list of outputs from the given `outpoints` that are in `chain` with
+    /// `chain_tip`.
     ///
-    /// This is the infallible version of [`try_list_chain_unspents`].
+    /// This is the infallible version of [`try_filter_chain_txouts`].
     ///
-    /// [`try_list_chain_unspents`]: Self::try_list_chain_unspents
-    pub fn list_chain_unspents<'a, C: ChainOracle<Error = Infallible> + 'a>(
+    /// [`try_filter_chain_txouts`]: Self::try_filter_chain_txouts
+    pub fn filter_chain_txouts<'a, C: ChainOracle<Error = Infallible> + 'a, S: Clone + 'a>(
         &'a self,
         chain: &'a C,
-        static_block: BlockId,
-    ) -> impl Iterator<Item = FullTxOut<ObservedAs<A>>> + 'a {
-        self.try_list_chain_unspents(chain, static_block)
-            .map(|r| r.expect("error is infallible"))
+        chain_tip: BlockId,
+        outpoints: impl IntoIterator<Item = (S, OutPoint)> + 'a,
+    ) -> impl Iterator<Item = (S, FullTxOut<ObservedAs<A>>)> + 'a {
+        self.try_filter_chain_txouts(chain, chain_tip, outpoints)
+            .map(|r| r.expect("oracle is infallible"))
+    }
+
+    /// Get a filtered list of unspent outputs (UTXOs) from the given `outpoints` that are in
+    /// `chain` with `chain_tip`.
+    ///
+    /// `outpoints` is a list of outpoints we are interested in, coupled with the associated txout's
+    /// script pubkey index (`S`).
+    ///
+    /// Floating outputs are ignored.
+    ///
+    /// # Error
+    ///
+    /// An [`Iterator::Item`] can be an [`Err`] if the [`ChainOracle`] implementation (`chain`)
+    /// fails.
+    ///
+    /// If the [`ChainOracle`] implementation is infallible, [`filter_chain_unspents`] can be used
+    /// instead.
+    ///
+    /// [`filter_chain_unspents`]: Self::filter_chain_unspents
+    pub fn try_filter_chain_unspents<'a, C: ChainOracle + 'a, S: Clone + 'a>(
+        &'a self,
+        chain: &'a C,
+        chain_tip: BlockId,
+        outpoints: impl IntoIterator<Item = (S, OutPoint)> + 'a,
+    ) -> impl Iterator<Item = Result<(S, FullTxOut<ObservedAs<A>>), C::Error>> + 'a {
+        self.try_filter_chain_txouts(chain, chain_tip, outpoints)
+            .filter(|r| !matches!(r, Ok((_, full_txo)) if full_txo.spent_by.is_some()))
+    }
+
+    /// Get a filtered list of unspent outputs (UTXOs) from the given `outpoints` that are in
+    /// `chain` with `chain_tip`.
+    ///
+    /// This is the infallible version of [`try_filter_chain_unspents`].
+    ///
+    /// [`try_filter_chain_unspents`]: Self::try_filter_chain_unspents
+    pub fn filter_chain_unspents<'a, C: ChainOracle<Error = Infallible> + 'a, S: Clone + 'a>(
+        &'a self,
+        chain: &'a C,
+        chain_tip: BlockId,
+        txouts: impl IntoIterator<Item = (S, OutPoint)> + 'a,
+    ) -> impl Iterator<Item = (S, FullTxOut<ObservedAs<A>>)> + 'a {
+        self.try_filter_chain_unspents(chain, chain_tip, txouts)
+            .map(|r| r.expect("oracle is infallible"))
+    }
+
+    /// Get the total balance of `outpoints` that are in `chain` of `chain_tip`.
+    ///
+    /// The output of `trust_predicate` should return `true` for scripts that we trust.
+    ///
+    /// If the provided [`ChainOracle`] implementation (`chain`) is infallible, [`balance`] can be
+    /// used instead.
+    ///
+    /// [`balance`]: Self::balance
+    pub fn try_balance<C: ChainOracle, S: Clone>(
+        &self,
+        chain: &C,
+        chain_tip: BlockId,
+        outpoints: impl IntoIterator<Item = (S, OutPoint)>,
+        mut trust_predicate: impl FnMut(&S, &Script) -> bool,
+    ) -> Result<Balance, C::Error> {
+        let mut immature = 0;
+        let mut trusted_pending = 0;
+        let mut untrusted_pending = 0;
+        let mut confirmed = 0;
+
+        for res in self.try_filter_chain_unspents(chain, chain_tip, outpoints) {
+            let (spk_i, txout) = res?;
+
+            match &txout.chain_position {
+                ObservedAs::Confirmed(_) => {
+                    if txout.is_confirmed_and_spendable(chain_tip.height) {
+                        confirmed += txout.txout.value;
+                    } else if !txout.is_mature(chain_tip.height) {
+                        immature += txout.txout.value;
+                    }
+                }
+                ObservedAs::Unconfirmed(_) => {
+                    if trust_predicate(&spk_i, &txout.txout.script_pubkey) {
+                        trusted_pending += txout.txout.value;
+                    } else {
+                        untrusted_pending += txout.txout.value;
+                    }
+                }
+            }
+        }
+
+        Ok(Balance {
+            immature,
+            trusted_pending,
+            untrusted_pending,
+            confirmed,
+        })
+    }
+
+    /// Get the total balance of `outpoints` that are in `chain` of `chain_tip`.
+    ///
+    /// This is the infallible version of [`try_balance`].
+    ///
+    /// [`try_balance`]: Self::try_balance
+    pub fn balance<C: ChainOracle<Error = Infallible>, S: Clone>(
+        &self,
+        chain: &C,
+        chain_tip: BlockId,
+        outpoints: impl IntoIterator<Item = (S, OutPoint)>,
+        trust_predicate: impl FnMut(&S, &Script) -> bool,
+    ) -> Balance {
+        self.try_balance(chain, chain_tip, outpoints, trust_predicate)
+            .expect("oracle is infallible")
     }
 }
 

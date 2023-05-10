@@ -2,7 +2,7 @@ use core::ops::RangeBounds;
 
 use crate::{
     collections::{hash_map::Entry, BTreeMap, BTreeSet, HashMap},
-    indexed_tx_graph::{Indexer, OwnedIndexer},
+    indexed_tx_graph::Indexer,
     ForEachTxOut,
 };
 use bitcoin::{self, OutPoint, Script, Transaction, TxOut, Txid};
@@ -75,12 +75,6 @@ impl<I: Clone + Ord> Indexer for SpkTxOutIndex<I> {
     }
 }
 
-impl<I: Clone + Ord + 'static> OwnedIndexer for SpkTxOutIndex<I> {
-    fn is_spk_owned(&self, spk: &Script) -> bool {
-        self.spk_indices.get(spk).is_some()
-    }
-}
-
 /// This macro is used instead of a member function of `SpkTxOutIndex`, which would result in a
 /// compiler error[E0521]: "borrowed data escapes out of closure" when we attempt to take a
 /// reference out of the `ForEachTxOut` closure during scanning.
@@ -124,6 +118,11 @@ impl<I: Clone + Ord> SpkTxOutIndex<I> {
     /// script pubkey (if any).
     pub fn scan_txout(&mut self, op: OutPoint, txout: &TxOut) -> Option<&I> {
         scan_txout!(self, op, txout)
+    }
+
+    /// Get a reference to the set of indexed outpoints.
+    pub fn outpoints(&self) -> &BTreeSet<(I, OutPoint)> {
+        &self.spk_txouts
     }
 
     /// Iterate over all known txouts that spend to tracked script pubkeys.

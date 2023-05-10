@@ -236,23 +236,36 @@ fn test_list_owned_txouts() {
                 .map(|&hash| BlockId { height, hash })
                 .expect("block must exist");
             let txouts = graph
-                .list_owned_txouts(&local_chain, chain_tip)
+                .graph()
+                .filter_chain_txouts(
+                    &local_chain,
+                    chain_tip,
+                    graph.index.outpoints().iter().cloned(),
+                )
                 .collect::<Vec<_>>();
 
             let utxos = graph
-                .list_owned_unspents(&local_chain, chain_tip)
+                .graph()
+                .filter_chain_unspents(
+                    &local_chain,
+                    chain_tip,
+                    graph.index.outpoints().iter().cloned(),
+                )
                 .collect::<Vec<_>>();
 
-            let balance = graph.balance(&local_chain, chain_tip, |spk: &Script| {
-                trusted_spks.contains(spk)
-            });
+            let balance = graph.graph().balance(
+                &local_chain,
+                chain_tip,
+                graph.index.outpoints().iter().cloned(),
+                |_, spk: &Script| trusted_spks.contains(spk),
+            );
 
             assert_eq!(txouts.len(), 5);
             assert_eq!(utxos.len(), 4);
 
             let confirmed_txouts_txid = txouts
                 .iter()
-                .filter_map(|full_txout| {
+                .filter_map(|(_, full_txout)| {
                     if matches!(full_txout.chain_position, ObservedAs::Confirmed(_)) {
                         Some(full_txout.outpoint.txid)
                     } else {
@@ -263,7 +276,7 @@ fn test_list_owned_txouts() {
 
             let unconfirmed_txouts_txid = txouts
                 .iter()
-                .filter_map(|full_txout| {
+                .filter_map(|(_, full_txout)| {
                     if matches!(full_txout.chain_position, ObservedAs::Unconfirmed(_)) {
                         Some(full_txout.outpoint.txid)
                     } else {
@@ -274,7 +287,7 @@ fn test_list_owned_txouts() {
 
             let confirmed_utxos_txid = utxos
                 .iter()
-                .filter_map(|full_txout| {
+                .filter_map(|(_, full_txout)| {
                     if matches!(full_txout.chain_position, ObservedAs::Confirmed(_)) {
                         Some(full_txout.outpoint.txid)
                     } else {
@@ -285,7 +298,7 @@ fn test_list_owned_txouts() {
 
             let unconfirmed_utxos_txid = utxos
                 .iter()
-                .filter_map(|full_txout| {
+                .filter_map(|(_, full_txout)| {
                     if matches!(full_txout.chain_position, ObservedAs::Unconfirmed(_)) {
                         Some(full_txout.outpoint.txid)
                     } else {
