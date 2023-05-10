@@ -47,11 +47,14 @@ where
     ///
     /// The file must have been opened with read and write permissions.
     ///
+    /// `magic` is the expected prefixed bytes of the file. If this does not match, an error will be
+    /// returned.
+    ///
     /// [`File`]: std::fs::File
     pub fn new(magic: &'a [u8], mut db_file: File) -> Result<Self, FileError> {
         db_file.rewind()?;
 
-        let mut magic_buf = Vec::from_iter((0..).take(magic.len()));
+        let mut magic_buf = vec![0_u8; magic.len()];
         db_file.read_exact(magic_buf.as_mut())?;
 
         if magic_buf != magic {
@@ -71,6 +74,10 @@ where
     /// Creates or loads a store from `db_path`.
     ///
     /// If no file exists there, it will be created.
+    ///
+    /// Refer to [`new`] for documentation on the `magic` input.
+    ///
+    /// [`new`]: Self::new
     pub fn new_from_path<P>(magic: &'a [u8], db_path: P) -> Result<Self, FileError>
     where
         P: AsRef<Path>,
@@ -170,46 +177,7 @@ mod test {
     const TEST_MAGIC_BYTES: [u8; TEST_MAGIC_BYTES_LEN] =
         [98, 100, 107, 102, 115, 49, 49, 49, 49, 49, 49, 49];
 
-    #[derive(
-        Debug,
-        Clone,
-        Copy,
-        PartialOrd,
-        Ord,
-        PartialEq,
-        Eq,
-        Hash,
-        serde::Serialize,
-        serde::Deserialize,
-    )]
-    enum TestKeychain {
-        External,
-        Internal,
-    }
-
-    impl core::fmt::Display for TestKeychain {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            match self {
-                Self::External => write!(f, "external"),
-                Self::Internal => write!(f, "internal"),
-            }
-        }
-    }
-
-    #[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
-    struct TestChangeSet {
-        pub changes: Vec<String>,
-    }
-
-    impl Append for TestChangeSet {
-        fn append(&mut self, mut other: Self) {
-            self.changes.append(&mut other.changes)
-        }
-
-        fn is_empty(&self) -> bool {
-            self.changes.is_empty()
-        }
-    }
+    type TestChangeSet = Vec<String>;
 
     #[derive(Debug)]
     struct TestTracker;
@@ -248,9 +216,7 @@ mod test {
         let mut data = [255_u8; 2000];
         data[..TEST_MAGIC_BYTES_LEN].copy_from_slice(&TEST_MAGIC_BYTES);
 
-        let changeset = TestChangeSet {
-            changes: vec!["one".into(), "two".into(), "three!".into()],
-        };
+        let changeset = vec!["one".into(), "two".into(), "three!".into()];
 
         let mut file = NamedTempFile::new().unwrap();
         file.write_all(&data).expect("should write");

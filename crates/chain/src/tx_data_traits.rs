@@ -1,6 +1,7 @@
 use crate::collections::BTreeMap;
 use crate::collections::BTreeSet;
 use crate::BlockId;
+use alloc::vec::Vec;
 use bitcoin::{Block, OutPoint, Transaction, TxOut};
 
 /// Trait to do something with every txout contained in a structure.
@@ -94,5 +95,26 @@ impl<T: Ord> Append for BTreeSet<T> {
 
     fn is_empty(&self) -> bool {
         BTreeSet::is_empty(self)
+    }
+}
+
+impl<T> Append for Vec<T> {
+    fn append(&mut self, mut other: Self) {
+        Vec::append(self, &mut other)
+    }
+
+    fn is_empty(&self) -> bool {
+        Vec::is_empty(self)
+    }
+}
+
+impl<A: Append, B: Append> Append for (A, B) {
+    fn append(&mut self, other: Self) {
+        Append::append(&mut self.0, other.0);
+        Append::append(&mut self.1, other.1);
+    }
+
+    fn is_empty(&self) -> bool {
+        Append::is_empty(&self.0) && Append::is_empty(&self.1)
     }
 }
