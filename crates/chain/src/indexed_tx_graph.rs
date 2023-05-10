@@ -301,6 +301,10 @@ impl<A: Anchor, IA: Append> Append for IndexedAdditions<A, IA> {
         self.graph_additions.append(other.graph_additions);
         self.index_additions.append(other.index_additions);
     }
+
+    fn is_empty(&self) -> bool {
+        self.graph_additions.is_empty() && self.index_additions.is_empty()
+    }
 }
 
 /// Represents a structure that can index transaction data.

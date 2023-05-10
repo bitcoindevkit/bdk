@@ -1,6 +1,7 @@
 use crate::collections::BTreeMap;
 use crate::collections::BTreeSet;
 use crate::BlockId;
+use alloc::vec::Vec;
 use bitcoin::{Block, OutPoint, Transaction, TxOut};
 
 /// Trait to do something with every txout contained in a structure.
@@ -64,20 +65,56 @@ impl<A: Anchor> Anchor for &'static A {
 pub trait Append {
     /// Append another object of the same type onto `self`.
     fn append(&mut self, other: Self);
+
+    /// Returns whether the structure is considered empty.
+    fn is_empty(&self) -> bool;
 }
 
 impl Append for () {
     fn append(&mut self, _other: Self) {}
+
+    fn is_empty(&self) -> bool {
+        true
+    }
 }
 
 impl<K: Ord, V> Append for BTreeMap<K, V> {
     fn append(&mut self, mut other: Self) {
         BTreeMap::append(self, &mut other)
     }
+
+    fn is_empty(&self) -> bool {
+        BTreeMap::is_empty(self)
+    }
 }
 
 impl<T: Ord> Append for BTreeSet<T> {
     fn append(&mut self, mut other: Self) {
         BTreeSet::append(self, &mut other)
+    }
+
+    fn is_empty(&self) -> bool {
+        BTreeSet::is_empty(self)
+    }
+}
+
+impl<T> Append for Vec<T> {
+    fn append(&mut self, mut other: Self) {
+        Vec::append(self, &mut other)
+    }
+
+    fn is_empty(&self) -> bool {
+        Vec::is_empty(self)
+    }
+}
+
+impl<A: Append, B: Append> Append for (A, B) {
+    fn append(&mut self, other: Self) {
+        Append::append(&mut self.0, other.0);
+        Append::append(&mut self.1, other.1);
+    }
+
+    fn is_empty(&self) -> bool {
+        Append::is_empty(&self.0) && Append::is_empty(&self.1)
     }
 }

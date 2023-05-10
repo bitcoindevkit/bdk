@@ -940,6 +940,13 @@ impl<A: Ord> Append for Additions<A> {
                 .collect::<Vec<_>>(),
         );
     }
+
+    fn is_empty(&self) -> bool {
+        self.tx.is_empty()
+            && self.txout.is_empty()
+            && self.anchors.is_empty()
+            && self.last_seen.is_empty()
+    }
 }
 
 impl<A> AsRef<TxGraph<A>> for TxGraph<A> {
