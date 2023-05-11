@@ -99,14 +99,14 @@ impl TxHeight {
 )]
 pub enum ConfirmationTime {
     Confirmed { height: u32, time: u64 },
-    Unconfirmed,
+    Unconfirmed { last_seen: u64 },
 }
 
 impl sparse_chain::ChainPosition for ConfirmationTime {
     fn height(&self) -> TxHeight {
         match self {
             ConfirmationTime::Confirmed { height, .. } => TxHeight::Confirmed(*height),
-            ConfirmationTime::Unconfirmed => TxHeight::Unconfirmed,
+            ConfirmationTime::Unconfirmed { .. } => TxHeight::Unconfirmed,
         }
     }
 
@@ -116,7 +116,7 @@ impl sparse_chain::ChainPosition for ConfirmationTime {
                 height,
                 time: u64::MAX,
             },
-            TxHeight::Unconfirmed => Self::Unconfirmed,
+            TxHeight::Unconfirmed => Self::Unconfirmed { last_seen: 0 },
         }
     }
 
@@ -126,7 +126,7 @@ impl sparse_chain::ChainPosition for ConfirmationTime {
                 height,
                 time: u64::MIN,
             },
-            TxHeight::Unconfirmed => Self::Unconfirmed,
+            TxHeight::Unconfirmed => Self::Unconfirmed { last_seen: 0 },
         }
     }
 }
@@ -144,7 +144,7 @@ impl From<ObservedAs<ConfirmationTimeAnchor>> for ConfirmationTime {
                 height: a.confirmation_height,
                 time: a.confirmation_time,
             },
-            ObservedAs::Unconfirmed(_) => Self::Unconfirmed,
+            ObservedAs::Unconfirmed(_) => Self::Unconfirmed { last_seen: 0 },
         }
     }
 }

@@ -22,6 +22,6 @@ pub(crate) fn map_confirmation_time(
         (Some(time), Some(height)) if height <= height_at_start => {
             ConfirmationTime::Confirmed { height, time }
         }
-        _ => ConfirmationTime::Unconfirmed,
+        _ => ConfirmationTime::Unconfirmed { last_seen: 0 },
     }
 }

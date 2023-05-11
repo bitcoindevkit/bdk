@@ -881,7 +881,7 @@ mod test {
                 txout: Default::default(),
                 keychain: KeychainKind::External,
                 is_spent: false,
-                confirmation_time: ConfirmationTime::Unconfirmed,
+                confirmation_time: ConfirmationTime::Unconfirmed { last_seen: 0 },
                 derivation_index: 0,
             },
             LocalUtxo {

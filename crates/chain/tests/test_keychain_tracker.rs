@@ -33,7 +33,7 @@ fn test_insert_tx() {
     let _ = tracker.txout_index.reveal_to_target(&(), 5);
 
     let changeset = tracker
-        .insert_tx_preview(tx.clone(), ConfirmationTime::Unconfirmed)
+        .insert_tx_preview(tx.clone(), ConfirmationTime::Unconfirmed { last_seen: 0 })
         .unwrap();
     tracker.apply_changeset(changeset);
     assert_eq!(
@@ -41,7 +41,7 @@ fn test_insert_tx() {
             .chain_graph()
             .transactions_in_chain()
             .collect::<Vec<_>>(),
-        vec![(&ConfirmationTime::Unconfirmed, &tx,)]
+        vec![(&ConfirmationTime::Unconfirmed { last_seen: 0 }, &tx,)]
     );
 
     assert_eq!(

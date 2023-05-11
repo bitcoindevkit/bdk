@@ -504,9 +504,7 @@ impl<D> Wallet<D> {
     {
         let changeset = self.chain.insert_block(block_id)?;
         let changed = !changeset.is_empty();
-        if changed {
-            self.persist.stage(changeset.into());
-        }
+        self.persist.stage(changeset.into());
         Ok(changed)
     }
 
@@ -528,24 +526,13 @@ impl<D> Wallet<D> {
         &mut self,
         tx: Transaction,
         position: ConfirmationTime,
-        seen_at: Option<u64>,
     ) -> Result<bool, InsertTxError>
     where
         D: PersistBackend<ChangeSet>,
     {
         let tip = self.chain.tip();
 
-        if let ConfirmationTime::Confirmed { height, .. } = position {
-            let tip_height = tip.map(|b| b.height);
-            if Some(height) > tip_height {
-                return Err(InsertTxError::ConfirmationHeightCannotBeGreaterThanTip {
-                    tip_height,
-                    tx_height: height,
-                });
-            }
-        }
-
-        let anchor = match position {
+        let (anchor, last_seen) = match position {
             ConfirmationTime::Confirmed { height, time } => {
                 let tip_height = tip.map(|b| b.height);
                 if Some(height) > tip_height {
@@ -554,20 +541,21 @@ impl<D> Wallet<D> {
                         tx_height: height,
                     });
                 }
-                Some(ConfirmationTimeAnchor {
-                    anchor_block: tip.expect("already checked if tip_height > height"),
-                    confirmation_height: height,
-                    confirmation_time: time,
-                })
+                (
+                    Some(ConfirmationTimeAnchor {
+                        anchor_block: tip.expect("already checked if tip_height > height"),
+                        confirmation_height: height,
+                        confirmation_time: time,
+                    }),
+                    None,
+                )
             }
-            ConfirmationTime::Unconfirmed => None,
+            ConfirmationTime::Unconfirmed { last_seen } => (None, Some(last_seen)),
         };
 
-        let changeset: ChangeSet = self.indexed_graph.insert_tx(&tx, anchor, seen_at).into();
+        let changeset: ChangeSet = self.indexed_graph.insert_tx(&tx, anchor, last_seen).into();
         let changed = !changeset.is_empty();
-        if changed {
-            self.persist.stage(changeset);
-        }
+        self.persist.stage(changeset);
         Ok(changed)
     }
 
@@ -1032,7 +1020,7 @@ impl<D> Wallet<D> {
         let transaction_details = TransactionDetails {
             transaction: None,
             txid,
-            confirmation_time: ConfirmationTime::Unconfirmed,
+            confirmation_time: ConfirmationTime::Unconfirmed { last_seen: 0 },
             received,
             sent,
             fee: Some(fee_amount),
@@ -1541,7 +1529,7 @@ impl<D> Wallet<D> {
                                 spendable &=
                                     (current_height.saturating_sub(height)) >= COINBASE_MATURITY;
                             }
-                            ConfirmationTime::Unconfirmed => spendable = false,
+                            ConfirmationTime::Unconfirmed { .. } => spendable = false,
                         }
                     }
                 }
@@ -1771,9 +1759,7 @@ impl<D> Wallet<D> {
         changeset.append(self.indexed_graph.apply_update(update.graph).into());
 
         let changed = !changeset.is_empty();
-        if changed {
-            self.persist.stage(changeset);
-        }
+        self.persist.stage(changeset);
         Ok(changed)
     }
 
@@ -1797,16 +1783,18 @@ impl<D> Wallet<D> {
         self.persist.staged()
     }
 
-    /// Get a reference to the inner [`TxGraph`](bdk_chain::tx_graph::TxGraph).
-    pub fn as_graph(&self) -> &TxGraph<ConfirmationTimeAnchor> {
+    /// Get a reference to the inner [`TxGraph`].
+    pub fn tx_graph(&self) -> &TxGraph<ConfirmationTimeAnchor> {
         self.indexed_graph.graph()
     }
 
-    pub fn as_index(&self) -> &KeychainTxOutIndex<KeychainKind> {
+    /// Get a reference to the inner [`KeychainTxOutIndex`].
+    pub fn spk_index(&self) -> &KeychainTxOutIndex<KeychainKind> {
         &self.indexed_graph.index
     }
 
-    pub fn as_chain(&self) -> &LocalChain {
+    /// Get a reference to the inner [`LocalChain`].
+    pub fn local_chain(&self) -> &LocalChain {
         &self.chain
     }
 }
@@ -1949,7 +1937,7 @@ macro_rules! doctest_wallet {
         let _ = wallet.insert_tx(tx.clone(), ConfirmationTime::Confirmed {
             height: 500,
             time: 50_000
-        }, None);
+        });
 
         wallet
     }}

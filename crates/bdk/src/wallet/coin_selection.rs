@@ -722,9 +722,13 @@ mod test {
 
     fn get_test_utxos() -> Vec<WeightedUtxo> {
         vec![
-            utxo(100_000, 0, ConfirmationTime::Unconfirmed),
-            utxo(FEE_AMOUNT - 40, 1, ConfirmationTime::Unconfirmed),
-            utxo(200_000, 2, ConfirmationTime::Unconfirmed),
+            utxo(100_000, 0, ConfirmationTime::Unconfirmed { last_seen: 0 }),
+            utxo(
+                FEE_AMOUNT - 40,
+                1,
+                ConfirmationTime::Unconfirmed { last_seen: 0 },
+            ),
+            utxo(200_000, 2, ConfirmationTime::Unconfirmed { last_seen: 0 }),
         ]
     }
 
@@ -780,7 +784,7 @@ mod test {
                             time: rng.next_u64(),
                         }
                     } else {
-                        ConfirmationTime::Unconfirmed
+                        ConfirmationTime::Unconfirmed { last_seen: 0 }
                     },
                 }),
             });
@@ -803,7 +807,7 @@ mod test {
                 keychain: KeychainKind::External,
                 is_spent: false,
                 derivation_index: 42,
-                confirmation_time: ConfirmationTime::Unconfirmed,
+                confirmation_time: ConfirmationTime::Unconfirmed { last_seen: 0 },
             }),
         };
         vec![utxo; utxos_number]
@@ -1091,7 +1095,11 @@ mod test {
 
         let required = vec![utxos[0].clone()];
         let mut optional = utxos[1..].to_vec();
-        optional.push(utxo(500_000, 3, ConfirmationTime::Unconfirmed));
+        optional.push(utxo(
+            500_000,
+            3,
+            ConfirmationTime::Unconfirmed { last_seen: 0 },
+        ));
 
         // Defensive assertions, for sanity and in case someone changes the test utxos vector.
         let amount: u64 = required.iter().map(|u| u.utxo.txout().value).sum();
