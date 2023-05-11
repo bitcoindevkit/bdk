@@ -1,6 +1,6 @@
 use crate::{
     collections::*,
-    indexed_tx_graph::{Indexer, OwnedIndexer},
+    indexed_tx_graph::Indexer,
     miniscript::{Descriptor, DescriptorPublicKey},
     spk_iter::BIP32_MAX_INDEX,
     ForEachTxOut, SpkIterator, SpkTxOutIndex,
@@ -109,12 +109,6 @@ impl<K: Clone + Ord + Debug> Indexer for KeychainTxOutIndex<K> {
     }
 }
 
-impl<K: Clone + Ord + Debug> OwnedIndexer for KeychainTxOutIndex<K> {
-    fn is_spk_owned(&self, spk: &Script) -> bool {
-        self.index_of_spk(spk).is_some()
-    }
-}
-
 impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     /// Scans an object for relevant outpoints, which are stored and indexed internally.
     ///
@@ -151,6 +145,11 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     /// Return a reference to the internal [`SpkTxOutIndex`].
     pub fn inner(&self) -> &SpkTxOutIndex<(K, u32)> {
         &self.inner
+    }
+
+    /// Get a reference to the set of indexed outpoints.
+    pub fn outpoints(&self) -> &BTreeSet<((K, u32), OutPoint)> {
+        self.inner.outpoints()
     }
 
     /// Return a reference to the internal map of the keychain to descriptors.

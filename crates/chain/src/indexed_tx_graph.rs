@@ -1,12 +1,9 @@
-use core::convert::Infallible;
-
 use alloc::vec::Vec;
-use bitcoin::{OutPoint, Script, Transaction, TxOut};
+use bitcoin::{OutPoint, Transaction, TxOut};
 
 use crate::{
-    keychain::Balance,
     tx_graph::{Additions, TxGraph},
-    Anchor, Append, BlockId, ChainOracle, FullTxOut, ObservedAs,
+    Anchor, Append,
 };
 
 /// A struct that combines [`TxGraph`] and an [`Indexer`] implementation.
@@ -29,6 +26,14 @@ impl<A, I: Default> Default for IndexedTxGraph<A, I> {
 }
 
 impl<A, I> IndexedTxGraph<A, I> {
+    /// Construct a new [`IndexedTxGraph`] with a given `index`.
+    pub fn new(index: I) -> Self {
+        Self {
+            index,
+            graph: TxGraph::default(),
+        }
+    }
+
     /// Get a reference of the internal transaction graph.
     pub fn graph(&self) -> &TxGraph<A> {
         &self.graph
@@ -157,115 +162,6 @@ where
     }
 }
 
-impl<A: Anchor, I: OwnedIndexer> IndexedTxGraph<A, I> {
-    pub fn try_list_owned_txouts<'a, C: ChainOracle + 'a>(
-        &'a self,
-        chain: &'a C,
-        chain_tip: BlockId,
-    ) -> impl Iterator<Item = Result<FullTxOut<ObservedAs<A>>, C::Error>> + 'a {
-        self.graph()
-            .try_list_chain_txouts(chain, chain_tip)
-            .filter(|r| {
-                if let Ok(full_txout) = r {
-                    if !self.index.is_spk_owned(&full_txout.txout.script_pubkey) {
-                        return false;
-                    }
-                }
-                true
-            })
-    }
-
-    pub fn list_owned_txouts<'a, C: ChainOracle<Error = Infallible> + 'a>(
-        &'a self,
-        chain: &'a C,
-        chain_tip: BlockId,
-    ) -> impl Iterator<Item = FullTxOut<ObservedAs<A>>> + 'a {
-        self.try_list_owned_txouts(chain, chain_tip)
-            .map(|r| r.expect("oracle is infallible"))
-    }
-
-    pub fn try_list_owned_unspents<'a, C: ChainOracle + 'a>(
-        &'a self,
-        chain: &'a C,
-        chain_tip: BlockId,
-    ) -> impl Iterator<Item = Result<FullTxOut<ObservedAs<A>>, C::Error>> + 'a {
-        self.graph()
-            .try_list_chain_unspents(chain, chain_tip)
-            .filter(|r| {
-                if let Ok(full_txout) = r {
-                    if !self.index.is_spk_owned(&full_txout.txout.script_pubkey) {
-                        return false;
-                    }
-                }
-                true
-            })
-    }
-
-    pub fn list_owned_unspents<'a, C: ChainOracle<Error = Infallible> + 'a>(
-        &'a self,
-        chain: &'a C,
-        chain_tip: BlockId,
-    ) -> impl Iterator<Item = FullTxOut<ObservedAs<A>>> + 'a {
-        self.try_list_owned_unspents(chain, chain_tip)
-            .map(|r| r.expect("oracle is infallible"))
-    }
-
-    pub fn try_balance<C, F>(
-        &self,
-        chain: &C,
-        chain_tip: BlockId,
-        mut should_trust: F,
-    ) -> Result<Balance, C::Error>
-    where
-        C: ChainOracle,
-        F: FnMut(&Script) -> bool,
-    {
-        let tip_height = chain_tip.height;
-
-        let mut immature = 0;
-        let mut trusted_pending = 0;
-        let mut untrusted_pending = 0;
-        let mut confirmed = 0;
-
-        for res in self.try_list_owned_unspents(chain, chain_tip) {
-            let txout = res?;
-
-            match &txout.chain_position {
-                ObservedAs::Confirmed(_) => {
-                    if txout.is_confirmed_and_spendable(tip_height) {
-                        confirmed += txout.txout.value;
-                    } else if !txout.is_mature(tip_height) {
-                        immature += txout.txout.value;
-                    }
-                }
-                ObservedAs::Unconfirmed(_) => {
-                    if should_trust(&txout.txout.script_pubkey) {
-                        trusted_pending += txout.txout.value;
-                    } else {
-                        untrusted_pending += txout.txout.value;
-                    }
-                }
-            }
-        }
-
-        Ok(Balance {
-            immature,
-            trusted_pending,
-            untrusted_pending,
-            confirmed,
-        })
-    }
-
-    pub fn balance<C, F>(&self, chain: &C, chain_tip: BlockId, should_trust: F) -> Balance
-    where
-        C: ChainOracle<Error = Infallible>,
-        F: FnMut(&Script) -> bool,
-    {
-        self.try_balance(chain, chain_tip, should_trust)
-            .expect("error is infallible")
-    }
-}
-
 /// A structure that represents changes to an [`IndexedTxGraph`].
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(
@@ -323,10 +219,4 @@ pub trait Indexer {
 
     /// Determines whether the transaction should be included in the index.
     fn is_tx_relevant(&self, tx: &Transaction) -> bool;
-}
-
-/// A trait that extends [`Indexer`] to also index "owned" script pubkeys.
-pub trait OwnedIndexer: Indexer {
-    /// Determines whether a given script pubkey (`spk`) is owned.
-    fn is_spk_owned(&self, spk: &Script) -> bool;
 }
