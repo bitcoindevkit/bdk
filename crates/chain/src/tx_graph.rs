@@ -865,7 +865,12 @@ impl<A: Anchor> TxGraph<A> {
         outpoints: impl IntoIterator<Item = (S, OutPoint)> + 'a,
     ) -> impl Iterator<Item = Result<(S, FullTxOut<ObservedAs<A>>), C::Error>> + 'a {
         self.try_filter_chain_txouts(chain, chain_tip, outpoints)
-            .filter(|r| !matches!(r, Ok((_, full_txo)) if full_txo.spent_by.is_some()))
+            .filter(|r| match r {
+                // keep unspents, drop spents
+                Ok((_, full_txo)) => full_txo.spent_by.is_none(),
+                // keep errors
+                Err(_) => true,
+            })
     }
 
     /// Get a filtered list of unspent outputs (UTXOs) from the given `outpoints` that are in
