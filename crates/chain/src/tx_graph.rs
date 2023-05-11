@@ -766,8 +766,9 @@ impl<A: Anchor> TxGraph<A> {
     /// Get a filtered list of outputs from the given `outpoints` that are in `chain` with
     /// `chain_tip`.
     ///
-    /// `outpoints` is a list of outpoints we are interested in, coupled with the associated txout's
-    /// script pubkey index (`S`).
+    /// `outpoints` is a list of outpoints we are interested in, coupled with an outpoint identifier
+    /// (`OI`) for convenience. If `OI` is not necessary, the caller can use `()`, or
+    /// [`Iterator::enumerate`] over a list of [`OutPoint`]s.
     ///
     /// Floating outputs are ignored.
     ///
@@ -780,16 +781,16 @@ impl<A: Anchor> TxGraph<A> {
     /// instead.
     ///
     /// [`filter_chain_txouts`]: Self::filter_chain_txouts
-    pub fn try_filter_chain_txouts<'a, C: ChainOracle + 'a, S: Clone + 'a>(
+    pub fn try_filter_chain_txouts<'a, C: ChainOracle + 'a, OI: Clone + 'a>(
         &'a self,
         chain: &'a C,
         chain_tip: BlockId,
-        outpoints: impl IntoIterator<Item = (S, OutPoint)> + 'a,
-    ) -> impl Iterator<Item = Result<(S, FullTxOut<ObservedAs<A>>), C::Error>> + 'a {
+        outpoints: impl IntoIterator<Item = (OI, OutPoint)> + 'a,
+    ) -> impl Iterator<Item = Result<(OI, FullTxOut<ObservedAs<A>>), C::Error>> + 'a {
         outpoints
             .into_iter()
             .map(
-                move |(spk_i, op)| -> Result<Option<(S, FullTxOut<_>)>, C::Error> {
+                move |(spk_i, op)| -> Result<Option<(OI, FullTxOut<_>)>, C::Error> {
                     let tx_node = match self.get_tx_node(op.txid) {
                         Some(n) => n,
                         None => return Ok(None),
@@ -831,12 +832,12 @@ impl<A: Anchor> TxGraph<A> {
     /// This is the infallible version of [`try_filter_chain_txouts`].
     ///
     /// [`try_filter_chain_txouts`]: Self::try_filter_chain_txouts
-    pub fn filter_chain_txouts<'a, C: ChainOracle<Error = Infallible> + 'a, S: Clone + 'a>(
+    pub fn filter_chain_txouts<'a, C: ChainOracle<Error = Infallible> + 'a, OI: Clone + 'a>(
         &'a self,
         chain: &'a C,
         chain_tip: BlockId,
-        outpoints: impl IntoIterator<Item = (S, OutPoint)> + 'a,
-    ) -> impl Iterator<Item = (S, FullTxOut<ObservedAs<A>>)> + 'a {
+        outpoints: impl IntoIterator<Item = (OI, OutPoint)> + 'a,
+    ) -> impl Iterator<Item = (OI, FullTxOut<ObservedAs<A>>)> + 'a {
         self.try_filter_chain_txouts(chain, chain_tip, outpoints)
             .map(|r| r.expect("oracle is infallible"))
     }
@@ -844,8 +845,9 @@ impl<A: Anchor> TxGraph<A> {
     /// Get a filtered list of unspent outputs (UTXOs) from the given `outpoints` that are in
     /// `chain` with `chain_tip`.
     ///
-    /// `outpoints` is a list of outpoints we are interested in, coupled with the associated txout's
-    /// script pubkey index (`S`).
+    /// `outpoints` is a list of outpoints we are interested in, coupled with an outpoint identifier
+    /// (`OI`) for convenience. If `OI` is not necessary, the caller can use `()`, or
+    /// [`Iterator::enumerate`] over a list of [`OutPoint`]s.
     ///
     /// Floating outputs are ignored.
     ///
@@ -858,12 +860,12 @@ impl<A: Anchor> TxGraph<A> {
     /// instead.
     ///
     /// [`filter_chain_unspents`]: Self::filter_chain_unspents
-    pub fn try_filter_chain_unspents<'a, C: ChainOracle + 'a, S: Clone + 'a>(
+    pub fn try_filter_chain_unspents<'a, C: ChainOracle + 'a, OI: Clone + 'a>(
         &'a self,
         chain: &'a C,
         chain_tip: BlockId,
-        outpoints: impl IntoIterator<Item = (S, OutPoint)> + 'a,
-    ) -> impl Iterator<Item = Result<(S, FullTxOut<ObservedAs<A>>), C::Error>> + 'a {
+        outpoints: impl IntoIterator<Item = (OI, OutPoint)> + 'a,
+    ) -> impl Iterator<Item = Result<(OI, FullTxOut<ObservedAs<A>>), C::Error>> + 'a {
         self.try_filter_chain_txouts(chain, chain_tip, outpoints)
             .filter(|r| match r {
                 // keep unspents, drop spents
@@ -879,12 +881,12 @@ impl<A: Anchor> TxGraph<A> {
     /// This is the infallible version of [`try_filter_chain_unspents`].
     ///
     /// [`try_filter_chain_unspents`]: Self::try_filter_chain_unspents
-    pub fn filter_chain_unspents<'a, C: ChainOracle<Error = Infallible> + 'a, S: Clone + 'a>(
+    pub fn filter_chain_unspents<'a, C: ChainOracle<Error = Infallible> + 'a, OI: Clone + 'a>(
         &'a self,
         chain: &'a C,
         chain_tip: BlockId,
-        txouts: impl IntoIterator<Item = (S, OutPoint)> + 'a,
-    ) -> impl Iterator<Item = (S, FullTxOut<ObservedAs<A>>)> + 'a {
+        txouts: impl IntoIterator<Item = (OI, OutPoint)> + 'a,
+    ) -> impl Iterator<Item = (OI, FullTxOut<ObservedAs<A>>)> + 'a {
         self.try_filter_chain_unspents(chain, chain_tip, txouts)
             .map(|r| r.expect("oracle is infallible"))
     }
@@ -893,16 +895,20 @@ impl<A: Anchor> TxGraph<A> {
     ///
     /// The output of `trust_predicate` should return `true` for scripts that we trust.
     ///
+    /// `outpoints` is a list of outpoints we are interested in, coupled with an outpoint identifier
+    /// (`OI`) for convenience. If `OI` is not necessary, the caller can use `()`, or
+    /// [`Iterator::enumerate`] over a list of [`OutPoint`]s.
+    ///
     /// If the provided [`ChainOracle`] implementation (`chain`) is infallible, [`balance`] can be
     /// used instead.
     ///
     /// [`balance`]: Self::balance
-    pub fn try_balance<C: ChainOracle, S: Clone>(
+    pub fn try_balance<C: ChainOracle, OI: Clone>(
         &self,
         chain: &C,
         chain_tip: BlockId,
-        outpoints: impl IntoIterator<Item = (S, OutPoint)>,
-        mut trust_predicate: impl FnMut(&S, &Script) -> bool,
+        outpoints: impl IntoIterator<Item = (OI, OutPoint)>,
+        mut trust_predicate: impl FnMut(&OI, &Script) -> bool,
     ) -> Result<Balance, C::Error> {
         let mut immature = 0;
         let mut trusted_pending = 0;
@@ -943,12 +949,12 @@ impl<A: Anchor> TxGraph<A> {
     /// This is the infallible version of [`try_balance`].
     ///
     /// [`try_balance`]: Self::try_balance
-    pub fn balance<C: ChainOracle<Error = Infallible>, S: Clone>(
+    pub fn balance<C: ChainOracle<Error = Infallible>, OI: Clone>(
         &self,
         chain: &C,
         chain_tip: BlockId,
-        outpoints: impl IntoIterator<Item = (S, OutPoint)>,
-        trust_predicate: impl FnMut(&S, &Script) -> bool,
+        outpoints: impl IntoIterator<Item = (OI, OutPoint)>,
+        trust_predicate: impl FnMut(&OI, &Script) -> bool,
     ) -> Balance {
         self.try_balance(chain, chain_tip, outpoints, trust_predicate)
             .expect("oracle is infallible")
