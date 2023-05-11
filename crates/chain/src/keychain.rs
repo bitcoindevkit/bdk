@@ -18,6 +18,7 @@
 use crate::{
     chain_graph::{self, ChainGraph},
     collections::BTreeMap,
+    local_chain::LocalChain,
     sparse_chain::ChainPosition,
     tx_graph::TxGraph,
     Append, ForEachTxOut,
@@ -99,6 +100,28 @@ impl<K> Default for DerivationAdditions<K> {
 impl<K> AsRef<BTreeMap<K, u32>> for DerivationAdditions<K> {
     fn as_ref(&self) -> &BTreeMap<K, u32> {
         &self.0
+    }
+}
+
+/// A structure to update [`KeychainTxOutIndex`], [`TxGraph`] and [`LocalChain`]
+/// atomically.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LocalUpdate<K, A> {
+    /// Last active derivation index per keychain (`K`).
+    pub keychain: BTreeMap<K, u32>,
+    /// Update for the [`TxGraph`].
+    pub graph: TxGraph<A>,
+    /// Update for the [`LocalChain`].
+    pub chain: LocalChain,
+}
+
+impl<K, A> Default for LocalUpdate<K, A> {
+    fn default() -> Self {
+        Self {
+            keychain: Default::default(),
+            graph: Default::default(),
+            chain: Default::default(),
+        }
     }
 }
 

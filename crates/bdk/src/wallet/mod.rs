@@ -22,7 +22,7 @@ use alloc::{
 pub use bdk_chain::keychain::Balance;
 use bdk_chain::{
     indexed_tx_graph::{IndexedAdditions, IndexedTxGraph},
-    keychain::{DerivationAdditions, KeychainTxOutIndex},
+    keychain::{DerivationAdditions, KeychainTxOutIndex, LocalUpdate},
     local_chain::{self, LocalChain, UpdateNotConnectedError},
     tx_graph::{CanonicalTx, TxGraph},
     Anchor, Append, BlockId, ConfirmationTime, ConfirmationTimeAnchor, FullTxOut, ObservedAs,
@@ -94,21 +94,14 @@ pub struct Wallet<D = ()> {
 }
 
 /// The update to a [`Wallet`] used in [`Wallet::apply_update`]. This is usually returned from blockchain data sources.
-/// The type parameter `T` indicates the kind of transaction contained in the update. It's usually a [`bitcoin::Transaction`].
-#[derive(Debug, Default, PartialEq)]
-pub struct Update<K = KeychainKind, A = ConfirmationTimeAnchor> {
-    keychain: BTreeMap<K, u32>,
-    graph: TxGraph<A>,
-    chain: LocalChain,
-}
+pub type Update = LocalUpdate<KeychainKind, ConfirmationTimeAnchor>;
 
-/// The changeset produced internally by applying an update
+/// The changeset produced internally by applying an update.
 #[derive(Debug, PartialEq, serde::Deserialize, serde::Serialize)]
 #[serde(bound(
     deserialize = "A: Ord + serde::Deserialize<'de>, K: Ord + serde::Deserialize<'de>",
     serialize = "A: Ord + serde::Serialize, K: Ord + serde::Serialize"
 ))]
-// #[cfg_attr(predicate, attr)]
 pub struct ChangeSet<K = KeychainKind, A = ConfirmationTimeAnchor> {
     pub chain_changeset: local_chain::ChangeSet,
     pub indexed_additions: IndexedAdditions<A, DerivationAdditions<K>>,
