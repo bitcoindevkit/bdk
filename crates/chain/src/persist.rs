@@ -41,11 +41,19 @@ where
 
     /// Commit the staged changes to the underlying persistance backend.
     ///
+    /// Changes that are committed (if any) are returned.
+    ///
+    /// # Error
+    ///
     /// Returns a backend-defined error if this fails.
-    pub fn commit(&mut self) -> Result<(), B::WriteError> {
-        let mut temp = C::default();
-        core::mem::swap(&mut temp, &mut self.stage);
-        self.backend.write_changes(&temp)
+    pub fn commit(&mut self) -> Result<Option<C>, B::WriteError> {
+        if self.stage.is_empty() {
+            return Ok(None);
+        }
+        self.backend
+            .write_changes(&self.stage)
+            // if written successfully, take and return `self.stage`
+            .map(|_| Some(core::mem::take(&mut self.stage)))
     }
 }
 
