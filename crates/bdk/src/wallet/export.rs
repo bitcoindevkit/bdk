@@ -247,7 +247,6 @@ mod test {
                     height: 5000,
                     time: 0,
                 },
-                None,
             )
             .unwrap();
         wallet

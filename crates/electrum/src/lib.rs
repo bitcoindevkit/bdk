@@ -296,7 +296,7 @@ impl<K: Ord + Clone + Debug> ElectrumUpdate<K, TxHeight> {
                     height,
                     time: height_to_time[&height],
                 },
-                TxHeight::Unconfirmed => ConfirmationTime::Unconfirmed,
+                TxHeight::Unconfirmed => ConfirmationTime::Unconfirmed { last_seen: 0 },
             };
             let _ = new_update.insert_tx(txid, conf_time).expect("must insert");
         }
