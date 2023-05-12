@@ -4,6 +4,7 @@ members = [
     "crates/chain",
     "crates/file_store",
     "crates/electrum",
+    "example-crates/example_cli",
     "example-crates/keychain_tracker_electrum",
     "example-crates/keychain_tracker_esplora",
     "example-crates/keychain_tracker_example_cli",

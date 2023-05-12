@@ -1,0 +1,17 @@
+[package]
+name = "example_cli"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+bdk_chain = { path = "../../crates/chain", features = ["serde", "miniscript"]}
+bdk_file_store = { path = "../../crates/file_store" }
+bdk_tmp_plan = { path = "../../nursery/tmp_plan" }
+bdk_coin_select = { path = "../../nursery/coin_select" }
+
+clap = { version = "3.2.23", features = ["derive", "env"] }
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "^1.0" }
