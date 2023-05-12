@@ -34,6 +34,10 @@ impl ChainOracle for LocalChain {
             },
         )
     }
+
+    fn get_chain_tip(&self) -> Result<Option<BlockId>, Self::Error> {
+        Ok(self.tip())
+    }
 }
 
 impl AsRef<BTreeMap<u32, BlockHash>> for LocalChain {

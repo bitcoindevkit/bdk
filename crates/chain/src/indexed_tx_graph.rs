@@ -203,6 +203,15 @@ impl<A: Anchor, IA: Append> Append for IndexedAdditions<A, IA> {
     }
 }
 
+impl<A, IA: Default> From<Additions<A>> for IndexedAdditions<A, IA> {
+    fn from(graph_additions: Additions<A>) -> Self {
+        Self {
+            graph_additions,
+            ..Default::default()
+        }
+    }
+}
+
 /// Represents a structure that can index transaction data.
 pub trait Indexer {
     /// The resultant "additions" when new transaction data is indexed.

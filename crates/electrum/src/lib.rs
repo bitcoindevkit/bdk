@@ -130,7 +130,7 @@ impl ElectrumExt for Client {
                     let mut scanned_spk_iter = scanned_spks
                         .iter()
                         .map(|(i, (spk, _))| (i.clone(), spk.clone()));
-                    match populate_with_spks::<K, _, _>(
+                    match populate_with_spks::<_, _>(
                         self,
                         &mut update,
                         &mut scanned_spk_iter,
@@ -143,7 +143,7 @@ impl ElectrumExt for Client {
                     };
                 }
                 for (keychain, keychain_spks) in &mut request_spks {
-                    match populate_with_spks::<K, u32, _>(
+                    match populate_with_spks::<u32, _>(
                         self,
                         &mut update,
                         keychain_spks,
@@ -529,7 +529,7 @@ fn populate_with_txids(
 
 /// Populate an update [`SparseChain`] with transactions (and associated block positions) from
 /// the transaction history of the provided `spk`s.
-fn populate_with_spks<K, I, S>(
+fn populate_with_spks<I, S>(
     client: &Client,
     update: &mut SparseChain,
     spks: &mut S,
@@ -537,7 +537,6 @@ fn populate_with_spks<K, I, S>(
     batch_size: usize,
 ) -> Result<BTreeMap<I, (Script, bool)>, InternalError>
 where
-    K: Ord + Clone,
     I: Ord + Clone,
     S: Iterator<Item = (I, Script)>,
 {
