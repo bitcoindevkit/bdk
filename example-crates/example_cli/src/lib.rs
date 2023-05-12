@@ -54,7 +54,7 @@ impl<A: Anchor, X: Append> Append for ChangeSet<A, X> {
     }
 
     fn is_empty(&self) -> bool {
-        todo!()
+        self.indexed_additions.is_empty() && self.extension.is_empty()
     }
 }
 
@@ -666,7 +666,7 @@ pub fn planned_utxos<A: Anchor, O: ChainOracle, K: Clone + bdk_tmp_plan::CanDeri
 pub fn handle_commands<C: clap::Subcommand, A: Anchor, O: ChainOracle, X>(
     graph: &Mutex<KeychainTxGraph<A>>,
     db: &Mutex<Database<A, X>>,
-    chain: &O,
+    chain: &Mutex<O>,
     keymap: &HashMap<DescriptorPublicKey, DescriptorSecretKey>,
     network: Network,
     broadcast: impl FnOnce(&Transaction) -> anyhow::Result<()>,
@@ -684,26 +684,31 @@ where
         }
         Commands::Balance => {
             let graph = &*graph.lock().unwrap();
+            let chain = &*chain.lock().unwrap();
             run_balance_cmd(graph, chain).map_err(anyhow::Error::from)
         }
         Commands::TxOut { txout_cmd } => {
             let graph = &*graph.lock().unwrap();
+            let chain = &*chain.lock().unwrap();
             run_txo_cmd(graph, chain, network, txout_cmd)
         }
         Commands::Send {
             value,
             address,
             coin_select,
-        } => run_send_cmd(
-            graph,
-            db,
-            chain,
-            keymap,
-            coin_select,
-            address,
-            value,
-            broadcast,
-        ),
+        } => {
+            let chain = &*chain.lock().unwrap();
+            run_send_cmd(
+                graph,
+                db,
+                chain,
+                keymap,
+                coin_select,
+                address,
+                value,
+                broadcast,
+            )
+        }
     }
 }
 
