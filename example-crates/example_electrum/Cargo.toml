@@ -1,0 +1,11 @@
+[package]
+name = "example_electrum"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+bdk_chain = { path = "../../crates/chain", features = ["serde"] }
+bdk_electrum = { path = "../../crates/electrum" }
+example_cli = { path = "../example_cli" }
