@@ -2,6 +2,7 @@ use alloc::vec::Vec;
 use bitcoin::{OutPoint, Transaction, TxOut};
 
 use crate::{
+    keychain::DerivationAdditions,
     tx_graph::{Additions, TxGraph},
     Anchor, Append,
 };
@@ -208,6 +209,15 @@ impl<A, IA: Default> From<Additions<A>> for IndexedAdditions<A, IA> {
         Self {
             graph_additions,
             ..Default::default()
+        }
+    }
+}
+
+impl<A, K> From<DerivationAdditions<K>> for IndexedAdditions<A, DerivationAdditions<K>> {
+    fn from(index_additions: DerivationAdditions<K>) -> Self {
+        Self {
+            graph_additions: Default::default(),
+            index_additions,
         }
     }
 }

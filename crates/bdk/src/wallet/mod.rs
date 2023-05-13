@@ -22,11 +22,11 @@ use alloc::{
 pub use bdk_chain::keychain::Balance;
 use bdk_chain::{
     indexed_tx_graph::{IndexedAdditions, IndexedTxGraph},
-    keychain::{DerivationAdditions, KeychainTxOutIndex, LocalUpdate},
+    keychain::{KeychainTxOutIndex, LocalChangeSet, LocalUpdate},
     local_chain::{self, LocalChain, UpdateNotConnectedError},
     tx_graph::{CanonicalTx, TxGraph},
-    Anchor, Append, BlockId, ConfirmationTime, ConfirmationTimeAnchor, FullTxOut, ObservedAs,
-    Persist, PersistBackend,
+    Append, BlockId, ConfirmationTime, ConfirmationTimeAnchor, FullTxOut, ObservedAs, Persist,
+    PersistBackend,
 };
 use bitcoin::consensus::encode::serialize;
 use bitcoin::secp256k1::Secp256k1;
@@ -96,67 +96,8 @@ pub struct Wallet<D = ()> {
 /// The update to a [`Wallet`] used in [`Wallet::apply_update`]. This is usually returned from blockchain data sources.
 pub type Update = LocalUpdate<KeychainKind, ConfirmationTimeAnchor>;
 
-/// The changeset produced internally by applying an update.
-#[derive(Debug, PartialEq, serde::Deserialize, serde::Serialize)]
-#[serde(bound(
-    deserialize = "A: Ord + serde::Deserialize<'de>, K: Ord + serde::Deserialize<'de>",
-    serialize = "A: Ord + serde::Serialize, K: Ord + serde::Serialize"
-))]
-pub struct ChangeSet<K = KeychainKind, A = ConfirmationTimeAnchor> {
-    pub chain_changeset: local_chain::ChangeSet,
-    pub indexed_additions: IndexedAdditions<A, DerivationAdditions<K>>,
-}
-
-impl<K, A> Default for ChangeSet<K, A> {
-    fn default() -> Self {
-        Self {
-            chain_changeset: Default::default(),
-            indexed_additions: Default::default(),
-        }
-    }
-}
-
-impl<K: Ord, A: Anchor> Append for ChangeSet<K, A> {
-    fn append(&mut self, other: Self) {
-        Append::append(&mut self.chain_changeset, other.chain_changeset);
-        Append::append(&mut self.indexed_additions, other.indexed_additions);
-    }
-
-    fn is_empty(&self) -> bool {
-        self.chain_changeset.is_empty() && self.indexed_additions.is_empty()
-    }
-}
-
-impl<K, A> From<IndexedAdditions<A, DerivationAdditions<K>>> for ChangeSet<K, A> {
-    fn from(indexed_additions: IndexedAdditions<A, DerivationAdditions<K>>) -> Self {
-        Self {
-            indexed_additions,
-            ..Default::default()
-        }
-    }
-}
-
-impl<K, A> From<DerivationAdditions<K>> for ChangeSet<K, A> {
-    fn from(index_additions: DerivationAdditions<K>) -> Self {
-        Self {
-            indexed_additions: IndexedAdditions {
-                index_additions,
-                ..Default::default()
-            },
-            ..Default::default()
-        }
-    }
-}
-
-impl<K, A> From<local_chain::ChangeSet> for ChangeSet<K, A> {
-    fn from(chain_changeset: local_chain::ChangeSet) -> Self {
-        Self {
-            chain_changeset,
-            ..Default::default()
-        }
-    }
-}
-
+// /// The changeset produced internally by applying an update.
+pub(crate) type ChangeSet = LocalChangeSet<KeychainKind, ConfirmationTimeAnchor>;
 /// The address index selection strategy to use to derived an address from the wallet's external
 /// descriptor. See [`Wallet::get_address`]. If you're unsure which one to use use `WalletIndex::New`.
 #[derive(Debug)]
@@ -356,10 +297,11 @@ impl<D> Wallet<D> {
         let txout_index = &mut self.indexed_graph.index;
         let (index, spk) = match address_index {
             AddressIndex::New => {
-                let ((index, spk), changeset) = txout_index.reveal_next_spk(&keychain);
+                let ((index, spk), index_additions) = txout_index.reveal_next_spk(&keychain);
                 let spk = spk.clone();
 
-                self.persist.stage(changeset.into());
+                self.persist
+                    .stage(ChangeSet::from(IndexedAdditions::from(index_additions)));
                 self.persist.commit().expect("TODO");
                 (index, spk)
             }
@@ -931,11 +873,12 @@ impl<D> Wallet<D> {
             Some(ref drain_recipient) => drain_recipient.clone(),
             None => {
                 let change_keychain = self.map_keychain(KeychainKind::Internal);
-                let ((index, spk), changeset) =
+                let ((index, spk), index_additions) =
                     self.indexed_graph.index.next_unused_spk(&change_keychain);
                 let spk = spk.clone();
                 self.indexed_graph.index.mark_used(&change_keychain, index);
-                self.persist.stage(changeset.into());
+                self.persist
+                    .stage(ChangeSet::from(IndexedAdditions::from(index_additions)));
                 self.persist.commit().expect("TODO");
                 spk
             }
@@ -1751,11 +1694,11 @@ impl<D> Wallet<D> {
         D: PersistBackend<ChangeSet>,
     {
         let mut changeset: ChangeSet = self.chain.apply_update(update.chain)?.into();
-        let (_, derivation_additions) = self
+        let (_, index_additions) = self
             .indexed_graph
             .index
             .reveal_to_target_multi(&update.keychain);
-        changeset.append(derivation_additions.into());
+        changeset.append(ChangeSet::from(IndexedAdditions::from(index_additions)));
         changeset.append(self.indexed_graph.apply_update(update.graph).into());
 
         let changed = !changeset.is_empty();
