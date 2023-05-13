@@ -10,7 +10,7 @@ use bdk_chain::{
         psbt::Prevouts,
         secp256k1::{self, Secp256k1},
         util::sighash::SighashCache,
-        Address, LockTime, Network, Script, Sequence, Transaction, TxIn, TxOut,
+        Address, LockTime, Network, Sequence, Transaction, TxIn, TxOut,
     },
     indexed_tx_graph::{IndexedAdditions, IndexedTxGraph},
     keychain::{DerivationAdditions, KeychainTxOutIndex},
@@ -219,8 +219,17 @@ pub fn run_address_cmd<A, X>(
 where
     ChangeSet<A, X>: Default + Append + DeserializeOwned + Serialize,
 {
-    let process_spk = |spk_i: u32, spk: &Script, index_additions: DerivationAdditions<Keychain>| {
-        if !index_additions.is_empty() {
+    let index = &mut graph.index;
+
+    match cmd {
+        AddressCmd::Next | AddressCmd::New => {
+            let spk_chooser = match cmd {
+                AddressCmd::Next => KeychainTxOutIndex::next_unused_spk,
+                AddressCmd::New => KeychainTxOutIndex::reveal_next_spk,
+                _ => unreachable!("only these two variants exist in match arm"),
+            };
+
+            let ((spk_i, spk), index_additions) = spk_chooser(index, &Keychain::External);
             let db = &mut *db.lock().unwrap();
             db.stage(ChangeSet {
                 indexed_additions: IndexedAdditions {
@@ -230,22 +239,9 @@ where
                 ..Default::default()
             });
             db.commit()?;
-        }
-        let addr = Address::from_script(spk, network).context("failed to derive address")?;
-        println!("[address @ {}] {}", spk_i, addr);
-        Ok(())
-    };
-
-    let index = &mut graph.index;
-
-    match cmd {
-        AddressCmd::Next => {
-            let ((spk_i, spk), index_additions) = index.next_unused_spk(&Keychain::External);
-            process_spk(spk_i, spk, index_additions)
-        }
-        AddressCmd::New => {
-            let ((spk_i, spk), index_additions) = index.reveal_next_spk(&Keychain::External);
-            process_spk(spk_i, spk, index_additions)
+            let addr = Address::from_script(spk, network).context("failed to derive address")?;
+            println!("[address @ {}] {}", spk_i, addr);
+            Ok(())
         }
         AddressCmd::Index => {
             for (keychain, derivation_index) in index.last_revealed_indices() {
