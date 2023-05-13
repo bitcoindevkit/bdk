@@ -26,42 +26,13 @@ pub use clap;
 use clap::{Parser, Subcommand};
 
 pub type KeychainTxGraph<A> = IndexedTxGraph<A, KeychainTxOutIndex<Keychain>>;
-pub type Database<'m, A, X> = Persist<Store<'m, ChangeSet<A, X>>, ChangeSet<A, X>>;
-
-#[derive(Debug, Clone, PartialEq, serde::Deserialize, serde::Serialize)]
-#[serde(bound(
-    deserialize = "A: Ord + serde::Deserialize<'de>, X: serde::Deserialize<'de>",
-    serialize = "A: Ord + serde::Serialize, X: serde::Serialize",
-))]
-pub struct ChangeSet<A, X> {
-    pub indexed_additions: IndexedAdditions<A, DerivationAdditions<Keychain>>,
-    pub extension: X,
-}
-
-impl<A, X: Default> Default for ChangeSet<A, X> {
-    fn default() -> Self {
-        Self {
-            indexed_additions: Default::default(),
-            extension: Default::default(),
-        }
-    }
-}
-
-impl<A: Anchor, X: Append> Append for ChangeSet<A, X> {
-    fn append(&mut self, other: Self) {
-        Append::append(&mut self.indexed_additions, other.indexed_additions);
-        Append::append(&mut self.extension, other.extension)
-    }
-
-    fn is_empty(&self) -> bool {
-        self.indexed_additions.is_empty() && self.extension.is_empty()
-    }
-}
+pub type KeychainAdditions<A> = IndexedAdditions<A, DerivationAdditions<Keychain>>;
+pub type Database<'m, C> = Persist<Store<'m, C>, C>;
 
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
 #[clap(propagate_version = true)]
-pub struct Args<C: clap::Subcommand> {
+pub struct Args<S: clap::Subcommand> {
     #[clap(env = "DESCRIPTOR")]
     pub descriptor: String,
     #[clap(env = "CHANGE_DESCRIPTOR")]
@@ -77,14 +48,14 @@ pub struct Args<C: clap::Subcommand> {
     pub cp_limit: usize,
 
     #[clap(subcommand)]
-    pub command: Commands<C>,
+    pub command: Commands<S>,
 }
 
 #[allow(clippy::almost_swapped)]
 #[derive(Subcommand, Debug, Clone)]
-pub enum Commands<C: clap::Subcommand> {
+pub enum Commands<S: clap::Subcommand> {
     #[clap(flatten)]
-    ChainSpecific(C),
+    ChainSpecific(S),
     /// Address generation and inspection.
     Address {
         #[clap(subcommand)]
@@ -210,14 +181,14 @@ impl core::fmt::Display for Keychain {
     }
 }
 
-pub fn run_address_cmd<A, X>(
+pub fn run_address_cmd<A, C>(
     graph: &mut KeychainTxGraph<A>,
-    db: &Mutex<Database<'_, A, X>>,
+    db: &Mutex<Database<C>>,
     network: Network,
     cmd: AddressCmd,
 ) -> anyhow::Result<()>
 where
-    ChangeSet<A, X>: Default + Append + DeserializeOwned + Serialize,
+    C: Default + Append + DeserializeOwned + Serialize + From<KeychainAdditions<A>>,
 {
     let index = &mut graph.index;
 
@@ -231,13 +202,7 @@ where
 
             let ((spk_i, spk), index_additions) = spk_chooser(index, &Keychain::External);
             let db = &mut *db.lock().unwrap();
-            db.stage(ChangeSet {
-                indexed_additions: IndexedAdditions {
-                    index_additions,
-                    ..Default::default()
-                },
-                ..Default::default()
-            });
+            db.stage(C::from(KeychainAdditions::from(index_additions)));
             db.commit()?;
             let addr = Address::from_script(spk, network).context("failed to derive address")?;
             println!("[address @ {}] {}", spk_i, addr);
@@ -351,9 +316,9 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn run_send_cmd<A: Anchor, O: ChainOracle, X>(
+pub fn run_send_cmd<A: Anchor, O: ChainOracle, C>(
     graph: &Mutex<KeychainTxGraph<A>>,
-    db: &Mutex<Database<'_, A, X>>,
+    db: &Mutex<Database<'_, C>>,
     chain: &O,
     keymap: &HashMap<DescriptorPublicKey, DescriptorSecretKey>,
     cs_algorithm: CoinSelectionAlgo,
@@ -363,7 +328,7 @@ pub fn run_send_cmd<A: Anchor, O: ChainOracle, X>(
 ) -> anyhow::Result<()>
 where
     O::Error: std::error::Error + Send + Sync + 'static,
-    ChangeSet<A, X>: Default + Append + DeserializeOwned + Serialize,
+    C: Default + Append + DeserializeOwned + Serialize + From<KeychainAdditions<A>>,
 {
     let (transaction, change_index) = {
         let graph = &mut *graph.lock().unwrap();
@@ -374,13 +339,9 @@ where
             // We must first persist to disk the fact that we've got a new address from the
             // change keychain so future scans will find the tx we're about to broadcast.
             // If we're unable to persist this, then we don't want to broadcast.
-            db.lock().unwrap().stage(ChangeSet {
-                indexed_additions: IndexedAdditions {
-                    index_additions,
-                    ..Default::default()
-                },
-                ..Default::default()
-            });
+            db.lock()
+                .unwrap()
+                .stage(C::from(KeychainAdditions::from(index_additions)));
 
             // We don't want other callers/threads to use this address while we're using it
             // but we also don't want to scan the tx we just created because it's not
@@ -396,15 +357,12 @@ where
         Ok(_) => {
             println!("Broadcasted Tx : {}", transaction.txid());
 
-            let indexed_additions = graph.lock().unwrap().insert_tx(&transaction, None, None);
+            let keychain_additions = graph.lock().unwrap().insert_tx(&transaction, None, None);
 
             // We know the tx is at least unconfirmed now. Note if persisting here fails,
             // it's not a big deal since we can always find it again form
             // blockchain.
-            db.lock().unwrap().stage(ChangeSet {
-                indexed_additions,
-                ..Default::default()
-            });
+            db.lock().unwrap().stage(C::from(keychain_additions));
             Ok(())
         }
         Err(e) => {
@@ -659,18 +617,18 @@ pub fn planned_utxos<A: Anchor, O: ChainOracle, K: Clone + bdk_tmp_plan::CanDeri
         .collect()
 }
 
-pub fn handle_commands<C: clap::Subcommand, A: Anchor, O: ChainOracle, X>(
+pub fn handle_commands<S: clap::Subcommand, A: Anchor, O: ChainOracle, C>(
     graph: &Mutex<KeychainTxGraph<A>>,
-    db: &Mutex<Database<A, X>>,
+    db: &Mutex<Database<C>>,
     chain: &Mutex<O>,
     keymap: &HashMap<DescriptorPublicKey, DescriptorSecretKey>,
     network: Network,
     broadcast: impl FnOnce(&Transaction) -> anyhow::Result<()>,
-    cmd: Commands<C>,
+    cmd: Commands<S>,
 ) -> anyhow::Result<()>
 where
     O::Error: std::error::Error + Send + Sync + 'static,
-    ChangeSet<A, X>: Default + Append + DeserializeOwned + Serialize,
+    C: Default + Append + DeserializeOwned + Serialize + From<KeychainAdditions<A>>,
 {
     match cmd {
         Commands::ChainSpecific(_) => unreachable!("example code should handle this!"),
@@ -708,9 +666,9 @@ where
     }
 }
 
-pub fn prepare_index<C: clap::Subcommand, SC: secp256k1::Signing>(
-    args: &Args<C>,
-    secp: &Secp256k1<SC>,
+pub fn prepare_index<S: clap::Subcommand, CTX: secp256k1::Signing>(
+    args: &Args<S>,
+    secp: &Secp256k1<CTX>,
 ) -> anyhow::Result<(KeychainTxOutIndex<Keychain>, KeyMap)> {
     let mut index = KeychainTxOutIndex::<Keychain>::default();
 
@@ -732,18 +690,18 @@ pub fn prepare_index<C: clap::Subcommand, SC: secp256k1::Signing>(
 }
 
 #[allow(clippy::type_complexity)]
-pub fn init<'m, S: clap::Subcommand, A: Anchor, X>(
+pub fn init<'m, S: clap::Subcommand, C>(
     db_magic: &'m [u8],
     db_default_path: &str,
 ) -> anyhow::Result<(
     Args<S>,
     KeyMap,
-    Mutex<KeychainTxGraph<A>>,
-    Mutex<Database<'m, A, X>>,
-    X,
+    KeychainTxOutIndex<Keychain>,
+    Mutex<Database<'m, C>>,
+    C,
 )>
 where
-    ChangeSet<A, X>: Default + Append + Serialize + DeserializeOwned,
+    C: Default + Append + Serialize + DeserializeOwned,
 {
     if std::env::var("BDK_DB_PATH").is_err() {
         std::env::set_var("BDK_DB_PATH", db_default_path);
@@ -752,25 +710,19 @@ where
     let secp = Secp256k1::default();
     let (index, keymap) = prepare_index(&args, &secp)?;
 
-    let mut indexed_graph = IndexedTxGraph::<A, KeychainTxOutIndex<Keychain>>::new(index);
+    let mut db_backend = match Store::<'m, C>::new_from_path(db_magic, &args.db_path) {
+        Ok(db_backend) => db_backend,
+        // we cannot return `err` directly as it has lifetime `'m`
+        Err(err) => return Err(anyhow::anyhow!("failed to init db backend: {:?}", err)),
+    };
 
-    let mut db_backend =
-        match Store::<'m, ChangeSet<A, X>>::new_from_path(db_magic, args.db_path.as_path()) {
-            Ok(db_backend) => db_backend,
-            Err(err) => return Err(anyhow::anyhow!("failed to init db backend: {:?}", err)),
-        };
-
-    let ChangeSet {
-        indexed_additions,
-        extension,
-    } = db_backend.load_from_persistence()?;
-    indexed_graph.apply_additions(indexed_additions);
+    let init_changeset = db_backend.load_from_persistence()?;
 
     Ok((
         args,
         keymap,
-        Mutex::new(indexed_graph),
+        index,
         Mutex::new(Database::new(db_backend)),
-        extension,
+        init_changeset,
     ))
 }

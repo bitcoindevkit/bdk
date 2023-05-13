@@ -6,8 +6,9 @@ use std::{
 
 use bdk_chain::{
     bitcoin::{Address, BlockHash, Network, OutPoint, Txid},
-    indexed_tx_graph::IndexedAdditions,
-    local_chain::{self, LocalChain},
+    indexed_tx_graph::{IndexedAdditions, IndexedTxGraph},
+    keychain::LocalChangeSet,
+    local_chain::LocalChain,
     Append, ConfirmationHeightAnchor,
 };
 use bdk_electrum::{
@@ -17,6 +18,7 @@ use bdk_electrum::{
 use example_cli::{
     anyhow::{self, Context},
     clap::{self, Parser, Subcommand},
+    Keychain,
 };
 
 const DB_MAGIC: &[u8] = b"bdk_example_electrum";
@@ -59,15 +61,21 @@ pub struct ScanOptions {
     pub batch_size: usize,
 }
 
+type ChangeSet = LocalChangeSet<Keychain, ConfirmationHeightAnchor>;
+
 fn main() -> anyhow::Result<()> {
-    let (args, keymap, graph, db, chain_changeset) =
-        example_cli::init::<ElectrumCommands, ConfirmationHeightAnchor, local_chain::ChangeSet>(
-            DB_MAGIC, DB_PATH,
-        )?;
+    let (args, keymap, index, db, init_changeset) =
+        example_cli::init::<ElectrumCommands, ChangeSet>(DB_MAGIC, DB_PATH)?;
+
+    let graph = Mutex::new({
+        let mut graph = IndexedTxGraph::new(index);
+        graph.apply_additions(init_changeset.indexed_additions);
+        graph
+    });
 
     let chain = Mutex::new({
         let mut chain = LocalChain::default();
-        chain.apply_changeset(chain_changeset);
+        chain.apply_changeset(init_changeset.chain_changeset);
         chain
     });
 
@@ -302,9 +310,9 @@ fn main() -> anyhow::Result<()> {
             additions
         };
 
-        example_cli::ChangeSet {
+        ChangeSet {
             indexed_additions,
-            extension: chain_changeset,
+            chain_changeset,
         }
     };
 

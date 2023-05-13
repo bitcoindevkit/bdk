@@ -18,10 +18,11 @@
 use crate::{
     chain_graph::{self, ChainGraph},
     collections::BTreeMap,
-    local_chain::LocalChain,
+    indexed_tx_graph::IndexedAdditions,
+    local_chain::{self, LocalChain},
     sparse_chain::ChainPosition,
     tx_graph::TxGraph,
-    Append, ForEachTxOut,
+    Anchor, Append, ForEachTxOut,
 };
 
 #[cfg(feature = "miniscript")]
@@ -121,6 +122,67 @@ impl<K, A> Default for LocalUpdate<K, A> {
             keychain: Default::default(),
             graph: Default::default(),
             chain: Default::default(),
+        }
+    }
+}
+
+/// A structure that records the corresponding changes as result of applying an [`LocalUpdate`].
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Deserialize, serde::Serialize),
+    serde(
+        crate = "serde_crate",
+        bound(
+            deserialize = "K: Ord + serde::Deserialize<'de>, A: Ord + serde::Deserialize<'de>",
+            serialize = "K: Ord + serde::Serialize, A: Ord + serde::Serialize",
+        )
+    )
+)]
+pub struct LocalChangeSet<K, A> {
+    /// Changes to the [`LocalChain`].
+    pub chain_changeset: local_chain::ChangeSet,
+
+    /// Additions to [`IndexedTxGraph`].
+    ///
+    /// [`IndexedTxGraph`]: crate::indexed_tx_graph::IndexedTxGraph
+    pub indexed_additions: IndexedAdditions<A, DerivationAdditions<K>>,
+}
+
+impl<K, A> Default for LocalChangeSet<K, A> {
+    fn default() -> Self {
+        Self {
+            chain_changeset: Default::default(),
+            indexed_additions: Default::default(),
+        }
+    }
+}
+
+impl<K: Ord, A: Anchor> Append for LocalChangeSet<K, A> {
+    fn append(&mut self, other: Self) {
+        Append::append(&mut self.chain_changeset, other.chain_changeset);
+        Append::append(&mut self.indexed_additions, other.indexed_additions);
+    }
+
+    fn is_empty(&self) -> bool {
+        self.chain_changeset.is_empty() && self.indexed_additions.is_empty()
+    }
+}
+
+impl<K, A> From<local_chain::ChangeSet> for LocalChangeSet<K, A> {
+    fn from(chain_changeset: local_chain::ChangeSet) -> Self {
+        Self {
+            chain_changeset,
+            ..Default::default()
+        }
+    }
+}
+
+impl<K, A> From<IndexedAdditions<A, DerivationAdditions<K>>> for LocalChangeSet<K, A> {
+    fn from(indexed_additions: IndexedAdditions<A, DerivationAdditions<K>>) -> Self {
+        Self {
+            indexed_additions,
+            ..Default::default()
         }
     }
 }
