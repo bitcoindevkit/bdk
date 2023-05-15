@@ -1,6 +1,6 @@
 #[allow(unused_macros)]
 macro_rules! h {
-    ($index:literal) => {{
+    ($index:expr) => {{
         bitcoin::hashes::Hash::hash($index.as_bytes())
     }};
 }
