@@ -53,7 +53,6 @@ impl<'a, K, A: Anchor> ElectrumUpdate<K, A> {
                 let _ = graph_update.insert_anchor(txid, anchor);
             }
         }
-        dbg!(graph_update.full_txs().count());
         LocalUpdate {
             keychain: self.keychain_update,
             graph: graph_update,
@@ -63,6 +62,12 @@ impl<'a, K, A: Anchor> ElectrumUpdate<K, A> {
 }
 
 impl<K> ElectrumUpdate<K, ConfirmationHeightAnchor> {
+    /// Finalizes the [`ElectrumUpdate`] with `new_txs` and anchors of type
+    /// [`ConfirmationTimeAnchor`].
+    ///
+    /// **Note:** The confirmation time might not be precisely correct if there has been a reorg.
+    /// Electrum's API intends that we use the merkle proof API, we should change `bdk_electrum` to
+    /// use it.
     pub fn finalize_as_confirmation_time<T>(
         self,
         client: &Client,
@@ -73,7 +78,6 @@ impl<K> ElectrumUpdate<K, ConfirmationHeightAnchor> {
         T: IntoIterator<Item = Transaction>,
     {
         let update = self.finalize(seen_at, new_txs);
-        let update_tip = update.chain.tip().expect("must have tip");
 
         let relevant_heights = {
             let mut visited_heights = HashSet::new();
@@ -96,16 +100,6 @@ impl<K> ElectrumUpdate<K, ConfirmationHeightAnchor> {
                     .map(|bh| bh.time as u64),
             )
             .collect::<HashMap<u32, u64>>();
-
-        if update_tip.hash != client.block_header(update_tip.height as _)?.block_hash() {
-            // [TODO] We should alter the logic so we won't have to return an error. This is to
-            // [TODO] ensure obtained block times are "anchored" to our tip. If we exclude this, it
-            // [TODO] should be "safe" as well. Tx confirmation times would just slightly vary.
-            return Err(Error::Message(format!(
-                "tip changed during update: update_tip={:?}",
-                update_tip
-            )));
-        }
 
         let graph_additions = {
             let old_additions = TxGraph::default().determine_additions(&update.graph);
@@ -336,6 +330,10 @@ fn determine_tx_anchor(
     raw_height: i32,
     txid: Txid,
 ) -> Option<ConfirmationHeightAnchor> {
+    // The electrum API has a weird quirk where an unconfirmed transaction is presented with a
+    // height of 0. To avoid invalid representation in our data structures, we manually set
+    // transactions residing in the genesis block to have height 0, then interpret a height of 0 as
+    // unconfirmed for all other transactions.
     if txid
         == Txid::from_hex("4a5e1e4baab89f3a32518a88c31bc87f618f76673e2cc77ab2127b7afdeda33b")
             .expect("must deserialize genesis coinbase txid")
