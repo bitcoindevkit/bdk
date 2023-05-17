@@ -7,10 +7,8 @@ use std::{cmp::Reverse, collections::HashMap, path::PathBuf, sync::Mutex, time::
 
 use bdk_chain::{
     bitcoin::{
-        psbt::Prevouts,
-        secp256k1::{self, Secp256k1},
-        util::sighash::SighashCache,
-        Address, LockTime, Network, Sequence, Transaction, TxIn, TxOut,
+        psbt::Prevouts, secp256k1::Secp256k1, util::sighash::SighashCache, Address, LockTime,
+        Network, Sequence, Transaction, TxIn, TxOut,
     },
     indexed_tx_graph::{IndexedAdditions, IndexedTxGraph},
     keychain::{DerivationAdditions, KeychainTxOutIndex},
@@ -73,7 +71,7 @@ pub enum Commands<S: clap::Subcommand> {
     Send {
         value: u64,
         address: Address,
-        #[clap(short, default_value = "largest-first")]
+        #[clap(short, default_value = "bnb")]
         coin_select: CoinSelectionAlgo,
     },
 }
@@ -238,6 +236,13 @@ pub fn run_balance_cmd<A: Anchor, O: ChainOracle>(
     graph: &KeychainTxGraph<A>,
     chain: &O,
 ) -> Result<(), O::Error> {
+    fn print_balances<'a>(title_str: &'a str, items: impl IntoIterator<Item = (&'a str, u64)>) {
+        println!("{}:", title_str);
+        for (name, amount) in items.into_iter() {
+            println!("    {:<10} {:>12} sats", name, amount)
+        }
+    }
+
     let balance = graph.graph().try_balance(
         chain,
         chain.get_chain_tip()?.unwrap_or_default(),
@@ -248,15 +253,22 @@ pub fn run_balance_cmd<A: Anchor, O: ChainOracle>(
     let confirmed_total = balance.confirmed + balance.immature;
     let unconfirmed_total = balance.untrusted_pending + balance.trusted_pending;
 
-    println!("[confirmed]");
-    println!("  total     = {}sats", confirmed_total);
-    println!("  spendable = {}sats", balance.confirmed);
-    println!("  immature  = {}sats", balance.immature);
-
-    println!("[unconfirmed]");
-    println!("  total     = {}sats", unconfirmed_total,);
-    println!("  trusted   = {}sats", balance.trusted_pending);
-    println!("  untrusted = {}sats", balance.untrusted_pending);
+    print_balances(
+        "confirmed",
+        [
+            ("total", confirmed_total),
+            ("spendable", balance.confirmed),
+            ("immature", balance.immature),
+        ],
+    );
+    print_balances(
+        "unconfirmed",
+        [
+            ("total", unconfirmed_total),
+            ("trusted", balance.trusted_pending),
+            ("untrusted", balance.untrusted_pending),
+        ],
+    );
 
     Ok(())
 }
@@ -339,9 +351,11 @@ where
             // We must first persist to disk the fact that we've got a new address from the
             // change keychain so future scans will find the tx we're about to broadcast.
             // If we're unable to persist this, then we don't want to broadcast.
-            db.lock()
-                .unwrap()
-                .stage(C::from(KeychainAdditions::from(index_additions)));
+            {
+                let db = &mut *db.lock().unwrap();
+                db.stage(C::from(KeychainAdditions::from(index_additions)));
+                db.commit()?;
+            }
 
             // We don't want other callers/threads to use this address while we're using it
             // but we also don't want to scan the tx we just created because it's not
@@ -502,6 +516,8 @@ where
 
     let mut transaction = Transaction {
         version: 0x02,
+        // because the temporary planning module does not support timelocks, we can use the chain
+        // tip as the `lock_time` for anti-fee-sniping purposes
         lock_time: chain
             .get_chain_tip()?
             .and_then(|block_id| LockTime::from_height(block_id.height).ok())
@@ -666,29 +682,6 @@ where
     }
 }
 
-pub fn prepare_index<S: clap::Subcommand, CTX: secp256k1::Signing>(
-    args: &Args<S>,
-    secp: &Secp256k1<CTX>,
-) -> anyhow::Result<(KeychainTxOutIndex<Keychain>, KeyMap)> {
-    let mut index = KeychainTxOutIndex::<Keychain>::default();
-
-    let (descriptor, mut keymap) =
-        Descriptor::<DescriptorPublicKey>::parse_descriptor(secp, &args.descriptor)?;
-    index.add_keychain(Keychain::External, descriptor);
-
-    if let Some((internal_descriptor, internal_keymap)) = args
-        .change_descriptor
-        .as_ref()
-        .map(|desc_str| Descriptor::<DescriptorPublicKey>::parse_descriptor(secp, desc_str))
-        .transpose()?
-    {
-        keymap.extend(internal_keymap);
-        index.add_keychain(Keychain::Internal, internal_descriptor);
-    }
-
-    Ok((index, keymap))
-}
-
 #[allow(clippy::type_complexity)]
 pub fn init<'m, S: clap::Subcommand, C>(
     db_magic: &'m [u8],
@@ -708,7 +701,22 @@ where
     }
     let args = Args::<S>::parse();
     let secp = Secp256k1::default();
-    let (index, keymap) = prepare_index(&args, &secp)?;
+
+    let mut index = KeychainTxOutIndex::<Keychain>::default();
+
+    let (descriptor, mut keymap) =
+        Descriptor::<DescriptorPublicKey>::parse_descriptor(&secp, &args.descriptor)?;
+    index.add_keychain(Keychain::External, descriptor);
+
+    if let Some((internal_descriptor, internal_keymap)) = args
+        .change_descriptor
+        .as_ref()
+        .map(|desc_str| Descriptor::<DescriptorPublicKey>::parse_descriptor(&secp, desc_str))
+        .transpose()?
+    {
+        keymap.extend(internal_keymap);
+        index.add_keychain(Keychain::Internal, internal_descriptor);
+    }
 
     let mut db_backend = match Store::<'m, C>::new_from_path(db_magic, &args.db_path) {
         Ok(db_backend) => db_backend,

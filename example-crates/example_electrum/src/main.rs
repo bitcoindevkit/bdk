@@ -27,7 +27,7 @@ const ASSUME_FINAL_DEPTH: usize = 10;
 
 #[derive(Subcommand, Debug, Clone)]
 enum ElectrumCommands {
-    /// Scans the addresses in the wallet using the esplora API.
+    /// Scans the addresses in the wallet using the electrum API.
     Scan {
         /// When a gap this large has been found for a keychain, it will stop.
         #[clap(long, default_value = "5")]
@@ -35,7 +35,7 @@ enum ElectrumCommands {
         #[clap(flatten)]
         scan_options: ScanOptions,
     },
-    /// Scans particular addresses using the esplora API.
+    /// Scans particular addresses using the electrum API.
     Sync {
         /// Scan all the unused addresses.
         #[clap(long)]
@@ -119,7 +119,7 @@ fn main() -> anyhow::Result<()> {
             stop_gap,
             scan_options,
         } => {
-            let (keychain_spks, c) = {
+            let (keychain_spks, local_chain) = {
                 let graph = &*graph.lock().unwrap();
                 let chain = &*chain.lock().unwrap();
 
@@ -155,7 +155,7 @@ fn main() -> anyhow::Result<()> {
 
             client
                 .scan(
-                    &c,
+                    &local_chain,
                     keychain_spks,
                     core::iter::empty(),
                     core::iter::empty(),

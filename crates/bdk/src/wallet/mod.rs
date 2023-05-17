@@ -501,20 +501,7 @@ impl<D> Wallet<D> {
         Ok(changed)
     }
 
-    #[deprecated(note = "use Wallet::transactions instead")]
-    /// Deprecated. use `Wallet::transactions` instead.
-    pub fn list_transactions(
-        &self,
-        include_raw: bool,
-    ) -> impl Iterator<Item = TransactionDetails> + '_ {
-        self.indexed_graph
-            .graph()
-            .list_chain_txs(&self.chain, self.chain.tip().unwrap_or_default())
-            .map(move |canonical_tx| new_tx_details(&self.indexed_graph, canonical_tx, include_raw))
-    }
-
-    /// Iterate over the transactions in the wallet in order of ascending confirmation time with
-    /// unconfirmed transactions last.
+    /// Iterate over the transactions in the wallet.
     pub fn transactions(
         &self,
     ) -> impl Iterator<Item = CanonicalTx<'_, Transaction, ConfirmationTimeAnchor>> + '_ {
@@ -1685,6 +1672,8 @@ impl<D> Wallet<D> {
 
     /// Applies an update to the wallet and stages the changes (but does not [`commit`] them).
     ///
+    /// This returns whether the `update` resulted in any changes.
+    ///
     /// Usually you create an `update` by interacting with some blockchain data source and inserting
     /// transactions related to your wallet into it.
     ///
@@ -1706,7 +1695,10 @@ impl<D> Wallet<D> {
         Ok(changed)
     }
 
-    /// Commits all curently [`staged`] changed to the persistence backend returning and error when this fails.
+    /// Commits all curently [`staged`] changed to the persistence backend returning and error when
+    /// this fails.
+    ///
+    /// This returns whether the `update` resulted in any changes.
     ///
     /// [`staged`]: Self::staged
     pub fn commit(&mut self) -> Result<bool, D::WriteError>
