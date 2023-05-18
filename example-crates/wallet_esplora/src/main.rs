@@ -1,97 +1,94 @@
-// use bdk::{
-//     bitcoin::{Address, Network},
-//     wallet::AddressIndex,
-//     SignOptions, Wallet,
-// };
-// use bdk_esplora::esplora_client;
-// use bdk_esplora::EsploraExt;
-// use bdk_file_store::KeychainStore;
-// use std::{io::Write, str::FromStr};
+const DB_MAGIC: &str = "bdk_wallet_esplora_example";
+const SEND_AMOUNT: u64 = 5000;
+const STOP_GAP: usize = 50;
+const PARALLEL_REQUESTS: usize = 5;
 
-// const SEND_AMOUNT: u64 = 5000;
-// const STOP_GAP: usize = 50;
-// const PARALLEL_REQUESTS: usize = 5;
+use std::{io::Write, str::FromStr};
+
+use bdk::{
+    bitcoin::{Address, Network},
+    wallet::AddressIndex,
+    SignOptions, Wallet,
+};
+use bdk_esplora::{esplora_client, v2::EsploraExt};
+use bdk_file_store::Store;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    todo!("update this exampe!");
-    // let db_path = std::env::temp_dir().join("bdk-esplora-example");
-    // let db = KeychainStore::new_from_path(db_path)?;
-    // let external_descriptor = "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/84'/0'/0'/0/*)";
-    // let internal_descriptor = "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/84'/0'/0'/1/*)";
+    let db_path = std::env::temp_dir().join("bdk-esplora-example");
+    let db = Store::<bdk::wallet::ChangeSet>::new_from_path(DB_MAGIC.as_bytes(), db_path)?;
+    let external_descriptor = "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/84'/0'/0'/0/*)";
+    let internal_descriptor = "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/84'/0'/0'/1/*)";
 
-    // let mut wallet = Wallet::new(
-    //     external_descriptor,
-    //     Some(internal_descriptor),
-    //     db,
-    //     Network::Testnet,
-    // )?;
+    let mut wallet = Wallet::new(
+        external_descriptor,
+        Some(internal_descriptor),
+        db,
+        Network::Testnet,
+    )?;
 
-    // let address = wallet.get_address(AddressIndex::New);
-    // println!("Generated Address: {}", address);
+    let address = wallet.get_address(AddressIndex::New);
+    println!("Generated Address: {}", address);
 
-    // let balance = wallet.get_balance();
-    // println!("Wallet balance before syncing: {} sats", balance.total());
+    let balance = wallet.get_balance();
+    println!("Wallet balance before syncing: {} sats", balance.total());
 
-    // print!("Syncing...");
-    // // Scanning the chain...
-    // let esplora_url = "https://mempool.space/testnet/api";
-    // let client = esplora_client::Builder::new(esplora_url).build_blocking()?;
-    // let checkpoints = wallet.checkpoints();
-    // let spks = wallet
-    //     .spks_of_all_keychains()
-    //     .into_iter()
-    //     .map(|(k, spks)| {
-    //         let mut first = true;
-    //         (
-    //             k,
-    //             spks.inspect(move |(spk_i, _)| {
-    //                 if first {
-    //                     first = false;
-    //                     print!("\nScanning keychain [{:?}]:", k);
-    //                 }
-    //                 print!(" {}", spk_i);
-    //                 let _ = std::io::stdout().flush();
-    //             }),
-    //         )
-    //     })
-    //     .collect();
-    // let update = client.scan(
-    //     checkpoints,
-    //     spks,
-    //     core::iter::empty(),
-    //     core::iter::empty(),
-    //     STOP_GAP,
-    //     PARALLEL_REQUESTS,
-    // )?;
-    // println!();
-    // wallet.apply_update(update)?;
-    // wallet.commit()?;
+    print!("Syncing...");
+    let client =
+        esplora_client::Builder::new("https://blockstream.info/testnet/api").build_blocking()?;
 
-    // let balance = wallet.get_balance();
-    // println!("Wallet balance after syncing: {} sats", balance.total());
+    let local_chain = wallet.checkpoints();
+    let keychain_spks = wallet
+        .spks_of_all_keychains()
+        .into_iter()
+        .map(|(k, k_spks)| {
+            let mut once = Some(());
+            let mut stdout = std::io::stdout();
+            let k_spks = k_spks
+                .inspect(move |(spk_i, _)| match once.take() {
+                    Some(_) => print!("\nScanning keychain [{:?}]", k),
+                    None => print!(" {:<3}", spk_i),
+                })
+                .inspect(move |_| stdout.flush().expect("must flush"));
+            (k, k_spks)
+        })
+        .collect();
+    let update = client.scan(
+        local_chain,
+        keychain_spks,
+        None,
+        None,
+        STOP_GAP,
+        PARALLEL_REQUESTS,
+    )?;
+    println!();
+    wallet.apply_update(update)?;
+    wallet.commit()?;
 
-    // if balance.total() < SEND_AMOUNT {
-    //     println!(
-    //         "Please send at least {} sats to the receiving address",
-    //         SEND_AMOUNT
-    //     );
-    //     std::process::exit(0);
-    // }
+    let balance = wallet.get_balance();
+    println!("Wallet balance after syncing: {} sats", balance.total());
 
-    // let faucet_address = Address::from_str("mkHS9ne12qx9pS9VojpwU5xtRd4T7X7ZUt")?;
+    if balance.total() < SEND_AMOUNT {
+        println!(
+            "Please send at least {} sats to the receiving address",
+            SEND_AMOUNT
+        );
+        std::process::exit(0);
+    }
 
-    // let mut tx_builder = wallet.build_tx();
-    // tx_builder
-    //     .add_recipient(faucet_address.script_pubkey(), SEND_AMOUNT)
-    //     .enable_rbf();
+    let faucet_address = Address::from_str("mkHS9ne12qx9pS9VojpwU5xtRd4T7X7ZUt")?;
 
-    // let (mut psbt, _) = tx_builder.finish()?;
-    // let finalized = wallet.sign(&mut psbt, SignOptions::default())?;
-    // assert!(finalized);
+    let mut tx_builder = wallet.build_tx();
+    tx_builder
+        .add_recipient(faucet_address.script_pubkey(), SEND_AMOUNT)
+        .enable_rbf();
 
-    // let tx = psbt.extract_tx();
-    // client.broadcast(&tx)?;
-    // println!("Tx broadcasted! Txid: {}", tx.txid());
+    let (mut psbt, _) = tx_builder.finish()?;
+    let finalized = wallet.sign(&mut psbt, SignOptions::default())?;
+    assert!(finalized);
 
-    // Ok(())
+    let tx = psbt.extract_tx();
+    client.broadcast(&tx)?;
+    println!("Tx broadcasted! Txid: {}", tx.txid());
+
+    Ok(())
 }

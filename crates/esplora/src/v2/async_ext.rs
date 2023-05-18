@@ -1,16 +1,14 @@
-use std::collections::BTreeMap;
-
 use async_trait::async_trait;
 use bdk_chain::{
     bitcoin::{BlockHash, OutPoint, Script, Txid},
-    chain_graph::ChainGraph,
-    keychain::KeychainScan,
-    sparse_chain, BlockId, ConfirmationTime,
+    collections::BTreeMap,
+    keychain::LocalUpdate,
+    BlockId, ConfirmationTimeAnchor,
 };
 use esplora_client::{Error, OutputStatus};
-use futures::stream::{FuturesOrdered, TryStreamExt};
+use futures::{stream::FuturesOrdered, TryStreamExt};
 
-use crate::map_confirmation_time;
+use crate::map_confirmation_time_anchor;
 
 /// Trait to extend [`esplora_client::AsyncClient`] functionality.
 ///
@@ -22,7 +20,8 @@ use crate::map_confirmation_time;
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 pub trait EsploraAsyncExt {
-    /// Scan the blockchain (via esplora) for the data specified and returns a [`KeychainScan`].
+    /// Scan the blockchain (via esplora) for the data specified and returns a
+    /// [`LocalUpdate<K, ConfirmationTimeAnchor>`].
     ///
     /// - `local_chain`: the most recent block hashes present locally
     /// - `keychain_spks`: keychains that we want to scan transactions for
@@ -47,7 +46,7 @@ pub trait EsploraAsyncExt {
         outpoints: impl IntoIterator<IntoIter = impl Iterator<Item = OutPoint> + Send> + Send,
         stop_gap: usize,
         parallel_requests: usize,
-    ) -> Result<KeychainScan<K, ConfirmationTime>, Error>;
+    ) -> Result<LocalUpdate<K, ConfirmationTimeAnchor>, Error>;
 
     /// Convenience method to call [`scan`] without requiring a keychain.
     ///
@@ -60,26 +59,23 @@ pub trait EsploraAsyncExt {
         txids: impl IntoIterator<IntoIter = impl Iterator<Item = Txid> + Send> + Send,
         outpoints: impl IntoIterator<IntoIter = impl Iterator<Item = OutPoint> + Send> + Send,
         parallel_requests: usize,
-    ) -> Result<ChainGraph<ConfirmationTime>, Error> {
-        let wallet_scan = self
-            .scan(
-                local_chain,
-                [(
-                    (),
-                    misc_spks
-                        .into_iter()
-                        .enumerate()
-                        .map(|(i, spk)| (i as u32, spk)),
-                )]
-                .into(),
-                txids,
-                outpoints,
-                usize::MAX,
-                parallel_requests,
-            )
-            .await?;
-
-        Ok(wallet_scan.update)
+    ) -> Result<LocalUpdate<(), ConfirmationTimeAnchor>, Error> {
+        self.scan(
+            local_chain,
+            [(
+                (),
+                misc_spks
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, spk)| (i as u32, spk)),
+            )]
+            .into(),
+            txids,
+            outpoints,
+            usize::MAX,
+            parallel_requests,
+        )
+        .await
     }
 }
 
@@ -98,47 +94,35 @@ impl EsploraAsyncExt for esplora_client::AsyncClient {
         outpoints: impl IntoIterator<IntoIter = impl Iterator<Item = OutPoint> + Send> + Send,
         stop_gap: usize,
         parallel_requests: usize,
-    ) -> Result<KeychainScan<K, ConfirmationTime>, Error> {
-        let txids = txids.into_iter();
-        let outpoints = outpoints.into_iter();
+    ) -> Result<LocalUpdate<K, ConfirmationTimeAnchor>, Error> {
         let parallel_requests = Ord::max(parallel_requests, 1);
-        let mut scan = KeychainScan::default();
-        let update = &mut scan.update;
-        let last_active_indices = &mut scan.last_active_indices;
 
-        for (&height, &original_hash) in local_chain.iter().rev() {
-            let update_block_id = BlockId {
-                height,
-                hash: self.get_block_hash(height).await?,
-            };
-            let _ = update
-                .insert_checkpoint(update_block_id)
-                .expect("cannot repeat height here");
-            if update_block_id.hash == original_hash {
-                break;
-            }
-        }
-        let tip_at_start = BlockId {
-            height: self.get_height().await?,
-            hash: self.get_tip_hash().await?,
-        };
-        if let Err(failure) = update.insert_checkpoint(tip_at_start) {
-            match failure {
-                sparse_chain::InsertCheckpointError::HashNotMatching { .. } => {
-                    // there was a re-org before we started scanning. We haven't consumed any iterators, so calling this function recursively is safe.
-                    return EsploraAsyncExt::scan(
-                        self,
-                        local_chain,
-                        keychain_spks,
-                        txids,
-                        outpoints,
-                        stop_gap,
-                        parallel_requests,
-                    )
-                    .await;
+        let (mut update, tip_at_start) = loop {
+            let mut update = LocalUpdate::<K, ConfirmationTimeAnchor>::default();
+
+            for (&height, &original_hash) in local_chain.iter().rev() {
+                let update_block_id = BlockId {
+                    height,
+                    hash: self.get_block_hash(height).await?,
+                };
+                let _ = update
+                    .chain
+                    .insert_block(update_block_id)
+                    .expect("cannot repeat height here");
+                if update_block_id.hash == original_hash {
+                    break;
                 }
             }
-        }
+
+            let tip_at_start = BlockId {
+                height: self.get_height().await?,
+                hash: self.get_tip_hash().await?,
+            };
+
+            if update.chain.insert_block(tip_at_start).is_ok() {
+                break (update, tip_at_start);
+            }
+        };
 
         for (keychain, spks) in keychain_spks {
             let mut spks = spks.into_iter();
@@ -147,7 +131,7 @@ impl EsploraAsyncExt for esplora_client::AsyncClient {
             type IndexWithTxs = (u32, Vec<esplora_client::Tx>);
 
             loop {
-                let futures: FuturesOrdered<_> = (0..parallel_requests)
+                let futures = (0..parallel_requests)
                     .filter_map(|_| {
                         let (index, script) = spks.next()?;
                         let client = self.clone();
@@ -178,13 +162,11 @@ impl EsploraAsyncExt for esplora_client::AsyncClient {
                             Result::<_, esplora_client::Error>::Ok((index, related_txs))
                         })
                     })
-                    .collect();
+                    .collect::<FuturesOrdered<_>>();
 
                 let n_futures = futures.len();
 
-                let idx_with_tx: Vec<IndexWithTxs> = futures.try_collect().await?;
-
-                for (index, related_txs) in idx_with_tx {
+                for (index, related_txs) in futures.try_collect::<Vec<IndexWithTxs>>().await? {
                     if related_txs.is_empty() {
                         empty_scripts += 1;
                     } else {
@@ -192,22 +174,11 @@ impl EsploraAsyncExt for esplora_client::AsyncClient {
                         empty_scripts = 0;
                     }
                     for tx in related_txs {
-                        let confirmation_time =
-                            map_confirmation_time(&tx.status, tip_at_start.height);
+                        let anchor = map_confirmation_time_anchor(&tx.status, tip_at_start);
 
-                        if let Err(failure) = update.insert_tx(tx.to_tx(), confirmation_time) {
-                            use bdk_chain::{
-                                chain_graph::InsertTxError, sparse_chain::InsertTxError::*,
-                            };
-                            match failure {
-                                InsertTxError::Chain(TxTooHigh { .. }) => {
-                                    unreachable!("chain position already checked earlier")
-                                }
-                                InsertTxError::Chain(TxMovedUnexpectedly { .. })
-                                | InsertTxError::UnresolvableConflict(_) => {
-                                    /* implies reorg during a scan. We deal with that below */
-                                }
-                            }
+                        let _ = update.graph.insert_tx(tx.to_tx());
+                        if let Some(anchor) = anchor {
+                            let _ = update.graph.insert_anchor(tx.txid, anchor);
                         }
                     }
                 }
@@ -218,34 +189,30 @@ impl EsploraAsyncExt for esplora_client::AsyncClient {
             }
 
             if let Some(last_active_index) = last_active_index {
-                last_active_indices.insert(keychain, last_active_index);
+                update.keychain.insert(keychain, last_active_index);
             }
         }
 
-        for txid in txids {
-            let (tx, tx_status) =
-                match (self.get_tx(&txid).await?, self.get_tx_status(&txid).await?) {
-                    (Some(tx), Some(tx_status)) => (tx, tx_status),
-                    _ => continue,
-                };
-
-            let confirmation_time = map_confirmation_time(&tx_status, tip_at_start.height);
-
-            if let Err(failure) = update.insert_tx(tx, confirmation_time) {
-                use bdk_chain::{chain_graph::InsertTxError, sparse_chain::InsertTxError::*};
-                match failure {
-                    InsertTxError::Chain(TxTooHigh { .. }) => {
-                        unreachable!("chain position already checked earlier")
+        for txid in txids.into_iter() {
+            if update.graph.get_tx(txid).is_none() {
+                match self.get_tx(&txid).await? {
+                    Some(tx) => {
+                        let _ = update.graph.insert_tx(tx);
                     }
-                    InsertTxError::Chain(TxMovedUnexpectedly { .. })
-                    | InsertTxError::UnresolvableConflict(_) => {
-                        /* implies reorg during a scan. We deal with that below */
-                    }
+                    None => continue,
                 }
             }
+            match self.get_tx_status(&txid).await? {
+                Some(tx_status) => {
+                    if let Some(anchor) = map_confirmation_time_anchor(&tx_status, tip_at_start) {
+                        let _ = update.graph.insert_anchor(txid, anchor);
+                    }
+                }
+                None => continue,
+            }
         }
 
-        for op in outpoints {
+        for op in outpoints.into_iter() {
             let mut op_txs = Vec::with_capacity(2);
             if let (Some(tx), Some(tx_status)) = (
                 self.get_tx(&op.txid).await?,
@@ -265,39 +232,24 @@ impl EsploraAsyncExt for esplora_client::AsyncClient {
             }
 
             for (tx, status) in op_txs {
-                let confirmation_time = map_confirmation_time(&status, tip_at_start.height);
+                let txid = tx.txid();
+                let anchor = map_confirmation_time_anchor(&status, tip_at_start);
 
-                if let Err(failure) = update.insert_tx(tx, confirmation_time) {
-                    use bdk_chain::{chain_graph::InsertTxError, sparse_chain::InsertTxError::*};
-                    match failure {
-                        InsertTxError::Chain(TxTooHigh { .. }) => {
-                            unreachable!("chain position already checked earlier")
-                        }
-                        InsertTxError::Chain(TxMovedUnexpectedly { .. })
-                        | InsertTxError::UnresolvableConflict(_) => {
-                            /* implies reorg during a scan. We deal with that below */
-                        }
-                    }
+                let _ = update.graph.insert_tx(tx);
+                if let Some(anchor) = anchor {
+                    let _ = update.graph.insert_anchor(txid, anchor);
                 }
             }
         }
 
-        let reorg_occurred = {
-            if let Some(checkpoint) = ChainGraph::chain(update).latest_checkpoint() {
-                self.get_block_hash(checkpoint.height).await? != checkpoint.hash
-            } else {
-                false
-            }
-        };
-
-        if reorg_occurred {
-            // A reorg occurred, so let's find out where all the txids we found are in the chain now.
-            // XXX: collect required because of weird type naming issues
-            let txids_found = ChainGraph::chain(update)
-                .txids()
-                .map(|(_, txid)| *txid)
+        if tip_at_start.hash != self.get_block_hash(tip_at_start.height).await? {
+            // A reorg occurred, so let's find out where all the txids we found are now in the chain
+            let txids_found = update
+                .graph
+                .full_txs()
+                .map(|tx_node| tx_node.txid)
                 .collect::<Vec<_>>();
-            scan.update = EsploraAsyncExt::scan_without_keychain(
+            update.chain = EsploraAsyncExt::scan_without_keychain(
                 self,
                 local_chain,
                 [],
@@ -305,9 +257,10 @@ impl EsploraAsyncExt for esplora_client::AsyncClient {
                 [],
                 parallel_requests,
             )
-            .await?;
+            .await?
+            .chain;
         }
 
-        Ok(scan)
+        Ok(update)
     }
 }
