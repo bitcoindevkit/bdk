@@ -30,20 +30,22 @@ impl<K, A> Default for ElectrumUpdate<K, A> {
     }
 }
 
-impl<'a, K, A: Anchor> ElectrumUpdate<K, A> {
-    pub fn missing_full_txs<A2>(
-        &'a self,
-        graph: &'a TxGraph<A2>,
-    ) -> impl Iterator<Item = &'a Txid> + 'a {
+impl<K, A: Anchor> ElectrumUpdate<K, A> {
+    pub fn missing_full_txs<A2>(&self, graph: &TxGraph<A2>) -> Vec<Txid> {
         self.graph_update
             .keys()
             .filter(move |&&txid| graph.as_ref().get_tx(txid).is_none())
+            .cloned()
+            .collect()
     }
 
-    pub fn finalize<T>(self, seen_at: Option<u64>, new_txs: T) -> LocalUpdate<K, A>
-    where
-        T: IntoIterator<Item = Transaction>,
-    {
+    pub fn finalize(
+        self,
+        client: &Client,
+        seen_at: Option<u64>,
+        missing: Vec<Txid>,
+    ) -> Result<LocalUpdate<K, A>, Error> {
+        let new_txs = client.batch_transaction_get(&missing)?;
         let mut graph_update = TxGraph::<A>::new(new_txs);
         for (txid, anchors) in self.graph_update {
             if let Some(seen_at) = seen_at {
@@ -53,11 +55,11 @@ impl<'a, K, A: Anchor> ElectrumUpdate<K, A> {
                 let _ = graph_update.insert_anchor(txid, anchor);
             }
         }
-        LocalUpdate {
+        Ok(LocalUpdate {
             keychain: self.keychain_update,
             graph: graph_update,
             chain: self.chain_update,
-        }
+        })
     }
 }
 
@@ -68,16 +70,13 @@ impl<K> ElectrumUpdate<K, ConfirmationHeightAnchor> {
     /// **Note:** The confirmation time might not be precisely correct if there has been a reorg.
     /// Electrum's API intends that we use the merkle proof API, we should change `bdk_electrum` to
     /// use it.
-    pub fn finalize_as_confirmation_time<T>(
+    pub fn finalize_as_confirmation_time(
         self,
         client: &Client,
         seen_at: Option<u64>,
-        new_txs: T,
-    ) -> Result<LocalUpdate<K, ConfirmationTimeAnchor>, Error>
-    where
-        T: IntoIterator<Item = Transaction>,
-    {
-        let update = self.finalize(seen_at, new_txs);
+        missing: Vec<Txid>,
+    ) -> Result<LocalUpdate<K, ConfirmationTimeAnchor>, Error> {
+        let update = self.finalize(client, seen_at, missing)?;
 
         let relevant_heights = {
             let mut visited_heights = HashSet::new();
@@ -111,7 +110,7 @@ impl<K> ElectrumUpdate<K, ConfirmationHeightAnchor> {
                     .anchors
                     .into_iter()
                     .map(|(height_anchor, txid)| {
-                        let confirmation_height = dbg!(height_anchor.confirmation_height);
+                        let confirmation_height = height_anchor.confirmation_height;
                         let confirmation_time = height_to_time[&confirmation_height];
                         let time_anchor = ConfirmationTimeAnchor {
                             anchor_block: height_anchor.anchor_block,

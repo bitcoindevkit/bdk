@@ -278,20 +278,15 @@ fn main() -> anyhow::Result<()> {
 
     let missing_txids = {
         let graph = &*graph.lock().unwrap();
-        response
-            .missing_full_txs(graph.graph())
-            .cloned()
-            .collect::<Vec<_>>()
+        response.missing_full_txs(graph.graph())
     };
 
-    let new_txs = client
-        .batch_transaction_get(&missing_txids)
-        .context("fetching full transactions")?;
     let now = std::time::UNIX_EPOCH
         .elapsed()
         .expect("must get time")
         .as_secs();
-    let final_update = response.finalize(Some(now), new_txs);
+
+    let final_update = response.finalize(&client, Some(now), missing_txids)?;
 
     let db_changeset = {
         let mut chain = chain.lock().unwrap();
