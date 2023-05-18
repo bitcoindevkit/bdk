@@ -24,11 +24,17 @@ mod spk_txout_index;
 pub use spk_txout_index::*;
 mod chain_data;
 pub use chain_data::*;
+pub mod indexed_tx_graph;
 pub mod keychain;
+pub mod local_chain;
 pub mod sparse_chain;
 mod tx_data_traits;
 pub mod tx_graph;
 pub use tx_data_traits::*;
+mod chain_oracle;
+pub use chain_oracle::*;
+mod persist;
+pub use persist::*;
 
 #[doc(hidden)]
 pub mod example_utils;
@@ -39,6 +45,10 @@ pub use miniscript;
 mod descriptor_ext;
 #[cfg(feature = "miniscript")]
 pub use descriptor_ext::DescriptorExt;
+#[cfg(feature = "miniscript")]
+mod spk_iter;
+#[cfg(feature = "miniscript")]
+pub use spk_iter::*;
 
 #[allow(unused_imports)]
 #[macro_use]

@@ -14,12 +14,13 @@
 //! [`KeychainChangeSet`]s.
 //!
 //! [`SpkTxOutIndex`]: crate::SpkTxOutIndex
+
 use crate::{
     chain_graph::{self, ChainGraph},
     collections::BTreeMap,
     sparse_chain::ChainPosition,
     tx_graph::TxGraph,
-    ForEachTxOut,
+    Append, ForEachTxOut,
 };
 
 #[cfg(feature = "miniscript")]
@@ -69,12 +70,12 @@ impl<K> DerivationAdditions<K> {
     }
 }
 
-impl<K: Ord> DerivationAdditions<K> {
+impl<K: Ord> Append for DerivationAdditions<K> {
     /// Append another [`DerivationAdditions`] into self.
     ///
     /// If the keychain already exists, increase the index when the other's index > self's index.
     /// If the keychain did not exist, append the new keychain.
-    pub fn append(&mut self, mut other: Self) {
+    fn append(&mut self, mut other: Self) {
         self.0.iter_mut().for_each(|(key, index)| {
             if let Some(other_index) = other.0.remove(key) {
                 *index = other_index.max(*index);
@@ -82,6 +83,10 @@ impl<K: Ord> DerivationAdditions<K> {
         });
 
         self.0.append(&mut other.0);
+    }
+
+    fn is_empty(&self) -> bool {
+        self.0.is_empty()
     }
 }
 

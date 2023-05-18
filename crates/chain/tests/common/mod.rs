@@ -6,6 +6,14 @@ macro_rules! h {
 }
 
 #[allow(unused_macros)]
+macro_rules! local_chain {
+    [ $(($height:expr, $block_hash:expr)), * ] => {{
+        #[allow(unused_mut)]
+        bdk_chain::local_chain::LocalChain::from_blocks([$(($height, $block_hash).into()),*])
+    }};
+}
+
+#[allow(unused_macros)]
 macro_rules! chain {
     ($([$($tt:tt)*]),*) => { chain!( checkpoints: [$([$($tt)*]),*] ) };
     (checkpoints: $($tail:tt)*) => { chain!( index: TxHeight, checkpoints: $($tail)*) };

@@ -1,16 +1,17 @@
 use crate::{
     collections::*,
+    indexed_tx_graph::Indexer,
     miniscript::{Descriptor, DescriptorPublicKey},
-    ForEachTxOut, SpkTxOutIndex,
+    spk_iter::BIP32_MAX_INDEX,
+    ForEachTxOut, SpkIterator, SpkTxOutIndex,
 };
-use alloc::{borrow::Cow, vec::Vec};
-use bitcoin::{secp256k1::Secp256k1, OutPoint, Script, TxOut};
+use alloc::vec::Vec;
+use bitcoin::{OutPoint, Script, TxOut};
 use core::{fmt::Debug, ops::Deref};
 
-use super::DerivationAdditions;
+use crate::Append;
 
-/// Maximum [BIP32](https://bips.xyz/32) derivation index.
-pub const BIP32_MAX_INDEX: u32 = (1 << 31) - 1;
+use super::DerivationAdditions;
 
 /// A convenient wrapper around [`SpkTxOutIndex`] that relates script pubkeys to miniscript public
 /// [`Descriptor`]s.
@@ -88,6 +89,26 @@ impl<K> Deref for KeychainTxOutIndex<K> {
     }
 }
 
+impl<K: Clone + Ord + Debug> Indexer for KeychainTxOutIndex<K> {
+    type Additions = DerivationAdditions<K>;
+
+    fn index_txout(&mut self, outpoint: OutPoint, txout: &TxOut) -> Self::Additions {
+        self.scan_txout(outpoint, txout)
+    }
+
+    fn index_tx(&mut self, tx: &bitcoin::Transaction) -> Self::Additions {
+        self.scan(tx)
+    }
+
+    fn apply_additions(&mut self, additions: Self::Additions) {
+        self.apply_additions(additions)
+    }
+
+    fn is_tx_relevant(&self, tx: &bitcoin::Transaction) -> bool {
+        self.is_relevant(tx)
+    }
+}
+
 impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     /// Scans an object for relevant outpoints, which are stored and indexed internally.
     ///
@@ -124,6 +145,11 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     /// Return a reference to the internal [`SpkTxOutIndex`].
     pub fn inner(&self) -> &SpkTxOutIndex<(K, u32)> {
         &self.inner
+    }
+
+    /// Get a reference to the set of indexed outpoints.
+    pub fn outpoints(&self) -> &BTreeSet<((K, u32), OutPoint)> {
+        self.inner.outpoints()
     }
 
     /// Return a reference to the internal map of the keychain to descriptors.
@@ -214,10 +240,9 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
         let next_reveal_index = self.last_revealed.get(keychain).map_or(0, |v| *v + 1);
         let lookahead = self.lookahead.get(keychain).map_or(0, |v| *v);
 
-        for (new_index, new_spk) in range_descriptor_spks(
-            Cow::Borrowed(descriptor),
-            next_store_index..next_reveal_index + lookahead,
-        ) {
+        for (new_index, new_spk) in
+            SpkIterator::new_with_range(descriptor, next_store_index..next_reveal_index + lookahead)
+        {
             let _inserted = self
                 .inner
                 .insert_spk((keychain.clone(), new_index), new_spk);
@@ -237,13 +262,13 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     /// derivable script pubkeys.
     pub fn spks_of_all_keychains(
         &self,
-    ) -> BTreeMap<K, impl Iterator<Item = (u32, Script)> + Clone> {
+    ) -> BTreeMap<K, SpkIterator<Descriptor<DescriptorPublicKey>>> {
         self.keychains
             .iter()
             .map(|(keychain, descriptor)| {
                 (
                     keychain.clone(),
-                    range_descriptor_spks(Cow::Owned(descriptor.clone()), 0..),
+                    SpkIterator::new_with_range(descriptor.clone(), 0..),
                 )
             })
             .collect()
@@ -255,13 +280,13 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     /// # Panics
     ///
     /// This will panic if the `keychain` does not exist.
-    pub fn spks_of_keychain(&self, keychain: &K) -> impl Iterator<Item = (u32, Script)> + Clone {
+    pub fn spks_of_keychain(&self, keychain: &K) -> SpkIterator<Descriptor<DescriptorPublicKey>> {
         let descriptor = self
             .keychains
             .get(keychain)
             .expect("keychain must exist")
             .clone();
-        range_descriptor_spks(Cow::Owned(descriptor), 0..)
+        SpkIterator::new_with_range(descriptor, 0..)
     }
 
     /// Convenience method to get [`revealed_spks_of_keychain`] of all keychains.
@@ -341,7 +366,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
         &mut self,
         keychains: &BTreeMap<K, u32>,
     ) -> (
-        BTreeMap<K, impl Iterator<Item = (u32, Script)>>,
+        BTreeMap<K, SpkIterator<Descriptor<DescriptorPublicKey>>>,
         DerivationAdditions<K>,
     ) {
         let mut additions = DerivationAdditions::default();
@@ -351,7 +376,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
             let (new_spks, new_additions) = self.reveal_to_target(keychain, index);
             if !new_additions.is_empty() {
                 spks.insert(keychain.clone(), new_spks);
-                additions.append(new_additions);
+                additions.append(new_additions.clone());
             }
         }
 
@@ -376,7 +401,10 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
         &mut self,
         keychain: &K,
         target_index: u32,
-    ) -> (impl Iterator<Item = (u32, Script)>, DerivationAdditions<K>) {
+    ) -> (
+        SpkIterator<Descriptor<DescriptorPublicKey>>,
+        DerivationAdditions<K>,
+    ) {
         let descriptor = self.keychains.get(keychain).expect("keychain must exist");
         let has_wildcard = descriptor.has_wildcard();
 
@@ -401,7 +429,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
 
         // we range over indexes that are not stored
         let range = next_reveal_index + lookahead..=target_index + lookahead;
-        for (new_index, new_spk) in range_descriptor_spks(Cow::Borrowed(descriptor), range) {
+        for (new_index, new_spk) in SpkIterator::new_with_range(descriptor, range) {
             let _inserted = self
                 .inner
                 .insert_spk((keychain.clone(), new_index), new_spk);
@@ -418,16 +446,13 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
                 let _old_index = self.last_revealed.insert(keychain.clone(), index);
                 debug_assert!(_old_index < Some(index));
                 (
-                    range_descriptor_spks(
-                        Cow::Owned(descriptor.clone()),
-                        next_reveal_index..index + 1,
-                    ),
+                    SpkIterator::new_with_range(descriptor.clone(), next_reveal_index..index + 1),
                     DerivationAdditions(core::iter::once((keychain.clone(), index)).collect()),
                 )
             }
             None => (
-                range_descriptor_spks(
-                    Cow::Owned(descriptor.clone()),
+                SpkIterator::new_with_range(
+                    descriptor.clone(),
                     next_reveal_index..next_reveal_index,
                 ),
                 DerivationAdditions::default(),
@@ -557,34 +582,4 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     pub fn apply_additions(&mut self, additions: DerivationAdditions<K>) {
         let _ = self.reveal_to_target_multi(&additions.0);
     }
-}
-
-fn range_descriptor_spks<'a, R>(
-    descriptor: Cow<'a, Descriptor<DescriptorPublicKey>>,
-    range: R,
-) -> impl Iterator<Item = (u32, Script)> + Clone + Send + 'a
-where
-    R: Iterator<Item = u32> + Clone + Send + 'a,
-{
-    let secp = Secp256k1::verification_only();
-    let has_wildcard = descriptor.has_wildcard();
-    range
-        .into_iter()
-        // non-wildcard descriptors can only have one derivation index (0)
-        .take_while(move |&index| has_wildcard || index == 0)
-        // we can only iterate over non-hardened indices
-        .take_while(|&index| index <= BIP32_MAX_INDEX)
-        .map(
-            move |index| -> Result<_, miniscript::descriptor::ConversionError> {
-                Ok((
-                    index,
-                    descriptor
-                        .at_derivation_index(index)
-                        .derived_descriptor(&secp)?
-                        .script_pubkey(),
-                ))
-            },
-        )
-        .take_while(Result::is_ok)
-        .map(Result::unwrap)
 }

@@ -136,6 +136,7 @@ fn update_evicts_conflicting_tx() {
             graph: tx_graph::Additions {
                 tx: [tx_b2.clone()].into(),
                 txout: [].into(),
+                ..Default::default()
             },
         };
         assert_eq!(
@@ -215,6 +216,7 @@ fn update_evicts_conflicting_tx() {
             graph: tx_graph::Additions {
                 tx: [tx_b2].into(),
                 txout: [].into(),
+                ..Default::default()
             },
         };
         assert_eq!(
@@ -363,7 +365,7 @@ fn test_get_tx_in_chain() {
     let _ = cg.insert_tx(tx.clone(), TxHeight::Unconfirmed).unwrap();
     assert_eq!(
         cg.get_tx_in_chain(tx.txid()),
-        Some((&TxHeight::Unconfirmed, &tx))
+        Some((&TxHeight::Unconfirmed, &tx,))
     );
 }
 
@@ -395,9 +397,9 @@ fn test_iterate_transactions() {
     assert_eq!(
         cg.transactions_in_chain().collect::<Vec<_>>(),
         vec![
-            (&TxHeight::Confirmed(0), &txs[2]),
-            (&TxHeight::Confirmed(1), &txs[0]),
-            (&TxHeight::Unconfirmed, &txs[1]),
+            (&TxHeight::Confirmed(0), &txs[2],),
+            (&TxHeight::Confirmed(1), &txs[0],),
+            (&TxHeight::Unconfirmed, &txs[1],),
         ]
     );
 }

@@ -13,7 +13,7 @@ use bdk_chain::{
         Descriptor, DescriptorPublicKey,
     },
     sparse_chain::{self, ChainPosition},
-    DescriptorExt, FullTxOut,
+    Append, DescriptorExt, FullTxOut,
 };
 use bdk_coin_select::{coin_select_bnb, CoinSelector, CoinSelectorOpt, WeightedValue};
 use bdk_file_store::KeychainStore;

@@ -2,6 +2,7 @@ use core::ops::RangeBounds;
 
 use crate::{
     collections::{hash_map::Entry, BTreeMap, BTreeSet, HashMap},
+    indexed_tx_graph::Indexer,
     ForEachTxOut,
 };
 use bitcoin::{self, OutPoint, Script, Transaction, TxOut, Txid};
@@ -52,6 +53,28 @@ impl<I> Default for SpkTxOutIndex<I> {
     }
 }
 
+impl<I: Clone + Ord> Indexer for SpkTxOutIndex<I> {
+    type Additions = ();
+
+    fn index_txout(&mut self, outpoint: OutPoint, txout: &TxOut) -> Self::Additions {
+        self.scan_txout(outpoint, txout);
+        Default::default()
+    }
+
+    fn index_tx(&mut self, tx: &Transaction) -> Self::Additions {
+        self.scan(tx);
+        Default::default()
+    }
+
+    fn apply_additions(&mut self, _additions: Self::Additions) {
+        // This applies nothing.
+    }
+
+    fn is_tx_relevant(&self, tx: &Transaction) -> bool {
+        self.is_relevant(tx)
+    }
+}
+
 /// This macro is used instead of a member function of `SpkTxOutIndex`, which would result in a
 /// compiler error[E0521]: "borrowed data escapes out of closure" when we attempt to take a
 /// reference out of the `ForEachTxOut` closure during scanning.
@@ -95,6 +118,11 @@ impl<I: Clone + Ord> SpkTxOutIndex<I> {
     /// script pubkey (if any).
     pub fn scan_txout(&mut self, op: OutPoint, txout: &TxOut) -> Option<&I> {
         scan_txout!(self, op, txout)
+    }
+
+    /// Get a reference to the set of indexed outpoints.
+    pub fn outpoints(&self) -> &BTreeSet<(I, OutPoint)> {
+        &self.spk_txouts
     }
 
     /// Iterate over all known txouts that spend to tracked script pubkeys.
