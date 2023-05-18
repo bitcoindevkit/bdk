@@ -97,7 +97,8 @@ pub struct Wallet<D = ()> {
 pub type Update = LocalUpdate<KeychainKind, ConfirmationTimeAnchor>;
 
 // /// The changeset produced internally by applying an update.
-pub(crate) type ChangeSet = LocalChangeSet<KeychainKind, ConfirmationTimeAnchor>;
+pub type ChangeSet = LocalChangeSet<KeychainKind, ConfirmationTimeAnchor>;
+
 /// The address index selection strategy to use to derived an address from the wallet's external
 /// descriptor. See [`Wallet::get_address`]. If you're unsure which one to use use `WalletIndex::New`.
 #[derive(Debug)]
