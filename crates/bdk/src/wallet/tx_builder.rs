@@ -184,7 +184,8 @@ impl<'a, D, Cs: Clone, Ctx> Clone for TxBuilder<'a, D, Cs, Ctx> {
 // methods supported by both contexts, for any CoinSelectionAlgorithm
 impl<'a, D, Cs: CoinSelectionAlgorithm, Ctx: TxBuilderContext> TxBuilder<'a, D, Cs, Ctx> {
     /// Set a custom fee rate
-    /// The fee_rate method refers to the fee rate in satoshis/vbyte (sats/vbyte).
+    /// The fee_rate method sets the fee rate using a FeeRate type in either satoshis/vbyte (sats/vbyte)
+    /// using FeeRate::from_sat_per_vb(), or satoshis/kwu (sats/kwu) using FeeRate::from_sat_per_kwu().
     pub fn fee_rate(&mut self, fee_rate: FeeRate) -> &mut Self {
         self.params.fee_policy = Some(FeePolicy::FeeRate(fee_rate));
         self
@@ -193,7 +194,8 @@ impl<'a, D, Cs: CoinSelectionAlgorithm, Ctx: TxBuilderContext> TxBuilder<'a, D, 
     /// Set an absolute fee
     /// The fee_absolute method refers to the absolute transaction fee in satoshis (sats).
     /// If anyone sets both the fee_absolute method and the fee_rate method,
-    /// the fee_absolute value will take precedence over the fee_rate.
+    /// the FeePolicy enum will be set by whichever function was called last,
+    /// as the FeeRate and FeeAmount are mutually exclusive.
     pub fn fee_absolute(&mut self, fee_amount: u64) -> &mut Self {
         self.params.fee_policy = Some(FeePolicy::FeeAmount(fee_amount));
         self
