@@ -175,7 +175,7 @@ pub trait ConfigurableBlockchain: Blockchain + Sized {
 
 /// Trait for blockchains that don't contain any state
 ///
-/// Statless blockchains can be used to sync multiple wallets with different descriptors.
+/// Stateless blockchains can be used to sync multiple wallets with different descriptors.
 ///
 /// [`BlockchainFactory`] is automatically implemented for `Arc<T>` where `T` is a stateless
 /// blockchain.

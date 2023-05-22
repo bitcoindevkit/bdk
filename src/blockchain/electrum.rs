@@ -132,7 +132,7 @@ impl WalletSync for ElectrumBlockchain {
 
         // The electrum server has been inconsistent somehow in its responses during sync. For
         // example, we do a batch request of transactions and the response contains less
-        // tranascations than in the request. This should never happen but we don't want to panic.
+        // transactions than in the request. This should never happen but we don't want to panic.
         let electrum_goof = || Error::Generic("electrum server misbehaving".to_string());
 
         let batch_update = loop {

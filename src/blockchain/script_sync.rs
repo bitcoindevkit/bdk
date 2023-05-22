@@ -397,7 +397,7 @@ impl<'a, D: BatchDatabase> State<'a, D> {
 
         // set every utxo we observed, unless it's already spent
         // we don't do this in the loop above as we want to know all the spent outputs before
-        // adding the non-spent to the batch in case there are new tranasactions
+        // adding the non-spent to the batch in case there are new transactions
         // that spend form each other.
         for finished_tx in &finished_txs {
             let tx = finished_tx
