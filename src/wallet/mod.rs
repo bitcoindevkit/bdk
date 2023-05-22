@@ -379,9 +379,19 @@ where
             .get_script_pubkey_from_path(KeychainKind::External, max_address.saturating_sub(1))?
             .is_none()
         {
-            debug!("caching external addresses");
             new_addresses_cached = true;
-            self.cache_addresses(KeychainKind::External, 0, max_address)?;
+            // TODO add database function to find max child / index to start from
+            let from: u32 = self
+                .database
+                .borrow()
+                .iter_script_pubkeys(Some(KeychainKind::External))
+                .map(|scripts| scripts.len())
+                .unwrap_or(0) as u32;
+            debug!(
+                "caching external addresses from {} to max_addresses {}",
+                from, max_address
+            );
+            self.cache_addresses(KeychainKind::External, from, max_address)?;
         }
 
         if let Some(change_descriptor) = &self.change_descriptor {
@@ -396,9 +406,19 @@ where
                 .get_script_pubkey_from_path(KeychainKind::Internal, max_address.saturating_sub(1))?
                 .is_none()
             {
-                debug!("caching internal addresses");
                 new_addresses_cached = true;
-                self.cache_addresses(KeychainKind::Internal, 0, max_address)?;
+                // TODO add database function to find max child / index to start from
+                let from: u32 = self
+                    .database
+                    .borrow()
+                    .iter_script_pubkeys(Some(KeychainKind::Internal))
+                    .map(|scripts| scripts.len())
+                    .unwrap_or(0) as u32;
+                debug!(
+                    "caching internal addresses, from {} to max_addresses {}",
+                    from, max_address
+                );
+                self.cache_addresses(KeychainKind::Internal, from, max_address)?;
             }
         }
         Ok(new_addresses_cached)
@@ -1391,9 +1411,10 @@ where
         }
 
         info!(
-            "Derivation of {} addresses from {} took {} ms",
-            count,
+            "Derivation of {} addresses from {} to {} took {} ms",
+            count - from,
             from,
+            count,
             start_time.elapsed().as_millis()
         );
 
@@ -1709,7 +1730,7 @@ where
         // TODO: what if i generate an address first and cache some addresses?
         // TODO: we should sync if generating an address triggers a new batch to be stored
 
-        // We need to ensure descriptor is derivable to fullfil "missing cache", otherwise we will
+        // We need to ensure descriptor is derivable to fulfill "missing cache", otherwise we will
         // end up with an infinite loop
         let has_wildcard = self.descriptor.has_wildcard()
             && (self.change_descriptor.is_none()

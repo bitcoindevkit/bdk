@@ -493,6 +493,27 @@ macro_rules! bdk_blockchain_tests {
             }
 
             #[test]
+            fn test_sync_multiple_batches() {
+                let (wallet, blockchain, descriptors, mut test_client) = init_single_sig();
+
+                for index in 1..=310 {
+                    if index % 10 == 0 {
+                        test_client.receive(testutils! {
+                            @tx ( (@external descriptors, index) => 1_000 )
+                        });
+                    }
+                    if index % 50 == 0 {
+                        test_client.generate(1, None);
+                    }
+                }
+                wallet.sync(&blockchain, SyncOptions::default()).unwrap();
+
+                assert_eq!(wallet.get_balance().unwrap().confirmed, 30_000, "incorrect confirmed balance");
+                assert_eq!(wallet.get_balance().unwrap().untrusted_pending, 1_000, "incorrect untrusted balance");
+                assert_eq!(wallet.list_transactions(false).unwrap().len(), 31, "incorrect number of txs");
+            }
+
+            #[test]
             fn test_sync_before_and_after_receive() {
                 let (wallet, blockchain, descriptors, mut test_client) = init_single_sig();
 

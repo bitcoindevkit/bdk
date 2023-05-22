@@ -67,7 +67,7 @@ impl<'a, D: BatchDatabase> ScriptReq<'a, D> {
 
     pub fn satisfy(
         mut self,
-        // we want to know the txids assoiciated with the script and their height
+        // we want to know the txids associated with the script and their height
         txids: Vec<Vec<(Txid, Option<u32>)>>,
     ) -> Result<Request<'a, D>, Error> {
         for (txid_list, script) in txids.iter().zip(self.scripts_needed.iter()) {
