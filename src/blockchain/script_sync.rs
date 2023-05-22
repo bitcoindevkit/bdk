@@ -67,7 +67,7 @@ impl<'a, D: BatchDatabase> ScriptReq<'a, D> {
 
     pub fn satisfy(
         mut self,
-        // we want to know the txids assoiciated with the script and their height
+        // we want to know the txids associated with the script and their height
         txids: Vec<Vec<(Txid, Option<u32>)>>,
     ) -> Result<Request<'a, D>, Error> {
         for (txid_list, script) in txids.iter().zip(self.scripts_needed.iter()) {
@@ -397,7 +397,7 @@ impl<'a, D: BatchDatabase> State<'a, D> {
 
         // set every utxo we observed, unless it's already spent
         // we don't do this in the loop above as we want to know all the spent outputs before
-        // adding the non-spent to the batch in case there are new tranasactions
+        // adding the non-spent to the batch in case there are new transactions
         // that spend form each other.
         for finished_tx in &finished_txs {
             let tx = finished_tx
