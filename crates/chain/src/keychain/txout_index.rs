@@ -70,7 +70,7 @@ pub struct KeychainTxOutIndex<K> {
     lookahead: BTreeMap<K, u32>,
 }
 
-impl<K> Default for KeychainTxOutIndex<K> {
+impl<K: Ord> Default for KeychainTxOutIndex<K> {
     fn default() -> Self {
         Self {
             inner: SpkTxOutIndex::default(),

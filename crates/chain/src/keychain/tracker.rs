@@ -67,13 +67,16 @@ where
         scan: &KeychainScan<K, P>,
     ) -> Result<KeychainChangeSet<K, P>, chain_graph::UpdateError<P>> {
         // TODO: `KeychainTxOutIndex::determine_additions`
-        let mut derivation_indices = scan.last_active_indices.clone();
-        derivation_indices.retain(|keychain, index| {
-            match self.txout_index.last_revealed_index(keychain) {
-                Some(existing) => *index > existing,
-                None => true,
-            }
-        });
+        let derivation_indices = scan
+            .last_active_indices
+            .iter()
+            .filter_map(
+                |(keychain, index)| match self.txout_index.last_revealed_index(keychain) {
+                    Some(existing) if *index <= existing => None,
+                    _ => Some((keychain.clone(), *index)),
+                },
+            )
+            .collect::<BTreeMap<K, u32>>();
 
         Ok(KeychainChangeSet {
             derivation_indices: DerivationAdditions(derivation_indices),
@@ -234,7 +237,7 @@ where
         let mut untrusted_pending = 0;
         let mut confirmed = 0;
         let last_sync_height = self.chain().latest_checkpoint().map(|latest| latest.height);
-        for ((keychain, _), utxo) in self.full_utxos() {
+        for (keychain_index, utxo) in self.full_utxos() {
             let chain_position = &utxo.chain_position;
 
             match chain_position.height() {
@@ -253,7 +256,7 @@ where
                     }
                 }
                 TxHeight::Unconfirmed => {
-                    if should_trust(keychain) {
+                    if should_trust(&keychain_index.0) {
                         trusted_pending += utxo.txout.value;
                     } else {
                         untrusted_pending += utxo.txout.value;
@@ -280,7 +283,7 @@ where
     }
 }
 
-impl<K, P> Default for KeychainTracker<K, P> {
+impl<K: Ord, P: Ord> Default for KeychainTracker<K, P> {
     fn default() -> Self {
         Self {
             txout_index: Default::default(),

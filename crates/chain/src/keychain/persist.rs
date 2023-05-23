@@ -23,7 +23,7 @@ pub struct Persist<K, P, B> {
     stage: keychain::KeychainChangeSet<K, P>,
 }
 
-impl<K, P, B> Persist<K, P, B> {
+impl<K: Ord, P, B> Persist<K, P, B> {
     /// Create a new `Persist` from a [`PersistBackend`].
     pub fn new(backend: B) -> Self {
         Self {

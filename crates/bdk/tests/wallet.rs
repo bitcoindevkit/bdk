@@ -3050,7 +3050,7 @@ fn test_spend_coinbase() {
         builder.finish(),
         Err(Error::InsufficientFunds {
             needed: _,
-            available: 0
+            available: 0,
         })
     ));
 
@@ -3063,7 +3063,7 @@ fn test_spend_coinbase() {
         builder.finish(),
         Err(Error::InsufficientFunds {
             needed: _,
-            available: 0
+            available: 0,
         })
     );
 

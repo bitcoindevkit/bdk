@@ -90,7 +90,7 @@ impl<K: Ord> Append for DerivationAdditions<K> {
     }
 }
 
-impl<K> Default for DerivationAdditions<K> {
+impl<K: Ord> Default for DerivationAdditions<K> {
     fn default() -> Self {
         Self(Default::default())
     }
@@ -111,7 +111,7 @@ pub struct KeychainScan<K, P> {
     pub last_active_indices: BTreeMap<K, u32>,
 }
 
-impl<K, P> Default for KeychainScan<K, P> {
+impl<K: Ord, P: Ord> Default for KeychainScan<K, P> {
     fn default() -> Self {
         Self {
             update: Default::default(),
@@ -120,7 +120,7 @@ impl<K, P> Default for KeychainScan<K, P> {
     }
 }
 
-impl<K, P> From<ChainGraph<P>> for KeychainScan<K, P> {
+impl<K: Ord, P> From<ChainGraph<P>> for KeychainScan<K, P> {
     fn from(update: ChainGraph<P>) -> Self {
         KeychainScan {
             update,
@@ -152,7 +152,7 @@ pub struct KeychainChangeSet<K, P> {
     pub chain_graph: chain_graph::ChangeSet<P>,
 }
 
-impl<K, P> Default for KeychainChangeSet<K, P> {
+impl<K: Ord, P> Default for KeychainChangeSet<K, P> {
     fn default() -> Self {
         Self {
             chain_graph: Default::default(),
@@ -182,7 +182,7 @@ impl<K, P> KeychainChangeSet<K, P> {
     }
 }
 
-impl<K, P> From<chain_graph::ChangeSet<P>> for KeychainChangeSet<K, P> {
+impl<K: Ord, P> From<chain_graph::ChangeSet<P>> for KeychainChangeSet<K, P> {
     fn from(changeset: chain_graph::ChangeSet<P>) -> Self {
         Self {
             chain_graph: changeset,
@@ -191,7 +191,7 @@ impl<K, P> From<chain_graph::ChangeSet<P>> for KeychainChangeSet<K, P> {
     }
 }
 
-impl<K, P> From<DerivationAdditions<K>> for KeychainChangeSet<K, P> {
+impl<K: Ord, P> From<DerivationAdditions<K>> for KeychainChangeSet<K, P> {
     fn from(additions: DerivationAdditions<K>) -> Self {
         Self {
             derivation_indices: additions,

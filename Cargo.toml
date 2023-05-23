@@ -14,5 +14,5 @@ members = [
     "nursery/coin_select"
 ]
 
-[workspace.package]
-authors = ["Bitcoin Dev Kit Developers"]
+# [workspace.package]
+# authors = ["Bitcoin Dev Kit Developers"]

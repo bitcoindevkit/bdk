@@ -16,7 +16,7 @@ pub struct IndexedTxGraph<A, I> {
     graph: TxGraph<A>,
 }
 
-impl<A, I: Default> Default for IndexedTxGraph<A, I> {
+impl<A: Ord, I: Default> Default for IndexedTxGraph<A, I> {
     fn default() -> Self {
         Self {
             graph: Default::default(),
@@ -25,7 +25,7 @@ impl<A, I: Default> Default for IndexedTxGraph<A, I> {
     }
 }
 
-impl<A, I> IndexedTxGraph<A, I> {
+impl<A: Ord, I> IndexedTxGraph<A, I> {
     /// Construct a new [`IndexedTxGraph`] with a given `index`.
     pub fn new(index: I) -> Self {
         Self {
@@ -183,7 +183,7 @@ pub struct IndexedAdditions<A, IA> {
     pub index_additions: IA,
 }
 
-impl<A, IA: Default> Default for IndexedAdditions<A, IA> {
+impl<A: Ord, IA: Default> Default for IndexedAdditions<A, IA> {
     fn default() -> Self {
         Self {
             graph_additions: Default::default(),

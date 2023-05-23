@@ -30,7 +30,7 @@ pub struct ChainGraph<P = TxHeight> {
     graph: TxGraph,
 }
 
-impl<P> Default for ChainGraph<P> {
+impl<P: Ord> Default for ChainGraph<P> {
     fn default() -> Self {
         Self {
             chain: Default::default(),

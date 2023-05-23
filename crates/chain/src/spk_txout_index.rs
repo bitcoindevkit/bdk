@@ -41,7 +41,7 @@ pub struct SpkTxOutIndex<I> {
     spk_txouts: BTreeSet<(I, OutPoint)>,
 }
 
-impl<I> Default for SpkTxOutIndex<I> {
+impl<I: Ord> Default for SpkTxOutIndex<I> {
     fn default() -> Self {
         Self {
             txouts: Default::default(),

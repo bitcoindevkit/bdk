@@ -110,7 +110,7 @@ where
     fn nth(&mut self, n: usize) -> Option<Self::Item> {
         self.next_index = self
             .next_index
-            .saturating_add(u32::try_from(n).unwrap_or(u32::MAX));
+            .saturating_add(core::convert::TryFrom::try_from(n).unwrap_or(u32::MAX));
         self.next()
     }
 }

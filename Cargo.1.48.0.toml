@@ -1,0 +1,5 @@
+[workspace]
+members = [
+    "crates/chain",
+    "crates/file_store",
+]

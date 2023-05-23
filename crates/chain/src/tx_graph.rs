@@ -83,7 +83,7 @@ pub struct TxGraph<A = ()> {
     empty_outspends: HashSet<Txid>,
 }
 
-impl<A> Default for TxGraph<A> {
+impl<A: Ord> Default for TxGraph<A> {
     fn default() -> Self {
         Self {
             txs: Default::default(),
@@ -171,7 +171,7 @@ impl<A> TxGraph<A> {
                 TxNodeInternal::Partial(txouts) => Some(
                     txouts
                         .iter()
-                        .map(|(&vout, txout)| (OutPoint::new(*txid, vout), txout)),
+                        .map(move |(&vout, txout)| (OutPoint::new(*txid, vout), txout)),
                 ),
             })
             .flatten()
@@ -384,7 +384,7 @@ impl<A: Clone + Ord> TxGraph<A> {
         update.txs.insert(
             outpoint.txid,
             (
-                TxNodeInternal::Partial([(outpoint.vout, txout)].into()),
+                TxNodeInternal::Partial(core::iter::once((outpoint.vout, txout)).collect()),
                 BTreeSet::new(),
                 0,
             ),
@@ -989,7 +989,7 @@ pub struct Additions<A = ()> {
     pub last_seen: BTreeMap<Txid, u64>,
 }
 
-impl<A> Default for Additions<A> {
+impl<A: Ord> Default for Additions<A> {
     fn default() -> Self {
         Self {
             tx: Default::default(),

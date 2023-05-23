@@ -1,7 +1,7 @@
 [package]
 name = "wallet_electrum_example"
 version = "0.1.0"
-edition = "2021"
+edition = "2018"
 
 [dependencies]
 bdk = { path = "../../crates/bdk" }

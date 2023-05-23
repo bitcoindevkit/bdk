@@ -347,7 +347,7 @@ impl<P> AsRef<SparseChain<P>> for SparseChain<P> {
     }
 }
 
-impl<P> Default for SparseChain<P> {
+impl<P: Ord> Default for SparseChain<P> {
     fn default() -> Self {
         Self {
             checkpoints: Default::default(),
