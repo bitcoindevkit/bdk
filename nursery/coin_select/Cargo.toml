@@ -10,6 +10,7 @@ license = "MIT OR Apache-2.0"
 [dev-dependencies]
 rand = "0.8"
 proptest = "1"
+bitcoin = "0.30"
 
 [features]
 default = ["std"]

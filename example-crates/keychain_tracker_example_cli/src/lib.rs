@@ -15,7 +15,7 @@ use bdk_chain::{
     sparse_chain::{self, ChainPosition},
     DescriptorExt, FullTxOut,
 };
-use bdk_coin_select::{coin_select_bnb, CoinSelector, CoinSelectorOpt, WeightedValue};
+use bdk_coin_select::{coin_select_bnb, CoinSelector, CoinSelectorOpt, Candidate};
 use bdk_file_store::KeychainStore;
 use clap::{Parser, Subcommand};
 use std::{
@@ -352,7 +352,7 @@ pub fn create_tx<P: ChainPosition>(
     let wv_candidates = candidates
         .iter()
         .map(|(plan, utxo)| {
-            WeightedValue::new(
+            Candidate::new(
                 utxo.txout.value,
                 plan.expected_weight() as _,
                 plan.witness_version().is_some(),

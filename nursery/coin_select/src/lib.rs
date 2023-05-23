@@ -1,4 +1,9 @@
 #![no_std]
+#![warn(missing_docs)]
+#![doc = include_str!("../README.md")]
+#![deny(unsafe_code)]
+
+
 #[allow(unused)]
 #[macro_use]
 extern crate alloc;
@@ -7,6 +12,7 @@ extern crate alloc;
 #[allow(unused)]
 #[macro_use]
 extern crate std;
+
 
 mod coin_selector;
 pub mod float;
@@ -19,9 +25,9 @@ mod feerate;
 pub use feerate::*;
 pub mod change_policy;
 
-/// Txin "base" fields include `outpoint` (32+4) and `nSequence` (4). This does not include
-/// `scriptSigLen`, `scriptSig` or witness stack length
-pub const TXIN_BASE_WEIGHT: u32 = (32 + 4 + 4) * 4;
+/// Txin "base" fields include `outpoint` (32+4) and `nSequence` (4) and 1 byte for the scriptSig
+/// length.
+pub const TXIN_BASE_WEIGHT: u32 = (32 + 4 + 4 + 1) * 4;
 
 /// The weight of a TXOUT without the `scriptPubkey` (and script pubkey length field).
 /// Just the weight of the value field.

@@ -1,5 +1,5 @@
 use super::change_lower_bound;
-use crate::{bnb::BnBMetric, float::Ordf32, CoinSelector, Drain, FeeRate, Target, WeightedValue};
+use crate::{bnb::BnBMetric, float::Ordf32, CoinSelector, Drain, FeeRate, Target, Candidate};
 
 /// The "waste" metric used by bitcoin core.
 ///
@@ -226,7 +226,7 @@ where
 /// tells you how much weight such a perfect candidate would have if it had the same value per
 /// weight unit as `candidate`. This is useful for estimating a lower weight bound for a perfect
 /// match.
-fn slurp_wv(candidate: WeightedValue, value_to_slurp: i64, feerate: FeeRate) -> f32 {
+fn slurp_wv(candidate: Candidate, value_to_slurp: i64, feerate: FeeRate) -> f32 {
     // the value per weight unit this candidate offers at feerate
     let value_per_wu = (candidate.value as f32 / candidate.weight as f32) - feerate.spwu();
     // return how much weight we need

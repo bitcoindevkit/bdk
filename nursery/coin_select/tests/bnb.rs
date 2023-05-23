@@ -1,4 +1,4 @@
-use bdk_coin_select::{bnb::BnBMetric, CoinSelector, Drain, FeeRate, Target, WeightedValue};
+use bdk_coin_select::{bnb::BnBMetric, CoinSelector, Drain, FeeRate, Target, Candidate};
 #[macro_use]
 extern crate alloc;
 
@@ -9,10 +9,10 @@ use proptest::{
 };
 use rand::{Rng, RngCore};
 
-fn test_wv(mut rng: impl RngCore) -> impl Iterator<Item = WeightedValue> {
+fn test_wv(mut rng: impl RngCore) -> impl Iterator<Item = Candidate> {
     core::iter::repeat_with(move || {
         let value = rng.gen_range(0..1_000);
-        WeightedValue {
+        Candidate {
             value,
             weight: 100,
             input_count: rng.gen_range(1..2),
@@ -57,7 +57,7 @@ fn bnb_finds_an_exact_solution_in_n_iter() {
     let mut rng = TestRng::deterministic_rng(RngAlgorithm::ChaCha);
     let mut wv = test_wv(&mut rng);
 
-    let solution: Vec<WeightedValue> = (0..solution_len).map(|_| wv.next().unwrap()).collect();
+    let solution: Vec<Candidate> = (0..solution_len).map(|_| wv.next().unwrap()).collect();
     let solution_weight = solution.iter().map(|sol| sol.weight).sum();
     let target = solution.iter().map(|c| c.value).sum();
 
@@ -149,7 +149,7 @@ proptest! {
         let mut rng = TestRng::deterministic_rng(RngAlgorithm::ChaCha);
         let mut wv = test_wv(&mut rng);
 
-        let solution: Vec<WeightedValue> = (0..solution_len).map(|_| wv.next().unwrap()).collect();
+        let solution: Vec<Candidate> = (0..solution_len).map(|_| wv.next().unwrap()).collect();
         let target = solution.iter().map(|c| c.value).sum();
         let solution_weight = solution.iter().map(|sol| sol.weight).sum();
 

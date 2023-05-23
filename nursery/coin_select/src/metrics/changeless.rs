@@ -1,5 +1,5 @@
 use super::change_lower_bound;
-use crate::{bnb::BnBMetric, float::Ordf32, CoinSelector, Drain, Target};
+use crate::{bnb::BnBMetric, CoinSelector, Drain, Target};
 
 pub struct Changeless<'c, C> {
     pub target: Target,

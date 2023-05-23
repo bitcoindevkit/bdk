@@ -1,5 +1,5 @@
 use bdk_coin_select::{
-    change_policy, float::Ordf32, metrics, CoinSelector, Drain, FeeRate, Target, WeightedValue,
+    change_policy, float::Ordf32, metrics, CoinSelector, Drain, FeeRate, Target, Candidate,
 };
 use proptest::{
     prelude::*,
@@ -7,10 +7,10 @@ use proptest::{
 };
 use rand::prelude::IteratorRandom;
 
-fn test_wv(mut rng: impl RngCore) -> impl Iterator<Item = WeightedValue> {
+fn test_wv(mut rng: impl RngCore) -> impl Iterator<Item = Candidate> {
     core::iter::repeat_with(move || {
         let value = rng.gen_range(0..1_000);
-        WeightedValue {
+        Candidate {
             value,
             weight: rng.gen_range(0..100),
             input_count: rng.gen_range(1..2),

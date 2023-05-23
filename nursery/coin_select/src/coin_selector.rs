@@ -4,88 +4,6 @@ use crate::float::FloatExt;
 use crate::{bnb::BnBMetric, float::Ordf32, FeeRate};
 use alloc::{borrow::Cow, collections::BTreeSet, vec::Vec};
 
-/// A [`WeightedValue`] represents an input candidate for [`CoinSelector`]. This can either be a
-/// single UTXO, or a group of UTXOs that should be spent together.
-#[derive(Debug, Clone, Copy)]
-pub struct WeightedValue {
-    /// Total value of the UTXO(s) that this [`WeightedValue`] represents.
-    pub value: u64,
-    /// Total weight of including this/these UTXO(s).
-    /// `txin` fields: `prevout`, `nSequence`, `scriptSigLen`, `scriptSig`, `scriptWitnessLen`,
-    /// `scriptWitness` should all be included.
-    pub weight: u32,
-    /// Total number of inputs; so we can calculate extra `varint` weight due to `vin` len changes.
-    pub input_count: usize,
-    /// Whether this [`WeightedValue`] contains at least one segwit spend.
-    pub is_segwit: bool,
-}
-
-impl WeightedValue {
-    /// Create a new [`WeightedValue`] that represents a single input.
-    ///
-    /// `satisfaction_weight` is the weight of `scriptSigLen + scriptSig + scriptWitnessLen +
-    /// scriptWitness`.
-    pub fn new(value: u64, satisfaction_weight: u32, is_segwit: bool) -> WeightedValue {
-        let weight = TXIN_BASE_WEIGHT + satisfaction_weight;
-        WeightedValue {
-            value,
-            weight,
-            input_count: 1,
-            is_segwit,
-        }
-    }
-
-    /// Effective value of this input candidate: `actual_value - input_weight * feerate (sats/wu)`.
-    pub fn effective_value(&self, feerate: FeeRate) -> Ordf32 {
-        Ordf32(self.value as f32 - (self.weight as f32 * feerate.spwu()))
-    }
-
-    /// Value per weight unit
-    pub fn value_pwu(&self) -> Ordf32 {
-        Ordf32(self.value as f32 / self.weight as f32)
-    }
-}
-
-/// A drain (A.K.A. change) output.
-/// Technically it could represent multiple outputs.
-///
-/// These are usually created by a [`change_policy`].
-///
-/// [`change_policy`]: crate::change_policy
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
-pub struct Drain {
-    /// The weight of adding this drain
-    pub weight: u32,
-    /// The value that should be assigned to the drain
-    pub value: u64,
-    /// The weight of spending this drain
-    pub spend_weight: u32,
-}
-
-impl Drain {
-    /// A drian representing no drain at all.
-    pub fn none() -> Self {
-        Self::default()
-    }
-
-    /// is the "none" drain
-    pub fn is_none(&self) -> bool {
-        self == &Drain::none()
-    }
-
-    /// Is not the "none" drain
-    pub fn is_some(&self) -> bool {
-        !self.is_none()
-    }
-
-    /// The waste of adding this drain to a transaction according to the [waste metric].
-    ///
-    /// [waste metric]; https://bitcoin.stackexchange.com/questions/113622/what-does-waste-metric-mean-in-the-context-of-coin-selection
-    pub fn waste(&self, feerate: FeeRate, long_term_feerate: FeeRate) -> f32 {
-        self.weight as f32 * feerate.spwu() + self.spend_weight as f32 * long_term_feerate.spwu()
-    }
-}
-
 /// [`CoinSelector`] is responsible for selecting and deselecting from a set of canididates.
 ///
 /// You can do this manually by calling methods like [`select`] or automatically with methods like [`branch_and_bound`].
@@ -95,7 +13,7 @@ impl Drain {
 #[derive(Debug, Clone)]
 pub struct CoinSelector<'a> {
     base_weight: u32,
-    candidates: &'a [WeightedValue],
+    candidates: &'a [Candidate],
     selected: Cow<'a, BTreeSet<usize>>,
     banned: Cow<'a, BTreeSet<usize>>,
     candidate_order: Cow<'a, Vec<usize>>,
@@ -132,7 +50,7 @@ impl<'a> CoinSelector<'a> {
     /// slice you pass in.
     // TODO: constructor should be number of outputs and output weight instead so we can keep track
     // of varint number of outputs
-    pub fn new(candidates: &'a [WeightedValue], base_weight: u32) -> Self {
+    pub fn new(candidates: &'a [Candidate], base_weight: u32) -> Self {
         Self {
             base_weight,
             candidates,
@@ -146,7 +64,7 @@ impl<'a> CoinSelector<'a> {
     /// index with the candidate.
     pub fn candidates(
         &self,
-    ) -> impl DoubleEndedIterator<Item = (usize, WeightedValue)> + ExactSizeIterator + '_ {
+    ) -> impl DoubleEndedIterator<Item = (usize, Candidate)> + ExactSizeIterator + '_ {
         self.candidate_order
             .iter()
             .map(move |i| (*i, self.candidates[*i]))
@@ -154,7 +72,7 @@ impl<'a> CoinSelector<'a> {
 
     /// Get the candidate at `index`. `index` refers to its position in the original `candidates` slice passed
     /// into [`CoinSelector::new`].
-    pub fn candidate(&self, index: usize) -> WeightedValue {
+    pub fn candidate(&self, index: usize) -> Candidate {
         self.candidates[index]
     }
 
@@ -338,7 +256,7 @@ impl<'a> CoinSelector<'a> {
 
     pub fn sort_candidates_by<F>(&mut self, mut cmp: F)
     where
-        F: FnMut((usize, WeightedValue), (usize, WeightedValue)) -> core::cmp::Ordering,
+        F: FnMut((usize, Candidate), (usize, Candidate)) -> core::cmp::Ordering,
     {
         let order = self.candidate_order.to_mut();
         let candidates = &self.candidates;
@@ -347,7 +265,7 @@ impl<'a> CoinSelector<'a> {
 
     pub fn sort_candidates_by_key<F, K>(&mut self, mut key_fn: F)
     where
-        F: FnMut((usize, WeightedValue)) -> K,
+        F: FnMut((usize, Candidate)) -> K,
         K: Ord,
     {
         self.sort_candidates_by(|a, b| key_fn(a).cmp(&key_fn(b)))
@@ -383,13 +301,13 @@ impl<'a> CoinSelector<'a> {
         waste
     }
 
-    pub fn selected(&self) -> impl ExactSizeIterator<Item = (usize, WeightedValue)> + '_ {
+    pub fn selected(&self) -> impl ExactSizeIterator<Item = (usize, Candidate)> + '_ {
         self.selected
             .iter()
             .map(move |&index| (index, self.candidates[index]))
     }
 
-    pub fn unselected(&self) -> impl DoubleEndedIterator<Item = (usize, WeightedValue)> + '_ {
+    pub fn unselected(&self) -> impl DoubleEndedIterator<Item = (usize, Candidate)> + '_ {
         self.unselected_indexes()
             .map(move |i| (i, self.candidates[i]))
     }
@@ -468,7 +386,7 @@ pub struct SelectIter<'a> {
 }
 
 impl<'a> Iterator for SelectIter<'a> {
-    type Item = (CoinSelector<'a>, usize, WeightedValue);
+    type Item = (CoinSelector<'a>, usize, Candidate);
 
     fn next(&mut self) -> Option<Self::Item> {
         let (index, wv) = self.cs.unselected().next()?;
@@ -506,5 +424,87 @@ impl<'a> core::fmt::Display for CoinSelector<'a> {
         }
 
         write!(f, "]")
+    }
+}
+
+/// A `Candidate` represents an input candidate for [`CoinSelector`]. This can either be a
+/// single UTXO, or a group of UTXOs that should be spent together.
+#[derive(Debug, Clone, Copy)]
+pub struct Candidate {
+    /// Total value of the UTXO(s) that this [`Candidate`] represents.
+    pub value: u64,
+    /// Total weight of including this/these UTXO(s).
+    /// `txin` fields: `prevout`, `nSequence`, `scriptSigLen`, `scriptSig`, `scriptWitnessLen`,
+    /// `scriptWitness` should all be included.
+    pub weight: u32,
+    /// Total number of inputs; so we can calculate extra `varint` weight due to `vin` len changes.
+    pub input_count: usize,
+    /// Whether this [`Candidate`] contains at least one segwit spend.
+    pub is_segwit: bool,
+}
+
+impl Candidate {
+    /// Create a new [`Candidate`] that represents a single input.
+    ///
+    /// `satisfaction_weight` is the weight of `scriptSigLen + scriptSig + scriptWitnessLen +
+    /// scriptWitness`.
+    pub fn new(value: u64, satisfaction_weight: u32, is_segwit: bool) -> Candidate {
+        let weight = TXIN_BASE_WEIGHT + satisfaction_weight;
+        Candidate {
+            value,
+            weight,
+            input_count: 1,
+            is_segwit,
+        }
+    }
+
+    /// Effective value of this input candidate: `actual_value - input_weight * feerate (sats/wu)`.
+    pub fn effective_value(&self, feerate: FeeRate) -> Ordf32 {
+        Ordf32(self.value as f32 - (self.weight as f32 * feerate.spwu()))
+    }
+
+    /// Value per weight unit
+    pub fn value_pwu(&self) -> Ordf32 {
+        Ordf32(self.value as f32 / self.weight as f32)
+    }
+}
+
+/// A drain (A.K.A. change) output.
+/// Technically it could represent multiple outputs.
+///
+/// These are usually created by a [`change_policy`].
+///
+/// [`change_policy`]: crate::change_policy
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
+pub struct Drain {
+    /// The weight of adding this drain
+    pub weight: u32,
+    /// The value that should be assigned to the drain
+    pub value: u64,
+    /// The weight of spending this drain
+    pub spend_weight: u32,
+}
+
+impl Drain {
+    /// A drian representing no drain at all.
+    pub fn none() -> Self {
+        Self::default()
+    }
+
+    /// is the "none" drain
+    pub fn is_none(&self) -> bool {
+        self == &Drain::none()
+    }
+
+    /// Is not the "none" drain
+    pub fn is_some(&self) -> bool {
+        !self.is_none()
+    }
+
+    /// The waste of adding this drain to a transaction according to the [waste metric].
+    ///
+    /// [waste metric]; https://bitcoin.stackexchange.com/questions/113622/what-does-waste-metric-mean-in-the-context-of-coin-selection
+    pub fn waste(&self, feerate: FeeRate, long_term_feerate: FeeRate) -> f32 {
+        self.weight as f32 * feerate.spwu() + self.spend_weight as f32 * long_term_feerate.spwu()
     }
 }
