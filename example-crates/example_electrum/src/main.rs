@@ -13,7 +13,7 @@ use bdk_chain::{
 };
 use bdk_electrum::{
     electrum_client::{self, ElectrumApi},
-    v2::{ElectrumExt, ElectrumUpdate},
+    ElectrumExt, ElectrumUpdate,
 };
 use example_cli::{
     anyhow::{self, Context},

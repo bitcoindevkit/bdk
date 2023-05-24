@@ -1,9 +1,0 @@
-[package]
-name = "keychain_tracker_electrum_example"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-bdk_chain = { path = "../../crates/chain", features = ["serde"] }
-bdk_electrum = { path = "../../crates/electrum" }
-keychain_tracker_example_cli = { path = "../keychain_tracker_example_cli"}

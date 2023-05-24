@@ -16,7 +16,7 @@ use bdk_chain::{
         descriptor::{DescriptorSecretKey, KeyMap},
         Descriptor, DescriptorPublicKey,
     },
-    Anchor, Append, ChainOracle, DescriptorExt, FullTxOut, ObservedAs, Persist, PersistBackend,
+    Anchor, Append, ChainOracle, DescriptorExt, FullTxOut, Persist, PersistBackend,
 };
 pub use bdk_file_store;
 pub use clap;
@@ -607,7 +607,7 @@ pub fn planned_utxos<A: Anchor, O: ChainOracle, K: Clone + bdk_tmp_plan::CanDeri
     graph: &KeychainTxGraph<A>,
     chain: &O,
     assets: &bdk_tmp_plan::Assets<K>,
-) -> Result<Vec<(bdk_tmp_plan::Plan<K>, FullTxOut<ObservedAs<A>>)>, O::Error> {
+) -> Result<Vec<(bdk_tmp_plan::Plan<K>, FullTxOut<A>)>, O::Error> {
     let chain_tip = chain.get_chain_tip()?.unwrap_or_default();
     let outpoints = graph.index.outpoints().iter().cloned();
     graph
@@ -615,7 +615,7 @@ pub fn planned_utxos<A: Anchor, O: ChainOracle, K: Clone + bdk_tmp_plan::CanDeri
         .try_filter_chain_unspents(chain, chain_tip, outpoints)
         .filter_map(
             #[allow(clippy::type_complexity)]
-            |r| -> Option<Result<(bdk_tmp_plan::Plan<K>, FullTxOut<ObservedAs<A>>), _>> {
+            |r| -> Option<Result<(bdk_tmp_plan::Plan<K>, FullTxOut<A>), _>> {
                 let (k, i, full_txo) = match r {
                     Err(err) => return Some(Err(err)),
                     Ok(((k, i), full_txo)) => (k, i, full_txo),

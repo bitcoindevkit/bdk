@@ -13,12 +13,12 @@ readme = "README.md"
 
 [dependencies]
 bdk_chain = { path = "../chain", version = "0.4.0", features = ["serde", "miniscript"] }
-esplora-client = { version = "0.3", default-features = false }
+esplora-client = { version = "0.5", default-features = false }
 async-trait = { version = "0.1.66", optional = true }
 futures = { version = "0.3.26", optional = true }
 
 [features]
-default = ["async-https", "blocking"]
+default = ["blocking"]
 async = ["async-trait", "futures", "esplora-client/async"]
 async-https = ["async", "esplora-client/async-https"]
 blocking = ["esplora-client/blocking"]

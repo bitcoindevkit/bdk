@@ -27,7 +27,7 @@ To use the extension traits:
 // for blocking
 use bdk_esplora::EsploraExt;
 // for async
-use bdk_esplora::EsploraAsyncExt;
+// use bdk_esplora::EsploraAsyncExt;
 ```
 
 For full examples, refer to [`example-crates/wallet_esplora`](https://github.com/bitcoindevkit/bdk/tree/master/example-crates/wallet_esplora) (blocking) and [`example-crates/wallet_esplora_async`](https://github.com/bitcoindevkit/bdk/tree/master/example-crates/wallet_esplora_async).

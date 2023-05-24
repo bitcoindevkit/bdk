@@ -8,7 +8,7 @@ use bdk_chain::{
     keychain::{Balance, DerivationAdditions, KeychainTxOutIndex},
     local_chain::LocalChain,
     tx_graph::Additions,
-    BlockId, ConfirmationHeightAnchor, ObservedAs,
+    BlockId, ChainPosition, ConfirmationHeightAnchor,
 };
 use bitcoin::{secp256k1::Secp256k1, BlockHash, OutPoint, Script, Transaction, TxIn, TxOut};
 use miniscript::Descriptor;
@@ -266,7 +266,7 @@ fn test_list_owned_txouts() {
             let confirmed_txouts_txid = txouts
                 .iter()
                 .filter_map(|(_, full_txout)| {
-                    if matches!(full_txout.chain_position, ObservedAs::Confirmed(_)) {
+                    if matches!(full_txout.chain_position, ChainPosition::Confirmed(_)) {
                         Some(full_txout.outpoint.txid)
                     } else {
                         None
@@ -277,7 +277,7 @@ fn test_list_owned_txouts() {
             let unconfirmed_txouts_txid = txouts
                 .iter()
                 .filter_map(|(_, full_txout)| {
-                    if matches!(full_txout.chain_position, ObservedAs::Unconfirmed(_)) {
+                    if matches!(full_txout.chain_position, ChainPosition::Unconfirmed(_)) {
                         Some(full_txout.outpoint.txid)
                     } else {
                         None
@@ -288,7 +288,7 @@ fn test_list_owned_txouts() {
             let confirmed_utxos_txid = utxos
                 .iter()
                 .filter_map(|(_, full_txout)| {
-                    if matches!(full_txout.chain_position, ObservedAs::Confirmed(_)) {
+                    if matches!(full_txout.chain_position, ChainPosition::Confirmed(_)) {
                         Some(full_txout.outpoint.txid)
                     } else {
                         None
@@ -299,7 +299,7 @@ fn test_list_owned_txouts() {
             let unconfirmed_utxos_txid = utxos
                 .iter()
                 .filter_map(|(_, full_txout)| {
-                    if matches!(full_txout.chain_position, ObservedAs::Unconfirmed(_)) {
+                    if matches!(full_txout.chain_position, ChainPosition::Unconfirmed(_)) {
                         Some(full_txout.outpoint.txid)
                     } else {
                         None
