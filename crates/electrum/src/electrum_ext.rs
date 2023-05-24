@@ -11,8 +11,6 @@ use std::{
     fmt::Debug,
 };
 
-use crate::InternalError;
-
 #[derive(Debug, Clone)]
 pub struct ElectrumUpdate<K, A> {
     pub graph_update: HashMap<Txid, BTreeSet<A>>,
@@ -209,57 +207,42 @@ impl ElectrumExt<ConfirmationHeightAnchor> for Client {
 
             if !request_spks.is_empty() {
                 if !scanned_spks.is_empty() {
-                    let mut scanned_spk_iter = scanned_spks
-                        .iter()
-                        .map(|(i, (spk, _))| (i.clone(), spk.clone()));
-                    match populate_with_spks(
+                    scanned_spks.append(&mut populate_with_spks(
                         self,
                         anchor_block,
                         &mut update,
-                        &mut scanned_spk_iter,
+                        &mut scanned_spks
+                            .iter()
+                            .map(|(i, (spk, _))| (i.clone(), spk.clone())),
                         stop_gap,
                         batch_size,
-                    ) {
-                        Err(InternalError::Reorg) => continue,
-                        Err(InternalError::ElectrumError(e)) => return Err(e),
-                        Ok(mut spks) => scanned_spks.append(&mut spks),
-                    };
+                    )?);
                 }
                 for (keychain, keychain_spks) in &mut request_spks {
-                    match populate_with_spks(
-                        self,
-                        anchor_block,
-                        &mut update,
-                        keychain_spks,
-                        stop_gap,
-                        batch_size,
-                    ) {
-                        Err(InternalError::Reorg) => continue,
-                        Err(InternalError::ElectrumError(e)) => return Err(e),
-                        Ok(spks) => scanned_spks.extend(
-                            spks.into_iter()
-                                .map(|(spk_i, spk)| ((keychain.clone(), spk_i), spk)),
-                        ),
-                    };
+                    scanned_spks.extend(
+                        populate_with_spks(
+                            self,
+                            anchor_block,
+                            &mut update,
+                            keychain_spks,
+                            stop_gap,
+                            batch_size,
+                        )?
+                        .into_iter()
+                        .map(|(spk_i, spk)| ((keychain.clone(), spk_i), spk)),
+                    );
                 }
             }
 
-            match populate_with_txids(self, anchor_block, &mut update, &mut txids.iter().cloned()) {
-                Err(InternalError::Reorg) => continue,
-                Err(InternalError::ElectrumError(e)) => return Err(e),
-                Ok(_) => {}
-            }
+            populate_with_txids(self, anchor_block, &mut update, &mut txids.iter().cloned())?;
 
-            match populate_with_outpoints(
+            // [TODO] cache transactions to reduce bandwidth
+            let _txs = populate_with_outpoints(
                 self,
                 anchor_block,
                 &mut update,
                 &mut outpoints.iter().cloned(),
-            ) {
-                Err(InternalError::Reorg) => continue,
-                Err(InternalError::ElectrumError(e)) => return Err(e),
-                Ok(_txs) => { /* [TODO] cache full txs to reduce bandwidth */ }
-            }
+            )?;
 
             // check for reorgs during scan process
             let server_blockhash = self
@@ -366,7 +349,7 @@ fn populate_with_outpoints<K>(
     anchor_block: BlockId,
     update: &mut ElectrumUpdate<K, ConfirmationHeightAnchor>,
     outpoints: &mut impl Iterator<Item = OutPoint>,
-) -> Result<HashMap<Txid, Transaction>, InternalError> {
+) -> Result<HashMap<Txid, Transaction>, Error> {
     let mut full_txs = HashMap::new();
     for outpoint in outpoints {
         let txid = outpoint.txid;
@@ -428,12 +411,12 @@ fn populate_with_txids<K>(
     anchor_block: BlockId,
     update: &mut ElectrumUpdate<K, ConfirmationHeightAnchor>,
     txids: &mut impl Iterator<Item = Txid>,
-) -> Result<(), InternalError> {
+) -> Result<(), Error> {
     for txid in txids {
         let tx = match client.transaction_get(&txid) {
             Ok(tx) => tx,
             Err(electrum_client::Error::Protocol(_)) => continue,
-            Err(other_err) => return Err(other_err.into()),
+            Err(other_err) => return Err(other_err),
         };
 
         let spk = tx
@@ -466,7 +449,7 @@ fn populate_with_spks<K, I: Ord + Clone>(
     spks: &mut impl Iterator<Item = (I, Script)>,
     stop_gap: usize,
     batch_size: usize,
-) -> Result<BTreeMap<I, (Script, bool)>, InternalError> {
+) -> Result<BTreeMap<I, (Script, bool)>, Error> {
     let mut unused_spk_count = 0_usize;
     let mut scanned_spks = BTreeMap::new();
 

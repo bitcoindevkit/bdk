@@ -25,7 +25,7 @@ use bdk_chain::{
     keychain::{KeychainTxOutIndex, LocalChangeSet, LocalUpdate},
     local_chain::{self, LocalChain, UpdateNotConnectedError},
     tx_graph::{CanonicalTx, TxGraph},
-    Append, BlockId, ConfirmationTime, ConfirmationTimeAnchor, FullTxOut, ObservedAs, Persist,
+    Append, BlockId, ChainPosition, ConfirmationTime, ConfirmationTimeAnchor, FullTxOut, Persist,
     PersistBackend,
 };
 use bitcoin::consensus::encode::serialize;
@@ -1015,7 +1015,7 @@ impl<D> Wallet<D> {
         let pos = graph
             .get_chain_position(&self.chain, chain_tip, txid)
             .ok_or(Error::TransactionNotFound)?;
-        if let ObservedAs::Confirmed(_) = pos {
+        if let ChainPosition::Confirmed(_) = pos {
             return Err(Error::TransactionConfirmed);
         }
 
@@ -1258,8 +1258,8 @@ impl<D> Wallet<D> {
                 .graph()
                 .get_chain_position(&self.chain, chain_tip, input.previous_output.txid)
                 .map(|observed_as| match observed_as {
-                    ObservedAs::Confirmed(a) => a.confirmation_height,
-                    ObservedAs::Unconfirmed(_) => u32::MAX,
+                    ChainPosition::Confirmed(a) => a.confirmation_height,
+                    ChainPosition::Unconfirmed(_) => u32::MAX,
                 });
             let current_height = sign_options
                 .assume_height
@@ -1775,7 +1775,7 @@ where
 fn new_local_utxo(
     keychain: KeychainKind,
     derivation_index: u32,
-    full_txo: FullTxOut<ObservedAs<ConfirmationTimeAnchor>>,
+    full_txo: FullTxOut<ConfirmationTimeAnchor>,
 ) -> LocalUtxo {
     LocalUtxo {
         outpoint: full_txo.outpoint,

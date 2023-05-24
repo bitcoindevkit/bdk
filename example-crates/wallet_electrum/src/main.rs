@@ -10,7 +10,7 @@ use bdk::bitcoin::Address;
 use bdk::SignOptions;
 use bdk::{bitcoin::Network, Wallet};
 use bdk_electrum::electrum_client::{self, ElectrumApi};
-use bdk_electrum::v2::ElectrumExt;
+use bdk_electrum::ElectrumExt;
 use bdk_file_store::Store;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

@@ -8,8 +8,8 @@ use bdk::Error;
 use bdk::FeeRate;
 use bdk::KeychainKind;
 use bdk_chain::BlockId;
+use bdk_chain::ConfirmationTime;
 use bdk_chain::COINBASE_MATURITY;
-use bdk_chain::{ConfirmationTime, TxHeight};
 use bitcoin::hashes::Hash;
 use bitcoin::BlockHash;
 use bitcoin::Script;
@@ -23,7 +23,7 @@ use core::str::FromStr;
 mod common;
 use common::*;
 
-fn receive_output(wallet: &mut Wallet, value: u64, height: TxHeight) -> OutPoint {
+fn receive_output(wallet: &mut Wallet, value: u64, height: ConfirmationTime) -> OutPoint {
     let tx = Transaction {
         version: 1,
         lock_time: PackedLockTime(0),
@@ -34,18 +34,7 @@ fn receive_output(wallet: &mut Wallet, value: u64, height: TxHeight) -> OutPoint
         }],
     };
 
-    wallet
-        .insert_tx(
-            tx.clone(),
-            match height {
-                TxHeight::Confirmed(height) => ConfirmationTime::Confirmed {
-                    height,
-                    time: 42_000,
-                },
-                TxHeight::Unconfirmed => ConfirmationTime::Unconfirmed { last_seen: 0 },
-            },
-        )
-        .unwrap();
+    wallet.insert_tx(tx.clone(), height).unwrap();
 
     OutPoint {
         txid: tx.txid(),
@@ -54,7 +43,10 @@ fn receive_output(wallet: &mut Wallet, value: u64, height: TxHeight) -> OutPoint
 }
 
 fn receive_output_in_latest_block(wallet: &mut Wallet, value: u64) -> OutPoint {
-    let height = wallet.latest_checkpoint().map(|id| id.height).into();
+    let height = match wallet.latest_checkpoint() {
+        Some(BlockId { height, .. }) => ConfirmationTime::Confirmed { height, time: 0 },
+        None => ConfirmationTime::Unconfirmed { last_seen: 0 },
+    };
     receive_output(wallet, value, height)
 }
 
@@ -1941,7 +1933,11 @@ fn test_bump_fee_unconfirmed_inputs_only() {
     let (psbt, __details) = builder.finish().unwrap();
     // Now we receive one transaction with 0 confirmations. We won't be able to use that for
     // fee bumping, as it's still unconfirmed!
-    receive_output(&mut wallet, 25_000, TxHeight::Unconfirmed);
+    receive_output(
+        &mut wallet,
+        25_000,
+        ConfirmationTime::Unconfirmed { last_seen: 0 },
+    );
     let mut tx = psbt.extract_tx();
     let txid = tx.txid();
     for txin in &mut tx.input {
@@ -1966,7 +1962,7 @@ fn test_bump_fee_unconfirmed_input() {
     let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
     // We receive a tx with 0 confirmations, which will be used as an input
     // in the drain tx.
-    receive_output(&mut wallet, 25_000, TxHeight::Unconfirmed);
+    receive_output(&mut wallet, 25_000, ConfirmationTime::unconfirmed(0));
     let mut builder = wallet.build_tx();
     builder
         .drain_wallet()

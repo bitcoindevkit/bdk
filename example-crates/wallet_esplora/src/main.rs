@@ -10,7 +10,7 @@ use bdk::{
     wallet::AddressIndex,
     SignOptions, Wallet,
 };
-use bdk_esplora::{esplora_client, v2::EsploraExt};
+use bdk_esplora::{esplora_client, EsploraExt};
 use bdk_file_store::Store;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

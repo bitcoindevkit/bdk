@@ -130,8 +130,8 @@ impl FullyNodedExport {
                 .transactions()
                 .next()
                 .map_or(0, |canonical_tx| match canonical_tx.observed_as {
-                    bdk_chain::ObservedAs::Confirmed(a) => a.confirmation_height,
-                    bdk_chain::ObservedAs::Unconfirmed(_) => 0,
+                    bdk_chain::ChainPosition::Confirmed(a) => a.confirmation_height,
+                    bdk_chain::ChainPosition::Unconfirmed(_) => 0,
                 })
         } else {
             0

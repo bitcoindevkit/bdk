@@ -5,7 +5,7 @@ use bdk::{
     wallet::AddressIndex,
     SignOptions, Wallet,
 };
-use bdk_esplora::{esplora_client, v2::EsploraAsyncExt};
+use bdk_esplora::{esplora_client, EsploraAsyncExt};
 use bdk_file_store::Store;
 
 const DB_MAGIC: &str = "bdk_wallet_esplora_async_example";
