@@ -10,8 +10,8 @@ use bdk_coin_select::{CoinSelector, Candidate, TXIN_BASE_WEIGHT};
 use bitcoin::{ Transaction, TxIn };
 
 // You should use miniscript to figure out the satisfaction weight for your coins!
-const TR_SATISFACTION_WEIGHT: u32 = 66;
-const TR_INPUT_WEIGHT: u32 = TXIN_BASE_WEIGHT + TR_SATISFACTION_WEIGHT;
+const tr_satisfaction_weight: u32 = 66;
+const tr_input_weight: u32 = txin_base_weight + tr_satisfaction_weight;
 
 
 let candidates = vec![
@@ -52,7 +52,8 @@ let base_weight = Transaction {
 
 panic!("{}", base_weight);
 
-let coin_selector = CoinSelector::new(&candidates,base_weight);
+let mut coin_selector = CoinSelector::new(&candidates,base_weight);
+
 
 ```
 

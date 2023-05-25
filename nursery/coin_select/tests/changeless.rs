@@ -110,7 +110,7 @@ fn random_minimal_selection<'a>(
 ) -> CoinSelector<'a> {
     let mut cs = cs.clone();
     let mut last_waste: Option<f32> = None;
-    while let Some(next) = cs.unselected_indexes().choose(rng) {
+    while let Some(next) = cs.unselected_indices().choose(rng) {
         cs.select(next);
         if cs.is_target_met(target, change_policy(&cs, target)) {
             break;

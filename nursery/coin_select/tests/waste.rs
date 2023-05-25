@@ -422,7 +422,7 @@ fn randomly_satisfy_target_with_low_waste<'a>(
     let mut cs = cs.clone();
 
     let mut last_waste: Option<f32> = None;
-    while let Some(next) = cs.unselected_indexes().choose(rng) {
+    while let Some(next) = cs.unselected_indices().choose(rng) {
         cs.select(next);
         let change = change_policy(&cs, target);
         if cs.is_target_met(target, change) {

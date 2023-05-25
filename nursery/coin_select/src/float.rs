@@ -63,6 +63,7 @@ impl core::fmt::Display for Ordf64 {
 
 /// Extension trait for adding basic float ops to f32 that don't exist in core for reasons.
 pub trait FloatExt {
+    /// Adds the ceil method to `f32`
     fn ceil(self) -> Self;
 }
 

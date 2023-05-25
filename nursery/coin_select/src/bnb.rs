@@ -87,7 +87,7 @@ impl<'a, M: BnBMetric> BnbIter<'a, M> {
             return;
         }
 
-        let next_unselected = cs.unselected_indexes().next().unwrap();
+        let next_unselected = cs.unselected_indices().next().unwrap();
         let mut inclusion_cs = cs.clone();
         inclusion_cs.select(next_unselected);
         let mut exclusion_cs = cs.clone();
@@ -130,6 +130,7 @@ impl<'a, O: PartialEq> PartialEq for Branch<'a, O> {
 
 impl<'a, O: PartialEq> Eq for Branch<'a, O> {}
 
+/// A branch and bound metric
 pub trait BnBMetric {
     type Score: Ord + Clone + core::fmt::Debug;
 

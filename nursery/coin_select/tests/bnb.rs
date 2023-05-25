@@ -1,4 +1,4 @@
-use bdk_coin_select::{bnb::BnBMetric, CoinSelector, Drain, FeeRate, Target, Candidate};
+use bdk_coin_select::{BnBMetric, CoinSelector, Drain, FeeRate, Target, Candidate};
 #[macro_use]
 extern crate alloc;
 
@@ -40,7 +40,7 @@ impl BnBMetric for MinExcessThenWeight {
         let lower_bound_excess = cs.excess(self.target, Drain::none()).max(0);
         let lower_bound_weight = {
             let mut cs = cs.clone();
-            cs.select_until_target_met(self.target, Drain::none())?;
+            cs.select_until_target_met(self.target, Drain::none()).ok()?;
             cs.selected_weight()
         };
         Some((lower_bound_excess, lower_bound_weight))

@@ -98,7 +98,7 @@ impl<'a> CoinSelector<'a> {
 
     /// Select the next unselected candidate in the sorted order fo the candidates.
     pub fn select_next(&mut self) -> bool {
-        let next = self.unselected_indexes().next();
+        let next = self.unselected_indices().next();
         if let Some(next) = next {
             self.select(next);
             true
@@ -108,12 +108,12 @@ impl<'a> CoinSelector<'a> {
     }
 
     /// Ban an input from being selected. Banning the input means it won't show up in [`unselected`]
-    /// or [`unselected_indexes`]. Note it can still be manually selected.
+    /// or [`unselected_indices`]. Note it can still be manually selected.
     ///
     /// `index` refers to its position in the original `candidates` slice passed into [`CoinSelector::new`].
     ///
     /// [`unselected`]: Self::unselected
-    /// [`unselected_indexes`]: Self::unselected_indexes
+    /// [`unselected_indices`]: Self::unselected_indices
     pub fn ban(&mut self, index: usize) {
         self.banned.to_mut().insert(index);
     }
@@ -174,7 +174,9 @@ impl<'a> CoinSelector<'a> {
             .sum()
     }
 
-    pub fn input_weight(&self) -> u32 {
+    /// The weight of the inputs including the witness header and the varint for the number of
+    /// inputs.
+    fn input_weight(&self) -> u32 {
         let witness_header_extra_weight = self
             .selected()
             .find(|(_, wv)| wv.is_segwit)
@@ -214,6 +216,8 @@ impl<'a> CoinSelector<'a> {
             - self.implied_fee(target.feerate, target.min_fee, drain.weight) as i64
     }
 
+    /// How much the current selection overshoots the value need to satisfy `target.feerate` and
+    /// `target.value` (while ignoring `target.min_fee`).
     pub fn rate_excess(&self, target: Target, drain: Drain) -> i64 {
         self.selected_value() as i64
             - target.value as i64
@@ -221,6 +225,8 @@ impl<'a> CoinSelector<'a> {
             - self.implied_fee_from_feerate(target.feerate, drain.weight) as i64
     }
 
+    /// How much the current selection overshoots the vlaue needed to satisfy `target.min_fee` and
+    /// `target.value` (while ignoring `target.feerate`).
     pub fn absolute_excess(&self, target: Target, drain: Drain) -> i64 {
         self.selected_value() as i64
             - target.value as i64
@@ -236,11 +242,12 @@ impl<'a> CoinSelector<'a> {
         FeeRate::from_sat_per_wu(numerator as f32 / denom as f32)
     }
 
-    pub fn implied_fee(&self, feerate: FeeRate, min_fee: u64, drain_weight: u32) -> u64 {
+    /// The fee the current selection should pay to reach `feerate` and provide `min_fee`
+    fn implied_fee(&self, feerate: FeeRate, min_fee: u64, drain_weight: u32) -> u64 {
         (self.implied_fee_from_feerate(feerate, drain_weight)).max(min_fee)
     }
 
-    pub fn implied_fee_from_feerate(&self, feerate: FeeRate, drain_weight: u32) -> u64 {
+    fn implied_fee_from_feerate(&self, feerate: FeeRate, drain_weight: u32) -> u64 {
         (self.weight(drain_weight) as f32 * feerate.spwu()).ceil() as u64
     }
 
@@ -254,6 +261,15 @@ impl<'a> CoinSelector<'a> {
         self.selected_weight() as f32 * (feerate.spwu() - long_term_feerate.spwu())
     }
 
+    /// Sorts the candidates by the comparision function.
+    ///
+    /// The comparision function takes the candidates's index and the [`Candidate`].
+    ///
+    /// Note this function does not change the index of the candidates after sorting, just the order
+    /// in which they will be returned when interating over them in [`candidates`] and [`unselected`].
+    ///
+    /// [`candidates`]: CoinSelector::candidates
+    /// [`unselected`]: CoinSelector::unselected
     pub fn sort_candidates_by<F>(&mut self, mut cmp: F)
     where
         F: FnMut((usize, Candidate), (usize, Candidate)) -> core::cmp::Ordering,
@@ -263,6 +279,17 @@ impl<'a> CoinSelector<'a> {
         order.sort_by(|a, b| cmp((*a, candidates[*a]), (*b, candidates[*b])))
     }
 
+
+
+    /// Sorts the candidates by the key function.
+    ///
+    /// The key function takes the candidates's index and the [`Candidate`].
+    ///
+    /// Note this function does not change the index of the candidates after sorting, just the order
+    /// in which they will be returned when interating over them in [`candidates`] and [`unselected`].
+    ///
+    /// [`candidates`]: CoinSelector::candidates
+    /// [`unselected`]: CoinSelector::unselected
     pub fn sort_candidates_by_key<F, K>(&mut self, mut key_fn: F)
     where
         F: FnMut((usize, Candidate)) -> K,
@@ -271,10 +298,16 @@ impl<'a> CoinSelector<'a> {
         self.sort_candidates_by(|a, b| key_fn(a).cmp(&key_fn(b)))
     }
 
+    /// Sorts the candidates by descending value per weight unit
     pub fn sort_candidates_by_descending_value_pwu(&mut self) {
         self.sort_candidates_by_key(|(_, wv)| core::cmp::Reverse(wv.value_pwu()));
     }
 
+    /// The waste created by the current selection as measured by the [waste metric].
+    ///
+    /// You can pass in an `excess_discount` which must be between `0.0..1.0`. Passing in `1.0` gives you no discount
+    ///
+    /// [waste metric]; https://bitcoin.stackexchange.com/questions/113622/what-does-waste-metric-mean-in-the-context-of-coin-selection
     pub fn waste(
         &self,
         target: Target,
@@ -301,36 +334,51 @@ impl<'a> CoinSelector<'a> {
         waste
     }
 
+    /// The selected candidates with their index.
     pub fn selected(&self) -> impl ExactSizeIterator<Item = (usize, Candidate)> + '_ {
         self.selected
             .iter()
             .map(move |&index| (index, self.candidates[index]))
     }
 
+    /// The unselected candidates with their index.
+    ///
+    /// The candidates are returned in sorted order. See [`sort_candidates_by`].
+    ///
+    /// [`sort_candidates_by`]: Self::sort_candidates_by
     pub fn unselected(&self) -> impl DoubleEndedIterator<Item = (usize, Candidate)> + '_ {
-        self.unselected_indexes()
+        self.unselected_indices()
             .map(move |i| (i, self.candidates[i]))
     }
 
-    pub fn selected_indexes(&self) -> &BTreeSet<usize> {
+    /// The indices of the selelcted candidates.
+    pub fn selected_indices(&self) -> &BTreeSet<usize> {
         &self.selected
     }
 
-    pub fn unselected_indexes(&self) -> impl DoubleEndedIterator<Item = usize> + '_ {
+    /// The indices of the unselected candidates.
+    ///
+    /// This excludes candidates that have been selected or [`banned`].
+    ///
+    /// [`banned`]: Self::ban
+    pub fn unselected_indices(&self) -> impl DoubleEndedIterator<Item = usize> + '_ {
         self.candidate_order
             .iter()
             .filter(move |index| !(self.selected.contains(index) || self.banned.contains(index)))
             .map(|index| *index)
     }
 
+    /// Whether there are any unselected candidates left.
     pub fn is_exhausted(&self) -> bool {
-        self.unselected_indexes().next().is_none()
+        self.unselected_indices().next().is_none()
     }
 
+    /// Whether the constraints of `Target` have been met if we include the `drain` ouput.
     pub fn is_target_met(&self, target: Target, drain: Drain) -> bool {
         self.excess(target, drain) >= 0
     }
 
+    /// Select all unselected candidates
     pub fn select_all(&mut self) {
         loop {
             if !self.select_next() {
@@ -339,20 +387,28 @@ impl<'a> CoinSelector<'a> {
         }
     }
 
+    /// Select all candidates with an *effective value* greater than 0 at the provided `feerate`.
+    ///
+    /// A candidate if effective if it provides more value than it takes to pay for at `feerate`.
     pub fn select_all_effective(&mut self, feerate: FeeRate) {
         // TODO: do this without allocating
-        for i in self.unselected_indexes().collect::<Vec<_>>() {
+        for i in self.unselected_indices().collect::<Vec<_>>() {
             if self.candidates[i].effective_value(feerate) > Ordf32(0.0) {
                 self.select(i);
             }
         }
     }
 
+    /// Select candidates until `target` has been met assuming the `drain` output is attached.
+    ///
+    /// Returns an `Some(_)` if it was able to meet the target.
     #[must_use]
-    pub fn select_until_target_met(&mut self, target: Target, drain: Drain) -> Option<()> {
-        self.select_until(|cs| cs.is_target_met(target, drain))
+    pub fn select_until_target_met(&mut self, target: Target, drain: Drain) -> Result<(), InsufficientFunds> {
+        self.select_until(|cs| cs.is_target_met(target, drain)).ok_or_else(|| InsufficientFunds { missing: self.excess(target, drain).abs() as u64 })
     }
 
+
+    /// Select candidates until some predicate has been satisfied.
     #[must_use]
     pub fn select_until(
         &mut self,
@@ -369,37 +425,17 @@ impl<'a> CoinSelector<'a> {
         }
     }
 
+    /// Return an iterator that can be used to select candidates.
     pub fn select_iter(self) -> SelectIter<'a> {
         SelectIter { cs: self.clone() }
     }
 
+    /// Runs a branch and bound algorithm to optimize for the provided metric
     pub fn branch_and_bound<M: BnBMetric>(
         &self,
         metric: M,
     ) -> impl Iterator<Item = Option<(CoinSelector<'a>, M::Score)>> {
         crate::bnb::BnbIter::new(self.clone(), metric)
-    }
-}
-
-pub struct SelectIter<'a> {
-    cs: CoinSelector<'a>,
-}
-
-impl<'a> Iterator for SelectIter<'a> {
-    type Item = (CoinSelector<'a>, usize, Candidate);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let (index, wv) = self.cs.unselected().next()?;
-        self.cs.select(index);
-        Some((self.cs.clone(), index, wv))
-    }
-}
-
-impl<'a> DoubleEndedIterator for SelectIter<'a> {
-    fn next_back(&mut self) -> Option<Self::Item> {
-        let (index, wv) = self.cs.unselected().next_back()?;
-        self.cs.select(index);
-        Some((self.cs.clone(), index, wv))
     }
 }
 
@@ -444,6 +480,11 @@ pub struct Candidate {
 }
 
 impl Candidate {
+
+    pub fn new_tr_keyspend(value: u64) -> Self {
+        let weight = TXIN_BASE_WEIGHT + TR_KEYSPEND_SATISFACTION_WEIGHT;
+        Self::new(value, weight, true)
+    }
     /// Create a new [`Candidate`] that represents a single input.
     ///
     /// `satisfaction_weight` is the weight of `scriptSigLen + scriptSig + scriptWitnessLen +
@@ -501,6 +542,14 @@ impl Drain {
         !self.is_none()
     }
 
+    pub fn new_tr_keyspend() -> Self {
+        Self {
+            weight: TXOUT_BASE_WEIGHT + TR_SPK_WEIGHT,
+            value: 0,
+            spend_weight: TXIN_BASE_WEIGHT + TR_KEYSPEND_SATISFACTION_WEIGHT,
+        }
+    }
+
     /// The waste of adding this drain to a transaction according to the [waste metric].
     ///
     /// [waste metric]; https://bitcoin.stackexchange.com/questions/113622/what-does-waste-metric-mean-in-the-context-of-coin-selection
@@ -508,3 +557,41 @@ impl Drain {
         self.weight as f32 * feerate.spwu() + self.spend_weight as f32 * long_term_feerate.spwu()
     }
 }
+
+/// The `SelectIter` allows you to select candidates by calling `.next`.
+pub struct SelectIter<'a> {
+    cs: CoinSelector<'a>,
+}
+
+impl<'a> Iterator for SelectIter<'a> {
+    type Item = (CoinSelector<'a>, usize, Candidate);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let (index, wv) = self.cs.unselected().next()?;
+        self.cs.select(index);
+        Some((self.cs.clone(), index, wv))
+    }
+}
+
+impl<'a> DoubleEndedIterator for SelectIter<'a> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        let (index, wv) = self.cs.unselected().next_back()?;
+        self.cs.select(index);
+        Some((self.cs.clone(), index, wv))
+    }
+}
+
+
+#[derive(Clone, Debug, Copy, PartialEq, Eq)]
+pub struct InsufficientFunds {
+    missing: u64
+}
+
+impl core::fmt::Display for InsufficientFunds {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+        write!(f, "Insufficient funds. Missing {} sats.", self.missing)
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for InsufficientFunds {}

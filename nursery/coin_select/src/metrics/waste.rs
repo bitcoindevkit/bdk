@@ -141,8 +141,8 @@ where
                 // by taking whatever value we want from it but at the value per weight of the real
                 // input.
                 let ideal_next_weight = {
-                    // satisfying absolute and feerate requires different calculations sowe do them
-                    // both indepdently and find which requires the most weight of the next input.
+                    // satisfying absolute and feerate constraints requires different calculations so we do them
+                    // both independently and find which requires the most weight of the next input.
                     let remaining_rate = cs.rate_excess(self.target, change_lower_bound);
                     let remaining_abs = cs.absolute_excess(self.target, change_lower_bound);
 

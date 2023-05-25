@@ -1,3 +1,4 @@
+//! Branch and bound metrics that can be passed to [`CoinSelector::branch_and_bound`].
 use crate::{bnb::BnBMetric, float::Ordf32, CoinSelector, Drain, Target};
 mod waste;
 pub use waste::*;

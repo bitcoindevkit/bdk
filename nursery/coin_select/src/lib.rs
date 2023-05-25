@@ -1,5 +1,5 @@
 #![no_std]
-#![warn(missing_docs)]
+// #![warn(missing_docs)]
 #![doc = include_str!("../README.md")]
 #![deny(unsafe_code)]
 
@@ -18,7 +18,9 @@ mod coin_selector;
 pub mod float;
 pub use coin_selector::*;
 
-pub mod bnb;
+mod bnb;
+pub use bnb::*;
+
 pub mod metrics;
 
 mod feerate;
@@ -32,6 +34,12 @@ pub const TXIN_BASE_WEIGHT: u32 = (32 + 4 + 4 + 1) * 4;
 /// The weight of a TXOUT without the `scriptPubkey` (and script pubkey length field).
 /// Just the weight of the value field.
 pub const TXOUT_BASE_WEIGHT: u32 = 4 * core::mem::size_of::<u64>() as u32; // just the value
+
+pub const TR_KEYSPEND_SATISFACTION_WEIGHT: u32 = 66;
+
+/// The weight of a taproot script pubkey
+pub const TR_SPK_WEIGHT: u32 = (1 + 1 + 32) * 4; // version + push + key
+
 
 /// Helper to calculate varint size. `v` is the value the varint represents.
 fn varint_size(v: usize) -> u32 {
