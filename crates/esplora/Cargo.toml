@@ -16,8 +16,6 @@ bdk_chain = { path = "../chain", version = "0.4.0", features = ["serde", "minisc
 esplora-client = { version = "0.3", default-features = false }
 async-trait = { version = "0.1.66", optional = true }
 futures = { version = "0.3.26", optional = true }
-# base64 versions after 0.21.0 have MSRV 1.60.0
-base64 = "=0.21.0"
 
 [features]
 default = ["async-https", "blocking"]
