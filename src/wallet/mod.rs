@@ -368,57 +368,63 @@ where
     /// transaction output scripts.
     pub fn ensure_addresses_cached(&self, max_addresses: u32) -> Result<bool, Error> {
         let mut new_addresses_cached = false;
-        let max_address = match self.descriptor.has_wildcard() {
-            false => 0,
-            true => max_addresses,
+        let (last_index, max_addresses) = match self.descriptor.has_wildcard() {
+            false => (0, 0),
+            true => {
+                // last used index
+                let last_index = self
+                    .database
+                    .borrow()
+                    .get_last_index(KeychainKind::External)?
+                    .unwrap_or_default();
+
+                (last_index, max_addresses)
+            }
         };
-        debug!("max_address {}", max_address);
+        debug!("external max_address {}", last_index + max_addresses);
         if self
             .database
             .borrow()
-            .get_script_pubkey_from_path(KeychainKind::External, max_address.saturating_sub(1))?
+            .get_script_pubkey_from_path(KeychainKind::External, last_index + max_addresses)?
             .is_none()
         {
             new_addresses_cached = true;
-            // TODO add database function to find max child / index to start from
-            let from: u32 = self
-                .database
-                .borrow()
-                .iter_script_pubkeys(Some(KeychainKind::External))
-                .map(|scripts| scripts.len())
-                .unwrap_or(0) as u32;
             debug!(
-                "caching external addresses from {} to max_addresses {}",
-                from, max_address
+                "caching external addresses from {} to max_address {}",
+                last_index,
+                last_index + max_addresses
             );
-            self.cache_addresses(KeychainKind::External, from, max_address)?;
+            self.cache_addresses(KeychainKind::External, last_index, max_addresses)?;
         }
 
         if let Some(change_descriptor) = &self.change_descriptor {
-            let max_address = match change_descriptor.has_wildcard() {
-                false => 0,
-                true => max_addresses,
+            let (last_index, max_addresses) = match change_descriptor.has_wildcard() {
+                false => (0, 0),
+                true => {
+                    // last used index
+                    let last_index = self
+                        .database
+                        .borrow()
+                        .get_last_index(KeychainKind::Internal)?
+                        .unwrap_or_default();
+
+                    (last_index, max_addresses)
+                }
             };
 
             if self
                 .database
                 .borrow()
-                .get_script_pubkey_from_path(KeychainKind::Internal, max_address.saturating_sub(1))?
+                .get_script_pubkey_from_path(KeychainKind::Internal, last_index + max_addresses)?
                 .is_none()
             {
                 new_addresses_cached = true;
-                // TODO add database function to find max child / index to start from
-                let from: u32 = self
-                    .database
-                    .borrow()
-                    .iter_script_pubkeys(Some(KeychainKind::Internal))
-                    .map(|scripts| scripts.len())
-                    .unwrap_or(0) as u32;
                 debug!(
-                    "caching internal addresses, from {} to max_addresses {}",
-                    from, max_address
+                    "caching internal addresses from {} to max_address {}",
+                    last_index,
+                    last_index + max_addresses
                 );
-                self.cache_addresses(KeychainKind::Internal, from, max_address)?;
+                self.cache_addresses(KeychainKind::Internal, last_index, max_addresses)?;
             }
         }
         Ok(new_addresses_cached)
@@ -1412,9 +1418,9 @@ where
 
         info!(
             "Derivation of {} addresses from {} to {} took {} ms",
-            count - from,
-            from,
             count,
+            from,
+            from + count,
             start_time.elapsed().as_millis()
         );
 
