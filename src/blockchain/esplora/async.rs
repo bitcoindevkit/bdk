@@ -35,7 +35,7 @@ use crate::FeeRate;
 pub struct EsploraBlockchain {
     url_client: AsyncClient,
     stop_gap: usize,
-    concurrency: u8,
+    concurrency: usize,
 }
 
 impl std::convert::From<AsyncClient> for EsploraBlockchain {
@@ -68,7 +68,7 @@ impl EsploraBlockchain {
     }
 
     /// Set the concurrency to use when doing batch queries against the Esplora instance.
-    pub fn with_concurrency(mut self, concurrency: u8) -> Self {
+    pub fn with_concurrency(mut self, concurrency: usize) -> Self {
         self.concurrency = concurrency;
         self
     }
@@ -149,7 +149,7 @@ impl WalletSync for EsploraBlockchain {
                 Request::Script(script_req) => {
                     let futures: FuturesOrdered<_> = script_req
                         .request()
-                        .take(self.concurrency as usize)
+                        .take(self.concurrency)
                         .map(|script| async move {
                             let mut related_txs: Vec<Tx> =
                                 self.url_client.scripthash_txs(script, None).await?;

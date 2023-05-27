@@ -53,7 +53,7 @@ pub struct EsploraBlockchainConfig {
     pub proxy: Option<String>,
     /// Number of parallel requests sent to the esplora service (default: 4)
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub concurrency: Option<u8>,
+    pub concurrency: Option<usize>,
     /// Stop searching addresses for transactions after finding an unused gap of this length.
     pub stop_gap: usize,
     /// Socket timeout.
@@ -88,7 +88,7 @@ crate::bdk_blockchain_tests! {
     }
 }
 
-const DEFAULT_CONCURRENT_REQUESTS: u8 = 4;
+const DEFAULT_CONCURRENT_REQUESTS: usize = 4;
 
 #[cfg(test)]
 mod test {

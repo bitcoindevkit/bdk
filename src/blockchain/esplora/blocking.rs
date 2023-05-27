@@ -34,7 +34,7 @@ use crate::FeeRate;
 pub struct EsploraBlockchain {
     url_client: BlockingClient,
     stop_gap: usize,
-    concurrency: u8,
+    concurrency: usize,
 }
 
 impl EsploraBlockchain {
@@ -57,7 +57,7 @@ impl EsploraBlockchain {
     }
 
     /// Set the number of parallel requests the client can make.
-    pub fn with_concurrency(mut self, concurrency: u8) -> Self {
+    pub fn with_concurrency(mut self, concurrency: usize) -> Self {
         self.concurrency = concurrency;
         self
     }
@@ -129,10 +129,7 @@ impl WalletSync for EsploraBlockchain {
         let batch_update = loop {
             request = match request {
                 Request::Script(script_req) => {
-                    let scripts = script_req
-                        .request()
-                        .take(self.concurrency as usize)
-                        .cloned();
+                    let scripts = script_req.request().take(self.concurrency).cloned();
 
                     let mut handles = vec![];
                     for script in scripts {
