@@ -190,6 +190,9 @@ impl<'a, D, Cs: CoinSelectionAlgorithm, Ctx: TxBuilderContext> TxBuilder<'a, D, 
     }
 
     /// Set an absolute fee
+    /// The fee_absolute method refers to the absolute transaction fee in satoshis (sats).
+    /// If anyone sets both the fee_absolute method and the fee_rate method,
+    /// the fee_absolute value will take precedence over the fee_rate.
     pub fn fee_absolute(&mut self, fee_amount: u64) -> &mut Self {
         self.params.fee_policy = Some(FeePolicy::FeeAmount(fee_amount));
         self
