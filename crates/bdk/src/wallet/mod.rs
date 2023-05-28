@@ -451,16 +451,19 @@ impl<D> Wallet<D> {
         Ok(changed)
     }
 
-    /// Add a transaction to the wallet's internal view of the chain.
-    /// This stages but does not [`commit`] the change.
-    ///
-    /// There are a number reasons `tx` could be rejected with an `Err(_)`. The most important one
-    /// is that the transaction is at a height that is greater than [`latest_checkpoint`]. Therefore
-    /// you should use [`insert_checkpoint`] to insert new checkpoints before manually inserting new
-    /// transactions.
+    /// Add a transaction to the wallet's internal view of the chain. This stages but does not
+    /// [`commit`] the change.
     ///
     /// Returns whether anything changed with the transaction insertion (e.g. `false` if the
     /// transaction was already inserted at the same position).
+    ///
+    /// A `tx` can be rejected if `position` has a height greater than the [`latest_checkpoint`].
+    /// Therefore you should use [`insert_checkpoint`] to insert new checkpoints before manually
+    /// inserting new transactions.
+    ///
+    /// **WARNING:** If `position` is confirmed, we anchor the `tx` to a the lowest checkpoint that
+    /// is >= the `position`'s height. The caller is responsible for ensuring the `tx` exists in our
+    /// local view of the best chain's history.
     ///
     /// [`commit`]: Self::commit
     /// [`latest_checkpoint`]: Self::latest_checkpoint
@@ -473,25 +476,28 @@ impl<D> Wallet<D> {
     where
         D: PersistBackend<ChangeSet>,
     {
-        let tip = self.chain.tip();
-
         let (anchor, last_seen) = match position {
             ConfirmationTime::Confirmed { height, time } => {
-                let tip_height = tip.map(|b| b.height);
-                if Some(height) > tip_height {
-                    return Err(InsertTxError::ConfirmationHeightCannotBeGreaterThanTip {
-                        tip_height,
+                // anchor tx to checkpoint with lowest height that is >= position's height
+                let anchor = self
+                    .chain
+                    .blocks()
+                    .range(height..)
+                    .next()
+                    .ok_or(InsertTxError::ConfirmationHeightCannotBeGreaterThanTip {
+                        tip_height: self.chain.tip().map(|b| b.height),
                         tx_height: height,
-                    });
-                }
-                (
-                    Some(ConfirmationTimeAnchor {
-                        anchor_block: tip.expect("already checked if tip_height > height"),
+                    })
+                    .map(|(&anchor_height, &anchor_hash)| ConfirmationTimeAnchor {
+                        anchor_block: BlockId {
+                            height: anchor_height,
+                            hash: anchor_hash,
+                        },
                         confirmation_height: height,
                         confirmation_time: time,
-                    }),
-                    None,
-                )
+                    })?;
+
+                (Some(anchor), None)
             }
             ConfirmationTime::Unconfirmed { last_seen } => (None, Some(last_seen)),
         };
