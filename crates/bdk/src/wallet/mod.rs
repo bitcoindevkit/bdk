@@ -21,12 +21,12 @@ use alloc::{
 };
 pub use bdk_chain::keychain::Balance;
 use bdk_chain::{
-    indexed_tx_graph::{IndexedAdditions, IndexedTxGraph},
+    indexed_tx_graph::IndexedAdditions,
     keychain::{KeychainTxOutIndex, LocalChangeSet, LocalUpdate},
     local_chain::{self, LocalChain, UpdateNotConnectedError},
     tx_graph::{CanonicalTx, TxGraph},
-    Append, BlockId, ChainPosition, ConfirmationTime, ConfirmationTimeAnchor, FullTxOut, Persist,
-    PersistBackend,
+    Append, BlockId, ChainPosition, ConfirmationTime, ConfirmationTimeAnchor, FullTxOut,
+    IndexedTxGraph, Persist, PersistBackend,
 };
 use bitcoin::consensus::encode::serialize;
 use bitcoin::secp256k1::Secp256k1;
@@ -88,7 +88,7 @@ pub struct Wallet<D = ()> {
     change_signers: Arc<SignersContainer>,
     chain: LocalChain,
     indexed_graph: IndexedTxGraph<ConfirmationTimeAnchor, KeychainTxOutIndex<KeychainKind>>,
-    persist: Persist<D, ChangeSet>, // [TODO] Use a different `ChangeSet`
+    persist: Persist<D, ChangeSet>,
     network: Network,
     secp: SecpCtx,
 }
@@ -96,7 +96,7 @@ pub struct Wallet<D = ()> {
 /// The update to a [`Wallet`] used in [`Wallet::apply_update`]. This is usually returned from blockchain data sources.
 pub type Update = LocalUpdate<KeychainKind, ConfirmationTimeAnchor>;
 
-// /// The changeset produced internally by applying an update.
+/// The changeset produced internally by [`Wallet`] when mutated.
 pub type ChangeSet = LocalChangeSet<KeychainKind, ConfirmationTimeAnchor>;
 
 /// The address index selection strategy to use to derived an address from the wallet's external
@@ -184,10 +184,15 @@ where
     }
 }
 
+/// An error that may occur when inserting a transaction into [`Wallet`].
 #[derive(Debug)]
 pub enum InsertTxError {
+    /// The error variant that occurs when the caller attempts to insert a transaction with a
+    /// confirmation height that is greater than the internal chain tip.
     ConfirmationHeightCannotBeGreaterThanTip {
+        /// The internal chain's tip height.
         tip_height: Option<u32>,
+        /// The introduced transaction's confirmation height.
         tx_height: u32,
     },
 }

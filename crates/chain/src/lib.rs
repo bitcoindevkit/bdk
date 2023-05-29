@@ -17,18 +17,23 @@
 //!    cache or how you fetch it.
 //!
 //! [Bitcoin Dev Kit]: https://bitcoindevkit.org/
+
 #![no_std]
+#![warn(missing_docs)]
+
 pub use bitcoin;
 mod spk_txout_index;
 pub use spk_txout_index::*;
 mod chain_data;
 pub use chain_data::*;
 pub mod indexed_tx_graph;
+pub use indexed_tx_graph::IndexedTxGraph;
 pub mod keychain;
 pub mod local_chain;
 mod tx_data_traits;
 pub mod tx_graph;
 pub use tx_data_traits::*;
+pub use tx_graph::TxGraph;
 mod chain_oracle;
 pub use chain_oracle::*;
 mod persist;

@@ -1,3 +1,7 @@
+//! Contains the [`IndexedTxGraph`] structure and associated types.
+//!
+//! This is essentially a [`TxGraph`] combined with an indexer.
+
 use alloc::vec::Vec;
 use bitcoin::{OutPoint, Transaction, TxOut};
 

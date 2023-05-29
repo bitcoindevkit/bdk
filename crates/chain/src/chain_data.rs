@@ -21,6 +21,7 @@ impl<A> ChainPosition<A> {
 }
 
 impl<A: Clone> ChainPosition<&A> {
+    /// Maps a [`ChainPosition<&A>`] into a [`ChainPosition<A>`] by cloning the contents.
     pub fn cloned(self) -> ChainPosition<A> {
         match self {
             ChainPosition::Confirmed(a) => ChainPosition::Confirmed(a.clone()),
@@ -30,6 +31,7 @@ impl<A: Clone> ChainPosition<&A> {
 }
 
 impl<A: Anchor> ChainPosition<A> {
+    /// Determines the upper bound of the confirmation height.
     pub fn confirmation_height_upper_bound(&self) -> Option<u32> {
         match self {
             ChainPosition::Confirmed(a) => Some(a.confirmation_height_upper_bound()),
@@ -46,15 +48,27 @@ impl<A: Anchor> ChainPosition<A> {
     serde(crate = "serde_crate")
 )]
 pub enum ConfirmationTime {
-    Confirmed { height: u32, time: u64 },
-    Unconfirmed { last_seen: u64 },
+    /// The confirmed variant.
+    Confirmed {
+        /// Confirmation height.
+        height: u32,
+        /// Confirmation time in unix seconds.
+        time: u64,
+    },
+    /// The unconfirmed variant.
+    Unconfirmed {
+        /// The last-seen timestamp in unix seconds.
+        last_seen: u64,
+    },
 }
 
 impl ConfirmationTime {
+    /// Construct an unconfirmed variant using the given `last_seen` time in unix seconds.
     pub fn unconfirmed(last_seen: u64) -> Self {
         Self::Unconfirmed { last_seen }
     }
 
+    /// Returns whether [`ConfirmationTime`] is the confirmed variant.
     pub fn is_confirmed(&self) -> bool {
         matches!(self, Self::Confirmed { .. })
     }
@@ -154,8 +168,9 @@ impl Anchor for ConfirmationHeightAnchor {
 pub struct ConfirmationTimeAnchor {
     /// The anchor block.
     pub anchor_block: BlockId,
-
+    /// The confirmation height of the chain data being anchored.
     pub confirmation_height: u32,
+    /// The confirmation time of the chain data being anchored.
     pub confirmation_time: u64,
 }
 

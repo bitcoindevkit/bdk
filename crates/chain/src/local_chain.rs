@@ -1,6 +1,8 @@
+//! The [`LocalChain`] is a local implementation of [`ChainOracle`].
+
 use core::convert::Infallible;
 
-use alloc::collections::{BTreeMap, BTreeSet};
+use alloc::collections::BTreeMap;
 use bitcoin::BlockHash;
 
 use crate::{BlockId, ChainOracle};
@@ -59,6 +61,7 @@ impl From<BTreeMap<u32, BlockHash>> for LocalChain {
 }
 
 impl LocalChain {
+    /// Contruct a [`LocalChain`] from a list of [`BlockId`]s.
     pub fn from_blocks<B>(blocks: B) -> Self
     where
         B: IntoIterator<Item = BlockId>,
@@ -73,6 +76,7 @@ impl LocalChain {
         &self.blocks
     }
 
+    /// Get the chain tip.
     pub fn tip(&self) -> Option<BlockId> {
         self.blocks
             .iter()
@@ -158,15 +162,14 @@ impl LocalChain {
         Ok(changeset)
     }
 
+    /// Derives a [`ChangeSet`] that assumes that there are no preceding changesets.
+    ///
+    /// The changeset returned will record additions of all blocks included in [`Self`].
     pub fn initial_changeset(&self) -> ChangeSet {
         self.blocks
             .iter()
             .map(|(&height, &hash)| (height, Some(hash)))
             .collect()
-    }
-
-    pub fn heights(&self) -> BTreeSet<u32> {
-        self.blocks.keys().cloned().collect()
     }
 
     /// Insert a block of [`BlockId`] into the [`LocalChain`].
@@ -225,8 +228,11 @@ impl std::error::Error for UpdateNotConnectedError {}
 /// Represents a failure when trying to insert a checkpoint into [`LocalChain`].
 #[derive(Clone, Debug, PartialEq)]
 pub struct InsertBlockNotMatchingError {
+    /// The checkpoints' height.
     pub height: u32,
+    /// Original checkpoint's block hash.
     pub original_hash: BlockHash,
+    /// Update checkpoint's block hash.
     pub update_hash: BlockHash,
 }
 

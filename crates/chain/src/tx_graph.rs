@@ -983,9 +983,13 @@ impl<A: Anchor> TxGraph<A> {
 )]
 #[must_use]
 pub struct Additions<A = ()> {
+    /// Added transactions.
     pub txs: BTreeSet<Transaction>,
+    /// Added txouts.
     pub txouts: BTreeMap<OutPoint, TxOut>,
+    /// Added anchors.
     pub anchors: BTreeSet<(A, Txid)>,
+    /// Added last-seen unix timestamps of transactions.
     pub last_seen: BTreeMap<Txid, u64>,
 }
 

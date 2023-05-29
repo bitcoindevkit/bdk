@@ -236,7 +236,6 @@ impl ElectrumExt<ConfirmationHeightAnchor> for Client {
 
             populate_with_txids(self, anchor_block, &mut update, &mut txids.iter().cloned())?;
 
-            // [TODO] cache transactions to reduce bandwidth
             let _txs = populate_with_outpoints(
                 self,
                 anchor_block,
