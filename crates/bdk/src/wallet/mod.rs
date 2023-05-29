@@ -273,7 +273,8 @@ impl<D> Wallet<D> {
     where
         D: PersistBackend<ChangeSet>,
     {
-        self._get_address(address_index, KeychainKind::External)
+        self._get_address(KeychainKind::External, address_index)
+            .expect("persistence backend must not fail")
     }
 
     /// Return a derived address using the internal (change) descriptor.
@@ -287,50 +288,63 @@ impl<D> Wallet<D> {
     where
         D: PersistBackend<ChangeSet>,
     {
-        self._get_address(address_index, KeychainKind::Internal)
+        self._get_address(KeychainKind::Internal, address_index)
+            .expect("persistence backend must not fail")
     }
 
-    fn _get_address(&mut self, address_index: AddressIndex, keychain: KeychainKind) -> AddressInfo
+    /// Return a derived address using the specified `keychain` (external/internal).
+    ///
+    /// If `keychain` is [`KeychainKind::External`], external addresses will be derived (used for
+    /// receiving funds).
+    ///
+    /// If `keychain` is [`KeychainKind::Internal`], internal addresses will be derived (used for
+    /// creating change outputs). If the wallet does not have an internal keychain, it will use the
+    /// external keychain to derive change outputs.
+    ///
+    /// See [`AddressIndex`] for available address index selection strategies. If none of the keys
+    /// in the descriptor are derivable (i.e. does not end with /*) then the same address will
+    /// always be returned for any [`AddressIndex`].
+    fn _get_address(
+        &mut self,
+        keychain: KeychainKind,
+        address_index: AddressIndex,
+    ) -> Result<AddressInfo, D::WriteError>
     where
         D: PersistBackend<ChangeSet>,
     {
         let keychain = self.map_keychain(keychain);
         let txout_index = &mut self.indexed_graph.index;
-        let (index, spk) = match address_index {
+        let (index, spk, additions) = match address_index {
             AddressIndex::New => {
                 let ((index, spk), index_additions) = txout_index.reveal_next_spk(&keychain);
-                let spk = spk.clone();
-
-                self.persist
-                    .stage(ChangeSet::from(IndexedAdditions::from(index_additions)));
-                self.persist.commit().expect("TODO");
-                (index, spk)
+                (index, spk.clone(), Some(index_additions))
             }
             AddressIndex::LastUnused => {
-                let index = txout_index.last_revealed_index(&keychain);
-                match index {
-                    Some(index) if !txout_index.is_used(&(keychain, index)) => (
-                        index,
-                        txout_index
-                            .spk_at_index(&(keychain, index))
-                            .expect("must exist")
-                            .clone(),
-                    ),
-                    _ => return self._get_address(AddressIndex::New, keychain),
-                }
+                let ((index, spk), index_additions) = txout_index.next_unused_spk(&keychain);
+                (index, spk.clone(), Some(index_additions))
             }
-            AddressIndex::Peek(index) => txout_index
-                .spks_of_keychain(&keychain)
-                .take(index as usize + 1)
-                .last()
-                .unwrap(),
+            AddressIndex::Peek(index) => {
+                let (index, spk) = txout_index
+                    .spks_of_keychain(&keychain)
+                    .take(index as usize + 1)
+                    .last()
+                    .unwrap();
+                (index, spk, None)
+            }
         };
-        AddressInfo {
+
+        if let Some(additions) = additions {
+            self.persist
+                .stage(ChangeSet::from(IndexedAdditions::from(additions)));
+            self.persist.commit()?;
+        }
+
+        Ok(AddressInfo {
             index,
             address: Address::from_script(&spk, self.network)
                 .expect("descriptor must have address form"),
             keychain,
-        }
+        })
     }
 
     /// Return whether or not a `script` is part of this wallet (either internal or external)
