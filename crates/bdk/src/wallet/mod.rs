@@ -248,7 +248,7 @@ impl<D> Wallet<D> {
     }
 
     /// Iterator over all keychains in this wallet
-    pub fn keychanins(&self) -> &BTreeMap<KeychainKind, ExtendedDescriptor> {
+    pub fn keychains(&self) -> &BTreeMap<KeychainKind, ExtendedDescriptor> {
         self.keychain_tracker.txout_index.keychains()
     }
 
@@ -1508,7 +1508,7 @@ impl<D> Wallet<D> {
 
         if params.add_global_xpubs {
             let all_xpubs = self
-                .keychanins()
+                .keychains()
                 .iter()
                 .flat_map(|(_, desc)| desc.get_extended_keys())
                 .collect::<Vec<_>>();

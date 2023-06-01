@@ -73,7 +73,7 @@ fn test_descriptor_checksum() {
     assert_eq!(checksum.len(), 8);
 
     let raw_descriptor = wallet
-        .keychanins()
+        .keychains()
         .iter()
         .next()
         .unwrap()
