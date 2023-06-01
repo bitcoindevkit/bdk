@@ -118,6 +118,7 @@ impl FullyNodedExport {
     ) -> Result<Self, &'static str> {
         let descriptor = wallet
             .get_descriptor_for_keychain(KeychainKind::External)
+            .expect("external descriptor is always expected for default wallet")
             .to_string_with_secret(
                 &wallet
                     .get_signers(KeychainKind::External)
@@ -147,6 +148,7 @@ impl FullyNodedExport {
             true => {
                 let descriptor = wallet
                     .get_descriptor_for_keychain(KeychainKind::Internal)
+                    .expect("we ensured that public descriptor exists at this point")
                     .to_string_with_secret(
                         &wallet
                             .get_signers(KeychainKind::Internal)
