@@ -1,5 +1,6 @@
 use bdk_chain::bitcoin::{BlockHash, OutPoint, Script, Txid};
 use bdk_chain::collections::BTreeMap;
+use bdk_chain::local_chain::CheckPoint;
 use bdk_chain::BlockId;
 use bdk_chain::{keychain::LocalUpdate, ConfirmationTimeAnchor};
 use esplora_client::{Error, OutputStatus, TxStatus};
@@ -27,7 +28,7 @@ pub trait EsploraExt {
     #[allow(clippy::result_large_err)] // FIXME
     fn scan<K: Ord + Clone>(
         &self,
-        local_chain: &BTreeMap<u32, BlockHash>,
+        prev_tip: Option<CheckPoint>,
         keychain_spks: BTreeMap<K, impl IntoIterator<Item = (u32, Script)>>,
         txids: impl IntoIterator<Item = Txid>,
         outpoints: impl IntoIterator<Item = OutPoint>,
@@ -41,14 +42,14 @@ pub trait EsploraExt {
     #[allow(clippy::result_large_err)] // FIXME
     fn scan_without_keychain(
         &self,
-        local_chain: &BTreeMap<u32, BlockHash>,
+        prev_tip: Option<CheckPoint>,
         misc_spks: impl IntoIterator<Item = Script>,
         txids: impl IntoIterator<Item = Txid>,
         outpoints: impl IntoIterator<Item = OutPoint>,
         parallel_requests: usize,
     ) -> Result<LocalUpdate<(), ConfirmationTimeAnchor>, Error> {
         self.scan(
-            local_chain,
+            prev_tip,
             [(
                 (),
                 misc_spks
@@ -68,7 +69,7 @@ pub trait EsploraExt {
 impl EsploraExt for esplora_client::BlockingClient {
     fn scan<K: Ord + Clone>(
         &self,
-        local_chain: &BTreeMap<u32, BlockHash>,
+        prev_tip: Option<CheckPoint>,
         keychain_spks: BTreeMap<K, impl IntoIterator<Item = (u32, Script)>>,
         txids: impl IntoIterator<Item = Txid>,
         outpoints: impl IntoIterator<Item = OutPoint>,
@@ -77,32 +78,58 @@ impl EsploraExt for esplora_client::BlockingClient {
     ) -> Result<LocalUpdate<K, ConfirmationTimeAnchor>, Error> {
         let parallel_requests = Ord::max(parallel_requests, 1);
 
-        let (mut update, tip_at_start) = loop {
-            let mut update = LocalUpdate::<K, ConfirmationTimeAnchor>::default();
-
-            for (&height, &original_hash) in local_chain.iter().rev() {
-                let update_block_id = BlockId {
-                    height,
-                    hash: self.get_block_hash(height)?,
-                };
-                let _ = update
-                    .chain
-                    .insert_block(update_block_id)
-                    .expect("cannot repeat height here");
-                if update_block_id.hash == original_hash {
-                    break;
+        let (new_blocks, mut last_cp) = 'retry: loop {
+            let new_tip = loop {
+                let hash = self.get_tip_hash()?;
+                let status = self.get_block_status(&hash)?;
+                if status.in_best_chain && status.next_best.is_none() {
+                    break BlockId {
+                        height: status.height.expect("must have height"),
+                        hash,
+                    };
                 }
-            }
-
-            let tip_at_start = BlockId {
-                height: self.get_height()?,
-                hash: self.get_tip_hash()?,
             };
 
-            if update.chain.insert_block(tip_at_start).is_ok() {
-                break (update, tip_at_start);
+            let mut new_blocks = core::iter::once((new_tip.height, new_tip.hash))
+                .collect::<BTreeMap<u32, BlockHash>>();
+
+            let mut agreement_cp = Option::<CheckPoint>::None;
+
+            for cp in prev_tip.iter().flat_map(CheckPoint::iter) {
+                let cp_block = cp.block_id();
+                let hash = self.get_block_hash(cp_block.height)?;
+                if hash == cp_block.hash {
+                    agreement_cp = Some(cp);
+                    break;
+                }
+                new_blocks.insert(cp_block.height, hash);
             }
+
+            // check for tip changes
+            // retry if there are changes to the tip
+            let status = self.get_block_status(&new_tip.hash)?;
+            if !status.in_best_chain || status.next_best.is_some() {
+                continue 'retry;
+            }
+
+            // `new_blocks` should only include blocks that are actually new
+            let new_blocks = match &agreement_cp {
+                Some(agreement_cp) => new_blocks.split_off(&(agreement_cp.height() + 1)),
+                None => new_blocks,
+            };
+            break 'retry (new_blocks, agreement_cp);
         };
+
+        // construct checkpoints
+        for (&height, &hash) in new_blocks.iter() {
+            last_cp = Some(
+                CheckPoint::new_with_prev(BlockId { height, hash }, last_cp)
+                    .expect("heights should not conflict"),
+            );
+        }
+
+        let tip = last_cp.expect("must have atleast one checkpoint");
+        let mut update = LocalUpdate::<K, ConfirmationTimeAnchor>::new(tip.clone());
 
         for (keychain, spks) in keychain_spks {
             let mut spks = spks.into_iter();
@@ -155,7 +182,7 @@ impl EsploraExt for esplora_client::BlockingClient {
                         empty_scripts = 0;
                     }
                     for tx in related_txs {
-                        let anchor = map_confirmation_time_anchor(&tx.status, tip_at_start);
+                        let anchor = map_confirmation_time_anchor(&tx.status, &tip);
 
                         let _ = update.graph.insert_tx(tx.to_tx());
                         if let Some(anchor) = anchor {
@@ -187,7 +214,7 @@ impl EsploraExt for esplora_client::BlockingClient {
                 tx_status @ TxStatus {
                     confirmed: true, ..
                 } => {
-                    if let Some(anchor) = map_confirmation_time_anchor(&tx_status, tip_at_start) {
+                    if let Some(anchor) = map_confirmation_time_anchor(&tx_status, &tip) {
                         let _ = update.graph.insert_anchor(txid, anchor);
                     }
                 }
@@ -219,7 +246,7 @@ impl EsploraExt for esplora_client::BlockingClient {
 
             for (tx, status) in op_txs {
                 let txid = tx.txid();
-                let anchor = map_confirmation_time_anchor(&status, tip_at_start);
+                let anchor = map_confirmation_time_anchor(&status, &tip);
 
                 let _ = update.graph.insert_tx(tx);
                 if let Some(anchor) = anchor {
@@ -228,22 +255,23 @@ impl EsploraExt for esplora_client::BlockingClient {
             }
         }
 
-        if tip_at_start.hash != self.get_block_hash(tip_at_start.height)? {
+        if tip.hash() != self.get_block_hash(tip.height())? {
             // A reorg occurred, so let's find out where all the txids we found are now in the chain
             let txids_found = update
                 .graph
                 .full_txs()
                 .map(|tx_node| tx_node.txid)
                 .collect::<Vec<_>>();
-            update.chain = EsploraExt::scan_without_keychain(
+            let new_update = EsploraExt::scan_without_keychain(
                 self,
-                local_chain,
+                Some(tip),
                 [],
                 txids_found,
                 [],
                 parallel_requests,
-            )?
-            .chain;
+            )?;
+            update.tip = new_update.tip;
+            update.graph = new_update.graph;
         }
 
         Ok(update)

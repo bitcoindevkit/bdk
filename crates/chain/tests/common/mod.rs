@@ -9,25 +9,17 @@ macro_rules! h {
 macro_rules! local_chain {
     [ $(($height:expr, $block_hash:expr)), * ] => {{
         #[allow(unused_mut)]
-        bdk_chain::local_chain::LocalChain::from_blocks([$(($height, $block_hash).into()),*])
+        bdk_chain::local_chain::LocalChain::from_blocks([$(($height, $block_hash).into()),*].into_iter().collect())
     }};
 }
 
 #[allow(unused_macros)]
-macro_rules! chain {
-    ($([$($tt:tt)*]),*) => { chain!( checkpoints: [$([$($tt)*]),*] ) };
-    (checkpoints: $($tail:tt)*) => { chain!( index: TxHeight, checkpoints: $($tail)*) };
-    (index: $ind:ty, checkpoints: [ $([$height:expr, $block_hash:expr]),* ] $(,txids: [$(($txid:expr, $tx_height:expr)),*])?) => {{
+macro_rules! chain_update {
+    [ $(($height:expr, $hash:expr)), * ] => {{
         #[allow(unused_mut)]
-        let mut chain = bdk_chain::sparse_chain::SparseChain::<$ind>::from_checkpoints([$(($height, $block_hash).into()),*]);
-
-        $(
-            $(
-                let _ = chain.insert_tx($txid, $tx_height).expect("should succeed");
-            )*
-        )?
-
-        chain
+        bdk_chain::local_chain::LocalChain::from_blocks([$(($height, $hash).into()),*].into_iter().collect())
+            .tip()
+            .expect("must have tip")
     }};
 }
 

@@ -15,21 +15,12 @@
 //!
 //! Refer to [`bdk_electrum_example`] for a complete example.
 //!
-//! [`ElectrumClient::scan`]: ElectrumClient::scan
+//! [`ElectrumClient::scan`]: electrum_client::ElectrumClient::scan
 //! [`missing_full_txs`]: ElectrumUpdate::missing_full_txs
-//! [`batch_transaction_get`]: ElectrumApi::batch_transaction_get
+//! [`batch_transaction_get`]: electrum_client::ElectrumApi::batch_transaction_get
 //! [`bdk_electrum_example`]: https://github.com/LLFourn/bdk_core_staging/tree/master/bdk_electrum_example
 
-use bdk_chain::bitcoin::BlockHash;
-use electrum_client::{Client, ElectrumApi, Error};
 mod electrum_ext;
 pub use bdk_chain;
 pub use electrum_client;
 pub use electrum_ext::*;
-
-fn get_tip(client: &Client) -> Result<(u32, BlockHash), Error> {
-    // TODO: unsubscribe when added to the client, or is there a better call to use here?
-    client
-        .block_headers_subscribe()
-        .map(|data| (data.height as u32, data.header.block_hash()))
-}

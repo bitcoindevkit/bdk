@@ -1,7 +1,7 @@
 use bdk_chain::{
     bitcoin::{hashes::hex::FromHex, BlockHash, OutPoint, Script, Transaction, Txid},
     keychain::LocalUpdate,
-    local_chain::LocalChain,
+    local_chain::CheckPoint,
     tx_graph::{self, TxGraph},
     Anchor, BlockId, ConfirmationHeightAnchor, ConfirmationTimeAnchor,
 };
@@ -14,21 +14,19 @@ use std::{
 #[derive(Debug, Clone)]
 pub struct ElectrumUpdate<K, A> {
     pub graph_update: HashMap<Txid, BTreeSet<A>>,
-    pub chain_update: LocalChain,
+    pub chain_update: CheckPoint,
     pub keychain_update: BTreeMap<K, u32>,
 }
 
-impl<K, A> Default for ElectrumUpdate<K, A> {
-    fn default() -> Self {
+impl<K, A: Anchor> ElectrumUpdate<K, A> {
+    pub fn new(cp: CheckPoint) -> Self {
         Self {
-            graph_update: Default::default(),
-            chain_update: Default::default(),
-            keychain_update: Default::default(),
+            graph_update: HashMap::new(),
+            chain_update: cp,
+            keychain_update: BTreeMap::new(),
         }
     }
-}
 
-impl<K, A: Anchor> ElectrumUpdate<K, A> {
     pub fn missing_full_txs<A2>(&self, graph: &TxGraph<A2>) -> Vec<Txid> {
         self.graph_update
             .keys()
@@ -56,7 +54,7 @@ impl<K, A: Anchor> ElectrumUpdate<K, A> {
         Ok(LocalUpdate {
             keychain: self.keychain_update,
             graph: graph_update,
-            chain: self.chain_update,
+            tip: self.chain_update,
         })
     }
 }
@@ -128,7 +126,7 @@ impl<K> ElectrumUpdate<K, ConfirmationHeightAnchor> {
                 graph.apply_additions(graph_additions);
                 graph
             },
-            chain: update.chain,
+            tip: update.tip,
         })
     }
 }
@@ -138,7 +136,7 @@ pub trait ElectrumExt<A> {
 
     fn scan<K: Ord + Clone>(
         &self,
-        local_chain: &BTreeMap<u32, BlockHash>,
+        prev_tip: Option<CheckPoint>,
         keychain_spks: BTreeMap<K, impl IntoIterator<Item = (u32, Script)>>,
         txids: impl IntoIterator<Item = Txid>,
         outpoints: impl IntoIterator<Item = OutPoint>,
@@ -148,7 +146,7 @@ pub trait ElectrumExt<A> {
 
     fn scan_without_keychain(
         &self,
-        local_chain: &BTreeMap<u32, BlockHash>,
+        prev_tip: Option<CheckPoint>,
         misc_spks: impl IntoIterator<Item = Script>,
         txids: impl IntoIterator<Item = Txid>,
         outpoints: impl IntoIterator<Item = OutPoint>,
@@ -160,7 +158,7 @@ pub trait ElectrumExt<A> {
             .map(|(i, spk)| (i as u32, spk));
 
         self.scan(
-            local_chain,
+            prev_tip,
             [((), spk_iter)].into(),
             txids,
             outpoints,
@@ -179,7 +177,7 @@ impl ElectrumExt<ConfirmationHeightAnchor> for Client {
 
     fn scan<K: Ord + Clone>(
         &self,
-        local_chain: &BTreeMap<u32, BlockHash>,
+        prev_tip: Option<CheckPoint>,
         keychain_spks: BTreeMap<K, impl IntoIterator<Item = (u32, Script)>>,
         txids: impl IntoIterator<Item = Txid>,
         outpoints: impl IntoIterator<Item = OutPoint>,
@@ -196,14 +194,10 @@ impl ElectrumExt<ConfirmationHeightAnchor> for Client {
         let outpoints = outpoints.into_iter().collect::<Vec<_>>();
 
         let update = loop {
-            let mut update = ElectrumUpdate::<K, ConfirmationHeightAnchor> {
-                chain_update: prepare_chain_update(self, local_chain)?,
-                ..Default::default()
-            };
-            let anchor_block = update
-                .chain_update
-                .tip()
-                .expect("must have atleast one block");
+            let mut update = ElectrumUpdate::<K, ConfirmationHeightAnchor>::new(
+                prepare_chain_update(self, prev_tip.clone())?,
+            );
+            let anchor_block = update.chain_update.block_id();
 
             if !request_spks.is_empty() {
                 if !scanned_spks.is_empty() {
@@ -271,39 +265,72 @@ impl ElectrumExt<ConfirmationHeightAnchor> for Client {
 /// Prepare an update "template" based on the checkpoints of the `local_chain`.
 fn prepare_chain_update(
     client: &Client,
-    local_chain: &BTreeMap<u32, BlockHash>,
-) -> Result<LocalChain, Error> {
-    let mut update = LocalChain::default();
+    prev_tip: Option<CheckPoint>,
+) -> Result<CheckPoint, Error> {
+    let mut header_notification = client.block_headers_subscribe()?;
 
-    // Find the local chain block that is still there so our update can connect to the local chain.
-    for (&existing_height, &existing_hash) in local_chain.iter().rev() {
-        // TODO: a batch request may be safer, as a reorg that happens when we are obtaining
-        //       `block_header`s will result in inconsistencies
-        let current_hash = client.block_header(existing_height as usize)?.block_hash();
-        let _ = update
-            .insert_block(BlockId {
-                height: existing_height,
-                hash: current_hash,
-            })
-            .expect("This never errors because we are working with a fresh chain");
+    let (new_blocks, mut last_cp) = 'retry: loop {
+        let tip = BlockId {
+            height: header_notification.height as _,
+            hash: header_notification.header.block_hash(),
+        };
+        let tip_parent = BlockId {
+            height: (header_notification.height - 1) as _,
+            hash: header_notification.header.prev_blockhash,
+        };
 
-        if current_hash == existing_hash {
-            break;
+        // this records new blocks, including blocks that are to be replaced
+        let mut new_blocks = [tip_parent, tip]
+            .into_iter()
+            .map(|b| (b.height, b.hash))
+            .collect::<BTreeMap<u32, BlockHash>>();
+        let mut agreement_cp = Option::<CheckPoint>::None;
+
+        for cp in prev_tip.iter().flat_map(CheckPoint::iter) {
+            let cp_block = cp.block_id();
+            // TODO: a batch request may be safer, as a reorg that happens when we are obtaining
+            //       `block_header`s will result in inconsistencies
+            let hash = client.block_header(cp_block.height as _)?.block_hash();
+            if hash == cp_block.hash {
+                agreement_cp = Some(cp);
+                break;
+            }
+            new_blocks.insert(cp_block.height, hash);
         }
-    }
 
-    // Insert the new tip so new transactions will be accepted into the sparsechain.
-    let tip = {
-        let (height, hash) = crate::get_tip(client)?;
-        BlockId { height, hash }
+        // check for tip changes
+        loop {
+            match client.block_headers_pop()? {
+                Some(new_notification) => {
+                    let new_height = new_notification.height;
+                    header_notification = new_notification;
+                    if new_height as u32 <= tip.height {
+                        // we may have a reorg
+                        // reorg-detection logic can be improved (false positives are possible)
+                        continue 'retry;
+                    }
+                }
+                None => {
+                    let new_blocks = match &agreement_cp {
+                        // `new_blocks` should only include blocks that are actually new
+                        Some(agreement_cp) => new_blocks.split_off(&(agreement_cp.height() + 1)),
+                        None => new_blocks,
+                    };
+
+                    break 'retry (new_blocks, agreement_cp);
+                }
+            };
+        }
     };
-    if update.insert_block(tip).is_err() {
-        // There has been a re-org before we even begin scanning addresses.
-        // Just recursively call (this should never happen).
-        return prepare_chain_update(client, local_chain);
+
+    // construct checkpoints
+    for (height, hash) in new_blocks {
+        let cp = CheckPoint::new_with_prev(BlockId { height, hash }, last_cp)
+            .expect("heights should not conflict");
+        last_cp = Some(cp);
     }
 
-    Ok(update)
+    Ok(last_cp.expect("must have atleast one checkpoint"))
 }
 
 fn determine_tx_anchor(

@@ -47,7 +47,7 @@ dev-getrandom-wasm = ["getrandom/js"]
 lazy_static = "1.4"
 env_logger = "0.7"
 # Move back to importing from rust-bitcoin once https://github.com/rust-bitcoin/rust-bitcoin/pull/1342 is released
-base64 = "^0.13"
+base64 = "^0.21"
 assert_matches = "1.5.0"
 
 [package.metadata.docs.rs]
