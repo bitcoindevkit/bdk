@@ -8,7 +8,7 @@ use bdk_chain::{
     keychain::{Balance, DerivationAdditions, KeychainTxOutIndex},
     local_chain::LocalChain,
     tx_graph::Additions,
-    BlockId, ChainPosition, ConfirmationHeightAnchor,
+    ChainPosition, ConfirmationHeightAnchor,
 };
 use bitcoin::{secp256k1::Secp256k1, BlockHash, OutPoint, Script, Transaction, TxIn, TxOut};
 use miniscript::Descriptor;
@@ -109,8 +109,8 @@ fn test_list_owned_txouts() {
     // Create Local chains
 
     let local_chain = (0..150)
-        .map(|i| (i as u32, h!("random")))
-        .collect::<BTreeMap<u32, BlockHash>>();
+        .map(|i| (i as u32, Some(h!("random"))))
+        .collect::<BTreeMap<u32, Option<BlockHash>>>();
     let local_chain = LocalChain::from(local_chain);
 
     // Initiate IndexedTxGraph
@@ -212,9 +212,8 @@ fn test_list_owned_txouts() {
             (
                 *tx,
                 local_chain
-                    .blocks()
-                    .get(&height)
-                    .map(|&hash| BlockId { height, hash })
+                    .checkpoint(height)
+                    .map(|cp| cp.block_id())
                     .map(|anchor_block| ConfirmationHeightAnchor {
                         anchor_block,
                         confirmation_height: anchor_block.height,
@@ -231,9 +230,8 @@ fn test_list_owned_txouts() {
         |height: u32,
          graph: &IndexedTxGraph<ConfirmationHeightAnchor, KeychainTxOutIndex<String>>| {
             let chain_tip = local_chain
-                .blocks()
-                .get(&height)
-                .map(|&hash| BlockId { height, hash })
+                .checkpoint(height)
+                .map(|cp| cp.block_id())
                 .expect("block must exist");
             let txouts = graph
                 .graph()

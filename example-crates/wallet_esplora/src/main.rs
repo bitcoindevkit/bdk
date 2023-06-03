@@ -36,7 +36,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client =
         esplora_client::Builder::new("https://blockstream.info/testnet/api").build_blocking()?;
 
-    let local_chain = wallet.checkpoints();
+    let prev_tip = wallet.latest_checkpoint();
     let keychain_spks = wallet
         .spks_of_all_keychains()
         .into_iter()
@@ -53,7 +53,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         })
         .collect();
     let update = client.scan(
-        local_chain,
+        prev_tip,
         keychain_spks,
         None,
         None,

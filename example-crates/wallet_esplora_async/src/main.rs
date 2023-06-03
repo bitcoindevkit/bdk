@@ -37,7 +37,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client =
         esplora_client::Builder::new("https://blockstream.info/testnet/api").build_async()?;
 
-    let local_chain = wallet.checkpoints();
+    let prev_cp = wallet.latest_checkpoint();
     let keychain_spks = wallet
         .spks_of_all_keychains()
         .into_iter()
@@ -54,14 +54,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         })
         .collect();
     let update = client
-        .scan(
-            local_chain,
-            keychain_spks,
-            [],
-            [],
-            STOP_GAP,
-            PARALLEL_REQUESTS,
-        )
+        .scan(prev_cp, keychain_spks, [], [], STOP_GAP, PARALLEL_REQUESTS)
         .await?;
     println!();
     wallet.apply_update(update)?;

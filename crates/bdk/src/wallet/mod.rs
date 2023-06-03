@@ -23,7 +23,7 @@ pub use bdk_chain::keychain::Balance;
 use bdk_chain::{
     indexed_tx_graph::IndexedAdditions,
     keychain::{KeychainTxOutIndex, LocalChangeSet, LocalUpdate},
-    local_chain::{self, LocalChain, UpdateNotConnectedError},
+    local_chain::{self, CannotConnectError, CheckPoint, CheckPointIter, LocalChain},
     tx_graph::{CanonicalTx, TxGraph},
     Append, BlockId, ChainPosition, ConfirmationTime, ConfirmationTimeAnchor, FullTxOut,
     IndexedTxGraph, Persist, PersistBackend,
@@ -32,8 +32,8 @@ use bitcoin::consensus::encode::serialize;
 use bitcoin::secp256k1::Secp256k1;
 use bitcoin::util::psbt;
 use bitcoin::{
-    Address, BlockHash, EcdsaSighashType, LockTime, Network, OutPoint, SchnorrSighashType, Script,
-    Sequence, Transaction, TxOut, Txid, Witness,
+    Address, EcdsaSighashType, LockTime, Network, OutPoint, SchnorrSighashType, Script, Sequence,
+    Transaction, TxOut, Txid, Witness,
 };
 use core::fmt;
 use core::ops::Deref;
@@ -245,7 +245,7 @@ impl<D> Wallet<D> {
         };
 
         let changeset = db.load_from_persistence().map_err(NewError::Persist)?;
-        chain.apply_changeset(changeset.chain_changeset);
+        chain.apply_changeset(&changeset.chain_changeset);
         indexed_graph.apply_additions(changeset.indexed_additions);
 
         let persist = Persist::new(db);
@@ -370,19 +370,19 @@ impl<D> Wallet<D> {
             .graph()
             .filter_chain_unspents(
                 &self.chain,
-                self.chain.tip().unwrap_or_default(),
+                self.chain.tip().map(|cp| cp.block_id()).unwrap_or_default(),
                 self.indexed_graph.index.outpoints().iter().cloned(),
             )
             .map(|((k, i), full_txo)| new_local_utxo(k, i, full_txo))
     }
 
     /// Get all the checkpoints the wallet is currently storing indexed by height.
-    pub fn checkpoints(&self) -> &BTreeMap<u32, BlockHash> {
-        self.chain.blocks()
+    pub fn checkpoints(&self) -> CheckPointIter {
+        self.chain.iter_checkpoints(None)
     }
 
     /// Returns the latest checkpoint.
-    pub fn latest_checkpoint(&self) -> Option<BlockId> {
+    pub fn latest_checkpoint(&self) -> Option<CheckPoint> {
         self.chain.tip()
     }
 
@@ -420,7 +420,7 @@ impl<D> Wallet<D> {
             .graph()
             .filter_chain_unspents(
                 &self.chain,
-                self.chain.tip().unwrap_or_default(),
+                self.chain.tip().map(|cp| cp.block_id()).unwrap_or_default(),
                 core::iter::once((spk_i, op)),
             )
             .map(|((k, i), full_txo)| new_local_utxo(k, i, full_txo))
@@ -437,7 +437,7 @@ impl<D> Wallet<D> {
         let canonical_tx = CanonicalTx {
             observed_as: graph.get_chain_position(
                 &self.chain,
-                self.chain.tip().unwrap_or_default(),
+                self.chain.tip().map(|cp| cp.block_id()).unwrap_or_default(),
                 txid,
             )?,
             node: graph.get_tx_node(txid)?,
@@ -460,11 +460,11 @@ impl<D> Wallet<D> {
     pub fn insert_checkpoint(
         &mut self,
         block_id: BlockId,
-    ) -> Result<bool, local_chain::InsertBlockNotMatchingError>
+    ) -> Result<bool, local_chain::InsertBlockError>
     where
         D: PersistBackend<ChangeSet>,
     {
-        let changeset = self.chain.insert_block(block_id)?;
+        let (_, changeset) = self.chain.get_or_insert(block_id)?;
         let changed = !changeset.is_empty();
         self.persist.stage(changeset.into());
         Ok(changed)
@@ -500,18 +500,15 @@ impl<D> Wallet<D> {
                 // anchor tx to checkpoint with lowest height that is >= position's height
                 let anchor = self
                     .chain
-                    .blocks()
+                    .checkpoints()
                     .range(height..)
                     .next()
                     .ok_or(InsertTxError::ConfirmationHeightCannotBeGreaterThanTip {
-                        tip_height: self.chain.tip().map(|b| b.height),
+                        tip_height: self.chain.tip().map(|b| b.height()),
                         tx_height: height,
                     })
-                    .map(|(&anchor_height, &anchor_hash)| ConfirmationTimeAnchor {
-                        anchor_block: BlockId {
-                            height: anchor_height,
-                            hash: anchor_hash,
-                        },
+                    .map(|(&_, cp)| ConfirmationTimeAnchor {
+                        anchor_block: cp.block_id(),
                         confirmation_height: height,
                         confirmation_time: time,
                     })?;
@@ -531,9 +528,10 @@ impl<D> Wallet<D> {
     pub fn transactions(
         &self,
     ) -> impl Iterator<Item = CanonicalTx<'_, Transaction, ConfirmationTimeAnchor>> + '_ {
-        self.indexed_graph
-            .graph()
-            .list_chain_txs(&self.chain, self.chain.tip().unwrap_or_default())
+        self.indexed_graph.graph().list_chain_txs(
+            &self.chain,
+            self.chain.tip().map(|cp| cp.block_id()).unwrap_or_default(),
+        )
     }
 
     /// Return the balance, separated into available, trusted-pending, untrusted-pending and immature
@@ -541,7 +539,7 @@ impl<D> Wallet<D> {
     pub fn get_balance(&self) -> Balance {
         self.indexed_graph.graph().balance(
             &self.chain,
-            self.chain.tip().unwrap_or_default(),
+            self.chain.tip().map(|cp| cp.block_id()).unwrap_or_default(),
             self.indexed_graph.index.outpoints().iter().cloned(),
             |&(k, _), _| k == KeychainKind::Internal,
         )
@@ -715,8 +713,7 @@ impl<D> Wallet<D> {
             None => self
                 .chain
                 .tip()
-                .and_then(|cp| cp.height.into())
-                .map(|height| LockTime::from_height(height).expect("Invalid height")),
+                .map(|cp| LockTime::from_height(cp.height()).expect("Invalid height")),
             h => h,
         };
 
@@ -1030,7 +1027,7 @@ impl<D> Wallet<D> {
     ) -> Result<TxBuilder<'_, D, DefaultCoinSelectionAlgorithm, BumpFee>, Error> {
         let graph = self.indexed_graph.graph();
         let txout_index = &self.indexed_graph.index;
-        let chain_tip = self.chain.tip().unwrap_or_default();
+        let chain_tip = self.chain.tip().map(|cp| cp.block_id()).unwrap_or_default();
 
         let mut tx = graph
             .get_tx(txid)
@@ -1265,7 +1262,7 @@ impl<D> Wallet<D> {
         psbt: &mut psbt::PartiallySignedTransaction,
         sign_options: SignOptions,
     ) -> Result<bool, Error> {
-        let chain_tip = self.chain.tip().unwrap_or_default();
+        let chain_tip = self.chain.tip().map(|cp| cp.block_id()).unwrap_or_default();
 
         let tx = &psbt.unsigned_tx;
         let mut finished = true;
@@ -1288,7 +1285,7 @@ impl<D> Wallet<D> {
                 });
             let current_height = sign_options
                 .assume_height
-                .or(self.chain.tip().map(|b| b.height));
+                .or(self.chain.tip().map(|b| b.height()));
 
             debug!(
                 "Input #{} - {}, using `confirmation_height` = {:?}, `current_height` = {:?}",
@@ -1433,7 +1430,7 @@ impl<D> Wallet<D> {
         must_only_use_confirmed_tx: bool,
         current_height: Option<u32>,
     ) -> (Vec<WeightedUtxo>, Vec<WeightedUtxo>) {
-        let chain_tip = self.chain.tip().unwrap_or_default();
+        let chain_tip = self.chain.tip().map(|cp| cp.block_id()).unwrap_or_default();
         //    must_spend <- manually selected utxos
         //    may_spend  <- all other available utxos
         let mut may_spend = self.get_available_utxos();
@@ -1704,11 +1701,11 @@ impl<D> Wallet<D> {
     /// transactions related to your wallet into it.
     ///
     /// [`commit`]: Self::commit
-    pub fn apply_update(&mut self, update: Update) -> Result<bool, UpdateNotConnectedError>
+    pub fn apply_update(&mut self, update: Update) -> Result<bool, CannotConnectError>
     where
         D: PersistBackend<ChangeSet>,
     {
-        let mut changeset: ChangeSet = self.chain.apply_update(update.chain)?.into();
+        let mut changeset = ChangeSet::from(self.chain.apply_update(update.tip)?);
         let (_, index_additions) = self
             .indexed_graph
             .index
