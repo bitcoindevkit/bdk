@@ -260,20 +260,21 @@ impl LocalChain {
             Some(original_tip) => {
                 let (changeset, perfect_connection) =
                     merge_chains(original_tip, update_tip.clone(), update_lower_bound)?;
-                if perfect_connection {
-                    self.tip = Some(update_tip);
-                    for (height, hash) in &changeset {
-                        match hash {
-                            Some(hash) => self.index.insert(*height, *hash),
-                            None => self.index.remove(height),
-                        };
-                    }
-                    changeset
-                } else {
+
+                if !perfect_connection {
                     self.apply_changeset(&changeset);
                     // return early as `apply_changeset` already calls `check_consistency`
                     return Ok(changeset);
                 }
+
+                self.tip = Some(update_tip);
+                for (height, hash) in &changeset {
+                    match hash {
+                        Some(hash) => self.index.insert(*height, *hash),
+                        None => self.index.remove(height),
+                    };
+                }
+                changeset
             }
             None => {
                 *self = Self::from_tip(update_tip);
