@@ -3326,3 +3326,25 @@ fn test_tx_cancellation() {
         .unwrap();
     assert_eq!(change_derivation_4, (KeychainKind::Internal, 2));
 }
+
+// TODO: this is not really a test right now, just a showcase of the API
+#[test]
+fn test_new_tx_builder() {
+    use bdk::wallet::tx_builder_2::*;
+    use bdk_chain::collections::HashSet;
+
+    let (wallet, _) =
+        get_funded_wallet_with_change(get_test_wpkh(), Some(get_test_tr_single_sig_xprv()));
+
+    let descriptors = wallet.keychains();
+    let coins_by_keychain = wallet.list_unspent_by_keychain();
+    let mut coin_control = CoinControl::default();
+    let assets = vec![Asset {}];
+    for (keychain, coins) in coins_by_keychain {
+        let desc = descriptors.get(&keychain).unwrap();
+        let coins = coins
+            .into_iter()
+            .map(|lu| (lu.outpoint, lu.txout, lu.confirmation_time));
+        coin_control.add_planned_utxos(coins, desc.clone(), assets.clone(), HashSet::default());
+    }
+}

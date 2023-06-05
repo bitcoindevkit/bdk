@@ -43,6 +43,7 @@ pub mod coin_selection;
 pub mod export;
 pub mod signer;
 pub mod tx_builder;
+pub mod tx_builder_2;
 pub(crate) mod utils;
 
 #[cfg(feature = "hardware-signer")]
@@ -346,6 +347,14 @@ impl<D> Wallet<D> {
                 confirmation_time: utxo.chain_position,
             })
             .collect()
+    }
+
+    pub fn list_unspent_by_keychain(&self) -> BTreeMap<KeychainKind, Vec<LocalUtxo>> {
+        let mut map = BTreeMap::default();
+        for utxo in self.list_unspent() {
+            map.entry(utxo.keychain).or_insert(Vec::new()).push(utxo);
+        }
+        map
     }
 
     /// Get all the checkpoints the wallet is currently storing indexed by height.
