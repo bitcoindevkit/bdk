@@ -846,12 +846,12 @@ fn test_inserting_anchor_without_tx() {
     ]);
     let anchors_with_txids = &anchors_with_txs
         .iter()
-        .map(|(anchor, tx)| (anchor.clone(), tx.txid()))
+        .map(|(anchor, tx)| (*anchor, tx.txid()))
         .collect::<BTreeSet<_>>();
 
     let mut anchor_additions = Additions::default();
     for (anchor, tx) in &anchors_with_txs {
-        let additions = graph.insert_anchor(tx.txid(), anchor.clone());
+        let additions = graph.insert_anchor(tx.txid(), *anchor);
         anchor_additions.append(additions);
     }
 
@@ -895,8 +895,8 @@ fn test_inserting_anchor_without_tx() {
             graph.get_tx_node(tx.txid()).unwrap(),
             TxNode {
                 txid: tx.txid(),
-                tx: tx,
-                anchors: &BTreeSet::from([anchor.clone()]),
+                tx,
+                anchors: &BTreeSet::from([*anchor]),
                 last_seen_unconfirmed: 0
             }
         );
@@ -906,6 +906,4 @@ fn test_inserting_anchor_without_tx() {
     for tx in txs.iter().take(5).skip(3) {
         assert!(graph.get_tx_node(tx.txid()).unwrap().anchors.is_empty());
     }
-
-    assert!(false)
 }
