@@ -4,7 +4,7 @@ use bdk_chain::{
     collections::*,
     local_chain::LocalChain,
     tx_graph::{Additions, TxGraph},
-    Append, BlockId, ConfirmationHeightAnchor, ObservedAs,
+    Append, BlockId, ChainPosition, ConfirmationHeightAnchor,
 };
 use bitcoin::{
     hashes::Hash, BlockHash, OutPoint, PackedLockTime, Script, Transaction, TxIn, TxOut, Txid,
@@ -56,22 +56,22 @@ fn insert_txouts() {
     };
 
     // Conf anchor used to mark the full transaction as confirmed.
-    let conf_anchor = ObservedAs::Confirmed(BlockId {
+    let conf_anchor = ChainPosition::Confirmed(BlockId {
         height: 100,
         hash: h!("random blockhash"),
     });
 
     // Unconfirmed anchor to mark the partial transactions as unconfirmed
-    let unconf_anchor = ObservedAs::<BlockId>::Unconfirmed(1000000);
+    let unconf_anchor = ChainPosition::<BlockId>::Unconfirmed(1000000);
 
     // Make the original graph
     let mut graph = {
-        let mut graph = TxGraph::<ObservedAs<BlockId>>::default();
+        let mut graph = TxGraph::<ChainPosition<BlockId>>::default();
         for (outpoint, txout) in &original_ops {
             assert_eq!(
                 graph.insert_txout(*outpoint, txout.clone()),
                 Additions {
-                    txout: [(*outpoint, txout.clone())].into(),
+                    txouts: [(*outpoint, txout.clone())].into(),
                     ..Default::default()
                 }
             );
@@ -87,7 +87,7 @@ fn insert_txouts() {
             assert_eq!(
                 graph.insert_txout(*outpoint, txout.clone()),
                 Additions {
-                    txout: [(*outpoint, txout.clone())].into(),
+                    txouts: [(*outpoint, txout.clone())].into(),
                     ..Default::default()
                 }
             );
@@ -95,8 +95,8 @@ fn insert_txouts() {
             assert_eq!(
                 graph.insert_anchor(outpoint.txid, unconf_anchor),
                 Additions {
-                    tx: [].into(),
-                    txout: [].into(),
+                    txs: [].into(),
+                    txouts: [].into(),
                     anchors: [(unconf_anchor, outpoint.txid)].into(),
                     last_seen: [].into()
                 }
@@ -105,8 +105,8 @@ fn insert_txouts() {
             assert_eq!(
                 graph.insert_seen_at(outpoint.txid, 1000000),
                 Additions {
-                    tx: [].into(),
-                    txout: [].into(),
+                    txs: [].into(),
+                    txouts: [].into(),
                     anchors: [].into(),
                     last_seen: [(outpoint.txid, 1000000)].into()
                 }
@@ -116,7 +116,7 @@ fn insert_txouts() {
         assert_eq!(
             graph.insert_tx(update_txs.clone()),
             Additions {
-                tx: [update_txs.clone()].into(),
+                txs: [update_txs.clone()].into(),
                 ..Default::default()
             }
         );
@@ -125,8 +125,8 @@ fn insert_txouts() {
         assert_eq!(
             graph.insert_anchor(update_txs.txid(), conf_anchor),
             Additions {
-                tx: [].into(),
-                txout: [].into(),
+                txs: [].into(),
+                txouts: [].into(),
                 anchors: [(conf_anchor, update_txs.txid())].into(),
                 last_seen: [].into()
             }
@@ -140,8 +140,8 @@ fn insert_txouts() {
     assert_eq!(
         additions,
         Additions {
-            tx: [update_txs.clone()].into(),
-            txout: update_ops.into(),
+            txs: [update_txs.clone()].into(),
+            txouts: update_ops.into(),
             anchors: [(conf_anchor, update_txs.txid()), (unconf_anchor, h!("tx2"))].into(),
             last_seen: [(h!("tx2"), 1000000)].into()
         }
@@ -707,7 +707,7 @@ fn test_chain_spends() {
     assert_eq!(
         graph.get_chain_spend(&local_chain, tip, OutPoint::new(tx_0.txid(), 0)),
         Some((
-            ObservedAs::Confirmed(&ConfirmationHeightAnchor {
+            ChainPosition::Confirmed(&ConfirmationHeightAnchor {
                 anchor_block: tip,
                 confirmation_height: 98
             }),
@@ -719,7 +719,7 @@ fn test_chain_spends() {
     assert_eq!(
         graph.get_chain_position(&local_chain, tip, tx_0.txid()),
         // Some(ObservedAs::Confirmed(&local_chain.get_block(95).expect("block expected"))),
-        Some(ObservedAs::Confirmed(&ConfirmationHeightAnchor {
+        Some(ChainPosition::Confirmed(&ConfirmationHeightAnchor {
             anchor_block: tip,
             confirmation_height: 95
         }))
@@ -728,7 +728,7 @@ fn test_chain_spends() {
     // Even if unconfirmed tx has a last_seen of 0, it can still be part of a chain spend.
     assert_eq!(
         graph.get_chain_spend(&local_chain, tip, OutPoint::new(tx_0.txid(), 1)),
-        Some((ObservedAs::Unconfirmed(0), tx_2.txid())),
+        Some((ChainPosition::Unconfirmed(0), tx_2.txid())),
     );
 
     // Mark the unconfirmed as seen and check correct ObservedAs status is returned.
@@ -739,7 +739,7 @@ fn test_chain_spends() {
         graph
             .get_chain_spend(&local_chain, tip, OutPoint::new(tx_0.txid(), 1))
             .unwrap(),
-        (ObservedAs::Unconfirmed(1234567), tx_2.txid())
+        (ChainPosition::Unconfirmed(1234567), tx_2.txid())
     );
 
     // A conflicting transaction that conflicts with tx_1.
@@ -775,7 +775,7 @@ fn test_chain_spends() {
         graph
             .get_chain_position(&local_chain, tip, tx_2_conflict.txid())
             .expect("position expected"),
-        ObservedAs::Unconfirmed(1234568)
+        ChainPosition::Unconfirmed(1234568)
     );
 
     // Chain_spend now catches the new transaction as the spend.
@@ -783,7 +783,7 @@ fn test_chain_spends() {
         graph
             .get_chain_spend(&local_chain, tip, OutPoint::new(tx_0.txid(), 1))
             .expect("expect observation"),
-        (ObservedAs::Unconfirmed(1234568), tx_2_conflict.txid())
+        (ChainPosition::Unconfirmed(1234568), tx_2_conflict.txid())
     );
 
     // Chain position of the `tx_2` is now none, as it is older than `tx_2_conflict`

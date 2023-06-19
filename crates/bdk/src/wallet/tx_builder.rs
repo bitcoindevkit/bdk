@@ -39,7 +39,7 @@
 use crate::collections::BTreeMap;
 use crate::collections::HashSet;
 use alloc::{boxed::Box, rc::Rc, string::String, vec::Vec};
-use bdk_chain::ConfirmationTime;
+use bdk_chain::PersistBackend;
 use core::cell::RefCell;
 use core::marker::PhantomData;
 
@@ -47,7 +47,7 @@ use bitcoin::util::psbt::{self, PartiallySignedTransaction as Psbt};
 use bitcoin::{LockTime, OutPoint, Script, Sequence, Transaction};
 
 use super::coin_selection::{CoinSelectionAlgorithm, DefaultCoinSelectionAlgorithm};
-use super::persist;
+use super::ChangeSet;
 use crate::{
     types::{FeeRate, KeychainKind, LocalUtxo, WeightedUtxo},
     TransactionDetails,
@@ -529,7 +529,7 @@ impl<'a, D, Cs: CoinSelectionAlgorithm, Ctx: TxBuilderContext> TxBuilder<'a, D, 
     /// [`BIP174`]: https://github.com/bitcoin/bips/blob/master/bip-0174.mediawiki
     pub fn finish(self) -> Result<(Psbt, TransactionDetails), Error>
     where
-        D: persist::PersistBackend<KeychainKind, ConfirmationTime>,
+        D: PersistBackend<ChangeSet>,
     {
         self.wallet
             .borrow_mut()
@@ -884,7 +884,7 @@ mod test {
                 txout: Default::default(),
                 keychain: KeychainKind::External,
                 is_spent: false,
-                confirmation_time: ConfirmationTime::Unconfirmed,
+                confirmation_time: ConfirmationTime::Unconfirmed { last_seen: 0 },
                 derivation_index: 0,
             },
             LocalUtxo {

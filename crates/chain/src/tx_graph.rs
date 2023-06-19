@@ -56,8 +56,8 @@
 //! ```
 
 use crate::{
-    collections::*, keychain::Balance, Anchor, Append, BlockId, ChainOracle, ForEachTxOut,
-    FullTxOut, ObservedAs,
+    collections::*, keychain::Balance, Anchor, Append, BlockId, ChainOracle, ChainPosition,
+    ForEachTxOut, FullTxOut,
 };
 use alloc::vec::Vec;
 use bitcoin::{OutPoint, Script, Transaction, TxOut, Txid};
@@ -135,7 +135,7 @@ impl Default for TxNodeInternal {
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct CanonicalTx<'a, T, A> {
     /// How the transaction is observed as (confirmed or unconfirmed).
-    pub observed_as: ObservedAs<&'a A>,
+    pub observed_as: ChainPosition<&'a A>,
     /// The transaction node (as part of the graph).
     pub node: TxNode<'a, T, A>,
 }
@@ -482,7 +482,7 @@ impl<A: Clone + Ord> TxGraph<A> {
 
     /// Applies [`Additions`] to [`TxGraph`].
     pub fn apply_additions(&mut self, additions: Additions<A>) {
-        for tx in additions.tx {
+        for tx in additions.txs {
             let txid = tx.txid();
 
             tx.input
@@ -513,7 +513,7 @@ impl<A: Clone + Ord> TxGraph<A> {
             }
         }
 
-        for (outpoint, txout) in additions.txout {
+        for (outpoint, txout) in additions.txouts {
             let tx_entry = self
                 .txs
                 .entry(outpoint.txid)
@@ -553,11 +553,11 @@ impl<A: Clone + Ord> TxGraph<A> {
         for (&txid, (update_tx_node, _, update_last_seen)) in &update.txs {
             let prev_last_seen: u64 = match (self.txs.get(&txid), update_tx_node) {
                 (None, TxNodeInternal::Whole(update_tx)) => {
-                    additions.tx.insert(update_tx.clone());
+                    additions.txs.insert(update_tx.clone());
                     0
                 }
                 (None, TxNodeInternal::Partial(update_txos)) => {
-                    additions.txout.extend(
+                    additions.txouts.extend(
                         update_txos
                             .iter()
                             .map(|(&vout, txo)| (OutPoint::new(txid, vout), txo.clone())),
@@ -569,14 +569,14 @@ impl<A: Clone + Ord> TxGraph<A> {
                     Some((TxNodeInternal::Partial(_), _, last_seen)),
                     TxNodeInternal::Whole(update_tx),
                 ) => {
-                    additions.tx.insert(update_tx.clone());
+                    additions.txs.insert(update_tx.clone());
                     *last_seen
                 }
                 (
                     Some((TxNodeInternal::Partial(txos), _, last_seen)),
                     TxNodeInternal::Partial(update_txos),
                 ) => {
-                    additions.txout.extend(
+                    additions.txouts.extend(
                         update_txos
                             .iter()
                             .filter(|(vout, _)| !txos.contains_key(*vout))
@@ -614,7 +614,7 @@ impl<A: Anchor> TxGraph<A> {
         chain: &C,
         chain_tip: BlockId,
         txid: Txid,
-    ) -> Result<Option<ObservedAs<&A>>, C::Error> {
+    ) -> Result<Option<ChainPosition<&A>>, C::Error> {
         let (tx_node, anchors, last_seen) = match self.txs.get(&txid) {
             Some(v) => v,
             None => return Ok(None),
@@ -622,7 +622,7 @@ impl<A: Anchor> TxGraph<A> {
 
         for anchor in anchors {
             match chain.is_block_in_chain(anchor.anchor_block(), chain_tip)? {
-                Some(true) => return Ok(Some(ObservedAs::Confirmed(anchor))),
+                Some(true) => return Ok(Some(ChainPosition::Confirmed(anchor))),
                 _ => continue,
             }
         }
@@ -651,7 +651,7 @@ impl<A: Anchor> TxGraph<A> {
             }
         }
 
-        Ok(Some(ObservedAs::Unconfirmed(*last_seen)))
+        Ok(Some(ChainPosition::Unconfirmed(*last_seen)))
     }
 
     /// Get the position of the transaction in `chain` with tip `chain_tip`.
@@ -664,7 +664,7 @@ impl<A: Anchor> TxGraph<A> {
         chain: &C,
         chain_tip: BlockId,
         txid: Txid,
-    ) -> Option<ObservedAs<&A>> {
+    ) -> Option<ChainPosition<&A>> {
         self.try_get_chain_position(chain, chain_tip, txid)
             .expect("error is infallible")
     }
@@ -686,7 +686,7 @@ impl<A: Anchor> TxGraph<A> {
         chain: &C,
         chain_tip: BlockId,
         outpoint: OutPoint,
-    ) -> Result<Option<(ObservedAs<&A>, Txid)>, C::Error> {
+    ) -> Result<Option<(ChainPosition<&A>, Txid)>, C::Error> {
         if self
             .try_get_chain_position(chain, chain_tip, outpoint.txid)?
             .is_none()
@@ -714,7 +714,7 @@ impl<A: Anchor> TxGraph<A> {
         chain: &C,
         static_block: BlockId,
         outpoint: OutPoint,
-    ) -> Option<(ObservedAs<&A>, Txid)> {
+    ) -> Option<(ChainPosition<&A>, Txid)> {
         self.try_get_chain_spend(chain, static_block, outpoint)
             .expect("error is infallible")
     }
@@ -786,7 +786,7 @@ impl<A: Anchor> TxGraph<A> {
         chain: &'a C,
         chain_tip: BlockId,
         outpoints: impl IntoIterator<Item = (OI, OutPoint)> + 'a,
-    ) -> impl Iterator<Item = Result<(OI, FullTxOut<ObservedAs<A>>), C::Error>> + 'a {
+    ) -> impl Iterator<Item = Result<(OI, FullTxOut<A>), C::Error>> + 'a {
         outpoints
             .into_iter()
             .map(
@@ -837,7 +837,7 @@ impl<A: Anchor> TxGraph<A> {
         chain: &'a C,
         chain_tip: BlockId,
         outpoints: impl IntoIterator<Item = (OI, OutPoint)> + 'a,
-    ) -> impl Iterator<Item = (OI, FullTxOut<ObservedAs<A>>)> + 'a {
+    ) -> impl Iterator<Item = (OI, FullTxOut<A>)> + 'a {
         self.try_filter_chain_txouts(chain, chain_tip, outpoints)
             .map(|r| r.expect("oracle is infallible"))
     }
@@ -865,7 +865,7 @@ impl<A: Anchor> TxGraph<A> {
         chain: &'a C,
         chain_tip: BlockId,
         outpoints: impl IntoIterator<Item = (OI, OutPoint)> + 'a,
-    ) -> impl Iterator<Item = Result<(OI, FullTxOut<ObservedAs<A>>), C::Error>> + 'a {
+    ) -> impl Iterator<Item = Result<(OI, FullTxOut<A>), C::Error>> + 'a {
         self.try_filter_chain_txouts(chain, chain_tip, outpoints)
             .filter(|r| match r {
                 // keep unspents, drop spents
@@ -886,7 +886,7 @@ impl<A: Anchor> TxGraph<A> {
         chain: &'a C,
         chain_tip: BlockId,
         txouts: impl IntoIterator<Item = (OI, OutPoint)> + 'a,
-    ) -> impl Iterator<Item = (OI, FullTxOut<ObservedAs<A>>)> + 'a {
+    ) -> impl Iterator<Item = (OI, FullTxOut<A>)> + 'a {
         self.try_filter_chain_unspents(chain, chain_tip, txouts)
             .map(|r| r.expect("oracle is infallible"))
     }
@@ -919,14 +919,14 @@ impl<A: Anchor> TxGraph<A> {
             let (spk_i, txout) = res?;
 
             match &txout.chain_position {
-                ObservedAs::Confirmed(_) => {
+                ChainPosition::Confirmed(_) => {
                     if txout.is_confirmed_and_spendable(chain_tip.height) {
                         confirmed += txout.txout.value;
                     } else if !txout.is_mature(chain_tip.height) {
                         immature += txout.txout.value;
                     }
                 }
-                ObservedAs::Unconfirmed(_) => {
+                ChainPosition::Unconfirmed(_) => {
                     if trust_predicate(&spk_i, &txout.txout.script_pubkey) {
                         trusted_pending += txout.txout.value;
                     } else {
@@ -983,17 +983,21 @@ impl<A: Anchor> TxGraph<A> {
 )]
 #[must_use]
 pub struct Additions<A = ()> {
-    pub tx: BTreeSet<Transaction>,
-    pub txout: BTreeMap<OutPoint, TxOut>,
+    /// Added transactions.
+    pub txs: BTreeSet<Transaction>,
+    /// Added txouts.
+    pub txouts: BTreeMap<OutPoint, TxOut>,
+    /// Added anchors.
     pub anchors: BTreeSet<(A, Txid)>,
+    /// Added last-seen unix timestamps of transactions.
     pub last_seen: BTreeMap<Txid, u64>,
 }
 
 impl<A> Default for Additions<A> {
     fn default() -> Self {
         Self {
-            tx: Default::default(),
-            txout: Default::default(),
+            txs: Default::default(),
+            txouts: Default::default(),
             anchors: Default::default(),
             last_seen: Default::default(),
         }
@@ -1003,12 +1007,12 @@ impl<A> Default for Additions<A> {
 impl<A> Additions<A> {
     /// Returns true if the [`Additions`] is empty (no transactions or txouts).
     pub fn is_empty(&self) -> bool {
-        self.tx.is_empty() && self.txout.is_empty()
+        self.txs.is_empty() && self.txouts.is_empty()
     }
 
     /// Iterates over all outpoints contained within [`Additions`].
     pub fn txouts(&self) -> impl Iterator<Item = (OutPoint, &TxOut)> {
-        self.tx
+        self.txs
             .iter()
             .flat_map(|tx| {
                 tx.output
@@ -1016,14 +1020,14 @@ impl<A> Additions<A> {
                     .enumerate()
                     .map(move |(vout, txout)| (OutPoint::new(tx.txid(), vout as _), txout))
             })
-            .chain(self.txout.iter().map(|(op, txout)| (*op, txout)))
+            .chain(self.txouts.iter().map(|(op, txout)| (*op, txout)))
     }
 }
 
 impl<A: Ord> Append for Additions<A> {
     fn append(&mut self, mut other: Self) {
-        self.tx.append(&mut other.tx);
-        self.txout.append(&mut other.txout);
+        self.txs.append(&mut other.txs);
+        self.txouts.append(&mut other.txouts);
         self.anchors.append(&mut other.anchors);
 
         // last_seen timestamps should only increase
@@ -1037,8 +1041,8 @@ impl<A: Ord> Append for Additions<A> {
     }
 
     fn is_empty(&self) -> bool {
-        self.tx.is_empty()
-            && self.txout.is_empty()
+        self.txs.is_empty()
+            && self.txouts.is_empty()
             && self.anchors.is_empty()
             && self.last_seen.is_empty()
     }
