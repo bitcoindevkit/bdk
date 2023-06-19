@@ -61,7 +61,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         PARALLEL_REQUESTS,
     )?;
     println!();
-    wallet.apply_update(update)?;
+    wallet.apply_update(update, false)?;
     wallet.commit()?;
 
     let balance = wallet.get_balance();

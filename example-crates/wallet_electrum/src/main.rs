@@ -59,7 +59,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let missing = electrum_update.missing_full_txs(wallet.as_ref());
     let update = electrum_update.finalize_as_confirmation_time(&client, None, missing)?;
 
-    wallet.apply_update(update)?;
+    wallet.apply_update(update, false)?;
     wallet.commit()?;
 
     let balance = wallet.get_balance();
