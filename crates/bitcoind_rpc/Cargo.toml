@@ -1,5 +1,5 @@
 [package]
-name = "bitcoind_rpc"
+name = "bdk_bitcoind_rpc"
 version = "0.1.0"
 edition = "2021"
 

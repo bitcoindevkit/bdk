@@ -8,6 +8,7 @@ members = [
     "crates/bitcoind_rpc",
     "example-crates/example_cli",
     "example-crates/example_electrum",
+    "example-crates/example_rpc",
     "example-crates/wallet_electrum",
     "example-crates/wallet_esplora",
     "example-crates/wallet_esplora_async",

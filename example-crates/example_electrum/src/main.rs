@@ -22,8 +22,7 @@ use example_cli::{
 };
 
 const DB_MAGIC: &[u8] = b"bdk_example_electrum";
-const DB_PATH: &str = ".bdk_electrum_example.db";
-// const ASSUME_FINAL_DEPTH: usize = 10;
+const DB_PATH: &str = ".bdk_example_electrum.db";
 
 #[derive(Subcommand, Debug, Clone)]
 enum ElectrumCommands {
