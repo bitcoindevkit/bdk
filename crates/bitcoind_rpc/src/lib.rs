@@ -6,6 +6,7 @@ use bdk_chain::{
     local_chain::CheckPoint,
     BlockId, ConfirmationHeightAnchor, ConfirmationTimeAnchor, TxGraph,
 };
+pub use bitcoincore_rpc;
 use bitcoincore_rpc::{bitcoincore_rpc_json::GetBlockResult, Client, RpcApi};
 
 #[derive(Debug, Clone)]
@@ -51,6 +52,10 @@ pub fn confirmation_time_anchor(
 }
 
 impl BitcoindRpcItem {
+    pub fn is_mempool(&self) -> bool {
+        matches!(self, Self::Mempool { .. })
+    }
+
     pub fn into_update<K, A, F>(self, anchor: F) -> LocalUpdate<K, A>
     where
         A: Clone + Ord + PartialOrd,
@@ -145,15 +150,17 @@ impl<'a> BitcoindRpcIter<'a> {
                             // block is not in the main chain
                             continue 'cp_loop;
                         }
+
                         // agreement
-                        // next loop
                         *last_cp = Some(cp);
                         *last_info = Some(info);
+                        continue 'main_loop;
                     }
 
                     // no point of agreement found
                     // next loop will emit block @ fallback height
                     *last_cp = None;
+                    *last_info = None;
                 }
                 (Some(last_cp), last_info @ Some(_)) => {
                     // find next block
@@ -212,7 +219,7 @@ impl<'a> BitcoindRpcIter<'a> {
                         }
                     }
                 }
-                (None, Some(_)) => unreachable!(),
+                (None, Some(info)) => unreachable!("got info with no checkpoint? info={:#?}", info),
             }
         }
     }
