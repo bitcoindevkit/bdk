@@ -90,6 +90,38 @@ where
         }
     }
 
+    /// Apply `update`, but filters out irrelevant transactions.
+    ///
+    /// Relevancy is determined by the [`Indexer::is_tx_relevant`] implementation of `I`.
+    pub fn prune_and_apply_update(
+        &mut self,
+        update: TxGraph<A>,
+    ) -> IndexedAdditions<A, I::Additions> {
+        let mut additions = IndexedAdditions::<A, I::Additions>::default();
+
+        // index all transactions first
+        for tx_node in update.full_txs() {
+            additions
+                .index_additions
+                .append(self.index.index_tx(&tx_node));
+        }
+
+        let update = update
+            .full_txs()
+            .filter(|tx_node| self.index.is_tx_relevant(tx_node))
+            .fold(TxGraph::default(), |mut g, tx_node| -> TxGraph<A> {
+                let _ = g.insert_tx(tx_node.tx.clone());
+                for anchor in tx_node.anchors {
+                    let _ = g.insert_anchor(tx_node.txid, anchor.clone());
+                }
+                let _ = g.insert_seen_at(tx_node.txid, tx_node.last_seen_unconfirmed);
+                g
+            });
+
+        additions.append(self.apply_update(update));
+        additions
+    }
+
     /// Insert a floating `txout` of given `outpoint`.
     pub fn insert_txout(
         &mut self,
@@ -146,14 +178,12 @@ where
         // 2. decide whether to insert them into the graph depending on whether `is_tx_relevant`
         //    returns true or not. (in a second loop).
         let mut additions = IndexedAdditions::<A, I::Additions>::default();
-        let mut transactions = Vec::new();
-        for (tx, anchors) in txs.into_iter() {
-            additions.index_additions.append(self.index.index_tx(tx));
-            transactions.push((tx, anchors));
-        }
+        let txs = txs
+            .into_iter()
+            .inspect(|(tx, _)| additions.index_additions.append(self.index.index_tx(tx)))
+            .collect::<Vec<_>>();
         additions.append(
-            transactions
-                .into_iter()
+            txs.into_iter()
                 .filter_map(|(tx, anchors)| match self.index.is_tx_relevant(tx) {
                     true => Some(self.insert_tx(tx, anchors, seen_at)),
                     false => None,

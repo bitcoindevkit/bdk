@@ -1694,14 +1694,16 @@ impl<D> Wallet<D> {
     }
 
     /// Applies an update to the wallet and stages the changes (but does not [`commit`] them).
+    /// Returns whether the `update` resulted in any changes.
     ///
-    /// This returns whether the `update` resulted in any changes.
+    /// If `prune` is set, irrelevant transactions are pruned. Relevant transactions change the UTXO
+    /// set of tracked script pubkeys (script pubkeys derived from tracked descriptors).
     ///
     /// Usually you create an `update` by interacting with some blockchain data source and inserting
     /// transactions related to your wallet into it.
     ///
     /// [`commit`]: Self::commit
-    pub fn apply_update(&mut self, update: Update) -> Result<bool, CannotConnectError>
+    pub fn apply_update(&mut self, update: Update, prune: bool) -> Result<bool, CannotConnectError>
     where
         D: PersistBackend<ChangeSet>,
     {
@@ -1711,7 +1713,14 @@ impl<D> Wallet<D> {
             .index
             .reveal_to_target_multi(&update.keychain);
         changeset.append(ChangeSet::from(IndexedAdditions::from(index_additions)));
-        changeset.append(self.indexed_graph.apply_update(update.graph).into());
+        changeset.append(
+            if prune {
+                self.indexed_graph.prune_and_apply_update(update.graph)
+            } else {
+                self.indexed_graph.apply_update(update.graph)
+            }
+            .into(),
+        );
 
         let changed = !changeset.is_empty();
         self.persist.stage(changeset);
