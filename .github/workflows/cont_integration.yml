@@ -32,6 +32,34 @@ jobs:
       - name: Test
         run: cargo test ${{ matrix.features }}
 
+  check-no-std:
+    name: Check no_std
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+          profile: minimal
+          # target: "thumbv6m-none-eabi"
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2.2.1
+      - name: Check bdk_chain
+        working-directory: ./crates/chain
+        # TODO "--target thumbv6m-none-eabi" should work but currently does not
+        run: cargo check --no-default-features --features bitcoin/no-std,miniscript/no-std,hashbrown
+      - name: Check bdk
+        working-directory: ./crates/bdk
+        # TODO "--target thumbv6m-none-eabi" should work but currently does not
+        run: cargo check --no-default-features --features bitcoin/no-std,miniscript/no-std,bdk_chain/hashbrown
+      - name: Check esplora
+        working-directory: ./crates/esplora
+        # TODO "--target thumbv6m-none-eabi" should work but currently does not
+        run: cargo check --no-default-features --features bitcoin/no-std,miniscript/no-std,bdk_chain/hashbrown
+
   check-wasm:
     name: Check WASM
     runs-on: ubuntu-20.04
@@ -57,10 +85,10 @@ jobs:
         uses: Swatinem/rust-cache@v2.2.1
       - name: Check bdk
         working-directory: ./crates/bdk
-        run: cargo check --target wasm32-unknown-unknown --features dev-getrandom-wasm
+        run: cargo check --target wasm32-unknown-unknown --no-default-features --features bitcoin/no-std,miniscript/no-std,bdk_chain/hashbrown,dev-getrandom-wasm
       - name: Check esplora
         working-directory: ./crates/esplora
-        run: cargo check --target wasm32-unknown-unknown --features async --no-default-features
+        run: cargo check --target wasm32-unknown-unknown --no-default-features --features bitcoin/no-std,miniscript/no-std,bdk_chain/hashbrown,async
 
   fmt:
     name: Rust fmt

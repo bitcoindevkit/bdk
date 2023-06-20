@@ -170,9 +170,9 @@ pub enum NewError<P> {
     Persist(P),
 }
 
-impl<P> core::fmt::Display for NewError<P>
+impl<P> fmt::Display for NewError<P>
 where
-    P: core::fmt::Display,
+    P: fmt::Display,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
