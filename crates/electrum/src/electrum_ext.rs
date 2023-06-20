@@ -325,8 +325,12 @@ fn prepare_chain_update(
 
     // construct checkpoints
     for (height, hash) in new_blocks {
-        let cp = CheckPoint::new_with_prev(BlockId { height, hash }, last_cp)
-            .expect("heights should not conflict");
+        let cp = match last_cp.clone() {
+            Some(last_cp) => last_cp
+                .extend(BlockId { height, hash })
+                .expect("must extend checkpoint"),
+            None => CheckPoint::new(BlockId { height, hash }),
+        };
         last_cp = Some(cp);
     }
 

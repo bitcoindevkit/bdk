@@ -174,14 +174,13 @@ impl<'a> BitcoindRpcIter<'a> {
                             }
 
                             let block = self.client.get_block(&info.hash)?;
-                            let cp = CheckPoint::new_with_prev(
-                                BlockId {
+                            let cp = last_cp
+                                .clone()
+                                .extend(BlockId {
                                     height: info.height as _,
                                     hash: info.hash,
-                                },
-                                Some(last_cp.clone()),
-                            )
-                            .expect("must create valid checkpoint");
+                                })
+                                .expect("must extend from checkpoint");
 
                             *last_cp = cp.clone();
                             *last_info = Some(info.clone());

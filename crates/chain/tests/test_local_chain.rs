@@ -27,10 +27,7 @@ enum ExpectedResult<'a> {
 impl<'a> TestLocalChain<'a> {
     fn run(mut self) {
         let got_changeset = match self.chain.update(self.new_tip) {
-            Ok((apply, changeset)) => {
-                apply();
-                changeset
-            }
+            Ok(changeset) => changeset,
             Err(err) => {
                 assert_eq!(ExpectedResult::Err(err), self.exp);
                 return;
@@ -270,9 +267,7 @@ fn insert_block() {
     for (i, t) in test_cases.into_iter().enumerate() {
         let mut chain = t.original;
         assert_eq!(
-            chain
-                .get_or_insert(t.insert.into())
-                .map(|(_, changeset)| changeset),
+            chain.insert_block(t.insert.into()),
             t.expected_result,
             "[{}] unexpected result when inserting block",
             i,

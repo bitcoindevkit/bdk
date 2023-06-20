@@ -464,7 +464,7 @@ impl<D> Wallet<D> {
     where
         D: PersistBackend<ChangeSet>,
     {
-        let (_, changeset) = self.chain.get_or_insert(block_id)?;
+        let changeset = self.chain.insert_block(block_id)?;
         let changed = !changeset.is_empty();
         self.persist.stage(changeset.into());
         Ok(changed)
@@ -1707,7 +1707,7 @@ impl<D> Wallet<D> {
     where
         D: PersistBackend<ChangeSet>,
     {
-        let mut changeset = ChangeSet::from(self.chain.apply_update(update.tip)?);
+        let mut changeset = ChangeSet::from(self.chain.update(update.tip)?);
         let (_, index_additions) = self
             .indexed_graph
             .index
