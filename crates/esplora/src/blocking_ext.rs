@@ -122,10 +122,12 @@ impl EsploraExt for esplora_client::BlockingClient {
 
         // construct checkpoints
         for (&height, &hash) in new_blocks.iter() {
-            last_cp = Some(
-                CheckPoint::new_with_prev(BlockId { height, hash }, last_cp)
-                    .expect("heights should not conflict"),
-            );
+            last_cp = Some(match last_cp {
+                Some(last_cp) => last_cp
+                    .extend(BlockId { height, hash })
+                    .expect("must extend checkpoint"),
+                None => CheckPoint::new(BlockId { height, hash }),
+            });
         }
 
         let tip = last_cp.expect("must have atleast one checkpoint");

@@ -47,24 +47,18 @@ impl CheckPoint {
         Self(Arc::new(CPInner { block, prev: None }))
     }
 
-    /// Construct a [`CheckPoint`] of `block` with a previous checkpoint.
-    pub fn new_with_prev(
-        block: BlockId,
-        prev: Option<CheckPoint>,
-    ) -> Result<Self, NewCheckPointError> {
-        if let Some(prev_cp) = &prev {
-            if prev_cp.height() >= block.height {
-                return Err(NewCheckPointError {
-                    new_height: block.height,
-                    prev_height: prev_cp.height(),
-                });
-            }
+    /// Extends [`CheckPoint`] with `block` and returns the new checkpoint tip.
+    ///
+    /// Returns an `Err` of the initial checkpoint
+    pub fn extend(self, block: BlockId) -> Result<Self, Self> {
+        if self.height() < block.height {
+            Ok(Self(Arc::new(CPInner {
+                block,
+                prev: Some(self.0),
+            })))
+        } else {
+            Err(self)
         }
-
-        Ok(Self(Arc::new(CPInner {
-            block,
-            prev: prev.map(|cp| cp.0),
-        })))
     }
 
     /// Get the [`BlockId`] of the checkpoint.
@@ -199,10 +193,14 @@ impl LocalChain {
             checkpoints: blocks
                 .into_iter()
                 .map({
-                    let mut prev = None;
+                    let mut prev = Option::<CheckPoint>::None;
                     move |(height, hash)| {
-                        let cp = CheckPoint::new_with_prev(BlockId { height, hash }, prev.clone())
-                            .expect("must not fail");
+                        let cp = match prev.clone() {
+                            Some(prev) => {
+                                prev.extend(BlockId { height, hash }).expect("must extend")
+                            }
+                            None => CheckPoint::new(BlockId { height, hash }),
+                        };
                         prev = Some(cp.clone());
                         (height, cp)
                     }
@@ -221,10 +219,10 @@ impl LocalChain {
         self.checkpoints.is_empty()
     }
 
-    /// Previews, and optionally applies updates to [`Self`] with the given `new_tip`.
+    /// Updates [`Self`] with the given `new_tip`.
     ///
-    /// The method returns `(apply_update, changeset)` if [`Ok`]. `apply_update` is a closure that
-    /// can be called to apply the changes represented in `changeset.
+    /// The method returns [`ChangeSet`] on success. This represents the applied changes to
+    /// [`Self`].
     ///
     /// To update, the `new_tip` must *connect* with `self`. If `self` and `new_tip` has a mutual
     /// checkpoint (same height and hash), it can connect if:
@@ -247,10 +245,7 @@ impl LocalChain {
     /// Refer to [module-level documentation] for more.
     ///
     /// [module-level documentation]: crate::local_chain
-    pub fn update(
-        &mut self,
-        new_tip: CheckPoint,
-    ) -> Result<(impl FnOnce() + '_, ChangeSet), CannotConnectError> {
+    pub fn update(&mut self, new_tip: CheckPoint) -> Result<ChangeSet, CannotConnectError> {
         let mut updated_cps = BTreeMap::<u32, CheckPoint>::new();
         let mut agreement_height = Option::<u32>::None;
         let mut complete_match = false;
@@ -316,17 +311,16 @@ impl LocalChain {
             changeset
         };
 
-        let apply_update = move || {
-            if let Some(&start_height) = updated_cps.keys().next() {
-                self.checkpoints.split_off(&invalidate_lb);
-                self.checkpoints.append(&mut updated_cps);
-                if !self.is_empty() && !complete_match {
-                    self.fix_links(start_height);
-                }
+        // apply update if `update_cps` is non-empty
+        if let Some(&start_height) = updated_cps.keys().next() {
+            self.checkpoints.split_off(&invalidate_lb);
+            self.checkpoints.append(&mut updated_cps);
+            if !self.is_empty() && !complete_match {
+                self.fix_links(start_height);
             }
-        };
+        }
 
-        Ok((apply_update, changeset))
+        Ok(changeset)
     }
 
     /// Apply the given `changeset`.
@@ -344,41 +338,24 @@ impl LocalChain {
         }
     }
 
-    /// Update [`LocalChain`].
-    ///
-    /// This is equivalent to calling [`update`] and applying the update in sequence.
-    ///
-    /// [`update`]: Self::update
-    pub fn apply_update(&mut self, new_tip: CheckPoint) -> Result<ChangeSet, CannotConnectError> {
-        let (apply, changeset) = self.update(new_tip)?;
-        apply();
-        Ok(changeset)
-    }
-
-    /// Get or insert a `block_id`.
+    /// Insert a [`BlockId`].
     ///
     /// # Errors
     ///
     /// Replacing the block hash of an existing checkpoint will result in an error.
-    pub fn get_or_insert(
-        &mut self,
-        block_id: BlockId,
-    ) -> Result<(CheckPoint, ChangeSet), InsertBlockError> {
+    pub fn insert_block(&mut self, block_id: BlockId) -> Result<ChangeSet, InsertBlockError> {
         use crate::collections::btree_map::Entry;
 
         match self.checkpoints.entry(block_id.height) {
             Entry::Vacant(entry) => {
                 entry.insert(CheckPoint::new(block_id));
                 self.fix_links(block_id.height);
-                let cp = self.checkpoint(block_id.height).expect("must be inserted");
-                let changeset =
-                    core::iter::once((block_id.height, Some(block_id.hash))).collect::<ChangeSet>();
-                Ok((cp, changeset))
+                Ok(core::iter::once((block_id.height, Some(block_id.hash))).collect())
             }
             Entry::Occupied(entry) => {
                 let cp = entry.get();
                 if cp.block_id() == block_id {
-                    Ok((cp.clone(), ChangeSet::default()))
+                    Ok(ChangeSet::default())
                 } else {
                     Err(InsertBlockError {
                         height: block_id.height,
