@@ -313,7 +313,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
         self.inner
             .all_spks()
             .range((keychain.clone(), u32::MIN)..(keychain.clone(), next_index))
-            .map(|((_, derivation_index), spk)| (*derivation_index, spk))
+            .map(|((_, derivation_index), spk)| (*derivation_index, spk.as_script()))
     }
 
     /// Get the next derivation index for `keychain`. The next index is the index after the last revealed

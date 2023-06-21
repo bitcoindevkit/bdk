@@ -7,7 +7,7 @@ use bdk_chain::{
     Anchor, Append, BlockId, ChainPosition, ConfirmationHeightAnchor,
 };
 use bitcoin::{
-    hashes::Hash, BlockHash, OutPoint, PackedLockTime, Script, Transaction, TxIn, TxOut, Txid,
+    absolute, hashes::Hash, BlockHash, OutPoint, ScriptBuf, Transaction, TxIn, TxOut, Txid,
 };
 use core::iter;
 use std::vec;
@@ -20,14 +20,14 @@ fn insert_txouts() {
             OutPoint::new(h!("tx1"), 1),
             TxOut {
                 value: 10_000,
-                script_pubkey: Script::new(),
+                script_pubkey: ScriptBuf::new(),
             },
         ),
         (
             OutPoint::new(h!("tx1"), 2),
             TxOut {
                 value: 20_000,
-                script_pubkey: Script::new(),
+                script_pubkey: ScriptBuf::new(),
             },
         ),
     ];
@@ -37,21 +37,21 @@ fn insert_txouts() {
         OutPoint::new(h!("tx2"), 0),
         TxOut {
             value: 20_000,
-            script_pubkey: Script::new(),
+            script_pubkey: ScriptBuf::new(),
         },
     )];
 
     // One full transaction to be included in the update
     let update_txs = Transaction {
         version: 0x01,
-        lock_time: PackedLockTime(0),
+        lock_time: absolute::LockTime::ZERO,
         input: vec![TxIn {
             previous_output: OutPoint::null(),
             ..Default::default()
         }],
         output: vec![TxOut {
             value: 30_000,
-            script_pubkey: Script::new(),
+            script_pubkey: ScriptBuf::new(),
         }],
     };
 
@@ -161,14 +161,14 @@ fn insert_txouts() {
                 1u32,
                 &TxOut {
                     value: 10_000,
-                    script_pubkey: Script::new(),
+                    script_pubkey: ScriptBuf::new(),
                 }
             ),
             (
                 2u32,
                 &TxOut {
                     value: 20_000,
-                    script_pubkey: Script::new(),
+                    script_pubkey: ScriptBuf::new(),
                 }
             )
         ]
@@ -181,7 +181,7 @@ fn insert_txouts() {
             0u32,
             &TxOut {
                 value: 30_000,
-                script_pubkey: Script::new()
+                script_pubkey: ScriptBuf::new()
             }
         )]
         .into()
@@ -192,7 +192,7 @@ fn insert_txouts() {
 fn insert_tx_graph_doesnt_count_coinbase_as_spent() {
     let tx = Transaction {
         version: 0x01,
-        lock_time: PackedLockTime(0),
+        lock_time: absolute::LockTime::ZERO,
         input: vec![TxIn {
             previous_output: OutPoint::null(),
             ..Default::default()
@@ -210,7 +210,7 @@ fn insert_tx_graph_doesnt_count_coinbase_as_spent() {
 fn insert_tx_graph_keeps_track_of_spend() {
     let tx1 = Transaction {
         version: 0x01,
-        lock_time: PackedLockTime(0),
+        lock_time: absolute::LockTime::ZERO,
         input: vec![],
         output: vec![TxOut::default()],
     };
@@ -222,7 +222,7 @@ fn insert_tx_graph_keeps_track_of_spend() {
 
     let tx2 = Transaction {
         version: 0x01,
-        lock_time: PackedLockTime(0),
+        lock_time: absolute::LockTime::ZERO,
         input: vec![TxIn {
             previous_output: op,
             ..Default::default()
@@ -251,7 +251,7 @@ fn insert_tx_graph_keeps_track_of_spend() {
 fn insert_tx_can_retrieve_full_tx_from_graph() {
     let tx = Transaction {
         version: 0x01,
-        lock_time: PackedLockTime(0),
+        lock_time: absolute::LockTime::ZERO,
         input: vec![TxIn {
             previous_output: OutPoint::null(),
             ..Default::default()
@@ -269,11 +269,11 @@ fn insert_tx_displaces_txouts() {
     let mut tx_graph = TxGraph::<()>::default();
     let tx = Transaction {
         version: 0x01,
-        lock_time: PackedLockTime(0),
+        lock_time: absolute::LockTime::ZERO,
         input: vec![],
         output: vec![TxOut {
             value: 42_000,
-            script_pubkey: Script::default(),
+            script_pubkey: ScriptBuf::default(),
         }],
     };
 
@@ -284,7 +284,7 @@ fn insert_tx_displaces_txouts() {
         },
         TxOut {
             value: 1_337_000,
-            script_pubkey: Script::default(),
+            script_pubkey: ScriptBuf::default(),
         },
     );
 
@@ -295,7 +295,7 @@ fn insert_tx_displaces_txouts() {
         },
         TxOut {
             value: 1_000_000_000,
-            script_pubkey: Script::default(),
+            script_pubkey: ScriptBuf::default(),
         },
     );
 
@@ -325,11 +325,11 @@ fn insert_txout_does_not_displace_tx() {
     let mut tx_graph = TxGraph::<()>::default();
     let tx = Transaction {
         version: 0x01,
-        lock_time: PackedLockTime(0),
+        lock_time: absolute::LockTime::ZERO,
         input: vec![],
         output: vec![TxOut {
             value: 42_000,
-            script_pubkey: Script::default(),
+            script_pubkey: ScriptBuf::default(),
         }],
     };
 
@@ -342,7 +342,7 @@ fn insert_txout_does_not_displace_tx() {
         },
         TxOut {
             value: 1_337_000,
-            script_pubkey: Script::default(),
+            script_pubkey: ScriptBuf::default(),
         },
     );
 
@@ -353,7 +353,7 @@ fn insert_txout_does_not_displace_tx() {
         },
         TxOut {
             value: 1_000_000_000,
-            script_pubkey: Script::default(),
+            script_pubkey: ScriptBuf::default(),
         },
     );
 
@@ -381,7 +381,7 @@ fn test_calculate_fee() {
     let mut graph = TxGraph::<()>::default();
     let intx1 = Transaction {
         version: 0x01,
-        lock_time: PackedLockTime(0),
+        lock_time: absolute::LockTime::ZERO,
         input: vec![],
         output: vec![TxOut {
             value: 100,
@@ -390,7 +390,7 @@ fn test_calculate_fee() {
     };
     let intx2 = Transaction {
         version: 0x02,
-        lock_time: PackedLockTime(0),
+        lock_time: absolute::LockTime::ZERO,
         input: vec![],
         output: vec![TxOut {
             value: 200,
@@ -415,7 +415,7 @@ fn test_calculate_fee() {
 
     let mut tx = Transaction {
         version: 0x01,
-        lock_time: PackedLockTime(0),
+        lock_time: absolute::LockTime::ZERO,
         input: vec![
             TxIn {
                 previous_output: OutPoint {
@@ -464,7 +464,7 @@ fn test_calculate_fee() {
 fn test_calculate_fee_on_coinbase() {
     let tx = Transaction {
         version: 0x01,
-        lock_time: PackedLockTime(0),
+        lock_time: absolute::LockTime::ZERO,
         input: vec![TxIn {
             previous_output: OutPoint::null(),
             ..Default::default()
@@ -636,11 +636,11 @@ fn test_chain_spends() {
         output: vec![
             TxOut {
                 value: 10_000,
-                script_pubkey: Script::new(),
+                script_pubkey: ScriptBuf::new(),
             },
             TxOut {
                 value: 20_000,
-                script_pubkey: Script::new(),
+                script_pubkey: ScriptBuf::new(),
             },
         ],
         ..common::new_tx(0)
@@ -655,11 +655,11 @@ fn test_chain_spends() {
         output: vec![
             TxOut {
                 value: 5_000,
-                script_pubkey: Script::new(),
+                script_pubkey: ScriptBuf::new(),
             },
             TxOut {
                 value: 5_000,
-                script_pubkey: Script::new(),
+                script_pubkey: ScriptBuf::new(),
             },
         ],
         ..common::new_tx(0)
@@ -674,11 +674,11 @@ fn test_chain_spends() {
         output: vec![
             TxOut {
                 value: 10_000,
-                script_pubkey: Script::new(),
+                script_pubkey: ScriptBuf::new(),
             },
             TxOut {
                 value: 10_000,
-                script_pubkey: Script::new(),
+                script_pubkey: ScriptBuf::new(),
             },
         ],
         ..common::new_tx(0)

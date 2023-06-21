@@ -56,7 +56,7 @@ macro_rules! changeset {
 pub fn new_tx(lt: u32) -> bitcoin::Transaction {
     bitcoin::Transaction {
         version: 0x00,
-        lock_time: bitcoin::PackedLockTime(lt),
+        lock_time: bitcoin::absolute::LockTime::from_consensus(lt),
         input: vec![],
         output: vec![],
     }
