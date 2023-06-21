@@ -1,6 +1,5 @@
 use bdk_coin_select::{
-    change_policy, float::Ordf32, metrics::Waste, CoinSelector, Drain, FeeRate, Target,
-    Candidate,
+    change_policy, float::Ordf32, metrics::Waste, Candidate, CoinSelector, Drain, FeeRate, Target,
 };
 use proptest::{
     prelude::*,

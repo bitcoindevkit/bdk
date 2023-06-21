@@ -3,7 +3,6 @@
 #![doc = include_str!("../README.md")]
 #![deny(unsafe_code)]
 
-
 #[allow(unused)]
 #[macro_use]
 extern crate alloc;
@@ -12,7 +11,6 @@ extern crate alloc;
 #[allow(unused)]
 #[macro_use]
 extern crate std;
-
 
 mod coin_selector;
 pub mod float;
@@ -39,7 +37,6 @@ pub const TR_KEYSPEND_SATISFACTION_WEIGHT: u32 = 66;
 
 /// The weight of a taproot script pubkey
 pub const TR_SPK_WEIGHT: u32 = (1 + 1 + 32) * 4; // version + push + key
-
 
 /// Helper to calculate varint size. `v` is the value the varint represents.
 fn varint_size(v: usize) -> u32 {

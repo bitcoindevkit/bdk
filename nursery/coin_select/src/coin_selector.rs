@@ -279,8 +279,6 @@ impl<'a> CoinSelector<'a> {
         order.sort_by(|a, b| cmp((*a, candidates[*a]), (*b, candidates[*b])))
     }
 
-
-
     /// Sorts the candidates by the key function.
     ///
     /// The key function takes the candidates's index and the [`Candidate`].
@@ -403,10 +401,16 @@ impl<'a> CoinSelector<'a> {
     ///
     /// Returns an `Some(_)` if it was able to meet the target.
     #[must_use]
-    pub fn select_until_target_met(&mut self, target: Target, drain: Drain) -> Result<(), InsufficientFunds> {
-        self.select_until(|cs| cs.is_target_met(target, drain)).ok_or_else(|| InsufficientFunds { missing: self.excess(target, drain).abs() as u64 })
+    pub fn select_until_target_met(
+        &mut self,
+        target: Target,
+        drain: Drain,
+    ) -> Result<(), InsufficientFunds> {
+        self.select_until(|cs| cs.is_target_met(target, drain))
+            .ok_or_else(|| InsufficientFunds {
+                missing: self.excess(target, drain).abs() as u64,
+            })
     }
-
 
     /// Select candidates until some predicate has been satisfied.
     #[must_use]
@@ -480,7 +484,6 @@ pub struct Candidate {
 }
 
 impl Candidate {
-
     pub fn new_tr_keyspend(value: u64) -> Self {
         let weight = TXIN_BASE_WEIGHT + TR_KEYSPEND_SATISFACTION_WEIGHT;
         Self::new(value, weight, true)
@@ -581,10 +584,9 @@ impl<'a> DoubleEndedIterator for SelectIter<'a> {
     }
 }
 
-
 #[derive(Clone, Debug, Copy, PartialEq, Eq)]
 pub struct InsufficientFunds {
-    missing: u64
+    missing: u64,
 }
 
 impl core::fmt::Display for InsufficientFunds {

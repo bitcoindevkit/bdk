@@ -1,6 +1,5 @@
-use bdk_coin_select::{
-    change_policy, float::Ordf32, metrics, CoinSelector, Drain, FeeRate, Target, Candidate,
-};
+#![allow(unused)]
+use bdk_coin_select::{float::Ordf32, metrics, Candidate, CoinSelector, Drain, FeeRate, Target};
 use proptest::{
     prelude::*,
     test_runner::{RngAlgorithm, TestRng},

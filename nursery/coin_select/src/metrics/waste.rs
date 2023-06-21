@@ -1,5 +1,5 @@
 use super::change_lower_bound;
-use crate::{bnb::BnBMetric, float::Ordf32, CoinSelector, Drain, FeeRate, Target, Candidate};
+use crate::{bnb::BnBMetric, float::Ordf32, Candidate, CoinSelector, Drain, FeeRate, Target};
 
 /// The "waste" metric used by bitcoin core.
 ///
