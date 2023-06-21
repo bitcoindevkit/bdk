@@ -28,13 +28,18 @@ pub mod change_policy;
 /// length.
 pub const TXIN_BASE_WEIGHT: u32 = (32 + 4 + 4 + 1) * 4;
 
-/// The weight of a TXOUT without the `scriptPubkey` (and script pubkey length field).
-/// Just the weight of the value field.
-pub const TXOUT_BASE_WEIGHT: u32 = 4 * core::mem::size_of::<u64>() as u32; // just the value
+/// The weight of a TXOUT with a zero length `scriptPubkey`
+pub const TXOUT_BASE_WEIGHT: u32 =
+    // The value
+    4 * core::mem::size_of::<u64>() as u32
+    // The spk length
+    + (4 * 1);
 
+/// The additional weight over [`TXIN_BASE_WEIGHT`] incurred by satisfying an input with a keyspend
+/// and the default sighash.
 pub const TR_KEYSPEND_SATISFACTION_WEIGHT: u32 = 66;
 
-/// The weight of a taproot script pubkey
+/// The additional weight of an output with segwit `v1` (taproot) script pubkey over a blank output (i.e. with weight [`TXOUT_BASE_WEIGHT`]).
 pub const TR_SPK_WEIGHT: u32 = (1 + 1 + 32) * 4; // version + push + key
 
 /// Helper to calculate varint size. `v` is the value the varint represents.
