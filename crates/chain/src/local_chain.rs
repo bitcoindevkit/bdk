@@ -23,24 +23,6 @@ struct CPInner {
     prev: Option<Arc<CPInner>>,
 }
 
-/// Occurs when the caller contructs a [`CheckPoint`] with a height that is not higher than the
-/// previous checkpoint it points to.
-#[derive(Debug, Clone, PartialEq)]
-pub struct NewCheckPointError {
-    /// The height of the new checkpoint.
-    pub new_height: u32,
-    /// The height of the previous checkpoint.
-    pub prev_height: u32,
-}
-
-impl core::fmt::Display for NewCheckPointError {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "cannot construct checkpoint with a height ({}) that is not higher than the previous checkpoint ({})", self.new_height, self.prev_height)
-    }
-}
-
-impl std::error::Error for NewCheckPointError {}
-
 impl CheckPoint {
     /// Construct a [`CheckPoint`] from a [`BlockId`].
     pub fn new(block: BlockId) -> Self {
@@ -248,27 +230,30 @@ impl LocalChain {
     pub fn update(&mut self, new_tip: CheckPoint) -> Result<ChangeSet, CannotConnectError> {
         let mut updated_cps = BTreeMap::<u32, CheckPoint>::new();
         let mut agreement_height = Option::<u32>::None;
-        let mut complete_match = false;
+        let mut agreement_ptr_matches = false;
 
         for cp in new_tip.iter() {
             let block = cp.block_id();
-            let original_cp = self.checkpoints.get(&block.height);
 
-            // if original block of height does not exist, or if the hash does not match we will
-            // need to update the original checkpoint at that height
-            if original_cp.map(CheckPoint::block_id) != Some(block) {
-                updated_cps.insert(block.height, cp.clone());
-            }
+            match self.checkpoints.get(&block.height) {
+                Some(original_cp) if original_cp.block_id() == block => {
+                    let ptr_matches = Arc::as_ptr(&original_cp.0) == Arc::as_ptr(&cp.0);
 
-            if let Some(original_cp) = original_cp {
-                // record the first agreement height
-                if agreement_height.is_none() && original_cp.block_id() == block {
-                    agreement_height = Some(block.height);
+                    // only record the first agreement height
+                    if agreement_height.is_none() && original_cp.block_id() == block {
+                        agreement_height = Some(block.height);
+                        agreement_ptr_matches = ptr_matches;
+                    }
+
+                    // break if the internal pointers of the checkpoints are the same
+                    if ptr_matches {
+                        break;
+                    }
                 }
-                // break if the internal pointers of the checkpoints are the same
-                if Arc::as_ptr(&original_cp.0) == Arc::as_ptr(&cp.0) {
-                    complete_match = true;
-                    break;
+                // only insert into `updated_cps` if cp is actually updated (original cp is `None`,
+                // or block ids do not match)
+                _ => {
+                    updated_cps.insert(block.height, cp.clone());
                 }
             }
         }
@@ -315,7 +300,11 @@ impl LocalChain {
         if let Some(&start_height) = updated_cps.keys().next() {
             self.checkpoints.split_off(&invalidate_lb);
             self.checkpoints.append(&mut updated_cps);
-            if !self.is_empty() && !complete_match {
+
+            // we never need to fix links if either:
+            // 1. the original chain is empty
+            // 2. the pointers match at the first point of agreement (where the block ids are equal)
+            if !(self.is_empty() || agreement_ptr_matches) {
                 self.fix_links(start_height);
             }
         }
