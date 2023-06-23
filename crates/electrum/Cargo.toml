@@ -14,3 +14,11 @@ readme = "README.md"
 [dependencies]
 bdk_chain = { path = "../chain", version = "0.4.0", features = ["serde", "miniscript"] }
 electrum-client = { version = "0.12" }
+
+[dev-dependencies]
+anyhow = "1"
+electrsd = { version= "0.22", features = ["bitcoind_22_0", "electrs_0_9_1"] }
+# zip versions after 0.6.3 don't work with our MSRV 1.57.0
+ zip = "=0.6.3"
+ # base64ct versions at 1.6.0 and higher have MSRV 1.60.0
+ base64ct = "<1.6.0"
