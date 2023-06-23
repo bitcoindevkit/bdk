@@ -213,6 +213,29 @@ fn update() {
             new_tip: chain_update![(1, h!("B'")), (2, h!("C'")), (3, h!("D"))],
             exp: ExpectedResult::Err(CannotConnectError { try_include: BlockId { height: 0, hash: h!("A") } }),
         },
+        // Introduce blocks between two points of agreement
+        //        | 0 | 1 | 2 | 3 | 4 | 5
+        // chain  | A   B       D   E
+        // update | A       C       E   F
+        TestLocalChain {
+            name: "introduce blocks between two points of agreement",
+            chain: local_chain![(0, h!("A")), (1, h!("B")), (3, h!("D")), (4, h!("E"))],
+            new_tip: chain_update![(0, h!("A")), (2, h!("C")), (4, h!("E")), (5, h!("F"))],
+            exp: ExpectedResult::Ok {
+                changeset: &[
+                    (2, Some(h!("C"))),
+                    (5, Some(h!("F"))),
+                ],
+                init_changeset: &[
+                    (0, Some(h!("A"))),
+                    (1, Some(h!("B"))),
+                    (2, Some(h!("C"))),
+                    (3, Some(h!("D"))),
+                    (4, Some(h!("E"))),
+                    (5, Some(h!("F"))),
+                ],
+            },
+        }
     ]
     .into_iter()
     .for_each(TestLocalChain::run);
