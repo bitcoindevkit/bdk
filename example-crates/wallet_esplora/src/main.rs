@@ -1,7 +1,7 @@
 const DB_MAGIC: &str = "bdk_wallet_esplora_example";
 const SEND_AMOUNT: u64 = 5000;
 const STOP_GAP: usize = 50;
-const PARALLEL_REQUESTS: usize = 5;
+const PARALLEL_REQUESTS: usize = 2;
 
 use std::{io::Write, str::FromStr};
 

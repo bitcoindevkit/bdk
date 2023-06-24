@@ -5,7 +5,7 @@ use bdk_chain::{
     tx_graph::{self, TxGraph},
     Anchor, BlockId, ConfirmationHeightAnchor, ConfirmationTimeAnchor,
 };
-use electrum_client::{Client, ElectrumApi, Error};
+use electrum_client::{Client, ElectrumApi, Error, HeaderNotification};
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     fmt::Debug,
@@ -262,28 +262,24 @@ impl ElectrumExt<ConfirmationHeightAnchor> for Client {
     }
 }
 
-/// Prepare an update "template" based on the checkpoints of the `local_chain`.
+/// Return a [`CheckPoint`] of the latest tip, that connects with the previous tip.
 fn prepare_chain_update(
     client: &Client,
     prev_tip: Option<CheckPoint>,
 ) -> Result<CheckPoint, Error> {
-    let mut header_notification = client.block_headers_subscribe()?;
+    let HeaderNotification { height, mut header } = client.block_headers_subscribe()?;
+    let mut height = height as u32;
 
     let (new_blocks, mut last_cp) = 'retry: loop {
-        let tip = BlockId {
-            height: header_notification.height as _,
-            hash: header_notification.header.block_hash(),
-        };
-        let tip_parent = BlockId {
-            height: (header_notification.height - 1) as _,
-            hash: header_notification.header.prev_blockhash,
-        };
-
         // this records new blocks, including blocks that are to be replaced
-        let mut new_blocks = [tip_parent, tip]
-            .into_iter()
-            .map(|b| (b.height, b.hash))
+        let mut new_blocks = core::iter::once((height as _, header.block_hash()))
+            .chain(
+                height
+                    .checked_sub(1)
+                    .map(|h| (h as _, header.prev_blockhash)),
+            )
             .collect::<BTreeMap<u32, BlockHash>>();
+
         let mut agreement_cp = Option::<CheckPoint>::None;
 
         for cp in prev_tip.iter().flat_map(CheckPoint::iter) {
@@ -302,9 +298,10 @@ fn prepare_chain_update(
         loop {
             match client.block_headers_pop()? {
                 Some(new_notification) => {
-                    let new_height = new_notification.height;
-                    header_notification = new_notification;
-                    if new_height as u32 <= tip.height {
+                    let old_height = height;
+                    height = new_notification.height as u32;
+                    header = new_notification.header;
+                    if height <= old_height {
                         // we may have a reorg
                         // reorg-detection logic can be improved (false positives are possible)
                         continue 'retry;
