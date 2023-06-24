@@ -1,5 +1,5 @@
 use bdk_chain::{
-    bitcoin::{hashes::hex::FromHex, OutPoint, Script, Transaction, Txid},
+    bitcoin::{OutPoint, ScriptBuf, Transaction, Txid},
     keychain::LocalUpdate,
     local_chain::{self, CheckPoint},
     tx_graph::{self, TxGraph},
@@ -9,6 +9,7 @@ use electrum_client::{Client, ElectrumApi, Error, HeaderNotification};
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     fmt::Debug,
+    str::FromStr,
 };
 
 /// We assume that a block of this depth and deeper cannot be reorged.
@@ -167,7 +168,7 @@ pub trait ElectrumExt<A> {
     fn scan<K: Ord + Clone>(
         &self,
         prev_tip: Option<CheckPoint>,
-        keychain_spks: BTreeMap<K, impl IntoIterator<Item = (u32, Script)>>,
+        keychain_spks: BTreeMap<K, impl IntoIterator<Item = (u32, ScriptBuf)>>,
         txids: impl IntoIterator<Item = Txid>,
         outpoints: impl IntoIterator<Item = OutPoint>,
         stop_gap: usize,
@@ -180,7 +181,7 @@ pub trait ElectrumExt<A> {
     fn scan_without_keychain(
         &self,
         prev_tip: Option<CheckPoint>,
-        misc_spks: impl IntoIterator<Item = Script>,
+        misc_spks: impl IntoIterator<Item = ScriptBuf>,
         txids: impl IntoIterator<Item = Txid>,
         outpoints: impl IntoIterator<Item = OutPoint>,
         batch_size: usize,
@@ -205,7 +206,7 @@ impl ElectrumExt<ConfirmationHeightAnchor> for Client {
     fn scan<K: Ord + Clone>(
         &self,
         prev_tip: Option<CheckPoint>,
-        keychain_spks: BTreeMap<K, impl IntoIterator<Item = (u32, Script)>>,
+        keychain_spks: BTreeMap<K, impl IntoIterator<Item = (u32, ScriptBuf)>>,
         txids: impl IntoIterator<Item = Txid>,
         outpoints: impl IntoIterator<Item = OutPoint>,
         stop_gap: usize,
@@ -215,7 +216,7 @@ impl ElectrumExt<ConfirmationHeightAnchor> for Client {
             .into_iter()
             .map(|(k, s)| (k, s.into_iter()))
             .collect::<BTreeMap<K, _>>();
-        let mut scanned_spks = BTreeMap::<(K, u32), (Script, bool)>::new();
+        let mut scanned_spks = BTreeMap::<(K, u32), (ScriptBuf, bool)>::new();
 
         let txids = txids.into_iter().collect::<Vec<_>>();
         let outpoints = outpoints.into_iter().collect::<Vec<_>>();
@@ -375,7 +376,7 @@ fn determine_tx_anchor(
     // transactions residing in the genesis block to have height 0, then interpret a height of 0 as
     // unconfirmed for all other transactions.
     if txid
-        == Txid::from_hex("4a5e1e4baab89f3a32518a88c31bc87f618f76673e2cc77ab2127b7afdeda33b")
+        == Txid::from_str("4a5e1e4baab89f3a32518a88c31bc87f618f76673e2cc77ab2127b7afdeda33b")
             .expect("must deserialize genesis coinbase txid")
     {
         let anchor_block = cps.values().next()?.block_id();
@@ -506,10 +507,10 @@ fn populate_with_spks<K, I: Ord + Clone>(
     client: &Client,
     cps: &BTreeMap<u32, CheckPoint>,
     update: &mut ElectrumUpdate<K, ConfirmationHeightAnchor>,
-    spks: &mut impl Iterator<Item = (I, Script)>,
+    spks: &mut impl Iterator<Item = (I, ScriptBuf)>,
     stop_gap: usize,
     batch_size: usize,
-) -> Result<BTreeMap<I, (Script, bool)>, Error> {
+) -> Result<BTreeMap<I, (ScriptBuf, bool)>, Error> {
     let mut unused_spk_count = 0_usize;
     let mut scanned_spks = BTreeMap::new();
 
@@ -521,7 +522,8 @@ fn populate_with_spks<K, I: Ord + Clone>(
             return Ok(scanned_spks);
         }
 
-        let spk_histories = client.batch_script_get_history(spks.iter().map(|(_, s)| s))?;
+        let spk_histories =
+            client.batch_script_get_history(spks.iter().map(|(_, s)| s.as_script()))?;
 
         for ((spk_index, spk), spk_history) in spks.into_iter().zip(spk_histories) {
             if spk_history.is_empty() {
