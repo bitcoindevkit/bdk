@@ -20,6 +20,8 @@
 //! [`batch_transaction_get`]: electrum_client::ElectrumApi::batch_transaction_get
 //! [`bdk_electrum_example`]: https://github.com/LLFourn/bdk_core_staging/tree/master/bdk_electrum_example
 
+#![warn(missing_docs)]
+
 mod electrum_ext;
 pub use bdk_chain;
 pub use electrum_client;
