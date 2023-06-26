@@ -16,15 +16,15 @@
 //! witness/script_sig for the input.
 use bdk_chain::{bitcoin, collections::*, miniscript};
 use bitcoin::{
-    blockdata::{locktime::LockTime, transaction::Sequence},
+    absolute,
+    address::WitnessVersion,
+    bip32::{DerivationPath, Fingerprint, KeySource},
+    blockdata::transaction::Sequence,
+    ecdsa,
     hashes::{hash160, ripemd160, sha256},
     secp256k1::Secp256k1,
-    util::{
-        address::WitnessVersion,
-        bip32::{DerivationPath, Fingerprint, KeySource},
-        taproot::{LeafVersion, TapBranchHash, TapLeafHash},
-    },
-    EcdsaSig, SchnorrSig, Script, TxIn, Witness,
+    taproot::{self, LeafVersion, TapLeafHash},
+    ScriptBuf, TxIn, Witness,
 };
 use miniscript::{
     descriptor::{InnerXKey, Tr},
@@ -46,7 +46,7 @@ use template::TemplateItem;
 enum TrSpend {
     KeySpend,
     LeafSpend {
-        script: Script,
+        script: ScriptBuf,
         leaf_version: LeafVersion,
     },
 }
@@ -55,7 +55,7 @@ enum TrSpend {
 enum Target {
     Legacy,
     Segwitv0 {
-        script_code: Script,
+        script_code: ScriptBuf,
     },
     Segwitv1 {
         tr: Tr<DefiniteDescriptorKey>,
@@ -72,7 +72,7 @@ impl Target {}
 pub struct Plan<AK> {
     template: Vec<TemplateItem<AK>>,
     target: Target,
-    set_locktime: Option<LockTime>,
+    set_locktime: Option<absolute::LockTime>,
     set_sequence: Option<Sequence>,
 }
 
@@ -86,9 +86,9 @@ impl Default for Target {
 /// Signatures and hash pre-images that can be used to complete a plan.
 pub struct SatisfactionMaterial {
     /// Schnorr signautres under their keys
-    pub schnorr_sigs: BTreeMap<DefiniteDescriptorKey, SchnorrSig>,
+    pub schnorr_sigs: BTreeMap<DefiniteDescriptorKey, taproot::Signature>,
     /// ECDSA signatures under their keys
-    pub ecdsa_sigs: BTreeMap<DefiniteDescriptorKey, EcdsaSig>,
+    pub ecdsa_sigs: BTreeMap<DefiniteDescriptorKey, ecdsa::Signature>,
     /// SHA256 pre-images under their images
     pub sha256_preimages: BTreeMap<sha256::Hash, Vec<u8>>,
     /// hash160 pre-images under their images
@@ -201,7 +201,7 @@ where
                     ..
                 } => PlanState::Complete {
                     final_script_sig: None,
-                    final_script_witness: Some(Witness::from_vec(witness)),
+                    final_script_witness: Some(Witness::from(witness)),
                 },
                 Target::Segwitv1 {
                     tr,
@@ -220,7 +220,7 @@ where
 
                     PlanState::Complete {
                         final_script_sig: None,
-                        final_script_witness: Some(Witness::from_vec(witness)),
+                        final_script_witness: Some(Witness::from(witness)),
                     }
                 }
             }
@@ -306,7 +306,7 @@ where
     }
 
     /// The minimum required locktime height or time on the transaction using the plan.
-    pub fn required_locktime(&self) -> Option<LockTime> {
+    pub fn required_locktime(&self) -> Option<absolute::LockTime> {
         self.set_locktime.clone()
     }
 
@@ -330,7 +330,7 @@ pub enum PlanState<Ak> {
     /// The plan is complete
     Complete {
         /// The script sig that should be set on the input
-        final_script_sig: Option<Script>,
+        final_script_sig: Option<ScriptBuf>,
         /// The witness that should be set on the input
         final_script_witness: Option<Witness>,
     },
@@ -341,7 +341,7 @@ pub enum PlanState<Ak> {
 pub struct Assets<K> {
     pub keys: Vec<K>,
     pub txo_age: Option<Sequence>,
-    pub max_locktime: Option<LockTime>,
+    pub max_locktime: Option<absolute::LockTime>,
     pub sha256: Vec<sha256::Hash>,
     pub hash256: Vec<hash256::Hash>,
     pub ripemd160: Vec<ripemd160::Hash>,
@@ -379,6 +379,11 @@ impl CanDerive for KeySource {
                 });
 
                 path_to_child(self, &origin, Some(&dxk.derivation_path))
+            }
+            DescriptorPublicKey::MultiXPub(_) => {
+                // This crate will be replaced by
+                // https://github.com/rust-bitcoin/rust-miniscript/pull/481 anyways
+                todo!();
             }
         }
     }

@@ -2,11 +2,14 @@ use bdk_chain::{bitcoin, collections::*, miniscript};
 use core::ops::Deref;
 
 use bitcoin::{
+    bip32,
     hashes::{hash160, ripemd160, sha256},
+    key::XOnlyPublicKey,
     psbt::Prevouts,
     secp256k1::{KeyPair, Message, PublicKey, Signing, Verification},
-    util::{bip32, sighash, sighash::SighashCache, taproot},
-    EcdsaSighashType, SchnorrSighashType, Transaction, TxOut, XOnlyPublicKey,
+    sighash,
+    sighash::{EcdsaSighashType, SighashCache, TapSighashType},
+    taproot, Transaction, TxOut,
 };
 
 use super::*;
@@ -72,7 +75,7 @@ pub enum RequiredSignatures<Ak> {
         /// the internal key
         plan_key: PlanKey<Ak>,
         /// The merkle root of the taproot output
-        merkle_root: Option<TapBranchHash>,
+        merkle_root: Option<taproot::TapNodeHash>,
     },
     /// Taproot script path signatures are required
     TapScript {
@@ -114,12 +117,12 @@ impl From<bip32::Error> for SigningError {
 impl std::error::Error for SigningError {}
 
 impl RequiredSignatures<DescriptorPublicKey> {
-    pub fn sign_with_keymap<T: Deref<Target = Transaction>>(
+    pub fn sign_with_keymap<T: core::borrow::Borrow<Transaction>>(
         &self,
         input_index: usize,
         keymap: &KeyMap,
         prevouts: &Prevouts<'_, impl core::borrow::Borrow<TxOut>>,
-        schnorr_sighashty: Option<SchnorrSighashType>,
+        schnorr_sighashty: Option<TapSighashType>,
         _ecdsa_sighashty: Option<EcdsaSighashType>,
         sighash_cache: &mut SighashCache<T>,
         auth_data: &mut SatisfactionMaterial,
@@ -131,7 +134,7 @@ impl RequiredSignatures<DescriptorPublicKey> {
                 plan_key,
                 merkle_root,
             } => {
-                let schnorr_sighashty = schnorr_sighashty.unwrap_or(SchnorrSighashType::Default);
+                let schnorr_sighashty = schnorr_sighashty.unwrap_or(TapSighashType::Default);
                 let sighash = sighash_cache.taproot_key_spend_signature_hash(
                     input_index,
                     prevouts,
@@ -148,6 +151,11 @@ impl RequiredSignatures<DescriptorPublicKey> {
                             .derive_priv(&secp, &plan_key.derivation_hint)?
                             .private_key
                     }
+                    DescriptorSecretKey::MultiXPrv(_) => {
+                        // This crate will be replaced by
+                        // https://github.com/rust-bitcoin/rust-miniscript/pull/481 anyways
+                        todo!();
+                    }
                 };
 
                 let pubkey = PublicKey::from_secret_key(&secp, &secret_key);
@@ -162,7 +170,7 @@ impl RequiredSignatures<DescriptorPublicKey> {
                 let msg = Message::from_slice(sighash.as_ref()).expect("Sighashes are 32 bytes");
                 let sig = secp.sign_schnorr_no_aux_rand(&msg, &keypair);
 
-                let bitcoin_sig = SchnorrSig {
+                let bitcoin_sig = taproot::Signature {
                     sig,
                     hash_ty: schnorr_sighashty,
                 };
@@ -176,7 +184,7 @@ impl RequiredSignatures<DescriptorPublicKey> {
                 leaf_hash,
                 plan_keys,
             } => {
-                let sighash_type = schnorr_sighashty.unwrap_or(SchnorrSighashType::Default);
+                let sighash_type = schnorr_sighashty.unwrap_or(TapSighashType::Default);
                 let sighash = sighash_cache.taproot_script_spend_signature_hash(
                     input_index,
                     prevouts,
@@ -195,12 +203,17 @@ impl RequiredSignatures<DescriptorPublicKey> {
                                     .derive_priv(&secp, &plan_key.derivation_hint)?
                                     .private_key
                             }
+                            DescriptorSecretKey::MultiXPrv(_) => {
+                                // This crate will be replaced by
+                                // https://github.com/rust-bitcoin/rust-miniscript/pull/481 anyways
+                                todo!();
+                            }
                         };
                         let keypair = KeyPair::from_secret_key(&secp, &secret_key.clone());
                         let msg =
                             Message::from_slice(sighash.as_ref()).expect("Sighashes are 32 bytes");
                         let sig = secp.sign_schnorr_no_aux_rand(&msg, &keypair);
-                        let bitcoin_sig = SchnorrSig {
+                        let bitcoin_sig = taproot::Signature {
                             sig,
                             hash_ty: sighash_type,
                         };

@@ -1,7 +1,7 @@
 use bdk_chain::{bitcoin, miniscript};
 use bitcoin::{
+    bip32::DerivationPath,
     hashes::{hash160, ripemd160, sha256},
-    util::bip32::DerivationPath,
 };
 
 use super::*;
