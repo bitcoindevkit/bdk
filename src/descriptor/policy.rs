@@ -659,11 +659,11 @@ impl Policy {
                 (0..*threshold).collect()
             }
             SatisfiableItem::Multisig { keys, .. } => (0..keys.len()).collect(),
-            _ => vec![],
+            _ => HashSet::new(),
         };
-        let selected = match path.get(&self.id) {
-            Some(arr) => arr,
-            _ => &default,
+        let selected: HashSet<_> = match path.get(&self.id) {
+            Some(arr) => arr.iter().copied().collect(),
+            _ => default,
         };
 
         match &self.item {
@@ -671,12 +671,22 @@ impl Policy {
                 let mapped_req = items
                     .iter()
                     .map(|i| i.get_condition(path))
-                    .collect::<Result<Vec<_>, _>>()?;
+                    .collect::<Vec<_>>();
 
                 // if all the requirements are null we don't care about `selected` because there
                 // are no requirements
-                if mapped_req.iter().all(Condition::is_null) {
+                if mapped_req
+                    .iter()
+                    .all(|cond| matches!(cond, Ok(c) if c.is_null()))
+                {
                     return Ok(Condition::default());
+                }
+
+                // make sure all the indexes in the `selected` list are within range
+                for index in &selected {
+                    if *index >= items.len() {
+                        return Err(PolicyError::IndexOutOfRange(*index));
+                    }
                 }
 
                 // if we have something, make sure we have enough items. note that the user can set
@@ -687,23 +697,18 @@ impl Policy {
                 }
 
                 // check the selected items, see if there are conflicting requirements
-                let mut requirements = Condition::default();
-                for item_index in selected {
-                    requirements = requirements.merge(
-                        mapped_req
-                            .get(*item_index)
-                            .ok_or(PolicyError::IndexOutOfRange(*item_index))?,
-                    )?;
-                }
-
-                Ok(requirements)
+                mapped_req
+                    .into_iter()
+                    .enumerate()
+                    .filter(|(index, _)| selected.contains(index))
+                    .try_fold(Condition::default(), |acc, (_, cond)| acc.merge(&cond?))
             }
             SatisfiableItem::Multisig { keys, threshold } => {
                 if selected.len() < *threshold {
                     return Err(PolicyError::NotEnoughItemsSelected(self.id.clone()));
                 }
-                if let Some(item) = selected.iter().find(|i| **i >= keys.len()) {
-                    return Err(PolicyError::IndexOutOfRange(*item));
+                if let Some(item) = selected.into_iter().find(|&i| i >= keys.len()) {
+                    return Err(PolicyError::IndexOutOfRange(item));
                 }
 
                 Ok(Condition::default())
