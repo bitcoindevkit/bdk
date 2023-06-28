@@ -8,7 +8,7 @@ use bdk_chain::{
     keychain::{Balance, DerivationAdditions, KeychainTxOutIndex},
     local_chain::LocalChain,
     tx_graph::Additions,
-    ChainPosition, ConfirmationHeightAnchor,
+    ChainPosition, ConfirmationHeightAnchor, TxGraph,
 };
 use bitcoin::{secp256k1::Secp256k1, BlockHash, OutPoint, Script, Transaction, TxIn, TxOut};
 use miniscript::Descriptor;
@@ -74,6 +74,85 @@ fn insert_relevant_txs() {
             index_additions: DerivationAdditions([((), 9_u32)].into()),
         }
     )
+}
+
+/// Ensure [`IndexedTxGraph::prune_and_apply_update`] prunes irrelevant transactions.
+#[test]
+fn prune_and_apply_update() {
+    let secp = Secp256k1::signing_only();
+    const DESCRIPTOR: &str = "tr(xprv9xgqHN7yz9MwCkxsBPN5qetuNdQSUttZNKw1dcYTV4mkaAFiBVGQziHs3NRSWMkCzvgjEe3n9xV8oYywvM8at9yRqyaZVz6TYYhX98VjsUk/0/*)";
+    const IRRELEVANT_DESCRIPTOR: &str = "tr(xprv9xgqHN7yz9MwCkxsBPN5qetuNdQSUttZNKw1dcYTV4mkaAFiBVGQziHs3NRSWMkCzvgjEe3n9xV8oYywvM8at9yRqyaZVz6TYYhX98VjsUk/1/*)";
+    let (descriptor, _) = Descriptor::parse_descriptor(&secp, DESCRIPTOR).expect("must be valid");
+    let (irrelevant_descriptor, _) =
+        Descriptor::parse_descriptor(&secp, IRRELEVANT_DESCRIPTOR).expect("must be valid");
+
+    // relevant spks
+    let spk_relevant_0 = descriptor.at_derivation_index(0).script_pubkey();
+    let spk_relevant_1 = descriptor.at_derivation_index(1).script_pubkey();
+    let spk_relevant_2 = descriptor.at_derivation_index(2).script_pubkey();
+
+    // irrelevant spks
+    let spk_irrelevant_0 = irrelevant_descriptor.at_derivation_index(0).script_pubkey();
+    let spk_irrelevant_1 = irrelevant_descriptor.at_derivation_index(1).script_pubkey();
+    let spk_irrelevant_2 = irrelevant_descriptor.at_derivation_index(2).script_pubkey();
+
+    let tx_a = Transaction {
+        output: vec![
+            TxOut {
+                value: 1000,
+                script_pubkey: spk_relevant_0,
+            },
+            TxOut {
+                value: 2000,
+                script_pubkey: spk_irrelevant_0,
+            },
+        ],
+        ..common::new_tx(0)
+    };
+
+    let tx_b = Transaction {
+        output: vec![
+            TxOut {
+                value: 3000,
+                script_pubkey: spk_irrelevant_1,
+            },
+            TxOut {
+                value: 4000,
+                script_pubkey: spk_irrelevant_2,
+            },
+        ],
+        ..common::new_tx(1)
+    };
+
+    let tx_c = Transaction {
+        output: vec![
+            TxOut {
+                value: 5000,
+                script_pubkey: spk_relevant_1,
+            },
+            TxOut {
+                value: 6000,
+                script_pubkey: spk_relevant_2,
+            },
+        ],
+        ..common::new_tx(1)
+    };
+
+    let mut graph = IndexedTxGraph::<ConfirmationHeightAnchor, KeychainTxOutIndex<()>>::default();
+    graph.index.add_keychain((), descriptor);
+    graph.index.set_lookahead_for_all(1);
+
+    let additions = graph.prune_and_apply_update(TxGraph::new([tx_a.clone(), tx_b, tx_c.clone()]));
+    assert_eq!(
+        additions,
+        IndexedAdditions {
+            graph_additions: Additions {
+                txs: [tx_a, tx_c].into(),
+                ..Default::default()
+            },
+            index_additions: DerivationAdditions([((), 2_u32)].into()),
+        }
+    );
 }
 
 #[test]

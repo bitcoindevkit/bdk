@@ -429,11 +429,7 @@ fn test_create_tx_drain_wallet_and_drain_to_and_with_recipient() {
 fn test_create_tx_drain_to_and_utxos() {
     let (mut wallet, _) = get_funded_wallet(get_test_wpkh());
     let addr = wallet.get_address(New);
-    let utxos: Vec<_> = wallet
-        .list_unspent()
-        .into_iter()
-        .map(|u| u.outpoint)
-        .collect();
+    let utxos: Vec<_> = wallet.list_unspent().map(|u| u.outpoint).collect();
     let mut builder = wallet.build_tx();
     builder
         .drain_to(addr.script_pubkey())
