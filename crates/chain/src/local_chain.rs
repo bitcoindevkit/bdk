@@ -10,7 +10,9 @@ use bitcoin::BlockHash;
 /// A structure that represents changes to [`LocalChain`].
 pub type ChangeSet = BTreeMap<u32, Option<BlockHash>>;
 
-/// Represents a block of [`LocalChain`].
+/// A block of [`LocalChain`].
+///
+/// Blocks are presented in a linked-list.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct CheckPoint(Arc<CPInner>);
 
@@ -66,7 +68,7 @@ impl CheckPoint {
         }))
     }
 
-    /// Get previous checkpoint.
+    /// Get the previous checkpoint.
     pub fn prev(&self) -> Option<CheckPoint> {
         self.0.prev.clone().map(CheckPoint)
     }
@@ -356,6 +358,10 @@ impl LocalChain {
         }
     }
 
+    /// Internal method for fixing pointers to make checkpoints a properly linked list. I.e.
+    /// [`CheckPoint::prev`] should return the previous checkpoint.
+    ///
+    /// We fix checkpoints from `start_height` and higher.
     fn fix_links(&mut self, start_height: u32) {
         let mut prev = self
             .checkpoints
