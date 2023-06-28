@@ -5,7 +5,7 @@ use std::{
 };
 
 use bdk_chain::{
-    bitcoin::{Address, Network, OutPoint, Txid},
+    bitcoin::{Address, Network, OutPoint, ScriptBuf, Txid},
     indexed_tx_graph::{IndexedAdditions, IndexedTxGraph},
     keychain::LocalChangeSet,
     local_chain::LocalChain,
@@ -79,6 +79,7 @@ fn main() -> anyhow::Result<()> {
         Network::Testnet => "ssl://electrum.blockstream.info:60002",
         Network::Regtest => "tcp://localhost:60401",
         Network::Signet => "tcp://signet-electrumx.wakiyamap.dev:50001",
+        _ => panic!("Unknown network"),
     };
     let config = electrum_client::Config::builder()
         .validate_domain(matches!(args.network, Network::Bitcoin))
@@ -172,7 +173,7 @@ fn main() -> anyhow::Result<()> {
                 unused_spks = false;
             }
 
-            let mut spks: Box<dyn Iterator<Item = bdk_chain::bitcoin::Script>> =
+            let mut spks: Box<dyn Iterator<Item = bdk_chain::bitcoin::ScriptBuf>> =
                 Box::new(core::iter::empty());
             if all_spks {
                 let all_spks = graph
@@ -190,7 +191,7 @@ fn main() -> anyhow::Result<()> {
                 let unused_spks = graph
                     .index
                     .unused_spks(..)
-                    .map(|(k, v)| (*k, v.clone()))
+                    .map(|(k, v)| (*k, ScriptBuf::from(v)))
                     .collect::<Vec<_>>();
                 spks = Box::new(spks.chain(unused_spks.into_iter().map(|(index, script)| {
                     eprintln!(
