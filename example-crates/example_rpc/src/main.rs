@@ -10,7 +10,7 @@ use std::{
 
 use bdk_bitcoind_rpc::{
     bitcoincore_rpc::{Auth, Client, RpcApi},
-    confirmation_time_anchor, BitcoindRpcItem, BitcoindRpcIter,
+    confirmation_time_anchor, BitcoindRpcEmitter, BitcoindRpcUpdate,
 };
 use bdk_chain::{
     bitcoin::{Address, Transaction},
@@ -151,13 +151,13 @@ fn main() -> anyhow::Result<()> {
         } => {
             graph.lock().unwrap().index.set_lookahead_for_all(lookahead);
 
-            let (chan, recv) = sync_channel::<(BitcoindRpcItem, u32)>(CHANNEL_BOUND);
+            let (chan, recv) = sync_channel::<(BitcoindRpcUpdate, u32)>(CHANNEL_BOUND);
             let prev_cp = chain.lock().unwrap().tip();
 
             let join_handle = std::thread::spawn(move || -> anyhow::Result<()> {
                 let mut tip_height = Option::<u32>::None;
 
-                for item in BitcoindRpcIter::new(&rpc_client, fallback_height, prev_cp) {
+                for item in BitcoindRpcEmitter::new(&rpc_client, fallback_height, prev_cp) {
                     let item = item?;
                     let is_block = !item.is_mempool();
                     let is_mempool = item.is_mempool();
