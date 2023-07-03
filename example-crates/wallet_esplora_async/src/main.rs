@@ -2,6 +2,7 @@ use std::{io::Write, str::FromStr};
 
 use bdk::{
     bitcoin::{Address, Network},
+    chain::keychain::LocalUpdate,
     wallet::AddressIndex,
     SignOptions, Wallet,
 };
@@ -37,7 +38,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client =
         esplora_client::Builder::new("https://blockstream.info/testnet/api").build_async()?;
 
-    let prev_cp = wallet.latest_checkpoint();
+    let prev_tip = wallet.latest_checkpoint();
     let keychain_spks = wallet
         .spks_of_all_keychains()
         .into_iter()
@@ -53,12 +54,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             (k, k_spks)
         })
         .collect();
-    let update = client
-        .scan(prev_cp, keychain_spks, [], [], STOP_GAP, PARALLEL_REQUESTS)
+    let (update_graph, last_active_indices) = client
+        .update_tx_graph(keychain_spks, None, None, STOP_GAP, PARALLEL_REQUESTS)
         .await?;
-    println!();
+    let get_heights = wallet.tx_graph().missing_blocks(wallet.local_chain());
+    let new_tip = client.update_local_chain(prev_tip, get_heights).await?;
+    let update = LocalUpdate {
+        keychain: last_active_indices,
+        graph: update_graph,
+        ..LocalUpdate::new(new_tip)
+    };
     wallet.apply_update(update, false)?;
     wallet.commit()?;
+    println!();
 
     let balance = wallet.get_balance();
     println!("Wallet balance after syncing: {} sats", balance.total());

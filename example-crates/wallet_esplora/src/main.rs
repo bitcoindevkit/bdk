@@ -1,12 +1,13 @@
 const DB_MAGIC: &str = "bdk_wallet_esplora_example";
-const SEND_AMOUNT: u64 = 5000;
-const STOP_GAP: usize = 50;
-const PARALLEL_REQUESTS: usize = 2;
+const SEND_AMOUNT: u64 = 1000;
+const STOP_GAP: usize = 5;
+const PARALLEL_REQUESTS: usize = 1;
 
 use std::{io::Write, str::FromStr};
 
 use bdk::{
     bitcoin::{Address, Network},
+    chain::keychain::LocalUpdate,
     wallet::AddressIndex,
     SignOptions, Wallet,
 };
@@ -52,17 +53,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             (k, k_spks)
         })
         .collect();
-    let update = client.scan(
-        prev_tip,
-        keychain_spks,
-        None,
-        None,
-        STOP_GAP,
-        PARALLEL_REQUESTS,
-    )?;
-    println!();
+
+    let (update_graph, last_active_indices) =
+        client.update_tx_graph(keychain_spks, None, None, STOP_GAP, PARALLEL_REQUESTS)?;
+    let get_heights = wallet.tx_graph().missing_blocks(wallet.local_chain());
+    let new_tip = client.update_local_chain(prev_tip, get_heights)?;
+    let update = LocalUpdate {
+        keychain: last_active_indices,
+        graph: update_graph,
+        ..LocalUpdate::new(new_tip)
+    };
+
     wallet.apply_update(update, false)?;
     wallet.commit()?;
+    println!();
 
     let balance = wallet.get_balance();
     println!("Wallet balance after syncing: {} sats", balance.total());

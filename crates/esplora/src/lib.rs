@@ -1,7 +1,5 @@
 #![doc = include_str!("../README.md")]
-use std::collections::BTreeMap;
-
-use bdk_chain::{local_chain::CheckPoint, ConfirmationTimeAnchor};
+use bdk_chain::{BlockId, ConfirmationTimeAnchor};
 use esplora_client::TxStatus;
 
 pub use esplora_client;
@@ -16,25 +14,22 @@ mod async_ext;
 #[cfg(feature = "async")]
 pub use async_ext::*;
 
-pub(crate) fn confirmation_time_anchor_maker(
-    tip: &CheckPoint,
-) -> impl FnMut(&TxStatus) -> Option<ConfirmationTimeAnchor> {
-    let cache = tip
-        .iter()
-        .take(10)
-        .map(|cp| (cp.height(), cp))
-        .collect::<BTreeMap<u32, CheckPoint>>();
+const ASSUME_FINAL_DEPTH: u32 = 15;
 
-    move |status| match (status.block_time, status.block_height) {
-        (Some(confirmation_time), Some(confirmation_height)) => {
-            let (_, anchor_cp) = cache.range(confirmation_height..).next()?;
-
-            Some(ConfirmationTimeAnchor {
-                anchor_block: anchor_cp.block_id(),
-                confirmation_height,
-                confirmation_time,
-            })
-        }
-        _ => None,
+fn anchor_from_status(status: &TxStatus) -> Option<ConfirmationTimeAnchor> {
+    if let TxStatus {
+        block_height: Some(height),
+        block_hash: Some(hash),
+        block_time: Some(time),
+        ..
+    } = status.clone()
+    {
+        Some(ConfirmationTimeAnchor {
+            anchor_block: BlockId { height, hash },
+            confirmation_height: height,
+            confirmation_time: time,
+        })
+    } else {
+        None
     }
 }
