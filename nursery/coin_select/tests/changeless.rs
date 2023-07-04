@@ -47,7 +47,7 @@ proptest! {
             value: 0
         };
 
-        let change_policy = crate::change_policy::min_waste(drain, long_term_feerate);
+        let change_policy = bdk_coin_select::change_policy::min_waste(drain, long_term_feerate);
         let wv = test_wv(&mut rng);
         let candidates = wv.take(num_inputs).collect::<Vec<_>>();
 

@@ -154,7 +154,7 @@ where
                     debug_assert!(weight_to_satisfy <= to_slurp.weight as f32);
                     weight_to_satisfy
                 };
-                let weight_lower_bound = cs.selected_weight() as f32 + ideal_next_weight;
+                let weight_lower_bound = cs.input_weight() as f32 + ideal_next_weight;
                 let mut waste = weight_lower_bound * rate_diff;
                 waste += change_lower_bound.waste(self.target.feerate, self.long_term_feerate);
 

@@ -15,7 +15,7 @@ use bdk_chain::{
     sparse_chain::{self, ChainPosition},
     DescriptorExt, FullTxOut,
 };
-use bdk_coin_select::{coin_select_bnb, CoinSelector, CoinSelectorOpt, Candidate};
+use bdk_coin_select::{coin_select_bnb, Candidate, CoinSelector, CoinSelectorOpt};
 use bdk_file_store::KeychainStore;
 use clap::{Parser, Subcommand};
 use std::{
