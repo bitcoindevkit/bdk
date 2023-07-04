@@ -9,17 +9,17 @@ There are two versions of the extension trait (blocking and async).
 
 For blocking-only:
 ```toml
-bdk_esplora = { version = "0.1", features = ["blocking"] }
+bdk_esplora = { version = "0.3", features = ["blocking"] }
 ```
 
 For async-only:
 ```toml
-bdk_esplora = { version = "0.1", features = ["async"] }
+bdk_esplora = { version = "0.3", features = ["async"] }
 ```
 
 For async-only (with https):
 ```toml
-bdk_esplora = { version = "0.1", features = ["async-https"] }
+bdk_esplora = { version = "0.3", features = ["async-https"] }
 ```
 
 To use the extension traits:
