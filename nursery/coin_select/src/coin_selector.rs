@@ -167,28 +167,31 @@ impl<'a> CoinSelector<'a> {
     pub fn is_empty(&self) -> bool {
         self.selected.is_empty()
     }
-    /// Weight sum of all selected inputs.
-    pub fn selected_weight(&self) -> u32 {
-        self.selected
-            .iter()
-            .map(|&index| self.candidates[index].weight)
-            .sum()
-    }
 
     /// The weight of the inputs including the witness header and the varint for the number of
     /// inputs.
-    fn input_weight(&self) -> u32 {
-        let witness_header_extra_weight = self
-            .selected()
-            .find(|(_, wv)| wv.is_segwit)
-            .map(|_| 2)
-            .unwrap_or(0);
+    pub fn input_weight(&self) -> u32 {
+        let is_segwit_tx = self.selected().any(|(_, wv)| wv.is_segwit);
+        let witness_header_extra_weight = is_segwit_tx as u32 * 2;
         let vin_count_varint_extra_weight = {
             let input_count = self.selected().map(|(_, wv)| wv.input_count).sum::<usize>();
             (varint_size(input_count) - 1) * 4
         };
 
-        self.selected_weight() + witness_header_extra_weight + vin_count_varint_extra_weight
+        let selected_weight: u32 = self
+            .selected()
+            .map(|(_, candidate)| {
+                let mut weight = candidate.weight;
+                if is_segwit_tx && !candidate.is_segwit {
+                    // non-segwit candidates do not have the witness length field included in their
+                    // weight field so we need to add 1 here if it's in a segwit tx.
+                    weight += 1;
+                }
+                weight
+            })
+            .sum();
+
+        selected_weight + witness_header_extra_weight + vin_count_varint_extra_weight
     }
 
     /// Absolute value sum of all selected inputs.
@@ -202,8 +205,6 @@ impl<'a> CoinSelector<'a> {
     /// Current weight of template tx + selected inputs.
     pub fn weight(&self, drain_weight: u32) -> u32 {
         // TODO take into account whether drain tips over varint for number of outputs
-        //
-        // TODO: take into account the witness stack length for each input
         self.base_weight + self.input_weight() + drain_weight
     }
 
@@ -235,8 +236,8 @@ impl<'a> CoinSelector<'a> {
             - target.min_fee as i64
     }
 
-    /// The feerate the transaction would have if we were to use this selection of inputs to achieve
-    /// the ???
+    /// The feerate the transaction would have if we were to use this selection of inputs to acheive
+    /// the `target_value`
     pub fn implied_feerate(&self, target_value: u64, drain: Drain) -> FeeRate {
         let numerator = self.selected_value() as i64 - target_value as i64 - drain.value as i64;
         let denom = self.weight(drain.weight);
@@ -258,8 +259,8 @@ impl<'a> CoinSelector<'a> {
     }
 
     // /// Waste sum of all selected inputs.
-    fn selected_waste(&self, feerate: FeeRate, long_term_feerate: FeeRate) -> f32 {
-        self.selected_weight() as f32 * (feerate.spwu() - long_term_feerate.spwu())
+    fn input_waste(&self, feerate: FeeRate, long_term_feerate: FeeRate) -> f32 {
+        self.input_weight() as f32 * (feerate.spwu() - long_term_feerate.spwu())
     }
 
     /// Sorts the candidates by the comparision function.
@@ -315,7 +316,7 @@ impl<'a> CoinSelector<'a> {
         excess_discount: f32,
     ) -> f32 {
         debug_assert!((0.0..=1.0).contains(&excess_discount));
-        let mut waste = self.selected_waste(target.feerate, long_term_feerate);
+        let mut waste = self.input_waste(target.feerate, long_term_feerate);
 
         if drain.is_none() {
             // We don't allow negative excess waste since negative excess just means you haven't

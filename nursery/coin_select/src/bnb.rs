@@ -42,13 +42,13 @@ impl<'a, M: BnBMetric> Iterator for BnbIter<'a, M> {
             None => return Some(None),
         };
 
-        match &self.best {
-            Some(best_score) if score >= *best_score => Some(None),
-            _ => {
-                self.best = Some(score.clone());
-                Some(Some((selector, score)))
+        if let Some(best_score) = &self.best {
+            if score >= *best_score {
+                return Some(None);
             }
         }
+        self.best = Some(score.clone());
+        Some(Some((selector, score)))
     }
 }
 

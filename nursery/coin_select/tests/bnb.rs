@@ -12,12 +12,17 @@ use rand::{Rng, RngCore};
 fn test_wv(mut rng: impl RngCore) -> impl Iterator<Item = Candidate> {
     core::iter::repeat_with(move || {
         let value = rng.gen_range(0..1_000);
-        Candidate {
+        let mut candidate = Candidate {
             value,
             weight: 100,
             input_count: rng.gen_range(1..2),
             is_segwit: rng.gen_bool(0.5),
-        }
+        };
+        // HACK: set is_segwit = true for all these tests because you can't actually lower bound
+        // things easily with how segwit inputs interfere with their weights. We can't modify the
+        // above since that would change what we pull from rng.
+        candidate.is_segwit = true;
+        candidate
     })
 }
 
@@ -28,21 +33,21 @@ struct MinExcessThenWeight {
 impl BnBMetric for MinExcessThenWeight {
     type Score = (i64, u32);
 
-    fn score<'a>(&mut self, cs: &CoinSelector<'a>) -> Option<Self::Score> {
+    fn score(&mut self, cs: &CoinSelector<'_>) -> Option<Self::Score> {
         if cs.excess(self.target, Drain::none()) < 0 {
             None
         } else {
-            Some((cs.excess(self.target, Drain::none()), cs.selected_weight()))
+            Some((cs.excess(self.target, Drain::none()), cs.input_weight()))
         }
     }
 
-    fn bound<'a>(&mut self, cs: &CoinSelector<'a>) -> Option<Self::Score> {
+    fn bound(&mut self, cs: &CoinSelector<'_>) -> Option<Self::Score> {
         let lower_bound_excess = cs.excess(self.target, Drain::none()).max(0);
         let lower_bound_weight = {
             let mut cs = cs.clone();
             cs.select_until_target_met(self.target, Drain::none())
                 .ok()?;
-            cs.selected_weight()
+            cs.input_weight()
         };
         Some((lower_bound_excess, lower_bound_weight))
     }
@@ -56,13 +61,21 @@ fn bnb_finds_an_exact_solution_in_n_iter() {
     let num_additional_canidates = 50;
 
     let mut rng = TestRng::deterministic_rng(RngAlgorithm::ChaCha);
-    let mut wv = test_wv(&mut rng);
+    let mut wv = test_wv(&mut rng).map(|mut candidate| {
+        candidate.is_segwit = true;
+        candidate
+    });
 
     let solution: Vec<Candidate> = (0..solution_len).map(|_| wv.next().unwrap()).collect();
-    let solution_weight = solution.iter().map(|sol| sol.weight).sum();
+    let solution_weight = {
+        let mut cs = CoinSelector::new(&solution, 0);
+        cs.select_all();
+        cs.input_weight()
+    };
+
     let target = solution.iter().map(|c| c.value).sum();
 
-    let mut candidates = solution.clone();
+    let mut candidates = solution;
     candidates.extend(wv.take(num_additional_canidates));
     candidates.sort_unstable_by_key(|wv| core::cmp::Reverse(wv.value));
 
@@ -86,7 +99,7 @@ fn bnb_finds_an_exact_solution_in_n_iter() {
 
     assert_eq!(i, 806);
 
-    assert!(best.selected_weight() <= solution_weight);
+    assert!(best.input_weight() <= solution_weight);
     assert_eq!(best.selected_value(), target.value);
 }
 
@@ -97,6 +110,7 @@ fn bnb_finds_solution_if_possible_in_n_iter() {
     let mut rng = TestRng::deterministic_rng(RngAlgorithm::ChaCha);
     let wv = test_wv(&mut rng);
     let candidates = wv.take(num_inputs).collect::<Vec<_>>();
+
     let cs = CoinSelector::new(&candidates, 0);
 
     let target = Target {
@@ -151,13 +165,20 @@ proptest! {
         let mut wv = test_wv(&mut rng);
 
         let solution: Vec<Candidate> = (0..solution_len).map(|_| wv.next().unwrap()).collect();
-        let target = solution.iter().map(|c| c.value).sum();
-        let solution_weight = solution.iter().map(|sol| sol.weight).sum();
+        let solution_weight = {
+            let mut cs = CoinSelector::new(&solution, 0);
+            cs.select_all();
+            cs.input_weight()
+        };
 
-        let mut candidates = solution.clone();
+        let target = solution.iter().map(|c| c.value).sum();
+
+        let mut candidates = solution;
         candidates.extend(wv.take(num_additional_canidates));
 
         let mut cs = CoinSelector::new(&candidates, 0);
+
+
         for i in 0..num_preselected.min(solution_len) {
             cs.select(i);
         }
@@ -182,7 +203,7 @@ proptest! {
 
 
 
-        prop_assert!(best.selected_weight() <= solution_weight);
+        prop_assert!(best.input_weight() <= solution_weight);
         prop_assert_eq!(best.selected_value(), target.value);
     }
 }

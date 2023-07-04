@@ -28,7 +28,8 @@ pub mod change_policy;
 /// length.
 pub const TXIN_BASE_WEIGHT: u32 = (32 + 4 + 4 + 1) * 4;
 
-/// The weight of a TXOUT with a zero length `scriptPubkey`
+/// The weight of a TXOUT with a zero length `scriptPubKey`
+#[allow(clippy::identity_op)]
 pub const TXOUT_BASE_WEIGHT: u32 =
     // The value
     4 * core::mem::size_of::<u64>() as u32

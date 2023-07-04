@@ -3,19 +3,21 @@ use crate::{bnb::BnBMetric, float::Ordf32, Candidate, CoinSelector, Drain, FeeRa
 
 /// The "waste" metric used by bitcoin core.
 ///
-/// See this [great
-/// explanation](https://bitcoin.stackexchange.com/questions/113622/what-does-waste-metric-mean-in-the-context-of-coin-selection) for an understanding of the waste metric.
+/// See this [great explanation](https://bitcoin.stackexchange.com/questions/113622/what-does-waste-metric-mean-in-the-context-of-coin-selection)
+/// for an understanding of the waste metric.
 ///
 /// ## WARNING: Waste metric considered wasteful
 ///
 /// Note that bitcoin core at the time of writing use the waste metric to
 ///
 /// 1. minimise the waste while searching for changeless solutions.
-/// 2. It tiebreaks multiple valid selections from different algorithms (which do not try and minimise waste) with waste.
+/// 2. It tiebreaks multiple valid selections from different algorithms (which do not try and
+///    minimise waste) with waste.
 ///
-/// This is **very** different from minimising waste in general which is what this metric will do when used in [`CoinSelector::branch_and_bound`].
-/// The waste metric tends to over consolidate funds. If the `long_term_feerate` is even slightly
-/// higher than the current feerate (specified in `target`) it will select all your coins!
+/// This is **very** different from minimising waste in general which is what this metric will do
+/// when used in [`CoinSelector::branch_and_bound`]. The waste metric tends to over consolidate
+/// funds. If the `long_term_feerate` is even slightly higher than the current feerate (specified
+/// in `target`) it will select all your coins!
 pub struct Waste<'c, C> {
     pub target: Target,
     pub long_term_feerate: FeeRate,
@@ -154,7 +156,7 @@ where
                     debug_assert!(weight_to_satisfy <= to_slurp.weight as f32);
                     weight_to_satisfy
                 };
-                let weight_lower_bound = cs.selected_weight() as f32 + ideal_next_weight;
+                let weight_lower_bound = cs.input_weight() as f32 + ideal_next_weight;
                 let mut waste = weight_lower_bound * rate_diff;
                 waste += change_lower_bound.waste(self.target.feerate, self.long_term_feerate);
 

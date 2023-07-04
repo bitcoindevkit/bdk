@@ -257,7 +257,12 @@ fn waste_low_but_non_negative_rate_diff_means_adding_more_inputs_might_reduce_ex
 
     let change_policy = change_policy::min_waste(drain, long_term_feerate);
     let wv = test_wv(&mut rng);
-    let candidates = wv.take(num_inputs).collect::<Vec<_>>();
+    let mut candidates = wv.take(num_inputs).collect::<Vec<_>>();
+    // HACK: for this test had to set segwit true to keep it working once we
+    // started properly accounting for legacy weight variations
+    candidates
+        .iter_mut()
+        .for_each(|candidate| candidate.is_segwit = true);
 
     let cs = CoinSelector::new(&candidates, base_weight);
 
