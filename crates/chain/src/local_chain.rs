@@ -25,6 +25,13 @@ struct CPInner {
     prev: Option<Arc<CPInner>>,
 }
 
+/// A safe representation of the underlying raw pointer of a [`CheckPoint`].
+///
+/// If two [`CheckPoint`]s return [`Pointer`]s that are equal, then the underlying raw pointer of
+/// the checkpoints are equal.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
+pub struct Pointer(*const CPInner);
+
 impl CheckPoint {
     /// Construct a [`CheckPoint`] from a [`BlockId`].
     pub fn new(block: BlockId) -> Self {
@@ -73,11 +80,18 @@ impl CheckPoint {
         self.0.prev.clone().map(CheckPoint)
     }
 
-    /// Iterate
+    /// Iterate from this checkpoint in descending height.
     pub fn iter(&self) -> CheckPointIter {
         CheckPointIter {
             current: Some(Arc::clone(&self.0)),
         }
+    }
+
+    /// Returns a safe representation of the underlying raw pointer of a [`CheckPoint`].
+    ///
+    /// See [`Pointer`] to learn more.
+    pub fn as_ptr(&self) -> Pointer {
+        Pointer(Arc::as_ptr(&self.0))
     }
 }
 
@@ -230,88 +244,22 @@ impl LocalChain {
     ///
     /// [module-level documentation]: crate::local_chain
     pub fn update(&mut self, new_tip: CheckPoint) -> Result<ChangeSet, CannotConnectError> {
-        let mut updated_cps = BTreeMap::<u32, CheckPoint>::new();
-        let mut agreement_height = Option::<u32>::None;
-        let mut agreement_ptr_matches = false;
-
-        for cp in new_tip.iter() {
-            let block = cp.block_id();
-
-            match self.checkpoints.get(&block.height) {
-                Some(original_cp) if original_cp.block_id() == block => {
-                    let ptr_matches = Arc::as_ptr(&original_cp.0) == Arc::as_ptr(&cp.0);
-
-                    // only record the first agreement height
-                    if agreement_height.is_none() && original_cp.block_id() == block {
-                        agreement_height = Some(block.height);
-                        agreement_ptr_matches = ptr_matches;
-                    }
-
-                    // break if the internal pointers of the checkpoints are the same
-                    if ptr_matches {
-                        break;
-                    }
+        match self.tip() {
+            Some(original_tip) => {
+                let (cp, changeset) = merge(original_tip, new_tip)?;
+                *self = Self::from_checkpoint(cp);
+                Ok(changeset)
+            }
+            None => {
+                let mut changeset = ChangeSet::default();
+                for cp in new_tip.iter() {
+                    let block = cp.block_id();
+                    changeset.insert(block.height, Some(block.hash));
+                    self.checkpoints.insert(block.height, cp.clone());
                 }
-                // only insert into `updated_cps` if cp is actually updated (original cp is `None`,
-                // or block ids do not match)
-                _ => {
-                    updated_cps.insert(block.height, cp.clone());
-                }
+                Ok(changeset)
             }
         }
-
-        // Lower bound of the range to invalidate in `self`.
-        let invalidate_lb = match agreement_height {
-            // if there is no agreement, we invalidate all of the original chain
-            None => u32::MIN,
-            // if the agreement is at the update's tip, we don't need to invalidate
-            Some(height) if height == new_tip.height() => u32::MAX,
-            Some(height) => height + 1,
-        };
-
-        let changeset = {
-            // Construct initial changeset of heights to invalidate in `self`.
-            let mut changeset = self
-                .checkpoints
-                .range(invalidate_lb..)
-                .map(|(&height, _)| (height, None))
-                .collect::<ChangeSet>();
-
-            // The height of the first block to invalidate (if any) must be represented in the `update`.
-            if let Some(first_invalidated_height) = changeset.keys().next() {
-                if !updated_cps.contains_key(first_invalidated_height) {
-                    return Err(CannotConnectError {
-                        try_include: self
-                            .checkpoints
-                            .get(first_invalidated_height)
-                            .expect("checkpoint already exists")
-                            .block_id(),
-                    });
-                }
-            }
-
-            changeset.extend(
-                updated_cps
-                    .iter()
-                    .map(|(height, cp)| (*height, Some(cp.hash()))),
-            );
-            changeset
-        };
-
-        // apply update if `update_cps` is non-empty
-        if let Some(&start_height) = updated_cps.keys().next() {
-            self.checkpoints.split_off(&invalidate_lb);
-            self.checkpoints.append(&mut updated_cps);
-
-            // we never need to fix links if either:
-            // 1. the original chain is empty
-            // 2. the pointers match at the first point of agreement (where the block ids are equal)
-            if !(self.is_empty() || agreement_ptr_matches) {
-                self.fix_links(start_height);
-            }
-        }
-
-        Ok(changeset)
     }
 
     /// Apply the given `changeset`.
@@ -444,18 +392,179 @@ impl std::error::Error for InsertBlockError {}
 #[derive(Clone, Debug, PartialEq)]
 pub struct CannotConnectError {
     /// The suggested checkpoint to include to connect the two chains.
-    pub try_include: BlockId,
+    pub try_include_height: u32,
 }
 
 impl core::fmt::Display for CannotConnectError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(
             f,
-            "introduced chain cannot connect with the original chain, try include {}:{}",
-            self.try_include.height, self.try_include.hash,
+            "introduced chain cannot connect with the original chain, try include height {}",
+            self.try_include_height,
         )
     }
 }
 
 #[cfg(feature = "std")]
 impl std::error::Error for CannotConnectError {}
+
+fn merge(
+    original_tip: CheckPoint,
+    update_tip: CheckPoint,
+) -> Result<(CheckPoint, ChangeSet), CannotConnectError> {
+    let mut o_visited = BTreeMap::<u32, CheckPoint>::new();
+    let mut o_iter = original_tip
+        .iter()
+        .inspect(|cp| {
+            o_visited.insert(cp.height(), cp.clone());
+        })
+        .peekable();
+
+    let mut u_visited = BTreeMap::<u32, CheckPoint>::new();
+    let u_iter = update_tip.iter().inspect(|cp| {
+        u_visited.insert(cp.height(), cp.clone());
+    });
+
+    let mut highest_agreement = Option::<u32>::None;
+
+    for u_cp in u_iter {
+        // match heights of `o_iter` and `u_iter`
+        let o_cp = loop {
+            match o_iter.peek() {
+                Some(o_cp) if o_cp.height() > u_cp.height() => o_iter.next(),
+                Some(o_cp) if o_cp.height() == u_cp.height() => break o_iter.next(),
+                _ => break None,
+            };
+        };
+        let o_cp = match o_cp {
+            Some(o_cp) => o_cp,
+            None => continue,
+        };
+
+        // perfect match!
+        if o_cp.as_ptr() == u_cp.as_ptr() {
+            let invalidate_lb = o_cp.height() + 1;
+            if let Some(invalidate_o) = o_visited.range(invalidate_lb..).next().map(|(&h, _)| h) {
+                if let Some(invalidate_u) = u_visited.range(invalidate_o..).next().map(|(&h, _)| h)
+                {
+                    if invalidate_u != invalidate_o {
+                        return Err(CannotConnectError {
+                            try_include_height: invalidate_o,
+                        });
+                    }
+                }
+            }
+            let changeset = u_visited
+                .split_off(&invalidate_lb)
+                .into_iter()
+                .map(|(h, cp)| (h, Some(cp.hash())))
+                .collect::<ChangeSet>();
+            return Ok((update_tip, changeset));
+        }
+
+        // find highest agreement height
+        if highest_agreement.is_none() && o_cp.hash() == u_cp.hash() {
+            highest_agreement = Some(o_cp.height());
+        }
+    }
+
+    // check invalidation
+    let mut explicit_invalidation = false;
+    let invalidate_lb = match highest_agreement {
+        Some(h) => {
+            let invalidate_lb = h + 1;
+            if let Some(invalidate_o) = o_visited.range(invalidate_lb..).next().map(|(&h, _)| h) {
+                if let Some(invalidate_u) = u_visited.range(invalidate_o..).next().map(|(&h, _)| h)
+                {
+                    explicit_invalidation = true;
+                    if invalidate_u != invalidate_o {
+                        return Err(CannotConnectError {
+                            try_include_height: invalidate_o,
+                        });
+                    }
+                }
+            }
+            invalidate_lb
+        }
+        None => {
+            explicit_invalidation = true;
+            // If there is no agreement height, the lowest original checkpoint must be displaced by
+            // an update checkpoint. We can ensure this if `o_iter` is exhausted and the first
+            // height of `o_visited` exists in `u_visited`.
+            if let Some(cp) = o_iter.peek() {
+                return Err(CannotConnectError {
+                    try_include_height: cp.height(),
+                });
+            }
+            let first_o = o_visited
+                .keys()
+                .next()
+                .expect("must atleast have one height");
+            if !u_visited.contains_key(first_o) {
+                return Err(CannotConnectError {
+                    try_include_height: *first_o,
+                });
+            }
+            // we invalidate everything in the original chain
+            0
+        }
+    };
+
+    // make changeset
+    let changeset = {
+        let mut changeset = match explicit_invalidation {
+            true => o_visited
+                .range(invalidate_lb..)
+                .map(|(&h, _)| (h, None))
+                .collect::<ChangeSet>(),
+            false => ChangeSet::default(),
+        };
+        for (h, u_cp) in &u_visited {
+            match o_visited.get(h) {
+                Some(o_cp) if o_cp.hash() == u_cp.hash() => continue,
+                _ => changeset.insert(*h, Some(u_cp.hash())),
+            };
+        }
+        changeset
+    };
+
+    // get original cp before the first change
+    let first_change_height = match changeset.keys().next() {
+        Some(&h) => h,
+        // empty changeset
+        None => return Ok((original_tip, changeset)),
+    };
+
+    let start_cp = o_visited
+        .range(..first_change_height)
+        .next_back()
+        .map(|(_, cp)| cp.clone());
+
+    let chain_ext = {
+        let mut chain_ext = o_visited
+            .range(first_change_height..)
+            .map(|(&h, cp)| (h, cp.hash()))
+            .collect::<BTreeMap<u32, BlockHash>>();
+        for (&height, &hash_delta) in &changeset {
+            match hash_delta {
+                Some(hash) => chain_ext.insert(height, hash),
+                None => chain_ext.remove(&height),
+            };
+        }
+        chain_ext
+    };
+
+    // build new chain
+    let mut cp = start_cp;
+    for (height, hash) in chain_ext {
+        let block = BlockId { height, hash };
+        match cp.clone() {
+            Some(this_cp) => cp = Some(this_cp.extend(block).expect("must extend")),
+            _ => {
+                let _ = cp.insert(CheckPoint::new(block));
+            }
+        };
+    }
+
+    Ok((cp.expect("must have checkpoint"), changeset))
+}

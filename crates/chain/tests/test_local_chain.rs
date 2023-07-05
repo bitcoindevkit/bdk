@@ -1,6 +1,5 @@
-use bdk_chain::{
-    local_chain::{CannotConnectError, ChangeSet, CheckPoint, InsertBlockError, LocalChain},
-    BlockId,
+use bdk_chain::local_chain::{
+    CannotConnectError, ChangeSet, CheckPoint, InsertBlockError, LocalChain,
 };
 use bitcoin::BlockHash;
 
@@ -28,8 +27,13 @@ impl<'a> TestLocalChain<'a> {
     fn run(mut self) {
         let got_changeset = match self.chain.update(self.new_tip) {
             Ok(changeset) => changeset,
-            Err(err) => {
-                assert_eq!(ExpectedResult::Err(err), self.exp);
+            Err(got_err) => {
+                assert_eq!(
+                    ExpectedResult::Err(got_err),
+                    self.exp,
+                    "{}: unexpected error",
+                    self.name
+                );
                 return;
             }
         };
@@ -86,10 +90,7 @@ fn update() {
             chain: local_chain![(0, h!("A"))],
             new_tip: chain_update![(1, h!("B"))],
             exp: ExpectedResult::Err(CannotConnectError {
-                try_include: BlockId {
-                    height: 0,
-                    hash: h!("A"),
-                },
+                try_include_height: 0,
             }),
         },
         TestLocalChain {
@@ -148,10 +149,7 @@ fn update() {
             chain: local_chain![(1, h!("B")), (2, h!("C"))],
             new_tip: chain_update![(0, h!("A")), (1, h!("B")), (3, h!("D"))],
             exp: ExpectedResult::Err(CannotConnectError {
-                try_include: BlockId {
-                    height: 2,
-                    hash: h!("C"),
-                },
+                try_include_height: 2,
             }),
         },
         // Transient invalidation:
@@ -211,7 +209,7 @@ fn update() {
             name: "invalidation but no connection",
             chain: local_chain![(0, h!("A")), (1, h!("B")), (2, h!("C")), (4, h!("E"))],
             new_tip: chain_update![(1, h!("B'")), (2, h!("C'")), (3, h!("D"))],
-            exp: ExpectedResult::Err(CannotConnectError { try_include: BlockId { height: 0, hash: h!("A") } }),
+            exp: ExpectedResult::Err(CannotConnectError { try_include_height: 0 }),
         },
         // Introduce blocks between two points of agreement
         //        | 0 | 1 | 2 | 3 | 4 | 5
