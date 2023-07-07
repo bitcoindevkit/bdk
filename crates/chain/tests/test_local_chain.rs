@@ -57,15 +57,15 @@ impl<'a> TestLocalChain<'a> {
                 );
             }
             ExpectedResult::Err(err) => panic!(
-                "expected error ({}), got non-error result: {:?}",
-                err, got_changeset
+                "{}: expected error ({}), got non-error result: {:?}",
+                self.name, err, got_changeset
             ),
         }
     }
 }
 
 #[test]
-fn update() {
+fn update_local_chain() {
     [
         TestLocalChain {
             name: "add first tip",
@@ -91,6 +91,14 @@ fn update() {
             new_tip: chain_update![(1, h!("B"))],
             exp: ExpectedResult::Err(CannotConnectError {
                 try_include_height: 0,
+            }),
+        },
+        TestLocalChain {
+            name: "two disjoint chains cannot merge (existing chain longer)",
+            chain: local_chain![(1, h!("A"))],
+            new_tip: chain_update![(0, h!("B"))],
+            exp: ExpectedResult::Err(CannotConnectError {
+                try_include_height: 1,
             }),
         },
         TestLocalChain {
@@ -233,14 +241,14 @@ fn update() {
                     (5, Some(h!("F"))),
                 ],
             },
-        }
+        },
     ]
     .into_iter()
     .for_each(TestLocalChain::run);
 }
 
 #[test]
-fn insert_block() {
+fn local_chain_insert_block() {
     struct TestCase {
         original: LocalChain,
         insert: (u32, BlockHash),
