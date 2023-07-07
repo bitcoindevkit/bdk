@@ -417,6 +417,12 @@ fn merge_chains(orig: CheckPoint, update: CheckPoint) -> Result<ChangeSet, Canno
                 potentially_invalidated_heights.push(o.height());
                 prev_orig_was_invalidated = false;
                 prev_orig = curr_orig.take();
+
+                // OPTIMIZATION: we have run out of update blocks so we don't need to continue
+                // iterating becuase there's no possibility of adding anything to changeset.
+                if u.is_none() {
+                    break;
+                }
             }
             (Some(o), Some(u)) => {
                 if o.hash() == u.hash() {
@@ -426,7 +432,7 @@ fn merge_chains(orig: CheckPoint, update: CheckPoint) -> Result<ChangeSet, Canno
                     // connection to the original chain from the update chain (i.e. we know the
                     // precisely which original blocks are invalid).
                     if !prev_orig_was_invalidated && !point_of_agreement_found {
-                        if let (Some(prev_orig), Some(_prev_update)) = (prev_orig, prev_update) {
+                        if let (Some(prev_orig), Some(_prev_update)) = (&prev_orig, &prev_update) {
                             return Err(CannotConnectError {
                                 try_include_height: prev_orig.height(),
                             });
@@ -453,21 +459,22 @@ fn merge_chains(orig: CheckPoint, update: CheckPoint) -> Result<ChangeSet, Canno
                 prev_orig = curr_orig.take();
             }
             (None, None) => {
-                // When we don't have a point of agreement you can imagine it is implicitly the
-                // genesis block so we need to do the final connectivity check which in this case
-                // just means making sure the entire original chain was invalidated.
-                if !prev_orig_was_invalidated && !point_of_agreement_found {
-                    if let Some(prev_orig) = prev_orig {
-                        return Err(CannotConnectError {
-                            try_include_height: prev_orig.height(),
-                        });
-                    }
-                }
                 break;
             }
             _ => {
                 unreachable!("compiler cannot tell that everything has been covered")
             }
+        }
+    }
+
+    // When we don't have a point of agreement you can imagine it is implicitly the
+    // genesis block so we need to do the final connectivity check which in this case
+    // just means making sure the entire original chain was invalidated.
+    if !prev_orig_was_invalidated && !point_of_agreement_found {
+        if let Some(prev_orig) = prev_orig {
+            return Err(CannotConnectError {
+                try_include_height: prev_orig.height(),
+            });
         }
     }
 
