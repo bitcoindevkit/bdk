@@ -378,7 +378,7 @@ impl<D> Wallet<D> {
 
     /// Get all the checkpoints the wallet is currently storing indexed by height.
     pub fn checkpoints(&self) -> CheckPointIter {
-        self.chain.iter_checkpoints(None)
+        self.chain.iter_checkpoints()
     }
 
     /// Returns the latest checkpoint.
@@ -500,15 +500,18 @@ impl<D> Wallet<D> {
                 // anchor tx to checkpoint with lowest height that is >= position's height
                 let anchor = self
                     .chain
-                    .checkpoints()
+                    .heights()
                     .range(height..)
                     .next()
                     .ok_or(InsertTxError::ConfirmationHeightCannotBeGreaterThanTip {
                         tip_height: self.chain.tip().map(|b| b.height()),
                         tx_height: height,
                     })
-                    .map(|(&_, cp)| ConfirmationTimeAnchor {
-                        anchor_block: cp.block_id(),
+                    .map(|(&anchor_height, &hash)| ConfirmationTimeAnchor {
+                        anchor_block: BlockId {
+                            height: anchor_height,
+                            hash,
+                        },
                         confirmation_height: height,
                         confirmation_time: time,
                     })?;

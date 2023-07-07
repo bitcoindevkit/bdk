@@ -617,8 +617,8 @@ impl<A: Anchor> TxGraph<A> {
                     }
                 }
             })
-            .filter_map(|block| match chain.checkpoints().get(&block.height) {
-                Some(chain_cp) if chain_cp.hash() == block.hash => None,
+            .filter_map(|block| match chain.heights().get(&block.height) {
+                Some(chain_hash) if *chain_hash == block.hash => None,
                 _ => Some(block.height),
             })
     }

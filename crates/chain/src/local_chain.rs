@@ -10,9 +10,9 @@ use bitcoin::BlockHash;
 /// A structure that represents changes to [`LocalChain`].
 pub type ChangeSet = BTreeMap<u32, Option<BlockHash>>;
 
-/// A block of [`LocalChain`].
+/// A blockchain of [`LocalChain`].
 ///
-/// Blocks are presented in a linked-list.
+/// The in a linked-list with newer blocks pointing to older ones.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct CheckPoint(Arc<CPInner>);
 
@@ -25,23 +25,17 @@ struct CPInner {
     prev: Option<Arc<CPInner>>,
 }
 
-/// A safe representation of the underlying raw pointer of a [`CheckPoint`].
-///
-/// If two [`CheckPoint`]s return [`Pointer`]s that are equal, then the underlying raw pointer of
-/// the checkpoints are equal.
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
-pub struct Pointer(*const CPInner);
-
 impl CheckPoint {
-    /// Construct a [`CheckPoint`] from a [`BlockId`].
+    /// Construct a new base block at the front of a linked list.
     pub fn new(block: BlockId) -> Self {
         Self(Arc::new(CPInner { block, prev: None }))
     }
 
-    /// Extends [`CheckPoint`] with `block` and returns the new checkpoint tip.
+    /// Puts another checkpoint onto the linked list representing the blockchain.
     ///
-    /// Returns an `Err` of the initial checkpoint
-    pub fn extend(self, block: BlockId) -> Result<Self, Self> {
+    /// Returns an `Err(self)` if the block you are pushing on is not at a greater height that the one you
+    /// are pushing on to.
+    pub fn push(self, block: BlockId) -> Result<Self, Self> {
         if self.height() < block.height {
             Ok(Self(Arc::new(CPInner {
                 block,
@@ -50,6 +44,18 @@ impl CheckPoint {
         } else {
             Err(self)
         }
+    }
+
+    /// Extends the checkpoint linked list by a iterator of block ids.
+    ///
+    /// Returns an `Err(self)` if there is block which does not have a greater height than the
+    /// previous one.
+    pub fn extend(self, blocks: impl IntoIterator<Item = BlockId>) -> Result<Self, Self> {
+        let mut curr = self.clone();
+        for block in blocks {
+            curr = curr.push(block).map_err(|_| self.clone())?;
+        }
+        Ok(curr)
     }
 
     /// Get the [`BlockId`] of the checkpoint.
@@ -67,15 +73,7 @@ impl CheckPoint {
         self.0.block.hash
     }
 
-    /// Detach this checkpoint from the previous.
-    pub fn detach(self) -> Self {
-        Self(Arc::new(CPInner {
-            block: self.0.block,
-            prev: None,
-        }))
-    }
-
-    /// Get the previous checkpoint.
+    /// Get the previous checkpoint in the chain
     pub fn prev(&self) -> Option<CheckPoint> {
         self.0.prev.clone().map(CheckPoint)
     }
@@ -85,13 +83,6 @@ impl CheckPoint {
         CheckPointIter {
             current: Some(Arc::clone(&self.0)),
         }
-    }
-
-    /// Returns a safe representation of the underlying raw pointer of a [`CheckPoint`].
-    ///
-    /// See [`Pointer`] to learn more.
-    pub fn as_ptr(&self) -> Pointer {
-        Pointer(Arc::as_ptr(&self.0))
     }
 }
 
@@ -113,16 +104,13 @@ impl Iterator for CheckPointIter {
 /// This is a local implementation of [`ChainOracle`].
 #[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct LocalChain {
-    checkpoints: BTreeMap<u32, CheckPoint>,
+    tip: Option<CheckPoint>,
+    index: BTreeMap<u32, BlockHash>,
 }
 
 impl From<LocalChain> for BTreeMap<u32, BlockHash> {
     fn from(value: LocalChain) -> Self {
-        value
-            .checkpoints
-            .values()
-            .map(|cp| (cp.height(), cp.hash()))
-            .collect()
+        value.index
     }
 }
 
@@ -151,19 +139,17 @@ impl ChainOracle for LocalChain {
         }
         Ok(
             match (
-                self.checkpoints.get(&block.height),
-                self.checkpoints.get(&chain_tip.height),
+                self.index.get(&block.height),
+                self.index.get(&chain_tip.height),
             ) {
-                (Some(cp), Some(tip_cp)) => {
-                    Some(cp.hash() == block.hash && tip_cp.hash() == chain_tip.hash)
-                }
+                (Some(cp), Some(tip_cp)) => Some(*cp == block.hash && *tip_cp == chain_tip.hash),
                 _ => None,
             },
         )
     }
 
     fn get_chain_tip(&self) -> Result<Option<BlockId>, Self::Error> {
-        Ok(self.checkpoints.values().last().map(CheckPoint::block_id))
+        Ok(self.tip.as_ref().map(|tip| tip.block_id()))
     }
 }
 
@@ -176,10 +162,13 @@ impl LocalChain {
     }
 
     /// Construct a [`LocalChain`] from a given `checkpoint` tip.
-    pub fn from_checkpoint(checkpoint: CheckPoint) -> Self {
-        Self {
-            checkpoints: checkpoint.iter().map(|cp| (cp.height(), cp)).collect(),
-        }
+    pub fn from_tip(tip: CheckPoint) -> Self {
+        let mut _self = Self {
+            tip: Some(tip),
+            ..Default::default()
+        };
+        _self.reindex(0);
+        _self
     }
 
     /// Constructs a [`LocalChain`] from a [`BTreeMap`] of height to [`BlockHash`].
@@ -187,34 +176,31 @@ impl LocalChain {
     /// The [`BTreeMap`] enforces the height order. However, the caller must ensure the blocks are
     /// all of the same chain.
     pub fn from_blocks(blocks: BTreeMap<u32, BlockHash>) -> Self {
-        Self {
-            checkpoints: blocks
-                .into_iter()
-                .map({
-                    let mut prev = Option::<CheckPoint>::None;
-                    move |(height, hash)| {
-                        let cp = match prev.clone() {
-                            Some(prev) => {
-                                prev.extend(BlockId { height, hash }).expect("must extend")
-                            }
-                            None => CheckPoint::new(BlockId { height, hash }),
-                        };
-                        prev = Some(cp.clone());
-                        (height, cp)
-                    }
-                })
-                .collect(),
+        let mut tip: Option<CheckPoint> = None;
+
+        for block in &blocks {
+            match tip {
+                Some(curr) => {
+                    tip = Some(
+                        curr.push(BlockId::from(block))
+                            .expect("BTreeMap is ordered"),
+                    )
+                }
+                None => tip = Some(CheckPoint::new(BlockId::from(block))),
+            }
         }
+
+        Self { index: blocks, tip }
     }
 
     /// Get the highest checkpoint.
     pub fn tip(&self) -> Option<CheckPoint> {
-        self.checkpoints.values().last().cloned()
+        self.tip.clone()
     }
 
     /// Returns whether the [`LocalChain`] is empty (has no checkpoints).
     pub fn is_empty(&self) -> bool {
-        self.checkpoints.is_empty()
+        self.tip.is_none()
     }
 
     /// Updates [`Self`] with the given `new_tip`.
@@ -251,13 +237,8 @@ impl LocalChain {
                 Ok(changeset)
             }
             None => {
-                let mut changeset = ChangeSet::default();
-                for cp in new_tip.iter() {
-                    let block = cp.block_id();
-                    changeset.insert(block.height, Some(block.hash));
-                    self.checkpoints.insert(block.height, cp.clone());
-                }
-                Ok(changeset)
+                *self = Self::from_tip(new_tip);
+                Ok(self.initial_changeset())
             }
         }
     }
@@ -265,15 +246,38 @@ impl LocalChain {
     /// Apply the given `changeset`.
     pub fn apply_changeset(&mut self, changeset: &ChangeSet) {
         if let Some(start_height) = changeset.keys().next().cloned() {
+            let mut extension = BTreeMap::default();
+            let mut base: Option<CheckPoint> = None;
+            if let Some(tip) = &self.tip {
+                for cp in tip.iter() {
+                    if cp.height() >= start_height {
+                        extension.insert(cp.height(), cp.hash());
+                    } else {
+                        base = Some(cp);
+                        break;
+                    }
+                }
+            }
+
             for (&height, &hash) in changeset {
                 match hash {
-                    Some(hash) => self
-                        .checkpoints
-                        .insert(height, CheckPoint::new(BlockId { height, hash })),
-                    None => self.checkpoints.remove(&height),
+                    Some(hash) => {
+                        extension.insert(height, hash);
+                    }
+                    None => {
+                        extension.remove(&height);
+                    }
                 };
             }
-            self.fix_links(start_height);
+            let new_tip = match base {
+                Some(base) => Some(
+                    base.extend(extension.into_iter().map(BlockId::from))
+                        .expect("extension is strictly greater than base"),
+                ),
+                None => LocalChain::from_blocks(extension).tip(),
+            };
+            self.tip = new_tip;
+            self.reindex(start_height);
         }
     }
 
@@ -283,84 +287,53 @@ impl LocalChain {
     ///
     /// Replacing the block hash of an existing checkpoint will result in an error.
     pub fn insert_block(&mut self, block_id: BlockId) -> Result<ChangeSet, InsertBlockError> {
-        use crate::collections::btree_map::Entry;
-
-        match self.checkpoints.entry(block_id.height) {
-            Entry::Vacant(entry) => {
-                entry.insert(CheckPoint::new(block_id));
-                self.fix_links(block_id.height);
-                Ok(core::iter::once((block_id.height, Some(block_id.hash))).collect())
-            }
-            Entry::Occupied(entry) => {
-                let cp = entry.get();
-                if cp.block_id() == block_id {
-                    Ok(ChangeSet::default())
-                } else {
-                    Err(InsertBlockError {
-                        height: block_id.height,
-                        original_hash: cp.hash(),
-                        update_hash: block_id.hash,
-                    })
-                }
+        if let Some(&original_hash) = self.index.get(&block_id.height) {
+            if original_hash != block_id.hash {
+                return Err(InsertBlockError {
+                    height: block_id.height,
+                    original_hash,
+                    update_hash: block_id.hash,
+                });
+            } else {
+                return Ok(ChangeSet::default());
             }
         }
+
+        let mut changeset = ChangeSet::default();
+        changeset.insert(block_id.height, Some(block_id.hash));
+        self.apply_changeset(&changeset);
+        Ok(changeset)
     }
 
-    /// Internal method for fixing pointers to make checkpoints a properly linked list. I.e.
-    /// [`CheckPoint::prev`] should return the previous checkpoint.
-    ///
-    /// We fix checkpoints from `start_height` and higher.
-    fn fix_links(&mut self, start_height: u32) {
-        let mut prev = self
-            .checkpoints
-            .range(..start_height)
-            .last()
-            .map(|(_, cp)| cp.clone());
-
-        for (_, cp) in self.checkpoints.range_mut(start_height..) {
-            if cp.0.prev.as_ref().map(Arc::as_ptr) != prev.as_ref().map(|cp| Arc::as_ptr(&cp.0)) {
-                cp.0 = Arc::new(CPInner {
-                    block: cp.block_id(),
-                    prev: prev.clone().map(|cp| cp.0),
-                });
+    /// Reindex the heights in the chain from (and including) `from` height
+    fn reindex(&mut self, from: u32) {
+        let _ = self.index.split_off(&from);
+        if let Some(tip) = &self.tip {
+            for cp in tip.iter() {
+                if cp.height() < from {
+                    break;
+                }
+                self.index.insert(cp.height(), cp.hash());
             }
-            prev = Some(cp.clone());
         }
     }
 
     /// Derives an initial [`ChangeSet`], meaning that it can be applied to an empty chain to
     /// recover the current chain.
     pub fn initial_changeset(&self) -> ChangeSet {
-        self.iter_checkpoints(None)
-            .map(|cp| (cp.height(), Some(cp.hash())))
-            .collect()
-    }
-
-    /// Get checkpoint of `height` (if any).
-    pub fn checkpoint(&self, height: u32) -> Option<CheckPoint> {
-        self.checkpoints.get(&height).cloned()
+        self.index.iter().map(|(k, v)| (*k, Some(*v))).collect()
     }
 
     /// Iterate over checkpoints in decending height order.
-    ///
-    /// `height_upper_bound` is inclusive. A value of `None` means there is no bound, so all
-    /// checkpoints will be traversed.
-    pub fn iter_checkpoints(&self, height_upper_bound: Option<u32>) -> CheckPointIter {
+    pub fn iter_checkpoints(&self) -> CheckPointIter {
         CheckPointIter {
-            current: match height_upper_bound {
-                Some(height) => self
-                    .checkpoints
-                    .range(..=height)
-                    .last()
-                    .map(|(_, cp)| cp.0.clone()),
-                None => self.checkpoints.values().last().map(|cp| cp.0.clone()),
-            },
+            current: self.tip.as_ref().map(|tip| tip.0.clone()),
         }
     }
 
-    /// Get a reference to the internal checkpoint map.
-    pub fn checkpoints(&self) -> &BTreeMap<u32, CheckPoint> {
-        &self.checkpoints
+    /// Get a reference to the internal index mapping the height to block hash
+    pub fn heights(&self) -> &BTreeMap<u32, BlockHash> {
+        &self.index
     }
 }
 

@@ -347,7 +347,7 @@ fn construct_update_tip(
         .map(|(height, hash)| BlockId { height, hash })
         .fold(agreement_cp, |prev_cp, block| {
             Some(match prev_cp {
-                Some(cp) => cp.extend(block).expect("must extend checkpoint"),
+                Some(cp) => cp.push(block).expect("must extend checkpoint"),
                 None => CheckPoint::new(block),
             })
         })

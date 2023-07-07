@@ -280,7 +280,7 @@ impl<'a> BitcoindRpcEmitter<'a> {
                         let block = self.client.get_block(&info.hash)?;
                         let cp = last_cp
                             .clone()
-                            .extend(BlockId {
+                            .push(BlockId {
                                 height: info.height as _,
                                 hash: info.hash,
                             })

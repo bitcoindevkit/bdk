@@ -181,7 +181,7 @@ impl EsploraExt for esplora_client::BlockingClient {
             .into_iter()
             .map(|(height, hash)| BlockId { height, hash })
             .fold(first_cp, |prev_cp, block| {
-                prev_cp.extend(block).expect("must extend checkpoint")
+                prev_cp.push(block).expect("must extend checkpoint")
             });
 
         Ok(new_tip)
