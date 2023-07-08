@@ -80,9 +80,7 @@ impl CheckPoint {
 
     /// Iterate from this checkpoint in descending height.
     pub fn iter(&self) -> CheckPointIter {
-        CheckPointIter {
-            current: Some(Arc::clone(&self.0)),
-        }
+        self.clone().into_iter()
     }
 }
 
@@ -98,6 +96,17 @@ impl Iterator for CheckPointIter {
         let current = self.current.clone()?;
         self.current = current.prev.clone();
         Some(CheckPoint(current))
+    }
+}
+
+impl IntoIterator for CheckPoint {
+    type Item = CheckPoint;
+    type IntoIter = CheckPointIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        CheckPointIter {
+            current: Some(self.0),
+        }
     }
 }
 
@@ -248,14 +257,12 @@ impl LocalChain {
         if let Some(start_height) = changeset.keys().next().cloned() {
             let mut extension = BTreeMap::default();
             let mut base: Option<CheckPoint> = None;
-            if let Some(tip) = &self.tip {
-                for cp in tip.iter() {
-                    if cp.height() >= start_height {
-                        extension.insert(cp.height(), cp.hash());
-                    } else {
-                        base = Some(cp);
-                        break;
-                    }
+            for cp in self.iter_checkpoints() {
+                if cp.height() >= start_height {
+                    extension.insert(cp.height(), cp.hash());
+                } else {
+                    base = Some(cp);
+                    break;
                 }
             }
 
@@ -308,13 +315,11 @@ impl LocalChain {
     /// Reindex the heights in the chain from (and including) `from` height
     fn reindex(&mut self, from: u32) {
         let _ = self.index.split_off(&from);
-        if let Some(tip) = &self.tip {
-            for cp in tip.iter() {
-                if cp.height() < from {
-                    break;
-                }
-                self.index.insert(cp.height(), cp.hash());
+        for cp in self.iter_checkpoints() {
+            if cp.height() < from {
+                break;
             }
+            self.index.insert(cp.height(), cp.hash());
         }
     }
 
@@ -383,8 +388,8 @@ impl std::error::Error for CannotConnectError {}
 
 fn merge_chains(orig: CheckPoint, update: CheckPoint) -> Result<ChangeSet, CannotConnectError> {
     let mut changeset = ChangeSet::default();
-    let mut orig = orig.iter();
-    let mut update = update.iter();
+    let mut orig = orig.into_iter();
+    let mut update = update.into_iter();
     let mut curr_orig = None;
     let mut curr_update = None;
     let mut prev_orig: Option<CheckPoint> = None;
