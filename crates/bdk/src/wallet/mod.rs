@@ -1710,7 +1710,7 @@ impl<D> Wallet<D> {
     where
         D: PersistBackend<ChangeSet>,
     {
-        let mut changeset = ChangeSet::from(self.chain.update(update.tip)?);
+        let mut changeset = ChangeSet::from(self.chain.update(update.tip, None)?);
         let (_, index_additions) = self
             .indexed_graph
             .index

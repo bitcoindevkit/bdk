@@ -167,6 +167,10 @@ impl LocalChain {
     pub fn from_changeset(changeset: ChangeSet) -> Self {
         let mut chain = Self::default();
         chain.apply_changeset(&changeset);
+
+        #[cfg(debug_assertions)]
+        chain._check_consistency(Some(&changeset));
+
         chain
     }
 
@@ -177,6 +181,10 @@ impl LocalChain {
             ..Default::default()
         };
         _self.reindex(0);
+
+        #[cfg(debug_assertions)]
+        _self._check_consistency(None);
+
         _self
     }
 
@@ -199,7 +207,12 @@ impl LocalChain {
             }
         }
 
-        Self { index: blocks, tip }
+        let chain = Self { index: blocks, tip };
+
+        #[cfg(debug_assertions)]
+        chain._check_consistency(None);
+
+        chain
     }
 
     /// Get the highest checkpoint.
@@ -212,23 +225,23 @@ impl LocalChain {
         self.tip.is_none()
     }
 
-    /// Updates [`Self`] with the given `new_tip`.
+    /// Updates [`Self`] with the given `update_tip`.
     ///
     /// The method returns [`ChangeSet`] on success. This represents the applied changes to
     /// [`Self`].
     ///
-    /// To update, the `new_tip` must *connect* with `self`. If `self` and `new_tip` has a mutual
-    /// checkpoint (same height and hash), it can connect if:
+    /// To update, the `update_tip` must *connect* with `self`. If `self` and `update_tip` has a
+    /// mutual checkpoint (same height and hash), it can connect if:
     /// * The mutual checkpoint is the tip of `self`.
-    /// * An ancestor of `new_tip` has a height which is of the checkpoint one higher than the
+    /// * An ancestor of `update_tip` has a height which is of the checkpoint one higher than the
     ///         mutual checkpoint from `self`.
     ///
     /// Additionally:
-    /// * If `self` is empty, `new_tip` will always connect.
-    /// * If `self` only has one checkpoint, `new_tip` must have an ancestor checkpoint with the
+    /// * If `self` is empty, `update_tip` will always connect.
+    /// * If `self` only has one checkpoint, `update_tip` must have an ancestor checkpoint with the
     ///     same height as it.
     ///
-    /// To invalidate from a given checkpoint, `new_tip` must contain an ancestor checkpoint with
+    /// To invalidate from a given checkpoint, `update_tip` must contain an ancestor checkpoint with
     /// the same height but different hash.
     ///
     /// # Errors
@@ -238,18 +251,40 @@ impl LocalChain {
     /// Refer to [module-level documentation] for more.
     ///
     /// [module-level documentation]: crate::local_chain
-    pub fn update(&mut self, new_tip: CheckPoint) -> Result<ChangeSet, CannotConnectError> {
-        match self.tip() {
+    pub fn update(
+        &mut self,
+        update_tip: CheckPoint,
+        update_lower_bound: Option<u32>,
+    ) -> Result<ChangeSet, CannotConnectError> {
+        let changeset = match self.tip() {
             Some(original_tip) => {
-                let changeset = merge_chains(original_tip, new_tip)?;
-                self.apply_changeset(&changeset);
-                Ok(changeset)
+                let (changeset, perfect_connection) =
+                    merge_chains(original_tip, update_tip.clone(), update_lower_bound)?;
+                if perfect_connection {
+                    self.tip = Some(update_tip);
+                    for (height, hash) in &changeset {
+                        match hash {
+                            Some(hash) => self.index.insert(*height, *hash),
+                            None => self.index.remove(height),
+                        };
+                    }
+                    changeset
+                } else {
+                    self.apply_changeset(&changeset);
+                    // return early as `apply_changeset` already calls `check_consistency`
+                    return Ok(changeset);
+                }
             }
             None => {
-                *self = Self::from_tip(new_tip);
-                Ok(self.initial_changeset())
+                *self = Self::from_tip(update_tip);
+                self.initial_changeset()
             }
-        }
+        };
+
+        #[cfg(debug_assertions)]
+        self._check_consistency(Some(&changeset));
+
+        Ok(changeset)
     }
 
     /// Apply the given `changeset`.
@@ -285,6 +320,9 @@ impl LocalChain {
             };
             self.tip = new_tip;
             self.reindex(start_height);
+
+            #[cfg(debug_assertions)]
+            self._check_consistency(Some(changeset));
         }
     }
 
@@ -340,6 +378,33 @@ impl LocalChain {
     pub fn heights(&self) -> &BTreeMap<u32, BlockHash> {
         &self.index
     }
+
+    /// Checkpoints that exist under `self.tip` and blocks indexed in `self.index` should be equal.
+    /// Additionally, if a `changeset` is provided, the changes specified in the `changeset` should
+    /// be reflected in `self.index`.
+    #[cfg(debug_assertions)]
+    fn _check_consistency(&self, changeset: Option<&ChangeSet>) {
+        debug_assert_eq!(
+            self.tip
+                .iter()
+                .flat_map(CheckPoint::iter)
+                .map(|cp| (cp.height(), cp.hash()))
+                .collect::<BTreeMap<_, _>>(),
+            self.index,
+            "checkpoint history and index must be consistent"
+        );
+
+        if let Some(changeset) = changeset {
+            for (height, exp_hash) in changeset {
+                let hash = self.index.get(height);
+                assert_eq!(
+                    hash,
+                    exp_hash.as_ref(),
+                    "changeset changes should be reflected in the internal index"
+                );
+            }
+        }
+    }
 }
 
 /// Represents a failure when trying to insert a checkpoint into [`LocalChain`].
@@ -386,10 +451,19 @@ impl core::fmt::Display for CannotConnectError {
 #[cfg(feature = "std")]
 impl std::error::Error for CannotConnectError {}
 
-fn merge_chains(orig: CheckPoint, update: CheckPoint) -> Result<ChangeSet, CannotConnectError> {
+fn merge_chains(
+    original_tip: CheckPoint,
+    update_tip: CheckPoint,
+    update_lb_height: Option<u32>,
+) -> Result<(ChangeSet, bool), CannotConnectError> {
     let mut changeset = ChangeSet::default();
-    let mut orig = orig.into_iter();
-    let mut update = update.into_iter();
+    let mut orig = original_tip.into_iter();
+    let mut update = update_tip
+        .into_iter()
+        .take_while(|cp| match update_lb_height {
+            Some(lb_height) => lb_height <= cp.height(),
+            None => true,
+        });
     let mut curr_orig = None;
     let mut curr_update = None;
     let mut prev_orig: Option<CheckPoint> = None;
@@ -449,7 +523,7 @@ fn merge_chains(orig: CheckPoint, update: CheckPoint) -> Result<ChangeSet, Canno
                     // point then we know everything else in the two chains will match so the
                     // changeset is fine.
                     if Arc::as_ptr(&o.0) == Arc::as_ptr(&u.0) {
-                        break;
+                        return Ok((changeset, true));
                     }
                 } else {
                     // We have an invalidation height so we set the height to the updated hash and
@@ -483,5 +557,5 @@ fn merge_chains(orig: CheckPoint, update: CheckPoint) -> Result<ChangeSet, Canno
         }
     }
 
-    Ok(changeset)
+    Ok((changeset, false))
 }

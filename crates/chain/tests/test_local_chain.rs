@@ -25,7 +25,8 @@ enum ExpectedResult<'a> {
 
 impl<'a> TestLocalChain<'a> {
     fn run(mut self) {
-        let got_changeset = match self.chain.update(self.new_tip) {
+        println!("[TestLocalChain] test: {}", self.name);
+        let got_changeset = match self.chain.update(self.new_tip, None) {
             Ok(changeset) => changeset,
             Err(got_err) => {
                 assert_eq!(
@@ -110,13 +111,56 @@ fn update_local_chain() {
                 init_changeset: &[(0, Some(h!("A")))],
             },
         },
+        // Introduce an older checkpoint (B)
+        //        | 0 | 1 | 2 | 3
+        // chain  |         C   D
+        // update |     B   C
         TestLocalChain {
-            name: "can introduce older checkpoints",
+            name: "can introduce older checkpoint",
             chain: local_chain![(2, h!("C")), (3, h!("D"))],
             new_tip: chain_update![(1, h!("B")), (2, h!("C"))],
             exp: ExpectedResult::Ok {
                 changeset: &[(1, Some(h!("B")))],
                 init_changeset: &[(1, Some(h!("B"))), (2, Some(h!("C"))), (3, Some(h!("D")))],
+            },
+        },
+        // Introduce an older checkpoint (A) that is not directly behind PoA
+        //        | 1 | 2 | 3
+        // chain  |     B   C
+        // update | A       C
+        TestLocalChain {
+            name: "can introduce older checkpoint 2",
+            chain: local_chain![(3, h!("B")), (4, h!("C"))],
+            new_tip: chain_update![(2, h!("A")), (4, h!("C"))],
+            exp: ExpectedResult::Ok {
+                changeset: &[(2, Some(h!("A")))],
+                init_changeset: &[(2, Some(h!("A"))), (3, Some(h!("B"))), (4, Some(h!("C")))],
+            }
+        },
+        // Introduce an older checkpoint (B) that is not the oldest checkpoint
+        //        | 1 | 2 | 3
+        // chain  | A       C
+        // update |     B   C
+        TestLocalChain {
+            name: "can introduce older checkpoint 3",
+            chain: local_chain![(1, h!("A")), (3, h!("C"))],
+            new_tip: chain_update![(2, h!("B")), (3, h!("C"))],
+            exp: ExpectedResult::Ok {
+                changeset: &[(2, Some(h!("B")))],
+                init_changeset: &[(1, Some(h!("A"))), (2, Some(h!("B"))), (3, Some(h!("C")))],
+            }
+        },
+        // Introduce two older checkpoints below the PoA
+        //        | 1 | 2 | 3
+        // chain  |         C
+        // update | A   B   C
+        TestLocalChain {
+            name: "introduce two older checkpoints below PoA",
+            chain: local_chain![(3, h!("C"))],
+            new_tip: chain_update![(1, h!("A")), (2, h!("B")), (3, h!("C"))],
+            exp: ExpectedResult::Ok {
+                changeset: &[(1, Some(h!("A"))), (2, Some(h!("B")))],
+                init_changeset: &[(1, Some(h!("A"))), (2, Some(h!("B"))), (3, Some(h!("C")))],
             },
         },
         TestLocalChain {
