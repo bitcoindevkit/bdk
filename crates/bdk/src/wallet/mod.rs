@@ -1699,14 +1699,11 @@ impl<D> Wallet<D> {
     /// Applies an update to the wallet and stages the changes (but does not [`commit`] them).
     /// Returns whether the `update` resulted in any changes.
     ///
-    /// If `prune` is set, irrelevant transactions are pruned. Relevant transactions change the UTXO
-    /// set of tracked script pubkeys (script pubkeys derived from tracked descriptors).
-    ///
     /// Usually you create an `update` by interacting with some blockchain data source and inserting
     /// transactions related to your wallet into it.
     ///
     /// [`commit`]: Self::commit
-    pub fn apply_update(&mut self, update: Update, prune: bool) -> Result<bool, CannotConnectError>
+    pub fn apply_update(&mut self, update: Update) -> Result<bool, CannotConnectError>
     where
         D: PersistBackend<ChangeSet>,
     {
@@ -1719,14 +1716,41 @@ impl<D> Wallet<D> {
             .index
             .reveal_to_target_multi(&update.keychain);
         changeset.append(ChangeSet::from(IndexedAdditions::from(index_additions)));
-        changeset.append(
-            if prune {
-                self.indexed_graph.prune_and_apply_update(update.graph)
-            } else {
-                self.indexed_graph.apply_update(update.graph)
-            }
-            .into(),
+        changeset.append(ChangeSet::from(
+            self.indexed_graph.apply_update(update.graph),
+        ));
+
+        let changed = !changeset.is_empty();
+        self.persist.stage(changeset);
+        Ok(changed)
+    }
+
+    /// Applies and update to the wallet (after pruning it of irrelevant transactions) and stages
+    /// the changes (does not [`commit`] them).
+    ///
+    /// Irrelevant transactions are transactions that do not change the UTXO set of tracked script
+    /// pubkeys (script pubkeys that are derived from tracked descriptors).
+    ///
+    /// To apply an update without pruning, use [`apply_update`].
+    ///
+    /// [`commit`]: Self::commit
+    /// [`apply_update`]: Self::apply_update
+    pub fn prune_and_apply_update(&mut self, update: Update) -> Result<bool, CannotConnectError>
+    where
+        D: PersistBackend<ChangeSet>,
+    {
+        let mut changeset = ChangeSet::from(
+            self.chain
+                .update(update.tip, update.introduce_older_blocks)?,
         );
+        let (_, index_additions) = self
+            .indexed_graph
+            .index
+            .reveal_to_target_multi(&update.keychain);
+        changeset.append(ChangeSet::from(IndexedAdditions::from(index_additions)));
+        changeset.append(ChangeSet::from(
+            self.indexed_graph.prune_and_apply_update(update.graph),
+        ));
 
         let changed = !changeset.is_empty();
         self.persist.stage(changeset);

@@ -64,7 +64,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         graph: update_graph,
         ..LocalUpdate::new(new_tip)
     };
-    wallet.apply_update(update, false)?;
+    wallet.apply_update(update)?;
     wallet.commit()?;
     println!();
 
