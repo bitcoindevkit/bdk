@@ -190,7 +190,7 @@ impl EsploraAsyncExt for esplora_client::AsyncClient {
             .map(|(height, hash)| BlockId { height, hash })
             .fold(first_cp, |prev_cp, block| {
                 prev_cp
-                    .extend(core::iter::once(block))
+                    .extend_with_blocks(core::iter::once(block))
                     .expect("must extend checkpoint")
             });
 

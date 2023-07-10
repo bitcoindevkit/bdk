@@ -50,7 +50,10 @@ impl CheckPoint {
     ///
     /// Returns an `Err(self)` if there is block which does not have a greater height than the
     /// previous one.
-    pub fn extend(self, blocks: impl IntoIterator<Item = BlockId>) -> Result<Self, Self> {
+    pub fn extend_with_blocks(
+        self,
+        blocks: impl IntoIterator<Item = BlockId>,
+    ) -> Result<Self, Self> {
         let mut curr = self.clone();
         for block in blocks {
             curr = curr.push(block).map_err(|_| self.clone())?;
@@ -322,7 +325,7 @@ impl LocalChain {
             }
             let new_tip = match base {
                 Some(base) => Some(
-                    base.extend(extension.into_iter().map(BlockId::from))
+                    base.extend_with_blocks(extension.into_iter().map(BlockId::from))
                         .expect("extension is strictly greater than base"),
                 ),
                 None => LocalChain::from_blocks(extension).tip(),
