@@ -72,6 +72,7 @@ impl<K, A: Anchor> ElectrumUpdate<K, A> {
             keychain: self.keychain_update,
             graph: graph_update,
             tip: self.chain_update,
+            introduce_older_blocks: true,
         })
     }
 }
@@ -145,6 +146,7 @@ impl<K> ElectrumUpdate<K, ConfirmationHeightAnchor> {
                 graph
             },
             tip: update.tip,
+            introduce_older_blocks: true,
         })
     }
 }

@@ -194,7 +194,8 @@ fn main() -> anyhow::Result<()> {
                     let mut chain = chain.lock().unwrap();
                     let mut graph = graph.lock().unwrap();
 
-                    let chain_changeset = chain.update(update.tip, None)?;
+                    let chain_changeset =
+                        chain.update(update.tip, update.introduce_older_blocks)?;
 
                     let mut indexed_additions =
                         IndexedAdditions::<ConfirmationTimeAnchor, _>::default();

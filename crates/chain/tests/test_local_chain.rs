@@ -26,7 +26,7 @@ enum ExpectedResult<'a> {
 impl<'a> TestLocalChain<'a> {
     fn run(mut self) {
         println!("[TestLocalChain] test: {}", self.name);
-        let got_changeset = match self.chain.update(self.new_tip, None) {
+        let got_changeset = match self.chain.update(self.new_tip, true) {
             Ok(changeset) => changeset,
             Err(got_err) => {
                 assert_eq!(

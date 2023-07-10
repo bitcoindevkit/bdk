@@ -7,7 +7,7 @@ use std::{
 use bdk_chain::{
     bitcoin::{Address, Network, OutPoint, Txid},
     indexed_tx_graph::{IndexedAdditions, IndexedTxGraph},
-    keychain::{LocalChangeSet, LocalUpdate},
+    keychain::LocalChangeSet,
     local_chain::{CheckPoint, LocalChain},
     Append, ConfirmationTimeAnchor,
 };
@@ -112,7 +112,7 @@ fn main() -> anyhow::Result<()> {
         }
     };
 
-    let (graph_update, last_active_indices) = match &esplora_cmd {
+    let (update_graph, update_keychain_indices) = match &esplora_cmd {
         EsploraCommands::Scan {
             stop_gap,
             scan_options,
@@ -261,7 +261,7 @@ fn main() -> anyhow::Result<()> {
     let (heights_to_fetch, tip) = {
         let chain = &*chain.lock().unwrap();
 
-        let heights_to_fetch = graph_update.missing_blocks(chain).collect::<Vec<_>>();
+        let heights_to_fetch = update_graph.missing_blocks(chain).collect::<Vec<_>>();
         let tip = chain.tip();
         (heights_to_fetch, tip)
     };
@@ -277,34 +277,27 @@ fn main() -> anyhow::Result<()> {
     println!("prev tip: {}", tip.as_ref().map_or(0, CheckPoint::height));
     println!("missing blocks: {:?}", heights_to_fetch);
 
-    let tip = client
+    let update_tip = client
         .update_local_chain(tip, heights_to_fetch)
         .context("scanning for blocks")?;
 
     #[cfg(debug_assertions)]
     println!(
         "new chain: {:?}",
-        tip.iter().map(|cp| cp.height()).collect::<Vec<_>>()
+        update_tip.iter().map(|cp| cp.height()).collect::<Vec<_>>()
     );
-    println!("new tip: {}", tip.height());
-
-    let update = LocalUpdate {
-        keychain: last_active_indices,
-        graph: graph_update,
-        tip,
-    };
+    println!("new tip: {}", update_tip.height());
 
     // check that all anchors are part of the new tip's history
     #[cfg(debug_assertions)]
     {
         use bdk_chain::bitcoin::BlockHash;
         use bdk_chain::collections::HashMap;
-        let chain_heights = update
-            .tip
+        let chain_heights = update_tip
             .iter()
             .map(|cp| (cp.height(), cp.hash()))
             .collect::<HashMap<u32, BlockHash>>();
-        for (anchor, _) in update.graph.all_anchors() {
+        for (anchor, _) in update_graph.all_anchors() {
             assert_eq!(anchor.anchor_block.height, anchor.confirmation_height);
             assert!(chain_heights.contains_key(&anchor.anchor_block.height));
 
@@ -325,13 +318,13 @@ fn main() -> anyhow::Result<()> {
         let mut chain = chain.lock().unwrap();
         let mut graph = graph.lock().unwrap();
 
-        let chain_changeset = chain.update(update.tip, None)?;
+        let chain_changeset = chain.update(update_tip, true)?;
 
         let indexed_additions = {
             let mut additions = IndexedAdditions::default();
-            let (_, index_additions) = graph.index.reveal_to_target_multi(&update.keychain);
+            let (_, index_additions) = graph.index.reveal_to_target_multi(&update_keychain_indices);
             additions.append(IndexedAdditions::from(index_additions));
-            additions.append(graph.apply_update(update.graph));
+            additions.append(graph.apply_update(update_graph));
             additions
         };
 

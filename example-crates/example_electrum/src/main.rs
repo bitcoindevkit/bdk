@@ -274,7 +274,8 @@ fn main() -> anyhow::Result<()> {
         let mut chain = chain.lock().unwrap();
         let mut graph = graph.lock().unwrap();
 
-        let chain_changeset = chain.update(final_update.tip, None)?;
+        let chain_changeset =
+            chain.update(final_update.tip, final_update.introduce_older_blocks)?;
 
         let indexed_additions = {
             let mut additions = IndexedAdditions::<ConfirmationHeightAnchor, _>::default();

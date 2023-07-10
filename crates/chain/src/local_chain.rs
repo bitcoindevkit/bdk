@@ -227,6 +227,14 @@ impl LocalChain {
 
     /// Updates [`Self`] with the given `update_tip`.
     ///
+    /// `introduce_older_blocks` specifies whether the `update_tip`'s history can introduce blocks
+    /// below the original chain's tip without invalidating blocks. Block-by-block syncing
+    /// mechanisms would typically create updates that builds upon the previous tip. In this case,
+    /// this paramater would be false. Script-pubkey based syncing mechanisms may not introduce
+    /// transactions in a chronological order so some updates require introducing older blocks (to
+    /// anchor older transactions). For script-pubkey based syncing, this parameter would typically
+    /// be true.
+    ///
     /// The method returns [`ChangeSet`] on success. This represents the applied changes to
     /// [`Self`].
     ///
@@ -254,12 +262,12 @@ impl LocalChain {
     pub fn update(
         &mut self,
         update_tip: CheckPoint,
-        update_lower_bound: Option<u32>,
+        introduce_older_blocks: bool,
     ) -> Result<ChangeSet, CannotConnectError> {
         let changeset = match self.tip() {
             Some(original_tip) => {
                 let (changeset, perfect_connection) =
-                    merge_chains(original_tip, update_tip.clone(), update_lower_bound)?;
+                    merge_chains(original_tip, update_tip.clone(), introduce_older_blocks)?;
 
                 if !perfect_connection {
                     self.apply_changeset(&changeset);
@@ -455,16 +463,11 @@ impl std::error::Error for CannotConnectError {}
 fn merge_chains(
     original_tip: CheckPoint,
     update_tip: CheckPoint,
-    update_lb_height: Option<u32>,
+    introduce_older_blocks: bool,
 ) -> Result<(ChangeSet, bool), CannotConnectError> {
     let mut changeset = ChangeSet::default();
     let mut orig = original_tip.into_iter();
-    let mut update = update_tip
-        .into_iter()
-        .take_while(|cp| match update_lb_height {
-            Some(lb_height) => lb_height <= cp.height(),
-            None => true,
-        });
+    let mut update = update_tip.into_iter();
     let mut curr_orig = None;
     let mut curr_update = None;
     let mut prev_orig: Option<CheckPoint> = None;
@@ -520,10 +523,12 @@ fn merge_chains(
                     }
                     point_of_agreement_found = true;
                     prev_orig_was_invalidated = false;
-                    // OPTIMIZATION -- if we have the same underlying references at this
+                    // OPTIMIZATION 1 -- if we know that older blocks cannot be introduced without
+                    // invalidation, we can break after finding the point of agreement
+                    // OPTIMIZATION 2 -- if we have the same underlying references at this
                     // point then we know everything else in the two chains will match so the
                     // changeset is fine.
-                    if Arc::as_ptr(&o.0) == Arc::as_ptr(&u.0) {
+                    if !introduce_older_blocks || Arc::as_ptr(&o.0) == Arc::as_ptr(&u.0) {
                         return Ok((changeset, true));
                     }
                 } else {
