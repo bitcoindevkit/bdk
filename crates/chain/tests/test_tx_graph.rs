@@ -3,8 +3,8 @@ mod common;
 use bdk_chain::{
     collections::*,
     local_chain::LocalChain,
-    tx_graph::{Additions, TxGraph},
-    Append, BlockId, ChainPosition, ConfirmationHeightAnchor,
+    tx_graph::{Additions, TxGraph, TxNode},
+    Append, BlockId, ChainPosition, ConfirmationHeightAnchor, ObservedAs,
 };
 use bitcoin::{
     hashes::Hash, BlockHash, OutPoint, PackedLockTime, Script, Transaction, TxIn, TxOut, Txid,
@@ -820,5 +820,90 @@ fn test_additions_last_seen_append() {
             &original.last_seen.get(&txid).cloned(),
             Ord::max(original_ls, update_ls),
         );
+    }
+}
+
+/// Inserting anchors without the corresponding transaction
+/// and testing the recoverability of the transaction graph
+#[test]
+fn test_inserting_anchor_without_tx() {
+    let mut graph = TxGraph::<ConfirmationHeightAnchor>::default();
+    let mut graph_recovered = graph.clone();
+    let txs = (0..5).map(common::new_tx).collect::<Vec<_>>();
+    let anchors = (0..5)
+        .map(|i| ConfirmationHeightAnchor {
+            anchor_block: BlockId {
+                height: i,
+                hash: BlockHash::from_hash(h!(&i.to_string())),
+            },
+            confirmation_height: i,
+        })
+        .collect::<Vec<_>>();
+    let anchors_with_txs = BTreeSet::from([
+        (anchors[0], txs[0].clone()),
+        (anchors[1], txs[1].clone()),
+        (anchors[2], txs[2].clone()),
+    ]);
+    let anchors_with_txids = &anchors_with_txs
+        .iter()
+        .map(|(anchor, tx)| (*anchor, tx.txid()))
+        .collect::<BTreeSet<_>>();
+
+    let mut anchor_additions = Additions::default();
+    for (anchor, tx) in &anchors_with_txs {
+        let additions = graph.insert_anchor(tx.txid(), *anchor);
+        anchor_additions.append(additions);
+    }
+
+    // Additions should only include the Anchor for the Tx-Block 0, 1 and 2
+    assert_eq!(
+        anchor_additions,
+        Additions {
+            anchors: anchors_with_txids.clone(),
+            ..Default::default()
+        }
+    );
+
+    // Graph should be recoverable from additions
+    graph_recovered.apply_additions(anchor_additions);
+    assert_eq!(graph, graph_recovered);
+
+    // Check whether Anchors 0, 1 and 2 are part of TxGraph
+    assert_eq!(graph.all_anchors(), anchors_with_txids);
+
+    // Insert transactions into graph and check the returned addition
+    let mut tx_additions = Additions::default();
+    for tx in &txs {
+        let additions = graph.insert_tx(tx.clone());
+        assert_eq!(
+            additions,
+            Additions {
+                tx: BTreeSet::from([tx.clone()]),
+                ..Default::default()
+            }
+        );
+        tx_additions.append(additions);
+    }
+
+    // Graph should be recoverable from additions
+    graph_recovered.apply_additions(tx_additions);
+    assert_eq!(graph, graph_recovered);
+
+    // Transactions 0, 1 and 2 should have an Anchor
+    for (anchor, tx) in &anchors_with_txs {
+        assert_eq!(
+            graph.get_tx_node(tx.txid()).unwrap(),
+            TxNode {
+                txid: tx.txid(),
+                tx,
+                anchors: &BTreeSet::from([*anchor]),
+                last_seen_unconfirmed: 0
+            }
+        );
+    }
+
+    // Transactions 3 and 4 should not have an Anchor
+    for tx in txs.iter().take(5).skip(3) {
+        assert!(graph.get_tx_node(tx.txid()).unwrap().anchors.is_empty());
     }
 }
