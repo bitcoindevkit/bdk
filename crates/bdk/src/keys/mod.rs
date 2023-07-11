@@ -15,6 +15,7 @@ use crate::collections::HashSet;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::any::TypeId;
+use core::fmt;
 use core::marker::PhantomData;
 use core::ops::Deref;
 use core::str::FromStr;
@@ -934,8 +935,8 @@ pub enum KeyError {
 impl_error!(miniscript::Error, Miniscript, KeyError);
 impl_error!(bitcoin::util::bip32::Error, Bip32, KeyError);
 
-impl std::fmt::Display for KeyError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for KeyError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidScriptContext => write!(f, "Invalid script context"),
             Self::InvalidNetwork => write!(f, "Invalid network"),

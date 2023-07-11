@@ -1,7 +1,12 @@
+//! Contains the [`IndexedTxGraph`] structure and associated types.
+//!
+//! This is essentially a [`TxGraph`] combined with an indexer.
+
 use alloc::vec::Vec;
 use bitcoin::{OutPoint, Transaction, TxOut};
 
 use crate::{
+    keychain::DerivationAdditions,
     tx_graph::{Additions, TxGraph},
     Anchor, Append,
 };
@@ -50,10 +55,10 @@ impl<A: Anchor, I: Indexer> IndexedTxGraph<A, I> {
 
         self.index.apply_additions(index_additions);
 
-        for tx in &graph_additions.tx {
+        for tx in &graph_additions.txs {
             self.index.index_tx(tx);
         }
-        for (&outpoint, txout) in &graph_additions.txout {
+        for (&outpoint, txout) in &graph_additions.txouts {
             self.index.index_txout(outpoint, txout);
         }
 
@@ -72,10 +77,10 @@ where
         let graph_additions = self.graph.apply_update(update);
 
         let mut index_additions = I::Additions::default();
-        for added_tx in &graph_additions.tx {
+        for added_tx in &graph_additions.txs {
             index_additions.append(self.index.index_tx(added_tx));
         }
-        for (&added_outpoint, added_txout) in &graph_additions.txout {
+        for (&added_outpoint, added_txout) in &graph_additions.txouts {
             index_additions.append(self.index.index_txout(added_outpoint, added_txout));
         }
 
@@ -200,6 +205,24 @@ impl<A: Anchor, IA: Append> Append for IndexedAdditions<A, IA> {
 
     fn is_empty(&self) -> bool {
         self.graph_additions.is_empty() && self.index_additions.is_empty()
+    }
+}
+
+impl<A, IA: Default> From<Additions<A>> for IndexedAdditions<A, IA> {
+    fn from(graph_additions: Additions<A>) -> Self {
+        Self {
+            graph_additions,
+            ..Default::default()
+        }
+    }
+}
+
+impl<A, K> From<DerivationAdditions<K>> for IndexedAdditions<A, DerivationAdditions<K>> {
+    fn from(index_additions: DerivationAdditions<K>) -> Self {
+        Self {
+            graph_additions: Default::default(),
+            index_additions,
+        }
     }
 }
 

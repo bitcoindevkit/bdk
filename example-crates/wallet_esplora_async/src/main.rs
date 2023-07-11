@@ -6,16 +6,17 @@ use bdk::{
     SignOptions, Wallet,
 };
 use bdk_esplora::{esplora_client, EsploraAsyncExt};
-use bdk_file_store::KeychainStore;
+use bdk_file_store::Store;
 
+const DB_MAGIC: &str = "bdk_wallet_esplora_async_example";
 const SEND_AMOUNT: u64 = 5000;
 const STOP_GAP: usize = 50;
 const PARALLEL_REQUESTS: usize = 5;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let db_path = std::env::temp_dir().join("bdk-esplora-example");
-    let db = KeychainStore::new_from_path(db_path)?;
+    let db_path = std::env::temp_dir().join("bdk-esplora-async-example");
+    let db = Store::<bdk::wallet::ChangeSet>::new_from_path(DB_MAGIC.as_bytes(), db_path)?;
     let external_descriptor = "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/84'/0'/0'/0/*)";
     let internal_descriptor = "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/84'/0'/0'/1/*)";
 
@@ -33,34 +34,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Wallet balance before syncing: {} sats", balance.total());
 
     print!("Syncing...");
-    // Scanning the blockchain
-    let esplora_url = "https://mempool.space/testnet/api";
-    let client = esplora_client::Builder::new(esplora_url).build_async()?;
-    let checkpoints = wallet.checkpoints();
-    let spks = wallet
+    let client =
+        esplora_client::Builder::new("https://blockstream.info/testnet/api").build_async()?;
+
+    let local_chain = wallet.checkpoints();
+    let keychain_spks = wallet
         .spks_of_all_keychains()
         .into_iter()
-        .map(|(k, spks)| {
-            let mut first = true;
-            (
-                k,
-                spks.inspect(move |(spk_i, _)| {
-                    if first {
-                        first = false;
-                        print!("\nScanning keychain [{:?}]:", k);
-                    }
-                    print!(" {}", spk_i);
-                    let _ = std::io::stdout().flush();
-                }),
-            )
+        .map(|(k, k_spks)| {
+            let mut once = Some(());
+            let mut stdout = std::io::stdout();
+            let k_spks = k_spks
+                .inspect(move |(spk_i, _)| match once.take() {
+                    Some(_) => print!("\nScanning keychain [{:?}]", k),
+                    None => print!(" {:<3}", spk_i),
+                })
+                .inspect(move |_| stdout.flush().expect("must flush"));
+            (k, k_spks)
         })
         .collect();
     let update = client
         .scan(
-            checkpoints,
-            spks,
-            std::iter::empty(),
-            std::iter::empty(),
+            local_chain,
+            keychain_spks,
+            [],
+            [],
             STOP_GAP,
             PARALLEL_REQUESTS,
         )

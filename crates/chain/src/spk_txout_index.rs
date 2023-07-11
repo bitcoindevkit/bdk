@@ -20,13 +20,13 @@ use bitcoin::{self, OutPoint, Script, Transaction, TxOut, Txid};
 /// Note there is no harm in scanning transactions that disappear from the blockchain or were never
 /// in there in the first place. `SpkTxOutIndex` is intentionally *monotone* -- you cannot delete or
 /// modify txouts that have been indexed. To find out which txouts from the index are actually in the
-/// chain or unspent, you must use other sources of information like a [`SparseChain`].
+/// chain or unspent, you must use other sources of information like a [`TxGraph`].
 ///
 /// [`TxOut`]: bitcoin::TxOut
 /// [`insert_spk`]: Self::insert_spk
 /// [`Ord`]: core::cmp::Ord
 /// [`scan`]: Self::scan
-/// [`SparseChain`]: crate::sparse_chain::SparseChain
+/// [`TxGraph`]: crate::tx_graph::TxGraph
 #[derive(Clone, Debug)]
 pub struct SpkTxOutIndex<I> {
     /// script pubkeys ordered by index

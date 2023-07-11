@@ -107,8 +107,10 @@ impl fmt::Display for MiniscriptPsbtError {
     }
 }
 
+#[cfg(feature = "std")]
 impl std::error::Error for MiniscriptPsbtError {}
 
+#[cfg(feature = "std")]
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

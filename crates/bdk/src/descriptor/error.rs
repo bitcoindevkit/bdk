@@ -11,6 +11,8 @@
 
 //! Descriptor errors
 
+use core::fmt;
+
 /// Errors related to the parsing and usage of descriptors
 #[derive(Debug)]
 pub enum Error {
@@ -51,8 +53,8 @@ impl From<crate::keys::KeyError> for Error {
     }
 }
 
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidHdKeyPath => write!(f, "Invalid HD key path"),
             Self::InvalidDescriptorChecksum => {

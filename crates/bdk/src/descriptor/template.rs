@@ -17,7 +17,7 @@
 use bitcoin::util::bip32;
 use bitcoin::Network;
 
-use miniscript::{Legacy, Segwitv0};
+use miniscript::{Legacy, Segwitv0, Tap};
 
 use super::{ExtendedDescriptor, IntoWalletDescriptor, KeyMap};
 use crate::descriptor::DescriptorError;
@@ -149,6 +149,34 @@ pub struct P2Wpkh<K: IntoDescriptorKey<Segwitv0>>(pub K);
 impl<K: IntoDescriptorKey<Segwitv0>> DescriptorTemplate for P2Wpkh<K> {
     fn build(self, _network: Network) -> Result<DescriptorTemplateOut, DescriptorError> {
         descriptor!(wpkh(self.0))
+    }
+}
+
+/// P2TR template. Expands to a descriptor `tr(key)`
+///
+/// ## Example
+///
+/// ```
+/// # use bdk::bitcoin::{PrivateKey, Network};
+/// # use bdk::Wallet;
+/// # use bdk::wallet::AddressIndex::New;
+/// use bdk::template::P2TR;
+///
+/// let key =
+///     bitcoin::PrivateKey::from_wif("cTc4vURSzdx6QE6KVynWGomDbLaA75dNALMNyfjh3p8DRRar84Um")?;
+/// let mut wallet = Wallet::new_no_persist(P2TR(key), None, Network::Testnet)?;
+///
+/// assert_eq!(
+///     wallet.get_address(New).to_string(),
+///     "tb1pvjf9t34fznr53u5tqhejz4nr69luzkhlvsdsdfq9pglutrpve2xq7hps46"
+/// );
+/// # Ok::<_, Box<dyn std::error::Error>>(())
+/// ```
+pub struct P2TR<K: IntoDescriptorKey<Tap>>(pub K);
+
+impl<K: IntoDescriptorKey<Tap>> DescriptorTemplate for P2TR<K> {
+    fn build(self, _network: Network) -> Result<DescriptorTemplateOut, DescriptorError> {
+        descriptor!(tr(self.0))
     }
 }
 
@@ -377,6 +405,81 @@ impl<K: DerivableKey<Segwitv0>> DescriptorTemplate for Bip84Public<K> {
     }
 }
 
+/// BIP86 template. Expands to `tr(key/86'/{0,1}'/0'/{0,1}/*)`
+///
+/// Since there are hardened derivation steps, this template requires a private derivable key (generally a `xprv`/`tprv`).
+///
+/// See [`Bip86Public`] for a template that can work with a `xpub`/`tpub`.
+///
+/// ## Example
+///
+/// ```
+/// # use std::str::FromStr;
+/// # use bdk::bitcoin::{PrivateKey, Network};
+/// # use bdk::{Wallet,  KeychainKind};
+/// # use bdk::wallet::AddressIndex::New;
+/// use bdk::template::Bip86;
+///
+/// let key = bitcoin::util::bip32::ExtendedPrivKey::from_str("tprv8ZgxMBicQKsPeZRHk4rTG6orPS2CRNFX3njhUXx5vj9qGog5ZMH4uGReDWN5kCkY3jmWEtWause41CDvBRXD1shKknAMKxT99o9qUTRVC6m")?;
+/// let mut wallet = Wallet::new_no_persist(
+///     Bip86(key.clone(), KeychainKind::External),
+///     Some(Bip86(key, KeychainKind::Internal)),
+///     Network::Testnet,
+/// )?;
+///
+/// assert_eq!(wallet.get_address(New).to_string(), "tb1p5unlj09djx8xsjwe97269kqtxqpwpu2epeskgqjfk4lnf69v4tnqpp35qu");
+/// assert_eq!(wallet.public_descriptor(KeychainKind::External).unwrap().to_string(), "tr([c55b303f/86'/1'/0']tpubDCiHofpEs47kx358bPdJmTZHmCDqQ8qw32upCSxHrSEdeeBs2T5Mq6QMB2ukeMqhNBiyhosBvJErteVhfURPGXPv3qLJPw5MVpHUewsbP2m/0/*)#dkgvr5hm");
+/// # Ok::<_, Box<dyn std::error::Error>>(())
+/// ```
+pub struct Bip86<K: DerivableKey<Tap>>(pub K, pub KeychainKind);
+
+impl<K: DerivableKey<Tap>> DescriptorTemplate for Bip86<K> {
+    fn build(self, network: Network) -> Result<DescriptorTemplateOut, DescriptorError> {
+        P2TR(segwit_v1::make_bipxx_private(86, self.0, self.1, network)?).build(network)
+    }
+}
+
+/// BIP86 public template. Expands to `tr(key/{0,1}/*)`
+///
+/// This assumes that the key used has already been derived with `m/86'/0'/0'` for Mainnet or `m/86'/1'/0'` for Testnet.
+///
+/// This template requires the parent fingerprint to populate correctly the metadata of PSBTs.
+///
+/// See [`Bip86`] for a template that does the full derivation, but requires private data
+/// for the key.
+///
+/// ## Example
+///
+/// ```
+/// # use std::str::FromStr;
+/// # use bdk::bitcoin::{PrivateKey, Network};
+/// # use bdk::{Wallet,  KeychainKind};
+/// # use bdk::wallet::AddressIndex::New;
+/// use bdk::template::Bip86Public;
+///
+/// let key = bitcoin::util::bip32::ExtendedPubKey::from_str("tpubDC2Qwo2TFsaNC4ju8nrUJ9mqVT3eSgdmy1yPqhgkjwmke3PRXutNGRYAUo6RCHTcVQaDR3ohNU9we59brGHuEKPvH1ags2nevW5opEE9Z5Q")?;
+/// let fingerprint = bitcoin::util::bip32::Fingerprint::from_str("c55b303f")?;
+/// let mut wallet = Wallet::new_no_persist(
+///     Bip86Public(key.clone(), fingerprint, KeychainKind::External),
+///     Some(Bip86Public(key, fingerprint, KeychainKind::Internal)),
+///     Network::Testnet,
+/// )?;
+///
+/// assert_eq!(wallet.get_address(New).to_string(), "tb1pwjp9f2k5n0xq73ecuu0c5njvgqr3vkh7yaylmpqvsuuaafymh0msvcmh37");
+/// assert_eq!(wallet.public_descriptor(KeychainKind::External).unwrap().to_string(), "tr([c55b303f/86'/1'/0']tpubDC2Qwo2TFsaNC4ju8nrUJ9mqVT3eSgdmy1yPqhgkjwmke3PRXutNGRYAUo6RCHTcVQaDR3ohNU9we59brGHuEKPvH1ags2nevW5opEE9Z5Q/0/*)#2p65srku");
+/// # Ok::<_, Box<dyn std::error::Error>>(())
+/// ```
+pub struct Bip86Public<K: DerivableKey<Tap>>(pub K, pub bip32::Fingerprint, pub KeychainKind);
+
+impl<K: DerivableKey<Tap>> DescriptorTemplate for Bip86Public<K> {
+    fn build(self, network: Network) -> Result<DescriptorTemplateOut, DescriptorError> {
+        P2TR(segwit_v1::make_bipxx_public(
+            86, self.0, self.1, self.2, network,
+        )?)
+        .build(network)
+    }
+}
+
 macro_rules! expand_make_bipxx {
     ( $mod_name:ident, $ctx:ty ) => {
         mod $mod_name {
@@ -443,6 +546,7 @@ macro_rules! expand_make_bipxx {
 
 expand_make_bipxx!(legacy, Legacy);
 expand_make_bipxx!(segwit_v0, Segwitv0);
+expand_make_bipxx!(segwit_v1, Tap);
 
 #[cfg(test)]
 mod test {
@@ -455,7 +559,6 @@ mod test {
     use crate::descriptor::{DescriptorError, DescriptorMeta};
     use crate::keys::ValidNetworks;
     use assert_matches::assert_matches;
-    use bitcoin::network::constants::Network::Regtest;
     use miniscript::descriptor::{DescriptorPublicKey, KeyMap};
     use miniscript::Descriptor;
 
@@ -497,11 +600,14 @@ mod test {
     fn check(
         desc: Result<(Descriptor<DescriptorPublicKey>, KeyMap, ValidNetworks), DescriptorError>,
         is_witness: bool,
+        is_taproot: bool,
         is_fixed: bool,
+        network: Network,
         expected: &[&str],
     ) {
         let (desc, _key_map, _networks) = desc.unwrap();
         assert_eq!(desc.is_witness(), is_witness);
+        assert_eq!(desc.is_taproot(), is_taproot);
         assert_eq!(!desc.has_wildcard(), is_fixed);
         for i in 0..expected.len() {
             let index = i as u32;
@@ -510,7 +616,7 @@ mod test {
             } else {
                 desc.at_derivation_index(index)
             };
-            let address = child_desc.address(Regtest).unwrap();
+            let address = child_desc.address(network).unwrap();
             assert_eq!(address.to_string(), *expected.get(i).unwrap());
         }
     }
@@ -524,7 +630,9 @@ mod test {
         check(
             P2Pkh(prvkey).build(Network::Bitcoin),
             false,
+            false,
             true,
+            Network::Regtest,
             &["mwJ8hxFYW19JLuc65RCTaP4v1rzVU8cVMT"],
         );
 
@@ -535,7 +643,9 @@ mod test {
         check(
             P2Pkh(pubkey).build(Network::Bitcoin),
             false,
+            false,
             true,
+            Network::Regtest,
             &["muZpTpBYhxmRFuCjLc7C6BBDF32C8XVJUi"],
         );
     }
@@ -549,7 +659,9 @@ mod test {
         check(
             P2Wpkh_P2Sh(prvkey).build(Network::Bitcoin),
             true,
+            false,
             true,
+            Network::Regtest,
             &["2NB4ox5VDRw1ecUv6SnT3VQHPXveYztRqk5"],
         );
 
@@ -560,7 +672,9 @@ mod test {
         check(
             P2Wpkh_P2Sh(pubkey).build(Network::Bitcoin),
             true,
+            false,
             true,
+            Network::Regtest,
             &["2N5LiC3CqzxDamRTPG1kiNv1FpNJQ7x28sb"],
         );
     }
@@ -574,7 +688,9 @@ mod test {
         check(
             P2Wpkh(prvkey).build(Network::Bitcoin),
             true,
+            false,
             true,
+            Network::Regtest,
             &["bcrt1q4525hmgw265tl3drrl8jjta7ayffu6jfcwxx9y"],
         );
 
@@ -585,8 +701,39 @@ mod test {
         check(
             P2Wpkh(pubkey).build(Network::Bitcoin),
             true,
+            false,
             true,
+            Network::Regtest,
             &["bcrt1qngw83fg8dz0k749cg7k3emc7v98wy0c7azaa6h"],
+        );
+    }
+
+    // P2TR `tr(key)`
+    #[test]
+    fn test_p2tr_template() {
+        let prvkey =
+            bitcoin::PrivateKey::from_wif("cTc4vURSzdx6QE6KVynWGomDbLaA75dNALMNyfjh3p8DRRar84Um")
+                .unwrap();
+        check(
+            P2TR(prvkey).build(Network::Bitcoin),
+            false,
+            true,
+            true,
+            Network::Regtest,
+            &["bcrt1pvjf9t34fznr53u5tqhejz4nr69luzkhlvsdsdfq9pglutrpve2xqnwtkqq"],
+        );
+
+        let pubkey = bitcoin::PublicKey::from_str(
+            "03a34b99f22c790c4e36b2b3c2c35a36db06226e41c692fc82b8b56ac1c540c5bd",
+        )
+        .unwrap();
+        check(
+            P2TR(pubkey).build(Network::Bitcoin),
+            false,
+            true,
+            true,
+            Network::Regtest,
+            &["bcrt1pw74tdcrxlzn5r8z6ku2vztr86fgq0m245s72mjktf4afwzsf8ugs4evwdf"],
         );
     }
 
@@ -598,6 +745,8 @@ mod test {
             Bip44(prvkey, KeychainKind::External).build(Network::Bitcoin),
             false,
             false,
+            false,
+            Network::Regtest,
             &[
                 "n453VtnjDHPyDt2fDstKSu7A3YCJoHZ5g5",
                 "mvfrrumXgTtwFPWDNUecBBgzuMXhYM7KRP",
@@ -608,6 +757,8 @@ mod test {
             Bip44(prvkey, KeychainKind::Internal).build(Network::Bitcoin),
             false,
             false,
+            false,
+            Network::Regtest,
             &[
                 "muHF98X9KxEzdKrnFAX85KeHv96eXopaip",
                 "n4hpyLJE5ub6B5Bymv4eqFxS5KjrewSmYR",
@@ -625,6 +776,8 @@ mod test {
             Bip44Public(pubkey, fingerprint, KeychainKind::External).build(Network::Bitcoin),
             false,
             false,
+            false,
+            Network::Regtest,
             &[
                 "miNG7dJTzJqNbFS19svRdTCisC65dsubtR",
                 "n2UqaDbCjWSFJvpC84m3FjUk5UaeibCzYg",
@@ -635,6 +788,8 @@ mod test {
             Bip44Public(pubkey, fingerprint, KeychainKind::Internal).build(Network::Bitcoin),
             false,
             false,
+            false,
+            Network::Regtest,
             &[
                 "moDr3vJ8wpt5nNxSK55MPq797nXJb2Ru9H",
                 "ms7A1Yt4uTezT2XkefW12AvLoko8WfNJMG",
@@ -651,6 +806,8 @@ mod test {
             Bip49(prvkey, KeychainKind::External).build(Network::Bitcoin),
             true,
             false,
+            false,
+            Network::Regtest,
             &[
                 "2N9bCAJXGm168MjVwpkBdNt6ucka3PKVoUV",
                 "2NDckYkqrYyDMtttEav5hB3Bfw9EGAW5HtS",
@@ -661,6 +818,8 @@ mod test {
             Bip49(prvkey, KeychainKind::Internal).build(Network::Bitcoin),
             true,
             false,
+            false,
+            Network::Regtest,
             &[
                 "2NB3pA8PnzJLGV8YEKNDFpbViZv3Bm1K6CG",
                 "2NBiX2Wzxngb5rPiWpUiJQ2uLVB4HBjFD4p",
@@ -678,6 +837,8 @@ mod test {
             Bip49Public(pubkey, fingerprint, KeychainKind::External).build(Network::Bitcoin),
             true,
             false,
+            false,
+            Network::Regtest,
             &[
                 "2N3K4xbVAHoiTQSwxkZjWDfKoNC27pLkYnt",
                 "2NCTQfJ1sZa3wQ3pPseYRHbaNEpC3AquEfX",
@@ -688,6 +849,8 @@ mod test {
             Bip49Public(pubkey, fingerprint, KeychainKind::Internal).build(Network::Bitcoin),
             true,
             false,
+            false,
+            Network::Regtest,
             &[
                 "2NF2vttKibwyxigxtx95Zw8K7JhDbo5zPVJ",
                 "2Mtmyd8taksxNVWCJ4wVvaiss7QPZGcAJuH",
@@ -704,6 +867,8 @@ mod test {
             Bip84(prvkey, KeychainKind::External).build(Network::Bitcoin),
             true,
             false,
+            false,
+            Network::Regtest,
             &[
                 "bcrt1qkmvk2nadgplmd57ztld8nf8v2yxkzmdvwtjf8s",
                 "bcrt1qx0v6zgfwe50m4kqc58cqzcyem7ay2sfl3gvqhp",
@@ -714,6 +879,8 @@ mod test {
             Bip84(prvkey, KeychainKind::Internal).build(Network::Bitcoin),
             true,
             false,
+            false,
+            Network::Regtest,
             &[
                 "bcrt1qtrwtz00wxl69e5xex7amy4xzlxkaefg3gfdkxa",
                 "bcrt1qqqasfhxpkkf7zrxqnkr2sfhn74dgsrc3e3ky45",
@@ -731,6 +898,8 @@ mod test {
             Bip84Public(pubkey, fingerprint, KeychainKind::External).build(Network::Bitcoin),
             true,
             false,
+            false,
+            Network::Regtest,
             &[
                 "bcrt1qedg9fdlf8cnnqfd5mks6uz5w4kgpk2prcdvd0h",
                 "bcrt1q3lncdlwq3lgcaaeyruynjnlccr0ve0kakh6ana",
@@ -741,10 +910,75 @@ mod test {
             Bip84Public(pubkey, fingerprint, KeychainKind::Internal).build(Network::Bitcoin),
             true,
             false,
+            false,
+            Network::Regtest,
             &[
                 "bcrt1qm6wqukenh7guu792lj2njgw9n78cmwsy8xy3z2",
                 "bcrt1q694twxtjn4nnrvnyvra769j0a23rllj5c6cgwp",
                 "bcrt1qhlac3c5ranv5w5emlnqs7wxhkxt8maelylcarp",
+            ],
+        );
+    }
+
+    // BIP86 `tr(key/86'/0'/0'/{0,1}/*)`
+    // Used addresses in test vector in https://github.com/bitcoin/bips/blob/master/bip-0086.mediawiki
+    #[test]
+    fn test_bip86_template() {
+        let prvkey = bitcoin::util::bip32::ExtendedPrivKey::from_str("xprv9s21ZrQH143K3GJpoapnV8SFfukcVBSfeCficPSGfubmSFDxo1kuHnLisriDvSnRRuL2Qrg5ggqHKNVpxR86QEC8w35uxmGoggxtQTPvfUu").unwrap();
+        check(
+            Bip86(prvkey, KeychainKind::External).build(Network::Bitcoin),
+            false,
+            true,
+            false,
+            Network::Bitcoin,
+            &[
+                "bc1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxqkedrcr",
+                "bc1p4qhjn9zdvkux4e44uhx8tc55attvtyu358kutcqkudyccelu0was9fqzwh",
+                "bc1p0d0rhyynq0awa9m8cqrcr8f5nxqx3aw29w4ru5u9my3h0sfygnzs9khxz8",
+            ],
+        );
+        check(
+            Bip86(prvkey, KeychainKind::Internal).build(Network::Bitcoin),
+            false,
+            true,
+            false,
+            Network::Bitcoin,
+            &[
+                "bc1p3qkhfews2uk44qtvauqyr2ttdsw7svhkl9nkm9s9c3x4ax5h60wqwruhk7",
+                "bc1ptdg60grjk9t3qqcqczp4tlyy3z47yrx9nhlrjsmw36q5a72lhdrs9f00nj",
+                "bc1pgcwgsu8naxp7xlp5p7ufzs7emtfza2las7r2e7krzjhe5qj5xz2q88kmk5",
+            ],
+        );
+    }
+
+    // BIP86 public `tr(key/{0,1}/*)`
+    // Used addresses in test vector in https://github.com/bitcoin/bips/blob/master/bip-0086.mediawiki
+    #[test]
+    fn test_bip86_public_template() {
+        let pubkey = bitcoin::util::bip32::ExtendedPubKey::from_str("xpub6BgBgsespWvERF3LHQu6CnqdvfEvtMcQjYrcRzx53QJjSxarj2afYWcLteoGVky7D3UKDP9QyrLprQ3VCECoY49yfdDEHGCtMMj92pReUsQ").unwrap();
+        let fingerprint = bitcoin::util::bip32::Fingerprint::from_str("73c5da0a").unwrap();
+        check(
+            Bip86Public(pubkey, fingerprint, KeychainKind::External).build(Network::Bitcoin),
+            false,
+            true,
+            false,
+            Network::Bitcoin,
+            &[
+                "bc1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxqkedrcr",
+                "bc1p4qhjn9zdvkux4e44uhx8tc55attvtyu358kutcqkudyccelu0was9fqzwh",
+                "bc1p0d0rhyynq0awa9m8cqrcr8f5nxqx3aw29w4ru5u9my3h0sfygnzs9khxz8",
+            ],
+        );
+        check(
+            Bip86Public(pubkey, fingerprint, KeychainKind::Internal).build(Network::Bitcoin),
+            false,
+            true,
+            false,
+            Network::Bitcoin,
+            &[
+                "bc1p3qkhfews2uk44qtvauqyr2ttdsw7svhkl9nkm9s9c3x4ax5h60wqwruhk7",
+                "bc1ptdg60grjk9t3qqcqczp4tlyy3z47yrx9nhlrjsmw36q5a72lhdrs9f00nj",
+                "bc1pgcwgsu8naxp7xlp5p7ufzs7emtfza2las7r2e7krzjhe5qj5xz2q88kmk5",
             ],
         );
     }

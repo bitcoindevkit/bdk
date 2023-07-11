@@ -1,5 +1,13 @@
 #![doc = include_str!("../README.md")]
+// only enables the `doc_cfg` feature when the `docsrs` configuration attribute is defined
+#![cfg_attr(docsrs, feature(doc_cfg))]
+#![cfg_attr(
+    docsrs,
+    doc(html_logo_url = "https://github.com/bitcoindevkit/bdk/raw/master/static/bdk.png")
+)]
 #![no_std]
+#![warn(missing_docs)]
+
 #[cfg(feature = "std")]
 #[macro_use]
 extern crate std;
