@@ -20,8 +20,8 @@
 //!
 //! ```no_run
 //! # use bitcoin::Network;
-//! # use bdk::database::{AnyDatabase, MemoryDatabase};
-//! # use bdk::{Wallet};
+//! # use jitash_bdk::database::{AnyDatabase, MemoryDatabase};
+//! # use jitash_bdk::{Wallet};
 //! let memory = MemoryDatabase::default();
 //! let wallet_memory = Wallet::new("...", None, Network::Testnet, memory)?;
 //!
@@ -30,7 +30,7 @@
 //! let sled = sled::open("my-database")?.open_tree("default_tree")?;
 //! let wallet_sled = Wallet::new("...", None, Network::Testnet, sled)?;
 //! # }
-//! # Ok::<(), bdk::Error>(())
+//! # Ok::<(), jitash_bdk::Error>(())
 //! ```
 //!
 //! When paired with the use of [`ConfigurableDatabase`], it allows creating wallets with any
@@ -38,12 +38,12 @@
 //!
 //! ```no_run
 //! # use bitcoin::Network;
-//! # use bdk::database::*;
-//! # use bdk::{Wallet};
+//! # use jitash_bdk::database::*;
+//! # use jitash_bdk::{Wallet};
 //! let config = serde_json::from_str("...")?;
 //! let database = AnyDatabase::from_config(&config)?;
 //! let wallet = Wallet::new("...", None, Network::Testnet, database)?;
-//! # Ok::<(), bdk::Error>(())
+//! # Ok::<(), jitash_bdk::Error>(())
 //! ```
 
 use super::*;

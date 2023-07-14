@@ -451,7 +451,7 @@ where
     ///
     /// To sort transactions, the following code can be used:
     /// ```no_run
-    /// # let mut tx_list: Vec<bdk::TransactionDetails> = vec![];
+    /// # let mut tx_list: Vec<jitash_bdk::TransactionDetails> = vec![];
     /// tx_list.sort_by(|a, b| {
     ///     b.confirmation_time
     ///         .as_ref()
@@ -536,9 +536,9 @@ where
     /// ## Example
     ///
     /// ```
-    /// # use bdk::{Wallet, KeychainKind};
-    /// # use bdk::bitcoin::Network;
-    /// # use bdk::database::MemoryDatabase;
+    /// # use jitash_bdk::{Wallet, KeychainKind};
+    /// # use jitash_bdk::bitcoin::Network;
+    /// # use jitash_bdk::database::MemoryDatabase;
     /// let wallet = Wallet::new("wpkh(tprv8ZgxMBicQKsPe73PBRSmNbTfbcsZnwWhz5eVmhHpi31HW29Z7mc9B4cWGRQzopNUzZUT391DeDJxL2PefNunWyLgqCKRMDkU1s2s8bAfoSk/84'/0'/0'/0/*)", None, Network::Testnet, MemoryDatabase::new())?;
     /// for secret_key in wallet.get_signers(KeychainKind::External).signers().iter().filter_map(|s| s.descriptor_secret_key()) {
     ///     // secret_key: tprv8ZgxMBicQKsPe73PBRSmNbTfbcsZnwWhz5eVmhHpi31HW29Z7mc9B4cWGRQzopNUzZUT391DeDJxL2PefNunWyLgqCKRMDkU1s2s8bAfoSk/84'/0'/0'/0/*
@@ -563,8 +563,8 @@ where
     /// ```
     /// # use std::str::FromStr;
     /// # use bitcoin::*;
-    /// # use bdk::*;
-    /// # use bdk::database::*;
+    /// # use jitash_bdk::*;
+    /// # use jitash_bdk::database::*;
     /// # let descriptor = "wpkh(tpubD6NzVbkrYhZ4Xferm7Pz4VnjdcDPFyjVu5K4iZXQ4pVN8Cks4pHVowTBXBKRhX64pkRyJZJN5xAKj4UDNnLPb5p2sSKXhewoYx5GbTdUFWq/*)";
     /// # let wallet = doctest_wallet!();
     /// # let to_address = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap();
@@ -576,7 +576,7 @@ where
     /// };
     ///
     /// // sign and broadcast ...
-    /// # Ok::<(), bdk::Error>(())
+    /// # Ok::<(), jitash_bdk::Error>(())
     /// ```
     ///
     /// [`TxBuilder`]: crate::TxBuilder
@@ -945,8 +945,8 @@ where
     /// # // TODO: remove norun -- bumping fee seems to need the tx in the wallet database first.
     /// # use std::str::FromStr;
     /// # use bitcoin::*;
-    /// # use bdk::*;
-    /// # use bdk::database::*;
+    /// # use jitash_bdk::*;
+    /// # use jitash_bdk::database::*;
     /// # let descriptor = "wpkh(tpubD6NzVbkrYhZ4Xferm7Pz4VnjdcDPFyjVu5K4iZXQ4pVN8Cks4pHVowTBXBKRhX64pkRyJZJN5xAKj4UDNnLPb5p2sSKXhewoYx5GbTdUFWq/*)";
     /// # let wallet = doctest_wallet!();
     /// # let to_address = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap();
@@ -970,7 +970,7 @@ where
     /// let _ = wallet.sign(&mut psbt, SignOptions::default())?;
     /// let fee_bumped_tx = psbt.extract_tx();
     /// // broadcast fee_bumped_tx to replace original
-    /// # Ok::<(), bdk::Error>(())
+    /// # Ok::<(), jitash_bdk::Error>(())
     /// ```
     // TODO: support for merging multiple transactions while bumping the fees
     pub fn build_fee_bump(
@@ -1096,8 +1096,8 @@ where
     /// ```
     /// # use std::str::FromStr;
     /// # use bitcoin::*;
-    /// # use bdk::*;
-    /// # use bdk::database::*;
+    /// # use jitash_bdk::*;
+    /// # use jitash_bdk::database::*;
     /// # let descriptor = "wpkh(tpubD6NzVbkrYhZ4Xferm7Pz4VnjdcDPFyjVu5K4iZXQ4pVN8Cks4pHVowTBXBKRhX64pkRyJZJN5xAKj4UDNnLPb5p2sSKXhewoYx5GbTdUFWq/*)";
     /// # let wallet = doctest_wallet!();
     /// # let to_address = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap();
@@ -1108,7 +1108,7 @@ where
     /// };
     /// let  finalized = wallet.sign(&mut psbt, SignOptions::default())?;
     /// assert!(finalized, "we should have signed all the inputs");
-    /// # Ok::<(), bdk::Error>(())
+    /// # Ok::<(), jitash_bdk::Error>(())
     pub fn sign(
         &self,
         psbt: &mut psbt::PartiallySignedTransaction,
@@ -1518,6 +1518,104 @@ where
         selected: Vec<Utxo>,
         params: TxParams,
     ) -> Result<psbt::PartiallySignedTransaction, Error> {
+        let mut psbt = psbt::PartiallySignedTransaction::from_unsigned_tx(tx)?;
+
+        if params.add_global_xpubs {
+            let mut all_xpubs = self.descriptor.get_extended_keys()?;
+            if let Some(change_descriptor) = &self.change_descriptor {
+                all_xpubs.extend(change_descriptor.get_extended_keys()?);
+            }
+
+            for xpub in all_xpubs {
+                let origin = match xpub.origin {
+                    Some(origin) => origin,
+                    None if xpub.xkey.depth == 0 => {
+                        (xpub.root_fingerprint(&self.secp), vec![].into())
+                    }
+                    _ => return Err(Error::MissingKeyOrigin(xpub.xkey.to_string())),
+                };
+
+                psbt.xpub.insert(xpub.xkey, origin);
+            }
+        }
+
+        let mut lookup_output = selected
+            .into_iter()
+            .map(|utxo| (utxo.outpoint(), utxo))
+            .collect::<HashMap<_, _>>();
+
+        // add metadata for the inputs
+        for (psbt_input, input) in psbt.inputs.iter_mut().zip(psbt.unsigned_tx.input.iter()) {
+            let utxo = match lookup_output.remove(&input.previous_output) {
+                Some(utxo) => utxo,
+                None => continue,
+            };
+
+            match utxo {
+                Utxo::Local(utxo) => {
+                    *psbt_input =
+                        match self.get_psbt_input(utxo, params.sighash, params.only_witness_utxo) {
+                            Ok(psbt_input) => psbt_input,
+                            Err(e) => match e {
+                                Error::UnknownUtxo => psbt::Input {
+                                    sighash_type: params.sighash,
+                                    ..psbt::Input::default()
+                                },
+                                _ => return Err(e),
+                            },
+                        }
+                }
+                Utxo::Foreign {
+                    psbt_input: foreign_psbt_input,
+                    outpoint,
+                } => {
+                    let is_taproot = foreign_psbt_input
+                        .witness_utxo
+                        .as_ref()
+                        .map(|txout| txout.script_pubkey.is_v1_p2tr())
+                        .unwrap_or(false);
+                    if !is_taproot
+                        && !params.only_witness_utxo
+                        && foreign_psbt_input.non_witness_utxo.is_none()
+                    {
+                        return Err(Error::Generic(format!(
+                            "Missing non_witness_utxo on foreign utxo {}",
+                            outpoint
+                        )));
+                    }
+                    *psbt_input = *foreign_psbt_input;
+                }
+            }
+        }
+
+        self.update_psbt_with_descriptor(&mut psbt)?;
+
+        Ok(psbt)
+    }
+
+    pub fn cus_complete_transaction(
+        &self,
+        tx: Transaction,
+    ) -> Result<psbt::PartiallySignedTransaction, Error> {
+        let params = TxParams::default();
+        // 获取 tx 中使用到的utxo
+        let selected: Vec<Utxo> = self.list_unspent()
+            .unwrap()
+            .into_iter()
+            .filter(|utxo| {
+                tx.input
+                    .iter()
+                    .any(|tx_input| {
+                        tx_input.previous_output.txid == utxo.outpoint.txid &&
+                            tx_input.previous_output.vout == utxo.outpoint.vout
+                    })
+            })
+            .map(|utxo| {
+                Utxo::Local(utxo)
+            })
+            .collect();
+
+
         let mut psbt = psbt::PartiallySignedTransaction::from_unsigned_tx(tx)?;
 
         if params.add_global_xpubs {

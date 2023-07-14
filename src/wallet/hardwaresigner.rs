@@ -14,12 +14,12 @@
 //! This module contains HWISigner, an implementation of a [TransactionSigner] to be
 //! used with hardware wallets.
 //! ```no_run
-//! # use bdk::bitcoin::Network;
-//! # use bdk::database::MemoryDatabase;
-//! # use bdk::signer::SignerOrdering;
-//! # use bdk::wallet::hardwaresigner::HWISigner;
-//! # use bdk::wallet::AddressIndex::New;
-//! # use bdk::{FeeRate, KeychainKind, SignOptions, SyncOptions, Wallet};
+//! # use jitash_bdk::bitcoin::Network;
+//! # use jitash_bdk::database::MemoryDatabase;
+//! # use jitash_bdk::signer::SignerOrdering;
+//! # use jitash_bdk::wallet::hardwaresigner::HWISigner;
+//! # use jitash_bdk::wallet::AddressIndex::New;
+//! # use jitash_bdk::{FeeRate, KeychainKind, SignOptions, SyncOptions, Wallet};
 //! # use hwi::{types::HWIChain, HWIClient};
 //! # use std::sync::Arc;
 //! #

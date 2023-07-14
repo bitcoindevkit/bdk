@@ -36,17 +36,17 @@ pub type DescriptorTemplateOut = (ExtendedDescriptor, KeyMap, ValidNetworks);
 /// ## Example
 ///
 /// ```
-/// use bdk::descriptor::error::Error as DescriptorError;
-/// use bdk::keys::{IntoDescriptorKey, KeyError};
-/// use bdk::miniscript::Legacy;
-/// use bdk::template::{DescriptorTemplate, DescriptorTemplateOut};
+/// use jitash_bdk::descriptor::error::Error as DescriptorError;
+/// use jitash_bdk::keys::{IntoDescriptorKey, KeyError};
+/// use jitash_bdk::miniscript::Legacy;
+/// use jitash_bdk::template::{DescriptorTemplate, DescriptorTemplateOut};
 /// use bitcoin::Network;
 ///
 /// struct MyP2PKH<K: IntoDescriptorKey<Legacy>>(K);
 ///
 /// impl<K: IntoDescriptorKey<Legacy>> DescriptorTemplate for MyP2PKH<K> {
 ///     fn build(self, network: Network) -> Result<DescriptorTemplateOut, DescriptorError> {
-///         Ok(bdk::descriptor!(pkh(self.0))?)
+///         Ok(jitash_bdk::descriptor!(pkh(self.0))?)
 ///     }
 /// }
 /// ```
@@ -72,11 +72,11 @@ impl<T: DescriptorTemplate> IntoWalletDescriptor for T {
 /// ## Example
 ///
 /// ```
-/// # use bdk::bitcoin::{PrivateKey, Network};
-/// # use bdk::{Wallet};
-/// # use bdk::database::MemoryDatabase;
-/// # use bdk::wallet::AddressIndex::New;
-/// use bdk::template::P2Pkh;
+/// # use jitash_bdk::bitcoin::{PrivateKey, Network};
+/// # use jitash_bdk::{Wallet};
+/// # use jitash_bdk::database::MemoryDatabase;
+/// # use jitash_bdk::wallet::AddressIndex::New;
+/// use jitash_bdk::template::P2Pkh;
 ///
 /// let key =
 ///     bitcoin::PrivateKey::from_wif("cTc4vURSzdx6QE6KVynWGomDbLaA75dNALMNyfjh3p8DRRar84Um")?;
@@ -106,11 +106,11 @@ impl<K: IntoDescriptorKey<Legacy>> DescriptorTemplate for P2Pkh<K> {
 /// ## Example
 ///
 /// ```
-/// # use bdk::bitcoin::{PrivateKey, Network};
-/// # use bdk::{Wallet};
-/// # use bdk::database::MemoryDatabase;
-/// # use bdk::wallet::AddressIndex::New;
-/// use bdk::template::P2Wpkh_P2Sh;
+/// # use jitash_bdk::bitcoin::{PrivateKey, Network};
+/// # use jitash_bdk::{Wallet};
+/// # use jitash_bdk::database::MemoryDatabase;
+/// # use jitash_bdk::wallet::AddressIndex::New;
+/// use jitash_bdk::template::P2Wpkh_P2Sh;
 ///
 /// let key =
 ///     bitcoin::PrivateKey::from_wif("cTc4vURSzdx6QE6KVynWGomDbLaA75dNALMNyfjh3p8DRRar84Um")?;
@@ -141,11 +141,11 @@ impl<K: IntoDescriptorKey<Segwitv0>> DescriptorTemplate for P2Wpkh_P2Sh<K> {
 /// ## Example
 ///
 /// ```
-/// # use bdk::bitcoin::{PrivateKey, Network};
-/// # use bdk::{Wallet};
-/// # use bdk::database::MemoryDatabase;
-/// # use bdk::wallet::AddressIndex::New;
-/// use bdk::template::P2Wpkh;
+/// # use jitash_bdk::bitcoin::{PrivateKey, Network};
+/// # use jitash_bdk::{Wallet};
+/// # use jitash_bdk::database::MemoryDatabase;
+/// # use jitash_bdk::wallet::AddressIndex::New;
+/// use jitash_bdk::template::P2Wpkh;
 ///
 /// let key =
 ///     bitcoin::PrivateKey::from_wif("cTc4vURSzdx6QE6KVynWGomDbLaA75dNALMNyfjh3p8DRRar84Um")?;
@@ -180,11 +180,11 @@ impl<K: IntoDescriptorKey<Segwitv0>> DescriptorTemplate for P2Wpkh<K> {
 ///
 /// ```
 /// # use std::str::FromStr;
-/// # use bdk::bitcoin::{PrivateKey, Network};
-/// # use bdk::{Wallet,  KeychainKind};
-/// # use bdk::database::MemoryDatabase;
-/// # use bdk::wallet::AddressIndex::New;
-/// use bdk::template::Bip44;
+/// # use jitash_bdk::bitcoin::{PrivateKey, Network};
+/// # use jitash_bdk::{Wallet,  KeychainKind};
+/// # use jitash_bdk::database::MemoryDatabase;
+/// # use jitash_bdk::wallet::AddressIndex::New;
+/// use jitash_bdk::template::Bip44;
 ///
 /// let key = bitcoin::util::bip32::ExtendedPrivKey::from_str("tprv8ZgxMBicQKsPeZRHk4rTG6orPS2CRNFX3njhUXx5vj9qGog5ZMH4uGReDWN5kCkY3jmWEtWause41CDvBRXD1shKknAMKxT99o9qUTRVC6m")?;
 /// let wallet = Wallet::new(
@@ -219,11 +219,11 @@ impl<K: DerivableKey<Legacy>> DescriptorTemplate for Bip44<K> {
 ///
 /// ```
 /// # use std::str::FromStr;
-/// # use bdk::bitcoin::{PrivateKey, Network};
-/// # use bdk::{Wallet,  KeychainKind};
-/// # use bdk::database::MemoryDatabase;
-/// # use bdk::wallet::AddressIndex::New;
-/// use bdk::template::Bip44Public;
+/// # use jitash_bdk::bitcoin::{PrivateKey, Network};
+/// # use jitash_bdk::{Wallet,  KeychainKind};
+/// # use jitash_bdk::database::MemoryDatabase;
+/// # use jitash_bdk::wallet::AddressIndex::New;
+/// use jitash_bdk::template::Bip44Public;
 ///
 /// let key = bitcoin::util::bip32::ExtendedPubKey::from_str("tpubDDDzQ31JkZB7VxUr9bjvBivDdqoFLrDPyLWtLapArAi51ftfmCb2DPxwLQzX65iNcXz1DGaVvyvo6JQ6rTU73r2gqdEo8uov9QKRb7nKCSU")?;
 /// let fingerprint = bitcoin::util::bip32::Fingerprint::from_str("c55b303f")?;
@@ -259,11 +259,11 @@ impl<K: DerivableKey<Legacy>> DescriptorTemplate for Bip44Public<K> {
 ///
 /// ```
 /// # use std::str::FromStr;
-/// # use bdk::bitcoin::{PrivateKey, Network};
-/// # use bdk::{Wallet,  KeychainKind};
-/// # use bdk::database::MemoryDatabase;
-/// # use bdk::wallet::AddressIndex::New;
-/// use bdk::template::Bip49;
+/// # use jitash_bdk::bitcoin::{PrivateKey, Network};
+/// # use jitash_bdk::{Wallet,  KeychainKind};
+/// # use jitash_bdk::database::MemoryDatabase;
+/// # use jitash_bdk::wallet::AddressIndex::New;
+/// use jitash_bdk::template::Bip49;
 ///
 /// let key = bitcoin::util::bip32::ExtendedPrivKey::from_str("tprv8ZgxMBicQKsPeZRHk4rTG6orPS2CRNFX3njhUXx5vj9qGog5ZMH4uGReDWN5kCkY3jmWEtWause41CDvBRXD1shKknAMKxT99o9qUTRVC6m")?;
 /// let wallet = Wallet::new(
@@ -298,11 +298,11 @@ impl<K: DerivableKey<Segwitv0>> DescriptorTemplate for Bip49<K> {
 ///
 /// ```
 /// # use std::str::FromStr;
-/// # use bdk::bitcoin::{PrivateKey, Network};
-/// # use bdk::{Wallet,  KeychainKind};
-/// # use bdk::database::MemoryDatabase;
-/// # use bdk::wallet::AddressIndex::New;
-/// use bdk::template::Bip49Public;
+/// # use jitash_bdk::bitcoin::{PrivateKey, Network};
+/// # use jitash_bdk::{Wallet,  KeychainKind};
+/// # use jitash_bdk::database::MemoryDatabase;
+/// # use jitash_bdk::wallet::AddressIndex::New;
+/// use jitash_bdk::template::Bip49Public;
 ///
 /// let key = bitcoin::util::bip32::ExtendedPubKey::from_str("tpubDC49r947KGK52X5rBWS4BLs5m9SRY3pYHnvRrm7HcybZ3BfdEsGFyzCMzayi1u58eT82ZeyFZwH7DD6Q83E3fM9CpfMtmnTygnLfP59jL9L")?;
 /// let fingerprint = bitcoin::util::bip32::Fingerprint::from_str("c55b303f")?;
@@ -338,11 +338,11 @@ impl<K: DerivableKey<Segwitv0>> DescriptorTemplate for Bip49Public<K> {
 ///
 /// ```
 /// # use std::str::FromStr;
-/// # use bdk::bitcoin::{PrivateKey, Network};
-/// # use bdk::{Wallet,  KeychainKind};
-/// # use bdk::database::MemoryDatabase;
-/// # use bdk::wallet::AddressIndex::New;
-/// use bdk::template::Bip84;
+/// # use jitash_bdk::bitcoin::{PrivateKey, Network};
+/// # use jitash_bdk::{Wallet,  KeychainKind};
+/// # use jitash_bdk::database::MemoryDatabase;
+/// # use jitash_bdk::wallet::AddressIndex::New;
+/// use jitash_bdk::template::Bip84;
 ///
 /// let key = bitcoin::util::bip32::ExtendedPrivKey::from_str("tprv8ZgxMBicQKsPeZRHk4rTG6orPS2CRNFX3njhUXx5vj9qGog5ZMH4uGReDWN5kCkY3jmWEtWause41CDvBRXD1shKknAMKxT99o9qUTRVC6m")?;
 /// let wallet = Wallet::new(
@@ -377,11 +377,11 @@ impl<K: DerivableKey<Segwitv0>> DescriptorTemplate for Bip84<K> {
 ///
 /// ```
 /// # use std::str::FromStr;
-/// # use bdk::bitcoin::{PrivateKey, Network};
-/// # use bdk::{Wallet,  KeychainKind};
-/// # use bdk::database::MemoryDatabase;
-/// # use bdk::wallet::AddressIndex::New;
-/// use bdk::template::Bip84Public;
+/// # use jitash_bdk::bitcoin::{PrivateKey, Network};
+/// # use jitash_bdk::{Wallet,  KeychainKind};
+/// # use jitash_bdk::database::MemoryDatabase;
+/// # use jitash_bdk::wallet::AddressIndex::New;
+/// use jitash_bdk::template::Bip84Public;
 ///
 /// let key = bitcoin::util::bip32::ExtendedPubKey::from_str("tpubDC2Qwo2TFsaNC4ju8nrUJ9mqVT3eSgdmy1yPqhgkjwmke3PRXutNGRYAUo6RCHTcVQaDR3ohNU9we59brGHuEKPvH1ags2nevW5opEE9Z5Q")?;
 /// let fingerprint = bitcoin::util::bip32::Fingerprint::from_str("c55b303f")?;

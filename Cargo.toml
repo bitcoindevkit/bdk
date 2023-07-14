@@ -1,8 +1,8 @@
 [package]
-name = "bdk"
+name = "jitash-bdk"
 version = "0.28.0"
 edition = "2018"
-authors = ["Alekos Filini <alekos.filini@gmail.com>", "Riccardo Casatta <riccardo@casatta.it>"]
+authors = ["Jitash <jitash.cn@gmail.com>"]
 homepage = "https://bitcoindevkit.org"
 repository = "https://github.com/bitcoindevkit/bdk"
 documentation = "https://docs.rs/bdk"

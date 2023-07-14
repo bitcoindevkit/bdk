@@ -39,14 +39,14 @@ The `bdk` library aims to be the core building block for Bitcoin wallets of any 
 ### Sync the balance of a descriptor
 
 ```rust,no_run
-use bdk::Wallet;
-use bdk::database::MemoryDatabase;
-use bdk::blockchain::ElectrumBlockchain;
-use bdk::SyncOptions;
-use bdk::electrum_client::Client;
-use bdk::bitcoin::Network;
+use jitash_bdk::Wallet;
+use jitash_bdk::database::MemoryDatabase;
+use jitash_bdk::blockchain::ElectrumBlockchain;
+use jitash_bdk::SyncOptions;
+use jitash_bdk::electrum_client::Client;
+use jitash_bdk::bitcoin::Network;
 
-fn main() -> Result<(), bdk::Error> {
+fn main() -> Result<(), jitash_bdk::Error> {
     let blockchain = ElectrumBlockchain::from(Client::new("ssl://electrum.blockstream.info:60002")?);
     let wallet = Wallet::new(
         "wpkh([c258d2e4/84h/1h/0h]tpubDDYkZojQFQjht8Tm4jsS3iuEmKjTiEGjG6KnuFNKKJb5A6ZUCUZKdvLdSDWofKi4ToRCwb9poe1XdqfUnP4jaJjCB2Zwv11ZLgSbnZSNecE/0/*)",
@@ -66,11 +66,11 @@ fn main() -> Result<(), bdk::Error> {
 ### Generate a few addresses
 
 ```rust
-use bdk::{Wallet, database::MemoryDatabase};
-use bdk::wallet::AddressIndex::New;
-use bdk::bitcoin::Network;
+use jitash_bdk::{Wallet, database::MemoryDatabase};
+use jitash_bdk::wallet::AddressIndex::New;
+use jitash_bdk::bitcoin::Network;
 
-fn main() -> Result<(), bdk::Error> {
+fn main() -> Result<(), jitash_bdk::Error> {
     let wallet = Wallet::new(
         "wpkh([c258d2e4/84h/1h/0h]tpubDDYkZojQFQjht8Tm4jsS3iuEmKjTiEGjG6KnuFNKKJb5A6ZUCUZKdvLdSDWofKi4ToRCwb9poe1XdqfUnP4jaJjCB2Zwv11ZLgSbnZSNecE/0/*)",
         Some("wpkh([c258d2e4/84h/1h/0h]tpubDDYkZojQFQjht8Tm4jsS3iuEmKjTiEGjG6KnuFNKKJb5A6ZUCUZKdvLdSDWofKi4ToRCwb9poe1XdqfUnP4jaJjCB2Zwv11ZLgSbnZSNecE/1/*)"),
@@ -89,18 +89,18 @@ fn main() -> Result<(), bdk::Error> {
 ### Create a transaction
 
 ```rust,no_run
-use bdk::{FeeRate, Wallet, SyncOptions};
-use bdk::database::MemoryDatabase;
-use bdk::blockchain::ElectrumBlockchain;
+use jitash_bdk::{FeeRate, Wallet, SyncOptions};
+use jitash_bdk::database::MemoryDatabase;
+use jitash_bdk::blockchain::ElectrumBlockchain;
 
-use bdk::electrum_client::Client;
-use bdk::wallet::AddressIndex::New;
+use jitash_bdk::electrum_client::Client;
+use jitash_bdk::wallet::AddressIndex::New;
 
 use base64;
-use bdk::bitcoin::consensus::serialize;
-use bdk::bitcoin::Network;
+use jitash_bdk::bitcoin::consensus::serialize;
+use jitash_bdk::bitcoin::Network;
 
-fn main() -> Result<(), bdk::Error> {
+fn main() -> Result<(), jitash_bdk::Error> {
     let blockchain = ElectrumBlockchain::from(Client::new("ssl://electrum.blockstream.info:60002")?);
     let wallet = Wallet::new(
         "wpkh([c258d2e4/84h/1h/0h]tpubDDYkZojQFQjht8Tm4jsS3iuEmKjTiEGjG6KnuFNKKJb5A6ZUCUZKdvLdSDWofKi4ToRCwb9poe1XdqfUnP4jaJjCB2Zwv11ZLgSbnZSNecE/0/*)",
@@ -132,13 +132,13 @@ fn main() -> Result<(), bdk::Error> {
 ### Sign a transaction
 
 ```rust,no_run
-use bdk::{Wallet, SignOptions, database::MemoryDatabase};
+use jitash_bdk::{Wallet, SignOptions, database::MemoryDatabase};
 
 use base64;
-use bdk::bitcoin::consensus::deserialize;
-use bdk::bitcoin::Network;
+use jitash_bdk::bitcoin::consensus::deserialize;
+use jitash_bdk::bitcoin::Network;
 
-fn main() -> Result<(), bdk::Error> {
+fn main() -> Result<(), jitash_bdk::Error> {
     let wallet = Wallet::new(
         "wpkh([c258d2e4/84h/1h/0h]tprv8griRPhA7342zfRyB6CqeKF8CJDXYu5pgnj1cjL1u2ngKcJha5jjTRimG82ABzJQ4MQe71CV54xfn25BbhCNfEGGJZnxvCDQCd6JkbvxW6h/0/*)",
         Some("wpkh([c258d2e4/84h/1h/0h]tprv8griRPhA7342zfRyB6CqeKF8CJDXYu5pgnj1cjL1u2ngKcJha5jjTRimG82ABzJQ4MQe71CV54xfn25BbhCNfEGGJZnxvCDQCd6JkbvxW6h/1/*)"),

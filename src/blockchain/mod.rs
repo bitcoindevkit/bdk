@@ -190,11 +190,11 @@ pub trait StatelessBlockchain: Blockchain {}
 This example shows how to sync multiple walles and return the sum of their balances
 
 ```no_run
-# use bdk::Error;
-# use bdk::blockchain::*;
-# use bdk::database::*;
-# use bdk::wallet::*;
-# use bdk::*;
+# use jitash_bdk::Error;
+# use jitash_bdk::blockchain::*;
+# use jitash_bdk::database::*;
+# use jitash_bdk::wallet::*;
+# use jitash_bdk::*;
 fn sum_of_balances<B: BlockchainFactory>(blockchain_factory: B, wallets: &[Wallet<MemoryDatabase>]) -> Result<Balance, Error> {
     Ok(wallets
         .iter()

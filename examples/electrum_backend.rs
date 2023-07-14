@@ -1,16 +1,16 @@
 use std::str::FromStr;
-
-use bdk::bitcoin::util::bip32::ExtendedPrivKey;
-use bdk::bitcoin::Network;
-use bdk::blockchain::{Blockchain, ElectrumBlockchain};
-use bdk::database::MemoryDatabase;
-use bdk::template::Bip84;
-use bdk::wallet::export::FullyNodedExport;
-use bdk::{KeychainKind, SyncOptions, Wallet};
-
-use bdk::electrum_client::Client;
-use bdk::wallet::AddressIndex;
 use bitcoin::util::bip32;
+use electrum_client::Client;
+
+use jitash_bdk::bitcoin::util::bip32::ExtendedPrivKey;
+use jitash_bdk::bitcoin::Network;
+use jitash_bdk::blockchain::{Blockchain, ElectrumBlockchain};
+use jitash_bdk::database::MemoryDatabase;
+use jitash_bdk::template::Bip84;
+use jitash_bdk::wallet::export::FullyNodedExport;
+use jitash_bdk::{KeychainKind, SyncOptions, Wallet};
+use jitash_bdk::wallet::AddressIndex;
+
 
 pub mod utils;
 
@@ -80,7 +80,7 @@ fn run(network: &Network, electrum_url: &str, xpriv: &str) {
 
     let export = FullyNodedExport::export_wallet(&wallet, "exported wallet", true)
         .map_err(ToString::to_string)
-        .map_err(bdk::Error::Generic)
+        .map_err(jitash_bdk::Error::Generic)
         .unwrap();
 
     println!("------\nWallet Backup: {}", export.to_string());

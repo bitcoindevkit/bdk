@@ -9,7 +9,7 @@
 // You may not use this file except in accordance with one or both of these
 // licenses.
 
-extern crate bdk;
+extern crate jitash_bdk;
 extern crate bitcoin;
 extern crate log;
 extern crate miniscript;
@@ -24,9 +24,9 @@ use bitcoin::Network;
 use miniscript::policy::Concrete;
 use miniscript::Descriptor;
 
-use bdk::database::memory::MemoryDatabase;
-use bdk::wallet::AddressIndex::New;
-use bdk::{KeychainKind, Wallet};
+use jitash_bdk::database::memory::MemoryDatabase;
+use jitash_bdk::wallet::AddressIndex::New;
+use jitash_bdk::{KeychainKind, Wallet};
 
 /// Miniscript policy is a high level abstraction of spending conditions. Defined in the
 /// rust-miniscript library here  https://docs.rs/miniscript/7.0.0/miniscript/policy/index.html

@@ -20,10 +20,10 @@
 //!
 //! ```
 //! # use std::sync::Arc;
-//! # use bdk::descriptor::*;
-//! # use bdk::wallet::signer::*;
-//! # use bdk::bitcoin::secp256k1::Secp256k1;
-//! use bdk::descriptor::policy::BuildSatisfaction;
+//! # use jitash_bdk::descriptor::*;
+//! # use jitash_bdk::wallet::signer::*;
+//! # use jitash_bdk::bitcoin::secp256k1::Secp256k1;
+//! use jitash_bdk::descriptor::policy::BuildSatisfaction;
 //! let secp = Secp256k1::new();
 //! let desc = "wsh(and_v(v:pk(cV3oCth6zxZ1UVsHLnGothsWNsaoxRhC6aeNi5VbSdFpwUkgkEci),or_d(pk(cVMTy7uebJgvFaSBwcgvwk8qn8xSLc97dKow4MBetjrrahZoimm2),older(12960))))";
 //!
@@ -33,7 +33,7 @@
 //! let signers = Arc::new(SignersContainer::build(key_map, &extended_desc, &secp));
 //! let policy = extended_desc.extract_policy(&signers, BuildSatisfaction::None, &secp)?;
 //! println!("policy: {}", serde_json::to_string(&policy)?);
-//! # Ok::<(), bdk::Error>(())
+//! # Ok::<(), jitash_bdk::Error>(())
 //! ```
 
 use std::cmp::max;

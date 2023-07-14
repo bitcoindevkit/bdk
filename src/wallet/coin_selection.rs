@@ -26,10 +26,10 @@
 //! ```
 //! # use std::str::FromStr;
 //! # use bitcoin::*;
-//! # use bdk::wallet::{self, coin_selection::*};
-//! # use bdk::database::Database;
-//! # use bdk::*;
-//! # use bdk::wallet::coin_selection::decide_change;
+//! # use jitash_bdk::wallet::{self, coin_selection::*};
+//! # use jitash_bdk::database::Database;
+//! # use jitash_bdk::*;
+//! # use jitash_bdk::wallet::coin_selection::decide_change;
 //! # const TXIN_BASE_WEIGHT: usize = (32 + 4 + 4) * 4;
 //! #[derive(Debug)]
 //! struct AlwaysSpendEverything;
@@ -43,7 +43,7 @@
 //!         fee_rate: FeeRate,
 //!         target_amount: u64,
 //!         drain_script: &Script,
-//!     ) -> Result<CoinSelectionResult, bdk::Error> {
+//!     ) -> Result<CoinSelectionResult, jitash_bdk::Error> {
 //!         let mut selected_amount = 0;
 //!         let mut additional_weight = 0;
 //!         let all_utxos_selected = required_utxos
@@ -61,7 +61,7 @@
 //!         let additional_fees = fee_rate.fee_wu(additional_weight);
 //!         let amount_needed_with_fees = additional_fees + target_amount;
 //!         if selected_amount < amount_needed_with_fees {
-//!             return Err(bdk::Error::InsufficientFunds {
+//!             return Err(jitash_bdk::Error::InsufficientFunds {
 //!                 needed: amount_needed_with_fees,
 //!                 available: selected_amount,
 //!             });
@@ -91,7 +91,7 @@
 //!
 //! // inspect, sign, broadcast, ...
 //!
-//! # Ok::<(), bdk::Error>(())
+//! # Ok::<(), jitash_bdk::Error>(())
 //! ```
 
 use crate::types::FeeRate;

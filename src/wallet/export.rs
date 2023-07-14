@@ -20,9 +20,9 @@
 //! ```
 //! # use std::str::FromStr;
 //! # use bitcoin::*;
-//! # use bdk::database::*;
-//! # use bdk::wallet::export::*;
-//! # use bdk::*;
+//! # use jitash_bdk::database::*;
+//! # use jitash_bdk::wallet::export::*;
+//! # use jitash_bdk::*;
 //! let import = r#"{
 //!     "descriptor": "wpkh([c258d2e4\/84h\/1h\/0h]tpubDD3ynpHgJQW8VvWRzQ5WFDCrs4jqVFGHB3vLC3r49XHJSqP8bHKdK4AriuUKLccK68zfzowx7YhmDN8SiSkgCDENUFx9qVw65YyqM78vyVe\/0\/*)",
 //!     "blockheight":1782088,
@@ -36,15 +36,15 @@
 //!     Network::Testnet,
 //!     MemoryDatabase::default(),
 //! )?;
-//! # Ok::<_, bdk::Error>(())
+//! # Ok::<_, jitash_bdk::Error>(())
 //! ```
 //!
 //! ### Export a `Wallet`
 //! ```
 //! # use bitcoin::*;
-//! # use bdk::database::*;
-//! # use bdk::wallet::export::*;
-//! # use bdk::*;
+//! # use jitash_bdk::database::*;
+//! # use jitash_bdk::wallet::export::*;
+//! # use jitash_bdk::*;
 //! let wallet = Wallet::new(
 //!     "wpkh([c258d2e4/84h/1h/0h]tpubDD3ynpHgJQW8VvWRzQ5WFDCrs4jqVFGHB3vLC3r49XHJSqP8bHKdK4AriuUKLccK68zfzowx7YhmDN8SiSkgCDENUFx9qVw65YyqM78vyVe/0/*)",
 //!     Some("wpkh([c258d2e4/84h/1h/0h]tpubDD3ynpHgJQW8VvWRzQ5WFDCrs4jqVFGHB3vLC3r49XHJSqP8bHKdK4AriuUKLccK68zfzowx7YhmDN8SiSkgCDENUFx9qVw65YyqM78vyVe/1/*)"),
@@ -53,10 +53,10 @@
 //! )?;
 //! let export = FullyNodedExport::export_wallet(&wallet, "exported wallet", true)
 //!     .map_err(ToString::to_string)
-//!     .map_err(bdk::Error::Generic)?;
+//!     .map_err(jitash_bdk::Error::Generic)?;
 //!
 //! println!("Exported: {}", export.to_string());
-//! # Ok::<_, bdk::Error>(())
+//! # Ok::<_, jitash_bdk::Error>(())
 //! ```
 
 use std::str::FromStr;

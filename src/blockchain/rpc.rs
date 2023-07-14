@@ -18,13 +18,13 @@
 //! ## Example
 //!
 //! ```no_run
-//! # use bdk::blockchain::{RpcConfig, RpcBlockchain, ConfigurableBlockchain, rpc::Auth};
+//! # use jitash_bdk::blockchain::{RpcConfig, RpcBlockchain, ConfigurableBlockchain, rpc::Auth};
 //! let config = RpcConfig {
 //!     url: "127.0.0.1:18332".to_string(),
 //!     auth: Auth::Cookie {
 //!         file: "/home/user/.bitcoin/.cookie".into(),
 //!     },
-//!     network: bdk::bitcoin::Network::Testnet,
+//!     network: jitash_bdk::bitcoin::Network::Testnet,
 //!     wallet_name: "wallet_name".to_string(),
 //!     sync_params: None,
 //! };
@@ -820,9 +820,9 @@ fn descriptor_from_script_pubkey(script: &Script) -> String {
 /// ## Example
 ///
 /// ```no_run
-/// # use bdk::bitcoin::Network;
-/// # use bdk::blockchain::BlockchainFactory;
-/// # use bdk::blockchain::rpc::{Auth, RpcBlockchainFactory};
+/// # use jitash_bdk::bitcoin::Network;
+/// # use jitash_bdk::blockchain::BlockchainFactory;
+/// # use jitash_bdk::blockchain::rpc::{Auth, RpcBlockchainFactory};
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// let factory = RpcBlockchainFactory {
 ///     url: "http://127.0.0.1:18332".to_string(),

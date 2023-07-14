@@ -6,26 +6,26 @@
 // You may not use this file except in accordance with one or both of these
 // licenses.
 
-use bdk::bitcoin::secp256k1::Secp256k1;
-use bdk::bitcoin::Amount;
-use bdk::bitcoin::Network;
-use bdk::bitcoincore_rpc::RpcApi;
+use jitash_bdk::bitcoin::secp256k1::Secp256k1;
+use jitash_bdk::bitcoin::Amount;
+use jitash_bdk::bitcoin::Network;
+use jitash_bdk::bitcoincore_rpc::RpcApi;
 
-use bdk::blockchain::rpc::{Auth, RpcBlockchain, RpcConfig};
-use bdk::blockchain::ConfigurableBlockchain;
+use jitash_bdk::blockchain::rpc::{Auth, RpcBlockchain, RpcConfig};
+use jitash_bdk::blockchain::ConfigurableBlockchain;
 
-use bdk::keys::bip39::{Language, Mnemonic, WordCount};
-use bdk::keys::{DerivableKey, GeneratableKey, GeneratedKey};
+use jitash_bdk::keys::bip39::{Language, Mnemonic, WordCount};
+use jitash_bdk::keys::{DerivableKey, GeneratableKey, GeneratedKey};
 
-use bdk::miniscript::miniscript::Segwitv0;
+use jitash_bdk::miniscript::miniscript::Segwitv0;
 
-use bdk::sled;
-use bdk::template::Bip84;
-use bdk::wallet::{signer::SignOptions, wallet_name_from_descriptor, AddressIndex, SyncOptions};
-use bdk::KeychainKind;
-use bdk::Wallet;
+use jitash_bdk::sled;
+use jitash_bdk::template::Bip84;
+use jitash_bdk::wallet::{signer::SignOptions, wallet_name_from_descriptor, AddressIndex, SyncOptions};
+use jitash_bdk::KeychainKind;
+use jitash_bdk::Wallet;
 
-use bdk::blockchain::Blockchain;
+use jitash_bdk::blockchain::Blockchain;
 
 use electrsd;
 
@@ -82,7 +82,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // Use the derived descriptors from the privatekey to
     // create unique wallet name.
-    // This is a special utility function exposed via `bdk::wallet_name_from_descriptor()`
+    // This is a special utility function exposed via `jitash_bdk::wallet_name_from_descriptor()`
     let wallet_name = wallet_name_from_descriptor(
         Bip84(xprv.clone(), KeychainKind::External),
         Some(Bip84(xprv.clone(), KeychainKind::Internal)),

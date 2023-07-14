@@ -9,9 +9,9 @@
 // You may not use this file except in accordance with one or both of these
 // licenses.
 
-use bdk::blockchain::compact_filters::*;
-use bdk::database::MemoryDatabase;
-use bdk::*;
+use jitash_bdk::blockchain::compact_filters::*;
+use jitash_bdk::database::MemoryDatabase;
+use jitash_bdk::*;
 use bitcoin::*;
 use blockchain::compact_filters::CompactFiltersBlockchain;
 use blockchain::compact_filters::CompactFiltersError;

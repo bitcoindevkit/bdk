@@ -16,8 +16,8 @@
 //! ```
 //! # use std::str::FromStr;
 //! # use bitcoin::*;
-//! # use bdk::*;
-//! # use bdk::wallet::tx_builder::CreateTx;
+//! # use jitash_bdk::*;
+//! # use jitash_bdk::wallet::tx_builder::CreateTx;
 //! # let to_address = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap();
 //! # let wallet = doctest_wallet!();
 //! // create a TxBuilder from a wallet
@@ -33,7 +33,7 @@
 //!     // Turn on RBF signaling
 //!     .enable_rbf();
 //! let (psbt, tx_details) = tx_builder.finish()?;
-//! # Ok::<(), bdk::Error>(())
+//! # Ok::<(), jitash_bdk::Error>(())
 //! ```
 
 use std::collections::BTreeMap;
@@ -74,8 +74,8 @@ impl TxBuilderContext for BumpFee {}
 /// as in the following example:
 ///
 /// ```
-/// # use bdk::*;
-/// # use bdk::wallet::tx_builder::*;
+/// # use jitash_bdk::*;
+/// # use jitash_bdk::wallet::tx_builder::*;
 /// # use bitcoin::*;
 /// # use core::str::FromStr;
 /// # let wallet = doctest_wallet!();
@@ -102,7 +102,7 @@ impl TxBuilderContext for BumpFee {}
 /// };
 ///
 /// assert_eq!(psbt1.unsigned_tx.output[..2], psbt2.unsigned_tx.output[..2]);
-/// # Ok::<(), bdk::Error>(())
+/// # Ok::<(), jitash_bdk::Error>(())
 /// ```
 ///
 /// At the moment [`coin_selection`] is an exception to the rule as it consumes `self`.
@@ -240,7 +240,7 @@ impl<'a, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderContext>
     /// # use std::str::FromStr;
     /// # use std::collections::BTreeMap;
     /// # use bitcoin::*;
-    /// # use bdk::*;
+    /// # use jitash_bdk::*;
     /// # let to_address = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap();
     /// # let wallet = doctest_wallet!();
     /// let mut path = BTreeMap::new();
@@ -251,7 +251,7 @@ impl<'a, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderContext>
     ///     .add_recipient(to_address.script_pubkey(), 50_000)
     ///     .policy_path(path, KeychainKind::External);
     ///
-    /// # Ok::<(), bdk::Error>(())
+    /// # Ok::<(), jitash_bdk::Error>(())
     /// ```
     pub fn policy_path(
         &mut self,
@@ -612,8 +612,8 @@ impl<'a, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>> TxBuilder<'a, D, Cs, C
     /// ```
     /// # use std::str::FromStr;
     /// # use bitcoin::*;
-    /// # use bdk::*;
-    /// # use bdk::wallet::tx_builder::CreateTx;
+    /// # use jitash_bdk::*;
+    /// # use jitash_bdk::wallet::tx_builder::CreateTx;
     /// # let to_address = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap();
     /// # let wallet = doctest_wallet!();
     /// let mut tx_builder = wallet.build_tx();
@@ -626,7 +626,7 @@ impl<'a, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>> TxBuilder<'a, D, Cs, C
     ///     .fee_rate(FeeRate::from_sat_per_vb(5.0))
     ///     .enable_rbf();
     /// let (psbt, tx_details) = tx_builder.finish()?;
-    /// # Ok::<(), bdk::Error>(())
+    /// # Ok::<(), jitash_bdk::Error>(())
     /// ```
     ///
     /// [`allow_shrinking`]: Self::allow_shrinking

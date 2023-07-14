@@ -31,8 +31,8 @@
 //! ```no_run
 //! # use std::sync::Arc;
 //! # use bitcoin::*;
-//! # use bdk::*;
-//! # use bdk::blockchain::compact_filters::*;
+//! # use jitash_bdk::*;
+//! # use jitash_bdk::blockchain::compact_filters::*;
 //! let num_threads = 4;
 //!
 //! let mempool = Arc::new(Mempool::default());

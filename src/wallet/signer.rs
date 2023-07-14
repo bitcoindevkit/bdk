@@ -20,9 +20,9 @@
 //! # use bitcoin::secp256k1::{Secp256k1, All};
 //! # use bitcoin::*;
 //! # use bitcoin::util::psbt;
-//! # use bdk::signer::*;
-//! # use bdk::database::*;
-//! # use bdk::*;
+//! # use jitash_bdk::signer::*;
+//! # use jitash_bdk::database::*;
+//! # use jitash_bdk::*;
 //! # #[derive(Debug)]
 //! # struct CustomHSM;
 //! # impl CustomHSM {
@@ -77,7 +77,7 @@
 //!     Arc::new(custom_signer)
 //! );
 //!
-//! # Ok::<_, bdk::Error>(())
+//! # Ok::<_, jitash_bdk::Error>(())
 //! ```
 
 use std::cmp::Ordering;

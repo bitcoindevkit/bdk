@@ -2,7 +2,7 @@ pub(crate) mod tx {
 
     use std::str::FromStr;
 
-    use bdk::{database::BatchDatabase, SignOptions, Wallet};
+    use jitash_bdk::{database::BatchDatabase, SignOptions, Wallet};
     use bitcoin::{Address, Transaction};
 
     pub fn build_signed_tx<D: BatchDatabase>(

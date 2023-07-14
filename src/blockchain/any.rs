@@ -21,14 +21,14 @@
 //!
 //! ```no_run
 //! # use bitcoin::Network;
-//! # use bdk::blockchain::*;
+//! # use jitash_bdk::blockchain::*;
 //! # #[cfg(all(feature = "esplora", feature = "ureq"))]
 //! # {
 //! let config = serde_json::from_str("...")?;
 //! let blockchain = AnyBlockchain::from_config(&config)?;
 //! let height = blockchain.get_height();
 //! # }
-//! # Ok::<(), bdk::Error>(())
+//! # Ok::<(), jitash_bdk::Error>(())
 //! ```
 
 use super::*;
@@ -172,7 +172,7 @@ impl_from!(boxed rpc::RpcBlockchain, AnyBlockchain, Rpc, #[cfg(feature = "rpc")]
 /// ```
 /// # #[cfg(feature = "electrum")]
 /// # {
-/// use bdk::blockchain::{electrum::ElectrumBlockchainConfig, AnyBlockchainConfig};
+/// use jitash_bdk::blockchain::{electrum::ElectrumBlockchainConfig, AnyBlockchainConfig};
 /// let config: AnyBlockchainConfig = serde_json::from_str(
 ///     r#"{
 ///    "type" : "electrum",

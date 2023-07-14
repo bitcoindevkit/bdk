@@ -50,12 +50,12 @@
 ## Sync the balance of a descriptor
 
 ```no_run
-use bdk::{Wallet, SyncOptions};
-use bdk::database::MemoryDatabase;
-use bdk::blockchain::ElectrumBlockchain;
-use bdk::electrum_client::Client;
+use jitash_bdk::{Wallet, SyncOptions};
+use jitash_bdk::database::MemoryDatabase;
+use jitash_bdk::blockchain::ElectrumBlockchain;
+use jitash_bdk::electrum_client::Client;
 
-fn main() -> Result<(), bdk::Error> {
+fn main() -> Result<(), jitash_bdk::Error> {
     let client = Client::new("ssl://electrum.blockstream.info:60002")?;
     let blockchain = ElectrumBlockchain::from(client);
     let wallet = Wallet::new(
@@ -79,11 +79,11 @@ fn main() -> Result<(), bdk::Error> {
 //!
 //! ### Example
 //! ```
-//! use bdk::{Wallet};
-//! use bdk::database::MemoryDatabase;
-//! use bdk::wallet::AddressIndex::New;
+//! use jitash_bdk::{Wallet};
+//! use jitash_bdk::database::MemoryDatabase;
+//! use jitash_bdk::wallet::AddressIndex::New;
 //!
-//! fn main() -> Result<(), bdk::Error> {
+//! fn main() -> Result<(), jitash_bdk::Error> {
 //! let wallet = Wallet::new(
 //!         "wpkh([c258d2e4/84h/1h/0h]tpubDDYkZojQFQjht8Tm4jsS3iuEmKjTiEGjG6KnuFNKKJb5A6ZUCUZKdvLdSDWofKi4ToRCwb9poe1XdqfUnP4jaJjCB2Zwv11ZLgSbnZSNecE/0/*)",
 //!         Some("wpkh([c258d2e4/84h/1h/0h]tpubDDYkZojQFQjht8Tm4jsS3iuEmKjTiEGjG6KnuFNKKJb5A6ZUCUZKdvLdSDWofKi4ToRCwb9poe1XdqfUnP4jaJjCB2Zwv11ZLgSbnZSNecE/1/*)"),
@@ -104,15 +104,15 @@ fn main() -> Result<(), bdk::Error> {
 ## Create a transaction
 
 ```no_run
-use bdk::{FeeRate, Wallet, SyncOptions};
-use bdk::database::MemoryDatabase;
-use bdk::blockchain::ElectrumBlockchain;
-use bdk::electrum_client::Client;
+use jitash_bdk::{FeeRate, Wallet, SyncOptions};
+use jitash_bdk::database::MemoryDatabase;
+use jitash_bdk::blockchain::ElectrumBlockchain;
+use jitash_bdk::electrum_client::Client;
 
 use bitcoin::consensus::serialize;
-use bdk::wallet::AddressIndex::New;
+use jitash_bdk::wallet::AddressIndex::New;
 
-fn main() -> Result<(), bdk::Error> {
+fn main() -> Result<(), jitash_bdk::Error> {
     let client = Client::new("ssl://electrum.blockstream.info:60002")?;
     let wallet = Wallet::new(
         "wpkh([c258d2e4/84h/1h/0h]tpubDDYkZojQFQjht8Tm4jsS3iuEmKjTiEGjG6KnuFNKKJb5A6ZUCUZKdvLdSDWofKi4ToRCwb9poe1XdqfUnP4jaJjCB2Zwv11ZLgSbnZSNecE/0/*)",
@@ -151,10 +151,10 @@ fn main() -> Result<(), bdk::Error> {
 //!
 //! use bitcoin::util::psbt::PartiallySignedTransaction as Psbt;
 //!
-//! use bdk::{Wallet, SignOptions};
-//! use bdk::database::MemoryDatabase;
+//! use jitash_bdk::{Wallet, SignOptions};
+//! use jitash_bdk::database::MemoryDatabase;
 //!
-//! fn main() -> Result<(), bdk::Error> {
+//! fn main() -> Result<(), jitash_bdk::Error> {
 //!     let wallet = Wallet::new(
 //!         "wpkh([c258d2e4/84h/1h/0h]tprv8griRPhA7342zfRyB6CqeKF8CJDXYu5pgnj1cjL1u2ngKcJha5jjTRimG82ABzJQ4MQe71CV54xfn25BbhCNfEGGJZnxvCDQCd6JkbvxW6h/0/*)",
 //!         Some("wpkh([c258d2e4/84h/1h/0h]tprv8griRPhA7342zfRyB6CqeKF8CJDXYu5pgnj1cjL1u2ngKcJha5jjTRimG82ABzJQ4MQe71CV54xfn25BbhCNfEGGJZnxvCDQCd6JkbvxW6h/1/*)"),

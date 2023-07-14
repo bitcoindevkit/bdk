@@ -6,11 +6,11 @@
 // You may not use this file except in accordance with one or both of these
 // licenses.
 
-use bdk::blockchain::{Blockchain, ElectrumBlockchain};
-use bdk::database::MemoryDatabase;
-use bdk::wallet::AddressIndex;
-use bdk::{descriptor, SyncOptions};
-use bdk::{FeeRate, SignOptions, Wallet};
+use jitash_bdk::blockchain::{Blockchain, ElectrumBlockchain};
+use jitash_bdk::database::MemoryDatabase;
+use jitash_bdk::wallet::AddressIndex;
+use jitash_bdk::{descriptor, SyncOptions};
+use jitash_bdk::{FeeRate, SignOptions, Wallet};
 use bitcoin::secp256k1::Secp256k1;
 use bitcoin::{Address, Network};
 use electrum_client::Client;

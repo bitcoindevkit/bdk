@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
-use bdk::blockchain::Blockchain;
-use bdk::{
+use jitash_bdk::blockchain::Blockchain;
+use jitash_bdk::{
     blockchain::esplora::EsploraBlockchain,
     database::MemoryDatabase,
     template::Bip84,
@@ -82,7 +82,7 @@ fn run(network: &Network, esplora_url: &str, xpriv: &str) {
 
     let export = FullyNodedExport::export_wallet(&wallet, "exported wallet", true)
         .map_err(ToString::to_string)
-        .map_err(bdk::Error::Generic)
+        .map_err(jitash_bdk::Error::Generic)
         .unwrap();
 
     println!("------\nWallet Backup: {}", export.to_string());

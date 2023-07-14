@@ -6,9 +6,9 @@
 //! ## Example
 //!
 //! ```no_run
-//! # use bdk::blockchain::esplora::EsploraBlockchain;
+//! # use jitash_bdk::blockchain::esplora::EsploraBlockchain;
 //! let blockchain = EsploraBlockchain::new("https://blockstream.info/testnet/api", 20);
-//! # Ok::<(), bdk::Error>(())
+//! # Ok::<(), jitash_bdk::Error>(())
 //! ```
 //!
 //! Esplora blockchain can use either `ureq` or `reqwest` for the HTTP client

@@ -6,15 +6,15 @@
 // You may not use this file except in accordance with one or both of these
 // licenses.
 
-use bdk::bitcoin::secp256k1::Secp256k1;
-use bdk::bitcoin::util::bip32::DerivationPath;
-use bdk::bitcoin::Network;
-use bdk::descriptor;
-use bdk::descriptor::IntoWalletDescriptor;
-use bdk::keys::bip39::{Language, Mnemonic, WordCount};
-use bdk::keys::{GeneratableKey, GeneratedKey};
-use bdk::miniscript::Tap;
-use bdk::Error as BDK_Error;
+use jitash_bdk::bitcoin::secp256k1::Secp256k1;
+use jitash_bdk::bitcoin::util::bip32::DerivationPath;
+use jitash_bdk::bitcoin::Network;
+use jitash_bdk::descriptor;
+use jitash_bdk::descriptor::IntoWalletDescriptor;
+use jitash_bdk::keys::bip39::{Language, Mnemonic, WordCount};
+use jitash_bdk::keys::{GeneratableKey, GeneratedKey};
+use jitash_bdk::miniscript::Tap;
+use jitash_bdk::Error as BDK_Error;
 use std::error::Error;
 use std::str::FromStr;
 

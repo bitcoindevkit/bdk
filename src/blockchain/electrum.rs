@@ -18,10 +18,10 @@
 //! ## Example
 //!
 //! ```no_run
-//! # use bdk::blockchain::electrum::ElectrumBlockchain;
+//! # use jitash_bdk::blockchain::electrum::ElectrumBlockchain;
 //! let client = electrum_client::Client::new("ssl://electrum.blockstream.info:50002")?;
 //! let blockchain = ElectrumBlockchain::from(client);
-//! # Ok::<(), bdk::Error>(())
+//! # Ok::<(), jitash_bdk::Error>(())
 //! ```
 
 use std::collections::{HashMap, HashSet};
