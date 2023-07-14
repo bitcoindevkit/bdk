@@ -46,11 +46,6 @@ pub use txout_index::*;
 pub struct DerivationAdditions<K>(pub BTreeMap<K, u32>);
 
 impl<K> DerivationAdditions<K> {
-    /// Returns whether the additions are empty.
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-
     /// Get the inner map of the keychain to its new derivation index.
     pub fn as_inner(&self) -> &BTreeMap<K, u32> {
         &self.0
@@ -72,6 +67,7 @@ impl<K: Ord> Append for DerivationAdditions<K> {
         self.0.append(&mut other.0);
     }
 
+    /// Returns whether the additions are empty.
     fn is_empty(&self) -> bool {
         self.0.is_empty()
     }

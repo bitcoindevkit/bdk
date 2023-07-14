@@ -5,6 +5,7 @@ mod common;
 use bdk_chain::{
     collections::BTreeMap,
     keychain::{DerivationAdditions, KeychainTxOutIndex},
+    Append,
 };
 
 use bitcoin::{secp256k1::Secp256k1, OutPoint, Script, Transaction, TxOut};
