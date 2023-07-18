@@ -5,7 +5,6 @@
 
 use bdk_chain::{
     bitcoin::{Block, Transaction, Txid},
-    keychain::LocalUpdate,
     local_chain::CheckPoint,
     BlockId, ConfirmationHeightAnchor, ConfirmationTimeAnchor, TxGraph,
 };
@@ -22,9 +21,7 @@ pub enum BitcoindRpcUpdate {
         /// The checkpoint constructed from the block's height/hash and connected to the previous
         /// block.
         cp: CheckPoint,
-        /// The result obtained from the `getblock` RPC call of this block's hash.
-        info: Box<GetBlockResult>,
-        ///
+        /// The actual block of the blockchain.
         block: Box<Block>,
     },
     /// An emitted subset of mempool transactions.
@@ -42,16 +39,14 @@ pub enum BitcoindRpcUpdate {
 ///
 /// This is to be used as an input to [`BitcoindRpcUpdate::into_update`].
 pub fn confirmation_height_anchor(
-    info: &GetBlockResult,
-    _txid: Txid,
+    cp: &CheckPoint,
+    _block: &Block,
     _tx_pos: usize,
 ) -> ConfirmationHeightAnchor {
+    let anchor_block = cp.block_id();
     ConfirmationHeightAnchor {
-        anchor_block: BlockId {
-            height: info.height as _,
-            hash: info.hash,
-        },
-        confirmation_height: info.height as _,
+        anchor_block,
+        confirmation_height: anchor_block.height,
     }
 }
 
@@ -59,17 +54,15 @@ pub fn confirmation_height_anchor(
 ///
 /// This is to be used as an input to [`BitcoindRpcUpdate::into_update`].
 pub fn confirmation_time_anchor(
-    info: &GetBlockResult,
-    _txid: Txid,
+    cp: &CheckPoint,
+    block: &Block,
     _tx_pos: usize,
 ) -> ConfirmationTimeAnchor {
+    let anchor_block = cp.block_id();
     ConfirmationTimeAnchor {
-        anchor_block: BlockId {
-            height: info.height as _,
-            hash: info.hash,
-        },
-        confirmation_height: info.height as _,
-        confirmation_time: info.time as _,
+        anchor_block,
+        confirmation_height: anchor_block.height,
+        confirmation_time: block.header.time as _,
     }
 }
 
@@ -84,41 +77,36 @@ impl BitcoindRpcUpdate {
         matches!(self, Self::Block { .. })
     }
 
-    /// Transforms the [`BitcoindRpcUpdate`] into a [`LocalUpdate`].
+    /// Transforms the [`BitcoindRpcUpdate`] into a [`TxGraph`] update.
     ///
-    /// [`confirmation_height_anchor`] and [`confirmation_time_anchor`] can be used as the `anchor`
-    /// intput to construct updates with [`ConfirmationHeightAnchor`]s and
-    /// [`ConfirmationTimeAnchor`]s respectively.
-    pub fn into_update<K, A, F>(self, anchor: F) -> LocalUpdate<K, A>
+    /// The [`CheckPoint`] tip is also returned. This is the block height and hash that the
+    /// [`TxGraph`] update is created from.
+    ///
+    /// The `anchor` parameter specifies the anchor type of the update.
+    /// [`confirmation_height_anchor`] and [`confirmation_time_anchor`] are avaliable to create
+    /// updates with [`ConfirmationHeightAnchor`] and [`ConfirmationTimeAnchor`] respectively.
+    pub fn into_update<A, F>(self, anchor: F) -> (CheckPoint, TxGraph<A>)
     where
         A: Clone + Ord + PartialOrd,
-        F: Fn(&GetBlockResult, Txid, usize) -> A,
+        F: Fn(&CheckPoint, &Block, usize) -> A,
     {
+        let mut tx_graph = TxGraph::default();
         match self {
-            BitcoindRpcUpdate::Block { cp, info, block } => LocalUpdate {
-                graph: {
-                    let mut g = TxGraph::<A>::new(block.txdata);
-                    for (tx_pos, &txid) in info.tx.iter().enumerate() {
-                        let _ = g.insert_anchor(txid, anchor(&info, txid, tx_pos));
-                    }
-                    g
-                },
-                ..LocalUpdate::new(cp)
-            },
-            BitcoindRpcUpdate::Mempool { cp, txs } => LocalUpdate {
-                graph: {
-                    let mut last_seens = Vec::<(Txid, u64)>::with_capacity(txs.len());
-                    let mut g = TxGraph::<A>::new(txs.into_iter().map(|(tx, last_seen)| {
-                        last_seens.push((tx.txid(), last_seen));
-                        tx
-                    }));
-                    for (txid, seen_at) in last_seens {
-                        let _ = g.insert_seen_at(txid, seen_at);
-                    }
-                    g
-                },
-                ..LocalUpdate::new(cp)
-            },
+            BitcoindRpcUpdate::Block { cp, block } => {
+                for (tx_pos, tx) in block.txdata.iter().enumerate() {
+                    let txid = tx.txid();
+                    let _ = tx_graph.insert_anchor(txid, anchor(&cp, &block, tx_pos));
+                    let _ = tx_graph.insert_tx(tx.clone());
+                }
+                (cp, tx_graph)
+            }
+            BitcoindRpcUpdate::Mempool { cp, txs } => {
+                for (tx, seen_at) in txs {
+                    let _ = tx_graph.insert_seen_at(tx.txid(), seen_at);
+                    let _ = tx_graph.insert_tx(tx);
+                }
+                (cp, tx_graph)
+            }
         }
     }
 }
@@ -230,10 +218,9 @@ impl<'a> BitcoindRpcEmitter<'a> {
                     hash: info.hash,
                 });
                 *last_cp = Some(cp.clone());
-                *last_info = Some(info.clone());
+                *last_info = Some(info);
                 Ok(Some(BitcoindRpcUpdate::Block {
                     cp,
-                    info: Box::new(info),
                     block: Box::new(block),
                 }))
             }
@@ -287,11 +274,10 @@ impl<'a> BitcoindRpcEmitter<'a> {
                             .expect("must extend from checkpoint");
 
                         *last_cp = cp.clone();
-                        *last_info = Some(info.clone());
+                        *last_info = Some(info);
 
                         Ok(Some(BitcoindRpcUpdate::Block {
                             cp,
-                            info: Box::new(info),
                             block: Box::new(block),
                         }))
                     }

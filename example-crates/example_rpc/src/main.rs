@@ -14,10 +14,9 @@ use bdk_bitcoind_rpc::{
 };
 use bdk_chain::{
     bitcoin::{Address, Transaction},
-    indexed_tx_graph::IndexedAdditions,
-    keychain::{LocalChangeSet, LocalUpdate},
+    keychain::LocalChangeSet,
     local_chain::LocalChain,
-    Append, BlockId, ConfirmationTimeAnchor, IndexedTxGraph,
+    BlockId, ConfirmationTimeAnchor, IndexedTxGraph,
 };
 use example_cli::{
     anyhow,
@@ -186,22 +185,16 @@ fn main() -> anyhow::Result<()> {
 
             for (item, tip_height) in recv {
                 let is_mempool = item.is_mempool();
-                let update: LocalUpdate<Keychain, ConfirmationTimeAnchor> =
-                    item.into_update(confirmation_time_anchor);
-                let current_height = update.tip.height();
+                let (cp_update, graph_update) = item.into_update(confirmation_time_anchor);
+
+                let current_height = cp_update.height();
 
                 let db_changeset = {
                     let mut chain = chain.lock().unwrap();
                     let mut graph = graph.lock().unwrap();
 
-                    let chain_changeset =
-                        chain.update(update.tip, update.introduce_older_blocks)?;
-
-                    let mut indexed_additions =
-                        IndexedAdditions::<ConfirmationTimeAnchor, _>::default();
-                    let (_, index_additions) = graph.index.reveal_to_target_multi(&update.keychain);
-                    indexed_additions.append(index_additions.into());
-                    indexed_additions.append(graph.prune_and_apply_update(update.graph));
+                    let chain_changeset = chain.update(cp_update, false)?;
+                    let indexed_additions = graph.prune_and_apply_update(graph_update);
 
                     ChangeSet {
                         indexed_additions,
