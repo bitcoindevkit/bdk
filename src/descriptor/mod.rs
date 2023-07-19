@@ -306,6 +306,10 @@ pub(crate) fn into_wallet_descriptor_checked<T: IntoWalletDescriptor>(
         return Err(DescriptorError::HardenedDerivationXpub);
     }
 
+    if descriptor.is_multipath() {
+        return Err(DescriptorError::MultiPath);
+    }
+
     // Run miniscript's sanity check, which will look for duplicated keys and other potential
     // issues
     descriptor.sanity_check()?;
@@ -862,6 +866,12 @@ mod test {
 
         assert_matches!(result, Err(DescriptorError::HardenedDerivationXpub));
 
+        let descriptor = "wpkh(tpubD6NzVbkrYhZ4XHndKkuB8FifXm8r5FQHwrN6oZuWCz13qb93rtgKvD4PQsqC4HP4yhV3tA2fqr2RbY5mNXfM7RxXUoeABoDtsFUq2zJq6YK/<0;1>/*)";
+        let result = into_wallet_descriptor_checked(descriptor, &secp, Network::Testnet);
+
+        assert_matches!(result, Err(DescriptorError::MultiPath));
+
+        // repeated pubkeys
         let descriptor = "wsh(multi(2,tpubD6NzVbkrYhZ4XHndKkuB8FifXm8r5FQHwrN6oZuWCz13qb93rtgKvD4PQsqC4HP4yhV3tA2fqr2RbY5mNXfM7RxXUoeABoDtsFUq2zJq6YK/0/*,tpubD6NzVbkrYhZ4XHndKkuB8FifXm8r5FQHwrN6oZuWCz13qb93rtgKvD4PQsqC4HP4yhV3tA2fqr2RbY5mNXfM7RxXUoeABoDtsFUq2zJq6YK/0/*))";
         let result = into_wallet_descriptor_checked(descriptor, &secp, Network::Testnet);
 
