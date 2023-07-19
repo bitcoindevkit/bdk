@@ -2,7 +2,7 @@ use std::{io::Write, str::FromStr};
 
 use bdk::{
     bitcoin::{Address, Network},
-    chain::keychain::LocalUpdate,
+    chain::{keychain::LocalUpdate, local_chain},
     wallet::AddressIndex,
     SignOptions, Wallet,
 };
@@ -62,7 +62,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let update = LocalUpdate {
         keychain: last_active_indices,
         graph: update_graph,
-        ..LocalUpdate::new(new_tip)
+        ..LocalUpdate::new(local_chain::Update {
+            tip: new_tip,
+            introduce_older_blocks: true,
+        })
     };
     wallet.apply_update(update)?;
     wallet.commit()?;

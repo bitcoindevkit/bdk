@@ -13,11 +13,11 @@ pub type ChangeSet = BTreeMap<u32, Option<BlockHash>>;
 /// A blockchain of [`LocalChain`].
 ///
 /// The in a linked-list with newer blocks pointing to older ones.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone)]
 pub struct CheckPoint(Arc<CPInner>);
 
 /// The internal contents of [`CheckPoint`].
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone)]
 struct CPInner {
     /// Block id (hash and height).
     block: BlockId,
@@ -113,11 +113,31 @@ impl IntoIterator for CheckPoint {
     }
 }
 
+/// Represents an update to [`LocalChain`].
+#[derive(Debug, Clone)]
+pub struct Update {
+    /// The update's new [`CheckPoint`] tip.
+    pub tip: CheckPoint,
+
+    /// Whether the update allows for introducing older blocks.
+    ///
+    /// Refer to [`LocalChain::apply_update`] for more.
+    ///
+    /// [`LocalChain::apply_update`]: crate::local_chain::LocalChain::apply_update
+    pub introduce_older_blocks: bool,
+}
+
 /// This is a local implementation of [`ChainOracle`].
-#[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Default, Clone)]
 pub struct LocalChain {
     tip: Option<CheckPoint>,
     index: BTreeMap<u32, BlockHash>,
+}
+
+impl PartialEq for LocalChain {
+    fn eq(&self, other: &Self) -> bool {
+        self.index == other.index
+    }
 }
 
 impl From<LocalChain> for BTreeMap<u32, BlockHash> {
@@ -262,41 +282,28 @@ impl LocalChain {
     /// Refer to [module-level documentation] for more.
     ///
     /// [module-level documentation]: crate::local_chain
-    pub fn update(
-        &mut self,
-        update_tip: CheckPoint,
-        introduce_older_blocks: bool,
-    ) -> Result<ChangeSet, CannotConnectError> {
-        let changeset = match self.tip() {
+    pub fn apply_update(&mut self, update: Update) -> Result<ChangeSet, CannotConnectError> {
+        match self.tip() {
             Some(original_tip) => {
-                let (changeset, perfect_connection) =
-                    merge_chains(original_tip, update_tip.clone(), introduce_older_blocks)?;
+                let changeset = merge_chains(
+                    original_tip,
+                    update.tip.clone(),
+                    update.introduce_older_blocks,
+                )?;
+                self.apply_changeset(&changeset);
 
-                if !perfect_connection {
-                    self.apply_changeset(&changeset);
-                    // return early as `apply_changeset` already calls `check_consistency`
-                    return Ok(changeset);
-                }
-
-                self.tip = Some(update_tip);
-                for (height, hash) in &changeset {
-                    match hash {
-                        Some(hash) => self.index.insert(*height, *hash),
-                        None => self.index.remove(height),
-                    };
-                }
-                changeset
+                // return early as `apply_changeset` already calls `check_consistency`
+                Ok(changeset)
             }
             None => {
-                *self = Self::from_tip(update_tip);
-                self.initial_changeset()
+                *self = Self::from_tip(update.tip);
+                let changeset = self.initial_changeset();
+
+                #[cfg(debug_assertions)]
+                self._check_consistency(Some(&changeset));
+                Ok(changeset)
             }
-        };
-
-        #[cfg(debug_assertions)]
-        self._check_consistency(Some(&changeset));
-
-        Ok(changeset)
+        }
     }
 
     /// Apply the given `changeset`.
@@ -467,7 +474,7 @@ fn merge_chains(
     original_tip: CheckPoint,
     update_tip: CheckPoint,
     introduce_older_blocks: bool,
-) -> Result<(ChangeSet, bool), CannotConnectError> {
+) -> Result<ChangeSet, CannotConnectError> {
     let mut changeset = ChangeSet::default();
     let mut orig = original_tip.into_iter();
     let mut update = update_tip.into_iter();
@@ -526,13 +533,12 @@ fn merge_chains(
                     }
                     point_of_agreement_found = true;
                     prev_orig_was_invalidated = false;
-                    // OPTIMIZATION 1 -- if we know that older blocks cannot be introduced without
-                    // invalidation, we can break after finding the point of agreement
-                    // OPTIMIZATION 2 -- if we have the same underlying references at this
-                    // point then we know everything else in the two chains will match so the
-                    // changeset is fine.
+                    // OPTIMIZATION 1 -- If we know that older blocks cannot be introduced without
+                    // invalidation, we can break after finding the point of agreement.
+                    // OPTIMIZATION 2 -- if we have the same underlying pointer at this point, we
+                    // can guarantee that no older blocks are introduced.
                     if !introduce_older_blocks || Arc::as_ptr(&o.0) == Arc::as_ptr(&u.0) {
-                        return Ok((changeset, true));
+                        return Ok(changeset);
                     }
                 } else {
                     // We have an invalidation height so we set the height to the updated hash and
@@ -566,5 +572,5 @@ fn merge_chains(
         }
     }
 
-    Ok((changeset, false))
+    Ok(changeset)
 }

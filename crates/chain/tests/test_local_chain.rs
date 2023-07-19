@@ -1,6 +1,4 @@
-use bdk_chain::local_chain::{
-    CannotConnectError, ChangeSet, CheckPoint, InsertBlockError, LocalChain,
-};
+use bdk_chain::local_chain::{CannotConnectError, ChangeSet, InsertBlockError, LocalChain, Update};
 use bitcoin::BlockHash;
 
 #[macro_use]
@@ -10,7 +8,7 @@ mod common;
 struct TestLocalChain<'a> {
     name: &'static str,
     chain: LocalChain,
-    new_tip: CheckPoint,
+    update: Update,
     exp: ExpectedResult<'a>,
 }
 
@@ -26,7 +24,7 @@ enum ExpectedResult<'a> {
 impl<'a> TestLocalChain<'a> {
     fn run(mut self) {
         println!("[TestLocalChain] test: {}", self.name);
-        let got_changeset = match self.chain.update(self.new_tip, true) {
+        let got_changeset = match self.chain.apply_update(self.update) {
             Ok(changeset) => changeset,
             Err(got_err) => {
                 assert_eq!(
@@ -71,7 +69,7 @@ fn update_local_chain() {
         TestLocalChain {
             name: "add first tip",
             chain: local_chain![],
-            new_tip: chain_update![(0, h!("A"))],
+            update: chain_update![(0, h!("A"))],
             exp: ExpectedResult::Ok {
                 changeset: &[(0, Some(h!("A")))],
                 init_changeset: &[(0, Some(h!("A")))],
@@ -80,7 +78,7 @@ fn update_local_chain() {
         TestLocalChain {
             name: "add second tip",
             chain: local_chain![(0, h!("A"))],
-            new_tip: chain_update![(0, h!("A")), (1, h!("B"))],
+            update: chain_update![(0, h!("A")), (1, h!("B"))],
             exp: ExpectedResult::Ok {
                 changeset: &[(1, Some(h!("B")))],
                 init_changeset: &[(0, Some(h!("A"))), (1, Some(h!("B")))],
@@ -89,7 +87,7 @@ fn update_local_chain() {
         TestLocalChain {
             name: "two disjoint chains cannot merge",
             chain: local_chain![(0, h!("A"))],
-            new_tip: chain_update![(1, h!("B"))],
+            update: chain_update![(1, h!("B"))],
             exp: ExpectedResult::Err(CannotConnectError {
                 try_include_height: 0,
             }),
@@ -97,7 +95,7 @@ fn update_local_chain() {
         TestLocalChain {
             name: "two disjoint chains cannot merge (existing chain longer)",
             chain: local_chain![(1, h!("A"))],
-            new_tip: chain_update![(0, h!("B"))],
+            update: chain_update![(0, h!("B"))],
             exp: ExpectedResult::Err(CannotConnectError {
                 try_include_height: 1,
             }),
@@ -105,7 +103,7 @@ fn update_local_chain() {
         TestLocalChain {
             name: "duplicate chains should merge",
             chain: local_chain![(0, h!("A"))],
-            new_tip: chain_update![(0, h!("A"))],
+            update: chain_update![(0, h!("A"))],
             exp: ExpectedResult::Ok {
                 changeset: &[],
                 init_changeset: &[(0, Some(h!("A")))],
@@ -118,7 +116,7 @@ fn update_local_chain() {
         TestLocalChain {
             name: "can introduce older checkpoint",
             chain: local_chain![(2, h!("C")), (3, h!("D"))],
-            new_tip: chain_update![(1, h!("B")), (2, h!("C"))],
+            update: chain_update![(1, h!("B")), (2, h!("C"))],
             exp: ExpectedResult::Ok {
                 changeset: &[(1, Some(h!("B")))],
                 init_changeset: &[(1, Some(h!("B"))), (2, Some(h!("C"))), (3, Some(h!("D")))],
@@ -131,7 +129,7 @@ fn update_local_chain() {
         TestLocalChain {
             name: "can introduce older checkpoint 2",
             chain: local_chain![(3, h!("B")), (4, h!("C"))],
-            new_tip: chain_update![(2, h!("A")), (4, h!("C"))],
+            update: chain_update![(2, h!("A")), (4, h!("C"))],
             exp: ExpectedResult::Ok {
                 changeset: &[(2, Some(h!("A")))],
                 init_changeset: &[(2, Some(h!("A"))), (3, Some(h!("B"))), (4, Some(h!("C")))],
@@ -144,7 +142,7 @@ fn update_local_chain() {
         TestLocalChain {
             name: "can introduce older checkpoint 3",
             chain: local_chain![(1, h!("A")), (3, h!("C"))],
-            new_tip: chain_update![(2, h!("B")), (3, h!("C"))],
+            update: chain_update![(2, h!("B")), (3, h!("C"))],
             exp: ExpectedResult::Ok {
                 changeset: &[(2, Some(h!("B")))],
                 init_changeset: &[(1, Some(h!("A"))), (2, Some(h!("B"))), (3, Some(h!("C")))],
@@ -157,7 +155,7 @@ fn update_local_chain() {
         TestLocalChain {
             name: "introduce two older checkpoints below PoA",
             chain: local_chain![(3, h!("C"))],
-            new_tip: chain_update![(1, h!("A")), (2, h!("B")), (3, h!("C"))],
+            update: chain_update![(1, h!("A")), (2, h!("B")), (3, h!("C"))],
             exp: ExpectedResult::Ok {
                 changeset: &[(1, Some(h!("A"))), (2, Some(h!("B")))],
                 init_changeset: &[(1, Some(h!("A"))), (2, Some(h!("B"))), (3, Some(h!("C")))],
@@ -166,7 +164,7 @@ fn update_local_chain() {
         TestLocalChain {
             name: "fix blockhash before agreement point",
             chain: local_chain![(0, h!("im-wrong")), (1, h!("we-agree"))],
-            new_tip: chain_update![(0, h!("fix")), (1, h!("we-agree"))],
+            update: chain_update![(0, h!("fix")), (1, h!("we-agree"))],
             exp: ExpectedResult::Ok {
                 changeset: &[(0, Some(h!("fix")))],
                 init_changeset: &[(0, Some(h!("fix"))), (1, Some(h!("we-agree")))],
@@ -180,7 +178,7 @@ fn update_local_chain() {
         TestLocalChain {
             name: "two points of agreement",
             chain: local_chain![(1, h!("B")), (2, h!("C"))],
-            new_tip: chain_update![(0, h!("A")), (1, h!("B")), (2, h!("C")), (3, h!("D"))],
+            update: chain_update![(0, h!("A")), (1, h!("B")), (2, h!("C")), (3, h!("D"))],
             exp: ExpectedResult::Ok {
                 changeset: &[(0, Some(h!("A"))), (3, Some(h!("D")))],
                 init_changeset: &[
@@ -199,7 +197,7 @@ fn update_local_chain() {
         TestLocalChain {
             name: "update and chain does not connect",
             chain: local_chain![(1, h!("B")), (2, h!("C"))],
-            new_tip: chain_update![(0, h!("A")), (1, h!("B")), (3, h!("D"))],
+            update: chain_update![(0, h!("A")), (1, h!("B")), (3, h!("D"))],
             exp: ExpectedResult::Err(CannotConnectError {
                 try_include_height: 2,
             }),
@@ -212,7 +210,7 @@ fn update_local_chain() {
         TestLocalChain {
             name: "transitive invalidation applies to checkpoints higher than invalidation",
             chain: local_chain![(0, h!("A")), (2, h!("B")), (3, h!("C")), (5, h!("E"))],
-            new_tip: chain_update![(0, h!("A")), (2, h!("B'")), (3, h!("C'")), (4, h!("D"))],
+            update: chain_update![(0, h!("A")), (2, h!("B'")), (3, h!("C'")), (4, h!("D"))],
             exp: ExpectedResult::Ok {
                 changeset: &[
                     (2, Some(h!("B'"))),
@@ -236,7 +234,7 @@ fn update_local_chain() {
         TestLocalChain {
             name: "transitive invalidation applies to checkpoints higher than invalidation no point of agreement",
             chain: local_chain![(1, h!("B")), (2, h!("C")), (4, h!("E"))],
-            new_tip: chain_update![(1, h!("B'")), (2, h!("C'")), (3, h!("D"))],
+            update: chain_update![(1, h!("B'")), (2, h!("C'")), (3, h!("D"))],
             exp: ExpectedResult::Ok {
                 changeset: &[
                     (1, Some(h!("B'"))),
@@ -260,7 +258,7 @@ fn update_local_chain() {
         TestLocalChain {
             name: "invalidation but no connection",
             chain: local_chain![(0, h!("A")), (1, h!("B")), (2, h!("C")), (4, h!("E"))],
-            new_tip: chain_update![(1, h!("B'")), (2, h!("C'")), (3, h!("D"))],
+            update: chain_update![(1, h!("B'")), (2, h!("C'")), (3, h!("D"))],
             exp: ExpectedResult::Err(CannotConnectError { try_include_height: 0 }),
         },
         // Introduce blocks between two points of agreement
@@ -270,7 +268,7 @@ fn update_local_chain() {
         TestLocalChain {
             name: "introduce blocks between two points of agreement",
             chain: local_chain![(0, h!("A")), (1, h!("B")), (3, h!("D")), (4, h!("E"))],
-            new_tip: chain_update![(0, h!("A")), (2, h!("C")), (4, h!("E")), (5, h!("F"))],
+            update: chain_update![(0, h!("A")), (2, h!("C")), (4, h!("E")), (5, h!("F"))],
             exp: ExpectedResult::Ok {
                 changeset: &[
                     (2, Some(h!("C"))),

@@ -23,11 +23,11 @@ pub trait EsploraExt {
     /// * `prev_tip` is the previous tip of [`LocalChain::tip`].
     /// * `get_heights` is the block heights that we are interested in fetching from Esplora.
     ///
-    /// The result of this method can be applied to [`LocalChain::update`].
+    /// The result of this method can be applied to [`LocalChain::apply_update`].
     ///
     /// [`LocalChain`]: bdk_chain::local_chain::LocalChain
     /// [`LocalChain::tip`]: bdk_chain::local_chain::LocalChain::tip
-    /// [`LocalChain::update`]: bdk_chain::local_chain::LocalChain::update
+    /// [`LocalChain::apply_update`]: bdk_chain::local_chain::LocalChain::apply_update
     #[allow(clippy::result_large_err)]
     fn update_local_chain(
         &self,

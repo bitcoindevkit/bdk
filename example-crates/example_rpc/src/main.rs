@@ -15,7 +15,7 @@ use bdk_bitcoind_rpc::{
 use bdk_chain::{
     bitcoin::{Address, Transaction},
     keychain::LocalChangeSet,
-    local_chain::LocalChain,
+    local_chain::{self, LocalChain},
     BlockId, ConfirmationTimeAnchor, IndexedTxGraph,
 };
 use example_cli::{
@@ -185,15 +185,18 @@ fn main() -> anyhow::Result<()> {
 
             for (item, tip_height) in recv {
                 let is_mempool = item.is_mempool();
-                let (cp_update, graph_update) = item.into_update(confirmation_time_anchor);
+                let (tip, graph_update) = item.into_update(confirmation_time_anchor);
 
-                let current_height = cp_update.height();
+                let current_height = tip.height();
 
                 let db_changeset = {
                     let mut chain = chain.lock().unwrap();
                     let mut graph = graph.lock().unwrap();
 
-                    let chain_changeset = chain.update(cp_update, false)?;
+                    let chain_changeset = chain.apply_update(local_chain::Update {
+                        tip,
+                        introduce_older_blocks: false,
+                    })?;
                     let indexed_additions = graph.prune_and_apply_update(graph_update);
 
                     ChangeSet {

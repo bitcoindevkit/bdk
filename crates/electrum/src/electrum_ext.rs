@@ -1,7 +1,7 @@
 use bdk_chain::{
     bitcoin::{hashes::hex::FromHex, OutPoint, Script, Transaction, Txid},
     keychain::LocalUpdate,
-    local_chain::CheckPoint,
+    local_chain::{self, CheckPoint},
     tx_graph::{self, TxGraph},
     Anchor, BlockId, ConfirmationHeightAnchor, ConfirmationTimeAnchor,
 };
@@ -24,16 +24,16 @@ pub struct ElectrumUpdate<K, A> {
     /// Map of [`Txid`]s to associated [`Anchor`]s.
     pub graph_update: HashMap<Txid, BTreeSet<A>>,
     /// The latest chain tip, as seen by the Electrum server.
-    pub chain_update: CheckPoint,
+    pub new_tip: local_chain::CheckPoint,
     /// Last-used index update for [`KeychainTxOutIndex`](bdk_chain::keychain::KeychainTxOutIndex).
     pub keychain_update: BTreeMap<K, u32>,
 }
 
 impl<K, A: Anchor> ElectrumUpdate<K, A> {
-    fn new(cp: CheckPoint) -> Self {
+    fn new(new_tip: local_chain::CheckPoint) -> Self {
         Self {
+            new_tip,
             graph_update: HashMap::new(),
-            chain_update: cp,
             keychain_update: BTreeMap::new(),
         }
     }
@@ -71,8 +71,10 @@ impl<K, A: Anchor> ElectrumUpdate<K, A> {
         Ok(LocalUpdate {
             keychain: self.keychain_update,
             graph: graph_update,
-            tip: self.chain_update,
-            introduce_older_blocks: true,
+            chain: local_chain::Update {
+                tip: self.new_tip,
+                introduce_older_blocks: true,
+            },
         })
     }
 }
@@ -145,8 +147,7 @@ impl<K> ElectrumUpdate<K, ConfirmationHeightAnchor> {
                 graph.apply_additions(graph_additions);
                 graph
             },
-            tip: update.tip,
-            introduce_older_blocks: true,
+            chain: update.chain,
         })
     }
 }
@@ -224,7 +225,7 @@ impl ElectrumExt<ConfirmationHeightAnchor> for Client {
             let (tip, _) = construct_update_tip(self, prev_tip.clone())?;
             let mut update = ElectrumUpdate::<K, ConfirmationHeightAnchor>::new(tip.clone());
             let cps = update
-                .chain_update
+                .new_tip
                 .iter()
                 .take(10)
                 .map(|cp| (cp.height(), cp))

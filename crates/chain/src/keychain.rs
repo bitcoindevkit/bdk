@@ -11,10 +11,7 @@
 //! [`SpkTxOutIndex`]: crate::SpkTxOutIndex
 
 use crate::{
-    collections::BTreeMap,
-    indexed_tx_graph::IndexedAdditions,
-    local_chain::{self, CheckPoint},
-    tx_graph::TxGraph,
+    collections::BTreeMap, indexed_tx_graph::IndexedAdditions, local_chain, tx_graph::TxGraph,
     Anchor, Append,
 };
 
@@ -92,7 +89,7 @@ impl<K> AsRef<BTreeMap<K, u32>> for DerivationAdditions<K> {
 /// A structure to update [`KeychainTxOutIndex`], [`TxGraph`] and [`LocalChain`] atomically.
 ///
 /// [`LocalChain`]: local_chain::LocalChain
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct LocalUpdate<K, A> {
     /// Last active derivation index per keychain (`K`).
     pub keychain: BTreeMap<K, u32>,
@@ -103,26 +100,18 @@ pub struct LocalUpdate<K, A> {
     /// Update for the [`LocalChain`].
     ///
     /// [`LocalChain`]: local_chain::LocalChain
-    pub tip: CheckPoint,
-
-    /// Whether the [`LocalChain`] update (`tip`) can introduce blocks below the original chain's
-    /// tip without invalidating blocks.
-    ///
-    /// Refer to [`LocalChain::update`] for more.
-    ///
-    /// [`LocalChain`]: local_chain::LocalChain
-    /// [`LocalChain::update`]: local_chain::LocalChain::update
-    pub introduce_older_blocks: bool,
+    pub chain: local_chain::Update,
 }
 
 impl<K, A> LocalUpdate<K, A> {
     /// Construct a [`LocalUpdate`] with a given [`CheckPoint`] tip.
-    pub fn new(tip: CheckPoint) -> Self {
+    ///
+    /// [`CheckPoint`]: local_chain::CheckPoint
+    pub fn new(chain_update: local_chain::Update) -> Self {
         Self {
             keychain: BTreeMap::new(),
             graph: TxGraph::default(),
-            tip,
-            introduce_older_blocks: false,
+            chain: chain_update,
         }
     }
 }

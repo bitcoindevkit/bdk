@@ -8,7 +8,7 @@ use bdk_chain::{
     bitcoin::{Address, Network, OutPoint, Txid},
     indexed_tx_graph::{IndexedAdditions, IndexedTxGraph},
     keychain::LocalChangeSet,
-    local_chain::{CheckPoint, LocalChain},
+    local_chain::{self, CheckPoint, LocalChain},
     Append, ConfirmationTimeAnchor,
 };
 
@@ -318,7 +318,10 @@ fn main() -> anyhow::Result<()> {
         let mut chain = chain.lock().unwrap();
         let mut graph = graph.lock().unwrap();
 
-        let chain_changeset = chain.update(update_tip, true)?;
+        let chain_changeset = chain.apply_update(local_chain::Update {
+            tip: update_tip,
+            introduce_older_blocks: true,
+        })?;
 
         let indexed_additions = {
             let mut additions = IndexedAdditions::default();

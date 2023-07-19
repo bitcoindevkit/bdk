@@ -252,7 +252,7 @@ fn main() -> anyhow::Result<()> {
                 .context("scanning the blockchain")?;
             ElectrumUpdate {
                 graph_update: update.graph_update,
-                chain_update: update.chain_update,
+                new_tip: update.new_tip,
                 keychain_update: BTreeMap::new(),
             }
         }
@@ -274,8 +274,7 @@ fn main() -> anyhow::Result<()> {
         let mut chain = chain.lock().unwrap();
         let mut graph = graph.lock().unwrap();
 
-        let chain_changeset =
-            chain.update(final_update.tip, final_update.introduce_older_blocks)?;
+        let chain_changeset = chain.apply_update(final_update.chain)?;
 
         let indexed_additions = {
             let mut additions = IndexedAdditions::<ConfirmationHeightAnchor, _>::default();

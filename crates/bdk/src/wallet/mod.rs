@@ -1707,10 +1707,7 @@ impl<D> Wallet<D> {
     where
         D: PersistBackend<ChangeSet>,
     {
-        let mut changeset = ChangeSet::from(
-            self.chain
-                .update(update.tip, update.introduce_older_blocks)?,
-        );
+        let mut changeset = ChangeSet::from(self.chain.apply_update(update.chain)?);
         let (_, index_additions) = self
             .indexed_graph
             .index
@@ -1739,10 +1736,7 @@ impl<D> Wallet<D> {
     where
         D: PersistBackend<ChangeSet>,
     {
-        let mut changeset = ChangeSet::from(
-            self.chain
-                .update(update.tip, update.introduce_older_blocks)?,
-        );
+        let mut changeset = ChangeSet::from(self.chain.apply_update(update.chain)?);
         let (_, index_additions) = self
             .indexed_graph
             .index
