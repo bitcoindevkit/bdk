@@ -177,15 +177,16 @@ impl<K: IntoDescriptorKey<Segwitv0>> DescriptorTemplate for P2Wpkh<K> {
 /// ```
 /// # use bdk::bitcoin::{PrivateKey, Network};
 /// # use bdk::Wallet;
+/// # use bdk::database::MemoryDatabase;
 /// # use bdk::wallet::AddressIndex::New;
 /// use bdk::template::P2TR;
 ///
 /// let key =
 ///     bitcoin::PrivateKey::from_wif("cTc4vURSzdx6QE6KVynWGomDbLaA75dNALMNyfjh3p8DRRar84Um")?;
-/// let mut wallet = Wallet::new_no_persist(P2TR(key), None, Network::Testnet)?;
+/// let mut wallet = Wallet::new(P2TR(key), None, Network::Testnet, MemoryDatabase::default())?;
 ///
 /// assert_eq!(
-///     wallet.get_address(New).to_string(),
+///     wallet.get_address(New)?.to_string(),
 ///     "tb1pvjf9t34fznr53u5tqhejz4nr69luzkhlvsdsdfq9pglutrpve2xq7hps46"
 /// );
 /// # Ok::<_, Box<dyn std::error::Error>>(())
@@ -447,18 +448,20 @@ impl<K: DerivableKey<Segwitv0>> DescriptorTemplate for Bip84Public<K> {
 /// # use std::str::FromStr;
 /// # use bdk::bitcoin::{PrivateKey, Network};
 /// # use bdk::{Wallet,  KeychainKind};
+/// # use bdk::database::MemoryDatabase;
 /// # use bdk::wallet::AddressIndex::New;
 /// use bdk::template::Bip86;
 ///
 /// let key = bitcoin::util::bip32::ExtendedPrivKey::from_str("tprv8ZgxMBicQKsPeZRHk4rTG6orPS2CRNFX3njhUXx5vj9qGog5ZMH4uGReDWN5kCkY3jmWEtWause41CDvBRXD1shKknAMKxT99o9qUTRVC6m")?;
-/// let mut wallet = Wallet::new_no_persist(
+/// let mut wallet = Wallet::new(
 ///     Bip86(key.clone(), KeychainKind::External),
 ///     Some(Bip86(key, KeychainKind::Internal)),
 ///     Network::Testnet,
+///     MemoryDatabase::default()
 /// )?;
 ///
-/// assert_eq!(wallet.get_address(New).to_string(), "tb1p5unlj09djx8xsjwe97269kqtxqpwpu2epeskgqjfk4lnf69v4tnqpp35qu");
-/// assert_eq!(wallet.public_descriptor(KeychainKind::External).unwrap().to_string(), "tr([c55b303f/86'/1'/0']tpubDCiHofpEs47kx358bPdJmTZHmCDqQ8qw32upCSxHrSEdeeBs2T5Mq6QMB2ukeMqhNBiyhosBvJErteVhfURPGXPv3qLJPw5MVpHUewsbP2m/0/*)#dkgvr5hm");
+/// assert_eq!(wallet.get_address(New)?.to_string(), "tb1p5unlj09djx8xsjwe97269kqtxqpwpu2epeskgqjfk4lnf69v4tnqpp35qu");
+/// assert_eq!(wallet.public_descriptor(KeychainKind::External)?.unwrap().to_string(), "tr([c55b303f/86'/1'/0']tpubDCiHofpEs47kx358bPdJmTZHmCDqQ8qw32upCSxHrSEdeeBs2T5Mq6QMB2ukeMqhNBiyhosBvJErteVhfURPGXPv3qLJPw5MVpHUewsbP2m/0/*)#dkgvr5hm");
 /// # Ok::<_, Box<dyn std::error::Error>>(())
 /// ```
 pub struct Bip86<K: DerivableKey<Tap>>(pub K, pub KeychainKind);
@@ -484,19 +487,21 @@ impl<K: DerivableKey<Tap>> DescriptorTemplate for Bip86<K> {
 /// # use std::str::FromStr;
 /// # use bdk::bitcoin::{PrivateKey, Network};
 /// # use bdk::{Wallet,  KeychainKind};
+/// # use bdk::database::MemoryDatabase;
 /// # use bdk::wallet::AddressIndex::New;
 /// use bdk::template::Bip86Public;
 ///
 /// let key = bitcoin::util::bip32::ExtendedPubKey::from_str("tpubDC2Qwo2TFsaNC4ju8nrUJ9mqVT3eSgdmy1yPqhgkjwmke3PRXutNGRYAUo6RCHTcVQaDR3ohNU9we59brGHuEKPvH1ags2nevW5opEE9Z5Q")?;
 /// let fingerprint = bitcoin::util::bip32::Fingerprint::from_str("c55b303f")?;
-/// let mut wallet = Wallet::new_no_persist(
+/// let mut wallet = Wallet::new(
 ///     Bip86Public(key.clone(), fingerprint, KeychainKind::External),
 ///     Some(Bip86Public(key, fingerprint, KeychainKind::Internal)),
 ///     Network::Testnet,
+///     MemoryDatabase::default()
 /// )?;
 ///
-/// assert_eq!(wallet.get_address(New).to_string(), "tb1pwjp9f2k5n0xq73ecuu0c5njvgqr3vkh7yaylmpqvsuuaafymh0msvcmh37");
-/// assert_eq!(wallet.public_descriptor(KeychainKind::External).unwrap().to_string(), "tr([c55b303f/86'/1'/0']tpubDC2Qwo2TFsaNC4ju8nrUJ9mqVT3eSgdmy1yPqhgkjwmke3PRXutNGRYAUo6RCHTcVQaDR3ohNU9we59brGHuEKPvH1ags2nevW5opEE9Z5Q/0/*)#2p65srku");
+/// assert_eq!(wallet.get_address(New)?.to_string(), "tb1pwjp9f2k5n0xq73ecuu0c5njvgqr3vkh7yaylmpqvsuuaafymh0msvcmh37");
+/// assert_eq!(wallet.public_descriptor(KeychainKind::External)?.unwrap().to_string(), "tr([c55b303f/86'/1'/0']tpubDC2Qwo2TFsaNC4ju8nrUJ9mqVT3eSgdmy1yPqhgkjwmke3PRXutNGRYAUo6RCHTcVQaDR3ohNU9we59brGHuEKPvH1ags2nevW5opEE9Z5Q/0/*)#2p65srku");
 /// # Ok::<_, Box<dyn std::error::Error>>(())
 /// ```
 pub struct Bip86Public<K: DerivableKey<Tap>>(pub K, pub bip32::Fingerprint, pub KeychainKind);
