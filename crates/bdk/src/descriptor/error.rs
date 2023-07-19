@@ -32,11 +32,11 @@ pub enum Error {
     InvalidDescriptorCharacter(u8),
 
     /// BIP32 error
-    Bip32(bitcoin::util::bip32::Error),
+    Bip32(bitcoin::bip32::Error),
     /// Error during base58 decoding
-    Base58(bitcoin::util::base58::Error),
+    Base58(bitcoin::base58::Error),
     /// Key-related error
-    Pk(bitcoin::util::key::Error),
+    Pk(bitcoin::key::Error),
     /// Miniscript error
     Miniscript(miniscript::Error),
     /// Hex decoding error
@@ -81,9 +81,9 @@ impl fmt::Display for Error {
 #[cfg(feature = "std")]
 impl std::error::Error for Error {}
 
-impl_error!(bitcoin::util::bip32::Error, Bip32);
-impl_error!(bitcoin::util::base58::Error, Base58);
-impl_error!(bitcoin::util::key::Error, Pk);
+impl_error!(bitcoin::bip32::Error, Bip32);
+impl_error!(bitcoin::base58::Error, Base58);
+impl_error!(bitcoin::key::Error, Pk);
 impl_error!(miniscript::Error, Miniscript);
 impl_error!(bitcoin::hashes::hex::Error, Hex);
 impl_error!(crate::descriptor::policy::PolicyError, Policy);

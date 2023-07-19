@@ -137,7 +137,7 @@ fn main() {
 <!-- use bdk::electrum_client::Client; -->
 <!-- use bdk::wallet::AddressIndex::New; -->
 
-<!-- use base64; -->
+<!-- use bitcoin::base64; -->
 <!-- use bdk::bitcoin::consensus::serialize; -->
 <!-- use bdk::bitcoin::Network; -->
 
@@ -174,7 +174,7 @@ fn main() {
 <!-- ```rust,no_run -->
 <!-- use bdk::{Wallet, SignOptions}; -->
 
-<!-- use base64; -->
+<!-- use bitcoin::base64; -->
 <!-- use bdk::bitcoin::consensus::deserialize; -->
 <!-- use bdk::bitcoin::Network; -->
 

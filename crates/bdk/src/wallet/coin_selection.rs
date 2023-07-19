@@ -38,12 +38,12 @@
 //!         &self,
 //!         required_utxos: Vec<WeightedUtxo>,
 //!         optional_utxos: Vec<WeightedUtxo>,
-//!         fee_rate: FeeRate,
+//!         fee_rate: bdk::FeeRate,
 //!         target_amount: u64,
 //!         drain_script: &Script,
 //!     ) -> Result<CoinSelectionResult, bdk::Error> {
 //!         let mut selected_amount = 0;
-//!         let mut additional_weight = 0;
+//!         let mut additional_weight = Weight::ZERO;
 //!         let all_utxos_selected = required_utxos
 //!             .into_iter()
 //!             .chain(optional_utxos)
@@ -51,7 +51,9 @@
 //!                 (&mut selected_amount, &mut additional_weight),
 //!                 |(selected_amount, additional_weight), weighted_utxo| {
 //!                     **selected_amount += weighted_utxo.utxo.txout().value;
-//!                     **additional_weight += TXIN_BASE_WEIGHT + weighted_utxo.satisfaction_weight;
+//!                     **additional_weight += Weight::from_wu(
+//!                         (TXIN_BASE_WEIGHT + weighted_utxo.satisfaction_weight) as u64,
+//!                     );
 //!                     Some(weighted_utxo.utxo)
 //!                 },
 //!             )
@@ -80,7 +82,10 @@
 //! # let mut wallet = doctest_wallet!();
 //! // create wallet, sync, ...
 //!
-//! let to_address = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap();
+//! let to_address = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt")
+//!     .unwrap()
+//!     .require_network(Network::Testnet)
+//!     .unwrap();
 //! let (psbt, details) = {
 //!     let mut builder = wallet.build_tx().coin_selection(AlwaysSpendEverything);
 //!     builder.add_recipient(to_address.script_pubkey(), 50_000);
@@ -99,7 +104,7 @@ use crate::{error::Error, Utxo};
 
 use alloc::vec::Vec;
 use bitcoin::consensus::encode::serialize;
-use bitcoin::Script;
+use bitcoin::{Script, Weight};
 
 use core::convert::TryInto;
 use rand::seq::SliceRandom;
@@ -302,8 +307,9 @@ fn select_sorted_utxos(
             (&mut selected_amount, &mut fee_amount),
             |(selected_amount, fee_amount), (must_use, weighted_utxo)| {
                 if must_use || **selected_amount < target_amount + **fee_amount {
-                    **fee_amount +=
-                        fee_rate.fee_wu(TXIN_BASE_WEIGHT + weighted_utxo.satisfaction_weight);
+                    **fee_amount += fee_rate.fee_wu(Weight::from_wu(
+                        (TXIN_BASE_WEIGHT + weighted_utxo.satisfaction_weight) as u64,
+                    ));
                     **selected_amount += weighted_utxo.utxo.txout().value;
 
                     log::debug!(
@@ -351,7 +357,9 @@ struct OutputGroup {
 
 impl OutputGroup {
     fn new(weighted_utxo: WeightedUtxo, fee_rate: FeeRate) -> Self {
-        let fee = fee_rate.fee_wu(TXIN_BASE_WEIGHT + weighted_utxo.satisfaction_weight);
+        let fee = fee_rate.fee_wu(Weight::from_wu(
+            (TXIN_BASE_WEIGHT + weighted_utxo.satisfaction_weight) as u64,
+        ));
         let effective_value = weighted_utxo.utxo.txout().value as i64 - fee as i64;
         OutputGroup {
             weighted_utxo,
@@ -681,7 +689,7 @@ mod test {
     use core::str::FromStr;
 
     use bdk_chain::ConfirmationTime;
-    use bitcoin::{OutPoint, Script, TxOut};
+    use bitcoin::{OutPoint, ScriptBuf, TxOut};
 
     use super::*;
     use crate::types::*;
@@ -710,7 +718,7 @@ mod test {
                 outpoint,
                 txout: TxOut {
                     value,
-                    script_pubkey: Script::new(),
+                    script_pubkey: ScriptBuf::new(),
                 },
                 keychain: KeychainKind::External,
                 is_spent: false,
@@ -773,7 +781,7 @@ mod test {
                     .unwrap(),
                     txout: TxOut {
                         value: rng.gen_range(0..200000000),
-                        script_pubkey: Script::new(),
+                        script_pubkey: ScriptBuf::new(),
                     },
                     keychain: KeychainKind::External,
                     is_spent: false,
@@ -802,7 +810,7 @@ mod test {
                 .unwrap(),
                 txout: TxOut {
                     value: utxos_value,
-                    script_pubkey: Script::new(),
+                    script_pubkey: ScriptBuf::new(),
                 },
                 keychain: KeychainKind::External,
                 is_spent: false,
@@ -825,7 +833,7 @@ mod test {
     #[test]
     fn test_largest_first_coin_selection_success() {
         let utxos = get_test_utxos();
-        let drain_script = Script::default();
+        let drain_script = ScriptBuf::default();
         let target_amount = 250_000 + FEE_AMOUNT;
 
         let result = LargestFirstCoinSelection::default()
@@ -846,7 +854,7 @@ mod test {
     #[test]
     fn test_largest_first_coin_selection_use_all() {
         let utxos = get_test_utxos();
-        let drain_script = Script::default();
+        let drain_script = ScriptBuf::default();
         let target_amount = 20_000 + FEE_AMOUNT;
 
         let result = LargestFirstCoinSelection::default()
@@ -867,7 +875,7 @@ mod test {
     #[test]
     fn test_largest_first_coin_selection_use_only_necessary() {
         let utxos = get_test_utxos();
-        let drain_script = Script::default();
+        let drain_script = ScriptBuf::default();
         let target_amount = 20_000 + FEE_AMOUNT;
 
         let result = LargestFirstCoinSelection::default()
@@ -889,7 +897,7 @@ mod test {
     #[should_panic(expected = "InsufficientFunds")]
     fn test_largest_first_coin_selection_insufficient_funds() {
         let utxos = get_test_utxos();
-        let drain_script = Script::default();
+        let drain_script = ScriptBuf::default();
         let target_amount = 500_000 + FEE_AMOUNT;
 
         LargestFirstCoinSelection::default()
@@ -907,7 +915,7 @@ mod test {
     #[should_panic(expected = "InsufficientFunds")]
     fn test_largest_first_coin_selection_insufficient_funds_high_fees() {
         let utxos = get_test_utxos();
-        let drain_script = Script::default();
+        let drain_script = ScriptBuf::default();
         let target_amount = 250_000 + FEE_AMOUNT;
 
         LargestFirstCoinSelection::default()
@@ -924,7 +932,7 @@ mod test {
     #[test]
     fn test_oldest_first_coin_selection_success() {
         let utxos = get_oldest_first_test_utxos();
-        let drain_script = Script::default();
+        let drain_script = ScriptBuf::default();
         let target_amount = 180_000 + FEE_AMOUNT;
 
         let result = OldestFirstCoinSelection::default()
@@ -945,7 +953,7 @@ mod test {
     #[test]
     fn test_oldest_first_coin_selection_use_all() {
         let utxos = get_oldest_first_test_utxos();
-        let drain_script = Script::default();
+        let drain_script = ScriptBuf::default();
         let target_amount = 20_000 + FEE_AMOUNT;
 
         let result = OldestFirstCoinSelection::default()
@@ -966,7 +974,7 @@ mod test {
     #[test]
     fn test_oldest_first_coin_selection_use_only_necessary() {
         let utxos = get_oldest_first_test_utxos();
-        let drain_script = Script::default();
+        let drain_script = ScriptBuf::default();
         let target_amount = 20_000 + FEE_AMOUNT;
 
         let result = OldestFirstCoinSelection::default()
@@ -988,7 +996,7 @@ mod test {
     #[should_panic(expected = "InsufficientFunds")]
     fn test_oldest_first_coin_selection_insufficient_funds() {
         let utxos = get_oldest_first_test_utxos();
-        let drain_script = Script::default();
+        let drain_script = ScriptBuf::default();
         let target_amount = 600_000 + FEE_AMOUNT;
 
         OldestFirstCoinSelection::default()
@@ -1008,7 +1016,7 @@ mod test {
         let utxos = get_oldest_first_test_utxos();
 
         let target_amount: u64 = utxos.iter().map(|wu| wu.utxo.txout().value).sum::<u64>() - 50;
-        let drain_script = Script::default();
+        let drain_script = ScriptBuf::default();
 
         OldestFirstCoinSelection::default()
             .coin_select(
@@ -1027,7 +1035,7 @@ mod test {
         // select three outputs
         let utxos = generate_same_value_utxos(100_000, 20);
 
-        let drain_script = Script::default();
+        let drain_script = ScriptBuf::default();
 
         let target_amount = 250_000 + FEE_AMOUNT;
 
@@ -1049,7 +1057,7 @@ mod test {
     #[test]
     fn test_bnb_coin_selection_required_are_enough() {
         let utxos = get_test_utxos();
-        let drain_script = Script::default();
+        let drain_script = ScriptBuf::default();
         let target_amount = 20_000 + FEE_AMOUNT;
 
         let result = BranchAndBoundCoinSelection::default()
@@ -1070,7 +1078,7 @@ mod test {
     #[test]
     fn test_bnb_coin_selection_optional_are_enough() {
         let utxos = get_test_utxos();
-        let drain_script = Script::default();
+        let drain_script = ScriptBuf::default();
         let target_amount = 299756 + FEE_AMOUNT;
 
         let result = BranchAndBoundCoinSelection::default()
@@ -1106,7 +1114,7 @@ mod test {
         assert_eq!(amount, 100_000);
         let amount: u64 = optional.iter().map(|u| u.utxo.txout().value).sum();
         assert!(amount > 150_000);
-        let drain_script = Script::default();
+        let drain_script = ScriptBuf::default();
 
         let target_amount = 150_000 + FEE_AMOUNT;
 
@@ -1129,7 +1137,7 @@ mod test {
     #[should_panic(expected = "InsufficientFunds")]
     fn test_bnb_coin_selection_insufficient_funds() {
         let utxos = get_test_utxos();
-        let drain_script = Script::default();
+        let drain_script = ScriptBuf::default();
         let target_amount = 500_000 + FEE_AMOUNT;
 
         BranchAndBoundCoinSelection::default()
@@ -1147,7 +1155,7 @@ mod test {
     #[should_panic(expected = "InsufficientFunds")]
     fn test_bnb_coin_selection_insufficient_funds_high_fees() {
         let utxos = get_test_utxos();
-        let drain_script = Script::default();
+        let drain_script = ScriptBuf::default();
         let target_amount = 250_000 + FEE_AMOUNT;
 
         BranchAndBoundCoinSelection::default()
@@ -1164,7 +1172,7 @@ mod test {
     #[test]
     fn test_bnb_coin_selection_check_fee_rate() {
         let utxos = get_test_utxos();
-        let drain_script = Script::default();
+        let drain_script = ScriptBuf::default();
         let target_amount = 99932; // first utxo's effective value
 
         let result = BranchAndBoundCoinSelection::new(0)
@@ -1192,7 +1200,7 @@ mod test {
         for _i in 0..200 {
             let mut optional_utxos = generate_random_utxos(&mut rng, 16);
             let target_amount = sum_random_utxos(&mut rng, &mut optional_utxos);
-            let drain_script = Script::default();
+            let drain_script = ScriptBuf::default();
             let result = BranchAndBoundCoinSelection::new(0)
                 .coin_select(
                     vec![],
@@ -1220,7 +1228,7 @@ mod test {
         let size_of_change = 31;
         let cost_of_change = size_of_change as f32 * fee_rate.as_sat_per_vb();
 
-        let drain_script = Script::default();
+        let drain_script = ScriptBuf::default();
         let target_amount = 20_000 + FEE_AMOUNT;
         BranchAndBoundCoinSelection::new(size_of_change)
             .bnb(
@@ -1251,7 +1259,7 @@ mod test {
         let cost_of_change = size_of_change as f32 * fee_rate.as_sat_per_vb();
         let target_amount = 20_000 + FEE_AMOUNT;
 
-        let drain_script = Script::default();
+        let drain_script = ScriptBuf::default();
 
         BranchAndBoundCoinSelection::new(size_of_change)
             .bnb(
@@ -1287,7 +1295,7 @@ mod test {
         // cost_of_change + 5.
         let target_amount = 2 * 50_000 - 2 * 67 - cost_of_change.ceil() as i64 + 5;
 
-        let drain_script = Script::default();
+        let drain_script = ScriptBuf::default();
 
         let result = BranchAndBoundCoinSelection::new(size_of_change)
             .bnb(
@@ -1327,7 +1335,7 @@ mod test {
             let target_amount =
                 optional_utxos[3].effective_value + optional_utxos[23].effective_value;
 
-            let drain_script = Script::default();
+            let drain_script = ScriptBuf::default();
 
             let result = BranchAndBoundCoinSelection::new(0)
                 .bnb(
@@ -1358,7 +1366,7 @@ mod test {
             .map(|u| OutputGroup::new(u, fee_rate))
             .collect();
 
-        let drain_script = Script::default();
+        let drain_script = ScriptBuf::default();
 
         let result = BranchAndBoundCoinSelection::default().single_random_draw(
             vec![],
@@ -1376,7 +1384,7 @@ mod test {
     #[test]
     fn test_bnb_exclude_negative_effective_value() {
         let utxos = get_test_utxos();
-        let drain_script = Script::default();
+        let drain_script = ScriptBuf::default();
 
         let selection = BranchAndBoundCoinSelection::default().coin_select(
             vec![],
@@ -1398,7 +1406,7 @@ mod test {
     #[test]
     fn test_bnb_include_negative_effective_value_when_required() {
         let utxos = get_test_utxos();
-        let drain_script = Script::default();
+        let drain_script = ScriptBuf::default();
 
         let (required, optional) = utxos
             .into_iter()
@@ -1424,7 +1432,7 @@ mod test {
     #[test]
     fn test_bnb_sum_of_effective_value_negative() {
         let utxos = get_test_utxos();
-        let drain_script = Script::default();
+        let drain_script = ScriptBuf::default();
 
         let selection = BranchAndBoundCoinSelection::default().coin_select(
             utxos,

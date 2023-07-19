@@ -13,7 +13,7 @@
 
 use crate::FeeRate;
 use alloc::vec::Vec;
-use bitcoin::util::psbt::PartiallySignedTransaction as Psbt;
+use bitcoin::psbt::PartiallySignedTransaction as Psbt;
 use bitcoin::TxOut;
 
 // TODO upstream the functions here to `rust-bitcoin`?

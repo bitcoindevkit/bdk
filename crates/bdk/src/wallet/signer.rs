@@ -19,7 +19,7 @@
 //! # use core::str::FromStr;
 //! # use bitcoin::secp256k1::{Secp256k1, All};
 //! # use bitcoin::*;
-//! # use bitcoin::util::psbt;
+//! # use bitcoin::psbt;
 //! # use bdk::signer::*;
 //! # use bdk::*;
 //! # #[derive(Debug)]
@@ -86,18 +86,17 @@ use core::cmp::Ordering;
 use core::fmt;
 use core::ops::{Bound::Included, Deref};
 
-use bitcoin::blockdata::opcodes;
-use bitcoin::blockdata::script::Builder as ScriptBuilder;
-use bitcoin::hashes::{hash160, Hash};
+use bitcoin::bip32::{ChildNumber, DerivationPath, ExtendedPrivKey, Fingerprint};
+use bitcoin::hashes::hash160;
 use bitcoin::secp256k1::Message;
-use bitcoin::util::bip32::{ChildNumber, DerivationPath, ExtendedPrivKey, Fingerprint};
-use bitcoin::util::{ecdsa, psbt, schnorr, sighash, taproot};
-use bitcoin::{secp256k1, XOnlyPublicKey};
-use bitcoin::{EcdsaSighashType, PrivateKey, PublicKey, SchnorrSighashType, Script};
+use bitcoin::sighash::{EcdsaSighashType, TapSighash, TapSighashType};
+use bitcoin::{ecdsa, psbt, sighash, taproot};
+use bitcoin::{key::TapTweak, key::XOnlyPublicKey, secp256k1};
+use bitcoin::{PrivateKey, PublicKey};
 
 use miniscript::descriptor::{
-    Descriptor, DescriptorPublicKey, DescriptorSecretKey, DescriptorXKey, KeyMap, SinglePriv,
-    SinglePubKey,
+    Descriptor, DescriptorMultiXKey, DescriptorPublicKey, DescriptorSecretKey, DescriptorXKey,
+    InnerXKey, KeyMap, SinglePriv, SinglePubKey,
 };
 use miniscript::{Legacy, Segwitv0, SigType, Tap, ToPublicKey};
 
@@ -130,7 +129,7 @@ impl From<Fingerprint> for SignerId {
 }
 
 /// Signing error
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug)]
 pub enum SignerError {
     /// The private key is missing for the required public key
     MissingKey,
@@ -383,6 +382,48 @@ impl InputSigner for SignerWrapper<DescriptorXKey<ExtendedPrivKey>> {
     }
 }
 
+fn multikey_to_xkeys<K: InnerXKey + Clone>(
+    multikey: DescriptorMultiXKey<K>,
+) -> Vec<DescriptorXKey<K>> {
+    multikey
+        .derivation_paths
+        .into_paths()
+        .into_iter()
+        .map(|derivation_path| DescriptorXKey {
+            origin: multikey.origin.clone(),
+            xkey: multikey.xkey.clone(),
+            derivation_path,
+            wildcard: multikey.wildcard,
+        })
+        .collect()
+}
+
+impl SignerCommon for SignerWrapper<DescriptorMultiXKey<ExtendedPrivKey>> {
+    fn id(&self, secp: &SecpCtx) -> SignerId {
+        SignerId::from(self.root_fingerprint(secp))
+    }
+
+    fn descriptor_secret_key(&self) -> Option<DescriptorSecretKey> {
+        Some(DescriptorSecretKey::MultiXPrv(self.signer.clone()))
+    }
+}
+
+impl InputSigner for SignerWrapper<DescriptorMultiXKey<ExtendedPrivKey>> {
+    fn sign_input(
+        &self,
+        psbt: &mut psbt::PartiallySignedTransaction,
+        input_index: usize,
+        sign_options: &SignOptions,
+        secp: &SecpCtx,
+    ) -> Result<(), SignerError> {
+        let xkeys = multikey_to_xkeys(self.signer.clone());
+        for xkey in xkeys {
+            SignerWrapper::new(xkey, self.ctx).sign_input(psbt, input_index, sign_options, secp)?
+        }
+        Ok(())
+    }
+}
+
 impl SignerCommon for SignerWrapper<PrivateKey> {
     fn id(&self, secp: &SecpCtx) -> SignerId {
         SignerId::from(self.public_key(secp).to_pubkeyhash(SigType::Ecdsa))
@@ -477,8 +518,16 @@ impl InputSigner for SignerWrapper<PrivateKey> {
         }
 
         let (hash, hash_ty) = match self.ctx {
-            SignerContext::Segwitv0 => Segwitv0::sighash(psbt, input_index, ())?,
-            SignerContext::Legacy => Legacy::sighash(psbt, input_index, ())?,
+            SignerContext::Segwitv0 => {
+                let (h, t) = Segwitv0::sighash(psbt, input_index, ())?;
+                let h = h.to_raw_hash();
+                (h, t)
+            }
+            SignerContext::Legacy => {
+                let (h, t) = Legacy::sighash(psbt, input_index, ())?;
+                let h = h.to_raw_hash();
+                (h, t)
+            }
             _ => return Ok(()), // handled above
         };
         sign_psbt_ecdsa(
@@ -499,12 +548,12 @@ fn sign_psbt_ecdsa(
     secret_key: &secp256k1::SecretKey,
     pubkey: PublicKey,
     psbt_input: &mut psbt::Input,
-    hash: bitcoin::Sighash,
+    hash: impl bitcoin::hashes::Hash + bitcoin::secp256k1::ThirtyTwoByteHash,
     hash_ty: EcdsaSighashType,
     secp: &SecpCtx,
     allow_grinding: bool,
 ) {
-    let msg = &Message::from_slice(&hash.into_inner()[..]).unwrap();
+    let msg = &Message::from(hash);
     let sig = if allow_grinding {
         secp.sign_ecdsa_low_r(msg, secret_key)
     } else {
@@ -513,7 +562,7 @@ fn sign_psbt_ecdsa(
     secp.verify_ecdsa(msg, &sig, &pubkey.inner)
         .expect("invalid or corrupted ecdsa signature");
 
-    let final_signature = ecdsa::EcdsaSig { sig, hash_ty };
+    let final_signature = ecdsa::Signature { sig, hash_ty };
     psbt_input.partial_sigs.insert(pubkey, final_signature);
 }
 
@@ -523,12 +572,10 @@ fn sign_psbt_schnorr(
     pubkey: XOnlyPublicKey,
     leaf_hash: Option<taproot::TapLeafHash>,
     psbt_input: &mut psbt::Input,
-    hash: taproot::TapSighashHash,
-    hash_ty: SchnorrSighashType,
+    hash: TapSighash,
+    hash_ty: TapSighashType,
     secp: &SecpCtx,
 ) {
-    use schnorr::TapTweak;
-
     let keypair = secp256k1::KeyPair::from_seckey_slice(secp, secret_key.as_ref()).unwrap();
     let keypair = match leaf_hash {
         None => keypair
@@ -537,12 +584,12 @@ fn sign_psbt_schnorr(
         Some(_) => keypair, // no tweak for script spend
     };
 
-    let msg = &Message::from_slice(&hash.into_inner()[..]).unwrap();
+    let msg = &Message::from(hash);
     let sig = secp.sign_schnorr(msg, &keypair);
     secp.verify_schnorr(&sig, msg, &XOnlyPublicKey::from_keypair(&keypair).0)
         .expect("invalid or corrupted schnorr signature");
 
-    let final_signature = schnorr::SchnorrSig { sig, hash_ty };
+    let final_signature = taproot::Signature { sig, hash_ty };
 
     if let Some(lh) = leaf_hash {
         psbt_input
@@ -628,6 +675,11 @@ impl SignersContainer {
                     Arc::new(SignerWrapper::new(private_key.key, ctx)),
                 ),
                 DescriptorSecretKey::XPrv(xprv) => container.add_external(
+                    SignerId::from(xprv.root_fingerprint(secp)),
+                    SignerOrdering::default(),
+                    Arc::new(SignerWrapper::new(xprv, ctx)),
+                ),
+                DescriptorSecretKey::MultiXPrv(xprv) => container.add_external(
                     SignerId::from(xprv.root_fingerprint(secp)),
                     SignerOrdering::default(),
                     Arc::new(SignerWrapper::new(xprv, ctx)),
@@ -802,7 +854,7 @@ pub(crate) trait ComputeSighash {
 
 impl ComputeSighash for Legacy {
     type Extra = ();
-    type Sighash = bitcoin::Sighash;
+    type Sighash = sighash::LegacySighash;
     type SighashType = EcdsaSighashType;
 
     fn sighash(
@@ -849,19 +901,9 @@ impl ComputeSighash for Legacy {
     }
 }
 
-fn p2wpkh_script_code(script: &Script) -> Script {
-    ScriptBuilder::new()
-        .push_opcode(opcodes::all::OP_DUP)
-        .push_opcode(opcodes::all::OP_HASH160)
-        .push_slice(&script[2..])
-        .push_opcode(opcodes::all::OP_EQUALVERIFY)
-        .push_opcode(opcodes::all::OP_CHECKSIG)
-        .into_script()
-}
-
 impl ComputeSighash for Segwitv0 {
     type Extra = ();
-    type Sighash = bitcoin::Sighash;
+    type Sighash = sighash::SegwitV0Sighash;
     type SighashType = EcdsaSighashType;
 
     fn sighash(
@@ -908,14 +950,21 @@ impl ComputeSighash for Segwitv0 {
             Some(ref witness_script) => witness_script.clone(),
             None => {
                 if utxo.script_pubkey.is_v0_p2wpkh() {
-                    p2wpkh_script_code(&utxo.script_pubkey)
+                    utxo.script_pubkey
+                        .p2wpkh_script_code()
+                        .expect("We check above that the spk is a p2wpkh")
                 } else if psbt_input
                     .redeem_script
                     .as_ref()
-                    .map(Script::is_v0_p2wpkh)
+                    .map(|s| s.is_v0_p2wpkh())
                     .unwrap_or(false)
                 {
-                    p2wpkh_script_code(psbt_input.redeem_script.as_ref().unwrap())
+                    psbt_input
+                        .redeem_script
+                        .as_ref()
+                        .unwrap()
+                        .p2wpkh_script_code()
+                        .expect("We check above that the spk is a p2wpkh")
                 } else {
                     return Err(SignerError::MissingWitnessScript);
                 }
@@ -936,14 +985,14 @@ impl ComputeSighash for Segwitv0 {
 
 impl ComputeSighash for Tap {
     type Extra = Option<taproot::TapLeafHash>;
-    type Sighash = taproot::TapSighashHash;
-    type SighashType = SchnorrSighashType;
+    type Sighash = TapSighash;
+    type SighashType = TapSighashType;
 
     fn sighash(
         psbt: &psbt::PartiallySignedTransaction,
         input_index: usize,
         extra: Self::Extra,
-    ) -> Result<(Self::Sighash, SchnorrSighashType), SignerError> {
+    ) -> Result<(Self::Sighash, TapSighashType), SignerError> {
         if input_index >= psbt.inputs.len() || input_index >= psbt.unsigned_tx.input.len() {
             return Err(SignerError::InputIndexOutOfRange);
         }
@@ -952,8 +1001,8 @@ impl ComputeSighash for Tap {
 
         let sighash_type = psbt_input
             .sighash_type
-            .unwrap_or_else(|| SchnorrSighashType::Default.into())
-            .schnorr_hash_ty()
+            .unwrap_or_else(|| TapSighashType::Default.into())
+            .taproot_hash_ty()
             .map_err(|_| SignerError::InvalidSighash)?;
         let witness_utxos = (0..psbt.inputs.len())
             .map(|i| psbt.get_utxo_for(i))
@@ -1015,8 +1064,8 @@ mod signers_container_tests {
     use crate::descriptor::IntoWalletDescriptor;
     use crate::keys::{DescriptorKey, IntoDescriptorKey};
     use assert_matches::assert_matches;
+    use bitcoin::bip32;
     use bitcoin::secp256k1::{All, Secp256k1};
-    use bitcoin::util::bip32;
     use bitcoin::Network;
     use core::str::FromStr;
     use miniscript::ScriptContext;

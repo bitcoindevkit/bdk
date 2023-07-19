@@ -516,13 +516,14 @@ macro_rules! descriptor {
         use $crate::miniscript::descriptor::{Descriptor, DescriptorPublicKey};
 
         $crate::impl_top_level_pk!(Pkh, $crate::miniscript::Legacy, $key)
+            .and_then(|(a, b, c)| Ok((a.map_err(|e| miniscript::Error::from(e))?, b, c)))
             .map(|(a, b, c)| (Descriptor::<DescriptorPublicKey>::Pkh(a), b, c))
     });
     ( wpkh ( $key:expr ) ) => ({
         use $crate::miniscript::descriptor::{Descriptor, DescriptorPublicKey};
 
         $crate::impl_top_level_pk!(Wpkh, $crate::miniscript::Segwitv0, $key)
-            .and_then(|(a, b, c)| Ok((a?, b, c)))
+            .and_then(|(a, b, c)| Ok((a.map_err(|e| miniscript::Error::from(e))?, b, c)))
             .map(|(a, b, c)| (Descriptor::<DescriptorPublicKey>::Wpkh(a), b, c))
     });
     ( sh ( wpkh ( $key:expr ) ) ) => ({
@@ -532,7 +533,7 @@ macro_rules! descriptor {
         use $crate::miniscript::descriptor::{Descriptor, DescriptorPublicKey, Sh};
 
         $crate::impl_top_level_pk!(Wpkh, $crate::miniscript::Segwitv0, $key)
-            .and_then(|(a, b, c)| Ok((a?, b, c)))
+            .and_then(|(a, b, c)| Ok((a.map_err(|e| miniscript::Error::from(e))?, b, c)))
             .and_then(|(a, b, c)| Ok((Descriptor::<DescriptorPublicKey>::Sh(Sh::new_wpkh(a.into_inner())?), b, c)))
     });
     ( sh ( $( $minisc:tt )* ) ) => ({
@@ -702,7 +703,7 @@ macro_rules! fragment {
         $crate::keys::make_pkh($key, &secp)
     });
     ( after ( $value:expr ) ) => ({
-        $crate::impl_leaf_opcode_value!(After, $crate::bitcoin::PackedLockTime($value)) // TODO!! https://github.com/rust-bitcoin/rust-bitcoin/issues/1302
+        $crate::impl_leaf_opcode_value!(After, $crate::miniscript::AbsLockTime::from_consensus($value))
     });
     ( older ( $value:expr ) ) => ({
         $crate::impl_leaf_opcode_value!(Older, $crate::bitcoin::Sequence($value)) // TODO!!
@@ -796,7 +797,6 @@ macro_rules! fragment {
 #[cfg(test)]
 mod test {
     use alloc::string::ToString;
-    use bitcoin::hashes::hex::ToHex;
     use bitcoin::secp256k1::Secp256k1;
     use miniscript::descriptor::{DescriptorPublicKey, KeyMap};
     use miniscript::{Descriptor, Legacy, Segwitv0};
@@ -805,8 +805,8 @@ mod test {
 
     use crate::descriptor::{DescriptorError, DescriptorMeta};
     use crate::keys::{DescriptorKey, IntoDescriptorKey, ValidNetworks};
+    use bitcoin::bip32;
     use bitcoin::network::constants::Network::{Bitcoin, Regtest, Signet, Testnet};
-    use bitcoin::util::bip32;
     use bitcoin::PrivateKey;
 
     // test the descriptor!() macro
@@ -822,18 +822,15 @@ mod test {
         assert_eq!(desc.is_witness(), is_witness);
         assert_eq!(!desc.has_wildcard(), is_fixed);
         for i in 0..expected.len() {
-            let index = i as u32;
-            let child_desc = if !desc.has_wildcard() {
-                desc.at_derivation_index(0)
-            } else {
-                desc.at_derivation_index(index)
-            };
+            let child_desc = desc
+                .at_derivation_index(i as u32)
+                .expect("i is not hardened");
             let address = child_desc.address(Regtest);
             if let Ok(address) = address {
                 assert_eq!(address.to_string(), *expected.get(i).unwrap());
             } else {
                 let script = child_desc.script_pubkey();
-                assert_eq!(script.to_hex().as_str(), *expected.get(i).unwrap());
+                assert_eq!(script.to_hex_string(), *expected.get(i).unwrap());
             }
         }
     }
@@ -1178,9 +1175,7 @@ mod test {
     }
 
     #[test]
-    #[should_panic(
-        expected = "Miniscript(ContextError(CompressedOnly(\"04b4632d08485ff1df2db55b9dafd23347d1c47a457072a1e87be26896549a87378ec38ff91d43e8c2092ebda601780485263da089465619e0358a5c1be7ac91f4\")))"
-    )]
+    #[should_panic(expected = "Miniscript(ContextError(UncompressedKeysNotAllowed))")]
     fn test_dsl_miniscript_checks() {
         let mut uncompressed_pk =
             PrivateKey::from_wif("L5EZftvrYaSudiozVRzTqLcHLNDoVn7H5HSfM9BAN6tMJX8oTWz6").unwrap();

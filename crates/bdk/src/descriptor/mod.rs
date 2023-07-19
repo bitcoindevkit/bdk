@@ -18,17 +18,17 @@ use crate::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use bitcoin::util::bip32::{ChildNumber, DerivationPath, ExtendedPubKey, Fingerprint, KeySource};
-use bitcoin::util::{psbt, taproot};
-use bitcoin::{secp256k1, PublicKey, XOnlyPublicKey};
+use bitcoin::bip32::{ChildNumber, DerivationPath, ExtendedPubKey, Fingerprint, KeySource};
+use bitcoin::{key::XOnlyPublicKey, secp256k1, PublicKey};
+use bitcoin::{psbt, taproot};
 use bitcoin::{Network, TxOut};
 
 use miniscript::descriptor::{
-    DefiniteDescriptorKey, DescriptorSecretKey, DescriptorType, InnerXKey, SinglePubKey,
+    DefiniteDescriptorKey, DescriptorMultiXKey, DescriptorSecretKey, DescriptorType,
+    DescriptorXKey, InnerXKey, KeyMap, SinglePubKey, Wildcard,
 };
 pub use miniscript::{
-    descriptor::DescriptorXKey, descriptor::KeyMap, descriptor::Wildcard, Descriptor,
-    DescriptorPublicKey, Legacy, Miniscript, ScriptContext, Segwitv0,
+    Descriptor, DescriptorPublicKey, Legacy, Miniscript, ScriptContext, Segwitv0,
 };
 use miniscript::{ForEachKey, MiniscriptKey, TranslatePk};
 
@@ -59,16 +59,16 @@ pub type DerivedDescriptor = Descriptor<DefiniteDescriptorKey>;
 /// Alias for the type of maps that represent derivation paths in a [`psbt::Input`] or
 /// [`psbt::Output`]
 ///
-/// [`psbt::Input`]: bitcoin::util::psbt::Input
-/// [`psbt::Output`]: bitcoin::util::psbt::Output
+/// [`psbt::Input`]: bitcoin::psbt::Input
+/// [`psbt::Output`]: bitcoin::psbt::Output
 pub type HdKeyPaths = BTreeMap<secp256k1::PublicKey, KeySource>;
 
 /// Alias for the type of maps that represent taproot key origins in a [`psbt::Input`] or
 /// [`psbt::Output`]
 ///
-/// [`psbt::Input`]: bitcoin::util::psbt::Input
-/// [`psbt::Output`]: bitcoin::util::psbt::Output
-pub type TapKeyOrigins = BTreeMap<bitcoin::XOnlyPublicKey, (Vec<taproot::TapLeafHash>, KeySource)>;
+/// [`psbt::Input`]: bitcoin::psbt::Input
+/// [`psbt::Output`]: bitcoin::psbt::Output
+pub type TapKeyOrigins = BTreeMap<XOnlyPublicKey, (Vec<taproot::TapLeafHash>, KeySource)>;
 
 /// Trait for types which can be converted into an [`ExtendedDescriptor`] and a [`KeyMap`] usable by a wallet in a specific [`Network`]
 pub trait IntoWalletDescriptor {
@@ -136,14 +136,10 @@ impl IntoWalletDescriptor for (ExtendedDescriptor, KeyMap) {
             network: Network,
         }
 
-        impl<'s, 'd>
-            miniscript::Translator<DescriptorPublicKey, miniscript::DummyKey, DescriptorError>
+        impl<'s, 'd> miniscript::Translator<DescriptorPublicKey, String, DescriptorError>
             for Translator<'s, 'd>
         {
-            fn pk(
-                &mut self,
-                pk: &DescriptorPublicKey,
-            ) -> Result<miniscript::DummyKey, DescriptorError> {
+            fn pk(&mut self, pk: &DescriptorPublicKey) -> Result<String, DescriptorError> {
                 let secp = &self.secp;
 
                 let (_, _, networks) = if self.descriptor.is_taproot() {
@@ -161,7 +157,7 @@ impl IntoWalletDescriptor for (ExtendedDescriptor, KeyMap) {
                 };
 
                 if networks.contains(&self.network) {
-                    Ok(miniscript::DummyKey)
+                    Ok(Default::default())
                 } else {
                     Err(DescriptorError::Key(KeyError::InvalidNetwork))
                 }
@@ -169,35 +165,40 @@ impl IntoWalletDescriptor for (ExtendedDescriptor, KeyMap) {
             fn sha256(
                 &mut self,
                 _sha256: &<DescriptorPublicKey as MiniscriptKey>::Sha256,
-            ) -> Result<miniscript::DummySha256Hash, DescriptorError> {
+            ) -> Result<String, DescriptorError> {
                 Ok(Default::default())
             }
             fn hash256(
                 &mut self,
                 _hash256: &<DescriptorPublicKey as MiniscriptKey>::Hash256,
-            ) -> Result<miniscript::DummyHash256Hash, DescriptorError> {
+            ) -> Result<String, DescriptorError> {
                 Ok(Default::default())
             }
             fn ripemd160(
                 &mut self,
                 _ripemd160: &<DescriptorPublicKey as MiniscriptKey>::Ripemd160,
-            ) -> Result<miniscript::DummyRipemd160Hash, DescriptorError> {
+            ) -> Result<String, DescriptorError> {
                 Ok(Default::default())
             }
             fn hash160(
                 &mut self,
                 _hash160: &<DescriptorPublicKey as MiniscriptKey>::Hash160,
-            ) -> Result<miniscript::DummyHash160Hash, DescriptorError> {
+            ) -> Result<String, DescriptorError> {
                 Ok(Default::default())
             }
         }
 
         // check the network for the keys
-        self.0.translate_pk(&mut Translator {
+        use miniscript::TranslateErr;
+        match self.0.translate_pk(&mut Translator {
             secp,
             network,
             descriptor: &self.0,
-        })?;
+        }) {
+            Ok(_) => {}
+            Err(TranslateErr::TranslatorErr(e)) => return Err(e),
+            Err(TranslateErr::OuterError(e)) => return Err(e.into()),
+        }
 
         Ok(self)
     }
@@ -251,7 +252,12 @@ impl IntoWalletDescriptor for DescriptorTemplateOut {
         }
 
         // fixup the network for keys that need it in the descriptor
-        let translated = desc.translate_pk(&mut Translator { network })?;
+        use miniscript::TranslateErr;
+        let translated = match desc.translate_pk(&mut Translator { network }) {
+            Ok(descriptor) => descriptor,
+            Err(TranslateErr::TranslatorErr(e)) => return Err(e),
+            Err(TranslateErr::OuterError(e)) => return Err(e.into()),
+        };
         // ...and in the key map
         let fixed_keymap = keymap
             .into_iter()
@@ -338,6 +344,18 @@ pub trait ExtractPolicy {
 
 pub(crate) trait XKeyUtils {
     fn root_fingerprint(&self, secp: &SecpCtx) -> Fingerprint;
+}
+
+impl<T> XKeyUtils for DescriptorMultiXKey<T>
+where
+    T: InnerXKey,
+{
+    fn root_fingerprint(&self, secp: &SecpCtx) -> Fingerprint {
+        match self.origin {
+            Some((fingerprint, _)) => fingerprint,
+            None => self.xkey.xkey_fingerprint(secp),
+        }
+    }
 }
 
 impl<T> XKeyUtils for DescriptorXKey<T>
@@ -494,7 +512,10 @@ impl DescriptorMeta for ExtendedDescriptor {
             false
         });
 
-        path_found.map(|path| self.at_derivation_index(path))
+        path_found.map(|path| {
+            self.at_derivation_index(path)
+                .expect("We ignore hardened wildcards")
+        })
     }
 
     fn derive_from_hd_keypaths(
@@ -545,7 +566,7 @@ impl DescriptorMeta for ExtendedDescriptor {
             return None;
         }
 
-        let descriptor = self.at_derivation_index(0);
+        let descriptor = self.at_derivation_index(0).expect("0 is not hardened");
         match descriptor.desc_type() {
             // TODO: add pk() here
             DescriptorType::Pkh
@@ -585,11 +606,10 @@ mod test {
     use core::str::FromStr;
 
     use assert_matches::assert_matches;
-    use bitcoin::consensus::encode::deserialize;
     use bitcoin::hashes::hex::FromHex;
     use bitcoin::secp256k1::Secp256k1;
-    use bitcoin::util::{bip32, psbt};
-    use bitcoin::Script;
+    use bitcoin::ScriptBuf;
+    use bitcoin::{bip32, psbt::Psbt};
 
     use super::*;
     use crate::psbt::PsbtUtils;
@@ -600,7 +620,7 @@ mod test {
             "wpkh(02b4632d08485ff1df2db55b9dafd23347d1c47a457072a1e87be26896549a8737)",
         )
         .unwrap();
-        let psbt: psbt::PartiallySignedTransaction = deserialize(
+        let psbt = Psbt::deserialize(
             &Vec::<u8>::from_hex(
                 "70736274ff010052010000000162307be8e431fbaff807cdf9cdc3fde44d7402\
                  11bc8342c31ffd6ec11fe35bcc0100000000ffffffff01328601000000000016\
@@ -623,7 +643,7 @@ mod test {
             "pkh([0f056943/44h/0h/0h]tpubDDpWvmUrPZrhSPmUzCMBHffvC3HyMAPnWDSAQNBTnj1iZeJa7BZQEttFiP4DS4GCcXQHezdXhn86Hj6LHX5EDstXPWrMaSneRWM8yUf6NFd/10/*)",
         )
         .unwrap();
-        let psbt: psbt::PartiallySignedTransaction = deserialize(
+        let psbt = Psbt::deserialize(
             &Vec::<u8>::from_hex(
                 "70736274ff010053010000000145843b86be54a3cd8c9e38444e1162676c00df\
                  e7964122a70df491ea12fd67090100000000ffffffff01c19598000000000017\
@@ -654,7 +674,7 @@ mod test {
             "wsh(and_v(v:pk(03b6633fef2397a0a9de9d7b6f23aef8368a6e362b0581f0f0af70d5ecfd254b14),older(6)))",
         )
         .unwrap();
-        let psbt: psbt::PartiallySignedTransaction = deserialize(
+        let psbt = Psbt::deserialize(
             &Vec::<u8>::from_hex(
                 "70736274ff01005302000000011c8116eea34408ab6529223c9a176606742207\
                  67a1ff1d46a6e3c4a88243ea6e01000000000600000001109698000000000017\
@@ -678,7 +698,7 @@ mod test {
             "sh(and_v(v:pk(021403881a5587297818fcaf17d239cefca22fce84a45b3b1d23e836c4af671dbb),after(630000)))",
         )
         .unwrap();
-        let psbt: psbt::PartiallySignedTransaction = deserialize(
+        let psbt = Psbt::deserialize(
             &Vec::<u8>::from_hex(
                 "70736274ff0100530100000001bc8c13df445dfadcc42afa6dc841f85d22b01d\
                  a6270ebf981740f4b7b1d800390000000000feffffff01ba9598000000000017\
@@ -861,9 +881,9 @@ mod test {
         let (descriptor, _) =
             into_wallet_descriptor_checked(descriptor, &secp, Network::Testnet).unwrap();
 
-        let descriptor = descriptor.at_derivation_index(0);
+        let descriptor = descriptor.at_derivation_index(0).unwrap();
 
-        let script = Script::from_str("5321022f533b667e2ea3b36e21961c9fe9dca340fbe0af5210173a83ae0337ab20a57621026bb53a98e810bd0ee61a0ed1164ba6c024786d76554e793e202dc6ce9c78c4ea2102d5b8a7d66a41ffdb6f4c53d61994022e886b4f45001fb158b95c9164d45f8ca3210324b75eead2c1f9c60e8adeb5e7009fec7a29afcdb30d829d82d09562fe8bae8521032d34f8932200833487bd294aa219dcbe000b9f9b3d824799541430009f0fa55121037468f8ea99b6c64788398b5ad25480cad08f4b0d65be54ce3a55fd206b5ae4722103f72d3d96663b0ea99b0aeb0d7f273cab11a8de37885f1dddc8d9112adb87169357ae").unwrap();
+        let script = ScriptBuf::from_hex("5321022f533b667e2ea3b36e21961c9fe9dca340fbe0af5210173a83ae0337ab20a57621026bb53a98e810bd0ee61a0ed1164ba6c024786d76554e793e202dc6ce9c78c4ea2102d5b8a7d66a41ffdb6f4c53d61994022e886b4f45001fb158b95c9164d45f8ca3210324b75eead2c1f9c60e8adeb5e7009fec7a29afcdb30d829d82d09562fe8bae8521032d34f8932200833487bd294aa219dcbe000b9f9b3d824799541430009f0fa55121037468f8ea99b6c64788398b5ad25480cad08f4b0d65be54ce3a55fd206b5ae4722103f72d3d96663b0ea99b0aeb0d7f273cab11a8de37885f1dddc8d9112adb87169357ae").unwrap();
 
         let mut psbt_input = psbt::Input::default();
         psbt_input

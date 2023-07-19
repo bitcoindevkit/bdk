@@ -15,7 +15,7 @@ use core::ops::Sub;
 
 use bdk_chain::ConfirmationTime;
 use bitcoin::blockdata::transaction::{OutPoint, Transaction, TxOut};
-use bitcoin::{hash_types::Txid, util::psbt};
+use bitcoin::{hash_types::Txid, psbt, Weight};
 
 use serde::{Deserialize, Serialize};
 
@@ -99,8 +99,8 @@ impl FeeRate {
     }
 
     /// Calculate fee rate from `fee` and weight units (`wu`).
-    pub fn from_wu(fee: u64, wu: usize) -> FeeRate {
-        Self::from_vb(fee, wu.vbytes())
+    pub fn from_wu(fee: u64, wu: Weight) -> FeeRate {
+        Self::from_vb(fee, wu.to_vbytes_ceil() as usize)
     }
 
     /// Calculate fee rate from `fee` and `vbytes`.
@@ -120,8 +120,8 @@ impl FeeRate {
     }
 
     /// Calculate absolute fee in Satoshis using size in weight units.
-    pub fn fee_wu(&self, wu: usize) -> u64 {
-        self.fee_vb(wu.vbytes())
+    pub fn fee_wu(&self, wu: Weight) -> u64 {
+        self.fee_vb(wu.to_vbytes_ceil() as usize)
     }
 
     /// Calculate absolute fee in Satoshis using size in virtual bytes.
