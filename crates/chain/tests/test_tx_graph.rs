@@ -697,7 +697,7 @@ fn test_chain_spends() {
             let _ = graph.insert_anchor(
                 tx.txid(),
                 ConfirmationHeightAnchor {
-                    anchor_block: tip,
+                    anchor_block: tip.block_id(),
                     confirmation_height: *ht,
                 },
             );
@@ -705,10 +705,10 @@ fn test_chain_spends() {
 
     // Assert that confirmed spends are returned correctly.
     assert_eq!(
-        graph.get_chain_spend(&local_chain, tip, OutPoint::new(tx_0.txid(), 0)),
+        graph.get_chain_spend(&local_chain, tip.block_id(), OutPoint::new(tx_0.txid(), 0)),
         Some((
             ChainPosition::Confirmed(&ConfirmationHeightAnchor {
-                anchor_block: tip,
+                anchor_block: tip.block_id(),
                 confirmation_height: 98
             }),
             tx_1.txid(),
@@ -717,17 +717,17 @@ fn test_chain_spends() {
 
     // Check if chain position is returned correctly.
     assert_eq!(
-        graph.get_chain_position(&local_chain, tip, tx_0.txid()),
+        graph.get_chain_position(&local_chain, tip.block_id(), tx_0.txid()),
         // Some(ObservedAs::Confirmed(&local_chain.get_block(95).expect("block expected"))),
         Some(ChainPosition::Confirmed(&ConfirmationHeightAnchor {
-            anchor_block: tip,
+            anchor_block: tip.block_id(),
             confirmation_height: 95
         }))
     );
 
     // Even if unconfirmed tx has a last_seen of 0, it can still be part of a chain spend.
     assert_eq!(
-        graph.get_chain_spend(&local_chain, tip, OutPoint::new(tx_0.txid(), 1)),
+        graph.get_chain_spend(&local_chain, tip.block_id(), OutPoint::new(tx_0.txid(), 1)),
         Some((ChainPosition::Unconfirmed(0), tx_2.txid())),
     );
 
@@ -737,7 +737,7 @@ fn test_chain_spends() {
     // Check chain spend returned correctly.
     assert_eq!(
         graph
-            .get_chain_spend(&local_chain, tip, OutPoint::new(tx_0.txid(), 1))
+            .get_chain_spend(&local_chain, tip.block_id(), OutPoint::new(tx_0.txid(), 1))
             .unwrap(),
         (ChainPosition::Unconfirmed(1234567), tx_2.txid())
     );
@@ -754,7 +754,7 @@ fn test_chain_spends() {
 
     // Because this tx conflicts with an already confirmed transaction, chain position should return none.
     assert!(graph
-        .get_chain_position(&local_chain, tip, tx_1_conflict.txid())
+        .get_chain_position(&local_chain, tip.block_id(), tx_1_conflict.txid())
         .is_none());
 
     // Another conflicting tx that conflicts with tx_2.
@@ -773,7 +773,7 @@ fn test_chain_spends() {
     // This should return a valid observation with correct last seen.
     assert_eq!(
         graph
-            .get_chain_position(&local_chain, tip, tx_2_conflict.txid())
+            .get_chain_position(&local_chain, tip.block_id(), tx_2_conflict.txid())
             .expect("position expected"),
         ChainPosition::Unconfirmed(1234568)
     );
@@ -781,14 +781,14 @@ fn test_chain_spends() {
     // Chain_spend now catches the new transaction as the spend.
     assert_eq!(
         graph
-            .get_chain_spend(&local_chain, tip, OutPoint::new(tx_0.txid(), 1))
+            .get_chain_spend(&local_chain, tip.block_id(), OutPoint::new(tx_0.txid(), 1))
             .expect("expect observation"),
         (ChainPosition::Unconfirmed(1234568), tx_2_conflict.txid())
     );
 
     // Chain position of the `tx_2` is now none, as it is older than `tx_2_conflict`
     assert!(graph
-        .get_chain_position(&local_chain, tip, tx_2.txid())
+        .get_chain_position(&local_chain, tip.block_id(), tx_2.txid())
         .is_none());
 }
 

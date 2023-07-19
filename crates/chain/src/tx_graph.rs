@@ -56,8 +56,8 @@
 //! ```
 
 use crate::{
-    collections::*, keychain::Balance, Anchor, Append, BlockId, ChainOracle, ChainPosition,
-    ForEachTxOut, FullTxOut,
+    collections::*, keychain::Balance, local_chain::LocalChain, Anchor, Append, BlockId,
+    ChainOracle, ChainPosition, ForEachTxOut, FullTxOut,
 };
 use alloc::vec::Vec;
 use bitcoin::{OutPoint, Script, Transaction, TxOut, Txid};
@@ -598,6 +598,31 @@ impl<A: Clone + Ord> TxGraph<A> {
 }
 
 impl<A: Anchor> TxGraph<A> {
+    /// Find missing block heights of `chain`.
+    ///
+    /// This works by scanning through anchors, and seeing whether the anchor block of the anchor
+    /// exists in the [`LocalChain`].
+    pub fn missing_blocks<'a>(&'a self, chain: &'a LocalChain) -> impl Iterator<Item = u32> + 'a {
+        self.anchors
+            .iter()
+            .map(|(a, _)| a.anchor_block())
+            .filter({
+                let mut last_block = Option::<BlockId>::None;
+                move |block| {
+                    if last_block.as_ref() == Some(block) {
+                        false
+                    } else {
+                        last_block = Some(*block);
+                        true
+                    }
+                }
+            })
+            .filter_map(|block| match chain.heights().get(&block.height) {
+                Some(chain_hash) if *chain_hash == block.hash => None,
+                _ => Some(block.height),
+            })
+    }
+
     /// Get the position of the transaction in `chain` with tip `chain_tip`.
     ///
     /// If the given transaction of `txid` does not exist in the chain of `chain_tip`, `None` is

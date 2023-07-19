@@ -1,34 +1,46 @@
 use bdk_chain::{
-    bitcoin::{hashes::hex::FromHex, BlockHash, OutPoint, Script, Transaction, Txid},
+    bitcoin::{hashes::hex::FromHex, OutPoint, Script, Transaction, Txid},
     keychain::LocalUpdate,
-    local_chain::LocalChain,
+    local_chain::{self, CheckPoint},
     tx_graph::{self, TxGraph},
     Anchor, BlockId, ConfirmationHeightAnchor, ConfirmationTimeAnchor,
 };
-use electrum_client::{Client, ElectrumApi, Error};
+use electrum_client::{Client, ElectrumApi, Error, HeaderNotification};
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     fmt::Debug,
 };
 
+/// We assume that a block of this depth and deeper cannot be reorged.
+const ASSUME_FINAL_DEPTH: u32 = 8;
+
+/// Represents an update fetched from an Electrum server, but excludes full transactions.
+///
+/// To provide a complete update to [`TxGraph`], you'll need to call [`Self::missing_full_txs`] to
+/// determine the full transactions missing from [`TxGraph`]. Then call [`Self::finalize`] to fetch
+/// the full transactions from Electrum and finalize the update.
 #[derive(Debug, Clone)]
 pub struct ElectrumUpdate<K, A> {
+    /// Map of [`Txid`]s to associated [`Anchor`]s.
     pub graph_update: HashMap<Txid, BTreeSet<A>>,
-    pub chain_update: LocalChain,
+    /// The latest chain tip, as seen by the Electrum server.
+    pub new_tip: local_chain::CheckPoint,
+    /// Last-used index update for [`KeychainTxOutIndex`](bdk_chain::keychain::KeychainTxOutIndex).
     pub keychain_update: BTreeMap<K, u32>,
 }
 
-impl<K, A> Default for ElectrumUpdate<K, A> {
-    fn default() -> Self {
+impl<K, A: Anchor> ElectrumUpdate<K, A> {
+    fn new(new_tip: local_chain::CheckPoint) -> Self {
         Self {
-            graph_update: Default::default(),
-            chain_update: Default::default(),
-            keychain_update: Default::default(),
+            new_tip,
+            graph_update: HashMap::new(),
+            keychain_update: BTreeMap::new(),
         }
     }
-}
 
-impl<K, A: Anchor> ElectrumUpdate<K, A> {
+    /// Determine the full transactions that are missing from `graph`.
+    ///
+    /// Refer to [`ElectrumUpdate`].
     pub fn missing_full_txs<A2>(&self, graph: &TxGraph<A2>) -> Vec<Txid> {
         self.graph_update
             .keys()
@@ -37,6 +49,9 @@ impl<K, A: Anchor> ElectrumUpdate<K, A> {
             .collect()
     }
 
+    /// Finalizes update with `missing` txids to fetch from `client`.
+    ///
+    /// Refer to [`ElectrumUpdate`].
     pub fn finalize(
         self,
         client: &Client,
@@ -56,7 +71,10 @@ impl<K, A: Anchor> ElectrumUpdate<K, A> {
         Ok(LocalUpdate {
             keychain: self.keychain_update,
             graph: graph_update,
-            chain: self.chain_update,
+            chain: local_chain::Update {
+                tip: self.new_tip,
+                introduce_older_blocks: true,
+            },
         })
     }
 }
@@ -75,6 +93,7 @@ impl<K> ElectrumUpdate<K, ConfirmationHeightAnchor> {
         missing: Vec<Txid>,
     ) -> Result<LocalUpdate<K, ConfirmationTimeAnchor>, Error> {
         let update = self.finalize(client, seen_at, missing)?;
+        // client.batch_transaction_get(txid)
 
         let relevant_heights = {
             let mut visited_heights = HashSet::new();
@@ -133,12 +152,22 @@ impl<K> ElectrumUpdate<K, ConfirmationHeightAnchor> {
     }
 }
 
+/// Trait to extend [`Client`] functionality.
 pub trait ElectrumExt<A> {
-    fn get_tip(&self) -> Result<(u32, BlockHash), Error>;
-
+    /// Scan the blockchain (via electrum) for the data specified and returns a [`ElectrumUpdate`].
+    ///
+    /// - `prev_tip`: the most recent blockchain tip present locally
+    /// - `keychain_spks`: keychains that we want to scan transactions for
+    /// - `txids`: transactions for which we want updated [`Anchor`]s
+    /// - `outpoints`: transactions associated with these outpoints (residing, spending) that we
+    ///     want to included in the update
+    ///
+    /// The scan for each keychain stops after a gap of `stop_gap` script pubkeys with no associated
+    /// transactions. `batch_size` specifies the max number of script pubkeys to request for in a
+    /// single batch request.
     fn scan<K: Ord + Clone>(
         &self,
-        local_chain: &BTreeMap<u32, BlockHash>,
+        prev_tip: Option<CheckPoint>,
         keychain_spks: BTreeMap<K, impl IntoIterator<Item = (u32, Script)>>,
         txids: impl IntoIterator<Item = Txid>,
         outpoints: impl IntoIterator<Item = OutPoint>,
@@ -146,9 +175,12 @@ pub trait ElectrumExt<A> {
         batch_size: usize,
     ) -> Result<ElectrumUpdate<K, A>, Error>;
 
+    /// Convenience method to call [`scan`] without requiring a keychain.
+    ///
+    /// [`scan`]: ElectrumExt::scan
     fn scan_without_keychain(
         &self,
-        local_chain: &BTreeMap<u32, BlockHash>,
+        prev_tip: Option<CheckPoint>,
         misc_spks: impl IntoIterator<Item = Script>,
         txids: impl IntoIterator<Item = Txid>,
         outpoints: impl IntoIterator<Item = OutPoint>,
@@ -160,7 +192,7 @@ pub trait ElectrumExt<A> {
             .map(|(i, spk)| (i as u32, spk));
 
         self.scan(
-            local_chain,
+            prev_tip,
             [((), spk_iter)].into(),
             txids,
             outpoints,
@@ -171,15 +203,9 @@ pub trait ElectrumExt<A> {
 }
 
 impl ElectrumExt<ConfirmationHeightAnchor> for Client {
-    fn get_tip(&self) -> Result<(u32, BlockHash), Error> {
-        // TODO: unsubscribe when added to the client, or is there a better call to use here?
-        self.block_headers_subscribe()
-            .map(|data| (data.height as u32, data.header.block_hash()))
-    }
-
     fn scan<K: Ord + Clone>(
         &self,
-        local_chain: &BTreeMap<u32, BlockHash>,
+        prev_tip: Option<CheckPoint>,
         keychain_spks: BTreeMap<K, impl IntoIterator<Item = (u32, Script)>>,
         txids: impl IntoIterator<Item = Txid>,
         outpoints: impl IntoIterator<Item = OutPoint>,
@@ -196,20 +222,20 @@ impl ElectrumExt<ConfirmationHeightAnchor> for Client {
         let outpoints = outpoints.into_iter().collect::<Vec<_>>();
 
         let update = loop {
-            let mut update = ElectrumUpdate::<K, ConfirmationHeightAnchor> {
-                chain_update: prepare_chain_update(self, local_chain)?,
-                ..Default::default()
-            };
-            let anchor_block = update
-                .chain_update
-                .tip()
-                .expect("must have atleast one block");
+            let (tip, _) = construct_update_tip(self, prev_tip.clone())?;
+            let mut update = ElectrumUpdate::<K, ConfirmationHeightAnchor>::new(tip.clone());
+            let cps = update
+                .new_tip
+                .iter()
+                .take(10)
+                .map(|cp| (cp.height(), cp))
+                .collect::<BTreeMap<u32, CheckPoint>>();
 
             if !request_spks.is_empty() {
                 if !scanned_spks.is_empty() {
                     scanned_spks.append(&mut populate_with_spks(
                         self,
-                        anchor_block,
+                        &cps,
                         &mut update,
                         &mut scanned_spks
                             .iter()
@@ -222,7 +248,7 @@ impl ElectrumExt<ConfirmationHeightAnchor> for Client {
                     scanned_spks.extend(
                         populate_with_spks(
                             self,
-                            anchor_block,
+                            &cps,
                             &mut update,
                             keychain_spks,
                             stop_gap,
@@ -234,20 +260,14 @@ impl ElectrumExt<ConfirmationHeightAnchor> for Client {
                 }
             }
 
-            populate_with_txids(self, anchor_block, &mut update, &mut txids.iter().cloned())?;
+            populate_with_txids(self, &cps, &mut update, &mut txids.iter().cloned())?;
 
-            let _txs = populate_with_outpoints(
-                self,
-                anchor_block,
-                &mut update,
-                &mut outpoints.iter().cloned(),
-            )?;
+            let _txs =
+                populate_with_outpoints(self, &cps, &mut update, &mut outpoints.iter().cloned())?;
 
             // check for reorgs during scan process
-            let server_blockhash = self
-                .block_header(anchor_block.height as usize)?
-                .block_hash();
-            if anchor_block.hash != server_blockhash {
+            let server_blockhash = self.block_header(tip.height() as usize)?.block_hash();
+            if tip.hash() != server_blockhash {
                 continue; // reorg
             }
 
@@ -268,46 +288,86 @@ impl ElectrumExt<ConfirmationHeightAnchor> for Client {
     }
 }
 
-/// Prepare an update "template" based on the checkpoints of the `local_chain`.
-fn prepare_chain_update(
+/// Return a [`CheckPoint`] of the latest tip, that connects with `prev_tip`.
+fn construct_update_tip(
     client: &Client,
-    local_chain: &BTreeMap<u32, BlockHash>,
-) -> Result<LocalChain, Error> {
-    let mut update = LocalChain::default();
+    prev_tip: Option<CheckPoint>,
+) -> Result<(CheckPoint, Option<u32>), Error> {
+    let HeaderNotification { height, .. } = client.block_headers_subscribe()?;
+    let new_tip_height = height as u32;
 
-    // Find the local chain block that is still there so our update can connect to the local chain.
-    for (&existing_height, &existing_hash) in local_chain.iter().rev() {
-        // TODO: a batch request may be safer, as a reorg that happens when we are obtaining
-        //       `block_header`s will result in inconsistencies
-        let current_hash = client.block_header(existing_height as usize)?.block_hash();
-        let _ = update
-            .insert_block(BlockId {
-                height: existing_height,
-                hash: current_hash,
-            })
-            .expect("This never errors because we are working with a fresh chain");
-
-        if current_hash == existing_hash {
-            break;
+    // If electrum returns a tip height that is lower than our previous tip, then checkpoints do
+    // not need updating. We just return the previous tip and use that as the point of agreement.
+    if let Some(prev_tip) = prev_tip.as_ref() {
+        if new_tip_height < prev_tip.height() {
+            return Ok((prev_tip.clone(), Some(prev_tip.height())));
         }
     }
 
-    // Insert the new tip so new transactions will be accepted into the sparsechain.
-    let tip = {
-        let (height, hash) = crate::get_tip(client)?;
-        BlockId { height, hash }
+    // Atomically fetch the latest `ASSUME_FINAL_DEPTH` count of blocks from Electrum. We use this
+    // to construct our checkpoint update.
+    let mut new_blocks = {
+        let start_height = new_tip_height.saturating_sub(ASSUME_FINAL_DEPTH);
+        let hashes = client
+            .block_headers(start_height as _, ASSUME_FINAL_DEPTH as _)?
+            .headers
+            .into_iter()
+            .map(|h| h.block_hash());
+        (start_height..).zip(hashes).collect::<BTreeMap<u32, _>>()
     };
-    if update.insert_block(tip).is_err() {
-        // There has been a re-org before we even begin scanning addresses.
-        // Just recursively call (this should never happen).
-        return prepare_chain_update(client, local_chain);
-    }
 
-    Ok(update)
+    // Find the "point of agreement" (if any).
+    let agreement_cp = {
+        let mut agreement_cp = Option::<CheckPoint>::None;
+        for cp in prev_tip.iter().flat_map(CheckPoint::iter) {
+            let cp_block = cp.block_id();
+            let hash = match new_blocks.get(&cp_block.height) {
+                Some(&hash) => hash,
+                None => {
+                    assert!(
+                        new_tip_height >= cp_block.height,
+                        "already checked that electrum's tip cannot be smaller"
+                    );
+                    let hash = client.block_header(cp_block.height as _)?.block_hash();
+                    new_blocks.insert(cp_block.height, hash);
+                    hash
+                }
+            };
+            if hash == cp_block.hash {
+                agreement_cp = Some(cp);
+                break;
+            }
+        }
+        agreement_cp
+    };
+
+    let agreement_height = agreement_cp.as_ref().map(CheckPoint::height);
+
+    let new_tip = new_blocks
+        .into_iter()
+        // Prune `new_blocks` to only include blocks that are actually new.
+        .filter(|(height, _)| Some(*height) > agreement_height)
+        .map(|(height, hash)| BlockId { height, hash })
+        .fold(agreement_cp, |prev_cp, block| {
+            Some(match prev_cp {
+                Some(cp) => cp.push(block).expect("must extend checkpoint"),
+                None => CheckPoint::new(block),
+            })
+        })
+        .expect("must have at least one checkpoint");
+
+    Ok((new_tip, agreement_height))
 }
 
+/// A [tx status] comprises of a concatenation of `tx_hash:height:`s. We transform a single one of
+/// these concatenations into a [`ConfirmationHeightAnchor`] if possible.
+///
+/// We use the lowest possible checkpoint as the anchor block (from `cps`). If an anchor block
+/// cannot be found, or the transaction is unconfirmed, [`None`] is returned.
+///
+/// [tx status](https://electrumx-spesmilo.readthedocs.io/en/latest/protocol-basics.html#status)
 fn determine_tx_anchor(
-    anchor_block: BlockId,
+    cps: &BTreeMap<u32, CheckPoint>,
     raw_height: i32,
     txid: Txid,
 ) -> Option<ConfirmationHeightAnchor> {
@@ -319,6 +379,7 @@ fn determine_tx_anchor(
         == Txid::from_hex("4a5e1e4baab89f3a32518a88c31bc87f618f76673e2cc77ab2127b7afdeda33b")
             .expect("must deserialize genesis coinbase txid")
     {
+        let anchor_block = cps.values().next()?.block_id();
         return Some(ConfirmationHeightAnchor {
             anchor_block,
             confirmation_height: 0,
@@ -331,6 +392,7 @@ fn determine_tx_anchor(
         }
         h => {
             let h = h as u32;
+            let anchor_block = cps.range(h..).next().map(|(_, cp)| cp.block_id())?;
             if h > anchor_block.height {
                 None
             } else {
@@ -345,7 +407,7 @@ fn determine_tx_anchor(
 
 fn populate_with_outpoints<K>(
     client: &Client,
-    anchor_block: BlockId,
+    cps: &BTreeMap<u32, CheckPoint>,
     update: &mut ElectrumUpdate<K, ConfirmationHeightAnchor>,
     outpoints: &mut impl Iterator<Item = OutPoint>,
 ) -> Result<HashMap<Txid, Transaction>, Error> {
@@ -394,7 +456,7 @@ fn populate_with_outpoints<K>(
                 }
             };
 
-            let anchor = determine_tx_anchor(anchor_block, res.height, res.tx_hash);
+            let anchor = determine_tx_anchor(cps, res.height, res.tx_hash);
 
             let tx_entry = update.graph_update.entry(res.tx_hash).or_default();
             if let Some(anchor) = anchor {
@@ -407,7 +469,7 @@ fn populate_with_outpoints<K>(
 
 fn populate_with_txids<K>(
     client: &Client,
-    anchor_block: BlockId,
+    cps: &BTreeMap<u32, CheckPoint>,
     update: &mut ElectrumUpdate<K, ConfirmationHeightAnchor>,
     txids: &mut impl Iterator<Item = Txid>,
 ) -> Result<(), Error> {
@@ -429,7 +491,7 @@ fn populate_with_txids<K>(
             .into_iter()
             .find(|r| r.tx_hash == txid)
         {
-            Some(r) => determine_tx_anchor(anchor_block, r.height, txid),
+            Some(r) => determine_tx_anchor(cps, r.height, txid),
             None => continue,
         };
 
@@ -443,7 +505,7 @@ fn populate_with_txids<K>(
 
 fn populate_with_spks<K, I: Ord + Clone>(
     client: &Client,
-    anchor_block: BlockId,
+    cps: &BTreeMap<u32, CheckPoint>,
     update: &mut ElectrumUpdate<K, ConfirmationHeightAnchor>,
     spks: &mut impl Iterator<Item = (I, Script)>,
     stop_gap: usize,
@@ -477,7 +539,7 @@ fn populate_with_spks<K, I: Ord + Clone>(
 
             for tx in spk_history {
                 let tx_entry = update.graph_update.entry(tx.tx_hash).or_default();
-                if let Some(anchor) = determine_tx_anchor(anchor_block, tx.height, tx.tx_hash) {
+                if let Some(anchor) = determine_tx_anchor(cps, tx.height, tx.tx_hash) {
                     tx_entry.insert(anchor);
                 }
             }

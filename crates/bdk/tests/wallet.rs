@@ -44,7 +44,10 @@ fn receive_output(wallet: &mut Wallet, value: u64, height: ConfirmationTime) -> 
 
 fn receive_output_in_latest_block(wallet: &mut Wallet, value: u64) -> OutPoint {
     let height = match wallet.latest_checkpoint() {
-        Some(BlockId { height, .. }) => ConfirmationTime::Confirmed { height, time: 0 },
+        Some(cp) => ConfirmationTime::Confirmed {
+            height: cp.height(),
+            time: 0,
+        },
         None => ConfirmationTime::Unconfirmed { last_seen: 0 },
     };
     receive_output(wallet, value, height)
@@ -222,7 +225,7 @@ fn test_create_tx_fee_sniping_locktime_last_sync() {
     // If there's no current_height we're left with using the last sync height
     assert_eq!(
         psbt.unsigned_tx.lock_time.0,
-        wallet.latest_checkpoint().unwrap().height
+        wallet.latest_checkpoint().unwrap().height()
     );
 }
 
@@ -426,11 +429,7 @@ fn test_create_tx_drain_wallet_and_drain_to_and_with_recipient() {
 fn test_create_tx_drain_to_and_utxos() {
     let (mut wallet, _) = get_funded_wallet(get_test_wpkh());
     let addr = wallet.get_address(New);
-    let utxos: Vec<_> = wallet
-        .list_unspent()
-        .into_iter()
-        .map(|u| u.outpoint)
-        .collect();
+    let utxos: Vec<_> = wallet.list_unspent().map(|u| u.outpoint).collect();
     let mut builder = wallet.build_tx();
     builder
         .drain_to(addr.script_pubkey())
@@ -1482,7 +1481,7 @@ fn test_bump_fee_drain_wallet() {
         .insert_tx(
             tx.clone(),
             ConfirmationTime::Confirmed {
-                height: wallet.latest_checkpoint().unwrap().height,
+                height: wallet.latest_checkpoint().unwrap().height(),
                 time: 42_000,
             },
         )

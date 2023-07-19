@@ -14,16 +14,22 @@ mod async_ext;
 #[cfg(feature = "async")]
 pub use async_ext::*;
 
-pub(crate) fn map_confirmation_time_anchor(
-    tx_status: &TxStatus,
-    tip_at_start: BlockId,
-) -> Option<ConfirmationTimeAnchor> {
-    match (tx_status.block_time, tx_status.block_height) {
-        (Some(confirmation_time), Some(confirmation_height)) => Some(ConfirmationTimeAnchor {
-            anchor_block: tip_at_start,
-            confirmation_height,
-            confirmation_time,
-        }),
-        _ => None,
+const ASSUME_FINAL_DEPTH: u32 = 15;
+
+fn anchor_from_status(status: &TxStatus) -> Option<ConfirmationTimeAnchor> {
+    if let TxStatus {
+        block_height: Some(height),
+        block_hash: Some(hash),
+        block_time: Some(time),
+        ..
+    } = status.clone()
+    {
+        Some(ConfirmationTimeAnchor {
+            anchor_block: BlockId { height, hash },
+            confirmation_height: height,
+            confirmation_time: time,
+        })
+    } else {
+        None
     }
 }
