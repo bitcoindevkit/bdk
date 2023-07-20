@@ -1066,6 +1066,45 @@ impl<A> ChangeSet<A> {
             })
             .chain(self.txouts.iter().map(|(op, txout)| (*op, txout)))
     }
+
+    /// Iterates over the heights of that the new transaction anchors in this changeset.
+    ///
+    /// This is useful if you want to find which heights you need to fetch data about in order to
+    /// confirm or exclude these anchors.
+    ///
+    /// See also: [`TxGraph::missing_heights`]
+    pub fn anchor_heights(&self) -> impl Iterator<Item = u32> + '_
+    where
+        A: Anchor,
+    {
+        let mut dedup = None;
+        self.anchors
+            .iter()
+            .map(|(a, _)| a.anchor_block().height)
+            .filter(move |height| {
+                let duplicate = dedup == Some(*height);
+                dedup = Some(*height);
+                !duplicate
+            })
+    }
+
+    /// Returns an iterator for the [`anchor_heights`] in this changeset that are not included in
+    /// `local_chain`. This tells you which heights you need to include in `local_chain` in order
+    /// for it to conclusively act as a [`ChainOracle`] for the transaction anchors this changeset
+    /// will add.
+    ///
+    /// [`ChainOracle`]: crate::ChainOracle
+    /// [`anchor_heights`]: Self::anchor_heights
+    pub fn missing_heights_from<'a>(
+        &'a self,
+        local_chain: &'a LocalChain,
+    ) -> impl Iterator<Item = u32> + 'a
+    where
+        A: Anchor,
+    {
+        self.anchor_heights()
+            .filter(move |height| !local_chain.blocks().contains_key(height))
+    }
 }
 
 impl<A: Ord> Append for ChangeSet<A> {
