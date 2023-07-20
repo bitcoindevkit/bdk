@@ -1,0 +1,14 @@
+[package]
+name = "bdk_bitcoind_rpc"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+bdk_chain = { path = "../chain", version = "0.5.0", features = ["serde", "miniscript"] }
+bitcoincore-rpc = { version = "0.17.0" }
+
+[dev-dependencies]
+bitcoind = { version = "0.32.0", features = ["25_0"] }
+anyhow = { version = "1" }

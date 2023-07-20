@@ -1,0 +1,12 @@
+[package]
+name = "example_rpc"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+bdk_chain = { path = "../../crates/chain", features = ["serde"] }
+bdk_bitcoind_rpc = { path = "../../crates/bitcoind_rpc" }
+example_cli = { path = "../example_cli" }
+ctrlc = { version = "^2" }
