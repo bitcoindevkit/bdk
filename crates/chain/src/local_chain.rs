@@ -191,8 +191,8 @@ impl LocalChain {
         let mut chain = Self::default();
         chain.apply_changeset(&changeset);
 
-        #[cfg(debug_assertions)]
-        chain._check_consistency(Some(&changeset));
+        debug_assert!(chain._check_index_is_consistent_with_tip());
+        debug_assert!(chain._check_changeset_is_applied(&changeset));
 
         chain
     }
@@ -204,10 +204,7 @@ impl LocalChain {
             ..Default::default()
         };
         _self.reindex(0);
-
-        #[cfg(debug_assertions)]
-        _self._check_consistency(None);
-
+        debug_assert!(_self._check_index_is_consistent_with_tip());
         _self
     }
 
@@ -232,8 +229,7 @@ impl LocalChain {
 
         let chain = Self { index: blocks, tip };
 
-        #[cfg(debug_assertions)]
-        chain._check_consistency(None);
+        debug_assert!(chain._check_index_is_consistent_with_tip());
 
         chain
     }
@@ -299,8 +295,8 @@ impl LocalChain {
                 *self = Self::from_tip(update.tip);
                 let changeset = self.initial_changeset();
 
-                #[cfg(debug_assertions)]
-                self._check_consistency(Some(&changeset));
+                debug_assert!(self._check_index_is_consistent_with_tip());
+                debug_assert!(self._check_changeset_is_applied(&changeset));
                 Ok(changeset)
             }
         }
@@ -340,8 +336,8 @@ impl LocalChain {
             self.tip = new_tip;
             self.reindex(start_height);
 
-            #[cfg(debug_assertions)]
-            self._check_consistency(Some(changeset));
+            debug_assert!(self._check_index_is_consistent_with_tip());
+            debug_assert!(self._check_changeset_is_applied(changeset));
         }
     }
 
@@ -398,31 +394,23 @@ impl LocalChain {
         &self.index
     }
 
-    /// Checkpoints that exist under `self.tip` and blocks indexed in `self.index` should be equal.
-    /// Additionally, if a `changeset` is provided, the changes specified in the `changeset` should
-    /// be reflected in `self.index`.
-    #[cfg(debug_assertions)]
-    fn _check_consistency(&self, changeset: Option<&ChangeSet>) {
-        debug_assert_eq!(
-            self.tip
-                .iter()
-                .flat_map(CheckPoint::iter)
-                .map(|cp| (cp.height(), cp.hash()))
-                .collect::<BTreeMap<_, _>>(),
-            self.index,
-            "checkpoint history and index must be consistent"
-        );
+    fn _check_index_is_consistent_with_tip(&self) -> bool {
+        let tip_history = self
+            .tip
+            .iter()
+            .flat_map(CheckPoint::iter)
+            .map(|cp| (cp.height(), cp.hash()))
+            .collect::<BTreeMap<_, _>>();
+        self.index == tip_history
+    }
 
-        if let Some(changeset) = changeset {
-            for (height, exp_hash) in changeset {
-                let hash = self.index.get(height);
-                assert_eq!(
-                    hash,
-                    exp_hash.as_ref(),
-                    "changeset changes should be reflected in the internal index"
-                );
+    fn _check_changeset_is_applied(&self, changeset: &ChangeSet) -> bool {
+        for (height, exp_hash) in changeset {
+            if self.index.get(height) != exp_hash.as_ref() {
+                return false;
             }
         }
+        true
     }
 }
 
