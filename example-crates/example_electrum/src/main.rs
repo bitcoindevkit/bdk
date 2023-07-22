@@ -278,7 +278,9 @@ fn main() -> anyhow::Result<()> {
 
         let indexed_additions = {
             let mut additions = IndexedAdditions::<ConfirmationHeightAnchor, _>::default();
-            let (_, index_additions) = graph.index.reveal_to_target_multi(&final_update.keychain);
+            let (_, index_additions) = graph
+                .index
+                .reveal_to_target_multi(&final_update.last_active_indices);
             additions.append(IndexedAdditions {
                 index_additions,
                 ..Default::default()

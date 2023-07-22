@@ -10,9 +10,13 @@ use bitcoin::BlockHash;
 /// A structure that represents changes to [`LocalChain`].
 pub type ChangeSet = BTreeMap<u32, Option<BlockHash>>;
 
-/// A blockchain of [`LocalChain`].
+/// A [`LocalChain`] checkpoint is used to find the agreement point between two chains and as a
+/// transaction anchor.
 ///
-/// The in a linked-list with newer blocks pointing to older ones.
+/// Each checkpoint contains the height and hash of a block ([`BlockId`]).
+///
+/// Internaly, checkpoints are nodes of a linked-list. This allows the caller to view the entire
+/// chain without holding a lock to [`LocalChain`].
 #[derive(Debug, Clone)]
 pub struct CheckPoint(Arc<CPInner>);
 
@@ -382,7 +386,7 @@ impl LocalChain {
         }
     }
 
-    /// Get a reference to the internal index mapping the height to block hash
+    /// Get a reference to the internal index mapping the height to block hash.
     pub fn heights(&self) -> &BTreeMap<u32, BlockHash> {
         &self.index
     }

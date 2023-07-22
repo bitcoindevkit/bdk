@@ -91,8 +91,9 @@ impl<K> AsRef<BTreeMap<K, u32>> for DerivationAdditions<K> {
 /// [`LocalChain`]: local_chain::LocalChain
 #[derive(Debug, Clone)]
 pub struct LocalUpdate<K, A> {
-    /// Last active derivation index per keychain (`K`).
-    pub keychain: BTreeMap<K, u32>,
+    /// Contains the last active derivation indices per keychain (`K`), which is used to update the
+    /// [`KeychainTxOutIndex`].
+    pub last_active_indices: BTreeMap<K, u32>,
 
     /// Update for the [`TxGraph`].
     pub graph: TxGraph<A>,
@@ -104,12 +105,12 @@ pub struct LocalUpdate<K, A> {
 }
 
 impl<K, A> LocalUpdate<K, A> {
-    /// Construct a [`LocalUpdate`] with a given [`CheckPoint`] tip.
+    /// Construct a [`LocalUpdate`] with a given [`local_chain::Update`].
     ///
     /// [`CheckPoint`]: local_chain::CheckPoint
     pub fn new(chain_update: local_chain::Update) -> Self {
         Self {
-            keychain: BTreeMap::new(),
+            last_active_indices: BTreeMap::new(),
             graph: TxGraph::default(),
             chain: chain_update,
         }

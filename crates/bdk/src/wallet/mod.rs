@@ -1711,7 +1711,7 @@ impl<D> Wallet<D> {
         let (_, index_additions) = self
             .indexed_graph
             .index
-            .reveal_to_target_multi(&update.keychain);
+            .reveal_to_target_multi(&update.last_active_indices);
         changeset.append(ChangeSet::from(IndexedAdditions::from(index_additions)));
         changeset.append(ChangeSet::from(
             self.indexed_graph.apply_update(update.graph),

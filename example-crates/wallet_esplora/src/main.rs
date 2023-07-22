@@ -59,7 +59,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let get_heights = wallet.tx_graph().missing_blocks(wallet.local_chain());
     let chain_update = client.update_local_chain(prev_tip, get_heights)?;
     let update = LocalUpdate {
-        keychain: last_active_indices,
+        last_active_indices,
         graph: update_graph,
         ..LocalUpdate::new(chain_update)
     };

@@ -123,7 +123,7 @@ fn update_local_chain() {
             },
         },
         // Introduce an older checkpoint (A) that is not directly behind PoA
-        //        | 1 | 2 | 3
+        //        | 2 | 3 | 4
         // chain  |     B   C
         // update | A       C
         TestLocalChain {

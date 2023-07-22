@@ -282,7 +282,6 @@ impl EsploraAsyncExt for esplora_client::AsyncClient {
                     async move { client.get_tx_status(&txid).await.map(|s| (txid, s)) }
                 })
                 .collect::<FuturesOrdered<_>>();
-            // .collect::<Vec<JoinHandle<Result<(Txid, TxStatus), Error>>>>();
 
             if handles.is_empty() {
                 break;

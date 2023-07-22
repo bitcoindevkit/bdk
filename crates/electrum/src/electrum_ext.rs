@@ -69,7 +69,7 @@ impl<K, A: Anchor> ElectrumUpdate<K, A> {
             }
         }
         Ok(LocalUpdate {
-            keychain: self.keychain_update,
+            last_active_indices: self.keychain_update,
             graph: graph_update,
             chain: local_chain::Update {
                 tip: self.new_tip,
@@ -93,7 +93,6 @@ impl<K> ElectrumUpdate<K, ConfirmationHeightAnchor> {
         missing: Vec<Txid>,
     ) -> Result<LocalUpdate<K, ConfirmationTimeAnchor>, Error> {
         let update = self.finalize(client, seen_at, missing)?;
-        // client.batch_transaction_get(txid)
 
         let relevant_heights = {
             let mut visited_heights = HashSet::new();
@@ -141,7 +140,7 @@ impl<K> ElectrumUpdate<K, ConfirmationHeightAnchor> {
         };
 
         Ok(LocalUpdate {
-            keychain: update.keychain,
+            last_active_indices: update.last_active_indices,
             graph: {
                 let mut graph = TxGraph::default();
                 graph.apply_additions(graph_additions);
