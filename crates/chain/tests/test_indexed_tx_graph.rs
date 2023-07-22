@@ -107,11 +107,11 @@ fn insert_relevant_txs() {
 
 fn test_list_owned_txouts() {
     // Create Local chains
-
-    let local_chain = (0..150)
-        .map(|i| (i as u32, Some(h!("random"))))
-        .collect::<BTreeMap<u32, Option<BlockHash>>>();
-    let local_chain = LocalChain::from(local_chain);
+    let local_chain = LocalChain::from(
+        (0..150)
+            .map(|i| (i as u32, h!("random")))
+            .collect::<BTreeMap<u32, BlockHash>>(),
+    );
 
     // Initiate IndexedTxGraph
 

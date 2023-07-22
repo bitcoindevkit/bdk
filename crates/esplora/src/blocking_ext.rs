@@ -6,8 +6,8 @@ use bdk_chain::collections::{BTreeMap, BTreeSet};
 use bdk_chain::{
     bitcoin::{BlockHash, Script},
     local_chain::{self, CheckPoint},
+    BlockId, ConfirmationTimeAnchor, TxGraph,
 };
-use bdk_chain::{BlockId, ConfirmationTimeAnchor, TxGraph};
 use esplora_client::{Error, TxStatus};
 
 use crate::{anchor_from_status, ASSUME_FINAL_DEPTH};

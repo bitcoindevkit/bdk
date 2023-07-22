@@ -113,17 +113,25 @@ impl IntoIterator for CheckPoint {
     }
 }
 
-/// Represents an update to [`LocalChain`].
+/// A struct to update [`LocalChain`].
+///
+/// This is used as input for [`LocalChain::apply_update`]. It contains the update's chain `tip` and
+/// a `bool` which signals whether this update can introduce blocks below the original chain's tip
+/// without invalidating blocks residing on the original chain. Block-by-block syncing mechanisms
+/// would typically create updates that builds upon the previous tip. In this case, this paramater
+/// would be `false`. Script-pubkey based syncing mechanisms may not introduce transactions in a
+/// chronological order so some updates require introducing older blocks (to anchor older
+/// transactions). For script-pubkey based syncing, this parameter would typically be `true`.
 #[derive(Debug, Clone)]
 pub struct Update {
-    /// The update's new [`CheckPoint`] tip.
+    /// The update chain's new tip.
     pub tip: CheckPoint,
 
     /// Whether the update allows for introducing older blocks.
     ///
-    /// Refer to [`LocalChain::apply_update`] for more.
+    /// Refer to [struct-level documentation] for more.
     ///
-    /// [`LocalChain::apply_update`]: crate::local_chain::LocalChain::apply_update
+    /// [struct-level documentation]: Update
     pub introduce_older_blocks: bool,
 }
 
@@ -143,12 +151,6 @@ impl PartialEq for LocalChain {
 impl From<LocalChain> for BTreeMap<u32, BlockHash> {
     fn from(value: LocalChain) -> Self {
         value.index
-    }
-}
-
-impl From<ChangeSet> for LocalChain {
-    fn from(value: ChangeSet) -> Self {
-        Self::from_changeset(value)
     }
 }
 
@@ -244,18 +246,9 @@ impl LocalChain {
         self.tip.is_none()
     }
 
-    /// Updates [`Self`] with the given `update_tip`.
+    /// Applies the given `update` to the chain.
     ///
-    /// `introduce_older_blocks` specifies whether the `update_tip`'s history can introduce blocks
-    /// below the original chain's tip without invalidating blocks. Block-by-block syncing
-    /// mechanisms would typically create updates that builds upon the previous tip. In this case,
-    /// this paramater would be false. Script-pubkey based syncing mechanisms may not introduce
-    /// transactions in a chronological order so some updates require introducing older blocks (to
-    /// anchor older transactions). For script-pubkey based syncing, this parameter would typically
-    /// be true.
-    ///
-    /// The method returns [`ChangeSet`] on success. This represents the applied changes to
-    /// [`Self`].
+    /// The method returns [`ChangeSet`] on success. This represents the applied changes to `self`.
     ///
     /// To update, the `update_tip` must *connect* with `self`. If `self` and `update_tip` has a
     /// mutual checkpoint (same height and hash), it can connect if:
@@ -275,7 +268,7 @@ impl LocalChain {
     ///
     /// An error will occur if the update does not correctly connect with `self`.
     ///
-    /// Refer to [module-level documentation] for more.
+    /// Refer to [`Update`] for more about the update struct.
     ///
     /// [module-level documentation]: crate::local_chain
     pub fn apply_update(&mut self, update: Update) -> Result<ChangeSet, CannotConnectError> {

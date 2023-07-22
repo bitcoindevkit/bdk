@@ -603,18 +603,16 @@ impl<A: Anchor> TxGraph<A> {
     /// This works by scanning through anchors, and seeing whether the anchor block of the anchor
     /// exists in the [`LocalChain`].
     pub fn missing_blocks<'a>(&'a self, chain: &'a LocalChain) -> impl Iterator<Item = u32> + 'a {
+        let mut last_block = Option::<BlockId>::None;
         self.anchors
             .iter()
             .map(|(a, _)| a.anchor_block())
-            .filter({
-                let mut last_block = Option::<BlockId>::None;
-                move |block| {
-                    if last_block.as_ref() == Some(block) {
-                        false
-                    } else {
-                        last_block = Some(*block);
-                        true
-                    }
+            .filter(move |block| {
+                if last_block.as_ref() == Some(block) {
+                    false
+                } else {
+                    last_block = Some(*block);
+                    true
                 }
             })
             .filter_map(|block| match chain.heights().get(&block.height) {
