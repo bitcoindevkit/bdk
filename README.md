@@ -52,3 +52,15 @@ Fully working examples of how to use these components are in `/example-crates`
 [`rust-bitcoin`]: https://github.com/rust-bitcoin/rust-bitcoin
 [`esplora-client`]: https://docs.rs/esplora-client/0.3.0/esplora_client/
 [`electrum-client`]: https://docs.rs/electrum-client/0.13.0/electrum_client/
+
+## Minimum Supported Rust Version (MSRV)
+This library should compile with any combination of features with Rust 1.57.0.
+
+To build with the MSRV you will need to pin dependencies as follows:
+
+```
+# log 0.4.19 has MSRV 1.60.0+
+cargo update -p log --precise "0.4.18"
+# tempfile 3.7.0 has MSRV 1.63.0
+cargo update -p tempfile --precise "3.6.0"
+```

@@ -13,7 +13,7 @@ edition = "2021"
 rust-version = "1.57"
 
 [dependencies]
-log = "=0.4.18"
+log = "0.4"
 rand = "^0.8"
 miniscript = { version = "9", features = ["serde"], default-features = false }
 bitcoin = { version = "0.29", features = ["serde", "base64", "rand"], default-features = false }
