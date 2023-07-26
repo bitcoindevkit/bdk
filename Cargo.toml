@@ -1,6 +1,6 @@
 [package]
 name = "jitash-bdk"
-version = "0.28.0"
+version = "0.28.1"
 edition = "2018"
 authors = ["Jitash <jitash.cn@gmail.com>"]
 homepage = "https://bitcoindevkit.org"
