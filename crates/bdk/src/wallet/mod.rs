@@ -66,7 +66,7 @@ use crate::descriptor::{
     calc_checksum, into_wallet_descriptor_checked, DerivedDescriptor, DescriptorMeta,
     ExtendedDescriptor, ExtractPolicy, IntoWalletDescriptor, Policy, XKeyUtils,
 };
-use crate::error::{Error, MiniscriptPsbtError};
+use crate::error::{CalculateFeeError, Error, MiniscriptPsbtError};
 use crate::psbt::PsbtUtils;
 use crate::signer::SignerError;
 use crate::types::*;
@@ -430,27 +430,52 @@ impl<D> Wallet<D> {
             .next()
     }
 
-    /// Return a single transactions made and received by the wallet
+    /// Calculates the fee of a given transaction. Returns 0 if `tx` is a coinbase transaction.
     ///
-    /// Optionally fill the [`TransactionDetails::transaction`] field with the raw transaction if
-    /// `include_raw` is `true`.
-    pub fn get_tx(&self, txid: Txid, include_raw: bool) -> Option<TransactionDetails> {
+    /// Note `tx` does not have to be in the graph for this to work.
+    pub fn calculate_fee(&self, tx: &Transaction) -> Result<u64, CalculateFeeError> {
+        match self.indexed_graph.graph().calculate_fee(tx) {
+            None => Err(CalculateFeeError::MissingTxOut),
+            Some(fee) if fee < 0 => Err(CalculateFeeError::NegativeFee(fee)),
+            Some(fee) => Ok(u64::try_from(fee).unwrap()),
+        }
+    }
+
+    /// Calculate the `FeeRate` for a given transaction.
+    ///
+    /// Note `tx` does not have to be in the graph for this to work.
+    pub fn calculate_fee_rate(&self, tx: &Transaction) -> Result<FeeRate, CalculateFeeError> {
+        self.calculate_fee(tx).map(|fee| {
+            let weight = tx.weight();
+            FeeRate::from_wu(fee, weight)
+        })
+    }
+
+    /// Computes total input value going from script pubkeys in the index (sent) and the total output
+    /// value going to script pubkeys in the index (received) in `tx`. For the `sent` to be computed
+    /// correctly, the output being spent must have already been scanned by the index. Calculating
+    /// received just uses the transaction outputs directly, so it will be correct even if it has not
+    /// been scanned.
+    pub fn sent_and_received(&self, tx: &Transaction) -> (u64, u64) {
+        self.indexed_graph.index.sent_and_received(tx)
+    }
+
+    /// Return a single `CanonicalTx` made and received by the wallet or `None` if it doesn't
+    /// exist in the wallet
+    pub fn get_tx(
+        &self,
+        txid: Txid,
+    ) -> Option<CanonicalTx<'_, Transaction, ConfirmationTimeAnchor>> {
         let graph = self.indexed_graph.graph();
 
-        let canonical_tx = CanonicalTx {
+        Some(CanonicalTx {
             chain_position: graph.get_chain_position(
                 &self.chain,
                 self.chain.tip().map(|cp| cp.block_id()).unwrap_or_default(),
                 txid,
             )?,
             tx_node: graph.get_tx_node(txid)?,
-        };
-
-        Some(new_tx_details(
-            &self.indexed_graph,
-            canonical_tx,
-            include_raw,
-        ))
+        })
     }
 
     /// Add a new checkpoint to the wallet's internal view of the chain.
@@ -603,7 +628,7 @@ impl<D> Wallet<D> {
     /// # let descriptor = "wpkh(tpubD6NzVbkrYhZ4Xferm7Pz4VnjdcDPFyjVu5K4iZXQ4pVN8Cks4pHVowTBXBKRhX64pkRyJZJN5xAKj4UDNnLPb5p2sSKXhewoYx5GbTdUFWq/*)";
     /// # let mut wallet = doctest_wallet!();
     /// # let to_address = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap().assume_checked();
-    /// let (psbt, details) = {
+    /// let psbt = {
     ///    let mut builder =  wallet.build_tx();
     ///    builder
     ///        .add_recipient(to_address.script_pubkey(), 50_000);
@@ -628,7 +653,7 @@ impl<D> Wallet<D> {
         &mut self,
         coin_selection: Cs,
         params: TxParams,
-    ) -> Result<(psbt::PartiallySignedTransaction, TransactionDetails), Error>
+    ) -> Result<psbt::PartiallySignedTransaction, Error>
     where
         D: PersistBackend<ChangeSet>,
     {
@@ -976,20 +1001,8 @@ impl<D> Wallet<D> {
         // sort input/outputs according to the chosen algorithm
         params.ordering.sort_tx(&mut tx);
 
-        let txid = tx.txid();
-        let sent = coin_selection.local_selected_amount();
         let psbt = self.complete_transaction(tx, coin_selection.selected, params)?;
-
-        let transaction_details = TransactionDetails {
-            transaction: None,
-            txid,
-            confirmation_time: ConfirmationTime::Unconfirmed { last_seen: 0 },
-            received,
-            sent,
-            fee: Some(fee_amount),
-        };
-
-        Ok((psbt, transaction_details))
+        Ok(psbt)
     }
 
     /// Bump the fee of a transaction previously created with this wallet.
@@ -1008,7 +1021,7 @@ impl<D> Wallet<D> {
     /// # let descriptor = "wpkh(tpubD6NzVbkrYhZ4Xferm7Pz4VnjdcDPFyjVu5K4iZXQ4pVN8Cks4pHVowTBXBKRhX64pkRyJZJN5xAKj4UDNnLPb5p2sSKXhewoYx5GbTdUFWq/*)";
     /// # let mut wallet = doctest_wallet!();
     /// # let to_address = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap().assume_checked();
-    /// let (mut psbt, _) = {
+    /// let mut psbt = {
     ///     let mut builder = wallet.build_tx();
     ///     builder
     ///         .add_recipient(to_address.script_pubkey(), 50_000)
@@ -1018,7 +1031,7 @@ impl<D> Wallet<D> {
     /// let _ = wallet.sign(&mut psbt, SignOptions::default())?;
     /// let tx = psbt.extract_tx();
     /// // broadcast tx but it's taking too long to confirm so we want to bump the fee
-    /// let (mut psbt, _) =  {
+    /// let mut psbt =  {
     ///     let mut builder = wallet.build_fee_bump(tx.txid())?;
     ///     builder
     ///         .fee_rate(bdk::FeeRate::from_sat_per_vb(5.0));
@@ -1179,7 +1192,7 @@ impl<D> Wallet<D> {
     /// # let descriptor = "wpkh(tpubD6NzVbkrYhZ4Xferm7Pz4VnjdcDPFyjVu5K4iZXQ4pVN8Cks4pHVowTBXBKRhX64pkRyJZJN5xAKj4UDNnLPb5p2sSKXhewoYx5GbTdUFWq/*)";
     /// # let mut wallet = doctest_wallet!();
     /// # let to_address = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap().assume_checked();
-    /// let (mut psbt, _) = {
+    /// let mut psbt = {
     ///     let mut builder = wallet.build_tx();
     ///     builder.add_recipient(to_address.script_pubkey(), 50_000);
     ///     builder.finish()?
@@ -1735,7 +1748,7 @@ impl<D> Wallet<D> {
         Ok(())
     }
 
-    /// Commits all curently [`staged`] changed to the persistence backend returning and error when
+    /// Commits all currently [`staged`] changed to the persistence backend returning and error when
     /// this fails.
     ///
     /// This returns whether the `update` resulted in any changes.
@@ -1823,61 +1836,6 @@ fn new_local_utxo(
         confirmation_time: full_txo.chain_position.into(),
         keychain,
         derivation_index,
-    }
-}
-
-fn new_tx_details(
-    indexed_graph: &IndexedTxGraph<ConfirmationTimeAnchor, KeychainTxOutIndex<KeychainKind>>,
-    canonical_tx: CanonicalTx<'_, Transaction, ConfirmationTimeAnchor>,
-    include_raw: bool,
-) -> TransactionDetails {
-    let graph = indexed_graph.graph();
-    let index = &indexed_graph.index;
-    let tx = canonical_tx.tx_node.tx;
-
-    let received = tx
-        .output
-        .iter()
-        .map(|txout| {
-            if index.index_of_spk(&txout.script_pubkey).is_some() {
-                txout.value
-            } else {
-                0
-            }
-        })
-        .sum();
-
-    let sent = tx
-        .input
-        .iter()
-        .map(|txin| {
-            if let Some((_, txout)) = index.txout(txin.previous_output) {
-                txout.value
-            } else {
-                0
-            }
-        })
-        .sum();
-
-    let inputs = tx
-        .input
-        .iter()
-        .map(|txin| {
-            graph
-                .get_txout(txin.previous_output)
-                .map(|txout| txout.value)
-        })
-        .sum::<Option<u64>>();
-    let outputs = tx.output.iter().map(|txout| txout.value).sum();
-    let fee = inputs.map(|inputs| inputs.saturating_sub(outputs));
-
-    TransactionDetails {
-        transaction: if include_raw { Some(tx.clone()) } else { None },
-        txid: canonical_tx.tx_node.txid,
-        received,
-        sent,
-        fee,
-        confirmation_time: canonical_tx.chain_position.cloned().into(),
     }
 }
 

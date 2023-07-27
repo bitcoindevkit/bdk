@@ -86,7 +86,7 @@
 //!     .unwrap()
 //!     .require_network(Network::Testnet)
 //!     .unwrap();
-//! let (psbt, details) = {
+//! let psbt = {
 //!     let mut builder = wallet.build_tx().coin_selection(AlwaysSpendEverything);
 //!     builder.add_recipient(to_address.script_pubkey(), 50_000);
 //!     builder.finish()?

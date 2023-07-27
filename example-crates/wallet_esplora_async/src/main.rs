@@ -87,7 +87,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .add_recipient(faucet_address.script_pubkey(), SEND_AMOUNT)
         .enable_rbf();
 
-    let (mut psbt, _) = tx_builder.finish()?;
+    let mut psbt = tx_builder.finish()?;
     let finalized = wallet.sign(&mut psbt, SignOptions::default())?;
     assert!(finalized);
 

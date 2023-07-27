@@ -29,7 +29,7 @@ extern crate bip39;
 
 #[allow(unused_imports)]
 #[macro_use]
-pub(crate) mod error;
+pub mod error;
 pub mod descriptor;
 pub mod keys;
 pub mod psbt;

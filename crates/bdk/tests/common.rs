@@ -1,8 +1,11 @@
 #![allow(unused)]
-use bdk::{wallet::AddressIndex, Wallet};
+
+use bdk::{wallet::AddressIndex, KeychainKind, LocalUtxo, Wallet};
+use bdk_chain::indexed_tx_graph::Indexer;
 use bdk_chain::{BlockId, ConfirmationTime};
 use bitcoin::hashes::Hash;
-use bitcoin::{BlockHash, Network, Transaction, TxOut};
+use bitcoin::{Address, BlockHash, Network, OutPoint, Transaction, TxIn, TxOut, Txid};
+use std::str::FromStr;
 
 /// Return a fake wallet that appears to be funded for testing.
 pub fn get_funded_wallet_with_change(
@@ -10,16 +13,52 @@ pub fn get_funded_wallet_with_change(
     change: Option<&str>,
 ) -> (Wallet, bitcoin::Txid) {
     let mut wallet = Wallet::new_no_persist(descriptor, change, Network::Regtest).unwrap();
-    let address = wallet.get_address(AddressIndex::New).address;
+    let change_address = wallet.get_address(AddressIndex::New).address;
+    let sendto_address = Address::from_str("bcrt1q3qtze4ys45tgdvguj66zrk4fu6hq3a3v9pfly5")
+        .expect("address")
+        .require_network(Network::Regtest)
+        .unwrap();
 
-    let tx = Transaction {
+    let tx0 = Transaction {
         version: 1,
         lock_time: bitcoin::absolute::LockTime::ZERO,
-        input: vec![],
-        output: vec![TxOut {
-            value: 50_000,
-            script_pubkey: address.script_pubkey(),
+        input: vec![TxIn {
+            previous_output: OutPoint {
+                txid: Txid::all_zeros(),
+                vout: 0,
+            },
+            script_sig: Default::default(),
+            sequence: Default::default(),
+            witness: Default::default(),
         }],
+        output: vec![TxOut {
+            value: 76_000,
+            script_pubkey: change_address.script_pubkey(),
+        }],
+    };
+
+    let tx1 = Transaction {
+        version: 1,
+        lock_time: bitcoin::absolute::LockTime::ZERO,
+        input: vec![TxIn {
+            previous_output: OutPoint {
+                txid: tx0.txid(),
+                vout: 0,
+            },
+            script_sig: Default::default(),
+            sequence: Default::default(),
+            witness: Default::default(),
+        }],
+        output: vec![
+            TxOut {
+                value: 50_000,
+                script_pubkey: change_address.script_pubkey(),
+            },
+            TxOut {
+                value: 25_000,
+                script_pubkey: sendto_address.script_pubkey(),
+            },
+        ],
     };
 
     wallet
@@ -29,16 +68,31 @@ pub fn get_funded_wallet_with_change(
         })
         .unwrap();
     wallet
+        .insert_checkpoint(BlockId {
+            height: 2_000,
+            hash: BlockHash::all_zeros(),
+        })
+        .unwrap();
+    wallet
         .insert_tx(
-            tx.clone(),
+            tx0,
             ConfirmationTime::Confirmed {
                 height: 1_000,
                 time: 100,
             },
         )
         .unwrap();
+    wallet
+        .insert_tx(
+            tx1.clone(),
+            ConfirmationTime::Confirmed {
+                height: 2_000,
+                time: 200,
+            },
+        )
+        .unwrap();
 
-    (wallet, tx.txid())
+    (wallet, tx1.txid())
 }
 
 pub fn get_funded_wallet(descriptor: &str) -> (Wallet, bitcoin::Txid) {

@@ -32,7 +32,7 @@
 //!     .do_not_spend_change()
 //!     // Turn on RBF signaling
 //!     .enable_rbf();
-//! let (psbt, tx_details) = tx_builder.finish()?;
+//! let psbt = tx_builder.finish()?;
 //! # Ok::<(), bdk::Error>(())
 //! ```
 
@@ -48,10 +48,7 @@ use bitcoin::{absolute, script::PushBytes, OutPoint, ScriptBuf, Sequence, Transa
 
 use super::coin_selection::{CoinSelectionAlgorithm, DefaultCoinSelectionAlgorithm};
 use super::ChangeSet;
-use crate::{
-    types::{FeeRate, KeychainKind, LocalUtxo, WeightedUtxo},
-    TransactionDetails,
-};
+use crate::types::{FeeRate, KeychainKind, LocalUtxo, WeightedUtxo};
 use crate::{Error, Utxo, Wallet};
 /// Context in which the [`TxBuilder`] is valid
 pub trait TxBuilderContext: core::fmt::Debug + Default + Clone {}
@@ -85,7 +82,7 @@ impl TxBuilderContext for BumpFee {}
 /// # let addr1 = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap().assume_checked();
 /// # let addr2 = addr1.clone();
 /// // chaining
-/// let (psbt1, details) = {
+/// let psbt1 = {
 ///     let mut builder = wallet.build_tx();
 ///     builder
 ///         .ordering(TxOrdering::Untouched)
@@ -95,7 +92,7 @@ impl TxBuilderContext for BumpFee {}
 /// };
 ///
 /// // non-chaining
-/// let (psbt2, details) = {
+/// let psbt2 = {
 ///     let mut builder = wallet.build_tx();
 ///     builder.ordering(TxOrdering::Untouched);
 ///     for addr in &[addr1, addr2] {
@@ -531,7 +528,7 @@ impl<'a, D, Cs: CoinSelectionAlgorithm, Ctx: TxBuilderContext> TxBuilder<'a, D, 
     /// Returns the [`BIP174`] "PSBT" and summary details about the transaction.
     ///
     /// [`BIP174`]: https://github.com/bitcoin/bips/blob/master/bip-0174.mediawiki
-    pub fn finish(self) -> Result<(Psbt, TransactionDetails), Error>
+    pub fn finish(self) -> Result<Psbt, Error>
     where
         D: PersistBackend<ChangeSet>,
     {
@@ -645,7 +642,7 @@ impl<'a, D, Cs: CoinSelectionAlgorithm> TxBuilder<'a, D, Cs, CreateTx> {
     ///     .drain_to(to_address.script_pubkey())
     ///     .fee_rate(bdk::FeeRate::from_sat_per_vb(5.0))
     ///     .enable_rbf();
-    /// let (psbt, tx_details) = tx_builder.finish()?;
+    /// let psbt = tx_builder.finish()?;
     /// # Ok::<(), bdk::Error>(())
     /// ```
     ///

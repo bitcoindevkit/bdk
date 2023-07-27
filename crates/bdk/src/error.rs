@@ -9,6 +9,10 @@
 // You may not use this file except in accordance with one or both of these
 // licenses.
 
+//! Errors
+//!
+//! This module defines the errors that can be thrown by [`crate`] functions.
+
 use crate::bitcoin::Network;
 use crate::{descriptor, wallet};
 use alloc::{string::String, vec::Vec};
@@ -89,7 +93,17 @@ pub enum Error {
     Psbt(bitcoin::psbt::Error),
 }
 
+/// Errors returned by `Wallet::calculate_fee`.
+#[derive(Debug)]
+pub enum CalculateFeeError {
+    /// Missing `TxOut` for one of the inputs of the tx
+    MissingTxOut,
+    /// When the transaction is invalid according to the graph it has a negative fee
+    NegativeFee(i64),
+}
+
 /// Errors returned by miniscript when updating inconsistent PSBTs
+#[allow(missing_docs)] // TODO add docs
 #[derive(Debug, Clone)]
 pub enum MiniscriptPsbtError {
     Conversion(miniscript::descriptor::ConversionError),
