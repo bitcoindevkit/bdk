@@ -212,7 +212,7 @@ fn test_list_owned_txouts() {
             (
                 *tx,
                 local_chain
-                    .heights()
+                    .blocks()
                     .get(&height)
                     .cloned()
                     .map(|hash| BlockId { height, hash })
@@ -232,7 +232,7 @@ fn test_list_owned_txouts() {
         |height: u32,
          graph: &IndexedTxGraph<ConfirmationHeightAnchor, KeychainTxOutIndex<String>>| {
             let chain_tip = local_chain
-                .heights()
+                .blocks()
                 .get(&height)
                 .map(|&hash| BlockId { height, hash })
                 .unwrap_or_else(|| panic!("block must exist at {}", height));

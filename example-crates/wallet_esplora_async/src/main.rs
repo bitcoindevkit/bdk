@@ -57,8 +57,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (update_graph, last_active_indices) = client
         .update_tx_graph(keychain_spks, None, None, STOP_GAP, PARALLEL_REQUESTS)
         .await?;
-    let get_heights = wallet.tx_graph().missing_heights(wallet.local_chain());
-    let chain_update = client.update_local_chain(prev_tip, get_heights).await?;
+    let missing_heights = wallet.tx_graph().missing_heights(wallet.local_chain());
+    let chain_update = client.update_local_chain(prev_tip, missing_heights).await?;
     let update = LocalUpdate {
         last_active_indices,
         graph: update_graph,

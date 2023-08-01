@@ -8,6 +8,9 @@ use alloc::sync::Arc;
 use bitcoin::BlockHash;
 
 /// A structure that represents changes to [`LocalChain`].
+///
+/// The key represents the block height, and the value either represents added a new [`CheckPoint`]
+/// (if [`Some`]), or removing a [`CheckPoint`] (if [`None`]).
 pub type ChangeSet = BTreeMap<u32, Option<BlockHash>>;
 
 /// A [`LocalChain`] checkpoint is used to find the agreement point between two chains and as a
@@ -15,8 +18,9 @@ pub type ChangeSet = BTreeMap<u32, Option<BlockHash>>;
 ///
 /// Each checkpoint contains the height and hash of a block ([`BlockId`]).
 ///
-/// Internaly, checkpoints are nodes of a linked-list. This allows the caller to view the entire
-/// chain without holding a lock to [`LocalChain`].
+/// Internaly, checkpoints are nodes of a reference-counted linked-list. This allows the caller to
+/// cheaply clone a [`CheckPoint`] without copying the whole list and to view the entire chain
+/// without holding a lock on [`LocalChain`].
 #[derive(Debug, Clone)]
 pub struct CheckPoint(Arc<CPInner>);
 
@@ -54,10 +58,7 @@ impl CheckPoint {
     ///
     /// Returns an `Err(self)` if there is block which does not have a greater height than the
     /// previous one.
-    pub fn extend_with_blocks(
-        self,
-        blocks: impl IntoIterator<Item = BlockId>,
-    ) -> Result<Self, Self> {
+    pub fn extend(self, blocks: impl IntoIterator<Item = BlockId>) -> Result<Self, Self> {
         let mut curr = self.clone();
         for block in blocks {
             curr = curr.push(block).map_err(|_| self.clone())?;
@@ -120,12 +121,15 @@ impl IntoIterator for CheckPoint {
 /// A struct to update [`LocalChain`].
 ///
 /// This is used as input for [`LocalChain::apply_update`]. It contains the update's chain `tip` and
-/// a `bool` which signals whether this update can introduce blocks below the original chain's tip
-/// without invalidating blocks residing on the original chain. Block-by-block syncing mechanisms
-/// would typically create updates that builds upon the previous tip. In this case, this paramater
-/// would be `false`. Script-pubkey based syncing mechanisms may not introduce transactions in a
-/// chronological order so some updates require introducing older blocks (to anchor older
-/// transactions). For script-pubkey based syncing, this parameter would typically be `true`.
+/// a flag `introduce_older_blocks` which signals whether this update intends to introduce missing
+/// blocks to the original chain.
+///
+/// Block-by-block syncing mechanisms would typically create updates that builds upon the previous
+/// tip. In this case, `introduce_older_blocks` would be `false`.
+///
+/// Script-pubkey based syncing mechanisms may not introduce transactions in a chronological order
+/// so some updates require introducing older blocks (to anchor older transactions). For
+/// script-pubkey based syncing, `introduce_older_blocks` would typically be `true`.
 #[derive(Debug, Clone)]
 pub struct Update {
     /// The update chain's new tip.
@@ -205,13 +209,13 @@ impl LocalChain {
 
     /// Construct a [`LocalChain`] from a given `checkpoint` tip.
     pub fn from_tip(tip: CheckPoint) -> Self {
-        let mut _self = Self {
+        let mut chain = Self {
             tip: Some(tip),
             ..Default::default()
         };
-        _self.reindex(0);
-        debug_assert!(_self._check_index_is_consistent_with_tip());
-        _self
+        chain.reindex(0);
+        debug_assert!(chain._check_index_is_consistent_with_tip());
+        chain
     }
 
     /// Constructs a [`LocalChain`] from a [`BTreeMap`] of height to [`BlockHash`].
@@ -247,26 +251,23 @@ impl LocalChain {
 
     /// Returns whether the [`LocalChain`] is empty (has no checkpoints).
     pub fn is_empty(&self) -> bool {
-        self.tip.is_none()
+        let res = self.tip.is_none();
+        debug_assert_eq!(res, self.index.is_empty());
+        res
     }
 
     /// Applies the given `update` to the chain.
     ///
     /// The method returns [`ChangeSet`] on success. This represents the applied changes to `self`.
     ///
-    /// To update, the `update_tip` must *connect* with `self`. If `self` and `update_tip` has a
-    /// mutual checkpoint (same height and hash), it can connect if:
-    /// * The mutual checkpoint is the tip of `self`.
-    /// * An ancestor of `update_tip` has a height which is of the checkpoint one higher than the
-    ///         mutual checkpoint from `self`.
+    /// There must be no ambiguity about which of the existing chain's blocks are still valid and
+    /// which are now invalid. That is, the new chain must implicitly connect to a definite block in
+    /// the existing chain and invalidate the block after it (if it exists) by including a block at
+    /// the same height but with a different hash to explicitly exclude it as a connection point.
     ///
-    /// Additionally:
-    /// * If `self` is empty, `update_tip` will always connect.
-    /// * If `self` only has one checkpoint, `update_tip` must have an ancestor checkpoint with the
-    ///     same height as it.
-    ///
-    /// To invalidate from a given checkpoint, `update_tip` must contain an ancestor checkpoint with
-    /// the same height but different hash.
+    /// Additionally, an empty chain can be updated with any chain, and a chain with a single block
+    /// can have it's block invalidated by an update chain with a block at the same height but
+    /// different hash.
     ///
     /// # Errors
     ///
@@ -325,7 +326,7 @@ impl LocalChain {
             }
             let new_tip = match base {
                 Some(base) => Some(
-                    base.extend_with_blocks(extension.into_iter().map(BlockId::from))
+                    base.extend(extension.into_iter().map(BlockId::from))
                         .expect("extension is strictly greater than base"),
                 ),
                 None => LocalChain::from_blocks(extension).tip(),
@@ -379,7 +380,7 @@ impl LocalChain {
         self.index.iter().map(|(k, v)| (*k, Some(*v))).collect()
     }
 
-    /// Iterate over checkpoints in decending height order.
+    /// Iterate over checkpoints in descending height order.
     pub fn iter_checkpoints(&self) -> CheckPointIter {
         CheckPointIter {
             current: self.tip.as_ref().map(|tip| tip.0.clone()),
@@ -387,7 +388,7 @@ impl LocalChain {
     }
 
     /// Get a reference to the internal index mapping the height to block hash.
-    pub fn heights(&self) -> &BTreeMap<u32, BlockHash> {
+    pub fn blocks(&self) -> &BTreeMap<u32, BlockHash> {
         &self.index
     }
 

@@ -500,7 +500,7 @@ impl<D> Wallet<D> {
                 // anchor tx to checkpoint with lowest height that is >= position's height
                 let anchor = self
                     .chain
-                    .heights()
+                    .blocks()
                     .range(height..)
                     .next()
                     .ok_or(InsertTxError::ConfirmationHeightCannotBeGreaterThanTip {
@@ -1697,13 +1697,12 @@ impl<D> Wallet<D> {
     }
 
     /// Applies an update to the wallet and stages the changes (but does not [`commit`] them).
-    /// Returns whether the `update` resulted in any changes.
     ///
     /// Usually you create an `update` by interacting with some blockchain data source and inserting
     /// transactions related to your wallet into it.
     ///
     /// [`commit`]: Self::commit
-    pub fn apply_update(&mut self, update: Update) -> Result<bool, CannotConnectError>
+    pub fn apply_update(&mut self, update: Update) -> Result<(), CannotConnectError>
     where
         D: PersistBackend<ChangeSet>,
     {
@@ -1717,9 +1716,8 @@ impl<D> Wallet<D> {
             self.indexed_graph.apply_update(update.graph),
         ));
 
-        let changed = !changeset.is_empty();
         self.persist.stage(changeset);
-        Ok(changed)
+        Ok(())
     }
 
     /// Commits all curently [`staged`] changed to the persistence backend returning and error when
