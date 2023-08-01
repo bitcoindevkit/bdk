@@ -6,6 +6,7 @@ use bdk::wallet::coin_selection::LargestFirstCoinSelection;
 use bdk::wallet::AddressIndex::*;
 use bdk::wallet::{AddressIndex, AddressInfo, Balance, Wallet};
 use bdk::{Error, FeeRate, KeychainKind};
+use bdk_chain::tx_graph::CalculateFeeError;
 use bdk_chain::COINBASE_MATURITY;
 use bdk_chain::{BlockId, ConfirmationTime};
 use bitcoin::hashes::Hash;
@@ -104,7 +105,7 @@ fn test_get_funded_wallet_sent_and_received() {
 fn test_get_funded_wallet_tx_fees() {
     let (wallet, _) = get_funded_wallet(get_test_wpkh());
     assert_eq!(wallet.get_balance().confirmed, 50000);
-    let mut tx_fee_amounts: Vec<(Txid, Result<u64, bdk::error::CalculateFeeError>)> = wallet
+    let mut tx_fee_amounts: Vec<(Txid, Result<u64, CalculateFeeError>)> = wallet
         .transactions()
         .map(|ct| {
             let fee = wallet.calculate_fee(ct.node.tx);
@@ -116,7 +117,7 @@ fn test_get_funded_wallet_tx_fees() {
     assert_eq!(tx_fee_amounts.len(), 2);
     assert_matches!(
         tx_fee_amounts.get(1),
-        Some((_, Err(bdk::error::CalculateFeeError::MissingTxOut)))
+        Some((_, Err(CalculateFeeError::MissingTxOut(_))))
     );
     assert_matches!(tx_fee_amounts.get(0), Some((_, Ok(1000))))
 }
@@ -125,7 +126,7 @@ fn test_get_funded_wallet_tx_fees() {
 fn test_get_funded_wallet_tx_fee_rate() {
     let (wallet, _) = get_funded_wallet(get_test_wpkh());
     assert_eq!(wallet.get_balance().confirmed, 50000);
-    let mut tx_fee_rates: Vec<(Txid, Result<FeeRate, bdk::error::CalculateFeeError>)> = wallet
+    let mut tx_fee_rates: Vec<(Txid, Result<FeeRate, CalculateFeeError>)> = wallet
         .transactions()
         .map(|ct| {
             let fee_rate = wallet.calculate_fee_rate(ct.node.tx);
@@ -137,7 +138,7 @@ fn test_get_funded_wallet_tx_fee_rate() {
     assert_eq!(tx_fee_rates.len(), 2);
     assert_matches!(
         tx_fee_rates.get(1),
-        Some((_, Err(bdk::error::CalculateFeeError::MissingTxOut)))
+        Some((_, Err(CalculateFeeError::MissingTxOut(_))))
     );
     assert_matches!(tx_fee_rates.get(0), Some((_, Ok(_))))
 }

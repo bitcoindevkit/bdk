@@ -135,6 +135,15 @@ pub struct CanonicalTx<'a, T, A> {
     pub tx_node: TxNode<'a, T, A>,
 }
 
+/// Errors returned by `TxGraph::calculate_fee`.
+#[derive(Debug, PartialEq, Eq)]
+pub enum CalculateFeeError {
+    /// Missing `TxOut` for one or more of the inputs of the tx
+    MissingTxOut(Vec<OutPoint>),
+    /// When the transaction is invalid according to the graph it has a negative fee
+    NegativeFee(i64),
+}
+
 impl<A> TxGraph<A> {
     /// Iterate over all tx outputs known by [`TxGraph`].
     ///
@@ -236,25 +245,33 @@ impl<A> TxGraph<A> {
     }
 
     /// Calculates the fee of a given transaction. Returns 0 if `tx` is a coinbase transaction.
-    /// Returns `Some(_)` if we have all the `TxOut`s being spent by `tx` in the graph (either as
-    /// the full transactions or individual txouts). If the returned value is negative, then the
-    /// transaction is invalid according to the graph.
-    ///
-    /// Returns `None` if we're missing an input for the tx in the graph.
+    /// Returns `OK(_)` if we have all the `TxOut`s being spent by `tx` in the graph (either as
+    /// the full transactions or individual txouts).
     ///
     /// Note `tx` does not have to be in the graph for this to work.
-    pub fn calculate_fee(&self, tx: &Transaction) -> Option<i64> {
+    pub fn calculate_fee(&self, tx: &Transaction) -> Result<u64, CalculateFeeError> {
         if tx.is_coin_base() {
-            return Some(0);
+            return Ok(0);
         }
-        let inputs_sum = tx
-            .input
-            .iter()
-            .map(|txin| {
-                self.get_txout(txin.previous_output)
-                    .map(|txout| txout.value as i64)
-            })
-            .sum::<Option<i64>>()?;
+        let inputs_sum = tx.input.iter().fold(
+            (0_u64, Vec::new()),
+            |(mut sum, mut missing_outpoints), txin| match self.get_txout(txin.previous_output) {
+                None => {
+                    missing_outpoints.push(txin.previous_output);
+                    (sum, missing_outpoints)
+                }
+                Some(txout) => {
+                    sum += txout.value;
+                    (sum, missing_outpoints)
+                }
+            },
+        );
+
+        let inputs_sum = if inputs_sum.1.is_empty() {
+            Ok(inputs_sum.0 as i64)
+        } else {
+            Err(CalculateFeeError::MissingTxOut(inputs_sum.1))
+        }?;
 
         let outputs_sum = tx
             .output
@@ -262,7 +279,12 @@ impl<A> TxGraph<A> {
             .map(|txout| txout.value as i64)
             .sum::<i64>();
 
-        Some(inputs_sum - outputs_sum)
+        let fee = inputs_sum - outputs_sum;
+        if fee < 0 {
+            Err(CalculateFeeError::NegativeFee(fee))
+        } else {
+            Ok(fee as u64)
+        }
     }
 
     /// The transactions spending from this output.

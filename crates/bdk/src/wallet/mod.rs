@@ -40,6 +40,7 @@ use core::fmt;
 use core::ops::Deref;
 use miniscript::psbt::{PsbtExt, PsbtInputExt, PsbtInputSatisfier};
 
+use bdk_chain::tx_graph::CalculateFeeError;
 #[allow(unused_imports)]
 use log::{debug, error, info, trace};
 
@@ -66,7 +67,7 @@ use crate::descriptor::{
     calc_checksum, into_wallet_descriptor_checked, DerivedDescriptor, DescriptorMeta,
     ExtendedDescriptor, ExtractPolicy, IntoWalletDescriptor, Policy, XKeyUtils,
 };
-use crate::error::{CalculateFeeError, Error, MiniscriptPsbtError};
+use crate::error::{Error, MiniscriptPsbtError};
 use crate::psbt::PsbtUtils;
 use crate::signer::SignerError;
 use crate::types::*;
@@ -434,11 +435,7 @@ impl<D> Wallet<D> {
     ///
     /// Note `tx` does not have to be in the graph for this to work.
     pub fn calculate_fee(&self, tx: &Transaction) -> Result<u64, CalculateFeeError> {
-        match self.indexed_graph.graph().calculate_fee(tx) {
-            None => Err(CalculateFeeError::MissingTxOut),
-            Some(fee) if fee < 0 => Err(CalculateFeeError::NegativeFee(fee)),
-            Some(fee) => Ok(u64::try_from(fee).unwrap()),
-        }
+        self.indexed_graph.graph().calculate_fee(tx)
     }
 
     /// Calculate the `FeeRate` for a given transaction.
@@ -1072,13 +1069,12 @@ impl<D> Wallet<D> {
             return Err(Error::IrreplaceableTransaction);
         }
 
-        let fee = graph.calculate_fee(&tx).ok_or(Error::FeeRateUnavailable)?;
-        if fee < 0 {
-            // It's available but it's wrong so let's say it's unavailable
-            return Err(Error::FeeRateUnavailable)?;
-        }
-        let fee = fee as u64;
-        let feerate = FeeRate::from_wu(fee, tx.weight());
+        let fee = self
+            .calculate_fee(&tx)
+            .map_err(|_| Error::FeeRateUnavailable)?;
+        let fee_rate = self
+            .calculate_fee_rate(&tx)
+            .map_err(|_| Error::FeeRateUnavailable)?;
 
         // remove the inputs from the tx and process them
         let original_txin = tx.input.drain(..).collect::<Vec<_>>();
@@ -1162,7 +1158,7 @@ impl<D> Wallet<D> {
             utxos: original_utxos,
             bumping_fee: Some(tx_builder::PreviousFee {
                 absolute: fee,
-                rate: feerate.as_sat_per_vb(),
+                rate: fee_rate.as_sat_per_vb(),
             }),
             ..Default::default()
         };
