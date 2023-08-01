@@ -3,11 +3,14 @@ use std::{net, thread};
 use nakamoto::client::network::Services;
 use nakamoto::client::traits::Handle as HandleTrait;
 use nakamoto::client::Handle;
-use nakamoto::client::{Client, Config, Error, chan, Event};
+use nakamoto::client::{chan, Client, Config, Error, Event};
 use nakamoto::common::block::Height;
 use nakamoto::net::poll;
 
-use bdk_chain::{bitcoin::{ Script, Transaction }, BlockId, ChainOracle};
+use bdk_chain::{
+    bitcoin::{Script, Transaction},
+    BlockId, ChainOracle, TxGraph,
+};
 
 /// The network reactor we're going to use.
 type Reactor = poll::Reactor<net::TcpStream>;
@@ -46,17 +49,45 @@ impl ChainOracle for CBFClient {
     }
 }
 
+#[derive(Clone)]
 pub struct CBFClient {
     handle: Handle<poll::reactor::Waker>,
 }
 
+#[derive(Debug, Clone)]
 pub enum CBFUpdate {
-    Synced { height: Height, tip: Height },
+    Synced {
+        height: Height,
+        tip: Height,
+    },
     BlockMatched {
         transactions: Vec<Transaction>,
-        block: BlockId
+        block: BlockId,
     },
-    BlockDisconnected { block: BlockId },
+    BlockDisconnected {
+        block: BlockId,
+    },
+}
+
+pub struct CBFUpdateIterator {
+    client: CBFClient,
+}
+
+impl Iterator for CBFUpdateIterator {
+    type Item = Result<CBFUpdate, Error>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.client.watch_events() {
+            Ok(update) => {
+                if let CBFUpdate::Synced { .. } = update {
+                    None
+                } else {
+                    Some(Ok(update))
+                }
+            }
+            Err(e) => Some(Err(e)),
+        }
+    }
 }
 
 impl CBFClient {
@@ -83,6 +114,7 @@ impl CBFClient {
         Ok(())
     }
 
+    // Watch for Block events that match the scripts we're interested in
     pub fn watch_events(&self) -> Result<CBFUpdate, Error> {
         let events_chan = self.handle.events();
         loop {
@@ -90,12 +122,6 @@ impl CBFClient {
                 recv(events_chan) -> event => {
                     let event = event?;
                     match event {
-                        Event::Ready { .. } => {
-                            todo!("Handle ready event");
-                        }
-                        Event::FilterProcessed { .. } => {
-                            todo!("Handle filter processed event");
-                        }
                         Event::BlockDisconnected { hash, height, .. } => {
                             return Ok(CBFUpdate::BlockDisconnected { block: BlockId { height: height as u32, hash } });
                         }
@@ -120,6 +146,29 @@ impl CBFClient {
         }
     }
 
-    // Create a method that takes in a CBFUpdate and turns it into a 
-    // Indexed Graph update.
+    // Turns a CBFUpdate into a TxGraph update
+    pub fn into_tx_graph_update<F>(
+        &self,
+        txs: Vec<Transaction>,
+        block: BlockId,
+        is_relevant: F,
+    ) -> TxGraph<BlockId>
+    where
+        F: Fn(&Transaction) -> bool,
+    {
+        let mut tx_graph = TxGraph::default();
+        let filtered_txs = txs.into_iter().filter(|tx| is_relevant(tx));
+        for tx in filtered_txs {
+            let txid = tx.txid();
+            let _ = tx_graph.insert_anchor(txid, block);
+            let _ = tx_graph.insert_tx(tx);
+        }
+        tx_graph
+    }
+
+    pub fn iter(&self) -> CBFUpdateIterator {
+        CBFUpdateIterator {
+            client: self.clone(),
+        }
+    }
 }
