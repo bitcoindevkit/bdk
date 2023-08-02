@@ -201,3 +201,26 @@ at your option.
 Unless you explicitly state otherwise, any contribution intentionally submitted
 for inclusion in the work by you, as defined in the Apache-2.0 license, shall be
 dual licensed as above, without any additional terms or conditions.
+
+## Minimum Supported Rust Version (MSRV)
+
+This library should compile with any combination of features with Rust 1.57.0.
+
+To build with the MSRV you will need to pin dependencies as follows:
+
+```shell
+# log 0.4.19 has MSRV 1.60.0
+cargo update -p log --precise "0.4.18"
+# tempfile 3.7.0 has MSRV 1.63.0
+cargo update -p tempfile --precise "3.6.0"
+# required for sqlite feature, hashlink 0.8.2 has MSRV 1.61.0
+cargo update -p hashlink --precise "0.8.1"
+# required for compact_filters feature, regex after 1.7.3 has MSRV 1.60.0
+cargo update -p regex --precise "1.7.3"
+# zip 0.6.3 has MSRV 1.59.0 but still works
+cargo update -p zip --precise "0.6.3"
+# base64ct 1.6.0 has MSRV 1.60.0
+cargo update -p base64ct --precise "1.5.3"
+# rustix 0.38.0 has MSRV 1.65.0
+cargo update -p rustix --precise "0.37.23"
+```
