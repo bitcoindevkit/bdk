@@ -8,4 +8,4 @@ edition = "2021"
 [dependencies]
 bdk_cbf = { path = "../../crates/bdk_cbf"}
 bdk_chain = { path = "../../crates/chain"}
-bdk_cli = { path = "../example_cli" }
+example_cli = { path = "../example_cli" }

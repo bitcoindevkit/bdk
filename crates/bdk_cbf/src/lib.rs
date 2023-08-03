@@ -1,14 +1,15 @@
 use std::{net, thread};
+use core::fmt::Debug;
 
 use bdk_chain::keychain::DerivationAdditions;
 use nakamoto::client::network::Services;
 use nakamoto::client::Handle;
 use nakamoto::client::traits::Handle as HandleTrait;
 use nakamoto::client::{chan, Client, Config, Error, Event};
-use nakamoto::common::block::Height;
 use nakamoto::net::poll;
 
 pub use nakamoto::client::network::Network;
+pub use nakamoto::common::block::Height;
 
 use bdk_chain::{
     bitcoin::{Script, Transaction},
@@ -18,9 +19,12 @@ use bdk_chain::{
     BlockId, ChainOracle, ConfirmationHeightAnchor, TxGraph,
 };
 
-use core::fmt::Debug;
-
 type Reactor = poll::Reactor<net::TcpStream>;
+
+#[derive(Clone)]
+pub struct CBFClient {
+    handle: Handle<poll::reactor::Waker>,
+}
 
 impl ChainOracle for CBFClient {
     type Error = nakamoto::client::Error;
@@ -54,11 +58,6 @@ impl ChainOracle for CBFClient {
             hash: header.block_hash(),
         }))
     }
-}
-
-#[derive(Clone)]
-pub struct CBFClient {
-    handle: Handle<poll::reactor::Waker>,
 }
 
 #[derive(Debug, Clone)]
@@ -97,7 +96,11 @@ impl Iterator for CBFUpdateIterator {
 }
 
 impl CBFClient {
-    pub fn start_client(cfg: Config, peer_count: usize) -> Result<Self, Error> {
+    pub fn start_client(network: Network, peer_count: usize) -> Result<Self, Error> {
+        let cfg = Config {
+            network,
+            ..Default::default()
+        };
         let client = Client::<Reactor>::new()?;
         let handle = client.handle();
 
@@ -112,7 +115,7 @@ impl CBFClient {
         Ok(Self { handle })
     }
 
-    //create a function to watch
+    /// Given a list of scripts, start scanning the chain from the given height.
     pub fn start_scanning(
         &self,
         start_height: Height,
@@ -123,7 +126,7 @@ impl CBFClient {
         Ok(())
     }
 
-    // Watch for Block events that match the scripts we're interested in
+    /// Listen for nakamoto events that are relevant to scripts we are watching.
     pub fn watch_events(&self) -> Result<CBFUpdate, Error> {
         let events_chan = self.handle.events();
         loop {
@@ -158,7 +161,7 @@ impl CBFClient {
         }
     }
 
-    // Turns a CBFUpdate into a TxGraph update
+    /// Given a list of tuples of block and their transactions, create a TxGraph update.
     pub fn into_tx_graph_update(
         &self,
         block_txs: Vec<(BlockId, Vec<Transaction>)>,
@@ -201,7 +204,7 @@ impl CBFClient {
 
         while let Some(keychains) = Self::check_stop_gap(stop_gap, &empty_scripts_counter) {
             keychains.iter().for_each(|k| {
-                /*let (_, _) =*/ indexed_tx_graph.index.set_lookahead(k, watch_per_keychain);
+                indexed_tx_graph.index.set_lookahead(k, watch_per_keychain);
             });
 
             let mut spk_watchlist = BTreeMap::<K, Vec<Script>>::new();
@@ -244,7 +247,7 @@ impl CBFClient {
             for (k, scripts) in spk_watchlist.iter() {
                 for script in scripts {
                     let counter = empty_scripts_counter.get_mut(k).unwrap();
-                    if Self::is_script_in_udpate(script.clone(), &updates) {
+                    if Self::is_script_in_udpates(script.clone(), &updates) {
                         *counter = 0;
                     } else {
                         *counter += 1;
@@ -262,7 +265,7 @@ impl CBFClient {
         Ok(additions)
     }
 
-    fn is_script_in_udpate(script: Script, updates: &Vec<(BlockId, Vec<Transaction>)>) -> bool {
+    fn is_script_in_udpates(script: Script, updates: &Vec<(BlockId, Vec<Transaction>)>) -> bool {
         for update in updates {
             for tx in update.1.iter() {
                 for output in tx.output.iter() {
