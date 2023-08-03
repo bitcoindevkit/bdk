@@ -5,7 +5,7 @@ use std::{
 };
 
 use bdk_chain::{
-    bitcoin::{Address, BlockHash, Network, OutPoint, Txid},
+    bitcoin::{Address, Network, OutPoint, Txid},
     indexed_tx_graph::{IndexedAdditions, IndexedTxGraph},
     keychain::LocalChangeSet,
     local_chain::LocalChain,
@@ -22,8 +22,7 @@ use example_cli::{
 };
 
 const DB_MAGIC: &[u8] = b"bdk_example_electrum";
-const DB_PATH: &str = ".bdk_electrum_example.db";
-const ASSUME_FINAL_DEPTH: usize = 10;
+const DB_PATH: &str = ".bdk_example_electrum.db";
 
 #[derive(Subcommand, Debug, Clone)]
 enum ElectrumCommands {
@@ -73,11 +72,7 @@ fn main() -> anyhow::Result<()> {
         graph
     });
 
-    let chain = Mutex::new({
-        let mut chain = LocalChain::default();
-        chain.apply_changeset(init_changeset.chain_changeset);
-        chain
-    });
+    let chain = Mutex::new(LocalChain::from_changeset(init_changeset.chain_changeset));
 
     let electrum_url = match args.network {
         Network::Bitcoin => "ssl://electrum.blockstream.info:50002",
@@ -119,7 +114,7 @@ fn main() -> anyhow::Result<()> {
             stop_gap,
             scan_options,
         } => {
-            let (keychain_spks, local_chain) = {
+            let (keychain_spks, tip) = {
                 let graph = &*graph.lock().unwrap();
                 let chain = &*chain.lock().unwrap();
 
@@ -142,20 +137,13 @@ fn main() -> anyhow::Result<()> {
                     })
                     .collect::<BTreeMap<_, _>>();
 
-                let c = chain
-                    .blocks()
-                    .iter()
-                    .rev()
-                    .take(ASSUME_FINAL_DEPTH)
-                    .map(|(k, v)| (*k, *v))
-                    .collect::<BTreeMap<u32, BlockHash>>();
-
-                (keychain_spks, c)
+                let tip = chain.tip();
+                (keychain_spks, tip)
             };
 
             client
                 .scan(
-                    &local_chain,
+                    tip,
                     keychain_spks,
                     core::iter::empty(),
                     core::iter::empty(),
@@ -174,7 +162,7 @@ fn main() -> anyhow::Result<()> {
             // Get a short lock on the tracker to get the spks we're interested in
             let graph = graph.lock().unwrap();
             let chain = chain.lock().unwrap();
-            let chain_tip = chain.tip().unwrap_or_default();
+            let chain_tip = chain.tip().map(|cp| cp.block_id()).unwrap_or_default();
 
             if !(all_spks || unused_spks || utxos || unconfirmed) {
                 unused_spks = true;
@@ -254,23 +242,17 @@ fn main() -> anyhow::Result<()> {
                 }));
             }
 
-            let c = chain
-                .blocks()
-                .iter()
-                .rev()
-                .take(ASSUME_FINAL_DEPTH)
-                .map(|(k, v)| (*k, *v))
-                .collect::<BTreeMap<u32, BlockHash>>();
+            let tip = chain.tip();
 
             // drop lock on graph and chain
             drop((graph, chain));
 
             let update = client
-                .scan_without_keychain(&c, spks, txids, outpoints, scan_options.batch_size)
+                .scan_without_keychain(tip, spks, txids, outpoints, scan_options.batch_size)
                 .context("scanning the blockchain")?;
             ElectrumUpdate {
                 graph_update: update.graph_update,
-                chain_update: update.chain_update,
+                new_tip: update.new_tip,
                 keychain_update: BTreeMap::new(),
             }
         }
@@ -296,7 +278,9 @@ fn main() -> anyhow::Result<()> {
 
         let indexed_additions = {
             let mut additions = IndexedAdditions::<ConfirmationHeightAnchor, _>::default();
-            let (_, index_additions) = graph.index.reveal_to_target_multi(&final_update.keychain);
+            let (_, index_additions) = graph
+                .index
+                .reveal_to_target_multi(&final_update.last_active_indices);
             additions.append(IndexedAdditions {
                 index_additions,
                 ..Default::default()

@@ -107,11 +107,11 @@ fn insert_relevant_txs() {
 
 fn test_list_owned_txouts() {
     // Create Local chains
-
-    let local_chain = (0..150)
-        .map(|i| (i as u32, h!("random")))
-        .collect::<BTreeMap<u32, BlockHash>>();
-    let local_chain = LocalChain::from(local_chain);
+    let local_chain = LocalChain::from(
+        (0..150)
+            .map(|i| (i as u32, h!("random")))
+            .collect::<BTreeMap<u32, BlockHash>>(),
+    );
 
     // Initiate IndexedTxGraph
 
@@ -214,7 +214,8 @@ fn test_list_owned_txouts() {
                 local_chain
                     .blocks()
                     .get(&height)
-                    .map(|&hash| BlockId { height, hash })
+                    .cloned()
+                    .map(|hash| BlockId { height, hash })
                     .map(|anchor_block| ConfirmationHeightAnchor {
                         anchor_block,
                         confirmation_height: anchor_block.height,
@@ -234,7 +235,7 @@ fn test_list_owned_txouts() {
                 .blocks()
                 .get(&height)
                 .map(|&hash| BlockId { height, hash })
-                .expect("block must exist");
+                .unwrap_or_else(|| panic!("block must exist at {}", height));
             let txouts = graph
                 .graph()
                 .filter_chain_txouts(

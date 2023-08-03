@@ -4,7 +4,7 @@ use bdk_chain::{
     collections::*,
     local_chain::LocalChain,
     tx_graph::{Additions, TxGraph},
-    Append, BlockId, ChainPosition, ConfirmationHeightAnchor,
+    Anchor, Append, BlockId, ChainPosition, ConfirmationHeightAnchor,
 };
 use bitcoin::{
     hashes::Hash, BlockHash, OutPoint, PackedLockTime, Script, Transaction, TxIn, TxOut, Txid,
@@ -697,7 +697,7 @@ fn test_chain_spends() {
             let _ = graph.insert_anchor(
                 tx.txid(),
                 ConfirmationHeightAnchor {
-                    anchor_block: tip,
+                    anchor_block: tip.block_id(),
                     confirmation_height: *ht,
                 },
             );
@@ -705,10 +705,10 @@ fn test_chain_spends() {
 
     // Assert that confirmed spends are returned correctly.
     assert_eq!(
-        graph.get_chain_spend(&local_chain, tip, OutPoint::new(tx_0.txid(), 0)),
+        graph.get_chain_spend(&local_chain, tip.block_id(), OutPoint::new(tx_0.txid(), 0)),
         Some((
             ChainPosition::Confirmed(&ConfirmationHeightAnchor {
-                anchor_block: tip,
+                anchor_block: tip.block_id(),
                 confirmation_height: 98
             }),
             tx_1.txid(),
@@ -717,17 +717,17 @@ fn test_chain_spends() {
 
     // Check if chain position is returned correctly.
     assert_eq!(
-        graph.get_chain_position(&local_chain, tip, tx_0.txid()),
+        graph.get_chain_position(&local_chain, tip.block_id(), tx_0.txid()),
         // Some(ObservedAs::Confirmed(&local_chain.get_block(95).expect("block expected"))),
         Some(ChainPosition::Confirmed(&ConfirmationHeightAnchor {
-            anchor_block: tip,
+            anchor_block: tip.block_id(),
             confirmation_height: 95
         }))
     );
 
     // Even if unconfirmed tx has a last_seen of 0, it can still be part of a chain spend.
     assert_eq!(
-        graph.get_chain_spend(&local_chain, tip, OutPoint::new(tx_0.txid(), 1)),
+        graph.get_chain_spend(&local_chain, tip.block_id(), OutPoint::new(tx_0.txid(), 1)),
         Some((ChainPosition::Unconfirmed(0), tx_2.txid())),
     );
 
@@ -737,7 +737,7 @@ fn test_chain_spends() {
     // Check chain spend returned correctly.
     assert_eq!(
         graph
-            .get_chain_spend(&local_chain, tip, OutPoint::new(tx_0.txid(), 1))
+            .get_chain_spend(&local_chain, tip.block_id(), OutPoint::new(tx_0.txid(), 1))
             .unwrap(),
         (ChainPosition::Unconfirmed(1234567), tx_2.txid())
     );
@@ -754,7 +754,7 @@ fn test_chain_spends() {
 
     // Because this tx conflicts with an already confirmed transaction, chain position should return none.
     assert!(graph
-        .get_chain_position(&local_chain, tip, tx_1_conflict.txid())
+        .get_chain_position(&local_chain, tip.block_id(), tx_1_conflict.txid())
         .is_none());
 
     // Another conflicting tx that conflicts with tx_2.
@@ -773,7 +773,7 @@ fn test_chain_spends() {
     // This should return a valid observation with correct last seen.
     assert_eq!(
         graph
-            .get_chain_position(&local_chain, tip, tx_2_conflict.txid())
+            .get_chain_position(&local_chain, tip.block_id(), tx_2_conflict.txid())
             .expect("position expected"),
         ChainPosition::Unconfirmed(1234568)
     );
@@ -781,14 +781,14 @@ fn test_chain_spends() {
     // Chain_spend now catches the new transaction as the spend.
     assert_eq!(
         graph
-            .get_chain_spend(&local_chain, tip, OutPoint::new(tx_0.txid(), 1))
+            .get_chain_spend(&local_chain, tip.block_id(), OutPoint::new(tx_0.txid(), 1))
             .expect("expect observation"),
         (ChainPosition::Unconfirmed(1234568), tx_2_conflict.txid())
     );
 
     // Chain position of the `tx_2` is now none, as it is older than `tx_2_conflict`
     assert!(graph
-        .get_chain_position(&local_chain, tip, tx_2.txid())
+        .get_chain_position(&local_chain, tip.block_id(), tx_2.txid())
         .is_none());
 }
 
@@ -821,4 +821,137 @@ fn test_additions_last_seen_append() {
             Ord::max(original_ls, update_ls),
         );
     }
+}
+
+#[test]
+fn test_missing_blocks() {
+    /// An anchor implementation for testing, made up of `(the_anchor_block, random_data)`.
+    #[derive(Debug, Clone, Eq, PartialEq, PartialOrd, Ord, core::hash::Hash)]
+    struct TestAnchor(BlockId);
+
+    impl Anchor for TestAnchor {
+        fn anchor_block(&self) -> BlockId {
+            self.0
+        }
+    }
+
+    struct Scenario<'a> {
+        name: &'a str,
+        graph: TxGraph<TestAnchor>,
+        chain: LocalChain,
+        exp_heights: &'a [u32],
+    }
+
+    const fn new_anchor(height: u32, hash: BlockHash) -> TestAnchor {
+        TestAnchor(BlockId { height, hash })
+    }
+
+    fn new_scenario<'a>(
+        name: &'a str,
+        graph_anchors: &'a [(Txid, TestAnchor)],
+        chain: &'a [(u32, BlockHash)],
+        exp_heights: &'a [u32],
+    ) -> Scenario<'a> {
+        Scenario {
+            name,
+            graph: {
+                let mut g = TxGraph::default();
+                for (txid, anchor) in graph_anchors {
+                    let _ = g.insert_anchor(*txid, anchor.clone());
+                }
+                g
+            },
+            chain: {
+                let mut c = LocalChain::default();
+                for (height, hash) in chain {
+                    let _ = c.insert_block(BlockId {
+                        height: *height,
+                        hash: *hash,
+                    });
+                }
+                c
+            },
+            exp_heights,
+        }
+    }
+
+    fn run(scenarios: &[Scenario]) {
+        for scenario in scenarios {
+            let Scenario {
+                name,
+                graph,
+                chain,
+                exp_heights,
+            } = scenario;
+
+            let heights = graph.missing_heights(chain).collect::<Vec<_>>();
+            assert_eq!(&heights, exp_heights, "scenario: {}", name);
+        }
+    }
+
+    run(&[
+        new_scenario(
+            "2 txs with the same anchor (2:B) which is missing from chain",
+            &[
+                (h!("tx_1"), new_anchor(2, h!("B"))),
+                (h!("tx_2"), new_anchor(2, h!("B"))),
+            ],
+            &[(1, h!("A")), (3, h!("C"))],
+            &[2],
+        ),
+        new_scenario(
+            "2 txs with different anchors at the same height, one of the anchors is missing",
+            &[
+                (h!("tx_1"), new_anchor(2, h!("B1"))),
+                (h!("tx_2"), new_anchor(2, h!("B2"))),
+            ],
+            &[(1, h!("A")), (2, h!("B1"))],
+            &[],
+        ),
+        new_scenario(
+            "tx with 2 anchors of same height which are missing from the chain",
+            &[
+                (h!("tx"), new_anchor(3, h!("C1"))),
+                (h!("tx"), new_anchor(3, h!("C2"))),
+            ],
+            &[(1, h!("A")), (4, h!("D"))],
+            &[3],
+        ),
+        new_scenario(
+            "tx with 2 anchors at the same height, chain has this height but does not match either anchor",
+            &[
+                (h!("tx"), new_anchor(4, h!("D1"))),
+                (h!("tx"), new_anchor(4, h!("D2"))),
+            ],
+            &[(4, h!("D3")), (5, h!("E"))],
+            &[],
+        ),
+        new_scenario(
+            "tx with 2 anchors at different heights, one anchor exists in chain, should return nothing",
+            &[
+                (h!("tx"), new_anchor(3, h!("C"))),
+                (h!("tx"), new_anchor(4, h!("D"))),
+            ],
+            &[(4, h!("D")), (5, h!("E"))],
+            &[],
+        ),
+        new_scenario(
+            "tx with 2 anchors at different heights, first height is already in chain with different hash, iterator should only return 2nd height",
+            &[
+                (h!("tx"), new_anchor(5, h!("E1"))),
+                (h!("tx"), new_anchor(6, h!("F1"))),
+            ],
+            &[(4, h!("D")), (5, h!("E")), (7, h!("G"))],
+            &[6],
+        ),
+        new_scenario(
+            "tx with 2 anchors at different heights, neither height is in chain, both heights should be returned",
+            &[
+                (h!("tx"), new_anchor(3, h!("C"))),
+                (h!("tx"), new_anchor(4, h!("D"))),
+            ],
+            &[(1, h!("A")), (2, h!("B"))],
+            &[3, 4],
+        ),
+    ]);
 }

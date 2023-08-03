@@ -38,6 +38,8 @@ impl ForEachTxOut for Transaction {
 
 /// Trait that "anchors" blockchain data to a specific block of height and hash.
 ///
+/// [`Anchor`] implementations must be [`Ord`] by the anchor block's [`BlockId`] first.
+///
 /// I.e. If transaction A is anchored in block B, then if block B is in the best chain, we can
 /// assume that transaction A is also confirmed in the best chain. This does not necessarily mean
 /// that transaction A is confirmed in block B. It could also mean transaction A is confirmed in a

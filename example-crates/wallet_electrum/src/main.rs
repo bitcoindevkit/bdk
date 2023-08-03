@@ -35,7 +35,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     print!("Syncing...");
     let client = electrum_client::Client::new("ssl://electrum.blockstream.info:60002")?;
 
-    let local_chain = wallet.checkpoints();
+    let prev_tip = wallet.latest_checkpoint();
     let keychain_spks = wallet
         .spks_of_all_keychains()
         .into_iter()
@@ -52,8 +52,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         })
         .collect();
 
-    let electrum_update =
-        client.scan(local_chain, keychain_spks, None, None, STOP_GAP, BATCH_SIZE)?;
+    let electrum_update = client.scan(prev_tip, keychain_spks, None, None, STOP_GAP, BATCH_SIZE)?;
 
     println!();
 

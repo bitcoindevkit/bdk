@@ -4,3 +4,6 @@ Cargo.lock
 
 *.swp
 .idea
+
+# Example persisted files.
+*.db
