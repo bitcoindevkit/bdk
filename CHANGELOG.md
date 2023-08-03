@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.28.1]
+
+### Summary
+
+This patch release backports (from the BDK 1.0 dev branch) a fix for a bug in the policy condition calculation and adds a new taproot single key descriptor template (BIP-86). The policy condition calculation bug can cause issues when a policy subtree fails due to missing info even if it's not selected when creating a new transaction, errors on unused policy paths are now ignored.
+
+### Fixed
+
+- Backported #932 fix for policy condition calculation #1008
+
+### Added
+
+-  Backported #840 taproot descriptor template (BIP-86) #1033
+
 ## [v0.28.0]
 
 ### Summary
@@ -656,4 +670,5 @@ final transaction is created by calling `finish` on the builder.
 [v0.27.0]: https://github.com/bitcoindevkit/bdk/compare/v0.26.0...v0.27.0
 [v0.27.1]: https://github.com/bitcoindevkit/bdk/compare/v0.27.0...v0.27.1
 [v0.28.0]: https://github.com/bitcoindevkit/bdk/compare/v0.27.1...v0.28.0
-[Unreleased]: https://github.com/bitcoindevkit/bdk/compare/v0.28.0...HEAD
+[v0.28.1]: https://github.com/bitcoindevkit/bdk/compare/v0.28.0...v0.28.1
+[Unreleased]: https://github.com/bitcoindevkit/bdk/compare/v0.28.1...HEAD
