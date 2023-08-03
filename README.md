@@ -61,6 +61,8 @@ To build with the MSRV you will need to pin dependencies as follows:
 ```
 # log 0.4.19 has MSRV 1.60.0+
 cargo update -p log --precise "0.4.18"
-# tempfile 3.7.0 has MSRV 1.63.0
+# tempfile 3.7.0 has MSRV 1.63.0+
 cargo update -p tempfile --precise "3.6.0"
+# rustls 0.21.2 has MSRV 1.60.0+
+cargo update -p rustls:0.21.6 --precise "0.21.1"
 ```
