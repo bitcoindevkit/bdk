@@ -29,11 +29,12 @@ use bdk_chain::{
     IndexedTxGraph, Persist, PersistBackend,
 };
 use bitcoin::consensus::encode::serialize;
+use bitcoin::psbt;
 use bitcoin::secp256k1::Secp256k1;
-use bitcoin::util::psbt;
+use bitcoin::sighash::{EcdsaSighashType, TapSighashType};
 use bitcoin::{
-    Address, EcdsaSighashType, LockTime, Network, OutPoint, SchnorrSighashType, Script, Sequence,
-    Transaction, TxOut, Txid, Witness,
+    absolute, Address, Network, OutPoint, Script, ScriptBuf, Sequence, Transaction, TxOut, Txid,
+    Weight, Witness,
 };
 use core::fmt;
 use core::ops::Deref;
@@ -322,11 +323,11 @@ impl<D> Wallet<D> {
         let (index, spk, additions) = match address_index {
             AddressIndex::New => {
                 let ((index, spk), index_additions) = txout_index.reveal_next_spk(&keychain);
-                (index, spk.clone(), Some(index_additions))
+                (index, spk.into(), Some(index_additions))
             }
             AddressIndex::LastUnused => {
                 let ((index, spk), index_additions) = txout_index.next_unused_spk(&keychain);
-                (index, spk.clone(), Some(index_additions))
+                (index, spk.into(), Some(index_additions))
             }
             AddressIndex::Peek(index) => {
                 let (index, spk) = txout_index
@@ -396,7 +397,7 @@ impl<D> Wallet<D> {
     /// script pubkeys the wallet is storing internally).
     pub fn spks_of_all_keychains(
         &self,
-    ) -> BTreeMap<KeychainKind, impl Iterator<Item = (u32, Script)> + Clone> {
+    ) -> BTreeMap<KeychainKind, impl Iterator<Item = (u32, ScriptBuf)> + Clone> {
         self.indexed_graph.index.spks_of_all_keychains()
     }
 
@@ -408,7 +409,7 @@ impl<D> Wallet<D> {
     pub fn spks_of_keychain(
         &self,
         keychain: KeychainKind,
-    ) -> impl Iterator<Item = (u32, Script)> + Clone {
+    ) -> impl Iterator<Item = (u32, ScriptBuf)> + Clone {
         self.indexed_graph.index.spks_of_keychain(&keychain)
     }
 
@@ -599,7 +600,7 @@ impl<D> Wallet<D> {
     /// # use bdk::*;
     /// # let descriptor = "wpkh(tpubD6NzVbkrYhZ4Xferm7Pz4VnjdcDPFyjVu5K4iZXQ4pVN8Cks4pHVowTBXBKRhX64pkRyJZJN5xAKj4UDNnLPb5p2sSKXhewoYx5GbTdUFWq/*)";
     /// # let mut wallet = doctest_wallet!();
-    /// # let to_address = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap();
+    /// # let to_address = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap().assume_checked();
     /// let (psbt, details) = {
     ///    let mut builder =  wallet.build_tx();
     ///    builder
@@ -716,7 +717,7 @@ impl<D> Wallet<D> {
             None => self
                 .chain
                 .tip()
-                .map(|cp| LockTime::from_height(cp.height()).expect("Invalid height")),
+                .map(|cp| absolute::LockTime::from_height(cp.height()).expect("Invalid height")),
             h => h,
         };
 
@@ -726,7 +727,7 @@ impl<D> Wallet<D> {
                 // Fee sniping can be partially prevented by setting the timelock
                 // to current_height. If we don't know the current_height,
                 // we default to 0.
-                let fee_sniping_height = current_height.unwrap_or(LockTime::ZERO);
+                let fee_sniping_height = current_height.unwrap_or(absolute::LockTime::ZERO);
 
                 // We choose the biggest between the required nlocktime and the fee sniping
                 // height
@@ -734,7 +735,7 @@ impl<D> Wallet<D> {
                     // No requirement, just use the fee_sniping_height
                     None => fee_sniping_height,
                     // There's a block-based requirement, but the value is lower than the fee_sniping_height
-                    Some(value @ LockTime::Blocks(_)) if value < fee_sniping_height => fee_sniping_height,
+                    Some(value @ absolute::LockTime::Blocks(_)) if value < fee_sniping_height => fee_sniping_height,
                     // There's a time-based requirement or a block-based requirement greater
                     // than the fee_sniping_height use that value
                     Some(value) => value,
@@ -750,7 +751,9 @@ impl<D> Wallet<D> {
 
         let n_sequence = match (params.rbf, requirements.csv) {
             // No RBF or CSV but there's an nLockTime, so the nSequence cannot be final
-            (None, None) if lock_time != LockTime::ZERO => Sequence::ENABLE_LOCKTIME_NO_RBF,
+            (None, None) if lock_time != absolute::LockTime::ZERO => {
+                Sequence::ENABLE_LOCKTIME_NO_RBF
+            }
             // No RBF, CSV or nLockTime, make the transaction final
             (None, None) => Sequence::MAX,
 
@@ -813,7 +816,7 @@ impl<D> Wallet<D> {
 
         let mut tx = Transaction {
             version,
-            lock_time: lock_time.into(),
+            lock_time,
             input: vec![],
             output: vec![],
         };
@@ -861,7 +864,7 @@ impl<D> Wallet<D> {
         // end up with a transaction with a slightly higher fee rate than the requested one.
         // If, instead, we undershoot, we may end up with a feerate lower than the requested one
         // - we might come up with non broadcastable txs!
-        fee_amount += fee_rate.fee_wu(2);
+        fee_amount += fee_rate.fee_wu(Weight::from_wu(2));
 
         if params.change_policy != tx_builder::ChangeSpendPolicy::ChangeAllowed
             && internal_descriptor.is_none()
@@ -878,7 +881,7 @@ impl<D> Wallet<D> {
             params.drain_wallet,
             params.manually_selected_only,
             params.bumping_fee.is_some(), // we mandate confirmed transactions if we're bumping the fee
-            current_height.map(LockTime::to_consensus_u32),
+            current_height.map(absolute::LockTime::to_consensus_u32),
         );
 
         // get drain script
@@ -888,7 +891,7 @@ impl<D> Wallet<D> {
                 let change_keychain = self.map_keychain(KeychainKind::Internal);
                 let ((index, spk), index_additions) =
                     self.indexed_graph.index.next_unused_spk(&change_keychain);
-                let spk = spk.clone();
+                let spk = spk.into();
                 self.indexed_graph.index.mark_used(&change_keychain, index);
                 self.persist
                     .stage(ChangeSet::from(IndexedAdditions::from(index_additions)));
@@ -912,7 +915,7 @@ impl<D> Wallet<D> {
             .iter()
             .map(|u| bitcoin::TxIn {
                 previous_output: u.outpoint(),
-                script_sig: Script::default(),
+                script_sig: ScriptBuf::default(),
                 sequence: n_sequence,
                 witness: Witness::new(),
             })
@@ -1000,7 +1003,7 @@ impl<D> Wallet<D> {
     /// # use bdk::*;
     /// # let descriptor = "wpkh(tpubD6NzVbkrYhZ4Xferm7Pz4VnjdcDPFyjVu5K4iZXQ4pVN8Cks4pHVowTBXBKRhX64pkRyJZJN5xAKj4UDNnLPb5p2sSKXhewoYx5GbTdUFWq/*)";
     /// # let mut wallet = doctest_wallet!();
-    /// # let to_address = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap();
+    /// # let to_address = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap().assume_checked();
     /// let (mut psbt, _) = {
     ///     let mut builder = wallet.build_tx();
     ///     builder
@@ -1014,7 +1017,7 @@ impl<D> Wallet<D> {
     /// let (mut psbt, _) =  {
     ///     let mut builder = wallet.build_fee_bump(tx.txid())?;
     ///     builder
-    ///         .fee_rate(FeeRate::from_sat_per_vb(5.0));
+    ///         .fee_rate(bdk::FeeRate::from_sat_per_vb(5.0));
     ///     builder.finish()?
     /// };
     ///
@@ -1078,6 +1081,7 @@ impl<D> Wallet<D> {
 
                 let weighted_utxo = match txout_index.index_of_spk(&txout.script_pubkey) {
                     Some(&(keychain, derivation_index)) => {
+                        #[allow(deprecated)]
                         let satisfaction_weight = self
                             .get_descriptor_for_keychain(keychain)
                             .max_satisfaction_weight()
@@ -1170,7 +1174,7 @@ impl<D> Wallet<D> {
     /// # use bdk::*;
     /// # let descriptor = "wpkh(tpubD6NzVbkrYhZ4Xferm7Pz4VnjdcDPFyjVu5K4iZXQ4pVN8Cks4pHVowTBXBKRhX64pkRyJZJN5xAKj4UDNnLPb5p2sSKXhewoYx5GbTdUFWq/*)";
     /// # let mut wallet = doctest_wallet!();
-    /// # let to_address = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap();
+    /// # let to_address = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap().assume_checked();
     /// let (mut psbt, _) = {
     ///     let mut builder = wallet.build_tx();
     ///     builder.add_recipient(to_address.script_pubkey(), 50_000);
@@ -1207,8 +1211,8 @@ impl<D> Wallet<D> {
             && !psbt.inputs.iter().all(|i| {
                 i.sighash_type.is_none()
                     || i.sighash_type == Some(EcdsaSighashType::All.into())
-                    || i.sighash_type == Some(SchnorrSighashType::All.into())
-                    || i.sighash_type == Some(SchnorrSighashType::Default.into())
+                    || i.sighash_type == Some(TapSighashType::All.into())
+                    || i.sighash_type == Some(TapSighashType::Default.into())
             })
         {
             return Err(Error::Signer(signer::SignerError::NonStandardSighash));
@@ -1403,13 +1407,14 @@ impl<D> Wallet<D> {
             .index
             .index_of_spk(&txout.script_pubkey)?;
         let descriptor = self.get_descriptor_for_keychain(keychain);
-        Some(descriptor.at_derivation_index(child))
+        descriptor.at_derivation_index(child).ok()
     }
 
     fn get_available_utxos(&self) -> Vec<(LocalUtxo, usize)> {
         self.list_unspent()
             .map(|utxo| {
                 let keychain = utxo.keychain;
+                #[allow(deprecated)]
                 (
                     utxo,
                     self.get_descriptor_for_keychain(keychain)
@@ -1620,7 +1625,9 @@ impl<D> Wallet<D> {
         };
 
         let desc = self.get_descriptor_for_keychain(keychain);
-        let derived_descriptor = desc.at_derivation_index(child);
+        let derived_descriptor = desc
+            .at_derivation_index(child)
+            .expect("child can't be hardened");
 
         psbt_input
             .update_with_descriptor_unchecked(&derived_descriptor)
@@ -1669,7 +1676,9 @@ impl<D> Wallet<D> {
                 );
 
                 let desc = self.get_descriptor_for_keychain(keychain);
-                let desc = desc.at_derivation_index(child);
+                let desc = desc
+                    .at_derivation_index(child)
+                    .expect("child can't be hardened");
 
                 if is_input {
                     psbt.update_input_with_descriptor(index, &desc)
@@ -1871,7 +1880,7 @@ fn new_tx_details(
 /// Macro for getting a wallet for use in a doctest
 macro_rules! doctest_wallet {
     () => {{
-        use $crate::bitcoin::{BlockHash, Transaction, PackedLockTime, TxOut, Network, hashes::Hash};
+        use $crate::bitcoin::{BlockHash, Transaction, absolute, TxOut, Network, hashes::Hash};
         use $crate::chain::{ConfirmationTime, BlockId};
         use $crate::wallet::{AddressIndex, Wallet};
         let descriptor = "tr([73c5da0a/86'/0'/0']tprv8fMn4hSKPRC1oaCPqxDb1JWtgkpeiQvZhsr8W2xuy3GEMkzoArcAWTfJxYb6Wj8XNNDWEjfYKK4wGQXh3ZUXhDF2NcnsALpWTeSwarJt7Vc/0/*)";
@@ -1886,7 +1895,7 @@ macro_rules! doctest_wallet {
         let address = wallet.get_address(AddressIndex::New).address;
         let tx = Transaction {
             version: 1,
-            lock_time: PackedLockTime(0),
+            lock_time: absolute::LockTime::ZERO,
             input: vec![],
             output: vec![TxOut {
                 value: 500_000,

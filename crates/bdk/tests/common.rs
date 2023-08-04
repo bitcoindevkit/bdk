@@ -14,7 +14,7 @@ pub fn get_funded_wallet_with_change(
 
     let tx = Transaction {
         version: 1,
-        lock_time: bitcoin::PackedLockTime(0),
+        lock_time: bitcoin::absolute::LockTime::ZERO,
         input: vec![],
         output: vec![TxOut {
             value: 50_000,

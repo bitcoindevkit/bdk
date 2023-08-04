@@ -1,10 +1,10 @@
 use bdk_chain::SpkTxOutIndex;
-use bitcoin::{hashes::hex::FromHex, OutPoint, PackedLockTime, Script, Transaction, TxIn, TxOut};
+use bitcoin::{absolute, OutPoint, ScriptBuf, Transaction, TxIn, TxOut};
 
 #[test]
 fn spk_txout_sent_and_received() {
-    let spk1 = Script::from_hex("001404f1e52ce2bab3423c6a8c63b7cd730d8f12542c").unwrap();
-    let spk2 = Script::from_hex("00142b57404ae14f08c3a0c903feb2af7830605eb00f").unwrap();
+    let spk1 = ScriptBuf::from_hex("001404f1e52ce2bab3423c6a8c63b7cd730d8f12542c").unwrap();
+    let spk2 = ScriptBuf::from_hex("00142b57404ae14f08c3a0c903feb2af7830605eb00f").unwrap();
 
     let mut index = SpkTxOutIndex::default();
     index.insert_spk(0, spk1.clone());
@@ -12,7 +12,7 @@ fn spk_txout_sent_and_received() {
 
     let tx1 = Transaction {
         version: 0x02,
-        lock_time: PackedLockTime(0),
+        lock_time: absolute::LockTime::ZERO,
         input: vec![],
         output: vec![TxOut {
             value: 42_000,
@@ -31,7 +31,7 @@ fn spk_txout_sent_and_received() {
 
     let tx2 = Transaction {
         version: 0x1,
-        lock_time: PackedLockTime(0),
+        lock_time: absolute::LockTime::ZERO,
         input: vec![TxIn {
             previous_output: OutPoint {
                 txid: tx1.txid(),
@@ -57,8 +57,8 @@ fn spk_txout_sent_and_received() {
 
 #[test]
 fn mark_used() {
-    let spk1 = Script::from_hex("001404f1e52ce2bab3423c6a8c63b7cd730d8f12542c").unwrap();
-    let spk2 = Script::from_hex("00142b57404ae14f08c3a0c903feb2af7830605eb00f").unwrap();
+    let spk1 = ScriptBuf::from_hex("001404f1e52ce2bab3423c6a8c63b7cd730d8f12542c").unwrap();
+    let spk2 = ScriptBuf::from_hex("00142b57404ae14f08c3a0c903feb2af7830605eb00f").unwrap();
 
     let mut spk_index = SpkTxOutIndex::default();
     spk_index.insert_spk(1, spk1.clone());
@@ -74,7 +74,7 @@ fn mark_used() {
 
     let tx1 = Transaction {
         version: 0x02,
-        lock_time: PackedLockTime(0),
+        lock_time: absolute::LockTime::ZERO,
         input: vec![],
         output: vec![TxOut {
             value: 42_000,

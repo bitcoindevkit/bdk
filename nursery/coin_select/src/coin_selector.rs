@@ -97,11 +97,13 @@ impl CoinSelectorOpt {
         let mut tx = Transaction {
             input: vec![],
             version: 1,
-            lock_time: LockTime::ZERO.into(),
+            lock_time: absolute::LockTime::ZERO,
             output: txouts.to_vec(),
         };
         let base_weight = tx.weight();
-        // this awkward calculation is necessary since TxOut doesn't have \.weight()
+        // Calculating drain_weight like this instead of using .weight()
+        // allows us to take into account the output len varint increase that
+        // might happen when adding a new output
         let drain_weight = {
             tx.output.push(drain_output.clone());
             tx.weight() - base_weight
@@ -113,8 +115,8 @@ impl CoinSelectorOpt {
                 Some(txouts.iter().map(|txout| txout.value).sum())
             },
             ..Self::from_weights(
-                base_weight as u32,
-                drain_weight as u32,
+                base_weight.to_wu() as u32,
+                drain_weight.to_wu() as u32,
                 TXIN_BASE_WEIGHT + drain_satisfaction_weight,
             )
         }

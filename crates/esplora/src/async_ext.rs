@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use bdk_chain::collections::btree_map;
 use bdk_chain::{
-    bitcoin::{BlockHash, OutPoint, Script, Txid},
+    bitcoin::{BlockHash, OutPoint, ScriptBuf, Txid},
     collections::{BTreeMap, BTreeSet},
     local_chain::{self, CheckPoint},
     BlockId, ConfirmationTimeAnchor, TxGraph,
@@ -52,7 +52,7 @@ pub trait EsploraAsyncExt {
         &self,
         keychain_spks: BTreeMap<
             K,
-            impl IntoIterator<IntoIter = impl Iterator<Item = (u32, Script)> + Send> + Send,
+            impl IntoIterator<IntoIter = impl Iterator<Item = (u32, ScriptBuf)> + Send> + Send,
         >,
         txids: impl IntoIterator<IntoIter = impl Iterator<Item = Txid> + Send> + Send,
         outpoints: impl IntoIterator<IntoIter = impl Iterator<Item = OutPoint> + Send> + Send,
@@ -66,7 +66,7 @@ pub trait EsploraAsyncExt {
     #[allow(clippy::result_large_err)]
     async fn update_tx_graph_without_keychain(
         &self,
-        misc_spks: impl IntoIterator<IntoIter = impl Iterator<Item = Script> + Send> + Send,
+        misc_spks: impl IntoIterator<IntoIter = impl Iterator<Item = ScriptBuf> + Send> + Send,
         txids: impl IntoIterator<IntoIter = impl Iterator<Item = Txid> + Send> + Send,
         outpoints: impl IntoIterator<IntoIter = impl Iterator<Item = OutPoint> + Send> + Send,
         parallel_requests: usize,
@@ -205,7 +205,7 @@ impl EsploraAsyncExt for esplora_client::AsyncClient {
         &self,
         keychain_spks: BTreeMap<
             K,
-            impl IntoIterator<IntoIter = impl Iterator<Item = (u32, Script)> + Send> + Send,
+            impl IntoIterator<IntoIter = impl Iterator<Item = (u32, ScriptBuf)> + Send> + Send,
         >,
         txids: impl IntoIterator<IntoIter = impl Iterator<Item = Txid> + Send> + Send,
         outpoints: impl IntoIterator<IntoIter = impl Iterator<Item = OutPoint> + Send> + Send,

@@ -11,13 +11,14 @@ use bdk_chain::BlockId;
 use bdk_chain::ConfirmationTime;
 use bdk_chain::COINBASE_MATURITY;
 use bitcoin::hashes::Hash;
+use bitcoin::sighash::{EcdsaSighashType, TapSighashType};
 use bitcoin::BlockHash;
-use bitcoin::Script;
-use bitcoin::{util::psbt, Network};
+use bitcoin::ScriptBuf;
 use bitcoin::{
-    Address, EcdsaSighashType, LockTime, OutPoint, PackedLockTime, SchnorrSighashType, Sequence,
-    Transaction, TxIn, TxOut,
+    absolute, script::PushBytesBuf, taproot::TapNodeHash, Address, OutPoint, Sequence, Transaction,
+    TxIn, TxOut, Weight,
 };
+use bitcoin::{psbt, Network};
 use core::str::FromStr;
 
 mod common;
@@ -26,7 +27,7 @@ use common::*;
 fn receive_output(wallet: &mut Wallet, value: u64, height: ConfirmationTime) -> OutPoint {
     let tx = Transaction {
         version: 1,
-        lock_time: PackedLockTime(0),
+        lock_time: absolute::LockTime::ZERO,
         input: vec![],
         output: vec![TxOut {
             script_pubkey: wallet.get_address(LastUnused).script_pubkey(),
@@ -210,7 +211,7 @@ fn test_create_tx_default_locktime_is_last_sync_height() {
 
     // Since we never synced the wallet we don't have a last_sync_height
     // we could use to try to prevent fee sniping. We default to 0.
-    assert_eq!(psbt.unsigned_tx.lock_time.0, 1_000);
+    assert_eq!(psbt.unsigned_tx.lock_time.to_consensus_u32(), 1_000);
 }
 
 #[test]
@@ -224,7 +225,7 @@ fn test_create_tx_fee_sniping_locktime_last_sync() {
 
     // If there's no current_height we're left with using the last sync height
     assert_eq!(
-        psbt.unsigned_tx.lock_time.0,
+        psbt.unsigned_tx.lock_time.to_consensus_u32(),
         wallet.latest_checkpoint().unwrap().height()
     );
 }
@@ -237,7 +238,7 @@ fn test_create_tx_default_locktime_cltv() {
     builder.add_recipient(addr.script_pubkey(), 25_000);
     let (psbt, _) = builder.finish().unwrap();
 
-    assert_eq!(psbt.unsigned_tx.lock_time.0, 100_000);
+    assert_eq!(psbt.unsigned_tx.lock_time.to_consensus_u32(), 100_000);
 }
 
 #[test]
@@ -248,13 +249,13 @@ fn test_create_tx_custom_locktime() {
     builder
         .add_recipient(addr.script_pubkey(), 25_000)
         .current_height(630_001)
-        .nlocktime(LockTime::from_height(630_000).unwrap());
+        .nlocktime(absolute::LockTime::from_height(630_000).unwrap());
     let (psbt, _) = builder.finish().unwrap();
 
     // When we explicitly specify a nlocktime
     // we don't try any fee sniping prevention trick
     // (we ignore the current_height)
-    assert_eq!(psbt.unsigned_tx.lock_time.0, 630_000);
+    assert_eq!(psbt.unsigned_tx.lock_time.to_consensus_u32(), 630_000);
 }
 
 #[test]
@@ -264,10 +265,10 @@ fn test_create_tx_custom_locktime_compatible_with_cltv() {
     let mut builder = wallet.build_tx();
     builder
         .add_recipient(addr.script_pubkey(), 25_000)
-        .nlocktime(LockTime::from_height(630_000).unwrap());
+        .nlocktime(absolute::LockTime::from_height(630_000).unwrap());
     let (psbt, _) = builder.finish().unwrap();
 
-    assert_eq!(psbt.unsigned_tx.lock_time.0, 630_000);
+    assert_eq!(psbt.unsigned_tx.lock_time.to_consensus_u32(), 630_000);
 }
 
 #[test]
@@ -280,7 +281,7 @@ fn test_create_tx_custom_locktime_incompatible_with_cltv() {
     let mut builder = wallet.build_tx();
     builder
         .add_recipient(addr.script_pubkey(), 25_000)
-        .nlocktime(LockTime::from_height(50000).unwrap());
+        .nlocktime(absolute::LockTime::from_height(50000).unwrap());
     builder.finish().unwrap();
 }
 
@@ -402,7 +403,9 @@ fn test_create_tx_drain_wallet_and_drain_to() {
 #[test]
 fn test_create_tx_drain_wallet_and_drain_to_and_with_recipient() {
     let (mut wallet, _) = get_funded_wallet(get_test_wpkh());
-    let addr = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap();
+    let addr = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt")
+        .unwrap()
+        .assume_checked();
     let drain_addr = wallet.get_address(New);
     let mut builder = wallet.build_tx();
     builder
@@ -614,18 +617,18 @@ fn test_create_tx_custom_sighash() {
     let mut builder = wallet.build_tx();
     builder
         .add_recipient(addr.script_pubkey(), 30_000)
-        .sighash(bitcoin::EcdsaSighashType::Single.into());
+        .sighash(EcdsaSighashType::Single.into());
     let (psbt, _) = builder.finish().unwrap();
 
     assert_eq!(
         psbt.inputs[0].sighash_type,
-        Some(bitcoin::EcdsaSighashType::Single.into())
+        Some(EcdsaSighashType::Single.into())
     );
 }
 
 #[test]
 fn test_create_tx_input_hd_keypaths() {
-    use bitcoin::util::bip32::{DerivationPath, Fingerprint};
+    use bitcoin::bip32::{DerivationPath, Fingerprint};
     use core::str::FromStr;
 
     let (mut wallet, _) = get_funded_wallet("wpkh([d34db33f/44'/0'/0']tpubDEnoLuPdBep9bzw5LoGYpsxUQYheRQ9gcgrJhJEcdKFB9cWQRyYmkCyRoTqeD4tJYiVVgt6A3rN6rWn9RYhR9sBsGxji29LYWHuKKbdb1ev/0/*)");
@@ -646,7 +649,7 @@ fn test_create_tx_input_hd_keypaths() {
 
 #[test]
 fn test_create_tx_output_hd_keypaths() {
-    use bitcoin::util::bip32::{DerivationPath, Fingerprint};
+    use bitcoin::bip32::{DerivationPath, Fingerprint};
     use core::str::FromStr;
 
     let (mut wallet, _) = get_funded_wallet("wpkh([d34db33f/44'/0'/0']tpubDEnoLuPdBep9bzw5LoGYpsxUQYheRQ9gcgrJhJEcdKFB9cWQRyYmkCyRoTqeD4tJYiVVgt6A3rN6rWn9RYhR9sBsGxji29LYWHuKKbdb1ev/0/*)");
@@ -680,7 +683,7 @@ fn test_create_tx_set_redeem_script_p2sh() {
 
     assert_eq!(
         psbt.inputs[0].redeem_script,
-        Some(Script::from(
+        Some(ScriptBuf::from(
             Vec::<u8>::from_hex(
                 "21032b0558078bec38694a84933d659303e2575dae7e91685911454115bfd64487e3ac"
             )
@@ -704,7 +707,7 @@ fn test_create_tx_set_witness_script_p2wsh() {
     assert_eq!(psbt.inputs[0].redeem_script, None);
     assert_eq!(
         psbt.inputs[0].witness_script,
-        Some(Script::from(
+        Some(ScriptBuf::from(
             Vec::<u8>::from_hex(
                 "21032b0558078bec38694a84933d659303e2575dae7e91685911454115bfd64487e3ac"
             )
@@ -715,8 +718,6 @@ fn test_create_tx_set_witness_script_p2wsh() {
 
 #[test]
 fn test_create_tx_set_redeem_witness_script_p2wsh_p2sh() {
-    use bitcoin::hashes::hex::FromHex;
-
     let (mut wallet, _) =
         get_funded_wallet("sh(wsh(pk(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW)))");
     let addr = wallet.get_address(New);
@@ -724,12 +725,10 @@ fn test_create_tx_set_redeem_witness_script_p2wsh_p2sh() {
     builder.drain_to(addr.script_pubkey()).drain_wallet();
     let (psbt, _) = builder.finish().unwrap();
 
-    let script = Script::from(
-        Vec::<u8>::from_hex(
-            "21032b0558078bec38694a84933d659303e2575dae7e91685911454115bfd64487e3ac",
-        )
-        .unwrap(),
-    );
+    let script = ScriptBuf::from_hex(
+        "21032b0558078bec38694a84933d659303e2575dae7e91685911454115bfd64487e3ac",
+    )
+    .unwrap();
 
     assert_eq!(psbt.inputs[0].redeem_script, Some(script.to_v0_p2wsh()));
     assert_eq!(psbt.inputs[0].witness_script, Some(script));
@@ -799,7 +798,7 @@ fn test_create_tx_add_utxo() {
             script_pubkey: wallet.get_address(New).address.script_pubkey(),
         }],
         version: 0,
-        lock_time: PackedLockTime(0),
+        lock_time: absolute::LockTime::ZERO,
     };
     wallet
         .insert_tx(
@@ -808,7 +807,9 @@ fn test_create_tx_add_utxo() {
         )
         .unwrap();
 
-    let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
+    let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX")
+        .unwrap()
+        .assume_checked();
     let mut builder = wallet.build_tx();
     builder
         .add_recipient(addr.script_pubkey(), 30_000)
@@ -838,7 +839,7 @@ fn test_create_tx_manually_selected_insufficient() {
             script_pubkey: wallet.get_address(New).address.script_pubkey(),
         }],
         version: 0,
-        lock_time: PackedLockTime(0),
+        lock_time: absolute::LockTime::ZERO,
     };
 
     wallet
@@ -848,7 +849,9 @@ fn test_create_tx_manually_selected_insufficient() {
         )
         .unwrap();
 
-    let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
+    let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX")
+        .unwrap()
+        .assume_checked();
     let mut builder = wallet.build_tx();
     builder
         .add_recipient(addr.script_pubkey(), 30_000)
@@ -866,7 +869,9 @@ fn test_create_tx_manually_selected_insufficient() {
 fn test_create_tx_policy_path_required() {
     let (mut wallet, _) = get_funded_wallet(get_test_a_or_b_plus_csv());
 
-    let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
+    let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX")
+        .unwrap()
+        .assume_checked();
     let mut builder = wallet.build_tx();
     builder.add_recipient(addr.script_pubkey(), 30_000);
     builder.finish().unwrap();
@@ -879,7 +884,7 @@ fn test_create_tx_policy_path_no_csv() {
 
     let tx = Transaction {
         version: 0,
-        lock_time: PackedLockTime(0),
+        lock_time: absolute::LockTime::ZERO,
         input: vec![],
         output: vec![TxOut {
             value: 50_000,
@@ -895,7 +900,9 @@ fn test_create_tx_policy_path_no_csv() {
     // child #0 is just the key "A"
     let path = vec![(root_id, vec![0])].into_iter().collect();
 
-    let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
+    let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX")
+        .unwrap()
+        .assume_checked();
     let mut builder = wallet.build_tx();
     builder
         .add_recipient(addr.script_pubkey(), 30_000)
@@ -914,7 +921,9 @@ fn test_create_tx_policy_path_use_csv() {
     // child #1 is or(pk(B),older(144))
     let path = vec![(root_id, vec![1])].into_iter().collect();
 
-    let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
+    let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX")
+        .unwrap()
+        .assume_checked();
     let mut builder = wallet.build_tx();
     builder
         .add_recipient(addr.script_pubkey(), 30_000)
@@ -933,7 +942,9 @@ fn test_create_tx_policy_path_ignored_subtree_with_csv() {
     // child #0 is pk(cRjo6jqfVNP33HhSS76UhXETZsGTZYx8FMFvR9kpbtCSV1PmdZdu)
     let path = vec![(root_id, vec![0])].into_iter().collect();
 
-    let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
+    let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX")
+        .unwrap()
+        .assume_checked();
     let mut builder = wallet.build_tx();
     builder
         .add_recipient(addr.script_pubkey(), 30_000)
@@ -945,8 +956,8 @@ fn test_create_tx_policy_path_ignored_subtree_with_csv() {
 
 #[test]
 fn test_create_tx_global_xpubs_with_origin() {
+    use bitcoin::bip32;
     use bitcoin::hashes::hex::FromHex;
-    use bitcoin::util::bip32;
 
     let (mut wallet, _) = get_funded_wallet("wpkh([73756c7f/48'/0'/0'/2']tpubDCKxNyM3bLgbEX13Mcd8mYxbVg9ajDkWXMh29hMWBurKfVmBfWAM96QVP3zaUcN51HvkZ3ar4VwP82kC8JZhhux8vFQoJintSpVBwpFvyU3/0/*)");
     let addr = wallet.get_address(New);
@@ -970,8 +981,11 @@ fn test_add_foreign_utxo() {
     let (wallet2, _) =
         get_funded_wallet("wpkh(cVbZ8ovhye9AoAHFsqobCf7LxbXDAECy9Kb8TZdfsDYMZGBUyCnm)");
 
-    let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
+    let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX")
+        .unwrap()
+        .assume_checked();
     let utxo = wallet2.list_unspent().next().expect("must take!");
+    #[allow(deprecated)]
     let foreign_utxo_satisfaction = wallet2
         .get_descriptor_for_keychain(KeychainKind::External)
         .max_satisfaction_weight()
@@ -1036,6 +1050,7 @@ fn test_add_foreign_utxo() {
 fn test_add_foreign_utxo_invalid_psbt_input() {
     let (mut wallet, _) = get_funded_wallet(get_test_wpkh());
     let outpoint = wallet.list_unspent().next().expect("must exist").outpoint;
+    #[allow(deprecated)]
     let foreign_utxo_satisfaction = wallet
         .get_descriptor_for_keychain(KeychainKind::External)
         .max_satisfaction_weight()
@@ -1057,6 +1072,7 @@ fn test_add_foreign_utxo_where_outpoint_doesnt_match_psbt_input() {
     let tx1 = wallet1.get_tx(txid1, true).unwrap().transaction.unwrap();
     let tx2 = wallet2.get_tx(txid2, true).unwrap().transaction.unwrap();
 
+    #[allow(deprecated)]
     let satisfaction_weight = wallet2
         .get_descriptor_for_keychain(KeychainKind::External)
         .max_satisfaction_weight()
@@ -1096,9 +1112,12 @@ fn test_add_foreign_utxo_only_witness_utxo() {
     let (mut wallet1, _) = get_funded_wallet(get_test_wpkh());
     let (wallet2, txid2) =
         get_funded_wallet("wpkh(cVbZ8ovhye9AoAHFsqobCf7LxbXDAECy9Kb8TZdfsDYMZGBUyCnm)");
-    let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
+    let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX")
+        .unwrap()
+        .assume_checked();
     let utxo2 = wallet2.list_unspent().next().unwrap();
 
+    #[allow(deprecated)]
     let satisfaction_weight = wallet2
         .get_descriptor_for_keychain(KeychainKind::External)
         .max_satisfaction_weight()
@@ -1181,8 +1200,8 @@ fn test_create_tx_global_xpubs_origin_missing() {
 
 #[test]
 fn test_create_tx_global_xpubs_master_without_origin() {
+    use bitcoin::bip32;
     use bitcoin::hashes::hex::FromHex;
-    use bitcoin::util::bip32;
 
     let (mut wallet, _) = get_funded_wallet("wpkh(tpubD6NzVbkrYhZ4Y55A58Gv9RSNF5hy84b5AJqYy7sCcjFrkcLpPre8kmgfit6kY1Zs3BLgeypTDBZJM222guPpdz7Cup5yzaMu62u7mYGbwFL/0/*)");
     let addr = wallet.get_address(New);
@@ -1315,7 +1334,9 @@ fn test_bump_fee_zero_abs() {
 #[test]
 fn test_bump_fee_reduce_change() {
     let (mut wallet, _) = get_funded_wallet(get_test_wpkh());
-    let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
+    let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX")
+        .unwrap()
+        .assume_checked();
     let mut builder = wallet.build_tx();
     builder
         .add_recipient(addr.script_pubkey(), 25_000)
@@ -1401,7 +1422,9 @@ fn test_bump_fee_reduce_change() {
 #[test]
 fn test_bump_fee_reduce_single_recipient() {
     let (mut wallet, _) = get_funded_wallet(get_test_wpkh());
-    let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
+    let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX")
+        .unwrap()
+        .assume_checked();
     let mut builder = wallet.build_tx();
     builder
         .drain_to(addr.script_pubkey())
@@ -1434,7 +1457,9 @@ fn test_bump_fee_reduce_single_recipient() {
 #[test]
 fn test_bump_fee_absolute_reduce_single_recipient() {
     let (mut wallet, _) = get_funded_wallet(get_test_wpkh());
-    let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
+    let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX")
+        .unwrap()
+        .assume_checked();
     let mut builder = wallet.build_tx();
     builder
         .drain_to(addr.script_pubkey())
@@ -1470,7 +1495,7 @@ fn test_bump_fee_drain_wallet() {
     // receive an extra tx so that our wallet has two utxos.
     let tx = Transaction {
         version: 1,
-        lock_time: PackedLockTime(0),
+        lock_time: absolute::LockTime::ZERO,
         input: vec![],
         output: vec![TxOut {
             value: 25_000,
@@ -1486,7 +1511,9 @@ fn test_bump_fee_drain_wallet() {
             },
         )
         .unwrap();
-    let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
+    let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX")
+        .unwrap()
+        .assume_checked();
 
     let mut builder = wallet.build_tx();
     builder
@@ -1530,7 +1557,7 @@ fn test_bump_fee_remove_output_manually_selected_only() {
     // unless you've also set "allow_shrinking" OR there is a change output.
     let init_tx = Transaction {
         version: 1,
-        lock_time: PackedLockTime(0),
+        lock_time: absolute::LockTime::ZERO,
         input: vec![],
         output: vec![TxOut {
             script_pubkey: wallet.get_address(New).script_pubkey(),
@@ -1553,7 +1580,9 @@ fn test_bump_fee_remove_output_manually_selected_only() {
         txid: init_tx.txid(),
         vout: 0,
     };
-    let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
+    let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX")
+        .unwrap()
+        .assume_checked();
     let mut builder = wallet.build_tx();
     builder
         .drain_to(addr.script_pubkey())
@@ -1581,7 +1610,7 @@ fn test_bump_fee_add_input() {
     let (mut wallet, _) = get_funded_wallet(get_test_wpkh());
     let init_tx = Transaction {
         version: 1,
-        lock_time: PackedLockTime(0),
+        lock_time: absolute::LockTime::ZERO,
         input: vec![],
         output: vec![TxOut {
             script_pubkey: wallet.get_address(New).script_pubkey(),
@@ -1597,7 +1626,9 @@ fn test_bump_fee_add_input() {
         .into();
     wallet.insert_tx(init_tx, pos).unwrap();
 
-    let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
+    let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX")
+        .unwrap()
+        .assume_checked();
     let mut builder = wallet.build_tx().coin_selection(LargestFirstCoinSelection);
     builder
         .add_recipient(addr.script_pubkey(), 45_000)
@@ -1643,7 +1674,9 @@ fn test_bump_fee_add_input() {
 fn test_bump_fee_absolute_add_input() {
     let (mut wallet, _) = get_funded_wallet(get_test_wpkh());
     receive_output_in_latest_block(&mut wallet, 25_000);
-    let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
+    let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX")
+        .unwrap()
+        .assume_checked();
     let mut builder = wallet.build_tx().coin_selection(LargestFirstCoinSelection);
     builder
         .add_recipient(addr.script_pubkey(), 45_000)
@@ -1691,7 +1724,9 @@ fn test_bump_fee_no_change_add_input_and_change() {
     let op = receive_output_in_latest_block(&mut wallet, 25_000);
 
     // initially make a tx without change by using `drain_to`
-    let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
+    let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX")
+        .unwrap()
+        .assume_checked();
     let mut builder = wallet.build_tx();
     builder
         .drain_to(addr.script_pubkey())
@@ -1747,7 +1782,9 @@ fn test_bump_fee_no_change_add_input_and_change() {
 fn test_bump_fee_add_input_change_dust() {
     let (mut wallet, _) = get_funded_wallet(get_test_wpkh());
     receive_output_in_latest_block(&mut wallet, 25_000);
-    let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
+    let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX")
+        .unwrap()
+        .assume_checked();
     let mut builder = wallet.build_tx().coin_selection(LargestFirstCoinSelection);
     builder
         .add_recipient(addr.script_pubkey(), 45_000)
@@ -1775,7 +1812,8 @@ fn test_bump_fee_add_input_change_dust() {
     // + extra input weight: 160 WU = (32 (prevout) + 4 (vout) + 4 (nsequence)) * 4
     // + input satisfaction weight: 112 WU = 106 (witness) + 2 (witness len) + (1 (script len)) * 4
     // - change output weight: 124 WU = (8 (value) + 1 (script len) + 22 (script)) * 4
-    let new_tx_weight = original_tx_weight + 160 + 112 - 124;
+    let new_tx_weight =
+        original_tx_weight + Weight::from_wu(160) + Weight::from_wu(112) - Weight::from_wu(124);
     // two inputs (50k, 25k) and one output (45k) - epsilon
     // We use epsilon here to avoid asking for a slightly too high feerate
     let fee_abs = 50_000 + 25_000 - 45_000 - 10;
@@ -1811,7 +1849,9 @@ fn test_bump_fee_force_add_input() {
     let (mut wallet, _) = get_funded_wallet(get_test_wpkh());
     let incoming_op = receive_output_in_latest_block(&mut wallet, 25_000);
 
-    let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
+    let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX")
+        .unwrap()
+        .assume_checked();
     let mut builder = wallet.build_tx().coin_selection(LargestFirstCoinSelection);
     builder
         .add_recipient(addr.script_pubkey(), 45_000)
@@ -1865,7 +1905,9 @@ fn test_bump_fee_absolute_force_add_input() {
     let (mut wallet, _) = get_funded_wallet(get_test_wpkh());
     let incoming_op = receive_output_in_latest_block(&mut wallet, 25_000);
 
-    let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
+    let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX")
+        .unwrap()
+        .assume_checked();
     let mut builder = wallet.build_tx().coin_selection(LargestFirstCoinSelection);
     builder
         .add_recipient(addr.script_pubkey(), 45_000)
@@ -1923,7 +1965,9 @@ fn test_bump_fee_unconfirmed_inputs_only() {
     // The replacement transaction may only include an unconfirmed input
     // if that input was included in one of the original transactions.
     let (mut wallet, _) = get_funded_wallet(get_test_wpkh());
-    let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
+    let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX")
+        .unwrap()
+        .assume_checked();
     let mut builder = wallet.build_tx();
     builder
         .drain_wallet()
@@ -1958,7 +2002,9 @@ fn test_bump_fee_unconfirmed_input() {
     // always fee bump with an unconfirmed input if it was included in the
     // original transaction)
     let (mut wallet, _) = get_funded_wallet(get_test_wpkh());
-    let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
+    let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX")
+        .unwrap()
+        .assume_checked();
     // We receive a tx with 0 confirmations, which will be used as an input
     // in the drain tx.
     receive_output(&mut wallet, 25_000, ConfirmationTime::unconfirmed(0));
@@ -1996,7 +2042,9 @@ fn test_fee_amount_negative_drain_val() {
     // for a transaction.
     // See https://github.com/bitcoindevkit/bdk/issues/660
     let (mut wallet, _) = get_funded_wallet(get_test_wpkh());
-    let send_to = Address::from_str("tb1ql7w62elx9ucw4pj5lgw4l028hmuw80sndtntxt").unwrap();
+    let send_to = Address::from_str("tb1ql7w62elx9ucw4pj5lgw4l028hmuw80sndtntxt")
+        .unwrap()
+        .assume_checked();
     let fee_rate = FeeRate::from_sat_per_vb(2.01);
     let incoming_op = receive_output_in_latest_block(&mut wallet, 8859);
 
@@ -2110,7 +2158,9 @@ fn test_sign_single_xprv_no_hd_keypaths() {
 #[test]
 fn test_include_output_redeem_witness_script() {
     let (mut wallet, _) = get_funded_wallet("sh(wsh(multi(1,cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW,cRjo6jqfVNP33HhSS76UhXETZsGTZYx8FMFvR9kpbtCSV1PmdZdu)))");
-    let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
+    let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX")
+        .unwrap()
+        .assume_checked();
     let mut builder = wallet.build_tx();
     builder
         .add_recipient(addr.script_pubkey(), 45_000)
@@ -2127,7 +2177,9 @@ fn test_include_output_redeem_witness_script() {
 #[test]
 fn test_signing_only_one_of_multiple_inputs() {
     let (mut wallet, _) = get_funded_wallet(get_test_wpkh());
-    let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
+    let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX")
+        .unwrap()
+        .assume_checked();
     let mut builder = wallet.build_tx();
     builder
         .add_recipient(addr.script_pubkey(), 45_000)
@@ -2135,7 +2187,7 @@ fn test_signing_only_one_of_multiple_inputs() {
     let (mut psbt, _) = builder.finish().unwrap();
 
     // add another input to the psbt that is at least passable.
-    let dud_input = bitcoin::util::psbt::Input {
+    let dud_input = bitcoin::psbt::Input {
         witness_utxo: Some(TxOut {
             value: 100_000,
             script_pubkey: miniscript::Descriptor::<bitcoin::PublicKey>::from_str(
@@ -2383,7 +2435,9 @@ fn test_returns_index_and_address() {
         wallet.get_address(New),
         AddressInfo {
             index: 0,
-            address: Address::from_str("tb1q6yn66vajcctph75pvylgkksgpp6nq04ppwct9a").unwrap(),
+            address: Address::from_str("tb1q6yn66vajcctph75pvylgkksgpp6nq04ppwct9a")
+                .unwrap()
+                .assume_checked(),
             keychain: KeychainKind::External,
         }
     );
@@ -2393,7 +2447,9 @@ fn test_returns_index_and_address() {
         wallet.get_address(New),
         AddressInfo {
             index: 1,
-            address: Address::from_str("tb1q4er7kxx6sssz3q7qp7zsqsdx4erceahhax77d7").unwrap(),
+            address: Address::from_str("tb1q4er7kxx6sssz3q7qp7zsqsdx4erceahhax77d7")
+                .unwrap()
+                .assume_checked(),
             keychain: KeychainKind::External,
         }
     );
@@ -2403,7 +2459,9 @@ fn test_returns_index_and_address() {
         wallet.get_address(Peek(25)),
         AddressInfo {
             index: 25,
-            address: Address::from_str("tb1qsp7qu0knx3sl6536dzs0703u2w2ag6ppl9d0c2").unwrap(),
+            address: Address::from_str("tb1qsp7qu0knx3sl6536dzs0703u2w2ag6ppl9d0c2")
+                .unwrap()
+                .assume_checked(),
             keychain: KeychainKind::External,
         }
     );
@@ -2413,7 +2471,9 @@ fn test_returns_index_and_address() {
         wallet.get_address(New),
         AddressInfo {
             index: 2,
-            address: Address::from_str("tb1qzntf2mqex4ehwkjlfdyy3ewdlk08qkvkvrz7x2").unwrap(),
+            address: Address::from_str("tb1qzntf2mqex4ehwkjlfdyy3ewdlk08qkvkvrz7x2")
+                .unwrap()
+                .assume_checked(),
             keychain: KeychainKind::External,
         }
     );
@@ -2423,7 +2483,8 @@ fn test_returns_index_and_address() {
 fn test_sending_to_bip350_bech32m_address() {
     let (mut wallet, _) = get_funded_wallet(get_test_wpkh());
     let addr = Address::from_str("tb1pqqqqp399et2xygdj5xreqhjjvcmzhxw4aywxecjdzew6hylgvsesf3hn0c")
-        .unwrap();
+        .unwrap()
+        .assume_checked();
     let mut builder = wallet.build_tx();
     builder.add_recipient(addr.script_pubkey(), 45_000);
     builder.finish().unwrap();
@@ -2432,7 +2493,7 @@ fn test_sending_to_bip350_bech32m_address() {
 #[test]
 fn test_get_address() {
     use bdk::descriptor::template::Bip84;
-    let key = bitcoin::util::bip32::ExtendedPrivKey::from_str("tprv8ZgxMBicQKsPcx5nBGsR63Pe8KnRUqmbJNENAfGftF3yuXoMMoVJJcYeUw5eVkm9WBPjWYt6HMWYJNesB5HaNVBaFc1M6dRjWSYnmewUMYy").unwrap();
+    let key = bitcoin::bip32::ExtendedPrivKey::from_str("tprv8ZgxMBicQKsPcx5nBGsR63Pe8KnRUqmbJNENAfGftF3yuXoMMoVJJcYeUw5eVkm9WBPjWYt6HMWYJNesB5HaNVBaFc1M6dRjWSYnmewUMYy").unwrap();
     let mut wallet = Wallet::new_no_persist(
         Bip84(key, KeychainKind::External),
         Some(Bip84(key, KeychainKind::Internal)),
@@ -2444,7 +2505,9 @@ fn test_get_address() {
         wallet.get_address(AddressIndex::New),
         AddressInfo {
             index: 0,
-            address: Address::from_str("bcrt1qrhgaqu0zvf5q2d0gwwz04w0dh0cuehhqvzpp4w").unwrap(),
+            address: Address::from_str("bcrt1qrhgaqu0zvf5q2d0gwwz04w0dh0cuehhqvzpp4w")
+                .unwrap()
+                .assume_checked(),
             keychain: KeychainKind::External,
         }
     );
@@ -2453,7 +2516,9 @@ fn test_get_address() {
         wallet.get_internal_address(AddressIndex::New),
         AddressInfo {
             index: 0,
-            address: Address::from_str("bcrt1q0ue3s5y935tw7v3gmnh36c5zzsaw4n9c9smq79").unwrap(),
+            address: Address::from_str("bcrt1q0ue3s5y935tw7v3gmnh36c5zzsaw4n9c9smq79")
+                .unwrap()
+                .assume_checked(),
             keychain: KeychainKind::Internal,
         }
     );
@@ -2465,7 +2530,9 @@ fn test_get_address() {
         wallet.get_internal_address(AddressIndex::New),
         AddressInfo {
             index: 0,
-            address: Address::from_str("bcrt1qrhgaqu0zvf5q2d0gwwz04w0dh0cuehhqvzpp4w").unwrap(),
+            address: Address::from_str("bcrt1qrhgaqu0zvf5q2d0gwwz04w0dh0cuehhqvzpp4w")
+                .unwrap()
+                .assume_checked(),
             keychain: KeychainKind::External,
         },
         "when there's no internal descriptor it should just use external"
@@ -2477,7 +2544,7 @@ fn test_get_address_no_reuse_single_descriptor() {
     use bdk::descriptor::template::Bip84;
     use std::collections::HashSet;
 
-    let key = bitcoin::util::bip32::ExtendedPrivKey::from_str("tprv8ZgxMBicQKsPcx5nBGsR63Pe8KnRUqmbJNENAfGftF3yuXoMMoVJJcYeUw5eVkm9WBPjWYt6HMWYJNesB5HaNVBaFc1M6dRjWSYnmewUMYy").unwrap();
+    let key = bitcoin::bip32::ExtendedPrivKey::from_str("tprv8ZgxMBicQKsPcx5nBGsR63Pe8KnRUqmbJNENAfGftF3yuXoMMoVJJcYeUw5eVkm9WBPjWYt6HMWYJNesB5HaNVBaFc1M6dRjWSYnmewUMYy").unwrap();
     let mut wallet =
         Wallet::new_no_persist(Bip84(key, KeychainKind::External), None, Network::Regtest).unwrap();
 
@@ -2532,7 +2599,7 @@ fn test_taproot_psbt_populate_tap_key_origins_repeated_key() {
     let (mut wallet, _) = get_funded_wallet(get_test_tr_repeated_key());
     let addr = wallet.get_address(AddressIndex::New);
 
-    let path = vec![("e5mmg3xh".to_string(), vec![0])]
+    let path = vec![("rn4nre9c".to_string(), vec![0])]
         .into_iter()
         .collect();
 
@@ -2553,13 +2620,6 @@ fn test_taproot_psbt_populate_tap_key_origins_repeated_key() {
         input_key_origins,
         vec![
             (
-                from_str!("b511bd5771e47ee27558b1765e87b541668304ec567721c7b880edc0a010da55"),
-                (
-                    vec![],
-                    (FromStr::from_str("871fd295").unwrap(), vec![].into())
-                )
-            ),
-            (
                 from_str!("2b0558078bec38694a84933d659303e2575dae7e91685911454115bfd64487e3"),
                 (
                     vec![
@@ -2571,6 +2631,13 @@ fn test_taproot_psbt_populate_tap_key_origins_repeated_key() {
                         ),
                     ],
                     (FromStr::from_str("ece52657").unwrap(), vec![].into())
+                )
+            ),
+            (
+                from_str!("b511bd5771e47ee27558b1765e87b541668304ec567721c7b880edc0a010da55"),
+                (
+                    vec![],
+                    (FromStr::from_str("871fd295").unwrap(), vec![].into())
                 )
             )
         ],
@@ -2592,10 +2659,8 @@ fn test_taproot_psbt_populate_tap_key_origins_repeated_key() {
 
 #[test]
 fn test_taproot_psbt_input_tap_tree() {
-    use bdk::bitcoin::psbt::serialize::Deserialize;
-    use bdk::bitcoin::psbt::TapTree;
     use bitcoin::hashes::hex::FromHex;
-    use bitcoin::util::taproot;
+    use bitcoin::taproot;
 
     let (mut wallet, _) = get_funded_wallet(get_test_tr_with_taptree());
     let addr = wallet.get_address(AddressIndex::Peek(0));
@@ -2607,15 +2672,17 @@ fn test_taproot_psbt_input_tap_tree() {
     assert_eq!(
         psbt.inputs[0].tap_merkle_root,
         Some(
-            FromHex::from_hex("61f81509635053e52d9d1217545916167394490da2287aca4693606e43851986")
-                .unwrap()
+            TapNodeHash::from_str(
+                "61f81509635053e52d9d1217545916167394490da2287aca4693606e43851986"
+            )
+            .unwrap()
         ),
     );
     assert_eq!(
         psbt.inputs[0].tap_scripts.clone().into_iter().collect::<Vec<_>>(),
         vec![
-            (taproot::ControlBlock::from_slice(&Vec::<u8>::from_hex("c0b511bd5771e47ee27558b1765e87b541668304ec567721c7b880edc0a010da55b7ef769a745e625ed4b9a4982a4dc08274c59187e73e6f07171108f455081cb2").unwrap()).unwrap(), (from_str!("208aee2b8120a5f157f1223f72b5e62b825831a27a9fdf427db7cc697494d4a642ac"), taproot::LeafVersion::TapScript)),
-            (taproot::ControlBlock::from_slice(&Vec::<u8>::from_hex("c0b511bd5771e47ee27558b1765e87b541668304ec567721c7b880edc0a010da55b9a515f7be31a70186e3c5937ee4a70cc4b4e1efe876c1d38e408222ffc64834").unwrap()).unwrap(), (from_str!("2051494dc22e24a32fe9dcfbd7e85faf345fa1df296fb49d156e859ef345201295ac"), taproot::LeafVersion::TapScript)),
+            (taproot::ControlBlock::decode(&Vec::<u8>::from_hex("c0b511bd5771e47ee27558b1765e87b541668304ec567721c7b880edc0a010da55b7ef769a745e625ed4b9a4982a4dc08274c59187e73e6f07171108f455081cb2").unwrap()).unwrap(), (ScriptBuf::from_hex("208aee2b8120a5f157f1223f72b5e62b825831a27a9fdf427db7cc697494d4a642ac").unwrap(), taproot::LeafVersion::TapScript)),
+            (taproot::ControlBlock::decode(&Vec::<u8>::from_hex("c0b511bd5771e47ee27558b1765e87b541668304ec567721c7b880edc0a010da55b9a515f7be31a70186e3c5937ee4a70cc4b4e1efe876c1d38e408222ffc64834").unwrap()).unwrap(), (ScriptBuf::from_hex("2051494dc22e24a32fe9dcfbd7e85faf345fa1df296fb49d156e859ef345201295ac").unwrap(), taproot::LeafVersion::TapScript)),
         ],
     );
     assert_eq!(
@@ -2632,10 +2699,8 @@ fn test_taproot_psbt_input_tap_tree() {
         psbt.outputs[0].tap_internal_key
     );
 
-    assert_eq!(
-        psbt.outputs[0].tap_tree,
-        Some(TapTree::deserialize(&Vec::<u8>::from_hex("01c022208aee2b8120a5f157f1223f72b5e62b825831a27a9fdf427db7cc697494d4a642ac01c0222051494dc22e24a32fe9dcfbd7e85faf345fa1df296fb49d156e859ef345201295ac",).unwrap()).unwrap())
-    );
+    let tap_tree: bitcoin::taproot::TapTree = serde_json::from_str(r#"[1,{"Script":["2051494dc22e24a32fe9dcfbd7e85faf345fa1df296fb49d156e859ef345201295ac",192]},1,{"Script":["208aee2b8120a5f157f1223f72b5e62b825831a27a9fdf427db7cc697494d4a642ac",192]}]"#).unwrap();
+    assert_eq!(psbt.outputs[0].tap_tree, Some(tap_tree));
 }
 
 #[test]
@@ -2706,9 +2771,12 @@ fn test_taproot_foreign_utxo() {
     let (mut wallet1, _) = get_funded_wallet(get_test_wpkh());
     let (wallet2, _) = get_funded_wallet(get_test_tr_single_sig());
 
-    let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
+    let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX")
+        .unwrap()
+        .assume_checked();
     let utxo = wallet2.list_unspent().next().unwrap();
     let psbt_input = wallet2.get_psbt_input(utxo.clone(), None, false).unwrap();
+    #[allow(deprecated)]
     let foreign_utxo_satisfaction = wallet2
         .get_descriptor_for_keychain(KeychainKind::External)
         .max_satisfaction_weight()
@@ -2829,7 +2897,7 @@ fn test_taproot_script_spend_sign_all_leaves() {
 #[test]
 fn test_taproot_script_spend_sign_include_some_leaves() {
     use bdk::signer::TapLeavesOptions;
-    use bitcoin::util::taproot::TapLeafHash;
+    use bitcoin::taproot::TapLeafHash;
 
     let (mut wallet, _) = get_funded_wallet(get_test_tr_with_taptree_both_priv());
     let addr = wallet.get_address(AddressIndex::New);
@@ -2869,7 +2937,7 @@ fn test_taproot_script_spend_sign_include_some_leaves() {
 #[test]
 fn test_taproot_script_spend_sign_exclude_some_leaves() {
     use bdk::signer::TapLeavesOptions;
-    use bitcoin::util::taproot::TapLeafHash;
+    use bitcoin::taproot::TapLeafHash;
 
     let (mut wallet, _) = get_funded_wallet(get_test_tr_with_taptree_both_priv());
     let addr = wallet.get_address(AddressIndex::New);
@@ -2958,7 +3026,7 @@ fn test_taproot_sign_explicit_sighash_all() {
     let mut builder = wallet.build_tx();
     builder
         .drain_to(addr.script_pubkey())
-        .sighash(SchnorrSighashType::All.into())
+        .sighash(TapSighashType::All.into())
         .drain_wallet();
     let (mut psbt, _) = builder.finish().unwrap();
 
@@ -2971,7 +3039,7 @@ fn test_taproot_sign_explicit_sighash_all() {
 
 #[test]
 fn test_taproot_sign_non_default_sighash() {
-    let sighash = SchnorrSighashType::NonePlusAnyoneCanPay;
+    let sighash = TapSighashType::NonePlusAnyoneCanPay;
 
     let (mut wallet, _) = get_funded_wallet(get_test_tr_single_sig());
     let addr = wallet.get_address(New);
@@ -3052,7 +3120,7 @@ fn test_spend_coinbase() {
         .unwrap();
     let coinbase_tx = Transaction {
         version: 1,
-        lock_time: bitcoin::PackedLockTime(0),
+        lock_time: absolute::LockTime::ZERO,
         input: vec![TxIn {
             previous_output: OutPoint::null(),
             ..Default::default()
@@ -3088,7 +3156,9 @@ fn test_spend_coinbase() {
 
     // We try to create a transaction, only to notice that all
     // our funds are unspendable
-    let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX").unwrap();
+    let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX")
+        .unwrap()
+        .assume_checked();
     let mut builder = wallet.build_tx();
     builder
         .add_recipient(addr.script_pubkey(), balance.immature / 2)
@@ -3167,7 +3237,7 @@ fn test_fee_rate_sign_no_grinding_high_r() {
     let addr = wallet.get_address(New);
     let fee_rate = FeeRate::from_sat_per_vb(1.0);
     let mut builder = wallet.build_tx();
-    let mut data = vec![0];
+    let mut data = PushBytesBuf::try_from(vec![0]).unwrap();
     builder
         .drain_to(addr.script_pubkey())
         .drain_wallet()
@@ -3187,8 +3257,8 @@ fn test_fee_rate_sign_no_grinding_high_r() {
     while sig_len < 71 {
         // Changing the OP_RETURN data will make the signature change (but not the fee, until
         // data[0] is small enough)
-        data[0] += 1;
-        psbt.unsigned_tx.output[op_return_vout].script_pubkey = Script::new_op_return(&data);
+        data.as_mut_bytes()[0] += 1;
+        psbt.unsigned_tx.output[op_return_vout].script_pubkey = ScriptBuf::new_op_return(&data);
         // Clearing the previous signature
         psbt.inputs[0].partial_sigs.clear();
         // Signing
@@ -3310,7 +3380,9 @@ fn test_taproot_load_descriptor_duplicated_keys() {
 fn test_tx_cancellation() {
     macro_rules! new_tx {
         ($wallet:expr) => {{
-            let addr = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap();
+            let addr = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt")
+                .unwrap()
+                .assume_checked();
             let mut builder = $wallet.build_tx();
             builder.add_recipient(addr.script_pubkey(), 10_000);
 

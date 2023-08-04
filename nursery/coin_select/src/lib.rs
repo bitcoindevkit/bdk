@@ -12,7 +12,7 @@ use bdk_chain::{
     bitcoin,
     collections::{BTreeSet, HashMap},
 };
-use bitcoin::{LockTime, Transaction, TxOut};
+use bitcoin::{absolute, Transaction, TxOut};
 use core::fmt::{Debug, Display};
 
 mod coin_selector;

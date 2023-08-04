@@ -1,5 +1,5 @@
 use bdk_chain::{bitcoin, miniscript};
-use bitcoin::locktime::{Height, Time};
+use bitcoin::locktime::absolute;
 use miniscript::Terminal;
 
 use super::*;
@@ -154,7 +154,7 @@ where
 
 #[derive(Debug)]
 struct TermPlan<Ak> {
-    pub min_locktime: Option<LockTime>,
+    pub min_locktime: Option<absolute::LockTime>,
     pub min_sequence: Option<Sequence>,
     pub template: Vec<TemplateItem<Ak>>,
 }
@@ -216,10 +216,12 @@ fn plan_steps<Ak: Clone + CanDerive, Ctx: ScriptContext>(
         }
         Terminal::After(locktime) => {
             let max_locktime = assets.max_locktime?;
-            let locktime = LockTime::from(locktime);
+            let locktime = absolute::LockTime::from(*locktime);
             let (height, time) = match max_locktime {
-                LockTime::Blocks(height) => (height, Time::from_consensus(0).unwrap()),
-                LockTime::Seconds(seconds) => (Height::from_consensus(0).unwrap(), seconds),
+                absolute::LockTime::Blocks(height) => {
+                    (height, absolute::Time::from_consensus(0).unwrap())
+                }
+                absolute::LockTime::Seconds(seconds) => (absolute::Height::ZERO, seconds),
             };
             if max_locktime.is_satisfied_by(height, time) {
                 Some(TermPlan {

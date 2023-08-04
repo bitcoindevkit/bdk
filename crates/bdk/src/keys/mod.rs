@@ -22,8 +22,8 @@ use core::str::FromStr;
 
 use bitcoin::secp256k1::{self, Secp256k1, Signing};
 
-use bitcoin::util::bip32;
-use bitcoin::{Network, PrivateKey, PublicKey, XOnlyPublicKey};
+use bitcoin::bip32;
+use bitcoin::{key::XOnlyPublicKey, Network, PrivateKey, PublicKey};
 
 use miniscript::descriptor::{Descriptor, DescriptorXKey, Wildcard};
 pub use miniscript::descriptor::{
@@ -388,12 +388,12 @@ impl<Ctx: ScriptContext> From<bip32::ExtendedPrivKey> for ExtendedKey<Ctx> {
 ///
 /// ```
 /// use bdk::bitcoin;
-/// use bdk::bitcoin::util::bip32;
+/// use bdk::bitcoin::bip32;
 /// use bdk::keys::{DerivableKey, ExtendedKey, KeyError, ScriptContext};
 ///
 /// struct MyCustomKeyType {
 ///     key_data: bitcoin::PrivateKey,
-///     chain_code: Vec<u8>,
+///     chain_code: [u8; 32],
 ///     network: bitcoin::Network,
 /// }
 ///
@@ -404,7 +404,7 @@ impl<Ctx: ScriptContext> From<bip32::ExtendedPrivKey> for ExtendedKey<Ctx> {
 ///             depth: 0,
 ///             parent_fingerprint: bip32::Fingerprint::default(),
 ///             private_key: self.key_data.inner,
-///             chain_code: bip32::ChainCode::from(self.chain_code.as_ref()),
+///             chain_code: bip32::ChainCode::from(&self.chain_code),
 ///             child_number: bip32::ChildNumber::Normal { index: 0 },
 ///         };
 ///
@@ -419,14 +419,14 @@ impl<Ctx: ScriptContext> From<bip32::ExtendedPrivKey> for ExtendedKey<Ctx> {
 ///
 /// ```
 /// use bdk::bitcoin;
-/// use bdk::bitcoin::util::bip32;
+/// use bdk::bitcoin::bip32;
 /// use bdk::keys::{
 ///     any_network, DerivableKey, DescriptorKey, ExtendedKey, KeyError, ScriptContext,
 /// };
 ///
 /// struct MyCustomKeyType {
 ///     key_data: bitcoin::PrivateKey,
-///     chain_code: Vec<u8>,
+///     chain_code: [u8; 32],
 /// }
 ///
 /// impl<Ctx: ScriptContext> DerivableKey<Ctx> for MyCustomKeyType {
@@ -436,7 +436,7 @@ impl<Ctx: ScriptContext> From<bip32::ExtendedPrivKey> for ExtendedKey<Ctx> {
 ///             depth: 0,
 ///             parent_fingerprint: bip32::Fingerprint::default(),
 ///             private_key: self.key_data.inner,
-///             chain_code: bip32::ChainCode::from(self.chain_code.as_ref()),
+///             chain_code: bip32::ChainCode::from(&self.chain_code),
 ///             child_number: bip32::ChildNumber::Normal { index: 0 },
 ///         };
 ///
@@ -927,13 +927,13 @@ pub enum KeyError {
     Message(String),
 
     /// BIP32 error
-    Bip32(bitcoin::util::bip32::Error),
+    Bip32(bitcoin::bip32::Error),
     /// Miniscript error
     Miniscript(miniscript::Error),
 }
 
 impl_error!(miniscript::Error, Miniscript, KeyError);
-impl_error!(bitcoin::util::bip32::Error, Bip32, KeyError);
+impl_error!(bitcoin::bip32::Error, Bip32, KeyError);
 
 impl fmt::Display for KeyError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -953,7 +953,7 @@ impl std::error::Error for KeyError {}
 
 #[cfg(test)]
 pub mod test {
-    use bitcoin::util::bip32;
+    use bitcoin::bip32;
 
     use super::*;
 

@@ -7,7 +7,7 @@ use std::{cmp::Reverse, collections::HashMap, path::PathBuf, sync::Mutex, time::
 
 use bdk_chain::{
     bitcoin::{
-        psbt::Prevouts, secp256k1::Secp256k1, util::sighash::SighashCache, Address, LockTime,
+        absolute, address, psbt::Prevouts, secp256k1::Secp256k1, sighash::SighashCache, Address,
         Network, Sequence, Transaction, TxIn, TxOut,
     },
     indexed_tx_graph::{IndexedAdditions, IndexedTxGraph},
@@ -70,7 +70,7 @@ pub enum Commands<S: clap::Subcommand> {
     /// Send coins to an address.
     Send {
         value: u64,
-        address: Address,
+        address: Address<address::NetworkUnchecked>,
         #[clap(short, default_value = "bnb")]
         coin_select: CoinSelectionAlgo,
     },
@@ -457,7 +457,7 @@ where
     additions.append(change_additions);
 
     // Clone to drop the immutable reference.
-    let change_script = change_script.clone();
+    let change_script = change_script.into();
 
     let change_plan = bdk_tmp_plan::plan_satisfaction(
         &graph
@@ -465,7 +465,8 @@ where
             .keychains()
             .get(&internal_keychain)
             .expect("must exist")
-            .at_derivation_index(change_index),
+            .at_derivation_index(change_index)
+            .expect("change_index can't be hardened"),
         &assets,
     )
     .expect("failed to obtain change plan");
@@ -520,9 +521,8 @@ where
         // tip as the `lock_time` for anti-fee-sniping purposes
         lock_time: chain
             .get_chain_tip()?
-            .and_then(|block_id| LockTime::from_height(block_id.height).ok())
-            .unwrap_or(LockTime::ZERO)
-            .into(),
+            .and_then(|block_id| absolute::LockTime::from_height(block_id.height).ok())
+            .unwrap_or(absolute::LockTime::ZERO),
         input: selected_txos
             .iter()
             .map(|(_, utxo)| TxIn {
@@ -625,7 +625,8 @@ pub fn planned_utxos<A: Anchor, O: ChainOracle, K: Clone + bdk_tmp_plan::CanDeri
                     .keychains()
                     .get(&k)
                     .expect("keychain must exist")
-                    .at_derivation_index(i);
+                    .at_derivation_index(i)
+                    .expect("i can't be hardened");
                 let plan = bdk_tmp_plan::plan_satisfaction(&desc, assets)?;
                 Some(Ok((plan, full_txo)))
             },
@@ -668,6 +669,7 @@ where
             coin_select,
         } => {
             let chain = &*chain.lock().unwrap();
+            let address = address.require_network(network)?;
             run_send_cmd(
                 graph,
                 db,

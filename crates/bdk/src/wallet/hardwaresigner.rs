@@ -19,7 +19,7 @@
 //! # use bdk::wallet::hardwaresigner::HWISigner;
 //! # use bdk::wallet::AddressIndex::New;
 //! # use bdk::{FeeRate, KeychainKind, SignOptions, Wallet};
-//! # use hwi::{types::HWIChain, HWIClient};
+//! # use hwi::HWIClient;
 //! # use std::sync::Arc;
 //! #
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -28,7 +28,7 @@
 //!     panic!("No devices found!");
 //! }
 //! let first_device = devices.remove(0)?;
-//! let custom_signer = HWISigner::from_device(&first_device, HWIChain::Test)?;
+//! let custom_signer = HWISigner::from_device(&first_device, Network::Testnet.into())?;
 //!
 //! # let mut wallet = Wallet::new_no_persist(
 //! #     "",
@@ -47,9 +47,9 @@
 //! # }
 //! ```
 
+use bitcoin::bip32::Fingerprint;
 use bitcoin::psbt::PartiallySignedTransaction;
 use bitcoin::secp256k1::{All, Secp256k1};
-use bitcoin::util::bip32::Fingerprint;
 
 use hwi::error::Error;
 use hwi::types::{HWIChain, HWIDevice};

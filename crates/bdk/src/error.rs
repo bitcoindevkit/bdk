@@ -84,9 +84,9 @@ pub enum Error {
     /// Miniscript PSBT error
     MiniscriptPsbt(MiniscriptPsbtError),
     /// BIP32 error
-    Bip32(bitcoin::util::bip32::Error),
+    Bip32(bitcoin::bip32::Error),
     /// Partially signed bitcoin transaction error
-    Psbt(bitcoin::util::psbt::Error),
+    Psbt(bitcoin::psbt::Error),
 }
 
 /// Errors returned by miniscript when updating inconsistent PSBTs
@@ -197,5 +197,5 @@ impl From<crate::keys::KeyError> for Error {
 
 impl_error!(miniscript::Error, Miniscript);
 impl_error!(MiniscriptPsbtError, MiniscriptPsbt);
-impl_error!(bitcoin::util::bip32::Error, Bip32);
-impl_error!(bitcoin::util::psbt::Error, Psbt);
+impl_error!(bitcoin::bip32::Error, Bip32);
+impl_error!(bitcoin::psbt::Error, Psbt);

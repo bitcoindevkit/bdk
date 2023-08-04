@@ -232,7 +232,7 @@ mod test {
             input: vec![],
             output: vec![],
             version: 0,
-            lock_time: bitcoin::PackedLockTime::ZERO,
+            lock_time: bitcoin::absolute::LockTime::ZERO,
         };
         wallet
             .insert_checkpoint(BlockId {

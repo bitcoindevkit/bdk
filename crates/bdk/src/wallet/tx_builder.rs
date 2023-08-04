@@ -18,7 +18,7 @@
 //! # use bitcoin::*;
 //! # use bdk::*;
 //! # use bdk::wallet::tx_builder::CreateTx;
-//! # let to_address = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap();
+//! # let to_address = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap().assume_checked();
 //! # let mut wallet = doctest_wallet!();
 //! // create a TxBuilder from a wallet
 //! let mut tx_builder = wallet.build_tx();
@@ -27,7 +27,7 @@
 //!     // Create a transaction with one output to `to_address` of 50_000 satoshi
 //!     .add_recipient(to_address.script_pubkey(), 50_000)
 //!     // With a custom fee rate of 5.0 satoshi/vbyte
-//!     .fee_rate(FeeRate::from_sat_per_vb(5.0))
+//!     .fee_rate(bdk::FeeRate::from_sat_per_vb(5.0))
 //!     // Only spend non-change outputs
 //!     .do_not_spend_change()
 //!     // Turn on RBF signaling
@@ -43,8 +43,8 @@ use bdk_chain::PersistBackend;
 use core::cell::RefCell;
 use core::marker::PhantomData;
 
-use bitcoin::util::psbt::{self, PartiallySignedTransaction as Psbt};
-use bitcoin::{LockTime, OutPoint, Script, Sequence, Transaction};
+use bitcoin::psbt::{self, PartiallySignedTransaction as Psbt};
+use bitcoin::{absolute, script::PushBytes, OutPoint, ScriptBuf, Sequence, Transaction};
 
 use super::coin_selection::{CoinSelectionAlgorithm, DefaultCoinSelectionAlgorithm};
 use super::ChangeSet;
@@ -82,7 +82,7 @@ impl TxBuilderContext for BumpFee {}
 /// # use bitcoin::*;
 /// # use core::str::FromStr;
 /// # let mut wallet = doctest_wallet!();
-/// # let addr1 = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap();
+/// # let addr1 = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap().assume_checked();
 /// # let addr2 = addr1.clone();
 /// // chaining
 /// let (psbt1, details) = {
@@ -129,9 +129,9 @@ pub struct TxBuilder<'a, D, Cs, Ctx> {
 //TODO: TxParams should eventually be exposed publicly.
 #[derive(Default, Debug, Clone)]
 pub(crate) struct TxParams {
-    pub(crate) recipients: Vec<(Script, u64)>,
+    pub(crate) recipients: Vec<(ScriptBuf, u64)>,
     pub(crate) drain_wallet: bool,
-    pub(crate) drain_to: Option<Script>,
+    pub(crate) drain_to: Option<ScriptBuf>,
     pub(crate) fee_policy: Option<FeePolicy>,
     pub(crate) internal_policy_path: Option<BTreeMap<String, Vec<usize>>>,
     pub(crate) external_policy_path: Option<BTreeMap<String, Vec<usize>>>,
@@ -140,7 +140,7 @@ pub(crate) struct TxParams {
     pub(crate) manually_selected_only: bool,
     pub(crate) sighash: Option<psbt::PsbtSighashType>,
     pub(crate) ordering: TxOrdering,
-    pub(crate) locktime: Option<LockTime>,
+    pub(crate) locktime: Option<absolute::LockTime>,
     pub(crate) rbf: Option<RbfValue>,
     pub(crate) version: Option<Version>,
     pub(crate) change_policy: ChangeSpendPolicy,
@@ -148,7 +148,7 @@ pub(crate) struct TxParams {
     pub(crate) add_global_xpubs: bool,
     pub(crate) include_output_redeem_witness_script: bool,
     pub(crate) bumping_fee: Option<PreviousFee>,
-    pub(crate) current_height: Option<LockTime>,
+    pub(crate) current_height: Option<absolute::LockTime>,
     pub(crate) allow_dust: bool,
 }
 
@@ -245,7 +245,10 @@ impl<'a, D, Cs: CoinSelectionAlgorithm, Ctx: TxBuilderContext> TxBuilder<'a, D, 
     /// # use std::collections::BTreeMap;
     /// # use bitcoin::*;
     /// # use bdk::*;
-    /// # let to_address = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap();
+    /// # let to_address =
+    /// Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt")
+    ///     .unwrap()
+    ///     .assume_checked();
     /// # let mut wallet = doctest_wallet!();
     /// let mut path = BTreeMap::new();
     /// path.insert("aabbccdd".to_string(), vec![0, 1]);
@@ -287,6 +290,7 @@ impl<'a, D, Cs: CoinSelectionAlgorithm, Ctx: TxBuilderContext> TxBuilder<'a, D, 
 
             for utxo in utxos {
                 let descriptor = wallet.get_descriptor_for_keychain(utxo.keychain);
+                #[allow(deprecated)]
                 let satisfaction_weight = descriptor.max_satisfaction_weight().unwrap();
                 self.params.utxos.push(WeightedUtxo {
                     satisfaction_weight,
@@ -431,7 +435,7 @@ impl<'a, D, Cs: CoinSelectionAlgorithm, Ctx: TxBuilderContext> TxBuilder<'a, D, 
     /// Use a specific nLockTime while creating the transaction
     ///
     /// This can cause conflicts if the wallet's descriptors contain an "after" (OP_CLTV) operator.
-    pub fn nlocktime(&mut self, locktime: LockTime) -> &mut Self {
+    pub fn nlocktime(&mut self, locktime: absolute::LockTime) -> &mut Self {
         self.params.locktime = Some(locktime);
         self
     }
@@ -470,7 +474,7 @@ impl<'a, D, Cs: CoinSelectionAlgorithm, Ctx: TxBuilderContext> TxBuilder<'a, D, 
         self
     }
 
-    /// Only Fill-in the [`psbt::Input::witness_utxo`](bitcoin::util::psbt::Input::witness_utxo) field when spending from
+    /// Only Fill-in the [`psbt::Input::witness_utxo`](bitcoin::psbt::Input::witness_utxo) field when spending from
     /// SegWit descriptors.
     ///
     /// This reduces the size of the PSBT, but some signers might reject them due to the lack of
@@ -480,8 +484,8 @@ impl<'a, D, Cs: CoinSelectionAlgorithm, Ctx: TxBuilderContext> TxBuilder<'a, D, 
         self
     }
 
-    /// Fill-in the [`psbt::Output::redeem_script`](bitcoin::util::psbt::Output::redeem_script) and
-    /// [`psbt::Output::witness_script`](bitcoin::util::psbt::Output::witness_script) fields.
+    /// Fill-in the [`psbt::Output::redeem_script`](bitcoin::psbt::Output::redeem_script) and
+    /// [`psbt::Output::witness_script`](bitcoin::psbt::Output::witness_script) fields.
     ///
     /// This is useful for signers which always require it, like ColdCard hardware wallets.
     pub fn include_output_redeem_witness_script(&mut self) -> &mut Self {
@@ -568,7 +572,8 @@ impl<'a, D, Cs: CoinSelectionAlgorithm, Ctx: TxBuilderContext> TxBuilder<'a, D, 
     ///
     /// In both cases, if you don't provide a current height, we use the last sync height.
     pub fn current_height(&mut self, height: u32) -> &mut Self {
-        self.params.current_height = Some(LockTime::from_height(height).expect("Invalid height"));
+        self.params.current_height =
+            Some(absolute::LockTime::from_height(height).expect("Invalid height"));
         self
     }
 
@@ -583,20 +588,20 @@ impl<'a, D, Cs: CoinSelectionAlgorithm, Ctx: TxBuilderContext> TxBuilder<'a, D, 
 
 impl<'a, D, Cs: CoinSelectionAlgorithm> TxBuilder<'a, D, Cs, CreateTx> {
     /// Replace the recipients already added with a new list
-    pub fn set_recipients(&mut self, recipients: Vec<(Script, u64)>) -> &mut Self {
+    pub fn set_recipients(&mut self, recipients: Vec<(ScriptBuf, u64)>) -> &mut Self {
         self.params.recipients = recipients;
         self
     }
 
     /// Add a recipient to the internal list
-    pub fn add_recipient(&mut self, script_pubkey: Script, amount: u64) -> &mut Self {
+    pub fn add_recipient(&mut self, script_pubkey: ScriptBuf, amount: u64) -> &mut Self {
         self.params.recipients.push((script_pubkey, amount));
         self
     }
 
     /// Add data as an output, using OP_RETURN
-    pub fn add_data(&mut self, data: &[u8]) -> &mut Self {
-        let script = Script::new_op_return(data);
+    pub fn add_data<T: AsRef<PushBytes>>(&mut self, data: &T) -> &mut Self {
+        let script = ScriptBuf::new_op_return(data);
         self.add_recipient(script, 0u64);
         self
     }
@@ -626,7 +631,10 @@ impl<'a, D, Cs: CoinSelectionAlgorithm> TxBuilder<'a, D, Cs, CreateTx> {
     /// # use bitcoin::*;
     /// # use bdk::*;
     /// # use bdk::wallet::tx_builder::CreateTx;
-    /// # let to_address = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap();
+    /// # let to_address =
+    /// Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt")
+    ///     .unwrap()
+    ///     .assume_checked();
     /// # let mut wallet = doctest_wallet!();
     /// let mut tx_builder = wallet.build_tx();
     ///
@@ -635,7 +643,7 @@ impl<'a, D, Cs: CoinSelectionAlgorithm> TxBuilder<'a, D, Cs, CreateTx> {
     ///     .drain_wallet()
     ///     // Send the excess (which is all the coins minus the fee) to this address.
     ///     .drain_to(to_address.script_pubkey())
-    ///     .fee_rate(FeeRate::from_sat_per_vb(5.0))
+    ///     .fee_rate(bdk::FeeRate::from_sat_per_vb(5.0))
     ///     .enable_rbf();
     /// let (psbt, tx_details) = tx_builder.finish()?;
     /// # Ok::<(), bdk::Error>(())
@@ -645,7 +653,7 @@ impl<'a, D, Cs: CoinSelectionAlgorithm> TxBuilder<'a, D, Cs, CreateTx> {
     /// [`add_recipient`]: Self::add_recipient
     /// [`add_utxos`]: Self::add_utxos
     /// [`drain_wallet`]: Self::drain_wallet
-    pub fn drain_to(&mut self, script_pubkey: Script) -> &mut Self {
+    pub fn drain_to(&mut self, script_pubkey: ScriptBuf) -> &mut Self {
         self.params.drain_to = Some(script_pubkey);
         self
     }
@@ -663,7 +671,7 @@ impl<'a, D> TxBuilder<'a, D, DefaultCoinSelectionAlgorithm, BumpFee> {
     ///
     /// Returns an `Err` if `script_pubkey` can't be found among the recipients of the
     /// transaction we are bumping.
-    pub fn allow_shrinking(&mut self, script_pubkey: Script) -> Result<&mut Self, Error> {
+    pub fn allow_shrinking(&mut self, script_pubkey: ScriptBuf) -> Result<&mut Self, Error> {
         match self
             .params
             .recipients
@@ -868,8 +876,11 @@ mod test {
         );
 
         assert_eq!(tx.output[0].value, 800);
-        assert_eq!(tx.output[1].script_pubkey, From::from(vec![0xAA]));
-        assert_eq!(tx.output[2].script_pubkey, From::from(vec![0xAA, 0xEE]));
+        assert_eq!(tx.output[1].script_pubkey, ScriptBuf::from(vec![0xAA]));
+        assert_eq!(
+            tx.output[2].script_pubkey,
+            ScriptBuf::from(vec![0xAA, 0xEE])
+        );
     }
 
     fn get_test_utxos() -> Vec<LocalUtxo> {
@@ -878,7 +889,7 @@ mod test {
         vec![
             LocalUtxo {
                 outpoint: OutPoint {
-                    txid: bitcoin::Txid::from_inner([0; 32]),
+                    txid: bitcoin::Txid::from_slice(&[0; 32]).unwrap(),
                     vout: 0,
                 },
                 txout: Default::default(),
@@ -889,7 +900,7 @@ mod test {
             },
             LocalUtxo {
                 outpoint: OutPoint {
-                    txid: bitcoin::Txid::from_inner([0; 32]),
+                    txid: bitcoin::Txid::from_slice(&[0; 32]).unwrap(),
                     vout: 1,
                 },
                 txout: Default::default(),

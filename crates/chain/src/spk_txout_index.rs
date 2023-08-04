@@ -5,7 +5,7 @@ use crate::{
     indexed_tx_graph::Indexer,
     ForEachTxOut,
 };
-use bitcoin::{self, OutPoint, Script, Transaction, TxOut, Txid};
+use bitcoin::{self, OutPoint, Script, ScriptBuf, Transaction, TxOut, Txid};
 
 /// An index storing [`TxOut`]s that have a script pubkey that matches those in a list.
 ///
@@ -30,9 +30,9 @@ use bitcoin::{self, OutPoint, Script, Transaction, TxOut, Txid};
 #[derive(Clone, Debug)]
 pub struct SpkTxOutIndex<I> {
     /// script pubkeys ordered by index
-    spks: BTreeMap<I, Script>,
+    spks: BTreeMap<I, ScriptBuf>,
     /// A reverse lookup from spk to spk index
-    spk_indices: HashMap<Script, I>,
+    spk_indices: HashMap<ScriptBuf, I>,
     /// The set of unused indexes.
     unused: BTreeSet<I>,
     /// Lookup index and txout by outpoint.
@@ -152,11 +152,11 @@ impl<I: Clone + Ord> SpkTxOutIndex<I> {
         use bitcoin::hashes::Hash;
         use core::ops::Bound::*;
         let min_op = OutPoint {
-            txid: Txid::from_inner([0x00; 32]),
+            txid: Txid::all_zeros(),
             vout: u32::MIN,
         };
         let max_op = OutPoint {
-            txid: Txid::from_inner([0xff; 32]),
+            txid: Txid::from_byte_array([0xff; Txid::LEN]),
             vout: u32::MAX,
         };
 
@@ -188,18 +188,18 @@ impl<I: Clone + Ord> SpkTxOutIndex<I> {
     ///
     /// If that index hasn't been inserted yet, it will return `None`.
     pub fn spk_at_index(&self, index: &I) -> Option<&Script> {
-        self.spks.get(index)
+        self.spks.get(index).map(|s| s.as_script())
     }
 
     /// The script pubkeys that are being tracked by the index.
-    pub fn all_spks(&self) -> &BTreeMap<I, Script> {
+    pub fn all_spks(&self) -> &BTreeMap<I, ScriptBuf> {
         &self.spks
     }
 
     /// Adds a script pubkey to scan for. Returns `false` and does nothing if spk already exists in the map
     ///
     /// the index will look for outputs spending to this spk whenever it scans new data.
-    pub fn insert_spk(&mut self, index: I, spk: Script) -> bool {
+    pub fn insert_spk(&mut self, index: I, spk: ScriptBuf) -> bool {
         match self.spk_indices.entry(spk.clone()) {
             Entry::Vacant(value) => {
                 value.insert(index.clone());

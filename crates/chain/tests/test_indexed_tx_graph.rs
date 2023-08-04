@@ -10,7 +10,9 @@ use bdk_chain::{
     tx_graph::Additions,
     BlockId, ChainPosition, ConfirmationHeightAnchor,
 };
-use bitcoin::{secp256k1::Secp256k1, BlockHash, OutPoint, Script, Transaction, TxIn, TxOut};
+use bitcoin::{
+    secp256k1::Secp256k1, BlockHash, OutPoint, Script, ScriptBuf, Transaction, TxIn, TxOut,
+};
 use miniscript::Descriptor;
 
 /// Ensure [`IndexedTxGraph::insert_relevant_txs`] can successfully index transactions NOT presented
@@ -25,8 +27,8 @@ fn insert_relevant_txs() {
     const DESCRIPTOR: &str = "tr([73c5da0a/86'/0'/0']xprv9xgqHN7yz9MwCkxsBPN5qetuNdQSUttZNKw1dcYTV4mkaAFiBVGQziHs3NRSWMkCzvgjEe3n9xV8oYywvM8at9yRqyaZVz6TYYhX98VjsUk/0/*)";
     let (descriptor, _) = Descriptor::parse_descriptor(&Secp256k1::signing_only(), DESCRIPTOR)
         .expect("must be valid");
-    let spk_0 = descriptor.at_derivation_index(0).script_pubkey();
-    let spk_1 = descriptor.at_derivation_index(9).script_pubkey();
+    let spk_0 = descriptor.at_derivation_index(0).unwrap().script_pubkey();
+    let spk_1 = descriptor.at_derivation_index(9).unwrap().script_pubkey();
 
     let mut graph = IndexedTxGraph::<ConfirmationHeightAnchor, KeychainTxOutIndex<()>>::default();
     graph.index.add_keychain((), descriptor);
@@ -127,21 +129,21 @@ fn test_list_owned_txouts() {
 
     // Get trusted and untrusted addresses
 
-    let mut trusted_spks = Vec::new();
-    let mut untrusted_spks = Vec::new();
+    let mut trusted_spks: Vec<ScriptBuf> = Vec::new();
+    let mut untrusted_spks: Vec<ScriptBuf> = Vec::new();
 
     {
         // we need to scope here to take immutanble reference of the graph
         for _ in 0..10 {
             let ((_, script), _) = graph.index.reveal_next_spk(&"keychain_1".to_string());
             // TODO Assert indexes
-            trusted_spks.push(script.clone());
+            trusted_spks.push(script.to_owned());
         }
     }
     {
         for _ in 0..10 {
             let ((_, script), _) = graph.index.reveal_next_spk(&"keychain_2".to_string());
-            untrusted_spks.push(script.clone());
+            untrusted_spks.push(script.to_owned());
         }
     }
 
@@ -155,7 +157,7 @@ fn test_list_owned_txouts() {
         }],
         output: vec![TxOut {
             value: 70000,
-            script_pubkey: trusted_spks[0].clone(),
+            script_pubkey: trusted_spks[0].to_owned(),
         }],
         ..common::new_tx(0)
     };
@@ -164,7 +166,7 @@ fn test_list_owned_txouts() {
     let tx2 = Transaction {
         output: vec![TxOut {
             value: 30000,
-            script_pubkey: untrusted_spks[0].clone(),
+            script_pubkey: untrusted_spks[0].to_owned(),
         }],
         ..common::new_tx(0)
     };
@@ -177,7 +179,7 @@ fn test_list_owned_txouts() {
         }],
         output: vec![TxOut {
             value: 10000,
-            script_pubkey: trusted_spks[1].clone(),
+            script_pubkey: trusted_spks[1].to_owned(),
         }],
         ..common::new_tx(0)
     };
@@ -186,7 +188,7 @@ fn test_list_owned_txouts() {
     let tx4 = Transaction {
         output: vec![TxOut {
             value: 20000,
-            script_pubkey: untrusted_spks[1].clone(),
+            script_pubkey: untrusted_spks[1].to_owned(),
         }],
         ..common::new_tx(0)
     };
@@ -195,7 +197,7 @@ fn test_list_owned_txouts() {
     let tx5 = Transaction {
         output: vec![TxOut {
             value: 15000,
-            script_pubkey: trusted_spks[2].clone(),
+            script_pubkey: trusted_spks[2].to_owned(),
         }],
         ..common::new_tx(0)
     };
@@ -258,7 +260,7 @@ fn test_list_owned_txouts() {
                 &local_chain,
                 chain_tip,
                 graph.index.outpoints().iter().cloned(),
-                |_, spk: &Script| trusted_spks.contains(spk),
+                |_, spk: &Script| trusted_spks.contains(&spk.to_owned()),
             );
 
             assert_eq!(txouts.len(), 5);

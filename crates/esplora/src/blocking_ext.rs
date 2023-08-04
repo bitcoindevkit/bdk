@@ -1,10 +1,9 @@
 use std::thread::JoinHandle;
 
-use bdk_chain::bitcoin::{OutPoint, Txid};
 use bdk_chain::collections::btree_map;
 use bdk_chain::collections::{BTreeMap, BTreeSet};
 use bdk_chain::{
-    bitcoin::{BlockHash, Script},
+    bitcoin::{BlockHash, OutPoint, ScriptBuf, Txid},
     local_chain::{self, CheckPoint},
     BlockId, ConfirmationTimeAnchor, TxGraph,
 };
@@ -49,7 +48,7 @@ pub trait EsploraExt {
     #[allow(clippy::result_large_err)]
     fn update_tx_graph<K: Ord + Clone>(
         &self,
-        keychain_spks: BTreeMap<K, impl IntoIterator<Item = (u32, Script)>>,
+        keychain_spks: BTreeMap<K, impl IntoIterator<Item = (u32, ScriptBuf)>>,
         txids: impl IntoIterator<Item = Txid>,
         outpoints: impl IntoIterator<Item = OutPoint>,
         stop_gap: usize,
@@ -62,7 +61,7 @@ pub trait EsploraExt {
     #[allow(clippy::result_large_err)]
     fn update_tx_graph_without_keychain(
         &self,
-        misc_spks: impl IntoIterator<Item = Script>,
+        misc_spks: impl IntoIterator<Item = ScriptBuf>,
         txids: impl IntoIterator<Item = Txid>,
         outpoints: impl IntoIterator<Item = OutPoint>,
         parallel_requests: usize,
@@ -195,7 +194,7 @@ impl EsploraExt for esplora_client::BlockingClient {
 
     fn update_tx_graph<K: Ord + Clone>(
         &self,
-        keychain_spks: BTreeMap<K, impl IntoIterator<Item = (u32, Script)>>,
+        keychain_spks: BTreeMap<K, impl IntoIterator<Item = (u32, ScriptBuf)>>,
         txids: impl IntoIterator<Item = Txid>,
         outpoints: impl IntoIterator<Item = OutPoint>,
         stop_gap: usize,

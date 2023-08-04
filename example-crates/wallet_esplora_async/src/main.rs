@@ -79,7 +79,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::process::exit(0);
     }
 
-    let faucet_address = Address::from_str("mkHS9ne12qx9pS9VojpwU5xtRd4T7X7ZUt")?;
+    let faucet_address = Address::from_str("mkHS9ne12qx9pS9VojpwU5xtRd4T7X7ZUt")?
+        .require_network(Network::Testnet)?;
 
     let mut tx_builder = wallet.build_tx();
     tx_builder
