@@ -1,6 +1,6 @@
 use bdk_chain::{
     bitcoin::{OutPoint, ScriptBuf, Transaction, Txid},
-    keychain::LocalUpdate,
+    keychain::WalletUpdate,
     local_chain::{self, CheckPoint},
     tx_graph::{self, TxGraph},
     Anchor, BlockId, ConfirmationHeightAnchor, ConfirmationTimeAnchor,
@@ -58,7 +58,7 @@ impl<K, A: Anchor> ElectrumUpdate<K, A> {
         client: &Client,
         seen_at: Option<u64>,
         missing: Vec<Txid>,
-    ) -> Result<LocalUpdate<K, A>, Error> {
+    ) -> Result<WalletUpdate<K, A>, Error> {
         let new_txs = client.batch_transaction_get(&missing)?;
         let mut graph_update = TxGraph::<A>::new(new_txs);
         for (txid, anchors) in self.graph_update {
@@ -69,7 +69,7 @@ impl<K, A: Anchor> ElectrumUpdate<K, A> {
                 let _ = graph_update.insert_anchor(txid, anchor);
             }
         }
-        Ok(LocalUpdate {
+        Ok(WalletUpdate {
             last_active_indices: self.keychain_update,
             graph: graph_update,
             chain: local_chain::Update {
@@ -92,7 +92,7 @@ impl<K> ElectrumUpdate<K, ConfirmationHeightAnchor> {
         client: &Client,
         seen_at: Option<u64>,
         missing: Vec<Txid>,
-    ) -> Result<LocalUpdate<K, ConfirmationTimeAnchor>, Error> {
+    ) -> Result<WalletUpdate<K, ConfirmationTimeAnchor>, Error> {
         let update = self.finalize(client, seen_at, missing)?;
 
         let relevant_heights = {
@@ -117,13 +117,13 @@ impl<K> ElectrumUpdate<K, ConfirmationHeightAnchor> {
             )
             .collect::<HashMap<u32, u64>>();
 
-        let graph_additions = {
-            let old_additions = TxGraph::default().determine_additions(&update.graph);
-            tx_graph::Additions {
-                txs: old_additions.txs,
-                txouts: old_additions.txouts,
-                last_seen: old_additions.last_seen,
-                anchors: old_additions
+        let graph_changeset = {
+            let old_changeset = TxGraph::default().apply_update(update.graph.clone());
+            tx_graph::ChangeSet {
+                txs: old_changeset.txs,
+                txouts: old_changeset.txouts,
+                last_seen: old_changeset.last_seen,
+                anchors: old_changeset
                     .anchors
                     .into_iter()
                     .map(|(height_anchor, txid)| {
@@ -140,11 +140,11 @@ impl<K> ElectrumUpdate<K, ConfirmationHeightAnchor> {
             }
         };
 
-        Ok(LocalUpdate {
+        Ok(WalletUpdate {
             last_active_indices: update.last_active_indices,
             graph: {
                 let mut graph = TxGraph::default();
-                graph.apply_additions(graph_additions);
+                graph.apply_changeset(graph_changeset);
                 graph
             },
             chain: update.chain,

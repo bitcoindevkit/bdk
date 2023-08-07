@@ -10,8 +10,8 @@ use bdk_chain::{
         absolute, address, psbt::Prevouts, secp256k1::Secp256k1, sighash::SighashCache, Address,
         Network, Sequence, Transaction, TxIn, TxOut,
     },
-    indexed_tx_graph::{IndexedAdditions, IndexedTxGraph},
-    keychain::{DerivationAdditions, KeychainTxOutIndex},
+    indexed_tx_graph::{self, IndexedTxGraph},
+    keychain::{self, KeychainTxOutIndex},
     miniscript::{
         descriptor::{DescriptorSecretKey, KeyMap},
         Descriptor, DescriptorPublicKey,
@@ -24,7 +24,7 @@ pub use clap;
 use clap::{Parser, Subcommand};
 
 pub type KeychainTxGraph<A> = IndexedTxGraph<A, KeychainTxOutIndex<Keychain>>;
-pub type KeychainAdditions<A> = IndexedAdditions<A, DerivationAdditions<Keychain>>;
+pub type KeychainChangeSet<A> = indexed_tx_graph::ChangeSet<A, keychain::ChangeSet<Keychain>>;
 pub type Database<'m, C> = Persist<Store<'m, C>, C>;
 
 #[derive(Parser)]
@@ -186,7 +186,7 @@ pub fn run_address_cmd<A, C>(
     cmd: AddressCmd,
 ) -> anyhow::Result<()>
 where
-    C: Default + Append + DeserializeOwned + Serialize + From<KeychainAdditions<A>>,
+    C: Default + Append + DeserializeOwned + Serialize + From<KeychainChangeSet<A>>,
 {
     let index = &mut graph.index;
 
@@ -198,9 +198,9 @@ where
                 _ => unreachable!("only these two variants exist in match arm"),
             };
 
-            let ((spk_i, spk), index_additions) = spk_chooser(index, &Keychain::External);
+            let ((spk_i, spk), index_changeset) = spk_chooser(index, &Keychain::External);
             let db = &mut *db.lock().unwrap();
-            db.stage(C::from(KeychainAdditions::from(index_additions)));
+            db.stage(C::from(KeychainChangeSet::from(index_changeset)));
             db.commit()?;
             let addr = Address::from_script(spk, network).context("failed to derive address")?;
             println!("[address @ {}] {}", spk_i, addr);
@@ -340,20 +340,20 @@ pub fn run_send_cmd<A: Anchor, O: ChainOracle, C>(
 ) -> anyhow::Result<()>
 where
     O::Error: std::error::Error + Send + Sync + 'static,
-    C: Default + Append + DeserializeOwned + Serialize + From<KeychainAdditions<A>>,
+    C: Default + Append + DeserializeOwned + Serialize + From<KeychainChangeSet<A>>,
 {
     let (transaction, change_index) = {
         let graph = &mut *graph.lock().unwrap();
         // take mutable ref to construct tx -- it is only open for a short time while building it.
         let (tx, change_info) = create_tx(graph, chain, keymap, cs_algorithm, address, value)?;
 
-        if let Some((index_additions, (change_keychain, index))) = change_info {
+        if let Some((index_changeset, (change_keychain, index))) = change_info {
             // We must first persist to disk the fact that we've got a new address from the
             // change keychain so future scans will find the tx we're about to broadcast.
             // If we're unable to persist this, then we don't want to broadcast.
             {
                 let db = &mut *db.lock().unwrap();
-                db.stage(C::from(KeychainAdditions::from(index_additions)));
+                db.stage(C::from(KeychainChangeSet::from(index_changeset)));
                 db.commit()?;
             }
 
@@ -371,12 +371,12 @@ where
         Ok(_) => {
             println!("Broadcasted Tx : {}", transaction.txid());
 
-            let keychain_additions = graph.lock().unwrap().insert_tx(&transaction, None, None);
+            let keychain_changeset = graph.lock().unwrap().insert_tx(&transaction, None, None);
 
             // We know the tx is at least unconfirmed now. Note if persisting here fails,
             // it's not a big deal since we can always find it again form
             // blockchain.
-            db.lock().unwrap().stage(C::from(keychain_additions));
+            db.lock().unwrap().stage(C::from(keychain_changeset));
             Ok(())
         }
         Err(e) => {
@@ -399,12 +399,12 @@ pub fn create_tx<A: Anchor, O: ChainOracle>(
     value: u64,
 ) -> anyhow::Result<(
     Transaction,
-    Option<(DerivationAdditions<Keychain>, (Keychain, u32))>,
+    Option<(keychain::ChangeSet<Keychain>, (Keychain, u32))>,
 )>
 where
     O::Error: std::error::Error + Send + Sync + 'static,
 {
-    let mut additions = DerivationAdditions::default();
+    let mut changeset = keychain::ChangeSet::default();
 
     let assets = bdk_tmp_plan::Assets {
         keys: keymap.iter().map(|(pk, _)| pk.clone()).collect(),
@@ -452,9 +452,9 @@ where
         Keychain::External
     };
 
-    let ((change_index, change_script), change_additions) =
+    let ((change_index, change_script), change_changeset) =
         graph.index.next_unused_spk(&internal_keychain);
-    additions.append(change_additions);
+    changeset.append(change_changeset);
 
     // Clone to drop the immutable reference.
     let change_script = change_script.into();
@@ -594,7 +594,7 @@ where
     }
 
     let change_info = if selection_meta.drain_value.is_some() {
-        Some((additions, (internal_keychain, change_index)))
+        Some((changeset, (internal_keychain, change_index)))
     } else {
         None
     };
@@ -645,7 +645,7 @@ pub fn handle_commands<S: clap::Subcommand, A: Anchor, O: ChainOracle, C>(
 ) -> anyhow::Result<()>
 where
     O::Error: std::error::Error + Send + Sync + 'static,
-    C: Default + Append + DeserializeOwned + Serialize + From<KeychainAdditions<A>>,
+    C: Default + Append + DeserializeOwned + Serialize + From<KeychainChangeSet<A>>,
 {
     match cmd {
         Commands::ChainSpecific(_) => unreachable!("example code should handle this!"),

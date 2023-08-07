@@ -6,8 +6,8 @@ use std::{
 
 use bdk_chain::{
     bitcoin::{Address, Network, OutPoint, ScriptBuf, Txid},
-    indexed_tx_graph::{IndexedAdditions, IndexedTxGraph},
-    keychain::LocalChangeSet,
+    indexed_tx_graph::{self, IndexedTxGraph},
+    keychain::WalletChangeSet,
     local_chain::LocalChain,
     Append, ConfirmationHeightAnchor,
 };
@@ -60,7 +60,7 @@ pub struct ScanOptions {
     pub batch_size: usize,
 }
 
-type ChangeSet = LocalChangeSet<Keychain, ConfirmationHeightAnchor>;
+type ChangeSet = WalletChangeSet<Keychain, ConfirmationHeightAnchor>;
 
 fn main() -> anyhow::Result<()> {
     let (args, keymap, index, db, init_changeset) =
@@ -68,11 +68,11 @@ fn main() -> anyhow::Result<()> {
 
     let graph = Mutex::new({
         let mut graph = IndexedTxGraph::new(index);
-        graph.apply_additions(init_changeset.indexed_additions);
+        graph.apply_changeset(init_changeset.index_tx_graph);
         graph
     });
 
-    let chain = Mutex::new(LocalChain::from_changeset(init_changeset.chain_changeset));
+    let chain = Mutex::new(LocalChain::from_changeset(init_changeset.chain));
 
     let electrum_url = match args.network {
         Network::Bitcoin => "ssl://electrum.blockstream.info:50002",
@@ -234,8 +234,8 @@ fn main() -> anyhow::Result<()> {
                 let unconfirmed_txids = graph
                     .graph()
                     .list_chain_txs(&*chain, chain_tip)
-                    .filter(|canonical_tx| !canonical_tx.observed_as.is_confirmed())
-                    .map(|canonical_tx| canonical_tx.node.txid)
+                    .filter(|canonical_tx| !canonical_tx.chain_position.is_confirmed())
+                    .map(|canonical_tx| canonical_tx.tx_node.txid)
                     .collect::<Vec<Txid>>();
 
                 txids = Box::new(unconfirmed_txids.into_iter().inspect(|txid| {
@@ -275,24 +275,25 @@ fn main() -> anyhow::Result<()> {
         let mut chain = chain.lock().unwrap();
         let mut graph = graph.lock().unwrap();
 
-        let chain_changeset = chain.apply_update(final_update.chain)?;
+        let chain = chain.apply_update(final_update.chain)?;
 
-        let indexed_additions = {
-            let mut additions = IndexedAdditions::<ConfirmationHeightAnchor, _>::default();
-            let (_, index_additions) = graph
+        let index_tx_graph = {
+            let mut changeset =
+                indexed_tx_graph::ChangeSet::<ConfirmationHeightAnchor, _>::default();
+            let (_, indexer) = graph
                 .index
                 .reveal_to_target_multi(&final_update.last_active_indices);
-            additions.append(IndexedAdditions {
-                index_additions,
+            changeset.append(indexed_tx_graph::ChangeSet {
+                indexer,
                 ..Default::default()
             });
-            additions.append(graph.apply_update(final_update.graph));
-            additions
+            changeset.append(graph.apply_update(final_update.graph));
+            changeset
         };
 
         ChangeSet {
-            indexed_additions,
-            chain_changeset,
+            index_tx_graph,
+            chain,
         }
     };
 

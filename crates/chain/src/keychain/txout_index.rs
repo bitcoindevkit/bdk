@@ -11,8 +11,6 @@ use core::{fmt::Debug, ops::Deref};
 
 use crate::Append;
 
-use super::DerivationAdditions;
-
 /// A convenient wrapper around [`SpkTxOutIndex`] that relates script pubkeys to miniscript public
 /// [`Descriptor`]s.
 ///
@@ -23,7 +21,7 @@ use super::DerivationAdditions;
 /// revealed. In addition to revealed scripts, we have a `lookahead` parameter for each keychain,
 /// which defines the number of script pubkeys to store ahead of the last revealed index.
 ///
-/// Methods that could update the last revealed index will return [`DerivationAdditions`] to report
+/// Methods that could update the last revealed index will return [`super::ChangeSet`] to report
 /// these changes. This can be persisted for future recovery.
 ///
 /// ## Synopsis
@@ -90,18 +88,18 @@ impl<K> Deref for KeychainTxOutIndex<K> {
 }
 
 impl<K: Clone + Ord + Debug> Indexer for KeychainTxOutIndex<K> {
-    type Additions = DerivationAdditions<K>;
+    type ChangeSet = super::ChangeSet<K>;
 
-    fn index_txout(&mut self, outpoint: OutPoint, txout: &TxOut) -> Self::Additions {
+    fn index_txout(&mut self, outpoint: OutPoint, txout: &TxOut) -> Self::ChangeSet {
         self.scan_txout(outpoint, txout)
     }
 
-    fn index_tx(&mut self, tx: &bitcoin::Transaction) -> Self::Additions {
+    fn index_tx(&mut self, tx: &bitcoin::Transaction) -> Self::ChangeSet {
         self.scan(tx)
     }
 
-    fn apply_additions(&mut self, additions: Self::Additions) {
-        self.apply_additions(additions)
+    fn apply_changeset(&mut self, changeset: Self::ChangeSet) {
+        self.apply_changeset(changeset)
     }
 
     fn is_tx_relevant(&self, tx: &bitcoin::Transaction) -> bool {
@@ -113,7 +111,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     /// Scans an object for relevant outpoints, which are stored and indexed internally.
     ///
     /// If the matched script pubkey is part of the lookahead, the last stored index is updated for
-    /// the script pubkey's keychain and the [`DerivationAdditions`] returned will reflect the
+    /// the script pubkey's keychain and the [`super::ChangeSet`] returned will reflect the
     /// change.
     ///
     /// Typically, this method is used in two situations:
@@ -126,19 +124,19 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     /// See [`ForEachTxout`] for the types that support this.
     ///
     /// [`ForEachTxout`]: crate::ForEachTxOut
-    pub fn scan(&mut self, txouts: &impl ForEachTxOut) -> DerivationAdditions<K> {
-        let mut additions = DerivationAdditions::<K>::default();
-        txouts.for_each_txout(|(op, txout)| additions.append(self.scan_txout(op, txout)));
-        additions
+    pub fn scan(&mut self, txouts: &impl ForEachTxOut) -> super::ChangeSet<K> {
+        let mut changeset = super::ChangeSet::<K>::default();
+        txouts.for_each_txout(|(op, txout)| changeset.append(self.scan_txout(op, txout)));
+        changeset
     }
 
     /// Scan a single outpoint for a matching script pubkey.
     ///
     /// If it matches, this will store and index it.
-    pub fn scan_txout(&mut self, op: OutPoint, txout: &TxOut) -> DerivationAdditions<K> {
+    pub fn scan_txout(&mut self, op: OutPoint, txout: &TxOut) -> super::ChangeSet<K> {
         match self.inner.scan_txout(op, txout).cloned() {
             Some((keychain, index)) => self.reveal_to_target(&keychain, index).1,
-            None => DerivationAdditions::default(),
+            None => super::ChangeSet::default(),
         }
     }
 
@@ -370,20 +368,20 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
         keychains: &BTreeMap<K, u32>,
     ) -> (
         BTreeMap<K, SpkIterator<Descriptor<DescriptorPublicKey>>>,
-        DerivationAdditions<K>,
+        super::ChangeSet<K>,
     ) {
-        let mut additions = DerivationAdditions::default();
+        let mut changeset = super::ChangeSet::default();
         let mut spks = BTreeMap::new();
 
         for (keychain, &index) in keychains {
-            let (new_spks, new_additions) = self.reveal_to_target(keychain, index);
-            if !new_additions.is_empty() {
+            let (new_spks, new_changeset) = self.reveal_to_target(keychain, index);
+            if !new_changeset.is_empty() {
                 spks.insert(keychain.clone(), new_spks);
-                additions.append(new_additions.clone());
+                changeset.append(new_changeset.clone());
             }
         }
 
-        (spks, additions)
+        (spks, changeset)
     }
 
     /// Reveals script pubkeys of the `keychain`'s descriptor **up to and including** the
@@ -394,7 +392,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     /// reveal up to the last possible index.
     ///
     /// This returns an iterator of newly revealed indices (alongside their scripts) and a
-    /// [`DerivationAdditions`], which reports updates to the latest revealed index. If no new script
+    /// [`super::ChangeSet`], which reports updates to the latest revealed index. If no new script
     /// pubkeys are revealed, then both of these will be empty.
     ///
     /// # Panics
@@ -406,7 +404,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
         target_index: u32,
     ) -> (
         SpkIterator<Descriptor<DescriptorPublicKey>>,
-        DerivationAdditions<K>,
+        super::ChangeSet<K>,
     ) {
         let descriptor = self.keychains.get(keychain).expect("keychain must exist");
         let has_wildcard = descriptor.has_wildcard();
@@ -450,7 +448,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
                 debug_assert!(_old_index < Some(index));
                 (
                     SpkIterator::new_with_range(descriptor.clone(), next_reveal_index..index + 1),
-                    DerivationAdditions(core::iter::once((keychain.clone(), index)).collect()),
+                    super::ChangeSet(core::iter::once((keychain.clone(), index)).collect()),
                 )
             }
             None => (
@@ -458,7 +456,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
                     descriptor.clone(),
                     next_reveal_index..next_reveal_index,
                 ),
-                DerivationAdditions::default(),
+                super::ChangeSet::default(),
             ),
         }
     }
@@ -466,10 +464,10 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     /// Attempts to reveal the next script pubkey for `keychain`.
     ///
     /// Returns the derivation index of the revealed script pubkey, the revealed script pubkey and a
-    /// [`DerivationAdditions`] which represents changes in the last revealed index (if any).
+    /// [`super::ChangeSet`] which represents changes in the last revealed index (if any).
     ///
     /// When a new script cannot be revealed, we return the last revealed script and an empty
-    /// [`DerivationAdditions`]. There are two scenarios when a new script pubkey cannot be derived:
+    /// [`super::ChangeSet`]. There are two scenarios when a new script pubkey cannot be derived:
     ///
     ///  1. The descriptor has no wildcard and already has one script revealed.
     ///  2. The descriptor has already revealed scripts up to the numeric bound.
@@ -477,14 +475,14 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     /// # Panics
     ///
     /// Panics if the `keychain` does not exist.
-    pub fn reveal_next_spk(&mut self, keychain: &K) -> ((u32, &Script), DerivationAdditions<K>) {
+    pub fn reveal_next_spk(&mut self, keychain: &K) -> ((u32, &Script), super::ChangeSet<K>) {
         let (next_index, _) = self.next_index(keychain);
-        let additions = self.reveal_to_target(keychain, next_index).1;
+        let changeset = self.reveal_to_target(keychain, next_index).1;
         let script = self
             .inner
             .spk_at_index(&(keychain.clone(), next_index))
             .expect("script must already be stored");
-        ((next_index, script), additions)
+        ((next_index, script), changeset)
     }
 
     /// Gets the next unused script pubkey in the keychain. I.e., the script pubkey with the lowest
@@ -499,7 +497,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     /// # Panics
     ///
     /// Panics if `keychain` has never been added to the index
-    pub fn next_unused_spk(&mut self, keychain: &K) -> ((u32, &Script), DerivationAdditions<K>) {
+    pub fn next_unused_spk(&mut self, keychain: &K) -> ((u32, &Script), super::ChangeSet<K>) {
         let need_new = self.unused_spks_of_keychain(keychain).next().is_none();
         // this rather strange branch is needed because of some lifetime issues
         if need_new {
@@ -509,7 +507,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
                 self.unused_spks_of_keychain(keychain)
                     .next()
                     .expect("we already know next exists"),
-                DerivationAdditions::default(),
+                super::ChangeSet::default(),
             )
         }
     }
@@ -580,9 +578,9 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
             .collect()
     }
 
-    /// Applies the derivation additions to the [`KeychainTxOutIndex`], extending the number of
-    /// derived scripts per keychain, as specified in the `additions`.
-    pub fn apply_additions(&mut self, additions: DerivationAdditions<K>) {
-        let _ = self.reveal_to_target_multi(&additions.0);
+    /// Applies the derivation changeset to the [`KeychainTxOutIndex`], extending the number of
+    /// derived scripts per keychain, as specified in the `changeset`.
+    pub fn apply_changeset(&mut self, changeset: super::ChangeSet<K>) {
+        let _ = self.reveal_to_target_multi(&changeset.0);
     }
 }
