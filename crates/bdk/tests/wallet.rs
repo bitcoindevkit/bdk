@@ -6,7 +6,6 @@ use bdk::wallet::coin_selection::LargestFirstCoinSelection;
 use bdk::wallet::AddressIndex::*;
 use bdk::wallet::{AddressIndex, AddressInfo, Balance, Wallet};
 use bdk::{Error, FeeRate, KeychainKind};
-use bdk_chain::tx_graph::CalculateFeeError;
 use bdk_chain::COINBASE_MATURITY;
 use bdk_chain::{BlockId, ConfirmationTime};
 use bitcoin::hashes::Hash;
@@ -84,63 +83,60 @@ fn test_descriptor_checksum() {
 #[test]
 fn test_get_funded_wallet_balance() {
     let (wallet, _) = get_funded_wallet(get_test_wpkh());
-    assert_eq!(wallet.get_balance().confirmed, 50000);
+
+    // The funded wallet contains a tx with a 76_000 sats input and two outputs, one spending 25_000
+    // to a foreign address and one returning 50_000 back to the wallet as change. The remaining 1000
+    // sats are the transaction fee.
+    assert_eq!(wallet.get_balance().confirmed, 50_000);
 }
 
 #[test]
 fn test_get_funded_wallet_sent_and_received() {
-    let (wallet, _) = get_funded_wallet(get_test_wpkh());
-    assert_eq!(wallet.get_balance().confirmed, 50000);
+    let (wallet, txid) = get_funded_wallet(get_test_wpkh());
+
     let mut tx_amounts: Vec<(Txid, (u64, u64))> = wallet
         .transactions()
-        .map(|ct| (ct.node.txid, wallet.sent_and_received(ct.node.tx)))
+        .map(|ct| (ct.tx_node.txid, wallet.sent_and_received(ct.tx_node.tx)))
         .collect();
     tx_amounts.sort_by(|a1, a2| a1.0.cmp(&a2.0));
 
-    assert_eq!(tx_amounts.len(), 2);
-    assert_matches!(tx_amounts.get(0), Some((_, (76_000, 50_000))))
+    let tx = wallet.get_tx(txid).expect("transaction").tx_node.tx;
+    let (sent, received) = wallet.sent_and_received(tx);
+
+    // The funded wallet contains a tx with a 76_000 sats input and two outputs, one spending 25_000
+    // to a foreign address and one returning 50_000 back to the wallet as change. The remaining 1000
+    // sats are the transaction fee.
+    assert_eq!(sent, 76_000);
+    assert_eq!(received, 50_000);
 }
 
 #[test]
 fn test_get_funded_wallet_tx_fees() {
-    let (wallet, _) = get_funded_wallet(get_test_wpkh());
-    assert_eq!(wallet.get_balance().confirmed, 50000);
-    let mut tx_fee_amounts: Vec<(Txid, Result<u64, CalculateFeeError>)> = wallet
-        .transactions()
-        .map(|ct| {
-            let fee = wallet.calculate_fee(ct.node.tx);
-            (ct.node.txid, fee)
-        })
-        .collect();
-    tx_fee_amounts.sort_by(|a1, a2| a1.0.cmp(&a2.0));
+    let (wallet, txid) = get_funded_wallet(get_test_wpkh());
 
-    assert_eq!(tx_fee_amounts.len(), 2);
-    assert_matches!(
-        tx_fee_amounts.get(1),
-        Some((_, Err(CalculateFeeError::MissingTxOut(_))))
-    );
-    assert_matches!(tx_fee_amounts.get(0), Some((_, Ok(1000))))
+    let tx = wallet.get_tx(txid).expect("transaction").tx_node.tx;
+    let tx_fee = wallet.calculate_fee(tx).expect("transaction fee");
+
+    // The funded wallet contains a tx with a 76_000 sats input and two outputs, one spending 25_000
+    // to a foreign address and one returning 50_000 back to the wallet as change. The remaining 1000
+    // sats are the transaction fee.
+    assert_eq!(tx_fee, 1000)
 }
 
 #[test]
 fn test_get_funded_wallet_tx_fee_rate() {
-    let (wallet, _) = get_funded_wallet(get_test_wpkh());
-    assert_eq!(wallet.get_balance().confirmed, 50000);
-    let mut tx_fee_rates: Vec<(Txid, Result<FeeRate, CalculateFeeError>)> = wallet
-        .transactions()
-        .map(|ct| {
-            let fee_rate = wallet.calculate_fee_rate(ct.node.tx);
-            (ct.node.txid, fee_rate)
-        })
-        .collect();
-    tx_fee_rates.sort_by(|a1, a2| a1.0.cmp(&a2.0));
+    let (wallet, txid) = get_funded_wallet(get_test_wpkh());
 
-    assert_eq!(tx_fee_rates.len(), 2);
-    assert_matches!(
-        tx_fee_rates.get(1),
-        Some((_, Err(CalculateFeeError::MissingTxOut(_))))
-    );
-    assert_matches!(tx_fee_rates.get(0), Some((_, Ok(_))))
+    let tx = wallet.get_tx(txid).expect("transaction").tx_node.tx;
+    let tx_fee_rate = wallet.calculate_fee_rate(tx).expect("transaction fee rate");
+
+    // The funded wallet contains a tx with a 76_000 sats input and two outputs, one spending 25_000
+    // to a foreign address and one returning 50_000 back to the wallet as change. The remaining 1000
+    // sats are the transaction fee.
+
+    // tx weight = 452 bytes, as vbytes = (452+3)/4 = 113
+    // fee rate (sats per vbyte) = fee / vbytes = 1000 / 113 = 8.8495575221 rounded to 8.849558
+    assert_eq!(tx_fee_rate.as_sat_per_vb(), 8.849558);
 }
 
 macro_rules! assert_fee_rate {
@@ -1099,6 +1095,77 @@ fn test_add_foreign_utxo() {
 }
 
 #[test]
+#[should_panic(
+    expected = "MissingTxOut([OutPoint { txid: 0x21d7fb1bceda00ab4069fc52d06baa13470803e9050edd16f5736e5d8c4925fd, vout: 0 }])"
+)]
+fn test_calculate_fee_with_missing_foreign_utxo() {
+    let (mut wallet1, _) = get_funded_wallet(get_test_wpkh());
+    let (wallet2, _) =
+        get_funded_wallet("wpkh(cVbZ8ovhye9AoAHFsqobCf7LxbXDAECy9Kb8TZdfsDYMZGBUyCnm)");
+
+    let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX")
+        .unwrap()
+        .assume_checked();
+    let utxo = wallet2.list_unspent().next().expect("must take!");
+    #[allow(deprecated)]
+    let foreign_utxo_satisfaction = wallet2
+        .get_descriptor_for_keychain(KeychainKind::External)
+        .max_satisfaction_weight()
+        .unwrap();
+
+    let psbt_input = psbt::Input {
+        witness_utxo: Some(utxo.txout.clone()),
+        ..Default::default()
+    };
+
+    let mut builder = wallet1.build_tx();
+    builder
+        .add_recipient(addr.script_pubkey(), 60_000)
+        .only_witness_utxo()
+        .add_foreign_utxo(utxo.outpoint, psbt_input, foreign_utxo_satisfaction)
+        .unwrap();
+    let psbt = builder.finish().unwrap();
+    let tx = psbt.extract_tx();
+    wallet1.calculate_fee(&tx).unwrap();
+}
+
+#[test]
+fn test_calculate_fee_with_inserted_foreign_utxo() {
+    let (mut wallet1, _) = get_funded_wallet(get_test_wpkh());
+    let (wallet2, _) =
+        get_funded_wallet("wpkh(cVbZ8ovhye9AoAHFsqobCf7LxbXDAECy9Kb8TZdfsDYMZGBUyCnm)");
+
+    let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX")
+        .unwrap()
+        .assume_checked();
+    let utxo = wallet2.list_unspent().next().expect("must take!");
+    #[allow(deprecated)]
+    let foreign_utxo_satisfaction = wallet2
+        .get_descriptor_for_keychain(KeychainKind::External)
+        .max_satisfaction_weight()
+        .unwrap();
+
+    let psbt_input = psbt::Input {
+        witness_utxo: Some(utxo.txout.clone()),
+        ..Default::default()
+    };
+
+    let mut builder = wallet1.build_tx();
+    builder
+        .add_recipient(addr.script_pubkey(), 60_000)
+        .only_witness_utxo()
+        .add_foreign_utxo(utxo.outpoint, psbt_input, foreign_utxo_satisfaction)
+        .unwrap();
+    let psbt = builder.finish().unwrap();
+    let psbt_fee = psbt.fee_amount().expect("psbt fee");
+    let tx = psbt.extract_tx();
+
+    wallet1.insert_txout(utxo.outpoint, utxo.txout);
+    let wallet1_fee = wallet1.calculate_fee(&tx).expect("wallet fee");
+    assert_eq!(psbt_fee, wallet1_fee);
+}
+
+#[test]
 #[should_panic(expected = "Generic(\"Foreign utxo missing witness_utxo or non_witness_utxo\")")]
 fn test_add_foreign_utxo_invalid_psbt_input() {
     let (mut wallet, _) = get_funded_wallet(get_test_wpkh());
@@ -1122,8 +1189,8 @@ fn test_add_foreign_utxo_where_outpoint_doesnt_match_psbt_input() {
         get_funded_wallet("wpkh(cVbZ8ovhye9AoAHFsqobCf7LxbXDAECy9Kb8TZdfsDYMZGBUyCnm)");
 
     let utxo2 = wallet2.list_unspent().next().unwrap();
-    let tx1 = wallet1.get_tx(txid1).unwrap().node.tx.clone();
-    let tx2 = wallet2.get_tx(txid2).unwrap().node.tx.clone();
+    let tx1 = wallet1.get_tx(txid1).unwrap().tx_node.tx.clone();
+    let tx2 = wallet2.get_tx(txid2).unwrap().tx_node.tx.clone();
 
     #[allow(deprecated)]
     let satisfaction_weight = wallet2
@@ -1212,7 +1279,7 @@ fn test_add_foreign_utxo_only_witness_utxo() {
 
     {
         let mut builder = builder.clone();
-        let tx2 = wallet2.get_tx(txid2).unwrap().node.tx;
+        let tx2 = wallet2.get_tx(txid2).unwrap().tx_node.tx;
         let psbt_input = psbt::Input {
             non_witness_utxo: Some(tx2.clone()),
             ..Default::default()
@@ -2842,7 +2909,7 @@ fn test_taproot_sign_using_non_witness_utxo() {
     let mut psbt = builder.finish().unwrap();
 
     psbt.inputs[0].witness_utxo = None;
-    psbt.inputs[0].non_witness_utxo = Some(wallet.get_tx(prev_txid).unwrap().node.tx.clone());
+    psbt.inputs[0].non_witness_utxo = Some(wallet.get_tx(prev_txid).unwrap().tx_node.tx.clone());
     assert!(
         psbt.inputs[0].non_witness_utxo.is_some(),
         "Previous tx should be present in the database"

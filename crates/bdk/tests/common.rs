@@ -7,7 +7,11 @@ use bitcoin::hashes::Hash;
 use bitcoin::{Address, BlockHash, Network, OutPoint, Transaction, TxIn, TxOut, Txid};
 use std::str::FromStr;
 
-/// Return a fake wallet that appears to be funded for testing.
+// Return a fake wallet that appears to be funded for testing.
+//
+// The funded wallet containing a tx with a 76_000 sats input and two outputs, one spending 25_000
+// to a foreign address and one returning 50_000 back to the wallet as change. The remaining 1000
+// sats are the transaction fee.
 pub fn get_funded_wallet_with_change(
     descriptor: &str,
     change: Option<&str>,
@@ -95,6 +99,11 @@ pub fn get_funded_wallet_with_change(
     (wallet, tx1.txid())
 }
 
+// Return a fake wallet that appears to be funded for testing.
+//
+// The funded wallet containing a tx with a 76_000 sats input and two outputs, one spending 25_000
+// to a foreign address and one returning 50_000 back to the wallet as change. The remaining 1000
+// sats are the transaction fee.
 pub fn get_funded_wallet(descriptor: &str) -> (Wallet, bitcoin::Txid) {
     get_funded_wallet_with_change(descriptor, None)
 }

@@ -431,16 +431,40 @@ impl<D> Wallet<D> {
             .next()
     }
 
+    /// Inserts the given foreign `TxOut` at `OutPoint` into the wallet's transaction graph. Any
+    /// inserted foreign TxOuts are not persisted until [`Self::commit`] is called.
+    ///
+    /// Only insert TxOuts you trust the values for!
+    pub fn insert_txout(&mut self, outpoint: OutPoint, txout: TxOut)
+    where
+        D: PersistBackend<ChangeSet>,
+    {
+        let additions = self.indexed_graph.insert_txout(outpoint, &txout);
+        self.persist.stage(ChangeSet::from(additions));
+    }
+
     /// Calculates the fee of a given transaction. Returns 0 if `tx` is a coinbase transaction.
     ///
+    /// To calculate the fee for a [`Transaction`] that depends on foreign [`TxOut`] values you must
+    /// first manually insert the foreign TxOuts into the tx graph using the [`insert_txout`] function.
+    /// Only insert TxOuts you trust the values for!
+    ///
     /// Note `tx` does not have to be in the graph for this to work.
+    ///
+    /// [`insert_txout`]: Self::insert_txout
     pub fn calculate_fee(&self, tx: &Transaction) -> Result<u64, CalculateFeeError> {
         self.indexed_graph.graph().calculate_fee(tx)
     }
 
-    /// Calculate the `FeeRate` for a given transaction.
+    /// Calculate the [`FeeRate`] for a given transaction.
+    ///
+    /// To calculate the fee rate for a [`Transaction`] that depends on foreign [`TxOut`] values you
+    /// must first manually insert the foreign TxOuts into the tx graph using the [`insert_txout`] function.
+    /// Only insert TxOuts you trust the values for!
     ///
     /// Note `tx` does not have to be in the graph for this to work.
+    ///
+    /// [`insert_txout`]: Self::insert_txout
     pub fn calculate_fee_rate(&self, tx: &Transaction) -> Result<FeeRate, CalculateFeeError> {
         self.calculate_fee(tx).map(|fee| {
             let weight = tx.weight();
@@ -451,14 +475,55 @@ impl<D> Wallet<D> {
     /// Computes total input value going from script pubkeys in the index (sent) and the total output
     /// value going to script pubkeys in the index (received) in `tx`. For the `sent` to be computed
     /// correctly, the output being spent must have already been scanned by the index. Calculating
-    /// received just uses the transaction outputs directly, so it will be correct even if it has not
-    /// been scanned.
+    /// received just uses the [`Transaction`] outputs directly, so it will be correct even if it has
+    /// not been scanned.
     pub fn sent_and_received(&self, tx: &Transaction) -> (u64, u64) {
         self.indexed_graph.index.sent_and_received(tx)
     }
 
-    /// Return a single `CanonicalTx` made and received by the wallet or `None` if it doesn't
-    /// exist in the wallet
+    /// Get a single transaction from the wallet as a [`CanonicalTx`] (if the transaction exists).
+    ///
+    /// `CanonicalTx` contains the full transaction alongside meta-data such as:
+    /// * Blocks that the transaction is [`Anchor`]ed in. These may or may not be blocks that exist
+    ///   in the best chain.
+    /// * The [`ChainPosition`] of the transaction in the best chain - whether the transaction is
+    ///   confirmed or unconfirmed. If the transaction is confirmed, the anchor which proves the
+    ///   confirmation is provided. If the transaction is unconfirmed, the unix timestamp of when
+    ///   the transaction was last seen in the mempool is provided.
+    ///
+    /// ```rust, no_run
+    /// use bdk::{chain::ChainPosition, Wallet};
+    /// use bdk_chain::Anchor;
+    /// # let wallet: Wallet<()> = todo!();
+    /// # let my_txid: bitcoin::Txid = todo!();
+    ///
+    /// let canonical_tx = wallet.get_tx(my_txid).expect("panic if tx does not exist");
+    ///
+    /// // get reference to full transaction
+    /// println!("my tx: {:#?}", canonical_tx.tx_node.tx);
+    ///
+    /// // list all transaction anchors
+    /// for anchor in canonical_tx.tx_node.anchors {
+    ///     println!(
+    ///         "tx is anchored by block of hash {}",
+    ///         anchor.anchor_block().hash
+    ///     );
+    /// }
+    ///
+    /// // get confirmation status of transaction
+    /// match canonical_tx.chain_position {
+    ///     ChainPosition::Confirmed(anchor) => println!(
+    ///         "tx is confirmed at height {}, we know this since {}:{} is in the best chain",
+    ///         anchor.confirmation_height, anchor.anchor_block.height, anchor.anchor_block.hash,
+    ///     ),
+    ///     ChainPosition::Unconfirmed(last_seen) => println!(
+    ///         "tx is last seen at {}, it is unconfirmed as it is not anchored in the best chain",
+    ///         last_seen,
+    ///     ),
+    /// }
+    /// ```
+    ///
+    /// [`Anchor`]: bdk_chain::Anchor
     pub fn get_tx(
         &self,
         txid: Txid,

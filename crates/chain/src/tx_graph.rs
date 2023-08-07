@@ -245,33 +245,37 @@ impl<A> TxGraph<A> {
     }
 
     /// Calculates the fee of a given transaction. Returns 0 if `tx` is a coinbase transaction.
-    /// Returns `OK(_)` if we have all the `TxOut`s being spent by `tx` in the graph (either as
+    /// Returns `OK(_)` if we have all the [`TxOut`]s being spent by `tx` in the graph (either as
     /// the full transactions or individual txouts).
     ///
+    /// To calculate the fee for a [`Transaction`] that depends on foreign [`TxOut`] values you must
+    /// first manually insert the foreign TxOuts into the tx graph using the [`insert_txout`] function.
+    /// Only insert TxOuts you trust the values for!
+    ///
     /// Note `tx` does not have to be in the graph for this to work.
+    ///
+    /// [`insert_txout`]: Self::insert_txout
     pub fn calculate_fee(&self, tx: &Transaction) -> Result<u64, CalculateFeeError> {
         if tx.is_coin_base() {
             return Ok(0);
         }
-        let inputs_sum = tx.input.iter().fold(
-            (0_u64, Vec::new()),
+
+        let (inputs_sum, missing_outputs) = tx.input.iter().fold(
+            (0_i64, Vec::new()),
             |(mut sum, mut missing_outpoints), txin| match self.get_txout(txin.previous_output) {
                 None => {
                     missing_outpoints.push(txin.previous_output);
                     (sum, missing_outpoints)
                 }
                 Some(txout) => {
-                    sum += txout.value;
+                    sum += txout.value as i64;
                     (sum, missing_outpoints)
                 }
             },
         );
-
-        let inputs_sum = if inputs_sum.1.is_empty() {
-            Ok(inputs_sum.0 as i64)
-        } else {
-            Err(CalculateFeeError::MissingTxOut(inputs_sum.1))
-        }?;
+        if !missing_outputs.is_empty() {
+            return Err(CalculateFeeError::MissingTxOut(missing_outputs));
+        }
 
         let outputs_sum = tx
             .output
