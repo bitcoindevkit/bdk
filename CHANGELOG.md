@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.29.0]
+
+### Summary
+
+Because of the esplora-client update to 0.5.0 the 0.28.1 release needs to be yanked and replaced with this 0.29.0 release.
+
 ## [v0.28.1]
 
 ### Summary
@@ -671,4 +677,5 @@ final transaction is created by calling `finish` on the builder.
 [v0.27.1]: https://github.com/bitcoindevkit/bdk/compare/v0.27.0...v0.27.1
 [v0.28.0]: https://github.com/bitcoindevkit/bdk/compare/v0.27.1...v0.28.0
 [v0.28.1]: https://github.com/bitcoindevkit/bdk/compare/v0.28.0...v0.28.1
-[Unreleased]: https://github.com/bitcoindevkit/bdk/compare/v0.28.1...HEAD
+[v0.29.0]: https://github.com/bitcoindevkit/bdk/compare/v0.28.1...v0.29.0
+[Unreleased]: https://github.com/bitcoindevkit/bdk/compare/v0.29.0...HEAD
