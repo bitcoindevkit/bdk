@@ -66,11 +66,12 @@ jobs:
           cargo update -p tempfile --precise "3.6.0"
           cargo update -p hashlink --precise "0.8.1"
           cargo update -p regex --precise "1.7.3"
-          cargo update -p zip --precise "0.6.3"
-          cargo update -p base64ct --precise "1.5.3"
+          cargo update -p zip:0.6.6 --precise "0.6.3"
           cargo update -p rustix --precise "0.37.23"
           cargo update -p tokio --precise "1.29.1"
           cargo update -p cc --precise "1.0.81"
+          cargo update -p rustls:0.21.6 --precise "0.21.1"
+          cargo update -p flate2:1.0.27 --precise "1.0.26"
       - name: Build
         run: cargo build --features ${{ matrix.features }} --no-default-features
       - name: Clippy
@@ -226,10 +227,11 @@ jobs:
         cargo update -p tempfile --precise "3.6.0"
         cargo update -p hashlink --precise "0.8.1"
         cargo update -p regex --precise "1.7.3"
-        cargo update -p zip --precise "0.6.3"
-        cargo update -p base64ct --precise "1.5.3"
+        cargo update -p zip:0.6.6 --precise "0.6.3"
         cargo update -p rustix --precise "0.37.23"
         cargo update -p tokio --precise "1.29.1"
         cargo update -p cc --precise "1.0.81"
+        cargo update -p rustls:0.21.6 --precise "0.21.1"
+        cargo update -p flate2:1.0.27 --precise "1.0.26"
     - name: Test
       run: cargo test --features test-hardware-signer
