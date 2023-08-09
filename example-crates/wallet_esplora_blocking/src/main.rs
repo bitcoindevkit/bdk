@@ -55,7 +55,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .collect();
 
     let (update_graph, last_active_indices) =
-        client.update_tx_graph(keychain_spks, None, None, STOP_GAP, PARALLEL_REQUESTS)?;
+        client.scan_txs_with_keychains(keychain_spks, None, None, STOP_GAP, PARALLEL_REQUESTS)?;
     let missing_heights = wallet.tx_graph().missing_heights(wallet.local_chain());
     let chain_update = client.update_local_chain(prev_tip, missing_heights)?;
     let update = WalletUpdate {

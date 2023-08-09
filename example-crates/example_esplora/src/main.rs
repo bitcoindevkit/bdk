@@ -154,7 +154,7 @@ fn main() -> anyhow::Result<()> {
             // represents the last active spk derivation indices of keychains
             // (`keychain_indices_update`).
             let (graph_update, last_active_indices) = client
-                .update_tx_graph(
+                .scan_txs_with_keychains(
                     keychain_spks,
                     core::iter::empty(),
                     core::iter::empty(),
@@ -276,12 +276,8 @@ fn main() -> anyhow::Result<()> {
                 }
             }
 
-            let graph_update = client.update_tx_graph_without_keychain(
-                spks,
-                txids,
-                outpoints,
-                scan_options.parallel_requests,
-            )?;
+            let graph_update =
+                client.scan_txs(spks, txids, outpoints, scan_options.parallel_requests)?;
 
             graph.lock().unwrap().apply_update(graph_update)
         }
