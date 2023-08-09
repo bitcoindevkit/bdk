@@ -62,7 +62,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     };
 
     // Get a new core address
-    let core_address = bitcoind.client.get_new_address(None, None)?;
+    let core_address = bitcoind
+        .client
+        .get_new_address(None, None)?
+        .require_network(Network::Regtest)?;
 
     // Generate 101 blocks and use the above address as coinbase
     bitcoind.client.generate_to_address(101, &core_address)?;

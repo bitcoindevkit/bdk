@@ -92,7 +92,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     } else {
         println!("Creating a PSBT sending 9800 SATs plus fee to the u01.net testnet faucet return address 'tb1ql7w62elx9ucw4pj5lgw4l028hmuw80sndtntxt'.");
-        let return_address = Address::from_str("tb1ql7w62elx9ucw4pj5lgw4l028hmuw80sndtntxt")?;
+        let return_address = Address::from_str("tb1ql7w62elx9ucw4pj5lgw4l028hmuw80sndtntxt")?
+            .require_network(Network::Testnet)?;
         let mut builder = watch_only_wallet.build_tx();
         builder
             .add_recipient(return_address.script_pubkey(), 9_800)

@@ -43,9 +43,9 @@ use std::fmt;
 use serde::ser::SerializeMap;
 use serde::{Serialize, Serializer};
 
+use bitcoin::bip32::Fingerprint;
 use bitcoin::hashes::{hash160, ripemd160, sha256};
-use bitcoin::util::bip32::Fingerprint;
-use bitcoin::{LockTime, PublicKey, Sequence, XOnlyPublicKey};
+use bitcoin::{absolute, key::XOnlyPublicKey, PublicKey, Sequence};
 
 use miniscript::descriptor::{
     DescriptorPublicKey, ShInner, SinglePub, SinglePubKey, SortedMultiVec, WshInner,
@@ -66,7 +66,7 @@ use crate::wallet::utils::{After, Older, SecpCtx};
 use super::checksum::calc_checksum;
 use super::error::Error;
 use super::XKeyUtils;
-use bitcoin::util::psbt::{Input as PsbtInput, PartiallySignedTransaction as Psbt};
+use bitcoin::psbt::{self, Psbt};
 use miniscript::psbt::PsbtInputSatisfier;
 
 /// A unique identifier for a key
@@ -93,6 +93,9 @@ impl PkOrF {
                 ..
             }) => PkOrF::XOnlyPubkey(*pk),
             DescriptorPublicKey::XPub(xpub) => PkOrF::Fingerprint(xpub.root_fingerprint(secp)),
+            DescriptorPublicKey::MultiXPub(multi) => {
+                PkOrF::Fingerprint(multi.root_fingerprint(secp))
+            }
         }
     }
 }
@@ -129,7 +132,7 @@ pub enum SatisfiableItem {
     /// Absolute timeclock timestamp
     AbsoluteTimelock {
         /// The timelock value
-        value: LockTime,
+        value: absolute::LockTime,
     },
     /// Relative timelock locktime
     RelativeTimelock {
@@ -449,11 +452,14 @@ pub struct Condition {
     pub csv: Option<Sequence>,
     /// Optional timelock condition
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub timelock: Option<LockTime>,
+    pub timelock: Option<absolute::LockTime>,
 }
 
 impl Condition {
-    fn merge_nlocktime(a: LockTime, b: LockTime) -> Result<LockTime, PolicyError> {
+    fn merge_nlocktime(
+        a: absolute::LockTime,
+        b: absolute::LockTime,
+    ) -> Result<absolute::LockTime, PolicyError> {
         if !a.is_same_unit(b) {
             Err(PolicyError::MixedTimelockUnits)
         } else if a > b {
@@ -746,6 +752,7 @@ fn signer_id(key: &DescriptorPublicKey, secp: &SecpCtx) -> SignerId {
             ..
         }) => pk.to_pubkeyhash(SigType::Ecdsa).into(),
         DescriptorPublicKey::XPub(xpub) => xpub.root_fingerprint(secp).into(),
+        DescriptorPublicKey::MultiXPub(xpub) => xpub.root_fingerprint(secp).into(),
     }
 }
 
@@ -783,9 +790,9 @@ fn make_generic_signature<M: Fn() -> SatisfiableItem, F: Fn(&Psbt) -> bool>(
 fn generic_sig_in_psbt<
     // C is for "check", it's a closure we use to *check* if a psbt input contains the signature
     // for a specific key
-    C: Fn(&PsbtInput, &SinglePubKey) -> bool,
+    C: Fn(&psbt::Input, &SinglePubKey) -> bool,
     // E is for "extract", it extracts a key from the bip32 derivations found in the psbt input
-    E: Fn(&PsbtInput, Fingerprint) -> Option<SinglePubKey>,
+    E: Fn(&psbt::Input, Fingerprint) -> Option<SinglePubKey>,
 >(
     psbt: &Psbt,
     key: &DescriptorPublicKey,
@@ -797,6 +804,13 @@ fn generic_sig_in_psbt<
     psbt.inputs.iter().all(|input| match key {
         DescriptorPublicKey::Single(SinglePub { key, .. }) => check(input, key),
         DescriptorPublicKey::XPub(xpub) => {
+            //TODO check actual derivation matches
+            match extract(input, xpub.root_fingerprint(secp)) {
+                Some(pubkey) => check(input, &pubkey),
+                None => false,
+            }
+        }
+        DescriptorPublicKey::MultiXPub(xpub) => {
             //TODO check actual derivation matches
             match extract(input, xpub.root_fingerprint(secp)) {
                 Some(pubkey) => check(input, &pubkey),
@@ -908,12 +922,12 @@ impl<Ctx: ScriptContext + 'static> ExtractPolicy for Miniscript<DescriptorPublic
             }
             Terminal::After(value) => {
                 let mut policy: Policy = SatisfiableItem::AbsoluteTimelock {
-                    value: value.into(),
+                    value: (*value).into(),
                 }
                 .into();
                 policy.contribution = Satisfaction::Complete {
                     condition: Condition {
-                        timelock: Some(value.into()),
+                        timelock: Some((*value).into()),
                         csv: None,
                     },
                 };
@@ -925,9 +939,9 @@ impl<Ctx: ScriptContext + 'static> ExtractPolicy for Miniscript<DescriptorPublic
                 {
                     let after = After::new(Some(current_height), false);
                     let after_sat =
-                        Satisfier::<bitcoin::PublicKey>::check_after(&after, value.into());
+                        Satisfier::<bitcoin::PublicKey>::check_after(&after, (*value).into());
                     let inputs_sat = psbt_inputs_sat(psbt).all(|sat| {
-                        Satisfier::<bitcoin::PublicKey>::check_after(&sat, value.into())
+                        Satisfier::<bitcoin::PublicKey>::check_after(&sat, (*value).into())
                     });
                     if after_sat && inputs_sat {
                         policy.satisfaction = policy.contribution.clone();
@@ -1152,8 +1166,8 @@ mod test {
     use crate::keys::{DescriptorKey, IntoDescriptorKey};
     use crate::wallet::signer::SignersContainer;
     use assert_matches::assert_matches;
+    use bitcoin::bip32;
     use bitcoin::secp256k1::Secp256k1;
-    use bitcoin::util::bip32;
     use bitcoin::Network;
     use std::str::FromStr;
     use std::sync::Arc;
@@ -1572,6 +1586,7 @@ mod test {
 
         let addr = wallet_desc
             .at_derivation_index(0)
+            .unwrap()
             .address(Network::Testnet)
             .unwrap();
         assert_eq!(
@@ -1638,6 +1653,7 @@ mod test {
 
         let addr = wallet_desc
             .at_derivation_index(0)
+            .unwrap()
             .address(Network::Testnet)
             .unwrap();
         assert_eq!(

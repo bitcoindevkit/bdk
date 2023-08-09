@@ -14,7 +14,7 @@
 // TODO: maybe write our own implementation of bip39? Seems stupid to have an extra dependency for
 // something that should be fairly simple to re-implement.
 
-use bitcoin::util::bip32;
+use bitcoin::bip32;
 use bitcoin::Network;
 
 use miniscript::ScriptContext;
@@ -141,7 +141,7 @@ impl<Ctx: ScriptContext> GeneratableKey<Ctx> for Mnemonic {
         (word_count, language): Self::Options,
         entropy: Self::Entropy,
     ) -> Result<GeneratedKey<Self, Ctx>, Self::Error> {
-        let entropy = &entropy.as_ref()[..(word_count as usize / 8)];
+        let entropy = &entropy[..(word_count as usize / 8)];
         let mnemonic = Mnemonic::from_entropy_in(language, entropy)?;
 
         Ok(GeneratedKey::new(mnemonic, any_network()))
@@ -152,7 +152,7 @@ impl<Ctx: ScriptContext> GeneratableKey<Ctx> for Mnemonic {
 mod test {
     use std::str::FromStr;
 
-    use bitcoin::util::bip32;
+    use bitcoin::bip32;
 
     use bip39::{Language, Mnemonic};
 

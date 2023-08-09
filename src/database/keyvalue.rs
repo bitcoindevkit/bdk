@@ -15,7 +15,7 @@ use sled::{Batch, Tree};
 
 use bitcoin::consensus::encode::{deserialize, serialize};
 use bitcoin::hash_types::Txid;
-use bitcoin::{OutPoint, Script, Transaction};
+use bitcoin::{OutPoint, Script, ScriptBuf, Transaction};
 
 use crate::database::memory::MapKey;
 use crate::database::{BatchDatabase, BatchOperations, Database, SyncTime};
@@ -90,7 +90,7 @@ macro_rules! impl_batch_operations {
             Ok(())
         }
 
-        fn del_script_pubkey_from_path(&mut self, keychain: KeychainKind, path: u32) -> Result<Option<Script>, Error> {
+        fn del_script_pubkey_from_path(&mut self, keychain: KeychainKind, path: u32) -> Result<Option<ScriptBuf>, Error> {
             let key = MapKey::Path((Some(keychain), Some(path))).as_map_key();
             let res = self.remove(key);
             let res = $process_delete!(res);
@@ -221,7 +221,7 @@ impl Database for Tree {
         }
     }
 
-    fn iter_script_pubkeys(&self, keychain: Option<KeychainKind>) -> Result<Vec<Script>, Error> {
+    fn iter_script_pubkeys(&self, keychain: Option<KeychainKind>) -> Result<Vec<ScriptBuf>, Error> {
         let key = MapKey::Path((keychain, None)).as_map_key();
         self.scan_prefix(key)
             .map(|x| -> Result<_, Error> {
@@ -286,7 +286,7 @@ impl Database for Tree {
         &self,
         keychain: KeychainKind,
         path: u32,
-    ) -> Result<Option<Script>, Error> {
+    ) -> Result<Option<ScriptBuf>, Error> {
         let key = MapKey::Path((Some(keychain), Some(path))).as_map_key();
         Ok(self.get(key)?.map(|b| deserialize(&b)).transpose()?)
     }

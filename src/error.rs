@@ -86,6 +86,8 @@ pub enum Error {
         /// found network, for example the network of the bitcoin node
         found: Network,
     },
+    /// The address requested comes from an hardened index
+    HardenedIndex,
     #[cfg(feature = "verify")]
     /// Transaction verification error
     Verification(crate::wallet::verify::VerifyError),
@@ -106,7 +108,7 @@ pub enum Error {
     /// Miniscript PSBT error
     MiniscriptPsbt(MiniscriptPsbtError),
     /// BIP32 error
-    Bip32(bitcoin::util::bip32::Error),
+    Bip32(bitcoin::bip32::Error),
     /// A secp256k1 error
     Secp256k1(bitcoin::secp256k1::Error),
     /// Error serializing or deserializing JSON data
@@ -114,9 +116,9 @@ pub enum Error {
     /// Hex decoding error
     Hex(bitcoin::hashes::hex::Error),
     /// Partially signed bitcoin transaction error
-    Psbt(bitcoin::util::psbt::Error),
+    Psbt(bitcoin::psbt::Error),
     /// Partially signed bitcoin transaction parse error
-    PsbtParse(bitcoin::util::psbt::PsbtParseError),
+    PsbtParse(bitcoin::psbt::PsbtParseError),
 
     //KeyMismatch(bitcoin::secp256k1::PublicKey, bitcoin::secp256k1::PublicKey),
     //MissingInputUTXO(usize),
@@ -228,6 +230,7 @@ impl fmt::Display for Error {
                 "Invalid network: requested {} but found {}",
                 requested, found
             ),
+            Self::HardenedIndex => write!(f, "Requested address from an hardened index"),
             #[cfg(feature = "verify")]
             Self::Verification(err) => write!(f, "Transaction verification error: {}", err),
             Self::InvalidProgressValue(progress) => {
@@ -304,12 +307,12 @@ impl From<crate::keys::KeyError> for Error {
 impl_error!(bitcoin::consensus::encode::Error, Encode);
 impl_error!(miniscript::Error, Miniscript);
 impl_error!(MiniscriptPsbtError, MiniscriptPsbt);
-impl_error!(bitcoin::util::bip32::Error, Bip32);
+impl_error!(bitcoin::bip32::Error, Bip32);
 impl_error!(bitcoin::secp256k1::Error, Secp256k1);
 impl_error!(serde_json::Error, Json);
 impl_error!(bitcoin::hashes::hex::Error, Hex);
-impl_error!(bitcoin::util::psbt::Error, Psbt);
-impl_error!(bitcoin::util::psbt::PsbtParseError, PsbtParse);
+impl_error!(bitcoin::psbt::Error, Psbt);
+impl_error!(bitcoin::psbt::PsbtParseError, PsbtParse);
 
 #[cfg(feature = "electrum")]
 impl_error!(electrum_client::Error, Electrum);

@@ -10,13 +10,13 @@
 
 use crate::testutils::TestIncomingTx;
 use bitcoin::consensus::encode::{deserialize, serialize};
-use bitcoin::hashes::hex::{FromHex, ToHex};
 use bitcoin::hashes::sha256d;
-use bitcoin::{Address, Amount, PackedLockTime, Script, Sequence, Transaction, Txid, Witness};
-pub use bitcoincore_rpc::bitcoincore_rpc_json::AddressType;
+use bitcoin::{absolute, Address, Amount, Script, ScriptBuf, Sequence, Transaction, Txid, Witness};
+pub use bitcoincore_rpc::json::AddressType;
 pub use bitcoincore_rpc::{Auth, Client as RpcClient, RpcApi};
 use core::str::FromStr;
 use electrsd::bitcoind::BitcoinD;
+use electrsd::electrum_client::ElectrumApi as _;
 use electrsd::{bitcoind, ElectrsD};
 pub use electrum_client::{Client as ElectrumClient, ElectrumApi};
 #[allow(unused_imports)]
@@ -45,7 +45,11 @@ impl TestClient {
 
         let electrsd = ElectrsD::with_conf(electrs_exe, &bitcoind, &conf).unwrap();
 
-        let node_address = bitcoind.client.get_new_address(None, None).unwrap();
+        let node_address = bitcoind
+            .client
+            .get_new_address(None, None)
+            .unwrap()
+            .assume_checked();
         bitcoind
             .client
             .generate_to_address(101, &node_address)
@@ -107,7 +111,7 @@ impl TestClient {
             .collect();
 
         if self.get_balance(None, None).unwrap() < Amount::from_sat(required_balance) {
-            panic!("Insufficient funds in bitcoind. Please generate a few blocks with: `bitcoin-cli generatetoaddress 10 {}`", self.get_new_address(None, None).unwrap());
+            panic!("Insufficient funds in bitcoind. Please generate a few blocks with: `bitcoin-cli generatetoaddress 10 {}`", self.get_new_address(None, None).unwrap().assume_checked());
         }
 
         // FIXME: core can't create a tx with two outputs to the same address
@@ -143,6 +147,7 @@ impl TestClient {
 
         let monitor_script = Address::from_str(&meta_tx.output[0].to_address)
             .unwrap()
+            .assume_checked()
             .script_pubkey();
         self.wait_for_tx(txid, &monitor_script);
 
@@ -161,7 +166,7 @@ impl TestClient {
 
         let bumped: serde_json::Value = self.call("bumpfee", &[txid.to_string().into()]).unwrap();
         let new_txid = Txid::from_str(&bumped["txid"].as_str().unwrap().to_string()).unwrap();
-        let monitor_script = Script::from_hex(&mut tx.vout[0].script_pub_key.hex.to_hex()).unwrap();
+        let monitor_script = ScriptBuf::from_bytes(tx.vout[0].script_pub_key.hex.clone());
         self.wait_for_tx(new_txid, &monitor_script);
 
         debug!("Bumped {}, new txid {}", txid, new_txid);
@@ -170,41 +175,44 @@ impl TestClient {
     }
 
     pub fn generate_manually(&mut self, txs: Vec<Transaction>) -> String {
-        use bitcoin::blockdata::block::{Block, BlockHeader};
+        use bitcoin::blockdata::block::{Block, Header, Version};
         use bitcoin::blockdata::script::Builder;
         use bitcoin::blockdata::transaction::{OutPoint, TxIn, TxOut};
         use bitcoin::hash_types::{BlockHash, TxMerkleNode};
         use bitcoin::hashes::Hash;
+        use bitcoin::pow::CompactTarget;
 
         let block_template: serde_json::Value = self
             .call("getblocktemplate", &[json!({"rules": ["segwit"]})])
             .unwrap();
         trace!("getblocktemplate: {:#?}", block_template);
 
-        let header = BlockHeader {
-            version: block_template["version"].as_i64().unwrap() as i32,
-            prev_blockhash: BlockHash::from_hex(
+        let header = Header {
+            version: Version::from_consensus(block_template["version"].as_i64().unwrap() as i32),
+            prev_blockhash: BlockHash::from_str(
                 block_template["previousblockhash"].as_str().unwrap(),
             )
             .unwrap(),
             merkle_root: TxMerkleNode::all_zeros(),
             time: block_template["curtime"].as_u64().unwrap() as u32,
-            bits: u32::from_str_radix(block_template["bits"].as_str().unwrap(), 16).unwrap(),
+            bits: CompactTarget::from_consensus(
+                u32::from_str_radix(block_template["bits"].as_str().unwrap(), 16).unwrap(),
+            ),
             nonce: 0,
         };
         debug!("header: {:#?}", header);
 
         let height = block_template["height"].as_u64().unwrap() as i64;
-        let witness_reserved_value: Vec<u8> = sha256d::Hash::all_zeros().as_ref().into();
+        let witness_reserved_value = sha256d::Hash::all_zeros().as_byte_array().to_vec();
         // burn block subsidy and fees, not a big deal
         let mut coinbase_tx = Transaction {
             version: 1,
-            lock_time: PackedLockTime(0),
+            lock_time: absolute::LockTime::ZERO,
             input: vec![TxIn {
                 previous_output: OutPoint::null(),
                 script_sig: Builder::new().push_int(height).into_script(),
                 sequence: Sequence(0xFFFFFFFF),
-                witness: Witness::from_vec(vec![witness_reserved_value]),
+                witness: Witness::from_slice(&vec![witness_reserved_value]),
             }],
             output: vec![],
         };
@@ -225,7 +233,7 @@ impl TestClient {
 
             // now update and replace the coinbase tx
             let mut coinbase_witness_commitment_script = vec![0x6a, 0x24, 0xaa, 0x21, 0xa9, 0xed];
-            coinbase_witness_commitment_script.extend_from_slice(&witness_commitment);
+            coinbase_witness_commitment_script.extend_from_slice(witness_commitment.as_ref());
 
             coinbase_tx.output.push(TxOut {
                 value: 0,
@@ -245,11 +253,11 @@ impl TestClient {
 
         // now do PoW :)
         let target = block.header.target();
-        while block.header.validate_pow(&target).is_err() {
+        while block.header.validate_pow(target).is_err() {
             block.header.nonce = block.header.nonce.checked_add(1).unwrap(); // panic if we run out of nonces
         }
 
-        let block_hex: String = serialize(&block).to_hex();
+        let block_hex: String = bitcoin::consensus::encode::serialize_hex(&block);
         debug!("generated block hex: {}", block_hex);
 
         self.electrsd.client.block_headers_subscribe().unwrap();
@@ -265,11 +273,12 @@ impl TestClient {
 
         self.wait_for_block(height as usize);
 
-        block.header.block_hash().to_hex()
+        block.header.block_hash().to_string()
     }
 
     pub fn generate(&mut self, num_blocks: u64, address: Option<Address>) {
-        let address = address.unwrap_or_else(|| self.get_new_address(None, None).unwrap());
+        let address =
+            address.unwrap_or_else(|| self.get_new_address(None, None).unwrap().assume_checked());
         let hashes = self.generate_to_address(num_blocks, &address).unwrap();
         let best_hash = hashes.last().unwrap();
         let height = self.get_block_info(best_hash).unwrap().height;
@@ -317,9 +326,11 @@ impl TestClient {
             &self
                 .get_new_address(None, address_type)
                 .unwrap()
+                .assume_checked()
                 .to_string(),
         )
         .unwrap()
+        .assume_checked()
     }
 }
 
@@ -378,7 +389,7 @@ macro_rules! bdk_blockchain_tests {
      fn $_fn_name:ident ( $( $test_client:ident : &TestClient )? $(,)? ) -> $blockchain:ty $block:block) => {
         #[cfg(test)]
         mod bdk_blockchain_tests {
-            use $crate::bitcoin::{Transaction, Network};
+            use $crate::bitcoin::{Transaction, Network, blockdata::script::PushBytesBuf};
             use $crate::testutils::blockchain_tests::TestClient;
             use $crate::blockchain::Blockchain;
             use $crate::database::MemoryDatabase;
@@ -386,6 +397,7 @@ macro_rules! bdk_blockchain_tests {
             use $crate::wallet::AddressIndex;
             use $crate::{Wallet, FeeRate, SyncOptions};
             use $crate::testutils;
+            use std::convert::TryFrom;
 
             use super::*;
 
@@ -1058,7 +1070,7 @@ macro_rules! bdk_blockchain_tests {
                 assert_eq!(wallet.get_balance().unwrap().untrusted_pending, 50_000, "incorrect balance");
 
                 let mut builder = wallet.build_tx();
-                let data = [42u8;80];
+                let data = PushBytesBuf::try_from(vec![42u8;80]).unwrap();
                 builder.add_data(&data);
                 let (mut psbt, details) = builder.finish().unwrap();
 
@@ -1066,7 +1078,7 @@ macro_rules! bdk_blockchain_tests {
                 assert!(finalized, "Cannot finalize transaction");
                 let tx = psbt.extract_tx();
                 let serialized_tx = bitcoin::consensus::encode::serialize(&tx);
-                assert!(serialized_tx.windows(data.len()).any(|e| e==data), "cannot find op_return data in transaction");
+                assert!(serialized_tx.windows(data.len()).any(|e| e==data.as_bytes()), "cannot find op_return data in transaction");
                 blockchain.broadcast(&tx).unwrap();
                 test_client.generate(1, Some(node_addr));
                 wallet.sync(&blockchain, SyncOptions::default()).unwrap();
@@ -1165,8 +1177,9 @@ macro_rules! bdk_blockchain_tests {
                 // 2. Get a new bech32m address from test bitcoind node taproot wallet
 
                 // TODO replace once rust-bitcoincore-rpc with PR 199 released
-                let node_addr: bitcoin::Address = taproot_wallet_client.call("getnewaddress", &["test address".into(), "bech32m".into()]).unwrap();
-                assert_eq!(node_addr, bitcoin::Address::from_str("bcrt1pj5y3f0fu4y7g98k4v63j9n0xvj3lmln0cpwhsjzknm6nt0hr0q7qnzwsy9").unwrap());
+                let node_addr: bitcoin::Address<bitcoin::address::NetworkUnchecked> = taproot_wallet_client.call("getnewaddress", &["test address".into(), "bech32m".into()]).unwrap();
+                let node_addr = node_addr.assume_checked();
+                assert_eq!(node_addr, bitcoin::Address::from_str("bcrt1pj5y3f0fu4y7g98k4v63j9n0xvj3lmln0cpwhsjzknm6nt0hr0q7qnzwsy9").unwrap().assume_checked());
 
                 // 3. Send 50_000 sats from test bitcoind node to test BDK wallet
 
@@ -1215,7 +1228,7 @@ macro_rules! bdk_blockchain_tests {
 
                 let (wallet, blockchain, _, mut test_client) = init_single_sig();
                 let bdk_address = wallet.get_address(AddressIndex::New).unwrap().address;
-                let core_address = test_client.get_new_address(None, None).unwrap();
+                let core_address = test_client.get_new_address(None, None).unwrap().assume_checked();
                 let tx = testutils! {
                     @tx ( (@addr bdk_address.clone()) => 50_000, (@addr core_address.clone()) => 40_000 )
                 };
@@ -1407,8 +1420,8 @@ macro_rules! bdk_blockchain_tests {
                     "label":"taproot key spend",
                 }]);
                 let _importdescriptors_result: Value = taproot_wallet_client.call("importdescriptors", &[import_descriptor_args]).expect("import wallet");
-                let generate_to_address: bitcoin::Address = taproot_wallet_client.call("getnewaddress", &["test address".into(), "bech32m".into()]).expect("new address");
-                let _generatetoaddress_result = taproot_wallet_client.generate_to_address(101, &generate_to_address).expect("generated to address");
+                let generate_to_address: bitcoin::Address<bitcoin::address::NetworkUnchecked> = taproot_wallet_client.call("getnewaddress", &["test address".into(), "bech32m".into()]).expect("new address");
+                let _generatetoaddress_result = taproot_wallet_client.generate_to_address(101, &generate_to_address.assume_checked()).expect("generated to address");
                 let send_to_address = wallet.get_address($crate::wallet::AddressIndex::New).unwrap().address.to_string();
                 let change_address = wallet.get_address($crate::wallet::AddressIndex::New).unwrap().address.to_string();
                 let send_addr_amounts = json!([{
@@ -1421,7 +1434,7 @@ macro_rules! bdk_blockchain_tests {
                 let send_result: Value = taproot_wallet_client.call("send", &[send_addr_amounts, Value::Null, "unset".into(), Value::Null, send_options]).expect("send psbt");
                 let core_psbt = send_result["psbt"].as_str().expect("core psbt str");
 
-                use bitcoin::util::psbt::PartiallySignedTransaction;
+                use bitcoin::psbt::PartiallySignedTransaction;
 
                 // Test parsing core created PSBT
                 let mut psbt = PartiallySignedTransaction::from_str(&core_psbt).expect("core taproot psbt");

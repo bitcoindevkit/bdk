@@ -9,7 +9,7 @@ use crate::{
     wallet::time::Instant,
     BlockTime, Error, KeychainKind, LocalUtxo, TransactionDetails,
 };
-use bitcoin::{OutPoint, Script, Transaction, TxOut, Txid};
+use bitcoin::{OutPoint, Script, ScriptBuf, Transaction, TxOut, Txid};
 use log::*;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 
@@ -53,7 +53,7 @@ pub struct ScriptReq<'a, D: BatchDatabase> {
     state: State<'a, D>,
     script_index: usize,
     initial_scripts_needed: usize, // if this is 1, we assume the descriptor is not derivable
-    scripts_needed: VecDeque<Script>,
+    scripts_needed: VecDeque<ScriptBuf>,
     stop_gap: usize,
     keychain: KeychainKind,
     next_keychains: Vec<KeychainKind>,
@@ -62,7 +62,7 @@ pub struct ScriptReq<'a, D: BatchDatabase> {
 /// The sync starts by returning script pubkeys we are interested in.
 impl<'a, D: BatchDatabase> ScriptReq<'a, D> {
     pub fn request(&self) -> impl Iterator<Item = &Script> + Clone {
-        self.scripts_needed.iter()
+        self.scripts_needed.iter().map(|s| s.as_script())
     }
 
     pub fn satisfy(

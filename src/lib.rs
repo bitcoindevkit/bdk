@@ -149,7 +149,7 @@ fn main() -> Result<(), bdk::Error> {
 //! ```no_run
 //! use std::str::FromStr;
 //!
-//! use bitcoin::util::psbt::PartiallySignedTransaction as Psbt;
+//! use bitcoin::psbt::PartiallySignedTransaction as Psbt;
 //!
 //! use bdk::{Wallet, SignOptions};
 //! use bdk::database::MemoryDatabase;

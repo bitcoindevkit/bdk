@@ -1,7 +1,7 @@
 use bdk::bitcoin::{Address, Network};
 use bdk::blockchain::{Blockchain, ElectrumBlockchain};
 use bdk::database::MemoryDatabase;
-use bdk::hwi::{types::HWIChain, HWIClient};
+use bdk::hwi::HWIClient;
 use bdk::miniscript::{Descriptor, DescriptorPublicKey};
 use bdk::signer::SignerOrdering;
 use bdk::wallet::{hardwaresigner::HWISigner, AddressIndex};
@@ -30,7 +30,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let first_device = devices.remove(0)?;
     // ...and creating a client out of the first one
-    let client = HWIClient::get_client(&first_device, true, HWIChain::Test)?;
+    let client = HWIClient::get_client(&first_device, true, Network::Testnet.into())?;
     println!("Look what I found, a {}!", first_device.model);
 
     // Getting the HW's public descriptors
@@ -41,7 +41,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // Creating a custom signer from the device
-    let custom_signer = HWISigner::from_device(&first_device, HWIChain::Test)?;
+    let custom_signer = HWISigner::from_device(&first_device, Network::Testnet.into())?;
     let mut wallet = Wallet::new(
         descriptors.receive[0].clone(),
         Some(descriptors.internal[0].clone()),
@@ -77,7 +77,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    let return_address = Address::from_str("tb1ql7w62elx9ucw4pj5lgw4l028hmuw80sndtntxt")?;
+    let return_address = Address::from_str("tb1ql7w62elx9ucw4pj5lgw4l028hmuw80sndtntxt")?
+        .require_network(Network::Testnet)?;
     let (mut psbt, _details) = {
         let mut builder = wallet.build_tx();
         builder

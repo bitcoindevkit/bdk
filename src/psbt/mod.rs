@@ -12,7 +12,7 @@
 //! Additional functions on the `rust-bitcoin` `PartiallySignedTransaction` structure.
 
 use crate::FeeRate;
-use bitcoin::util::psbt::PartiallySignedTransaction as Psbt;
+use bitcoin::psbt::PartiallySignedTransaction as Psbt;
 use bitcoin::TxOut;
 
 // TODO upstream the functions here to `rust-bitcoin`?

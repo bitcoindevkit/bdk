@@ -6,8 +6,8 @@
 // You may not use this file except in accordance with one or both of these
 // licenses.
 
+use bdk::bitcoin::bip32::DerivationPath;
 use bdk::bitcoin::secp256k1::Secp256k1;
-use bdk::bitcoin::util::bip32::DerivationPath;
 use bdk::bitcoin::Network;
 use bdk::descriptor;
 use bdk::descriptor::IntoWalletDescriptor;

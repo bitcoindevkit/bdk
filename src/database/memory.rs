@@ -20,7 +20,7 @@ use std::ops::Bound::{Excluded, Included};
 
 use bitcoin::consensus::encode::{deserialize, serialize};
 use bitcoin::hash_types::Txid;
-use bitcoin::{OutPoint, Script, Transaction};
+use bitcoin::{OutPoint, Script, ScriptBuf, Transaction};
 
 use crate::database::{BatchDatabase, BatchOperations, ConfigurableDatabase, Database, SyncTime};
 use crate::error::Error;
@@ -136,7 +136,7 @@ impl BatchOperations for MemoryDatabase {
         path: u32,
     ) -> Result<(), Error> {
         let key = MapKey::Path((Some(keychain), Some(path))).as_map_key();
-        self.map.insert(key, Box::new(script.clone()));
+        self.map.insert(key, Box::new(ScriptBuf::from(script)));
 
         let key = MapKey::Script(Some(script)).as_map_key();
         let value = json!({
@@ -196,7 +196,7 @@ impl BatchOperations for MemoryDatabase {
         &mut self,
         keychain: KeychainKind,
         path: u32,
-    ) -> Result<Option<Script>, Error> {
+    ) -> Result<Option<ScriptBuf>, Error> {
         let key = MapKey::Path((Some(keychain), Some(path))).as_map_key();
         let res = self.map.remove(&key);
         self.deleted_keys.push(key);
@@ -315,7 +315,7 @@ impl Database for MemoryDatabase {
         }
     }
 
-    fn iter_script_pubkeys(&self, keychain: Option<KeychainKind>) -> Result<Vec<Script>, Error> {
+    fn iter_script_pubkeys(&self, keychain: Option<KeychainKind>) -> Result<Vec<ScriptBuf>, Error> {
         let key = MapKey::Path((keychain, None)).as_map_key();
         self.map
             .range::<Vec<u8>, _>((Included(&key), Excluded(&after(&key))))
@@ -368,7 +368,7 @@ impl Database for MemoryDatabase {
         &self,
         keychain: KeychainKind,
         path: u32,
-    ) -> Result<Option<Script>, Error> {
+    ) -> Result<Option<ScriptBuf>, Error> {
         let key = MapKey::Path((Some(keychain), Some(path))).as_map_key();
         Ok(self
             .map
@@ -485,7 +485,6 @@ macro_rules! populate_test_db {
         $crate::populate_test_db!($db, $tx_meta, $current_height, (@coinbase false))
     }};
     ($db:expr, $tx_meta:expr, $current_height:expr, (@coinbase $is_coinbase:expr)$(,)?) => {{
-        use std::str::FromStr;
         use $crate::database::SyncTime;
         use $crate::database::{BatchOperations, Database};
         let mut db = $db;
@@ -497,7 +496,7 @@ macro_rules! populate_test_db {
         }
         let tx = $crate::bitcoin::Transaction {
             version: 1,
-            lock_time: bitcoin::PackedLockTime(0),
+            lock_time: bitcoin::absolute::LockTime::ZERO,
             input,
             output: tx_meta
                 .output
@@ -506,6 +505,7 @@ macro_rules! populate_test_db {
                     value: out_meta.value,
                     script_pubkey: $crate::bitcoin::Address::from_str(&out_meta.to_address)
                         .unwrap()
+                        .assume_checked()
                         .script_pubkey(),
                 })
                 .collect(),

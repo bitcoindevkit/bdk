@@ -27,7 +27,7 @@ use bitcoin::network::message::{NetworkMessage, RawNetworkMessage};
 use bitcoin::network::message_blockdata::*;
 use bitcoin::network::message_filter::*;
 use bitcoin::network::message_network::VersionMessage;
-use bitcoin::network::Address;
+use bitcoin::network::{Address, Magic};
 use bitcoin::{Block, Network, Transaction, Txid, Wtxid};
 
 use super::CompactFiltersError;
@@ -242,7 +242,7 @@ impl Peer {
     /// Send a Bitcoin network message
     fn _send(
         writer: &mut TcpStream,
-        magic: u32,
+        magic: Magic,
         payload: NetworkMessage,
     ) -> Result<(), CompactFiltersError> {
         log::trace!("==> {:?}", payload);

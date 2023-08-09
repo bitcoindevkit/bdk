@@ -27,7 +27,7 @@
 use serde::{Deserialize, Serialize};
 
 use bitcoin::hash_types::Txid;
-use bitcoin::{OutPoint, Script, Transaction, TxOut};
+use bitcoin::{OutPoint, Script, ScriptBuf, Transaction, TxOut};
 
 use crate::error::Error;
 use crate::types::*;
@@ -83,7 +83,7 @@ pub trait BatchOperations {
         &mut self,
         keychain: KeychainKind,
         child: u32,
-    ) -> Result<Option<Script>, Error>;
+    ) -> Result<Option<ScriptBuf>, Error>;
     /// Delete the data related to a specific script_pubkey, meaning the keychain and the child
     /// number.
     fn del_path_from_script_pubkey(
@@ -124,7 +124,7 @@ pub trait Database: BatchOperations {
     ) -> Result<(), Error>;
 
     /// Return the list of script_pubkeys
-    fn iter_script_pubkeys(&self, keychain: Option<KeychainKind>) -> Result<Vec<Script>, Error>;
+    fn iter_script_pubkeys(&self, keychain: Option<KeychainKind>) -> Result<Vec<ScriptBuf>, Error>;
     /// Return the list of [`LocalUtxo`]s
     fn iter_utxos(&self) -> Result<Vec<LocalUtxo>, Error>;
     /// Return the list of raw transactions
@@ -137,7 +137,7 @@ pub trait Database: BatchOperations {
         &self,
         keychain: KeychainKind,
         child: u32,
-    ) -> Result<Option<Script>, Error>;
+    ) -> Result<Option<ScriptBuf>, Error>;
     /// Fetch the keychain and child number of a given script_pubkey
     fn get_path_from_script_pubkey(
         &self,
@@ -214,17 +214,17 @@ impl<T: Database> DatabaseUtils for T {}
 
 #[cfg(test)]
 pub mod test {
-    use std::str::FromStr;
-
     use bitcoin::consensus::encode::deserialize;
     use bitcoin::consensus::serialize;
     use bitcoin::hashes::hex::*;
+    use bitcoin::Witness;
     use bitcoin::*;
+    use std::str::FromStr;
 
     use super::*;
 
     pub fn test_script_pubkey<D: Database>(mut db: D) {
-        let script = Script::from(
+        let script = ScriptBuf::from(
             Vec::<u8>::from_hex("76a91402306a7c23f3e8010de41e9e591348bb83f11daa88ac").unwrap(),
         );
         let path = 42;
@@ -245,7 +245,7 @@ pub mod test {
     pub fn test_batch_script_pubkey<D: BatchDatabase>(mut db: D) {
         let mut batch = db.begin_batch();
 
-        let script = Script::from(
+        let script = ScriptBuf::from(
             Vec::<u8>::from_hex("76a91402306a7c23f3e8010de41e9e591348bb83f11daa88ac").unwrap(),
         );
         let path = 42;
@@ -272,7 +272,7 @@ pub mod test {
     }
 
     pub fn test_iter_script_pubkey<D: Database>(mut db: D) {
-        let script = Script::from(
+        let script = ScriptBuf::from(
             Vec::<u8>::from_hex("76a91402306a7c23f3e8010de41e9e591348bb83f11daa88ac").unwrap(),
         );
         let path = 42;
@@ -284,7 +284,7 @@ pub mod test {
     }
 
     pub fn test_del_script_pubkey<D: Database>(mut db: D) {
-        let script = Script::from(
+        let script = ScriptBuf::from(
             Vec::<u8>::from_hex("76a91402306a7c23f3e8010de41e9e591348bb83f11daa88ac").unwrap(),
         );
         let path = 42;
@@ -302,7 +302,7 @@ pub mod test {
             "5df6e0e2761359d30a8275058e299fcc0381534545f55cf43e41983f5d4c9456:0",
         )
         .unwrap();
-        let script = Script::from(
+        let script = ScriptBuf::from(
             Vec::<u8>::from_hex("76a91402306a7c23f3e8010de41e9e591348bb83f11daa88ac").unwrap(),
         );
         let txout = TxOut {
@@ -478,7 +478,7 @@ pub mod test {
     pub fn test_del_path_from_script_pubkey<D: Database>(mut db: D) {
         let keychain = KeychainKind::External;
 
-        let script = Script::from(
+        let script = ScriptBuf::from(
             Vec::<u8>::from_hex("76a91402306a7c23f3e8010de41e9e591348bb83f11daa88ac").unwrap(),
         );
         let path = 42;
@@ -502,14 +502,14 @@ pub mod test {
         let scripts = db.iter_script_pubkeys(Some(keychain)).unwrap();
         assert!(scripts.is_empty());
 
-        let first_script = Script::from(
+        let first_script = ScriptBuf::from(
             Vec::<u8>::from_hex("76a91402306a7c23f3e8010de41e9e591348bb83f11daa88ac").unwrap(),
         );
         let path = 42;
 
         db.set_script_pubkey(&first_script, keychain, path).unwrap();
 
-        let second_script = Script::from(
+        let second_script = ScriptBuf::from(
             Vec::<u8>::from_hex("00145c9a1816d38db5cbdd4b067b689dc19eb7d930e2").unwrap(),
         );
         let path = 57;
@@ -528,7 +528,7 @@ pub mod test {
             "5df6e0e2761359d30a8275058e299fcc0381534545f55cf43e41983f5d4c9456:0",
         )
         .unwrap();
-        let script = Script::from(
+        let script = ScriptBuf::from(
             Vec::<u8>::from_hex("76a91402306a7c23f3e8010de41e9e591348bb83f11daa88ac").unwrap(),
         );
         let txout = TxOut {

@@ -96,7 +96,7 @@ use bdk::blockchain::ElectrumBlockchain;
 use bdk::electrum_client::Client;
 use bdk::wallet::AddressIndex::New;
 
-use base64;
+use bitcoin::base64;
 use bdk::bitcoin::consensus::serialize;
 use bdk::bitcoin::Network;
 
@@ -123,7 +123,7 @@ fn main() -> Result<(), bdk::Error> {
     };
 
     println!("Transaction details: {:#?}", details);
-    println!("Unsigned PSBT: {}", base64::encode(&serialize(&psbt)));
+    println!("Unsigned PSBT: {}", base64::encode(psbt.serialize()));
 
     Ok(())
 }
@@ -134,9 +134,9 @@ fn main() -> Result<(), bdk::Error> {
 ```rust,no_run
 use bdk::{Wallet, SignOptions, database::MemoryDatabase};
 
-use base64;
+use bitcoin::base64;
 use bdk::bitcoin::consensus::deserialize;
-use bdk::bitcoin::Network;
+use bdk::bitcoin::{psbt::Psbt, Network};
 
 fn main() -> Result<(), bdk::Error> {
     let wallet = Wallet::new(
@@ -147,7 +147,7 @@ fn main() -> Result<(), bdk::Error> {
     )?;
 
     let psbt = "...";
-    let mut psbt = deserialize(&base64::decode(psbt).unwrap())?;
+    let mut psbt = Psbt::deserialize(&base64::decode(psbt).unwrap())?;
 
     let _finalized = wallet.sign(&mut psbt, SignOptions::default())?;
 

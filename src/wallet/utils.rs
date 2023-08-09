@@ -10,7 +10,7 @@
 // licenses.
 
 use bitcoin::secp256k1::{All, Secp256k1};
-use bitcoin::{LockTime, Script, Sequence};
+use bitcoin::{absolute, Script, Sequence};
 
 use miniscript::{MiniscriptKey, Satisfier, ToPublicKey};
 
@@ -65,7 +65,7 @@ pub(crate) fn check_nsequence_rbf(rbf: Sequence, csv: Sequence) -> bool {
 }
 
 impl<Pk: MiniscriptKey + ToPublicKey> Satisfier<Pk> for After {
-    fn check_after(&self, n: LockTime) -> bool {
+    fn check_after(&self, n: absolute::LockTime) -> bool {
         if let Some(current_height) = self.current_height {
             current_height >= n.to_consensus_u32()
         } else {
@@ -114,17 +114,20 @@ pub(crate) type SecpCtx = Secp256k1<All>;
 
 #[cfg(test)]
 mod test {
+    use std::str::FromStr;
+
     // When nSequence is lower than this flag the timelock is interpreted as block-height-based,
     // otherwise it's time-based
     pub(crate) const SEQUENCE_LOCKTIME_TYPE_FLAG: u32 = 1 << 22;
 
     use super::{check_nsequence_rbf, IsDust};
-    use crate::bitcoin::{Address, Sequence};
-    use std::str::FromStr;
+    use crate::bitcoin::{Address, Network, Sequence};
 
     #[test]
     fn test_is_dust() {
         let script_p2pkh = Address::from_str("1GNgwA8JfG7Kc8akJ8opdNWJUihqUztfPe")
+            .unwrap()
+            .require_network(Network::Bitcoin)
             .unwrap()
             .script_pubkey();
         assert!(script_p2pkh.is_p2pkh());
@@ -132,6 +135,8 @@ mod test {
         assert!(!546.is_dust(&script_p2pkh));
 
         let script_p2wpkh = Address::from_str("bc1qxlh2mnc0yqwas76gqq665qkggee5m98t8yskd8")
+            .unwrap()
+            .require_network(Network::Bitcoin)
             .unwrap()
             .script_pubkey();
         assert!(script_p2wpkh.is_v0_p2wpkh());

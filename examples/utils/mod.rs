@@ -13,7 +13,10 @@ pub(crate) mod tx {
         // Create a transaction builder
         let mut tx_builder = wallet.build_tx();
 
-        let to_address = Address::from_str(recipient_address).unwrap();
+        let to_address = Address::from_str(recipient_address)
+            .unwrap()
+            .require_network(wallet.network())
+            .unwrap();
 
         // Set recipient of the transaction
         tx_builder.set_recipients(vec![(to_address.script_pubkey(), amount)]);

@@ -106,7 +106,7 @@ macro_rules! testutils {
         let secp = Secp256k1::new();
 
         let parsed = Descriptor::<DescriptorPublicKey>::parse_descriptor(&secp, &$descriptors.0).expect("Failed to parse descriptor in `testutils!(@external)`").0;
-        parsed.at_derivation_index($child).address(bitcoin::Network::Regtest).expect("No address form")
+        parsed.at_derivation_index($child).unwrap().address(bitcoin::Network::Regtest).expect("No address form")
     });
     ( @internal $descriptors:expr, $child:expr ) => ({
         use $crate::bitcoin::secp256k1::Secp256k1;
@@ -146,7 +146,7 @@ macro_rules! testutils {
         let mut seed = [0u8; 32];
         rand::thread_rng().fill(&mut seed[..]);
 
-        let key = $crate::bitcoin::util::bip32::ExtendedPrivKey::new_master(
+        let key = $crate::bitcoin::bip32::ExtendedPrivKey::new_master(
             $crate::bitcoin::Network::Testnet,
             &seed,
         );

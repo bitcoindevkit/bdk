@@ -9,7 +9,7 @@ use bdk::{
     KeychainKind, SyncOptions, Wallet,
 };
 use bitcoin::{
-    util::bip32::{self, ExtendedPrivKey},
+    bip32::{self, ExtendedPrivKey},
     Network,
 };
 

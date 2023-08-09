@@ -132,7 +132,7 @@ impl WalletSync for EsploraBlockchain {
                     let scripts = script_req
                         .request()
                         .take(self.concurrency as usize)
-                        .cloned();
+                        .map(bitcoin::ScriptBuf::from);
 
                     let mut handles = vec![];
                     for script in scripts {

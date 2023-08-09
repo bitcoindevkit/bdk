@@ -13,11 +13,11 @@ use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use bitcoin::bip158::BlockFilter;
 use bitcoin::hash_types::{BlockHash, FilterHeader};
 use bitcoin::hashes::Hash;
 use bitcoin::network::message::NetworkMessage;
 use bitcoin::network::message_blockdata::GetHeadersMessage;
-use bitcoin::util::bip158::BlockFilter;
 
 use super::peer::*;
 use super::store::*;

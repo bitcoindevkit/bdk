@@ -13,7 +13,7 @@ use std::convert::AsRef;
 use std::ops::Sub;
 
 use bitcoin::blockdata::transaction::{OutPoint, Transaction, TxOut};
-use bitcoin::{hash_types::Txid, util::psbt};
+use bitcoin::{hash_types::Txid, psbt, Weight};
 
 use serde::{Deserialize, Serialize};
 
@@ -97,8 +97,8 @@ impl FeeRate {
     }
 
     /// Calculate fee rate from `fee` and weight units (`wu`).
-    pub fn from_wu(fee: u64, wu: usize) -> FeeRate {
-        Self::from_vb(fee, wu.vbytes())
+    pub fn from_wu(fee: u64, wu: Weight) -> FeeRate {
+        Self::from_vb(fee, wu.to_vbytes_ceil() as usize)
     }
 
     /// Calculate fee rate from `fee` and `vbytes`.
@@ -113,8 +113,8 @@ impl FeeRate {
     }
 
     /// Calculate absolute fee in Satoshis using size in weight units.
-    pub fn fee_wu(&self, wu: usize) -> u64 {
-        self.fee_vb(wu.vbytes())
+    pub fn fee_wu(&self, wu: Weight) -> u64 {
+        self.fee_vb(wu.to_vbytes_ceil() as usize)
     }
 
     /// Calculate absolute fee in Satoshis using size in virtual bytes.
@@ -405,7 +405,7 @@ mod tests {
 
         let tx_details_a = TransactionDetails {
             transaction: None,
-            txid: Txid::from_inner([0; 32]),
+            txid: Txid::all_zeros(),
             received: 0,
             sent: 0,
             fee: None,
@@ -414,7 +414,7 @@ mod tests {
 
         let tx_details_b = TransactionDetails {
             transaction: None,
-            txid: Txid::from_inner([0; 32]),
+            txid: Txid::all_zeros(),
             received: 0,
             sent: 0,
             fee: None,
@@ -423,7 +423,7 @@ mod tests {
 
         let tx_details_c = TransactionDetails {
             transaction: None,
-            txid: Txid::from_inner([0; 32]),
+            txid: Txid::all_zeros(),
             received: 0,
             sent: 0,
             fee: None,
@@ -432,7 +432,7 @@ mod tests {
 
         let tx_details_d = TransactionDetails {
             transaction: None,
-            txid: Txid::from_inner([1; 32]),
+            txid: Txid::from_byte_array([1; Txid::LEN]),
             received: 0,
             sent: 0,
             fee: None,

@@ -153,7 +153,7 @@ impl BatchOperations for AnyDatabase {
         &mut self,
         keychain: KeychainKind,
         child: u32,
-    ) -> Result<Option<Script>, Error> {
+    ) -> Result<Option<ScriptBuf>, Error> {
         impl_inner_method!(
             AnyDatabase,
             self,
@@ -204,7 +204,7 @@ impl Database for AnyDatabase {
         )
     }
 
-    fn iter_script_pubkeys(&self, keychain: Option<KeychainKind>) -> Result<Vec<Script>, Error> {
+    fn iter_script_pubkeys(&self, keychain: Option<KeychainKind>) -> Result<Vec<ScriptBuf>, Error> {
         impl_inner_method!(AnyDatabase, self, iter_script_pubkeys, keychain)
     }
     fn iter_utxos(&self) -> Result<Vec<LocalUtxo>, Error> {
@@ -221,7 +221,7 @@ impl Database for AnyDatabase {
         &self,
         keychain: KeychainKind,
         child: u32,
-    ) -> Result<Option<Script>, Error> {
+    ) -> Result<Option<ScriptBuf>, Error> {
         impl_inner_method!(
             AnyDatabase,
             self,
@@ -286,7 +286,7 @@ impl BatchOperations for AnyBatch {
         &mut self,
         keychain: KeychainKind,
         child: u32,
-    ) -> Result<Option<Script>, Error> {
+    ) -> Result<Option<ScriptBuf>, Error> {
         impl_inner_method!(AnyBatch, self, del_script_pubkey_from_path, keychain, child)
     }
     fn del_path_from_script_pubkey(

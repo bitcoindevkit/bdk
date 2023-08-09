@@ -31,18 +31,17 @@
 //! let blockchain = RpcBlockchain::from_config(&config);
 //! ```
 
-use crate::bitcoin::hashes::hex::ToHex;
 use crate::bitcoin::{Network, OutPoint, Transaction, TxOut, Txid};
 use crate::blockchain::*;
 use crate::database::{BatchDatabase, BatchOperations, DatabaseUtils};
 use crate::descriptor::calc_checksum;
 use crate::error::MissingCachedScripts;
 use crate::{BlockTime, Error, FeeRate, KeychainKind, LocalUtxo, TransactionDetails};
-use bitcoin::Script;
+use bitcoin::{Script, ScriptBuf};
 use bitcoincore_rpc::json::{
     GetTransactionResultDetailCategory, ImportMultiOptions, ImportMultiRequest,
-    ImportMultiRequestScriptPubkey, ImportMultiRescanSince, ListTransactionResult,
-    ListUnspentResultEntry, ScanningDetails,
+    ImportMultiRequestScriptPubkey, ListTransactionResult, ListUnspentResultEntry, ScanningDetails,
+    Timestamp,
 };
 use bitcoincore_rpc::jsonrpc::serde_json::{json, Value};
 use bitcoincore_rpc::Auth as RpcAuth;
@@ -302,8 +301,8 @@ struct DbState<'a, D> {
     params: &'a RpcSyncParams,
     prog: &'a dyn Progress,
 
-    ext_spks: Vec<Script>,
-    int_spks: Vec<Script>,
+    ext_spks: Vec<ScriptBuf>,
+    int_spks: Vec<ScriptBuf>,
     txs: HashMap<Txid, TransactionDetails>,
     utxos: HashSet<LocalUtxo>,
     last_indexes: HashMap<KeychainKind, u32>,
@@ -668,7 +667,7 @@ fn import_descriptors<'a, S>(
     scripts_iter: S,
 ) -> Result<(), Error>
 where
-    S: Iterator<Item = &'a Script>,
+    S: Iterator<Item = &'a ScriptBuf>,
 {
     let requests = Value::Array(
         scripts_iter
@@ -696,11 +695,11 @@ where
 
 fn import_multi<'a, S>(client: &Client, start_epoch: u64, scripts_iter: S) -> Result<(), Error>
 where
-    S: Iterator<Item = &'a Script>,
+    S: Iterator<Item = &'a ScriptBuf>,
 {
     let requests = scripts_iter
         .map(|script| ImportMultiRequest {
-            timestamp: ImportMultiRescanSince::Timestamp(start_epoch),
+            timestamp: Timestamp::Time(start_epoch),
             script_pubkey: Some(ImportMultiRequestScriptPubkey::Script(script)),
             watchonly: Some(true),
             ..Default::default()
@@ -808,7 +807,7 @@ fn is_wallet_descriptor(client: &Client) -> Result<bool, Error> {
 }
 
 fn descriptor_from_script_pubkey(script: &Script) -> String {
-    let desc = format!("raw({})", script.to_hex());
+    let desc = format!("raw({})", script.to_hex_string());
     format!("{}#{}", desc, calc_checksum(&desc).unwrap())
 }
 
@@ -964,7 +963,7 @@ mod test {
 
         // generate scripts (1 tx per script)
         let scripts = (0..TX_COUNT)
-            .map(|index| desc.at_derivation_index(index).script_pubkey())
+            .map(|index| desc.at_derivation_index(index).unwrap().script_pubkey())
             .collect::<Vec<_>>();
 
         // import scripts and wait

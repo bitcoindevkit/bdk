@@ -1,6 +1,6 @@
 use std::str::FromStr;
 
-use bdk::bitcoin::util::bip32::ExtendedPrivKey;
+use bdk::bitcoin::bip32::ExtendedPrivKey;
 use bdk::bitcoin::Network;
 use bdk::blockchain::{Blockchain, ElectrumBlockchain};
 use bdk::database::MemoryDatabase;
@@ -10,7 +10,7 @@ use bdk::{KeychainKind, SyncOptions, Wallet};
 
 use bdk::electrum_client::Client;
 use bdk::wallet::AddressIndex;
-use bitcoin::util::bip32;
+use bitcoin::bip32;
 
 pub mod utils;
 

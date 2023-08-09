@@ -21,16 +21,17 @@ use rand::{thread_rng, Rng};
 
 use rocksdb::{Direction, IteratorMode, ReadOptions, WriteBatch, DB};
 
+use bitcoin::bip158::BlockFilter;
+use bitcoin::block::Header;
 use bitcoin::blockdata::constants::genesis_block;
 use bitcoin::consensus::{deserialize, encode::VarInt, serialize, Decodable, Encodable};
 use bitcoin::hash_types::{FilterHash, FilterHeader};
 use bitcoin::hashes::Hash;
-use bitcoin::util::bip158::BlockFilter;
-use bitcoin::util::uint::Uint256;
+use bitcoin::pow::Work;
 use bitcoin::Block;
 use bitcoin::BlockHash;
-use bitcoin::BlockHeader;
 use bitcoin::Network;
+use bitcoin::ScriptBuf;
 
 use super::CompactFiltersError;
 
@@ -69,7 +70,7 @@ impl StoreEntry {
             }
             StoreEntry::Block(Some(height)) => prefix.extend_from_slice(&height.to_be_bytes()),
             StoreEntry::BlockHeaderIndex(Some(hash)) => {
-                prefix.extend_from_slice(&hash.into_inner())
+                prefix.extend_from_slice(hash.to_raw_hash().as_ref())
             }
             StoreEntry::CFilterTable((filter_type, bundle_index)) => {
                 prefix.push(*filter_type);
@@ -228,7 +229,7 @@ impl ChainStore<Full> {
             batch.put_cf(
                 cf_handle,
                 genesis_key,
-                (genesis.header, genesis.header.work()).serialize(),
+                (genesis.header, genesis.header.work().to_be_bytes()).serialize(),
             );
             batch.put_cf(
                 cf_handle,
@@ -260,7 +261,7 @@ impl ChainStore<Full> {
                 step *= 2;
             }
 
-            let (header, _): (BlockHeader, Uint256) = SerializeDb::deserialize(
+            let (header, _): (Header, [u8; 32]) = SerializeDb::deserialize(
                 &store_read
                     .get_pinned_cf(cf_handle, StoreEntry::BlockHeader(Some(index)).get_key())?
                     .unwrap(),
@@ -292,11 +293,12 @@ impl ChainStore<Full> {
         let cf_handle = write_store.cf_handle(&self.cf_name).unwrap();
         let new_cf_handle = write_store.cf_handle(&new_cf_name).unwrap();
 
-        let (header, work): (BlockHeader, Uint256) = SerializeDb::deserialize(
+        let (header, work): (Header, [u8; 32]) = SerializeDb::deserialize(
             &write_store
                 .get_pinned_cf(cf_handle, StoreEntry::BlockHeader(Some(from)).get_key())?
                 .ok_or(CompactFiltersError::DataCorruption)?,
         )?;
+        let work = Work::from_be_bytes(work);
 
         let mut batch = WriteBatch::default();
         batch.put_cf(
@@ -307,7 +309,7 @@ impl ChainStore<Full> {
         batch.put_cf(
             new_cf_handle,
             StoreEntry::BlockHeader(Some(from)).get_key(),
-            (header, work).serialize(),
+            (header, work.to_be_bytes()).serialize(),
         );
         write_store.write(batch)?;
 
@@ -381,7 +383,7 @@ impl ChainStore<Full> {
             opts,
             IteratorMode::From(&from_key, Direction::Forward),
         ) {
-            let (header, _): (BlockHeader, Uint256) = SerializeDb::deserialize(&v)?;
+            let (header, _): (Header, [u8; 32]) = SerializeDb::deserialize(&v)?;
 
             batch.delete_cf(
                 cf_handle,
@@ -433,7 +435,7 @@ impl ChainStore<Full> {
         let key = StoreEntry::BlockHeader(Some(height)).get_key();
         let data = read_store.get_pinned_cf(cf_handle, key)?;
         data.map(|data| {
-            let (header, _): (BlockHeader, Uint256) =
+            let (header, _): (Header, [u8; 32]) =
                 deserialize(&data).map_err(|_| CompactFiltersError::DataCorruption)?;
             Ok::<_, CompactFiltersError>(header.block_hash())
         })
@@ -496,7 +498,7 @@ impl ChainStore<Full> {
 }
 
 impl<T: StoreType> ChainStore<T> {
-    pub fn work(&self) -> Result<Uint256, CompactFiltersError> {
+    pub fn work(&self) -> Result<Work, CompactFiltersError> {
         let read_store = self.store.read().unwrap();
         let cf_handle = read_store.cf_handle(&self.cf_name).unwrap();
 
@@ -506,12 +508,13 @@ impl<T: StoreType> ChainStore<T> {
         Ok(iterator
             .last()
             .map(|(_, v)| -> Result<_, CompactFiltersError> {
-                let (_, work): (BlockHeader, Uint256) = SerializeDb::deserialize(&v)?;
+                let (_, work): (Header, [u8; 32]) = SerializeDb::deserialize(&v)?;
+                let work = Work::from_be_bytes(work);
 
                 Ok(work)
             })
             .transpose()?
-            .unwrap_or_default())
+            .unwrap_or_else(|| Work::from_be_bytes([0; 32])))
     }
 
     pub fn get_height(&self) -> Result<usize, CompactFiltersError> {
@@ -546,7 +549,7 @@ impl<T: StoreType> ChainStore<T> {
         iterator
             .last()
             .map(|(_, v)| -> Result<_, CompactFiltersError> {
-                let (header, _): (BlockHeader, Uint256) = SerializeDb::deserialize(&v)?;
+                let (header, _): (Header, [u8; 32]) = SerializeDb::deserialize(&v)?;
 
                 Ok(header.block_hash())
             })
@@ -556,7 +559,7 @@ impl<T: StoreType> ChainStore<T> {
     pub fn apply(
         &mut self,
         from: usize,
-        headers: Vec<BlockHeader>,
+        headers: Vec<Header>,
     ) -> Result<BlockHash, CompactFiltersError> {
         let mut batch = WriteBatch::default();
 
@@ -566,7 +569,8 @@ impl<T: StoreType> ChainStore<T> {
         let (mut last_hash, mut accumulated_work) = read_store
             .get_pinned_cf(cf_handle, StoreEntry::BlockHeader(Some(from)).get_key())?
             .map(|result| {
-                let (header, work): (BlockHeader, Uint256) = SerializeDb::deserialize(&result)?;
+                let (header, work): (Header, [u8; 32]) = SerializeDb::deserialize(&result)?;
+                let work = Work::from_be_bytes(work);
                 Ok::<_, CompactFiltersError>((header.block_hash(), work))
             })
             .transpose()?
@@ -589,7 +593,7 @@ impl<T: StoreType> ChainStore<T> {
             batch.put_cf(
                 cf_handle,
                 StoreEntry::BlockHeader(Some(height)).get_key(),
-                (header, accumulated_work).serialize(),
+                (header, accumulated_work.to_be_bytes()).serialize(),
             );
         }
 
@@ -641,7 +645,7 @@ impl CfStore {
         let genesis = genesis_block(headers_store.network);
 
         let filter = BlockFilter::new_script_filter(&genesis, |utxo| {
-            Err(bitcoin::util::bip158::Error::UtxoMissing(*utxo))
+            Err::<ScriptBuf, _>(bitcoin::bip158::Error::UtxoMissing(*utxo))
         })?;
         let first_key = StoreEntry::CFilterTable((filter_type, Some(0))).get_key();
 
@@ -653,7 +657,7 @@ impl CfStore {
                     &first_key,
                     (
                         BundleStatus::Init,
-                        filter.filter_header(&FilterHeader::from_hash(Hash::all_zeros())),
+                        filter.filter_header(&FilterHeader::from_raw_hash(Hash::all_zeros())),
                     )
                         .serialize(),
                 )?;

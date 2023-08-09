@@ -325,8 +325,8 @@ impl ConfigurableBlockchain for ElectrumBlockchain {
         let socks5 = config.socks5.as_ref().map(Socks5Config::new);
         let electrum_config = ConfigBuilder::new()
             .retry(config.retry)
-            .timeout(config.timeout)?
-            .socks5(socks5)?
+            .timeout(config.timeout)
+            .socks5(socks5)
             .validate_domain(config.validate_domain)
             .build();
 

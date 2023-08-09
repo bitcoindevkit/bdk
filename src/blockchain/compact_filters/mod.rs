@@ -355,7 +355,7 @@ impl WalletSync for CompactFiltersBlockchain {
                     peer,
                     |block_hash, filter| {
                         if !filter
-                            .match_any(block_hash, &mut all_scripts.iter().map(AsRef::as_ref))?
+                            .match_any(block_hash, all_scripts.iter().map(|s| s.as_slice()))?
                         {
                             return Ok(false);
                         }
@@ -570,7 +570,7 @@ pub enum CompactFiltersError {
     /// Internal I/O error
     Io(std::io::Error),
     /// Invalid BIP158 filter
-    Bip158(bitcoin::util::bip158::Error),
+    Bip158(bitcoin::bip158::Error),
     /// Internal system time error
     Time(std::time::SystemTimeError),
 
@@ -608,7 +608,7 @@ impl std::error::Error for CompactFiltersError {}
 
 impl_error!(rocksdb::Error, Db, CompactFiltersError);
 impl_error!(std::io::Error, Io, CompactFiltersError);
-impl_error!(bitcoin::util::bip158::Error, Bip158, CompactFiltersError);
+impl_error!(bitcoin::bip158::Error, Bip158, CompactFiltersError);
 impl_error!(std::time::SystemTimeError, Time, CompactFiltersError);
 
 impl From<crate::error::Error> for CompactFiltersError {
