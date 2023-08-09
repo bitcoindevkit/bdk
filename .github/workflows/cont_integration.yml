@@ -69,6 +69,8 @@ jobs:
           cargo update -p zip --precise "0.6.3"
           cargo update -p base64ct --precise "1.5.3"
           cargo update -p rustix --precise "0.37.23"
+          cargo update -p tokio --precise "1.29.1"
+          cargo update -p cc --precise "1.0.81"
       - name: Build
         run: cargo build --features ${{ matrix.features }} --no-default-features
       - name: Clippy
@@ -227,5 +229,7 @@ jobs:
         cargo update -p zip --precise "0.6.3"
         cargo update -p base64ct --precise "1.5.3"
         cargo update -p rustix --precise "0.37.23"
+        cargo update -p tokio --precise "1.29.1"
+        cargo update -p cc --precise "1.0.81"
     - name: Test
       run: cargo test --features test-hardware-signer

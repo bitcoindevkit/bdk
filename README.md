@@ -223,4 +223,8 @@ cargo update -p zip --precise "0.6.3"
 cargo update -p base64ct --precise "1.5.3"
 # rustix 0.38.0 has MSRV 1.65.0
 cargo update -p rustix --precise "0.37.23"
+# tokio 0.30.0 has MSRV 1.63.0
+cargo update -p tokio --precise "1.29.1"
+# cc 1.0.82 is throwing error with rust 1.57.0, "error[E0599]: no method named `retain_mut`..."
+cargo update -p cc --precise "1.0.81"
 ```
