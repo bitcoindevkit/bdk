@@ -208,14 +208,14 @@ impl<'a> CoinSelector<'a> {
         self.base_weight + self.input_weight() + drain_weight
     }
 
-    /// How much the current selection overshoots the value needed to acheive `target`.
+    /// How much the current selection overshoots the value needed to achieve `target`.
     ///
     /// In order for the resulting transaction to be valid this must be 0.
     pub fn excess(&self, target: Target, drain: Drain) -> i64 {
         self.selected_value() as i64
             - target.value as i64
             - drain.value as i64
-            - self.implied_fee(target.feerate, target.min_fee, drain.weight) as i64
+            - self.implied_fee(target.feerate, target.min_fee, drain.weights.output_weight) as i64
     }
 
     /// How much the current selection overshoots the value need to satisfy `target.feerate` and
@@ -224,7 +224,7 @@ impl<'a> CoinSelector<'a> {
         self.selected_value() as i64
             - target.value as i64
             - drain.value as i64
-            - self.implied_fee_from_feerate(target.feerate, drain.weight) as i64
+            - self.implied_fee_from_feerate(target.feerate, drain.weights.output_weight) as i64
     }
 
     /// How much the current selection overshoots the value needed to satisfy `target.min_fee` and
@@ -236,11 +236,11 @@ impl<'a> CoinSelector<'a> {
             - target.min_fee as i64
     }
 
-    /// The feerate the transaction would have if we were to use this selection of inputs to acheive
-    /// the `target_value`
+    /// The feerate the transaction would have if we were to use this selection of inputs to achieve
+    /// the `target_value`.
     pub fn implied_feerate(&self, target_value: u64, drain: Drain) -> FeeRate {
         let numerator = self.selected_value() as i64 - target_value as i64 - drain.value as i64;
-        let denom = self.weight(drain.weight);
+        let denom = self.weight(drain.weights.output_weight);
         FeeRate::from_sat_per_wu(numerator as f32 / denom as f32)
     }
 
@@ -327,8 +327,8 @@ impl<'a> CoinSelector<'a> {
             excess_waste *= excess_discount.max(0.0).min(1.0);
             waste += excess_waste;
         } else {
-            waste += drain.weight as f32 * target.feerate.spwu()
-                + drain.spend_weight as f32 * long_term_feerate.spwu();
+            waste += drain.weights.output_weight as f32 * target.feerate.spwu()
+                + drain.weights.spend_weight as f32 * long_term_feerate.spwu();
         }
 
         waste
@@ -514,6 +514,34 @@ impl Candidate {
     }
 }
 
+/// A structure that represents the weight costs of a drain (a.k.a. change) output.
+///
+/// This structure can also represent multiple outputs.
+#[derive(Default, Debug, Clone, Copy, Hash, PartialEq, Eq)]
+pub struct DrainWeights {
+    /// The weight of adding this drain output.
+    pub output_weight: u32,
+    /// The weight of spending this drain output (in the future).
+    pub spend_weight: u32,
+}
+
+impl DrainWeights {
+    /// The waste of adding this drain to a transaction according to the [waste metric].
+    ///
+    /// [waste metric]: https://bitcoin.stackexchange.com/questions/113622/what-does-waste-metric-mean-in-the-context-of-coin-selection
+    pub fn waste(&self, feerate: FeeRate, long_term_feerate: FeeRate) -> f32 {
+        self.output_weight as f32 * feerate.spwu()
+            + self.spend_weight as f32 * long_term_feerate.spwu()
+    }
+
+    pub fn new_tr_keyspend() -> Self {
+        Self {
+            output_weight: TXOUT_BASE_WEIGHT + TR_SPK_WEIGHT,
+            spend_weight: TXIN_BASE_WEIGHT + TR_KEYSPEND_SATISFACTION_WEIGHT,
+        }
+    }
+}
+
 /// A drain (A.K.A. change) output.
 /// Technically it could represent multiple outputs.
 ///
@@ -522,12 +550,10 @@ impl Candidate {
 /// [`change_policy`]: crate::change_policy
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
 pub struct Drain {
-    /// The weight of adding this drain
-    pub weight: u32,
-    /// The value that should be assigned to the drain
+    /// Weight of adding drain output and spending the drain output.
+    pub weights: DrainWeights,
+    /// The value that should be assigned to the drain.
     pub value: u64,
-    /// The weight of spending this drain
-    pub spend_weight: u32,
 }
 
 impl Drain {
@@ -546,19 +572,11 @@ impl Drain {
         !self.is_none()
     }
 
-    pub fn new_tr_keyspend() -> Self {
-        Self {
-            weight: TXOUT_BASE_WEIGHT + TR_SPK_WEIGHT,
-            value: 0,
-            spend_weight: TXIN_BASE_WEIGHT + TR_KEYSPEND_SATISFACTION_WEIGHT,
-        }
-    }
-
     /// The waste of adding this drain to a transaction according to the [waste metric].
     ///
     /// [waste metric]: https://bitcoin.stackexchange.com/questions/113622/what-does-waste-metric-mean-in-the-context-of-coin-selection
     pub fn waste(&self, feerate: FeeRate, long_term_feerate: FeeRate) -> f32 {
-        self.weight as f32 * feerate.spwu() + self.spend_weight as f32 * long_term_feerate.spwu()
+        self.weights.waste(feerate, long_term_feerate)
     }
 }
 

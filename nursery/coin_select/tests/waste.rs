@@ -1,5 +1,6 @@
 use bdk_coin_select::{
-    change_policy, float::Ordf32, metrics::Waste, Candidate, CoinSelector, Drain, FeeRate, Target,
+    change_policy, float::Ordf32, metrics::Waste, Candidate, CoinSelector, Drain, DrainWeights,
+    FeeRate, Target,
 };
 use proptest::{
     prelude::*,
@@ -21,13 +22,12 @@ fn waste_all_selected_except_one_is_optimal_and_awkward() {
     let long_term_feerate =
         FeeRate::from_sat_per_vb((0.0f32).max(feerate - long_term_feerate_diff));
     let feerate = FeeRate::from_sat_per_vb(feerate);
-    let drain = Drain {
-        weight: change_weight,
+    let drain_weights = DrainWeights {
+        output_weight: change_weight,
         spend_weight: change_spend_weight,
-        value: 0,
     };
 
-    let change_policy = change_policy::min_waste(drain, long_term_feerate);
+    let change_policy = change_policy::min_waste(drain_weights, long_term_feerate);
     let wv = test_wv(&mut rng);
     let candidates = wv.take(num_inputs).collect::<Vec<_>>();
 
@@ -76,13 +76,16 @@ fn waste_naive_effective_value_shouldnt_be_better() {
     let long_term_feerate =
         FeeRate::from_sat_per_vb((0.0f32).max(feerate - long_term_feerate_diff));
     let feerate = FeeRate::from_sat_per_vb(feerate);
-    let drain = Drain {
-        weight: change_weight,
+    let drain_weights = DrainWeights {
+        output_weight: change_weight,
         spend_weight: change_spend_weight,
+    };
+    let drain = Drain {
+        weights: drain_weights,
         value: 0,
     };
 
-    let change_policy = change_policy::min_waste(drain, long_term_feerate);
+    let change_policy = change_policy::min_waste(drain_weights, long_term_feerate);
     let wv = test_wv(&mut rng);
     let candidates = wv.take(num_inputs).collect::<Vec<_>>();
 
@@ -137,13 +140,12 @@ fn waste_doesnt_take_too_long_to_finish() {
     let long_term_feerate =
         FeeRate::from_sat_per_vb((0.0f32).max(feerate - long_term_feerate_diff));
     let feerate = FeeRate::from_sat_per_vb(feerate);
-    let drain = Drain {
-        weight: change_weight,
+    let drain_weights = DrainWeights {
+        output_weight: change_weight,
         spend_weight: change_spend_weight,
-        value: 0,
     };
 
-    let change_policy = change_policy::min_waste(drain, long_term_feerate);
+    let change_policy = change_policy::min_waste(drain_weights, long_term_feerate);
     let wv = test_wv(&mut rng);
     let candidates = wv.take(num_inputs).collect::<Vec<_>>();
 
@@ -190,13 +192,12 @@ fn waste_lower_long_term_feerate_but_still_need_to_select_all() {
     let mut rng = TestRng::deterministic_rng(RngAlgorithm::ChaCha);
     let long_term_feerate = FeeRate::from_sat_per_vb(0.0f32.max(feerate - long_term_feerate_diff));
     let feerate = FeeRate::from_sat_per_vb(feerate);
-    let drain = Drain {
-        weight: change_weight,
+    let drain_weights = DrainWeights {
+        output_weight: change_weight,
         spend_weight: change_spend_weight,
-        value: 0,
     };
 
-    let change_policy = change_policy::min_waste(drain, long_term_feerate);
+    let change_policy = change_policy::min_waste(drain_weights, long_term_feerate);
     let wv = test_wv(&mut rng);
     let candidates = wv.take(num_inputs).collect::<Vec<_>>();
 
@@ -249,13 +250,12 @@ fn waste_low_but_non_negative_rate_diff_means_adding_more_inputs_might_reduce_ex
     let mut rng = TestRng::deterministic_rng(RngAlgorithm::ChaCha);
     let long_term_feerate = FeeRate::from_sat_per_vb(0.0f32.max(feerate - long_term_feerate_diff));
     let feerate = FeeRate::from_sat_per_vb(feerate);
-    let drain = Drain {
-        weight: change_weight,
+    let drain_weights = DrainWeights {
+        output_weight: change_weight,
         spend_weight: change_spend_weight,
-        value: 0,
     };
 
-    let change_policy = change_policy::min_waste(drain, long_term_feerate);
+    let change_policy = change_policy::min_waste(drain_weights, long_term_feerate);
     let wv = test_wv(&mut rng);
     let mut candidates = wv.take(num_inputs).collect::<Vec<_>>();
     // HACK: for this test had to set segwit true to keep it working once we

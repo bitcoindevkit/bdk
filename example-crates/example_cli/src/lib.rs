@@ -1,6 +1,6 @@
 pub use anyhow;
 use anyhow::Context;
-use bdk_coin_select::{Candidate, CoinSelector};
+use bdk_coin_select::{Candidate, CoinSelector, Drain};
 use bdk_file_store::Store;
 use serde::{de::DeserializeOwned, Serialize};
 use std::{cmp::Reverse, collections::HashMap, path::PathBuf, sync::Mutex};
@@ -262,13 +262,13 @@ where
     };
 
     let target = bdk_coin_select::Target {
-        feerate: bdk_coin_select::FeeRate::from_sat_per_vb(1.0),
+        feerate: bdk_coin_select::FeeRate::from_sat_per_vb(5.0),
         min_fee: 0,
         value: transaction.output.iter().map(|txo| txo.value).sum(),
     };
 
-    let drain = bdk_coin_select::Drain {
-        weight: {
+    let drain_weights = bdk_coin_select::DrainWeights {
+        output_weight: {
             // we calculate the weight difference of including the drain output in the base tx
             // this method will detect varint size changes of txout count
             let tx_weight = transaction.weight();
@@ -282,11 +282,14 @@ where
             };
             (tx_weight_with_drain - tx_weight).to_wu() as u32 - 1
         },
-        value: 0,
         spend_weight: change_plan.expected_weight() as u32,
     };
-    let long_term_feerate = bdk_coin_select::FeeRate::from_sat_per_wu(0.25);
-    let drain_policy = bdk_coin_select::change_policy::min_waste(drain, long_term_feerate);
+    let long_term_feerate = bdk_coin_select::FeeRate::from_sat_per_vb(1.0);
+    let drain_policy = bdk_coin_select::change_policy::min_value_and_waste(
+        drain_weights,
+        change_script.dust_value().to_sat(),
+        long_term_feerate,
+    );
 
     let mut selector = CoinSelector::new(&candidates, transaction.weight().to_wu() as u32);
     match cs_algorithm {
@@ -299,16 +302,10 @@ where
             let (final_selection, _score) = selector
                 .branch_and_bound(metric)
                 .take(50_000)
-                // we only process viable solutions
+                // skip exclusion branches (as they are not scored)
                 .flatten()
-                .reduce(|(best_sol, best_score), (curr_sol, curr_score)| {
-                    // we are reducing waste
-                    if curr_score < best_score {
-                        (curr_sol, curr_score)
-                    } else {
-                        (best_sol, best_score)
-                    }
-                })
+                // the last result is always the best score
+                .last()
                 .ok_or(anyhow::format_err!("no bnb solution found"))?;
             selector = final_selection;
         }
@@ -327,7 +324,13 @@ where
                 }),
                 CoinSelectionAlgo::BranchAndBound => unreachable!("bnb variant is matched already"),
             }
-            selector.select_until_target_met(target, drain)?
+            selector.select_until_target_met(
+                target,
+                Drain {
+                    weights: drain_weights,
+                    value: 0,
+                },
+            )?
         }
     };
 
