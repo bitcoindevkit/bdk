@@ -88,7 +88,7 @@ fn bnb_finds_an_exact_solution_in_n_iter() {
         min_fee: 0,
     };
 
-    let solutions = cs.branch_and_bound(MinExcessThenWeight { target });
+    let solutions = cs.bnb_solutions(MinExcessThenWeight { target });
 
     let (i, (best, _score)) = solutions
         .enumerate()
@@ -119,7 +119,7 @@ fn bnb_finds_solution_if_possible_in_n_iter() {
         min_fee: 0,
     };
 
-    let solutions = cs.branch_and_bound(MinExcessThenWeight { target });
+    let solutions = cs.bnb_solutions(MinExcessThenWeight { target });
 
     let (i, (sol, _score)) = solutions
         .enumerate()
@@ -147,7 +147,7 @@ proptest! {
             min_fee: 0,
         };
 
-        let solutions = cs.branch_and_bound(MinExcessThenWeight { target });
+        let solutions = cs.bnb_solutions(MinExcessThenWeight { target });
 
         match solutions.enumerate().filter_map(|(i, sol)| Some((i, sol?))).last() {
             Some((_i, (sol, _score))) => assert!(sol.selected_value() >= target.value),
@@ -193,7 +193,7 @@ proptest! {
             min_fee: 0
         };
 
-        let solutions = cs.branch_and_bound(MinExcessThenWeight { target });
+        let solutions = cs.bnb_solutions(MinExcessThenWeight { target });
 
         let (_i, (best, _score)) = solutions
             .enumerate()

@@ -299,40 +299,27 @@ where
                 long_term_feerate,
                 change_policy: &drain_policy,
             };
-            let (final_selection, _score) = selector
-                .branch_and_bound(metric)
-                .take(50_000)
-                // skip exclusion branches (as they are not scored)
-                .flatten()
-                // the last result is always the best score
-                .last()
-                .ok_or(anyhow::format_err!("no bnb solution found"))?;
-            selector = final_selection;
+            selector.run_bnb(metric, 50_000)?;
         }
-        cs_algorithm => {
-            match cs_algorithm {
-                CoinSelectionAlgo::LargestFirst => {
-                    selector.sort_candidates_by_key(|(_, c)| Reverse(c.value))
-                }
-                CoinSelectionAlgo::SmallestFirst => {
-                    selector.sort_candidates_by_key(|(_, c)| c.value)
-                }
-                CoinSelectionAlgo::OldestFirst => selector
-                    .sort_candidates_by_key(|(i, _)| raw_candidates[i].1.chain_position.clone()),
-                CoinSelectionAlgo::NewestFirst => selector.sort_candidates_by_key(|(i, _)| {
-                    Reverse(raw_candidates[i].1.chain_position.clone())
-                }),
-                CoinSelectionAlgo::BranchAndBound => unreachable!("bnb variant is matched already"),
-            }
-            selector.select_until_target_met(
-                target,
-                Drain {
-                    weights: drain_weights,
-                    value: 0,
-                },
-            )?
+        CoinSelectionAlgo::LargestFirst => {
+            selector.sort_candidates_by_key(|(_, c)| Reverse(c.value))
         }
+        CoinSelectionAlgo::SmallestFirst => selector.sort_candidates_by_key(|(_, c)| c.value),
+        CoinSelectionAlgo::OldestFirst => {
+            selector.sort_candidates_by_key(|(i, _)| raw_candidates[i].1.chain_position.clone())
+        }
+        CoinSelectionAlgo::NewestFirst => selector
+            .sort_candidates_by_key(|(i, _)| Reverse(raw_candidates[i].1.chain_position.clone())),
     };
+
+    // ensure target is met
+    selector.select_until_target_met(
+        target,
+        Drain {
+            weights: drain_weights,
+            value: 0,
+        },
+    )?;
 
     // get the selected utxos
     let selected_txos = selector

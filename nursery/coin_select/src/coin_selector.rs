@@ -6,10 +6,10 @@ use alloc::{borrow::Cow, collections::BTreeSet, vec::Vec};
 
 /// [`CoinSelector`] is responsible for selecting and deselecting from a set of canididates.
 ///
-/// You can do this manually by calling methods like [`select`] or automatically with methods like [`branch_and_bound`].
+/// You can do this manually by calling methods like [`select`] or automatically with methods like [`bnb_solutions`].
 ///
 /// [`select`]: CoinSelector::select
-/// [`branch_and_bound`]: CoinSelector::branch_and_bound
+/// [`bnb_solutions`]: CoinSelector::bnb_solutions
 #[derive(Debug, Clone)]
 pub struct CoinSelector<'a> {
     base_weight: u32,
@@ -456,12 +456,40 @@ impl<'a> CoinSelector<'a> {
         SelectIter { cs: self.clone() }
     }
 
-    /// Runs a branch and bound algorithm to optimize for the provided metric
-    pub fn branch_and_bound<M: BnBMetric>(
+    /// Returns a branch and bound iterator, given a `metric`.
+    ///
+    /// Not every iteration will return a solution. If a solution is found, we return the selection
+    /// and score. Each subsequent solution of the iterator guarantees a higher score than the last.
+    ///
+    /// Most of the time, you would want to use [`CoinSelector::run_bnb`] instead.
+    pub fn bnb_solutions<M: BnBMetric>(
         &self,
         metric: M,
     ) -> impl Iterator<Item = Option<(CoinSelector<'a>, M::Score)>> {
         crate::bnb::BnbIter::new(self.clone(), metric)
+    }
+
+    /// Run branch and bound until we cannot find a better solution, or we reach `max_rounds`.
+    ///
+    /// If a solution is found, the [`BnBMetric::Score`] is returned. Otherwise, we error with
+    /// [`NoBnbSolution`].
+    ///
+    /// To access to raw bnb iterator, use [`CoinSelector::bnb_solutions`].
+    pub fn run_bnb<M: BnBMetric>(
+        &mut self,
+        metric: M,
+        max_rounds: usize,
+    ) -> Result<M::Score, NoBnbSolution> {
+        let mut rounds = 0_usize;
+        let (selector, score) = self
+            .bnb_solutions(metric)
+            .inspect(|_| rounds += 1)
+            .take(max_rounds)
+            .flatten()
+            .last()
+            .ok_or(NoBnbSolution { max_rounds, rounds })?;
+        *self = selector;
+        Ok(score)
     }
 }
 
@@ -639,3 +667,22 @@ impl core::fmt::Display for InsufficientFunds {
 
 #[cfg(feature = "std")]
 impl std::error::Error for InsufficientFunds {}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NoBnbSolution {
+    max_rounds: usize,
+    rounds: usize,
+}
+
+impl core::fmt::Display for NoBnbSolution {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(
+            f,
+            "No bnb solution found after {} rounds (max rounds is {}).",
+            self.rounds, self.max_rounds
+        )
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for NoBnbSolution {}

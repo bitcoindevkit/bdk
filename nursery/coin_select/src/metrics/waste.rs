@@ -15,9 +15,9 @@ use crate::{bnb::BnBMetric, float::Ordf32, Candidate, CoinSelector, Drain, FeeRa
 ///    minimise waste) with waste.
 ///
 /// This is **very** different from minimising waste in general which is what this metric will do
-/// when used in [`CoinSelector::branch_and_bound`]. The waste metric tends to over consolidate
-/// funds. If the `long_term_feerate` is even slightly higher than the current feerate (specified
-/// in `target`) it will select all your coins!
+/// when used in [`CoinSelector::bnb_solutions`]. The waste metric tends to over consolidate funds.
+/// If the `long_term_feerate` is even slightly higher than the current feerate (specified in
+/// `target`) it will select all your coins!
 pub struct Waste<'c, C> {
     pub target: Target,
     pub long_term_feerate: FeeRate,

@@ -38,7 +38,7 @@ fn waste_all_selected_except_one_is_optimal_and_awkward() {
         min_fee,
     };
 
-    let solutions = cs.branch_and_bound(Waste {
+    let solutions = cs.bnb_solutions(Waste {
         target,
         long_term_feerate,
         change_policy: &change_policy,
@@ -97,7 +97,7 @@ fn waste_naive_effective_value_shouldnt_be_better() {
         min_fee,
     };
 
-    let solutions = cs.branch_and_bound(Waste {
+    let solutions = cs.bnb_solutions(Waste {
         target,
         long_term_feerate,
         change_policy: &change_policy,
@@ -157,7 +157,7 @@ fn waste_doesnt_take_too_long_to_finish() {
         min_fee,
     };
 
-    let solutions = cs.branch_and_bound(Waste {
+    let solutions = cs.bnb_solutions(Waste {
         target,
         long_term_feerate,
         change_policy: &change_policy,
@@ -209,7 +209,7 @@ fn waste_lower_long_term_feerate_but_still_need_to_select_all() {
         min_fee,
     };
 
-    let solutions = cs.branch_and_bound(Waste {
+    let solutions = cs.bnb_solutions(Waste {
         target,
         long_term_feerate,
         change_policy: &change_policy,
@@ -272,7 +272,7 @@ fn waste_low_but_non_negative_rate_diff_means_adding_more_inputs_might_reduce_ex
         min_fee,
     };
 
-    let solutions = cs.branch_and_bound(Waste {
+    let solutions = cs.bnb_solutions(Waste {
         target,
         long_term_feerate,
         change_policy: &change_policy,
