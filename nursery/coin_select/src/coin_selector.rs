@@ -60,6 +60,27 @@ impl<'a> CoinSelector<'a> {
         }
     }
 
+    /// Creates a new coin selector from some candidate inputs and a list of `output_weights`.
+    ///
+    /// This is a convenience method to calculate the `base_weight` from a set of recipient output
+    /// weights. This is equivalent to calculating the `base_weight` yourself and calling
+    /// [`CoinSelector::new`].
+    pub fn fund_outputs(
+        candidates: &'a [Candidate],
+        output_weights: impl Iterator<Item = u32>,
+    ) -> Self {
+        let (output_count, output_weight_total) =
+            output_weights.fold((0_usize, 0_u32), |(n, w), a| (n + 1, w + a));
+
+        let base_weight = (4 /* nVersion */
+            + 4 /* nLockTime */
+            + varint_size(0) /* inputs varint */
+            + varint_size(output_count)/* outputs varint */)
+            * 4
+            + output_weight_total;
+        Self::new(candidates, base_weight)
+    }
+
     /// Iterate over all the candidates in their currently sorted order. Each item has the original
     /// index with the candidate.
     pub fn candidates(
@@ -519,7 +540,9 @@ impl Candidate {
 /// This structure can also represent multiple outputs.
 #[derive(Default, Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub struct DrainWeights {
-    /// The weight of adding this drain output.
+    /// The weight of including this drain output.
+    ///
+    /// This must take into account the weight change from varint output count.
     pub output_weight: u32,
     /// The weight of spending this drain output (in the future).
     pub spend_weight: u32,

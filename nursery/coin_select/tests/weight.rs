@@ -1,7 +1,9 @@
 #![allow(clippy::zero_prefixed_literal)]
 
+use std::str::FromStr;
+
 use bdk_coin_select::{Candidate, CoinSelector, Drain};
-use bitcoin::{consensus::Decodable, ScriptBuf, Transaction};
+use bitcoin::{absolute::Height, consensus::Decodable, Address, ScriptBuf, Transaction, TxOut};
 
 fn hex_val(c: u8) -> u8 {
     match c {
@@ -162,4 +164,37 @@ fn legacy_three_inputs_one_segwit() {
     coin_selector.select_all();
 
     assert_eq!(coin_selector.weight(0), orig_weight.to_wu() as u32);
+}
+
+/// Ensure that `fund_outputs` caculates the same `base_weight` as `rust-bitcoin`.
+///
+/// We test it with 3 different output counts (resulting in different varint output-count weights).
+#[test]
+fn fund_outputs() {
+    let txo = TxOut {
+        script_pubkey: Address::from_str("bc1q4hym5spvze5d4wand9mf9ed7ku00kg6cv3h9ct")
+            .expect("must parse address")
+            .assume_checked()
+            .script_pubkey(),
+        value: 50_000,
+    };
+    let txo_weight = txo.weight() as u32;
+
+    let output_counts: &[usize] = &[0x01, 0xfd, 0x01_0000];
+
+    for &output_count in output_counts {
+        let weight_from_fund_outputs =
+            CoinSelector::fund_outputs(&[], (0..=output_count).map(|_| txo_weight)).weight(0);
+
+        let exp_weight = Transaction {
+            version: 0,
+            lock_time: bitcoin::absolute::LockTime::Blocks(Height::ZERO),
+            input: Vec::new(),
+            output: (0..=output_count).map(|_| txo.clone()).collect(),
+        }
+        .weight()
+        .to_wu() as u32;
+
+        assert_eq!(weight_from_fund_outputs, exp_weight);
+    }
 }
