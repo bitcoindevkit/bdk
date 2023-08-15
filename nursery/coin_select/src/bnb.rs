@@ -2,14 +2,14 @@ use super::CoinSelector;
 use alloc::collections::BinaryHeap;
 
 #[derive(Debug)]
-pub(crate) struct BnbIter<'a, M: BnBMetric> {
+pub(crate) struct BnbIter<'a, M: BnbMetric> {
     queue: BinaryHeap<Branch<'a, M::Score>>,
     best: Option<M::Score>,
     /// The `BnBMetric` that will score each selection
     metric: M,
 }
 
-impl<'a, M: BnBMetric> Iterator for BnbIter<'a, M> {
+impl<'a, M: BnbMetric> Iterator for BnbIter<'a, M> {
     type Item = Option<(CoinSelector<'a>, M::Score)>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -52,7 +52,7 @@ impl<'a, M: BnBMetric> Iterator for BnbIter<'a, M> {
     }
 }
 
-impl<'a, M: BnBMetric> BnbIter<'a, M> {
+impl<'a, M: BnbMetric> BnbIter<'a, M> {
     pub fn new(mut selector: CoinSelector<'a>, metric: M) -> Self {
         let mut iter = BnbIter {
             queue: BinaryHeap::default(),
@@ -131,7 +131,7 @@ impl<'a, O: PartialEq> PartialEq for Branch<'a, O> {
 impl<'a, O: PartialEq> Eq for Branch<'a, O> {}
 
 /// A branch and bound metric
-pub trait BnBMetric {
+pub trait BnbMetric {
     type Score: Ord + Clone + core::fmt::Debug;
 
     fn score(&mut self, cs: &CoinSelector<'_>) -> Option<Self::Score>;

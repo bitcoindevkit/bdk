@@ -1,12 +1,12 @@
 use super::change_lower_bound;
-use crate::{bnb::BnBMetric, CoinSelector, Drain, Target};
+use crate::{bnb::BnbMetric, CoinSelector, Drain, Target};
 
 pub struct Changeless<'c, C> {
     pub target: Target,
     pub change_policy: &'c C,
 }
 
-impl<'c, C> BnBMetric for Changeless<'c, C>
+impl<'c, C> BnbMetric for Changeless<'c, C>
 where
     for<'a, 'b> C: Fn(&'b CoinSelector<'a>, Target) -> Drain,
 {

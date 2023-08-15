@@ -1,8 +1,10 @@
 //! Branch and bound metrics that can be passed to [`CoinSelector::bnb_solutions`] or
 //! [`CoinSelector::run_bnb`].
-use crate::{bnb::BnBMetric, float::Ordf32, CoinSelector, Drain, Target};
+use crate::{bnb::BnbMetric, float::Ordf32, CoinSelector, Drain, Target};
 mod waste;
 pub use waste::*;
+mod lowest_fee;
+pub use lowest_fee::*;
 mod changeless;
 pub use changeless::*;
 
@@ -38,8 +40,8 @@ fn change_lower_bound<'a>(
 
 macro_rules! impl_for_tuple {
     ($($a:ident $b:tt)*) => {
-        impl<$($a),*> BnBMetric for ($($a),*)
-            where $($a: BnBMetric),*
+        impl<$($a),*> BnbMetric for ($($a),*)
+            where $($a: BnbMetric),*
         {
             type Score=($(<$a>::Score),*);
 

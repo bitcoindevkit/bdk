@@ -36,6 +36,9 @@ pub fn min_value(
 ///
 /// Note that the value field of the `drain` is ignored.
 /// The `value` will be set to whatever needs to be to reach the given target.
+///
+/// **WARNING:** This may result in a change output that is below dust limit. It is recommended to
+/// use [`min_value_and_waste`].
 pub fn min_waste(
     drain_weights: DrainWeights,
     long_term_feerate: FeeRate,

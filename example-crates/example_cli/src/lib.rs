@@ -262,7 +262,7 @@ where
     };
 
     let target = bdk_coin_select::Target {
-        feerate: bdk_coin_select::FeeRate::from_sat_per_vb(5.0),
+        feerate: bdk_coin_select::FeeRate::from_sat_per_vb(2.0),
         min_fee: 0,
         value: transaction.output.iter().map(|txo| txo.value).sum(),
     };
@@ -284,7 +284,7 @@ where
         },
         spend_weight: change_plan.expected_weight() as u32,
     };
-    let long_term_feerate = bdk_coin_select::FeeRate::from_sat_per_vb(1.0);
+    let long_term_feerate = bdk_coin_select::FeeRate::from_sat_per_vb(5.0);
     let drain_policy = bdk_coin_select::change_policy::min_value_and_waste(
         drain_weights,
         change_script.dust_value().to_sat(),
@@ -294,12 +294,12 @@ where
     let mut selector = CoinSelector::new(&candidates, transaction.weight().to_wu() as u32);
     match cs_algorithm {
         CoinSelectionAlgo::BranchAndBound => {
-            let metric = bdk_coin_select::metrics::Waste {
+            let metric = bdk_coin_select::metrics::LowestFee {
                 target,
                 long_term_feerate,
                 change_policy: &drain_policy,
             };
-            selector.run_bnb(metric, 50_000)?;
+            selector.run_bnb(metric, 100_000)?;
         }
         CoinSelectionAlgo::LargestFirst => {
             selector.sort_candidates_by_key(|(_, c)| Reverse(c.value))

@@ -1,4 +1,4 @@
-use bdk_coin_select::{BnBMetric, Candidate, CoinSelector, Drain, FeeRate, Target};
+use bdk_coin_select::{BnbMetric, Candidate, CoinSelector, Drain, FeeRate, Target};
 #[macro_use]
 extern crate alloc;
 
@@ -30,7 +30,7 @@ struct MinExcessThenWeight {
     target: Target,
 }
 
-impl BnBMetric for MinExcessThenWeight {
+impl BnbMetric for MinExcessThenWeight {
     type Score = (i64, u32);
 
     fn score(&mut self, cs: &CoinSelector<'_>) -> Option<Self::Score> {

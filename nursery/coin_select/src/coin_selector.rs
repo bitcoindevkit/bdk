@@ -1,7 +1,7 @@
 use super::*;
 #[allow(unused)] // some bug in <= 1.48.0 sees this as unused when it isn't
 use crate::float::FloatExt;
-use crate::{bnb::BnBMetric, float::Ordf32, FeeRate};
+use crate::{bnb::BnbMetric, float::Ordf32, FeeRate};
 use alloc::{borrow::Cow, collections::BTreeSet, vec::Vec};
 
 /// [`CoinSelector`] is responsible for selecting and deselecting from a set of canididates.
@@ -462,7 +462,7 @@ impl<'a> CoinSelector<'a> {
     /// and score. Each subsequent solution of the iterator guarantees a higher score than the last.
     ///
     /// Most of the time, you would want to use [`CoinSelector::run_bnb`] instead.
-    pub fn bnb_solutions<M: BnBMetric>(
+    pub fn bnb_solutions<M: BnbMetric>(
         &self,
         metric: M,
     ) -> impl Iterator<Item = Option<(CoinSelector<'a>, M::Score)>> {
@@ -475,7 +475,7 @@ impl<'a> CoinSelector<'a> {
     /// [`NoBnbSolution`].
     ///
     /// To access to raw bnb iterator, use [`CoinSelector::bnb_solutions`].
-    pub fn run_bnb<M: BnBMetric>(
+    pub fn run_bnb<M: BnbMetric>(
         &mut self,
         metric: M,
         max_rounds: usize,
@@ -631,7 +631,9 @@ impl Drain {
     }
 }
 
-/// The `SelectIter` allows you to select candidates by calling `.next`.
+/// The `SelectIter` allows you to select candidates by calling [`Iterator::next`].
+///
+/// The [`Iterator::Item`] is a tuple of `(selector, last_selected_index, last_selected_candidate)`.
 pub struct SelectIter<'a> {
     cs: CoinSelector<'a>,
 }

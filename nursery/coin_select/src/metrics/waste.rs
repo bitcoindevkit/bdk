@@ -1,5 +1,5 @@
 use super::change_lower_bound;
-use crate::{bnb::BnBMetric, float::Ordf32, Candidate, CoinSelector, Drain, FeeRate, Target};
+use crate::{bnb::BnbMetric, float::Ordf32, Candidate, CoinSelector, Drain, FeeRate, Target};
 
 /// The "waste" metric used by bitcoin core.
 ///
@@ -24,7 +24,7 @@ pub struct Waste<'c, C> {
     pub change_policy: &'c C,
 }
 
-impl<'c, C> BnBMetric for Waste<'c, C>
+impl<'c, C> BnbMetric for Waste<'c, C>
 where
     for<'a, 'b> C: Fn(&'b CoinSelector<'a>, Target) -> Drain,
 {
@@ -150,8 +150,10 @@ where
 
                     let weight_to_satisfy_abs =
                         remaining_abs.min(0) as f32 / to_slurp.value_pwu().0;
+
                     let weight_to_satisfy_rate =
                         slurp_wv(to_slurp, remaining_rate.min(0), self.target.feerate);
+
                     let weight_to_satisfy = weight_to_satisfy_abs.max(weight_to_satisfy_rate);
                     debug_assert!(weight_to_satisfy <= to_slurp.weight as f32);
                     weight_to_satisfy
@@ -224,6 +226,9 @@ where
     }
 }
 
+/// Returns the "perfect weight" for this candidate to slurp up a given value with `feerate` while
+/// not changing the candidate's value/weight ratio.
+///
 /// Used to pretend that a candidate had precisely `value_to_slurp` + fee needed to include it. It
 /// tells you how much weight such a perfect candidate would have if it had the same value per
 /// weight unit as `candidate`. This is useful for estimating a lower weight bound for a perfect
