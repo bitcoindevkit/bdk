@@ -65,16 +65,20 @@ fn insert_relevant_txs() {
 
     let txs = [tx_c, tx_b, tx_a];
 
+    let changeset = indexed_tx_graph::ChangeSet {
+        graph: tx_graph::ChangeSet {
+            txs: txs.clone().into(),
+            ..Default::default()
+        },
+        indexer: keychain::ChangeSet([((), 9_u32)].into()),
+    };
+
     assert_eq!(
         graph.insert_relevant_txs(txs.iter().map(|tx| (tx, None)), None),
-        indexed_tx_graph::ChangeSet {
-            graph: tx_graph::ChangeSet {
-                txs: txs.into(),
-                ..Default::default()
-            },
-            indexer: keychain::ChangeSet([((), 9_u32)].into()),
-        }
-    )
+        changeset,
+    );
+
+    assert_eq!(graph.initial_changeset(), changeset,);
 }
 
 #[test]

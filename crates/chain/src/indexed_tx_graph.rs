@@ -59,6 +59,13 @@ impl<A: Anchor, I: Indexer> IndexedTxGraph<A, I> {
 
         self.graph.apply_changeset(changeset.graph);
     }
+
+    /// Determines the [`ChangeSet`] between `self` and an empty [`IndexedTxGraph`].
+    pub fn initial_changeset(&self) -> ChangeSet<A, I::ChangeSet> {
+        let graph = self.graph.initial_changeset();
+        let indexer = self.index.initial_changeset();
+        ChangeSet { graph, indexer }
+    }
 }
 
 impl<A: Anchor, I: Indexer> IndexedTxGraph<A, I>
@@ -231,6 +238,9 @@ pub trait Indexer {
 
     /// Apply changeset to itself.
     fn apply_changeset(&mut self, changeset: Self::ChangeSet);
+
+    /// Determines the [`ChangeSet`] between `self` and an empty [`Indexer`].
+    fn initial_changeset(&self) -> Self::ChangeSet;
 
     /// Determines whether the transaction should be included in the index.
     fn is_tx_relevant(&self, tx: &Transaction) -> bool;

@@ -66,6 +66,8 @@ impl<I: Clone + Ord> Indexer for SpkTxOutIndex<I> {
         Default::default()
     }
 
+    fn initial_changeset(&self) -> Self::ChangeSet {}
+
     fn apply_changeset(&mut self, _changeset: Self::ChangeSet) {
         // This applies nothing.
     }

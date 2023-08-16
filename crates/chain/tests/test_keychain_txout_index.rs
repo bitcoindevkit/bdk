@@ -43,6 +43,8 @@ fn spk_at_index(descriptor: &Descriptor<DescriptorPublicKey>, index: u32) -> Scr
 
 #[test]
 fn test_set_all_derivation_indices() {
+    use bdk_chain::indexed_tx_graph::Indexer;
+
     let (mut txout_index, _, _) = init_txout_index();
     let derive_to: BTreeMap<_, _> =
         [(TestKeychain::External, 12), (TestKeychain::Internal, 24)].into();
@@ -56,6 +58,7 @@ fn test_set_all_derivation_indices() {
         keychain::ChangeSet::default(),
         "no changes if we set to the same thing"
     );
+    assert_eq!(txout_index.initial_changeset().as_inner(), &derive_to);
 }
 
 #[test]

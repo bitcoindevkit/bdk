@@ -98,6 +98,10 @@ impl<K: Clone + Ord + Debug> Indexer for KeychainTxOutIndex<K> {
         self.scan(tx)
     }
 
+    fn initial_changeset(&self) -> Self::ChangeSet {
+        super::ChangeSet(self.last_revealed.clone())
+    }
+
     fn apply_changeset(&mut self, changeset: Self::ChangeSet) {
         self.apply_changeset(changeset)
     }

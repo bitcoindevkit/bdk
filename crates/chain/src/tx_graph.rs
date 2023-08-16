@@ -438,6 +438,11 @@ impl<A: Clone + Ord> TxGraph<A> {
         changeset
     }
 
+    /// Determines the [`ChangeSet`] between `self` and an empty [`TxGraph`].
+    pub fn initial_changeset(&self) -> ChangeSet<A> {
+        Self::default().determine_changeset(self.clone())
+    }
+
     /// Applies [`ChangeSet`] to [`TxGraph`].
     pub fn apply_changeset(&mut self, changeset: ChangeSet<A>) {
         for tx in changeset.txs {

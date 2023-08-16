@@ -20,6 +20,7 @@ mod txout_index;
 pub use txout_index::*;
 
 /// Represents updates to the derivation index of a [`KeychainTxOutIndex`].
+/// It maps each keychain `K` to its last revealed index.
 ///
 /// It can be applied to [`KeychainTxOutIndex`] with [`apply_changeset`]. [`ChangeSet] are
 /// monotone in that they will never decrease the revealed derivation index.

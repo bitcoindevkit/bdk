@@ -141,7 +141,7 @@ fn insert_txouts() {
         changeset,
         ChangeSet {
             txs: [update_txs.clone()].into(),
-            txouts: update_ops.into(),
+            txouts: update_ops.clone().into(),
             anchors: [(conf_anchor, update_txs.txid()), (unconf_anchor, h!("tx2"))].into(),
             last_seen: [(h!("tx2"), 1000000)].into()
         }
@@ -185,6 +185,17 @@ fn insert_txouts() {
             }
         )]
         .into()
+    );
+
+    // Check that the initial_changeset is correct
+    assert_eq!(
+        graph.initial_changeset(),
+        ChangeSet {
+            txs: [update_txs.clone()].into(),
+            txouts: update_ops.into_iter().chain(original_ops).collect(),
+            anchors: [(conf_anchor, update_txs.txid()), (unconf_anchor, h!("tx2"))].into(),
+            last_seen: [(h!("tx2"), 1000000)].into()
+        }
     );
 }
 
