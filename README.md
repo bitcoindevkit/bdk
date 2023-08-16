@@ -218,13 +218,15 @@ cargo update -p hashlink --precise "0.8.1"
 # required for compact_filters feature, regex after 1.7.3 has MSRV 1.60.0
 cargo update -p regex --precise "1.7.3"
 # zip 0.6.3 has MSRV 1.59.0 but still works
-cargo update -p zip --precise "0.6.3"
-# base64ct 1.6.0 has MSRV 1.60.0
-cargo update -p base64ct --precise "1.5.3"
+cargo update -p zip:0.6.6 --precise "0.6.3"
 # rustix 0.38.0 has MSRV 1.65.0
 cargo update -p rustix --precise "0.37.23"
 # tokio 0.30.0 has MSRV 1.63.0
 cargo update -p tokio --precise "1.29.1"
 # cc 1.0.82 is throwing error with rust 1.57.0, "error[E0599]: no method named `retain_mut`..."
 cargo update -p cc --precise "1.0.81"
+# rustls 0.21.2 has MSRV 1.60.0+
+cargo update -p rustls:0.21.6 --precise "0.21.1"
+# flate2 1.0.27 has MSRV 1.63.0+
+cargo update -p flate2:1.0.27 --precise "1.0.26"
 ```
