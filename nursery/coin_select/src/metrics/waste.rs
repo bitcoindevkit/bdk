@@ -24,6 +24,18 @@ pub struct Waste<'c, C> {
     pub change_policy: &'c C,
 }
 
+impl<'c, C> Clone for Waste<'c, C> {
+    fn clone(&self) -> Self {
+        Self {
+            target: self.target,
+            long_term_feerate: self.long_term_feerate,
+            change_policy: self.change_policy,
+        }
+    }
+}
+
+impl<'c, C> Copy for Waste<'c, C> {}
+
 impl<'c, C> BnbMetric for Waste<'c, C>
 where
     for<'a, 'b> C: Fn(&'b CoinSelector<'a>, Target) -> Drain,

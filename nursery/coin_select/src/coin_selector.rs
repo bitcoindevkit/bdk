@@ -12,7 +12,7 @@ use alloc::{borrow::Cow, collections::BTreeSet, vec::Vec};
 /// [`bnb_solutions`]: CoinSelector::bnb_solutions
 #[derive(Debug, Clone)]
 pub struct CoinSelector<'a> {
-    base_weight: u32,
+    pub base_weight: u32,
     candidates: &'a [Candidate],
     selected: Cow<'a, BTreeSet<usize>>,
     banned: Cow<'a, BTreeSet<usize>>,
@@ -672,8 +672,8 @@ impl std::error::Error for InsufficientFunds {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NoBnbSolution {
-    max_rounds: usize,
-    rounds: usize,
+    pub max_rounds: usize,
+    pub rounds: usize,
 }
 
 impl core::fmt::Display for NoBnbSolution {

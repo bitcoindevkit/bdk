@@ -18,7 +18,7 @@ impl<'a, M: BnbMetric> Iterator for BnbIter<'a, M> {
         //     for thing in self.queue.iter() {
         //         println!("{} {:?}", &thing.selector, thing.lower_bound);
         //     }
-        //     let _ = std::io::stdin().read_line(&mut String::new());
+        //     let _ = std::io::stdin().read_line(&mut alloc::string::String::new());
         // }
 
         let branch = self.queue.pop()?;
@@ -88,14 +88,14 @@ impl<'a, M: BnbMetric> BnbIter<'a, M> {
         }
 
         let next_unselected = cs.unselected_indices().next().unwrap();
+
         let mut inclusion_cs = cs.clone();
         inclusion_cs.select(next_unselected);
+        self.consider_adding_to_queue(&inclusion_cs, false);
+
         let mut exclusion_cs = cs.clone();
         exclusion_cs.ban(next_unselected);
-
-        for (child_cs, is_exclusion) in &[(&inclusion_cs, false), (&exclusion_cs, true)] {
-            self.consider_adding_to_queue(child_cs, *is_exclusion)
-        }
+        self.consider_adding_to_queue(&exclusion_cs, true);
     }
 }
 

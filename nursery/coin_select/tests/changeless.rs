@@ -1,5 +1,7 @@
 #![allow(unused)]
-use bdk_coin_select::{float::Ordf32, metrics, Candidate, CoinSelector, Drain, FeeRate, Target};
+use bdk_coin_select::{
+    float::Ordf32, metrics, Candidate, CoinSelector, Drain, DrainWeights, FeeRate, Target,
+};
 use proptest::{
     prelude::*,
     test_runner::{RngAlgorithm, TestRng},
@@ -41,10 +43,9 @@ proptest! {
         let mut rng = TestRng::deterministic_rng(RngAlgorithm::ChaCha);
         let long_term_feerate = FeeRate::from_sat_per_vb(0.0f32.max(feerate - long_term_feerate_diff));
         let feerate = FeeRate::from_sat_per_vb(feerate);
-        let drain = Drain {
-            weight: change_weight,
+        let drain = DrainWeights {
+            output_weight: change_weight,
             spend_weight: change_spend_weight,
-            value: 0
         };
 
         let change_policy = bdk_coin_select::change_policy::min_waste(drain, long_term_feerate);
@@ -59,7 +60,7 @@ proptest! {
             min_fee
         };
 
-        let solutions = cs.branch_and_bound(metrics::Changeless {
+        let solutions = cs.bnb_solutions(metrics::Changeless {
             target,
             change_policy: &change_policy
         });
@@ -78,7 +79,7 @@ proptest! {
                         let mut naive_select = cs.clone();
                         naive_select.sort_candidates_by_key(|(_, wv)| core::cmp::Reverse(wv.effective_value(target.feerate)));
                         // we filter out failing onces below
-                        let _ = naive_select.select_until_target_met(target, drain);
+                        let _ = naive_select.select_until_target_met(target, Drain { weights: drain, value: 0 });
                         naive_select
                     },
                 ];

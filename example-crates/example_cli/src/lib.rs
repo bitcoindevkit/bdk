@@ -1,6 +1,6 @@
 pub use anyhow;
 use anyhow::Context;
-use bdk_coin_select::{Candidate, CoinSelector, Drain};
+use bdk_coin_select::{Candidate, CoinSelector};
 use bdk_file_store::Store;
 use serde::{de::DeserializeOwned, Serialize};
 use std::{cmp::Reverse, collections::HashMap, path::PathBuf, sync::Mutex};
@@ -294,12 +294,18 @@ where
     let mut selector = CoinSelector::new(&candidates, transaction.weight().to_wu() as u32);
     match cs_algorithm {
         CoinSelectionAlgo::BranchAndBound => {
-            let metric = bdk_coin_select::metrics::LowestFee {
+            let metric = bdk_coin_select::metrics::Waste {
                 target,
                 long_term_feerate,
                 change_policy: &drain_policy,
             };
-            selector.run_bnb(metric, 100_000)?;
+            if let Err(bnb_err) = selector.run_bnb(metric, 100_000) {
+                selector.sort_candidates_by_descending_value_pwu();
+                println!(
+                    "Error: {} Falling back to select until target met.",
+                    bnb_err
+                );
+            };
         }
         CoinSelectionAlgo::LargestFirst => {
             selector.sort_candidates_by_key(|(_, c)| Reverse(c.value))
@@ -313,13 +319,7 @@ where
     };
 
     // ensure target is met
-    selector.select_until_target_met(
-        target,
-        Drain {
-            weights: drain_weights,
-            value: 0,
-        },
-    )?;
+    selector.select_until_target_met(target, drain_policy(&selector, target))?;
 
     // get the selected utxos
     let selected_txos = selector

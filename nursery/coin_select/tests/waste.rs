@@ -322,10 +322,9 @@ proptest! {
         let mut rng = TestRng::deterministic_rng(RngAlgorithm::ChaCha);
         let long_term_feerate = FeeRate::from_sat_per_vb(0.0f32.max(feerate - long_term_feerate_diff));
         let feerate = FeeRate::from_sat_per_vb(feerate);
-        let drain = Drain {
-            weight: change_weight,
+        let drain = DrainWeights {
+            output_weight: change_weight,
             spend_weight: change_spend_weight,
-            value: 0
         };
 
         let change_policy = crate::change_policy::min_waste(drain, long_term_feerate);
@@ -340,7 +339,7 @@ proptest! {
             min_fee
         };
 
-        let solutions = cs.branch_and_bound(Waste {
+        let solutions = cs.bnb_solutions(Waste {
             target,
             long_term_feerate,
             change_policy: &change_policy
@@ -360,7 +359,7 @@ proptest! {
                         let mut naive_select = cs.clone();
                         naive_select.sort_candidates_by_key(|(_, wv)| core::cmp::Reverse(wv.effective_value(target.feerate)));
                         // we filter out failing onces below
-                        let _ = naive_select.select_until_target_met(target, drain);
+                        let _ = naive_select.select_until_target_met(target, Drain { weights: drain, value: 0 });
                         naive_select
                     },
                     {

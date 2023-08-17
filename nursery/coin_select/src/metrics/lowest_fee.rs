@@ -9,11 +9,35 @@ pub struct LowestFee<'c, C> {
     pub change_policy: &'c C,
 }
 
+impl<'c, C> Clone for LowestFee<'c, C> {
+    fn clone(&self) -> Self {
+        Self {
+            target: self.target,
+            long_term_feerate: self.long_term_feerate,
+            change_policy: self.change_policy,
+        }
+    }
+}
+
+impl<'c, C> Copy for LowestFee<'c, C> {}
+
 impl<'c, C> LowestFee<'c, C>
 where
     for<'a, 'b> C: Fn(&'b CoinSelector<'a>, Target) -> Drain,
 {
-    fn calculate_metric(&self, cs: &CoinSelector<'_>, drain_weights: Option<DrainWeights>) -> f32 {
+    fn calc_metric(&self, cs: &CoinSelector<'_>, drain_weights: Option<DrainWeights>) -> f32 {
+        self.calc_metric_lb(cs, drain_weights)
+            + match drain_weights {
+                Some(_) => {
+                    let selected_value = cs.selected_value();
+                    assert!(selected_value >= self.target.value);
+                    (cs.selected_value() - self.target.value) as f32
+                }
+                None => 0.0,
+            }
+    }
+
+    fn calc_metric_lb(&self, cs: &CoinSelector<'_>, drain_weights: Option<DrainWeights>) -> f32 {
         match drain_weights {
             // with change
             Some(drain_weights) => {
@@ -22,10 +46,7 @@ where
                     + drain_weights.spend_weight as f32 * self.long_term_feerate.spwu()
             }
             // changeless
-            None => {
-                cs.input_weight() as f32 * self.target.feerate.spwu()
-                    + (cs.selected_value() - self.target.value) as f32
-            }
+            None => cs.input_weight() as f32 * self.target.feerate.spwu(),
         }
     }
 }
@@ -48,7 +69,7 @@ where
             None
         };
 
-        Some(Ordf32(self.calculate_metric(cs, drain_weights)))
+        Some(Ordf32(self.calc_metric(cs, drain_weights)))
     }
 
     fn bound(&mut self, cs: &CoinSelector<'_>) -> Option<Self::Score> {
@@ -66,11 +87,12 @@ where
             // Target is met, is it possible to add further inputs to remove drain output?
             // If we do, can we get a better score?
 
-            // First lower bound candidate is just the selection itself.
-            let mut lower_bound = self.calculate_metric(cs, change_lb_weights);
+            // First lower bound candidate is just the selection itself (include excess).
+            let mut lower_bound = self.calc_metric(cs, change_lb_weights);
 
-            // Since a changeless solution may exist, we should try reduce the excess
             if change_lb.is_none() {
+                // Since a changeless solution may exist, we should try minimize the excess with by
+                // adding as much -ev candidates as possible
                 let selection_with_as_much_negative_ev_as_possible = cs
                     .clone()
                     .select_iter()
@@ -98,13 +120,12 @@ where
                             let excess = cs.rate_excess(self.target, Drain::none());
 
                             // change the input's weight to make it's effective value match the excess
-                            let perfect_input_weight =
-                                slurp_candidate(finishing_input, excess, self.target.feerate);
+                            let perfect_input_weight = slurp(self.target, excess, finishing_input);
 
                             (cs.input_weight() as f32 + perfect_input_weight)
                                 * self.target.feerate.spwu()
                         }
-                        None => self.calculate_metric(&cs, None),
+                        None => self.calc_metric(&cs, None),
                     };
 
                     lower_bound = lower_bound.min(lower_bound_changeless)
@@ -122,34 +143,22 @@ where
             .find(|(cs, _, _)| cs.is_target_met(self.target, change_lb))?;
         cs.deselect(slurp_index);
 
-        let perfect_excess = i64::min(
-            cs.rate_excess(self.target, Drain::none()),
-            cs.absolute_excess(self.target, Drain::none()),
-        );
+        let mut lower_bound = self.calc_metric_lb(&cs, change_lb_weights);
 
-        match change_lb_weights {
-            // must have change!
-            Some(change_weights) => {
-                // [todo] This will not be perfect, just a placeholder for now
-                let lowest_fee = (cs.input_weight() + change_weights.output_weight) as f32
-                    * self.target.feerate.spwu()
-                    + change_weights.spend_weight as f32 * self.long_term_feerate.spwu();
+        if change_lb_weights.is_none() {
+            // changeless solution is possible, find the max excess we need to rid of
+            let perfect_excess = i64::max(
+                cs.rate_excess(self.target, Drain::none()),
+                cs.absolute_excess(self.target, Drain::none()),
+            );
 
-                Some(Ordf32(lowest_fee))
-            }
-            // can be changeless!
-            None => {
-                // use the lowest excess to find "perfect candidate weight"
-                let perfect_input_weight =
-                    slurp_candidate(candidate_to_slurp, perfect_excess, self.target.feerate);
+            // use the highest excess to find "perfect candidate weight"
+            let perfect_input_weight = slurp(self.target, perfect_excess, candidate_to_slurp);
 
-                // the perfect input weight canned the excess and we assume no change
-                let lowest_fee =
-                    (cs.input_weight() as f32 + perfect_input_weight) * self.target.feerate.spwu();
-
-                Some(Ordf32(lowest_fee))
-            }
+            lower_bound += perfect_input_weight * self.target.feerate.spwu();
         }
+
+        Some(Ordf32(lower_bound))
     }
 
     fn requires_ordering_by_descending_value_pwu(&self) -> bool {
@@ -157,19 +166,28 @@ where
     }
 }
 
-fn slurp_candidate(candidate: Candidate, excess: i64, feerate: FeeRate) -> f32 {
-    let candidate_weight = candidate.weight as f32;
+fn slurp(target: Target, excess: i64, candidate: Candidate) -> f32 {
+    let vpw = candidate.value_pwu().0;
+    let perfect_weight = -excess as f32 / (vpw - target.feerate.spwu());
 
-    // this equation is dervied from:
-    // * `input_effective_value = input_value - input_weight * feerate`
-    // * `input_value * new_input_weight = new_input_value * input_weight`
-    //      (ensure we have the same value:weight ratio)
-    // where we want `input_effective_value` to match `-excess`.
-    let perfect_weight = -(candidate_weight * excess as f32)
-        / (candidate.value as f32 - candidate_weight * feerate.spwu());
+    #[cfg(debug_assertions)]
+    {
+        let perfect_value = (candidate.value as f32 * perfect_weight) / candidate.weight as f32;
+        let perfect_vpw = perfect_value / perfect_weight;
+        if perfect_vpw.is_nan() {
+            assert_eq!(perfect_value, 0.0);
+            assert_eq!(perfect_weight, 0.0);
+        } else {
+            assert!(
+                (vpw - perfect_vpw).abs() < 0.01,
+                "value:weight ratio must stay the same: vpw={} perfect_vpw={} perfect_value={} perfect_weight={}",
+                vpw,
+                perfect_vpw,
+                perfect_value,
+                perfect_weight,
+            );
+        }
+    }
 
-    debug_assert!(perfect_weight <= candidate_weight);
-
-    // we can't allow the weight to go negative
-    perfect_weight.min(0.0)
+    perfect_weight.max(0.0)
 }
