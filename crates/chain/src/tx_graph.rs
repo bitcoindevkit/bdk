@@ -893,9 +893,9 @@ impl<A: Anchor> TxGraph<A> {
         outpoints: impl IntoIterator<Item = (OI, OutPoint)> + 'a,
     ) -> impl Iterator<Item = Result<(OI, FullTxOut<A>), C::Error>> + 'a {
         self.try_filter_chain_txouts(chain, chain_tip, outpoints)
-            .filter(|r| match r {
+            .filter(move |r| match r {
                 // keep unspents, drop spents
-                Ok((_, full_txo)) => full_txo.spent_by.is_none(),
+                Ok((_, full_txo)) => full_txo.is_confirmed_and_spendable(chain_tip.height),
                 // keep errors
                 Err(_) => true,
             })
