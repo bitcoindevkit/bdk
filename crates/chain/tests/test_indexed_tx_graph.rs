@@ -4,11 +4,10 @@ mod common;
 use std::collections::{BTreeMap, BTreeSet};
 
 use bdk_chain::{
-    indexed_tx_graph::{IndexedAdditions, IndexedTxGraph},
-    keychain::{Balance, DerivationAdditions, KeychainTxOutIndex},
+    indexed_tx_graph::{self, IndexedTxGraph},
+    keychain::{self, Balance, KeychainTxOutIndex},
     local_chain::LocalChain,
-    tx_graph::Additions,
-    BlockId, ChainPosition, ConfirmationHeightAnchor,
+    tx_graph, BlockId, ChainPosition, ConfirmationHeightAnchor,
 };
 use bitcoin::{
     secp256k1::Secp256k1, BlockHash, OutPoint, Script, ScriptBuf, Transaction, TxIn, TxOut,
@@ -66,16 +65,20 @@ fn insert_relevant_txs() {
 
     let txs = [tx_c, tx_b, tx_a];
 
+    let changeset = indexed_tx_graph::ChangeSet {
+        graph: tx_graph::ChangeSet {
+            txs: txs.clone().into(),
+            ..Default::default()
+        },
+        indexer: keychain::ChangeSet([((), 9_u32)].into()),
+    };
+
     assert_eq!(
         graph.insert_relevant_txs(txs.iter().map(|tx| (tx, None)), None),
-        IndexedAdditions {
-            graph_additions: Additions {
-                txs: txs.into(),
-                ..Default::default()
-            },
-            index_additions: DerivationAdditions([((), 9_u32)].into()),
-        }
-    )
+        changeset,
+    );
+
+    assert_eq!(graph.initial_changeset(), changeset,);
 }
 
 #[test]

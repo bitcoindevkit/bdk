@@ -21,8 +21,8 @@ use alloc::{
 };
 pub use bdk_chain::keychain::Balance;
 use bdk_chain::{
-    indexed_tx_graph::IndexedAdditions,
-    keychain::{KeychainTxOutIndex, LocalChangeSet, LocalUpdate},
+    indexed_tx_graph,
+    keychain::{KeychainTxOutIndex, WalletChangeSet, WalletUpdate},
     local_chain::{self, CannotConnectError, CheckPoint, CheckPointIter, LocalChain},
     tx_graph::{CanonicalTx, TxGraph},
     Append, BlockId, ChainPosition, ConfirmationTime, ConfirmationTimeAnchor, FullTxOut,
@@ -95,10 +95,10 @@ pub struct Wallet<D = ()> {
 }
 
 /// The update to a [`Wallet`] used in [`Wallet::apply_update`]. This is usually returned from blockchain data sources.
-pub type Update = LocalUpdate<KeychainKind, ConfirmationTimeAnchor>;
+pub type Update = WalletUpdate<KeychainKind, ConfirmationTimeAnchor>;
 
 /// The changeset produced internally by [`Wallet`] when mutated.
-pub type ChangeSet = LocalChangeSet<KeychainKind, ConfirmationTimeAnchor>;
+pub type ChangeSet = WalletChangeSet<KeychainKind, ConfirmationTimeAnchor>;
 
 /// The address index selection strategy to use to derived an address from the wallet's external
 /// descriptor. See [`Wallet::get_address`]. If you're unsure which one to use use `WalletIndex::New`.
@@ -246,8 +246,8 @@ impl<D> Wallet<D> {
         };
 
         let changeset = db.load_from_persistence().map_err(NewError::Persist)?;
-        chain.apply_changeset(&changeset.chain_changeset);
-        indexed_graph.apply_additions(changeset.indexed_additions);
+        chain.apply_changeset(&changeset.chain);
+        indexed_graph.apply_changeset(changeset.index_tx_graph);
 
         let persist = Persist::new(db);
 
@@ -320,14 +320,14 @@ impl<D> Wallet<D> {
     {
         let keychain = self.map_keychain(keychain);
         let txout_index = &mut self.indexed_graph.index;
-        let (index, spk, additions) = match address_index {
+        let (index, spk, changeset) = match address_index {
             AddressIndex::New => {
-                let ((index, spk), index_additions) = txout_index.reveal_next_spk(&keychain);
-                (index, spk.into(), Some(index_additions))
+                let ((index, spk), index_changeset) = txout_index.reveal_next_spk(&keychain);
+                (index, spk.into(), Some(index_changeset))
             }
             AddressIndex::LastUnused => {
-                let ((index, spk), index_additions) = txout_index.next_unused_spk(&keychain);
-                (index, spk.into(), Some(index_additions))
+                let ((index, spk), index_changeset) = txout_index.next_unused_spk(&keychain);
+                (index, spk.into(), Some(index_changeset))
             }
             AddressIndex::Peek(index) => {
                 let (index, spk) = txout_index
@@ -339,9 +339,11 @@ impl<D> Wallet<D> {
             }
         };
 
-        if let Some(additions) = additions {
+        if let Some(changeset) = changeset {
             self.persist
-                .stage(ChangeSet::from(IndexedAdditions::from(additions)));
+                .stage(ChangeSet::from(indexed_tx_graph::ChangeSet::from(
+                    changeset,
+                )));
             self.persist.commit()?;
         }
 
@@ -436,12 +438,12 @@ impl<D> Wallet<D> {
         let graph = self.indexed_graph.graph();
 
         let canonical_tx = CanonicalTx {
-            observed_as: graph.get_chain_position(
+            chain_position: graph.get_chain_position(
                 &self.chain,
                 self.chain.tip().map(|cp| cp.block_id()).unwrap_or_default(),
                 txid,
             )?,
-            node: graph.get_tx_node(txid)?,
+            tx_node: graph.get_tx_node(txid)?,
         };
 
         Some(new_tx_details(
@@ -889,12 +891,14 @@ impl<D> Wallet<D> {
             Some(ref drain_recipient) => drain_recipient.clone(),
             None => {
                 let change_keychain = self.map_keychain(KeychainKind::Internal);
-                let ((index, spk), index_additions) =
+                let ((index, spk), index_changeset) =
                     self.indexed_graph.index.next_unused_spk(&change_keychain);
                 let spk = spk.into();
                 self.indexed_graph.index.mark_used(&change_keychain, index);
                 self.persist
-                    .stage(ChangeSet::from(IndexedAdditions::from(index_additions)));
+                    .stage(ChangeSet::from(indexed_tx_graph::ChangeSet::from(
+                        index_changeset,
+                    )));
                 self.persist.commit().expect("TODO");
                 spk
             }
@@ -1286,7 +1290,7 @@ impl<D> Wallet<D> {
                 .indexed_graph
                 .graph()
                 .get_chain_position(&self.chain, chain_tip, input.previous_output.txid)
-                .map(|observed_as| match observed_as {
+                .map(|chain_position| match chain_position {
                     ChainPosition::Confirmed(a) => a.confirmation_height,
                     ChainPosition::Unconfirmed(_) => u32::MAX,
                 });
@@ -1469,7 +1473,7 @@ impl<D> Wallet<D> {
                     .graph()
                     .get_chain_position(&self.chain, chain_tip, txid)
                 {
-                    Some(observed_as) => observed_as.cloned().into(),
+                    Some(chain_position) => chain_position.cloned().into(),
                     None => return false,
                 };
 
@@ -1716,11 +1720,13 @@ impl<D> Wallet<D> {
         D: PersistBackend<ChangeSet>,
     {
         let mut changeset = ChangeSet::from(self.chain.apply_update(update.chain)?);
-        let (_, index_additions) = self
+        let (_, index_changeset) = self
             .indexed_graph
             .index
             .reveal_to_target_multi(&update.last_active_indices);
-        changeset.append(ChangeSet::from(IndexedAdditions::from(index_additions)));
+        changeset.append(ChangeSet::from(indexed_tx_graph::ChangeSet::from(
+            index_changeset,
+        )));
         changeset.append(ChangeSet::from(
             self.indexed_graph.apply_update(update.graph),
         ));
@@ -1827,7 +1833,7 @@ fn new_tx_details(
 ) -> TransactionDetails {
     let graph = indexed_graph.graph();
     let index = &indexed_graph.index;
-    let tx = canonical_tx.node.tx;
+    let tx = canonical_tx.tx_node.tx;
 
     let received = tx
         .output
@@ -1867,11 +1873,11 @@ fn new_tx_details(
 
     TransactionDetails {
         transaction: if include_raw { Some(tx.clone()) } else { None },
-        txid: canonical_tx.node.txid,
+        txid: canonical_tx.tx_node.txid,
         received,
         sent,
         fee,
-        confirmation_time: canonical_tx.observed_as.cloned().into(),
+        confirmation_time: canonical_tx.chain_position.cloned().into(),
     }
 }
 

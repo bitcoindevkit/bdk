@@ -1,17 +1,17 @@
 //! Module for structures that store and traverse transactions.
 //!
 //! [`TxGraph`] is a monotone structure that inserts transactions and indexes the spends. The
-//! [`Additions`] structure reports changes of [`TxGraph`] but can also be applied to a
+//! [`ChangeSet`] structure reports changes of [`TxGraph`] but can also be applied to a
 //! [`TxGraph`] as well. Lastly, [`TxDescendants`] is an [`Iterator`] that traverses descendants of
 //! a given transaction.
 //!
 //! Conflicting transactions are allowed to coexist within a [`TxGraph`]. This is useful for
 //! identifying and traversing conflicts and descendants of a given transaction.
 //!
-//! # Previewing and applying changes
+//! # Applying changes
 //!
-//! Methods that either preview or apply changes to [`TxGraph`] will return [`Additions`].
-//! [`Additions`] can be applied back to a [`TxGraph`] or be used to inform persistent storage
+//! Methods that apply changes to [`TxGraph`] will return [`ChangeSet`].
+//! [`ChangeSet`] can be applied back to a [`TxGraph`] or be used to inform persistent storage
 //! of the changes to [`TxGraph`].
 //!
 //! ```
@@ -20,16 +20,14 @@
 //! # use bdk_chain::example_utils::*;
 //! # use bitcoin::Transaction;
 //! # let tx_a = tx_from_hex(RAW_TX_1);
-//! # let tx_b = tx_from_hex(RAW_TX_2);
 //! let mut graph: TxGraph = TxGraph::default();
+//! let mut another_graph: TxGraph = TxGraph::default();
 //!
-//! // preview a transaction insertion (not actually inserted)
-//! let additions = graph.insert_tx_preview(tx_a);
-//! // apply the insertion
-//! graph.apply_additions(additions);
+//! // insert a transaction
+//! let changeset = graph.insert_tx(tx_a);
 //!
-//! // you can also insert a transaction directly
-//! let already_applied_additions = graph.insert_tx(tx_b);
+//! // the resulting changeset can be applied to another tx graph
+//! another_graph.apply_changeset(changeset);
 //! ```
 //!
 //! A [`TxGraph`] can also be updated with another [`TxGraph`].
@@ -44,15 +42,12 @@
 //! let mut graph: TxGraph = TxGraph::default();
 //! let update = TxGraph::new(vec![tx_a, tx_b]);
 //!
-//! // preview additions as the result of the update
-//! let additions = graph.determine_additions(&update);
-//! // apply the additions
-//! graph.apply_additions(additions);
+//! // apply the update graph
+//! let changeset = graph.apply_update(update.clone());
 //!
-//! // we can also apply the update graph directly
-//! // the additions will be empty as we have already applied the same update above
-//! let additions = graph.apply_update(update);
-//! assert!(additions.is_empty());
+//! // if we apply it again, the resulting changeset will be empty
+//! let changeset = graph.apply_update(update);
+//! assert!(changeset.is_empty());
 //! ```
 
 use crate::{
@@ -135,9 +130,9 @@ impl Default for TxNodeInternal {
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct CanonicalTx<'a, T, A> {
     /// How the transaction is observed as (confirmed or unconfirmed).
-    pub observed_as: ChainPosition<&'a A>,
+    pub chain_position: ChainPosition<&'a A>,
     /// The transaction node (as part of the graph).
-    pub node: TxNode<'a, T, A>,
+    pub tx_node: TxNode<'a, T, A>,
 }
 
 impl<A> TxGraph<A> {
@@ -371,15 +366,16 @@ impl<A: Clone + Ord> TxGraph<A> {
         new
     }
 
-    /// Returns the resultant [`Additions`] if the given `txout` is inserted at `outpoint`. Does not
-    /// mutate `self`.
+    /// Inserts the given [`TxOut`] at [`OutPoint`].
     ///
     /// Inserting floating txouts are useful for determining fee/feerate of transactions we care
     /// about.
     ///
-    /// The [`Additions`] result will be empty if the `outpoint` (or a full transaction containing
+    /// The [`ChangeSet`] result will be empty if the `outpoint` (or a full transaction containing
     /// the `outpoint`) already existed in `self`.
-    pub fn insert_txout_preview(&self, outpoint: OutPoint, txout: TxOut) -> Additions<A> {
+    ///
+    /// [`apply_changeset`]: Self::apply_changeset
+    pub fn insert_txout(&mut self, outpoint: OutPoint, txout: TxOut) -> ChangeSet<A> {
         let mut update = Self::default();
         update.txs.insert(
             outpoint.txid,
@@ -389,100 +385,67 @@ impl<A: Clone + Ord> TxGraph<A> {
                 0,
             ),
         );
-        self.determine_additions(&update)
-    }
-
-    /// Inserts the given [`TxOut`] at [`OutPoint`].
-    ///
-    /// This is equivalent to calling [`insert_txout_preview`] and [`apply_additions`] in sequence.
-    ///
-    /// [`insert_txout_preview`]: Self::insert_txout_preview
-    /// [`apply_additions`]: Self::apply_additions
-    pub fn insert_txout(&mut self, outpoint: OutPoint, txout: TxOut) -> Additions<A> {
-        let additions = self.insert_txout_preview(outpoint, txout);
-        self.apply_additions(additions.clone());
-        additions
-    }
-
-    /// Returns the resultant [`Additions`] if the given transaction is inserted. Does not actually
-    /// mutate [`Self`].
-    ///
-    /// The [`Additions`] result will be empty if `tx` already exists in `self`.
-    pub fn insert_tx_preview(&self, tx: Transaction) -> Additions<A> {
-        let mut update = Self::default();
-        update
-            .txs
-            .insert(tx.txid(), (TxNodeInternal::Whole(tx), BTreeSet::new(), 0));
-        self.determine_additions(&update)
+        let changeset = self.determine_changeset(update);
+        self.apply_changeset(changeset.clone());
+        changeset
     }
 
     /// Inserts the given transaction into [`TxGraph`].
     ///
-    /// The [`Additions`] returned will be empty if `tx` already exists.
-    pub fn insert_tx(&mut self, tx: Transaction) -> Additions<A> {
-        let additions = self.insert_tx_preview(tx);
-        self.apply_additions(additions.clone());
-        additions
-    }
-
-    /// Returns the resultant [`Additions`] if the `txid` is set in `anchor`.
-    pub fn insert_anchor_preview(&self, txid: Txid, anchor: A) -> Additions<A> {
+    /// The [`ChangeSet`] returned will be empty if `tx` already exists.
+    pub fn insert_tx(&mut self, tx: Transaction) -> ChangeSet<A> {
         let mut update = Self::default();
-        update.anchors.insert((anchor, txid));
-        self.determine_additions(&update)
+        update
+            .txs
+            .insert(tx.txid(), (TxNodeInternal::Whole(tx), BTreeSet::new(), 0));
+        let changeset = self.determine_changeset(update);
+        self.apply_changeset(changeset.clone());
+        changeset
     }
 
     /// Inserts the given `anchor` into [`TxGraph`].
     ///
-    /// This is equivalent to calling [`insert_anchor_preview`] and [`apply_additions`] in sequence.
-    /// The [`Additions`] returned will be empty if graph already knows that `txid` exists in
+    /// The [`ChangeSet`] returned will be empty if graph already knows that `txid` exists in
     /// `anchor`.
-    ///
-    /// [`insert_anchor_preview`]: Self::insert_anchor_preview
-    /// [`apply_additions`]: Self::apply_additions
-    pub fn insert_anchor(&mut self, txid: Txid, anchor: A) -> Additions<A> {
-        let additions = self.insert_anchor_preview(txid, anchor);
-        self.apply_additions(additions.clone());
-        additions
+    pub fn insert_anchor(&mut self, txid: Txid, anchor: A) -> ChangeSet<A> {
+        let mut update = Self::default();
+        update.anchors.insert((anchor, txid));
+        let changeset = self.determine_changeset(update);
+        self.apply_changeset(changeset.clone());
+        changeset
     }
 
-    /// Returns the resultant [`Additions`] if the `txid` is set to `seen_at`.
+    /// Inserts the given `seen_at` for `txid` into [`TxGraph`].
     ///
     /// Note that [`TxGraph`] only keeps track of the lastest `seen_at`.
-    pub fn insert_seen_at_preview(&self, txid: Txid, seen_at: u64) -> Additions<A> {
+    pub fn insert_seen_at(&mut self, txid: Txid, seen_at: u64) -> ChangeSet<A> {
         let mut update = Self::default();
         let (_, _, update_last_seen) = update.txs.entry(txid).or_default();
         *update_last_seen = seen_at;
-        self.determine_additions(&update)
-    }
-
-    /// Inserts the given `seen_at` into [`TxGraph`].
-    ///
-    /// This is equivalent to calling [`insert_seen_at_preview`] and [`apply_additions`] in
-    /// sequence.
-    ///
-    /// [`insert_seen_at_preview`]: Self::insert_seen_at_preview
-    /// [`apply_additions`]: Self::apply_additions
-    pub fn insert_seen_at(&mut self, txid: Txid, seen_at: u64) -> Additions<A> {
-        let additions = self.insert_seen_at_preview(txid, seen_at);
-        self.apply_additions(additions.clone());
-        additions
+        let changeset = self.determine_changeset(update);
+        self.apply_changeset(changeset.clone());
+        changeset
     }
 
     /// Extends this graph with another so that `self` becomes the union of the two sets of
     /// transactions.
     ///
-    /// The returned [`Additions`] is the set difference between `update` and `self` (transactions that
+    /// The returned [`ChangeSet`] is the set difference between `update` and `self` (transactions that
     /// exist in `update` but not in `self`).
-    pub fn apply_update(&mut self, update: TxGraph<A>) -> Additions<A> {
-        let additions = self.determine_additions(&update);
-        self.apply_additions(additions.clone());
-        additions
+    pub fn apply_update(&mut self, update: TxGraph<A>) -> ChangeSet<A> {
+        let changeset = self.determine_changeset(update);
+        self.apply_changeset(changeset.clone());
+        changeset
     }
 
-    /// Applies [`Additions`] to [`TxGraph`].
-    pub fn apply_additions(&mut self, additions: Additions<A>) {
-        for tx in additions.txs {
+    /// Determines the [`ChangeSet`] between `self` and an empty [`TxGraph`].
+    pub fn initial_changeset(&self) -> ChangeSet<A> {
+        Self::default().determine_changeset(self.clone())
+    }
+
+    /// Applies [`ChangeSet`] to [`TxGraph`].
+    pub fn apply_changeset(&mut self, changeset: ChangeSet<A>) {
+        for tx in changeset.txs {
             let txid = tx.txid();
 
             tx.input
@@ -513,7 +476,7 @@ impl<A: Clone + Ord> TxGraph<A> {
             }
         }
 
-        for (outpoint, txout) in additions.txouts {
+        for (outpoint, txout) in changeset.txouts {
             let tx_entry = self
                 .txs
                 .entry(outpoint.txid)
@@ -528,14 +491,14 @@ impl<A: Clone + Ord> TxGraph<A> {
             }
         }
 
-        for (anchor, txid) in additions.anchors {
+        for (anchor, txid) in changeset.anchors {
             if self.anchors.insert((anchor.clone(), txid)) {
                 let (_, anchors, _) = self.txs.entry(txid).or_insert_with(Default::default);
                 anchors.insert(anchor);
             }
         }
 
-        for (txid, new_last_seen) in additions.last_seen {
+        for (txid, new_last_seen) in changeset.last_seen {
             let (_, _, last_seen) = self.txs.entry(txid).or_insert_with(Default::default);
             if new_last_seen > *last_seen {
                 *last_seen = new_last_seen;
@@ -543,21 +506,21 @@ impl<A: Clone + Ord> TxGraph<A> {
         }
     }
 
-    /// Previews the resultant [`Additions`] when [`Self`] is updated against the `update` graph.
+    /// Previews the resultant [`ChangeSet`] when [`Self`] is updated against the `update` graph.
     ///
-    /// The [`Additions`] would be the set difference between `update` and `self` (transactions that
+    /// The [`ChangeSet`] would be the set difference between `update` and `self` (transactions that
     /// exist in `update` but not in `self`).
-    pub fn determine_additions(&self, update: &TxGraph<A>) -> Additions<A> {
-        let mut additions = Additions::default();
+    pub(crate) fn determine_changeset(&self, update: TxGraph<A>) -> ChangeSet<A> {
+        let mut changeset = ChangeSet::default();
 
         for (&txid, (update_tx_node, _, update_last_seen)) in &update.txs {
             let prev_last_seen: u64 = match (self.txs.get(&txid), update_tx_node) {
                 (None, TxNodeInternal::Whole(update_tx)) => {
-                    additions.txs.insert(update_tx.clone());
+                    changeset.txs.insert(update_tx.clone());
                     0
                 }
                 (None, TxNodeInternal::Partial(update_txos)) => {
-                    additions.txouts.extend(
+                    changeset.txouts.extend(
                         update_txos
                             .iter()
                             .map(|(&vout, txo)| (OutPoint::new(txid, vout), txo.clone())),
@@ -569,14 +532,14 @@ impl<A: Clone + Ord> TxGraph<A> {
                     Some((TxNodeInternal::Partial(_), _, last_seen)),
                     TxNodeInternal::Whole(update_tx),
                 ) => {
-                    additions.txs.insert(update_tx.clone());
+                    changeset.txs.insert(update_tx.clone());
                     *last_seen
                 }
                 (
                     Some((TxNodeInternal::Partial(txos), _, last_seen)),
                     TxNodeInternal::Partial(update_txos),
                 ) => {
-                    additions.txouts.extend(
+                    changeset.txouts.extend(
                         update_txos
                             .iter()
                             .filter(|(vout, _)| !txos.contains_key(*vout))
@@ -587,13 +550,13 @@ impl<A: Clone + Ord> TxGraph<A> {
             };
 
             if *update_last_seen > prev_last_seen {
-                additions.last_seen.insert(txid, *update_last_seen);
+                changeset.last_seen.insert(txid, *update_last_seen);
             }
         }
 
-        additions.anchors = update.anchors.difference(&self.anchors).cloned().collect();
+        changeset.anchors = update.anchors.difference(&self.anchors).cloned().collect();
 
-        additions
+        changeset
     }
 }
 
@@ -804,8 +767,8 @@ impl<A: Anchor> TxGraph<A> {
             self.try_get_chain_position(chain, chain_tip, tx.txid)
                 .map(|v| {
                     v.map(|observed_in| CanonicalTx {
-                        observed_as: observed_in,
-                        node: tx,
+                        chain_position: observed_in,
+                        tx_node: tx,
                     })
                 })
                 .transpose()
@@ -1026,7 +989,7 @@ impl<A: Anchor> TxGraph<A> {
 
 /// A structure that represents changes to a [`TxGraph`].
 ///
-/// It is named "additions" because [`TxGraph`] is monotone, so transactions can only be added and
+/// Since [`TxGraph`] is monotone "changeset" can only contain transactions to be added and
 /// not removed.
 ///
 /// Refer to [module-level documentation] for more.
@@ -1045,7 +1008,7 @@ impl<A: Anchor> TxGraph<A> {
     )
 )]
 #[must_use]
-pub struct Additions<A = ()> {
+pub struct ChangeSet<A = ()> {
     /// Added transactions.
     pub txs: BTreeSet<Transaction>,
     /// Added txouts.
@@ -1056,7 +1019,7 @@ pub struct Additions<A = ()> {
     pub last_seen: BTreeMap<Txid, u64>,
 }
 
-impl<A> Default for Additions<A> {
+impl<A> Default for ChangeSet<A> {
     fn default() -> Self {
         Self {
             txs: Default::default(),
@@ -1067,13 +1030,13 @@ impl<A> Default for Additions<A> {
     }
 }
 
-impl<A> Additions<A> {
-    /// Returns true if the [`Additions`] is empty (no transactions or txouts).
+impl<A> ChangeSet<A> {
+    /// Returns true if the [`ChangeSet`] is empty (no transactions or txouts).
     pub fn is_empty(&self) -> bool {
         self.txs.is_empty() && self.txouts.is_empty()
     }
 
-    /// Iterates over all outpoints contained within [`Additions`].
+    /// Iterates over all outpoints contained within [`ChangeSet`].
     pub fn txouts(&self) -> impl Iterator<Item = (OutPoint, &TxOut)> {
         self.txs
             .iter()
@@ -1087,7 +1050,7 @@ impl<A> Additions<A> {
     }
 }
 
-impl<A: Ord> Append for Additions<A> {
+impl<A: Ord> Append for ChangeSet<A> {
     fn append(&mut self, mut other: Self) {
         self.txs.append(&mut other.txs);
         self.txouts.append(&mut other.txouts);
@@ -1117,7 +1080,7 @@ impl<A> AsRef<TxGraph<A>> for TxGraph<A> {
     }
 }
 
-impl<A> ForEachTxOut for Additions<A> {
+impl<A> ForEachTxOut for ChangeSet<A> {
     fn for_each_txout(&self, f: impl FnMut((OutPoint, &TxOut))) {
         self.txouts().for_each(f)
     }

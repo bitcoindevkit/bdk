@@ -54,19 +54,21 @@ impl<I> Default for SpkTxOutIndex<I> {
 }
 
 impl<I: Clone + Ord> Indexer for SpkTxOutIndex<I> {
-    type Additions = ();
+    type ChangeSet = ();
 
-    fn index_txout(&mut self, outpoint: OutPoint, txout: &TxOut) -> Self::Additions {
+    fn index_txout(&mut self, outpoint: OutPoint, txout: &TxOut) -> Self::ChangeSet {
         self.scan_txout(outpoint, txout);
         Default::default()
     }
 
-    fn index_tx(&mut self, tx: &Transaction) -> Self::Additions {
+    fn index_tx(&mut self, tx: &Transaction) -> Self::ChangeSet {
         self.scan(tx);
         Default::default()
     }
 
-    fn apply_additions(&mut self, _additions: Self::Additions) {
+    fn initial_changeset(&self) -> Self::ChangeSet {}
+
+    fn apply_changeset(&mut self, _changeset: Self::ChangeSet) {
         // This applies nothing.
     }
 

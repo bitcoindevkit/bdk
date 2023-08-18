@@ -3,7 +3,7 @@ mod common;
 use bdk_chain::{
     collections::*,
     local_chain::LocalChain,
-    tx_graph::{Additions, TxGraph},
+    tx_graph::{ChangeSet, TxGraph},
     Anchor, Append, BlockId, ChainPosition, ConfirmationHeightAnchor,
 };
 use bitcoin::{
@@ -70,7 +70,7 @@ fn insert_txouts() {
         for (outpoint, txout) in &original_ops {
             assert_eq!(
                 graph.insert_txout(*outpoint, txout.clone()),
-                Additions {
+                ChangeSet {
                     txouts: [(*outpoint, txout.clone())].into(),
                     ..Default::default()
                 }
@@ -86,7 +86,7 @@ fn insert_txouts() {
             // Insert partials transactions
             assert_eq!(
                 graph.insert_txout(*outpoint, txout.clone()),
-                Additions {
+                ChangeSet {
                     txouts: [(*outpoint, txout.clone())].into(),
                     ..Default::default()
                 }
@@ -94,7 +94,7 @@ fn insert_txouts() {
             // Mark them unconfirmed.
             assert_eq!(
                 graph.insert_anchor(outpoint.txid, unconf_anchor),
-                Additions {
+                ChangeSet {
                     txs: [].into(),
                     txouts: [].into(),
                     anchors: [(unconf_anchor, outpoint.txid)].into(),
@@ -104,7 +104,7 @@ fn insert_txouts() {
             // Mark them last seen at.
             assert_eq!(
                 graph.insert_seen_at(outpoint.txid, 1000000),
-                Additions {
+                ChangeSet {
                     txs: [].into(),
                     txouts: [].into(),
                     anchors: [].into(),
@@ -115,7 +115,7 @@ fn insert_txouts() {
         // Insert the full transaction
         assert_eq!(
             graph.insert_tx(update_txs.clone()),
-            Additions {
+            ChangeSet {
                 txs: [update_txs.clone()].into(),
                 ..Default::default()
             }
@@ -124,7 +124,7 @@ fn insert_txouts() {
         // Mark it as confirmed.
         assert_eq!(
             graph.insert_anchor(update_txs.txid(), conf_anchor),
-            Additions {
+            ChangeSet {
                 txs: [].into(),
                 txouts: [].into(),
                 anchors: [(conf_anchor, update_txs.txid())].into(),
@@ -135,20 +135,20 @@ fn insert_txouts() {
     };
 
     // Check the resulting addition.
-    let additions = graph.determine_additions(&update);
+    let changeset = graph.apply_update(update);
 
     assert_eq!(
-        additions,
-        Additions {
+        changeset,
+        ChangeSet {
             txs: [update_txs.clone()].into(),
-            txouts: update_ops.into(),
+            txouts: update_ops.clone().into(),
             anchors: [(conf_anchor, update_txs.txid()), (unconf_anchor, h!("tx2"))].into(),
             last_seen: [(h!("tx2"), 1000000)].into()
         }
     );
 
-    // Apply addition and check the new graph counts.
-    graph.apply_additions(additions);
+    // Apply changeset and check the new graph counts.
+    graph.apply_changeset(changeset);
     assert_eq!(graph.all_txouts().count(), 4);
     assert_eq!(graph.full_txs().count(), 1);
     assert_eq!(graph.floating_txouts().count(), 3);
@@ -185,6 +185,17 @@ fn insert_txouts() {
             }
         )]
         .into()
+    );
+
+    // Check that the initial_changeset is correct
+    assert_eq!(
+        graph.initial_changeset(),
+        ChangeSet {
+            txs: [update_txs.clone()].into(),
+            txouts: update_ops.into_iter().chain(original_ops).collect(),
+            anchors: [(conf_anchor, update_txs.txid()), (unconf_anchor, h!("tx2"))].into(),
+            last_seen: [(h!("tx2"), 1000000)].into()
+        }
     );
 }
 
@@ -299,7 +310,7 @@ fn insert_tx_displaces_txouts() {
         },
     );
 
-    let _additions = tx_graph.insert_tx(tx.clone());
+    let _changeset = tx_graph.insert_tx(tx.clone());
 
     assert_eq!(
         tx_graph
@@ -333,7 +344,7 @@ fn insert_txout_does_not_displace_tx() {
         }],
     };
 
-    let _additions = tx_graph.insert_tx(tx.clone());
+    let _changeset = tx_graph.insert_tx(tx.clone());
 
     let _ = tx_graph.insert_txout(
         OutPoint {
@@ -794,7 +805,7 @@ fn test_chain_spends() {
 
 /// Ensure that `last_seen` values only increase during [`Append::append`].
 #[test]
-fn test_additions_last_seen_append() {
+fn test_changeset_last_seen_append() {
     let txid: Txid = h!("test txid");
 
     let test_cases: &[(Option<u64>, Option<u64>)] = &[
@@ -806,11 +817,11 @@ fn test_additions_last_seen_append() {
     ];
 
     for (original_ls, update_ls) in test_cases {
-        let mut original = Additions::<()> {
+        let mut original = ChangeSet::<()> {
             last_seen: original_ls.map(|ls| (txid, ls)).into_iter().collect(),
             ..Default::default()
         };
-        let update = Additions::<()> {
+        let update = ChangeSet::<()> {
             last_seen: update_ls.map(|ls| (txid, ls)).into_iter().collect(),
             ..Default::default()
         };

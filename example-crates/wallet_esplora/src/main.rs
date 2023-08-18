@@ -7,7 +7,7 @@ use std::{io::Write, str::FromStr};
 
 use bdk::{
     bitcoin::{Address, Network},
-    chain::keychain::LocalUpdate,
+    chain::keychain::WalletUpdate,
     wallet::AddressIndex,
     SignOptions, Wallet,
 };
@@ -58,10 +58,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         client.update_tx_graph(keychain_spks, None, None, STOP_GAP, PARALLEL_REQUESTS)?;
     let missing_heights = wallet.tx_graph().missing_heights(wallet.local_chain());
     let chain_update = client.update_local_chain(prev_tip, missing_heights)?;
-    let update = LocalUpdate {
+    let update = WalletUpdate {
         last_active_indices,
         graph: update_graph,
-        ..LocalUpdate::new(chain_update)
+        ..WalletUpdate::new(chain_update)
     };
 
     wallet.apply_update(update)?;

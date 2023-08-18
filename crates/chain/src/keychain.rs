@@ -11,8 +11,7 @@
 //! [`SpkTxOutIndex`]: crate::SpkTxOutIndex
 
 use crate::{
-    collections::BTreeMap, indexed_tx_graph::IndexedAdditions, local_chain, tx_graph::TxGraph,
-    Anchor, Append,
+    collections::BTreeMap, indexed_tx_graph, local_chain, tx_graph::TxGraph, Anchor, Append,
 };
 
 #[cfg(feature = "miniscript")]
@@ -21,12 +20,13 @@ mod txout_index;
 pub use txout_index::*;
 
 /// Represents updates to the derivation index of a [`KeychainTxOutIndex`].
+/// It maps each keychain `K` to its last revealed index.
 ///
-/// It can be applied to [`KeychainTxOutIndex`] with [`apply_additions`]. [`DerivationAdditions] are
+/// It can be applied to [`KeychainTxOutIndex`] with [`apply_changeset`]. [`ChangeSet] are
 /// monotone in that they will never decrease the revealed derivation index.
 ///
 /// [`KeychainTxOutIndex`]: crate::keychain::KeychainTxOutIndex
-/// [`apply_additions`]: crate::keychain::KeychainTxOutIndex::apply_additions
+/// [`apply_changeset`]: crate::keychain::KeychainTxOutIndex::apply_changeset
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(
     feature = "serde",
@@ -40,17 +40,17 @@ pub use txout_index::*;
     )
 )]
 #[must_use]
-pub struct DerivationAdditions<K>(pub BTreeMap<K, u32>);
+pub struct ChangeSet<K>(pub BTreeMap<K, u32>);
 
-impl<K> DerivationAdditions<K> {
+impl<K> ChangeSet<K> {
     /// Get the inner map of the keychain to its new derivation index.
     pub fn as_inner(&self) -> &BTreeMap<K, u32> {
         &self.0
     }
 }
 
-impl<K: Ord> Append for DerivationAdditions<K> {
-    /// Append another [`DerivationAdditions`] into self.
+impl<K: Ord> Append for ChangeSet<K> {
+    /// Append another [`ChangeSet`] into self.
     ///
     /// If the keychain already exists, increase the index when the other's index > self's index.
     /// If the keychain did not exist, append the new keychain.
@@ -64,19 +64,19 @@ impl<K: Ord> Append for DerivationAdditions<K> {
         self.0.append(&mut other.0);
     }
 
-    /// Returns whether the additions are empty.
+    /// Returns whether the changeset are empty.
     fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
 }
 
-impl<K> Default for DerivationAdditions<K> {
+impl<K> Default for ChangeSet<K> {
     fn default() -> Self {
         Self(Default::default())
     }
 }
 
-impl<K> AsRef<BTreeMap<K, u32>> for DerivationAdditions<K> {
+impl<K> AsRef<BTreeMap<K, u32>> for ChangeSet<K> {
     fn as_ref(&self) -> &BTreeMap<K, u32> {
         &self.0
     }
@@ -86,7 +86,7 @@ impl<K> AsRef<BTreeMap<K, u32>> for DerivationAdditions<K> {
 ///
 /// [`LocalChain`]: local_chain::LocalChain
 #[derive(Debug, Clone)]
-pub struct LocalUpdate<K, A> {
+pub struct WalletUpdate<K, A> {
     /// Contains the last active derivation indices per keychain (`K`), which is used to update the
     /// [`KeychainTxOutIndex`].
     pub last_active_indices: BTreeMap<K, u32>,
@@ -100,10 +100,8 @@ pub struct LocalUpdate<K, A> {
     pub chain: local_chain::Update,
 }
 
-impl<K, A> LocalUpdate<K, A> {
-    /// Construct a [`LocalUpdate`] with a given [`local_chain::Update`].
-    ///
-    /// [`CheckPoint`]: local_chain::CheckPoint
+impl<K, A> WalletUpdate<K, A> {
+    /// Construct a [`WalletUpdate`] with a given [`local_chain::Update`].
     pub fn new(chain_update: local_chain::Update) -> Self {
         Self {
             last_active_indices: BTreeMap::new(),
@@ -113,7 +111,7 @@ impl<K, A> LocalUpdate<K, A> {
     }
 }
 
-/// A structure that records the corresponding changes as result of applying an [`LocalUpdate`].
+/// A structure that records the corresponding changes as result of applying an [`WalletUpdate`].
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(
     feature = "serde",
@@ -126,51 +124,51 @@ impl<K, A> LocalUpdate<K, A> {
         )
     )
 )]
-pub struct LocalChangeSet<K, A> {
+pub struct WalletChangeSet<K, A> {
     /// Changes to the [`LocalChain`].
     ///
     /// [`LocalChain`]: local_chain::LocalChain
-    pub chain_changeset: local_chain::ChangeSet,
+    pub chain: local_chain::ChangeSet,
 
-    /// Additions to [`IndexedTxGraph`].
+    /// ChangeSet to [`IndexedTxGraph`].
     ///
     /// [`IndexedTxGraph`]: crate::indexed_tx_graph::IndexedTxGraph
-    pub indexed_additions: IndexedAdditions<A, DerivationAdditions<K>>,
+    pub index_tx_graph: indexed_tx_graph::ChangeSet<A, ChangeSet<K>>,
 }
 
-impl<K, A> Default for LocalChangeSet<K, A> {
+impl<K, A> Default for WalletChangeSet<K, A> {
     fn default() -> Self {
         Self {
-            chain_changeset: Default::default(),
-            indexed_additions: Default::default(),
+            chain: Default::default(),
+            index_tx_graph: Default::default(),
         }
     }
 }
 
-impl<K: Ord, A: Anchor> Append for LocalChangeSet<K, A> {
+impl<K: Ord, A: Anchor> Append for WalletChangeSet<K, A> {
     fn append(&mut self, other: Self) {
-        Append::append(&mut self.chain_changeset, other.chain_changeset);
-        Append::append(&mut self.indexed_additions, other.indexed_additions);
+        Append::append(&mut self.chain, other.chain);
+        Append::append(&mut self.index_tx_graph, other.index_tx_graph);
     }
 
     fn is_empty(&self) -> bool {
-        self.chain_changeset.is_empty() && self.indexed_additions.is_empty()
+        self.chain.is_empty() && self.index_tx_graph.is_empty()
     }
 }
 
-impl<K, A> From<local_chain::ChangeSet> for LocalChangeSet<K, A> {
-    fn from(chain_changeset: local_chain::ChangeSet) -> Self {
+impl<K, A> From<local_chain::ChangeSet> for WalletChangeSet<K, A> {
+    fn from(chain: local_chain::ChangeSet) -> Self {
         Self {
-            chain_changeset,
+            chain,
             ..Default::default()
         }
     }
 }
 
-impl<K, A> From<IndexedAdditions<A, DerivationAdditions<K>>> for LocalChangeSet<K, A> {
-    fn from(indexed_additions: IndexedAdditions<A, DerivationAdditions<K>>) -> Self {
+impl<K, A> From<indexed_tx_graph::ChangeSet<A, ChangeSet<K>>> for WalletChangeSet<K, A> {
+    fn from(index_tx_graph: indexed_tx_graph::ChangeSet<A, ChangeSet<K>>) -> Self {
         Self {
-            indexed_additions,
+            index_tx_graph,
             ..Default::default()
         }
     }
@@ -254,8 +252,8 @@ mod test {
         lhs_di.insert(Keychain::Three, 3);
         rhs_di.insert(Keychain::Four, 4);
 
-        let mut lhs = DerivationAdditions(lhs_di);
-        let rhs = DerivationAdditions(rhs_di);
+        let mut lhs = ChangeSet(lhs_di);
+        let rhs = ChangeSet(rhs_di);
         lhs.append(rhs);
 
         // Exiting index doesn't update if the new index in `other` is lower than `self`.

@@ -1571,7 +1571,7 @@ fn test_bump_fee_remove_output_manually_selected_only() {
                 .transactions()
                 .last()
                 .unwrap()
-                .observed_as
+                .chain_position
                 .cloned()
                 .into(),
         )
@@ -1621,7 +1621,7 @@ fn test_bump_fee_add_input() {
         .transactions()
         .last()
         .unwrap()
-        .observed_as
+        .chain_position
         .cloned()
         .into();
     wallet.insert_tx(init_tx, pos).unwrap();
