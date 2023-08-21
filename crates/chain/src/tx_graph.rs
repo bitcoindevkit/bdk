@@ -52,7 +52,7 @@
 
 use crate::{
     collections::*, keychain::Balance, local_chain::LocalChain, Anchor, Append, BlockId,
-    ChainOracle, ChainPosition, ForEachTxOut, FullTxOut,
+    ChainOracle, ChainPosition, FullTxOut,
 };
 use alloc::vec::Vec;
 use bitcoin::{OutPoint, Script, Transaction, TxOut, Txid};
@@ -1069,18 +1069,6 @@ impl<A: Ord> Append for ChangeSet<A> {
 impl<A> AsRef<TxGraph<A>> for TxGraph<A> {
     fn as_ref(&self) -> &TxGraph<A> {
         self
-    }
-}
-
-impl<A> ForEachTxOut for ChangeSet<A> {
-    fn for_each_txout(&self, f: impl FnMut((OutPoint, &TxOut))) {
-        self.txouts().for_each(f)
-    }
-}
-
-impl<A> ForEachTxOut for TxGraph<A> {
-    fn for_each_txout(&self, f: impl FnMut((OutPoint, &TxOut))) {
-        self.all_txouts().for_each(f)
     }
 }
 
