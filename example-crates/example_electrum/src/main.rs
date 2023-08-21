@@ -8,7 +8,7 @@ use bdk_chain::{
     bitcoin::{Address, Network, OutPoint, ScriptBuf, Txid},
     indexed_tx_graph::{self, IndexedTxGraph},
     keychain::WalletChangeSet,
-    local_chain::LocalChain,
+    local_chain::{self, LocalChain},
     Append, ConfirmationHeightAnchor,
 };
 use bdk_electrum::{
@@ -269,25 +269,27 @@ fn main() -> anyhow::Result<()> {
         .expect("must get time")
         .as_secs();
 
-    let final_update = response.finalize(&client, Some(now), missing_txids)?;
+    let (graph_update, keychain_update, update_tip) =
+        response.finalize(&client, Some(now), missing_txids)?;
 
     let db_changeset = {
         let mut chain = chain.lock().unwrap();
         let mut graph = graph.lock().unwrap();
 
-        let chain = chain.apply_update(final_update.chain)?;
+        let chain = chain.apply_update(local_chain::Update {
+            tip: update_tip,
+            introduce_older_blocks: true,
+        })?;
 
         let indexed_tx_graph = {
             let mut changeset =
                 indexed_tx_graph::ChangeSet::<ConfirmationHeightAnchor, _>::default();
-            let (_, indexer) = graph
-                .index
-                .reveal_to_target_multi(&final_update.last_active_indices);
+            let (_, indexer) = graph.index.reveal_to_target_multi(&keychain_update);
             changeset.append(indexed_tx_graph::ChangeSet {
                 indexer,
                 ..Default::default()
             });
-            changeset.append(graph.apply_update(final_update.graph));
+            changeset.append(graph.apply_update(graph_update));
             changeset
         };
 
