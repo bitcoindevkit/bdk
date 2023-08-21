@@ -9,6 +9,7 @@ use std::str::FromStr;
 use bdk::bitcoin::Address;
 use bdk::SignOptions;
 use bdk::{bitcoin::Network, Wallet};
+use bdk_electrum::bdk_chain::{keychain::WalletUpdate, local_chain};
 use bdk_electrum::electrum_client::{self, ElectrumApi};
 use bdk_electrum::ElectrumExt;
 use bdk_file_store::Store;
@@ -57,9 +58,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!();
 
     let missing = electrum_update.missing_full_txs(wallet.as_ref());
-    let update = electrum_update.finalize_as_confirmation_time(&client, None, missing)?;
+    let (graph_update, keychain_update, update_tip) =
+        electrum_update.finalize_as_confirmation_time(&client, None, missing)?;
 
-    wallet.apply_update(update)?;
+    let wallet_update = WalletUpdate {
+        last_active_indices: keychain_update,
+        graph: graph_update,
+        chain: local_chain::Update {
+            tip: update_tip,
+            introduce_older_blocks: true,
+        },
+    };
+    wallet.apply_update(wallet_update)?;
     wallet.commit()?;
 
     let balance = wallet.get_balance();
