@@ -3,7 +3,7 @@ use crate::{
     indexed_tx_graph::Indexer,
     miniscript::{Descriptor, DescriptorPublicKey},
     spk_iter::BIP32_MAX_INDEX,
-    ForEachTxOut, SpkIterator, SpkTxOutIndex,
+    SpkIterator, SpkTxOutIndex,
 };
 use alloc::vec::Vec;
 use bitcoin::{OutPoint, Script, TxOut};
@@ -112,7 +112,7 @@ impl<K: Clone + Ord + Debug> Indexer for KeychainTxOutIndex<K> {
 }
 
 impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
-    /// Scans an object for relevant outpoints, which are stored and indexed internally.
+    /// Scans a transaction for relevant outpoints, which are stored and indexed internally.
     ///
     /// If the matched script pubkey is part of the lookahead, the last stored index is updated for
     /// the script pubkey's keychain and the [`super::ChangeSet`] returned will reflect the
@@ -124,13 +124,11 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     /// your txouts.
     /// 2. When getting new data from the chain, you usually scan it before incorporating it into
     /// your chain state (i.e., `SparseChain`, `ChainGraph`).
-    ///
-    /// See [`ForEachTxout`] for the types that support this.
-    ///
-    /// [`ForEachTxout`]: crate::ForEachTxOut
-    pub fn scan(&mut self, txouts: &impl ForEachTxOut) -> super::ChangeSet<K> {
+    pub fn scan(&mut self, tx: &bitcoin::Transaction) -> super::ChangeSet<K> {
         let mut changeset = super::ChangeSet::<K>::default();
-        txouts.for_each_txout(|(op, txout)| changeset.append(self.scan_txout(op, txout)));
+        for (op, txout) in tx.output.iter().enumerate() {
+            changeset.append(self.scan_txout(OutPoint::new(tx.txid(), op as u32), txout));
+        }
         changeset
     }
 

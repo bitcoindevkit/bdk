@@ -3,7 +3,6 @@ use core::ops::RangeBounds;
 use crate::{
     collections::{hash_map::Entry, BTreeMap, BTreeSet, HashMap},
     indexed_tx_graph::Indexer,
-    ForEachTxOut,
 };
 use bitcoin::{self, OutPoint, Script, ScriptBuf, Transaction, TxOut, Txid};
 
@@ -77,41 +76,23 @@ impl<I: Clone + Ord> Indexer for SpkTxOutIndex<I> {
     }
 }
 
-/// This macro is used instead of a member function of `SpkTxOutIndex`, which would result in a
-/// compiler error[E0521]: "borrowed data escapes out of closure" when we attempt to take a
-/// reference out of the `ForEachTxOut` closure during scanning.
-macro_rules! scan_txout {
-    ($self:ident, $op:expr, $txout:expr) => {{
-        let spk_i = $self.spk_indices.get(&$txout.script_pubkey);
-        if let Some(spk_i) = spk_i {
-            $self.txouts.insert($op, (spk_i.clone(), $txout.clone()));
-            $self.spk_txouts.insert((spk_i.clone(), $op));
-            $self.unused.remove(&spk_i);
-        }
-        spk_i
-    }};
-}
-
 impl<I: Clone + Ord> SpkTxOutIndex<I> {
-    /// Scans an object containing many txouts.
+    /// Scans a transaction containing many txouts.
     ///
     /// Typically, this is used in two situations:
     ///
     /// 1. After loading transaction data from the disk, you may scan over all the txouts to restore all
     /// your txouts.
     /// 2. When getting new data from the chain, you usually scan it before incorporating it into your chain state.
-    ///
-    /// See [`ForEachTxout`] for the types that support this.
-    ///
-    /// [`ForEachTxout`]: crate::ForEachTxOut
-    pub fn scan(&mut self, txouts: &impl ForEachTxOut) -> BTreeSet<I> {
+    pub fn scan(&mut self, tx: &bitcoin::Transaction) -> BTreeSet<I> {
         let mut scanned_indices = BTreeSet::new();
 
-        txouts.for_each_txout(|(op, txout)| {
-            if let Some(spk_i) = scan_txout!(self, op, txout) {
+        for (i, txout) in tx.output.iter().enumerate() {
+            let op = OutPoint::new(tx.txid(), i as u32);
+            if let Some(spk_i) = self.scan_txout(op, txout) {
                 scanned_indices.insert(spk_i.clone());
             }
-        });
+        }
 
         scanned_indices
     }
@@ -119,7 +100,13 @@ impl<I: Clone + Ord> SpkTxOutIndex<I> {
     /// Scan a single `TxOut` for a matching script pubkey and returns the index that matches the
     /// script pubkey (if any).
     pub fn scan_txout(&mut self, op: OutPoint, txout: &TxOut) -> Option<&I> {
-        scan_txout!(self, op, txout)
+        let spk_i = self.spk_indices.get(&txout.script_pubkey);
+        if let Some(spk_i) = spk_i {
+            self.txouts.insert(op, (spk_i.clone(), txout.clone()));
+            self.spk_txouts.insert((spk_i.clone(), op));
+            self.unused.remove(spk_i);
+        }
+        spk_i
     }
 
     /// Get a reference to the set of indexed outpoints.
