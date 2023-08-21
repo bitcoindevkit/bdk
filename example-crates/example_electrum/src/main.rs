@@ -7,7 +7,7 @@ use std::{
 use bdk_chain::{
     bitcoin::{Address, Network, OutPoint, ScriptBuf, Txid},
     indexed_tx_graph::{self, IndexedTxGraph},
-    keychain::WalletChangeSet,
+    keychain,
     local_chain::{self, LocalChain},
     Append, ConfirmationHeightAnchor,
 };
@@ -60,7 +60,10 @@ pub struct ScanOptions {
     pub batch_size: usize,
 }
 
-type ChangeSet = WalletChangeSet<Keychain, ConfirmationHeightAnchor>;
+type ChangeSet = (
+    local_chain::ChangeSet,
+    indexed_tx_graph::ChangeSet<ConfirmationHeightAnchor, keychain::ChangeSet<Keychain>>,
+);
 
 fn main() -> anyhow::Result<()> {
     let (args, keymap, index, db, init_changeset) =
@@ -68,11 +71,11 @@ fn main() -> anyhow::Result<()> {
 
     let graph = Mutex::new({
         let mut graph = IndexedTxGraph::new(index);
-        graph.apply_changeset(init_changeset.index_tx_graph);
+        graph.apply_changeset(init_changeset.1);
         graph
     });
 
-    let chain = Mutex::new(LocalChain::from_changeset(init_changeset.chain));
+    let chain = Mutex::new(LocalChain::from_changeset(init_changeset.0));
 
     let electrum_url = match args.network {
         Network::Bitcoin => "ssl://electrum.blockstream.info:50002",
@@ -293,10 +296,7 @@ fn main() -> anyhow::Result<()> {
             changeset
         };
 
-        ChangeSet {
-            index_tx_graph,
-            chain,
-        }
+        (chain, index_tx_graph)
     };
 
     let mut db = db.lock().unwrap();
