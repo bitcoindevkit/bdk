@@ -22,7 +22,7 @@ use alloc::{
 pub use bdk_chain::keychain::Balance;
 use bdk_chain::{
     indexed_tx_graph,
-    keychain::{KeychainTxOutIndex, WalletChangeSet, WalletUpdate},
+    keychain::{KeychainTxOutIndex, WalletChangeSet},
     local_chain::{self, CannotConnectError, CheckPoint, CheckPointIter, LocalChain},
     tx_graph::{CanonicalTx, TxGraph},
     Append, BlockId, ChainPosition, ConfirmationTime, ConfirmationTimeAnchor, FullTxOut,
@@ -93,6 +93,35 @@ pub struct Wallet<D = ()> {
     persist: Persist<D, ChangeSet>,
     network: Network,
     secp: SecpCtx,
+}
+
+/// A structure to update [`KeychainTxOutIndex`], [`TxGraph`] and [`LocalChain`] atomically.
+///
+/// [`LocalChain`]: local_chain::LocalChain
+#[derive(Debug, Clone)]
+pub struct WalletUpdate<K, A> {
+    /// Contains the last active derivation indices per keychain (`K`), which is used to update the
+    /// [`KeychainTxOutIndex`].
+    pub last_active_indices: BTreeMap<K, u32>,
+
+    /// Update for the [`TxGraph`].
+    pub graph: TxGraph<A>,
+
+    /// Update for the [`LocalChain`].
+    ///
+    /// [`LocalChain`]: local_chain::LocalChain
+    pub chain: local_chain::Update,
+}
+
+impl<K, A> WalletUpdate<K, A> {
+    /// Construct a [`WalletUpdate`] with a given [`local_chain::Update`].
+    pub fn new(chain_update: local_chain::Update) -> Self {
+        Self {
+            last_active_indices: BTreeMap::new(),
+            graph: TxGraph::default(),
+            chain: chain_update,
+        }
+    }
 }
 
 /// The update to a [`Wallet`] used in [`Wallet::apply_update`]. This is usually returned from blockchain data sources.
