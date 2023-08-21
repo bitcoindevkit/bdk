@@ -6,9 +6,9 @@ use std::{
 
 use bdk_chain::{
     bitcoin::{Address, Network, OutPoint, ScriptBuf, Txid},
-    indexed_tx_graph::IndexedTxGraph,
-    keychain::WalletChangeSet,
-    local_chain::{CheckPoint, LocalChain},
+    indexed_tx_graph::{self, IndexedTxGraph},
+    keychain,
+    local_chain::{self, CheckPoint, LocalChain},
     Append, ConfirmationTimeAnchor,
 };
 
@@ -22,6 +22,11 @@ use example_cli::{
 
 const DB_MAGIC: &[u8] = b"bdk_example_esplora";
 const DB_PATH: &str = ".bdk_esplora_example.db";
+
+type ChangeSet = (
+    local_chain::ChangeSet,
+    indexed_tx_graph::ChangeSet<ConfirmationTimeAnchor, keychain::ChangeSet<Keychain>>,
+);
 
 #[derive(Subcommand, Debug, Clone)]
 enum EsploraCommands {
@@ -60,22 +65,22 @@ pub struct ScanOptions {
 }
 
 fn main() -> anyhow::Result<()> {
-    let (args, keymap, index, db, init_changeset) = example_cli::init::<
-        EsploraCommands,
-        WalletChangeSet<Keychain, ConfirmationTimeAnchor>,
-    >(DB_MAGIC, DB_PATH)?;
+    let (args, keymap, index, db, init_changeset) =
+        example_cli::init::<EsploraCommands, ChangeSet>(DB_MAGIC, DB_PATH)?;
+
+    let (init_chain_changeset, init_indexed_tx_graph_changeset) = init_changeset;
 
     // Contruct `IndexedTxGraph` and `LocalChain` with our initial changeset. They are wrapped in
     // `Mutex` to display how they can be used in a multithreaded context. Technically the mutexes
     // aren't strictly needed here.
     let graph = Mutex::new({
         let mut graph = IndexedTxGraph::new(index);
-        graph.apply_changeset(init_changeset.indexed_tx_graph);
+        graph.apply_changeset(init_indexed_tx_graph_changeset);
         graph
     });
     let chain = Mutex::new({
         let mut chain = LocalChain::default();
-        chain.apply_changeset(&init_changeset.chain);
+        chain.apply_changeset(&init_chain_changeset);
         chain
     });
 
@@ -307,18 +312,17 @@ fn main() -> anyhow::Result<()> {
     println!("missing block heights: {:?}", missing_block_heights);
 
     // Here, we actually fetch the missing blocks and create a `local_chain::Update`.
-    let chain_update = client
-        .update_local_chain(tip, missing_block_heights)
-        .context("scanning for blocks")?;
-
-    println!("new tip: {}", chain_update.tip.height());
+    let chain_changeset = {
+        let chain_update = client
+            .update_local_chain(tip, missing_block_heights)
+            .context("scanning for blocks")?;
+        println!("new tip: {}", chain_update.tip.height());
+        chain.lock().unwrap().apply_update(chain_update)?
+    };
 
     // We persist the changes
     let mut db = db.lock().unwrap();
-    db.stage(WalletChangeSet {
-        chain: chain.lock().unwrap().apply_update(chain_update)?,
-        indexed_tx_graph: indexed_tx_graph_changeset,
-    });
+    db.stage((chain_changeset, indexed_tx_graph_changeset));
     db.commit()?;
     Ok(())
 }
