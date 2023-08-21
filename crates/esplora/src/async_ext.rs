@@ -136,7 +136,7 @@ impl EsploraAsyncExt for esplora_client::AsyncClient {
 
                     // the updated hash (block hash at this height after the update), can either be:
                     // 1. a block that already existed in `fetched_blocks`
-                    // 2. a block that exists locally and atleast has a depth of ASSUME_FINAL_DEPTH
+                    // 2. a block that exists locally and at least has a depth of ASSUME_FINAL_DEPTH
                     // 3. otherwise we can freshly fetch the block from remote, which is safe as it
                     //    is guaranteed that this would be at or below ASSUME_FINAL_DEPTH from the
                     //    remote tip
@@ -160,7 +160,7 @@ impl EsploraAsyncExt for esplora_client::AsyncClient {
                         let first_new_height = *fetched_blocks
                             .keys()
                             .next()
-                            .expect("must have atleast one new block");
+                            .expect("must have at least one new block");
                         if first_new_height >= local_block.height {
                             break;
                         }
@@ -179,7 +179,7 @@ impl EsploraAsyncExt for esplora_client::AsyncClient {
                     let (&height, &hash) = fetched_blocks
                         .iter()
                         .next()
-                        .expect("must have atleast one new block");
+                        .expect("must have at least one new block");
                     CheckPoint::new(BlockId { height, hash })
                 }
             };

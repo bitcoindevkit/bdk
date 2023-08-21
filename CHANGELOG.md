@@ -158,7 +158,7 @@ BDK and LDK together.
 - Add the ability to specify which leaves to sign in a taproot transaction through `TapLeavesOptions` in `SignOptions`
 - Add the ability to specify whether a taproot transaction should be signed using the internal key or not, using `sign_with_tap_internal_key` in `SignOptions`
 - Consolidate params `fee_amount` and `amount_needed` in `target_amount` in `CoinSelectionAlgorithm::coin_select` signature.
-- Change the meaning of the `fee_amount` field inside `CoinSelectionResult`: from now on the `fee_amount` will represent only the fees asociated with the utxos in the `selected` field of `CoinSelectionResult`.
+- Change the meaning of the `fee_amount` field inside `CoinSelectionResult`: from now on the `fee_amount` will represent only the fees associated with the utxos in the `selected` field of `CoinSelectionResult`.
 - New `RpcBlockchain` implementation with various fixes.
 - Return balance in separate categories, namely `confirmed`, `trusted_pending`, `untrusted_pending` & `immature`.
 
@@ -449,7 +449,7 @@ final transaction is created by calling `finish` on the builder.
 #### Changed
 - Simplify the architecture of blockchain traits
 - Improve sync
-- Remove unused varaint HeaderParseFail
+- Remove unused variant `HeaderParseFail`
 
 ### CLI
 #### Added
@@ -529,7 +529,7 @@ final transaction is created by calling `finish` on the builder.
 - Use TXIN_DEFAULT_WEIGHT constant in coin selection
 - Replace `must_use` with `required` in coin selection
 - Take both spending policies into account in create_tx
-- Check last derivation in cache to avoid recomputation
+- Check last derivation in cache to avoid recomputing
 - Use the branch-and-bound cs by default
 - Make coin_select return UTXOs instead of TxIns
 - Build output lookup inside complete transaction
@@ -550,7 +550,7 @@ final transaction is created by calling `finish` on the builder.
 - Require esplora feature for repl example
 
 #### Security
-- Use dirs-next instead of dirs since the latter is unmantained
+- Use dirs-next instead of dirs since the latter is unmaintained
 
 ## [0.1.0-beta.1] - 2020-09-08
 

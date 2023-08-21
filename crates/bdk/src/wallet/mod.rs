@@ -231,7 +231,7 @@ impl Wallet {
 pub enum NewError<P> {
     /// There was problem with the descriptors passed in
     Descriptor(crate::descriptor::DescriptorError),
-    /// We were unable to load the wallet's data from the persistance backend
+    /// We were unable to load the wallet's data from the persistence backend
     Persist(P),
 }
 
@@ -243,7 +243,7 @@ where
         match self {
             NewError::Descriptor(e) => e.fmt(f),
             NewError::Persist(e) => {
-                write!(f, "failed to load wallet from persistance backend: {}", e)
+                write!(f, "failed to load wallet from persistence backend: {}", e)
             }
         }
     }
@@ -455,9 +455,9 @@ impl<D> Wallet<D> {
 
     /// Returns a iterators of all the script pubkeys for the `Internal` and External` variants in `KeychainKind`.
     ///
-    /// This is inteded to be used when doing a full scan of your addresses (e.g. after restoring
+    /// This is intended to be used when doing a full scan of your addresses (e.g. after restoring
     /// from seed words). You pass the `BTreeMap` of iterators to a blockchain data source (e.g.
-    /// electrum server) which will go through each address until it reaches a *stop grap*.
+    /// electrum server) which will go through each address until it reaches a *stop gap*.
     ///
     /// Note carefully that iterators go over **all** script pubkeys on the keychains (not what
     /// script pubkeys the wallet is storing internally).

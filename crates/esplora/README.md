@@ -1,6 +1,6 @@
 # BDK Esplora
 
-BDK Esplora extends [`esplora_client`](crate::esplora_client) to update [`bdk_chain`] structures
+BDK Esplora extends [`esplora-client`] to update [`bdk_chain`] structures
 from an Esplora server.
 
 ## Usage
@@ -31,3 +31,6 @@ use bdk_esplora::EsploraExt;
 ```
 
 For full examples, refer to [`example-crates/wallet_esplora`](https://github.com/bitcoindevkit/bdk/tree/master/example-crates/wallet_esplora) (blocking) and [`example-crates/wallet_esplora_async`](https://github.com/bitcoindevkit/bdk/tree/master/example-crates/wallet_esplora_async).
+
+[`esplora-client`]: https://docs.rs/esplora-client/
+[`bdk_chain`]: https://docs.rs/bdk-chain/

@@ -18,7 +18,7 @@ pub type ChangeSet = BTreeMap<u32, Option<BlockHash>>;
 ///
 /// Each checkpoint contains the height and hash of a block ([`BlockId`]).
 ///
-/// Internaly, checkpoints are nodes of a reference-counted linked-list. This allows the caller to
+/// Internally, checkpoints are nodes of a reference-counted linked-list. This allows the caller to
 /// cheaply clone a [`CheckPoint`] without copying the whole list and to view the entire chain
 /// without holding a lock on [`LocalChain`].
 #[derive(Debug, Clone)]
@@ -427,7 +427,7 @@ impl core::fmt::Display for InsertBlockError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(
             f,
-            "failed to insert block at height {} as blockhashes conflict: original={}, update={}",
+            "failed to insert block at height {} as block hashes conflict: original={}, update={}",
             self.height, self.original_hash, self.update_hash
         )
     }
@@ -498,7 +498,7 @@ fn merge_chains(
                 prev_orig = curr_orig.take();
 
                 // OPTIMIZATION: we have run out of update blocks so we don't need to continue
-                // iterating becuase there's no possibility of adding anything to changeset.
+                // iterating because there's no possibility of adding anything to changeset.
                 if u.is_none() {
                     break;
                 }
@@ -507,7 +507,7 @@ fn merge_chains(
                 if o.hash() == u.hash() {
                     // We have found our point of agreement 🎉 -- we require that the previous (i.e.
                     // higher because we are iterating backwards) block in the original chain was
-                    // invalidated (if it exists). This ensures that there is an unambigious point of
+                    // invalidated (if it exists). This ensures that there is an unambiguous point of
                     // connection to the original chain from the update chain (i.e. we know the
                     // precisely which original blocks are invalid).
                     if !prev_orig_was_invalidated && !point_of_agreement_found {
