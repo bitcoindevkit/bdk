@@ -1,6 +1,5 @@
 use bdk_chain::{
     bitcoin::{OutPoint, ScriptBuf, Transaction, Txid},
-    keychain::WalletUpdate,
     local_chain::{self, CheckPoint},
     tx_graph::{self, TxGraph},
     Anchor, BlockId, ConfirmationHeightAnchor, ConfirmationTimeAnchor,
@@ -15,7 +14,8 @@ use std::{
 /// We assume that a block of this depth and deeper cannot be reorged.
 const ASSUME_FINAL_DEPTH: u32 = 8;
 
-/// Represents an update fetched from an Electrum server, but excludes full transactions.
+/// Represents an update fetched from an Electrum server, but excludes full
+/// transactions.
 ///
 /// To provide a complete update to [`TxGraph`], you'll need to call [`Self::missing_full_txs`] to
 /// determine the full transactions missing from [`TxGraph`]. Then call [`Self::finalize`] to fetch
@@ -58,7 +58,7 @@ impl<K, A: Anchor> ElectrumUpdate<K, A> {
         client: &Client,
         seen_at: Option<u64>,
         missing: Vec<Txid>,
-    ) -> Result<WalletUpdate<K, A>, Error> {
+    ) -> Result<(TxGraph<A>, BTreeMap<K, u32>, local_chain::CheckPoint), Error> {
         let new_txs = client.batch_transaction_get(&missing)?;
         let mut graph_update = TxGraph::<A>::new(new_txs);
         for (txid, anchors) in self.graph_update {
@@ -69,14 +69,7 @@ impl<K, A: Anchor> ElectrumUpdate<K, A> {
                 let _ = graph_update.insert_anchor(txid, anchor);
             }
         }
-        Ok(WalletUpdate {
-            last_active_indices: self.keychain_update,
-            graph: graph_update,
-            chain: local_chain::Update {
-                tip: self.new_tip,
-                introduce_older_blocks: true,
-            },
-        })
+        Ok((graph_update, self.keychain_update, self.new_tip))
     }
 }
 
@@ -92,13 +85,19 @@ impl<K> ElectrumUpdate<K, ConfirmationHeightAnchor> {
         client: &Client,
         seen_at: Option<u64>,
         missing: Vec<Txid>,
-    ) -> Result<WalletUpdate<K, ConfirmationTimeAnchor>, Error> {
-        let update = self.finalize(client, seen_at, missing)?;
+    ) -> Result<
+        (
+            TxGraph<ConfirmationTimeAnchor>,
+            BTreeMap<K, u32>,
+            local_chain::CheckPoint,
+        ),
+        Error,
+    > {
+        let (graph, keychain_update, update_tip) = self.finalize(client, seen_at, missing)?;
 
         let relevant_heights = {
             let mut visited_heights = HashSet::new();
-            update
-                .graph
+            graph
                 .all_anchors()
                 .iter()
                 .map(|(a, _)| a.confirmation_height_upper_bound())
@@ -118,7 +117,7 @@ impl<K> ElectrumUpdate<K, ConfirmationHeightAnchor> {
             .collect::<HashMap<u32, u64>>();
 
         let graph_changeset = {
-            let old_changeset = TxGraph::default().apply_update(update.graph.clone());
+            let old_changeset = TxGraph::default().apply_update(graph.clone());
             tx_graph::ChangeSet {
                 txs: old_changeset.txs,
                 txouts: old_changeset.txouts,
@@ -140,15 +139,10 @@ impl<K> ElectrumUpdate<K, ConfirmationHeightAnchor> {
             }
         };
 
-        Ok(WalletUpdate {
-            last_active_indices: update.last_active_indices,
-            graph: {
-                let mut graph = TxGraph::default();
-                graph.apply_changeset(graph_changeset);
-                graph
-            },
-            chain: update.chain,
-        })
+        let mut update = TxGraph::default();
+        update.apply_changeset(graph_changeset);
+
+        Ok((update, keychain_update, update_tip))
     }
 }
 
@@ -457,7 +451,6 @@ fn populate_with_outpoints<K>(
             };
 
             let anchor = determine_tx_anchor(cps, res.height, res.tx_hash);
-
             let tx_entry = update.graph_update.entry(res.tx_hash).or_default();
             if let Some(anchor) = anchor {
                 tx_entry.insert(anchor);
