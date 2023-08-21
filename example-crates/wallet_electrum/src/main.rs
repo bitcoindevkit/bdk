@@ -8,8 +8,8 @@ use std::str::FromStr;
 
 use bdk::bitcoin::Address;
 use bdk::SignOptions;
-use bdk::{bitcoin::Network, Wallet};
-use bdk_electrum::bdk_chain::{keychain::WalletUpdate, local_chain};
+use bdk::{bitcoin::Network, wallet::WalletUpdate, Wallet};
+use bdk_electrum::bdk_chain::local_chain;
 use bdk_electrum::electrum_client::{self, ElectrumApi};
 use bdk_electrum::ElectrumExt;
 use bdk_file_store::Store;

@@ -10,9 +10,7 @@
 //!
 //! [`SpkTxOutIndex`]: crate::SpkTxOutIndex
 
-use crate::{
-    collections::BTreeMap, indexed_tx_graph, local_chain, tx_graph::TxGraph, Anchor, Append,
-};
+use crate::{collections::BTreeMap, indexed_tx_graph, local_chain, Anchor, Append};
 
 #[cfg(feature = "miniscript")]
 mod txout_index;
@@ -79,35 +77,6 @@ impl<K> Default for ChangeSet<K> {
 impl<K> AsRef<BTreeMap<K, u32>> for ChangeSet<K> {
     fn as_ref(&self) -> &BTreeMap<K, u32> {
         &self.0
-    }
-}
-
-/// A structure to update [`KeychainTxOutIndex`], [`TxGraph`] and [`LocalChain`] atomically.
-///
-/// [`LocalChain`]: local_chain::LocalChain
-#[derive(Debug, Clone)]
-pub struct WalletUpdate<K, A> {
-    /// Contains the last active derivation indices per keychain (`K`), which is used to update the
-    /// [`KeychainTxOutIndex`].
-    pub last_active_indices: BTreeMap<K, u32>,
-
-    /// Update for the [`TxGraph`].
-    pub graph: TxGraph<A>,
-
-    /// Update for the [`LocalChain`].
-    ///
-    /// [`LocalChain`]: local_chain::LocalChain
-    pub chain: local_chain::Update,
-}
-
-impl<K, A> WalletUpdate<K, A> {
-    /// Construct a [`WalletUpdate`] with a given [`local_chain::Update`].
-    pub fn new(chain_update: local_chain::Update) -> Self {
-        Self {
-            last_active_indices: BTreeMap::new(),
-            graph: TxGraph::default(),
-            chain: chain_update,
-        }
     }
 }
 
