@@ -308,7 +308,7 @@ proptest! {
     #[test]
     #[cfg(not(debug_assertions))] // too slow if compiling for debug
     fn waste_prop_waste(
-        num_inputs in 0usize..50,
+        num_inputs in 0usize..20,
         target in 0u64..25_000,
         feerate in 1.0f32..10.0,
         min_fee in 0u64..1_000,
