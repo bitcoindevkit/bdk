@@ -9,7 +9,7 @@ use crate::{
     wallet::time::Instant,
     BlockTime, Error, KeychainKind, LocalUtxo, TransactionDetails,
 };
-use bitcoin::{OutPoint, Script, ScriptBuf, Transaction, TxOut, Txid};
+use bitcoin::{hashes::Hash, OutPoint, Script, ScriptBuf, Transaction, TxOut, Txid};
 use log::*;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 
@@ -444,8 +444,14 @@ impl<'a, D: BatchDatabase> State<'a, D> {
 /// Remove conflicting transactions -- tie breaking them by fee.
 fn make_txs_consistent(txs: &[TransactionDetails]) -> Vec<&TransactionDetails> {
     let mut utxo_index: HashMap<OutPoint, &TransactionDetails> = HashMap::default();
+    let mut coinbase_txs = vec![];
     for tx in txs {
         for input in &tx.transaction.as_ref().unwrap().input {
+            if input.previous_output.txid == Txid::all_zeros() {
+                coinbase_txs.push(tx);
+                break;
+            }
+
             utxo_index
                 .entry(input.previous_output)
                 .and_modify(|existing| match (tx.fee, existing.fee) {
@@ -463,5 +469,6 @@ fn make_txs_consistent(txs: &[TransactionDetails]) -> Vec<&TransactionDetails> {
         .collect::<HashMap<_, _>>()
         .into_iter()
         .map(|(_, tx)| tx)
+        .chain(coinbase_txs)
         .collect()
 }

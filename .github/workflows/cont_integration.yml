@@ -72,6 +72,9 @@ jobs:
           cargo update -p cc --precise "1.0.81"
           cargo update -p rustls:0.21.6 --precise "0.21.1"
           cargo update -p flate2:1.0.27 --precise "1.0.26"
+          cargo update -p reqwest --precise "0.11.18"
+          cargo update -p h2 --precise "0.3.20"
+          cargo update -p rustls-webpki --precise "0.100.1"
       - name: Build
         run: cargo build --features ${{ matrix.features }} --no-default-features
       - name: Clippy
@@ -233,5 +236,8 @@ jobs:
         cargo update -p cc --precise "1.0.81"
         cargo update -p rustls:0.21.6 --precise "0.21.1"
         cargo update -p flate2:1.0.27 --precise "1.0.26"
+        cargo update -p reqwest --precise "0.11.18"
+        cargo update -p h2 --precise "0.3.20"
+        cargo update -p rustls-webpki --precise "0.100.1"
     - name: Test
       run: cargo test --features test-hardware-signer

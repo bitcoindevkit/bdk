@@ -229,4 +229,10 @@ cargo update -p cc --precise "1.0.81"
 cargo update -p rustls:0.21.6 --precise "0.21.1"
 # flate2 1.0.27 has MSRV 1.63.0+
 cargo update -p flate2:1.0.27 --precise "1.0.26"
+# reqwest 0.11.19 has MSRV 1.63.0+
+cargo update -p reqwest --precise "0.11.18"
+# h2 0.3.21 has MSRV 1.63.0+
+cargo update -p h2 --precise "0.3.20"
+# rustls-webpki 0.100.2 has MSRV 1.60+
+cargo update -p rustls-webpki --precise "0.100.2"
 ```

@@ -1098,18 +1098,18 @@ macro_rules! bdk_blockchain_tests {
                 wallet.sync(&blockchain, SyncOptions::default()).unwrap();
                 assert_eq!(wallet.get_balance().unwrap().immature, 0, "incorrect balance");
 
-                test_client.generate(1, Some(wallet_addr));
+                test_client.generate(2, Some(wallet_addr));
 
                 wallet.sync(&blockchain, SyncOptions::default()).unwrap();
 
-                assert!(wallet.get_balance().unwrap().immature > 0, "incorrect balance after receiving coinbase");
+                assert_eq!(wallet.get_balance().unwrap().immature, 5000000000*2, "incorrect balance after receiving coinbase");
 
                 // make coinbase mature (100 blocks)
                 let node_addr = test_client.get_node_address(None);
                 test_client.generate(100, Some(node_addr));
                 wallet.sync(&blockchain, SyncOptions::default()).unwrap();
 
-                assert!(wallet.get_balance().unwrap().confirmed > 0, "incorrect balance after maturing coinbase");
+                assert_eq!(wallet.get_balance().unwrap().confirmed, 5000000000 * 2, "incorrect balance after maturing coinbase");
 
             }
 
