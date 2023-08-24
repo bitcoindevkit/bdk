@@ -110,7 +110,7 @@ pub struct WalletUpdate<K, A> {
     /// Update for the [`LocalChain`].
     ///
     /// [`LocalChain`]: local_chain::LocalChain
-    pub chain: local_chain::Update,
+    pub chain: Option<local_chain::Update>,
 }
 
 impl<K, A> WalletUpdate<K, A> {
@@ -119,7 +119,7 @@ impl<K, A> WalletUpdate<K, A> {
         Self {
             last_active_indices: BTreeMap::new(),
             graph: TxGraph::default(),
-            chain: chain_update,
+            chain: Some(chain_update),
         }
     }
 }
@@ -1942,7 +1942,11 @@ impl<D> Wallet<D> {
     where
         D: PersistBackend<ChangeSet>,
     {
-        let mut changeset = ChangeSet::from(self.chain.apply_update(update.chain)?);
+        let mut changeset = match update.chain {
+            Some(chain_update) => ChangeSet::from(self.chain.apply_update(chain_update)?),
+            None => ChangeSet::default(),
+        };
+
         let (_, index_changeset) = self
             .indexed_graph
             .index
