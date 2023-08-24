@@ -384,4 +384,12 @@ fn test_non_wildcard_derivations() {
         txout_index.reveal_to_target(&TestKeychain::External, 200);
     assert_eq!(revealed_spks.count(), 0);
     assert!(revealed_changeset.is_empty());
+
+    // we check that spks_of_keychain returns a SpkIterator with just one element
+    assert_eq!(
+        txout_index
+            .spks_of_keychain(&TestKeychain::External)
+            .count(),
+        1,
+    );
 }
