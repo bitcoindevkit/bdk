@@ -335,6 +335,10 @@ impl<'a, D, Cs: CoinSelectionAlgorithm, Ctx: TxBuilderContext> TxBuilder<'a, D, 
     ///
     /// This is an **EXPERIMENTAL** feature, API and other major changes are expected.
     ///
+    /// In order to use [`Wallet::calculate_fee`] or [`Wallet::calculate_fee_rate`] for a transaction
+    /// created with foreign UTXO(s) you must manually insert the corresponding TxOut(s) into the tx
+    /// graph using the [`Wallet::insert_txout`] function.
+    ///
     /// # Errors
     ///
     /// This method returns errors in the following circumstances:

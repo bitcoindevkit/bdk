@@ -431,10 +431,17 @@ impl<D> Wallet<D> {
             .next()
     }
 
-    /// Inserts the given foreign `TxOut` at `OutPoint` into the wallet's transaction graph. Any
-    /// inserted foreign TxOuts are not persisted until [`Self::commit`] is called.
+    /// Inserts a [`TxOut`] at [`OutPoint`] into the wallet's transaction graph.
+    /// Any inserted TxOuts are not persisted until [`commit`] is called.
+    ///
+    /// This can be used to add a `TxOut` that the wallet doesn't own but is used as an input to
+    /// a [`Transaction`] passed to the [`calculate_fee`] or [`calculate_fee_rate`] functions.
     ///
     /// Only insert TxOuts you trust the values for!
+    ///
+    /// [`calculate_fee`]: Self::calculate_fee
+    /// [`calculate_fee_rate`]: Self::calculate_fee_rate
+    /// [`commit`]: Self::commit
     pub fn insert_txout(&mut self, outpoint: OutPoint, txout: TxOut)
     where
         D: PersistBackend<ChangeSet>,
@@ -445,12 +452,30 @@ impl<D> Wallet<D> {
 
     /// Calculates the fee of a given transaction. Returns 0 if `tx` is a coinbase transaction.
     ///
-    /// To calculate the fee for a [`Transaction`] that depends on foreign [`TxOut`] values you must
-    /// first manually insert the foreign TxOuts into the tx graph using the [`insert_txout`] function.
-    /// Only insert TxOuts you trust the values for!
+    /// To calculate the fee for a [`Transaction`] with inputs not owned by this wallet you must
+    /// manually insert the TxOut(s) into the tx graph using the [`insert_txout`] function.
     ///
     /// Note `tx` does not have to be in the graph for this to work.
     ///
+    /// # Examples
+    ///
+    /// ```rust, no_run
+    /// # use bitcoin::Txid;
+    /// # use bdk::Wallet;
+    /// # let mut wallet: Wallet<()> = todo!();
+    /// # let txid:Txid = todo!();
+    /// let tx = wallet.get_tx(txid).expect("transaction").tx_node.tx;
+    /// let fee = wallet.calculate_fee(tx).expect("fee");
+    /// ```
+    ///
+    /// ```rust, no_run
+    /// # use bitcoin::psbt::PartiallySignedTransaction;
+    /// # use bdk::Wallet;
+    /// # let mut wallet: Wallet<()> = todo!();
+    /// # let mut psbt: PartiallySignedTransaction = todo!();
+    /// let tx = &psbt.clone().extract_tx();
+    /// let fee = wallet.calculate_fee(tx).expect("fee");
+    /// ```
     /// [`insert_txout`]: Self::insert_txout
     pub fn calculate_fee(&self, tx: &Transaction) -> Result<u64, CalculateFeeError> {
         self.indexed_graph.graph().calculate_fee(tx)
@@ -458,12 +483,30 @@ impl<D> Wallet<D> {
 
     /// Calculate the [`FeeRate`] for a given transaction.
     ///
-    /// To calculate the fee rate for a [`Transaction`] that depends on foreign [`TxOut`] values you
-    /// must first manually insert the foreign TxOuts into the tx graph using the [`insert_txout`] function.
-    /// Only insert TxOuts you trust the values for!
+    /// To calculate the fee rate for a [`Transaction`] with inputs not owned by this wallet you must
+    /// manually insert the TxOut(s) into the tx graph using the [`insert_txout`] function.
     ///
     /// Note `tx` does not have to be in the graph for this to work.
     ///
+    /// # Examples
+    ///
+    /// ```rust, no_run
+    /// # use bitcoin::Txid;
+    /// # use bdk::Wallet;
+    /// # let mut wallet: Wallet<()> = todo!();
+    /// # let txid:Txid = todo!();
+    /// let tx = wallet.get_tx(txid).expect("transaction").tx_node.tx;
+    /// let fee_rate = wallet.calculate_fee_rate(tx).expect("fee rate");
+    /// ```
+    ///
+    /// ```rust, no_run
+    /// # use bitcoin::psbt::PartiallySignedTransaction;
+    /// # use bdk::Wallet;
+    /// # let mut wallet: Wallet<()> = todo!();
+    /// # let mut psbt: PartiallySignedTransaction = todo!();
+    /// let tx = &psbt.clone().extract_tx();
+    /// let fee_rate = wallet.calculate_fee_rate(tx).expect("fee rate");
+    /// ```
     /// [`insert_txout`]: Self::insert_txout
     pub fn calculate_fee_rate(&self, tx: &Transaction) -> Result<FeeRate, CalculateFeeError> {
         self.calculate_fee(tx).map(|fee| {
@@ -473,10 +516,31 @@ impl<D> Wallet<D> {
     }
 
     /// Computes total input value going from script pubkeys in the index (sent) and the total output
-    /// value going to script pubkeys in the index (received) in `tx`. For the `sent` to be computed
-    /// correctly, the output being spent must have already been scanned by the index. Calculating
-    /// received just uses the [`Transaction`] outputs directly, so it will be correct even if it has
-    /// not been scanned.
+    /// value going to script pubkeys in the index (received) in `tx`.
+    ///
+    /// For the `sent` to be computed correctly, the outputs being spent must have already been
+    /// scanned by the index. Calculating received just uses the [`Transaction`] outputs directly,
+    /// so it will be correct even if it has not been scanned.
+    ///
+    /// # Examples
+    ///
+    /// ```rust, no_run
+    /// # use bitcoin::Txid;
+    /// # use bdk::Wallet;
+    /// # let mut wallet: Wallet<()> = todo!();
+    /// # let txid:Txid = todo!();
+    /// let tx = wallet.get_tx(txid).expect("transaction").tx_node.tx;
+    /// let (sent, received) = wallet.sent_and_received(tx);
+    /// ```
+    ///
+    /// ```rust, no_run
+    /// # use bitcoin::psbt::PartiallySignedTransaction;
+    /// # use bdk::Wallet;
+    /// # let mut wallet: Wallet<()> = todo!();
+    /// # let mut psbt: PartiallySignedTransaction = todo!();
+    /// let tx = &psbt.clone().extract_tx();
+    /// let (sent, received) = wallet.sent_and_received(tx);
+    /// ```
     pub fn sent_and_received(&self, tx: &Transaction) -> (u64, u64) {
         self.indexed_graph.index.sent_and_received(tx)
     }
