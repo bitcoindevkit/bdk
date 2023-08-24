@@ -1,3 +1,6 @@
+mod tx_template;
+pub use tx_template::*;
+
 #[allow(unused_macros)]
 macro_rules! h {
     ($index:literal) => {{
