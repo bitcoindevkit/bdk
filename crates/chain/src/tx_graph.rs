@@ -385,9 +385,7 @@ impl<A: Clone + Ord> TxGraph<A> {
                 0,
             ),
         );
-        let changeset = self.determine_changeset(update);
-        self.apply_changeset(changeset.clone());
-        changeset
+        self.apply_update(update)
     }
 
     /// Inserts the given transaction into [`TxGraph`].
@@ -398,9 +396,7 @@ impl<A: Clone + Ord> TxGraph<A> {
         update
             .txs
             .insert(tx.txid(), (TxNodeInternal::Whole(tx), BTreeSet::new(), 0));
-        let changeset = self.determine_changeset(update);
-        self.apply_changeset(changeset.clone());
-        changeset
+        self.apply_update(update)
     }
 
     /// Inserts the given `anchor` into [`TxGraph`].
@@ -410,9 +406,7 @@ impl<A: Clone + Ord> TxGraph<A> {
     pub fn insert_anchor(&mut self, txid: Txid, anchor: A) -> ChangeSet<A> {
         let mut update = Self::default();
         update.anchors.insert((anchor, txid));
-        let changeset = self.determine_changeset(update);
-        self.apply_changeset(changeset.clone());
-        changeset
+        self.apply_update(update)
     }
 
     /// Inserts the given `seen_at` for `txid` into [`TxGraph`].
@@ -422,9 +416,7 @@ impl<A: Clone + Ord> TxGraph<A> {
         let mut update = Self::default();
         let (_, _, update_last_seen) = update.txs.entry(txid).or_default();
         *update_last_seen = seen_at;
-        let changeset = self.determine_changeset(update);
-        self.apply_changeset(changeset.clone());
-        changeset
+        self.apply_update(update)
     }
 
     /// Extends this graph with another so that `self` becomes the union of the two sets of
