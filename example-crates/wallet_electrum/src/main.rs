@@ -64,10 +64,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let wallet_update = WalletUpdate {
         last_active_indices: keychain_update,
         graph: graph_update,
-        chain: local_chain::Update {
+        chain: Some(local_chain::Update {
             tip: update_tip,
             introduce_older_blocks: true,
-        },
+        }),
     };
     wallet.apply_update(wallet_update)?;
     wallet.commit()?;
