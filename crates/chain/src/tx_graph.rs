@@ -339,6 +339,9 @@ impl<A> TxGraph<A> {
     /// Creates an iterator that both filters and maps conflicting transactions (this includes
     /// descendants of directly-conflicting transactions, which are also considered conflicts).
     ///
+    /// Note that this does not find all conflicts, because we are not checking ancestors of the
+    /// root tx for conflicts.
+    ///
     /// Refer to [`Self::walk_descendants`] for `walk_map` usage.
     pub fn walk_conflicts<'g, F, O>(
         &'g self,
@@ -659,6 +662,10 @@ impl<A: Anchor> TxGraph<A> {
         chain_tip: BlockId,
         txid: Txid,
     ) -> Result<Option<ChainPosition<&A>>, C::Error> {
+        // This is a stack of previous spends of `txid`. Anything that conflicts with `txid`'s
+        // ancestors also conflict with `txid`
+        let mut check_tx_conflicts: Vec<(&Transaction, &u64, u32)> = Vec::new();
+
         let (tx_node, anchors, last_seen) = match self.txs.get(&txid) {
             Some(v) => v,
             None => return Ok(None),
@@ -673,25 +680,42 @@ impl<A: Anchor> TxGraph<A> {
 
         // The tx is not anchored to a block which is in the best chain, let's check whether we can
         // ignore it by checking conflicts!
-        let tx = match tx_node {
-            TxNodeInternal::Whole(tx) => tx,
+        match tx_node {
+            TxNodeInternal::Whole(tx) => check_tx_conflicts.push((tx, last_seen, 0)),
             TxNodeInternal::Partial(_) => {
                 // Partial transactions (outputs only) cannot have conflicts.
                 return Ok(None);
             }
         };
 
-        // If a conflicting tx is in the best chain, or has `last_seen` higher than this tx, then
-        // this tx cannot exist in the best chain
-        for conflicting_tx in self.walk_conflicts(tx, |_, txid| self.get_tx_node(txid)) {
-            for block in conflicting_tx.anchors.iter().map(A::anchor_block) {
-                if chain.is_block_in_chain(block, chain_tip)? == Some(true) {
-                    // conflicting tx is in best chain, so the current tx cannot be in best chain!
+        while let Some((tx, last_seen, ancestor_height)) = check_tx_conflicts.pop() {
+            // If a conflicting tx is in the best chain, or has `last_seen` higher than this tx, then
+            // this tx cannot exist in the best chain
+            for conflicting_tx in self.walk_conflicts(tx, |_, txid| self.get_tx_node(txid)) {
+                for block in conflicting_tx.anchors.iter().map(A::anchor_block) {
+                    if chain.is_block_in_chain(block, chain_tip)? == Some(true) {
+                        // conflicting tx is in best chain, so the current tx cannot be in best chain!
+                        return Ok(None);
+                    }
+                }
+                if conflicting_tx.last_seen_unconfirmed > *last_seen {
                     return Ok(None);
                 }
             }
-            if conflicting_tx.last_seen_unconfirmed > *last_seen {
-                return Ok(None);
+
+            // Add this tx's direct ancestor(s) to the stack to check for conflicts, with a hard
+            // limit of 25 previous generations from the original tx
+            if ancestor_height < 25 {
+                tx.input
+                    .iter()
+                    .map(|txin| txin.previous_output.txid)
+                    .for_each(|prev_txid| {
+                        if let Some((TxNodeInternal::Whole(tx), _, last_seen)) =
+                            self.txs.get(&prev_txid)
+                        {
+                            check_tx_conflicts.push((tx, last_seen, ancestor_height + 1));
+                        };
+                    });
             }
         }
 

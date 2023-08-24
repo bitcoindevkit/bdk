@@ -153,89 +153,89 @@ fn test_tx_conflict_handling() {
         ..Default::default()
     };
 
-    // let tx_bestchain_conflict_1: TxTemplate<'_, ConfirmationHeightAnchor> = TxTemplate {
-    //     tx_name: "tx_bestchain_conflict_1",
-    //     inputs: &[TxInTemplate::PrevTx("tx1", 0)],
-    //     outputs: &[TxOutTemplate {
-    //         value: 20000,
-    //         spk_index: Some(1),
-    //     }],
-    //     ..Default::default()
-    // };
+    let tx_bestchain_conflict_1: TxTemplate<'_, ConfirmationHeightAnchor> = TxTemplate {
+        tx_name: "tx_bestchain_conflict_1",
+        inputs: &[TxInTemplate::PrevTx("tx1", 0)],
+        outputs: &[TxOutTemplate {
+            value: 20000,
+            spk_index: Some(1),
+        }],
+        ..Default::default()
+    };
 
-    // // Conflicting transaction anchored in best chain
-    // let tx_bestchain_conflict_2: TxTemplate<'_, ConfirmationHeightAnchor> = TxTemplate {
-    //     tx_name: "tx_bestchain_conflict_2",
-    //     inputs: &[TxInTemplate::PrevTx("tx1", 0)],
-    //     outputs: &[TxOutTemplate {
-    //         value: 20000,
-    //         spk_index: Some(2),
-    //     }],
-    //     anchors: &[ConfirmationHeightAnchor {
-    //         anchor_block: BlockId {
-    //             height: 4,
-    //             hash: h!("E"),
-    //         },
-    //         confirmation_height: 4,
-    //     }],
-    //     ..Default::default()
-    // };
+    // Conflicting transaction anchored in best chain
+    let tx_bestchain_conflict_2: TxTemplate<'_, ConfirmationHeightAnchor> = TxTemplate {
+        tx_name: "tx_bestchain_conflict_2",
+        inputs: &[TxInTemplate::PrevTx("tx1", 0)],
+        outputs: &[TxOutTemplate {
+            value: 20000,
+            spk_index: Some(2),
+        }],
+        anchors: &[ConfirmationHeightAnchor {
+            anchor_block: BlockId {
+                height: 4,
+                hash: h!("E"),
+            },
+            confirmation_height: 4,
+        }],
+        ..Default::default()
+    };
 
-    // let tx_bestchain_spend_1: TxTemplate<'_, ConfirmationHeightAnchor> = TxTemplate {
-    //     tx_name: "tx_bestchain_spend_1",
-    //     inputs: &[TxInTemplate::PrevTx("tx_bestchain_conflict_1", 0)],
-    //     outputs: &[TxOutTemplate {
-    //         value: 30000,
-    //         spk_index: Some(3),
-    //     }],
-    //     ..Default::default()
-    // };
+    let tx_bestchain_spend_1: TxTemplate<'_, ConfirmationHeightAnchor> = TxTemplate {
+        tx_name: "tx_bestchain_spend_1",
+        inputs: &[TxInTemplate::PrevTx("tx_bestchain_conflict_1", 0)],
+        outputs: &[TxOutTemplate {
+            value: 30000,
+            spk_index: Some(3),
+        }],
+        ..Default::default()
+    };
 
-    // let tx_bestchain_spend_2: TxTemplate<'_, ConfirmationHeightAnchor> = TxTemplate {
-    //     tx_name: "tx_bestchain_spend_2",
-    //     inputs: &[TxInTemplate::PrevTx("tx_bestchain_conflict_2", 0)],
-    //     outputs: &[TxOutTemplate {
-    //         value: 30000,
-    //         spk_index: Some(3),
-    //     }],
-    //     ..Default::default()
-    // };
+    let tx_bestchain_spend_2: TxTemplate<'_, ConfirmationHeightAnchor> = TxTemplate {
+        tx_name: "tx_bestchain_spend_2",
+        inputs: &[TxInTemplate::PrevTx("tx_bestchain_conflict_2", 0)],
+        outputs: &[TxOutTemplate {
+            value: 30000,
+            spk_index: Some(3),
+        }],
+        ..Default::default()
+    };
 
-    // let tx_inputs_conflict_1: TxTemplate<'_, ConfirmationHeightAnchor> = TxTemplate {
-    //     tx_name: "tx_inputs_conflict_1",
-    //     inputs: &[
-    //         TxInTemplate::PrevTx("tx_conflict_1", 0),
-    //         TxInTemplate::PrevTx("tx_conflict_2", 0),
-    //     ],
-    //     outputs: &[TxOutTemplate {
-    //         value: 20000,
-    //         spk_index: Some(3),
-    //     }],
-    //     ..Default::default()
-    // };
+    let tx_inputs_conflict_1: TxTemplate<'_, ConfirmationHeightAnchor> = TxTemplate {
+        tx_name: "tx_inputs_conflict_1",
+        inputs: &[
+            TxInTemplate::PrevTx("tx_conflict_1", 0),
+            TxInTemplate::PrevTx("tx_conflict_2", 0),
+        ],
+        outputs: &[TxOutTemplate {
+            value: 20000,
+            spk_index: Some(3),
+        }],
+        ..Default::default()
+    };
 
-    // let tx_inputs_conflict_2: TxTemplate<'_, ConfirmationHeightAnchor> = TxTemplate {
-    //     tx_name: "tx_inputs_conflict_2",
-    //     inputs: &[
-    //         TxInTemplate::PrevTx("tx_conflict_1", 0),
-    //         TxInTemplate::PrevTx("tx_confirmed_conflict", 0),
-    //     ],
-    //     outputs: &[TxOutTemplate {
-    //         value: 20000,
-    //         spk_index: Some(5),
-    //     }],
-    //     ..Default::default()
-    // };
+    let tx_inputs_conflict_2: TxTemplate<'_, ConfirmationHeightAnchor> = TxTemplate {
+        tx_name: "tx_inputs_conflict_2",
+        inputs: &[
+            TxInTemplate::PrevTx("tx_conflict_1", 0),
+            TxInTemplate::PrevTx("tx_confirmed_conflict", 0),
+        ],
+        outputs: &[TxOutTemplate {
+            value: 20000,
+            spk_index: Some(5),
+        }],
+        ..Default::default()
+    };
 
-    // let tx_spend_inputs_conflict: TxTemplate<'_, ConfirmationHeightAnchor> = TxTemplate {
-    //     tx_name: "tx_spend_inputs_conflict",
-    //     inputs: &[TxInTemplate::PrevTx("tx_inputs_conflict_2", 0)],
-    //     outputs: &[TxOutTemplate {
-    //         value: 20000,
-    //         spk_index: Some(6),
-    //     }],
-    //     ..Default::default()
-    // };
+    let tx_spend_inputs_conflict: TxTemplate<'_, ConfirmationHeightAnchor> = TxTemplate {
+        tx_name: "tx_spend_inputs_conflict",
+        inputs: &[TxInTemplate::PrevTx("tx_inputs_conflict_2", 0)],
+        outputs: &[TxOutTemplate {
+            value: 20000,
+            spk_index: Some(6),
+        }],
+        ..Default::default()
+    };
 
     let scenarios = [
         Scenario {
@@ -304,101 +304,101 @@ fn test_tx_conflict_handling() {
                 confirmed: 50000,
             },
         },
-        // Scenario {
-        //     name: "B and B' conflict, C spends B, B' is anchored in best chain",
-        //     tx_templates: &[
-        //         tx1,
-        //         tx_bestchain_conflict_1, // B
-        //         tx_bestchain_conflict_2, // B'
-        //         tx_bestchain_spend_1,    // C
-        //     ],
-        //     // B and C should not appear in the list methods
-        //     exp_chain_txs: HashSet::from([("tx1", 0), ("tx_bestchain_conflict_2", 0)]),
-        //     exp_unspents: HashSet::from([("tx_bestchain_conflict_2", 0)]),
-        //     exp_balance: Balance {
-        //         immature: 0,
-        //         trusted_pending: 0,
-        //         untrusted_pending: 0,
-        //         confirmed: 20000,
-        //     },
-        // },
-        // Scenario {
-        //     name: "B and B' conflict, C spends B', B' is anchored in best chain",
-        //     tx_templates: &[
-        //         tx1,
-        //         tx_bestchain_conflict_1, // B
-        //         tx_bestchain_conflict_2, // B'
-        //         tx_bestchain_spend_2,    // C
-        //     ],
-        //     // B should not appear in the list methods
-        //     exp_chain_txs: HashSet::from([
-        //         ("tx1", 0),
-        //         ("tx_bestchain_conflict_2", 0),
-        //         ("tx_bestchain_spend_2", 0),
-        //     ]),
-        //     exp_unspents: HashSet::from([("tx_bestchain_spend_2", 0)]),
-        //     exp_balance: Balance {
-        //         immature: 0,
-        //         trusted_pending: 30000,
-        //         untrusted_pending: 0,
-        //         confirmed: 0,
-        //     },
-        // },
-        // Scenario {
-        //     name: "B and B' conflict, C spends both B and B'",
-        //     tx_templates: &[
-        //         tx1,
-        //         tx_conflict_1,        // B
-        //         tx_conflict_2,        // B'
-        //         tx_inputs_conflict_1, // C
-        //     ],
-        //     // C should not appear in the list methods
-        //     exp_chain_txs: HashSet::from([("tx1", 0), ("tx_conflict_2", 0)]),
-        //     exp_unspents: HashSet::from([("tx_conflict_2", 0)]),
-        //     exp_balance: Balance {
-        //         immature: 0,
-        //         trusted_pending: 30000,
-        //         untrusted_pending: 0,
-        //         confirmed: 0,
-        //     },
-        // },
-        // Scenario {
-        //     name: "B and B' conflict, B' is confirmed, C spends both B and B'",
-        //     tx_templates: &[
-        //         tx1,
-        //         tx_conflict_1,         // B
-        //         tx_confirmed_conflict, // B'
-        //         tx_inputs_conflict_2,  // C
-        //     ],
-        //     // C should not appear in the list methods
-        //     exp_chain_txs: HashSet::from([("tx1", 0), ("tx_confirmed_conflict", 0)]),
-        //     exp_unspents: HashSet::from([("tx_confirmed_conflict", 0)]),
-        //     exp_balance: Balance {
-        //         immature: 0,
-        //         trusted_pending: 0,
-        //         untrusted_pending: 0,
-        //         confirmed: 50000,
-        //     },
-        // },
-        // Scenario {
-        //     name: "B and B' conflict, B' is confirmed, C spends both B and B', D spends C",
-        //     tx_templates: &[
-        //         tx1,
-        //         tx_conflict_1,            // B
-        //         tx_confirmed_conflict,    // B'
-        //         tx_inputs_conflict_2,     // C
-        //         tx_spend_inputs_conflict, // D
-        //     ],
-        //     // D should not appear in the list methods
-        //     exp_chain_txs: HashSet::from([("tx1", 0), ("tx_confirmed_conflict", 0)]),
-        //     exp_unspents: HashSet::from([("tx_confirmed_conflict", 0)]),
-        //     exp_balance: Balance {
-        //         immature: 0,
-        //         trusted_pending: 0,
-        //         untrusted_pending: 0,
-        //         confirmed: 50000,
-        //     },
-        // },
+        Scenario {
+            name: "B and B' conflict, C spends B, B' is anchored in best chain",
+            tx_templates: &[
+                tx1,
+                tx_bestchain_conflict_1, // B
+                tx_bestchain_conflict_2, // B'
+                tx_bestchain_spend_1,    // C
+            ],
+            // B and C should not appear in the list methods
+            exp_chain_txs: HashSet::from([("tx1", 0), ("tx_bestchain_conflict_2", 0)]),
+            exp_unspents: HashSet::from([("tx_bestchain_conflict_2", 0)]),
+            exp_balance: Balance {
+                immature: 0,
+                trusted_pending: 0,
+                untrusted_pending: 0,
+                confirmed: 20000,
+            },
+        },
+        Scenario {
+            name: "B and B' conflict, C spends B', B' is anchored in best chain",
+            tx_templates: &[
+                tx1,
+                tx_bestchain_conflict_1, // B
+                tx_bestchain_conflict_2, // B'
+                tx_bestchain_spend_2,    // C
+            ],
+            // B should not appear in the list methods
+            exp_chain_txs: HashSet::from([
+                ("tx1", 0),
+                ("tx_bestchain_conflict_2", 0),
+                ("tx_bestchain_spend_2", 0),
+            ]),
+            exp_unspents: HashSet::from([("tx_bestchain_spend_2", 0)]),
+            exp_balance: Balance {
+                immature: 0,
+                trusted_pending: 30000,
+                untrusted_pending: 0,
+                confirmed: 0,
+            },
+        },
+        Scenario {
+            name: "B and B' conflict, C spends both B and B'",
+            tx_templates: &[
+                tx1,
+                tx_conflict_1,        // B
+                tx_conflict_2,        // B'
+                tx_inputs_conflict_1, // C
+            ],
+            // C should not appear in the list methods
+            exp_chain_txs: HashSet::from([("tx1", 0), ("tx_conflict_2", 0)]),
+            exp_unspents: HashSet::from([("tx_conflict_2", 0)]),
+            exp_balance: Balance {
+                immature: 0,
+                trusted_pending: 30000,
+                untrusted_pending: 0,
+                confirmed: 0,
+            },
+        },
+        Scenario {
+            name: "B and B' conflict, B' is confirmed, C spends both B and B'",
+            tx_templates: &[
+                tx1,
+                tx_conflict_1,         // B
+                tx_confirmed_conflict, // B'
+                tx_inputs_conflict_2,  // C
+            ],
+            // C should not appear in the list methods
+            exp_chain_txs: HashSet::from([("tx1", 0), ("tx_confirmed_conflict", 0)]),
+            exp_unspents: HashSet::from([("tx_confirmed_conflict", 0)]),
+            exp_balance: Balance {
+                immature: 0,
+                trusted_pending: 0,
+                untrusted_pending: 0,
+                confirmed: 50000,
+            },
+        },
+        Scenario {
+            name: "B and B' conflict, B' is confirmed, C spends both B and B', D spends C",
+            tx_templates: &[
+                tx1,
+                tx_conflict_1,            // B
+                tx_confirmed_conflict,    // B'
+                tx_inputs_conflict_2,     // C
+                tx_spend_inputs_conflict, // D
+            ],
+            // D should not appear in the list methods
+            exp_chain_txs: HashSet::from([("tx1", 0), ("tx_confirmed_conflict", 0)]),
+            exp_unspents: HashSet::from([("tx_confirmed_conflict", 0)]),
+            exp_balance: Balance {
+                immature: 0,
+                trusted_pending: 0,
+                untrusted_pending: 0,
+                confirmed: 50000,
+            },
+        },
     ];
 
     for scenario in scenarios {
