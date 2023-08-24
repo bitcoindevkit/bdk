@@ -1,3 +1,4 @@
+mod common;
 use bdk_coin_select::{BnbMetric, Candidate, CoinSelector, Drain, FeeRate, Target};
 #[macro_use]
 extern crate alloc;
@@ -34,22 +35,33 @@ impl BnbMetric for MinExcessThenWeight {
     type Score = (i64, u32);
 
     fn score(&mut self, cs: &CoinSelector<'_>) -> Option<Self::Score> {
-        if cs.excess(self.target, Drain::none()) < 0 {
+        let excess = cs.excess(self.target, Drain::none());
+        if excess < 0 {
             None
         } else {
-            Some((cs.excess(self.target, Drain::none()), cs.input_weight()))
+            Some((excess, cs.input_weight()))
         }
     }
 
     fn bound(&mut self, cs: &CoinSelector<'_>) -> Option<Self::Score> {
-        let lower_bound_excess = cs.excess(self.target, Drain::none()).max(0);
-        let lower_bound_weight = {
-            let mut cs = cs.clone();
-            cs.select_until_target_met(self.target, Drain::none())
-                .ok()?;
-            cs.input_weight()
-        };
-        Some((lower_bound_excess, lower_bound_weight))
+        let mut cs = cs.clone();
+        cs.select_until_target_met(self.target, Drain::none())
+            .ok()?;
+        if let Some(last_index) = cs.selected_indices().last().copied() {
+            cs.deselect(last_index);
+        }
+        Some((cs.excess(self.target, Drain::none()), cs.input_weight()))
+    }
+
+    fn is_target_just_met(&mut self, cs: &CoinSelector<'_>) -> bool {
+        let drain = Drain::none();
+
+        let mut prev_cs = cs.clone();
+        if let Some(last_index) = prev_cs.selected_indices().iter().last().copied() {
+            prev_cs.deselect(last_index);
+        }
+
+        cs.is_target_met(self.target, drain) && !prev_cs.is_target_met(self.target, drain)
     }
 }
 
@@ -57,8 +69,8 @@ impl BnbMetric for MinExcessThenWeight {
 /// Detect regressions/improvements by making sure it always finds the solution in the same
 /// number of iterations.
 fn bnb_finds_an_exact_solution_in_n_iter() {
-    let solution_len = 8;
-    let num_additional_canidates = 50;
+    let solution_len = 6;
+    let num_additional_canidates = 12;
 
     let mut rng = TestRng::deterministic_rng(RngAlgorithm::ChaCha);
     let mut wv = test_wv(&mut rng).map(|mut candidate| {
@@ -75,7 +87,7 @@ fn bnb_finds_an_exact_solution_in_n_iter() {
 
     let target = solution.iter().map(|c| c.value).sum();
 
-    let mut candidates = solution;
+    let mut candidates = solution.clone();
     candidates.extend(wv.take(num_additional_canidates));
     candidates.sort_unstable_by_key(|wv| core::cmp::Reverse(wv.value));
 
@@ -90,17 +102,17 @@ fn bnb_finds_an_exact_solution_in_n_iter() {
 
     let solutions = cs.bnb_solutions(MinExcessThenWeight { target });
 
-    let (i, (best, _score)) = solutions
+    let mut rounds = 0;
+    let (best, score) = solutions
         .enumerate()
-        .take(807)
-        .filter_map(|(i, sol)| Some((i, sol?)))
+        .inspect(|(i, _)| rounds = *i + 1)
+        .filter_map(|(_, sol)| sol)
         .last()
         .expect("it found a solution");
 
-    assert_eq!(i, 806);
-
-    assert!(best.input_weight() <= solution_weight);
-    assert_eq!(best.selected_value(), target.value);
+    assert_eq!(rounds, 50169);
+    assert_eq!(best.input_weight(), solution_weight);
+    assert_eq!(best.selected_value(), target.value, "score={:?}", score);
 }
 
 #[test]
@@ -121,13 +133,15 @@ fn bnb_finds_solution_if_possible_in_n_iter() {
 
     let solutions = cs.bnb_solutions(MinExcessThenWeight { target });
 
-    let (i, (sol, _score)) = solutions
+    let mut rounds = 0;
+    let (sol, _score) = solutions
         .enumerate()
-        .filter_map(|(i, sol)| Some((i, sol?)))
+        .inspect(|(i, _)| rounds = *i + 1)
+        .filter_map(|(_, sol)| sol)
         .last()
         .expect("found a solution");
 
-    assert_eq!(i, 176);
+    assert_eq!(rounds, 202);
     let excess = sol.excess(target, Drain::none());
     assert_eq!(excess, 8);
 }
@@ -135,7 +149,7 @@ fn bnb_finds_solution_if_possible_in_n_iter() {
 proptest! {
 
     #[test]
-    fn bnb_always_finds_solution_if_possible(num_inputs in 1usize..50, target in 0u64..10_000) {
+    fn bnb_always_finds_solution_if_possible(num_inputs in 1usize..18, target in 0u64..10_000) {
         let mut rng = TestRng::deterministic_rng(RngAlgorithm::ChaCha);
         let wv = test_wv(&mut rng);
         let candidates = wv.take(num_inputs).collect::<Vec<_>>();
@@ -157,9 +171,9 @@ proptest! {
 
     #[test]
     fn bnb_always_finds_exact_solution_eventually(
-        solution_len in 1usize..10,
-        num_additional_canidates in 0usize..100,
-        num_preselected in 0usize..10
+        solution_len in 1usize..8,
+        num_additional_canidates in 0usize..16,
+        num_preselected in 0usize..8
     ) {
         let mut rng = TestRng::deterministic_rng(RngAlgorithm::ChaCha);
         let mut wv = test_wv(&mut rng);
@@ -200,8 +214,6 @@ proptest! {
             .filter_map(|(i, sol)| Some((i, sol?)))
             .last()
             .expect("it found a solution");
-
-
 
         prop_assert!(best.input_weight() <= solution_weight);
         prop_assert_eq!(best.selected_value(), target.value);

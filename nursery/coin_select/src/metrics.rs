@@ -54,9 +54,12 @@ macro_rules! impl_for_tuple {
                 Some(($(self.$b.bound(cs)?),*))
             }
             #[allow(unused)]
+            fn is_target_just_met(&mut self, cs: &CoinSelector<'_>) -> bool {
+                [$(self.$b.is_target_just_met(cs)),*].iter().all(|x| *x)
+            }
+            #[allow(unused)]
             fn requires_ordering_by_descending_value_pwu(&self) -> bool {
                 [$(self.$b.requires_ordering_by_descending_value_pwu()),*].iter().all(|x| *x)
-
             }
         }
     };

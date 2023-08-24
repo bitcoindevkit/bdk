@@ -233,6 +233,17 @@ where
         }
     }
 
+    fn is_target_just_met(&mut self, cs: &CoinSelector<'_>) -> bool {
+        let drain = (self.change_policy)(cs, self.target);
+
+        let mut prev_cs = cs.clone();
+        if let Some(last_index) = prev_cs.selected_indices().iter().last().copied() {
+            prev_cs.deselect(last_index);
+        }
+
+        cs.is_target_met(self.target, drain) && !prev_cs.is_target_met(self.target, drain)
+    }
+
     fn requires_ordering_by_descending_value_pwu(&self) -> bool {
         true
     }

@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use std::any::type_name;
 
 use bdk_coin_select::{
@@ -25,6 +27,7 @@ where
 {
     println!("== TEST ==");
     println!("{}", type_name::<M>());
+    println!("{:?}", params);
 
     let candidates = gen_candidates(params.n_candidates);
     {
@@ -60,7 +63,7 @@ where
 
     println!("\tbranch and bound:");
     let now = std::time::Instant::now();
-    let result = bnb_search(&mut selection, metric);
+    let result = bnb_search(&mut selection, metric, usize::MAX);
     let change = change_policy(&selection, target);
     let result_str = result_string(&result, change);
     println!(
@@ -102,20 +105,24 @@ where
 {
     println!("== TEST ==");
     println!("{}", type_name::<M>());
+    println!("{:?}", params);
 
     let candidates = gen_candidates(params.n_candidates);
     {
         println!("\tcandidates:");
         for (i, candidate) in candidates.iter().enumerate() {
             println!(
-                "\t\t[{}] {:?} ev={}",
+                "\t\t[{}] {:?} ev={}, waste={}",
                 i,
                 candidate,
-                candidate.effective_value(params.feerate())
+                candidate.effective_value(params.feerate()),
+                candidate.weight as f32 * (params.feerate - params.long_term_feerate().spwu()),
             );
         }
     }
 
+    let target = params.target();
+    let change_policy = gen_change_policy(&params);
     let mut metric = gen_metric(&params, gen_change_policy(&params));
 
     let init_cs = {
@@ -126,7 +133,7 @@ where
         cs
     };
 
-    for cs in ExhaustiveIter::new(&init_cs).into_iter().flatten() {
+    for (cs, _) in ExhaustiveIter::new(&init_cs).into_iter().flatten() {
         if let Some(lb_score) = metric.bound(&cs) {
             // This is the branch's lower bound. In other words, this is the BEST selection
             // possible (can overshoot) traversing down this branch. Let's check that!
@@ -134,22 +141,33 @@ where
             if let Some(score) = metric.score(&cs) {
                 prop_assert!(
                     score >= lb_score,
-                    "selection={} score={} lb={}",
+                    "checking branch: selection={} score={} change={} lb={}",
                     cs,
                     score,
+                    change_policy(&cs, target).is_some(),
                     lb_score
                 );
             }
 
-            for descendant_cs in ExhaustiveIter::new(&cs).into_iter().flatten() {
+            for (descendant_cs, _) in ExhaustiveIter::new(&cs)
+                .into_iter()
+                .flatten()
+                .filter(|(_, inc)| *inc)
+            {
                 if let Some(descendant_score) = metric.score(&descendant_cs) {
                     prop_assert!(
                         descendant_score >= lb_score,
-                        "this: {} (score={}), parent: {} (lb={})",
-                        descendant_cs,
-                        descendant_score,
+                        "
+                            parent={:8} change={} lb={} target_met={}
+                        descendant={:8} change={} score={}
+                        ",
                         cs,
-                        lb_score
+                        change_policy(&cs, target).is_some(),
+                        lb_score,
+                        cs.is_target_met(target, Drain::none()),
+                        descendant_cs,
+                        change_policy(&descendant_cs, target).is_some(),
+                        descendant_score,
                     );
                 }
             }
@@ -158,6 +176,7 @@ where
     Ok(())
 }
 
+#[derive(Debug)]
 pub struct StrategyParams {
     pub n_candidates: usize,
     pub target_value: u64,
@@ -248,15 +267,16 @@ impl<'a> ExhaustiveIter<'a> {
 }
 
 impl<'a> Iterator for ExhaustiveIter<'a> {
-    type Item = CoinSelector<'a>;
+    type Item = (CoinSelector<'a>, bool);
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
             let (cs, inclusion) = self.stack.pop()?;
             let _more = self.push_branches(&cs);
-            if inclusion {
-                return Some(cs);
-            }
+            return Some((cs, inclusion));
+            // if inclusion {
+            //     return Some(cs);
+            // }
         }
     }
 }
@@ -275,7 +295,8 @@ where
     let iter = ExhaustiveIter::new(cs)?
         .enumerate()
         .inspect(|(i, _)| rounds = *i)
-        .filter_map(|(_, cs)| metric.score(&cs).map(|score| (cs, score)));
+        .filter(|(_, (_, inclusion))| *inclusion)
+        .filter_map(|(_, (cs, _))| metric.score(&cs).map(|score| (cs, score)));
 
     for (child_cs, score) in iter {
         match &mut best {
@@ -297,7 +318,11 @@ where
     best.map(|(_, score)| (score, rounds))
 }
 
-pub fn bnb_search<M>(cs: &mut CoinSelector, metric: M) -> Result<(Ordf32, usize), NoBnbSolution>
+pub fn bnb_search<M>(
+    cs: &mut CoinSelector,
+    metric: M,
+    max_rounds: usize,
+) -> Result<(Ordf32, usize), NoBnbSolution>
 where
     M: BnbMetric<Score = Ordf32>,
 {
@@ -305,12 +330,10 @@ where
     let (selection, score) = cs
         .bnb_solutions(metric)
         .inspect(|_| rounds += 1)
+        .take(max_rounds)
         .flatten()
         .last()
-        .ok_or(NoBnbSolution {
-            max_rounds: usize::MAX,
-            rounds,
-        })?;
+        .ok_or(NoBnbSolution { max_rounds, rounds })?;
     println!("\t\tsolution={}, score={}", selection, score);
     *cs = selection;
 

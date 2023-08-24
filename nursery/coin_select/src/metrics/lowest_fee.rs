@@ -82,6 +82,7 @@ where
         } else {
             None
         };
+        // println!("\tchange lb: {:?}", change_lb_weights);
 
         if cs.is_target_met(self.target, change_lb) {
             // Target is met, is it possible to add further inputs to remove drain output?
@@ -90,7 +91,7 @@ where
             // First lower bound candidate is just the selection itself (include excess).
             let mut lower_bound = self.calc_metric(cs, change_lb_weights);
 
-            if change_lb.is_none() {
+            if change_lb_weights.is_none() {
                 // Since a changeless solution may exist, we should try minimize the excess with by
                 // adding as much -ev candidates as possible
                 let selection_with_as_much_negative_ev_as_possible = cs
@@ -143,7 +144,7 @@ where
             .find(|(cs, _, _)| cs.is_target_met(self.target, change_lb))?;
         cs.deselect(slurp_index);
 
-        let mut lower_bound = self.calc_metric_lb(&cs, change_lb_weights);
+        let mut lower_bound = self.calc_metric_lb(&cs, None);
 
         if change_lb_weights.is_none() {
             // changeless solution is possible, find the max excess we need to rid of
@@ -159,6 +160,17 @@ where
         }
 
         Some(Ordf32(lower_bound))
+    }
+
+    fn is_target_just_met(&mut self, cs: &CoinSelector<'_>) -> bool {
+        let drain = (self.change_policy)(cs, self.target);
+
+        let mut prev_cs = cs.clone();
+        if let Some(last_index) = prev_cs.selected_indices().iter().last().copied() {
+            prev_cs.deselect(last_index);
+        }
+
+        cs.is_target_met(self.target, drain) && !prev_cs.is_target_met(self.target, drain)
     }
 
     fn requires_ordering_by_descending_value_pwu(&self) -> bool {
@@ -190,4 +202,5 @@ fn slurp(target: Target, excess: i64, candidate: Candidate) -> f32 {
     }
 
     perfect_weight.max(0.0)
+    // dbg!(perfect_weight)
 }

@@ -471,7 +471,7 @@ impl<'a> CoinSelector<'a> {
 
     /// Run branch and bound until we cannot find a better solution, or we reach `max_rounds`.
     ///
-    /// If a solution is found, the [`BnBMetric::Score`] is returned. Otherwise, we error with
+    /// If a solution is found, the [`BnbMetric::Score`] is returned. Otherwise, we error with
     /// [`NoBnbSolution`].
     ///
     /// To access to raw bnb iterator, use [`CoinSelector::bnb_solutions`].
