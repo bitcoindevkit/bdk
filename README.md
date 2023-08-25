@@ -33,7 +33,7 @@ It is built upon the excellent [`rust-bitcoin`] and [`rust-miniscript`] crates.
 
 > ⚠ The Bitcoin Dev Kit developers are in the process of releasing a `v1.0` which is a fundamental re-write of how the library works.
 > See for some background on this project: https://bitcoindevkit.org/blog/road-to-bdk-1/ (ignore the timeline 😁)
-> For a release timeline see the [`bdk_core_staging`] repo where a lot of the component work is being done. The plan is that everything in the `bdk_core_staging` repo will be moved into the `crates` directory here.
+> For a release timeline see the [`BDK 1.0 project page`].
 
 ## Architecture
 
@@ -45,13 +45,19 @@ The project is split up into several crates in the `/crates` directory:
 - [`esplora`](./crates/esplora): Extends the [`esplora-client`] crate with methods to fetch chain data from an esplora HTTP server in the form that [`bdk_chain`] and `Wallet` can consume.
 - [`electrum`](./crates/electrum): Extends the [`electrum-client`] crate with methods to fetch chain data from an electrum server in the form that [`bdk_chain`] and `Wallet` can consume.
 
-Fully working examples of how to use these components are in `/example-crates`
+Fully working examples of how to use these components are in `/example-crates`:
+- [`example_cli`](./example-crates/example_cli): Library used by the `example_*` crates. Provides utilities for syncing, showing the balance, generating addresses and creating transactions without using the bdk `Wallet`.
+- [`example_electrum`](./example-crates/example_electrum): A command line Bitcoin wallet application built on top of `example_cli` and the `electrum` crate. It shows the power of the bdk tools (`chain` + `file_store` + `electrum`), without depending on the main `bdk` library.
+- [`wallet_esplora_blocking`](./example-crates/wallet_esplora_blocking): Uses the `Wallet` to sync and spend using the Esplora blocking interface.
+- [`wallet_esplora_async`](./example-crates/wallet_esplora_async): Uses the `Wallet` to sync and spend using the Esplora asynchronous interface.
+- [`wallet_electrum`](./example-crates/wallet_electrum): Uses the `Wallet` to sync and spend using Electrum.
 
-[`bdk_core_staging`]: https://github.com/LLFourn/bdk_core_staging
+[`BDK 1.0 project page`]: https://github.com/orgs/bitcoindevkit/projects/14
 [`rust-miniscript`]: https://github.com/rust-bitcoin/rust-miniscript
 [`rust-bitcoin`]: https://github.com/rust-bitcoin/rust-bitcoin
-[`esplora-client`]: https://docs.rs/esplora-client/0.3.0/esplora_client/
-[`electrum-client`]: https://docs.rs/electrum-client/0.13.0/electrum_client/
+[`esplora-client`]: https://docs.rs/esplora-client/
+[`electrum-client`]: https://docs.rs/electrum-client/
+[`bdk_chain`]: https://docs.rs/bdk-chain/
 
 ## Minimum Supported Rust Version (MSRV)
 This library should compile with any combination of features with Rust 1.57.0.
@@ -65,4 +71,30 @@ cargo update -p log --precise "0.4.18"
 cargo update -p tempfile --precise "3.6.0"
 # rustls 0.21.2 has MSRV 1.60.0+
 cargo update -p rustls:0.21.6 --precise "0.21.1"
+# tokio 1.30 has MSRV 1.63.0+
+cargo update -p tokio:1.32.0 --precise "1.29.1"
+# flate2 1.0.27 has MSRV 1.63.0+
+cargo update -p flate2:1.0.27 --precise "1.0.26"
+# reqwest 0.11.19 has MSRV 1.63.0+
+cargo update -p reqwest --precise "0.11.18"
+# h2 0.3.21 has MSRV 1.63.0+
+cargo update -p h2 --precise "0.3.20"
+# rustls-webpki has MSRV 1.60.0+
+cargo update -p rustls-webpki --precise "0.100.1"
 ```
+
+## License
+
+Licensed under either of
+
+* Apache License, Version 2.0, ([LICENSE-APACHE](LICENSE-APACHE) or <https://www.apache.org/licenses/LICENSE-2.0>)
+* MIT license ([LICENSE-MIT](LICENSE-MIT) or <https://opensource.org/licenses/MIT>)
+
+at your option.
+
+### Contribution
+
+Unless you explicitly state otherwise, any contribution intentionally
+submitted for inclusion in the work by you, as defined in the Apache-2.0
+license, shall be dual licensed as above, without any additional terms or
+conditions.

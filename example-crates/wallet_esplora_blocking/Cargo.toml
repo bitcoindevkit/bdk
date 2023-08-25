@@ -1,5 +1,5 @@
 [package]
-name = "wallet_esplora"
+name = "wallet_esplora_blocking"
 version = "0.2.0"
 edition = "2021"
 publish = false
