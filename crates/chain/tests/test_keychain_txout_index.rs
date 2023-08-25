@@ -4,6 +4,7 @@
 mod common;
 use bdk_chain::{
     collections::BTreeMap,
+    indexed_tx_graph::Indexer,
     keychain::{self, KeychainTxOutIndex},
     Append,
 };
@@ -194,7 +195,7 @@ fn test_lookahead() {
             ],
             ..common::new_tx(external_index)
         };
-        assert_eq!(txout_index.scan(&tx), keychain::ChangeSet::default());
+        assert_eq!(txout_index.index_tx(&tx), keychain::ChangeSet::default());
         assert_eq!(
             txout_index.last_revealed_index(&TestKeychain::External),
             Some(last_external_index)
@@ -248,7 +249,7 @@ fn test_scan_with_lookahead() {
             value: 0,
         };
 
-        let changeset = txout_index.scan_txout(op, &txout);
+        let changeset = txout_index.index_txout(op, &txout);
         assert_eq!(
             changeset.as_inner(),
             &[(TestKeychain::External, spk_i)].into()
@@ -273,7 +274,7 @@ fn test_scan_with_lookahead() {
         script_pubkey: spk_41,
         value: 0,
     };
-    let changeset = txout_index.scan_txout(op, &txout);
+    let changeset = txout_index.index_txout(op, &txout);
     assert!(changeset.is_empty());
 }
 

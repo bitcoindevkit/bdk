@@ -9,8 +9,9 @@ use bitcoin::{self, OutPoint, Script, ScriptBuf, Transaction, TxOut, Txid};
 /// An index storing [`TxOut`]s that have a script pubkey that matches those in a list.
 ///
 /// The basic idea is that you insert script pubkeys you care about into the index with
-/// [`insert_spk`] and then when you call [`scan`], the index will look at any txouts you pass in and
-/// store and index any txouts matching one of its script pubkeys.
+/// [`insert_spk`] and then when you call [`Indexer::index_tx`] or [`Indexer::index_txout`], the
+/// index will look at any txouts you pass in and store and index any txouts matching one of its
+/// script pubkeys.
 ///
 /// Each script pubkey is associated with an application-defined index script index `I`, which must be
 /// [`Ord`]. Usually, this is used to associate the derivation index of the script pubkey or even a
@@ -24,7 +25,6 @@ use bitcoin::{self, OutPoint, Script, ScriptBuf, Transaction, TxOut, Txid};
 /// [`TxOut`]: bitcoin::TxOut
 /// [`insert_spk`]: Self::insert_spk
 /// [`Ord`]: core::cmp::Ord
-/// [`scan`]: Self::scan
 /// [`TxGraph`]: crate::tx_graph::TxGraph
 #[derive(Clone, Debug)]
 pub struct SpkTxOutIndex<I> {
@@ -53,19 +53,35 @@ impl<I> Default for SpkTxOutIndex<I> {
 }
 
 impl<I: Clone + Ord> Indexer for SpkTxOutIndex<I> {
-    type ChangeSet = ();
+    type ChangeSet = BTreeSet<I>;
 
     fn index_txout(&mut self, outpoint: OutPoint, txout: &TxOut) -> Self::ChangeSet {
-        self.scan_txout(outpoint, txout);
-        Default::default()
+        let spk_i = self.spk_indices.get(&txout.script_pubkey);
+        let mut scanned_indices = BTreeSet::new();
+        if let Some(spk_i) = spk_i {
+            self.txouts.insert(outpoint, (spk_i.clone(), txout.clone()));
+            self.spk_txouts.insert((spk_i.clone(), outpoint));
+            self.unused.remove(spk_i);
+            scanned_indices.insert(spk_i.clone());
+        }
+        scanned_indices
     }
 
     fn index_tx(&mut self, tx: &Transaction) -> Self::ChangeSet {
-        self.scan(tx);
-        Default::default()
+        let mut scanned_indices = BTreeSet::new();
+
+        for (i, txout) in tx.output.iter().enumerate() {
+            let op = OutPoint::new(tx.txid(), i as u32);
+            let mut txout_indices = self.index_txout(op, txout);
+            scanned_indices.append(&mut txout_indices);
+        }
+
+        scanned_indices
     }
 
-    fn initial_changeset(&self) -> Self::ChangeSet {}
+    fn initial_changeset(&self) -> Self::ChangeSet {
+        self.spks.keys().cloned().collect()
+    }
 
     fn apply_changeset(&mut self, _changeset: Self::ChangeSet) {
         // This applies nothing.
@@ -77,38 +93,6 @@ impl<I: Clone + Ord> Indexer for SpkTxOutIndex<I> {
 }
 
 impl<I: Clone + Ord> SpkTxOutIndex<I> {
-    /// Scans a transaction containing many txouts.
-    ///
-    /// Typically, this is used in two situations:
-    ///
-    /// 1. After loading transaction data from the disk, you may scan over all the txouts to restore all
-    /// your txouts.
-    /// 2. When getting new data from the chain, you usually scan it before incorporating it into your chain state.
-    pub fn scan(&mut self, tx: &bitcoin::Transaction) -> BTreeSet<I> {
-        let mut scanned_indices = BTreeSet::new();
-
-        for (i, txout) in tx.output.iter().enumerate() {
-            let op = OutPoint::new(tx.txid(), i as u32);
-            if let Some(spk_i) = self.scan_txout(op, txout) {
-                scanned_indices.insert(spk_i.clone());
-            }
-        }
-
-        scanned_indices
-    }
-
-    /// Scan a single `TxOut` for a matching script pubkey and returns the index that matches the
-    /// script pubkey (if any).
-    pub fn scan_txout(&mut self, op: OutPoint, txout: &TxOut) -> Option<&I> {
-        let spk_i = self.spk_indices.get(&txout.script_pubkey);
-        if let Some(spk_i) = spk_i {
-            self.txouts.insert(op, (spk_i.clone(), txout.clone()));
-            self.spk_txouts.insert((spk_i.clone(), op));
-            self.unused.remove(spk_i);
-        }
-        spk_i
-    }
-
     /// Get a reference to the set of indexed outpoints.
     pub fn outpoints(&self) -> &BTreeSet<(I, OutPoint)> {
         &self.spk_txouts
