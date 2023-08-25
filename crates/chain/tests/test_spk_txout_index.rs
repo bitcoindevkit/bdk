@@ -1,4 +1,4 @@
-use bdk_chain::SpkTxOutIndex;
+use bdk_chain::{indexed_tx_graph::Indexer, SpkTxOutIndex};
 use bitcoin::{absolute, OutPoint, ScriptBuf, Transaction, TxIn, TxOut};
 
 #[test]
@@ -22,7 +22,7 @@ fn spk_txout_sent_and_received() {
 
     assert_eq!(index.sent_and_received(&tx1), (0, 42_000));
     assert_eq!(index.net_value(&tx1), 42_000);
-    index.scan(&tx1);
+    index.index_tx(&tx1);
     assert_eq!(
         index.sent_and_received(&tx1),
         (0, 42_000),
@@ -82,7 +82,7 @@ fn mark_used() {
         }],
     };
 
-    spk_index.scan(&tx1);
+    spk_index.index_tx(&tx1);
     spk_index.unmark_used(&1);
     assert!(
         spk_index.is_used(&1),

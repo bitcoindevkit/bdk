@@ -233,7 +233,18 @@ pub trait Indexer {
     /// Scan and index the given `outpoint` and `txout`.
     fn index_txout(&mut self, outpoint: OutPoint, txout: &TxOut) -> Self::ChangeSet;
 
-    /// Scan and index the given transaction.
+    /// Scans a transaction for relevant outpoints, which are stored and indexed internally.
+    ///
+    /// If the matched script pubkey is part of the lookahead, the last stored index is updated for
+    /// the script pubkey's keychain and the [`ChangeSet`] returned will reflect the
+    /// change.
+    ///
+    /// Typically, this method is used in two situations:
+    ///
+    /// 1. After loading transaction data from the disk, you may scan over all the txouts to restore all
+    /// your txouts.
+    /// 2. When getting new data from the chain, you usually scan it before incorporating it into
+    /// your chain state.
     fn index_tx(&mut self, tx: &Transaction) -> Self::ChangeSet;
 
     /// Apply changeset to itself.
