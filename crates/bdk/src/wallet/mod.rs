@@ -94,9 +94,9 @@ pub struct Wallet<D = ()> {
     secp: SecpCtx,
 }
 
-/// A structure to update [`KeychainTxOutIndex`], [`TxGraph`] and [`LocalChain`] atomically.
+/// A structure to update [`Wallet`].
 ///
-/// [`LocalChain`]: local_chain::LocalChain
+/// It updates [`bdk_chain::keychain::KeychainTxOutIndex`], [`bdk_chain::TxGraph`] and [`local_chain::LocalChain`] atomically.
 #[derive(Debug, Clone)]
 pub struct WalletUpdate<K, A> {
     /// Contains the last active derivation indices per keychain (`K`), which is used to update the
@@ -112,13 +112,12 @@ pub struct WalletUpdate<K, A> {
     pub chain: Option<local_chain::Update>,
 }
 
-impl<K, A> WalletUpdate<K, A> {
-    /// Construct a [`WalletUpdate`] with a given [`local_chain::Update`].
-    pub fn new(chain_update: local_chain::Update) -> Self {
+impl<K, A> Default for WalletUpdate<K, A> {
+    fn default() -> Self {
         Self {
             last_active_indices: BTreeMap::new(),
             graph: TxGraph::default(),
-            chain: Some(chain_update),
+            chain: None,
         }
     }
 }

@@ -60,7 +60,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let update = WalletUpdate {
         last_active_indices,
         graph: update_graph,
-        ..WalletUpdate::new(chain_update)
+        chain: Some(chain_update),
     };
 
     wallet.apply_update(update)?;
