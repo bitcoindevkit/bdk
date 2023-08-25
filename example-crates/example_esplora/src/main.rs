@@ -70,7 +70,7 @@ fn main() -> anyhow::Result<()> {
     // aren't strictly needed here.
     let graph = Mutex::new({
         let mut graph = IndexedTxGraph::new(index);
-        graph.apply_changeset(init_changeset.index_tx_graph);
+        graph.apply_changeset(init_changeset.indexed_tx_graph);
         graph
     });
     let chain = Mutex::new({

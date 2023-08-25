@@ -133,14 +133,14 @@ pub struct WalletChangeSet<K, A> {
     /// ChangeSet to [`IndexedTxGraph`].
     ///
     /// [`IndexedTxGraph`]: crate::indexed_tx_graph::IndexedTxGraph
-    pub index_tx_graph: indexed_tx_graph::ChangeSet<A, ChangeSet<K>>,
+    pub indexed_tx_graph: indexed_tx_graph::ChangeSet<A, ChangeSet<K>>,
 }
 
 impl<K, A> Default for WalletChangeSet<K, A> {
     fn default() -> Self {
         Self {
             chain: Default::default(),
-            index_tx_graph: Default::default(),
+            indexed_tx_graph: Default::default(),
         }
     }
 }
@@ -148,11 +148,11 @@ impl<K, A> Default for WalletChangeSet<K, A> {
 impl<K: Ord, A: Anchor> Append for WalletChangeSet<K, A> {
     fn append(&mut self, other: Self) {
         Append::append(&mut self.chain, other.chain);
-        Append::append(&mut self.index_tx_graph, other.index_tx_graph);
+        Append::append(&mut self.indexed_tx_graph, other.indexed_tx_graph);
     }
 
     fn is_empty(&self) -> bool {
-        self.chain.is_empty() && self.index_tx_graph.is_empty()
+        self.chain.is_empty() && self.indexed_tx_graph.is_empty()
     }
 }
 
@@ -166,9 +166,9 @@ impl<K, A> From<local_chain::ChangeSet> for WalletChangeSet<K, A> {
 }
 
 impl<K, A> From<indexed_tx_graph::ChangeSet<A, ChangeSet<K>>> for WalletChangeSet<K, A> {
-    fn from(index_tx_graph: indexed_tx_graph::ChangeSet<A, ChangeSet<K>>) -> Self {
+    fn from(indexed_tx_graph: indexed_tx_graph::ChangeSet<A, ChangeSet<K>>) -> Self {
         Self {
-            index_tx_graph,
+            indexed_tx_graph,
             ..Default::default()
         }
     }
