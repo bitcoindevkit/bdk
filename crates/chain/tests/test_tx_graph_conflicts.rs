@@ -54,6 +54,7 @@ fn test_tx_conflict_handling() {
     // Confirmed parent transaction at Block 1.
     let tx1: TxTemplate<'_, ConfirmationHeightAnchor> = TxTemplate {
         tx_name: "tx1",
+        inputs: &[TxInTemplate::Bogus],
         outputs: &[TxOutTemplate {
             value: 10000,
             spk_index: Some(0),
@@ -66,12 +67,11 @@ fn test_tx_conflict_handling() {
             confirmation_height: 1,
         }],
         last_seen: None,
-        ..Default::default()
     };
 
     let tx_conflict_1: TxTemplate<'_, ConfirmationHeightAnchor> = TxTemplate {
         tx_name: "tx_conflict_1",
-        inputs: &[TxInTemplate::PrevTx("tx1", 0)],
+        inputs: &[TxInTemplate::PrevTx("tx1", 0), TxInTemplate::Bogus],
         outputs: &[TxOutTemplate {
             value: 20000,
             spk_index: Some(1),

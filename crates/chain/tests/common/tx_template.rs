@@ -1,9 +1,10 @@
+use rand::distributions::{Alphanumeric, DistString};
 use std::collections::HashMap;
 
 use bdk_chain::{tx_graph::TxGraph, ConfirmationHeightAnchor, SpkTxOutIndex};
 use bitcoin::{
-    hashes::Hash, locktime::absolute::LockTime, secp256k1::Secp256k1, OutPoint, ScriptBuf,
-    Sequence, Transaction, TxIn, TxOut, Txid, Witness,
+    locktime::absolute::LockTime, secp256k1::Secp256k1, OutPoint, ScriptBuf, Sequence, Transaction,
+    TxIn, TxOut, Txid, Witness,
 };
 use miniscript::Descriptor;
 
@@ -86,8 +87,14 @@ pub fn init_graph<'a>(
                 .iter()
                 .map(|input| match input {
                     TxInTemplate::Bogus => TxIn {
-                        // #TODO have actual random data
-                        previous_output: OutPoint::new(Txid::all_zeros(), bogus_txin_vout as u32),
+                        previous_output: OutPoint::new(
+                            bitcoin::hashes::Hash::hash(
+                                Alphanumeric
+                                    .sample_string(&mut rand::thread_rng(), 20)
+                                    .as_bytes(),
+                            ),
+                            bogus_txin_vout as u32,
+                        ),
                         script_sig: ScriptBuf::new(),
                         sequence: Sequence::default(),
                         witness: Witness::new(),
