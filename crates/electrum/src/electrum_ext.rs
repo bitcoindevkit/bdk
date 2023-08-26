@@ -14,86 +14,63 @@ use std::{
 /// We assume that a block of this depth and deeper cannot be reorged.
 const ASSUME_FINAL_DEPTH: u32 = 8;
 
-/// Represents an update fetched from an Electrum server, but excludes full
-/// transactions.
+/// Represents a [`TxGraph`] update fetched from an Electrum server, but excludes full transactions.
 ///
 /// To provide a complete update to [`TxGraph`], you'll need to call [`Self::missing_full_txs`] to
-/// determine the full transactions missing from [`TxGraph`]. Then call [`Self::finalize`] to fetch
-/// the full transactions from Electrum and finalize the update.
-#[derive(Debug, Clone)]
-pub struct ElectrumUpdate<K, A> {
-    /// Map of [`Txid`]s to associated [`Anchor`]s.
-    pub graph_update: HashMap<Txid, BTreeSet<A>>,
-    /// The latest chain tip, as seen by the Electrum server.
-    pub new_tip: local_chain::CheckPoint,
-    /// Last-used index update for [`KeychainTxOutIndex`](bdk_chain::keychain::KeychainTxOutIndex).
-    pub keychain_update: BTreeMap<K, u32>,
-}
+/// determine the full transactions missing from [`TxGraph`]. Then call [`Self::finalize`] to
+/// fetch the full transactions from Electrum and finalize the update.
+#[derive(Debug, Default, Clone)]
+pub struct IncompleteTxGraph<A>(HashMap<Txid, BTreeSet<A>>);
 
-impl<K, A: Anchor> ElectrumUpdate<K, A> {
-    fn new(new_tip: local_chain::CheckPoint) -> Self {
-        Self {
-            new_tip,
-            graph_update: HashMap::new(),
-            keychain_update: BTreeMap::new(),
-        }
-    }
-
+impl<A: Anchor> IncompleteTxGraph<A> {
     /// Determine the full transactions that are missing from `graph`.
     ///
-    /// Refer to [`ElectrumUpdate`].
+    /// Refer to [`IncompleteTxGraph`] for more.
     pub fn missing_full_txs<A2>(&self, graph: &TxGraph<A2>) -> Vec<Txid> {
-        self.graph_update
+        self.0
             .keys()
             .filter(move |&&txid| graph.as_ref().get_tx(txid).is_none())
             .cloned()
             .collect()
     }
 
-    /// Finalizes update with `missing` txids to fetch from `client`.
+    /// Finalizes the [`TxGraph`] update by fetching `missing` txids from the `client`.
     ///
-    /// Refer to [`ElectrumUpdate`].
+    /// Refer to [`IncompleteTxGraph`] for more.
     pub fn finalize(
         self,
         client: &Client,
         seen_at: Option<u64>,
         missing: Vec<Txid>,
-    ) -> Result<(TxGraph<A>, BTreeMap<K, u32>, local_chain::CheckPoint), Error> {
+    ) -> Result<TxGraph<A>, Error> {
         let new_txs = client.batch_transaction_get(&missing)?;
-        let mut graph_update = TxGraph::<A>::new(new_txs);
-        for (txid, anchors) in self.graph_update {
+        let mut graph = TxGraph::<A>::new(new_txs);
+        for (txid, anchors) in self.0 {
             if let Some(seen_at) = seen_at {
-                let _ = graph_update.insert_seen_at(txid, seen_at);
+                let _ = graph.insert_seen_at(txid, seen_at);
             }
             for anchor in anchors {
-                let _ = graph_update.insert_anchor(txid, anchor);
+                let _ = graph.insert_anchor(txid, anchor);
             }
         }
-        Ok((graph_update, self.keychain_update, self.new_tip))
+        Ok(graph)
     }
 }
 
-impl<K> ElectrumUpdate<K, ConfirmationHeightAnchor> {
-    /// Finalizes the [`ElectrumUpdate`] with `new_txs` and anchors of type
+impl IncompleteTxGraph<ConfirmationHeightAnchor> {
+    /// Finalizes the [`IncompleteTxGraph`] with `new_txs` and anchors of type
     /// [`ConfirmationTimeAnchor`].
     ///
     /// **Note:** The confirmation time might not be precisely correct if there has been a reorg.
     /// Electrum's API intends that we use the merkle proof API, we should change `bdk_electrum` to
     /// use it.
-    pub fn finalize_as_confirmation_time(
+    pub fn finalize_with_confirmation_time(
         self,
         client: &Client,
         seen_at: Option<u64>,
         missing: Vec<Txid>,
-    ) -> Result<
-        (
-            TxGraph<ConfirmationTimeAnchor>,
-            BTreeMap<K, u32>,
-            local_chain::CheckPoint,
-        ),
-        Error,
-    > {
-        let (graph, keychain_update, update_tip) = self.finalize(client, seen_at, missing)?;
+    ) -> Result<TxGraph<ConfirmationTimeAnchor>, Error> {
+        let graph = self.finalize(client, seen_at, missing)?;
 
         let relevant_heights = {
             let mut visited_heights = HashSet::new();
@@ -117,7 +94,7 @@ impl<K> ElectrumUpdate<K, ConfirmationHeightAnchor> {
             .collect::<HashMap<u32, u64>>();
 
         let graph_changeset = {
-            let old_changeset = TxGraph::default().apply_update(graph.clone());
+            let old_changeset = TxGraph::default().apply_update(graph);
             tx_graph::ChangeSet {
                 txs: old_changeset.txs,
                 txouts: old_changeset.txouts,
@@ -139,16 +116,16 @@ impl<K> ElectrumUpdate<K, ConfirmationHeightAnchor> {
             }
         };
 
-        let mut update = TxGraph::default();
-        update.apply_changeset(graph_changeset);
-
-        Ok((update, keychain_update, update_tip))
+        let mut new_graph = TxGraph::default();
+        new_graph.apply_changeset(graph_changeset);
+        Ok(new_graph)
     }
 }
 
 /// Trait to extend [`Client`] functionality.
 pub trait ElectrumExt<A> {
-    /// Scan the blockchain (via electrum) for the data specified and returns a [`ElectrumUpdate`].
+    /// Scan the blockchain (via electrum) for the data specified and returns updates for
+    /// [`bdk_chain`] data structures.
     ///
     /// - `prev_tip`: the most recent blockchain tip present locally
     /// - `keychain_spks`: keychains that we want to scan transactions for
@@ -159,6 +136,7 @@ pub trait ElectrumExt<A> {
     /// The scan for each keychain stops after a gap of `stop_gap` script pubkeys with no associated
     /// transactions. `batch_size` specifies the max number of script pubkeys to request for in a
     /// single batch request.
+    #[allow(clippy::type_complexity)]
     fn scan<K: Ord + Clone>(
         &self,
         prev_tip: Option<CheckPoint>,
@@ -167,7 +145,7 @@ pub trait ElectrumExt<A> {
         outpoints: impl IntoIterator<Item = OutPoint>,
         stop_gap: usize,
         batch_size: usize,
-    ) -> Result<ElectrumUpdate<K, A>, Error>;
+    ) -> Result<(local_chain::Update, IncompleteTxGraph<A>, BTreeMap<K, u32>), Error>;
 
     /// Convenience method to call [`scan`] without requiring a keychain.
     ///
@@ -179,20 +157,22 @@ pub trait ElectrumExt<A> {
         txids: impl IntoIterator<Item = Txid>,
         outpoints: impl IntoIterator<Item = OutPoint>,
         batch_size: usize,
-    ) -> Result<ElectrumUpdate<(), A>, Error> {
+    ) -> Result<(local_chain::Update, IncompleteTxGraph<A>), Error> {
         let spk_iter = misc_spks
             .into_iter()
             .enumerate()
             .map(|(i, spk)| (i as u32, spk));
 
-        self.scan(
+        let (chain, graph, _) = self.scan(
             prev_tip,
             [((), spk_iter)].into(),
             txids,
             outpoints,
             usize::MAX,
             batch_size,
-        )
+        )?;
+
+        Ok((chain, graph))
     }
 }
 
@@ -205,7 +185,14 @@ impl ElectrumExt<ConfirmationHeightAnchor> for Client {
         outpoints: impl IntoIterator<Item = OutPoint>,
         stop_gap: usize,
         batch_size: usize,
-    ) -> Result<ElectrumUpdate<K, ConfirmationHeightAnchor>, Error> {
+    ) -> Result<
+        (
+            local_chain::Update,
+            IncompleteTxGraph<ConfirmationHeightAnchor>,
+            BTreeMap<K, u32>,
+        ),
+        Error,
+    > {
         let mut request_spks = keychain_spks
             .into_iter()
             .map(|(k, s)| (k, s.into_iter()))
@@ -217,9 +204,8 @@ impl ElectrumExt<ConfirmationHeightAnchor> for Client {
 
         let update = loop {
             let (tip, _) = construct_update_tip(self, prev_tip.clone())?;
-            let mut update = ElectrumUpdate::<K, ConfirmationHeightAnchor>::new(tip.clone());
-            let cps = update
-                .new_tip
+            let mut graph_update = IncompleteTxGraph::<ConfirmationHeightAnchor>::default();
+            let cps = tip
                 .iter()
                 .take(10)
                 .map(|cp| (cp.height(), cp))
@@ -230,7 +216,7 @@ impl ElectrumExt<ConfirmationHeightAnchor> for Client {
                     scanned_spks.append(&mut populate_with_spks(
                         self,
                         &cps,
-                        &mut update,
+                        &mut graph_update,
                         &mut scanned_spks
                             .iter()
                             .map(|(i, (spk, _))| (i.clone(), spk.clone())),
@@ -243,7 +229,7 @@ impl ElectrumExt<ConfirmationHeightAnchor> for Client {
                         populate_with_spks(
                             self,
                             &cps,
-                            &mut update,
+                            &mut graph_update,
                             keychain_spks,
                             stop_gap,
                             batch_size,
@@ -254,10 +240,14 @@ impl ElectrumExt<ConfirmationHeightAnchor> for Client {
                 }
             }
 
-            populate_with_txids(self, &cps, &mut update, &mut txids.iter().cloned())?;
+            populate_with_txids(self, &cps, &mut graph_update, &mut txids.iter().cloned())?;
 
-            let _txs =
-                populate_with_outpoints(self, &cps, &mut update, &mut outpoints.iter().cloned())?;
+            let _txs = populate_with_outpoints(
+                self,
+                &cps,
+                &mut graph_update,
+                &mut outpoints.iter().cloned(),
+            )?;
 
             // check for reorgs during scan process
             let server_blockhash = self.block_header(tip.height() as usize)?.block_hash();
@@ -265,7 +255,12 @@ impl ElectrumExt<ConfirmationHeightAnchor> for Client {
                 continue; // reorg
             }
 
-            update.keychain_update = request_spks
+            let chain_update = local_chain::Update {
+                tip,
+                introduce_older_blocks: true,
+            };
+
+            let keychain_update = request_spks
                 .into_keys()
                 .filter_map(|k| {
                     scanned_spks
@@ -275,7 +270,8 @@ impl ElectrumExt<ConfirmationHeightAnchor> for Client {
                         .map(|((_, i), _)| (k, *i))
                 })
                 .collect::<BTreeMap<_, _>>();
-            break update;
+
+            break (chain_update, graph_update, keychain_update);
         };
 
         Ok(update)
@@ -399,10 +395,10 @@ fn determine_tx_anchor(
     }
 }
 
-fn populate_with_outpoints<K>(
+fn populate_with_outpoints(
     client: &Client,
     cps: &BTreeMap<u32, CheckPoint>,
-    update: &mut ElectrumUpdate<K, ConfirmationHeightAnchor>,
+    graph_update: &mut IncompleteTxGraph<ConfirmationHeightAnchor>,
     outpoints: &mut impl Iterator<Item = OutPoint>,
 ) -> Result<HashMap<Txid, Transaction>, Error> {
     let mut full_txs = HashMap::new();
@@ -451,7 +447,7 @@ fn populate_with_outpoints<K>(
             };
 
             let anchor = determine_tx_anchor(cps, res.height, res.tx_hash);
-            let tx_entry = update.graph_update.entry(res.tx_hash).or_default();
+            let tx_entry = graph_update.0.entry(res.tx_hash).or_default();
             if let Some(anchor) = anchor {
                 tx_entry.insert(anchor);
             }
@@ -460,10 +456,10 @@ fn populate_with_outpoints<K>(
     Ok(full_txs)
 }
 
-fn populate_with_txids<K>(
+fn populate_with_txids(
     client: &Client,
     cps: &BTreeMap<u32, CheckPoint>,
-    update: &mut ElectrumUpdate<K, ConfirmationHeightAnchor>,
+    graph_update: &mut IncompleteTxGraph<ConfirmationHeightAnchor>,
     txids: &mut impl Iterator<Item = Txid>,
 ) -> Result<(), Error> {
     for txid in txids {
@@ -488,7 +484,7 @@ fn populate_with_txids<K>(
             None => continue,
         };
 
-        let tx_entry = update.graph_update.entry(txid).or_default();
+        let tx_entry = graph_update.0.entry(txid).or_default();
         if let Some(anchor) = anchor {
             tx_entry.insert(anchor);
         }
@@ -496,10 +492,10 @@ fn populate_with_txids<K>(
     Ok(())
 }
 
-fn populate_with_spks<K, I: Ord + Clone>(
+fn populate_with_spks<I: Ord + Clone>(
     client: &Client,
     cps: &BTreeMap<u32, CheckPoint>,
-    update: &mut ElectrumUpdate<K, ConfirmationHeightAnchor>,
+    graph_update: &mut IncompleteTxGraph<ConfirmationHeightAnchor>,
     spks: &mut impl Iterator<Item = (I, ScriptBuf)>,
     stop_gap: usize,
     batch_size: usize,
@@ -532,7 +528,7 @@ fn populate_with_spks<K, I: Ord + Clone>(
             }
 
             for tx in spk_history {
-                let tx_entry = update.graph_update.entry(tx.tx_hash).or_default();
+                let tx_entry = graph_update.0.entry(tx.tx_hash).or_default();
                 if let Some(anchor) = determine_tx_anchor(cps, tx.height, tx.tx_hash) {
                     tx_entry.insert(anchor);
                 }
