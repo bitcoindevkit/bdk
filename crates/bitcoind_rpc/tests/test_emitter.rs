@@ -215,15 +215,10 @@ fn test_into_tx_graph() -> anyhow::Result<()> {
             let _ = chain.apply_update(chain_update)?;
         }
 
-        let tx_graph_update = update.into_tx_graph_update(
-            bdk_bitcoind_rpc::indexer_filter(&mut indexed_tx_graph.index, &mut BTreeSet::new()),
-            bdk_bitcoind_rpc::confirmation_height_anchor,
-        );
-        assert_eq!(tx_graph_update.full_txs().count(), 0);
-        assert_eq!(tx_graph_update.all_txouts().count(), 0);
-        assert_eq!(tx_graph_update.all_anchors().len(), 0);
+        let tx_graph_update =
+            update.indexed_tx_graph_update(bdk_bitcoind_rpc::confirmation_height_anchor);
 
-        let indexed_additions = indexed_tx_graph.apply_update(tx_graph_update);
+        let indexed_additions = indexed_tx_graph.insert_relevant_txs(tx_graph_update);
         assert!(indexed_additions.is_empty());
     }
 
@@ -250,20 +245,10 @@ fn test_into_tx_graph() -> anyhow::Result<()> {
         let update = Emitter::new(&env.client, 0, chain.tip()).emit_update()?;
         assert!(update.is_mempool());
 
-        let tx_graph_update = update.into_tx_graph_update(
-            bdk_bitcoind_rpc::indexer_filter(&mut indexed_tx_graph.index, &mut BTreeSet::new()),
-            bdk_bitcoind_rpc::confirmation_height_anchor,
-        );
-        assert_eq!(
-            tx_graph_update
-                .full_txs()
-                .map(|tx| tx.txid)
-                .collect::<BTreeSet<Txid>>(),
-            exp_txids,
-            "the mempool update should have 3 relevant transactions",
-        );
+        let tx_graph_update =
+            update.indexed_tx_graph_update(bdk_bitcoind_rpc::confirmation_height_anchor);
 
-        let indexed_additions = indexed_tx_graph.apply_update(tx_graph_update);
+        let indexed_additions = indexed_tx_graph.insert_relevant_txs(tx_graph_update);
         assert_eq!(
             indexed_additions
                 .graph
@@ -302,25 +287,10 @@ fn test_into_tx_graph() -> anyhow::Result<()> {
             let _ = chain.apply_update(chain_update)?;
         }
 
-        let tx_graph_update = update.into_tx_graph_update(
-            bdk_bitcoind_rpc::indexer_filter(&mut indexed_tx_graph.index, &mut BTreeSet::new()),
-            bdk_bitcoind_rpc::confirmation_height_anchor,
-        );
-        assert_eq!(
-            tx_graph_update
-                .full_txs()
-                .map(|tx| tx.txid)
-                .collect::<BTreeSet<Txid>>(),
-            exp_txids,
-            "block update should have 3 relevant transactions",
-        );
-        assert_eq!(
-            tx_graph_update.all_anchors(),
-            &exp_anchors,
-            "the block update should introduce anchors",
-        );
+        let tx_graph_update =
+            update.indexed_tx_graph_update(bdk_bitcoind_rpc::confirmation_height_anchor);
 
-        let indexed_additions = indexed_tx_graph.apply_update(tx_graph_update);
+        let indexed_additions = indexed_tx_graph.insert_relevant_txs(tx_graph_update);
         assert!(indexed_additions.graph.txs.is_empty());
         assert!(indexed_additions.graph.txouts.is_empty());
         assert_eq!(indexed_additions.graph.anchors, exp_anchors);

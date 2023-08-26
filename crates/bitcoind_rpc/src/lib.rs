@@ -1,8 +1,7 @@
 //! This crate is used for updating [`bdk_chain`] structures with data from the `bitcoind` RPC
-//! interface.
+//! interface (excluding the RPC wallet API).
 //!
-//! The main structure is [`Emitter`], which sources blockchain data from
-//! [`bitcoincore_rpc::Client`].
+//! [`Emitter`] is the main structure which sources blockchain data from [`bitcoincore_rpc::Client`].
 //!
 //! To only get block updates (exlude mempool transactions), the caller can use
 //! [`Emitter::emit_block`] until it returns `Ok(None)` (which means the chain tip is reached). A
@@ -43,9 +42,9 @@
 
 use bdk_chain::{
     bitcoin::{Block, Transaction},
-    indexed_tx_graph::Indexer,
+    indexed_tx_graph::TxItem,
     local_chain::{self, CheckPoint},
-    Append, BlockId, ConfirmationHeightAnchor, ConfirmationTimeAnchor, TxGraph,
+    BlockId, ConfirmationHeightAnchor, ConfirmationTimeAnchor,
 };
 pub use bitcoincore_rpc;
 use bitcoincore_rpc::{json::GetBlockResult, RpcApi};
@@ -92,24 +91,21 @@ impl EmittedUpdate {
         })
     }
 
-    /// Transforms the emitted update into a [`TxGraph`] update.
-    ///
-    /// The `tx_filter` parameter takes in a closure that filters out irrelevant transactions so
-    /// they do not get included in the [`TxGraph`] update. We have provided two closures;
-    /// [`empty_filter`] and [`indexer_filter`] for this purpose.
+    /// Return transaction items to be consumed by [`IndexedTxGraph::insert_relevant_txs`].
     ///
     /// The `anchor_map` parameter takes in a closure that creates anchors of a specific type.
     /// [`confirmation_height_anchor`] and [`confirmation_time_anchor`] are avaliable to create
     /// updates with [`ConfirmationHeightAnchor`] and [`ConfirmationTimeAnchor`] respectively.
-    pub fn into_tx_graph_update<F, M, A>(self, tx_filter: F, anchor_map: M) -> TxGraph<A>
+    ///
+    /// [`IndexedTxGraph::insert_relevant_txs`]: bdk_chain::IndexedTxGraph::insert_relevant_txs
+    pub fn indexed_tx_graph_update<M, A>(&self, anchor_map: M) -> Vec<TxItem<'_, Option<A>>>
     where
-        F: FnMut(&Transaction) -> bool,
         M: Fn(&CheckPoint, &Block, usize) -> A,
-        A: Clone + Ord + PartialOrd,
+        A: Clone + Ord + PartialEq,
     {
         match self {
-            EmittedUpdate::Block(e) => e.into_tx_graph_update(tx_filter, anchor_map),
-            EmittedUpdate::Mempool(e) => e.into_tx_graph_update(tx_filter),
+            EmittedUpdate::Block(e) => e.indexed_tx_graph_update(anchor_map).collect(),
+            EmittedUpdate::Mempool(e) => e.indexed_tx_graph_update().collect(),
         }
     }
 }
@@ -129,87 +125,63 @@ impl EmittedBlock {
         self.cp.clone()
     }
 
-    /// Transforms the emitted update into a [`TxGraph`] update.
+    /// Convenience method to get [`local_chain::Update`].
+    pub fn chain_update(&self) -> local_chain::Update {
+        local_chain::Update {
+            tip: self.cp.clone(),
+            introduce_older_blocks: false,
+        }
+    }
+
+    /// Return transaction items to be consumed by [`IndexedTxGraph::insert_relevant_txs`].
     ///
-    /// The `tx_filter` parameter takes in a closure that filters out irrelevant transactions so
-    /// they do not get included in the [`TxGraph`] update. We have provided two closures;
-    /// [`empty_filter`] and [`indexer_filter`] for this purpose.
+    /// Refer to [`EmittedUpdate::indexed_tx_graph_update`] for more.
     ///
-    /// The `anchor_map` parameter takes in a closure that creates anchors of a specific type.
-    /// [`confirmation_height_anchor`] and [`confirmation_time_anchor`] are avaliable to create
-    /// updates with [`ConfirmationHeightAnchor`] and [`ConfirmationTimeAnchor`] respectively.
-    pub fn into_tx_graph_update<F, M, A>(self, mut tx_filter: F, anchor_map: M) -> TxGraph<A>
+    /// [`IndexedTxGraph::insert_relevant_txs`]: bdk_chain::IndexedTxGraph::insert_relevant_txs
+    pub fn indexed_tx_graph_update<M, A>(
+        &self,
+        anchor_map: M,
+    ) -> impl Iterator<Item = TxItem<'_, Option<A>>>
     where
-        F: FnMut(&Transaction) -> bool,
         M: Fn(&CheckPoint, &Block, usize) -> A,
-        A: Clone + Ord + PartialOrd,
+        A: Clone + Ord + PartialEq,
     {
-        let mut tx_graph = TxGraph::default();
-        let tx_iter = self
-            .block
+        self.block
             .txdata
             .iter()
             .enumerate()
-            .filter(move |(_, tx)| tx_filter(tx));
-        for (tx_pos, tx) in tx_iter {
-            let txid = tx.txid();
-            let _ = tx_graph.insert_anchor(txid, anchor_map(&self.cp, &self.block, tx_pos));
-            let _ = tx_graph.insert_tx(tx.clone());
-        }
-        tx_graph
+            .map(move |(i, tx)| (tx, Some(anchor_map(&self.cp, &self.block, i)), None))
     }
 }
 
 /// An emitted subset of mempool transactions.
 #[derive(Debug, Clone)]
 pub struct EmittedMempool {
-    /// Subset of mempool transactions.
+    /// Subset of mempool transactions as tuples of `(tx, seen_at)`.
+    ///
+    /// `seen_at` is the unix timestamp of when the transaction was first seen in the mempool.
     pub txs: Vec<(Transaction, u64)>,
 }
 
 impl EmittedMempool {
-    /// Transforms the emitted mempool into a [`TxGraph`] update.
+    /// Return transaction items to be consumed by [`IndexedTxGraph::insert_relevant_txs`].
     ///
-    /// The `tx_filter` parameter takes in a closure that filters out irrelevant transactions so
-    /// they do not get included in the [`TxGraph`] update. We have provided two closures;
-    /// [`empty_filter`] and [`indexer_filter`] for this purpose.
-    pub fn into_tx_graph_update<F, A>(self, mut tx_filter: F) -> TxGraph<A>
+    /// Refer to [`EmittedUpdate::indexed_tx_graph_update`] for more.
+    ///
+    /// [`IndexedTxGraph::insert_relevant_txs`]: bdk_chain::IndexedTxGraph::insert_relevant_txs
+    pub fn indexed_tx_graph_update<A>(&self) -> impl Iterator<Item = TxItem<'_, Option<A>>>
     where
-        F: FnMut(&Transaction) -> bool,
-        A: Clone + Ord + PartialOrd,
+        A: Clone + Ord + PartialEq,
     {
-        let mut tx_graph = TxGraph::default();
-        let tx_iter = self.txs.into_iter().filter(move |(tx, _)| tx_filter(tx));
-        for (tx, seen_at) in tx_iter {
-            let _ = tx_graph.insert_seen_at(tx.txid(), seen_at);
-            let _ = tx_graph.insert_tx(tx);
-        }
-        tx_graph
+        self.txs
+            .iter()
+            .map(|(tx, seen_at)| (tx, None, Some(*seen_at)))
     }
-}
-
-/// Creates a closure that filters transactions based on an [`Indexer`] implementation.
-pub fn indexer_filter<'i, I: Indexer>(
-    indexer: &'i mut I,
-    changeset: &'i mut I::ChangeSet,
-) -> impl FnMut(&Transaction) -> bool + 'i
-where
-    I::ChangeSet: bdk_chain::Append,
-{
-    |tx| {
-        changeset.append(indexer.index_tx(tx));
-        indexer.is_tx_relevant(tx)
-    }
-}
-
-/// Returns an empty filter-closure.
-pub fn empty_filter() -> impl FnMut(&Transaction) -> bool {
-    |_| true
 }
 
 /// A closure that transforms a [`EmittedUpdate`] into a [`ConfirmationHeightAnchor`].
 ///
-/// This is to be used as an input to [`EmittedUpdate::into_tx_graph_update`].
+/// This is to be used as an input to [`EmittedUpdate::indexed_tx_graph_update`].
 pub fn confirmation_height_anchor(
     cp: &CheckPoint,
     _block: &Block,
@@ -224,7 +196,7 @@ pub fn confirmation_height_anchor(
 
 /// A closure that transforms a [`EmittedUpdate`] into a [`ConfirmationTimeAnchor`].
 ///
-/// This is to be used as an input to [`EmittedUpdate::into_tx_graph_update`].
+/// This is to be used as an input to [`EmittedUpdate::indexed_tx_graph_update`].
 pub fn confirmation_time_anchor(
     cp: &CheckPoint,
     block: &Block,
