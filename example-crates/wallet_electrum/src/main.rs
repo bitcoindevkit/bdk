@@ -7,9 +7,9 @@ use std::io::Write;
 use std::str::FromStr;
 
 use bdk::bitcoin::Address;
+use bdk::wallet::WalletUpdate;
 use bdk::SignOptions;
-use bdk::{bitcoin::Network, wallet::WalletUpdate, Wallet};
-use bdk_electrum::bdk_chain::local_chain;
+use bdk::{bitcoin::Network, Wallet};
 use bdk_electrum::electrum_client::{self, ElectrumApi};
 use bdk_electrum::ElectrumExt;
 use bdk_file_store::Store;
@@ -53,21 +53,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         })
         .collect();
 
-    let electrum_update = client.scan(prev_tip, keychain_spks, None, None, STOP_GAP, BATCH_SIZE)?;
+    let (chain_update, incomplete_graph_update, keychain_update) =
+        client.scan(prev_tip, keychain_spks, None, None, STOP_GAP, BATCH_SIZE)?;
 
     println!();
 
-    let missing = electrum_update.missing_full_txs(wallet.as_ref());
-    let (graph_update, keychain_update, update_tip) =
-        electrum_update.finalize_as_confirmation_time(&client, None, missing)?;
+    let missing = incomplete_graph_update.missing_full_txs(wallet.as_ref());
+    let graph_update =
+        incomplete_graph_update.finalize_with_confirmation_time(&client, None, missing)?;
 
     let wallet_update = WalletUpdate {
         last_active_indices: keychain_update,
         graph: graph_update,
-        chain: Some(local_chain::Update {
-            tip: update_tip,
-            introduce_older_blocks: true,
-        }),
+        chain: Some(chain_update),
     };
     wallet.apply_update(wallet_update)?;
     wallet.commit()?;
