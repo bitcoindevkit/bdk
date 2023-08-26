@@ -29,11 +29,9 @@
 //! for r in Emitter::new(&client, 709_632, None) {
 //!     let update = r.expect("todo: deal with the error properly");
 //!
-//!     if update.is_block() {
-//!         let cp = update.checkpoint();
-//!         println!("block {}:{}", cp.height(), cp.hash());
-//!     } else {
-//!         println!("mempool!");
+//!     match update.checkpoint() {
+//!         Some(cp) => println!("block {}:{}", cp.height(), cp.hash()),
+//!         None => println!("mempool!"),
 //!     }
 //! }
 //! ```
@@ -46,7 +44,7 @@
 use bdk_chain::{
     bitcoin::{Block, Transaction},
     indexed_tx_graph::Indexer,
-    local_chain::CheckPoint,
+    local_chain::{self, CheckPoint},
     Append, BlockId, ConfirmationHeightAnchor, ConfirmationTimeAnchor, TxGraph,
 };
 pub use bitcoincore_rpc;
@@ -77,11 +75,21 @@ impl EmittedUpdate {
     }
 
     /// Get the emission's checkpoint.
-    pub fn checkpoint(&self) -> CheckPoint {
+    ///
+    /// The emission will only have a checkpoint if it is the [`EmittedUpdate::Block`] variant.
+    pub fn checkpoint(&self) -> Option<CheckPoint> {
         match self {
-            EmittedUpdate::Block(e) => e.checkpoint(),
-            EmittedUpdate::Mempool(e) => e.checkpoint(),
+            EmittedUpdate::Block(e) => Some(e.checkpoint()),
+            EmittedUpdate::Mempool(_) => None,
         }
+    }
+
+    /// Convenience method to get [`local_chain::Update`].
+    pub fn chain_update(&self) -> Option<local_chain::Update> {
+        Some(local_chain::Update {
+            tip: self.checkpoint()?,
+            introduce_older_blocks: false,
+        })
     }
 
     /// Transforms the emitted update into a [`TxGraph`] update.
@@ -155,18 +163,11 @@ impl EmittedBlock {
 /// An emitted subset of mempool transactions.
 #[derive(Debug, Clone)]
 pub struct EmittedMempool {
-    /// The checkpoint of the last-seen tip.
-    pub cp: CheckPoint,
     /// Subset of mempool transactions.
     pub txs: Vec<(Transaction, u64)>,
 }
 
 impl EmittedMempool {
-    /// Get the emission's checkpoint.
-    pub fn checkpoint(&self) -> CheckPoint {
-        self.cp.clone()
-    }
-
     /// Transforms the emitted mempool into a [`TxGraph`] update.
     ///
     /// The `tx_filter` parameter takes in a closure that filters out irrelevant transactions so
@@ -295,15 +296,7 @@ impl<'c, C: RpcApi> Emitter<'c, C> {
                 },
             )
             .collect::<Result<Vec<_>, _>>()?;
-        let cp = match &self.last_cp {
-            Some(cp) => cp.clone(),
-            None => {
-                let hash = self.client.get_best_block_hash()?;
-                let height = self.client.get_block_info(&hash)?.height as u32;
-                CheckPoint::new(BlockId { height, hash })
-            }
-        };
-        Ok(EmittedMempool { cp, txs })
+        Ok(EmittedMempool { txs })
     }
 
     /// Emits the next block (if any).
