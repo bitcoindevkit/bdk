@@ -211,10 +211,9 @@ fn test_into_tx_graph() -> anyhow::Result<()> {
     for r in Emitter::new(&env.client, 0, chain.tip()) {
         let update = r?;
 
-        let _ = chain.apply_update(bdk_chain::local_chain::Update {
-            tip: update.checkpoint(),
-            introduce_older_blocks: false,
-        })?;
+        if let Some(chain_update) = update.chain_update() {
+            let _ = chain.apply_update(chain_update)?;
+        }
 
         let tx_graph_update = update.into_tx_graph_update(
             bdk_bitcoind_rpc::indexer_filter(&mut indexed_tx_graph.index, &mut BTreeSet::new()),
@@ -299,10 +298,9 @@ fn test_into_tx_graph() -> anyhow::Result<()> {
         let update = Emitter::new(&env.client, 0, chain.tip()).emit_update()?;
         assert!(update.is_block());
 
-        let _ = chain.apply_update(bdk_chain::local_chain::Update {
-            tip: update.checkpoint(),
-            introduce_older_blocks: false,
-        })?;
+        if let Some(chain_update) = update.chain_update() {
+            let _ = chain.apply_update(chain_update)?;
+        }
 
         let tx_graph_update = update.into_tx_graph_update(
             bdk_bitcoind_rpc::indexer_filter(&mut indexed_tx_graph.index, &mut BTreeSet::new()),

@@ -192,9 +192,8 @@ fn main() -> anyhow::Result<()> {
             let mut start = Instant::now();
 
             for (item, tip_height) in recv {
-                let is_mempool = item.is_mempool();
+                let chain_update = item.chain_update();
                 let tip = item.checkpoint();
-                let current_height = tip.height();
 
                 let db_changeset = {
                     let mut indexed_changeset = indexed_tx_graph::ChangeSet::default();
@@ -211,10 +210,10 @@ fn main() -> anyhow::Result<()> {
                     };
                     indexed_changeset.append(graph.apply_update(graph_update));
 
-                    let chain_changeset = chain.apply_update(local_chain::Update {
-                        tip,
-                        introduce_older_blocks: false,
-                    })?;
+                    let chain_changeset = match chain_update {
+                        Some(update) => chain.apply_update(update)?,
+                        None => local_chain::ChangeSet::default(),
+                    };
 
                     (chain_changeset, indexed_changeset)
                 };
@@ -237,10 +236,9 @@ fn main() -> anyhow::Result<()> {
                     };
                     println!(
                         "* scanned_to: {} / {} tip | total: {} sats",
-                        if is_mempool {
-                            "mempool".to_string()
-                        } else {
-                            current_height.to_string()
+                        match tip {
+                            Some(cp) => cp.height().to_string(),
+                            None => "mempool".to_string(),
                         },
                         tip_height,
                         balance.confirmed
