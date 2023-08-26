@@ -135,8 +135,7 @@ where
     /// timestamp of when the transactions are last seen.
     pub fn insert_relevant_txs<'t>(
         &mut self,
-        txs: impl IntoIterator<Item = (&'t Transaction, impl IntoIterator<Item = A>)>,
-        seen_at: Option<u64>,
+        txs: impl IntoIterator<Item = TxItem<'t, impl IntoIterator<Item = A>>>,
     ) -> ChangeSet<A, I::ChangeSet> {
         // The algorithm below allows for non-topologically ordered transactions by using two loops.
         // This is achieved by:
@@ -146,17 +145,19 @@ where
         //    returns true or not. (in a second loop).
         let mut changeset = ChangeSet::<A, I::ChangeSet>::default();
         let mut transactions = Vec::new();
-        for (tx, anchors) in txs.into_iter() {
+        for (tx, anchors, seen_at) in txs.into_iter() {
             changeset.indexer.append(self.index.index_tx(tx));
-            transactions.push((tx, anchors));
+            transactions.push((tx, anchors, seen_at));
         }
         changeset.append(
             transactions
                 .into_iter()
-                .filter_map(|(tx, anchors)| match self.index.is_tx_relevant(tx) {
-                    true => Some(self.insert_tx(tx, anchors, seen_at)),
-                    false => None,
-                })
+                .filter_map(
+                    |(tx, anchors, seen_at)| match self.index.is_tx_relevant(tx) {
+                        true => Some(self.insert_tx(tx, anchors, seen_at)),
+                        false => None,
+                    },
+                )
                 .fold(Default::default(), |mut acc, other| {
                     acc.append(other);
                     acc
@@ -165,6 +166,11 @@ where
         changeset
     }
 }
+
+/// Transaction combined with an [`Anchor`] container and an optional last-seen timestamp.
+///
+/// This is used as a input item of [`IndexedTxGraph::insert_relevant_txs`].
+pub type TxItem<'t, A> = (&'t Transaction, A, Option<u64>);
 
 /// A structure that represents changes to an [`IndexedTxGraph`].
 #[derive(Clone, Debug, PartialEq)]
