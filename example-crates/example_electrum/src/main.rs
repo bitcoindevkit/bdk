@@ -13,7 +13,7 @@ use bdk_chain::{
 };
 use bdk_electrum::{
     electrum_client::{self, ElectrumApi},
-    ElectrumExt, ElectrumUpdate,
+    ElectrumExt,
 };
 use example_cli::{
     anyhow::{self, Context},
@@ -251,20 +251,18 @@ fn main() -> anyhow::Result<()> {
             // drop lock on graph and chain
             drop((graph, chain));
 
-            let update = client
+            let (chain_update, graph_update) = client
                 .scan_without_keychain(tip, spks, txids, outpoints, scan_options.batch_size)
                 .context("scanning the blockchain")?;
-            ElectrumUpdate {
-                graph_update: update.graph_update,
-                new_tip: update.new_tip,
-                keychain_update: BTreeMap::new(),
-            }
+            (chain_update, graph_update, BTreeMap::new())
         }
     };
 
+    let (chain_update, incomplete_graph_update, keychain_update) = response;
+
     let missing_txids = {
         let graph = &*graph.lock().unwrap();
-        response.missing_full_txs(graph.graph())
+        incomplete_graph_update.missing_full_txs(graph.graph())
     };
 
     let now = std::time::UNIX_EPOCH
@@ -272,17 +270,13 @@ fn main() -> anyhow::Result<()> {
         .expect("must get time")
         .as_secs();
 
-    let (graph_update, keychain_update, update_tip) =
-        response.finalize(&client, Some(now), missing_txids)?;
+    let graph_update = incomplete_graph_update.finalize(&client, Some(now), missing_txids)?;
 
     let db_changeset = {
         let mut chain = chain.lock().unwrap();
         let mut graph = graph.lock().unwrap();
 
-        let chain = chain.apply_update(local_chain::Update {
-            tip: update_tip,
-            introduce_older_blocks: true,
-        })?;
+        let chain = chain.apply_update(chain_update)?;
 
         let index_tx_graph = {
             let mut changeset =
