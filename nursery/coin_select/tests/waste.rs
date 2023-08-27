@@ -1,9 +1,11 @@
+#![allow(unused_imports)]
+
 mod common;
+
+use bdk_coin_select::change_policy::min_value_and_waste;
 use bdk_coin_select::{
-    change_policy::{self, min_value_and_waste},
-    float::Ordf32,
-    metrics::Waste,
-    Candidate, CoinSelector, Drain, DrainWeights, FeeRate, Target,
+    change_policy, float::Ordf32, metrics::Waste, Candidate, CoinSelector, Drain, DrainWeights,
+    FeeRate, Target,
 };
 use proptest::{
     prelude::*,
@@ -404,6 +406,7 @@ proptest! {
     }
 
     #[test]
+    #[cfg(not(debug_assertions))] // too slow if compiling for debug
     fn can_eventually_find_best_solution(
         n_candidates in 1..20_usize,        // candidates (n)
         target_value in 500..500_000_u64,   // target value (sats)
@@ -443,6 +446,7 @@ proptest! {
     }
 
     #[test]
+    #[cfg(not(debug_assertions))] // too slow if compiling for debug
     fn ensure_bound_is_not_too_tight(
         n_candidates in 0..15_usize,        // candidates (n)
         target_value in 500..500_000_u64,   // target value (sats)

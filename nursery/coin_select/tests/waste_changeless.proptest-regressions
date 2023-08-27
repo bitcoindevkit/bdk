@@ -1,0 +1,11 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc bc541ecdfbef4f0dc018118e3a12e8f42d4288794042dde6e67cba9ed151f38d # shrinks to n_candidates = 1, target_value = 500, base_weight = 0, min_fee = 0, feerate = 1.0, feerate_lt_diff = 18.710138, drain_weight = 100, drain_spend_weight = 1, drain_dust = 100
+cc d7e58be3eb2b3a1f2894b44bce70391afb8cb7e9b23436a09cad19fc9a7278df # shrinks to n_candidates = 16, target_value = 460692, base_weight = 804, min_fee = 0, feerate = 32.85966, feerate_lt_diff = -6.205499, drain_weight = 100, drain_spend_weight = 1, drain_dust = 100
+cc c58d6ede8d1e34850919280d5460e6a9cef6f1addc5ea7a0cc63cfebe20045ea # shrinks to n_candidates = 11, target_value = 464563, base_weight = 169, min_fee = 0, feerate = 33.581432, feerate_lt_diff = -6.752643, drain_weight = 100, drain_spend_weight = 1, drain_dust = 100
+cc 0ffc31477cb45c78a95f83647c4a980cd4883a6baff2facdd779ea919ec8944f # shrinks to n_candidates = 4, target_value = 73433, base_weight = 662, min_fee = 0, feerate = 84.17225, feerate_lt_diff = 0.0, drain_weight = 100, drain_spend_weight = 1, drain_dust = 100
+cc c3845318d5b272f4d5915b4be0107cb8d85c95ccf1baca7741476ee35bc1afde # shrinks to n_candidates = 13, target_value = 7932, base_weight = 306, min_fee = 0, feerate = 92.8342, feerate_lt_diff = 44.98121, drain_weight = 100, drain_spend_weight = 1, drain_dust = 100

@@ -170,6 +170,7 @@ proptest! {
     }
 
     #[test]
+    #[cfg(not(debug_assertions))] // too slow if compiling for debug
     fn bnb_always_finds_exact_solution_eventually(
         solution_len in 1usize..8,
         num_additional_canidates in 0usize..16,

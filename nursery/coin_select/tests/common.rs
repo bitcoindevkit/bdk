@@ -30,18 +30,6 @@ where
     println!("{:?}", params);
 
     let candidates = gen_candidates(params.n_candidates);
-    {
-        println!("\tcandidates:");
-        for (i, candidate) in candidates.iter().enumerate() {
-            println!(
-                "\t\t[{}] {:?} ev={}",
-                i,
-                candidate,
-                candidate.effective_value(params.feerate())
-            );
-        }
-    }
-
     let target = params.target();
 
     let mut metric = gen_metric(&params, gen_change_policy(&params));
@@ -49,6 +37,11 @@ where
 
     let mut selection = CoinSelector::new(&candidates, params.base_weight);
     let mut exp_selection = selection.clone();
+
+    if metric.requires_ordering_by_descending_value_pwu() {
+        exp_selection.sort_candidates_by_descending_value_pwu();
+    }
+    print_candidates(&params, &exp_selection);
 
     println!("\texhaustive search:");
     let now = std::time::Instant::now();
@@ -79,7 +72,9 @@ where
             prop_assert_eq!(
                 score,
                 score_to_match,
-                "score: got={} exp={}",
+                "score:
+                    got={}
+                    exp={}",
                 result_str,
                 exp_result_str
             )
@@ -108,18 +103,6 @@ where
     println!("{:?}", params);
 
     let candidates = gen_candidates(params.n_candidates);
-    {
-        println!("\tcandidates:");
-        for (i, candidate) in candidates.iter().enumerate() {
-            println!(
-                "\t\t[{}] {:?} ev={}, waste={}",
-                i,
-                candidate,
-                candidate.effective_value(params.feerate()),
-                candidate.weight as f32 * (params.feerate - params.long_term_feerate().spwu()),
-            );
-        }
-    }
 
     let target = params.target();
     let change_policy = gen_change_policy(&params);
@@ -132,6 +115,7 @@ where
         }
         cs
     };
+    print_candidates(&params, &init_cs);
 
     for (cs, _) in ExhaustiveIter::new(&init_cs).into_iter().flatten() {
         if let Some(lb_score) = metric.bound(&cs) {
@@ -231,6 +215,20 @@ pub fn gen_candidates(n: usize) -> Vec<Candidate> {
     })
     .take(n)
     .collect()
+}
+
+pub fn print_candidates(params: &StrategyParams, cs: &CoinSelector<'_>) {
+    println!("\tcandidates:");
+    for (i, candidate) in cs.candidates() {
+        println!(
+            "\t\t{:3} | ev:{:10.2} | vpw:{:10.2} | waste:{:10.2} | {:?}",
+            i,
+            candidate.effective_value(params.feerate()),
+            candidate.value_pwu(),
+            candidate.weight as f32 * (params.feerate().spwu() - params.long_term_feerate().spwu()),
+            candidate,
+        );
+    }
 }
 
 pub struct ExhaustiveIter<'a> {

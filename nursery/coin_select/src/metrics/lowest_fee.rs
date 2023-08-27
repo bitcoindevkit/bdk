@@ -202,5 +202,4 @@ fn slurp(target: Target, excess: i64, candidate: Candidate) -> f32 {
     }
 
     perfect_weight.max(0.0)
-    // dbg!(perfect_weight)
 }

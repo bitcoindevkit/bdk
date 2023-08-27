@@ -319,9 +319,9 @@ impl<'a> CoinSelector<'a> {
         self.sort_candidates_by(|a, b| key_fn(a).cmp(&key_fn(b)))
     }
 
-    /// Sorts the candidates by descending value per weight unit
+    /// Sorts the candidates by descending value per weight unit, tie-breaking with value.
     pub fn sort_candidates_by_descending_value_pwu(&mut self) {
-        self.sort_candidates_by_key(|(_, wv)| core::cmp::Reverse(wv.value_pwu()));
+        self.sort_candidates_by_key(|(_, wv)| core::cmp::Reverse((wv.value_pwu(), wv.value)));
     }
 
     /// The waste created by the current selection as measured by the [waste metric].
@@ -356,7 +356,9 @@ impl<'a> CoinSelector<'a> {
     }
 
     /// The selected candidates with their index.
-    pub fn selected(&self) -> impl ExactSizeIterator<Item = (usize, Candidate)> + '_ {
+    pub fn selected(
+        &self,
+    ) -> impl ExactSizeIterator<Item = (usize, Candidate)> + DoubleEndedIterator + '_ {
         self.selected
             .iter()
             .map(move |&index| (index, self.candidates[index]))

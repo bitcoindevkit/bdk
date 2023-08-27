@@ -24,21 +24,28 @@ impl<'a, M: BnbMetric> Iterator for BnbIter<'a, M> {
         // }
 
         let branch = self.queue.pop()?;
-        println!(
-            "\t\t( POP) branch={} inclusion=({}) lb={:?}, score={:?}",
-            branch.selector,
-            !branch.is_exclusion,
-            branch.lower_bound,
-            self.metric.score(&branch.selector),
-        );
         if let Some(best) = &self.best {
             // If the next thing in queue is not better than our best we're done.
             // The exception is when the branch has just met the target with the last selection, so
             // we want to consider these branches first.
             if !branch.target_just_met && *best < branch.lower_bound {
+                // println!(
+                //     "\t\t(SKIP) branch={} inclusion={} lb={:?}, score={:?}",
+                //     branch.selector,
+                //     !branch.is_exclusion,
+                //     branch.lower_bound,
+                //     self.metric.score(&branch.selector),
+                // );
                 return None;
             }
         }
+        // println!(
+        //     "\t\t( POP) branch={} inclusion={} lb={:?}, score={:?}",
+        //     branch.selector,
+        //     !branch.is_exclusion,
+        //     branch.lower_bound,
+        //     self.metric.score(&branch.selector),
+        // );
 
         let selector = branch.selector;
 
@@ -90,13 +97,13 @@ impl<'a, M: BnbMetric> BnbIter<'a, M> {
                     target_just_met: self.metric.is_target_just_met(cs),
                     is_exclusion,
                 };
-                println!(
-                    "\t\t(PUSH) branch={} inclusion={} lb={:?}, score={:?}",
-                    branch.selector,
-                    !branch.is_exclusion,
-                    branch.lower_bound,
-                    self.metric.score(&branch.selector),
-                );
+                // println!(
+                //     "\t\t(PUSH) branch={} inclusion={} lb={:?}, score={:?}",
+                //     branch.selector,
+                //     !branch.is_exclusion,
+                //     branch.lower_bound,
+                //     self.metric.score(&branch.selector),
+                // );
                 self.queue.push(branch);
             }
         }

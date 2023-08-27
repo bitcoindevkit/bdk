@@ -7,3 +7,5 @@
 cc 22ecc118934d2c7e620751b2a8940e88aa07639a1d567861e1a04be9750c4291 # shrinks to n_candidates = 4, target_value = 500, base_weight = 0, min_fee = 0, feerate = 59.03896, feerate_lt_diff = 0.0, drain_weight = 100, drain_spend_weight = 1, drain_dust = 100
 cc 6095f674d510fabaf130dd1d5bc58ba13ef6fc4bab986672f3c89b375d09325a # shrinks to n_candidates = 4, target_value = 500, base_weight = 0, min_fee = 0, feerate = 63.823364, feerate_lt_diff = 0.0, drain_weight = 100, drain_spend_weight = 1, drain_dust = 100
 cc f523c5d000e56a3193f212f9cc84ca60ee5f6f3b78fc4ab32063f1a05afc5a1b # shrinks to n_candidates = 12, target_value = 500, base_weight = 0, min_fee = 0, feerate = 79.459656, feerate_lt_diff = 0.0, drain_weight = 100, drain_spend_weight = 1, drain_dust = 100
+cc 6011be0850184ddcc369cc30de0f92ac4a42046daefdaf4393e551edb82ed23b # shrinks to solution_len = 1, num_additional_canidates = 0, num_preselected = 0
+cc a4f560d934de55fa1f17589e7a0bf22aab4bc77c9ae8dad8a623f7ad71d9ebfa # shrinks to num_inputs = 5, target = 2474

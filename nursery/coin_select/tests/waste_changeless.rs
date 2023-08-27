@@ -1,16 +1,11 @@
 #![allow(unused_imports)]
 
 mod common;
-use bdk_coin_select::change_policy::min_value_and_waste;
-use bdk_coin_select::metrics::LowestFee;
-use bdk_coin_select::{Candidate, CoinSelector};
+use bdk_coin_select::metrics::WasteChangeless;
+use bdk_coin_select::{Candidate, CoinSelector, Drain};
 use proptest::prelude::*;
 
 proptest! {
-    #![proptest_config(ProptestConfig {
-        ..Default::default()
-    })]
-
     #[test]
     #[cfg(not(debug_assertions))] // too slow if compiling for debug
     fn can_eventually_find_best_solution(
@@ -19,24 +14,47 @@ proptest! {
         base_weight in 0..1000_u32,         // base weight (wu)
         min_fee in 0..1000_u64,             // min fee (sats)
         feerate in 1.0..100.0_f32,          // feerate (sats/vb)
-        feerate_lt_diff in -5.0..50.0_f32,  // longterm feerate diff (sats/vb)
+        feerate_lt_diff in -50.0..0.0_f32,  // longterm feerate diff (sats/vb)
         drain_weight in 100..=500_u32,      // drain weight (wu)
         drain_spend_weight in 1..=2000_u32, // drain spend weight (wu)
         drain_dust in 100..=1000_u64,       // drain dust (sats)
     ) {
         common::can_eventually_find_best_solution(
             common::gen_candidates,
-            |p| min_value_and_waste(
-                p.drain_weights(),
-                p.drain_dust,
-                p.long_term_feerate(),
-            ),
-            |p, cp| LowestFee {
-                target: p.target(),
-                long_term_feerate: p.long_term_feerate(),
-                // [TODO]: Remove this memory leak hack
-                change_policy: Box::leak(Box::new(cp)),
+            |_| |_, _| Drain::none(),
+            |p, _| WasteChangeless::new(p.target(), p.long_term_feerate()),
+            common::StrategyParams {
+                n_candidates,
+                target_value,
+                base_weight,
+                min_fee,
+                feerate,
+                feerate_lt_diff,
+                drain_weight,
+                drain_spend_weight,
+                drain_dust,
             },
+        )?;
+    }
+
+    /// This is extremely non-optimal right now
+    #[test]
+    #[cfg(not(debug_assertions))] // too slow if compiling for debug
+    fn find_best_solution_with_negative_diff(
+        n_candidates in 5..15_usize,        // candidates (n)
+        target_value in 500..500_000_u64,   // target value (sats)
+        base_weight in 0..1000_u32,         // base weight (wu)
+        min_fee in 0..1000_u64,             // min fee (sats)
+        feerate in 1.0..100.0_f32,          // feerate (sats/vb)
+        feerate_lt_diff in 0.0..50.0_f32,  // longterm feerate diff (sats/vb)
+        drain_weight in 100..=500_u32,      // drain weight (wu)
+        drain_spend_weight in 1..=2000_u32, // drain spend weight (wu)
+        drain_dust in 100..=1000_u64,       // drain dust (sats)
+    ) {
+        common::can_eventually_find_best_solution(
+            common::gen_candidates,
+            |_| |_, _| Drain::none(),
+            |p, _| WasteChangeless::new(p.target(), p.long_term_feerate()),
             common::StrategyParams {
                 n_candidates,
                 target_value,
@@ -59,24 +77,15 @@ proptest! {
         base_weight in 0..1000_u32,         // base weight (wu)
         min_fee in 0..1000_u64,             // min fee (sats)
         feerate in 1.0..100.0_f32,          // feerate (sats/vb)
-        feerate_lt_diff in -5.0..50.0_f32,  // longterm feerate diff (sats/vb)
+        feerate_lt_diff in -10.0..0.0_f32,  // longterm feerate diff (sats/vb)
         drain_weight in 100..=500_u32,      // drain weight (wu)
         drain_spend_weight in 1..=1000_u32, // drain spend weight (wu)
         drain_dust in 100..=1000_u64,       // drain dust (sats)
     ) {
         common::ensure_bound_is_not_too_tight(
             common::gen_candidates,
-            |p| min_value_and_waste(
-                p.drain_weights(),
-                p.drain_dust,
-                p.long_term_feerate(),
-            ),
-            |p, cp| LowestFee {
-                target: p.target(),
-                long_term_feerate: p.long_term_feerate(),
-                // [TODO]: Remove this memory leak hack
-                change_policy: Box::leak(Box::new(cp)),
-            },
+            |_| |_, _| Drain::none(),
+            |p, _| WasteChangeless::new(p.target(), p.long_term_feerate()),
             common::StrategyParams {
                 n_candidates,
                 target_value,
@@ -130,20 +139,11 @@ proptest! {
 
         let mut cs = CoinSelector::new(&candidates, params.base_weight);
 
-        let change_policy = min_value_and_waste(
-            params.drain_weights(),
-            params.drain_dust,
-            params.long_term_feerate(),
-        );
-
-        let metric = LowestFee {
-            target: params.target(),
-            long_term_feerate: params.long_term_feerate(),
-            change_policy: &change_policy,
-        };
+        let metric = WasteChangeless::new(params.target(), params.long_term_feerate());
 
         let (score, rounds) = common::bnb_search(&mut cs, metric, params.n_candidates)?;
         println!("\t\tscore={} rounds={}", score, rounds);
         prop_assert!(rounds <= params.n_candidates);
     }
+
 }
