@@ -539,7 +539,7 @@ fn test_conflicting_descendants() {
 
     assert_eq!(
         graph
-            .walk_conflicts(&tx_a2, |depth, txid| Some((depth, txid)))
+            .walk_conflicts(&tx_a2, 25, |depth, txid| Some((depth, txid)))
             .collect::<Vec<_>>(),
         vec![(0_usize, txid_a), (1_usize, txid_b),],
     );
