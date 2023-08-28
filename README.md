@@ -69,6 +69,8 @@ To build with the MSRV you will need to pin dependencies as follows:
 cargo update -p log --precise "0.4.18"
 # tempfile 3.7.0 has MSRV 1.63.0+
 cargo update -p tempfile --precise "3.6.0"
+# minreq 2.9.0 prevents pinning rustls to 0.21.1
+cargo update -p minreq --precise "2.8.1"
 # rustls 0.21.2 has MSRV 1.60.0+
 cargo update -p rustls:0.21.6 --precise "0.21.1"
 # tokio 1.30 has MSRV 1.63.0+
@@ -79,7 +81,7 @@ cargo update -p flate2:1.0.27 --precise "1.0.26"
 cargo update -p reqwest --precise "0.11.18"
 # h2 0.3.21 has MSRV 1.63.0+
 cargo update -p h2 --precise "0.3.20"
-# rustls-webpki has MSRV 1.60.0+
+# rustls-webpki 0.100.2 has MSRV 1.60.0+
 cargo update -p rustls-webpki --precise "0.100.1"
 ```
 
