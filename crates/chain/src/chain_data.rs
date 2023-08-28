@@ -87,6 +87,9 @@ impl From<ChainPosition<ConfirmationTimeAnchor>> for ConfirmationTime {
 }
 
 /// A reference to a block in the canonical chain.
+///
+/// `BlockId` implements [`Anchor`]. When a transaction is anchored to `BlockId`, the confirmation
+/// block and anchor block are the same block.
 #[derive(Debug, Clone, PartialEq, Eq, Copy, PartialOrd, Ord, core::hash::Hash)]
 #[cfg_attr(
     feature = "serde",
@@ -98,6 +101,12 @@ pub struct BlockId {
     pub height: u32,
     /// The hash of the block.
     pub hash: BlockHash,
+}
+
+impl Anchor for BlockId {
+    fn anchor_block(&self) -> Self {
+        *self
+    }
 }
 
 impl Default for BlockId {
@@ -131,6 +140,8 @@ impl From<(&u32, &BlockHash)> for BlockId {
 }
 
 /// An [`Anchor`] implementation that also records the exact confirmation height of the transaction.
+///
+/// Refer to [`Anchor`] for more details.
 #[derive(Debug, Default, Clone, PartialEq, Eq, Copy, PartialOrd, Ord, core::hash::Hash)]
 #[cfg_attr(
     feature = "serde",
@@ -159,6 +170,8 @@ impl Anchor for ConfirmationHeightAnchor {
 
 /// An [`Anchor`] implementation that also records the exact confirmation time and height of the
 /// transaction.
+///
+/// Refer to [`Anchor`] for more details.
 #[derive(Debug, Default, Clone, PartialEq, Eq, Copy, PartialOrd, Ord, core::hash::Hash)]
 #[cfg_attr(
     feature = "serde",

@@ -44,6 +44,58 @@ impl ForEachTxOut for Transaction {
 /// assume that transaction A is also confirmed in the best chain. This does not necessarily mean
 /// that transaction A is confirmed in block B. It could also mean transaction A is confirmed in a
 /// parent block of B.
+///
+/// ```
+/// # use bdk_chain::local_chain::LocalChain;
+/// # use bdk_chain::tx_graph::TxGraph;
+/// # use bdk_chain::BlockId;
+/// # use bdk_chain::ConfirmationHeightAnchor;
+/// # use bdk_chain::example_utils::*;
+/// # use bitcoin::hashes::Hash;
+///
+/// // Initialize the local chain with two blocks.
+/// let chain = LocalChain::from_blocks(
+///     [
+///         (1, Hash::hash("first".as_bytes())),
+///         (2, Hash::hash("second".as_bytes())),
+///     ]
+///     .into_iter()
+///     .collect(),
+/// );
+///
+/// // Transaction to be inserted into `TxGraph`s with different anchor types.
+/// let tx = tx_from_hex(RAW_TX_1);
+///
+/// // Insert `tx` into a `TxGraph` that uses `BlockId` as the anchor type.
+/// // When a transaction is anchored with `BlockId`, the anchor block and the confirmation block of
+/// // the transaction is the same block.
+/// let mut graph_a = TxGraph::<BlockId>::default();
+/// let _ = graph_a.insert_tx(tx.clone());
+/// graph_a.insert_anchor(
+///     tx.txid(),
+///     BlockId {
+///         height: 1,
+///         hash: Hash::hash("first".as_bytes()),
+///     },
+/// );
+///
+/// // Insert `tx` into a `TxGraph` that uses `ConfirmationHeightAnchor` as the anchor type.
+/// // When a transaction is anchored with `ConfirmationHeightAnchor`, the anchor block and
+/// // confirmation block can be different. However, the confirmation block cannot be higher than
+/// // the anchor block and both blocks must be in the same chain for the anchor to be valid.
+/// let mut graph_b = TxGraph::<ConfirmationHeightAnchor>::default();
+/// let _ = graph_b.insert_tx(tx.clone());
+/// graph_b.insert_anchor(
+///     tx.txid(),
+///     ConfirmationHeightAnchor {
+///         anchor_block: BlockId {
+///             height: 2,
+///             hash: Hash::hash("second".as_bytes()),
+///         },
+///         confirmation_height: 1,
+///     },
+/// );
+/// ```
 pub trait Anchor: core::fmt::Debug + Clone + Eq + PartialOrd + Ord + core::hash::Hash {
     /// Returns the [`BlockId`] that the associated blockchain data is "anchored" in.
     fn anchor_block(&self) -> BlockId;
