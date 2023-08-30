@@ -64,13 +64,15 @@ This library should compile with any combination of features with Rust 1.57.0.
 
 To build with the MSRV you will need to pin dependencies as follows:
 
-```
+```shell
 # log 0.4.19 has MSRV 1.60.0+
 cargo update -p log --precise "0.4.18"
 # tempfile 3.7.0 has MSRV 1.63.0+
 cargo update -p tempfile --precise "3.6.0"
 # rustls 0.21.2 has MSRV 1.60.0+
-cargo update -p rustls:0.21.6 --precise "0.21.1"
+cargo update -p rustls:0.21.7 --precise "0.21.1"
+# rustls 0.20.9 has MSRV 1.60.0+
+cargo update -p rustls:0.20.9 --precise "0.20.8"
 # tokio 1.30 has MSRV 1.63.0+
 cargo update -p tokio:1.32.0 --precise "1.29.1"
 # flate2 1.0.27 has MSRV 1.63.0+
