@@ -6,3 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+bdk = { path = "../../crates/bdk" }
+bdk_bitcoind_rpc = { path = "../../crates/bitcoind_rpc" }
+bdk_file_store = { path = "../../crates/file_store" }
+anyhow = "1"
