@@ -1846,9 +1846,23 @@ impl<D> Wallet<D> {
         self.persist.staged()
     }
 
+    /// Stages wallet changes in memory for later commit.
+    /// 
+    /// To commit changes to the persistence backend, call [`commit`].
+    /// 
+    /// [`commit`]: Self::commit
+    pub fn stage(&mut self, changeset: ChangeSet) where D: PersistBackend<ChangeSet> {
+        self.persist.stage(changeset);
+    }
+
     /// Get a reference to the inner [`TxGraph`].
     pub fn tx_graph(&self) -> &TxGraph<ConfirmationTimeAnchor> {
         self.indexed_graph.graph()
+    }
+
+    /// Get a mutable reference to the inner [`IndexedTxGraph`].
+    pub fn mut_indexed_tx_graph(&mut self) -> &mut IndexedTxGraph<ConfirmationTimeAnchor, KeychainTxOutIndex<KeychainKind>> {
+        &mut self.indexed_graph
     }
 
     /// Get a reference to the inner [`KeychainTxOutIndex`].
@@ -1859,6 +1873,11 @@ impl<D> Wallet<D> {
     /// Get a reference to the inner [`LocalChain`].
     pub fn local_chain(&self) -> &LocalChain {
         &self.chain
+    }
+
+     /// Get a mutable reference to the inner [`LocalChain`].
+     pub fn mut_local_chain(&mut self) -> &mut LocalChain {
+        &mut self.chain
     }
 }
 
