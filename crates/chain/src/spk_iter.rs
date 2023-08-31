@@ -52,6 +52,8 @@ where
     // If the descriptor doesn't have a wildcard, we shorten whichever range you pass in
     // to have length <= 1. This means that if you pass in 0..0 or 0..1 the range will
     // remain the same, but if you pass in 0..10, we'll shorten it to 0..1
+    // Also note that if the descriptor doesn't have a wildcard, passing in a range starting
+    // from n > 0, will return an empty iterator.
     pub(crate) fn new_with_range<R>(descriptor: D, range: R) -> Self
     where
         R: RangeBounds<u32>,
@@ -97,6 +99,11 @@ where
         // For non-wildcard descriptors, we expect the first element to be Some((0, spk)), then None after.
         // For wildcard descriptors, we expect it to keep iterating until exhausted.
         if self.next_index >= self.end {
+            return None;
+        }
+
+        // If the descriptor is non-wildcard, only index 0 will return an spk.
+        if !self.descriptor.borrow().has_wildcard() && self.next_index != 0 {
             return None;
         }
 
@@ -220,6 +227,24 @@ mod test {
 
         assert_eq!(external_spk.nth(0).unwrap(), (0, external_spk_0));
         assert_eq!(external_spk.nth(0), None);
+
+        // non index-0 should NOT return an spk
+        assert_eq!(
+            SpkIterator::new_with_range(&no_wildcard_descriptor, 1..1).next(),
+            None
+        );
+        assert_eq!(
+            SpkIterator::new_with_range(&no_wildcard_descriptor, 1..=1).next(),
+            None
+        );
+        assert_eq!(
+            SpkIterator::new_with_range(&no_wildcard_descriptor, 1..2).next(),
+            None
+        );
+        assert_eq!(
+            SpkIterator::new_with_range(&no_wildcard_descriptor, 1..=2).next(),
+            None
+        );
     }
 
     // The following dummy traits were created to test if SpkIterator is working properly.
