@@ -754,7 +754,7 @@ fn expand_multi_keys<Pk: IntoDescriptorKey<Ctx>, Ctx: ScriptContext>(
     let (key_map, valid_networks) = key_maps_networks.into_iter().fold(
         (KeyMap::default(), any_network()),
         |(mut keys_acc, net_acc), (key, net)| {
-            keys_acc.extend(key.into_iter());
+            keys_acc.extend(key);
             let net_acc = merge_networks(&net_acc, &net);
 
             (keys_acc, net_acc)

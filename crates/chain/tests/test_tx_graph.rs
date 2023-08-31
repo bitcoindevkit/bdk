@@ -1,5 +1,6 @@
 #[macro_use]
 mod common;
+use bdk_chain::tx_graph::CalculateFeeError;
 use bdk_chain::{
     collections::*,
     local_chain::LocalChain,
@@ -453,22 +454,29 @@ fn test_calculate_fee() {
         }],
     };
 
-    assert_eq!(graph.calculate_fee(&tx), Some(100));
+    assert_eq!(graph.calculate_fee(&tx), Ok(100));
 
     tx.input.remove(2);
 
-    // fee would be negative
-    assert_eq!(graph.calculate_fee(&tx), Some(-200));
+    // fee would be negative, should return CalculateFeeError::NegativeFee
+    assert_eq!(
+        graph.calculate_fee(&tx),
+        Err(CalculateFeeError::NegativeFee(-200))
+    );
 
-    // If we have an unknown outpoint, fee should return None.
+    // If we have an unknown outpoint, fee should return CalculateFeeError::MissingTxOut.
+    let outpoint = OutPoint {
+        txid: h!("unknown_txid"),
+        vout: 0,
+    };
     tx.input.push(TxIn {
-        previous_output: OutPoint {
-            txid: h!("unknown_txid"),
-            vout: 0,
-        },
+        previous_output: outpoint,
         ..Default::default()
     });
-    assert_eq!(graph.calculate_fee(&tx), None);
+    assert_eq!(
+        graph.calculate_fee(&tx),
+        Err(CalculateFeeError::MissingTxOut(vec!(outpoint)))
+    );
 }
 
 #[test]
@@ -485,7 +493,7 @@ fn test_calculate_fee_on_coinbase() {
 
     let graph = TxGraph::<()>::default();
 
-    assert_eq!(graph.calculate_fee(&tx), Some(0));
+    assert_eq!(graph.calculate_fee(&tx), Ok(0));
 }
 
 #[test]

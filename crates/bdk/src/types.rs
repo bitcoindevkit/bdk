@@ -14,8 +14,8 @@ use core::convert::AsRef;
 use core::ops::Sub;
 
 use bdk_chain::ConfirmationTime;
-use bitcoin::blockdata::transaction::{OutPoint, Transaction, TxOut};
-use bitcoin::{hash_types::Txid, psbt, Weight};
+use bitcoin::blockdata::transaction::{OutPoint, TxOut};
+use bitcoin::{psbt, Weight};
 
 use serde::{Deserialize, Serialize};
 
@@ -231,40 +231,6 @@ impl Utxo {
                 unreachable!("Foreign UTXOs will always have one of these set")
             }
         }
-    }
-}
-
-/// A wallet transaction
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub struct TransactionDetails {
-    /// Optional transaction
-    pub transaction: Option<Transaction>,
-    /// Transaction id
-    pub txid: Txid,
-    /// Received value (sats)
-    /// Sum of owned outputs of this transaction.
-    pub received: u64,
-    /// Sent value (sats)
-    /// Sum of owned inputs of this transaction.
-    pub sent: u64,
-    /// Fee value in sats if it was available.
-    pub fee: Option<u64>,
-    /// If the transaction is confirmed, contains height and Unix timestamp of the block containing the
-    /// transaction, unconfirmed transaction contains `None`.
-    pub confirmation_time: ConfirmationTime,
-}
-
-impl PartialOrd for TransactionDetails {
-    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for TransactionDetails {
-    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
-        self.confirmation_time
-            .cmp(&other.confirmation_time)
-            .then_with(|| self.txid.cmp(&other.txid))
     }
 }
 

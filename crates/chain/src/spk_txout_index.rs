@@ -288,8 +288,8 @@ impl<I: Clone + Ord> SpkTxOutIndex<I> {
     /// Computes total input value going from script pubkeys in the index (sent) and the total output
     /// value going to script pubkeys in the index (received) in `tx`. For the `sent` to be computed
     /// correctly, the output being spent must have already been scanned by the index. Calculating
-    /// received just uses the transaction outputs directly, so it will be correct even if it has not
-    /// been scanned.
+    /// received just uses the [`Transaction`] outputs directly, so it will be correct even if it has
+    /// not been scanned.
     pub fn sent_and_received(&self, tx: &Transaction) -> (u64, u64) {
         let mut sent = 0;
         let mut received = 0;
