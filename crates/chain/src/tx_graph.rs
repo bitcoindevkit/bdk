@@ -319,6 +319,12 @@ impl<A> TxGraph<A> {
             .map(|(outpoint, spends)| (outpoint.vout, spends))
     }
 
+    /// Creates an iterator of ancestor transactions from the starting `Transaction`, up to a
+    /// specified depth limit.
+    pub fn walk_ancestors(&self, tx: Transaction, depth_limit: usize) -> TxAncestors<A> {
+        TxAncestors::new_exclude_root(self, tx, depth_limit)
+    }
+
     /// Creates an iterator that filters and maps descendants from the starting `txid`.
     ///
     /// The supplied closure takes in two inputs `(depth, descendant_txid)`:
@@ -327,7 +333,7 @@ impl<A> TxGraph<A> {
     ///     descendant is spending an output of the starting `txid`; the `depth` will be 1.
     /// * `descendant_txid` is the descendant's txid which we are considering to walk.
     ///
-    /// The supplied closure returns an `Option<T>`, allowing the caller to map each node it vists
+    /// The supplied closure returns an `Option<T>`, allowing the caller to map each node it visits
     /// and decide whether to visit descendants.
     pub fn walk_descendants<'g, F, O>(&'g self, txid: Txid, walk_map: F) -> TxDescendants<A, F>
     where
@@ -1156,6 +1162,10 @@ impl<A> ForEachTxOut for TxGraph<A> {
 }
 
 /// An iterator that traverses transaction ancestors to a specified depth.
+///
+/// This `struct` is created by the [`walk_ancestors`] method of [`TxGraph`].
+///
+/// [`walk_ancestors`]: TxGraph::walk_ancestors
 pub struct TxAncestors<'g, A> {
     graph: &'g TxGraph<A>,
     visited: HashSet<Txid>,
@@ -1179,7 +1189,6 @@ impl<'g, A> TxAncestors<'g, A> {
     }
 
     /// Creates a `TxAncestors` that excludes the starting `Transaction` when iterating.
-    #[allow(unused)]
     pub(crate) fn new_exclude_root(
         graph: &'g TxGraph<A>,
         tx: Transaction,
@@ -1239,15 +1248,15 @@ impl<'g, A> TxAncestors<'g, A> {
 }
 
 impl<'g, A> TxAncestors<'g, A> {
-    fn populate_stack(&mut self, ancestor_depth: usize, tx: Transaction) {
-        if ancestor_depth <= self.depth_limit && self.visited.insert(tx.txid()) {
+    fn populate_stack(&mut self, depth: usize, tx: Transaction) {
+        if depth <= self.depth_limit && self.visited.insert(tx.txid()) {
             tx.input
                 .iter()
                 .map(|txin| txin.previous_output.txid)
                 .for_each(|prev_txid| {
                     if let Some((TxNodeInternal::Whole(tx), _, _)) = self.graph.txs.get(&prev_txid)
                     {
-                        self.stack.push((ancestor_depth, tx.clone()));
+                        self.stack.push((depth, tx.clone()));
                     };
                 });
         }
