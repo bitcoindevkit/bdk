@@ -248,7 +248,7 @@ impl<D> Wallet<D> {
 
         let changeset = db.load_from_persistence().map_err(NewError::Persist)?;
         chain.apply_changeset(&changeset.chain);
-        indexed_graph.apply_changeset(changeset.index_tx_graph);
+        indexed_graph.apply_changeset(changeset.indexed_tx_graph);
 
         let persist = Persist::new(db);
 

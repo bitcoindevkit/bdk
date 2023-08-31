@@ -68,7 +68,7 @@ fn main() -> anyhow::Result<()> {
 
     let graph = Mutex::new({
         let mut graph = IndexedTxGraph::new(index);
-        graph.apply_changeset(init_changeset.index_tx_graph);
+        graph.apply_changeset(init_changeset.indexed_tx_graph);
         graph
     });
 
@@ -277,7 +277,7 @@ fn main() -> anyhow::Result<()> {
 
         let chain = chain.apply_update(final_update.chain)?;
 
-        let index_tx_graph = {
+        let indexed_tx_graph = {
             let mut changeset =
                 indexed_tx_graph::ChangeSet::<ConfirmationHeightAnchor, _>::default();
             let (_, indexer) = graph
@@ -292,7 +292,7 @@ fn main() -> anyhow::Result<()> {
         };
 
         ChangeSet {
-            index_tx_graph,
+            indexed_tx_graph,
             chain,
         }
     };
