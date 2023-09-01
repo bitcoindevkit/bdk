@@ -174,18 +174,18 @@ mod test {
         let mut external_spk = SpkIterator::new(&external_desc);
         let max_index = BIP32_MAX_INDEX - 22;
 
-        assert_eq!(external_spk.next().unwrap(), (0, external_spk_0));
-        assert_eq!(external_spk.nth(15).unwrap(), (16, external_spk_16));
-        assert_eq!(external_spk.nth(3).unwrap(), (20, external_spk_20.clone()));
-        assert_eq!(external_spk.next().unwrap(), (21, external_spk_21));
+        assert_eq!(external_spk.next(), Some((0, external_spk_0)));
+        assert_eq!(external_spk.nth(15), Some((16, external_spk_16)));
+        assert_eq!(external_spk.nth(3), Some((20, external_spk_20.clone())));
+        assert_eq!(external_spk.next(), Some((21, external_spk_21)));
         assert_eq!(
-            external_spk.nth(max_index as usize).unwrap(),
-            (BIP32_MAX_INDEX, external_spk_max)
+            external_spk.nth(max_index as usize),
+            Some((BIP32_MAX_INDEX, external_spk_max))
         );
         assert_eq!(external_spk.nth(0), None);
 
         let mut external_spk = SpkIterator::new_with_range(&external_desc, 0..21);
-        assert_eq!(external_spk.nth(20).unwrap(), (20, external_spk_20));
+        assert_eq!(external_spk.nth(20), Some((20, external_spk_20)));
         assert_eq!(external_spk.next(), None);
 
         let mut external_spk = SpkIterator::new_with_range(&external_desc, 0..21);
@@ -204,12 +204,12 @@ mod test {
 
         let mut external_spk = SpkIterator::new(&no_wildcard_descriptor);
 
-        assert_eq!(external_spk.next().unwrap(), (0, external_spk_0.clone()));
+        assert_eq!(external_spk.next(), Some((0, external_spk_0.clone())));
         assert_eq!(external_spk.next(), None);
 
         let mut external_spk = SpkIterator::new(&no_wildcard_descriptor);
 
-        assert_eq!(external_spk.nth(0).unwrap(), (0, external_spk_0.clone()));
+        assert_eq!(external_spk.nth(0), Some((0, external_spk_0.clone())));
         assert_eq!(external_spk.nth(0), None);
 
         let mut external_spk = SpkIterator::new_with_range(&no_wildcard_descriptor, 0..0);
@@ -218,14 +218,14 @@ mod test {
 
         let mut external_spk = SpkIterator::new_with_range(&no_wildcard_descriptor, 0..1);
 
-        assert_eq!(external_spk.nth(0).unwrap(), (0, external_spk_0.clone()));
+        assert_eq!(external_spk.nth(0), Some((0, external_spk_0.clone())));
         assert_eq!(external_spk.next(), None);
 
         // We test that using new_with_range with range_len > 1 gives back an iterator with
         // range_len = 1
         let mut external_spk = SpkIterator::new_with_range(&no_wildcard_descriptor, 0..10);
 
-        assert_eq!(external_spk.nth(0).unwrap(), (0, external_spk_0));
+        assert_eq!(external_spk.nth(0), Some((0, external_spk_0)));
         assert_eq!(external_spk.nth(0), None);
 
         // non index-0 should NOT return an spk
