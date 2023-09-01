@@ -494,7 +494,7 @@ pub fn setup_conflicts(
     let tx1 = Transaction {
         output: vec![TxOut {
             script_pubkey: spk_iter.next().unwrap().1,
-            value: 10000,
+            value: 40000,
         }],
         ..new_tx(0)
     };
@@ -1256,27 +1256,19 @@ fn test_unconfirmed_conflicts_at_same_last_seen() {
         )
         .collect::<Vec<_>>();
 
-    // FIXME: Currently both the mempool tx are indexed and listed out. This can happen in case of RBF fee bumps,
-    // when both the txs are observed at a single sync time. This can be resolved by checking the input's nSequence.
-    // Additionally in case of non RBF conflicts at same `seen_at`, conflicting txids can be reported back for filtering
-    // out in higher layers. This is similar to what core rpc does in case of unresolvable conflicts.
-
-    // We have two in mempool txouts. Both at same chain position.
-    assert_eq!(txouts.len(), 3);
+    assert_eq!(txouts.len(), 2);
     assert_eq!(
         txouts
             .iter()
             .filter(|(_, txout)| matches!(txout.chain_position, ChainPosition::Unconfirmed(100)))
             .count(),
-        2
+        1
     );
-
-    // We have two mempool utxos both at same chain position.
     assert_eq!(
         utxos
             .iter()
             .filter(|(_, txout)| matches!(txout.chain_position, ChainPosition::Unconfirmed(100)))
             .count(),
-        2
+        1
     );
 }

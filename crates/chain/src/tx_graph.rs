@@ -705,6 +705,28 @@ impl<A: Anchor> TxGraph<A> {
             if conflicting_tx.last_seen_unconfirmed > *last_seen {
                 return Ok(None);
             }
+            if conflicting_tx.last_seen_unconfirmed == *last_seen {
+                // Check if conflicting tx has higher absolute fee and fee rate
+                let check_fee = self.calculate_fee(tx);
+                let check_conflicting_fee = self.calculate_fee(&conflicting_tx);
+                if let Ok(fee) = check_fee {
+                    if let Ok(conflicting_fee) = check_conflicting_fee {
+                        let fee_rate = fee as f32 / tx.weight().to_vbytes_ceil() as f32;
+                        let conflicting_fee_rate = conflicting_fee as f32
+                            / conflicting_tx.weight().to_vbytes_ceil() as f32;
+
+                        if conflicting_fee > fee && conflicting_fee_rate > fee_rate {
+                            return Ok(None);
+                        }
+                    }
+                }
+
+                // If fee rates cannot be distinguished, then conflicting tx has priority if txid of
+                // conflicting tx > txid of original tx
+                if conflicting_tx.txid() > tx.txid() {
+                    return Ok(None);
+                }
+            }
         }
 
         Ok(Some(ChainPosition::Unconfirmed(*last_seen)))
