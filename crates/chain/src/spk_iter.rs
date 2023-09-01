@@ -45,34 +45,43 @@ where
 {
     /// Creates a new script pubkey iterator starting at 0 from a descriptor.
     pub fn new(descriptor: D) -> Self {
-        let end = if descriptor.borrow().has_wildcard() {
-            BIP32_MAX_INDEX
-        } else {
-            0
-        };
-
-        SpkIterator::new_with_range(descriptor, 0..=end)
+        SpkIterator::new_with_range(descriptor, 0..=BIP32_MAX_INDEX)
     }
 
     // Creates a new script pubkey iterator from a descriptor with a given range.
+    // If the descriptor doesn't have a wildcard, we shorten whichever range you pass in
+    // to have length <= 1. This means that if you pass in 0..0 or 0..1 the range will
+    // remain the same, but if you pass in 0..10, we'll shorten it to 0..1
+    // Also note that if the descriptor doesn't have a wildcard, passing in a range starting
+    // from n > 0, will return an empty iterator.
     pub(crate) fn new_with_range<R>(descriptor: D, range: R) -> Self
     where
         R: RangeBounds<u32>,
     {
+        let start = match range.start_bound() {
+            Bound::Included(start) => *start,
+            Bound::Excluded(start) => *start + 1,
+            Bound::Unbounded => u32::MIN,
+        };
+
         let mut end = match range.end_bound() {
             Bound::Included(end) => *end + 1,
             Bound::Excluded(end) => *end,
             Bound::Unbounded => u32::MAX,
         };
+
         // Because `end` is exclusive, we want the maximum value to be BIP32_MAX_INDEX + 1.
         end = end.min(BIP32_MAX_INDEX + 1);
 
+        if !descriptor.borrow().has_wildcard() {
+            // The length of the range should be at most 1
+            if end != start {
+                end = start + 1;
+            }
+        }
+
         Self {
-            next_index: match range.start_bound() {
-                Bound::Included(start) => *start,
-                Bound::Excluded(start) => *start + 1,
-                Bound::Unbounded => u32::MIN,
-            },
+            next_index: start,
             end,
             descriptor,
             secp: Secp256k1::verification_only(),
@@ -90,6 +99,11 @@ where
         // For non-wildcard descriptors, we expect the first element to be Some((0, spk)), then None after.
         // For wildcard descriptors, we expect it to keep iterating until exhausted.
         if self.next_index >= self.end {
+            return None;
+        }
+
+        // If the descriptor is non-wildcard, only index 0 will return an spk.
+        if !self.descriptor.borrow().has_wildcard() && self.next_index != 0 {
             return None;
         }
 
@@ -160,18 +174,18 @@ mod test {
         let mut external_spk = SpkIterator::new(&external_desc);
         let max_index = BIP32_MAX_INDEX - 22;
 
-        assert_eq!(external_spk.next().unwrap(), (0, external_spk_0));
-        assert_eq!(external_spk.nth(15).unwrap(), (16, external_spk_16));
-        assert_eq!(external_spk.nth(3).unwrap(), (20, external_spk_20.clone()));
-        assert_eq!(external_spk.next().unwrap(), (21, external_spk_21));
+        assert_eq!(external_spk.next(), Some((0, external_spk_0)));
+        assert_eq!(external_spk.nth(15), Some((16, external_spk_16)));
+        assert_eq!(external_spk.nth(3), Some((20, external_spk_20.clone())));
+        assert_eq!(external_spk.next(), Some((21, external_spk_21)));
         assert_eq!(
-            external_spk.nth(max_index as usize).unwrap(),
-            (BIP32_MAX_INDEX, external_spk_max)
+            external_spk.nth(max_index as usize),
+            Some((BIP32_MAX_INDEX, external_spk_max))
         );
         assert_eq!(external_spk.nth(0), None);
 
         let mut external_spk = SpkIterator::new_with_range(&external_desc, 0..21);
-        assert_eq!(external_spk.nth(20).unwrap(), (20, external_spk_20));
+        assert_eq!(external_spk.nth(20), Some((20, external_spk_20)));
         assert_eq!(external_spk.next(), None);
 
         let mut external_spk = SpkIterator::new_with_range(&external_desc, 0..21);
@@ -190,13 +204,47 @@ mod test {
 
         let mut external_spk = SpkIterator::new(&no_wildcard_descriptor);
 
-        assert_eq!(external_spk.next().unwrap(), (0, external_spk_0.clone()));
+        assert_eq!(external_spk.next(), Some((0, external_spk_0.clone())));
         assert_eq!(external_spk.next(), None);
 
         let mut external_spk = SpkIterator::new(&no_wildcard_descriptor);
 
-        assert_eq!(external_spk.nth(0).unwrap(), (0, external_spk_0));
+        assert_eq!(external_spk.nth(0), Some((0, external_spk_0.clone())));
         assert_eq!(external_spk.nth(0), None);
+
+        let mut external_spk = SpkIterator::new_with_range(&no_wildcard_descriptor, 0..0);
+
+        assert_eq!(external_spk.next(), None);
+
+        let mut external_spk = SpkIterator::new_with_range(&no_wildcard_descriptor, 0..1);
+
+        assert_eq!(external_spk.nth(0), Some((0, external_spk_0.clone())));
+        assert_eq!(external_spk.next(), None);
+
+        // We test that using new_with_range with range_len > 1 gives back an iterator with
+        // range_len = 1
+        let mut external_spk = SpkIterator::new_with_range(&no_wildcard_descriptor, 0..10);
+
+        assert_eq!(external_spk.nth(0), Some((0, external_spk_0)));
+        assert_eq!(external_spk.nth(0), None);
+
+        // non index-0 should NOT return an spk
+        assert_eq!(
+            SpkIterator::new_with_range(&no_wildcard_descriptor, 1..1).next(),
+            None
+        );
+        assert_eq!(
+            SpkIterator::new_with_range(&no_wildcard_descriptor, 1..=1).next(),
+            None
+        );
+        assert_eq!(
+            SpkIterator::new_with_range(&no_wildcard_descriptor, 1..2).next(),
+            None
+        );
+        assert_eq!(
+            SpkIterator::new_with_range(&no_wildcard_descriptor, 1..=2).next(),
+            None
+        );
     }
 
     // The following dummy traits were created to test if SpkIterator is working properly.
