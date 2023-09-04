@@ -21,8 +21,8 @@ use crate::{anchor_from_status, ASSUME_FINAL_DEPTH};
 pub trait EsploraAsyncExt {
     /// Prepare an [`LocalChain`] update with blocks fetched from Esplora.
     ///
-    /// * `prev_tip` is the previous tip of [`LocalChain::tip`].
-    /// * `get_heights` is the block heights that we are interested in fetching from Esplora.
+    /// * `local_tip` is the previous tip of [`LocalChain::tip`].
+    /// * `request_heights` is the block heights that we are interested in fetching from Esplora.
     ///
     /// The result of this method can be applied to [`LocalChain::apply_update`].
     ///
