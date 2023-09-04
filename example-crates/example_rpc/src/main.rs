@@ -10,12 +10,13 @@ use std::{
 
 use bdk_bitcoind_rpc::{
     bitcoincore_rpc::{Auth, Client, RpcApi},
-    EmittedUpdate, Emitter,
+    Emission, EmittedBlock, Emitter,
 };
 use bdk_chain::{
-    bitcoin::{address, Address, Transaction},
-    indexed_tx_graph, keychain,
-    local_chain::{self, LocalChain},
+    bitcoin::{address, hashes::Hash, Address, BlockHash, Transaction},
+    indexed_tx_graph::{self, TxItem},
+    keychain,
+    local_chain::{self, CheckPoint, LocalChain},
     Append, BlockId, ConfirmationTimeAnchor, IndexedTxGraph,
 };
 use example_cli::{
@@ -153,56 +154,97 @@ fn main() -> anyhow::Result<()> {
         } => {
             graph.lock().unwrap().index.set_lookahead_for_all(lookahead);
 
-            let (chan, recv) = sync_channel::<(EmittedUpdate, u32)>(CHANNEL_BOUND);
+            let (chan, recv) = sync_channel::<(Emission<EmittedBlock>, u32)>(CHANNEL_BOUND);
             let prev_cp = chain.lock().unwrap().tip();
+            let start_height = prev_cp
+                .as_ref()
+                .map_or(fallback_height, |cp| cp.height().saturating_sub(10));
 
             let join_handle = std::thread::spawn(move || -> anyhow::Result<()> {
                 let mut tip_height = Option::<u32>::None;
 
-                let mut emitter = Emitter::new(&rpc_client, fallback_height, prev_cp);
+                let mut emissions =
+                    Emitter::new(&rpc_client, start_height).into_iterator::<EmittedBlock>();
                 loop {
-                    let item = emitter.emit_update()?;
-                    let is_mempool = item.is_mempool();
-
-                    if tip_height.is_none() || is_mempool {
-                        tip_height = Some(rpc_client.get_block_count()? as u32);
-                    }
-                    chan.send((item, tip_height.expect("must have tip height")))?;
-
-                    if !is_mempool {
-                        // break if sigterm is detected
+                    for r in &mut emissions {
+                        // return if sigterm is detected
                         if sigterm_flag.load(Ordering::Acquire) {
-                            break;
+                            return Ok(());
                         }
-                        continue;
+
+                        let emission = r?;
+                        let is_mempool = emission.is_mempool();
+
+                        if tip_height.is_none() || is_mempool {
+                            tip_height = Some(rpc_client.get_block_count()? as u32);
+                        }
+                        chan.send((emission, tip_height.expect("must have tip height")))?;
                     }
 
-                    // everything after this point is a mempool update
-                    // mempool update is emitted after we reach the chain tip
                     // if we are are in "sync-once" mode, we break here
                     // otherwise, we sleep or wait for sigterm
                     if !live || await_flag(&sigterm_flag, LIVE_POLL_DUR_SECS) {
-                        break;
+                        return Ok(());
                     }
                 }
-
-                Ok(())
             });
 
             let mut start = Instant::now();
 
-            for (item, tip_height) in recv {
-                let chain_update = item.chain_update();
-                let tip = item.checkpoint();
+            for (emission, tip_height) in recv {
+                let chain_update = match &emission {
+                    Emission::Mempool(_) => None,
+                    Emission::Block(EmittedBlock { block, height }) => {
+                        let this_id = BlockId {
+                            height: *height,
+                            hash: block.block_hash(),
+                        };
+                        let tip = if block.header.prev_blockhash == BlockHash::all_zeros() {
+                            CheckPoint::new(this_id)
+                        } else {
+                            CheckPoint::new(BlockId {
+                                height: height - 1,
+                                hash: block.header.prev_blockhash,
+                            })
+                            .extend(core::iter::once(this_id))
+                            .expect("must construct checkpoint")
+                        };
+
+                        Some(local_chain::Update {
+                            tip,
+                            introduce_older_blocks: false,
+                        })
+                    }
+                };
+                let update_tip_height = chain_update.as_ref().map(|u| u.tip.height());
+
+                let tx_graph_update: Vec<TxItem<Option<ConfirmationTimeAnchor>>> = match &emission {
+                    Emission::Mempool(txs) => {
+                        txs.iter().map(|tx| (&tx.tx, None, Some(tx.time))).collect()
+                    }
+                    Emission::Block(b) => {
+                        let anchor = ConfirmationTimeAnchor {
+                            anchor_block: BlockId {
+                                height: b.height,
+                                hash: b.block.block_hash(),
+                            },
+                            confirmation_height: b.height,
+                            confirmation_time: b.block.header.time as _,
+                        };
+                        b.block
+                            .txdata
+                            .iter()
+                            .map(move |tx| (tx, Some(anchor), None))
+                            .collect()
+                    }
+                };
 
                 let db_changeset = {
                     let mut indexed_changeset = indexed_tx_graph::ChangeSet::default();
                     let mut chain = chain.lock().unwrap();
                     let mut graph = graph.lock().unwrap();
 
-                    let graph_update =
-                        item.indexed_tx_graph_update(bdk_bitcoind_rpc::confirmation_time_anchor);
-                    indexed_changeset.append(graph.insert_relevant_txs(graph_update));
+                    indexed_changeset.append(graph.insert_relevant_txs(tx_graph_update));
 
                     let chain_changeset = match chain_update {
                         Some(update) => chain.apply_update(update)?,
@@ -230,8 +272,8 @@ fn main() -> anyhow::Result<()> {
                     };
                     println!(
                         "* scanned_to: {} / {} tip | total: {} sats",
-                        match tip {
-                            Some(cp) => cp.height().to_string(),
+                        match update_tip_height {
+                            Some(h) => h.to_string(),
                             None => "mempool".to_string(),
                         },
                         tip_height,

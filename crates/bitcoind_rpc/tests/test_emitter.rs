@@ -1,11 +1,13 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use bdk_bitcoind_rpc::Emitter;
+use bdk_bitcoind_rpc::{EmittedBlock, Emitter, MempoolTx};
 use bdk_chain::{
     bitcoin::{Address, Amount, BlockHash, Txid},
-    local_chain::LocalChain,
-    Append, BlockId, ConfirmationHeightAnchor, IndexedTxGraph, SpkTxOutIndex,
+    indexed_tx_graph::TxItem,
+    local_chain::{self, CheckPoint, LocalChain},
+    Append, BlockId, IndexedTxGraph, SpkTxOutIndex,
 };
+use bitcoin::hashes::Hash;
 use bitcoincore_rpc::RpcApi;
 
 struct TestEnv {
@@ -65,6 +67,47 @@ impl TestEnv {
     }
 }
 
+fn block_to_chain_update(block: &bitcoin::Block, height: u32) -> local_chain::Update {
+    let this_id = BlockId {
+        height,
+        hash: block.block_hash(),
+    };
+    let tip = if block.header.prev_blockhash == BlockHash::all_zeros() {
+        CheckPoint::new(this_id)
+    } else {
+        CheckPoint::new(BlockId {
+            height: height - 1,
+            hash: block.header.prev_blockhash,
+        })
+        .extend(core::iter::once(this_id))
+        .expect("must construct checkpoint")
+    };
+
+    local_chain::Update {
+        tip,
+        introduce_older_blocks: false,
+    }
+}
+
+fn block_to_tx_graph_update(
+    block: &bitcoin::Block,
+    height: u32,
+) -> impl Iterator<Item = TxItem<'_, Option<BlockId>>> {
+    let anchor = BlockId {
+        hash: block.block_hash(),
+        height,
+    };
+    block.txdata.iter().map(move |tx| (tx, Some(anchor), None))
+}
+
+fn mempool_to_tx_graph_update(
+    mempool_txs: &[MempoolTx],
+) -> impl Iterator<Item = TxItem<'_, Option<BlockId>>> {
+    mempool_txs
+        .iter()
+        .map(|mempool_tx| (&mempool_tx.tx, None, Some(mempool_tx.time)))
+}
+
 /// Ensure that blocks are emitted in order even after reorg.
 ///
 /// 1. Mine 101 blocks.
@@ -75,7 +118,7 @@ impl TestEnv {
 pub fn test_sync_local_chain() -> anyhow::Result<()> {
     let env = TestEnv::new()?;
     let mut local_chain = LocalChain::default();
-    let mut emitter = Emitter::new(&env.client, 0, local_chain.tip());
+    let mut emitter = Emitter::new(&env.client, 0);
 
     // mine some blocks and returned the actual block hashes
     let exp_hashes = {
@@ -85,24 +128,25 @@ pub fn test_sync_local_chain() -> anyhow::Result<()> {
     };
 
     // see if the emitter outputs the right blocks
+    println!("first sync:");
     loop {
-        let cp = match emitter.emit_block()? {
-            Some(b) => b.checkpoint(),
+        let (height, block) = match emitter.next_block()? {
+            Some(b) => {
+                println!("\t[{:3}] {}", b.height, b.block.block_hash());
+                (b.height, b.block)
+            }
             None => break,
         };
         assert_eq!(
-            cp.hash(),
-            exp_hashes[cp.height() as usize],
+            block.block_hash(),
+            exp_hashes[height as usize],
             "emitted block hash is unexpected"
         );
 
-        let chain_update = bdk_chain::local_chain::Update {
-            tip: cp.clone(),
-            introduce_older_blocks: false,
-        };
+        let chain_update = block_to_chain_update(&block, height);
         assert_eq!(
             local_chain.apply_update(chain_update)?,
-            BTreeMap::from([(cp.height(), Some(cp.hash()))]),
+            BTreeMap::from([(height, Some(block.block_hash()))]),
             "chain update changeset is unexpected",
         );
     }
@@ -117,10 +161,6 @@ pub fn test_sync_local_chain() -> anyhow::Result<()> {
         "final local_chain state is unexpected",
     );
 
-    // create new emitter (just for testing sake)
-    drop(emitter);
-    let mut emitter = Emitter::new(&env.client, 0, local_chain.tip());
-
     // perform reorg
     let reorged_blocks = env.reorg(6)?;
     let exp_hashes = exp_hashes
@@ -131,36 +171,36 @@ pub fn test_sync_local_chain() -> anyhow::Result<()> {
         .collect::<Vec<_>>();
 
     // see if the emitter outputs the right blocks
+    println!("after reorg:");
     let mut exp_height = exp_hashes.len() - reorged_blocks.len();
     loop {
-        let cp = match emitter.emit_block()? {
-            Some(b) => b.checkpoint(),
+        let (height, block) = match emitter.next_block()? {
+            Some(b) => {
+                println!("\t[{:3}] {}", b.height, b.block.block_hash());
+                (b.height, b.block)
+            }
             None => break,
         };
         assert_eq!(
-            cp.height(),
-            exp_height as u32,
+            height, exp_height as u32,
             "emitted block has unexpected height"
         );
 
         assert_eq!(
-            cp.hash(),
-            exp_hashes[cp.height() as usize],
+            block.block_hash(),
+            exp_hashes[height as usize],
             "emitted block is unexpected"
         );
 
-        let chain_update = bdk_chain::local_chain::Update {
-            tip: cp.clone(),
-            introduce_older_blocks: false,
-        };
+        let chain_update = block_to_chain_update(&block, height);
         assert_eq!(
             local_chain.apply_update(chain_update)?,
             if exp_height == exp_hashes.len() - reorged_blocks.len() {
-                core::iter::once((cp.height(), Some(cp.hash())))
-                    .chain((cp.height() + 1..exp_hashes.len() as u32).map(|h| (h, None)))
+                core::iter::once((height, Some(block.block_hash())))
+                    .chain((height + 1..exp_hashes.len() as u32).map(|h| (h, None)))
                     .collect::<bdk_chain::local_chain::ChangeSet>()
             } else {
-                BTreeMap::from([(cp.height(), Some(cp.hash()))])
+                BTreeMap::from([(height, Some(block.block_hash()))])
             },
             "chain update changeset is unexpected",
         );
@@ -200,7 +240,7 @@ fn test_into_tx_graph() -> anyhow::Result<()> {
     println!("mined blocks!");
 
     let mut chain = LocalChain::default();
-    let mut indexed_tx_graph = IndexedTxGraph::<ConfirmationHeightAnchor, _>::new({
+    let mut indexed_tx_graph = IndexedTxGraph::<BlockId, _>::new({
         let mut index = SpkTxOutIndex::<usize>::default();
         index.insert_spk(0, addr_0.script_pubkey());
         index.insert_spk(1, addr_1.script_pubkey());
@@ -208,17 +248,16 @@ fn test_into_tx_graph() -> anyhow::Result<()> {
         index
     });
 
-    for r in Emitter::new(&env.client, 0, chain.tip()) {
-        let update = r?;
+    let emitter = &mut Emitter::new(&env.client, 0);
 
-        if let Some(chain_update) = update.chain_update() {
-            let _ = chain.apply_update(chain_update)?;
-        }
-
-        let tx_graph_update =
-            update.indexed_tx_graph_update(bdk_bitcoind_rpc::confirmation_height_anchor);
-
-        let indexed_additions = indexed_tx_graph.insert_relevant_txs(tx_graph_update);
+    loop {
+        let (block, height) = match emitter.next_block()? {
+            Some(b) => (b.block, b.height),
+            None => break,
+        };
+        let _ = chain.apply_update(block_to_chain_update(&block, height))?;
+        let indexed_additions =
+            indexed_tx_graph.insert_relevant_txs(block_to_tx_graph_update(&block, height));
         assert!(indexed_additions.is_empty());
     }
 
@@ -240,15 +279,14 @@ fn test_into_tx_graph() -> anyhow::Result<()> {
         txids
     };
 
-    // expect the next update to be a mempool update (with 3 relevant tx)
+    // expect that the next block should be none and we should get 3 txs from mempool
     {
-        let update = Emitter::new(&env.client, 0, chain.tip()).emit_update()?;
-        assert!(update.is_mempool());
+        // next block should be `None`
+        assert!(emitter.next_block()?.is_none());
 
-        let tx_graph_update =
-            update.indexed_tx_graph_update(bdk_bitcoind_rpc::confirmation_height_anchor);
-
-        let indexed_additions = indexed_tx_graph.insert_relevant_txs(tx_graph_update);
+        let mempool_txs = emitter.mempool().collect::<Result<Vec<_>, _>>()?;
+        let indexed_additions =
+            indexed_tx_graph.insert_relevant_txs(mempool_to_tx_graph_update(&mempool_txs));
         assert_eq!(
             indexed_additions
                 .graph
@@ -268,29 +306,20 @@ fn test_into_tx_graph() -> anyhow::Result<()> {
     let exp_anchors = exp_txids
         .iter()
         .map({
-            let anchor = ConfirmationHeightAnchor {
-                anchor_block: BlockId {
-                    height: exp_block_height,
-                    hash: exp_block_hash,
-                },
-                confirmation_height: exp_block_height,
+            let anchor = BlockId {
+                height: exp_block_height,
+                hash: exp_block_hash,
             };
             move |&txid| (anchor, txid)
         })
         .collect::<BTreeSet<_>>();
 
+    // must receive mined block which will confirm the transactions.
     {
-        let update = Emitter::new(&env.client, 0, chain.tip()).emit_update()?;
-        assert!(update.is_block());
-
-        if let Some(chain_update) = update.chain_update() {
-            let _ = chain.apply_update(chain_update)?;
-        }
-
-        let tx_graph_update =
-            update.indexed_tx_graph_update(bdk_bitcoind_rpc::confirmation_height_anchor);
-
-        let indexed_additions = indexed_tx_graph.insert_relevant_txs(tx_graph_update);
+        let EmittedBlock { block, height } = emitter.next_block()?.expect("must get mined block");
+        let _ = chain.apply_update(block_to_chain_update(&block, height))?;
+        let indexed_additions =
+            indexed_tx_graph.insert_relevant_txs(block_to_tx_graph_update(&block, height));
         assert!(indexed_additions.graph.txs.is_empty());
         assert!(indexed_additions.graph.txouts.is_empty());
         assert_eq!(indexed_additions.graph.anchors, exp_anchors);
