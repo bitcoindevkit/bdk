@@ -81,8 +81,12 @@ cargo update -p flate2:1.0.27 --precise "1.0.26"
 cargo update -p reqwest --precise "0.11.18"
 # h2 0.3.21 has MSRV 1.63.0+
 cargo update -p h2 --precise "0.3.20"
-# rustls-webpki has MSRV 1.60.0+
-cargo update -p rustls-webpki --precise "0.100.1"
+# rustls-webpki 0.100.2 has MSRV 1.60.0+
+cargo update -p rustls-webpki:0.100.3 --precise "0.100.1"
+# rustls-webpki 0.101.2 has MSRV 1.60.0+
+cargo update -p rustls-webpki:0.101.5 --precise "0.101.1"
+# zip 0.6.3 has MSRV 1.59.0+
+cargo update -p zip:0.6.6 --precise "0.6.2"
 ```
 
 ## License
