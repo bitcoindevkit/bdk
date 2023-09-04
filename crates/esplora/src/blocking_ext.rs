@@ -252,7 +252,7 @@ impl EsploraExt for esplora_client::BlockingClient {
                     }
                 }
 
-                if last_index > last_active_index.map(|i| i + stop_gap as u32) {
+                if last_index > last_active_index.map(|i| i.saturating_add(stop_gap as u32)) {
                     break;
                 }
             }
