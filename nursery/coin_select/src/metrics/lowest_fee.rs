@@ -144,20 +144,16 @@ where
             .find(|(cs, _, _)| cs.is_target_met(self.target, change_lb))?;
         cs.deselect(slurp_index);
 
-        let mut lower_bound = self.calc_metric_lb(&cs, None);
+        let mut lower_bound = self.calc_metric_lb(&cs, change_lb_weights);
 
-        if change_lb_weights.is_none() {
-            // changeless solution is possible, find the max excess we need to rid of
-            let perfect_excess = i64::max(
-                cs.rate_excess(self.target, Drain::none()),
-                cs.absolute_excess(self.target, Drain::none()),
-            );
-
-            // use the highest excess to find "perfect candidate weight"
-            let perfect_input_weight = slurp(self.target, perfect_excess, candidate_to_slurp);
-
-            lower_bound += perfect_input_weight * self.target.feerate.spwu();
-        }
+        // find the max excess we need to rid of
+        let perfect_excess = i64::max(
+            cs.rate_excess(self.target, Drain::none()),
+            cs.absolute_excess(self.target, Drain::none()),
+        );
+        // use the highest excess to find "perfect candidate weight"
+        let perfect_input_weight = slurp(self.target, perfect_excess, candidate_to_slurp);
+        lower_bound += perfect_input_weight * self.target.feerate.spwu();
 
         Some(Ordf32(lower_bound))
     }
