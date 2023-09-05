@@ -2,19 +2,16 @@
 use bdk_coin_select::{
     float::Ordf32, metrics, Candidate, CoinSelector, Drain, DrainWeights, FeeRate, Target,
 };
-use proptest::{
-    prelude::*,
-    test_runner::{RngAlgorithm, TestRng},
-};
-use rand::prelude::IteratorRandom;
+use proptest::{prelude::*, proptest, test_runner::*};
+use rand::{prelude::IteratorRandom, Rng, RngCore};
 
 fn test_wv(mut rng: impl RngCore) -> impl Iterator<Item = Candidate> {
     core::iter::repeat_with(move || {
-        let value = rng.gen_range(0..1_000);
+        let value = rng.gen_range(0, 1_000);
         Candidate {
             value,
-            weight: rng.gen_range(0..100),
-            input_count: rng.gen_range(1..2),
+            weight: rng.gen_range(0, 100),
+            input_count: rng.gen_range(1, 2),
             is_segwit: rng.gen_bool(0.5),
         }
     })

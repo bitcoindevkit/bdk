@@ -8,8 +8,8 @@ license = "MIT OR Apache-2.0"
 # No dependencies! Don't add any please!
 
 [dev-dependencies]
-rand = "0.8"
-proptest = "1"
+rand = "0.7"
+proptest = "0.10"
 bitcoin = "0.30"
 
 [features]

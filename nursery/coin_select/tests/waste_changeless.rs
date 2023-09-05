@@ -3,7 +3,7 @@
 mod common;
 use bdk_coin_select::metrics::WasteChangeless;
 use bdk_coin_select::{Candidate, CoinSelector, Drain};
-use proptest::prelude::*;
+use proptest::{prelude::*, proptest};
 
 proptest! {
     #[test]
