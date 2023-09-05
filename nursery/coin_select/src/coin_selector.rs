@@ -93,6 +93,7 @@ impl CoinSelectorOpt {
         txouts: &[TxOut],
         drain_output: &TxOut,
         drain_satisfaction_weight: u32,
+        curr_value: i64,
     ) -> Self {
         let mut tx = Transaction {
             input: vec![],
@@ -110,7 +111,18 @@ impl CoinSelectorOpt {
             target_value: if txouts.is_empty() {
                 None
             } else {
-                Some(txouts.iter().map(|txout| txout.value).sum())
+                // curr_value could be < 0 bc it is a sum of effective values
+                if curr_value >= 0 {
+                    Some(
+                        txouts
+                            .iter()
+                            .map(|txout| txout.value)
+                            .sum::<u64>()
+                            .saturating_sub(curr_value as u64),
+                    )
+                } else {
+                    Some(txouts.iter().map(|txout| txout.value).sum::<u64>() + curr_value as u64)
+                }
             },
             ..Self::from_weights(
                 base_weight as u32,

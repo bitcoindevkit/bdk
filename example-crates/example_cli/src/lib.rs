@@ -3,26 +3,28 @@ use anyhow::Context;
 use bdk_coin_select::{coin_select_bnb, CoinSelector, CoinSelectorOpt, WeightedValue};
 use bdk_file_store::Store;
 use serde::{de::DeserializeOwned, Serialize};
-use std::{cmp::Reverse, collections::HashMap, path::PathBuf, sync::Mutex, time::Duration};
+use std::{cmp::Reverse, collections::HashMap, fmt, path::PathBuf, sync::Mutex, time::Duration};
 
 use bdk_chain::{
     bitcoin::{
         psbt::Prevouts, secp256k1::Secp256k1, util::sighash::SighashCache, Address, LockTime,
-        Network, Sequence, Transaction, TxIn, TxOut,
+        Network, OutPoint, Sequence, Transaction, TxIn, TxOut, Txid,
     },
     indexed_tx_graph::{IndexedAdditions, IndexedTxGraph},
     keychain::{DerivationAdditions, KeychainTxOutIndex},
+    local_chain::LocalChain,
     miniscript::{
         descriptor::{DescriptorSecretKey, KeyMap},
         Descriptor, DescriptorPublicKey,
     },
-    Anchor, Append, ChainOracle, DescriptorExt, FullTxOut, Persist, PersistBackend,
+    Anchor, Append, ChainOracle, ChainPosition, DescriptorExt, FullTxOut, Persist, PersistBackend,
 };
 pub use bdk_file_store;
 pub use clap;
 
 use clap::{Parser, Subcommand};
 
+const DEFAULT_FEERATE_WU: f32 = 0.25;
 pub type KeychainTxGraph<A> = IndexedTxGraph<A, KeychainTxOutIndex<Keychain>>;
 pub type KeychainAdditions<A> = IndexedAdditions<A, DerivationAdditions<Keychain>>;
 pub type Database<'m, C> = Persist<Store<'m, C>, C>;
@@ -73,6 +75,7 @@ pub enum Commands<S: clap::Subcommand> {
         address: Address,
         #[clap(short, default_value = "bnb")]
         coin_select: CoinSelectionAlgo,
+        feerate: f32,
     },
 }
 
@@ -334,6 +337,7 @@ pub fn run_send_cmd<A: Anchor, O: ChainOracle, C>(
     chain: &O,
     keymap: &HashMap<DescriptorPublicKey, DescriptorSecretKey>,
     cs_algorithm: CoinSelectionAlgo,
+    target_feerate: f32,
     address: Address,
     value: u64,
     broadcast: impl FnOnce(&Transaction) -> anyhow::Result<()>,
@@ -345,7 +349,18 @@ where
     let (transaction, change_index) = {
         let graph = &mut *graph.lock().unwrap();
         // take mutable ref to construct tx -- it is only open for a short time while building it.
-        let (tx, change_info) = create_tx(graph, chain, keymap, cs_algorithm, address, value)?;
+        let (tx, change_info) = create_tx(
+            graph,
+            chain,
+            keymap,
+            cs_algorithm,
+            Some(target_feerate),
+            vec![TxOut {
+                script_pubkey: address.script_pubkey(),
+                value,
+            }],
+            vec![],
+        )?;
 
         if let Some((index_additions, (change_keychain, index))) = change_info {
             // We must first persist to disk the fact that we've got a new address from the
@@ -395,8 +410,9 @@ pub fn create_tx<A: Anchor, O: ChainOracle>(
     chain: &O,
     keymap: &HashMap<DescriptorPublicKey, DescriptorSecretKey>,
     cs_algorithm: CoinSelectionAlgo,
-    address: Address,
-    value: u64,
+    target_feerate: Option<f32>,
+    recipients: Vec<TxOut>,
+    required: Vec<OutPoint>,
 ) -> anyhow::Result<(
     Transaction,
     Option<(DerivationAdditions<Keychain>, (Keychain, u32))>,
@@ -412,7 +428,11 @@ where
     };
 
     // TODO use planning module
-    let mut candidates = planned_utxos(graph, chain, &assets)?;
+    let candidates = planned_utxos(graph, chain, &assets)?;
+
+    let (required, mut candidates): (Vec<_>, Vec<_>) = candidates
+        .iter()
+        .partition(|(_, utxo)| required.contains(&utxo.outpoint));
 
     // apply coin selection algorithm
     match cs_algorithm {
@@ -441,10 +461,19 @@ where
         })
         .collect();
 
-    let mut outputs = vec![TxOut {
-        value,
-        script_pubkey: address.script_pubkey(),
-    }];
+    let curr_value = required
+        .iter()
+        .map(|(plan, utxo)| {
+            WeightedValue::new(
+                utxo.txout.value,
+                plan.expected_weight() as _,
+                plan.witness_version().is_some(),
+            )
+            .effective_value(target_feerate.unwrap_or(DEFAULT_FEERATE_WU))
+        })
+        .sum::<i64>();
+
+    let mut outputs = recipients;
 
     let internal_keychain = if graph.index.keychains().get(&Keychain::Internal).is_some() {
         Keychain::Internal
@@ -476,7 +505,8 @@ where
     };
 
     let cs_opts = CoinSelectorOpt {
-        target_feerate: 0.5,
+        // 0.25 sats/wu == 1 sat/vb
+        target_feerate: target_feerate.unwrap_or(DEFAULT_FEERATE_WU),
         min_drain_value: graph
             .index
             .keychains()
@@ -487,6 +517,7 @@ where
             &outputs,
             &change_output,
             change_plan.expected_weight() as u32,
+            curr_value,
         )
     };
 
@@ -506,7 +537,10 @@ where
     let (_, selection_meta) = selection.best_strategy();
 
     // get the selected utxos
-    let selected_txos = selection.apply_selection(&candidates).collect::<Vec<_>>();
+    let selected_txos = selection
+        .apply_selection(&candidates)
+        .chain(required.iter())
+        .collect::<Vec<_>>();
 
     if let Some(drain_value) = selection_meta.drain_value {
         change_output.value = drain_value;
@@ -633,6 +667,112 @@ pub fn planned_utxos<A: Anchor, O: ChainOracle, K: Clone + bdk_tmp_plan::CanDeri
         .collect()
 }
 
+/// Errors that can be thrown by the [`Wallet`](crate::wallet::Wallet)
+#[derive(Debug)]
+pub enum Error {
+    /// Thrown when a tx is not found in the internal database
+    TransactionNotFound,
+    /// Happens when trying to bump a transaction that is already confirmed
+    TransactionConfirmed,
+    /// Trying to replace a tx that has a sequence >= `0xFFFFFFFE`
+    IrreplaceableTransaction,
+    /// Node doesn't have data to estimate a fee rate
+    FeeRateUnavailable,
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::TransactionNotFound => {
+                write!(f, "Transaction not found in the internal database")
+            }
+            Self::TransactionConfirmed => write!(f, "Transaction already confirmed"),
+            Self::IrreplaceableTransaction => write!(f, "Transaction can't be replaced"),
+            Self::FeeRateUnavailable => write!(f, "Fee rate unavailable"),
+        }
+    }
+}
+
+impl std::error::Error for Error {}
+
+#[allow(clippy::type_complexity)]
+pub fn build_fee_bump<A: Anchor, O: ChainOracle>(
+    graph: &mut KeychainTxGraph<A>,
+    chain: &LocalChain,
+    keymap: &HashMap<DescriptorPublicKey, DescriptorSecretKey>,
+    cs_algorithm: CoinSelectionAlgo,
+    new_feerate: f32,
+    txid: Txid,
+) -> anyhow::Result<(
+    Transaction,
+    Option<(DerivationAdditions<Keychain>, (Keychain, u32))>,
+)>
+where
+    O::Error: std::error::Error + Send + Sync + 'static,
+{
+    let chain_tip = chain.get_chain_tip()?.unwrap_or_default();
+    let txout_index = &graph.index;
+
+    let pos = graph
+        .graph()
+        .get_chain_position(chain, chain_tip, txid)
+        .ok_or(Error::TransactionNotFound)?;
+    if let ChainPosition::Confirmed(_) = pos {
+        Err(Error::TransactionConfirmed)?;
+    }
+
+    let mut tx = graph
+        .graph()
+        .get_tx(txid)
+        .ok_or(Error::TransactionNotFound)?
+        .clone();
+
+    if !tx
+        .input
+        .iter()
+        .any(|txin| txin.sequence.to_consensus_u32() <= 0xFFFFFFFD)
+    {
+        Err(Error::IrreplaceableTransaction)?;
+    }
+
+    // remove the inputs from the tx and process them
+    let original_outpoints = tx
+        .input
+        .drain(..)
+        .map(|txin| txin.previous_output)
+        .collect::<Vec<_>>();
+
+    if tx.output.len() > 1 {
+        let mut change_index = None;
+        for (index, txout) in tx.output.iter().enumerate() {
+            let change_type = if txout_index.keychains().get(&Keychain::Internal).is_some() {
+                Keychain::Internal
+            } else {
+                Keychain::External
+            };
+            match txout_index.index_of_spk(&txout.script_pubkey) {
+                Some(&(keychain, _)) if keychain == change_type => change_index = Some(index),
+                _ => {}
+            }
+        }
+
+        // TODO reduce by fee?
+        if let Some(change_index) = change_index {
+            tx.output.remove(change_index);
+        }
+    }
+
+    create_tx(
+        graph,
+        chain,
+        keymap,
+        cs_algorithm,
+        Some(new_feerate),
+        tx.output,
+        original_outpoints,
+    )
+}
+
 pub fn handle_commands<S: clap::Subcommand, A: Anchor, O: ChainOracle, C>(
     graph: &Mutex<KeychainTxGraph<A>>,
     db: &Mutex<Database<C>>,
@@ -666,6 +806,7 @@ where
             value,
             address,
             coin_select,
+            feerate,
         } => {
             let chain = &*chain.lock().unwrap();
             run_send_cmd(
@@ -674,6 +815,7 @@ where
                 chain,
                 keymap,
                 coin_select,
+                feerate,
                 address,
                 value,
                 broadcast,
