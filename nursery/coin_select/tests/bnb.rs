@@ -52,17 +52,6 @@ impl BnbMetric for MinExcessThenWeight {
         }
         Some((cs.excess(self.target, Drain::none()), cs.input_weight()))
     }
-
-    fn is_target_just_met(&mut self, cs: &CoinSelector<'_>) -> bool {
-        let drain = Drain::none();
-
-        let mut prev_cs = cs.clone();
-        if let Some(last_index) = prev_cs.selected_indices().iter().last().copied() {
-            prev_cs.deselect(last_index);
-        }
-
-        cs.is_target_met(self.target, drain) && !prev_cs.is_target_met(self.target, drain)
-    }
 }
 
 #[test]
@@ -87,7 +76,7 @@ fn bnb_finds_an_exact_solution_in_n_iter() {
 
     let target = solution.iter().map(|c| c.value).sum();
 
-    let mut candidates = solution.clone();
+    let mut candidates = solution;
     candidates.extend(wv.take(num_additional_canidates));
     candidates.sort_unstable_by_key(|wv| core::cmp::Reverse(wv.value));
 

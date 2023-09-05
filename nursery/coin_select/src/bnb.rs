@@ -26,9 +26,7 @@ impl<'a, M: BnbMetric> Iterator for BnbIter<'a, M> {
         let branch = self.queue.pop()?;
         if let Some(best) = &self.best {
             // If the next thing in queue is not better than our best we're done.
-            // The exception is when the branch has just met the target with the last selection, so
-            // we want to consider these branches first.
-            if !branch.target_just_met && *best < branch.lower_bound {
+            if *best < branch.lower_bound {
                 // println!(
                 //     "\t\t(SKIP) branch={} inclusion={} lb={:?}, score={:?}",
                 //     branch.selector,
@@ -94,7 +92,6 @@ impl<'a, M: BnbMetric> BnbIter<'a, M> {
                 let branch = Branch {
                     lower_bound: bound,
                     selector: cs.clone(),
-                    target_just_met: self.metric.is_target_just_met(cs),
                     is_exclusion,
                 };
                 // println!(
@@ -110,18 +107,24 @@ impl<'a, M: BnbMetric> BnbIter<'a, M> {
     }
 
     fn insert_new_branches(&mut self, cs: &CoinSelector<'a>) {
-        if cs.is_exhausted() {
-            return;
-        }
+        let (next_index, next) = match cs.unselected().next() {
+            Some(c) => c,
+            None => return, // exhausted
+        };
 
-        let next_unselected = cs.unselected_indices().next().unwrap();
-
+        // for the exclusion branch, we keep banning if candidates have the same weight and value
         let mut exclusion_cs = cs.clone();
-        exclusion_cs.ban(next_unselected);
+        let to_ban = (next.value, next.weight);
+        for (next_index, next) in cs.unselected() {
+            if (next.value, next.weight) != to_ban {
+                break;
+            }
+            exclusion_cs.ban(next_index);
+        }
         self.consider_adding_to_queue(&exclusion_cs, true);
 
         let mut inclusion_cs = cs.clone();
-        inclusion_cs.select(next_unselected);
+        inclusion_cs.select(next_index);
         self.consider_adding_to_queue(&inclusion_cs, false);
     }
 }
@@ -130,31 +133,19 @@ impl<'a, M: BnbMetric> BnbIter<'a, M> {
 struct Branch<'a, O> {
     lower_bound: O,
     selector: CoinSelector<'a>,
-    target_just_met: bool,
     is_exclusion: bool,
 }
 
 impl<'a, O: Ord> Ord for Branch<'a, O> {
     fn cmp(&self, other: &Self) -> core::cmp::Ordering {
-        // NOTE: We prioritize inclusion branches which have just found a solution with the last
-        // selection. We do this because the lower bound values are always equal or better than the
-        // actual score. We want to consider the score first before traversing other branches.
         // NOTE: Reverse comparision `lower_bound` because we want a min-heap (by default BinaryHeap
         // is a max-heap).
         // NOTE: We tiebreak equal scores based on whether it's exlusion or not (preferring
         // inclusion). We do this because we want to try and get to evaluating complete selection
         // returning actual scores as soon as possible.
         core::cmp::Ord::cmp(
-            &(
-                !self.is_exclusion && self.target_just_met,
-                Reverse(&self.lower_bound),
-                !self.is_exclusion,
-            ),
-            &(
-                !other.is_exclusion && other.target_just_met,
-                Reverse(&other.lower_bound),
-                !other.is_exclusion,
-            ),
+            &(Reverse(&self.lower_bound), !self.is_exclusion),
+            &(Reverse(&other.lower_bound), !other.is_exclusion),
         )
     }
 }
@@ -180,15 +171,6 @@ pub trait BnbMetric {
     fn score(&mut self, cs: &CoinSelector<'_>) -> Option<Self::Score>;
 
     fn bound(&mut self, cs: &CoinSelector<'_>) -> Option<Self::Score>;
-
-    /// Returns whether this selection meets the target with the last selected candidate.
-    ///
-    /// In other words, the current selection meets the target, but deselecting the last selected
-    /// candidate does not.
-    ///
-    /// We prioritize exploring inclusion branches that just meet the target over the lower bound
-    /// score.
-    fn is_target_just_met(&mut self, cs: &CoinSelector<'_>) -> bool;
 
     fn requires_ordering_by_descending_value_pwu(&self) -> bool {
         false

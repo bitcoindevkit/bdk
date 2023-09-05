@@ -152,21 +152,6 @@ impl BnbMetric for WasteChangeless {
         Some(lb)
     }
 
-    fn is_target_just_met(&mut self, cs: &crate::CoinSelector<'_>) -> bool {
-        let no_drain = Drain::none();
-
-        let prev_cs = match cs.selected_indices().iter().last().copied() {
-            Some(last_index) => {
-                let mut prev_cs = cs.clone();
-                prev_cs.deselect(last_index);
-                prev_cs
-            }
-            None => return false,
-        };
-
-        cs.is_target_met(self.target, no_drain) && !prev_cs.is_target_met(self.target, no_drain)
-    }
-
     fn requires_ordering_by_descending_value_pwu(&self) -> bool {
         true
     }

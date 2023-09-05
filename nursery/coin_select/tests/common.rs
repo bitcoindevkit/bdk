@@ -187,7 +187,7 @@ impl StrategyParams {
     }
 
     pub fn long_term_feerate(&self) -> FeeRate {
-        FeeRate::from_sat_per_vb(((self.feerate + self.feerate_lt_diff) as f32).max(1.0))
+        FeeRate::from_sat_per_vb((self.feerate + self.feerate_lt_diff).max(1.0))
     }
 
     pub fn drain_weights(&self) -> DrainWeights {
@@ -268,14 +268,9 @@ impl<'a> Iterator for ExhaustiveIter<'a> {
     type Item = (CoinSelector<'a>, bool);
 
     fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            let (cs, inclusion) = self.stack.pop()?;
-            let _more = self.push_branches(&cs);
-            return Some((cs, inclusion));
-            // if inclusion {
-            //     return Some(cs);
-            // }
-        }
+        let (cs, inclusion) = self.stack.pop()?;
+        self.push_branches(&cs);
+        Some((cs, inclusion))
     }
 }
 
