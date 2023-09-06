@@ -100,11 +100,3 @@ pub mod collections {
 
 /// How many confirmations are needed f or a coinbase output to be spent.
 pub const COINBASE_MATURITY: u32 = 100;
-
-impl<A, IA> From<indexed_tx_graph::ChangeSet<A, IA>>
-    for (local_chain::ChangeSet, indexed_tx_graph::ChangeSet<A, IA>)
-{
-    fn from(indexed_changeset: indexed_tx_graph::ChangeSet<A, IA>) -> Self {
-        (local_chain::ChangeSet::default(), indexed_changeset)
-    }
-}

@@ -91,11 +91,10 @@ impl<K: Clone + Ord + Debug> Indexer for KeychainTxOutIndex<K> {
     type ChangeSet = super::ChangeSet<K>;
 
     fn index_txout(&mut self, outpoint: OutPoint, txout: &TxOut) -> Self::ChangeSet {
-        let mut changeset = super::ChangeSet::<K>::default();
-        for (keychain, index) in self.inner.index_txout(outpoint, txout) {
-            changeset.append(self.reveal_to_target(&keychain, index).1);
+        match self.inner.scan_txout(outpoint, txout).cloned() {
+            Some((keychain, index)) => self.reveal_to_target(&keychain, index).1,
+            None => super::ChangeSet::default(),
         }
-        changeset
     }
 
     fn index_tx(&mut self, tx: &bitcoin::Transaction) -> Self::ChangeSet {
@@ -175,8 +174,10 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
 
     /// Set the lookahead count for `keychain`.
     ///
-    /// The lookahead is the number of scripts to cache ahead of the last stored script index. This
-    /// is useful during a scan via [`Indexer::index_tx`] or [`Indexer::index_txout`].
+    /// The lookahead is the number of scripts to cache ahead of the last revealed script index. This
+    /// is useful to find outputs you own when processing block data that lie beyond the last revealed
+    /// index. In certain situations, such as when performing an initial scan of the blockchain during
+    /// wallet import, it may be uncertain or unknown what the last revealed index is.
     ///
     /// # Panics
     ///

@@ -13,7 +13,7 @@ use bdk_chain::{
 };
 use bdk_electrum::{
     electrum_client::{self, ElectrumApi},
-    ElectrumExt,
+    ElectrumExt, ElectrumUpdate,
 };
 use example_cli::{
     anyhow::{self, Context},
@@ -66,16 +66,16 @@ type ChangeSet = (
 );
 
 fn main() -> anyhow::Result<()> {
-    let (args, keymap, index, db, init_changeset) =
+    let (args, keymap, index, db, (disk_local_chain, disk_tx_graph)) =
         example_cli::init::<ElectrumCommands, ChangeSet>(DB_MAGIC, DB_PATH)?;
 
     let graph = Mutex::new({
         let mut graph = IndexedTxGraph::new(index);
-        graph.apply_changeset(init_changeset.1);
+        graph.apply_changeset(disk_tx_graph);
         graph
     });
 
-    let chain = Mutex::new(LocalChain::from_changeset(init_changeset.0));
+    let chain = Mutex::new(LocalChain::from_changeset(disk_local_chain));
 
     let electrum_url = match args.network {
         Network::Bitcoin => "ssl://electrum.blockstream.info:50002",
@@ -251,18 +251,24 @@ fn main() -> anyhow::Result<()> {
             // drop lock on graph and chain
             drop((graph, chain));
 
-            let (chain_update, graph_update) = client
+            let electrum_update = client
                 .scan_without_keychain(tip, spks, txids, outpoints, scan_options.batch_size)
                 .context("scanning the blockchain")?;
-            (chain_update, graph_update, BTreeMap::new())
+            (electrum_update, BTreeMap::new())
         }
     };
 
-    let (chain_update, incomplete_graph_update, keychain_update) = response;
+    let (
+        ElectrumUpdate {
+            chain_update,
+            relevant_txids,
+        },
+        keychain_update,
+    ) = response;
 
     let missing_txids = {
         let graph = &*graph.lock().unwrap();
-        incomplete_graph_update.missing_full_txs(graph.graph())
+        relevant_txids.missing_full_txs(graph.graph())
     };
 
     let now = std::time::UNIX_EPOCH
@@ -270,7 +276,7 @@ fn main() -> anyhow::Result<()> {
         .expect("must get time")
         .as_secs();
 
-    let graph_update = incomplete_graph_update.finalize(&client, Some(now), missing_txids)?;
+    let graph_update = relevant_txids.into_tx_graph(&client, Some(now), missing_txids)?;
 
     let db_changeset = {
         let mut chain = chain.lock().unwrap();
