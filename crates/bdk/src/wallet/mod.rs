@@ -25,7 +25,7 @@ use bdk_chain::{
     keychain::{self, KeychainTxOutIndex},
     local_chain::{self, CannotConnectError, CheckPoint, CheckPointIter, LocalChain},
     tx_graph::{CanonicalTx, TxGraph},
-    Anchor, Append, BlockId, ChainPosition, ConfirmationTime, ConfirmationTimeAnchor, FullTxOut,
+    Append, BlockId, ChainPosition, ConfirmationTime, ConfirmationTimeAnchor, FullTxOut,
     IndexedTxGraph, Persist, PersistBackend,
 };
 use bitcoin::consensus::encode::serialize;
@@ -95,73 +95,51 @@ pub struct Wallet<D = ()> {
     secp: SecpCtx,
 }
 
-/// A structure to update [`Wallet`].
+/// An update to [`Wallet`].
 ///
 /// It updates [`bdk_chain::keychain::KeychainTxOutIndex`], [`bdk_chain::TxGraph`] and [`local_chain::LocalChain`] atomically.
-#[derive(Debug, Clone)]
-pub struct WalletUpdate<K, A> {
+#[derive(Debug, Clone, Default)]
+pub struct Update {
     /// Contains the last active derivation indices per keychain (`K`), which is used to update the
     /// [`KeychainTxOutIndex`].
-    pub last_active_indices: BTreeMap<K, u32>,
+    pub last_active_indices: BTreeMap<KeychainKind, u32>,
 
-    /// Update for the [`TxGraph`].
-    pub graph: TxGraph<A>,
+    /// Update for the wallet's internal [`TxGraph`].
+    pub graph: TxGraph<ConfirmationTimeAnchor>,
 
-    /// Update for the [`LocalChain`].
+    /// Update for the wallet's internal [`LocalChain`].
     ///
     /// [`LocalChain`]: local_chain::LocalChain
     pub chain: Option<local_chain::Update>,
 }
 
-impl<K, A> Default for WalletUpdate<K, A> {
-    fn default() -> Self {
-        Self {
-            last_active_indices: BTreeMap::new(),
-            graph: TxGraph::default(),
-            chain: None,
-        }
-    }
-}
-
-/// A structure that records the corresponding changes as result of applying an [`WalletUpdate`].
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct WalletChangeSet<K, A> {
+/// The changes made to a wallet by applying an [`Update`].
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, Default)]
+pub struct ChangeSet {
     /// Changes to the [`LocalChain`].
     ///
     /// [`LocalChain`]: local_chain::LocalChain
     pub chain: local_chain::ChangeSet,
 
-    /// ChangeSet to [`IndexedTxGraph`].
+    /// Changes to [`IndexedTxGraph`].
     ///
     /// [`IndexedTxGraph`]: bdk_chain::indexed_tx_graph::IndexedTxGraph
-    #[serde(bound(
-        deserialize = "K: Ord + serde::Deserialize<'de>, A: Ord + serde::Deserialize<'de>",
-        serialize = "K: Ord + serde::Serialize, A: Ord + serde::Serialize",
-    ))]
-    pub index_tx_graph: indexed_tx_graph::ChangeSet<A, keychain::ChangeSet<K>>,
+    pub indexed_tx_graph:
+        indexed_tx_graph::ChangeSet<ConfirmationTimeAnchor, keychain::ChangeSet<KeychainKind>>,
 }
 
-impl<K, A> Default for WalletChangeSet<K, A> {
-    fn default() -> Self {
-        Self {
-            chain: Default::default(),
-            index_tx_graph: Default::default(),
-        }
-    }
-}
-
-impl<K: Ord, A: Anchor> Append for WalletChangeSet<K, A> {
+impl Append for ChangeSet {
     fn append(&mut self, other: Self) {
         Append::append(&mut self.chain, other.chain);
-        Append::append(&mut self.index_tx_graph, other.index_tx_graph);
+        Append::append(&mut self.indexed_tx_graph, other.indexed_tx_graph);
     }
 
     fn is_empty(&self) -> bool {
-        self.chain.is_empty() && self.index_tx_graph.is_empty()
+        self.chain.is_empty() && self.indexed_tx_graph.is_empty()
     }
 }
 
-impl<K, A> From<local_chain::ChangeSet> for WalletChangeSet<K, A> {
+impl From<local_chain::ChangeSet> for ChangeSet {
     fn from(chain: local_chain::ChangeSet) -> Self {
         Self {
             chain,
@@ -170,20 +148,21 @@ impl<K, A> From<local_chain::ChangeSet> for WalletChangeSet<K, A> {
     }
 }
 
-impl<K, A> From<indexed_tx_graph::ChangeSet<A, keychain::ChangeSet<K>>> for WalletChangeSet<K, A> {
-    fn from(index_tx_graph: indexed_tx_graph::ChangeSet<A, keychain::ChangeSet<K>>) -> Self {
+impl From<indexed_tx_graph::ChangeSet<ConfirmationTimeAnchor, keychain::ChangeSet<KeychainKind>>>
+    for ChangeSet
+{
+    fn from(
+        indexed_tx_graph: indexed_tx_graph::ChangeSet<
+            ConfirmationTimeAnchor,
+            keychain::ChangeSet<KeychainKind>,
+        >,
+    ) -> Self {
         Self {
-            index_tx_graph,
+            indexed_tx_graph,
             ..Default::default()
         }
     }
 }
-
-/// The update to a [`Wallet`] used in [`Wallet::apply_update`]. This is usually returned from blockchain data sources.
-pub type Update = WalletUpdate<KeychainKind, ConfirmationTimeAnchor>;
-
-/// The changeset produced internally by [`Wallet`] when mutated.
-pub type ChangeSet = WalletChangeSet<KeychainKind, ConfirmationTimeAnchor>;
 
 /// The address index selection strategy to use to derived an address from the wallet's external
 /// descriptor. See [`Wallet::get_address`]. If you're unsure which one to use use `WalletIndex::New`.
@@ -332,7 +311,7 @@ impl<D> Wallet<D> {
 
         let changeset = db.load_from_persistence().map_err(NewError::Persist)?;
         chain.apply_changeset(&changeset.chain);
-        indexed_graph.apply_changeset(changeset.index_tx_graph);
+        indexed_graph.apply_changeset(changeset.indexed_tx_graph);
 
         let persist = Persist::new(db);
 

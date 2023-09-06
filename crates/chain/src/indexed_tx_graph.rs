@@ -6,7 +6,7 @@ use alloc::vec::Vec;
 use bitcoin::{OutPoint, Transaction, TxOut};
 
 use crate::{
-    keychain,
+    keychain, local_chain,
     tx_graph::{self, TxGraph},
     Anchor, Append,
 };
@@ -225,7 +225,16 @@ impl<A, K> From<keychain::ChangeSet<K>> for ChangeSet<A, keychain::ChangeSet<K>>
     }
 }
 
-/// Represents a structure that can index transaction data.
+impl<A, IA> From<ChangeSet<A, IA>> for (local_chain::ChangeSet, ChangeSet<A, IA>) {
+    fn from(indexed_changeset: ChangeSet<A, IA>) -> Self {
+        (local_chain::ChangeSet::default(), indexed_changeset)
+    }
+}
+
+/// Utilities for indexing transaction data.
+///
+/// Types which implement this trait can be used to construct an [`IndexedTxGraph`].
+/// This trait's methods should rarely be called directly.
 pub trait Indexer {
     /// The resultant "changeset" when new transaction data is indexed.
     type ChangeSet;
@@ -234,17 +243,6 @@ pub trait Indexer {
     fn index_txout(&mut self, outpoint: OutPoint, txout: &TxOut) -> Self::ChangeSet;
 
     /// Scans a transaction for relevant outpoints, which are stored and indexed internally.
-    ///
-    /// If the matched script pubkey is part of the lookahead, the last stored index is updated for
-    /// the script pubkey's keychain and the [`ChangeSet`] returned will reflect the
-    /// change.
-    ///
-    /// Typically, this method is used in two situations:
-    ///
-    /// 1. After loading transaction data from the disk, you may scan over all the txouts to restore all
-    /// your txouts.
-    /// 2. When getting new data from the chain, you usually scan it before incorporating it into
-    /// your chain state.
     fn index_tx(&mut self, tx: &Transaction) -> Self::ChangeSet;
 
     /// Apply changeset to itself.

@@ -53,35 +53,19 @@ impl<I> Default for SpkTxOutIndex<I> {
 }
 
 impl<I: Clone + Ord> Indexer for SpkTxOutIndex<I> {
-    type ChangeSet = BTreeSet<I>;
+    type ChangeSet = ();
 
     fn index_txout(&mut self, outpoint: OutPoint, txout: &TxOut) -> Self::ChangeSet {
-        let spk_i = self.spk_indices.get(&txout.script_pubkey);
-        let mut scanned_indices = BTreeSet::new();
-        if let Some(spk_i) = spk_i {
-            self.txouts.insert(outpoint, (spk_i.clone(), txout.clone()));
-            self.spk_txouts.insert((spk_i.clone(), outpoint));
-            self.unused.remove(spk_i);
-            scanned_indices.insert(spk_i.clone());
-        }
-        scanned_indices
+        self.scan_txout(outpoint, txout);
+        Default::default()
     }
 
     fn index_tx(&mut self, tx: &Transaction) -> Self::ChangeSet {
-        let mut scanned_indices = BTreeSet::new();
-
-        for (i, txout) in tx.output.iter().enumerate() {
-            let op = OutPoint::new(tx.txid(), i as u32);
-            let mut txout_indices = self.index_txout(op, txout);
-            scanned_indices.append(&mut txout_indices);
-        }
-
-        scanned_indices
+        self.scan(tx);
+        Default::default()
     }
 
-    fn initial_changeset(&self) -> Self::ChangeSet {
-        self.spks.keys().cloned().collect()
-    }
+    fn initial_changeset(&self) -> Self::ChangeSet {}
 
     fn apply_changeset(&mut self, _changeset: Self::ChangeSet) {
         // This applies nothing.
@@ -93,6 +77,38 @@ impl<I: Clone + Ord> Indexer for SpkTxOutIndex<I> {
 }
 
 impl<I: Clone + Ord> SpkTxOutIndex<I> {
+    /// Scans a transaction's outputs for matching script pubkeys.
+    ///
+    /// Typically, this is used in two situations:
+    ///
+    /// 1. After loading transaction data from the disk, you may scan over all the txouts to restore all
+    /// your txouts.
+    /// 2. When getting new data from the chain, you usually scan it before incorporating it into your chain state.
+    pub fn scan(&mut self, tx: &Transaction) -> BTreeSet<I> {
+        let mut scanned_indices = BTreeSet::new();
+        let txid = tx.txid();
+        for (i, txout) in tx.output.iter().enumerate() {
+            let op = OutPoint::new(txid, i as u32);
+            if let Some(spk_i) = self.scan_txout(op, txout) {
+                scanned_indices.insert(spk_i.clone());
+            }
+        }
+
+        scanned_indices
+    }
+
+    /// Scan a single `TxOut` for a matching script pubkey and returns the index that matches the
+    /// script pubkey (if any).
+    pub fn scan_txout(&mut self, op: OutPoint, txout: &TxOut) -> Option<&I> {
+        let spk_i = self.spk_indices.get(&txout.script_pubkey);
+        if let Some(spk_i) = spk_i {
+            self.txouts.insert(op, (spk_i.clone(), txout.clone()));
+            self.spk_txouts.insert((spk_i.clone(), op));
+            self.unused.remove(spk_i);
+        }
+        spk_i
+    }
+
     /// Get a reference to the set of indexed outpoints.
     pub fn outpoints(&self) -> &BTreeSet<(I, OutPoint)> {
         &self.spk_txouts
