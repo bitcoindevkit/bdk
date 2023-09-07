@@ -12,7 +12,7 @@ use bdk_chain::{
     Append, ConfirmationHeightAnchor,
 };
 use bdk_electrum::{
-    electrum_client::{self, ElectrumApi},
+    electrum_client::{self, Client, ElectrumApi},
     ElectrumExt, ElectrumUpdate,
 };
 use example_cli::{
@@ -33,6 +33,8 @@ enum ElectrumCommands {
         stop_gap: usize,
         #[clap(flatten)]
         scan_options: ScanOptions,
+        #[clap(flatten)]
+        electrum_args: ElectrumArgs,
     },
     /// Scans particular addresses using the electrum API.
     Sync {
@@ -50,7 +52,42 @@ enum ElectrumCommands {
         unconfirmed: bool,
         #[clap(flatten)]
         scan_options: ScanOptions,
+        #[clap(flatten)]
+        electrum_args: ElectrumArgs,
     },
+}
+
+impl ElectrumCommands {
+    fn electrum_args(&self) -> ElectrumArgs {
+        match self {
+            ElectrumCommands::Scan { electrum_args, .. } => electrum_args.clone(),
+            ElectrumCommands::Sync { electrum_args, .. } => electrum_args.clone(),
+        }
+    }
+}
+
+#[derive(clap::Args, Debug, Clone)]
+pub struct ElectrumArgs {
+    /// The electrum url to use to connect to. If not provided it will use a default electrum server
+    /// for your chosen network.
+    electrum_url: Option<String>,
+}
+
+impl ElectrumArgs {
+    pub fn client(&self, network: Network) -> anyhow::Result<Client> {
+        let electrum_url = self.electrum_url.as_deref().unwrap_or(match network {
+            Network::Bitcoin => "ssl://electrum.blockstream.info:50002",
+            Network::Testnet => "ssl://electrum.blockstream.info:60002",
+            Network::Regtest => "tcp://localhost:60401",
+            Network::Signet => "tcp://signet-electrumx.wakiyamap.dev:50001",
+            _ => panic!("Unknown network"),
+        });
+        let config = electrum_client::Config::builder()
+            .validate_domain(matches!(network, Network::Bitcoin))
+            .build();
+
+        Ok(electrum_client::Client::from_config(electrum_url, config)?)
+    }
 }
 
 #[derive(Parser, Debug, Clone, PartialEq)]
@@ -66,8 +103,10 @@ type ChangeSet = (
 );
 
 fn main() -> anyhow::Result<()> {
+    // let (args, keymap, index, db, (disk_local_chain, disk_tx_graph)) =
+    //     example_cli::init::<ElectrumCommands, ChangeSet>(DB_MAGIC, DB_PATH)?;
     let (args, keymap, index, db, (disk_local_chain, disk_tx_graph)) =
-        example_cli::init::<ElectrumCommands, ChangeSet>(DB_MAGIC, DB_PATH)?;
+        example_cli::init::<ElectrumCommands, ElectrumArgs, ChangeSet>(DB_MAGIC, DB_PATH)?;
 
     let graph = Mutex::new({
         let mut graph = IndexedTxGraph::new(index);
@@ -76,19 +115,6 @@ fn main() -> anyhow::Result<()> {
     });
 
     let chain = Mutex::new(LocalChain::from_changeset(disk_local_chain));
-
-    let electrum_url = match args.network {
-        Network::Bitcoin => "ssl://electrum.blockstream.info:50002",
-        Network::Testnet => "ssl://electrum.blockstream.info:60002",
-        Network::Regtest => "tcp://localhost:60401",
-        Network::Signet => "tcp://signet-electrumx.wakiyamap.dev:50001",
-        _ => panic!("Unknown network"),
-    };
-    let config = electrum_client::Config::builder()
-        .validate_domain(matches!(args.network, Network::Bitcoin))
-        .build();
-
-    let client = electrum_client::Client::from_config(electrum_url, config)?;
 
     let electrum_cmd = match &args.command {
         example_cli::Commands::ChainSpecific(electrum_cmd) => electrum_cmd,
@@ -99,11 +125,10 @@ fn main() -> anyhow::Result<()> {
                 &chain,
                 &keymap,
                 args.network,
-                |tx| {
-                    client
-                        .transaction_broadcast(tx)
-                        .map(|_| ())
-                        .map_err(anyhow::Error::from)
+                |electrum_args, tx| {
+                    let client = electrum_args.client(args.network)?;
+                    client.transaction_broadcast(tx)?;
+                    Ok(())
                 },
                 general_cmd.clone(),
             );
@@ -113,10 +138,13 @@ fn main() -> anyhow::Result<()> {
         }
     };
 
+    let client = electrum_cmd.electrum_args().client(args.network)?;
+
     let response = match electrum_cmd.clone() {
         ElectrumCommands::Scan {
             stop_gap,
             scan_options,
+            ..
         } => {
             let (keychain_spks, tip) = {
                 let graph = &*graph.lock().unwrap();
@@ -162,6 +190,7 @@ fn main() -> anyhow::Result<()> {
             mut utxos,
             mut unconfirmed,
             scan_options,
+            ..
         } => {
             // Get a short lock on the tracker to get the spks we're interested in
             let graph = graph.lock().unwrap();

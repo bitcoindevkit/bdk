@@ -13,16 +13,21 @@ use bdk_bitcoind_rpc::{
     Emission, EmittedBlock, Emitter,
 };
 use bdk_chain::{
-    bitcoin::{address, hashes::Hash, Address, BlockHash, Transaction},
+    bitcoin::{hashes::Hash, BlockHash},
     indexed_tx_graph::{self, InsertTxItem},
+    // bitcoin::{hashes::Hash, BlockHash},
+    // indexed_tx_graph::{self, TxItem},
     keychain,
     local_chain::{self, CheckPoint, LocalChain},
-    Append, BlockId, ConfirmationTimeAnchor, IndexedTxGraph,
+    Append,
+    BlockId,
+    ConfirmationTimeAnchor,
+    IndexedTxGraph,
 };
 use example_cli::{
     anyhow,
     clap::{self, Args, Subcommand},
-    CoinSelectionAlgo, Keychain,
+    Keychain,
 };
 
 const DB_MAGIC: &[u8] = b"bdk_example_rpc";
@@ -63,6 +68,21 @@ impl From<RpcArgs> for Auth {
     }
 }
 
+impl RpcArgs {
+    fn new_client(&self) -> anyhow::Result<Client> {
+        Ok(Client::new(
+            &self.url,
+            match (&self.rpc_cookie, &self.rpc_user, &self.rpc_password) {
+                (None, None, None) => Auth::None,
+                (Some(path), _, _) => Auth::CookieFile(path.clone()),
+                (_, Some(user), Some(pass)) => Auth::UserPass(user.clone(), pass.clone()),
+                (_, Some(_), None) => panic!("rpc auth: missing rpc_pass"),
+                (_, None, Some(_)) => panic!("rpc auth: missing rpc_user"),
+            },
+        )?)
+    }
+}
+
 #[derive(Subcommand, Debug, Clone)]
 enum RpcCommands {
     /// Syncs local state with remote state via RPC (starting from last point of agreement) and
@@ -80,31 +100,13 @@ enum RpcCommands {
         #[clap(flatten)]
         rpc_args: RpcArgs,
     },
-    /// Create and broadcast a transaction.
-    Tx {
-        value: u64,
-        address: Address<address::NetworkUnchecked>,
-        #[clap(short, default_value = "bnb")]
-        coin_select: CoinSelectionAlgo,
-        #[clap(flatten)]
-        rpc_args: RpcArgs,
-    },
-}
-
-impl RpcCommands {
-    fn rpc_args(&self) -> &RpcArgs {
-        match self {
-            RpcCommands::Sync { rpc_args, .. } => rpc_args,
-            RpcCommands::Tx { rpc_args, .. } => rpc_args,
-        }
-    }
 }
 
 fn main() -> anyhow::Result<()> {
     let sigterm_flag = start_ctrlc_handler();
 
     let (args, keymap, index, db, init_changeset) =
-        example_cli::init::<RpcCommands, ChangeSet>(DB_MAGIC, DB_PATH)?;
+        example_cli::init::<RpcCommands, RpcArgs, ChangeSet>(DB_MAGIC, DB_PATH)?;
 
     let graph = Mutex::new({
         let mut graph = IndexedTxGraph::new(index);
@@ -123,7 +125,11 @@ fn main() -> anyhow::Result<()> {
                 &chain,
                 &keymap,
                 args.network,
-                |_| Err(anyhow::anyhow!("use `tx` instead")),
+                |rpc_args, tx| {
+                    let client = rpc_args.new_client()?;
+                    client.send_raw_transaction(tx)?;
+                    Ok(())
+                },
                 general_cmd,
             );
             db.lock().unwrap().commit()?;
@@ -131,26 +137,12 @@ fn main() -> anyhow::Result<()> {
         }
     };
 
-    let rpc_client = {
-        let a = rpc_cmd.rpc_args();
-        Client::new(
-            &a.url,
-            match (&a.rpc_cookie, &a.rpc_user, &a.rpc_password) {
-                (None, None, None) => Auth::None,
-                (Some(path), _, _) => Auth::CookieFile(path.clone()),
-                (_, Some(user), Some(pass)) => Auth::UserPass(user.clone(), pass.clone()),
-                (_, Some(_), None) => panic!("rpc auth: missing rpc_pass"),
-                (_, None, Some(_)) => panic!("rpc auth: missing rpc_user"),
-            },
-        )?
-    };
-
     match rpc_cmd {
         RpcCommands::Sync {
             fallback_height,
             lookahead,
             live,
-            ..
+            rpc_args,
         } => {
             graph.lock().unwrap().index.set_lookahead_for_all(lookahead);
 
@@ -162,6 +154,7 @@ fn main() -> anyhow::Result<()> {
 
             let join_handle = std::thread::spawn(move || -> anyhow::Result<()> {
                 let mut tip_height = Option::<u32>::None;
+                let rpc_client = rpc_args.new_client()?;
 
                 let mut emissions =
                     Emitter::new(&rpc_client, start_height).into_iterator::<EmittedBlock>();
@@ -291,30 +284,6 @@ fn main() -> anyhow::Result<()> {
             join_handle
                 .join()
                 .expect("failed to join chain source thread")
-        }
-        RpcCommands::Tx {
-            value,
-            address,
-            coin_select,
-            ..
-        } => {
-            let chain = chain.lock().unwrap();
-            let broadcast = move |tx: &Transaction| -> anyhow::Result<()> {
-                rpc_client.send_raw_transaction(tx)?;
-                Ok(())
-            };
-            example_cli::run_send_cmd(
-                &graph,
-                &db,
-                &*chain,
-                &keymap,
-                coin_select,
-                address
-                    .require_network(args.network)
-                    .expect("address has the wrong network"),
-                value,
-                broadcast,
-            )
         }
     }
 }
