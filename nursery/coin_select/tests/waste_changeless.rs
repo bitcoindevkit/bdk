@@ -2,7 +2,7 @@
 
 mod common;
 use bdk_coin_select::metrics::WasteChangeless;
-use bdk_coin_select::{Candidate, CoinSelector, Drain};
+use bdk_coin_select::{Candidate, CoinSelector, Drain, Target};
 use proptest::{prelude::*, proptest};
 
 proptest! {
@@ -19,22 +19,10 @@ proptest! {
         drain_spend_weight in 1..=2000_u32, // drain spend weight (wu)
         drain_dust in 100..=1000_u64,       // drain dust (sats)
     ) {
-        common::can_eventually_find_best_solution(
-            common::gen_candidates,
-            |_| |_, _| Drain::none(),
-            |p, _| WasteChangeless::new(p.target(), p.long_term_feerate()),
-            common::StrategyParams {
-                n_candidates,
-                target_value,
-                base_weight,
-                min_fee,
-                feerate,
-                feerate_lt_diff,
-                drain_weight,
-                drain_spend_weight,
-                drain_dust,
-            },
-        )?;
+        let params = common::StrategyParams { n_candidates, target_value, base_weight, min_fee, feerate, feerate_lt_diff, drain_weight, drain_spend_weight, drain_dust };
+        let candidates = common::gen_candidates(params.n_candidates);
+        let metric = WasteChangeless::new(params.target(), params.long_term_feerate());
+        common::can_eventually_find_best_solution(params, candidates, &|_, _| Drain::none(), metric)?;
     }
 
     /// This is extremely non-optimal right now
@@ -51,22 +39,10 @@ proptest! {
         drain_spend_weight in 1..=2000_u32, // drain spend weight (wu)
         drain_dust in 100..=1000_u64,       // drain dust (sats)
     ) {
-        common::can_eventually_find_best_solution(
-            common::gen_candidates,
-            |_| |_, _| Drain::none(),
-            |p, _| WasteChangeless::new(p.target(), p.long_term_feerate()),
-            common::StrategyParams {
-                n_candidates,
-                target_value,
-                base_weight,
-                min_fee,
-                feerate,
-                feerate_lt_diff,
-                drain_weight,
-                drain_spend_weight,
-                drain_dust,
-            },
-        )?;
+        let params = common::StrategyParams { n_candidates, target_value, base_weight, min_fee, feerate, feerate_lt_diff, drain_weight, drain_spend_weight, drain_dust };
+        let candidates = common::gen_candidates(params.n_candidates);
+        let metric = WasteChangeless::new(params.target(), params.long_term_feerate());
+        common::can_eventually_find_best_solution(params, candidates, &|_, _| Drain::none(), metric)?;
     }
 
     #[test]
@@ -82,22 +58,10 @@ proptest! {
         drain_spend_weight in 1..=1000_u32, // drain spend weight (wu)
         drain_dust in 100..=1000_u64,       // drain dust (sats)
     ) {
-        common::ensure_bound_is_not_too_tight(
-            common::gen_candidates,
-            |_| |_, _| Drain::none(),
-            |p, _| WasteChangeless::new(p.target(), p.long_term_feerate()),
-            common::StrategyParams {
-                n_candidates,
-                target_value,
-                base_weight,
-                min_fee,
-                feerate,
-                feerate_lt_diff,
-                drain_weight,
-                drain_spend_weight,
-                drain_dust,
-            },
-        )?;
+        let params = common::StrategyParams { n_candidates, target_value, base_weight, min_fee, feerate, feerate_lt_diff, drain_weight, drain_spend_weight, drain_dust };
+        let candidates = common::gen_candidates(params.n_candidates);
+        let metric = WasteChangeless::new(params.target(), params.long_term_feerate());
+        common::ensure_bound_is_not_too_tight(params, candidates, &|_, _| Drain::none(), metric)?;
     }
 
     #[test]

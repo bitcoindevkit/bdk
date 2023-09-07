@@ -418,31 +418,11 @@ proptest! {
         drain_spend_weight in 1..=2000_u32, // drain spend weight (wu)
         drain_dust in 100..=1000_u64,       // drain dust (sats)
     ) {
-        common::can_eventually_find_best_solution(
-            common::gen_candidates,
-            |p| min_value_and_waste(
-                p.drain_weights(),
-                p.drain_dust,
-                p.long_term_feerate(),
-            ),
-            |p, cp| Waste {
-                target: p.target(),
-                long_term_feerate: p.long_term_feerate(),
-                // [TODO]: Remove this memory leak hack
-                change_policy: Box::leak(Box::new(cp)),
-            },
-            common::StrategyParams {
-                n_candidates,
-                target_value,
-                base_weight,
-                min_fee,
-                feerate,
-                feerate_lt_diff,
-                drain_weight,
-                drain_spend_weight,
-                drain_dust,
-            },
-        )?;
+        let params = common::StrategyParams { n_candidates, target_value, base_weight, min_fee, feerate, feerate_lt_diff, drain_weight, drain_spend_weight, drain_dust };
+        let candidates = common::gen_candidates(params.n_candidates);
+        let change_policy = min_value_and_waste(params.drain_weights(), params.drain_dust, params.long_term_feerate());
+        let metric = Waste { target: params.target(), long_term_feerate: params.long_term_feerate(), change_policy: &change_policy };
+        common::can_eventually_find_best_solution(params, candidates, &change_policy, metric)?;
     }
 
     #[test]
@@ -458,31 +438,11 @@ proptest! {
         drain_spend_weight in 1..=1000_u32, // drain spend weight (wu)
         drain_dust in 100..=1000_u64,       // drain dust (sats)
     ) {
-        common::ensure_bound_is_not_too_tight(
-            common::gen_candidates,
-            |p| min_value_and_waste(
-                p.drain_weights(),
-                p.drain_dust,
-                p.long_term_feerate(),
-            ),
-            |p, cp| Waste {
-                target: p.target(),
-                long_term_feerate: p.long_term_feerate(),
-                // [TODO]: Remove this memory leak hack
-                change_policy: Box::leak(Box::new(cp)),
-            },
-            common::StrategyParams {
-                n_candidates,
-                target_value,
-                base_weight,
-                min_fee,
-                feerate,
-                feerate_lt_diff,
-                drain_weight,
-                drain_spend_weight,
-                drain_dust,
-            },
-        )?;
+        let params = common::StrategyParams { n_candidates, target_value, base_weight, min_fee, feerate, feerate_lt_diff, drain_weight, drain_spend_weight, drain_dust };
+        let candidates = common::gen_candidates(params.n_candidates);
+        let change_policy = min_value_and_waste(params.drain_weights(), params.drain_dust, params.long_term_feerate());
+        let metric = Waste { target: params.target(), long_term_feerate: params.long_term_feerate(), change_policy: &change_policy };
+        common::ensure_bound_is_not_too_tight(params, candidates, &change_policy, metric)?;
     }
 }
 

@@ -12,28 +12,21 @@ use proptest::{
     test_runner::{RngAlgorithm, TestRng},
 };
 
-pub fn can_eventually_find_best_solution<M, P, GM, GC, GP>(
-    gen_candidates: GC,
-    gen_change_policy: GP,
-    gen_metric: GM,
+pub fn can_eventually_find_best_solution<P, M>(
     params: StrategyParams,
+    candidates: Vec<Candidate>,
+    change_policy: &P,
+    mut metric: M,
 ) -> Result<(), proptest::test_runner::TestCaseError>
 where
     M: BnbMetric<Score = Ordf32>,
     P: Fn(&CoinSelector, Target) -> Drain,
-    GM: Fn(&StrategyParams, P) -> M,
-    GC: Fn(usize) -> Vec<Candidate>,
-    GP: Fn(&StrategyParams) -> P,
 {
     println!("== TEST ==");
     println!("{}", type_name::<M>());
     println!("{:?}", params);
 
-    let candidates = gen_candidates(params.n_candidates);
     let target = params.target();
-
-    let mut metric = gen_metric(&params, gen_change_policy(&params));
-    let change_policy = gen_change_policy(&params);
 
     let mut selection = CoinSelector::new(&candidates, params.base_weight);
     let mut exp_selection = selection.clone();
@@ -85,28 +78,21 @@ where
     Ok(())
 }
 
-pub fn ensure_bound_is_not_too_tight<M, P, GM, GC, GP>(
-    gen_candidates: GC,
-    gen_change_policy: GP,
-    gen_metric: GM,
+pub fn ensure_bound_is_not_too_tight<P, M>(
     params: StrategyParams,
+    candidates: Vec<Candidate>,
+    change_policy: &P,
+    mut metric: M,
 ) -> Result<(), proptest::test_runner::TestCaseError>
 where
     M: BnbMetric<Score = Ordf32>,
     P: Fn(&CoinSelector, Target) -> Drain,
-    GM: Fn(&StrategyParams, P) -> M,
-    GC: Fn(usize) -> Vec<Candidate>,
-    GP: Fn(&StrategyParams) -> P,
 {
     println!("== TEST ==");
     println!("{}", type_name::<M>());
     println!("{:?}", params);
 
-    let candidates = gen_candidates(params.n_candidates);
-
     let target = params.target();
-    let change_policy = gen_change_policy(&params);
-    let mut metric = gen_metric(&params, gen_change_policy(&params));
 
     let init_cs = {
         let mut cs = CoinSelector::new(&candidates, params.base_weight);
