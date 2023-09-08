@@ -298,3 +298,76 @@ fn test_into_tx_graph() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+#[test]
+fn test_status_of_reorg_tx() -> anyhow::Result<()> {
+    let env = TestEnv::new()?;
+    let address = env.client.get_new_address(None, None)?.assume_checked();
+
+    env.mine_blocks(101, None)?;
+
+    let mut chain = LocalChain::default();
+    let mut indexed_tx_graph = IndexedTxGraph::<ConfirmationHeightAnchor, _>::new({
+        let mut index = SpkTxOutIndex::<usize>::default();
+        index.insert_spk(0, address.script_pubkey());
+        index
+    });
+
+    let txid = env.client.send_to_address(
+        &address,
+        Amount::from_sat(10_000),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )?;
+
+    env.mine_blocks(1, None)?;
+
+    for r in Emitter::new(&env.client, 0, chain.tip()) {
+        let update = r?;
+
+        if let Some(chain_update) = update.chain_update() {
+            let _ = chain.apply_update(chain_update)?;
+        }
+
+        let tx_graph_update =
+            update.indexed_tx_graph_update(bdk_bitcoind_rpc::confirmation_height_anchor);
+
+        let _ = indexed_tx_graph.insert_relevant_txs(tx_graph_update);
+    }
+
+    let chain_tip = chain.tip().unwrap().block_id();
+    let tx_chain_position = indexed_tx_graph
+        .graph()
+        .get_chain_position(&chain, chain_tip, txid)
+        .unwrap();
+    assert!(tx_chain_position.is_confirmed());
+
+    env.reorg(2)?;
+
+    for r in Emitter::new(&env.client, 0, chain.tip()) {
+        let update = r?;
+
+        if let Some(chain_update) = update.chain_update() {
+            let _ = chain.apply_update(chain_update)?;
+        }
+
+        let tx_graph_update =
+            update.indexed_tx_graph_update(bdk_bitcoind_rpc::confirmation_height_anchor);
+
+        let indexed_additions = indexed_tx_graph.insert_relevant_txs(tx_graph_update);
+        assert!(indexed_additions.is_empty());
+    }
+
+    let chain_tip = chain.tip().unwrap().block_id();
+    let tx_chain_position = indexed_tx_graph
+        .graph()
+        .get_chain_position(&chain, chain_tip, txid)
+        .unwrap();
+    assert!(!tx_chain_position.is_confirmed());
+
+    Ok(())
+}
