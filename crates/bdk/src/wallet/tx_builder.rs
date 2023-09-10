@@ -295,8 +295,7 @@ impl<'a, D, Cs: CoinSelectionAlgorithm, Ctx: TxBuilderContext> TxBuilder<'a, D, 
 
             for utxo in utxos {
                 let descriptor = wallet.get_descriptor_for_keychain(utxo.keychain);
-                #[allow(deprecated)]
-                let satisfaction_weight = descriptor.max_satisfaction_weight().unwrap();
+                let satisfaction_weight = descriptor.max_weight_to_satisfy().unwrap();
                 self.params.utxos.push(WeightedUtxo {
                     satisfaction_weight,
                     utxo: Utxo::Local(utxo),
@@ -337,9 +336,10 @@ impl<'a, D, Cs: CoinSelectionAlgorithm, Ctx: TxBuilderContext> TxBuilder<'a, D, 
     /// causing you to pay a fee that is too high. The party who is broadcasting the transaction can
     /// of course check the real input weight matches the expected weight prior to broadcasting.
     ///
-    /// To guarantee the `satisfaction_weight` is correct, you can require the party providing the
+    /// TODO: add notes about the new `max_weight_to_satisfy`
+    /// To guarantee the `max_weight_to_satisfy` is correct, you can require the party providing the
     /// `psbt_input` provide a miniscript descriptor for the input so you can check it against the
-    /// `script_pubkey` and then ask it for the [`max_satisfaction_weight`].
+    /// `script_pubkey` and then ask it for the [`max_weight_to_satisfy`].
     ///
     /// This is an **EXPERIMENTAL** feature, API and other major changes are expected.
     ///
@@ -360,7 +360,7 @@ impl<'a, D, Cs: CoinSelectionAlgorithm, Ctx: TxBuilderContext> TxBuilder<'a, D, 
     ///
     /// [`only_witness_utxo`]: Self::only_witness_utxo
     /// [`finish`]: Self::finish
-    /// [`max_satisfaction_weight`]: miniscript::Descriptor::max_satisfaction_weight
+    /// [`max_weight_to_satisfy`]: miniscript::Descriptor::max_weight_to_satisfy
     pub fn add_foreign_utxo(
         &mut self,
         outpoint: OutPoint,
