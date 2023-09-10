@@ -245,7 +245,7 @@ fn test_list_owned_txouts() {
                 .graph()
                 .filter_chain_txouts(
                     &local_chain,
-                    chain_tip,
+                    Some(chain_tip),
                     graph.index.outpoints().iter().cloned(),
                 )
                 .collect::<Vec<_>>();
@@ -254,14 +254,14 @@ fn test_list_owned_txouts() {
                 .graph()
                 .filter_chain_unspents(
                     &local_chain,
-                    chain_tip,
+                    Some(chain_tip),
                     graph.index.outpoints().iter().cloned(),
                 )
                 .collect::<Vec<_>>();
 
             let balance = graph.graph().balance(
                 &local_chain,
-                chain_tip,
+                Some(chain_tip),
                 graph.index.outpoints().iter().cloned(),
                 |_, spk: &Script| trusted_spks.contains(&spk.to_owned()),
             );

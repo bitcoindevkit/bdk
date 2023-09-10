@@ -166,7 +166,7 @@ fn main() -> anyhow::Result<()> {
             // Get a short lock on the tracker to get the spks we're interested in
             let graph = graph.lock().unwrap();
             let chain = chain.lock().unwrap();
-            let chain_tip = chain.tip().map(|cp| cp.block_id()).unwrap_or_default();
+            let chain_tip = chain.tip().map(|cp| cp.block_id());
 
             if !(all_spks || unused_spks || utxos || unconfirmed) {
                 unused_spks = true;

@@ -1,4 +1,4 @@
-use bitcoin::{hashes::Hash, BlockHash, OutPoint, TxOut, Txid};
+use bitcoin::{BlockHash, OutPoint, TxOut, Txid};
 
 use crate::{Anchor, COINBASE_MATURITY};
 
@@ -109,15 +109,6 @@ impl Anchor for BlockId {
     }
 }
 
-impl Default for BlockId {
-    fn default() -> Self {
-        Self {
-            height: Default::default(),
-            hash: BlockHash::all_zeros(),
-        }
-    }
-}
-
 impl From<(u32, BlockHash)> for BlockId {
     fn from((height, hash): (u32, BlockHash)) -> Self {
         Self { height, hash }
@@ -142,7 +133,7 @@ impl From<(&u32, &BlockHash)> for BlockId {
 /// An [`Anchor`] implementation that also records the exact confirmation height of the transaction.
 ///
 /// Refer to [`Anchor`] for more details.
-#[derive(Debug, Default, Clone, PartialEq, Eq, Copy, PartialOrd, Ord, core::hash::Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy, PartialOrd, Ord, core::hash::Hash)]
 #[cfg_attr(
     feature = "serde",
     derive(serde::Deserialize, serde::Serialize),
@@ -172,7 +163,7 @@ impl Anchor for ConfirmationHeightAnchor {
 /// transaction.
 ///
 /// Refer to [`Anchor`] for more details.
-#[derive(Debug, Default, Clone, PartialEq, Eq, Copy, PartialOrd, Ord, core::hash::Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy, PartialOrd, Ord, core::hash::Hash)]
 #[cfg_attr(
     feature = "serde",
     derive(serde::Deserialize, serde::Serialize),

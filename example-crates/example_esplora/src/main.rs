@@ -206,7 +206,7 @@ fn main() -> anyhow::Result<()> {
             {
                 let graph = graph.lock().unwrap();
                 let chain = chain.lock().unwrap();
-                let chain_tip = chain.tip().map(|cp| cp.block_id()).unwrap_or_default();
+                let chain_tip = chain.tip().map(|cp| cp.block_id());
 
                 if *all_spks {
                     let all_spks = graph

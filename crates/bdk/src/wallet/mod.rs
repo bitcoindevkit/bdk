@@ -437,7 +437,7 @@ impl<D> Wallet<D> {
             .graph()
             .filter_chain_unspents(
                 &self.chain,
-                self.chain.tip().map(|cp| cp.block_id()).unwrap_or_default(),
+                self.chain.tip().map(|cp| cp.block_id()),
                 self.indexed_graph.index.outpoints().iter().cloned(),
             )
             .map(|((k, i), full_txo)| new_local_utxo(k, i, full_txo))
@@ -487,7 +487,7 @@ impl<D> Wallet<D> {
             .graph()
             .filter_chain_unspents(
                 &self.chain,
-                self.chain.tip().map(|cp| cp.block_id()).unwrap_or_default(),
+                self.chain.tip().map(|cp| cp.block_id()),
                 core::iter::once((spk_i, op)),
             )
             .map(|((k, i), full_txo)| new_local_utxo(k, i, full_txo))
@@ -660,7 +660,7 @@ impl<D> Wallet<D> {
         Some(CanonicalTx {
             chain_position: graph.get_chain_position(
                 &self.chain,
-                self.chain.tip().map(|cp| cp.block_id()).unwrap_or_default(),
+                self.chain.tip().map(|cp| cp.block_id()),
                 txid,
             )?,
             tx_node: graph.get_tx_node(txid)?,
@@ -748,10 +748,9 @@ impl<D> Wallet<D> {
     pub fn transactions(
         &self,
     ) -> impl Iterator<Item = CanonicalTx<'_, Transaction, ConfirmationTimeAnchor>> + '_ {
-        self.indexed_graph.graph().list_chain_txs(
-            &self.chain,
-            self.chain.tip().map(|cp| cp.block_id()).unwrap_or_default(),
-        )
+        self.indexed_graph
+            .graph()
+            .list_chain_txs(&self.chain, self.chain.tip().map(|cp| cp.block_id()))
     }
 
     /// Return the balance, separated into available, trusted-pending, untrusted-pending and immature
@@ -759,7 +758,7 @@ impl<D> Wallet<D> {
     pub fn get_balance(&self) -> Balance {
         self.indexed_graph.graph().balance(
             &self.chain,
-            self.chain.tip().map(|cp| cp.block_id()).unwrap_or_default(),
+            self.chain.tip().map(|cp| cp.block_id()),
             self.indexed_graph.index.outpoints().iter().cloned(),
             |&(k, _), _| k == KeychainKind::Internal,
         )
@@ -1239,7 +1238,7 @@ impl<D> Wallet<D> {
     ) -> Result<TxBuilder<'_, D, DefaultCoinSelectionAlgorithm, BumpFee>, Error> {
         let graph = self.indexed_graph.graph();
         let txout_index = &self.indexed_graph.index;
-        let chain_tip = self.chain.tip().map(|cp| cp.block_id()).unwrap_or_default();
+        let chain_tip = self.chain.tip().map(|cp| cp.block_id());
 
         let mut tx = graph
             .get_tx(txid)
@@ -1474,7 +1473,7 @@ impl<D> Wallet<D> {
         psbt: &mut psbt::PartiallySignedTransaction,
         sign_options: SignOptions,
     ) -> Result<bool, Error> {
-        let chain_tip = self.chain.tip().map(|cp| cp.block_id()).unwrap_or_default();
+        let chain_tip = self.chain.tip().map(|cp| cp.block_id());
 
         let tx = &psbt.unsigned_tx;
         let mut finished = true;
@@ -1643,7 +1642,7 @@ impl<D> Wallet<D> {
         must_only_use_confirmed_tx: bool,
         current_height: Option<u32>,
     ) -> (Vec<WeightedUtxo>, Vec<WeightedUtxo>) {
-        let chain_tip = self.chain.tip().map(|cp| cp.block_id()).unwrap_or_default();
+        let chain_tip = self.chain.tip().map(|cp| cp.block_id());
         //    must_spend <- manually selected utxos
         //    may_spend  <- all other available utxos
         let mut may_spend = self.get_available_utxos();

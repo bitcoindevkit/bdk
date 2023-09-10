@@ -653,10 +653,10 @@ impl<A: Anchor> TxGraph<A> {
     /// [`ChainOracle`] is infallible, [`get_chain_position`] can be used instead.
     ///
     /// [`get_chain_position`]: Self::get_chain_position
-    pub fn try_get_chain_position<C: ChainOracle>(
+    pub fn try_get_chain_position<B: Into<BlockId> + Clone, C: ChainOracle>(
         &self,
         chain: &C,
-        chain_tip: BlockId,
+        chain_tip: Option<B>,
         txid: Txid,
     ) -> Result<Option<ChainPosition<&A>>, C::Error> {
         let (tx_node, anchors, last_seen) = match self.txs.get(&txid) {
@@ -665,7 +665,7 @@ impl<A: Anchor> TxGraph<A> {
         };
 
         for anchor in anchors {
-            match chain.is_block_in_chain(anchor.anchor_block(), chain_tip)? {
+            match chain.is_block_in_chain(anchor.anchor_block(), chain_tip.clone())? {
                 Some(true) => return Ok(Some(ChainPosition::Confirmed(anchor))),
                 _ => continue,
             }
@@ -685,7 +685,7 @@ impl<A: Anchor> TxGraph<A> {
         // this tx cannot exist in the best chain
         for conflicting_tx in self.walk_conflicts(tx, |_, txid| self.get_tx_node(txid)) {
             for block in conflicting_tx.anchors.iter().map(A::anchor_block) {
-                if chain.is_block_in_chain(block, chain_tip)? == Some(true) {
+                if chain.is_block_in_chain(block, chain_tip.clone())? == Some(true) {
                     // conflicting tx is in best chain, so the current tx cannot be in best chain!
                     return Ok(None);
                 }
@@ -703,10 +703,10 @@ impl<A: Anchor> TxGraph<A> {
     /// This is the infallible version of [`try_get_chain_position`].
     ///
     /// [`try_get_chain_position`]: Self::try_get_chain_position
-    pub fn get_chain_position<C: ChainOracle<Error = Infallible>>(
+    pub fn get_chain_position<B: Into<BlockId> + Clone, C: ChainOracle<Error = Infallible>>(
         &self,
         chain: &C,
-        chain_tip: BlockId,
+        chain_tip: Option<B>,
         txid: Txid,
     ) -> Option<ChainPosition<&A>> {
         self.try_get_chain_position(chain, chain_tip, txid)
@@ -725,21 +725,23 @@ impl<A: Anchor> TxGraph<A> {
     /// If the [`ChainOracle`] is infallible, [`get_chain_spend`] can be used instead.
     ///
     /// [`get_chain_spend`]: Self::get_chain_spend
-    pub fn try_get_chain_spend<C: ChainOracle>(
+    pub fn try_get_chain_spend<B: Into<BlockId> + Clone, C: ChainOracle>(
         &self,
         chain: &C,
-        chain_tip: BlockId,
+        chain_tip: Option<B>,
         outpoint: OutPoint,
     ) -> Result<Option<(ChainPosition<&A>, Txid)>, C::Error> {
         if self
-            .try_get_chain_position(chain, chain_tip, outpoint.txid)?
+            .try_get_chain_position(chain, chain_tip.clone(), outpoint.txid)?
             .is_none()
         {
             return Ok(None);
         }
         if let Some(spends) = self.spends.get(&outpoint) {
             for &txid in spends {
-                if let Some(observed_at) = self.try_get_chain_position(chain, chain_tip, txid)? {
+                if let Some(observed_at) =
+                    self.try_get_chain_position(chain, chain_tip.clone(), txid)?
+                {
                     return Ok(Some((observed_at, txid)));
                 }
             }
@@ -753,10 +755,10 @@ impl<A: Anchor> TxGraph<A> {
     /// This is the infallible version of [`try_get_chain_spend`]
     ///
     /// [`try_get_chain_spend`]: Self::try_get_chain_spend
-    pub fn get_chain_spend<C: ChainOracle<Error = Infallible>>(
+    pub fn get_chain_spend<B: Into<BlockId> + Clone, C: ChainOracle<Error = Infallible>>(
         &self,
         chain: &C,
-        static_block: BlockId,
+        static_block: Option<B>,
         outpoint: OutPoint,
     ) -> Option<(ChainPosition<&A>, Txid)> {
         self.try_get_chain_spend(chain, static_block, outpoint)
@@ -776,13 +778,13 @@ impl<A: Anchor> TxGraph<A> {
     /// If the [`ChainOracle`] is infallible, [`list_chain_txs`] can be used instead.
     ///
     /// [`list_chain_txs`]: Self::list_chain_txs
-    pub fn try_list_chain_txs<'a, C: ChainOracle + 'a>(
+    pub fn try_list_chain_txs<'a, B: Into<BlockId> + Clone, C: ChainOracle + 'a>(
         &'a self,
         chain: &'a C,
-        chain_tip: BlockId,
+        chain_tip: Option<B>,
     ) -> impl Iterator<Item = Result<CanonicalTx<'a, Transaction, A>, C::Error>> {
         self.full_txs().filter_map(move |tx| {
-            self.try_get_chain_position(chain, chain_tip, tx.txid)
+            self.try_get_chain_position(chain, chain_tip.clone(), tx.txid)
                 .map(|v| {
                     v.map(|observed_in| CanonicalTx {
                         chain_position: observed_in,
@@ -798,10 +800,10 @@ impl<A: Anchor> TxGraph<A> {
     /// This is the infallible version of [`try_list_chain_txs`].
     ///
     /// [`try_list_chain_txs`]: Self::try_list_chain_txs
-    pub fn list_chain_txs<'a, C: ChainOracle + 'a>(
+    pub fn list_chain_txs<'a, B: Into<BlockId> + Clone, C: ChainOracle + 'a>(
         &'a self,
         chain: &'a C,
-        chain_tip: BlockId,
+        chain_tip: Option<B>,
     ) -> impl Iterator<Item = CanonicalTx<'a, Transaction, A>> {
         self.try_list_chain_txs(chain, chain_tip)
             .map(|r| r.expect("oracle is infallible"))
@@ -825,10 +827,15 @@ impl<A: Anchor> TxGraph<A> {
     /// instead.
     ///
     /// [`filter_chain_txouts`]: Self::filter_chain_txouts
-    pub fn try_filter_chain_txouts<'a, C: ChainOracle + 'a, OI: Clone + 'a>(
+    pub fn try_filter_chain_txouts<
+        'a,
+        B: Into<BlockId> + Clone + 'a,
+        C: ChainOracle + 'a,
+        OI: Clone + 'a,
+    >(
         &'a self,
         chain: &'a C,
-        chain_tip: BlockId,
+        chain_tip: Option<B>,
         outpoints: impl IntoIterator<Item = (OI, OutPoint)> + 'a,
     ) -> impl Iterator<Item = Result<(OI, FullTxOut<A>), C::Error>> + 'a {
         outpoints
@@ -846,13 +853,13 @@ impl<A: Anchor> TxGraph<A> {
                     };
 
                     let chain_position =
-                        match self.try_get_chain_position(chain, chain_tip, op.txid)? {
+                        match self.try_get_chain_position(chain, chain_tip.clone(), op.txid)? {
                             Some(pos) => pos.cloned(),
                             None => return Ok(None),
                         };
 
                     let spent_by = self
-                        .try_get_chain_spend(chain, chain_tip, op)?
+                        .try_get_chain_spend(chain, chain_tip.clone(), op)?
                         .map(|(a, txid)| (a.cloned(), txid));
 
                     Ok(Some((
@@ -876,10 +883,15 @@ impl<A: Anchor> TxGraph<A> {
     /// This is the infallible version of [`try_filter_chain_txouts`].
     ///
     /// [`try_filter_chain_txouts`]: Self::try_filter_chain_txouts
-    pub fn filter_chain_txouts<'a, C: ChainOracle<Error = Infallible> + 'a, OI: Clone + 'a>(
+    pub fn filter_chain_txouts<
+        'a,
+        B: Into<BlockId> + Clone + 'a,
+        C: ChainOracle<Error = Infallible> + 'a,
+        OI: Clone + 'a,
+    >(
         &'a self,
         chain: &'a C,
-        chain_tip: BlockId,
+        chain_tip: Option<B>,
         outpoints: impl IntoIterator<Item = (OI, OutPoint)> + 'a,
     ) -> impl Iterator<Item = (OI, FullTxOut<A>)> + 'a {
         self.try_filter_chain_txouts(chain, chain_tip, outpoints)
@@ -904,10 +916,15 @@ impl<A: Anchor> TxGraph<A> {
     /// instead.
     ///
     /// [`filter_chain_unspents`]: Self::filter_chain_unspents
-    pub fn try_filter_chain_unspents<'a, C: ChainOracle + 'a, OI: Clone + 'a>(
+    pub fn try_filter_chain_unspents<
+        'a,
+        B: Into<BlockId> + Clone + 'a,
+        C: ChainOracle + 'a,
+        OI: Clone + 'a,
+    >(
         &'a self,
         chain: &'a C,
-        chain_tip: BlockId,
+        chain_tip: Option<B>,
         outpoints: impl IntoIterator<Item = (OI, OutPoint)> + 'a,
     ) -> impl Iterator<Item = Result<(OI, FullTxOut<A>), C::Error>> + 'a {
         self.try_filter_chain_txouts(chain, chain_tip, outpoints)
@@ -925,10 +942,15 @@ impl<A: Anchor> TxGraph<A> {
     /// This is the infallible version of [`try_filter_chain_unspents`].
     ///
     /// [`try_filter_chain_unspents`]: Self::try_filter_chain_unspents
-    pub fn filter_chain_unspents<'a, C: ChainOracle<Error = Infallible> + 'a, OI: Clone + 'a>(
+    pub fn filter_chain_unspents<
+        'a,
+        B: Into<BlockId> + Clone + 'a,
+        C: ChainOracle<Error = Infallible> + 'a,
+        OI: Clone + 'a,
+    >(
         &'a self,
         chain: &'a C,
-        chain_tip: BlockId,
+        chain_tip: Option<B>,
         txouts: impl IntoIterator<Item = (OI, OutPoint)> + 'a,
     ) -> impl Iterator<Item = (OI, FullTxOut<A>)> + 'a {
         self.try_filter_chain_unspents(chain, chain_tip, txouts)
@@ -947,10 +969,10 @@ impl<A: Anchor> TxGraph<A> {
     /// used instead.
     ///
     /// [`balance`]: Self::balance
-    pub fn try_balance<C: ChainOracle, OI: Clone>(
+    pub fn try_balance<B: Into<BlockId> + Clone, C: ChainOracle, OI: Clone>(
         &self,
         chain: &C,
-        chain_tip: BlockId,
+        chain_tip: Option<B>,
         outpoints: impl IntoIterator<Item = (OI, OutPoint)>,
         mut trust_predicate: impl FnMut(&OI, &Script) -> bool,
     ) -> Result<Balance, C::Error> {
@@ -959,15 +981,19 @@ impl<A: Anchor> TxGraph<A> {
         let mut untrusted_pending = 0;
         let mut confirmed = 0;
 
-        for res in self.try_filter_chain_unspents(chain, chain_tip, outpoints) {
+        let chain_tip_block_id = chain_tip.map(|block| block.into());
+
+        for res in self.try_filter_chain_unspents(chain, chain_tip_block_id, outpoints) {
             let (spk_i, txout) = res?;
 
             match &txout.chain_position {
                 ChainPosition::Confirmed(_) => {
-                    if txout.is_confirmed_and_spendable(chain_tip.height) {
-                        confirmed += txout.txout.value;
-                    } else if !txout.is_mature(chain_tip.height) {
-                        immature += txout.txout.value;
+                    if let Some(block_id) = chain_tip_block_id {
+                        if txout.is_confirmed_and_spendable(block_id.height) {
+                            confirmed += txout.txout.value;
+                        } else if !txout.is_mature(block_id.height) {
+                            immature += txout.txout.value;
+                        }
                     }
                 }
                 ChainPosition::Unconfirmed(_) => {
@@ -993,10 +1019,10 @@ impl<A: Anchor> TxGraph<A> {
     /// This is the infallible version of [`try_balance`].
     ///
     /// [`try_balance`]: Self::try_balance
-    pub fn balance<C: ChainOracle<Error = Infallible>, OI: Clone>(
+    pub fn balance<B: Into<BlockId> + Clone, C: ChainOracle<Error = Infallible>, OI: Clone>(
         &self,
         chain: &C,
-        chain_tip: BlockId,
+        chain_tip: Option<B>,
         outpoints: impl IntoIterator<Item = (OI, OutPoint)>,
         trust_predicate: impl FnMut(&OI, &Script) -> bool,
     ) -> Balance {

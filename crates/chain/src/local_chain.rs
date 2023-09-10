@@ -171,11 +171,16 @@ impl From<BTreeMap<u32, BlockHash>> for LocalChain {
 impl ChainOracle for LocalChain {
     type Error = Infallible;
 
-    fn is_block_in_chain(
+    fn is_block_in_chain<B: Into<BlockId>>(
         &self,
         block: BlockId,
-        chain_tip: BlockId,
+        chain_tip: Option<B>,
     ) -> Result<Option<bool>, Self::Error> {
+        let chain_tip: BlockId = match chain_tip {
+            Some(x) => x.into(),
+            None => return Ok(None),
+        };
+
         if block.height > chain_tip.height {
             return Ok(None);
         }
