@@ -243,7 +243,7 @@ fn test_list_owned_txouts() {
                 .unwrap_or_else(|| panic!("block must exist at {}", height));
             let txouts = graph
                 .graph()
-                .filter_chain_txouts(
+                .filter_subchain_txouts(
                     &local_chain,
                     Some(chain_tip),
                     graph.index.outpoints().iter().cloned(),
@@ -252,14 +252,14 @@ fn test_list_owned_txouts() {
 
             let utxos = graph
                 .graph()
-                .filter_chain_unspents(
+                .filter_subchain_unspents(
                     &local_chain,
                     Some(chain_tip),
                     graph.index.outpoints().iter().cloned(),
                 )
                 .collect::<Vec<_>>();
 
-            let balance = graph.graph().balance(
+            let balance = graph.graph().subchain_balance(
                 &local_chain,
                 Some(chain_tip),
                 graph.index.outpoints().iter().cloned(),

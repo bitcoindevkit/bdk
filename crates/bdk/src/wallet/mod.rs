@@ -435,7 +435,7 @@ impl<D> Wallet<D> {
     pub fn list_unspent(&self) -> impl Iterator<Item = LocalUtxo> + '_ {
         self.indexed_graph
             .graph()
-            .filter_chain_unspents(
+            .filter_subchain_unspents(
                 &self.chain,
                 self.chain.tip().map(|cp| cp.block_id()),
                 self.indexed_graph.index.outpoints().iter().cloned(),
@@ -485,7 +485,7 @@ impl<D> Wallet<D> {
         let (&spk_i, _) = self.indexed_graph.index.txout(op)?;
         self.indexed_graph
             .graph()
-            .filter_chain_unspents(
+            .filter_subchain_unspents(
                 &self.chain,
                 self.chain.tip().map(|cp| cp.block_id()),
                 core::iter::once((spk_i, op)),
@@ -658,7 +658,7 @@ impl<D> Wallet<D> {
         let graph = self.indexed_graph.graph();
 
         Some(CanonicalTx {
-            chain_position: graph.get_chain_position(
+            chain_position: graph.get_subchain_position(
                 &self.chain,
                 self.chain.tip().map(|cp| cp.block_id()),
                 txid,
@@ -750,13 +750,13 @@ impl<D> Wallet<D> {
     ) -> impl Iterator<Item = CanonicalTx<'_, Transaction, ConfirmationTimeAnchor>> + '_ {
         self.indexed_graph
             .graph()
-            .list_chain_txs(&self.chain, self.chain.tip().map(|cp| cp.block_id()))
+            .list_subchain_txs(&self.chain, self.chain.tip().map(|cp| cp.block_id()))
     }
 
     /// Return the balance, separated into available, trusted-pending, untrusted-pending and immature
     /// values.
     pub fn get_balance(&self) -> Balance {
-        self.indexed_graph.graph().balance(
+        self.indexed_graph.graph().subchain_balance(
             &self.chain,
             self.chain.tip().map(|cp| cp.block_id()),
             self.indexed_graph.index.outpoints().iter().cloned(),
@@ -1246,7 +1246,7 @@ impl<D> Wallet<D> {
             .clone();
 
         let pos = graph
-            .get_chain_position(&self.chain, chain_tip, txid)
+            .get_subchain_position(&self.chain, chain_tip, txid)
             .ok_or(Error::TransactionNotFound)?;
         if let ChainPosition::Confirmed(_) = pos {
             return Err(Error::TransactionConfirmed);
@@ -1278,7 +1278,7 @@ impl<D> Wallet<D> {
                 let txout = &prev_tx.output[txin.previous_output.vout as usize];
 
                 let confirmation_time: ConfirmationTime = graph
-                    .get_chain_position(&self.chain, chain_tip, txin.previous_output.txid)
+                    .get_subchain_position(&self.chain, chain_tip, txin.previous_output.txid)
                     .ok_or(Error::UnknownUtxo)?
                     .cloned()
                     .into();
@@ -1489,7 +1489,7 @@ impl<D> Wallet<D> {
             let confirmation_height = self
                 .indexed_graph
                 .graph()
-                .get_chain_position(&self.chain, chain_tip, input.previous_output.txid)
+                .get_subchain_position(&self.chain, chain_tip, input.previous_output.txid)
                 .map(|chain_position| match chain_position {
                     ChainPosition::Confirmed(a) => a.confirmation_height,
                     ChainPosition::Unconfirmed(_) => u32::MAX,
@@ -1671,7 +1671,7 @@ impl<D> Wallet<D> {
                 let confirmation_time: ConfirmationTime = match self
                     .indexed_graph
                     .graph()
-                    .get_chain_position(&self.chain, chain_tip, txid)
+                    .get_subchain_position(&self.chain, chain_tip, txid)
                 {
                     Some(chain_position) => chain_position.cloned().into(),
                     None => return false,

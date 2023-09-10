@@ -214,7 +214,7 @@ fn main() -> anyhow::Result<()> {
 
                 let utxos = graph
                     .graph()
-                    .filter_chain_unspents(&*chain, chain_tip, init_outpoints)
+                    .filter_subchain_unspents(&*chain, chain_tip, init_outpoints)
                     .map(|(_, utxo)| utxo)
                     .collect::<Vec<_>>();
 
@@ -236,7 +236,7 @@ fn main() -> anyhow::Result<()> {
             if unconfirmed {
                 let unconfirmed_txids = graph
                     .graph()
-                    .list_chain_txs(&*chain, chain_tip)
+                    .list_subchain_txs(&*chain, chain_tip)
                     .filter(|canonical_tx| !canonical_tx.chain_position.is_confirmed())
                     .map(|canonical_tx| canonical_tx.tx_node.txid)
                     .collect::<Vec<Txid>>();

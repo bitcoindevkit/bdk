@@ -246,7 +246,7 @@ fn main() -> anyhow::Result<()> {
                     let init_outpoints = graph.index.outpoints().iter().cloned();
                     let utxos = graph
                         .graph()
-                        .filter_chain_unspents(&*chain, chain_tip, init_outpoints)
+                        .filter_subchain_unspents(&*chain, chain_tip, init_outpoints)
                         .map(|(_, utxo)| utxo)
                         .collect::<Vec<_>>();
                     outpoints = Box::new(
@@ -269,7 +269,7 @@ fn main() -> anyhow::Result<()> {
                     // `EsploraExt::update_tx_graph_without_keychain`.
                     let unconfirmed_txids = graph
                         .graph()
-                        .list_chain_txs(&*chain, chain_tip)
+                        .list_subchain_txs(&*chain, chain_tip)
                         .filter(|canonical_tx| !canonical_tx.chain_position.is_confirmed())
                         .map(|canonical_tx| canonical_tx.tx_node.txid)
                         .collect::<Vec<Txid>>();
