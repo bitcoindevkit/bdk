@@ -1171,10 +1171,9 @@ fn test_add_foreign_utxo() {
         .unwrap()
         .assume_checked();
     let utxo = wallet2.list_unspent().next().expect("must take!");
-    #[allow(deprecated)]
     let foreign_utxo_satisfaction = wallet2
         .get_descriptor_for_keychain(KeychainKind::External)
-        .max_satisfaction_weight()
+        .max_weight_to_satisfy()
         .unwrap();
 
     let psbt_input = psbt::Input {
@@ -1247,10 +1246,9 @@ fn test_calculate_fee_with_missing_foreign_utxo() {
         .unwrap()
         .assume_checked();
     let utxo = wallet2.list_unspent().next().expect("must take!");
-    #[allow(deprecated)]
     let foreign_utxo_satisfaction = wallet2
         .get_descriptor_for_keychain(KeychainKind::External)
-        .max_satisfaction_weight()
+        .max_weight_to_satisfy()
         .unwrap();
 
     let psbt_input = psbt::Input {
@@ -1273,10 +1271,9 @@ fn test_calculate_fee_with_missing_foreign_utxo() {
 fn test_add_foreign_utxo_invalid_psbt_input() {
     let (mut wallet, _) = get_funded_wallet(get_test_wpkh());
     let outpoint = wallet.list_unspent().next().expect("must exist").outpoint;
-    #[allow(deprecated)]
     let foreign_utxo_satisfaction = wallet
         .get_descriptor_for_keychain(KeychainKind::External)
-        .max_satisfaction_weight()
+        .max_weight_to_satisfy()
         .unwrap();
 
     let mut builder = wallet.build_tx();
@@ -1295,10 +1292,9 @@ fn test_add_foreign_utxo_where_outpoint_doesnt_match_psbt_input() {
     let tx1 = wallet1.get_tx(txid1).unwrap().tx_node.tx.clone();
     let tx2 = wallet2.get_tx(txid2).unwrap().tx_node.tx.clone();
 
-    #[allow(deprecated)]
     let satisfaction_weight = wallet2
         .get_descriptor_for_keychain(KeychainKind::External)
-        .max_satisfaction_weight()
+        .max_weight_to_satisfy()
         .unwrap();
 
     let mut builder = wallet1.build_tx();
@@ -1340,10 +1336,9 @@ fn test_add_foreign_utxo_only_witness_utxo() {
         .assume_checked();
     let utxo2 = wallet2.list_unspent().next().unwrap();
 
-    #[allow(deprecated)]
     let satisfaction_weight = wallet2
         .get_descriptor_for_keychain(KeychainKind::External)
-        .max_satisfaction_weight()
+        .max_weight_to_satisfy()
         .unwrap();
 
     let mut builder = wallet1.build_tx();
@@ -3074,10 +3069,9 @@ fn test_taproot_foreign_utxo() {
         .assume_checked();
     let utxo = wallet2.list_unspent().next().unwrap();
     let psbt_input = wallet2.get_psbt_input(utxo.clone(), None, false).unwrap();
-    #[allow(deprecated)]
     let foreign_utxo_satisfaction = wallet2
         .get_descriptor_for_keychain(KeychainKind::External)
-        .max_satisfaction_weight()
+        .max_weight_to_satisfy()
         .unwrap();
 
     assert!(
