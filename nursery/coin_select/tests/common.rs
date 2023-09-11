@@ -12,6 +12,11 @@ use proptest::{
     test_runner::{RngAlgorithm, TestRng},
 };
 
+/// Used for constructing a proptest that compares an exhaustive search result with a bnb result
+/// with the given metric.
+///
+/// We don't restrict bnb rounds, so we expect that the bnb result to be equal to the exhaustive
+/// search result.
 pub fn can_eventually_find_best_solution<P, M>(
     params: StrategyParams,
     candidates: Vec<Candidate>,
@@ -46,6 +51,13 @@ where
         now.elapsed().as_secs_f64(),
         exp_result_str
     );
+    // bonus check: ensure min_fee is respected
+    if exp_result.is_some() {
+        let selected_value = exp_selection.selected_value();
+        let drain_value = change_policy(&exp_selection, target).value;
+        let target_value = target.value;
+        assert!(selected_value - target_value - drain_value >= params.min_fee);
+    }
 
     println!("\tbranch and bound:");
     let now = std::time::Instant::now();
@@ -70,7 +82,13 @@ where
                     exp={}",
                 result_str,
                 exp_result_str
-            )
+            );
+
+            // bonus check: ensure min_fee is respected
+            let selected_value = selection.selected_value();
+            let drain_value = change_policy(&selection, target).value;
+            let target_value = target.value;
+            assert!(selected_value - target_value - drain_value >= params.min_fee);
         }
         _ => prop_assert!(result.is_err(), "should not find solution"),
     }
@@ -78,6 +96,10 @@ where
     Ok(())
 }
 
+/// Used for constructing a proptest that compares the bound score at every branch with the actual
+/// scores of all descendant branches.
+///
+/// If this fails, it means the metric's bound function is too tight.
 pub fn ensure_bound_is_not_too_tight<P, M>(
     params: StrategyParams,
     candidates: Vec<Candidate>,
