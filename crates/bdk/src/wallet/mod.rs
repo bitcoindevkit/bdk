@@ -28,7 +28,6 @@ use bdk_chain::{
     Append, BlockId, ChainPosition, ConfirmationTime, ConfirmationTimeAnchor, FullTxOut,
     IndexedTxGraph, Persist, PersistBackend,
 };
-use bitcoin::consensus::encode::serialize;
 use bitcoin::psbt;
 use bitcoin::secp256k1::Secp256k1;
 use bitcoin::sighash::{EcdsaSighashType, TapSighashType};
@@ -36,6 +35,7 @@ use bitcoin::{
     absolute, Address, Network, OutPoint, Script, ScriptBuf, Sequence, Transaction, TxOut, Txid,
     Weight, Witness,
 };
+use bitcoin::consensus::encode::serialize;
 use core::fmt;
 use core::ops::Deref;
 use miniscript::psbt::{PsbtExt, PsbtInputExt, PsbtInputSatisfier};
@@ -1288,7 +1288,7 @@ impl<D> Wallet<D> {
                         let satisfaction_weight = self
                             .get_descriptor_for_keychain(keychain)
                             .max_weight_to_satisfy()
-                            .unwrap();
+                            .unwrap() + 4;
                         WeightedUtxo {
                             utxo: Utxo::Local(LocalUtxo {
                                 outpoint: txin.previous_output,
@@ -1298,7 +1298,7 @@ impl<D> Wallet<D> {
                                 derivation_index,
                                 confirmation_time,
                             }),
-                            satisfaction_weight,
+                            satisfaction_weight
                         }
                     }
                     None => {
@@ -1621,7 +1621,7 @@ impl<D> Wallet<D> {
                     utxo,
                     self.get_descriptor_for_keychain(keychain)
                         .max_weight_to_satisfy()
-                        .unwrap(),
+                        .unwrap() + 4,
                 )
             })
             .collect()
