@@ -336,10 +336,12 @@ impl<'a, D, Cs: CoinSelectionAlgorithm, Ctx: TxBuilderContext> TxBuilder<'a, D, 
     /// causing you to pay a fee that is too high. The party who is broadcasting the transaction can
     /// of course check the real input weight matches the expected weight prior to broadcasting.
     ///
-    /// TODO: add notes about the new `max_weight_to_satisfy`
     /// To guarantee the `max_weight_to_satisfy` is correct, you can require the party providing the
     /// `psbt_input` provide a miniscript descriptor for the input so you can check it against the
     /// `script_pubkey` and then ask it for the [`max_weight_to_satisfy`].
+    /// Be aware that `max_weight_to_satisfy` uses `segwit_weight` instead of `legacy_weight`,
+    /// if you want to include only legacy inputs in your transaction, you should remove 1WU
+    /// from each input's `max_weight_to_satisfy` for a more accurate estimate.
     ///
     /// This is an **EXPERIMENTAL** feature, API and other major changes are expected.
     ///
