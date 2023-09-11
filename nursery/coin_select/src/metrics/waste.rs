@@ -19,8 +19,11 @@ use crate::{bnb::BnbMetric, float::Ordf32, Candidate, CoinSelector, Drain, FeeRa
 /// If the `long_term_feerate` is even slightly higher than the current feerate (specified in
 /// `target`) it will select all your coins!
 pub struct Waste<'c, C> {
+    /// The target parameters of the resultant selection.
     pub target: Target,
+    /// The longterm feerate as part of the waste metric.
     pub long_term_feerate: FeeRate,
+    /// Policy to determine the change output (if any) of a given selection.
     pub change_policy: &'c C,
 }
 

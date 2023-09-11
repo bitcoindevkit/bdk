@@ -5,6 +5,8 @@ use crate::float::Ordf32;
 use super::CoinSelector;
 use alloc::collections::BinaryHeap;
 
+/// An [`Iterator`] that iterates over rounds of branch and bound to minimize the score of the
+/// provided [`BnbMetric`].
 #[derive(Debug)]
 pub(crate) struct BnbIter<'a, M: BnbMetric> {
     queue: BinaryHeap<Branch<'a>>,
@@ -71,7 +73,7 @@ impl<'a, M: BnbMetric> Iterator for BnbIter<'a, M> {
 }
 
 impl<'a, M: BnbMetric> BnbIter<'a, M> {
-    pub fn new(mut selector: CoinSelector<'a>, metric: M) -> Self {
+    pub(crate) fn new(mut selector: CoinSelector<'a>, metric: M) -> Self {
         let mut iter = BnbIter {
             queue: BinaryHeap::default(),
             best: None,
@@ -166,17 +168,25 @@ impl<'a> PartialEq for Branch<'a> {
 
 impl<'a> Eq for Branch<'a> {}
 
-/// A branch and bound metric where the score is minimized.
+/// A branch and bound metric where we minimize the [`Ordf32`] score.
+///
+/// This is to be used as input for [`CoinSelector::run_bnb`] or [`CoinSelector::bnb_solutions`].
 pub trait BnbMetric {
     /// Get the score of a given selection.
+    ///
+    /// If this returns `None`, the selection is invalid.
     fn score(&mut self, cs: &CoinSelector<'_>) -> Option<Ordf32>;
 
-    /// Get the lower bound using the metric's heuristic.
+    /// Get the lower bound score using a heuristic.
     ///
     /// This represents the best possible score of all descendant branches (according to the
     /// heuristic).
+    ///
+    /// If this returns `None`, the current branch and all descendant branches will not have valid
+    /// solutions.
     fn bound(&mut self, cs: &CoinSelector<'_>) -> Option<Ordf32>;
 
+    /// Returns whether the metric requies we order candidates by descending value per weight unit.
     fn requires_ordering_by_descending_value_pwu(&self) -> bool {
         false
     }

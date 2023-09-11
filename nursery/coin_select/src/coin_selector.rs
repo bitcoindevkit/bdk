@@ -4,15 +4,16 @@ use crate::float::FloatExt;
 use crate::{bnb::BnbMetric, float::Ordf32, FeeRate};
 use alloc::{borrow::Cow, collections::BTreeSet, vec::Vec};
 
-/// [`CoinSelector`] is responsible for selecting and deselecting from a set of canididates.
+/// [`CoinSelector`] selects/deselects coins from a set of canididate coins.
 ///
-/// You can do this manually by calling methods like [`select`] or automatically with methods like [`bnb_solutions`].
+/// You can manually select coins using methods like [`select`], or automatically with methods such
+/// as [`bnb_solutions`].
 ///
 /// [`select`]: CoinSelector::select
 /// [`bnb_solutions`]: CoinSelector::bnb_solutions
 #[derive(Debug, Clone)]
 pub struct CoinSelector<'a> {
-    pub base_weight: u32,
+    base_weight: u32,
     candidates: &'a [Candidate],
     selected: Cow<'a, BTreeSet<usize>>,
     banned: Cow<'a, BTreeSet<usize>>,
@@ -81,6 +82,11 @@ impl<'a> CoinSelector<'a> {
         Self::new(candidates, base_weight)
     }
 
+    /// The weight of the transaction without any inputs and without a change output.
+    pub fn base_weight(&self) -> u32 {
+        self.base_weight
+    }
+
     /// Iterate over all the candidates in their currently sorted order. Each item has the original
     /// index with the candidate.
     pub fn candidates(
@@ -91,14 +97,14 @@ impl<'a> CoinSelector<'a> {
             .map(move |i| (*i, self.candidates[*i]))
     }
 
-    /// Get the candidate at `index`. `index` refers to its position in the original `candidates` slice passed
-    /// into [`CoinSelector::new`].
+    /// Get the candidate at `index`. `index` refers to its position in the original `candidates` 
+    /// slice passed into [`CoinSelector::new`].
     pub fn candidate(&self, index: usize) -> Candidate {
         self.candidates[index]
     }
 
-    /// Deselect a candidate at `index`. `index` refers to its position in the original `candidates` slice passed
-    /// into [`CoinSelector::new`].
+    /// Deselect a candidate at `index`. `index` refers to its position in the original `candidates`
+    /// slice passed into [`CoinSelector::new`].
     pub fn deselect(&mut self, index: usize) -> bool {
         self.selected.to_mut().remove(&index)
     }
@@ -110,8 +116,8 @@ impl<'a> CoinSelector<'a> {
         self.selected.iter().map(move |i| &candidates[*i])
     }
 
-    /// Select the input at `index`. `index` refers to its position in the original `candidates` slice passed
-    /// into [`CoinSelector::new`].
+    /// Select the input at `index`. `index` refers to its position in the original `candidates` 
+    /// slice passed into [`CoinSelector::new`].
     pub fn select(&mut self, index: usize) -> bool {
         assert!(index < self.candidates.len());
         self.selected.to_mut().insert(index)
@@ -458,7 +464,8 @@ impl<'a> CoinSelector<'a> {
         SelectIter { cs: self.clone() }
     }
 
-    /// Returns a branch and bound iterator, given a `metric`.
+    /// Iterates over rounds of branch and bound to minimize the score of the provided
+    /// [`BnbMetric`].
     ///
     /// Not every iteration will return a solution. If a solution is found, we return the selection
     /// and score. Each subsequent solution of the iterator guarantees a higher score than the last.
@@ -471,11 +478,12 @@ impl<'a> CoinSelector<'a> {
         crate::bnb::BnbIter::new(self.clone(), metric)
     }
 
-    /// Run branch and bound until we cannot find a better solution, or we reach `max_rounds`.
+    /// Run branch and bound to minimize the score of the provided [`BnbMetric`].
     ///
-    /// If a solution is found, the score is returned. Otherwise, we error with [`NoBnbSolution`].
+    /// The method keeps trying until no better solution can be found, or we reach `max_rounds`. If
+    /// a solution is found, the score is returned. Otherwise, we error with [`NoBnbSolution`].
     ///
-    /// To access to raw bnb iterator, use [`CoinSelector::bnb_solutions`].
+    /// Use [`CoinSelector::bnb_solutions`] to access the branch and bound iterator directly.
     pub fn run_bnb<M: BnbMetric>(
         &mut self,
         metric: M,
@@ -518,8 +526,9 @@ impl<'a> core::fmt::Display for CoinSelector<'a> {
     }
 }
 
-/// A `Candidate` represents an input candidate for [`CoinSelector`]. This can either be a
-/// single UTXO, or a group of UTXOs that should be spent together.
+/// A `Candidate` represents an input candidate for [`CoinSelector`].
+///
+/// This can either be a single UTXO, or a group of UTXOs that should be spent together.
 #[derive(Debug, Clone, Copy)]
 pub struct Candidate {
     /// Total value of the UTXO(s) that this [`Candidate`] represents.
@@ -535,10 +544,12 @@ pub struct Candidate {
 }
 
 impl Candidate {
+    /// Create a [`Candidate`] input that spends a single taproot keyspend output.
     pub fn new_tr_keyspend(value: u64) -> Self {
         let weight = TXIN_BASE_WEIGHT + TR_KEYSPEND_SATISFACTION_WEIGHT;
         Self::new(value, weight, true)
     }
+
     /// Create a new [`Candidate`] that represents a single input.
     ///
     /// `satisfaction_weight` is the weight of `scriptSigLen + scriptSig + scriptWitnessLen +
@@ -586,6 +597,7 @@ impl DrainWeights {
             + self.spend_weight as f32 * long_term_feerate.spwu()
     }
 
+    /// Create [`DrainWeights`] that represents a drain output with a taproot keyspend.
     pub fn new_tr_keyspend() -> Self {
         Self {
             output_weight: TXOUT_BASE_WEIGHT + TR_SPK_WEIGHT,
@@ -657,9 +669,11 @@ impl<'a> DoubleEndedIterator for SelectIter<'a> {
     }
 }
 
+/// Error type that occurs when the target amount cannot be met.
 #[derive(Clone, Debug, Copy, PartialEq, Eq)]
 pub struct InsufficientFunds {
-    missing: u64,
+    /// The missing amount in satoshis.
+    pub missing: u64,
 }
 
 impl core::fmt::Display for InsufficientFunds {
@@ -671,9 +685,12 @@ impl core::fmt::Display for InsufficientFunds {
 #[cfg(feature = "std")]
 impl std::error::Error for InsufficientFunds {}
 
+/// Error type for when a solution cannot be found by branch-and-bound.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NoBnbSolution {
+    /// Maximum rounds set by the caller.
     pub max_rounds: usize,
+    /// Number of branch-and-bound rounds performed.
     pub rounds: usize,
 }
 

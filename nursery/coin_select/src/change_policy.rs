@@ -1,11 +1,15 @@
+//! This module contains a collection of change policies.
+//!
+//! A change policy determines whether a given coin selection (presented by [`CoinSelector`]) should
+//! construct a transaction with a change output. A change policy is represented as a function of
+//! type `Fn(&CoinSelector, Target) -> Drain`.
+
 #[allow(unused)] // some bug in <= 1.48.0 sees this as unused when it isn't
 use crate::float::FloatExt;
 use crate::{CoinSelector, Drain, DrainWeights, FeeRate, Target};
 use core::convert::TryInto;
 
-/// Add a change output if the change value would be greater than or equal to `min_value`.
-///
-/// Note that the value field of the `drain` is ignored.
+/// Construct a change policy that creates change when the change value is greater than `min_value`.
 pub fn min_value(
     drain_weights: DrainWeights,
     min_value: u64,
@@ -32,13 +36,10 @@ pub fn min_value(
     }
 }
 
-/// Add a change output if it would reduce the overall waste of the transaction.
+/// Construct a change policy that creates change when it would reduce the transaction waste.
 ///
-/// Note that the value field of the `drain` is ignored.
-/// The `value` will be set to whatever needs to be to reach the given target.
-///
-/// **WARNING:** This may result in a change output that is below dust limit. It is recommended to
-/// use [`min_value_and_waste`].
+/// **WARNING:** This may result in a change value that is below dust limit. [`min_value_and_waste`]
+/// is a more sensible default.
 pub fn min_waste(
     drain_weights: DrainWeights,
     long_term_feerate: FeeRate,
@@ -66,11 +67,11 @@ pub fn min_waste(
     }
 }
 
-/// Add a change output if the change value is greater than or equal to `min_value` and if it would
-/// reduce the overall waste of the transaction.
+/// Construct a change policy that creates change when it would reduce the transaction waste given
+/// that `min_value` is respected.
 ///
-/// Note that the value field of the `drain` is ignored. [`Drain`] is just used for the drain weight
-/// and drain spend weight.
+/// This is equivalent to combining [`min_value`] with [`min_waste`], and including change when both
+/// policies have change.
 pub fn min_value_and_waste(
     drain_weights: DrainWeights,
     min_value: u64,

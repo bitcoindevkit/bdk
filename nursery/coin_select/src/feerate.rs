@@ -52,6 +52,7 @@ impl FeeRate {
         Self::from_sat_per_wu(fee as f32 / wu as f32)
     }
 
+    /// Calculate feerate from `satoshi/wu`.
     pub fn from_sat_per_wu(sats_per_wu: f32) -> Self {
         Self::new_checked(sats_per_wu)
     }
@@ -62,11 +63,12 @@ impl FeeRate {
         Self::from_sat_per_vb(rate)
     }
 
-    /// Return the value as satoshi/vbyte
+    /// Return the value as satoshi/vbyte.
     pub fn as_sat_vb(&self) -> f32 {
         self.0 .0 * 4.0
     }
 
+    /// Return the value as satoshi/wu.
     pub fn spwu(&self) -> f32 {
         self.0 .0
     }

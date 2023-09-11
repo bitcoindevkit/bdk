@@ -3,9 +3,20 @@ use crate::{
     DrainWeights, FeeRate, Target,
 };
 
+/// Metric that aims to minimize transaction fees. The future fee for spending the change output is
+/// included in this calculation.
+///
+/// The scoring function for changeless solutions is:
+/// > input_weight * feerate + excess
+///
+/// The scoring function for solutions with change:
+/// > (input_weight + change_output_weight) * feerate + change_spend_weight * long_term_feerate
 pub struct LowestFee<'c, C> {
+    /// The target parameters for the resultant selection.
     pub target: Target,
+    /// The estimated feerate needed to spend our change output later.
     pub long_term_feerate: FeeRate,
+    /// Policy to determine the change output (if any) of a given selection.
     pub change_policy: &'c C,
 }
 
