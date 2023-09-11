@@ -84,16 +84,3 @@ impl_for_tuple!(A 0 B 1);
 impl_for_tuple!(A 0 B 1 C 2);
 impl_for_tuple!(A 0 B 1 C 2 D 3);
 impl_for_tuple!(A 0 B 1 C 2 D 3 E 4);
-
-#[test]
-fn yooo() {
-    let boo = [(Ordf32(0.1), 0.1_f32); 10];
-    let mut acc = Option::<f32>::None;
-    for (score, ratio) in boo {
-        match &mut acc {
-            Some(acc) => *acc += score.0 * ratio,
-            acc => *acc = Some(score.0 * ratio),
-        }
-    }
-    println!("{:?}", acc.map(Ordf32));
-}

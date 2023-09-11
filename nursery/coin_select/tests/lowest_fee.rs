@@ -1,9 +1,9 @@
 #![allow(unused_imports)]
 
 mod common;
-use bdk_coin_select::change_policy::min_value_and_waste;
-use bdk_coin_select::metrics::LowestFee;
-use bdk_coin_select::{Candidate, CoinSelector};
+use bdk_coin_select::change_policy::{self, min_value_and_waste};
+use bdk_coin_select::metrics::{Changeless, LowestFee};
+use bdk_coin_select::{BnbMetric, Candidate, CoinSelector};
 use proptest::prelude::*;
 
 proptest! {
@@ -106,4 +106,56 @@ proptest! {
         println!("\t\tscore={} rounds={}", score, rounds);
         prop_assert!(rounds <= params.n_candidates);
     }
+}
+
+/// We combine the `LowestFee` and `Changeless` metrics to derive a `ChangelessLowestFee` metric.
+#[test]
+fn combined_changeless_metric() {
+    let params = common::StrategyParams {
+        n_candidates: 100,
+        target_value: 100_000,
+        base_weight: 1000,
+        min_fee: 0,
+        feerate: 5.0,
+        feerate_lt_diff: -4.0,
+        drain_weight: 200,
+        drain_spend_weight: 600,
+        drain_dust: 200,
+    };
+
+    let candidates = common::gen_candidates(params.n_candidates);
+    let mut cs_a = CoinSelector::new(&candidates, params.base_weight);
+    let mut cs_b = CoinSelector::new(&candidates, params.base_weight);
+
+    let change_policy = min_value_and_waste(
+        params.drain_weights(),
+        params.drain_dust,
+        params.long_term_feerate(),
+    );
+
+    let metric_lowest_fee = LowestFee {
+        target: params.target(),
+        long_term_feerate: params.long_term_feerate(),
+        change_policy: &change_policy,
+    };
+
+    let metric_changeless = Changeless {
+        target: params.target(),
+        change_policy: &change_policy,
+    };
+
+    let metric_combined = ((metric_lowest_fee, 1.0_f32), (metric_changeless, 0.0_f32));
+
+    // cs_a uses the non-combined metric
+    let (score, rounds) =
+        common::bnb_search(&mut cs_a, metric_lowest_fee, usize::MAX).expect("must find solution");
+    println!("score={:?} rounds={}", score, rounds);
+
+    // cs_b uses the combined metric
+    let (combined_score, combined_rounds) =
+        common::bnb_search(&mut cs_b, metric_combined, usize::MAX).expect("must find solution");
+    println!("score={:?} rounds={}", combined_score, combined_rounds);
+
+    // [todo] shouldn't rounds be less since we are only considering changeless branches?
+    assert!(combined_rounds <= rounds);
 }
