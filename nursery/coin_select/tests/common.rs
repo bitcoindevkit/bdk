@@ -24,7 +24,7 @@ pub fn can_eventually_find_best_solution<P, M>(
     mut metric: M,
 ) -> Result<(), proptest::test_runner::TestCaseError>
 where
-    M: BnbMetric<Score = Ordf32>,
+    M: BnbMetric,
     P: Fn(&CoinSelector, Target) -> Drain,
 {
     println!("== TEST ==");
@@ -107,7 +107,7 @@ pub fn ensure_bound_is_not_too_tight<P, M>(
     mut metric: M,
 ) -> Result<(), proptest::test_runner::TestCaseError>
 where
-    M: BnbMetric<Score = Ordf32>,
+    M: BnbMetric,
     P: Fn(&CoinSelector, Target) -> Drain,
 {
     println!("== TEST ==");
@@ -284,7 +284,7 @@ impl<'a> Iterator for ExhaustiveIter<'a> {
 
 pub fn exhaustive_search<M>(cs: &mut CoinSelector, metric: &mut M) -> Option<(Ordf32, usize)>
 where
-    M: BnbMetric<Score = Ordf32>,
+    M: BnbMetric,
 {
     if metric.requires_ordering_by_descending_value_pwu() {
         cs.sort_candidates_by_descending_value_pwu();
@@ -325,7 +325,7 @@ pub fn bnb_search<M>(
     max_rounds: usize,
 ) -> Result<(Ordf32, usize), NoBnbSolution>
 where
-    M: BnbMetric<Score = Ordf32>,
+    M: BnbMetric,
 {
     let mut rounds = 0_usize;
     let (selection, score) = cs

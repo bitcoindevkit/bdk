@@ -1,5 +1,5 @@
 mod common;
-use bdk_coin_select::{BnbMetric, Candidate, CoinSelector, Drain, FeeRate, Target};
+use bdk_coin_select::{float::Ordf32, BnbMetric, Candidate, CoinSelector, Drain, FeeRate, Target};
 #[macro_use]
 extern crate alloc;
 
@@ -27,26 +27,31 @@ struct MinExcessThenWeight {
     target: Target,
 }
 
-impl BnbMetric for MinExcessThenWeight {
-    type Score = (i64, u32);
+/// Assumes tx weight is less than 1MB.
+const EXCESS_RATIO: f32 = 1_000_000_f32;
 
-    fn score(&mut self, cs: &CoinSelector<'_>) -> Option<Self::Score> {
+impl BnbMetric for MinExcessThenWeight {
+    fn score(&mut self, cs: &CoinSelector<'_>) -> Option<Ordf32> {
         let excess = cs.excess(self.target, Drain::none());
         if excess < 0 {
             None
         } else {
-            Some((excess, cs.input_weight()))
+            Some(Ordf32(
+                excess as f32 * EXCESS_RATIO + cs.input_weight() as f32,
+            ))
         }
     }
 
-    fn bound(&mut self, cs: &CoinSelector<'_>) -> Option<Self::Score> {
+    fn bound(&mut self, cs: &CoinSelector<'_>) -> Option<Ordf32> {
         let mut cs = cs.clone();
         cs.select_until_target_met(self.target, Drain::none())
             .ok()?;
         if let Some(last_index) = cs.selected_indices().last().copied() {
             cs.deselect(last_index);
         }
-        Some((cs.excess(self.target, Drain::none()), cs.input_weight()))
+        Some(Ordf32(
+            cs.excess(self.target, Drain::none()) as f32 * EXCESS_RATIO + cs.input_weight() as f32,
+        ))
     }
 }
 
@@ -132,7 +137,6 @@ fn bnb_finds_solution_if_possible_in_n_iter() {
 }
 
 proptest! {
-
     #[test]
     fn bnb_always_finds_solution_if_possible(num_inputs in 1usize..18, target in 0u64..10_000) {
         let mut rng = TestRng::deterministic_rng(RngAlgorithm::ChaCha);

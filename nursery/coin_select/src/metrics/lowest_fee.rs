@@ -51,9 +51,7 @@ impl<'c, C> BnbMetric for LowestFee<'c, C>
 where
     for<'a, 'b> C: Fn(&'b CoinSelector<'a>, Target) -> Drain,
 {
-    type Score = Ordf32;
-
-    fn score(&mut self, cs: &CoinSelector<'_>) -> Option<Self::Score> {
+    fn score(&mut self, cs: &CoinSelector<'_>) -> Option<Ordf32> {
         let drain = (self.change_policy)(cs, self.target);
         if !cs.is_target_met(self.target, drain) {
             return None;
@@ -68,7 +66,7 @@ where
         Some(Ordf32(self.calc_metric(cs, drain_weights)))
     }
 
-    fn bound(&mut self, cs: &CoinSelector<'_>) -> Option<Self::Score> {
+    fn bound(&mut self, cs: &CoinSelector<'_>) -> Option<Ordf32> {
         // this either returns:
         // * None: change output may or may not exist
         // * Some: change output must exist from this branch onwards

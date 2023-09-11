@@ -36,9 +36,7 @@ impl<'c, C> BnbMetric for Waste<'c, C>
 where
     for<'a, 'b> C: Fn(&'b CoinSelector<'a>, Target) -> Drain,
 {
-    type Score = Ordf32;
-
-    fn score(&mut self, cs: &CoinSelector<'_>) -> Option<Self::Score> {
+    fn score(&mut self, cs: &CoinSelector<'_>) -> Option<Ordf32> {
         let drain = (self.change_policy)(cs, self.target);
         if !cs.is_target_met(self.target, drain) {
             return None;
@@ -47,7 +45,7 @@ where
         Some(Ordf32(score))
     }
 
-    fn bound(&mut self, cs: &CoinSelector<'_>) -> Option<Self::Score> {
+    fn bound(&mut self, cs: &CoinSelector<'_>) -> Option<Ordf32> {
         // Welcome my bretheren. This dungeon was authored by Lloyd Fournier A.K.A "LLFourn" with
         // the assistance of chat GPT and the developers of the IOTA cryptocurrency. There are
         // comments trying to make sense of the logic here but it's really just me pretending I know

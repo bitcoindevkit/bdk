@@ -467,21 +467,20 @@ impl<'a> CoinSelector<'a> {
     pub fn bnb_solutions<M: BnbMetric>(
         &self,
         metric: M,
-    ) -> impl Iterator<Item = Option<(CoinSelector<'a>, M::Score)>> {
+    ) -> impl Iterator<Item = Option<(CoinSelector<'a>, Ordf32)>> {
         crate::bnb::BnbIter::new(self.clone(), metric)
     }
 
     /// Run branch and bound until we cannot find a better solution, or we reach `max_rounds`.
     ///
-    /// If a solution is found, the [`BnbMetric::Score`] is returned. Otherwise, we error with
-    /// [`NoBnbSolution`].
+    /// If a solution is found, the score is returned. Otherwise, we error with [`NoBnbSolution`].
     ///
     /// To access to raw bnb iterator, use [`CoinSelector::bnb_solutions`].
     pub fn run_bnb<M: BnbMetric>(
         &mut self,
         metric: M,
         max_rounds: usize,
-    ) -> Result<M::Score, NoBnbSolution> {
+    ) -> Result<Ordf32, NoBnbSolution> {
         let mut rounds = 0_usize;
         let (selector, score) = self
             .bnb_solutions(metric)

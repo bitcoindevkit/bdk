@@ -42,22 +42,38 @@ fn change_lower_bound<'a>(
 
 macro_rules! impl_for_tuple {
     ($($a:ident $b:tt)*) => {
-        impl<$($a),*> BnbMetric for ($($a),*)
+        impl<$($a),*> BnbMetric for ($(($a, f32)),*)
             where $($a: BnbMetric),*
         {
-            type Score=($(<$a>::Score),*);
-
             #[allow(unused)]
-            fn score(&mut self, cs: &CoinSelector<'_>) -> Option<Self::Score> {
-                Some(($(self.$b.score(cs)?),*))
+            fn score(&mut self, cs: &CoinSelector<'_>) -> Option<crate::float::Ordf32> {
+                let mut acc = Option::<f32>::None;
+                for (score, ratio) in [$((self.$b.0.score(cs)?, self.$b.1)),*] {
+                    let score: Ordf32 = score;
+                    let ratio: f32 = ratio;
+                    match &mut acc {
+                        Some(acc) => *acc += score.0 * ratio,
+                        acc => *acc = Some(score.0 * ratio),
+                    }
+                }
+                acc.map(Ordf32)
             }
             #[allow(unused)]
-            fn bound(&mut self, cs: &CoinSelector<'_>) -> Option<Self::Score> {
-                Some(($(self.$b.bound(cs)?),*))
+            fn bound(&mut self, cs: &CoinSelector<'_>) -> Option<crate::float::Ordf32> {
+                let mut acc = Option::<f32>::None;
+                for (score, ratio) in [$((self.$b.0.bound(cs)?, self.$b.1)),*] {
+                    let score: Ordf32 = score;
+                    let ratio: f32 = ratio;
+                    match &mut acc {
+                        Some(acc) => *acc += score.0 * ratio,
+                        acc => *acc = Some(score.0 * ratio),
+                    }
+                }
+                acc.map(Ordf32)
             }
             #[allow(unused)]
             fn requires_ordering_by_descending_value_pwu(&self) -> bool {
-                [$(self.$b.requires_ordering_by_descending_value_pwu()),*].iter().all(|x| *x)
+                [$(self.$b.0.requires_ordering_by_descending_value_pwu()),*].iter().all(|x| *x)
             }
         }
     };
@@ -68,3 +84,16 @@ impl_for_tuple!(A 0 B 1);
 impl_for_tuple!(A 0 B 1 C 2);
 impl_for_tuple!(A 0 B 1 C 2 D 3);
 impl_for_tuple!(A 0 B 1 C 2 D 3 E 4);
+
+#[test]
+fn yooo() {
+    let boo = [(Ordf32(0.1), 0.1_f32); 10];
+    let mut acc = Option::<f32>::None;
+    for (score, ratio) in boo {
+        match &mut acc {
+            Some(acc) => *acc += score.0 * ratio,
+            acc => *acc = Some(score.0 * ratio),
+        }
+    }
+    println!("{:?}", acc.map(Ordf32));
+}

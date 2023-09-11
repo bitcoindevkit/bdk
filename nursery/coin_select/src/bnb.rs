@@ -1,18 +1,20 @@
 use core::cmp::Reverse;
 
+use crate::float::Ordf32;
+
 use super::CoinSelector;
 use alloc::collections::BinaryHeap;
 
 #[derive(Debug)]
 pub(crate) struct BnbIter<'a, M: BnbMetric> {
-    queue: BinaryHeap<Branch<'a, M::Score>>,
-    best: Option<M::Score>,
+    queue: BinaryHeap<Branch<'a>>,
+    best: Option<Ordf32>,
     /// The `BnBMetric` that will score each selection
     metric: M,
 }
 
 impl<'a, M: BnbMetric> Iterator for BnbIter<'a, M> {
-    type Item = Option<(CoinSelector<'a>, M::Score)>;
+    type Item = Option<(CoinSelector<'a>, Ordf32)>;
 
     fn next(&mut self) -> Option<Self::Item> {
         // {
@@ -63,7 +65,7 @@ impl<'a, M: BnbMetric> Iterator for BnbIter<'a, M> {
                 return Some(None);
             }
         }
-        self.best = Some(score.clone());
+        self.best = Some(score);
         Some(Some((selector, score)))
     }
 }
@@ -130,13 +132,13 @@ impl<'a, M: BnbMetric> BnbIter<'a, M> {
 }
 
 #[derive(Debug, Clone)]
-struct Branch<'a, O> {
-    lower_bound: O,
+struct Branch<'a> {
+    lower_bound: Ordf32,
     selector: CoinSelector<'a>,
     is_exclusion: bool,
 }
 
-impl<'a, O: Ord> Ord for Branch<'a, O> {
+impl<'a> Ord for Branch<'a> {
     fn cmp(&self, other: &Self) -> core::cmp::Ordering {
         // NOTE: Reverse comparision `lower_bound` because we want a min-heap (by default BinaryHeap
         // is a max-heap).
@@ -150,27 +152,30 @@ impl<'a, O: Ord> Ord for Branch<'a, O> {
     }
 }
 
-impl<'a, O: Ord> PartialOrd for Branch<'a, O> {
+impl<'a> PartialOrd for Branch<'a> {
     fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl<'a, O: PartialEq> PartialEq for Branch<'a, O> {
+impl<'a> PartialEq for Branch<'a> {
     fn eq(&self, other: &Self) -> bool {
         self.lower_bound == other.lower_bound
     }
 }
 
-impl<'a, O: PartialEq> Eq for Branch<'a, O> {}
+impl<'a> Eq for Branch<'a> {}
 
-/// A branch and bound metric.
+/// A branch and bound metric where the score is minimized.
 pub trait BnbMetric {
-    type Score: Ord + Clone + core::fmt::Debug;
+    /// Get the score of a given selection.
+    fn score(&mut self, cs: &CoinSelector<'_>) -> Option<Ordf32>;
 
-    fn score(&mut self, cs: &CoinSelector<'_>) -> Option<Self::Score>;
-
-    fn bound(&mut self, cs: &CoinSelector<'_>) -> Option<Self::Score>;
+    /// Get the lower bound using the metric's heuristic.
+    ///
+    /// This represents the best possible score of all descendant branches (according to the
+    /// heuristic).
+    fn bound(&mut self, cs: &CoinSelector<'_>) -> Option<Ordf32>;
 
     fn requires_ordering_by_descending_value_pwu(&self) -> bool {
         false

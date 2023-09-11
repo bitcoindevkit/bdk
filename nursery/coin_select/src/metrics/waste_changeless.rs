@@ -47,9 +47,7 @@ impl WasteChangeless {
 }
 
 impl BnbMetric for WasteChangeless {
-    type Score = Ordf32;
-
-    fn score(&mut self, cs: &crate::CoinSelector<'_>) -> Option<Self::Score> {
+    fn score(&mut self, cs: &crate::CoinSelector<'_>) -> Option<Ordf32> {
         let no_drain = Drain::none();
 
         if !cs.is_target_met(self.target, no_drain) {
@@ -64,7 +62,7 @@ impl BnbMetric for WasteChangeless {
         )))
     }
 
-    fn bound(&mut self, cs: &crate::CoinSelector<'_>) -> Option<Self::Score> {
+    fn bound(&mut self, cs: &crate::CoinSelector<'_>) -> Option<Ordf32> {
         let no_drain = Drain::none();
 
         // input_waste = input_weight * (feerate - long_term_feerate)
