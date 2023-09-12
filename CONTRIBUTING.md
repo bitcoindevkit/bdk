@@ -48,8 +48,13 @@ hesitate to split it into multiple small, focused PRs.
 
 The Minimal Supported Rust Version is **1.57.0** (enforced by our CI).
 
+Commits should be signed with GPG using a key with a valid email address.
 Commits should cover both the issue fixed and the solution's rationale.
-These [guidelines](https://chris.beams.io/posts/git-commit/) should be kept in mind. Commit messages should follow the ["Conventional Commits 1.0.0"](https://www.conventionalcommits.org/en/v1.0.0/) to make commit histories easier to read by humans and automated tools. 
+These [guidelines](https://chris.beams.io/posts/git-commit/) should be kept in mind.
+Commit messages should follow the ["Conventional Commits 1.0.0"](https://www.conventionalcommits.org/en/v1.0.0/)
+to make commit histories easier to read by humans and automated tools.
+You can use tools like [`cocogitto`](https://github.com/cocogitto/cocogitto)
+to check if your commit messages follow the convention.
 
 To facilitate communication with other contributors, the project is making use
 of GitHub's "assignee" field. First check that no one is assigned and then
