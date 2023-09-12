@@ -48,7 +48,7 @@ pub trait EsploraAsyncExt {
     /// transactions. `parallel_requests` specifies the max number of HTTP requests to make in
     /// parallel.
     #[allow(clippy::result_large_err)]
-    async fn update_tx_graph<K: Ord + Clone + Send>(
+    async fn scan_txs_with_keychains<K: Ord + Clone + Send>(
         &self,
         keychain_spks: BTreeMap<
             K,
@@ -60,18 +60,18 @@ pub trait EsploraAsyncExt {
         parallel_requests: usize,
     ) -> Result<(TxGraph<ConfirmationTimeAnchor>, BTreeMap<K, u32>), Error>;
 
-    /// Convenience method to call [`update_tx_graph`] without requiring a keychain.
+    /// Convenience method to call [`scan_txs_with_keychains`] without requiring a keychain.
     ///
-    /// [`update_tx_graph`]: EsploraAsyncExt::update_tx_graph
+    /// [`scan_txs_with_keychains`]: EsploraAsyncExt::scan_txs_with_keychains
     #[allow(clippy::result_large_err)]
-    async fn update_tx_graph_without_keychain(
+    async fn scan_txs(
         &self,
         misc_spks: impl IntoIterator<IntoIter = impl Iterator<Item = ScriptBuf> + Send> + Send,
         txids: impl IntoIterator<IntoIter = impl Iterator<Item = Txid> + Send> + Send,
         outpoints: impl IntoIterator<IntoIter = impl Iterator<Item = OutPoint> + Send> + Send,
         parallel_requests: usize,
     ) -> Result<TxGraph<ConfirmationTimeAnchor>, Error> {
-        self.update_tx_graph(
+        self.scan_txs_with_keychains(
             [(
                 (),
                 misc_spks
@@ -201,7 +201,7 @@ impl EsploraAsyncExt for esplora_client::AsyncClient {
         })
     }
 
-    async fn update_tx_graph<K: Ord + Clone + Send>(
+    async fn scan_txs_with_keychains<K: Ord + Clone + Send>(
         &self,
         keychain_spks: BTreeMap<
             K,
