@@ -61,7 +61,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             relevant_txids,
         },
         keychain_update,
-    ) = client.scan(prev_tip, keychain_spks, None, None, STOP_GAP, BATCH_SIZE)?;
+    ) = client.scan_with_keychain(prev_tip, keychain_spks, STOP_GAP, BATCH_SIZE)?;
 
     println!();
 

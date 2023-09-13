@@ -146,12 +146,10 @@ pub trait ElectrumExt {
     /// The scan for each keychain stops after a gap of `stop_gap` script pubkeys with no associated
     /// transactions. `batch_size` specifies the max number of script pubkeys to request for in a
     /// single batch request.
-    fn scan<K: Ord + Clone>(
+    fn scan_with_keychain<K: Ord + Clone>(
         &self,
         prev_tip: Option<CheckPoint>,
         keychain_spks: BTreeMap<K, impl IntoIterator<Item = (u32, ScriptBuf)>>,
-        txids: impl IntoIterator<Item = Txid>,
-        outpoints: impl IntoIterator<Item = OutPoint>,
         stop_gap: usize,
         batch_size: usize,
     ) -> Result<(ElectrumUpdate, BTreeMap<K, u32>), Error>;
@@ -163,8 +161,8 @@ pub trait ElectrumExt {
         &self,
         prev_tip: Option<CheckPoint>,
         misc_spks: impl IntoIterator<Item = ScriptBuf>,
-        txids: impl IntoIterator<Item = Txid>,
-        outpoints: impl IntoIterator<Item = OutPoint>,
+        _txids: impl IntoIterator<Item = Txid>,
+        _outpoints: impl IntoIterator<Item = OutPoint>,
         batch_size: usize,
     ) -> Result<ElectrumUpdate, Error> {
         let spk_iter = misc_spks
@@ -172,26 +170,18 @@ pub trait ElectrumExt {
             .enumerate()
             .map(|(i, spk)| (i as u32, spk));
 
-        let (electrum_update, _) = self.scan(
-            prev_tip,
-            [((), spk_iter)].into(),
-            txids,
-            outpoints,
-            usize::MAX,
-            batch_size,
-        )?;
+        let (electrum_update, _) =
+            self.scan_with_keychain(prev_tip, [((), spk_iter)].into(), usize::MAX, batch_size)?;
 
         Ok(electrum_update)
     }
 }
 
 impl ElectrumExt for Client {
-    fn scan<K: Ord + Clone>(
+    fn scan_with_keychain<K: Ord + Clone>(
         &self,
         prev_tip: Option<CheckPoint>,
         keychain_spks: BTreeMap<K, impl IntoIterator<Item = (u32, ScriptBuf)>>,
-        txids: impl IntoIterator<Item = Txid>,
-        outpoints: impl IntoIterator<Item = OutPoint>,
         stop_gap: usize,
         batch_size: usize,
     ) -> Result<(ElectrumUpdate, BTreeMap<K, u32>), Error> {
@@ -201,8 +191,8 @@ impl ElectrumExt for Client {
             .collect::<BTreeMap<K, _>>();
         let mut scanned_spks = BTreeMap::<(K, u32), (ScriptBuf, bool)>::new();
 
-        let txids = txids.into_iter().collect::<Vec<_>>();
-        let outpoints = outpoints.into_iter().collect::<Vec<_>>();
+        let txids = Vec::<_>::new();
+        let outpoints = Vec::<_>::new();
 
         let (electrum_update, keychain_update) = loop {
             let (tip, _) = construct_update_tip(self, prev_tip.clone())?;

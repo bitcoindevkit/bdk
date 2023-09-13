@@ -146,14 +146,7 @@ fn main() -> anyhow::Result<()> {
             };
 
             client
-                .scan(
-                    tip,
-                    keychain_spks,
-                    core::iter::empty(),
-                    core::iter::empty(),
-                    stop_gap,
-                    scan_options.batch_size,
-                )
+                .scan_with_keychain(tip, keychain_spks, stop_gap, scan_options.batch_size)
                 .context("scanning the blockchain")?
         }
         ElectrumCommands::Sync {
