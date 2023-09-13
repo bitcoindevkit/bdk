@@ -709,18 +709,15 @@ fn test_chain_spends() {
     let _ = graph.insert_tx(tx_1.clone());
     let _ = graph.insert_tx(tx_2.clone());
 
-    [95, 98]
-        .iter()
-        .zip([&tx_0, &tx_1].into_iter())
-        .for_each(|(ht, tx)| {
-            let _ = graph.insert_anchor(
-                tx.txid(),
-                ConfirmationHeightAnchor {
-                    anchor_block: tip.block_id(),
-                    confirmation_height: *ht,
-                },
-            );
-        });
+    [95, 98].iter().zip([&tx_0, &tx_1]).for_each(|(ht, tx)| {
+        let _ = graph.insert_anchor(
+            tx.txid(),
+            ConfirmationHeightAnchor {
+                anchor_block: tip.block_id(),
+                confirmation_height: *ht,
+            },
+        );
+    });
 
     // Assert that confirmed spends are returned correctly.
     assert_eq!(
