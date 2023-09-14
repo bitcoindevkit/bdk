@@ -644,6 +644,11 @@ impl<A: Anchor> TxGraph<A> {
 
     /// Get the position of the transaction in `chain` with tip `chain_tip`.
     ///
+    /// This method is like [`try_get_chain_position`] except it restricts the
+    /// chain to a custom tip. The tip doesn't even need to be in the same chain as the tip.
+    /// You can use this to find information about a point in the past or on a fork if your
+    /// chain oracle supports that.
+    ///
     /// If the given transaction of `txid` does not exist in the chain of `chain_tip`, `None` is
     /// returned.
     ///
@@ -652,11 +657,12 @@ impl<A: Anchor> TxGraph<A> {
     /// An error will occur if the [`ChainOracle`] implementation (`chain`) fails. If the
     /// [`ChainOracle`] is infallible, [`get_subchain_position`] can be used instead.
     ///
+    /// [`try_get_chain_position`]: Self::try_get_chain_position
     /// [`get_subchain_position`]: Self::get_subchain_position
-    pub fn try_get_subchain_position<B: Into<BlockId> + Clone, C: ChainOracle>(
+    pub fn try_get_subchain_position<C: ChainOracle>(
         &self,
         chain: &C,
-        chain_tip: Option<B>,
+        chain_tip: Option<BlockId>,
         txid: Txid,
     ) -> Result<Option<ChainPosition<&A>>, C::Error> {
         let (tx_node, anchors, last_seen) = match self.txs.get(&txid) {
@@ -665,7 +671,7 @@ impl<A: Anchor> TxGraph<A> {
         };
 
         for anchor in anchors {
-            match chain.is_block_in_chain(anchor.anchor_block(), chain_tip.clone())? {
+            match chain.is_block_in_chain(anchor.anchor_block(), chain_tip.as_ref())? {
                 Some(true) => return Ok(Some(ChainPosition::Confirmed(anchor))),
                 _ => continue,
             }
@@ -685,7 +691,7 @@ impl<A: Anchor> TxGraph<A> {
         // this tx cannot exist in the best chain
         for conflicting_tx in self.walk_conflicts(tx, |_, txid| self.get_tx_node(txid)) {
             for block in conflicting_tx.anchors.iter().map(A::anchor_block) {
-                if chain.is_block_in_chain(block, chain_tip.clone())? == Some(true) {
+                if chain.is_block_in_chain(block, chain_tip.as_ref())? == Some(true) {
                     // conflicting tx is in best chain, so the current tx cannot be in best chain!
                     return Ok(None);
                 }
@@ -722,10 +728,10 @@ impl<A: Anchor> TxGraph<A> {
     /// This is the infallible version of [`try_get_subchain_position`].
     ///
     /// [`try_get_subchain_position`]: Self::try_get_subchain_position
-    pub fn get_subchain_position<B: Into<BlockId> + Clone, C: ChainOracle<Error = Infallible>>(
+    pub fn get_subchain_position<C: ChainOracle<Error = Infallible>>(
         &self,
         chain: &C,
-        chain_tip: Option<B>,
+        chain_tip: Option<BlockId>,
         txid: Txid,
     ) -> Option<ChainPosition<&A>> {
         self.try_get_subchain_position(chain, chain_tip, txid)
@@ -751,30 +757,33 @@ impl<A: Anchor> TxGraph<A> {
     ///
     /// If no in-chain transaction spends `outpoint`, `None` will be returned.
     ///
+    /// This method is like [`try_get_chain_spend`] except it restricts the chain to a custom tip.
+    /// The tip doesn't even need to be in the same chain as the tip. You can use this to find information
+    /// about a point in the past or on a fork if your chain oracle supports that.
+    ///
     /// # Error
     ///
     /// An error will occur only if the [`ChainOracle`] implementation (`chain`) fails.
     ///
     /// If the [`ChainOracle`] is infallible, [`get_subchain_spend`] can be used instead.
     ///
+    /// [`try_get_chain_spend`]: Self::try_get_chain_spend
     /// [`get_subchain_spend`]: Self::get_subchain_spend
-    pub fn try_get_subchain_spend<B: Into<BlockId> + Clone, C: ChainOracle>(
+    pub fn try_get_subchain_spend<C: ChainOracle>(
         &self,
         chain: &C,
-        chain_tip: Option<B>,
+        chain_tip: Option<BlockId>,
         outpoint: OutPoint,
     ) -> Result<Option<(ChainPosition<&A>, Txid)>, C::Error> {
         if self
-            .try_get_subchain_position(chain, chain_tip.clone(), outpoint.txid)?
+            .try_get_subchain_position(chain, chain_tip, outpoint.txid)?
             .is_none()
         {
             return Ok(None);
         }
         if let Some(spends) = self.spends.get(&outpoint) {
             for &txid in spends {
-                if let Some(observed_at) =
-                    self.try_get_subchain_position(chain, chain_tip.clone(), txid)?
-                {
+                if let Some(observed_at) = self.try_get_subchain_position(chain, chain_tip, txid)? {
                     return Ok(Some((observed_at, txid)));
                 }
             }
@@ -808,10 +817,10 @@ impl<A: Anchor> TxGraph<A> {
     /// This is the infallible version of [`try_get_subchain_spend`]
     ///
     /// [`try_get_subchain_spend`]: Self::try_get_subchain_spend
-    pub fn get_subchain_spend<B: Into<BlockId> + Clone, C: ChainOracle<Error = Infallible>>(
+    pub fn get_subchain_spend<C: ChainOracle<Error = Infallible>>(
         &self,
         chain: &C,
-        chain_tip: Option<B>,
+        chain_tip: Option<BlockId>,
         outpoint: OutPoint,
     ) -> Option<(ChainPosition<&A>, Txid)> {
         self.try_get_subchain_spend(chain, chain_tip, outpoint)
@@ -835,6 +844,10 @@ impl<A: Anchor> TxGraph<A> {
 
     /// List graph transactions that are in `chain` with `chain_tip`.
     ///
+    /// This method is like `try_list_chain_txs` except it restricts the chain to a custom tip.
+    /// The tip doesn't even need to be in the same chain as the tip. You can use this to find information
+    /// about a point in the past or on a fork if your chain oracle supports that.
+    ///
     /// Each transaction is represented as a [`CanonicalTx`] that contains where the transaction is
     /// observed in-chain, and the [`TxNode`].
     ///
@@ -845,14 +858,15 @@ impl<A: Anchor> TxGraph<A> {
     ///
     /// If the [`ChainOracle`] is infallible, [`list_subchain_txs`] can be used instead.
     ///
+    /// [`try_list_chain_txs`]: Self::try_list_chain_txs
     /// [`list_subchain_txs`]: Self::list_subchain_txs
-    pub fn try_list_subchain_txs<'a, B: Into<BlockId> + Clone, C: ChainOracle + 'a>(
+    pub fn try_list_subchain_txs<'a, C: ChainOracle + 'a>(
         &'a self,
         chain: &'a C,
-        chain_tip: Option<B>,
+        chain_tip: Option<BlockId>,
     ) -> impl Iterator<Item = Result<CanonicalTx<'a, Transaction, A>, C::Error>> {
         self.full_txs().filter_map(move |tx| {
-            self.try_get_subchain_position(chain, chain_tip.clone(), tx.txid)
+            self.try_get_subchain_position(chain, chain_tip, tx.txid)
                 .map(|v| {
                     v.map(|observed_in| CanonicalTx {
                         chain_position: observed_in,
@@ -892,10 +906,10 @@ impl<A: Anchor> TxGraph<A> {
     /// This is the infallible version of [`try_list_subchain_txs`].
     ///
     /// [`try_list_subchain_txs`]: Self::try_list_subchain_txs
-    pub fn list_subchain_txs<'a, B: Into<BlockId> + Clone, C: ChainOracle + 'a>(
+    pub fn list_subchain_txs<'a, C: ChainOracle + 'a>(
         &'a self,
         chain: &'a C,
-        chain_tip: Option<B>,
+        chain_tip: Option<BlockId>,
     ) -> impl Iterator<Item = CanonicalTx<'a, Transaction, A>> {
         self.try_list_subchain_txs(chain, chain_tip)
             .map(|r| r.expect("oracle is infallible"))
@@ -917,6 +931,10 @@ impl<A: Anchor> TxGraph<A> {
     /// Get a filtered list of outputs from the given `outpoints` that are in `chain` with
     /// `chain_tip`.
     ///
+    /// This method is like [`try_filter_chain_txouts`] except it restricts the chain to a custom tip.
+    /// The tip doesn't even need to be in the same chain as the tip. You can use this to find information
+    /// about a point in the past or on a fork if your chain oracle supports that.
+    ///
     /// `outpoints` is a list of outpoints we are interested in, coupled with an outpoint identifier
     /// (`OI`) for convenience. If `OI` is not necessary, the caller can use `()`, or
     /// [`Iterator::enumerate`] over a list of [`OutPoint`]s.
@@ -931,16 +949,12 @@ impl<A: Anchor> TxGraph<A> {
     /// If the [`ChainOracle`] implementation is infallible, [`filter_subchain_txouts`] can be used
     /// instead.
     ///
+    /// [`try_filter_chain_txouts`]: Self::try_filter_chain_txouts
     /// [`filter_subchain_txouts`]: Self::filter_subchain_txouts
-    pub fn try_filter_subchain_txouts<
-        'a,
-        B: Into<BlockId> + Clone + 'a,
-        C: ChainOracle + 'a,
-        OI: Clone + 'a,
-    >(
+    pub fn try_filter_subchain_txouts<'a, C: ChainOracle + 'a, OI: Clone + 'a>(
         &'a self,
         chain: &'a C,
-        chain_tip: Option<B>,
+        chain_tip: Option<BlockId>,
         outpoints: impl IntoIterator<Item = (OI, OutPoint)> + 'a,
     ) -> impl Iterator<Item = Result<(OI, FullTxOut<A>), C::Error>> + 'a {
         outpoints
@@ -958,13 +972,13 @@ impl<A: Anchor> TxGraph<A> {
                     };
 
                     let chain_position =
-                        match self.try_get_subchain_position(chain, chain_tip.clone(), op.txid)? {
+                        match self.try_get_subchain_position(chain, chain_tip, op.txid)? {
                             Some(pos) => pos.cloned(),
                             None => return Ok(None),
                         };
 
                     let spent_by = self
-                        .try_get_subchain_spend(chain, chain_tip.clone(), op)?
+                        .try_get_subchain_spend(chain, chain_tip, op)?
                         .map(|(a, txid)| (a.cloned(), txid));
 
                     Ok(Some((
@@ -1017,15 +1031,10 @@ impl<A: Anchor> TxGraph<A> {
     /// This is the infallible version of [`try_filter_subchain_txouts`].
     ///
     /// [`try_filter_subchain_txouts`]: Self::try_filter_subchain_txouts
-    pub fn filter_subchain_txouts<
-        'a,
-        B: Into<BlockId> + Clone + 'a,
-        C: ChainOracle<Error = Infallible> + 'a,
-        OI: Clone + 'a,
-    >(
+    pub fn filter_subchain_txouts<'a, C: ChainOracle<Error = Infallible> + 'a, OI: Clone + 'a>(
         &'a self,
         chain: &'a C,
-        chain_tip: Option<B>,
+        chain_tip: Option<BlockId>,
         outpoints: impl IntoIterator<Item = (OI, OutPoint)> + 'a,
     ) -> impl Iterator<Item = (OI, FullTxOut<A>)> + 'a {
         self.try_filter_subchain_txouts(chain, chain_tip, outpoints)
@@ -1049,6 +1058,10 @@ impl<A: Anchor> TxGraph<A> {
     /// Get a filtered list of unspent outputs (UTXOs) from the given `outpoints` that are in
     /// `chain` with `chain_tip`.
     ///
+    /// This method is like [`try_filter_chain_unspents`] except it restricts the chain to a custom tip.
+    /// The tip doesn't even need to be in the same chain as the tip. You can use this to find information
+    /// about a point in the past or on a fork if your chain oracle supports that.
+    ///
     /// `outpoints` is a list of outpoints we are interested in, coupled with an outpoint identifier
     /// (`OI`) for convenience. If `OI` is not necessary, the caller can use `()`, or
     /// [`Iterator::enumerate`] over a list of [`OutPoint`]s.
@@ -1063,16 +1076,12 @@ impl<A: Anchor> TxGraph<A> {
     /// If the [`ChainOracle`] implementation is infallible, [`filter_subchain_unspents`] can be used
     /// instead.
     ///
+    /// [`try_filter_chain_unspents`]: Self::try_filter_chain_unspents
     /// [`filter_subchain_unspents`]: Self::filter_subchain_unspents
-    pub fn try_filter_subchain_unspents<
-        'a,
-        B: Into<BlockId> + Clone + 'a,
-        C: ChainOracle + 'a,
-        OI: Clone + 'a,
-    >(
+    pub fn try_filter_subchain_unspents<'a, C: ChainOracle + 'a, OI: Clone + 'a>(
         &'a self,
         chain: &'a C,
-        chain_tip: Option<B>,
+        chain_tip: Option<BlockId>,
         outpoints: impl IntoIterator<Item = (OI, OutPoint)> + 'a,
     ) -> impl Iterator<Item = Result<(OI, FullTxOut<A>), C::Error>> + 'a {
         self.try_filter_subchain_txouts(chain, chain_tip, outpoints)
@@ -1120,15 +1129,10 @@ impl<A: Anchor> TxGraph<A> {
     /// This is the infallible version of [`try_filter_subchain_unspents`].
     ///
     /// [`try_filter_subchain_unspents`]: Self::try_filter_subchain_unspents
-    pub fn filter_subchain_unspents<
-        'a,
-        B: Into<BlockId> + Clone + 'a,
-        C: ChainOracle<Error = Infallible> + 'a,
-        OI: Clone + 'a,
-    >(
+    pub fn filter_subchain_unspents<'a, C: ChainOracle<Error = Infallible> + 'a, OI: Clone + 'a>(
         &'a self,
         chain: &'a C,
-        chain_tip: Option<B>,
+        chain_tip: Option<BlockId>,
         txouts: impl IntoIterator<Item = (OI, OutPoint)> + 'a,
     ) -> impl Iterator<Item = (OI, FullTxOut<A>)> + 'a {
         self.try_filter_subchain_unspents(chain, chain_tip, txouts)
@@ -1152,6 +1156,10 @@ impl<A: Anchor> TxGraph<A> {
 
     /// Get the total balance of `outpoints` that are in `chain` of `chain_tip`.
     ///
+    /// This method is like [`try_balance`] except it restricts the chain to a custom tip.
+    /// The tip doesn't even need to be in the same chain as the tip. You can use this to find information
+    /// about a point in the past or on a fork if your chain oracle supports that.
+    ///
     /// The output of `trust_predicate` should return `true` for scripts that we trust.
     ///
     /// `outpoints` is a list of outpoints we are interested in, coupled with an outpoint identifier
@@ -1161,11 +1169,12 @@ impl<A: Anchor> TxGraph<A> {
     /// If the provided [`ChainOracle`] implementation (`chain`) is infallible, [`subchain_balance`] can be
     /// used instead.
     ///
+    /// [`try_balance`]: Self::try_balance
     /// [`subchain_balance`]: Self::subchain_balance
-    pub fn try_subchain_balance<B: Into<BlockId> + Clone, C: ChainOracle, OI: Clone>(
+    pub fn try_subchain_balance<C: ChainOracle, OI: Clone>(
         &self,
         chain: &C,
-        chain_tip: Option<B>,
+        chain_tip: Option<BlockId>,
         outpoints: impl IntoIterator<Item = (OI, OutPoint)>,
         mut trust_predicate: impl FnMut(&OI, &Script) -> bool,
     ) -> Result<Balance, C::Error> {
@@ -1174,14 +1183,12 @@ impl<A: Anchor> TxGraph<A> {
         let mut untrusted_pending = 0;
         let mut confirmed = 0;
 
-        let chain_tip_block_id = chain_tip.map(|block| block.into());
-
-        for res in self.try_filter_subchain_unspents(chain, chain_tip_block_id, outpoints) {
+        for res in self.try_filter_subchain_unspents(chain, chain_tip, outpoints) {
             let (spk_i, txout) = res?;
 
             match &txout.chain_position {
                 ChainPosition::Confirmed(_) => {
-                    if let Some(block_id) = chain_tip_block_id {
+                    if let Some(block_id) = chain_tip {
                         if txout.is_confirmed_and_spendable(block_id.height) {
                             confirmed += txout.txout.value;
                         } else if !txout.is_mature(block_id.height) {
@@ -1233,14 +1240,10 @@ impl<A: Anchor> TxGraph<A> {
     /// This is the infallible version of [`try_subchain_balance`].
     ///
     /// [`try_subchain_balance`]: Self::try_subchain_balance
-    pub fn subchain_balance<
-        B: Into<BlockId> + Clone,
-        C: ChainOracle<Error = Infallible>,
-        OI: Clone,
-    >(
+    pub fn subchain_balance<C: ChainOracle<Error = Infallible>, OI: Clone>(
         &self,
         chain: &C,
-        chain_tip: Option<B>,
+        chain_tip: Option<BlockId>,
         outpoints: impl IntoIterator<Item = (OI, OutPoint)>,
         trust_predicate: impl FnMut(&OI, &Script) -> bool,
     ) -> Balance {

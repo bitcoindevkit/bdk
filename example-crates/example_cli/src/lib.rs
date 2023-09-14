@@ -250,9 +250,8 @@ pub fn run_balance_cmd<A: Anchor, O: ChainOracle>(
         }
     }
 
-    let balance = graph.graph().try_subchain_balance(
+    let balance = graph.graph().try_balance(
         chain,
-        chain.get_chain_tip()?,
         graph.index.outpoints().iter().cloned(),
         |(k, _), _| k == &Keychain::Internal,
     )?;
@@ -289,7 +288,6 @@ pub fn run_txo_cmd<A: Anchor, O: ChainOracle>(
 where
     O::Error: std::error::Error + Send + Sync + 'static,
 {
-    let chain_tip = chain.get_chain_tip()?;
     let outpoints = graph.index.outpoints().iter().cloned();
 
     match cmd {
@@ -301,7 +299,7 @@ where
         } => {
             let txouts = graph
                 .graph()
-                .try_filter_subchain_txouts(chain, chain_tip, outpoints)
+                .try_filter_chain_txouts(chain, outpoints)
                 .filter(|r| match r {
                     Ok((_, full_txo)) => match (spent, unspent) {
                         (true, false) => full_txo.spent_by.is_some(),
@@ -621,11 +619,10 @@ pub fn planned_utxos<A: Anchor, O: ChainOracle, K: Clone + bdk_tmp_plan::CanDeri
     chain: &O,
     assets: &bdk_tmp_plan::Assets<K>,
 ) -> Result<Vec<(bdk_tmp_plan::Plan<K>, FullTxOut<A>)>, O::Error> {
-    let chain_tip = chain.get_chain_tip()?;
     let outpoints = graph.index.outpoints().iter().cloned();
     graph
         .graph()
-        .try_filter_subchain_unspents(chain, chain_tip, outpoints)
+        .try_filter_chain_unspents(chain, outpoints)
         .filter_map(
             #[allow(clippy::type_complexity)]
             |r| -> Option<Result<(bdk_tmp_plan::Plan<K>, FullTxOut<A>), _>> {

@@ -166,7 +166,6 @@ fn main() -> anyhow::Result<()> {
             // Get a short lock on the tracker to get the spks we're interested in
             let graph = graph.lock().unwrap();
             let chain = chain.lock().unwrap();
-            let chain_tip = chain.tip().map(|cp| cp.block_id());
 
             if !(all_spks || unused_spks || utxos || unconfirmed) {
                 unused_spks = true;
@@ -214,7 +213,7 @@ fn main() -> anyhow::Result<()> {
 
                 let utxos = graph
                     .graph()
-                    .filter_subchain_unspents(&*chain, chain_tip, init_outpoints)
+                    .filter_chain_unspents(&*chain, init_outpoints)
                     .map(|(_, utxo)| utxo)
                     .collect::<Vec<_>>();
 
@@ -236,7 +235,7 @@ fn main() -> anyhow::Result<()> {
             if unconfirmed {
                 let unconfirmed_txids = graph
                     .graph()
-                    .list_subchain_txs(&*chain, chain_tip)
+                    .list_chain_txs(&*chain)
                     .filter(|canonical_tx| !canonical_tx.chain_position.is_confirmed())
                     .map(|canonical_tx| canonical_tx.tx_node.txid)
                     .collect::<Vec<Txid>>();

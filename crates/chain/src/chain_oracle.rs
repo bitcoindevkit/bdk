@@ -14,10 +14,10 @@ pub trait ChainOracle {
     ///
     /// If `None` is returned, it means the implementation cannot determine whether `block` exists
     /// under `chain_tip`.
-    fn is_block_in_chain<B: Into<BlockId>>(
+    fn is_block_in_chain(
         &self,
         block: BlockId,
-        chain_tip: Option<B>,
+        chain_tip: Option<&BlockId>,
     ) -> Result<Option<bool>, Self::Error>;
 
     /// Get the best chain's chain tip.
