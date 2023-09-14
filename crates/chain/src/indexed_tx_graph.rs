@@ -6,7 +6,7 @@ use alloc::vec::Vec;
 use bitcoin::{OutPoint, Transaction, TxOut};
 
 use crate::{
-    keychain, local_chain,
+    keychain,
     tx_graph::{self, TxGraph},
     Anchor, Append,
 };
@@ -222,12 +222,6 @@ impl<A, K> From<keychain::ChangeSet<K>> for ChangeSet<A, keychain::ChangeSet<K>>
             graph: Default::default(),
             indexer,
         }
-    }
-}
-
-impl<A, IA> From<ChangeSet<A, IA>> for (local_chain::ChangeSet, ChangeSet<A, IA>) {
-    fn from(indexed_changeset: ChangeSet<A, IA>) -> Self {
-        (local_chain::ChangeSet::default(), indexed_changeset)
     }
 }
 
