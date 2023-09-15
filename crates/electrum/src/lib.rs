@@ -1,6 +1,6 @@
 //! This crate is used for updating structures of the [`bdk_chain`] crate with data from electrum.
 //!
-//! The star of the show is the [`ElectrumExt::scan`] method, which scans for relevant blockchain
+//! The star of the show is the [`ElectrumExt::scan_with_keychain`] method, which scans for relevant blockchain
 //! data (via electrum) and outputs updates for [`bdk_chain`] structures as a tuple of form:
 //!
 //! ([`bdk_chain::local_chain::Update`], [`RelevantTxids`], `keychain_update`)
@@ -17,7 +17,7 @@
 //!
 //! Refer to [`bdk_electrum_example`] for a complete example.
 //!
-//! [`ElectrumClient::scan`]: electrum_client::ElectrumClient::scan
+//! [`ElectrumClient::scan_with_keychain`]: electrum_client::ElectrumClient::scan_with_keychain
 //! [`missing_full_txs`]: RelevantTxids::missing_full_txs
 //! [`batch_transaction_get`]: electrum_client::ElectrumApi::batch_transaction_get
 //! [`bdk_electrum_example`]: https://github.com/LLFourn/bdk_core_staging/tree/master/bdk_electrum_example

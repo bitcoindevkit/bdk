@@ -152,9 +152,9 @@ pub trait ElectrumExt {
         batch_size: usize,
     ) -> Result<(ElectrumUpdate, BTreeMap<K, u32>), Error>;
 
-    /// Convenience method to call [`scan`] without requiring a keychain.
+    /// Convenience method to call [`scan_with_keychain`] without requiring a keychain.
     ///
-    /// [`scan`]: ElectrumExt::scan
+    /// [`scan_with_keychain`]: ElectrumExt::scan_with_keychain
     fn sync(
         &self,
         prev_tip: Option<CheckPoint>,
