@@ -43,6 +43,7 @@ pub use types::*;
 pub use wallet::signer;
 pub use wallet::signer::SignOptions;
 pub use wallet::tx_builder::TxBuilder;
+pub use wallet::Update;
 pub use wallet::Wallet;
 
 /// Get the version of BDK at runtime

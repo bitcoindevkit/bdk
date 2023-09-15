@@ -24,7 +24,7 @@ use bdk_chain::{
     indexed_tx_graph,
     keychain::{self, KeychainTxOutIndex},
     local_chain::{self, CannotConnectError, CheckPoint, CheckPointIter, LocalChain},
-    tx_graph::{CanonicalTx, TxGraph},
+    tx_graph::{self, CanonicalTx, TxGraph},
     Append, BlockId, ChainPosition, ConfirmationTime, ConfirmationTimeAnchor, FullTxOut,
     IndexedTxGraph, Persist, PersistBackend,
 };
@@ -100,17 +100,44 @@ pub struct Wallet<D = ()> {
 /// It updates [`bdk_chain::keychain::KeychainTxOutIndex`], [`bdk_chain::TxGraph`] and [`local_chain::LocalChain`] atomically.
 #[derive(Debug, Clone, Default)]
 pub struct Update {
-    /// Contains the last active derivation indices per keychain (`K`), which is used to update the
-    /// [`KeychainTxOutIndex`].
-    pub last_active_indices: BTreeMap<KeychainKind, u32>,
-
-    /// Update for the wallet's internal [`TxGraph`].
-    pub graph: TxGraph<ConfirmationTimeAnchor>,
-
     /// Update for the wallet's internal [`LocalChain`].
     ///
     /// [`LocalChain`]: local_chain::LocalChain
     pub chain: Option<local_chain::Update>,
+
+    /// Update for the wallet's internal [`TxGraph`].
+    pub graph: TxGraph<ConfirmationTimeAnchor>,
+
+    /// Contains the last active derivation indices per keychain (`K`), which is used to update the
+    /// [`KeychainTxOutIndex`].
+    pub last_active_indices: BTreeMap<KeychainKind, u32>,
+}
+
+impl From<TxGraph<ConfirmationTimeAnchor>> for Update {
+    fn from(graph: TxGraph<ConfirmationTimeAnchor>) -> Self {
+        Self {
+            graph,
+            ..Default::default()
+        }
+    }
+}
+
+impl From<BTreeMap<KeychainKind, u32>> for Update {
+    fn from(last_active_indices: BTreeMap<KeychainKind, u32>) -> Self {
+        Self {
+            last_active_indices,
+            ..Default::default()
+        }
+    }
+}
+
+impl From<local_chain::Update> for Update {
+    fn from(chain: local_chain::Update) -> Self {
+        Self {
+            chain: Some(chain),
+            ..Default::default()
+        }
+    }
 }
 
 /// The changes made to a wallet by applying an [`Update`].
@@ -159,6 +186,24 @@ impl From<indexed_tx_graph::ChangeSet<ConfirmationTimeAnchor, keychain::ChangeSe
     ) -> Self {
         Self {
             indexed_tx_graph,
+            ..Default::default()
+        }
+    }
+}
+
+impl From<tx_graph::ChangeSet<ConfirmationTimeAnchor>> for ChangeSet {
+    fn from(graph_changeset: tx_graph::ChangeSet<ConfirmationTimeAnchor>) -> Self {
+        Self {
+            indexed_tx_graph: graph_changeset.into(),
+            ..Default::default()
+        }
+    }
+}
+
+impl From<keychain::ChangeSet<KeychainKind>> for ChangeSet {
+    fn from(keychain_changeset: keychain::ChangeSet<KeychainKind>) -> Self {
+        Self {
+            indexed_tx_graph: keychain_changeset.into(),
             ..Default::default()
         }
     }
