@@ -142,7 +142,7 @@ pub trait ElectrumExt {
     /// The scan for each keychain stops after a gap of `stop_gap` script pubkeys with no associated
     /// transactions. `batch_size` specifies the max number of script pubkeys to request for in a
     /// single batch request.
-    /// ##### NOTE: Scanning with keychain is very inefficient and should be used only when restoring
+    /// Note that scanning with keychain is very inefficient and should be used only when restoring
     /// from seed words.
     fn scan_with_keychain<K: Ord + Clone>(
         &self,
