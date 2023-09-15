@@ -24,3 +24,5 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
       - name: Check conventional commits in PR
         uses: cocogitto/cocogitto-action@v3
+        with:
+          check-latest-tag-only: true
