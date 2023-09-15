@@ -2,7 +2,7 @@ use std::{io::Write, str::FromStr};
 
 use bdk::{
     bitcoin::{Address, Network},
-    wallet::{AddressIndex, Update},
+    wallet::AddressIndex,
     SignOptions, Wallet,
 };
 use bdk_esplora::{esplora_client, EsploraAsyncExt};
@@ -11,7 +11,7 @@ use bdk_file_store::Store;
 const DB_MAGIC: &str = "bdk_wallet_esplora_async_example";
 const SEND_AMOUNT: u64 = 5000;
 const STOP_GAP: usize = 50;
-const PARALLEL_REQUESTS: usize = 5;
+const PARALLEL_REQUESTS: usize = 1;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -56,14 +56,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (update_graph, last_active_indices) = client
         .scan_txs_with_keychains(keychain_spks, None, None, STOP_GAP, PARALLEL_REQUESTS)
         .await?;
-    let missing_heights = wallet.tx_graph().missing_heights(wallet.local_chain());
-    let chain_update = client.update_local_chain(prev_tip, missing_heights).await?;
-    let update = Update {
+    wallet.apply_update(bdk::Update {
         last_active_indices,
         graph: update_graph,
-        chain: Some(chain_update),
-    };
-    wallet.apply_update(update)?;
+        ..Default::default()
+    })?;
+    let missing_heights = wallet
+        .staged()
+        .indexed_tx_graph
+        .graph
+        .missing_heights_from(wallet.local_chain());
+    let chain_update = client.update_local_chain(prev_tip, missing_heights).await?;
+    wallet.apply_update(chain_update.into())?;
     wallet.commit()?;
     println!();
 
