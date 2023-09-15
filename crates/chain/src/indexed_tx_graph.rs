@@ -225,7 +225,10 @@ impl<A, K> From<keychain::ChangeSet<K>> for ChangeSet<A, keychain::ChangeSet<K>>
     }
 }
 
-/// Represents a structure that can index transaction data.
+/// Utilities for indexing transaction data.
+///
+/// Types which implement this trait can be used to construct an [`IndexedTxGraph`].
+/// This trait's methods should rarely be called directly.
 pub trait Indexer {
     /// The resultant "changeset" when new transaction data is indexed.
     type ChangeSet;
@@ -233,7 +236,7 @@ pub trait Indexer {
     /// Scan and index the given `outpoint` and `txout`.
     fn index_txout(&mut self, outpoint: OutPoint, txout: &TxOut) -> Self::ChangeSet;
 
-    /// Scan and index the given transaction.
+    /// Scans a transaction for relevant outpoints, which are stored and indexed internally.
     fn index_tx(&mut self, tx: &Transaction) -> Self::ChangeSet;
 
     /// Apply changeset to itself.

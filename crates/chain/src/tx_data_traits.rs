@@ -2,39 +2,6 @@ use crate::collections::BTreeMap;
 use crate::collections::BTreeSet;
 use crate::BlockId;
 use alloc::vec::Vec;
-use bitcoin::{Block, OutPoint, Transaction, TxOut};
-
-/// Trait to do something with every txout contained in a structure.
-///
-/// We would prefer to just work with things that can give us an `Iterator<Item=(OutPoint, &TxOut)>`
-/// here, but rust's type system makes it extremely hard to do this (without trait objects).
-pub trait ForEachTxOut {
-    /// The provided closure `f` will be called with each `outpoint/txout` pair.
-    fn for_each_txout(&self, f: impl FnMut((OutPoint, &TxOut)));
-}
-
-impl ForEachTxOut for Block {
-    fn for_each_txout(&self, mut f: impl FnMut((OutPoint, &TxOut))) {
-        for tx in self.txdata.iter() {
-            tx.for_each_txout(&mut f)
-        }
-    }
-}
-
-impl ForEachTxOut for Transaction {
-    fn for_each_txout(&self, mut f: impl FnMut((OutPoint, &TxOut))) {
-        let txid = self.txid();
-        for (i, txout) in self.output.iter().enumerate() {
-            f((
-                OutPoint {
-                    txid,
-                    vout: i as u32,
-                },
-                txout,
-            ))
-        }
-    }
-}
 
 /// Trait that "anchors" blockchain data to a specific block of height and hash.
 ///
@@ -124,14 +91,6 @@ pub trait Append {
     fn is_empty(&self) -> bool;
 }
 
-impl Append for () {
-    fn append(&mut self, _other: Self) {}
-
-    fn is_empty(&self) -> bool {
-        true
-    }
-}
-
 impl<K: Ord, V> Append for BTreeMap<K, V> {
     fn append(&mut self, mut other: Self) {
         BTreeMap::append(self, &mut other)
@@ -162,13 +121,30 @@ impl<T> Append for Vec<T> {
     }
 }
 
-impl<A: Append, B: Append> Append for (A, B) {
-    fn append(&mut self, other: Self) {
-        Append::append(&mut self.0, other.0);
-        Append::append(&mut self.1, other.1);
-    }
+macro_rules! impl_append_for_tuple {
+    ($($a:ident $b:tt)*) => {
+        impl<$($a),*> Append for ($($a,)*) where $($a: Append),* {
 
-    fn is_empty(&self) -> bool {
-        Append::is_empty(&self.0) && Append::is_empty(&self.1)
+            fn append(&mut self, _other: Self) {
+                $(Append::append(&mut self.$b, _other.$b) );*
+            }
+
+            fn is_empty(&self) -> bool {
+                $(Append::is_empty(&self.$b) && )* true
+            }
+        }
     }
 }
+
+impl_append_for_tuple!();
+impl_append_for_tuple!(T0 0);
+impl_append_for_tuple!(T0 0 T1 1);
+impl_append_for_tuple!(T0 0 T1 1 T2 2);
+impl_append_for_tuple!(T0 0 T1 1 T2 2 T3 3);
+impl_append_for_tuple!(T0 0 T1 1 T2 2 T3 3 T4 4);
+impl_append_for_tuple!(T0 0 T1 1 T2 2 T3 3 T4 4 T5 5);
+impl_append_for_tuple!(T0 0 T1 1 T2 2 T3 3 T4 4 T5 5 T6 6);
+impl_append_for_tuple!(T0 0 T1 1 T2 2 T3 3 T4 4 T5 5 T6 6 T7 7);
+impl_append_for_tuple!(T0 0 T1 1 T2 2 T3 3 T4 4 T5 5 T6 6 T7 7 T8 8);
+impl_append_for_tuple!(T0 0 T1 1 T2 2 T3 3 T4 4 T5 5 T6 6 T7 7 T8 8 T9 9);
+impl_append_for_tuple!(T0 0 T1 1 T2 2 T3 3 T4 4 T5 5 T6 6 T7 7 T8 8 T9 9 T10 10);

@@ -7,8 +7,8 @@ use std::{
 use bdk_chain::{
     bitcoin::{Address, Network, OutPoint, ScriptBuf, Txid},
     indexed_tx_graph::{self, IndexedTxGraph},
-    keychain::WalletChangeSet,
-    local_chain::LocalChain,
+    keychain,
+    local_chain::{self, LocalChain},
     Append, ConfirmationHeightAnchor,
 };
 use bdk_electrum::{
@@ -60,19 +60,22 @@ pub struct ScanOptions {
     pub batch_size: usize,
 }
 
-type ChangeSet = WalletChangeSet<Keychain, ConfirmationHeightAnchor>;
+type ChangeSet = (
+    local_chain::ChangeSet,
+    indexed_tx_graph::ChangeSet<ConfirmationHeightAnchor, keychain::ChangeSet<Keychain>>,
+);
 
 fn main() -> anyhow::Result<()> {
-    let (args, keymap, index, db, init_changeset) =
+    let (args, keymap, index, db, (disk_local_chain, disk_tx_graph)) =
         example_cli::init::<ElectrumCommands, ChangeSet>(DB_MAGIC, DB_PATH)?;
 
     let graph = Mutex::new({
         let mut graph = IndexedTxGraph::new(index);
-        graph.apply_changeset(init_changeset.indexed_tx_graph);
+        graph.apply_changeset(disk_tx_graph);
         graph
     });
 
-    let chain = Mutex::new(LocalChain::from_changeset(init_changeset.chain));
+    let chain = Mutex::new(LocalChain::from_changeset(disk_local_chain));
 
     let electrum_url = match args.network {
         Network::Bitcoin => "ssl://electrum.blockstream.info:50002",
@@ -248,20 +251,24 @@ fn main() -> anyhow::Result<()> {
             // drop lock on graph and chain
             drop((graph, chain));
 
-            let update = client
+            let electrum_update = client
                 .scan_without_keychain(tip, spks, txids, outpoints, scan_options.batch_size)
                 .context("scanning the blockchain")?;
-            ElectrumUpdate {
-                graph_update: update.graph_update,
-                new_tip: update.new_tip,
-                keychain_update: BTreeMap::new(),
-            }
+            (electrum_update, BTreeMap::new())
         }
     };
 
+    let (
+        ElectrumUpdate {
+            chain_update,
+            relevant_txids,
+        },
+        keychain_update,
+    ) = response;
+
     let missing_txids = {
         let graph = &*graph.lock().unwrap();
-        response.missing_full_txs(graph.graph())
+        relevant_txids.missing_full_txs(graph.graph())
     };
 
     let now = std::time::UNIX_EPOCH
@@ -269,32 +276,27 @@ fn main() -> anyhow::Result<()> {
         .expect("must get time")
         .as_secs();
 
-    let final_update = response.finalize(&client, Some(now), missing_txids)?;
+    let graph_update = relevant_txids.into_tx_graph(&client, Some(now), missing_txids)?;
 
     let db_changeset = {
         let mut chain = chain.lock().unwrap();
         let mut graph = graph.lock().unwrap();
 
-        let chain = chain.apply_update(final_update.chain)?;
+        let chain = chain.apply_update(chain_update)?;
 
         let indexed_tx_graph = {
             let mut changeset =
                 indexed_tx_graph::ChangeSet::<ConfirmationHeightAnchor, _>::default();
-            let (_, indexer) = graph
-                .index
-                .reveal_to_target_multi(&final_update.last_active_indices);
+            let (_, indexer) = graph.index.reveal_to_target_multi(&keychain_update);
             changeset.append(indexed_tx_graph::ChangeSet {
                 indexer,
                 ..Default::default()
             });
-            changeset.append(graph.apply_update(final_update.graph));
+            changeset.append(graph.apply_update(graph_update));
             changeset
         };
 
-        ChangeSet {
-            indexed_tx_graph,
-            chain,
-        }
+        (chain, indexed_tx_graph)
     };
 
     let mut db = db.lock().unwrap();

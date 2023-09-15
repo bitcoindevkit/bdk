@@ -3,7 +3,7 @@ use crate::{
     indexed_tx_graph::Indexer,
     miniscript::{Descriptor, DescriptorPublicKey},
     spk_iter::BIP32_MAX_INDEX,
-    ForEachTxOut, SpkIterator, SpkTxOutIndex,
+    SpkIterator, SpkTxOutIndex,
 };
 use alloc::vec::Vec;
 use bitcoin::{OutPoint, Script, TxOut};
@@ -91,11 +91,18 @@ impl<K: Clone + Ord + Debug> Indexer for KeychainTxOutIndex<K> {
     type ChangeSet = super::ChangeSet<K>;
 
     fn index_txout(&mut self, outpoint: OutPoint, txout: &TxOut) -> Self::ChangeSet {
-        self.scan_txout(outpoint, txout)
+        match self.inner.scan_txout(outpoint, txout).cloned() {
+            Some((keychain, index)) => self.reveal_to_target(&keychain, index).1,
+            None => super::ChangeSet::default(),
+        }
     }
 
     fn index_tx(&mut self, tx: &bitcoin::Transaction) -> Self::ChangeSet {
-        self.scan(tx)
+        let mut changeset = super::ChangeSet::<K>::default();
+        for (op, txout) in tx.output.iter().enumerate() {
+            changeset.append(self.index_txout(OutPoint::new(tx.txid(), op as u32), txout));
+        }
+        changeset
     }
 
     fn initial_changeset(&self) -> Self::ChangeSet {
@@ -112,38 +119,6 @@ impl<K: Clone + Ord + Debug> Indexer for KeychainTxOutIndex<K> {
 }
 
 impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
-    /// Scans an object for relevant outpoints, which are stored and indexed internally.
-    ///
-    /// If the matched script pubkey is part of the lookahead, the last stored index is updated for
-    /// the script pubkey's keychain and the [`super::ChangeSet`] returned will reflect the
-    /// change.
-    ///
-    /// Typically, this method is used in two situations:
-    ///
-    /// 1. After loading transaction data from the disk, you may scan over all the txouts to restore all
-    /// your txouts.
-    /// 2. When getting new data from the chain, you usually scan it before incorporating it into
-    /// your chain state (i.e., `SparseChain`, `ChainGraph`).
-    ///
-    /// See [`ForEachTxout`] for the types that support this.
-    ///
-    /// [`ForEachTxout`]: crate::ForEachTxOut
-    pub fn scan(&mut self, txouts: &impl ForEachTxOut) -> super::ChangeSet<K> {
-        let mut changeset = super::ChangeSet::<K>::default();
-        txouts.for_each_txout(|(op, txout)| changeset.append(self.scan_txout(op, txout)));
-        changeset
-    }
-
-    /// Scan a single outpoint for a matching script pubkey.
-    ///
-    /// If it matches, this will store and index it.
-    pub fn scan_txout(&mut self, op: OutPoint, txout: &TxOut) -> super::ChangeSet<K> {
-        match self.inner.scan_txout(op, txout).cloned() {
-            Some((keychain, index)) => self.reveal_to_target(&keychain, index).1,
-            None => super::ChangeSet::default(),
-        }
-    }
-
     /// Return a reference to the internal [`SpkTxOutIndex`].
     pub fn inner(&self) -> &SpkTxOutIndex<(K, u32)> {
         &self.inner
@@ -199,15 +174,14 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
 
     /// Set the lookahead count for `keychain`.
     ///
-    /// The lookahead is the number of scripts to cache ahead of the last stored script index. This
-    /// is useful during a scan via [`scan`] or [`scan_txout`].
+    /// The lookahead is the number of scripts to cache ahead of the last revealed script index. This
+    /// is useful to find outputs you own when processing block data that lie beyond the last revealed
+    /// index. In certain situations, such as when performing an initial scan of the blockchain during
+    /// wallet import, it may be uncertain or unknown what the last revealed index is.
     ///
     /// # Panics
     ///
     /// This will panic if the `keychain` does not exist.
-    ///
-    /// [`scan`]: Self::scan
-    /// [`scan_txout`]: Self::scan_txout
     pub fn set_lookahead(&mut self, keychain: &K, lookahead: u32) {
         self.lookahead.insert(keychain.clone(), lookahead);
         self.replenish_lookahead(keychain);

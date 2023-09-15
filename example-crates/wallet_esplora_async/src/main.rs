@@ -2,8 +2,7 @@ use std::{io::Write, str::FromStr};
 
 use bdk::{
     bitcoin::{Address, Network},
-    chain::keychain::WalletUpdate,
-    wallet::AddressIndex,
+    wallet::{AddressIndex, Update},
     SignOptions, Wallet,
 };
 use bdk_esplora::{esplora_client, EsploraAsyncExt};
@@ -59,10 +58,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
     let missing_heights = wallet.tx_graph().missing_heights(wallet.local_chain());
     let chain_update = client.update_local_chain(prev_tip, missing_heights).await?;
-    let update = WalletUpdate {
+    let update = Update {
         last_active_indices,
         graph: update_graph,
-        ..WalletUpdate::new(chain_update)
+        chain: Some(chain_update),
     };
     wallet.apply_update(update)?;
     wallet.commit()?;

@@ -22,7 +22,7 @@ use alloc::{
 pub use bdk_chain::keychain::Balance;
 use bdk_chain::{
     indexed_tx_graph,
-    keychain::{KeychainTxOutIndex, WalletChangeSet, WalletUpdate},
+    keychain::{self, KeychainTxOutIndex},
     local_chain::{self, CannotConnectError, CheckPoint, CheckPointIter, LocalChain},
     tx_graph::{CanonicalTx, TxGraph},
     Append, BlockId, ChainPosition, ConfirmationTime, ConfirmationTimeAnchor, FullTxOut,
@@ -95,11 +95,74 @@ pub struct Wallet<D = ()> {
     secp: SecpCtx,
 }
 
-/// The update to a [`Wallet`] used in [`Wallet::apply_update`]. This is usually returned from blockchain data sources.
-pub type Update = WalletUpdate<KeychainKind, ConfirmationTimeAnchor>;
+/// An update to [`Wallet`].
+///
+/// It updates [`bdk_chain::keychain::KeychainTxOutIndex`], [`bdk_chain::TxGraph`] and [`local_chain::LocalChain`] atomically.
+#[derive(Debug, Clone, Default)]
+pub struct Update {
+    /// Contains the last active derivation indices per keychain (`K`), which is used to update the
+    /// [`KeychainTxOutIndex`].
+    pub last_active_indices: BTreeMap<KeychainKind, u32>,
 
-/// The changeset produced internally by [`Wallet`] when mutated.
-pub type ChangeSet = WalletChangeSet<KeychainKind, ConfirmationTimeAnchor>;
+    /// Update for the wallet's internal [`TxGraph`].
+    pub graph: TxGraph<ConfirmationTimeAnchor>,
+
+    /// Update for the wallet's internal [`LocalChain`].
+    ///
+    /// [`LocalChain`]: local_chain::LocalChain
+    pub chain: Option<local_chain::Update>,
+}
+
+/// The changes made to a wallet by applying an [`Update`].
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, Default)]
+pub struct ChangeSet {
+    /// Changes to the [`LocalChain`].
+    ///
+    /// [`LocalChain`]: local_chain::LocalChain
+    pub chain: local_chain::ChangeSet,
+
+    /// Changes to [`IndexedTxGraph`].
+    ///
+    /// [`IndexedTxGraph`]: bdk_chain::indexed_tx_graph::IndexedTxGraph
+    pub indexed_tx_graph:
+        indexed_tx_graph::ChangeSet<ConfirmationTimeAnchor, keychain::ChangeSet<KeychainKind>>,
+}
+
+impl Append for ChangeSet {
+    fn append(&mut self, other: Self) {
+        Append::append(&mut self.chain, other.chain);
+        Append::append(&mut self.indexed_tx_graph, other.indexed_tx_graph);
+    }
+
+    fn is_empty(&self) -> bool {
+        self.chain.is_empty() && self.indexed_tx_graph.is_empty()
+    }
+}
+
+impl From<local_chain::ChangeSet> for ChangeSet {
+    fn from(chain: local_chain::ChangeSet) -> Self {
+        Self {
+            chain,
+            ..Default::default()
+        }
+    }
+}
+
+impl From<indexed_tx_graph::ChangeSet<ConfirmationTimeAnchor, keychain::ChangeSet<KeychainKind>>>
+    for ChangeSet
+{
+    fn from(
+        indexed_tx_graph: indexed_tx_graph::ChangeSet<
+            ConfirmationTimeAnchor,
+            keychain::ChangeSet<KeychainKind>,
+        >,
+    ) -> Self {
+        Self {
+            indexed_tx_graph,
+            ..Default::default()
+        }
+    }
+}
 
 /// The address index selection strategy to use to derived an address from the wallet's external
 /// descriptor. See [`Wallet::get_address`]. If you're unsure which one to use use `WalletIndex::New`.
@@ -1857,7 +1920,11 @@ impl<D> Wallet<D> {
     where
         D: PersistBackend<ChangeSet>,
     {
-        let mut changeset = ChangeSet::from(self.chain.apply_update(update.chain)?);
+        let mut changeset = match update.chain {
+            Some(chain_update) => ChangeSet::from(self.chain.apply_update(chain_update)?),
+            None => ChangeSet::default(),
+        };
+
         let (_, index_changeset) = self
             .indexed_graph
             .index

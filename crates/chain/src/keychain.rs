@@ -10,9 +10,7 @@
 //!
 //! [`SpkTxOutIndex`]: crate::SpkTxOutIndex
 
-use crate::{
-    collections::BTreeMap, indexed_tx_graph, local_chain, tx_graph::TxGraph, Anchor, Append,
-};
+use crate::{collections::BTreeMap, Append};
 
 #[cfg(feature = "miniscript")]
 mod txout_index;
@@ -79,98 +77,6 @@ impl<K> Default for ChangeSet<K> {
 impl<K> AsRef<BTreeMap<K, u32>> for ChangeSet<K> {
     fn as_ref(&self) -> &BTreeMap<K, u32> {
         &self.0
-    }
-}
-
-/// A structure to update [`KeychainTxOutIndex`], [`TxGraph`] and [`LocalChain`] atomically.
-///
-/// [`LocalChain`]: local_chain::LocalChain
-#[derive(Debug, Clone)]
-pub struct WalletUpdate<K, A> {
-    /// Contains the last active derivation indices per keychain (`K`), which is used to update the
-    /// [`KeychainTxOutIndex`].
-    pub last_active_indices: BTreeMap<K, u32>,
-
-    /// Update for the [`TxGraph`].
-    pub graph: TxGraph<A>,
-
-    /// Update for the [`LocalChain`].
-    ///
-    /// [`LocalChain`]: local_chain::LocalChain
-    pub chain: local_chain::Update,
-}
-
-impl<K, A> WalletUpdate<K, A> {
-    /// Construct a [`WalletUpdate`] with a given [`local_chain::Update`].
-    pub fn new(chain_update: local_chain::Update) -> Self {
-        Self {
-            last_active_indices: BTreeMap::new(),
-            graph: TxGraph::default(),
-            chain: chain_update,
-        }
-    }
-}
-
-/// A structure that records the corresponding changes as result of applying an [`WalletUpdate`].
-#[derive(Debug, Clone, PartialEq)]
-#[cfg_attr(
-    feature = "serde",
-    derive(serde::Deserialize, serde::Serialize),
-    serde(
-        crate = "serde_crate",
-        bound(
-            deserialize = "K: Ord + serde::Deserialize<'de>, A: Ord + serde::Deserialize<'de>",
-            serialize = "K: Ord + serde::Serialize, A: Ord + serde::Serialize",
-        )
-    )
-)]
-pub struct WalletChangeSet<K, A> {
-    /// Changes to the [`LocalChain`].
-    ///
-    /// [`LocalChain`]: local_chain::LocalChain
-    pub chain: local_chain::ChangeSet,
-
-    /// ChangeSet to [`IndexedTxGraph`].
-    ///
-    /// [`IndexedTxGraph`]: crate::indexed_tx_graph::IndexedTxGraph
-    pub indexed_tx_graph: indexed_tx_graph::ChangeSet<A, ChangeSet<K>>,
-}
-
-impl<K, A> Default for WalletChangeSet<K, A> {
-    fn default() -> Self {
-        Self {
-            chain: Default::default(),
-            indexed_tx_graph: Default::default(),
-        }
-    }
-}
-
-impl<K: Ord, A: Anchor> Append for WalletChangeSet<K, A> {
-    fn append(&mut self, other: Self) {
-        Append::append(&mut self.chain, other.chain);
-        Append::append(&mut self.indexed_tx_graph, other.indexed_tx_graph);
-    }
-
-    fn is_empty(&self) -> bool {
-        self.chain.is_empty() && self.indexed_tx_graph.is_empty()
-    }
-}
-
-impl<K, A> From<local_chain::ChangeSet> for WalletChangeSet<K, A> {
-    fn from(chain: local_chain::ChangeSet) -> Self {
-        Self {
-            chain,
-            ..Default::default()
-        }
-    }
-}
-
-impl<K, A> From<indexed_tx_graph::ChangeSet<A, ChangeSet<K>>> for WalletChangeSet<K, A> {
-    fn from(indexed_tx_graph: indexed_tx_graph::ChangeSet<A, ChangeSet<K>>) -> Self {
-        Self {
-            indexed_tx_graph,
-            ..Default::default()
-        }
     }
 }
 
