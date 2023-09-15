@@ -61,11 +61,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         graph: update_graph,
         ..Default::default()
     })?;
-    let missing_heights = wallet
-        .staged()
-        .indexed_tx_graph
-        .graph
-        .missing_heights_from(wallet.local_chain());
+    let missing_heights = wallet.missing_heights().iter().copied();
     let chain_update = client.update_local_chain(prev_tip, missing_heights).await?;
     wallet.apply_update(chain_update.into())?;
     wallet.commit()?;

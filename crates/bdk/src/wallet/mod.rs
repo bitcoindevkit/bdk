@@ -19,6 +19,7 @@ use alloc::{
     sync::Arc,
     vec::Vec,
 };
+use bdk_chain::collections::BTreeSet;
 pub use bdk_chain::keychain::Balance;
 use bdk_chain::{
     indexed_tx_graph,
@@ -91,9 +92,21 @@ pub struct Wallet<D = ()> {
     chain: LocalChain,
     indexed_graph: IndexedTxGraph<ConfirmationTimeAnchor, KeychainTxOutIndex<KeychainKind>>,
     persist: Persist<D, ChangeSet>,
+    missing_heights: MissingBlockHeights,
     network: Network,
     secp: SecpCtx,
 }
+
+/// Heights of blocks that ae missing from the wallet's [`LocalChain`].
+///
+/// Some chain sources may fetch transactions that are [`Anchor`]ed to block heights that do not
+/// exist in our [`LocalChain`]. A second call is needed to fetch those missing [`BlockId`]
+/// checkpoints.
+///
+/// Refer to [`Wallet::missing_heights`] for more.
+///
+/// [`Anchor`]: bdk_chain::Anchor
+pub type MissingBlockHeights = BTreeSet<u32>;
 
 /// An update to [`Wallet`].
 ///
@@ -356,6 +369,12 @@ impl<D> Wallet<D> {
 
         let changeset = db.load_from_persistence().map_err(NewError::Persist)?;
         chain.apply_changeset(&changeset.chain);
+
+        let missing_heights = changeset
+            .indexed_tx_graph
+            .graph
+            .missing_heights_from(&chain)
+            .collect();
         indexed_graph.apply_changeset(changeset.indexed_tx_graph);
 
         let persist = Persist::new(db);
@@ -367,6 +386,7 @@ impl<D> Wallet<D> {
             chain,
             indexed_graph,
             persist,
+            missing_heights,
             secp,
         })
     }
@@ -1965,24 +1985,36 @@ impl<D> Wallet<D> {
     where
         D: PersistBackend<ChangeSet>,
     {
-        let mut changeset = match update.chain {
-            Some(chain_update) => ChangeSet::from(self.chain.apply_update(chain_update)?),
-            None => ChangeSet::default(),
-        };
+        let mut changeset = ChangeSet::default();
+
+        if let Some(chain_update) = update.chain {
+            let chain_changeset = self.chain.apply_update(chain_update)?;
+            for height in chain_changeset.keys() {
+                self.missing_heights.remove(height);
+            }
+            changeset.append(ChangeSet::from(chain_changeset));
+        }
 
         let (_, index_changeset) = self
             .indexed_graph
             .index
             .reveal_to_target_multi(&update.last_active_indices);
-        changeset.append(ChangeSet::from(indexed_tx_graph::ChangeSet::from(
-            index_changeset,
-        )));
-        changeset.append(ChangeSet::from(
-            self.indexed_graph.apply_update(update.graph),
-        ));
+        changeset.append(ChangeSet::from(index_changeset));
+
+        let graph_changeset = self.indexed_graph.apply_update(update.graph);
+        self.missing_heights
+            .extend(graph_changeset.graph.missing_heights_from(&self.chain));
+        changeset.append(ChangeSet::from(graph_changeset));
 
         self.persist.stage(changeset);
         Ok(())
+    }
+
+    /// Data that is still missing after we call [`Wallet::apply_update`].
+    ///
+    /// Some chain sources requires multiple rounds of I/O.
+    pub fn missing_heights(&self) -> &MissingBlockHeights {
+        &self.missing_heights
     }
 
     /// Commits all currently [`staged`] changed to the persistence backend returning and error when
