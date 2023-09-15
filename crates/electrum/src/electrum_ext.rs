@@ -142,11 +142,8 @@ pub trait ElectrumExt {
     /// The scan for each keychain stops after a gap of `stop_gap` script pubkeys with no associated
     /// transactions. `batch_size` specifies the max number of script pubkeys to request for in a
     /// single batch request.
-<<<<<<< HEAD
-=======
     /// ##### NOTE: Scanning with keychain is very inefficient and should be used only when restoring
     /// from seed words.
->>>>>>> 5a57229 (BREAKING CHANGE: In `electrum` crate rename the `ElectrumExt` trait method `scan` to `scan_with_keychain`)
     fn scan_with_keychain<K: Ord + Clone>(
         &self,
         prev_tip: Option<CheckPoint>,
@@ -171,7 +168,6 @@ pub trait ElectrumExt {
             .enumerate()
             .map(|(i, spk)| (i as u32, spk));
 
-<<<<<<< HEAD
         let (electrum_update, _) =
             self.scan_with_keychain(prev_tip, [((), spk_iter)].into(), usize::MAX, batch_size)?;
 
@@ -180,13 +176,6 @@ pub trait ElectrumExt {
 }
 
 impl ElectrumExt for Client {
-=======
-        self.scan_with_keychain(prev_tip, [((), spk_iter)].into(), usize::MAX, batch_size)
-    }
-}
-
-impl ElectrumExt<ConfirmationHeightAnchor> for Client {
->>>>>>> 5a57229 (BREAKING CHANGE: In `electrum` crate rename the `ElectrumExt` trait method `scan` to `scan_with_keychain`)
     fn scan_with_keychain<K: Ord + Clone>(
         &self,
         prev_tip: Option<CheckPoint>,

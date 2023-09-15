@@ -245,7 +245,7 @@ fn main() -> anyhow::Result<()> {
             drop((graph, chain));
 
             let electrum_update = client
-                .scan_without_keychain(tip, spks, txids, outpoints, scan_options.batch_size)
+                .sync(tip, spks, txids, outpoints, scan_options.batch_size)
                 .context("scanning the blockchain")?;
             (electrum_update, BTreeMap::new())
         }
