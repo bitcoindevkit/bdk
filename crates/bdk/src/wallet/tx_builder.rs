@@ -181,6 +181,13 @@ impl<'a, D, Cs: Clone, Ctx> Clone for TxBuilder<'a, D, Cs, Ctx> {
 // methods supported by both contexts, for any CoinSelectionAlgorithm
 impl<'a, D, Cs: CoinSelectionAlgorithm, Ctx: TxBuilderContext> TxBuilder<'a, D, Cs, Ctx> {
     /// Set a custom fee rate
+    /// The fee_rate method sets the mining fee paid by the transaction as a rate on its size.
+    /// This means that the total fee paid is equal to this rate * size of the transaction in virtual Bytes (vB) or Weigth Unit (wu).
+    /// This rate is internally expressed in satoshis-per-virtual-bytes (sats/vB) using FeeRate::from_sat_per_vb, but can also be set by:
+    /// * sats/kvB (1000 sats/kvB == 1 sats/vB) using FeeRate::from_sat_per_kvb
+    /// * btc/kvB (0.00001000 btc/kvB == 1 sats/vB) using FeeRate::from_btc_per_kvb
+    /// * sats/kwu (250 sats/kwu == 1 sats/vB) using FeeRate::from_sat_per_kwu
+    /// Default is 1 sat/vB (see min_relay_fee)
     pub fn fee_rate(&mut self, fee_rate: FeeRate) -> &mut Self {
         self.params.fee_policy = Some(FeePolicy::FeeRate(fee_rate));
         self
@@ -189,7 +196,8 @@ impl<'a, D, Cs: CoinSelectionAlgorithm, Ctx: TxBuilderContext> TxBuilder<'a, D, 
     /// Set an absolute fee
     /// The fee_absolute method refers to the absolute transaction fee in satoshis (sats).
     /// If anyone sets both the fee_absolute method and the fee_rate method,
-    /// the fee_absolute value will take precedence over the fee_rate.
+    /// the FeePolicy enum will be set by whichever method was called last,
+    /// as the FeeRate and FeeAmount are mutually exclusive.
     pub fn fee_absolute(&mut self, fee_amount: u64) -> &mut Self {
         self.params.fee_policy = Some(FeePolicy::FeeAmount(fee_amount));
         self
