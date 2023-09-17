@@ -48,6 +48,15 @@ hesitate to split it into multiple small, focused PRs.
 
 The Minimal Supported Rust Version is **1.57.0** (enforced by our CI).
 
+To facilitate communication with other contributors, the project is making use
+of GitHub's "assignee" field. First check that no one is assigned and then
+comment suggesting that you're working on it. If someone is already assigned,
+don't hesitate to ask if the assigned party or previous commenter are still
+working on it if it has been awhile.
+
+Commit policy
+-------------
+
 Commits should be signed with GPG using a key with a valid email address.
 Commits should cover both the issue fixed and the solution's rationale.
 These [guidelines](https://chris.beams.io/posts/git-commit/) should be kept in mind.
@@ -56,11 +65,22 @@ to make commit histories easier to read by humans and automated tools.
 You can use tools like [`cocogitto`](https://github.com/cocogitto/cocogitto)
 to check if your commit messages follow the convention.
 
-To facilitate communication with other contributors, the project is making use
-of GitHub's "assignee" field. First check that no one is assigned and then
-comment suggesting that you're working on it. If someone is already assigned,
-don't hesitate to ask if the assigned party or previous commenter are still
-working on it if it has been awhile.
+[Git Hooks](https://git-scm.com/book/en/v2/Customizing-Git-Git-Hooks) can be used
+to automate some of the above checks.
+There are hooks provided in the `ci/git-hooks` directory that can be installed:
+
+```bash
+cp ci/git-hooks/signed-commits.sh .git/hooks/pre-push
+cp ci/git-hooks/conventional-commits.sh .git/hooks/commit-msg
+```
+
+`signed-commits.sh` hook (a `pre-push` hook)
+will not allow the user to push to remote if the last commit is not signed.
+This is a good sanity test,
+if the last commit is signed then there is a high chance
+of any other previous are also signed.
+`conventional-commits.sh` hook (a `commit-msg` hook) will not allow the user to commit
+if the commit message does not satisfy the Conventional Commits template.
 
 Deprecation policy
 ------------------
