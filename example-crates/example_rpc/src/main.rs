@@ -14,7 +14,7 @@ use bdk_bitcoind_rpc::{
 };
 use bdk_chain::{
     bitcoin::{address, hashes::Hash, Address, BlockHash, Transaction},
-    indexed_tx_graph::{self, TxItem},
+    indexed_tx_graph::{self, InsertTxItem},
     keychain,
     local_chain::{self, CheckPoint, LocalChain},
     Append, BlockId, ConfirmationTimeAnchor, IndexedTxGraph,
@@ -218,34 +218,34 @@ fn main() -> anyhow::Result<()> {
                 };
                 let update_tip_height = chain_update.as_ref().map(|u| u.tip.height());
 
-                let tx_graph_update: Vec<TxItem<Option<ConfirmationTimeAnchor>>> = match &emission {
-                    Emission::Mempool(txs) => {
-                        txs.iter().map(|tx| (&tx.tx, None, Some(tx.time))).collect()
-                    }
-                    Emission::Block(b) => {
-                        let anchor = ConfirmationTimeAnchor {
-                            anchor_block: BlockId {
-                                height: b.height,
-                                hash: b.block.block_hash(),
-                            },
-                            confirmation_height: b.height,
-                            confirmation_time: b.block.header.time as _,
-                        };
-                        b.block
-                            .txdata
-                            .iter()
-                            .map(move |tx| (tx, Some(anchor), None))
-                            .collect()
-                    }
-                };
+                let tx_graph_update: Vec<InsertTxItem<Option<ConfirmationTimeAnchor>>> =
+                    match &emission {
+                        Emission::Mempool(txs) => {
+                            txs.iter().map(|tx| (&tx.tx, None, Some(tx.time))).collect()
+                        }
+                        Emission::Block(b) => {
+                            let anchor = ConfirmationTimeAnchor {
+                                anchor_block: BlockId {
+                                    height: b.height,
+                                    hash: b.block.block_hash(),
+                                },
+                                confirmation_height: b.height,
+                                confirmation_time: b.block.header.time as _,
+                            };
+                            b.block
+                                .txdata
+                                .iter()
+                                .map(move |tx| (tx, Some(anchor), None))
+                                .collect()
+                        }
+                    };
 
                 let db_changeset = {
                     let mut indexed_changeset = indexed_tx_graph::ChangeSet::default();
                     let mut chain = chain.lock().unwrap();
                     let mut graph = graph.lock().unwrap();
 
-                    indexed_changeset.append(graph.insert_relevant_txs(tx_graph_update));
-
+                    indexed_changeset.append(graph.batch_insert_relevant(tx_graph_update));
                     let chain_changeset = match chain_update {
                         Some(update) => chain.apply_update(update)?,
                         None => local_chain::ChangeSet::default(),

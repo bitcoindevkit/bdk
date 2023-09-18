@@ -1,6 +1,6 @@
 use bitcoin::{hashes::Hash, BlockHash, OutPoint, TxOut, Txid};
 
-use crate::{Anchor, COINBASE_MATURITY};
+use crate::{Anchor, AnchorFromBlockPosition, COINBASE_MATURITY};
 
 /// Represents the observed position of some chain data.
 ///
@@ -109,6 +109,12 @@ impl Anchor for BlockId {
     }
 }
 
+impl AnchorFromBlockPosition for BlockId {
+    fn from_block_position(_block: &bitcoin::Block, block_id: BlockId, _tx_pos: usize) -> Self {
+        block_id
+    }
+}
+
 impl Default for BlockId {
     fn default() -> Self {
         Self {
@@ -168,6 +174,15 @@ impl Anchor for ConfirmationHeightAnchor {
     }
 }
 
+impl AnchorFromBlockPosition for ConfirmationHeightAnchor {
+    fn from_block_position(_block: &bitcoin::Block, block_id: BlockId, _tx_pos: usize) -> Self {
+        Self {
+            anchor_block: block_id,
+            confirmation_height: block_id.height,
+        }
+    }
+}
+
 /// An [`Anchor`] implementation that also records the exact confirmation time and height of the
 /// transaction.
 ///
@@ -196,6 +211,17 @@ impl Anchor for ConfirmationTimeAnchor {
         self.confirmation_height
     }
 }
+
+impl AnchorFromBlockPosition for ConfirmationTimeAnchor {
+    fn from_block_position(block: &bitcoin::Block, block_id: BlockId, _tx_pos: usize) -> Self {
+        Self {
+            anchor_block: block_id,
+            confirmation_height: block_id.height,
+            confirmation_time: block.header.time as _,
+        }
+    }
+}
+
 /// A `TxOut` with as much data as we can retrieve about it
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct FullTxOut<A> {

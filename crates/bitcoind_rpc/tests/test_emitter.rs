@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use bdk_bitcoind_rpc::{EmittedBlock, Emitter, MempoolTx};
 use bdk_chain::{
     bitcoin::{Address, Amount, BlockHash, Txid},
-    indexed_tx_graph::TxItem,
+    indexed_tx_graph::InsertTxItem,
     local_chain::{self, CheckPoint, LocalChain},
     Append, BlockId, IndexedTxGraph, SpkTxOutIndex,
 };
@@ -92,7 +92,7 @@ fn block_to_chain_update(block: &bitcoin::Block, height: u32) -> local_chain::Up
 fn block_to_tx_graph_update(
     block: &bitcoin::Block,
     height: u32,
-) -> impl Iterator<Item = TxItem<'_, Option<BlockId>>> {
+) -> impl Iterator<Item = InsertTxItem<'_, Option<BlockId>>> {
     let anchor = BlockId {
         hash: block.block_hash(),
         height,
@@ -102,7 +102,7 @@ fn block_to_tx_graph_update(
 
 fn mempool_to_tx_graph_update(
     mempool_txs: &[MempoolTx],
-) -> impl Iterator<Item = TxItem<'_, Option<BlockId>>> {
+) -> impl Iterator<Item = InsertTxItem<'_, Option<BlockId>>> {
     mempool_txs
         .iter()
         .map(|mempool_tx| (&mempool_tx.tx, None, Some(mempool_tx.time)))
@@ -257,7 +257,7 @@ fn test_into_tx_graph() -> anyhow::Result<()> {
         };
         let _ = chain.apply_update(block_to_chain_update(&block, height))?;
         let indexed_additions =
-            indexed_tx_graph.insert_relevant_txs(block_to_tx_graph_update(&block, height));
+            indexed_tx_graph.batch_insert_relevant(block_to_tx_graph_update(&block, height));
         assert!(indexed_additions.is_empty());
     }
 
@@ -286,7 +286,7 @@ fn test_into_tx_graph() -> anyhow::Result<()> {
 
         let mempool_txs = emitter.mempool().collect::<Result<Vec<_>, _>>()?;
         let indexed_additions =
-            indexed_tx_graph.insert_relevant_txs(mempool_to_tx_graph_update(&mempool_txs));
+            indexed_tx_graph.batch_insert_relevant(mempool_to_tx_graph_update(&mempool_txs));
         assert_eq!(
             indexed_additions
                 .graph
@@ -319,7 +319,7 @@ fn test_into_tx_graph() -> anyhow::Result<()> {
         let EmittedBlock { block, height } = emitter.next_block()?.expect("must get mined block");
         let _ = chain.apply_update(block_to_chain_update(&block, height))?;
         let indexed_additions =
-            indexed_tx_graph.insert_relevant_txs(block_to_tx_graph_update(&block, height));
+            indexed_tx_graph.batch_insert_relevant(block_to_tx_graph_update(&block, height));
         assert!(indexed_additions.graph.txs.is_empty());
         assert!(indexed_additions.graph.txouts.is_empty());
         assert_eq!(indexed_additions.graph.anchors, exp_anchors);
