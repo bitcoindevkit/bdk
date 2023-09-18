@@ -215,7 +215,7 @@ impl<A: Anchor> FullTxOut<A> {
     /// Whether the `txout` is considered mature.
     ///
     /// Depending on the implementation of [`confirmation_height_upper_bound`] in [`Anchor`], this
-    /// method may return false-negatives. In other words, interpretted confirmation count may be
+    /// method may return false-negatives. In other words, interpreted confirmation count may be
     /// less than the actual value.
     ///
     /// [`confirmation_height_upper_bound`]: Anchor::confirmation_height_upper_bound
@@ -239,10 +239,10 @@ impl<A: Anchor> FullTxOut<A> {
 
     /// Whether the utxo is/was/will be spendable with chain `tip`.
     ///
-    /// This method does not take into account the locktime.
+    /// This method does not take into account the lock time.
     ///
     /// Depending on the implementation of [`confirmation_height_upper_bound`] in [`Anchor`], this
-    /// method may return false-negatives. In other words, interpretted confirmation count may be
+    /// method may return false-negatives. In other words, interpreted confirmation count may be
     /// less than the actual value.
     ///
     /// [`confirmation_height_upper_bound`]: Anchor::confirmation_height_upper_bound

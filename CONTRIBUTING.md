@@ -91,7 +91,7 @@ This is also enforced by the CI.
 Security
 --------
 
-Security is a high priority of BDK; disclosure of security vulnerabilites helps
+Security is a high priority of BDK; disclosure of security vulnerabilities helps
 prevent user loss of funds.
 
 Note that BDK is currently considered "pre-production" during this time, there

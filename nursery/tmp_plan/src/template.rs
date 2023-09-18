@@ -35,7 +35,7 @@ pub struct PlanKey<Ak> {
 impl<Ak> TemplateItem<Ak> {
     pub fn expected_size(&self) -> usize {
         match self {
-            TemplateItem::Sign { .. } => 64, /* size of sig TODO: take into consideration sighash falg */
+            TemplateItem::Sign { .. } => 64, /* size of sig TODO: take into consideration sighash flag */
             TemplateItem::Pk { .. } => 32,
             TemplateItem::One => varint_len(1),
             TemplateItem::Zero => 0, /* zero means an empty witness element */

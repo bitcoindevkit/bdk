@@ -27,19 +27,19 @@ where
         }
     }
 
-    /// Stage a `changeset` to be commited later with [`commit`].
+    /// Stage a `changeset` to be committed later with [`commit`].
     ///
     /// [`commit`]: Self::commit
     pub fn stage(&mut self, changeset: C) {
         self.stage.append(changeset)
     }
 
-    /// Get the changes that have not been commited yet.
+    /// Get the changes that have not been committed yet.
     pub fn staged(&self) -> &C {
         &self.stage
     }
 
-    /// Commit the staged changes to the underlying persistance backend.
+    /// Commit the staged changes to the underlying persistence backend.
     ///
     /// Changes that are committed (if any) are returned.
     ///
