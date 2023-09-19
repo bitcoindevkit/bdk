@@ -1,0 +1,21 @@
+[package]
+name = "bdk_sqlite_store"
+version = "0.2.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/bitcoindevkit/bdk"
+documentation = "https://docs.rs/bdk_file_store"
+description = "A simple append-only SQLite based implementation of Persist for Bitcoin Dev Kit."
+keywords = ["bitcoin", "persist", "persistence", "bdk", "sqlite"]
+authors = ["Bitcoin Dev Kit Developers"]
+readme = "README.md"
+
+[dependencies]
+bdk_chain = { path = "../chain", version = "0.5.0", features = [ "serde", "miniscript" ] }
+rusqlite = { version = "0.27.0", features = ["bundled"]}
+serde = { version = "1", features = ["derive"] }
+log = { version = "0.4", features = [] }
+serde_json = "1.0.107"
+
+[dev-dependencies]
+tempfile = "3"
