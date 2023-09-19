@@ -466,12 +466,13 @@ impl Wallet {
     /// # use bdk_wallet::descriptor::Descriptor;
     /// # use bitcoin::key::Secp256k1;
     /// # use bdk_wallet::KeychainKind;
-    /// # use bdk_file_store::Store;
+    /// # use bdk_sqlite::{Store, rusqlite::Connection};
     /// #
     /// # fn main() -> Result<(), anyhow::Error> {
     /// # let temp_dir = tempfile::tempdir().expect("must create tempdir");
     /// # let file_path = temp_dir.path().join("store.db");
-    /// # let db: Store<bdk_wallet::wallet::ChangeSet> = Store::create_new(&[], &file_path).expect("must create db");
+    /// # let conn = Connection::open(file_path).expect("must open connection");
+    /// # let db = Store::new(conn).expect("must create db");
     /// let secp = Secp256k1::new();
     ///
     /// let (external_descriptor, external_keymap) = Descriptor::parse_descriptor(&secp, "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/84'/1'/0'/0/*)").unwrap();
