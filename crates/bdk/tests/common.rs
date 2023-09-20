@@ -108,6 +108,12 @@ pub fn get_funded_wallet(descriptor: &str) -> (Wallet, bitcoin::Txid) {
     get_funded_wallet_with_change(descriptor, None)
 }
 
+// This PKH can be obtained in testnet by using the 12-word seed
+// abandon x 11 + cactus and getting the first receiving address.
+pub fn get_test_pkh() -> &'static str {
+    "pkh(0275d93539d503d824ad0c69a4c23ae480700489de09378ba32c1776cf86d6bb93)"
+}
+
 pub fn get_test_wpkh() -> &'static str {
     "wpkh(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW)"
 }
