@@ -638,6 +638,19 @@ fn test_create_tx_absolute_high_fee() {
 }
 
 #[test]
+#[should_panic(expected = "InsufficientFunds")]
+fn test_legacy_create_tx_absolute_high_fee() {
+    let (mut wallet, _) = get_funded_wallet(get_test_pkh());
+    let addr = wallet.get_address(New);
+    let mut builder = wallet.build_tx();
+    builder
+        .drain_to(addr.script_pubkey())
+        .drain_wallet()
+        .fee_absolute(60_000);
+    let _ = builder.finish().unwrap();
+}
+
+#[test]
 fn test_create_tx_add_change() {
     use bdk::wallet::tx_builder::TxOrdering;
 
