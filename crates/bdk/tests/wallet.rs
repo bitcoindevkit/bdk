@@ -715,6 +715,17 @@ fn test_create_tx_ordering_respected() {
 }
 
 #[test]
+fn test_legacy_create_tx_default_sighash() {
+    let (mut wallet, _) = get_funded_wallet(get_test_pkh());
+    let addr = wallet.get_address(New);
+    let mut builder = wallet.build_tx();
+    builder.add_recipient(addr.script_pubkey(), 30_000);
+    let psbt = builder.finish().unwrap();
+
+    assert_eq!(psbt.inputs[0].sighash_type, None);
+}
+
+#[test]
 fn test_create_tx_default_sighash() {
     let (mut wallet, _) = get_funded_wallet(get_test_wpkh());
     let addr = wallet.get_address(New);
@@ -723,6 +734,22 @@ fn test_create_tx_default_sighash() {
     let psbt = builder.finish().unwrap();
 
     assert_eq!(psbt.inputs[0].sighash_type, None);
+}
+
+#[test]
+fn test_legacy_create_tx_custom_sighash() {
+    let (mut wallet, _) = get_funded_wallet(get_test_pkh());
+    let addr = wallet.get_address(New);
+    let mut builder = wallet.build_tx();
+    builder
+        .add_recipient(addr.script_pubkey(), 30_000)
+        .sighash(EcdsaSighashType::Single.into());
+    let psbt = builder.finish().unwrap();
+
+    assert_eq!(
+        psbt.inputs[0].sighash_type,
+        Some(EcdsaSighashType::Single.into())
+    );
 }
 
 #[test]
