@@ -557,6 +557,23 @@ fn test_create_tx_custom_fee_rate() {
 }
 
 #[test]
+fn test_legacy_create_tx_absolute_fee() {
+    let (mut wallet, _) = get_funded_wallet(get_test_pkh());
+    let addr = wallet.get_address(New);
+    let mut builder = wallet.build_tx();
+    builder
+        .drain_to(addr.script_pubkey())
+        .drain_wallet()
+        .fee_absolute(100);
+    let psbt = builder.finish().unwrap();
+    let fee = check_fee!(wallet, psbt);
+
+    assert_eq!(fee.unwrap_or(0), 100);
+    assert_eq!(psbt.unsigned_tx.output.len(), 1);
+    assert_eq!(psbt.unsigned_tx.output[0].value, 50_000 - fee.unwrap_or(0));
+}
+
+#[test]
 fn test_create_tx_absolute_fee() {
     let (mut wallet, _) = get_funded_wallet(get_test_wpkh());
     let addr = wallet.get_address(New);
