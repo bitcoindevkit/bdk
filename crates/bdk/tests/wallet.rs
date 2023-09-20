@@ -1197,7 +1197,7 @@ fn test_add_foreign_utxo_where_outpoint_doesnt_match_psbt_input() {
                 satisfaction_weight
             )
             .is_ok(),
-        "shoulld be ok when outpoint does match psbt_input"
+        "should be ok when outpoint does match psbt_input"
     );
 }
 
