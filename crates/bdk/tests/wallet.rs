@@ -139,6 +139,22 @@ fn test_get_funded_wallet_tx_fee_rate() {
     assert_eq!(tx_fee_rate.as_sat_per_vb(), 8.849558);
 }
 
+#[test]
+fn test_legacy_get_funded_wallet_tx_fee_rate() {
+    let (wallet, txid) = get_funded_wallet(get_test_pkh());
+
+    let tx = wallet.get_tx(txid).expect("transaction").tx_node.tx;
+    let tx_fee_rate = wallet.calculate_fee_rate(tx).expect("transaction fee rate");
+
+    // The funded wallet contains a tx with a 76_000 sats input and two outputs, one spending 25_000
+    // to a foreign address and one returning 50_000 back to the wallet as change. The remaining 1000
+    // sats are the transaction fee.
+
+    // tx weight = 464 bytes, as vbytes = (464)/4 = 116
+    // fee rate (sats per vbyte) = fee / vbytes = 1000 / 116 = 8.6206896551724137931 rounded to 8.620689
+    assert_eq!(tx_fee_rate.as_sat_per_vb(), 8.620689);
+}
+
 macro_rules! assert_fee_rate {
     ($psbt:expr, $fees:expr, $fee_rate:expr $( ,@dust_change $( $dust_change:expr )* )* $( ,@add_signature $( $add_signature:expr )* )* ) => ({
         let psbt = $psbt.clone();
