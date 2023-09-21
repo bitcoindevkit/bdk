@@ -62,6 +62,8 @@ Commits should cover both the issue fixed and the solution's rationale.
 These [guidelines](https://chris.beams.io/posts/git-commit/) should be kept in mind.
 Commit messages should follow the ["Conventional Commits 1.0.0"](https://www.conventionalcommits.org/en/v1.0.0/)
 to make commit histories easier to read by humans and automated tools.
+Commits starting with `Merge ...` which GitHub automatically generates
+are exempt from this rule.
 You can use tools like [`cocogitto`](https://github.com/cocogitto/cocogitto)
 to check if your commit messages follow the convention.
 
