@@ -645,7 +645,7 @@ impl<A: Anchor> TxGraph<A> {
     /// Get the position of the transaction in `chain` with tip `chain_tip`.
     ///
     /// This method is like [`try_get_chain_position`] except it restricts the
-    /// chain to a custom tip. The tip doesn't even need to be in the same chain as the tip.
+    /// chain to a custom tip. The tip doesn't even need to be in the same chain as the current tip.
     /// You can use this to find information about a point in the past or on a fork if your
     /// chain oracle supports that.
     ///
@@ -758,7 +758,7 @@ impl<A: Anchor> TxGraph<A> {
     /// If no in-chain transaction spends `outpoint`, `None` will be returned.
     ///
     /// This method is like [`try_get_chain_spend`] except it restricts the chain to a custom tip.
-    /// The tip doesn't even need to be in the same chain as the tip. You can use this to find information
+    /// The tip doesn't even need to be in the same chain as the current tip. You can use this to find information
     /// about a point in the past or on a fork if your chain oracle supports that.
     ///
     /// # Error
@@ -845,7 +845,7 @@ impl<A: Anchor> TxGraph<A> {
     /// List graph transactions that are in `chain` with `chain_tip`.
     ///
     /// This method is like `try_list_chain_txs` except it restricts the chain to a custom tip.
-    /// The tip doesn't even need to be in the same chain as the tip. You can use this to find information
+    /// The tip doesn't even need to be in the same chain as the current tip. You can use this to find information
     /// about a point in the past or on a fork if your chain oracle supports that.
     ///
     /// Each transaction is represented as a [`CanonicalTx`] that contains where the transaction is
@@ -932,7 +932,7 @@ impl<A: Anchor> TxGraph<A> {
     /// `chain_tip`.
     ///
     /// This method is like [`try_filter_chain_txouts`] except it restricts the chain to a custom tip.
-    /// The tip doesn't even need to be in the same chain as the tip. You can use this to find information
+    /// The tip doesn't even need to be in the same chain as the current tip. You can use this to find information
     /// about a point in the past or on a fork if your chain oracle supports that.
     ///
     /// `outpoints` is a list of outpoints we are interested in, coupled with an outpoint identifier
@@ -1059,7 +1059,7 @@ impl<A: Anchor> TxGraph<A> {
     /// `chain` with `chain_tip`.
     ///
     /// This method is like [`try_filter_chain_unspents`] except it restricts the chain to a custom tip.
-    /// The tip doesn't even need to be in the same chain as the tip. You can use this to find information
+    /// The tip doesn't even need to be in the same chain as the current tip. You can use this to find information
     /// about a point in the past or on a fork if your chain oracle supports that.
     ///
     /// `outpoints` is a list of outpoints we are interested in, coupled with an outpoint identifier
@@ -1157,7 +1157,7 @@ impl<A: Anchor> TxGraph<A> {
     /// Get the total balance of `outpoints` that are in `chain` of `chain_tip`.
     ///
     /// This method is like [`try_balance`] except it restricts the chain to a custom tip.
-    /// The tip doesn't even need to be in the same chain as the tip. You can use this to find information
+    /// The tip doesn't even need to be in the same chain as the current tip. You can use this to find information
     /// about a point in the past or on a fork if your chain oracle supports that.
     ///
     /// The output of `trust_predicate` should return `true` for scripts that we trust.
