@@ -39,6 +39,7 @@ jobs:
           cargo update -p reqwest --precise "0.11.18"
           cargo update -p h2 --precise "0.3.20"
           cargo update -p rustls-webpki --precise "0.100.1"
+          cargo update -p tokio-util --precise "0.7.8"
       - name: Build
         run: cargo build ${{ matrix.features }}
       - name: Test

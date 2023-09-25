@@ -83,6 +83,8 @@ cargo update -p reqwest --precise "0.11.18"
 cargo update -p h2 --precise "0.3.20"
 # rustls-webpki has MSRV 1.60.0+
 cargo update -p rustls-webpki --precise "0.100.1"
+# tokio-util 0.7.9 does not build with our MSRV
+cargo update -p tokio-util --precise "0.7.8"
 ```
 
 ## License
