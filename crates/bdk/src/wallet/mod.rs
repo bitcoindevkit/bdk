@@ -219,10 +219,17 @@ impl Wallet {
         change_descriptor: Option<E>,
         network: Network,
     ) -> Result<Self, crate::descriptor::DescriptorError> {
-        Self::new(descriptor, change_descriptor, (), network).map_err(|e| match e {
-            NewError::Descriptor(e) => e,
-            NewError::Persist(_) => unreachable!("no persistence so it can't fail"),
-        })
+        // create infallible no-op persist
+        let persist = Persist::new(());
+
+        // initialize empty wallet
+        let wallet =
+            Self::init(descriptor, change_descriptor, network, persist).map_err(|e| match e {
+                NewError::Descriptor(e) => e,
+                NewError::Persist(_) => unreachable!("no persistence so it can't fail"),
+            })?;
+
+        Ok(wallet)
     }
 }
 
@@ -277,8 +284,37 @@ impl<D> Wallet<D> {
     where
         D: PersistBackend<ChangeSet>,
     {
+        // load current changeset from db
+        let changeset = db.load_from_persistence().map_err(NewError::Persist)?;
+
+        // create persist
+        let persist = Persist::new(db);
+
+        // initialize empty wallet
+        let mut wallet = Self::init(descriptor, change_descriptor, network, persist)?;
+
+        // apply loaded changeset to wallet
+        wallet.chain.apply_changeset(&changeset.chain);
+        wallet
+            .indexed_graph
+            .apply_changeset(changeset.indexed_tx_graph);
+
+        Ok(wallet)
+    }
+
+    /// Initialize an empty wallet from a `descriptor` (and an optional `change_descriptor`) and
+    /// a [`Persist`].
+    pub fn init<E: IntoWalletDescriptor>(
+        descriptor: E,
+        change_descriptor: Option<E>,
+        network: Network,
+        persist: Persist<D, ChangeSet>,
+    ) -> Result<Self, NewError<D::LoadError>>
+    where
+        D: PersistBackend<ChangeSet>,
+    {
         let secp = Secp256k1::new();
-        let mut chain = LocalChain::default();
+        let chain = LocalChain::default();
         let mut indexed_graph =
             IndexedTxGraph::<ConfirmationTimeAnchor, KeychainTxOutIndex<KeychainKind>>::default();
 
@@ -308,12 +344,6 @@ impl<D> Wallet<D> {
             }
             None => Arc::new(SignersContainer::new()),
         };
-
-        let changeset = db.load_from_persistence().map_err(NewError::Persist)?;
-        chain.apply_changeset(&changeset.chain);
-        indexed_graph.apply_changeset(changeset.indexed_tx_graph);
-
-        let persist = Persist::new(db);
 
         Ok(Wallet {
             signers,
