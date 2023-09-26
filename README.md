@@ -75,6 +75,8 @@ cargo update -p rustls:0.21.7 --precise "0.21.1"
 cargo update -p rustls:0.20.9 --precise "0.20.8"
 # tokio 1.30 has MSRV 1.63.0+
 cargo update -p tokio:1.32.0 --precise "1.29.1"
+# tokio-util 0.7.9 doesn't build with MSRV 1.57.0
+cargo update -p tokio-util --precise "0.7.8"
 # flate2 1.0.27 has MSRV 1.63.0+
 cargo update -p flate2:1.0.27 --precise "1.0.26"
 # reqwest 0.11.19 has MSRV 1.63.0+
@@ -84,7 +86,7 @@ cargo update -p h2 --precise "0.3.20"
 # rustls-webpki 0.100.2 has MSRV 1.60.0+
 cargo update -p rustls-webpki:0.100.3 --precise "0.100.1"
 # rustls-webpki 0.101.2 has MSRV 1.60.0+
-cargo update -p rustls-webpki:0.101.5 --precise "0.101.1"
+cargo update -p rustls-webpki:0.101.6 --precise "0.101.1"
 # zip 0.6.3 has MSRV 1.59.0+
 cargo update -p zip:0.6.6 --precise "0.6.2"
 ```
