@@ -284,7 +284,7 @@ fn test_into_tx_graph() -> anyhow::Result<()> {
         // next block should be `None`
         assert!(emitter.next_block()?.is_none());
 
-        let mempool_txs = emitter.mempool().collect::<Result<Vec<_>, _>>()?;
+        let mempool_txs = emitter.mempool()?;
         let indexed_additions =
             indexed_tx_graph.batch_insert_relevant(mempool_to_tx_graph_update(&mempool_txs));
         assert_eq!(

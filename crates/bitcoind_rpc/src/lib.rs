@@ -73,7 +73,13 @@ pub struct Emitter<'c, C> {
     start_height: u32,
 
     emitted: BTreeMap<u32, BlockHash>,
-    last: Option<bitcoincore_rpc_json::GetBlockResult>,
+    last_block: Option<bitcoincore_rpc_json::GetBlockResult>,
+    /// Records the latest first-seen epoch of emitted mempool transactions.
+    ///
+    /// This allows us to avoid re-emitting some mempool transactions. Mempool transactions need to
+    /// be re-emitted if the latest block that may contain the transaction's ancestors have not yet
+    /// been emitted.
+    last_mempool_time: usize,
 }
 
 impl<'c, C: bitcoincore_rpc::RpcApi> Emitter<'c, C> {
@@ -85,25 +91,56 @@ impl<'c, C: bitcoincore_rpc::RpcApi> Emitter<'c, C> {
             client,
             start_height,
             emitted: BTreeMap::new(),
-            last: None,
+            last_block: None,
+            last_mempool_time: 0,
         }
     }
 
-    /// Emit all mempool transactions.
-    pub fn mempool(&self) -> impl Iterator<Item = Result<MempoolTx, bitcoincore_rpc::Error>> + '_ {
-        let res = self.client.get_raw_mempool();
+    /// Emit mempool transactions.
+    ///
+    /// This avoids re-emitting transactions (where viable). We can do this if all blocks
+    /// containing ancestor transactions are already emitted.
+    pub fn mempool(&mut self) -> Result<Vec<MempoolTx>, bitcoincore_rpc::Error> {
+        let client = self.client;
+        let prev_block_height = self.last_block.as_ref().map_or(0, |r| r.height);
+        let prev_mempool_time = self.last_mempool_time;
+        let mut latest_time = self.last_mempool_time;
 
-        let tx_iter = res.as_ref().unwrap_or(&Vec::new()).clone().into_iter().map(
-            |txid| -> Result<MempoolTx, bitcoincore_rpc::Error> {
-                let tx = self.client.get_raw_transaction(&txid, None)?;
-                let time = self.client.get_mempool_entry(&txid)?.time;
-                Ok(MempoolTx { tx, time })
-            },
-        );
-        // iterator will be non-empty if get_raw_mempool returned an error
-        let err_iter = res.err().into_iter().map(Err);
+        let txs_to_emit = client
+            .get_raw_mempool_verbose()?
+            .into_iter()
+            .filter_map(
+                move |(txid, tx_entry)| -> Option<Result<_, bitcoincore_rpc::Error>> {
+                    let tx_time = tx_entry.time as usize;
+                    if tx_time > latest_time {
+                        latest_time = tx_time;
+                    }
 
-        err_iter.chain(tx_iter)
+                    // Avoid emitting transactions that are already emitted if we can guarantee
+                    // blocks containing ancestors are already emitted. We only check block height
+                    // because in case of reorg, we reset `self.last_mempool_time` to force
+                    // emitting all mempool txs.
+                    let is_emitted = tx_time < prev_mempool_time;
+                    let is_within_known_tip = tx_entry.height as usize <= prev_block_height;
+                    if is_emitted && is_within_known_tip {
+                        return None;
+                    }
+
+                    let tx = match client.get_raw_transaction(&txid, None) {
+                        Ok(tx) => tx,
+                        Err(err) => return Some(Err(err)),
+                    };
+
+                    Some(Ok(MempoolTx {
+                        tx,
+                        time: tx_time as u64,
+                    }))
+                },
+            )
+            .collect::<Result<Vec<_>, _>>()?;
+
+        self.last_mempool_time = latest_time;
+        Ok(txs_to_emit)
     }
 
     /// Emit the next block header (if any).
@@ -179,12 +216,7 @@ impl<'c, C: bitcoincore_rpc::RpcApi, B> Iter<'c, C, B> {
         match f(&mut self.emitter) {
             Ok(None) => {
                 self.last_emission_was_mempool = true;
-                Some(
-                    self.emitter
-                        .mempool()
-                        .collect::<Result<Vec<_>, _>>()
-                        .map(Emission::<B>::Mempool),
-                )
+                Some(self.emitter.mempool().map(Emission::<B>::Mempool))
             }
             Ok(Some(b)) => Some(Ok(Emission::Block(b))),
             Err(err) => Some(Err(err)),
@@ -211,6 +243,7 @@ impl<'c, C: bitcoincore_rpc::RpcApi> Iterator for Iter<'c, C, EmittedHeader> {
 enum PollResponse {
     Block(bitcoincore_rpc_json::GetBlockResult),
     NoMoreBlocks,
+    /// Fetched block is not in the best chain.
     BlockNotInBestChain,
     AgreementFound(bitcoincore_rpc_json::GetBlockResult),
     AgreementPointNotFound,
@@ -222,7 +255,7 @@ where
 {
     let client = emitter.client;
 
-    if let Some(last_res) = &emitter.last {
+    if let Some(last_res) = &emitter.last_block {
         assert!(!emitter.emitted.is_empty());
 
         let next_hash = match last_res.nextblockhash {
@@ -275,25 +308,29 @@ where
                 let height = res.height as u32;
                 let item = get_item(&res.hash)?;
                 assert_eq!(emitter.emitted.insert(height, res.hash), None);
-                emitter.last = Some(res);
+                emitter.last_block = Some(res);
                 return Ok(Some((height, item)));
             }
             PollResponse::NoMoreBlocks => {
-                emitter.last = None;
+                emitter.last_block = None;
                 return Ok(None);
             }
             PollResponse::BlockNotInBestChain => {
-                emitter.last = None;
+                emitter.last_block = None;
+                // we want to re-emit all mempool txs on reorg
+                emitter.last_mempool_time = 0;
                 continue;
             }
             PollResponse::AgreementFound(res) => {
                 emitter.emitted.split_off(&(res.height as u32 + 1));
-                emitter.last = Some(res);
+                emitter.last_block = Some(res);
                 continue;
             }
             PollResponse::AgreementPointNotFound => {
                 emitter.emitted.clear();
-                emitter.last = None;
+                emitter.last_block = None;
+                // we want to re-emit all mempool txs on reorg
+                emitter.last_mempool_time = 0;
                 continue;
             }
         }
