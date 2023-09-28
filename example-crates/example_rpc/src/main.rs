@@ -2,7 +2,6 @@ use std::{
     path::PathBuf,
     sync::{
         atomic::{AtomicBool, Ordering},
-        mpsc::sync_channel,
         Arc, Mutex,
     },
     time::{Duration, Instant, SystemTime},
@@ -10,19 +9,13 @@ use std::{
 
 use bdk_bitcoind_rpc::{
     bitcoincore_rpc::{Auth, Client, RpcApi},
-    Emission, EmittedBlock, Emitter,
+    Emitter,
 };
 use bdk_chain::{
     bitcoin::{hashes::Hash, BlockHash},
-    indexed_tx_graph::{self, InsertTxItem},
-    // bitcoin::{hashes::Hash, BlockHash},
-    // indexed_tx_graph::{self, TxItem},
-    keychain,
+    indexed_tx_graph, keychain,
     local_chain::{self, CheckPoint, LocalChain},
-    Append,
-    BlockId,
-    ConfirmationTimeAnchor,
-    IndexedTxGraph,
+    BlockId, ConfirmationTimeAnchor, IndexedTxGraph,
 };
 use example_cli::{
     anyhow,
@@ -32,8 +25,12 @@ use example_cli::{
 
 const DB_MAGIC: &[u8] = b"bdk_example_rpc";
 const DB_PATH: &str = ".bdk_example_rpc.db";
-const CHANNEL_BOUND: usize = 10;
-const LIVE_POLL_DUR_SECS: Duration = Duration::from_secs(15);
+// const CHANNEL_BOUND: usize = 10;
+// const LIVE_POLL_DUR_SECS: Duration = Duration::from_secs(15);
+
+/// The block depth which we assume no reorgs can happen at.
+const ASSUME_FINAL_DEPTH: u32 = 6;
+const DB_COMMIT_DELAY_SEC: u64 = 30;
 
 type ChangeSet = (
     local_chain::ChangeSet,
@@ -94,16 +91,13 @@ enum RpcCommands {
         /// The unused-scripts lookahead will be kept at this size
         #[clap(long, default_value = "10")]
         lookahead: u32,
-        /// Whether to be live!
-        #[clap(long, default_value = "false")]
-        live: bool,
         #[clap(flatten)]
         rpc_args: RpcArgs,
     },
 }
 
 fn main() -> anyhow::Result<()> {
-    let sigterm_flag = start_ctrlc_handler();
+    // let sigterm_flag = start_ctrlc_handler();
 
     let (args, keymap, index, db, init_changeset) =
         example_cli::init::<RpcCommands, RpcArgs, ChangeSet>(DB_MAGIC, DB_PATH)?;
@@ -141,153 +135,70 @@ fn main() -> anyhow::Result<()> {
         RpcCommands::Sync {
             fallback_height,
             lookahead,
-            live,
             rpc_args,
         } => {
-            graph.lock().unwrap().index.set_lookahead_for_all(lookahead);
+            let mut chain = chain.lock().unwrap();
+            let mut graph = graph.lock().unwrap();
+            let mut db = db.lock().unwrap();
 
-            let (chan, recv) = sync_channel::<(Emission<EmittedBlock>, u32)>(CHANNEL_BOUND);
-            let prev_cp = chain.lock().unwrap().tip();
-            let start_height = prev_cp
-                .as_ref()
-                .map_or(fallback_height, |cp| cp.height().saturating_sub(10));
+            graph.index.set_lookahead_for_all(lookahead);
 
-            let join_handle = std::thread::spawn(move || -> anyhow::Result<()> {
-                let mut tip_height = Option::<u32>::None;
-                let rpc_client = rpc_args.new_client()?;
-
-                let mut emissions =
-                    Emitter::new(&rpc_client, start_height).into_iterator::<EmittedBlock>();
-                loop {
-                    for r in &mut emissions {
-                        // return if sigterm is detected
-                        if sigterm_flag.load(Ordering::Acquire) {
-                            return Ok(());
-                        }
-
-                        let emission = r?;
-                        let is_mempool = emission.is_mempool();
-
-                        if tip_height.is_none() || is_mempool {
-                            tip_height = Some(rpc_client.get_block_count()? as u32);
-                        }
-                        chan.send((emission, tip_height.expect("must have tip height")))?;
-                    }
-
-                    // if we are are in "sync-once" mode, we break here
-                    // otherwise, we sleep or wait for sigterm
-                    if !live || await_flag(&sigterm_flag, LIVE_POLL_DUR_SECS) {
-                        return Ok(());
-                    }
-                }
+            // we start at a height lower than last-seen tip in case of reorgs
+            let prev_cp = chain.tip();
+            let start_height = prev_cp.as_ref().map_or(fallback_height, |cp| {
+                cp.height().saturating_sub(ASSUME_FINAL_DEPTH)
             });
 
-            let mut start = Instant::now();
+            let rpc_client = rpc_args.new_client()?;
+            let mut emitter = Emitter::new(&rpc_client, start_height);
 
-            for (emission, tip_height) in recv {
-                let chain_update = match &emission {
-                    Emission::Mempool(_) => None,
-                    Emission::Block(EmittedBlock { block, height }) => {
-                        let this_id = BlockId {
-                            height: *height,
-                            hash: block.block_hash(),
-                        };
-                        let tip = if block.header.prev_blockhash == BlockHash::all_zeros() {
-                            CheckPoint::new(this_id)
-                        } else {
-                            CheckPoint::new(BlockId {
-                                height: height - 1,
-                                hash: block.header.prev_blockhash,
-                            })
-                            .extend(core::iter::once(this_id))
-                            .expect("must construct checkpoint")
-                        };
+            let mut last_db_commit = Instant::now();
 
-                        Some(local_chain::Update {
-                            tip,
-                            introduce_older_blocks: false,
-                        })
-                    }
+            while let Some(block) = emitter.next_block()? {
+                let this_id = BlockId {
+                    height: block.height,
+                    hash: block.block.block_hash(),
                 };
-                let update_tip_height = chain_update.as_ref().map(|u| u.tip.height());
-
-                let tx_graph_update: Vec<InsertTxItem<Option<ConfirmationTimeAnchor>>> =
-                    match &emission {
-                        Emission::Mempool(txs) => {
-                            txs.iter().map(|tx| (&tx.tx, None, Some(tx.time))).collect()
-                        }
-                        Emission::Block(b) => {
-                            let anchor = ConfirmationTimeAnchor {
-                                anchor_block: BlockId {
-                                    height: b.height,
-                                    hash: b.block.block_hash(),
-                                },
-                                confirmation_height: b.height,
-                                confirmation_time: b.block.header.time as _,
-                            };
-                            b.block
-                                .txdata
-                                .iter()
-                                .map(move |tx| (tx, Some(anchor), None))
-                                .collect()
-                        }
-                    };
-
-                let db_changeset = {
-                    let mut indexed_changeset = indexed_tx_graph::ChangeSet::default();
-                    let mut chain = chain.lock().unwrap();
-                    let mut graph = graph.lock().unwrap();
-
-                    indexed_changeset.append(graph.batch_insert_relevant(tx_graph_update));
-                    let chain_changeset = match chain_update {
-                        Some(update) => chain.apply_update(update)?,
-                        None => local_chain::ChangeSet::default(),
-                    };
-
-                    (chain_changeset, indexed_changeset)
+                let update_cp = if block.block.header.prev_blockhash == BlockHash::all_zeros() {
+                    CheckPoint::new(this_id)
+                } else {
+                    CheckPoint::new(BlockId {
+                        height: block.height - 1,
+                        hash: block.block.header.prev_blockhash,
+                    })
+                    .extend(core::iter::once(this_id))
+                    .expect("must construct checkpoint")
                 };
 
-                let mut db = db.lock().unwrap();
-                db.stage(db_changeset);
+                let chain_changeset = chain.apply_update(local_chain::Update {
+                    tip: update_cp,
+                    introduce_older_blocks: false,
+                })?;
+                let graph_changeset = graph.apply_block(block.block, block.height);
 
-                // print stuff every 3 seconds
-                if start.elapsed() >= Duration::from_secs(3) {
-                    start = Instant::now();
-                    let balance = {
-                        let chain = chain.lock().unwrap();
-                        let graph = graph.lock().unwrap();
-                        graph.graph().balance(
-                            &*chain,
-                            chain.tip().map_or(BlockId::default(), |cp| cp.block_id()),
-                            graph.index.outpoints().iter().cloned(),
-                            |(k, _), _| k == &Keychain::Internal,
-                        )
-                    };
-                    println!(
-                        "* scanned_to: {} / {} tip | total: {} sats",
-                        match update_tip_height {
-                            Some(h) => h.to_string(),
-                            None => "mempool".to_string(),
-                        },
-                        tip_height,
-                        balance.confirmed
-                            + balance.immature
-                            + balance.trusted_pending
-                            + balance.untrusted_pending
-                    );
+                db.stage((chain_changeset, graph_changeset));
+                if last_db_commit.elapsed() >= Duration::from_secs(DB_COMMIT_DELAY_SEC) {
+                    db.commit()?;
+                    last_db_commit = Instant::now();
                 }
             }
 
-            db.lock().unwrap().commit()?;
-            println!("commited to database!");
+            // mempool
+            let mempool_txs = emitter.mempool()?;
+            let graph_changeset = graph.batch_insert_unconfirmed(
+                mempool_txs.iter().map(|m_tx| (&m_tx.tx, Some(m_tx.time))),
+            );
+            db.stage((local_chain::ChangeSet::default(), graph_changeset));
 
-            join_handle
-                .join()
-                .expect("failed to join chain source thread")
+            // commit one last time!
+            db.commit()?;
         }
     }
+
+    Ok(())
 }
 
+#[allow(dead_code)]
 fn start_ctrlc_handler() -> Arc<AtomicBool> {
     let flag = Arc::new(AtomicBool::new(false));
     let cloned_flag = flag.clone();
@@ -297,6 +208,7 @@ fn start_ctrlc_handler() -> Arc<AtomicBool> {
     flag
 }
 
+#[allow(dead_code)]
 fn await_flag(flag: &AtomicBool, duration: Duration) -> bool {
     let start = SystemTime::now();
     loop {

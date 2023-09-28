@@ -10,25 +10,20 @@
 //!
 //! # [`Iter`]
 //!
-//! [`Emitter::into_iterator<B>`] transforms the emitter into an iterator that returns
-//! [`Emission<B>`] items. The `B` generic can either be [`EmittedBlock`] or [`EmittedHeader`] and
-//! determines whether we are iterating blocks or headers.
-//!
-//! The iterator initially returns blocks/headers in increasing height order. After the chain tip is
-//! reached, the next update is the mempool. After the mempool update is released, the first
-//! succeeding call to [`Iterator::next`] will return [`None`]. Subsequent calls will resume
-//! returning [`Some`] once more blocks are found.
+//! [`Emitter::into_iterator<B>`] transforms the emitter into an iterator that either returns
+//! [`EmittedBlock`] or [`EmittedHeader`].
 //!
 //! ```rust,no_run
-//! use bdk_bitcoind_rpc::{Emission, EmittedBlock, Emitter};
+//! use bdk_bitcoind_rpc::{EmittedBlock, Emitter};
 //! # let client: bdk_bitcoind_rpc::bitcoincore_rpc::Client = todo!();
 //!
 //! for r in Emitter::new(&client, 709_632).into_iterator::<EmittedBlock>() {
-//!     let emission = r.expect("todo: handle error");
-//!     match emission {
-//!         Emission::Block(b) => println!("block {}: {}", b.height, b.block.block_hash()),
-//!         Emission::Mempool(m) => println!("mempool: {} txs", m.len()),
-//!     }
+//!     let emitted_block = r.expect("todo: handle error");
+//!     println!(
+//!         "block {}: {}",
+//!         emitted_block.height,
+//!         emitted_block.block.block_hash()
+//!     );
 //! }
 //! ```
 #![warn(missing_docs)]
@@ -72,14 +67,16 @@ pub struct Emitter<'c, C> {
     client: &'c C,
     start_height: u32,
 
-    emitted: BTreeMap<u32, BlockHash>,
+    emitted_blocks: BTreeMap<u32, BlockHash>,
     last_block: Option<bitcoincore_rpc_json::GetBlockResult>,
-    /// Records the latest first-seen epoch of emitted mempool transactions.
-    ///
-    /// This allows us to avoid re-emitting some mempool transactions. Mempool transactions need to
-    /// be re-emitted if the latest block that may contain the transaction's ancestors have not yet
-    /// been emitted.
+
+    /// The latest first-seen epoch of emitted mempool transactions. This is used to determine
+    /// whether a mempool transaction is already emitted.
     last_mempool_time: usize,
+
+    /// The last emitted block during our last mempool emission. This is used to determine whether
+    /// there has been a reorg since our last mempool emission.
+    last_mempool_tip: Option<(u32, BlockHash)>,
 }
 
 impl<'c, C: bitcoincore_rpc::RpcApi> Emitter<'c, C> {
@@ -90,9 +87,10 @@ impl<'c, C: bitcoincore_rpc::RpcApi> Emitter<'c, C> {
         Self {
             client,
             start_height,
-            emitted: BTreeMap::new(),
+            emitted_blocks: BTreeMap::new(),
             last_block: None,
             last_mempool_time: 0,
+            last_mempool_tip: None,
         }
     }
 
@@ -102,27 +100,35 @@ impl<'c, C: bitcoincore_rpc::RpcApi> Emitter<'c, C> {
     /// containing ancestor transactions are already emitted.
     pub fn mempool(&mut self) -> Result<Vec<MempoolTx>, bitcoincore_rpc::Error> {
         let client = self.client;
-        let prev_block_height = self.last_block.as_ref().map_or(0, |r| r.height);
+
+        let prev_mempool_tip = match self.last_mempool_tip {
+            // use 'avoid-re-emission' logic if there is no reorg
+            Some((height, hash)) if self.emitted_blocks.get(&height) == Some(&hash) => height,
+            _ => 0,
+        };
+
         let prev_mempool_time = self.last_mempool_time;
-        let mut latest_time = self.last_mempool_time;
+        let mut latest_time = prev_mempool_time;
 
         let txs_to_emit = client
             .get_raw_mempool_verbose()?
             .into_iter()
-            .filter_map(
+            .filter_map({
+                let latest_time = &mut latest_time;
                 move |(txid, tx_entry)| -> Option<Result<_, bitcoincore_rpc::Error>> {
                     let tx_time = tx_entry.time as usize;
-                    if tx_time > latest_time {
-                        latest_time = tx_time;
+                    if tx_time > *latest_time {
+                        *latest_time = tx_time;
                     }
 
                     // Avoid emitting transactions that are already emitted if we can guarantee
-                    // blocks containing ancestors are already emitted. We only check block height
-                    // because in case of reorg, we reset `self.last_mempool_time` to force
-                    // emitting all mempool txs.
-                    let is_emitted = tx_time < prev_mempool_time;
-                    let is_within_known_tip = tx_entry.height as usize <= prev_block_height;
-                    if is_emitted && is_within_known_tip {
+                    // blocks containing ancestors are already emitted. The bitcoind rpc interface
+                    // provides us with the block height that the tx is introduced to the mempool.
+                    // If we have already emitted the block of height, we can assume that all
+                    // ancestor txs have been processed by the receiver.
+                    let is_already_emitted = tx_time <= prev_mempool_time;
+                    let is_within_height = tx_entry.height <= prev_mempool_tip as _;
+                    if is_already_emitted && is_within_height {
                         return None;
                     }
 
@@ -135,11 +141,17 @@ impl<'c, C: bitcoincore_rpc::RpcApi> Emitter<'c, C> {
                         tx,
                         time: tx_time as u64,
                     }))
-                },
-            )
+                }
+            })
             .collect::<Result<Vec<_>, _>>()?;
 
         self.last_mempool_time = latest_time;
+        self.last_mempool_tip = self
+            .emitted_blocks
+            .iter()
+            .last()
+            .map(|(&height, &hash)| (height, hash));
+
         Ok(txs_to_emit)
     }
 
@@ -155,7 +167,7 @@ impl<'c, C: bitcoincore_rpc::RpcApi> Emitter<'c, C> {
         Ok(poll_res.map(|(height, block)| EmittedBlock { block, height }))
     }
 
-    /// Transforms `self` into an iterator of [`Emission`]s.
+    /// Transforms `self` into an iterator of either [`EmittedBlock`]s or [`EmittedHeader`]s.
     ///
     /// Refer to [module-level documentation] for more.
     ///
@@ -163,80 +175,33 @@ impl<'c, C: bitcoincore_rpc::RpcApi> Emitter<'c, C> {
     pub fn into_iterator<B>(self) -> Iter<'c, C, B> {
         Iter {
             emitter: self,
-            last_emission_was_mempool: false,
             phantom: PhantomData,
         }
     }
 }
 
-/// This is the [`Iterator::Item`] of [`Iter`]. This can either represent a block/header or the set
-/// of mempool transactions.
-///
-/// Refer to [module-level documentation] for more.
-///
-/// [module-level documentation]: crate
-pub enum Emission<B> {
-    /// An emitted set of mempool transactions.
-    Mempool(Vec<MempoolTx>),
-    /// An emitted block.
-    Block(B),
-}
-
-impl<B> Emission<B> {
-    /// Whether the emission if of mempool transactions.
-    pub fn is_mempool(&self) -> bool {
-        matches!(self, Self::Mempool(_))
-    }
-
-    /// Wether the emission if of a block.
-    pub fn is_block(&self) -> bool {
-        matches!(self, Self::Block(_))
-    }
-}
-
-/// An [`Iterator`] that wraps an [`Emitter`], and emits [`Result`]s of [`Emission`].
+/// An [`Iterator`] that wraps an [`Emitter`], and emits [`Result`]s of either [`EmittedHeader`]s
+/// or [`EmittedBlock`]s.
 ///
 /// This is constructed with [`Emitter::into_iterator`].
 pub struct Iter<'c, C, B = EmittedBlock> {
     emitter: Emitter<'c, C>,
-    last_emission_was_mempool: bool,
     phantom: PhantomData<B>,
 }
 
-impl<'c, C: bitcoincore_rpc::RpcApi, B> Iter<'c, C, B> {
-    fn next_with<F>(&mut self, f: F) -> Option<Result<Emission<B>, bitcoincore_rpc::Error>>
-    where
-        F: Fn(&mut Emitter<'c, C>) -> Result<Option<B>, bitcoincore_rpc::Error>,
-    {
-        if self.last_emission_was_mempool {
-            self.last_emission_was_mempool = false;
-            return None;
-        }
-
-        match f(&mut self.emitter) {
-            Ok(None) => {
-                self.last_emission_was_mempool = true;
-                Some(self.emitter.mempool().map(Emission::<B>::Mempool))
-            }
-            Ok(Some(b)) => Some(Ok(Emission::Block(b))),
-            Err(err) => Some(Err(err)),
-        }
-    }
-}
-
 impl<'c, C: bitcoincore_rpc::RpcApi> Iterator for Iter<'c, C, EmittedBlock> {
-    type Item = Result<Emission<EmittedBlock>, bitcoincore_rpc::Error>;
+    type Item = Result<EmittedBlock, bitcoincore_rpc::Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.next_with(Emitter::next_block)
+        self.emitter.next_block().transpose()
     }
 }
 
 impl<'c, C: bitcoincore_rpc::RpcApi> Iterator for Iter<'c, C, EmittedHeader> {
-    type Item = Result<Emission<EmittedHeader>, bitcoincore_rpc::Error>;
+    type Item = Result<EmittedHeader, bitcoincore_rpc::Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.next_with(Emitter::next_header)
+        self.emitter.next_header().transpose()
     }
 }
 
@@ -256,7 +221,7 @@ where
     let client = emitter.client;
 
     if let Some(last_res) = &emitter.last_block {
-        assert!(!emitter.emitted.is_empty());
+        assert!(!emitter.emitted_blocks.is_empty());
 
         let next_hash = match last_res.nextblockhash {
             None => return Ok(PollResponse::NoMoreBlocks),
@@ -270,7 +235,7 @@ where
         return Ok(PollResponse::Block(res));
     }
 
-    if emitter.emitted.is_empty() {
+    if emitter.emitted_blocks.is_empty() {
         let hash = client.get_block_hash(emitter.start_height as _)?;
 
         let res = client.get_block_info(&hash)?;
@@ -280,7 +245,7 @@ where
         return Ok(PollResponse::Block(res));
     }
 
-    for (&_, hash) in emitter.emitted.iter().rev() {
+    for (&_, hash) in emitter.emitted_blocks.iter().rev() {
         let res = client.get_block_info(hash)?;
         if res.confirmations < 0 {
             // block is not in best chain
@@ -307,7 +272,7 @@ where
             PollResponse::Block(res) => {
                 let height = res.height as u32;
                 let item = get_item(&res.hash)?;
-                assert_eq!(emitter.emitted.insert(height, res.hash), None);
+                assert_eq!(emitter.emitted_blocks.insert(height, res.hash), None);
                 emitter.last_block = Some(res);
                 return Ok(Some((height, item)));
             }
@@ -317,20 +282,16 @@ where
             }
             PollResponse::BlockNotInBestChain => {
                 emitter.last_block = None;
-                // we want to re-emit all mempool txs on reorg
-                emitter.last_mempool_time = 0;
                 continue;
             }
             PollResponse::AgreementFound(res) => {
-                emitter.emitted.split_off(&(res.height as u32 + 1));
+                emitter.emitted_blocks.split_off(&(res.height as u32 + 1));
                 emitter.last_block = Some(res);
                 continue;
             }
             PollResponse::AgreementPointNotFound => {
-                emitter.emitted.clear();
+                emitter.emitted_blocks.clear();
                 emitter.last_block = None;
-                // we want to re-emit all mempool txs on reorg
-                emitter.last_mempool_time = 0;
                 continue;
             }
         }
