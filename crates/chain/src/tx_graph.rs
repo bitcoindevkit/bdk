@@ -324,10 +324,10 @@ impl<A> TxGraph<A> {
     /// The supplied closure takes in two inputs `(depth, descendant_txid)`:
     ///
     /// * `depth` is the distance between the starting `txid` and the `descendant_txid`. I.e., if the
-    ///     descendant is spending an output of the starting `txid`; the `depth` will be 1.
+    ///     descendant is spending an output of the starting `txid` then `depth` will be 1.
     /// * `descendant_txid` is the descendant's txid which we are considering to walk.
     ///
-    /// The supplied closure returns an `Option<T>`, allowing the caller to map each node it vists
+    /// The supplied closure returns an `Option<T>`, allowing the caller to map each node it visits
     /// and decide whether to visit descendants.
     pub fn walk_descendants<'g, F, O>(&'g self, txid: Txid, walk_map: F) -> TxDescendants<A, F>
     where
@@ -1173,7 +1173,7 @@ impl<'g, A, F> TxDescendants<'g, A, F> {
         descendants
     }
 
-    /// Creates a `TxDescendants` from multiple starting transactions that include the starting
+    /// Creates a `TxDescendants` from multiple starting transactions that includes the starting
     /// `txid`s when iterating.
     pub(crate) fn from_multiple_include_root<I>(
         graph: &'g TxGraph<A>,
