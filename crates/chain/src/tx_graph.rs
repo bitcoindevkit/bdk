@@ -54,8 +54,8 @@ use crate::{
     collections::*, keychain::Balance, local_chain::LocalChain, Anchor, Append, BlockId,
     ChainOracle, ChainPosition, FullTxOut,
 };
-use alloc::vec::Vec;
 use alloc::collections::vec_deque::VecDeque;
+use alloc::vec::Vec;
 use bitcoin::{OutPoint, Script, Transaction, TxOut, Txid};
 use core::{
     convert::Infallible,
@@ -697,8 +697,9 @@ impl<A: Anchor> TxGraph<A> {
             }
         }
 
-        // The tx is not anchored to a block which is in the best chain, let's check whether we can
-        // ignore it by checking conflicts!
+        // The tx is not anchored to a block which is in the best chain, which means that it
+        // might be in mempool, or it might have been dropped already.
+        // Let's check conflicts to find out!
         let tx = match tx_node {
             TxNodeInternal::Whole(tx) => tx,
             TxNodeInternal::Partial(_) => {
@@ -707,17 +708,70 @@ impl<A: Anchor> TxGraph<A> {
             }
         };
 
-        // If a conflicting tx is in the best chain, or has `last_seen` higher than this tx, then
-        // this tx cannot exist in the best chain
-        for conflicting_tx in self.walk_conflicts(tx, |_, txid| self.get_tx_node(txid)) {
-            for block in conflicting_tx.anchors.iter().map(A::anchor_block) {
-                if chain.is_block_in_chain(block, chain_tip)? == Some(true) {
-                    // conflicting tx is in best chain, so the current tx cannot be in best chain!
+        // We want to retrieve all the transactions that conflict with us, plus all the
+        // transactions that conflict with our unconfirmed ancestors, since they conflict with us
+        // as well.
+        // We only traverse unconfirmed ancestors since conflicts of confirmed transactions
+        // cannot be in the best chain.
+
+        // First of all, we retrieve all our ancestors. Since we're using `new_include_root`, the
+        // resulting array will also include `tx`
+        let unconfirmed_ancestor_txs =
+            TxAncestors::new_include_root(self, tx, |_, ancestor_tx: &Transaction| {
+                let tx_node = self.get_tx_node(ancestor_tx.txid())?;
+                // We're filtering the ancestors to keep only the unconfirmed ones (= no anchors in
+                // the best chain)
+                for block in tx_node.anchors {
+                    match chain.is_block_in_chain(block.anchor_block(), chain_tip) {
+                        Ok(Some(true)) => return None,
+                        Err(e) => return Some(Err(e)),
+                        _ => continue,
+                    }
+                }
+                Some(Ok(tx_node))
+            })
+            .collect::<Result<Vec<_>, C::Error>>()?;
+
+        // We determine our tx's last seen, which is the max between our last seen,
+        // and our unconf descendants' last seen.
+        let unconfirmed_descendants_txs =
+            TxDescendants::new_include_root(self, tx.txid(), |_, descendant_txid: Txid| {
+                let tx_node = self.get_tx_node(descendant_txid)?;
+                // We're filtering the ancestors to keep only the unconfirmed ones (= no anchors in
+                // the best chain)
+                for block in tx_node.anchors {
+                    match chain.is_block_in_chain(block.anchor_block(), chain_tip) {
+                        Ok(Some(true)) => return None,
+                        Err(e) => return Some(Err(e)),
+                        _ => continue,
+                    }
+                }
+                Some(Ok(tx_node))
+            })
+            .collect::<Result<Vec<_>, C::Error>>()?;
+
+        let tx_last_seen = unconfirmed_descendants_txs
+            .iter()
+            .max_by_key(|tx| tx.last_seen_unconfirmed)
+            .map(|tx| tx.last_seen_unconfirmed)
+            .expect("descendants always includes at least one transaction (the root tx");
+
+        // Now we traverse our ancestors and consider all their conflicts
+        for tx_node in unconfirmed_ancestor_txs {
+            // We retrieve all the transactions conflicting with this specific ancestor
+            let conflicting_txs = self.walk_conflicts(tx_node.tx, |_, txid| self.get_tx_node(txid));
+
+            // If a conflicting tx is in the best chain, or has `last_seen` higher than this ancestor, then
+            // this tx cannot exist in the best chain
+            for conflicting_tx in conflicting_txs {
+                for block in conflicting_tx.anchors {
+                    if chain.is_block_in_chain(block.anchor_block(), chain_tip)? == Some(true) {
+                        return Ok(None);
+                    }
+                }
+                if conflicting_tx.last_seen_unconfirmed > tx_last_seen {
                     return Ok(None);
                 }
-            }
-            if conflicting_tx.last_seen_unconfirmed > *last_seen {
-                return Ok(None);
             }
         }
 
