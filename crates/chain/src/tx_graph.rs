@@ -1145,7 +1145,7 @@ impl<A> AsRef<TxGraph<A>> for TxGraph<A> {
 pub struct TxDescendants<'g, A, F> {
     graph: &'g TxGraph<A>,
     visited: HashSet<Txid>,
-    stack: Vec<(usize, Txid)>,
+    queue: VecDeque<(usize, Txid)>,
     filter_map: F,
 }
 
@@ -1156,7 +1156,7 @@ impl<'g, A, F> TxDescendants<'g, A, F> {
         Self {
             graph,
             visited: Default::default(),
-            stack: [(0, txid)].into(),
+            queue: [(0, txid)].into(),
             filter_map,
         }
     }
@@ -1166,10 +1166,10 @@ impl<'g, A, F> TxDescendants<'g, A, F> {
         let mut descendants = Self {
             graph,
             visited: Default::default(),
-            stack: Default::default(),
+            queue: Default::default(),
             filter_map,
         };
-        descendants.populate_stack(1, txid);
+        descendants.populate_queue(1, txid);
         descendants
     }
 
@@ -1186,7 +1186,7 @@ impl<'g, A, F> TxDescendants<'g, A, F> {
         Self {
             graph,
             visited: Default::default(),
-            stack: txids.into_iter().map(|txid| (0, txid)).collect(),
+            queue: txids.into_iter().map(|txid| (0, txid)).collect(),
             filter_map,
         }
     }
@@ -1205,25 +1205,25 @@ impl<'g, A, F> TxDescendants<'g, A, F> {
         let mut descendants = Self {
             graph,
             visited: Default::default(),
-            stack: Default::default(),
+            queue: Default::default(),
             filter_map,
         };
         for txid in txids {
-            descendants.populate_stack(1, txid);
+            descendants.populate_queue(1, txid);
         }
         descendants
     }
 }
 
 impl<'g, A, F> TxDescendants<'g, A, F> {
-    fn populate_stack(&mut self, depth: usize, txid: Txid) {
+    fn populate_queue(&mut self, depth: usize, txid: Txid) {
         let spend_paths = self
             .graph
             .spends
             .range(tx_outpoint_range(txid))
             .flat_map(|(_, spends)| spends)
             .map(|&txid| (depth, txid));
-        self.stack.extend(spend_paths);
+        self.queue.extend(spend_paths);
     }
 }
 
@@ -1235,8 +1235,8 @@ where
 
     fn next(&mut self) -> Option<Self::Item> {
         let (op_spends, txid, item) = loop {
-            // we have exhausted all paths when stack is empty
-            let (op_spends, txid) = self.stack.pop()?;
+            // we have exhausted all paths when queue is empty
+            let (op_spends, txid) = self.queue.pop_front()?;
             // we do not want to visit the same transaction twice
             if self.visited.insert(txid) {
                 // ignore paths when user filters them out
@@ -1246,7 +1246,7 @@ where
             }
         };
 
-        self.populate_stack(op_spends + 1, txid);
+        self.populate_queue(op_spends + 1, txid);
         Some(item)
     }
 }

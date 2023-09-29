@@ -610,7 +610,7 @@ fn test_descendants_no_repeat() {
         .collect::<Vec<_>>();
 
     let mut graph = TxGraph::<()>::default();
-    let mut expected_txids = BTreeSet::new();
+    let mut expected_txids = Vec::new();
 
     // these are NOT descendants of `tx_a`
     for tx in txs_not_connected {
@@ -625,19 +625,14 @@ fn test_descendants_no_repeat() {
         .chain(core::iter::once(&tx_e))
     {
         let _ = graph.insert_tx(tx.clone());
-        assert!(expected_txids.insert(tx.txid()));
+        expected_txids.push(tx.txid());
     }
 
     let descendants = graph
         .walk_descendants(tx_a.txid(), |_, txid| Some(txid))
         .collect::<Vec<_>>();
 
-    assert_eq!(descendants.len(), expected_txids.len());
-
-    for txid in descendants {
-        assert!(expected_txids.remove(&txid));
-    }
-    assert!(expected_txids.is_empty());
+    assert_eq!(descendants, expected_txids);
 }
 
 #[test]
