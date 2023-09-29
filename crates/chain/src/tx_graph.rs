@@ -381,8 +381,9 @@ impl<A> TxGraph<A> {
     /// transaction's inputs (spends). The conflicting txids are returned with the given
     /// transaction's vin (in which it conflicts).
     ///
-    /// Note that this only returns directly conflicting txids and does not include descendants of
-    /// those txids (which are technically also conflicting).
+    /// Note that this only returns directly conflicting txids and won't include:
+    /// - descendants of conflicting transactions (which are technically also conflicting)
+    /// - transactions conflicting with the given transaction's ancestors
     pub fn direct_conflicts_of_tx<'g>(
         &'g self,
         tx: &'g Transaction,
