@@ -89,6 +89,10 @@ cargo update -p rustls-webpki:0.100.3 --precise "0.100.1"
 cargo update -p rustls-webpki:0.101.6 --precise "0.101.1"
 # zip 0.6.3 has MSRV 1.59.0+
 cargo update -p zip:0.6.6 --precise "0.6.2"
+# time 0.3.14 has MSRV 1.59.0+
+cargo update -p time --precise "0.3.13"
+# cc 1.0.82 has MSRV 1.61.0+
+cargo update -p cc --precise "1.0.81"
 ```
 
 ## License
