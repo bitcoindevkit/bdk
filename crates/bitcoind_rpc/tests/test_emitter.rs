@@ -7,8 +7,14 @@ use bdk_chain::{
     local_chain::{self, CheckPoint, LocalChain},
     Append, BlockId, IndexedTxGraph, SpkTxOutIndex,
 };
-use bitcoin::hashes::Hash;
-use bitcoincore_rpc::RpcApi;
+use bitcoin::{
+    address::NetworkChecked, block::Header, hash_types::TxMerkleNode, hashes::Hash, Block,
+    CompactTarget, ScriptBuf, ScriptHash, Transaction, TxIn, TxOut,
+};
+use bitcoincore_rpc::{
+    bitcoincore_rpc_json::{GetBlockTemplateModes, GetBlockTemplateRules},
+    RpcApi,
+};
 
 struct TestEnv {
     #[allow(dead_code)]
@@ -44,6 +50,62 @@ impl TestEnv {
         Ok(block_hashes)
     }
 
+    fn mine_empty_block(&self) -> anyhow::Result<BlockHash> {
+        let bt = self.client.get_block_template(
+            GetBlockTemplateModes::Template,
+            &[GetBlockTemplateRules::SegWit],
+            &[],
+        )?;
+
+        let txdata = vec![Transaction {
+            version: 1,
+            lock_time: bitcoin::absolute::LockTime::from_height(0)?,
+            input: vec![TxIn {
+                previous_output: bitcoin::OutPoint::default(),
+                script_sig: ScriptBuf::builder()
+                    .push_int(bt.height as _)
+                    .push_int(0)
+                    .into_script(),
+                sequence: bitcoin::Sequence::default(),
+                witness: bitcoin::Witness::new(),
+            }],
+            output: vec![TxOut {
+                value: 0,
+                script_pubkey: ScriptBuf::new_p2sh(&ScriptHash::all_zeros()),
+            }],
+        }];
+
+        let bits: [u8; 4] = bt
+            .bits
+            .clone()
+            .try_into()
+            .expect("rpc provided us with invalid bits");
+
+        let mut block = Block {
+            header: Header {
+                version: bitcoin::block::Version::default(),
+                prev_blockhash: bt.previous_block_hash,
+                merkle_root: TxMerkleNode::all_zeros(),
+                time: Ord::max(bt.min_time, std::time::UNIX_EPOCH.elapsed()?.as_secs()) as u32,
+                bits: CompactTarget::from_consensus(u32::from_be_bytes(bits)),
+                nonce: 0,
+            },
+            txdata,
+        };
+
+        block.header.merkle_root = block.compute_merkle_root().expect("must compute");
+
+        for nonce in 0..=u32::MAX {
+            block.header.nonce = nonce;
+            if block.header.target().is_met_by(block.block_hash()) {
+                break;
+            }
+        }
+
+        self.client.submit_block(&block)?;
+        Ok(block.block_hash())
+    }
+
     fn reorg(&self, count: usize) -> anyhow::Result<Vec<BlockHash>> {
         let start_height = self.client.get_block_count()?;
 
@@ -64,6 +126,13 @@ impl TestEnv {
             "reorg should not result in height change"
         );
         res
+    }
+
+    fn send(&self, address: &Address<NetworkChecked>, amount: Amount) -> anyhow::Result<Txid> {
+        let txid = self
+            .client
+            .send_to_address(address, amount, None, None, None, None, None, None)?;
+        Ok(txid)
     }
 }
 
@@ -324,6 +393,59 @@ fn test_into_tx_graph() -> anyhow::Result<()> {
         assert!(indexed_additions.graph.txouts.is_empty());
         assert_eq!(indexed_additions.graph.anchors, exp_anchors);
     }
+
+    Ok(())
+}
+
+/// Ensure avoid-re-emission-logic is sound when [`Emitter`] is synced to tip.
+///
+/// The receiver (bdk_chain structures) is synced to the chain tip, and there is txs in the mempool.
+/// When we call Emitter::mempool multiple times, mempool txs should not be re-emitted, even if the
+/// chain tip is extended.
+#[test]
+fn mempool_avoids_re_emission() -> anyhow::Result<()> {
+    const BLOCKS_TO_MINE: usize = 101;
+    const MEMPOOL_TX_COUNT: usize = 2;
+
+    let env = TestEnv::new()?;
+    let mut emitter = Emitter::new(&env.client, 0);
+
+    // mine blocks and sync up emitter
+    let addr = env.client.get_new_address(None, None)?.assume_checked();
+    env.mine_blocks(BLOCKS_TO_MINE, Some(addr.clone()))?;
+    while emitter.next_header()?.is_some() {}
+
+    // have some random txs in mempool
+    let exp_txids = (0..MEMPOOL_TX_COUNT)
+        .map(|_| env.send(&addr, Amount::from_sat(2100)))
+        .collect::<Result<BTreeSet<Txid>, _>>()?;
+
+    // the first emission should include all transactions
+    let emitted_txids = emitter
+        .mempool()?
+        .into_iter()
+        .map(|m_tx| m_tx.tx.txid())
+        .collect::<BTreeSet<Txid>>();
+    assert_eq!(
+        emitted_txids, exp_txids,
+        "all mempool txs should be emitted"
+    );
+
+    // second emission should be empty
+    assert!(
+        emitter.mempool()?.is_empty(),
+        "second emission should be empty"
+    );
+
+    // mine empty blocks + sync up our emitter -> we should still not re-emit
+    for _ in 0..BLOCKS_TO_MINE {
+        env.mine_empty_block()?;
+    }
+    while emitter.next_header()?.is_some() {}
+    assert!(
+        emitter.mempool()?.is_empty(),
+        "third emission, after chain tip is extended, should also be empty"
+    );
 
     Ok(())
 }
