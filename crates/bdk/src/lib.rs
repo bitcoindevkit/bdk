@@ -30,6 +30,8 @@ extern crate bip39;
 #[allow(unused_imports)]
 #[macro_use]
 pub(crate) mod error;
+#[cfg(feature = "blockchain")]
+pub mod blockchain;
 pub mod descriptor;
 pub mod keys;
 pub mod psbt;
