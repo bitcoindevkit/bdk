@@ -4,12 +4,12 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc, Mutex,
     },
-    time::{Duration, Instant, SystemTime},
+    time::{Duration, Instant},
 };
 
 use bdk_bitcoind_rpc::{
     bitcoincore_rpc::{Auth, Client, RpcApi},
-    Emitter,
+    EmittedBlock, Emitter, MempoolTx,
 };
 use bdk_chain::{
     bitcoin::{hashes::Hash, BlockHash},
@@ -25,17 +25,26 @@ use example_cli::{
 
 const DB_MAGIC: &[u8] = b"bdk_example_rpc";
 const DB_PATH: &str = ".bdk_example_rpc.db";
-// const CHANNEL_BOUND: usize = 10;
-// const LIVE_POLL_DUR_SECS: Duration = Duration::from_secs(15);
+
+const CHANNEL_BOUND: usize = 10;
+/// Delay (in seconds) for mempool emissions and printing status to stdout.
+const LIVE_POLL_DELAY_SEC: Duration = Duration::from_secs(15);
 
 /// The block depth which we assume no reorgs can happen at.
 const ASSUME_FINAL_DEPTH: u32 = 6;
-const DB_COMMIT_DELAY_SEC: u64 = 30;
+const DB_COMMIT_DELAY_SEC: Duration = Duration::from_secs(30);
 
 type ChangeSet = (
     local_chain::ChangeSet,
     indexed_tx_graph::ChangeSet<ConfirmationTimeAnchor, keychain::ChangeSet<Keychain>>,
 );
+
+#[derive(Debug)]
+enum Emission {
+    Block(EmittedBlock),
+    Mempool(Vec<MempoolTx>),
+    Tip(u32),
+}
 
 #[derive(Args, Debug, Clone)]
 struct RpcArgs {
@@ -51,6 +60,12 @@ struct RpcArgs {
     /// RPC auth password
     #[clap(env = "RPC_PASS", long)]
     rpc_password: Option<String>,
+    /// Starting block height to fallback to if no point of agreement if found
+    #[clap(env = "FALLBACK_HEIGHT", long, default_value = "0")]
+    fallback_height: u32,
+    /// The unused-scripts lookahead will be kept at this size
+    #[clap(long, default_value = "10")]
+    lookahead: u32,
 }
 
 impl From<RpcArgs> for Auth {
@@ -85,20 +100,16 @@ enum RpcCommands {
     /// Syncs local state with remote state via RPC (starting from last point of agreement) and
     /// stores/indexes relevant transactions
     Sync {
-        /// Starting block height to fallback to if no point of agreement if found
-        #[clap(env = "FALLBACK_HEIGHT", long, default_value = "0")]
-        fallback_height: u32,
-        /// The unused-scripts lookahead will be kept at this size
-        #[clap(long, default_value = "10")]
-        lookahead: u32,
+        #[clap(flatten)]
+        rpc_args: RpcArgs,
+    },
+    Live {
         #[clap(flatten)]
         rpc_args: RpcArgs,
     },
 }
 
 fn main() -> anyhow::Result<()> {
-    // let sigterm_flag = start_ctrlc_handler();
-
     let (args, keymap, index, db, init_changeset) =
         example_cli::init::<RpcCommands, RpcArgs, ChangeSet>(DB_MAGIC, DB_PATH)?;
 
@@ -132,11 +143,13 @@ fn main() -> anyhow::Result<()> {
     };
 
     match rpc_cmd {
-        RpcCommands::Sync {
-            fallback_height,
-            lookahead,
-            rpc_args,
-        } => {
+        RpcCommands::Sync { rpc_args } => {
+            let RpcArgs {
+                fallback_height,
+                lookahead,
+                ..
+            } = rpc_args;
+
             let mut chain = chain.lock().unwrap();
             let mut graph = graph.lock().unwrap();
             let mut db = db.lock().unwrap();
@@ -177,7 +190,7 @@ fn main() -> anyhow::Result<()> {
                 let graph_changeset = graph.apply_block(block.block, block.height);
 
                 db.stage((chain_changeset, graph_changeset));
-                if last_db_commit.elapsed() >= Duration::from_secs(DB_COMMIT_DELAY_SEC) {
+                if last_db_commit.elapsed() >= DB_COMMIT_DELAY_SEC {
                     db.commit()?;
                     last_db_commit = Instant::now();
                 }
@@ -192,6 +205,125 @@ fn main() -> anyhow::Result<()> {
 
             // commit one last time!
             db.commit()?;
+        }
+        RpcCommands::Live { rpc_args } => {
+            let RpcArgs {
+                fallback_height,
+                lookahead,
+                ..
+            } = rpc_args;
+            let sigterm_flag = start_ctrlc_handler();
+
+            graph.lock().unwrap().index.set_lookahead_for_all(lookahead);
+            let start_height = chain.lock().unwrap().tip().map_or(fallback_height, |cp| {
+                cp.height().saturating_sub(ASSUME_FINAL_DEPTH)
+            });
+
+            let (tx, rx) = std::sync::mpsc::sync_channel::<Emission>(CHANNEL_BOUND);
+            let emission_jh = std::thread::spawn(move || -> anyhow::Result<()> {
+                let rpc_client = rpc_args.new_client()?;
+                let mut emitter = Emitter::new(&rpc_client, start_height);
+                let mut last_mempool_update = Instant::now();
+
+                let mut block_count = rpc_client.get_block_count()? as u32;
+                tx.send(Emission::Tip(block_count))?;
+
+                loop {
+                    match emitter.next_block()? {
+                        Some(block) => {
+                            if block.height > block_count {
+                                block_count = rpc_client.get_block_count()? as u32;
+                                tx.send(Emission::Tip(block_count))?;
+                            }
+                            tx.send(Emission::Block(block))?;
+                            if last_mempool_update.elapsed() >= LIVE_POLL_DELAY_SEC {
+                                last_mempool_update = Instant::now();
+                                tx.send(Emission::Mempool(emitter.mempool()?))?;
+                            }
+                        }
+                        None => {
+                            if await_flag(&sigterm_flag, LIVE_POLL_DELAY_SEC) {
+                                return Ok(());
+                            }
+                            last_mempool_update = Instant::now();
+                            tx.send(Emission::Mempool(emitter.mempool()?))?;
+                            continue;
+                        }
+                    };
+                }
+            });
+
+            let mut last_db_commit = Instant::now();
+            let mut db = db.lock().unwrap();
+            let mut graph = graph.lock().unwrap();
+            let mut chain = chain.lock().unwrap();
+            let mut tip_height = 0_u32;
+
+            for emission in rx {
+                let changeset = match emission {
+                    Emission::Block(block) => {
+                        let this_id = BlockId {
+                            height: block.height,
+                            hash: block.block.block_hash(),
+                        };
+                        let update_cp =
+                            if block.block.header.prev_blockhash == BlockHash::all_zeros() {
+                                CheckPoint::new(this_id)
+                            } else {
+                                CheckPoint::new(BlockId {
+                                    height: block.height - 1,
+                                    hash: block.block.header.prev_blockhash,
+                                })
+                                .extend(core::iter::once(this_id))
+                                .expect("must construct checkpoint")
+                            };
+                        let chain_changeset = chain.apply_update(local_chain::Update {
+                            tip: update_cp,
+                            introduce_older_blocks: false,
+                        })?;
+                        let graph_changeset = graph.apply_block(block.block, block.height);
+                        (chain_changeset, graph_changeset)
+                    }
+                    Emission::Mempool(mempool_txs) => {
+                        let graph_changeset = graph.batch_insert_unconfirmed(
+                            mempool_txs.iter().map(|m_tx| (&m_tx.tx, Some(m_tx.time))),
+                        );
+                        (local_chain::ChangeSet::default(), graph_changeset)
+                    }
+                    Emission::Tip(h) => {
+                        tip_height = h;
+                        continue;
+                    }
+                };
+
+                db.stage(changeset);
+
+                if last_db_commit.elapsed() >= DB_COMMIT_DELAY_SEC {
+                    if let Some(synced_to) = chain.tip() {
+                        let balance = {
+                            graph.graph().balance(
+                                &*chain,
+                                synced_to.block_id(),
+                                graph.index.outpoints().iter().cloned(),
+                                |(k, _), _| k == &Keychain::Internal,
+                            )
+                        };
+                        println!(
+                            "[status] synced to {} @ {} / {} | total: {} sats",
+                            synced_to.hash(),
+                            synced_to.height(),
+                            tip_height,
+                            balance.total()
+                        );
+                    }
+
+                    db.commit()?;
+                    last_db_commit = Instant::now();
+                    println!("[status] commited to db");
+                }
+            }
+
+            emission_jh.join().expect("must join emitter thread")?;
         }
     }
 
@@ -210,16 +342,12 @@ fn start_ctrlc_handler() -> Arc<AtomicBool> {
 
 #[allow(dead_code)]
 fn await_flag(flag: &AtomicBool, duration: Duration) -> bool {
-    let start = SystemTime::now();
+    let start = Instant::now();
     loop {
         if flag.load(Ordering::Acquire) {
             return true;
         }
-        if SystemTime::now()
-            .duration_since(start)
-            .expect("should succeed")
-            >= duration
-        {
+        if start.elapsed() >= duration {
             return false;
         }
         std::thread::sleep(Duration::from_secs(1));
