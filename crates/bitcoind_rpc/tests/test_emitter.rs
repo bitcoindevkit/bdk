@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use bdk_bitcoind_rpc::{EmittedBlock, Emitter, MempoolTx};
+use bdk_bitcoind_rpc::{EmittedBlock, EmittedHeader, Emitter, MempoolTx};
 use bdk_chain::{
     bitcoin::{Address, Amount, BlockHash, Txid},
     indexed_tx_graph::InsertTxItem,
@@ -445,6 +445,79 @@ fn mempool_avoids_re_emission() -> anyhow::Result<()> {
     assert!(
         emitter.mempool()?.is_empty(),
         "third emission, after chain tip is extended, should also be empty"
+    );
+
+    Ok(())
+}
+
+/// Ensure mempool txs at new height are always emitted.
+///
+/// The network is at height h. The receiver is synced to height h-1. When mempool txs are
+/// introduced at height h, we should always emit them.
+///
+/// The receiver (bdk_chain structures) is synced to one block before the chain tip, and there are txs
+/// in the mempool. When the Emitter is synced to the chain tip and we call Emitter::mempool,
+/// the mempool txs should be emitted once.
+#[test]
+fn mempool_tx_emission_at_new_height() -> anyhow::Result<()> {
+    const BLOCKS_TO_MINE: usize = 101;
+    const MEMPOOL_TX_COUNT: usize = 2;
+
+    let env = TestEnv::new()?;
+    let mut emitter = Emitter::new(&env.client, 0);
+
+    // mine blocks and sync up emitter to chain tip height - 1
+    let addr = env.client.get_new_address(None, None)?.assume_checked();
+    env.mine_blocks(BLOCKS_TO_MINE, Some(addr.clone()))?;
+    while emitter.next_header()?.is_some() {}
+
+    // mine one more block the emitter hasn't seen
+    env.mine_blocks(1, Some(addr.clone()))?;
+
+    // add some random txs in mempool at chain tip height
+    let exp_txids = (0..MEMPOOL_TX_COUNT)
+        .map(|_| env.send(&addr, Amount::from_sat(2100)))
+        .collect::<Result<BTreeSet<Txid>, _>>()?;
+
+    // the emission should include all mempool transactions
+    let emitted_txids = emitter
+        .mempool()?
+        .into_iter()
+        .map(|m_tx| m_tx.tx.txid())
+        .collect::<BTreeSet<Txid>>();
+    assert_eq!(
+        emitted_txids, exp_txids,
+        "all mempool txs should be emitted"
+    );
+
+    let EmittedHeader {
+        height,
+        header: _header,
+    } = emitter.next_header()?.unwrap();
+
+    assert_eq!(
+        height as usize,
+        BLOCKS_TO_MINE + 1,
+        "next header should be at height of last mined block"
+    );
+
+    // the next emission should include all mempool transactions again for new height
+    let emitted_txids = emitter
+        .mempool()?
+        .into_iter()
+        .map(|m_tx| m_tx.tx.txid())
+        .collect::<BTreeSet<Txid>>();
+    assert_eq!(
+        emitted_txids, exp_txids,
+        "all mempool txs should be emitted"
+    );
+
+    // there should be no more mempool emissions for the same height
+    assert!(emitter.next_header()?.is_none());
+
+    assert!(
+        emitter.mempool()?.is_empty(),
+        "next mempool emission should be empty"
     );
 
     Ok(())
