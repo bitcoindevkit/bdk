@@ -1958,7 +1958,7 @@ fn test_legacy_bump_fee_add_input() {
 
     let mut builder = wallet.build_fee_bump(txid).unwrap();
     builder.fee_rate(FeeRate::from_sat_per_vb(50.0));
-    let psbt = builder.finish().unwrap();
+    let mut psbt = builder.finish().unwrap();
     let sent_received = wallet.sent_and_received(&psbt.clone().extract_tx());
     let fee = check_fee!(wallet, psbt);
     assert_eq!(sent_received.0, original_details.0 + 25_000);
@@ -1984,7 +1984,14 @@ fn test_legacy_bump_fee_add_input() {
         sent_received.1
     );
 
-    assert_fee_rate!(psbt, fee.unwrap_or(0), FeeRate::from_sat_per_vb(50.0), @add_signature);
+    // sign the transaction
+    wallet.sign(&mut psbt, SignOptions::default()).unwrap();
+
+    assert_delta!(
+        psbt.fee_rate().unwrap(),
+        FeeRate::from_sat_per_vb(50.0),
+        FeeRate::from_sat_per_vb(1.0)
+    );
 }
 
 #[test]
