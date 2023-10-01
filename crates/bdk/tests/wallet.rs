@@ -167,7 +167,7 @@ macro_rules! assert_fee_rate {
                 }
         )*
 
-            #[allow(unused_mut)]
+        #[allow(unused_mut)]
         #[allow(unused_assignments)]
         let mut dust_change = false;
         $(
@@ -459,6 +459,16 @@ macro_rules! check_fee {
         assert_eq!(tx_fee, $psbt.fee_amount());
         tx_fee
     }};
+}
+
+/// A floating point assert! that takes an additional third argument `delta`
+/// as a tolerance value when test for equality the first and second argument.
+macro_rules! assert_delta {
+    ($x:expr, $y:expr, $d:expr) => {
+        if !($x - $y < $d || $y - $x < $d) {
+            panic!();
+        }
+    };
 }
 
 #[test]
