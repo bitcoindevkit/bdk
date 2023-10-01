@@ -35,6 +35,7 @@ pub use bitcoincore_rpc;
 use bitcoincore_rpc::bitcoincore_rpc_json;
 
 /// Represents a transaction that exists in the mempool.
+#[derive(Debug)]
 pub struct MempoolTx {
     /// The transaction.
     pub tx: Transaction,
@@ -43,6 +44,7 @@ pub struct MempoolTx {
 }
 
 /// A block obtained from `bitcoind`.
+#[derive(Debug)]
 pub struct EmittedBlock {
     /// The actual block.
     pub block: Block,
@@ -51,6 +53,7 @@ pub struct EmittedBlock {
 }
 
 /// A block header obtained from `bitcoind`.
+#[derive(Debug)]
 pub struct EmittedHeader {
     /// The actual block header.
     pub header: Header,
