@@ -27,7 +27,7 @@
 //!     // Create a transaction with one output to `to_address` of 50_000 satoshi
 //!     .add_recipient(to_address.script_pubkey(), 50_000)
 //!     // With a custom fee rate of 5.0 satoshi/vbyte
-//!     .fee_rate(bdk::FeeRate::from_sat_per_vb(5.0))
+//!     .fee_rate(bdk::FeeRate::from_sat_per_vb_unchecked(5))
 //!     // Only spend non-change outputs
 //!     .do_not_spend_change()
 //!     // Turn on RBF signaling
@@ -163,7 +163,7 @@ pub(crate) enum FeePolicy {
 
 impl Default for FeePolicy {
     fn default() -> Self {
-        FeePolicy::FeeRate(FeeRate::default_min_relay_fee())
+        FeePolicy::FeeRate(FeeRate::BROADCAST_MIN)
     }
 }
 
@@ -652,7 +652,7 @@ impl<'a, D, Cs: CoinSelectionAlgorithm> TxBuilder<'a, D, Cs, CreateTx> {
     ///     .drain_wallet()
     ///     // Send the excess (which is all the coins minus the fee) to this address.
     ///     .drain_to(to_address.script_pubkey())
-    ///     .fee_rate(bdk::FeeRate::from_sat_per_vb(5.0))
+    ///     .fee_rate(bdk::FeeRate::from_sat_per_vb_unchecked(5))
     ///     .enable_rbf();
     /// let psbt = tx_builder.finish()?;
     /// # Ok::<(), bdk::Error>(())

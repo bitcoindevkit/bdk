@@ -71,9 +71,11 @@ impl PsbtUtils for Psbt {
 
     fn fee_rate(&self) -> Option<FeeRate> {
         let fee_amount = self.fee_amount();
-        fee_amount.map(|fee| {
+        fee_amount.and_then(|fee| {
             let weight = self.clone().extract_tx().weight();
-            FeeRate::from_wu(fee, weight)
+            Some(FeeRate::from_sat_per_kwu(
+                fee.checked_mul(1000)? / weight.to_wu(),
+            ))
         })
     }
 }

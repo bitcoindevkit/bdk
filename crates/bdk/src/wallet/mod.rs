@@ -574,7 +574,7 @@ impl<D> Wallet<D> {
     pub fn calculate_fee_rate(&self, tx: &Transaction) -> Result<FeeRate, CalculateFeeError> {
         self.calculate_fee(tx).map(|fee| {
             let weight = tx.weight();
-            FeeRate::from_wu(fee, weight)
+            FeeRate::from_sat_per_kwu(fee.saturating_mul(1000) / weight.to_wu())
         })
     }
 
@@ -1004,7 +1004,7 @@ impl<D> Wallet<D> {
         let (fee_rate, mut fee_amount) = match params
             .fee_policy
             .as_ref()
-            .unwrap_or(&FeePolicy::FeeRate(FeeRate::default()))
+            .unwrap_or(&FeePolicy::FeeRate(FeeRate::BROADCAST_MIN))
         {
             //FIXME: see https://github.com/bitcoindevkit/bdk/issues/256
             FeePolicy::FeeAmount(fee) => {
@@ -1015,11 +1015,13 @@ impl<D> Wallet<D> {
                         });
                     }
                 }
-                (FeeRate::from_sat_per_vb(0.0), *fee)
+                (FeeRate::ZERO, *fee)
             }
             FeePolicy::FeeRate(rate) => {
                 if let Some(previous_fee) = params.bumping_fee {
-                    let required_feerate = FeeRate::from_sat_per_vb(previous_fee.rate + 1.0);
+                    let required_feerate = FeeRate::from_sat_per_kwu(
+                        ((previous_fee.rate + 1.0) as f64 * 250.0).ceil() as u64,
+                    );
                     if *rate < required_feerate {
                         return Err(Error::FeeRateTooLow {
                             required: required_feerate,
@@ -1069,7 +1071,7 @@ impl<D> Wallet<D> {
             outgoing += value;
         }
 
-        fee_amount += fee_rate.fee_wu(tx.weight());
+        fee_amount += (fee_rate * tx.weight()).to_sat();
 
         // Segwit transactions' header is 2WU larger than legacy txs' header,
         // as they contain a witness marker (1WU) and a witness flag (1WU) (see BIP144).
@@ -1080,7 +1082,7 @@ impl<D> Wallet<D> {
         // end up with a transaction with a slightly higher fee rate than the requested one.
         // If, instead, we undershoot, we may end up with a feerate lower than the requested one
         // - we might come up with non broadcastable txs!
-        fee_amount += fee_rate.fee_wu(Weight::from_wu(2));
+        fee_amount += (fee_rate * Weight::from_wu(2)).to_sat();
 
         if params.change_policy != tx_builder::ChangeSpendPolicy::ChangeAllowed
             && internal_descriptor.is_none()
@@ -1223,7 +1225,7 @@ impl<D> Wallet<D> {
     /// let mut psbt =  {
     ///     let mut builder = wallet.build_fee_bump(tx.txid())?;
     ///     builder
-    ///         .fee_rate(bdk::FeeRate::from_sat_per_vb(5.0));
+    ///         .fee_rate(bdk::FeeRate::from_sat_per_vb_unchecked(5));
     ///     builder.finish()?
     /// };
     ///
@@ -1350,7 +1352,7 @@ impl<D> Wallet<D> {
             utxos: original_utxos,
             bumping_fee: Some(tx_builder::PreviousFee {
                 absolute: fee,
-                rate: fee_rate.as_sat_per_vb(),
+                rate: fee_rate.to_sat_per_vb_ceil() as f32,
             }),
             ..Default::default()
         };

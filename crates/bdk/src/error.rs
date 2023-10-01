@@ -138,7 +138,7 @@ impl fmt::Display for Error {
             Self::FeeRateTooLow { required } => write!(
                 f,
                 "Fee rate too low: required {} sat/vbyte",
-                required.as_sat_per_vb()
+                required.to_sat_per_vb_ceil()
             ),
             Self::FeeTooLow { required } => write!(f, "Fee to low: required {} sat", required),
             Self::FeeRateUnavailable => write!(f, "Fee rate unavailable"),
