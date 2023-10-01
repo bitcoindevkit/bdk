@@ -108,10 +108,10 @@ pub fn get_funded_wallet(descriptor: &str) -> (Wallet, bitcoin::Txid) {
     get_funded_wallet_with_change(descriptor, None)
 }
 
-// This PKH can be obtained in testnet by using the 12-word seed
-// abandon x 11 + cactus and getting the first receiving address.
+// This PKH WIF was taken from example 5 in
+// https://github.com/libbitcoin/libbitcoin-explorer/wiki/bx-ec-to-wif
 pub fn get_test_pkh() -> &'static str {
-    "pkh(0275d93539d503d824ad0c69a4c23ae480700489de09378ba32c1776cf86d6bb93)"
+    "pkh(cNJFgo1driFnPcBdBX8BrJrpxchBWXwXCvNH5SoSkdcF6JXXwHMm)"
 }
 
 pub fn get_test_wpkh() -> &'static str {

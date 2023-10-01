@@ -552,10 +552,6 @@ fn test_create_tx_default_fee_rate() {
     assert_fee_rate!(psbt, fee.unwrap_or(0), FeeRate::default(), @add_signature);
 }
 
-// FIXME: Something is going on
-// thread 'test_legacy_create_tx_custom_fee_rate' panicked at 'assertion failed: `(left == right)`
-//  left: `FeeRate(9.537815)`,
-// right: `FeeRate(5.0)`'
 #[test]
 fn test_legacy_create_tx_custom_fee_rate() {
     let (mut wallet, _) = get_funded_wallet(get_test_pkh());
@@ -564,9 +560,16 @@ fn test_legacy_create_tx_custom_fee_rate() {
     builder
         .add_recipient(addr.script_pubkey(), 25_000)
         .fee_rate(FeeRate::from_sat_per_vb(5.0));
-    let psbt = builder.finish().unwrap();
+    let mut psbt = builder.finish().unwrap();
 
-    assert_eq!(psbt.fee_rate().unwrap(), FeeRate::from_sat_per_vb(5.0));
+    // sign the transaction
+    wallet.sign(&mut psbt, SignOptions::default()).unwrap();
+
+    assert_delta!(
+        psbt.fee_rate().unwrap(),
+        FeeRate::from_sat_per_vb(5.0),
+        FeeRate::from_sat_per_vb(0.6)
+    )
 }
 
 #[test]
