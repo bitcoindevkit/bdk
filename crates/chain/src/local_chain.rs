@@ -5,6 +5,7 @@ use core::convert::Infallible;
 use crate::collections::BTreeMap;
 use crate::{BlockId, ChainOracle};
 use alloc::sync::Arc;
+use bitcoin::hashes::Hash;
 use bitcoin::BlockHash;
 
 /// A structure that represents changes to [`LocalChain`].
@@ -37,6 +38,39 @@ impl CheckPoint {
     /// Construct a new base block at the front of a linked list.
     pub fn new(block: BlockId) -> Self {
         Self(Arc::new(CPInner { block, prev: None }))
+    }
+
+    /// Construct a checkpoint from the given `header` and block `height`.
+    ///
+    /// If `header` is of the genesis block, the checkpoint won't have a [`prev`] node. Otherwise,
+    /// we return a checkpoint linked with the previous block.
+    ///
+    /// [`prev`]: CheckPoint::prev
+    pub fn from_header(header: &bitcoin::block::Header, height: u32) -> Self {
+        let hash = header.block_hash();
+        let this_block_id = BlockId { height, hash };
+
+        if header.prev_blockhash == BlockHash::all_zeros() {
+            return Self::new(this_block_id);
+        }
+
+        let height = height - 1;
+        let hash = header.prev_blockhash;
+        let prev_block_id = BlockId { height, hash };
+
+        CheckPoint::new(prev_block_id)
+            .extend(core::iter::once(this_block_id))
+            .expect("must construct checkpoint")
+    }
+
+    /// Convenience method to convert the [`CheckPoint`] into an [`Update`].
+    ///
+    /// For more information, refer to [`Update`].
+    pub fn into_update(self, introduce_older_blocks: bool) -> Update {
+        Update {
+            tip: self,
+            introduce_older_blocks,
+        }
     }
 
     /// Puts another checkpoint onto the linked list representing the blockchain.

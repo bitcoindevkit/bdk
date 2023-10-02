@@ -12,10 +12,9 @@ use bdk_bitcoind_rpc::{
     EmittedBlock, Emitter, MempoolTx,
 };
 use bdk_chain::{
-    bitcoin::{hashes::Hash, BlockHash},
     indexed_tx_graph, keychain,
     local_chain::{self, CheckPoint, LocalChain},
-    BlockId, ConfirmationTimeAnchor, IndexedTxGraph,
+    ConfirmationTimeAnchor, IndexedTxGraph,
 };
 use example_cli::{
     anyhow,
@@ -168,25 +167,9 @@ fn main() -> anyhow::Result<()> {
             let mut last_db_commit = Instant::now();
 
             while let Some(block) = emitter.next_block()? {
-                let this_id = BlockId {
-                    height: block.height,
-                    hash: block.block.block_hash(),
-                };
-                let update_cp = if block.block.header.prev_blockhash == BlockHash::all_zeros() {
-                    CheckPoint::new(this_id)
-                } else {
-                    CheckPoint::new(BlockId {
-                        height: block.height - 1,
-                        hash: block.block.header.prev_blockhash,
-                    })
-                    .extend(core::iter::once(this_id))
-                    .expect("must construct checkpoint")
-                };
-
-                let chain_changeset = chain.apply_update(local_chain::Update {
-                    tip: update_cp,
-                    introduce_older_blocks: false,
-                })?;
+                let chain_update =
+                    CheckPoint::from_header(&block.block.header, block.height).into_update(false);
+                let chain_changeset = chain.apply_update(chain_update)?;
                 let graph_changeset = graph.apply_block(block.block, block.height);
 
                 db.stage((chain_changeset, graph_changeset));
@@ -262,25 +245,10 @@ fn main() -> anyhow::Result<()> {
             for emission in rx {
                 let changeset = match emission {
                     Emission::Block(block) => {
-                        let this_id = BlockId {
-                            height: block.height,
-                            hash: block.block.block_hash(),
-                        };
-                        let update_cp =
-                            if block.block.header.prev_blockhash == BlockHash::all_zeros() {
-                                CheckPoint::new(this_id)
-                            } else {
-                                CheckPoint::new(BlockId {
-                                    height: block.height - 1,
-                                    hash: block.block.header.prev_blockhash,
-                                })
-                                .extend(core::iter::once(this_id))
-                                .expect("must construct checkpoint")
-                            };
-                        let chain_changeset = chain.apply_update(local_chain::Update {
-                            tip: update_cp,
-                            introduce_older_blocks: false,
-                        })?;
+                        let chain_update =
+                            CheckPoint::from_header(&block.block.header, block.height)
+                                .into_update(false);
+                        let chain_changeset = chain.apply_update(chain_update)?;
                         let graph_changeset = graph.apply_block(block.block, block.height);
                         (chain_changeset, graph_changeset)
                     }
