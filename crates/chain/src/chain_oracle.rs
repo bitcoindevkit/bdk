@@ -17,7 +17,7 @@ pub trait ChainOracle {
     fn is_block_in_chain(
         &self,
         block: BlockId,
-        chain_tip: Option<&BlockId>,
+        chain_tip: BlockId,
     ) -> Result<Option<bool>, Self::Error>;
 
     /// Get the best chain's chain tip.

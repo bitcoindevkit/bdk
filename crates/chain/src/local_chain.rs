@@ -174,13 +174,8 @@ impl ChainOracle for LocalChain {
     fn is_block_in_chain(
         &self,
         block: BlockId,
-        chain_tip: Option<&BlockId>,
+        chain_tip: BlockId,
     ) -> Result<Option<bool>, Self::Error> {
-        let chain_tip = match chain_tip {
-            Some(x) => x,
-            None => return Ok(None),
-        };
-
         if block.height > chain_tip.height {
             return Ok(None);
         }

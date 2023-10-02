@@ -665,13 +665,18 @@ impl<A: Anchor> TxGraph<A> {
         chain_tip: Option<BlockId>,
         txid: Txid,
     ) -> Result<Option<ChainPosition<&A>>, C::Error> {
+        let chain_tip = match chain_tip {
+            Some(tip) => tip,
+            None => return Ok(None),
+        };
+
         let (tx_node, anchors, last_seen) = match self.txs.get(&txid) {
             Some(v) => v,
             None => return Ok(None),
         };
 
         for anchor in anchors {
-            match chain.is_block_in_chain(anchor.anchor_block(), chain_tip.as_ref())? {
+            match chain.is_block_in_chain(anchor.anchor_block(), chain_tip)? {
                 Some(true) => return Ok(Some(ChainPosition::Confirmed(anchor))),
                 _ => continue,
             }
@@ -691,7 +696,7 @@ impl<A: Anchor> TxGraph<A> {
         // this tx cannot exist in the best chain
         for conflicting_tx in self.walk_conflicts(tx, |_, txid| self.get_tx_node(txid)) {
             for block in conflicting_tx.anchors.iter().map(A::anchor_block) {
-                if chain.is_block_in_chain(block, chain_tip.as_ref())? == Some(true) {
+                if chain.is_block_in_chain(block, chain_tip)? == Some(true) {
                     // conflicting tx is in best chain, so the current tx cannot be in best chain!
                     return Ok(None);
                 }
