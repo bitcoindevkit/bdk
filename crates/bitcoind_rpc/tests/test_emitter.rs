@@ -662,3 +662,58 @@ fn mempool_during_reorg() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+/// If blockchain re-org includes the start height, emit new start height block
+///
+/// 1. mine 101 blocks
+/// 2. emmit blocks 99a, 100a
+/// 3. invalidate blocks 99a, 100a, 101a
+/// 4. mine new blocks 99b, 100b, 101b
+/// 5. emmit block 99b
+///
+/// The block hash of 99b should be different than 99a, but their previous block hashes should
+/// be the same.
+#[test]
+fn no_agreement_point() -> anyhow::Result<()> {
+    const PREMINE_COUNT: usize = 101;
+
+    let env = TestEnv::new()?;
+
+    // start height is 99
+    let mut emitter = Emitter::new(&env.client, (PREMINE_COUNT - 2) as u32);
+
+    // mine 101 blocks
+    let addr = env.client.get_new_address(None, None)?.assume_checked();
+    env.mine_blocks(PREMINE_COUNT, Some(addr.clone()))?;
+
+    // emit block 99a
+    let block_header_99a = emitter.next_header()?.expect("block 99a header");
+    let block_hash_99a = block_header_99a.header.block_hash();
+    let block_hash_98a = block_header_99a.header.prev_blockhash;
+
+    // emit block 100a
+    let block_header_100a = emitter.next_header()?.expect("block 100a header");
+    let block_hash_100a = block_header_100a.header.block_hash();
+
+    // get hash for block 101a
+    let block_hash_101a = env.client.get_block_hash(101)?;
+
+    // invalidate blocks 99a, 100a, 101a
+    env.client.invalidate_block(&block_hash_99a)?;
+    env.client.invalidate_block(&block_hash_100a)?;
+    env.client.invalidate_block(&block_hash_101a)?;
+
+    // mine new blocks 99b, 100b, 101b
+    let addr = env.client.get_new_address(None, None)?.assume_checked();
+    env.mine_blocks(3, Some(addr.clone()))?;
+
+    // emit block header 99b
+    let block_header_99b = emitter.next_header()?.expect("block 99b header");
+    let block_hash_99b = block_header_99b.header.block_hash();
+    let block_hash_98b = block_header_99b.header.prev_blockhash;
+
+    assert_ne!(block_hash_99a, block_hash_99b);
+    assert_eq!(block_hash_98a, block_hash_98b);
+
+    Ok(())
+}
