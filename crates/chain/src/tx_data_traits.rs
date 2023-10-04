@@ -76,10 +76,17 @@ pub trait Anchor: core::fmt::Debug + Clone + Eq + PartialOrd + Ord + core::hash:
     }
 }
 
-impl<A: Anchor> Anchor for &'static A {
+impl<'a, A: Anchor> Anchor for &'a A {
     fn anchor_block(&self) -> BlockId {
         <A as Anchor>::anchor_block(self)
     }
+}
+
+/// An [`Anchor`] that can be constructed from a given block, block height and transaction position
+/// within the block.
+pub trait AnchorFromBlockPosition: Anchor {
+    /// Construct the anchor from a given `block`, block height and `tx_pos` within the block.
+    fn from_block_position(block: &bitcoin::Block, block_id: BlockId, tx_pos: usize) -> Self;
 }
 
 /// Trait that makes an object appendable.
