@@ -39,6 +39,41 @@ impl CheckPoint {
         Self(Arc::new(CPInner { block, prev: None }))
     }
 
+    /// Construct a checkpoint from the given `header` and block `height`.
+    ///
+    /// If `header` is of the genesis block, the checkpoint won't have a [`prev`] node. Otherwise,
+    /// we return a checkpoint linked with the previous block.
+    ///
+    /// [`prev`]: CheckPoint::prev
+    pub fn from_header(header: &bitcoin::block::Header, height: u32) -> Self {
+        let hash = header.block_hash();
+        let this_block_id = BlockId { height, hash };
+
+        let prev_height = match height.checked_sub(1) {
+            Some(h) => h,
+            None => return Self::new(this_block_id),
+        };
+
+        let prev_block_id = BlockId {
+            height: prev_height,
+            hash: header.prev_blockhash,
+        };
+
+        CheckPoint::new(prev_block_id)
+            .push(this_block_id)
+            .expect("must construct checkpoint")
+    }
+
+    /// Convenience method to convert the [`CheckPoint`] into an [`Update`].
+    ///
+    /// For more information, refer to [`Update`].
+    pub fn into_update(self, introduce_older_blocks: bool) -> Update {
+        Update {
+            tip: self,
+            introduce_older_blocks,
+        }
+    }
+
     /// Puts another checkpoint onto the linked list representing the blockchain.
     ///
     /// Returns an `Err(self)` if the block you are pushing on is not at a greater height that the one you
