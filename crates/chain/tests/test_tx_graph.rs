@@ -5,7 +5,7 @@ use bdk_chain::{
     collections::*,
     local_chain::LocalChain,
     tx_graph::{ChangeSet, TxGraph},
-    Anchor, Append, BlockId, ChainPosition, ConfirmationHeightAnchor,
+    Anchor, Append, BlockId, ChainOracle, ChainPosition, ConfirmationHeightAnchor,
 };
 use bitcoin::{
     absolute, hashes::Hash, BlockHash, OutPoint, ScriptBuf, Transaction, TxIn, TxOut, Txid,
@@ -496,6 +496,208 @@ fn test_calculate_fee_on_coinbase() {
     assert_eq!(graph.calculate_fee(&tx), Ok(0));
 }
 
+// `test_walk_ancestors` uses the following transaction structure:
+//
+//     a0
+//    /  \
+//   b0   b1   b2
+//  /  \   \  /
+// c0  c1   c2  c3
+//    /      \  /
+//   d0       d1
+//             \
+//              e0
+//
+// where b0 and b1 spend a0, c0 and c1 spend b0, d0 spends c1, etc.
+#[test]
+fn test_walk_ancestors() {
+    let local_chain: LocalChain = (0..=20)
+        .map(|ht| (ht, BlockHash::hash(format!("Block Hash {}", ht).as_bytes())))
+        .collect::<BTreeMap<u32, BlockHash>>()
+        .into();
+    let tip = local_chain.tip().expect("must have tip");
+
+    let tx_a0 = Transaction {
+        input: vec![TxIn {
+            previous_output: OutPoint::new(h!("op0"), 0),
+            ..TxIn::default()
+        }],
+        output: vec![TxOut::default(), TxOut::default()],
+        ..common::new_tx(0)
+    };
+
+    // tx_b0 spends tx_a0
+    let tx_b0 = Transaction {
+        input: vec![TxIn {
+            previous_output: OutPoint::new(tx_a0.txid(), 0),
+            ..TxIn::default()
+        }],
+        output: vec![TxOut::default(), TxOut::default()],
+        ..common::new_tx(0)
+    };
+
+    // tx_b1 spends tx_a0
+    let tx_b1 = Transaction {
+        input: vec![TxIn {
+            previous_output: OutPoint::new(tx_a0.txid(), 1),
+            ..TxIn::default()
+        }],
+        output: vec![TxOut::default()],
+        ..common::new_tx(0)
+    };
+
+    let tx_b2 = Transaction {
+        input: vec![TxIn {
+            previous_output: OutPoint::new(h!("op1"), 0),
+            ..TxIn::default()
+        }],
+        output: vec![TxOut::default()],
+        ..common::new_tx(0)
+    };
+
+    // tx_c0 spends tx_b0
+    let tx_c0 = Transaction {
+        input: vec![TxIn {
+            previous_output: OutPoint::new(tx_b0.txid(), 0),
+            ..TxIn::default()
+        }],
+        output: vec![TxOut::default()],
+        ..common::new_tx(0)
+    };
+
+    // tx_c1 spends tx_b0
+    let tx_c1 = Transaction {
+        input: vec![TxIn {
+            previous_output: OutPoint::new(tx_b0.txid(), 1),
+            ..TxIn::default()
+        }],
+        output: vec![TxOut::default()],
+        ..common::new_tx(0)
+    };
+
+    // tx_c2 spends tx_b1 and tx_b2
+    let tx_c2 = Transaction {
+        input: vec![
+            TxIn {
+                previous_output: OutPoint::new(tx_b1.txid(), 0),
+                ..TxIn::default()
+            },
+            TxIn {
+                previous_output: OutPoint::new(tx_b2.txid(), 0),
+                ..TxIn::default()
+            },
+        ],
+        output: vec![TxOut::default()],
+        ..common::new_tx(0)
+    };
+
+    let tx_c3 = Transaction {
+        input: vec![TxIn {
+            previous_output: OutPoint::new(h!("op2"), 0),
+            ..TxIn::default()
+        }],
+        output: vec![TxOut::default()],
+        ..common::new_tx(0)
+    };
+
+    // tx_d0 spends tx_c1
+    let tx_d0 = Transaction {
+        input: vec![TxIn {
+            previous_output: OutPoint::new(tx_c1.txid(), 0),
+            ..TxIn::default()
+        }],
+        output: vec![TxOut::default()],
+        ..common::new_tx(0)
+    };
+
+    // tx_d1 spends tx_c2 and tx_c3
+    let tx_d1 = Transaction {
+        input: vec![
+            TxIn {
+                previous_output: OutPoint::new(tx_c2.txid(), 0),
+                ..TxIn::default()
+            },
+            TxIn {
+                previous_output: OutPoint::new(tx_c3.txid(), 0),
+                ..TxIn::default()
+            },
+        ],
+        output: vec![TxOut::default()],
+        ..common::new_tx(0)
+    };
+
+    // tx_e0 spends tx_d1
+    let tx_e0 = Transaction {
+        input: vec![TxIn {
+            previous_output: OutPoint::new(tx_d1.txid(), 0),
+            ..TxIn::default()
+        }],
+        output: vec![TxOut::default()],
+        ..common::new_tx(0)
+    };
+
+    let mut graph = TxGraph::<BlockId>::new(vec![
+        tx_a0.clone(),
+        tx_b0.clone(),
+        tx_b1.clone(),
+        tx_b2.clone(),
+        tx_c0.clone(),
+        tx_c1.clone(),
+        tx_c2.clone(),
+        tx_c3.clone(),
+        tx_d0.clone(),
+        tx_d1.clone(),
+        tx_e0.clone(),
+    ]);
+
+    [&tx_a0, &tx_b1].iter().for_each(|&tx| {
+        let _ = graph.insert_anchor(tx.txid(), tip.block_id());
+    });
+
+    let ancestors = [
+        graph
+            .walk_ancestors(&tx_c0, |depth, tx| Some((depth, tx)))
+            .collect::<Vec<_>>(),
+        graph
+            .walk_ancestors(&tx_d0, |depth, tx| Some((depth, tx)))
+            .collect::<Vec<_>>(),
+        graph
+            .walk_ancestors(&tx_e0, |depth, tx| Some((depth, tx)))
+            .collect::<Vec<_>>(),
+        // Only traverse unconfirmed ancestors of tx_e0 this time
+        graph
+            .walk_ancestors(&tx_e0, |depth, tx| {
+                let tx_node = graph.get_tx_node(tx.txid())?;
+                for block in tx_node.anchors {
+                    match local_chain.is_block_in_chain(block.anchor_block(), tip.block_id()) {
+                        Ok(Some(true)) => return None,
+                        _ => continue,
+                    }
+                }
+                Some((depth, tx_node.tx))
+            })
+            .collect::<Vec<_>>(),
+    ];
+
+    let expected_ancestors = [
+        vec![(1, &tx_b0), (2, &tx_a0)],
+        vec![(1, &tx_c1), (2, &tx_b0), (3, &tx_a0)],
+        vec![
+            (1, &tx_d1),
+            (2, &tx_c2),
+            (2, &tx_c3),
+            (3, &tx_b1),
+            (3, &tx_b2),
+            (4, &tx_a0),
+        ],
+        vec![(1, &tx_d1), (2, &tx_c2), (2, &tx_c3), (3, &tx_b2)],
+    ];
+
+    for (txids, expected_txids) in ancestors.iter().zip(expected_ancestors.iter()) {
+        assert_eq!(txids, expected_txids);
+    }
+}
+
 #[test]
 fn test_conflicting_descendants() {
     let previous_output = OutPoint::new(h!("op"), 2);
@@ -610,7 +812,7 @@ fn test_descendants_no_repeat() {
         .collect::<Vec<_>>();
 
     let mut graph = TxGraph::<()>::default();
-    let mut expected_txids = BTreeSet::new();
+    let mut expected_txids = Vec::new();
 
     // these are NOT descendants of `tx_a`
     for tx in txs_not_connected {
@@ -625,19 +827,14 @@ fn test_descendants_no_repeat() {
         .chain(core::iter::once(&tx_e))
     {
         let _ = graph.insert_tx(tx.clone());
-        assert!(expected_txids.insert(tx.txid()));
+        expected_txids.push(tx.txid());
     }
 
     let descendants = graph
         .walk_descendants(tx_a.txid(), |_, txid| Some(txid))
         .collect::<Vec<_>>();
 
-    assert_eq!(descendants.len(), expected_txids.len());
-
-    for txid in descendants {
-        assert!(expected_txids.remove(&txid));
-    }
-    assert!(expected_txids.is_empty());
+    assert_eq!(descendants, expected_txids);
 }
 
 #[test]
