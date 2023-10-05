@@ -451,6 +451,23 @@ impl<A: Clone + Ord> TxGraph<A> {
         self.apply_update(update)
     }
 
+    /// Batch insert unconfirmed transactions.
+    ///
+    /// Items of `txs` are tuples containing the transaction and a *last seen* timestamp. The
+    /// *last seen* communicates when the transaction is last seen in the mempool which is used for
+    /// conflict-resolution (refer to [`TxGraph::insert_seen_at`] for details).
+    pub fn batch_insert_unconfirmed(
+        &mut self,
+        txs: impl IntoIterator<Item = (Transaction, u64)>,
+    ) -> ChangeSet<A> {
+        let mut changeset = ChangeSet::<A>::default();
+        for (tx, seen_at) in txs {
+            changeset.append(self.insert_seen_at(tx.txid(), seen_at));
+            changeset.append(self.insert_tx(tx));
+        }
+        changeset
+    }
+
     /// Inserts the given `anchor` into [`TxGraph`].
     ///
     /// The [`ChangeSet`] returned will be empty if graph already knows that `txid` exists in

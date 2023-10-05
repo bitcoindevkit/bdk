@@ -212,8 +212,7 @@ fn main() -> anyhow::Result<()> {
 
             // mempool
             let mempool_txs = emitter.mempool()?;
-            let graph_changeset = graph
-                .batch_insert_unconfirmed(mempool_txs.iter().map(|(tx, time)| (tx, Some(*time))));
+            let graph_changeset = graph.batch_insert_unconfirmed(mempool_txs);
             db.stage((local_chain::ChangeSet::default(), graph_changeset));
 
             // commit one last time!
@@ -291,7 +290,7 @@ fn main() -> anyhow::Result<()> {
                     }
                     Emission::Mempool(mempool_txs) => {
                         let graph_changeset = graph.batch_insert_relevant_unconfirmed(
-                            mempool_txs.iter().map(|(tx, time)| (tx, Some(*time))),
+                            mempool_txs.iter().map(|(tx, time)| (tx, *time)),
                         );
                         (local_chain::ChangeSet::default(), graph_changeset)
                     }

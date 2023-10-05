@@ -74,7 +74,7 @@ fn insert_relevant_txs() {
     };
 
     assert_eq!(
-        graph.batch_insert_relevant(txs.iter().map(|tx| (tx, None, None))),
+        graph.batch_insert_relevant(txs.iter().map(|tx| (tx, None))),
         changeset,
     );
 
@@ -225,11 +225,10 @@ fn test_list_owned_txouts() {
                         anchor_block,
                         confirmation_height: anchor_block.height,
                     }),
-                None,
             )
         }));
 
-    let _ = graph.batch_insert_relevant([&tx4, &tx5].iter().map(|tx| (*tx, None, Some(100))));
+    let _ = graph.batch_insert_relevant_unconfirmed([&tx4, &tx5].iter().map(|tx| (*tx, 100)));
 
     // A helper lambda to extract and filter data from the graph.
     let fetch =

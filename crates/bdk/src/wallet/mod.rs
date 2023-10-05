@@ -509,7 +509,7 @@ impl<D> Wallet<D> {
     where
         D: PersistBackend<ChangeSet>,
     {
-        let additions = self.indexed_graph.insert_txout(outpoint, &txout);
+        let additions = self.indexed_graph.insert_txout(outpoint, txout);
         self.persist.stage(ChangeSet::from(additions));
     }
 

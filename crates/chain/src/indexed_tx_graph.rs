@@ -72,32 +72,34 @@ impl<A: Anchor, I: Indexer> IndexedTxGraph<A, I>
 where
     I::ChangeSet: Default + Append,
 {
+    fn index_tx_graph_changeset(
+        &mut self,
+        tx_graph_changeset: &tx_graph::ChangeSet<A>,
+    ) -> I::ChangeSet {
+        let mut changeset = I::ChangeSet::default();
+        for added_tx in &tx_graph_changeset.txs {
+            changeset.append(self.index.index_tx(added_tx));
+        }
+        for (&added_outpoint, added_txout) in &tx_graph_changeset.txouts {
+            changeset.append(self.index.index_txout(added_outpoint, added_txout));
+        }
+        changeset
+    }
+
     /// Apply an `update` directly.
     ///
     /// `update` is a [`TxGraph<A>`] and the resultant changes is returned as [`ChangeSet`].
     pub fn apply_update(&mut self, update: TxGraph<A>) -> ChangeSet<A, I::ChangeSet> {
         let graph = self.graph.apply_update(update);
-
-        let mut indexer = I::ChangeSet::default();
-        for added_tx in &graph.txs {
-            indexer.append(self.index.index_tx(added_tx));
-        }
-        for (&added_outpoint, added_txout) in &graph.txouts {
-            indexer.append(self.index.index_txout(added_outpoint, added_txout));
-        }
-
+        let indexer = self.index_tx_graph_changeset(&graph);
         ChangeSet { graph, indexer }
     }
 
     /// Insert a floating `txout` of given `outpoint`.
-    pub fn insert_txout(
-        &mut self,
-        outpoint: OutPoint,
-        txout: &TxOut,
-    ) -> ChangeSet<A, I::ChangeSet> {
-        let mut update = TxGraph::<A>::default();
-        let _ = update.insert_txout(outpoint, txout.clone());
-        self.apply_update(update)
+    pub fn insert_txout(&mut self, outpoint: OutPoint, txout: TxOut) -> ChangeSet<A, I::ChangeSet> {
+        let graph = self.graph.insert_txout(outpoint, txout);
+        let indexer = self.index_tx_graph_changeset(&graph);
+        ChangeSet { graph, indexer }
     }
 
     /// Insert and index a transaction into the graph.
@@ -112,18 +114,19 @@ where
     ) -> ChangeSet<A, I::ChangeSet> {
         let txid = tx.txid();
 
-        let mut update = TxGraph::<A>::default();
+        let mut graph = tx_graph::ChangeSet::default();
         if self.graph.get_tx(txid).is_none() {
-            let _ = update.insert_tx(tx.clone());
+            graph.append(self.graph.insert_tx(tx.clone()));
         }
         for anchor in anchors.into_iter() {
-            let _ = update.insert_anchor(txid, anchor);
+            graph.append(self.graph.insert_anchor(txid, anchor));
         }
         if let Some(seen_at) = seen_at {
-            let _ = update.insert_seen_at(txid, seen_at);
+            graph.append(self.graph.insert_seen_at(txid, seen_at));
         }
 
-        self.apply_update(update)
+        let indexer = self.index_tx_graph_changeset(&graph);
+        ChangeSet { graph, indexer }
     }
 
     /// Batch insert transactions, filtering out those that are irrelevant.
@@ -132,7 +135,7 @@ where
     /// transactions in `txs` will be ignored. `txs` do not need to be in topological order.
     pub fn batch_insert_relevant<'t>(
         &mut self,
-        txs: impl IntoIterator<Item = InsertTxItem<'t, impl IntoIterator<Item = A>>>,
+        txs: impl IntoIterator<Item = (&'t Transaction, impl IntoIterator<Item = A>)>,
     ) -> ChangeSet<A, I::ChangeSet> {
         // The algorithm below allows for non-topologically ordered transactions by using two loops.
         // This is achieved by:
@@ -140,38 +143,25 @@ where
         //    not store anything about them.
         // 2. decide whether to insert them into the graph depending on whether `is_tx_relevant`
         //    returns true or not. (in a second loop).
-        let mut changeset = ChangeSet::<A, I::ChangeSet>::default();
+        let txs = txs.into_iter().collect::<Vec<_>>();
 
-        let txs = txs
-            .into_iter()
-            .inspect(|(tx, _, _)| changeset.indexer.append(self.index.index_tx(tx)))
-            .collect::<Vec<_>>();
+        let mut indexer = I::ChangeSet::default();
+        for (tx, _) in &txs {
+            indexer.append(self.index.index_tx(tx));
+        }
 
-        for (tx, anchors, seen_at) in txs {
+        let mut graph = tx_graph::ChangeSet::default();
+        for (tx, anchors) in txs {
             if self.index.is_tx_relevant(tx) {
-                changeset.append(self.insert_tx(tx, anchors, seen_at));
+                let txid = tx.txid();
+                graph.append(self.graph.insert_tx(tx.clone()));
+                for anchor in anchors {
+                    graph.append(self.graph.insert_anchor(txid, anchor));
+                }
             }
         }
 
-        changeset
-    }
-
-    /// Batch insert transactions.
-    ///
-    /// All transactions in `txs` will be inserted. To filter out irrelevant transactions, use
-    /// [`batch_insert_relevant`] instead.
-    ///
-    /// [`batch_insert_relevant`]: IndexedTxGraph::batch_insert_relevant
-    pub fn batch_insert<'t>(
-        &mut self,
-        txs: impl IntoIterator<Item = InsertTxItem<'t, impl IntoIterator<Item = A>>>,
-    ) -> ChangeSet<A, I::ChangeSet> {
-        let mut changeset = ChangeSet::<A, I::ChangeSet>::default();
-        for (tx, anchors, seen_at) in txs {
-            changeset.indexer.append(self.index.index_tx(tx));
-            changeset.append(self.insert_tx(tx, anchors, seen_at));
-        }
-        changeset
+        ChangeSet { graph, indexer }
     }
 
     /// Batch insert unconfirmed transactions, filtering out those that are irrelevant.
@@ -179,38 +169,51 @@ where
     /// Relevancy is determined by the internal [`Indexer::is_tx_relevant`] implementation of `I`.
     /// Irrelevant tansactions in `txs` will be ignored.
     ///
-    /// Items of `txs` are tuples containing the transaction and an optional *last seen* timestamp.
-    /// The *last seen* communicates when the transaction is last seen in the mempool which is used
-    /// for conflict-resolution in [`TxGraph`] (refer to [`TxGraph::insert_seen_at`] for details).
+    /// Items of `txs` are tuples containing the transaction and a *last seen* timestamp. The
+    /// *last seen* communicates when the transaction is last seen in the mempool which is used for
+    /// conflict-resolution in [`TxGraph`] (refer to [`TxGraph::insert_seen_at`] for details).
     pub fn batch_insert_relevant_unconfirmed<'t>(
         &mut self,
-        unconfirmed_txs: impl IntoIterator<Item = (&'t Transaction, Option<u64>)>,
+        unconfirmed_txs: impl IntoIterator<Item = (&'t Transaction, u64)>,
     ) -> ChangeSet<A, I::ChangeSet> {
-        self.batch_insert_relevant(
-            unconfirmed_txs
-                .into_iter()
-                .map(|(tx, last_seen)| (tx, core::iter::empty(), last_seen)),
-        )
+        // The algorithm below allows for non-topologically ordered transactions by using two loops.
+        // This is achieved by:
+        // 1. insert all txs into the index. If they are irrelevant then that's fine it will just
+        //    not store anything about them.
+        // 2. decide whether to insert them into the graph depending on whether `is_tx_relevant`
+        //    returns true or not. (in a second loop).
+        let txs = unconfirmed_txs.into_iter().collect::<Vec<_>>();
+
+        let mut indexer = I::ChangeSet::default();
+        for (tx, _) in &txs {
+            indexer.append(self.index.index_tx(tx));
+        }
+
+        let graph = self.graph.batch_insert_unconfirmed(
+            txs.into_iter()
+                .filter(|(tx, _)| self.index.is_tx_relevant(tx))
+                .map(|(tx, seen_at)| (tx.clone(), seen_at)),
+        );
+
+        ChangeSet { graph, indexer }
     }
 
     /// Batch insert unconfirmed transactions.
     ///
-    /// Items of `txs` are tuples containing the transaction and an optional *last seen* timestamp.
-    /// The *last seen* communicates when the transaction is last seen in the mempool which is used
-    /// for conflict-resolution in [`TxGraph`] (refer to [`TxGraph::insert_seen_at`] for details).
+    /// Items of `txs` are tuples containing the transaction and a *last seen* timestamp. The
+    /// *last seen* communicates when the transaction is last seen in the mempool which is used for
+    /// conflict-resolution in [`TxGraph`] (refer to [`TxGraph::insert_seen_at`] for details).
     ///
     /// To filter out irrelevant transactions, use [`batch_insert_relevant_unconfirmed`] instead.
     ///
     /// [`batch_insert_relevant_unconfirmed`]: IndexedTxGraph::batch_insert_relevant_unconfirmed
-    pub fn batch_insert_unconfirmed<'t>(
+    pub fn batch_insert_unconfirmed(
         &mut self,
-        unconfirmed_txs: impl IntoIterator<Item = (&'t Transaction, Option<u64>)>,
+        txs: impl IntoIterator<Item = (Transaction, u64)>,
     ) -> ChangeSet<A, I::ChangeSet> {
-        self.batch_insert(
-            unconfirmed_txs
-                .into_iter()
-                .map(|(tx, last_seen)| (tx, core::iter::empty(), last_seen)),
-        )
+        let graph = self.graph.batch_insert_unconfirmed(txs);
+        let indexer = self.index_tx_graph_changeset(&graph);
+        ChangeSet { graph, indexer }
     }
 }
 
@@ -241,7 +244,6 @@ where
             (
                 tx,
                 core::iter::once(A::from_block_position(&block, block_id, tx_pos)),
-                None,
             )
         });
         self.batch_insert_relevant(txs)
@@ -260,29 +262,16 @@ where
             hash: block.block_hash(),
             height,
         };
-        let txs = block.txdata.iter().enumerate().map(|(tx_pos, tx)| {
-            (
-                tx,
-                core::iter::once(A::from_block_position(&block, block_id, tx_pos)),
-                None,
-            )
-        });
-        self.batch_insert(txs)
+        let mut graph = tx_graph::ChangeSet::default();
+        for (tx_pos, tx) in block.txdata.iter().enumerate() {
+            let anchor = A::from_block_position(&block, block_id, tx_pos);
+            graph.append(self.graph.insert_anchor(tx.txid(), anchor));
+            graph.append(self.graph.insert_tx(tx.clone()));
+        }
+        let indexer = self.index_tx_graph_changeset(&graph);
+        ChangeSet { graph, indexer }
     }
 }
-
-/// A tuple of a transaction, and associated metadata, that are to be inserted into [`IndexedTxGraph`].
-///
-/// This tuple contains fields in the following order:
-/// * A reference to the transaction.
-/// * A collection of [`Anchor`]s.
-/// * An optional last-seen timestamp.
-///
-/// This is used as a input item of [`batch_insert_relevant`] and [`batch_insert`].
-///
-/// [`batch_insert_relevant`]: IndexedTxGraph::batch_insert_relevant
-/// [`batch_insert`]: IndexedTxGraph::batch_insert
-pub type InsertTxItem<'t, A> = (&'t Transaction, A, Option<u64>);
 
 /// A structure that represents changes to an [`IndexedTxGraph`].
 #[derive(Clone, Debug, PartialEq)]
