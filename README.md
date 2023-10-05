@@ -221,12 +221,16 @@ cargo update -p regex --precise "1.7.3"
 cargo update -p zip:0.6.6 --precise "0.6.3"
 # rustix 0.38.0 has MSRV 1.65.0
 cargo update -p rustix --precise "0.37.23"
-# tokio 0.30.0 has MSRV 1.63.0
+# tokio 1.30 has MSRV 1.63.0+
 cargo update -p tokio --precise "1.29.1"
+# tokio-util 0.7.9 doesn't build with MSRV 1.57.0
+cargo update -p tokio-util --precise "0.7.8"
 # cc 1.0.82 is throwing error with rust 1.57.0, "error[E0599]: no method named `retain_mut`..."
 cargo update -p cc --precise "1.0.81"
+# rustls 0.20.9 has MSRV 1.60.0+
+cargo update -p rustls:0.20.9 --precise "0.20.8"
 # rustls 0.21.2 has MSRV 1.60.0+
-cargo update -p rustls:0.21.6 --precise "0.21.1"
+cargo update -p rustls:0.21.7 --precise "0.21.1"
 # flate2 1.0.27 has MSRV 1.63.0+
 cargo update -p flate2:1.0.27 --precise "1.0.26"
 # reqwest 0.11.19 has MSRV 1.63.0+
@@ -234,5 +238,7 @@ cargo update -p reqwest --precise "0.11.18"
 # h2 0.3.21 has MSRV 1.63.0+
 cargo update -p h2 --precise "0.3.20"
 # rustls-webpki 0.100.2 has MSRV 1.60+
-cargo update -p rustls-webpki --precise "0.100.2"
+cargo update -p rustls-webpki:0.100.3 --precise "0.100.1"
+# rustls-webpki 0.101.6 has MSRV 1.60+
+cargo update -p rustls-webpki:0.101.6 --precise "0.101.1"
 ```
