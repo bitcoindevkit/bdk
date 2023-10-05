@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.29.0]
+
+### Summary
+
+This maintenance release updates our `rust-bitcoin` dependency to 0.30.x and fixes a wallet balance bug when a wallet has more than one coinbase transaction.
+
+### Changed
+
+- Update rust-bitcoin to 0.30 #1071
+
+### Fixed
+
+- Fix a bug when syncing coinbase utxos on electrum #1090
+
 ## [v0.28.2]
 
 ### Summary
@@ -678,4 +692,5 @@ final transaction is created by calling `finish` on the builder.
 [v0.28.0]: https://github.com/bitcoindevkit/bdk/compare/v0.27.1...v0.28.0
 [v0.28.1]: https://github.com/bitcoindevkit/bdk/compare/v0.28.0...v0.28.1
 [v0.28.2]: https://github.com/bitcoindevkit/bdk/compare/v0.28.1...v0.28.2
-[Unreleased]: https://github.com/bitcoindevkit/bdk/compare/v0.28.2...HEAD
+[v0.29.0]: https://github.com/bitcoindevkit/bdk/compare/v0.28.2...v0.29.0
+[Unreleased]: https://github.com/bitcoindevkit/bdk/compare/v0.29.0...HEAD
