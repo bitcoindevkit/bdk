@@ -368,7 +368,8 @@ fn test_into_tx_graph() -> anyhow::Result<()> {
     // must receive mined block which will confirm the transactions.
     {
         let (height, block) = emitter.next_block()?.expect("must get mined block");
-        let _ = chain.apply_update(block_to_chain_update(&block, height))?;
+        let _ = chain
+            .apply_update(CheckPoint::from_header(&block.header, height).into_update(false))?;
         let indexed_additions = indexed_tx_graph.apply_block_relevant(block, height);
         assert!(indexed_additions.graph.txs.is_empty());
         assert!(indexed_additions.graph.txouts.is_empty());
@@ -685,34 +686,59 @@ fn mempool_during_reorg() -> anyhow::Result<()> {
         env.send(&addr, Amount::from_sat(2100))?;
     }
 
-    // perform reorgs at different heights
-    for reorg_count in 1..TIP_DIFF {
-        // sync emitter to tip
-        while emitter.next_header()?.is_some() {}
+    // sync emitter to tip, first mempool emission should include all txs (as we haven't emitted
+    // from the mempool yet)
+    while emitter.next_header()?.is_some() {}
+    assert_eq!(
+        emitter
+            .mempool()?
+            .into_iter()
+            .map(|(tx, _)| tx.txid())
+            .collect::<BTreeSet<_>>(),
+        env.client
+            .get_raw_mempool()?
+            .into_iter()
+            .collect::<BTreeSet<_>>(),
+        "first mempool emission should include all txs",
+    );
 
+    // perform reorgs at different heights, these reorgs will not comfirm transactions in the
+    // mempool
+    for reorg_count in 1..TIP_DIFF {
         println!("REORG COUNT: {}", reorg_count);
         env.reorg_empty_blocks(reorg_count)?;
 
-        // we recalculate this at every loop as reorgs may evict transactions from mempool
-        let tx_introductions = env
+        // This is a map of mempool txids to tip height where the tx was introduced to the mempool
+        // we recalculate this at every loop as reorgs may evict transactions from mempool. We use
+        // the introduction height to determine whether we expect a tx to appear in a mempool
+        // emission.
+        // TODO: How can have have reorg logic in `TestEnv` NOT blacklast old blocks first?
+        let tx_introductions = dbg!(env
             .client
             .get_raw_mempool_verbose()?
             .into_iter()
             .map(|(txid, entry)| (txid, entry.height as usize))
-            .collect::<BTreeMap<_, _>>();
+            .collect::<BTreeMap<_, _>>());
 
+        // `next_header` emits the replacement block of the reorg
         if let Some((height, _)) = emitter.next_header()? {
-            // the mempool emission (that follows the first block emission after reorg) should return
-            // the entire mempool contents
+            println!("\t- replacement height: {}", height);
+
+            // the mempool emission (that follows the first block emission after reorg) should only
+            // include mempool txs introduced at reorg height or greater
             let mempool = emitter
                 .mempool()?
                 .into_iter()
                 .map(|(tx, _)| tx.txid())
                 .collect::<BTreeSet<_>>();
-            let exp_mempool = tx_introductions.keys().copied().collect::<BTreeSet<_>>();
+            let exp_mempool = tx_introductions
+                .iter()
+                .filter(|(_, &intro_h)| intro_h >= (height as usize))
+                .map(|(&txid, _)| txid)
+                .collect::<BTreeSet<_>>();
             assert_eq!(
                 mempool, exp_mempool,
-                "the first mempool emission after reorg should include all mempool txs"
+                "the first mempool emission after reorg should only include mempool txs introduced at reorg height or greater"
             );
 
             let mempool = emitter
@@ -738,6 +764,9 @@ fn mempool_during_reorg() -> anyhow::Result<()> {
                     .collect::<Vec<_>>(),
             );
         }
+
+        // sync emitter to tip
+        while emitter.next_header()?.is_some() {}
     }
 
     Ok(())

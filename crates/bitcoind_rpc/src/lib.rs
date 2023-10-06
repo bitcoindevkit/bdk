@@ -33,7 +33,7 @@ pub struct Emitter<'c, C> {
 
     /// The last emitted block during our last mempool emission. This is used to determine whether
     /// there has been a reorg since our last mempool emission.
-    last_mempool_tip: Option<(u32, BlockHash)>,
+    last_mempool_tip: Option<u32>,
 }
 
 impl<'c, C: bitcoincore_rpc::RpcApi> Emitter<'c, C> {
@@ -65,12 +65,17 @@ impl<'c, C: bitcoincore_rpc::RpcApi> Emitter<'c, C> {
     pub fn mempool(&mut self) -> Result<Vec<(Transaction, u64)>, bitcoincore_rpc::Error> {
         let client = self.client;
 
-        let prev_mempool_tip = match self.last_mempool_tip {
-            // use 'avoid-re-emission' logic if there is no reorg
-            Some((height, hash)) if self.emitted_blocks.get(&height) == Some(&hash) => height,
-            _ => 0,
-        };
+        // This is the emitted tip height during the last mempool emission.
+        let prev_mempool_tip = self
+            .last_mempool_tip
+            // We use `start_height - 1` as we cannot guarantee that the block at
+            // `start_height` has been emitted.
+            .unwrap_or(self.start_height.saturating_sub(1));
 
+        // Mempool txs come with a timestamp of when the tx is introduced to the mempool. We keep
+        // track of the latest mempool tx's timestamp to determine whether we have seen a tx
+        // before. `prev_mempool_time` is the previous timestamp and `last_time` records what will
+        // be the new latest timestamp.
         let prev_mempool_time = self.last_mempool_time;
         let mut latest_time = prev_mempool_time;
 
@@ -109,11 +114,7 @@ impl<'c, C: bitcoincore_rpc::RpcApi> Emitter<'c, C> {
             .collect::<Result<Vec<_>, _>>()?;
 
         self.last_mempool_time = latest_time;
-        self.last_mempool_tip = self
-            .emitted_blocks
-            .iter()
-            .last()
-            .map(|(&height, &hash)| (height, hash));
+        self.last_mempool_tip = self.emitted_blocks.iter().last().map(|(&height, _)| height);
 
         Ok(txs_to_emit)
     }
@@ -209,7 +210,18 @@ where
                 continue;
             }
             PollResponse::AgreementFound(res) => {
-                emitter.emitted_blocks.split_off(&(res.height as u32 + 1));
+                let agreement_h = res.height as u32;
+
+                // get rid of evicted blocks
+                emitter.emitted_blocks.split_off(&(agreement_h + 1));
+
+                // The tip during the last mempool emission needs to in the best chain, we reduce
+                // it if it is not.
+                if let Some(h) = emitter.last_mempool_tip.as_mut() {
+                    if *h > agreement_h {
+                        *h = agreement_h;
+                    }
+                }
                 emitter.last_block = Some(res);
                 continue;
             }
