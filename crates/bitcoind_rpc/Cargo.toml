@@ -9,13 +9,13 @@ edition = "2021"
 # For no-std, remember to enable the bitcoin/no-std feature
 bitcoin = { version = "0.30", default-features = false }
 bitcoincore-rpc = { version = "0.17" }
+bdk_chain = { path = "../chain", version = "0.5", default-features = false }
 
 [dev-dependencies]
-bdk_chain = { path = "../chain", version = "0.5", features = ["serde", "miniscript"] }
 bitcoind = { version = "0.33", features = ["25_0"] }
 anyhow = { version = "1" }
 
 [features]
 default = ["std"]
-std = ["bitcoin/std"]
-serde = ["bitcoin/serde"]
+std = ["bitcoin/std", "bdk_chain/std"]
+serde = ["bitcoin/serde", "bdk_chain/serde"]

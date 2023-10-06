@@ -189,7 +189,7 @@ fn block_to_chain_update(block: &bitcoin::Block, height: u32) -> local_chain::Up
 pub fn test_sync_local_chain() -> anyhow::Result<()> {
     let env = TestEnv::new()?;
     let mut local_chain = LocalChain::default();
-    let mut emitter = Emitter::new(&env.client, 0);
+    let mut emitter = Emitter::from_height(&env.client, 0);
 
     // mine some blocks and returned the actual block hashes
     let exp_hashes = {
@@ -305,7 +305,7 @@ fn test_into_tx_graph() -> anyhow::Result<()> {
         index
     });
 
-    let emitter = &mut Emitter::new(&env.client, 0);
+    let emitter = &mut Emitter::from_height(&env.client, 0);
 
     while let Some((height, block)) = emitter.next_block()? {
         let _ = chain.apply_update(block_to_chain_update(&block, height))?;
@@ -393,7 +393,7 @@ fn ensure_block_emitted_after_reorg_is_at_reorg_height() -> anyhow::Result<()> {
     const CHAIN_TIP_HEIGHT: usize = 110;
 
     let env = TestEnv::new()?;
-    let mut emitter = Emitter::new(&env.client, EMITTER_START_HEIGHT as _);
+    let mut emitter = Emitter::from_height(&env.client, EMITTER_START_HEIGHT as _);
 
     env.mine_blocks(CHAIN_TIP_HEIGHT, None)?;
     while emitter.next_header()?.is_some() {}
@@ -461,7 +461,7 @@ fn tx_can_become_unconfirmed_after_reorg() -> anyhow::Result<()> {
     const SEND_AMOUNT: Amount = Amount::from_sat(10_000);
 
     let env = TestEnv::new()?;
-    let mut emitter = Emitter::new(&env.client, 0);
+    let mut emitter = Emitter::from_height(&env.client, 0);
 
     // setup addresses
     let addr_to_mine = env.client.get_new_address(None, None)?.assume_checked();
@@ -542,7 +542,7 @@ fn mempool_avoids_re_emission() -> anyhow::Result<()> {
     const MEMPOOL_TX_COUNT: usize = 2;
 
     let env = TestEnv::new()?;
-    let mut emitter = Emitter::new(&env.client, 0);
+    let mut emitter = Emitter::from_height(&env.client, 0);
 
     // mine blocks and sync up emitter
     let addr = env.client.get_new_address(None, None)?.assume_checked();
@@ -597,7 +597,7 @@ fn mempool_re_emits_if_tx_introduction_height_not_reached() -> anyhow::Result<()
     const MEMPOOL_TX_COUNT: usize = 21;
 
     let env = TestEnv::new()?;
-    let mut emitter = Emitter::new(&env.client, 0);
+    let mut emitter = Emitter::from_height(&env.client, 0);
 
     // mine blocks to get initial balance, sync emitter up to tip
     let addr = env.client.get_new_address(None, None)?.assume_checked();
@@ -674,7 +674,7 @@ fn mempool_during_reorg() -> anyhow::Result<()> {
     const PREMINE_COUNT: usize = 101;
 
     let env = TestEnv::new()?;
-    let mut emitter = Emitter::new(&env.client, 0);
+    let mut emitter = Emitter::from_height(&env.client, 0);
 
     // mine blocks to get initial balance
     let addr = env.client.get_new_address(None, None)?.assume_checked();
@@ -789,7 +789,7 @@ fn no_agreement_point() -> anyhow::Result<()> {
     let env = TestEnv::new()?;
 
     // start height is 99
-    let mut emitter = Emitter::new(&env.client, (PREMINE_COUNT - 2) as u32);
+    let mut emitter = Emitter::from_height(&env.client, (PREMINE_COUNT - 2) as u32);
 
     // mine 101 blocks
     env.mine_blocks(PREMINE_COUNT, None)?;
