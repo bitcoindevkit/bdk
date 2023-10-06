@@ -624,8 +624,7 @@ where
                 Ok(_) => {
                     println!("Broadcasted Tx : {}", transaction.txid());
 
-                    let keychain_changeset =
-                        graph.lock().unwrap().insert_tx(&transaction, None, None);
+                    let keychain_changeset = graph.lock().unwrap().insert_tx(transaction);
 
                     // We know the tx is at least unconfirmed now. Note if persisting here fails,
                     // it's not a big deal since we can always find it again form

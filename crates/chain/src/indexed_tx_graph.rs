@@ -3,7 +3,7 @@
 //! This is essentially a [`TxGraph`] combined with an indexer.
 
 use alloc::vec::Vec;
-use bitcoin::{Block, OutPoint, Transaction, TxOut};
+use bitcoin::{Block, OutPoint, Transaction, TxOut, Txid};
 
 use crate::{
     keychain,
@@ -103,30 +103,23 @@ where
     }
 
     /// Insert and index a transaction into the graph.
-    ///
-    /// `anchors` can be provided to anchor the transaction to various blocks. `seen_at` is a
-    /// unix timestamp of when the transaction is last seen.
-    pub fn insert_tx(
-        &mut self,
-        tx: &Transaction,
-        anchors: impl IntoIterator<Item = A>,
-        seen_at: Option<u64>,
-    ) -> ChangeSet<A, I::ChangeSet> {
-        let txid = tx.txid();
-
-        let mut graph = tx_graph::ChangeSet::default();
-        if self.graph.get_tx(txid).is_none() {
-            graph.append(self.graph.insert_tx(tx.clone()));
-        }
-        for anchor in anchors.into_iter() {
-            graph.append(self.graph.insert_anchor(txid, anchor));
-        }
-        if let Some(seen_at) = seen_at {
-            graph.append(self.graph.insert_seen_at(txid, seen_at));
-        }
-
+    pub fn insert_tx(&mut self, tx: Transaction) -> ChangeSet<A, I::ChangeSet> {
+        let graph = self.graph.insert_tx(tx);
         let indexer = self.index_tx_graph_changeset(&graph);
         ChangeSet { graph, indexer }
+    }
+
+    /// Insert an `anchor` for a given transaction.
+    pub fn insert_anchor(&mut self, txid: Txid, anchor: A) -> ChangeSet<A, I::ChangeSet> {
+        self.graph.insert_anchor(txid, anchor).into()
+    }
+
+    /// Insert a unix timestamp of when a transaction is seen in the mempool.
+    ///
+    /// This is used for transaction conflict resolution in [`TxGraph`] where the transaction with
+    /// the later last-seen is prioritized.
+    pub fn insert_seen_at(&mut self, txid: Txid, seen_at: u64) -> ChangeSet<A, I::ChangeSet> {
+        self.graph.insert_seen_at(txid, seen_at).into()
     }
 
     /// Batch insert transactions, filtering out those that are irrelevant.
