@@ -69,12 +69,12 @@ To build with the MSRV you will need to pin dependencies as follows:
 cargo update -p log --precise "0.4.18"
 # tempfile 3.7.0 has MSRV 1.63.0+
 cargo update -p tempfile --precise "3.6.0"
-# rustls 0.21.2 has MSRV 1.60.0+
+# rustls 0.21.7 has MSRV 1.60.0+
 cargo update -p rustls:0.21.7 --precise "0.21.1"
 # rustls 0.20.9 has MSRV 1.60.0+
 cargo update -p rustls:0.20.9 --precise "0.20.8"
-# tokio 1.30 has MSRV 1.63.0+
-cargo update -p tokio:1.32.0 --precise "1.29.1"
+# tokio 1.33 has MSRV 1.63.0+
+cargo update -p tokio:1.33.0 --precise "1.29.1"
 # tokio-util 0.7.9 doesn't build with MSRV 1.57.0
 cargo update -p tokio-util --precise "0.7.8"
 # flate2 1.0.27 has MSRV 1.63.0+
@@ -83,16 +83,20 @@ cargo update -p flate2:1.0.27 --precise "1.0.26"
 cargo update -p reqwest --precise "0.11.18"
 # h2 0.3.21 has MSRV 1.63.0+
 cargo update -p h2 --precise "0.3.20"
-# rustls-webpki 0.100.2 has MSRV 1.60.0+
+# rustls-webpki 0.100.3 has MSRV 1.60.0+
 cargo update -p rustls-webpki:0.100.3 --precise "0.100.1"
 # rustls-webpki 0.101.2 has MSRV 1.60.0+
 cargo update -p rustls-webpki:0.101.6 --precise "0.101.1"
-# zip 0.6.3 has MSRV 1.59.0+
+# zip 0.6.6 has MSRV 1.59.0+
 cargo update -p zip:0.6.6 --precise "0.6.2"
 # time 0.3.14 has MSRV 1.59.0+
 cargo update -p time --precise "0.3.13"
 # cc 1.0.82 has MSRV 1.61.0+
 cargo update -p cc --precise "1.0.81"
+# byteorder 1.5.0 has MSRV 1.60.0+
+cargo update -p byteorder --precise "1.4.3"
+# webpki 0.22.4 requires `ring:0.17.2` which has MSRV 1.61.0+
+cargo update -p webpki --precise "0.22.2"
 ```
 
 ## License
