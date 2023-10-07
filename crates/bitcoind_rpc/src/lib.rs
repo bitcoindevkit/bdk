@@ -1,5 +1,5 @@
-//! This crate is used for emitting blockchain data from the `bitcoind` RPC interface (excluding the
-//! RPC wallet API).
+//! This crate is used for emitting blockchain data from the `bitcoind` RPC interface. It does not
+//! use the wallet RPC API, so this crate can be used with wallet-disabled Bitcoin Core nodes.
 //!
 //! [`Emitter`] is the main structure which sources blockchain data from [`bitcoincore_rpc::Client`].
 //!
@@ -23,7 +23,14 @@ pub struct Emitter<'c, C> {
     client: &'c C,
     start_height: u32,
 
+    /// The checkpoint of the last-emitted block that is in the best chain. If it is later found
+    /// that the block is no longer in the best chain, it will be popped off from here.
     last_cp: Option<CheckPoint>,
+
+    /// The block result returned from rpc of the last-emitted block. As this result contains the
+    /// next block's block hash (which we use to fetch the next block), we set this to `None`
+    /// whenever there are no more blocks, or the next block is no longer in the best chain. This
+    /// gives us an opportunity to re-fetch this result.
     last_block: Option<bitcoincore_rpc_json::GetBlockResult>,
 
     /// The latest first-seen epoch of emitted mempool transactions. This is used to determine
@@ -67,15 +74,14 @@ impl<'c, C: bitcoincore_rpc::RpcApi> Emitter<'c, C> {
 
     /// Emit mempool transactions, alongside their first-seen unix timestamps.
     ///
-    /// Ideally, this method would only emit the same transaction once. However, if the receiver
-    /// filters transactions based on whether it alters the output set of tracked script pubkeys,
-    /// there are situations where we would want to re-emit. For example, if an emitted mempool
-    /// transaction spends a tracked UTXO which is confirmed at height `h`, but the receiver has
-    /// only seen up to block of height `h-1`, we want to re-emit this transaction until the
-    /// receiver has seen the block at height `h`.
+    /// This method emits each transaction only once, unless we cannot guarantee the transaction's
+    /// ancestors are already emitted.
     ///
-    /// In other words, we want to re-emit a transaction if we cannot guarantee it's ancestors are
-    /// already emitted.
+    /// To understand why, consider a receiver which filters transactions based on whether it
+    /// alters the UTXO set of tracked script pubkeys. If an emitted mempool transaction spends a
+    /// tracked UTXO which is confirmed at height `h`, but the receiver has only seen up to block
+    /// of height `h-1`, we want to re-emit this transaction until the receiver has seen the block
+    /// at height `h`.
     pub fn mempool(&mut self) -> Result<Vec<(Transaction, u64)>, bitcoincore_rpc::Error> {
         let client = self.client;
 
