@@ -167,8 +167,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     /// [`set_lookahead`]: Self::set_lookahead
     pub fn set_lookahead_for_all(&mut self, lookahead: u32) {
         for keychain in &self.keychains.keys().cloned().collect::<Vec<_>>() {
-            self.lookahead.insert(keychain.clone(), lookahead);
-            self.replenish_lookahead(keychain);
+            self.set_lookahead(keychain, lookahead);
         }
     }
 
