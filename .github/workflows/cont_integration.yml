@@ -12,7 +12,7 @@ jobs:
         rust:
           - version: stable
             clippy: true
-          - version: 1.57.0 # MSRV
+          - version: "1.57.0" # MSRV
         features:
           - --no-default-features
           - --all-features
@@ -20,11 +20,9 @@ jobs:
       - name: checkout
         uses: actions/checkout@v2
       - name: Install Rust toolchain
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@stable
         with:
             toolchain: ${{ matrix.rust.version }}
-            override: true
-            profile: minimal
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2.2.1
       - name: Pin dependencies for MSRV
@@ -56,11 +54,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v2
       - name: Install Rust toolchain
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable
-          override: true
-          profile: minimal
           # target: "thumbv6m-none-eabi"
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2.2.1
@@ -91,11 +86,8 @@ jobs:
       - run: sudo apt-get update || exit 1
       - run: sudo apt-get install -y libclang-common-10-dev clang-10 libc6-dev-i386 || exit 1
       - name: Install Rust toolchain
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@stable
         with:
-            toolchain: stable
-            override: true
-            profile: minimal
             target: "wasm32-unknown-unknown"
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2.2.1
@@ -113,11 +105,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v2
       - name: Install Rust toolchain
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@stable
         with:
-            toolchain: stable
-            override: true
-            profile: minimal
             components: rustfmt
       - name: Check fmt
         run: cargo fmt --all -- --config format_code_in_doc_comments=true --check
@@ -126,16 +115,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v1
-      - uses: actions-rs/toolchain@v1
+      - uses: dtolnay/rust-toolchain@stable
         with:
             # we pin clippy instead of using "stable" so that our CI doesn't break
             # at each new cargo release
             toolchain: "1.67.0"
             components: clippy
-            override: true
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2.2.1
-      - uses: actions-rs/clippy-check@v1
+      - run: cargo clippy  --all-features --all-targets -- -D warnings
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          args: --all-features --all-targets -- -D warnings
