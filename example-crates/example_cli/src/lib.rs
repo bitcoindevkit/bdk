@@ -34,7 +34,7 @@ pub type Database<'m, C> = Persist<Store<'m, C>, C>;
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
 #[clap(propagate_version = true)]
-pub struct Args<S: clap::Subcommand> {
+pub struct Args<CS: clap::Subcommand, S: clap::Args> {
     #[clap(env = "DESCRIPTOR")]
     pub descriptor: String,
     #[clap(env = "CHANGE_DESCRIPTOR")]
@@ -50,14 +50,14 @@ pub struct Args<S: clap::Subcommand> {
     pub cp_limit: usize,
 
     #[clap(subcommand)]
-    pub command: Commands<S>,
+    pub command: Commands<CS, S>,
 }
 
 #[allow(clippy::almost_swapped)]
 #[derive(Subcommand, Debug, Clone)]
-pub enum Commands<S: clap::Subcommand> {
+pub enum Commands<CS: clap::Subcommand, S: clap::Args> {
     #[clap(flatten)]
-    ChainSpecific(S),
+    ChainSpecific(CS),
     /// Address generation and inspection.
     Address {
         #[clap(subcommand)]
@@ -77,6 +77,8 @@ pub enum Commands<S: clap::Subcommand> {
         address: Address<address::NetworkUnchecked>,
         #[clap(short, default_value = "bnb")]
         coin_select: CoinSelectionAlgo,
+        #[clap(flatten)]
+        chain_specfic: S,
     },
 }
 
@@ -179,225 +181,6 @@ impl core::fmt::Display for Keychain {
         match self {
             Keychain::External => write!(f, "external"),
             Keychain::Internal => write!(f, "internal"),
-        }
-    }
-}
-
-pub fn run_address_cmd<A, C>(
-    graph: &mut KeychainTxGraph<A>,
-    db: &Mutex<Database<C>>,
-    network: Network,
-    cmd: AddressCmd,
-) -> anyhow::Result<()>
-where
-    C: Default + Append + DeserializeOwned + Serialize + From<KeychainChangeSet<A>>,
-{
-    let index = &mut graph.index;
-
-    match cmd {
-        AddressCmd::Next | AddressCmd::New => {
-            let spk_chooser = match cmd {
-                AddressCmd::Next => KeychainTxOutIndex::next_unused_spk,
-                AddressCmd::New => KeychainTxOutIndex::reveal_next_spk,
-                _ => unreachable!("only these two variants exist in match arm"),
-            };
-
-            let ((spk_i, spk), index_changeset) = spk_chooser(index, &Keychain::External);
-            let db = &mut *db.lock().unwrap();
-            db.stage(C::from((
-                local_chain::ChangeSet::default(),
-                indexed_tx_graph::ChangeSet::from(index_changeset),
-            )));
-            db.commit()?;
-            let addr = Address::from_script(spk, network).context("failed to derive address")?;
-            println!("[address @ {}] {}", spk_i, addr);
-            Ok(())
-        }
-        AddressCmd::Index => {
-            for (keychain, derivation_index) in index.last_revealed_indices() {
-                println!("{:?}: {}", keychain, derivation_index);
-            }
-            Ok(())
-        }
-        AddressCmd::List { change } => {
-            let target_keychain = match change {
-                true => Keychain::Internal,
-                false => Keychain::External,
-            };
-            for (spk_i, spk) in index.revealed_spks_of_keychain(&target_keychain) {
-                let address = Address::from_script(spk, network)
-                    .expect("should always be able to derive address");
-                println!(
-                    "{:?} {} used:{}",
-                    spk_i,
-                    address,
-                    index.is_used(&(target_keychain, spk_i))
-                );
-            }
-            Ok(())
-        }
-    }
-}
-
-pub fn run_balance_cmd<A: Anchor, O: ChainOracle>(
-    graph: &KeychainTxGraph<A>,
-    chain: &O,
-) -> Result<(), O::Error> {
-    fn print_balances<'a>(title_str: &'a str, items: impl IntoIterator<Item = (&'a str, u64)>) {
-        println!("{}:", title_str);
-        for (name, amount) in items.into_iter() {
-            println!("    {:<10} {:>12} sats", name, amount)
-        }
-    }
-
-    let balance = graph.graph().try_balance(
-        chain,
-        chain.get_chain_tip()?.unwrap_or_default(),
-        graph.index.outpoints().iter().cloned(),
-        |(k, _), _| k == &Keychain::Internal,
-    )?;
-
-    let confirmed_total = balance.confirmed + balance.immature;
-    let unconfirmed_total = balance.untrusted_pending + balance.trusted_pending;
-
-    print_balances(
-        "confirmed",
-        [
-            ("total", confirmed_total),
-            ("spendable", balance.confirmed),
-            ("immature", balance.immature),
-        ],
-    );
-    print_balances(
-        "unconfirmed",
-        [
-            ("total", unconfirmed_total),
-            ("trusted", balance.trusted_pending),
-            ("untrusted", balance.untrusted_pending),
-        ],
-    );
-
-    Ok(())
-}
-
-pub fn run_txo_cmd<A: Anchor, O: ChainOracle>(
-    graph: &KeychainTxGraph<A>,
-    chain: &O,
-    network: Network,
-    cmd: TxOutCmd,
-) -> anyhow::Result<()>
-where
-    O::Error: std::error::Error + Send + Sync + 'static,
-{
-    let chain_tip = chain.get_chain_tip()?.unwrap_or_default();
-    let outpoints = graph.index.outpoints().iter().cloned();
-
-    match cmd {
-        TxOutCmd::List {
-            spent,
-            unspent,
-            confirmed,
-            unconfirmed,
-        } => {
-            let txouts = graph
-                .graph()
-                .try_filter_chain_txouts(chain, chain_tip, outpoints)
-                .filter(|r| match r {
-                    Ok((_, full_txo)) => match (spent, unspent) {
-                        (true, false) => full_txo.spent_by.is_some(),
-                        (false, true) => full_txo.spent_by.is_none(),
-                        _ => true,
-                    },
-                    // always keep errored items
-                    Err(_) => true,
-                })
-                .filter(|r| match r {
-                    Ok((_, full_txo)) => match (confirmed, unconfirmed) {
-                        (true, false) => full_txo.chain_position.is_confirmed(),
-                        (false, true) => !full_txo.chain_position.is_confirmed(),
-                        _ => true,
-                    },
-                    // always keep errored items
-                    Err(_) => true,
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-
-            for (spk_i, full_txo) in txouts {
-                let addr = Address::from_script(&full_txo.txout.script_pubkey, network)?;
-                println!(
-                    "{:?} {} {} {} spent:{:?}",
-                    spk_i, full_txo.txout.value, full_txo.outpoint, addr, full_txo.spent_by
-                )
-            }
-            Ok(())
-        }
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-pub fn run_send_cmd<A: Anchor, O: ChainOracle, C>(
-    graph: &Mutex<KeychainTxGraph<A>>,
-    db: &Mutex<Database<'_, C>>,
-    chain: &O,
-    keymap: &HashMap<DescriptorPublicKey, DescriptorSecretKey>,
-    cs_algorithm: CoinSelectionAlgo,
-    address: Address,
-    value: u64,
-    broadcast: impl FnOnce(&Transaction) -> anyhow::Result<()>,
-) -> anyhow::Result<()>
-where
-    O::Error: std::error::Error + Send + Sync + 'static,
-    C: Default + Append + DeserializeOwned + Serialize + From<KeychainChangeSet<A>>,
-{
-    let (transaction, change_index) = {
-        let graph = &mut *graph.lock().unwrap();
-        // take mutable ref to construct tx -- it is only open for a short time while building it.
-        let (tx, change_info) = create_tx(graph, chain, keymap, cs_algorithm, address, value)?;
-
-        if let Some((index_changeset, (change_keychain, index))) = change_info {
-            // We must first persist to disk the fact that we've got a new address from the
-            // change keychain so future scans will find the tx we're about to broadcast.
-            // If we're unable to persist this, then we don't want to broadcast.
-            {
-                let db = &mut *db.lock().unwrap();
-                db.stage(C::from((
-                    local_chain::ChangeSet::default(),
-                    indexed_tx_graph::ChangeSet::from(index_changeset),
-                )));
-                db.commit()?;
-            }
-
-            // We don't want other callers/threads to use this address while we're using it
-            // but we also don't want to scan the tx we just created because it's not
-            // technically in the blockchain yet.
-            graph.index.mark_used(&change_keychain, index);
-            (tx, Some((change_keychain, index)))
-        } else {
-            (tx, None)
-        }
-    };
-
-    match (broadcast)(&transaction) {
-        Ok(_) => {
-            println!("Broadcasted Tx : {}", transaction.txid());
-
-            let keychain_changeset = graph.lock().unwrap().insert_tx(&transaction, None, None);
-
-            // We know the tx is at least unconfirmed now. Note if persisting here fails,
-            // it's not a big deal since we can always find it again form
-            // blockchain.
-            db.lock().unwrap().stage(C::from((
-                local_chain::ChangeSet::default(),
-                keychain_changeset,
-            )));
-            Ok(())
-        }
-        Err(e) => {
-            if let Some((keychain, index)) = change_index {
-                // We failed to broadcast, so allow our change address to be used in the future
-                graph.lock().unwrap().index.unmark_used(&keychain, index);
-            }
-            Err(e)
         }
     }
 }
@@ -647,14 +430,14 @@ pub fn planned_utxos<A: Anchor, O: ChainOracle, K: Clone + bdk_tmp_plan::CanDeri
         .collect()
 }
 
-pub fn handle_commands<S: clap::Subcommand, A: Anchor, O: ChainOracle, C>(
+pub fn handle_commands<CS: clap::Subcommand, S: clap::Args, A: Anchor, O: ChainOracle, C>(
     graph: &Mutex<KeychainTxGraph<A>>,
     db: &Mutex<Database<C>>,
     chain: &Mutex<O>,
     keymap: &HashMap<DescriptorPublicKey, DescriptorSecretKey>,
     network: Network,
-    broadcast: impl FnOnce(&Transaction) -> anyhow::Result<()>,
-    cmd: Commands<S>,
+    broadcast: impl FnOnce(S, &Transaction) -> anyhow::Result<()>,
+    cmd: Commands<CS, S>,
 ) -> anyhow::Result<()>
 where
     O::Error: std::error::Error + Send + Sync + 'static,
@@ -664,45 +447,212 @@ where
         Commands::ChainSpecific(_) => unreachable!("example code should handle this!"),
         Commands::Address { addr_cmd } => {
             let graph = &mut *graph.lock().unwrap();
-            run_address_cmd(graph, db, network, addr_cmd)
+            let index = &mut graph.index;
+
+            match addr_cmd {
+                AddressCmd::Next | AddressCmd::New => {
+                    let spk_chooser = match addr_cmd {
+                        AddressCmd::Next => KeychainTxOutIndex::next_unused_spk,
+                        AddressCmd::New => KeychainTxOutIndex::reveal_next_spk,
+                        _ => unreachable!("only these two variants exist in match arm"),
+                    };
+
+                    let ((spk_i, spk), index_changeset) = spk_chooser(index, &Keychain::External);
+                    let db = &mut *db.lock().unwrap();
+                    db.stage(C::from((
+                        local_chain::ChangeSet::default(),
+                        indexed_tx_graph::ChangeSet::from(index_changeset),
+                    )));
+                    db.commit()?;
+                    let addr =
+                        Address::from_script(spk, network).context("failed to derive address")?;
+                    println!("[address @ {}] {}", spk_i, addr);
+                    Ok(())
+                }
+                AddressCmd::Index => {
+                    for (keychain, derivation_index) in index.last_revealed_indices() {
+                        println!("{:?}: {}", keychain, derivation_index);
+                    }
+                    Ok(())
+                }
+                AddressCmd::List { change } => {
+                    let target_keychain = match change {
+                        true => Keychain::Internal,
+                        false => Keychain::External,
+                    };
+                    for (spk_i, spk) in index.revealed_spks_of_keychain(&target_keychain) {
+                        let address = Address::from_script(spk, network)
+                            .expect("should always be able to derive address");
+                        println!(
+                            "{:?} {} used:{}",
+                            spk_i,
+                            address,
+                            index.is_used(&(target_keychain, spk_i))
+                        );
+                    }
+                    Ok(())
+                }
+            }
         }
         Commands::Balance => {
             let graph = &*graph.lock().unwrap();
             let chain = &*chain.lock().unwrap();
-            run_balance_cmd(graph, chain).map_err(anyhow::Error::from)
+            fn print_balances<'a>(
+                title_str: &'a str,
+                items: impl IntoIterator<Item = (&'a str, u64)>,
+            ) {
+                println!("{}:", title_str);
+                for (name, amount) in items.into_iter() {
+                    println!("    {:<10} {:>12} sats", name, amount)
+                }
+            }
+
+            let balance = graph.graph().try_balance(
+                chain,
+                chain.get_chain_tip()?.unwrap_or_default(),
+                graph.index.outpoints().iter().cloned(),
+                |(k, _), _| k == &Keychain::Internal,
+            )?;
+
+            let confirmed_total = balance.confirmed + balance.immature;
+            let unconfirmed_total = balance.untrusted_pending + balance.trusted_pending;
+
+            print_balances(
+                "confirmed",
+                [
+                    ("total", confirmed_total),
+                    ("spendable", balance.confirmed),
+                    ("immature", balance.immature),
+                ],
+            );
+            print_balances(
+                "unconfirmed",
+                [
+                    ("total", unconfirmed_total),
+                    ("trusted", balance.trusted_pending),
+                    ("untrusted", balance.untrusted_pending),
+                ],
+            );
+
+            Ok(())
         }
         Commands::TxOut { txout_cmd } => {
             let graph = &*graph.lock().unwrap();
             let chain = &*chain.lock().unwrap();
-            run_txo_cmd(graph, chain, network, txout_cmd)
+            let chain_tip = chain.get_chain_tip()?.unwrap_or_default();
+            let outpoints = graph.index.outpoints().iter().cloned();
+
+            match txout_cmd {
+                TxOutCmd::List {
+                    spent,
+                    unspent,
+                    confirmed,
+                    unconfirmed,
+                } => {
+                    let txouts = graph
+                        .graph()
+                        .try_filter_chain_txouts(chain, chain_tip, outpoints)
+                        .filter(|r| match r {
+                            Ok((_, full_txo)) => match (spent, unspent) {
+                                (true, false) => full_txo.spent_by.is_some(),
+                                (false, true) => full_txo.spent_by.is_none(),
+                                _ => true,
+                            },
+                            // always keep errored items
+                            Err(_) => true,
+                        })
+                        .filter(|r| match r {
+                            Ok((_, full_txo)) => match (confirmed, unconfirmed) {
+                                (true, false) => full_txo.chain_position.is_confirmed(),
+                                (false, true) => !full_txo.chain_position.is_confirmed(),
+                                _ => true,
+                            },
+                            // always keep errored items
+                            Err(_) => true,
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
+
+                    for (spk_i, full_txo) in txouts {
+                        let addr = Address::from_script(&full_txo.txout.script_pubkey, network)?;
+                        println!(
+                            "{:?} {} {} {} spent:{:?}",
+                            spk_i, full_txo.txout.value, full_txo.outpoint, addr, full_txo.spent_by
+                        )
+                    }
+                    Ok(())
+                }
+            }
         }
         Commands::Send {
             value,
             address,
             coin_select,
+            chain_specfic,
         } => {
             let chain = &*chain.lock().unwrap();
             let address = address.require_network(network)?;
-            run_send_cmd(
-                graph,
-                db,
-                chain,
-                keymap,
-                coin_select,
-                address,
-                value,
-                broadcast,
-            )
+            let (transaction, change_index) = {
+                let graph = &mut *graph.lock().unwrap();
+                // take mutable ref to construct tx -- it is only open for a short time while building it.
+                let (tx, change_info) =
+                    create_tx(graph, chain, keymap, coin_select, address, value)?;
+
+                if let Some((index_changeset, (change_keychain, index))) = change_info {
+                    // We must first persist to disk the fact that we've got a new address from the
+                    // change keychain so future scans will find the tx we're about to broadcast.
+                    // If we're unable to persist this, then we don't want to broadcast.
+                    {
+                        let db = &mut *db.lock().unwrap();
+                        db.stage(C::from((
+                            local_chain::ChangeSet::default(),
+                            indexed_tx_graph::ChangeSet::from(index_changeset),
+                        )));
+                        db.commit()?;
+                    }
+
+                    // We don't want other callers/threads to use this address while we're using it
+                    // but we also don't want to scan the tx we just created because it's not
+                    // technically in the blockchain yet.
+                    graph.index.mark_used(&change_keychain, index);
+                    (tx, Some((change_keychain, index)))
+                } else {
+                    (tx, None)
+                }
+            };
+
+            match (broadcast)(chain_specfic, &transaction) {
+                Ok(_) => {
+                    println!("Broadcasted Tx : {}", transaction.txid());
+
+                    let keychain_changeset = graph.lock().unwrap().insert_tx(transaction);
+
+                    // We know the tx is at least unconfirmed now. Note if persisting here fails,
+                    // it's not a big deal since we can always find it again form
+                    // blockchain.
+                    db.lock().unwrap().stage(C::from((
+                        local_chain::ChangeSet::default(),
+                        keychain_changeset,
+                    )));
+                    Ok(())
+                }
+                Err(e) => {
+                    if let Some((keychain, index)) = change_index {
+                        // We failed to broadcast, so allow our change address to be used in the future
+                        graph.lock().unwrap().index.unmark_used(&keychain, index);
+                    }
+                    Err(e)
+                }
+            }
         }
     }
 }
 
 #[allow(clippy::type_complexity)]
-pub fn init<'m, S: clap::Subcommand, C>(
+pub fn init<'m, CS: clap::Subcommand, S: clap::Args, C>(
     db_magic: &'m [u8],
     db_default_path: &str,
 ) -> anyhow::Result<(
-    Args<S>,
+    Args<CS, S>,
     KeyMap,
     KeychainTxOutIndex<Keychain>,
     Mutex<Database<'m, C>>,
@@ -714,7 +664,7 @@ where
     if std::env::var("BDK_DB_PATH").is_err() {
         std::env::set_var("BDK_DB_PATH", db_default_path);
     }
-    let args = Args::<S>::parse();
+    let args = Args::<CS, S>::parse();
     let secp = Secp256k1::default();
 
     let mut index = KeychainTxOutIndex::<Keychain>::default();

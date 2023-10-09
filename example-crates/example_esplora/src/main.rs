@@ -37,6 +37,8 @@ enum EsploraCommands {
         stop_gap: usize,
         #[clap(flatten)]
         scan_options: ScanOptions,
+        #[clap(flatten)]
+        esplora_args: EsploraArgs,
     },
     /// Scan for particular addresses and unconfirmed transactions using the esplora API.
     Sync {
@@ -54,7 +56,39 @@ enum EsploraCommands {
         unconfirmed: bool,
         #[clap(flatten)]
         scan_options: ScanOptions,
+        #[clap(flatten)]
+        esplora_args: EsploraArgs,
     },
+}
+impl EsploraCommands {
+    fn esplora_args(&self) -> EsploraArgs {
+        match self {
+            EsploraCommands::Scan { esplora_args, .. } => esplora_args.clone(),
+            EsploraCommands::Sync { esplora_args, .. } => esplora_args.clone(),
+        }
+    }
+}
+
+#[derive(clap::Args, Debug, Clone)]
+pub struct EsploraArgs {
+    /// The esplora url endpoint to connect to e.g. `<https://blockstream.info/api>`
+    /// If not provided it'll be set to a default for the network provided
+    esplora_url: Option<String>,
+}
+
+impl EsploraArgs {
+    pub fn client(&self, network: Network) -> anyhow::Result<esplora_client::BlockingClient> {
+        let esplora_url = self.esplora_url.as_deref().unwrap_or(match network {
+            Network::Bitcoin => "https://blockstream.info/api",
+            Network::Testnet => "https://blockstream.info/testnet/api",
+            Network::Regtest => "http://localhost:3002",
+            Network::Signet => "https://mempool.space/signet/api",
+            _ => panic!("unsupported network"),
+        });
+
+        let client = esplora_client::Builder::new(esplora_url).build_blocking()?;
+        Ok(client)
+    }
 }
 
 #[derive(Parser, Debug, Clone, PartialEq)]
@@ -66,7 +100,7 @@ pub struct ScanOptions {
 
 fn main() -> anyhow::Result<()> {
     let (args, keymap, index, db, init_changeset) =
-        example_cli::init::<EsploraCommands, ChangeSet>(DB_MAGIC, DB_PATH)?;
+        example_cli::init::<EsploraCommands, EsploraArgs, ChangeSet>(DB_MAGIC, DB_PATH)?;
 
     let (init_chain_changeset, init_indexed_tx_graph_changeset) = init_changeset;
 
@@ -84,16 +118,6 @@ fn main() -> anyhow::Result<()> {
         chain
     });
 
-    let esplora_url = match args.network {
-        Network::Bitcoin => "https://blockstream.info/api",
-        Network::Testnet => "https://blockstream.info/testnet/api",
-        Network::Regtest => "http://localhost:3002",
-        Network::Signet => "https://mempool.space/signet/api",
-        _ => panic!("unsupported network"),
-    };
-
-    let client = esplora_client::Builder::new(esplora_url).build_blocking()?;
-
     let esplora_cmd = match &args.command {
         // These are commands that are handled by this example (sync, scan).
         example_cli::Commands::ChainSpecific(esplora_cmd) => esplora_cmd,
@@ -105,7 +129,8 @@ fn main() -> anyhow::Result<()> {
                 &chain,
                 &keymap,
                 args.network,
-                |tx| {
+                |esplora_args, tx| {
+                    let client = esplora_args.client(args.network)?;
                     client
                         .broadcast(tx)
                         .map(|_| ())
@@ -119,6 +144,7 @@ fn main() -> anyhow::Result<()> {
         }
     };
 
+    let client = esplora_cmd.esplora_args().client(args.network)?;
     // Prepare the `IndexedTxGraph` update based on whether we are scanning or syncing.
     // Scanning: We are iterating through spks of all keychains and scanning for transactions for
     //   each spk. We start with the lowest derivation index spk and stop scanning after `stop_gap`
@@ -131,6 +157,7 @@ fn main() -> anyhow::Result<()> {
         EsploraCommands::Scan {
             stop_gap,
             scan_options,
+            ..
         } => {
             let keychain_spks = graph
                 .lock()
@@ -184,6 +211,7 @@ fn main() -> anyhow::Result<()> {
             mut utxos,
             mut unconfirmed,
             scan_options,
+            ..
         } => {
             if !(*all_spks || unused_spks || utxos || unconfirmed) {
                 // If nothing is specifically selected, we select everything (except all spks).

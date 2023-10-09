@@ -509,7 +509,7 @@ impl<D> Wallet<D> {
     where
         D: PersistBackend<ChangeSet>,
     {
-        let additions = self.indexed_graph.insert_txout(outpoint, &txout);
+        let additions = self.indexed_graph.insert_txout(outpoint, txout);
         self.persist.stage(ChangeSet::from(additions));
     }
 
@@ -738,7 +738,16 @@ impl<D> Wallet<D> {
             ConfirmationTime::Unconfirmed { last_seen } => (None, Some(last_seen)),
         };
 
-        let changeset: ChangeSet = self.indexed_graph.insert_tx(&tx, anchor, last_seen).into();
+        let mut changeset = ChangeSet::default();
+        let txid = tx.txid();
+        changeset.append(self.indexed_graph.insert_tx(tx).into());
+        if let Some(anchor) = anchor {
+            changeset.append(self.indexed_graph.insert_anchor(txid, anchor).into());
+        }
+        if let Some(last_seen) = last_seen {
+            changeset.append(self.indexed_graph.insert_seen_at(txid, last_seen).into());
+        }
+
         let changed = !changeset.is_empty();
         self.persist.stage(changeset);
         Ok(changed)
