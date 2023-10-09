@@ -241,4 +241,8 @@ cargo update -p h2 --precise "0.3.20"
 cargo update -p rustls-webpki:0.100.3 --precise "0.100.1"
 # rustls-webpki 0.101.6 has MSRV 1.60+
 cargo update -p rustls-webpki:0.101.6 --precise "0.101.1"
+# byteorder 1.5.0 has MSRV 1.60.0+
+cargo update -p byteorder --precise "1.4.3"
+# webpki 0.22.4 requires `ring:0.17.2` which has MSRV 1.61.0+
+cargo update -p webpki --precise "0.22.2"
 ```
