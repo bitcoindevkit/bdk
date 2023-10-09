@@ -189,6 +189,16 @@ impl<'a, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderContext>
     }
 
     /// Set an absolute fee
+    ///
+    /// The fee_absolute method refers to the absolute transaction fee in satoshis (sats).
+    ///
+    /// If anyone sets both the [`fee_absolute`](TxBuilder::fee_absolute) method
+    /// and the [`fee_rate`](TxBuilder::fee_rate) method, the fee policy will
+    /// be set by whichever method was called last, as the two are mutually exclusive.
+    ///
+    /// Note that this is really a minimum absolute fee -- it's possible to
+    /// overshoot it slightly since adding a change output to drain the remaining
+    /// excess might not be viable.
     pub fn fee_absolute(&mut self, fee_amount: u64) -> &mut Self {
         self.params.fee_policy = Some(FeePolicy::FeeAmount(fee_amount));
         self
