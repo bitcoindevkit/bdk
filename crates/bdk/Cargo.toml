@@ -21,7 +21,6 @@ serde_json = { version = "^1.0" }
 bdk_chain = { path = "../chain", version = "0.7.0", features = ["miniscript", "serde"], default-features = false }
 
 # Optional dependencies
-hwi = { version = "0.7.0", optional = true, features = [ "miniscript"] }
 bip39 = { version = "2.0", optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
@@ -34,8 +33,6 @@ std = ["bitcoin/std", "miniscript/std", "bdk_chain/std"]
 compiler = ["miniscript/compiler"]
 all-keys = ["keys-bip39"]
 keys-bip39 = ["bip39"]
-hardware-signer = ["hwi"]
-test-hardware-signer = ["hardware-signer"]
 
 # This feature is used to run `cargo check` in our CI targeting wasm. It's not recommended
 # for libraries to explicitly include the "getrandom/js" feature, so we only do it when

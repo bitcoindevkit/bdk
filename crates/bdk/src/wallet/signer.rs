@@ -80,6 +80,7 @@
 //! ```
 
 use crate::collections::BTreeMap;
+use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::cmp::Ordering;
@@ -162,16 +163,10 @@ pub enum SignerError {
     SighashError(sighash::Error),
     /// Miniscript PSBT error
     MiniscriptPsbt(MiniscriptPsbtError),
-    /// Error while signing using hardware wallets
-    #[cfg(feature = "hardware-signer")]
-    HWIError(hwi::error::Error),
-}
-
-#[cfg(feature = "hardware-signer")]
-impl From<hwi::error::Error> for SignerError {
-    fn from(e: hwi::error::Error) -> Self {
-        SignerError::HWIError(e)
-    }
+    /// To be used only by external libraries implementing [`InputSigner`] or
+    /// [`TransactionSigner`], so that they can return their own custom errors, without having to
+    /// modify [`SignerError`] in BDK.
+    External(String),
 }
 
 impl From<sighash::Error> for SignerError {
@@ -196,8 +191,7 @@ impl fmt::Display for SignerError {
             Self::InvalidSighash => write!(f, "Invalid SIGHASH for the signing context in use"),
             Self::SighashError(err) => write!(f, "Error while computing the hash to sign: {}", err),
             Self::MiniscriptPsbt(err) => write!(f, "Miniscript PSBT error: {}", err),
-            #[cfg(feature = "hardware-signer")]
-            Self::HWIError(err) => write!(f, "Error while signing using hardware wallets: {}", err),
+            Self::External(err) => write!(f, "{}", err),
         }
     }
 }
