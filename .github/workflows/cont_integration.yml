@@ -46,6 +46,7 @@ jobs:
           cargo update -p cc --precise "1.0.81"
           cargo update -p byteorder --precise "1.4.3"
           cargo update -p webpki --precise "0.22.2"
+          cargo update -p jobserver --precise "0.1.26"
       - name: Build
         run: cargo build ${{ matrix.features }}
       - name: Test
