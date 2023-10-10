@@ -1,9 +1,12 @@
 /target
-Cargo.lock
 /.vscode
+/result
 
 *.swp
 .idea
 
 # Example persisted files.
 *.db
+
+# pre-commit-hooks.nix
+.pre-commit-config.yaml

@@ -44,6 +44,7 @@ The project is split up into several crates in the `/crates` directory:
 - [`file_store`](./crates/file_store): A (experimental) persistence backend for storing chain data in a single file.
 - [`esplora`](./crates/esplora): Extends the [`esplora-client`] crate with methods to fetch chain data from an esplora HTTP server in the form that [`bdk_chain`] and `Wallet` can consume.
 - [`electrum`](./crates/electrum): Extends the [`electrum-client`] crate with methods to fetch chain data from an electrum server in the form that [`bdk_chain`] and `Wallet` can consume.
+- [`bitcond_rpc`](./crates/bitcond_rpc) Emitting blockchain data from the `bitcoind` RPC interface.
 
 Fully working examples of how to use these components are in `/example-crates`:
 - [`example_cli`](./example-crates/example_cli): Library used by the `example_*` crates. Provides utilities for syncing, showing the balance, generating addresses and creating transactions without using the bdk `Wallet`.
@@ -58,6 +59,12 @@ Fully working examples of how to use these components are in `/example-crates`:
 [`esplora-client`]: https://docs.rs/esplora-client/
 [`electrum-client`]: https://docs.rs/electrum-client/
 [`bdk_chain`]: https://docs.rs/bdk-chain/
+
+## Dependencies
+
+- `bitcoind_rpc` depends on `bitcoind` being installed and available in `PATH` or in the `BITCOIND_EXEC` ENV variable.
+- `esplora` depends on [Blockstream's version of `electrs`](https://github.com/Blockstream/electrs)
+   being installed and available in `PATH` or in the `ELECTRS_EXEC` ENV variable.
 
 ## Minimum Supported Rust Version (MSRV)
 This library should compile with any combination of features with Rust 1.57.0.
@@ -78,31 +85,19 @@ cargo update -p tokio --precise "1.29.1"
 # tokio-util 0.7.9 doesn't build with MSRV 1.57.0
 cargo update -p tokio-util --precise "0.7.8"
 # flate2 1.0.27 has MSRV 1.63.0+
-cargo update -p flate2 --precise "1.0.26"
+cargo update -p flate2:1.0.28 --precise "1.0.26"
 # reqwest 0.11.19 has MSRV 1.63.0+
 cargo update -p reqwest --precise "0.11.18"
 # h2 0.3.21 has MSRV 1.63.0+
 cargo update -p h2 --precise "0.3.20"
 # rustls-webpki 0.100.3 has MSRV 1.60.0+
 cargo update -p rustls-webpki:0.100.3 --precise "0.100.1"
-# rustls-webpki 0.101.2 has MSRV 1.60.0+
-cargo update -p rustls-webpki:0.101.7 --precise "0.101.1"
-# zip 0.6.6 has MSRV 1.59.0+
-cargo update -p zip --precise "0.6.2"
-# time 0.3.14 has MSRV 1.59.0+
-cargo update -p time --precise "0.3.13"
 # byteorder 1.5.0 has MSRV 1.60.0+
 cargo update -p byteorder --precise "1.4.3"
 # webpki 0.22.4 requires `ring:0.17.2` which has MSRV 1.61.0+
 cargo update -p webpki --precise "0.22.2"
 # os_str_bytes 6.6.0 has MSRV 1.61.0+
-cargo update -p os_str_bytes --precise 6.5.1
-# sct 0.7.1 has MSRV 1.61.0+
-cargo update -p sct --precise 0.7.0
-# cc 1.0.82 has MSRV 1.61.0+
-cargo update -p cc --precise "1.0.81"
-# jobserver 0.1.27 has MSRV 1.66.0+
-cargo update -p jobserver --precise "0.1.26"
+cargo update -p os_str_bytes --precise "6.5.1"
 ```
 
 ## License

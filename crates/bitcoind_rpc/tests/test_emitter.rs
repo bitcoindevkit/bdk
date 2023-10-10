@@ -1,3 +1,4 @@
+use core::panic;
 use std::collections::{BTreeMap, BTreeSet};
 
 use bdk_bitcoind_rpc::Emitter;
@@ -25,9 +26,9 @@ struct TestEnv {
 
 impl TestEnv {
     fn new() -> anyhow::Result<Self> {
-        let daemon = match std::env::var_os("TEST_BITCOIND") {
+        let daemon = match std::env::var_os("BITCOIND_EXEC") {
             Some(bitcoind_path) => bitcoind::BitcoinD::new(bitcoind_path),
-            None => bitcoind::BitcoinD::from_downloaded(),
+            None => panic!("Cannot find bitcoind daemon, set BITCOIND_EXEC environment variable with the path to bitcoind"),
         }?;
         let client = bitcoincore_rpc::Client::new(
             &daemon.rpc_url(),

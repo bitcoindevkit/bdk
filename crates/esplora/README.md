@@ -3,6 +3,11 @@
 BDK Esplora extends [`esplora-client`] to update [`bdk_chain`] structures
 from an Esplora server.
 
+## Dependencies
+
+`esplora` depends on [Blockstream's version of `electrs`](https://github.com/Blockstream/electrs)
+being installed and available in `PATH` or in the `ELECTRS_EXEC` ENV variable.
+
 ## Usage
 
 There are two versions of the extension trait (blocking and async).

@@ -1,22 +1,30 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/bdk",
-    "crates/chain",
-    "crates/file_store",
-    "crates/electrum",
-    "crates/esplora",
-    "crates/bitcoind_rpc",
-    "example-crates/example_cli",
-    "example-crates/example_electrum",
-    "example-crates/example_esplora",
-    "example-crates/example_bitcoind_rpc_polling",
-    "example-crates/wallet_electrum",
-    "example-crates/wallet_esplora_blocking",
-    "example-crates/wallet_esplora_async",
-    "nursery/tmp_plan",
-    "nursery/coin_select"
+  "crates/bdk",
+  "crates/chain",
+  "crates/file_store",
+  "crates/electrum",
+  "crates/esplora",
+  "crates/bitcoind_rpc",
+  "example-crates/example_cli",
+  "example-crates/example_electrum",
+  "example-crates/example_esplora",
+  "example-crates/example_bitcoind_rpc_polling",
+  "example-crates/wallet_electrum",
+  "example-crates/wallet_esplora_blocking",
+  "example-crates/wallet_esplora_async",
+  "nursery/tmp_plan",
+  "nursery/coin_select",
 ]
 
 [workspace.package]
 authors = ["Bitcoin Dev Kit Developers"]
+
+[profile.dev]
+
+[profile.ci]
+inherits = "dev"
+debug = 1
+incremental = false
+lto = "off"
