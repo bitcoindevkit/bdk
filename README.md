@@ -97,6 +97,8 @@ cargo update -p cc --precise "1.0.81"
 cargo update -p byteorder --precise "1.4.3"
 # webpki 0.22.4 requires `ring:0.17.2` which has MSRV 1.61.0+
 cargo update -p webpki --precise "0.22.2"
+# jobserver 0.1.27 has MSRV 1.66.0+
+cargo update -p jobserver --precise "0.1.26"
 ```
 
 ## License
