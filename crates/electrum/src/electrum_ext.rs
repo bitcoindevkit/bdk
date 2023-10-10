@@ -11,8 +11,8 @@ use std::{
     str::FromStr,
 };
 
-/// We assume that a block of this depth and deeper cannot be reorged.
-const ASSUME_FINAL_DEPTH: u32 = 8;
+/// We assume that a blocks deeper than this depth cannot be reorged.
+const MAX_REORG_DEPTH: u32 = 6;
 
 /// Represents updates fetched from an Electrum server, but excludes full transactions.
 ///
@@ -302,12 +302,20 @@ fn construct_update_tip(
         }
     }
 
-    // Atomically fetch the latest `ASSUME_FINAL_DEPTH` count of blocks from Electrum. We use this
+    // Atomically fetch the latest `MAX_REOG_DEPTH + 1` count of blocks from Electrum. We use this
     // to construct our checkpoint update.
+    //
+    // The reason why we fetch multiple blocks in an atomic/batched call is to ensure consistency
+    // between the fetched blocks (as there is a still a slim chance that a reorg happens when we
+    // are fetching blocks individually).
+    //
+    // The reason why we want to fetch `MAX_REORG_DEPTH + 1` number of blocks in the batch call, is
+    // because we want to at least include one block which is "final". This is beneficial if we
+    // anchor transactions to the lowest-possible block.
     let mut new_blocks = {
-        let start_height = new_tip_height.saturating_sub(ASSUME_FINAL_DEPTH);
+        let start_height = new_tip_height.saturating_sub(MAX_REORG_DEPTH);
         let hashes = client
-            .block_headers(start_height as _, ASSUME_FINAL_DEPTH as _)?
+            .block_headers(start_height as _, (MAX_REORG_DEPTH + 1) as _)?
             .headers
             .into_iter()
             .map(|h| h.block_hash());
