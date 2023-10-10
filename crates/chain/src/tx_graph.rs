@@ -373,7 +373,7 @@ impl<A> TxGraph<A> {
     where
         F: FnMut(usize, Txid) -> Option<O> + 'g,
     {
-        let txids = self.direct_conflicts_of_tx(tx).map(|(_, txid)| txid);
+        let txids = self.direct_conflitcs(tx).map(|(_, txid)| txid);
         TxDescendants::from_multiple_include_root(self, txids, walk_map)
     }
 
@@ -384,7 +384,7 @@ impl<A> TxGraph<A> {
     /// Note that this only returns directly conflicting txids and won't include:
     /// - descendants of conflicting transactions (which are technically also conflicting)
     /// - transactions conflicting with the given transaction's ancestors
-    pub fn direct_conflicts_of_tx<'g>(
+    pub fn direct_conflitcs<'g>(
         &'g self,
         tx: &'g Transaction,
     ) -> impl Iterator<Item = (usize, Txid)> + '_ {
