@@ -191,7 +191,7 @@ fn main() -> anyhow::Result<()> {
                         introduce_older_blocks: false,
                     })
                     .expect("must always apply as we receive blocks in order from emitter");
-                let graph_changeset = graph.apply_block_relevant(emission.block, height);
+                let graph_changeset = graph.apply_block_relevant(&emission.block, height);
                 db.stage((chain_changeset, graph_changeset));
 
                 // commit staged db changes in intervals
@@ -307,7 +307,7 @@ fn main() -> anyhow::Result<()> {
                             .apply_update(chain_update)
                             .expect("must always apply as we receive blocks in order from emitter");
                         let graph_changeset =
-                            graph.apply_block_relevant(block_emission.block, height);
+                            graph.apply_block_relevant(&block_emission.block, height);
                         (chain_changeset, graph_changeset)
                     }
                     Emission::Mempool(mempool_txs) => {

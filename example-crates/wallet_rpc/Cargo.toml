@@ -1,0 +1,15 @@
+[package]
+name = "wallet_rpc"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+bdk = { path = "../../crates/bdk" }
+bdk_file_store = { path = "../../crates/file_store" }
+bdk_bitcoind_rpc = { path = "../../crates/bitcoind_rpc" }
+
+anyhow = "1"
+clap = { version = "3.2.25", features = ["derive", "env"] }
+ctrlc = "2.0.1"
