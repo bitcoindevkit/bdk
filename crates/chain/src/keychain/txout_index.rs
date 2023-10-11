@@ -13,6 +13,71 @@ use core::{
 
 use crate::Append;
 
+
+/// Represents updates to the derivation index of a [`KeychainTxOutIndex`].
+/// It maps each keychain `K` to its last revealed index.
+///
+/// It can be applied to [`KeychainTxOutIndex`] with [`apply_changeset`]. [`ChangeSet] are
+/// monotone in that they will never decrease the revealed derivation index.
+///
+/// [`KeychainTxOutIndex`]: crate::keychain::KeychainTxOutIndex
+/// [`apply_changeset`]: crate::keychain::KeychainTxOutIndex::apply_changeset
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Deserialize, serde::Serialize),
+    serde(
+        crate = "serde_crate",
+        bound(
+            deserialize = "K: Ord + serde::Deserialize<'de>",
+            serialize = "K: Ord + serde::Serialize"
+        )
+    )
+)]
+#[must_use]
+pub struct ChangeSet<K>(pub BTreeMap<K, u32>);
+
+impl<K> ChangeSet<K> {
+    /// Get the inner map of the keychain to its new derivation index.
+    pub fn as_inner(&self) -> &BTreeMap<K, u32> {
+        &self.0
+    }
+}
+
+impl<K: Ord> Append for ChangeSet<K> {
+    /// Append another [`ChangeSet`] into self.
+    ///
+    /// If the keychain already exists, increase the index when the other's index > self's index.
+    /// If the keychain did not exist, append the new keychain.
+    fn append(&mut self, mut other: Self) {
+        self.0.iter_mut().for_each(|(key, index)| {
+            if let Some(other_index) = other.0.remove(key) {
+                *index = other_index.max(*index);
+            }
+        });
+        // We use `extend` instead of `BTreeMap::append` due to performance issues with `append`.
+        // Refer to https://github.com/rust-lang/rust/issues/34666#issuecomment-675658420
+        self.0.extend(other.0);
+    }
+
+    /// Returns whether the changeset are empty.
+    fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl<K> Default for ChangeSet<K> {
+    fn default() -> Self {
+        Self(Default::default())
+    }
+}
+
+impl<K> AsRef<BTreeMap<K, u32>> for ChangeSet<K> {
+    fn as_ref(&self) -> &BTreeMap<K, u32> {
+        &self.0
+    }
+}
+
 const DEFAULT_LOOKAHEAD: u32 = 25;
 
 /// [`KeychainTxOutIndex`] controls how script pubkeys are revealed for multiple keychains, and
