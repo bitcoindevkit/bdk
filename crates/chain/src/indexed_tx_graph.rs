@@ -320,6 +320,7 @@ impl<A, IA: Default> From<tx_graph::ChangeSet<A>> for ChangeSet<A, IA> {
     }
 }
 
+#[cfg(feature = "miniscript")]
 impl<A, K> From<keychain::ChangeSet<K>> for ChangeSet<A, keychain::ChangeSet<K>> {
     fn from(indexer: keychain::ChangeSet<K>) -> Self {
         Self {
