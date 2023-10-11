@@ -5,7 +5,7 @@ mod common;
 use bdk_chain::{
     collections::BTreeMap,
     indexed_tx_graph::Indexer,
-    keychain::{self, KeychainTxOutIndex},
+    keychain::{self, ChangeSet, KeychainTxOutIndex},
     Append,
 };
 
@@ -42,6 +42,38 @@ fn spk_at_index(descriptor: &Descriptor<DescriptorPublicKey>, index: u32) -> Scr
         .derived_descriptor(&Secp256k1::verification_only(), index)
         .expect("must derive")
         .script_pubkey()
+}
+
+#[test]
+fn append_keychain_derivation_indices() {
+    #[derive(Ord, PartialOrd, Eq, PartialEq, Clone, Debug)]
+    enum Keychain {
+        One,
+        Two,
+        Three,
+        Four,
+    }
+    let mut lhs_di = BTreeMap::<Keychain, u32>::default();
+    let mut rhs_di = BTreeMap::<Keychain, u32>::default();
+    lhs_di.insert(Keychain::One, 7);
+    lhs_di.insert(Keychain::Two, 0);
+    rhs_di.insert(Keychain::One, 3);
+    rhs_di.insert(Keychain::Two, 5);
+    lhs_di.insert(Keychain::Three, 3);
+    rhs_di.insert(Keychain::Four, 4);
+
+    let mut lhs = ChangeSet(lhs_di);
+    let rhs = ChangeSet(rhs_di);
+    lhs.append(rhs);
+
+    // Exiting index doesn't update if the new index in `other` is lower than `self`.
+    assert_eq!(lhs.0.get(&Keychain::One), Some(&7));
+    // Existing index updates if the new index in `other` is higher than `self`.
+    assert_eq!(lhs.0.get(&Keychain::Two), Some(&5));
+    // Existing index is unchanged if keychain doesn't exist in `other`.
+    assert_eq!(lhs.0.get(&Keychain::Three), Some(&3));
+    // New keychain gets added if the keychain is in `other` but not in `self`.
+    assert_eq!(lhs.0.get(&Keychain::Four), Some(&4));
 }
 
 #[test]
