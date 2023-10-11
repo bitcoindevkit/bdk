@@ -9,7 +9,7 @@ edition = "2021"
 # For no-std, remember to enable the bitcoin/no-std feature
 bitcoin = { version = "0.30", default-features = false }
 bitcoincore-rpc = { version = "0.17" }
-bdk_chain = { path = "../chain", version = "0.5", default-features = false }
+bdk_chain = { path = "../chain", version = "0.6", default-features = false }
 
 [dev-dependencies]
 bitcoind = { version = "0.33", features = ["25_0"] }
