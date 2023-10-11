@@ -23,7 +23,9 @@ pub use bdk_chain::keychain::Balance;
 use bdk_chain::{
     indexed_tx_graph,
     keychain::{self, KeychainTxOutIndex},
-    local_chain::{self, CannotConnectError, CheckPoint, CheckPointIter, LocalChain},
+    local_chain::{
+        self, ApplyHeaderError, CannotConnectError, CheckPoint, CheckPointIter, LocalChain,
+    },
     tx_graph::{CanonicalTx, TxGraph},
     Append, BlockId, ChainPosition, ConfirmationTime, ConfirmationTimeHeightAnchor, FullTxOut,
     IndexedTxGraph, Persist, PersistBackend,
@@ -31,8 +33,8 @@ use bdk_chain::{
 use bitcoin::secp256k1::{All, Secp256k1};
 use bitcoin::sighash::{EcdsaSighashType, TapSighashType};
 use bitcoin::{
-    absolute, Address, Network, OutPoint, Script, ScriptBuf, Sequence, Transaction, TxOut, Txid,
-    Weight, Witness,
+    absolute, Address, Block, Network, OutPoint, Script, ScriptBuf, Sequence, Transaction, TxOut,
+    Txid, Weight, Witness,
 };
 use bitcoin::{consensus::encode::serialize, BlockHash};
 use bitcoin::{constants::genesis_block, psbt};
@@ -427,6 +429,55 @@ pub enum InsertTxError {
         tx_height: u32,
     },
 }
+
+impl fmt::Display for InsertTxError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            InsertTxError::ConfirmationHeightCannotBeGreaterThanTip {
+                tip_height,
+                tx_height,
+            } => {
+                write!(f, "cannot insert tx with confirmation height ({}) higher than internal tip height ({})", tx_height, tip_height)
+            }
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for InsertTxError {}
+
+/// An error that may occur when applying a block to [`Wallet`].
+#[derive(Debug)]
+pub enum ApplyBlockError {
+    /// Occurs when the update chain cannot connect with original chain.
+    CannotConnect(CannotConnectError),
+    /// Occurs when the `connected_to` hash does not match the hash derived from `block`.
+    UnexpectedConnectedToHash {
+        /// Block hash of `connected_to`.
+        connected_to_hash: BlockHash,
+        /// Expected block hash of `connected_to`, as derived from `block`.
+        expected_hash: BlockHash,
+    },
+}
+
+impl fmt::Display for ApplyBlockError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ApplyBlockError::CannotConnect(err) => err.fmt(f),
+            ApplyBlockError::UnexpectedConnectedToHash {
+                expected_hash: block_hash,
+                connected_to_hash: checkpoint_hash,
+            } => write!(
+                f,
+                "`connected_to` hash {} differs from the expected hash {} (which is derived from `block`)",
+                checkpoint_hash, block_hash
+            ),
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for ApplyBlockError {}
 
 impl<D> Wallet<D> {
     /// Initialize an empty [`Wallet`].
@@ -2302,7 +2353,7 @@ impl<D> Wallet<D> {
         self.persist.commit().map(|c| c.is_some())
     }
 
-    /// Returns the changes that will be staged with the next call to [`commit`].
+    /// Returns the changes that will be committed with the next call to [`commit`].
     ///
     /// [`commit`]: Self::commit
     pub fn staged(&self) -> &ChangeSet
@@ -2325,6 +2376,86 @@ impl<D> Wallet<D> {
     /// Get a reference to the inner [`LocalChain`].
     pub fn local_chain(&self) -> &LocalChain {
         &self.chain
+    }
+
+    /// Introduces a `block` of `height` to the wallet, and tries to connect it to the
+    /// `prev_blockhash` of the block's header.
+    ///
+    /// This is a convenience method that is equivalent to calling [`apply_block_connected_to`]
+    /// with `prev_blockhash` and `height-1` as the `connected_to` parameter.
+    ///
+    /// [`apply_block_connected_to`]: Self::apply_block_connected_to
+    pub fn apply_block(&mut self, block: Block, height: u32) -> Result<(), CannotConnectError>
+    where
+        D: PersistBackend<ChangeSet>,
+    {
+        let connected_to = match height.checked_sub(1) {
+            Some(prev_height) => BlockId {
+                height: prev_height,
+                hash: block.header.prev_blockhash,
+            },
+            None => BlockId {
+                height,
+                hash: block.block_hash(),
+            },
+        };
+        self.apply_block_connected_to(block, height, connected_to)
+            .map_err(|err| match err {
+                ApplyHeaderError::InconsistentBlocks => {
+                    unreachable!("connected_to is derived from the block so must be consistent")
+                }
+                ApplyHeaderError::CannotConnect(err) => err,
+            })
+    }
+
+    /// Applies relevant transactions from `block` of `height` to the wallet, and connects the
+    /// block to the internal chain.
+    ///
+    /// The `connected_to` parameter informs the wallet how this block connects to the internal
+    /// [`LocalChain`]. Relevant transactions are filtered from the `block` and inserted into the
+    /// internal [`TxGraph`].
+    pub fn apply_block_connected_to(
+        &mut self,
+        block: Block,
+        height: u32,
+        connected_to: BlockId,
+    ) -> Result<(), ApplyHeaderError>
+    where
+        D: PersistBackend<ChangeSet>,
+    {
+        let mut changeset = ChangeSet::default();
+        changeset.append(
+            self.chain
+                .apply_header_connected_to(&block.header, height, connected_to)?
+                .into(),
+        );
+        changeset.append(
+            self.indexed_graph
+                .apply_block_relevant(block, height)
+                .into(),
+        );
+        self.persist.stage(changeset);
+        Ok(())
+    }
+
+    /// Apply relevant unconfirmed transactions to the wallet.
+    ///
+    /// Transactions that are not relevant are filtered out.
+    ///
+    /// This method takes in an iterator of `(tx, last_seen)` where `last_seen` is the timestamp of
+    /// when the transaction was last seen in the mempool. This is used for conflict resolution
+    /// when there is conflicting unconfirmed transactions. The transaction with the later
+    /// `last_seen` is prioritied.
+    pub fn apply_unconfirmed_txs<'t>(
+        &mut self,
+        unconfirmed_txs: impl IntoIterator<Item = (&'t Transaction, u64)>,
+    ) where
+        D: PersistBackend<ChangeSet>,
+    {
+        let indexed_graph_changeset = self
+            .indexed_graph
+            .batch_insert_relevant_unconfirmed(unconfirmed_txs);
+        self.persist.stage(ChangeSet::from(indexed_graph_changeset));
     }
 }
 
