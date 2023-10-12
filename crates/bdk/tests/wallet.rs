@@ -42,14 +42,14 @@ fn receive_output(wallet: &mut Wallet, value: u64, height: ConfirmationTime) -> 
 }
 
 fn receive_output_in_latest_block(wallet: &mut Wallet, value: u64) -> OutPoint {
-    let height = match wallet.latest_checkpoint() {
-        Some(cp) => ConfirmationTime::Confirmed {
-            height: cp.height(),
-            time: 0,
-        },
-        None => ConfirmationTime::Unconfirmed { last_seen: 0 },
+    let latest_cp = wallet.latest_checkpoint();
+    let height = latest_cp.height();
+    let anchor = if height == 0 {
+        ConfirmationTime::Unconfirmed { last_seen: 0 }
+    } else {
+        ConfirmationTime::Confirmed { height, time: 0 }
     };
-    receive_output(wallet, value, height)
+    receive_output(wallet, value, anchor)
 }
 
 // The satisfaction size of a P2WPKH is 112 WU =
@@ -277,7 +277,7 @@ fn test_create_tx_fee_sniping_locktime_last_sync() {
     // If there's no current_height we're left with using the last sync height
     assert_eq!(
         psbt.unsigned_tx.lock_time.to_consensus_u32(),
-        wallet.latest_checkpoint().unwrap().height()
+        wallet.latest_checkpoint().height()
     );
 }
 
@@ -1615,7 +1615,7 @@ fn test_bump_fee_drain_wallet() {
         .insert_tx(
             tx.clone(),
             ConfirmationTime::Confirmed {
-                height: wallet.latest_checkpoint().unwrap().height(),
+                height: wallet.latest_checkpoint().height(),
                 time: 42_000,
             },
         )

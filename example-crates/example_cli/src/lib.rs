@@ -315,10 +315,8 @@ where
         version: 0x02,
         // because the temporary planning module does not support timelocks, we can use the chain
         // tip as the `lock_time` for anti-fee-sniping purposes
-        lock_time: chain
-            .get_chain_tip()?
-            .and_then(|block_id| absolute::LockTime::from_height(block_id.height).ok())
-            .unwrap_or(absolute::LockTime::ZERO),
+        lock_time: absolute::LockTime::from_height(chain.get_chain_tip()?.height)
+            .expect("invalid height"),
         input: selected_txos
             .iter()
             .map(|(_, utxo)| TxIn {
@@ -404,7 +402,7 @@ pub fn planned_utxos<A: Anchor, O: ChainOracle, K: Clone + bdk_tmp_plan::CanDeri
     chain: &O,
     assets: &bdk_tmp_plan::Assets<K>,
 ) -> Result<Vec<(bdk_tmp_plan::Plan<K>, FullTxOut<A>)>, O::Error> {
-    let chain_tip = chain.get_chain_tip()?.unwrap_or_default();
+    let chain_tip = chain.get_chain_tip()?;
     let outpoints = graph.index.outpoints().iter().cloned();
     graph
         .graph()
@@ -509,7 +507,7 @@ where
 
             let balance = graph.graph().try_balance(
                 chain,
-                chain.get_chain_tip()?.unwrap_or_default(),
+                chain.get_chain_tip()?,
                 graph.index.outpoints().iter().cloned(),
                 |(k, _), _| k == &Keychain::Internal,
             )?;
@@ -539,7 +537,7 @@ where
         Commands::TxOut { txout_cmd } => {
             let graph = &*graph.lock().unwrap();
             let chain = &*chain.lock().unwrap();
-            let chain_tip = chain.get_chain_tip()?.unwrap_or_default();
+            let chain_tip = chain.get_chain_tip()?;
             let outpoints = graph.index.outpoints().iter().cloned();
 
             match txout_cmd {

@@ -1,7 +1,7 @@
 #[macro_use]
 mod common;
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 use bdk_chain::{
     indexed_tx_graph::{self, IndexedTxGraph},
@@ -9,9 +9,7 @@ use bdk_chain::{
     local_chain::LocalChain,
     tx_graph, BlockId, ChainPosition, ConfirmationHeightAnchor,
 };
-use bitcoin::{
-    secp256k1::Secp256k1, BlockHash, OutPoint, Script, ScriptBuf, Transaction, TxIn, TxOut,
-};
+use bitcoin::{secp256k1::Secp256k1, OutPoint, Script, ScriptBuf, Transaction, TxIn, TxOut};
 use miniscript::Descriptor;
 
 /// Ensure [`IndexedTxGraph::insert_relevant_txs`] can successfully index transactions NOT presented
@@ -112,11 +110,8 @@ fn insert_relevant_txs() {
 
 fn test_list_owned_txouts() {
     // Create Local chains
-    let local_chain = LocalChain::from(
-        (0..150)
-            .map(|i| (i as u32, h!("random")))
-            .collect::<BTreeMap<u32, BlockHash>>(),
-    );
+    let local_chain = LocalChain::from_blocks((0..150).map(|i| (i as u32, h!("random"))).collect())
+        .expect("must have genesis hash");
 
     // Initiate IndexedTxGraph
 

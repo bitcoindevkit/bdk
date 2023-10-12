@@ -179,9 +179,9 @@ pub struct Update {
 }
 
 /// This is a local implementation of [`ChainOracle`].
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct LocalChain {
-    tip: Option<CheckPoint>,
+    tip: CheckPoint,
     index: BTreeMap<u32, BlockHash>,
 }
 
@@ -194,12 +194,6 @@ impl PartialEq for LocalChain {
 impl From<LocalChain> for BTreeMap<u32, BlockHash> {
     fn from(value: LocalChain) -> Self {
         value.index
-    }
-}
-
-impl From<BTreeMap<u32, BlockHash>> for LocalChain {
-    fn from(value: BTreeMap<u32, BlockHash>) -> Self {
-        Self::from_blocks(value)
     }
 }
 
@@ -225,39 +219,71 @@ impl ChainOracle for LocalChain {
         )
     }
 
-    fn get_chain_tip(&self) -> Result<Option<BlockId>, Self::Error> {
-        Ok(self.tip.as_ref().map(|tip| tip.block_id()))
+    fn get_chain_tip(&self) -> Result<BlockId, Self::Error> {
+        Ok(self.tip.block_id())
     }
 }
 
 impl LocalChain {
+    /// Get the genesis hash.
+    pub fn genesis_hash(&self) -> BlockHash {
+        self.index.get(&0).copied().expect("must have genesis hash")
+    }
+
+    /// Construct [`LocalChain`] from genesis `hash`.
+    #[must_use]
+    pub fn from_genesis_hash(hash: BlockHash) -> (Self, ChangeSet) {
+        let height = 0;
+        let chain = Self {
+            tip: CheckPoint::new(BlockId { height, hash }),
+            index: core::iter::once((height, hash)).collect(),
+        };
+        let changeset = chain.initial_changeset();
+        (chain, changeset)
+    }
+
     /// Construct a [`LocalChain`] from an initial `changeset`.
-    pub fn from_changeset(changeset: ChangeSet) -> Self {
-        let mut chain = Self::default();
-        chain.apply_changeset(&changeset);
+    pub fn from_changeset(changeset: ChangeSet) -> Result<Self, MissingGenesisError> {
+        let genesis_entry = changeset.get(&0).copied().flatten();
+        let genesis_hash = match genesis_entry {
+            Some(hash) => hash,
+            None => return Err(MissingGenesisError),
+        };
+
+        let (mut chain, _) = Self::from_genesis_hash(genesis_hash);
+        chain.apply_changeset(&changeset)?;
 
         debug_assert!(chain._check_index_is_consistent_with_tip());
         debug_assert!(chain._check_changeset_is_applied(&changeset));
 
-        chain
+        Ok(chain)
     }
 
     /// Construct a [`LocalChain`] from a given `checkpoint` tip.
-    pub fn from_tip(tip: CheckPoint) -> Self {
+    pub fn from_tip(tip: CheckPoint) -> Result<Self, MissingGenesisError> {
         let mut chain = Self {
-            tip: Some(tip),
-            ..Default::default()
+            tip,
+            index: BTreeMap::new(),
         };
         chain.reindex(0);
+
+        if chain.index.get(&0).copied().is_none() {
+            return Err(MissingGenesisError);
+        }
+
         debug_assert!(chain._check_index_is_consistent_with_tip());
-        chain
+        Ok(chain)
     }
 
     /// Constructs a [`LocalChain`] from a [`BTreeMap`] of height to [`BlockHash`].
     ///
     /// The [`BTreeMap`] enforces the height order. However, the caller must ensure the blocks are
     /// all of the same chain.
-    pub fn from_blocks(blocks: BTreeMap<u32, BlockHash>) -> Self {
+    pub fn from_blocks(blocks: BTreeMap<u32, BlockHash>) -> Result<Self, MissingGenesisError> {
+        if !blocks.contains_key(&0) {
+            return Err(MissingGenesisError);
+        }
+
         let mut tip: Option<CheckPoint> = None;
 
         for block in &blocks {
@@ -272,23 +298,18 @@ impl LocalChain {
             }
         }
 
-        let chain = Self { index: blocks, tip };
+        let chain = Self {
+            index: blocks,
+            tip: tip.expect("already checked to have genesis"),
+        };
 
         debug_assert!(chain._check_index_is_consistent_with_tip());
-
-        chain
+        Ok(chain)
     }
 
     /// Get the highest checkpoint.
-    pub fn tip(&self) -> Option<CheckPoint> {
+    pub fn tip(&self) -> CheckPoint {
         self.tip.clone()
-    }
-
-    /// Returns whether the [`LocalChain`] is empty (has no checkpoints).
-    pub fn is_empty(&self) -> bool {
-        let res = self.tip.is_none();
-        debug_assert_eq!(res, self.index.is_empty());
-        res
     }
 
     /// Applies the given `update` to the chain.
@@ -312,34 +333,28 @@ impl LocalChain {
     ///
     /// [module-level documentation]: crate::local_chain
     pub fn apply_update(&mut self, update: Update) -> Result<ChangeSet, CannotConnectError> {
-        match self.tip() {
-            Some(original_tip) => {
-                let changeset = merge_chains(
-                    original_tip,
-                    update.tip.clone(),
-                    update.introduce_older_blocks,
-                )?;
-                self.apply_changeset(&changeset);
-
-                // return early as `apply_changeset` already calls `check_consistency`
-                Ok(changeset)
-            }
-            None => {
-                *self = Self::from_tip(update.tip);
-                let changeset = self.initial_changeset();
-
-                debug_assert!(self._check_index_is_consistent_with_tip());
-                debug_assert!(self._check_changeset_is_applied(&changeset));
-                Ok(changeset)
-            }
-        }
+        let changeset = merge_chains(
+            self.tip.clone(),
+            update.tip.clone(),
+            update.introduce_older_blocks,
+        )?;
+        // `._check_index_is_consistent_with_tip` and `._check_changeset_is_applied` is called in
+        // `.apply_changeset`
+        self.apply_changeset(&changeset)
+            .map_err(|_| CannotConnectError {
+                try_include_height: 0,
+            })?;
+        Ok(changeset)
     }
 
     /// Apply the given `changeset`.
-    pub fn apply_changeset(&mut self, changeset: &ChangeSet) {
+    pub fn apply_changeset(&mut self, changeset: &ChangeSet) -> Result<(), MissingGenesisError> {
         if let Some(start_height) = changeset.keys().next().cloned() {
+            // changes after point of agreement
             let mut extension = BTreeMap::default();
+            // point of agreement
             let mut base: Option<CheckPoint> = None;
+
             for cp in self.iter_checkpoints() {
                 if cp.height() >= start_height {
                     extension.insert(cp.height(), cp.hash());
@@ -359,12 +374,12 @@ impl LocalChain {
                     }
                 };
             }
+
             let new_tip = match base {
-                Some(base) => Some(
-                    base.extend(extension.into_iter().map(BlockId::from))
-                        .expect("extension is strictly greater than base"),
-                ),
-                None => LocalChain::from_blocks(extension).tip(),
+                Some(base) => base
+                    .extend(extension.into_iter().map(BlockId::from))
+                    .expect("extension is strictly greater than base"),
+                None => LocalChain::from_blocks(extension)?.tip(),
             };
             self.tip = new_tip;
             self.reindex(start_height);
@@ -372,6 +387,8 @@ impl LocalChain {
             debug_assert!(self._check_index_is_consistent_with_tip());
             debug_assert!(self._check_changeset_is_applied(changeset));
         }
+
+        Ok(())
     }
 
     /// Insert a [`BlockId`].
@@ -379,13 +396,13 @@ impl LocalChain {
     /// # Errors
     ///
     /// Replacing the block hash of an existing checkpoint will result in an error.
-    pub fn insert_block(&mut self, block_id: BlockId) -> Result<ChangeSet, InsertBlockError> {
+    pub fn insert_block(&mut self, block_id: BlockId) -> Result<ChangeSet, AlterCheckPointError> {
         if let Some(&original_hash) = self.index.get(&block_id.height) {
             if original_hash != block_id.hash {
-                return Err(InsertBlockError {
+                return Err(AlterCheckPointError {
                     height: block_id.height,
                     original_hash,
-                    update_hash: block_id.hash,
+                    update_hash: Some(block_id.hash),
                 });
             } else {
                 return Ok(ChangeSet::default());
@@ -394,7 +411,12 @@ impl LocalChain {
 
         let mut changeset = ChangeSet::default();
         changeset.insert(block_id.height, Some(block_id.hash));
-        self.apply_changeset(&changeset);
+        self.apply_changeset(&changeset)
+            .map_err(|_| AlterCheckPointError {
+                height: 0,
+                original_hash: self.genesis_hash(),
+                update_hash: changeset.get(&0).cloned().flatten(),
+            })?;
         Ok(changeset)
     }
 
@@ -418,7 +440,7 @@ impl LocalChain {
     /// Iterate over checkpoints in descending height order.
     pub fn iter_checkpoints(&self) -> CheckPointIter {
         CheckPointIter {
-            current: self.tip.as_ref().map(|tip| tip.0.clone()),
+            current: Some(self.tip.0.clone()),
         }
     }
 
@@ -431,7 +453,6 @@ impl LocalChain {
         let tip_history = self
             .tip
             .iter()
-            .flat_map(CheckPoint::iter)
             .map(|cp| (cp.height(), cp.hash()))
             .collect::<BTreeMap<_, _>>();
         self.index == tip_history
@@ -447,29 +468,52 @@ impl LocalChain {
     }
 }
 
-/// Represents a failure when trying to insert a checkpoint into [`LocalChain`].
+/// An error which occurs when a [`LocalChain`] is constructed without a genesis checkpoint.
 #[derive(Clone, Debug, PartialEq)]
-pub struct InsertBlockError {
-    /// The checkpoints' height.
-    pub height: u32,
-    /// Original checkpoint's block hash.
-    pub original_hash: BlockHash,
-    /// Update checkpoint's block hash.
-    pub update_hash: BlockHash,
-}
+pub struct MissingGenesisError;
 
-impl core::fmt::Display for InsertBlockError {
+impl core::fmt::Display for MissingGenesisError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(
             f,
-            "failed to insert block at height {} as block hashes conflict: original={}, update={}",
-            self.height, self.original_hash, self.update_hash
+            "cannot construct `LocalChain` without a genesis checkpoint"
         )
     }
 }
 
 #[cfg(feature = "std")]
-impl std::error::Error for InsertBlockError {}
+impl std::error::Error for MissingGenesisError {}
+
+/// Represents a failure when trying to insert/remove a checkpoint to/from [`LocalChain`].
+#[derive(Clone, Debug, PartialEq)]
+pub struct AlterCheckPointError {
+    /// The checkpoint's height.
+    pub height: u32,
+    /// The original checkpoint's block hash which cannot be replaced/removed.
+    pub original_hash: BlockHash,
+    /// The attempted update to the `original_block` hash.
+    pub update_hash: Option<BlockHash>,
+}
+
+impl core::fmt::Display for AlterCheckPointError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self.update_hash {
+            Some(update_hash) => write!(
+                f,
+                "failed to insert block at height {}: original={} update={}",
+                self.height, self.original_hash, update_hash
+            ),
+            None => write!(
+                f,
+                "failed to remove block at height {}: original={}",
+                self.height, self.original_hash
+            ),
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for AlterCheckPointError {}
 
 /// Occurs when an update does not have a common checkpoint with the original chain.
 #[derive(Clone, Debug, PartialEq)]

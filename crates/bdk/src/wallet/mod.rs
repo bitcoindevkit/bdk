@@ -28,14 +28,14 @@ use bdk_chain::{
     Append, BlockId, ChainPosition, ConfirmationTime, ConfirmationTimeHeightAnchor, FullTxOut,
     IndexedTxGraph, Persist, PersistBackend,
 };
-use bitcoin::consensus::encode::serialize;
-use bitcoin::psbt;
 use bitcoin::secp256k1::Secp256k1;
 use bitcoin::sighash::{EcdsaSighashType, TapSighashType};
 use bitcoin::{
     absolute, Address, Network, OutPoint, Script, ScriptBuf, Sequence, Transaction, TxOut, Txid,
     Weight, Witness,
 };
+use bitcoin::{consensus::encode::serialize, BlockHash};
+use bitcoin::{constants::genesis_block, psbt};
 use core::fmt;
 use core::ops::Deref;
 use miniscript::psbt::{PsbtExt, PsbtInputExt, PsbtInputSatisfier};
@@ -225,26 +225,57 @@ impl Wallet {
         descriptor: E,
         change_descriptor: Option<E>,
         network: Network,
-    ) -> Result<Self, crate::descriptor::DescriptorError> {
+    ) -> Result<Self, NewNoPersistError> {
         Self::new(descriptor, change_descriptor, (), network).map_err(|e| match e {
-            NewError::Descriptor(e) => e,
-            NewError::Persist(_) => unreachable!("no persistence so it can't fail"),
+            NewError::Descriptor(e) => NewNoPersistError::Descriptor(e),
+            NewError::Persist(_) | NewError::InvalidPersistenceGenesis => {
+                unreachable!("no persistence so it can't fail")
+            }
+            NewError::UnknownNetwork => NewNoPersistError::UnknownNetwork,
         })
     }
 }
 
+/// Error returned from [`Wallet::new_no_persist`]
+#[derive(Debug)]
+pub enum NewNoPersistError {
+    /// There was problem with the descriptors passed in
+    Descriptor(crate::descriptor::DescriptorError),
+    /// We cannot determine the genesis hash from the network.
+    UnknownNetwork,
+}
+
+impl fmt::Display for NewNoPersistError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            NewNoPersistError::Descriptor(e) => e.fmt(f),
+            NewNoPersistError::UnknownNetwork => write!(
+                f,
+                "unknown network - genesis block hash needs to be provided explicitly"
+            ),
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for NewNoPersistError {}
+
 #[derive(Debug)]
 /// Error returned from [`Wallet::new`]
-pub enum NewError<P> {
+pub enum NewError<PE> {
     /// There was problem with the descriptors passed in
     Descriptor(crate::descriptor::DescriptorError),
     /// We were unable to load the wallet's data from the persistence backend
-    Persist(P),
+    Persist(PE),
+    /// We cannot determine the genesis hash from the network
+    UnknownNetwork,
+    /// The genesis block hash is either missing from persistence or has an unexpected value
+    InvalidPersistenceGenesis,
 }
 
-impl<P> fmt::Display for NewError<P>
+impl<PE> fmt::Display for NewError<PE>
 where
-    P: fmt::Display,
+    PE: fmt::Display,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -252,9 +283,17 @@ where
             NewError::Persist(e) => {
                 write!(f, "failed to load wallet from persistence backend: {}", e)
             }
+            NewError::UnknownNetwork => write!(
+                f,
+                "unknown network - genesis block hash needs to be provided explicitly"
+            ),
+            NewError::InvalidPersistenceGenesis => write!(f, "the genesis block hash is either missing from persistence or has an unexpected value"),
         }
     }
 }
+
+#[cfg(feature = "std")]
+impl<PE> std::error::Error for NewError<PE> where PE: core::fmt::Display + core::fmt::Debug {}
 
 /// An error that may occur when inserting a transaction into [`Wallet`].
 #[derive(Debug)]
@@ -263,14 +302,11 @@ pub enum InsertTxError {
     /// confirmation height that is greater than the internal chain tip.
     ConfirmationHeightCannotBeGreaterThanTip {
         /// The internal chain's tip height.
-        tip_height: Option<u32>,
+        tip_height: u32,
         /// The introduced transaction's confirmation height.
         tx_height: u32,
     },
 }
-
-#[cfg(feature = "std")]
-impl<P: core::fmt::Display + core::fmt::Debug> std::error::Error for NewError<P> {}
 
 impl<D> Wallet<D> {
     /// Create a wallet from a `descriptor` (and an optional `change_descriptor`) and load related
@@ -278,14 +314,32 @@ impl<D> Wallet<D> {
     pub fn new<E: IntoWalletDescriptor>(
         descriptor: E,
         change_descriptor: Option<E>,
-        mut db: D,
+        db: D,
         network: Network,
     ) -> Result<Self, NewError<D::LoadError>>
     where
         D: PersistBackend<ChangeSet>,
     {
+        Self::with_custom_genesis_hash(descriptor, change_descriptor, db, network, None)
+    }
+
+    /// Create a new [`Wallet`] with a custom genesis hash.
+    ///
+    /// This is like [`Wallet::new`] with an additional `custom_genesis_hash` parameter.
+    pub fn with_custom_genesis_hash<E: IntoWalletDescriptor>(
+        descriptor: E,
+        change_descriptor: Option<E>,
+        mut db: D,
+        network: Network,
+        custom_genesis_hash: Option<BlockHash>,
+    ) -> Result<Self, NewError<D::LoadError>>
+    where
+        D: PersistBackend<ChangeSet>,
+    {
         let secp = Secp256k1::new();
-        let mut chain = LocalChain::default();
+        let genesis_hash =
+            custom_genesis_hash.unwrap_or_else(|| genesis_block(network).block_hash());
+        let (mut chain, _) = LocalChain::from_genesis_hash(genesis_hash);
         let mut indexed_graph = IndexedTxGraph::<
             ConfirmationTimeHeightAnchor,
             KeychainTxOutIndex<KeychainKind>,
@@ -319,7 +373,9 @@ impl<D> Wallet<D> {
         };
 
         let changeset = db.load_from_persistence().map_err(NewError::Persist)?;
-        chain.apply_changeset(&changeset.chain);
+        chain
+            .apply_changeset(&changeset.chain)
+            .map_err(|_| NewError::InvalidPersistenceGenesis)?;
         indexed_graph.apply_changeset(changeset.indexed_tx_graph);
 
         let persist = Persist::new(db);
@@ -446,7 +502,7 @@ impl<D> Wallet<D> {
             .graph()
             .filter_chain_unspents(
                 &self.chain,
-                self.chain.tip().map(|cp| cp.block_id()).unwrap_or_default(),
+                self.chain.tip().block_id(),
                 self.indexed_graph.index.outpoints().iter().cloned(),
             )
             .map(|((k, i), full_txo)| new_local_utxo(k, i, full_txo))
@@ -458,7 +514,7 @@ impl<D> Wallet<D> {
     }
 
     /// Returns the latest checkpoint.
-    pub fn latest_checkpoint(&self) -> Option<CheckPoint> {
+    pub fn latest_checkpoint(&self) -> CheckPoint {
         self.chain.tip()
     }
 
@@ -496,7 +552,7 @@ impl<D> Wallet<D> {
             .graph()
             .filter_chain_unspents(
                 &self.chain,
-                self.chain.tip().map(|cp| cp.block_id()).unwrap_or_default(),
+                self.chain.tip().block_id(),
                 core::iter::once((spk_i, op)),
             )
             .map(|((k, i), full_txo)| new_local_utxo(k, i, full_txo))
@@ -669,7 +725,7 @@ impl<D> Wallet<D> {
         Some(CanonicalTx {
             chain_position: graph.get_chain_position(
                 &self.chain,
-                self.chain.tip().map(|cp| cp.block_id()).unwrap_or_default(),
+                self.chain.tip().block_id(),
                 txid,
             )?,
             tx_node: graph.get_tx_node(txid)?,
@@ -686,7 +742,7 @@ impl<D> Wallet<D> {
     pub fn insert_checkpoint(
         &mut self,
         block_id: BlockId,
-    ) -> Result<bool, local_chain::InsertBlockError>
+    ) -> Result<bool, local_chain::AlterCheckPointError>
     where
         D: PersistBackend<ChangeSet>,
     {
@@ -730,7 +786,7 @@ impl<D> Wallet<D> {
                     .range(height..)
                     .next()
                     .ok_or(InsertTxError::ConfirmationHeightCannotBeGreaterThanTip {
-                        tip_height: self.chain.tip().map(|b| b.height()),
+                        tip_height: self.chain.tip().height(),
                         tx_height: height,
                     })
                     .map(|(&anchor_height, &hash)| ConfirmationTimeHeightAnchor {
@@ -766,10 +822,9 @@ impl<D> Wallet<D> {
     pub fn transactions(
         &self,
     ) -> impl Iterator<Item = CanonicalTx<'_, Transaction, ConfirmationTimeHeightAnchor>> + '_ {
-        self.indexed_graph.graph().list_chain_txs(
-            &self.chain,
-            self.chain.tip().map(|cp| cp.block_id()).unwrap_or_default(),
-        )
+        self.indexed_graph
+            .graph()
+            .list_chain_txs(&self.chain, self.chain.tip().block_id())
     }
 
     /// Return the balance, separated into available, trusted-pending, untrusted-pending and immature
@@ -777,7 +832,7 @@ impl<D> Wallet<D> {
     pub fn get_balance(&self) -> Balance {
         self.indexed_graph.graph().balance(
             &self.chain,
-            self.chain.tip().map(|cp| cp.block_id()).unwrap_or_default(),
+            self.chain.tip().block_id(),
             self.indexed_graph.index.outpoints().iter().cloned(),
             |&(k, _), _| k == KeychainKind::Internal,
         )
@@ -945,14 +1000,14 @@ impl<D> Wallet<D> {
             _ => 1,
         };
 
-        // We use a match here instead of a map_or_else as it's way more readable :)
+        // We use a match here instead of a unwrap_or_else as it's way more readable :)
         let current_height = match params.current_height {
             // If they didn't tell us the current height, we assume it's the latest sync height.
-            None => self
-                .chain
-                .tip()
-                .map(|cp| absolute::LockTime::from_height(cp.height()).expect("Invalid height")),
-            h => h,
+            None => {
+                let tip_height = self.chain.tip().height();
+                absolute::LockTime::from_height(tip_height).expect("invalid height")
+            }
+            Some(h) => h,
         };
 
         let lock_time = match params.locktime {
@@ -961,7 +1016,7 @@ impl<D> Wallet<D> {
                 // Fee sniping can be partially prevented by setting the timelock
                 // to current_height. If we don't know the current_height,
                 // we default to 0.
-                let fee_sniping_height = current_height.unwrap_or(absolute::LockTime::ZERO);
+                let fee_sniping_height = current_height;
 
                 // We choose the biggest between the required nlocktime and the fee sniping
                 // height
@@ -1115,7 +1170,7 @@ impl<D> Wallet<D> {
             params.drain_wallet,
             params.manually_selected_only,
             params.bumping_fee.is_some(), // we mandate confirmed transactions if we're bumping the fee
-            current_height.map(absolute::LockTime::to_consensus_u32),
+            Some(current_height.to_consensus_u32()),
         );
 
         // get drain script
@@ -1257,7 +1312,7 @@ impl<D> Wallet<D> {
     ) -> Result<TxBuilder<'_, D, DefaultCoinSelectionAlgorithm, BumpFee>, Error> {
         let graph = self.indexed_graph.graph();
         let txout_index = &self.indexed_graph.index;
-        let chain_tip = self.chain.tip().map(|cp| cp.block_id()).unwrap_or_default();
+        let chain_tip = self.chain.tip().block_id();
 
         let mut tx = graph
             .get_tx(txid)
@@ -1492,7 +1547,7 @@ impl<D> Wallet<D> {
         psbt: &mut psbt::PartiallySignedTransaction,
         sign_options: SignOptions,
     ) -> Result<bool, Error> {
-        let chain_tip = self.chain.tip().map(|cp| cp.block_id()).unwrap_or_default();
+        let chain_tip = self.chain.tip().block_id();
 
         let tx = &psbt.unsigned_tx;
         let mut finished = true;
@@ -1515,7 +1570,7 @@ impl<D> Wallet<D> {
                 });
             let current_height = sign_options
                 .assume_height
-                .or(self.chain.tip().map(|b| b.height()));
+                .unwrap_or_else(|| self.chain.tip().height());
 
             debug!(
                 "Input #{} - {}, using `confirmation_height` = {:?}, `current_height` = {:?}",
@@ -1552,8 +1607,8 @@ impl<D> Wallet<D> {
                         &mut tmp_input,
                         (
                             PsbtInputSatisfier::new(psbt, n),
-                            After::new(current_height, false),
-                            Older::new(current_height, confirmation_height, false),
+                            After::new(Some(current_height), false),
+                            Older::new(Some(current_height), confirmation_height, false),
                         ),
                     ) {
                         Ok(_) => {
@@ -1661,7 +1716,7 @@ impl<D> Wallet<D> {
         must_only_use_confirmed_tx: bool,
         current_height: Option<u32>,
     ) -> (Vec<WeightedUtxo>, Vec<WeightedUtxo>) {
-        let chain_tip = self.chain.tip().map(|cp| cp.block_id()).unwrap_or_default();
+        let chain_tip = self.chain.tip().block_id();
         //    must_spend <- manually selected utxos
         //    may_spend  <- all other available utxos
         let mut may_spend = self.get_available_utxos();

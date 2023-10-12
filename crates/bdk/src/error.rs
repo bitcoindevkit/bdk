@@ -199,3 +199,12 @@ impl_error!(miniscript::Error, Miniscript);
 impl_error!(MiniscriptPsbtError, MiniscriptPsbt);
 impl_error!(bitcoin::bip32::Error, Bip32);
 impl_error!(bitcoin::psbt::Error, Psbt);
+
+impl From<crate::wallet::NewNoPersistError> for Error {
+    fn from(e: crate::wallet::NewNoPersistError) -> Self {
+        match e {
+            wallet::NewNoPersistError::Descriptor(e) => Error::Descriptor(e),
+            unknown_network_err => Error::Generic(format!("{}", unknown_network_err)),
+        }
+    }
+}

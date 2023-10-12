@@ -5,10 +5,10 @@ use std::{
 };
 
 use bdk_chain::{
-    bitcoin::{Address, Network, OutPoint, ScriptBuf, Txid},
+    bitcoin::{constants::genesis_block, Address, Network, OutPoint, ScriptBuf, Txid},
     indexed_tx_graph::{self, IndexedTxGraph},
     keychain,
-    local_chain::{self, CheckPoint, LocalChain},
+    local_chain::{self, LocalChain},
     Append, ConfirmationTimeHeightAnchor,
 };
 
@@ -102,6 +102,8 @@ fn main() -> anyhow::Result<()> {
     let (args, keymap, index, db, init_changeset) =
         example_cli::init::<EsploraCommands, EsploraArgs, ChangeSet>(DB_MAGIC, DB_PATH)?;
 
+    let genesis_hash = genesis_block(args.network).block_hash();
+
     let (init_chain_changeset, init_indexed_tx_graph_changeset) = init_changeset;
 
     // Contruct `IndexedTxGraph` and `LocalChain` with our initial changeset. They are wrapped in
@@ -113,8 +115,8 @@ fn main() -> anyhow::Result<()> {
         graph
     });
     let chain = Mutex::new({
-        let mut chain = LocalChain::default();
-        chain.apply_changeset(&init_chain_changeset);
+        let (mut chain, _) = LocalChain::from_genesis_hash(genesis_hash);
+        chain.apply_changeset(&init_chain_changeset)?;
         chain
     });
 
@@ -234,7 +236,7 @@ fn main() -> anyhow::Result<()> {
             {
                 let graph = graph.lock().unwrap();
                 let chain = chain.lock().unwrap();
-                let chain_tip = chain.tip().map(|cp| cp.block_id()).unwrap_or_default();
+                let chain_tip = chain.tip().block_id();
 
                 if *all_spks {
                     let all_spks = graph
@@ -332,7 +334,7 @@ fn main() -> anyhow::Result<()> {
         (missing_block_heights, tip)
     };
 
-    println!("prev tip: {}", tip.as_ref().map_or(0, CheckPoint::height));
+    println!("prev tip: {}", tip.height());
     println!("missing block heights: {:?}", missing_block_heights);
 
     // Here, we actually fetch the missing blocks and create a `local_chain::Update`.

@@ -39,10 +39,7 @@ fn test_tx_conflict_handling() {
         (5, h!("F")),
         (6, h!("G"))
     );
-    let chain_tip = local_chain
-        .tip()
-        .map(|cp| cp.block_id())
-        .unwrap_or_default();
+    let chain_tip = local_chain.tip().block_id();
 
     let scenarios = [
         Scenario {

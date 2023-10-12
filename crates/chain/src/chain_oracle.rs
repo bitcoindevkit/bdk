@@ -21,5 +21,5 @@ pub trait ChainOracle {
     ) -> Result<Option<bool>, Self::Error>;
 
     /// Get the best chain's chain tip.
-    fn get_chain_tip(&self) -> Result<Option<BlockId>, Self::Error>;
+    fn get_chain_tip(&self) -> Result<BlockId, Self::Error>;
 }

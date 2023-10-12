@@ -30,7 +30,7 @@ pub trait EsploraExt {
     #[allow(clippy::result_large_err)]
     fn update_local_chain(
         &self,
-        local_tip: Option<CheckPoint>,
+        local_tip: CheckPoint,
         request_heights: impl IntoIterator<Item = u32>,
     ) -> Result<local_chain::Update, Error>;
 
@@ -87,7 +87,7 @@ pub trait EsploraExt {
 impl EsploraExt for esplora_client::BlockingClient {
     fn update_local_chain(
         &self,
-        local_tip: Option<CheckPoint>,
+        local_tip: CheckPoint,
         request_heights: impl IntoIterator<Item = u32>,
     ) -> Result<local_chain::Update, Error> {
         let request_heights = request_heights.into_iter().collect::<BTreeSet<_>>();
@@ -120,41 +120,39 @@ impl EsploraExt for esplora_client::BlockingClient {
         let earliest_agreement_cp = {
             let mut earliest_agreement_cp = Option::<CheckPoint>::None;
 
-            if let Some(local_tip) = local_tip {
-                let local_tip_height = local_tip.height();
-                for local_cp in local_tip.iter() {
-                    let local_block = local_cp.block_id();
+            let local_tip_height = local_tip.height();
+            for local_cp in local_tip.iter() {
+                let local_block = local_cp.block_id();
 
-                    // the updated hash (block hash at this height after the update), can either be:
-                    // 1. a block that already existed in `fetched_blocks`
-                    // 2. a block that exists locally and at least has a depth of ASSUME_FINAL_DEPTH
-                    // 3. otherwise we can freshly fetch the block from remote, which is safe as it
-                    //    is guaranteed that this would be at or below ASSUME_FINAL_DEPTH from the
-                    //    remote tip
-                    let updated_hash = match fetched_blocks.entry(local_block.height) {
-                        btree_map::Entry::Occupied(entry) => *entry.get(),
-                        btree_map::Entry::Vacant(entry) => *entry.insert(
-                            if local_tip_height - local_block.height >= ASSUME_FINAL_DEPTH {
-                                local_block.hash
-                            } else {
-                                self.get_block_hash(local_block.height)?
-                            },
-                        ),
-                    };
+                // the updated hash (block hash at this height after the update), can either be:
+                // 1. a block that already existed in `fetched_blocks`
+                // 2. a block that exists locally and at least has a depth of ASSUME_FINAL_DEPTH
+                // 3. otherwise we can freshly fetch the block from remote, which is safe as it
+                //    is guaranteed that this would be at or below ASSUME_FINAL_DEPTH from the
+                //    remote tip
+                let updated_hash = match fetched_blocks.entry(local_block.height) {
+                    btree_map::Entry::Occupied(entry) => *entry.get(),
+                    btree_map::Entry::Vacant(entry) => *entry.insert(
+                        if local_tip_height - local_block.height >= ASSUME_FINAL_DEPTH {
+                            local_block.hash
+                        } else {
+                            self.get_block_hash(local_block.height)?
+                        },
+                    ),
+                };
 
-                    // since we may introduce blocks below the point of agreement, we cannot break
-                    // here unconditionally - we only break if we guarantee there are no new heights
-                    // below our current local checkpoint
-                    if local_block.hash == updated_hash {
-                        earliest_agreement_cp = Some(local_cp);
+                // since we may introduce blocks below the point of agreement, we cannot break
+                // here unconditionally - we only break if we guarantee there are no new heights
+                // below our current local checkpoint
+                if local_block.hash == updated_hash {
+                    earliest_agreement_cp = Some(local_cp);
 
-                        let first_new_height = *fetched_blocks
-                            .keys()
-                            .next()
-                            .expect("must have at least one new block");
-                        if first_new_height >= local_block.height {
-                            break;
-                        }
+                    let first_new_height = *fetched_blocks
+                        .keys()
+                        .next()
+                        .expect("must have at least one new block");
+                    if first_new_height >= local_block.height {
+                        break;
                     }
                 }
             }

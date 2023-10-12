@@ -23,6 +23,7 @@ macro_rules! local_chain {
     [ $(($height:expr, $block_hash:expr)), * ] => {{
         #[allow(unused_mut)]
         bdk_chain::local_chain::LocalChain::from_blocks([$(($height, $block_hash).into()),*].into_iter().collect())
+            .expect("chain must have genesis block")
     }};
 }
 
@@ -32,8 +33,8 @@ macro_rules! chain_update {
         #[allow(unused_mut)]
         bdk_chain::local_chain::Update {
             tip: bdk_chain::local_chain::LocalChain::from_blocks([$(($height, $hash).into()),*].into_iter().collect())
-            .tip()
-            .expect("must have tip"),
+                .expect("chain must have genesis block")
+                .tip(),
             introduce_older_blocks: true,
         }
     }};
