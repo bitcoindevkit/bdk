@@ -37,6 +37,7 @@ pub use tx_graph::TxGraph;
 mod chain_oracle;
 pub use chain_oracle::*;
 mod persist;
+pub use keychain::Balance;
 pub use persist::*;
 
 #[doc(hidden)]
