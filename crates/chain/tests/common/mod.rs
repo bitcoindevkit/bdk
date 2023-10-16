@@ -70,7 +70,7 @@ macro_rules! changeset {
 #[allow(unused)]
 pub fn new_tx(lt: u32) -> bitcoin::Transaction {
     bitcoin::Transaction {
-        version: 0x00,
+        version: bitcoin::transaction::Version::non_standard(0x00),
         lock_time: bitcoin::absolute::LockTime::from_consensus(lt),
         input: vec![],
         output: vec![],

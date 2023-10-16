@@ -30,14 +30,14 @@ use bdk_chain::{
     Append, BlockId, ChainPosition, ConfirmationTime, ConfirmationTimeHeightAnchor, FullTxOut,
     IndexedTxGraph, Persist, PersistBackend,
 };
+use bitcoin::constants::genesis_block;
 use bitcoin::secp256k1::{All, Secp256k1};
 use bitcoin::sighash::{EcdsaSighashType, TapSighashType};
 use bitcoin::{
-    absolute, Address, Block, FeeRate, Network, OutPoint, Script, ScriptBuf, Sequence, Transaction,
-    TxOut, Txid, Weight, Witness,
+    absolute, psbt, Address, Block, FeeRate, Network, OutPoint, Script, ScriptBuf, Sequence,
+    Transaction, TxOut, Txid, Witness,
 };
-use bitcoin::{consensus::encode::serialize, BlockHash};
-use bitcoin::{constants::genesis_block, psbt};
+use bitcoin::{consensus::encode::serialize, transaction, Amount, BlockHash, Psbt};
 use core::fmt;
 use core::ops::Deref;
 use descriptor::error::Error as DescriptorError;
@@ -945,11 +945,11 @@ impl<D> Wallet<D> {
     /// ```
     ///
     /// ```rust, no_run
-    /// # use bitcoin::psbt::PartiallySignedTransaction;
+    /// # use bitcoin::Psbt;
     /// # use bdk::Wallet;
     /// # let mut wallet: Wallet<()> = todo!();
-    /// # let mut psbt: PartiallySignedTransaction = todo!();
-    /// let tx = &psbt.clone().extract_tx();
+    /// # let mut psbt: Psbt = todo!();
+    /// let tx = &psbt.clone().extract_tx().expect("tx");
     /// let fee = wallet.calculate_fee(tx).expect("fee");
     /// ```
     /// [`insert_txout`]: Self::insert_txout
@@ -976,12 +976,12 @@ impl<D> Wallet<D> {
     /// ```
     ///
     /// ```rust, no_run
-    /// # use bitcoin::psbt::PartiallySignedTransaction;
+    /// # use bitcoin::Psbt;
     /// # use bdk::Wallet;
     /// # let mut wallet: Wallet<()> = todo!();
-    /// # let mut psbt: PartiallySignedTransaction = todo!();
-    /// let tx = psbt.clone().extract_tx();
-    /// let fee_rate = wallet.calculate_fee_rate(&tx).expect("fee rate");
+    /// # let mut psbt: Psbt = todo!();
+    /// let tx = &psbt.clone().extract_tx().expect("tx");
+    /// let fee_rate = wallet.calculate_fee_rate(tx).expect("fee rate");
     /// ```
     /// [`insert_txout`]: Self::insert_txout
     pub fn calculate_fee_rate(&self, tx: &Transaction) -> Result<FeeRate, CalculateFeeError> {
@@ -1007,11 +1007,11 @@ impl<D> Wallet<D> {
     /// ```
     ///
     /// ```rust, no_run
-    /// # use bitcoin::psbt::PartiallySignedTransaction;
+    /// # use bitcoin::Psbt;
     /// # use bdk::Wallet;
     /// # let mut wallet: Wallet<()> = todo!();
-    /// # let mut psbt: PartiallySignedTransaction = todo!();
-    /// let tx = &psbt.clone().extract_tx();
+    /// # let mut psbt: Psbt = todo!();
+    /// let tx = &psbt.clone().extract_tx().expect("tx");
     /// let (sent, received) = wallet.sent_and_received(tx);
     /// ```
     pub fn sent_and_received(&self, tx: &Transaction) -> (u64, u64) {
@@ -1261,7 +1261,7 @@ impl<D> Wallet<D> {
         &mut self,
         coin_selection: Cs,
         params: TxParams,
-    ) -> Result<psbt::PartiallySignedTransaction, CreateTxError<D::WriteError>>
+    ) -> Result<Psbt, CreateTxError<D::WriteError>>
     where
         D: PersistBackend<ChangeSet>,
     {
@@ -1455,7 +1455,7 @@ impl<D> Wallet<D> {
         };
 
         let mut tx = Transaction {
-            version,
+            version: transaction::Version::non_standard(version),
             lock_time,
             input: vec![],
             output: vec![],
@@ -1485,7 +1485,7 @@ impl<D> Wallet<D> {
 
             let new_out = TxOut {
                 script_pubkey: script_pubkey.clone(),
-                value,
+                value: Amount::from_sat(value),
             };
 
             tx.output.push(new_out);
@@ -1494,17 +1494,6 @@ impl<D> Wallet<D> {
         }
 
         fee_amount += (fee_rate * tx.weight()).to_sat();
-
-        // Segwit transactions' header is 2WU larger than legacy txs' header,
-        // as they contain a witness marker (1WU) and a witness flag (1WU) (see BIP144).
-        // At this point we really don't know if the resulting transaction will be segwit
-        // or legacy, so we just add this 2WU to the fee_amount - overshooting the fee amount
-        // is better than undershooting it.
-        // If we pass a fee_amount that is slightly higher than the final fee_amount, we
-        // end up with a transaction with a slightly higher fee rate than the requested one.
-        // If, instead, we undershoot, we may end up with a feerate lower than the requested one
-        // - we might come up with non broadcastable txs!
-        fee_amount += (fee_rate * Weight::from_wu(2)).to_sat();
 
         if params.change_policy != tx_builder::ChangeSpendPolicy::ChangeAllowed
             && internal_descriptor.is_none()
@@ -1594,7 +1583,7 @@ impl<D> Wallet<D> {
 
                 // create drain output
                 let drain_output = TxOut {
-                    value: *amount,
+                    value: Amount::from_sat(*amount),
                     script_pubkey: drain_script,
                 };
 
@@ -1640,7 +1629,7 @@ impl<D> Wallet<D> {
     ///     builder.finish()?
     /// };
     /// let _ = wallet.sign(&mut psbt, SignOptions::default())?;
-    /// let tx = psbt.extract_tx();
+    /// let tx = psbt.clone().extract_tx().expect("tx");
     /// // broadcast tx but it's taking too long to confirm so we want to bump the fee
     /// let mut psbt =  {
     ///     let mut builder = wallet.build_fee_bump(tx.txid())?;
@@ -1764,11 +1753,11 @@ impl<D> Wallet<D> {
 
         let params = TxParams {
             // TODO: figure out what rbf option should be?
-            version: Some(tx_builder::Version(tx.version)),
+            version: Some(tx_builder::Version(tx.version.0)),
             recipients: tx
                 .output
                 .into_iter()
-                .map(|txout| (txout.script_pubkey, txout.value))
+                .map(|txout| (txout.script_pubkey, txout.value.to_sat()))
                 .collect(),
             utxos: original_utxos,
             bumping_fee: Some(tx_builder::PreviousFee {
@@ -1814,11 +1803,7 @@ impl<D> Wallet<D> {
     /// let finalized = wallet.sign(&mut psbt, SignOptions::default())?;
     /// assert!(finalized, "we should have signed all the inputs");
     /// # Ok::<(),anyhow::Error>(())
-    pub fn sign(
-        &self,
-        psbt: &mut psbt::PartiallySignedTransaction,
-        sign_options: SignOptions,
-    ) -> Result<bool, SignerError> {
+    pub fn sign(&self, psbt: &mut Psbt, sign_options: SignOptions) -> Result<bool, SignerError> {
         // This adds all the PSBT metadata for the inputs, which will help us later figure out how
         // to derive our keys
         self.update_psbt_with_descriptor(psbt)
@@ -1898,7 +1883,7 @@ impl<D> Wallet<D> {
     /// The [`SignOptions`] can be used to tweak the behavior of the finalizer.
     pub fn finalize_psbt(
         &self,
-        psbt: &mut psbt::PartiallySignedTransaction,
+        psbt: &mut Psbt,
         sign_options: SignOptions,
     ) -> Result<bool, SignerError> {
         let chain_tip = self.chain.tip().block_id();
@@ -2124,7 +2109,7 @@ impl<D> Wallet<D> {
                 if must_only_use_confirmed_tx && !confirmation_time.is_confirmed() {
                     return false;
                 }
-                if tx.is_coin_base() {
+                if tx.is_coinbase() {
                     debug_assert!(
                         confirmation_time.is_confirmed(),
                         "coinbase must always be confirmed"
@@ -2173,11 +2158,11 @@ impl<D> Wallet<D> {
         tx: Transaction,
         selected: Vec<Utxo>,
         params: TxParams,
-    ) -> Result<psbt::PartiallySignedTransaction, CreateTxError<D::WriteError>>
+    ) -> Result<Psbt, CreateTxError<D::WriteError>>
     where
         D: PersistBackend<ChangeSet>,
     {
-        let mut psbt = psbt::PartiallySignedTransaction::from_unsigned_tx(tx)?;
+        let mut psbt = Psbt::from_unsigned_tx(tx)?;
 
         if params.add_global_xpubs {
             let all_xpubs = self
@@ -2233,7 +2218,7 @@ impl<D> Wallet<D> {
                     let is_taproot = foreign_psbt_input
                         .witness_utxo
                         .as_ref()
-                        .map(|txout| txout.script_pubkey.is_v1_p2tr())
+                        .map(|txout| txout.script_pubkey.is_p2tr())
                         .unwrap_or(false);
                     if !is_taproot
                         && !params.only_witness_utxo
@@ -2295,10 +2280,7 @@ impl<D> Wallet<D> {
         Ok(psbt_input)
     }
 
-    fn update_psbt_with_descriptor(
-        &self,
-        psbt: &mut psbt::PartiallySignedTransaction,
-    ) -> Result<(), MiniscriptPsbtError> {
+    fn update_psbt_with_descriptor(&self, psbt: &mut Psbt) -> Result<(), MiniscriptPsbtError> {
         // We need to borrow `psbt` mutably within the loops, so we have to allocate a vec for all
         // the input utxos and outputs
         let utxos = (0..psbt.inputs.len())
@@ -2602,11 +2584,11 @@ macro_rules! doctest_wallet {
         .unwrap();
         let address = wallet.get_address(AddressIndex::New).address;
         let tx = Transaction {
-            version: 1,
+            version: transaction::Version::ONE,
             lock_time: absolute::LockTime::ZERO,
             input: vec![],
             output: vec![TxOut {
-                value: 500_000,
+                value: Amount::from_sat(500_000),
                 script_pubkey: address.script_pubkey(),
             }],
         };

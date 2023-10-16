@@ -96,7 +96,7 @@ impl CoinSelectorOpt {
     ) -> Self {
         let mut tx = Transaction {
             input: vec![],
-            version: 1,
+            version: transaction::Version::ONE,
             lock_time: absolute::LockTime::ZERO,
             output: txouts.to_vec(),
         };
@@ -112,7 +112,7 @@ impl CoinSelectorOpt {
             target_value: if txouts.is_empty() {
                 None
             } else {
-                Some(txouts.iter().map(|txout| txout.value).sum())
+                Some(txouts.iter().map(|txout| txout.value.to_sat()).sum())
             },
             ..Self::from_weights(
                 base_weight.to_wu() as u32,

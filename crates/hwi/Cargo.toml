@@ -10,4 +10,4 @@ readme = "README.md"
 
 [dependencies]
 bdk = { path = "../bdk" }
-hwi = { version = "0.7.0", features = [ "miniscript"] }
+hwi = { version = "0.8.0", features = [ "miniscript"] }
