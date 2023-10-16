@@ -14,8 +14,8 @@ readme = "README.md"
 
 [dependencies]
 # For no-std, remember to enable the bitcoin/no-std feature
-bitcoin = { version = "0.30", default-features = false }
-bitcoincore-rpc = { version = "0.17" }
+bitcoin = { version = "0.31", default-features = false }
+bitcoincore-rpc = { version = "0.18" }
 bdk_chain = { path = "../chain", version = "0.11", default-features = false }
 
 [dev-dependencies]

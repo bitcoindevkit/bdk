@@ -19,13 +19,12 @@
 //! # use core::str::FromStr;
 //! # use bitcoin::secp256k1::{Secp256k1, All};
 //! # use bitcoin::*;
-//! # use bitcoin::psbt;
 //! # use bdk::signer::*;
 //! # use bdk::*;
 //! # #[derive(Debug)]
 //! # struct CustomHSM;
 //! # impl CustomHSM {
-//! #     fn hsm_sign_input(&self, _psbt: &mut psbt::PartiallySignedTransaction, _input: usize) -> Result<(), SignerError> {
+//! #     fn hsm_sign_input(&self, _psbt: &mut Psbt, _input: usize) -> Result<(), SignerError> {
 //! #         Ok(())
 //! #     }
 //! #     fn connect() -> Self {
@@ -55,7 +54,7 @@
 //! impl InputSigner for CustomSigner {
 //!     fn sign_input(
 //!         &self,
-//!         psbt: &mut psbt::PartiallySignedTransaction,
+//!         psbt: &mut Psbt,
 //!         input_index: usize,
 //!         _sign_options: &SignOptions,
 //!         _secp: &Secp256k1<All>,
@@ -87,13 +86,13 @@ use core::cmp::Ordering;
 use core::fmt;
 use core::ops::{Bound::Included, Deref};
 
-use bitcoin::bip32::{ChildNumber, DerivationPath, ExtendedPrivKey, Fingerprint};
+use bitcoin::bip32::{ChildNumber, DerivationPath, Fingerprint, Xpriv};
 use bitcoin::hashes::hash160;
 use bitcoin::secp256k1::Message;
 use bitcoin::sighash::{EcdsaSighashType, TapSighash, TapSighashType};
 use bitcoin::{ecdsa, psbt, sighash, taproot};
 use bitcoin::{key::TapTweak, key::XOnlyPublicKey, secp256k1};
-use bitcoin::{PrivateKey, PublicKey};
+use bitcoin::{PrivateKey, Psbt, PublicKey};
 
 use miniscript::descriptor::{
     Descriptor, DescriptorMultiXKey, DescriptorPublicKey, DescriptorSecretKey, DescriptorXKey,
@@ -264,7 +263,7 @@ pub trait InputSigner: SignerCommon {
     /// Sign a single psbt input
     fn sign_input(
         &self,
-        psbt: &mut psbt::PartiallySignedTransaction,
+        psbt: &mut Psbt,
         input_index: usize,
         sign_options: &SignOptions,
         secp: &SecpCtx,
@@ -279,7 +278,7 @@ pub trait TransactionSigner: SignerCommon {
     /// Sign all the inputs of the psbt
     fn sign_transaction(
         &self,
-        psbt: &mut psbt::PartiallySignedTransaction,
+        psbt: &mut Psbt,
         sign_options: &SignOptions,
         secp: &SecpCtx,
     ) -> Result<(), SignerError>;
@@ -288,7 +287,7 @@ pub trait TransactionSigner: SignerCommon {
 impl<T: InputSigner> TransactionSigner for T {
     fn sign_transaction(
         &self,
-        psbt: &mut psbt::PartiallySignedTransaction,
+        psbt: &mut Psbt,
         sign_options: &SignOptions,
         secp: &SecpCtx,
     ) -> Result<(), SignerError> {
@@ -300,7 +299,7 @@ impl<T: InputSigner> TransactionSigner for T {
     }
 }
 
-impl SignerCommon for SignerWrapper<DescriptorXKey<ExtendedPrivKey>> {
+impl SignerCommon for SignerWrapper<DescriptorXKey<Xpriv>> {
     fn id(&self, secp: &SecpCtx) -> SignerId {
         SignerId::from(self.root_fingerprint(secp))
     }
@@ -310,10 +309,10 @@ impl SignerCommon for SignerWrapper<DescriptorXKey<ExtendedPrivKey>> {
     }
 }
 
-impl InputSigner for SignerWrapper<DescriptorXKey<ExtendedPrivKey>> {
+impl InputSigner for SignerWrapper<DescriptorXKey<Xpriv>> {
     fn sign_input(
         &self,
-        psbt: &mut psbt::PartiallySignedTransaction,
+        psbt: &mut Psbt,
         input_index: usize,
         sign_options: &SignOptions,
         secp: &SecpCtx,
@@ -396,7 +395,7 @@ fn multikey_to_xkeys<K: InnerXKey + Clone>(
         .collect()
 }
 
-impl SignerCommon for SignerWrapper<DescriptorMultiXKey<ExtendedPrivKey>> {
+impl SignerCommon for SignerWrapper<DescriptorMultiXKey<Xpriv>> {
     fn id(&self, secp: &SecpCtx) -> SignerId {
         SignerId::from(self.root_fingerprint(secp))
     }
@@ -406,10 +405,10 @@ impl SignerCommon for SignerWrapper<DescriptorMultiXKey<ExtendedPrivKey>> {
     }
 }
 
-impl InputSigner for SignerWrapper<DescriptorMultiXKey<ExtendedPrivKey>> {
+impl InputSigner for SignerWrapper<DescriptorMultiXKey<Xpriv>> {
     fn sign_input(
         &self,
-        psbt: &mut psbt::PartiallySignedTransaction,
+        psbt: &mut Psbt,
         input_index: usize,
         sign_options: &SignOptions,
         secp: &SecpCtx,
@@ -438,7 +437,7 @@ impl SignerCommon for SignerWrapper<PrivateKey> {
 impl InputSigner for SignerWrapper<PrivateKey> {
     fn sign_input(
         &self,
-        psbt: &mut psbt::PartiallySignedTransaction,
+        psbt: &mut Psbt,
         input_index: usize,
         sign_options: &SignOptions,
         secp: &SecpCtx,
@@ -577,7 +576,7 @@ fn sign_psbt_schnorr(
     hash_ty: TapSighashType,
     secp: &SecpCtx,
 ) {
-    let keypair = secp256k1::KeyPair::from_seckey_slice(secp, secret_key.as_ref()).unwrap();
+    let keypair = secp256k1::Keypair::from_seckey_slice(secp, secret_key.as_ref()).unwrap();
     let keypair = match leaf_hash {
         None => keypair
             .tap_tweak(secp, psbt_input.tap_merkle_root)
@@ -852,7 +851,7 @@ pub(crate) trait ComputeSighash {
     type SighashType;
 
     fn sighash(
-        psbt: &psbt::PartiallySignedTransaction,
+        psbt: &Psbt,
         input_index: usize,
         extra: Self::Extra,
     ) -> Result<(Self::Sighash, Self::SighashType), SignerError>;
@@ -864,7 +863,7 @@ impl ComputeSighash for Legacy {
     type SighashType = EcdsaSighashType;
 
     fn sighash(
-        psbt: &psbt::PartiallySignedTransaction,
+        psbt: &Psbt,
         input_index: usize,
         _extra: (),
     ) -> Result<(Self::Sighash, Self::SighashType), SignerError> {
@@ -913,7 +912,7 @@ impl ComputeSighash for Segwitv0 {
     type SighashType = EcdsaSighashType;
 
     fn sighash(
-        psbt: &psbt::PartiallySignedTransaction,
+        psbt: &Psbt,
         input_index: usize,
         _extra: (),
     ) -> Result<(Self::Sighash, Self::SighashType), SignerError> {
@@ -924,7 +923,7 @@ impl ComputeSighash for Segwitv0 {
         let psbt_input = &psbt.inputs[input_index];
         let tx_input = &psbt.unsigned_tx.input[input_index];
 
-        let sighash = psbt_input
+        let sighash_type = psbt_input
             .sighash_type
             .unwrap_or_else(|| EcdsaSighashType::All.into())
             .ecdsa_hash_ty()
@@ -952,40 +951,39 @@ impl ComputeSighash for Segwitv0 {
         };
         let value = utxo.value;
 
-        let script = match psbt_input.witness_script {
-            Some(ref witness_script) => witness_script.clone(),
+        let mut sighasher = sighash::SighashCache::new(&psbt.unsigned_tx);
+
+        let sighash = match psbt_input.witness_script {
+            Some(ref witness_script) => {
+                sighasher.p2wsh_signature_hash(input_index, witness_script, value, sighash_type)?
+            }
             None => {
-                if utxo.script_pubkey.is_v0_p2wpkh() {
-                    utxo.script_pubkey
-                        .p2wpkh_script_code()
-                        .expect("We check above that the spk is a p2wpkh")
+                if utxo.script_pubkey.is_p2wpkh() {
+                    sighasher.p2wpkh_signature_hash(
+                        input_index,
+                        &utxo.script_pubkey,
+                        value,
+                        sighash_type,
+                    )?
                 } else if psbt_input
                     .redeem_script
                     .as_ref()
-                    .map(|s| s.is_v0_p2wpkh())
+                    .map(|s| s.is_p2wpkh())
                     .unwrap_or(false)
                 {
-                    psbt_input
-                        .redeem_script
-                        .as_ref()
-                        .unwrap()
-                        .p2wpkh_script_code()
-                        .expect("We check above that the spk is a p2wpkh")
+                    let script_pubkey = psbt_input.redeem_script.as_ref().unwrap();
+                    sighasher.p2wpkh_signature_hash(
+                        input_index,
+                        script_pubkey,
+                        value,
+                        sighash_type,
+                    )?
                 } else {
                     return Err(SignerError::MissingWitnessScript);
                 }
             }
         };
-
-        Ok((
-            sighash::SighashCache::new(&psbt.unsigned_tx).segwit_signature_hash(
-                input_index,
-                &script,
-                value,
-                sighash,
-            )?,
-            sighash,
-        ))
+        Ok((sighash, sighash_type))
     }
 }
 
@@ -995,7 +993,7 @@ impl ComputeSighash for Tap {
     type SighashType = TapSighashType;
 
     fn sighash(
-        psbt: &psbt::PartiallySignedTransaction,
+        psbt: &Psbt,
         input_index: usize,
         extra: Self::Extra,
     ) -> Result<(Self::Sighash, TapSighashType), SignerError> {
@@ -1166,7 +1164,7 @@ mod signers_container_tests {
     impl TransactionSigner for DummySigner {
         fn sign_transaction(
             &self,
-            _psbt: &mut psbt::PartiallySignedTransaction,
+            _psbt: &mut Psbt,
             _sign_options: &SignOptions,
             _secp: &SecpCtx,
         ) -> Result<(), SignerError> {
@@ -1184,8 +1182,8 @@ mod signers_container_tests {
     ) -> (DescriptorKey<Ctx>, DescriptorKey<Ctx>, Fingerprint) {
         let secp: Secp256k1<All> = Secp256k1::new();
         let path = bip32::DerivationPath::from_str(PATH).unwrap();
-        let tprv = bip32::ExtendedPrivKey::from_str(tprv).unwrap();
-        let tpub = bip32::ExtendedPubKey::from_priv(&secp, &tprv);
+        let tprv = bip32::Xpriv::from_str(tprv).unwrap();
+        let tpub = bip32::Xpub::from_priv(&secp, &tprv);
         let fingerprint = tprv.fingerprint(&secp);
         let prvkey = (tprv, path.clone()).into_descriptor_key().unwrap();
         let pubkey = (tpub, path).into_descriptor_key().unwrap();

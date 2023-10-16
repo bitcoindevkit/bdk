@@ -90,7 +90,7 @@ async fn main() -> Result<(), anyhow::Error> {
     let finalized = wallet.sign(&mut psbt, SignOptions::default())?;
     assert!(finalized);
 
-    let tx = psbt.extract_tx();
+    let tx = psbt.extract_tx()?;
     client.broadcast(&tx).await?;
     println!("Tx broadcasted! Txid: {}", tx.txid());
 

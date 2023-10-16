@@ -3,7 +3,7 @@ use std::thread::JoinHandle;
 use bdk_chain::collections::btree_map;
 use bdk_chain::collections::BTreeMap;
 use bdk_chain::{
-    bitcoin::{BlockHash, OutPoint, ScriptBuf, TxOut, Txid},
+    bitcoin::{Amount, BlockHash, OutPoint, ScriptBuf, TxOut, Txid},
     local_chain::{self, CheckPoint},
     BlockId, ConfirmationTimeHeightAnchor, TxGraph,
 };
@@ -204,7 +204,7 @@ impl EsploraExt for esplora_client::BlockingClient {
                                 },
                                 TxOut {
                                     script_pubkey: prevout.scriptpubkey.clone(),
-                                    value: prevout.value,
+                                    value: Amount::from_sat(prevout.value),
                                 },
                             ))
                         });

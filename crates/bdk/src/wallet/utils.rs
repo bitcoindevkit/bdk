@@ -138,7 +138,7 @@ mod test {
             .require_network(Network::Bitcoin)
             .unwrap()
             .script_pubkey();
-        assert!(script_p2wpkh.is_v0_p2wpkh());
+        assert!(script_p2wpkh.is_p2wpkh());
         assert!(293.is_dust(&script_p2wpkh));
         assert!(!294.is_dust(&script_p2wpkh));
     }

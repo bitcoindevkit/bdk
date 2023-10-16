@@ -48,8 +48,8 @@
 //! ```
 
 use bitcoin::bip32::Fingerprint;
-use bitcoin::psbt::PartiallySignedTransaction;
 use bitcoin::secp256k1::{All, Secp256k1};
+use bitcoin::Psbt;
 
 use hwi::error::Error;
 use hwi::types::{HWIChain, HWIDevice};
@@ -87,7 +87,7 @@ impl SignerCommon for HWISigner {
 impl TransactionSigner for HWISigner {
     fn sign_transaction(
         &self,
-        psbt: &mut PartiallySignedTransaction,
+        psbt: &mut Psbt,
         _sign_options: &crate::SignOptions,
         _secp: &crate::wallet::utils::SecpCtx,
     ) -> Result<(), SignerError> {

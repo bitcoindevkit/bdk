@@ -1137,7 +1137,7 @@ impl ExtractPolicy for Descriptor<DescriptorPublicKey> {
                 let key_spend_sig =
                     miniscript::Tap::make_signature(tr.internal_key(), signers, build_sat, secp);
 
-                if tr.taptree().is_none() {
+                if tr.tap_tree().is_none() {
                     Ok(Some(key_spend_sig))
                 } else {
                     let mut items = vec![key_spend_sig];
@@ -1184,8 +1184,8 @@ mod test {
         secp: &SecpCtx,
     ) -> (DescriptorKey<Ctx>, DescriptorKey<Ctx>, Fingerprint) {
         let path = bip32::DerivationPath::from_str(path).unwrap();
-        let tprv = bip32::ExtendedPrivKey::from_str(tprv).unwrap();
-        let tpub = bip32::ExtendedPubKey::from_priv(secp, &tprv);
+        let tprv = bip32::Xpriv::from_str(tprv).unwrap();
+        let tpub = bip32::Xpub::from_priv(secp, &tprv);
         let fingerprint = tprv.fingerprint(secp);
         let prvkey = (tprv, path.clone()).into_descriptor_key().unwrap();
         let pubkey = (tpub, path).into_descriptor_key().unwrap();

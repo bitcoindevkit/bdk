@@ -18,7 +18,7 @@ use crate::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use bitcoin::bip32::{ChildNumber, DerivationPath, ExtendedPubKey, Fingerprint, KeySource};
+use bitcoin::bip32::{ChildNumber, DerivationPath, Fingerprint, KeySource, Xpub};
 use bitcoin::{key::XOnlyPublicKey, secp256k1, PublicKey};
 use bitcoin::{psbt, taproot};
 use bitcoin::{Network, TxOut};
@@ -377,7 +377,7 @@ where
 pub(crate) trait DescriptorMeta {
     fn is_witness(&self) -> bool;
     fn is_taproot(&self) -> bool;
-    fn get_extended_keys(&self) -> Vec<DescriptorXKey<ExtendedPubKey>>;
+    fn get_extended_keys(&self) -> Vec<DescriptorXKey<Xpub>>;
     fn derive_from_hd_keypaths(
         &self,
         hd_keypaths: &HdKeyPaths,
@@ -418,7 +418,7 @@ impl DescriptorMeta for ExtendedDescriptor {
         self.desc_type() == DescriptorType::Tr
     }
 
-    fn get_extended_keys(&self) -> Vec<DescriptorXKey<ExtendedPubKey>> {
+    fn get_extended_keys(&self) -> Vec<DescriptorXKey<Xpub>> {
         let mut answer = Vec::new();
 
         self.for_each_key(|pk| {
@@ -438,21 +438,20 @@ impl DescriptorMeta for ExtendedDescriptor {
         secp: &SecpCtx,
     ) -> Option<DerivedDescriptor> {
         // Ensure that deriving `xpub` with `path` yields `expected`
-        let verify_key = |xpub: &DescriptorXKey<ExtendedPubKey>,
-                          path: &DerivationPath,
-                          expected: &SinglePubKey| {
-            let derived = xpub
-                .xkey
-                .derive_pub(secp, path)
-                .expect("The path should never contain hardened derivation steps")
-                .public_key;
+        let verify_key =
+            |xpub: &DescriptorXKey<Xpub>, path: &DerivationPath, expected: &SinglePubKey| {
+                let derived = xpub
+                    .xkey
+                    .derive_pub(secp, path)
+                    .expect("The path should never contain hardened derivation steps")
+                    .public_key;
 
-            match expected {
-                SinglePubKey::FullKey(pk) if &PublicKey::new(derived) == pk => true,
-                SinglePubKey::XOnly(pk) if &XOnlyPublicKey::from(derived) == pk => true,
-                _ => false,
-            }
-        };
+                match expected {
+                    SinglePubKey::FullKey(pk) if &PublicKey::new(derived) == pk => true,
+                    SinglePubKey::XOnly(pk) if &XOnlyPublicKey::from(derived) == pk => true,
+                    _ => false,
+                }
+            };
 
         let mut path_found = None;
 
@@ -605,10 +604,10 @@ mod test {
     use core::str::FromStr;
 
     use assert_matches::assert_matches;
-    use bitcoin::hashes::hex::FromHex;
+    use bitcoin::hex::FromHex;
     use bitcoin::secp256k1::Secp256k1;
     use bitcoin::ScriptBuf;
-    use bitcoin::{bip32, psbt::Psbt};
+    use bitcoin::{bip32, Psbt};
 
     use super::*;
     use crate::psbt::PsbtUtils;
@@ -727,7 +726,7 @@ mod test {
 
         let secp = Secp256k1::new();
 
-        let xprv = bip32::ExtendedPrivKey::from_str("xprv9s21ZrQH143K3c3gF1DUWpWNr2SG2XrG8oYPpqYh7hoWsJy9NjabErnzriJPpnGHyKz5NgdXmq1KVbqS1r4NXdCoKitWg5e86zqXHa8kxyB").unwrap();
+        let xprv = bip32::Xpriv::from_str("xprv9s21ZrQH143K3c3gF1DUWpWNr2SG2XrG8oYPpqYh7hoWsJy9NjabErnzriJPpnGHyKz5NgdXmq1KVbqS1r4NXdCoKitWg5e86zqXHa8kxyB").unwrap();
         let path = bip32::DerivationPath::from_str("m/0").unwrap();
 
         // here `to_descriptor_key` will set the valid networks for the key to only mainnet, since
@@ -746,7 +745,7 @@ mod test {
         let mut xprv_testnet = xprv;
         xprv_testnet.network = Network::Testnet;
 
-        let xpub_testnet = bip32::ExtendedPubKey::from_priv(&secp, &xprv_testnet);
+        let xpub_testnet = bip32::Xpub::from_priv(&secp, &xprv_testnet);
         let desc_pubkey = DescriptorPublicKey::XPub(DescriptorXKey {
             xkey: xpub_testnet,
             origin: None,
@@ -836,7 +835,7 @@ mod test {
     fn test_descriptor_from_str_from_output_of_macro() {
         let secp = Secp256k1::new();
 
-        let tpub = bip32::ExtendedPubKey::from_str("tpubD6NzVbkrYhZ4XHndKkuB8FifXm8r5FQHwrN6oZuWCz13qb93rtgKvD4PQsqC4HP4yhV3tA2fqr2RbY5mNXfM7RxXUoeABoDtsFUq2zJq6YK").unwrap();
+        let tpub = bip32::Xpub::from_str("tpubD6NzVbkrYhZ4XHndKkuB8FifXm8r5FQHwrN6oZuWCz13qb93rtgKvD4PQsqC4HP4yhV3tA2fqr2RbY5mNXfM7RxXUoeABoDtsFUq2zJq6YK").unwrap();
         let path = bip32::DerivationPath::from_str("m/1/2").unwrap();
         let key = (tpub, path).into_descriptor_key().unwrap();
 
@@ -895,7 +894,7 @@ mod test {
             .update_with_descriptor_unchecked(&descriptor)
             .unwrap();
 
-        assert_eq!(psbt_input.redeem_script, Some(script.to_v0_p2wsh()));
+        assert_eq!(psbt_input.redeem_script, Some(script.to_p2wsh()));
         assert_eq!(psbt_input.witness_script, Some(script));
     }
 }
