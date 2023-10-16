@@ -41,7 +41,7 @@ pub enum Error {
     /// Miniscript error
     Miniscript(miniscript::Error),
     /// Hex decoding error
-    Hex(bitcoin::hashes::hex::Error),
+    Hex(bitcoin::hex::HexToBytesError),
 }
 
 impl From<crate::keys::KeyError> for Error {
@@ -110,8 +110,8 @@ impl From<miniscript::Error> for Error {
     }
 }
 
-impl From<bitcoin::hashes::hex::Error> for Error {
-    fn from(err: bitcoin::hashes::hex::Error) -> Self {
+impl From<bitcoin::hex::HexToBytesError> for Error {
+    fn from(err: bitcoin::hex::HexToBytesError) -> Self {
         Error::Hex(err)
     }
 }

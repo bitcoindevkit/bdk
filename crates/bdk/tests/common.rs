@@ -4,7 +4,10 @@ use bdk::{wallet::AddressIndex, KeychainKind, LocalOutput, Wallet};
 use bdk_chain::indexed_tx_graph::Indexer;
 use bdk_chain::{BlockId, ConfirmationTime};
 use bitcoin::hashes::Hash;
-use bitcoin::{Address, BlockHash, FeeRate, Network, OutPoint, Transaction, TxIn, TxOut, Txid};
+use bitcoin::{
+    transaction, Address, Amount, BlockHash, FeeRate, Network, OutPoint, Transaction, TxIn, TxOut,
+    Txid,
+};
 use std::str::FromStr;
 
 // Return a fake wallet that appears to be funded for testing.
@@ -24,7 +27,7 @@ pub fn get_funded_wallet_with_change(
         .unwrap();
 
     let tx0 = Transaction {
-        version: 1,
+        version: transaction::Version::ONE,
         lock_time: bitcoin::absolute::LockTime::ZERO,
         input: vec![TxIn {
             previous_output: OutPoint {
@@ -36,13 +39,13 @@ pub fn get_funded_wallet_with_change(
             witness: Default::default(),
         }],
         output: vec![TxOut {
-            value: 76_000,
+            value: Amount::from_sat(76_000),
             script_pubkey: change_address.script_pubkey(),
         }],
     };
 
     let tx1 = Transaction {
-        version: 1,
+        version: transaction::Version::ONE,
         lock_time: bitcoin::absolute::LockTime::ZERO,
         input: vec![TxIn {
             previous_output: OutPoint {
@@ -55,11 +58,11 @@ pub fn get_funded_wallet_with_change(
         }],
         output: vec![
             TxOut {
-                value: 50_000,
+                value: Amount::from_sat(50_000),
                 script_pubkey: change_address.script_pubkey(),
             },
             TxOut {
-                value: 25_000,
+                value: Amount::from_sat(25_000),
                 script_pubkey: sendto_address.script_pubkey(),
             },
         ],

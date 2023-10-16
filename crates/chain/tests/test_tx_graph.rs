@@ -8,7 +8,8 @@ use bdk_chain::{
     Anchor, Append, BlockId, ChainOracle, ChainPosition, ConfirmationHeightAnchor,
 };
 use bitcoin::{
-    absolute, hashes::Hash, BlockHash, OutPoint, ScriptBuf, Transaction, TxIn, TxOut, Txid,
+    absolute, hashes::Hash, transaction, Amount, BlockHash, OutPoint, ScriptBuf, Transaction, TxIn,
+    TxOut, Txid,
 };
 use common::*;
 use core::iter;
@@ -23,14 +24,14 @@ fn insert_txouts() {
         (
             OutPoint::new(h!("tx1"), 1),
             TxOut {
-                value: 10_000,
+                value: Amount::from_sat(10_000),
                 script_pubkey: ScriptBuf::new(),
             },
         ),
         (
             OutPoint::new(h!("tx1"), 2),
             TxOut {
-                value: 20_000,
+                value: Amount::from_sat(20_000),
                 script_pubkey: ScriptBuf::new(),
             },
         ),
@@ -40,21 +41,21 @@ fn insert_txouts() {
     let update_ops = [(
         OutPoint::new(h!("tx2"), 0),
         TxOut {
-            value: 20_000,
+            value: Amount::from_sat(20_000),
             script_pubkey: ScriptBuf::new(),
         },
     )];
 
     // One full transaction to be included in the update
     let update_txs = Transaction {
-        version: 0x01,
+        version: transaction::Version::ONE,
         lock_time: absolute::LockTime::ZERO,
         input: vec![TxIn {
             previous_output: OutPoint::null(),
             ..Default::default()
         }],
         output: vec![TxOut {
-            value: 30_000,
+            value: Amount::from_sat(30_000),
             script_pubkey: ScriptBuf::new(),
         }],
     };
@@ -164,14 +165,14 @@ fn insert_txouts() {
             (
                 1u32,
                 &TxOut {
-                    value: 10_000,
+                    value: Amount::from_sat(10_000),
                     script_pubkey: ScriptBuf::new(),
                 }
             ),
             (
                 2u32,
                 &TxOut {
-                    value: 20_000,
+                    value: Amount::from_sat(20_000),
                     script_pubkey: ScriptBuf::new(),
                 }
             )
@@ -184,7 +185,7 @@ fn insert_txouts() {
         [(
             0u32,
             &TxOut {
-                value: 30_000,
+                value: Amount::from_sat(30_000),
                 script_pubkey: ScriptBuf::new()
             }
         )]
@@ -206,7 +207,7 @@ fn insert_txouts() {
 #[test]
 fn insert_tx_graph_doesnt_count_coinbase_as_spent() {
     let tx = Transaction {
-        version: 0x01,
+        version: transaction::Version::ONE,
         lock_time: absolute::LockTime::ZERO,
         input: vec![TxIn {
             previous_output: OutPoint::null(),
@@ -225,10 +226,10 @@ fn insert_tx_graph_doesnt_count_coinbase_as_spent() {
 #[test]
 fn insert_tx_graph_keeps_track_of_spend() {
     let tx1 = Transaction {
-        version: 0x01,
+        version: transaction::Version::ONE,
         lock_time: absolute::LockTime::ZERO,
         input: vec![],
-        output: vec![TxOut::default()],
+        output: vec![TxOut::NULL],
     };
 
     let op = OutPoint {
@@ -237,7 +238,7 @@ fn insert_tx_graph_keeps_track_of_spend() {
     };
 
     let tx2 = Transaction {
-        version: 0x01,
+        version: transaction::Version::ONE,
         lock_time: absolute::LockTime::ZERO,
         input: vec![TxIn {
             previous_output: op,
@@ -266,13 +267,13 @@ fn insert_tx_graph_keeps_track_of_spend() {
 #[test]
 fn insert_tx_can_retrieve_full_tx_from_graph() {
     let tx = Transaction {
-        version: 0x01,
+        version: transaction::Version::ONE,
         lock_time: absolute::LockTime::ZERO,
         input: vec![TxIn {
             previous_output: OutPoint::null(),
             ..Default::default()
         }],
-        output: vec![TxOut::default()],
+        output: vec![TxOut::NULL],
     };
 
     let mut graph = TxGraph::<()>::default();
@@ -287,12 +288,12 @@ fn insert_tx_can_retrieve_full_tx_from_graph() {
 fn insert_tx_displaces_txouts() {
     let mut tx_graph = TxGraph::<()>::default();
     let tx = Transaction {
-        version: 0x01,
+        version: transaction::Version::ONE,
         lock_time: absolute::LockTime::ZERO,
         input: vec![],
         output: vec![TxOut {
-            value: 42_000,
-            script_pubkey: ScriptBuf::default(),
+            value: Amount::from_sat(42_000),
+            script_pubkey: ScriptBuf::new(),
         }],
     };
 
@@ -302,7 +303,7 @@ fn insert_tx_displaces_txouts() {
             vout: 0,
         },
         TxOut {
-            value: 1_337_000,
+            value: Amount::from_sat(1_337_000),
             script_pubkey: ScriptBuf::default(),
         },
     );
@@ -315,8 +316,8 @@ fn insert_tx_displaces_txouts() {
             vout: 0,
         },
         TxOut {
-            value: 1_000_000_000,
-            script_pubkey: ScriptBuf::default(),
+            value: Amount::from_sat(1_000_000_000),
+            script_pubkey: ScriptBuf::new(),
         },
     );
 
@@ -330,7 +331,7 @@ fn insert_tx_displaces_txouts() {
             })
             .unwrap()
             .value,
-        42_000
+        Amount::from_sat(42_000)
     );
     assert_eq!(
         tx_graph.get_txout(OutPoint {
@@ -345,12 +346,12 @@ fn insert_tx_displaces_txouts() {
 fn insert_txout_does_not_displace_tx() {
     let mut tx_graph = TxGraph::<()>::default();
     let tx = Transaction {
-        version: 0x01,
+        version: transaction::Version::ONE,
         lock_time: absolute::LockTime::ZERO,
         input: vec![],
         output: vec![TxOut {
-            value: 42_000,
-            script_pubkey: ScriptBuf::default(),
+            value: Amount::from_sat(42_000),
+            script_pubkey: ScriptBuf::new(),
         }],
     };
 
@@ -362,8 +363,8 @@ fn insert_txout_does_not_displace_tx() {
             vout: 0,
         },
         TxOut {
-            value: 1_337_000,
-            script_pubkey: ScriptBuf::default(),
+            value: Amount::from_sat(1_337_000),
+            script_pubkey: ScriptBuf::new(),
         },
     );
 
@@ -373,8 +374,8 @@ fn insert_txout_does_not_displace_tx() {
             vout: 0,
         },
         TxOut {
-            value: 1_000_000_000,
-            script_pubkey: ScriptBuf::default(),
+            value: Amount::from_sat(1_000_000_000),
+            script_pubkey: ScriptBuf::new(),
         },
     );
 
@@ -386,7 +387,7 @@ fn insert_txout_does_not_displace_tx() {
             })
             .unwrap()
             .value,
-        42_000
+        Amount::from_sat(42_000)
     );
     assert_eq!(
         tx_graph.get_txout(OutPoint {
@@ -401,21 +402,21 @@ fn insert_txout_does_not_displace_tx() {
 fn test_calculate_fee() {
     let mut graph = TxGraph::<()>::default();
     let intx1 = Transaction {
-        version: 0x01,
+        version: transaction::Version::ONE,
         lock_time: absolute::LockTime::ZERO,
         input: vec![],
         output: vec![TxOut {
-            value: 100,
-            ..Default::default()
+            value: Amount::from_sat(100),
+            script_pubkey: ScriptBuf::new(),
         }],
     };
     let intx2 = Transaction {
-        version: 0x02,
+        version: transaction::Version::TWO,
         lock_time: absolute::LockTime::ZERO,
         input: vec![],
         output: vec![TxOut {
-            value: 200,
-            ..Default::default()
+            value: Amount::from_sat(200),
+            script_pubkey: ScriptBuf::new(),
         }],
     };
 
@@ -425,8 +426,8 @@ fn test_calculate_fee() {
             vout: 0,
         },
         TxOut {
-            value: 300,
-            ..Default::default()
+            value: Amount::from_sat(300),
+            script_pubkey: ScriptBuf::new(),
         },
     );
 
@@ -435,7 +436,7 @@ fn test_calculate_fee() {
     let _ = graph.insert_txout(intxout1.0, intxout1.1);
 
     let mut tx = Transaction {
-        version: 0x01,
+        version: transaction::Version::ONE,
         lock_time: absolute::LockTime::ZERO,
         input: vec![
             TxIn {
@@ -458,8 +459,8 @@ fn test_calculate_fee() {
             },
         ],
         output: vec![TxOut {
-            value: 500,
-            ..Default::default()
+            value: Amount::from_sat(500),
+            script_pubkey: ScriptBuf::new(),
         }],
     };
 
@@ -491,13 +492,13 @@ fn test_calculate_fee() {
 #[test]
 fn test_calculate_fee_on_coinbase() {
     let tx = Transaction {
-        version: 0x01,
+        version: transaction::Version::ONE,
         lock_time: absolute::LockTime::ZERO,
         input: vec![TxIn {
             previous_output: OutPoint::null(),
             ..Default::default()
         }],
-        output: vec![TxOut::default()],
+        output: vec![TxOut::NULL],
     };
 
     let graph = TxGraph::<()>::default();
@@ -533,7 +534,7 @@ fn test_walk_ancestors() {
             previous_output: OutPoint::new(h!("op0"), 0),
             ..TxIn::default()
         }],
-        output: vec![TxOut::default(), TxOut::default()],
+        output: vec![TxOut::NULL, TxOut::NULL],
         ..common::new_tx(0)
     };
 
@@ -543,7 +544,7 @@ fn test_walk_ancestors() {
             previous_output: OutPoint::new(tx_a0.txid(), 0),
             ..TxIn::default()
         }],
-        output: vec![TxOut::default(), TxOut::default()],
+        output: vec![TxOut::NULL, TxOut::NULL],
         ..common::new_tx(0)
     };
 
@@ -553,7 +554,7 @@ fn test_walk_ancestors() {
             previous_output: OutPoint::new(tx_a0.txid(), 1),
             ..TxIn::default()
         }],
-        output: vec![TxOut::default()],
+        output: vec![TxOut::NULL],
         ..common::new_tx(0)
     };
 
@@ -562,7 +563,7 @@ fn test_walk_ancestors() {
             previous_output: OutPoint::new(h!("op1"), 0),
             ..TxIn::default()
         }],
-        output: vec![TxOut::default()],
+        output: vec![TxOut::NULL],
         ..common::new_tx(0)
     };
 
@@ -572,7 +573,7 @@ fn test_walk_ancestors() {
             previous_output: OutPoint::new(tx_b0.txid(), 0),
             ..TxIn::default()
         }],
-        output: vec![TxOut::default()],
+        output: vec![TxOut::NULL],
         ..common::new_tx(0)
     };
 
@@ -582,7 +583,7 @@ fn test_walk_ancestors() {
             previous_output: OutPoint::new(tx_b0.txid(), 1),
             ..TxIn::default()
         }],
-        output: vec![TxOut::default()],
+        output: vec![TxOut::NULL],
         ..common::new_tx(0)
     };
 
@@ -598,7 +599,7 @@ fn test_walk_ancestors() {
                 ..TxIn::default()
             },
         ],
-        output: vec![TxOut::default()],
+        output: vec![TxOut::NULL],
         ..common::new_tx(0)
     };
 
@@ -607,7 +608,7 @@ fn test_walk_ancestors() {
             previous_output: OutPoint::new(h!("op2"), 0),
             ..TxIn::default()
         }],
-        output: vec![TxOut::default()],
+        output: vec![TxOut::NULL],
         ..common::new_tx(0)
     };
 
@@ -617,7 +618,7 @@ fn test_walk_ancestors() {
             previous_output: OutPoint::new(tx_c1.txid(), 0),
             ..TxIn::default()
         }],
-        output: vec![TxOut::default()],
+        output: vec![TxOut::NULL],
         ..common::new_tx(0)
     };
 
@@ -633,7 +634,7 @@ fn test_walk_ancestors() {
                 ..TxIn::default()
             },
         ],
-        output: vec![TxOut::default()],
+        output: vec![TxOut::NULL],
         ..common::new_tx(0)
     };
 
@@ -643,7 +644,7 @@ fn test_walk_ancestors() {
             previous_output: OutPoint::new(tx_d1.txid(), 0),
             ..TxIn::default()
         }],
-        output: vec![TxOut::default()],
+        output: vec![TxOut::NULL],
         ..common::new_tx(0)
     };
 
@@ -726,7 +727,7 @@ fn test_conflicting_descendants() {
             previous_output,
             ..TxIn::default()
         }],
-        output: vec![TxOut::default()],
+        output: vec![TxOut::NULL],
         ..common::new_tx(0)
     };
 
@@ -736,7 +737,7 @@ fn test_conflicting_descendants() {
             previous_output,
             ..TxIn::default()
         }],
-        output: vec![TxOut::default(), TxOut::default()],
+        output: vec![TxOut::NULL, TxOut::NULL],
         ..common::new_tx(1)
     };
 
@@ -746,7 +747,7 @@ fn test_conflicting_descendants() {
             previous_output: OutPoint::new(tx_a.txid(), 0),
             ..TxIn::default()
         }],
-        output: vec![TxOut::default()],
+        output: vec![TxOut::NULL],
         ..common::new_tx(2)
     };
 
@@ -768,7 +769,7 @@ fn test_conflicting_descendants() {
 #[test]
 fn test_descendants_no_repeat() {
     let tx_a = Transaction {
-        output: vec![TxOut::default(), TxOut::default(), TxOut::default()],
+        output: vec![TxOut::NULL, TxOut::NULL, TxOut::NULL],
         ..common::new_tx(0)
     };
 
@@ -778,7 +779,7 @@ fn test_descendants_no_repeat() {
                 previous_output: OutPoint::new(tx_a.txid(), vout),
                 ..TxIn::default()
             }],
-            output: vec![TxOut::default()],
+            output: vec![TxOut::NULL],
             ..common::new_tx(1)
         })
         .collect::<Vec<_>>();
@@ -789,7 +790,7 @@ fn test_descendants_no_repeat() {
                 previous_output: OutPoint::new(txs_b[vout as usize].txid(), vout),
                 ..TxIn::default()
             }],
-            output: vec![TxOut::default()],
+            output: vec![TxOut::NULL],
             ..common::new_tx(2)
         })
         .collect::<Vec<_>>();
@@ -805,7 +806,7 @@ fn test_descendants_no_repeat() {
                 ..TxIn::default()
             },
         ],
-        output: vec![TxOut::default()],
+        output: vec![TxOut::NULL],
         ..common::new_tx(3)
     };
 
@@ -814,7 +815,7 @@ fn test_descendants_no_repeat() {
             previous_output: OutPoint::new(tx_d.txid(), 0),
             ..TxIn::default()
         }],
-        output: vec![TxOut::default()],
+        output: vec![TxOut::NULL],
         ..common::new_tx(4)
     };
 
@@ -824,7 +825,7 @@ fn test_descendants_no_repeat() {
                 previous_output: OutPoint::new(h!("tx_does_not_exist"), v),
                 ..TxIn::default()
             }],
-            output: vec![TxOut::default()],
+            output: vec![TxOut::NULL],
             ..common::new_tx(v)
         })
         .collect::<Vec<_>>();
@@ -871,11 +872,11 @@ fn test_chain_spends() {
         input: vec![],
         output: vec![
             TxOut {
-                value: 10_000,
+                value: Amount::from_sat(10_000),
                 script_pubkey: ScriptBuf::new(),
             },
             TxOut {
-                value: 20_000,
+                value: Amount::from_sat(20_000),
                 script_pubkey: ScriptBuf::new(),
             },
         ],
@@ -890,11 +891,11 @@ fn test_chain_spends() {
         }],
         output: vec![
             TxOut {
-                value: 5_000,
+                value: Amount::from_sat(5_000),
                 script_pubkey: ScriptBuf::new(),
             },
             TxOut {
-                value: 5_000,
+                value: Amount::from_sat(5_000),
                 script_pubkey: ScriptBuf::new(),
             },
         ],
@@ -909,11 +910,11 @@ fn test_chain_spends() {
         }],
         output: vec![
             TxOut {
-                value: 10_000,
+                value: Amount::from_sat(10_000),
                 script_pubkey: ScriptBuf::new(),
             },
             TxOut {
-                value: 10_000,
+                value: Amount::from_sat(10_000),
                 script_pubkey: ScriptBuf::new(),
             },
         ],

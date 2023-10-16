@@ -3,12 +3,14 @@ use anyhow::Context;
 use bdk_coin_select::{coin_select_bnb, CoinSelector, CoinSelectorOpt, WeightedValue};
 use bdk_file_store::Store;
 use serde::{de::DeserializeOwned, Serialize};
-use std::{cmp::Reverse, collections::HashMap, path::PathBuf, sync::Mutex, time::Duration};
+use std::{cmp::Reverse, collections::BTreeMap, path::PathBuf, sync::Mutex, time::Duration};
 
 use bdk_chain::{
     bitcoin::{
-        absolute, address, psbt::Prevouts, secp256k1::Secp256k1, sighash::SighashCache, Address,
-        Network, Sequence, Transaction, TxIn, TxOut,
+        absolute, address,
+        secp256k1::Secp256k1,
+        sighash::{Prevouts, SighashCache},
+        transaction, Address, Amount, Network, Sequence, Transaction, TxIn, TxOut,
     },
     indexed_tx_graph::{self, IndexedTxGraph},
     keychain::{self, KeychainTxOutIndex},
@@ -197,7 +199,7 @@ pub struct CreateTxChange {
 pub fn create_tx<A: Anchor, O: ChainOracle>(
     graph: &mut KeychainTxGraph<A>,
     chain: &O,
-    keymap: &HashMap<DescriptorPublicKey, DescriptorSecretKey>,
+    keymap: &BTreeMap<DescriptorPublicKey, DescriptorSecretKey>,
     cs_algorithm: CoinSelectionAlgo,
     address: Address,
     value: u64,
@@ -235,7 +237,7 @@ where
         .iter()
         .map(|(plan, utxo)| {
             WeightedValue::new(
-                utxo.txout.value,
+                utxo.txout.value.to_sat(),
                 plan.expected_weight() as _,
                 plan.witness_version().is_some(),
             )
@@ -243,7 +245,7 @@ where
         .collect();
 
     let mut outputs = vec![TxOut {
-        value,
+        value: Amount::from_sat(value),
         script_pubkey: address.script_pubkey(),
     }];
 
@@ -273,7 +275,7 @@ where
     .expect("failed to obtain change plan");
 
     let mut change_output = TxOut {
-        value: 0,
+        value: Amount::ZERO,
         script_pubkey: change_script,
     };
 
@@ -311,13 +313,13 @@ where
     let selected_txos = selection.apply_selection(&candidates).collect::<Vec<_>>();
 
     if let Some(drain_value) = selection_meta.drain_value {
-        change_output.value = drain_value;
+        change_output.value = Amount::from_sat(drain_value);
         // if the selection tells us to use change and the change value is sufficient, we add it as an output
         outputs.push(change_output)
     }
 
     let mut transaction = Transaction {
-        version: 0x02,
+        version: transaction::Version::TWO,
         // because the temporary planning module does not support timelocks, we can use the chain
         // tip as the `lock_time` for anti-fee-sniping purposes
         lock_time: absolute::LockTime::from_height(chain.get_chain_tip()?.height)
@@ -440,7 +442,7 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args, A: Anchor, O: ChainO
     graph: &Mutex<KeychainTxGraph<A>>,
     db: &Mutex<Database<C>>,
     chain: &Mutex<O>,
-    keymap: &HashMap<DescriptorPublicKey, DescriptorSecretKey>,
+    keymap: &BTreeMap<DescriptorPublicKey, DescriptorSecretKey>,
     network: Network,
     broadcast: impl FnOnce(S, &Transaction) -> anyhow::Result<()>,
     cmd: Commands<CS, S>,

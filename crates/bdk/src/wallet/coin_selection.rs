@@ -52,9 +52,10 @@
 //!             .scan(
 //!                 (&mut selected_amount, &mut additional_weight),
 //!                 |(selected_amount, additional_weight), weighted_utxo| {
-//!                     **selected_amount += weighted_utxo.utxo.txout().value;
+//!                     **selected_amount += weighted_utxo.utxo.txout().value.to_sat();
 //!                     **additional_weight += Weight::from_wu(
-//!                         (TxIn::default().segwit_weight() + weighted_utxo.satisfaction_weight)
+//!                         (TxIn::default().segwit_weight().to_wu()
+//!                             + weighted_utxo.satisfaction_weight as u64)
 //!                             as u64,
 //!                     );
 //!                     Some(weighted_utxo.utxo)
@@ -192,7 +193,7 @@ pub struct CoinSelectionResult {
 impl CoinSelectionResult {
     /// The total value of the inputs selected.
     pub fn selected_amount(&self) -> u64 {
-        self.selected.iter().map(|u| u.txout().value).sum()
+        self.selected.iter().map(|u| u.txout().value.to_sat()).sum()
     }
 
     /// The total value of the inputs selected from the local wallet.
@@ -200,7 +201,7 @@ impl CoinSelectionResult {
         self.selected
             .iter()
             .filter_map(|u| match u {
-                Utxo::Local(_) => Some(u.txout().value),
+                Utxo::Local(_) => Some(u.txout().value.to_sat()),
                 _ => None,
             })
             .sum()
@@ -344,11 +345,11 @@ fn select_sorted_utxos(
                 if must_use || **selected_amount < target_amount + **fee_amount {
                     **fee_amount += (fee_rate
                         * Weight::from_wu(
-                            (TxIn::default().segwit_weight() + weighted_utxo.satisfaction_weight)
-                                as u64,
+                            TxIn::default().segwit_weight().to_wu()
+                                + weighted_utxo.satisfaction_weight as u64,
                         ))
                     .to_sat();
-                    **selected_amount += weighted_utxo.utxo.txout().value;
+                    **selected_amount += weighted_utxo.utxo.txout().value.to_sat();
                     Some(weighted_utxo.utxo)
                 } else {
                     None
@@ -390,10 +391,10 @@ impl OutputGroup {
     fn new(weighted_utxo: WeightedUtxo, fee_rate: FeeRate) -> Self {
         let fee = (fee_rate
             * Weight::from_wu(
-                (TxIn::default().segwit_weight() + weighted_utxo.satisfaction_weight) as u64,
+                TxIn::default().segwit_weight().to_wu() + weighted_utxo.satisfaction_weight as u64,
             ))
         .to_sat();
-        let effective_value = weighted_utxo.utxo.txout().value as i64 - fee as i64;
+        let effective_value = weighted_utxo.utxo.txout().value.to_sat() as i64 - fee as i64;
         OutputGroup {
             weighted_utxo,
             fee,
@@ -484,7 +485,7 @@ impl CoinSelectionAlgorithm for BranchAndBoundCoinSelection {
                     .chain(optional_utxos.iter())
                     .fold((0, 0), |(mut fees, mut value), utxo| {
                         fees += utxo.fee;
-                        value += utxo.weighted_utxo.utxo.txout().value;
+                        value += utxo.weighted_utxo.utxo.txout().value.to_sat();
 
                         (fees, value)
                     });
@@ -588,7 +589,7 @@ impl BranchAndBoundCoinSelection {
                 // If we found a solution better than the previous one, or if there wasn't previous
                 // solution, update the best solution
                 if best_selection_value.is_none() || curr_value < best_selection_value.unwrap() {
-                    best_selection = current_selection.clone();
+                    best_selection.clone_from(&current_selection);
                     best_selection_value = Some(curr_value);
                 }
 
@@ -742,7 +743,7 @@ mod test {
     use core::str::FromStr;
 
     use bdk_chain::ConfirmationTime;
-    use bitcoin::{Amount, OutPoint, ScriptBuf, TxIn, TxOut};
+    use bitcoin::{Amount, ScriptBuf, TxIn, TxOut};
 
     use super::*;
     use crate::types::*;
@@ -770,7 +771,7 @@ mod test {
             utxo: Utxo::Local(LocalOutput {
                 outpoint,
                 txout: TxOut {
-                    value,
+                    value: Amount::from_sat(value),
                     script_pubkey: ScriptBuf::new(),
                 },
                 keychain: KeychainKind::External,
@@ -834,7 +835,7 @@ mod test {
                     ))
                     .unwrap(),
                     txout: TxOut {
-                        value: rng.gen_range(0..200000000),
+                        value: Amount::from_sat(rng.gen_range(0..200000000)),
                         script_pubkey: ScriptBuf::new(),
                     },
                     keychain: KeychainKind::External,
@@ -865,7 +866,7 @@ mod test {
                     ))
                     .unwrap(),
                     txout: TxOut {
-                        value: utxos_value,
+                        value: Amount::from_sat(utxos_value),
                         script_pubkey: ScriptBuf::new(),
                     },
                     keychain: KeychainKind::External,
@@ -882,7 +883,7 @@ mod test {
         utxos.shuffle(&mut rng);
         utxos[..utxos_picked_len]
             .iter()
-            .map(|u| u.utxo.txout().value)
+            .map(|u| u.utxo.txout().value.to_sat())
             .sum()
     }
 
@@ -1071,7 +1072,11 @@ mod test {
     fn test_oldest_first_coin_selection_insufficient_funds_high_fees() {
         let utxos = get_oldest_first_test_utxos();
 
-        let target_amount: u64 = utxos.iter().map(|wu| wu.utxo.txout().value).sum::<u64>() - 50;
+        let target_amount: u64 = utxos
+            .iter()
+            .map(|wu| wu.utxo.txout().value.to_sat())
+            .sum::<u64>()
+            - 50;
         let drain_script = ScriptBuf::default();
 
         OldestFirstCoinSelection
@@ -1166,9 +1171,9 @@ mod test {
         ));
 
         // Defensive assertions, for sanity and in case someone changes the test utxos vector.
-        let amount: u64 = required.iter().map(|u| u.utxo.txout().value).sum();
+        let amount: u64 = required.iter().map(|u| u.utxo.txout().value.to_sat()).sum();
         assert_eq!(amount, 100_000);
-        let amount: u64 = optional.iter().map(|u| u.utxo.txout().value).sum();
+        let amount: u64 = optional.iter().map(|u| u.utxo.txout().value.to_sat()).sum();
         assert!(amount > 150_000);
         let drain_script = ScriptBuf::default();
 
@@ -1238,7 +1243,8 @@ mod test {
 
         assert_eq!(result.selected.len(), 1);
         assert_eq!(result.selected_amount(), 100_000);
-        let input_weight = (TxIn::default().segwit_weight() + P2WPKH_SATISFACTION_SIZE) as u64;
+        let input_weight =
+            TxIn::default().segwit_weight().to_wu() + P2WPKH_SATISFACTION_SIZE as u64;
         // the final fee rate should be exactly the same as the fee rate given
         let result_feerate = Amount::from_sat(result.fee_amount) / Weight::from_wu(input_weight);
         assert_eq!(result_feerate, feerate);
@@ -1460,9 +1466,9 @@ mod test {
         let utxos = get_test_utxos();
         let drain_script = ScriptBuf::default();
 
-        let (required, optional) = utxos
-            .into_iter()
-            .partition(|u| matches!(u, WeightedUtxo { utxo, .. } if utxo.txout().value < 1000));
+        let (required, optional) = utxos.into_iter().partition(
+            |u| matches!(u, WeightedUtxo { utxo, .. } if utxo.txout().value.to_sat() < 1000),
+        );
 
         let selection = BranchAndBoundCoinSelection::default().coin_select(
             required,
@@ -1511,7 +1517,7 @@ mod test {
                 utxo: Utxo::Local(LocalOutput {
                     outpoint: OutPoint::new(bitcoin::hashes::Hash::hash(txid.as_bytes()), 0),
                     txout: TxOut {
-                        value,
+                        value: Amount::from_sat(value),
                         script_pubkey: ScriptBuf::new(),
                     },
                     keychain: KeychainKind::External,
