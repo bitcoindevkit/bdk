@@ -3,7 +3,7 @@ use crate::BlockId;
 /// Represents a service that tracks the blockchain.
 ///
 /// The main method is [`is_block_in_chain`] which determines whether a given block of [`BlockId`]
-/// is an ancestor of another "static block".
+/// is an ancestor of the `chain_tip`.
 ///
 /// [`is_block_in_chain`]: Self::is_block_in_chain
 pub trait ChainOracle {

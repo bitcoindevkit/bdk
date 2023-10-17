@@ -5,21 +5,25 @@ use alloc::vec::Vec;
 
 /// Trait that "anchors" blockchain data to a specific block of height and hash.
 ///
-/// [`Anchor`] implementations must be [`Ord`] by the anchor block's [`BlockId`] first.
-///
-/// I.e. If transaction A is anchored in block B, then if block B is in the best chain, we can
+/// If transaction A is anchored in block B, and block B is in the best chain, we can
 /// assume that transaction A is also confirmed in the best chain. This does not necessarily mean
 /// that transaction A is confirmed in block B. It could also mean transaction A is confirmed in a
 /// parent block of B.
 ///
+/// Every [`Anchor`] implementation must contain a [`BlockId`] parameter, and must implement
+/// [`Ord`]. When implementing [`Ord`], the anchors' [`BlockId`]s should take precedence
+/// over other elements inside the [`Anchor`]s for comparison purposes, i.e., you should first
+/// compare the anchors' [`BlockId`]s and then care about the rest.
+///
+/// The example shows different types of anchors:
 /// ```
 /// # use bdk_chain::local_chain::LocalChain;
 /// # use bdk_chain::tx_graph::TxGraph;
 /// # use bdk_chain::BlockId;
 /// # use bdk_chain::ConfirmationHeightAnchor;
+/// # use bdk_chain::ConfirmationTimeHeightAnchor;
 /// # use bdk_chain::example_utils::*;
 /// # use bitcoin::hashes::Hash;
-///
 /// // Initialize the local chain with two blocks.
 /// let chain = LocalChain::from_blocks(
 ///     [
@@ -47,6 +51,7 @@ use alloc::vec::Vec;
 /// );
 ///
 /// // Insert `tx` into a `TxGraph` that uses `ConfirmationHeightAnchor` as the anchor type.
+/// // This anchor records the anchor block and the confirmation height of the transaction.
 /// // When a transaction is anchored with `ConfirmationHeightAnchor`, the anchor block and
 /// // confirmation block can be different. However, the confirmation block cannot be higher than
 /// // the anchor block and both blocks must be in the same chain for the anchor to be valid.
@@ -60,6 +65,25 @@ use alloc::vec::Vec;
 ///             hash: Hash::hash("second".as_bytes()),
 ///         },
 ///         confirmation_height: 1,
+///     },
+/// );
+///
+/// // Insert `tx` into a `TxGraph` that uses `ConfirmationTimeHeightAnchor` as the anchor type.
+/// // This anchor records the anchor block, the confirmation height and time of the transaction.
+/// // When a transaction is anchored with `ConfirmationTimeHeightAnchor`, the anchor block and
+/// // confirmation block can be different. However, the confirmation block cannot be higher than
+/// // the anchor block and both blocks must be in the same chain for the anchor to be valid.
+/// let mut graph_c = TxGraph::<ConfirmationTimeHeightAnchor>::default();
+/// let _ = graph_c.insert_tx(tx.clone());
+/// graph_c.insert_anchor(
+///     tx.txid(),
+///     ConfirmationTimeHeightAnchor {
+///         anchor_block: BlockId {
+///             height: 2,
+///             hash: Hash::hash("third".as_bytes()),
+///         },
+///         confirmation_height: 1,
+///         confirmation_time: 123,
 ///     },
 /// );
 /// ```

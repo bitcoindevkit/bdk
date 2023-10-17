@@ -7,7 +7,7 @@ use crate::{BlockId, ChainOracle};
 use alloc::sync::Arc;
 use bitcoin::BlockHash;
 
-/// A structure that represents changes to [`LocalChain`].
+/// The [`ChangeSet`] represents changes to [`LocalChain`].
 ///
 /// The key represents the block height, and the value either represents added a new [`CheckPoint`]
 /// (if [`Some`]), or removing a [`CheckPoint`] (if [`None`]).
@@ -127,7 +127,7 @@ impl CheckPoint {
     }
 }
 
-/// A structure that iterates over checkpoints backwards.
+/// Iterates over checkpoints backwards.
 pub struct CheckPointIter {
     current: Option<Arc<CPInner>>,
 }
@@ -153,7 +153,7 @@ impl IntoIterator for CheckPoint {
     }
 }
 
-/// A struct to update [`LocalChain`].
+/// Used to update [`LocalChain`].
 ///
 /// This is used as input for [`LocalChain::apply_update`]. It contains the update's chain `tip` and
 /// a flag `introduce_older_blocks` which signals whether this update intends to introduce missing

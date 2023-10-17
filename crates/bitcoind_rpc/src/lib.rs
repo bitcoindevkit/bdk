@@ -14,7 +14,7 @@ use bitcoin::{block::Header, Block, BlockHash, Transaction};
 pub use bitcoincore_rpc;
 use bitcoincore_rpc::bitcoincore_rpc_json;
 
-/// A structure that emits data sourced from [`bitcoincore_rpc::Client`].
+/// The [`Emitter`] is used to emit data sourced from [`bitcoincore_rpc::Client`].
 ///
 /// Refer to [module-level documentation] for more.
 ///
