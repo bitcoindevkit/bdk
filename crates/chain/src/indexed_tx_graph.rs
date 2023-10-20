@@ -160,7 +160,7 @@ where
     /// Batch insert unconfirmed transactions, filtering out those that are irrelevant.
     ///
     /// Relevancy is determined by the internal [`Indexer::is_tx_relevant`] implementation of `I`.
-    /// Irrelevant tansactions in `txs` will be ignored.
+    /// Irrelevant transactions in `txs` will be ignored.
     ///
     /// Items of `txs` are tuples containing the transaction and a *last seen* timestamp. The
     /// *last seen* communicates when the transaction is last seen in the mempool which is used for
@@ -223,7 +223,7 @@ where
     /// [`AnchorFromBlockPosition::from_block_position`].
     ///
     /// Relevancy is determined by the internal [`Indexer::is_tx_relevant`] implementation of `I`.
-    /// Irrelevant tansactions in `txs` will be ignored.
+    /// Irrelevant transactions in `txs` will be ignored.
     pub fn apply_block_relevant(
         &mut self,
         block: Block,

@@ -27,6 +27,7 @@ jobs:
         uses: Swatinem/rust-cache@v2.2.1
       - name: Install grcov
         run: if [[ ! -e ~/.cargo/bin/grcov ]]; then cargo install grcov; fi
+        # TODO: re-enable the hwi tests
       - name: Build simulator image
         run: docker build -t hwi/ledger_emulator ./ci -f ci/Dockerfile.ledger
       - name: Run simulator image

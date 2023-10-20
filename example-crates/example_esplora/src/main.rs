@@ -106,7 +106,7 @@ fn main() -> anyhow::Result<()> {
 
     let (init_chain_changeset, init_indexed_tx_graph_changeset) = init_changeset;
 
-    // Contruct `IndexedTxGraph` and `LocalChain` with our initial changeset. They are wrapped in
+    // Construct `IndexedTxGraph` and `LocalChain` with our initial changeset. They are wrapped in
     // `Mutex` to display how they can be used in a multithreaded context. Technically the mutexes
     // aren't strictly needed here.
     let graph = Mutex::new({

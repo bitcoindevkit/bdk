@@ -1293,7 +1293,7 @@ fn test_add_foreign_utxo_where_outpoint_doesnt_match_psbt_input() {
                 satisfaction_weight
             )
             .is_ok(),
-        "shoulld be ok when outpoint does match psbt_input"
+        "should be ok when outpoint does match psbt_input"
     );
 }
 
@@ -2013,7 +2013,7 @@ fn test_bump_fee_add_input_change_dust() {
 
     let mut tx = psbt.extract_tx();
     for txin in &mut tx.input {
-        txin.witness.push([0x00; P2WPKH_FAKE_WITNESS_SIZE]); // to get realisitc weight
+        txin.witness.push([0x00; P2WPKH_FAKE_WITNESS_SIZE]); // to get realistic weight
     }
     let original_tx_weight = tx.weight();
     assert_eq!(tx.input.len(), 1);

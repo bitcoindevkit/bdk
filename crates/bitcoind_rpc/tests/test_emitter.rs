@@ -735,7 +735,7 @@ fn mempool_during_reorg() -> anyhow::Result<()> {
         "first mempool emission should include all txs",
     );
 
-    // perform reorgs at different heights, these reorgs will not comfirm transactions in the
+    // perform reorgs at different heights, these reorgs will not confirm transactions in the
     // mempool
     for reorg_count in 1..TIP_DIFF {
         println!("REORG COUNT: {}", reorg_count);
@@ -808,10 +808,10 @@ fn mempool_during_reorg() -> anyhow::Result<()> {
 /// If blockchain re-org includes the start height, emit new start height block
 ///
 /// 1. mine 101 blocks
-/// 2. emmit blocks 99a, 100a
+/// 2. emit blocks 99a, 100a
 /// 3. invalidate blocks 99a, 100a, 101a
 /// 4. mine new blocks 99b, 100b, 101b
-/// 5. emmit block 99b
+/// 5. emit block 99b
 ///
 /// The block hash of 99b should be different than 99a, but their previous block hashes should
 /// be the same.

@@ -32,7 +32,7 @@ const CHANNEL_BOUND: usize = 10;
 const STDOUT_PRINT_DELAY: Duration = Duration::from_secs(6);
 /// Delay between mempool emissions.
 const MEMPOOL_EMIT_DELAY: Duration = Duration::from_secs(30);
-/// Delay for committing to persistance.
+/// Delay for committing to persistence.
 const DB_COMMIT_DELAY: Duration = Duration::from_secs(60);
 
 type ChangeSet = (
@@ -184,7 +184,7 @@ fn main() -> anyhow::Result<()> {
                     CheckPoint::from_header(&block.header, height).into_update(false);
                 let chain_changeset = chain
                     .apply_update(chain_update)
-                    .expect("must always apply as we recieve blocks in order from emitter");
+                    .expect("must always apply as we receive blocks in order from emitter");
                 let graph_changeset = graph.apply_block_relevant(block, height);
                 db.stage((chain_changeset, graph_changeset));
 
@@ -193,7 +193,7 @@ fn main() -> anyhow::Result<()> {
                     last_db_commit = Instant::now();
                     db.commit()?;
                     println!(
-                        "[{:>10}s] commited to db (took {}s)",
+                        "[{:>10}s] committed to db (took {}s)",
                         start.elapsed().as_secs_f32(),
                         last_db_commit.elapsed().as_secs_f32()
                     );
@@ -298,7 +298,7 @@ fn main() -> anyhow::Result<()> {
                             CheckPoint::from_header(&block.header, height).into_update(false);
                         let chain_changeset = chain
                             .apply_update(chain_update)
-                            .expect("must always apply as we recieve blocks in order from emitter");
+                            .expect("must always apply as we receive blocks in order from emitter");
                         let graph_changeset = graph.apply_block_relevant(block, height);
                         (chain_changeset, graph_changeset)
                     }
@@ -320,7 +320,7 @@ fn main() -> anyhow::Result<()> {
                     last_db_commit = Instant::now();
                     db.commit()?;
                     println!(
-                        "[{:>10}s] commited to db (took {}s)",
+                        "[{:>10}s] committed to db (took {}s)",
                         start.elapsed().as_secs_f32(),
                         last_db_commit.elapsed().as_secs_f32()
                     );
