@@ -1986,6 +1986,14 @@ impl<D> Wallet<D> {
     pub fn local_chain(&self) -> &LocalChain {
         &self.chain
     }
+
+    /// Get the [`KeychainKind`] and derivation index for a given [`Script`].
+    ///
+    /// This will return `None` if the script is not in the wallet.
+    // TODO: Generalize this implementation once we make the wallet generic over K
+    pub fn which_keychain_derived(&self, spk: &Script) -> Option<&(KeychainKind, u32)> {
+        self.indexed_graph.index.index_of_spk(spk)
+    }
 }
 
 impl<D> AsRef<bdk_chain::tx_graph::TxGraph<ConfirmationTimeAnchor>> for Wallet<D> {
