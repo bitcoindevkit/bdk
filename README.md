@@ -15,7 +15,7 @@
     <a href="https://github.com/bitcoindevkit/bdk/actions?query=workflow%3ACI"><img alt="CI Status" src="https://github.com/bitcoindevkit/bdk/workflows/CI/badge.svg"></a>
     <a href="https://coveralls.io/github/bitcoindevkit/bdk?branch=master"><img src="https://coveralls.io/repos/github/bitcoindevkit/bdk/badge.svg?branch=master"/></a>
     <a href="https://docs.rs/bdk"><img alt="API Docs" src="https://img.shields.io/badge/docs.rs-bdk-green"/></a>
-    <a href="https://blog.rust-lang.org/2021/12/02/Rust-1.57.0.html"><img alt="Rustc Version 1.57.0+" src="https://img.shields.io/badge/rustc-1.57.0%2B-lightgrey.svg"/></a>
+    <a href="https://blog.rust-lang.org/2022/08/11/Rust-1.63.0.html"><img alt="Rustc Version 1.63.0+" src="https://img.shields.io/badge/rustc-1.63.0%2B-lightgrey.svg"/></a>
     <a href="https://discord.gg/d7NkDKm"><img alt="Chat on Discord" src="https://img.shields.io/discord/753336465005608961?logo=discord"></a>
   </p>
 
@@ -60,51 +60,19 @@ Fully working examples of how to use these components are in `/example-crates`:
 [`bdk_chain`]: https://docs.rs/bdk-chain/
 
 ## Minimum Supported Rust Version (MSRV)
-This library should compile with any combination of features with Rust 1.57.0.
+This library should compile with any combination of features with Rust 1.63.0.
 
 To build with the MSRV you will need to pin dependencies as follows:
 
 ```shell
-# log 0.4.19 has MSRV 1.60.0+
-cargo update -p log --precise "0.4.18"
-# tempfile 3.7.0 has MSRV 1.63.0+
-cargo update -p tempfile --precise "3.6.0"
-# reqwest 0.11.19 has MSRV 1.63.0+
-cargo update -p reqwest --precise "0.11.18"
-# hyper-rustls 0.24.1 has MSRV 1.60.0+
-cargo update -p hyper-rustls --precise 0.24.0
-# rustls 0.21.7 has MSRV 1.60.0+
-cargo update -p rustls:0.21.9 --precise "0.21.1"
-# rustls 0.20.9 has MSRV 1.60.0+
-cargo update -p rustls:0.20.9 --precise "0.20.8"
-# tokio 1.33 has MSRV 1.63.0+
-cargo update -p tokio --precise "1.29.1"
-# tokio-util 0.7.9 doesn't build with MSRV 1.57.0
-cargo update -p tokio-util --precise "0.7.8"
-# flate2 1.0.27 has MSRV 1.63.0+
-cargo update -p flate2 --precise "1.0.26"
-# h2 0.3.21 has MSRV 1.63.0+
-cargo update -p h2 --precise "0.3.20"
-# rustls-webpki 0.100.3 has MSRV 1.60.0+
-cargo update -p rustls-webpki:0.100.3 --precise "0.100.1"
-# rustls-webpki 0.101.2 has MSRV 1.60.0+
-cargo update -p rustls-webpki:0.101.7 --precise "0.101.1"
-# zip 0.6.6 has MSRV 1.59.0+
+# zip 0.6.3 has MSRV 1.64.0+
 cargo update -p zip --precise "0.6.2"
-# time 0.3.14 has MSRV 1.59.0+
-cargo update -p time --precise "0.3.13"
-# byteorder 1.5.0 has MSRV 1.60.0+
-cargo update -p byteorder --precise "1.4.3"
-# webpki 0.22.4 requires `ring:0.17.2` which has MSRV 1.61.0+
-cargo update -p webpki --precise "0.22.2"
-# os_str_bytes 6.6.0 has MSRV 1.61.0+
-cargo update -p os_str_bytes --precise 6.5.1
-# sct 0.7.1 has MSRV 1.61.0+
-cargo update -p sct --precise 0.7.0
-# cc 1.0.82 has MSRV 1.61.0+
-cargo update -p cc --precise "1.0.81"
-# jobserver 0.1.27 has MSRV 1.66.0+
+# time 0.3.21 has MSRV 1.65.0+
+cargo update -p time --precise "0.3.20"
+# jobserver 0.1.27 has MSRV 1.66.0
 cargo update -p jobserver --precise "0.1.26"
+# reqwest 0.11.20 has MSRV > 1.63.0+
+cargo update -p reqwest --precise "0.11.19"
 ```
 
 ## License

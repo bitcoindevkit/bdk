@@ -10,7 +10,7 @@ readme = "README.md"
 license = "MIT OR Apache-2.0"
 authors = ["Bitcoin Dev Kit Developers"]
 edition = "2021"
-rust-version = "1.57"
+rust-version = "1.63"
 
 [dependencies]
 rand = "^0.8"
