@@ -128,12 +128,18 @@ pub struct ChangeSet {
         ConfirmationTimeHeightAnchor,
         keychain::ChangeSet<KeychainKind>,
     >,
+
+    /// Stores the network type of the wallet.
+    pub network: Option<Network>,
 }
 
 impl Append for ChangeSet {
     fn append(&mut self, other: Self) {
         Append::append(&mut self.chain, other.chain);
         Append::append(&mut self.indexed_tx_graph, other.indexed_tx_graph);
+        if other.network.is_some() {
+            self.network = other.network;
+        }
     }
 
     fn is_empty(&self) -> bool {
@@ -225,75 +231,81 @@ impl Wallet {
         descriptor: E,
         change_descriptor: Option<E>,
         network: Network,
-    ) -> Result<Self, NewNoPersistError> {
+    ) -> Result<Self, crate::descriptor::DescriptorError> {
         Self::new(descriptor, change_descriptor, (), network).map_err(|e| match e {
-            NewError::Descriptor(e) => NewNoPersistError::Descriptor(e),
-            NewError::Persist(_) | NewError::InvalidPersistenceGenesis => {
-                unreachable!("no persistence so it can't fail")
-            }
-            NewError::UnknownNetwork => NewNoPersistError::UnknownNetwork,
+            NewError::Descriptor(e) => e,
+            NewError::Write(_) => unreachable!("mock-write must always succeed"),
         })
     }
-}
 
-/// Error returned from [`Wallet::new_no_persist`]
-#[derive(Debug)]
-pub enum NewNoPersistError {
-    /// There was problem with the descriptors passed in
-    Descriptor(crate::descriptor::DescriptorError),
-    /// We cannot determine the genesis hash from the network.
-    UnknownNetwork,
-}
-
-impl fmt::Display for NewNoPersistError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            NewNoPersistError::Descriptor(e) => e.fmt(f),
-            NewNoPersistError::UnknownNetwork => write!(
-                f,
-                "unknown network - genesis block hash needs to be provided explicitly"
-            ),
-        }
+    /// Creates a wallet that does not persist data, with a custom genesis hash.
+    pub fn new_no_persist_with_genesis_hash<E: IntoWalletDescriptor>(
+        descriptor: E,
+        change_descriptor: Option<E>,
+        network: Network,
+        genesis_hash: BlockHash,
+    ) -> Result<Self, crate::descriptor::DescriptorError> {
+        Self::new_with_genesis_hash(descriptor, change_descriptor, (), network, genesis_hash)
+            .map_err(|e| match e {
+                NewError::Descriptor(e) => e,
+                NewError::Write(_) => unreachable!("mock-write must always succeed"),
+            })
     }
 }
-
-#[cfg(feature = "std")]
-impl std::error::Error for NewNoPersistError {}
 
 #[derive(Debug)]
 /// Error returned from [`Wallet::new`]
-pub enum NewError<PE> {
-    /// There was problem with the descriptors passed in
+pub enum NewError<W> {
+    /// There was problem with the passed-in descriptor(s).
     Descriptor(crate::descriptor::DescriptorError),
-    /// We were unable to load the wallet's data from the persistence backend
-    Persist(PE),
-    /// We cannot determine the genesis hash from the network
-    UnknownNetwork,
-    /// The genesis block hash is either missing from persistence or has an unexpected value
-    InvalidPersistenceGenesis,
+    /// We were unable to write the wallet's data to the persistence backend.
+    Write(W),
 }
 
-impl<PE> fmt::Display for NewError<PE>
+impl<W> fmt::Display for NewError<W>
 where
-    PE: fmt::Display,
+    W: fmt::Display,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             NewError::Descriptor(e) => e.fmt(f),
-            NewError::Persist(e) => {
-                write!(f, "failed to load wallet from persistence backend: {}", e)
-            }
-            NewError::UnknownNetwork => write!(
-                f,
-                "unknown network - genesis block hash needs to be provided explicitly"
-            ),
-            NewError::InvalidPersistenceGenesis => write!(f, "the genesis block hash is either missing from persistence or has an unexpected value"),
+            NewError::Write(e) => e.fmt(f),
         }
     }
 }
 
 #[cfg(feature = "std")]
-impl<PE> std::error::Error for NewError<PE> where PE: core::fmt::Display + core::fmt::Debug {}
+impl<W> std::error::Error for NewError<W> where W: core::fmt::Display + core::fmt::Debug {}
+
+/// An error that may occur when loading a [`Wallet`] from persistence.
+#[derive(Debug)]
+pub enum LoadError<L> {
+    /// There was a problem with the passed-in descriptor(s).
+    Descriptor(crate::descriptor::DescriptorError),
+    /// Loading data from the persistence backend failed.
+    Load(L),
+    /// Data loaded from persistence is missing network type.
+    MissingNetwork,
+    /// Data loaded from persistence is missing genesis hash.
+    MissingGenesis,
+}
+
+impl<L> fmt::Display for LoadError<L>
+where
+    L: fmt::Display,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            LoadError::Descriptor(e) => e.fmt(f),
+            LoadError::Load(e) => e.fmt(f),
+            LoadError::MissingNetwork => write!(f, "loaded data is missing network type"),
+            LoadError::MissingGenesis => write!(f, "loaded data is missing genesis hash"),
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl<L> std::error::Error for LoadError<L> where L: core::fmt::Display + core::fmt::Debug {}
 
 /// An error that may occur when inserting a transaction into [`Wallet`].
 #[derive(Debug)]
@@ -316,30 +328,29 @@ impl<D> Wallet<D> {
         change_descriptor: Option<E>,
         db: D,
         network: Network,
-    ) -> Result<Self, NewError<D::LoadError>>
+    ) -> Result<Self, NewError<D::WriteError>>
     where
         D: PersistBackend<ChangeSet>,
     {
-        Self::with_custom_genesis_hash(descriptor, change_descriptor, db, network, None)
+        let genesis_hash = genesis_block(network).block_hash();
+        Self::new_with_genesis_hash(descriptor, change_descriptor, db, network, genesis_hash)
     }
 
     /// Create a new [`Wallet`] with a custom genesis hash.
     ///
     /// This is like [`Wallet::new`] with an additional `custom_genesis_hash` parameter.
-    pub fn with_custom_genesis_hash<E: IntoWalletDescriptor>(
+    pub fn new_with_genesis_hash<E: IntoWalletDescriptor>(
         descriptor: E,
         change_descriptor: Option<E>,
-        mut db: D,
+        db: D,
         network: Network,
-        custom_genesis_hash: Option<BlockHash>,
-    ) -> Result<Self, NewError<D::LoadError>>
+        genesis_hash: BlockHash,
+    ) -> Result<Self, NewError<D::WriteError>>
     where
         D: PersistBackend<ChangeSet>,
     {
         let secp = Secp256k1::new();
-        let genesis_hash =
-            custom_genesis_hash.unwrap_or_else(|| genesis_block(network).block_hash());
-        let (mut chain, _) = LocalChain::from_genesis_hash(genesis_hash);
+        let (chain, _) = LocalChain::from_genesis_hash(genesis_hash);
         let mut indexed_graph = IndexedTxGraph::<
             ConfirmationTimeHeightAnchor,
             KeychainTxOutIndex<KeychainKind>,
@@ -351,34 +362,27 @@ impl<D> Wallet<D> {
             .index
             .add_keychain(KeychainKind::External, descriptor.clone());
         let signers = Arc::new(SignersContainer::build(keymap, &descriptor, &secp));
-        let change_signers = match change_descriptor {
+
+        let change_signers = Arc::new(match change_descriptor {
             Some(desc) => {
-                let (change_descriptor, change_keymap) =
-                    into_wallet_descriptor_checked(desc, &secp, network)
-                        .map_err(NewError::Descriptor)?;
-
-                let change_signers = Arc::new(SignersContainer::build(
-                    change_keymap,
-                    &change_descriptor,
-                    &secp,
-                ));
-
+                let (descriptor, keymap) = into_wallet_descriptor_checked(desc, &secp, network)
+                    .map_err(NewError::Descriptor)?;
+                let signers = SignersContainer::build(keymap, &descriptor, &secp);
                 indexed_graph
                     .index
-                    .add_keychain(KeychainKind::Internal, change_descriptor);
-
-                change_signers
+                    .add_keychain(KeychainKind::Internal, descriptor);
+                signers
             }
-            None => Arc::new(SignersContainer::new()),
-        };
+            None => SignersContainer::new(),
+        });
 
-        let changeset = db.load_from_persistence().map_err(NewError::Persist)?;
-        chain
-            .apply_changeset(&changeset.chain)
-            .map_err(|_| NewError::InvalidPersistenceGenesis)?;
-        indexed_graph.apply_changeset(changeset.indexed_tx_graph);
-
-        let persist = Persist::new(db);
+        let mut persist = Persist::new(db);
+        persist.stage(ChangeSet {
+            chain: chain.initial_changeset(),
+            indexed_tx_graph: indexed_graph.initial_changeset(),
+            network: Some(network),
+        });
+        persist.commit().map_err(NewError::Write)?;
 
         Ok(Wallet {
             signers,
@@ -387,6 +391,56 @@ impl<D> Wallet<D> {
             chain,
             indexed_graph,
             persist,
+            secp,
+        })
+    }
+
+    /// Load [`Wallet`] from persistence.
+    pub fn load<E: IntoWalletDescriptor>(
+        descriptor: E,
+        change_descriptor: Option<E>,
+        mut db: D,
+    ) -> Result<Self, LoadError<D::LoadError>>
+    where
+        D: PersistBackend<ChangeSet>,
+    {
+        let secp = Secp256k1::new();
+
+        let changeset = db.load_from_persistence().map_err(LoadError::Load)?;
+        let network = changeset.network.ok_or(LoadError::MissingNetwork)?;
+
+        let chain =
+            LocalChain::from_changeset(changeset.chain).map_err(|_| LoadError::MissingGenesis)?;
+
+        let mut index = KeychainTxOutIndex::<KeychainKind>::default();
+
+        let (descriptor, keymap) = into_wallet_descriptor_checked(descriptor, &secp, network)
+            .map_err(LoadError::Descriptor)?;
+        let signers = Arc::new(SignersContainer::build(keymap, &descriptor, &secp));
+        index.add_keychain(KeychainKind::External, descriptor);
+
+        let change_signers = Arc::new(match change_descriptor {
+            Some(descriptor) => {
+                let (descriptor, keymap) =
+                    into_wallet_descriptor_checked(descriptor, &secp, network)
+                        .map_err(LoadError::Descriptor)?;
+                let signers = SignersContainer::build(keymap, &descriptor, &secp);
+                index.add_keychain(KeychainKind::Internal, descriptor);
+                signers
+            }
+            None => SignersContainer::new(),
+        });
+
+        let indexed_graph = IndexedTxGraph::new(index);
+        let persist = Persist::new(db);
+
+        Ok(Wallet {
+            signers,
+            change_signers,
+            chain,
+            indexed_graph,
+            persist,
+            network,
             secp,
         })
     }
