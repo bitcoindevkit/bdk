@@ -37,6 +37,14 @@ where
         let (changeset, result) = self.aggregate_changesets();
         result.map(|_| changeset)
     }
+
+    fn is_empty(&mut self) -> Result<bool, Self::LoadError> {
+        let init_pos = self.db_file.stream_position()?;
+        let stream_len = self.db_file.seek(io::SeekFrom::End(0))?;
+        let magic_len = self.magic.len() as u64;
+        self.db_file.seek(io::SeekFrom::Start(init_pos))?;
+        Ok(stream_len == magic_len)
+    }
 }
 
 impl<'a, C> Store<'a, C>
@@ -181,6 +189,19 @@ mod test {
 
     #[derive(Debug)]
     struct TestTracker;
+
+    #[test]
+    fn is_empty() {
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(&TEST_MAGIC_BYTES).expect("should write");
+
+        let mut db = Store::<TestChangeSet>::new(&TEST_MAGIC_BYTES, file.reopen().unwrap())
+            .expect("must open");
+        assert!(db.is_empty().expect("must read"));
+        db.write_changes(&vec!["hello".to_string(), "world".to_string()])
+            .expect("must write");
+        assert!(!db.is_empty().expect("must read"));
+    }
 
     #[test]
     fn new_fails_if_file_is_too_short() {
