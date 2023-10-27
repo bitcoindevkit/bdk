@@ -7,6 +7,7 @@ use std::{io::Write, str::FromStr};
 
 use bdk::{
     bitcoin::{Address, Network},
+    chain::PersistBackend,
     wallet::{AddressIndex, Update},
     SignOptions, Wallet,
 };
