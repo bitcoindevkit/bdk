@@ -53,7 +53,6 @@ pub struct Args<CS: clap::Subcommand, S: clap::Args> {
     pub command: Commands<CS, S>,
 }
 
-#[allow(clippy::almost_swapped)]
 #[derive(Subcommand, Debug, Clone)]
 pub enum Commands<CS: clap::Subcommand, S: clap::Args> {
     #[clap(flatten)]
@@ -137,7 +136,6 @@ impl core::fmt::Display for CoinSelectionAlgo {
     }
 }
 
-#[allow(clippy::almost_swapped)]
 #[derive(Subcommand, Debug, Clone)]
 pub enum AddressCmd {
     /// Get the next unused address.

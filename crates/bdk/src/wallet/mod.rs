@@ -2290,9 +2290,6 @@ impl<D> Wallet<D> {
     ) -> Result<(), MiniscriptPsbtError> {
         // We need to borrow `psbt` mutably within the loops, so we have to allocate a vec for all
         // the input utxos and outputs
-        //
-        // Clippy complains that the collect is not required, but that's wrong
-        #[allow(clippy::needless_collect)]
         let utxos = (0..psbt.inputs.len())
             .filter_map(|i| psbt.get_utxo_for(i).map(|utxo| (true, i, utxo)))
             .chain(
