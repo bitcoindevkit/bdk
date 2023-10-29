@@ -188,7 +188,12 @@ impl core::fmt::Display for Keychain {
     }
 }
 
-#[allow(clippy::type_complexity)]
+pub struct CreateTxChange {
+    pub index_changeset: keychain::ChangeSet<Keychain>,
+    pub change_keychain: Keychain,
+    pub index: u32,
+}
+
 pub fn create_tx<A: Anchor, O: ChainOracle>(
     graph: &mut KeychainTxGraph<A>,
     chain: &O,
@@ -196,10 +201,7 @@ pub fn create_tx<A: Anchor, O: ChainOracle>(
     cs_algorithm: CoinSelectionAlgo,
     address: Address,
     value: u64,
-) -> anyhow::Result<(
-    Transaction,
-    Option<(keychain::ChangeSet<Keychain>, (Keychain, u32))>,
-)>
+) -> anyhow::Result<(Transaction, Option<CreateTxChange>)>
 where
     O::Error: std::error::Error + Send + Sync + 'static,
 {
@@ -391,7 +393,11 @@ where
     }
 
     let change_info = if selection_meta.drain_value.is_some() {
-        Some((changeset, (internal_keychain, change_index)))
+        Some(CreateTxChange {
+            index_changeset: changeset,
+            change_keychain: internal_keychain,
+            index: change_index,
+        })
     } else {
         None
     };
@@ -399,35 +405,34 @@ where
     Ok((transaction, change_info))
 }
 
-#[allow(clippy::type_complexity)]
+// Alias the elements of `Result` of `planned_utxos`
+pub type PlannedUtxo<K, A> = (bdk_tmp_plan::Plan<K>, FullTxOut<A>);
+
 pub fn planned_utxos<A: Anchor, O: ChainOracle, K: Clone + bdk_tmp_plan::CanDerive>(
     graph: &KeychainTxGraph<A>,
     chain: &O,
     assets: &bdk_tmp_plan::Assets<K>,
-) -> Result<Vec<(bdk_tmp_plan::Plan<K>, FullTxOut<A>)>, O::Error> {
+) -> Result<Vec<PlannedUtxo<K, A>>, O::Error> {
     let chain_tip = chain.get_chain_tip()?;
     let outpoints = graph.index.outpoints().iter().cloned();
     graph
         .graph()
         .try_filter_chain_unspents(chain, chain_tip, outpoints)
-        .filter_map(
-            #[allow(clippy::type_complexity)]
-            |r| -> Option<Result<(bdk_tmp_plan::Plan<K>, FullTxOut<A>), _>> {
-                let (k, i, full_txo) = match r {
-                    Err(err) => return Some(Err(err)),
-                    Ok(((k, i), full_txo)) => (k, i, full_txo),
-                };
-                let desc = graph
-                    .index
-                    .keychains()
-                    .get(&k)
-                    .expect("keychain must exist")
-                    .at_derivation_index(i)
-                    .expect("i can't be hardened");
-                let plan = bdk_tmp_plan::plan_satisfaction(&desc, assets)?;
-                Some(Ok((plan, full_txo)))
-            },
-        )
+        .filter_map(|r| -> Option<Result<PlannedUtxo<K, A>, _>> {
+            let (k, i, full_txo) = match r {
+                Err(err) => return Some(Err(err)),
+                Ok(((k, i), full_txo)) => (k, i, full_txo),
+            };
+            let desc = graph
+                .index
+                .keychains()
+                .get(&k)
+                .expect("keychain must exist")
+                .at_derivation_index(i)
+                .expect("i can't be hardened");
+            let plan = bdk_tmp_plan::plan_satisfaction(&desc, assets)?;
+            Some(Ok((plan, full_txo)))
+        })
         .collect()
 }
 
@@ -597,7 +602,12 @@ where
                 let (tx, change_info) =
                     create_tx(graph, chain, keymap, coin_select, address, value)?;
 
-                if let Some((index_changeset, (change_keychain, index))) = change_info {
+                if let Some(CreateTxChange {
+                    index_changeset,
+                    change_keychain,
+                    index,
+                }) = change_info
+                {
                     // We must first persist to disk the fact that we've got a new address from the
                     // change keychain so future scans will find the tx we're about to broadcast.
                     // If we're unable to persist this, then we don't want to broadcast.
@@ -646,17 +656,19 @@ where
     }
 }
 
-#[allow(clippy::type_complexity)]
-pub fn init<CS: clap::Subcommand, S: clap::Args, C>(
-    db_magic: &[u8],
-    db_default_path: &str,
-) -> anyhow::Result<(
+// Alias the `Result` of `init`
+pub type InitialState<CS, S, C> = (
     Args<CS, S>,
     KeyMap,
     KeychainTxOutIndex<Keychain>,
     Mutex<Database<C>>,
     C,
-)>
+);
+
+pub fn init<CS: clap::Subcommand, S: clap::Args, C>(
+    db_magic: &[u8],
+    db_default_path: &str,
+) -> anyhow::Result<InitialState<CS, S, C>>
 where
     C: Default + Append + Serialize + DeserializeOwned,
 {
