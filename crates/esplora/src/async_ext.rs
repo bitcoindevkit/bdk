@@ -6,10 +6,13 @@ use bdk_chain::{
     local_chain::{self, CheckPoint},
     BlockId, ConfirmationTimeHeightAnchor, TxGraph,
 };
-use esplora_client::{Error, TxStatus};
+use esplora_client::TxStatus;
 use futures::{stream::FuturesOrdered, TryStreamExt};
 
 use crate::anchor_from_status;
+
+/// [`esplora_client::Error`]
+type Error = Box<esplora_client::Error>;
 
 /// Trait to extend the functionality of [`esplora_client::AsyncClient`].
 ///
@@ -35,7 +38,6 @@ pub trait EsploraAsyncExt {
     /// [`LocalChain`]: bdk_chain::local_chain::LocalChain
     /// [`LocalChain::tip`]: bdk_chain::local_chain::LocalChain::tip
     /// [`LocalChain::apply_update`]: bdk_chain::local_chain::LocalChain::apply_update
-    #[allow(clippy::result_large_err)]
     async fn update_local_chain(
         &self,
         local_tip: CheckPoint,
@@ -50,7 +52,6 @@ pub trait EsploraAsyncExt {
     /// The full scan for each keychain stops after a gap of `stop_gap` script pubkeys with no associated
     /// transactions. `parallel_requests` specifies the max number of HTTP requests to make in
     /// parallel.
-    #[allow(clippy::result_large_err)]
     async fn full_scan<K: Ord + Clone + Send>(
         &self,
         keychain_spks: BTreeMap<
@@ -73,7 +74,6 @@ pub trait EsploraAsyncExt {
     /// may include scripts that have been used, use [`full_scan`] with the keychain.
     ///
     /// [`full_scan`]: EsploraAsyncExt::full_scan
-    #[allow(clippy::result_large_err)]
     async fn sync(
         &self,
         misc_spks: impl IntoIterator<IntoIter = impl Iterator<Item = ScriptBuf> + Send> + Send,

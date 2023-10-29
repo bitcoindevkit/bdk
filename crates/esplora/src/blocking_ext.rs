@@ -7,9 +7,12 @@ use bdk_chain::{
     local_chain::{self, CheckPoint},
     BlockId, ConfirmationTimeHeightAnchor, TxGraph,
 };
-use esplora_client::{Error, TxStatus};
+use esplora_client::TxStatus;
 
 use crate::anchor_from_status;
+
+/// [`esplora_client::Error`]
+type Error = Box<esplora_client::Error>;
 
 /// Trait to extend the functionality of [`esplora_client::BlockingClient`].
 ///
@@ -33,7 +36,6 @@ pub trait EsploraExt {
     /// [`LocalChain`]: bdk_chain::local_chain::LocalChain
     /// [`LocalChain::tip`]: bdk_chain::local_chain::LocalChain::tip
     /// [`LocalChain::apply_update`]: bdk_chain::local_chain::LocalChain::apply_update
-    #[allow(clippy::result_large_err)]
     fn update_local_chain(
         &self,
         local_tip: CheckPoint,
@@ -48,7 +50,6 @@ pub trait EsploraExt {
     /// The full scan for each keychain stops after a gap of `stop_gap` script pubkeys with no associated
     /// transactions. `parallel_requests` specifies the max number of HTTP requests to make in
     /// parallel.
-    #[allow(clippy::result_large_err)]
     fn full_scan<K: Ord + Clone>(
         &self,
         keychain_spks: BTreeMap<K, impl IntoIterator<Item = (u32, ScriptBuf)>>,
@@ -68,7 +69,6 @@ pub trait EsploraExt {
     /// may include scripts that have been used, use [`full_scan`] with the keychain.
     ///
     /// [`full_scan`]: EsploraExt::full_scan
-    #[allow(clippy::result_large_err)]
     fn sync(
         &self,
         misc_spks: impl IntoIterator<Item = ScriptBuf>,
@@ -247,7 +247,12 @@ impl EsploraExt for esplora_client::BlockingClient {
                 .map(|txid| {
                     std::thread::spawn({
                         let client = self.clone();
-                        move || client.get_tx_status(&txid).map(|s| (txid, s))
+                        move || {
+                            client
+                                .get_tx_status(&txid)
+                                .map_err(Box::new)
+                                .map(|s| (txid, s))
+                        }
                     })
                 })
                 .collect::<Vec<JoinHandle<Result<(Txid, TxStatus), Error>>>>();
