@@ -216,6 +216,44 @@ mod test {
     #[derive(Debug)]
     struct TestTracker;
 
+    /// Check behavior of [`Store::create_new`] and [`Store::open`].
+    #[test]
+    fn construct_store() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let file_path = temp_dir.path().join("db_file");
+        let _ = Store::<TestChangeSet>::open(&TEST_MAGIC_BYTES, &file_path)
+            .expect_err("must not open as file does not exist yet");
+        let _ = Store::<TestChangeSet>::create_new(&TEST_MAGIC_BYTES, &file_path)
+            .expect("must create file");
+        // cannot create new as file already exists
+        let _ = Store::<TestChangeSet>::create_new(&TEST_MAGIC_BYTES, &file_path)
+            .expect_err("must fail as file already exists now");
+        let _ = Store::<TestChangeSet>::open(&TEST_MAGIC_BYTES, &file_path)
+            .expect("must open as file exists now");
+    }
+
+    #[test]
+    fn open_or_create_new() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let file_path = temp_dir.path().join("db_file");
+        let changeset = vec!["hello".to_string(), "world".to_string()];
+
+        {
+            let mut db = Store::<TestChangeSet>::open_or_create_new(&TEST_MAGIC_BYTES, &file_path)
+                .expect("must create");
+            assert!(file_path.exists());
+            db.append_changeset(&changeset).expect("must succeed");
+        }
+
+        {
+            let mut db = Store::<TestChangeSet>::open_or_create_new(&TEST_MAGIC_BYTES, &file_path)
+                .expect("must recover");
+            let (recovered_changeset, r) = db.aggregate_changesets();
+            r.expect("must succeed");
+            assert_eq!(recovered_changeset, changeset);
+        }
+    }
+
     #[test]
     fn is_empty() {
         let mut file = NamedTempFile::new().unwrap();
