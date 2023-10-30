@@ -681,7 +681,7 @@ where
         index.add_keychain(Keychain::Internal, internal_descriptor);
     }
 
-    let mut db_backend = match Store::<'m, C>::new_from_path(db_magic, &args.db_path) {
+    let mut db_backend = match Store::<'m, C>::open_or_create_new(db_magic, &args.db_path) {
         Ok(db_backend) => db_backend,
         // we cannot return `err` directly as it has lifetime `'m`
         Err(err) => return Err(anyhow::anyhow!("failed to init db backend: {:?}", err)),

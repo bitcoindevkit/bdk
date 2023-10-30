@@ -51,20 +51,55 @@ impl<'a, C> Store<'a, C>
 where
     C: Default + Append + serde::Serialize + serde::de::DeserializeOwned,
 {
-    /// Creates a new store from a [`File`].
+    /// Create a new [`Store`] file in write-only mode; error if the file exists.
     ///
-    /// The file must have been opened with read and write permissions.
+    /// `magic` is the prefixed bytes to write to the new file. This will be checked when opening
+    /// the `Store` in the future with [`open`].
     ///
-    /// `magic` is the expected prefixed bytes of the file. If this does not match, an error will be
-    /// returned.
+    /// [`open`]: Store::open
+    pub fn create_new<P>(magic: &'a [u8], file_path: P) -> Result<Self, FileError>
+    where
+        P: AsRef<Path>,
+    {
+        if file_path.as_ref().exists() {
+            // `io::Error` is used instead of a variant on `FileError` because there is already a
+            // nightly-only `File::create_new` method
+            return Err(FileError::Io(io::Error::new(
+                io::ErrorKind::Other,
+                "file already exists",
+            )));
+        }
+        let mut f = OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .open(file_path)?;
+        f.write_all(magic)?;
+        Ok(Self {
+            magic,
+            db_file: f,
+            marker: Default::default(),
+        })
+    }
+
+    /// Open an existing [`Store`].
     ///
-    /// [`File`]: std::fs::File
-    pub fn new(magic: &'a [u8], mut db_file: File) -> Result<Self, FileError> {
-        db_file.rewind()?;
+    /// Use [`create_new`] to create a new `Store`.
+    ///
+    /// # Errors
+    ///
+    /// If the prefixed bytes of the opened file does not match the provided `magic`, the
+    /// [`FileError::InvalidMagicBytes`] error variant will be returned.
+    ///
+    /// [`create_new`]: Store::create_new
+    pub fn open<P>(magic: &'a [u8], file_path: P) -> Result<Self, FileError>
+    where
+        P: AsRef<Path>,
+    {
+        let mut f = OpenOptions::new().read(true).write(true).open(file_path)?;
 
         let mut magic_buf = vec![0_u8; magic.len()];
-        db_file.read_exact(magic_buf.as_mut())?;
-
+        f.read_exact(&mut magic_buf)?;
         if magic_buf != magic {
             return Err(FileError::InvalidMagicBytes {
                 got: magic_buf,
@@ -74,35 +109,26 @@ where
 
         Ok(Self {
             magic,
-            db_file,
+            db_file: f,
             marker: Default::default(),
         })
     }
 
-    /// Creates or loads a store from `db_path`.
+    /// Attempt to open existing [`Store`] file; create it if the file is non-existant.
     ///
-    /// If no file exists there, it will be created.
+    /// Internally, this calls either [`open`] or [`create_new`].
     ///
-    /// Refer to [`new`] for documentation on the `magic` input.
-    ///
-    /// [`new`]: Self::new
-    pub fn new_from_path<P>(magic: &'a [u8], db_path: P) -> Result<Self, FileError>
+    /// [`open`]: Store::open
+    /// [`create_new`]: Store::create_new
+    pub fn open_or_create_new<P>(magic: &'a [u8], file_path: P) -> Result<Self, FileError>
     where
         P: AsRef<Path>,
     {
-        let already_exists = db_path.as_ref().exists();
-
-        let mut db_file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .open(db_path)?;
-
-        if !already_exists {
-            db_file.write_all(magic)?;
+        if file_path.as_ref().exists() {
+            Self::open(magic, file_path)
+        } else {
+            Self::create_new(magic, file_path)
         }
-
-        Self::new(magic, db_file)
     }
 
     /// Iterates over the stored changeset from first to last, changing the seek position at each
@@ -195,8 +221,8 @@ mod test {
         let mut file = NamedTempFile::new().unwrap();
         file.write_all(&TEST_MAGIC_BYTES).expect("should write");
 
-        let mut db = Store::<TestChangeSet>::new(&TEST_MAGIC_BYTES, file.reopen().unwrap())
-            .expect("must open");
+        let mut db =
+            Store::<TestChangeSet>::open(&TEST_MAGIC_BYTES, file.path()).expect("must open");
         assert!(db.is_empty().expect("must read"));
         db.write_changes(&vec!["hello".to_string(), "world".to_string()])
             .expect("must write");
@@ -209,7 +235,7 @@ mod test {
         file.write_all(&TEST_MAGIC_BYTES[..TEST_MAGIC_BYTES_LEN - 1])
             .expect("should write");
 
-        match Store::<TestChangeSet>::new(&TEST_MAGIC_BYTES, file.reopen().unwrap()) {
+        match Store::<TestChangeSet>::open(&TEST_MAGIC_BYTES, file.path()) {
             Err(FileError::Io(e)) => assert_eq!(e.kind(), std::io::ErrorKind::UnexpectedEof),
             unexpected => panic!("unexpected result: {:?}", unexpected),
         };
@@ -223,7 +249,7 @@ mod test {
         file.write_all(invalid_magic_bytes.as_bytes())
             .expect("should write");
 
-        match Store::<TestChangeSet>::new(&TEST_MAGIC_BYTES, file.reopen().unwrap()) {
+        match Store::<TestChangeSet>::open(&TEST_MAGIC_BYTES, file.path()) {
             Err(FileError::InvalidMagicBytes { got, .. }) => {
                 assert_eq!(got, invalid_magic_bytes.as_bytes())
             }
@@ -242,8 +268,8 @@ mod test {
         let mut file = NamedTempFile::new().unwrap();
         file.write_all(&data).expect("should write");
 
-        let mut store = Store::<TestChangeSet>::new(&TEST_MAGIC_BYTES, file.reopen().unwrap())
-            .expect("should open");
+        let mut store =
+            Store::<TestChangeSet>::open(&TEST_MAGIC_BYTES, file.path()).expect("should open");
         match store.iter_changesets().next() {
             Some(Err(IterError::Bincode(_))) => {}
             unexpected_res => panic!("unexpected result: {:?}", unexpected_res),
