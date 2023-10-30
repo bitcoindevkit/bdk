@@ -7,7 +7,6 @@ use std::{io::Write, str::FromStr};
 
 use bdk::{
     bitcoin::{Address, Network},
-    chain::PersistBackend,
     wallet::{AddressIndex, Update},
     SignOptions, Wallet,
 };
@@ -16,20 +15,16 @@ use bdk_file_store::Store;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let db_path = std::env::temp_dir().join("bdk-esplora-example");
-    let mut db = Store::<bdk::wallet::ChangeSet>::open_or_create_new(DB_MAGIC.as_bytes(), db_path)?;
+    let db = Store::<bdk::wallet::ChangeSet>::open_or_create_new(DB_MAGIC.as_bytes(), db_path)?;
     let external_descriptor = "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/84'/1'/0'/0/*)";
     let internal_descriptor = "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/84'/1'/0'/1/*)";
 
-    let mut wallet = if db.is_empty()? {
-        Wallet::new(
-            external_descriptor,
-            Some(internal_descriptor),
-            db,
-            Network::Testnet,
-        )?
-    } else {
-        Wallet::load(external_descriptor, Some(internal_descriptor), db)?
-    };
+    let mut wallet = Wallet::new_or_load(
+        external_descriptor,
+        Some(internal_descriptor),
+        db,
+        Network::Testnet,
+    )?;
 
     let address = wallet.get_address(AddressIndex::New);
     println!("Generated Address: {}", address);
