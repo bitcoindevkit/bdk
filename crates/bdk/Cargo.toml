@@ -47,6 +47,8 @@ dev-getrandom-wasm = ["getrandom/js"]
 lazy_static = "1.4"
 env_logger = "0.7"
 assert_matches = "1.5.0"
+tempfile = "3"
+bdk_file_store = { path = "../file_store" }
 
 [package.metadata.docs.rs]
 all-features = true

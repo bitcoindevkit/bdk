@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use assert_matches::assert_matches;
 use bdk::descriptor::calc_checksum;
 use bdk::psbt::PsbtUtils;
@@ -17,7 +19,6 @@ use bitcoin::{
 };
 use bitcoin::{psbt, Network};
 use bitcoin::{BlockHash, Txid};
-use core::str::FromStr;
 
 mod common;
 use common::*;
@@ -59,6 +60,101 @@ fn receive_output_in_latest_block(wallet: &mut Wallet, value: u64) -> OutPoint {
 // Here, we push just once for simplicity, so we have to add an extra byte for the missing
 // OP_PUSH.
 const P2WPKH_FAKE_WITNESS_SIZE: usize = 106;
+
+const DB_MAGIC: &[u8] = &[0x21, 0x24, 0x48];
+
+#[test]
+fn load_recovers_wallet() {
+    let temp_dir = tempfile::tempdir().expect("must create tempdir");
+    let file_path = temp_dir.path().join("store.db");
+
+    // create new wallet
+    let wallet_keychains = {
+        let db = bdk_file_store::Store::create_new(DB_MAGIC, &file_path).expect("must create db");
+        let wallet =
+            Wallet::new(get_test_wpkh(), None, db, Network::Testnet).expect("must init wallet");
+        wallet.keychains().clone()
+    };
+
+    // recover wallet
+    {
+        let db = bdk_file_store::Store::open(DB_MAGIC, &file_path).expect("must recover db");
+        let wallet = Wallet::load(get_test_wpkh(), None, db).expect("must recover wallet");
+        assert_eq!(wallet.network(), Network::Testnet);
+        assert_eq!(wallet.spk_index().keychains(), &wallet_keychains);
+    }
+}
+
+#[test]
+fn new_or_load() {
+    let temp_dir = tempfile::tempdir().expect("must create tempdir");
+    let file_path = temp_dir.path().join("store.db");
+
+    // init wallet when non-existant
+    let wallet_keychains = {
+        let db = bdk_file_store::Store::open_or_create_new(DB_MAGIC, &file_path)
+            .expect("must create db");
+        let wallet = Wallet::new_or_load(get_test_wpkh(), None, db, Network::Testnet)
+            .expect("must init wallet");
+        wallet.keychains().clone()
+    };
+
+    // wrong network
+    {
+        let db =
+            bdk_file_store::Store::open_or_create_new(DB_MAGIC, &file_path).expect("must open db");
+        let err = Wallet::new_or_load(get_test_wpkh(), None, db, Network::Bitcoin)
+            .expect_err("wrong network");
+        assert!(
+            matches!(
+                err,
+                bdk::wallet::NewOrLoadError::LoadedNetworkDoesNotMatch {
+                    got: Some(Network::Testnet),
+                    expected: Network::Bitcoin
+                }
+            ),
+            "err: {}",
+            err,
+        );
+    }
+
+    // wrong genesis hash
+    {
+        let exp_blockhash = BlockHash::all_zeros();
+        let got_blockhash =
+            bitcoin::blockdata::constants::genesis_block(Network::Testnet).block_hash();
+
+        let db =
+            bdk_file_store::Store::open_or_create_new(DB_MAGIC, &file_path).expect("must open db");
+        let err = Wallet::new_or_load_with_genesis_hash(
+            get_test_wpkh(),
+            None,
+            db,
+            Network::Testnet,
+            exp_blockhash,
+        )
+        .expect_err("wrong genesis hash");
+        assert!(
+            matches!(
+                err,
+                bdk::wallet::NewOrLoadError::LoadedGenesisDoesNotMatch { got, expected }
+                if got == Some(got_blockhash) && expected == exp_blockhash
+            ),
+            "err: {}",
+            err,
+        );
+    }
+
+    // all parameters match
+    {
+        let db =
+            bdk_file_store::Store::open_or_create_new(DB_MAGIC, &file_path).expect("must open db");
+        let wallet = Wallet::new_or_load(get_test_wpkh(), None, db, Network::Testnet)
+            .expect("must recover wallet");
+        assert_eq!(wallet.network(), Network::Testnet);
+        assert_eq!(wallet.keychains(), &wallet_keychains);
+    }
+}
 
 #[test]
 fn test_descriptor_checksum() {
