@@ -748,6 +748,20 @@ impl<D> Wallet<D> {
             .map(|((k, i), full_txo)| new_local_utxo(k, i, full_txo))
     }
 
+    /// List all relevant outputs (includes both spent and unspent, confirmed and unconfirmed).
+    ///
+    /// To list only unspent outputs (UTXOs), use [`Wallet::list_unspent`] instead.
+    pub fn list_output(&self) -> impl Iterator<Item = LocalOutput> + '_ {
+        self.indexed_graph
+            .graph()
+            .filter_chain_txouts(
+                &self.chain,
+                self.chain.tip().block_id(),
+                self.indexed_graph.index.outpoints().iter().cloned(),
+            )
+            .map(|((k, i), full_txo)| new_local_utxo(k, i, full_txo))
+    }
+
     /// Get all the checkpoints the wallet is currently storing indexed by height.
     pub fn checkpoints(&self) -> CheckPointIter {
         self.chain.iter_checkpoints()
