@@ -755,7 +755,7 @@ mod test {
         .unwrap();
         WeightedUtxo {
             satisfaction_weight: P2WPKH_SATISFACTION_SIZE,
-            utxo: Utxo::Local(LocalUtxo {
+            utxo: Utxo::Local(LocalOutput {
                 outpoint,
                 txout: TxOut {
                     value,
@@ -815,7 +815,7 @@ mod test {
         for _ in 0..utxos_number {
             res.push(WeightedUtxo {
                 satisfaction_weight: P2WPKH_SATISFACTION_SIZE,
-                utxo: Utxo::Local(LocalUtxo {
+                utxo: Utxo::Local(LocalOutput {
                     outpoint: OutPoint::from_str(
                         "ebd9813ecebc57ff8f30797de7c205e3c7498ca950ea4341ee51a685ff2fa30a:0",
                     )
@@ -844,7 +844,7 @@ mod test {
     fn generate_same_value_utxos(utxos_value: u64, utxos_number: usize) -> Vec<WeightedUtxo> {
         let utxo = WeightedUtxo {
             satisfaction_weight: P2WPKH_SATISFACTION_SIZE,
-            utxo: Utxo::Local(LocalUtxo {
+            utxo: Utxo::Local(LocalOutput {
                 outpoint: OutPoint::from_str(
                     "ebd9813ecebc57ff8f30797de7c205e3c7498ca950ea4341ee51a685ff2fa30a:0",
                 )
