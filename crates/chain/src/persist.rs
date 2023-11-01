@@ -79,19 +79,10 @@ pub trait PersistBackend<C> {
     fn write_changes(&mut self, changeset: &C) -> Result<(), Self::WriteError>;
 
     /// Return the aggregate changeset `C` from persistence.
-    fn load_from_persistence(&mut self) -> Result<C, Self::LoadError>;
-
-    /// Returns whether the persistence backend contains no data.
-    fn is_empty(&mut self) -> Result<bool, Self::LoadError>
-    where
-        C: Append,
-    {
-        self.load_from_persistence()
-            .map(|changeset| changeset.is_empty())
-    }
+    fn load_from_persistence(&mut self) -> Result<Option<C>, Self::LoadError>;
 }
 
-impl<C: Default> PersistBackend<C> for () {
+impl<C> PersistBackend<C> for () {
     type WriteError = Infallible;
 
     type LoadError = Infallible;
@@ -100,11 +91,7 @@ impl<C: Default> PersistBackend<C> for () {
         Ok(())
     }
 
-    fn load_from_persistence(&mut self) -> Result<C, Self::LoadError> {
-        Ok(C::default())
-    }
-
-    fn is_empty(&mut self) -> Result<bool, Self::LoadError> {
-        Ok(true)
+    fn load_from_persistence(&mut self) -> Result<Option<C>, Self::LoadError> {
+        Ok(None)
     }
 }

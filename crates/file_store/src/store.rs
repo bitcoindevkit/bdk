@@ -23,7 +23,7 @@ pub struct Store<'a, C> {
 
 impl<'a, C> PersistBackend<C> for Store<'a, C>
 where
-    C: Default + Append + serde::Serialize + serde::de::DeserializeOwned,
+    C: Append + serde::Serialize + serde::de::DeserializeOwned,
 {
     type WriteError = std::io::Error;
 
@@ -33,23 +33,14 @@ where
         self.append_changeset(changeset)
     }
 
-    fn load_from_persistence(&mut self) -> Result<C, Self::LoadError> {
-        let (changeset, result) = self.aggregate_changesets();
-        result.map(|_| changeset)
-    }
-
-    fn is_empty(&mut self) -> Result<bool, Self::LoadError> {
-        let init_pos = self.db_file.stream_position()?;
-        let stream_len = self.db_file.seek(io::SeekFrom::End(0))?;
-        let magic_len = self.magic.len() as u64;
-        self.db_file.seek(io::SeekFrom::Start(init_pos))?;
-        Ok(stream_len == magic_len)
+    fn load_from_persistence(&mut self) -> Result<Option<C>, Self::LoadError> {
+        self.aggregate_changesets().map_err(|e| e.iter_error)
     }
 }
 
 impl<'a, C> Store<'a, C>
 where
-    C: Default + Append + serde::Serialize + serde::de::DeserializeOwned,
+    C: Append + serde::Serialize + serde::de::DeserializeOwned,
 {
     /// Create a new [`Store`] file in write-only mode; error if the file exists.
     ///
@@ -156,16 +147,24 @@ where
     ///
     /// **WARNING**: This method changes the write position of the underlying file. The next
     /// changeset will be written over the erroring entry (or the end of the file if none existed).
-    pub fn aggregate_changesets(&mut self) -> (C, Result<(), IterError>) {
-        let mut changeset = C::default();
-        let result = (|| {
-            for next_changeset in self.iter_changesets() {
-                changeset.append(next_changeset?);
+    pub fn aggregate_changesets(&mut self) -> Result<Option<C>, AggregateChangesetsError<C>> {
+        let mut changeset = Option::<C>::None;
+        for next_changeset in self.iter_changesets() {
+            let next_changeset = match next_changeset {
+                Ok(next_changeset) => next_changeset,
+                Err(iter_error) => {
+                    return Err(AggregateChangesetsError {
+                        changeset,
+                        iter_error,
+                    })
+                }
+            };
+            match &mut changeset {
+                Some(changeset) => changeset.append(next_changeset),
+                changeset => *changeset = Some(next_changeset),
             }
-            Ok(())
-        })();
-
-        (changeset, result)
+        }
+        Ok(changeset)
     }
 
     /// Append a new changeset to the file and truncate the file to the end of the appended
@@ -195,6 +194,24 @@ where
         Ok(())
     }
 }
+
+/// Error type for [`Store::aggregate_changesets`].
+#[derive(Debug)]
+pub struct AggregateChangesetsError<C> {
+    /// The partially-aggregated changeset.
+    pub changeset: Option<C>,
+
+    /// The error returned by [`EntryIter`].
+    pub iter_error: IterError,
+}
+
+impl<C> std::fmt::Display for AggregateChangesetsError<C> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(&self.iter_error, f)
+    }
+}
+
+impl<C: std::fmt::Debug> std::error::Error for AggregateChangesetsError<C> {}
 
 #[cfg(test)]
 mod test {
@@ -248,23 +265,9 @@ mod test {
         {
             let mut db = Store::<TestChangeSet>::open_or_create_new(&TEST_MAGIC_BYTES, &file_path)
                 .expect("must recover");
-            let (recovered_changeset, r) = db.aggregate_changesets();
-            r.expect("must succeed");
-            assert_eq!(recovered_changeset, changeset);
+            let recovered_changeset = db.aggregate_changesets().expect("must succeed");
+            assert_eq!(recovered_changeset, Some(changeset));
         }
-    }
-
-    #[test]
-    fn is_empty() {
-        let mut file = NamedTempFile::new().unwrap();
-        file.write_all(&TEST_MAGIC_BYTES).expect("should write");
-
-        let mut db =
-            Store::<TestChangeSet>::open(&TEST_MAGIC_BYTES, file.path()).expect("must open");
-        assert!(db.is_empty().expect("must read"));
-        db.write_changes(&vec!["hello".to_string(), "world".to_string()])
-            .expect("must write");
-        assert!(!db.is_empty().expect("must read"));
     }
 
     #[test]

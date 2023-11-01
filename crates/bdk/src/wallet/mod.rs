@@ -293,6 +293,8 @@ pub enum LoadError<L> {
     Descriptor(crate::descriptor::DescriptorError),
     /// Loading data from the persistence backend failed.
     Load(L),
+    /// Wallet not initialized, persistence backend is empty.
+    NotInitialized,
     /// Data loaded from persistence is missing network type.
     MissingNetwork,
     /// Data loaded from persistence is missing genesis hash.
@@ -307,6 +309,9 @@ where
         match self {
             LoadError::Descriptor(e) => e.fmt(f),
             LoadError::Load(e) => e.fmt(f),
+            LoadError::NotInitialized => {
+                write!(f, "wallet is not initialized, persistence backend is empty")
+            }
             LoadError::MissingNetwork => write!(f, "loaded data is missing network type"),
             LoadError::MissingGenesis => write!(f, "loaded data is missing genesis hash"),
         }
@@ -330,6 +335,8 @@ pub enum NewOrLoadError<W, L> {
     Write(W),
     /// Loading from the persistence backend failed.
     Load(L),
+    /// Wallet is not initialized, persistence backend is empty.
+    NotInitialized,
     /// The loaded genesis hash does not match what was provided.
     LoadedGenesisDoesNotMatch {
         /// The expected genesis block hash.
@@ -356,6 +363,9 @@ where
             NewOrLoadError::Descriptor(e) => e.fmt(f),
             NewOrLoadError::Write(e) => write!(f, "failed to write to persistence: {}", e),
             NewOrLoadError::Load(e) => write!(f, "failed to load from persistence: {}", e),
+            NewOrLoadError::NotInitialized => {
+                write!(f, "wallet is not initialized, persistence backend is empty")
+            }
             NewOrLoadError::LoadedGenesisDoesNotMatch { expected, got } => {
                 write!(f, "loaded genesis hash is not {}, got {:?}", expected, got)
             }
@@ -454,8 +464,23 @@ impl<D> Wallet<D> {
     where
         D: PersistBackend<ChangeSet>,
     {
+        let changeset = db
+            .load_from_persistence()
+            .map_err(LoadError::Load)?
+            .ok_or(LoadError::NotInitialized)?;
+        Self::load_from_changeset(descriptor, change_descriptor, db, changeset)
+    }
+
+    fn load_from_changeset<E: IntoWalletDescriptor>(
+        descriptor: E,
+        change_descriptor: Option<E>,
+        db: D,
+        changeset: ChangeSet,
+    ) -> Result<Self, LoadError<D::LoadError>>
+    where
+        D: PersistBackend<ChangeSet>,
+    {
         let secp = Secp256k1::new();
-        let changeset = db.load_from_persistence().map_err(LoadError::Load)?;
         let network = changeset.network.ok_or(LoadError::MissingNetwork)?;
         let chain =
             LocalChain::from_changeset(changeset.chain).map_err(|_| LoadError::MissingGenesis)?;
@@ -517,8 +542,43 @@ impl<D> Wallet<D> {
     where
         D: PersistBackend<ChangeSet>,
     {
-        if db.is_empty().map_err(NewOrLoadError::Load)? {
-            return Self::new_with_genesis_hash(
+        let changeset = db.load_from_persistence().map_err(NewOrLoadError::Load)?;
+        match changeset {
+            Some(changeset) => {
+                let wallet =
+                    Self::load_from_changeset(descriptor, change_descriptor, db, changeset)
+                        .map_err(|e| match e {
+                            LoadError::Descriptor(e) => NewOrLoadError::Descriptor(e),
+                            LoadError::Load(e) => NewOrLoadError::Load(e),
+                            LoadError::NotInitialized => NewOrLoadError::NotInitialized,
+                            LoadError::MissingNetwork => {
+                                NewOrLoadError::LoadedNetworkDoesNotMatch {
+                                    expected: network,
+                                    got: None,
+                                }
+                            }
+                            LoadError::MissingGenesis => {
+                                NewOrLoadError::LoadedGenesisDoesNotMatch {
+                                    expected: genesis_hash,
+                                    got: None,
+                                }
+                            }
+                        })?;
+                if wallet.network != network {
+                    return Err(NewOrLoadError::LoadedNetworkDoesNotMatch {
+                        expected: network,
+                        got: Some(wallet.network),
+                    });
+                }
+                if wallet.chain.genesis_hash() != genesis_hash {
+                    return Err(NewOrLoadError::LoadedGenesisDoesNotMatch {
+                        expected: genesis_hash,
+                        got: Some(wallet.chain.genesis_hash()),
+                    });
+                }
+                Ok(wallet)
+            }
+            None => Self::new_with_genesis_hash(
                 descriptor,
                 change_descriptor,
                 db,
@@ -528,34 +588,8 @@ impl<D> Wallet<D> {
             .map_err(|e| match e {
                 NewError::Descriptor(e) => NewOrLoadError::Descriptor(e),
                 NewError::Write(e) => NewOrLoadError::Write(e),
-            });
+            }),
         }
-
-        let wallet = Self::load(descriptor, change_descriptor, db).map_err(|e| match e {
-            LoadError::Descriptor(e) => NewOrLoadError::Descriptor(e),
-            LoadError::Load(e) => NewOrLoadError::Load(e),
-            LoadError::MissingNetwork => NewOrLoadError::LoadedNetworkDoesNotMatch {
-                expected: network,
-                got: None,
-            },
-            LoadError::MissingGenesis => NewOrLoadError::LoadedGenesisDoesNotMatch {
-                expected: genesis_hash,
-                got: None,
-            },
-        })?;
-        if wallet.network != network {
-            return Err(NewOrLoadError::LoadedNetworkDoesNotMatch {
-                expected: network,
-                got: Some(wallet.network),
-            });
-        }
-        if wallet.chain.genesis_hash() != genesis_hash {
-            return Err(NewOrLoadError::LoadedGenesisDoesNotMatch {
-                expected: genesis_hash,
-                got: Some(wallet.chain.genesis_hash()),
-            });
-        }
-        Ok(wallet)
     }
 
     /// Get the Bitcoin network the wallet is using.

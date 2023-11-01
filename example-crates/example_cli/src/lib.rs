@@ -687,7 +687,7 @@ where
         Err(err) => return Err(anyhow::anyhow!("failed to init db backend: {:?}", err)),
     };
 
-    let init_changeset = db_backend.load_from_persistence()?;
+    let init_changeset = db_backend.load_from_persistence()?.unwrap_or_default();
 
     Ok((
         args,
