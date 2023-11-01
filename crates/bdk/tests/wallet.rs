@@ -237,6 +237,25 @@ fn test_get_funded_wallet_tx_fee_rate() {
     assert_eq!(tx_fee_rate.as_sat_per_vb(), 8.849558);
 }
 
+#[test]
+fn test_list_output() {
+    let (wallet, txid) = get_funded_wallet(get_test_wpkh());
+    let txos = wallet
+        .list_output()
+        .map(|op| (op.outpoint, op))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    assert_eq!(txos.len(), 2);
+    for (op, txo) in txos {
+        if op.txid == txid {
+            assert_eq!(txo.txout.value, 50_000);
+            assert!(!txo.is_spent);
+        } else {
+            assert_eq!(txo.txout.value, 76_000);
+            assert!(txo.is_spent);
+        }
+    }
+}
+
 macro_rules! assert_fee_rate {
     ($psbt:expr, $fees:expr, $fee_rate:expr $( ,@dust_change $( $dust_change:expr )* )* $( ,@add_signature $( $add_signature:expr )* )* ) => ({
         let psbt = $psbt.clone();
