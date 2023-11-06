@@ -138,6 +138,10 @@ impl Append for ChangeSet {
         Append::append(&mut self.chain, other.chain);
         Append::append(&mut self.indexed_tx_graph, other.indexed_tx_graph);
         if other.network.is_some() {
+            debug_assert!(
+                self.network.is_none() || self.network == other.network,
+                "network type must be consistent"
+            );
             self.network = other.network;
         }
     }
