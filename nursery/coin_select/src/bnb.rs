@@ -92,21 +92,36 @@ impl<'a, M: BnbMetric> BnbIter<'a, M> {
     fn consider_adding_to_queue(&mut self, cs: &CoinSelector<'a>, is_exclusion: bool) {
         let bound = self.metric.bound(cs);
         if let Some(bound) = bound {
-            if self.best.is_none() || self.best.as_ref().unwrap() > &bound {
+            if self.best.is_none() || self.best.as_ref().unwrap() >= &bound {
                 let branch = Branch {
                     lower_bound: bound,
                     selector: cs.clone(),
                     is_exclusion,
                 };
-                // println!(
-                //     "\t\t(PUSH) branch={} inclusion={} lb={:?}, score={:?}",
-                //     branch.selector,
-                //     !branch.is_exclusion,
-                //     branch.lower_bound,
-                //     self.metric.score(&branch.selector),
-                // );
+                println!(
+                    "\t\t(PUSH) branch={} inclusion={} lb={:?} score={:?}",
+                    branch.selector,
+                    !branch.is_exclusion,
+                    branch.lower_bound,
+                    self.metric.score(&branch.selector),
+                );
                 self.queue.push(branch);
+            } else {
+                println!(
+                    "\t\t( REJ) branch={} inclusion={} lb={:?} score={:?}",
+                    cs,
+                    !is_exclusion,
+                    bound,
+                    self.metric.score(cs),
+                );
             }
+        } else {
+            println!(
+                "\t\t(NO B) branch={} inclusion={} score={:?}",
+                cs,
+                !is_exclusion,
+                self.metric.score(cs),
+            );
         }
     }
 
@@ -116,20 +131,30 @@ impl<'a, M: BnbMetric> BnbIter<'a, M> {
             None => return, // exhausted
         };
 
+        let mut inclusion_cs = cs.clone();
+        inclusion_cs.select(next_index);
+        self.consider_adding_to_queue(&inclusion_cs, false);
+
         // for the exclusion branch, we keep banning if candidates have the same weight and value
+        let mut is_first_ban = true;
         let mut exclusion_cs = cs.clone();
         let to_ban = (next.value, next.weight);
         for (next_index, next) in cs.unselected() {
             if (next.value, next.weight) != to_ban {
                 break;
             }
+            let (index, candidate) = exclusion_cs
+                .candidates()
+                .find(|(i, _)| *i == next_index)
+                .expect("must have index since we are planning to ban it");
+            if is_first_ban {
+                is_first_ban = false;
+            } else {
+                println!("banning: [{}] {:?}", index, candidate);
+            }
             exclusion_cs.ban(next_index);
         }
         self.consider_adding_to_queue(&exclusion_cs, true);
-
-        let mut inclusion_cs = cs.clone();
-        inclusion_cs.select(next_index);
-        self.consider_adding_to_queue(&inclusion_cs, false);
     }
 }
 

@@ -1,4 +1,5 @@
 #![allow(unused)]
+mod common;
 use bdk_coin_select::{
     float::Ordf32, metrics, Candidate, CoinSelector, Drain, DrainWeights, FeeRate, Target,
 };
@@ -48,6 +49,7 @@ proptest! {
         let change_policy = bdk_coin_select::change_policy::min_waste(drain, long_term_feerate);
         let wv = test_wv(&mut rng);
         let candidates = wv.take(num_inputs).collect::<Vec<_>>();
+        println!("candidates: {:#?}", candidates);
 
         let cs = CoinSelector::new(&candidates, base_weight);
 
@@ -89,7 +91,10 @@ proptest! {
                 }
             }
             None => {
-                prop_assert!(!cs.is_selection_plausible_with_change_policy(target, &change_policy));
+                let mut cs = cs.clone();
+                let mut metric = metrics::Changeless { target, change_policy: &change_policy };
+                let has_solution = common::exhaustive_search(&mut cs, &mut metric).is_some();
+                assert!(!has_solution);
             }
         }
         dbg!(start.elapsed());

@@ -100,7 +100,7 @@ fn bnb_finds_an_exact_solution_in_n_iter() {
         .last()
         .expect("it found a solution");
 
-    assert_eq!(rounds, 50169);
+    assert_eq!(rounds, 50180);
     assert_eq!(best.input_weight(), solution_weight);
     assert_eq!(best.selected_value(), target.value, "score={:?}", score);
 }
