@@ -3,8 +3,6 @@
 use crate::{bnb::BnbMetric, float::Ordf32, CoinSelector, Drain, Target};
 mod waste;
 pub use waste::*;
-mod waste_changeless;
-pub use waste_changeless::*;
 mod lowest_fee;
 pub use lowest_fee::*;
 mod changeless;
