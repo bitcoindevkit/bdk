@@ -97,7 +97,7 @@ impl<'a> CoinSelector<'a> {
             .map(move |i| (*i, self.candidates[*i]))
     }
 
-    /// Get the candidate at `index`. `index` refers to its position in the original `candidates` 
+    /// Get the candidate at `index`. `index` refers to its position in the original `candidates`
     /// slice passed into [`CoinSelector::new`].
     pub fn candidate(&self, index: usize) -> Candidate {
         self.candidates[index]
@@ -116,7 +116,7 @@ impl<'a> CoinSelector<'a> {
         self.selected.iter().map(move |i| &candidates[*i])
     }
 
-    /// Select the input at `index`. `index` refers to its position in the original `candidates` 
+    /// Select the input at `index`. `index` refers to its position in the original `candidates`
     /// slice passed into [`CoinSelector::new`].
     pub fn select(&mut self, index: usize) -> bool {
         assert!(index < self.candidates.len());

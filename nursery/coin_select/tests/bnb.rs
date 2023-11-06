@@ -46,7 +46,7 @@ impl BnbMetric for MinExcessThenWeight {
         let mut cs = cs.clone();
         cs.select_until_target_met(self.target, Drain::none())
             .ok()?;
-        if let Some(last_index) = cs.selected_indices().last().copied() {
+        if let Some(last_index) = cs.selected_indices().iter().last().copied() {
             cs.deselect(last_index);
         }
         Some(Ordf32(
