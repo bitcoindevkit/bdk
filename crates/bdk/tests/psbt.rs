@@ -156,3 +156,37 @@ fn test_psbt_fee_rate_with_missing_txout() {
     assert!(pkh_psbt.fee_amount().is_none());
     assert!(pkh_psbt.fee_rate().is_none());
 }
+
+#[test]
+fn test_psbt_multiple_internalkey_signers() {
+    use bdk::signer::{SignerContext, SignerOrdering, SignerWrapper};
+    use bdk::KeychainKind;
+    use bitcoin::{secp256k1::Secp256k1, PrivateKey};
+    use miniscript::psbt::PsbtExt;
+    use std::sync::Arc;
+
+    let secp = Secp256k1::new();
+    let (mut wallet, _) = get_funded_wallet(get_test_tr_single_sig());
+    let send_to = wallet.get_address(AddressIndex::New);
+    let mut builder = wallet.build_tx();
+    builder.add_recipient(send_to.script_pubkey(), 10_000);
+    let mut psbt = builder.finish().unwrap();
+    // Adds a signer for the wrong internal key, bdk should not use this key to sign
+    wallet.add_signer(
+        KeychainKind::External,
+        // A signerordering lower than 100, bdk will use this signer first
+        SignerOrdering(0),
+        Arc::new(SignerWrapper::new(
+            PrivateKey::from_wif("5J5PZqvCe1uThJ3FZeUUFLCh2FuK9pZhtEK4MzhNmugqTmxCdwE").unwrap(),
+            SignerContext::Tap {
+                is_internal_key: true,
+            },
+        )),
+    );
+    let _ = wallet.sign(&mut psbt, SignOptions::default()).unwrap();
+    // Checks that we signed using the right key
+    assert!(
+        psbt.finalize_mut(&secp).is_ok(),
+        "The wrong internal key was used"
+    );
+}

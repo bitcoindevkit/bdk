@@ -459,20 +459,23 @@ impl InputSigner for SignerWrapper<PrivateKey> {
         let x_only_pubkey = XOnlyPublicKey::from(pubkey.inner);
 
         if let SignerContext::Tap { is_internal_key } = self.ctx {
-            if is_internal_key
-                && psbt.inputs[input_index].tap_key_sig.is_none()
-                && sign_options.sign_with_tap_internal_key
-            {
-                let (hash, hash_ty) = Tap::sighash(psbt, input_index, None)?;
-                sign_psbt_schnorr(
-                    &self.inner,
-                    x_only_pubkey,
-                    None,
-                    &mut psbt.inputs[input_index],
-                    hash,
-                    hash_ty,
-                    secp,
-                );
+            if let Some(psbt_internal_key) = psbt.inputs[input_index].tap_internal_key {
+                if is_internal_key
+                    && psbt.inputs[input_index].tap_key_sig.is_none()
+                    && sign_options.sign_with_tap_internal_key
+                    && x_only_pubkey == psbt_internal_key
+                {
+                    let (hash, hash_ty) = Tap::sighash(psbt, input_index, None)?;
+                    sign_psbt_schnorr(
+                        &self.inner,
+                        x_only_pubkey,
+                        None,
+                        &mut psbt.inputs[input_index],
+                        hash,
+                        hash_ty,
+                        secp,
+                    );
+                }
             }
 
             if let Some((leaf_hashes, _)) =
