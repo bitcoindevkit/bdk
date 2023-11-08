@@ -35,7 +35,8 @@ impl Default for Target {
     fn default() -> Self {
         Self {
             feerate: FeeRate::default_min_relay_fee(),
-            min_fee: 0, // TODO figure out what the actual network rule is for this
+            // https://bitcoin.stackexchange.com/questions/69282/what-is-the-min-relay-min-fee-code-26
+            min_fee: 1000,
             value: 0,
         }
     }
@@ -47,10 +48,12 @@ impl<'a> CoinSelector<'a> {
     /// The `base_weight` is the weight of the transaction without any inputs and without a change
     /// output.
     ///
+    /// The `CoinSelector` does not keep track of the final transaction's output count. The caller
+    /// is responsible for including the potential output-count varint weight change in the
+    /// corresponding [`DrainWeights`].
+    ///
     /// Note that methods in `CoinSelector` will refer to inputs by the index in the `candidates`
     /// slice you pass in.
-    // TODO: constructor should be number of outputs and output weight instead so we can keep track
-    // of varint number of outputs
     pub fn new(candidates: &'a [Candidate], base_weight: u32) -> Self {
         Self {
             base_weight,
@@ -68,10 +71,11 @@ impl<'a> CoinSelector<'a> {
     /// [`CoinSelector::new`].
     pub fn fund_outputs(
         candidates: &'a [Candidate],
-        output_weights: impl Iterator<Item = u32>,
+        output_weights: impl IntoIterator<Item = u32>,
     ) -> Self {
-        let (output_count, output_weight_total) =
-            output_weights.fold((0_usize, 0_u32), |(n, w), a| (n + 1, w + a));
+        let (output_count, output_weight_total) = output_weights
+            .into_iter()
+            .fold((0_usize, 0_u32), |(n, w), a| (n + 1, w + a));
 
         let base_weight = (4 /* nVersion */
             + 4 /* nLockTime */
@@ -79,6 +83,7 @@ impl<'a> CoinSelector<'a> {
             + varint_size(output_count)/* outputs varint */)
             * 4
             + output_weight_total;
+
         Self::new(candidates, base_weight)
     }
 
@@ -231,7 +236,6 @@ impl<'a> CoinSelector<'a> {
 
     /// Current weight of template tx + selected inputs.
     pub fn weight(&self, drain_weight: u32) -> u32 {
-        // TODO take into account whether drain tips over varint for number of outputs
         self.base_weight + self.input_weight() + drain_weight
     }
 
@@ -420,11 +424,14 @@ impl<'a> CoinSelector<'a> {
     ///
     /// A candidate if effective if it provides more value than it takes to pay for at `feerate`.
     pub fn select_all_effective(&mut self, feerate: FeeRate) {
-        // TODO: do this without allocating
-        for i in self.unselected_indices().collect::<Vec<_>>() {
-            if self.candidates[i].effective_value(feerate) > Ordf32(0.0) {
-                self.select(i);
+        for cand_index in self.candidate_order.iter() {
+            if self.selected.contains(cand_index)
+                || self.banned.contains(cand_index)
+                || self.candidates[*cand_index].effective_value(feerate) <= Ordf32(0.0)
+            {
+                continue;
             }
+            self.selected.to_mut().insert(*cand_index);
         }
     }
 
