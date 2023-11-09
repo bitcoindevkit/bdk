@@ -61,6 +61,21 @@ fn receive_output_in_latest_block(wallet: &mut Wallet, value: u64) -> OutPoint {
 const P2WPKH_FAKE_WITNESS_SIZE: usize = 106;
 
 #[test]
+fn test_which_keychain_derived_script() {
+    let (mut segwit_wallet, _) = get_funded_wallet(get_test_wpkh());
+    let addr = segwit_wallet.get_address(New);
+    let script = addr.script_pubkey();
+    let keychain = segwit_wallet.which_keychain_derived(&script).unwrap();
+    assert_eq!(keychain.0, KeychainKind::External);
+
+    let (mut taproot_wallet, _) = get_funded_wallet(get_test_tr_single_sig());
+    let addr = taproot_wallet.get_address(New);
+    let script = addr.script_pubkey();
+    let keychain = segwit_wallet.which_keychain_derived(&script);
+    assert!(keychain.is_none());
+}
+
+#[test]
 fn test_descriptor_checksum() {
     let (wallet, _) = get_funded_wallet(get_test_wpkh());
     let checksum = wallet.descriptor_checksum(KeychainKind::External);
