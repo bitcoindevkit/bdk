@@ -50,10 +50,10 @@ fn test_tx_conflict_handling() {
             tx_templates: &[
                 TxTemplate {
                     tx_name: "tx1",
-                    inputs: &[TxInTemplate::Bogus],
                     outputs: &[TxOutTemplate::new(40000, Some(0))],
                     anchors: &[block_id!(1, "B")],
                     last_seen: None,
+                    ..Default::default()
                 },
                 TxTemplate {
                     tx_name: "tx_conflict_1",
@@ -70,14 +70,12 @@ fn test_tx_conflict_handling() {
                     ..Default::default()
                 },
             ],
-            // correct output if filtered by fee rate: tx1, tx_conflict_1
-            exp_chain_txs: HashSet::from(["tx1", "tx_conflict_1", "tx_conflict_2"]),
-            exp_chain_txouts: HashSet::from([("tx1", 0), ("tx_conflict_1", 0), ("tx_conflict_2", 0)]),
-            // correct output if filtered by fee rate: tx_conflict_1
-            exp_unspents: HashSet::from([("tx_conflict_1", 0), ("tx_conflict_2", 0)]),
+            exp_chain_txs: HashSet::from(["tx1", "tx_conflict_2"]),
+            exp_chain_txouts: HashSet::from([("tx1", 0), ("tx_conflict_2", 0)]),
+            exp_unspents: HashSet::from([("tx_conflict_2", 0)]),
             exp_balance: Balance {
                 immature: 0,
-                trusted_pending: 50000, // correct output if filtered by fee rate: 20000
+                trusted_pending: 30000,
                 untrusted_pending: 0,
                 confirmed: 0,
             },

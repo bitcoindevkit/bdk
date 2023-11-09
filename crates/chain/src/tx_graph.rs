@@ -789,6 +789,12 @@ impl<A: Anchor> TxGraph<A> {
                 if conflicting_tx.last_seen_unconfirmed > tx_last_seen {
                     return Ok(None);
                 }
+                if conflicting_tx.last_seen_unconfirmed == *last_seen
+                    && conflicting_tx.txid() > tx.txid()
+                {
+                    // Conflicting tx has priority if txid of conflicting tx > txid of original tx
+                    return Ok(None);
+                }
             }
         }
 
