@@ -52,7 +52,7 @@ impl TxOutTemplate {
 pub fn init_graph<'a, A: Anchor + Clone + 'a>(
     tx_templates: impl IntoIterator<Item = &'a TxTemplate<'a, A>>,
 ) -> (TxGraph<A>, SpkTxOutIndex<u32>, HashMap<&'a str, Txid>) {
-    let (descriptor, _) = Descriptor::parse_descriptor(&Secp256k1::signing_only(), "tr(tprv8ZgxMBicQKsPd3krDUsBAmtnRsK3rb8u5yi1zhQgMhF1tR8MW7xfE4rnrbbsrbPR52e7rKapu6ztw1jXveJSCGHEriUGZV7mCe88duLp5pj/86'/1'/0'/0/*)").unwrap();
+    let (descriptor, _) = Descriptor::parse_descriptor(&Secp256k1::signing_only(), super::DESCRIPTORS[2]).unwrap();
     let mut graph = TxGraph::<A>::default();
     let mut spk_index = SpkTxOutIndex::default();
     (0..10).for_each(|index| {
