@@ -19,7 +19,6 @@ pub extern crate alloc;
 pub extern crate bitcoin;
 #[cfg(feature = "hardware-signer")]
 pub extern crate hwi;
-extern crate log;
 pub extern crate miniscript;
 extern crate serde;
 extern crate serde_json;

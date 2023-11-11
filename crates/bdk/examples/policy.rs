@@ -10,8 +10,6 @@
 // licenses.
 
 extern crate bdk;
-extern crate env_logger;
-extern crate log;
 use std::error::Error;
 
 use bdk::bitcoin::Network;
@@ -29,10 +27,6 @@ use bdk::wallet::signer::SignersContainer;
 /// one of the Extend Private key.
 
 fn main() -> Result<(), Box<dyn Error>> {
-    env_logger::init_from_env(
-        env_logger::Env::default().filter_or(env_logger::DEFAULT_FILTER_ENV, "info"),
-    );
-
     let secp = bitcoin::secp256k1::Secp256k1::new();
 
     // The descriptor used in the example
@@ -48,7 +42,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     // But they can be used as independent tools also.
     let (wallet_desc, keymap) = desc.into_wallet_descriptor(&secp, Network::Testnet)?;
 
-    log::info!("Example Descriptor for policy analysis : {}", wallet_desc);
+    println!("Example Descriptor for policy analysis : {}", wallet_desc);
 
     // Create the signer with the keymap and descriptor.
     let signers_container = SignersContainer::build(keymap, &wallet_desc, &secp);
@@ -60,7 +54,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .extract_policy(&signers_container, BuildSatisfaction::None, &secp)?
         .expect("We expect a policy");
 
-    log::info!("Derived Policy for the descriptor {:#?}", policy);
+    println!("Derived Policy for the descriptor {:#?}", policy);
 
     Ok(())
 }

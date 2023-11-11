@@ -42,8 +42,6 @@ use descriptor::error::Error as DescriptorError;
 use miniscript::psbt::{PsbtExt, PsbtInputExt, PsbtInputSatisfier};
 
 use bdk_chain::tx_graph::CalculateFeeError;
-#[allow(unused_imports)]
-use log::{debug, error, info, trace};
 
 pub mod coin_selection;
 pub mod export;
@@ -1231,7 +1229,6 @@ impl<D> Wallet<D> {
 
         let requirements =
             external_requirements.merge(&internal_requirements.unwrap_or_default())?;
-        debug!("Policy requirements: {:?}", requirements);
 
         let version = match params.version {
             Some(tx_builder::Version(0)) => return Err(CreateTxError::Version0),
@@ -1828,11 +1825,6 @@ impl<D> Wallet<D> {
                 .assume_height
                 .unwrap_or_else(|| self.chain.tip().height());
 
-            debug!(
-                "Input #{} - {}, using `confirmation_height` = {:?}, `current_height` = {:?}",
-                n, input.previous_output, confirmation_height, current_height
-            );
-
             // - Try to derive the descriptor by looking at the txout. If it's in our database, we
             //   know exactly which `keychain` to use, and which derivation index it is
             // - If that fails, try to derive it by looking at the psbt input: the complete logic
@@ -1875,10 +1867,7 @@ impl<D> Wallet<D> {
                                 psbt_input.partial_sigs.clear();
                             }
                         }
-                        Err(e) => {
-                            debug!("satisfy error {:?} for input {}", e, n);
-                            finished = false
-                        }
+                        Err(_) => finished = false,
                     }
                 }
                 None => finished = false,
@@ -2207,11 +2196,6 @@ impl<D> Wallet<D> {
             if let Some(&(keychain, child)) =
                 self.indexed_graph.index.index_of_spk(&out.script_pubkey)
             {
-                debug!(
-                    "Found descriptor for input #{} {:?}/{}",
-                    index, keychain, child
-                );
-
                 let desc = self.get_descriptor_for_keychain(keychain);
                 let desc = desc
                     .at_derivation_index(child)
