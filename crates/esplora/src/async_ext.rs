@@ -4,7 +4,7 @@ use bdk_chain::{
     bitcoin::{BlockHash, OutPoint, ScriptBuf, Txid},
     collections::{BTreeMap, BTreeSet},
     local_chain::{self, CheckPoint},
-    BlockId, ConfirmationTimeAnchor, TxGraph,
+    BlockId, ConfirmationTimeHeightAnchor, TxGraph,
 };
 use esplora_client::{Error, TxStatus};
 use futures::{stream::FuturesOrdered, TryStreamExt};
@@ -40,7 +40,7 @@ pub trait EsploraAsyncExt {
     /// indices.
     ///
     /// * `keychain_spks`: keychains that we want to scan transactions for
-    /// * `txids`: transactions for which we want updated [`ConfirmationTimeAnchor`]s
+    /// * `txids`: transactions for which we want updated [`ConfirmationTimeHeightAnchor`]s
     /// * `outpoints`: transactions associated with these outpoints (residing, spending) that we
     ///     want to include in the update
     ///
@@ -58,7 +58,7 @@ pub trait EsploraAsyncExt {
         outpoints: impl IntoIterator<IntoIter = impl Iterator<Item = OutPoint> + Send> + Send,
         stop_gap: usize,
         parallel_requests: usize,
-    ) -> Result<(TxGraph<ConfirmationTimeAnchor>, BTreeMap<K, u32>), Error>;
+    ) -> Result<(TxGraph<ConfirmationTimeHeightAnchor>, BTreeMap<K, u32>), Error>;
 
     /// Convenience method to call [`scan_txs_with_keychains`] without requiring a keychain.
     ///
@@ -70,7 +70,7 @@ pub trait EsploraAsyncExt {
         txids: impl IntoIterator<IntoIter = impl Iterator<Item = Txid> + Send> + Send,
         outpoints: impl IntoIterator<IntoIter = impl Iterator<Item = OutPoint> + Send> + Send,
         parallel_requests: usize,
-    ) -> Result<TxGraph<ConfirmationTimeAnchor>, Error> {
+    ) -> Result<TxGraph<ConfirmationTimeHeightAnchor>, Error> {
         self.scan_txs_with_keychains(
             [(
                 (),
@@ -211,10 +211,10 @@ impl EsploraAsyncExt for esplora_client::AsyncClient {
         outpoints: impl IntoIterator<IntoIter = impl Iterator<Item = OutPoint> + Send> + Send,
         stop_gap: usize,
         parallel_requests: usize,
-    ) -> Result<(TxGraph<ConfirmationTimeAnchor>, BTreeMap<K, u32>), Error> {
+    ) -> Result<(TxGraph<ConfirmationTimeHeightAnchor>, BTreeMap<K, u32>), Error> {
         type TxsOfSpkIndex = (u32, Vec<esplora_client::Tx>);
         let parallel_requests = Ord::max(parallel_requests, 1);
-        let mut graph = TxGraph::<ConfirmationTimeAnchor>::default();
+        let mut graph = TxGraph::<ConfirmationTimeHeightAnchor>::default();
         let mut last_active_indexes = BTreeMap::<K, u32>::new();
 
         for (keychain, spks) in keychain_spks {

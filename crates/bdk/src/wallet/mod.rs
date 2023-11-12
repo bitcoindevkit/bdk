@@ -25,7 +25,7 @@ use bdk_chain::{
     keychain::{self, KeychainTxOutIndex},
     local_chain::{self, CannotConnectError, CheckPoint, CheckPointIter, LocalChain},
     tx_graph::{CanonicalTx, TxGraph},
-    Append, BlockId, ChainPosition, ConfirmationTime, ConfirmationTimeAnchor, FullTxOut,
+    Append, BlockId, ChainPosition, ConfirmationTime, ConfirmationTimeHeightAnchor, FullTxOut,
     IndexedTxGraph, Persist, PersistBackend,
 };
 use bitcoin::consensus::encode::serialize;
@@ -89,7 +89,7 @@ pub struct Wallet<D = ()> {
     signers: Arc<SignersContainer>,
     change_signers: Arc<SignersContainer>,
     chain: LocalChain,
-    indexed_graph: IndexedTxGraph<ConfirmationTimeAnchor, KeychainTxOutIndex<KeychainKind>>,
+    indexed_graph: IndexedTxGraph<ConfirmationTimeHeightAnchor, KeychainTxOutIndex<KeychainKind>>,
     persist: Persist<D, ChangeSet>,
     network: Network,
     secp: SecpCtx,
@@ -105,7 +105,7 @@ pub struct Update {
     pub last_active_indices: BTreeMap<KeychainKind, u32>,
 
     /// Update for the wallet's internal [`TxGraph`].
-    pub graph: TxGraph<ConfirmationTimeAnchor>,
+    pub graph: TxGraph<ConfirmationTimeHeightAnchor>,
 
     /// Update for the wallet's internal [`LocalChain`].
     ///
@@ -124,8 +124,10 @@ pub struct ChangeSet {
     /// Changes to [`IndexedTxGraph`].
     ///
     /// [`IndexedTxGraph`]: bdk_chain::indexed_tx_graph::IndexedTxGraph
-    pub indexed_tx_graph:
-        indexed_tx_graph::ChangeSet<ConfirmationTimeAnchor, keychain::ChangeSet<KeychainKind>>,
+    pub indexed_tx_graph: indexed_tx_graph::ChangeSet<
+        ConfirmationTimeHeightAnchor,
+        keychain::ChangeSet<KeychainKind>,
+    >,
 }
 
 impl Append for ChangeSet {
@@ -148,12 +150,17 @@ impl From<local_chain::ChangeSet> for ChangeSet {
     }
 }
 
-impl From<indexed_tx_graph::ChangeSet<ConfirmationTimeAnchor, keychain::ChangeSet<KeychainKind>>>
-    for ChangeSet
+impl
+    From<
+        indexed_tx_graph::ChangeSet<
+            ConfirmationTimeHeightAnchor,
+            keychain::ChangeSet<KeychainKind>,
+        >,
+    > for ChangeSet
 {
     fn from(
         indexed_tx_graph: indexed_tx_graph::ChangeSet<
-            ConfirmationTimeAnchor,
+            ConfirmationTimeHeightAnchor,
             keychain::ChangeSet<KeychainKind>,
         >,
     ) -> Self {
@@ -279,8 +286,10 @@ impl<D> Wallet<D> {
     {
         let secp = Secp256k1::new();
         let mut chain = LocalChain::default();
-        let mut indexed_graph =
-            IndexedTxGraph::<ConfirmationTimeAnchor, KeychainTxOutIndex<KeychainKind>>::default();
+        let mut indexed_graph = IndexedTxGraph::<
+            ConfirmationTimeHeightAnchor,
+            KeychainTxOutIndex<KeychainKind>,
+        >::default();
 
         let (descriptor, keymap) = into_wallet_descriptor_checked(descriptor, &secp, network)
             .map_err(NewError::Descriptor)?;
@@ -654,7 +663,7 @@ impl<D> Wallet<D> {
     pub fn get_tx(
         &self,
         txid: Txid,
-    ) -> Option<CanonicalTx<'_, Transaction, ConfirmationTimeAnchor>> {
+    ) -> Option<CanonicalTx<'_, Transaction, ConfirmationTimeHeightAnchor>> {
         let graph = self.indexed_graph.graph();
 
         Some(CanonicalTx {
@@ -724,7 +733,7 @@ impl<D> Wallet<D> {
                         tip_height: self.chain.tip().map(|b| b.height()),
                         tx_height: height,
                     })
-                    .map(|(&anchor_height, &hash)| ConfirmationTimeAnchor {
+                    .map(|(&anchor_height, &hash)| ConfirmationTimeHeightAnchor {
                         anchor_block: BlockId {
                             height: anchor_height,
                             hash,
@@ -756,7 +765,7 @@ impl<D> Wallet<D> {
     /// Iterate over the transactions in the wallet.
     pub fn transactions(
         &self,
-    ) -> impl Iterator<Item = CanonicalTx<'_, Transaction, ConfirmationTimeAnchor>> + '_ {
+    ) -> impl Iterator<Item = CanonicalTx<'_, Transaction, ConfirmationTimeHeightAnchor>> + '_ {
         self.indexed_graph.graph().list_chain_txs(
             &self.chain,
             self.chain.tip().map(|cp| cp.block_id()).unwrap_or_default(),
@@ -1973,7 +1982,7 @@ impl<D> Wallet<D> {
     }
 
     /// Get a reference to the inner [`TxGraph`].
-    pub fn tx_graph(&self) -> &TxGraph<ConfirmationTimeAnchor> {
+    pub fn tx_graph(&self) -> &TxGraph<ConfirmationTimeHeightAnchor> {
         self.indexed_graph.graph()
     }
 
@@ -1988,8 +1997,8 @@ impl<D> Wallet<D> {
     }
 }
 
-impl<D> AsRef<bdk_chain::tx_graph::TxGraph<ConfirmationTimeAnchor>> for Wallet<D> {
-    fn as_ref(&self) -> &bdk_chain::tx_graph::TxGraph<ConfirmationTimeAnchor> {
+impl<D> AsRef<bdk_chain::tx_graph::TxGraph<ConfirmationTimeHeightAnchor>> for Wallet<D> {
+    fn as_ref(&self) -> &bdk_chain::tx_graph::TxGraph<ConfirmationTimeHeightAnchor> {
         self.indexed_graph.graph()
     }
 }
@@ -2028,7 +2037,7 @@ where
 fn new_local_utxo(
     keychain: KeychainKind,
     derivation_index: u32,
-    full_txo: FullTxOut<ConfirmationTimeAnchor>,
+    full_txo: FullTxOut<ConfirmationTimeHeightAnchor>,
 ) -> LocalUtxo {
     LocalUtxo {
         outpoint: full_txo.outpoint,

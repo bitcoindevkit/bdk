@@ -2,7 +2,7 @@ use bdk_chain::{
     bitcoin::{OutPoint, ScriptBuf, Transaction, Txid},
     local_chain::{self, CheckPoint},
     tx_graph::{self, TxGraph},
-    Anchor, BlockId, ConfirmationHeightAnchor, ConfirmationTimeAnchor,
+    Anchor, BlockId, ConfirmationHeightAnchor, ConfirmationTimeHeightAnchor,
 };
 use electrum_client::{Client, ElectrumApi, Error, HeaderNotification};
 use std::{
@@ -57,7 +57,7 @@ impl RelevantTxids {
     }
 
     /// Finalizes [`RelevantTxids`] with `new_txs` and anchors of type
-    /// [`ConfirmationTimeAnchor`].
+    /// [`ConfirmationTimeHeightAnchor`].
     ///
     /// **Note:** The confirmation time might not be precisely correct if there has been a reorg.
     /// Electrum's API intends that we use the merkle proof API, we should change `bdk_electrum` to
@@ -67,7 +67,7 @@ impl RelevantTxids {
         client: &Client,
         seen_at: Option<u64>,
         missing: Vec<Txid>,
-    ) -> Result<TxGraph<ConfirmationTimeAnchor>, Error> {
+    ) -> Result<TxGraph<ConfirmationTimeHeightAnchor>, Error> {
         let graph = self.into_tx_graph(client, seen_at, missing)?;
 
         let relevant_heights = {
@@ -103,7 +103,7 @@ impl RelevantTxids {
                     .map(|(height_anchor, txid)| {
                         let confirmation_height = height_anchor.confirmation_height;
                         let confirmation_time = height_to_time[&confirmation_height];
-                        let time_anchor = ConfirmationTimeAnchor {
+                        let time_anchor = ConfirmationTimeHeightAnchor {
                             anchor_block: height_anchor.anchor_block,
                             confirmation_height,
                             confirmation_time,
