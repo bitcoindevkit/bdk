@@ -11,8 +11,8 @@ use std::{
     str::FromStr,
 };
 
-/// We assume that a block of this depth and deeper cannot be reorged.
-const ASSUME_FINAL_DEPTH: u32 = 8;
+/// We include a chain suffix of a certain length for the purpose of robustness.
+const CHAIN_SUFFIX_LENGTH: u32 = 8;
 
 /// Represents updates fetched from an Electrum server, but excludes full transactions.
 ///
@@ -302,12 +302,12 @@ fn construct_update_tip(
         }
     }
 
-    // Atomically fetch the latest `ASSUME_FINAL_DEPTH` count of blocks from Electrum. We use this
+    // Atomically fetch the latest `CHAIN_SUFFIX_LENGTH` count of blocks from Electrum. We use this
     // to construct our checkpoint update.
     let mut new_blocks = {
-        let start_height = new_tip_height.saturating_sub(ASSUME_FINAL_DEPTH);
+        let start_height = new_tip_height.saturating_sub(CHAIN_SUFFIX_LENGTH - 1);
         let hashes = client
-            .block_headers(start_height as _, ASSUME_FINAL_DEPTH as _)?
+            .block_headers(start_height as _, CHAIN_SUFFIX_LENGTH as _)?
             .headers
             .into_iter()
             .map(|h| h.block_hash());
