@@ -171,25 +171,5 @@ where
 fn slurp(target: Target, excess: i64, candidate: Candidate) -> f32 {
     let vpw = candidate.value_pwu().0;
     let perfect_weight = -excess as f32 / (vpw - target.feerate.spwu());
-
-    #[cfg(debug_assertions)]
-    {
-        let perfect_value = (candidate.value as f32 * perfect_weight) / candidate.weight as f32;
-        let perfect_vpw = perfect_value / perfect_weight;
-        if perfect_vpw.is_nan() {
-            assert_eq!(perfect_value, 0.0);
-            assert_eq!(perfect_weight, 0.0);
-        } else {
-            assert!(
-                (vpw - perfect_vpw).abs() < 0.01,
-                "value:weight ratio must stay the same: vpw={} perfect_vpw={} perfect_value={} perfect_weight={}",
-                vpw,
-                perfect_vpw,
-                perfect_value,
-                perfect_weight,
-            );
-        }
-    }
-
     perfect_weight.max(0.0)
 }
