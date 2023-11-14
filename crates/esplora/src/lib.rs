@@ -1,5 +1,5 @@
 #![doc = include_str!("../README.md")]
-use bdk_chain::{BlockId, ConfirmationTimeAnchor};
+use bdk_chain::{BlockId, ConfirmationTimeHeightAnchor};
 use esplora_client::TxStatus;
 
 pub use esplora_client;
@@ -16,7 +16,7 @@ pub use async_ext::*;
 
 const ASSUME_FINAL_DEPTH: u32 = 15;
 
-fn anchor_from_status(status: &TxStatus) -> Option<ConfirmationTimeAnchor> {
+fn anchor_from_status(status: &TxStatus) -> Option<ConfirmationTimeHeightAnchor> {
     if let TxStatus {
         block_height: Some(height),
         block_hash: Some(hash),
@@ -24,7 +24,7 @@ fn anchor_from_status(status: &TxStatus) -> Option<ConfirmationTimeAnchor> {
         ..
     } = status.clone()
     {
-        Some(ConfirmationTimeAnchor {
+        Some(ConfirmationTimeHeightAnchor {
             anchor_block: BlockId { height, hash },
             confirmation_height: height,
             confirmation_time: time,

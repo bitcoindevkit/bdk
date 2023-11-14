@@ -74,8 +74,8 @@ impl ConfirmationTime {
     }
 }
 
-impl From<ChainPosition<ConfirmationTimeAnchor>> for ConfirmationTime {
-    fn from(observed_as: ChainPosition<ConfirmationTimeAnchor>) -> Self {
+impl From<ChainPosition<ConfirmationTimeHeightAnchor>> for ConfirmationTime {
+    fn from(observed_as: ChainPosition<ConfirmationTimeHeightAnchor>) -> Self {
         match observed_as {
             ChainPosition::Confirmed(a) => Self::Confirmed {
                 height: a.confirmation_height,
@@ -193,7 +193,7 @@ impl AnchorFromBlockPosition for ConfirmationHeightAnchor {
     derive(serde::Deserialize, serde::Serialize),
     serde(crate = "serde_crate")
 )]
-pub struct ConfirmationTimeAnchor {
+pub struct ConfirmationTimeHeightAnchor {
     /// The anchor block.
     pub anchor_block: BlockId,
     /// The confirmation height of the chain data being anchored.
@@ -202,7 +202,7 @@ pub struct ConfirmationTimeAnchor {
     pub confirmation_time: u64,
 }
 
-impl Anchor for ConfirmationTimeAnchor {
+impl Anchor for ConfirmationTimeHeightAnchor {
     fn anchor_block(&self) -> BlockId {
         self.anchor_block
     }
@@ -212,7 +212,7 @@ impl Anchor for ConfirmationTimeAnchor {
     }
 }
 
-impl AnchorFromBlockPosition for ConfirmationTimeAnchor {
+impl AnchorFromBlockPosition for ConfirmationTimeHeightAnchor {
     fn from_block_position(block: &bitcoin::Block, block_id: BlockId, _tx_pos: usize) -> Self {
         Self {
             anchor_block: block_id,

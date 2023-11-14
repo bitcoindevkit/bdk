@@ -9,7 +9,7 @@ use bdk_chain::{
     indexed_tx_graph::{self, IndexedTxGraph},
     keychain,
     local_chain::{self, CheckPoint, LocalChain},
-    Append, ConfirmationTimeAnchor,
+    Append, ConfirmationTimeHeightAnchor,
 };
 
 use bdk_esplora::{esplora_client, EsploraExt};
@@ -25,7 +25,7 @@ const DB_PATH: &str = ".bdk_esplora_example.db";
 
 type ChangeSet = (
     local_chain::ChangeSet,
-    indexed_tx_graph::ChangeSet<ConfirmationTimeAnchor, keychain::ChangeSet<Keychain>>,
+    indexed_tx_graph::ChangeSet<ConfirmationTimeHeightAnchor, keychain::ChangeSet<Keychain>>,
 );
 
 #[derive(Subcommand, Debug, Clone)]
