@@ -718,7 +718,14 @@ impl<A: Anchor> TxGraph<A> {
         // might be in mempool, or it might have been dropped already.
         // Let's check conflicts to find out!
         let tx = match tx_node {
-            TxNodeInternal::Whole(tx) => tx,
+            TxNodeInternal::Whole(tx) => {
+                // A coinbase tx that is not anchored in the best chain cannot be unconfirmed and
+                // should always be filtered out.
+                if tx.is_coin_base() {
+                    return Ok(None);
+                }
+                tx
+            }
             TxNodeInternal::Partial(_) => {
                 // Partial transactions (outputs only) cannot have conflicts.
                 return Ok(None);

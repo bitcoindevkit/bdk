@@ -46,6 +46,49 @@ fn test_tx_conflict_handling() {
 
     let scenarios = [
         Scenario {
+            name: "coinbase tx cannot be in mempool and be unconfirmed",
+            tx_templates: &[
+                TxTemplate {
+                    tx_name: "unconfirmed_coinbase",
+                    inputs: &[TxInTemplate::Coinbase],
+                    outputs: &[TxOutTemplate::new(5000, Some(0))],
+                    ..Default::default()
+                },
+                TxTemplate {
+                    tx_name: "confirmed_genesis",
+                    inputs: &[TxInTemplate::Bogus],
+                    outputs: &[TxOutTemplate::new(10000, Some(1))],
+                    anchors: &[block_id!(1, "B")],
+                    last_seen: None,
+                },
+                TxTemplate {
+                    tx_name: "unconfirmed_conflict",
+                    inputs: &[
+                        TxInTemplate::PrevTx("confirmed_genesis", 0), 
+                        TxInTemplate::PrevTx("unconfirmed_coinbase", 0)
+                    ],
+                    outputs: &[TxOutTemplate::new(20000, Some(2))],
+                    ..Default::default()
+                },
+                TxTemplate {
+                    tx_name: "confirmed_conflict",
+                    inputs: &[TxInTemplate::PrevTx("confirmed_genesis", 0)],
+                    outputs: &[TxOutTemplate::new(20000, Some(3))],
+                    anchors: &[block_id!(4, "E")],
+                    ..Default::default()
+                },
+            ],
+            exp_chain_txs: HashSet::from(["confirmed_genesis", "confirmed_conflict"]),
+            exp_chain_txouts: HashSet::from([("confirmed_genesis", 0), ("confirmed_conflict", 0)]),
+            exp_unspents: HashSet::from([("confirmed_conflict", 0)]),
+            exp_balance: Balance {
+                immature: 0,
+                trusted_pending: 0,
+                untrusted_pending: 0,
+                confirmed: 20000,
+            },
+        },
+        Scenario {
             name: "2 unconfirmed txs with same last_seens conflict",
             tx_templates: &[
                 TxTemplate {
