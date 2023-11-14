@@ -1,8 +1,14 @@
 [package]
 name = "bdk_coin_select"
 version = "0.1.0"
-edition = "2018"
+edition = "2021"
+rust-version = "1.57"
+homepage = "https://bitcoindevkit.org"
+repository = "https://github.com/bitcoindevkit/bdk"
+documentation = "https://docs.rs/bdk_coin_select"
+description = "Tools for input selection for making Bitcoin transactions."
 license = "MIT OR Apache-2.0"
+readme = "README.md"
 
 [dependencies]
 # No dependencies! Don't add any please!
