@@ -3181,7 +3181,7 @@ fn test_taproot_script_spend_sign_exclude_some_leaves() {
         .values()
         .map(|(script, version)| TapLeafHash::from_script(script, *version))
         .collect();
-    let included_script_leaves = vec![script_leaves.pop().unwrap()];
+    let included_script_leaves = [script_leaves.pop().unwrap()];
     let excluded_script_leaves = script_leaves;
 
     assert!(
