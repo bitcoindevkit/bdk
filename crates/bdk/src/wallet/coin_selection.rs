@@ -836,7 +836,7 @@ mod test {
         let drain_script = ScriptBuf::default();
         let target_amount = 250_000 + FEE_AMOUNT;
 
-        let result = LargestFirstCoinSelection::default()
+        let result = LargestFirstCoinSelection
             .coin_select(
                 utxos,
                 vec![],
@@ -857,7 +857,7 @@ mod test {
         let drain_script = ScriptBuf::default();
         let target_amount = 20_000 + FEE_AMOUNT;
 
-        let result = LargestFirstCoinSelection::default()
+        let result = LargestFirstCoinSelection
             .coin_select(
                 utxos,
                 vec![],
@@ -878,7 +878,7 @@ mod test {
         let drain_script = ScriptBuf::default();
         let target_amount = 20_000 + FEE_AMOUNT;
 
-        let result = LargestFirstCoinSelection::default()
+        let result = LargestFirstCoinSelection
             .coin_select(
                 vec![],
                 utxos,
@@ -900,7 +900,7 @@ mod test {
         let drain_script = ScriptBuf::default();
         let target_amount = 500_000 + FEE_AMOUNT;
 
-        LargestFirstCoinSelection::default()
+        LargestFirstCoinSelection
             .coin_select(
                 vec![],
                 utxos,
@@ -918,7 +918,7 @@ mod test {
         let drain_script = ScriptBuf::default();
         let target_amount = 250_000 + FEE_AMOUNT;
 
-        LargestFirstCoinSelection::default()
+        LargestFirstCoinSelection
             .coin_select(
                 vec![],
                 utxos,
@@ -935,7 +935,7 @@ mod test {
         let drain_script = ScriptBuf::default();
         let target_amount = 180_000 + FEE_AMOUNT;
 
-        let result = OldestFirstCoinSelection::default()
+        let result = OldestFirstCoinSelection
             .coin_select(
                 vec![],
                 utxos,
@@ -956,7 +956,7 @@ mod test {
         let drain_script = ScriptBuf::default();
         let target_amount = 20_000 + FEE_AMOUNT;
 
-        let result = OldestFirstCoinSelection::default()
+        let result = OldestFirstCoinSelection
             .coin_select(
                 utxos,
                 vec![],
@@ -977,7 +977,7 @@ mod test {
         let drain_script = ScriptBuf::default();
         let target_amount = 20_000 + FEE_AMOUNT;
 
-        let result = OldestFirstCoinSelection::default()
+        let result = OldestFirstCoinSelection
             .coin_select(
                 vec![],
                 utxos,
@@ -999,7 +999,7 @@ mod test {
         let drain_script = ScriptBuf::default();
         let target_amount = 600_000 + FEE_AMOUNT;
 
-        OldestFirstCoinSelection::default()
+        OldestFirstCoinSelection
             .coin_select(
                 vec![],
                 utxos,
@@ -1018,7 +1018,7 @@ mod test {
         let target_amount: u64 = utxos.iter().map(|wu| wu.utxo.txout().value).sum::<u64>() - 50;
         let drain_script = ScriptBuf::default();
 
-        OldestFirstCoinSelection::default()
+        OldestFirstCoinSelection
             .coin_select(
                 vec![],
                 utxos,
