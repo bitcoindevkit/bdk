@@ -43,7 +43,11 @@ pub struct Emitter<'c, C> {
 }
 
 impl<'c, C: bitcoincore_rpc::RpcApi> Emitter<'c, C> {
-    /// TODO
+    /// Construct a new [`Emitter`] with the given RPC `client`, `last_cp` and `start_height`.
+    ///
+    /// * `last_cp` is the check point used to find the latest block which is still part of the best
+    ///   chain.
+    /// * `start_height` is the block height to start emitting blocks from.
     pub fn new(client: &'c C, last_cp: CheckPoint, start_height: u32) -> Self {
         Self {
             client,
