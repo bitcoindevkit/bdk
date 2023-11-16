@@ -259,6 +259,29 @@ impl Wallet {
     }
 }
 
+impl<D> Wallet<D>
+where
+    D: PersistBackend<ChangeSet, WriteError = core::convert::Infallible>,
+{
+    /// Infallibly return a derived address using the external descriptor, see [`AddressIndex`] for
+    /// available address index selection strategies. If none of the keys in the descriptor are derivable
+    /// (i.e. does not end with /*) then the same address will always be returned for any [`AddressIndex`].
+    pub fn get_address(&mut self, address_index: AddressIndex) -> AddressInfo {
+        self.try_get_address(address_index).unwrap()
+    }
+
+    /// Infallibly return a derived address using the internal (change) descriptor.
+    ///
+    /// If the wallet doesn't have an internal descriptor it will use the external descriptor.
+    ///
+    /// see [`AddressIndex`] for available address index selection strategies. If none of the keys
+    /// in the descriptor are derivable (i.e. does not end with /*) then the same address will always
+    /// be returned for any [`AddressIndex`].
+    pub fn get_internal_address(&mut self, address_index: AddressIndex) -> AddressInfo {
+        self.try_get_internal_address(address_index).unwrap()
+    }
+}
+
 /// The error type when constructing a fresh [`Wallet`].
 ///
 /// Methods [`new`] and [`new_with_genesis_hash`] may return this error.
@@ -611,27 +634,37 @@ impl<D> Wallet<D> {
     /// Return a derived address using the external descriptor, see [`AddressIndex`] for
     /// available address index selection strategies. If none of the keys in the descriptor are derivable
     /// (i.e. does not end with /*) then the same address will always be returned for any [`AddressIndex`].
-    pub fn get_address(&mut self, address_index: AddressIndex) -> AddressInfo
+    ///
+    /// A `PersistBackend<ChangeSet>::WriteError` will result if unable to persist the new address
+    /// to the `PersistBackend`.
+    pub fn try_get_address(
+        &mut self,
+        address_index: AddressIndex,
+    ) -> Result<AddressInfo, D::WriteError>
     where
         D: PersistBackend<ChangeSet>,
     {
         self._get_address(KeychainKind::External, address_index)
-            .expect("persistence backend must not fail")
     }
 
     /// Return a derived address using the internal (change) descriptor.
     ///
     /// If the wallet doesn't have an internal descriptor it will use the external descriptor.
     ///
+    /// A `PersistBackend<ChangeSet>::WriteError` will result if unable to persist the new address
+    /// to the `PersistBackend`.
+    ///
     /// see [`AddressIndex`] for available address index selection strategies. If none of the keys
     /// in the descriptor are derivable (i.e. does not end with /*) then the same address will always
     /// be returned for any [`AddressIndex`].
-    pub fn get_internal_address(&mut self, address_index: AddressIndex) -> AddressInfo
+    pub fn try_get_internal_address(
+        &mut self,
+        address_index: AddressIndex,
+    ) -> Result<AddressInfo, D::WriteError>
     where
         D: PersistBackend<ChangeSet>,
     {
         self._get_address(KeychainKind::Internal, address_index)
-            .expect("persistence backend must not fail")
     }
 
     /// Return a derived address using the specified `keychain` (external/internal).

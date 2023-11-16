@@ -26,7 +26,7 @@ fn main() -> Result<(), anyhow::Error> {
         Network::Testnet,
     )?;
 
-    let address = wallet.get_address(AddressIndex::New);
+    let address = wallet.try_get_address(AddressIndex::New)?;
     println!("Generated Address: {}", address);
 
     let balance = wallet.get_balance();
