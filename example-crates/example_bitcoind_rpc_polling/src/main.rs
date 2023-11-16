@@ -131,7 +131,7 @@ fn main() -> anyhow::Result<()> {
         start.elapsed().as_secs_f32()
     );
 
-    let chain = Mutex::new(LocalChain::from_changeset(init_changeset.0));
+    let chain = Mutex::new(LocalChain::from_changeset(init_changeset.0)?);
     println!(
         "[{:>10}s] loaded local chain from changeset",
         start.elapsed().as_secs_f32()
@@ -170,10 +170,7 @@ fn main() -> anyhow::Result<()> {
 
             let chain_tip = chain.lock().unwrap().tip();
             let rpc_client = rpc_args.new_client()?;
-            let mut emitter = match chain_tip {
-                Some(cp) => Emitter::from_checkpoint(&rpc_client, cp),
-                None => Emitter::from_height(&rpc_client, fallback_height),
-            };
+            let mut emitter = Emitter::new(&rpc_client, chain_tip, fallback_height);
 
             let mut last_db_commit = Instant::now();
             let mut last_print = Instant::now();
@@ -205,23 +202,22 @@ fn main() -> anyhow::Result<()> {
                 // print synced-to height and current balance in intervals
                 if last_print.elapsed() >= STDOUT_PRINT_DELAY {
                     last_print = Instant::now();
-                    if let Some(synced_to) = chain.tip() {
-                        let balance = {
-                            graph.graph().balance(
-                                &*chain,
-                                synced_to.block_id(),
-                                graph.index.outpoints().iter().cloned(),
-                                |(k, _), _| k == &Keychain::Internal,
-                            )
-                        };
-                        println!(
-                            "[{:>10}s] synced to {} @ {} | total: {} sats",
-                            start.elapsed().as_secs_f32(),
-                            synced_to.hash(),
-                            synced_to.height(),
-                            balance.total()
-                        );
-                    }
+                    let synced_to = chain.tip();
+                    let balance = {
+                        graph.graph().balance(
+                            &*chain,
+                            synced_to.block_id(),
+                            graph.index.outpoints().iter().cloned(),
+                            |(k, _), _| k == &Keychain::Internal,
+                        )
+                    };
+                    println!(
+                        "[{:>10}s] synced to {} @ {} | total: {} sats",
+                        start.elapsed().as_secs_f32(),
+                        synced_to.hash(),
+                        synced_to.height(),
+                        balance.total()
+                    );
                 }
             }
 
@@ -253,10 +249,7 @@ fn main() -> anyhow::Result<()> {
             let (tx, rx) = std::sync::mpsc::sync_channel::<Emission>(CHANNEL_BOUND);
             let emission_jh = std::thread::spawn(move || -> anyhow::Result<()> {
                 let rpc_client = rpc_args.new_client()?;
-                let mut emitter = match last_cp {
-                    Some(cp) => Emitter::from_checkpoint(&rpc_client, cp),
-                    None => Emitter::from_height(&rpc_client, fallback_height),
-                };
+                let mut emitter = Emitter::new(&rpc_client, last_cp, fallback_height);
 
                 let mut block_count = rpc_client.get_block_count()? as u32;
                 tx.send(Emission::Tip(block_count))?;
@@ -335,24 +328,23 @@ fn main() -> anyhow::Result<()> {
 
                 if last_print.map_or(Duration::MAX, |i| i.elapsed()) >= STDOUT_PRINT_DELAY {
                     last_print = Some(Instant::now());
-                    if let Some(synced_to) = chain.tip() {
-                        let balance = {
-                            graph.graph().balance(
-                                &*chain,
-                                synced_to.block_id(),
-                                graph.index.outpoints().iter().cloned(),
-                                |(k, _), _| k == &Keychain::Internal,
-                            )
-                        };
-                        println!(
-                            "[{:>10}s] synced to {} @ {} / {} | total: {} sats",
-                            start.elapsed().as_secs_f32(),
-                            synced_to.hash(),
-                            synced_to.height(),
-                            tip_height,
-                            balance.total()
-                        );
-                    }
+                    let synced_to = chain.tip();
+                    let balance = {
+                        graph.graph().balance(
+                            &*chain,
+                            synced_to.block_id(),
+                            graph.index.outpoints().iter().cloned(),
+                            |(k, _), _| k == &Keychain::Internal,
+                        )
+                    };
+                    println!(
+                        "[{:>10}s] synced to {} @ {} / {} | total: {} sats",
+                        start.elapsed().as_secs_f32(),
+                        synced_to.hash(),
+                        synced_to.height(),
+                        tip_height,
+                        balance.total()
+                    );
                 }
             }
 

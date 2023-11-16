@@ -148,7 +148,7 @@ pub trait ElectrumExt {
     /// single batch request.
     fn scan<K: Ord + Clone>(
         &self,
-        prev_tip: Option<CheckPoint>,
+        prev_tip: CheckPoint,
         keychain_spks: BTreeMap<K, impl IntoIterator<Item = (u32, ScriptBuf)>>,
         txids: impl IntoIterator<Item = Txid>,
         outpoints: impl IntoIterator<Item = OutPoint>,
@@ -161,7 +161,7 @@ pub trait ElectrumExt {
     /// [`scan`]: ElectrumExt::scan
     fn scan_without_keychain(
         &self,
-        prev_tip: Option<CheckPoint>,
+        prev_tip: CheckPoint,
         misc_spks: impl IntoIterator<Item = ScriptBuf>,
         txids: impl IntoIterator<Item = Txid>,
         outpoints: impl IntoIterator<Item = OutPoint>,
@@ -188,7 +188,7 @@ pub trait ElectrumExt {
 impl ElectrumExt for Client {
     fn scan<K: Ord + Clone>(
         &self,
-        prev_tip: Option<CheckPoint>,
+        prev_tip: CheckPoint,
         keychain_spks: BTreeMap<K, impl IntoIterator<Item = (u32, ScriptBuf)>>,
         txids: impl IntoIterator<Item = Txid>,
         outpoints: impl IntoIterator<Item = OutPoint>,
@@ -289,17 +289,15 @@ impl ElectrumExt for Client {
 /// Return a [`CheckPoint`] of the latest tip, that connects with `prev_tip`.
 fn construct_update_tip(
     client: &Client,
-    prev_tip: Option<CheckPoint>,
+    prev_tip: CheckPoint,
 ) -> Result<(CheckPoint, Option<u32>), Error> {
     let HeaderNotification { height, .. } = client.block_headers_subscribe()?;
     let new_tip_height = height as u32;
 
     // If electrum returns a tip height that is lower than our previous tip, then checkpoints do
     // not need updating. We just return the previous tip and use that as the point of agreement.
-    if let Some(prev_tip) = prev_tip.as_ref() {
-        if new_tip_height < prev_tip.height() {
-            return Ok((prev_tip.clone(), Some(prev_tip.height())));
-        }
+    if new_tip_height < prev_tip.height() {
+        return Ok((prev_tip.clone(), Some(prev_tip.height())));
     }
 
     // Atomically fetch the latest `CHAIN_SUFFIX_LENGTH` count of blocks from Electrum. We use this
@@ -317,7 +315,7 @@ fn construct_update_tip(
     // Find the "point of agreement" (if any).
     let agreement_cp = {
         let mut agreement_cp = Option::<CheckPoint>::None;
-        for cp in prev_tip.iter().flat_map(CheckPoint::iter) {
+        for cp in prev_tip.iter() {
             let cp_block = cp.block_id();
             let hash = match new_blocks.get(&cp_block.height) {
                 Some(&hash) => hash,

@@ -511,11 +511,13 @@ fn test_calculate_fee_on_coinbase() {
 // where b0 and b1 spend a0, c0 and c1 spend b0, d0 spends c1, etc.
 #[test]
 fn test_walk_ancestors() {
-    let local_chain: LocalChain = (0..=20)
-        .map(|ht| (ht, BlockHash::hash(format!("Block Hash {}", ht).as_bytes())))
-        .collect::<BTreeMap<u32, BlockHash>>()
-        .into();
-    let tip = local_chain.tip().expect("must have tip");
+    let local_chain = LocalChain::from_blocks(
+        (0..=20)
+            .map(|ht| (ht, BlockHash::hash(format!("Block Hash {}", ht).as_bytes())))
+            .collect(),
+    )
+    .expect("must contain genesis hash");
+    let tip = local_chain.tip();
 
     let tx_a0 = Transaction {
         input: vec![TxIn {
@@ -839,11 +841,13 @@ fn test_descendants_no_repeat() {
 
 #[test]
 fn test_chain_spends() {
-    let local_chain: LocalChain = (0..=100)
-        .map(|ht| (ht, BlockHash::hash(format!("Block Hash {}", ht).as_bytes())))
-        .collect::<BTreeMap<u32, BlockHash>>()
-        .into();
-    let tip = local_chain.tip().expect("must have tip");
+    let local_chain = LocalChain::from_blocks(
+        (0..=100)
+            .map(|ht| (ht, BlockHash::hash(format!("Block Hash {}", ht).as_bytes())))
+            .collect(),
+    )
+    .expect("must have genesis hash");
+    let tip = local_chain.tip();
 
     // The parent tx contains 2 outputs. Which are spent by one confirmed and one unconfirmed tx.
     // The parent tx is confirmed at block 95.
@@ -906,18 +910,15 @@ fn test_chain_spends() {
     let _ = graph.insert_tx(tx_1.clone());
     let _ = graph.insert_tx(tx_2.clone());
 
-    [95, 98]
-        .iter()
-        .zip([&tx_0, &tx_1].into_iter())
-        .for_each(|(ht, tx)| {
-            let _ = graph.insert_anchor(
-                tx.txid(),
-                ConfirmationHeightAnchor {
-                    anchor_block: tip.block_id(),
-                    confirmation_height: *ht,
-                },
-            );
-        });
+    for (ht, tx) in [(95, &tx_0), (98, &tx_1)] {
+        let _ = graph.insert_anchor(
+            tx.txid(),
+            ConfirmationHeightAnchor {
+                anchor_block: tip.block_id(),
+                confirmation_height: ht,
+            },
+        );
+    }
 
     // Assert that confirmed spends are returned correctly.
     assert_eq!(
@@ -1078,7 +1079,7 @@ fn test_missing_blocks() {
                 g
             },
             chain: {
-                let mut c = LocalChain::default();
+                let (mut c, _) = LocalChain::from_genesis_hash(h!("genesis"));
                 for (height, hash) in chain {
                     let _ = c.insert_block(BlockId {
                         height: *height,

@@ -79,10 +79,10 @@ pub trait PersistBackend<C> {
     fn write_changes(&mut self, changeset: &C) -> Result<(), Self::WriteError>;
 
     /// Return the aggregate changeset `C` from persistence.
-    fn load_from_persistence(&mut self) -> Result<C, Self::LoadError>;
+    fn load_from_persistence(&mut self) -> Result<Option<C>, Self::LoadError>;
 }
 
-impl<C: Default> PersistBackend<C> for () {
+impl<C> PersistBackend<C> for () {
     type WriteError = Infallible;
 
     type LoadError = Infallible;
@@ -91,7 +91,7 @@ impl<C: Default> PersistBackend<C> for () {
         Ok(())
     }
 
-    fn load_from_persistence(&mut self) -> Result<C, Self::LoadError> {
-        Ok(C::default())
+    fn load_from_persistence(&mut self) -> Result<Option<C>, Self::LoadError> {
+        Ok(None)
     }
 }

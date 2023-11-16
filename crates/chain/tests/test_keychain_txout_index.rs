@@ -312,7 +312,7 @@ fn test_wildcard_derivations() {
     let _ = txout_index.reveal_to_target(&TestKeychain::External, 25);
 
     (0..=15)
-        .chain(vec![17, 20, 23].into_iter())
+        .chain([17, 20, 23])
         .for_each(|index| assert!(txout_index.mark_used(&TestKeychain::External, index)));
 
     assert_eq!(txout_index.next_index(&TestKeychain::External), (26, true));

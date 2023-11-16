@@ -112,7 +112,7 @@ fn main() -> anyhow::Result<()> {
         graph
     });
 
-    let chain = Mutex::new(LocalChain::from_changeset(disk_local_chain));
+    let chain = Mutex::new(LocalChain::from_changeset(disk_local_chain)?);
 
     let electrum_cmd = match &args.command {
         example_cli::Commands::ChainSpecific(electrum_cmd) => electrum_cmd,
@@ -193,7 +193,7 @@ fn main() -> anyhow::Result<()> {
             // Get a short lock on the tracker to get the spks we're interested in
             let graph = graph.lock().unwrap();
             let chain = chain.lock().unwrap();
-            let chain_tip = chain.tip().map(|cp| cp.block_id()).unwrap_or_default();
+            let chain_tip = chain.tip().block_id();
 
             if !(all_spks || unused_spks || utxos || unconfirmed) {
                 unused_spks = true;
