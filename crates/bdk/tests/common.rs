@@ -4,7 +4,7 @@ use bdk::{wallet::AddressIndex, KeychainKind, LocalOutput, Wallet};
 use bdk_chain::indexed_tx_graph::Indexer;
 use bdk_chain::{BlockId, ConfirmationTime};
 use bitcoin::hashes::Hash;
-use bitcoin::{Address, BlockHash, Network, OutPoint, Transaction, TxIn, TxOut, Txid};
+use bitcoin::{Address, BlockHash, FeeRate, Network, OutPoint, Transaction, TxIn, TxOut, Txid};
 use std::str::FromStr;
 
 // Return a fake wallet that appears to be funded for testing.
@@ -153,4 +153,17 @@ pub fn get_test_tr_with_taptree_xprv() -> &'static str {
 
 pub fn get_test_tr_dup_keys() -> &'static str {
     "tr(cNJmN3fH9DDbDt131fQNkVakkpzawJBSeybCUNmP1BovpmGQ45xG,{pk(8aee2b8120a5f157f1223f72b5e62b825831a27a9fdf427db7cc697494d4a642),pk(8aee2b8120a5f157f1223f72b5e62b825831a27a9fdf427db7cc697494d4a642)})"
+}
+
+/// Construct a new [`FeeRate`] from the given raw `sat_vb` feerate. This is
+/// useful in cases where we want to create a feerate from a `f64`, as the
+/// traditional [`FeeRate::from_sat_per_vb`] method will only accept an integer.
+///
+/// **Note** this 'quick and dirty' conversion should only be used when the input
+/// parameter has units of `satoshis/vbyte` **AND** is not expected to overflow,
+/// or else the resulting value will be inaccurate.
+fn feerate_unchecked(sat_vb: f64) -> FeeRate {
+    // 1 sat_vb / 4wu_vb * 1000kwu_wu = 250 sat_kwu
+    let sat_kwu = (sat_vb * 250.0).ceil() as u64;
+    FeeRate::from_sat_per_kwu(sat_kwu)
 }

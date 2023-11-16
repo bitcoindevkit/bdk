@@ -56,12 +56,6 @@ fn receive_output_in_latest_block(wallet: &mut Wallet, value: u64) -> OutPoint {
     receive_output(wallet, value, anchor)
 }
 
-fn feerate_unchecked(sat_vb: f64) -> FeeRate {
-    // 1 sat_vb / 4wu_vb * 1000kwu_wu = 250 sat_kwu
-    let sat_kwu = (sat_vb * 250.0).ceil() as u64;
-    FeeRate::from_sat_per_kwu(sat_kwu)
-}
-
 // The satisfaction size of a P2WPKH is 112 WU =
 // 1 (elements in witness) + 1 (OP_PUSH) + 33 (pk) + 1 (OP_PUSH) + 72 (signature + sighash) + 1*4 (script len)
 // On the witness itself, we have to push once for the pk (33WU) and once for signature + sighash (72WU), for
@@ -1581,8 +1575,9 @@ fn test_bump_fee_reduce_change() {
         .insert_tx(tx, ConfirmationTime::Unconfirmed { last_seen: 0 })
         .unwrap();
 
+    let feerate = FeeRate::from_sat_per_kwu(625); // 2.5 sat/vb
     let mut builder = wallet.build_fee_bump(txid).unwrap();
-    builder.fee_rate(feerate_unchecked(2.5)).enable_rbf();
+    builder.fee_rate(feerate).enable_rbf();
     let psbt = builder.finish().unwrap();
     let sent_received = wallet.sent_and_received(&psbt.clone().extract_tx());
     let fee = check_fee!(wallet, psbt);
@@ -1613,7 +1608,7 @@ fn test_bump_fee_reduce_change() {
         sent_received.1
     );
 
-    assert_fee_rate!(psbt, fee.unwrap_or(0), feerate_unchecked(2.5), @add_signature);
+    assert_fee_rate!(psbt, fee.unwrap_or(0), feerate, @add_signature);
 
     let mut builder = wallet.build_fee_bump(txid).unwrap();
     builder.fee_absolute(200);
@@ -1676,9 +1671,10 @@ fn test_bump_fee_reduce_single_recipient() {
         .insert_tx(tx, ConfirmationTime::Unconfirmed { last_seen: 0 })
         .unwrap();
 
+    let feerate = FeeRate::from_sat_per_kwu(625); // 2.5 sat/vb
     let mut builder = wallet.build_fee_bump(txid).unwrap();
     builder
-        .fee_rate(feerate_unchecked(2.5))
+        .fee_rate(feerate)
         .allow_shrinking(addr.script_pubkey())
         .unwrap();
     let psbt = builder.finish().unwrap();
@@ -1692,7 +1688,7 @@ fn test_bump_fee_reduce_single_recipient() {
     assert_eq!(tx.output.len(), 1);
     assert_eq!(tx.output[0].value + fee.unwrap_or(0), sent_received.0);
 
-    assert_fee_rate!(psbt, fee.unwrap_or(0), feerate_unchecked(2.5), @add_signature);
+    assert_fee_rate!(psbt, fee.unwrap_or(0), feerate, @add_signature);
 }
 
 #[test]
@@ -2311,7 +2307,7 @@ fn test_fee_amount_negative_drain_val() {
     let send_to = Address::from_str("tb1ql7w62elx9ucw4pj5lgw4l028hmuw80sndtntxt")
         .unwrap()
         .assume_checked();
-    let fee_rate = feerate_unchecked(2.01);
+    let fee_rate = FeeRate::from_sat_per_kwu(500);
     let incoming_op = receive_output_in_latest_block(&mut wallet, 8859);
 
     let mut builder = wallet.build_tx();
