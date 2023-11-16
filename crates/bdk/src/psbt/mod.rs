@@ -11,9 +11,10 @@
 
 //! Additional functions on the `rust-bitcoin` `PartiallySignedTransaction` structure.
 
-use crate::FeeRate;
 use alloc::vec::Vec;
 use bitcoin::psbt::PartiallySignedTransaction as Psbt;
+use bitcoin::Amount;
+use bitcoin::FeeRate;
 use bitcoin::TxOut;
 
 // TODO upstream the functions here to `rust-bitcoin`?
@@ -65,7 +66,7 @@ impl PsbtUtils for Psbt {
         let fee_amount = self.fee_amount();
         fee_amount.map(|fee| {
             let weight = self.clone().extract_tx().weight();
-            FeeRate::from_wu(fee, weight)
+            Amount::from_sat(fee) / weight
         })
     }
 }

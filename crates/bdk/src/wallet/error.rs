@@ -14,7 +14,7 @@
 use crate::descriptor::policy::PolicyError;
 use crate::descriptor::DescriptorError;
 use crate::wallet::coin_selection;
-use crate::{descriptor, FeeRate, KeychainKind};
+use crate::{descriptor, KeychainKind};
 use alloc::string::String;
 use bitcoin::{absolute, psbt, OutPoint, Sequence, Txid};
 use core::fmt;
@@ -83,8 +83,8 @@ pub enum CreateTxError<P> {
     },
     /// When bumping a tx the fee rate requested is lower than required
     FeeRateTooLow {
-        /// Required fee rate (satoshi/vbyte)
-        required: FeeRate,
+        /// Required fee rate
+        required: bitcoin::FeeRate,
     },
     /// `manually_selected_only` option is selected but no utxo has been passed
     NoUtxosSelected,
@@ -168,8 +168,8 @@ where
             CreateTxError::FeeRateTooLow { required } => {
                 write!(
                     f,
-                    "Fee rate too low: required {} sat/vbyte",
-                    required.as_sat_per_vb()
+                    "Fee rate too low: required {} sat/kwu",
+                    required.to_sat_per_kwu()
                 )
             }
             CreateTxError::NoUtxosSelected => {

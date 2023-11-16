@@ -1,7 +1,7 @@
 use bdk::bitcoin::TxIn;
 use bdk::wallet::AddressIndex;
 use bdk::wallet::AddressIndex::New;
-use bdk::{psbt, FeeRate, SignOptions};
+use bdk::{psbt, SignOptions};
 use bitcoin::psbt::PartiallySignedTransaction as Psbt;
 use core::str::FromStr;
 mod common;
@@ -9,6 +9,12 @@ use common::*;
 
 // from bip 174
 const PSBT_STR: &str = "cHNidP8BAKACAAAAAqsJSaCMWvfEm4IS9Bfi8Vqz9cM9zxU4IagTn4d6W3vkAAAAAAD+////qwlJoIxa98SbghL0F+LxWrP1wz3PFTghqBOfh3pbe+QBAAAAAP7///8CYDvqCwAAAAAZdqkUdopAu9dAy+gdmI5x3ipNXHE5ax2IrI4kAAAAAAAAGXapFG9GILVT+glechue4O/p+gOcykWXiKwAAAAAAAEHakcwRAIgR1lmF5fAGwNrJZKJSGhiGDR9iYZLcZ4ff89X0eURZYcCIFMJ6r9Wqk2Ikf/REf3xM286KdqGbX+EhtdVRs7tr5MZASEDXNxh/HupccC1AaZGoqg7ECy0OIEhfKaC3Ibi1z+ogpIAAQEgAOH1BQAAAAAXqRQ1RebjO4MsRwUPJNPuuTycA5SLx4cBBBYAFIXRNTfy4mVAWjTbr6nj3aAfuCMIAAAA";
+
+fn feerate_unchecked(sat_vb: f64) -> bitcoin::FeeRate {
+    // 1 sat_vb / 4wu_vb * 1000kwu_wu = 250 sat_kwu
+    let sat_kwu = (sat_vb * 250.0).ceil() as u64;
+    bitcoin::FeeRate::from_sat_per_kwu(sat_kwu)
+}
 
 #[test]
 #[should_panic(expected = "InputIndexOutOfRange")]
@@ -82,13 +88,13 @@ fn test_psbt_sign_with_finalized() {
 fn test_psbt_fee_rate_with_witness_utxo() {
     use psbt::PsbtUtils;
 
-    let expected_fee_rate = 1.2345;
+    let expected_fee_rate = feerate_unchecked(1.2345);
 
     let (mut wallet, _) = get_funded_wallet("wpkh(tprv8ZgxMBicQKsPd3EupYiPRhaMooHKUHJxNsTfYuScep13go8QFfHdtkG9nRkFGb7busX4isf6X9dURGCoKgitaApQ6MupRhZMcELAxTBRJgS/*)");
     let addr = wallet.get_address(New);
     let mut builder = wallet.build_tx();
     builder.drain_to(addr.script_pubkey()).drain_wallet();
-    builder.fee_rate(FeeRate::from_sat_per_vb(expected_fee_rate));
+    builder.fee_rate(expected_fee_rate);
     let mut psbt = builder.finish().unwrap();
     let fee_amount = psbt.fee_amount();
     assert!(fee_amount.is_some());
@@ -99,21 +105,21 @@ fn test_psbt_fee_rate_with_witness_utxo() {
     assert!(finalized);
 
     let finalized_fee_rate = psbt.fee_rate().unwrap();
-    assert!(finalized_fee_rate.as_sat_per_vb() >= expected_fee_rate);
-    assert!(finalized_fee_rate.as_sat_per_vb() < unfinalized_fee_rate.as_sat_per_vb());
+    assert!(finalized_fee_rate >= expected_fee_rate);
+    assert!(finalized_fee_rate < unfinalized_fee_rate);
 }
 
 #[test]
 fn test_psbt_fee_rate_with_nonwitness_utxo() {
     use psbt::PsbtUtils;
 
-    let expected_fee_rate = 1.2345;
+    let expected_fee_rate = feerate_unchecked(1.2345);
 
     let (mut wallet, _) = get_funded_wallet("pkh(tprv8ZgxMBicQKsPd3EupYiPRhaMooHKUHJxNsTfYuScep13go8QFfHdtkG9nRkFGb7busX4isf6X9dURGCoKgitaApQ6MupRhZMcELAxTBRJgS/*)");
     let addr = wallet.get_address(New);
     let mut builder = wallet.build_tx();
     builder.drain_to(addr.script_pubkey()).drain_wallet();
-    builder.fee_rate(FeeRate::from_sat_per_vb(expected_fee_rate));
+    builder.fee_rate(expected_fee_rate);
     let mut psbt = builder.finish().unwrap();
     let fee_amount = psbt.fee_amount();
     assert!(fee_amount.is_some());
@@ -123,21 +129,21 @@ fn test_psbt_fee_rate_with_nonwitness_utxo() {
     assert!(finalized);
 
     let finalized_fee_rate = psbt.fee_rate().unwrap();
-    assert!(finalized_fee_rate.as_sat_per_vb() >= expected_fee_rate);
-    assert!(finalized_fee_rate.as_sat_per_vb() < unfinalized_fee_rate.as_sat_per_vb());
+    assert!(finalized_fee_rate >= expected_fee_rate);
+    assert!(finalized_fee_rate < unfinalized_fee_rate);
 }
 
 #[test]
 fn test_psbt_fee_rate_with_missing_txout() {
     use psbt::PsbtUtils;
 
-    let expected_fee_rate = 1.2345;
+    let expected_fee_rate = feerate_unchecked(1.2345);
 
     let (mut wpkh_wallet,  _) = get_funded_wallet("wpkh(tprv8ZgxMBicQKsPd3EupYiPRhaMooHKUHJxNsTfYuScep13go8QFfHdtkG9nRkFGb7busX4isf6X9dURGCoKgitaApQ6MupRhZMcELAxTBRJgS/*)");
     let addr = wpkh_wallet.get_address(New);
     let mut builder = wpkh_wallet.build_tx();
     builder.drain_to(addr.script_pubkey()).drain_wallet();
-    builder.fee_rate(FeeRate::from_sat_per_vb(expected_fee_rate));
+    builder.fee_rate(expected_fee_rate);
     let mut wpkh_psbt = builder.finish().unwrap();
 
     wpkh_psbt.inputs[0].witness_utxo = None;
@@ -149,7 +155,7 @@ fn test_psbt_fee_rate_with_missing_txout() {
     let addr = pkh_wallet.get_address(New);
     let mut builder = pkh_wallet.build_tx();
     builder.drain_to(addr.script_pubkey()).drain_wallet();
-    builder.fee_rate(FeeRate::from_sat_per_vb(expected_fee_rate));
+    builder.fee_rate(expected_fee_rate);
     let mut pkh_psbt = builder.finish().unwrap();
 
     pkh_psbt.inputs[0].non_witness_utxo = None;
