@@ -13,7 +13,7 @@ use bdk::{
 use bdk_esplora::{esplora_client, EsploraExt};
 use bdk_file_store::Store;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<(), anyhow::Error> {
     let db_path = std::env::temp_dir().join("bdk-esplora-example");
     let db = Store::<bdk::wallet::ChangeSet>::open_or_create_new(DB_MAGIC.as_bytes(), db_path)?;
     let external_descriptor = "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/84'/1'/0'/0/*)";
@@ -26,7 +26,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Network::Testnet,
     )?;
 
-    let address = wallet.get_address(AddressIndex::New);
+    let address = wallet.try_get_address(AddressIndex::New)?;
     println!("Generated Address: {}", address);
 
     let balance = wallet.get_balance();

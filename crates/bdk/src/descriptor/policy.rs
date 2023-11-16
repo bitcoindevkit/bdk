@@ -33,13 +33,14 @@
 //! let signers = Arc::new(SignersContainer::build(key_map, &extended_desc, &secp));
 //! let policy = extended_desc.extract_policy(&signers, BuildSatisfaction::None, &secp)?;
 //! println!("policy: {}", serde_json::to_string(&policy).unwrap());
-//! # Ok::<(), bdk::Error>(())
+//! # Ok::<(), anyhow::Error>(())
 //! ```
 
 use crate::collections::{BTreeMap, HashSet, VecDeque};
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::cmp::max;
+
 use core::fmt;
 
 use serde::ser::SerializeMap;

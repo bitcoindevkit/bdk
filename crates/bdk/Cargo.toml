@@ -49,6 +49,7 @@ env_logger = "0.7"
 assert_matches = "1.5.0"
 tempfile = "3"
 bdk_file_store = { path = "../file_store" }
+anyhow = "1"
 
 [package.metadata.docs.rs]
 all-features = true

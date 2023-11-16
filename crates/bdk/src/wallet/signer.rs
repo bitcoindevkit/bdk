@@ -76,7 +76,7 @@
 //!     Arc::new(custom_signer)
 //! );
 //!
-//! # Ok::<_, bdk::Error>(())
+//! # Ok::<_, anyhow::Error>(())
 //! ```
 
 use crate::collections::BTreeMap;
@@ -103,6 +103,7 @@ use miniscript::{Legacy, Segwitv0, SigType, Tap, ToPublicKey};
 use super::utils::SecpCtx;
 use crate::descriptor::{DescriptorMeta, XKeyUtils};
 use crate::psbt::PsbtUtils;
+use crate::wallet::error::MiniscriptPsbtError;
 
 /// Identifier of a signer in the `SignersContainers`. Used as a key to find the right signer among
 /// multiple of them
@@ -159,6 +160,8 @@ pub enum SignerError {
     InvalidSighash,
     /// Error while computing the hash to sign
     SighashError(sighash::Error),
+    /// Miniscript PSBT error
+    MiniscriptPsbt(MiniscriptPsbtError),
     /// Error while signing using hardware wallets
     #[cfg(feature = "hardware-signer")]
     HWIError(hwi::error::Error),
@@ -192,6 +195,7 @@ impl fmt::Display for SignerError {
             Self::NonStandardSighash => write!(f, "The psbt contains a non standard sighash"),
             Self::InvalidSighash => write!(f, "Invalid SIGHASH for the signing context in use"),
             Self::SighashError(err) => write!(f, "Error while computing the hash to sign: {}", err),
+            Self::MiniscriptPsbt(err) => write!(f, "Miniscript PSBT error: {}", err),
             #[cfg(feature = "hardware-signer")]
             Self::HWIError(err) => write!(f, "Error while signing using hardware wallets: {}", err),
         }
