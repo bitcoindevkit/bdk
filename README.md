@@ -70,7 +70,7 @@ cargo update -p log --precise "0.4.18"
 # tempfile 3.7.0 has MSRV 1.63.0+
 cargo update -p tempfile --precise "3.6.0"
 # rustls 0.21.7 has MSRV 1.60.0+
-cargo update -p rustls:0.21.8 --precise "0.21.1"
+cargo update -p rustls:0.21.9 --precise "0.21.1"
 # rustls 0.20.9 has MSRV 1.60.0+
 cargo update -p rustls:0.20.9 --precise "0.20.8"
 # tokio 1.33 has MSRV 1.63.0+
