@@ -40,23 +40,21 @@
 //! # Ok::<(), anyhow::Error>(())
 //! ```
 
-use crate::collections::BTreeMap;
-use crate::collections::HashSet;
 use alloc::{boxed::Box, rc::Rc, string::String, vec::Vec};
-use bdk_chain::PersistBackend;
 use core::cell::RefCell;
 use core::fmt;
 use core::marker::PhantomData;
 
+use bdk_chain::PersistBackend;
 use bitcoin::psbt::{self, PartiallySignedTransaction as Psbt};
-use bitcoin::{absolute, script::PushBytes, OutPoint, ScriptBuf, Sequence, Transaction, Txid};
+use bitcoin::script::PushBytes;
+use bitcoin::{absolute, FeeRate, OutPoint, ScriptBuf, Sequence, Transaction, Txid};
 
 use super::coin_selection::{CoinSelectionAlgorithm, DefaultCoinSelectionAlgorithm};
-use super::ChangeSet;
-use crate::types::{KeychainKind, LocalOutput, WeightedUtxo};
-use crate::wallet::CreateTxError;
-use crate::{Utxo, Wallet};
-use bitcoin::FeeRate;
+use super::{ChangeSet, CreateTxError, Wallet};
+use crate::collections::{BTreeMap, HashSet};
+use crate::{KeychainKind, LocalOutput, Utxo, WeightedUtxo};
+
 /// Context in which the [`TxBuilder`] is valid
 pub trait TxBuilderContext: core::fmt::Debug + Default + Clone {}
 

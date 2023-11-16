@@ -162,7 +162,7 @@ pub fn get_test_tr_dup_keys() -> &'static str {
 /// **Note** this 'quick and dirty' conversion should only be used when the input
 /// parameter has units of `satoshis/vbyte` **AND** is not expected to overflow,
 /// or else the resulting value will be inaccurate.
-fn feerate_unchecked(sat_vb: f64) -> FeeRate {
+pub fn feerate_unchecked(sat_vb: f64) -> FeeRate {
     // 1 sat_vb / 4wu_vb * 1000kwu_wu = 250 sat_kwu
     let sat_kwu = (sat_vb * 250.0).ceil() as u64;
     FeeRate::from_sat_per_kwu(sat_kwu)

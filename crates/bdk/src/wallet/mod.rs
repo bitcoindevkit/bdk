@@ -33,8 +33,8 @@ use bdk_chain::{
 use bitcoin::secp256k1::{All, Secp256k1};
 use bitcoin::sighash::{EcdsaSighashType, TapSighashType};
 use bitcoin::{
-    absolute, Address, Block, FeeRate, Network, OutPoint, Script, ScriptBuf, Sequence, Transaction, TxOut,
-    Txid, Weight, Witness,
+    absolute, Address, Block, FeeRate, Network, OutPoint, Script, ScriptBuf, Sequence, Transaction,
+    TxOut, Txid, Weight, Witness,
 };
 use bitcoin::{consensus::encode::serialize, BlockHash};
 use bitcoin::{constants::genesis_block, psbt};

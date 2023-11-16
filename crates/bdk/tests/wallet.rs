@@ -13,16 +13,15 @@ use bdk::KeychainKind;
 use bdk_chain::COINBASE_MATURITY;
 use bdk_chain::{BlockId, ConfirmationTime};
 use bitcoin::hashes::Hash;
+use bitcoin::psbt;
+use bitcoin::script::PushBytesBuf;
 use bitcoin::sighash::{EcdsaSighashType, TapSighashType};
-use bitcoin::Amount;
-use bitcoin::FeeRate;
-use bitcoin::ScriptBuf;
+use bitcoin::taproot::TapNodeHash;
 use bitcoin::{
-    absolute, script::PushBytesBuf, taproot::TapNodeHash, Address, OutPoint, Sequence, Transaction,
-    TxIn, TxOut, Weight,
+    absolute, Address, Amount, BlockHash, FeeRate, Network, OutPoint, ScriptBuf, Sequence,
+    Transaction, TxIn, TxOut, Txid, Weight,
 };
-use bitcoin::{psbt, Network};
-use bitcoin::{BlockHash, Txid};
+
 mod common;
 use common::*;
 
