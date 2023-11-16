@@ -168,8 +168,10 @@ where
             CreateTxError::FeeRateTooLow { required } => {
                 write!(
                     f,
-                    "Fee rate too low: required {} sat/kwu",
-                    required.to_sat_per_kwu()
+                    // Note: alternate fmt as sat/vb (ceil) available in bitcoin-0.31
+                    //"Fee rate too low: required {required:#}"
+                    "Fee rate too low: required {} sat/vb",
+                    crate::floating_rate!(required)
                 )
             }
             CreateTxError::NoUtxosSelected => {

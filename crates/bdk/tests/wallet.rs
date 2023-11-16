@@ -1488,7 +1488,6 @@ fn test_bump_fee_confirmed_tx() {
 }
 
 #[test]
-#[should_panic(expected = "FeeRateTooLow")]
 fn test_bump_fee_low_fee_rate() {
     let (mut wallet, _) = get_funded_wallet(get_test_wpkh());
     let addr = wallet.get_address(New);
@@ -1497,6 +1496,7 @@ fn test_bump_fee_low_fee_rate() {
         .add_recipient(addr.script_pubkey(), 25_000)
         .enable_rbf();
     let psbt = builder.finish().unwrap();
+    let feerate = psbt.fee_rate().unwrap();
 
     let tx = psbt.extract_tx();
     let txid = tx.txid();
@@ -1506,8 +1506,18 @@ fn test_bump_fee_low_fee_rate() {
         .unwrap();
 
     let mut builder = wallet.build_fee_bump(txid).unwrap();
-    builder.fee_rate(FeeRate::from_sat_per_vb_unchecked(1));
-    builder.finish().unwrap();
+    builder.fee_rate(FeeRate::BROADCAST_MIN);
+    let res = builder.finish();
+    assert_matches!(
+        res,
+        Err(CreateTxError::FeeRateTooLow { .. }),
+        "expected FeeRateTooLow error"
+    );
+
+    let required = feerate.to_sat_per_kwu() + 250; // +1 sat/vb
+    let sat_vb = required as f64 / 250.0;
+    let expect = format!("Fee rate too low: required {} sat/vb", sat_vb);
+    assert_eq!(res.unwrap_err().to_string(), expect);
 }
 
 #[test]

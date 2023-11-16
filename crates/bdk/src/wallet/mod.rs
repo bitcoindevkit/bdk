@@ -2563,6 +2563,17 @@ fn create_signers<E: IntoWalletDescriptor>(
     Ok((signers, change_signers))
 }
 
+/// Transforms a [`FeeRate`] to `f64` with unit as sat/vb.
+#[macro_export]
+#[doc(hidden)]
+macro_rules! floating_rate {
+    ($rate:expr) => {{
+        use $crate::bitcoin::blockdata::constants::WITNESS_SCALE_FACTOR;
+        // sat_kwu / 250.0 -> sat_vb
+        $rate.to_sat_per_kwu() as f64 / ((1000 / WITNESS_SCALE_FACTOR) as f64)
+    }};
+}
+
 #[macro_export]
 #[doc(hidden)]
 /// Macro for getting a wallet for use in a doctest
