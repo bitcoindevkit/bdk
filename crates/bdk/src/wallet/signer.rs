@@ -754,7 +754,7 @@ pub struct SignOptions {
     /// Whether the signer should trust the `witness_utxo`, if the `non_witness_utxo` hasn't been
     /// provided
     ///
-    /// Defaults to `false` to mitigate the "SegWit bug" which chould trick the wallet into
+    /// Defaults to `false` to mitigate the "SegWit bug" which should trick the wallet into
     /// paying a fee larger than expected.
     ///
     /// Some wallets, especially if relatively old, might not provide the `non_witness_utxo` for

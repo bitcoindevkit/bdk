@@ -78,7 +78,7 @@ pub enum Commands<CS: clap::Subcommand, S: clap::Args> {
         #[clap(short, default_value = "bnb")]
         coin_select: CoinSelectionAlgo,
         #[clap(flatten)]
-        chain_specfic: S,
+        chain_specific: S,
     },
 }
 
@@ -585,7 +585,7 @@ where
             value,
             address,
             coin_select,
-            chain_specfic,
+            chain_specific,
         } => {
             let chain = &*chain.lock().unwrap();
             let address = address.require_network(network)?;
@@ -618,7 +618,7 @@ where
                 }
             };
 
-            match (broadcast)(chain_specfic, &transaction) {
+            match (broadcast)(chain_specific, &transaction) {
                 Ok(_) => {
                     println!("Broadcasted Tx : {}", transaction.txid());
 

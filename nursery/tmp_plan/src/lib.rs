@@ -315,7 +315,7 @@ where
         self.set_sequence.clone()
     }
 
-    /// The minmum required transaction version required on the transaction using the plan.
+    /// The minimum required transaction version required on the transaction using the plan.
     pub fn min_version(&self) -> Option<u32> {
         if let Some(_) = self.set_sequence {
             Some(2)

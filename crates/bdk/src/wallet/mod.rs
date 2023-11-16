@@ -1459,7 +1459,7 @@ impl<D> Wallet<D> {
                 };
 
                 // TODO: We should pay attention when adding a new output: this might increase
-                // the lenght of the "number of vouts" parameter by 2 bytes, potentially making
+                // the length of the "number of vouts" parameter by 2 bytes, potentially making
                 // our feerate too low
                 tx.output.push(drain_output);
             }

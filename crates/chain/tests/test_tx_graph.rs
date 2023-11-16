@@ -15,7 +15,7 @@ use std::vec;
 
 #[test]
 fn insert_txouts() {
-    // 2 (Outpoint, TxOut) tupples that denotes original data in the graph, as partial transactions.
+    // 2 (Outpoint, TxOut) tuples that denotes original data in the graph, as partial transactions.
     let original_ops = [
         (
             OutPoint::new(h!("tx1"), 1),
@@ -33,7 +33,7 @@ fn insert_txouts() {
         ),
     ];
 
-    // Another (OutPoint, TxOut) tupple to be used as update as partial transaction.
+    // Another (OutPoint, TxOut) tuple to be used as update as partial transaction.
     let update_ops = [(
         OutPoint::new(h!("tx2"), 0),
         TxOut {

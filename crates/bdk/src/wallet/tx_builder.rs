@@ -182,7 +182,7 @@ impl<'a, D, Cs: Clone, Ctx> Clone for TxBuilder<'a, D, Cs, Ctx> {
 impl<'a, D, Cs: CoinSelectionAlgorithm, Ctx: TxBuilderContext> TxBuilder<'a, D, Cs, Ctx> {
     /// Set a custom fee rate
     /// The fee_rate method sets the mining fee paid by the transaction as a rate on its size.
-    /// This means that the total fee paid is equal to this rate * size of the transaction in virtual Bytes (vB) or Weigth Unit (wu).
+    /// This means that the total fee paid is equal to this rate * size of the transaction in virtual Bytes (vB) or Weight Unit (wu).
     /// This rate is internally expressed in satoshis-per-virtual-bytes (sats/vB) using FeeRate::from_sat_per_vb, but can also be set by:
     /// * sats/kvB (1000 sats/kvB == 1 sats/vB) using FeeRate::from_sat_per_kvb
     /// * btc/kvB (0.00001000 btc/kvB == 1 sats/vB) using FeeRate::from_btc_per_kvb

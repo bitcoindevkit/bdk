@@ -517,7 +517,7 @@ final transaction is created by calling `finish` on the builder.
 - Default to SIGHASH_ALL if not specified
 - Replace ChangeSpendPolicy::filter_utxos with a predicate
 - Make 'unspendable' into a HashSet
-- Stop implicitly enforcing manaul selection by .add_utxo
+- Stop implicitly enforcing manual selection by .add_utxo
 - Rename DumbCS to LargestFirstCoinSelection
 - Rename must_use_utxos to required_utxos
 - Rename may_use_utxos to optional_uxtos

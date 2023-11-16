@@ -480,7 +480,7 @@ impl<A: Clone + Ord> TxGraph<A> {
 
     /// Inserts the given `seen_at` for `txid` into [`TxGraph`].
     ///
-    /// Note that [`TxGraph`] only keeps track of the lastest `seen_at`.
+    /// Note that [`TxGraph`] only keeps track of the latest `seen_at`.
     pub fn insert_seen_at(&mut self, txid: Txid, seen_at: u64) -> ChangeSet<A> {
         let mut update = Self::default();
         let (_, _, update_last_seen) = update.txs.entry(txid).or_default();

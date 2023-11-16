@@ -521,7 +521,7 @@ pub enum PolicyError {
 impl fmt::Display for PolicyError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::NotEnoughItemsSelected(err) => write!(f, "Not enought items selected: {}", err),
+            Self::NotEnoughItemsSelected(err) => write!(f, "Not enough items selected: {}", err),
             Self::IndexOutOfRange(index) => write!(f, "Index out of range: {}", index),
             Self::AddOnLeaf => write!(f, "Add on leaf"),
             Self::AddOnPartialComplete => write!(f, "Add on partial complete"),
