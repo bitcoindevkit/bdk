@@ -4,10 +4,12 @@ use assert_matches::assert_matches;
 use bdk::descriptor::calc_checksum;
 use bdk::psbt::PsbtUtils;
 use bdk::signer::{SignOptions, SignerError};
-use bdk::wallet::coin_selection::LargestFirstCoinSelection;
+use bdk::wallet::coin_selection::{self, LargestFirstCoinSelection};
+use bdk::wallet::error::CreateTxError;
+use bdk::wallet::tx_builder::AddForeignUtxoError;
 use bdk::wallet::AddressIndex::*;
 use bdk::wallet::{AddressIndex, AddressInfo, Balance, Wallet};
-use bdk::{Error, FeeRate, KeychainKind};
+use bdk::{FeeRate, KeychainKind};
 use bdk_chain::COINBASE_MATURITY;
 use bdk_chain::{BlockId, ConfirmationTime};
 use bitcoin::hashes::Hash;
@@ -309,7 +311,6 @@ fn test_create_tx_manually_selected_empty_utxos() {
 }
 
 #[test]
-#[should_panic(expected = "Invalid version `0`")]
 fn test_create_tx_version_0() {
     let (mut wallet, _) = get_funded_wallet(get_test_wpkh());
     let addr = wallet.get_address(New);
@@ -317,13 +318,10 @@ fn test_create_tx_version_0() {
     builder
         .add_recipient(addr.script_pubkey(), 25_000)
         .version(0);
-    builder.finish().unwrap();
+    assert!(matches!(builder.finish(), Err(CreateTxError::Version0)));
 }
 
 #[test]
-#[should_panic(
-    expected = "TxBuilder requested version `1`, but at least `2` is needed to use OP_CSV"
-)]
 fn test_create_tx_version_1_csv() {
     let (mut wallet, _) = get_funded_wallet(get_test_single_sig_csv());
     let addr = wallet.get_address(New);
@@ -331,7 +329,7 @@ fn test_create_tx_version_1_csv() {
     builder
         .add_recipient(addr.script_pubkey(), 25_000)
         .version(1);
-    builder.finish().unwrap();
+    assert!(matches!(builder.finish(), Err(CreateTxError::Version1Csv)));
 }
 
 #[test]
@@ -419,9 +417,6 @@ fn test_create_tx_custom_locktime_compatible_with_cltv() {
 }
 
 #[test]
-#[should_panic(
-    expected = "TxBuilder requested timelock of `Blocks(Height(50000))`, but at least `Blocks(Height(100000))` is required to spend from this script"
-)]
 fn test_create_tx_custom_locktime_incompatible_with_cltv() {
     let (mut wallet, _) = get_funded_wallet(get_test_single_sig_cltv());
     let addr = wallet.get_address(New);
@@ -429,7 +424,9 @@ fn test_create_tx_custom_locktime_incompatible_with_cltv() {
     builder
         .add_recipient(addr.script_pubkey(), 25_000)
         .nlocktime(absolute::LockTime::from_height(50000).unwrap());
-    builder.finish().unwrap();
+    assert!(matches!(builder.finish(),
+        Err(CreateTxError::LockTime { requested, required })
+        if requested.to_consensus_u32() == 50_000 && required.to_consensus_u32() == 100_000));
 }
 
 #[test]
@@ -458,9 +455,6 @@ fn test_create_tx_with_default_rbf_csv() {
 }
 
 #[test]
-#[should_panic(
-    expected = "Cannot enable RBF with nSequence `Sequence(3)` given a required OP_CSV of `Sequence(6)`"
-)]
 fn test_create_tx_with_custom_rbf_csv() {
     let (mut wallet, _) = get_funded_wallet(get_test_single_sig_csv());
     let addr = wallet.get_address(New);
@@ -468,7 +462,9 @@ fn test_create_tx_with_custom_rbf_csv() {
     builder
         .add_recipient(addr.script_pubkey(), 25_000)
         .enable_rbf_with_sequence(Sequence(3));
-    builder.finish().unwrap();
+    assert!(matches!(builder.finish(),
+        Err(CreateTxError::RbfSequenceCsv { rbf, csv })
+        if rbf.to_consensus_u32() == 3 && csv.to_consensus_u32() == 6));
 }
 
 #[test]
@@ -483,7 +479,6 @@ fn test_create_tx_no_rbf_cltv() {
 }
 
 #[test]
-#[should_panic(expected = "Cannot enable RBF with a nSequence >= 0xFFFFFFFE")]
 fn test_create_tx_invalid_rbf_sequence() {
     let (mut wallet, _) = get_funded_wallet(get_test_wpkh());
     let addr = wallet.get_address(New);
@@ -491,7 +486,7 @@ fn test_create_tx_invalid_rbf_sequence() {
     builder
         .add_recipient(addr.script_pubkey(), 25_000)
         .enable_rbf_with_sequence(Sequence(0xFFFFFFFE));
-    builder.finish().unwrap();
+    assert!(matches!(builder.finish(), Err(CreateTxError::RbfSequence)));
 }
 
 #[test]
@@ -519,9 +514,6 @@ fn test_create_tx_default_sequence() {
 }
 
 #[test]
-#[should_panic(
-    expected = "The `change_policy` can be set only if the wallet has a change_descriptor"
-)]
 fn test_create_tx_change_policy_no_internal() {
     let (mut wallet, _) = get_funded_wallet(get_test_wpkh());
     let addr = wallet.get_address(New);
@@ -529,7 +521,10 @@ fn test_create_tx_change_policy_no_internal() {
     builder
         .add_recipient(addr.script_pubkey(), 25_000)
         .do_not_spend_change();
-    builder.finish().unwrap();
+    assert!(matches!(
+        builder.finish(),
+        Err(CreateTxError::ChangePolicyDescriptor)
+    ));
 }
 
 macro_rules! check_fee {
@@ -1236,7 +1231,6 @@ fn test_calculate_fee_with_missing_foreign_utxo() {
 }
 
 #[test]
-#[should_panic(expected = "Generic(\"Foreign utxo missing witness_utxo or non_witness_utxo\")")]
 fn test_add_foreign_utxo_invalid_psbt_input() {
     let (mut wallet, _) = get_funded_wallet(get_test_wpkh());
     let outpoint = wallet.list_unspent().next().expect("must exist").outpoint;
@@ -1247,9 +1241,9 @@ fn test_add_foreign_utxo_invalid_psbt_input() {
         .unwrap();
 
     let mut builder = wallet.build_tx();
-    builder
-        .add_foreign_utxo(outpoint, psbt::Input::default(), foreign_utxo_satisfaction)
-        .unwrap();
+    let result =
+        builder.add_foreign_utxo(outpoint, psbt::Input::default(), foreign_utxo_satisfaction);
+    assert!(matches!(result, Err(AddForeignUtxoError::MissingUtxo)));
 }
 
 #[test]
@@ -2531,7 +2525,7 @@ fn test_sign_nonstandard_sighash() {
     );
     assert_matches!(
         result,
-        Err(bdk::Error::Signer(SignerError::NonStandardSighash)),
+        Err(SignerError::NonStandardSighash),
         "Signing failed with the wrong error type"
     );
 
@@ -2948,7 +2942,7 @@ fn test_taproot_sign_missing_witness_utxo() {
     );
     assert_matches!(
         result,
-        Err(Error::Signer(SignerError::MissingWitnessUtxo)),
+        Err(SignerError::MissingWitnessUtxo),
         "Signing should have failed with the correct error because the witness_utxo is missing"
     );
 
@@ -3289,7 +3283,7 @@ fn test_taproot_sign_non_default_sighash() {
     );
     assert_matches!(
         result,
-        Err(Error::Signer(SignerError::NonStandardSighash)),
+        Err(SignerError::NonStandardSighash),
         "Signing failed with the wrong error type"
     );
 
@@ -3307,7 +3301,7 @@ fn test_taproot_sign_non_default_sighash() {
     );
     assert_matches!(
         result,
-        Err(Error::Signer(SignerError::MissingWitnessUtxo)),
+        Err(SignerError::MissingWitnessUtxo),
         "Signing failed with the wrong error type"
     );
 
@@ -3395,10 +3389,12 @@ fn test_spend_coinbase() {
         .current_height(confirmation_height);
     assert!(matches!(
         builder.finish(),
-        Err(Error::InsufficientFunds {
-            needed: _,
-            available: 0
-        })
+        Err(CreateTxError::CoinSelection(
+            coin_selection::Error::InsufficientFunds {
+                needed: _,
+                available: 0
+            }
+        ))
     ));
 
     // Still unspendable...
@@ -3408,10 +3404,12 @@ fn test_spend_coinbase() {
         .current_height(not_yet_mature_time);
     assert_matches!(
         builder.finish(),
-        Err(Error::InsufficientFunds {
-            needed: _,
-            available: 0
-        })
+        Err(CreateTxError::CoinSelection(
+            coin_selection::Error::InsufficientFunds {
+                needed: _,
+                available: 0
+            }
+        ))
     );
 
     wallet
@@ -3447,7 +3445,10 @@ fn test_allow_dust_limit() {
 
     builder.add_recipient(addr.script_pubkey(), 0);
 
-    assert_matches!(builder.finish(), Err(Error::OutputBelowDustLimit(0)));
+    assert_matches!(
+        builder.finish(),
+        Err(CreateTxError::OutputBelowDustLimit(0))
+    );
 
     let mut builder = wallet.build_tx();
 

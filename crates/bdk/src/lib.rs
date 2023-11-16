@@ -27,9 +27,6 @@ extern crate serde_json;
 #[cfg(feature = "keys-bip39")]
 extern crate bip39;
 
-#[allow(unused_imports)]
-#[macro_use]
-pub(crate) mod error;
 pub mod descriptor;
 pub mod keys;
 pub mod psbt;
@@ -38,7 +35,6 @@ pub mod wallet;
 
 pub use descriptor::template;
 pub use descriptor::HdKeyPaths;
-pub use error::Error;
 pub use types::*;
 pub use wallet::signer;
 pub use wallet::signer::SignOptions;

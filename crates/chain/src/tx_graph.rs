@@ -57,6 +57,7 @@ use crate::{
 use alloc::collections::vec_deque::VecDeque;
 use alloc::vec::Vec;
 use bitcoin::{OutPoint, Script, Transaction, TxOut, Txid};
+use core::fmt::{self, Formatter};
 use core::{
     convert::Infallible,
     ops::{Deref, RangeInclusive},
@@ -144,6 +145,26 @@ pub enum CalculateFeeError {
     /// When the transaction is invalid according to the graph it has a negative fee
     NegativeFee(i64),
 }
+
+impl fmt::Display for CalculateFeeError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            CalculateFeeError::MissingTxOut(outpoints) => write!(
+                f,
+                "missing `TxOut` for one or more of the inputs of the tx: {:?}",
+                outpoints
+            ),
+            CalculateFeeError::NegativeFee(fee) => write!(
+                f,
+                "transaction is invalid according to the graph and has negative fee: {}",
+                fee
+            ),
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for CalculateFeeError {}
 
 impl<A> TxGraph<A> {
     /// Iterate over all tx outputs known by [`TxGraph`].

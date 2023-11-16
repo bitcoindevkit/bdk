@@ -26,9 +26,12 @@
 //! ```
 //! # use std::str::FromStr;
 //! # use bitcoin::*;
-//! # use bdk::wallet::{self, coin_selection::*};
+//! # use bdk::wallet::{self, ChangeSet, coin_selection::*, coin_selection};
+//! # use bdk::wallet::error::CreateTxError;
+//! # use bdk_chain::PersistBackend;
 //! # use bdk::*;
 //! # use bdk::wallet::coin_selection::decide_change;
+//! # use anyhow::Error;
 //! # const TXIN_BASE_WEIGHT: usize = (32 + 4 + 4) * 4;
 //! #[derive(Debug)]
 //! struct AlwaysSpendEverything;
@@ -41,7 +44,7 @@
 //!         fee_rate: bdk::FeeRate,
 //!         target_amount: u64,
 //!         drain_script: &Script,
-//!     ) -> Result<CoinSelectionResult, bdk::Error> {
+//!     ) -> Result<CoinSelectionResult, coin_selection::Error> {
 //!         let mut selected_amount = 0;
 //!         let mut additional_weight = Weight::ZERO;
 //!         let all_utxos_selected = required_utxos
@@ -61,7 +64,7 @@
 //!         let additional_fees = fee_rate.fee_wu(additional_weight);
 //!         let amount_needed_with_fees = additional_fees + target_amount;
 //!         if selected_amount < amount_needed_with_fees {
-//!             return Err(bdk::Error::InsufficientFunds {
+//!             return Err(coin_selection::Error::InsufficientFunds {
 //!                 needed: amount_needed_with_fees,
 //!                 available: selected_amount,
 //!             });
@@ -94,19 +97,20 @@
 //!
 //! // inspect, sign, broadcast, ...
 //!
-//! # Ok::<(), bdk::Error>(())
+//! # Ok::<(), anyhow::Error>(())
 //! ```
 
 use crate::types::FeeRate;
 use crate::wallet::utils::IsDust;
+use crate::Utxo;
 use crate::WeightedUtxo;
-use crate::{error::Error, Utxo};
 
 use alloc::vec::Vec;
 use bitcoin::consensus::encode::serialize;
 use bitcoin::{Script, Weight};
 
 use core::convert::TryInto;
+use core::fmt::{self, Formatter};
 use rand::seq::SliceRandom;
 
 /// Default coin selection algorithm used by [`TxBuilder`](super::tx_builder::TxBuilder) if not
@@ -116,6 +120,43 @@ pub type DefaultCoinSelectionAlgorithm = BranchAndBoundCoinSelection;
 // Base weight of a Txin, not counting the weight needed for satisfying it.
 // prev_txid (32 bytes) + prev_vout (4 bytes) + sequence (4 bytes)
 pub(crate) const TXIN_BASE_WEIGHT: usize = (32 + 4 + 4) * 4;
+
+/// Errors that can be thrown by the [`coin_selection`](crate::wallet::coin_selection) module
+#[derive(Debug)]
+pub enum Error {
+    /// Wallet's UTXO set is not enough to cover recipient's requested plus fee
+    InsufficientFunds {
+        /// Sats needed for some transaction
+        needed: u64,
+        /// Sats available for spending
+        available: u64,
+    },
+    /// Branch and bound coin selection tries to avoid needing a change by finding the right inputs for
+    /// the desired outputs plus fee, if there is not such combination this error is thrown
+    BnBNoExactMatch,
+    /// Branch and bound coin selection possible attempts with sufficiently big UTXO set could grow
+    /// exponentially, thus a limit is set, and when hit, this error is thrown
+    BnBTotalTriesExceeded,
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InsufficientFunds { needed, available } => write!(
+                f,
+                "Insufficient funds: {} sat available of {} sat needed",
+                available, needed
+            ),
+            Self::BnBTotalTriesExceeded => {
+                write!(f, "Branch and bound coin selection: total tries exceeded")
+            }
+            Self::BnBNoExactMatch => write!(f, "Branch and bound coin selection: not exact match"),
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for Error {}
 
 #[derive(Debug)]
 /// Remaining amount after performing coin selection

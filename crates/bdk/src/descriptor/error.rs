@@ -10,7 +10,6 @@
 // licenses.
 
 //! Descriptor errors
-
 use core::fmt;
 
 /// Errors related to the parsing and usage of descriptors
@@ -87,9 +86,38 @@ impl fmt::Display for Error {
 #[cfg(feature = "std")]
 impl std::error::Error for Error {}
 
-impl_error!(bitcoin::bip32::Error, Bip32);
-impl_error!(bitcoin::base58::Error, Base58);
-impl_error!(bitcoin::key::Error, Pk);
-impl_error!(miniscript::Error, Miniscript);
-impl_error!(bitcoin::hashes::hex::Error, Hex);
-impl_error!(crate::descriptor::policy::PolicyError, Policy);
+impl From<bitcoin::bip32::Error> for Error {
+    fn from(err: bitcoin::bip32::Error) -> Self {
+        Error::Bip32(err)
+    }
+}
+
+impl From<bitcoin::base58::Error> for Error {
+    fn from(err: bitcoin::base58::Error) -> Self {
+        Error::Base58(err)
+    }
+}
+
+impl From<bitcoin::key::Error> for Error {
+    fn from(err: bitcoin::key::Error) -> Self {
+        Error::Pk(err)
+    }
+}
+
+impl From<miniscript::Error> for Error {
+    fn from(err: miniscript::Error) -> Self {
+        Error::Miniscript(err)
+    }
+}
+
+impl From<bitcoin::hashes::hex::Error> for Error {
+    fn from(err: bitcoin::hashes::hex::Error) -> Self {
+        Error::Hex(err)
+    }
+}
+
+impl From<crate::descriptor::policy::PolicyError> for Error {
+    fn from(err: crate::descriptor::policy::PolicyError) -> Self {
+        Error::Policy(err)
+    }
+}

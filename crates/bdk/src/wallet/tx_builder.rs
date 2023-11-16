@@ -17,7 +17,11 @@
 //! # use std::str::FromStr;
 //! # use bitcoin::*;
 //! # use bdk::*;
+//! # use bdk::wallet::ChangeSet;
+//! # use bdk::wallet::error::CreateTxError;
 //! # use bdk::wallet::tx_builder::CreateTx;
+//! # use bdk_chain::PersistBackend;
+//! # use anyhow::Error;
 //! # let to_address = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap().assume_checked();
 //! # let mut wallet = doctest_wallet!();
 //! // create a TxBuilder from a wallet
@@ -33,7 +37,7 @@
 //!     // Turn on RBF signaling
 //!     .enable_rbf();
 //! let psbt = tx_builder.finish()?;
-//! # Ok::<(), bdk::Error>(())
+//! # Ok::<(), anyhow::Error>(())
 //! ```
 
 use crate::collections::BTreeMap;
@@ -41,15 +45,18 @@ use crate::collections::HashSet;
 use alloc::{boxed::Box, rc::Rc, string::String, vec::Vec};
 use bdk_chain::PersistBackend;
 use core::cell::RefCell;
+use core::fmt;
 use core::marker::PhantomData;
 
 use bitcoin::psbt::{self, PartiallySignedTransaction as Psbt};
-use bitcoin::{absolute, script::PushBytes, OutPoint, ScriptBuf, Sequence, Transaction};
+use bitcoin::{absolute, script::PushBytes, OutPoint, ScriptBuf, Sequence, Transaction, Txid};
 
 use super::coin_selection::{CoinSelectionAlgorithm, DefaultCoinSelectionAlgorithm};
 use super::ChangeSet;
 use crate::types::{FeeRate, KeychainKind, LocalUtxo, WeightedUtxo};
-use crate::{Error, Utxo, Wallet};
+use crate::wallet::CreateTxError;
+use crate::{Utxo, Wallet};
+
 /// Context in which the [`TxBuilder`] is valid
 pub trait TxBuilderContext: core::fmt::Debug + Default + Clone {}
 
@@ -78,6 +85,10 @@ impl TxBuilderContext for BumpFee {}
 /// # use bdk::wallet::tx_builder::*;
 /// # use bitcoin::*;
 /// # use core::str::FromStr;
+/// # use bdk::wallet::ChangeSet;
+/// # use bdk::wallet::error::CreateTxError;
+/// # use bdk_chain::PersistBackend;
+/// # use anyhow::Error;
 /// # let mut wallet = doctest_wallet!();
 /// # let addr1 = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap().assume_checked();
 /// # let addr2 = addr1.clone();
@@ -102,7 +113,7 @@ impl TxBuilderContext for BumpFee {}
 /// };
 ///
 /// assert_eq!(psbt1.unsigned_tx.output[..2], psbt2.unsigned_tx.output[..2]);
-/// # Ok::<(), bdk::Error>(())
+/// # Ok::<(), anyhow::Error>(())
 /// ```
 ///
 /// At the moment [`coin_selection`] is an exception to the rule as it consumes `self`.
@@ -263,7 +274,7 @@ impl<'a, D, Cs: CoinSelectionAlgorithm, Ctx: TxBuilderContext> TxBuilder<'a, D, 
     ///     .add_recipient(to_address.script_pubkey(), 50_000)
     ///     .policy_path(path, KeychainKind::External);
     ///
-    /// # Ok::<(), bdk::Error>(())
+    /// # Ok::<(), anyhow::Error>(())
     /// ```
     pub fn policy_path(
         &mut self,
@@ -285,12 +296,16 @@ impl<'a, D, Cs: CoinSelectionAlgorithm, Ctx: TxBuilderContext> TxBuilder<'a, D, 
     ///
     /// These have priority over the "unspendable" utxos, meaning that if a utxo is present both in
     /// the "utxos" and the "unspendable" list, it will be spent.
-    pub fn add_utxos(&mut self, outpoints: &[OutPoint]) -> Result<&mut Self, Error> {
+    pub fn add_utxos(&mut self, outpoints: &[OutPoint]) -> Result<&mut Self, AddUtxoError> {
         {
             let wallet = self.wallet.borrow();
             let utxos = outpoints
                 .iter()
-                .map(|outpoint| wallet.get_utxo(*outpoint).ok_or(Error::UnknownUtxo))
+                .map(|outpoint| {
+                    wallet
+                        .get_utxo(*outpoint)
+                        .ok_or(AddUtxoError::UnknownUtxo(*outpoint))
+                })
                 .collect::<Result<Vec<_>, _>>()?;
 
             for utxo in utxos {
@@ -311,7 +326,7 @@ impl<'a, D, Cs: CoinSelectionAlgorithm, Ctx: TxBuilderContext> TxBuilder<'a, D, 
     ///
     /// These have priority over the "unspendable" utxos, meaning that if a utxo is present both in
     /// the "utxos" and the "unspendable" list, it will be spent.
-    pub fn add_utxo(&mut self, outpoint: OutPoint) -> Result<&mut Self, Error> {
+    pub fn add_utxo(&mut self, outpoint: OutPoint) -> Result<&mut Self, AddUtxoError> {
         self.add_utxos(&[outpoint])
     }
 
@@ -366,23 +381,22 @@ impl<'a, D, Cs: CoinSelectionAlgorithm, Ctx: TxBuilderContext> TxBuilder<'a, D, 
         outpoint: OutPoint,
         psbt_input: psbt::Input,
         satisfaction_weight: usize,
-    ) -> Result<&mut Self, Error> {
+    ) -> Result<&mut Self, AddForeignUtxoError> {
         if psbt_input.witness_utxo.is_none() {
             match psbt_input.non_witness_utxo.as_ref() {
                 Some(tx) => {
                     if tx.txid() != outpoint.txid {
-                        return Err(Error::Generic(
-                            "Foreign utxo outpoint does not match PSBT input".into(),
-                        ));
+                        return Err(AddForeignUtxoError::InvalidTxid {
+                            input_txid: tx.txid(),
+                            foreign_utxo: outpoint,
+                        });
                     }
                     if tx.output.len() <= outpoint.vout as usize {
-                        return Err(Error::InvalidOutpoint(outpoint));
+                        return Err(AddForeignUtxoError::InvalidOutpoint(outpoint));
                     }
                 }
                 None => {
-                    return Err(Error::Generic(
-                        "Foreign utxo missing witness_utxo or non_witness_utxo".into(),
-                    ))
+                    return Err(AddForeignUtxoError::MissingUtxo);
                 }
             }
         }
@@ -520,7 +534,7 @@ impl<'a, D, Cs: CoinSelectionAlgorithm, Ctx: TxBuilderContext> TxBuilder<'a, D, 
 
     /// Choose the coin selection algorithm
     ///
-    /// Overrides the [`DefaultCoinSelectionAlgorithm`](super::coin_selection::DefaultCoinSelectionAlgorithm).
+    /// Overrides the [`DefaultCoinSelectionAlgorithm`].
     ///
     /// Note that this function consumes the builder and returns it so it is usually best to put this as the first call on the builder.
     pub fn coin_selection<P: CoinSelectionAlgorithm>(
@@ -537,10 +551,10 @@ impl<'a, D, Cs: CoinSelectionAlgorithm, Ctx: TxBuilderContext> TxBuilder<'a, D, 
 
     /// Finish building the transaction.
     ///
-    /// Returns the [`BIP174`] "PSBT" and summary details about the transaction.
+    /// Returns a new [`Psbt`] per [`BIP174`].
     ///
     /// [`BIP174`]: https://github.com/bitcoin/bips/blob/master/bip-0174.mediawiki
-    pub fn finish(self) -> Result<Psbt, Error>
+    pub fn finish(self) -> Result<Psbt, CreateTxError<D::WriteError>>
     where
         D: PersistBackend<ChangeSet>,
     {
@@ -595,6 +609,90 @@ impl<'a, D, Cs: CoinSelectionAlgorithm, Ctx: TxBuilderContext> TxBuilder<'a, D, 
     }
 }
 
+#[derive(Debug)]
+/// Error returned from [`TxBuilder::add_utxo`] and [`TxBuilder::add_utxos`]
+pub enum AddUtxoError {
+    /// Happens when trying to spend an UTXO that is not in the internal database
+    UnknownUtxo(OutPoint),
+}
+
+impl fmt::Display for AddUtxoError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UnknownUtxo(outpoint) => write!(
+                f,
+                "UTXO not found in the internal database for txid: {} with vout: {}",
+                outpoint.txid, outpoint.vout
+            ),
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for AddUtxoError {}
+
+#[derive(Debug)]
+/// Error returned from [`TxBuilder::add_foreign_utxo`].
+pub enum AddForeignUtxoError {
+    /// Foreign utxo outpoint txid does not match PSBT input txid
+    InvalidTxid {
+        /// PSBT input txid
+        input_txid: Txid,
+        /// Foreign UTXO outpoint
+        foreign_utxo: OutPoint,
+    },
+    /// Requested outpoint doesn't exist in the tx (vout greater than available outputs)
+    InvalidOutpoint(OutPoint),
+    /// Foreign utxo missing witness_utxo or non_witness_utxo
+    MissingUtxo,
+}
+
+impl fmt::Display for AddForeignUtxoError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidTxid {
+                input_txid,
+                foreign_utxo,
+            } => write!(
+                f,
+                "Foreign UTXO outpoint txid: {} does not match PSBT input txid: {}",
+                foreign_utxo.txid, input_txid,
+            ),
+            Self::InvalidOutpoint(outpoint) => write!(
+                f,
+                "Requested outpoint doesn't exist for txid: {} with vout: {}",
+                outpoint.txid, outpoint.vout,
+            ),
+            Self::MissingUtxo => write!(f, "Foreign utxo missing witness_utxo or non_witness_utxo"),
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for AddForeignUtxoError {}
+
+#[derive(Debug)]
+/// Error returned from [`TxBuilder::allow_shrinking`]
+pub enum AllowShrinkingError {
+    /// Script/PubKey was not in the original transaction
+    MissingScriptPubKey(ScriptBuf),
+}
+
+impl fmt::Display for AllowShrinkingError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::MissingScriptPubKey(script_buf) => write!(
+                f,
+                "Script/PubKey was not in the original transaction: {}",
+                script_buf,
+            ),
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for AllowShrinkingError {}
+
 impl<'a, D, Cs: CoinSelectionAlgorithm> TxBuilder<'a, D, Cs, CreateTx> {
     /// Replace the recipients already added with a new list
     pub fn set_recipients(&mut self, recipients: Vec<(ScriptBuf, u64)>) -> &mut Self {
@@ -639,7 +737,11 @@ impl<'a, D, Cs: CoinSelectionAlgorithm> TxBuilder<'a, D, Cs, CreateTx> {
     /// # use std::str::FromStr;
     /// # use bitcoin::*;
     /// # use bdk::*;
+    /// # use bdk::wallet::ChangeSet;
+    /// # use bdk::wallet::error::CreateTxError;
     /// # use bdk::wallet::tx_builder::CreateTx;
+    /// # use bdk_chain::PersistBackend;
+    /// # use anyhow::Error;
     /// # let to_address =
     /// Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt")
     ///     .unwrap()
@@ -655,7 +757,7 @@ impl<'a, D, Cs: CoinSelectionAlgorithm> TxBuilder<'a, D, Cs, CreateTx> {
     ///     .fee_rate(bdk::FeeRate::from_sat_per_vb(5.0))
     ///     .enable_rbf();
     /// let psbt = tx_builder.finish()?;
-    /// # Ok::<(), bdk::Error>(())
+    /// # Ok::<(), anyhow::Error>(())
     /// ```
     ///
     /// [`allow_shrinking`]: Self::allow_shrinking
@@ -680,7 +782,10 @@ impl<'a, D> TxBuilder<'a, D, DefaultCoinSelectionAlgorithm, BumpFee> {
     ///
     /// Returns an `Err` if `script_pubkey` can't be found among the recipients of the
     /// transaction we are bumping.
-    pub fn allow_shrinking(&mut self, script_pubkey: ScriptBuf) -> Result<&mut Self, Error> {
+    pub fn allow_shrinking(
+        &mut self,
+        script_pubkey: ScriptBuf,
+    ) -> Result<&mut Self, AllowShrinkingError> {
         match self
             .params
             .recipients
@@ -692,10 +797,7 @@ impl<'a, D> TxBuilder<'a, D, DefaultCoinSelectionAlgorithm, BumpFee> {
                 self.params.drain_to = Some(script_pubkey);
                 Ok(self)
             }
-            None => Err(Error::Generic(format!(
-                "{} was not in the original transaction",
-                script_pubkey
-            ))),
+            None => Err(AllowShrinkingError::MissingScriptPubKey(script_pubkey)),
         }
     }
 }

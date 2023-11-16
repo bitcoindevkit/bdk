@@ -6,6 +6,7 @@
 // You may not use this file except in accordance with one or both of these
 // licenses.
 
+use anyhow::anyhow;
 use bdk::bitcoin::bip32::DerivationPath;
 use bdk::bitcoin::secp256k1::Secp256k1;
 use bdk::bitcoin::Network;
@@ -14,13 +15,11 @@ use bdk::descriptor::IntoWalletDescriptor;
 use bdk::keys::bip39::{Language, Mnemonic, WordCount};
 use bdk::keys::{GeneratableKey, GeneratedKey};
 use bdk::miniscript::Tap;
-use bdk::Error as BDK_Error;
-use std::error::Error;
 use std::str::FromStr;
 
 /// This example demonstrates how to generate a mnemonic phrase
 /// using BDK and use that to generate a descriptor string.
-fn main() -> Result<(), Box<dyn Error>> {
+fn main() -> Result<(), anyhow::Error> {
     let secp = Secp256k1::new();
 
     // In this example we are generating a 12 words mnemonic phrase
@@ -28,7 +27,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     // using their respective `WordCount` variant.
     let mnemonic: GeneratedKey<_, Tap> =
         Mnemonic::generate((WordCount::Words12, Language::English))
-            .map_err(|_| BDK_Error::Generic("Mnemonic generation error".to_string()))?;
+            .map_err(|_| anyhow!("Mnemonic generation error"))?;
 
     println!("Mnemonic phrase: {}", *mnemonic);
     let mnemonic_with_passphrase = (mnemonic, None);

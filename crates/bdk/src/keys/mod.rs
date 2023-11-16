@@ -413,7 +413,7 @@ impl<Ctx: ScriptContext> From<bip32::ExtendedPrivKey> for ExtendedKey<Ctx> {
 /// }
 /// ```
 ///
-/// Types that don't internally encode the [`Network`](bitcoin::Network) in which they are valid need some extra
+/// Types that don't internally encode the [`Network`] in which they are valid need some extra
 /// steps to override the set of valid networks, otherwise only the network specified in the
 /// [`ExtendedPrivKey`] or [`ExtendedPubKey`] will be considered valid.
 ///
@@ -932,8 +932,17 @@ pub enum KeyError {
     Miniscript(miniscript::Error),
 }
 
-impl_error!(miniscript::Error, Miniscript, KeyError);
-impl_error!(bitcoin::bip32::Error, Bip32, KeyError);
+impl From<miniscript::Error> for KeyError {
+    fn from(err: miniscript::Error) -> Self {
+        KeyError::Miniscript(err)
+    }
+}
+
+impl From<bip32::Error> for KeyError {
+    fn from(err: bip32::Error) -> Self {
+        KeyError::Bip32(err)
+    }
+}
 
 impl fmt::Display for KeyError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

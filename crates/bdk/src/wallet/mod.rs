@@ -38,6 +38,7 @@ use bitcoin::{consensus::encode::serialize, BlockHash};
 use bitcoin::{constants::genesis_block, psbt};
 use core::fmt;
 use core::ops::Deref;
+use descriptor::error::Error as DescriptorError;
 use miniscript::psbt::{PsbtExt, PsbtInputExt, PsbtInputSatisfier};
 
 use bdk_chain::tx_graph::CalculateFeeError;
@@ -50,6 +51,7 @@ pub mod signer;
 pub mod tx_builder;
 pub(crate) mod utils;
 
+pub mod error;
 #[cfg(feature = "hardware-signer")]
 #[cfg_attr(docsrs, doc(cfg(feature = "hardware-signer")))]
 pub mod hardwaresigner;
@@ -64,14 +66,14 @@ use utils::{check_nsequence_rbf, After, Older, SecpCtx};
 
 use crate::descriptor::policy::BuildSatisfaction;
 use crate::descriptor::{
-    calc_checksum, into_wallet_descriptor_checked, DerivedDescriptor, DescriptorMeta,
+    self, calc_checksum, into_wallet_descriptor_checked, DerivedDescriptor, DescriptorMeta,
     ExtendedDescriptor, ExtractPolicy, IntoWalletDescriptor, Policy, XKeyUtils,
 };
-use crate::error::{Error, MiniscriptPsbtError};
 use crate::psbt::PsbtUtils;
 use crate::signer::SignerError;
 use crate::types::*;
 use crate::wallet::coin_selection::Excess::{Change, NoChange};
+use crate::wallet::error::{BuildFeeBumpError, CreateTxError, MiniscriptPsbtError};
 
 const COINBASE_MATURITY: u32 = 100;
 
@@ -235,7 +237,7 @@ impl Wallet {
         descriptor: E,
         change_descriptor: Option<E>,
         network: Network,
-    ) -> Result<Self, crate::descriptor::DescriptorError> {
+    ) -> Result<Self, DescriptorError> {
         Self::new(descriptor, change_descriptor, (), network).map_err(|e| match e {
             NewError::Descriptor(e) => e,
             NewError::Write(_) => unreachable!("mock-write must always succeed"),
@@ -1092,6 +1094,10 @@ impl<D> Wallet<D> {
     /// # use std::str::FromStr;
     /// # use bitcoin::*;
     /// # use bdk::*;
+    /// # use bdk::wallet::ChangeSet;
+    /// # use bdk::wallet::error::CreateTxError;
+    /// # use bdk_chain::PersistBackend;
+    /// # use anyhow::Error;
     /// # let descriptor = "wpkh(tpubD6NzVbkrYhZ4Xferm7Pz4VnjdcDPFyjVu5K4iZXQ4pVN8Cks4pHVowTBXBKRhX64pkRyJZJN5xAKj4UDNnLPb5p2sSKXhewoYx5GbTdUFWq/*)";
     /// # let mut wallet = doctest_wallet!();
     /// # let to_address = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap().assume_checked();
@@ -1103,7 +1109,7 @@ impl<D> Wallet<D> {
     /// };
     ///
     /// // sign and broadcast ...
-    /// # Ok::<(), bdk::Error>(())
+    /// # Ok::<(), anyhow::Error>(())
     /// ```
     ///
     /// [`TxBuilder`]: crate::TxBuilder
@@ -1120,7 +1126,7 @@ impl<D> Wallet<D> {
         &mut self,
         coin_selection: Cs,
         params: TxParams,
-    ) -> Result<psbt::PartiallySignedTransaction, Error>
+    ) -> Result<psbt::PartiallySignedTransaction, CreateTxError<D::WriteError>>
     where
         D: PersistBackend<ChangeSet>,
     {
@@ -1142,7 +1148,7 @@ impl<D> Wallet<D> {
         let internal_policy = internal_descriptor
             .as_ref()
             .map(|desc| {
-                Ok::<_, Error>(
+                Ok::<_, CreateTxError<D::WriteError>>(
                     desc.extract_policy(&self.change_signers, BuildSatisfaction::None, &self.secp)?
                         .unwrap(),
                 )
@@ -1155,7 +1161,9 @@ impl<D> Wallet<D> {
             && external_policy.requires_path()
             && params.external_policy_path.is_none()
         {
-            return Err(Error::SpendingPolicyRequired(KeychainKind::External));
+            return Err(CreateTxError::SpendingPolicyRequired(
+                KeychainKind::External,
+            ));
         };
         // Same for the internal_policy path, if present
         if let Some(internal_policy) = &internal_policy {
@@ -1163,7 +1171,9 @@ impl<D> Wallet<D> {
                 && internal_policy.requires_path()
                 && params.internal_policy_path.is_none()
             {
-                return Err(Error::SpendingPolicyRequired(KeychainKind::Internal));
+                return Err(CreateTxError::SpendingPolicyRequired(
+                    KeychainKind::Internal,
+                ));
             };
         }
 
@@ -1175,7 +1185,7 @@ impl<D> Wallet<D> {
         )?;
         let internal_requirements = internal_policy
             .map(|policy| {
-                Ok::<_, Error>(
+                Ok::<_, CreateTxError<D::WriteError>>(
                     policy.get_condition(
                         params
                             .internal_policy_path
@@ -1191,14 +1201,9 @@ impl<D> Wallet<D> {
         debug!("Policy requirements: {:?}", requirements);
 
         let version = match params.version {
-            Some(tx_builder::Version(0)) => {
-                return Err(Error::Generic("Invalid version `0`".into()))
-            }
+            Some(tx_builder::Version(0)) => return Err(CreateTxError::Version0),
             Some(tx_builder::Version(1)) if requirements.csv.is_some() => {
-                return Err(Error::Generic(
-                    "TxBuilder requested version `1`, but at least `2` is needed to use OP_CSV"
-                        .into(),
-                ))
+                return Err(CreateTxError::Version1Csv)
             }
             Some(tx_builder::Version(x)) => x,
             None if requirements.csv.is_some() => 2,
@@ -1229,7 +1234,9 @@ impl<D> Wallet<D> {
                     // No requirement, just use the fee_sniping_height
                     None => fee_sniping_height,
                     // There's a block-based requirement, but the value is lower than the fee_sniping_height
-                    Some(value @ absolute::LockTime::Blocks(_)) if value < fee_sniping_height => fee_sniping_height,
+                    Some(value @ absolute::LockTime::Blocks(_)) if value < fee_sniping_height => {
+                        fee_sniping_height
+                    }
                     // There's a time-based requirement or a block-based requirement greater
                     // than the fee_sniping_height use that value
                     Some(value) => value,
@@ -1238,9 +1245,19 @@ impl<D> Wallet<D> {
             // Specific nLockTime required and we have no constraints, so just set to that value
             Some(x) if requirements.timelock.is_none() => x,
             // Specific nLockTime required and it's compatible with the constraints
-            Some(x) if requirements.timelock.unwrap().is_same_unit(x) && x >= requirements.timelock.unwrap() => x,
+            Some(x)
+                if requirements.timelock.unwrap().is_same_unit(x)
+                    && x >= requirements.timelock.unwrap() =>
+            {
+                x
+            }
             // Invalid nLockTime required
-            Some(x) => return Err(Error::Generic(format!("TxBuilder requested timelock of `{:?}`, but at least `{:?}` is required to spend from this script", x, requirements.timelock.unwrap())))
+            Some(x) => {
+                return Err(CreateTxError::LockTime {
+                    requested: x,
+                    required: requirements.timelock.unwrap(),
+                })
+            }
         };
 
         let n_sequence = match (params.rbf, requirements.csv) {
@@ -1258,18 +1275,13 @@ impl<D> Wallet<D> {
 
             // RBF with a specific value but that value is too high
             (Some(tx_builder::RbfValue::Value(rbf)), _) if !rbf.is_rbf() => {
-                return Err(Error::Generic(
-                    "Cannot enable RBF with a nSequence >= 0xFFFFFFFE".into(),
-                ))
+                return Err(CreateTxError::RbfSequence)
             }
             // RBF with a specific value requested, but the value is incompatible with CSV
             (Some(tx_builder::RbfValue::Value(rbf)), Some(csv))
                 if !check_nsequence_rbf(rbf, csv) =>
             {
-                return Err(Error::Generic(format!(
-                    "Cannot enable RBF with nSequence `{:?}` given a required OP_CSV of `{:?}`",
-                    rbf, csv
-                )))
+                return Err(CreateTxError::RbfSequenceCsv { rbf, csv })
             }
 
             // RBF enabled with the default value with CSV also enabled. CSV takes precedence
@@ -1288,7 +1300,7 @@ impl<D> Wallet<D> {
             FeePolicy::FeeAmount(fee) => {
                 if let Some(previous_fee) = params.bumping_fee {
                     if *fee < previous_fee.absolute {
-                        return Err(Error::FeeTooLow {
+                        return Err(CreateTxError::FeeTooLow {
                             required: previous_fee.absolute,
                         });
                     }
@@ -1299,7 +1311,7 @@ impl<D> Wallet<D> {
                 if let Some(previous_fee) = params.bumping_fee {
                     let required_feerate = FeeRate::from_sat_per_vb(previous_fee.rate + 1.0);
                     if *rate < required_feerate {
-                        return Err(Error::FeeRateTooLow {
+                        return Err(CreateTxError::FeeRateTooLow {
                             required: required_feerate,
                         });
                     }
@@ -1316,7 +1328,7 @@ impl<D> Wallet<D> {
         };
 
         if params.manually_selected_only && params.utxos.is_empty() {
-            return Err(Error::NoUtxosSelected);
+            return Err(CreateTxError::NoUtxosSelected);
         }
 
         // we keep it as a float while we accumulate it, and only round it at the end
@@ -1330,7 +1342,7 @@ impl<D> Wallet<D> {
                 && value.is_dust(script_pubkey)
                 && !script_pubkey.is_provably_unspendable()
             {
-                return Err(Error::OutputBelowDustLimit(index));
+                return Err(CreateTxError::OutputBelowDustLimit(index));
             }
 
             if self.is_mine(script_pubkey) {
@@ -1363,9 +1375,7 @@ impl<D> Wallet<D> {
         if params.change_policy != tx_builder::ChangeSpendPolicy::ChangeAllowed
             && internal_descriptor.is_none()
         {
-            return Err(Error::Generic(
-                "The `change_policy` can be set only if the wallet has a change_descriptor".into(),
-            ));
+            return Err(CreateTxError::ChangePolicyDescriptor);
         }
 
         let (required_utxos, optional_utxos) = self.preselect_utxos(
@@ -1391,7 +1401,7 @@ impl<D> Wallet<D> {
                     .stage(ChangeSet::from(indexed_tx_graph::ChangeSet::from(
                         index_changeset,
                     )));
-                self.persist.commit().expect("TODO");
+                self.persist.commit().map_err(CreateTxError::Persist)?;
                 spk
             }
         };
@@ -1432,13 +1442,13 @@ impl<D> Wallet<D> {
                     change_fee,
                 } = excess
                 {
-                    return Err(Error::InsufficientFunds {
+                    return Err(CreateTxError::InsufficientFunds {
                         needed: *dust_threshold,
                         available: remaining_amount.saturating_sub(*change_fee),
                     });
                 }
             } else {
-                return Err(Error::NoRecipients);
+                return Err(CreateTxError::NoRecipients);
             }
         }
 
@@ -1485,6 +1495,10 @@ impl<D> Wallet<D> {
     /// # use std::str::FromStr;
     /// # use bitcoin::*;
     /// # use bdk::*;
+    /// # use bdk::wallet::ChangeSet;
+    /// # use bdk::wallet::error::CreateTxError;
+    /// # use bdk_chain::PersistBackend;
+    /// # use anyhow::Error;
     /// # let descriptor = "wpkh(tpubD6NzVbkrYhZ4Xferm7Pz4VnjdcDPFyjVu5K4iZXQ4pVN8Cks4pHVowTBXBKRhX64pkRyJZJN5xAKj4UDNnLPb5p2sSKXhewoYx5GbTdUFWq/*)";
     /// # let mut wallet = doctest_wallet!();
     /// # let to_address = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap().assume_checked();
@@ -1508,27 +1522,27 @@ impl<D> Wallet<D> {
     /// let _ = wallet.sign(&mut psbt, SignOptions::default())?;
     /// let fee_bumped_tx = psbt.extract_tx();
     /// // broadcast fee_bumped_tx to replace original
-    /// # Ok::<(), bdk::Error>(())
+    /// # Ok::<(), anyhow::Error>(())
     /// ```
     // TODO: support for merging multiple transactions while bumping the fees
     pub fn build_fee_bump(
         &mut self,
         txid: Txid,
-    ) -> Result<TxBuilder<'_, D, DefaultCoinSelectionAlgorithm, BumpFee>, Error> {
+    ) -> Result<TxBuilder<'_, D, DefaultCoinSelectionAlgorithm, BumpFee>, BuildFeeBumpError> {
         let graph = self.indexed_graph.graph();
         let txout_index = &self.indexed_graph.index;
         let chain_tip = self.chain.tip().block_id();
 
         let mut tx = graph
             .get_tx(txid)
-            .ok_or(Error::TransactionNotFound)?
+            .ok_or(BuildFeeBumpError::TransactionNotFound(txid))?
             .clone();
 
         let pos = graph
             .get_chain_position(&self.chain, chain_tip, txid)
-            .ok_or(Error::TransactionNotFound)?;
+            .ok_or(BuildFeeBumpError::TransactionNotFound(txid))?;
         if let ChainPosition::Confirmed(_) = pos {
-            return Err(Error::TransactionConfirmed);
+            return Err(BuildFeeBumpError::TransactionConfirmed(txid));
         }
 
         if !tx
@@ -1536,29 +1550,29 @@ impl<D> Wallet<D> {
             .iter()
             .any(|txin| txin.sequence.to_consensus_u32() <= 0xFFFFFFFD)
         {
-            return Err(Error::IrreplaceableTransaction);
+            return Err(BuildFeeBumpError::IrreplaceableTransaction(tx.txid()));
         }
 
         let fee = self
             .calculate_fee(&tx)
-            .map_err(|_| Error::FeeRateUnavailable)?;
+            .map_err(|_| BuildFeeBumpError::FeeRateUnavailable)?;
         let fee_rate = self
             .calculate_fee_rate(&tx)
-            .map_err(|_| Error::FeeRateUnavailable)?;
+            .map_err(|_| BuildFeeBumpError::FeeRateUnavailable)?;
 
         // remove the inputs from the tx and process them
         let original_txin = tx.input.drain(..).collect::<Vec<_>>();
         let original_utxos = original_txin
             .iter()
-            .map(|txin| -> Result<_, Error> {
+            .map(|txin| -> Result<_, BuildFeeBumpError> {
                 let prev_tx = graph
                     .get_tx(txin.previous_output.txid)
-                    .ok_or(Error::UnknownUtxo)?;
+                    .ok_or(BuildFeeBumpError::UnknownUtxo(txin.previous_output))?;
                 let txout = &prev_tx.output[txin.previous_output.vout as usize];
 
                 let confirmation_time: ConfirmationTime = graph
                     .get_chain_position(&self.chain, chain_tip, txin.previous_output.txid)
-                    .ok_or(Error::UnknownUtxo)?
+                    .ok_or(BuildFeeBumpError::UnknownUtxo(txin.previous_output))?
                     .cloned()
                     .into();
 
@@ -1655,6 +1669,9 @@ impl<D> Wallet<D> {
     /// # use std::str::FromStr;
     /// # use bitcoin::*;
     /// # use bdk::*;
+    /// # use bdk::wallet::ChangeSet;
+    /// # use bdk::wallet::error::CreateTxError;
+    /// # use bdk_chain::PersistBackend;
     /// # let descriptor = "wpkh(tpubD6NzVbkrYhZ4Xferm7Pz4VnjdcDPFyjVu5K4iZXQ4pVN8Cks4pHVowTBXBKRhX64pkRyJZJN5xAKj4UDNnLPb5p2sSKXhewoYx5GbTdUFWq/*)";
     /// # let mut wallet = doctest_wallet!();
     /// # let to_address = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap().assume_checked();
@@ -1663,17 +1680,18 @@ impl<D> Wallet<D> {
     ///     builder.add_recipient(to_address.script_pubkey(), 50_000);
     ///     builder.finish()?
     /// };
-    /// let  finalized = wallet.sign(&mut psbt, SignOptions::default())?;
+    /// let finalized = wallet.sign(&mut psbt, SignOptions::default())?;
     /// assert!(finalized, "we should have signed all the inputs");
-    /// # Ok::<(), bdk::Error>(())
+    /// # Ok::<(),anyhow::Error>(())
     pub fn sign(
         &self,
         psbt: &mut psbt::PartiallySignedTransaction,
         sign_options: SignOptions,
-    ) -> Result<bool, Error> {
+    ) -> Result<bool, SignerError> {
         // This adds all the PSBT metadata for the inputs, which will help us later figure out how
         // to derive our keys
-        self.update_psbt_with_descriptor(psbt)?;
+        self.update_psbt_with_descriptor(psbt)
+            .map_err(SignerError::MiniscriptPsbt)?;
 
         // If we aren't allowed to use `witness_utxo`, ensure that every input (except p2tr and finalized ones)
         // has the `non_witness_utxo`
@@ -1685,7 +1703,7 @@ impl<D> Wallet<D> {
                 .filter(|i| i.tap_internal_key.is_none() && i.tap_merkle_root.is_none())
                 .any(|i| i.non_witness_utxo.is_none())
         {
-            return Err(Error::Signer(signer::SignerError::MissingNonWitnessUtxo));
+            return Err(SignerError::MissingNonWitnessUtxo);
         }
 
         // If the user hasn't explicitly opted-in, refuse to sign the transaction unless every input
@@ -1698,7 +1716,7 @@ impl<D> Wallet<D> {
                     || i.sighash_type == Some(TapSighashType::Default.into())
             })
         {
-            return Err(Error::Signer(signer::SignerError::NonStandardSighash));
+            return Err(SignerError::NonStandardSighash);
         }
 
         for signer in self
@@ -1719,7 +1737,7 @@ impl<D> Wallet<D> {
     }
 
     /// Return the spending policies for the wallet's descriptor
-    pub fn policies(&self, keychain: KeychainKind) -> Result<Option<Policy>, Error> {
+    pub fn policies(&self, keychain: KeychainKind) -> Result<Option<Policy>, DescriptorError> {
         let signers = match keychain {
             KeychainKind::External => &self.signers,
             KeychainKind::Internal => &self.change_signers,
@@ -1751,7 +1769,7 @@ impl<D> Wallet<D> {
         &self,
         psbt: &mut psbt::PartiallySignedTransaction,
         sign_options: SignOptions,
-    ) -> Result<bool, Error> {
+    ) -> Result<bool, SignerError> {
         let chain_tip = self.chain.tip().block_id();
 
         let tx = &psbt.unsigned_tx;
@@ -1761,7 +1779,7 @@ impl<D> Wallet<D> {
             let psbt_input = &psbt
                 .inputs
                 .get(n)
-                .ok_or(Error::Signer(SignerError::InputIndexOutOfRange))?;
+                .ok_or(SignerError::InputIndexOutOfRange)?;
             if psbt_input.final_script_sig.is_some() || psbt_input.final_script_witness.is_some() {
                 continue;
             }
@@ -2010,7 +2028,10 @@ impl<D> Wallet<D> {
         tx: Transaction,
         selected: Vec<Utxo>,
         params: TxParams,
-    ) -> Result<psbt::PartiallySignedTransaction, Error> {
+    ) -> Result<psbt::PartiallySignedTransaction, CreateTxError<D::WriteError>>
+    where
+        D: PersistBackend<ChangeSet>,
+    {
         let mut psbt = psbt::PartiallySignedTransaction::from_unsigned_tx(tx)?;
 
         if params.add_global_xpubs {
@@ -2026,7 +2047,7 @@ impl<D> Wallet<D> {
                     None if xpub.xkey.depth == 0 => {
                         (xpub.root_fingerprint(&self.secp), vec![].into())
                     }
-                    _ => return Err(Error::MissingKeyOrigin(xpub.xkey.to_string())),
+                    _ => return Err(CreateTxError::MissingKeyOrigin(xpub.xkey.to_string())),
                 };
 
                 psbt.xpub.insert(xpub.xkey, origin);
@@ -2051,7 +2072,7 @@ impl<D> Wallet<D> {
                         match self.get_psbt_input(utxo, params.sighash, params.only_witness_utxo) {
                             Ok(psbt_input) => psbt_input,
                             Err(e) => match e {
-                                Error::UnknownUtxo => psbt::Input {
+                                CreateTxError::UnknownUtxo => psbt::Input {
                                     sighash_type: params.sighash,
                                     ..psbt::Input::default()
                                 },
@@ -2072,10 +2093,7 @@ impl<D> Wallet<D> {
                         && !params.only_witness_utxo
                         && foreign_psbt_input.non_witness_utxo.is_none()
                     {
-                        return Err(Error::Generic(format!(
-                            "Missing non_witness_utxo on foreign utxo {}",
-                            outpoint
-                        )));
+                        return Err(CreateTxError::MissingNonWitnessUtxo(outpoint));
                     }
                     *psbt_input = *foreign_psbt_input;
                 }
@@ -2093,14 +2111,17 @@ impl<D> Wallet<D> {
         utxo: LocalUtxo,
         sighash_type: Option<psbt::PsbtSighashType>,
         only_witness_utxo: bool,
-    ) -> Result<psbt::Input, Error> {
+    ) -> Result<psbt::Input, CreateTxError<D::WriteError>>
+    where
+        D: PersistBackend<ChangeSet>,
+    {
         // Try to find the prev_script in our db to figure out if this is internal or external,
         // and the derivation index
         let &(keychain, child) = self
             .indexed_graph
             .index
             .index_of_spk(&utxo.txout.script_pubkey)
-            .ok_or(Error::UnknownUtxo)?;
+            .ok_or(CreateTxError::UnknownUtxo)?;
 
         let mut psbt_input = psbt::Input {
             sighash_type,
@@ -2131,7 +2152,7 @@ impl<D> Wallet<D> {
     fn update_psbt_with_descriptor(
         &self,
         psbt: &mut psbt::PartiallySignedTransaction,
-    ) -> Result<(), Error> {
+    ) -> Result<(), MiniscriptPsbtError> {
         // We need to borrow `psbt` mutably within the loops, so we have to allocate a vec for all
         // the input utxos and outputs
         //
@@ -2271,7 +2292,7 @@ pub fn wallet_name_from_descriptor<T>(
     change_descriptor: Option<T>,
     network: Network,
     secp: &SecpCtx,
-) -> Result<String, Error>
+) -> Result<String, DescriptorError>
 where
     T: IntoWalletDescriptor,
 {
