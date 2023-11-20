@@ -254,12 +254,6 @@ impl CoinSelectionAlgorithm for LargestFirstCoinSelection {
         target_amount: u64,
         drain_script: &Script,
     ) -> Result<CoinSelectionResult, Error> {
-        log::debug!(
-            "target_amount = `{}`, fee_rate = `{:?}`",
-            target_amount,
-            fee_rate
-        );
-
         // We put the "required UTXOs" first and make sure the optional UTXOs are sorted,
         // initially smallest to largest, before being reversed with `.rev()`.
         let utxos = {
@@ -352,13 +346,6 @@ fn select_sorted_utxos(
                         (TXIN_BASE_WEIGHT + weighted_utxo.satisfaction_weight) as u64,
                     ));
                     **selected_amount += weighted_utxo.utxo.txout().value;
-
-                    log::debug!(
-                        "Selected {}, updated fee_amount = `{}`",
-                        weighted_utxo.utxo.outpoint(),
-                        fee_amount
-                    );
-
                     Some(weighted_utxo.utxo)
                 } else {
                     None

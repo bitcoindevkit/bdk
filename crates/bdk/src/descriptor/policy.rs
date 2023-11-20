@@ -58,9 +58,6 @@ use miniscript::{
     Descriptor, Miniscript, Satisfier, ScriptContext, SigType, Terminal, ToPublicKey,
 };
 
-#[allow(unused_imports)]
-use log::{debug, error, info, trace};
-
 use crate::descriptor::ExtractPolicy;
 use crate::keys::ExtScriptContext;
 use crate::wallet::signer::{SignerId, SignersContainer};

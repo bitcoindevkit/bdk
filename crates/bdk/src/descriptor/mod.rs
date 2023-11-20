@@ -488,11 +488,6 @@ impl DescriptorMeta for ExtendedDescriptor {
                         ) {
                             Some(derive_path)
                         } else {
-                            log::debug!(
-                                "Key `{}` derived with {} yields an unexpected key",
-                                root_fingerprint,
-                                derive_path
-                            );
                             None
                         }
                     });
