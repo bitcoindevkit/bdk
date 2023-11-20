@@ -814,15 +814,20 @@ impl<D> Wallet<D> {
     }
 
     /// Inserts a [`TxOut`] at [`OutPoint`] into the wallet's transaction graph.
-    /// Any inserted TxOuts are not persisted until [`commit`] is called.
     ///
-    /// This can be used to add a `TxOut` that the wallet doesn't own but is used as an input to
-    /// a [`Transaction`] passed to the [`calculate_fee`] or [`calculate_fee_rate`] functions.
+    /// This is used for providing a previous output's value so that we can use [`calculate_fee`]
+    /// or [`calculate_fee_rate`] on a given transaction. Outputs inserted with this method will
+    /// not be returned in [`list_unspent`] or [`list_output`].
     ///
-    /// Only insert TxOuts you trust the values for!
+    /// Any inserted `TxOut`s are not persisted until [`commit`] is called.
+    ///
+    /// **WARNING:** This should only be used to add `TxOut`s that the wallet does not own. Only
+    /// insert `TxOut`s that you trust the values for!
     ///
     /// [`calculate_fee`]: Self::calculate_fee
     /// [`calculate_fee_rate`]: Self::calculate_fee_rate
+    /// [`list_unspent`]: Self::list_unspent
+    /// [`list_output`]: Self::list_output
     /// [`commit`]: Self::commit
     pub fn insert_txout(&mut self, outpoint: OutPoint, txout: TxOut)
     where
