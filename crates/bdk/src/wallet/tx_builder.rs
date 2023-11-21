@@ -53,7 +53,7 @@ use bitcoin::{absolute, script::PushBytes, OutPoint, ScriptBuf, Sequence, Transa
 
 use super::coin_selection::{CoinSelectionAlgorithm, DefaultCoinSelectionAlgorithm};
 use super::ChangeSet;
-use crate::types::{FeeRate, KeychainKind, LocalUtxo, WeightedUtxo};
+use crate::types::{FeeRate, KeychainKind, LocalOutput, WeightedUtxo};
 use crate::wallet::CreateTxError;
 use crate::{Utxo, Wallet};
 
@@ -889,7 +889,7 @@ impl Default for ChangeSpendPolicy {
 }
 
 impl ChangeSpendPolicy {
-    pub(crate) fn is_satisfied_by(&self, utxo: &LocalUtxo) -> bool {
+    pub(crate) fn is_satisfied_by(&self, utxo: &LocalOutput) -> bool {
         match self {
             ChangeSpendPolicy::ChangeAllowed => true,
             ChangeSpendPolicy::OnlyChange => utxo.keychain == KeychainKind::Internal,
@@ -994,11 +994,11 @@ mod test {
         );
     }
 
-    fn get_test_utxos() -> Vec<LocalUtxo> {
+    fn get_test_utxos() -> Vec<LocalOutput> {
         use bitcoin::hashes::Hash;
 
         vec![
-            LocalUtxo {
+            LocalOutput {
                 outpoint: OutPoint {
                     txid: bitcoin::Txid::from_slice(&[0; 32]).unwrap(),
                     vout: 0,
@@ -1009,7 +1009,7 @@ mod test {
                 confirmation_time: ConfirmationTime::Unconfirmed { last_seen: 0 },
                 derivation_index: 0,
             },
-            LocalUtxo {
+            LocalOutput {
                 outpoint: OutPoint {
                     txid: bitcoin::Txid::from_slice(&[0; 32]).unwrap(),
                     vout: 1,

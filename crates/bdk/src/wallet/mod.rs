@@ -735,10 +735,24 @@ impl<D> Wallet<D> {
     }
 
     /// Return the list of unspent outputs of this wallet
-    pub fn list_unspent(&self) -> impl Iterator<Item = LocalUtxo> + '_ {
+    pub fn list_unspent(&self) -> impl Iterator<Item = LocalOutput> + '_ {
         self.indexed_graph
             .graph()
             .filter_chain_unspents(
+                &self.chain,
+                self.chain.tip().block_id(),
+                self.indexed_graph.index.outpoints().iter().cloned(),
+            )
+            .map(|((k, i), full_txo)| new_local_utxo(k, i, full_txo))
+    }
+
+    /// List all relevant outputs (includes both spent and unspent, confirmed and unconfirmed).
+    ///
+    /// To list only unspent outputs (UTXOs), use [`Wallet::list_unspent`] instead.
+    pub fn list_output(&self) -> impl Iterator<Item = LocalOutput> + '_ {
+        self.indexed_graph
+            .graph()
+            .filter_chain_txouts(
                 &self.chain,
                 self.chain.tip().block_id(),
                 self.indexed_graph.index.outpoints().iter().cloned(),
@@ -784,7 +798,7 @@ impl<D> Wallet<D> {
 
     /// Returns the utxo owned by this wallet corresponding to `outpoint` if it exists in the
     /// wallet's database.
-    pub fn get_utxo(&self, op: OutPoint) -> Option<LocalUtxo> {
+    pub fn get_utxo(&self, op: OutPoint) -> Option<LocalOutput> {
         let (&spk_i, _) = self.indexed_graph.index.txout(op)?;
         self.indexed_graph
             .graph()
@@ -798,15 +812,20 @@ impl<D> Wallet<D> {
     }
 
     /// Inserts a [`TxOut`] at [`OutPoint`] into the wallet's transaction graph.
-    /// Any inserted TxOuts are not persisted until [`commit`] is called.
     ///
-    /// This can be used to add a `TxOut` that the wallet doesn't own but is used as an input to
-    /// a [`Transaction`] passed to the [`calculate_fee`] or [`calculate_fee_rate`] functions.
+    /// This is used for providing a previous output's value so that we can use [`calculate_fee`]
+    /// or [`calculate_fee_rate`] on a given transaction. Outputs inserted with this method will
+    /// not be returned in [`list_unspent`] or [`list_output`].
     ///
-    /// Only insert TxOuts you trust the values for!
+    /// Any inserted `TxOut`s are not persisted until [`commit`] is called.
+    ///
+    /// **WARNING:** This should only be used to add `TxOut`s that the wallet does not own. Only
+    /// insert `TxOut`s that you trust the values for!
     ///
     /// [`calculate_fee`]: Self::calculate_fee
     /// [`calculate_fee_rate`]: Self::calculate_fee_rate
+    /// [`list_unspent`]: Self::list_unspent
+    /// [`list_output`]: Self::list_output
     /// [`commit`]: Self::commit
     pub fn insert_txout(&mut self, outpoint: OutPoint, txout: TxOut)
     where
@@ -1614,7 +1633,7 @@ impl<D> Wallet<D> {
                             .max_satisfaction_weight()
                             .unwrap();
                         WeightedUtxo {
-                            utxo: Utxo::Local(LocalUtxo {
+                            utxo: Utxo::Local(LocalOutput {
                                 outpoint: txin.previous_output,
                                 txout: txout.clone(),
                                 keychain,
@@ -1933,7 +1952,7 @@ impl<D> Wallet<D> {
         descriptor.at_derivation_index(child).ok()
     }
 
-    fn get_available_utxos(&self) -> Vec<(LocalUtxo, usize)> {
+    fn get_available_utxos(&self) -> Vec<(LocalOutput, usize)> {
         self.list_unspent()
             .map(|utxo| {
                 let keychain = utxo.keychain;
@@ -2130,7 +2149,7 @@ impl<D> Wallet<D> {
     /// get the corresponding PSBT Input for a LocalUtxo
     pub fn get_psbt_input(
         &self,
-        utxo: LocalUtxo,
+        utxo: LocalOutput,
         sighash_type: Option<psbt::PsbtSighashType>,
         only_witness_utxo: bool,
     ) -> Result<psbt::Input, CreateTxError<D::WriteError>>
@@ -2336,8 +2355,8 @@ fn new_local_utxo(
     keychain: KeychainKind,
     derivation_index: u32,
     full_txo: FullTxOut<ConfirmationTimeHeightAnchor>,
-) -> LocalUtxo {
-    LocalUtxo {
+) -> LocalOutput {
+    LocalOutput {
         outpoint: full_txo.outpoint,
         txout: full_txo.txout,
         is_spent: full_txo.spent_by.is_some(),

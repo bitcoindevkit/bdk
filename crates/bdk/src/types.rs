@@ -161,7 +161,7 @@ impl Vbytes for usize {
 ///
 /// [`Wallet`]: crate::Wallet
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash)]
-pub struct LocalUtxo {
+pub struct LocalOutput {
     /// Reference to a transaction output
     pub outpoint: OutPoint,
     /// Transaction output
@@ -192,7 +192,7 @@ pub struct WeightedUtxo {
 /// An unspent transaction output (UTXO).
 pub enum Utxo {
     /// A UTXO owned by the local wallet.
-    Local(LocalUtxo),
+    Local(LocalOutput),
     /// A UTXO owned by another wallet.
     Foreign {
         /// The location of the output.
