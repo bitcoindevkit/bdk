@@ -92,7 +92,7 @@ fn new_or_load() {
     let temp_dir = tempfile::tempdir().expect("must create tempdir");
     let file_path = temp_dir.path().join("store.db");
 
-    // init wallet when non-existant
+    // init wallet when non-existent
     let wallet_keychains = {
         let db = bdk_file_store::Store::open_or_create_new(DB_MAGIC, &file_path)
             .expect("must create db");
