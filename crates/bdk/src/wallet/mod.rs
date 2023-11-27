@@ -40,6 +40,7 @@ use core::fmt;
 use core::ops::Deref;
 use descriptor::error::Error as DescriptorError;
 use miniscript::psbt::{PsbtExt, PsbtInputExt, PsbtInputSatisfier};
+use rand::Rng;
 
 use bdk_chain::tx_graph::CalculateFeeError;
 
@@ -1271,63 +1272,29 @@ impl<D> Wallet<D> {
             Some(h) => h,
         };
 
-        let lock_time = match params.locktime {
-            // When no nLockTime is specified, we try to prevent fee sniping, if possible
-            None => {
-                // Fee sniping can be partially prevented by setting the timelock
-                // to current_height. If we don't know the current_height,
-                // we default to 0.
-                let fee_sniping_height = current_height;
+        // Initialize a locktime now so we can check whether to set `Sequence::MAX` in the
+        // following step. Later, we adjust the tx locktime to deter fee sniping, if applicable,
+        // and finally check that a requested locktime is compatible with policy requirements.
+        let lock_time = params.locktime.unwrap_or(current_height);
 
-                // We choose the biggest between the required nlocktime and the fee sniping
-                // height
-                match requirements.timelock {
-                    // No requirement, just use the fee_sniping_height
-                    None => fee_sniping_height,
-                    // There's a block-based requirement, but the value is lower than the fee_sniping_height
-                    Some(value @ absolute::LockTime::Blocks(_)) if value < fee_sniping_height => {
-                        fee_sniping_height
-                    }
-                    // There's a time-based requirement or a block-based requirement greater
-                    // than the fee_sniping_height use that value
-                    Some(value) => value,
-                }
-            }
-            // Specific nLockTime required and we have no constraints, so just set to that value
-            Some(x) if requirements.timelock.is_none() => x,
-            // Specific nLockTime required and it's compatible with the constraints
-            Some(x)
-                if requirements.timelock.unwrap().is_same_unit(x)
-                    && x >= requirements.timelock.unwrap() =>
-            {
-                x
-            }
-            // Invalid nLockTime required
-            Some(x) => {
-                return Err(CreateTxError::LockTime {
-                    requested: x,
-                    required: requirements.timelock.unwrap(),
-                })
-            }
-        };
-
-        let n_sequence = match (params.rbf, requirements.csv) {
+        let (n_sequence, is_policy_fixed) = match (params.rbf, requirements.csv) {
             // No RBF or CSV but there's an nLockTime, so the nSequence cannot be final
             (None, None) if lock_time != absolute::LockTime::ZERO => {
-                Sequence::ENABLE_LOCKTIME_NO_RBF
+                (Sequence::ENABLE_LOCKTIME_NO_RBF, false)
             }
             // No RBF, CSV or nLockTime, make the transaction final
-            (None, None) => Sequence::MAX,
+            (None, None) => (Sequence::MAX, false),
 
             // No RBF requested, use the value from CSV. Note that this value is by definition
             // non-final, so even if a timelock is enabled this nSequence is fine, hence why we
             // don't bother checking for it here. The same is true for all the other branches below
-            (None, Some(csv)) => csv,
+            (None, Some(csv)) => (csv, true),
 
             // RBF with a specific value but that value is too high
             (Some(tx_builder::RbfValue::Value(rbf)), _) if !rbf.is_rbf() => {
                 return Err(CreateTxError::RbfSequence)
             }
+
             // RBF with a specific value requested, but the value is incompatible with CSV
             (Some(tx_builder::RbfValue::Value(rbf)), Some(csv))
                 if !check_nsequence_rbf(rbf, csv) =>
@@ -1336,10 +1303,10 @@ impl<D> Wallet<D> {
             }
 
             // RBF enabled with the default value with CSV also enabled. CSV takes precedence
-            (Some(tx_builder::RbfValue::Default), Some(csv)) => csv,
+            (Some(tx_builder::RbfValue::Default), Some(csv)) => (csv, true),
             // Valid RBF, either default or with a specific value. We ignore the `CSV` value
             // because we've already checked it before
-            (Some(rbf), _) => rbf.get_value(),
+            (Some(rbf), _) => (rbf.get_value(), false),
         };
 
         let (fee_rate, mut fee_amount) = match params
@@ -1477,6 +1444,40 @@ impl<D> Wallet<D> {
                 witness: Witness::new(),
             })
             .collect();
+
+        // Discourage fee sniping
+        if tx.version == 2 {
+            create_tx_locktime(
+                &mut tx,
+                &coin_selection.selected,
+                current_height.to_consensus_u32(),
+                params.rbf.is_some(),
+                is_policy_fixed,
+            );
+        }
+
+        // Allow policy or params to override default locktime.
+        tx.lock_time = match (params.locktime, requirements.timelock) {
+            (None, Some(required)) => match required {
+                // If the value is block-based and less than the current tx locktime, keep the
+                // current locktime, otherwise use required.
+                value @ absolute::LockTime::Blocks(_) if value < tx.lock_time => tx.lock_time,
+                _ => required,
+            },
+            // Locktime requested and we have no other constraints.
+            (Some(requested), None) => requested,
+            // Use requested only if it doesn't conflict with requirements.
+            (Some(requested), Some(required)) => {
+                if required.is_same_unit(requested) && requested < required {
+                    return Err(CreateTxError::LockTime {
+                        requested,
+                        required,
+                    });
+                }
+                requested
+            }
+            (None, None) => tx.lock_time,
+        };
 
         if tx.output.is_empty() {
             // Uh oh, our transaction has no outputs.
@@ -2390,6 +2391,82 @@ fn create_signers<E: IntoWalletDescriptor>(
     };
 
     Ok((signers, change_signers))
+}
+
+/// An implementation of [`BIP326`] Anti-fee sniping in Taproot transactions. This function
+/// sets the transaction [`LockTime`].
+///
+/// [`BIP326`]: (https://github.com/bitcoin/bips/blob/master/bip-0326.mediawiki)
+/// [`LockTime`]: (absolute::LockTime)
+fn create_tx_locktime(
+    transaction: &mut Transaction,
+    selected: &[Utxo],
+    chain_tip: u32,
+    rbf_enabled: bool,
+    policy_fixed: bool,
+) {
+    // nSequence can encode a max csv of 65535, detailed in BIP68
+    const MAX_ENCODABLE_CSV: u32 = 0xFFFF;
+    let mut rng = rand::thread_rng();
+
+    // Filter foreign utxos, since we don't know their confirmation time
+    let utxos: Vec<&LocalOutput> = selected
+        .iter()
+        .filter_map(|u| match u {
+            Utxo::Local(txo) => Some(txo),
+            _ => None,
+        })
+        .collect();
+
+    /* Set transaction `LockTime` to the current height if:
+    - 50% probability
+    - RBF not enabled
+    - any inputs:
+        - are not p2tr
+        - have more than 65535 confirmations
+        - are unconfirmed */
+    if rand::random()
+        || !rbf_enabled
+        || utxos.iter().any(|u| {
+            !u.txout.script_pubkey.is_v1_p2tr()
+                || match u.confirmation_time {
+                    ConfirmationTime::Confirmed { height, .. } => {
+                        chain_tip - height > MAX_ENCODABLE_CSV
+                    }
+                    _ => true, // unconfirmed
+                }
+        })
+    {
+        let mut height = chain_tip;
+        if rng.gen_range(0..10) == 1 {
+            // Occasionally, randomly pick a locktime further back.
+            height = height.saturating_sub(rng.gen_range(0u32..100));
+        }
+
+        transaction.lock_time =
+            absolute::LockTime::from_height(height).expect("valid locktime height");
+    } else {
+        // If none of the above are true, we're spending taproot coins with fewer
+        // than 65535 confirmations, and RBF enabled. Set `LockTime::ZERO`, and set
+        // the `Sequence` of a randomly chosen input to its confirmations.
+        if !policy_fixed && !utxos.is_empty() {
+            let idx = rng.gen_range(0..utxos.len());
+            let utxo = &utxos[idx];
+            let mut confs = match utxo.confirmation_time {
+                ConfirmationTime::Confirmed { height, .. } => {
+                    (chain_tip - height).try_into().expect("confs is valid u16")
+                }
+                _ => 0u16,
+            };
+            if rng.gen_range(0..10) == 1 {
+                // Occasionally, randomly pick a lower sequence.
+                confs = confs.saturating_sub(rng.gen_range(0u16..100));
+            }
+            transaction.input[idx].sequence = Sequence::from_height(confs);
+        }
+
+        transaction.lock_time = absolute::LockTime::ZERO;
+    }
 }
 
 #[macro_export]
