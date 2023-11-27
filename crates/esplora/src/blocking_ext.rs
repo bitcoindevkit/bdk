@@ -250,7 +250,13 @@ impl EsploraExt for esplora_client::BlockingClient {
                     }
                 }
 
-                if last_index > last_active_index.map(|i| i.saturating_add(stop_gap as u32)) {
+                let last_index = last_index.expect("Must be set since handles wasn't empty.");
+                let past_gap_limit = if let Some(i) = last_active_index {
+                    last_index > i.saturating_add(stop_gap as u32)
+                } else {
+                    last_index >= stop_gap as u32
+                };
+                if past_gap_limit {
                     break;
                 }
             }
