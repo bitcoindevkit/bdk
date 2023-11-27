@@ -75,6 +75,9 @@ use crate::wallet::error::{BuildFeeBumpError, CreateTxError, MiniscriptPsbtError
 
 const COINBASE_MATURITY: u32 = 100;
 
+// The default "gap limit" for a wallet.
+const DEFAULT_LOOKAHEAD: u32 = 1_000;
+
 /// A Bitcoin wallet
 ///
 /// The `Wallet` struct acts as a way of coherently interfacing with output descriptors and related transactions.
@@ -456,6 +459,7 @@ impl<D> Wallet<D> {
         let secp = Secp256k1::new();
         let (chain, chain_changeset) = LocalChain::from_genesis_hash(genesis_hash);
         let mut index = KeychainTxOutIndex::<KeychainKind>::default();
+        index.set_lookahead_for_all(DEFAULT_LOOKAHEAD);
 
         let (signers, change_signers) =
             create_signers(&mut index, &secp, descriptor, change_descriptor, network)
