@@ -5,7 +5,7 @@ use std::{
 };
 
 use bdk_chain::{
-    bitcoin::{Address, Network, OutPoint, ScriptBuf, Txid},
+    bitcoin::{constants::genesis_block, Address, Network, OutPoint, ScriptBuf, Txid},
     indexed_tx_graph::{self, IndexedTxGraph},
     keychain,
     local_chain::{self, LocalChain},
@@ -112,7 +112,12 @@ fn main() -> anyhow::Result<()> {
         graph
     });
 
-    let chain = Mutex::new(LocalChain::from_changeset(disk_local_chain)?);
+    let chain = Mutex::new({
+        let genesis_hash = genesis_block(args.network).block_hash();
+        let (mut chain, _) = LocalChain::from_genesis_hash(genesis_hash);
+        chain.apply_changeset(&disk_local_chain)?;
+        chain
+    });
 
     let electrum_cmd = match &args.command {
         example_cli::Commands::ChainSpecific(electrum_cmd) => electrum_cmd,
