@@ -459,13 +459,13 @@ impl<D> Wallet<D> {
         let secp = Secp256k1::new();
         let (chain, chain_changeset) = LocalChain::from_genesis_hash(genesis_hash);
         let mut index = KeychainTxOutIndex::<KeychainKind>::default();
-        index.set_lookahead_for_all(DEFAULT_LOOKAHEAD);
 
         let (signers, change_signers) =
             create_signers(&mut index, &secp, descriptor, change_descriptor, network)
                 .map_err(NewError::Descriptor)?;
 
-        let indexed_graph = IndexedTxGraph::new(index);
+        let mut indexed_graph = IndexedTxGraph::new(index);
+        indexed_graph.index.set_lookahead_for_all(DEFAULT_LOOKAHEAD);
 
         let mut persist = Persist::new(db);
         persist.stage(ChangeSet {
@@ -2311,6 +2311,20 @@ impl<D> Wallet<D> {
     pub fn spk_index(&self) -> &KeychainTxOutIndex<KeychainKind> {
         &self.indexed_graph.index
     }
+
+    // /// Set's inner [`KeychainTxOutIndex`] look ahead count for all keychains.
+    // ///
+    // /// See [`KeychainTxOutIndex::set_lookahead_for_all`] for more details.
+    // pub fn set_spk_lookahead_for_all(&mut self, lookahead: u32) {
+    //     self.indexed_graph.index.set_lookahead_for_all(lookahead);
+    // }
+    //
+    // /// Set's inner [`KeychainTxOutIndex`] look ahead count for the specified keychain.
+    // ///
+    // /// See [`KeychainTxOutIndex::set_lookahead`] for more details.
+    // pub fn set_lookahead(&mut self, keychain: &KeychainKind, lookahead: u32) {
+    //     self.indexed_graph.index.set_lookahead(keychain, lookahead);
+    // }
 
     /// Get a reference to the inner [`LocalChain`].
     pub fn local_chain(&self) -> &LocalChain {

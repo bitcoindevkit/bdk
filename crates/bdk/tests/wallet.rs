@@ -189,6 +189,14 @@ fn test_get_funded_wallet_balance() {
 }
 
 #[test]
+fn test_get_funded_wallet_balance_for_nonzero_index() {
+    // The funded wallet contains a tx with a 76_000 sats outputs to spk at index 1 that is found
+    // with the default look ahead.
+    let (wallet, _) = get_funded_wallet_at_index(get_test_wpkh_xprv(), Peek(1));
+    assert_eq!(wallet.get_balance().confirmed, 76_000);
+}
+
+#[test]
 fn test_get_funded_wallet_sent_and_received() {
     let (wallet, txid) = get_funded_wallet(get_test_wpkh());
 

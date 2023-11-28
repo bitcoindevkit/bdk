@@ -108,8 +108,57 @@ pub fn get_funded_wallet(descriptor: &str) -> (Wallet, bitcoin::Txid) {
     get_funded_wallet_with_change(descriptor, None)
 }
 
+// Return a fake wallet that appears to have one UTXO sent at a specific address index.
+//
+// The funded wallet containing a tx with one 76_000 sats input.
+pub fn get_funded_wallet_at_index(descriptor: &str, address_index: AddressIndex) -> (Wallet, Txid) {
+    let mut wallet = Wallet::new_no_persist(descriptor, None, Network::Regtest).unwrap();
+    let utxo_address = wallet.get_address(address_index).address;
+
+    let tx0 = Transaction {
+        version: 1,
+        lock_time: bitcoin::absolute::LockTime::ZERO,
+        input: vec![TxIn {
+            previous_output: OutPoint {
+                txid: Txid::all_zeros(),
+                vout: 0,
+            },
+            script_sig: Default::default(),
+            sequence: Default::default(),
+            witness: Default::default(),
+        }],
+        output: vec![TxOut {
+            value: 76_000,
+            script_pubkey: utxo_address.script_pubkey(),
+        }],
+    };
+
+    wallet
+        .insert_checkpoint(BlockId {
+            height: 1_000,
+            hash: BlockHash::all_zeros(),
+        })
+        .unwrap();
+
+    wallet
+        .insert_tx(
+            tx0.clone(),
+            ConfirmationTime::Confirmed {
+                height: 1_000,
+                time: 100,
+            },
+        )
+        .unwrap();
+
+    (wallet, tx0.txid())
+}
+
 pub fn get_test_wpkh() -> &'static str {
     "wpkh(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW)"
+}
+
+pub fn get_test_wpkh_xprv() -> &'static str {
+    "wpkh(tprv8ZgxMBicQKsPdDArR4xSAECuVxeX1jwwSXR4ApKbkYgZiziDc4LdBy2WvJeGDfUSE4UT4hHhbgEwbdq8ajjUHiKDegkwrNU6V55CxcxonVN/*)"
 }
 
 pub fn get_test_single_sig_csv() -> &'static str {
