@@ -148,7 +148,7 @@ mod test {
         Descriptor<DescriptorPublicKey>,
         Descriptor<DescriptorPublicKey>,
     ) {
-        let mut txout_index = KeychainTxOutIndex::<TestKeychain>::default();
+        let mut txout_index = KeychainTxOutIndex::<TestKeychain>::new(0);
 
         let secp = Secp256k1::signing_only();
         let (external_descriptor,_) = Descriptor::<DescriptorPublicKey>::parse_descriptor(&secp, "tr([73c5da0a/86'/0'/0']xprv9xgqHN7yz9MwCkxsBPN5qetuNdQSUttZNKw1dcYTV4mkaAFiBVGQziHs3NRSWMkCzvgjEe3n9xV8oYywvM8at9yRqyaZVz6TYYhX98VjsUk/0/*)").unwrap();
