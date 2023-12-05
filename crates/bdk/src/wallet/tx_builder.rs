@@ -199,6 +199,10 @@ impl<'a, D, Cs: CoinSelectionAlgorithm, Ctx: TxBuilderContext> TxBuilder<'a, D, 
     /// * btc/kvB (0.00001000 btc/kvB == 1 sats/vB) using FeeRate::from_btc_per_kvb
     /// * sats/kwu (250 sats/kwu == 1 sats/vB) using FeeRate::from_sat_per_kwu
     /// Default is 1 sat/vB (see min_relay_fee)
+    ///
+    /// Note that this is really a minimum feerate -- it's possible to
+    /// overshoot it slightly since adding a change output to drain the remaining
+    /// excess might not be viable.
     pub fn fee_rate(&mut self, fee_rate: FeeRate) -> &mut Self {
         self.params.fee_policy = Some(FeePolicy::FeeRate(fee_rate));
         self
@@ -209,6 +213,10 @@ impl<'a, D, Cs: CoinSelectionAlgorithm, Ctx: TxBuilderContext> TxBuilder<'a, D, 
     /// If anyone sets both the fee_absolute method and the fee_rate method,
     /// the FeePolicy enum will be set by whichever method was called last,
     /// as the FeeRate and FeeAmount are mutually exclusive.
+    ///
+    /// Note that this is really a minimum absolute fee -- it's possible to
+    /// overshoot it slightly since adding a change output to drain the remaining
+    /// excess might not be viable.
     pub fn fee_absolute(&mut self, fee_amount: u64) -> &mut Self {
         self.params.fee_policy = Some(FeePolicy::FeeAmount(fee_amount));
         self
