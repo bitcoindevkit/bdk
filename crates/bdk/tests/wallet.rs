@@ -81,7 +81,8 @@ fn load_recovers_wallet() {
     // recover wallet
     {
         let db = bdk_file_store::Store::open(DB_MAGIC, &file_path).expect("must recover db");
-        let wallet = Wallet::load(get_test_wpkh(), None, db).expect("must recover wallet");
+        let wallet =
+            Wallet::load(get_test_wpkh(), None, db, Network::Testnet).expect("must recover wallet");
         assert_eq!(wallet.network(), Network::Testnet);
         assert_eq!(wallet.spk_index().keychains(), &wallet_keychains);
     }
@@ -110,10 +111,10 @@ fn new_or_load() {
         assert!(
             matches!(
                 err,
-                bdk::wallet::NewOrLoadError::LoadedNetworkDoesNotMatch {
+                bdk::wallet::NewOrLoadError::Load(bdk::wallet::LoadError::NetworkDoesNotMatch {
                     got: Some(Network::Testnet),
-                    expected: Network::Bitcoin
-                }
+                    expected: Network::Bitcoin,
+                })
             ),
             "err: {}",
             err,
@@ -139,8 +140,47 @@ fn new_or_load() {
         assert!(
             matches!(
                 err,
-                bdk::wallet::NewOrLoadError::LoadedGenesisDoesNotMatch { got, expected }
+                bdk::wallet::NewOrLoadError::Load( bdk::wallet::LoadError::GenesisDoesNotMatch { got, expected } )
                 if got == Some(got_blockhash) && expected == exp_blockhash
+            ),
+            "err: {}",
+            err,
+        );
+    }
+
+    // wrong external descriptor
+    {
+        let db =
+            bdk_file_store::Store::open_or_create_new(DB_MAGIC, &file_path).expect("must open db");
+        let err = Wallet::new_or_load(get_test_single_sig_csv(), None, db, Network::Testnet)
+            .expect_err("wrong genesis hash");
+        assert!(
+            matches!(
+                err,
+                bdk::wallet::NewOrLoadError::Load( bdk::wallet::LoadError::DescriptorDoesNotMatch { keychain, got:_, expected:_ } )
+                if keychain == KeychainKind::External
+            ),
+            "err: {}",
+            err,
+        );
+    }
+
+    // wrong internal descriptor
+    {
+        let db =
+            bdk_file_store::Store::open_or_create_new(DB_MAGIC, &file_path).expect("must open db");
+        let err = Wallet::new_or_load(
+            get_test_wpkh(),
+            Some(get_test_single_sig_csv()),
+            db,
+            Network::Testnet,
+        )
+        .expect_err("wrong genesis hash");
+        assert!(
+            matches!(
+                err,
+                bdk::wallet::NewOrLoadError::Load( bdk::wallet::LoadError::DescriptorDoesNotMatch { keychain, got:_, expected:_ } )
+                if keychain == KeychainKind::Internal
             ),
             "err: {}",
             err,
