@@ -128,6 +128,17 @@ impl<T> Append for Vec<T> {
     }
 }
 
+impl<T> Append for Option<T> {
+    // If other is Some then replace self's value with other's value, if other is None do nothing.
+    fn append(&mut self, other: Self) {
+        other.and_then(|v| self.replace(v));
+    }
+
+    fn is_empty(&self) -> bool {
+        self.is_none()
+    }
+}
+
 macro_rules! impl_append_for_tuple {
     ($($a:ident $b:tt)*) => {
         impl<$($a),*> Append for ($($a,)*) where $($a: Append),* {
