@@ -1,4 +1,4 @@
-//! This crate is a collection of core structures for [Bitcoin Dev Kit] (alpha release).
+//! This crate is a collection of core structures for [Bitcoin Dev Kit].
 //!
 //! The goal of this crate is to give wallets the mechanisms needed to:
 //!

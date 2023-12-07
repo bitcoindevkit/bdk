@@ -54,7 +54,7 @@ async fn main() -> Result<(), anyhow::Error> {
         })
         .collect();
     let (update_graph, last_active_indices) = client
-        .scan_txs_with_keychains(keychain_spks, None, None, STOP_GAP, PARALLEL_REQUESTS)
+        .full_scan(keychain_spks, STOP_GAP, PARALLEL_REQUESTS)
         .await?;
     let missing_heights = update_graph.missing_heights(wallet.local_chain());
     let chain_update = client.update_local_chain(prev_tip, missing_heights).await?;
