@@ -134,64 +134,54 @@ pub struct ElectrumUpdate {
 
 /// Trait to extend [`Client`] functionality.
 pub trait ElectrumExt {
-    /// Scan the blockchain (via electrum) for the data specified and returns updates for
-    /// [`bdk_chain`] data structures.
+    /// Full scan the keychain scripts specified with the blockchain (via an Electrum client) and
+    /// returns updates for [`bdk_chain`] data structures.
     ///
     /// - `prev_tip`: the most recent blockchain tip present locally
     /// - `keychain_spks`: keychains that we want to scan transactions for
-    /// - `txids`: transactions for which we want updated [`Anchor`]s
-    /// - `outpoints`: transactions associated with these outpoints (residing, spending) that we
-    ///     want to included in the update
     ///
-    /// The scan for each keychain stops after a gap of `stop_gap` script pubkeys with no associated
+    /// The full scan for each keychain stops after a gap of `stop_gap` script pubkeys with no associated
     /// transactions. `batch_size` specifies the max number of script pubkeys to request for in a
     /// single batch request.
-    fn scan<K: Ord + Clone>(
+    fn full_scan<K: Ord + Clone>(
         &self,
         prev_tip: CheckPoint,
         keychain_spks: BTreeMap<K, impl IntoIterator<Item = (u32, ScriptBuf)>>,
-        txids: impl IntoIterator<Item = Txid>,
-        outpoints: impl IntoIterator<Item = OutPoint>,
         stop_gap: usize,
         batch_size: usize,
     ) -> Result<(ElectrumUpdate, BTreeMap<K, u32>), Error>;
 
-    /// Convenience method to call [`scan`] without requiring a keychain.
+    /// Sync a set of scripts with the blockchain (via an Electrum client) for the data specified
+    /// and returns updates for [`bdk_chain`] data structures.
     ///
-    /// [`scan`]: ElectrumExt::scan
-    fn scan_without_keychain(
+    /// - `prev_tip`: the most recent blockchain tip present locally
+    /// - `misc_spks`: an iterator of scripts we want to sync transactions for
+    /// - `txids`: transactions for which we want updated [`Anchor`]s
+    /// - `outpoints`: transactions associated with these outpoints (residing, spending) that we
+    ///     want to include in the update
+    ///
+    /// `batch_size` specifies the max number of script pubkeys to request for in a single batch
+    /// request.
+    ///
+    /// If the scripts to sync are unknown, such as when restoring or importing a keychain that
+    /// may include scripts that have been used, use [`full_scan`] with the keychain.
+    ///
+    /// [`full_scan`]: ElectrumExt::full_scan
+    fn sync(
         &self,
         prev_tip: CheckPoint,
         misc_spks: impl IntoIterator<Item = ScriptBuf>,
         txids: impl IntoIterator<Item = Txid>,
         outpoints: impl IntoIterator<Item = OutPoint>,
         batch_size: usize,
-    ) -> Result<ElectrumUpdate, Error> {
-        let spk_iter = misc_spks
-            .into_iter()
-            .enumerate()
-            .map(|(i, spk)| (i as u32, spk));
-
-        let (electrum_update, _) = self.scan(
-            prev_tip,
-            [((), spk_iter)].into(),
-            txids,
-            outpoints,
-            usize::MAX,
-            batch_size,
-        )?;
-
-        Ok(electrum_update)
-    }
+    ) -> Result<ElectrumUpdate, Error>;
 }
 
 impl ElectrumExt for Client {
-    fn scan<K: Ord + Clone>(
+    fn full_scan<K: Ord + Clone>(
         &self,
         prev_tip: CheckPoint,
         keychain_spks: BTreeMap<K, impl IntoIterator<Item = (u32, ScriptBuf)>>,
-        txids: impl IntoIterator<Item = Txid>,
-        outpoints: impl IntoIterator<Item = OutPoint>,
         stop_gap: usize,
         batch_size: usize,
     ) -> Result<(ElectrumUpdate, BTreeMap<K, u32>), Error> {
@@ -200,9 +190,6 @@ impl ElectrumExt for Client {
             .map(|(k, s)| (k, s.into_iter()))
             .collect::<BTreeMap<K, _>>();
         let mut scanned_spks = BTreeMap::<(K, u32), (ScriptBuf, bool)>::new();
-
-        let txids = txids.into_iter().collect::<Vec<_>>();
-        let outpoints = outpoints.into_iter().collect::<Vec<_>>();
 
         let (electrum_update, keychain_update) = loop {
             let (tip, _) = construct_update_tip(self, prev_tip.clone())?;
@@ -242,15 +229,6 @@ impl ElectrumExt for Client {
                 }
             }
 
-            populate_with_txids(self, &cps, &mut relevant_txids, &mut txids.iter().cloned())?;
-
-            let _txs = populate_with_outpoints(
-                self,
-                &cps,
-                &mut relevant_txids,
-                &mut outpoints.iter().cloned(),
-            )?;
-
             // check for reorgs during scan process
             let server_blockhash = self.block_header(tip.height() as usize)?.block_hash();
             if tip.hash() != server_blockhash {
@@ -283,6 +261,41 @@ impl ElectrumExt for Client {
         };
 
         Ok((electrum_update, keychain_update))
+    }
+
+    fn sync(
+        &self,
+        prev_tip: CheckPoint,
+        misc_spks: impl IntoIterator<Item = ScriptBuf>,
+        txids: impl IntoIterator<Item = Txid>,
+        outpoints: impl IntoIterator<Item = OutPoint>,
+        batch_size: usize,
+    ) -> Result<ElectrumUpdate, Error> {
+        let spk_iter = misc_spks
+            .into_iter()
+            .enumerate()
+            .map(|(i, spk)| (i as u32, spk));
+
+        let (mut electrum_update, _) = self.full_scan(
+            prev_tip.clone(),
+            [((), spk_iter)].into(),
+            usize::MAX,
+            batch_size,
+        )?;
+
+        let (tip, _) = construct_update_tip(self, prev_tip)?;
+        let cps = tip
+            .iter()
+            .take(10)
+            .map(|cp| (cp.height(), cp))
+            .collect::<BTreeMap<u32, CheckPoint>>();
+
+        populate_with_txids(self, &cps, &mut electrum_update.relevant_txids, txids)?;
+
+        let _txs =
+            populate_with_outpoints(self, &cps, &mut electrum_update.relevant_txids, outpoints)?;
+
+        Ok(electrum_update)
     }
 }
 
@@ -405,7 +418,7 @@ fn populate_with_outpoints(
     client: &Client,
     cps: &BTreeMap<u32, CheckPoint>,
     relevant_txids: &mut RelevantTxids,
-    outpoints: &mut impl Iterator<Item = OutPoint>,
+    outpoints: impl IntoIterator<Item = OutPoint>,
 ) -> Result<HashMap<Txid, Transaction>, Error> {
     let mut full_txs = HashMap::new();
     for outpoint in outpoints {
@@ -466,7 +479,7 @@ fn populate_with_txids(
     client: &Client,
     cps: &BTreeMap<u32, CheckPoint>,
     relevant_txids: &mut RelevantTxids,
-    txids: &mut impl Iterator<Item = Txid>,
+    txids: impl IntoIterator<Item = Txid>,
 ) -> Result<(), Error> {
     for txid in txids {
         let tx = match client.transaction_get(&txid) {
