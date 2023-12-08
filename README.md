@@ -74,7 +74,7 @@ cargo update -p reqwest --precise "0.11.18"
 # hyper-rustls 0.24.1 has MSRV 1.60.0+
 cargo update -p hyper-rustls --precise 0.24.0
 # rustls 0.21.7 has MSRV 1.60.0+
-cargo update -p rustls:0.21.9 --precise "0.21.1"
+cargo update -p rustls:0.21.10 --precise "0.21.1"
 # rustls 0.20.9 has MSRV 1.60.0+
 cargo update -p rustls:0.20.9 --precise "0.20.8"
 # tokio 1.33 has MSRV 1.63.0+
