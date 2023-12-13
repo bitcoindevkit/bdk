@@ -147,6 +147,8 @@ impl From<(&u32, &BlockHash)> for BlockId {
 
 /// An [`Anchor`] implementation that also records the exact confirmation height of the transaction.
 ///
+/// Note that the confirmation block and the anchor block can be different here.
+///
 /// Refer to [`Anchor`] for more details.
 #[derive(Debug, Default, Clone, PartialEq, Eq, Copy, PartialOrd, Ord, core::hash::Hash)]
 #[cfg_attr(
@@ -185,6 +187,8 @@ impl AnchorFromBlockPosition for ConfirmationHeightAnchor {
 
 /// An [`Anchor`] implementation that also records the exact confirmation time and height of the
 /// transaction.
+///
+/// Note that the confirmation block and the anchor block can be different here.
 ///
 /// Refer to [`Anchor`] for more details.
 #[derive(Debug, Default, Clone, PartialEq, Eq, Copy, PartialOrd, Ord, core::hash::Hash)]

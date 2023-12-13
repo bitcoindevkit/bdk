@@ -221,7 +221,7 @@ pub enum SignerContext {
     },
 }
 
-/// Wrapper structure to pair a signer with its context
+/// Wrapper to pair a signer with its context
 #[derive(Debug, Clone)]
 pub struct SignerWrapper<S: Sized + fmt::Debug + Clone> {
     signer: S,

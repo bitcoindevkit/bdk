@@ -11,7 +11,7 @@
 
 //! Wallet
 //!
-//! This module defines the [`Wallet`] structure.
+//! This module defines the [`Wallet`].
 use crate::collections::{BTreeMap, HashMap, HashSet};
 use alloc::{
     boxed::Box,
@@ -77,7 +77,7 @@ const COINBASE_MATURITY: u32 = 100;
 
 /// A Bitcoin wallet
 ///
-/// The `Wallet` struct acts as a way of coherently interfacing with output descriptors and related transactions.
+/// The `Wallet` acts as a way of coherently interfacing with output descriptors and related transactions.
 /// Its main components are:
 ///
 /// 1. output *descriptors* from which it can derive addresses.

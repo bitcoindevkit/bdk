@@ -110,6 +110,7 @@ fn test_tx_conflict_handling() {
                     ..Default::default()
                 },
             ],
+            // the txgraph is going to pick tx_conflict_2 because of higher lexicographical txid
             exp_chain_txs: HashSet::from(["tx1", "tx_conflict_2"]),
             exp_chain_txouts: HashSet::from([("tx1", 0), ("tx_conflict_2", 0)]),
             exp_unspents: HashSet::from([("tx_conflict_2", 0)]),

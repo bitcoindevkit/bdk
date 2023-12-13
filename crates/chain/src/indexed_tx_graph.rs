@@ -1,7 +1,5 @@
-//! Contains the [`IndexedTxGraph`] structure and associated types.
-//!
-//! This is essentially a [`TxGraph`] combined with an indexer.
-
+//! Contains the [`IndexedTxGraph`] and associated types. Refer to the
+//! [`IndexedTxGraph`] documentation for more.
 use alloc::vec::Vec;
 use bitcoin::{Block, OutPoint, Transaction, TxOut, Txid};
 
@@ -11,9 +9,9 @@ use crate::{
     Anchor, AnchorFromBlockPosition, Append, BlockId,
 };
 
-/// A struct that combines [`TxGraph`] and an [`Indexer`] implementation.
+/// The [`IndexedTxGraph`] combines a [`TxGraph`] and an [`Indexer`] implementation.
 ///
-/// This structure ensures that [`TxGraph`] and [`Indexer`] are updated atomically.
+/// It ensures that [`TxGraph`] and [`Indexer`] are updated atomically.
 #[derive(Debug)]
 pub struct IndexedTxGraph<A, I> {
     /// Transaction index.
@@ -266,7 +264,7 @@ where
     }
 }
 
-/// A structure that represents changes to an [`IndexedTxGraph`].
+/// Represents changes to an [`IndexedTxGraph`].
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(
     feature = "serde",

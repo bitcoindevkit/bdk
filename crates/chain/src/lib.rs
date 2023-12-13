@@ -12,9 +12,8 @@
 //!    you do it synchronously or asynchronously. If you know a fact about the blockchain, you can just
 //!    tell `bdk_chain`'s APIs about it, and that information will be integrated, if it can be done
 //!    consistently.
-//! 2. Error-free APIs.
-//! 3. Data persistence agnostic -- `bdk_chain` does not care where you cache on-chain data, what you
-//!    cache or how you fetch it.
+//! 2. Data persistence agnostic -- `bdk_chain` does not care where you cache on-chain data, what you
+//!    cache or how you retrieve it from persistent storage.
 //!
 //! [Bitcoin Dev Kit]: https://bitcoindevkit.org/
 
