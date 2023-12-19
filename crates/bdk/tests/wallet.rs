@@ -71,19 +71,26 @@ fn load_recovers_wallet() {
     let file_path = temp_dir.path().join("store.db");
 
     // create new wallet
-    let wallet_keychains = {
+    let wallet_spk_index = {
         let db = bdk_file_store::Store::create_new(DB_MAGIC, &file_path).expect("must create db");
-        let wallet =
-            Wallet::new(get_test_wpkh(), None, db, Network::Testnet).expect("must init wallet");
-        wallet.keychains().clone()
+        let mut wallet = Wallet::new(get_test_tr_single_sig_xprv(), None, db, Network::Testnet)
+            .expect("must init wallet");
+
+        wallet.try_get_address(New).unwrap();
+        wallet.spk_index().clone()
     };
 
     // recover wallet
     {
         let db = bdk_file_store::Store::open(DB_MAGIC, &file_path).expect("must recover db");
-        let wallet = Wallet::load(get_test_wpkh(), None, db).expect("must recover wallet");
+        let wallet =
+            Wallet::load(get_test_tr_single_sig_xprv(), None, db).expect("must recover wallet");
         assert_eq!(wallet.network(), Network::Testnet);
-        assert_eq!(wallet.spk_index().keychains(), &wallet_keychains);
+        assert_eq!(wallet.spk_index().keychains(), wallet_spk_index.keychains());
+        assert_eq!(
+            wallet.spk_index().last_revealed_indices(),
+            wallet_spk_index.last_revealed_indices()
+        );
     }
 }
 
