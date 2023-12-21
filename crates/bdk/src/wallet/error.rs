@@ -46,7 +46,7 @@ impl std::error::Error for MiniscriptPsbtError {}
 #[derive(Debug)]
 /// Error returned from [`TxBuilder::finish`]
 ///
-/// [`TxBuilder::finish`]: crate::wallet::tx_builder::TxBuilder::finish
+/// [`TxBuilder::finish`]: super::tx_builder::TxBuilder::finish
 pub enum CreateTxError<P> {
     /// There was a problem with the descriptors passed in
     Descriptor(DescriptorError),
@@ -248,9 +248,7 @@ impl<P> From<coin_selection::Error> for CreateTxError<P> {
 impl<P: core::fmt::Display + core::fmt::Debug> std::error::Error for CreateTxError<P> {}
 
 #[derive(Debug)]
-/// Error returned from [`Wallet::build_fee_bump`]
-///
-/// [`Wallet::build_fee_bump`]: super::Wallet::build_fee_bump
+/// Error returned from [`crate::Wallet::build_fee_bump`]
 pub enum BuildFeeBumpError {
     /// Happens when trying to spend an UTXO that is not in the internal database
     UnknownUtxo(OutPoint),

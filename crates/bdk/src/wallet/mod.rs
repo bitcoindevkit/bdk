@@ -20,6 +20,7 @@ use alloc::{
     vec::Vec,
 };
 pub use bdk_chain::keychain::Balance;
+use bdk_chain::spk_client::{FullScanRequest, SyncRequest};
 use bdk_chain::{
     indexed_tx_graph,
     keychain::{self, KeychainTxOutIndex},
@@ -28,7 +29,7 @@ use bdk_chain::{
     },
     tx_graph::{CanonicalTx, TxGraph},
     Append, BlockId, ChainPosition, ConfirmationTime, ConfirmationTimeHeightAnchor, FullTxOut,
-    IndexedTxGraph, Persist, PersistBackend,
+    IndexedTxGraph, Persist, PersistBackend, SpkIterator,
 };
 use bitcoin::secp256k1::{All, Secp256k1};
 use bitcoin::sighash::{EcdsaSighashType, TapSighashType};
@@ -42,6 +43,7 @@ use core::fmt;
 use core::ops::Deref;
 use descriptor::error::Error as DescriptorError;
 use miniscript::psbt::{PsbtExt, PsbtInputExt, PsbtInputSatisfier};
+use miniscript::{Descriptor, DescriptorPublicKey};
 
 use bdk_chain::tx_graph::CalculateFeeError;
 
@@ -2496,6 +2498,31 @@ impl<D> Wallet<D> {
             .indexed_graph
             .batch_insert_relevant_unconfirmed(unconfirmed_txs);
         self.persist.stage(ChangeSet::from(indexed_graph_changeset));
+    }
+
+    /// Create a [`SyncRequest`] for this wallet for all revealed spks.
+    ///
+    /// This is the first step when performing a spk-based wallet sync, the returned [`SyncRequest`] collects
+    /// all revealed script pub keys from the wallet keychain needed to start a blockchain sync with a spk based
+    /// blockchain client.
+    pub fn sync_revealed_spks_request(&self) -> SyncRequest {
+        let chain_tip = self.local_chain().tip();
+        self.spk_index().sync_revealed_spks_request(chain_tip)
+    }
+
+    /// Create a [`FullScanRequest] for this wallet.
+    ///
+    /// This is the first step when performing a spk-based wallet full scan, the returned [`FullScanRequest]
+    /// collects iterators for the wallet's keychain script pub keys needed to start a blockchain full scan
+    /// with a spk based blockchain client.
+    ///
+    /// This operation is generally only used when importing or restoring a previously used wallet
+    /// in which the list of used scripts is not known.
+    pub fn full_scan_request(
+        &self,
+    ) -> FullScanRequest<KeychainKind, SpkIterator<Descriptor<DescriptorPublicKey>>> {
+        let chain_tip = self.local_chain().tip();
+        self.spk_index().full_scan_request(chain_tip)
     }
 }
 
