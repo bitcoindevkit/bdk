@@ -723,11 +723,6 @@ impl<A: Anchor> TxGraph<A> {
                     }
                     !has_missing_height
                 });
-                #[cfg(feature = "std")]
-                debug_assert!({
-                    println!("txid={} skip={}", txid, skip);
-                    true
-                });
                 !skip
             })
             .filter_map(move |(a, _)| {
@@ -740,6 +735,24 @@ impl<A: Anchor> TxGraph<A> {
                 } else {
                     None
                 }
+            })
+    }
+
+    /// Iterates over the heights of the transaction anchors in this tx graph greater than a minimum height.
+    ///
+    /// This is useful if you want to find which heights you need to fetch data about in order to
+    /// confirm or exclude these anchors.
+    ///
+    /// See also: [`Self::missing_heights`]
+    pub fn anchor_heights(&self, min_height: u32) -> impl Iterator<Item = u32> + '_ {
+        let mut dedup = None;
+        self.anchors
+            .iter()
+            .map(|(a, _)| a.anchor_block().height)
+            .filter(move |height| {
+                let duplicate = dedup == Some(*height);
+                dedup = Some(*height);
+                !duplicate && *height > min_height
             })
     }
 
