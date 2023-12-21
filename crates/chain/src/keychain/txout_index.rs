@@ -5,12 +5,15 @@ use crate::{
     spk_iter::BIP32_MAX_INDEX,
     SpkIterator, SpkTxOutIndex,
 };
-use bitcoin::{OutPoint, Script, Transaction, TxOut, Txid};
+use alloc::vec::Vec;
+use bitcoin::{OutPoint, Script, ScriptBuf, Transaction, TxOut, Txid};
 use core::{
     fmt::Debug,
     ops::{Bound, RangeBounds},
 };
 
+use crate::local_chain::CheckPoint;
+use crate::spk_client::{FullScanRequest, SyncRequest};
 use crate::Append;
 
 const DEFAULT_LOOKAHEAD: u32 = 25;
@@ -110,13 +113,13 @@ pub struct KeychainTxOutIndex<K> {
     lookahead: u32,
 }
 
-impl<K> Default for KeychainTxOutIndex<K> {
+impl<K: Clone + Ord + Debug + Send> Default for KeychainTxOutIndex<K> {
     fn default() -> Self {
         Self::new(DEFAULT_LOOKAHEAD)
     }
 }
 
-impl<K: Clone + Ord + Debug> Indexer for KeychainTxOutIndex<K> {
+impl<K: Clone + Ord + Debug + Send + 'static> Indexer for KeychainTxOutIndex<K> {
     type ChangeSet = super::ChangeSet<K>;
 
     fn index_txout(&mut self, outpoint: OutPoint, txout: &TxOut) -> Self::ChangeSet {
@@ -134,12 +137,12 @@ impl<K: Clone + Ord + Debug> Indexer for KeychainTxOutIndex<K> {
         changeset
     }
 
-    fn initial_changeset(&self) -> Self::ChangeSet {
-        super::ChangeSet(self.last_revealed.clone())
-    }
-
     fn apply_changeset(&mut self, changeset: Self::ChangeSet) {
         self.apply_changeset(changeset)
+    }
+
+    fn initial_changeset(&self) -> Self::ChangeSet {
+        super::ChangeSet(self.last_revealed.clone())
     }
 
     fn is_tx_relevant(&self, tx: &bitcoin::Transaction) -> bool {
@@ -147,7 +150,7 @@ impl<K: Clone + Ord + Debug> Indexer for KeychainTxOutIndex<K> {
     }
 }
 
-impl<K> KeychainTxOutIndex<K> {
+impl<K: Clone + Ord + Debug + Send> KeychainTxOutIndex<K> {
     /// Construct a [`KeychainTxOutIndex`] with the given `lookahead`.
     ///
     /// The `lookahead` is the number of script pubkeys to derive and cache from the internal
@@ -169,7 +172,7 @@ impl<K> KeychainTxOutIndex<K> {
 }
 
 /// Methods that are *re-exposed* from the internal [`SpkTxOutIndex`].
-impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
+impl<K: Clone + Ord + Debug + Send> KeychainTxOutIndex<K> {
     /// Return a reference to the internal [`SpkTxOutIndex`].
     ///
     /// **WARNING:** The internal index will contain lookahead spks. Refer to
@@ -291,7 +294,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     }
 }
 
-impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
+impl<K: Clone + Ord + Debug + Send + 'static> KeychainTxOutIndex<K> {
     /// Return a reference to the internal map of keychain to descriptors.
     pub fn keychains(&self) -> &BTreeMap<K, Descriptor<DescriptorPublicKey>> {
         &self.keychains
@@ -667,6 +670,43 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
                     .map(|index| (keychain.clone(), index))
             })
             .collect()
+    }
+
+    /// Create a [`SyncRequest`] for this [`KeychainTxOutIndex`] for all revealed spks.
+    ///
+    /// This is the first step when performing a spk-based wallet sync, the returned [`SyncRequest`] collects
+    /// all revealed script pub keys needed to start a blockchain sync with a spk based blockchain client. A
+    /// [`CheckPoint`] representing the current chain tip must be provided.
+    pub fn sync_revealed_spks_request(&self, chain_tip: CheckPoint) -> SyncRequest {
+        // Sync all revealed SPKs
+        let spks = self
+            .revealed_spks()
+            .map(|(_keychain, index, spk)| (index, ScriptBuf::from(spk)))
+            .collect::<Vec<(u32, ScriptBuf)>>();
+
+        let mut req = SyncRequest::new(chain_tip);
+        req.add_spks(spks);
+        req
+    }
+
+    /// Create a [`FullScanRequest`] for this [`KeychainTxOutIndex`].
+    ///
+    /// This is the first step when performing a spk-based full scan, the returned [`FullScanRequest`]
+    /// collects iterators for the index's keychain script pub keys to start a blockchain full scan with a
+    /// spk based blockchain client. A [`CheckPoint`] representing the current chain tip must be provided.
+    ///
+    /// This operation is generally only used when importing or restoring previously used keychains
+    /// in which the list of used scripts is not known.
+    pub fn full_scan_request(
+        &self,
+        chain_tip: CheckPoint,
+    ) -> FullScanRequest<K, SpkIterator<Descriptor<DescriptorPublicKey>>> {
+        let spks_by_keychain: BTreeMap<K, SpkIterator<Descriptor<DescriptorPublicKey>>> =
+            self.all_unbounded_spk_iters();
+
+        let mut req = FullScanRequest::new(chain_tip);
+        req.add_spks_by_keychain(spks_by_keychain);
+        req
     }
 
     /// Applies the derivation changeset to the [`KeychainTxOutIndex`], extending the number of
