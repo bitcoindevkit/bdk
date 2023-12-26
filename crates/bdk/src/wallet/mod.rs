@@ -517,7 +517,9 @@ impl<D> Wallet<D> {
             create_signers(&mut index, &secp, descriptor, change_descriptor, network)
                 .map_err(LoadError::Descriptor)?;
 
-        let indexed_graph = IndexedTxGraph::new(index);
+        let mut indexed_graph = IndexedTxGraph::new(index);
+        indexed_graph.apply_changeset(changeset.indexed_tx_graph);
+
         let persist = Persist::new(db);
 
         Ok(Wallet {
