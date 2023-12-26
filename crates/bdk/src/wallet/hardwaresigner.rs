@@ -30,12 +30,9 @@
 //! let first_device = devices.remove(0)?;
 //! let custom_signer = HWISigner::from_device(&first_device, Network::Testnet.into())?;
 //!
-//! # let mut wallet = Wallet::new_no_persist(
-//! #     "",
-//! #     None,
-//! #     Network::Testnet,
-//! # )?;
-//! #
+//! # let mut wallet = Wallet::builder("")
+//! #   .with_network(Network::Testnet)
+//! #   .init_without_persistence()?;
 //! // Adding the hardware signer to the BDK wallet
 //! wallet.add_signer(
 //!     KeychainKind::External,

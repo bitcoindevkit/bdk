@@ -22,12 +22,10 @@ fn main() -> Result<(), anyhow::Error> {
     let external_descriptor = "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/84'/1'/0'/0/*)";
     let internal_descriptor = "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/84'/1'/0'/1/*)";
 
-    let mut wallet = Wallet::new_or_load(
-        external_descriptor,
-        Some(internal_descriptor),
-        db,
-        Network::Testnet,
-    )?;
+    let mut wallet = Wallet::builder(external_descriptor)
+        .with_change_descriptor(internal_descriptor)
+        .with_network(Network::Testnet)
+        .init_or_load(db)?;
 
     let address = wallet.try_get_address(bdk::wallet::AddressIndex::New)?;
     println!("Generated Address: {}", address);

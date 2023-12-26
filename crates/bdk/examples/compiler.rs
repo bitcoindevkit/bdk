@@ -47,7 +47,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("Compiled into following Descriptor: \n{}", descriptor);
 
     // Create a new wallet from this descriptor
-    let mut wallet = Wallet::new_no_persist(&format!("{}", descriptor), None, Network::Regtest)?;
+    let mut wallet = Wallet::builder(&format!("{}", descriptor))
+        .with_network(Network::Regtest)
+        .init_without_persistence()?;
 
     println!(
         "First derived address from the descriptor: \n{}",

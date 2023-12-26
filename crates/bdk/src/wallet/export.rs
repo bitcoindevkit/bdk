@@ -29,11 +29,13 @@
 //! }"#;
 //!
 //! let import = FullyNodedExport::from_str(import)?;
-//! let wallet = Wallet::new_no_persist(
-//!     &import.descriptor(),
-//!     import.change_descriptor().as_ref(),
-//!     Network::Testnet,
-//! )?;
+//! let descriptor = import.descriptor();
+//! let change_descriptor = import.change_descriptor();
+//! let mut builder = Wallet::builder(&descriptor).with_network(Network::Testnet);
+//! if let Some(change_descriptor) = &change_descriptor {
+//!     builder = builder.with_change_descriptor(change_descriptor);
+//! }
+//! let wallet = builder.init_without_persistence()?;
 //! # Ok::<_, Box<dyn std::error::Error>>(())
 //! ```
 //!
@@ -42,11 +44,10 @@
 //! # use bitcoin::*;
 //! # use bdk::wallet::export::*;
 //! # use bdk::*;
-//! let wallet = Wallet::new_no_persist(
-//!     "wpkh([c258d2e4/84h/1h/0h]tpubDD3ynpHgJQW8VvWRzQ5WFDCrs4jqVFGHB3vLC3r49XHJSqP8bHKdK4AriuUKLccK68zfzowx7YhmDN8SiSkgCDENUFx9qVw65YyqM78vyVe/0/*)",
-//!     Some("wpkh([c258d2e4/84h/1h/0h]tpubDD3ynpHgJQW8VvWRzQ5WFDCrs4jqVFGHB3vLC3r49XHJSqP8bHKdK4AriuUKLccK68zfzowx7YhmDN8SiSkgCDENUFx9qVw65YyqM78vyVe/1/*)"),
-//!     Network::Testnet,
-//! )?;
+//! let wallet = Wallet::builder("wpkh([c258d2e4/84h/1h/0h]tpubDD3ynpHgJQW8VvWRzQ5WFDCrs4jqVFGHB3vLC3r49XHJSqP8bHKdK4AriuUKLccK68zfzowx7YhmDN8SiSkgCDENUFx9qVw65YyqM78vyVe/0/*)")
+//!     .with_change_descriptor("wpkh([c258d2e4/84h/1h/0h]tpubDD3ynpHgJQW8VvWRzQ5WFDCrs4jqVFGHB3vLC3r49XHJSqP8bHKdK4AriuUKLccK68zfzowx7YhmDN8SiSkgCDENUFx9qVw65YyqM78vyVe/1/*)")
+//!     .with_network(Network::Testnet)
+//!     .init_without_persistence()?;
 //! let export = FullyNodedExport::export_wallet(&wallet, "exported wallet", true).unwrap();
 //!
 //! println!("Exported: {}", export.to_string());
@@ -226,7 +227,11 @@ mod test {
         change_descriptor: Option<&str>,
         network: Network,
     ) -> Wallet<()> {
-        let mut wallet = Wallet::new_no_persist(descriptor, change_descriptor, network).unwrap();
+        let mut builder = Wallet::builder(descriptor).with_network(network);
+        if let Some(change_descriptor) = change_descriptor {
+            builder = builder.with_change_descriptor(change_descriptor);
+        }
+        let mut wallet = builder.init_without_persistence().unwrap();
         let transaction = Transaction {
             input: vec![],
             output: vec![],

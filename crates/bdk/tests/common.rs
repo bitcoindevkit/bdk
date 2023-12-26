@@ -16,7 +16,12 @@ pub fn get_funded_wallet_with_change(
     descriptor: &str,
     change: Option<&str>,
 ) -> (Wallet, bitcoin::Txid) {
-    let mut wallet = Wallet::new_no_persist(descriptor, change, Network::Regtest).unwrap();
+    let mut builder = Wallet::builder(descriptor).with_network(Network::Regtest);
+    if let Some(change_descriptor) = change {
+        builder = builder.with_change_descriptor(change_descriptor);
+    }
+    let mut wallet = builder.init_without_persistence().unwrap();
+
     let change_address = wallet.get_address(AddressIndex::New).address;
     let sendto_address = Address::from_str("bcrt1q3qtze4ys45tgdvguj66zrk4fu6hq3a3v9pfly5")
         .expect("address")
