@@ -402,6 +402,58 @@ fn test_create_tx_fee_sniping_locktime_last_sync() {
 }
 
 #[test]
+fn test_create_tx_fee_sniping_tr() {
+    // P2TR:
+    // TxIn Sequence not greater than utxo confirmations,
+    // or LockTime set to current height
+    let (mut wallet, _) = get_funded_wallet(get_test_tr_single_sig());
+    let addr = wallet.get_address(AddressIndex::New).address;
+    // add checkpoint
+    let confs = 1000;
+    let new_tip = wallet.latest_checkpoint().height() + confs;
+    wallet
+        .insert_checkpoint(BlockId {
+            height: new_tip,
+            hash: BlockHash::all_zeros(),
+        })
+        .unwrap();
+    let mut builder = wallet.build_tx();
+    builder
+        .version(2)
+        .add_recipient(addr.script_pubkey(), 20_000)
+        .enable_rbf();
+    let psbt = builder.finish().unwrap();
+    let tx = psbt.unsigned_tx;
+    let txin = &tx.input[0];
+    if matches!(tx.lock_time, absolute::LockTime::ZERO) {
+        assert!(txin.sequence.to_consensus_u32() <= confs);
+    } else {
+        assert!(tx.lock_time.to_consensus_u32() > new_tip - 100);
+    }
+}
+
+#[test]
+fn test_create_tx_fee_sniping_tr_csv() {
+    // Don't overwrite policy csv for taproot spends
+    let (mut wallet, _) = get_funded_wallet(get_test_tr_with_taptree_csv());
+    let addr = wallet.get_address(New);
+    let policy = wallet.policies(KeychainKind::External).unwrap().unwrap();
+    let path = vec![(policy.id.to_string(), vec![1])].into_iter().collect();
+    let condition = policy.get_condition(&path).unwrap();
+    let csv = condition.csv.unwrap();
+    assert_eq!(csv, Sequence::from_consensus(6));
+    let mut builder = wallet.build_tx();
+    builder
+        .version(2)
+        .add_recipient(addr.script_pubkey(), 20000)
+        .enable_rbf()
+        .policy_path(path, KeychainKind::External);
+    let psbt = builder.finish().unwrap();
+    let txin = &psbt.unsigned_tx.input[0];
+    assert_eq!(txin.sequence, csv);
+}
+
+#[test]
 fn test_create_tx_default_locktime_cltv() {
     let (mut wallet, _) = get_funded_wallet(get_test_single_sig_cltv());
     let addr = wallet.get_address(New);
