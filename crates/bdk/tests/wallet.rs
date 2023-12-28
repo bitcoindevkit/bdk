@@ -372,21 +372,7 @@ fn test_create_tx_custom_version() {
 }
 
 #[test]
-fn test_create_tx_default_locktime_is_last_sync_height() {
-    let (mut wallet, _) = get_funded_wallet(get_test_wpkh());
-
-    let addr = wallet.get_address(New);
-    let mut builder = wallet.build_tx();
-    builder.add_recipient(addr.script_pubkey(), 25_000);
-    let psbt = builder.finish().unwrap();
-
-    // Since we never synced the wallet we don't have a last_sync_height
-    // we could use to try to prevent fee sniping. We default to 0.
-    assert_eq!(psbt.unsigned_tx.lock_time.to_consensus_u32(), 2_000);
-}
-
-#[test]
-fn test_create_tx_fee_sniping_locktime_last_sync() {
+fn test_create_tx_default_locktime_last_sync() {
     let (mut wallet, _) = get_funded_wallet(get_test_wpkh());
     let addr = wallet.get_address(New);
     let mut builder = wallet.build_tx();
