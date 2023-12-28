@@ -12,7 +12,7 @@ use bdk_bitcoind_rpc::{
     Emitter,
 };
 use bdk_chain::{
-    bitcoin::{Block, Transaction},
+    bitcoin::{constants::genesis_block, Block, Transaction},
     indexed_tx_graph, keychain,
     local_chain::{self, CheckPoint, LocalChain},
     ConfirmationTimeHeightAnchor, IndexedTxGraph,
@@ -117,10 +117,11 @@ fn main() -> anyhow::Result<()> {
         "[{:>10}s] loaded initial changeset from db",
         start.elapsed().as_secs_f32()
     );
+    let (init_chain_changeset, init_graph_changeset) = init_changeset;
 
     let graph = Mutex::new({
         let mut graph = IndexedTxGraph::new(index);
-        graph.apply_changeset(init_changeset.1);
+        graph.apply_changeset(init_graph_changeset);
         graph
     });
     println!(
@@ -128,7 +129,16 @@ fn main() -> anyhow::Result<()> {
         start.elapsed().as_secs_f32()
     );
 
-    let chain = Mutex::new(LocalChain::from_changeset(init_changeset.0)?);
+    let chain = Mutex::new(if init_chain_changeset.is_empty() {
+        let genesis_hash = genesis_block(args.network).block_hash();
+        let (chain, chain_changeset) = LocalChain::from_genesis_hash(genesis_hash);
+        let mut db = db.lock().unwrap();
+        db.stage((chain_changeset, Default::default()));
+        db.commit()?;
+        chain
+    } else {
+        LocalChain::from_changeset(init_chain_changeset)?
+    });
     println!(
         "[{:>10}s] loaded local chain from changeset",
         start.elapsed().as_secs_f32()
