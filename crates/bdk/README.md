@@ -72,7 +72,10 @@ fn main() {
     let db = ();
 
     let descriptor = "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/84'/0'/0'/0/*)";
-    let mut wallet = Wallet::new(descriptor, None, db, Network::Testnet).expect("should create");
+    let mut wallet = Wallet::builder(descriptor)
+        .with_network(Network::Testnet)
+        .init(db)
+        .expect("should create");
 
     // get a new address (this increments revealed derivation index)
     println!("revealed address: {}", wallet.get_address(AddressIndex::New));

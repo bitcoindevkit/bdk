@@ -28,6 +28,7 @@ use bdk_chain::{
     Append, BlockId, ChainPosition, ConfirmationTime, ConfirmationTimeHeightAnchor, FullTxOut,
     IndexedTxGraph, Persist, PersistBackend,
 };
+use bitcoin::psbt;
 use bitcoin::secp256k1::{All, Secp256k1};
 use bitcoin::sighash::{EcdsaSighashType, TapSighashType};
 use bitcoin::{
@@ -35,7 +36,6 @@ use bitcoin::{
     Weight, Witness,
 };
 use bitcoin::{consensus::encode::serialize, BlockHash};
-use bitcoin::{constants::genesis_block, psbt};
 use core::fmt;
 use core::ops::Deref;
 use descriptor::error::Error as DescriptorError;
@@ -43,6 +43,8 @@ use miniscript::psbt::{PsbtExt, PsbtInputExt, PsbtInputSatisfier};
 
 use bdk_chain::tx_graph::CalculateFeeError;
 
+mod builder;
+pub use builder::*;
 pub mod coin_selection;
 pub mod export;
 pub mod signer;
@@ -229,34 +231,6 @@ impl fmt::Display for AddressInfo {
     }
 }
 
-impl Wallet {
-    /// Creates a wallet that does not persist data.
-    pub fn new_no_persist<E: IntoWalletDescriptor>(
-        descriptor: E,
-        change_descriptor: Option<E>,
-        network: Network,
-    ) -> Result<Self, DescriptorError> {
-        Self::new(descriptor, change_descriptor, (), network).map_err(|e| match e {
-            NewError::Descriptor(e) => e,
-            NewError::Write(_) => unreachable!("mock-write must always succeed"),
-        })
-    }
-
-    /// Creates a wallet that does not persist data, with a custom genesis hash.
-    pub fn new_no_persist_with_genesis_hash<E: IntoWalletDescriptor>(
-        descriptor: E,
-        change_descriptor: Option<E>,
-        network: Network,
-        genesis_hash: BlockHash,
-    ) -> Result<Self, crate::descriptor::DescriptorError> {
-        Self::new_with_genesis_hash(descriptor, change_descriptor, (), network, genesis_hash)
-            .map_err(|e| match e {
-                NewError::Descriptor(e) => e,
-                NewError::Write(_) => unreachable!("mock-write must always succeed"),
-            })
-    }
-}
-
 impl<D> Wallet<D>
 where
     D: PersistBackend<ChangeSet, WriteError = core::convert::Infallible>,
@@ -280,34 +254,31 @@ where
     }
 }
 
-/// The error type when constructing a fresh [`Wallet`].
+/// The error type when initializing a fresh [`Wallet`].
 ///
-/// Methods [`new`] and [`new_with_genesis_hash`] may return this error.
-///
-/// [`new`]: Wallet::new
-/// [`new_with_genesis_hash`]: Wallet::new_with_genesis_hash
+/// [`WalletBuilder::init`] may return this error.
 #[derive(Debug)]
-pub enum NewError<W> {
+pub enum InitError<W> {
     /// There was problem with the passed-in descriptor(s).
     Descriptor(crate::descriptor::DescriptorError),
     /// We were unable to write the wallet's data to the persistence backend.
     Write(W),
 }
 
-impl<W> fmt::Display for NewError<W>
+impl<W> fmt::Display for InitError<W>
 where
     W: fmt::Display,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            NewError::Descriptor(e) => e.fmt(f),
-            NewError::Write(e) => e.fmt(f),
+            InitError::Descriptor(e) => e.fmt(f),
+            InitError::Write(e) => e.fmt(f),
         }
     }
 }
 
 #[cfg(feature = "std")]
-impl<W> std::error::Error for NewError<W> where W: core::fmt::Display + core::fmt::Debug {}
+impl<W> std::error::Error for InitError<W> where W: core::fmt::Display + core::fmt::Debug {}
 
 /// The error type when loading a [`Wallet`] from persistence.
 ///
@@ -350,12 +321,9 @@ impl<L> std::error::Error for LoadError<L> where L: core::fmt::Display + core::f
 
 /// Error type for when we try load a [`Wallet`] from persistence and creating it if non-existant.
 ///
-/// Methods [`new_or_load`] and [`new_or_load_with_genesis_hash`] may return this error.
-///
-/// [`new_or_load`]: Wallet::new_or_load
-/// [`new_or_load_with_genesis_hash`]: Wallet::new_or_load_with_genesis_hash
+/// Method [`WalletBuilder::init_or_load`] may return this error.
 #[derive(Debug)]
-pub enum NewOrLoadError<W, L> {
+pub enum InitOrLoadError<W, L> {
     /// There is a problem with the passed-in descriptor.
     Descriptor(crate::descriptor::DescriptorError),
     /// Writing to the persistence backend failed.
@@ -380,23 +348,23 @@ pub enum NewOrLoadError<W, L> {
     },
 }
 
-impl<W, L> fmt::Display for NewOrLoadError<W, L>
+impl<W, L> fmt::Display for InitOrLoadError<W, L>
 where
     W: fmt::Display,
     L: fmt::Display,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            NewOrLoadError::Descriptor(e) => e.fmt(f),
-            NewOrLoadError::Write(e) => write!(f, "failed to write to persistence: {}", e),
-            NewOrLoadError::Load(e) => write!(f, "failed to load from persistence: {}", e),
-            NewOrLoadError::NotInitialized => {
+            InitOrLoadError::Descriptor(e) => e.fmt(f),
+            InitOrLoadError::Write(e) => write!(f, "failed to write to persistence: {}", e),
+            InitOrLoadError::Load(e) => write!(f, "failed to load from persistence: {}", e),
+            InitOrLoadError::NotInitialized => {
                 write!(f, "wallet is not initialized, persistence backend is empty")
             }
-            NewOrLoadError::LoadedGenesisDoesNotMatch { expected, got } => {
+            InitOrLoadError::LoadedGenesisDoesNotMatch { expected, got } => {
                 write!(f, "loaded genesis hash is not {}, got {:?}", expected, got)
             }
-            NewOrLoadError::LoadedNetworkDoesNotMatch { expected, got } => {
+            InitOrLoadError::LoadedNetworkDoesNotMatch { expected, got } => {
                 write!(f, "loaded network type is not {}, got {:?}", expected, got)
             }
         }
@@ -404,7 +372,7 @@ where
 }
 
 #[cfg(feature = "std")]
-impl<W, L> std::error::Error for NewOrLoadError<W, L>
+impl<W, L> std::error::Error for InitOrLoadError<W, L>
 where
     W: core::fmt::Display + core::fmt::Debug,
     L: core::fmt::Display + core::fmt::Debug,
@@ -424,54 +392,43 @@ pub enum InsertTxError {
     },
 }
 
-impl<D> Wallet<D> {
-    /// Initialize an empty [`Wallet`].
-    pub fn new<E: IntoWalletDescriptor>(
-        descriptor: E,
-        change_descriptor: Option<E>,
-        db: D,
-        network: Network,
-    ) -> Result<Self, NewError<D::WriteError>>
-    where
-        D: PersistBackend<ChangeSet>,
-    {
-        let genesis_hash = genesis_block(network).block_hash();
-        Self::new_with_genesis_hash(descriptor, change_descriptor, db, network, genesis_hash)
+impl Wallet {
+    /// Start building a new [`Wallet`].
+    pub fn builder<E: IntoWalletDescriptor>(descriptor: E) -> WalletBuilder<E> {
+        WalletBuilder::new(descriptor)
     }
+}
 
-    /// Initialize an empty [`Wallet`] with a custom genesis hash.
-    ///
-    /// This is like [`Wallet::new`] with an additional `genesis_hash` parameter. This is useful
-    /// for syncing from alternative networks.
-    pub fn new_with_genesis_hash<E: IntoWalletDescriptor>(
-        descriptor: E,
-        change_descriptor: Option<E>,
+impl<D> Wallet<D> {
+    pub(crate) fn init<E: IntoWalletDescriptor>(
+        builder: WalletBuilder<E>,
         db: D,
-        network: Network,
-        genesis_hash: BlockHash,
-    ) -> Result<Self, NewError<D::WriteError>>
+    ) -> Result<Self, InitError<D::WriteError>>
     where
         D: PersistBackend<ChangeSet>,
     {
         let secp = Secp256k1::new();
+        let network = builder.network;
+        let genesis_hash = builder.determine_genesis_hash();
         let (chain, chain_changeset) = LocalChain::from_genesis_hash(genesis_hash);
         let mut index = KeychainTxOutIndex::<KeychainKind>::default();
-
-        let (signers, change_signers) =
-            create_signers(&mut index, &secp, descriptor, change_descriptor, network)
-                .map_err(NewError::Descriptor)?;
-
+        let (signers, change_signers) = create_signers(
+            &mut index,
+            &secp,
+            builder.descriptor,
+            builder.change_descriptor,
+            builder.network,
+        )
+        .map_err(InitError::Descriptor)?;
         let indexed_graph = IndexedTxGraph::new(index);
-
         let mut persist = Persist::new(db);
         persist.stage(ChangeSet {
             chain: chain_changeset,
             indexed_tx_graph: indexed_graph.initial_changeset(),
             network: Some(network),
         });
-        persist.commit().map_err(NewError::Write)?;
-
-        Ok(Wallet {
+        persist.commit().map_err(InitError::Write)?;
+        Ok(Self {
             signers,
             change_signers,
             network,
@@ -533,90 +490,54 @@ impl<D> Wallet<D> {
         })
     }
 
-    /// Either loads [`Wallet`] from persistence, or initializes it if it does not exist.
-    ///
-    /// This method will fail if the loaded [`Wallet`] has different parameters to those provided.
-    pub fn new_or_load<E: IntoWalletDescriptor>(
-        descriptor: E,
-        change_descriptor: Option<E>,
-        db: D,
-        network: Network,
-    ) -> Result<Self, NewOrLoadError<D::WriteError, D::LoadError>>
-    where
-        D: PersistBackend<ChangeSet>,
-    {
-        let genesis_hash = genesis_block(network).block_hash();
-        Self::new_or_load_with_genesis_hash(
-            descriptor,
-            change_descriptor,
-            db,
-            network,
-            genesis_hash,
-        )
-    }
-
-    /// Either loads [`Wallet`] from persistence, or initializes it if it does not exist (with a
-    /// custom genesis hash).
-    ///
-    /// This method will fail if the loaded [`Wallet`] has different parameters to those provided.
-    /// This is like [`Wallet::new_or_load`] with an additional `genesis_hash` parameter. This is
-    /// useful for syncing from alternative networks.
-    pub fn new_or_load_with_genesis_hash<E: IntoWalletDescriptor>(
-        descriptor: E,
-        change_descriptor: Option<E>,
+    pub(crate) fn init_or_load<E: IntoWalletDescriptor>(
+        builder: WalletBuilder<E>,
         mut db: D,
-        network: Network,
-        genesis_hash: BlockHash,
-    ) -> Result<Self, NewOrLoadError<D::WriteError, D::LoadError>>
+    ) -> Result<Self, InitOrLoadError<D::WriteError, D::LoadError>>
     where
         D: PersistBackend<ChangeSet>,
     {
-        let changeset = db.load_from_persistence().map_err(NewOrLoadError::Load)?;
+        let network = builder.network;
+        let genesis_hash = builder.determine_genesis_hash();
+        let changeset = db.load_from_persistence().map_err(InitOrLoadError::Load)?;
         match changeset {
             Some(changeset) => {
-                let wallet =
-                    Self::load_from_changeset(descriptor, change_descriptor, db, changeset)
-                        .map_err(|e| match e {
-                            LoadError::Descriptor(e) => NewOrLoadError::Descriptor(e),
-                            LoadError::Load(e) => NewOrLoadError::Load(e),
-                            LoadError::NotInitialized => NewOrLoadError::NotInitialized,
-                            LoadError::MissingNetwork => {
-                                NewOrLoadError::LoadedNetworkDoesNotMatch {
-                                    expected: network,
-                                    got: None,
-                                }
-                            }
-                            LoadError::MissingGenesis => {
-                                NewOrLoadError::LoadedGenesisDoesNotMatch {
-                                    expected: genesis_hash,
-                                    got: None,
-                                }
-                            }
-                        })?;
-                if wallet.network != network {
-                    return Err(NewOrLoadError::LoadedNetworkDoesNotMatch {
+                let wallet = Self::load_from_changeset(
+                    builder.descriptor,
+                    builder.change_descriptor,
+                    db,
+                    changeset,
+                )
+                .map_err(|err| match err {
+                    LoadError::Descriptor(err) => InitOrLoadError::Descriptor(err),
+                    LoadError::Load(err) => InitOrLoadError::Load(err),
+                    LoadError::NotInitialized => InitOrLoadError::NotInitialized,
+                    LoadError::MissingNetwork => InitOrLoadError::LoadedNetworkDoesNotMatch {
+                        expected: network,
+                        got: None,
+                    },
+                    LoadError::MissingGenesis => InitOrLoadError::LoadedGenesisDoesNotMatch {
+                        expected: genesis_hash,
+                        got: None,
+                    },
+                })?;
+                if wallet.network != builder.network {
+                    return Err(InitOrLoadError::LoadedNetworkDoesNotMatch {
                         expected: network,
                         got: Some(wallet.network),
                     });
                 }
                 if wallet.chain.genesis_hash() != genesis_hash {
-                    return Err(NewOrLoadError::LoadedGenesisDoesNotMatch {
+                    return Err(InitOrLoadError::LoadedGenesisDoesNotMatch {
                         expected: genesis_hash,
                         got: Some(wallet.chain.genesis_hash()),
                     });
                 }
                 Ok(wallet)
             }
-            None => Self::new_with_genesis_hash(
-                descriptor,
-                change_descriptor,
-                db,
-                network,
-                genesis_hash,
-            )
-            .map_err(|e| match e {
-                NewError::Descriptor(e) => NewOrLoadError::Descriptor(e),
-                NewError::Write(e) => NewOrLoadError::Write(e),
+            None => builder.init(db).map_err(|err| match err {
+                InitError::Descriptor(err) => InitOrLoadError::Descriptor(err),
+                InitError::Write(err) => InitOrLoadError::Write(err),
             }),
         }
     }
@@ -1121,7 +1042,9 @@ impl<D> Wallet<D> {
     /// ```
     /// # use bdk::{Wallet, KeychainKind};
     /// # use bdk::bitcoin::Network;
-    /// let wallet = Wallet::new_no_persist("wpkh(tprv8ZgxMBicQKsPe73PBRSmNbTfbcsZnwWhz5eVmhHpi31HW29Z7mc9B4cWGRQzopNUzZUT391DeDJxL2PefNunWyLgqCKRMDkU1s2s8bAfoSk/84'/0'/0'/0/*)", None, Network::Testnet)?;
+    /// let wallet = Wallet::builder("wpkh(tprv8ZgxMBicQKsPe73PBRSmNbTfbcsZnwWhz5eVmhHpi31HW29Z7mc9B4cWGRQzopNUzZUT391DeDJxL2PefNunWyLgqCKRMDkU1s2s8bAfoSk/84'/0'/0'/0/*)")
+    ///     .with_network(Network::Testnet)
+    ///     .init_without_persistence()?;
     /// for secret_key in wallet.get_signers(KeychainKind::External).signers().iter().filter_map(|s| s.descriptor_secret_key()) {
     ///     // secret_key: tprv8ZgxMBicQKsPe73PBRSmNbTfbcsZnwWhz5eVmhHpi31HW29Z7mc9B4cWGRQzopNUzZUT391DeDJxL2PefNunWyLgqCKRMDkU1s2s8bAfoSk/84'/0'/0'/0/*
     ///     println!("secret_key: {}", secret_key);
@@ -2403,12 +2326,11 @@ macro_rules! doctest_wallet {
         let descriptor = "tr([73c5da0a/86'/0'/0']tprv8fMn4hSKPRC1oaCPqxDb1JWtgkpeiQvZhsr8W2xuy3GEMkzoArcAWTfJxYb6Wj8XNNDWEjfYKK4wGQXh3ZUXhDF2NcnsALpWTeSwarJt7Vc/0/*)";
         let change_descriptor = "tr([73c5da0a/86'/0'/0']tprv8fMn4hSKPRC1oaCPqxDb1JWtgkpeiQvZhsr8W2xuy3GEMkzoArcAWTfJxYb6Wj8XNNDWEjfYKK4wGQXh3ZUXhDF2NcnsALpWTeSwarJt7Vc/1/*)";
 
-        let mut wallet = Wallet::new_no_persist(
-            descriptor,
-            Some(change_descriptor),
-            Network::Regtest,
-        )
-        .unwrap();
+        let mut wallet = Wallet::builder(descriptor)
+            .with_change_descriptor(change_descriptor)
+            .with_network(Network::Regtest)
+            .init_without_persistence()
+            .unwrap();
         let address = wallet.get_address(AddressIndex::New).address;
         let tx = Transaction {
             version: 1,
