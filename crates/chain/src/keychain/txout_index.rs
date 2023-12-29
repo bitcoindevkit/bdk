@@ -117,11 +117,12 @@ impl<K: Clone + Ord + Debug> Indexer for KeychainTxOutIndex<K> {
 impl<K> KeychainTxOutIndex<K> {
     /// Construct a [`KeychainTxOutIndex`] with the given `lookahead`.
     ///
-    /// The lookahead is the number of scripts to cache ahead of the last revealed script index.
-    /// This is useful to find outputs you own when processing block data that lie beyond the last
-    /// revealed index. In certain situations, such as when performing an initial scan of the
-    /// blockchain during wallet import, it may be uncertain or unknown what the last revealed index
-    /// is.
+    /// The `lookahead` is the number of script pubkeys to derive and cache from the internal
+    /// descriptors over and above the last revealed script index. Without a lookahead the index
+    /// will miss outputs you own when processing transactions whose output script pubkeys lie
+    /// beyond the last revealed index. In certain situations, such as when performing an initial
+    /// scan of the blockchain during wallet import, it may be uncertain or unknown what the index
+    /// of the last revealed script pubkey actually is.
     pub fn new(lookahead: u32) -> Self {
         Self {
             inner: SpkTxOutIndex::default(),
