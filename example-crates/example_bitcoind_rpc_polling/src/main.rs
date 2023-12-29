@@ -12,7 +12,7 @@ use bdk_bitcoind_rpc::{
     Emitter,
 };
 use bdk_chain::{
-    bitcoin::{Block, Transaction},
+    bitcoin::{constants::genesis_block, Block, Transaction},
     indexed_tx_graph, keychain,
     local_chain::{self, CheckPoint, LocalChain},
     ConfirmationTimeHeightAnchor, IndexedTxGraph,
@@ -64,9 +64,6 @@ struct RpcArgs {
     /// Starting block height to fallback to if no point of agreement if found
     #[clap(env = "FALLBACK_HEIGHT", long, default_value = "0")]
     fallback_height: u32,
-    /// The unused-scripts lookahead will be kept at this size
-    #[clap(long, default_value = "10")]
-    lookahead: u32,
 }
 
 impl From<RpcArgs> for Auth {
@@ -120,10 +117,11 @@ fn main() -> anyhow::Result<()> {
         "[{:>10}s] loaded initial changeset from db",
         start.elapsed().as_secs_f32()
     );
+    let (init_chain_changeset, init_graph_changeset) = init_changeset;
 
     let graph = Mutex::new({
         let mut graph = IndexedTxGraph::new(index);
-        graph.apply_changeset(init_changeset.1);
+        graph.apply_changeset(init_graph_changeset);
         graph
     });
     println!(
@@ -131,7 +129,16 @@ fn main() -> anyhow::Result<()> {
         start.elapsed().as_secs_f32()
     );
 
-    let chain = Mutex::new(LocalChain::from_changeset(init_changeset.0)?);
+    let chain = Mutex::new(if init_chain_changeset.is_empty() {
+        let genesis_hash = genesis_block(args.network).block_hash();
+        let (chain, chain_changeset) = LocalChain::from_genesis_hash(genesis_hash);
+        let mut db = db.lock().unwrap();
+        db.stage((chain_changeset, Default::default()));
+        db.commit()?;
+        chain
+    } else {
+        LocalChain::from_changeset(init_chain_changeset)?
+    });
     println!(
         "[{:>10}s] loaded local chain from changeset",
         start.elapsed().as_secs_f32()
@@ -161,12 +168,8 @@ fn main() -> anyhow::Result<()> {
     match rpc_cmd {
         RpcCommands::Sync { rpc_args } => {
             let RpcArgs {
-                fallback_height,
-                lookahead,
-                ..
+                fallback_height, ..
             } = rpc_args;
-
-            graph.lock().unwrap().index.set_lookahead_for_all(lookahead);
 
             let chain_tip = chain.lock().unwrap().tip();
             let rpc_client = rpc_args.new_client()?;
@@ -233,13 +236,10 @@ fn main() -> anyhow::Result<()> {
         }
         RpcCommands::Live { rpc_args } => {
             let RpcArgs {
-                fallback_height,
-                lookahead,
-                ..
+                fallback_height, ..
             } = rpc_args;
             let sigterm_flag = start_ctrlc_handler();
 
-            graph.lock().unwrap().index.set_lookahead_for_all(lookahead);
             let last_cp = chain.lock().unwrap().tip();
 
             println!(

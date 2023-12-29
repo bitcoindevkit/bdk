@@ -811,20 +811,15 @@ impl<'a, D> TxBuilder<'a, D, DefaultCoinSelectionAlgorithm, BumpFee> {
 }
 
 /// Ordering of the transaction's inputs and outputs
-#[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Hash, Clone, Copy)]
+#[derive(Default, Debug, Ord, PartialOrd, Eq, PartialEq, Hash, Clone, Copy)]
 pub enum TxOrdering {
     /// Randomized (default)
+    #[default]
     Shuffle,
     /// Unchanged
     Untouched,
     /// BIP69 / Lexicographic
     Bip69Lexicographic,
-}
-
-impl Default for TxOrdering {
-    fn default() -> Self {
-        TxOrdering::Shuffle
-    }
 }
 
 impl TxOrdering {
@@ -880,20 +875,15 @@ impl RbfValue {
 }
 
 /// Policy regarding the use of change outputs when creating a transaction
-#[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Hash, Clone, Copy)]
+#[derive(Default, Debug, Ord, PartialOrd, Eq, PartialEq, Hash, Clone, Copy)]
 pub enum ChangeSpendPolicy {
     /// Use both change and non-change outputs (default)
+    #[default]
     ChangeAllowed,
     /// Only use change outputs (see [`TxBuilder::only_spend_change`])
     OnlyChange,
     /// Only use non-change outputs (see [`TxBuilder::do_not_spend_change`])
     ChangeForbidden,
-}
-
-impl Default for ChangeSpendPolicy {
-    fn default() -> Self {
-        ChangeSpendPolicy::ChangeAllowed
-    }
 }
 
 impl ChangeSpendPolicy {
