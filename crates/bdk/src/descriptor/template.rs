@@ -575,7 +575,7 @@ mod test {
 
         if let ExtendedDescriptor::Pkh(pkh) = xdesc.0 {
             let path: Vec<ChildNumber> = pkh.into_inner().full_derivation_path().unwrap().into();
-            let purpose = path.get(0).unwrap();
+            let purpose = path.first().unwrap();
             assert_matches!(purpose, Hardened { index: 44 });
             let coin_type = path.get(1).unwrap();
             assert_matches!(coin_type, Hardened { index: 0 });
@@ -589,7 +589,7 @@ mod test {
 
         if let ExtendedDescriptor::Pkh(pkh) = tdesc.0 {
             let path: Vec<ChildNumber> = pkh.into_inner().full_derivation_path().unwrap().into();
-            let purpose = path.get(0).unwrap();
+            let purpose = path.first().unwrap();
             assert_matches!(purpose, Hardened { index: 44 });
             let coin_type = path.get(1).unwrap();
             assert_matches!(coin_type, Hardened { index: 1 });

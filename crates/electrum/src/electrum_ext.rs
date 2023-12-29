@@ -477,7 +477,7 @@ fn populate_with_txids(
 
         let spk = tx
             .output
-            .get(0)
+            .first()
             .map(|txo| &txo.script_pubkey)
             .expect("tx must have an output");
 

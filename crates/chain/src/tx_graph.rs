@@ -581,10 +581,7 @@ impl<A: Clone + Ord> TxGraph<A> {
         }
 
         for (outpoint, txout) in changeset.txouts {
-            let tx_entry = self
-                .txs
-                .entry(outpoint.txid)
-                .or_insert_with(Default::default);
+            let tx_entry = self.txs.entry(outpoint.txid).or_default();
 
             match tx_entry {
                 (TxNodeInternal::Whole(_), _, _) => { /* do nothing since we already have full tx */
@@ -597,13 +594,13 @@ impl<A: Clone + Ord> TxGraph<A> {
 
         for (anchor, txid) in changeset.anchors {
             if self.anchors.insert((anchor.clone(), txid)) {
-                let (_, anchors, _) = self.txs.entry(txid).or_insert_with(Default::default);
+                let (_, anchors, _) = self.txs.entry(txid).or_default();
                 anchors.insert(anchor);
             }
         }
 
         for (txid, new_last_seen) in changeset.last_seen {
-            let (_, _, last_seen) = self.txs.entry(txid).or_insert_with(Default::default);
+            let (_, _, last_seen) = self.txs.entry(txid).or_default();
             if new_last_seen > *last_seen {
                 *last_seen = new_last_seen;
             }

@@ -168,9 +168,7 @@ impl<I: Clone + Ord> SpkTxOutIndex<I> {
     ///
     /// Returns `None` if the `TxOut` hasn't been scanned or if nothing matching was found there.
     pub fn txout(&self, outpoint: OutPoint) -> Option<(&I, &TxOut)> {
-        self.txouts
-            .get(&outpoint)
-            .map(|(spk_i, txout)| (spk_i, txout))
+        self.txouts.get(&outpoint).map(|v| (&v.0, &v.1))
     }
 
     /// Returns the script that has been inserted at the `index`.
