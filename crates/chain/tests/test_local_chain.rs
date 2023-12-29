@@ -292,6 +292,27 @@ fn update_local_chain() {
                 ],
             },
         },
+        // Allow update that is shorter than original chain
+        //        | 0 | 1 | 2 | 3 | 4 | 5
+        // chain  | A       C   D   E   F
+        // update | A       C   D'
+        TestLocalChain {
+            name: "allow update that is shorter than original chain",
+            chain: local_chain![(0, h!("_")), (2, h!("C")), (3, h!("D")), (4, h!("E")), (5, h!("F"))],
+            update: chain_update![(0, h!("_")), (2, h!("C")), (3, h!("D'"))],
+            exp: ExpectedResult::Ok {
+                changeset: &[
+                    (3, Some(h!("D'"))),
+                    (4, None),
+                    (5, None),
+                ],
+                init_changeset: &[
+                    (0, Some(h!("_"))),
+                    (2, Some(h!("C"))),
+                    (3, Some(h!("D'"))),
+                ],
+            },
+        },
     ]
     .into_iter()
     .for_each(TestLocalChain::run);
