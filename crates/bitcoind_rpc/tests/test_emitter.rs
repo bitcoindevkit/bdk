@@ -157,28 +157,6 @@ impl TestEnv {
     }
 }
 
-fn block_to_chain_update(block: &bitcoin::Block, height: u32) -> local_chain::Update {
-    let this_id = BlockId {
-        height,
-        hash: block.block_hash(),
-    };
-    let tip = if block.header.prev_blockhash == BlockHash::all_zeros() {
-        CheckPoint::new(this_id)
-    } else {
-        CheckPoint::new(BlockId {
-            height: height - 1,
-            hash: block.header.prev_blockhash,
-        })
-        .extend(core::iter::once(this_id))
-        .expect("must construct checkpoint")
-    };
-
-    local_chain::Update {
-        tip,
-        introduce_older_blocks: false,
-    }
-}
-
 /// Ensure that blocks are emitted in order even after reorg.
 ///
 /// 1. Mine 101 blocks.
@@ -200,17 +178,21 @@ pub fn test_sync_local_chain() -> anyhow::Result<()> {
 
     // see if the emitter outputs the right blocks
     println!("first sync:");
-    while let Some((height, block)) = emitter.next_block()? {
+    while let Some(emission) = emitter.next_block()? {
+        let height = emission.block_height();
+        let hash = emission.block_hash();
         assert_eq!(
-            block.block_hash(),
+            emission.block_hash(),
             exp_hashes[height as usize],
             "emitted block hash is unexpected"
         );
 
-        let chain_update = block_to_chain_update(&block, height);
         assert_eq!(
-            local_chain.apply_update(chain_update)?,
-            BTreeMap::from([(height, Some(block.block_hash()))]),
+            local_chain.apply_update(local_chain::Update {
+                tip: emission.checkpoint,
+                introduce_older_blocks: false,
+            })?,
+            BTreeMap::from([(height, Some(hash))]),
             "chain update changeset is unexpected",
         );
     }
@@ -237,27 +219,30 @@ pub fn test_sync_local_chain() -> anyhow::Result<()> {
     // see if the emitter outputs the right blocks
     println!("after reorg:");
     let mut exp_height = exp_hashes.len() - reorged_blocks.len();
-    while let Some((height, block)) = emitter.next_block()? {
+    while let Some(emission) = emitter.next_block()? {
+        let height = emission.block_height();
+        let hash = emission.block_hash();
         assert_eq!(
             height, exp_height as u32,
             "emitted block has unexpected height"
         );
 
         assert_eq!(
-            block.block_hash(),
-            exp_hashes[height as usize],
+            hash, exp_hashes[height as usize],
             "emitted block is unexpected"
         );
 
-        let chain_update = block_to_chain_update(&block, height);
         assert_eq!(
-            local_chain.apply_update(chain_update)?,
+            local_chain.apply_update(local_chain::Update {
+                tip: emission.checkpoint,
+                introduce_older_blocks: false,
+            })?,
             if exp_height == exp_hashes.len() - reorged_blocks.len() {
-                core::iter::once((height, Some(block.block_hash())))
+                core::iter::once((height, Some(hash)))
                     .chain((height + 1..exp_hashes.len() as u32).map(|h| (h, None)))
                     .collect::<bdk_chain::local_chain::ChangeSet>()
             } else {
-                BTreeMap::from([(height, Some(block.block_hash()))])
+                BTreeMap::from([(height, Some(hash))])
             },
             "chain update changeset is unexpected",
         );
@@ -307,9 +292,13 @@ fn test_into_tx_graph() -> anyhow::Result<()> {
 
     let emitter = &mut Emitter::new(&env.client, chain.tip(), 0);
 
-    while let Some((height, block)) = emitter.next_block()? {
-        let _ = chain.apply_update(block_to_chain_update(&block, height))?;
-        let indexed_additions = indexed_tx_graph.apply_block_relevant(block, height);
+    while let Some(emission) = emitter.next_block()? {
+        let height = emission.block_height();
+        let _ = chain.apply_update(local_chain::Update {
+            tip: emission.checkpoint,
+            introduce_older_blocks: false,
+        })?;
+        let indexed_additions = indexed_tx_graph.apply_block_relevant(emission.block, height);
         assert!(indexed_additions.is_empty());
     }
 
@@ -367,10 +356,13 @@ fn test_into_tx_graph() -> anyhow::Result<()> {
 
     // must receive mined block which will confirm the transactions.
     {
-        let (height, block) = emitter.next_block()?.expect("must get mined block");
-        let _ = chain
-            .apply_update(CheckPoint::from_header(&block.header, height).into_update(false))?;
-        let indexed_additions = indexed_tx_graph.apply_block_relevant(block, height);
+        let emission = emitter.next_block()?.expect("must get mined block");
+        let height = emission.block_height();
+        let _ = chain.apply_update(local_chain::Update {
+            tip: emission.checkpoint,
+            introduce_older_blocks: false,
+        })?;
+        let indexed_additions = indexed_tx_graph.apply_block_relevant(emission.block, height);
         assert!(indexed_additions.graph.txs.is_empty());
         assert!(indexed_additions.graph.txouts.is_empty());
         assert_eq!(indexed_additions.graph.anchors, exp_anchors);
@@ -407,9 +399,12 @@ fn ensure_block_emitted_after_reorg_is_at_reorg_height() -> anyhow::Result<()> {
 
     for reorg_count in 1..=10 {
         let replaced_blocks = env.reorg_empty_blocks(reorg_count)?;
-        let (height, next_header) = emitter.next_header()?.expect("must emit block after reorg");
+        let next_emission = emitter.next_header()?.expect("must emit block after reorg");
         assert_eq!(
-            (height as usize, next_header.block_hash()),
+            (
+                next_emission.block_height() as usize,
+                next_emission.block_hash()
+            ),
             replaced_blocks[0],
             "block emitted after reorg should be at the reorg height"
         );
@@ -439,8 +434,9 @@ fn sync_from_emitter<C>(
 where
     C: bitcoincore_rpc::RpcApi,
 {
-    while let Some((height, block)) = emitter.next_block()? {
-        process_block(recv_chain, recv_graph, block, height)?;
+    while let Some(emission) = emitter.next_block()? {
+        let height = emission.block_height();
+        process_block(recv_chain, recv_graph, emission.block, height)?;
     }
     Ok(())
 }
@@ -660,7 +656,8 @@ fn mempool_re_emits_if_tx_introduction_height_not_reached() -> anyhow::Result<()
 
     // At this point, the emitter has seen all mempool transactions. It should only re-emit those
     // that have introduction heights less than the emitter's last-emitted block tip.
-    while let Some((height, _)) = emitter.next_header()? {
+    while let Some(emission) = emitter.next_header()? {
+        let height = emission.block_height();
         // We call `mempool()` twice.
         // The second call (at height `h`) should skip the tx introduced at height `h`.
         for try_index in 0..2 {
@@ -754,7 +751,8 @@ fn mempool_during_reorg() -> anyhow::Result<()> {
             .collect::<BTreeMap<_, _>>());
 
         // `next_header` emits the replacement block of the reorg
-        if let Some((height, _)) = emitter.next_header()? {
+        if let Some(emission) = emitter.next_header()? {
+            let height = emission.block_height();
             println!("\t- replacement height: {}", height);
 
             // the mempool emission (that follows the first block emission after reorg) should only
@@ -835,12 +833,12 @@ fn no_agreement_point() -> anyhow::Result<()> {
     env.mine_blocks(PREMINE_COUNT, None)?;
 
     // emit block 99a
-    let (_, block_header_99a) = emitter.next_header()?.expect("block 99a header");
+    let block_header_99a = emitter.next_header()?.expect("block 99a header").block;
     let block_hash_99a = block_header_99a.block_hash();
     let block_hash_98a = block_header_99a.prev_blockhash;
 
     // emit block 100a
-    let (_, block_header_100a) = emitter.next_header()?.expect("block 100a header");
+    let block_header_100a = emitter.next_header()?.expect("block 100a header").block;
     let block_hash_100a = block_header_100a.block_hash();
 
     // get hash for block 101a
@@ -855,7 +853,7 @@ fn no_agreement_point() -> anyhow::Result<()> {
     env.mine_blocks(3, None)?;
 
     // emit block header 99b
-    let (_, block_header_99b) = emitter.next_header()?.expect("block 99b header");
+    let block_header_99b = emitter.next_header()?.expect("block 99b header").block;
     let block_hash_99b = block_header_99b.block_hash();
     let block_hash_98b = block_header_99b.prev_blockhash;
 
