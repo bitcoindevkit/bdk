@@ -224,20 +224,26 @@ where
     /// Irrelevant transactions in `txs` will be ignored.
     pub fn apply_block_relevant(
         &mut self,
-        block: Block,
+        block: &Block,
         height: u32,
     ) -> ChangeSet<A, I::ChangeSet> {
         let block_id = BlockId {
             hash: block.block_hash(),
             height,
         };
-        let txs = block.txdata.iter().enumerate().map(|(tx_pos, tx)| {
-            (
-                tx,
-                core::iter::once(A::from_block_position(&block, block_id, tx_pos)),
-            )
-        });
-        self.batch_insert_relevant(txs)
+        let mut changeset = ChangeSet::<A, I::ChangeSet>::default();
+        for (tx_pos, tx) in block.txdata.iter().enumerate() {
+            changeset.indexer.append(self.index.index_tx(tx));
+            if self.index.is_tx_relevant(tx) {
+                let txid = tx.txid();
+                let anchor = A::from_block_position(block, block_id, tx_pos);
+                changeset.graph.append(self.graph.insert_tx(tx.clone()));
+                changeset
+                    .graph
+                    .append(self.graph.insert_anchor(txid, anchor));
+            }
+        }
+        changeset
     }
 
     /// Batch insert all transactions of the given `block` of `height`.

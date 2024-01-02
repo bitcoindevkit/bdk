@@ -2385,7 +2385,7 @@ impl<D> Wallet<D> {
     /// with `prev_blockhash` and `height-1` as the `connected_to` parameter.
     ///
     /// [`apply_block_connected_to`]: Self::apply_block_connected_to
-    pub fn apply_block(&mut self, block: Block, height: u32) -> Result<(), CannotConnectError>
+    pub fn apply_block(&mut self, block: &Block, height: u32) -> Result<(), CannotConnectError>
     where
         D: PersistBackend<ChangeSet>,
     {
@@ -2416,7 +2416,7 @@ impl<D> Wallet<D> {
     /// internal [`TxGraph`].
     pub fn apply_block_connected_to(
         &mut self,
-        block: Block,
+        block: &Block,
         height: u32,
         connected_to: BlockId,
     ) -> Result<(), ApplyHeaderError>

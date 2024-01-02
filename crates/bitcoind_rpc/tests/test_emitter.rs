@@ -298,7 +298,7 @@ fn test_into_tx_graph() -> anyhow::Result<()> {
             tip: emission.checkpoint,
             introduce_older_blocks: false,
         })?;
-        let indexed_additions = indexed_tx_graph.apply_block_relevant(emission.block, height);
+        let indexed_additions = indexed_tx_graph.apply_block_relevant(&emission.block, height);
         assert!(indexed_additions.is_empty());
     }
 
@@ -362,7 +362,7 @@ fn test_into_tx_graph() -> anyhow::Result<()> {
             tip: emission.checkpoint,
             introduce_older_blocks: false,
         })?;
-        let indexed_additions = indexed_tx_graph.apply_block_relevant(emission.block, height);
+        let indexed_additions = indexed_tx_graph.apply_block_relevant(&emission.block, height);
         assert!(indexed_additions.graph.txs.is_empty());
         assert!(indexed_additions.graph.txouts.is_empty());
         assert_eq!(indexed_additions.graph.anchors, exp_anchors);
