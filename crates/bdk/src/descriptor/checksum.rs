@@ -107,28 +107,7 @@ pub fn calc_checksum(desc: &str) -> Result<String, DescriptorError> {
         .map(|b| unsafe { String::from_utf8_unchecked(b.to_vec()) })
 }
 
-// TODO in release 0.25.0, remove get_checksum_bytes and get_checksum
 // TODO in release 0.25.0, consolidate calc_checksum_bytes_internal into calc_checksum_bytes
-
-/// Compute the checksum bytes of a descriptor
-#[deprecated(
-    since = "0.24.0",
-    note = "Use new `calc_checksum_bytes` function which excludes any existing checksum in the descriptor string before calculating the checksum hash bytes. See https://github.com/bitcoindevkit/bdk/pull/765."
-)]
-pub fn get_checksum_bytes(desc: &str) -> Result<[u8; 8], DescriptorError> {
-    calc_checksum_bytes_internal(desc, false)
-}
-
-/// Compute the checksum of a descriptor
-#[deprecated(
-    since = "0.24.0",
-    note = "Use new `calc_checksum` function which excludes any existing checksum in the descriptor string before calculating the checksum hash. See https://github.com/bitcoindevkit/bdk/pull/765."
-)]
-pub fn get_checksum(desc: &str) -> Result<String, DescriptorError> {
-    // unsafe is okay here as the checksum only uses bytes in `CHECKSUM_CHARSET`
-    calc_checksum_bytes_internal(desc, false)
-        .map(|b| unsafe { String::from_utf8_unchecked(b.to_vec()) })
-}
 
 #[cfg(test)]
 mod test {
