@@ -7,8 +7,8 @@ use bdk::signer::{SignOptions, SignerError};
 use bdk::wallet::coin_selection::{self, LargestFirstCoinSelection};
 use bdk::wallet::error::CreateTxError;
 use bdk::wallet::tx_builder::AddForeignUtxoError;
-use bdk::wallet::AddressIndex::*;
 use bdk::wallet::{AddressIndex, AddressInfo, Balance, Wallet};
+use bdk::wallet::{AddressIndex::*, NewError};
 use bdk::{FeeRate, KeychainKind};
 use bdk_chain::COINBASE_MATURITY;
 use bdk_chain::{BlockId, ConfirmationTime};
@@ -91,6 +91,13 @@ fn load_recovers_wallet() {
             wallet.spk_index().last_revealed_indices(),
             wallet_spk_index.last_revealed_indices()
         );
+    }
+
+    // `new` can only be called on empty db
+    {
+        let db = bdk_file_store::Store::open(DB_MAGIC, &file_path).expect("must recover db");
+        let result = Wallet::new(get_test_tr_single_sig_xprv(), None, db, Network::Testnet);
+        assert!(matches!(result, Err(NewError::NonEmptyDatabase)));
     }
 }
 

@@ -237,6 +237,7 @@ impl Wallet {
         network: Network,
     ) -> Result<Self, DescriptorError> {
         Self::new(descriptor, change_descriptor, (), network).map_err(|e| match e {
+            NewError::NonEmptyDatabase => unreachable!("mock-database cannot have data"),
             NewError::Descriptor(e) => e,
             NewError::Write(_) => unreachable!("mock-write must always succeed"),
         })
@@ -251,6 +252,7 @@ impl Wallet {
     ) -> Result<Self, crate::descriptor::DescriptorError> {
         Self::new_with_genesis_hash(descriptor, change_descriptor, (), network, genesis_hash)
             .map_err(|e| match e {
+                NewError::NonEmptyDatabase => unreachable!("mock-database cannot have data"),
                 NewError::Descriptor(e) => e,
                 NewError::Write(_) => unreachable!("mock-write must always succeed"),
             })
@@ -288,6 +290,8 @@ where
 /// [`new_with_genesis_hash`]: Wallet::new_with_genesis_hash
 #[derive(Debug)]
 pub enum NewError<W> {
+    /// Database already has data.
+    NonEmptyDatabase,
     /// There was problem with the passed-in descriptor(s).
     Descriptor(crate::descriptor::DescriptorError),
     /// We were unable to write the wallet's data to the persistence backend.
@@ -300,6 +304,10 @@ where
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            NewError::NonEmptyDatabase => write!(
+                f,
+                "database already has data - use `load` or `new_or_load` methods instead"
+            ),
             NewError::Descriptor(e) => e.fmt(f),
             NewError::Write(e) => e.fmt(f),
         }
@@ -446,13 +454,18 @@ impl<D> Wallet<D> {
     pub fn new_with_genesis_hash<E: IntoWalletDescriptor>(
         descriptor: E,
         change_descriptor: Option<E>,
-        db: D,
+        mut db: D,
         network: Network,
         genesis_hash: BlockHash,
     ) -> Result<Self, NewError<D::WriteError>>
     where
         D: PersistBackend<ChangeSet>,
     {
+        if let Ok(changeset) = db.load_from_persistence() {
+            if changeset.is_some() {
+                return Err(NewError::NonEmptyDatabase);
+            }
+        }
         let secp = Secp256k1::new();
         let (chain, chain_changeset) = LocalChain::from_genesis_hash(genesis_hash);
         let mut index = KeychainTxOutIndex::<KeychainKind>::default();
@@ -615,6 +628,9 @@ impl<D> Wallet<D> {
                 genesis_hash,
             )
             .map_err(|e| match e {
+                NewError::NonEmptyDatabase => {
+                    unreachable!("database is already checked to have no data")
+                }
                 NewError::Descriptor(e) => NewOrLoadError::Descriptor(e),
                 NewError::Write(e) => NewOrLoadError::Write(e),
             }),
