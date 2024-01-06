@@ -172,14 +172,7 @@ fn main() -> anyhow::Result<()> {
             };
 
             client
-                .scan(
-                    tip,
-                    keychain_spks,
-                    core::iter::empty(),
-                    core::iter::empty(),
-                    stop_gap,
-                    scan_options.batch_size,
-                )
+                .full_scan(tip, keychain_spks, stop_gap, scan_options.batch_size)
                 .context("scanning the blockchain")?
         }
         ElectrumCommands::Sync {
@@ -279,7 +272,7 @@ fn main() -> anyhow::Result<()> {
             drop((graph, chain));
 
             let electrum_update = client
-                .scan_without_keychain(tip, spks, txids, outpoints, scan_options.batch_size)
+                .sync(tip, spks, txids, outpoints, scan_options.batch_size)
                 .context("scanning the blockchain")?;
             (electrum_update, BTreeMap::new())
         }

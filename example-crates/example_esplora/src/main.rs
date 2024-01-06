@@ -188,13 +188,7 @@ fn main() -> anyhow::Result<()> {
             // represents the last active spk derivation indices of keychains
             // (`keychain_indices_update`).
             let (graph_update, last_active_indices) = client
-                .scan_txs_with_keychains(
-                    keychain_spks,
-                    core::iter::empty(),
-                    core::iter::empty(),
-                    *stop_gap,
-                    scan_options.parallel_requests,
-                )
+                .full_scan(keychain_spks, *stop_gap, scan_options.parallel_requests)
                 .context("scanning for transactions")?;
 
             let mut graph = graph.lock().expect("mutex must not be poisoned");
@@ -312,7 +306,7 @@ fn main() -> anyhow::Result<()> {
             }
 
             let graph_update =
-                client.scan_txs(spks, txids, outpoints, scan_options.parallel_requests)?;
+                client.sync(spks, txids, outpoints, scan_options.parallel_requests)?;
 
             graph.lock().unwrap().apply_update(graph_update)
         }

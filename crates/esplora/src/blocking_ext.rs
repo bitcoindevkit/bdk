@@ -19,8 +19,8 @@ use crate::{anchor_from_status, ASSUME_FINAL_DEPTH};
 pub trait EsploraExt {
     /// Prepare an [`LocalChain`] update with blocks fetched from Esplora.
     ///
-    /// * `prev_tip` is the previous tip of [`LocalChain::tip`].
-    /// * `get_heights` is the block heights that we are interested in fetching from Esplora.
+    /// * `local_tip` is the previous tip of [`LocalChain::tip`].
+    /// * `request_heights` is the block heights that we are interested in fetching from Esplora.
     ///
     /// The result of this method can be applied to [`LocalChain::apply_update`].
     ///
@@ -34,54 +34,42 @@ pub trait EsploraExt {
         request_heights: impl IntoIterator<Item = u32>,
     ) -> Result<local_chain::Update, Error>;
 
-    /// Scan Esplora for the data specified and return a [`TxGraph`] and a map of last active
-    /// indices.
+    /// Full scan the keychain scripts specified with the blockchain (via an Esplora client) and
+    /// returns a [`TxGraph`] and a map of last active indices.
     ///
     /// * `keychain_spks`: keychains that we want to scan transactions for
-    /// * `txids`: transactions for which we want updated [`ConfirmationTimeHeightAnchor`]s
-    /// * `outpoints`: transactions associated with these outpoints (residing, spending) that we
-    ///     want to include in the update
     ///
-    /// The scan for each keychain stops after a gap of `stop_gap` script pubkeys with no associated
+    /// The full scan for each keychain stops after a gap of `stop_gap` script pubkeys with no associated
     /// transactions. `parallel_requests` specifies the max number of HTTP requests to make in
     /// parallel.
     #[allow(clippy::result_large_err)]
-    fn scan_txs_with_keychains<K: Ord + Clone>(
+    fn full_scan<K: Ord + Clone>(
         &self,
         keychain_spks: BTreeMap<K, impl IntoIterator<Item = (u32, ScriptBuf)>>,
-        txids: impl IntoIterator<Item = Txid>,
-        outpoints: impl IntoIterator<Item = OutPoint>,
         stop_gap: usize,
         parallel_requests: usize,
     ) -> Result<(TxGraph<ConfirmationTimeHeightAnchor>, BTreeMap<K, u32>), Error>;
 
-    /// Convenience method to call [`scan_txs_with_keychains`] without requiring a keychain.
+    /// Sync a set of scripts with the blockchain (via an Esplora client) for the data
+    /// specified and return a [`TxGraph`].
     ///
-    /// [`scan_txs_with_keychains`]: EsploraExt::scan_txs_with_keychains
+    /// * `misc_spks`: scripts that we want to sync transactions for
+    /// * `txids`: transactions for which we want updated [`ConfirmationTimeHeightAnchor`]s
+    /// * `outpoints`: transactions associated with these outpoints (residing, spending) that we
+    ///     want to include in the update
+    ///
+    /// If the scripts to sync are unknown, such as when restoring or importing a keychain that
+    /// may include scripts that have been used, use [`full_scan`] with the keychain.
+    ///
+    /// [`full_scan`]: EsploraExt::full_scan
     #[allow(clippy::result_large_err)]
-    fn scan_txs(
+    fn sync(
         &self,
         misc_spks: impl IntoIterator<Item = ScriptBuf>,
         txids: impl IntoIterator<Item = Txid>,
         outpoints: impl IntoIterator<Item = OutPoint>,
         parallel_requests: usize,
-    ) -> Result<TxGraph<ConfirmationTimeHeightAnchor>, Error> {
-        self.scan_txs_with_keychains(
-            [(
-                (),
-                misc_spks
-                    .into_iter()
-                    .enumerate()
-                    .map(|(i, spk)| (i as u32, spk)),
-            )]
-            .into(),
-            txids,
-            outpoints,
-            usize::MAX,
-            parallel_requests,
-        )
-        .map(|(g, _)| g)
-    }
+    ) -> Result<TxGraph<ConfirmationTimeHeightAnchor>, Error>;
 }
 
 impl EsploraExt for esplora_client::BlockingClient {
@@ -190,11 +178,9 @@ impl EsploraExt for esplora_client::BlockingClient {
         })
     }
 
-    fn scan_txs_with_keychains<K: Ord + Clone>(
+    fn full_scan<K: Ord + Clone>(
         &self,
         keychain_spks: BTreeMap<K, impl IntoIterator<Item = (u32, ScriptBuf)>>,
-        txids: impl IntoIterator<Item = Txid>,
-        outpoints: impl IntoIterator<Item = OutPoint>,
         stop_gap: usize,
         parallel_requests: usize,
     ) -> Result<(TxGraph<ConfirmationTimeHeightAnchor>, BTreeMap<K, u32>), Error> {
@@ -266,6 +252,31 @@ impl EsploraExt for esplora_client::BlockingClient {
             }
         }
 
+        Ok((graph, last_active_indexes))
+    }
+
+    fn sync(
+        &self,
+        misc_spks: impl IntoIterator<Item = ScriptBuf>,
+        txids: impl IntoIterator<Item = Txid>,
+        outpoints: impl IntoIterator<Item = OutPoint>,
+        parallel_requests: usize,
+    ) -> Result<TxGraph<ConfirmationTimeHeightAnchor>, Error> {
+        let mut graph = self
+            .full_scan(
+                [(
+                    (),
+                    misc_spks
+                        .into_iter()
+                        .enumerate()
+                        .map(|(i, spk)| (i as u32, spk)),
+                )]
+                .into(),
+                usize::MAX,
+                parallel_requests,
+            )
+            .map(|(g, _)| g)?;
+
         let mut txids = txids.into_iter();
         loop {
             let handles = txids
@@ -292,7 +303,7 @@ impl EsploraExt for esplora_client::BlockingClient {
             }
         }
 
-        for op in outpoints.into_iter() {
+        for op in outpoints {
             if graph.get_tx(op.txid).is_none() {
                 if let Some(tx) = self.get_tx(&op.txid)? {
                     let _ = graph.insert_tx(tx);
@@ -317,7 +328,6 @@ impl EsploraExt for esplora_client::BlockingClient {
                 }
             }
         }
-
-        Ok((graph, last_active_indexes))
+        Ok(graph)
     }
 }
