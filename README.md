@@ -44,6 +44,7 @@ The project is split up into several crates in the `/crates` directory:
 - [`file_store`](./crates/file_store): A (experimental) persistence backend for storing chain data in a single file.
 - [`esplora`](./crates/esplora): Extends the [`esplora-client`] crate with methods to fetch chain data from an esplora HTTP server in the form that [`bdk_chain`] and `Wallet` can consume.
 - [`electrum`](./crates/electrum): Extends the [`electrum-client`] crate with methods to fetch chain data from an electrum server in the form that [`bdk_chain`] and `Wallet` can consume.
+- [`bitcond_rpc`](./crates/bitcond_rpc) Emitting blockchain data from the `bitcoind` RPC interface.
 
 Fully working examples of how to use these components are in `/example-crates`:
 - [`example_cli`](./example-crates/example_cli): Library used by the `example_*` crates. Provides utilities for syncing, showing the balance, generating addresses and creating transactions without using the bdk `Wallet`.
@@ -60,6 +61,12 @@ Fully working examples of how to use these components are in `/example-crates`:
 [`esplora-client`]: https://docs.rs/esplora-client/
 [`electrum-client`]: https://docs.rs/electrum-client/
 [`bdk_chain`]: https://docs.rs/bdk-chain/
+
+## Dependencies
+
+- `bitcoind_rpc` depends on `bitcoind` being installed and available in `PATH` or in the `BITCOIND_EXEC` ENV variable.
+- `esplora` depends on [Blockstream's version of `electrs`](https://github.com/Blockstream/electrs)
+   being installed and available in `PATH` or in the `ELECTRS_EXEC` ENV variable.
 
 ## Minimum Supported Rust Version (MSRV)
 This library should compile with any combination of features with Rust 1.63.0.

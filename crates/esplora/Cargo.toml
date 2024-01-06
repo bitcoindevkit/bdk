@@ -22,7 +22,7 @@ bitcoin = { version = "0.30.0", optional = true, default-features = false }
 miniscript = { version = "10.0.0", optional = true, default-features = false }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-electrsd = { version= "0.25.0", features = ["bitcoind_25_0", "esplora_a33e97e1", "legacy"] }
+electrsd = { version = "0.26.0", features = ["legacy"] }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }
 
 [features]

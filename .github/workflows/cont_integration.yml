@@ -4,126 +4,139 @@ name: CI
 
 jobs:
 
-  build-test:
-    name: Build and test
+  self-care:
+    name: Flake self-check
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        rust:
-          - version: stable
-            clippy: true
-          - version: 1.63.0 # MSRV
-        features:
-          - --no-default-features
-          - --all-features
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check Nix flake inputs
+        uses: DeterminateSystems/flake-checker-action@v5
+        with:
+          fail-mode: true
+
+  pre-commit-checks:
+    name: "Pre-commit checks: typos, pgp-signed and conventional commits"
+    runs-on: ubuntu-latest
     steps:
       - name: checkout
-        uses: actions/checkout@v2
-      - name: Install Rust toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-            toolchain: ${{ matrix.rust.version }}
-            override: true
-            profile: minimal
-      - name: Rust Cache
-        uses: Swatinem/rust-cache@v2.2.1
-      - name: Pin dependencies for MSRV
-        if: matrix.rust.version == '1.63.0'
+        uses: actions/checkout@v4
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v5
+      # Cache Nix artifacts
+      - uses: DeterminateSystems/magic-nix-cache-action@v2
+      # Commit checks
+      - name: Pre-commit checks
+        run: nix build -L .#ci.pre-commit-check
+
+  rustfmt:
+    name: rustfmt
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v5
+      # Cache Nix artifacts
+      - uses: DeterminateSystems/magic-nix-cache-action@v2
+      # Rustfmt
+      - name: Rustfmt
+        run: nix build -L .#ci.fmt
+
+  clippy:
+    name: clippy
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v5
+      # Cache Nix artifacts
+      - uses: DeterminateSystems/magic-nix-cache-action@v2
+      # Clippy
+      - name: Clippy
+        run: nix build -L .#ci.clippy
+
+  test-latest:
+    name: Build, test, check latest Rust
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v5
+      # Cache Nix artifacts
+      - uses: DeterminateSystems/magic-nix-cache-action@v2
+      # Cache Builds
+      - name: Build and Cache latest Rust
+        run: nix build -L .
+      # Tests: latest
+      - name: Test workspace all-features latest
+        run: nix build -L .#ci.latest.all
+      - name: Test workspace no-default-features latest
+        run: nix build -L .#ci.latest.noDefault
+      - name: Test bdk no-std latest
+        run: nix build -L .#ci.latest.noStdBdk
+      - name: Test bdk_chain no-std latest
+        run: nix build -L .#ci.latest.noStdChain
+      - name: Test bdk_esplora no-std latest
+        run: nix build -L .#ci.latest.noStdEsplora
+
+  test-MSRV:
+    name: Build, test, check MSRV
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v5
+      # Cache Nix artifacts
+      - uses: DeterminateSystems/magic-nix-cache-action@v2
+      # Cache Builds
+      - name: Build and Cache MSRV
+        run: nix build -L .#MSRV
+      # Tests: MSRV
+      - name: Test workspace all-features MSRV
+        run: nix build -L .#ci.MSRV.all
+      - name: Test workspace no-default-features MSRV
+        run: nix build -L .#ci.MSRV.noDefault
+      - name: Test bdk no-std MSRV
+        run: nix build -L .#ci.MSRV.noStdBdk
+      - name: Test bdk_chain no-std MSRV
+        run: nix build -L .#ci.MSRV.noStdChain
+      - name: Test bdk_esplora no-std MSRV
+        run: nix build -L .#ci.MSRV.noStdEsplora
+
+  check-WASM:
+    name: Build and check WASM
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v5
+      # Cache Nix artifacts
+      - uses: DeterminateSystems/magic-nix-cache-action@v2
+      # Cache Builds
+      - name: Build and Cache WASM
+        run: nix build -L .#WASM
+      # Checks: WASM
+      - name: Check bdk WASM
+        run: nix build -L .#ci.WASM.bdk
+      - name: Check bdk_esplora WASM
+        run: nix build -L .#ci.WASM.esplora
+
+  audit:
+    name: Audit based on rustsec/advisory-db
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v5
+      # Cache Nix artifacts
+      - uses: DeterminateSystems/magic-nix-cache-action@v2
+      # Audit
+      - name: Audit
         run: |
-          cargo update -p zstd-sys --precise "2.0.8+zstd.1.5.5"
-          cargo update -p time --precise "0.3.20"
-          cargo update -p jobserver --precise "0.1.26"
-          cargo update -p home --precise "0.5.5"
-      - name: Build
-        run: cargo build ${{ matrix.features }}
-      - name: Test
-        run: cargo test ${{ matrix.features }}
-
-  check-no-std:
-    name: Check no_std
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v2
-      - name: Install Rust toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          override: true
-          profile: minimal
-          # target: "thumbv6m-none-eabi"
-      - name: Rust Cache
-        uses: Swatinem/rust-cache@v2.2.1
-      - name: Check bdk_chain
-        working-directory: ./crates/chain
-        # TODO "--target thumbv6m-none-eabi" should work but currently does not
-        run: cargo check --no-default-features --features bitcoin/no-std,miniscript/no-std,hashbrown
-      - name: Check bdk
-        working-directory: ./crates/bdk
-        # TODO "--target thumbv6m-none-eabi" should work but currently does not
-        run: cargo check --no-default-features --features bitcoin/no-std,miniscript/no-std,bdk_chain/hashbrown
-      - name: Check esplora
-        working-directory: ./crates/esplora
-        # TODO "--target thumbv6m-none-eabi" should work but currently does not
-        run: cargo check --no-default-features --features bitcoin/no-std,miniscript/no-std,bdk_chain/hashbrown
-
-  check-wasm:
-    name: Check WASM
-    runs-on: ubuntu-20.04
-    env:
-      CC: clang-10
-      CFLAGS: -I/usr/include
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v2
-        # Install a recent version of clang that supports wasm32
-      - run: wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add - || exit 1
-      - run: sudo apt-get update || exit 1
-      - run: sudo apt-get install -y libclang-common-10-dev clang-10 libc6-dev-i386 || exit 1
-      - name: Install Rust toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-            toolchain: stable
-            override: true
-            profile: minimal
-            target: "wasm32-unknown-unknown"
-      - name: Rust Cache
-        uses: Swatinem/rust-cache@v2.2.1
-      - name: Check bdk
-        working-directory: ./crates/bdk
-        run: cargo check --target wasm32-unknown-unknown --no-default-features --features bitcoin/no-std,miniscript/no-std,bdk_chain/hashbrown,dev-getrandom-wasm
-      - name: Check esplora
-        working-directory: ./crates/esplora
-        run: cargo check --target wasm32-unknown-unknown --no-default-features --features bitcoin/no-std,miniscript/no-std,bdk_chain/hashbrown,async
-
-  fmt:
-    name: Rust fmt
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v2
-      - name: Install Rust toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-            toolchain: stable
-            override: true
-            profile: minimal
-            components: rustfmt
-      - name: Check fmt
-        run: cargo fmt --all -- --config format_code_in_doc_comments=true --check
-
-  clippy_check:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v1
-      - uses: actions-rs/toolchain@v1
-        with:
-            toolchain: stable
-            components: clippy
-            override: true
-      - name: Rust Cache
-        uses: Swatinem/rust-cache@v2.2.1
-      - uses: actions-rs/clippy-check@v1
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          args: --all-features --all-targets -- -D warnings
+          nix flake update -- advisory-db
+          nix build -L .#ci.audit

@@ -3,6 +3,7 @@ use bdk_chain::BlockId;
 use bdk_esplora::EsploraExt;
 use electrsd::bitcoind::bitcoincore_rpc::RpcApi;
 use electrsd::bitcoind::{self, anyhow, BitcoinD};
+use electrsd::electrum_client::ElectrumApi;
 use electrsd::{Conf, ElectrsD};
 use esplora_client::{self, BlockingClient, Builder};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
@@ -36,14 +37,21 @@ struct TestEnv {
 impl TestEnv {
     fn new() -> Result<Self, anyhow::Error> {
         let bitcoind_exe =
-            bitcoind::downloaded_exe_path().expect("bitcoind version feature must be enabled");
-        let bitcoind = BitcoinD::new(bitcoind_exe).unwrap();
+            bitcoind::exe_path().expect("Cannot find bitcoind daemon, set BITCOIND_EXEC environment variable with the path to bitcoind");
+        let mut bitcoind_conf = bitcoind::Conf::default();
+        bitcoind_conf.p2p = bitcoind::P2P::Yes;
+        let bitcoind = BitcoinD::with_conf(bitcoind_exe, &bitcoind_conf)?;
 
         let mut electrs_conf = Conf::default();
         electrs_conf.http_enabled = true;
-        let electrs_exe =
-            electrsd::downloaded_exe_path().expect("electrs version feature must be enabled");
+        let electrs_exe = electrsd::exe_path().expect("Cannot find electrs daemon, set ELECTRS_EXEC environment variable with the path to electrs");
         let electrsd = ElectrsD::with_conf(electrs_exe, &bitcoind, &electrs_conf)?;
+
+        // Alive checks
+        bitcoind.client.ping().unwrap(); // without using bitcoind, it is dropped and all the rest fails.
+        electrsd.client.ping().unwrap();
+        assert!(bitcoind.client.ping().is_ok());
+        assert!(electrsd.client.ping().is_ok());
 
         let base_url = format!("http://{}", &electrsd.esplora_url.clone().unwrap());
         let client = Builder::new(base_url.as_str()).build_blocking()?;
@@ -58,8 +66,7 @@ impl TestEnv {
     fn reset_electrsd(mut self) -> anyhow::Result<Self> {
         let mut electrs_conf = Conf::default();
         electrs_conf.http_enabled = true;
-        let electrs_exe =
-            electrsd::downloaded_exe_path().expect("electrs version feature must be enabled");
+        let electrs_exe = electrsd::exe_path().expect("Cannot find electrs daemon, set ELECTRS_EXEC environment variable with the path to electrs");
         let electrsd = ElectrsD::with_conf(electrs_exe, &self.bitcoind, &electrs_conf)?;
 
         let base_url = format!("http://{}", &electrsd.esplora_url.clone().unwrap());

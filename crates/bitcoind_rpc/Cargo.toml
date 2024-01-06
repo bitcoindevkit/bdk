@@ -19,7 +19,7 @@ bitcoincore-rpc = { version = "0.17" }
 bdk_chain = { path = "../chain", version = "0.9", default-features = false }
 
 [dev-dependencies]
-bitcoind = { version = "0.33", features = ["25_0"] }
+bitcoind = "0.33"
 anyhow = { version = "1" }
 
 [features]

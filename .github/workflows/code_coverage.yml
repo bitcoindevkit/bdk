@@ -6,52 +6,36 @@ jobs:
   Codecov:
     name: Code Coverage
     runs-on: ubuntu-latest
-    env:
-      RUSTFLAGS: "-Cinstrument-coverage"
-      RUSTDOCFLAGS: "-Cinstrument-coverage"
-      LLVM_PROFILE_FILE: "./target/coverage/%p-%m.profraw"
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v2
-      - name: Install lcov tools
-        run: sudo apt-get install lcov -y
-      - name: Install Rust toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-            toolchain: stable
-            override: true
-            profile: minimal
-            components: llvm-tools-preview
-      - name: Rust Cache
-        uses: Swatinem/rust-cache@v2.2.1
-      - name: Install grcov
-        run: if [[ ! -e ~/.cargo/bin/grcov ]]; then cargo install grcov; fi
-        # TODO: re-enable the hwi tests
-      - name: Build simulator image
-        run: docker build -t hwi/ledger_emulator ./ci -f ci/Dockerfile.ledger
-      - name: Run simulator image
-        run: docker run --name simulator --network=host hwi/ledger_emulator &
-      - name: Install Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.9'
-      - name: Install python dependencies
-        run: pip install hwi==2.1.1 protobuf==3.20.1
-      - name: Test
-        run: cargo test --all-features
-      - name: Make coverage directory
-        run: mkdir coverage
-      - name: Run grcov
-        run: grcov . --binary-path ./target/debug/ -s . -t lcov --branch --ignore-not-existing --keep-only '**/crates/**' --ignore '**/tests/**' --ignore '**/examples/**' -o ./coverage/lcov.info
-      - name: Generate HTML coverage report
-        run: genhtml -o coverage-report.html --ignore-errors source ./coverage/lcov.info
+      - name: checkout
+        uses: actions/checkout@v4
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v5
+      # Cache Nix artifacts
+      - uses: DeterminateSystems/magic-nix-cache-action@v2
+      # Code Coverage
+      - name: Code Coverage
+        run: nix build -L .#ci.codeCoverage
+      - name: Ensure lcov.info exists
+        # it is result because of the $out in Nix
+        run: |
+          test -f result
+          cp result lcov.info
+          ls -lah lcov.info
       - name: Coveralls upload
-        uses: coverallsapp/github-action@master
+        uses: coverallsapp/github-action@v2
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Upload artifact
-        uses: actions/upload-artifact@v2
+          file: ./lcov.info
+          format: lcov
+          allow-empty: true
+          fail-on-error: true
+          compare-ref: ${{ github.base_ref }}
+          compare-sha: ${{ github.event.pull_request.base.sha}}
+      - name: Generate HTML coverage report
+        run: nix develop -L .#lcov --command bash -c "genhtml -o coverage-report.html --ignore-errors source lcov.info"
+      - name: Upload HTML coverage report
+        uses: actions/upload-artifact@v3
         with:
           name: coverage-report
           path: coverage-report.html

@@ -22,3 +22,11 @@ members = [
 
 [workspace.package]
 authors = ["Bitcoin Dev Kit Developers"]
+
+[profile.dev]
+
+[profile.ci]
+inherits = "dev"
+debug = 1
+incremental = false
+lto = "off"
