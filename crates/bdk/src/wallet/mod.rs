@@ -356,7 +356,7 @@ where
 #[cfg(feature = "std")]
 impl<L> std::error::Error for LoadError<L> where L: core::fmt::Display + core::fmt::Debug {}
 
-/// Error type for when we try load a [`Wallet`] from persistence and creating it if non-existant.
+/// Error type for when we try load a [`Wallet`] from persistence and creating it if non-existent.
 ///
 /// Methods [`new_or_load`] and [`new_or_load_with_genesis_hash`] may return this error.
 ///
