@@ -105,7 +105,7 @@ where
         })
     }
 
-    /// Attempt to open existing [`Store`] file; create it if the file is non-existant.
+    /// Attempt to open existing [`Store`] file; create it if the file is non-existent.
     ///
     /// Internally, this calls either [`open`] or [`create_new`].
     ///
