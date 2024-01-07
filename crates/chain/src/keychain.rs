@@ -58,8 +58,9 @@ impl<K: Ord> Append for ChangeSet<K> {
                 *index = other_index.max(*index);
             }
         });
-
-        self.0.append(&mut other.0);
+        // We use `extend` instead of `BTreeMap::append` due to performance issues with `append`.
+        // Refer to https://github.com/rust-lang/rust/issues/34666#issuecomment-675658420
+        self.0.extend(other.0);
     }
 
     /// Returns whether the changeset are empty.
