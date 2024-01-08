@@ -206,9 +206,11 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     fn next_store_index(&self, keychain: &K) -> u32 {
         self.inner()
             .all_spks()
+            // This range is filtering out the spks with a keychain different than
+            // `keychain`. We don't use filter here as range is more optimized.
             .range((keychain.clone(), u32::MIN)..(keychain.clone(), u32::MAX))
             .last()
-            .map_or(0, |((_, v), _)| *v + 1)
+            .map_or(0, |((_, index), _)| *index + 1)
     }
 
     /// Generates script pubkey iterators for every `keychain`. The iterators iterate over all
