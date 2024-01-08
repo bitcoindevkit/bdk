@@ -1,0 +1,13 @@
+[package]
+name = "bdk_hwi"
+version = "0.1.0"
+edition = "2021"
+homepage = "https://bitcoindevkit.org"
+repository = "https://github.com/bitcoindevkit/bdk"
+description = "Utilities to use bdk with hardware wallets"
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+
+[dependencies]
+bdk = { path = "../bdk" }
+hwi = { version = "0.7.0", features = [ "miniscript"] }

@@ -50,10 +50,6 @@ pub mod tx_builder;
 pub(crate) mod utils;
 
 pub mod error;
-#[cfg(feature = "hardware-signer")]
-#[cfg_attr(docsrs, doc(cfg(feature = "hardware-signer")))]
-pub mod hardwaresigner;
-
 pub use utils::IsDust;
 
 #[allow(deprecated)]
