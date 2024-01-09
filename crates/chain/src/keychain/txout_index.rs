@@ -390,7 +390,11 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
             let _inserted = self
                 .inner
                 .insert_spk((keychain.clone(), new_index), new_spk);
-            debug_assert!(_inserted, "must not have existing spk",);
+            debug_assert!(_inserted, "must not have existing spk");
+            debug_assert!(
+                has_wildcard || new_index == 0,
+                "non-wildcard descriptors must not iterate past index 0"
+            );
         }
 
         let _old_index = self.last_revealed.insert(keychain.clone(), target_index);
