@@ -7,3 +7,5 @@ Cargo.lock
 
 # Example persisted files.
 *.db
+bdk_wallet_esplora_async_example.dat
+bdk_wallet_esplora_blocking_example.dat

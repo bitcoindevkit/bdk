@@ -1,9 +1,9 @@
 use std::{
-    collections::BTreeMap,
     io::{self, Write},
     sync::Mutex,
 };
 
+use bdk_chain::spk_client::{FullScanRequest, SyncRequest};
 use bdk_chain::{
     bitcoin::{constants::genesis_block, Address, Network, OutPoint, ScriptBuf, Txid},
     indexed_tx_graph::{self, IndexedTxGraph},
@@ -83,7 +83,7 @@ impl EsploraArgs {
             Network::Bitcoin => "https://blockstream.info/api",
             Network::Testnet => "https://blockstream.info/testnet/api",
             Network::Regtest => "http://localhost:3002",
-            Network::Signet => "https://mempool.space/signet/api",
+            Network::Signet => "http://signet.bitcoindevkit.net",
             _ => panic!("unsupported network"),
         });
 
@@ -172,36 +172,27 @@ fn main() -> anyhow::Result<()> {
                 .lock()
                 .expect("mutex must not be poisoned")
                 .index
-                .all_unbounded_spk_iters()
-                .into_iter()
-                // This `map` is purely for logging.
-                .map(|(keychain, iter)| {
-                    let mut first = true;
-                    let spk_iter = iter.inspect(move |(i, _)| {
-                        if first {
-                            eprint!("\nscanning {}: ", keychain);
-                            first = false;
-                        }
-                        eprint!("{} ", i);
-                        // Flush early to ensure we print at every iteration.
-                        let _ = io::stderr().flush();
-                    });
-                    (keychain, spk_iter)
-                })
-                .collect::<BTreeMap<_, _>>();
+                .all_unbounded_spk_iters();
 
             // The client scans keychain spks for transaction histories, stopping after `stop_gap`
             // is reached. It returns a `TxGraph` update (`graph_update`) and a structure that
             // represents the last active spk derivation indices of keychains
             // (`keychain_indices_update`).
-            let update = client
-                .full_scan(
-                    local_tip,
-                    keychain_spks,
-                    *stop_gap,
-                    scan_options.parallel_requests,
-                )
+            let mut request = FullScanRequest::new(local_tip);
+            request.add_spks_by_keychain(keychain_spks);
+            request.inspect_spks(move |k, i, spk| {
+                println!(
+                    "{:?}[{}]: {}",
+                    k,
+                    i,
+                    Address::from_script(spk, args.network).unwrap()
+                );
+            });
+            println!("Scanning... ");
+            let result = client
+                .full_scan(request, *stop_gap, scan_options.parallel_requests)
                 .context("scanning for transactions")?;
+            println!("done. ");
 
             let mut graph = graph.lock().expect("mutex must not be poisoned");
             let mut chain = chain.lock().expect("mutex must not be poisoned");
@@ -209,11 +200,11 @@ fn main() -> anyhow::Result<()> {
             // deriviation indices. Usually before a scan you are on a fresh wallet with no
             // addresses derived so we need to derive up to last active addresses the scan found
             // before adding the transactions.
-            (chain.apply_update(update.local_chain)?, {
+            (chain.apply_update(result.chain_update)?, {
                 let (_, index_changeset) = graph
                     .index
-                    .reveal_to_target_multi(&update.last_active_indices);
-                let mut indexed_tx_graph_changeset = graph.apply_update(update.tx_graph);
+                    .reveal_to_target_multi(&result.last_active_indices);
+                let mut indexed_tx_graph_changeset = graph.apply_update(result.graph_update);
                 indexed_tx_graph_changeset.append(index_changeset.into());
                 indexed_tx_graph_changeset
             })
@@ -238,7 +229,8 @@ fn main() -> anyhow::Result<()> {
             }
 
             // Spks, outpoints and txids we want updates on will be accumulated here.
-            let mut spks: Box<dyn Iterator<Item = ScriptBuf>> = Box::new(core::iter::empty());
+            let mut spks: Box<dyn Iterator<Item = (u32, ScriptBuf)>> =
+                Box::new(core::iter::empty());
             let mut outpoints: Box<dyn Iterator<Item = OutPoint>> = Box::new(core::iter::empty());
             let mut txids: Box<dyn Iterator<Item = Txid>> = Box::new(core::iter::empty());
 
@@ -256,12 +248,7 @@ fn main() -> anyhow::Result<()> {
                         .revealed_spks()
                         .map(|(k, i, spk)| (k, i, spk.to_owned()))
                         .collect::<Vec<_>>();
-                    spks = Box::new(spks.chain(all_spks.into_iter().map(|(k, i, spk)| {
-                        eprintln!("scanning {}:{}", k, i);
-                        // Flush early to ensure we print at every iteration.
-                        let _ = io::stderr().flush();
-                        spk
-                    })));
+                    spks = Box::new(spks.chain(all_spks.into_iter().map(|(_k, i, spk)| (i, spk))));
                 }
                 if unused_spks {
                     let unused_spks = graph
@@ -269,17 +256,8 @@ fn main() -> anyhow::Result<()> {
                         .unused_spks()
                         .map(|(k, i, spk)| (k, i, spk.to_owned()))
                         .collect::<Vec<_>>();
-                    spks = Box::new(spks.chain(unused_spks.into_iter().map(|(k, i, spk)| {
-                        eprintln!(
-                            "Checking if address {} {}:{} has been used",
-                            Address::from_script(&spk, args.network).unwrap(),
-                            k,
-                            i,
-                        );
-                        // Flush early to ensure we print at every iteration.
-                        let _ = io::stderr().flush();
-                        spk
-                    })));
+                    spks =
+                        Box::new(spks.chain(unused_spks.into_iter().map(|(_k, i, spk)| (i, spk))));
                 }
                 if utxos {
                     // We want to search for whether the UTXO is spent, and spent by which
@@ -323,17 +301,26 @@ fn main() -> anyhow::Result<()> {
                 }
             }
 
-            let update = client.sync(
-                local_tip,
-                spks,
-                txids,
-                outpoints,
-                scan_options.parallel_requests,
-            )?;
+            let mut request = SyncRequest::new(local_tip);
+            request.add_spks(spks);
+            request.inspect_spks(move |i, spk| {
+                println!(
+                    "[{}]: {}",
+                    i,
+                    Address::from_script(spk, args.network).unwrap()
+                );
+            });
+            request.add_txids(txids);
+            request.add_outpoints(outpoints);
+            println!("Syncing... ");
+            let result = client
+                .sync(request, scan_options.parallel_requests)
+                .context("syncing transactions")?;
+            println!("done. ");
 
             (
-                chain.lock().unwrap().apply_update(update.local_chain)?,
-                graph.lock().unwrap().apply_update(update.tx_graph),
+                chain.lock().unwrap().apply_update(result.chain_update)?,
+                graph.lock().unwrap().apply_update(result.graph_update),
             )
         }
     };

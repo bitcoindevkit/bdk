@@ -3,8 +3,9 @@ const SEND_AMOUNT: u64 = 1000;
 const STOP_GAP: usize = 5;
 const PARALLEL_REQUESTS: usize = 1;
 
-use std::{io::Write, str::FromStr};
+use std::str::FromStr;
 
+use bdk::chain::spk_client::FullScanRequest;
 use bdk::{
     bitcoin::{Address, Network},
     wallet::{AddressIndex, Update},
@@ -14,17 +15,15 @@ use bdk_esplora::{esplora_client, EsploraExt};
 use bdk_file_store::Store;
 
 fn main() -> Result<(), anyhow::Error> {
-    let db_path = std::env::temp_dir().join("bdk-esplora-example");
+    // let db_path = std::env::temp_dir().join("bdk-esplora-example");
+    let db_path = "bdk-esplora-blocking-example";
     let db = Store::<bdk::wallet::ChangeSet>::open_or_create_new(DB_MAGIC.as_bytes(), db_path)?;
     let external_descriptor = "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/84'/1'/0'/0/*)";
     let internal_descriptor = "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/84'/1'/0'/1/*)";
+    let network = Network::Signet;
 
-    let mut wallet = Wallet::new_or_load(
-        external_descriptor,
-        Some(internal_descriptor),
-        db,
-        Network::Testnet,
-    )?;
+    let mut wallet =
+        Wallet::new_or_load(external_descriptor, Some(internal_descriptor), db, network)?;
 
     let address = wallet.try_get_address(AddressIndex::New)?;
     println!("Generated Address: {}", address);
@@ -32,37 +31,29 @@ fn main() -> Result<(), anyhow::Error> {
     let balance = wallet.get_balance();
     println!("Wallet balance before syncing: {} sats", balance.total());
 
-    print!("Syncing...");
     let client =
-        esplora_client::Builder::new("https://blockstream.info/testnet/api").build_blocking()?;
+        esplora_client::Builder::new("http://signet.bitcoindevkit.net").build_blocking()?;
 
-    let keychain_spks = wallet
-        .all_unbounded_spk_iters()
-        .into_iter()
-        .map(|(k, k_spks)| {
-            let mut once = Some(());
-            let mut stdout = std::io::stdout();
-            let k_spks = k_spks
-                .inspect(move |(spk_i, _)| match once.take() {
-                    Some(_) => print!("\nScanning keychain [{:?}]", k),
-                    None => print!(" {:<3}", spk_i),
-                })
-                .inspect(move |_| stdout.flush().expect("must flush"));
-            (k, k_spks)
-        })
-        .collect();
+    let keychain_spks = wallet.all_unbounded_spk_iters();
 
-    let update = client.full_scan(
-        wallet.latest_checkpoint(),
-        keychain_spks,
-        STOP_GAP,
-        PARALLEL_REQUESTS,
-    )?;
+    let mut request = FullScanRequest::new(wallet.latest_checkpoint());
+    request.add_spks_by_keychain(keychain_spks);
+    request.inspect_spks(move |k, i, spk| {
+        println!(
+            "{:?}[{}]: {}",
+            k,
+            i,
+            Address::from_script(spk, network).unwrap()
+        );
+    });
+    println!("Scanning...");
+    let result = client.full_scan(request, STOP_GAP, PARALLEL_REQUESTS)?;
+    println!("done. ");
 
     wallet.apply_update(Update {
-        last_active_indices: update.last_active_indices,
-        graph: update.tx_graph,
-        chain: Some(update.local_chain),
+        last_active_indices: result.last_active_indices,
+        graph: result.graph_update,
+        chain: Some(result.chain_update),
     })?;
     wallet.commit()?;
     println!();

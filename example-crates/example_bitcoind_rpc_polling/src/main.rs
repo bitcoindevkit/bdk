@@ -216,7 +216,7 @@ fn main() -> anyhow::Result<()> {
                             &*chain,
                             synced_to.block_id(),
                             graph.index.outpoints().iter().cloned(),
-                            |(k, _), _| k == &Keychain::Internal,
+                            |(k, _), _| k == &Keychain::Internal { account: 0 },
                         )
                     };
                     println!(
@@ -344,7 +344,7 @@ fn main() -> anyhow::Result<()> {
                             &*chain,
                             synced_to.block_id(),
                             graph.index.outpoints().iter().cloned(),
-                            |(k, _), _| k == &Keychain::Internal,
+                            |(k, _), _| k == &Keychain::Internal { account: 0 },
                         )
                     };
                     println!(

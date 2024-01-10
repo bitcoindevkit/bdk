@@ -175,15 +175,15 @@ pub enum TxOutCmd {
     Debug, Clone, Copy, PartialOrd, Ord, PartialEq, Eq, serde::Deserialize, serde::Serialize,
 )]
 pub enum Keychain {
-    External,
-    Internal,
+    External { account: u32 },
+    Internal { account: u32 },
 }
 
 impl core::fmt::Display for Keychain {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Keychain::External => write!(f, "external"),
-            Keychain::Internal => write!(f, "internal"),
+            Keychain::External { account } => write!(f, "external[{}]", account),
+            Keychain::Internal { account } => write!(f, "internal[{}]", account),
         }
     }
 }
@@ -247,10 +247,15 @@ where
         script_pubkey: address.script_pubkey(),
     }];
 
-    let internal_keychain = if graph.index.keychains().get(&Keychain::Internal).is_some() {
-        Keychain::Internal
+    let internal_keychain = if graph
+        .index
+        .keychains()
+        .get(&Keychain::Internal { account: 0 })
+        .is_some()
+    {
+        Keychain::Internal { account: 0 }
     } else {
-        Keychain::External
+        Keychain::External { account: 0 }
     };
 
     let ((change_index, change_script), change_changeset) =
@@ -463,7 +468,8 @@ where
                         _ => unreachable!("only these two variants exist in match arm"),
                     };
 
-                    let ((spk_i, spk), index_changeset) = spk_chooser(index, &Keychain::External);
+                    let ((spk_i, spk), index_changeset) =
+                        spk_chooser(index, &Keychain::External { account: 0 });
                     let db = &mut *db.lock().unwrap();
                     db.stage_and_commit(C::from((
                         local_chain::ChangeSet::default(),
@@ -482,8 +488,8 @@ where
                 }
                 AddressCmd::List { change } => {
                     let target_keychain = match change {
-                        true => Keychain::Internal,
-                        false => Keychain::External,
+                        true => Keychain::Internal { account: 0 },
+                        false => Keychain::External { account: 0 },
                     };
                     for (spk_i, spk) in index.revealed_keychain_spks(&target_keychain) {
                         let address = Address::from_script(spk, network)
@@ -516,7 +522,7 @@ where
                 chain,
                 chain.get_chain_tip()?,
                 graph.index.outpoints().iter().cloned(),
-                |(k, _), _| k == &Keychain::Internal,
+                |(k, _), _| k == &Keychain::Internal { account: 0 },
             )?;
 
             let confirmed_total = balance.confirmed + balance.immature;
@@ -689,7 +695,7 @@ where
 
     let (descriptor, mut keymap) =
         Descriptor::<DescriptorPublicKey>::parse_descriptor(&secp, &args.descriptor)?;
-    index.add_keychain(Keychain::External, descriptor);
+    index.add_keychain(Keychain::External { account: 0 }, descriptor);
 
     if let Some((internal_descriptor, internal_keymap)) = args
         .change_descriptor
@@ -698,7 +704,7 @@ where
         .transpose()?
     {
         keymap.extend(internal_keymap);
-        index.add_keychain(Keychain::Internal, internal_descriptor);
+        index.add_keychain(Keychain::Internal { account: 0 }, internal_descriptor);
     }
 
     let mut db_backend = match Store::<C>::open_or_create_new(db_magic, &args.db_path) {
