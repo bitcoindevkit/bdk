@@ -5,6 +5,7 @@ use core::convert::Infallible;
 use crate::collections::BTreeMap;
 use crate::{BlockId, ChainOracle};
 use alloc::sync::Arc;
+use bitcoin::block::Header;
 use bitcoin::BlockHash;
 
 /// The [`ChangeSet`] represents changes to [`LocalChain`].
@@ -369,6 +370,91 @@ impl LocalChain {
         Ok(changeset)
     }
 
+    /// Update the chain with a given [`Header`] and a `connected_to` [`BlockId`].
+    ///
+    /// The `header` will be transformed into checkpoints - one for the current block and one for
+    /// the previous block. Note that a genesis header will be transformed into only one checkpoint
+    /// (as there are no previous blocks). The checkpoints will be applied to the chain via
+    /// [`apply_update`].
+    ///
+    /// # Errors
+    ///
+    /// [`ApplyHeaderError::InconsistentBlocks`] occurs if the `connected_to` block and the
+    /// [`Header`] is inconsistent. For example, if the `connected_to` block is the same height as
+    /// `header` or `prev_blockhash`, but has a different block hash. Or if the `connected_to`
+    /// height is greater than the header's `height`.
+    ///
+    /// [`ApplyHeaderError::CannotConnect`] occurs if the internal call to [`apply_update`] fails.
+    ///
+    /// [`apply_update`]: LocalChain::apply_update
+    pub fn apply_header_connected_to(
+        &mut self,
+        header: &Header,
+        height: u32,
+        connected_to: BlockId,
+    ) -> Result<ChangeSet, ApplyHeaderError> {
+        let this = BlockId {
+            height,
+            hash: header.block_hash(),
+        };
+        let prev = height.checked_sub(1).map(|prev_height| BlockId {
+            height: prev_height,
+            hash: header.prev_blockhash,
+        });
+        let conn = match connected_to {
+            // `connected_to` can be ignored if same as `this` or `prev` (duplicate)
+            conn if conn == this || Some(conn) == prev => None,
+            // this occurs if:
+            // - `connected_to` height is the same as `prev`, but different hash
+            // - `connected_to` height is the same as `this`, but different hash
+            // - `connected_to` height is greater than `this` (this is not allowed)
+            conn if conn.height >= height.saturating_sub(1) => {
+                return Err(ApplyHeaderError::InconsistentBlocks)
+            }
+            conn => Some(conn),
+        };
+
+        let update = Update {
+            tip: CheckPoint::from_block_ids([conn, prev, Some(this)].into_iter().flatten())
+                .expect("block ids must be in order"),
+            introduce_older_blocks: false,
+        };
+
+        self.apply_update(update)
+            .map_err(ApplyHeaderError::CannotConnect)
+    }
+
+    /// Update the chain with a given [`Header`] connecting it with the previous block.
+    ///
+    /// This is a convenience method to call [`apply_header_connected_to`] with the `connected_to`
+    /// parameter being `height-1:prev_blockhash`. If there is no previous block (i.e. genesis), we
+    /// use the current block as `connected_to`.
+    ///
+    /// [`apply_header_connected_to`]: LocalChain::apply_header_connected_to
+    pub fn apply_header(
+        &mut self,
+        header: &Header,
+        height: u32,
+    ) -> Result<ChangeSet, CannotConnectError> {
+        let connected_to = match height.checked_sub(1) {
+            Some(prev_height) => BlockId {
+                height: prev_height,
+                hash: header.prev_blockhash,
+            },
+            None => BlockId {
+                height,
+                hash: header.block_hash(),
+            },
+        };
+        self.apply_header_connected_to(header, height, connected_to)
+            .map_err(|err| match err {
+                ApplyHeaderError::InconsistentBlocks => {
+                    unreachable!("connected_to is derived from the block so is always consistent")
+                }
+                ApplyHeaderError::CannotConnect(err) => err,
+            })
+    }
+
     /// Apply the given `changeset`.
     pub fn apply_changeset(&mut self, changeset: &ChangeSet) -> Result<(), MissingGenesisError> {
         if let Some(start_height) = changeset.keys().next().cloned() {
@@ -578,6 +664,30 @@ impl core::fmt::Display for CannotConnectError {
 
 #[cfg(feature = "std")]
 impl std::error::Error for CannotConnectError {}
+
+/// The error type for [`LocalChain::apply_header_connected_to`].
+#[derive(Debug, Clone, PartialEq)]
+pub enum ApplyHeaderError {
+    /// Occurs when `connected_to` block conflicts with either the current block or previous block.
+    InconsistentBlocks,
+    /// Occurs when the update cannot connect with the original chain.
+    CannotConnect(CannotConnectError),
+}
+
+impl core::fmt::Display for ApplyHeaderError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            ApplyHeaderError::InconsistentBlocks => write!(
+                f,
+                "the `connected_to` block conflicts with either the current or previous block"
+            ),
+            ApplyHeaderError::CannotConnect(err) => core::fmt::Display::fmt(err, f),
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for ApplyHeaderError {}
 
 fn merge_chains(
     original_tip: CheckPoint,
