@@ -39,6 +39,28 @@ impl CheckPoint {
         Self(Arc::new(CPInner { block, prev: None }))
     }
 
+    /// Construct a checkpoint from a list of [`BlockId`]s in ascending height order.
+    ///
+    /// # Errors
+    ///
+    /// This method will error if any of the follow occurs:
+    ///
+    /// - The `blocks` iterator is empty, in which case, the error will be `None`.
+    /// - The `blocks` iterator is not in ascending height order.
+    /// - The `blocks` iterator contains multiple [`BlockId`]s of the same height.
+    ///
+    /// The error type is the last successful checkpoint constructed (if any).
+    pub fn from_block_ids(
+        block_ids: impl IntoIterator<Item = BlockId>,
+    ) -> Result<Self, Option<Self>> {
+        let mut blocks = block_ids.into_iter();
+        let mut acc = CheckPoint::new(blocks.next().ok_or(None)?);
+        for id in blocks {
+            acc = acc.push(id).map_err(Some)?;
+        }
+        Ok(acc)
+    }
+
     /// Construct a checkpoint from the given `header` and block `height`.
     ///
     /// If `header` is of the genesis block, the checkpoint won't have a [`prev`] node. Otherwise,
