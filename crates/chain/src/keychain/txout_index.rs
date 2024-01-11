@@ -206,9 +206,11 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     fn next_store_index(&self, keychain: &K) -> u32 {
         self.inner()
             .all_spks()
+            // This range is filtering out the spks with a keychain different than
+            // `keychain`. We don't use filter here as range is more optimized.
             .range((keychain.clone(), u32::MIN)..(keychain.clone(), u32::MAX))
             .last()
-            .map_or(0, |((_, v), _)| *v + 1)
+            .map_or(0, |((_, index), _)| *index + 1)
     }
 
     /// Generates script pubkey iterators for every `keychain`. The iterators iterate over all
@@ -362,51 +364,45 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
         let has_wildcard = descriptor.has_wildcard();
 
         let target_index = if has_wildcard { target_index } else { 0 };
-        let next_reveal_index = self.last_revealed.get(keychain).map_or(0, |v| *v + 1);
+        let next_reveal_index = self
+            .last_revealed
+            .get(keychain)
+            .map_or(0, |index| *index + 1);
 
         debug_assert!(next_reveal_index + self.lookahead >= self.next_store_index(keychain));
 
-        // if we need to reveal new indices, the latest revealed index goes here
-        let mut reveal_to_index = None;
-
-        // if the target is not yet revealed, but is already stored (due to lookahead), we need to
-        // set the `reveal_to_index` as target here (as the `for` loop below only updates
-        // `reveal_to_index` for indexes that are NOT stored)
-        if next_reveal_index <= target_index && target_index < next_reveal_index + self.lookahead {
-            reveal_to_index = Some(target_index);
-        }
-
-        // we range over indexes that are not stored
-        let range = next_reveal_index + self.lookahead..=target_index + self.lookahead;
-        for (new_index, new_spk) in SpkIterator::new_with_range(descriptor, range) {
-            let _inserted = self
-                .inner
-                .insert_spk((keychain.clone(), new_index), new_spk);
-            debug_assert!(_inserted, "must not have existing spk",);
-
-            // everything after `target_index` is stored for lookahead only
-            if new_index <= target_index {
-                reveal_to_index = Some(new_index);
-            }
-        }
-
-        match reveal_to_index {
-            Some(index) => {
-                let _old_index = self.last_revealed.insert(keychain.clone(), index);
-                debug_assert!(_old_index < Some(index));
-                (
-                    SpkIterator::new_with_range(descriptor.clone(), next_reveal_index..index + 1),
-                    super::ChangeSet(core::iter::once((keychain.clone(), index)).collect()),
-                )
-            }
-            None => (
+        // If the target_index is already revealed, we are done
+        if next_reveal_index > target_index {
+            return (
                 SpkIterator::new_with_range(
                     descriptor.clone(),
                     next_reveal_index..next_reveal_index,
                 ),
                 super::ChangeSet::default(),
-            ),
+            );
         }
+
+        // We range over the indexes that are not stored and insert their spks in the index.
+        // Indexes from next_reveal_index to next_reveal_index + lookahead are already stored (due
+        // to lookahead), so we only range from next_reveal_index + lookahead to target + lookahead
+        let range = next_reveal_index + self.lookahead..=target_index + self.lookahead;
+        for (new_index, new_spk) in SpkIterator::new_with_range(descriptor, range) {
+            let _inserted = self
+                .inner
+                .insert_spk((keychain.clone(), new_index), new_spk);
+            debug_assert!(_inserted, "must not have existing spk");
+            debug_assert!(
+                has_wildcard || new_index == 0,
+                "non-wildcard descriptors must not iterate past index 0"
+            );
+        }
+
+        let _old_index = self.last_revealed.insert(keychain.clone(), target_index);
+        debug_assert!(_old_index < Some(target_index));
+        (
+            SpkIterator::new_with_range(descriptor.clone(), next_reveal_index..target_index + 1),
+            super::ChangeSet(core::iter::once((keychain.clone(), target_index)).collect()),
+        )
     }
 
     /// Attempts to reveal the next script pubkey for `keychain`.
