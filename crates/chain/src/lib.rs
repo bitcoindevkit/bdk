@@ -32,6 +32,7 @@ pub mod local_chain;
 mod tx_data_traits;
 pub mod tx_graph;
 pub use tx_data_traits::*;
+pub use tx_graph::Balance;
 pub use tx_graph::TxGraph;
 mod chain_oracle;
 pub use chain_oracle::*;

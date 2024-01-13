@@ -5,9 +5,9 @@ use std::collections::BTreeSet;
 
 use bdk_chain::{
     indexed_tx_graph::{self, IndexedTxGraph},
-    keychain::{self, Balance, KeychainTxOutIndex},
+    keychain::{self, KeychainTxOutIndex},
     local_chain::LocalChain,
-    tx_graph, BlockId, ChainPosition, ConfirmationHeightAnchor,
+    tx_graph, Balance, BlockId, ChainPosition, ConfirmationHeightAnchor,
 };
 use bitcoin::{secp256k1::Secp256k1, OutPoint, Script, ScriptBuf, Transaction, TxIn, TxOut};
 use miniscript::Descriptor;
