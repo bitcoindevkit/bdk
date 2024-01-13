@@ -165,7 +165,7 @@ fn main() -> anyhow::Result<()> {
                 .lock()
                 .expect("mutex must not be poisoned")
                 .index
-                .spks_of_all_keychains()
+                .all_unbounded_spk_iters()
                 .into_iter()
                 // This `map` is purely for logging.
                 .map(|(keychain, iter)| {
@@ -235,32 +235,32 @@ fn main() -> anyhow::Result<()> {
                 if *all_spks {
                     let all_spks = graph
                         .index
-                        .all_spks()
-                        .iter()
-                        .map(|(k, v)| (*k, v.clone()))
+                        .revealed_spks()
+                        .map(|(k, i, spk)| (k, i, spk.to_owned()))
                         .collect::<Vec<_>>();
-                    spks = Box::new(spks.chain(all_spks.into_iter().map(|(index, script)| {
-                        eprintln!("scanning {:?}", index);
+                    spks = Box::new(spks.chain(all_spks.into_iter().map(|(k, i, spk)| {
+                        eprintln!("scanning {}:{}", k, i);
                         // Flush early to ensure we print at every iteration.
                         let _ = io::stderr().flush();
-                        script
+                        spk
                     })));
                 }
                 if unused_spks {
                     let unused_spks = graph
                         .index
-                        .unused_spks(..)
-                        .map(|(k, v)| (*k, v.to_owned()))
+                        .unused_spks()
+                        .map(|(k, i, spk)| (k, i, spk.to_owned()))
                         .collect::<Vec<_>>();
-                    spks = Box::new(spks.chain(unused_spks.into_iter().map(|(index, script)| {
+                    spks = Box::new(spks.chain(unused_spks.into_iter().map(|(k, i, spk)| {
                         eprintln!(
-                            "Checking if address {} {:?} has been used",
-                            Address::from_script(&script, args.network).unwrap(),
-                            index
+                            "Checking if address {} {}:{} has been used",
+                            Address::from_script(&spk, args.network).unwrap(),
+                            k,
+                            i,
                         );
                         // Flush early to ensure we print at every iteration.
                         let _ = io::stderr().flush();
-                        script
+                        spk
                     })));
                 }
                 if utxos {

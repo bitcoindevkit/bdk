@@ -478,14 +478,14 @@ where
                         true => Keychain::Internal,
                         false => Keychain::External,
                     };
-                    for (spk_i, spk) in index.revealed_spks_of_keychain(&target_keychain) {
+                    for (spk_i, spk) in index.revealed_keychain_spks(&target_keychain) {
                         let address = Address::from_script(spk, network)
                             .expect("should always be able to derive address");
                         println!(
                             "{:?} {} used:{}",
                             spk_i,
                             address,
-                            index.is_used(&(target_keychain, spk_i))
+                            index.is_used(target_keychain, spk_i)
                         );
                     }
                     Ok(())
@@ -611,7 +611,7 @@ where
                     // We don't want other callers/threads to use this address while we're using it
                     // but we also don't want to scan the tx we just created because it's not
                     // technically in the blockchain yet.
-                    graph.index.mark_used(&change_keychain, index);
+                    graph.index.mark_used(change_keychain, index);
                     (tx, Some((change_keychain, index)))
                 } else {
                     (tx, None)
@@ -636,7 +636,7 @@ where
                 Err(e) => {
                     if let Some((keychain, index)) = change_index {
                         // We failed to broadcast, so allow our change address to be used in the future
-                        graph.lock().unwrap().index.unmark_used(&keychain, index);
+                        graph.lock().unwrap().index.unmark_used(keychain, index);
                     }
                     Err(e)
                 }

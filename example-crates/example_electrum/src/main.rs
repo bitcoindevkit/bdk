@@ -5,7 +5,7 @@ use std::{
 };
 
 use bdk_chain::{
-    bitcoin::{constants::genesis_block, Address, Network, OutPoint, ScriptBuf, Txid},
+    bitcoin::{constants::genesis_block, Address, Network, OutPoint, Txid},
     indexed_tx_graph::{self, IndexedTxGraph},
     keychain,
     local_chain::{self, LocalChain},
@@ -155,7 +155,7 @@ fn main() -> anyhow::Result<()> {
 
                 let keychain_spks = graph
                     .index
-                    .spks_of_all_keychains()
+                    .all_unbounded_spk_iters()
                     .into_iter()
                     .map(|(keychain, iter)| {
                         let mut first = true;
@@ -206,29 +206,28 @@ fn main() -> anyhow::Result<()> {
             if all_spks {
                 let all_spks = graph
                     .index
-                    .all_spks()
-                    .iter()
-                    .map(|(k, v)| (*k, v.clone()))
+                    .revealed_spks()
+                    .map(|(k, i, spk)| (k, i, spk.to_owned()))
                     .collect::<Vec<_>>();
-                spks = Box::new(spks.chain(all_spks.into_iter().map(|(index, script)| {
-                    eprintln!("scanning {:?}", index);
-                    script
+                spks = Box::new(spks.chain(all_spks.into_iter().map(|(k, i, spk)| {
+                    eprintln!("scanning {}:{}", k, i);
+                    spk
                 })));
             }
             if unused_spks {
                 let unused_spks = graph
                     .index
-                    .unused_spks(..)
-                    .map(|(k, v)| (*k, ScriptBuf::from(v)))
+                    .unused_spks()
+                    .map(|(k, i, spk)| (k, i, spk.to_owned()))
                     .collect::<Vec<_>>();
-                spks = Box::new(spks.chain(unused_spks.into_iter().map(|(index, script)| {
+                spks = Box::new(spks.chain(unused_spks.into_iter().map(|(k, i, spk)| {
                     eprintln!(
-                        "Checking if address {} {:?} has been used",
-                        Address::from_script(&script, args.network).unwrap(),
-                        index
+                        "Checking if address {} {}:{} has been used",
+                        Address::from_script(&spk, args.network).unwrap(),
+                        k,
+                        i,
                     );
-
-                    script
+                    spk
                 })));
             }
 

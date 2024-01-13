@@ -5,8 +5,8 @@ use crate::{
     spk_iter::BIP32_MAX_INDEX,
     SpkIterator, SpkTxOutIndex,
 };
-use bitcoin::{OutPoint, Script, TxOut};
-use core::{fmt::Debug, ops::Deref};
+use bitcoin::{OutPoint, Script, Transaction, TxOut};
+use core::fmt::Debug;
 
 use crate::Append;
 
@@ -75,14 +75,6 @@ impl<K> Default for KeychainTxOutIndex<K> {
     }
 }
 
-impl<K> Deref for KeychainTxOutIndex<K> {
-    type Target = SpkTxOutIndex<(K, u32)>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.inner
-    }
-}
-
 impl<K: Clone + Ord + Debug> Indexer for KeychainTxOutIndex<K> {
     type ChangeSet = super::ChangeSet<K>;
 
@@ -110,7 +102,7 @@ impl<K: Clone + Ord + Debug> Indexer for KeychainTxOutIndex<K> {
     }
 
     fn is_tx_relevant(&self, tx: &bitcoin::Transaction) -> bool {
-        self.is_relevant(tx)
+        self.inner.is_relevant(tx)
     }
 }
 
@@ -133,8 +125,11 @@ impl<K> KeychainTxOutIndex<K> {
     }
 }
 
+/// Methods that are *re-exposed* from the internal [`SpkTxOutIndex`].
 impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     /// Return a reference to the internal [`SpkTxOutIndex`].
+    ///
+    /// **WARNING:** The internal index will contain lookahead spks.
     pub fn inner(&self) -> &SpkTxOutIndex<(K, u32)> {
         &self.inner
     }
@@ -144,7 +139,97 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
         self.inner.outpoints()
     }
 
-    /// Return a reference to the internal map of the keychain to descriptors.
+    /// Return the [`TxOut`] of `outpoint` if it has been indexed.
+    ///
+    /// The associated keychain and keychain index of the txout's spk is also returned.
+    ///
+    /// This calls [`SpkTxOutIndex::txout`] internally.
+    pub fn txout(&self, outpoint: OutPoint) -> Option<(K, u32, &TxOut)> {
+        self.inner
+            .txout(outpoint)
+            .map(|((k, i), txo)| (k.clone(), *i, txo))
+    }
+
+    /// Return the script that exists under the given `keychain`'s `index`.
+    ///
+    /// This calls [`SpkTxOutIndex::spk_at_index`] internally.
+    pub fn spk_at_index(&self, keychain: K, index: u32) -> Option<&Script> {
+        self.inner.spk_at_index(&(keychain, index))
+    }
+
+    /// Returns the keychain and keychain index associated with the spk.
+    ///
+    /// This calls [`SpkTxOutIndex::index_of_spk`] internally.
+    pub fn index_of_spk(&self, script: &Script) -> Option<(K, u32)> {
+        self.inner.index_of_spk(script).cloned()
+    }
+
+    /// Returns whether the spk under the `keychain`'s `index` has been used.
+    ///
+    /// Here, "unused" means that after the script pubkey was stored in the index, the index has
+    /// never scanned a transaction output with it.
+    ///
+    /// This calls [`SpkTxOutIndex::is_used`] internally.
+    pub fn is_used(&self, keychain: K, index: u32) -> bool {
+        self.inner.is_used(&(keychain, index))
+    }
+
+    /// Marks the script pubkey at `index` as used even though the tracker hasn't seen an output
+    /// with it.
+    ///
+    /// This only has an effect when the `index` had been added to `self` already and was unused.
+    ///
+    /// Returns whether the `index` was initially present as `unused`.
+    ///
+    /// This is useful when you want to reserve a script pubkey for something but don't want to add
+    /// the transaction output using it to the index yet. Other callers will consider `index` on
+    /// `keychain` used until you call [`unmark_used`].
+    ///
+    /// This calls [`SpkTxOutIndex::mark_used`] internally.
+    ///
+    /// [`unmark_used`]: Self::unmark_used
+    pub fn mark_used(&mut self, keychain: K, index: u32) -> bool {
+        self.inner.mark_used(&(keychain, index))
+    }
+
+    /// Undoes the effect of [`mark_used`]. Returns whether the `index` is inserted back into
+    /// `unused`.
+    ///
+    /// Note that if `self` has scanned an output with this script pubkey, then this will have no
+    /// effect.
+    ///
+    /// This calls [`SpkTxOutIndex::unmark_used`] internally.
+    ///
+    /// [`mark_used`]: Self::mark_used
+    pub fn unmark_used(&mut self, keychain: K, index: u32) -> bool {
+        self.inner.unmark_used(&(keychain, index))
+    }
+
+    /// Computes total input value going from script pubkeys in the index (sent) and the total output
+    /// value going to script pubkeys in the index (received) in `tx`. For the `sent` to be computed
+    /// correctly, the output being spent must have already been scanned by the index. Calculating
+    /// received just uses the [`Transaction`] outputs directly, so it will be correct even if it has
+    /// not been scanned.
+    ///
+    /// This calls [`SpkTxOutIndex::sent_and_received`] internally.
+    pub fn sent_and_received(&self, tx: &Transaction) -> (u64, u64) {
+        self.inner.sent_and_received(tx)
+    }
+
+    /// Computes the net value that this transaction gives to the script pubkeys in the index and
+    /// *takes* from the transaction outputs in the index. Shorthand for calling
+    /// [`sent_and_received`] and subtracting sent from received.
+    ///
+    /// This calls [`SpkTxOutIndex::net_value`] internally.
+    ///
+    /// [`sent_and_received`]: Self::sent_and_received
+    pub fn net_value(&self, tx: &Transaction) -> i64 {
+        self.inner.net_value(tx)
+    }
+}
+
+impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
+    /// Return a reference to the internal map of keychain to descriptors.
     pub fn keychains(&self) -> &BTreeMap<K, Descriptor<DescriptorPublicKey>> {
         &self.keychains
     }
@@ -213,59 +298,67 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
             .map_or(0, |((_, index), _)| *index + 1)
     }
 
-    /// Generates script pubkey iterators for every `keychain`. The iterators iterate over all
-    /// derivable script pubkeys.
-    pub fn spks_of_all_keychains(
+    /// Get an unbounded spk iterator over a given `keychain`.
+    ///
+    /// # Panics
+    ///
+    /// This will panic if the given `keychain`'s descriptor does not exist.
+    pub fn unbounded_spk_iter(&self, keychain: &K) -> SpkIterator<Descriptor<DescriptorPublicKey>> {
+        SpkIterator::new(
+            self.keychains
+                .get(keychain)
+                .expect("keychain does not exist")
+                .clone(),
+        )
+    }
+
+    /// Get unbounded spk iterators for all keychains.
+    pub fn all_unbounded_spk_iters(
         &self,
     ) -> BTreeMap<K, SpkIterator<Descriptor<DescriptorPublicKey>>> {
         self.keychains
             .iter()
-            .map(|(keychain, descriptor)| {
-                (
-                    keychain.clone(),
-                    SpkIterator::new_with_range(descriptor.clone(), 0..),
-                )
-            })
+            .map(|(k, descriptor)| (k.clone(), SpkIterator::new(descriptor.clone())))
             .collect()
     }
 
-    /// Generates a script pubkey iterator for the given `keychain`'s descriptor (if it exists). The
-    /// iterator iterates over all derivable scripts of the keychain's descriptor.
-    ///
-    /// # Panics
-    ///
-    /// This will panic if the `keychain` does not exist.
-    pub fn spks_of_keychain(&self, keychain: &K) -> SpkIterator<Descriptor<DescriptorPublicKey>> {
-        let descriptor = self
-            .keychains
-            .get(keychain)
-            .expect("keychain must exist")
-            .clone();
-        SpkIterator::new_with_range(descriptor, 0..)
+    /// Iterate over revealed spks of all keychains.
+    pub fn revealed_spks(&self) -> impl DoubleEndedIterator<Item = (K, u32, &Script)> + Clone {
+        self.keychains.keys().flat_map(|keychain| {
+            self.revealed_keychain_spks(keychain)
+                .map(|(i, spk)| (keychain.clone(), i, spk))
+        })
     }
 
-    /// Convenience method to get [`revealed_spks_of_keychain`] of all keychains.
-    ///
-    /// [`revealed_spks_of_keychain`]: Self::revealed_spks_of_keychain
-    pub fn revealed_spks_of_all_keychains(
-        &self,
-    ) -> BTreeMap<K, impl Iterator<Item = (u32, &Script)> + Clone> {
-        self.keychains
-            .keys()
-            .map(|keychain| (keychain.clone(), self.revealed_spks_of_keychain(keychain)))
-            .collect()
-    }
-
-    /// Iterates over the script pubkeys revealed by this index under `keychain`.
-    pub fn revealed_spks_of_keychain(
+    /// Iterate over revealed spks of the given `keychain`.
+    pub fn revealed_keychain_spks(
         &self,
         keychain: &K,
     ) -> impl DoubleEndedIterator<Item = (u32, &Script)> + Clone {
-        let next_index = self.last_revealed.get(keychain).map_or(0, |v| *v + 1);
+        let next_i = self.last_revealed.get(keychain).map_or(0, |&i| i + 1);
         self.inner
             .all_spks()
-            .range((keychain.clone(), u32::MIN)..(keychain.clone(), next_index))
-            .map(|((_, derivation_index), spk)| (*derivation_index, spk.as_script()))
+            .range((keychain.clone(), u32::MIN)..(keychain.clone(), next_i))
+            .map(|((_, i), spk)| (*i, spk.as_script()))
+    }
+
+    /// Iterate over revealed, but unused, spks of all keychains.
+    pub fn unused_spks(&self) -> impl DoubleEndedIterator<Item = (K, u32, &Script)> + Clone {
+        self.keychains.keys().flat_map(|keychain| {
+            self.unused_keychain_spks(keychain)
+                .map(|(i, spk)| (keychain.clone(), i, spk))
+        })
+    }
+
+    /// Iterate over revealed, but unused, spks of the given `keychain`.
+    pub fn unused_keychain_spks(
+        &self,
+        keychain: &K,
+    ) -> impl DoubleEndedIterator<Item = (u32, &Script)> + Clone {
+        let next_i = self.last_revealed.get(keychain).map_or(0, |&i| i + 1);
+        self.inner
+            .unused_spks((keychain.clone(), u32::MIN)..(keychain.clone(), next_i))
+            .map(|((_, i), spk)| (*i, spk))
     }
 
     /// Get the next derivation index for `keychain`. The next index is the index after the last revealed
@@ -442,13 +535,13 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     ///
     /// Panics if `keychain` has never been added to the index
     pub fn next_unused_spk(&mut self, keychain: &K) -> ((u32, &Script), super::ChangeSet<K>) {
-        let need_new = self.unused_spks_of_keychain(keychain).next().is_none();
+        let need_new = self.unused_keychain_spks(keychain).next().is_none();
         // this rather strange branch is needed because of some lifetime issues
         if need_new {
             self.reveal_next_spk(keychain)
         } else {
             (
-                self.unused_spks_of_keychain(keychain)
+                self.unused_keychain_spks(keychain)
                     .next()
                     .expect("we already know next exists"),
                 super::ChangeSet::default(),
@@ -456,46 +549,9 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
         }
     }
 
-    /// Marks the script pubkey at `index` as used even though the tracker hasn't seen an output with it.
-    /// This only has an effect when the `index` had been added to `self` already and was unused.
-    ///
-    /// Returns whether the `index` was initially present as `unused`.
-    ///
-    /// This is useful when you want to reserve a script pubkey for something but don't want to add
-    /// the transaction output using it to the index yet. Other callers will consider `index` on
-    /// `keychain` used until you call [`unmark_used`].
-    ///
-    /// [`unmark_used`]: Self::unmark_used
-    pub fn mark_used(&mut self, keychain: &K, index: u32) -> bool {
-        self.inner.mark_used(&(keychain.clone(), index))
-    }
-
-    /// Undoes the effect of [`mark_used`]. Returns whether the `index` is inserted back into
-    /// `unused`.
-    ///
-    /// Note that if `self` has scanned an output with this script pubkey, then this will have no
-    /// effect.
-    ///
-    /// [`mark_used`]: Self::mark_used
-    pub fn unmark_used(&mut self, keychain: &K, index: u32) -> bool {
-        self.inner.unmark_used(&(keychain.clone(), index))
-    }
-
-    /// Iterates over all unused script pubkeys for a `keychain` stored in the index.
-    pub fn unused_spks_of_keychain(
-        &self,
-        keychain: &K,
-    ) -> impl DoubleEndedIterator<Item = (u32, &Script)> {
-        let next_index = self.last_revealed.get(keychain).map_or(0, |&v| v + 1);
-        let range = (keychain.clone(), u32::MIN)..(keychain.clone(), next_index);
-        self.inner
-            .unused_spks(range)
-            .map(|((_, i), script)| (*i, script))
-    }
-
     /// Iterates over all the [`OutPoint`] that have a `TxOut` with a script pubkey derived from
     /// `keychain`.
-    pub fn txouts_of_keychain(
+    pub fn keychain_outpoints(
         &self,
         keychain: &K,
     ) -> impl DoubleEndedIterator<Item = (u32, OutPoint)> + '_ {
@@ -507,7 +563,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     /// Returns the highest derivation index of the `keychain` where [`KeychainTxOutIndex`] has
     /// found a [`TxOut`] with it's script pubkey.
     pub fn last_used_index(&self, keychain: &K) -> Option<u32> {
-        self.txouts_of_keychain(keychain).last().map(|(i, _)| i)
+        self.keychain_outpoints(keychain).last().map(|(i, _)| i)
     }
 
     /// Returns the highest derivation index of each keychain that [`KeychainTxOutIndex`] has found
