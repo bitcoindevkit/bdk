@@ -262,6 +262,11 @@ where
     /// Infallibly return a derived address using the external descriptor, see [`AddressIndex`] for
     /// available address index selection strategies. If none of the keys in the descriptor are derivable
     /// (i.e. does not end with /*) then the same address will always be returned for any [`AddressIndex`].
+    ///
+    /// # Panics
+    ///
+    /// This panics when the caller requests for an address of derivation index greater than the
+    /// BIP32 max index.
     pub fn get_address(&mut self, address_index: AddressIndex) -> AddressInfo {
         self.try_get_address(address_index).unwrap()
     }
@@ -273,6 +278,11 @@ where
     /// see [`AddressIndex`] for available address index selection strategies. If none of the keys
     /// in the descriptor are derivable (i.e. does not end with /*) then the same address will always
     /// be returned for any [`AddressIndex`].
+    ///
+    /// # Panics
+    ///
+    /// This panics when the caller requests for an address of derivation index greater than the
+    /// BIP32 max index.
     pub fn get_internal_address(&mut self, address_index: AddressIndex) -> AddressInfo {
         self.try_get_internal_address(address_index).unwrap()
     }
@@ -649,6 +659,11 @@ impl<D> Wallet<D> {
     ///
     /// A `PersistBackend<ChangeSet>::WriteError` will result if unable to persist the new address
     /// to the `PersistBackend`.
+    ///
+    /// # Panics
+    ///
+    /// This panics when the caller requests for an address of derivation index greater than the
+    /// BIP32 max index.
     pub fn try_get_address(
         &mut self,
         address_index: AddressIndex,
@@ -669,6 +684,11 @@ impl<D> Wallet<D> {
     /// see [`AddressIndex`] for available address index selection strategies. If none of the keys
     /// in the descriptor are derivable (i.e. does not end with /*) then the same address will always
     /// be returned for any [`AddressIndex`].
+    ///
+    /// # Panics
+    ///
+    /// This panics when the caller requests for an address of derivation index greater than the
+    /// BIP32 max index.
     pub fn try_get_internal_address(
         &mut self,
         address_index: AddressIndex,
@@ -691,6 +711,11 @@ impl<D> Wallet<D> {
     /// See [`AddressIndex`] for available address index selection strategies. If none of the keys
     /// in the descriptor are derivable (i.e. does not end with /*) then the same address will
     /// always be returned for any [`AddressIndex`].
+    ///
+    /// # Panics
+    ///
+    /// This panics when the caller requests for an address of derivation index greater than the
+    /// BIP32 max index.
     fn _get_address(
         &mut self,
         keychain: KeychainKind,
@@ -710,12 +735,14 @@ impl<D> Wallet<D> {
                 let ((index, spk), index_changeset) = txout_index.next_unused_spk(&keychain);
                 (index, spk.into(), Some(index_changeset))
             }
-            AddressIndex::Peek(index) => {
-                let (index, spk) = txout_index
-                    .unbounded_spk_iter(&keychain)
-                    .take(index as usize + 1)
-                    .last()
-                    .unwrap();
+            AddressIndex::Peek(mut peek_index) => {
+                let mut spk_iter = txout_index.unbounded_spk_iter(&keychain);
+                if !spk_iter.descriptor().has_wildcard() {
+                    peek_index = 0;
+                }
+                let (index, spk) = spk_iter
+                    .nth(peek_index as usize)
+                    .expect("derivation index is out of bounds");
                 (index, spk, None)
             }
         };
