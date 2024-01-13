@@ -219,6 +219,7 @@ mod test {
 
     use bincode::DefaultOptions;
     use std::{
+        collections::BTreeSet,
         io::{Read, Write},
         vec::Vec,
     };
@@ -228,7 +229,7 @@ mod test {
     const TEST_MAGIC_BYTES: [u8; TEST_MAGIC_BYTES_LEN] =
         [98, 100, 107, 102, 115, 49, 49, 49, 49, 49, 49, 49];
 
-    type TestChangeSet = Vec<String>;
+    type TestChangeSet = BTreeSet<String>;
 
     #[derive(Debug)]
     struct TestTracker;
@@ -253,7 +254,7 @@ mod test {
     fn open_or_create_new() {
         let temp_dir = tempfile::tempdir().unwrap();
         let file_path = temp_dir.path().join("db_file");
-        let changeset = vec!["hello".to_string(), "world".to_string()];
+        let changeset = BTreeSet::from(["hello".to_string(), "world".to_string()]);
 
         {
             let mut db = Store::<TestChangeSet>::open_or_create_new(&TEST_MAGIC_BYTES, &file_path)
@@ -304,7 +305,7 @@ mod test {
         let mut data = [255_u8; 2000];
         data[..TEST_MAGIC_BYTES_LEN].copy_from_slice(&TEST_MAGIC_BYTES);
 
-        let changeset = vec!["one".into(), "two".into(), "three!".into()];
+        let changeset = TestChangeSet::from(["one".into(), "two".into(), "three!".into()]);
 
         let mut file = NamedTempFile::new().unwrap();
         file.write_all(&data).expect("should write");
@@ -339,5 +340,74 @@ mod test {
         };
 
         assert_eq!(got_bytes, expected_bytes);
+    }
+
+    #[test]
+    fn last_write_is_short() {
+        let temp_dir = tempfile::tempdir().unwrap();
+
+        let changesets = [
+            TestChangeSet::from(["1".into()]),
+            TestChangeSet::from(["2".into(), "3".into()]),
+            TestChangeSet::from(["4".into(), "5".into(), "6".into()]),
+        ];
+        let last_changeset = TestChangeSet::from(["7".into(), "8".into(), "9".into()]);
+        let last_changeset_bytes = bincode_options().serialize(&last_changeset).unwrap();
+
+        for short_write_len in 1..last_changeset_bytes.len() - 1 {
+            let file_path = temp_dir.path().join(format!("{}.dat", short_write_len));
+            println!("Test file: {:?}", file_path);
+
+            // simulate creating a file, writing data where the last write is incomplete
+            {
+                let mut db =
+                    Store::<TestChangeSet>::create_new(&TEST_MAGIC_BYTES, &file_path).unwrap();
+                for changeset in &changesets {
+                    db.append_changeset(changeset).unwrap();
+                }
+                // this is the incomplete write
+                db.db_file
+                    .write_all(&last_changeset_bytes[..short_write_len])
+                    .unwrap();
+            }
+
+            // load file again and aggregate changesets
+            // write the last changeset again (this time it succeeds)
+            {
+                let mut db = Store::<TestChangeSet>::open(&TEST_MAGIC_BYTES, &file_path).unwrap();
+                let err = db
+                    .aggregate_changesets()
+                    .expect_err("should return error as last read is short");
+                assert_eq!(
+                    err.changeset,
+                    changesets.iter().cloned().reduce(|mut acc, cs| {
+                        Append::append(&mut acc, cs);
+                        acc
+                    }),
+                    "should recover all changesets that are written in full",
+                );
+                db.db_file.write_all(&last_changeset_bytes).unwrap();
+            }
+
+            // load file again - this time we should successfully aggregate all changesets
+            {
+                let mut db = Store::<TestChangeSet>::open(&TEST_MAGIC_BYTES, &file_path).unwrap();
+                let aggregated_changesets = db
+                    .aggregate_changesets()
+                    .expect("aggregating all changesets should succeed");
+                assert_eq!(
+                    aggregated_changesets,
+                    changesets
+                        .iter()
+                        .cloned()
+                        .chain(core::iter::once(last_changeset.clone()))
+                        .reduce(|mut acc, cs| {
+                            Append::append(&mut acc, cs);
+                            acc
+                        }),
+                    "should recover all changesets",
+                );
+            }
+        }
     }
 }
