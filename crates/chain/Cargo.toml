@@ -27,5 +27,5 @@ rand = "0.8"
 
 [features]
 default = ["std"]
-std = ["bitcoin/std", "miniscript/std"]
-serde = ["serde_crate", "bitcoin/serde"]
+std = ["bitcoin/std", "miniscript?/std"]
+serde = ["serde_crate", "bitcoin/serde", "miniscript?/serde"]

@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
 use assert_matches::assert_matches;
-use bdk::descriptor::calc_checksum;
+use bdk::descriptor::{calc_checksum, IntoWalletDescriptor};
 use bdk::psbt::PsbtUtils;
 use bdk::signer::{SignOptions, SignerError};
 use bdk::wallet::coin_selection::{self, LargestFirstCoinSelection};
@@ -10,14 +10,15 @@ use bdk::wallet::tx_builder::AddForeignUtxoError;
 use bdk::wallet::{AddressIndex, AddressInfo, Balance, Wallet};
 use bdk::wallet::{AddressIndex::*, NewError};
 use bdk::{FeeRate, KeychainKind};
+use bdk_chain::collections::BTreeMap;
 use bdk_chain::COINBASE_MATURITY;
 use bdk_chain::{BlockId, ConfirmationTime};
 use bitcoin::hashes::Hash;
 use bitcoin::sighash::{EcdsaSighashType, TapSighashType};
 use bitcoin::ScriptBuf;
 use bitcoin::{
-    absolute, script::PushBytesBuf, taproot::TapNodeHash, Address, OutPoint, Sequence, Transaction,
-    TxIn, TxOut, Weight,
+    absolute, script::PushBytesBuf, secp256k1::Secp256k1, taproot::TapNodeHash, Address, OutPoint,
+    Sequence, Transaction, TxIn, TxOut, Weight,
 };
 use bitcoin::{psbt, Network};
 use bitcoin::{BlockHash, Txid};
@@ -83,13 +84,23 @@ fn load_recovers_wallet() {
     // recover wallet
     {
         let db = bdk_file_store::Store::open(DB_MAGIC, &file_path).expect("must recover db");
-        let wallet =
-            Wallet::load(get_test_tr_single_sig_xprv(), None, db).expect("must recover wallet");
+        let wallet = Wallet::load(db).expect("must recover wallet");
         assert_eq!(wallet.network(), Network::Testnet);
-        assert_eq!(wallet.spk_index().keychains(), wallet_spk_index.keychains());
+        assert_eq!(
+            wallet.spk_index().keychains().collect::<Vec<_>>(),
+            wallet_spk_index.keychains().collect::<Vec<_>>()
+        );
         assert_eq!(
             wallet.spk_index().last_revealed_indices(),
             wallet_spk_index.last_revealed_indices()
+        );
+        let secp = Secp256k1::new();
+        assert_eq!(
+            *wallet.get_descriptor_for_keychain(KeychainKind::External),
+            get_test_tr_single_sig_xprv()
+                .into_wallet_descriptor(&secp, wallet.network())
+                .unwrap()
+                .0
         );
     }
 
@@ -107,12 +118,12 @@ fn new_or_load() {
     let file_path = temp_dir.path().join("store.db");
 
     // init wallet when non-existent
-    let wallet_keychains = {
+    let wallet_keychains: BTreeMap<_, _> = {
         let db = bdk_file_store::Store::open_or_create_new(DB_MAGIC, &file_path)
             .expect("must create db");
         let wallet = Wallet::new_or_load(get_test_wpkh(), None, db, Network::Testnet)
             .expect("must init wallet");
-        wallet.keychains().clone()
+        wallet.keychains().map(|(k, v)| (*k, v.clone())).collect()
     };
 
     // wrong network
@@ -161,6 +172,49 @@ fn new_or_load() {
         );
     }
 
+    // wrong external descriptor
+    {
+        let exp_descriptor = get_test_tr_single_sig();
+        let got_descriptor = get_test_wpkh()
+            .into_wallet_descriptor(&Secp256k1::new(), Network::Testnet)
+            .unwrap()
+            .0;
+
+        let db =
+            bdk_file_store::Store::open_or_create_new(DB_MAGIC, &file_path).expect("must open db");
+        let err = Wallet::new_or_load(exp_descriptor, None, db, Network::Testnet)
+            .expect_err("wrong external descriptor");
+        assert!(
+            matches!(
+                err,
+                bdk::wallet::NewOrLoadError::LoadedDescriptorDoesNotMatch { ref got, keychain }
+                if got == &Some(got_descriptor) && keychain == KeychainKind::External
+            ),
+            "err: {}",
+            err,
+        );
+    }
+
+    // wrong internal descriptor
+    {
+        let exp_descriptor = Some(get_test_tr_single_sig());
+        let got_descriptor = None;
+
+        let db =
+            bdk_file_store::Store::open_or_create_new(DB_MAGIC, &file_path).expect("must open db");
+        let err = Wallet::new_or_load(get_test_wpkh(), exp_descriptor, db, Network::Testnet)
+            .expect_err("wrong internal descriptor");
+        assert!(
+            matches!(
+                err,
+                bdk::wallet::NewOrLoadError::LoadedDescriptorDoesNotMatch { ref got, keychain }
+                if got == &got_descriptor && keychain == KeychainKind::Internal
+            ),
+            "err: {}",
+            err,
+        );
+    }
+
     // all parameters match
     {
         let db =
@@ -168,7 +222,10 @@ fn new_or_load() {
         let wallet = Wallet::new_or_load(get_test_wpkh(), None, db, Network::Testnet)
             .expect("must recover wallet");
         assert_eq!(wallet.network(), Network::Testnet);
-        assert_eq!(wallet.keychains(), &wallet_keychains);
+        assert!(wallet
+            .keychains()
+            .map(|(k, v)| (*k, v.clone()))
+            .eq(wallet_keychains));
     }
 }
 
@@ -180,7 +237,6 @@ fn test_descriptor_checksum() {
 
     let raw_descriptor = wallet
         .keychains()
-        .iter()
         .next()
         .unwrap()
         .1

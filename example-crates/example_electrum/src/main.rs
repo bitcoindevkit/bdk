@@ -238,7 +238,7 @@ fn main() -> anyhow::Result<()> {
             let mut outpoints: Box<dyn Iterator<Item = OutPoint>> = Box::new(core::iter::empty());
 
             if utxos {
-                let init_outpoints = graph.index.outpoints().iter().cloned();
+                let init_outpoints = graph.index.outpoints();
 
                 let utxos = graph
                     .graph()
