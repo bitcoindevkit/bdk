@@ -700,7 +700,7 @@ impl<D> Wallet<D> {
     }
 
     /// Iterator over all keychains in this wallet
-    pub fn keychains(&self) -> &BTreeMap<KeychainKind, ExtendedDescriptor> {
+    pub fn keychains(&self) -> impl Iterator<Item = (KeychainKind, &ExtendedDescriptor)> {
         self.indexed_graph.index.keychains()
     }
 
@@ -833,7 +833,7 @@ impl<D> Wallet<D> {
             .filter_chain_unspents(
                 &self.chain,
                 self.chain.tip().block_id(),
-                self.indexed_graph.index.outpoints().iter().cloned(),
+                self.indexed_graph.index.outpoints(),
             )
             .map(|((k, i), full_txo)| new_local_utxo(k, i, full_txo))
     }
@@ -847,7 +847,7 @@ impl<D> Wallet<D> {
             .filter_chain_txouts(
                 &self.chain,
                 self.chain.tip().block_id(),
-                self.indexed_graph.index.outpoints().iter().cloned(),
+                self.indexed_graph.index.outpoints(),
             )
             .map(|((k, i), full_txo)| new_local_utxo(k, i, full_txo))
     }
@@ -1271,17 +1271,9 @@ impl<D> Wallet<D> {
     where
         D: PersistBackend<ChangeSet>,
     {
-        let external_descriptor = self
-            .indexed_graph
-            .index
-            .keychains()
-            .get(&KeychainKind::External)
-            .expect("must exist");
-        let internal_descriptor = self
-            .indexed_graph
-            .index
-            .keychains()
-            .get(&KeychainKind::Internal);
+        let keychains: BTreeMap<_, _> = self.indexed_graph.index.keychains().collect();
+        let external_descriptor = keychains.get(&KeychainKind::External).expect("must exist");
+        let internal_descriptor = keychains.get(&KeychainKind::Internal);
 
         let external_policy = external_descriptor
             .extract_policy(&self.signers, BuildSatisfaction::None, &self.secp)?
@@ -1892,7 +1884,11 @@ impl<D> Wallet<D> {
     ///
     /// This can be used to build a watch-only version of a wallet
     pub fn public_descriptor(&self, keychain: KeychainKind) -> Option<&ExtendedDescriptor> {
-        self.indexed_graph.index.keychains().get(&keychain)
+        self.indexed_graph
+            .index
+            .keychains()
+            .find(|(k, _)| *k == keychain)
+            .map(|(_, d)| d)
     }
 
     /// Finalize a PSBT, i.e., for each input determine if sufficient data is available to pass
@@ -1943,17 +1939,9 @@ impl<D> Wallet<D> {
                 .get_utxo_for(n)
                 .and_then(|txout| self.get_descriptor_for_txout(&txout))
                 .or_else(|| {
-                    self.indexed_graph
-                        .index
-                        .keychains()
-                        .iter()
-                        .find_map(|(_, desc)| {
-                            desc.derive_from_psbt_input(
-                                psbt_input,
-                                psbt.get_utxo_for(n),
-                                &self.secp,
-                            )
-                        })
+                    self.indexed_graph.index.keychains().find_map(|(_, desc)| {
+                        desc.derive_from_psbt_input(psbt_input, psbt.get_utxo_for(n), &self.secp)
+                    })
                 });
 
             match desc {
@@ -2176,7 +2164,6 @@ impl<D> Wallet<D> {
         if params.add_global_xpubs {
             let all_xpubs = self
                 .keychains()
-                .iter()
                 .flat_map(|(_, desc)| desc.get_extended_keys())
                 .collect::<Vec<_>>();
 

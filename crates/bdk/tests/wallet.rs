@@ -10,6 +10,7 @@ use bdk::wallet::tx_builder::AddForeignUtxoError;
 use bdk::wallet::{AddressIndex, AddressInfo, Balance, Wallet};
 use bdk::wallet::{AddressIndex::*, NewError};
 use bdk::{FeeRate, KeychainKind};
+use bdk_chain::collections::BTreeMap;
 use bdk_chain::COINBASE_MATURITY;
 use bdk_chain::{BlockId, ConfirmationTime};
 use bitcoin::hashes::Hash;
@@ -86,7 +87,10 @@ fn load_recovers_wallet() {
         let wallet =
             Wallet::load(get_test_tr_single_sig_xprv(), None, db).expect("must recover wallet");
         assert_eq!(wallet.network(), Network::Testnet);
-        assert_eq!(wallet.spk_index().keychains(), wallet_spk_index.keychains());
+        assert_eq!(
+            wallet.spk_index().keychains().collect::<Vec<_>>(),
+            wallet_spk_index.keychains().collect::<Vec<_>>()
+        );
         assert_eq!(
             wallet.spk_index().last_revealed_indices(),
             wallet_spk_index.last_revealed_indices()
@@ -107,12 +111,12 @@ fn new_or_load() {
     let file_path = temp_dir.path().join("store.db");
 
     // init wallet when non-existent
-    let wallet_keychains = {
+    let wallet_keychains: BTreeMap<_, _> = {
         let db = bdk_file_store::Store::open_or_create_new(DB_MAGIC, &file_path)
             .expect("must create db");
         let wallet = Wallet::new_or_load(get_test_wpkh(), None, db, Network::Testnet)
             .expect("must init wallet");
-        wallet.keychains().clone()
+        wallet.keychains().map(|(k, v)| (k, v.clone())).collect()
     };
 
     // wrong network
@@ -168,7 +172,13 @@ fn new_or_load() {
         let wallet = Wallet::new_or_load(get_test_wpkh(), None, db, Network::Testnet)
             .expect("must recover wallet");
         assert_eq!(wallet.network(), Network::Testnet);
-        assert_eq!(wallet.keychains(), &wallet_keychains);
+        assert_eq!(
+            wallet
+                .keychains()
+                .map(|(k, v)| (k, v.clone()))
+                .collect::<BTreeMap<_, _>>(),
+            wallet_keychains
+        );
     }
 }
 
@@ -180,7 +190,6 @@ fn test_descriptor_checksum() {
 
     let raw_descriptor = wallet
         .keychains()
-        .iter()
         .next()
         .unwrap()
         .1

@@ -3,6 +3,7 @@ mod common;
 
 use std::collections::BTreeSet;
 
+use crate::common::{descriptor_ids, DESCRIPTORS};
 use bdk_chain::{
     indexed_tx_graph::{self, IndexedTxGraph},
     keychain::{self, Balance, KeychainTxOutIndex},
@@ -21,16 +22,15 @@ use miniscript::Descriptor;
 /// agnostic.
 #[test]
 fn insert_relevant_txs() {
-    let (descriptor, _) =
-        Descriptor::parse_descriptor(&Secp256k1::signing_only(), common::DESCRIPTORS[0])
-            .expect("must be valid");
+    let (descriptor, _) = Descriptor::parse_descriptor(&Secp256k1::signing_only(), DESCRIPTORS[0])
+        .expect("must be valid");
     let spk_0 = descriptor.at_derivation_index(0).unwrap().script_pubkey();
     let spk_1 = descriptor.at_derivation_index(9).unwrap().script_pubkey();
 
     let mut graph = IndexedTxGraph::<ConfirmationHeightAnchor, KeychainTxOutIndex<()>>::new(
         KeychainTxOutIndex::new(10),
     );
-    graph.index.add_keychain((), descriptor);
+    graph.index.add_keychain((), descriptor.clone());
 
     let tx_a = Transaction {
         output: vec![
@@ -69,7 +69,10 @@ fn insert_relevant_txs() {
             txs: txs.clone().into(),
             ..Default::default()
         },
-        indexer: keychain::ChangeSet([((), 9_u32)].into()),
+        indexer: keychain::ChangeSet {
+            last_revealed: [(descriptor_ids(0), 9_u32)].into(),
+            keychains_added: [].into(),
+        },
     };
 
     assert_eq!(
@@ -77,7 +80,16 @@ fn insert_relevant_txs() {
         changeset,
     );
 
-    assert_eq!(graph.initial_changeset(), changeset,);
+    // The initial changeset will also contain info about the keychain we added
+    let initial_changeset = indexed_tx_graph::ChangeSet {
+        graph: changeset.graph,
+        indexer: keychain::ChangeSet {
+            last_revealed: changeset.indexer.last_revealed,
+            keychains_added: [((), descriptor)].into(),
+        },
+    };
+
+    assert_eq!(graph.initial_changeset(), initial_changeset);
 }
 
 #[test]
