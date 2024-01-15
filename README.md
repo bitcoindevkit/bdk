@@ -48,6 +48,8 @@ The project is split up into several crates in the `/crates` directory:
 Fully working examples of how to use these components are in `/example-crates`:
 - [`example_cli`](./example-crates/example_cli): Library used by the `example_*` crates. Provides utilities for syncing, showing the balance, generating addresses and creating transactions without using the bdk `Wallet`.
 - [`example_electrum`](./example-crates/example_electrum): A command line Bitcoin wallet application built on top of `example_cli` and the `electrum` crate. It shows the power of the bdk tools (`chain` + `file_store` + `electrum`), without depending on the main `bdk` library.
+- [`example_esplora`](./example-crates/example_esplora): A command line Bitcoin wallet application built on top of `example_cli` and the `esplora` crate. It shows the power of the bdk tools (`chain` + `file_store` + `esplora`), without depending on the main `bdk` library.
+- [`example_bitcoind_rpc_polling`](./example-crates/example_bitcoind_rpc_polling): A command line Bitcoin wallet application built on top of `example_cli` and the `bitcoind_rpc` crate. It shows the power of the bdk tools (`chain` + `file_store` + `bitcoind_rpc`), without depending on the main `bdk` library.
 - [`wallet_esplora_blocking`](./example-crates/wallet_esplora_blocking): Uses the `Wallet` to sync and spend using the Esplora blocking interface.
 - [`wallet_esplora_async`](./example-crates/wallet_esplora_async): Uses the `Wallet` to sync and spend using the Esplora asynchronous interface.
 - [`wallet_electrum`](./example-crates/wallet_electrum): Uses the `Wallet` to sync and spend using Electrum.
