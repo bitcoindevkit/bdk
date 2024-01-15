@@ -1,5 +1,5 @@
 use bdk_chain::local_chain::{
-    AlterCheckPointError, CannotConnectError, ChangeSet, LocalChain, Update,
+    AlterCheckPointError, CannotConnectError, ChangeSet, LocalChain, MissingGenesisError, Update,
 };
 use bitcoin::BlockHash;
 
@@ -348,5 +348,78 @@ fn local_chain_insert_block() {
             i,
         );
         assert_eq!(chain, t.expected_final, "[{}] unexpected final chain", i,);
+    }
+}
+
+#[test]
+fn local_chain_disconnect_from() {
+    struct TestCase {
+        name: &'static str,
+        original: LocalChain,
+        disconnect_from: (u32, BlockHash),
+        exp_result: Result<ChangeSet, MissingGenesisError>,
+        exp_final: LocalChain,
+    }
+
+    let test_cases = [
+        TestCase {
+            name: "try_replace_genesis_should_fail",
+            original: local_chain![(0, h!("_"))],
+            disconnect_from: (0, h!("_")),
+            exp_result: Err(MissingGenesisError),
+            exp_final: local_chain![(0, h!("_"))],
+        },
+        TestCase {
+            name: "try_replace_genesis_should_fail_2",
+            original: local_chain![(0, h!("_")), (2, h!("B")), (3, h!("C"))],
+            disconnect_from: (0, h!("_")),
+            exp_result: Err(MissingGenesisError),
+            exp_final: local_chain![(0, h!("_")), (2, h!("B")), (3, h!("C"))],
+        },
+        TestCase {
+            name: "from_does_not_exist",
+            original: local_chain![(0, h!("_")), (3, h!("C"))],
+            disconnect_from: (2, h!("B")),
+            exp_result: Ok(ChangeSet::default()),
+            exp_final: local_chain![(0, h!("_")), (3, h!("C"))],
+        },
+        TestCase {
+            name: "from_has_different_blockhash",
+            original: local_chain![(0, h!("_")), (2, h!("B"))],
+            disconnect_from: (2, h!("not_B")),
+            exp_result: Ok(ChangeSet::default()),
+            exp_final: local_chain![(0, h!("_")), (2, h!("B"))],
+        },
+        TestCase {
+            name: "disconnect_one",
+            original: local_chain![(0, h!("_")), (2, h!("B"))],
+            disconnect_from: (2, h!("B")),
+            exp_result: Ok(ChangeSet::from_iter([(2, None)])),
+            exp_final: local_chain![(0, h!("_"))],
+        },
+        TestCase {
+            name: "disconnect_three",
+            original: local_chain![(0, h!("_")), (2, h!("B")), (3, h!("C")), (4, h!("D"))],
+            disconnect_from: (2, h!("B")),
+            exp_result: Ok(ChangeSet::from_iter([(2, None), (3, None), (4, None)])),
+            exp_final: local_chain![(0, h!("_"))],
+        },
+    ];
+
+    for (i, t) in test_cases.into_iter().enumerate() {
+        println!("Case {}: {}", i, t.name);
+
+        let mut chain = t.original;
+        let result = chain.disconnect_from(t.disconnect_from.into());
+        assert_eq!(
+            result, t.exp_result,
+            "[{}:{}] unexpected changeset result",
+            i, t.name
+        );
+        assert_eq!(
+            chain, t.exp_final,
+            "[{}:{}] unexpected final chain",
+            i, t.name
+        );
     }
 }
