@@ -420,6 +420,28 @@ impl LocalChain {
         Ok(changeset)
     }
 
+    /// Removes blocks from (and inclusive of) the given `block_id`.
+    ///
+    /// This will remove blocks with a height equal or greater than `block_id`, but only if
+    /// `block_id` exists in the chain.
+    ///
+    /// # Errors
+    ///
+    /// This will fail with [`MissingGenesisError`] if the caller attempts to disconnect from the
+    /// genesis block.
+    pub fn disconnect_from(&mut self, block_id: BlockId) -> Result<ChangeSet, MissingGenesisError> {
+        if self.index.get(&block_id.height) != Some(&block_id.hash) {
+            return Ok(ChangeSet::default());
+        }
+
+        let changeset = self
+            .index
+            .range(block_id.height..)
+            .map(|(&height, _)| (height, None))
+            .collect::<ChangeSet>();
+        self.apply_changeset(&changeset).map(|_| changeset)
+    }
+
     /// Reindex the heights in the chain from (and including) `from` height
     fn reindex(&mut self, from: u32) {
         let _ = self.index.split_off(&from);
