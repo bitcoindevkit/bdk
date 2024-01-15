@@ -27,5 +27,5 @@ proptest = "1.2.0"
 
 [features]
 default = ["std"]
-std = ["bitcoin/std", "miniscript/std"]
-serde = ["serde_crate", "bitcoin/serde"]
+std = ["bitcoin/std", "miniscript?/std"]
+serde = ["serde_crate", "bitcoin/serde", "miniscript?/serde"]
