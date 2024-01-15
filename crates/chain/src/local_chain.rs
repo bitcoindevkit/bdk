@@ -370,12 +370,16 @@ impl LocalChain {
         Ok(changeset)
     }
 
-    /// Update the chain with a given [`Header`] and a `connected_to` [`BlockId`].
+    /// Update the chain with a given [`Header`] at `height` which you claim is connected to a existing block in the chain.
     ///
-    /// The `header` will be transformed into checkpoints - one for the current block and one for
-    /// the previous block. Note that a genesis header will be transformed into only one checkpoint
-    /// (as there are no previous blocks). The checkpoints will be applied to the chain via
-    /// [`apply_update`].
+    /// This is useful when you have a block header that you want to record as part of the chain but
+    /// don't necessarily know that the `prev_blockhash` is in the chain.
+    ///
+    /// This will usually insert two new [`BlockId`]s into the chain: the header's block and the
+    /// header's `prev_blockhash` block. `connected_to` must already be in the chain but is allowed
+    /// to be `prev_blockhash` (in which case only one new block id will be inserted).
+    /// To be successful, `connected_to` must be chosen carefully so that `LocalChain`'s [update
+    /// rules][`apply_update`] are satisfied.
     ///
     /// # Errors
     ///
@@ -386,7 +390,7 @@ impl LocalChain {
     ///
     /// [`ApplyHeaderError::CannotConnect`] occurs if the internal call to [`apply_update`] fails.
     ///
-    /// [`apply_update`]: LocalChain::apply_update
+    /// [`apply_update`]: Self::apply_update
     pub fn apply_header_connected_to(
         &mut self,
         header: &Header,
