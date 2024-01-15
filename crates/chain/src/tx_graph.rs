@@ -1271,10 +1271,12 @@ impl<A> ChangeSet<A> {
 }
 
 impl<A: Ord> Append for ChangeSet<A> {
-    fn append(&mut self, mut other: Self) {
-        self.txs.append(&mut other.txs);
-        self.txouts.append(&mut other.txouts);
-        self.anchors.append(&mut other.anchors);
+    fn append(&mut self, other: Self) {
+        // We use `extend` instead of `BTreeMap::append` due to performance issues with `append`.
+        // Refer to https://github.com/rust-lang/rust/issues/34666#issuecomment-675658420
+        self.txs.extend(other.txs);
+        self.txouts.extend(other.txouts);
+        self.anchors.extend(other.anchors);
 
         // last_seen timestamps should only increase
         self.last_seen.extend(

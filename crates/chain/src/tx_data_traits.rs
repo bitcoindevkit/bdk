@@ -123,8 +123,10 @@ pub trait Append {
 }
 
 impl<K: Ord, V> Append for BTreeMap<K, V> {
-    fn append(&mut self, mut other: Self) {
-        BTreeMap::append(self, &mut other)
+    fn append(&mut self, other: Self) {
+        // We use `extend` instead of `BTreeMap::append` due to performance issues with `append`.
+        // Refer to https://github.com/rust-lang/rust/issues/34666#issuecomment-675658420
+        BTreeMap::extend(self, other)
     }
 
     fn is_empty(&self) -> bool {
@@ -133,8 +135,10 @@ impl<K: Ord, V> Append for BTreeMap<K, V> {
 }
 
 impl<T: Ord> Append for BTreeSet<T> {
-    fn append(&mut self, mut other: Self) {
-        BTreeSet::append(self, &mut other)
+    fn append(&mut self, other: Self) {
+        // We use `extend` instead of `BTreeMap::append` due to performance issues with `append`.
+        // Refer to https://github.com/rust-lang/rust/issues/34666#issuecomment-675658420
+        BTreeSet::extend(self, other)
     }
 
     fn is_empty(&self) -> bool {
