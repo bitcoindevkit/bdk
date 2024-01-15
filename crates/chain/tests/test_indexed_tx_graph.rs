@@ -3,11 +3,12 @@ mod common;
 
 use std::collections::BTreeSet;
 
+use crate::common::DESCRIPTORS;
 use bdk_chain::{
     indexed_tx_graph::{self, IndexedTxGraph},
     keychain::{self, Balance, KeychainTxOutIndex},
     local_chain::LocalChain,
-    tx_graph, BlockId, ChainPosition, ConfirmationHeightAnchor,
+    tx_graph, BlockId, ChainPosition, ConfirmationHeightAnchor, DescriptorExt,
 };
 use bitcoin::{secp256k1::Secp256k1, OutPoint, Script, ScriptBuf, Transaction, TxIn, TxOut};
 use miniscript::Descriptor;
@@ -21,16 +22,15 @@ use miniscript::Descriptor;
 /// agnostic.
 #[test]
 fn insert_relevant_txs() {
-    let (descriptor, _) =
-        Descriptor::parse_descriptor(&Secp256k1::signing_only(), common::DESCRIPTORS[0])
-            .expect("must be valid");
+    let (descriptor, _) = Descriptor::parse_descriptor(&Secp256k1::signing_only(), DESCRIPTORS[0])
+        .expect("must be valid");
     let spk_0 = descriptor.at_derivation_index(0).unwrap().script_pubkey();
     let spk_1 = descriptor.at_derivation_index(9).unwrap().script_pubkey();
 
     let mut graph = IndexedTxGraph::<ConfirmationHeightAnchor, KeychainTxOutIndex<()>>::new(
         KeychainTxOutIndex::new(10),
     );
-    graph.index.add_keychain((), descriptor);
+    let _ = graph.index.insert_descriptor(descriptor.clone(), ());
 
     let tx_a = Transaction {
         output: vec![
@@ -69,7 +69,10 @@ fn insert_relevant_txs() {
             txs: txs.clone().into(),
             ..Default::default()
         },
-        indexer: keychain::ChangeSet([((), 9_u32)].into()),
+        indexer: keychain::ChangeSet {
+            last_revealed: [(descriptor.descriptor_id(), 9_u32)].into(),
+            keychains_added: [].into(),
+        },
     };
 
     assert_eq!(
@@ -77,7 +80,16 @@ fn insert_relevant_txs() {
         changeset,
     );
 
-    assert_eq!(graph.initial_changeset(), changeset,);
+    // The initial changeset will also contain info about the keychain we added
+    let initial_changeset = indexed_tx_graph::ChangeSet {
+        graph: changeset.graph,
+        indexer: keychain::ChangeSet {
+            last_revealed: changeset.indexer.last_revealed,
+            keychains_added: [((), descriptor)].into(),
+        },
+    };
+
+    assert_eq!(graph.initial_changeset(), initial_changeset);
 }
 
 #[test]
@@ -125,8 +137,8 @@ fn test_list_owned_txouts() {
         KeychainTxOutIndex::new(10),
     );
 
-    graph.index.add_keychain("keychain_1".into(), desc_1);
-    graph.index.add_keychain("keychain_2".into(), desc_2);
+    let _ = graph.index.insert_descriptor(desc_1, "keychain_1".into());
+    let _ = graph.index.insert_descriptor(desc_2, "keychain_2".into());
 
     // Get trusted and untrusted addresses
 
@@ -239,26 +251,18 @@ fn test_list_owned_txouts() {
                 .unwrap_or_else(|| panic!("block must exist at {}", height));
             let txouts = graph
                 .graph()
-                .filter_chain_txouts(
-                    &local_chain,
-                    chain_tip,
-                    graph.index.outpoints().iter().cloned(),
-                )
+                .filter_chain_txouts(&local_chain, chain_tip, graph.index.outpoints())
                 .collect::<Vec<_>>();
 
             let utxos = graph
                 .graph()
-                .filter_chain_unspents(
-                    &local_chain,
-                    chain_tip,
-                    graph.index.outpoints().iter().cloned(),
-                )
+                .filter_chain_unspents(&local_chain, chain_tip, graph.index.outpoints())
                 .collect::<Vec<_>>();
 
             let balance = graph.graph().balance(
                 &local_chain,
                 chain_tip,
-                graph.index.outpoints().iter().cloned(),
+                graph.index.outpoints(),
                 |_, spk: &Script| trusted_spks.contains(&spk.to_owned()),
             );
 

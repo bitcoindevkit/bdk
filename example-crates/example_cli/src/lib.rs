@@ -247,7 +247,11 @@ where
         script_pubkey: address.script_pubkey(),
     }];
 
-    let internal_keychain = if graph.index.keychains().get(&Keychain::Internal).is_some() {
+    let internal_keychain = if graph
+        .index
+        .keychains()
+        .any(|(k, _)| *k == Keychain::Internal)
+    {
         Keychain::Internal
     } else {
         Keychain::External
@@ -264,8 +268,9 @@ where
         &graph
             .index
             .keychains()
-            .get(&internal_keychain)
+            .find(|(k, _)| *k == &internal_keychain)
             .expect("must exist")
+            .1
             .at_derivation_index(change_index)
             .expect("change_index can't be hardened"),
         &assets,
@@ -282,8 +287,9 @@ where
         min_drain_value: graph
             .index
             .keychains()
-            .get(&internal_keychain)
+            .find(|(k, _)| *k == &internal_keychain)
             .expect("must exist")
+            .1
             .dust_value(),
         ..CoinSelectorOpt::fund_outputs(
             &outputs,
@@ -414,7 +420,7 @@ pub fn planned_utxos<A: Anchor, O: ChainOracle, K: Clone + bdk_tmp_plan::CanDeri
     assets: &bdk_tmp_plan::Assets<K>,
 ) -> Result<Vec<PlannedUtxo<K, A>>, O::Error> {
     let chain_tip = chain.get_chain_tip()?;
-    let outpoints = graph.index.outpoints().iter().cloned();
+    let outpoints = graph.index.outpoints();
     graph
         .graph()
         .try_filter_chain_unspents(chain, chain_tip, outpoints)
@@ -426,8 +432,9 @@ pub fn planned_utxos<A: Anchor, O: ChainOracle, K: Clone + bdk_tmp_plan::CanDeri
             let desc = graph
                 .index
                 .keychains()
-                .get(&k)
+                .find(|(keychain, _)| *keychain == &k)
                 .expect("keychain must exist")
+                .1
                 .at_derivation_index(i)
                 .expect("i can't be hardened");
             let plan = bdk_tmp_plan::plan_satisfaction(&desc, assets)?;
@@ -515,7 +522,7 @@ where
             let balance = graph.graph().try_balance(
                 chain,
                 chain.get_chain_tip()?,
-                graph.index.outpoints().iter().cloned(),
+                graph.index.outpoints(),
                 |(k, _), _| k == &Keychain::Internal,
             )?;
 
@@ -545,7 +552,7 @@ where
             let graph = &*graph.lock().unwrap();
             let chain = &*chain.lock().unwrap();
             let chain_tip = chain.get_chain_tip()?;
-            let outpoints = graph.index.outpoints().iter().cloned();
+            let outpoints = graph.index.outpoints();
 
             match txout_cmd {
                 TxOutCmd::List {
@@ -687,9 +694,11 @@ where
 
     let mut index = KeychainTxOutIndex::<Keychain>::default();
 
+    // TODO: descriptors are already stored in the db, so we shouldn't re-insert them in the index
+    // here. However, the keymap is not stored in the database.
     let (descriptor, mut keymap) =
         Descriptor::<DescriptorPublicKey>::parse_descriptor(&secp, &args.descriptor)?;
-    index.add_keychain(Keychain::External, descriptor);
+    let _ = index.insert_descriptor(descriptor, Keychain::External);
 
     if let Some((internal_descriptor, internal_keymap)) = args
         .change_descriptor
@@ -698,7 +707,7 @@ where
         .transpose()?
     {
         keymap.extend(internal_keymap);
-        index.add_keychain(Keychain::Internal, internal_descriptor);
+        let _ = index.insert_descriptor(internal_descriptor, Keychain::Internal);
     }
 
     let mut db_backend = match Store::<C>::open_or_create_new(db_magic, &args.db_path) {

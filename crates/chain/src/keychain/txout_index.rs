@@ -3,9 +3,12 @@ use crate::{
     indexed_tx_graph::Indexer,
     miniscript::{Descriptor, DescriptorPublicKey},
     spk_iter::BIP32_MAX_INDEX,
-    SpkIterator, SpkTxOutIndex,
+    DescriptorExt, SpkIterator, SpkTxOutIndex,
 };
-use bitcoin::{OutPoint, Script, Transaction, TxOut, Txid};
+use bitcoin::{
+    hashes::{hash_newtype, sha256, Hash},
+    OutPoint, Script, Transaction, TxOut, Txid,
+};
 use core::{
     fmt::Debug,
     ops::{Bound, RangeBounds},
@@ -13,9 +16,14 @@ use core::{
 
 use crate::Append;
 
+hash_newtype! {
+    /// Represents the ID of a descriptor, defined as the sha256 hash of
+    /// the descriptor string, checksum included.
+    pub struct DescriptorId(pub sha256::Hash);
+}
 
 /// Represents updates to the derivation index of a [`KeychainTxOutIndex`].
-/// It maps each keychain `K` to its last revealed index.
+/// It maps each keychain `K` to a descriptor and its last revealed index.
 ///
 /// It can be applied to [`KeychainTxOutIndex`] with [`apply_changeset`]. [`ChangeSet] are
 /// monotone in that they will never decrease the revealed derivation index.
@@ -35,46 +43,52 @@ use crate::Append;
     )
 )]
 #[must_use]
-pub struct ChangeSet<K>(pub BTreeMap<K, u32>);
-
-impl<K> ChangeSet<K> {
-    /// Get the inner map of the keychain to its new derivation index.
-    pub fn as_inner(&self) -> &BTreeMap<K, u32> {
-        &self.0
-    }
+pub struct ChangeSet<K> {
+    /// Contains the keychains that have been added and their respective descriptor
+    pub keychains_added: BTreeMap<K, Descriptor<DescriptorPublicKey>>,
+    /// Contains for each descriptor_id the last revealed index of derivation
+    pub last_revealed: BTreeMap<DescriptorId, u32>,
 }
 
 impl<K: Ord> Append for ChangeSet<K> {
     /// Append another [`ChangeSet`] into self.
     ///
+    /// For each keychain in `keychains_added` in the given [`ChangeSet`]:
+    /// If the keychain already exist with a different descriptor, we overwrite the old descriptor.
+    ///
+    /// For each `last_revealed` in the given [`ChangeSet`]:
     /// If the keychain already exists, increase the index when the other's index > self's index.
-    /// If the keychain did not exist, append the new keychain.
     fn append(&mut self, mut other: Self) {
-        self.0.iter_mut().for_each(|(key, index)| {
-            if let Some(other_index) = other.0.remove(key) {
+        for (keychain, descriptor) in &mut self.keychains_added {
+            if let Some(other_descriptor) = other.keychains_added.remove(keychain) {
+                *descriptor = other_descriptor;
+            }
+        }
+
+        for (descriptor_id, index) in &mut self.last_revealed {
+            if let Some(other_index) = other.last_revealed.remove(descriptor_id) {
                 *index = other_index.max(*index);
             }
-        });
+        }
+
         // We use `extend` instead of `BTreeMap::append` due to performance issues with `append`.
         // Refer to https://github.com/rust-lang/rust/issues/34666#issuecomment-675658420
-        self.0.extend(other.0);
+        self.keychains_added.extend(other.keychains_added);
+        self.last_revealed.extend(other.last_revealed);
     }
 
     /// Returns whether the changeset are empty.
     fn is_empty(&self) -> bool {
-        self.0.is_empty()
+        self.last_revealed.is_empty() && self.keychains_added.is_empty()
     }
 }
 
 impl<K> Default for ChangeSet<K> {
     fn default() -> Self {
-        Self(Default::default())
-    }
-}
-
-impl<K> AsRef<BTreeMap<K, u32>> for ChangeSet<K> {
-    fn as_ref(&self) -> &BTreeMap<K, u32> {
-        &self.0
+        Self {
+            last_revealed: BTreeMap::default(),
+            keychains_added: BTreeMap::default(),
+        }
     }
 }
 
@@ -119,7 +133,7 @@ const DEFAULT_LOOKAHEAD: u32 = 25;
 ///
 /// # Change sets
 ///
-/// Methods that can update the last revealed index will return [`super::ChangeSet`] to report
+/// Methods that can update the last revealed index or add keychains will return [`super::ChangeSet`] to report
 /// these changes. This can be persisted for future recovery.
 ///
 /// ## Synopsis
@@ -144,10 +158,10 @@ const DEFAULT_LOOKAHEAD: u32 = 25;
 /// # let secp = bdk_chain::bitcoin::secp256k1::Secp256k1::signing_only();
 /// # let (external_descriptor,_) = Descriptor::<DescriptorPublicKey>::parse_descriptor(&secp, "tr([73c5da0a/86'/0'/0']xprv9xgqHN7yz9MwCkxsBPN5qetuNdQSUttZNKw1dcYTV4mkaAFiBVGQziHs3NRSWMkCzvgjEe3n9xV8oYywvM8at9yRqyaZVz6TYYhX98VjsUk/0/*)").unwrap();
 /// # let (internal_descriptor,_) = Descriptor::<DescriptorPublicKey>::parse_descriptor(&secp, "tr([73c5da0a/86'/0'/0']xprv9xgqHN7yz9MwCkxsBPN5qetuNdQSUttZNKw1dcYTV4mkaAFiBVGQziHs3NRSWMkCzvgjEe3n9xV8oYywvM8at9yRqyaZVz6TYYhX98VjsUk/1/*)").unwrap();
-/// # let (descriptor_for_user_42, _) = Descriptor::<DescriptorPublicKey>::parse_descriptor(&secp, "tr([73c5da0a/86'/0'/0']xprv9xgqHN7yz9MwCkxsBPN5qetuNdQSUttZNKw1dcYTV4mkaAFiBVGQziHs3NRSWMkCzvgjEe3n9xV8oYywvM8at9yRqyaZVz6TYYhX98VjsUk/2/*)").unwrap();
-/// txout_index.add_keychain(MyKeychain::External, external_descriptor);
-/// txout_index.add_keychain(MyKeychain::Internal, internal_descriptor);
-/// txout_index.add_keychain(MyKeychain::MyAppUser { user_id: 42 }, descriptor_for_user_42);
+/// # let (descriptor_42, _) = Descriptor::<DescriptorPublicKey>::parse_descriptor(&secp, "tr([73c5da0a/86'/0'/0']xprv9xgqHN7yz9MwCkxsBPN5qetuNdQSUttZNKw1dcYTV4mkaAFiBVGQziHs3NRSWMkCzvgjEe3n9xV8oYywvM8at9yRqyaZVz6TYYhX98VjsUk/2/*)").unwrap();
+/// txout_index.insert_descriptor(external_descriptor, MyKeychain::External);
+/// txout_index.insert_descriptor(internal_descriptor, MyKeychain::Internal);
+/// txout_index.insert_descriptor(descriptor_42, MyKeychain::MyAppUser { user_id: 42 });
 ///
 /// let new_spk_for_user = txout_index.reveal_next_spk(&MyKeychain::MyAppUser{ user_id: 42 });
 /// ```
@@ -166,11 +180,13 @@ const DEFAULT_LOOKAHEAD: u32 = 25;
 /// [`all_unbounded_spk_iters`]: KeychainTxOutIndex::all_unbounded_spk_iters
 #[derive(Clone, Debug)]
 pub struct KeychainTxOutIndex<K> {
-    inner: SpkTxOutIndex<(K, u32)>,
-    // descriptors of each keychain
-    keychains: BTreeMap<K, Descriptor<DescriptorPublicKey>>,
+    inner: SpkTxOutIndex<(DescriptorId, u32)>,
+    // keychain -> (descriptor, descriptor id) map
+    keychains_to_descriptors: BTreeMap<K, (DescriptorId, Descriptor<DescriptorPublicKey>)>,
+    // descriptor id -> keychain map
+    descriptor_ids_to_keychain: BTreeMap<DescriptorId, K>,
     // last revealed indexes
-    last_revealed: BTreeMap<K, u32>,
+    last_revealed: BTreeMap<DescriptorId, u32>,
     // lookahead settings for each keychain
     lookahead: u32,
 }
@@ -186,7 +202,13 @@ impl<K: Clone + Ord + Debug> Indexer for KeychainTxOutIndex<K> {
 
     fn index_txout(&mut self, outpoint: OutPoint, txout: &TxOut) -> Self::ChangeSet {
         match self.inner.scan_txout(outpoint, txout).cloned() {
-            Some((keychain, index)) => self.reveal_to_target(&keychain, index).1,
+            Some((descriptor_id, index)) => {
+                if let Some(keychain) = self.keychain_of_descriptor_id(&descriptor_id) {
+                    self.reveal_to_target(&keychain.clone(), index).1
+                } else {
+                    super::ChangeSet::default()
+                }
+            }
             None => super::ChangeSet::default(),
         }
     }
@@ -200,7 +222,13 @@ impl<K: Clone + Ord + Debug> Indexer for KeychainTxOutIndex<K> {
     }
 
     fn initial_changeset(&self) -> Self::ChangeSet {
-        super::ChangeSet(self.last_revealed.clone())
+        super::ChangeSet {
+            keychains_added: self
+                .keychains()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect(),
+            last_revealed: self.last_revealed.clone(),
+        }
     }
 
     fn apply_changeset(&mut self, changeset: Self::ChangeSet) {
@@ -226,7 +254,8 @@ impl<K> KeychainTxOutIndex<K> {
     pub fn new(lookahead: u32) -> Self {
         Self {
             inner: SpkTxOutIndex::default(),
-            keychains: BTreeMap::new(),
+            descriptor_ids_to_keychain: BTreeMap::new(),
+            keychains_to_descriptors: BTreeMap::new(),
             last_revealed: BTreeMap::new(),
             lookahead,
         }
@@ -235,26 +264,44 @@ impl<K> KeychainTxOutIndex<K> {
 
 /// Methods that are *re-exposed* from the internal [`SpkTxOutIndex`].
 impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
+    /// Returns the corresponding (descriptor_id, descriptor) given a keychain, if exists
+    fn descriptor_of_keychain(
+        &self,
+        keychain: &K,
+    ) -> Option<&(DescriptorId, Descriptor<DescriptorPublicKey>)> {
+        self.keychains_to_descriptors.get(keychain)
+    }
+
+    /// Returns the corresponding keychain given a descriptor id, if exists
+    fn keychain_of_descriptor_id(&self, descriptor_id: &DescriptorId) -> Option<&K> {
+        self.descriptor_ids_to_keychain.get(descriptor_id)
+    }
+
     /// Return a reference to the internal [`SpkTxOutIndex`].
     ///
     /// **WARNING:** The internal index will contain lookahead spks. Refer to
     /// [struct-level docs](KeychainTxOutIndex) for more about `lookahead`.
-    pub fn inner(&self) -> &SpkTxOutIndex<(K, u32)> {
+    pub fn inner(&self) -> &SpkTxOutIndex<(DescriptorId, u32)> {
         &self.inner
     }
 
-    /// Get a reference to the set of indexed outpoints.
-    pub fn outpoints(&self) -> &BTreeSet<((K, u32), OutPoint)> {
-        self.inner.outpoints()
+    /// Get the set of indexed outpoints.
+    pub fn outpoints(&self) -> impl Iterator<Item = ((K, u32), OutPoint)> + '_ {
+        self.inner
+            .outpoints()
+            .iter()
+            .filter_map(|((desc_id, index), op)| {
+                self.keychain_of_descriptor_id(desc_id)
+                    .map(|k| ((k.clone(), *index), *op))
+            })
     }
 
     /// Iterate over known txouts that spend to tracked script pubkeys.
-    pub fn txouts(
-        &self,
-    ) -> impl DoubleEndedIterator<Item = (K, u32, OutPoint, &TxOut)> + ExactSizeIterator {
-        self.inner
-            .txouts()
-            .map(|((k, i), op, txo)| (k.clone(), *i, op, txo))
+    pub fn txouts(&self) -> impl DoubleEndedIterator<Item = (K, u32, OutPoint, &TxOut)> + '_ {
+        self.inner.txouts().filter_map(|((desc_id, i), op, txo)| {
+            self.keychain_of_descriptor_id(desc_id)
+                .map(|k| (k.clone(), *i, op, txo))
+        })
     }
 
     /// Finds all txouts on a transaction that has previously been scanned and indexed.
@@ -264,7 +311,10 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     ) -> impl DoubleEndedIterator<Item = (K, u32, OutPoint, &TxOut)> {
         self.inner
             .txouts_in_tx(txid)
-            .map(|((k, i), op, txo)| (k.clone(), *i, op, txo))
+            .filter_map(|((desc_id, i), op, txo)| {
+                self.keychain_of_descriptor_id(desc_id)
+                    .map(|k| (k.clone(), *i, op, txo))
+            })
     }
 
     /// Return the [`TxOut`] of `outpoint` if it has been indexed.
@@ -273,23 +323,26 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     ///
     /// This calls [`SpkTxOutIndex::txout`] internally.
     pub fn txout(&self, outpoint: OutPoint) -> Option<(K, u32, &TxOut)> {
-        self.inner
-            .txout(outpoint)
-            .map(|((k, i), txo)| (k.clone(), *i, txo))
+        let ((descriptor_id, index), txo) = self.inner.txout(outpoint)?;
+        let keychain = self.keychain_of_descriptor_id(descriptor_id)?;
+        Some((keychain.clone(), *index, txo))
     }
 
     /// Return the script that exists under the given `keychain`'s `index`.
     ///
     /// This calls [`SpkTxOutIndex::spk_at_index`] internally.
     pub fn spk_at_index(&self, keychain: K, index: u32) -> Option<&Script> {
-        self.inner.spk_at_index(&(keychain, index))
+        let descriptor_id = self.keychains_to_descriptors.get(&keychain)?.0;
+        self.inner.spk_at_index(&(descriptor_id, index))
     }
 
     /// Returns the keychain and keychain index associated with the spk.
     ///
     /// This calls [`SpkTxOutIndex::index_of_spk`] internally.
     pub fn index_of_spk(&self, script: &Script) -> Option<(K, u32)> {
-        self.inner.index_of_spk(script).cloned()
+        let (desc_id, last_index) = self.inner.index_of_spk(script)?;
+        self.keychain_of_descriptor_id(desc_id)
+            .map(|k| (k.clone(), *last_index))
     }
 
     /// Returns whether the spk under the `keychain`'s `index` has been used.
@@ -299,7 +352,11 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     ///
     /// This calls [`SpkTxOutIndex::is_used`] internally.
     pub fn is_used(&self, keychain: K, index: u32) -> bool {
-        self.inner.is_used(&(keychain, index))
+        let descriptor_id = self.keychains_to_descriptors.get(&keychain).map(|k| k.0);
+        match descriptor_id {
+            Some(descriptor_id) => self.inner.is_used(&(descriptor_id, index)),
+            None => false,
+        }
     }
 
     /// Marks the script pubkey at `index` as used even though the tracker hasn't seen an output
@@ -317,7 +374,11 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     ///
     /// [`unmark_used`]: Self::unmark_used
     pub fn mark_used(&mut self, keychain: K, index: u32) -> bool {
-        self.inner.mark_used(&(keychain, index))
+        let descriptor_id = self.keychains_to_descriptors.get(&keychain).map(|k| k.0);
+        match descriptor_id {
+            Some(descriptor_id) => self.inner.mark_used(&(descriptor_id, index)),
+            None => false,
+        }
     }
 
     /// Undoes the effect of [`mark_used`]. Returns whether the `index` is inserted back into
@@ -330,7 +391,11 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     ///
     /// [`mark_used`]: Self::mark_used
     pub fn unmark_used(&mut self, keychain: K, index: u32) -> bool {
-        self.inner.unmark_used(&(keychain, index))
+        let descriptor_id = self.keychains_to_descriptors.get(&keychain).map(|k| k.0);
+        match descriptor_id {
+            Some(descriptor_id) => self.inner.unmark_used(&(descriptor_id, index)),
+            None => false,
+        }
     }
 
     /// Computes total input value going from script pubkeys in the index (sent) and the total output
@@ -357,29 +422,42 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
 }
 
 impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
-    /// Return a reference to the internal map of keychain to descriptors.
-    pub fn keychains(&self) -> &BTreeMap<K, Descriptor<DescriptorPublicKey>> {
-        &self.keychains
+    /// Return the map of the keychain to descriptors.
+    pub fn keychains(&self) -> impl Iterator<Item = (&K, &Descriptor<DescriptorPublicKey>)> + '_ {
+        self.keychains_to_descriptors
+            .iter()
+            .map(|(k, (_, d))| (k, d))
     }
 
-    /// Add a keychain to the tracker's `txout_index` with a descriptor to derive addresses.
+    /// Insert a descriptor into the tracker's `txout_index`, with a keychain associated to it.
     ///
-    /// Adding a keychain means you will be able to derive new script pubkeys under that keychain
+    /// Adding a descriptor means you will be able to derive new script pubkeys under it
     /// and the txout index will discover transaction outputs with those script pubkeys.
     ///
-    /// # Panics
-    ///
-    /// This will panic if a different `descriptor` is introduced to the same `keychain`.
-    pub fn add_keychain(&mut self, keychain: K, descriptor: Descriptor<DescriptorPublicKey>) {
-        let old_descriptor = &*self
-            .keychains
-            .entry(keychain.clone())
-            .or_insert_with(|| descriptor.clone());
-        assert_eq!(
-            &descriptor, old_descriptor,
-            "keychain already contains a different descriptor"
-        );
+    /// When trying to add a keychain that already existed under a different descriptor, or a descriptor
+    /// that already existed with a different keychain, the old keychain (or descriptor) will be
+    /// overwritten.
+    pub fn insert_descriptor(
+        &mut self,
+        descriptor: Descriptor<DescriptorPublicKey>,
+        keychain: K,
+    ) -> super::ChangeSet<K> {
+        let descriptor_id = descriptor.descriptor_id();
+        self.keychains_to_descriptors
+            .insert(keychain.clone(), (descriptor_id, descriptor.clone()));
+        self.descriptor_ids_to_keychain
+            .insert(descriptor_id, keychain.clone());
         self.replenish_lookahead(&keychain, self.lookahead);
+        super::ChangeSet {
+            keychains_added: [(keychain, descriptor)].into(),
+            last_revealed: [].into(),
+        }
+    }
+
+    /// Gets the descriptor associated with the keychain. Returns `None` if the keychain doesn't
+    /// have a descriptor associated with it.
+    pub fn get_descriptor(&self, keychain: &K) -> Option<&Descriptor<DescriptorPublicKey>> {
+        self.keychains_to_descriptors.get(keychain).map(|(_, d)| d)
     }
 
     /// Get the lookahead setting.
@@ -402,26 +480,33 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     }
 
     fn replenish_lookahead(&mut self, keychain: &K, lookahead: u32) {
-        let descriptor = self.keychains.get(keychain).expect("keychain must exist");
+        let (descriptor_id, descriptor) = self
+            .keychains_to_descriptors
+            .get(keychain)
+            .expect("keychain must exist")
+            .clone();
         let next_store_index = self.next_store_index(keychain);
-        let next_reveal_index = self.last_revealed.get(keychain).map_or(0, |v| *v + 1);
+        let next_reveal_index = self.last_revealed.get(&descriptor_id).map_or(0, |v| *v + 1);
 
-        for (new_index, new_spk) in
-            SpkIterator::new_with_range(descriptor, next_store_index..next_reveal_index + lookahead)
-        {
-            let _inserted = self
-                .inner
-                .insert_spk((keychain.clone(), new_index), new_spk);
+        for (new_index, new_spk) in SpkIterator::new_with_range(
+            descriptor.clone(),
+            next_store_index..next_reveal_index + lookahead,
+        ) {
+            let _inserted = self.inner.insert_spk((descriptor_id, new_index), new_spk);
             debug_assert!(_inserted, "replenish lookahead: must not have existing spk: keychain={:?}, lookahead={}, next_store_index={}, next_reveal_index={}", keychain, lookahead, next_store_index, next_reveal_index);
         }
     }
 
     fn next_store_index(&self, keychain: &K) -> u32 {
+        let descriptor_id = self
+            .descriptor_of_keychain(keychain)
+            .expect("keychain must exist")
+            .0;
         self.inner()
             .all_spks()
             // This range is filtering out the spks with a keychain different than
             // `keychain`. We don't use filter here as range is more optimized.
-            .range((keychain.clone(), u32::MIN)..(keychain.clone(), u32::MAX))
+            .range((descriptor_id, u32::MIN)..(descriptor_id, u32::MAX))
             .last()
             .map_or(0, |((_, index), _)| *index + 1)
     }
@@ -432,60 +517,83 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     ///
     /// This will panic if the given `keychain`'s descriptor does not exist.
     pub fn unbounded_spk_iter(&self, keychain: &K) -> SpkIterator<Descriptor<DescriptorPublicKey>> {
-        SpkIterator::new(
-            self.keychains
-                .get(keychain)
-                .expect("keychain does not exist")
-                .clone(),
-        )
+        let descriptor = self
+            .descriptor_of_keychain(keychain)
+            .expect("Keychain must exist")
+            .1
+            .clone();
+        SpkIterator::new(descriptor)
     }
 
     /// Get unbounded spk iterators for all keychains.
     pub fn all_unbounded_spk_iters(
         &self,
     ) -> BTreeMap<K, SpkIterator<Descriptor<DescriptorPublicKey>>> {
-        self.keychains
+        self.keychains_to_descriptors
             .iter()
-            .map(|(k, descriptor)| (k.clone(), SpkIterator::new(descriptor.clone())))
+            .map(|(k, (_, descriptor))| (k.clone(), SpkIterator::new(descriptor.clone())))
             .collect()
     }
 
     /// Iterate over revealed spks of all keychains.
     pub fn revealed_spks(&self) -> impl DoubleEndedIterator<Item = (K, u32, &Script)> + Clone {
-        self.keychains.keys().flat_map(|keychain| {
+        self.keychains_to_descriptors.keys().flat_map(|keychain| {
             self.revealed_keychain_spks(keychain)
                 .map(|(i, spk)| (keychain.clone(), i, spk))
         })
     }
 
     /// Iterate over revealed spks of the given `keychain`.
+    ///
+    /// # Panics
+    ///
+    /// This will panic if the given `keychain`'s descriptor does not exist.
     pub fn revealed_keychain_spks(
         &self,
         keychain: &K,
     ) -> impl DoubleEndedIterator<Item = (u32, &Script)> + Clone {
-        let next_i = self.last_revealed.get(keychain).map_or(0, |&i| i + 1);
+        let desc_id = self
+            .keychains_to_descriptors
+            .get(keychain)
+            .expect("Must exist")
+            .0;
+        let next_i = self.last_revealed.get(&desc_id).map_or(0, |&i| i + 1);
         self.inner
             .all_spks()
-            .range((keychain.clone(), u32::MIN)..(keychain.clone(), next_i))
+            .range((desc_id, u32::MIN)..(desc_id, next_i))
             .map(|((_, i), spk)| (*i, spk.as_script()))
     }
 
     /// Iterate over revealed, but unused, spks of all keychains.
     pub fn unused_spks(&self) -> impl DoubleEndedIterator<Item = (K, u32, &Script)> + Clone {
-        self.keychains.keys().flat_map(|keychain| {
+        self.keychains_to_descriptors.keys().flat_map(|keychain| {
             self.unused_keychain_spks(keychain)
                 .map(|(i, spk)| (keychain.clone(), i, spk))
         })
     }
 
     /// Iterate over revealed, but unused, spks of the given `keychain`.
+    ///
+    /// # Panics
+    ///
+    /// This will panic if the given `keychain`'s descriptor does not exist.
     pub fn unused_keychain_spks(
         &self,
         keychain: &K,
     ) -> impl DoubleEndedIterator<Item = (u32, &Script)> + Clone {
-        let next_i = self.last_revealed.get(keychain).map_or(0, |&i| i + 1);
+        let desc_id = self
+            .keychains_to_descriptors
+            .get(keychain)
+            .map(|(desc_id, _)| desc_id)
+            .cloned()
+            .unwrap_or(
+                sha256::Hash::from_byte_array([0; 32])
+                    //.to_byte_array()
+                    .into(),
+            );
+        let next_i = self.last_revealed.get(&desc_id).map_or(0, |&i| i + 1);
         self.inner
-            .unused_spks((keychain.clone(), u32::MIN)..(keychain.clone(), next_i))
+            .unused_spks((desc_id, u32::MIN)..(desc_id, next_i))
             .map(|((_, i), spk)| (*i, spk))
     }
 
@@ -504,8 +612,11 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     ///
     /// Panics if the `keychain` does not exist.
     pub fn next_index(&self, keychain: &K) -> (u32, bool) {
-        let descriptor = self.keychains.get(keychain).expect("keychain must exist");
-        let last_index = self.last_revealed.get(keychain).cloned();
+        let (descriptor_id, descriptor) = self
+            .keychains_to_descriptors
+            .get(keychain)
+            .expect("must exist");
+        let last_index = self.last_revealed.get(descriptor_id).cloned();
 
         // we can only get the next index if the wildcard exists.
         let has_wildcard = descriptor.has_wildcard();
@@ -528,16 +639,35 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     /// Get the last derivation index that is revealed for each keychain.
     ///
     /// Keychains with no revealed indices will not be included in the returned [`BTreeMap`].
-    pub fn last_revealed_indices(&self) -> &BTreeMap<K, u32> {
-        &self.last_revealed
+    pub fn last_revealed_indices(&self) -> BTreeMap<K, u32> {
+        self.last_revealed
+            .iter()
+            .filter_map(|(descriptor_id, index)| {
+                self.keychain_of_descriptor_id(descriptor_id)
+                    .map(|k| (k.clone(), *index))
+            })
+            .collect()
     }
 
     /// Get the last derivation index revealed for `keychain`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the `keychain` does not exist.
     pub fn last_revealed_index(&self, keychain: &K) -> Option<u32> {
-        self.last_revealed.get(keychain).cloned()
+        let descriptor_id = self
+            .keychains_to_descriptors
+            .get(keychain)
+            .expect("keychain must exist")
+            .0;
+        self.last_revealed.get(&descriptor_id).cloned()
     }
 
     /// Convenience method to call [`Self::reveal_to_target`] on multiple keychains.
+    ///
+    /// # Panics
+    ///
+    /// Panics if any keychain in `keychains` does not exist.
     pub fn reveal_to_target_multi(
         &mut self,
         keychains: &BTreeMap<K, u32>,
@@ -581,13 +711,19 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
         SpkIterator<Descriptor<DescriptorPublicKey>>,
         super::ChangeSet<K>,
     ) {
-        let descriptor = self.keychains.get(keychain).expect("keychain must exist");
+        let (descriptor_id, descriptor) = self
+            .keychains_to_descriptors
+            .get(keychain)
+            .expect("must exist");
+        // Cloning since I need to modify self.inner, and I can't do that while
+        // I'm borrowing descriptor_id and descriptor
+        let (descriptor_id, descriptor) = (*descriptor_id, descriptor.clone());
         let has_wildcard = descriptor.has_wildcard();
 
         let target_index = if has_wildcard { target_index } else { 0 };
         let next_reveal_index = self
             .last_revealed
-            .get(keychain)
+            .get(&descriptor_id)
             .map_or(0, |index| *index + 1);
 
         debug_assert!(next_reveal_index + self.lookahead >= self.next_store_index(keychain));
@@ -595,10 +731,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
         // If the target_index is already revealed, we are done
         if next_reveal_index > target_index {
             return (
-                SpkIterator::new_with_range(
-                    descriptor.clone(),
-                    next_reveal_index..next_reveal_index,
-                ),
+                SpkIterator::new_with_range(descriptor, next_reveal_index..next_reveal_index),
                 super::ChangeSet::default(),
             );
         }
@@ -607,10 +740,8 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
         // Indexes from next_reveal_index to next_reveal_index + lookahead are already stored (due
         // to lookahead), so we only range from next_reveal_index + lookahead to target + lookahead
         let range = next_reveal_index + self.lookahead..=target_index + self.lookahead;
-        for (new_index, new_spk) in SpkIterator::new_with_range(descriptor, range) {
-            let _inserted = self
-                .inner
-                .insert_spk((keychain.clone(), new_index), new_spk);
+        for (new_index, new_spk) in SpkIterator::new_with_range(descriptor.clone(), range) {
+            let _inserted = self.inner.insert_spk((descriptor_id, new_index), new_spk);
             debug_assert!(_inserted, "must not have existing spk");
             debug_assert!(
                 has_wildcard || new_index == 0,
@@ -618,11 +749,14 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
             );
         }
 
-        let _old_index = self.last_revealed.insert(keychain.clone(), target_index);
+        let _old_index = self.last_revealed.insert(descriptor_id, target_index);
         debug_assert!(_old_index < Some(target_index));
         (
-            SpkIterator::new_with_range(descriptor.clone(), next_reveal_index..target_index + 1),
-            super::ChangeSet(core::iter::once((keychain.clone(), target_index)).collect()),
+            SpkIterator::new_with_range(descriptor, next_reveal_index..target_index + 1),
+            super::ChangeSet {
+                keychains_added: BTreeMap::new(),
+                last_revealed: core::iter::once((descriptor_id, target_index)).collect(),
+            },
         )
     }
 
@@ -641,11 +775,16 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     ///
     /// Panics if the `keychain` does not exist.
     pub fn reveal_next_spk(&mut self, keychain: &K) -> ((u32, &Script), super::ChangeSet<K>) {
+        let descriptor_id = self
+            .keychains_to_descriptors
+            .get(keychain)
+            .expect("Must exist")
+            .0;
         let (next_index, _) = self.next_index(keychain);
         let changeset = self.reveal_to_target(keychain, next_index).1;
         let script = self
             .inner
-            .spk_at_index(&(keychain.clone(), next_index))
+            .spk_at_index(&(descriptor_id, next_index))
             .expect("script must already be stored");
         ((next_index, script), changeset)
     }
@@ -682,6 +821,10 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     ///
     /// Use [`keychain_outpoints_in_range`](KeychainTxOutIndex::keychain_outpoints_in_range) to
     /// iterate over a specific derivation range.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `keychain` has never been added to the index
     pub fn keychain_outpoints(
         &self,
         keychain: &K,
@@ -691,19 +834,28 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
 
     /// Iterate over [`OutPoint`]s that point to `TxOut`s with script pubkeys derived from
     /// `keychain` in a given derivation `range`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `keychain` has never been added to the index
     pub fn keychain_outpoints_in_range(
         &self,
         keychain: &K,
         range: impl RangeBounds<u32>,
     ) -> impl DoubleEndedIterator<Item = (u32, OutPoint)> + '_ {
+        let descriptor_id = self
+            .keychains_to_descriptors
+            .get(keychain)
+            .expect("Must exist")
+            .0;
         let start = match range.start_bound() {
-            Bound::Included(i) => Bound::Included((keychain.clone(), *i)),
-            Bound::Excluded(i) => Bound::Excluded((keychain.clone(), *i)),
+            Bound::Included(i) => Bound::Included((descriptor_id, *i)),
+            Bound::Excluded(i) => Bound::Excluded((descriptor_id, *i)),
             Bound::Unbounded => Bound::Unbounded,
         };
         let end = match range.end_bound() {
-            Bound::Included(i) => Bound::Included((keychain.clone(), *i)),
-            Bound::Excluded(i) => Bound::Excluded((keychain.clone(), *i)),
+            Bound::Included(i) => Bound::Included((descriptor_id, *i)),
+            Bound::Excluded(i) => Bound::Excluded((descriptor_id, *i)),
             Bound::Unbounded => Bound::Unbounded,
         };
         self.inner
@@ -720,7 +872,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     /// Returns the highest derivation index of each keychain that [`KeychainTxOutIndex`] has found
     /// a [`TxOut`] with it's script pubkey.
     pub fn last_used_indices(&self) -> BTreeMap<K, u32> {
-        self.keychains
+        self.keychains_to_descriptors
             .iter()
             .filter_map(|(keychain, _)| {
                 self.last_used_index(keychain)
@@ -731,7 +883,25 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
 
     /// Applies the derivation changeset to the [`KeychainTxOutIndex`], extending the number of
     /// derived scripts per keychain, as specified in the `changeset`.
+    ///
+    /// # Panics
+    ///
+    /// This will panic if a different `descriptor` is introduced to the same `keychain`.
     pub fn apply_changeset(&mut self, changeset: super::ChangeSet<K>) {
-        let _ = self.reveal_to_target_multi(&changeset.0);
+        let ChangeSet {
+            keychains_added,
+            last_revealed,
+        } = changeset;
+        for (keychain, descriptor) in keychains_added {
+            let _ = self.insert_descriptor(descriptor, keychain);
+        }
+        let last_revealed = last_revealed
+            .into_iter()
+            .filter_map(|(descriptor_id, index)| {
+                self.keychain_of_descriptor_id(&descriptor_id)
+                    .map(|k| (k.clone(), index))
+            })
+            .collect();
+        let _ = self.reveal_to_target_multi(&last_revealed);
     }
 }
