@@ -100,6 +100,7 @@
 //! # Ok::<(), anyhow::Error>(())
 //! ```
 
+use crate::chain::collections::HashSet;
 use crate::types::FeeRate;
 use crate::wallet::utils::IsDust;
 use crate::Utxo;
@@ -107,6 +108,7 @@ use crate::WeightedUtxo;
 
 use alloc::vec::Vec;
 use bitcoin::consensus::encode::serialize;
+use bitcoin::OutPoint;
 use bitcoin::{Script, Weight};
 
 use core::convert::TryInto;
@@ -711,6 +713,25 @@ impl BranchAndBoundCoinSelection {
     }
 }
 
+/// Remove duplicate UTXOs.
+///
+/// If a UTXO appears in both `required` and `optional`, the appearance in `required` is kept.
+pub(crate) fn filter_duplicates<I>(required: I, optional: I) -> (I, I)
+where
+    I: IntoIterator<Item = WeightedUtxo> + FromIterator<WeightedUtxo>,
+{
+    let mut visited = HashSet::<OutPoint>::new();
+    let required = required
+        .into_iter()
+        .filter(|utxo| visited.insert(utxo.utxo.outpoint()))
+        .collect::<I>();
+    let optional = optional
+        .into_iter()
+        .filter(|utxo| visited.insert(utxo.utxo.outpoint()))
+        .collect::<I>();
+    (required, optional)
+}
+
 #[cfg(test)]
 mod test {
     use assert_matches::assert_matches;
@@ -721,6 +742,7 @@ mod test {
 
     use super::*;
     use crate::types::*;
+    use crate::wallet::coin_selection::filter_duplicates;
     use crate::wallet::Vbytes;
 
     use rand::rngs::StdRng;
@@ -1480,5 +1502,96 @@ mod test {
                 ..
             })
         );
+    }
+
+    #[test]
+    fn test_filter_duplicates() {
+        fn utxo(txid: &str, value: u64) -> WeightedUtxo {
+            WeightedUtxo {
+                satisfaction_weight: 0,
+                utxo: Utxo::Local(LocalOutput {
+                    outpoint: OutPoint::new(bitcoin::hashes::Hash::hash(txid.as_bytes()), 0),
+                    txout: TxOut {
+                        value,
+                        script_pubkey: ScriptBuf::new(),
+                    },
+                    keychain: KeychainKind::External,
+                    is_spent: false,
+                    derivation_index: 0,
+                    confirmation_time: ConfirmationTime::Confirmed {
+                        height: 12345,
+                        time: 12345,
+                    },
+                }),
+            }
+        }
+
+        fn to_utxo_vec(utxos: &[(&str, u64)]) -> Vec<WeightedUtxo> {
+            let mut v = utxos
+                .iter()
+                .map(|&(txid, value)| utxo(txid, value))
+                .collect::<Vec<_>>();
+            v.sort_by_key(|u| u.utxo.outpoint());
+            v
+        }
+
+        struct TestCase<'a> {
+            name: &'a str,
+            required: &'a [(&'a str, u64)],
+            optional: &'a [(&'a str, u64)],
+            exp_required: &'a [(&'a str, u64)],
+            exp_optional: &'a [(&'a str, u64)],
+        }
+
+        let test_cases = [
+            TestCase {
+                name: "no_duplicates",
+                required: &[("A", 1000), ("B", 2100)],
+                optional: &[("C", 1000)],
+                exp_required: &[("A", 1000), ("B", 2100)],
+                exp_optional: &[("C", 1000)],
+            },
+            TestCase {
+                name: "duplicate_required_utxos",
+                required: &[("A", 3000), ("B", 1200), ("C", 1234), ("A", 3000)],
+                optional: &[("D", 2100)],
+                exp_required: &[("A", 3000), ("B", 1200), ("C", 1234)],
+                exp_optional: &[("D", 2100)],
+            },
+            TestCase {
+                name: "duplicate_optional_utxos",
+                required: &[("A", 3000), ("B", 1200)],
+                optional: &[("C", 5000), ("D", 1300), ("C", 5000)],
+                exp_required: &[("A", 3000), ("B", 1200)],
+                exp_optional: &[("C", 5000), ("D", 1300)],
+            },
+            TestCase {
+                name: "duplicate_across_required_and_optional_utxos",
+                required: &[("A", 3000), ("B", 1200), ("C", 2100)],
+                optional: &[("A", 3000), ("D", 1200), ("E", 5000)],
+                exp_required: &[("A", 3000), ("B", 1200), ("C", 2100)],
+                exp_optional: &[("D", 1200), ("E", 5000)],
+            },
+        ];
+
+        for (i, t) in test_cases.into_iter().enumerate() {
+            println!("Case {}: {}", i, t.name);
+            let (required, optional) =
+                filter_duplicates(to_utxo_vec(t.required), to_utxo_vec(t.optional));
+            assert_eq!(
+                required,
+                to_utxo_vec(t.exp_required),
+                "[{}:{}] unexpected `required` result",
+                i,
+                t.name
+            );
+            assert_eq!(
+                optional,
+                to_utxo_vec(t.exp_optional),
+                "[{}:{}] unexpected `optional` result",
+                i,
+                t.name
+            );
+        }
     }
 }
