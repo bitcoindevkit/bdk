@@ -799,13 +799,14 @@ mod test {
 
     fn generate_random_utxos(rng: &mut StdRng, utxos_number: usize) -> Vec<WeightedUtxo> {
         let mut res = Vec::new();
-        for _ in 0..utxos_number {
+        for i in 0..utxos_number {
             res.push(WeightedUtxo {
                 satisfaction_weight: P2WPKH_SATISFACTION_SIZE,
                 utxo: Utxo::Local(LocalOutput {
-                    outpoint: OutPoint::from_str(
-                        "ebd9813ecebc57ff8f30797de7c205e3c7498ca950ea4341ee51a685ff2fa30a:0",
-                    )
+                    outpoint: OutPoint::from_str(&format!(
+                        "ebd9813ecebc57ff8f30797de7c205e3c7498ca950ea4341ee51a685ff2fa30a:{}",
+                        i
+                    ))
                     .unwrap(),
                     txout: TxOut {
                         value: rng.gen_range(0..200000000),
@@ -829,24 +830,26 @@ mod test {
     }
 
     fn generate_same_value_utxos(utxos_value: u64, utxos_number: usize) -> Vec<WeightedUtxo> {
-        let utxo = WeightedUtxo {
-            satisfaction_weight: P2WPKH_SATISFACTION_SIZE,
-            utxo: Utxo::Local(LocalOutput {
-                outpoint: OutPoint::from_str(
-                    "ebd9813ecebc57ff8f30797de7c205e3c7498ca950ea4341ee51a685ff2fa30a:0",
-                )
-                .unwrap(),
-                txout: TxOut {
-                    value: utxos_value,
-                    script_pubkey: ScriptBuf::new(),
-                },
-                keychain: KeychainKind::External,
-                is_spent: false,
-                derivation_index: 42,
-                confirmation_time: ConfirmationTime::Unconfirmed { last_seen: 0 },
-            }),
-        };
-        vec![utxo; utxos_number]
+        (0..utxos_number)
+            .map(|i| WeightedUtxo {
+                satisfaction_weight: P2WPKH_SATISFACTION_SIZE,
+                utxo: Utxo::Local(LocalOutput {
+                    outpoint: OutPoint::from_str(&format!(
+                        "ebd9813ecebc57ff8f30797de7c205e3c7498ca950ea4341ee51a685ff2fa30a:{}",
+                        i
+                    ))
+                    .unwrap(),
+                    txout: TxOut {
+                        value: utxos_value,
+                        script_pubkey: ScriptBuf::new(),
+                    },
+                    keychain: KeychainKind::External,
+                    is_spent: false,
+                    derivation_index: 42,
+                    confirmation_time: ConfirmationTime::Unconfirmed { last_seen: 0 },
+                }),
+            })
+            .collect()
     }
 
     fn sum_random_utxos(mut rng: &mut StdRng, utxos: &mut Vec<WeightedUtxo>) -> u64 {
