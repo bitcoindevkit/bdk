@@ -12,17 +12,46 @@ use crate::Append;
 
 const DEFAULT_LOOKAHEAD: u32 = 1_000;
 
-/// A convenient wrapper around [`SpkTxOutIndex`] that relates script pubkeys to miniscript public
-/// [`Descriptor`]s.
+/// [`KeychainTxOutIndex`] controls how script pubkeys are revealed for multiple keychains, and
+/// indexes [`TxOut`]s with them.
 ///
-/// Descriptors are referenced by the provided keychain generic (`K`).
+/// A single keychain is a chain of script pubkeys derived from a single [`Descriptor`]. Keychains
+/// are identified using the `K` generic. Script pubkeys are identified by the keychain that they
+/// are derived from `K`, as well as the derivation index `u32`.
 ///
-/// Script pubkeys for a descriptor are revealed chronologically from index 0. I.e., If the last
-/// revealed index of a descriptor is 5; scripts of indices 0 to 4 are guaranteed to be already
-/// revealed. In addition to revealed scripts, we have a `lookahead` parameter for each keychain,
-/// which defines the number of script pubkeys to store ahead of the last revealed index.
+/// # Revealed script pubkeys
 ///
-/// Methods that could update the last revealed index will return [`super::ChangeSet`] to report
+/// Tracking how script pubkeys are revealed is useful for collecting chain data. For example, if
+/// the user has requested 5 script pubkeys (to receive money with), we only need to use those
+/// script pubkeys to scan for chain data.
+///
+/// Call [`reveal_to_target`] or [`reveal_next_spk`] to reveal more script pubkeys.
+/// Call [`revealed_keychain_spks`] or [`revealed_spks`] to iterate through revealed script pubkeys.
+///
+/// # Lookahead script pubkeys
+///
+/// When an user first recovers a wallet (i.e. from a recovery phrase and/or descriptor), we will
+/// NOT have knowledge of which script pubkeys are revealed. So when we index a transaction or
+/// txout (using [`index_tx`]/[`index_txout`]) we scan the txouts against script pubkeys derived
+/// above the last revealed index. These additionally-derived script pubkeys are called the
+/// lookahead.
+///
+/// The [`KeychainTxOutIndex`] is constructed with the `lookahead` and cannot be altered. The
+/// default `lookahead` count is 1000. Use [`new`] to set a custom `lookahead`.
+///
+/// # Unbounded script pubkey iterator
+///
+/// For script-pubkey-based chain sources (such as Electrum/Esplora), an initial scan is best done
+/// by iterating though derived script pubkeys one by one and requesting transaction histories for
+/// each script pubkey. We will stop after x-number of script pubkeys have empty histories. An
+/// unbounded script pubkey iterator is useful to pass to such a chain source.
+///
+/// Call [`unbounded_spk_iter`] to get an unbounded script pubkey iterator for a given keychain.
+/// Call [`all_unbounded_spk_iters`] to get unbounded script pubkey iterators for all keychains.
+///
+/// # Change sets
+///
+/// Methods that can update the last revealed index will return [`super::ChangeSet`] to report
 /// these changes. This can be persisted for future recovery.
 ///
 /// ## Synopsis
@@ -58,6 +87,15 @@ const DEFAULT_LOOKAHEAD: u32 = 1_000;
 /// [`Ord`]: core::cmp::Ord
 /// [`SpkTxOutIndex`]: crate::spk_txout_index::SpkTxOutIndex
 /// [`Descriptor`]: crate::miniscript::Descriptor
+/// [`reveal_to_target`]: KeychainTxOutIndex::reveal_to_target
+/// [`reveal_next_spk`]: KeychainTxOutIndex::reveal_next_spk
+/// [`revealed_keychain_spks`]: KeychainTxOutIndex::revealed_keychain_spks
+/// [`revealed_spks`]: KeychainTxOutIndex::revealed_spks
+/// [`index_tx`]: KeychainTxOutIndex::index_tx
+/// [`index_txout`]: KeychainTxOutIndex::index_txout
+/// [`new`]: KeychainTxOutIndex::new
+/// [`unbounded_spk_iter`]: KeychainTxOutIndex::unbounded_spk_iter
+/// [`all_unbounded_spk_iters`]: KeychainTxOutIndex::all_unbounded_spk_iters
 #[derive(Clone, Debug)]
 pub struct KeychainTxOutIndex<K> {
     inner: SpkTxOutIndex<(K, u32)>,
@@ -115,6 +153,8 @@ impl<K> KeychainTxOutIndex<K> {
     /// beyond the last revealed index. In certain situations, such as when performing an initial
     /// scan of the blockchain during wallet import, it may be uncertain or unknown what the index
     /// of the last revealed script pubkey actually is.
+    ///
+    /// Refer to [struct-level docs](KeychainTxOutIndex) for more about `lookahead`.
     pub fn new(lookahead: u32) -> Self {
         Self {
             inner: SpkTxOutIndex::default(),
@@ -129,7 +169,8 @@ impl<K> KeychainTxOutIndex<K> {
 impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     /// Return a reference to the internal [`SpkTxOutIndex`].
     ///
-    /// **WARNING:** The internal index will contain lookahead spks.
+    /// **WARNING:** The internal index will contain lookahead spks. Refer to
+    /// [struct-level docs](KeychainTxOutIndex) for more about `lookahead`.
     pub fn inner(&self) -> &SpkTxOutIndex<(K, u32)> {
         &self.inner
     }
