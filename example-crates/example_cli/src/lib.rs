@@ -73,7 +73,9 @@ pub enum Commands<CS: clap::Subcommand, S: clap::Args> {
     },
     /// Send coins to an address.
     Send {
+        /// Amount to send in satoshis
         value: u64,
+        /// Destination address
         address: Address<address::NetworkUnchecked>,
         #[clap(short, default_value = "bnb")]
         coin_select: CoinSelectionAlgo,
@@ -144,14 +146,17 @@ pub enum AddressCmd {
     New,
     /// List all addresses
     List {
+        /// List change addresses
         #[clap(long)]
         change: bool,
     },
+    /// Get last revealed address index for each keychain.
     Index,
 }
 
 #[derive(Subcommand, Debug, Clone)]
 pub enum TxOutCmd {
+    /// List transaction outputs.
     List {
         /// Return only spent outputs.
         #[clap(short, long)]
