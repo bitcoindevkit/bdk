@@ -811,8 +811,7 @@ impl<D> Wallet<D> {
         self.chain.tip()
     }
 
-    /// Returns a iterators of all the script pubkeys for the `Internal` and `External` variants in
-    /// `KeychainKind`.
+    /// Get unbounded script pubkey iterators for both `Internal` and `External` keychains.
     ///
     /// This is intended to be used when doing a full scan of your addresses (e.g. after restoring
     /// from seed words). You pass the `BTreeMap` of iterators to a blockchain data source (e.g.
@@ -826,7 +825,7 @@ impl<D> Wallet<D> {
         self.indexed_graph.index.all_unbounded_spk_iters()
     }
 
-    /// Gets an iterator over all the script pubkeys in a single keychain.
+    /// Get an unbounded script pubkey iterator for the given `keychain`.
     ///
     /// See [`all_unbounded_spk_iters`] for more documentation
     ///
