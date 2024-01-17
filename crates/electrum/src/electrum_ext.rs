@@ -56,12 +56,14 @@ impl RelevantTxids {
         Ok(graph)
     }
 
-    /// Finalizes [`RelevantTxids`] with `new_txs` and anchors of type
-    /// [`ConfirmationTimeHeightAnchor`].
+    /// Finalizes the update by fetching `missing` txids from the `client`, where the
+    /// resulting [`TxGraph`] has anchors of type [`ConfirmationTimeHeightAnchor`].
+    ///
+    /// Refer to [`RelevantTxids`] for more details.
     ///
     /// **Note:** The confirmation time might not be precisely correct if there has been a reorg.
-    /// Electrum's API intends that we use the merkle proof API, we should change `bdk_electrum` to
-    /// use it.
+    // Electrum's API intends that we use the merkle proof API, we should change `bdk_electrum` to
+    // use it.
     pub fn into_confirmation_time_tx_graph(
         self,
         client: &Client,
