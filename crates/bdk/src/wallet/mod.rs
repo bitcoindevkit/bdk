@@ -914,12 +914,11 @@ impl<D> Wallet<D> {
         })
     }
 
-    /// Computes total input value going from script pubkeys in the index (sent) and the total output
-    /// value going to script pubkeys in the index (received) in `tx`.
+    /// Compute the `tx`'s sent and received amounts (in satoshis).
     ///
-    /// For the `sent` to be computed correctly, the outputs being spent must have already been
-    /// scanned by the index. Calculating received just uses the [`Transaction`] outputs directly,
-    /// so it will be correct even if it has not been scanned.
+    /// This method returns a tuple `(sent, received)`. Sent is the sum of the txin amounts
+    /// that spend from previous txouts tracked by this wallet. Received is the summation
+    /// of this tx's outputs that send to script pubkeys tracked by this wallet.
     ///
     /// # Examples
     ///
