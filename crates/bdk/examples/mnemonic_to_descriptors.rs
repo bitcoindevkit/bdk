@@ -33,8 +33,8 @@ fn main() -> Result<(), anyhow::Error> {
     let mnemonic_with_passphrase = (mnemonic, None);
 
     // define external and internal derivation key path
-    let external_path = DerivationPath::from_str("m/86h/0h/0h/0").unwrap();
-    let internal_path = DerivationPath::from_str("m/86h/0h/0h/1").unwrap();
+    let external_path = DerivationPath::from_str("m/86h/1h/0h/0").unwrap();
+    let internal_path = DerivationPath::from_str("m/86h/1h/0h/1").unwrap();
 
     // generate external and internal descriptor from mnemonic
     let (external_descriptor, ext_keymap) =
