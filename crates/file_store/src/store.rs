@@ -137,9 +137,9 @@ where
 
     /// Loads all the changesets that have been stored as one giant changeset.
     ///
-    /// This function returns a tuple of the aggregate changeset and a result that indicates
-    /// whether an error occurred while reading or deserializing one of the entries. If so the
-    /// changeset will consist of all of those it was able to read.
+    /// This function returns the aggregate changeset, or `None` if nothing was persisted.
+    /// If reading or deserializing any of the entries fails, an error is returned that
+    /// consists of all those it was able to read.
     ///
     /// You should usually check the error. In many applications, it may make sense to do a full
     /// wallet scan with a stop-gap after getting an error, since it is likely that one of the
