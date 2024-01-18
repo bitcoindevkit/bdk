@@ -29,7 +29,7 @@ pub type KeychainChangeSet<A> = (
     local_chain::ChangeSet,
     indexed_tx_graph::ChangeSet<A, keychain::ChangeSet<Keychain>>,
 );
-pub type Database<'m, C> = Persist<Store<'m, C>, C>;
+pub type Database<C> = Persist<Store<C>, C>;
 
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
@@ -646,14 +646,14 @@ where
 }
 
 #[allow(clippy::type_complexity)]
-pub fn init<'m, CS: clap::Subcommand, S: clap::Args, C>(
-    db_magic: &'m [u8],
+pub fn init<CS: clap::Subcommand, S: clap::Args, C>(
+    db_magic: &[u8],
     db_default_path: &str,
 ) -> anyhow::Result<(
     Args<CS, S>,
     KeyMap,
     KeychainTxOutIndex<Keychain>,
-    Mutex<Database<'m, C>>,
+    Mutex<Database<C>>,
     C,
 )>
 where
@@ -681,7 +681,7 @@ where
         index.add_keychain(Keychain::Internal, internal_descriptor);
     }
 
-    let mut db_backend = match Store::<'m, C>::open_or_create_new(db_magic, &args.db_path) {
+    let mut db_backend = match Store::<C>::open_or_create_new(db_magic, &args.db_path) {
         Ok(db_backend) => db_backend,
         // we cannot return `err` directly as it has lifetime `'m`
         Err(err) => return Err(anyhow::anyhow!("failed to init db backend: {:?}", err)),
