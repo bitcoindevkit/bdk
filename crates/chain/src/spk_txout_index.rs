@@ -215,7 +215,7 @@ impl<I: Clone + Ord> SpkTxOutIndex<I> {
     /// let unused_change_spks =
     ///     txout_index.unused_spks((change_index, u32::MIN)..(change_index, u32::MAX));
     /// ```
-    pub fn unused_spks<R>(&self, range: R) -> impl DoubleEndedIterator<Item = (&I, &Script)>
+    pub fn unused_spks<R>(&self, range: R) -> impl DoubleEndedIterator<Item = (&I, &Script)> + Clone
     where
         R: RangeBounds<I>,
     {

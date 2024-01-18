@@ -187,7 +187,7 @@ impl ElectrumExt for Client {
     ) -> Result<(ElectrumUpdate, BTreeMap<K, u32>), Error> {
         let mut request_spks = keychain_spks
             .into_iter()
-            .map(|(k, s)| (k, s.into_iter()))
+            .map(|(k, s)| (k.clone(), s.into_iter()))
             .collect::<BTreeMap<K, _>>();
         let mut scanned_spks = BTreeMap::<(K, u32), (ScriptBuf, bool)>::new();
 

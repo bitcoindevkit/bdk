@@ -87,6 +87,11 @@ where
             secp: Secp256k1::verification_only(),
         }
     }
+
+    /// Get a reference to the internal descriptor.
+    pub fn descriptor(&self) -> &D {
+        &self.descriptor
+    }
 }
 
 impl<D> Iterator for SpkIterator<D>

@@ -38,7 +38,7 @@ fn main() -> Result<(), anyhow::Error> {
 
     let prev_tip = wallet.latest_checkpoint();
     let keychain_spks = wallet
-        .spks_of_all_keychains()
+        .all_unbounded_spk_iters()
         .into_iter()
         .map(|(k, k_spks)| {
             let mut once = Some(());

@@ -262,6 +262,11 @@ where
     /// Infallibly return a derived address using the external descriptor, see [`AddressIndex`] for
     /// available address index selection strategies. If none of the keys in the descriptor are derivable
     /// (i.e. does not end with /*) then the same address will always be returned for any [`AddressIndex`].
+    ///
+    /// # Panics
+    ///
+    /// This panics when the caller requests for an address of derivation index greater than the
+    /// BIP32 max index.
     pub fn get_address(&mut self, address_index: AddressIndex) -> AddressInfo {
         self.try_get_address(address_index).unwrap()
     }
@@ -273,6 +278,11 @@ where
     /// see [`AddressIndex`] for available address index selection strategies. If none of the keys
     /// in the descriptor are derivable (i.e. does not end with /*) then the same address will always
     /// be returned for any [`AddressIndex`].
+    ///
+    /// # Panics
+    ///
+    /// This panics when the caller requests for an address of derivation index greater than the
+    /// BIP32 max index.
     pub fn get_internal_address(&mut self, address_index: AddressIndex) -> AddressInfo {
         self.try_get_internal_address(address_index).unwrap()
     }
@@ -649,6 +659,11 @@ impl<D> Wallet<D> {
     ///
     /// A `PersistBackend<ChangeSet>::WriteError` will result if unable to persist the new address
     /// to the `PersistBackend`.
+    ///
+    /// # Panics
+    ///
+    /// This panics when the caller requests for an address of derivation index greater than the
+    /// BIP32 max index.
     pub fn try_get_address(
         &mut self,
         address_index: AddressIndex,
@@ -669,6 +684,11 @@ impl<D> Wallet<D> {
     /// see [`AddressIndex`] for available address index selection strategies. If none of the keys
     /// in the descriptor are derivable (i.e. does not end with /*) then the same address will always
     /// be returned for any [`AddressIndex`].
+    ///
+    /// # Panics
+    ///
+    /// This panics when the caller requests for an address of derivation index greater than the
+    /// BIP32 max index.
     pub fn try_get_internal_address(
         &mut self,
         address_index: AddressIndex,
@@ -691,6 +711,11 @@ impl<D> Wallet<D> {
     /// See [`AddressIndex`] for available address index selection strategies. If none of the keys
     /// in the descriptor are derivable (i.e. does not end with /*) then the same address will
     /// always be returned for any [`AddressIndex`].
+    ///
+    /// # Panics
+    ///
+    /// This panics when the caller requests for an address of derivation index greater than the
+    /// BIP32 max index.
     fn _get_address(
         &mut self,
         keychain: KeychainKind,
@@ -710,12 +735,14 @@ impl<D> Wallet<D> {
                 let ((index, spk), index_changeset) = txout_index.next_unused_spk(&keychain);
                 (index, spk.into(), Some(index_changeset))
             }
-            AddressIndex::Peek(index) => {
-                let (index, spk) = txout_index
-                    .spks_of_keychain(&keychain)
-                    .take(index as usize + 1)
-                    .last()
-                    .unwrap();
+            AddressIndex::Peek(mut peek_index) => {
+                let mut spk_iter = txout_index.unbounded_spk_iter(&keychain);
+                if !spk_iter.descriptor().has_wildcard() {
+                    peek_index = 0;
+                }
+                let (index, spk) = spk_iter
+                    .nth(peek_index as usize)
+                    .expect("derivation index is out of bounds");
                 (index, spk, None)
             }
         };
@@ -745,7 +772,7 @@ impl<D> Wallet<D> {
     ///
     /// Will only return `Some(_)` if the wallet has given out the spk.
     pub fn derivation_of_spk(&self, spk: &Script) -> Option<(KeychainKind, u32)> {
-        self.indexed_graph.index.index_of_spk(spk).copied()
+        self.indexed_graph.index.index_of_spk(spk)
     }
 
     /// Return the list of unspent outputs of this wallet
@@ -784,7 +811,7 @@ impl<D> Wallet<D> {
         self.chain.tip()
     }
 
-    /// Returns a iterators of all the script pubkeys for the `Internal` and External` variants in `KeychainKind`.
+    /// Get unbounded script pubkey iterators for both `Internal` and `External` keychains.
     ///
     /// This is intended to be used when doing a full scan of your addresses (e.g. after restoring
     /// from seed words). You pass the `BTreeMap` of iterators to a blockchain data source (e.g.
@@ -792,36 +819,36 @@ impl<D> Wallet<D> {
     ///
     /// Note carefully that iterators go over **all** script pubkeys on the keychains (not what
     /// script pubkeys the wallet is storing internally).
-    pub fn spks_of_all_keychains(
+    pub fn all_unbounded_spk_iters(
         &self,
     ) -> BTreeMap<KeychainKind, impl Iterator<Item = (u32, ScriptBuf)> + Clone> {
-        self.indexed_graph.index.spks_of_all_keychains()
+        self.indexed_graph.index.all_unbounded_spk_iters()
     }
 
-    /// Gets an iterator over all the script pubkeys in a single keychain.
+    /// Get an unbounded script pubkey iterator for the given `keychain`.
     ///
-    /// See [`spks_of_all_keychains`] for more documentation
+    /// See [`all_unbounded_spk_iters`] for more documentation
     ///
-    /// [`spks_of_all_keychains`]: Self::spks_of_all_keychains
-    pub fn spks_of_keychain(
+    /// [`all_unbounded_spk_iters`]: Self::all_unbounded_spk_iters
+    pub fn unbounded_spk_iter(
         &self,
         keychain: KeychainKind,
     ) -> impl Iterator<Item = (u32, ScriptBuf)> + Clone {
-        self.indexed_graph.index.spks_of_keychain(&keychain)
+        self.indexed_graph.index.unbounded_spk_iter(&keychain)
     }
 
     /// Returns the utxo owned by this wallet corresponding to `outpoint` if it exists in the
     /// wallet's database.
     pub fn get_utxo(&self, op: OutPoint) -> Option<LocalOutput> {
-        let (&spk_i, _) = self.indexed_graph.index.txout(op)?;
+        let (keychain, index, _) = self.indexed_graph.index.txout(op)?;
         self.indexed_graph
             .graph()
             .filter_chain_unspents(
                 &self.chain,
                 self.chain.tip().block_id(),
-                core::iter::once((spk_i, op)),
+                core::iter::once(((), op)),
             )
-            .map(|((k, i), full_txo)| new_local_utxo(k, i, full_txo))
+            .map(|(_, full_txo)| new_local_utxo(keychain, index, full_txo))
             .next()
     }
 
@@ -1459,7 +1486,7 @@ impl<D> Wallet<D> {
                 let ((index, spk), index_changeset) =
                     self.indexed_graph.index.next_unused_spk(&change_keychain);
                 let spk = spk.into();
-                self.indexed_graph.index.mark_used(&change_keychain, index);
+                self.indexed_graph.index.mark_used(change_keychain, index);
                 self.persist
                     .stage(ChangeSet::from(indexed_tx_graph::ChangeSet::from(
                         index_changeset,
@@ -1640,7 +1667,7 @@ impl<D> Wallet<D> {
                     .into();
 
                 let weighted_utxo = match txout_index.index_of_spk(&txout.script_pubkey) {
-                    Some(&(keychain, derivation_index)) => {
+                    Some((keychain, derivation_index)) => {
                         #[allow(deprecated)]
                         let satisfaction_weight = self
                             .get_descriptor_for_keychain(keychain)
@@ -1684,7 +1711,7 @@ impl<D> Wallet<D> {
             for (index, txout) in tx.output.iter().enumerate() {
                 let change_type = self.map_keychain(KeychainKind::Internal);
                 match txout_index.index_of_spk(&txout.script_pubkey) {
-                    Some(&(keychain, _)) if keychain == change_type => change_index = Some(index),
+                    Some((keychain, _)) if keychain == change_type => change_index = Some(index),
                     _ => {}
                 }
             }
@@ -1939,10 +1966,10 @@ impl<D> Wallet<D> {
     pub fn cancel_tx(&mut self, tx: &Transaction) {
         let txout_index = &mut self.indexed_graph.index;
         for txout in &tx.output {
-            if let Some(&(keychain, index)) = txout_index.index_of_spk(&txout.script_pubkey) {
+            if let Some((keychain, index)) = txout_index.index_of_spk(&txout.script_pubkey) {
                 // NOTE: unmark_used will **not** make something unused if it has actually been used
                 // by a tx in the tracker. It only removes the superficial marking.
-                txout_index.unmark_used(&keychain, index);
+                txout_index.unmark_used(keychain, index);
             }
         }
     }
@@ -1958,7 +1985,7 @@ impl<D> Wallet<D> {
     }
 
     fn get_descriptor_for_txout(&self, txout: &TxOut) -> Option<DerivedDescriptor> {
-        let &(keychain, child) = self
+        let (keychain, child) = self
             .indexed_graph
             .index
             .index_of_spk(&txout.script_pubkey)?;
@@ -2172,7 +2199,7 @@ impl<D> Wallet<D> {
     {
         // Try to find the prev_script in our db to figure out if this is internal or external,
         // and the derivation index
-        let &(keychain, child) = self
+        let (keychain, child) = self
             .indexed_graph
             .index
             .index_of_spk(&utxo.txout.script_pubkey)
@@ -2226,7 +2253,7 @@ impl<D> Wallet<D> {
 
         // Try to figure out the keychain and derivation for every input and output
         for (is_input, index, out) in utxos.into_iter() {
-            if let Some(&(keychain, child)) =
+            if let Some((keychain, child)) =
                 self.indexed_graph.index.index_of_spk(&out.script_pubkey)
             {
                 let desc = self.get_descriptor_for_keychain(keychain);
