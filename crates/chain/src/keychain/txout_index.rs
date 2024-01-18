@@ -5,8 +5,11 @@ use crate::{
     spk_iter::BIP32_MAX_INDEX,
     SpkIterator, SpkTxOutIndex,
 };
-use bitcoin::{OutPoint, Script, Transaction, TxOut};
-use core::fmt::Debug;
+use bitcoin::{OutPoint, Script, Transaction, TxOut, Txid};
+use core::{
+    fmt::Debug,
+    ops::{Bound, RangeBounds},
+};
 
 use crate::Append;
 
@@ -178,6 +181,25 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     /// Get a reference to the set of indexed outpoints.
     pub fn outpoints(&self) -> &BTreeSet<((K, u32), OutPoint)> {
         self.inner.outpoints()
+    }
+
+    /// Iterate over known txouts that spend to tracked script pubkeys.
+    pub fn txouts(
+        &self,
+    ) -> impl DoubleEndedIterator<Item = (K, u32, OutPoint, &TxOut)> + ExactSizeIterator {
+        self.inner
+            .txouts()
+            .map(|((k, i), op, txo)| (k.clone(), *i, op, txo))
+    }
+
+    /// Finds all txouts on a transaction that has previously been scanned and indexed.
+    pub fn txouts_in_tx(
+        &self,
+        txid: Txid,
+    ) -> impl DoubleEndedIterator<Item = (K, u32, OutPoint, &TxOut)> {
+        self.inner
+            .txouts_in_tx(txid)
+            .map(|((k, i), op, txo)| (k.clone(), *i, op, txo))
     }
 
     /// Return the [`TxOut`] of `outpoint` if it has been indexed.
@@ -590,14 +612,37 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
         }
     }
 
-    /// Iterates over all the [`OutPoint`] that have a `TxOut` with a script pubkey derived from
+    /// Iterate over all [`OutPoint`]s that point to `TxOut`s with script pubkeys derived from
     /// `keychain`.
+    ///
+    /// Use [`keychain_outpoints_in_range`](KeychainTxOutIndex::keychain_outpoints_in_range) to
+    /// iterate over a specific derivation range.
     pub fn keychain_outpoints(
         &self,
         keychain: &K,
     ) -> impl DoubleEndedIterator<Item = (u32, OutPoint)> + '_ {
+        self.keychain_outpoints_in_range(keychain, ..)
+    }
+
+    /// Iterate over [`OutPoint`]s that point to `TxOut`s with script pubkeys derived from
+    /// `keychain` in a given derivation `range`.
+    pub fn keychain_outpoints_in_range(
+        &self,
+        keychain: &K,
+        range: impl RangeBounds<u32>,
+    ) -> impl DoubleEndedIterator<Item = (u32, OutPoint)> + '_ {
+        let start = match range.start_bound() {
+            Bound::Included(i) => Bound::Included((keychain.clone(), *i)),
+            Bound::Excluded(i) => Bound::Excluded((keychain.clone(), *i)),
+            Bound::Unbounded => Bound::Unbounded,
+        };
+        let end = match range.end_bound() {
+            Bound::Included(i) => Bound::Included((keychain.clone(), *i)),
+            Bound::Excluded(i) => Bound::Excluded((keychain.clone(), *i)),
+            Bound::Unbounded => Bound::Unbounded,
+        };
         self.inner
-            .outputs_in_range((keychain.clone(), u32::MIN)..(keychain.clone(), u32::MAX))
+            .outputs_in_range((start, end))
             .map(|((_, i), op)| (*i, op))
     }
 
