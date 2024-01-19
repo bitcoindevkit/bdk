@@ -43,11 +43,13 @@ pub struct Emitter<'c, C> {
 }
 
 impl<'c, C: bitcoincore_rpc::RpcApi> Emitter<'c, C> {
-    /// Construct a new [`Emitter`] with the given RPC `client`, `last_cp` and `start_height`.
+    /// Construct a new [`Emitter`].
     ///
-    /// * `last_cp` is the check point used to find the latest block which is still part of the best
-    ///   chain.
-    /// * `start_height` is the block height to start emitting blocks from.
+    /// `last_cp` informs the emitter of the chain we are starting off with. This way, the emitter
+    /// can start emission from a block that connects to the original chain.
+    ///
+    /// `start_height` starts emission from a given height (if there are no conflicts with the
+    /// original chain).
     pub fn new(client: &'c C, last_cp: CheckPoint, start_height: u32) -> Self {
         Self {
             client,
@@ -127,13 +129,58 @@ impl<'c, C: bitcoincore_rpc::RpcApi> Emitter<'c, C> {
     }
 
     /// Emit the next block height and header (if any).
-    pub fn next_header(&mut self) -> Result<Option<(u32, Header)>, bitcoincore_rpc::Error> {
-        poll(self, |hash| self.client.get_block_header(hash))
+    pub fn next_header(&mut self) -> Result<Option<BlockEvent<Header>>, bitcoincore_rpc::Error> {
+        Ok(poll(self, |hash| self.client.get_block_header(hash))?
+            .map(|(checkpoint, block)| BlockEvent { block, checkpoint }))
     }
 
     /// Emit the next block height and block (if any).
-    pub fn next_block(&mut self) -> Result<Option<(u32, Block)>, bitcoincore_rpc::Error> {
-        poll(self, |hash| self.client.get_block(hash))
+    pub fn next_block(&mut self) -> Result<Option<BlockEvent<Block>>, bitcoincore_rpc::Error> {
+        Ok(poll(self, |hash| self.client.get_block(hash))?
+            .map(|(checkpoint, block)| BlockEvent { block, checkpoint }))
+    }
+}
+
+/// A newly emitted block from [`Emitter`].
+#[derive(Debug)]
+pub struct BlockEvent<B> {
+    /// Either a full [`Block`] or [`Header`] of the new block.
+    pub block: B,
+
+    /// The checkpoint of the new block.
+    ///
+    /// A [`CheckPoint`] is a node of a linked list of [`BlockId`]s. This checkpoint is linked to
+    /// all [`BlockId`]s originally passed in [`Emitter::new`] as well as emitted blocks since then.
+    /// These blocks are guaranteed to be of the same chain.
+    ///
+    /// This is important as BDK structures require block-to-apply to be connected with another
+    /// block in the original chain.
+    pub checkpoint: CheckPoint,
+}
+
+impl<B> BlockEvent<B> {
+    /// The block height of this new block.
+    pub fn block_height(&self) -> u32 {
+        self.checkpoint.height()
+    }
+
+    /// The block hash of this new block.
+    pub fn block_hash(&self) -> BlockHash {
+        self.checkpoint.hash()
+    }
+
+    /// The [`BlockId`] of a previous block that this block connects to.
+    ///
+    /// This either returns a [`BlockId`] of a previously emitted block or from the chain we started
+    /// with (passed in as `last_cp` in [`Emitter::new`]).
+    ///
+    /// This value is derived from [`BlockEvent::checkpoint`].
+    pub fn connected_to(&self) -> BlockId {
+        match self.checkpoint.prev() {
+            Some(prev_cp) => prev_cp.block_id(),
+            // there is no previous checkpoint, so just connect with itself
+            None => self.checkpoint.block_id(),
+        }
     }
 }
 
@@ -203,7 +250,7 @@ where
 fn poll<C, V, F>(
     emitter: &mut Emitter<C>,
     get_item: F,
-) -> Result<Option<(u32, V)>, bitcoincore_rpc::Error>
+) -> Result<Option<(CheckPoint, V)>, bitcoincore_rpc::Error>
 where
     C: bitcoincore_rpc::RpcApi,
     F: Fn(&BlockHash) -> Result<V, bitcoincore_rpc::Error>,
@@ -215,13 +262,14 @@ where
                 let hash = res.hash;
                 let item = get_item(&hash)?;
 
-                emitter.last_cp = emitter
+                let new_cp = emitter
                     .last_cp
                     .clone()
                     .push(BlockId { height, hash })
                     .expect("must push");
+                emitter.last_cp = new_cp.clone();
                 emitter.last_block = Some(res);
-                return Ok(Some((height, item)));
+                return Ok(Some((new_cp, item)));
             }
             PollResponse::NoMoreBlocks => {
                 emitter.last_block = None;

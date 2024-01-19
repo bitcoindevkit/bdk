@@ -1,7 +1,11 @@
-use bdk_chain::local_chain::{
-    AlterCheckPointError, CannotConnectError, ChangeSet, LocalChain, MissingGenesisError, Update,
+use bdk_chain::{
+    local_chain::{
+        AlterCheckPointError, ApplyHeaderError, CannotConnectError, ChangeSet, CheckPoint,
+        LocalChain, MissingGenesisError, Update,
+    },
+    BlockId,
 };
-use bitcoin::BlockHash;
+use bitcoin::{block::Header, hashes::Hash, BlockHash};
 
 #[macro_use]
 mod common;
@@ -288,6 +292,27 @@ fn update_local_chain() {
                 ],
             },
         },
+        // Allow update that is shorter than original chain
+        //        | 0 | 1 | 2 | 3 | 4 | 5
+        // chain  | A       C   D   E   F
+        // update | A       C   D'
+        TestLocalChain {
+            name: "allow update that is shorter than original chain",
+            chain: local_chain![(0, h!("_")), (2, h!("C")), (3, h!("D")), (4, h!("E")), (5, h!("F"))],
+            update: chain_update![(0, h!("_")), (2, h!("C")), (3, h!("D'"))],
+            exp: ExpectedResult::Ok {
+                changeset: &[
+                    (3, Some(h!("D'"))),
+                    (4, None),
+                    (5, None),
+                ],
+                init_changeset: &[
+                    (0, Some(h!("_"))),
+                    (2, Some(h!("C"))),
+                    (3, Some(h!("D'"))),
+                ],
+            },
+        },
     ]
     .into_iter()
     .for_each(TestLocalChain::run);
@@ -421,5 +446,236 @@ fn local_chain_disconnect_from() {
             "[{}:{}] unexpected final chain",
             i, t.name
         );
+    }
+}
+
+#[test]
+fn checkpoint_from_block_ids() {
+    struct TestCase<'a> {
+        name: &'a str,
+        blocks: &'a [(u32, BlockHash)],
+        exp_result: Result<(), Option<(u32, BlockHash)>>,
+    }
+
+    let test_cases = [
+        TestCase {
+            name: "in_order",
+            blocks: &[(0, h!("A")), (1, h!("B")), (3, h!("D"))],
+            exp_result: Ok(()),
+        },
+        TestCase {
+            name: "with_duplicates",
+            blocks: &[(1, h!("B")), (2, h!("C")), (2, h!("C'"))],
+            exp_result: Err(Some((2, h!("C")))),
+        },
+        TestCase {
+            name: "not_in_order",
+            blocks: &[(1, h!("B")), (3, h!("D")), (2, h!("C"))],
+            exp_result: Err(Some((3, h!("D")))),
+        },
+        TestCase {
+            name: "empty",
+            blocks: &[],
+            exp_result: Err(None),
+        },
+        TestCase {
+            name: "single",
+            blocks: &[(21, h!("million"))],
+            exp_result: Ok(()),
+        },
+    ];
+
+    for (i, t) in test_cases.into_iter().enumerate() {
+        println!("running test case {}: '{}'", i, t.name);
+        let result = CheckPoint::from_block_ids(
+            t.blocks
+                .iter()
+                .map(|&(height, hash)| BlockId { height, hash }),
+        );
+        match t.exp_result {
+            Ok(_) => {
+                assert!(result.is_ok(), "[{}:{}] should be Ok", i, t.name);
+                let result_vec = {
+                    let mut v = result
+                        .unwrap()
+                        .into_iter()
+                        .map(|cp| (cp.height(), cp.hash()))
+                        .collect::<Vec<_>>();
+                    v.reverse();
+                    v
+                };
+                assert_eq!(
+                    &result_vec, t.blocks,
+                    "[{}:{}] not equal to original block ids",
+                    i, t.name
+                );
+            }
+            Err(exp_last) => {
+                assert!(result.is_err(), "[{}:{}] should be Err", i, t.name);
+                let err = result.unwrap_err();
+                assert_eq!(
+                    err.as_ref()
+                        .map(|last_cp| (last_cp.height(), last_cp.hash())),
+                    exp_last,
+                    "[{}:{}] error's last cp height should be {:?}, got {:?}",
+                    i,
+                    t.name,
+                    exp_last,
+                    err
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn local_chain_apply_header_connected_to() {
+    fn header_from_prev_blockhash(prev_blockhash: BlockHash) -> Header {
+        Header {
+            version: bitcoin::block::Version::default(),
+            prev_blockhash,
+            merkle_root: bitcoin::hash_types::TxMerkleNode::all_zeros(),
+            time: 0,
+            bits: bitcoin::CompactTarget::default(),
+            nonce: 0,
+        }
+    }
+
+    struct TestCase {
+        name: &'static str,
+        chain: LocalChain,
+        header: Header,
+        height: u32,
+        connected_to: BlockId,
+        exp_result: Result<Vec<(u32, Option<BlockHash>)>, ApplyHeaderError>,
+    }
+
+    let test_cases = [
+        {
+            let header = header_from_prev_blockhash(h!("A"));
+            let hash = header.block_hash();
+            let height = 2;
+            let connected_to = BlockId { height, hash };
+            TestCase {
+                name: "connected_to_self_header_applied_to_self",
+                chain: local_chain![(0, h!("_")), (height, hash)],
+                header,
+                height,
+                connected_to,
+                exp_result: Ok(vec![]),
+            }
+        },
+        {
+            let prev_hash = h!("A");
+            let prev_height = 1;
+            let header = header_from_prev_blockhash(prev_hash);
+            let hash = header.block_hash();
+            let height = prev_height + 1;
+            let connected_to = BlockId {
+                height: prev_height,
+                hash: prev_hash,
+            };
+            TestCase {
+                name: "connected_to_prev_header_applied_to_self",
+                chain: local_chain![(0, h!("_")), (prev_height, prev_hash)],
+                header,
+                height,
+                connected_to,
+                exp_result: Ok(vec![(height, Some(hash))]),
+            }
+        },
+        {
+            let header = header_from_prev_blockhash(BlockHash::all_zeros());
+            let hash = header.block_hash();
+            let height = 0;
+            let connected_to = BlockId { height, hash };
+            TestCase {
+                name: "genesis_applied_to_self",
+                chain: local_chain![(0, hash)],
+                header,
+                height,
+                connected_to,
+                exp_result: Ok(vec![]),
+            }
+        },
+        {
+            let header = header_from_prev_blockhash(h!("Z"));
+            let height = 10;
+            let hash = header.block_hash();
+            let prev_height = height - 1;
+            let prev_hash = header.prev_blockhash;
+            TestCase {
+                name: "connect_at_connected_to",
+                chain: local_chain![(0, h!("_")), (2, h!("B")), (3, h!("C"))],
+                header,
+                height: 10,
+                connected_to: BlockId {
+                    height: 3,
+                    hash: h!("C"),
+                },
+                exp_result: Ok(vec![(prev_height, Some(prev_hash)), (height, Some(hash))]),
+            }
+        },
+        {
+            let prev_hash = h!("A");
+            let prev_height = 1;
+            let header = header_from_prev_blockhash(prev_hash);
+            let connected_to = BlockId {
+                height: prev_height,
+                hash: h!("not_prev_hash"),
+            };
+            TestCase {
+                name: "inconsistent_prev_hash",
+                chain: local_chain![(0, h!("_")), (prev_height, h!("not_prev_hash"))],
+                header,
+                height: prev_height + 1,
+                connected_to,
+                exp_result: Err(ApplyHeaderError::InconsistentBlocks),
+            }
+        },
+        {
+            let prev_hash = h!("A");
+            let prev_height = 1;
+            let header = header_from_prev_blockhash(prev_hash);
+            let height = prev_height + 1;
+            let connected_to = BlockId {
+                height,
+                hash: h!("not_current_hash"),
+            };
+            TestCase {
+                name: "inconsistent_current_block",
+                chain: local_chain![(0, h!("_")), (height, h!("not_current_hash"))],
+                header,
+                height,
+                connected_to,
+                exp_result: Err(ApplyHeaderError::InconsistentBlocks),
+            }
+        },
+        {
+            let header = header_from_prev_blockhash(h!("B"));
+            let height = 3;
+            let connected_to = BlockId {
+                height: 4,
+                hash: h!("D"),
+            };
+            TestCase {
+                name: "connected_to_is_greater",
+                chain: local_chain![(0, h!("_")), (2, h!("B"))],
+                header,
+                height,
+                connected_to,
+                exp_result: Err(ApplyHeaderError::InconsistentBlocks),
+            }
+        },
+    ];
+
+    for (i, t) in test_cases.into_iter().enumerate() {
+        println!("running test case {}: '{}'", i, t.name);
+        let mut chain = t.chain;
+        let result = chain.apply_header_connected_to(&t.header, t.height, t.connected_to);
+        let exp_result = t
+            .exp_result
+            .map(|cs| cs.iter().cloned().collect::<ChangeSet>());
+        assert_eq!(result, exp_result, "[{}:{}] unexpected result", i, t.name);
     }
 }

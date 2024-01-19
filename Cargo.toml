@@ -15,6 +15,7 @@ members = [
     "example-crates/wallet_electrum",
     "example-crates/wallet_esplora_blocking",
     "example-crates/wallet_esplora_async",
+    "example-crates/wallet_rpc",
     "nursery/tmp_plan",
     "nursery/coin_select"
 ]
