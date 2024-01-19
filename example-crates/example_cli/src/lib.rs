@@ -457,11 +457,10 @@ where
 
                     let ((spk_i, spk), index_changeset) = spk_chooser(index, &Keychain::External);
                     let db = &mut *db.lock().unwrap();
-                    db.stage(C::from((
+                    db.stage_and_commit(C::from((
                         local_chain::ChangeSet::default(),
                         indexed_tx_graph::ChangeSet::from(index_changeset),
-                    )));
-                    db.commit()?;
+                    )))?;
                     let addr =
                         Address::from_script(spk, network).context("failed to derive address")?;
                     println!("[address @ {}] {}", spk_i, addr);
@@ -601,11 +600,10 @@ where
                     // If we're unable to persist this, then we don't want to broadcast.
                     {
                         let db = &mut *db.lock().unwrap();
-                        db.stage(C::from((
+                        db.stage_and_commit(C::from((
                             local_chain::ChangeSet::default(),
                             indexed_tx_graph::ChangeSet::from(index_changeset),
-                        )));
-                        db.commit()?;
+                        )))?;
                     }
 
                     // We don't want other callers/threads to use this address while we're using it
@@ -627,10 +625,10 @@ where
                     // We know the tx is at least unconfirmed now. Note if persisting here fails,
                     // it's not a big deal since we can always find it again form
                     // blockchain.
-                    db.lock().unwrap().stage(C::from((
+                    db.lock().unwrap().stage_and_commit(C::from((
                         local_chain::ChangeSet::default(),
                         keychain_changeset,
-                    )));
+                    )))?;
                     Ok(())
                 }
                 Err(e) => {

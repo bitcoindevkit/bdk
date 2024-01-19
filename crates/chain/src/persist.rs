@@ -55,6 +55,18 @@ where
             // if written successfully, take and return `self.stage`
             .map(|_| Some(core::mem::take(&mut self.stage)))
     }
+
+    /// Stages a new changeset and commits it (along with any other previously staged changes) to
+    /// the persistence backend
+    ///
+    /// Convience method for calling [`stage`] and then [`commit`].
+    ///
+    /// [`stage`]: Self::stage
+    /// [`commit`]: Self::commit
+    pub fn stage_and_commit(&mut self, changeset: C) -> Result<Option<C>, B::WriteError> {
+        self.stage(changeset);
+        self.commit()
+    }
 }
 
 /// A persistence backend for [`Persist`].
