@@ -15,13 +15,13 @@ use crate::{bincode_options, EntryIter, FileError, IterError};
 ///
 /// The changesets are the results of altering a tracker implementation (`T`).
 #[derive(Debug)]
-pub struct Store<'a, C> {
-    magic: &'a [u8],
+pub struct Store<C> {
+    magic_len: usize,
     db_file: File,
     marker: PhantomData<C>,
 }
 
-impl<'a, C> PersistBackend<C> for Store<'a, C>
+impl<C> PersistBackend<C> for Store<C>
 where
     C: Append + serde::Serialize + serde::de::DeserializeOwned,
 {
@@ -38,7 +38,7 @@ where
     }
 }
 
-impl<'a, C> Store<'a, C>
+impl<C> Store<C>
 where
     C: Append + serde::Serialize + serde::de::DeserializeOwned,
 {
@@ -48,7 +48,7 @@ where
     /// the `Store` in the future with [`open`].
     ///
     /// [`open`]: Store::open
-    pub fn create_new<P>(magic: &'a [u8], file_path: P) -> Result<Self, FileError>
+    pub fn create_new<P>(magic: &[u8], file_path: P) -> Result<Self, FileError>
     where
         P: AsRef<Path>,
     {
@@ -67,7 +67,7 @@ where
             .open(file_path)?;
         f.write_all(magic)?;
         Ok(Self {
-            magic,
+            magic_len: magic.len(),
             db_file: f,
             marker: Default::default(),
         })
@@ -83,7 +83,7 @@ where
     /// [`FileError::InvalidMagicBytes`] error variant will be returned.
     ///
     /// [`create_new`]: Store::create_new
-    pub fn open<P>(magic: &'a [u8], file_path: P) -> Result<Self, FileError>
+    pub fn open<P>(magic: &[u8], file_path: P) -> Result<Self, FileError>
     where
         P: AsRef<Path>,
     {
@@ -99,7 +99,7 @@ where
         }
 
         Ok(Self {
-            magic,
+            magic_len: magic.len(),
             db_file: f,
             marker: Default::default(),
         })
@@ -111,7 +111,7 @@ where
     ///
     /// [`open`]: Store::open
     /// [`create_new`]: Store::create_new
-    pub fn open_or_create_new<P>(magic: &'a [u8], file_path: P) -> Result<Self, FileError>
+    pub fn open_or_create_new<P>(magic: &[u8], file_path: P) -> Result<Self, FileError>
     where
         P: AsRef<Path>,
     {
@@ -132,7 +132,7 @@ where
     /// always iterate over all entries until `None` is returned if you want your next write to go
     /// at the end; otherwise, you will write over existing entries.
     pub fn iter_changesets(&mut self) -> EntryIter<C> {
-        EntryIter::new(self.magic.len() as u64, &mut self.db_file)
+        EntryIter::new(self.magic_len as u64, &mut self.db_file)
     }
 
     /// Loads all the changesets that have been stored as one giant changeset.

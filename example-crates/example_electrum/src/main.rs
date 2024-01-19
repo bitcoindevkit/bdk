@@ -122,7 +122,7 @@ fn main() -> anyhow::Result<()> {
     let electrum_cmd = match &args.command {
         example_cli::Commands::ChainSpecific(electrum_cmd) => electrum_cmd,
         general_cmd => {
-            let res = example_cli::handle_commands(
+            return example_cli::handle_commands(
                 &graph,
                 &db,
                 &chain,
@@ -135,9 +135,6 @@ fn main() -> anyhow::Result<()> {
                 },
                 general_cmd.clone(),
             );
-
-            db.lock().unwrap().commit()?;
-            return res;
         }
     };
 

@@ -125,7 +125,7 @@ fn main() -> anyhow::Result<()> {
         example_cli::Commands::ChainSpecific(esplora_cmd) => esplora_cmd,
         // These are general commands handled by example_cli. Execute the cmd and return.
         general_cmd => {
-            let res = example_cli::handle_commands(
+            return example_cli::handle_commands(
                 &graph,
                 &db,
                 &chain,
@@ -140,9 +140,6 @@ fn main() -> anyhow::Result<()> {
                 },
                 general_cmd.clone(),
             );
-
-            db.lock().unwrap().commit()?;
-            return res;
         }
     };
 

@@ -29,7 +29,7 @@ pub type KeychainChangeSet<A> = (
     local_chain::ChangeSet,
     indexed_tx_graph::ChangeSet<A, keychain::ChangeSet<Keychain>>,
 );
-pub type Database<'m, C> = Persist<Store<'m, C>, C>;
+pub type Database<C> = Persist<Store<C>, C>;
 
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
@@ -457,11 +457,10 @@ where
 
                     let ((spk_i, spk), index_changeset) = spk_chooser(index, &Keychain::External);
                     let db = &mut *db.lock().unwrap();
-                    db.stage(C::from((
+                    db.stage_and_commit(C::from((
                         local_chain::ChangeSet::default(),
                         indexed_tx_graph::ChangeSet::from(index_changeset),
-                    )));
-                    db.commit()?;
+                    )))?;
                     let addr =
                         Address::from_script(spk, network).context("failed to derive address")?;
                     println!("[address @ {}] {}", spk_i, addr);
@@ -601,11 +600,10 @@ where
                     // If we're unable to persist this, then we don't want to broadcast.
                     {
                         let db = &mut *db.lock().unwrap();
-                        db.stage(C::from((
+                        db.stage_and_commit(C::from((
                             local_chain::ChangeSet::default(),
                             indexed_tx_graph::ChangeSet::from(index_changeset),
-                        )));
-                        db.commit()?;
+                        )))?;
                     }
 
                     // We don't want other callers/threads to use this address while we're using it
@@ -627,10 +625,10 @@ where
                     // We know the tx is at least unconfirmed now. Note if persisting here fails,
                     // it's not a big deal since we can always find it again form
                     // blockchain.
-                    db.lock().unwrap().stage(C::from((
+                    db.lock().unwrap().stage_and_commit(C::from((
                         local_chain::ChangeSet::default(),
                         keychain_changeset,
-                    )));
+                    )))?;
                     Ok(())
                 }
                 Err(e) => {
@@ -646,14 +644,14 @@ where
 }
 
 #[allow(clippy::type_complexity)]
-pub fn init<'m, CS: clap::Subcommand, S: clap::Args, C>(
-    db_magic: &'m [u8],
+pub fn init<CS: clap::Subcommand, S: clap::Args, C>(
+    db_magic: &[u8],
     db_default_path: &str,
 ) -> anyhow::Result<(
     Args<CS, S>,
     KeyMap,
     KeychainTxOutIndex<Keychain>,
-    Mutex<Database<'m, C>>,
+    Mutex<Database<C>>,
     C,
 )>
 where
@@ -681,7 +679,7 @@ where
         index.add_keychain(Keychain::Internal, internal_descriptor);
     }
 
-    let mut db_backend = match Store::<'m, C>::open_or_create_new(db_magic, &args.db_path) {
+    let mut db_backend = match Store::<C>::open_or_create_new(db_magic, &args.db_path) {
         Ok(db_backend) => db_backend,
         // we cannot return `err` directly as it has lifetime `'m`
         Err(err) => return Err(anyhow::anyhow!("failed to init db backend: {:?}", err)),

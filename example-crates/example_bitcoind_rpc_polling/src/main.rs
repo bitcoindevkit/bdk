@@ -147,7 +147,7 @@ fn main() -> anyhow::Result<()> {
     let rpc_cmd = match args.command {
         example_cli::Commands::ChainSpecific(rpc_cmd) => rpc_cmd,
         general_cmd => {
-            let res = example_cli::handle_commands(
+            return example_cli::handle_commands(
                 &graph,
                 &db,
                 &chain,
@@ -160,8 +160,6 @@ fn main() -> anyhow::Result<()> {
                 },
                 general_cmd,
             );
-            db.lock().unwrap().commit()?;
-            return res;
         }
     };
 
