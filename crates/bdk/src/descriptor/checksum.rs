@@ -42,22 +42,16 @@ fn poly_mod(mut c: u64, val: u64) -> u64 {
     c
 }
 
-/// Computes the checksum bytes of a descriptor.
-/// `exclude_hash = true` ignores all data after the first '#' (inclusive).
-pub(crate) fn calc_checksum_bytes_internal(
-    mut desc: &str,
-    exclude_hash: bool,
-) -> Result<[u8; 8], DescriptorError> {
+/// Compute the checksum bytes of a descriptor, excludes any existing checksum in the descriptor string from the calculation
+pub fn calc_checksum_bytes(mut desc: &str) -> Result<[u8; 8], DescriptorError> {
     let mut c = 1;
     let mut cls = 0;
     let mut clscount = 0;
 
     let mut original_checksum = None;
-    if exclude_hash {
-        if let Some(split) = desc.split_once('#') {
-            desc = split.0;
-            original_checksum = Some(split.1);
-        }
+    if let Some(split) = desc.split_once('#') {
+        desc = split.0;
+        original_checksum = Some(split.1);
     }
 
     for ch in desc.as_bytes() {
@@ -95,39 +89,10 @@ pub(crate) fn calc_checksum_bytes_internal(
     Ok(checksum)
 }
 
-/// Compute the checksum bytes of a descriptor, excludes any existing checksum in the descriptor string from the calculation
-pub fn calc_checksum_bytes(desc: &str) -> Result<[u8; 8], DescriptorError> {
-    calc_checksum_bytes_internal(desc, true)
-}
-
 /// Compute the checksum of a descriptor, excludes any existing checksum in the descriptor string from the calculation
 pub fn calc_checksum(desc: &str) -> Result<String, DescriptorError> {
     // unsafe is okay here as the checksum only uses bytes in `CHECKSUM_CHARSET`
-    calc_checksum_bytes_internal(desc, true)
-        .map(|b| unsafe { String::from_utf8_unchecked(b.to_vec()) })
-}
-
-// TODO in release 0.25.0, remove get_checksum_bytes and get_checksum
-// TODO in release 0.25.0, consolidate calc_checksum_bytes_internal into calc_checksum_bytes
-
-/// Compute the checksum bytes of a descriptor
-#[deprecated(
-    since = "0.24.0",
-    note = "Use new `calc_checksum_bytes` function which excludes any existing checksum in the descriptor string before calculating the checksum hash bytes. See https://github.com/bitcoindevkit/bdk/pull/765."
-)]
-pub fn get_checksum_bytes(desc: &str) -> Result<[u8; 8], DescriptorError> {
-    calc_checksum_bytes_internal(desc, false)
-}
-
-/// Compute the checksum of a descriptor
-#[deprecated(
-    since = "0.24.0",
-    note = "Use new `calc_checksum` function which excludes any existing checksum in the descriptor string before calculating the checksum hash. See https://github.com/bitcoindevkit/bdk/pull/765."
-)]
-pub fn get_checksum(desc: &str) -> Result<String, DescriptorError> {
-    // unsafe is okay here as the checksum only uses bytes in `CHECKSUM_CHARSET`
-    calc_checksum_bytes_internal(desc, false)
-        .map(|b| unsafe { String::from_utf8_unchecked(b.to_vec()) })
+    calc_checksum_bytes(desc).map(|b| unsafe { String::from_utf8_unchecked(b.to_vec()) })
 }
 
 #[cfg(test)]
