@@ -30,7 +30,7 @@ use bdk_esplora::EsploraExt;
 // use bdk_esplora::EsploraAsyncExt;
 ```
 
-For full examples, refer to [`example-crates/wallet_esplora`](https://github.com/bitcoindevkit/bdk/tree/master/example-crates/wallet_esplora) (blocking) and [`example-crates/wallet_esplora_async`](https://github.com/bitcoindevkit/bdk/tree/master/example-crates/wallet_esplora_async).
+For full examples, refer to [`example-crates/wallet_esplora_blocking`](https://github.com/bitcoindevkit/bdk/tree/master/example-crates/wallet_esplora_blocking) and [`example-crates/wallet_esplora_async`](https://github.com/bitcoindevkit/bdk/tree/master/example-crates/wallet_esplora_async).
 
 [`esplora-client`]: https://docs.rs/esplora-client/
 [`bdk_chain`]: https://docs.rs/bdk-chain/
