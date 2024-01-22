@@ -43,18 +43,24 @@ impl<D> SpkIterator<D>
 where
     D: Borrow<Descriptor<DescriptorPublicKey>>,
 {
-    /// Creates a new script pubkey iterator starting at 0 from a descriptor.
+    /// Create a new script pubkey iterator from `descriptor`.
+    ///
+    /// This iterates from derivation index 0 and stops at index 0x7FFFFFFF (as specified in
+    /// BIP-32). Non-wildcard descriptors will only return one script pubkey at derivation index 0.
+    ///
+    /// Use [`new_with_range`](SpkIterator::new_with_range) to create an iterator with a specified
+    /// derivation index range.
     pub fn new(descriptor: D) -> Self {
         SpkIterator::new_with_range(descriptor, 0..=BIP32_MAX_INDEX)
     }
 
-    // Creates a new script pubkey iterator from a descriptor with a given range.
-    // If the descriptor doesn't have a wildcard, we shorten whichever range you pass in
-    // to have length <= 1. This means that if you pass in 0..0 or 0..1 the range will
-    // remain the same, but if you pass in 0..10, we'll shorten it to 0..1
-    // Also note that if the descriptor doesn't have a wildcard, passing in a range starting
-    // from n > 0, will return an empty iterator.
-    pub(crate) fn new_with_range<R>(descriptor: D, range: R) -> Self
+    /// Create a new script pubkey iterator from `descriptor` and a given `range`.
+    ///
+    /// Non-wildcard descriptors will only emit a single script pubkey (at derivation index 0).
+    /// Wildcard descriptors have an end-bound of 0x7FFFFFFF (inclusive).
+    ///
+    /// Refer to [`new`](SpkIterator::new) for more.
+    pub fn new_with_range<R>(descriptor: D, range: R) -> Self
     where
         R: RangeBounds<u32>,
     {
@@ -72,13 +78,6 @@ where
 
         // Because `end` is exclusive, we want the maximum value to be BIP32_MAX_INDEX + 1.
         end = end.min(BIP32_MAX_INDEX + 1);
-
-        if !descriptor.borrow().has_wildcard() {
-            // The length of the range should be at most 1
-            if end != start {
-                end = start + 1;
-            }
-        }
 
         Self {
             next_index: start,
@@ -248,6 +247,14 @@ mod test {
         );
         assert_eq!(
             SpkIterator::new_with_range(&no_wildcard_descriptor, 1..=2).next(),
+            None
+        );
+        assert_eq!(
+            SpkIterator::new_with_range(&no_wildcard_descriptor, 10..11).next(),
+            None
+        );
+        assert_eq!(
+            SpkIterator::new_with_range(&no_wildcard_descriptor, 10..=10).next(),
             None
         );
     }
