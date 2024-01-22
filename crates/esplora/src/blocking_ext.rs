@@ -17,7 +17,7 @@ use crate::{anchor_from_status, ASSUME_FINAL_DEPTH};
 ///
 /// [crate-level documentation]: crate
 pub trait EsploraExt {
-    /// Prepare an [`LocalChain`] update with blocks fetched from Esplora.
+    /// Prepare a [`LocalChain`] update with blocks fetched from Esplora.
     ///
     /// * `local_tip` is the previous tip of [`LocalChain::tip`].
     /// * `request_heights` is the block heights that we are interested in fetching from Esplora.

@@ -19,7 +19,7 @@ use crate::{anchor_from_status, ASSUME_FINAL_DEPTH};
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 pub trait EsploraAsyncExt {
-    /// Prepare an [`LocalChain`] update with blocks fetched from Esplora.
+    /// Prepare a [`LocalChain`] update with blocks fetched from Esplora.
     ///
     /// * `local_tip` is the previous tip of [`LocalChain::tip`].
     /// * `request_heights` is the block heights that we are interested in fetching from Esplora.
