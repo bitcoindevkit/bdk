@@ -13,7 +13,7 @@ use core::{
 
 use crate::Append;
 
-const DEFAULT_LOOKAHEAD: u32 = 1_000;
+const DEFAULT_LOOKAHEAD: u32 = 25;
 
 /// [`KeychainTxOutIndex`] controls how script pubkeys are revealed for multiple keychains, and
 /// indexes [`TxOut`]s with them.
