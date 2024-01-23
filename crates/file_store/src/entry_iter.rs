@@ -71,6 +71,16 @@ where
     }
 }
 
+impl<'t, T> Drop for EntryIter<'t, T> {
+    fn drop(&mut self) {
+        // This syncs the underlying file's offset with the buffer's position. This way, we
+        // maintain the correct position to start the next read/write.
+        if let Ok(pos) = self.db_file.stream_position() {
+            let _ = self.db_file.get_mut().seek(io::SeekFrom::Start(pos));
+        }
+    }
+}
+
 /// Error type for [`EntryIter`].
 #[derive(Debug)]
 pub enum IterError {
