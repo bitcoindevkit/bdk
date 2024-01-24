@@ -9,4 +9,4 @@ edition = "2021"
 bdk_chain = { path = "../../crates/chain", features = ["serde"] }
 bdk_bitcoind_rpc = { path = "../../crates/bitcoind_rpc" }
 example_cli = { path = "../example_cli" }
-ctrlc = { version = "^2" }
+ctrlc = { version = "^3" }
