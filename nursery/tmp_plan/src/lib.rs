@@ -17,8 +17,8 @@
 use bdk_chain::{bitcoin, collections::*, miniscript};
 use bitcoin::{
     absolute,
-    address::WitnessVersion,
     bip32::{DerivationPath, Fingerprint, KeySource},
+    blockdata::script::witness_version::WitnessVersion,
     blockdata::transaction::Sequence,
     ecdsa,
     hashes::{hash160, ripemd160, sha256},
@@ -32,7 +32,7 @@ use miniscript::{
 };
 
 pub(crate) fn varint_len(v: usize) -> usize {
-    bitcoin::VarInt(v as u64).len() as usize
+    bitcoin::VarInt(v as u64).size() as usize
 }
 
 mod plan_impls;

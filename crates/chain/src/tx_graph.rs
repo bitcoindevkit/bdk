@@ -300,7 +300,7 @@ impl<A> TxGraph<A> {
     ///
     /// [`insert_txout`]: Self::insert_txout
     pub fn calculate_fee(&self, tx: &Transaction) -> Result<u64, CalculateFeeError> {
-        if tx.is_coin_base() {
+        if tx.is_coinbase() {
             return Ok(0);
         }
 
@@ -312,7 +312,7 @@ impl<A> TxGraph<A> {
                     (sum, missing_outpoints)
                 }
                 Some(txout) => {
-                    sum += txout.value as i64;
+                    sum += txout.value.to_sat() as i64;
                     (sum, missing_outpoints)
                 }
             },
@@ -324,8 +324,8 @@ impl<A> TxGraph<A> {
         let outputs_sum = tx
             .output
             .iter()
-            .map(|txout| txout.value as i64)
-            .sum::<i64>();
+            .map(|txout| txout.value.to_sat())
+            .sum::<u64>() as i64;
 
         let fee = inputs_sum - outputs_sum;
         if fee < 0 {
@@ -773,7 +773,7 @@ impl<A: Anchor> TxGraph<A> {
             TxNodeInternal::Whole(tx) => {
                 // A coinbase tx that is not anchored in the best chain cannot be unconfirmed and
                 // should always be filtered out.
-                if tx.is_coin_base() {
+                if tx.is_coinbase() {
                     return Ok(None);
                 }
                 tx
@@ -1025,7 +1025,7 @@ impl<A: Anchor> TxGraph<A> {
                             txout,
                             chain_position,
                             spent_by,
-                            is_on_coinbase: tx_node.tx.is_coin_base(),
+                            is_on_coinbase: tx_node.tx.is_coinbase(),
                         },
                     )))
                 },
@@ -1128,16 +1128,16 @@ impl<A: Anchor> TxGraph<A> {
             match &txout.chain_position {
                 ChainPosition::Confirmed(_) => {
                     if txout.is_confirmed_and_spendable(chain_tip.height) {
-                        confirmed += txout.txout.value;
+                        confirmed += txout.txout.value.to_sat();
                     } else if !txout.is_mature(chain_tip.height) {
-                        immature += txout.txout.value;
+                        immature += txout.txout.value.to_sat();
                     }
                 }
                 ChainPosition::Unconfirmed(_) => {
                     if trust_predicate(&spk_i, &txout.txout.script_pubkey) {
-                        trusted_pending += txout.txout.value;
+                        trusted_pending += txout.txout.value.to_sat();
                     } else {
-                        untrusted_pending += txout.txout.value;
+                        untrusted_pending += txout.txout.value.to_sat();
                     }
                 }
             }

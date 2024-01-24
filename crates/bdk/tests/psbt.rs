@@ -2,7 +2,7 @@ use bdk::bitcoin::TxIn;
 use bdk::wallet::AddressIndex;
 use bdk::wallet::AddressIndex::New;
 use bdk::{psbt, FeeRate, SignOptions};
-use bitcoin::psbt::PartiallySignedTransaction as Psbt;
+use bitcoin::psbt::Psbt;
 use core::str::FromStr;
 mod common;
 use common::*;

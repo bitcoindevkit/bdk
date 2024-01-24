@@ -91,8 +91,8 @@ async fn main() -> Result<(), anyhow::Error> {
     assert!(finalized);
 
     let tx = psbt.extract_tx();
-    client.broadcast(&tx).await?;
-    println!("Tx broadcasted! Txid: {}", tx.txid());
+    client.broadcast(tx.as_ref().expect("not found")).await?;
+    println!("Tx broadcasted! Txid: {}", tx.expect("not found").txid());
 
     Ok(())
 }

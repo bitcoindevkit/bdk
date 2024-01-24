@@ -366,7 +366,7 @@ fn start_ctrlc_handler() -> Arc<AtomicBool> {
     let flag = Arc::new(AtomicBool::new(false));
     let cloned_flag = flag.clone();
 
-    ctrlc::set_handler(move || cloned_flag.store(true, Ordering::Release));
+    _ = ctrlc::set_handler(move || cloned_flag.store(true, Ordering::Release));
 
     flag
 }

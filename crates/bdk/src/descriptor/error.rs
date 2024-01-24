@@ -40,8 +40,10 @@ pub enum Error {
     Pk(bitcoin::key::Error),
     /// Miniscript error
     Miniscript(miniscript::Error),
-    /// Hex decoding error
-    Hex(bitcoin::hashes::hex::Error),
+    /// Hex Array decoding error
+    HexToArray(bitcoin::hex::HexToArrayError),
+    /// Hex Bytes decoding error
+    HexToBytes(bitcoin::hex::HexToBytesError),
 }
 
 impl From<crate::keys::KeyError> for Error {
@@ -78,7 +80,8 @@ impl fmt::Display for Error {
             Self::Base58(err) => write!(f, "Base58 error: {}", err),
             Self::Pk(err) => write!(f, "Key-related error: {}", err),
             Self::Miniscript(err) => write!(f, "Miniscript error: {}", err),
-            Self::Hex(err) => write!(f, "Hex decoding error: {}", err),
+            Self::HexToArray(err) => write!(f, "HexToArray decoding error: {}", err),
+            Self::HexToBytes(err) => write!(f, "HexToBytes decoding error: {}", err),
         }
     }
 }
@@ -110,9 +113,15 @@ impl From<miniscript::Error> for Error {
     }
 }
 
-impl From<bitcoin::hashes::hex::Error> for Error {
-    fn from(err: bitcoin::hashes::hex::Error) -> Self {
-        Error::Hex(err)
+impl From<bitcoin::hex::HexToArrayError> for Error {
+    fn from(err: bitcoin::hex::HexToArrayError) -> Self {
+        Error::HexToArray(err)
+    }
+}
+
+impl From<bitcoin::hex::HexToBytesError> for Error {
+    fn from(err: bitcoin::hex::HexToBytesError) -> Self {
+        Error::HexToBytes(err)
     }
 }
 

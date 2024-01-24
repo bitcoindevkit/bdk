@@ -57,7 +57,7 @@ pub type MnemonicWithPassphrase = (Mnemonic, Option<String>);
 #[cfg_attr(docsrs, doc(cfg(feature = "keys-bip39")))]
 impl<Ctx: ScriptContext> DerivableKey<Ctx> for Seed {
     fn into_extended_key(self) -> Result<ExtendedKey<Ctx>, KeyError> {
-        Ok(bip32::ExtendedPrivKey::new_master(Network::Bitcoin, &self[..])?.into())
+        Ok(bip32::Xpriv::new_master(Network::Bitcoin, &self[..])?.into())
     }
 
     fn into_descriptor_key(

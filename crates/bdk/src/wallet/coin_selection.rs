@@ -193,7 +193,7 @@ pub struct CoinSelectionResult {
 impl CoinSelectionResult {
     /// The total value of the inputs selected.
     pub fn selected_amount(&self) -> u64 {
-        self.selected.iter().map(|u| u.txout().value).sum()
+        self.selected.iter().map(|u| u.txout().value.to_sat()).sum()
     }
 
     /// The total value of the inputs selected from the local wallet.
@@ -201,7 +201,7 @@ impl CoinSelectionResult {
         self.selected
             .iter()
             .filter_map(|u| match u {
-                Utxo::Local(_) => Some(u.txout().value),
+                Utxo::Local(_) => Some(u.txout().value.to_sat()),
                 _ => None,
             })
             .sum()
@@ -345,7 +345,7 @@ fn select_sorted_utxos(
                     **fee_amount += fee_rate.fee_wu(Weight::from_wu(
                         (TXIN_BASE_WEIGHT + weighted_utxo.satisfaction_weight) as u64,
                     ));
-                    **selected_amount += weighted_utxo.utxo.txout().value;
+                    **selected_amount += weighted_utxo.utxo.txout().value.to_sat();
                     Some(weighted_utxo.utxo)
                 } else {
                     None
@@ -388,7 +388,7 @@ impl OutputGroup {
         let fee = fee_rate.fee_wu(Weight::from_wu(
             (TXIN_BASE_WEIGHT + weighted_utxo.satisfaction_weight) as u64,
         ));
-        let effective_value = weighted_utxo.utxo.txout().value as i64 - fee as i64;
+        let effective_value = weighted_utxo.utxo.txout().value.to_sat() as i64 - fee as i64;
         OutputGroup {
             weighted_utxo,
             fee,
@@ -478,7 +478,7 @@ impl CoinSelectionAlgorithm for BranchAndBoundCoinSelection {
                     .chain(optional_utxos.iter())
                     .fold((0, 0), |(mut fees, mut value), utxo| {
                         fees += utxo.fee;
-                        value += utxo.weighted_utxo.utxo.txout().value;
+                        value += utxo.weighted_utxo.utxo.txout().value.to_sat();
 
                         (fees, value)
                     });

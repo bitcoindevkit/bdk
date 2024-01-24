@@ -1137,7 +1137,7 @@ impl ExtractPolicy for Descriptor<DescriptorPublicKey> {
                 let key_spend_sig =
                     miniscript::Tap::make_signature(tr.internal_key(), signers, build_sat, secp);
 
-                if tr.taptree().is_none() {
+                if tr.tap_tree().is_none() {
                     Ok(Some(key_spend_sig))
                 } else {
                     let mut items = vec![key_spend_sig];

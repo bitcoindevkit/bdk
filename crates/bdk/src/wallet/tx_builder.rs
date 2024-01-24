@@ -48,7 +48,7 @@ use core::cell::RefCell;
 use core::fmt;
 use core::marker::PhantomData;
 
-use bitcoin::psbt::{self, PartiallySignedTransaction as Psbt};
+use bitcoin::psbt::{self, Psbt};
 use bitcoin::{absolute, script::PushBytes, OutPoint, ScriptBuf, Sequence, Transaction, Txid};
 
 use super::coin_selection::{CoinSelectionAlgorithm, DefaultCoinSelectionAlgorithm};

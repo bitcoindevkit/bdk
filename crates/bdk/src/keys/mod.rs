@@ -110,7 +110,7 @@ impl<Ctx: ScriptContext> DescriptorKey<Ctx> {
                 Ok((public, KeyMap::default(), valid_networks))
             }
             DescriptorKey::Secret(secret, valid_networks, _) => {
-                let mut key_map = KeyMap::with_capacity(1);
+                let mut key_map = KeyMap::new();
 
                 let public = secret
                     .to_public(secp)
@@ -315,9 +315,9 @@ pub trait IntoDescriptorKey<Ctx: ScriptContext>: Sized {
 /// Defaults to the [`Legacy`](miniscript::Legacy) context.
 pub enum ExtendedKey<Ctx: ScriptContext = miniscript::Legacy> {
     /// A private extended key, aka an `xprv`
-    Private((bip32::ExtendedPrivKey, PhantomData<Ctx>)),
+    Private((bip32::Xpriv, PhantomData<Ctx>)),
     /// A public extended key, aka an `xpub`
-    Public((bip32::ExtendedPubKey, PhantomData<Ctx>)),
+    Public((bip32::Xpub, PhantomData<Ctx>)),
 }
 
 impl<Ctx: ScriptContext> ExtendedKey<Ctx> {
@@ -331,7 +331,7 @@ impl<Ctx: ScriptContext> ExtendedKey<Ctx> {
 
     /// Transform the [`ExtendedKey`] into an [`ExtendedPrivKey`](bip32::ExtendedPrivKey) for the
     /// given [`Network`], if the key contains the private data
-    pub fn into_xprv(self, network: Network) -> Option<bip32::ExtendedPrivKey> {
+    pub fn into_xprv(self, network: Network) -> Option<bip32::Xpriv> {
         match self {
             ExtendedKey::Private((mut xprv, _)) => {
                 xprv.network = network;
@@ -347,9 +347,9 @@ impl<Ctx: ScriptContext> ExtendedKey<Ctx> {
         self,
         network: bitcoin::Network,
         secp: &Secp256k1<C>,
-    ) -> bip32::ExtendedPubKey {
+    ) -> bip32::Xpub {
         let mut xpub = match self {
-            ExtendedKey::Private((xprv, _)) => bip32::ExtendedPubKey::from_priv(secp, &xprv),
+            ExtendedKey::Private((xprv, _)) => bip32::Xpub::from_priv(secp, &xprv),
             ExtendedKey::Public((xpub, _)) => xpub,
         };
 
@@ -358,14 +358,14 @@ impl<Ctx: ScriptContext> ExtendedKey<Ctx> {
     }
 }
 
-impl<Ctx: ScriptContext> From<bip32::ExtendedPubKey> for ExtendedKey<Ctx> {
-    fn from(xpub: bip32::ExtendedPubKey) -> Self {
+impl<Ctx: ScriptContext> From<bip32::Xpub> for ExtendedKey<Ctx> {
+    fn from(xpub: bip32::Xpub) -> Self {
         ExtendedKey::Public((xpub, PhantomData))
     }
 }
 
-impl<Ctx: ScriptContext> From<bip32::ExtendedPrivKey> for ExtendedKey<Ctx> {
-    fn from(xprv: bip32::ExtendedPrivKey) -> Self {
+impl<Ctx: ScriptContext> From<bip32::Xpriv> for ExtendedKey<Ctx> {
+    fn from(xprv: bip32::Xpriv) -> Self {
         ExtendedKey::Private((xprv, PhantomData))
     }
 }
@@ -520,13 +520,13 @@ impl<Ctx: ScriptContext> DerivableKey<Ctx> for ExtendedKey<Ctx> {
     }
 }
 
-impl<Ctx: ScriptContext> DerivableKey<Ctx> for bip32::ExtendedPubKey {
+impl<Ctx: ScriptContext> DerivableKey<Ctx> for bip32::Xpub {
     fn into_extended_key(self) -> Result<ExtendedKey<Ctx>, KeyError> {
         Ok(self.into())
     }
 }
 
-impl<Ctx: ScriptContext> DerivableKey<Ctx> for bip32::ExtendedPrivKey {
+impl<Ctx: ScriptContext> DerivableKey<Ctx> for bip32::Xpriv {
     fn into_extended_key(self) -> Result<ExtendedKey<Ctx>, KeyError> {
         Ok(self.into())
     }
@@ -670,7 +670,7 @@ where
 {
 }
 
-impl<Ctx: ScriptContext> GeneratableKey<Ctx> for bip32::ExtendedPrivKey {
+impl<Ctx: ScriptContext> GeneratableKey<Ctx> for bip32::Xpriv {
     type Entropy = [u8; 32];
 
     type Options = ();
@@ -681,7 +681,7 @@ impl<Ctx: ScriptContext> GeneratableKey<Ctx> for bip32::ExtendedPrivKey {
         entropy: Self::Entropy,
     ) -> Result<GeneratedKey<Self, Ctx>, Self::Error> {
         // pick a arbitrary network here, but say that we support all of them
-        let xprv = bip32::ExtendedPrivKey::new_master(Network::Bitcoin, entropy.as_ref())?;
+        let xprv = bip32::Xpriv::new_master(Network::Bitcoin, entropy.as_ref())?;
         Ok(GeneratedKey::new(xprv, any_network()))
     }
 }

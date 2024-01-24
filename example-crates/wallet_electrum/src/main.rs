@@ -100,8 +100,8 @@ fn main() -> Result<(), anyhow::Error> {
     assert!(finalized);
 
     let tx = psbt.extract_tx();
-    client.transaction_broadcast(&tx)?;
-    println!("Tx broadcasted! Txid: {}", tx.txid());
+    client.transaction_broadcast(tx.as_ref().expect("not found"))?;
+    println!("Tx broadcasted! Txid: {}", tx?.txid());
 
     Ok(())
 }
