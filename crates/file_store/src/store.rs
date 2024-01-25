@@ -94,7 +94,7 @@ where
         if magic_buf != magic {
             return Err(FileError::InvalidMagicBytes {
                 got: magic_buf,
-                expected: magic,
+                expected: magic.to_vec(),
             });
         }
 
