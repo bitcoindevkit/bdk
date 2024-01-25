@@ -1,7 +1,7 @@
 use bincode::Options;
 use std::{
     fs::File,
-    io::{self, Seek},
+    io::{self, BufReader, Seek},
     marker::PhantomData,
 };
 
@@ -14,8 +14,9 @@ use crate::bincode_options;
 ///
 /// [`next`]: Self::next
 pub struct EntryIter<'t, T> {
-    db_file: Option<&'t mut File>,
-
+    /// Buffered reader around the file
+    db_file: BufReader<&'t mut File>,
+    finished: bool,
     /// The file position for the first read of `db_file`.
     start_pos: Option<u64>,
     types: PhantomData<T>,
@@ -24,8 +25,9 @@ pub struct EntryIter<'t, T> {
 impl<'t, T> EntryIter<'t, T> {
     pub fn new(start_pos: u64, db_file: &'t mut File) -> Self {
         Self {
-            db_file: Some(db_file),
+            db_file: BufReader::new(db_file),
             start_pos: Some(start_pos),
+            finished: false,
             types: PhantomData,
         }
     }
@@ -38,44 +40,44 @@ where
     type Item = Result<T, IterError>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        // closure which reads a single entry starting from `self.pos`
-        let read_one = |f: &mut File, start_pos: Option<u64>| -> Result<Option<T>, IterError> {
-            let pos = match start_pos {
-                Some(pos) => f.seek(io::SeekFrom::Start(pos))?,
-                None => f.stream_position()?,
-            };
+        if self.finished {
+            return None;
+        }
+        (|| {
+            if let Some(start) = self.start_pos.take() {
+                self.db_file.seek(io::SeekFrom::Start(start))?;
+            }
 
-            match bincode_options().deserialize_from(&*f) {
-                Ok(changeset) => {
-                    f.stream_position()?;
-                    Ok(Some(changeset))
-                }
+            let pos_before_read = self.db_file.stream_position()?;
+            match bincode_options().deserialize_from(&mut self.db_file) {
+                Ok(changeset) => Ok(Some(changeset)),
                 Err(e) => {
+                    self.finished = true;
+                    let pos_after_read = self.db_file.stream_position()?;
+                    // allow unexpected EOF if 0 bytes were read
                     if let bincode::ErrorKind::Io(inner) = &*e {
-                        if inner.kind() == io::ErrorKind::UnexpectedEof {
-                            let eof = f.seek(io::SeekFrom::End(0))?;
-                            if pos == eof {
-                                return Ok(None);
-                            }
+                        if inner.kind() == io::ErrorKind::UnexpectedEof
+                            && pos_after_read == pos_before_read
+                        {
+                            return Ok(None);
                         }
                     }
-                    f.seek(io::SeekFrom::Start(pos))?;
+                    self.db_file.seek(io::SeekFrom::Start(pos_before_read))?;
                     Err(IterError::Bincode(*e))
                 }
             }
-        };
-
-        let result = read_one(self.db_file.as_mut()?, self.start_pos.take());
-        if result.is_err() {
-            self.db_file = None;
-        }
-        result.transpose()
+        })()
+        .transpose()
     }
 }
 
-impl From<io::Error> for IterError {
-    fn from(value: io::Error) -> Self {
-        IterError::Io(value)
+impl<'t, T> Drop for EntryIter<'t, T> {
+    fn drop(&mut self) {
+        // This syncs the underlying file's offset with the buffer's position. This way, we
+        // maintain the correct position to start the next read/write.
+        if let Ok(pos) = self.db_file.stream_position() {
+            let _ = self.db_file.get_mut().seek(io::SeekFrom::Start(pos));
+        }
     }
 }
 
@@ -94,6 +96,12 @@ impl core::fmt::Display for IterError {
             IterError::Io(e) => write!(f, "io error trying to read entry {}", e),
             IterError::Bincode(e) => write!(f, "bincode error while reading entry {}", e),
         }
+    }
+}
+
+impl From<io::Error> for IterError {
+    fn from(value: io::Error) -> Self {
+        IterError::Io(value)
     }
 }
 
