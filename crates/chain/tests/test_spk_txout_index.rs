@@ -1,5 +1,7 @@
 use bdk_chain::{indexed_tx_graph::Indexer, SpkTxOutIndex};
-use bitcoin::{absolute, OutPoint, ScriptBuf, Transaction, TxIn, TxOut};
+use bitcoin::{
+    absolute, transaction::Version, Amount, OutPoint, ScriptBuf, Transaction, TxIn, TxOut,
+};
 
 #[test]
 fn spk_txout_sent_and_received() {
@@ -11,11 +13,11 @@ fn spk_txout_sent_and_received() {
     index.insert_spk(1, spk2.clone());
 
     let tx1 = Transaction {
-        version: 0x02,
+        version: bitcoin::transaction::Version(0x02),
         lock_time: absolute::LockTime::ZERO,
         input: vec![],
         output: vec![TxOut {
-            value: 42_000,
+            value: Amount::from_int_btc(42_000),
             script_pubkey: spk1.clone(),
         }],
     };
@@ -30,7 +32,7 @@ fn spk_txout_sent_and_received() {
     );
 
     let tx2 = Transaction {
-        version: 0x1,
+        version: Version(0x1),
         lock_time: absolute::LockTime::ZERO,
         input: vec![TxIn {
             previous_output: OutPoint {
@@ -41,12 +43,12 @@ fn spk_txout_sent_and_received() {
         }],
         output: vec![
             TxOut {
-                value: 20_000,
+                value: Amount::from_int_btc(20_000),
                 script_pubkey: spk2,
             },
             TxOut {
                 script_pubkey: spk1,
-                value: 30_000,
+                value: Amount::from_int_btc(30_000),
             },
         ],
     };
@@ -73,11 +75,11 @@ fn mark_used() {
     assert!(spk_index.is_used(&1));
 
     let tx1 = Transaction {
-        version: 0x02,
+        version: Version(0x02),
         lock_time: absolute::LockTime::ZERO,
         input: vec![],
         output: vec![TxOut {
-            value: 42_000,
+            value: Amount::from_int_btc(42_000),
             script_pubkey: spk1,
         }],
     };

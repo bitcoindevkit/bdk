@@ -9,7 +9,7 @@ use bdk_chain::{
     Append,
 };
 
-use bitcoin::{secp256k1::Secp256k1, OutPoint, ScriptBuf, Transaction, TxOut};
+use bitcoin::{secp256k1::Secp256k1, Amount, OutPoint, ScriptBuf, Transaction, TxOut};
 use miniscript::{Descriptor, DescriptorPublicKey};
 
 #[derive(Clone, Debug, PartialEq, Eq, Ord, PartialOrd)]
@@ -176,14 +176,14 @@ fn test_lookahead() {
                         .at_derivation_index(external_index)
                         .unwrap()
                         .script_pubkey(),
-                    value: 10_000,
+                    value: Amount::from_int_btc(10_000),
                 },
                 TxOut {
                     script_pubkey: internal_desc
                         .at_derivation_index(internal_index)
                         .unwrap()
                         .script_pubkey(),
-                    value: 10_000,
+                    value: Amount::from_int_btc(10_000),
                 },
             ],
             ..common::new_tx(external_index)
@@ -238,7 +238,7 @@ fn test_scan_with_lookahead() {
         let op = OutPoint::new(h!("fake tx"), spk_i);
         let txout = TxOut {
             script_pubkey: spk.clone(),
-            value: 0,
+            value: Amount::from_int_btc(0),
         };
 
         let changeset = txout_index.index_txout(op, &txout);
@@ -264,7 +264,7 @@ fn test_scan_with_lookahead() {
     let op = OutPoint::new(h!("fake tx"), 41);
     let txout = TxOut {
         script_pubkey: spk_41,
-        value: 0,
+        value: Amount::from_int_btc(0),
     };
     let changeset = txout_index.index_txout(op, &txout);
     assert!(changeset.is_empty());

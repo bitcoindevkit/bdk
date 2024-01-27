@@ -3,8 +3,8 @@ use std::collections::HashMap;
 
 use bdk_chain::{tx_graph::TxGraph, BlockId, SpkTxOutIndex};
 use bitcoin::{
-    locktime::absolute::LockTime, secp256k1::Secp256k1, OutPoint, ScriptBuf, Sequence, Transaction,
-    TxIn, TxOut, Txid, Witness,
+    locktime::absolute::LockTime, secp256k1::Secp256k1, transaction::Version, Amount, OutPoint,
+    ScriptBuf, Sequence, Transaction, TxIn, TxOut, Txid, Witness,
 };
 use miniscript::Descriptor;
 
@@ -68,7 +68,7 @@ pub fn init_graph<'a>(
 
     for (bogus_txin_vout, tx_tmp) in tx_templates.into_iter().enumerate() {
         let tx = Transaction {
-            version: 0,
+            version: Version(0),
             lock_time: LockTime::ZERO,
             input: tx_tmp
                 .inputs
@@ -111,11 +111,11 @@ pub fn init_graph<'a>(
                 .iter()
                 .map(|output| match &output.spk_index {
                     None => TxOut {
-                        value: output.value,
+                        value: Amount::from_int_btc(output.value),
                         script_pubkey: ScriptBuf::new(),
                     },
                     Some(index) => TxOut {
-                        value: output.value,
+                        value: Amount::from_int_btc(output.value),
                         script_pubkey: spk_index.spk_at_index(index).unwrap().to_owned(),
                     },
                 })

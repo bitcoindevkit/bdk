@@ -9,7 +9,9 @@ use bdk_chain::{
     local_chain::LocalChain,
     tx_graph, BlockId, ChainPosition, ConfirmationHeightAnchor,
 };
-use bitcoin::{secp256k1::Secp256k1, OutPoint, Script, ScriptBuf, Transaction, TxIn, TxOut};
+use bitcoin::{
+    secp256k1::Secp256k1, Amount, OutPoint, Script, ScriptBuf, Transaction, TxIn, TxOut,
+};
 use miniscript::Descriptor;
 
 /// Ensure [`IndexedTxGraph::insert_relevant_txs`] can successfully index transactions NOT presented
@@ -35,11 +37,11 @@ fn insert_relevant_txs() {
     let tx_a = Transaction {
         output: vec![
             TxOut {
-                value: 10_000,
+                value: Amount::from_int_btc(10_000),
                 script_pubkey: spk_0,
             },
             TxOut {
-                value: 20_000,
+                value: Amount::from_int_btc(20_000),
                 script_pubkey: spk_1,
             },
         ],
@@ -155,7 +157,7 @@ fn test_list_owned_txouts() {
             ..Default::default()
         }],
         output: vec![TxOut {
-            value: 70000,
+            value: Amount::from_int_btc(70000),
             script_pubkey: trusted_spks[0].to_owned(),
         }],
         ..common::new_tx(0)
@@ -164,7 +166,7 @@ fn test_list_owned_txouts() {
     // tx2 is an incoming transaction received at untrusted keychain at block 1.
     let tx2 = Transaction {
         output: vec![TxOut {
-            value: 30000,
+            value: Amount::from_int_btc(30000),
             script_pubkey: untrusted_spks[0].to_owned(),
         }],
         ..common::new_tx(0)
@@ -177,7 +179,7 @@ fn test_list_owned_txouts() {
             ..Default::default()
         }],
         output: vec![TxOut {
-            value: 10000,
+            value: Amount::from_int_btc(10000),
             script_pubkey: trusted_spks[1].to_owned(),
         }],
         ..common::new_tx(0)
@@ -186,7 +188,7 @@ fn test_list_owned_txouts() {
     // tx4 is an external transaction receiving at untrusted keychain, unconfirmed.
     let tx4 = Transaction {
         output: vec![TxOut {
-            value: 20000,
+            value: Amount::from_int_btc(20000),
             script_pubkey: untrusted_spks[1].to_owned(),
         }],
         ..common::new_tx(0)
@@ -195,7 +197,7 @@ fn test_list_owned_txouts() {
     // tx5 is spending tx3 and receiving change at trusted keychain, unconfirmed.
     let tx5 = Transaction {
         output: vec![TxOut {
-            value: 15000,
+            value: Amount::from_int_btc(15000),
             script_pubkey: trusted_spks[2].to_owned(),
         }],
         ..common::new_tx(0)

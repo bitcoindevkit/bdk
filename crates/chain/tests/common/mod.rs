@@ -1,4 +1,5 @@
 mod tx_template;
+use bitcoin::transaction::Version;
 #[allow(unused_imports)]
 pub use tx_template::*;
 
@@ -70,7 +71,7 @@ macro_rules! changeset {
 #[allow(unused)]
 pub fn new_tx(lt: u32) -> bitcoin::Transaction {
     bitcoin::Transaction {
-        version: 0x00,
+        version: Version(0x00),
         lock_time: bitcoin::absolute::LockTime::from_consensus(lt),
         input: vec![],
         output: vec![],
