@@ -5,8 +5,8 @@ use bdk_chain::indexed_tx_graph::Indexer;
 use bdk_chain::{BlockId, ConfirmationTime};
 use bitcoin::hashes::Hash;
 use bitcoin::{
-  Amount,
-    transaction::Version, Address, BlockHash, Network, OutPoint, Transaction, TxIn, TxOut, Txid,
+    transaction::Version, Address, Amount, BlockHash, Network, OutPoint, Transaction, TxIn, TxOut,
+    Txid,
 };
 use std::str::FromStr;
 
