@@ -216,7 +216,7 @@ mod test {
 
     use bdk_chain::{BlockId, ConfirmationTime};
     use bitcoin::hashes::Hash;
-    use bitcoin::{BlockHash, Network, Transaction};
+    use bitcoin::{transaction::Version, BlockHash, Network, Transaction};
 
     use super::*;
     use crate::wallet::Wallet;
@@ -230,7 +230,7 @@ mod test {
         let transaction = Transaction {
             input: vec![],
             output: vec![],
-            version: 0,
+            version: Version(0),
             lock_time: bitcoin::absolute::LockTime::ZERO,
         };
         wallet

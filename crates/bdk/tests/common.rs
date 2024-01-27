@@ -4,7 +4,9 @@ use bdk::{wallet::AddressIndex, KeychainKind, LocalOutput, Wallet};
 use bdk_chain::indexed_tx_graph::Indexer;
 use bdk_chain::{BlockId, ConfirmationTime};
 use bitcoin::hashes::Hash;
-use bitcoin::{Address, BlockHash, Network, OutPoint, Transaction, TxIn, TxOut, Txid};
+use bitcoin::{
+    transaction::Version, Address, BlockHash, Network, OutPoint, Transaction, TxIn, TxOut, Txid,
+};
 use std::str::FromStr;
 
 // Return a fake wallet that appears to be funded for testing.
@@ -24,7 +26,7 @@ pub fn get_funded_wallet_with_change(
         .unwrap();
 
     let tx0 = Transaction {
-        version: 1,
+        version: Version(1),
         lock_time: bitcoin::absolute::LockTime::ZERO,
         input: vec![TxIn {
             previous_output: OutPoint {

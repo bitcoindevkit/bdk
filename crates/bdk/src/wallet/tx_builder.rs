@@ -914,6 +914,7 @@ mod test {
     use bdk_chain::ConfirmationTime;
     use bitcoin::consensus::deserialize;
     use bitcoin::hashes::hex::FromHex;
+    use bitcoin::TxOut;
 
     use super::*;
 
@@ -984,7 +985,7 @@ mod test {
             .unwrap()
         );
 
-        assert_eq!(tx.output[0].value, 800);
+        assert_eq!(tx.output[0].value.to_sat(), 800);
         assert_eq!(tx.output[1].script_pubkey, ScriptBuf::from(vec![0xAA]));
         assert_eq!(
             tx.output[2].script_pubkey,
@@ -1001,7 +1002,7 @@ mod test {
                     txid: bitcoin::Txid::from_slice(&[0; 32]).unwrap(),
                     vout: 0,
                 },
-                txout: Default::default(),
+                txout: TxOut::minimal_non_dust(ScriptBuf::default()),
                 keychain: KeychainKind::External,
                 is_spent: false,
                 confirmation_time: ConfirmationTime::Unconfirmed { last_seen: 0 },
@@ -1012,7 +1013,7 @@ mod test {
                     txid: bitcoin::Txid::from_slice(&[0; 32]).unwrap(),
                     vout: 1,
                 },
-                txout: Default::default(),
+                txout: TxOut::minimal_non_dust(ScriptBuf::default()),
                 keychain: KeychainKind::Internal,
                 is_spent: false,
                 confirmation_time: ConfirmationTime::Confirmed {

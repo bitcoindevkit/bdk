@@ -9,8 +9,8 @@ use bdk_chain::{
 };
 use bitcoin::{
     address::NetworkChecked, block::Header, hash_types::TxMerkleNode, hashes::Hash,
-    secp256k1::rand::random, Block, CompactTarget, OutPoint, ScriptBuf, ScriptHash, Transaction,
-    TxIn, TxOut, WScriptHash,
+    secp256k1::rand::random, transaction::Version, Block, CompactTarget, OutPoint, ScriptBuf,
+    ScriptHash, Transaction, TxIn, TxOut, WScriptHash,
 };
 use bitcoincore_rpc::{
     bitcoincore_rpc_json::{GetBlockTemplateModes, GetBlockTemplateRules},
@@ -59,7 +59,7 @@ impl TestEnv {
         )?;
 
         let txdata = vec![Transaction {
-            version: 1,
+            version: Version(1),
             lock_time: bitcoin::absolute::LockTime::from_height(0)?,
             input: vec![TxIn {
                 previous_output: bitcoin::OutPoint::default(),
@@ -72,7 +72,7 @@ impl TestEnv {
                 witness: bitcoin::Witness::new(),
             }],
             output: vec![TxOut {
-                value: 0,
+                value: Amount::from_int_btc(0),
                 script_pubkey: ScriptBuf::new_p2sh(&ScriptHash::all_zeros()),
             }],
         }];
@@ -473,7 +473,7 @@ fn tx_can_become_unconfirmed_after_reorg() -> anyhow::Result<()> {
 
     // setup addresses
     let addr_to_mine = env.client.get_new_address(None, None)?.assume_checked();
-    let spk_to_track = ScriptBuf::new_v0_p2wsh(&WScriptHash::all_zeros());
+    let spk_to_track = ScriptBuf::new_p2wsh(&WScriptHash::all_zeros());
     let addr_to_track = Address::from_script(&spk_to_track, bitcoin::Network::Regtest)?;
 
     // setup receiver

@@ -717,7 +717,7 @@ mod test {
     use core::str::FromStr;
 
     use bdk_chain::ConfirmationTime;
-    use bitcoin::{OutPoint, ScriptBuf, TxOut};
+    use bitcoin::{Amount, OutPoint, ScriptBuf, TxOut};
 
     use super::*;
     use crate::types::*;
@@ -745,7 +745,7 @@ mod test {
             utxo: Utxo::Local(LocalOutput {
                 outpoint,
                 txout: TxOut {
-                    value,
+                    value: Amount::from_int_btc(value),
                     script_pubkey: ScriptBuf::new(),
                 },
                 keychain: KeychainKind::External,
@@ -808,7 +808,7 @@ mod test {
                     )
                     .unwrap(),
                     txout: TxOut {
-                        value: rng.gen_range(0..200000000),
+                        value: Amount::from_int_btc(rng.gen_range(0..200000000)),
                         script_pubkey: ScriptBuf::new(),
                     },
                     keychain: KeychainKind::External,
@@ -837,7 +837,7 @@ mod test {
                 )
                 .unwrap(),
                 txout: TxOut {
-                    value: utxos_value,
+                    value: Amount::from_int_btc(utxos_value),
                     script_pubkey: ScriptBuf::new(),
                 },
                 keychain: KeychainKind::External,
@@ -854,7 +854,7 @@ mod test {
         utxos.shuffle(&mut rng);
         utxos[..utxos_picked_len]
             .iter()
-            .map(|u| u.utxo.txout().value)
+            .map(|u| u.utxo.txout().value.to_sat())
             .sum()
     }
 
@@ -1043,7 +1043,11 @@ mod test {
     fn test_oldest_first_coin_selection_insufficient_funds_high_fees() {
         let utxos = get_oldest_first_test_utxos();
 
-        let target_amount: u64 = utxos.iter().map(|wu| wu.utxo.txout().value).sum::<u64>() - 50;
+        let target_amount: u64 = utxos
+            .iter()
+            .map(|wu| wu.utxo.txout().value.to_sat())
+            .sum::<u64>()
+            - 50;
         let drain_script = ScriptBuf::default();
 
         OldestFirstCoinSelection
@@ -1138,9 +1142,9 @@ mod test {
         ));
 
         // Defensive assertions, for sanity and in case someone changes the test utxos vector.
-        let amount: u64 = required.iter().map(|u| u.utxo.txout().value).sum();
+        let amount: u64 = required.iter().map(|u| u.utxo.txout().value.to_sat()).sum();
         assert_eq!(amount, 100_000);
-        let amount: u64 = optional.iter().map(|u| u.utxo.txout().value).sum();
+        let amount: u64 = optional.iter().map(|u| u.utxo.txout().value.to_sat()).sum();
         assert!(amount > 150_000);
         let drain_script = ScriptBuf::default();
 

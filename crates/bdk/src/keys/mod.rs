@@ -309,8 +309,8 @@ pub trait IntoDescriptorKey<Ctx: ScriptContext>: Sized {
 
 /// Enum for extended keys that can be either `xprv` or `xpub`
 ///
-/// An instance of [`ExtendedKey`] can be constructed from an [`ExtendedPrivKey`](bip32::ExtendedPrivKey)
-/// or an [`ExtendedPubKey`](bip32::ExtendedPubKey) by using the `From` trait.
+/// An instance of [`ExtendedKey`] can be constructed from an [`Xpriv`](bip32::Xpriv)
+/// or an [`Xpub`](bip32::Xpub) by using the `From` trait.
 ///
 /// Defaults to the [`Legacy`](miniscript::Legacy) context.
 pub enum ExtendedKey<Ctx: ScriptContext = miniscript::Legacy> {
@@ -329,7 +329,7 @@ impl<Ctx: ScriptContext> ExtendedKey<Ctx> {
         }
     }
 
-    /// Transform the [`ExtendedKey`] into an [`ExtendedPrivKey`](bip32::ExtendedPrivKey) for the
+    /// Transform the [`ExtendedKey`] into an [`Xpriv`](bip32::Xpriv) for the
     /// given [`Network`], if the key contains the private data
     pub fn into_xprv(self, network: Network) -> Option<bip32::Xpriv> {
         match self {
@@ -341,7 +341,7 @@ impl<Ctx: ScriptContext> ExtendedKey<Ctx> {
         }
     }
 
-    /// Transform the [`ExtendedKey`] into an [`ExtendedPubKey`](bip32::ExtendedPubKey) for the
+    /// Transform the [`ExtendedKey`] into an [`Xpub`](bip32::Xpub) for the
     /// given [`Network`]
     pub fn into_xpub<C: Signing>(
         self,
@@ -383,8 +383,8 @@ impl<Ctx: ScriptContext> From<bip32::Xpriv> for ExtendedKey<Ctx> {
 ///
 /// ## Examples
 ///
-/// Key types that can be directly converted into an [`ExtendedPrivKey`] or
-/// an [`ExtendedPubKey`] can implement only the required `into_extended_key()` method.
+/// Key types that can be directly converted into an [`Xpriv`] or
+/// an [`Xpub`] can implement only the required `into_extended_key()` method.
 ///
 /// ```
 /// use bdk::bitcoin;
@@ -399,7 +399,7 @@ impl<Ctx: ScriptContext> From<bip32::Xpriv> for ExtendedKey<Ctx> {
 ///
 /// impl<Ctx: ScriptContext> DerivableKey<Ctx> for MyCustomKeyType {
 ///     fn into_extended_key(self) -> Result<ExtendedKey<Ctx>, KeyError> {
-///         let xprv = bip32::ExtendedPrivKey {
+///         let xprv = bip32::Xpriv {
 ///             network: self.network,
 ///             depth: 0,
 ///             parent_fingerprint: bip32::Fingerprint::default(),
@@ -415,7 +415,7 @@ impl<Ctx: ScriptContext> From<bip32::Xpriv> for ExtendedKey<Ctx> {
 ///
 /// Types that don't internally encode the [`Network`] in which they are valid need some extra
 /// steps to override the set of valid networks, otherwise only the network specified in the
-/// [`ExtendedPrivKey`] or [`ExtendedPubKey`] will be considered valid.
+/// [`Xpriv`] or [`Xpub`] will be considered valid.
 ///
 /// ```
 /// use bdk::bitcoin;
@@ -431,7 +431,7 @@ impl<Ctx: ScriptContext> From<bip32::Xpriv> for ExtendedKey<Ctx> {
 ///
 /// impl<Ctx: ScriptContext> DerivableKey<Ctx> for MyCustomKeyType {
 ///     fn into_extended_key(self) -> Result<ExtendedKey<Ctx>, KeyError> {
-///         let xprv = bip32::ExtendedPrivKey {
+///         let xprv = bip32::Xpriv {
 ///             network: bitcoin::Network::Bitcoin, // pick an arbitrary network here
 ///             depth: 0,
 ///             parent_fingerprint: bip32::Fingerprint::default(),
@@ -459,8 +459,8 @@ impl<Ctx: ScriptContext> From<bip32::Xpriv> for ExtendedKey<Ctx> {
 /// ```
 ///
 /// [`DerivationPath`]: (bip32::DerivationPath)
-/// [`ExtendedPrivKey`]: (bip32::ExtendedPrivKey)
-/// [`ExtendedPubKey`]: (bip32::ExtendedPubKey)
+/// [`Xpriv`]: (bip32::Xpriv)
+/// [`Xpub`]: (bip32::Xpub)
 pub trait DerivableKey<Ctx: ScriptContext = miniscript::Legacy>: Sized {
     /// Consume `self` and turn it into an [`ExtendedKey`]
     #[cfg_attr(
@@ -971,7 +971,7 @@ pub mod test {
     #[test]
     fn test_keys_generate_xprv() {
         let generated_xprv: GeneratedKey<_, miniscript::Segwitv0> =
-            bip32::ExtendedPrivKey::generate_with_entropy_default(TEST_ENTROPY).unwrap();
+            bip32::Xpriv::generate_with_entropy_default(TEST_ENTROPY).unwrap();
 
         assert_eq!(generated_xprv.valid_networks, any_network());
         assert_eq!(generated_xprv.to_string(), "xprv9s21ZrQH143K4Xr1cJyqTvuL2FWR8eicgY9boWqMBv8MDVUZ65AXHnzBrK1nyomu6wdcabRgmGTaAKawvhAno1V5FowGpTLVx3jxzE5uk3Q");

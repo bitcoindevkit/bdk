@@ -1147,7 +1147,7 @@ fn test_create_tx_global_xpubs_with_origin() {
         .add_global_xpubs();
     let psbt = builder.finish().unwrap();
 
-    let key = bip32::ExtendedPubKey::from_str("tpubDCKxNyM3bLgbEX13Mcd8mYxbVg9ajDkWXMh29hMWBurKfVmBfWAM96QVP3zaUcN51HvkZ3ar4VwP82kC8JZhhux8vFQoJintSpVBwpFvyU3").unwrap();
+    let key = bip32::Xpub::from_str("tpubDCKxNyM3bLgbEX13Mcd8mYxbVg9ajDkWXMh29hMWBurKfVmBfWAM96QVP3zaUcN51HvkZ3ar4VwP82kC8JZhhux8vFQoJintSpVBwpFvyU3").unwrap();
     let fingerprint = bip32::Fingerprint::from_hex("73756c7f").unwrap();
     let path = bip32::DerivationPath::from_str("m/48'/0'/0'/2'").unwrap();
 
@@ -1428,7 +1428,7 @@ fn test_create_tx_global_xpubs_master_without_origin() {
         .add_global_xpubs();
     let psbt = builder.finish().unwrap();
 
-    let key = bip32::ExtendedPubKey::from_str("tpubD6NzVbkrYhZ4Y55A58Gv9RSNF5hy84b5AJqYy7sCcjFrkcLpPre8kmgfit6kY1Zs3BLgeypTDBZJM222guPpdz7Cup5yzaMu62u7mYGbwFL").unwrap();
+    let key = bip32::Xpub::from_str("tpubD6NzVbkrYhZ4Y55A58Gv9RSNF5hy84b5AJqYy7sCcjFrkcLpPre8kmgfit6kY1Zs3BLgeypTDBZJM222guPpdz7Cup5yzaMu62u7mYGbwFL").unwrap();
     let fingerprint = bip32::Fingerprint::from_hex("997a323b").unwrap();
 
     assert_eq!(psbt.xpub.len(), 1);
@@ -2747,7 +2747,7 @@ fn test_sending_to_bip350_bech32m_address() {
 #[test]
 fn test_get_address() {
     use bdk::descriptor::template::Bip84;
-    let key = bitcoin::bip32::ExtendedPrivKey::from_str("tprv8ZgxMBicQKsPcx5nBGsR63Pe8KnRUqmbJNENAfGftF3yuXoMMoVJJcYeUw5eVkm9WBPjWYt6HMWYJNesB5HaNVBaFc1M6dRjWSYnmewUMYy").unwrap();
+    let key = bitcoin::bip32::Xpriv::from_str("tprv8ZgxMBicQKsPcx5nBGsR63Pe8KnRUqmbJNENAfGftF3yuXoMMoVJJcYeUw5eVkm9WBPjWYt6HMWYJNesB5HaNVBaFc1M6dRjWSYnmewUMYy").unwrap();
     let mut wallet = Wallet::new_no_persist(
         Bip84(key, KeychainKind::External),
         Some(Bip84(key, KeychainKind::Internal)),
@@ -2798,7 +2798,7 @@ fn test_get_address_no_reuse_single_descriptor() {
     use bdk::descriptor::template::Bip84;
     use std::collections::HashSet;
 
-    let key = bitcoin::bip32::ExtendedPrivKey::from_str("tprv8ZgxMBicQKsPcx5nBGsR63Pe8KnRUqmbJNENAfGftF3yuXoMMoVJJcYeUw5eVkm9WBPjWYt6HMWYJNesB5HaNVBaFc1M6dRjWSYnmewUMYy").unwrap();
+    let key = bitcoin::bip32::Xpriv::from_str("tprv8ZgxMBicQKsPcx5nBGsR63Pe8KnRUqmbJNENAfGftF3yuXoMMoVJJcYeUw5eVkm9WBPjWYt6HMWYJNesB5HaNVBaFc1M6dRjWSYnmewUMYy").unwrap();
     let mut wallet =
         Wallet::new_no_persist(Bip84(key, KeychainKind::External), None, Network::Regtest).unwrap();
 
