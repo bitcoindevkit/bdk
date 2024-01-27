@@ -16,6 +16,8 @@ use bitcoin::hashes::Hash;
 use bitcoin::sighash::{EcdsaSighashType, TapSighashType};
 use bitcoin::ScriptBuf;
 use bitcoin::{
+  transaction::Version,
+  Amount,
     absolute, script::PushBytesBuf, taproot::TapNodeHash, Address, OutPoint, Sequence, Transaction,
     TxIn, TxOut, Weight,
 };
@@ -27,12 +29,12 @@ use common::*;
 
 fn receive_output(wallet: &mut Wallet, value: u64, height: ConfirmationTime) -> OutPoint {
     let tx = Transaction {
-        version: 1,
+        version: Version(1),
         lock_time: absolute::LockTime::ZERO,
         input: vec![],
         output: vec![TxOut {
             script_pubkey: wallet.get_address(LastUnused).script_pubkey(),
-            value,
+            value: Amount::from_int_btc(value),
         }],
     };
 
@@ -261,10 +263,10 @@ fn test_list_output() {
     assert_eq!(txos.len(), 2);
     for (op, txo) in txos {
         if op.txid == txid {
-            assert_eq!(txo.txout.value, 50_000);
+            assert_eq!(txo.txout.value.to_sat(), 50_000);
             assert!(!txo.is_spent);
         } else {
-            assert_eq!(txo.txout.value, 76_000);
+            assert_eq!(txo.txout.value.to_sat(), 76_000);
             assert!(txo.is_spent);
         }
     }
@@ -375,7 +377,7 @@ fn test_create_tx_custom_version() {
         .version(42);
     let psbt = builder.finish().unwrap();
 
-    assert_eq!(psbt.unsigned_tx.version, 42);
+    assert_eq!(psbt.unsigned_tx.version, Version(42));
 }
 
 #[test]
@@ -563,7 +565,7 @@ fn test_create_tx_change_policy_no_internal() {
 macro_rules! check_fee {
     ($wallet:expr, $psbt: expr) => {{
         let tx = $psbt.clone().extract_tx();
-        let tx_fee = $wallet.calculate_fee(&tx).ok();
+        let tx_fee = $wallet.calculate_fee(&tx.expect("not found")).ok();
         assert_eq!(tx_fee, $psbt.fee_amount());
         tx_fee
     }};
@@ -579,7 +581,7 @@ fn test_create_tx_drain_wallet_and_drain_to() {
     let fee = check_fee!(wallet, psbt);
 
     assert_eq!(psbt.unsigned_tx.output.len(), 1);
-    assert_eq!(psbt.unsigned_tx.output[0].value, 50_000 - fee.unwrap_or(0));
+    assert_eq!(psbt.unsigned_tx.output[0].value.to_sat(), 50_000 - fee.unwrap_or(0));
 }
 
 #[test]
@@ -607,7 +609,7 @@ fn test_create_tx_drain_wallet_and_drain_to_and_with_recipient() {
         .iter()
         .find(|x| x.script_pubkey == drain_addr.script_pubkey())
         .unwrap();
-    assert_eq!(main_output.value, 20_000,);
+    assert_eq!(main_output.value.to_sat(), 20_000,);
     assert_eq!(drain_output.value, 30_000 - fee.unwrap_or(0));
 }
 

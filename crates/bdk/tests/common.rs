@@ -5,6 +5,7 @@ use bdk_chain::indexed_tx_graph::Indexer;
 use bdk_chain::{BlockId, ConfirmationTime};
 use bitcoin::hashes::Hash;
 use bitcoin::{
+  Amount,
     transaction::Version, Address, BlockHash, Network, OutPoint, Transaction, TxIn, TxOut, Txid,
 };
 use std::str::FromStr;
@@ -38,13 +39,13 @@ pub fn get_funded_wallet_with_change(
             witness: Default::default(),
         }],
         output: vec![TxOut {
-            value: 76_000,
+            value: Amount::from_int_btc(76_000),
             script_pubkey: change_address.script_pubkey(),
         }],
     };
 
     let tx1 = Transaction {
-        version: 1,
+        version: Version(1),
         lock_time: bitcoin::absolute::LockTime::ZERO,
         input: vec![TxIn {
             previous_output: OutPoint {
@@ -57,11 +58,11 @@ pub fn get_funded_wallet_with_change(
         }],
         output: vec![
             TxOut {
-                value: 50_000,
+                value: Amount::from_int_btc(50_000),
                 script_pubkey: change_address.script_pubkey(),
             },
             TxOut {
-                value: 25_000,
+                value: Amount::from_int_btc(25_000),
                 script_pubkey: sendto_address.script_pubkey(),
             },
         ],
