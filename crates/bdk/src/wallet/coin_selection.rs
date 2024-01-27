@@ -1440,9 +1440,9 @@ mod test {
         let utxos = get_test_utxos();
         let drain_script = ScriptBuf::default();
 
-        let (required, optional) = utxos
-            .into_iter()
-            .partition(|u| matches!(u, WeightedUtxo { utxo, .. } if utxo.txout().value < 1000));
+        let (required, optional) = utxos.into_iter().partition(
+            |u| matches!(u, WeightedUtxo { utxo, .. } if utxo.txout().value.to_sat() < 1000),
+        );
 
         let selection = BranchAndBoundCoinSelection::default().coin_select(
             required,
