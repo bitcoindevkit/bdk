@@ -611,7 +611,10 @@ fn test_create_tx_drain_wallet_and_drain_to_and_with_recipient() {
         .find(|x| x.script_pubkey == drain_addr.script_pubkey())
         .unwrap();
     assert_eq!(main_output.value.to_btc() as u64, 20_000,);
-    assert_eq!(drain_output.value.to_btc() as u64, 30_000 - fee.unwrap_or(0));
+    assert_eq!(
+        drain_output.value.to_btc() as u64,
+        30_000 - fee.unwrap_or(0)
+    );
 }
 
 #[test]

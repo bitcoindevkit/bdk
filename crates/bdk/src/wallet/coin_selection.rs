@@ -193,7 +193,10 @@ pub struct CoinSelectionResult {
 impl CoinSelectionResult {
     /// The total value of the inputs selected.
     pub fn selected_amount(&self) -> u64 {
-        self.selected.iter().map(|u| u.txout().value.to_btc() as u64).sum()
+        self.selected
+            .iter()
+            .map(|u| u.txout().value.to_btc() as u64)
+            .sum()
     }
 
     /// The total value of the inputs selected from the local wallet.
@@ -1142,9 +1145,15 @@ mod test {
         ));
 
         // Defensive assertions, for sanity and in case someone changes the test utxos vector.
-        let amount: u64 = required.iter().map(|u| u.utxo.txout().value.to_btc() as u64).sum();
+        let amount: u64 = required
+            .iter()
+            .map(|u| u.utxo.txout().value.to_btc() as u64)
+            .sum();
         assert_eq!(amount, 100_000);
-        let amount: u64 = optional.iter().map(|u| u.utxo.txout().value.to_btc() as u64).sum();
+        let amount: u64 = optional
+            .iter()
+            .map(|u| u.utxo.txout().value.to_btc() as u64)
+            .sum();
         assert!(amount > 150_000);
         let drain_script = ScriptBuf::default();
 
