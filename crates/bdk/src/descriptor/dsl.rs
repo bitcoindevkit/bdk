@@ -276,12 +276,14 @@ macro_rules! parse_tap_tree {
     ( @merge $tree_a:expr, $tree_b:expr) => {{
         use $crate::alloc::sync::Arc;
         use $crate::miniscript::descriptor::TapTree;
+      use std::cmp;
 
         $tree_a
             .and_then(|tree_a| Ok((tree_a, $tree_b?)))
             .and_then(|((a_tree, mut a_keymap, a_networks), (b_tree, b_keymap, b_networks))| {
-                a_keymap.extend(b_keymap.into_iter());
-                Ok((TapTree::Tree(Arc::new(a_tree), Arc::new(b_tree)), a_keymap, $crate::keys::merge_networks(&a_networks, &b_networks)))
+              a_keymap.extend(b_keymap.into_iter());
+              let height = 1 + cmp::max(a_tree.height(), b_tree.height());
+              Ok((TapTree::Tree{left: Arc::new(a_tree), right: Arc::new(b_tree), height}, a_keymap, $crate::keys::merge_networks(&a_networks, &b_networks)))
             })
 
     }};
