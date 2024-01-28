@@ -968,7 +968,7 @@ impl ComputeSighash for Segwitv0 {
         };
 
         Ok((
-            sighash::SighashCache::new(&psbt.unsigned_tx).p2wpkh_signature_hash(
+            sighash::SighashCache::new(&psbt.unsigned_tx).p2wsh_signature_hash(
                 input_index,
                 &script,
                 value,
