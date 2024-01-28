@@ -1,7 +1,7 @@
 [package]
 name = "bdk"
 homepage = "https://bitcoindevkit.org"
-version = "1.0.0-alpha.5"
+version = "1.0.0-alpha.4"
 repository = "https://github.com/bitcoindevkit/bdk"
 documentation = "https://docs.rs/bdk"
 description = "A modern, lightweight, descriptor-based wallet library"
@@ -10,7 +10,7 @@ readme = "README.md"
 license = "MIT OR Apache-2.0"
 authors = ["Bitcoin Dev Kit Developers"]
 edition = "2021"
-rust-version = "1.67"
+rust-version = "1.70"
 
 [dependencies]
 rand = "^0.8"

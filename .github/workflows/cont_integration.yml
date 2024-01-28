@@ -12,7 +12,7 @@ jobs:
         rust:
           - version: stable
             clippy: true
-          - version: 1.67.0 # MSRV
+          - version: 1.70 # MSRV
         features:
           - --no-default-features
           - --all-features
@@ -28,7 +28,7 @@ jobs:
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2.2.1
       - name: Pin dependencies for MSRV
-        if: matrix.rust.version == '1.67.0'
+        if: matrix.rust.version == '1.70'
         run: |
           cargo update -p zip --precise "0.6.2"
           cargo update -p time --precise "0.3.20"

@@ -2,7 +2,7 @@
 name = "bdk_chain"
 version = "0.8.0"
 edition = "2021"
-rust-version = "1.67"
+rust-version = "1.70"
 homepage = "https://bitcoindevkit.org"
 repository = "https://github.com/bitcoindevkit/bdk"
 documentation = "https://docs.rs/bdk_chain"
