@@ -985,7 +985,7 @@ mod test {
             .unwrap()
         );
 
-        assert_eq!(tx.output[0].value.to_sat(), 800);
+        assert_eq!(tx.output[0].value.to_btc() as u64, 800);
         assert_eq!(tx.output[1].script_pubkey, ScriptBuf::from(vec![0xAA]));
         assert_eq!(
             tx.output[2].script_pubkey,

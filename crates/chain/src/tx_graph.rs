@@ -312,7 +312,7 @@ impl<A> TxGraph<A> {
                     (sum, missing_outpoints)
                 }
                 Some(txout) => {
-                    sum += txout.value.to_sat() as i64;
+                    sum += txout.value.to_btc() as u64 as i64;
                     (sum, missing_outpoints)
                 }
             },
@@ -324,7 +324,7 @@ impl<A> TxGraph<A> {
         let outputs_sum = tx
             .output
             .iter()
-            .map(|txout| txout.value.to_sat())
+            .map(|txout| txout.value.to_btc() as u64)
             .sum::<u64>() as i64;
 
         let fee = inputs_sum - outputs_sum;
@@ -1128,16 +1128,16 @@ impl<A: Anchor> TxGraph<A> {
             match &txout.chain_position {
                 ChainPosition::Confirmed(_) => {
                     if txout.is_confirmed_and_spendable(chain_tip.height) {
-                        confirmed += txout.txout.value.to_sat();
+                        confirmed += txout.txout.value.to_btc() as u64;
                     } else if !txout.is_mature(chain_tip.height) {
-                        immature += txout.txout.value.to_sat();
+                        immature += txout.txout.value.to_btc() as u64;
                     }
                 }
                 ChainPosition::Unconfirmed(_) => {
                     if trust_predicate(&spk_i, &txout.txout.script_pubkey) {
-                        trusted_pending += txout.txout.value.to_sat();
+                        trusted_pending += txout.txout.value.to_btc() as u64;
                     } else {
-                        untrusted_pending += txout.txout.value.to_sat();
+                        untrusted_pending += txout.txout.value.to_btc() as u64;
                     }
                 }
             }

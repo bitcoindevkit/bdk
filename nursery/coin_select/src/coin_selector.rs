@@ -112,7 +112,7 @@ impl CoinSelectorOpt {
             target_value: if txouts.is_empty() {
                 None
             } else {
-                Some(txouts.iter().map(|txout| txout.value.to_sat()).sum())
+                Some(txouts.iter().map(|txout| txout.value.to_btc() as u64).sum())
             },
             ..Self::from_weights(
                 base_weight.to_wu() as u32,

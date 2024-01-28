@@ -281,12 +281,12 @@ impl<I: Clone + Ord> SpkTxOutIndex<I> {
 
         for txin in &tx.input {
             if let Some((_, txout)) = self.txout(txin.previous_output) {
-                sent += txout.value.to_sat();
+                sent += txout.value.to_btc() as u64;
             }
         }
         for txout in &tx.output {
             if self.index_of_spk(&txout.script_pubkey).is_some() {
-                received += txout.value.to_sat();
+                received += txout.value.to_btc() as u64;
             }
         }
 

@@ -26,7 +26,7 @@ pub trait IsDust {
 
 impl IsDust for u64 {
     fn is_dust(&self, script: &Script) -> bool {
-        *self < script.dust_value().to_sat()
+        *self < script.dust_value().to_btc() as u64
     }
 }
 

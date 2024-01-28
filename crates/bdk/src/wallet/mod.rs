@@ -1777,7 +1777,7 @@ impl<D> Wallet<D> {
             recipients: tx
                 .output
                 .into_iter()
-                .map(|txout| (txout.script_pubkey, txout.value.to_sat()))
+                .map(|txout| (txout.script_pubkey, txout.value.to_btc() as u64))
                 .collect(),
             utxos: original_utxos,
             bumping_fee: Some(tx_builder::PreviousFee {

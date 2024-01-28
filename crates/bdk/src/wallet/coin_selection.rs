@@ -193,7 +193,7 @@ pub struct CoinSelectionResult {
 impl CoinSelectionResult {
     /// The total value of the inputs selected.
     pub fn selected_amount(&self) -> u64 {
-        self.selected.iter().map(|u| u.txout().value.to_sat()).sum()
+        self.selected.iter().map(|u| u.txout().value.to_btc() as u64).sum()
     }
 
     /// The total value of the inputs selected from the local wallet.
@@ -201,7 +201,7 @@ impl CoinSelectionResult {
         self.selected
             .iter()
             .filter_map(|u| match u {
-                Utxo::Local(_) => Some(u.txout().value.to_sat()),
+                Utxo::Local(_) => Some(u.txout().value.to_btc() as u64),
                 _ => None,
             })
             .sum()
@@ -315,7 +315,7 @@ pub fn decide_change(remaining_amount: u64, fee_rate: FeeRate, drain_script: &Sc
     let drain_val = remaining_amount.saturating_sub(change_fee);
 
     if drain_val.is_dust(drain_script) {
-        let dust_threshold = drain_script.dust_value().to_sat();
+        let dust_threshold = drain_script.dust_value().to_btc() as u64;
         Excess::NoChange {
             dust_threshold,
             change_fee,
@@ -345,7 +345,7 @@ fn select_sorted_utxos(
                     **fee_amount += fee_rate.fee_wu(Weight::from_wu(
                         (TXIN_BASE_WEIGHT + weighted_utxo.satisfaction_weight) as u64,
                     ));
-                    **selected_amount += weighted_utxo.utxo.txout().value.to_sat();
+                    **selected_amount += weighted_utxo.utxo.txout().value.to_btc() as u64;
                     Some(weighted_utxo.utxo)
                 } else {
                     None
@@ -388,7 +388,7 @@ impl OutputGroup {
         let fee = fee_rate.fee_wu(Weight::from_wu(
             (TXIN_BASE_WEIGHT + weighted_utxo.satisfaction_weight) as u64,
         ));
-        let effective_value = weighted_utxo.utxo.txout().value.to_sat() as i64 - fee as i64;
+        let effective_value = weighted_utxo.utxo.txout().value.to_btc() as u64 as i64 - fee as i64;
         OutputGroup {
             weighted_utxo,
             fee,
@@ -478,7 +478,7 @@ impl CoinSelectionAlgorithm for BranchAndBoundCoinSelection {
                     .chain(optional_utxos.iter())
                     .fold((0, 0), |(mut fees, mut value), utxo| {
                         fees += utxo.fee;
-                        value += utxo.weighted_utxo.utxo.txout().value.to_sat();
+                        value += utxo.weighted_utxo.utxo.txout().value.to_btc() as u64;
 
                         (fees, value)
                     });
@@ -854,7 +854,7 @@ mod test {
         utxos.shuffle(&mut rng);
         utxos[..utxos_picked_len]
             .iter()
-            .map(|u| u.utxo.txout().value.to_sat())
+            .map(|u| u.utxo.txout().value.to_btc() as u64)
             .sum()
     }
 
@@ -1045,7 +1045,7 @@ mod test {
 
         let target_amount: u64 = utxos
             .iter()
-            .map(|wu| wu.utxo.txout().value.to_sat())
+            .map(|wu| wu.utxo.txout().value.to_btc() as u64)
             .sum::<u64>()
             - 50;
         let drain_script = ScriptBuf::default();
@@ -1142,9 +1142,9 @@ mod test {
         ));
 
         // Defensive assertions, for sanity and in case someone changes the test utxos vector.
-        let amount: u64 = required.iter().map(|u| u.utxo.txout().value.to_sat()).sum();
+        let amount: u64 = required.iter().map(|u| u.utxo.txout().value.to_btc() as u64).sum();
         assert_eq!(amount, 100_000);
-        let amount: u64 = optional.iter().map(|u| u.utxo.txout().value.to_sat()).sum();
+        let amount: u64 = optional.iter().map(|u| u.utxo.txout().value.to_btc() as u64).sum();
         assert!(amount > 150_000);
         let drain_script = ScriptBuf::default();
 
@@ -1441,7 +1441,7 @@ mod test {
         let drain_script = ScriptBuf::default();
 
         let (required, optional) = utxos.into_iter().partition(
-            |u| matches!(u, WeightedUtxo { utxo, .. } if utxo.txout().value.to_sat() < 1000),
+            |u| matches!(u, WeightedUtxo { utxo, .. } if (utxo.txout().value.to_btc() as u64) < 1000),
         );
 
         let selection = BranchAndBoundCoinSelection::default().coin_select(

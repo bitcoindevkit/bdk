@@ -13,6 +13,6 @@ impl DescriptorExt for Descriptor<DescriptorPublicKey> {
             .expect("descriptor can't have hardened derivation")
             .script_pubkey()
             .dust_value()
-            .to_sat()
+            .to_btc() as u64
     }
 }

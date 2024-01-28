@@ -231,7 +231,7 @@ where
         .iter()
         .map(|(plan, utxo)| {
             WeightedValue::new(
-                utxo.txout.value.to_sat(),
+                utxo.txout.value.to_btc() as u64,
                 plan.expected_weight() as _,
                 plan.witness_version().is_some(),
             )

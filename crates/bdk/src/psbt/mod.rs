@@ -61,12 +61,12 @@ impl PsbtUtils for Psbt {
         let utxos: Option<Vec<TxOut>> = (0..tx.input.len()).map(|i| self.get_utxo_for(i)).collect();
 
         utxos.map(|inputs| {
-            let input_amount: u64 = inputs.iter().map(|i| i.value.to_sat()).sum();
+            let input_amount: u64 = inputs.iter().map(|i| i.value.to_btc() as u64).sum();
             let output_amount: u64 = self
                 .unsigned_tx
                 .output
                 .iter()
-                .map(|o| o.value.to_sat())
+                .map(|o| o.value.to_btc() as u64)
                 .sum();
             input_amount
                 .checked_sub(output_amount)

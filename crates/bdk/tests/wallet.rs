@@ -261,10 +261,10 @@ fn test_list_output() {
     assert_eq!(txos.len(), 2);
     for (op, txo) in txos {
         if op.txid == txid {
-            assert_eq!(txo.txout.value.to_sat(), 50_000);
+            assert_eq!(txo.txout.value.to_btc() as u64, 50_000);
             assert!(!txo.is_spent);
         } else {
-            assert_eq!(txo.txout.value.to_sat(), 76_000);
+            assert_eq!(txo.txout.value.to_btc() as u64, 76_000);
             assert!(txo.is_spent);
         }
     }
@@ -293,12 +293,12 @@ macro_rules! assert_fee_rate {
             let fee_amount = psbt
             .inputs
             .iter()
-            .fold(0, |acc, i| acc + i.witness_utxo.as_ref().unwrap().value.to_sat())
+            .fold(0, |acc, i| acc + i.witness_utxo.as_ref().unwrap().value.to_btc() as u64)
             - psbt
             .unsigned_tx
             .output
             .iter()
-            .fold(0, |acc, o| acc + o.value.to_sat());
+            .fold(0, |acc, o| acc + o.value.to_btc() as u64);
 
         assert_eq!(fee_amount, $fees);
 
@@ -580,7 +580,7 @@ fn test_create_tx_drain_wallet_and_drain_to() {
 
     assert_eq!(psbt.unsigned_tx.output.len(), 1);
     assert_eq!(
-        psbt.unsigned_tx.output[0].value.to_sat(),
+        psbt.unsigned_tx.output[0].value.to_btc() as u64,
         50_000 - fee.unwrap_or(0)
     );
 }
@@ -610,8 +610,8 @@ fn test_create_tx_drain_wallet_and_drain_to_and_with_recipient() {
         .iter()
         .find(|x| x.script_pubkey == drain_addr.script_pubkey())
         .unwrap();
-    assert_eq!(main_output.value.to_sat(), 20_000,);
-    assert_eq!(drain_output.value.to_sat(), 30_000 - fee.unwrap_or(0));
+    assert_eq!(main_output.value.to_btc() as u64, 20_000,);
+    assert_eq!(drain_output.value.to_btc() as u64, 30_000 - fee.unwrap_or(0));
 }
 
 #[test]
@@ -629,7 +629,7 @@ fn test_create_tx_drain_to_and_utxos() {
 
     assert_eq!(psbt.unsigned_tx.output.len(), 1);
     assert_eq!(
-        psbt.unsigned_tx.output[0].value.to_sat(),
+        psbt.unsigned_tx.output[0].value.to_btc() as u64,
         50_000 - fee.unwrap_or(0)
     );
 }
@@ -685,7 +685,7 @@ fn test_create_tx_absolute_fee() {
     assert_eq!(fee.unwrap_or(0), 100);
     assert_eq!(psbt.unsigned_tx.output.len(), 1);
     assert_eq!(
-        psbt.unsigned_tx.output[0].value.to_sat(),
+        psbt.unsigned_tx.output[0].value.to_btc() as u64,
         50_000 - fee.unwrap_or(0)
     );
 }
@@ -705,7 +705,7 @@ fn test_create_tx_absolute_zero_fee() {
     assert_eq!(fee.unwrap_or(0), 0);
     assert_eq!(psbt.unsigned_tx.output.len(), 1);
     assert_eq!(
-        psbt.unsigned_tx.output[0].value.to_sat(),
+        psbt.unsigned_tx.output[0].value.to_btc() as u64,
         50_000 - fee.unwrap_or(0)
     );
 }
@@ -737,9 +737,9 @@ fn test_create_tx_add_change() {
     let fee = check_fee!(wallet, psbt);
 
     assert_eq!(psbt.unsigned_tx.output.len(), 2);
-    assert_eq!(psbt.unsigned_tx.output[0].value.to_sat(), 25_000);
+    assert_eq!(psbt.unsigned_tx.output[0].value.to_btc() as u64, 25_000);
     assert_eq!(
-        psbt.unsigned_tx.output[1].value.to_sat(),
+        psbt.unsigned_tx.output[1].value.to_btc() as u64,
         25_000 - fee.unwrap_or(0)
     );
 }
@@ -754,7 +754,7 @@ fn test_create_tx_skip_change_dust() {
     let fee = check_fee!(wallet, psbt);
 
     assert_eq!(psbt.unsigned_tx.output.len(), 1);
-    assert_eq!(psbt.unsigned_tx.output[0].value.to_sat(), 49_800);
+    assert_eq!(psbt.unsigned_tx.output[0].value.to_btc() as u64, 49_800);
     assert_eq!(fee.unwrap_or(0), 200);
 }
 
@@ -786,11 +786,11 @@ fn test_create_tx_ordering_respected() {
 
     assert_eq!(psbt.unsigned_tx.output.len(), 3);
     assert_eq!(
-        psbt.unsigned_tx.output[0].value.to_sat(),
+        psbt.unsigned_tx.output[0].value.to_btc() as u64,
         10_000 - fee.unwrap_or(0)
     );
-    assert_eq!(psbt.unsigned_tx.output[1].value.to_sat(), 10_000);
-    assert_eq!(psbt.unsigned_tx.output[2].value.to_sat(), 30_000);
+    assert_eq!(psbt.unsigned_tx.output[1].value.to_btc() as u64, 10_000);
+    assert_eq!(psbt.unsigned_tx.output[2].value.to_btc() as u64, 30_000);
 }
 
 #[test]
@@ -1607,7 +1607,7 @@ fn test_bump_fee_reduce_change() {
             .find(|txout| txout.script_pubkey == addr.script_pubkey())
             .unwrap()
             .value
-            .to_sat(),
+            .to_btc() as u64,
         25_000
     );
     assert_eq!(
@@ -1616,7 +1616,7 @@ fn test_bump_fee_reduce_change() {
             .find(|txout| txout.script_pubkey != addr.script_pubkey())
             .unwrap()
             .value
-            .to_sat(),
+            .to_btc() as u64,
         sent_received.1
     );
 
@@ -1649,7 +1649,7 @@ fn test_bump_fee_reduce_change() {
             .find(|txout| txout.script_pubkey == addr.script_pubkey())
             .unwrap()
             .value
-            .to_sat(),
+            .to_btc() as u64,
         25_000
     );
     assert_eq!(
@@ -1658,7 +1658,7 @@ fn test_bump_fee_reduce_change() {
             .find(|txout| txout.script_pubkey != addr.script_pubkey())
             .unwrap()
             .value
-            .to_sat(),
+            .to_btc() as u64,
         sent_received.1
     );
 
@@ -1700,7 +1700,7 @@ fn test_bump_fee_reduce_single_recipient() {
     let tx = &psbt.unsigned_tx;
     assert_eq!(tx.output.len(), 1);
     assert_eq!(
-        tx.output[0].value.to_sat() + fee.unwrap_or(0),
+        tx.output[0].value.to_btc() as u64 + fee.unwrap_or(0),
         sent_received.0
     );
 
@@ -1742,7 +1742,7 @@ fn test_bump_fee_absolute_reduce_single_recipient() {
 
     assert_eq!(tx.output.len(), 1);
     assert_eq!(
-        tx.output[0].value.to_sat() + fee.unwrap_or(0),
+        tx.output[0].value.to_btc() as u64 + fee.unwrap_or(0),
         sent_received.0
     );
 
@@ -1922,7 +1922,7 @@ fn test_bump_fee_add_input() {
             .find(|txout| txout.script_pubkey == addr.script_pubkey())
             .unwrap()
             .value
-            .to_sat(),
+            .to_btc() as u64,
         45_000
     );
     assert_eq!(
@@ -1931,7 +1931,7 @@ fn test_bump_fee_add_input() {
             .find(|txout| txout.script_pubkey != addr.script_pubkey())
             .unwrap()
             .value
-            .to_sat(),
+            .to_btc() as u64,
         sent_received.1
     );
 
@@ -1975,7 +1975,7 @@ fn test_bump_fee_absolute_add_input() {
             .find(|txout| txout.script_pubkey == addr.script_pubkey())
             .unwrap()
             .value
-            .to_sat(),
+            .to_btc() as u64,
         45_000
     );
     assert_eq!(
@@ -1984,7 +1984,7 @@ fn test_bump_fee_absolute_add_input() {
             .find(|txout| txout.script_pubkey != addr.script_pubkey())
             .unwrap()
             .value
-            .to_sat(),
+            .to_btc() as u64,
         sent_received.1
     );
 
@@ -2041,7 +2041,7 @@ fn test_bump_fee_no_change_add_input_and_change() {
             .find(|txout| txout.script_pubkey == addr.script_pubkey())
             .unwrap()
             .value
-            .to_sat(),
+            .to_btc() as u64,
         original_send_all_amount
     );
     assert_eq!(
@@ -2050,7 +2050,7 @@ fn test_bump_fee_no_change_add_input_and_change() {
             .find(|txout| txout.script_pubkey != addr.script_pubkey())
             .unwrap()
             .value
-            .to_sat(),
+            .to_btc() as u64,
         75_000 - original_send_all_amount - fee.unwrap_or(0)
     );
 
@@ -2119,7 +2119,7 @@ fn test_bump_fee_add_input_change_dust() {
             .find(|txout| txout.script_pubkey == addr.script_pubkey())
             .unwrap()
             .value
-            .to_sat(),
+            .to_btc() as u64,
         45_000
     );
 
@@ -2174,7 +2174,7 @@ fn test_bump_fee_force_add_input() {
             .find(|txout| txout.script_pubkey == addr.script_pubkey())
             .unwrap()
             .value
-            .to_sat(),
+            .to_btc() as u64,
         45_000
     );
     assert_eq!(
@@ -2183,7 +2183,7 @@ fn test_bump_fee_force_add_input() {
             .find(|txout| txout.script_pubkey != addr.script_pubkey())
             .unwrap()
             .value
-            .to_sat(),
+            .to_btc() as u64,
         sent_received.1
     );
 
@@ -2237,7 +2237,7 @@ fn test_bump_fee_absolute_force_add_input() {
             .find(|txout| txout.script_pubkey == addr.script_pubkey())
             .unwrap()
             .value
-            .to_sat(),
+            .to_btc() as u64,
         45_000
     );
     assert_eq!(
@@ -2246,7 +2246,7 @@ fn test_bump_fee_absolute_force_add_input() {
             .find(|txout| txout.script_pubkey != addr.script_pubkey())
             .unwrap()
             .value
-            .to_sat(),
+            .to_btc() as u64,
         sent_received.1
     );
 

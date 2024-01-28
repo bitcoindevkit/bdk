@@ -513,7 +513,7 @@ fn tx_can_become_unconfirmed_after_reorg() -> anyhow::Result<()> {
     assert_eq!(
         get_balance(&recv_chain, &recv_graph)?,
         Balance {
-            confirmed: SEND_AMOUNT.to_sat() * ADDITIONAL_COUNT as u64,
+            confirmed: SEND_AMOUNT.to_btc() as u64 * ADDITIONAL_COUNT as u64,
             ..Balance::default()
         },
         "initial balance must be correct",
@@ -527,8 +527,8 @@ fn tx_can_become_unconfirmed_after_reorg() -> anyhow::Result<()> {
         assert_eq!(
             get_balance(&recv_chain, &recv_graph)?,
             Balance {
-                confirmed: SEND_AMOUNT.to_sat() * (ADDITIONAL_COUNT - reorg_count) as u64,
-                trusted_pending: SEND_AMOUNT.to_sat() * reorg_count as u64,
+                confirmed: SEND_AMOUNT.to_btc() as u64 * (ADDITIONAL_COUNT - reorg_count) as u64,
+                trusted_pending: SEND_AMOUNT.to_btc() as u64 * reorg_count as u64,
                 ..Balance::default()
             },
             "reorg_count: {}",
