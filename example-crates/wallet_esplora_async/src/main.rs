@@ -1,7 +1,7 @@
 use std::{io::Write, str::FromStr};
 
 use bdk::{
-    bitcoin::{psbt::ExtractTxError::*, Address, Network},
+    bitcoin::{Address, Network},
     wallet::{AddressIndex, Update},
     SignOptions, Wallet,
 };
@@ -90,11 +90,7 @@ async fn main() -> Result<(), anyhow::Error> {
     let finalized = wallet.sign(&mut psbt, SignOptions::default())?;
     assert!(finalized);
 
-    let tx = psbt.extract_tx().unwrap_or_else(|e| match e {
-        AbsurdFeeRate { tx, .. } => tx,
-        MissingInputValue { tx, .. } => tx,
-        _ => panic!("Encountered an error: {}", e),
-    });
+    let tx = psbt.extract_tx_unchecked_fee_rate();
     client.broadcast(&tx).await?;
     println!("Tx broadcasted! Txid: {}", tx.txid());
 

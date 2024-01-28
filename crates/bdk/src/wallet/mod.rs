@@ -950,7 +950,7 @@ impl<D> Wallet<D> {
     /// # use bdk::Wallet;
     /// # let mut wallet: Wallet<()> = todo!();
     /// # let mut psbt: Psbt = todo!();
-    /// let tx = &psbt.clone().extract_tx();
+    /// let tx = &psbt.clone().extract_tx_unchecked_fee_rate();
     /// let fee = wallet.calculate_fee(tx).expect("fee");
     /// ```
     /// [`insert_txout`]: Self::insert_txout
@@ -981,7 +981,7 @@ impl<D> Wallet<D> {
     /// # use bdk::Wallet;
     /// # let mut wallet: Wallet<()> = todo!();
     /// # let mut psbt: Psbt = todo!();
-    /// let tx = &psbt.clone().extract_tx();
+    /// let tx = &psbt.clone().extract_tx_unchecked_fee_rate();
     /// let fee_rate = wallet.calculate_fee_rate(tx).expect("fee rate");
     /// ```
     /// [`insert_txout`]: Self::insert_txout
@@ -1014,7 +1014,7 @@ impl<D> Wallet<D> {
     /// # use bdk::Wallet;
     /// # let mut wallet: Wallet<()> = todo!();
     /// # let mut psbt: Psbt = todo!();
-    /// let tx = &psbt.clone().extract_tx();
+    /// let tx = &psbt.clone().extract_tx_unchecked_fee_rate();
     /// let (sent, received) = wallet.sent_and_received(tx);
     /// ```
     pub fn sent_and_received(&self, tx: &Transaction) -> (u64, u64) {
@@ -1650,7 +1650,7 @@ impl<D> Wallet<D> {
     ///     builder.finish()?
     /// };
     /// let _ = wallet.sign(&mut psbt, SignOptions::default())?;
-    /// let tx = psbt.extract_tx();
+    /// let tx = psbt.extract_tx_unchecked_fee_rate();
     /// // broadcast tx but it's taking too long to confirm so we want to bump the fee
     /// let mut psbt =  {
     ///     let mut builder = wallet.build_fee_bump(tx.txid())?;
@@ -1660,7 +1660,7 @@ impl<D> Wallet<D> {
     /// };
     ///
     /// let _ = wallet.sign(&mut psbt, SignOptions::default())?;
-    /// let fee_bumped_tx = psbt.extract_tx();
+    /// let fee_bumped_tx = psbt.extract_tx_unchecked_fee_rate();
     /// // broadcast fee_bumped_tx to replace original
     /// # Ok::<(), anyhow::Error>(())
     /// ```

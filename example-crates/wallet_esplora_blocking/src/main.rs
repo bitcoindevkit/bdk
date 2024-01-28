@@ -90,9 +90,9 @@ fn main() -> Result<(), anyhow::Error> {
     let finalized = wallet.sign(&mut psbt, SignOptions::default())?;
     assert!(finalized);
 
-    let tx = psbt.extract_tx();
-    client.broadcast(tx.as_ref().expect("not found"))?;
-    println!("Tx broadcasted! Txid: {}", tx?.txid());
+    let tx = psbt.extract_tx_unchecked_fee_rate();
+    client.broadcast(&tx)?;
+    println!("Tx broadcasted! Txid: {}", tx.txid());
 
     Ok(())
 }
