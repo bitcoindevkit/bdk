@@ -81,7 +81,7 @@ impl From<ChainPosition<ConfirmationTimeHeightAnchor>> for ConfirmationTime {
                 height: a.confirmation_height,
                 time: a.confirmation_time,
             },
-            ChainPosition::Unconfirmed(_) => Self::Unconfirmed { last_seen: 0 },
+            ChainPosition::Unconfirmed(last_seen) => Self::Unconfirmed { last_seen },
         }
     }
 }
