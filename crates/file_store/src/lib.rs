@@ -13,14 +13,14 @@ pub(crate) fn bincode_options() -> impl bincode::Options {
 
 /// Error that occurs due to problems encountered with the file.
 #[derive(Debug)]
-pub enum FileError<'a> {
+pub enum FileError {
     /// IO error, this may mean that the file is too short.
     Io(io::Error),
     /// Magic bytes do not match what is expected.
-    InvalidMagicBytes { got: Vec<u8>, expected: &'a [u8] },
+    InvalidMagicBytes { got: Vec<u8>, expected: Vec<u8> },
 }
 
-impl<'a> core::fmt::Display for FileError<'a> {
+impl core::fmt::Display for FileError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::Io(e) => write!(f, "io error trying to read file: {}", e),
@@ -33,10 +33,10 @@ impl<'a> core::fmt::Display for FileError<'a> {
     }
 }
 
-impl<'a> From<io::Error> for FileError<'a> {
+impl From<io::Error> for FileError {
     fn from(value: io::Error) -> Self {
         Self::Io(value)
     }
 }
 
-impl<'a> std::error::Error for FileError<'a> {}
+impl std::error::Error for FileError {}
