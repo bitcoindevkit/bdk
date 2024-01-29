@@ -85,20 +85,20 @@ impl EsploraAsyncExt for esplora_client::AsyncClient {
         local_tip: CheckPoint,
         request_heights: impl IntoIterator<IntoIter = impl Iterator<Item = u32> + Send> + Send,
     ) -> Result<local_chain::Update, Error> {
-        let new_tip_height = self.get_height().await?;
-
         // Atomically fetch latest blocks from Esplora. This way, we avoid creating an update with
         // an inconsistent set of blocks (assuming that a reorg depth cannot be greater than the
         // latest blocks fetched).
-        let mut fetched_blocks = {
-            let heights = (0..=new_tip_height).rev();
-            let hashes = self
-                .get_blocks(Some(new_tip_height))
-                .await?
-                .into_iter()
-                .map(|b| b.id);
-            heights.zip(hashes).collect::<BTreeMap<u32, BlockHash>>()
-        };
+        let mut fetched_blocks = self
+            .get_blocks(None)
+            .await?
+            .into_iter()
+            .map(|b| (b.time.height, b.id))
+            .collect::<BTreeMap<u32, BlockHash>>();
+        let new_tip_height = fetched_blocks
+            .keys()
+            .last()
+            .copied()
+            .expect("must have atleast one block");
 
         // fetch blocks of heights that the caller is interested in, reusing latest blocks that are
         // already fetched.
