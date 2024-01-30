@@ -110,9 +110,13 @@ enum RpcCommands {
 
 fn main() -> anyhow::Result<()> {
     let start = Instant::now();
-
-    let (args, keymap, index, db, init_changeset) =
-        example_cli::init::<RpcCommands, RpcArgs, ChangeSet>(DB_MAGIC, DB_PATH)?;
+    let example_cli::Init {
+        args,
+        keymap,
+        index,
+        db,
+        init_changeset,
+    } = example_cli::init::<RpcCommands, RpcArgs, ChangeSet>(DB_MAGIC, DB_PATH)?;
     println!(
         "[{:>10}s] loaded initial changeset from db",
         start.elapsed().as_secs_f32()

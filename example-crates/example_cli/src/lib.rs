@@ -656,19 +656,26 @@ where
     }
 }
 
-// Alias the `Result` of `init`
-pub type InitialState<CS, S, C> = (
-    Args<CS, S>,
-    KeyMap,
-    KeychainTxOutIndex<Keychain>,
-    Mutex<Database<C>>,
-    C,
-);
+/// The initial state returned by [`init`].
+pub struct Init<CS: clap::Subcommand, S: clap::Args, C> {
+    /// Arguments parsed by the cli.
+    pub args: Args<CS, S>,
+    /// Descriptor keymap.
+    pub keymap: KeyMap,
+    /// Keychain-txout index.
+    pub index: KeychainTxOutIndex<Keychain>,
+    /// Persistence backend.
+    pub db: Mutex<Database<C>>,
+    /// Initial changeset.
+    pub init_changeset: C,
+}
 
+/// Parses command line arguments and initializes all components, creating
+/// a file store with the given parameters, or loading one if it exists.
 pub fn init<CS: clap::Subcommand, S: clap::Args, C>(
     db_magic: &[u8],
     db_default_path: &str,
-) -> anyhow::Result<InitialState<CS, S, C>>
+) -> anyhow::Result<Init<CS, S, C>>
 where
     C: Default + Append + Serialize + DeserializeOwned,
 {
@@ -702,11 +709,11 @@ where
 
     let init_changeset = db_backend.load_from_persistence()?.unwrap_or_default();
 
-    Ok((
+    Ok(Init {
         args,
         keymap,
         index,
-        Mutex::new(Database::new(db_backend)),
+        db: Mutex::new(Database::new(db_backend)),
         init_changeset,
-    ))
+    })
 }

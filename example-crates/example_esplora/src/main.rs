@@ -99,8 +99,13 @@ pub struct ScanOptions {
 }
 
 fn main() -> anyhow::Result<()> {
-    let (args, keymap, index, db, init_changeset) =
-        example_cli::init::<EsploraCommands, EsploraArgs, ChangeSet>(DB_MAGIC, DB_PATH)?;
+    let example_cli::Init {
+        args,
+        keymap,
+        index,
+        db,
+        init_changeset,
+    } = example_cli::init::<EsploraCommands, EsploraArgs, ChangeSet>(DB_MAGIC, DB_PATH)?;
 
     let genesis_hash = genesis_block(args.network).block_hash();
 
