@@ -24,6 +24,12 @@ pub trait EsploraExt {
     ///
     /// The result of this method can be applied to [`LocalChain::apply_update`].
     ///
+    /// ## Consistency
+    ///
+    /// The chain update returned is guaranteed to be consistent as long as there is not a *large* re-org
+    /// during the call. The size of re-org we can tollerate is server dependent but will be at
+    /// least 10.
+    ///
     /// [`LocalChain`]: bdk_chain::local_chain::LocalChain
     /// [`LocalChain::tip`]: bdk_chain::local_chain::LocalChain::tip
     /// [`LocalChain::apply_update`]: bdk_chain::local_chain::LocalChain::apply_update
@@ -78,9 +84,8 @@ impl EsploraExt for esplora_client::BlockingClient {
         local_tip: CheckPoint,
         request_heights: impl IntoIterator<Item = u32>,
     ) -> Result<local_chain::Update, Error> {
-        // Atomically fetch latest blocks from Esplora. This way, we avoid creating an update with
-        // an inconsistent set of blocks (assuming that a reorg depth cannot be greater than the
-        // latest blocks fetched).
+        // Fetch latest N (server dependent) blocks from Esplora. The server guarantees these are
+        // consistent.
         let mut fetched_blocks = self
             .get_blocks(None)?
             .into_iter()
@@ -101,6 +106,10 @@ impl EsploraExt for esplora_client::BlockingClient {
             }
             // only fetch what is missing
             if let btree_map::Entry::Vacant(entry) = fetched_blocks.entry(height) {
+                // ❗The return value of `get_block_hash` is not strictly guaranteed to be consistent
+                // with the chain at the time of `get_blocks` above (there could have been a deep
+                // re-org). Since `get_blocks` returns 10 (or so) blocks we are assuming that it's
+                // not possible to have a re-org deeper than that.
                 entry.insert(self.get_block_hash(height)?);
             }
         }
