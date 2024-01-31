@@ -1,6 +1,6 @@
 [package]
 name = "bdk_electrum"
-version = "0.6.0"
+version = "0.7.0"
 edition = "2021"
 homepage = "https://bitcoindevkit.org"
 repository = "https://github.com/bitcoindevkit/bdk"
@@ -12,6 +12,6 @@ readme = "README.md"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-bdk_chain = { path = "../chain", version = "0.8.0", default-features = false }
+bdk_chain = { path = "../chain", version = "0.9.0", default-features = false }
 electrum-client = { version = "0.18" }
 #rustls = { version = "=0.21.1", optional = true, features = ["dangerous_configuration"] }
