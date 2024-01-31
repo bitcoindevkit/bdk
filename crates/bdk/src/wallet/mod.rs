@@ -1972,11 +1972,26 @@ impl<D> Wallet<D> {
                             if sign_options.remove_partial_sigs {
                                 psbt_input.partial_sigs.clear();
                             }
+                            if sign_options.remove_taproot_extras {
+                                // We just constructed the final witness, clear these fields.
+                                psbt_input.tap_key_sig = None;
+                                psbt_input.tap_script_sigs.clear();
+                                psbt_input.tap_scripts.clear();
+                                psbt_input.tap_key_origins.clear();
+                                psbt_input.tap_internal_key = None;
+                                psbt_input.tap_merkle_root = None;
+                            }
                         }
                         Err(_) => finished = false,
                     }
                 }
                 None => finished = false,
+            }
+        }
+
+        if finished && sign_options.remove_taproot_extras {
+            for output in &mut psbt.outputs {
+                output.tap_key_origins.clear();
             }
         }
 

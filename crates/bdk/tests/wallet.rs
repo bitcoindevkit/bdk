@@ -2814,6 +2814,32 @@ fn test_get_address_no_reuse_single_descriptor() {
 }
 
 #[test]
+fn test_taproot_remove_tapfields_after_finalize_sign_option() {
+    let (mut wallet, _) = get_funded_wallet(get_test_tr_with_taptree());
+
+    let addr = wallet.get_address(New);
+    let mut builder = wallet.build_tx();
+    builder.drain_to(addr.script_pubkey()).drain_wallet();
+    let mut psbt = builder.finish().unwrap();
+    let finalized = wallet.sign(&mut psbt, SignOptions::default()).unwrap();
+    assert!(finalized);
+
+    // removes tap_* from inputs
+    for input in &psbt.inputs {
+        assert!(input.tap_key_sig.is_none());
+        assert!(input.tap_script_sigs.is_empty());
+        assert!(input.tap_scripts.is_empty());
+        assert!(input.tap_key_origins.is_empty());
+        assert!(input.tap_internal_key.is_none());
+        assert!(input.tap_merkle_root.is_none());
+    }
+    // removes key origins from outputs
+    for output in &psbt.outputs {
+        assert!(output.tap_key_origins.is_empty());
+    }
+}
+
+#[test]
 fn test_taproot_psbt_populate_tap_key_origins() {
     let (mut wallet, _) = get_funded_wallet(get_test_tr_single_sig_xprv());
     let addr = wallet.get_address(AddressIndex::New);
