@@ -103,8 +103,15 @@ type ChangeSet = (
 );
 
 fn main() -> anyhow::Result<()> {
-    let (args, keymap, index, db, (disk_local_chain, disk_tx_graph)) =
-        example_cli::init::<ElectrumCommands, ElectrumArgs, ChangeSet>(DB_MAGIC, DB_PATH)?;
+    let example_cli::Init {
+        args,
+        keymap,
+        index,
+        db,
+        init_changeset,
+    } = example_cli::init::<ElectrumCommands, ElectrumArgs, ChangeSet>(DB_MAGIC, DB_PATH)?;
+
+    let (disk_local_chain, disk_tx_graph) = init_changeset;
 
     let graph = Mutex::new({
         let mut graph = IndexedTxGraph::new(index);

@@ -35,24 +35,16 @@ pub trait PsbtUtils {
 }
 
 impl PsbtUtils for Psbt {
-    #[allow(clippy::all)] // We want to allow `manual_map` but it is too new.
     fn get_utxo_for(&self, input_index: usize) -> Option<TxOut> {
         let tx = &self.unsigned_tx;
+        let input = self.inputs.get(input_index)?;
 
-        if input_index >= tx.input.len() {
-            return None;
-        }
-
-        if let Some(input) = self.inputs.get(input_index) {
-            if let Some(wit_utxo) = &input.witness_utxo {
-                Some(wit_utxo.clone())
-            } else if let Some(in_tx) = &input.non_witness_utxo {
-                Some(in_tx.output[tx.input[input_index].previous_output.vout as usize].clone())
-            } else {
-                None
-            }
-        } else {
-            None
+        match (&input.witness_utxo, &input.non_witness_utxo) {
+            (Some(_), _) => input.witness_utxo.clone(),
+            (_, Some(_)) => input.non_witness_utxo.as_ref().map(|in_tx| {
+                in_tx.output[tx.input[input_index].previous_output.vout as usize].clone()
+            }),
+            _ => None,
         }
     }
 

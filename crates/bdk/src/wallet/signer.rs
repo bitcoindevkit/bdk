@@ -820,7 +820,6 @@ pub enum TapLeavesOptions {
     None,
 }
 
-#[allow(clippy::derivable_impls)]
 impl Default for SignOptions {
     fn default() -> Self {
         SignOptions {

@@ -12,7 +12,7 @@
 //! Wallet
 //!
 //! This module defines the [`Wallet`].
-use crate::collections::{BTreeMap, HashMap, HashSet};
+use crate::collections::{BTreeMap, HashMap};
 use alloc::{
     boxed::Box,
     string::{String, ToString},
@@ -1518,15 +1518,8 @@ impl<D> Wallet<D> {
             return Err(CreateTxError::ChangePolicyDescriptor);
         }
 
-        let (required_utxos, optional_utxos) = self.preselect_utxos(
-            params.change_policy,
-            &params.unspendable,
-            params.utxos.clone(),
-            params.drain_wallet,
-            params.manually_selected_only,
-            params.bumping_fee.is_some(), // we mandate confirmed transactions if we're bumping the fee
-            Some(current_height.to_consensus_u32()),
-        );
+        let (required_utxos, optional_utxos) =
+            self.preselect_utxos(&params, Some(current_height.to_consensus_u32()));
 
         // get drain script
         let drain_script = match params.drain_to {
@@ -2063,17 +2056,26 @@ impl<D> Wallet<D> {
 
     /// Given the options returns the list of utxos that must be used to form the
     /// transaction and any further that may be used if needed.
-    #[allow(clippy::too_many_arguments)]
     fn preselect_utxos(
         &self,
-        change_policy: tx_builder::ChangeSpendPolicy,
-        unspendable: &HashSet<OutPoint>,
-        manually_selected: Vec<WeightedUtxo>,
-        must_use_all_available: bool,
-        manual_only: bool,
-        must_only_use_confirmed_tx: bool,
+        params: &TxParams,
         current_height: Option<u32>,
     ) -> (Vec<WeightedUtxo>, Vec<WeightedUtxo>) {
+        let TxParams {
+            change_policy,
+            unspendable,
+            utxos,
+            drain_wallet,
+            manually_selected_only,
+            bumping_fee,
+            ..
+        } = params;
+
+        let manually_selected = utxos.clone();
+        // we mandate confirmed transactions if we're bumping the fee
+        let must_only_use_confirmed_tx = bumping_fee.is_some();
+        let must_use_all_available = *drain_wallet;
+
         let chain_tip = self.chain.tip().block_id();
         //    must_spend <- manually selected utxos
         //    may_spend  <- all other available utxos
@@ -2088,7 +2090,7 @@ impl<D> Wallet<D> {
 
         // NOTE: we are intentionally ignoring `unspendable` here. i.e manual
         // selection overrides unspendable.
-        if manual_only {
+        if *manually_selected_only {
             return (must_spend, vec![]);
         }
 
@@ -2290,9 +2292,6 @@ impl<D> Wallet<D> {
     ) -> Result<(), MiniscriptPsbtError> {
         // We need to borrow `psbt` mutably within the loops, so we have to allocate a vec for all
         // the input utxos and outputs
-        //
-        // Clippy complains that the collect is not required, but that's wrong
-        #[allow(clippy::needless_collect)]
         let utxos = (0..psbt.inputs.len())
             .filter_map(|i| psbt.get_utxo_for(i).map(|utxo| (true, i, utxo)))
             .chain(
