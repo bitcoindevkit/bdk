@@ -1546,6 +1546,9 @@ impl<D> Wallet<D> {
             }
         };
 
+        let (required_utxos, optional_utxos) =
+            coin_selection::filter_duplicates(required_utxos, optional_utxos);
+
         let coin_selection = coin_selection.coin_select(
             required_utxos,
             optional_utxos,
