@@ -97,8 +97,8 @@ impl EsploraExt for esplora_client::BlockingClient {
             .copied()
             .expect("must atleast have one block");
 
-        // fetch blocks of heights that the caller is interested in, reusing latest blocks that are
-        // already fetched.
+        // Fetch blocks of heights that the caller is interested in, skipping blocks that are
+        // already fetched when constructing `fetched_blocks`.
         for height in request_heights {
             // do not fetch blocks higher than remote tip
             if height > new_tip_height {
@@ -114,7 +114,8 @@ impl EsploraExt for esplora_client::BlockingClient {
             }
         }
 
-        // Ensure `fetched_blocks` can create an update that connects with the original chain.
+        // Ensure `fetched_blocks` can create an update that connects with the original chain by
+        // finding a "Point of Agreement".
         for (height, local_hash) in local_tip.iter().map(|cp| (cp.height(), cp.hash())) {
             if height > new_tip_height {
                 continue;
