@@ -2,14 +2,14 @@ use async_trait::async_trait;
 use bdk_chain::collections::btree_map;
 use bdk_chain::{
     bitcoin::{BlockHash, OutPoint, ScriptBuf, Txid},
-    collections::{BTreeMap, BTreeSet},
+    collections::BTreeMap,
     local_chain::{self, CheckPoint},
     BlockId, ConfirmationTimeHeightAnchor, TxGraph,
 };
 use esplora_client::{Error, TxStatus};
 use futures::{stream::FuturesOrdered, TryStreamExt};
 
-use crate::{anchor_from_status, ASSUME_FINAL_DEPTH};
+use crate::anchor_from_status;
 
 /// Trait to extend the functionality of [`esplora_client::AsyncClient`].
 ///
@@ -25,6 +25,12 @@ pub trait EsploraAsyncExt {
     /// * `request_heights` is the block heights that we are interested in fetching from Esplora.
     ///
     /// The result of this method can be applied to [`LocalChain::apply_update`].
+    ///
+    /// ## Consistency
+    ///
+    /// The chain update returned is guaranteed to be consistent as long as there is not a *large* re-org
+    /// during the call. The size of re-org we can tollerate is server dependent but will be at
+    /// least 10.
     ///
     /// [`LocalChain`]: bdk_chain::local_chain::LocalChain
     /// [`LocalChain::tip`]: bdk_chain::local_chain::LocalChain::tip
@@ -85,21 +91,22 @@ impl EsploraAsyncExt for esplora_client::AsyncClient {
         local_tip: CheckPoint,
         request_heights: impl IntoIterator<IntoIter = impl Iterator<Item = u32> + Send> + Send,
     ) -> Result<local_chain::Update, Error> {
-        let request_heights = request_heights.into_iter().collect::<BTreeSet<_>>();
-        let new_tip_height = self.get_height().await?;
+        // Fetch latest N (server dependent) blocks from Esplora. The server guarantees these are
+        // consistent.
+        let mut fetched_blocks = self
+            .get_blocks(None)
+            .await?
+            .into_iter()
+            .map(|b| (b.time.height, b.id))
+            .collect::<BTreeMap<u32, BlockHash>>();
+        let new_tip_height = fetched_blocks
+            .keys()
+            .last()
+            .copied()
+            .expect("must have atleast one block");
 
-        // atomically fetch blocks from esplora
-        let mut fetched_blocks = {
-            let heights = (0..=new_tip_height).rev();
-            let hashes = self
-                .get_blocks(Some(new_tip_height))
-                .await?
-                .into_iter()
-                .map(|b| b.id);
-            heights.zip(hashes).collect::<BTreeMap<u32, BlockHash>>()
-        };
-
-        // fetch heights that the caller is interested in
+        // Fetch blocks of heights that the caller is interested in, skipping blocks that are
+        // already fetched when constructing `fetched_blocks`.
         for height in request_heights {
             // do not fetch blocks higher than remote tip
             if height > new_tip_height {
@@ -107,81 +114,37 @@ impl EsploraAsyncExt for esplora_client::AsyncClient {
             }
             // only fetch what is missing
             if let btree_map::Entry::Vacant(entry) = fetched_blocks.entry(height) {
-                let hash = self.get_block_hash(height).await?;
-                entry.insert(hash);
+                // ❗The return value of `get_block_hash` is not strictly guaranteed to be consistent
+                // with the chain at the time of `get_blocks` above (there could have been a deep
+                // re-org). Since `get_blocks` returns 10 (or so) blocks we are assuming that it's
+                // not possible to have a re-org deeper than that.
+                entry.insert(self.get_block_hash(height).await?);
             }
         }
 
-        // find the earliest point of agreement between local chain and fetched chain
-        let earliest_agreement_cp = {
-            let mut earliest_agreement_cp = Option::<CheckPoint>::None;
-
-            let local_tip_height = local_tip.height();
-            for local_cp in local_tip.iter() {
-                let local_block = local_cp.block_id();
-
-                // the updated hash (block hash at this height after the update), can either be:
-                // 1. a block that already existed in `fetched_blocks`
-                // 2. a block that exists locally and at least has a depth of ASSUME_FINAL_DEPTH
-                // 3. otherwise we can freshly fetch the block from remote, which is safe as it
-                //    is guaranteed that this would be at or below ASSUME_FINAL_DEPTH from the
-                //    remote tip
-                let updated_hash = match fetched_blocks.entry(local_block.height) {
-                    btree_map::Entry::Occupied(entry) => *entry.get(),
-                    btree_map::Entry::Vacant(entry) => *entry.insert(
-                        if local_tip_height - local_block.height >= ASSUME_FINAL_DEPTH {
-                            local_block.hash
-                        } else {
-                            self.get_block_hash(local_block.height).await?
-                        },
-                    ),
-                };
-
-                // since we may introduce blocks below the point of agreement, we cannot break
-                // here unconditionally - we only break if we guarantee there are no new heights
-                // below our current local checkpoint
-                if local_block.hash == updated_hash {
-                    earliest_agreement_cp = Some(local_cp);
-
-                    let first_new_height = *fetched_blocks
-                        .keys()
-                        .next()
-                        .expect("must have at least one new block");
-                    if first_new_height >= local_block.height {
-                        break;
-                    }
-                }
+        // Ensure `fetched_blocks` can create an update that connects with the original chain by
+        // finding a "Point of Agreement".
+        for (height, local_hash) in local_tip.iter().map(|cp| (cp.height(), cp.hash())) {
+            if height > new_tip_height {
+                continue;
             }
 
-            earliest_agreement_cp
-        };
-
-        let tip = {
-            // first checkpoint to use for the update chain
-            let first_cp = match earliest_agreement_cp {
-                Some(cp) => cp,
-                None => {
-                    let (&height, &hash) = fetched_blocks
-                        .iter()
-                        .next()
-                        .expect("must have at least one new block");
-                    CheckPoint::new(BlockId { height, hash })
+            let fetched_hash = match fetched_blocks.entry(height) {
+                btree_map::Entry::Occupied(entry) => *entry.get(),
+                btree_map::Entry::Vacant(entry) => {
+                    *entry.insert(self.get_block_hash(height).await?)
                 }
             };
-            // transform fetched chain into the update chain
-            fetched_blocks
-                // we exclude anything at or below the first cp of the update chain otherwise
-                // building the chain will fail
-                .split_off(&(first_cp.height() + 1))
-                .into_iter()
-                .map(|(height, hash)| BlockId { height, hash })
-                .fold(first_cp, |prev_cp, block| {
-                    prev_cp.push(block).expect("must extend checkpoint")
-                })
-        };
+
+            // We have found point of agreement so the update will connect!
+            if fetched_hash == local_hash {
+                break;
+            }
+        }
 
         Ok(local_chain::Update {
-            tip,
+            tip: CheckPoint::from_block_ids(fetched_blocks.into_iter().map(BlockId::from))
+                .expect("must be in height order"),
             introduce_older_blocks: true,
         })
     }

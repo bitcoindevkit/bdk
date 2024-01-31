@@ -31,8 +31,6 @@ mod async_ext;
 #[cfg(feature = "async")]
 pub use async_ext::*;
 
-const ASSUME_FINAL_DEPTH: u32 = 15;
-
 fn anchor_from_status(status: &TxStatus) -> Option<ConfirmationTimeHeightAnchor> {
     if let TxStatus {
         block_height: Some(height),
