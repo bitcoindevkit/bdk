@@ -179,7 +179,7 @@ pub trait ElectrumExt {
     ) -> Result<ElectrumUpdate, Error>;
 }
 
-impl ElectrumExt for Client {
+impl<A: ElectrumApi> ElectrumExt for A {
     fn full_scan<K: Ord + Clone>(
         &self,
         prev_tip: CheckPoint,
@@ -303,7 +303,7 @@ impl ElectrumExt for Client {
 
 /// Return a [`CheckPoint`] of the latest tip, that connects with `prev_tip`.
 fn construct_update_tip(
-    client: &Client,
+    client: &impl ElectrumApi,
     prev_tip: CheckPoint,
 ) -> Result<(CheckPoint, Option<u32>), Error> {
     let HeaderNotification { height, .. } = client.block_headers_subscribe()?;
@@ -417,7 +417,7 @@ fn determine_tx_anchor(
 }
 
 fn populate_with_outpoints(
-    client: &Client,
+    client: &impl ElectrumApi,
     cps: &BTreeMap<u32, CheckPoint>,
     relevant_txids: &mut RelevantTxids,
     outpoints: impl IntoIterator<Item = OutPoint>,
@@ -478,7 +478,7 @@ fn populate_with_outpoints(
 }
 
 fn populate_with_txids(
-    client: &Client,
+    client: &impl ElectrumApi,
     cps: &BTreeMap<u32, CheckPoint>,
     relevant_txids: &mut RelevantTxids,
     txids: impl IntoIterator<Item = Txid>,
@@ -514,7 +514,7 @@ fn populate_with_txids(
 }
 
 fn populate_with_spks<I: Ord + Clone>(
-    client: &Client,
+    client: &impl ElectrumApi,
     cps: &BTreeMap<u32, CheckPoint>,
     relevant_txids: &mut RelevantTxids,
     spks: &mut impl Iterator<Item = (I, ScriptBuf)>,
