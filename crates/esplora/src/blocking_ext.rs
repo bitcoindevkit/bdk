@@ -3,7 +3,7 @@ use std::thread::JoinHandle;
 use bdk_chain::collections::btree_map;
 use bdk_chain::collections::BTreeMap;
 use bdk_chain::{
-    bitcoin::{BlockHash, OutPoint, ScriptBuf, Txid},
+    bitcoin::{BlockHash, OutPoint, ScriptBuf, TxOut, Txid},
     local_chain::{self, CheckPoint},
     BlockId, ConfirmationTimeHeightAnchor, TxGraph,
 };
@@ -193,6 +193,24 @@ impl EsploraExt for esplora_client::BlockingClient {
                         let _ = graph.insert_tx(tx.to_tx());
                         if let Some(anchor) = anchor_from_status(&tx.status) {
                             let _ = graph.insert_anchor(tx.txid, anchor);
+                        }
+
+                        let previous_outputs = tx.vin.iter().filter_map(|vin| {
+                            let prevout = vin.prevout.as_ref()?;
+                            Some((
+                                OutPoint {
+                                    txid: vin.txid,
+                                    vout: vin.vout,
+                                },
+                                TxOut {
+                                    script_pubkey: prevout.scriptpubkey.clone(),
+                                    value: prevout.value,
+                                },
+                            ))
+                        });
+
+                        for (outpoint, txout) in previous_outputs {
+                            let _ = graph.insert_txout(outpoint, txout);
                         }
                     }
                 }
