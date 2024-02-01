@@ -1,13 +1,14 @@
-use std::thread::JoinHandle;
-
 use bdk_chain::collections::btree_map;
 use bdk_chain::collections::BTreeMap;
+use bdk_chain::spk_client::{FullScanRequest, FullScanResult, SyncRequest, SyncResult};
 use bdk_chain::{
     bitcoin::{BlockHash, OutPoint, ScriptBuf, TxOut, Txid},
     local_chain::{self, CheckPoint},
     BlockId, ConfirmationTimeHeightAnchor, TxGraph,
 };
 use esplora_client::TxStatus;
+use std::fmt::Debug;
+use std::thread::JoinHandle;
 
 use crate::anchor_from_status;
 
@@ -30,7 +31,7 @@ pub trait EsploraExt {
     /// ## Consistency
     ///
     /// The chain update returned is guaranteed to be consistent as long as there is not a *large* re-org
-    /// during the call. The size of re-org we can tollerate is server dependent but will be at
+    /// during the call. The size of re-org we can tolerate is server dependent but will be at
     /// least 10.
     ///
     /// [`LocalChain`]: bdk_chain::local_chain::LocalChain
@@ -50,12 +51,12 @@ pub trait EsploraExt {
     /// The full scan for each keychain stops after a gap of `stop_gap` script pubkeys with no associated
     /// transactions. `parallel_requests` specifies the max number of HTTP requests to make in
     /// parallel.
-    fn full_scan<K: Ord + Clone>(
+    fn full_scan<K: Ord + Clone + Send + Debug, I: Iterator<Item = (u32, ScriptBuf)> + Send>(
         &self,
-        keychain_spks: BTreeMap<K, impl IntoIterator<Item = (u32, ScriptBuf)>>,
+        request: FullScanRequest<K, I>,
         stop_gap: usize,
         parallel_requests: usize,
-    ) -> Result<(TxGraph<ConfirmationTimeHeightAnchor>, BTreeMap<K, u32>), Error>;
+    ) -> Result<FullScanResult<K>, Error>;
 
     /// Sync a set of scripts with the blockchain (via an Esplora client) for the data
     /// specified and return a [`TxGraph`].
@@ -69,13 +70,7 @@ pub trait EsploraExt {
     /// may include scripts that have been used, use [`full_scan`] with the keychain.
     ///
     /// [`full_scan`]: EsploraExt::full_scan
-    fn sync(
-        &self,
-        misc_spks: impl IntoIterator<Item = ScriptBuf>,
-        txids: impl IntoIterator<Item = Txid>,
-        outpoints: impl IntoIterator<Item = OutPoint>,
-        parallel_requests: usize,
-    ) -> Result<TxGraph<ConfirmationTimeHeightAnchor>, Error>;
+    fn sync(&self, request: SyncRequest, parallel_requests: usize) -> Result<SyncResult, Error>;
 }
 
 impl EsploraExt for esplora_client::BlockingClient {
@@ -139,22 +134,21 @@ impl EsploraExt for esplora_client::BlockingClient {
         })
     }
 
-    fn full_scan<K: Ord + Clone>(
+    fn full_scan<K: Ord + Clone + Send + Debug, I: Iterator<Item = (u32, ScriptBuf)> + Send>(
         &self,
-        keychain_spks: BTreeMap<K, impl IntoIterator<Item = (u32, ScriptBuf)>>,
+        mut request: FullScanRequest<K, I>,
         stop_gap: usize,
         parallel_requests: usize,
-    ) -> Result<(TxGraph<ConfirmationTimeHeightAnchor>, BTreeMap<K, u32>), Error> {
+    ) -> Result<FullScanResult<K>, Error> {
         type TxsOfSpkIndex = (u32, Vec<esplora_client::Tx>);
         let parallel_requests = Ord::max(parallel_requests, 1);
-        let mut graph = TxGraph::<ConfirmationTimeHeightAnchor>::default();
-        let mut last_active_indexes = BTreeMap::<K, u32>::new();
+        let mut graph_update = TxGraph::<ConfirmationTimeHeightAnchor>::default();
+        let mut last_active_indices = BTreeMap::<K, u32>::new();
 
-        for (keychain, spks) in keychain_spks {
+        for (keychain, spks) in request.take_spks_by_keychain() {
             let mut spks = spks.into_iter();
             let mut last_index = Option::<u32>::None;
             let mut last_active_index = Option::<u32>::None;
-
             loop {
                 let handles = spks
                     .by_ref()
@@ -190,9 +184,9 @@ impl EsploraExt for esplora_client::BlockingClient {
                         last_active_index = Some(index);
                     }
                     for tx in txs {
-                        let _ = graph.insert_tx(tx.to_tx());
+                        let _ = graph_update.insert_tx(tx.to_tx());
                         if let Some(anchor) = anchor_from_status(&tx.status) {
-                            let _ = graph.insert_anchor(tx.txid, anchor);
+                            let _ = graph_update.insert_anchor(tx.txid, anchor);
                         }
 
                         let previous_outputs = tx.vin.iter().filter_map(|vin| {
@@ -210,7 +204,7 @@ impl EsploraExt for esplora_client::BlockingClient {
                         });
 
                         for (outpoint, txout) in previous_outputs {
-                            let _ = graph.insert_txout(outpoint, txout);
+                            let _ = graph_update.insert_txout(outpoint, txout);
                         }
                     }
                 }
@@ -227,41 +221,47 @@ impl EsploraExt for esplora_client::BlockingClient {
             }
 
             if let Some(last_active_index) = last_active_index {
-                last_active_indexes.insert(keychain, last_active_index);
+                last_active_indices.insert(keychain, last_active_index);
             }
         }
 
-        Ok((graph, last_active_indexes))
+        // Now that we're done updating the `IndexedTxGraph`, it's time to update the `LocalChain`! We
+        // want the `LocalChain` to have data about all the anchors in the `TxGraph` - for this reason,
+        // we want to retrieve the blocks at the heights of the newly added anchors that are missing from
+        // our view of the chain.
+
+        // new tx graph transactions determine possible missing blockchain heights
+        let missing_heights = graph_update.anchor_heights(request.chain_tip.height());
+        // get blockchain update from original request checkpoint and possible missing heights
+        let chain_update = self.update_local_chain(request.chain_tip.clone(), missing_heights)?;
+
+        Ok(FullScanResult {
+            graph_update,
+            chain_update,
+            last_active_indices,
+        })
     }
 
     fn sync(
         &self,
-        misc_spks: impl IntoIterator<Item = ScriptBuf>,
-        txids: impl IntoIterator<Item = Txid>,
-        outpoints: impl IntoIterator<Item = OutPoint>,
+        mut request: SyncRequest,
         parallel_requests: usize,
-    ) -> Result<TxGraph<ConfirmationTimeHeightAnchor>, Error> {
-        let mut graph = self
-            .full_scan(
-                [(
-                    (),
-                    misc_spks
-                        .into_iter()
-                        .enumerate()
-                        .map(|(i, spk)| (i as u32, spk)),
-                )]
-                .into(),
-                usize::MAX,
-                parallel_requests,
-            )
-            .map(|(g, _)| g)?;
+    ) -> Result<SyncResult, Error> {
+        let mut full_scan_request = FullScanRequest::new(request.chain_tip.clone());
+        let spks = [(0, Box::new(request.take_spks()))].into();
 
-        let mut txids = txids.into_iter();
+        full_scan_request.add_spks_by_keychain(spks);
+
+        let mut graph_update = self
+            .full_scan(full_scan_request, usize::MAX, parallel_requests)
+            .map(|result| result.graph_update)?;
+
+        let mut txids = request.take_txids();
         loop {
             let handles = txids
                 .by_ref()
                 .take(parallel_requests)
-                .filter(|&txid| graph.get_tx(txid).is_none())
+                .filter(|&txid| graph_update.get_tx(txid).is_none())
                 .map(|txid| {
                     std::thread::spawn({
                         let client = self.clone();
@@ -282,36 +282,45 @@ impl EsploraExt for esplora_client::BlockingClient {
             for handle in handles {
                 let (txid, status) = handle.join().expect("thread must not panic")?;
                 if let Some(anchor) = anchor_from_status(&status) {
-                    let _ = graph.insert_anchor(txid, anchor);
+                    let _ = graph_update.insert_anchor(txid, anchor);
                 }
             }
         }
 
-        for op in outpoints {
-            if graph.get_tx(op.txid).is_none() {
+        for op in request.take_outpoints() {
+            if graph_update.get_tx(op.txid).is_none() {
                 if let Some(tx) = self.get_tx(&op.txid)? {
-                    let _ = graph.insert_tx(tx);
+                    let _ = graph_update.insert_tx(tx);
                 }
                 let status = self.get_tx_status(&op.txid)?;
                 if let Some(anchor) = anchor_from_status(&status) {
-                    let _ = graph.insert_anchor(op.txid, anchor);
+                    let _ = graph_update.insert_anchor(op.txid, anchor);
                 }
             }
 
             if let Some(op_status) = self.get_output_status(&op.txid, op.vout as _)? {
                 if let Some(txid) = op_status.txid {
-                    if graph.get_tx(txid).is_none() {
+                    if graph_update.get_tx(txid).is_none() {
                         if let Some(tx) = self.get_tx(&txid)? {
-                            let _ = graph.insert_tx(tx);
+                            let _ = graph_update.insert_tx(tx);
                         }
                         let status = self.get_tx_status(&txid)?;
                         if let Some(anchor) = anchor_from_status(&status) {
-                            let _ = graph.insert_anchor(txid, anchor);
+                            let _ = graph_update.insert_anchor(txid, anchor);
                         }
                     }
                 }
             }
         }
-        Ok(graph)
+
+        // new tx graph transactions determine possible missing blockchain heights
+        let missing_heights = graph_update.anchor_heights(request.chain_tip.height());
+        // get blockchain update from original request checkpoint and possible missing heights
+        let chain_update = self.update_local_chain(request.chain_tip.clone(), missing_heights)?;
+
+        Ok(SyncResult {
+            graph_update,
+            chain_update,
+        })
     }
 }

@@ -1,3 +1,5 @@
+use bdk_chain::bitcoin::constants::genesis_block;
+use bdk_chain::bitcoin::Network::Testnet;
 use bdk_chain::local_chain::LocalChain;
 use bdk_chain::BlockId;
 use bdk_esplora::EsploraExt;
@@ -11,6 +13,7 @@ use std::thread::sleep;
 use std::time::Duration;
 
 use bdk_chain::bitcoin::{Address, Amount, BlockHash, Txid};
+use bdk_chain::spk_client::{FullScanRequest, FullScanResult, SyncRequest, SyncResult};
 
 macro_rules! h {
     ($index:literal) => {{
@@ -99,8 +102,8 @@ pub fn test_update_tx_graph_without_keychain() -> anyhow::Result<()> {
         Address::from_str("bcrt1qfjg5lv3dvc9az8patec8fjddrs4aqtauadnagr")?.assume_checked();
 
     let misc_spks = [
-        receive_address0.script_pubkey(),
-        receive_address1.script_pubkey(),
+        (0, receive_address0.script_pubkey()),
+        (1, receive_address1.script_pubkey()),
     ];
 
     let _block_hashes = env.mine_blocks(101, None)?;
@@ -129,12 +132,15 @@ pub fn test_update_tx_graph_without_keychain() -> anyhow::Result<()> {
         sleep(Duration::from_millis(10))
     }
 
-    let graph_update = env.client.sync(
-        misc_spks.into_iter(),
-        vec![].into_iter(),
-        vec![].into_iter(),
-        1,
-    )?;
+    let genesis_hash = genesis_block(Testnet).block_hash();
+    let (local_chain, _change_set) = LocalChain::from_genesis_hash(genesis_hash);
+    let mut request = SyncRequest::new(local_chain.tip());
+    request.add_spks(misc_spks);
+
+    let SyncResult {
+        graph_update,
+        chain_update: _,
+    } = env.client.sync(request, 1)?;
 
     // Check to see if we have the floating txouts available from our two created transactions'
     // previous outputs in order to calculate transaction fees.
@@ -196,7 +202,7 @@ pub fn test_update_tx_graph_gap_limit() -> anyhow::Result<()> {
         .map(|(i, addr)| (i as u32, addr.script_pubkey()))
         .collect();
     let mut keychains = BTreeMap::new();
-    keychains.insert(0, spks);
+    keychains.insert(0, spks.into_iter());
 
     // Then receive coins on the 4th address.
     let txid_4th_addr = env.bitcoind.client.send_to_address(
@@ -216,12 +222,28 @@ pub fn test_update_tx_graph_gap_limit() -> anyhow::Result<()> {
 
     // A scan with a gap limit of 2 won't find the transaction, but a scan with a gap limit of 3
     // will.
-    let (graph_update, active_indices) = env.client.full_scan(keychains.clone(), 2, 1)?;
+    let genesis_hash = genesis_block(Testnet).block_hash();
+    let (local_chain, _change_set) = LocalChain::from_genesis_hash(genesis_hash);
+    let mut request = FullScanRequest::new(local_chain.tip());
+    request.add_spks_by_keychain(keychains.clone());
+
+    let FullScanResult {
+        graph_update,
+        chain_update: _,
+        last_active_indices,
+    } = env.client.full_scan(request, 2, 1)?;
     assert!(graph_update.full_txs().next().is_none());
-    assert!(active_indices.is_empty());
-    let (graph_update, active_indices) = env.client.full_scan(keychains.clone(), 3, 1)?;
+    assert!(last_active_indices.is_empty());
+
+    let mut request = FullScanRequest::new(local_chain.tip());
+    request.add_spks_by_keychain(keychains.clone());
+    let FullScanResult {
+        graph_update,
+        chain_update: _,
+        last_active_indices,
+    } = env.client.full_scan(request, 3, 1)?;
     assert_eq!(graph_update.full_txs().next().unwrap().txid, txid_4th_addr);
-    assert_eq!(active_indices[&0], 3);
+    assert_eq!(last_active_indices[&0], 3);
 
     // Now receive a coin on the last address.
     let txid_last_addr = env.bitcoind.client.send_to_address(
@@ -241,16 +263,32 @@ pub fn test_update_tx_graph_gap_limit() -> anyhow::Result<()> {
 
     // A scan with gap limit 4 won't find the second transaction, but a scan with gap limit 5 will.
     // The last active indice won't be updated in the first case but will in the second one.
-    let (graph_update, active_indices) = env.client.full_scan(keychains.clone(), 4, 1)?;
+    let genesis_hash = genesis_block(Testnet).block_hash();
+    let (local_chain, _change_set) = LocalChain::from_genesis_hash(genesis_hash);
+    let mut request = FullScanRequest::new(local_chain.tip());
+    request.add_spks_by_keychain(keychains.clone());
+
+    let FullScanResult {
+        graph_update,
+        chain_update: _,
+        last_active_indices,
+    } = env.client.full_scan(request, 4, 1)?;
     let txs: HashSet<_> = graph_update.full_txs().map(|tx| tx.txid).collect();
     assert_eq!(txs.len(), 1);
     assert!(txs.contains(&txid_4th_addr));
-    assert_eq!(active_indices[&0], 3);
-    let (graph_update, active_indices) = env.client.full_scan(keychains, 5, 1)?;
+    assert_eq!(last_active_indices[&0], 3);
+
+    let mut request = FullScanRequest::new(local_chain.tip());
+    request.add_spks_by_keychain(keychains);
+    let FullScanResult {
+        graph_update,
+        chain_update: _,
+        last_active_indices,
+    } = env.client.full_scan(request, 5, 1)?;
     let txs: HashSet<_> = graph_update.full_txs().map(|tx| tx.txid).collect();
     assert_eq!(txs.len(), 2);
     assert!(txs.contains(&txid_4th_addr) && txs.contains(&txid_last_addr));
-    assert_eq!(active_indices[&0], 9);
+    assert_eq!(last_active_indices[&0], 9);
 
     Ok(())
 }
