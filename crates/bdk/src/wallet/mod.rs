@@ -1347,7 +1347,7 @@ impl<D> Wallet<D> {
             }
             Some(tx_builder::Version(x)) => x,
             None if requirements.csv.is_some() => 2,
-            _ => 1,
+            None => 1,
         };
 
         // We use a match here instead of a unwrap_or_else as it's way more readable :)
