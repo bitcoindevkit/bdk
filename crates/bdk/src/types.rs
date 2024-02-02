@@ -14,7 +14,7 @@ use core::convert::AsRef;
 use core::ops::Sub;
 
 use bdk_chain::ConfirmationTime;
-use bitcoin::blockdata::transaction::{OutPoint, TxOut};
+use bitcoin::blockdata::transaction::{OutPoint, Sequence, TxOut};
 use bitcoin::{psbt, Weight};
 
 use serde::{Deserialize, Serialize};
@@ -197,6 +197,8 @@ pub enum Utxo {
     Foreign {
         /// The location of the output.
         outpoint: OutPoint,
+        /// The nSequence value to set for this input.
+        sequence: Option<Sequence>,
         /// The information about the input we require to add it to a PSBT.
         // Box it to stop the type being too big.
         psbt_input: Box<psbt::Input>,
@@ -219,6 +221,7 @@ impl Utxo {
             Utxo::Foreign {
                 outpoint,
                 psbt_input,
+                ..
             } => {
                 if let Some(prev_tx) = &psbt_input.non_witness_utxo {
                     return &prev_tx.output[outpoint.vout as usize];
@@ -230,6 +233,14 @@ impl Utxo {
 
                 unreachable!("Foreign UTXOs will always have one of these set")
             }
+        }
+    }
+
+    /// Get the sequence number if an explicit sequence number has to be set for this input.
+    pub fn sequence(&self) -> Option<Sequence> {
+        match self {
+            Utxo::Local(_) => None,
+            Utxo::Foreign { sequence, .. } => *sequence,
         }
     }
 }
