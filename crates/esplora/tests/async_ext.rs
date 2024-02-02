@@ -1,68 +1,21 @@
 use bdk_esplora::EsploraAsyncExt;
+use electrsd::bitcoind::anyhow;
 use electrsd::bitcoind::bitcoincore_rpc::RpcApi;
-use electrsd::bitcoind::{self, anyhow, BitcoinD};
-use electrsd::{Conf, ElectrsD};
-use esplora_client::{self, AsyncClient, Builder};
+use esplora_client::{self, Builder};
 use std::collections::{BTreeMap, HashSet};
 use std::str::FromStr;
 use std::thread::sleep;
 use std::time::Duration;
 
-use bdk_chain::bitcoin::{Address, Amount, BlockHash, Txid};
-
-struct TestEnv {
-    bitcoind: BitcoinD,
-    #[allow(dead_code)]
-    electrsd: ElectrsD,
-    client: AsyncClient,
-}
-
-impl TestEnv {
-    fn new() -> Result<Self, anyhow::Error> {
-        let bitcoind_exe =
-            bitcoind::downloaded_exe_path().expect("bitcoind version feature must be enabled");
-        let bitcoind = BitcoinD::new(bitcoind_exe).unwrap();
-
-        let mut electrs_conf = Conf::default();
-        electrs_conf.http_enabled = true;
-        let electrs_exe =
-            electrsd::downloaded_exe_path().expect("electrs version feature must be enabled");
-        let electrsd = ElectrsD::with_conf(electrs_exe, &bitcoind, &electrs_conf)?;
-
-        let base_url = format!("http://{}", &electrsd.esplora_url.clone().unwrap());
-        let client = Builder::new(base_url.as_str()).build_async()?;
-
-        Ok(Self {
-            bitcoind,
-            electrsd,
-            client,
-        })
-    }
-
-    fn mine_blocks(
-        &self,
-        count: usize,
-        address: Option<Address>,
-    ) -> anyhow::Result<Vec<BlockHash>> {
-        let coinbase_address = match address {
-            Some(address) => address,
-            None => self
-                .bitcoind
-                .client
-                .get_new_address(None, None)?
-                .assume_checked(),
-        };
-        let block_hashes = self
-            .bitcoind
-            .client
-            .generate_to_address(count as _, &coinbase_address)?;
-        Ok(block_hashes)
-    }
-}
+use bdk_chain::bitcoin::{Address, Amount, Txid};
+use bdk_testenv::TestEnv;
 
 #[tokio::test]
 pub async fn test_update_tx_graph_without_keychain() -> anyhow::Result<()> {
     let env = TestEnv::new()?;
+    let base_url = format!("http://{}", &env.electrsd.esplora_url.clone().unwrap());
+    let client = Builder::new(base_url.as_str()).build_async()?;
+
     let receive_address0 =
         Address::from_str("bcrt1qc6fweuf4xjvz4x3gx3t9e0fh4hvqyu2qw4wvxm")?.assume_checked();
     let receive_address1 =
@@ -95,12 +48,11 @@ pub async fn test_update_tx_graph_without_keychain() -> anyhow::Result<()> {
         None,
     )?;
     let _block_hashes = env.mine_blocks(1, None)?;
-    while env.client.get_height().await.unwrap() < 102 {
+    while client.get_height().await.unwrap() < 102 {
         sleep(Duration::from_millis(10))
     }
 
-    let graph_update = env
-        .client
+    let graph_update = client
         .sync(
             misc_spks.into_iter(),
             vec![].into_iter(),
@@ -143,6 +95,8 @@ pub async fn test_update_tx_graph_without_keychain() -> anyhow::Result<()> {
 #[tokio::test]
 pub async fn test_async_update_tx_graph_gap_limit() -> anyhow::Result<()> {
     let env = TestEnv::new()?;
+    let base_url = format!("http://{}", &env.electrsd.esplora_url.clone().unwrap());
+    let client = Builder::new(base_url.as_str()).build_async()?;
     let _block_hashes = env.mine_blocks(101, None)?;
 
     // Now let's test the gap limit. First of all get a chain of 10 addresses.
@@ -182,16 +136,16 @@ pub async fn test_async_update_tx_graph_gap_limit() -> anyhow::Result<()> {
         None,
     )?;
     let _block_hashes = env.mine_blocks(1, None)?;
-    while env.client.get_height().await.unwrap() < 103 {
+    while client.get_height().await.unwrap() < 103 {
         sleep(Duration::from_millis(10))
     }
 
     // A scan with a gap limit of 2 won't find the transaction, but a scan with a gap limit of 3
     // will.
-    let (graph_update, active_indices) = env.client.full_scan(keychains.clone(), 2, 1).await?;
+    let (graph_update, active_indices) = client.full_scan(keychains.clone(), 2, 1).await?;
     assert!(graph_update.full_txs().next().is_none());
     assert!(active_indices.is_empty());
-    let (graph_update, active_indices) = env.client.full_scan(keychains.clone(), 3, 1).await?;
+    let (graph_update, active_indices) = client.full_scan(keychains.clone(), 3, 1).await?;
     assert_eq!(graph_update.full_txs().next().unwrap().txid, txid_4th_addr);
     assert_eq!(active_indices[&0], 3);
 
@@ -207,18 +161,18 @@ pub async fn test_async_update_tx_graph_gap_limit() -> anyhow::Result<()> {
         None,
     )?;
     let _block_hashes = env.mine_blocks(1, None)?;
-    while env.client.get_height().await.unwrap() < 104 {
+    while client.get_height().await.unwrap() < 104 {
         sleep(Duration::from_millis(10))
     }
 
     // A scan with gap limit 4 won't find the second transaction, but a scan with gap limit 5 will.
     // The last active indice won't be updated in the first case but will in the second one.
-    let (graph_update, active_indices) = env.client.full_scan(keychains.clone(), 4, 1).await?;
+    let (graph_update, active_indices) = client.full_scan(keychains.clone(), 4, 1).await?;
     let txs: HashSet<_> = graph_update.full_txs().map(|tx| tx.txid).collect();
     assert_eq!(txs.len(), 1);
     assert!(txs.contains(&txid_4th_addr));
     assert_eq!(active_indices[&0], 3);
-    let (graph_update, active_indices) = env.client.full_scan(keychains, 5, 1).await?;
+    let (graph_update, active_indices) = client.full_scan(keychains, 5, 1).await?;
     let txs: HashSet<_> = graph_update.full_txs().map(|tx| tx.txid).collect();
     assert_eq!(txs.len(), 2);
     assert!(txs.contains(&txid_4th_addr) && txs.contains(&txid_last_addr));

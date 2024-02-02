@@ -2,160 +2,14 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use bdk_bitcoind_rpc::Emitter;
 use bdk_chain::{
-    bitcoin::{Address, Amount, BlockHash, Txid},
+    bitcoin::{Address, Amount, Txid},
     keychain::Balance,
     local_chain::{self, CheckPoint, LocalChain},
     Append, BlockId, IndexedTxGraph, SpkTxOutIndex,
 };
-use bitcoin::{
-    address::NetworkChecked, block::Header, hash_types::TxMerkleNode, hashes::Hash,
-    secp256k1::rand::random, Block, CompactTarget, OutPoint, ScriptBuf, ScriptHash, Transaction,
-    TxIn, TxOut, WScriptHash,
-};
-use bitcoincore_rpc::{
-    bitcoincore_rpc_json::{GetBlockTemplateModes, GetBlockTemplateRules},
-    RpcApi,
-};
-
-struct TestEnv {
-    #[allow(dead_code)]
-    daemon: bitcoind::BitcoinD,
-    client: bitcoincore_rpc::Client,
-}
-
-impl TestEnv {
-    fn new() -> anyhow::Result<Self> {
-        let daemon = match std::env::var_os("TEST_BITCOIND") {
-            Some(bitcoind_path) => bitcoind::BitcoinD::new(bitcoind_path),
-            None => bitcoind::BitcoinD::from_downloaded(),
-        }?;
-        let client = bitcoincore_rpc::Client::new(
-            &daemon.rpc_url(),
-            bitcoincore_rpc::Auth::CookieFile(daemon.params.cookie_file.clone()),
-        )?;
-        Ok(Self { daemon, client })
-    }
-
-    fn mine_blocks(
-        &self,
-        count: usize,
-        address: Option<Address>,
-    ) -> anyhow::Result<Vec<BlockHash>> {
-        let coinbase_address = match address {
-            Some(address) => address,
-            None => self.client.get_new_address(None, None)?.assume_checked(),
-        };
-        let block_hashes = self
-            .client
-            .generate_to_address(count as _, &coinbase_address)?;
-        Ok(block_hashes)
-    }
-
-    fn mine_empty_block(&self) -> anyhow::Result<(usize, BlockHash)> {
-        let bt = self.client.get_block_template(
-            GetBlockTemplateModes::Template,
-            &[GetBlockTemplateRules::SegWit],
-            &[],
-        )?;
-
-        let txdata = vec![Transaction {
-            version: 1,
-            lock_time: bitcoin::absolute::LockTime::from_height(0)?,
-            input: vec![TxIn {
-                previous_output: bitcoin::OutPoint::default(),
-                script_sig: ScriptBuf::builder()
-                    .push_int(bt.height as _)
-                    // randomn number so that re-mining creates unique block
-                    .push_int(random())
-                    .into_script(),
-                sequence: bitcoin::Sequence::default(),
-                witness: bitcoin::Witness::new(),
-            }],
-            output: vec![TxOut {
-                value: 0,
-                script_pubkey: ScriptBuf::new_p2sh(&ScriptHash::all_zeros()),
-            }],
-        }];
-
-        let bits: [u8; 4] = bt
-            .bits
-            .clone()
-            .try_into()
-            .expect("rpc provided us with invalid bits");
-
-        let mut block = Block {
-            header: Header {
-                version: bitcoin::block::Version::default(),
-                prev_blockhash: bt.previous_block_hash,
-                merkle_root: TxMerkleNode::all_zeros(),
-                time: Ord::max(bt.min_time, std::time::UNIX_EPOCH.elapsed()?.as_secs()) as u32,
-                bits: CompactTarget::from_consensus(u32::from_be_bytes(bits)),
-                nonce: 0,
-            },
-            txdata,
-        };
-
-        block.header.merkle_root = block.compute_merkle_root().expect("must compute");
-
-        for nonce in 0..=u32::MAX {
-            block.header.nonce = nonce;
-            if block.header.target().is_met_by(block.block_hash()) {
-                break;
-            }
-        }
-
-        self.client.submit_block(&block)?;
-        Ok((bt.height as usize, block.block_hash()))
-    }
-
-    fn invalidate_blocks(&self, count: usize) -> anyhow::Result<()> {
-        let mut hash = self.client.get_best_block_hash()?;
-        for _ in 0..count {
-            let prev_hash = self.client.get_block_info(&hash)?.previousblockhash;
-            self.client.invalidate_block(&hash)?;
-            match prev_hash {
-                Some(prev_hash) => hash = prev_hash,
-                None => break,
-            }
-        }
-        Ok(())
-    }
-
-    fn reorg(&self, count: usize) -> anyhow::Result<Vec<BlockHash>> {
-        let start_height = self.client.get_block_count()?;
-        self.invalidate_blocks(count)?;
-
-        let res = self.mine_blocks(count, None);
-        assert_eq!(
-            self.client.get_block_count()?,
-            start_height,
-            "reorg should not result in height change"
-        );
-        res
-    }
-
-    fn reorg_empty_blocks(&self, count: usize) -> anyhow::Result<Vec<(usize, BlockHash)>> {
-        let start_height = self.client.get_block_count()?;
-        self.invalidate_blocks(count)?;
-
-        let res = (0..count)
-            .map(|_| self.mine_empty_block())
-            .collect::<Result<Vec<_>, _>>()?;
-        assert_eq!(
-            self.client.get_block_count()?,
-            start_height,
-            "reorg should not result in height change"
-        );
-        Ok(res)
-    }
-
-    fn send(&self, address: &Address<NetworkChecked>, amount: Amount) -> anyhow::Result<Txid> {
-        let txid = self
-            .client
-            .send_to_address(address, amount, None, None, None, None, None, None)?;
-        Ok(txid)
-    }
-}
+use bdk_testenv::TestEnv;
+use bitcoin::{hashes::Hash, Block, OutPoint, ScriptBuf, WScriptHash};
+use bitcoincore_rpc::RpcApi;
 
 /// Ensure that blocks are emitted in order even after reorg.
 ///
@@ -166,17 +20,22 @@ impl TestEnv {
 #[test]
 pub fn test_sync_local_chain() -> anyhow::Result<()> {
     let env = TestEnv::new()?;
-    let (mut local_chain, _) = LocalChain::from_genesis_hash(env.client.get_block_hash(0)?);
-    let mut emitter = Emitter::new(&env.client, local_chain.tip(), 0);
+    let network_tip = env.rpc_client().get_block_count()?;
+    let (mut local_chain, _) = LocalChain::from_genesis_hash(env.rpc_client().get_block_hash(0)?);
+    let mut emitter = Emitter::new(env.rpc_client(), local_chain.tip(), 0);
 
-    // mine some blocks and returned the actual block hashes
+    // Mine some blocks and return the actual block hashes.
+    // Because initializing `ElectrsD` already mines some blocks, we must include those too when
+    // returning block hashes.
     let exp_hashes = {
-        let mut hashes = vec![env.client.get_block_hash(0)?]; // include genesis block
-        hashes.extend(env.mine_blocks(101, None)?);
+        let mut hashes = (0..=network_tip)
+            .map(|height| env.rpc_client().get_block_hash(height))
+            .collect::<Result<Vec<_>, _>>()?;
+        hashes.extend(env.mine_blocks(101 - network_tip as usize, None)?);
         hashes
     };
 
-    // see if the emitter outputs the right blocks
+    // See if the emitter outputs the right blocks.
     println!("first sync:");
     while let Some(emission) = emitter.next_block()? {
         let height = emission.block_height();
@@ -207,7 +66,7 @@ pub fn test_sync_local_chain() -> anyhow::Result<()> {
         "final local_chain state is unexpected",
     );
 
-    // perform reorg
+    // Perform reorg.
     let reorged_blocks = env.reorg(6)?;
     let exp_hashes = exp_hashes
         .iter()
@@ -216,7 +75,7 @@ pub fn test_sync_local_chain() -> anyhow::Result<()> {
         .cloned()
         .collect::<Vec<_>>();
 
-    // see if the emitter outputs the right blocks
+    // See if the emitter outputs the right blocks.
     println!("after reorg:");
     let mut exp_height = exp_hashes.len() - reorged_blocks.len();
     while let Some(emission) = emitter.next_block()? {
@@ -272,16 +131,25 @@ fn test_into_tx_graph() -> anyhow::Result<()> {
     let env = TestEnv::new()?;
 
     println!("getting new addresses!");
-    let addr_0 = env.client.get_new_address(None, None)?.assume_checked();
-    let addr_1 = env.client.get_new_address(None, None)?.assume_checked();
-    let addr_2 = env.client.get_new_address(None, None)?.assume_checked();
+    let addr_0 = env
+        .rpc_client()
+        .get_new_address(None, None)?
+        .assume_checked();
+    let addr_1 = env
+        .rpc_client()
+        .get_new_address(None, None)?
+        .assume_checked();
+    let addr_2 = env
+        .rpc_client()
+        .get_new_address(None, None)?
+        .assume_checked();
     println!("got new addresses!");
 
     println!("mining block!");
     env.mine_blocks(101, None)?;
     println!("mined blocks!");
 
-    let (mut chain, _) = LocalChain::from_genesis_hash(env.client.get_block_hash(0)?);
+    let (mut chain, _) = LocalChain::from_genesis_hash(env.rpc_client().get_block_hash(0)?);
     let mut indexed_tx_graph = IndexedTxGraph::<BlockId, _>::new({
         let mut index = SpkTxOutIndex::<usize>::default();
         index.insert_spk(0, addr_0.script_pubkey());
@@ -290,7 +158,7 @@ fn test_into_tx_graph() -> anyhow::Result<()> {
         index
     });
 
-    let emitter = &mut Emitter::new(&env.client, chain.tip(), 0);
+    let emitter = &mut Emitter::new(env.rpc_client(), chain.tip(), 0);
 
     while let Some(emission) = emitter.next_block()? {
         let height = emission.block_height();
@@ -306,7 +174,7 @@ fn test_into_tx_graph() -> anyhow::Result<()> {
     let exp_txids = {
         let mut txids = BTreeSet::new();
         for _ in 0..3 {
-            txids.insert(env.client.send_to_address(
+            txids.insert(env.rpc_client().send_to_address(
                 &addr_0,
                 Amount::from_sat(10_000),
                 None,
@@ -342,7 +210,7 @@ fn test_into_tx_graph() -> anyhow::Result<()> {
 
     // mine a block that confirms the 3 txs
     let exp_block_hash = env.mine_blocks(1, None)?[0];
-    let exp_block_height = env.client.get_block_info(&exp_block_hash)?.height as u32;
+    let exp_block_height = env.rpc_client().get_block_info(&exp_block_hash)?.height as u32;
     let exp_anchors = exp_txids
         .iter()
         .map({
@@ -386,10 +254,10 @@ fn ensure_block_emitted_after_reorg_is_at_reorg_height() -> anyhow::Result<()> {
 
     let env = TestEnv::new()?;
     let mut emitter = Emitter::new(
-        &env.client,
+        env.rpc_client(),
         CheckPoint::new(BlockId {
             height: 0,
-            hash: env.client.get_block_hash(0)?,
+            hash: env.rpc_client().get_block_hash(0)?,
         }),
         EMITTER_START_HEIGHT as _,
     );
@@ -463,21 +331,24 @@ fn tx_can_become_unconfirmed_after_reorg() -> anyhow::Result<()> {
 
     let env = TestEnv::new()?;
     let mut emitter = Emitter::new(
-        &env.client,
+        env.rpc_client(),
         CheckPoint::new(BlockId {
             height: 0,
-            hash: env.client.get_block_hash(0)?,
+            hash: env.rpc_client().get_block_hash(0)?,
         }),
         0,
     );
 
     // setup addresses
-    let addr_to_mine = env.client.get_new_address(None, None)?.assume_checked();
+    let addr_to_mine = env
+        .rpc_client()
+        .get_new_address(None, None)?
+        .assume_checked();
     let spk_to_track = ScriptBuf::new_v0_p2wsh(&WScriptHash::all_zeros());
     let addr_to_track = Address::from_script(&spk_to_track, bitcoin::Network::Regtest)?;
 
     // setup receiver
-    let (mut recv_chain, _) = LocalChain::from_genesis_hash(env.client.get_block_hash(0)?);
+    let (mut recv_chain, _) = LocalChain::from_genesis_hash(env.rpc_client().get_block_hash(0)?);
     let mut recv_graph = IndexedTxGraph::<BlockId, _>::new({
         let mut recv_index = SpkTxOutIndex::default();
         recv_index.insert_spk((), spk_to_track.clone());
@@ -493,7 +364,7 @@ fn tx_can_become_unconfirmed_after_reorg() -> anyhow::Result<()> {
 
         // lock outputs that send to `addr_to_track`
         let outpoints_to_lock = env
-            .client
+            .rpc_client()
             .get_transaction(&txid, None)?
             .transaction()?
             .output
@@ -502,7 +373,7 @@ fn tx_can_become_unconfirmed_after_reorg() -> anyhow::Result<()> {
             .filter(|(_, txo)| txo.script_pubkey == spk_to_track)
             .map(|(vout, _)| OutPoint::new(txid, vout as _))
             .collect::<Vec<_>>();
-        env.client.lock_unspent(&outpoints_to_lock)?;
+        env.rpc_client().lock_unspent(&outpoints_to_lock)?;
 
         let _ = env.mine_blocks(1, None)?;
     }
@@ -551,16 +422,19 @@ fn mempool_avoids_re_emission() -> anyhow::Result<()> {
 
     let env = TestEnv::new()?;
     let mut emitter = Emitter::new(
-        &env.client,
+        env.rpc_client(),
         CheckPoint::new(BlockId {
             height: 0,
-            hash: env.client.get_block_hash(0)?,
+            hash: env.rpc_client().get_block_hash(0)?,
         }),
         0,
     );
 
     // mine blocks and sync up emitter
-    let addr = env.client.get_new_address(None, None)?.assume_checked();
+    let addr = env
+        .rpc_client()
+        .get_new_address(None, None)?
+        .assume_checked();
     env.mine_blocks(BLOCKS_TO_MINE, Some(addr.clone()))?;
     while emitter.next_header()?.is_some() {}
 
@@ -613,16 +487,19 @@ fn mempool_re_emits_if_tx_introduction_height_not_reached() -> anyhow::Result<()
 
     let env = TestEnv::new()?;
     let mut emitter = Emitter::new(
-        &env.client,
+        env.rpc_client(),
         CheckPoint::new(BlockId {
             height: 0,
-            hash: env.client.get_block_hash(0)?,
+            hash: env.rpc_client().get_block_hash(0)?,
         }),
         0,
     );
 
     // mine blocks to get initial balance, sync emitter up to tip
-    let addr = env.client.get_new_address(None, None)?.assume_checked();
+    let addr = env
+        .rpc_client()
+        .get_new_address(None, None)?
+        .assume_checked();
     env.mine_blocks(PREMINE_COUNT, Some(addr.clone()))?;
     while emitter.next_header()?.is_some() {}
 
@@ -698,16 +575,19 @@ fn mempool_during_reorg() -> anyhow::Result<()> {
 
     let env = TestEnv::new()?;
     let mut emitter = Emitter::new(
-        &env.client,
+        env.rpc_client(),
         CheckPoint::new(BlockId {
             height: 0,
-            hash: env.client.get_block_hash(0)?,
+            hash: env.rpc_client().get_block_hash(0)?,
         }),
         0,
     );
 
     // mine blocks to get initial balance
-    let addr = env.client.get_new_address(None, None)?.assume_checked();
+    let addr = env
+        .rpc_client()
+        .get_new_address(None, None)?
+        .assume_checked();
     env.mine_blocks(PREMINE_COUNT, Some(addr.clone()))?;
 
     // introduce mempool tx at each block extension
@@ -725,7 +605,7 @@ fn mempool_during_reorg() -> anyhow::Result<()> {
             .into_iter()
             .map(|(tx, _)| tx.txid())
             .collect::<BTreeSet<_>>(),
-        env.client
+        env.rpc_client()
             .get_raw_mempool()?
             .into_iter()
             .collect::<BTreeSet<_>>(),
@@ -744,7 +624,7 @@ fn mempool_during_reorg() -> anyhow::Result<()> {
         // emission.
         // TODO: How can have have reorg logic in `TestEnv` NOT blacklast old blocks first?
         let tx_introductions = dbg!(env
-            .client
+            .rpc_client()
             .get_raw_mempool_verbose()?
             .into_iter()
             .map(|(txid, entry)| (txid, entry.height as usize))
@@ -821,10 +701,10 @@ fn no_agreement_point() -> anyhow::Result<()> {
 
     // start height is 99
     let mut emitter = Emitter::new(
-        &env.client,
+        env.rpc_client(),
         CheckPoint::new(BlockId {
             height: 0,
-            hash: env.client.get_block_hash(0)?,
+            hash: env.rpc_client().get_block_hash(0)?,
         }),
         (PREMINE_COUNT - 2) as u32,
     );
@@ -842,12 +722,12 @@ fn no_agreement_point() -> anyhow::Result<()> {
     let block_hash_100a = block_header_100a.block_hash();
 
     // get hash for block 101a
-    let block_hash_101a = env.client.get_block_hash(101)?;
+    let block_hash_101a = env.rpc_client().get_block_hash(101)?;
 
     // invalidate blocks 99a, 100a, 101a
-    env.client.invalidate_block(&block_hash_99a)?;
-    env.client.invalidate_block(&block_hash_100a)?;
-    env.client.invalidate_block(&block_hash_101a)?;
+    env.rpc_client().invalidate_block(&block_hash_99a)?;
+    env.rpc_client().invalidate_block(&block_hash_100a)?;
+    env.rpc_client().invalidate_block(&block_hash_101a)?;
 
     // mine new blocks 99b, 100b, 101b
     env.mine_blocks(3, None)?;
