@@ -59,7 +59,7 @@ where
     /// Stages a new changeset and commits it (along with any other previously staged changes) to
     /// the persistence backend
     ///
-    /// Convience method for calling [`stage`] and then [`commit`].
+    /// Convenience method for calling [`stage`] and then [`commit`].
     ///
     /// [`stage`]: Self::stage
     /// [`commit`]: Self::commit
