@@ -2473,7 +2473,7 @@ impl<D> Wallet<D> {
     /// This method takes in an iterator of `(tx, last_seen)` where `last_seen` is the timestamp of
     /// when the transaction was last seen in the mempool. This is used for conflict resolution
     /// when there is conflicting unconfirmed transactions. The transaction with the later
-    /// `last_seen` is prioritied.
+    /// `last_seen` is prioritized.
     pub fn apply_unconfirmed_txs<'t>(
         &mut self,
         unconfirmed_txs: impl IntoIterator<Item = (&'t Transaction, u64)>,

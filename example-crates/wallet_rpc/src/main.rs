@@ -12,7 +12,7 @@ use std::{path::PathBuf, sync::mpsc::sync_channel, thread::spawn, time::Instant}
 
 const DB_MAGIC: &str = "bdk-rpc-wallet-example";
 
-/// Bitcoind RPC example usign `bdk::Wallet`.
+/// Bitcoind RPC example using `bdk::Wallet`.
 ///
 /// This syncs the chain block-by-block and prints the current balance, transaction count and UTXO
 /// count.
