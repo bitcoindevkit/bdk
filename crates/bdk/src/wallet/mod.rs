@@ -814,7 +814,10 @@ impl<D> Wallet<D> {
         })
     }
 
-    /// Return whether or not a `script` is part of this wallet (either internal or external)
+    /// Determines if `script` is associated with either the internal or external keychain of the wallet.
+    ///
+    /// To determine if the `script` belongs specifically to either
+    /// the internal or external keychain, use the `wallet.derivation_of_spk()` method.
     pub fn is_mine(&self, script: &Script) -> bool {
         self.indexed_graph.index.index_of_spk(script).is_some()
     }
