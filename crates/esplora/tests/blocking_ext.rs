@@ -136,6 +136,28 @@ pub fn test_update_tx_graph_without_keychain() -> anyhow::Result<()> {
         1,
     )?;
 
+    // Check to see if we have the floating txouts available from our two created transactions'
+    // previous outputs in order to calculate transaction fees.
+    for tx in graph_update.full_txs() {
+        // Retrieve the calculated fee from `TxGraph`, which will panic if we do not have the
+        // floating txouts available from the transactions' previous outputs.
+        let fee = graph_update.calculate_fee(tx.tx).expect("Fee must exist");
+
+        // Retrieve the fee in the transaction data from `bitcoind`.
+        let tx_fee = env
+            .bitcoind
+            .client
+            .get_transaction(&tx.txid, None)
+            .expect("Tx must exist")
+            .fee
+            .expect("Fee must exist")
+            .abs()
+            .to_sat() as u64;
+
+        // Check that the calculated fee matches the fee from the transaction data.
+        assert_eq!(fee, tx_fee);
+    }
+
     let mut graph_update_txids: Vec<Txid> = graph_update.full_txs().map(|tx| tx.txid).collect();
     graph_update_txids.sort();
     let mut expected_txids = vec![txid1, txid2];
