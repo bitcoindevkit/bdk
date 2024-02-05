@@ -390,6 +390,22 @@ impl<'a, D, Cs: CoinSelectionAlgorithm, Ctx: TxBuilderContext> TxBuilder<'a, D, 
         psbt_input: psbt::Input,
         satisfaction_weight: usize,
     ) -> Result<&mut Self, AddForeignUtxoError> {
+        self.add_foreign_utxo_with_sequence(
+            outpoint,
+            psbt_input,
+            satisfaction_weight,
+            Sequence::MAX,
+        )
+    }
+
+    /// Same as [add_foreign_utxo](TxBuilder::add_foreign_utxo) but allows to set the nSequence value.
+    pub fn add_foreign_utxo_with_sequence(
+        &mut self,
+        outpoint: OutPoint,
+        psbt_input: psbt::Input,
+        satisfaction_weight: usize,
+        sequence: Sequence,
+    ) -> Result<&mut Self, AddForeignUtxoError> {
         if psbt_input.witness_utxo.is_none() {
             match psbt_input.non_witness_utxo.as_ref() {
                 Some(tx) => {
@@ -413,6 +429,7 @@ impl<'a, D, Cs: CoinSelectionAlgorithm, Ctx: TxBuilderContext> TxBuilder<'a, D, 
             satisfaction_weight,
             utxo: Utxo::Foreign {
                 outpoint,
+                sequence: Some(sequence),
                 psbt_input: Box::new(psbt_input),
             },
         });

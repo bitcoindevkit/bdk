@@ -1347,7 +1347,7 @@ impl<D> Wallet<D> {
             }
             Some(tx_builder::Version(x)) => x,
             None if requirements.csv.is_some() => 2,
-            _ => 1,
+            None => 1,
         };
 
         // We use a match here instead of a unwrap_or_else as it's way more readable :)
@@ -1400,6 +1400,7 @@ impl<D> Wallet<D> {
             }
         };
 
+        // The nSequence to be by default for inputs unless an explicit sequence is specified.
         let n_sequence = match (params.rbf, requirements.csv) {
             // No RBF or CSV but there's an nLockTime, so the nSequence cannot be final
             (None, None) if lock_time != absolute::LockTime::ZERO => {
@@ -1558,7 +1559,7 @@ impl<D> Wallet<D> {
             .map(|u| bitcoin::TxIn {
                 previous_output: u.outpoint(),
                 script_sig: ScriptBuf::default(),
-                sequence: n_sequence,
+                sequence: u.sequence().unwrap_or(n_sequence),
                 witness: Witness::new(),
             })
             .collect();
@@ -1738,6 +1739,7 @@ impl<D> Wallet<D> {
                             satisfaction_weight,
                             utxo: Utxo::Foreign {
                                 outpoint: txin.previous_output,
+                                sequence: Some(txin.sequence),
                                 psbt_input: Box::new(psbt::Input {
                                     witness_utxo: Some(txout.clone()),
                                     non_witness_utxo: Some(prev_tx.clone()),
@@ -2218,8 +2220,9 @@ impl<D> Wallet<D> {
                         }
                 }
                 Utxo::Foreign {
-                    psbt_input: foreign_psbt_input,
                     outpoint,
+                    psbt_input: foreign_psbt_input,
+                    ..
                 } => {
                     let is_taproot = foreign_psbt_input
                         .witness_utxo
