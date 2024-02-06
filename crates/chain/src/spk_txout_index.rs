@@ -270,36 +270,39 @@ impl<I: Clone + Ord> SpkTxOutIndex<I> {
         self.spk_indices.get(script)
     }
 
-    /// Computes total input value going from script pubkeys in the index (sent) and the total output
-    /// value going to script pubkeys in the index (received) in `tx`. For the `sent` to be computed
-    /// correctly, the output being spent must have already been scanned by the index. Calculating
-    /// received just uses the [`Transaction`] outputs directly, so it will be correct even if it has
-    /// not been scanned.
-    pub fn sent_and_received(&self, tx: &Transaction) -> (u64, u64) {
+    /// Computes the total value transfer effect `tx` has on the script pubkeys in `range`. Value is
+    /// *sent* when a script pubkey in the `range` is on an input and *received* when it is on an
+    /// output. For `sent` to be computed correctly, the output being spent must have already been
+    /// scanned by the index. Calculating received just uses the [`Transaction`] outputs directly,
+    /// so it will be correct even if it has not been scanned.
+    pub fn sent_and_received(&self, tx: &Transaction, range: impl RangeBounds<I>) -> (u64, u64) {
         let mut sent = 0;
         let mut received = 0;
 
         for txin in &tx.input {
-            if let Some((_, txout)) = self.txout(txin.previous_output) {
-                sent += txout.value.to_sat();
+            if let Some((index, txout)) = self.txout(txin.previous_output) {
+                if range.contains(index) {
+                    sent += txout.value.to_sat();
+                }
             }
         }
         for txout in &tx.output {
-            if self.index_of_spk(&txout.script_pubkey).is_some() {
-                received += txout.value.to_sat();
+            if let Some(index) = self.index_of_spk(&txout.script_pubkey) {
+                if range.contains(index) {
+                    received += txout.value.to_sat();
+                }
             }
         }
 
         (sent, received)
     }
 
-    /// Computes the net value that this transaction gives to the script pubkeys in the index and
-    /// *takes* from the transaction outputs in the index. Shorthand for calling
-    /// [`sent_and_received`] and subtracting sent from received.
+    /// Computes the net value transfer effect of `tx` on the script pubkeys in `range`. Shorthand
+    /// for calling [`sent_and_received`] and subtracting sent from received.
     ///
     /// [`sent_and_received`]: Self::sent_and_received
-    pub fn net_value(&self, tx: &Transaction) -> i64 {
-        let (sent, received) = self.sent_and_received(tx);
+    pub fn net_value(&self, tx: &Transaction, range: impl RangeBounds<I>) -> i64 {
+        let (sent, received) = self.sent_and_received(tx, range);
         received as i64 - sent as i64
     }
 

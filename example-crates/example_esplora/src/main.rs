@@ -241,8 +241,8 @@ fn main() -> anyhow::Result<()> {
                 if *all_spks {
                     let all_spks = graph
                         .index
-                        .revealed_spks()
-                        .map(|(k, i, spk)| (k, i, spk.to_owned()))
+                        .revealed_spks(..)
+                        .map(|(k, i, spk)| (k.to_owned(), i, spk.to_owned()))
                         .collect::<Vec<_>>();
                     spks = Box::new(spks.chain(all_spks.into_iter().map(|(k, i, spk)| {
                         eprintln!("scanning {}:{}", k, i);

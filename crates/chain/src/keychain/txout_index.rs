@@ -268,15 +268,14 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
         self.inner.unmark_used(&(keychain, index))
     }
 
-    /// Computes total input value going from script pubkeys in the index (sent) and the total output
-    /// value going to script pubkeys in the index (received) in `tx`. For the `sent` to be computed
-    /// correctly, the output being spent must have already been scanned by the index. Calculating
-    /// received just uses the [`Transaction`] outputs directly, so it will be correct even if it has
-    /// not been scanned.
-    ///
-    /// This calls [`SpkTxOutIndex::sent_and_received`] internally.
-    pub fn sent_and_received(&self, tx: &Transaction) -> (u64, u64) {
-        self.inner.sent_and_received(tx)
+    /// Computes the total value transfer effect `tx` has on the script pubkeys belonging to the
+    /// keychains in `range`. Value is *sent* when a script pubkey in the `range` is on an input and
+    /// *received* when it is on an output. For `sent` to be computed correctly, the output being
+    /// spent must have already been scanned by the index. Calculating received just uses the
+    /// [`Transaction`] outputs directly, so it will be correct even if it has not been scanned.
+    pub fn sent_and_received(&self, tx: &Transaction, range: impl RangeBounds<K>) -> (u64, u64) {
+        self.inner
+            .sent_and_received(tx, Self::map_to_inner_bounds(range))
     }
 
     /// Computes the net value that this transaction gives to the script pubkeys in the index and
@@ -286,8 +285,8 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     /// This calls [`SpkTxOutIndex::net_value`] internally.
     ///
     /// [`sent_and_received`]: Self::sent_and_received
-    pub fn net_value(&self, tx: &Transaction) -> i64 {
-        self.inner.net_value(tx)
+    pub fn net_value(&self, tx: &Transaction, range: impl RangeBounds<K>) -> i64 {
+        self.inner.net_value(tx, Self::map_to_inner_bounds(range))
     }
 }
 
@@ -390,24 +389,32 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
             .collect()
     }
 
-    /// Iterate over revealed spks of all keychains.
-    pub fn revealed_spks(&self) -> impl DoubleEndedIterator<Item = (K, u32, &Script)> + Clone {
-        self.keychains.keys().flat_map(|keychain| {
-            self.revealed_keychain_spks(keychain)
-                .map(|(i, spk)| (keychain.clone(), i, spk))
+    /// Iterate over revealed spks of keychains in `range`
+    pub fn revealed_spks(
+        &self,
+        range: impl RangeBounds<K>,
+    ) -> impl DoubleEndedIterator<Item = (&K, u32, &Script)> + Clone {
+        self.keychains.range(range).flat_map(|(keychain, _)| {
+            let start = Bound::Included((keychain.clone(), u32::MIN));
+            let end = match self.last_revealed.get(keychain) {
+                Some(last_revealed) => Bound::Included((keychain.clone(), *last_revealed)),
+                None => Bound::Excluded((keychain.clone(), u32::MIN)),
+            };
+
+            self.inner
+                .all_spks()
+                .range((start, end))
+                .map(|((keychain, i), spk)| (keychain, *i, spk.as_script()))
         })
     }
 
     /// Iterate over revealed spks of the given `keychain`.
-    pub fn revealed_keychain_spks(
-        &self,
-        keychain: &K,
-    ) -> impl DoubleEndedIterator<Item = (u32, &Script)> + Clone {
-        let next_i = self.last_revealed.get(keychain).map_or(0, |&i| i + 1);
-        self.inner
-            .all_spks()
-            .range((keychain.clone(), u32::MIN)..(keychain.clone(), next_i))
-            .map(|((_, i), spk)| (*i, spk.as_script()))
+    pub fn revealed_keychain_spks<'a>(
+        &'a self,
+        keychain: &'a K,
+    ) -> impl DoubleEndedIterator<Item = (u32, &Script)> + 'a {
+        self.revealed_spks(keychain..=keychain)
+            .map(|(_, i, spk)| (i, spk))
     }
 
     /// Iterate over revealed, but unused, spks of all keychains.
@@ -617,38 +624,40 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
         }
     }
 
-    /// Iterate over all [`OutPoint`]s that point to `TxOut`s with script pubkeys derived from
+    /// Iterate over all [`OutPoint`]s that have `TxOut`s with script pubkeys derived from
     /// `keychain`.
-    ///
-    /// Use [`keychain_outpoints_in_range`](KeychainTxOutIndex::keychain_outpoints_in_range) to
-    /// iterate over a specific derivation range.
-    pub fn keychain_outpoints(
-        &self,
-        keychain: &K,
-    ) -> impl DoubleEndedIterator<Item = (u32, OutPoint)> + '_ {
-        self.keychain_outpoints_in_range(keychain, ..)
+    pub fn keychain_outpoints<'a>(
+        &'a self,
+        keychain: &'a K,
+    ) -> impl DoubleEndedIterator<Item = (u32, OutPoint)> + 'a {
+        self.keychain_outpoints_in_range(keychain..=keychain)
+            .map(move |(_, i, op)| (i, op))
     }
 
-    /// Iterate over [`OutPoint`]s that point to `TxOut`s with script pubkeys derived from
-    /// `keychain` in a given derivation `range`.
-    pub fn keychain_outpoints_in_range(
-        &self,
-        keychain: &K,
-        range: impl RangeBounds<u32>,
-    ) -> impl DoubleEndedIterator<Item = (u32, OutPoint)> + '_ {
-        let start = match range.start_bound() {
-            Bound::Included(i) => Bound::Included((keychain.clone(), *i)),
-            Bound::Excluded(i) => Bound::Excluded((keychain.clone(), *i)),
-            Bound::Unbounded => Bound::Unbounded,
-        };
-        let end = match range.end_bound() {
-            Bound::Included(i) => Bound::Included((keychain.clone(), *i)),
-            Bound::Excluded(i) => Bound::Excluded((keychain.clone(), *i)),
-            Bound::Unbounded => Bound::Unbounded,
-        };
+    /// Iterate over [`OutPoint`]s that have script pubkeys derived from keychains in `range`.
+    pub fn keychain_outpoints_in_range<'a>(
+        &'a self,
+        range: impl RangeBounds<K> + 'a,
+    ) -> impl DoubleEndedIterator<Item = (&'a K, u32, OutPoint)> + 'a {
+        let bounds = Self::map_to_inner_bounds(range);
         self.inner
-            .outputs_in_range((start, end))
-            .map(|((_, i), op)| (*i, op))
+            .outputs_in_range(bounds)
+            .map(move |((keychain, i), op)| (keychain, *i, op))
+    }
+
+    fn map_to_inner_bounds(bound: impl RangeBounds<K>) -> impl RangeBounds<(K, u32)> {
+        let start = match bound.start_bound() {
+            Bound::Included(keychain) => Bound::Included((keychain.clone(), u32::MIN)),
+            Bound::Excluded(keychain) => Bound::Excluded((keychain.clone(), u32::MAX)),
+            Bound::Unbounded => Bound::Unbounded,
+        };
+        let end = match bound.end_bound() {
+            Bound::Included(keychain) => Bound::Included((keychain.clone(), u32::MAX)),
+            Bound::Excluded(keychain) => Bound::Excluded((keychain.clone(), u32::MIN)),
+            Bound::Unbounded => Bound::Unbounded,
+        };
+
+        (start, end)
     }
 
     /// Returns the highest derivation index of the `keychain` where [`KeychainTxOutIndex`] has

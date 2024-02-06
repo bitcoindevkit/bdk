@@ -1015,7 +1015,7 @@ impl<D> Wallet<D> {
     /// let (sent, received) = wallet.sent_and_received(tx);
     /// ```
     pub fn sent_and_received(&self, tx: &Transaction) -> (u64, u64) {
-        self.indexed_graph.index.sent_and_received(tx)
+        self.indexed_graph.index.sent_and_received(tx, ..)
     }
 
     /// Get a single transaction from the wallet as a [`CanonicalTx`] (if the transaction exists).
