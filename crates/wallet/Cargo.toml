@@ -1,5 +1,5 @@
 [package]
-name = "bdk"
+name = "bdk_wallet"
 homepage = "https://bitcoindevkit.org"
 version = "1.0.0-alpha.11"
 repository = "https://github.com/bitcoindevkit/bdk"

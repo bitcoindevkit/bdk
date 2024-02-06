@@ -1,5 +1,5 @@
-use bdk::bitcoin::{Amount, FeeRate, Psbt, TxIn};
-use bdk::{psbt, KeychainKind, SignOptions};
+use bdk_wallet::bitcoin::{Amount, FeeRate, Psbt, TxIn};
+use bdk_wallet::{psbt, KeychainKind, SignOptions};
 use core::str::FromStr;
 mod common;
 use common::*;
@@ -156,8 +156,8 @@ fn test_psbt_fee_rate_with_missing_txout() {
 
 #[test]
 fn test_psbt_multiple_internalkey_signers() {
-    use bdk::signer::{SignerContext, SignerOrdering, SignerWrapper};
-    use bdk::KeychainKind;
+    use bdk_wallet::signer::{SignerContext, SignerOrdering, SignerWrapper};
+    use bdk_wallet::KeychainKind;
     use bitcoin::key::TapTweak;
     use bitcoin::secp256k1::{schnorr, Keypair, Message, Secp256k1, XOnlyPublicKey};
     use bitcoin::sighash::{Prevouts, SighashCache, TapSighashType};

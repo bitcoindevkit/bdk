@@ -16,10 +16,10 @@
 //! ```
 //! # use std::str::FromStr;
 //! # use bitcoin::*;
-//! # use bdk::*;
-//! # use bdk::wallet::ChangeSet;
-//! # use bdk::wallet::error::CreateTxError;
-//! # use bdk::wallet::tx_builder::CreateTx;
+//! # use bdk_wallet::*;
+//! # use bdk_wallet::wallet::ChangeSet;
+//! # use bdk_wallet::wallet::error::CreateTxError;
+//! # use bdk_wallet::wallet::tx_builder::CreateTx;
 //! # use bdk_persist::PersistBackend;
 //! # use anyhow::Error;
 //! # let to_address = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap().assume_checked();
@@ -78,12 +78,12 @@ impl TxBuilderContext for BumpFee {}
 /// as in the following example:
 ///
 /// ```
-/// # use bdk::*;
-/// # use bdk::wallet::tx_builder::*;
+/// # use bdk_wallet::*;
+/// # use bdk_wallet::wallet::tx_builder::*;
 /// # use bitcoin::*;
 /// # use core::str::FromStr;
-/// # use bdk::wallet::ChangeSet;
-/// # use bdk::wallet::error::CreateTxError;
+/// # use bdk_wallet::wallet::ChangeSet;
+/// # use bdk_wallet::wallet::error::CreateTxError;
 /// # use bdk_persist::PersistBackend;
 /// # use anyhow::Error;
 /// # let mut wallet = doctest_wallet!();
@@ -263,7 +263,7 @@ impl<'a, Cs, Ctx> TxBuilder<'a, Cs, Ctx> {
     /// # use std::str::FromStr;
     /// # use std::collections::BTreeMap;
     /// # use bitcoin::*;
-    /// # use bdk::*;
+    /// # use bdk_wallet::*;
     /// # let to_address =
     /// Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt")
     ///     .unwrap()
@@ -759,10 +759,10 @@ impl<'a, Cs: CoinSelectionAlgorithm> TxBuilder<'a, Cs, CreateTx> {
     /// ```
     /// # use std::str::FromStr;
     /// # use bitcoin::*;
-    /// # use bdk::*;
-    /// # use bdk::wallet::ChangeSet;
-    /// # use bdk::wallet::error::CreateTxError;
-    /// # use bdk::wallet::tx_builder::CreateTx;
+    /// # use bdk_wallet::*;
+    /// # use bdk_wallet::wallet::ChangeSet;
+    /// # use bdk_wallet::wallet::error::CreateTxError;
+    /// # use bdk_wallet::wallet::tx_builder::CreateTx;
     /// # use bdk_persist::PersistBackend;
     /// # use anyhow::Error;
     /// # let to_address =

@@ -6,7 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-bdk = { path = "../../crates/bdk" }
+bdk_wallet = { path = "../../crates/wallet" }
 bdk_esplora = { path = "../../crates/esplora", features = ["async-https"] }
 bdk_file_store = { path = "../../crates/file_store" }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }

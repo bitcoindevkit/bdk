@@ -4,7 +4,7 @@ version = "0.2.0"
 edition = "2021"
 
 [dependencies]
-bdk = { path = "../../crates/bdk" }
+bdk_wallet = { path = "../../crates/wallet" }
 bdk_electrum = { path = "../../crates/electrum" }
 bdk_file_store = { path = "../../crates/file_store" }
 anyhow = "1"

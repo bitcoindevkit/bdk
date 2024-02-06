@@ -1,18 +1,18 @@
 use std::str::FromStr;
 
 use assert_matches::assert_matches;
-use bdk::descriptor::{calc_checksum, IntoWalletDescriptor};
-use bdk::psbt::PsbtUtils;
-use bdk::signer::{SignOptions, SignerError};
-use bdk::wallet::coin_selection::{self, LargestFirstCoinSelection};
-use bdk::wallet::error::CreateTxError;
-use bdk::wallet::tx_builder::AddForeignUtxoError;
-use bdk::wallet::NewError;
-use bdk::wallet::{AddressInfo, Balance, Wallet};
-use bdk::KeychainKind;
 use bdk_chain::collections::BTreeMap;
 use bdk_chain::COINBASE_MATURITY;
 use bdk_chain::{BlockId, ConfirmationTime};
+use bdk_wallet::descriptor::{calc_checksum, IntoWalletDescriptor};
+use bdk_wallet::psbt::PsbtUtils;
+use bdk_wallet::signer::{SignOptions, SignerError};
+use bdk_wallet::wallet::coin_selection::{self, LargestFirstCoinSelection};
+use bdk_wallet::wallet::error::CreateTxError;
+use bdk_wallet::wallet::tx_builder::AddForeignUtxoError;
+use bdk_wallet::wallet::NewError;
+use bdk_wallet::wallet::{AddressInfo, Balance, Wallet};
+use bdk_wallet::KeychainKind;
 use bitcoin::hashes::Hash;
 use bitcoin::key::Secp256k1;
 use bitcoin::psbt;
@@ -137,7 +137,7 @@ fn new_or_load() {
         assert!(
             matches!(
                 err,
-                bdk::wallet::NewOrLoadError::LoadedNetworkDoesNotMatch {
+                bdk_wallet::wallet::NewOrLoadError::LoadedNetworkDoesNotMatch {
                     got: Some(Network::Testnet),
                     expected: Network::Bitcoin
                 }
@@ -166,7 +166,7 @@ fn new_or_load() {
         assert!(
             matches!(
                 err,
-                bdk::wallet::NewOrLoadError::LoadedGenesisDoesNotMatch { got, expected }
+                bdk_wallet::wallet::NewOrLoadError::LoadedGenesisDoesNotMatch { got, expected }
                 if got == Some(got_blockhash) && expected == exp_blockhash
             ),
             "err: {}",
@@ -189,7 +189,7 @@ fn new_or_load() {
         assert!(
             matches!(
                 err,
-                bdk::wallet::NewOrLoadError::LoadedDescriptorDoesNotMatch { ref got, keychain }
+                bdk_wallet::wallet::NewOrLoadError::LoadedDescriptorDoesNotMatch { ref got, keychain }
                 if got == &Some(got_descriptor) && keychain == KeychainKind::External
             ),
             "err: {}",
@@ -209,7 +209,7 @@ fn new_or_load() {
         assert!(
             matches!(
                 err,
-                bdk::wallet::NewOrLoadError::LoadedDescriptorDoesNotMatch { ref got, keychain }
+                bdk_wallet::wallet::NewOrLoadError::LoadedDescriptorDoesNotMatch { ref got, keychain }
                 if got == &got_descriptor && keychain == KeychainKind::Internal
             ),
             "err: {}",
@@ -791,7 +791,7 @@ fn test_create_tx_absolute_high_fee() {
 
 #[test]
 fn test_create_tx_add_change() {
-    use bdk::wallet::tx_builder::TxOrdering;
+    use bdk_wallet::wallet::tx_builder::TxOrdering;
 
     let (mut wallet, _) = get_funded_wallet(get_test_wpkh());
     let addr = wallet.next_unused_address(KeychainKind::External).unwrap();
@@ -846,7 +846,7 @@ fn test_create_tx_ordering_respected() {
     builder
         .add_recipient(addr.script_pubkey(), Amount::from_sat(30_000))
         .add_recipient(addr.script_pubkey(), Amount::from_sat(10_000))
-        .ordering(bdk::wallet::tx_builder::TxOrdering::Bip69Lexicographic);
+        .ordering(bdk_wallet::wallet::tx_builder::TxOrdering::Bip69Lexicographic);
     let psbt = builder.finish().unwrap();
     let fee = check_fee!(wallet, psbt);
 
@@ -2951,7 +2951,7 @@ fn test_sending_to_bip350_bech32m_address() {
 
 #[test]
 fn test_get_address() {
-    use bdk::descriptor::template::Bip84;
+    use bdk_wallet::descriptor::template::Bip84;
     let key = bitcoin::bip32::Xpriv::from_str("tprv8ZgxMBicQKsPcx5nBGsR63Pe8KnRUqmbJNENAfGftF3yuXoMMoVJJcYeUw5eVkm9WBPjWYt6HMWYJNesB5HaNVBaFc1M6dRjWSYnmewUMYy").unwrap();
     let wallet = Wallet::new_no_persist(
         Bip84(key, KeychainKind::External),
@@ -3022,7 +3022,7 @@ fn test_reveal_addresses() {
 
 #[test]
 fn test_get_address_no_reuse_single_descriptor() {
-    use bdk::descriptor::template::Bip84;
+    use bdk_wallet::descriptor::template::Bip84;
     use std::collections::HashSet;
 
     let key = bitcoin::bip32::Xpriv::from_str("tprv8ZgxMBicQKsPcx5nBGsR63Pe8KnRUqmbJNENAfGftF3yuXoMMoVJJcYeUw5eVkm9WBPjWYt6HMWYJNesB5HaNVBaFc1M6dRjWSYnmewUMYy").unwrap();
@@ -3384,7 +3384,7 @@ fn test_taproot_script_spend() {
 
 #[test]
 fn test_taproot_script_spend_sign_all_leaves() {
-    use bdk::signer::TapLeavesOptions;
+    use bdk_wallet::signer::TapLeavesOptions;
     let (mut wallet, _) = get_funded_wallet(get_test_tr_with_taptree_both_priv());
     let addr = wallet.next_unused_address(KeychainKind::External).unwrap();
 
@@ -3413,7 +3413,7 @@ fn test_taproot_script_spend_sign_all_leaves() {
 
 #[test]
 fn test_taproot_script_spend_sign_include_some_leaves() {
-    use bdk::signer::TapLeavesOptions;
+    use bdk_wallet::signer::TapLeavesOptions;
     use bitcoin::taproot::TapLeafHash;
 
     let (mut wallet, _) = get_funded_wallet(get_test_tr_with_taptree_both_priv());
@@ -3453,7 +3453,7 @@ fn test_taproot_script_spend_sign_include_some_leaves() {
 
 #[test]
 fn test_taproot_script_spend_sign_exclude_some_leaves() {
-    use bdk::signer::TapLeavesOptions;
+    use bdk_wallet::signer::TapLeavesOptions;
     use bitcoin::taproot::TapLeafHash;
 
     let (mut wallet, _) = get_funded_wallet(get_test_tr_with_taptree_both_priv());
@@ -3493,7 +3493,7 @@ fn test_taproot_script_spend_sign_exclude_some_leaves() {
 
 #[test]
 fn test_taproot_script_spend_sign_no_leaves() {
-    use bdk::signer::TapLeavesOptions;
+    use bdk_wallet::signer::TapLeavesOptions;
     let (mut wallet, _) = get_funded_wallet(get_test_tr_with_taptree_both_priv());
     let addr = wallet.next_unused_address(KeychainKind::External).unwrap();
 
