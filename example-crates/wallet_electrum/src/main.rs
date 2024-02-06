@@ -6,19 +6,20 @@ const BATCH_SIZE: usize = 5;
 use std::io::Write;
 use std::str::FromStr;
 
-use bdk::bitcoin::Address;
-use bdk::wallet::Update;
-use bdk::SignOptions;
-use bdk::{bitcoin::Network, Wallet};
 use bdk_electrum::{
     electrum_client::{self, ElectrumApi},
     ElectrumExt, ElectrumUpdate,
 };
 use bdk_file_store::Store;
+use bdk_wallet::bitcoin::Address;
+use bdk_wallet::wallet::Update;
+use bdk_wallet::SignOptions;
+use bdk_wallet::{bitcoin::Network, Wallet};
 
 fn main() -> Result<(), anyhow::Error> {
     let db_path = std::env::temp_dir().join("bdk-electrum-example");
-    let db = Store::<bdk::wallet::ChangeSet>::open_or_create_new(DB_MAGIC.as_bytes(), db_path)?;
+    let db =
+        Store::<bdk_wallet::wallet::ChangeSet>::open_or_create_new(DB_MAGIC.as_bytes(), db_path)?;
     let external_descriptor = "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/84'/1'/0'/0/*)";
     let internal_descriptor = "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/84'/1'/0'/1/*)";
 
@@ -29,7 +30,7 @@ fn main() -> Result<(), anyhow::Error> {
         Network::Testnet,
     )?;
 
-    let address = wallet.try_get_address(bdk::wallet::AddressIndex::New)?;
+    let address = wallet.try_get_address(bdk_wallet::wallet::AddressIndex::New)?;
     println!("Generated Address: {}", address);
 
     let balance = wallet.get_balance();

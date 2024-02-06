@@ -1,9 +1,7 @@
-use bdk::bitcoin::FeeRate;
-use bdk::bitcoin::TxIn;
-use bdk::wallet::AddressIndex;
-use bdk::wallet::AddressIndex::New;
-use bdk::{psbt, SignOptions};
-use bitcoin::psbt::PartiallySignedTransaction as Psbt;
+use bdk_wallet::bitcoin::{psbt::PartiallySignedTransaction as Psbt, FeeRate, TxIn};
+use bdk_wallet::wallet::AddressIndex;
+use bdk_wallet::wallet::AddressIndex::New;
+use bdk_wallet::{psbt, SignOptions};
 use core::str::FromStr;
 mod common;
 use common::*;
@@ -160,8 +158,8 @@ fn test_psbt_fee_rate_with_missing_txout() {
 
 #[test]
 fn test_psbt_multiple_internalkey_signers() {
-    use bdk::signer::{SignerContext, SignerOrdering, SignerWrapper};
-    use bdk::KeychainKind;
+    use bdk_wallet::signer::{SignerContext, SignerOrdering, SignerWrapper};
+    use bdk_wallet::KeychainKind;
     use bitcoin::key::TapTweak;
     use bitcoin::secp256k1::{schnorr, KeyPair, Message, Secp256k1, XOnlyPublicKey};
     use bitcoin::sighash::{Prevouts, SighashCache, TapSighashType};
@@ -182,10 +180,10 @@ fn test_psbt_multiple_internalkey_signers() {
     let mut psbt = builder.finish().unwrap();
     let unsigned_tx = psbt.unsigned_tx.clone();
 
-    // Adds a signer for the wrong internal key, bdk should not use this key to sign
+    // Adds a signer for the wrong internal key, bdk's wallet should not use this key to sign
     wallet.add_signer(
         KeychainKind::External,
-        // A signerordering lower than 100, bdk will use this signer first
+        // A signerordering lower than 100, bdk's wallet will use this signer first
         SignerOrdering(0),
         Arc::new(SignerWrapper::new(
             PrivateKey::from_wif("5J5PZqvCe1uThJ3FZeUUFLCh2FuK9pZhtEK4MzhNmugqTmxCdwE").unwrap(),

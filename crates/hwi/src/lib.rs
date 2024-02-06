@@ -3,11 +3,11 @@
 //! This crate contains HWISigner, an implementation of a [`TransactionSigner`] to be
 //! used with hardware wallets.
 //! ```no_run
-//! # use bdk::bitcoin::Network;
-//! # use bdk::signer::SignerOrdering;
+//! # use bdk_wallet::bitcoin::Network;
+//! # use bdk_wallet::signer::SignerOrdering;
 //! # use bdk_hwi::HWISigner;
-//! # use bdk::wallet::AddressIndex::New;
-//! # use bdk::{KeychainKind, SignOptions, Wallet};
+//! # use bdk_wallet::wallet::AddressIndex::New;
+//! # use bdk_wallet::{KeychainKind, SignOptions, Wallet};
 //! # use hwi::HWIClient;
 //! # use std::sync::Arc;
 //! #
@@ -36,7 +36,7 @@
 //! # }
 //! ```
 //!
-//! [`TransactionSigner`]: bdk::wallet::signer::TransactionSigner
+//! [`TransactionSigner`]: bdk_wallet::wallet::signer::TransactionSigner
 
 mod signer;
 pub use signer::*;

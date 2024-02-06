@@ -4,7 +4,7 @@
 $ cargo run --bin wallet_rpc -- --help
 
 wallet_rpc 0.1.0
-Bitcoind RPC example using `bdk::Wallet`
+Bitcoind RPC example using `bdk_wallet::Wallet`
 
 USAGE:
     wallet_rpc [OPTIONS] <DESCRIPTOR> [CHANGE_DESCRIPTOR]

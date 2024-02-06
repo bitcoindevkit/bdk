@@ -20,10 +20,10 @@
 //!
 //! ```
 //! # use std::sync::Arc;
-//! # use bdk::descriptor::*;
-//! # use bdk::wallet::signer::*;
-//! # use bdk::bitcoin::secp256k1::Secp256k1;
-//! use bdk::descriptor::policy::BuildSatisfaction;
+//! # use bdk_wallet::descriptor::*;
+//! # use bdk_wallet::wallet::signer::*;
+//! # use bdk_wallet::bitcoin::secp256k1::Secp256k1;
+//! use bdk_wallet::descriptor::policy::BuildSatisfaction;
 //! let secp = Secp256k1::new();
 //! let desc = "wsh(and_v(v:pk(cV3oCth6zxZ1UVsHLnGothsWNsaoxRhC6aeNi5VbSdFpwUkgkEci),or_d(pk(cVMTy7uebJgvFaSBwcgvwk8qn8xSLc97dKow4MBetjrrahZoimm2),older(12960))))";
 //!
