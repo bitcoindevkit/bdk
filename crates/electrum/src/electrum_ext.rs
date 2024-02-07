@@ -23,6 +23,11 @@ const CHAIN_SUFFIX_LENGTH: u32 = 8;
 pub struct RelevantTxids(HashMap<Txid, BTreeSet<ConfirmationHeightAnchor>>);
 
 impl RelevantTxids {
+    /// List txids fetched from the Electrum server.
+    pub fn txids(&self) -> impl ExactSizeIterator<Item = Txid> + '_ {
+        self.0.keys().copied()
+    }
+
     /// Determine the full transactions that are missing from `graph`.
     ///
     /// Refer to [`RelevantTxids`] for more details.
