@@ -76,8 +76,8 @@
 //! [`insert_txout`]: TxGraph::insert_txout
 
 use crate::{
-    collections::*, keychain::Balance, local_chain::LocalChain, Anchor, Append, BlockId,
-    ChainOracle, ChainPosition, FullTxOut,
+    collections::*, local_chain::LocalChain, Anchor, Append, Balance, BlockId, ChainOracle,
+    ChainPosition, FullTxOut,
 };
 use alloc::collections::vec_deque::VecDeque;
 use alloc::vec::Vec;

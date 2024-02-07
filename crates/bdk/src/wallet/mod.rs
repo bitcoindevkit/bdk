@@ -19,7 +19,7 @@ use alloc::{
     sync::Arc,
     vec::Vec,
 };
-pub use bdk_chain::keychain::Balance;
+pub use bdk_chain::Balance;
 use bdk_chain::{
     indexed_tx_graph,
     keychain::{self, KeychainTxOutIndex},
