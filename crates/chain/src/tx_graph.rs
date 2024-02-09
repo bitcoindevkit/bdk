@@ -67,7 +67,10 @@
 //!
 //! // if we apply it again, the resulting changeset will be empty
 //! let changeset = graph.apply_update(update);
-//! assert!(changeset.is_empty());
+//! assert!({
+//!     use bdk_chain::Append;
+//!     changeset.is_empty()
+//! });
 //! ```
 //! [`try_get_chain_position`]: TxGraph::try_get_chain_position
 //! [`insert_txout`]: TxGraph::insert_txout
@@ -1212,14 +1215,6 @@ impl<A> Default for ChangeSet<A> {
 }
 
 impl<A> ChangeSet<A> {
-    /// Returns true if the [`ChangeSet`] is empty (no transactions or txouts).
-    pub fn is_empty(&self) -> bool {
-        self.txs.is_empty()
-            && self.txouts.is_empty()
-            && self.anchors.is_empty()
-            && self.last_seen.is_empty()
-    }
-
     /// Iterates over all outpoints contained within [`ChangeSet`].
     pub fn txouts(&self) -> impl Iterator<Item = (OutPoint, &TxOut)> {
         self.txs
