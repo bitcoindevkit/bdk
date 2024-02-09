@@ -40,20 +40,23 @@
 //! # use bdk_chain::example_utils::*;
 //! # use bitcoin::Transaction;
 //! # let tx_a = tx_from_hex(RAW_TX_1);
-//! let mut graph: TxGraph = TxGraph::default();
-//! let mut another_graph: TxGraph = TxGraph::default();
+//! let mut tx_graph: TxGraph = TxGraph::default();
 //!
 //! // insert a transaction
-//! let changeset = graph.insert_tx(tx_a);
+//! let changeset = tx_graph.insert_tx(tx_a);
 //!
-//! // the resulting changeset can be applied to another tx graph
-//! another_graph.apply_changeset(changeset);
+//! // We can restore the state of the `tx_graph` by applying all
+//! // the changesets obtained by mutating the original (the order doesn't matter).
+//! let mut restored_tx_graph: TxGraph = TxGraph::default();
+//! restored_tx_graph.apply_changeset(changeset);
+//!
+//! assert_eq!(tx_graph, restored_tx_graph);
 //! ```
 //!
-//! A [`TxGraph`] can also be updated with another [`TxGraph`].
+//! A [`TxGraph`] can also be updated with another [`TxGraph`] which merges them together.
 //!
 //! ```
-//! # use bdk_chain::BlockId;
+//! # use bdk_chain::{Append, BlockId};
 //! # use bdk_chain::tx_graph::TxGraph;
 //! # use bdk_chain::example_utils::*;
 //! # use bitcoin::Transaction;
@@ -67,10 +70,7 @@
 //!
 //! // if we apply it again, the resulting changeset will be empty
 //! let changeset = graph.apply_update(update);
-//! assert!({
-//!     use bdk_chain::Append;
-//!     changeset.is_empty()
-//! });
+//! assert!(changeset.is_empty());
 //! ```
 //! [`try_get_chain_position`]: TxGraph::try_get_chain_position
 //! [`insert_txout`]: TxGraph::insert_txout
