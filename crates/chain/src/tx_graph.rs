@@ -1214,7 +1214,10 @@ impl<A> Default for ChangeSet<A> {
 impl<A> ChangeSet<A> {
     /// Returns true if the [`ChangeSet`] is empty (no transactions or txouts).
     pub fn is_empty(&self) -> bool {
-        self.txs.is_empty() && self.txouts.is_empty()
+        self.txs.is_empty()
+            && self.txouts.is_empty()
+            && self.anchors.is_empty()
+            && self.last_seen.is_empty()
     }
 
     /// Iterates over all outpoints contained within [`ChangeSet`].

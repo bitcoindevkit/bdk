@@ -213,7 +213,8 @@ fn insert_tx_graph_doesnt_count_coinbase_as_spent() {
     };
 
     let mut graph = TxGraph::<()>::default();
-    let _ = graph.insert_tx(tx);
+    let changeset = graph.insert_tx(tx);
+    assert!(!changeset.is_empty());
     assert!(graph.outspends(OutPoint::null()).is_empty());
     assert!(graph.tx_spends(Txid::all_zeros()).next().is_none());
 }
@@ -289,7 +290,7 @@ fn insert_tx_displaces_txouts() {
         }],
     };
 
-    let _ = tx_graph.insert_txout(
+    let changeset = tx_graph.insert_txout(
         OutPoint {
             txid: tx.txid(),
             vout: 0,
@@ -299,6 +300,8 @@ fn insert_tx_displaces_txouts() {
             script_pubkey: ScriptBuf::default(),
         },
     );
+
+    assert!(!changeset.is_empty());
 
     let _ = tx_graph.insert_txout(
         OutPoint {
@@ -653,7 +656,8 @@ fn test_walk_ancestors() {
     ]);
 
     [&tx_a0, &tx_b1].iter().for_each(|&tx| {
-        let _ = graph.insert_anchor(tx.txid(), tip.block_id());
+        let changeset = graph.insert_anchor(tx.txid(), tip.block_id());
+        assert!(!changeset.is_empty());
     });
 
     let ancestors = [
@@ -1027,10 +1031,12 @@ fn test_changeset_last_seen_append() {
             last_seen: original_ls.map(|ls| (txid, ls)).into_iter().collect(),
             ..Default::default()
         };
+        assert!(!original.is_empty() || original_ls.is_none());
         let update = ChangeSet::<()> {
             last_seen: update_ls.map(|ls| (txid, ls)).into_iter().collect(),
             ..Default::default()
         };
+        assert!(!update.is_empty() || update_ls.is_none());
 
         original.append(update);
         assert_eq!(
