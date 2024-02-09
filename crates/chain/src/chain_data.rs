@@ -9,7 +9,7 @@ use crate::{Anchor, AnchorFromBlockPosition, COINBASE_MATURITY};
 pub enum ChainPosition<A> {
     /// The chain data is seen as confirmed, and in anchored by `A`.
     Confirmed(A),
-    /// The chain data is seen in mempool at this given timestamp.
+    /// The chain data is not confirmed and last seen in the mempool at this timestamp.
     Unconfirmed(u64),
 }
 
@@ -48,14 +48,14 @@ impl<A: Anchor> ChainPosition<A> {
     serde(crate = "serde_crate")
 )]
 pub enum ConfirmationTime {
-    /// The confirmed variant.
+    /// The transaction is confirmed
     Confirmed {
         /// Confirmation height.
         height: u32,
         /// Confirmation time in unix seconds.
         time: u64,
     },
-    /// The unconfirmed variant.
+    /// The transaction is unconfirmed
     Unconfirmed {
         /// The last-seen timestamp in unix seconds.
         last_seen: u64,
@@ -157,13 +157,12 @@ impl From<(&u32, &BlockHash)> for BlockId {
     serde(crate = "serde_crate")
 )]
 pub struct ConfirmationHeightAnchor {
-    /// The anchor block.
-    pub anchor_block: BlockId,
-
     /// The exact confirmation height of the transaction.
     ///
     /// It is assumed that this value is never larger than the height of the anchor block.
     pub confirmation_height: u32,
+    /// The anchor block.
+    pub anchor_block: BlockId,
 }
 
 impl Anchor for ConfirmationHeightAnchor {
@@ -198,12 +197,12 @@ impl AnchorFromBlockPosition for ConfirmationHeightAnchor {
     serde(crate = "serde_crate")
 )]
 pub struct ConfirmationTimeHeightAnchor {
+    /// The confirmation height of the transaction being anchored.
+    pub confirmation_height: u32,
+    /// The confirmation time of the transaction being anchored.
+    pub confirmation_time: u64,
     /// The anchor block.
     pub anchor_block: BlockId,
-    /// The confirmation height of the chain data being anchored.
-    pub confirmation_height: u32,
-    /// The confirmation time of the chain data being anchored.
-    pub confirmation_time: u64,
 }
 
 impl Anchor for ConfirmationTimeHeightAnchor {
@@ -229,12 +228,12 @@ impl AnchorFromBlockPosition for ConfirmationTimeHeightAnchor {
 /// A `TxOut` with as much data as we can retrieve about it
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct FullTxOut<A> {
+    /// The position of the transaction in `outpoint` in the overall chain.
+    pub chain_position: ChainPosition<A>,
     /// The location of the `TxOut`.
     pub outpoint: OutPoint,
     /// The `TxOut`.
     pub txout: TxOut,
-    /// The position of the transaction in `outpoint` in the overall chain.
-    pub chain_position: ChainPosition<A>,
     /// The txid and chain position of the transaction (if any) that has spent this output.
     pub spent_by: Option<(ChainPosition<A>, Txid)>,
     /// Whether this output is on a coinbase transaction.
@@ -297,5 +296,37 @@ impl<A: Anchor> FullTxOut<A> {
         }
 
         true
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn chain_position_ord() {
+        let unconf1 = ChainPosition::<ConfirmationHeightAnchor>::Unconfirmed(10);
+        let unconf2 = ChainPosition::<ConfirmationHeightAnchor>::Unconfirmed(20);
+        let conf1 = ChainPosition::Confirmed(ConfirmationHeightAnchor {
+            confirmation_height: 9,
+            anchor_block: BlockId {
+                height: 20,
+                ..Default::default()
+            },
+        });
+        let conf2 = ChainPosition::Confirmed(ConfirmationHeightAnchor {
+            confirmation_height: 12,
+            anchor_block: BlockId {
+                height: 15,
+                ..Default::default()
+            },
+        });
+
+        assert!(unconf2 > unconf1, "higher last_seen means higher ord");
+        assert!(unconf1 > conf1, "unconfirmed is higher ord than confirmed");
+        assert!(
+            conf2 > conf1,
+            "confirmation_height is higher then it should be higher ord"
+        );
     }
 }
