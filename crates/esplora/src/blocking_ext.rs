@@ -314,7 +314,7 @@ impl EsploraExt for esplora_client::BlockingClient {
                             if !status.confirmed {
                                 let last_seen = anchor.confirmation_time;
                                 let _ = graph.insert_seen_at(op.txid, last_seen);
-                            } 
+                            }
                             // else, graph.remove_seen_at or similar as the tx is confirmed
                         }
                     }
