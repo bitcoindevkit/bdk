@@ -295,6 +295,10 @@ impl EsploraExt for esplora_client::BlockingClient {
                 let status = self.get_tx_status(&op.txid)?;
                 if let Some(anchor) = anchor_from_status(&status) {
                     let _ = graph.insert_anchor(op.txid, anchor);
+                    if !status.confirmed {
+                        let last_seen = anchor.confirmation_time;
+                        let _ = graph.insert_seen_at(op.txid, last_seen);
+                    }
                 }
             }
 
@@ -307,6 +311,11 @@ impl EsploraExt for esplora_client::BlockingClient {
                         let status = self.get_tx_status(&txid)?;
                         if let Some(anchor) = anchor_from_status(&status) {
                             let _ = graph.insert_anchor(txid, anchor);
+                            if !status.confirmed {
+                                let last_seen = anchor.confirmation_time;
+                                let _ = graph.insert_seen_at(op.txid, last_seen);
+                            } 
+                            // else, graph.remove_seen_at or similar as the tx is confirmed
                         }
                     }
                 }
