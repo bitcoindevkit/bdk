@@ -161,16 +161,26 @@ fn test_psbt_fee_rate_with_missing_txout() {
 fn test_psbt_multiple_internalkey_signers() {
     use bdk::signer::{SignerContext, SignerOrdering, SignerWrapper};
     use bdk::KeychainKind;
-    use bitcoin::{secp256k1::Secp256k1, PrivateKey};
-    use miniscript::psbt::PsbtExt;
+    use bitcoin::key::TapTweak;
+    use bitcoin::secp256k1::{schnorr, KeyPair, Message, Secp256k1, XOnlyPublicKey};
+    use bitcoin::sighash::{Prevouts, SighashCache, TapSighashType};
+    use bitcoin::{PrivateKey, TxOut};
     use std::sync::Arc;
 
     let secp = Secp256k1::new();
-    let (mut wallet, _) = get_funded_wallet(get_test_tr_single_sig());
+    let wif = "cNJmN3fH9DDbDt131fQNkVakkpzawJBSeybCUNmP1BovpmGQ45xG";
+    let desc = format!("tr({})", wif);
+    let prv = PrivateKey::from_wif(wif).unwrap();
+    let keypair = KeyPair::from_secret_key(&secp, &prv.inner);
+
+    let (mut wallet, _) = get_funded_wallet(&desc);
+    let to_spend = wallet.get_balance().total();
     let send_to = wallet.get_address(AddressIndex::New);
     let mut builder = wallet.build_tx();
-    builder.add_recipient(send_to.script_pubkey(), 10_000);
+    builder.drain_to(send_to.script_pubkey()).drain_wallet();
     let mut psbt = builder.finish().unwrap();
+    let unsigned_tx = psbt.unsigned_tx.clone();
+
     // Adds a signer for the wrong internal key, bdk should not use this key to sign
     wallet.add_signer(
         KeychainKind::External,
@@ -183,10 +193,32 @@ fn test_psbt_multiple_internalkey_signers() {
             },
         )),
     );
-    let _ = wallet.sign(&mut psbt, SignOptions::default()).unwrap();
-    // Checks that we signed using the right key
-    assert!(
-        psbt.finalize_mut(&secp).is_ok(),
-        "The wrong internal key was used"
-    );
+    let finalized = wallet.sign(&mut psbt, SignOptions::default()).unwrap();
+    assert!(finalized);
+
+    // To verify, we need the signature, message, and pubkey
+    let witness = psbt.inputs[0].final_script_witness.as_ref().unwrap();
+    assert!(!witness.is_empty());
+    let signature = schnorr::Signature::from_slice(witness.iter().next().unwrap()).unwrap();
+
+    // the prevout we're spending
+    let prevouts = &[TxOut {
+        script_pubkey: send_to.script_pubkey(),
+        value: to_spend,
+    }];
+    let prevouts = Prevouts::All(prevouts);
+    let input_index = 0;
+    let mut sighash_cache = SighashCache::new(unsigned_tx);
+    let sighash = sighash_cache
+        .taproot_key_spend_signature_hash(input_index, &prevouts, TapSighashType::Default)
+        .unwrap();
+    let message = Message::from(sighash);
+
+    // add tweak. this was taken from `signer::sign_psbt_schnorr`
+    let keypair = keypair.tap_tweak(&secp, None).to_inner();
+    let (xonlykey, _parity) = XOnlyPublicKey::from_keypair(&keypair);
+
+    // Must verify if we used the correct key to sign
+    let verify_res = secp.verify_schnorr(&signature, &message, &xonlykey);
+    assert!(verify_res.is_ok(), "The wrong internal key was used");
 }
