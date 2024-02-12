@@ -5,7 +5,8 @@ use crate::{
     spk_iter::BIP32_MAX_INDEX,
     SpkIterator, SpkTxOutIndex,
 };
-use bitcoin::{OutPoint, Script, Transaction, TxOut, Txid};
+use alloc::borrow::ToOwned;
+use bitcoin::{OutPoint, Script, ScriptBuf, Transaction, TxOut, Txid};
 use core::{
     fmt::Debug,
     ops::{Bound, RangeBounds},
@@ -575,13 +576,14 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     /// # Panics
     ///
     /// Panics if the `keychain` does not exist.
-    pub fn reveal_next_spk(&mut self, keychain: &K) -> ((u32, &Script), super::ChangeSet<K>) {
+    pub fn reveal_next_spk(&mut self, keychain: &K) -> ((u32, ScriptBuf), super::ChangeSet<K>) {
         let (next_index, _) = self.next_index(keychain);
         let changeset = self.reveal_to_target(keychain, next_index).1;
         let script = self
             .inner
             .spk_at_index(&(keychain.clone(), next_index))
-            .expect("script must already be stored");
+            .expect("script must already be stored")
+            .to_owned();
         ((next_index, script), changeset)
     }
 
@@ -597,18 +599,17 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     /// # Panics
     ///
     /// Panics if `keychain` has never been added to the index
-    pub fn next_unused_spk(&mut self, keychain: &K) -> ((u32, &Script), super::ChangeSet<K>) {
+    pub fn next_unused_spk(&mut self, keychain: &K) -> ((u32, ScriptBuf), super::ChangeSet<K>) {
         let need_new = self.unused_keychain_spks(keychain).next().is_none();
         // this rather strange branch is needed because of some lifetime issues
         if need_new {
             self.reveal_next_spk(keychain)
         } else {
-            (
-                self.unused_keychain_spks(keychain)
-                    .next()
-                    .expect("we already know next exists"),
-                super::ChangeSet::default(),
-            )
+            let (i, spk) = self
+                .unused_keychain_spks(keychain)
+                .next()
+                .expect("we already know next exists");
+            ((i, spk.to_owned()), super::ChangeSet::default())
         }
     }
 
