@@ -49,7 +49,7 @@ impl TxOutTemplate {
 }
 
 #[allow(dead_code)]
-pub fn init_graph<'a, A: Anchor + Copy + 'a>(
+pub fn init_graph<'a, A: Anchor + Clone + 'a>(
     tx_templates: impl IntoIterator<Item = &'a TxTemplate<'a, A>>,
 ) -> (TxGraph<A>, SpkTxOutIndex<u32>, HashMap<&'a str, Txid>) {
     let (descriptor, _) = Descriptor::parse_descriptor(&Secp256k1::signing_only(), "tr(tprv8ZgxMBicQKsPd3krDUsBAmtnRsK3rb8u5yi1zhQgMhF1tR8MW7xfE4rnrbbsrbPR52e7rKapu6ztw1jXveJSCGHEriUGZV7mCe88duLp5pj/86'/1'/0'/0/*)").unwrap();
@@ -126,7 +126,7 @@ pub fn init_graph<'a, A: Anchor + Copy + 'a>(
         spk_index.scan(&tx);
         let _ = graph.insert_tx(tx.clone());
         for anchor in tx_tmp.anchors.iter() {
-            let _ = graph.insert_anchor(tx.txid(), *anchor);
+            let _ = graph.insert_anchor(tx.txid(), anchor.clone());
         }
         if let Some(seen_at) = tx_tmp.last_seen {
             let _ = graph.insert_seen_at(tx.txid(), seen_at);

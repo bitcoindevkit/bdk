@@ -452,6 +452,21 @@ impl<A> TxGraph<A> {
 }
 
 impl<A: Clone + Ord> TxGraph<A> {
+    /// Transform the [`TxGraph`] to have [`Anchor`]s of another type.
+    ///
+    /// This takes in a closure of signature `FnMut(A) -> A2` which is called for each [`Anchor`] to
+    /// transform it.
+    pub fn map_anchors<A2: Clone + Ord, F>(self, f: F) -> TxGraph<A2>
+    where
+        F: FnMut(A) -> A2,
+    {
+        let mut new_graph = TxGraph::<A2>::default();
+        new_graph.apply_changeset(self.initial_changeset().map_anchors(f));
+        new_graph
+    }
+}
+
+impl<A: Clone + Ord> TxGraph<A> {
     /// Construct a new [`TxGraph`] from a list of transactions.
     pub fn new(txs: impl IntoIterator<Item = Transaction>) -> Self {
         let mut new = Self::default();
@@ -1293,6 +1308,26 @@ impl<A: Ord> Append for ChangeSet<A> {
             && self.txouts.is_empty()
             && self.anchors.is_empty()
             && self.last_seen.is_empty()
+    }
+}
+
+impl<A: Ord> ChangeSet<A> {
+    /// Transform the [`ChangeSet`] to have [`Anchor`]s of another type.
+    ///
+    /// This takes in a closure of signature `FnMut(A) -> A2` which is called for each [`Anchor`] to
+    /// transform it.
+    pub fn map_anchors<A2: Ord, F>(self, mut f: F) -> ChangeSet<A2>
+    where
+        F: FnMut(A) -> A2,
+    {
+        ChangeSet {
+            txs: self.txs,
+            txouts: self.txouts,
+            anchors: BTreeSet::<(A2, Txid)>::from_iter(
+                self.anchors.into_iter().map(|(a, txid)| (f(a), txid)),
+            ),
+            last_seen: self.last_seen,
+        }
     }
 }
 

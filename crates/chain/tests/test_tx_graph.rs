@@ -10,7 +10,9 @@ use bdk_chain::{
 use bitcoin::{
     absolute, hashes::Hash, BlockHash, OutPoint, ScriptBuf, Transaction, TxIn, TxOut, Txid,
 };
+use common::*;
 use core::iter;
+use rand::RngCore;
 use std::vec;
 
 #[test]
@@ -1171,4 +1173,87 @@ fn test_missing_blocks() {
             &[3, 4],
         ),
     ]);
+}
+
+#[test]
+/// The `map_anchors` allow a caller to pass a function to reconstruct the [`TxGraph`] with any [`Anchor`],
+/// even though the function is non-deterministic.
+fn call_map_anchors_with_non_deterministic_anchor() {
+    #[derive(Debug, Default, Clone, PartialEq, Eq, Copy, PartialOrd, Ord, core::hash::Hash)]
+    /// A non-deterministic anchor
+    pub struct NonDeterministicAnchor {
+        pub anchor_block: BlockId,
+        pub non_deterministic_field: u32,
+    }
+
+    let template = [
+        TxTemplate {
+            tx_name: "tx1",
+            inputs: &[TxInTemplate::Bogus],
+            outputs: &[TxOutTemplate::new(10000, Some(1))],
+            anchors: &[block_id!(1, "A")],
+            last_seen: None,
+        },
+        TxTemplate {
+            tx_name: "tx2",
+            inputs: &[TxInTemplate::PrevTx("tx1", 0)],
+            outputs: &[TxOutTemplate::new(20000, Some(2))],
+            anchors: &[block_id!(2, "B")],
+            ..Default::default()
+        },
+        TxTemplate {
+            tx_name: "tx3",
+            inputs: &[TxInTemplate::PrevTx("tx2", 0)],
+            outputs: &[TxOutTemplate::new(30000, Some(3))],
+            anchors: &[block_id!(3, "C"), block_id!(4, "D")],
+            ..Default::default()
+        },
+    ];
+    let (graph, _, _) = init_graph(&template);
+    let new_graph = graph.clone().map_anchors(|a| NonDeterministicAnchor {
+        anchor_block: a,
+        // A non-deterministic value
+        non_deterministic_field: rand::thread_rng().next_u32(),
+    });
+
+    // Check all the details in new_graph reconstruct as well
+
+    let mut full_txs_vec: Vec<_> = graph.full_txs().collect();
+    full_txs_vec.sort();
+    let mut new_txs_vec: Vec<_> = new_graph.full_txs().collect();
+    new_txs_vec.sort();
+    let mut new_txs = new_txs_vec.iter();
+
+    for tx_node in full_txs_vec.iter() {
+        let new_txnode = new_txs.next().unwrap();
+        assert_eq!(new_txnode.txid, tx_node.txid);
+        assert_eq!(new_txnode.tx, tx_node.tx);
+        assert_eq!(
+            new_txnode.last_seen_unconfirmed,
+            tx_node.last_seen_unconfirmed
+        );
+        assert_eq!(new_txnode.anchors.len(), tx_node.anchors.len());
+
+        let mut new_anchors: Vec<_> = new_txnode.anchors.iter().map(|a| a.anchor_block).collect();
+        new_anchors.sort();
+        let mut old_anchors: Vec<_> = tx_node.anchors.iter().copied().collect();
+        old_anchors.sort();
+        assert_eq!(new_anchors, old_anchors);
+    }
+    assert!(new_txs.next().is_none());
+
+    let new_graph_anchors: Vec<_> = new_graph
+        .all_anchors()
+        .iter()
+        .map(|i| i.0.anchor_block)
+        .collect();
+    assert_eq!(
+        new_graph_anchors,
+        vec![
+            block_id!(1, "A"),
+            block_id!(2, "B"),
+            block_id!(3, "C"),
+            block_id!(4, "D"),
+        ]
+    );
 }
