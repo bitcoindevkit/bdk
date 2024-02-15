@@ -26,7 +26,7 @@
 
 ## `bdk`
 
-The `bdk` crate provides the [`Wallet`](`crate::Wallet`) type which is a simple, high-level
+The `bdk` crate provides the [`Wallet`] type which is a simple, high-level
 interface built from the low-level components of [`bdk_chain`]. `Wallet` is a good starting point
 for many simple applications as well as a good demonstration of how to use the other mechanisms to
 construct a wallet. It has two keychains (external and internal) which are defined by
@@ -34,51 +34,51 @@ construct a wallet. It has two keychains (external and internal) which are defin
 chain data it also uses the descriptors to find transaction outputs owned by them. From there, you
 can create and sign transactions.
 
-For more information, see the [`Wallet`'s documentation](https://docs.rs/bdk/latest/bdk/wallet/struct.Wallet.html).
+For details about the API of `Wallet` see the [module-level documentation][`Wallet`].
 
 ### Blockchain data
 
-In order to get blockchain data for `Wallet` to consume, you have to put it into particular form.
-Right now this is [`KeychainScan`] which is defined in [`bdk_chain`].
-
-This can be created manually or from blockchain-scanning crates.
+In order to get blockchain data for `Wallet` to consume, you should configure a client from
+an available chain source. Typically you make a request to the chain source and get a response
+that the `Wallet` can use to update its view of the chain.
 
 **Blockchain Data Sources**
 
 * [`bdk_esplora`]: Grabs blockchain data from Esplora for updating BDK structures.
 * [`bdk_electrum`]: Grabs blockchain data from Electrum for updating BDK structures.
+* [`bdk_bitcoind_rpc`]: Grabs blockchain data from Bitcoin Core for updating BDK structures.
 
 **Examples**
 
-* [`example-crates/wallet_esplora`](https://github.com/bitcoindevkit/bdk/tree/master/example-crates/wallet_esplora)
+* [`example-crates/wallet_esplora_async`](https://github.com/bitcoindevkit/bdk/tree/master/example-crates/wallet_esplora_async)
+* [`example-crates/wallet_esplora_blocking`](https://github.com/bitcoindevkit/bdk/tree/master/example-crates/wallet_esplora_blocking)
 * [`example-crates/wallet_electrum`](https://github.com/bitcoindevkit/bdk/tree/master/example-crates/wallet_electrum)
+* [`example-crates/wallet_rpc`](https://github.com/bitcoindevkit/bdk/tree/master/example-crates/wallet_rpc)
 
 ### Persistence
 
-To persist the `Wallet` on disk, `Wallet` needs to be constructed with a
-[`Persist`](https://docs.rs/bdk_chain/latest/bdk_chain/keychain/struct.KeychainPersist.html) implementation.
+To persist the `Wallet` on disk, it must be constructed with a [`PersistBackend`] implementation.
 
 **Implementations**
 
-* [`bdk_file_store`]: a simple flat-file implementation of `Persist`.
+* [`bdk_file_store`]: A simple flat-file implementation of [`PersistBackend`].
 
 **Example**
 
-```rust
-use bdk::{bitcoin::Network, wallet::{AddressIndex, Wallet}};
+<!-- compile_fail because outpoint and txout are fake variables -->
+```rust,compile_fail
+use bdk::{bitcoin::Network, wallet::{ChangeSet, Wallet}};
 
 fn main() {
-    // a type that implements `Persist`
-    let db = ();
+    // Create a new file `Store`.
+    let db = bdk_file_store::Store::<ChangeSet>::open_or_create_new(b"magic_bytes", "path/to/my_wallet.db").expect("create store");
 
-    let descriptor = "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/84'/0'/0'/0/*)";
-    let mut wallet = Wallet::new(descriptor, None, db, Network::Testnet).expect("should create");
+    let descriptor = "wpkh(tprv8ZgxMBicQKsPdcAqYBpzAFwU5yxBUo88ggoBqu1qPcHUfSbKK1sKMLmC7EAk438btHQrSdu3jGGQa6PA71nvH5nkDexhLteJqkM4dQmWF9g/84'/1'/0'/0/*)";
+    let mut wallet = Wallet::new_or_load(descriptor, None, db, Network::Testnet).expect("create or load wallet");
 
-    // get a new address (this increments revealed derivation index)
-    println!("revealed address: {}", wallet.get_address(AddressIndex::New));
-    println!("staged changes: {:?}", wallet.staged());
-    // persist changes
-    wallet.commit().expect("must save");
+    // Insert a single `TxOut` at `OutPoint` into the wallet.
+    let _ = wallet.insert_txout(outpoint, txout);
+    wallet.commit().expect("must write to database");
 }
 ```
 
@@ -218,9 +218,11 @@ submitted for inclusion in the work by you, as defined in the Apache-2.0
 license, shall be dual licensed as above, without any additional terms or
 conditions.
 
+[`Wallet`]: https://docs.rs/bdk/1.0.0-alpha.7/bdk/wallet/struct.Wallet.html
+[`PersistBackend`]: https://docs.rs/bdk_chain/latest/bdk_chain/trait.PersistBackend.html
 [`bdk_chain`]: https://docs.rs/bdk_chain/latest
 [`bdk_file_store`]: https://docs.rs/bdk_file_store/latest
 [`bdk_electrum`]: https://docs.rs/bdk_electrum/latest
 [`bdk_esplora`]: https://docs.rs/bdk_esplora/latest
-[`KeychainScan`]: https://docs.rs/bdk_chain/latest/bdk_chain/keychain/struct.KeychainScan.html
+[`bdk_bitcoind_rpc`]: https://docs.rs/bdk_bitcoind_rpc/latest
 [`rust-miniscript`]: https://docs.rs/miniscript/latest/miniscript/index.html
