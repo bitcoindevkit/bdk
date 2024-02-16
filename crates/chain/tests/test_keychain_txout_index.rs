@@ -386,3 +386,98 @@ fn test_non_wildcard_derivations() {
         1,
     );
 }
+
+/// Check that calling `lookahead_to_target` stores the expected spks.
+#[test]
+fn lookahead_to_target() {
+    #[derive(Default)]
+    struct TestCase {
+        lookahead: u32,                      // Global lookahead value
+        external_last_revealed: Option<u32>, // Last revealed index for external keychain
+        internal_last_revealed: Option<u32>, // Last revealed index for internal keychain
+        external_target: Option<u32>,        // Call `lookahead_to_target(External, u32)`
+        internal_target: Option<u32>,        // Call `lookahead_to_target(Internal, u32)`
+    }
+
+    let test_cases = &[
+        TestCase {
+            lookahead: 0,
+            external_target: Some(100),
+            ..Default::default()
+        },
+        TestCase {
+            lookahead: 10,
+            internal_target: Some(99),
+            ..Default::default()
+        },
+        TestCase {
+            lookahead: 100,
+            internal_target: Some(9),
+            external_target: Some(10),
+            ..Default::default()
+        },
+        TestCase {
+            lookahead: 12,
+            external_last_revealed: Some(2),
+            internal_last_revealed: Some(2),
+            internal_target: Some(15),
+            external_target: Some(13),
+        },
+        TestCase {
+            lookahead: 13,
+            external_last_revealed: Some(100),
+            internal_last_revealed: Some(21),
+            internal_target: Some(120),
+            external_target: Some(130),
+        },
+    ];
+
+    for t in test_cases {
+        let (mut index, _, _) = init_txout_index(t.lookahead);
+
+        if let Some(last_revealed) = t.external_last_revealed {
+            let _ = index.reveal_to_target(&TestKeychain::External, last_revealed);
+        }
+        if let Some(last_revealed) = t.internal_last_revealed {
+            let _ = index.reveal_to_target(&TestKeychain::Internal, last_revealed);
+        }
+
+        let keychain_test_cases = [
+            (
+                TestKeychain::External,
+                t.external_last_revealed,
+                t.external_target,
+            ),
+            (
+                TestKeychain::Internal,
+                t.internal_last_revealed,
+                t.internal_target,
+            ),
+        ];
+        for (keychain, last_revealed, target) in keychain_test_cases {
+            if let Some(target) = target {
+                let original_last_stored_index = match last_revealed {
+                    Some(last_revealed) => Some(last_revealed + t.lookahead),
+                    None => t.lookahead.checked_sub(1),
+                };
+                let exp_last_stored_index = match original_last_stored_index {
+                    Some(original_last_stored_index) => {
+                        Ord::max(target, original_last_stored_index)
+                    }
+                    None => target,
+                };
+                index.lookahead_to_target(&keychain, target);
+                let keys = index
+                    .inner()
+                    .all_spks()
+                    .range((keychain.clone(), 0)..=(keychain.clone(), u32::MAX))
+                    .map(|(k, _)| k.clone())
+                    .collect::<Vec<_>>();
+                let exp_keys = core::iter::repeat(keychain)
+                    .zip(0_u32..=exp_last_stored_index)
+                    .collect::<Vec<_>>();
+                assert_eq!(keys, exp_keys);
+            }
+        }
+    }
+}

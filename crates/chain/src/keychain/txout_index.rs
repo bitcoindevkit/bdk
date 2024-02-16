@@ -326,12 +326,17 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
         self.lookahead
     }
 
-    /// Store lookahead scripts until `target_index`.
+    /// Store lookahead scripts until `target_index` (inclusive).
     ///
-    /// This does not change the `lookahead` setting.
+    /// This does not change the global `lookahead` setting.
     pub fn lookahead_to_target(&mut self, keychain: &K, target_index: u32) {
-        let next_index = self.next_store_index(keychain);
-        if let Some(temp_lookahead) = target_index.checked_sub(next_index).filter(|&v| v > 0) {
+        let (next_index, _) = self.next_index(keychain);
+
+        let temp_lookahead = (target_index + 1)
+            .checked_sub(next_index)
+            .filter(|&index| index > 0);
+
+        if let Some(temp_lookahead) = temp_lookahead {
             self.replenish_lookahead(keychain, temp_lookahead);
         }
     }
