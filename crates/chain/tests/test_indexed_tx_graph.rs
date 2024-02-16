@@ -30,7 +30,10 @@ fn insert_relevant_txs() {
     let mut graph = IndexedTxGraph::<ConfirmationHeightAnchor, KeychainTxOutIndex<()>>::new(
         KeychainTxOutIndex::new(10),
     );
-    graph.index.add_keychain((), descriptor.clone());
+    _ = graph
+        .index
+        .add_keychain((), descriptor.clone())
+        .expect("Keychain added");
 
     let tx_a = Transaction {
         output: vec![
@@ -137,8 +140,14 @@ fn test_list_owned_txouts() {
         KeychainTxOutIndex::new(10),
     );
 
-    graph.index.add_keychain("keychain_1".into(), desc_1);
-    graph.index.add_keychain("keychain_2".into(), desc_2);
+    _ = graph
+        .index
+        .add_keychain("keychain_1".into(), desc_1)
+        .expect("Keychain added");
+    _ = graph
+        .index
+        .add_keychain("keychain_2".into(), desc_2)
+        .expect("Keychain added");
 
     // Get trusted and untrusted addresses
 

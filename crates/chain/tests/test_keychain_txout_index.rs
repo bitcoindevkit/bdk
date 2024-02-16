@@ -1,7 +1,10 @@
 #![cfg(feature = "miniscript")]
 
+extern crate core;
+
 #[macro_use]
 mod common;
+
 use bdk_chain::{
     collections::BTreeMap,
     indexed_tx_graph::Indexer,
@@ -9,6 +12,7 @@ use bdk_chain::{
     Append,
 };
 
+use bdk_chain::keychain::AddKeychainError;
 use bitcoin::{secp256k1::Secp256k1, OutPoint, ScriptBuf, Transaction, TxOut};
 use miniscript::{Descriptor, DescriptorPublicKey};
 
@@ -18,6 +22,7 @@ use crate::common::{descriptor_ids, DESCRIPTORS};
 enum TestKeychain {
     External,
     Internal,
+    Other,
 }
 
 struct TestIndex {
@@ -35,8 +40,12 @@ fn init_txout_index(lookahead: u32) -> TestIndex {
     let (internal_descriptor, _) =
         Descriptor::<DescriptorPublicKey>::parse_descriptor(&secp, DESCRIPTORS[1]).unwrap();
 
-    txout_index.add_keychain(TestKeychain::External, external_descriptor.clone());
-    txout_index.add_keychain(TestKeychain::Internal, internal_descriptor.clone());
+    _ = txout_index
+        .add_keychain(TestKeychain::External, external_descriptor.clone())
+        .expect("no dup keychain or descriptor");
+    _ = txout_index
+        .add_keychain(TestKeychain::Internal, internal_descriptor.clone())
+        .expect("no dup keychain or descriptor");
 
     TestIndex {
         index: txout_index,
@@ -83,8 +92,38 @@ fn append_keychain_derivation_indices() {
     assert_eq!(lhs.last_revealed.get(&descriptor_ids(3)), Some(&4));
 }
 
+// test panic when adding existing keychain with different descriptor
 #[test]
-fn test_insert_different_desc_same_keychain() {
+#[should_panic]
+fn test_insert_different_desc_existing_keychain() {
+    let TestIndex {
+        index: mut txout_index,
+        external_descriptor: (external_descriptor, _),
+        internal_descriptor: (internal_descriptor, _),
+    } = init_txout_index(0);
+    assert_eq!(
+        txout_index.keychains().collect::<Vec<_>>(),
+        vec![
+            (TestKeychain::External, &external_descriptor),
+            (TestKeychain::Internal, &internal_descriptor)
+        ]
+    );
+
+    let secp = bdk_chain::bitcoin::secp256k1::Secp256k1::signing_only();
+    let (other_descriptor, _) =
+        Descriptor::<DescriptorPublicKey>::parse_descriptor(&secp, DESCRIPTORS[2]).unwrap();
+
+    let changeset = ChangeSet {
+        keychains_added: [(TestKeychain::External, other_descriptor.clone())].into(),
+        last_revealed: [].into(),
+    };
+    txout_index.apply_changeset(changeset);
+}
+
+// test panic when adding existing descriptor with different keychain
+#[test]
+#[should_panic]
+fn test_insert_different_keychain_existing_descriptor() {
     let TestIndex {
         index: mut txout_index,
         external_descriptor: (external_descriptor, _),
@@ -99,32 +138,10 @@ fn test_insert_different_desc_same_keychain() {
     );
 
     let changeset = ChangeSet {
-        keychains_added: [(TestKeychain::External, internal_descriptor.clone())].into(),
+        keychains_added: [(TestKeychain::Other, internal_descriptor.clone())].into(),
         last_revealed: [].into(),
     };
     txout_index.apply_changeset(changeset);
-
-    assert_eq!(
-        txout_index.keychains().collect::<Vec<_>>(),
-        vec![
-            (TestKeychain::External, &internal_descriptor),
-            (TestKeychain::Internal, &internal_descriptor)
-        ]
-    );
-
-    let changeset = ChangeSet {
-        keychains_added: [(TestKeychain::Internal, external_descriptor.clone())].into(),
-        last_revealed: [].into(),
-    };
-    txout_index.apply_changeset(changeset);
-
-    assert_eq!(
-        txout_index.keychains().collect::<Vec<_>>(),
-        vec![
-            (TestKeychain::External, &internal_descriptor),
-            (TestKeychain::Internal, &external_descriptor)
-        ]
-    );
 }
 
 #[test]
@@ -441,7 +458,9 @@ fn test_non_wildcard_derivations() {
         .unwrap()
         .script_pubkey();
 
-    txout_index.add_keychain(TestKeychain::External, no_wildcard_descriptor);
+    _ = txout_index
+        .add_keychain(TestKeychain::External, no_wildcard_descriptor)
+        .expect("no dup keychain or descriptor");
 
     // given:
     // - `txout_index` with no stored scripts
@@ -489,4 +508,91 @@ fn test_non_wildcard_derivations() {
             .count(),
         1,
     );
+}
+
+// Test error when adding duplicate keychain with different descriptor
+#[test]
+fn test_add_duplicate_keychain_error() {
+    let mut txout_index = KeychainTxOutIndex::<TestKeychain>::new(0);
+
+    let secp = bitcoin::secp256k1::Secp256k1::signing_only();
+    let (descriptor_0, _) =
+        Descriptor::<DescriptorPublicKey>::parse_descriptor(&secp, DESCRIPTORS[0]).unwrap();
+
+    let (descriptor_1, _) =
+        Descriptor::<DescriptorPublicKey>::parse_descriptor(&secp, DESCRIPTORS[1]).unwrap();
+
+    _ = txout_index
+        .add_keychain(TestKeychain::External, descriptor_0.clone())
+        .expect("no dup keychain or descriptor");
+
+    let add_keychain_result = txout_index.add_keychain(TestKeychain::External, descriptor_1);
+
+    assert!(
+        matches!(add_keychain_result, Err(AddKeychainError::<TestKeychain>::KeychainExists{ keychain, descriptor })
+                if keychain == TestKeychain::External && descriptor == descriptor_0)
+    );
+}
+
+// Test error when adding duplicate descriptor with different keychain
+#[test]
+fn test_add_duplicate_descriptor_error() {
+    let mut txout_index = KeychainTxOutIndex::<TestKeychain>::new(0);
+
+    let secp = bitcoin::secp256k1::Secp256k1::signing_only();
+    let (descriptor_0, _) =
+        Descriptor::<DescriptorPublicKey>::parse_descriptor(&secp, DESCRIPTORS[0]).unwrap();
+
+    _ = txout_index
+        .add_keychain(TestKeychain::External, descriptor_0.clone())
+        .expect("no dup keychain or descriptor");
+
+    let add_keychain_result =
+        txout_index.add_keychain(TestKeychain::Internal, descriptor_0.clone());
+
+    assert!(
+        matches!(add_keychain_result, Err(AddKeychainError::<TestKeychain>::DescriptorExists{ keychain, descriptor })
+                if keychain == TestKeychain::External && descriptor == descriptor_0)
+    );
+}
+
+// test returned changeset when adding new keychains
+#[test]
+fn test_add_keychains_changeset() {
+    let mut txout_index = KeychainTxOutIndex::<TestKeychain>::new(0);
+
+    let secp = bitcoin::secp256k1::Secp256k1::signing_only();
+    let (descriptor_0, _) =
+        Descriptor::<DescriptorPublicKey>::parse_descriptor(&secp, DESCRIPTORS[0]).unwrap();
+    let (descriptor_1, _) =
+        Descriptor::<DescriptorPublicKey>::parse_descriptor(&secp, DESCRIPTORS[1]).unwrap();
+    let (descriptor_2, _) =
+        Descriptor::<DescriptorPublicKey>::parse_descriptor(&secp, DESCRIPTORS[2]).unwrap();
+
+    let change_set = txout_index.add_keychain(TestKeychain::External, descriptor_0.clone());
+    let expected_keychains_added = [(TestKeychain::External, descriptor_0)]
+        .into_iter()
+        .collect::<BTreeMap<TestKeychain, Descriptor<DescriptorPublicKey>>>();
+    assert!(matches!(change_set, Ok(ChangeSet::<TestKeychain> {
+        keychains_added,
+        last_revealed
+    }) if keychains_added == expected_keychains_added && last_revealed == Default::default()));
+
+    let change_set = txout_index.add_keychain(TestKeychain::Internal, descriptor_1.clone());
+    let expected_keychains_added = [(TestKeychain::Internal, descriptor_1)]
+        .into_iter()
+        .collect::<BTreeMap<TestKeychain, Descriptor<DescriptorPublicKey>>>();
+    assert!(matches!(change_set, Ok(ChangeSet::<TestKeychain> {
+        keychains_added,
+        last_revealed
+    }) if keychains_added == expected_keychains_added && last_revealed == Default::default()));
+
+    let change_set = txout_index.add_keychain(TestKeychain::Other, descriptor_2.clone());
+    let expected_keychains_added = [(TestKeychain::Other, descriptor_2)]
+        .into_iter()
+        .collect::<BTreeMap<TestKeychain, Descriptor<DescriptorPublicKey>>>();
+    assert!(matches!(change_set, Ok(ChangeSet::<TestKeychain> {
+        keychains_added,
+        last_revealed
+    }) if keychains_added == expected_keychains_added && last_revealed == Default::default()));
 }

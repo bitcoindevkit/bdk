@@ -86,7 +86,8 @@ impl<K> Default for ChangeSet<K> {
     }
 }
 
-const DEFAULT_LOOKAHEAD: u32 = 25;
+/// The default script lookahead used when recovering a wallet keychain, see [`KeychainTxOutIndex`].
+pub const DEFAULT_LOOKAHEAD: u32 = 25;
 
 /// [`KeychainTxOutIndex`] controls how script pubkeys are revealed for multiple keychains, and
 /// indexes [`TxOut`]s with them.
@@ -113,7 +114,7 @@ const DEFAULT_LOOKAHEAD: u32 = 25;
 /// lookahead.
 ///
 /// The [`KeychainTxOutIndex`] is constructed with the `lookahead` and cannot be altered. The
-/// default `lookahead` count is 1000. Use [`new`] to set a custom `lookahead`.
+/// default `lookahead` count is [`DEFAULT_LOOKAHEAD`]. Use [`new`] to set a custom `lookahead`.
 ///
 /// # Unbounded script pubkey iterator
 ///
@@ -444,6 +445,57 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     }
 }
 
+/// Errors which can occur when adding a keychain and descriptor to a [`KeychainTxOutIndex`].
+#[derive(Clone, Debug, PartialEq)]
+pub enum AddKeychainError<K: Clone + Ord + Debug> {
+    /// Keychain can not be added because it was already added to the [`KeychainTxOutIndex`] and
+    /// associated with a different [`Descriptor`].
+    KeychainExists {
+        /// Existing keychain.
+        keychain: K,
+        /// Descriptor currently associated to keychain.
+        descriptor: Descriptor<DescriptorPublicKey>,
+    },
+    /// Keychain can not be added because the associated [`Descriptor`] was already added to
+    /// the [`KeychainTxOutIndex`] but associated with a different keychain.
+    DescriptorExists {
+        /// Keychain currently associated to descriptor.
+        keychain: K,
+        /// Existing descriptor.
+        descriptor: Descriptor<DescriptorPublicKey>,
+    },
+}
+
+impl<K: Clone + Ord + Debug> core::fmt::Display for AddKeychainError<K> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match &self {
+            AddKeychainError::KeychainExists {
+                keychain: k,
+                descriptor: d,
+            } => {
+                write!(
+                    f,
+                    "cannot add keychain `{:?}` because it was already added but is associated with a different descriptor `{}`",
+                    k, d
+                )
+            }
+            AddKeychainError::DescriptorExists {
+                keychain: k,
+                descriptor: d,
+            } => {
+                write!(
+                    f,
+                    "cannot add keychain because the associated descriptor `{}` was already added but is associated with a different keychain `{:?}`",
+                    d, k
+                )
+            }
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl<K: Clone + Ord + Debug> std::error::Error for AddKeychainError<K> {}
+
 impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     /// Return the map of the keychain to descriptors.
     pub fn keychains(&self) -> impl Iterator<Item = (K, &Descriptor<DescriptorPublicKey>)> + '_ {
@@ -460,13 +512,61 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     /// When trying to add a keychain that already existed under a different descriptor, or a descriptor
     /// that already existed with a different keychain, the old keychain (or descriptor) will be
     /// overwritten.
-    pub fn add_keychain(&mut self, keychain: K, descriptor: Descriptor<DescriptorPublicKey>) {
+    pub fn add_keychain(
+        &mut self,
+        keychain: K,
+        descriptor: Descriptor<DescriptorPublicKey>,
+    ) -> Result<ChangeSet<K>, AddKeychainError<K>> {
         let descriptor_id = calc_descriptor_id(&descriptor);
+
+        match self.keychains_to_descriptors.get(&keychain) {
+            // If the keychain exists but is associated to a different descriptor.
+            Some((_d_id, d)) if d.ne(&descriptor) => {
+                return Err(AddKeychainError::KeychainExists {
+                    keychain,
+                    descriptor: d.clone(),
+                })
+            }
+            // If the keychain exists but is associated to the same descriptor return empty ChangeSet.
+            Some(_) => {
+                return Ok(ChangeSet {
+                    keychains_added: Default::default(),
+                    last_revealed: Default::default(),
+                })
+            }
+            // No existing descriptor associated with this keychain.
+            _ => (),
+        }
+
+        match self.descriptor_ids_to_keychain.get(&descriptor_id) {
+            // If the descriptor exists but is associated to a different keychain.
+            Some(k) if k.ne(&keychain) => {
+                return Err(AddKeychainError::DescriptorExists {
+                    keychain: k.clone(),
+                    descriptor,
+                })
+            }
+            // If the descriptor exists but is associated to the same keychain return empty ChangeSet.
+            Some(_) => {
+                return Ok(ChangeSet {
+                    keychains_added: Default::default(),
+                    last_revealed: Default::default(),
+                })
+            }
+            // No existing keychain associated with this descriptor.
+            _ => (),
+        }
+
         self.keychains_to_descriptors
-            .insert(keychain.clone(), (descriptor_id, descriptor));
+            .insert(keychain.clone(), (descriptor_id, descriptor.clone()));
         self.descriptor_ids_to_keychain
             .insert(descriptor_id, keychain.clone());
         self.replenish_lookahead(&keychain, self.lookahead);
+
+        Ok(ChangeSet {
+            keychains_added: [(keychain, descriptor)].into_iter().collect(),
+            last_revealed: Default::default(),
+        })
     }
 
     /// Get the lookahead setting.
@@ -875,16 +975,17 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     /// Applies the derivation changeset to the [`KeychainTxOutIndex`], extending the number of
     /// derived scripts per keychain, as specified in the `changeset`.
     ///
-    /// # Panics
-    ///
-    /// This will panic if a different `descriptor` is introduced to the same `keychain`.
+    /// A [`AddKeychainError`] error is returned if a keychain or descriptor being added via the
+    /// changeset is already being used in the [`KeychainTxOutIndex`].
     pub fn apply_changeset(&mut self, changeset: super::ChangeSet<K>) {
         let ChangeSet {
             keychains_added,
             last_revealed,
         } = changeset;
         for (keychain, descriptor) in keychains_added {
-            self.add_keychain(keychain, descriptor);
+            _ = self
+                .add_keychain(keychain, descriptor)
+                .expect("Can't reuse keychain or descriptor.");
         }
         let last_revealed = last_revealed
             .into_iter()
