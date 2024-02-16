@@ -11,192 +11,211 @@ use bitcoin::{
     absolute, hashes::Hash, BlockHash, OutPoint, ScriptBuf, Transaction, TxIn, TxOut, Txid,
 };
 use core::iter;
+use std::str::FromStr;
 use std::vec;
 
 #[test]
+fn insert_partial_tx() {
+    let mut graph = TxGraph::<ChainPosition<BlockId>>::default();
+    let _ = graph.insert_txout(
+        OutPoint::new(h!("txA"), 1),
+        TxOut {
+            value: 10_000,
+            script_pubkey: ScriptBuf::new(),
+        },
+    );
+
+    assert_eq!(graph.full_txs().collect::<Vec<_>>().len(), 0);
+
+    let changeset = graph.initial_changeset();
+    assert_eq!(changeset.txouts.len(), 1);
+    assert_eq!(
+        changeset.txouts().next(),
+        Some((
+            OutPoint {
+                txid: Txid::from_str(
+                    "0619eff85fd33f55f61af87ee1b612d3e2a26d1aed5f130e9bc74e6d0928d643"
+                )
+                .unwrap(),
+                vout: 1
+            },
+            &TxOut {
+                value: 10_000,
+                script_pubkey: ScriptBuf::new()
+            }
+        ))
+    );
+}
+
+#[test]
+fn insert_full_tx_after_partial_tx_inserted() {
+    let mut graph = TxGraph::<ChainPosition<BlockId>>::default();
+    let op = OutPoint::new(h!("txB"), 1);
+    let _ = graph.insert_txout(
+        op,
+        TxOut {
+            value: 10_000,
+            script_pubkey: ScriptBuf::new(),
+        },
+    );
+    assert_eq!(graph.full_txs().collect::<Vec<_>>().len(), 0);
+
+    let _ = graph.insert_tx(Transaction {
+        version: 0x01,
+        lock_time: absolute::LockTime::ZERO,
+        input: vec![TxIn {
+            previous_output: op,
+            ..Default::default()
+        }],
+        output: vec![TxOut {
+            value: 10_000,
+            script_pubkey: ScriptBuf::new(),
+        }],
+    });
+
+    assert_eq!(graph.full_txs().collect::<Vec<_>>().len(), 1);
+
+    let changeset = graph.initial_changeset();
+    assert_eq!(changeset.txouts.len(), 1);
+    assert_eq!(
+        changeset.txouts().next(),
+        Some((
+            OutPoint {
+                txid: Txid::from_str(
+                    "297d5f325d248052e1b0834d733f3b64cfa162566a85e003a2f20cba47923e5e"
+                )
+                .unwrap(),
+                vout: 0
+            },
+            &TxOut {
+                value: 10_000,
+                script_pubkey: ScriptBuf::new()
+            }
+        ))
+    );
+}
+
+#[test]
 fn insert_txouts() {
-    // 2 (Outpoint, TxOut) tuples that denotes original data in the graph, as partial transactions.
-    let original_ops = [
-        (
-            OutPoint::new(h!("tx1"), 1),
+    let mut graph = TxGraph::<ChainPosition<BlockId>>::default();
+    let _ = graph.insert_txout(
+        OutPoint::new(h!("txA1"), 1),
+        TxOut {
+            value: 10_000,
+            script_pubkey: ScriptBuf::new(),
+        },
+    );
+    let _ = graph.insert_txout(
+        OutPoint::new(h!("txA2"), 2),
+        TxOut {
+            value: 10_000,
+            script_pubkey: ScriptBuf::new(),
+        },
+    );
+    let op1 = OutPoint::new(h!("txB1"), 3);
+    let _ = graph.insert_txout(
+        op1,
+        TxOut {
+            value: 10_000,
+            script_pubkey: ScriptBuf::new(),
+        },
+    );
+    let op2 = OutPoint::new(h!("txB2"), 4);
+    let _ = graph.insert_txout(
+        op2,
+        TxOut {
+            value: 10_000,
+            script_pubkey: ScriptBuf::new(),
+        },
+    );
+    assert_eq!(graph.full_txs().collect::<Vec<_>>().len(), 0);
+
+    let _ = graph.insert_tx(Transaction {
+        version: 0x01,
+        lock_time: absolute::LockTime::ZERO,
+        input: vec![
+            TxIn {
+                previous_output: op1,
+                ..Default::default()
+            },
+            TxIn {
+                previous_output: op2,
+                ..Default::default()
+            },
+        ],
+        output: vec![
             TxOut {
                 value: 10_000,
                 script_pubkey: ScriptBuf::new(),
             },
-        ),
-        (
-            OutPoint::new(h!("tx1"), 2),
             TxOut {
-                value: 20_000,
+                value: 10_000,
                 script_pubkey: ScriptBuf::new(),
             },
-        ),
-    ];
-
-    // Another (OutPoint, TxOut) tuple to be used as update as partial transaction.
-    let update_ops = [(
-        OutPoint::new(h!("tx2"), 0),
-        TxOut {
-            value: 20_000,
-            script_pubkey: ScriptBuf::new(),
-        },
-    )];
-
-    // One full transaction to be included in the update
-    let update_txs = Transaction {
-        version: 0x01,
-        lock_time: absolute::LockTime::ZERO,
-        input: vec![TxIn {
-            previous_output: OutPoint::null(),
-            ..Default::default()
-        }],
-        output: vec![TxOut {
-            value: 30_000,
-            script_pubkey: ScriptBuf::new(),
-        }],
-    };
-
-    // Conf anchor used to mark the full transaction as confirmed.
-    let conf_anchor = ChainPosition::Confirmed(BlockId {
-        height: 100,
-        hash: h!("random blockhash"),
+        ],
     });
 
-    // Unconfirmed anchor to mark the partial transactions as unconfirmed
-    let unconf_anchor = ChainPosition::<BlockId>::Unconfirmed(1000000);
+    assert_eq!(graph.full_txs().collect::<Vec<_>>().len(), 1);
 
-    // Make the original graph
-    let mut graph = {
-        let mut graph = TxGraph::<ChainPosition<BlockId>>::default();
-        for (outpoint, txout) in &original_ops {
-            assert_eq!(
-                graph.insert_txout(*outpoint, txout.clone()),
-                ChangeSet {
-                    txouts: [(*outpoint, txout.clone())].into(),
-                    ..Default::default()
-                }
-            );
-        }
-        graph
-    };
-
-    // Make the update graph
-    let update = {
-        let mut graph = TxGraph::default();
-        for (outpoint, txout) in &update_ops {
-            // Insert partials transactions
-            assert_eq!(
-                graph.insert_txout(*outpoint, txout.clone()),
-                ChangeSet {
-                    txouts: [(*outpoint, txout.clone())].into(),
-                    ..Default::default()
-                }
-            );
-            // Mark them unconfirmed.
-            assert_eq!(
-                graph.insert_anchor(outpoint.txid, unconf_anchor),
-                ChangeSet {
-                    txs: [].into(),
-                    txouts: [].into(),
-                    anchors: [(unconf_anchor, outpoint.txid)].into(),
-                    last_seen: [].into()
-                }
-            );
-            // Mark them last seen at.
-            assert_eq!(
-                graph.insert_seen_at(outpoint.txid, 1000000),
-                ChangeSet {
-                    txs: [].into(),
-                    txouts: [].into(),
-                    anchors: [].into(),
-                    last_seen: [(outpoint.txid, 1000000)].into()
-                }
-            );
-        }
-        // Insert the full transaction
-        assert_eq!(
-            graph.insert_tx(update_txs.clone()),
-            ChangeSet {
-                txs: [update_txs.clone()].into(),
-                ..Default::default()
-            }
-        );
-
-        // Mark it as confirmed.
-        assert_eq!(
-            graph.insert_anchor(update_txs.txid(), conf_anchor),
-            ChangeSet {
-                txs: [].into(),
-                txouts: [].into(),
-                anchors: [(conf_anchor, update_txs.txid())].into(),
-                last_seen: [].into()
-            }
-        );
-        graph
-    };
-
-    // Check the resulting addition.
-    let changeset = graph.apply_update(update);
-
+    let changeset = graph.initial_changeset();
+    let mut all_txouts: Vec<_> = changeset.txouts.iter().collect();
+    all_txouts.sort();
     assert_eq!(
-        changeset,
-        ChangeSet {
-            txs: [update_txs.clone()].into(),
-            txouts: update_ops.clone().into(),
-            anchors: [(conf_anchor, update_txs.txid()), (unconf_anchor, h!("tx2"))].into(),
-            last_seen: [(h!("tx2"), 1000000)].into()
-        }
-    );
-
-    // Apply changeset and check the new graph counts.
-    graph.apply_changeset(changeset);
-    assert_eq!(graph.all_txouts().count(), 4);
-    assert_eq!(graph.full_txs().count(), 1);
-    assert_eq!(graph.floating_txouts().count(), 3);
-
-    // Check TxOuts are fetched correctly from the graph.
-    assert_eq!(
-        graph.tx_outputs(h!("tx1")).expect("should exists"),
-        [
+        all_txouts,
+        vec![
             (
-                1u32,
+                &OutPoint {
+                    txid: Txid::from_str(
+                        "66544358ec7b627091acc90970e6149faff7ea29046fac33551dc2bac567fa0e"
+                    )
+                    .unwrap(),
+                    vout: 1
+                },
                 &TxOut {
-                    value: 10_000,
-                    script_pubkey: ScriptBuf::new(),
+                    value: 10000,
+                    script_pubkey: ScriptBuf::new()
                 }
             ),
             (
-                2u32,
+                &OutPoint {
+                    txid: Txid::from_str(
+                        "05592e017f4ea18ad173d6981020f7c4ad3d28d8fda17b35d833699c4ee99113"
+                    )
+                    .unwrap(),
+                    vout: 3
+                },
                 &TxOut {
-                    value: 20_000,
-                    script_pubkey: ScriptBuf::new(),
+                    value: 10000,
+                    script_pubkey: ScriptBuf::new()
                 }
-            )
+            ),
+            (
+                &OutPoint {
+                    txid: Txid::from_str(
+                        "6fbe23204829bf0edd8c33ce19f85d984a0e1c68fd12abc702fbb32f0f779637"
+                    )
+                    .unwrap(),
+                    vout: 4
+                },
+                &TxOut {
+                    value: 10000,
+                    script_pubkey: ScriptBuf::new()
+                }
+            ),
+            (
+                &OutPoint {
+                    txid: Txid::from_str(
+                        "667fd5fa288d2e10d190289234ee2790bb4c0b963502419dfe25c29e6fb91dd1"
+                    )
+                    .unwrap(),
+                    vout: 2
+                },
+                &TxOut {
+                    value: 10000,
+                    script_pubkey: ScriptBuf::new()
+                }
+            ),
         ]
-        .into()
-    );
-
-    assert_eq!(
-        graph.tx_outputs(update_txs.txid()).expect("should exists"),
-        [(
-            0u32,
-            &TxOut {
-                value: 30_000,
-                script_pubkey: ScriptBuf::new()
-            }
-        )]
-        .into()
-    );
-
-    // Check that the initial_changeset is correct
-    assert_eq!(
-        graph.initial_changeset(),
-        ChangeSet {
-            txs: [update_txs.clone()].into(),
-            txouts: update_ops.into_iter().chain(original_ops).collect(),
-            anchors: [(conf_anchor, update_txs.txid()), (unconf_anchor, h!("tx2"))].into(),
-            last_seen: [(h!("tx2"), 1000000)].into()
-        }
     );
 }
 
