@@ -81,6 +81,8 @@ use crate::{
 };
 use alloc::collections::vec_deque::VecDeque;
 use alloc::vec::Vec;
+#[cfg(feature = "bitcoinconsensus")]
+use bitcoin::blockdata::script::Error;
 use bitcoin::{OutPoint, Script, Transaction, TxOut, Txid};
 use core::fmt::{self, Formatter};
 use core::{
@@ -1169,7 +1171,50 @@ impl<A: Anchor> TxGraph<A> {
         self.try_balance(chain, chain_tip, outpoints, trust_predicate)
             .expect("oracle is infallible")
     }
+
+    /// Verify the given transaction is able to spend its inputs.
+    ///
+    /// This method uses [`rust-bitcoinconsensus`] to verify a [`Transaction`], guaranteeing
+    /// that if the method succeeds, the transaction meets consensus criteria as defined in
+    /// Bitcoin's `libbitcoinconsensus`.
+    ///
+    /// # Errors
+    ///
+    /// If the previous output isn't found for one or more `tx` inputs.
+    ///
+    /// If [`Script`] verification fails.
+    ///
+    /// [`rust-bitcoinconsensus`]: https://docs.rs/bitcoinconsensus/latest/bitcoinconsensus/
+    #[cfg(feature = "bitcoinconsensus")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "bitcoinconsensus")))]
+    pub fn verify_tx(&self, tx: &Transaction) -> Result<(), VerifyTxError> {
+        tx.verify(|op: &OutPoint| -> Option<TxOut> { self.get_txout(*op).cloned() })
+            .map_err(VerifyTxError::Script)
+    }
 }
+
+/// Errors that may be returned by [`TxGraph::verify_tx`].
+#[cfg(feature = "bitcoinconsensus")]
+#[cfg_attr(docsrs, doc(cfg(feature = "bitcoinconsensus")))]
+#[derive(Debug)]
+pub enum VerifyTxError {
+    /// An error evaluating Bitcoin [`Script`].
+    // note: this is `TxVerifyError` in bitcoin-0.31
+    Script(Error),
+}
+
+#[cfg(feature = "bitcoinconsensus")]
+impl fmt::Display for VerifyTxError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Script(e) => write!(f, "failed to verify transaction: {}", e),
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+#[cfg(feature = "bitcoinconsensus")]
+impl std::error::Error for VerifyTxError {}
 
 /// The [`ChangeSet`] represents changes to a [`TxGraph`].
 ///
