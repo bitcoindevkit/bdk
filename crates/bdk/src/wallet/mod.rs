@@ -69,7 +69,7 @@ use crate::psbt::PsbtUtils;
 use crate::signer::SignerError;
 use crate::types::*;
 use crate::wallet::coin_selection::Excess::{Change, NoChange};
-use crate::wallet::error::{BuildFeeBumpError, CreateTxError, MiniscriptPsbtError};
+use crate::wallet::error::{BuildFeeBumpError, CreateTxError, KeychainError, MiniscriptPsbtError};
 
 const COINBASE_MATURITY: u32 = 100;
 
@@ -233,10 +233,10 @@ impl Wallet {
         descriptor: E,
         change_descriptor: Option<E>,
         network: Network,
-    ) -> Result<Self, DescriptorError> {
+    ) -> Result<Self, KeychainError> {
         Self::new(descriptor, change_descriptor, (), network).map_err(|e| match e {
             NewError::NonEmptyDatabase => unreachable!("mock-database cannot have data"),
-            NewError::Descriptor(e) => e,
+            NewError::KeychainError(e) => e,
             NewError::Write(_) => unreachable!("mock-write must always succeed"),
         })
     }
@@ -247,11 +247,11 @@ impl Wallet {
         change_descriptor: Option<E>,
         network: Network,
         genesis_hash: BlockHash,
-    ) -> Result<Self, crate::descriptor::DescriptorError> {
+    ) -> Result<Self, KeychainError> {
         Self::new_with_genesis_hash(descriptor, change_descriptor, (), network, genesis_hash)
             .map_err(|e| match e {
                 NewError::NonEmptyDatabase => unreachable!("mock-database cannot have data"),
-                NewError::Descriptor(e) => e,
+                NewError::KeychainError(e) => e,
                 NewError::Write(_) => unreachable!("mock-write must always succeed"),
             })
     }
@@ -300,8 +300,8 @@ where
 pub enum NewError<W> {
     /// Database already has data.
     NonEmptyDatabase,
-    /// There was problem with the passed-in descriptor(s).
-    Descriptor(crate::descriptor::DescriptorError),
+    /// There was a problem with the passed-in descriptor or adding the keychain.
+    KeychainError(KeychainError),
     /// We were unable to write the wallet's data to the persistence backend.
     Write(W),
 }
@@ -316,7 +316,7 @@ where
                 f,
                 "database already has data - use `load` or `new_or_load` methods instead"
             ),
-            NewError::Descriptor(e) => e.fmt(f),
+            NewError::KeychainError(e) => e.fmt(f),
             NewError::Write(e) => e.fmt(f),
         }
     }
@@ -332,8 +332,8 @@ impl<W> std::error::Error for NewError<W> where W: core::fmt::Display + core::fm
 /// [`load`]: Wallet::load
 #[derive(Debug)]
 pub enum LoadError<L> {
-    /// There was a problem with the passed-in descriptor(s).
-    Descriptor(crate::descriptor::DescriptorError),
+    /// There was a problem with the passed-in descriptor or adding the keychain.
+    KeychainError(KeychainError),
     /// Loading data from the persistence backend failed.
     Load(L),
     /// Wallet not initialized, persistence backend is empty.
@@ -350,7 +350,7 @@ where
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            LoadError::Descriptor(e) => e.fmt(f),
+            LoadError::KeychainError(e) => e.fmt(f),
             LoadError::Load(e) => e.fmt(f),
             LoadError::NotInitialized => {
                 write!(f, "wallet is not initialized, persistence backend is empty")
@@ -372,8 +372,8 @@ impl<L> std::error::Error for LoadError<L> where L: core::fmt::Display + core::f
 /// [`new_or_load_with_genesis_hash`]: Wallet::new_or_load_with_genesis_hash
 #[derive(Debug)]
 pub enum NewOrLoadError<W, L> {
-    /// There is a problem with the passed-in descriptor.
-    Descriptor(crate::descriptor::DescriptorError),
+    /// There was a problem with the passed-in descriptor or adding the keychain.
+    KeychainError(KeychainError),
     /// Writing to the persistence backend failed.
     Write(W),
     /// Loading from the persistence backend failed.
@@ -403,7 +403,7 @@ where
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            NewOrLoadError::Descriptor(e) => e.fmt(f),
+            NewOrLoadError::KeychainError(e) => e.fmt(f),
             NewOrLoadError::Write(e) => write!(f, "failed to write to persistence: {}", e),
             NewOrLoadError::Load(e) => write!(f, "failed to load from persistence: {}", e),
             NewOrLoadError::NotInitialized => {
@@ -529,7 +529,7 @@ impl<D> Wallet<D> {
 
         let (signers, change_signers) =
             create_signers(&mut index, &secp, descriptor, change_descriptor, network)
-                .map_err(NewError::Descriptor)?;
+                .map_err(NewError::KeychainError)?;
 
         let indexed_graph = IndexedTxGraph::new(index);
 
@@ -585,7 +585,7 @@ impl<D> Wallet<D> {
 
         let (signers, change_signers) =
             create_signers(&mut index, &secp, descriptor, change_descriptor, network)
-                .map_err(LoadError::Descriptor)?;
+                .map_err(LoadError::KeychainError)?;
 
         let mut indexed_graph = IndexedTxGraph::new(index);
         indexed_graph.apply_changeset(changeset.indexed_tx_graph);
@@ -647,7 +647,7 @@ impl<D> Wallet<D> {
                 let wallet =
                     Self::load_from_changeset(descriptor, change_descriptor, db, changeset)
                         .map_err(|e| match e {
-                            LoadError::Descriptor(e) => NewOrLoadError::Descriptor(e),
+                            LoadError::KeychainError(e) => NewOrLoadError::KeychainError(e),
                             LoadError::Load(e) => NewOrLoadError::Load(e),
                             LoadError::NotInitialized => NewOrLoadError::NotInitialized,
                             LoadError::MissingNetwork => {
@@ -688,7 +688,7 @@ impl<D> Wallet<D> {
                 NewError::NonEmptyDatabase => {
                     unreachable!("database is already checked to have no data")
                 }
-                NewError::Descriptor(e) => NewOrLoadError::Descriptor(e),
+                NewError::KeychainError(e) => NewOrLoadError::KeychainError(e),
                 NewError::Write(e) => NewOrLoadError::Write(e),
             }),
         }
@@ -2535,16 +2535,22 @@ fn create_signers<E: IntoWalletDescriptor>(
     descriptor: E,
     change_descriptor: Option<E>,
     network: Network,
-) -> Result<(Arc<SignersContainer>, Arc<SignersContainer>), crate::descriptor::error::Error> {
-    let (descriptor, keymap) = into_wallet_descriptor_checked(descriptor, secp, network)?;
+) -> Result<(Arc<SignersContainer>, Arc<SignersContainer>), KeychainError> {
+    let (descriptor, keymap) = into_wallet_descriptor_checked(descriptor, secp, network)
+        .map_err(KeychainError::Descriptor)?;
     let signers = Arc::new(SignersContainer::build(keymap, &descriptor, secp));
-    index.add_keychain(KeychainKind::External, descriptor);
+    _ = index
+        .add_keychain(KeychainKind::External, descriptor)
+        .map_err(KeychainError::AddKeyChain)?;
 
     let change_signers = match change_descriptor {
         Some(descriptor) => {
-            let (descriptor, keymap) = into_wallet_descriptor_checked(descriptor, secp, network)?;
+            let (descriptor, keymap) = into_wallet_descriptor_checked(descriptor, secp, network)
+                .map_err(KeychainError::Descriptor)?;
             let signers = Arc::new(SignersContainer::build(keymap, &descriptor, secp));
-            index.add_keychain(KeychainKind::Internal, descriptor);
+            _ = index
+                .add_keychain(KeychainKind::Internal, descriptor)
+                .map_err(KeychainError::AddKeyChain)?;
             signers
         }
         None => Arc::new(SignersContainer::new()),

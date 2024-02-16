@@ -16,6 +16,7 @@ use crate::descriptor::DescriptorError;
 use crate::wallet::coin_selection;
 use crate::{descriptor, FeeRate, KeychainKind};
 use alloc::string::String;
+use bdk_chain::keychain::AddKeychainError;
 use bitcoin::{absolute, psbt, OutPoint, Sequence, Txid};
 use core::fmt;
 
@@ -290,3 +291,26 @@ impl fmt::Display for BuildFeeBumpError {
 
 #[cfg(feature = "std")]
 impl std::error::Error for BuildFeeBumpError {}
+
+/// The keychain related errors type when creating or loading a [`Wallet`].
+///
+/// [`Wallet`]: crate::wallet::Wallet
+#[derive(Debug)]
+pub enum KeychainError {
+    /// There was a problem with the passed-in descriptor(s).
+    Descriptor(DescriptorError),
+    /// There was an error adding the keychain.
+    AddKeyChain(AddKeychainError<KeychainKind>),
+}
+
+impl fmt::Display for KeychainError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            KeychainError::Descriptor(e) => e.fmt(f),
+            KeychainError::AddKeyChain(e) => e.fmt(f),
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for KeychainError {}
