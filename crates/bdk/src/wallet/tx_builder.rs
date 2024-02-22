@@ -190,7 +190,7 @@ impl<'a, D, Cs: Clone, Ctx> Clone for TxBuilder<'a, D, Cs, Ctx> {
 }
 
 // methods supported by both contexts, for any CoinSelectionAlgorithm
-impl<'a, D, Cs: CoinSelectionAlgorithm, Ctx: TxBuilderContext> TxBuilder<'a, D, Cs, Ctx> {
+impl<'a, D, Cs, Ctx> TxBuilder<'a, D, Cs, Ctx> {
     /// Set a custom fee rate
     /// The fee_rate method sets the mining fee paid by the transaction as a rate on its size.
     /// This means that the total fee paid is equal to this rate * size of the transaction in virtual Bytes (vB) or Weight Unit (wu).
@@ -574,20 +574,6 @@ impl<'a, D, Cs: CoinSelectionAlgorithm, Ctx: TxBuilderContext> TxBuilder<'a, D, 
         }
     }
 
-    /// Finish building the transaction.
-    ///
-    /// Returns a new [`Psbt`] per [`BIP174`].
-    ///
-    /// [`BIP174`]: https://github.com/bitcoin/bips/blob/master/bip-0174.mediawiki
-    pub fn finish(self) -> Result<Psbt, CreateTxError<D::WriteError>>
-    where
-        D: PersistBackend<ChangeSet>,
-    {
-        self.wallet
-            .borrow_mut()
-            .create_tx(self.coin_selection, self.params)
-    }
-
     /// Enable signaling RBF
     ///
     /// This will use the default nSequence value of `0xFFFFFFFD`.
@@ -631,6 +617,22 @@ impl<'a, D, Cs: CoinSelectionAlgorithm, Ctx: TxBuilderContext> TxBuilder<'a, D, 
     pub fn allow_dust(&mut self, allow_dust: bool) -> &mut Self {
         self.params.allow_dust = allow_dust;
         self
+    }
+}
+
+impl<'a, D, Cs: CoinSelectionAlgorithm, Ctx> TxBuilder<'a, D, Cs, Ctx> {
+    /// Finish building the transaction.
+    ///
+    /// Returns a new [`Psbt`] per [`BIP174`].
+    ///
+    /// [`BIP174`]: https://github.com/bitcoin/bips/blob/master/bip-0174.mediawiki
+    pub fn finish(self) -> Result<Psbt, CreateTxError<D::WriteError>>
+    where
+        D: PersistBackend<ChangeSet>,
+    {
+        self.wallet
+            .borrow_mut()
+            .create_tx(self.coin_selection, self.params)
     }
 }
 
