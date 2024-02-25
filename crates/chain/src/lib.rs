@@ -21,6 +21,7 @@
 #![warn(missing_docs)]
 
 pub use bitcoin;
+pub use bitcoin::absolute::Height;
 mod spk_txout_index;
 pub use spk_txout_index::*;
 mod chain_data;
@@ -37,6 +38,8 @@ mod chain_oracle;
 pub use chain_oracle::*;
 mod persist;
 pub use persist::*;
+use std::fmt;
+use std::ops::Deref;
 
 #[doc(hidden)]
 pub mod example_utils;
@@ -95,6 +98,59 @@ pub mod collections {
     pub type HashMap<K, V> = hashbrown::HashMap<K, V>;
     pub use alloc::collections::*;
     pub use hashbrown::hash_map;
+}
+
+/// Number of seconds that have elapsed since 00:00:00 UTC on 1 January 1970, the Unix epoch.
+#[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq, Copy, PartialOrd, Ord, core::hash::Hash)]
+pub struct UnixSeconds(u64);
+
+impl UnixSeconds {
+    pub fn from_consensus(n: u64) -> UnixSeconds {
+        UnixSeconds(n)
+    }
+}
+impl Default for UnixSeconds {
+    fn default() -> Self {
+        UnixSeconds(0)
+    }
+}
+
+#[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq, Copy, PartialOrd, Ord, core::hash::Hash)]
+pub struct BlockHeight(Height);
+
+impl Default for BlockHeight {
+    fn default() -> Self {
+        return BlockHeight(
+            Height::from_consensus(0).expect("Failed to create a default BlockHeight"),
+        );
+    }
+}
+
+impl Deref for BlockHeight {
+    type Target = Height;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+impl BlockHeight {
+    pub const ZERO: Self = BlockHeight(Height::ZERO);
+    pub const MAX: Self = BlockHeight(Height::MAX);
+
+    pub fn from_consensus(n: u32) -> BlockHeight {
+        BlockHeight(Height::from_consensus(n).expect("Invalid height value"))
+    }
+    pub fn to_consensus_u32(self) -> u32 {
+        self.0.to_consensus_u32()
+    }
+}
+
+impl fmt::Display for BlockHeight {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.to_consensus_u32())
+    }
 }
 
 /// How many confirmations are needed f or a coinbase output to be spent.
