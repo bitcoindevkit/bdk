@@ -815,6 +815,8 @@ impl<D> Wallet<D> {
     }
 
     /// Return whether or not a `script` is part of this wallet (either internal or external)
+    /// Use `derivation_of_spk` function to find the `KeychainKind` for the `script`, or
+    /// None if there's no  associated `Keychain`.
     pub fn is_mine(&self, script: &Script) -> bool {
         self.indexed_graph.index.index_of_spk(script).is_some()
     }
