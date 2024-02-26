@@ -826,15 +826,21 @@ impl<D> Wallet<D> {
         let txout_index = &mut self.indexed_graph.index;
         let (index, spk, changeset) = match address_index {
             AddressIndex::New => {
-                let ((index, spk), index_changeset) = txout_index.reveal_next_spk(&keychain);
+                let ((index, spk), index_changeset) = txout_index
+                    .reveal_next_spk(&keychain)
+                    .expect("Keychain exists (we called map_keychain)");
                 (index, spk.into(), Some(index_changeset))
             }
             AddressIndex::LastUnused => {
-                let ((index, spk), index_changeset) = txout_index.next_unused_spk(&keychain);
+                let ((index, spk), index_changeset) = txout_index
+                    .next_unused_spk(&keychain)
+                    .expect("Keychain exists (we called map_keychain)");
                 (index, spk.into(), Some(index_changeset))
             }
             AddressIndex::Peek(mut peek_index) => {
-                let mut spk_iter = txout_index.unbounded_spk_iter(&keychain);
+                let mut spk_iter = txout_index
+                    .unbounded_spk_iter(&keychain)
+                    .expect("Keychain exists (we called map_keychain)");
                 if !spk_iter.descriptor().has_wildcard() {
                     peek_index = 0;
                 }
@@ -933,7 +939,10 @@ impl<D> Wallet<D> {
         keychain: KeychainKind,
     ) -> impl Iterator<Item = (u32, ScriptBuf)> + Clone {
         let keychain = self.map_keychain(keychain);
-        self.indexed_graph.index.unbounded_spk_iter(&keychain)
+        self.indexed_graph
+            .index
+            .unbounded_spk_iter(&keychain)
+            .expect("Must exist (we called map_keychain)")
     }
 
     /// Returns the utxo owned by this wallet corresponding to `outpoint` if it exists in the
@@ -1567,8 +1576,11 @@ impl<D> Wallet<D> {
             Some(ref drain_recipient) => drain_recipient.clone(),
             None => {
                 let change_keychain = self.map_keychain(KeychainKind::Internal);
-                let ((index, spk), index_changeset) =
-                    self.indexed_graph.index.next_unused_spk(&change_keychain);
+                let ((index, spk), index_changeset) = self
+                    .indexed_graph
+                    .index
+                    .next_unused_spk(&change_keychain)
+                    .expect("Keychain exists (we called map_keychain)");
                 let spk = spk.into();
                 self.indexed_graph.index.mark_used(change_keychain, index);
                 self.persist
@@ -2040,7 +2052,12 @@ impl<D> Wallet<D> {
 
     /// The index of the next address that you would get if you were to ask the wallet for a new address
     pub fn next_derivation_index(&self, keychain: KeychainKind) -> u32 {
-        self.indexed_graph.index.next_index(&keychain).0
+        let keychain = self.map_keychain(keychain);
+        self.indexed_graph
+            .index
+            .next_index(&keychain)
+            .expect("Keychain must exist (we called map_keychain)")
+            .0
     }
 
     /// Informs the wallet that you no longer intend to broadcast a tx that was built from it.

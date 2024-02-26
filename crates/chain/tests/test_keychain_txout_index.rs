@@ -188,8 +188,9 @@ fn test_lookahead() {
     // - scripts cached in spk_txout_index should increase correctly
     // - stored scripts of external keychain should be of expected counts
     for index in (0..20).skip_while(|i| i % 2 == 1) {
-        let (revealed_spks, revealed_changeset) =
-            txout_index.reveal_to_target(&TestKeychain::External, index);
+        let (revealed_spks, revealed_changeset) = txout_index
+            .reveal_to_target(&TestKeychain::External, index)
+            .unwrap();
         assert_eq!(
             revealed_spks.collect::<Vec<_>>(),
             vec![(index, spk_at_index(&external_descriptor, index))],
@@ -208,24 +209,28 @@ fn test_lookahead() {
         assert_eq!(
             txout_index
                 .revealed_keychain_spks(&TestKeychain::External)
+                .unwrap()
                 .count(),
             index as usize + 1,
         );
         assert_eq!(
             txout_index
                 .revealed_keychain_spks(&TestKeychain::Internal)
+                .unwrap()
                 .count(),
             0,
         );
         assert_eq!(
             txout_index
                 .unused_keychain_spks(&TestKeychain::External)
+                .unwrap()
                 .count(),
             index as usize + 1,
         );
         assert_eq!(
             txout_index
                 .unused_keychain_spks(&TestKeychain::Internal)
+                .unwrap()
                 .count(),
             0,
         );
@@ -238,8 +243,9 @@ fn test_lookahead() {
     // - derivation index is set ahead of current derivation index + lookahead
     // expect:
     // - scripts cached in spk_txout_index should increase correctly, a.k.a. no scripts are skipped
-    let (revealed_spks, revealed_changeset) =
-        txout_index.reveal_to_target(&TestKeychain::Internal, 24);
+    let (revealed_spks, revealed_changeset) = txout_index
+        .reveal_to_target(&TestKeychain::Internal, 24)
+        .unwrap();
     assert_eq!(
         revealed_spks.collect::<Vec<_>>(),
         (0..=24)
@@ -260,6 +266,7 @@ fn test_lookahead() {
     assert_eq!(
         txout_index
             .revealed_keychain_spks(&TestKeychain::Internal)
+            .unwrap()
             .count(),
         25,
     );
@@ -312,12 +319,14 @@ fn test_lookahead() {
         assert_eq!(
             txout_index
                 .revealed_keychain_spks(&TestKeychain::External)
+                .unwrap()
                 .count(),
             last_external_index as usize + 1,
         );
         assert_eq!(
             txout_index
                 .revealed_keychain_spks(&TestKeychain::Internal)
+                .unwrap()
                 .count(),
             last_internal_index as usize + 1,
         );
@@ -401,11 +410,11 @@ fn test_wildcard_derivations() {
     // - next_derivation_index() == (0, true)
     // - derive_new() == ((0, <spk>), keychain::ChangeSet)
     // - next_unused() == ((0, <spk>), keychain::ChangeSet:is_empty())
-    assert_eq!(txout_index.next_index(&TestKeychain::External), (0, true));
-    let (spk, changeset) = txout_index.reveal_next_spk(&TestKeychain::External);
+    assert_eq!(txout_index.next_index(&TestKeychain::External).unwrap(), (0, true));
+    let (spk, changeset) = txout_index.reveal_next_spk(&TestKeychain::External).unwrap();
     assert_eq!(spk, (0_u32, external_spk_0.as_script()));
     assert_eq!(&changeset.last_revealed, &[(external_descriptor.descriptor_id(), 0)].into());
-    let (spk, changeset) = txout_index.next_unused_spk(&TestKeychain::External);
+    let (spk, changeset) = txout_index.next_unused_spk(&TestKeychain::External).unwrap();
     assert_eq!(spk, (0_u32, external_spk_0.as_script()));
     assert_eq!(&changeset.last_revealed, &[].into());
 
@@ -423,14 +432,14 @@ fn test_wildcard_derivations() {
         .chain([17, 20, 23])
         .for_each(|index| assert!(txout_index.mark_used(TestKeychain::External, index)));
 
-    assert_eq!(txout_index.next_index(&TestKeychain::External), (26, true));
+    assert_eq!(txout_index.next_index(&TestKeychain::External).unwrap(), (26, true));
 
-    let (spk, changeset) = txout_index.reveal_next_spk(&TestKeychain::External);
+    let (spk, changeset) = txout_index.reveal_next_spk(&TestKeychain::External).unwrap();
     assert_eq!(spk, (26, external_spk_26.as_script()));
 
     assert_eq!(&changeset.last_revealed, &[(external_descriptor.descriptor_id(), 26)].into());
 
-    let (spk, changeset) = txout_index.next_unused_spk(&TestKeychain::External);
+    let (spk, changeset) = txout_index.next_unused_spk(&TestKeychain::External).unwrap();
     assert_eq!(spk, (16, external_spk_16.as_script()));
     assert_eq!(&changeset.last_revealed, &[].into());
 
@@ -440,7 +449,7 @@ fn test_wildcard_derivations() {
         txout_index.mark_used(TestKeychain::External, index);
     });
 
-    let (spk, changeset) = txout_index.next_unused_spk(&TestKeychain::External);
+    let (spk, changeset) = txout_index.next_unused_spk(&TestKeychain::External).unwrap();
     assert_eq!(spk, (27, external_spk_27.as_script()));
     assert_eq!(&changeset.last_revealed, &[(external_descriptor.descriptor_id(), 27)].into());
 }
@@ -465,15 +474,22 @@ fn test_non_wildcard_derivations() {
     // - next derivation index should be new
     // - when we derive a new script, script @ index 0
     // - when we get the next unused script, script @ index 0
-    assert_eq!(txout_index.next_index(&TestKeychain::External), (0, true));
-    let (spk, changeset) = txout_index.reveal_next_spk(&TestKeychain::External);
+    assert_eq!(
+        txout_index.next_index(&TestKeychain::External).unwrap(),
+        (0, true)
+    );
+    let (spk, changeset) = txout_index
+        .reveal_next_spk(&TestKeychain::External)
+        .unwrap();
     assert_eq!(spk, (0, external_spk.as_script()));
     assert_eq!(
         &changeset.last_revealed,
         &[(no_wildcard_descriptor.descriptor_id(), 0)].into()
     );
 
-    let (spk, changeset) = txout_index.next_unused_spk(&TestKeychain::External);
+    let (spk, changeset) = txout_index
+        .next_unused_spk(&TestKeychain::External)
+        .unwrap();
     assert_eq!(spk, (0, external_spk.as_script()));
     assert_eq!(&changeset.last_revealed, &[].into());
 
@@ -483,18 +499,26 @@ fn test_non_wildcard_derivations() {
     // - next derivation index should not be new
     // - derive new and next unused should return the old script
     // - store_up_to should not panic and return empty changeset
-    assert_eq!(txout_index.next_index(&TestKeychain::External), (0, false));
+    assert_eq!(
+        txout_index.next_index(&TestKeychain::External).unwrap(),
+        (0, false)
+    );
     txout_index.mark_used(TestKeychain::External, 0);
 
-    let (spk, changeset) = txout_index.reveal_next_spk(&TestKeychain::External);
+    let (spk, changeset) = txout_index
+        .reveal_next_spk(&TestKeychain::External)
+        .unwrap();
     assert_eq!(spk, (0, external_spk.as_script()));
     assert_eq!(&changeset.last_revealed, &[].into());
 
-    let (spk, changeset) = txout_index.next_unused_spk(&TestKeychain::External);
+    let (spk, changeset) = txout_index
+        .next_unused_spk(&TestKeychain::External)
+        .unwrap();
     assert_eq!(spk, (0, external_spk.as_script()));
     assert_eq!(&changeset.last_revealed, &[].into());
-    let (revealed_spks, revealed_changeset) =
-        txout_index.reveal_to_target(&TestKeychain::External, 200);
+    let (revealed_spks, revealed_changeset) = txout_index
+        .reveal_to_target(&TestKeychain::External, 200)
+        .unwrap();
     assert_eq!(revealed_spks.count(), 0);
     assert!(revealed_changeset.is_empty());
 
@@ -502,6 +526,7 @@ fn test_non_wildcard_derivations() {
     assert_eq!(
         txout_index
             .revealed_keychain_spks(&TestKeychain::External)
+            .unwrap()
             .count(),
         1,
     );

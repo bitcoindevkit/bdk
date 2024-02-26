@@ -257,8 +257,10 @@ where
         Keychain::External
     };
 
-    let ((change_index, change_script), change_changeset) =
-        graph.index.next_unused_spk(&internal_keychain);
+    let ((change_index, change_script), change_changeset) = graph
+        .index
+        .next_unused_spk(&internal_keychain)
+        .expect("Must exist");
     changeset.append(change_changeset);
 
     // Clone to drop the immutable reference.
@@ -470,7 +472,8 @@ where
                         _ => unreachable!("only these two variants exist in match arm"),
                     };
 
-                    let ((spk_i, spk), index_changeset) = spk_chooser(index, &Keychain::External);
+                    let ((spk_i, spk), index_changeset) =
+                        spk_chooser(index, &Keychain::External).expect("Must exist");
                     let db = &mut *db.lock().unwrap();
                     db.stage_and_commit(C::from((
                         local_chain::ChangeSet::default(),
@@ -492,7 +495,10 @@ where
                         true => Keychain::Internal,
                         false => Keychain::External,
                     };
-                    for (spk_i, spk) in index.revealed_keychain_spks(&target_keychain) {
+                    for (spk_i, spk) in index
+                        .revealed_keychain_spks(&target_keychain)
+                        .expect("Must exist")
+                    {
                         let address = Address::from_script(spk, network)
                             .expect("should always be able to derive address");
                         println!(
