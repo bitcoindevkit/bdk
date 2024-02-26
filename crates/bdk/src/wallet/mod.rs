@@ -932,6 +932,7 @@ impl<D> Wallet<D> {
         &self,
         keychain: KeychainKind,
     ) -> impl Iterator<Item = (u32, ScriptBuf)> + Clone {
+        let keychain = self.map_keychain(keychain);
         self.indexed_graph.index.unbounded_spk_iter(&keychain)
     }
 
