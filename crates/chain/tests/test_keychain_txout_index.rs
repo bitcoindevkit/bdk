@@ -392,11 +392,16 @@ fn test_non_wildcard_derivations() {
 fn lookahead_to_target() {
     #[derive(Default)]
     struct TestCase {
-        lookahead: u32,                      // Global lookahead value
-        external_last_revealed: Option<u32>, // Last revealed index for external keychain
-        internal_last_revealed: Option<u32>, // Last revealed index for internal keychain
-        external_target: Option<u32>,        // Call `lookahead_to_target(External, u32)`
-        internal_target: Option<u32>,        // Call `lookahead_to_target(Internal, u32)`
+        /// Global lookahead value.
+        lookahead: u32,
+        /// Last revealed index for external keychain.
+        external_last_revealed: Option<u32>,
+        /// Last revealed index for internal keychain.
+        internal_last_revealed: Option<u32>,
+        /// Call `lookahead_to_target(External, u32)`.
+        external_target: Option<u32>,
+        /// Call `lookahead_to_target(Internal, u32)`.
+        internal_target: Option<u32>,
     }
 
     let test_cases = &[
