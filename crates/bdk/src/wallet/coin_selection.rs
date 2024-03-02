@@ -744,12 +744,11 @@ mod test {
     use core::str::FromStr;
 
     use bdk_chain::ConfirmationTime;
-    use bitcoin::{OutPoint, ScriptBuf, TxOut};
+    use bitcoin::{Amount, OutPoint, ScriptBuf, TxOut};
 
     use super::*;
     use crate::types::*;
     use crate::wallet::coin_selection::filter_duplicates;
-    use crate::wallet::Vbytes;
 
     use rand::rngs::StdRng;
     use rand::seq::SliceRandom;
@@ -1233,22 +1232,18 @@ mod test {
         let utxos = get_test_utxos();
         let drain_script = ScriptBuf::default();
         let target_amount = 99932; // first utxo's effective value
+        let feerate = FeeRate::BROADCAST_MIN;
 
         let result = BranchAndBoundCoinSelection::new(0)
-            .coin_select(
-                vec![],
-                utxos,
-                FeeRate::from_sat_per_vb_unchecked(1),
-                target_amount,
-                &drain_script,
-            )
+            .coin_select(vec![], utxos, feerate, target_amount, &drain_script)
             .unwrap();
 
         assert_eq!(result.selected.len(), 1);
         assert_eq!(result.selected_amount(), 100_000);
-        let input_size = (TXIN_BASE_WEIGHT + P2WPKH_SATISFACTION_SIZE).vbytes();
+        let input_weight = (TXIN_BASE_WEIGHT + P2WPKH_SATISFACTION_SIZE) as u64;
         // the final fee rate should be exactly the same as the fee rate given
-        assert!((1.0 - (result.fee_amount as f32 / input_size as f32)).abs() < f32::EPSILON);
+        let result_feerate = Amount::from_sat(result.fee_amount) / Weight::from_wu(input_weight);
+        assert_eq!(result_feerate, feerate);
     }
 
     #[test]

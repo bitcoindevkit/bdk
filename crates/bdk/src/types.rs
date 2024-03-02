@@ -46,19 +46,6 @@ impl AsRef<[u8]> for KeychainKind {
     }
 }
 
-/// Trait implemented by types that can be used to measure weight units.
-pub trait Vbytes {
-    /// Convert weight units to virtual bytes.
-    fn vbytes(self) -> usize;
-}
-
-impl Vbytes for usize {
-    fn vbytes(self) -> usize {
-        // ref: https://github.com/bitcoin/bips/blob/master/bip-0141.mediawiki#transaction-size-calculations
-        (self as f32 / 4.0).ceil() as usize
-    }
-}
-
 /// An unspent output owned by a [`Wallet`].
 ///
 /// [`Wallet`]: crate::Wallet
