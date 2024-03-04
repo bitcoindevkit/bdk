@@ -653,6 +653,10 @@ impl<'a, D: BatchDatabase> TxBuilder<'a, D, DefaultCoinSelectionAlgorithm, BumpF
     /// `script_pubkey` in order to bump the transaction fee. Without specifying this the wallet
     /// will attempt to find a change output to shrink instead.
     ///
+    /// **Warning**, use with extreme caution. The specified `script_pubkey` will be used _instead_
+    /// of a change address and if the total transaction input amounts are greater than the required
+    /// outputs + transaction fee the remaining change sats will also be sent to this address.
+    ///
     /// **Note** that the output may shrink to below the dust limit and therefore be removed. If it is
     /// preserved then it is currently not guaranteed to be in the same position as it was
     /// originally.

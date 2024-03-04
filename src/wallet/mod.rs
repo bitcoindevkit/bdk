@@ -3673,6 +3673,81 @@ pub(crate) mod test {
     }
 
     #[test]
+    fn test_bump_fee_allow_shrinking() {
+        // wallet with one 50_000 sat utxo
+        let (wallet, descriptors, _) = get_funded_wallet(get_test_wpkh());
+        // receive an extra 25_000 sat utxo so that our wallet has two utxos
+        let _incoming_txid = crate::populate_test_db!(
+            wallet.database.borrow_mut(),
+            testutils! (@tx ( (@external descriptors, 0) => 25_000 ) (@confirmations 1)),
+            Some(100),
+        );
+
+        let addr1 = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX")
+            .unwrap()
+            .assume_checked();
+        let addr2 = Address::from_str("bcrt1q6m7tyf45hd5swf7ug5f3r35y6htga0m2tlxhfh")
+            .unwrap()
+            .assume_checked();
+        let mut builder = wallet.build_tx();
+        builder
+            .add_recipient(addr1.script_pubkey(), 70_000)
+            .add_recipient(addr2.script_pubkey(), 4_400)
+            .fee_rate(FeeRate::default_min_relay_fee())
+            .enable_rbf();
+        let (psbt, mut original_details) = builder.finish().unwrap();
+        let mut tx = psbt.extract_tx();
+        let txid = tx.txid();
+
+        // fake tx inputs
+        for txin in &mut tx.input {
+            txin.witness.push([0x00; P2WPKH_FAKE_WITNESS_SIZE]); // fake signature
+            wallet
+                .database
+                .borrow_mut()
+                .del_utxo(&txin.previous_output)
+                .unwrap();
+        }
+        original_details.transaction = Some(tx);
+        wallet
+            .database
+            .borrow_mut()
+            .set_tx(&original_details)
+            .unwrap();
+
+        // all 75_000 sats from both utxos is sent
+        assert_eq!(original_details.sent, 75_000);
+        // 241 sats fee paid, 1 sat/vbyte
+        assert_eq!(original_details.fee, Some(241));
+        // 75_000-241-359 = full 74_400 sats outputs paid to recipient addresses
+        assert_eq!(original_details.received, 359);
+
+        // for the new fee rate, it should be enough to reduce the addr2 output
+        let mut builder = wallet.build_fee_bump(txid).unwrap();
+        builder
+            .allow_shrinking(addr2.script_pubkey())
+            .unwrap()
+            .fee_rate(FeeRate::from_sat_per_vb(15.0));
+        let (psbt, rbf_details) = builder.finish().unwrap();
+        let tx = psbt.extract_tx();
+
+        // all 75_000 sats from both utxos is sent
+        assert_eq!(rbf_details.sent, 75_000);
+        // 3150 sats fee paid, 15 sat/vbyte
+        assert_eq!(rbf_details.fee, Some(3150));
+        // 75_000-3150 = reduced 71_850 outputs paid to recipient addresses
+        assert_eq!(rbf_details.received, 0);
+        // addr2 was reduced from 4_400 to 1_850 sats
+        let addr2_output = tx
+            .output
+            .into_iter()
+            .filter(|o| o.script_pubkey.eq(&addr2.script_pubkey()))
+            .next();
+        assert!(addr2_output.is_some());
+        assert_eq!(addr2_output.unwrap().value, 1_850);
+    }
+
+    #[test]
     #[should_panic(expected = "InsufficientFunds")]
     fn test_bump_fee_remove_output_manually_selected_only() {
         let (wallet, descriptors, _) = get_funded_wallet(get_test_wpkh());
