@@ -1851,7 +1851,7 @@ pub fn get_funded_wallet(
         .database
         .borrow_mut()
         .set_script_pubkey(
-            &bitcoin::Address::from_str(&tx_meta.output.get(0).unwrap().to_address)
+            &bitcoin::Address::from_str(&tx_meta.output.first().unwrap().to_address)
                 .unwrap()
                 .assume_checked()
                 .script_pubkey(),
@@ -5266,7 +5266,7 @@ pub(crate) mod test {
             .values()
             .map(|(script, version)| TapLeafHash::from_script(script, *version))
             .collect();
-        let included_script_leaves = vec![script_leaves.pop().unwrap()];
+        let included_script_leaves = [script_leaves.pop().unwrap()];
         let excluded_script_leaves = script_leaves;
 
         assert!(
