@@ -34,7 +34,7 @@ fn main() -> Result<(), CompactFiltersError> {
     let descriptor = "wpkh(tpubD6NzVbkrYhZ4X2yy78HWrr1M9NT8dKeWfzNiQqDdMqqa9UmmGztGGz6TaLFGsLfdft5iu32gxq1T4eMNxExNNWzVCpf9Y6JZi5TnqoC9wJq/*)";
 
     let database = MemoryDatabase::default();
-    let wallet = Arc::new(Wallet::new(descriptor, None, Network::Testnet, database).unwrap());
+    let wallet = Wallet::new(descriptor, None, Network::Testnet, database).unwrap();
     wallet.sync(&blockchain, SyncOptions::default()).unwrap();
     info!("balance: {}", wallet.get_balance()?);
     Ok(())

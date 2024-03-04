@@ -168,7 +168,7 @@ impl WalletSync for ElectrumBlockchain {
                     let needs_block_height = conftime_req
                         .request()
                         .filter_map(|txid| txid_to_height.get(txid).cloned())
-                        .filter(|height| block_times.get(height).is_none())
+                        .filter(|height| block_times.contains_key(height))
                         .take(chunk_size)
                         .collect::<HashSet<u32>>();
 
@@ -269,7 +269,7 @@ impl<'a, 'b, D: Database> TxCache<'a, 'b, D> {
     fn save_txs<'c>(&mut self, txids: impl Iterator<Item = &'c Txid>) -> Result<(), Error> {
         let mut need_fetch = vec![];
         for txid in txids {
-            if self.cache.get(txid).is_some() {
+            if self.cache.contains_key(txid) {
                 continue;
             } else if let Some(transaction) = self.db.get_raw_tx(txid)? {
                 self.cache.insert(*txid, transaction);
@@ -295,7 +295,7 @@ impl<'a, 'b, D: Database> TxCache<'a, 'b, D> {
     }
 
     fn get(&self, txid: Txid) -> Option<Transaction> {
-        self.cache.get(&txid).map(Clone::clone)
+        self.cache.get(&txid).cloned()
     }
 }
 

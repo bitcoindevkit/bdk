@@ -188,6 +188,7 @@ pub(crate) trait DatabaseUtils: Database {
             .map(|o| o.is_some())
     }
 
+    #[allow(unused)]
     fn get_raw_tx_or<D>(&self, txid: &Txid, default: D) -> Result<Option<Transaction>, Error>
     where
         D: FnOnce() -> Result<Option<Transaction>, Error>,

@@ -552,7 +552,7 @@ impl<'a, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderContext>
     ///
     /// This will be used to:
     /// 1. Set the nLockTime for preventing fee sniping.
-    /// **Note**: This will be ignored if you manually specify a nlocktime using [`TxBuilder::nlocktime`].
+    ///    **Note**: This will be ignored if you manually specify a nlocktime using [`TxBuilder::nlocktime`].
     /// 2. Decide whether coinbase outputs are mature or not. If the coinbase outputs are not
     ///    mature at `current_height`, we ignore them in the coin selection.
     ///    If you want to create a transaction that spends immature coinbase inputs, manually
@@ -680,20 +680,15 @@ impl<'a, D: BatchDatabase> TxBuilder<'a, D, DefaultCoinSelectionAlgorithm, BumpF
 }
 
 /// Ordering of the transaction's inputs and outputs
-#[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Hash, Clone, Copy)]
+#[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Hash, Clone, Copy, Default)]
 pub enum TxOrdering {
     /// Randomized (default)
+    #[default]
     Shuffle,
     /// Unchanged
     Untouched,
     /// BIP69 / Lexicographic
     Bip69Lexicographic,
-}
-
-impl Default for TxOrdering {
-    fn default() -> Self {
-        TxOrdering::Shuffle
-    }
 }
 
 impl TxOrdering {
@@ -755,20 +750,15 @@ impl RbfValue {
 }
 
 /// Policy regarding the use of change outputs when creating a transaction
-#[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Hash, Clone, Copy)]
+#[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Hash, Clone, Copy, Default)]
 pub enum ChangeSpendPolicy {
     /// Use both change and non-change outputs (default)
+    #[default]
     ChangeAllowed,
     /// Only use change outputs (see [`TxBuilder::only_spend_change`])
     OnlyChange,
     /// Only use non-change outputs (see [`TxBuilder::do_not_spend_change`])
     ChangeForbidden,
-}
-
-impl Default for ChangeSpendPolicy {
-    fn default() -> Self {
-        ChangeSpendPolicy::ChangeAllowed
-    }
 }
 
 impl ChangeSpendPolicy {

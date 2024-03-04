@@ -59,6 +59,7 @@
 //! # Ok::<_, bdk::Error>(())
 //! ```
 
+use std::fmt::{Display, Formatter};
 use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
@@ -86,9 +87,9 @@ pub struct FullyNodedExport {
     pub label: String,
 }
 
-impl ToString for FullyNodedExport {
-    fn to_string(&self) -> String {
-        serde_json::to_string(self).unwrap()
+impl Display for FullyNodedExport {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", serde_json::to_string(self).unwrap())
     }
 }
 

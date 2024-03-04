@@ -166,7 +166,7 @@ impl CfSync {
                 let filters = cf_filters
                     .into_iter()
                     .enumerate()
-                    .chain(filters_map.into_iter())
+                    .chain(filters_map)
                     .collect();
                 status = self
                     .cf_store

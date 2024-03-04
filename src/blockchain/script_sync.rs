@@ -419,7 +419,7 @@ impl<'a, D: BatchDatabase> State<'a, D> {
                         txout: output.clone(),
                         keychain,
                         // Is this UTXO in the spent_utxos set?
-                        is_spent: spent_utxos.get(&outpoint).is_some(),
+                        is_spent: spent_utxos.contains(&outpoint),
                     })?;
                 }
             }
@@ -464,11 +464,10 @@ fn make_txs_consistent(txs: &[TransactionDetails]) -> Vec<&TransactionDetails> {
     }
 
     utxo_index
-        .into_iter()
-        .map(|(_, tx)| (tx.txid, tx))
+        .into_values()
+        .map(|tx| (tx.txid, tx))
         .collect::<HashMap<_, _>>()
-        .into_iter()
-        .map(|(_, tx)| tx)
+        .into_values()
         .chain(coinbase_txs)
         .collect()
 }
