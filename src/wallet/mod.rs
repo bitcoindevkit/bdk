@@ -3526,6 +3526,7 @@ pub(crate) mod test {
         assert_eq!(details.fee.unwrap_or(0), 200);
     }
 
+    #[allow(deprecated)]
     #[test]
     fn test_bump_fee_reduce_single_recipient() {
         let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
@@ -3572,6 +3573,7 @@ pub(crate) mod test {
         assert_fee_rate!(psbt, details.fee.unwrap_or(0), FeeRate::from_sat_per_vb(2.5), @add_signature);
     }
 
+    #[allow(deprecated)]
     #[test]
     fn test_bump_fee_absolute_reduce_single_recipient() {
         let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
@@ -3618,6 +3620,7 @@ pub(crate) mod test {
         assert_eq!(details.fee.unwrap_or(0), 300);
     }
 
+    #[allow(deprecated)]
     #[test]
     fn test_bump_fee_drain_wallet() {
         let (wallet, descriptors, _) = get_funded_wallet(get_test_wpkh());
@@ -4208,6 +4211,7 @@ pub(crate) mod test {
         builder.finish().unwrap();
     }
 
+    #[allow(deprecated)]
     #[test]
     fn test_bump_fee_unconfirmed_input() {
         // We create a tx draining the wallet and spending one confirmed

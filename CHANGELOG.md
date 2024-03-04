@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.30.0]
+
+### Summary
+
+This maintenance release updates the project MSRV to 1.63.0 and deprecates `TxBuilder::allow_shrinking()`.
+
 ## [v0.29.0]
 
 ### Summary
@@ -693,4 +699,5 @@ final transaction is created by calling `finish` on the builder.
 [v0.28.1]: https://github.com/bitcoindevkit/bdk/compare/v0.28.0...v0.28.1
 [v0.28.2]: https://github.com/bitcoindevkit/bdk/compare/v0.28.1...v0.28.2
 [v0.29.0]: https://github.com/bitcoindevkit/bdk/compare/v0.28.2...v0.29.0
-[Unreleased]: https://github.com/bitcoindevkit/bdk/compare/v0.29.0...HEAD
+[v0.30.0]: https://github.com/bitcoindevkit/bdk/compare/v0.29.0...v0.30.0
+[Unreleased]: https://github.com/bitcoindevkit/bdk/compare/v0.30.0...HEAD
