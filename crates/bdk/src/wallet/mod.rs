@@ -2245,7 +2245,7 @@ impl<D> Wallet<D> {
         Ok(psbt)
     }
 
-    /// get the corresponding PSBT Input for a LocalUtxo
+    /// get the corresponding PSBT Input for a LocalOutput
     pub fn get_psbt_input(
         &self,
         utxo: LocalOutput,
