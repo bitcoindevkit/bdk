@@ -126,14 +126,6 @@ impl<K: Clone + Ord + Debug> Indexer for KeychainTxOutIndex<K> {
         }
     }
 
-    fn index_tx(&mut self, tx: &bitcoin::Transaction) -> Self::ChangeSet {
-        let mut changeset = super::ChangeSet::<K>::default();
-        for (op, txout) in tx.output.iter().enumerate() {
-            changeset.append(self.index_txout(OutPoint::new(tx.txid(), op as u32), txout));
-        }
-        changeset
-    }
-
     fn initial_changeset(&self) -> Self::ChangeSet {
         super::ChangeSet(self.last_revealed.clone())
     }

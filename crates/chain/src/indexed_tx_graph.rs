@@ -44,6 +44,18 @@ impl<A, I> IndexedTxGraph<A, I> {
 }
 
 impl<A: Anchor, I: Indexer> IndexedTxGraph<A, I> {
+    /// Determines the [`ChangeSet`] between `self` and an empty [`IndexedTxGraph`].
+    pub fn initial_changeset(&self) -> ChangeSet<A, I::ChangeSet> {
+        let graph = self.graph.initial_changeset();
+        let indexer = self.index.initial_changeset();
+        ChangeSet { graph, indexer }
+    }
+}
+
+impl<A: Anchor, I: Indexer> IndexedTxGraph<A, I>
+where
+    I::ChangeSet: Default + Append,
+{
     /// Applies the [`ChangeSet`] to the [`IndexedTxGraph`].
     pub fn apply_changeset(&mut self, changeset: ChangeSet<A, I::ChangeSet>) {
         self.index.apply_changeset(changeset.indexer);
@@ -58,18 +70,6 @@ impl<A: Anchor, I: Indexer> IndexedTxGraph<A, I> {
         self.graph.apply_changeset(changeset.graph);
     }
 
-    /// Determines the [`ChangeSet`] between `self` and an empty [`IndexedTxGraph`].
-    pub fn initial_changeset(&self) -> ChangeSet<A, I::ChangeSet> {
-        let graph = self.graph.initial_changeset();
-        let indexer = self.index.initial_changeset();
-        ChangeSet { graph, indexer }
-    }
-}
-
-impl<A: Anchor, I: Indexer> IndexedTxGraph<A, I>
-where
-    I::ChangeSet: Default + Append,
-{
     fn index_tx_graph_changeset(
         &mut self,
         tx_graph_changeset: &tx_graph::ChangeSet<A>,
@@ -341,7 +341,16 @@ pub trait Indexer {
     fn index_txout(&mut self, outpoint: OutPoint, txout: &TxOut) -> Self::ChangeSet;
 
     /// Scans a transaction for relevant outpoints, which are stored and indexed internally.
-    fn index_tx(&mut self, tx: &Transaction) -> Self::ChangeSet;
+    fn index_tx(&mut self, tx: &Transaction) -> Self::ChangeSet
+    where
+        Self::ChangeSet: Default + Append,
+    {
+        let mut changeset = Self::ChangeSet::default();
+        for (op, txout) in tx.output.iter().enumerate() {
+            changeset.append(self.index_txout(OutPoint::new(tx.txid(), op as u32), txout));
+        }
+        changeset
+    }
 
     /// Apply changeset to itself.
     fn apply_changeset(&mut self, changeset: Self::ChangeSet);
