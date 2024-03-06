@@ -529,6 +529,52 @@ fn checkpoint_from_block_ids() {
 }
 
 #[test]
+fn checkpoint_query() {
+    struct TestCase {
+        chain: LocalChain,
+        /// The heights we want to call [`CheckPoint::query`] with, represented as an inclusive
+        /// range.
+        ///
+        /// If a [`CheckPoint`] exists at that height, we expect [`CheckPoint::query`] to return
+        /// it. If not, [`CheckPoint::query`] should return `None`.
+        query_range: (u32, u32),
+    }
+
+    let test_cases = [
+        TestCase {
+            chain: local_chain![(0, h!("_")), (1, h!("A"))],
+            query_range: (0, 2),
+        },
+        TestCase {
+            chain: local_chain![(0, h!("_")), (2, h!("B")), (3, h!("C"))],
+            query_range: (0, 3),
+        },
+    ];
+
+    for t in test_cases.into_iter() {
+        let tip = t.chain.tip();
+        for h in t.query_range.0..=t.query_range.1 {
+            let query_result = tip.get(h);
+
+            // perform an exhausitive search for the checkpoint at height `h`
+            let exp_hash = t
+                .chain
+                .iter_checkpoints()
+                .find(|cp| cp.height() == h)
+                .map(|cp| cp.hash());
+
+            match query_result {
+                Some(cp) => {
+                    assert_eq!(Some(cp.hash()), exp_hash);
+                    assert_eq!(cp.height(), h);
+                }
+                None => assert!(exp_hash.is_none()),
+            }
+        }
+    }
+}
+
+#[test]
 fn local_chain_apply_header_connected_to() {
     fn header_from_prev_blockhash(prev_blockhash: BlockHash) -> Header {
         Header {
