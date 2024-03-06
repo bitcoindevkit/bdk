@@ -725,13 +725,13 @@ impl<A: Anchor> TxGraph<A> {
                     };
                     let mut has_missing_height = false;
                     for anchor_block in tx_anchors.iter().map(Anchor::anchor_block) {
-                        match chain.blocks().get(&anchor_block.height) {
+                        match chain.query(anchor_block.height) {
                             None => {
                                 has_missing_height = true;
                                 continue;
                             }
-                            Some(chain_hash) => {
-                                if chain_hash == &anchor_block.hash {
+                            Some(chain_cp) => {
+                                if chain_cp.hash() == anchor_block.hash {
                                     return true;
                                 }
                             }
@@ -749,7 +749,7 @@ impl<A: Anchor> TxGraph<A> {
             .filter_map(move |(a, _)| {
                 let anchor_block = a.anchor_block();
                 if Some(anchor_block.height) != last_height_emitted
-                    && !chain.blocks().contains_key(&anchor_block.height)
+                    && chain.query(anchor_block.height).is_none()
                 {
                     last_height_emitted = Some(anchor_block.height);
                     Some(anchor_block.height)
@@ -1299,7 +1299,7 @@ impl<A> ChangeSet<A> {
         A: Anchor,
     {
         self.anchor_heights()
-            .filter(move |height| !local_chain.blocks().contains_key(height))
+            .filter(move |&height| local_chain.query(height).is_none())
     }
 }
 
