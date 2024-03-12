@@ -1,0 +1,16 @@
+[default]
+extend-ignore-re = [
+  "flate2", # crate
+  "tprv.*", # xpriv key
+  "tpub.*", # xpriv key
+  "bc.*",   # address
+  "pk(.*)", # miniscript policy
+  # some descriptor tests
+  "muCPpS6Ue7nkzeJMWDViw7Lkwr92Yc4K8g",
+  "2MypGwr5eQWAWWJtiJgUEToVxc4zuokjQRe",
+  "2NDUoevN4QMzhvHDMGhKuiT2fN9HXbFRMwn",
+  "mzYvhRAuQqbdSKMVVzXNYyqihgNdRadAUQ",
+]
+
+[default.extend-words]
+fing = "fing" # short for fingerprint

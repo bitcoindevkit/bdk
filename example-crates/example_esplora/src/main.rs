@@ -1,3 +1,4 @@
+#![allow(clippy::needless_collect)]
 use std::{
     collections::BTreeSet,
     io::{self, Write},
@@ -93,7 +94,7 @@ impl EsploraArgs {
     }
 }
 
-#[derive(Parser, Debug, Clone, PartialEq)]
+#[derive(Parser, Debug, Clone, PartialEq, Eq)]
 pub struct ScanOptions {
     /// Max number of concurrent esplora server requests.
     #[clap(long, default_value = "5")]
