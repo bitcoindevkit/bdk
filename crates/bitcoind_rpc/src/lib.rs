@@ -79,7 +79,7 @@ impl<'c, C: bitcoincore_rpc::RpcApi> Emitter<'c, C> {
             .last_mempool_tip
             // We use `start_height - 1` as we cannot guarantee that the block at
             // `start_height` has been emitted.
-            .unwrap_or(self.start_height.saturating_sub(1));
+            .unwrap_or_else(|| self.start_height.saturating_sub(1));
 
         // Mempool txs come with a timestamp of when the tx is introduced to the mempool. We keep
         // track of the latest mempool tx's timestamp to determine whether we have seen a tx

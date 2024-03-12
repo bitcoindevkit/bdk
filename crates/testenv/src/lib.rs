@@ -60,15 +60,15 @@ impl TestEnv {
 
     /// Construct a new [`TestEnv`] instance with the provided [`Config`].
     pub fn new_with_config(config: Config) -> anyhow::Result<Self> {
-        let bitcoind_exe = match std::env::var("BITCOIND_EXE") {
+        let bitcoind_exe = match std::env::var("BITCOIND_EXEC") {
             Ok(path) => path,
             Err(_) => bitcoind::downloaded_exe_path().context(
-                "you need to provide an env var BITCOIND_EXE or specify a bitcoind version feature",
+                "you need to provide an env var BITCOIND_EXEC or specify a bitcoind version feature",
             )?,
         };
         let bitcoind = bitcoind::BitcoinD::with_conf(bitcoind_exe, &config.bitcoind)?;
 
-        let electrs_exe = match std::env::var("ELECTRS_EXE") {
+        let electrs_exe = match std::env::var("ELECTRS_EXEC") {
             Ok(path) => path,
             Err(_) => electrsd::downloaded_exe_path()
                 .context("electrs version feature must be enabled")?,
@@ -92,7 +92,7 @@ impl TestEnv {
     pub fn reset_electrsd(mut self) -> anyhow::Result<Self> {
         let mut electrsd_conf = electrsd::Conf::default();
         electrsd_conf.http_enabled = true;
-        let electrsd = match std::env::var_os("ELECTRS_EXE") {
+        let electrsd = match std::env::var_os("ELECTRS_EXEC") {
             Some(env_electrs_exe) => {
                 electrsd::ElectrsD::with_conf(env_electrs_exe, &self.bitcoind, &electrsd_conf)
             }

@@ -6,35 +6,26 @@ jobs:
   Codecov:
     name: Code Coverage
     runs-on: ubuntu-latest
-    env:
-      RUSTFLAGS: "-Cinstrument-coverage"
-      RUSTDOCFLAGS: "-Cinstrument-coverage"
-      LLVM_PROFILE_FILE: "./target/coverage/%p-%m.profraw"
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v2
-      - name: Install lcov tools
-        run: sudo apt-get install lcov -y
-      - name: Install Rust toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-            toolchain: stable
-            override: true
-            profile: minimal
-            components: llvm-tools-preview
+      - name: checkout
+        uses: actions/checkout@v4
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v14
+      - name: Nix Cache
+        uses: DeterminateSystems/magic-nix-cache-action@v8
       - name: Rust Cache
-        uses: Swatinem/rust-cache@v2.2.1
+        uses: Swatinem/rust-cache@v2
+      # Code Coverage
       - name: Install grcov
         run: if [[ ! -e ~/.cargo/bin/grcov ]]; then cargo install grcov; fi
       - name: Test
-        run: cargo test --all-features
+        run: nix develop ".#coverage" -L --command cargo test --all-features
       - name: Make coverage directory
         run: mkdir coverage
       - name: Run grcov
-        run: grcov . --binary-path ./target/debug/ -s . -t lcov --branch --ignore-not-existing --keep-only '**/crates/**' --ignore '**/tests/**' --ignore '**/examples/**' -o ./coverage/lcov.info
+        run: nix develop ".#coverage" -L --command grcov . --binary-path ./target/debug/ -s . -t lcov --branch --ignore-not-existing --keep-only '**/crates/**' --ignore '**/tests/**' --ignore '**/examples/**' -o ./coverage/lcov.info
       - name: Generate HTML coverage report
-        run: genhtml -o coverage-report.html --ignore-errors source ./coverage/lcov.info
+        run: nix develop ".#coverage" -L --command genhtml -o coverage-report.html --ignore-errors source ./coverage/lcov.info
       - name: Coveralls upload
         uses: coverallsapp/github-action@master
         with:

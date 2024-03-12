@@ -25,3 +25,10 @@ authors = ["Bitcoin Dev Kit Developers"]
 [workspace.lints.clippy]
 print_stdout = "deny"
 print_stderr = "deny"
+[profile.dev]
+
+[profile.ci]
+inherits = "dev"
+debug = 1
+incremental = false
+lto = "off"

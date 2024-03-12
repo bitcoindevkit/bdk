@@ -32,7 +32,7 @@ The `bdk` libraries aims to provide well engineered and reviewed components for 
 It is built upon the excellent [`rust-bitcoin`] and [`rust-miniscript`] crates.
 
 > ⚠ The Bitcoin Dev Kit developers are in the process of releasing a `v1.0` which is a fundamental re-write of how the library works.
-> See for some background on this project: https://bitcoindevkit.org/blog/road-to-bdk-1/ (ignore the timeline 😁)
+> See for some background on this project: <https://bitcoindevkit.org/blog/road-to-bdk-1/> (ignore the timeline 😁)
 > For a release timeline see the [`BDK 1.0 project page`].
 
 ## Architecture
@@ -45,8 +45,11 @@ The project is split up into several crates in the `/crates` directory:
 - [`file_store`](./crates/file_store): A (experimental) persistence backend for storing chain data in a single file.
 - [`esplora`](./crates/esplora): Extends the [`esplora-client`] crate with methods to fetch chain data from an esplora HTTP server in the form that [`bdk_chain`] and `Wallet` can consume.
 - [`electrum`](./crates/electrum): Extends the [`electrum-client`] crate with methods to fetch chain data from an electrum server in the form that [`bdk_chain`] and `Wallet` can consume.
+- [`bitcoind_rpc`](./crates/bitcond_rpc) Emitting blockchain data from the `bitcoind` RPC interface.
+- [`testenv`](./crates/testenv): A testing environment for integration tests that spins up a regtest bitcoind and an electrs instance.
 
 Fully working examples of how to use these components are in `/example-crates`:
+
 - [`example_cli`](./example-crates/example_cli): Library used by the `example_*` crates. Provides utilities for syncing, showing the balance, generating addresses and creating transactions without using the bdk_wallet `Wallet`.
 - [`example_electrum`](./example-crates/example_electrum): A command line Bitcoin wallet application built on top of `example_cli` and the `electrum` crate. It shows the power of the bdk tools (`chain` + `file_store` + `electrum`), without depending on the main `bdk_wallet` library.
 - [`example_esplora`](./example-crates/example_esplora): A command line Bitcoin wallet application built on top of `example_cli` and the `esplora` crate. It shows the power of the bdk tools (`chain` + `file_store` + `esplora`), without depending on the main `bdk_wallet` library.
@@ -62,28 +65,34 @@ Fully working examples of how to use these components are in `/example-crates`:
 [`electrum-client`]: https://docs.rs/electrum-client/
 [`bdk_chain`]: https://docs.rs/bdk-chain/
 
+## Dependencies
+
+- `bitcoind_rpc` depends on `bitcoind` being installed and available in `PATH` or in the `BITCOIND_EXEC` ENV variable.
+- `esplora` depends on [Blockstream's version of `electrs`](https://github.com/Blockstream/electrs)
+   being installed and available in `PATH` or in the `ELECTRS_EXEC` ENV variable.
+
 ## Minimum Supported Rust Version (MSRV)
+
 This library should compile with any combination of features with Rust 1.63.0.
 
 To build with the MSRV you will need to pin dependencies as follows:
 
 ```shell
-cargo update -p zstd-sys --precise "2.0.8+zstd.1.5.5"
-cargo update -p time --precise "0.3.20"
 cargo update -p home --precise "0.5.5"
 cargo update -p proptest --precise "1.2.0"
 cargo update -p url --precise "2.5.0"
 cargo update -p cc --precise "1.0.105"
 cargo update -p tokio --precise "1.38.1"
 cargo update -p tokio-util --precise "0.7.11"
+cargo update -p bumpalo --precise "3.14.0"
 ```
 
 ## License
 
 Licensed under either of
 
-* Apache License, Version 2.0, ([LICENSE-APACHE](LICENSE-APACHE) or <https://www.apache.org/licenses/LICENSE-2.0>)
-* MIT license ([LICENSE-MIT](LICENSE-MIT) or <https://opensource.org/licenses/MIT>)
+- Apache License, Version 2.0, ([LICENSE-APACHE](LICENSE-APACHE) or <https://www.apache.org/licenses/LICENSE-2.0>)
+- MIT license ([LICENSE-MIT](LICENSE-MIT) or <https://opensource.org/licenses/MIT>)
 
 at your option.
 

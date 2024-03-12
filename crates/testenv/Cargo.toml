@@ -16,8 +16,8 @@ readme = "README.md"
 workspace = true
 
 [dependencies]
-bdk_chain = { path = "../chain", version = "0.19.0", default-features = false }
-electrsd = { version = "0.28.0", features = [ "bitcoind_25_0", "esplora_a33e97e1", "legacy" ] }
+bdk_chain = { path = "../chain", version = "0.19", default-features = false }
+electrsd = { version = "0.28.0", features = ["legacy"] }
 
 [features]
 default = ["std"]

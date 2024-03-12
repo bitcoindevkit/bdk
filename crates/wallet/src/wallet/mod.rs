@@ -2246,7 +2246,11 @@ impl Wallet {
         Ok(psbt_input)
     }
 
-    fn update_psbt_with_descriptor(&self, psbt: &mut Psbt) -> Result<(), MiniscriptPsbtError> {
+    #[allow(clippy::needless_collect)]
+    fn update_psbt_with_descriptor(
+        &self,
+        psbt: &mut psbt::Psbt,
+    ) -> Result<(), MiniscriptPsbtError> {
         // We need to borrow `psbt` mutably within the loops, so we have to allocate a vec for all
         // the input utxos and outputs
         let utxos = (0..psbt.inputs.len())
