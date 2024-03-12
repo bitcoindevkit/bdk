@@ -271,7 +271,7 @@ where
 }
 
 /// Represents changes to an [`IndexedTxGraph`].
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(
     feature = "serde",
     derive(serde::Deserialize, serde::Serialize),

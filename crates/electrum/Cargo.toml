@@ -16,7 +16,8 @@ bdk_chain = { path = "../chain", version = "0.11.0", default-features = false }
 electrum-client = { version = "0.18" }
 #rustls = { version = "=0.21.1", optional = true, features = ["dangerous_configuration"] }
 
-[dev-dependencies]
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 bdk_testenv = { path = "../testenv", default-features = false }
-electrsd = { version= "0.25.0", features = ["bitcoind_25_0", "esplora_a33e97e1", "legacy"] }
+electrsd = { version = "0.26.0", features = ["legacy"] }
 anyhow = "1"
+

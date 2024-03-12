@@ -116,9 +116,8 @@ fn main() -> anyhow::Result<()> {
             .expect("failed to send sigterm")
     });
 
-    let emitter_tip = wallet_tip.clone();
     spawn(move || -> Result<(), anyhow::Error> {
-        let mut emitter = Emitter::new(&rpc_client, emitter_tip, args.start_height);
+        let mut emitter = Emitter::new(&rpc_client, wallet_tip, args.start_height);
         while let Some(emission) = emitter.next_block()? {
             sender.send(Emission::Block(emission))?;
         }

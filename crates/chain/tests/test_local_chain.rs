@@ -18,7 +18,7 @@ struct TestLocalChain<'a> {
     exp: ExpectedResult<'a>,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 enum ExpectedResult<'a> {
     Ok {
         changeset: &'a [(u32, Option<BlockHash>)],

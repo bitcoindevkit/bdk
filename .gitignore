@@ -1,9 +1,15 @@
+# Added by Cargo
 /target
-Cargo.lock
-/.vscode
 
+# Dev environment
+/.vscode
 *.swp
 .idea
 
 # Example persisted files.
 *.db
+
+# Nix
+/result
+# pre-commit-hooks.nix
+.pre-commit-config.yaml

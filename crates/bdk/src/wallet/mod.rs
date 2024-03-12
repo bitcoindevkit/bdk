@@ -112,7 +112,7 @@ pub struct Update {
 }
 
 /// The changes made to a wallet by applying an [`Update`].
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
 pub struct ChangeSet {
     /// Changes to the [`LocalChain`].
     ///
@@ -2301,6 +2301,7 @@ impl<D> Wallet<D> {
         Ok(psbt_input)
     }
 
+    #[allow(clippy::needless_collect)]
     fn update_psbt_with_descriptor(
         &self,
         psbt: &mut psbt::PartiallySignedTransaction,

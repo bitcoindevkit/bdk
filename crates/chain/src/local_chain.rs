@@ -603,7 +603,7 @@ impl LocalChain {
 }
 
 /// An error which occurs when a [`LocalChain`] is constructed without a genesis checkpoint.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MissingGenesisError;
 
 impl core::fmt::Display for MissingGenesisError {
@@ -619,7 +619,7 @@ impl core::fmt::Display for MissingGenesisError {
 impl std::error::Error for MissingGenesisError {}
 
 /// Represents a failure when trying to insert/remove a checkpoint to/from [`LocalChain`].
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AlterCheckPointError {
     /// The checkpoint's height.
     pub height: u32,
@@ -650,7 +650,7 @@ impl core::fmt::Display for AlterCheckPointError {
 impl std::error::Error for AlterCheckPointError {}
 
 /// Occurs when an update does not have a common checkpoint with the original chain.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CannotConnectError {
     /// The suggested checkpoint to include to connect the two chains.
     pub try_include_height: u32,
@@ -670,7 +670,7 @@ impl core::fmt::Display for CannotConnectError {
 impl std::error::Error for CannotConnectError {}
 
 /// The error type for [`LocalChain::apply_header_connected_to`].
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ApplyHeaderError {
     /// Occurs when `connected_to` block conflicts with either the current block or previous block.
     InconsistentBlocks,
