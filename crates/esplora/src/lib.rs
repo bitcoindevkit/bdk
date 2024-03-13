@@ -16,6 +16,7 @@
 //! [`TxGraph`]: bdk_chain::tx_graph::TxGraph
 //! [`example_esplora`]: https://github.com/bitcoindevkit/bdk/tree/master/example-crates/example_esplora
 
+use bdk_chain::bitcoin::absolute::Time;
 use bdk_chain::{BlockId, ConfirmationTimeHeightAnchor};
 use esplora_client::TxStatus;
 
@@ -42,7 +43,8 @@ fn anchor_from_status(status: &TxStatus) -> Option<ConfirmationTimeHeightAnchor>
         Some(ConfirmationTimeHeightAnchor {
             anchor_block: BlockId { height, hash },
             confirmation_height: height,
-            confirmation_time: time,
+            confirmation_time: Time::from_consensus(time.try_into().expect("consensus time"))
+                .expect("consensus time"),
         })
     } else {
         None

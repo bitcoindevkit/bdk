@@ -1,7 +1,8 @@
 use rand::distributions::{Alphanumeric, DistString};
 use std::collections::HashMap;
 
-use bdk_chain::{tx_graph::TxGraph, Anchor, SpkTxOutIndex};
+use bdk_chain::{tx_graph::TxGraph, BlockId, SpkTxOutIndex};
+use bitcoin::absolute::Time;
 use bitcoin::{
     locktime::absolute::LockTime, secp256k1::Secp256k1, OutPoint, ScriptBuf, Sequence, Transaction,
     TxIn, TxOut, Txid, Witness,
@@ -20,7 +21,7 @@ pub struct TxTemplate<'a, A> {
     pub inputs: &'a [TxInTemplate<'a>],
     pub outputs: &'a [TxOutTemplate],
     pub anchors: &'a [A],
-    pub last_seen: Option<u64>,
+    pub last_seen: Option<Time>,
 }
 
 #[allow(dead_code)]
@@ -49,11 +50,11 @@ impl TxOutTemplate {
 }
 
 #[allow(dead_code)]
-pub fn init_graph<'a, A: Anchor + Clone + 'a>(
-    tx_templates: impl IntoIterator<Item = &'a TxTemplate<'a, A>>,
-) -> (TxGraph<A>, SpkTxOutIndex<u32>, HashMap<&'a str, Txid>) {
+pub fn init_graph<'a>(
+    tx_templates: impl IntoIterator<Item = &'a TxTemplate<'a, BlockId>>,
+) -> (TxGraph<BlockId>, SpkTxOutIndex<u32>, HashMap<&'a str, Txid>) {
     let (descriptor, _) = Descriptor::parse_descriptor(&Secp256k1::signing_only(), "tr(tprv8ZgxMBicQKsPd3krDUsBAmtnRsK3rb8u5yi1zhQgMhF1tR8MW7xfE4rnrbbsrbPR52e7rKapu6ztw1jXveJSCGHEriUGZV7mCe88duLp5pj/86'/1'/0'/0/*)").unwrap();
-    let mut graph = TxGraph::<A>::default();
+    let mut graph = TxGraph::<BlockId>::default();
     let mut spk_index = SpkTxOutIndex::default();
     (0..10).for_each(|index| {
         spk_index.insert_spk(
@@ -126,7 +127,7 @@ pub fn init_graph<'a, A: Anchor + Clone + 'a>(
         spk_index.scan(&tx);
         let _ = graph.insert_tx(tx.clone());
         for anchor in tx_tmp.anchors.iter() {
-            let _ = graph.insert_anchor(tx.txid(), anchor.clone());
+            let _ = graph.insert_anchor(tx.txid(), *anchor);
         }
         if let Some(seen_at) = tx_tmp.last_seen {
             let _ = graph.insert_seen_at(tx.txid(), seen_at);

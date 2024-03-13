@@ -4,6 +4,7 @@ mod common;
 use std::collections::{BTreeSet, HashSet};
 
 use bdk_chain::{keychain::Balance, BlockId};
+use bitcoin::absolute::{Time, LOCK_TIME_THRESHOLD};
 use bitcoin::{OutPoint, Script};
 use common::*;
 
@@ -99,14 +100,14 @@ fn test_tx_conflict_handling() {
                     tx_name: "tx_conflict_1",
                     inputs: &[TxInTemplate::PrevTx("tx1", 0)],
                     outputs: &[TxOutTemplate::new(20000, Some(2))],
-                    last_seen: Some(300),
+                    last_seen: Some(Time::from_consensus(LOCK_TIME_THRESHOLD+300).unwrap()),
                     ..Default::default()
                 },
                 TxTemplate {
                     tx_name: "tx_conflict_2",
                     inputs: &[TxInTemplate::PrevTx("tx1", 0)],
                     outputs: &[TxOutTemplate::new(30000, Some(3))],
-                    last_seen: Some(300),
+                    last_seen: Some(Time::from_consensus(LOCK_TIME_THRESHOLD+300).unwrap()),
                     ..Default::default()
                 },
             ],
@@ -135,14 +136,14 @@ fn test_tx_conflict_handling() {
                     tx_name: "tx_conflict_1",
                     inputs: &[TxInTemplate::PrevTx("tx1", 0), TxInTemplate::Bogus],
                     outputs: &[TxOutTemplate::new(20000, Some(2))],
-                    last_seen: Some(200),
+                    last_seen: Some(Time::from_consensus(LOCK_TIME_THRESHOLD+200).unwrap()),
                     ..Default::default()
                 },
                 TxTemplate {
                     tx_name: "tx_conflict_2",
                     inputs: &[TxInTemplate::PrevTx("tx1", 0),  TxInTemplate::PrevTx("tx1", 1)],
                     outputs: &[TxOutTemplate::new(30000, Some(3))],
-                    last_seen: Some(300),
+                    last_seen: Some(Time::from_consensus(LOCK_TIME_THRESHOLD+300).unwrap()),
                     ..Default::default()
                 },
             ],
@@ -170,21 +171,21 @@ fn test_tx_conflict_handling() {
                     tx_name: "tx_conflict_1",
                     inputs: &[TxInTemplate::PrevTx("tx1", 0), TxInTemplate::Bogus],
                     outputs: &[TxOutTemplate::new(20000, Some(1))],
-                    last_seen: Some(200),
+                    last_seen: Some(Time::from_consensus(LOCK_TIME_THRESHOLD+200).unwrap()),
                     ..Default::default()
                 },
                 TxTemplate {
                     tx_name: "tx_conflict_2",
                     inputs: &[TxInTemplate::PrevTx("tx1", 0)],
                     outputs: &[TxOutTemplate::new(30000, Some(2))],
-                    last_seen: Some(300),
+                    last_seen: Some(Time::from_consensus(LOCK_TIME_THRESHOLD+300).unwrap()),
                     ..Default::default()
                 },
                 TxTemplate {
                     tx_name: "tx_conflict_3",
                     inputs: &[TxInTemplate::PrevTx("tx1", 0)],
                     outputs: &[TxOutTemplate::new(40000, Some(3))],
-                    last_seen: Some(400),
+                    last_seen: Some(Time::from_consensus(LOCK_TIME_THRESHOLD+400).unwrap()),
                     ..Default::default()
                 },
             ],
@@ -212,7 +213,7 @@ fn test_tx_conflict_handling() {
                     tx_name: "tx_conflict_1",
                     inputs: &[TxInTemplate::PrevTx("tx1", 0), TxInTemplate::Bogus],
                     outputs: &[TxOutTemplate::new(20000, Some(1))],
-                    last_seen: Some(200),
+                    last_seen: Some(Time::from_consensus(LOCK_TIME_THRESHOLD+200).unwrap()),
                     ..Default::default()
                 },
                 TxTemplate {
@@ -220,7 +221,7 @@ fn test_tx_conflict_handling() {
                     inputs: &[TxInTemplate::PrevTx("tx1", 0)],
                     outputs: &[TxOutTemplate::new(30000, Some(2))],
                     anchors: &[block_id!(4, "Orphaned Block")],
-                    last_seen: Some(300),
+                    last_seen: Some(Time::from_consensus(LOCK_TIME_THRESHOLD+300).unwrap()),
                 },
             ],
             exp_chain_txs: HashSet::from(["tx1", "tx_orphaned_conflict"]),
@@ -247,7 +248,7 @@ fn test_tx_conflict_handling() {
                     tx_name: "tx_conflict_1",
                     inputs: &[TxInTemplate::PrevTx("tx1", 0), TxInTemplate::Bogus],
                     outputs: &[TxOutTemplate::new(20000, Some(1))],
-                    last_seen: Some(200),
+                    last_seen: Some(Time::from_consensus(LOCK_TIME_THRESHOLD+200).unwrap()),
                     ..Default::default()
                 },
                 TxTemplate {
@@ -255,7 +256,7 @@ fn test_tx_conflict_handling() {
                     inputs: &[TxInTemplate::PrevTx("tx1", 0)],
                     outputs: &[TxOutTemplate::new(30000, Some(2))],
                     anchors: &[block_id!(4, "Orphaned Block")],
-                    last_seen: Some(100),
+                    last_seen: Some(Time::from_consensus(LOCK_TIME_THRESHOLD+100).unwrap()),
                 },
             ],
             exp_chain_txs: HashSet::from(["tx1", "tx_conflict_1"]),
@@ -282,21 +283,21 @@ fn test_tx_conflict_handling() {
                     tx_name: "tx_conflict_1",
                     inputs: &[TxInTemplate::PrevTx("tx1", 0), TxInTemplate::Bogus],
                     outputs: &[TxOutTemplate::new(20000, Some(1))],
-                    last_seen: Some(200),
+                    last_seen: Some(Time::from_consensus(LOCK_TIME_THRESHOLD+200).unwrap()),
                     ..Default::default()
                 },
                 TxTemplate {
                     tx_name: "tx_conflict_2",
                     inputs: &[TxInTemplate::PrevTx("tx1", 0)],
                     outputs: &[TxOutTemplate::new(30000, Some(2))],
-                    last_seen: Some(300),
+                    last_seen: Some(Time::from_consensus(LOCK_TIME_THRESHOLD+300).unwrap()),
                     ..Default::default()
                 },
                 TxTemplate {
                     tx_name: "tx_conflict_3",
                     inputs: &[TxInTemplate::PrevTx("tx1", 0)],
                     outputs: &[TxOutTemplate::new(40000, Some(3))],
-                    last_seen: Some(400),
+                    last_seen: Some(Time::from_consensus(LOCK_TIME_THRESHOLD+400).unwrap()),
                     ..Default::default()
                 },
                 TxTemplate {
@@ -324,28 +325,28 @@ fn test_tx_conflict_handling() {
                     tx_name: "A",
                     inputs: &[TxInTemplate::Bogus],
                     outputs: &[TxOutTemplate::new(10000, Some(0))],
-                    last_seen: Some(22),
+                    last_seen: Some(Time::from_consensus(LOCK_TIME_THRESHOLD+22).unwrap()),
                     ..Default::default()
                 },
                 TxTemplate {
                     tx_name: "B",
                     inputs: &[TxInTemplate::PrevTx("A", 0)],
                     outputs: &[TxOutTemplate::new(20000, Some(1))],
-                    last_seen: Some(23),
+                    last_seen: Some(Time::from_consensus(LOCK_TIME_THRESHOLD+23).unwrap()),
                     ..Default::default()
                 },
                 TxTemplate {
                     tx_name: "B'",
                     inputs: &[TxInTemplate::PrevTx("A", 0)],
                     outputs: &[TxOutTemplate::new(20000, Some(2))],
-                    last_seen: Some(24),
+                    last_seen: Some(Time::from_consensus(LOCK_TIME_THRESHOLD+24).unwrap()),
                     ..Default::default()
                 },
                 TxTemplate {
                     tx_name: "C",
                     inputs: &[TxInTemplate::PrevTx("B", 0)],
                     outputs: &[TxOutTemplate::new(30000, Some(3))],
-                    last_seen: Some(25),
+                    last_seen: Some(Time::from_consensus(LOCK_TIME_THRESHOLD+25).unwrap()),
                     ..Default::default()
                 },
             ],
@@ -462,14 +463,14 @@ fn test_tx_conflict_handling() {
                     tx_name: "B",
                     inputs: &[TxInTemplate::PrevTx("A", 0), TxInTemplate::Bogus],
                     outputs: &[TxOutTemplate::new(20000, Some(1))],
-                    last_seen: Some(200),
+                    last_seen: Some(Time::from_consensus(LOCK_TIME_THRESHOLD+200).unwrap()),
                     ..Default::default()
                 },
                 TxTemplate {
                     tx_name: "B'",
                     inputs: &[TxInTemplate::PrevTx("A", 0)],
                     outputs: &[TxOutTemplate::new(30000, Some(2))],
-                    last_seen: Some(300),
+                    last_seen: Some(Time::from_consensus(LOCK_TIME_THRESHOLD+300).unwrap()),
                     ..Default::default()
                 },
                 TxTemplate {
@@ -507,7 +508,7 @@ fn test_tx_conflict_handling() {
                     tx_name: "B",
                     inputs: &[TxInTemplate::PrevTx("A", 0), TxInTemplate::Bogus],
                     outputs: &[TxOutTemplate::new(20000, Some(1))],
-                    last_seen: Some(200),
+                    last_seen: Some(Time::from_consensus(LOCK_TIME_THRESHOLD+200).unwrap()),
                     ..Default::default()
                 },
                 TxTemplate {
@@ -552,7 +553,7 @@ fn test_tx_conflict_handling() {
                     tx_name: "B",
                     inputs: &[TxInTemplate::PrevTx("A", 0), TxInTemplate::Bogus],
                     outputs: &[TxOutTemplate::new(20000, Some(1))],
-                    last_seen: Some(200),
+                    last_seen: Some(Time::from_consensus(LOCK_TIME_THRESHOLD+200).unwrap()),
                     ..Default::default()
                 },
                 TxTemplate {

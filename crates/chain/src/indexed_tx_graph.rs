@@ -1,6 +1,7 @@
 //! Contains the [`IndexedTxGraph`] and associated types. Refer to the
 //! [`IndexedTxGraph`] documentation for more.
 use alloc::vec::Vec;
+use bitcoin::absolute::Time;
 use bitcoin::{Block, OutPoint, Transaction, TxOut, Txid};
 
 use crate::{
@@ -116,7 +117,7 @@ where
     ///
     /// This is used for transaction conflict resolution in [`TxGraph`] where the transaction with
     /// the later last-seen is prioritized.
-    pub fn insert_seen_at(&mut self, txid: Txid, seen_at: u64) -> ChangeSet<A, I::ChangeSet> {
+    pub fn insert_seen_at(&mut self, txid: Txid, seen_at: Time) -> ChangeSet<A, I::ChangeSet> {
         self.graph.insert_seen_at(txid, seen_at).into()
     }
 
@@ -165,7 +166,7 @@ where
     /// conflict-resolution in [`TxGraph`] (refer to [`TxGraph::insert_seen_at`] for details).
     pub fn batch_insert_relevant_unconfirmed<'t>(
         &mut self,
-        unconfirmed_txs: impl IntoIterator<Item = (&'t Transaction, u64)>,
+        unconfirmed_txs: impl IntoIterator<Item = (&'t Transaction, Time)>,
     ) -> ChangeSet<A, I::ChangeSet> {
         // The algorithm below allows for non-topologically ordered transactions by using two loops.
         // This is achieved by:
@@ -200,7 +201,7 @@ where
     /// [`batch_insert_relevant_unconfirmed`]: IndexedTxGraph::batch_insert_relevant_unconfirmed
     pub fn batch_insert_unconfirmed(
         &mut self,
-        txs: impl IntoIterator<Item = (Transaction, u64)>,
+        txs: impl IntoIterator<Item = (Transaction, Time)>,
     ) -> ChangeSet<A, I::ChangeSet> {
         let graph = self.graph.batch_insert_unconfirmed(txs);
         let indexer = self.index_tx_graph_changeset(&graph);

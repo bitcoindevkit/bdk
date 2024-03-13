@@ -931,6 +931,7 @@ mod test {
     }
 
     use bdk_chain::ConfirmationTime;
+    use bitcoin::absolute::{Time, LOCK_TIME_THRESHOLD};
     use bitcoin::consensus::deserialize;
     use bitcoin::hashes::hex::FromHex;
 
@@ -1023,7 +1024,9 @@ mod test {
                 txout: Default::default(),
                 keychain: KeychainKind::External,
                 is_spent: false,
-                confirmation_time: ConfirmationTime::Unconfirmed { last_seen: 0 },
+                confirmation_time: ConfirmationTime::Unconfirmed {
+                    last_seen: Time::MIN,
+                },
                 derivation_index: 0,
             },
             LocalOutput {
@@ -1036,7 +1039,7 @@ mod test {
                 is_spent: false,
                 confirmation_time: ConfirmationTime::Confirmed {
                     height: 32,
-                    time: 42,
+                    time: Time::from_consensus(LOCK_TIME_THRESHOLD + 42).unwrap(),
                 },
                 derivation_index: 1,
             },

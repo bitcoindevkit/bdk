@@ -9,6 +9,7 @@ use bdk_chain::{
     local_chain::LocalChain,
     tx_graph, BlockId, ChainPosition, ConfirmationHeightAnchor,
 };
+use bitcoin::absolute::{Time, LOCK_TIME_THRESHOLD};
 use bitcoin::{secp256k1::Secp256k1, OutPoint, Script, ScriptBuf, Transaction, TxIn, TxOut};
 use miniscript::Descriptor;
 
@@ -224,7 +225,12 @@ fn test_list_owned_txouts() {
             )
         }));
 
-    let _ = graph.batch_insert_relevant_unconfirmed([&tx4, &tx5].iter().map(|tx| (*tx, 100)));
+    let _ = graph.batch_insert_relevant_unconfirmed([&tx4, &tx5].iter().map(|tx| {
+        (
+            *tx,
+            Time::from_consensus(LOCK_TIME_THRESHOLD + 100).unwrap(),
+        )
+    }));
 
     // A helper lambda to extract and filter data from the graph.
     let fetch =

@@ -738,6 +738,7 @@ mod test {
     use core::str::FromStr;
 
     use bdk_chain::ConfirmationTime;
+    use bitcoin::absolute::{Time, LOCK_TIME_THRESHOLD};
     use bitcoin::{OutPoint, ScriptBuf, TxOut};
 
     use super::*;
@@ -780,13 +781,27 @@ mod test {
 
     fn get_test_utxos() -> Vec<WeightedUtxo> {
         vec![
-            utxo(100_000, 0, ConfirmationTime::Unconfirmed { last_seen: 0 }),
+            utxo(
+                100_000,
+                0,
+                ConfirmationTime::Unconfirmed {
+                    last_seen: Time::MIN,
+                },
+            ),
             utxo(
                 FEE_AMOUNT - 40,
                 1,
-                ConfirmationTime::Unconfirmed { last_seen: 0 },
+                ConfirmationTime::Unconfirmed {
+                    last_seen: Time::MIN,
+                },
             ),
-            utxo(200_000, 2, ConfirmationTime::Unconfirmed { last_seen: 0 }),
+            utxo(
+                200_000,
+                2,
+                ConfirmationTime::Unconfirmed {
+                    last_seen: Time::MIN,
+                },
+            ),
         ]
     }
 
@@ -797,7 +812,7 @@ mod test {
             1,
             ConfirmationTime::Confirmed {
                 height: 1,
-                time: 1231006505,
+                time: Time::from_consensus(1231006505).unwrap(),
             },
         );
         let utxo2 = utxo(
@@ -805,7 +820,7 @@ mod test {
             2,
             ConfirmationTime::Confirmed {
                 height: 2,
-                time: 1231006505,
+                time: Time::from_consensus(1231006505).unwrap(),
             },
         );
         let utxo3 = utxo(
@@ -813,7 +828,7 @@ mod test {
             3,
             ConfirmationTime::Confirmed {
                 height: 3,
-                time: 1231006505,
+                time: Time::from_consensus(1231006505).unwrap(),
             },
         );
         vec![utxo1, utxo2, utxo3]
@@ -822,6 +837,8 @@ mod test {
     fn generate_random_utxos(rng: &mut StdRng, utxos_number: usize) -> Vec<WeightedUtxo> {
         let mut res = Vec::new();
         for i in 0..utxos_number {
+            let random_time =
+                Time::from_consensus(rng.gen_range(LOCK_TIME_THRESHOLD..=u32::MAX)).unwrap();
             res.push(WeightedUtxo {
                 satisfaction_weight: P2WPKH_SATISFACTION_SIZE,
                 utxo: Utxo::Local(LocalOutput {
@@ -840,10 +857,12 @@ mod test {
                     confirmation_time: if rng.gen_bool(0.5) {
                         ConfirmationTime::Confirmed {
                             height: rng.next_u32(),
-                            time: rng.next_u64(),
+                            time: random_time,
                         }
                     } else {
-                        ConfirmationTime::Unconfirmed { last_seen: 0 }
+                        ConfirmationTime::Unconfirmed {
+                            last_seen: Time::MIN,
+                        }
                     },
                 }),
             });
@@ -868,7 +887,9 @@ mod test {
                     keychain: KeychainKind::External,
                     is_spent: false,
                     derivation_index: 42,
-                    confirmation_time: ConfirmationTime::Unconfirmed { last_seen: 0 },
+                    confirmation_time: ConfirmationTime::Unconfirmed {
+                        last_seen: Time::MIN,
+                    },
                 }),
             })
             .collect()
@@ -1159,7 +1180,9 @@ mod test {
         optional.push(utxo(
             500_000,
             3,
-            ConfirmationTime::Unconfirmed { last_seen: 0 },
+            ConfirmationTime::Unconfirmed {
+                last_seen: Time::MIN,
+            },
         ));
 
         // Defensive assertions, for sanity and in case someone changes the test utxos vector.
@@ -1520,7 +1543,7 @@ mod test {
                     derivation_index: 0,
                     confirmation_time: ConfirmationTime::Confirmed {
                         height: 12345,
-                        time: 12345,
+                        time: Time::from_consensus(LOCK_TIME_THRESHOLD + 12345).unwrap(),
                     },
                 }),
             }

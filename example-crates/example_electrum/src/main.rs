@@ -4,6 +4,7 @@ use std::{
     sync::Mutex,
 };
 
+use bdk_chain::bitcoin::absolute::Time;
 use bdk_chain::{
     bitcoin::{constants::genesis_block, Address, Network, OutPoint, Txid},
     indexed_tx_graph::{self, IndexedTxGraph},
@@ -299,10 +300,13 @@ fn main() -> anyhow::Result<()> {
         relevant_txids.missing_full_txs(graph.graph())
     };
 
-    let now = std::time::UNIX_EPOCH
+    let now: u32 = std::time::UNIX_EPOCH
         .elapsed()
         .expect("must get time")
-        .as_secs();
+        .as_secs()
+        .try_into()
+        .expect("consensus bitcoin time");
+    let now = Time::from_consensus(now).expect("consensus bitcoin time");
 
     let graph_update = relevant_txids.into_tx_graph(&client, Some(now), missing_txids)?;
 

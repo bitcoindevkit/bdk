@@ -1,5 +1,5 @@
 use bdk_chain::{
-    bitcoin::{OutPoint, ScriptBuf, Transaction, Txid},
+    bitcoin::{absolute::Time, OutPoint, ScriptBuf, Transaction, Txid},
     local_chain::{self, CheckPoint},
     tx_graph::{self, TxGraph},
     Anchor, BlockId, ConfirmationHeightAnchor, ConfirmationTimeHeightAnchor,
@@ -40,7 +40,7 @@ impl RelevantTxids {
     pub fn into_tx_graph(
         self,
         client: &Client,
-        seen_at: Option<u64>,
+        seen_at: Option<Time>,
         missing: Vec<Txid>,
     ) -> Result<TxGraph<ConfirmationHeightAnchor>, Error> {
         let new_txs = client.batch_transaction_get(&missing)?;
@@ -67,7 +67,7 @@ impl RelevantTxids {
     pub fn into_confirmation_time_tx_graph(
         self,
         client: &Client,
-        seen_at: Option<u64>,
+        seen_at: Option<Time>,
         missing: Vec<Txid>,
     ) -> Result<TxGraph<ConfirmationTimeHeightAnchor>, Error> {
         let graph = self.into_tx_graph(client, seen_at, missing)?;
@@ -108,7 +108,10 @@ impl RelevantTxids {
                         let time_anchor = ConfirmationTimeHeightAnchor {
                             anchor_block: height_anchor.anchor_block,
                             confirmation_height,
-                            confirmation_time,
+                            confirmation_time: Time::from_consensus(
+                                confirmation_time.try_into().expect("consensus time"),
+                            )
+                            .expect("consensus time"),
                         };
                         (time_anchor, txid)
                     })

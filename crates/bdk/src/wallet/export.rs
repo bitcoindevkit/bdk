@@ -215,6 +215,7 @@ mod test {
     use core::str::FromStr;
 
     use bdk_chain::{BlockId, ConfirmationTime};
+    use bitcoin::absolute::Time;
     use bitcoin::hashes::Hash;
     use bitcoin::{BlockHash, Network, Transaction};
 
@@ -244,7 +245,7 @@ mod test {
                 transaction,
                 ConfirmationTime::Confirmed {
                     height: 5000,
-                    time: 0,
+                    time: Time::MIN,
                 },
             )
             .unwrap();

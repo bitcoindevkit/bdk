@@ -1,5 +1,5 @@
 use bdk::{
-    bitcoin::{Block, Network, Transaction},
+    bitcoin::{absolute::Time, Block, Network, Transaction},
     wallet::Wallet,
 };
 use bdk_bitcoind_rpc::{
@@ -73,7 +73,7 @@ impl Args {
 enum Emission {
     SigTerm,
     Block(bdk_bitcoind_rpc::BlockEvent<Block>),
-    Mempool(Vec<(Transaction, u64)>),
+    Mempool(Vec<(Transaction, Time)>),
 }
 
 fn main() -> anyhow::Result<()> {

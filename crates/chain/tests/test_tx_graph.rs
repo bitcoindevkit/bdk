@@ -7,6 +7,7 @@ use bdk_chain::{
     tx_graph::{ChangeSet, TxGraph},
     Anchor, Append, BlockId, ChainOracle, ChainPosition, ConfirmationHeightAnchor,
 };
+use bitcoin::absolute::{Time, LOCK_TIME_THRESHOLD};
 use bitcoin::{
     absolute, hashes::Hash, BlockHash, OutPoint, ScriptBuf, Transaction, TxIn, TxOut, Txid,
 };
@@ -65,7 +66,9 @@ fn insert_txouts() {
     });
 
     // Unconfirmed anchor to mark the partial transactions as unconfirmed
-    let unconf_anchor = ChainPosition::<BlockId>::Unconfirmed(1000000);
+    let unconf_anchor = ChainPosition::<BlockId>::Unconfirmed(
+        Time::from_consensus(LOCK_TIME_THRESHOLD + 1000000).unwrap(),
+    );
 
     // Make the original graph
     let mut graph = {
@@ -106,12 +109,19 @@ fn insert_txouts() {
             );
             // Mark them last seen at.
             assert_eq!(
-                graph.insert_seen_at(outpoint.txid, 1000000),
+                graph.insert_seen_at(
+                    outpoint.txid,
+                    Time::from_consensus(LOCK_TIME_THRESHOLD + 1000000).unwrap()
+                ),
                 ChangeSet {
                     txs: [].into(),
                     txouts: [].into(),
                     anchors: [].into(),
-                    last_seen: [(outpoint.txid, 1000000)].into()
+                    last_seen: [(
+                        outpoint.txid,
+                        Time::from_consensus(LOCK_TIME_THRESHOLD + 1000000).unwrap()
+                    )]
+                    .into()
                 }
             );
         }
@@ -146,7 +156,11 @@ fn insert_txouts() {
             txs: [update_txs.clone()].into(),
             txouts: update_ops.clone().into(),
             anchors: [(conf_anchor, update_txs.txid()), (unconf_anchor, h!("tx2"))].into(),
-            last_seen: [(h!("tx2"), 1000000)].into()
+            last_seen: [(
+                h!("tx2"),
+                Time::from_consensus(LOCK_TIME_THRESHOLD + 1000000).unwrap()
+            )]
+            .into()
         }
     );
 
@@ -197,7 +211,11 @@ fn insert_txouts() {
             txs: [update_txs.clone()].into(),
             txouts: update_ops.into_iter().chain(original_ops).collect(),
             anchors: [(conf_anchor, update_txs.txid()), (unconf_anchor, h!("tx2"))].into(),
-            last_seen: [(h!("tx2"), 1000000)].into()
+            last_seen: [(
+                h!("tx2"),
+                Time::from_consensus(LOCK_TIME_THRESHOLD + 1000000).unwrap()
+            )]
+            .into()
         }
     );
 }
@@ -951,18 +969,26 @@ fn test_chain_spends() {
     // Even if unconfirmed tx has a last_seen of 0, it can still be part of a chain spend.
     assert_eq!(
         graph.get_chain_spend(&local_chain, tip.block_id(), OutPoint::new(tx_0.txid(), 1)),
-        Some((ChainPosition::Unconfirmed(0), tx_2.txid())),
+        Some((ChainPosition::Unconfirmed(Time::MIN), tx_2.txid())),
     );
 
     // Mark the unconfirmed as seen and check correct ObservedAs status is returned.
-    let _ = graph.insert_seen_at(tx_2.txid(), 1234567);
+    let _ = graph.insert_seen_at(
+        tx_2.txid(),
+        Time::from_consensus(LOCK_TIME_THRESHOLD + 1234567).unwrap(),
+    );
 
     // Check chain spend returned correctly.
     assert_eq!(
         graph
             .get_chain_spend(&local_chain, tip.block_id(), OutPoint::new(tx_0.txid(), 1))
             .unwrap(),
-        (ChainPosition::Unconfirmed(1234567), tx_2.txid())
+        (
+            ChainPosition::Unconfirmed(
+                Time::from_consensus(LOCK_TIME_THRESHOLD + 1234567).unwrap()
+            ),
+            tx_2.txid()
+        )
     );
 
     // A conflicting transaction that conflicts with tx_1.
@@ -991,14 +1017,17 @@ fn test_chain_spends() {
 
     // Insert in graph and mark it as seen.
     let _ = graph.insert_tx(tx_2_conflict.clone());
-    let _ = graph.insert_seen_at(tx_2_conflict.txid(), 1234568);
+    let _ = graph.insert_seen_at(
+        tx_2_conflict.txid(),
+        Time::from_consensus(LOCK_TIME_THRESHOLD + 1234568).unwrap(),
+    );
 
     // This should return a valid observation with correct last seen.
     assert_eq!(
         graph
             .get_chain_position(&local_chain, tip.block_id(), tx_2_conflict.txid())
             .expect("position expected"),
-        ChainPosition::Unconfirmed(1234568)
+        ChainPosition::Unconfirmed(Time::from_consensus(LOCK_TIME_THRESHOLD + 1234568).unwrap())
     );
 
     // Chain_spend now catches the new transaction as the spend.
@@ -1006,7 +1035,12 @@ fn test_chain_spends() {
         graph
             .get_chain_spend(&local_chain, tip.block_id(), OutPoint::new(tx_0.txid(), 1))
             .expect("expect observation"),
-        (ChainPosition::Unconfirmed(1234568), tx_2_conflict.txid())
+        (
+            ChainPosition::Unconfirmed(
+                Time::from_consensus(LOCK_TIME_THRESHOLD + 1234568).unwrap()
+            ),
+            tx_2_conflict.txid()
+        )
     );
 
     // Chain position of the `tx_2` is now none, as it is older than `tx_2_conflict`
@@ -1020,12 +1054,27 @@ fn test_chain_spends() {
 fn test_changeset_last_seen_append() {
     let txid: Txid = h!("test txid");
 
-    let test_cases: &[(Option<u64>, Option<u64>)] = &[
-        (Some(5), Some(6)),
-        (Some(5), Some(5)),
-        (Some(6), Some(5)),
-        (None, Some(5)),
-        (Some(5), None),
+    let test_cases: &[(Option<Time>, Option<Time>)] = &[
+        (
+            Some(Time::from_consensus(LOCK_TIME_THRESHOLD + 5).unwrap()),
+            Some(Time::from_consensus(LOCK_TIME_THRESHOLD + 6).unwrap()),
+        ),
+        (
+            Some(Time::from_consensus(LOCK_TIME_THRESHOLD + 5).unwrap()),
+            Some(Time::from_consensus(LOCK_TIME_THRESHOLD + 5).unwrap()),
+        ),
+        (
+            Some(Time::from_consensus(LOCK_TIME_THRESHOLD + 6).unwrap()),
+            Some(Time::from_consensus(LOCK_TIME_THRESHOLD + 5).unwrap()),
+        ),
+        (
+            None,
+            Some(Time::from_consensus(LOCK_TIME_THRESHOLD + 5).unwrap()),
+        ),
+        (
+            Some(Time::from_consensus(LOCK_TIME_THRESHOLD + 5).unwrap()),
+            None,
+        ),
     ];
 
     for (original_ls, update_ls) in test_cases {

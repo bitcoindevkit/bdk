@@ -3,6 +3,7 @@
 use bdk::{wallet::AddressIndex, KeychainKind, LocalOutput, Wallet};
 use bdk_chain::indexed_tx_graph::Indexer;
 use bdk_chain::{BlockId, ConfirmationTime};
+use bitcoin::absolute::{Time, LOCK_TIME_THRESHOLD};
 use bitcoin::hashes::Hash;
 use bitcoin::{Address, BlockHash, Network, OutPoint, Transaction, TxIn, TxOut, Txid};
 use std::str::FromStr;
@@ -82,7 +83,7 @@ pub fn get_funded_wallet_with_change(
             tx0,
             ConfirmationTime::Confirmed {
                 height: 1_000,
-                time: 100,
+                time: Time::from_consensus(LOCK_TIME_THRESHOLD + 100).unwrap(),
             },
         )
         .unwrap();
@@ -91,7 +92,7 @@ pub fn get_funded_wallet_with_change(
             tx1.clone(),
             ConfirmationTime::Confirmed {
                 height: 2_000,
-                time: 200,
+                time: Time::from_consensus(LOCK_TIME_THRESHOLD + 200).unwrap(),
             },
         )
         .unwrap();

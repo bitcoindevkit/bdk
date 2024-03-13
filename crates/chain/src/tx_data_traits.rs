@@ -17,7 +17,8 @@ use alloc::vec::Vec;
 ///
 /// The example shows different types of anchors:
 /// ```
-/// # use bdk_chain::local_chain::LocalChain;
+/// # use bitcoin::absolute::{LOCK_TIME_THRESHOLD, Time};
+/// use bdk_chain::local_chain::LocalChain;
 /// # use bdk_chain::tx_graph::TxGraph;
 /// # use bdk_chain::BlockId;
 /// # use bdk_chain::ConfirmationHeightAnchor;
@@ -83,7 +84,7 @@ use alloc::vec::Vec;
 ///             hash: Hash::hash("third".as_bytes()),
 ///         },
 ///         confirmation_height: 1,
-///         confirmation_time: 123,
+///         confirmation_time: Time::from_consensus(LOCK_TIME_THRESHOLD + 123).unwrap(),
 ///     },
 /// );
 /// ```

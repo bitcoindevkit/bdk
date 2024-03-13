@@ -10,7 +10,7 @@
 #![warn(missing_docs)]
 
 use bdk_chain::{local_chain::CheckPoint, BlockId};
-use bitcoin::{block::Header, Block, BlockHash, Transaction};
+use bitcoin::{absolute::Time, block::Header, Block, BlockHash, Transaction};
 pub use bitcoincore_rpc;
 use bitcoincore_rpc::bitcoincore_rpc_json;
 
@@ -35,7 +35,7 @@ pub struct Emitter<'c, C> {
 
     /// The latest first-seen epoch of emitted mempool transactions. This is used to determine
     /// whether a mempool transaction is already emitted.
-    last_mempool_time: usize,
+    last_mempool_time: Time,
 
     /// The last emitted block during our last mempool emission. This is used to determine whether
     /// there has been a reorg since our last mempool emission.
@@ -56,7 +56,7 @@ impl<'c, C: bitcoincore_rpc::RpcApi> Emitter<'c, C> {
             start_height,
             last_cp,
             last_block: None,
-            last_mempool_time: 0,
+            last_mempool_time: Time::MIN,
             last_mempool_tip: None,
         }
     }
@@ -71,7 +71,7 @@ impl<'c, C: bitcoincore_rpc::RpcApi> Emitter<'c, C> {
     /// tracked UTXO which is confirmed at height `h`, but the receiver has only seen up to block
     /// of height `h-1`, we want to re-emit this transaction until the receiver has seen the block
     /// at height `h`.
-    pub fn mempool(&mut self) -> Result<Vec<(Transaction, u64)>, bitcoincore_rpc::Error> {
+    pub fn mempool(&mut self) -> Result<Vec<(Transaction, Time)>, bitcoincore_rpc::Error> {
         let client = self.client;
 
         // This is the emitted tip height during the last mempool emission.
@@ -94,7 +94,10 @@ impl<'c, C: bitcoincore_rpc::RpcApi> Emitter<'c, C> {
             .filter_map({
                 let latest_time = &mut latest_time;
                 move |(txid, tx_entry)| -> Option<Result<_, bitcoincore_rpc::Error>> {
-                    let tx_time = tx_entry.time as usize;
+                    let tx_time = Time::from_consensus(
+                        tx_entry.time.try_into().expect("consensus valid time"),
+                    )
+                    .expect("consensus valid time");
                     if tx_time > *latest_time {
                         *latest_time = tx_time;
                     }
@@ -117,7 +120,7 @@ impl<'c, C: bitcoincore_rpc::RpcApi> Emitter<'c, C> {
                         Err(err) => return Some(Err(err)),
                     };
 
-                    Some(Ok((tx, tx_time as u64)))
+                    Some(Ok((tx, tx_time)))
                 }
             })
             .collect::<Result<Vec<_>, _>>()?;

@@ -81,6 +81,7 @@ use crate::{
 };
 use alloc::collections::vec_deque::VecDeque;
 use alloc::vec::Vec;
+use bitcoin::absolute::Time;
 use bitcoin::{OutPoint, Script, Transaction, TxOut, Txid};
 use core::fmt::{self, Formatter};
 use core::{
@@ -96,7 +97,7 @@ use core::{
 #[derive(Clone, Debug, PartialEq)]
 pub struct TxGraph<A = ()> {
     // all transactions that the graph is aware of in format: `(tx_node, tx_anchors, tx_last_seen)`
-    txs: HashMap<Txid, (TxNodeInternal, BTreeSet<A>, u64)>,
+    txs: HashMap<Txid, (TxNodeInternal, BTreeSet<A>, Time)>,
     spends: BTreeMap<OutPoint, HashSet<Txid>>,
     anchors: BTreeSet<(A, Txid)>,
 
@@ -126,7 +127,7 @@ pub struct TxNode<'a, T, A> {
     /// The blocks that the transaction is "anchored" in.
     pub anchors: &'a BTreeSet<A>,
     /// The last-seen unix timestamp of the transaction as unconfirmed.
-    pub last_seen_unconfirmed: u64,
+    pub last_seen_unconfirmed: Time,
 }
 
 impl<'a, T, A> Deref for TxNode<'a, T, A> {
@@ -495,7 +496,7 @@ impl<A: Clone + Ord> TxGraph<A> {
             (
                 TxNodeInternal::Partial([(outpoint.vout, txout)].into()),
                 BTreeSet::new(),
-                0,
+                Time::MIN,
             ),
         );
         self.apply_update(update)
@@ -506,9 +507,10 @@ impl<A: Clone + Ord> TxGraph<A> {
     /// The [`ChangeSet`] returned will be empty if `tx` already exists.
     pub fn insert_tx(&mut self, tx: Transaction) -> ChangeSet<A> {
         let mut update = Self::default();
-        update
-            .txs
-            .insert(tx.txid(), (TxNodeInternal::Whole(tx), BTreeSet::new(), 0));
+        update.txs.insert(
+            tx.txid(),
+            (TxNodeInternal::Whole(tx), BTreeSet::new(), Time::MIN),
+        );
         self.apply_update(update)
     }
 
@@ -519,7 +521,7 @@ impl<A: Clone + Ord> TxGraph<A> {
     /// conflict-resolution (refer to [`TxGraph::insert_seen_at`] for details).
     pub fn batch_insert_unconfirmed(
         &mut self,
-        txs: impl IntoIterator<Item = (Transaction, u64)>,
+        txs: impl IntoIterator<Item = (Transaction, Time)>,
     ) -> ChangeSet<A> {
         let mut changeset = ChangeSet::<A>::default();
         for (tx, seen_at) in txs {
@@ -542,9 +544,13 @@ impl<A: Clone + Ord> TxGraph<A> {
     /// Inserts the given `seen_at` for `txid` into [`TxGraph`].
     ///
     /// Note that [`TxGraph`] only keeps track of the latest `seen_at`.
-    pub fn insert_seen_at(&mut self, txid: Txid, seen_at: u64) -> ChangeSet<A> {
+    pub fn insert_seen_at(&mut self, txid: Txid, seen_at: Time) -> ChangeSet<A> {
         let mut update = Self::default();
-        let (_, _, update_last_seen) = update.txs.entry(txid).or_default();
+        let (_, _, update_last_seen) =
+            update
+                .txs
+                .entry(txid)
+                .or_insert((Default::default(), Default::default(), Time::MIN));
         *update_last_seen = seen_at;
         self.apply_update(update)
     }
@@ -592,14 +598,20 @@ impl<A: Clone + Ord> TxGraph<A> {
                     );
                 }
                 None => {
-                    self.txs
-                        .insert(txid, (TxNodeInternal::Whole(tx), BTreeSet::new(), 0));
+                    self.txs.insert(
+                        txid,
+                        (TxNodeInternal::Whole(tx), BTreeSet::new(), Time::MIN),
+                    );
                 }
             }
         }
 
         for (outpoint, txout) in changeset.txouts {
-            let tx_entry = self.txs.entry(outpoint.txid).or_default();
+            let tx_entry = self.txs.entry(outpoint.txid).or_insert((
+                Default::default(),
+                Default::default(),
+                Time::MIN,
+            ));
 
             match tx_entry {
                 (TxNodeInternal::Whole(_), _, _) => { /* do nothing since we already have full tx */
@@ -612,13 +624,20 @@ impl<A: Clone + Ord> TxGraph<A> {
 
         for (anchor, txid) in changeset.anchors {
             if self.anchors.insert((anchor.clone(), txid)) {
-                let (_, anchors, _) = self.txs.entry(txid).or_default();
+                let (_, anchors, _) = self.txs.entry(txid).or_insert((
+                    Default::default(),
+                    Default::default(),
+                    Time::MIN,
+                ));
                 anchors.insert(anchor);
             }
         }
 
         for (txid, new_last_seen) in changeset.last_seen {
-            let (_, _, last_seen) = self.txs.entry(txid).or_default();
+            let (_, _, last_seen) =
+                self.txs
+                    .entry(txid)
+                    .or_insert((Default::default(), Default::default(), Time::MIN));
             if new_last_seen > *last_seen {
                 *last_seen = new_last_seen;
             }
@@ -633,10 +652,10 @@ impl<A: Clone + Ord> TxGraph<A> {
         let mut changeset = ChangeSet::default();
 
         for (&txid, (update_tx_node, _, update_last_seen)) in &update.txs {
-            let prev_last_seen: u64 = match (self.txs.get(&txid), update_tx_node) {
+            let prev_last_seen: Time = match (self.txs.get(&txid), update_tx_node) {
                 (None, TxNodeInternal::Whole(update_tx)) => {
                     changeset.txs.insert(update_tx.clone());
-                    0
+                    Time::MIN
                 }
                 (None, TxNodeInternal::Partial(update_txos)) => {
                     changeset.txouts.extend(
@@ -644,7 +663,7 @@ impl<A: Clone + Ord> TxGraph<A> {
                             .iter()
                             .map(|(&vout, txo)| (OutPoint::new(txid, vout), txo.clone())),
                     );
-                    0
+                    Time::MIN
                 }
                 (Some((TxNodeInternal::Whole(_), _, last_seen)), _) => *last_seen,
                 (
@@ -1215,7 +1234,7 @@ pub struct ChangeSet<A = ()> {
     /// Added anchors.
     pub anchors: BTreeSet<(A, Txid)>,
     /// Added last-seen unix timestamps of transactions.
-    pub last_seen: BTreeMap<Txid, u64>,
+    pub last_seen: BTreeMap<Txid, Time>,
 }
 
 impl<A> Default for ChangeSet<A> {

@@ -1,3 +1,4 @@
+use bitcoin::absolute::Time;
 use bitcoin::{hashes::Hash, BlockHash, OutPoint, TxOut, Txid};
 
 use crate::{Anchor, AnchorFromBlockPosition, COINBASE_MATURITY};
@@ -10,7 +11,7 @@ pub enum ChainPosition<A> {
     /// The chain data is seen as confirmed, and in anchored by `A`.
     Confirmed(A),
     /// The chain data is not confirmed and last seen in the mempool at this timestamp.
-    Unconfirmed(u64),
+    Unconfirmed(Time),
 }
 
 impl<A> ChainPosition<A> {
@@ -53,18 +54,18 @@ pub enum ConfirmationTime {
         /// Confirmation height.
         height: u32,
         /// Confirmation time in unix seconds.
-        time: u64,
+        time: Time,
     },
     /// The transaction is unconfirmed
     Unconfirmed {
         /// The last-seen timestamp in unix seconds.
-        last_seen: u64,
+        last_seen: Time,
     },
 }
 
 impl ConfirmationTime {
     /// Construct an unconfirmed variant using the given `last_seen` time in unix seconds.
-    pub fn unconfirmed(last_seen: u64) -> Self {
+    pub fn unconfirmed(last_seen: Time) -> Self {
         Self::Unconfirmed { last_seen }
     }
 
@@ -190,7 +191,7 @@ impl AnchorFromBlockPosition for ConfirmationHeightAnchor {
 /// Note that the confirmation block and the anchor block can be different here.
 ///
 /// Refer to [`Anchor`] for more details.
-#[derive(Debug, Default, Clone, PartialEq, Eq, Copy, PartialOrd, Ord, core::hash::Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy, PartialOrd, Ord, core::hash::Hash)]
 #[cfg_attr(
     feature = "serde",
     derive(serde::Deserialize, serde::Serialize),
@@ -200,9 +201,19 @@ pub struct ConfirmationTimeHeightAnchor {
     /// The confirmation height of the transaction being anchored.
     pub confirmation_height: u32,
     /// The confirmation time of the transaction being anchored.
-    pub confirmation_time: u64,
+    pub confirmation_time: Time,
     /// The anchor block.
     pub anchor_block: BlockId,
+}
+
+impl Default for ConfirmationTimeHeightAnchor {
+    fn default() -> Self {
+        Self {
+            confirmation_height: 0,
+            confirmation_time: Time::MIN,
+            anchor_block: Default::default(),
+        }
+    }
 }
 
 impl Anchor for ConfirmationTimeHeightAnchor {
@@ -220,7 +231,7 @@ impl AnchorFromBlockPosition for ConfirmationTimeHeightAnchor {
         Self {
             anchor_block: block_id,
             confirmation_height: block_id.height,
-            confirmation_time: block.header.time as _,
+            confirmation_time: Time::from_consensus(block.header.time).expect("consensus time"),
         }
     }
 }
@@ -302,11 +313,16 @@ impl<A: Anchor> FullTxOut<A> {
 #[cfg(test)]
 mod test {
     use super::*;
+    use bitcoin::absolute::LOCK_TIME_THRESHOLD;
 
     #[test]
     fn chain_position_ord() {
-        let unconf1 = ChainPosition::<ConfirmationHeightAnchor>::Unconfirmed(10);
-        let unconf2 = ChainPosition::<ConfirmationHeightAnchor>::Unconfirmed(20);
+        let unconf1 = ChainPosition::<ConfirmationHeightAnchor>::Unconfirmed(
+            Time::from_consensus(LOCK_TIME_THRESHOLD + 10).unwrap(),
+        );
+        let unconf2 = ChainPosition::<ConfirmationHeightAnchor>::Unconfirmed(
+            Time::from_consensus(LOCK_TIME_THRESHOLD + 20).unwrap(),
+        );
         let conf1 = ChainPosition::Confirmed(ConfirmationHeightAnchor {
             confirmation_height: 9,
             anchor_block: BlockId {

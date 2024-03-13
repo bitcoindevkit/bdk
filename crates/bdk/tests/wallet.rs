@@ -12,6 +12,7 @@ use bdk::wallet::{AddressIndex::*, NewError};
 use bdk::{FeeRate, KeychainKind};
 use bdk_chain::COINBASE_MATURITY;
 use bdk_chain::{BlockId, ConfirmationTime};
+use bitcoin::absolute::{Time, LOCK_TIME_THRESHOLD};
 use bitcoin::hashes::Hash;
 use bitcoin::sighash::{EcdsaSighashType, TapSighashType};
 use bitcoin::ScriptBuf;
@@ -48,9 +49,14 @@ fn receive_output_in_latest_block(wallet: &mut Wallet, value: u64) -> OutPoint {
     let latest_cp = wallet.latest_checkpoint();
     let height = latest_cp.height();
     let anchor = if height == 0 {
-        ConfirmationTime::Unconfirmed { last_seen: 0 }
+        ConfirmationTime::Unconfirmed {
+            last_seen: Time::MIN,
+        }
     } else {
-        ConfirmationTime::Confirmed { height, time: 0 }
+        ConfirmationTime::Confirmed {
+            height,
+            time: Time::MIN,
+        }
     };
     receive_output(wallet, value, anchor)
 }
@@ -979,7 +985,9 @@ fn test_create_tx_add_utxo() {
     wallet
         .insert_tx(
             small_output_tx.clone(),
-            ConfirmationTime::Unconfirmed { last_seen: 0 },
+            ConfirmationTime::Unconfirmed {
+                last_seen: Time::MIN,
+            },
         )
         .unwrap();
 
@@ -1025,7 +1033,9 @@ fn test_create_tx_manually_selected_insufficient() {
     wallet
         .insert_tx(
             small_output_tx.clone(),
-            ConfirmationTime::Unconfirmed { last_seen: 0 },
+            ConfirmationTime::Unconfirmed {
+                last_seen: Time::MIN,
+            },
         )
         .unwrap();
 
@@ -1072,7 +1082,12 @@ fn test_create_tx_policy_path_no_csv() {
         }],
     };
     wallet
-        .insert_tx(tx, ConfirmationTime::Unconfirmed { last_seen: 0 })
+        .insert_tx(
+            tx,
+            ConfirmationTime::Unconfirmed {
+                last_seen: Time::MIN,
+            },
+        )
         .unwrap();
 
     let external_policy = wallet.policies(KeychainKind::External).unwrap().unwrap();
@@ -1450,7 +1465,12 @@ fn test_bump_fee_irreplaceable_tx() {
     let tx = psbt.extract_tx();
     let txid = tx.txid();
     wallet
-        .insert_tx(tx, ConfirmationTime::Unconfirmed { last_seen: 0 })
+        .insert_tx(
+            tx,
+            ConfirmationTime::Unconfirmed {
+                last_seen: Time::MIN,
+            },
+        )
         .unwrap();
     wallet.build_fee_bump(txid).unwrap().finish().unwrap();
 }
@@ -1472,7 +1492,7 @@ fn test_bump_fee_confirmed_tx() {
             tx,
             ConfirmationTime::Confirmed {
                 height: 42,
-                time: 42_000,
+                time: Time::from_consensus(LOCK_TIME_THRESHOLD + 42_000).unwrap(),
             },
         )
         .unwrap();
@@ -1495,7 +1515,12 @@ fn test_bump_fee_low_fee_rate() {
     let txid = tx.txid();
 
     wallet
-        .insert_tx(tx, ConfirmationTime::Unconfirmed { last_seen: 0 })
+        .insert_tx(
+            tx,
+            ConfirmationTime::Unconfirmed {
+                last_seen: Time::MIN,
+            },
+        )
         .unwrap();
 
     let mut builder = wallet.build_fee_bump(txid).unwrap();
@@ -1518,7 +1543,12 @@ fn test_bump_fee_low_abs() {
     let txid = tx.txid();
 
     wallet
-        .insert_tx(tx, ConfirmationTime::Unconfirmed { last_seen: 0 })
+        .insert_tx(
+            tx,
+            ConfirmationTime::Unconfirmed {
+                last_seen: Time::MIN,
+            },
+        )
         .unwrap();
 
     let mut builder = wallet.build_fee_bump(txid).unwrap();
@@ -1540,7 +1570,12 @@ fn test_bump_fee_zero_abs() {
     let tx = psbt.extract_tx();
     let txid = tx.txid();
     wallet
-        .insert_tx(tx, ConfirmationTime::Unconfirmed { last_seen: 0 })
+        .insert_tx(
+            tx,
+            ConfirmationTime::Unconfirmed {
+                last_seen: Time::MIN,
+            },
+        )
         .unwrap();
 
     let mut builder = wallet.build_fee_bump(txid).unwrap();
@@ -1565,7 +1600,12 @@ fn test_bump_fee_reduce_change() {
     let tx = psbt.extract_tx();
     let txid = tx.txid();
     wallet
-        .insert_tx(tx, ConfirmationTime::Unconfirmed { last_seen: 0 })
+        .insert_tx(
+            tx,
+            ConfirmationTime::Unconfirmed {
+                last_seen: Time::MIN,
+            },
+        )
         .unwrap();
 
     let mut builder = wallet.build_fee_bump(txid).unwrap();
@@ -1660,7 +1700,12 @@ fn test_bump_fee_reduce_single_recipient() {
     let original_fee = check_fee!(wallet, psbt);
     let txid = tx.txid();
     wallet
-        .insert_tx(tx, ConfirmationTime::Unconfirmed { last_seen: 0 })
+        .insert_tx(
+            tx,
+            ConfirmationTime::Unconfirmed {
+                last_seen: Time::MIN,
+            },
+        )
         .unwrap();
 
     let mut builder = wallet.build_fee_bump(txid).unwrap();
@@ -1699,7 +1744,12 @@ fn test_bump_fee_absolute_reduce_single_recipient() {
     let original_sent_received = wallet.sent_and_received(&tx);
     let txid = tx.txid();
     wallet
-        .insert_tx(tx, ConfirmationTime::Unconfirmed { last_seen: 0 })
+        .insert_tx(
+            tx,
+            ConfirmationTime::Unconfirmed {
+                last_seen: Time::MIN,
+            },
+        )
         .unwrap();
 
     let mut builder = wallet.build_fee_bump(txid).unwrap();
@@ -1739,7 +1789,7 @@ fn test_bump_fee_drain_wallet() {
             tx.clone(),
             ConfirmationTime::Confirmed {
                 height: wallet.latest_checkpoint().height(),
-                time: 42_000,
+                time: Time::from_consensus(LOCK_TIME_THRESHOLD + 42_000).unwrap(),
             },
         )
         .unwrap();
@@ -1763,7 +1813,12 @@ fn test_bump_fee_drain_wallet() {
 
     let txid = tx.txid();
     wallet
-        .insert_tx(tx, ConfirmationTime::Unconfirmed { last_seen: 0 })
+        .insert_tx(
+            tx,
+            ConfirmationTime::Unconfirmed {
+                last_seen: Time::MIN,
+            },
+        )
         .unwrap();
     assert_eq!(original_sent_received.0, 25_000);
 
@@ -1830,7 +1885,12 @@ fn test_bump_fee_remove_output_manually_selected_only() {
     let original_sent_received = wallet.sent_and_received(&tx);
     let txid = tx.txid();
     wallet
-        .insert_tx(tx, ConfirmationTime::Unconfirmed { last_seen: 0 })
+        .insert_tx(
+            tx,
+            ConfirmationTime::Unconfirmed {
+                last_seen: Time::MIN,
+            },
+        )
         .unwrap();
     assert_eq!(original_sent_received.0, 25_000);
 
@@ -1874,7 +1934,12 @@ fn test_bump_fee_add_input() {
     let original_details = wallet.sent_and_received(&tx);
     let txid = tx.txid();
     wallet
-        .insert_tx(tx, ConfirmationTime::Unconfirmed { last_seen: 0 })
+        .insert_tx(
+            tx,
+            ConfirmationTime::Unconfirmed {
+                last_seen: Time::MIN,
+            },
+        )
         .unwrap();
 
     let mut builder = wallet.build_fee_bump(txid).unwrap();
@@ -1924,7 +1989,12 @@ fn test_bump_fee_absolute_add_input() {
     let original_sent_received = wallet.sent_and_received(&tx);
     let txid = tx.txid();
     wallet
-        .insert_tx(tx, ConfirmationTime::Unconfirmed { last_seen: 0 })
+        .insert_tx(
+            tx,
+            ConfirmationTime::Unconfirmed {
+                last_seen: Time::MIN,
+            },
+        )
         .unwrap();
 
     let mut builder = wallet.build_fee_bump(txid).unwrap();
@@ -1982,7 +2052,12 @@ fn test_bump_fee_no_change_add_input_and_change() {
     let tx = psbt.extract_tx();
     let txid = tx.txid();
     wallet
-        .insert_tx(tx, ConfirmationTime::Unconfirmed { last_seen: 0 })
+        .insert_tx(
+            tx,
+            ConfirmationTime::Unconfirmed {
+                last_seen: Time::MIN,
+            },
+        )
         .unwrap();
 
     // now bump the fees without using `allow_shrinking`. the wallet should add an
@@ -2047,7 +2122,12 @@ fn test_bump_fee_add_input_change_dust() {
     assert_eq!(tx.output.len(), 2);
     let txid = tx.txid();
     wallet
-        .insert_tx(tx, ConfirmationTime::Unconfirmed { last_seen: 0 })
+        .insert_tx(
+            tx,
+            ConfirmationTime::Unconfirmed {
+                last_seen: Time::MIN,
+            },
+        )
         .unwrap();
 
     let mut builder = wallet.build_fee_bump(txid).unwrap();
@@ -2111,7 +2191,12 @@ fn test_bump_fee_force_add_input() {
         txin.witness.push([0x00; P2WPKH_FAKE_WITNESS_SIZE]); // fake signature
     }
     wallet
-        .insert_tx(tx.clone(), ConfirmationTime::Unconfirmed { last_seen: 0 })
+        .insert_tx(
+            tx.clone(),
+            ConfirmationTime::Unconfirmed {
+                last_seen: Time::MIN,
+            },
+        )
         .unwrap();
     // the new fee_rate is low enough that just reducing the change would be fine, but we force
     // the addition of an extra input with `add_utxo()`
@@ -2171,7 +2256,12 @@ fn test_bump_fee_absolute_force_add_input() {
         txin.witness.push([0x00; P2WPKH_FAKE_WITNESS_SIZE]); // fake signature
     }
     wallet
-        .insert_tx(tx.clone(), ConfirmationTime::Unconfirmed { last_seen: 0 })
+        .insert_tx(
+            tx.clone(),
+            ConfirmationTime::Unconfirmed {
+                last_seen: Time::MIN,
+            },
+        )
         .unwrap();
 
     // the new fee_rate is low enough that just reducing the change would be fine, but we force
@@ -2232,7 +2322,9 @@ fn test_bump_fee_unconfirmed_inputs_only() {
     receive_output(
         &mut wallet,
         25_000,
-        ConfirmationTime::Unconfirmed { last_seen: 0 },
+        ConfirmationTime::Unconfirmed {
+            last_seen: Time::MIN,
+        },
     );
     let mut tx = psbt.extract_tx();
     let txid = tx.txid();
@@ -2240,7 +2332,12 @@ fn test_bump_fee_unconfirmed_inputs_only() {
         txin.witness.push([0x00; P2WPKH_FAKE_WITNESS_SIZE]); // fake signature
     }
     wallet
-        .insert_tx(tx, ConfirmationTime::Unconfirmed { last_seen: 0 })
+        .insert_tx(
+            tx,
+            ConfirmationTime::Unconfirmed {
+                last_seen: Time::MIN,
+            },
+        )
         .unwrap();
     let mut builder = wallet.build_fee_bump(txid).unwrap();
     builder.fee_rate(FeeRate::from_sat_per_vb(25.0));
@@ -2260,7 +2357,11 @@ fn test_bump_fee_unconfirmed_input() {
         .assume_checked();
     // We receive a tx with 0 confirmations, which will be used as an input
     // in the drain tx.
-    receive_output(&mut wallet, 25_000, ConfirmationTime::unconfirmed(0));
+    receive_output(
+        &mut wallet,
+        25_000,
+        ConfirmationTime::unconfirmed(Time::MIN),
+    );
     let mut builder = wallet.build_tx();
     builder
         .drain_wallet()
@@ -2273,7 +2374,12 @@ fn test_bump_fee_unconfirmed_input() {
         txin.witness.push([0x00; P2WPKH_FAKE_WITNESS_SIZE]); // fake signature
     }
     wallet
-        .insert_tx(tx, ConfirmationTime::Unconfirmed { last_seen: 0 })
+        .insert_tx(
+            tx,
+            ConfirmationTime::Unconfirmed {
+                last_seen: Time::MIN,
+            },
+        )
         .unwrap();
 
     let mut builder = wallet.build_fee_bump(txid).unwrap();
@@ -3392,7 +3498,7 @@ fn test_spend_coinbase() {
             coinbase_tx,
             ConfirmationTime::Confirmed {
                 height: confirmation_height,
-                time: 30_000,
+                time: Time::from_consensus(LOCK_TIME_THRESHOLD + 30_000).unwrap(),
             },
         )
         .unwrap();

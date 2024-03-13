@@ -11,6 +11,7 @@ use bdk_bitcoind_rpc::{
     bitcoincore_rpc::{Auth, Client, RpcApi},
     Emitter,
 };
+use bdk_chain::bitcoin::absolute::Time;
 use bdk_chain::{
     bitcoin::{constants::genesis_block, Block, Transaction},
     indexed_tx_graph, keychain,
@@ -43,7 +44,7 @@ type ChangeSet = (
 #[derive(Debug)]
 enum Emission {
     Block(bdk_bitcoind_rpc::BlockEvent<Block>),
-    Mempool(Vec<(Transaction, u64)>),
+    Mempool(Vec<(Transaction, Time)>),
     Tip(u32),
 }
 

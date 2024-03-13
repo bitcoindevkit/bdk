@@ -2479,7 +2479,7 @@ impl<D> Wallet<D> {
     /// `last_seen` is prioritized.
     pub fn apply_unconfirmed_txs<'t>(
         &mut self,
-        unconfirmed_txs: impl IntoIterator<Item = (&'t Transaction, u64)>,
+        unconfirmed_txs: impl IntoIterator<Item = (&'t Transaction, absolute::Time)>,
     ) where
         D: PersistBackend<ChangeSet>,
     {
@@ -2572,6 +2572,7 @@ fn create_signers<E: IntoWalletDescriptor>(
 macro_rules! doctest_wallet {
     () => {{
         use $crate::bitcoin::{BlockHash, Transaction, absolute, TxOut, Network, hashes::Hash};
+        use $crate::bitcoin::absolute::{LOCK_TIME_THRESHOLD, Time};
         use $crate::chain::{ConfirmationTime, BlockId};
         use $crate::wallet::{AddressIndex, Wallet};
         let descriptor = "tr([73c5da0a/86'/0'/0']tprv8fMn4hSKPRC1oaCPqxDb1JWtgkpeiQvZhsr8W2xuy3GEMkzoArcAWTfJxYb6Wj8XNNDWEjfYKK4wGQXh3ZUXhDF2NcnsALpWTeSwarJt7Vc/0/*)";
@@ -2596,7 +2597,7 @@ macro_rules! doctest_wallet {
         let _ = wallet.insert_checkpoint(BlockId { height: 1_000, hash: BlockHash::all_zeros() });
         let _ = wallet.insert_tx(tx.clone(), ConfirmationTime::Confirmed {
             height: 500,
-            time: 50_000
+            time: Time::from_consensus(LOCK_TIME_THRESHOLD+50_000).unwrap(),
         });
 
         wallet
