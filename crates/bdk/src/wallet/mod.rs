@@ -942,7 +942,7 @@ impl<D> Wallet<D> {
     /// # let mut wallet: Wallet<()> = todo!();
     /// # let txid:Txid = todo!();
     /// let tx = wallet.get_tx(txid).expect("transaction").tx_node.tx;
-    /// let fee = wallet.calculate_fee(tx).expect("fee");
+    /// let fee = wallet.calculate_fee(&tx).expect("fee");
     /// ```
     ///
     /// ```rust, no_run
@@ -973,7 +973,7 @@ impl<D> Wallet<D> {
     /// # let mut wallet: Wallet<()> = todo!();
     /// # let txid:Txid = todo!();
     /// let tx = wallet.get_tx(txid).expect("transaction").tx_node.tx;
-    /// let fee_rate = wallet.calculate_fee_rate(tx).expect("fee rate");
+    /// let fee_rate = wallet.calculate_fee_rate(&tx).expect("fee rate");
     /// ```
     ///
     /// ```rust, no_run
@@ -981,8 +981,8 @@ impl<D> Wallet<D> {
     /// # use bdk::Wallet;
     /// # let mut wallet: Wallet<()> = todo!();
     /// # let mut psbt: PartiallySignedTransaction = todo!();
-    /// let tx = &psbt.clone().extract_tx();
-    /// let fee_rate = wallet.calculate_fee_rate(tx).expect("fee rate");
+    /// let tx = psbt.clone().extract_tx();
+    /// let fee_rate = wallet.calculate_fee_rate(&tx).expect("fee rate");
     /// ```
     /// [`insert_txout`]: Self::insert_txout
     pub fn calculate_fee_rate(&self, tx: &Transaction) -> Result<FeeRate, CalculateFeeError> {
@@ -1003,8 +1003,8 @@ impl<D> Wallet<D> {
     /// # use bdk::Wallet;
     /// # let mut wallet: Wallet<()> = todo!();
     /// # let txid:Txid = todo!();
-    /// let tx = wallet.get_tx(txid).expect("transaction").tx_node.tx;
-    /// let (sent, received) = wallet.sent_and_received(tx);
+    /// let tx = wallet.get_tx(txid).expect("tx exists").tx_node.tx;
+    /// let (sent, received) = wallet.sent_and_received(&tx);
     /// ```
     ///
     /// ```rust, no_run
@@ -1065,7 +1065,7 @@ impl<D> Wallet<D> {
     pub fn get_tx(
         &self,
         txid: Txid,
-    ) -> Option<CanonicalTx<'_, Transaction, ConfirmationTimeHeightAnchor>> {
+    ) -> Option<CanonicalTx<'_, Arc<Transaction>, ConfirmationTimeHeightAnchor>> {
         let graph = self.indexed_graph.graph();
 
         Some(CanonicalTx {
@@ -1167,7 +1167,8 @@ impl<D> Wallet<D> {
     /// Iterate over the transactions in the wallet.
     pub fn transactions(
         &self,
-    ) -> impl Iterator<Item = CanonicalTx<'_, Transaction, ConfirmationTimeHeightAnchor>> + '_ {
+    ) -> impl Iterator<Item = CanonicalTx<'_, Arc<Transaction>, ConfirmationTimeHeightAnchor>> + '_
+    {
         self.indexed_graph
             .graph()
             .list_chain_txs(&self.chain, self.chain.tip().block_id())
@@ -1670,6 +1671,7 @@ impl<D> Wallet<D> {
         let mut tx = graph
             .get_tx(txid)
             .ok_or(BuildFeeBumpError::TransactionNotFound(txid))?
+            .as_ref()
             .clone();
 
         let pos = graph
@@ -1739,7 +1741,7 @@ impl<D> Wallet<D> {
                                 sequence: Some(txin.sequence),
                                 psbt_input: Box::new(psbt::Input {
                                     witness_utxo: Some(txout.clone()),
-                                    non_witness_utxo: Some(prev_tx.clone()),
+                                    non_witness_utxo: Some(prev_tx.as_ref().clone()),
                                     ..Default::default()
                                 }),
                             },
@@ -2295,7 +2297,7 @@ impl<D> Wallet<D> {
                 psbt_input.witness_utxo = Some(prev_tx.output[prev_output.vout as usize].clone());
             }
             if !desc.is_taproot() && (!desc.is_witness() || !only_witness_utxo) {
-                psbt_input.non_witness_utxo = Some(prev_tx.clone());
+                psbt_input.non_witness_utxo = Some(prev_tx.as_ref().clone());
             }
         }
         Ok(psbt_input)
