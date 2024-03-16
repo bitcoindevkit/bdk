@@ -441,7 +441,7 @@ where
     Ok(())
 }
 
-fn get_balance(
+fn balance(
     recv_chain: &LocalChain,
     recv_graph: &IndexedTxGraph<BlockId, SpkTxOutIndex<()>>,
 ) -> anyhow::Result<Balance> {
@@ -511,7 +511,7 @@ fn tx_can_become_unconfirmed_after_reorg() -> anyhow::Result<()> {
     sync_from_emitter(&mut recv_chain, &mut recv_graph, &mut emitter)?;
 
     assert_eq!(
-        get_balance(&recv_chain, &recv_graph)?,
+        balance(&recv_chain, &recv_graph)?,
         Balance {
             confirmed: SEND_AMOUNT.to_sat() * ADDITIONAL_COUNT as u64,
             ..Balance::default()
@@ -525,7 +525,7 @@ fn tx_can_become_unconfirmed_after_reorg() -> anyhow::Result<()> {
         sync_from_emitter(&mut recv_chain, &mut recv_graph, &mut emitter)?;
 
         assert_eq!(
-            get_balance(&recv_chain, &recv_graph)?,
+            balance(&recv_chain, &recv_graph)?,
             Balance {
                 confirmed: SEND_AMOUNT.to_sat() * (ADDITIONAL_COUNT - reorg_count) as u64,
                 trusted_pending: SEND_AMOUNT.to_sat() * reorg_count as u64,

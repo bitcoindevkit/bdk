@@ -75,7 +75,7 @@ fn main() {
     let mut wallet = Wallet::new(descriptor, None, db, Network::Testnet).expect("should create");
 
     // get a new address (this increments revealed derivation index)
-    println!("revealed address: {}", wallet.get_address(AddressIndex::New));
+    println!("revealed address: {}", wallet.address(AddressIndex::New));
     println!("staged changes: {:?}", wallet.staged());
     // persist changes
     wallet.commit().expect("must save");
@@ -101,7 +101,7 @@ fn main() {
 
 <!--     wallet.sync(&blockchain, SyncOptions::default())?; -->
 
-<!--     println!("Descriptor balance: {} SAT", wallet.get_balance()?); -->
+<!--     println!("Descriptor balance: {} SAT", wallet.balance()?); -->
 
 <!--     Ok(()) -->
 <!-- } -->
@@ -120,9 +120,9 @@ fn main() {
 <!--         Network::Testnet, -->
 <!--     )?; -->
 
-<!--     println!("Address #0: {}", wallet.get_address(New)); -->
-<!--     println!("Address #1: {}", wallet.get_address(New)); -->
-<!--     println!("Address #2: {}", wallet.get_address(New)); -->
+<!--     println!("Address #0: {}", wallet.address(New)); -->
+<!--     println!("Address #1: {}", wallet.address(New)); -->
+<!--     println!("Address #2: {}", wallet.address(New)); -->
 
 <!--     Ok(()) -->
 <!-- } -->
@@ -151,7 +151,7 @@ fn main() {
 
 <!--     wallet.sync(&blockchain, SyncOptions::default())?; -->
 
-<!--     let send_to = wallet.get_address(New); -->
+<!--     let send_to = wallet.address(New); -->
 <!--     let (psbt, details) = { -->
 <!--         let mut builder = wallet.build_tx(); -->
 <!--         builder -->

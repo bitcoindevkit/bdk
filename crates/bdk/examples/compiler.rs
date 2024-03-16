@@ -51,7 +51,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     println!(
         "First derived address from the descriptor: \n{}",
-        wallet.get_address(New)
+        wallet.address(New)
     );
 
     // BDK also has it's own `Policy` structure to represent the spending condition in a more
