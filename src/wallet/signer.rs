@@ -805,9 +805,10 @@ pub struct SignOptions {
 }
 
 /// Customize which taproot script-path leaves the signer should sign.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum TapLeavesOptions {
     /// The signer will sign all the leaves it has a key for.
+    #[default]
     All,
     /// The signer won't sign leaves other than the ones specified. Note that it could still ignore
     /// some of the specified leaves, if it doesn't have the right key to sign them.
@@ -816,12 +817,6 @@ pub enum TapLeavesOptions {
     Exclude(Vec<taproot::TapLeafHash>),
     /// The signer won't sign any leaf.
     None,
-}
-
-impl Default for TapLeavesOptions {
-    fn default() -> Self {
-        TapLeavesOptions::All
-    }
 }
 
 #[allow(clippy::derivable_impls)]

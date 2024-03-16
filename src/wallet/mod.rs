@@ -1851,7 +1851,7 @@ pub fn get_funded_wallet(
         .database
         .borrow_mut()
         .set_script_pubkey(
-            &bitcoin::Address::from_str(&tx_meta.output.get(0).unwrap().to_address)
+            &bitcoin::Address::from_str(&tx_meta.output.first().unwrap().to_address)
                 .unwrap()
                 .assume_checked()
                 .script_pubkey(),
@@ -3526,6 +3526,7 @@ pub(crate) mod test {
         assert_eq!(details.fee.unwrap_or(0), 200);
     }
 
+    #[allow(deprecated)]
     #[test]
     fn test_bump_fee_reduce_single_recipient() {
         let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
@@ -3572,6 +3573,7 @@ pub(crate) mod test {
         assert_fee_rate!(psbt, details.fee.unwrap_or(0), FeeRate::from_sat_per_vb(2.5), @add_signature);
     }
 
+    #[allow(deprecated)]
     #[test]
     fn test_bump_fee_absolute_reduce_single_recipient() {
         let (wallet, _, _) = get_funded_wallet(get_test_wpkh());
@@ -3618,6 +3620,7 @@ pub(crate) mod test {
         assert_eq!(details.fee.unwrap_or(0), 300);
     }
 
+    #[allow(deprecated)]
     #[test]
     fn test_bump_fee_drain_wallet() {
         let (wallet, descriptors, _) = get_funded_wallet(get_test_wpkh());
@@ -4208,6 +4211,7 @@ pub(crate) mod test {
         builder.finish().unwrap();
     }
 
+    #[allow(deprecated)]
     #[test]
     fn test_bump_fee_unconfirmed_input() {
         // We create a tx draining the wallet and spending one confirmed
@@ -5266,7 +5270,7 @@ pub(crate) mod test {
             .values()
             .map(|(script, version)| TapLeafHash::from_script(script, *version))
             .collect();
-        let included_script_leaves = vec![script_leaves.pop().unwrap()];
+        let included_script_leaves = [script_leaves.pop().unwrap()];
         let excluded_script_leaves = script_leaves;
 
         assert!(
