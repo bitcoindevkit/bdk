@@ -219,8 +219,6 @@ impl CoinSelectionResult {
 pub trait CoinSelectionAlgorithm: core::fmt::Debug {
     /// Perform the coin selection
     ///
-    /// - `database`: a reference to the wallet's database that can be used to lookup additional
-    ///               details for a specific UTXO
     /// - `required_utxos`: the utxos that must be spent regardless of `target_amount` with their
     ///                     weight cost
     /// - `optional_utxos`: the remaining available utxos to satisfy `target_amount` with their
