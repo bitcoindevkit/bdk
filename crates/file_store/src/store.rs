@@ -64,6 +64,7 @@ where
             .create(true)
             .read(true)
             .write(true)
+            .truncate(true)
             .open(file_path)?;
         f.write_all(magic)?;
         Ok(Self {
