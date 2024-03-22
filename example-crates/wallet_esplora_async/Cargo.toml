@@ -11,3 +11,5 @@ bdk_esplora = { path = "../../crates/esplora", features = ["async-https"] }
 bdk_file_store = { path = "../../crates/file_store" }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }
 anyhow = "1"
+env_logger = { version = "0.10", default-features =  false, features = ["humantime"] }
+log = "0.4.20"

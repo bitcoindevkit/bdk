@@ -1,12 +1,16 @@
-use std::{io::Write, str::FromStr};
+use env_logger::Env;
+use std::env;
+use std::str::FromStr;
 
+use bdk::wallet::Update;
 use bdk::{
     bitcoin::{Address, Network},
-    wallet::{AddressIndex, Update},
+    wallet::AddressIndex,
     SignOptions, Wallet,
 };
 use bdk_esplora::{esplora_client, EsploraAsyncExt};
 use bdk_file_store::Store;
+use log::info;
 
 const DB_MAGIC: &str = "bdk_wallet_esplora_async_example";
 const SEND_AMOUNT: u64 = 5000;
@@ -15,71 +19,94 @@ const PARALLEL_REQUESTS: usize = 5;
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
-    let db_path = std::env::temp_dir().join("bdk-esplora-async-example");
+    env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
+
+    let args: Vec<String> = env::args().collect();
+    let cmd = args.get(1);
+
+    let db_path = "bdk_wallet_esplora_async_example.dat";
     let db = Store::<bdk::wallet::ChangeSet>::open_or_create_new(DB_MAGIC.as_bytes(), db_path)?;
     let external_descriptor = "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/84'/1'/0'/0/*)";
     let internal_descriptor = "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/84'/1'/0'/1/*)";
+    let network = Network::Signet;
 
-    let mut wallet = Wallet::new_or_load(
-        external_descriptor,
-        Some(internal_descriptor),
-        db,
-        Network::Testnet,
-    )?;
+    let mut wallet =
+        Wallet::new_or_load(external_descriptor, Some(internal_descriptor), db, network)?;
 
     let address = wallet.try_get_address(AddressIndex::New)?;
-    println!("Generated Address: {}", address);
+    info!("Generated Address: {}", address);
 
     let balance = wallet.get_balance();
-    println!("Wallet balance before syncing: {} sats", balance.total());
+    info!("Wallet balance: {} sats", balance.total());
 
-    print!("Syncing...");
-    let client =
-        esplora_client::Builder::new("https://blockstream.info/testnet/api").build_async()?;
+    let client = esplora_client::Builder::new("http://signet.bitcoindevkit.net").build_async()?;
+    let (update, cmd) = match cmd.map(|c| c.as_str()) {
+        Some(cmd) if cmd == "fullscan" => {
+            info!("Start full scan...");
+            // 1. get data required to do a wallet full_scan
+            let mut request = wallet.full_scan_request();
+            request.inspect_spks(move |(i, s)| {
+                info!(
+                    "scanning index: {}, address: {}",
+                    i,
+                    Address::from_script(s, network).expect("address")
+                );
+            });
+            // 2. full scan to discover wallet transactions and update blockchain
+            let result = client
+                .full_scan(request, STOP_GAP, PARALLEL_REQUESTS)
+                .await?;
+            // 3. create wallet update
+            let update = Update {
+                last_active_indices: result.last_active_indices,
+                graph: result.graph_update,
+                chain: Some(result.chain_update),
+            };
+            Ok((update, cmd))
+        }
+        Some(cmd) if cmd == "sync" => {
+            info!("Start sync...");
+            // 1. get data required to do a wallet sync, if also syncing previously used addresses set unused_spks_only = false
+            let mut request = wallet.sync_revealed_spks_request();
+            request.inspect_spks(move |index, spk| {
+                info!(
+                    "syncing address {}: {}",
+                    index,
+                    Address::from_script(spk, network).expect("address")
+                );
+            });
+            // 2. sync unused wallet spks (addresses), unconfirmed tx, utxos and update blockchain
+            let result = client.sync(request, PARALLEL_REQUESTS).await?;
+            // 3. create wallet update
+            let update = Update {
+                graph: result.graph_update,
+                chain: Some(result.chain_update),
+                ..Update::default()
+            };
+            Ok((update, cmd))
+        }
+        _ => Err(()),
+    }
+    .expect("Specify if you want to do a wallet 'fullscan' or a 'sync'.");
 
-    let prev_tip = wallet.latest_checkpoint();
-    let keychain_spks = wallet
-        .all_unbounded_spk_iters()
-        .into_iter()
-        .map(|(k, k_spks)| {
-            let mut once = Some(());
-            let mut stdout = std::io::stdout();
-            let k_spks = k_spks
-                .inspect(move |(spk_i, _)| match once.take() {
-                    Some(_) => print!("\nScanning keychain [{:?}]", k),
-                    None => print!(" {:<3}", spk_i),
-                })
-                .inspect(move |_| stdout.flush().expect("must flush"));
-            (k, k_spks)
-        })
-        .collect();
-    let (update_graph, last_active_indices) = client
-        .full_scan(keychain_spks, STOP_GAP, PARALLEL_REQUESTS)
-        .await?;
-    let missing_heights = update_graph.missing_heights(wallet.local_chain());
-    let chain_update = client.update_local_chain(prev_tip, missing_heights).await?;
-    let update = Update {
-        last_active_indices,
-        graph: update_graph,
-        chain: Some(chain_update),
-    };
+    // 4. apply update to wallet
     wallet.apply_update(update)?;
+    // 5. commit wallet update to database
     wallet.commit()?;
-    println!();
 
     let balance = wallet.get_balance();
-    println!("Wallet balance after syncing: {} sats", balance.total());
+    info!("Wallet balance after {}: {} sats", cmd, balance.total());
 
     if balance.total() < SEND_AMOUNT {
-        println!(
+        info!(
             "Please send at least {} sats to the receiving address",
             SEND_AMOUNT
         );
         std::process::exit(0);
     }
 
-    let faucet_address = Address::from_str("mkHS9ne12qx9pS9VojpwU5xtRd4T7X7ZUt")?
-        .require_network(Network::Testnet)?;
+    let faucet_address =
+        Address::from_str("mkHS9ne12qx9pS9VojpwU5xtRd4T7X7ZUt")?.require_network(network)?;
 
     let mut tx_builder = wallet.build_tx();
     tx_builder
@@ -92,7 +119,7 @@ async fn main() -> Result<(), anyhow::Error> {
 
     let tx = psbt.extract_tx();
     client.broadcast(&tx).await?;
-    println!("Tx broadcasted! Txid: {}", tx.txid());
+    info!("Tx broadcasted! Txid: {}", tx.txid());
 
     Ok(())
 }

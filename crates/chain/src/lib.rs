@@ -52,6 +52,9 @@ mod spk_iter;
 #[cfg(feature = "miniscript")]
 pub use spk_iter::*;
 
+/// Helper types for use with spk-based blockchain clients.
+pub mod spk_client;
+
 #[allow(unused_imports)]
 #[macro_use]
 extern crate alloc;
