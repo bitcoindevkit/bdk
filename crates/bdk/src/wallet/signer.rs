@@ -782,6 +782,16 @@ pub struct SignOptions {
     /// Defaults to `true` which will remove partial signatures during finalization.
     pub remove_partial_sigs: bool,
 
+    /// Whether to remove taproot specific fields from the PSBT on finalization.
+    ///
+    /// For inputs this includes the taproot internal key, merkle root, and individual
+    /// scripts and signatures. For both inputs and outputs it includes key origin info.
+    ///
+    /// Defaults to `true` which will remove all of the above mentioned fields when finalizing.
+    ///
+    /// See [`BIP371`](https://github.com/bitcoin/bips/blob/master/bip-0371.mediawiki) for details.
+    pub remove_taproot_extras: bool,
+
     /// Whether to try finalizing the PSBT after the inputs are signed.
     ///
     /// Defaults to `true` which will try finalizing PSBT after inputs are signed.
@@ -827,6 +837,7 @@ impl Default for SignOptions {
             assume_height: None,
             allow_all_sighashes: false,
             remove_partial_sigs: true,
+            remove_taproot_extras: true,
             try_finalize: true,
             tap_leaves_options: TapLeavesOptions::default(),
             sign_with_tap_internal_key: true,
