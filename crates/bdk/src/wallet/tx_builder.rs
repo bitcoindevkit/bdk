@@ -31,7 +31,7 @@
 //!     // Create a transaction with one output to `to_address` of 50_000 satoshi
 //!     .add_recipient(to_address.script_pubkey(), 50_000)
 //!     // With a custom fee rate of 5.0 satoshi/vbyte
-//!     .fee_rate(bdk::FeeRate::from_sat_per_vb(5.0))
+//!     .fee_rate(FeeRate::from_sat_per_vb(5).expect("valid feerate"))
 //!     // Only spend non-change outputs
 //!     .do_not_spend_change()
 //!     // Turn on RBF signaling
@@ -40,22 +40,20 @@
 //! # Ok::<(), anyhow::Error>(())
 //! ```
 
-use crate::collections::BTreeMap;
-use crate::collections::HashSet;
 use alloc::{boxed::Box, rc::Rc, string::String, vec::Vec};
-use bdk_chain::PersistBackend;
 use core::cell::RefCell;
 use core::fmt;
 use core::marker::PhantomData;
 
+use bdk_chain::PersistBackend;
 use bitcoin::psbt::{self, PartiallySignedTransaction as Psbt};
-use bitcoin::{absolute, script::PushBytes, OutPoint, ScriptBuf, Sequence, Transaction, Txid};
+use bitcoin::script::PushBytes;
+use bitcoin::{absolute, FeeRate, OutPoint, ScriptBuf, Sequence, Transaction, Txid};
 
 use super::coin_selection::{CoinSelectionAlgorithm, DefaultCoinSelectionAlgorithm};
-use super::ChangeSet;
-use crate::types::{FeeRate, KeychainKind, LocalOutput, WeightedUtxo};
-use crate::wallet::CreateTxError;
-use crate::{Utxo, Wallet};
+use super::{ChangeSet, CreateTxError, Wallet};
+use crate::collections::{BTreeMap, HashSet};
+use crate::{KeychainKind, LocalOutput, Utxo, WeightedUtxo};
 
 /// Context in which the [`TxBuilder`] is valid
 pub trait TxBuilderContext: core::fmt::Debug + Default + Clone {}
@@ -163,7 +161,7 @@ pub(crate) struct TxParams {
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct PreviousFee {
     pub absolute: u64,
-    pub rate: f32,
+    pub rate: FeeRate,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -174,7 +172,7 @@ pub(crate) enum FeePolicy {
 
 impl Default for FeePolicy {
     fn default() -> Self {
-        FeePolicy::FeeRate(FeeRate::default_min_relay_fee())
+        FeePolicy::FeeRate(FeeRate::BROADCAST_MIN)
     }
 }
 
@@ -191,14 +189,12 @@ impl<'a, D, Cs: Clone, Ctx> Clone for TxBuilder<'a, D, Cs, Ctx> {
 
 // methods supported by both contexts, for any CoinSelectionAlgorithm
 impl<'a, D, Cs, Ctx> TxBuilder<'a, D, Cs, Ctx> {
-    /// Set a custom fee rate
-    /// The fee_rate method sets the mining fee paid by the transaction as a rate on its size.
-    /// This means that the total fee paid is equal to this rate * size of the transaction in virtual Bytes (vB) or Weight Unit (wu).
-    /// This rate is internally expressed in satoshis-per-virtual-bytes (sats/vB) using FeeRate::from_sat_per_vb, but can also be set by:
-    /// * sats/kvB (1000 sats/kvB == 1 sats/vB) using FeeRate::from_sat_per_kvb
-    /// * btc/kvB (0.00001000 btc/kvB == 1 sats/vB) using FeeRate::from_btc_per_kvb
-    /// * sats/kwu (250 sats/kwu == 1 sats/vB) using FeeRate::from_sat_per_kwu
-    /// Default is 1 sat/vB (see min_relay_fee)
+    /// Set a custom fee rate.
+    ///
+    /// This method sets the mining fee paid by the transaction as a rate on its size.
+    /// This means that the total fee paid is equal to `fee_rate` times the size
+    /// of the transaction. Default is 1 sat/vB in accordance with Bitcoin Core's default
+    /// relay policy.
     ///
     /// Note that this is really a minimum feerate -- it's possible to
     /// overshoot it slightly since adding a change output to drain the remaining
@@ -781,7 +777,7 @@ impl<'a, D, Cs: CoinSelectionAlgorithm> TxBuilder<'a, D, Cs, CreateTx> {
     ///     .drain_wallet()
     ///     // Send the excess (which is all the coins minus the fee) to this address.
     ///     .drain_to(to_address.script_pubkey())
-    ///     .fee_rate(bdk::FeeRate::from_sat_per_vb(5.0))
+    ///     .fee_rate(FeeRate::from_sat_per_vb(5).expect("valid feerate"))
     ///     .enable_rbf();
     /// let psbt = tx_builder.finish()?;
     /// # Ok::<(), anyhow::Error>(())

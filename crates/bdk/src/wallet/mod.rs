@@ -33,8 +33,8 @@ use bdk_chain::{
 use bitcoin::secp256k1::{All, Secp256k1};
 use bitcoin::sighash::{EcdsaSighashType, TapSighashType};
 use bitcoin::{
-    absolute, Address, Block, Network, OutPoint, Script, ScriptBuf, Sequence, Transaction, TxOut,
-    Txid, Weight, Witness,
+    absolute, Address, Block, FeeRate, Network, OutPoint, Script, ScriptBuf, Sequence, Transaction,
+    TxOut, Txid, Weight, Witness,
 };
 use bitcoin::{consensus::encode::serialize, BlockHash};
 use bitcoin::{constants::genesis_block, psbt};
@@ -986,10 +986,8 @@ impl<D> Wallet<D> {
     /// ```
     /// [`insert_txout`]: Self::insert_txout
     pub fn calculate_fee_rate(&self, tx: &Transaction) -> Result<FeeRate, CalculateFeeError> {
-        self.calculate_fee(tx).map(|fee| {
-            let weight = tx.weight();
-            FeeRate::from_wu(fee, weight)
-        })
+        self.calculate_fee(tx)
+            .map(|fee| bitcoin::Amount::from_sat(fee) / tx.weight())
     }
 
     /// Compute the `tx`'s sent and received amounts (in satoshis).
@@ -1432,32 +1430,31 @@ impl<D> Wallet<D> {
             (Some(rbf), _) => rbf.get_value(),
         };
 
-        let (fee_rate, mut fee_amount) = match params
-            .fee_policy
-            .as_ref()
-            .unwrap_or(&FeePolicy::FeeRate(FeeRate::default()))
-        {
+        let (fee_rate, mut fee_amount) = match params.fee_policy.unwrap_or_default() {
             //FIXME: see https://github.com/bitcoindevkit/bdk/issues/256
             FeePolicy::FeeAmount(fee) => {
                 if let Some(previous_fee) = params.bumping_fee {
-                    if *fee < previous_fee.absolute {
+                    if fee < previous_fee.absolute {
                         return Err(CreateTxError::FeeTooLow {
                             required: previous_fee.absolute,
                         });
                     }
                 }
-                (FeeRate::from_sat_per_vb(0.0), *fee)
+                (FeeRate::ZERO, fee)
             }
             FeePolicy::FeeRate(rate) => {
                 if let Some(previous_fee) = params.bumping_fee {
-                    let required_feerate = FeeRate::from_sat_per_vb(previous_fee.rate + 1.0);
-                    if *rate < required_feerate {
+                    let required_feerate = FeeRate::from_sat_per_kwu(
+                        previous_fee.rate.to_sat_per_kwu()
+                            + FeeRate::BROADCAST_MIN.to_sat_per_kwu(), // +1 sat/vb
+                    );
+                    if rate < required_feerate {
                         return Err(CreateTxError::FeeRateTooLow {
                             required: required_feerate,
                         });
                     }
                 }
-                (*rate, 0)
+                (rate, 0)
             }
         };
 
@@ -1500,7 +1497,7 @@ impl<D> Wallet<D> {
             outgoing += value;
         }
 
-        fee_amount += fee_rate.fee_wu(tx.weight());
+        fee_amount += (fee_rate * tx.weight()).to_sat();
 
         // Segwit transactions' header is 2WU larger than legacy txs' header,
         // as they contain a witness marker (1WU) and a witness flag (1WU) (see BIP144).
@@ -1511,7 +1508,7 @@ impl<D> Wallet<D> {
         // end up with a transaction with a slightly higher fee rate than the requested one.
         // If, instead, we undershoot, we may end up with a feerate lower than the requested one
         // - we might come up with non broadcastable txs!
-        fee_amount += fee_rate.fee_wu(Weight::from_wu(2));
+        fee_amount += (fee_rate * Weight::from_wu(2)).to_sat();
 
         if params.change_policy != tx_builder::ChangeSpendPolicy::ChangeAllowed
             && internal_descriptor.is_none()
@@ -1652,7 +1649,7 @@ impl<D> Wallet<D> {
     /// let mut psbt =  {
     ///     let mut builder = wallet.build_fee_bump(tx.txid())?;
     ///     builder
-    ///         .fee_rate(bdk::FeeRate::from_sat_per_vb(5.0));
+    ///         .fee_rate(FeeRate::from_sat_per_vb(5).expect("valid feerate"));
     ///     builder.finish()?
     /// };
     ///
@@ -1780,7 +1777,7 @@ impl<D> Wallet<D> {
             utxos: original_utxos,
             bumping_fee: Some(tx_builder::PreviousFee {
                 absolute: fee,
-                rate: fee_rate.as_sat_per_vb(),
+                rate: fee_rate,
             }),
             ..Default::default()
         };
@@ -2564,6 +2561,17 @@ fn create_signers<E: IntoWalletDescriptor>(
     };
 
     Ok((signers, change_signers))
+}
+
+/// Transforms a [`FeeRate`] to `f64` with unit as sat/vb.
+#[macro_export]
+#[doc(hidden)]
+macro_rules! floating_rate {
+    ($rate:expr) => {{
+        use $crate::bitcoin::blockdata::constants::WITNESS_SCALE_FACTOR;
+        // sat_kwu / 250.0 -> sat_vb
+        $rate.to_sat_per_kwu() as f64 / ((1000 / WITNESS_SCALE_FACTOR) as f64)
+    }};
 }
 
 #[macro_export]
