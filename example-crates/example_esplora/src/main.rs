@@ -269,7 +269,7 @@ fn main() -> anyhow::Result<()> {
                     // We want to search for whether the UTXO is spent, and spent by which
                     // transaction. We provide the outpoint of the UTXO to
                     // `EsploraExt::update_tx_graph_without_keychain`.
-                    let init_outpoints = graph.index.outpoints().iter().cloned();
+                    let init_outpoints = graph.index.outpoints();
                     let utxos = graph
                         .graph()
                         .filter_chain_unspents(&*chain, chain_tip, init_outpoints)

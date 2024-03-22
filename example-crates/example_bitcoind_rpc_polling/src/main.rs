@@ -215,7 +215,7 @@ fn main() -> anyhow::Result<()> {
                         graph.graph().balance(
                             &*chain,
                             synced_to.block_id(),
-                            graph.index.outpoints().iter().cloned(),
+                            graph.index.outpoints(),
                             |(k, _), _| k == &Keychain::Internal,
                         )
                     };
@@ -343,7 +343,7 @@ fn main() -> anyhow::Result<()> {
                         graph.graph().balance(
                             &*chain,
                             synced_to.block_id(),
-                            graph.index.outpoints().iter().cloned(),
+                            graph.index.outpoints(),
                             |(k, _), _| k == &Keychain::Internal,
                         )
                     };
