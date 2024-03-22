@@ -58,6 +58,7 @@ pub async fn test_update_tx_graph_without_keychain() -> anyhow::Result<()> {
             vec![].into_iter(),
             vec![].into_iter(),
             1,
+            0,
         )
         .await?;
 
@@ -142,10 +143,10 @@ pub async fn test_async_update_tx_graph_gap_limit() -> anyhow::Result<()> {
 
     // A scan with a gap limit of 2 won't find the transaction, but a scan with a gap limit of 3
     // will.
-    let (graph_update, active_indices) = client.full_scan(keychains.clone(), 2, 1).await?;
+    let (graph_update, active_indices) = client.full_scan(keychains.clone(), 2, 1, 0).await?;
     assert!(graph_update.full_txs().next().is_none());
     assert!(active_indices.is_empty());
-    let (graph_update, active_indices) = client.full_scan(keychains.clone(), 3, 1).await?;
+    let (graph_update, active_indices) = client.full_scan(keychains.clone(), 3, 1, 0).await?;
     assert_eq!(graph_update.full_txs().next().unwrap().txid, txid_4th_addr);
     assert_eq!(active_indices[&0], 3);
 
@@ -167,12 +168,12 @@ pub async fn test_async_update_tx_graph_gap_limit() -> anyhow::Result<()> {
 
     // A scan with gap limit 4 won't find the second transaction, but a scan with gap limit 5 will.
     // The last active indice won't be updated in the first case but will in the second one.
-    let (graph_update, active_indices) = client.full_scan(keychains.clone(), 4, 1).await?;
+    let (graph_update, active_indices) = client.full_scan(keychains.clone(), 4, 1, 0).await?;
     let txs: HashSet<_> = graph_update.full_txs().map(|tx| tx.txid).collect();
     assert_eq!(txs.len(), 1);
     assert!(txs.contains(&txid_4th_addr));
     assert_eq!(active_indices[&0], 3);
-    let (graph_update, active_indices) = client.full_scan(keychains, 5, 1).await?;
+    let (graph_update, active_indices) = client.full_scan(keychains, 5, 1, 0).await?;
     let txs: HashSet<_> = graph_update.full_txs().map(|tx| tx.txid).collect();
     assert_eq!(txs.len(), 2);
     assert!(txs.contains(&txid_4th_addr) && txs.contains(&txid_last_addr));

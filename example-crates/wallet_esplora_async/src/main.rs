@@ -1,4 +1,4 @@
-use std::{io::Write, str::FromStr};
+use std::{io::Write, str::FromStr, time};
 
 use bdk::{
     bitcoin::{Address, Network},
@@ -53,8 +53,11 @@ async fn main() -> Result<(), anyhow::Error> {
             (k, k_spks)
         })
         .collect();
+    let now = time::SystemTime::now()
+        .duration_since(time::UNIX_EPOCH)?
+        .as_secs();
     let (update_graph, last_active_indices) = client
-        .full_scan(keychain_spks, STOP_GAP, PARALLEL_REQUESTS)
+        .full_scan(keychain_spks, STOP_GAP, PARALLEL_REQUESTS, now)
         .await?;
     let missing_heights = update_graph.missing_heights(wallet.local_chain());
     let chain_update = client.update_local_chain(prev_tip, missing_heights).await?;

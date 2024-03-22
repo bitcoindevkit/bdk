@@ -2,6 +2,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     io::{self, Write},
     sync::Mutex,
+    time,
 };
 
 use bdk_chain::{
@@ -189,8 +190,16 @@ fn main() -> anyhow::Result<()> {
             // is reached. It returns a `TxGraph` update (`graph_update`) and a structure that
             // represents the last active spk derivation indices of keychains
             // (`keychain_indices_update`).
+            let now = time::SystemTime::now()
+                .duration_since(time::UNIX_EPOCH)?
+                .as_secs();
             let (graph_update, last_active_indices) = client
-                .full_scan(keychain_spks, *stop_gap, scan_options.parallel_requests)
+                .full_scan(
+                    keychain_spks,
+                    *stop_gap,
+                    scan_options.parallel_requests,
+                    now,
+                )
                 .context("scanning for transactions")?;
 
             let mut graph = graph.lock().expect("mutex must not be poisoned");
@@ -307,8 +316,11 @@ fn main() -> anyhow::Result<()> {
                 }
             }
 
+            let now = time::SystemTime::now()
+                .duration_since(time::UNIX_EPOCH)?
+                .as_secs();
             let graph_update =
-                client.sync(spks, txids, outpoints, scan_options.parallel_requests)?;
+                client.sync(spks, txids, outpoints, scan_options.parallel_requests, now)?;
 
             graph.lock().unwrap().apply_update(graph_update)
         }
