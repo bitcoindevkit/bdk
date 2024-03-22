@@ -596,7 +596,7 @@ fn test_tx_conflict_handling() {
 
         let txs = tx_graph
             .list_chain_txs(&local_chain, chain_tip)
-            .map(|tx| tx.tx_node.txid)
+            .map(|tx| tx.tx_node.compute_txid())
             .collect::<BTreeSet<_>>();
         let exp_txs = scenario
             .exp_chain_txs

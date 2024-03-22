@@ -144,7 +144,7 @@ where
         let mut graph = tx_graph::ChangeSet::default();
         for (tx, anchors) in txs {
             if self.index.is_tx_relevant(tx) {
-                let txid = tx.txid();
+                let txid = tx.compute_txid();
                 graph.append(self.graph.insert_tx(tx.clone()));
                 for anchor in anchors {
                     graph.append(self.graph.insert_anchor(txid, anchor));
@@ -235,7 +235,7 @@ where
         for (tx_pos, tx) in block.txdata.iter().enumerate() {
             changeset.indexer.append(self.index.index_tx(tx));
             if self.index.is_tx_relevant(tx) {
-                let txid = tx.txid();
+                let txid = tx.compute_txid();
                 let anchor = A::from_block_position(block, block_id, tx_pos);
                 changeset.graph.append(self.graph.insert_tx(tx.clone()));
                 changeset
@@ -262,7 +262,7 @@ where
         let mut graph = tx_graph::ChangeSet::default();
         for (tx_pos, tx) in block.txdata.iter().enumerate() {
             let anchor = A::from_block_position(&block, block_id, tx_pos);
-            graph.append(self.graph.insert_anchor(tx.txid(), anchor));
+            graph.append(self.graph.insert_anchor(tx.compute_txid(), anchor));
             graph.append(self.graph.insert_tx(tx.clone()));
         }
         let indexer = self.index_tx_graph_changeset(&graph);

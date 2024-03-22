@@ -23,3 +23,55 @@ members = [
 
 [workspace.package]
 authors = ["Bitcoin Dev Kit Developers"]
+
+[patch.crates-io.electrsd]
+git = "https://github.com/tcharding/electrsd"
+branch = "test-bitcoin"
+
+[patch.crates-io.esplora-client]
+git = "https://github.com/tcharding/rust-esplora-client"
+branch = "test-bitcoin"
+
+[patch.crates-io.electrum-client]
+git = "https://github.com/tcharding/rust-electrum-client"
+branch = "test-bitcoin"
+
+[patch.crates-io.hwi]
+git = "https://github.com/tcharding/rust-hwi"
+branch = "test-bitcoin"
+
+[patch.crates-io.miniscript]
+git = "https://github.com/tcharding/rust-miniscript"
+branch = "test-bitcoin"
+
+[patch.crates-io.bitcoind]
+git = "https://github.com/tcharding/bitcoind/"
+branch = "test-bitcoin"
+
+[patch.crates-io.bitcoincore-rpc]
+git = "https://github.com/tcharding/rust-bitcoincore-rpc"
+branch = "test-bitcoin"
+
+[patch.crates-io.base58ck]
+git = "https://github.com/rust-bitcoin/rust-bitcoin"
+branch = "rc1-fixes"
+
+[patch.crates-io.bitcoin]
+git = "https://github.com/rust-bitcoin/rust-bitcoin"
+branch = "rc1-fixes"
+
+[patch.crates-io.bitcoin_hashes]
+git = "https://github.com/rust-bitcoin/rust-bitcoin"
+branch = "rc1-fixes"
+
+[patch.crates-io.bitcoin-internals]
+git = "https://github.com/rust-bitcoin/rust-bitcoin"
+branch = "rc1-fixes"
+
+[patch.crates-io.bitcoin-io]
+git = "https://github.com/rust-bitcoin/rust-bitcoin"
+branch = "rc1-fixes"
+
+[patch.crates-io.bitcoin-units]
+git = "https://github.com/rust-bitcoin/rust-bitcoin"
+branch = "rc1-fixes"

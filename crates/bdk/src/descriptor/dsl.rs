@@ -702,10 +702,10 @@ macro_rules! fragment {
         $crate::keys::make_pkh($key, &secp)
     });
     ( after ( $value:expr ) ) => ({
-        $crate::impl_leaf_opcode_value!(After, $crate::miniscript::AbsLockTime::from_consensus($value))
+        $crate::impl_leaf_opcode_value!(After, $crate::miniscript::AbsLockTime::from_consensus($value).expect("TODO: Handle error"))
     });
     ( older ( $value:expr ) ) => ({
-        $crate::impl_leaf_opcode_value!(Older, $crate::bitcoin::Sequence($value)) // TODO!!
+        $crate::impl_leaf_opcode_value!(Older, $crate::miniscript::RelLockTime::from_consensus($value).expect("TODO: Handle error"))
     });
     ( sha256 ( $hash:expr ) ) => ({
         $crate::impl_leaf_opcode_value!(Sha256, $hash)
@@ -768,7 +768,11 @@ macro_rules! fragment {
     ( multi_vec ( $thresh:expr, $keys:expr ) ) => ({
         let secp = $crate::bitcoin::secp256k1::Secp256k1::new();
 
-        $crate::keys::make_multi($thresh, $crate::miniscript::Terminal::Multi, $keys, &secp)
+        let fun = |k, pks| {
+            let thresh = $crate::miniscript::Threshold::new(k, pks).expect("TODO: Handle this error");
+            $crate::miniscript::Terminal::Multi(thresh)
+        };
+        $crate::keys::make_multi($thresh, fun, $keys, &secp)
     });
     ( multi ( $thresh:expr $(, $key:expr )+ ) ) => ({
         $crate::group_multi_keys!( $( $key ),* )
@@ -777,7 +781,11 @@ macro_rules! fragment {
     ( multi_a_vec ( $thresh:expr, $keys:expr ) ) => ({
         let secp = $crate::bitcoin::secp256k1::Secp256k1::new();
 
-        $crate::keys::make_multi($thresh, $crate::miniscript::Terminal::MultiA, $keys, &secp)
+        let fun = |k, pks| {
+            let thresh = $crate::miniscript::Threshold::new(k, pks).expect("TODO: Handle this error");
+            $crate::miniscript::Terminal::MultiA(thresh)
+        };
+        $crate::keys::make_multi($thresh, fun, $keys, &secp)
     });
     ( multi_a ( $thresh:expr $(, $key:expr )+ ) ) => ({
         $crate::group_multi_keys!( $( $key ),* )

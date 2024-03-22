@@ -87,20 +87,16 @@ pub enum RequiredSignatures<Ak> {
 
 #[derive(Clone, Debug)]
 pub enum SigningError {
-    SigHashError(sighash::Error),
+    SighashTaproot(sighash::TaprootError),
+    SighashP2wpkh(sighash::P2wpkhError),
     DerivationError(bip32::Error),
-}
-
-impl From<sighash::Error> for SigningError {
-    fn from(e: sighash::Error) -> Self {
-        Self::SigHashError(e)
-    }
 }
 
 impl core::fmt::Display for SigningError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            SigningError::SigHashError(e) => e.fmt(f),
+            SigningError::SighashTaproot(ref e) => write!(f, "sighash taproot: {}", e),
+            SigningError::SighashP2wpkh(ref e) => write!(f, "sighash p2wpkh: {}", e),
             SigningError::DerivationError(e) => e.fmt(f),
         }
     }
@@ -112,8 +108,30 @@ impl From<bip32::Error> for SigningError {
     }
 }
 
+impl From<sighash::TaprootError> for SigningError {
+    fn from(e: sighash::TaprootError) -> Self {
+        Self::SighashTaproot(e)
+    }
+}
+
+impl From<sighash::P2wpkhError> for SigningError {
+    fn from(e: sighash::P2wpkhError) -> Self {
+        Self::SighashP2wpkh(e)
+    }
+}
+
 #[cfg(feature = "std")]
-impl std::error::Error for SigningError {}
+impl std::error::Error for SigningError {
+    fn cause(&self) -> Option<&dyn std::error::Error> {
+        use SigningError::*;
+
+        match *self {
+            SighashTaproot(ref e) => Some(e),
+            SighashP2wpkh(ref e) => Some(e),
+            DerivationError(ref e) => Some(e),
+        }
+    }
+}
 
 impl RequiredSignatures<DescriptorPublicKey> {
     pub fn sign_with_keymap<T: core::borrow::Borrow<Transaction>>(
@@ -167,11 +185,11 @@ impl RequiredSignatures<DescriptorPublicKey> {
                     .unwrap();
 
                 let msg = Message::from_digest(sighash.to_byte_array());
-                let sig = secp.sign_schnorr_no_aux_rand(&msg, &keypair);
+                let signature = secp.sign_schnorr_no_aux_rand(&msg, &keypair);
 
                 let bitcoin_sig = taproot::Signature {
-                    sig,
-                    hash_ty: schnorr_sighashty,
+                    signature,
+                    sighash_type: schnorr_sighashty,
                 };
 
                 auth_data
@@ -210,10 +228,10 @@ impl RequiredSignatures<DescriptorPublicKey> {
                         };
                         let keypair = Keypair::from_secret_key(&secp, &secret_key.clone());
                         let msg = Message::from_digest(sighash.to_byte_array());
-                        let sig = secp.sign_schnorr_no_aux_rand(&msg, &keypair);
+                        let signature = secp.sign_schnorr_no_aux_rand(&msg, &keypair);
                         let bitcoin_sig = taproot::Signature {
-                            sig,
-                            hash_ty: sighash_type,
+                            signature,
+                            sighash_type: sighash_type,
                         };
 
                         auth_data

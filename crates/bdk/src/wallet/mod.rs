@@ -1145,7 +1145,7 @@ impl<D> Wallet<D> {
         };
 
         let mut changeset = ChangeSet::default();
-        let txid = tx.txid();
+        let txid = tx.compute_txid();
         changeset.append(self.indexed_graph.insert_tx(tx).into());
         if let Some(anchor) = anchor {
             changeset.append(self.indexed_graph.insert_anchor(txid, anchor).into());
@@ -1471,6 +1471,7 @@ impl<D> Wallet<D> {
 
         let recipients = params.recipients.iter().map(|(r, v)| (r, *v));
 
+        #[allow(deprecated)] // TODO: is_provably_unspendable - needs more thought.
         for (index, (script_pubkey, value)) in recipients.enumerate() {
             if !params.allow_dust
                 && value.is_dust(script_pubkey)
@@ -1632,7 +1633,7 @@ impl<D> Wallet<D> {
     /// let tx = psbt.clone().extract_tx().expect("tx");
     /// // broadcast tx but it's taking too long to confirm so we want to bump the fee
     /// let mut psbt =  {
-    ///     let mut builder = wallet.build_fee_bump(tx.txid())?;
+    ///     let mut builder = wallet.build_fee_bump(tx.compute_txid())?;
     ///     builder
     ///         .fee_rate(FeeRate::from_sat_per_vb(5).expect("valid feerate"));
     ///     builder.finish()?
@@ -1670,7 +1671,9 @@ impl<D> Wallet<D> {
             .iter()
             .any(|txin| txin.sequence.to_consensus_u32() <= 0xFFFFFFFD)
         {
-            return Err(BuildFeeBumpError::IrreplaceableTransaction(tx.txid()));
+            return Err(BuildFeeBumpError::IrreplaceableTransaction(
+                tx.compute_txid(),
+            ));
         }
 
         let fee = self
@@ -1711,7 +1714,7 @@ impl<D> Wallet<D> {
                                 derivation_index,
                                 confirmation_time,
                             }),
-                            satisfaction_weight,
+                            satisfaction_weight: satisfaction_weight.to_wu() as usize,
                         }
                     }
                     None => {
@@ -2042,6 +2045,7 @@ impl<D> Wallet<D> {
                     self.get_descriptor_for_keychain(keychain)
                         .max_weight_to_satisfy()
                         .unwrap()
+                        .to_wu() as usize
                 })
             })
             .collect()

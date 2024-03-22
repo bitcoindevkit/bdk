@@ -166,7 +166,7 @@ impl FullyNodedExport {
         fn check_ms<Ctx: ScriptContext>(
             terminal: &Terminal<String, Ctx>,
         ) -> Result<(), &'static str> {
-            if let Terminal::Multi(_, _) = terminal {
+            if let Terminal::Multi(_) = terminal {
                 Ok(())
             } else {
                 Err("The descriptor contains operators not supported by Bitcoin Core")

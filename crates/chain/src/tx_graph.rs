@@ -448,7 +448,7 @@ impl<A> TxGraph<A> {
         &'g self,
         tx: &'g Transaction,
     ) -> impl Iterator<Item = (usize, Txid)> + '_ {
-        let txid = tx.txid();
+        let txid = tx.compute_txid();
         tx.input
             .iter()
             .enumerate()
@@ -519,7 +519,7 @@ impl<A: Clone + Ord> TxGraph<A> {
     pub fn insert_tx(&mut self, tx: Transaction) -> ChangeSet<A> {
         let mut update = Self::default();
         update.txs.insert(
-            tx.txid(),
+            tx.compute_txid(),
             (TxNodeInternal::Whole(tx.into()), BTreeSet::new(), 0),
         );
         self.apply_update(update)
@@ -536,7 +536,7 @@ impl<A: Clone + Ord> TxGraph<A> {
     ) -> ChangeSet<A> {
         let mut changeset = ChangeSet::<A>::default();
         for (tx, seen_at) in txs {
-            changeset.append(self.insert_seen_at(tx.txid(), seen_at));
+            changeset.append(self.insert_seen_at(tx.compute_txid(), seen_at));
             changeset.append(self.insert_tx(tx));
         }
         changeset
@@ -582,7 +582,7 @@ impl<A: Clone + Ord> TxGraph<A> {
     pub fn apply_changeset(&mut self, changeset: ChangeSet<A>) {
         for wrapped_tx in changeset.txs {
             let tx = wrapped_tx.as_ref();
-            let txid = tx.txid();
+            let txid = tx.compute_txid();
 
             tx.input
                 .iter()
@@ -600,7 +600,7 @@ impl<A: Clone + Ord> TxGraph<A> {
                 }
                 Some((TxNodeInternal::Whole(tx), _, _)) => {
                     debug_assert_eq!(
-                        tx.as_ref().txid(),
+                        tx.as_ref().compute_txid(),
                         txid,
                         "tx should produce txid that is same as key"
                     );
@@ -828,7 +828,7 @@ impl<A: Anchor> TxGraph<A> {
         // resulting array will also include `tx`
         let unconfirmed_ancestor_txs =
             TxAncestors::new_include_root(self, tx.clone(), |_, ancestor_tx: Arc<Transaction>| {
-                let tx_node = self.get_tx_node(ancestor_tx.as_ref().txid())?;
+                let tx_node = self.get_tx_node(ancestor_tx.as_ref().compute_txid())?;
                 // We're filtering the ancestors to keep only the unconfirmed ones (= no anchors in
                 // the best chain)
                 for block in tx_node.anchors {
@@ -846,7 +846,7 @@ impl<A: Anchor> TxGraph<A> {
         // and our unconf descendants' last seen.
         let unconfirmed_descendants_txs = TxDescendants::new_include_root(
             self,
-            tx.as_ref().txid(),
+            tx.as_ref().compute_txid(),
             |_, descendant_txid: Txid| {
                 let tx_node = self.get_tx_node(descendant_txid)?;
                 // We're filtering the ancestors to keep only the unconfirmed ones (= no anchors in
@@ -887,7 +887,7 @@ impl<A: Anchor> TxGraph<A> {
                     return Ok(None);
                 }
                 if conflicting_tx.last_seen_unconfirmed == *last_seen
-                    && conflicting_tx.as_ref().txid() > tx.as_ref().txid()
+                    && conflicting_tx.as_ref().compute_txid() > tx.as_ref().compute_txid()
                 {
                     // Conflicting tx has priority if txid of conflicting tx > txid of original tx
                     return Ok(None);
@@ -982,7 +982,7 @@ impl<A: Anchor> TxGraph<A> {
         chain_tip: BlockId,
     ) -> impl Iterator<Item = Result<CanonicalTx<'a, Arc<Transaction>, A>, C::Error>> {
         self.full_txs().filter_map(move |tx| {
-            self.try_get_chain_position(chain, chain_tip, tx.txid)
+            self.try_get_chain_position(chain, chain_tip, tx.compute_txid())
                 .map(|v| {
                     v.map(|observed_in| CanonicalTx {
                         chain_position: observed_in,
@@ -1258,7 +1258,7 @@ impl<A> ChangeSet<A> {
                 tx.output
                     .iter()
                     .enumerate()
-                    .map(move |(vout, txout)| (OutPoint::new(tx.txid(), vout as _), txout))
+                    .map(move |(vout, txout)| (OutPoint::new(tx.compute_txid(), vout as _), txout))
             })
             .chain(self.txouts.iter().map(|(op, txout)| (*op, txout)))
     }

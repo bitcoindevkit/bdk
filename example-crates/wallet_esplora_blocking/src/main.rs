@@ -92,7 +92,7 @@ fn main() -> Result<(), anyhow::Error> {
 
     let tx = psbt.extract_tx()?;
     client.broadcast(&tx)?;
-    println!("Tx broadcasted! Txid: {}", tx.txid());
+    println!("Tx broadcasted! Txid: {}", tx.compute_txid());
 
     Ok(())
 }

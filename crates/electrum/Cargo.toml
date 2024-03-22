@@ -12,11 +12,11 @@ readme = "README.md"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-bdk_chain = { path = "../chain", version = "0.11.0", default-features = false }
-electrum-client = { version = "0.19" }
+bdk_chain = { path = "../chain", default-features = false }
+electrum-client = { version = "0.20" }
 #rustls = { version = "=0.21.1", optional = true, features = ["dangerous_configuration"] }
 
 [dev-dependencies]
 bdk_testenv = { path = "../testenv", default-features = false }
-electrsd = { version= "0.27.1", features = ["bitcoind_25_0", "esplora_a33e97e1", "legacy"] }
+electrsd = { version= "0.28.0", features = ["bitcoind_25_0", "esplora_a33e97e1", "legacy"] }
 anyhow = "1"

@@ -128,11 +128,11 @@ fn insert_txouts() {
 
         // Mark it as confirmed.
         assert_eq!(
-            graph.insert_anchor(update_txs.txid(), conf_anchor),
+            graph.insert_anchor(update_txs.compute_txid(), conf_anchor),
             ChangeSet {
                 txs: [].into(),
                 txouts: [].into(),
-                anchors: [(conf_anchor, update_txs.txid())].into(),
+                anchors: [(conf_anchor, update_txs.compute_txid())].into(),
                 last_seen: [].into()
             }
         );
@@ -147,7 +147,11 @@ fn insert_txouts() {
         ChangeSet {
             txs: [Arc::new(update_txs.clone())].into(),
             txouts: update_ops.clone().into(),
-            anchors: [(conf_anchor, update_txs.txid()), (unconf_anchor, h!("tx2"))].into(),
+            anchors: [
+                (conf_anchor, update_txs.compute_txid()),
+                (unconf_anchor, h!("tx2"))
+            ]
+            .into(),
             last_seen: [(h!("tx2"), 1000000)].into()
         }
     );
@@ -181,7 +185,9 @@ fn insert_txouts() {
     );
 
     assert_eq!(
-        graph.tx_outputs(update_txs.txid()).expect("should exists"),
+        graph
+            .tx_outputs(update_txs.compute_txid())
+            .expect("should exists"),
         [(
             0u32,
             &TxOut {
@@ -198,7 +204,11 @@ fn insert_txouts() {
         ChangeSet {
             txs: [Arc::new(update_txs.clone())].into(),
             txouts: update_ops.into_iter().chain(original_ops).collect(),
-            anchors: [(conf_anchor, update_txs.txid()), (unconf_anchor, h!("tx2"))].into(),
+            anchors: [
+                (conf_anchor, update_txs.compute_txid()),
+                (unconf_anchor, h!("tx2"))
+            ]
+            .into(),
             last_seen: [(h!("tx2"), 1000000)].into()
         }
     );
@@ -233,7 +243,7 @@ fn insert_tx_graph_keeps_track_of_spend() {
     };
 
     let op = OutPoint {
-        txid: tx1.txid(),
+        txid: tx1.compute_txid(),
         vout: 0,
     };
 
@@ -259,7 +269,7 @@ fn insert_tx_graph_keeps_track_of_spend() {
 
     assert_eq!(
         graph1.outspends(op),
-        &iter::once(tx2.txid()).collect::<HashSet<_>>()
+        &iter::once(tx2.compute_txid()).collect::<HashSet<_>>()
     );
     assert_eq!(graph2.outspends(op), graph1.outspends(op));
 }
@@ -279,7 +289,9 @@ fn insert_tx_can_retrieve_full_tx_from_graph() {
     let mut graph = TxGraph::<()>::default();
     let _ = graph.insert_tx(tx.clone());
     assert_eq!(
-        graph.get_tx(tx.txid()).map(|tx| tx.as_ref().clone()),
+        graph
+            .get_tx(tx.compute_txid())
+            .map(|tx| tx.as_ref().clone()),
         Some(tx)
     );
 }
@@ -299,7 +311,7 @@ fn insert_tx_displaces_txouts() {
 
     let changeset = tx_graph.insert_txout(
         OutPoint {
-            txid: tx.txid(),
+            txid: tx.compute_txid(),
             vout: 0,
         },
         TxOut {
@@ -312,7 +324,7 @@ fn insert_tx_displaces_txouts() {
 
     let _ = tx_graph.insert_txout(
         OutPoint {
-            txid: tx.txid(),
+            txid: tx.compute_txid(),
             vout: 0,
         },
         TxOut {
@@ -326,7 +338,7 @@ fn insert_tx_displaces_txouts() {
     assert_eq!(
         tx_graph
             .get_txout(OutPoint {
-                txid: tx.txid(),
+                txid: tx.compute_txid(),
                 vout: 0
             })
             .unwrap()
@@ -335,7 +347,7 @@ fn insert_tx_displaces_txouts() {
     );
     assert_eq!(
         tx_graph.get_txout(OutPoint {
-            txid: tx.txid(),
+            txid: tx.compute_txid(),
             vout: 1
         }),
         None
@@ -359,7 +371,7 @@ fn insert_txout_does_not_displace_tx() {
 
     let _ = tx_graph.insert_txout(
         OutPoint {
-            txid: tx.txid(),
+            txid: tx.compute_txid(),
             vout: 0,
         },
         TxOut {
@@ -370,7 +382,7 @@ fn insert_txout_does_not_displace_tx() {
 
     let _ = tx_graph.insert_txout(
         OutPoint {
-            txid: tx.txid(),
+            txid: tx.compute_txid(),
             vout: 0,
         },
         TxOut {
@@ -382,7 +394,7 @@ fn insert_txout_does_not_displace_tx() {
     assert_eq!(
         tx_graph
             .get_txout(OutPoint {
-                txid: tx.txid(),
+                txid: tx.compute_txid(),
                 vout: 0
             })
             .unwrap()
@@ -391,7 +403,7 @@ fn insert_txout_does_not_displace_tx() {
     );
     assert_eq!(
         tx_graph.get_txout(OutPoint {
-            txid: tx.txid(),
+            txid: tx.compute_txid(),
             vout: 1
         }),
         None
@@ -441,14 +453,14 @@ fn test_calculate_fee() {
         input: vec![
             TxIn {
                 previous_output: OutPoint {
-                    txid: intx1.txid(),
+                    txid: intx1.compute_txid(),
                     vout: 0,
                 },
                 ..Default::default()
             },
             TxIn {
                 previous_output: OutPoint {
-                    txid: intx2.txid(),
+                    txid: intx2.compute_txid(),
                     vout: 0,
                 },
                 ..Default::default()
@@ -541,7 +553,7 @@ fn test_walk_ancestors() {
     // tx_b0 spends tx_a0
     let tx_b0 = Transaction {
         input: vec![TxIn {
-            previous_output: OutPoint::new(tx_a0.txid(), 0),
+            previous_output: OutPoint::new(tx_a0.compute_txid(), 0),
             ..TxIn::default()
         }],
         output: vec![TxOut::NULL, TxOut::NULL],
@@ -551,7 +563,7 @@ fn test_walk_ancestors() {
     // tx_b1 spends tx_a0
     let tx_b1 = Transaction {
         input: vec![TxIn {
-            previous_output: OutPoint::new(tx_a0.txid(), 1),
+            previous_output: OutPoint::new(tx_a0.compute_txid(), 1),
             ..TxIn::default()
         }],
         output: vec![TxOut::NULL],
@@ -570,7 +582,7 @@ fn test_walk_ancestors() {
     // tx_c0 spends tx_b0
     let tx_c0 = Transaction {
         input: vec![TxIn {
-            previous_output: OutPoint::new(tx_b0.txid(), 0),
+            previous_output: OutPoint::new(tx_b0.compute_txid(), 0),
             ..TxIn::default()
         }],
         output: vec![TxOut::NULL],
@@ -580,7 +592,7 @@ fn test_walk_ancestors() {
     // tx_c1 spends tx_b0
     let tx_c1 = Transaction {
         input: vec![TxIn {
-            previous_output: OutPoint::new(tx_b0.txid(), 1),
+            previous_output: OutPoint::new(tx_b0.compute_txid(), 1),
             ..TxIn::default()
         }],
         output: vec![TxOut::NULL],
@@ -591,11 +603,11 @@ fn test_walk_ancestors() {
     let tx_c2 = Transaction {
         input: vec![
             TxIn {
-                previous_output: OutPoint::new(tx_b1.txid(), 0),
+                previous_output: OutPoint::new(tx_b1.compute_txid(), 0),
                 ..TxIn::default()
             },
             TxIn {
-                previous_output: OutPoint::new(tx_b2.txid(), 0),
+                previous_output: OutPoint::new(tx_b2.compute_txid(), 0),
                 ..TxIn::default()
             },
         ],
@@ -615,7 +627,7 @@ fn test_walk_ancestors() {
     // tx_d0 spends tx_c1
     let tx_d0 = Transaction {
         input: vec![TxIn {
-            previous_output: OutPoint::new(tx_c1.txid(), 0),
+            previous_output: OutPoint::new(tx_c1.compute_txid(), 0),
             ..TxIn::default()
         }],
         output: vec![TxOut::NULL],
@@ -626,11 +638,11 @@ fn test_walk_ancestors() {
     let tx_d1 = Transaction {
         input: vec![
             TxIn {
-                previous_output: OutPoint::new(tx_c2.txid(), 0),
+                previous_output: OutPoint::new(tx_c2.compute_txid(), 0),
                 ..TxIn::default()
             },
             TxIn {
-                previous_output: OutPoint::new(tx_c3.txid(), 0),
+                previous_output: OutPoint::new(tx_c3.compute_txid(), 0),
                 ..TxIn::default()
             },
         ],
@@ -641,7 +653,7 @@ fn test_walk_ancestors() {
     // tx_e0 spends tx_d1
     let tx_e0 = Transaction {
         input: vec![TxIn {
-            previous_output: OutPoint::new(tx_d1.txid(), 0),
+            previous_output: OutPoint::new(tx_d1.compute_txid(), 0),
             ..TxIn::default()
         }],
         output: vec![TxOut::NULL],
@@ -663,7 +675,7 @@ fn test_walk_ancestors() {
     ]);
 
     [&tx_a0, &tx_b1].iter().for_each(|&tx| {
-        let changeset = graph.insert_anchor(tx.txid(), tip.block_id());
+        let changeset = graph.insert_anchor(tx.compute_txid(), tip.block_id());
         assert!(!changeset.is_empty());
     });
 
@@ -680,7 +692,7 @@ fn test_walk_ancestors() {
         // Only traverse unconfirmed ancestors of tx_e0 this time
         graph
             .walk_ancestors(tx_e0.clone(), |depth, tx| {
-                let tx_node = graph.get_tx_node(tx.txid())?;
+                let tx_node = graph.get_tx_node(tx.compute_txid())?;
                 for block in tx_node.anchors {
                     match local_chain.is_block_in_chain(block.anchor_block(), tip.block_id()) {
                         Ok(Some(true)) => return None,
@@ -744,15 +756,15 @@ fn test_conflicting_descendants() {
     // tx_b spends tx_a
     let tx_b = Transaction {
         input: vec![TxIn {
-            previous_output: OutPoint::new(tx_a.txid(), 0),
+            previous_output: OutPoint::new(tx_a.compute_txid(), 0),
             ..TxIn::default()
         }],
         output: vec![TxOut::NULL],
         ..common::new_tx(2)
     };
 
-    let txid_a = tx_a.txid();
-    let txid_b = tx_b.txid();
+    let txid_a = tx_a.compute_txid();
+    let txid_b = tx_b.compute_txid();
 
     let mut graph = TxGraph::<()>::default();
     let _ = graph.insert_tx(tx_a);
@@ -776,7 +788,7 @@ fn test_descendants_no_repeat() {
     let txs_b = (0..3)
         .map(|vout| Transaction {
             input: vec![TxIn {
-                previous_output: OutPoint::new(tx_a.txid(), vout),
+                previous_output: OutPoint::new(tx_a.compute_txid(), vout),
                 ..TxIn::default()
             }],
             output: vec![TxOut::NULL],
@@ -787,7 +799,7 @@ fn test_descendants_no_repeat() {
     let txs_c = (0..2)
         .map(|vout| Transaction {
             input: vec![TxIn {
-                previous_output: OutPoint::new(txs_b[vout as usize].txid(), vout),
+                previous_output: OutPoint::new(txs_b[vout as usize].compute_txid(), vout),
                 ..TxIn::default()
             }],
             output: vec![TxOut::NULL],
@@ -798,11 +810,11 @@ fn test_descendants_no_repeat() {
     let tx_d = Transaction {
         input: vec![
             TxIn {
-                previous_output: OutPoint::new(txs_c[0].txid(), 0),
+                previous_output: OutPoint::new(txs_c[0].compute_txid(), 0),
                 ..TxIn::default()
             },
             TxIn {
-                previous_output: OutPoint::new(txs_c[1].txid(), 0),
+                previous_output: OutPoint::new(txs_c[1].compute_txid(), 0),
                 ..TxIn::default()
             },
         ],
@@ -812,7 +824,7 @@ fn test_descendants_no_repeat() {
 
     let tx_e = Transaction {
         input: vec![TxIn {
-            previous_output: OutPoint::new(tx_d.txid(), 0),
+            previous_output: OutPoint::new(tx_d.compute_txid(), 0),
             ..TxIn::default()
         }],
         output: vec![TxOut::NULL],
@@ -846,11 +858,11 @@ fn test_descendants_no_repeat() {
         .chain(core::iter::once(&tx_e))
     {
         let _ = graph.insert_tx(tx.clone());
-        expected_txids.push(tx.txid());
+        expected_txids.push(tx.compute_txid());
     }
 
     let descendants = graph
-        .walk_descendants(tx_a.txid(), |_, txid| Some(txid))
+        .walk_descendants(tx_a.compute_txid(), |_, txid| Some(txid))
         .collect::<Vec<_>>();
 
     assert_eq!(descendants, expected_txids);
@@ -886,7 +898,7 @@ fn test_chain_spends() {
     // The first confirmed transaction spends vout: 0. And is confirmed at block 98.
     let tx_1 = Transaction {
         input: vec![TxIn {
-            previous_output: OutPoint::new(tx_0.txid(), 0),
+            previous_output: OutPoint::new(tx_0.compute_txid(), 0),
             ..TxIn::default()
         }],
         output: vec![
@@ -905,7 +917,7 @@ fn test_chain_spends() {
     // The second transactions spends vout:1, and is unconfirmed.
     let tx_2 = Transaction {
         input: vec![TxIn {
-            previous_output: OutPoint::new(tx_0.txid(), 1),
+            previous_output: OutPoint::new(tx_0.compute_txid(), 1),
             ..TxIn::default()
         }],
         output: vec![
@@ -929,7 +941,7 @@ fn test_chain_spends() {
 
     for (ht, tx) in [(95, &tx_0), (98, &tx_1)] {
         let _ = graph.insert_anchor(
-            tx.txid(),
+            tx.compute_txid(),
             ConfirmationHeightAnchor {
                 anchor_block: tip.block_id(),
                 confirmation_height: ht,
@@ -939,19 +951,23 @@ fn test_chain_spends() {
 
     // Assert that confirmed spends are returned correctly.
     assert_eq!(
-        graph.get_chain_spend(&local_chain, tip.block_id(), OutPoint::new(tx_0.txid(), 0)),
+        graph.get_chain_spend(
+            &local_chain,
+            tip.block_id(),
+            OutPoint::new(tx_0.compute_txid(), 0)
+        ),
         Some((
             ChainPosition::Confirmed(&ConfirmationHeightAnchor {
                 anchor_block: tip.block_id(),
                 confirmation_height: 98
             }),
-            tx_1.txid(),
+            tx_1.compute_txid(),
         )),
     );
 
     // Check if chain position is returned correctly.
     assert_eq!(
-        graph.get_chain_position(&local_chain, tip.block_id(), tx_0.txid()),
+        graph.get_chain_position(&local_chain, tip.block_id(), tx_0.compute_txid()),
         // Some(ObservedAs::Confirmed(&local_chain.get_block(95).expect("block expected"))),
         Some(ChainPosition::Confirmed(&ConfirmationHeightAnchor {
             anchor_block: tip.block_id(),
@@ -961,25 +977,33 @@ fn test_chain_spends() {
 
     // Even if unconfirmed tx has a last_seen of 0, it can still be part of a chain spend.
     assert_eq!(
-        graph.get_chain_spend(&local_chain, tip.block_id(), OutPoint::new(tx_0.txid(), 1)),
-        Some((ChainPosition::Unconfirmed(0), tx_2.txid())),
+        graph.get_chain_spend(
+            &local_chain,
+            tip.block_id(),
+            OutPoint::new(tx_0.compute_txid(), 1)
+        ),
+        Some((ChainPosition::Unconfirmed(0), tx_2.compute_txid())),
     );
 
     // Mark the unconfirmed as seen and check correct ObservedAs status is returned.
-    let _ = graph.insert_seen_at(tx_2.txid(), 1234567);
+    let _ = graph.insert_seen_at(tx_2.compute_txid(), 1234567);
 
     // Check chain spend returned correctly.
     assert_eq!(
         graph
-            .get_chain_spend(&local_chain, tip.block_id(), OutPoint::new(tx_0.txid(), 1))
+            .get_chain_spend(
+                &local_chain,
+                tip.block_id(),
+                OutPoint::new(tx_0.compute_txid(), 1)
+            )
             .unwrap(),
-        (ChainPosition::Unconfirmed(1234567), tx_2.txid())
+        (ChainPosition::Unconfirmed(1234567), tx_2.compute_txid())
     );
 
     // A conflicting transaction that conflicts with tx_1.
     let tx_1_conflict = Transaction {
         input: vec![TxIn {
-            previous_output: OutPoint::new(tx_0.txid(), 0),
+            previous_output: OutPoint::new(tx_0.compute_txid(), 0),
             ..Default::default()
         }],
         ..common::new_tx(0)
@@ -988,13 +1012,13 @@ fn test_chain_spends() {
 
     // Because this tx conflicts with an already confirmed transaction, chain position should return none.
     assert!(graph
-        .get_chain_position(&local_chain, tip.block_id(), tx_1_conflict.txid())
+        .get_chain_position(&local_chain, tip.block_id(), tx_1_conflict.compute_txid())
         .is_none());
 
     // Another conflicting tx that conflicts with tx_2.
     let tx_2_conflict = Transaction {
         input: vec![TxIn {
-            previous_output: OutPoint::new(tx_0.txid(), 1),
+            previous_output: OutPoint::new(tx_0.compute_txid(), 1),
             ..Default::default()
         }],
         ..common::new_tx(0)
@@ -1002,12 +1026,12 @@ fn test_chain_spends() {
 
     // Insert in graph and mark it as seen.
     let _ = graph.insert_tx(tx_2_conflict.clone());
-    let _ = graph.insert_seen_at(tx_2_conflict.txid(), 1234568);
+    let _ = graph.insert_seen_at(tx_2_conflict.compute_txid(), 1234568);
 
     // This should return a valid observation with correct last seen.
     assert_eq!(
         graph
-            .get_chain_position(&local_chain, tip.block_id(), tx_2_conflict.txid())
+            .get_chain_position(&local_chain, tip.block_id(), tx_2_conflict.compute_txid())
             .expect("position expected"),
         ChainPosition::Unconfirmed(1234568)
     );
@@ -1015,14 +1039,21 @@ fn test_chain_spends() {
     // Chain_spend now catches the new transaction as the spend.
     assert_eq!(
         graph
-            .get_chain_spend(&local_chain, tip.block_id(), OutPoint::new(tx_0.txid(), 1))
+            .get_chain_spend(
+                &local_chain,
+                tip.block_id(),
+                OutPoint::new(tx_0.compute_txid(), 1)
+            )
             .expect("expect observation"),
-        (ChainPosition::Unconfirmed(1234568), tx_2_conflict.txid())
+        (
+            ChainPosition::Unconfirmed(1234568),
+            tx_2_conflict.compute_txid()
+        )
     );
 
     // Chain position of the `tx_2` is now none, as it is older than `tx_2_conflict`
     assert!(graph
-        .get_chain_position(&local_chain, tip.block_id(), tx_2.txid())
+        .get_chain_position(&local_chain, tip.block_id(), tx_2.compute_txid())
         .is_none());
 }
 
@@ -1243,7 +1274,7 @@ fn call_map_anchors_with_non_deterministic_anchor() {
 
     for tx_node in full_txs_vec.iter() {
         let new_txnode = new_txs.next().unwrap();
-        assert_eq!(new_txnode.txid, tx_node.txid);
+        assert_eq!(new_txnode.compute_txid(), tx_node.compute_txid());
         assert_eq!(new_txnode.tx, tx_node.tx);
         assert_eq!(
             new_txnode.last_seen_unconfirmed,

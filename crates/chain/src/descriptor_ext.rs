@@ -12,7 +12,7 @@ impl DescriptorExt for Descriptor<DescriptorPublicKey> {
         self.at_derivation_index(0)
             .expect("descriptor can't have hardened derivation")
             .script_pubkey()
-            .dust_value()
+            .minimal_non_dust()
             .to_sat()
     }
 }

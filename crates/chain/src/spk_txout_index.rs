@@ -86,7 +86,7 @@ impl<I: Clone + Ord> SpkTxOutIndex<I> {
     /// 2. When getting new data from the chain, you usually scan it before incorporating it into your chain state.
     pub fn scan(&mut self, tx: &Transaction) -> BTreeSet<I> {
         let mut scanned_indices = BTreeSet::new();
-        let txid = tx.txid();
+        let txid = tx.compute_txid();
         for (i, txout) in tx.output.iter().enumerate() {
             let op = OutPoint::new(txid, i as u32);
             if let Some(spk_i) = self.scan_txout(op, txout) {

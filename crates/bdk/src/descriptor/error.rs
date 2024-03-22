@@ -37,7 +37,7 @@ pub enum Error {
     /// Error during base58 decoding
     Base58(bitcoin::base58::Error),
     /// Key-related error
-    Pk(bitcoin::key::Error),
+    Pk(bitcoin::key::ParsePublicKeyError),
     /// Miniscript error
     Miniscript(miniscript::Error),
     /// Hex decoding error
@@ -98,8 +98,8 @@ impl From<bitcoin::base58::Error> for Error {
     }
 }
 
-impl From<bitcoin::key::Error> for Error {
-    fn from(err: bitcoin::key::Error) -> Self {
+impl From<bitcoin::key::ParsePublicKeyError> for Error {
+    fn from(err: bitcoin::key::ParsePublicKeyError) -> Self {
         Error::Pk(err)
     }
 }

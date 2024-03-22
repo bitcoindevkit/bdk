@@ -240,7 +240,7 @@ fn plan_steps<Ak: Clone + CanDerive, Ctx: ScriptContext>(
             if max_sequence.is_height_locked() == older.is_height_locked() {
                 if max_sequence.to_consensus_u32() >= older.to_consensus_u32() {
                     Some(TermPlan {
-                        min_sequence: Some(*older),
+                        min_sequence: Some((*older).into()),
                         ..Default::default()
                     })
                 } else {
@@ -319,7 +319,7 @@ fn plan_steps<Ak: Clone + CanDerive, Ctx: ScriptContext>(
             }
         }
         Terminal::Thresh(_, _) => todo!(),
-        Terminal::Multi(_, _) => todo!(),
-        Terminal::MultiA(_, _) => todo!(),
+        Terminal::Multi(_) => todo!(),
+        Terminal::MultiA(_) => todo!(),
     }
 }

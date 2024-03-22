@@ -23,15 +23,15 @@ use core::str::FromStr;
 use bitcoin::secp256k1::{self, Secp256k1, Signing};
 
 use bitcoin::bip32;
-use bitcoin::{key::XOnlyPublicKey, Network, PrivateKey, PublicKey};
+use bitcoin::{key::XOnlyPublicKey, Network, NetworkKind, PrivateKey, PublicKey};
 
 use miniscript::descriptor::{Descriptor, DescriptorXKey, Wildcard};
 pub use miniscript::descriptor::{
     DescriptorPublicKey, DescriptorSecretKey, KeyMap, SinglePriv, SinglePub, SinglePubKey,
     SortedMultiVec,
 };
-pub use miniscript::ScriptContext;
 use miniscript::{Miniscript, Terminal};
+pub use miniscript::{ScriptContext, Threshold};
 
 use crate::descriptor::{CheckMiniscript, DescriptorError};
 use crate::wallet::utils::SecpCtx;
@@ -334,7 +334,7 @@ impl<Ctx: ScriptContext> ExtendedKey<Ctx> {
     pub fn into_xprv(self, network: Network) -> Option<bip32::Xpriv> {
         match self {
             ExtendedKey::Private((mut xprv, _)) => {
-                xprv.network = network;
+                xprv.network = network.into();
                 Some(xprv)
             }
             ExtendedKey::Public(_) => None,
@@ -353,7 +353,7 @@ impl<Ctx: ScriptContext> ExtendedKey<Ctx> {
             ExtendedKey::Public((xpub, _)) => xpub,
         };
 
-        xpub.network = network;
+        xpub.network = network.into();
         xpub
     }
 }
@@ -400,7 +400,7 @@ impl<Ctx: ScriptContext> From<bip32::Xpriv> for ExtendedKey<Ctx> {
 /// impl<Ctx: ScriptContext> DerivableKey<Ctx> for MyCustomKeyType {
 ///     fn into_extended_key(self) -> Result<ExtendedKey<Ctx>, KeyError> {
 ///         let xprv = bip32::Xpriv {
-///             network: self.network,
+///             network: self.network.into(),
 ///             depth: 0,
 ///             parent_fingerprint: bip32::Fingerprint::default(),
 ///             private_key: self.key_data.inner,
@@ -432,7 +432,7 @@ impl<Ctx: ScriptContext> From<bip32::Xpriv> for ExtendedKey<Ctx> {
 /// impl<Ctx: ScriptContext> DerivableKey<Ctx> for MyCustomKeyType {
 ///     fn into_extended_key(self) -> Result<ExtendedKey<Ctx>, KeyError> {
 ///         let xprv = bip32::Xpriv {
-///             network: bitcoin::Network::Bitcoin, // pick an arbitrary network here
+///             network: bitcoin::NetworkKind::Main, // pick an arbitrary network here
 ///             depth: 0,
 ///             parent_fingerprint: bip32::Fingerprint::default(),
 ///             private_key: self.key_data.inner,
@@ -715,7 +715,7 @@ impl<Ctx: ScriptContext> GeneratableKey<Ctx> for PrivateKey {
         let inner = secp256k1::SecretKey::from_slice(&entropy)?;
         let private_key = PrivateKey {
             compressed: options.compressed,
-            network: Network::Bitcoin,
+            network: NetworkKind::Main,
             inner,
         };
 
@@ -846,7 +846,7 @@ impl<Ctx: ScriptContext> IntoDescriptorKey<Ctx> for DescriptorPublicKey {
         let networks = match self {
             DescriptorPublicKey::Single(_) => any_network(),
             DescriptorPublicKey::XPub(DescriptorXKey { xkey, .. })
-                if xkey.network == Network::Bitcoin =>
+                if xkey.network == NetworkKind::Main =>
             {
                 mainnet_network()
             }
@@ -880,11 +880,11 @@ impl<Ctx: ScriptContext> IntoDescriptorKey<Ctx> for XOnlyPublicKey {
 impl<Ctx: ScriptContext> IntoDescriptorKey<Ctx> for DescriptorSecretKey {
     fn into_descriptor_key(self) -> Result<DescriptorKey<Ctx>, KeyError> {
         let networks = match &self {
-            DescriptorSecretKey::Single(sk) if sk.key.network == Network::Bitcoin => {
+            DescriptorSecretKey::Single(sk) if sk.key.network == NetworkKind::Main => {
                 mainnet_network()
             }
             DescriptorSecretKey::XPrv(DescriptorXKey { xkey, .. })
-                if xkey.network == Network::Bitcoin =>
+                if xkey.network == NetworkKind::Main =>
             {
                 mainnet_network()
             }
@@ -1001,6 +1001,6 @@ pub mod test {
         .unwrap();
         let xprv = xkey.into_xprv(Network::Testnet).unwrap();
 
-        assert_eq!(xprv.network, Network::Testnet);
+        assert_eq!(xprv.network, NetworkKind::Test);
     }
 }

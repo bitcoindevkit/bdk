@@ -426,7 +426,7 @@ fn populate_with_outpoints(
     for outpoint in outpoints {
         let txid = outpoint.txid;
         let tx = client.transaction_get(&txid)?;
-        debug_assert_eq!(tx.txid(), txid);
+        debug_assert_eq!(tx.compute_txid(), txid);
         let txout = match tx.output.get(outpoint.vout as usize) {
             Some(txout) => txout,
             None => continue,

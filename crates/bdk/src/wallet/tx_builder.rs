@@ -316,7 +316,7 @@ impl<'a, D, Cs, Ctx> TxBuilder<'a, D, Cs, Ctx> {
                 let descriptor = wallet.get_descriptor_for_keychain(utxo.keychain);
                 let satisfaction_weight = descriptor.max_weight_to_satisfy().unwrap();
                 self.params.utxos.push(WeightedUtxo {
-                    satisfaction_weight,
+                    satisfaction_weight: satisfaction_weight.to_wu() as usize,
                     utxo: Utxo::Local(utxo),
                 });
             }
@@ -404,9 +404,9 @@ impl<'a, D, Cs, Ctx> TxBuilder<'a, D, Cs, Ctx> {
         if psbt_input.witness_utxo.is_none() {
             match psbt_input.non_witness_utxo.as_ref() {
                 Some(tx) => {
-                    if tx.txid() != outpoint.txid {
+                    if tx.compute_txid() != outpoint.txid {
                         return Err(AddForeignUtxoError::InvalidTxid {
-                            input_txid: tx.txid(),
+                            input_txid: tx.compute_txid(),
                             foreign_utxo: outpoint,
                         });
                     }
