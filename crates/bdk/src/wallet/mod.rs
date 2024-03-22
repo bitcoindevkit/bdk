@@ -180,7 +180,7 @@ impl
 }
 
 /// The address index selection strategy to use to derived an address from the wallet's external
-/// descriptor. See [`Wallet::get_address`]. If you're unsure which one to use use `WalletIndex::New`.
+/// descriptor. See [`Wallet::address`]. If you're unsure which one to use use `WalletIndex::New`.
 #[derive(Debug)]
 pub enum AddressIndex {
     /// Return a new address after incrementing the current descriptor index.
@@ -269,7 +269,7 @@ where
     ///
     /// This panics when the caller requests for an address of derivation index greater than the
     /// BIP32 max index.
-    pub fn get_address(&mut self, address_index: AddressIndex) -> AddressInfo {
+    pub fn address(&mut self, address_index: AddressIndex) -> AddressInfo {
         self.try_get_address(address_index).unwrap()
     }
 
@@ -1177,7 +1177,7 @@ impl<D> Wallet<D> {
 
     /// Return the balance, separated into available, trusted-pending, untrusted-pending and immature
     /// values.
-    pub fn get_balance(&self) -> Balance {
+    pub fn balance(&self) -> Balance {
         self.indexed_graph.graph().balance(
             &self.chain,
             self.chain.tip().block_id(),
@@ -2583,7 +2583,7 @@ macro_rules! doctest_wallet {
             Network::Regtest,
         )
         .unwrap();
-        let address = wallet.get_address(AddressIndex::New).address;
+        let address = wallet.address(AddressIndex::New).address;
         let tx = Transaction {
             version: 1,
             lock_time: absolute::LockTime::ZERO,
