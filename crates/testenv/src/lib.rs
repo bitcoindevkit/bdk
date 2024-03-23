@@ -235,3 +235,44 @@ impl TestEnv {
         Ok(txid)
     }
 }
+
+#[cfg(test)]
+mod test {
+    use crate::TestEnv;
+    use anyhow::Result;
+    use bitcoincore_rpc::RpcApi;
+
+    /// This checks that reorgs initiated by `bitcoind` is detected by our `electrsd` instance.
+    #[test]
+    fn test_reorg_is_detected_in_electrsd() -> Result<()> {
+        let env = TestEnv::new()?;
+
+        // Mine some blocks.
+        env.mine_blocks(101, None)?;
+        env.wait_until_electrum_sees_block()?;
+        let height = env.bitcoind.client.get_block_count()?;
+        let blocks = (0..=height)
+            .map(|i| env.bitcoind.client.get_block_hash(i))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        // Perform reorg on six blocks.
+        env.reorg(6)?;
+        env.wait_until_electrum_sees_block()?;
+        let reorged_height = env.bitcoind.client.get_block_count()?;
+        let reorged_blocks = (0..=height)
+            .map(|i| env.bitcoind.client.get_block_hash(i))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        assert_eq!(height, reorged_height);
+
+        // Block hashes should not be equal on the six reorged blocks.
+        for (i, (block, reorged_block)) in blocks.iter().zip(reorged_blocks.iter()).enumerate() {
+            match i <= height as usize - 6 {
+                true => assert_eq!(block, reorged_block),
+                false => assert_ne!(block, reorged_block),
+            }
+        }
+
+        Ok(())
+    }
+}
