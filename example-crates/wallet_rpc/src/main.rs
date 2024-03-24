@@ -1,18 +1,18 @@
-use bdk::{
-    bitcoin::{Block, Network, Transaction},
-    wallet::Wallet,
-};
 use bdk_bitcoind_rpc::{
     bitcoincore_rpc::{Auth, Client, RpcApi},
     Emitter,
 };
 use bdk_file_store::Store;
+use bdk_wallet::{
+    bitcoin::{Block, Network, Transaction},
+    wallet::Wallet,
+};
 use clap::{self, Parser};
 use std::{path::PathBuf, sync::mpsc::sync_channel, thread::spawn, time::Instant};
 
 const DB_MAGIC: &str = "bdk-rpc-wallet-example";
 
-/// Bitcoind RPC example using `bdk::Wallet`.
+/// Bitcoind RPC example using `bdk_wallet::Wallet`.
 ///
 /// This syncs the chain block-by-block and prints the current balance, transaction count and UTXO
 /// count.
@@ -89,7 +89,10 @@ fn main() -> anyhow::Result<()> {
     let mut wallet = Wallet::new_or_load(
         &args.descriptor,
         args.change_descriptor.as_ref(),
-        Store::<bdk::wallet::ChangeSet>::open_or_create_new(DB_MAGIC.as_bytes(), args.db_path)?,
+        Store::<bdk_wallet::wallet::ChangeSet>::open_or_create_new(
+            DB_MAGIC.as_bytes(),
+            args.db_path,
+        )?,
         args.network,
     )?;
     println!(

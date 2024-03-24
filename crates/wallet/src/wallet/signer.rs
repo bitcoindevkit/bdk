@@ -20,8 +20,8 @@
 //! # use bitcoin::secp256k1::{Secp256k1, All};
 //! # use bitcoin::*;
 //! # use bitcoin::psbt;
-//! # use bdk::signer::*;
-//! # use bdk::*;
+//! # use bdk_wallet::signer::*;
+//! # use bdk_wallet::*;
 //! # #[derive(Debug)]
 //! # struct CustomHSM;
 //! # impl CustomHSM {

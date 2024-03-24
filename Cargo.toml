@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/bdk",
+    "crates/wallet",
     "crates/chain",
     "crates/file_store",
     "crates/electrum",

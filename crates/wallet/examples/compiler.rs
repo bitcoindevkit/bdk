@@ -9,7 +9,7 @@
 // You may not use this file except in accordance with one or both of these
 // licenses.
 
-extern crate bdk;
+extern crate bdk_wallet;
 extern crate bitcoin;
 extern crate miniscript;
 extern crate serde_json;
@@ -21,13 +21,13 @@ use bitcoin::Network;
 use miniscript::policy::Concrete;
 use miniscript::Descriptor;
 
-use bdk::wallet::AddressIndex::New;
-use bdk::{KeychainKind, Wallet};
+use bdk_wallet::wallet::AddressIndex::New;
+use bdk_wallet::{KeychainKind, Wallet};
 
 /// Miniscript policy is a high level abstraction of spending conditions. Defined in the
 /// rust-miniscript library here  https://docs.rs/miniscript/7.0.0/miniscript/policy/index.html
 /// rust-miniscript provides a `compile()` function that can be used to compile any miniscript policy
-/// into a descriptor. This descriptor then in turn can be used in bdk a fully functioning wallet
+/// into a descriptor. This descriptor then in turn can be used in bdk wallet a fully functioning wallet
 /// can be derived from the policy.
 ///
 /// This example demonstrates the interaction between a bdk wallet and miniscript policy.
