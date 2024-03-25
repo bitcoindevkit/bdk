@@ -5,7 +5,6 @@ use core::convert::Infallible;
 use crate::collections::BTreeMap;
 use crate::{BlockId, ChainOracle};
 use alloc::sync::Arc;
-use alloc::vec::Vec;
 use bitcoin::block::Header;
 use bitcoin::BlockHash;
 
@@ -33,6 +32,20 @@ struct CPInner {
     block: BlockId,
     /// Previous checkpoint (if any).
     prev: Option<Arc<CPInner>>,
+}
+
+impl PartialEq for CheckPoint {
+    fn eq(&self, other: &Self) -> bool {
+        let mut self_cps = self.iter().map(|cp| cp.block_id());
+        let mut other_cps = other.iter().map(|cp| cp.block_id());
+        loop {
+            match (self_cps.next(), other_cps.next()) {
+                (Some(self_cp), Some(other_cp)) if self_cp == other_cp => continue,
+                (None, None) => break true,
+                _ => break false,
+            }
+        }
+    }
 }
 
 impl CheckPoint {
@@ -206,7 +219,7 @@ impl IntoIterator for CheckPoint {
 /// Script-pubkey based syncing mechanisms may not introduce transactions in a chronological order
 /// so some updates require introducing older blocks (to anchor older transactions). For
 /// script-pubkey based syncing, `introduce_older_blocks` would typically be `true`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Update {
     /// The update chain's new tip.
     pub tip: CheckPoint,
@@ -220,21 +233,9 @@ pub struct Update {
 }
 
 /// This is a local implementation of [`ChainOracle`].
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct LocalChain {
     tip: CheckPoint,
-}
-
-impl PartialEq for LocalChain {
-    fn eq(&self, other: &Self) -> bool {
-        self.iter_checkpoints()
-            .map(|cp| cp.block_id())
-            .collect::<Vec<_>>()
-            == other
-                .iter_checkpoints()
-                .map(|cp| cp.block_id())
-                .collect::<Vec<_>>()
-    }
 }
 
 // TODO: Figure out whether we can get rid of this
