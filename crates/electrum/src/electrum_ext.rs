@@ -46,8 +46,12 @@ impl RelevantTxids {
         let new_txs = client.batch_transaction_get(&missing)?;
         let mut graph = TxGraph::<ConfirmationHeightAnchor>::new(new_txs);
         for (txid, anchors) in self.0 {
-            if let Some(seen_at) = seen_at {
-                let _ = graph.insert_seen_at(txid, seen_at);
+            if anchors.is_empty() {
+                // this tx is unconfirmed,
+                // record the last seen timestamp
+                if let Some(seen_at) = seen_at {
+                    let _ = graph.insert_seen_at(txid, seen_at);
+                }
             }
             for anchor in anchors {
                 let _ = graph.insert_anchor(txid, anchor);

@@ -49,12 +49,14 @@ pub trait EsploraExt {
     ///
     /// The full scan for each keychain stops after a gap of `stop_gap` script pubkeys with no associated
     /// transactions. `parallel_requests` specifies the max number of HTTP requests to make in
-    /// parallel.
+    /// parallel. `time` is the current time, typically a UNIX timestamp, used only when setting
+    /// the time a transaction was last seen unconfirmed.
     fn full_scan<K: Ord + Clone>(
         &self,
         keychain_spks: BTreeMap<K, impl IntoIterator<Item = (u32, ScriptBuf)>>,
         stop_gap: usize,
         parallel_requests: usize,
+        time: u64,
     ) -> Result<(TxGraph<ConfirmationTimeHeightAnchor>, BTreeMap<K, u32>), Error>;
 
     /// Sync a set of scripts with the blockchain (via an Esplora client) for the data
@@ -64,6 +66,7 @@ pub trait EsploraExt {
     /// * `txids`: transactions for which we want updated [`ConfirmationTimeHeightAnchor`]s
     /// * `outpoints`: transactions associated with these outpoints (residing, spending) that we
     ///     want to include in the update
+    /// * `time`: UNIX timestamp used to set the time a transaction was last seen unconfirmed
     ///
     /// If the scripts to sync are unknown, such as when restoring or importing a keychain that
     /// may include scripts that have been used, use [`full_scan`] with the keychain.
@@ -75,6 +78,7 @@ pub trait EsploraExt {
         txids: impl IntoIterator<Item = Txid>,
         outpoints: impl IntoIterator<Item = OutPoint>,
         parallel_requests: usize,
+        time: u64,
     ) -> Result<TxGraph<ConfirmationTimeHeightAnchor>, Error>;
 }
 
@@ -144,6 +148,7 @@ impl EsploraExt for esplora_client::BlockingClient {
         keychain_spks: BTreeMap<K, impl IntoIterator<Item = (u32, ScriptBuf)>>,
         stop_gap: usize,
         parallel_requests: usize,
+        time: u64,
     ) -> Result<(TxGraph<ConfirmationTimeHeightAnchor>, BTreeMap<K, u32>), Error> {
         type TxsOfSpkIndex = (u32, Vec<esplora_client::Tx>);
         let parallel_requests = Ord::max(parallel_requests, 1);
@@ -194,6 +199,9 @@ impl EsploraExt for esplora_client::BlockingClient {
                         if let Some(anchor) = anchor_from_status(&tx.status) {
                             let _ = graph.insert_anchor(tx.txid, anchor);
                         }
+                        if !tx.status.confirmed {
+                            let _ = graph.insert_seen_at(tx.txid, time);
+                        }
 
                         let previous_outputs = tx.vin.iter().filter_map(|vin| {
                             let prevout = vin.prevout.as_ref()?;
@@ -240,6 +248,7 @@ impl EsploraExt for esplora_client::BlockingClient {
         txids: impl IntoIterator<Item = Txid>,
         outpoints: impl IntoIterator<Item = OutPoint>,
         parallel_requests: usize,
+        time: u64,
     ) -> Result<TxGraph<ConfirmationTimeHeightAnchor>, Error> {
         let mut graph = self
             .full_scan(
@@ -253,6 +262,7 @@ impl EsploraExt for esplora_client::BlockingClient {
                 .into(),
                 usize::MAX,
                 parallel_requests,
+                time,
             )
             .map(|(g, _)| g)?;
 
@@ -284,10 +294,14 @@ impl EsploraExt for esplora_client::BlockingClient {
                 if let Some(anchor) = anchor_from_status(&status) {
                     let _ = graph.insert_anchor(txid, anchor);
                 }
+                if !status.confirmed {
+                    let _ = graph.insert_seen_at(txid, time);
+                }
             }
         }
 
         for op in outpoints {
+            // get tx for this outpoint
             if graph.get_tx(op.txid).is_none() {
                 if let Some(tx) = self.get_tx(&op.txid)? {
                     let _ = graph.insert_tx(tx);
@@ -296,8 +310,12 @@ impl EsploraExt for esplora_client::BlockingClient {
                 if let Some(anchor) = anchor_from_status(&status) {
                     let _ = graph.insert_anchor(op.txid, anchor);
                 }
+                if !status.confirmed {
+                    let _ = graph.insert_seen_at(op.txid, time);
+                }
             }
 
+            // get spending status of this outpoint
             if let Some(op_status) = self.get_output_status(&op.txid, op.vout as _)? {
                 if let Some(txid) = op_status.txid {
                     if graph.get_tx(txid).is_none() {
@@ -307,6 +325,9 @@ impl EsploraExt for esplora_client::BlockingClient {
                         let status = self.get_tx_status(&txid)?;
                         if let Some(anchor) = anchor_from_status(&status) {
                             let _ = graph.insert_anchor(txid, anchor);
+                        }
+                        if !status.confirmed {
+                            let _ = graph.insert_seen_at(txid, time);
                         }
                     }
                 }
