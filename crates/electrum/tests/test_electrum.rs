@@ -1,6 +1,8 @@
 use anyhow::Result;
 use bdk_chain::{
-    bitcoin::{hashes::Hash, Address, Amount, ScriptBuf, WScriptHash},
+    bitcoin::{
+        constants::genesis_block, hashes::Hash, Address, Amount, Network, ScriptBuf, WScriptHash,
+    },
     keychain::Balance,
     local_chain::LocalChain,
     ConfirmationTimeHeightAnchor, IndexedTxGraph, SpkTxOutIndex,
@@ -8,6 +10,7 @@ use bdk_chain::{
 use bdk_electrum::{ElectrumExt, ElectrumUpdate};
 use bdk_testenv::TestEnv;
 use electrsd::bitcoind::bitcoincore_rpc::RpcApi;
+use std::str::FromStr;
 
 fn get_balance(
     recv_chain: &LocalChain,
@@ -187,6 +190,60 @@ fn tx_can_become_unconfirmed_after_reorg() -> Result<()> {
             depth,
         );
     }
+
+    Ok(())
+}
+
+#[test]
+fn test_last_seen_unconfirmed() -> Result<()> {
+    use bdk_chain::ConfirmationHeightAnchor;
+    let env = TestEnv::new()?;
+    let client = electrum_client::Client::new(env.electrsd.electrum_url.as_str())?;
+
+    // Setup receiver
+    let addr =
+        Address::from_str("bcrt1qj9f7r8r3p2y0sqf4r3r62qysmkuh0fzep473d2ar7rcz64wqvhssjgf0z4")?
+            .assume_checked();
+    let spk = addr.script_pubkey();
+    let (chain, _) = LocalChain::from_genesis_hash(genesis_block(Network::Regtest).block_hash());
+    let mut graph = {
+        let mut index = SpkTxOutIndex::<u32>::default();
+        index.insert_spk(0, addr.script_pubkey());
+        IndexedTxGraph::<ConfirmationHeightAnchor, _>::new(index)
+    };
+
+    // Mine blocks
+    let _ = env.mine_blocks(101, None)?;
+
+    // Send tx and confirm it
+    let amt = Amount::from_sat(10_000);
+    let txid = env.send(&addr, amt)?;
+    let _ = env.mine_blocks(1, None)?;
+
+    // Sync. Last seen time should be 0 for confirmed tx
+    env.wait_until_electrum_sees_block()?;
+    let ElectrumUpdate { relevant_txids, .. } =
+        client.sync(chain.tip(), [spk.clone()], None, None, 5)?;
+    let missing = relevant_txids.missing_full_txs(graph.graph());
+    let graph_update = relevant_txids.into_tx_graph(&client, None, missing)?;
+    let _ = graph.apply_update(graph_update);
+    let tx = graph.graph().full_txs().next().unwrap();
+    assert_eq!(tx.txid, txid);
+    assert_eq!(tx.last_seen_unconfirmed, 0);
+
+    // Send tx 2
+    let txid = env.send(&addr, amt)?;
+
+    // Mine empty block and sync. TxGraph should record last seen unconfirmed
+    let _ = env.mine_empty_block();
+    env.wait_until_electrum_sees_block()?;
+    let ElectrumUpdate { relevant_txids, .. } = client.sync(chain.tip(), [spk], None, None, 5)?;
+    let missing = relevant_txids.missing_full_txs(graph.graph());
+    assert!(missing.contains(&txid));
+    let graph_update = relevant_txids.into_tx_graph(&client, Some(2), missing)?;
+    let _ = graph.apply_update(graph_update);
+    let tx = graph.graph().full_txs().find(|tx| tx.txid == txid).unwrap();
+    assert_eq!(tx.last_seen_unconfirmed, 2);
 
     Ok(())
 }
