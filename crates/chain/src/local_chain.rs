@@ -165,7 +165,7 @@ impl CheckPoint {
 
     /// Query for checkpoint at `height`.
     ///
-    /// Returns `None` if checkpoint at `height` does not exist`.
+    /// Returns `None` if checkpoint at `height` does not exist.
     pub fn query(&self, height: u32) -> Option<Self> {
         self.iter()
             // optimization to avoid iterating the entire chain if we do not get a direct hit
