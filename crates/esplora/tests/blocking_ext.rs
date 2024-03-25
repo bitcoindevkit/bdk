@@ -198,6 +198,79 @@ pub fn test_update_tx_graph_gap_limit() -> anyhow::Result<()> {
 }
 
 #[test]
+fn test_last_seen_unconfirmed() -> anyhow::Result<()> {
+    use bdk_chain::ConfirmationTimeHeightAnchor;
+    use bdk_chain::IndexedTxGraph;
+    use bdk_chain::SpkTxOutIndex;
+    let env = TestEnv::new()?;
+    let base_url = format!("http://{}", &env.electrsd.esplora_url.clone().unwrap());
+    let client = Builder::new(base_url.as_str()).build_blocking()?;
+
+    // Setup receive graph
+    let addr =
+        Address::from_str("bcrt1qj9f7r8r3p2y0sqf4r3r62qysmkuh0fzep473d2ar7rcz64wqvhssjgf0z4")
+            .unwrap()
+            .assume_checked();
+    let spk = addr.script_pubkey();
+    let mut graph = {
+        let mut index = SpkTxOutIndex::<u32>::default();
+        index.insert_spk(0, spk.clone());
+        IndexedTxGraph::<ConfirmationTimeHeightAnchor, _>::new(index)
+    };
+
+    // Mine blocks
+    let miner = env
+        .rpc_client()
+        .get_new_address(None, None)?
+        .assume_checked();
+    let _block_hashes = env.mine_blocks(100, Some(miner.clone()))?;
+    while client.get_height().unwrap() < 101 {
+        sleep(Duration::from_millis(10))
+    }
+
+    // Send tx
+    let amt = Amount::from_sat(10_000);
+    let txid = env.send(&addr, amt)?;
+
+    // Mine empty block and sync. TxGraph should record last seen unconfirmed
+    let _ = env.mine_empty_block()?;
+    while client.get_height().unwrap() < 102 {
+        sleep(Duration::from_millis(10))
+    }
+    let timestamp = 2;
+    let graph_update = client.sync([spk.clone()], vec![], vec![], 1, timestamp)?;
+    let changeset = graph.apply_update(graph_update);
+    assert!(changeset.graph.anchors.is_empty());
+    let tx = graph.graph().full_txs().next();
+    assert!(tx.is_some());
+    let tx = tx.unwrap();
+    assert_eq!(tx.txid, txid);
+    assert_eq!(tx.last_seen_unconfirmed, timestamp);
+
+    // Time passes, graph should record the new timestamp
+    let timestamp = 4;
+    let graph_update = client.sync([spk.clone()], vec![], vec![], 1, timestamp)?;
+    let _ = graph.apply_update(graph_update);
+    let tx = graph.graph().full_txs().next().unwrap();
+    let graph_last_seen = tx.last_seen_unconfirmed;
+    assert_eq!(graph_last_seen, timestamp);
+
+    // Now confirm it. When we sync at a later time, last seen is unchanged
+    let _ = env.mine_blocks(1, Some(miner))?;
+    while client.get_height().unwrap() < 103 {
+        sleep(Duration::from_millis(10))
+    }
+    let timestamp = 8;
+    let graph_update = client.sync([spk], vec![], vec![], 1, timestamp)?;
+    let changeset = graph.apply_update(graph_update);
+    assert!(changeset.graph.last_seen.is_empty());
+    let tx = graph.graph().full_txs().find(|tx| tx.txid == txid).unwrap();
+    assert_eq!(tx.last_seen_unconfirmed, graph_last_seen);
+
+    Ok(())
+}
+
+#[test]
 fn update_local_chain() -> anyhow::Result<()> {
     const TIP_HEIGHT: u32 = 50;
 
