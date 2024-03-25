@@ -4,6 +4,7 @@ members = [
     "crates/bdk",
     "crates/chain",
     "crates/file_store",
+    "crates/sqlite_store",
     "crates/electrum",
     "crates/esplora",
     "crates/bitcoind_rpc",
