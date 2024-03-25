@@ -36,7 +36,6 @@ fn main() -> Result<(), anyhow::Error> {
     let client =
         esplora_client::Builder::new("https://blockstream.info/testnet/api").build_blocking();
 
-    let prev_tip = wallet.latest_checkpoint();
     let keychain_spks = wallet
         .all_unbounded_spk_iters()
         .into_iter()
@@ -53,20 +52,20 @@ fn main() -> Result<(), anyhow::Error> {
         })
         .collect();
 
-    let (mut update_graph, last_active_indices) =
-        client.full_scan(keychain_spks, STOP_GAP, PARALLEL_REQUESTS)?;
-
+    let mut update = client.full_scan(
+        wallet.latest_checkpoint(),
+        keychain_spks,
+        STOP_GAP,
+        PARALLEL_REQUESTS,
+    )?;
     let now = std::time::UNIX_EPOCH.elapsed().unwrap().as_secs();
-    let _ = update_graph.update_last_seen_unconfirmed(now);
-    let missing_heights = update_graph.missing_heights(wallet.local_chain());
-    let chain_update = client.update_local_chain(prev_tip, missing_heights)?;
-    let update = Update {
-        last_active_indices,
-        graph: update_graph,
-        chain: Some(chain_update),
-    };
+    let _ = update.tx_graph.update_last_seen_unconfirmed(now);
 
-    wallet.apply_update(update)?;
+    wallet.apply_update(Update {
+        last_active_indices: update.last_active_indices,
+        graph: update.tx_graph,
+        chain: Some(update.local_chain),
+    })?;
     wallet.commit()?;
     println!();
 

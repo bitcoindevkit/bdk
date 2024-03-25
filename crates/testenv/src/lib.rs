@@ -1,6 +1,8 @@
 use bdk_chain::{
     bitcoin::{
-        address::NetworkChecked, block::Header, hash_types::TxMerkleNode, hashes::Hash, secp256k1::rand::random, transaction, Address, Amount, Block, BlockHash, CompactTarget, ScriptBuf, ScriptHash, Transaction, TxIn, TxOut, Txid
+        address::NetworkChecked, block::Header, hash_types::TxMerkleNode, hashes::Hash,
+        secp256k1::rand::random, transaction, Address, Amount, Block, BlockHash, CompactTarget,
+        ScriptBuf, ScriptHash, Transaction, TxIn, TxOut, Txid,
     },
     local_chain::CheckPoint,
     BlockId,

@@ -2,7 +2,7 @@ use bdk_esplora::EsploraAsyncExt;
 use electrsd::bitcoind::anyhow;
 use electrsd::bitcoind::bitcoincore_rpc::RpcApi;
 use esplora_client::{self, Builder};
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::str::FromStr;
 use std::thread::sleep;
 use std::time::Duration;
@@ -52,8 +52,12 @@ pub async fn test_update_tx_graph_without_keychain() -> anyhow::Result<()> {
         sleep(Duration::from_millis(10))
     }
 
-    let graph_update = client
+    // use a full checkpoint linked list (since this is not what we are testing)
+    let cp_tip = env.make_checkpoint_tip();
+
+    let sync_update = client
         .sync(
+            cp_tip.clone(),
             misc_spks.into_iter(),
             vec![].into_iter(),
             vec![].into_iter(),
@@ -61,6 +65,24 @@ pub async fn test_update_tx_graph_without_keychain() -> anyhow::Result<()> {
         )
         .await?;
 
+    assert!(
+        {
+            let update_cps = sync_update
+                .local_chain
+                .tip
+                .iter()
+                .map(|cp| cp.block_id())
+                .collect::<BTreeSet<_>>();
+            let superset_cps = cp_tip
+                .iter()
+                .map(|cp| cp.block_id())
+                .collect::<BTreeSet<_>>();
+            superset_cps.is_superset(&update_cps)
+        },
+        "update should not alter original checkpoint tip since we already started with all checkpoints",
+    );
+
+    let graph_update = sync_update.tx_graph;
     // Check to see if we have the floating txouts available from our two created transactions'
     // previous outputs in order to calculate transaction fees.
     for tx in graph_update.full_txs() {
@@ -140,14 +162,24 @@ pub async fn test_async_update_tx_graph_stop_gap() -> anyhow::Result<()> {
         sleep(Duration::from_millis(10))
     }
 
+    // use a full checkpoint linked list (since this is not what we are testing)
+    let cp_tip = env.make_checkpoint_tip();
+
     // A scan with a gap limit of 3 won't find the transaction, but a scan with a gap limit of 4
     // will.
-    let (graph_update, active_indices) = client.full_scan(keychains.clone(), 3, 1).await?;
-    assert!(graph_update.full_txs().next().is_none());
-    assert!(active_indices.is_empty());
-    let (graph_update, active_indices) = client.full_scan(keychains.clone(), 4, 1).await?;
-    assert_eq!(graph_update.full_txs().next().unwrap().txid, txid_4th_addr);
-    assert_eq!(active_indices[&0], 3);
+    let full_scan_update = client
+        .full_scan(cp_tip.clone(), keychains.clone(), 3, 1)
+        .await?;
+    assert!(full_scan_update.tx_graph.full_txs().next().is_none());
+    assert!(full_scan_update.last_active_indices.is_empty());
+    let full_scan_update = client
+        .full_scan(cp_tip.clone(), keychains.clone(), 4, 1)
+        .await?;
+    assert_eq!(
+        full_scan_update.tx_graph.full_txs().next().unwrap().txid,
+        txid_4th_addr
+    );
+    assert_eq!(full_scan_update.last_active_indices[&0], 3);
 
     // Now receive a coin on the last address.
     let txid_last_addr = env.bitcoind.client.send_to_address(
@@ -167,16 +199,26 @@ pub async fn test_async_update_tx_graph_stop_gap() -> anyhow::Result<()> {
 
     // A scan with gap limit 5 won't find the second transaction, but a scan with gap limit 6 will.
     // The last active indice won't be updated in the first case but will in the second one.
-    let (graph_update, active_indices) = client.full_scan(keychains.clone(), 5, 1).await?;
-    let txs: HashSet<_> = graph_update.full_txs().map(|tx| tx.txid).collect();
+    let full_scan_update = client
+        .full_scan(cp_tip.clone(), keychains.clone(), 5, 1)
+        .await?;
+    let txs: HashSet<_> = full_scan_update
+        .tx_graph
+        .full_txs()
+        .map(|tx| tx.txid)
+        .collect();
     assert_eq!(txs.len(), 1);
     assert!(txs.contains(&txid_4th_addr));
-    assert_eq!(active_indices[&0], 3);
-    let (graph_update, active_indices) = client.full_scan(keychains, 6, 1).await?;
-    let txs: HashSet<_> = graph_update.full_txs().map(|tx| tx.txid).collect();
+    assert_eq!(full_scan_update.last_active_indices[&0], 3);
+    let full_scan_update = client.full_scan(cp_tip, keychains, 6, 1).await?;
+    let txs: HashSet<_> = full_scan_update
+        .tx_graph
+        .full_txs()
+        .map(|tx| tx.txid)
+        .collect();
     assert_eq!(txs.len(), 2);
     assert!(txs.contains(&txid_4th_addr) && txs.contains(&txid_last_addr));
-    assert_eq!(active_indices[&0], 9);
+    assert_eq!(full_scan_update.last_active_indices[&0], 9);
 
     Ok(())
 }

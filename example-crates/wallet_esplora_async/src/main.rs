@@ -53,18 +53,17 @@ async fn main() -> Result<(), anyhow::Error> {
             (k, k_spks)
         })
         .collect();
-    let (mut update_graph, last_active_indices) = client
-        .full_scan(keychain_spks, STOP_GAP, PARALLEL_REQUESTS)
-        .await?;
 
+    let mut update = client
+        .full_scan(prev_tip, keychain_spks, STOP_GAP, PARALLEL_REQUESTS)
+        .await?;
     let now = std::time::UNIX_EPOCH.elapsed().unwrap().as_secs();
-    let _ = update_graph.update_last_seen_unconfirmed(now);
-    let missing_heights = update_graph.missing_heights(wallet.local_chain());
-    let chain_update = client.update_local_chain(prev_tip, missing_heights).await?;
+    let _ = update.tx_graph.update_last_seen_unconfirmed(now);
+
     let update = Update {
-        last_active_indices,
-        graph: update_graph,
-        chain: Some(chain_update),
+        last_active_indices: update.last_active_indices,
+        graph: update.tx_graph,
+        chain: Some(update.local_chain),
     };
     wallet.apply_update(update)?;
     wallet.commit()?;
