@@ -1,7 +1,11 @@
-use bdk_chain::bitcoin::{
-    address::NetworkChecked, block::Header, hash_types::TxMerkleNode, hashes::Hash,
-    secp256k1::rand::random, Address, Amount, Block, BlockHash, CompactTarget, ScriptBuf,
-    ScriptHash, Transaction, TxIn, TxOut, Txid,
+use bdk_chain::{
+    bitcoin::{
+        address::NetworkChecked, block::Header, hash_types::TxMerkleNode, hashes::Hash,
+        secp256k1::rand::random, Address, Amount, Block, BlockHash, CompactTarget, ScriptBuf,
+        ScriptHash, Transaction, TxIn, TxOut, Txid,
+    },
+    local_chain::CheckPoint,
+    BlockId,
 };
 use bitcoincore_rpc::{
     bitcoincore_rpc_json::{GetBlockTemplateModes, GetBlockTemplateRules},
@@ -233,6 +237,18 @@ impl TestEnv {
             .client
             .send_to_address(address, amount, None, None, None, None, None, None)?;
         Ok(txid)
+    }
+
+    /// Create a checkpoint linked list of all the blocks in the chain.
+    pub fn make_checkpoint_tip(&self) -> CheckPoint {
+        CheckPoint::from_block_ids((0_u32..).map_while(|height| {
+            self.bitcoind
+                .client
+                .get_block_hash(height as u64)
+                .ok()
+                .map(|hash| BlockId { height, hash })
+        }))
+        .expect("must craft tip")
     }
 }
 
