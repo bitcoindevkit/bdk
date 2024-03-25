@@ -1684,8 +1684,12 @@ fn test_bump_fee_reduce_single_recipient() {
     let mut builder = wallet.build_fee_bump(txid).unwrap();
     builder
         .fee_rate(feerate)
-        .allow_shrinking(addr.script_pubkey())
-        .unwrap();
+        // remove original tx drain_to address and amount
+        .set_recipients(Vec::new())
+        // set back original drain_to address
+        .drain_to(addr.script_pubkey())
+        // drain wallet output amount will be re-calculated with new fee rate
+        .drain_wallet();
     let psbt = builder.finish().unwrap();
     let sent_received = wallet.sent_and_received(&psbt.clone().extract_tx());
     let fee = check_fee!(wallet, psbt);
@@ -1722,9 +1726,13 @@ fn test_bump_fee_absolute_reduce_single_recipient() {
 
     let mut builder = wallet.build_fee_bump(txid).unwrap();
     builder
-        .allow_shrinking(addr.script_pubkey())
-        .unwrap()
-        .fee_absolute(300);
+        .fee_absolute(300)
+        // remove original tx drain_to address and amount
+        .set_recipients(Vec::new())
+        // set back original drain_to address
+        .drain_to(addr.script_pubkey())
+        // drain wallet output amount will be re-calculated with new fee rate
+        .drain_wallet();
     let psbt = builder.finish().unwrap();
     let tx = &psbt.unsigned_tx;
     let sent_received = wallet.sent_and_received(tx);
@@ -1790,8 +1798,6 @@ fn test_bump_fee_drain_wallet() {
     let mut builder = wallet.build_fee_bump(txid).unwrap();
     builder
         .drain_wallet()
-        .allow_shrinking(addr.script_pubkey())
-        .unwrap()
         .fee_rate(FeeRate::from_sat_per_vb_unchecked(5));
     let psbt = builder.finish().unwrap();
     let sent_received = wallet.sent_and_received(&psbt.extract_tx());
@@ -1807,7 +1813,7 @@ fn test_bump_fee_remove_output_manually_selected_only() {
     // them, and make sure that `bump_fee` doesn't try to add more. This fails because we've
     // told the wallet it's not allowed to add more inputs AND it can't reduce the value of the
     // existing output. In other words, bump_fee + manually_selected_only is always an error
-    // unless you've also set "allow_shrinking" OR there is a change output.
+    // unless there is a change output.
     let init_tx = Transaction {
         version: 1,
         lock_time: absolute::LockTime::ZERO,
@@ -2003,8 +2009,8 @@ fn test_bump_fee_no_change_add_input_and_change() {
         .insert_tx(tx, ConfirmationTime::Unconfirmed { last_seen: 0 })
         .unwrap();
 
-    // now bump the fees without using `allow_shrinking`. the wallet should add an
-    // extra input and a change output, and leave the original output untouched
+    // Now bump the fees, the wallet should add an extra input and a change output, and leave
+    // the original output untouched.
     let mut builder = wallet.build_fee_bump(txid).unwrap();
     builder.fee_rate(FeeRate::from_sat_per_vb_unchecked(50));
     let psbt = builder.finish().unwrap();
@@ -2297,8 +2303,12 @@ fn test_bump_fee_unconfirmed_input() {
     let mut builder = wallet.build_fee_bump(txid).unwrap();
     builder
         .fee_rate(FeeRate::from_sat_per_vb_unchecked(15))
-        .allow_shrinking(addr.script_pubkey())
-        .unwrap();
+        // remove original tx drain_to address and amount
+        .set_recipients(Vec::new())
+        // set back original drain_to address
+        .drain_to(addr.script_pubkey())
+        // drain wallet output amount will be re-calculated with new fee rate
+        .drain_wallet();
     builder.finish().unwrap();
 }
 

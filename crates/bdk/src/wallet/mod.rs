@@ -57,7 +57,7 @@ pub use utils::IsDust;
 #[allow(deprecated)]
 use coin_selection::DefaultCoinSelectionAlgorithm;
 use signer::{SignOptions, SignerOrdering, SignersContainer, TransactionSigner};
-use tx_builder::{BumpFee, CreateTx, FeePolicy, TxBuilder, TxParams};
+use tx_builder::{FeePolicy, TxBuilder, TxParams};
 use utils::{check_nsequence_rbf, After, Older, SecpCtx};
 
 use crate::descriptor::policy::BuildSatisfaction;
@@ -1252,12 +1252,11 @@ impl<D> Wallet<D> {
     /// ```
     ///
     /// [`TxBuilder`]: crate::TxBuilder
-    pub fn build_tx(&mut self) -> TxBuilder<'_, D, DefaultCoinSelectionAlgorithm, CreateTx> {
+    pub fn build_tx(&mut self) -> TxBuilder<'_, D, DefaultCoinSelectionAlgorithm> {
         TxBuilder {
             wallet: alloc::rc::Rc::new(core::cell::RefCell::new(self)),
             params: TxParams::default(),
             coin_selection: DefaultCoinSelectionAlgorithm::default(),
-            phantom: core::marker::PhantomData,
         }
     }
 
@@ -1431,7 +1430,6 @@ impl<D> Wallet<D> {
         };
 
         let (fee_rate, mut fee_amount) = match params.fee_policy.unwrap_or_default() {
-            //FIXME: see https://github.com/bitcoindevkit/bdk/issues/256
             FeePolicy::FeeAmount(fee) => {
                 if let Some(previous_fee) = params.bumping_fee {
                     if fee < previous_fee.absolute {
@@ -1662,7 +1660,7 @@ impl<D> Wallet<D> {
     pub fn build_fee_bump(
         &mut self,
         txid: Txid,
-    ) -> Result<TxBuilder<'_, D, DefaultCoinSelectionAlgorithm, BumpFee>, BuildFeeBumpError> {
+    ) -> Result<TxBuilder<'_, D, DefaultCoinSelectionAlgorithm>, BuildFeeBumpError> {
         let graph = self.indexed_graph.graph();
         let txout_index = &self.indexed_graph.index;
         let chain_tip = self.chain.tip().block_id();
@@ -1786,7 +1784,6 @@ impl<D> Wallet<D> {
             wallet: alloc::rc::Rc::new(core::cell::RefCell::new(self)),
             params,
             coin_selection: DefaultCoinSelectionAlgorithm::default(),
-            phantom: core::marker::PhantomData,
         })
     }
 
