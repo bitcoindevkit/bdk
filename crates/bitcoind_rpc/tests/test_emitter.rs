@@ -57,12 +57,15 @@ pub fn test_sync_local_chain() -> anyhow::Result<()> {
     }
 
     assert_eq!(
-        local_chain.blocks(),
-        &exp_hashes
+        local_chain
+            .iter_checkpoints()
+            .map(|cp| (cp.height(), cp.hash()))
+            .collect::<BTreeSet<_>>(),
+        exp_hashes
             .iter()
             .enumerate()
             .map(|(i, hash)| (i as u32, *hash))
-            .collect(),
+            .collect::<BTreeSet<_>>(),
         "final local_chain state is unexpected",
     );
 
@@ -110,12 +113,15 @@ pub fn test_sync_local_chain() -> anyhow::Result<()> {
     }
 
     assert_eq!(
-        local_chain.blocks(),
-        &exp_hashes
+        local_chain
+            .iter_checkpoints()
+            .map(|cp| (cp.height(), cp.hash()))
+            .collect::<BTreeSet<_>>(),
+        exp_hashes
             .iter()
             .enumerate()
             .map(|(i, hash)| (i as u32, *hash))
-            .collect(),
+            .collect::<BTreeSet<_>>(),
         "final local_chain state is unexpected after reorg",
     );
 

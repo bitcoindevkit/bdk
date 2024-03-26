@@ -1,13 +1,13 @@
 #[macro_use]
 mod common;
 
-use std::collections::BTreeSet;
+use std::{collections::BTreeSet, sync::Arc};
 
 use bdk_chain::{
     indexed_tx_graph::{self, IndexedTxGraph},
     keychain::{self, Balance, KeychainTxOutIndex},
     local_chain::LocalChain,
-    tx_graph, BlockId, ChainPosition, ConfirmationHeightAnchor,
+    tx_graph, ChainPosition, ConfirmationHeightAnchor,
 };
 use bitcoin::{secp256k1::Secp256k1, OutPoint, Script, ScriptBuf, Transaction, TxIn, TxOut};
 use miniscript::Descriptor;
@@ -66,7 +66,7 @@ fn insert_relevant_txs() {
 
     let changeset = indexed_tx_graph::ChangeSet {
         graph: tx_graph::ChangeSet {
-            txs: txs.clone().into(),
+            txs: txs.iter().cloned().map(Arc::new).collect(),
             ..Default::default()
         },
         indexer: keychain::ChangeSet([((), 9_u32)].into()),
@@ -80,7 +80,6 @@ fn insert_relevant_txs() {
     assert_eq!(graph.initial_changeset(), changeset,);
 }
 
-#[test]
 /// Ensure consistency IndexedTxGraph list_* and balance methods. These methods lists
 /// relevant txouts and utxos from the information fetched from a ChainOracle (here a LocalChain).
 ///
@@ -108,7 +107,7 @@ fn insert_relevant_txs() {
 ///
 /// Finally Add more blocks to local chain until tx1 coinbase maturity hits.
 /// Assert maturity at coinbase maturity inflection height. Block height 98 and 99.
-
+#[test]
 fn test_list_owned_txouts() {
     // Create Local chains
     let local_chain = LocalChain::from_blocks((0..150).map(|i| (i as u32, h!("random"))).collect())
@@ -213,10 +212,8 @@ fn test_list_owned_txouts() {
             (
                 *tx,
                 local_chain
-                    .blocks()
-                    .get(&height)
-                    .cloned()
-                    .map(|hash| BlockId { height, hash })
+                    .query(height)
+                    .map(|cp| cp.block_id())
                     .map(|anchor_block| ConfirmationHeightAnchor {
                         anchor_block,
                         confirmation_height: anchor_block.height,
@@ -231,9 +228,8 @@ fn test_list_owned_txouts() {
         |height: u32,
          graph: &IndexedTxGraph<ConfirmationHeightAnchor, KeychainTxOutIndex<String>>| {
             let chain_tip = local_chain
-                .blocks()
-                .get(&height)
-                .map(|&hash| BlockId { height, hash })
+                .query(height)
+                .map(|cp| cp.block_id())
                 .unwrap_or_else(|| panic!("block must exist at {}", height));
             let txouts = graph
                 .graph()

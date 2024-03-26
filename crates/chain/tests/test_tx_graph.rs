@@ -13,6 +13,7 @@ use bitcoin::{
 use common::*;
 use core::iter;
 use rand::RngCore;
+use std::sync::Arc;
 use std::vec;
 
 #[test]
@@ -119,7 +120,7 @@ fn insert_txouts() {
         assert_eq!(
             graph.insert_tx(update_txs.clone()),
             ChangeSet {
-                txs: [update_txs.clone()].into(),
+                txs: [Arc::new(update_txs.clone())].into(),
                 ..Default::default()
             }
         );
@@ -143,7 +144,7 @@ fn insert_txouts() {
     assert_eq!(
         changeset,
         ChangeSet {
-            txs: [update_txs.clone()].into(),
+            txs: [Arc::new(update_txs.clone())].into(),
             txouts: update_ops.clone().into(),
             anchors: [(conf_anchor, update_txs.txid()), (unconf_anchor, h!("tx2"))].into(),
             last_seen: [(h!("tx2"), 1000000)].into()
@@ -194,7 +195,7 @@ fn insert_txouts() {
     assert_eq!(
         graph.initial_changeset(),
         ChangeSet {
-            txs: [update_txs.clone()].into(),
+            txs: [Arc::new(update_txs.clone())].into(),
             txouts: update_ops.into_iter().chain(original_ops).collect(),
             anchors: [(conf_anchor, update_txs.txid()), (unconf_anchor, h!("tx2"))].into(),
             last_seen: [(h!("tx2"), 1000000)].into()
@@ -276,7 +277,10 @@ fn insert_tx_can_retrieve_full_tx_from_graph() {
 
     let mut graph = TxGraph::<()>::default();
     let _ = graph.insert_tx(tx.clone());
-    assert_eq!(graph.get_tx(tx.txid()), Some(&tx));
+    assert_eq!(
+        graph.get_tx(tx.txid()).map(|tx| tx.as_ref().clone()),
+        Some(tx)
+    );
 }
 
 #[test]
@@ -643,7 +647,7 @@ fn test_walk_ancestors() {
         ..common::new_tx(0)
     };
 
-    let mut graph = TxGraph::<BlockId>::new(vec![
+    let mut graph = TxGraph::<BlockId>::new([
         tx_a0.clone(),
         tx_b0.clone(),
         tx_b1.clone(),
@@ -664,17 +668,17 @@ fn test_walk_ancestors() {
 
     let ancestors = [
         graph
-            .walk_ancestors(&tx_c0, |depth, tx| Some((depth, tx)))
+            .walk_ancestors(tx_c0.clone(), |depth, tx| Some((depth, tx)))
             .collect::<Vec<_>>(),
         graph
-            .walk_ancestors(&tx_d0, |depth, tx| Some((depth, tx)))
+            .walk_ancestors(tx_d0.clone(), |depth, tx| Some((depth, tx)))
             .collect::<Vec<_>>(),
         graph
-            .walk_ancestors(&tx_e0, |depth, tx| Some((depth, tx)))
+            .walk_ancestors(tx_e0.clone(), |depth, tx| Some((depth, tx)))
             .collect::<Vec<_>>(),
         // Only traverse unconfirmed ancestors of tx_e0 this time
         graph
-            .walk_ancestors(&tx_e0, |depth, tx| {
+            .walk_ancestors(tx_e0.clone(), |depth, tx| {
                 let tx_node = graph.get_tx_node(tx.txid())?;
                 for block in tx_node.anchors {
                     match local_chain.is_block_in_chain(block.anchor_block(), tip.block_id()) {
@@ -701,8 +705,14 @@ fn test_walk_ancestors() {
         vec![(1, &tx_d1), (2, &tx_c2), (2, &tx_c3), (3, &tx_b2)],
     ];
 
-    for (txids, expected_txids) in ancestors.iter().zip(expected_ancestors.iter()) {
-        assert_eq!(txids, expected_txids);
+    for (txids, expected_txids) in ancestors.into_iter().zip(expected_ancestors) {
+        assert_eq!(
+            txids,
+            expected_txids
+                .into_iter()
+                .map(|(i, tx)| (i, Arc::new(tx.clone())))
+                .collect::<Vec<_>>()
+        );
     }
 }
 
@@ -1046,139 +1056,6 @@ fn test_changeset_last_seen_append() {
             Ord::max(original_ls, update_ls),
         );
     }
-}
-
-#[test]
-fn test_missing_blocks() {
-    /// An anchor implementation for testing, made up of `(the_anchor_block, random_data)`.
-    #[derive(Debug, Clone, Eq, PartialEq, PartialOrd, Ord, core::hash::Hash)]
-    struct TestAnchor(BlockId);
-
-    impl Anchor for TestAnchor {
-        fn anchor_block(&self) -> BlockId {
-            self.0
-        }
-    }
-
-    struct Scenario<'a> {
-        name: &'a str,
-        graph: TxGraph<TestAnchor>,
-        chain: LocalChain,
-        exp_heights: &'a [u32],
-    }
-
-    const fn new_anchor(height: u32, hash: BlockHash) -> TestAnchor {
-        TestAnchor(BlockId { height, hash })
-    }
-
-    fn new_scenario<'a>(
-        name: &'a str,
-        graph_anchors: &'a [(Txid, TestAnchor)],
-        chain: &'a [(u32, BlockHash)],
-        exp_heights: &'a [u32],
-    ) -> Scenario<'a> {
-        Scenario {
-            name,
-            graph: {
-                let mut g = TxGraph::default();
-                for (txid, anchor) in graph_anchors {
-                    let _ = g.insert_anchor(*txid, anchor.clone());
-                }
-                g
-            },
-            chain: {
-                let (mut c, _) = LocalChain::from_genesis_hash(h!("genesis"));
-                for (height, hash) in chain {
-                    let _ = c.insert_block(BlockId {
-                        height: *height,
-                        hash: *hash,
-                    });
-                }
-                c
-            },
-            exp_heights,
-        }
-    }
-
-    fn run(scenarios: &[Scenario]) {
-        for scenario in scenarios {
-            let Scenario {
-                name,
-                graph,
-                chain,
-                exp_heights,
-            } = scenario;
-
-            let heights = graph.missing_heights(chain).collect::<Vec<_>>();
-            assert_eq!(&heights, exp_heights, "scenario: {}", name);
-        }
-    }
-
-    run(&[
-        new_scenario(
-            "2 txs with the same anchor (2:B) which is missing from chain",
-            &[
-                (h!("tx_1"), new_anchor(2, h!("B"))),
-                (h!("tx_2"), new_anchor(2, h!("B"))),
-            ],
-            &[(1, h!("A")), (3, h!("C"))],
-            &[2],
-        ),
-        new_scenario(
-            "2 txs with different anchors at the same height, one of the anchors is missing",
-            &[
-                (h!("tx_1"), new_anchor(2, h!("B1"))),
-                (h!("tx_2"), new_anchor(2, h!("B2"))),
-            ],
-            &[(1, h!("A")), (2, h!("B1"))],
-            &[],
-        ),
-        new_scenario(
-            "tx with 2 anchors of same height which are missing from the chain",
-            &[
-                (h!("tx"), new_anchor(3, h!("C1"))),
-                (h!("tx"), new_anchor(3, h!("C2"))),
-            ],
-            &[(1, h!("A")), (4, h!("D"))],
-            &[3],
-        ),
-        new_scenario(
-            "tx with 2 anchors at the same height, chain has this height but does not match either anchor",
-            &[
-                (h!("tx"), new_anchor(4, h!("D1"))),
-                (h!("tx"), new_anchor(4, h!("D2"))),
-            ],
-            &[(4, h!("D3")), (5, h!("E"))],
-            &[],
-        ),
-        new_scenario(
-            "tx with 2 anchors at different heights, one anchor exists in chain, should return nothing",
-            &[
-                (h!("tx"), new_anchor(3, h!("C"))),
-                (h!("tx"), new_anchor(4, h!("D"))),
-            ],
-            &[(4, h!("D")), (5, h!("E"))],
-            &[],
-        ),
-        new_scenario(
-            "tx with 2 anchors at different heights, first height is already in chain with different hash, iterator should only return 2nd height",
-            &[
-                (h!("tx"), new_anchor(5, h!("E1"))),
-                (h!("tx"), new_anchor(6, h!("F1"))),
-            ],
-            &[(4, h!("D")), (5, h!("E")), (7, h!("G"))],
-            &[6],
-        ),
-        new_scenario(
-            "tx with 2 anchors at different heights, neither height is in chain, both heights should be returned",
-            &[
-                (h!("tx"), new_anchor(3, h!("C"))),
-                (h!("tx"), new_anchor(4, h!("D"))),
-            ],
-            &[(1, h!("A")), (2, h!("B"))],
-            &[3, 4],
-        ),
-    ]);
 }
 
 #[test]
