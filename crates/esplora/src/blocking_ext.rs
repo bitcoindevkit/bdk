@@ -50,6 +50,19 @@ pub trait EsploraExt {
     /// The full scan for each keychain stops after a gap of `stop_gap` script pubkeys with no associated
     /// transactions. `parallel_requests` specifies the max number of HTTP requests to make in
     /// parallel.
+    ///
+    /// ## Note
+    ///
+    /// `stop_gap` is defined as "the maximum number of consecutive unused addresses".
+    /// For example, with a `stop_gap` of  3, `full_scan` will keep scanning
+    /// until it encounters 3 consecutive script pubkeys with no associated transactions.
+    ///
+    /// This follows the same approach as other Bitcoin-related software,
+    /// such as [Electrum](https://electrum.readthedocs.io/en/latest/faq.html#what-is-the-gap-limit),
+    /// [BTCPay Server](https://docs.btcpayserver.org/FAQ/Wallet/#the-gap-limit-problem),
+    /// and [Sparrow](https://www.sparrowwallet.com/docs/faq.html#ive-restored-my-wallet-but-some-of-my-funds-are-missing).
+    ///
+    /// A `stop_gap` of 0 will be treated as a `stop_gap` of 1.
     fn full_scan<K: Ord + Clone>(
         &self,
         keychain_spks: BTreeMap<K, impl IntoIterator<Item = (u32, ScriptBuf)>>,
@@ -149,6 +162,7 @@ impl EsploraExt for esplora_client::BlockingClient {
         let parallel_requests = Ord::max(parallel_requests, 1);
         let mut graph = TxGraph::<ConfirmationTimeHeightAnchor>::default();
         let mut last_active_indexes = BTreeMap::<K, u32>::new();
+        let stop_gap = Ord::max(stop_gap, 1);
 
         for (keychain, spks) in keychain_spks {
             let mut spks = spks.into_iter();
@@ -216,12 +230,12 @@ impl EsploraExt for esplora_client::BlockingClient {
                 }
 
                 let last_index = last_index.expect("Must be set since handles wasn't empty.");
-                let past_gap_limit = if let Some(i) = last_active_index {
-                    last_index > i.saturating_add(stop_gap as u32)
+                let gap_limit_reached = if let Some(i) = last_active_index {
+                    last_index >= i.saturating_add(stop_gap as u32)
                 } else {
-                    last_index >= stop_gap as u32
+                    last_index + 1 >= stop_gap as u32
                 };
-                if past_gap_limit {
+                if gap_limit_reached {
                     break;
                 }
             }
