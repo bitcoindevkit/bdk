@@ -89,8 +89,8 @@
 //! [`insert_txout`]: TxGraph::insert_txout
 
 use crate::{
-    collections::*, keychain::Balance, local_chain::LocalChain, Anchor, Append, BlockId,
-    ChainOracle, ChainPosition, FullTxOut,
+    collections::*, keychain::Balance, Anchor, Append, BlockId, ChainOracle, ChainPosition,
+    FullTxOut,
 };
 use alloc::collections::vec_deque::VecDeque;
 use alloc::sync::Arc;
@@ -696,69 +696,6 @@ impl<A: Clone + Ord> TxGraph<A> {
 }
 
 impl<A: Anchor> TxGraph<A> {
-    /// Find missing block heights of `chain`.
-    ///
-    /// This works by scanning through anchors, and seeing whether the anchor block of the anchor
-    /// exists in the [`LocalChain`]. The returned iterator does not output duplicate heights.
-    pub fn missing_heights<'a>(&'a self, chain: &'a LocalChain) -> impl Iterator<Item = u32> + 'a {
-        // Map of txids to skip.
-        //
-        // Usually, if a height of a tx anchor is missing from the chain, we would want to return
-        // this height in the iterator. The exception is when the tx is confirmed in chain. All the
-        // other missing-height anchors of this tx can be skipped.
-        //
-        // * Some(true)  => skip all anchors of this txid
-        // * Some(false) => do not skip anchors of this txid
-        // * None        => we do not know whether we can skip this txid
-        let mut txids_to_skip = HashMap::<Txid, bool>::new();
-
-        // Keeps track of the last height emitted so we don't double up.
-        let mut last_height_emitted = Option::<u32>::None;
-
-        self.anchors
-            .iter()
-            .filter(move |(_, txid)| {
-                let skip = *txids_to_skip.entry(*txid).or_insert_with(|| {
-                    let tx_anchors = match self.txs.get(txid) {
-                        Some((_, anchors, _)) => anchors,
-                        None => return true,
-                    };
-                    let mut has_missing_height = false;
-                    for anchor_block in tx_anchors.iter().map(Anchor::anchor_block) {
-                        match chain.query(anchor_block.height) {
-                            None => {
-                                has_missing_height = true;
-                                continue;
-                            }
-                            Some(chain_cp) => {
-                                if chain_cp.hash() == anchor_block.hash {
-                                    return true;
-                                }
-                            }
-                        }
-                    }
-                    !has_missing_height
-                });
-                #[cfg(feature = "std")]
-                debug_assert!({
-                    println!("txid={} skip={}", txid, skip);
-                    true
-                });
-                !skip
-            })
-            .filter_map(move |(a, _)| {
-                let anchor_block = a.anchor_block();
-                if Some(anchor_block.height) != last_height_emitted
-                    && chain.query(anchor_block.height).is_none()
-                {
-                    last_height_emitted = Some(anchor_block.height);
-                    Some(anchor_block.height)
-                } else {
-                    None
-                }
-            })
-    }
-
     /// Get the position of the transaction in `chain` with tip `chain_tip`.
     ///
     /// Chain data is fetched from `chain`, a [`ChainOracle`] implementation.
@@ -1267,8 +1204,6 @@ impl<A> ChangeSet<A> {
     ///
     /// This is useful if you want to find which heights you need to fetch data about in order to
     /// confirm or exclude these anchors.
-    ///
-    /// See also: [`TxGraph::missing_heights`]
     pub fn anchor_heights(&self) -> impl Iterator<Item = u32> + '_
     where
         A: Anchor,
@@ -1282,24 +1217,6 @@ impl<A> ChangeSet<A> {
                 dedup = Some(*height);
                 !duplicate
             })
-    }
-
-    /// Returns an iterator for the [`anchor_heights`] in this changeset that are not included in
-    /// `local_chain`. This tells you which heights you need to include in `local_chain` in order
-    /// for it to conclusively act as a [`ChainOracle`] for the transaction anchors this changeset
-    /// will add.
-    ///
-    /// [`ChainOracle`]: crate::ChainOracle
-    /// [`anchor_heights`]: Self::anchor_heights
-    pub fn missing_heights_from<'a>(
-        &'a self,
-        local_chain: &'a LocalChain,
-    ) -> impl Iterator<Item = u32> + 'a
-    where
-        A: Anchor,
-    {
-        self.anchor_heights()
-            .filter(move |&height| local_chain.query(height).is_none())
     }
 }
 
