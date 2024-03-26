@@ -53,9 +53,8 @@
 //! # Ok::<_, Box<dyn std::error::Error>>(())
 //! ```
 
-use core::str::FromStr;
-
 use alloc::string::{String, ToString};
+use core::str::FromStr;
 use serde::{Deserialize, Serialize};
 
 use miniscript::descriptor::{ShInner, WshInner};

@@ -625,7 +625,7 @@ impl<D> Wallet<D> {
     {
         let changeset = db
             .load_from_persistence()
-            .map_err( NewOrLoadError::Persist)?;
+            .map_err(NewOrLoadError::Persist)?;
         match changeset {
             Some(changeset) => {
                 let wallet =
