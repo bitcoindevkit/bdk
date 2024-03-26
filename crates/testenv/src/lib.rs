@@ -250,6 +250,12 @@ impl TestEnv {
         }))
         .expect("must craft tip")
     }
+
+    /// Get the genesis hash of the blockchain.
+    pub fn genesis_hash(&self) -> anyhow::Result<BlockHash> {
+        let hash = self.bitcoind.client.get_block_hash(0)?;
+        Ok(hash)
+    }
 }
 
 #[cfg(test)]
