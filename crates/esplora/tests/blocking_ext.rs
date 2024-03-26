@@ -1,3 +1,4 @@
+use bdk_chain::bitcoin::hashes::Hash;
 use bdk_chain::local_chain::LocalChain;
 use bdk_chain::BlockId;
 use bdk_esplora::EsploraExt;
@@ -24,6 +25,173 @@ macro_rules! local_chain {
         bdk_chain::local_chain::LocalChain::from_blocks([$(($height, $block_hash).into()),*].into_iter().collect())
             .expect("chain must have genesis block")
     }};
+}
+
+/// Ensure that update does not remove heights (from original), and all anchor heights are included.
+#[test]
+pub fn test_finalize_chain_update() -> anyhow::Result<()> {
+    struct TestCase<'a> {
+        name: &'a str,
+        /// Initial blockchain height to start the env with.
+        initial_env_height: u32,
+        /// Initial checkpoint heights to start with.
+        initial_cps: &'a [u32],
+        /// The final blockchain height of the env.
+        final_env_height: u32,
+        /// The anchors to test with: `(height, txid)`. Only the height is provided as we can fetch
+        /// the blockhash from the env.
+        anchors: &'a [(u32, Txid)],
+    }
+
+    let test_cases = [
+        TestCase {
+            name: "chain_extends",
+            initial_env_height: 60,
+            initial_cps: &[59, 60],
+            final_env_height: 90,
+            anchors: &[],
+        },
+        TestCase {
+            name: "introduce_older_heights",
+            initial_env_height: 50,
+            initial_cps: &[10, 15],
+            final_env_height: 50,
+            anchors: &[(11, h!("A")), (14, h!("B"))],
+        },
+        TestCase {
+            name: "introduce_older_heights_after_chain_extends",
+            initial_env_height: 50,
+            initial_cps: &[10, 15],
+            final_env_height: 100,
+            anchors: &[(11, h!("A")), (14, h!("B"))],
+        },
+    ];
+
+    for (i, t) in test_cases.into_iter().enumerate() {
+        println!("[{}] running test case: {}", i, t.name);
+
+        let env = TestEnv::new()?;
+        let base_url = format!("http://{}", &env.electrsd.esplora_url.clone().unwrap());
+        let client = Builder::new(base_url.as_str()).build_blocking()?;
+
+        // set env to `initial_env_height`
+        if let Some(to_mine) = t
+            .initial_env_height
+            .checked_sub(env.make_checkpoint_tip().height())
+        {
+            env.mine_blocks(to_mine as _, None)?;
+        }
+        while client.get_height()? < t.initial_env_height {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+
+        // craft initial `local_chain`
+        let local_chain = {
+            let (mut chain, _) = LocalChain::from_genesis_hash(env.genesis_hash()?);
+            let chain_tip = chain.tip();
+            let update_blocks = bdk_esplora::init_chain_update_blocking(&client, &chain_tip)?;
+            let update_anchors = t
+                .initial_cps
+                .iter()
+                .map(|&height| -> anyhow::Result<_> {
+                    Ok((
+                        BlockId {
+                            height,
+                            hash: env.bitcoind.client.get_block_hash(height as _)?,
+                        },
+                        Txid::all_zeros(),
+                    ))
+                })
+                .collect::<anyhow::Result<BTreeSet<_>>>()?;
+            let chain_update = bdk_esplora::finalize_chain_update_blocking(
+                &client,
+                &chain_tip,
+                &update_anchors,
+                update_blocks,
+            )?;
+            chain.apply_update(chain_update)?;
+            chain
+        };
+        println!("local chain height: {}", local_chain.tip().height());
+
+        // extend env chain
+        if let Some(to_mine) = t
+            .final_env_height
+            .checked_sub(env.make_checkpoint_tip().height())
+        {
+            env.mine_blocks(to_mine as _, None)?;
+        }
+        while client.get_height()? < t.final_env_height {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+
+        // craft update
+        let update = {
+            let local_tip = local_chain.tip();
+            let update_blocks = bdk_esplora::init_chain_update_blocking(&client, &local_tip)?;
+            let update_anchors = t
+                .anchors
+                .iter()
+                .map(|&(height, txid)| -> anyhow::Result<_> {
+                    Ok((
+                        BlockId {
+                            height,
+                            hash: env.bitcoind.client.get_block_hash(height as _)?,
+                        },
+                        txid,
+                    ))
+                })
+                .collect::<anyhow::Result<_>>()?;
+            bdk_esplora::finalize_chain_update_blocking(
+                &client,
+                &local_tip,
+                &update_anchors,
+                update_blocks,
+            )?
+        };
+
+        // apply update
+        let mut updated_local_chain = local_chain.clone();
+        updated_local_chain.apply_update(update)?;
+        println!(
+            "updated local chain height: {}",
+            updated_local_chain.tip().height()
+        );
+
+        assert!(
+            {
+                let initial_heights = local_chain
+                    .iter_checkpoints()
+                    .map(|cp| cp.height())
+                    .collect::<BTreeSet<_>>();
+                let updated_heights = updated_local_chain
+                    .iter_checkpoints()
+                    .map(|cp| cp.height())
+                    .collect::<BTreeSet<_>>();
+                updated_heights.is_superset(&initial_heights)
+            },
+            "heights from the initial chain must all be in the updated chain",
+        );
+
+        assert!(
+            {
+                let exp_anchor_heights = t
+                    .anchors
+                    .iter()
+                    .map(|(h, _)| *h)
+                    .chain(t.initial_cps.iter().copied())
+                    .collect::<BTreeSet<_>>();
+                let anchor_heights = updated_local_chain
+                    .iter_checkpoints()
+                    .map(|cp| cp.height())
+                    .collect::<BTreeSet<_>>();
+                anchor_heights.is_superset(&exp_anchor_heights)
+            },
+            "anchor heights must all be in updated chain",
+        );
+    }
+
+    Ok(())
 }
 
 #[test]
