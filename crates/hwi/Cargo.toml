@@ -1,6 +1,6 @@
 [package]
 name = "bdk_hwi"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 homepage = "https://bitcoindevkit.org"
 repository = "https://github.com/bitcoindevkit/bdk"
