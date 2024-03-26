@@ -28,7 +28,7 @@ use bdk_chain::{
     },
     tx_graph::{CanonicalTx, TxGraph},
     Append, BlockId, ChainPosition, ConfirmationTime, ConfirmationTimeHeightAnchor, FullTxOut,
-    IndexedTxGraph, Persist, PersistBackend,
+    IndexedTxGraph, Persist, PersistBackend, PersistBackendError,
 };
 use bitcoin::secp256k1::{All, Secp256k1};
 use bitcoin::sighash::{EcdsaSighashType, TapSighashType};
@@ -233,11 +233,11 @@ impl Wallet {
         descriptor: E,
         change_descriptor: Option<E>,
         network: Network,
-    ) -> Result<Self, DescriptorError> {
+    ) -> Result<Self, descriptor::error::Error> {
         Self::new(descriptor, change_descriptor, (), network).map_err(|e| match e {
             NewError::NonEmptyDatabase => unreachable!("mock-database cannot have data"),
             NewError::Descriptor(e) => e,
-            NewError::Write(_) => unreachable!("mock-write must always succeed"),
+            NewError::Persist(_) => unreachable!("mock-write must always succeed"),
         })
     }
 
@@ -252,14 +252,14 @@ impl Wallet {
             .map_err(|e| match e {
                 NewError::NonEmptyDatabase => unreachable!("mock-database cannot have data"),
                 NewError::Descriptor(e) => e,
-                NewError::Write(_) => unreachable!("mock-write must always succeed"),
+                NewError::Persist(_) => unreachable!("mock-write must always succeed"),
             })
     }
 }
 
 impl<D> Wallet<D>
 where
-    D: PersistBackend<ChangeSet, WriteError = core::convert::Infallible>,
+    D: PersistBackend<ChangeSet>,
 {
     /// Infallibly return a derived address using the external descriptor, see [`AddressIndex`] for
     /// available address index selection strategies. If none of the keys in the descriptor are derivable
@@ -297,19 +297,16 @@ where
 /// [`new`]: Wallet::new
 /// [`new_with_genesis_hash`]: Wallet::new_with_genesis_hash
 #[derive(Debug)]
-pub enum NewError<W> {
+pub enum NewError {
     /// Database already has data.
     NonEmptyDatabase,
     /// There was problem with the passed-in descriptor(s).
     Descriptor(crate::descriptor::DescriptorError),
     /// We were unable to write the wallet's data to the persistence backend.
-    Write(W),
+    Persist(PersistBackendError),
 }
 
-impl<W> fmt::Display for NewError<W>
-where
-    W: fmt::Display,
-{
+impl fmt::Display for NewError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             NewError::NonEmptyDatabase => write!(
@@ -317,13 +314,13 @@ where
                 "database already has data - use `load` or `new_or_load` methods instead"
             ),
             NewError::Descriptor(e) => e.fmt(f),
-            NewError::Write(e) => e.fmt(f),
+            NewError::Persist(e) => e.fmt(f),
         }
     }
 }
 
 #[cfg(feature = "std")]
-impl<W> std::error::Error for NewError<W> where W: core::fmt::Display + core::fmt::Debug {}
+impl std::error::Error for NewError {}
 
 /// The error type when loading a [`Wallet`] from persistence.
 ///
@@ -331,11 +328,11 @@ impl<W> std::error::Error for NewError<W> where W: core::fmt::Display + core::fm
 ///
 /// [`load`]: Wallet::load
 #[derive(Debug)]
-pub enum LoadError<L> {
+pub enum LoadError {
     /// There was a problem with the passed-in descriptor(s).
     Descriptor(crate::descriptor::DescriptorError),
     /// Loading data from the persistence backend failed.
-    Load(L),
+    Persist(PersistBackendError),
     /// Wallet not initialized, persistence backend is empty.
     NotInitialized,
     /// Data loaded from persistence is missing network type.
@@ -344,14 +341,11 @@ pub enum LoadError<L> {
     MissingGenesis,
 }
 
-impl<L> fmt::Display for LoadError<L>
-where
-    L: fmt::Display,
-{
+impl fmt::Display for LoadError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             LoadError::Descriptor(e) => e.fmt(f),
-            LoadError::Load(e) => e.fmt(f),
+            LoadError::Persist(e) => e.fmt(f),
             LoadError::NotInitialized => {
                 write!(f, "wallet is not initialized, persistence backend is empty")
             }
@@ -362,7 +356,7 @@ where
 }
 
 #[cfg(feature = "std")]
-impl<L> std::error::Error for LoadError<L> where L: core::fmt::Display + core::fmt::Debug {}
+impl std::error::Error for LoadError {}
 
 /// Error type for when we try load a [`Wallet`] from persistence and creating it if non-existent.
 ///
@@ -371,13 +365,11 @@ impl<L> std::error::Error for LoadError<L> where L: core::fmt::Display + core::f
 /// [`new_or_load`]: Wallet::new_or_load
 /// [`new_or_load_with_genesis_hash`]: Wallet::new_or_load_with_genesis_hash
 #[derive(Debug)]
-pub enum NewOrLoadError<W, L> {
+pub enum NewOrLoadError {
     /// There is a problem with the passed-in descriptor.
     Descriptor(crate::descriptor::DescriptorError),
     /// Writing to the persistence backend failed.
-    Write(W),
-    /// Loading from the persistence backend failed.
-    Load(L),
+    Persist(PersistBackendError),
     /// Wallet is not initialized, persistence backend is empty.
     NotInitialized,
     /// The loaded genesis hash does not match what was provided.
@@ -396,16 +388,11 @@ pub enum NewOrLoadError<W, L> {
     },
 }
 
-impl<W, L> fmt::Display for NewOrLoadError<W, L>
-where
-    W: fmt::Display,
-    L: fmt::Display,
-{
+impl fmt::Display for NewOrLoadError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             NewOrLoadError::Descriptor(e) => e.fmt(f),
-            NewOrLoadError::Write(e) => write!(f, "failed to write to persistence: {}", e),
-            NewOrLoadError::Load(e) => write!(f, "failed to load from persistence: {}", e),
+            NewOrLoadError::Persist(e) => write!(f, "failed to write to persistence, {}", e),
             NewOrLoadError::NotInitialized => {
                 write!(f, "wallet is not initialized, persistence backend is empty")
             }
@@ -420,12 +407,7 @@ where
 }
 
 #[cfg(feature = "std")]
-impl<W, L> std::error::Error for NewOrLoadError<W, L>
-where
-    W: core::fmt::Display + core::fmt::Debug,
-    L: core::fmt::Display + core::fmt::Debug,
-{
-}
+impl std::error::Error for NewOrLoadError {}
 
 /// An error that may occur when inserting a transaction into [`Wallet`].
 #[derive(Debug)]
@@ -496,7 +478,7 @@ impl<D> Wallet<D> {
         change_descriptor: Option<E>,
         db: D,
         network: Network,
-    ) -> Result<Self, NewError<D::WriteError>>
+    ) -> Result<Self, NewError>
     where
         D: PersistBackend<ChangeSet>,
     {
@@ -514,7 +496,7 @@ impl<D> Wallet<D> {
         mut db: D,
         network: Network,
         genesis_hash: BlockHash,
-    ) -> Result<Self, NewError<D::WriteError>>
+    ) -> Result<Self, NewError>
     where
         D: PersistBackend<ChangeSet>,
     {
@@ -539,7 +521,7 @@ impl<D> Wallet<D> {
             indexed_tx_graph: indexed_graph.initial_changeset(),
             network: Some(network),
         });
-        persist.commit().map_err(NewError::Write)?;
+        persist.commit().map_err(NewError::Persist)?;
 
         Ok(Wallet {
             signers,
@@ -557,13 +539,13 @@ impl<D> Wallet<D> {
         descriptor: E,
         change_descriptor: Option<E>,
         mut db: D,
-    ) -> Result<Self, LoadError<D::LoadError>>
+    ) -> Result<Self, LoadError>
     where
         D: PersistBackend<ChangeSet>,
     {
         let changeset = db
             .load_from_persistence()
-            .map_err(LoadError::Load)?
+            .map_err(LoadError::Persist)?
             .ok_or(LoadError::NotInitialized)?;
         Self::load_from_changeset(descriptor, change_descriptor, db, changeset)
     }
@@ -573,7 +555,7 @@ impl<D> Wallet<D> {
         change_descriptor: Option<E>,
         db: D,
         changeset: ChangeSet,
-    ) -> Result<Self, LoadError<D::LoadError>>
+    ) -> Result<Self, LoadError>
     where
         D: PersistBackend<ChangeSet>,
     {
@@ -611,7 +593,7 @@ impl<D> Wallet<D> {
         change_descriptor: Option<E>,
         db: D,
         network: Network,
-    ) -> Result<Self, NewOrLoadError<D::WriteError, D::LoadError>>
+    ) -> Result<Self, NewOrLoadError>
     where
         D: PersistBackend<ChangeSet>,
     {
@@ -637,18 +619,20 @@ impl<D> Wallet<D> {
         mut db: D,
         network: Network,
         genesis_hash: BlockHash,
-    ) -> Result<Self, NewOrLoadError<D::WriteError, D::LoadError>>
+    ) -> Result<Self, NewOrLoadError>
     where
         D: PersistBackend<ChangeSet>,
     {
-        let changeset = db.load_from_persistence().map_err(NewOrLoadError::Load)?;
+        let changeset = db
+            .load_from_persistence()
+            .map_err( NewOrLoadError::Persist)?;
         match changeset {
             Some(changeset) => {
                 let wallet =
                     Self::load_from_changeset(descriptor, change_descriptor, db, changeset)
                         .map_err(|e| match e {
                             LoadError::Descriptor(e) => NewOrLoadError::Descriptor(e),
-                            LoadError::Load(e) => NewOrLoadError::Load(e),
+                            LoadError::Persist(e) => NewOrLoadError::Persist(e),
                             LoadError::NotInitialized => NewOrLoadError::NotInitialized,
                             LoadError::MissingNetwork => {
                                 NewOrLoadError::LoadedNetworkDoesNotMatch {
@@ -689,7 +673,7 @@ impl<D> Wallet<D> {
                     unreachable!("database is already checked to have no data")
                 }
                 NewError::Descriptor(e) => NewOrLoadError::Descriptor(e),
-                NewError::Write(e) => NewOrLoadError::Write(e),
+                NewError::Persist(e) => NewOrLoadError::Persist(e),
             }),
         }
     }
@@ -718,7 +702,7 @@ impl<D> Wallet<D> {
     pub fn try_get_address(
         &mut self,
         address_index: AddressIndex,
-    ) -> Result<AddressInfo, D::WriteError>
+    ) -> Result<AddressInfo, PersistBackendError>
     where
         D: PersistBackend<ChangeSet>,
     {
@@ -743,7 +727,7 @@ impl<D> Wallet<D> {
     pub fn try_get_internal_address(
         &mut self,
         address_index: AddressIndex,
-    ) -> Result<AddressInfo, D::WriteError>
+    ) -> Result<AddressInfo, PersistBackendError>
     where
         D: PersistBackend<ChangeSet>,
     {
@@ -771,7 +755,7 @@ impl<D> Wallet<D> {
         &mut self,
         keychain: KeychainKind,
         address_index: AddressIndex,
-    ) -> Result<AddressInfo, D::WriteError>
+    ) -> Result<AddressInfo, PersistBackendError>
     where
         D: PersistBackend<ChangeSet>,
     {
@@ -1265,7 +1249,7 @@ impl<D> Wallet<D> {
         &mut self,
         coin_selection: Cs,
         params: TxParams,
-    ) -> Result<psbt::PartiallySignedTransaction, CreateTxError<D::WriteError>>
+    ) -> Result<psbt::PartiallySignedTransaction, CreateTxError>
     where
         D: PersistBackend<ChangeSet>,
     {
@@ -1287,7 +1271,7 @@ impl<D> Wallet<D> {
         let internal_policy = internal_descriptor
             .as_ref()
             .map(|desc| {
-                Ok::<_, CreateTxError<D::WriteError>>(
+                Ok::<_, CreateTxError>(
                     desc.extract_policy(&self.change_signers, BuildSatisfaction::None, &self.secp)?
                         .unwrap(),
                 )
@@ -1324,7 +1308,7 @@ impl<D> Wallet<D> {
         )?;
         let internal_requirements = internal_policy
             .map(|policy| {
-                Ok::<_, CreateTxError<D::WriteError>>(
+                Ok::<_, CreateTxError>(
                     policy.get_condition(
                         params
                             .internal_policy_path
@@ -2179,7 +2163,7 @@ impl<D> Wallet<D> {
         tx: Transaction,
         selected: Vec<Utxo>,
         params: TxParams,
-    ) -> Result<psbt::PartiallySignedTransaction, CreateTxError<D::WriteError>>
+    ) -> Result<psbt::PartiallySignedTransaction, CreateTxError>
     where
         D: PersistBackend<ChangeSet>,
     {
@@ -2263,7 +2247,7 @@ impl<D> Wallet<D> {
         utxo: LocalOutput,
         sighash_type: Option<psbt::PsbtSighashType>,
         only_witness_utxo: bool,
-    ) -> Result<psbt::Input, CreateTxError<D::WriteError>>
+    ) -> Result<psbt::Input, CreateTxError>
     where
         D: PersistBackend<ChangeSet>,
     {
@@ -2389,7 +2373,7 @@ impl<D> Wallet<D> {
     /// This returns whether the `update` resulted in any changes.
     ///
     /// [`staged`]: Self::staged
-    pub fn commit(&mut self) -> Result<bool, D::WriteError>
+    pub fn commit(&mut self) -> Result<bool, PersistBackendError>
     where
         D: PersistBackend<ChangeSet>,
     {

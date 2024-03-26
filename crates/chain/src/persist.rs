@@ -1,6 +1,26 @@
-use core::convert::Infallible;
-
 use crate::Append;
+use core::fmt;
+
+#[derive(Debug, Clone)]
+/// Errors returned by [`PersistBackend`] when staging and committing changes.
+pub enum PersistBackendError {
+    /// Occurs when there is an error writing to the persistent backend file.
+    WriteError,
+    /// Occurs when there is an error loading the persistent backend file.
+    LoadError,
+}
+
+impl fmt::Display for PersistBackendError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::WriteError => write!(f, "Error writing to persistent backend file."),
+            Self::LoadError => write!(f, "Error loading the persistent backend file."),
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for PersistBackendError {}
 
 /// `Persist` wraps a [`PersistBackend`] (`B`) to create a convenient staging area for changes (`C`)
 /// before they are persisted.
@@ -46,7 +66,7 @@ where
     /// # Error
     ///
     /// Returns a backend-defined error if this fails.
-    pub fn commit(&mut self) -> Result<Option<C>, B::WriteError> {
+    pub fn commit(&mut self) -> Result<Option<C>, PersistBackendError> {
         if self.stage.is_empty() {
             return Ok(None);
         }
@@ -63,7 +83,7 @@ where
     ///
     /// [`stage`]: Self::stage
     /// [`commit`]: Self::commit
-    pub fn stage_and_commit(&mut self, changeset: C) -> Result<Option<C>, B::WriteError> {
+    pub fn stage_and_commit(&mut self, changeset: C) -> Result<Option<C>, PersistBackendError> {
         self.stage(changeset);
         self.commit()
     }
@@ -74,12 +94,6 @@ where
 /// `C` represents the changeset; a datatype that records changes made to in-memory data structures
 /// that are to be persisted, or retrieved from persistence.
 pub trait PersistBackend<C> {
-    /// The error the backend returns when it fails to write.
-    type WriteError: core::fmt::Debug;
-
-    /// The error the backend returns when it fails to load changesets `C`.
-    type LoadError: core::fmt::Debug;
-
     /// Writes a changeset to the persistence backend.
     ///
     /// It is up to the backend what it does with this. It could store every changeset in a list or
@@ -88,22 +102,18 @@ pub trait PersistBackend<C> {
     /// changesets had been applied sequentially.
     ///
     /// [`load_from_persistence`]: Self::load_from_persistence
-    fn write_changes(&mut self, changeset: &C) -> Result<(), Self::WriteError>;
+    fn write_changes(&mut self, changeset: &C) -> Result<(), PersistBackendError>;
 
     /// Return the aggregate changeset `C` from persistence.
-    fn load_from_persistence(&mut self) -> Result<Option<C>, Self::LoadError>;
+    fn load_from_persistence(&mut self) -> Result<Option<C>, PersistBackendError>;
 }
 
 impl<C> PersistBackend<C> for () {
-    type WriteError = Infallible;
-
-    type LoadError = Infallible;
-
-    fn write_changes(&mut self, _changeset: &C) -> Result<(), Self::WriteError> {
+    fn write_changes(&mut self, _changeset: &C) -> Result<(), PersistBackendError> {
         Ok(())
     }
 
-    fn load_from_persistence(&mut self) -> Result<Option<C>, Self::LoadError> {
+    fn load_from_persistence(&mut self) -> Result<Option<C>, PersistBackendError> {
         Ok(None)
     }
 }

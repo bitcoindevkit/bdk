@@ -622,7 +622,7 @@ impl<'a, D, Cs: CoinSelectionAlgorithm, Ctx> TxBuilder<'a, D, Cs, Ctx> {
     /// Returns a new [`Psbt`] per [`BIP174`].
     ///
     /// [`BIP174`]: https://github.com/bitcoin/bips/blob/master/bip-0174.mediawiki
-    pub fn finish(self) -> Result<Psbt, CreateTxError<D::WriteError>>
+    pub fn finish(self) -> Result<Psbt, CreateTxError>
     where
         D: PersistBackend<ChangeSet>,
     {

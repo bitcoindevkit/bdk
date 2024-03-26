@@ -16,6 +16,7 @@ use crate::descriptor::DescriptorError;
 use crate::wallet::coin_selection;
 use crate::{descriptor, KeychainKind};
 use alloc::string::String;
+use bdk_chain::PersistBackendError;
 use bitcoin::{absolute, psbt, OutPoint, Sequence, Txid};
 use core::fmt;
 
@@ -47,11 +48,11 @@ impl std::error::Error for MiniscriptPsbtError {}
 /// Error returned from [`TxBuilder::finish`]
 ///
 /// [`TxBuilder::finish`]: crate::wallet::tx_builder::TxBuilder::finish
-pub enum CreateTxError<P> {
+pub enum CreateTxError {
     /// There was a problem with the descriptors passed in
     Descriptor(DescriptorError),
     /// We were unable to write wallet data to the persistence backend
-    Persist(P),
+    Persist(PersistBackendError),
     /// There was a problem while extracting and manipulating policies
     Policy(PolicyError),
     /// Spending policy is not compatible with this [`KeychainKind`]
@@ -119,10 +120,7 @@ pub enum CreateTxError<P> {
     MiniscriptPsbt(MiniscriptPsbtError),
 }
 
-impl<P> fmt::Display for CreateTxError<P>
-where
-    P: fmt::Display,
-{
+impl fmt::Display for CreateTxError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Descriptor(e) => e.fmt(f),
@@ -214,38 +212,44 @@ where
     }
 }
 
-impl<P> From<descriptor::error::Error> for CreateTxError<P> {
+impl From<descriptor::error::Error> for CreateTxError {
     fn from(err: descriptor::error::Error) -> Self {
         CreateTxError::Descriptor(err)
     }
 }
 
-impl<P> From<PolicyError> for CreateTxError<P> {
+impl From<PolicyError> for CreateTxError {
     fn from(err: PolicyError) -> Self {
         CreateTxError::Policy(err)
     }
 }
 
-impl<P> From<MiniscriptPsbtError> for CreateTxError<P> {
+impl From<MiniscriptPsbtError> for CreateTxError {
     fn from(err: MiniscriptPsbtError) -> Self {
         CreateTxError::MiniscriptPsbt(err)
     }
 }
 
-impl<P> From<psbt::Error> for CreateTxError<P> {
+impl From<psbt::Error> for CreateTxError {
     fn from(err: psbt::Error) -> Self {
         CreateTxError::Psbt(err)
     }
 }
 
-impl<P> From<coin_selection::Error> for CreateTxError<P> {
+impl From<coin_selection::Error> for CreateTxError {
     fn from(err: coin_selection::Error) -> Self {
         CreateTxError::CoinSelection(err)
     }
 }
 
+impl From<PersistBackendError> for CreateTxError {
+    fn from(err: PersistBackendError) -> Self {
+        CreateTxError::Persist(err)
+    }
+}
+
 #[cfg(feature = "std")]
-impl<P: core::fmt::Display + core::fmt::Debug> std::error::Error for CreateTxError<P> {}
+impl std::error::Error for CreateTxError {}
 
 #[derive(Debug)]
 /// Error returned from [`Wallet::build_fee_bump`]
