@@ -21,7 +21,7 @@ fn main() -> Result<(), anyhow::Error> {
 
     let mut wallet = Wallet::new_or_load(
         external_descriptor,
-        Some(internal_descriptor),
+        internal_descriptor,
         db,
         Network::Testnet,
     )?;
