@@ -53,9 +53,8 @@
 //! # Ok::<_, Box<dyn std::error::Error>>(())
 //! ```
 
-use core::str::FromStr;
-
 use alloc::string::{String, ToString};
+use core::str::FromStr;
 use serde::{Deserialize, Serialize};
 
 use miniscript::descriptor::{ShInner, WshInner};
@@ -110,8 +109,8 @@ impl FullyNodedExport {
     ///
     /// If the database is empty or `include_blockheight` is false, the `blockheight` field
     /// returned will be `0`.
-    pub fn export_wallet<D>(
-        wallet: &Wallet<D>,
+    pub fn export_wallet(
+        wallet: &Wallet,
         label: &str,
         include_blockheight: bool,
     ) -> Result<Self, &'static str> {
@@ -225,7 +224,7 @@ mod test {
         descriptor: &str,
         change_descriptor: Option<&str>,
         network: Network,
-    ) -> Wallet<()> {
+    ) -> Wallet {
         let mut wallet = Wallet::new_no_persist(descriptor, change_descriptor, network).unwrap();
         let transaction = Transaction {
             input: vec![],

@@ -1,4 +1,5 @@
 use std::{
+    fmt,
     fmt::Debug,
     fs::{File, OpenOptions},
     io::{self, Read, Seek, Write},
@@ -6,7 +7,7 @@ use std::{
     path::Path,
 };
 
-use bdk_chain::{Append, PersistBackend};
+use bdk_chain::{Append, PersistBackend, PersistBackendError};
 use bincode::Options;
 
 use crate::{bincode_options, EntryIter, FileError, IterError};
@@ -25,16 +26,13 @@ impl<C> PersistBackend<C> for Store<C>
 where
     C: Append + serde::Serialize + serde::de::DeserializeOwned,
 {
-    type WriteError = std::io::Error;
-
-    type LoadError = IterError;
-
-    fn write_changes(&mut self, changeset: &C) -> Result<(), Self::WriteError> {
+    fn write_changes(&mut self, changeset: &C) -> Result<(), PersistBackendError> {
         self.append_changeset(changeset)
     }
 
-    fn load_from_persistence(&mut self) -> Result<Option<C>, Self::LoadError> {
-        self.aggregate_changesets().map_err(|e| e.iter_error)
+    fn load_from_persistence(&mut self) -> Result<Option<C>, PersistBackendError> {
+        self.aggregate_changesets()
+            .map_err(|_e| PersistBackendError::IterError)
     }
 }
 
@@ -173,7 +171,7 @@ where
     ///
     /// The truncation is to avoid the possibility of having a valid but inconsistent changeset
     /// directly after the appended changeset.
-    pub fn append_changeset(&mut self, changeset: &C) -> Result<(), io::Error> {
+    pub fn append_changeset(&mut self, changeset: &C) -> Result<(), PersistBackendError> {
         // no need to write anything if changeset is empty
         if changeset.is_empty() {
             return Ok(());
@@ -182,15 +180,20 @@ where
         bincode_options()
             .serialize_into(&mut self.db_file, changeset)
             .map_err(|e| match *e {
-                bincode::ErrorKind::Io(inner) => inner,
+                bincode::ErrorKind::Io(_inner) => PersistBackendError::IterError,
                 unexpected_err => panic!("unexpected bincode error: {}", unexpected_err),
             })?;
 
         // truncate file after this changeset addition
         // if this is not done, data after this changeset may represent valid changesets, however
         // applying those changesets on top of this one may result in an inconsistent state
-        let pos = self.db_file.stream_position()?;
-        self.db_file.set_len(pos)?;
+        let pos = self
+            .db_file
+            .stream_position()
+            .map_err(|_| PersistBackendError::IoError)?;
+        self.db_file
+            .set_len(pos)
+            .map_err(|_| PersistBackendError::IoError)?;
 
         Ok(())
     }
@@ -206,13 +209,13 @@ pub struct AggregateChangesetsError<C> {
     pub iter_error: IterError,
 }
 
-impl<C> std::fmt::Display for AggregateChangesetsError<C> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        std::fmt::Display::fmt(&self.iter_error, f)
+impl<C> fmt::Display for AggregateChangesetsError<C> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        core::fmt::Display::fmt(&self.iter_error, f)
     }
 }
 
-impl<C: std::fmt::Debug> std::error::Error for AggregateChangesetsError<C> {}
+impl<C: fmt::Debug> std::error::Error for AggregateChangesetsError<C> {}
 
 #[cfg(test)]
 mod test {
