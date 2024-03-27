@@ -360,8 +360,8 @@ fn update_local_chain() -> anyhow::Result<()> {
         for height in t.request_heights {
             let exp_blockhash = blocks.get(height).expect("block must exist in bitcoind");
             assert_eq!(
-                chain.blocks().get(height),
-                Some(exp_blockhash),
+                chain.query(*height).map(|cp| cp.hash()),
+                Some(*exp_blockhash),
                 "[{}:{}] block {}:{} must exist in final chain",
                 i,
                 t.name,

@@ -1128,18 +1128,13 @@ impl<D> Wallet<D> {
                 // anchor tx to checkpoint with lowest height that is >= position's height
                 let anchor = self
                     .chain
-                    .blocks()
-                    .range(height..)
-                    .next()
+                    .query_from(height)
                     .ok_or(InsertTxError::ConfirmationHeightCannotBeGreaterThanTip {
                         tip_height: self.chain.tip().height(),
                         tx_height: height,
                     })
-                    .map(|(&anchor_height, &hash)| ConfirmationTimeHeightAnchor {
-                        anchor_block: BlockId {
-                            height: anchor_height,
-                            hash,
-                        },
+                    .map(|anchor_cp| ConfirmationTimeHeightAnchor {
+                        anchor_block: anchor_cp.block_id(),
                         confirmation_height: height,
                         confirmation_time: time,
                     })?;
