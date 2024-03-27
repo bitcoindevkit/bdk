@@ -90,8 +90,6 @@ pub enum CreateTxError {
     NoUtxosSelected,
     /// Output created is under the dust limit, 546 satoshis
     OutputBelowDustLimit(usize),
-    /// The `change_policy` was set but the wallet does not have a change_descriptor
-    ChangePolicyDescriptor,
     /// There was an error with coin selection
     CoinSelection(coin_selection::Error),
     /// Wallet's UTXO set is not enough to cover recipient's requested plus fee
@@ -176,12 +174,6 @@ impl fmt::Display for CreateTxError {
             }
             CreateTxError::OutputBelowDustLimit(limit) => {
                 write!(f, "Output below the dust limit: {}", limit)
-            }
-            CreateTxError::ChangePolicyDescriptor => {
-                write!(
-                    f,
-                    "The `change_policy` can be set only if the wallet has a change_descriptor"
-                )
             }
             CreateTxError::CoinSelection(e) => e.fmt(f),
             CreateTxError::InsufficientFunds { needed, available } => {

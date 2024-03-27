@@ -15,12 +15,9 @@ use std::str::FromStr;
 // The funded wallet containing a tx with a 76_000 sats input and two outputs, one spending 25_000
 // to a foreign address and one returning 50_000 back to the wallet as change. The remaining 1000
 // sats are the transaction fee.
-pub fn get_funded_wallet_with_change(
-    descriptor: &str,
-    change: Option<&str>,
-) -> (Wallet, bitcoin::Txid) {
+pub fn get_funded_wallet_with_change(descriptor: &str, change: &str) -> (Wallet, bitcoin::Txid) {
     let mut wallet = Wallet::new_no_persist(descriptor, change, Network::Regtest).unwrap();
-    let change_address = wallet.peek_address(KeychainKind::External, 0).address;
+    let receive_address = wallet.peek_address(KeychainKind::External, 0).address;
     let sendto_address = Address::from_str("bcrt1q3qtze4ys45tgdvguj66zrk4fu6hq3a3v9pfly5")
         .expect("address")
         .require_network(Network::Regtest)
@@ -40,7 +37,7 @@ pub fn get_funded_wallet_with_change(
         }],
         output: vec![TxOut {
             value: Amount::from_sat(76_000),
-            script_pubkey: change_address.script_pubkey(),
+            script_pubkey: receive_address.script_pubkey(),
         }],
     };
 
@@ -59,7 +56,7 @@ pub fn get_funded_wallet_with_change(
         output: vec![
             TxOut {
                 value: Amount::from_sat(50_000),
-                script_pubkey: change_address.script_pubkey(),
+                script_pubkey: receive_address.script_pubkey(),
             },
             TxOut {
                 value: Amount::from_sat(25_000),
@@ -108,11 +105,27 @@ pub fn get_funded_wallet_with_change(
 // to a foreign address and one returning 50_000 back to the wallet as change. The remaining 1000
 // sats are the transaction fee.
 pub fn get_funded_wallet(descriptor: &str) -> (Wallet, bitcoin::Txid) {
-    get_funded_wallet_with_change(descriptor, None)
+    let change = get_test_wpkh_change();
+    get_funded_wallet_with_change(descriptor, change)
+}
+
+pub fn get_funded_wallet_wpkh() -> (Wallet, bitcoin::Txid) {
+    get_funded_wallet_with_change(get_test_wpkh(), get_test_wpkh_change())
 }
 
 pub fn get_test_wpkh() -> &'static str {
     "wpkh(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW)"
+}
+
+pub fn get_test_wpkh_with_change_desc() -> (&'static str, &'static str) {
+    (
+        "wpkh(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW)",
+        get_test_wpkh_change(),
+    )
+}
+
+fn get_test_wpkh_change() -> &'static str {
+    "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/84'/1'/0'/1/0)"
 }
 
 pub fn get_test_single_sig_csv() -> &'static str {
@@ -148,6 +161,11 @@ pub fn get_test_tr_repeated_key() -> &'static str {
 
 pub fn get_test_tr_single_sig_xprv() -> &'static str {
     "tr(tprv8ZgxMBicQKsPdDArR4xSAECuVxeX1jwwSXR4ApKbkYgZiziDc4LdBy2WvJeGDfUSE4UT4hHhbgEwbdq8ajjUHiKDegkwrNU6V55CxcxonVN/*)"
+}
+
+pub fn get_test_tr_single_sig_xprv_with_change_desc() -> (&'static str, &'static str) {
+    ("tr(tprv8ZgxMBicQKsPdDArR4xSAECuVxeX1jwwSXR4ApKbkYgZiziDc4LdBy2WvJeGDfUSE4UT4hHhbgEwbdq8ajjUHiKDegkwrNU6V55CxcxonVN/0/*)",
+    "tr(tprv8ZgxMBicQKsPdDArR4xSAECuVxeX1jwwSXR4ApKbkYgZiziDc4LdBy2WvJeGDfUSE4UT4hHhbgEwbdq8ajjUHiKDegkwrNU6V55CxcxonVN/1/*)")
 }
 
 pub fn get_test_tr_with_taptree_xprv() -> &'static str {
