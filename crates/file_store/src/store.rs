@@ -1,4 +1,5 @@
 use std::{
+    fmt,
     fmt::Debug,
     fs::{File, OpenOptions},
     io::{self, Read, Seek, Write},
@@ -189,10 +190,10 @@ where
         let pos = self
             .db_file
             .stream_position()
-            .map_err(PersistBackendError::IoError)?;
+            .map_err(|_| PersistBackendError::IoError)?;
         self.db_file
             .set_len(pos)
-            .map_err(PersistBackendError::IoError)?;
+            .map_err(|_| PersistBackendError::IoError)?;
 
         Ok(())
     }
@@ -208,13 +209,13 @@ pub struct AggregateChangesetsError<C> {
     pub iter_error: IterError,
 }
 
-impl<C> std::fmt::Display for AggregateChangesetsError<C> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        std::fmt::Display::fmt(&self.iter_error, f)
+impl<C> fmt::Display for AggregateChangesetsError<C> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        core::fmt::Display::fmt(&self.iter_error, f)
     }
 }
 
-impl<C: std::fmt::Debug> std::error::Error for AggregateChangesetsError<C> {}
+impl<C: fmt::Debug> std::error::Error for AggregateChangesetsError<C> {}
 
 #[cfg(test)]
 mod test {

@@ -1,13 +1,12 @@
 use crate::Append;
 use alloc::boxed::Box;
 use core::fmt;
-use std::io;
 
 #[derive(Debug)]
 /// Errors returned by [`PersistBackend`] when writing or loading changes.
 pub enum PersistBackendError {
     /// Happens when there is an standard IO error writing to the backend file.
-    IoError(io::Error),
+    IoError,
     /// Happens when there is an error iterating over the persistent backend file.
     IterError,
     /// Occurs when there is an error loading the persistent backend file.
@@ -17,8 +16,8 @@ pub enum PersistBackendError {
 impl fmt::Display for PersistBackendError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::IoError(e) => write!(f, "Error writing to the persistent backend file: {}", e),
-            Self::IterError => write!(f, "Error writing to persistent backend file."),
+            Self::IoError => write!(f, "IO error writing to the persistent backend file"),
+            Self::IterError => write!(f, "Iterator error writing to persistent backend file."),
             Self::LoadError => write!(f, "Error loading the persistent backend file."),
         }
     }
@@ -38,8 +37,8 @@ pub struct Persist<C> {
     stage: C,
 }
 
-impl<C: std::fmt::Debug> std::fmt::Debug for Persist<C> {
-    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+impl<C: fmt::Debug> fmt::Debug for Persist<C> {
+    fn fmt(&self, fmt: &mut core::fmt::Formatter<'_>) -> Result<(), core::fmt::Error> {
         write!(fmt, "{:?}", self.stage)?;
         Ok(())
     }
@@ -57,7 +56,7 @@ where
         }
     }
 
-    /// Stage a `changeset` to be committed later with [`commit`].
+    /// Stage a `changeset` to be committed later stdwith [`commit`].
     ///
     /// [`commit`]: Self::commit
     pub fn stage(&mut self, changeset: C) {
