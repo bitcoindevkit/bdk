@@ -146,7 +146,9 @@ fn test_psbt_fee_rate_with_missing_txout() {
     assert!(wpkh_psbt.fee_amount().is_none());
     assert!(wpkh_psbt.fee_rate().is_none());
 
-    let (mut pkh_wallet,  _) = get_funded_wallet("pkh(tprv8ZgxMBicQKsPd3EupYiPRhaMooHKUHJxNsTfYuScep13go8QFfHdtkG9nRkFGb7busX4isf6X9dURGCoKgitaApQ6MupRhZMcELAxTBRJgS/*)");
+    let desc = "pkh(tprv8ZgxMBicQKsPd3EupYiPRhaMooHKUHJxNsTfYuScep13go8QFfHdtkG9nRkFGb7busX4isf6X9dURGCoKgitaApQ6MupRhZMcELAxTBRJgS/0)";
+    let chng = "pkh(tprv8ZgxMBicQKsPd3EupYiPRhaMooHKUHJxNsTfYuScep13go8QFfHdtkG9nRkFGb7busX4isf6X9dURGCoKgitaApQ6MupRhZMcELAxTBRJgS/1)";
+    let (mut pkh_wallet, _) = get_funded_wallet_with_change(desc, chng);
     let addr = pkh_wallet.get_address(New);
     let mut builder = pkh_wallet.build_tx();
     builder.drain_to(addr.script_pubkey()).drain_wallet();
@@ -174,7 +176,8 @@ fn test_psbt_multiple_internalkey_signers() {
     let prv = PrivateKey::from_wif(wif).unwrap();
     let keypair = KeyPair::from_secret_key(&secp, &prv.inner);
 
-    let (mut wallet, _) = get_funded_wallet(&desc);
+    let chng = "tr(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW)";
+    let (mut wallet, _) = get_funded_wallet_with_change(&desc, chng);
     let to_spend = wallet.get_balance().total();
     let send_to = wallet.get_address(AddressIndex::New);
     let mut builder = wallet.build_tx();

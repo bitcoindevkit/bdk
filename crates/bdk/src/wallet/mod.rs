@@ -231,7 +231,7 @@ impl Wallet {
     /// Creates a wallet that does not persist data.
     pub fn new_no_persist<E: IntoWalletDescriptor>(
         descriptor: E,
-        change_descriptor: Option<E>,
+        change_descriptor: E,
         network: Network,
     ) -> Result<Self, DescriptorError> {
         Self::new(descriptor, change_descriptor, (), network).map_err(|e| match e {
@@ -244,7 +244,7 @@ impl Wallet {
     /// Creates a wallet that does not persist data, with a custom genesis hash.
     pub fn new_no_persist_with_genesis_hash<E: IntoWalletDescriptor>(
         descriptor: E,
-        change_descriptor: Option<E>,
+        change_descriptor: E,
         network: Network,
         genesis_hash: BlockHash,
     ) -> Result<Self, crate::descriptor::DescriptorError> {
@@ -493,7 +493,7 @@ impl<D> Wallet<D> {
     /// Initialize an empty [`Wallet`].
     pub fn new<E: IntoWalletDescriptor>(
         descriptor: E,
-        change_descriptor: Option<E>,
+        change_descriptor: E,
         db: D,
         network: Network,
     ) -> Result<Self, NewError<D::WriteError>>
@@ -510,7 +510,7 @@ impl<D> Wallet<D> {
     /// for syncing from alternative networks.
     pub fn new_with_genesis_hash<E: IntoWalletDescriptor>(
         descriptor: E,
-        change_descriptor: Option<E>,
+        change_descriptor: E,
         mut db: D,
         network: Network,
         genesis_hash: BlockHash,
@@ -555,7 +555,7 @@ impl<D> Wallet<D> {
     /// Load [`Wallet`] from the given persistence backend.
     pub fn load<E: IntoWalletDescriptor>(
         descriptor: E,
-        change_descriptor: Option<E>,
+        change_descriptor: E,
         mut db: D,
     ) -> Result<Self, LoadError<D::LoadError>>
     where
@@ -570,7 +570,7 @@ impl<D> Wallet<D> {
 
     fn load_from_changeset<E: IntoWalletDescriptor>(
         descriptor: E,
-        change_descriptor: Option<E>,
+        change_descriptor: E,
         db: D,
         changeset: ChangeSet,
     ) -> Result<Self, LoadError<D::LoadError>>
@@ -608,7 +608,7 @@ impl<D> Wallet<D> {
     /// This method will fail if the loaded [`Wallet`] has different parameters to those provided.
     pub fn new_or_load<E: IntoWalletDescriptor>(
         descriptor: E,
-        change_descriptor: Option<E>,
+        change_descriptor: E,
         db: D,
         network: Network,
     ) -> Result<Self, NewOrLoadError<D::WriteError, D::LoadError>>
@@ -633,7 +633,7 @@ impl<D> Wallet<D> {
     /// useful for syncing from alternative networks.
     pub fn new_or_load_with_genesis_hash<E: IntoWalletDescriptor>(
         descriptor: E,
-        change_descriptor: Option<E>,
+        change_descriptor: E,
         mut db: D,
         network: Network,
         genesis_hash: BlockHash,
@@ -775,7 +775,6 @@ impl<D> Wallet<D> {
     where
         D: PersistBackend<ChangeSet>,
     {
-        let keychain = self.map_keychain(keychain);
         let txout_index = &mut self.indexed_graph.index;
         let (index, spk, changeset) = match address_index {
             AddressIndex::New => {
@@ -1208,7 +1207,9 @@ impl<D> Wallet<D> {
     /// ```
     /// # use bdk::{Wallet, KeychainKind};
     /// # use bdk::bitcoin::Network;
-    /// let wallet = Wallet::new_no_persist("wpkh(tprv8ZgxMBicQKsPe73PBRSmNbTfbcsZnwWhz5eVmhHpi31HW29Z7mc9B4cWGRQzopNUzZUT391DeDJxL2PefNunWyLgqCKRMDkU1s2s8bAfoSk/84'/0'/0'/0/*)", None, Network::Testnet)?;
+    /// let descriptor = "wpkh(tprv8ZgxMBicQKsPe73PBRSmNbTfbcsZnwWhz5eVmhHpi31HW29Z7mc9B4cWGRQzopNUzZUT391DeDJxL2PefNunWyLgqCKRMDkU1s2s8bAfoSk/84'/1'/0'/0/*)";
+    /// let change_descriptor = "wpkh(tprv8ZgxMBicQKsPe73PBRSmNbTfbcsZnwWhz5eVmhHpi31HW29Z7mc9B4cWGRQzopNUzZUT391DeDJxL2PefNunWyLgqCKRMDkU1s2s8bAfoSk/84'/1'/0'/1/*)";
+    /// let wallet = Wallet::new_no_persist(descriptor, change_descriptor, Network::Testnet)?;
     /// for secret_key in wallet.get_signers(KeychainKind::External).signers().iter().filter_map(|s| s.descriptor_secret_key()) {
     ///     // secret_key: tprv8ZgxMBicQKsPe73PBRSmNbTfbcsZnwWhz5eVmhHpi31HW29Z7mc9B4cWGRQzopNUzZUT391DeDJxL2PefNunWyLgqCKRMDkU1s2s8bAfoSk/84'/0'/0'/0/*
     ///     println!("secret_key: {}", secret_key);
@@ -1279,20 +1280,15 @@ impl<D> Wallet<D> {
             .indexed_graph
             .index
             .keychains()
-            .get(&KeychainKind::Internal);
+            .get(&KeychainKind::Internal)
+            .expect("must exist");
 
         let external_policy = external_descriptor
             .extract_policy(&self.signers, BuildSatisfaction::None, &self.secp)?
             .unwrap();
         let internal_policy = internal_descriptor
-            .as_ref()
-            .map(|desc| {
-                Ok::<_, CreateTxError<D::WriteError>>(
-                    desc.extract_policy(&self.change_signers, BuildSatisfaction::None, &self.secp)?
-                        .unwrap(),
-                )
-            })
-            .transpose()?;
+            .extract_policy(&self.change_signers, BuildSatisfaction::None, &self.secp)?
+            .unwrap();
 
         // The policy allows spending external outputs, but it requires a policy path that hasn't been
         // provided
@@ -1305,16 +1301,14 @@ impl<D> Wallet<D> {
             ));
         };
         // Same for the internal_policy path, if present
-        if let Some(internal_policy) = &internal_policy {
-            if params.change_policy != tx_builder::ChangeSpendPolicy::ChangeForbidden
-                && internal_policy.requires_path()
-                && params.internal_policy_path.is_none()
-            {
-                return Err(CreateTxError::SpendingPolicyRequired(
-                    KeychainKind::Internal,
-                ));
-            };
-        }
+        if params.change_policy != tx_builder::ChangeSpendPolicy::ChangeForbidden
+            && internal_policy.requires_path()
+            && params.internal_policy_path.is_none()
+        {
+            return Err(CreateTxError::SpendingPolicyRequired(
+                KeychainKind::Internal,
+            ));
+        };
 
         let external_requirements = external_policy.get_condition(
             params
@@ -1322,21 +1316,14 @@ impl<D> Wallet<D> {
                 .as_ref()
                 .unwrap_or(&BTreeMap::new()),
         )?;
-        let internal_requirements = internal_policy
-            .map(|policy| {
-                Ok::<_, CreateTxError<D::WriteError>>(
-                    policy.get_condition(
-                        params
-                            .internal_policy_path
-                            .as_ref()
-                            .unwrap_or(&BTreeMap::new()),
-                    )?,
-                )
-            })
-            .transpose()?;
+        let internal_requirements = internal_policy.get_condition(
+            params
+                .internal_policy_path
+                .as_ref()
+                .unwrap_or(&BTreeMap::new()),
+        )?;
 
-        let requirements =
-            external_requirements.merge(&internal_requirements.unwrap_or_default())?;
+        let requirements = external_requirements.merge(&internal_requirements)?;
 
         let version = match params.version {
             Some(tx_builder::Version(0)) => return Err(CreateTxError::Version0),
@@ -1510,12 +1497,6 @@ impl<D> Wallet<D> {
         // - we might come up with non broadcastable txs!
         fee_amount += (fee_rate * Weight::from_wu(2)).to_sat();
 
-        if params.change_policy != tx_builder::ChangeSpendPolicy::ChangeAllowed
-            && internal_descriptor.is_none()
-        {
-            return Err(CreateTxError::ChangePolicyDescriptor);
-        }
-
         let (required_utxos, optional_utxos) =
             self.preselect_utxos(&params, Some(current_height.to_consensus_u32()));
 
@@ -1523,7 +1504,7 @@ impl<D> Wallet<D> {
         let drain_script = match params.drain_to {
             Some(ref drain_recipient) => drain_recipient.clone(),
             None => {
-                let change_keychain = self.map_keychain(KeychainKind::Internal);
+                let change_keychain = KeychainKind::Internal;
                 let ((index, spk), index_changeset) =
                     self.indexed_graph.index.next_unused_spk(&change_keychain);
                 let spk = spk.into();
@@ -1754,9 +1735,11 @@ impl<D> Wallet<D> {
         if tx.output.len() > 1 {
             let mut change_index = None;
             for (index, txout) in tx.output.iter().enumerate() {
-                let change_type = self.map_keychain(KeychainKind::Internal);
+                let change_keychain = KeychainKind::Internal;
                 match txout_index.index_of_spk(&txout.script_pubkey) {
-                    Some((keychain, _)) if keychain == change_type => change_index = Some(index),
+                    Some((keychain, _)) if keychain == change_keychain => {
+                        change_index = Some(index)
+                    }
                     _ => {}
                 }
             }
@@ -2004,8 +1987,8 @@ impl<D> Wallet<D> {
 
     /// Returns the descriptor used to create addresses for a particular `keychain`.
     pub fn get_descriptor_for_keychain(&self, keychain: KeychainKind) -> &ExtendedDescriptor {
-        self.public_descriptor(self.map_keychain(keychain))
-            .expect("we mapped it to external if it doesn't exist")
+        self.public_descriptor(keychain)
+            .expect("must have keychain kind")
     }
 
     /// The derivation index of this wallet. It will return `None` if it has not derived any addresses.
@@ -2031,16 +2014,6 @@ impl<D> Wallet<D> {
                 // by a tx in the tracker. It only removes the superficial marking.
                 txout_index.unmark_used(keychain, index);
             }
-        }
-    }
-
-    fn map_keychain(&self, keychain: KeychainKind) -> KeychainKind {
-        if keychain == KeychainKind::Internal
-            && self.public_descriptor(KeychainKind::Internal).is_none()
-        {
-            KeychainKind::External
-        } else {
-            keychain
         }
     }
 
@@ -2558,22 +2531,22 @@ fn create_signers<E: IntoWalletDescriptor>(
     index: &mut KeychainTxOutIndex<KeychainKind>,
     secp: &Secp256k1<All>,
     descriptor: E,
-    change_descriptor: Option<E>,
+    change_descriptor: E,
     network: Network,
-) -> Result<(Arc<SignersContainer>, Arc<SignersContainer>), crate::descriptor::error::Error> {
-    let (descriptor, keymap) = into_wallet_descriptor_checked(descriptor, secp, network)?;
+) -> Result<(Arc<SignersContainer>, Arc<SignersContainer>), DescriptorError> {
+    let descriptor = into_wallet_descriptor_checked(descriptor, secp, network)?;
+    let change_descriptor = into_wallet_descriptor_checked(change_descriptor, secp, network)?;
+    if descriptor.0 == change_descriptor.0 {
+        return Err(DescriptorError::NonUnique(descriptor.0));
+    }
+
+    let (descriptor, keymap) = descriptor;
     let signers = Arc::new(SignersContainer::build(keymap, &descriptor, secp));
     index.add_keychain(KeychainKind::External, descriptor);
 
-    let change_signers = match change_descriptor {
-        Some(descriptor) => {
-            let (descriptor, keymap) = into_wallet_descriptor_checked(descriptor, secp, network)?;
-            let signers = Arc::new(SignersContainer::build(keymap, &descriptor, secp));
-            index.add_keychain(KeychainKind::Internal, descriptor);
-            signers
-        }
-        None => Arc::new(SignersContainer::new()),
-    };
+    let (descriptor, keymap) = change_descriptor;
+    let change_signers = Arc::new(SignersContainer::build(keymap, &descriptor, secp));
+    index.add_keychain(KeychainKind::Internal, descriptor);
 
     Ok((signers, change_signers))
 }
@@ -2602,7 +2575,7 @@ macro_rules! doctest_wallet {
 
         let mut wallet = Wallet::new_no_persist(
             descriptor,
-            Some(change_descriptor),
+            change_descriptor,
             Network::Regtest,
         )
         .unwrap();

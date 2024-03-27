@@ -21,7 +21,7 @@
 //!
 //! # let mut wallet = Wallet::new_no_persist(
 //! #     "",
-//! #     None,
+//! #     "",
 //! #     Network::Testnet,
 //! # )?;
 //! #

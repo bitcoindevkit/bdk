@@ -10,7 +10,10 @@
 // licenses.
 
 //! Descriptor errors
+
 use core::fmt;
+
+use super::ExtendedDescriptor;
 
 /// Errors related to the parsing and usage of descriptors
 #[derive(Debug)]
@@ -42,6 +45,8 @@ pub enum Error {
     Miniscript(miniscript::Error),
     /// Hex decoding error
     Hex(bitcoin::hashes::hex::Error),
+    /// The provided wallet descriptors are not unique
+    NonUnique(ExtendedDescriptor),
 }
 
 impl From<crate::keys::KeyError> for Error {
@@ -79,6 +84,7 @@ impl fmt::Display for Error {
             Self::Pk(err) => write!(f, "Key-related error: {}", err),
             Self::Miniscript(err) => write!(f, "Miniscript error: {}", err),
             Self::Hex(err) => write!(f, "Hex decoding error: {}", err),
+            Self::NonUnique(d) => write!(f, "Non unique change descriptor: {}", d),
         }
     }
 }

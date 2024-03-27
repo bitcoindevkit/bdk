@@ -77,9 +77,11 @@ impl<T: DescriptorTemplate> IntoWalletDescriptor for T {
 /// # use bdk::wallet::AddressIndex::New;
 /// use bdk::template::P2Pkh;
 ///
-/// let key =
+/// let key_a =
 ///     bitcoin::PrivateKey::from_wif("cTc4vURSzdx6QE6KVynWGomDbLaA75dNALMNyfjh3p8DRRar84Um")?;
-/// let mut wallet = Wallet::new_no_persist(P2Pkh(key), None, Network::Testnet)?;
+/// let key_b =
+///     bitcoin::PrivateKey::from_wif("cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW")?;
+/// let mut wallet = Wallet::new_no_persist(P2Pkh(key_a), P2Pkh(key_b), Network::Testnet)?;
 ///
 /// assert_eq!(
 ///     wallet.get_address(New).to_string(),
@@ -105,9 +107,12 @@ impl<K: IntoDescriptorKey<Legacy>> DescriptorTemplate for P2Pkh<K> {
 /// use bdk::template::P2Wpkh_P2Sh;
 /// use bdk::wallet::AddressIndex;
 ///
-/// let key =
+/// let key_a =
 ///     bitcoin::PrivateKey::from_wif("cTc4vURSzdx6QE6KVynWGomDbLaA75dNALMNyfjh3p8DRRar84Um")?;
-/// let mut wallet = Wallet::new_no_persist(P2Wpkh_P2Sh(key), None, Network::Testnet)?;
+/// let key_b =
+///     bitcoin::PrivateKey::from_wif("cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW")?;
+/// let mut wallet =
+///     Wallet::new_no_persist(P2Wpkh_P2Sh(key_a), P2Wpkh_P2Sh(key_b), Network::Testnet)?;
 ///
 /// assert_eq!(
 ///     wallet.get_address(AddressIndex::New).to_string(),
@@ -134,9 +139,11 @@ impl<K: IntoDescriptorKey<Segwitv0>> DescriptorTemplate for P2Wpkh_P2Sh<K> {
 /// use bdk::template::P2Wpkh;
 /// use bdk::wallet::AddressIndex::New;
 ///
-/// let key =
+/// let key_a =
 ///     bitcoin::PrivateKey::from_wif("cTc4vURSzdx6QE6KVynWGomDbLaA75dNALMNyfjh3p8DRRar84Um")?;
-/// let mut wallet = Wallet::new_no_persist(P2Wpkh(key), None, Network::Testnet)?;
+/// let key_b =
+///     bitcoin::PrivateKey::from_wif("cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW")?;
+/// let mut wallet = Wallet::new_no_persist(P2Wpkh(key_a), P2Wpkh(key_b), Network::Testnet)?;
 ///
 /// assert_eq!(
 ///     wallet.get_address(New).to_string(),
@@ -162,9 +169,11 @@ impl<K: IntoDescriptorKey<Segwitv0>> DescriptorTemplate for P2Wpkh<K> {
 /// # use bdk::wallet::AddressIndex::New;
 /// use bdk::template::P2TR;
 ///
-/// let key =
+/// let key_a =
 ///     bitcoin::PrivateKey::from_wif("cTc4vURSzdx6QE6KVynWGomDbLaA75dNALMNyfjh3p8DRRar84Um")?;
-/// let mut wallet = Wallet::new_no_persist(P2TR(key), None, Network::Testnet)?;
+/// let key_b =
+///     bitcoin::PrivateKey::from_wif("cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW")?;
+/// let mut wallet = Wallet::new_no_persist(P2TR(key_a), P2TR(key_b), Network::Testnet)?;
 ///
 /// assert_eq!(
 ///     wallet.get_address(New).to_string(),
@@ -198,7 +207,7 @@ impl<K: IntoDescriptorKey<Tap>> DescriptorTemplate for P2TR<K> {
 /// let key = bitcoin::bip32::ExtendedPrivKey::from_str("tprv8ZgxMBicQKsPeZRHk4rTG6orPS2CRNFX3njhUXx5vj9qGog5ZMH4uGReDWN5kCkY3jmWEtWause41CDvBRXD1shKknAMKxT99o9qUTRVC6m")?;
 /// let mut wallet = Wallet::new_no_persist(
 ///     Bip44(key.clone(), KeychainKind::External),
-///     Some(Bip44(key, KeychainKind::Internal)),
+///     Bip44(key, KeychainKind::Internal),
 ///     Network::Testnet,
 /// )?;
 ///
@@ -236,7 +245,7 @@ impl<K: DerivableKey<Legacy>> DescriptorTemplate for Bip44<K> {
 /// let fingerprint = bitcoin::bip32::Fingerprint::from_str("c55b303f")?;
 /// let mut wallet = Wallet::new_no_persist(
 ///     Bip44Public(key.clone(), fingerprint, KeychainKind::External),
-///     Some(Bip44Public(key, fingerprint, KeychainKind::Internal)),
+///     Bip44Public(key, fingerprint, KeychainKind::Internal),
 ///     Network::Testnet,
 /// )?;
 ///
@@ -273,7 +282,7 @@ impl<K: DerivableKey<Legacy>> DescriptorTemplate for Bip44Public<K> {
 /// let key = bitcoin::bip32::ExtendedPrivKey::from_str("tprv8ZgxMBicQKsPeZRHk4rTG6orPS2CRNFX3njhUXx5vj9qGog5ZMH4uGReDWN5kCkY3jmWEtWause41CDvBRXD1shKknAMKxT99o9qUTRVC6m")?;
 /// let mut wallet = Wallet::new_no_persist(
 ///     Bip49(key.clone(), KeychainKind::External),
-///     Some(Bip49(key, KeychainKind::Internal)),
+///     Bip49(key, KeychainKind::Internal),
 ///     Network::Testnet,
 /// )?;
 ///
@@ -311,7 +320,7 @@ impl<K: DerivableKey<Segwitv0>> DescriptorTemplate for Bip49<K> {
 /// let fingerprint = bitcoin::bip32::Fingerprint::from_str("c55b303f")?;
 /// let mut wallet = Wallet::new_no_persist(
 ///     Bip49Public(key.clone(), fingerprint, KeychainKind::External),
-///     Some(Bip49Public(key, fingerprint, KeychainKind::Internal)),
+///     Bip49Public(key, fingerprint, KeychainKind::Internal),
 ///     Network::Testnet,
 /// )?;
 ///
@@ -348,7 +357,7 @@ impl<K: DerivableKey<Segwitv0>> DescriptorTemplate for Bip49Public<K> {
 /// let key = bitcoin::bip32::ExtendedPrivKey::from_str("tprv8ZgxMBicQKsPeZRHk4rTG6orPS2CRNFX3njhUXx5vj9qGog5ZMH4uGReDWN5kCkY3jmWEtWause41CDvBRXD1shKknAMKxT99o9qUTRVC6m")?;
 /// let mut wallet = Wallet::new_no_persist(
 ///     Bip84(key.clone(), KeychainKind::External),
-///     Some(Bip84(key, KeychainKind::Internal)),
+///     Bip84(key, KeychainKind::Internal),
 ///     Network::Testnet,
 /// )?;
 ///
@@ -386,7 +395,7 @@ impl<K: DerivableKey<Segwitv0>> DescriptorTemplate for Bip84<K> {
 /// let fingerprint = bitcoin::bip32::Fingerprint::from_str("c55b303f")?;
 /// let mut wallet = Wallet::new_no_persist(
 ///     Bip84Public(key.clone(), fingerprint, KeychainKind::External),
-///     Some(Bip84Public(key, fingerprint, KeychainKind::Internal)),
+///     Bip84Public(key, fingerprint, KeychainKind::Internal),
 ///     Network::Testnet,
 /// )?;
 ///
@@ -423,7 +432,7 @@ impl<K: DerivableKey<Segwitv0>> DescriptorTemplate for Bip84Public<K> {
 /// let key = bitcoin::bip32::ExtendedPrivKey::from_str("tprv8ZgxMBicQKsPeZRHk4rTG6orPS2CRNFX3njhUXx5vj9qGog5ZMH4uGReDWN5kCkY3jmWEtWause41CDvBRXD1shKknAMKxT99o9qUTRVC6m")?;
 /// let mut wallet = Wallet::new_no_persist(
 ///     Bip86(key.clone(), KeychainKind::External),
-///     Some(Bip86(key, KeychainKind::Internal)),
+///     Bip86(key, KeychainKind::Internal),
 ///     Network::Testnet,
 /// )?;
 ///
@@ -461,7 +470,7 @@ impl<K: DerivableKey<Tap>> DescriptorTemplate for Bip86<K> {
 /// let fingerprint = bitcoin::bip32::Fingerprint::from_str("c55b303f")?;
 /// let mut wallet = Wallet::new_no_persist(
 ///     Bip86Public(key.clone(), fingerprint, KeychainKind::External),
-///     Some(Bip86Public(key, fingerprint, KeychainKind::Internal)),
+///     Bip86Public(key, fingerprint, KeychainKind::Internal),
 ///     Network::Testnet,
 /// )?;
 ///
