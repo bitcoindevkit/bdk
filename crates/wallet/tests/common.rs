@@ -10,11 +10,11 @@ use bitcoin::{
 };
 use std::str::FromStr;
 
-// Return a fake wallet that appears to be funded for testing.
-//
-// The funded wallet containing a tx with a 76_000 sats input and two outputs, one spending 25_000
-// to a foreign address and one returning 50_000 back to the wallet as change. The remaining 1000
-// sats are the transaction fee.
+/// Return a fake wallet that appears to be funded for testing.
+///
+/// The funded wallet contains a tx with a 76_000 sats input and two outputs, one spending 25_000
+/// to a foreign address and one returning 50_000 back to the wallet. The remaining 1000
+/// sats are the transaction fee.
 pub fn get_funded_wallet_with_change(descriptor: &str, change: &str) -> (Wallet, bitcoin::Txid) {
     let mut wallet = Wallet::new_no_persist(descriptor, change, Network::Regtest).unwrap();
     let receive_address = wallet.peek_address(KeychainKind::External, 0).address;
@@ -99,11 +99,15 @@ pub fn get_funded_wallet_with_change(descriptor: &str, change: &str) -> (Wallet,
     (wallet, tx1.txid())
 }
 
-// Return a fake wallet that appears to be funded for testing.
-//
-// The funded wallet containing a tx with a 76_000 sats input and two outputs, one spending 25_000
-// to a foreign address and one returning 50_000 back to the wallet as change. The remaining 1000
-// sats are the transaction fee.
+/// Return a fake wallet that appears to be funded for testing.
+///
+/// The funded wallet contains a tx with a 76_000 sats input and two outputs, one spending 25_000
+/// to a foreign address and one returning 50_000 back to the wallet. The remaining 1000
+/// sats are the transaction fee.
+///
+/// Note: the change descriptor will have script type `p2wpkh`. If passing some other script type
+/// as argument, make sure you're ok with getting a wallet where the keychains have potentially
+/// different script types. Otherwise, use `get_funded_wallet_with_change`.
 pub fn get_funded_wallet(descriptor: &str) -> (Wallet, bitcoin::Txid) {
     let change = get_test_wpkh_change();
     get_funded_wallet_with_change(descriptor, change)
