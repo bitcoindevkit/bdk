@@ -66,7 +66,7 @@ pub async fn test_update_tx_graph_without_keychain() -> anyhow::Result<()> {
     for tx in graph_update.full_txs() {
         // Retrieve the calculated fee from `TxGraph`, which will panic if we do not have the
         // floating txouts available from the transactions' previous outputs.
-        let fee = graph_update.calculate_fee(tx.tx).expect("Fee must exist");
+        let fee = graph_update.calculate_fee(&tx.tx).expect("Fee must exist");
 
         // Retrieve the fee in the transaction data from `bitcoind`.
         let tx_fee = env
