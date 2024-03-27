@@ -188,7 +188,10 @@ pub async fn finalize_chain_update<A: Anchor>(
     // `update_blocks` to see if a corresponding checkpoint already exists.
     let anchor_heights = anchors
         .iter()
+        .rev()
         .map(|(a, _)| a.anchor_block().height)
+        // filter out heights that surpass the update tip
+        .filter(|h| *h <= update_tip_height)
         // filter out duplicate heights
         .filter({
             let mut prev_height = Option::<u32>::None;
@@ -196,10 +199,7 @@ pub async fn finalize_chain_update<A: Anchor>(
                 None => true,
                 Some(prev_h) => prev_h != *h,
             }
-        })
-        // filter out heights that surpass the update tip
-        .filter(|h| *h <= update_tip_height)
-        .rev();
+        });
 
     // We keep track of a checkpoint node of `local_tip` to make traversing the linked-list of
     // checkpoints more efficient.
@@ -209,9 +209,6 @@ pub async fn finalize_chain_update<A: Anchor>(
         if let Some(cp) = curr_cp.query_from(h) {
             curr_cp = cp.clone();
             if cp.height() == h {
-                // blocks that already exist in checkpoint linked-list is also stored in
-                // `update_blocks` because we want to keep higher checkpoints of `local_chain`
-                update_blocks.insert(h, cp.hash());
                 continue;
             }
         }
