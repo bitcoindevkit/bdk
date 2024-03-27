@@ -1,11 +1,15 @@
 use crate::Append;
+use alloc::boxed::Box;
 use core::fmt;
+use std::io;
 
-#[derive(Debug, Clone)]
-/// Errors returned by [`PersistBackend`] when staging and committing changes.
+#[derive(Debug)]
+/// Errors returned by [`PersistBackend`] when writing or loading changes.
 pub enum PersistBackendError {
-    /// Occurs when there is an error writing to the persistent backend file.
-    WriteError,
+    /// Happens when there is an standard IO error writing to the backend file.
+    IoError(io::Error),
+    /// Happens when there is an error iterating over the persistent backend file.
+    IterError,
     /// Occurs when there is an error loading the persistent backend file.
     LoadError,
 }
@@ -13,7 +17,8 @@ pub enum PersistBackendError {
 impl fmt::Display for PersistBackendError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::WriteError => write!(f, "Error writing to persistent backend file."),
+            Self::IoError(e) => write!(f, "Error writing to the persistent backend file: {}", e),
+            Self::IterError => write!(f, "Error writing to persistent backend file."),
             Self::LoadError => write!(f, "Error loading the persistent backend file."),
         }
     }
@@ -28,19 +33,24 @@ impl std::error::Error for PersistBackendError {}
 /// Not all changes to the in-memory representation needs to be written to disk right away, so
 /// [`Persist::stage`] can be used to *stage* changes first and then [`Persist::commit`] can be used
 /// to write changes to disk.
-#[derive(Debug)]
-pub struct Persist<B, C> {
-    backend: B,
+pub struct Persist<C> {
+    backend: Box<dyn PersistBackend<C>>,
     stage: C,
 }
 
-impl<B, C> Persist<B, C>
+impl<C: std::fmt::Debug> std::fmt::Debug for Persist<C> {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        write!(fmt, "{:?}", self.stage)?;
+        Ok(())
+    }
+}
+
+impl<C> Persist<C>
 where
-    B: PersistBackend<C>,
     C: Default + Append,
 {
     /// Create a new [`Persist`] from [`PersistBackend`].
-    pub fn new(backend: B) -> Self {
+    pub fn new(backend: Box<dyn PersistBackend<C>>) -> Self {
         Self {
             backend,
             stage: Default::default(),

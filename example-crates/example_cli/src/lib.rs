@@ -29,7 +29,7 @@ pub type KeychainChangeSet<A> = (
     local_chain::ChangeSet,
     indexed_tx_graph::ChangeSet<A, keychain::ChangeSet<Keychain>>,
 );
-pub type Database<C> = Persist<Store<C>, C>;
+pub type Database<C> = Persist<C>;
 
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
@@ -677,7 +677,7 @@ pub fn init<CS: clap::Subcommand, S: clap::Args, C>(
     db_default_path: &str,
 ) -> anyhow::Result<Init<CS, S, C>>
 where
-    C: Default + Append + Serialize + DeserializeOwned,
+    C: Default + Append + Serialize + DeserializeOwned + 'static,
 {
     if std::env::var("BDK_DB_PATH").is_err() {
         std::env::set_var("BDK_DB_PATH", db_default_path);
@@ -713,7 +713,7 @@ where
         args,
         keymap,
         index,
-        db: Mutex::new(Database::new(db_backend)),
+        db: Mutex::new(Database::new(Box::new(db_backend))),
         init_changeset,
     })
 }

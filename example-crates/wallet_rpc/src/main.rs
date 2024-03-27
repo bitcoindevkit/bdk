@@ -89,7 +89,10 @@ fn main() -> anyhow::Result<()> {
     let mut wallet = Wallet::new_or_load(
         &args.descriptor,
         args.change_descriptor.as_ref(),
-        Store::<bdk::wallet::ChangeSet>::open_or_create_new(DB_MAGIC.as_bytes(), args.db_path)?,
+        Box::new(Store::<bdk::wallet::ChangeSet>::open_or_create_new(
+            DB_MAGIC.as_bytes(),
+            args.db_path,
+        )?),
         args.network,
     )?;
     println!(

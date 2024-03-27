@@ -72,7 +72,9 @@ fn load_recovers_wallet() {
 
     // create new wallet
     let wallet_spk_index = {
-        let db = bdk_file_store::Store::create_new(DB_MAGIC, &file_path).expect("must create db");
+        let db = Box::new(
+            bdk_file_store::Store::create_new(DB_MAGIC, &file_path).expect("must create db"),
+        );
         let mut wallet = Wallet::new(get_test_tr_single_sig_xprv(), None, db, Network::Testnet)
             .expect("must init wallet");
 
@@ -82,7 +84,8 @@ fn load_recovers_wallet() {
 
     // recover wallet
     {
-        let db = bdk_file_store::Store::open(DB_MAGIC, &file_path).expect("must recover db");
+        let db =
+            Box::new(bdk_file_store::Store::open(DB_MAGIC, &file_path).expect("must recover db"));
         let wallet =
             Wallet::load(get_test_tr_single_sig_xprv(), None, db).expect("must recover wallet");
         assert_eq!(wallet.network(), Network::Testnet);
@@ -95,7 +98,8 @@ fn load_recovers_wallet() {
 
     // `new` can only be called on empty db
     {
-        let db = bdk_file_store::Store::open(DB_MAGIC, &file_path).expect("must recover db");
+        let db =
+            Box::new(bdk_file_store::Store::open(DB_MAGIC, &file_path).expect("must recover db"));
         let result = Wallet::new(get_test_tr_single_sig_xprv(), None, db, Network::Testnet);
         assert!(matches!(result, Err(NewError::NonEmptyDatabase)));
     }
@@ -108,8 +112,10 @@ fn new_or_load() {
 
     // init wallet when non-existent
     let wallet_keychains = {
-        let db = bdk_file_store::Store::open_or_create_new(DB_MAGIC, &file_path)
-            .expect("must create db");
+        let db = Box::new(
+            bdk_file_store::Store::open_or_create_new(DB_MAGIC, &file_path)
+                .expect("must create db"),
+        );
         let wallet = Wallet::new_or_load(get_test_wpkh(), None, db, Network::Testnet)
             .expect("must init wallet");
         wallet.keychains().clone()
@@ -117,8 +123,9 @@ fn new_or_load() {
 
     // wrong network
     {
-        let db =
-            bdk_file_store::Store::open_or_create_new(DB_MAGIC, &file_path).expect("must open db");
+        let db = Box::new(
+            bdk_file_store::Store::open_or_create_new(DB_MAGIC, &file_path).expect("must open db"),
+        );
         let err = Wallet::new_or_load(get_test_wpkh(), None, db, Network::Bitcoin)
             .expect_err("wrong network");
         assert!(
@@ -140,8 +147,9 @@ fn new_or_load() {
         let got_blockhash =
             bitcoin::blockdata::constants::genesis_block(Network::Testnet).block_hash();
 
-        let db =
-            bdk_file_store::Store::open_or_create_new(DB_MAGIC, &file_path).expect("must open db");
+        let db = Box::new(
+            bdk_file_store::Store::open_or_create_new(DB_MAGIC, &file_path).expect("must open db"),
+        );
         let err = Wallet::new_or_load_with_genesis_hash(
             get_test_wpkh(),
             None,
@@ -163,8 +171,9 @@ fn new_or_load() {
 
     // all parameters match
     {
-        let db =
-            bdk_file_store::Store::open_or_create_new(DB_MAGIC, &file_path).expect("must open db");
+        let db = Box::new(
+            bdk_file_store::Store::open_or_create_new(DB_MAGIC, &file_path).expect("must open db"),
+        );
         let wallet = Wallet::new_or_load(get_test_wpkh(), None, db, Network::Testnet)
             .expect("must recover wallet");
         assert_eq!(wallet.network(), Network::Testnet);

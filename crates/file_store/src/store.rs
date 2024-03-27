@@ -25,17 +25,13 @@ impl<C> PersistBackend<C> for Store<C>
 where
     C: Append + serde::Serialize + serde::de::DeserializeOwned,
 {
-    // type WriteError = std::io::Error;
-
-    // type LoadError = IterError;
-
     fn write_changes(&mut self, changeset: &C) -> Result<(), PersistBackendError> {
         self.append_changeset(changeset)
     }
 
     fn load_from_persistence(&mut self) -> Result<Option<C>, PersistBackendError> {
         self.aggregate_changesets()
-            .map_err(|_| PersistBackendError::WriteError)
+            .map_err(|_e| PersistBackendError::IterError)
     }
 }
 
@@ -183,7 +179,7 @@ where
         bincode_options()
             .serialize_into(&mut self.db_file, changeset)
             .map_err(|e| match *e {
-                bincode::ErrorKind::Io(_inner) => PersistBackendError::WriteError,
+                bincode::ErrorKind::Io(_inner) => PersistBackendError::IterError,
                 unexpected_err => panic!("unexpected bincode error: {}", unexpected_err),
             })?;
 
@@ -193,10 +189,10 @@ where
         let pos = self
             .db_file
             .stream_position()
-            .map_err(|_| PersistBackendError::WriteError)?;
+            .map_err(PersistBackendError::IoError)?;
         self.db_file
             .set_len(pos)
-            .map_err(|_| PersistBackendError::WriteError)?;
+            .map_err(PersistBackendError::IoError)?;
 
         Ok(())
     }
