@@ -274,14 +274,13 @@ macro_rules! impl_sortedmulti {
 #[macro_export]
 macro_rules! parse_tap_tree {
     ( @merge $tree_a:expr, $tree_b:expr) => {{
-        use $crate::alloc::sync::Arc;
         use $crate::miniscript::descriptor::TapTree;
 
         $tree_a
             .and_then(|tree_a| Ok((tree_a, $tree_b?)))
             .and_then(|((a_tree, mut a_keymap, a_networks), (b_tree, b_keymap, b_networks))| {
                 a_keymap.extend(b_keymap.into_iter());
-                Ok((TapTree::Tree(Arc::new(a_tree), Arc::new(b_tree)), a_keymap, $crate::keys::merge_networks(&a_networks, &b_networks)))
+                Ok((TapTree::combine(a_tree, b_tree), a_keymap, $crate::keys::merge_networks(&a_networks, &b_networks)))
             })
 
     }};
@@ -806,7 +805,7 @@ mod test {
     use crate::descriptor::{DescriptorError, DescriptorMeta};
     use crate::keys::{DescriptorKey, IntoDescriptorKey, ValidNetworks};
     use bitcoin::bip32;
-    use bitcoin::network::constants::Network::{Bitcoin, Regtest, Signet, Testnet};
+    use bitcoin::Network::{Bitcoin, Regtest, Signet, Testnet};
     use bitcoin::PrivateKey;
 
     // test the descriptor!() macro
@@ -936,7 +935,7 @@ mod test {
 
     #[test]
     fn test_bip32_legacy_descriptors() {
-        let xprv = bip32::ExtendedPrivKey::from_str("tprv8ZgxMBicQKsPcx5nBGsR63Pe8KnRUqmbJNENAfGftF3yuXoMMoVJJcYeUw5eVkm9WBPjWYt6HMWYJNesB5HaNVBaFc1M6dRjWSYnmewUMYy").unwrap();
+        let xprv = bip32::Xpriv::from_str("tprv8ZgxMBicQKsPcx5nBGsR63Pe8KnRUqmbJNENAfGftF3yuXoMMoVJJcYeUw5eVkm9WBPjWYt6HMWYJNesB5HaNVBaFc1M6dRjWSYnmewUMYy").unwrap();
 
         let path = bip32::DerivationPath::from_str("m/0").unwrap();
         let desc_key = (xprv, path.clone()).into_descriptor_key().unwrap();
@@ -981,7 +980,7 @@ mod test {
 
     #[test]
     fn test_bip32_segwitv0_descriptors() {
-        let xprv = bip32::ExtendedPrivKey::from_str("tprv8ZgxMBicQKsPcx5nBGsR63Pe8KnRUqmbJNENAfGftF3yuXoMMoVJJcYeUw5eVkm9WBPjWYt6HMWYJNesB5HaNVBaFc1M6dRjWSYnmewUMYy").unwrap();
+        let xprv = bip32::Xpriv::from_str("tprv8ZgxMBicQKsPcx5nBGsR63Pe8KnRUqmbJNENAfGftF3yuXoMMoVJJcYeUw5eVkm9WBPjWYt6HMWYJNesB5HaNVBaFc1M6dRjWSYnmewUMYy").unwrap();
 
         let path = bip32::DerivationPath::from_str("m/0").unwrap();
         let desc_key = (xprv, path.clone()).into_descriptor_key().unwrap();
@@ -1038,10 +1037,10 @@ mod test {
 
     #[test]
     fn test_dsl_sortedmulti() {
-        let key_1 = bip32::ExtendedPrivKey::from_str("tprv8ZgxMBicQKsPcx5nBGsR63Pe8KnRUqmbJNENAfGftF3yuXoMMoVJJcYeUw5eVkm9WBPjWYt6HMWYJNesB5HaNVBaFc1M6dRjWSYnmewUMYy").unwrap();
+        let key_1 = bip32::Xpriv::from_str("tprv8ZgxMBicQKsPcx5nBGsR63Pe8KnRUqmbJNENAfGftF3yuXoMMoVJJcYeUw5eVkm9WBPjWYt6HMWYJNesB5HaNVBaFc1M6dRjWSYnmewUMYy").unwrap();
         let path_1 = bip32::DerivationPath::from_str("m/0").unwrap();
 
-        let key_2 = bip32::ExtendedPrivKey::from_str("tprv8ZgxMBicQKsPegBHHnq7YEgM815dG24M2Jk5RVqipgDxF1HJ1tsnT815X5Fd5FRfMVUs8NZs9XCb6y9an8hRPThnhfwfXJ36intaekySHGF").unwrap();
+        let key_2 = bip32::Xpriv::from_str("tprv8ZgxMBicQKsPegBHHnq7YEgM815dG24M2Jk5RVqipgDxF1HJ1tsnT815X5Fd5FRfMVUs8NZs9XCb6y9an8hRPThnhfwfXJ36intaekySHGF").unwrap();
         let path_2 = bip32::DerivationPath::from_str("m/1").unwrap();
 
         let desc_key1 = (key_1, path_1);
@@ -1097,7 +1096,7 @@ mod test {
     // - verify the valid_networks returned is correctly computed based on the keys present in the descriptor
     #[test]
     fn test_valid_networks() {
-        let xprv = bip32::ExtendedPrivKey::from_str("tprv8ZgxMBicQKsPcx5nBGsR63Pe8KnRUqmbJNENAfGftF3yuXoMMoVJJcYeUw5eVkm9WBPjWYt6HMWYJNesB5HaNVBaFc1M6dRjWSYnmewUMYy").unwrap();
+        let xprv = bip32::Xpriv::from_str("tprv8ZgxMBicQKsPcx5nBGsR63Pe8KnRUqmbJNENAfGftF3yuXoMMoVJJcYeUw5eVkm9WBPjWYt6HMWYJNesB5HaNVBaFc1M6dRjWSYnmewUMYy").unwrap();
         let path = bip32::DerivationPath::from_str("m/0").unwrap();
         let desc_key = (xprv, path).into_descriptor_key().unwrap();
 
@@ -1107,7 +1106,7 @@ mod test {
             [Testnet, Regtest, Signet].iter().cloned().collect()
         );
 
-        let xprv = bip32::ExtendedPrivKey::from_str("xprv9s21ZrQH143K3QTDL4LXw2F7HEK3wJUD2nW2nRk4stbPy6cq3jPPqjiChkVvvNKmPGJxWUtg6LnF5kejMRNNU3TGtRBeJgk33yuGBxrMPHi").unwrap();
+        let xprv = bip32::Xpriv::from_str("xprv9s21ZrQH143K3QTDL4LXw2F7HEK3wJUD2nW2nRk4stbPy6cq3jPPqjiChkVvvNKmPGJxWUtg6LnF5kejMRNNU3TGtRBeJgk33yuGBxrMPHi").unwrap();
         let path = bip32::DerivationPath::from_str("m/10/20/30/40").unwrap();
         let desc_key = (xprv, path).into_descriptor_key().unwrap();
 
@@ -1120,15 +1119,15 @@ mod test {
     fn test_key_maps_merged() {
         let secp = Secp256k1::new();
 
-        let xprv1 = bip32::ExtendedPrivKey::from_str("tprv8ZgxMBicQKsPcx5nBGsR63Pe8KnRUqmbJNENAfGftF3yuXoMMoVJJcYeUw5eVkm9WBPjWYt6HMWYJNesB5HaNVBaFc1M6dRjWSYnmewUMYy").unwrap();
+        let xprv1 = bip32::Xpriv::from_str("tprv8ZgxMBicQKsPcx5nBGsR63Pe8KnRUqmbJNENAfGftF3yuXoMMoVJJcYeUw5eVkm9WBPjWYt6HMWYJNesB5HaNVBaFc1M6dRjWSYnmewUMYy").unwrap();
         let path1 = bip32::DerivationPath::from_str("m/0").unwrap();
         let desc_key1 = (xprv1, path1.clone()).into_descriptor_key().unwrap();
 
-        let xprv2 = bip32::ExtendedPrivKey::from_str("tprv8ZgxMBicQKsPegBHHnq7YEgM815dG24M2Jk5RVqipgDxF1HJ1tsnT815X5Fd5FRfMVUs8NZs9XCb6y9an8hRPThnhfwfXJ36intaekySHGF").unwrap();
+        let xprv2 = bip32::Xpriv::from_str("tprv8ZgxMBicQKsPegBHHnq7YEgM815dG24M2Jk5RVqipgDxF1HJ1tsnT815X5Fd5FRfMVUs8NZs9XCb6y9an8hRPThnhfwfXJ36intaekySHGF").unwrap();
         let path2 = bip32::DerivationPath::from_str("m/2147483647'/0").unwrap();
         let desc_key2 = (xprv2, path2.clone()).into_descriptor_key().unwrap();
 
-        let xprv3 = bip32::ExtendedPrivKey::from_str("tprv8ZgxMBicQKsPdZXrcHNLf5JAJWFAoJ2TrstMRdSKtEggz6PddbuSkvHKM9oKJyFgZV1B7rw8oChspxyYbtmEXYyg1AjfWbL3ho3XHDpHRZf").unwrap();
+        let xprv3 = bip32::Xpriv::from_str("tprv8ZgxMBicQKsPdZXrcHNLf5JAJWFAoJ2TrstMRdSKtEggz6PddbuSkvHKM9oKJyFgZV1B7rw8oChspxyYbtmEXYyg1AjfWbL3ho3XHDpHRZf").unwrap();
         let path3 = bip32::DerivationPath::from_str("m/10/20/30/40").unwrap();
         let desc_key3 = (xprv3, path3.clone()).into_descriptor_key().unwrap();
 
@@ -1152,7 +1151,7 @@ mod test {
     #[test]
     fn test_script_context_validation() {
         // this compiles
-        let xprv = bip32::ExtendedPrivKey::from_str("tprv8ZgxMBicQKsPcx5nBGsR63Pe8KnRUqmbJNENAfGftF3yuXoMMoVJJcYeUw5eVkm9WBPjWYt6HMWYJNesB5HaNVBaFc1M6dRjWSYnmewUMYy").unwrap();
+        let xprv = bip32::Xpriv::from_str("tprv8ZgxMBicQKsPcx5nBGsR63Pe8KnRUqmbJNENAfGftF3yuXoMMoVJJcYeUw5eVkm9WBPjWYt6HMWYJNesB5HaNVBaFc1M6dRjWSYnmewUMYy").unwrap();
         let path = bip32::DerivationPath::from_str("m/0").unwrap();
         let desc_key: DescriptorKey<Legacy> = (xprv, path).into_descriptor_key().unwrap();
 

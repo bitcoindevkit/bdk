@@ -1,9 +1,7 @@
-use bdk::bitcoin::FeeRate;
-use bdk::bitcoin::TxIn;
+use bdk::bitcoin::{Amount, FeeRate, Psbt, TxIn};
 use bdk::wallet::AddressIndex;
 use bdk::wallet::AddressIndex::New;
 use bdk::{psbt, SignOptions};
-use bitcoin::psbt::PartiallySignedTransaction as Psbt;
 use core::str::FromStr;
 mod common;
 use common::*;
@@ -163,7 +161,7 @@ fn test_psbt_multiple_internalkey_signers() {
     use bdk::signer::{SignerContext, SignerOrdering, SignerWrapper};
     use bdk::KeychainKind;
     use bitcoin::key::TapTweak;
-    use bitcoin::secp256k1::{schnorr, KeyPair, Message, Secp256k1, XOnlyPublicKey};
+    use bitcoin::secp256k1::{schnorr, Keypair, Message, Secp256k1, XOnlyPublicKey};
     use bitcoin::sighash::{Prevouts, SighashCache, TapSighashType};
     use bitcoin::{PrivateKey, TxOut};
     use std::sync::Arc;
@@ -172,7 +170,7 @@ fn test_psbt_multiple_internalkey_signers() {
     let wif = "cNJmN3fH9DDbDt131fQNkVakkpzawJBSeybCUNmP1BovpmGQ45xG";
     let desc = format!("tr({})", wif);
     let prv = PrivateKey::from_wif(wif).unwrap();
-    let keypair = KeyPair::from_secret_key(&secp, &prv.inner);
+    let keypair = Keypair::from_secret_key(&secp, &prv.inner);
 
     let (mut wallet, _) = get_funded_wallet(&desc);
     let to_spend = wallet.get_balance().total();
@@ -205,7 +203,7 @@ fn test_psbt_multiple_internalkey_signers() {
     // the prevout we're spending
     let prevouts = &[TxOut {
         script_pubkey: send_to.script_pubkey(),
-        value: to_spend,
+        value: Amount::from_sat(to_spend),
     }];
     let prevouts = Prevouts::All(prevouts);
     let input_index = 0;

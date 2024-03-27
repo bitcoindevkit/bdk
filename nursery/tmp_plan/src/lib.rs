@@ -17,14 +17,13 @@
 use bdk_chain::{bitcoin, collections::*, miniscript};
 use bitcoin::{
     absolute,
-    address::WitnessVersion,
     bip32::{DerivationPath, Fingerprint, KeySource},
     blockdata::transaction::Sequence,
     ecdsa,
     hashes::{hash160, ripemd160, sha256},
     secp256k1::Secp256k1,
     taproot::{self, LeafVersion, TapLeafHash},
-    ScriptBuf, TxIn, Witness,
+    ScriptBuf, TxIn, Witness, WitnessVersion,
 };
 use miniscript::{
     descriptor::{InnerXKey, Tr},
@@ -32,7 +31,7 @@ use miniscript::{
 };
 
 pub(crate) fn varint_len(v: usize) -> usize {
-    bitcoin::VarInt(v as u64).len() as usize
+    bitcoin::VarInt(v as u64).size() as usize
 }
 
 mod plan_impls;

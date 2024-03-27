@@ -34,7 +34,7 @@ fn main() -> Result<(), anyhow::Error> {
 
     print!("Syncing...");
     let client =
-        esplora_client::Builder::new("https://blockstream.info/testnet/api").build_blocking()?;
+        esplora_client::Builder::new("https://blockstream.info/testnet/api").build_blocking();
 
     let prev_tip = wallet.latest_checkpoint();
     let keychain_spks = wallet
@@ -90,7 +90,7 @@ fn main() -> Result<(), anyhow::Error> {
     let finalized = wallet.sign(&mut psbt, SignOptions::default())?;
     assert!(finalized);
 
-    let tx = psbt.extract_tx();
+    let tx = psbt.extract_tx()?;
     client.broadcast(&tx)?;
     println!("Tx broadcasted! Txid: {}", tx.txid());
 

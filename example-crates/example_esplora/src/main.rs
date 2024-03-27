@@ -86,7 +86,7 @@ impl EsploraArgs {
             _ => panic!("unsupported network"),
         });
 
-        let client = esplora_client::Builder::new(esplora_url).build_blocking()?;
+        let client = esplora_client::Builder::new(esplora_url).build_blocking();
         Ok(client)
     }
 }

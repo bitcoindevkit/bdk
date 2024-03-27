@@ -30,7 +30,7 @@ macro_rules! local_chain {
 pub fn test_update_tx_graph_without_keychain() -> anyhow::Result<()> {
     let env = TestEnv::new()?;
     let base_url = format!("http://{}", &env.electrsd.esplora_url.clone().unwrap());
-    let client = Builder::new(base_url.as_str()).build_blocking()?;
+    let client = Builder::new(base_url.as_str()).build_blocking();
 
     let receive_address0 =
         Address::from_str("bcrt1qc6fweuf4xjvz4x3gx3t9e0fh4hvqyu2qw4wvxm")?.assume_checked();
@@ -111,7 +111,7 @@ pub fn test_update_tx_graph_without_keychain() -> anyhow::Result<()> {
 pub fn test_update_tx_graph_stop_gap() -> anyhow::Result<()> {
     let env = TestEnv::new()?;
     let base_url = format!("http://{}", &env.electrsd.esplora_url.clone().unwrap());
-    let client = Builder::new(base_url.as_str()).build_blocking()?;
+    let client = Builder::new(base_url.as_str()).build_blocking();
     let _block_hashes = env.mine_blocks(101, None)?;
 
     // Now let's test the gap limit. First of all get a chain of 10 addresses.
@@ -215,7 +215,7 @@ fn update_local_chain() -> anyhow::Result<()> {
     // so new blocks can be seen by Electrs
     let env = env.reset_electrsd()?;
     let base_url = format!("http://{}", &env.electrsd.esplora_url.clone().unwrap());
-    let client = Builder::new(base_url.as_str()).build_blocking()?;
+    let client = Builder::new(base_url.as_str()).build_blocking();
 
     struct TestCase {
         name: &'static str,
