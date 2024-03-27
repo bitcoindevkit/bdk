@@ -96,5 +96,5 @@ fn unmark_used_does_not_result_in_invalid_representation() {
     assert!(!spk_index.unmark_used(&0));
     assert!(!spk_index.unmark_used(&1));
     assert!(!spk_index.unmark_used(&2));
-    assert!(spk_index.unused_spks(..).collect::<Vec<_>>().is_empty());
+    assert!(spk_index.unused_spks(..).next().is_none());
 }

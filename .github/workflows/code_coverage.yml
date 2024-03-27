@@ -6,27 +6,18 @@ jobs:
   Codecov:
     name: Code Coverage
     runs-on: ubuntu-latest
-    env:
-      RUSTFLAGS: "-Cinstrument-coverage"
-      RUSTDOCFLAGS: "-Cinstrument-coverage"
-      LLVM_PROFILE_FILE: "./target/coverage/%p-%m.profraw"
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v2
-      - name: Install lcov tools
-        run: sudo apt-get install lcov -y
-      - name: Install Rust toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-            toolchain: stable
-            override: true
-            profile: minimal
-            components: llvm-tools-preview
+      - name: checkout
+        uses: actions/checkout@v4
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v5
+      - name: Nix Cache
+        uses: DeterminateSystems/magic-nix-cache-action@v2
       - name: Rust Cache
-        uses: Swatinem/rust-cache@v2.2.1
+        uses: Swatinem/rust-cache@v2
+      # Code Coverage
       - name: Install grcov
-        run: if [[ ! -e ~/.cargo/bin/grcov ]]; then cargo install grcov; fi
+        run: nix develop -L ".#coverage" --command cargo install grcov
         # TODO: re-enable the hwi tests
       - name: Build simulator image
         run: docker build -t hwi/ledger_emulator ./ci -f ci/Dockerfile.ledger
@@ -35,23 +26,23 @@ jobs:
       - name: Install Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.9'
+          python-version: "3.9"
       - name: Install python dependencies
         run: pip install hwi==2.1.1 protobuf==3.20.1
       - name: Test
-        run: cargo test --all-features
+        run: nix develop ".#coverage" -L --command cargo test --all-features
       - name: Make coverage directory
         run: mkdir coverage
       - name: Run grcov
-        run: grcov . --binary-path ./target/debug/ -s . -t lcov --branch --ignore-not-existing --keep-only '**/crates/**' --ignore '**/tests/**' --ignore '**/examples/**' -o ./coverage/lcov.info
+        run: nix develop ".#coverage" -L --command grcov . --binary-path ./target/debug/ -s . -t lcov --branch --ignore-not-existing --keep-only '**/crates/**' --ignore '**/tests/**' --ignore '**/examples/**' -o ./coverage/lcov.info
       - name: Generate HTML coverage report
-        run: genhtml -o coverage-report.html --ignore-errors source ./coverage/lcov.info
+        run: nix develop ".#coverage" -L --command genhtml -o coverage-report.html --ignore-errors source ./coverage/lcov.info
       - name: Coveralls upload
         uses: coverallsapp/github-action@master
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Upload artifact
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: coverage-report
           path: coverage-report.html

@@ -15,8 +15,13 @@ readme = "README.md"
 [dependencies]
 bitcoincore-rpc = { version = "0.17" }
 bdk_chain = { path = "../chain", version = "0.11", default-features = false }
-electrsd = { version= "0.25.0", features = ["bitcoind_25_0", "esplora_a33e97e1", "legacy"] }
 anyhow = { version = "1" }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+bitcoincore-rpc = { version = "0.17" }
+bdk_chain = { path = "../chain", version = "0.11", default-features = false }
+anyhow = { version = "1" }
+electrsd = { version = "0.26.0", features = ["legacy"] }
 
 [features]
 default = ["std"]

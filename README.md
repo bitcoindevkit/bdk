@@ -44,6 +44,7 @@ The project is split up into several crates in the `/crates` directory:
 - [`file_store`](./crates/file_store): A (experimental) persistence backend for storing chain data in a single file.
 - [`esplora`](./crates/esplora): Extends the [`esplora-client`] crate with methods to fetch chain data from an esplora HTTP server in the form that [`bdk_chain`] and `Wallet` can consume.
 - [`electrum`](./crates/electrum): Extends the [`electrum-client`] crate with methods to fetch chain data from an electrum server in the form that [`bdk_chain`] and `Wallet` can consume.
+- [`bitcond_rpc`](./crates/bitcond_rpc) Emitting blockchain data from the `bitcoind` RPC interface.
 
 Fully working examples of how to use these components are in `/example-crates`:
 - [`example_cli`](./example-crates/example_cli): Library used by the `example_*` crates. Provides utilities for syncing, showing the balance, generating addresses and creating transactions without using the bdk `Wallet`.
@@ -61,18 +62,19 @@ Fully working examples of how to use these components are in `/example-crates`:
 [`electrum-client`]: https://docs.rs/electrum-client/
 [`bdk_chain`]: https://docs.rs/bdk-chain/
 
+## Dependencies
+
+- `bitcoind_rpc` depends on `bitcoind` being installed and available in `PATH` or in the `BITCOIND_EXEC` ENV variable.
+- `esplora` depends on [Blockstream's version of `electrs`](https://github.com/Blockstream/electrs)
+   being installed and available in `PATH` or in the `ELECTRS_EXEC` ENV variable.
+
 ## Minimum Supported Rust Version (MSRV)
+
 This library should compile with any combination of features with Rust 1.63.0.
 
 To build with the MSRV you will need to pin dependencies as follows:
 
 ```shell
-# zip 0.6.3 has MSRV 1.64.0
-cargo update -p zip --precise "0.6.2"
-# time 0.3.21 has MSRV 1.65.0
-cargo update -p time --precise "0.3.20"
-# jobserver 0.1.27 has MSRV 1.66.0
-cargo update -p jobserver --precise "0.1.26"
 # home 0.5.9 has MSRV 1.70.0
 cargo update -p home --precise "0.5.5"
 ```

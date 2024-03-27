@@ -25,7 +25,7 @@ pub use txout_index::*;
 ///
 /// [`KeychainTxOutIndex`]: crate::keychain::KeychainTxOutIndex
 /// [`apply_changeset`]: crate::keychain::KeychainTxOutIndex::apply_changeset
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(
     feature = "serde",
     derive(serde::Deserialize, serde::Serialize),

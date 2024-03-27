@@ -93,7 +93,7 @@ use core::{
 /// See the [module-level documentation] for more.
 ///
 /// [module-level documentation]: crate::tx_graph
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TxGraph<A = ()> {
     // all transactions that the graph is aware of in format: `(tx_node, tx_anchors, tx_last_seen)`
     txs: HashMap<Txid, (TxNodeInternal, BTreeSet<A>, u64)>,
@@ -141,7 +141,7 @@ impl<'a, T, A> Deref for TxNode<'a, T, A> {
 ///
 /// This can either be a whole transaction, or a partial transaction (where we only have select
 /// outputs).
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum TxNodeInternal {
     Whole(Transaction),
     Partial(BTreeMap<u32, TxOut>),
@@ -1194,7 +1194,7 @@ impl<A: Anchor> TxGraph<A> {
 /// Refer to [module-level documentation] for more.
 ///
 /// [module-level documentation]: crate::tx_graph
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(
     feature = "serde",
     derive(serde::Deserialize, serde::Serialize),
