@@ -1,6 +1,6 @@
 [package]
 name = "bdk_electrum"
-version = "0.9.0"
+version = "0.10.0"
 edition = "2021"
 homepage = "https://bitcoindevkit.org"
 repository = "https://github.com/bitcoindevkit/bdk"
@@ -17,6 +17,6 @@ electrum-client = { version = "0.18" }
 #rustls = { version = "=0.21.1", optional = true, features = ["dangerous_configuration"] }
 
 [dev-dependencies]
-bdk_testenv = { path = "../testenv", default-features = false }
+bdk_testenv = { path = "../testenv", version = "0.1.0", default-features = false }
 electrsd = { version= "0.25.0", features = ["bitcoind_25_0", "esplora_a33e97e1", "legacy"] }
 anyhow = "1"
