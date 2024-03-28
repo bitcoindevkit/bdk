@@ -16,9 +16,7 @@
 //! [`TxGraph`]: bdk_chain::tx_graph::TxGraph
 //! [`example_esplora`]: https://github.com/bitcoindevkit/bdk/tree/master/example-crates/example_esplora
 
-use std::collections::BTreeMap;
-
-use bdk_chain::{local_chain, BlockId, ConfirmationTimeHeightAnchor, TxGraph};
+use bdk_chain::{BlockId, ConfirmationTimeHeightAnchor};
 use esplora_client::TxStatus;
 
 pub use esplora_client;
@@ -49,22 +47,4 @@ fn anchor_from_status(status: &TxStatus) -> Option<ConfirmationTimeHeightAnchor>
     } else {
         None
     }
-}
-
-/// Update returns from a full scan.
-pub struct FullScanUpdate<K> {
-    /// The update to apply to the receiving [`LocalChain`](local_chain::LocalChain).
-    pub local_chain: local_chain::Update,
-    /// The update to apply to the receiving [`TxGraph`].
-    pub tx_graph: TxGraph<ConfirmationTimeHeightAnchor>,
-    /// Last active indices for the corresponding keychains (`K`).
-    pub last_active_indices: BTreeMap<K, u32>,
-}
-
-/// Update returned from a sync.
-pub struct SyncUpdate {
-    /// The update to apply to the receiving [`LocalChain`](local_chain::LocalChain).
-    pub local_chain: local_chain::Update,
-    /// The update to apply to the receiving [`TxGraph`].
-    pub tx_graph: TxGraph<ConfirmationTimeHeightAnchor>,
 }
