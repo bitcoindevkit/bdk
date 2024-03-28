@@ -20,11 +20,13 @@ fn spk_txout_sent_and_received() {
         }],
     };
 
-    assert_eq!(index.sent_and_received(&tx1), (0, 42_000));
-    assert_eq!(index.net_value(&tx1), 42_000);
+    assert_eq!(index.sent_and_received(&tx1, ..), (0, 42_000));
+    assert_eq!(index.sent_and_received(&tx1, ..1), (0, 42_000));
+    assert_eq!(index.sent_and_received(&tx1, 1..), (0, 0));
+    assert_eq!(index.net_value(&tx1, ..), 42_000);
     index.index_tx(&tx1);
     assert_eq!(
-        index.sent_and_received(&tx1),
+        index.sent_and_received(&tx1, ..),
         (0, 42_000),
         "shouldn't change after scanning"
     );
@@ -51,8 +53,10 @@ fn spk_txout_sent_and_received() {
         ],
     };
 
-    assert_eq!(index.sent_and_received(&tx2), (42_000, 50_000));
-    assert_eq!(index.net_value(&tx2), 8_000);
+    assert_eq!(index.sent_and_received(&tx2, ..), (42_000, 50_000));
+    assert_eq!(index.sent_and_received(&tx2, ..1), (42_000, 30_000));
+    assert_eq!(index.sent_and_received(&tx2, 1..), (0, 20_000));
+    assert_eq!(index.net_value(&tx2, ..), 8_000);
 }
 
 #[test]
