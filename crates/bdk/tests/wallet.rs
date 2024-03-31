@@ -208,12 +208,12 @@ fn test_get_funded_wallet_sent_and_received() {
 
     let mut tx_amounts: Vec<(Txid, (u64, u64))> = wallet
         .transactions()
-        .map(|ct| (ct.tx_node.txid, wallet.sent_and_received(ct.tx_node.tx)))
+        .map(|ct| (ct.tx_node.txid, wallet.sent_and_received(&ct.tx_node)))
         .collect();
     tx_amounts.sort_by(|a1, a2| a1.0.cmp(&a2.0));
 
     let tx = wallet.get_tx(txid).expect("transaction").tx_node.tx;
-    let (sent, received) = wallet.sent_and_received(tx);
+    let (sent, received) = wallet.sent_and_received(&tx);
 
     // The funded wallet contains a tx with a 76_000 sats input and two outputs, one spending 25_000
     // to a foreign address and one returning 50_000 back to the wallet as change. The remaining 1000
@@ -227,7 +227,7 @@ fn test_get_funded_wallet_tx_fees() {
     let (wallet, txid) = get_funded_wallet(get_test_wpkh());
 
     let tx = wallet.get_tx(txid).expect("transaction").tx_node.tx;
-    let tx_fee = wallet.calculate_fee(tx).expect("transaction fee");
+    let tx_fee = wallet.calculate_fee(&tx).expect("transaction fee");
 
     // The funded wallet contains a tx with a 76_000 sats input and two outputs, one spending 25_000
     // to a foreign address and one returning 50_000 back to the wallet as change. The remaining 1000
@@ -240,7 +240,9 @@ fn test_get_funded_wallet_tx_fee_rate() {
     let (wallet, txid) = get_funded_wallet(get_test_wpkh());
 
     let tx = wallet.get_tx(txid).expect("transaction").tx_node.tx;
-    let tx_fee_rate = wallet.calculate_fee_rate(tx).expect("transaction fee rate");
+    let tx_fee_rate = wallet
+        .calculate_fee_rate(&tx)
+        .expect("transaction fee rate");
 
     // The funded wallet contains a tx with a 76_000 sats input and two outputs, one spending 25_000
     // to a foreign address and one returning 50_000 back to the wallet as change. The remaining 1000
@@ -1307,7 +1309,7 @@ fn test_add_foreign_utxo_where_outpoint_doesnt_match_psbt_input() {
             .add_foreign_utxo(
                 utxo2.outpoint,
                 psbt::Input {
-                    non_witness_utxo: Some(tx1),
+                    non_witness_utxo: Some(tx1.as_ref().clone()),
                     ..Default::default()
                 },
                 satisfaction_weight
@@ -1320,7 +1322,7 @@ fn test_add_foreign_utxo_where_outpoint_doesnt_match_psbt_input() {
             .add_foreign_utxo(
                 utxo2.outpoint,
                 psbt::Input {
-                    non_witness_utxo: Some(tx2),
+                    non_witness_utxo: Some(tx2.as_ref().clone()),
                     ..Default::default()
                 },
                 satisfaction_weight
@@ -1384,7 +1386,7 @@ fn test_add_foreign_utxo_only_witness_utxo() {
         let mut builder = builder.clone();
         let tx2 = wallet2.get_tx(txid2).unwrap().tx_node.tx;
         let psbt_input = psbt::Input {
-            non_witness_utxo: Some(tx2.clone()),
+            non_witness_utxo: Some(tx2.as_ref().clone()),
             ..Default::default()
         };
         builder
@@ -3050,7 +3052,8 @@ fn test_taproot_sign_using_non_witness_utxo() {
     let mut psbt = builder.finish().unwrap();
 
     psbt.inputs[0].witness_utxo = None;
-    psbt.inputs[0].non_witness_utxo = Some(wallet.get_tx(prev_txid).unwrap().tx_node.tx.clone());
+    psbt.inputs[0].non_witness_utxo =
+        Some(wallet.get_tx(prev_txid).unwrap().tx_node.as_ref().clone());
     assert!(
         psbt.inputs[0].non_witness_utxo.is_some(),
         "Previous tx should be present in the database"
