@@ -40,15 +40,11 @@ impl RelevantTxids {
     pub fn into_tx_graph(
         self,
         client: &Client,
-        seen_at: Option<u64>,
         missing: Vec<Txid>,
     ) -> Result<TxGraph<ConfirmationHeightAnchor>, Error> {
         let new_txs = client.batch_transaction_get(&missing)?;
         let mut graph = TxGraph::<ConfirmationHeightAnchor>::new(new_txs);
         for (txid, anchors) in self.0 {
-            if let Some(seen_at) = seen_at {
-                let _ = graph.insert_seen_at(txid, seen_at);
-            }
             for anchor in anchors {
                 let _ = graph.insert_anchor(txid, anchor);
             }
@@ -67,10 +63,9 @@ impl RelevantTxids {
     pub fn into_confirmation_time_tx_graph(
         self,
         client: &Client,
-        seen_at: Option<u64>,
         missing: Vec<Txid>,
     ) -> Result<TxGraph<ConfirmationTimeHeightAnchor>, Error> {
-        let graph = self.into_tx_graph(client, seen_at, missing)?;
+        let graph = self.into_tx_graph(client, missing)?;
 
         let relevant_heights = {
             let mut visited_heights = HashSet::new();

@@ -68,7 +68,7 @@ fn scan_detects_confirmed_tx() -> Result<()> {
     } = client.sync(recv_chain.tip(), [spk_to_track], None, None, 5)?;
 
     let missing = relevant_txids.missing_full_txs(recv_graph.graph());
-    let graph_update = relevant_txids.into_confirmation_time_tx_graph(&client, None, missing)?;
+    let graph_update = relevant_txids.into_confirmation_time_tx_graph(&client, missing)?;
     let _ = recv_chain
         .apply_update(chain_update)
         .map_err(|err| anyhow::anyhow!("LocalChain update error: {:?}", err))?;
@@ -134,7 +134,7 @@ fn tx_can_become_unconfirmed_after_reorg() -> Result<()> {
     } = client.sync(recv_chain.tip(), [spk_to_track.clone()], None, None, 5)?;
 
     let missing = relevant_txids.missing_full_txs(recv_graph.graph());
-    let graph_update = relevant_txids.into_confirmation_time_tx_graph(&client, None, missing)?;
+    let graph_update = relevant_txids.into_confirmation_time_tx_graph(&client, missing)?;
     let _ = recv_chain
         .apply_update(chain_update)
         .map_err(|err| anyhow::anyhow!("LocalChain update error: {:?}", err))?;
@@ -164,8 +164,7 @@ fn tx_can_become_unconfirmed_after_reorg() -> Result<()> {
         } = client.sync(recv_chain.tip(), [spk_to_track.clone()], None, None, 5)?;
 
         let missing = relevant_txids.missing_full_txs(recv_graph.graph());
-        let graph_update =
-            relevant_txids.into_confirmation_time_tx_graph(&client, None, missing)?;
+        let graph_update = relevant_txids.into_confirmation_time_tx_graph(&client, missing)?;
         let _ = recv_chain
             .apply_update(chain_update)
             .map_err(|err| anyhow::anyhow!("LocalChain update error: {:?}", err))?;
