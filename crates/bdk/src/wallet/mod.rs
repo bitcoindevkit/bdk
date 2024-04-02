@@ -54,7 +54,6 @@ pub(crate) mod utils;
 pub mod error;
 pub use utils::IsDust;
 
-#[allow(deprecated)]
 use coin_selection::DefaultCoinSelectionAlgorithm;
 use signer::{SignOptions, SignerOrdering, SignersContainer, TransactionSigner};
 use tx_builder::{BumpFee, CreateTx, FeePolicy, TxBuilder, TxParams};
@@ -1714,10 +1713,9 @@ impl<D> Wallet<D> {
 
                 let weighted_utxo = match txout_index.index_of_spk(&txout.script_pubkey) {
                     Some((keychain, derivation_index)) => {
-                        #[allow(deprecated)]
                         let satisfaction_weight = self
                             .get_descriptor_for_keychain(keychain)
-                            .max_satisfaction_weight()
+                            .max_weight_to_satisfy()
                             .unwrap();
                         WeightedUtxo {
                             utxo: Utxo::Local(LocalOutput {
@@ -1735,7 +1733,6 @@ impl<D> Wallet<D> {
                         let satisfaction_weight =
                             serialize(&txin.script_sig).len() * 4 + serialize(&txin.witness).len();
                         WeightedUtxo {
-                            satisfaction_weight,
                             utxo: Utxo::Foreign {
                                 outpoint: txin.previous_output,
                                 sequence: Some(txin.sequence),
@@ -1745,6 +1742,7 @@ impl<D> Wallet<D> {
                                     ..Default::default()
                                 }),
                             },
+                            satisfaction_weight,
                         }
                     }
                 };
@@ -2059,13 +2057,11 @@ impl<D> Wallet<D> {
         self.list_unspent()
             .map(|utxo| {
                 let keychain = utxo.keychain;
-                #[allow(deprecated)]
-                (
-                    utxo,
+                (utxo, {
                     self.get_descriptor_for_keychain(keychain)
-                        .max_satisfaction_weight()
-                        .unwrap(),
-                )
+                        .max_weight_to_satisfy()
+                        .unwrap()
+                })
             })
             .collect()
     }

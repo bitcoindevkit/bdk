@@ -32,7 +32,6 @@
 //! # use bdk::*;
 //! # use bdk::wallet::coin_selection::decide_change;
 //! # use anyhow::Error;
-//! # const TXIN_BASE_WEIGHT: usize = (32 + 4 + 4) * 4;
 //! #[derive(Debug)]
 //! struct AlwaysSpendEverything;
 //!
@@ -55,7 +54,8 @@
 //!                 |(selected_amount, additional_weight), weighted_utxo| {
 //!                     **selected_amount += weighted_utxo.utxo.txout().value;
 //!                     **additional_weight += Weight::from_wu(
-//!                         (TXIN_BASE_WEIGHT + weighted_utxo.satisfaction_weight) as u64,
+//!                         (TxIn::default().segwit_weight() + weighted_utxo.satisfaction_weight)
+//!                             as u64,
 //!                     );
 //!                     Some(weighted_utxo.utxo)
 //!                 },
@@ -109,6 +109,7 @@ use bitcoin::FeeRate;
 use alloc::vec::Vec;
 use bitcoin::consensus::encode::serialize;
 use bitcoin::OutPoint;
+use bitcoin::TxIn;
 use bitcoin::{Script, Weight};
 
 use core::convert::TryInto;
@@ -118,10 +119,6 @@ use rand::seq::SliceRandom;
 /// Default coin selection algorithm used by [`TxBuilder`](super::tx_builder::TxBuilder) if not
 /// overridden
 pub type DefaultCoinSelectionAlgorithm = BranchAndBoundCoinSelection;
-
-// Base weight of a Txin, not counting the weight needed for satisfying it.
-// prev_txid (32 bytes) + prev_vout (4 bytes) + sequence (4 bytes)
-pub(crate) const TXIN_BASE_WEIGHT: usize = (32 + 4 + 4) * 4;
 
 /// Errors that can be thrown by the [`coin_selection`](crate::wallet::coin_selection) module
 #[derive(Debug)]
@@ -347,10 +344,10 @@ fn select_sorted_utxos(
                 if must_use || **selected_amount < target_amount + **fee_amount {
                     **fee_amount += (fee_rate
                         * Weight::from_wu(
-                            (TXIN_BASE_WEIGHT + weighted_utxo.satisfaction_weight) as u64,
+                            (TxIn::default().segwit_weight() + weighted_utxo.satisfaction_weight)
+                                as u64,
                         ))
                     .to_sat();
-
                     **selected_amount += weighted_utxo.utxo.txout().value;
                     Some(weighted_utxo.utxo)
                 } else {
@@ -392,9 +389,10 @@ struct OutputGroup {
 impl OutputGroup {
     fn new(weighted_utxo: WeightedUtxo, fee_rate: FeeRate) -> Self {
         let fee = (fee_rate
-            * Weight::from_wu((TXIN_BASE_WEIGHT + weighted_utxo.satisfaction_weight) as u64))
+            * Weight::from_wu(
+                (TxIn::default().segwit_weight() + weighted_utxo.satisfaction_weight) as u64,
+            ))
         .to_sat();
-
         let effective_value = weighted_utxo.utxo.txout().value as i64 - fee as i64;
         OutputGroup {
             weighted_utxo,
@@ -744,7 +742,7 @@ mod test {
     use core::str::FromStr;
 
     use bdk_chain::ConfirmationTime;
-    use bitcoin::{Amount, OutPoint, ScriptBuf, TxOut};
+    use bitcoin::{Amount, OutPoint, ScriptBuf, TxIn, TxOut};
 
     use super::*;
     use crate::types::*;
@@ -754,9 +752,9 @@ mod test {
     use rand::seq::SliceRandom;
     use rand::{Rng, RngCore, SeedableRng};
 
-    // n. of items on witness (1WU) + signature len (1WU) + signature and sighash (72WU)
-    // + pubkey len (1WU) + pubkey (33WU) + script sig len (1 byte, 4WU)
-    const P2WPKH_SATISFACTION_SIZE: usize = 1 + 1 + 72 + 1 + 33 + 4;
+    // signature len (1WU) + signature and sighash (72WU)
+    // + pubkey len (1WU) + pubkey (33WU)
+    const P2WPKH_SATISFACTION_SIZE: usize = 1 + 72 + 1 + 33;
 
     const FEE_AMOUNT: u64 = 50;
 
@@ -1240,7 +1238,7 @@ mod test {
 
         assert_eq!(result.selected.len(), 1);
         assert_eq!(result.selected_amount(), 100_000);
-        let input_weight = (TXIN_BASE_WEIGHT + P2WPKH_SATISFACTION_SIZE) as u64;
+        let input_weight = (TxIn::default().segwit_weight() + P2WPKH_SATISFACTION_SIZE) as u64;
         // the final fee rate should be exactly the same as the fee rate given
         let result_feerate = Amount::from_sat(result.fee_amount) / Weight::from_wu(input_weight);
         assert_eq!(result_feerate, feerate);
