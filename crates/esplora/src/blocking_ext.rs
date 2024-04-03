@@ -148,8 +148,7 @@ impl EsploraExt for esplora_client::BlockingClient {
 /// block-based chain-sources). Therefore it's better to be conservative when setting the tip (use
 /// an earlier tip rather than a later tip) otherwise the caller may accidentally skip blocks when
 /// alternating between chain-sources.
-#[doc(hidden)]
-pub fn init_chain_update_blocking(
+fn init_chain_update_blocking(
     client: &esplora_client::BlockingClient,
     local_tip: &CheckPoint,
 ) -> Result<BTreeMap<u32, BlockHash>, Error> {
@@ -191,8 +190,7 @@ pub fn init_chain_update_blocking(
 ///
 /// A checkpoint is considered "missing" if an anchor (of `anchors`) points to a height without an
 /// existing checkpoint/block under `local_tip` or `update_blocks`.
-#[doc(hidden)]
-pub fn finalize_chain_update_blocking<A: Anchor>(
+fn finalize_chain_update_blocking<A: Anchor>(
     client: &esplora_client::BlockingClient,
     local_tip: &CheckPoint,
     anchors: &BTreeSet<(A, Txid)>,
@@ -251,8 +249,7 @@ pub fn finalize_chain_update_blocking<A: Anchor>(
 
 /// This performs a full scan to get an update for the [`TxGraph`] and
 /// [`KeychainTxOutIndex`](bdk_chain::keychain::KeychainTxOutIndex).
-#[doc(hidden)]
-pub fn full_scan_for_index_and_graph_blocking<K: Ord + Clone>(
+fn full_scan_for_index_and_graph_blocking<K: Ord + Clone>(
     client: &esplora_client::BlockingClient,
     keychain_spks: BTreeMap<K, impl IntoIterator<Item = (u32, ScriptBuf)>>,
     stop_gap: usize,
@@ -347,8 +344,7 @@ pub fn full_scan_for_index_and_graph_blocking<K: Ord + Clone>(
     Ok((tx_graph, last_active_indices))
 }
 
-#[doc(hidden)]
-pub fn sync_for_index_and_graph_blocking(
+fn sync_for_index_and_graph_blocking(
     client: &esplora_client::BlockingClient,
     misc_spks: impl IntoIterator<Item = ScriptBuf>,
     txids: impl IntoIterator<Item = Txid>,
@@ -430,4 +426,392 @@ pub fn sync_for_index_and_graph_blocking(
     }
 
     Ok(tx_graph)
+}
+
+#[cfg(test)]
+mod test {
+    use crate::blocking_ext::{finalize_chain_update_blocking, init_chain_update_blocking};
+    use bdk_chain::bitcoin::hashes::Hash;
+    use bdk_chain::bitcoin::Txid;
+    use bdk_chain::local_chain::LocalChain;
+    use bdk_chain::BlockId;
+    use bdk_testenv::TestEnv;
+    use electrsd::bitcoind::bitcoincore_rpc::RpcApi;
+    use esplora_client::{BlockHash, Builder};
+    use std::collections::{BTreeMap, BTreeSet};
+    use std::time::Duration;
+
+    macro_rules! h {
+        ($index:literal) => {{
+            bdk_chain::bitcoin::hashes::Hash::hash($index.as_bytes())
+        }};
+    }
+
+    macro_rules! local_chain {
+        [ $(($height:expr, $block_hash:expr)), * ] => {{
+            #[allow(unused_mut)]
+            bdk_chain::local_chain::LocalChain::from_blocks([$(($height, $block_hash).into()),*].into_iter().collect())
+                .expect("chain must have genesis block")
+        }};
+    }
+
+    /// Ensure that update does not remove heights (from original), and all anchor heights are included.
+    #[test]
+    pub fn test_finalize_chain_update() -> anyhow::Result<()> {
+        struct TestCase<'a> {
+            name: &'a str,
+            /// Initial blockchain height to start the env with.
+            initial_env_height: u32,
+            /// Initial checkpoint heights to start with.
+            initial_cps: &'a [u32],
+            /// The final blockchain height of the env.
+            final_env_height: u32,
+            /// The anchors to test with: `(height, txid)`. Only the height is provided as we can fetch
+            /// the blockhash from the env.
+            anchors: &'a [(u32, Txid)],
+        }
+
+        let test_cases = [
+            TestCase {
+                name: "chain_extends",
+                initial_env_height: 60,
+                initial_cps: &[59, 60],
+                final_env_height: 90,
+                anchors: &[],
+            },
+            TestCase {
+                name: "introduce_older_heights",
+                initial_env_height: 50,
+                initial_cps: &[10, 15],
+                final_env_height: 50,
+                anchors: &[(11, h!("A")), (14, h!("B"))],
+            },
+            TestCase {
+                name: "introduce_older_heights_after_chain_extends",
+                initial_env_height: 50,
+                initial_cps: &[10, 15],
+                final_env_height: 100,
+                anchors: &[(11, h!("A")), (14, h!("B"))],
+            },
+        ];
+
+        for (i, t) in test_cases.into_iter().enumerate() {
+            println!("[{}] running test case: {}", i, t.name);
+
+            let env = TestEnv::new()?;
+            let base_url = format!("http://{}", &env.electrsd.esplora_url.clone().unwrap());
+            let client = Builder::new(base_url.as_str()).build_blocking();
+
+            // set env to `initial_env_height`
+            if let Some(to_mine) = t
+                .initial_env_height
+                .checked_sub(env.make_checkpoint_tip().height())
+            {
+                env.mine_blocks(to_mine as _, None)?;
+            }
+            while client.get_height()? < t.initial_env_height {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+
+            // craft initial `local_chain`
+            let local_chain = {
+                let (mut chain, _) = LocalChain::from_genesis_hash(env.genesis_hash()?);
+                let chain_tip = chain.tip();
+                let update_blocks = init_chain_update_blocking(&client, &chain_tip)?;
+                let update_anchors = t
+                    .initial_cps
+                    .iter()
+                    .map(|&height| -> anyhow::Result<_> {
+                        Ok((
+                            BlockId {
+                                height,
+                                hash: env.bitcoind.client.get_block_hash(height as _)?,
+                            },
+                            Txid::all_zeros(),
+                        ))
+                    })
+                    .collect::<anyhow::Result<BTreeSet<_>>>()?;
+                let chain_update = finalize_chain_update_blocking(
+                    &client,
+                    &chain_tip,
+                    &update_anchors,
+                    update_blocks,
+                )?;
+                chain.apply_update(chain_update)?;
+                chain
+            };
+            println!("local chain height: {}", local_chain.tip().height());
+
+            // extend env chain
+            if let Some(to_mine) = t
+                .final_env_height
+                .checked_sub(env.make_checkpoint_tip().height())
+            {
+                env.mine_blocks(to_mine as _, None)?;
+            }
+            while client.get_height()? < t.final_env_height {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+
+            // craft update
+            let update = {
+                let local_tip = local_chain.tip();
+                let update_blocks = init_chain_update_blocking(&client, &local_tip)?;
+                let update_anchors = t
+                    .anchors
+                    .iter()
+                    .map(|&(height, txid)| -> anyhow::Result<_> {
+                        Ok((
+                            BlockId {
+                                height,
+                                hash: env.bitcoind.client.get_block_hash(height as _)?,
+                            },
+                            txid,
+                        ))
+                    })
+                    .collect::<anyhow::Result<_>>()?;
+                finalize_chain_update_blocking(&client, &local_tip, &update_anchors, update_blocks)?
+            };
+
+            // apply update
+            let mut updated_local_chain = local_chain.clone();
+            updated_local_chain.apply_update(update)?;
+            println!(
+                "updated local chain height: {}",
+                updated_local_chain.tip().height()
+            );
+
+            assert!(
+                {
+                    let initial_heights = local_chain
+                        .iter_checkpoints()
+                        .map(|cp| cp.height())
+                        .collect::<BTreeSet<_>>();
+                    let updated_heights = updated_local_chain
+                        .iter_checkpoints()
+                        .map(|cp| cp.height())
+                        .collect::<BTreeSet<_>>();
+                    updated_heights.is_superset(&initial_heights)
+                },
+                "heights from the initial chain must all be in the updated chain",
+            );
+
+            assert!(
+                {
+                    let exp_anchor_heights = t
+                        .anchors
+                        .iter()
+                        .map(|(h, _)| *h)
+                        .chain(t.initial_cps.iter().copied())
+                        .collect::<BTreeSet<_>>();
+                    let anchor_heights = updated_local_chain
+                        .iter_checkpoints()
+                        .map(|cp| cp.height())
+                        .collect::<BTreeSet<_>>();
+                    anchor_heights.is_superset(&exp_anchor_heights)
+                },
+                "anchor heights must all be in updated chain",
+            );
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn update_local_chain() -> anyhow::Result<()> {
+        const TIP_HEIGHT: u32 = 50;
+
+        let env = TestEnv::new()?;
+        let blocks = {
+            let bitcoind_client = &env.bitcoind.client;
+            assert_eq!(bitcoind_client.get_block_count()?, 1);
+            [
+                (0, bitcoind_client.get_block_hash(0)?),
+                (1, bitcoind_client.get_block_hash(1)?),
+            ]
+            .into_iter()
+            .chain((2..).zip(env.mine_blocks((TIP_HEIGHT - 1) as usize, None)?))
+            .collect::<BTreeMap<_, _>>()
+        };
+        // so new blocks can be seen by Electrs
+        let env = env.reset_electrsd()?;
+        let base_url = format!("http://{}", &env.electrsd.esplora_url.clone().unwrap());
+        let client = Builder::new(base_url.as_str()).build_blocking();
+
+        struct TestCase {
+            name: &'static str,
+            chain: LocalChain,
+            request_heights: &'static [u32],
+            exp_update_heights: &'static [u32],
+        }
+
+        let test_cases = [
+            TestCase {
+                name: "request_later_blocks",
+                chain: local_chain![(0, blocks[&0]), (21, blocks[&21])],
+                request_heights: &[22, 25, 28],
+                exp_update_heights: &[21, 22, 25, 28],
+            },
+            TestCase {
+                name: "request_prev_blocks",
+                chain: local_chain![(0, blocks[&0]), (1, blocks[&1]), (5, blocks[&5])],
+                request_heights: &[4],
+                exp_update_heights: &[4, 5],
+            },
+            TestCase {
+                name: "request_prev_blocks_2",
+                chain: local_chain![(0, blocks[&0]), (1, blocks[&1]), (10, blocks[&10])],
+                request_heights: &[4, 6],
+                exp_update_heights: &[4, 6, 10],
+            },
+            TestCase {
+                name: "request_later_and_prev_blocks",
+                chain: local_chain![(0, blocks[&0]), (7, blocks[&7]), (11, blocks[&11])],
+                request_heights: &[8, 9, 15],
+                exp_update_heights: &[8, 9, 11, 15],
+            },
+            TestCase {
+                name: "request_tip_only",
+                chain: local_chain![(0, blocks[&0]), (5, blocks[&5]), (49, blocks[&49])],
+                request_heights: &[TIP_HEIGHT],
+                exp_update_heights: &[49],
+            },
+            TestCase {
+                name: "request_nothing",
+                chain: local_chain![(0, blocks[&0]), (13, blocks[&13]), (23, blocks[&23])],
+                request_heights: &[],
+                exp_update_heights: &[23],
+            },
+            TestCase {
+                name: "request_nothing_during_reorg",
+                chain: local_chain![(0, blocks[&0]), (13, blocks[&13]), (23, h!("23"))],
+                request_heights: &[],
+                exp_update_heights: &[13, 23],
+            },
+            TestCase {
+                name: "request_nothing_during_reorg_2",
+                chain: local_chain![
+                    (0, blocks[&0]),
+                    (21, blocks[&21]),
+                    (22, h!("22")),
+                    (23, h!("23"))
+                ],
+                request_heights: &[],
+                exp_update_heights: &[21, 22, 23],
+            },
+            TestCase {
+                name: "request_prev_blocks_during_reorg",
+                chain: local_chain![
+                    (0, blocks[&0]),
+                    (21, blocks[&21]),
+                    (22, h!("22")),
+                    (23, h!("23"))
+                ],
+                request_heights: &[17, 20],
+                exp_update_heights: &[17, 20, 21, 22, 23],
+            },
+            TestCase {
+                name: "request_later_blocks_during_reorg",
+                chain: local_chain![
+                    (0, blocks[&0]),
+                    (9, blocks[&9]),
+                    (22, h!("22")),
+                    (23, h!("23"))
+                ],
+                request_heights: &[25, 27],
+                exp_update_heights: &[9, 22, 23, 25, 27],
+            },
+            TestCase {
+                name: "request_later_blocks_during_reorg_2",
+                chain: local_chain![(0, blocks[&0]), (9, h!("9"))],
+                request_heights: &[10],
+                exp_update_heights: &[0, 9, 10],
+            },
+            TestCase {
+                name: "request_later_and_prev_blocks_during_reorg",
+                chain: local_chain![(0, blocks[&0]), (1, blocks[&1]), (9, h!("9"))],
+                request_heights: &[8, 11],
+                exp_update_heights: &[1, 8, 9, 11],
+            },
+        ];
+
+        for (i, t) in test_cases.into_iter().enumerate() {
+            println!("Case {}: {}", i, t.name);
+            let mut chain = t.chain;
+            let cp_tip = chain.tip();
+
+            let new_blocks = init_chain_update_blocking(&client, &cp_tip).map_err(|err| {
+                anyhow::format_err!("[{}:{}] `init_chain_update` failed: {}", i, t.name, err)
+            })?;
+
+            let mock_anchors = t
+                .request_heights
+                .iter()
+                .map(|&h| {
+                    let anchor_blockhash: BlockHash = bdk_chain::bitcoin::hashes::Hash::hash(
+                        &format!("hash_at_height_{}", h).into_bytes(),
+                    );
+                    let txid: Txid = bdk_chain::bitcoin::hashes::Hash::hash(
+                        &format!("txid_at_height_{}", h).into_bytes(),
+                    );
+                    let anchor = BlockId {
+                        height: h,
+                        hash: anchor_blockhash,
+                    };
+                    (anchor, txid)
+                })
+                .collect::<BTreeSet<_>>();
+
+            let chain_update =
+                finalize_chain_update_blocking(&client, &cp_tip, &mock_anchors, new_blocks)?;
+            let update_blocks = chain_update
+                .tip
+                .iter()
+                .map(|cp| cp.block_id())
+                .collect::<BTreeSet<_>>();
+
+            let exp_update_blocks = t
+                .exp_update_heights
+                .iter()
+                .map(|&height| {
+                    let hash = blocks[&height];
+                    BlockId { height, hash }
+                })
+                .chain(
+                    // Electrs Esplora `get_block` call fetches 10 blocks which is included in the
+                    // update
+                    blocks
+                        .range(TIP_HEIGHT - 9..)
+                        .map(|(&height, &hash)| BlockId { height, hash }),
+                )
+                .collect::<BTreeSet<_>>();
+
+            assert!(
+                update_blocks.is_superset(&exp_update_blocks),
+                "[{}:{}] unexpected update",
+                i,
+                t.name
+            );
+
+            let _ = chain
+                .apply_update(chain_update)
+                .unwrap_or_else(|err| panic!("[{}:{}] update failed to apply: {}", i, t.name, err));
+
+            // all requested heights must exist in the final chain
+            for height in t.request_heights {
+                let exp_blockhash = blocks.get(height).expect("block must exist in bitcoind");
+                assert_eq!(
+                    chain.get(*height).map(|cp| cp.hash()),
+                    Some(*exp_blockhash),
+                    "[{}:{}] block {}:{} must exist in final chain",
+                    i,
+                    t.name,
+                    height,
+                    exp_blockhash
+                );
+            }
+        }
+
+        Ok(())
+    }
 }
