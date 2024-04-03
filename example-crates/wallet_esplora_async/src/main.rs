@@ -5,6 +5,7 @@ use bdk_wallet::{
     bitcoin::{Address, Amount, Network, Script},
     KeychainKind, SignOptions, Wallet,
 };
+use rand::thread_rng;
 
 use bdk_sqlite::{rusqlite::Connection, Store};
 
@@ -103,7 +104,7 @@ async fn main() -> Result<(), anyhow::Error> {
         .add_recipient(faucet_address.script_pubkey(), SEND_AMOUNT)
         .enable_rbf();
 
-    let mut psbt = tx_builder.finish()?;
+    let mut psbt = tx_builder.finish_with_aux_rand(&mut thread_rng())?;
     let finalized = wallet.sign(&mut psbt, SignOptions::default())?;
     assert!(finalized);
 

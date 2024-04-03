@@ -15,6 +15,7 @@ use bdk_wallet::descriptor::IntoWalletDescriptor;
 use bdk_wallet::keys::bip39::{Language, Mnemonic, WordCount};
 use bdk_wallet::keys::{GeneratableKey, GeneratedKey};
 use bdk_wallet::miniscript::Tap;
+use rand::thread_rng;
 use std::str::FromStr;
 
 /// This example demonstrates how to generate a mnemonic phrase
@@ -25,8 +26,9 @@ fn main() -> Result<(), anyhow::Error> {
     // In this example we are generating a 12 words mnemonic phrase
     // but it is also possible generate 15, 18, 21 and 24 words
     // using their respective `WordCount` variant.
+    let mut rng = thread_rng();
     let mnemonic: GeneratedKey<_, Tap> =
-        Mnemonic::generate((WordCount::Words12, Language::English))
+        Mnemonic::generate((WordCount::Words12, Language::English), &mut rng)
             .map_err(|_| anyhow!("Mnemonic generation error"))?;
 
     println!("Mnemonic phrase: {}", *mnemonic);

@@ -607,7 +607,7 @@ fn sign_psbt_schnorr(
     };
 
     let msg = &Message::from(hash);
-    let signature = secp.sign_schnorr(msg, &keypair);
+    let signature = secp.sign_schnorr_no_aux_rand(msg, &keypair);
     secp.verify_schnorr(&signature, msg, &XOnlyPublicKey::from_keypair(&keypair).0)
         .expect("invalid or corrupted schnorr signature");
 

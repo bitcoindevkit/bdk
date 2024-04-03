@@ -154,6 +154,7 @@ fn main() {
 <!-- use bitcoin::base64; -->
 <!-- use bdk_wallet::bitcoin::consensus::serialize; -->
 <!-- use bdk_wallet::bitcoin::Network; -->
+<!-- use rand::thread_rng(); -->
 
 <!-- fn main() -> Result<(), bdk_wallet::Error> { -->
 <!--     let blockchain = ElectrumBlockchain::from(Client::new("ssl://electrum.blockstream.info:60002")?); -->
@@ -173,7 +174,7 @@ fn main() {
 <!--             .enable_rbf() -->
 <!--             .do_not_spend_change() -->
 <!--             .fee_rate(FeeRate::from_sat_per_vb(5.0)); -->
-<!--         builder.finish()? -->
+<!--         builder.finish_with_aux_rand(&mut thread_rng())? -->
 <!--     }; -->
 
 <!--     println!("Transaction details: {:#?}", details); -->
