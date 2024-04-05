@@ -246,17 +246,6 @@ pub struct LocalChain {
     tip: CheckPoint,
 }
 
-// TODO: Figure out whether we can get rid of this
-impl From<LocalChain> for BTreeMap<u32, BlockHash> {
-    fn from(value: LocalChain) -> Self {
-        value
-            .tip
-            .iter()
-            .map(|cp| (cp.height(), cp.hash()))
-            .collect()
-    }
-}
-
 impl ChainOracle for LocalChain {
     type Error = Infallible;
 
