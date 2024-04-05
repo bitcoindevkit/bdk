@@ -75,6 +75,8 @@ cargo update -p time --precise "0.3.20"
 cargo update -p jobserver --precise "0.1.26"
 # home 0.5.9 has MSRV 1.70.0
 cargo update -p home --precise "0.5.5"
+# proptest 1.4.0 has MSRV 1.65.0
+cargo update -p proptest --precise "1.2.0"
 ```
 
 ## License
