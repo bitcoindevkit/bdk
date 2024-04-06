@@ -108,6 +108,12 @@ pub fn get_funded_wallet(descriptor: &str) -> (Wallet, bitcoin::Txid) {
     get_funded_wallet_with_change(descriptor, None)
 }
 
+// This PKH WIF was taken from example 5 in
+// https://github.com/libbitcoin/libbitcoin-explorer/wiki/bx-ec-to-wif
+pub fn get_test_pkh() -> &'static str {
+    "pkh(cNJFgo1driFnPcBdBX8BrJrpxchBWXwXCvNH5SoSkdcF6JXXwHMm)"
+}
+
 pub fn get_test_wpkh() -> &'static str {
     "wpkh(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW)"
 }
