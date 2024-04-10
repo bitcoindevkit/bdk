@@ -768,6 +768,161 @@ impl Wallet {
         })
     }
 
+    /// Peek an address of the given `keychain` at `index` without revealing it.
+    ///
+    /// For non-wildcard descriptors this returns the same address at every provided index.
+    ///
+    /// # Panics
+    ///
+    /// This panics when the caller requests for an address of derivation index greater than the
+    /// [BIP32](https://github.com/bitcoin/bips/blob/master/bip-0032.mediawiki) max index.
+    pub fn peek_address(&self, keychain: KeychainKind, mut index: u32) -> AddressInfo {
+        let keychain = self.map_keychain(keychain);
+        let mut spk_iter = self.indexed_graph.index.unbounded_spk_iter(&keychain);
+        if !spk_iter.descriptor().has_wildcard() {
+            index = 0;
+        }
+        let (index, spk) = spk_iter
+            .nth(index as usize)
+            .expect("derivation index is out of bounds");
+
+        AddressInfo {
+            index,
+            address: Address::from_script(&spk, self.network).expect("must have address form"),
+            keychain,
+        }
+    }
+
+    /// Attempt to reveal the next address of the given `keychain`.
+    ///
+    /// This will increment the internal derivation index. If the keychain's descriptor doesn't
+    /// contain a wildcard or every address is already revealed up to the maximum derivation
+    /// index defined in [BIP32](https://github.com/bitcoin/bips/blob/master/bip-0032.mediawiki),
+    /// then returns the last revealed address.
+    ///
+    /// # Errors
+    ///
+    /// If writing to persistent storage fails.
+    pub fn reveal_next_address(
+        &mut self,
+        keychain: KeychainKind,
+    ) -> Result<AddressInfo, D::WriteError>
+    where
+        D: PersistBackend<ChangeSet>,
+    {
+        let keychain = self.map_keychain(keychain);
+        let ((index, spk), index_changeset) = self.indexed_graph.index.reveal_next_spk(&keychain);
+
+        self.persist
+            .stage_and_commit(indexed_tx_graph::ChangeSet::from(index_changeset).into())?;
+
+        Ok(AddressInfo {
+            index,
+            address: Address::from_script(spk, self.network).expect("must have address form"),
+            keychain,
+        })
+    }
+
+    /// Reveal addresses up to and including the target `index` and return an iterator
+    /// of newly revealed addresses.
+    ///
+    /// If the target `index` is unreachable, we make a best effort to reveal up to the last
+    /// possible index. If all addresses up to the given `index` are already revealed, then
+    /// no new addresses are returned.
+    ///
+    /// # Errors
+    ///
+    /// If writing to persistent storage fails.
+    pub fn reveal_addresses_to(
+        &mut self,
+        keychain: KeychainKind,
+        index: u32,
+    ) -> Result<impl Iterator<Item = AddressInfo> + '_, D::WriteError>
+    where
+        D: PersistBackend<ChangeSet>,
+    {
+        let keychain = self.map_keychain(keychain);
+        let (spk_iter, index_changeset) =
+            self.indexed_graph.index.reveal_to_target(&keychain, index);
+
+        self.persist
+            .stage_and_commit(indexed_tx_graph::ChangeSet::from(index_changeset).into())?;
+
+        Ok(spk_iter.map(move |(index, spk)| AddressInfo {
+            index,
+            address: Address::from_script(&spk, self.network).expect("must have address form"),
+            keychain,
+        }))
+    }
+
+    /// Get the next unused address for the given `keychain`, i.e. the address with the lowest
+    /// derivation index that hasn't been used.
+    ///
+    /// This will attempt to derive and reveal a new address if no newly revealed addresses
+    /// are available. See also [`reveal_next_address`](Self::reveal_next_address).
+    ///
+    /// # Errors
+    ///
+    /// If writing to persistent storage fails.
+    pub fn next_unused_address(
+        &mut self,
+        keychain: KeychainKind,
+    ) -> Result<AddressInfo, D::WriteError>
+    where
+        D: PersistBackend<ChangeSet>,
+    {
+        let keychain = self.map_keychain(keychain);
+        let ((index, spk), index_changeset) = self.indexed_graph.index.next_unused_spk(&keychain);
+
+        self.persist
+            .stage_and_commit(indexed_tx_graph::ChangeSet::from(index_changeset).into())?;
+
+        Ok(AddressInfo {
+            index,
+            address: Address::from_script(spk, self.network).expect("must have address form"),
+            keychain,
+        })
+    }
+
+    /// Marks an address used of the given `keychain` at `index`.
+    ///
+    /// Returns whether the given index was present and then removed from the unused set.
+    pub fn mark_used(&mut self, keychain: KeychainKind, index: u32) -> bool {
+        self.indexed_graph.index.mark_used(keychain, index)
+    }
+
+    /// Undoes the effect of [`mark_used`] and returns whether the `index` was inserted
+    /// back into the unused set.
+    ///
+    /// Since this is only a superficial marker, it will have no effect if the address at the given
+    /// `index` was actually used, i.e. the wallet has previously indexed a tx output for the
+    /// derived spk.
+    ///
+    /// [`mark_used`]: Self::mark_used
+    pub fn unmark_used(&mut self, keychain: KeychainKind, index: u32) -> bool {
+        self.indexed_graph.index.unmark_used(keychain, index)
+    }
+
+    /// List addresses that are revealed but unused.
+    ///
+    /// Note if the returned iterator is empty you can reveal more addresses
+    /// by using [`reveal_next_address`](Self::reveal_next_address) or
+    /// [`reveal_addresses_to`](Self::reveal_addresses_to).
+    pub fn list_unused_addresses(
+        &self,
+        keychain: KeychainKind,
+    ) -> impl DoubleEndedIterator<Item = AddressInfo> + '_ {
+        let keychain = self.map_keychain(keychain);
+        self.indexed_graph
+            .index
+            .unused_keychain_spks(&keychain)
+            .map(move |(index, spk)| AddressInfo {
+                index,
+                address: Address::from_script(spk, self.network).expect("must have address form"),
+                keychain,
+            })
+    }
+
     /// Return whether or not a `script` is part of this wallet (either internal or external)
     pub fn is_mine(&self, script: &Script) -> bool {
         self.indexed_graph.index.index_of_spk(script).is_some()
