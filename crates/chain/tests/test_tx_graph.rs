@@ -1059,6 +1059,34 @@ fn test_changeset_last_seen_append() {
 }
 
 #[test]
+fn update_last_seen_unconfirmed() {
+    let mut graph = TxGraph::<()>::default();
+    let tx = new_tx(0);
+    let txid = tx.txid();
+
+    // insert a new tx
+    // initially we have a last_seen of 0, and no anchors
+    let _ = graph.insert_tx(tx);
+    let tx = graph.full_txs().next().unwrap();
+    assert_eq!(tx.last_seen_unconfirmed, 0);
+    assert!(tx.anchors.is_empty());
+
+    // higher timestamp should update last seen
+    let changeset = graph.update_last_seen_unconfirmed(2);
+    assert_eq!(changeset.last_seen.get(&txid).unwrap(), &2);
+
+    // lower timestamp has no effect
+    let changeset = graph.update_last_seen_unconfirmed(1);
+    assert!(changeset.last_seen.is_empty());
+
+    // once anchored, last seen is not updated
+    let _ = graph.insert_anchor(txid, ());
+    let changeset = graph.update_last_seen_unconfirmed(4);
+    assert!(changeset.is_empty());
+    assert_eq!(graph.full_txs().next().unwrap().last_seen_unconfirmed, 2);
+}
+
+#[test]
 fn test_missing_blocks() {
     /// An anchor implementation for testing, made up of `(the_anchor_block, random_data)`.
     #[derive(Debug, Clone, Eq, PartialEq, PartialOrd, Ord, core::hash::Hash)]

@@ -66,7 +66,9 @@ fn main() -> Result<(), anyhow::Error> {
     println!();
 
     let missing = relevant_txids.missing_full_txs(wallet.as_ref());
-    let graph_update = relevant_txids.into_confirmation_time_tx_graph(&client, None, missing)?;
+    let mut graph_update = relevant_txids.into_confirmation_time_tx_graph(&client, missing)?;
+    let now = std::time::UNIX_EPOCH.elapsed().unwrap().as_secs();
+    let _ = graph_update.update_last_seen_unconfirmed(now);
 
     let wallet_update = Update {
         last_active_indices: keychain_update,

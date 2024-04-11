@@ -53,8 +53,11 @@ fn main() -> Result<(), anyhow::Error> {
         })
         .collect();
 
-    let (update_graph, last_active_indices) =
+    let (mut update_graph, last_active_indices) =
         client.full_scan(keychain_spks, STOP_GAP, PARALLEL_REQUESTS)?;
+
+    let now = std::time::UNIX_EPOCH.elapsed().unwrap().as_secs();
+    let _ = update_graph.update_last_seen_unconfirmed(now);
     let missing_heights = update_graph.missing_heights(wallet.local_chain());
     let chain_update = client.update_local_chain(prev_tip, missing_heights)?;
     let update = Update {

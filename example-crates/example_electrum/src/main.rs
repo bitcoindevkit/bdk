@@ -299,12 +299,12 @@ fn main() -> anyhow::Result<()> {
         relevant_txids.missing_full_txs(graph.graph())
     };
 
+    let mut graph_update = relevant_txids.into_tx_graph(&client, missing_txids)?;
     let now = std::time::UNIX_EPOCH
         .elapsed()
         .expect("must get time")
         .as_secs();
-
-    let graph_update = relevant_txids.into_tx_graph(&client, Some(now), missing_txids)?;
+    let _ = graph_update.update_last_seen_unconfirmed(now);
 
     let db_changeset = {
         let mut chain = chain.lock().unwrap();
