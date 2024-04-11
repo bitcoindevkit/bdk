@@ -64,11 +64,16 @@ fn scan_detects_confirmed_tx() -> Result<()> {
     env.wait_until_electrum_sees_block()?;
     let ElectrumUpdate {
         chain_update,
-        relevant_txids,
-    } = client.sync(recv_chain.tip(), [spk_to_track], None, None, 5)?;
+        graph_update,
+    } = client.sync::<ConfirmationTimeHeightAnchor>(
+        recv_chain.tip(),
+        [spk_to_track],
+        Some(recv_graph.graph()),
+        None,
+        None,
+        5,
+    )?;
 
-    let missing = relevant_txids.missing_full_txs(recv_graph.graph());
-    let graph_update = relevant_txids.into_confirmation_time_tx_graph(&client, missing)?;
     let _ = recv_chain
         .apply_update(chain_update)
         .map_err(|err| anyhow::anyhow!("LocalChain update error: {:?}", err))?;
@@ -130,11 +135,16 @@ fn tx_can_become_unconfirmed_after_reorg() -> Result<()> {
     env.wait_until_electrum_sees_block()?;
     let ElectrumUpdate {
         chain_update,
-        relevant_txids,
-    } = client.sync(recv_chain.tip(), [spk_to_track.clone()], None, None, 5)?;
+        graph_update,
+    } = client.sync::<ConfirmationTimeHeightAnchor>(
+        recv_chain.tip(),
+        [spk_to_track.clone()],
+        Some(recv_graph.graph()),
+        None,
+        None,
+        5,
+    )?;
 
-    let missing = relevant_txids.missing_full_txs(recv_graph.graph());
-    let graph_update = relevant_txids.into_confirmation_time_tx_graph(&client, missing)?;
     let _ = recv_chain
         .apply_update(chain_update)
         .map_err(|err| anyhow::anyhow!("LocalChain update error: {:?}", err))?;
@@ -160,11 +170,16 @@ fn tx_can_become_unconfirmed_after_reorg() -> Result<()> {
         env.wait_until_electrum_sees_block()?;
         let ElectrumUpdate {
             chain_update,
-            relevant_txids,
-        } = client.sync(recv_chain.tip(), [spk_to_track.clone()], None, None, 5)?;
+            graph_update,
+        } = client.sync::<ConfirmationTimeHeightAnchor>(
+            recv_chain.tip(),
+            [spk_to_track.clone()],
+            Some(recv_graph.graph()),
+            None,
+            None,
+            5,
+        )?;
 
-        let missing = relevant_txids.missing_full_txs(recv_graph.graph());
-        let graph_update = relevant_txids.into_confirmation_time_tx_graph(&client, missing)?;
         let _ = recv_chain
             .apply_update(chain_update)
             .map_err(|err| anyhow::anyhow!("LocalChain update error: {:?}", err))?;

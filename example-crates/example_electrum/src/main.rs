@@ -181,7 +181,13 @@ fn main() -> anyhow::Result<()> {
             };
 
             client
-                .full_scan(tip, keychain_spks, stop_gap, scan_options.batch_size)
+                .full_scan::<_, ConfirmationHeightAnchor>(
+                    tip,
+                    keychain_spks,
+                    Some(graph.lock().unwrap().graph()),
+                    stop_gap,
+                    scan_options.batch_size,
+                )
                 .context("scanning the blockchain")?
         }
         ElectrumCommands::Sync {
@@ -274,14 +280,20 @@ fn main() -> anyhow::Result<()> {
                 }));
             }
 
-            let tip = chain.tip();
+            let electrum_update = client
+                .sync::<ConfirmationHeightAnchor>(
+                    chain.tip(),
+                    spks,
+                    Some(graph.graph()),
+                    txids,
+                    outpoints,
+                    scan_options.batch_size,
+                )
+                .context("scanning the blockchain")?;
 
             // drop lock on graph and chain
             drop((graph, chain));
 
-            let electrum_update = client
-                .sync(tip, spks, txids, outpoints, scan_options.batch_size)
-                .context("scanning the blockchain")?;
             (electrum_update, BTreeMap::new())
         }
     };
@@ -289,17 +301,11 @@ fn main() -> anyhow::Result<()> {
     let (
         ElectrumUpdate {
             chain_update,
-            relevant_txids,
+            mut graph_update,
         },
         keychain_update,
     ) = response;
 
-    let missing_txids = {
-        let graph = &*graph.lock().unwrap();
-        relevant_txids.missing_full_txs(graph.graph())
-    };
-
-    let mut graph_update = relevant_txids.into_tx_graph(&client, missing_txids)?;
     let now = std::time::UNIX_EPOCH
         .elapsed()
         .expect("must get time")
@@ -320,7 +326,12 @@ fn main() -> anyhow::Result<()> {
                 indexer,
                 ..Default::default()
             });
-            changeset.append(graph.apply_update(graph_update));
+            changeset.append(graph.apply_update(graph_update.map_anchors(|a| {
+                ConfirmationHeightAnchor {
+                    anchor_block: a.anchor_block,
+                    confirmation_height: a.confirmation_height,
+                }
+            })));
             changeset
         };
 
