@@ -7,6 +7,7 @@ use std::io::Write;
 use std::str::FromStr;
 
 use bdk::bitcoin::{Address, Amount};
+use bdk::chain::ConfirmationTimeHeightAnchor;
 use bdk::wallet::Update;
 use bdk::{bitcoin::Network, Wallet};
 use bdk::{KeychainKind, SignOptions};
@@ -58,15 +59,19 @@ fn main() -> Result<(), anyhow::Error> {
     let (
         ElectrumUpdate {
             chain_update,
-            relevant_txids,
+            mut graph_update,
         },
         keychain_update,
-    ) = client.full_scan(prev_tip, keychain_spks, STOP_GAP, BATCH_SIZE)?;
+    ) = client.full_scan::<_, ConfirmationTimeHeightAnchor>(
+        prev_tip,
+        keychain_spks,
+        Some(wallet.as_ref()),
+        STOP_GAP,
+        BATCH_SIZE,
+    )?;
 
     println!();
 
-    let missing = relevant_txids.missing_full_txs(wallet.as_ref());
-    let mut graph_update = relevant_txids.into_confirmation_time_tx_graph(&client, missing)?;
     let now = std::time::UNIX_EPOCH.elapsed().unwrap().as_secs();
     let _ = graph_update.update_last_seen_unconfirmed(now);
 

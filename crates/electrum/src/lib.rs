@@ -7,19 +7,10 @@
 //! keychain where the range of possibly used scripts is not known. In this case it is necessary to
 //! scan all keychain scripts until a number (the "stop gap") of unused scripts is discovered. For a
 //! sync or full scan the user receives relevant blockchain data and output updates for
-//! [`bdk_chain`] including [`RelevantTxids`].
-//!
-//! The [`RelevantTxids`] only includes `txid`s and not full transactions. The caller is responsible
-//! for obtaining full transactions before applying new data to their [`bdk_chain`]. This can be
-//! done with these steps:
-//!
-//! 1. Determine which full transactions are missing. Use [`RelevantTxids::missing_full_txs`].
-//!
-//! 2. Obtaining the full transactions. To do this via electrum use [`ElectrumApi::batch_transaction_get`].
+//! [`bdk_chain`] including [`bdk_chain::TxGraph`], which includes `txid`s and full transactions.
 //!
 //! Refer to [`example_electrum`] for a complete example.
 //!
-//! [`ElectrumApi::batch_transaction_get`]: electrum_client::ElectrumApi::batch_transaction_get
 //! [`example_electrum`]: https://github.com/bitcoindevkit/bdk/tree/master/example-crates/example_electrum
 
 #![warn(missing_docs)]
