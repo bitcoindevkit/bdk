@@ -2008,9 +2008,9 @@ impl<D> Wallet<D> {
         let txout_index = &mut self.indexed_graph.index;
         for txout in &tx.output {
             if let Some((keychain, index)) = txout_index.index_of_spk(&txout.script_pubkey) {
-                // NOTE: unmark_used will **not** make something unused if it has actually been used
+                // NOTE: mark_unused will **not** make something unused if it has actually been used
                 // by a tx in the tracker. It only removes the superficial marking.
-                txout_index.unmark_used(keychain, index);
+                txout_index.mark_unused(keychain, index);
             }
         }
     }

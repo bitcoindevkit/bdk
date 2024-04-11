@@ -649,7 +649,7 @@ where
                 Err(e) => {
                     if let Some((keychain, index)) = change_index {
                         // We failed to broadcast, so allow our change address to be used in the future
-                        graph.lock().unwrap().index.unmark_used(keychain, index);
+                        graph.lock().unwrap().index.mark_unused(keychain, index);
                     }
                     Err(e)
                 }

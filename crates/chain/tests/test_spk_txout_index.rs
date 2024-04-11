@@ -67,7 +67,7 @@ fn mark_used() {
     assert!(!spk_index.is_used(&1));
     spk_index.mark_used(&1);
     assert!(spk_index.is_used(&1));
-    spk_index.unmark_used(&1);
+    spk_index.mark_unused(&1);
     assert!(!spk_index.is_used(&1));
     spk_index.mark_used(&1);
     assert!(spk_index.is_used(&1));
@@ -83,18 +83,18 @@ fn mark_used() {
     };
 
     spk_index.index_tx(&tx1);
-    spk_index.unmark_used(&1);
+    spk_index.mark_unused(&1);
     assert!(
         spk_index.is_used(&1),
-        "even though we unmark_used it doesn't matter because there was a tx scanned that used it"
+        "even though we mark_unused it doesn't matter because there was a tx scanned that used it"
     );
 }
 
 #[test]
-fn unmark_used_does_not_result_in_invalid_representation() {
+fn mark_unused_does_not_result_in_invalid_representation() {
     let mut spk_index = SpkTxOutIndex::default();
-    assert!(!spk_index.unmark_used(&0));
-    assert!(!spk_index.unmark_used(&1));
-    assert!(!spk_index.unmark_used(&2));
+    assert!(!spk_index.mark_unused(&0));
+    assert!(!spk_index.mark_unused(&1));
+    assert!(!spk_index.mark_unused(&2));
     assert!(spk_index.unused_spks(..).collect::<Vec<_>>().is_empty());
 }

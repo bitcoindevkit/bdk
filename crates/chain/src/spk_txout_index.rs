@@ -239,9 +239,9 @@ impl<I: Clone + Ord> SpkTxOutIndex<I> {
     ///
     /// This is useful when you want to reserve a script pubkey for something but don't want to add
     /// the transaction output using it to the index yet. Other callers will consider the `index` used
-    /// until you call [`unmark_used`].
+    /// until you call [`mark_unused`].
     ///
-    /// [`unmark_used`]: Self::unmark_used
+    /// [`mark_unused`]: Self::mark_unused
     pub fn mark_used(&mut self, index: &I) -> bool {
         self.unused.remove(index)
     }
@@ -253,7 +253,7 @@ impl<I: Clone + Ord> SpkTxOutIndex<I> {
     /// effect.
     ///
     /// [`mark_used`]: Self::mark_used
-    pub fn unmark_used(&mut self, index: &I) -> bool {
+    pub fn mark_unused(&mut self, index: &I) -> bool {
         // we cannot set the index as unused when it does not exist
         if !self.spks.contains_key(index) {
             return false;

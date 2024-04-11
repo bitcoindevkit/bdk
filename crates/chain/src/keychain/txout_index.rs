@@ -246,11 +246,11 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     ///
     /// This is useful when you want to reserve a script pubkey for something but don't want to add
     /// the transaction output using it to the index yet. Other callers will consider `index` on
-    /// `keychain` used until you call [`unmark_used`].
+    /// `keychain` used until you call [`mark_unused`].
     ///
     /// This calls [`SpkTxOutIndex::mark_used`] internally.
     ///
-    /// [`unmark_used`]: Self::unmark_used
+    /// [`mark_unused`]: Self::mark_unused
     pub fn mark_used(&mut self, keychain: K, index: u32) -> bool {
         self.inner.mark_used(&(keychain, index))
     }
@@ -261,11 +261,11 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     /// Note that if `self` has scanned an output with this script pubkey, then this will have no
     /// effect.
     ///
-    /// This calls [`SpkTxOutIndex::unmark_used`] internally.
+    /// This calls [`SpkTxOutIndex::mark_unused`] internally.
     ///
     /// [`mark_used`]: Self::mark_used
-    pub fn unmark_used(&mut self, keychain: K, index: u32) -> bool {
-        self.inner.unmark_used(&(keychain, index))
+    pub fn mark_unused(&mut self, keychain: K, index: u32) -> bool {
+        self.inner.mark_unused(&(keychain, index))
     }
 
     /// Computes total input value going from script pubkeys in the index (sent) and the total output
