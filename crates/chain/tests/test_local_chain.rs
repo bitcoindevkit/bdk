@@ -1,3 +1,5 @@
+use std::ops::{Bound, RangeBounds};
+
 use bdk_chain::{
     local_chain::{
         AlterCheckPointError, ApplyHeaderError, CannotConnectError, ChangeSet, CheckPoint,
@@ -6,6 +8,7 @@ use bdk_chain::{
     BlockId,
 };
 use bitcoin::{block::Header, hashes::Hash, BlockHash};
+use proptest::prelude::*;
 
 #[macro_use]
 mod common;
@@ -723,5 +726,50 @@ fn local_chain_apply_header_connected_to() {
             .exp_result
             .map(|cs| cs.iter().cloned().collect::<ChangeSet>());
         assert_eq!(result, exp_result, "[{}:{}] unexpected result", i, t.name);
+    }
+}
+
+fn generate_height_range_bounds(
+    height_upper_bound: u32,
+) -> impl Strategy<Value = (Bound<u32>, Bound<u32>)> {
+    fn generate_height_bound(height_upper_bound: u32) -> impl Strategy<Value = Bound<u32>> {
+        prop_oneof![
+            (0..height_upper_bound).prop_map(Bound::Included),
+            (0..height_upper_bound).prop_map(Bound::Excluded),
+            Just(Bound::Unbounded),
+        ]
+    }
+    (
+        generate_height_bound(height_upper_bound),
+        generate_height_bound(height_upper_bound),
+    )
+}
+
+fn generate_checkpoints(max_height: u32, max_count: usize) -> impl Strategy<Value = CheckPoint> {
+    proptest::collection::btree_set(1..max_height, 0..max_count).prop_map(|mut heights| {
+        heights.insert(0); // must have genesis
+        CheckPoint::from_block_ids(heights.into_iter().map(|height| {
+            let hash = bitcoin::hashes::Hash::hash(height.to_le_bytes().as_slice());
+            BlockId { height, hash }
+        }))
+        .expect("blocks must be in order as it comes from btreeset")
+    })
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig {
+        ..Default::default()
+    })]
+
+    /// Ensure that [`CheckPoint::range`] returns the expected checkpoint heights by comparing it
+    /// against a more primitive approach.
+    #[test]
+    fn checkpoint_range(
+        range in generate_height_range_bounds(21_000),
+        cp in generate_checkpoints(21_000, 2100)
+    ) {
+        let exp_heights = cp.iter().map(|cp| cp.height()).filter(|h| range.contains(h)).collect::<Vec<u32>>();
+        let heights = cp.range(range).map(|cp| cp.height()).collect::<Vec<u32>>();
+        prop_assert_eq!(heights, exp_heights);
     }
 }
