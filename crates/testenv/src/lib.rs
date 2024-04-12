@@ -1,7 +1,7 @@
 use bdk_chain::bitcoin::{
     address::NetworkChecked, block::Header, hash_types::TxMerkleNode, hashes::Hash,
-    secp256k1::rand::random, Address, Amount, Block, BlockHash, CompactTarget, ScriptBuf,
-    ScriptHash, Transaction, TxIn, TxOut, Txid,
+    secp256k1::rand::random, transaction, Address, Amount, Block, BlockHash, CompactTarget,
+    ScriptBuf, ScriptHash, Transaction, TxIn, TxOut, Txid,
 };
 use bitcoincore_rpc::{
     bitcoincore_rpc_json::{GetBlockTemplateModes, GetBlockTemplateRules},
@@ -109,7 +109,7 @@ impl TestEnv {
         )?;
 
         let txdata = vec![Transaction {
-            version: 1,
+            version: transaction::Version::ONE,
             lock_time: bdk_chain::bitcoin::absolute::LockTime::from_height(0)?,
             input: vec![TxIn {
                 previous_output: bdk_chain::bitcoin::OutPoint::default(),
@@ -122,7 +122,7 @@ impl TestEnv {
                 witness: bdk_chain::bitcoin::Witness::new(),
             }],
             output: vec![TxOut {
-                value: 0,
+                value: Amount::ZERO,
                 script_pubkey: ScriptBuf::new_p2sh(&ScriptHash::all_zeros()),
             }],
         }];

@@ -12,7 +12,7 @@ use bdk_chain::{
     bitcoin,
     collections::{BTreeSet, HashMap},
 };
-use bitcoin::{absolute, Transaction, TxOut};
+use bitcoin::{absolute, transaction, Transaction, TxOut};
 use core::fmt::{Debug, Display};
 
 mod coin_selector;
@@ -29,5 +29,5 @@ pub const TXIN_BASE_WEIGHT: u32 = (32 + 4 + 4) * 4;
 // Shamelessly copied from
 // https://github.com/rust-bitcoin/rust-miniscript/blob/d5615acda1a7fdc4041a11c1736af139b8c7ebe8/src/util.rs#L8
 pub(crate) fn varint_size(v: usize) -> u32 {
-    bitcoin::VarInt(v as u64).len() as u32
+    bitcoin::VarInt(v as u64).size() as u32
 }

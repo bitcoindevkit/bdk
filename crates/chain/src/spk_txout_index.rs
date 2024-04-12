@@ -4,7 +4,7 @@ use crate::{
     collections::{hash_map::Entry, BTreeMap, BTreeSet, HashMap},
     indexed_tx_graph::Indexer,
 };
-use bitcoin::{self, OutPoint, Script, ScriptBuf, Transaction, TxOut, Txid};
+use bitcoin::{OutPoint, Script, ScriptBuf, Transaction, TxOut, Txid};
 
 /// An index storing [`TxOut`]s that have a script pubkey that matches those in a list.
 ///
@@ -281,12 +281,12 @@ impl<I: Clone + Ord> SpkTxOutIndex<I> {
 
         for txin in &tx.input {
             if let Some((_, txout)) = self.txout(txin.previous_output) {
-                sent += txout.value;
+                sent += txout.value.to_sat();
             }
         }
         for txout in &tx.output {
             if self.index_of_spk(&txout.script_pubkey).is_some() {
-                received += txout.value;
+                received += txout.value.to_sat();
             }
         }
 

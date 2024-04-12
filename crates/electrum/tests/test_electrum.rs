@@ -40,7 +40,7 @@ fn scan_detects_confirmed_tx() -> Result<()> {
         .client
         .get_new_address(None, None)?
         .assume_checked();
-    let spk_to_track = ScriptBuf::new_v0_p2wsh(&WScriptHash::all_zeros());
+    let spk_to_track = ScriptBuf::new_p2wsh(&WScriptHash::all_zeros());
     let addr_to_track = Address::from_script(&spk_to_track, bdk_chain::bitcoin::Network::Regtest)?;
 
     // Setup receiver.
@@ -106,7 +106,7 @@ fn tx_can_become_unconfirmed_after_reorg() -> Result<()> {
         .client
         .get_new_address(None, None)?
         .assume_checked();
-    let spk_to_track = ScriptBuf::new_v0_p2wsh(&WScriptHash::all_zeros());
+    let spk_to_track = ScriptBuf::new_p2wsh(&WScriptHash::all_zeros());
     let addr_to_track = Address::from_script(&spk_to_track, bdk_chain::bitcoin::Network::Regtest)?;
 
     // Setup receiver.

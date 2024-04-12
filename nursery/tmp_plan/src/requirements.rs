@@ -3,12 +3,11 @@ use core::ops::Deref;
 
 use bitcoin::{
     bip32,
-    hashes::{hash160, ripemd160, sha256},
+    hashes::{hash160, ripemd160, sha256, Hash},
     key::XOnlyPublicKey,
-    psbt::Prevouts,
-    secp256k1::{KeyPair, Message, PublicKey, Signing, Verification},
+    secp256k1::{Keypair, Message, PublicKey, Signing, Verification},
     sighash,
-    sighash::{EcdsaSighashType, SighashCache, TapSighashType},
+    sighash::{EcdsaSighashType, Prevouts, SighashCache, TapSighashType},
     taproot, Transaction, TxOut,
 };
 
@@ -163,11 +162,11 @@ impl RequiredSignatures<DescriptorPublicKey> {
 
                 let tweak =
                     taproot::TapTweakHash::from_key_and_tweak(x_only_pubkey, merkle_root.clone());
-                let keypair = KeyPair::from_secret_key(&secp, &secret_key.clone())
+                let keypair = Keypair::from_secret_key(&secp, &secret_key.clone())
                     .add_xonly_tweak(&secp, &tweak.to_scalar())
                     .unwrap();
 
-                let msg = Message::from_slice(sighash.as_ref()).expect("Sighashes are 32 bytes");
+                let msg = Message::from_digest(sighash.to_byte_array());
                 let sig = secp.sign_schnorr_no_aux_rand(&msg, &keypair);
 
                 let bitcoin_sig = taproot::Signature {
@@ -209,9 +208,8 @@ impl RequiredSignatures<DescriptorPublicKey> {
                                 todo!();
                             }
                         };
-                        let keypair = KeyPair::from_secret_key(&secp, &secret_key.clone());
-                        let msg =
-                            Message::from_slice(sighash.as_ref()).expect("Sighashes are 32 bytes");
+                        let keypair = Keypair::from_secret_key(&secp, &secret_key.clone());
+                        let msg = Message::from_digest(sighash.to_byte_array());
                         let sig = secp.sign_schnorr_no_aux_rand(&msg, &keypair);
                         let bitcoin_sig = taproot::Signature {
                             sig,

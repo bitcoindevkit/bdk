@@ -1,6 +1,6 @@
 use bdk::bitcoin::bip32::Fingerprint;
-use bdk::bitcoin::psbt::PartiallySignedTransaction;
 use bdk::bitcoin::secp256k1::{All, Secp256k1};
+use bdk::bitcoin::Psbt;
 
 use hwi::error::Error;
 use hwi::types::{HWIChain, HWIDevice};
@@ -37,7 +37,7 @@ impl SignerCommon for HWISigner {
 impl TransactionSigner for HWISigner {
     fn sign_transaction(
         &self,
-        psbt: &mut PartiallySignedTransaction,
+        psbt: &mut Psbt,
         _sign_options: &bdk::SignOptions,
         _secp: &Secp256k1<All>,
     ) -> Result<(), SignerError> {
