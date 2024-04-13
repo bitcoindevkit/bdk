@@ -1,21 +1,23 @@
+use crate::{bincode_options, EntryIter, FileError, IterError};
+use anyhow::anyhow;
+use bdk_chain::{Append, PersistBackend};
+use bincode::Options;
 use std::{
-    fmt::Debug,
+    fmt::{self, Debug},
     fs::{File, OpenOptions},
     io::{self, Read, Seek, Write},
     marker::PhantomData,
     path::Path,
 };
 
-use bdk_chain::{Append, PersistBackend};
-use bincode::Options;
-
-use crate::{bincode_options, EntryIter, FileError, IterError};
-
 /// Persists an append-only list of changesets (`C`) to a single file.
 ///
 /// The changesets are the results of altering a tracker implementation (`T`).
 #[derive(Debug)]
-pub struct Store<C> {
+pub struct Store<C>
+where
+    C: Sync + Send,
+{
     magic_len: usize,
     db_file: File,
     marker: PhantomData<C>,
@@ -23,24 +25,30 @@ pub struct Store<C> {
 
 impl<C> PersistBackend<C> for Store<C>
 where
-    C: Append + serde::Serialize + serde::de::DeserializeOwned,
+    C: Append
+        + serde::Serialize
+        + serde::de::DeserializeOwned
+        + core::marker::Send
+        + core::marker::Sync,
 {
-    type WriteError = std::io::Error;
-
-    type LoadError = IterError;
-
-    fn write_changes(&mut self, changeset: &C) -> Result<(), Self::WriteError> {
+    fn write_changes(&mut self, changeset: &C) -> anyhow::Result<()> {
         self.append_changeset(changeset)
+            .map_err(|e| anyhow!(e).context("failed to write changes to persistence backend"))
     }
 
-    fn load_from_persistence(&mut self) -> Result<Option<C>, Self::LoadError> {
-        self.aggregate_changesets().map_err(|e| e.iter_error)
+    fn load_from_persistence(&mut self) -> anyhow::Result<Option<C>> {
+        self.aggregate_changesets()
+            .map_err(|e| anyhow!(e.iter_error).context("error loading from persistence backend"))
     }
 }
 
 impl<C> Store<C>
 where
-    C: Append + serde::Serialize + serde::de::DeserializeOwned,
+    C: Append
+        + serde::Serialize
+        + serde::de::DeserializeOwned
+        + core::marker::Send
+        + core::marker::Sync,
 {
     /// Create a new [`Store`] file in write-only mode; error if the file exists.
     ///
@@ -182,7 +190,7 @@ where
         bincode_options()
             .serialize_into(&mut self.db_file, changeset)
             .map_err(|e| match *e {
-                bincode::ErrorKind::Io(inner) => inner,
+                bincode::ErrorKind::Io(error) => error,
                 unexpected_err => panic!("unexpected bincode error: {}", unexpected_err),
             })?;
 
@@ -212,7 +220,7 @@ impl<C> std::fmt::Display for AggregateChangesetsError<C> {
     }
 }
 
-impl<C: std::fmt::Debug> std::error::Error for AggregateChangesetsError<C> {}
+impl<C: fmt::Debug> std::error::Error for AggregateChangesetsError<C> {}
 
 #[cfg(test)]
 mod test {
