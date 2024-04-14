@@ -179,7 +179,7 @@ impl
 }
 
 /// The address index selection strategy to use to derived an address from the wallet's external
-/// descriptor. See [`Wallet::get_address`]. If you're unsure which one to use use `WalletIndex::New`.
+/// descriptor.
 #[derive(Debug)]
 pub enum AddressIndex {
     /// Return a new address after incrementing the current descriptor index.
@@ -253,36 +253,6 @@ impl Wallet {
                 NewError::Descriptor(e) => e,
                 NewError::Persist(_) => unreachable!("mock-write must always succeed"),
             })
-    }
-}
-
-impl Wallet {
-    /// Infallibly return a derived address using the external descriptor, see [`AddressIndex`] for
-    /// available address index selection strategies. If none of the keys in the descriptor are derivable
-    /// (i.e. does not end with /*) then the same address will always be returned for any [`AddressIndex`].
-    ///
-    /// # Panics
-    ///
-    /// This panics when the caller requests for an address of derivation index greater than the
-    /// BIP32 max index.
-    pub fn get_address(&mut self, address_index: AddressIndex) -> AddressInfo {
-        self.try_get_address(address_index).unwrap()
-    }
-
-    /// Infallibly return a derived address using the internal (change) descriptor.
-    ///
-    /// If the wallet doesn't have an internal descriptor it will use the external descriptor.
-    ///
-    /// see [`AddressIndex`] for available address index selection strategies. If none of the keys
-    /// in the descriptor are derivable (i.e. does not end with /*) then the same address will always
-    /// be returned for any [`AddressIndex`].
-    ///
-    /// # Panics
-    ///
-    /// This panics when the caller requests for an address of derivation index greater than the
-    /// BIP32 max index.
-    pub fn get_internal_address(&mut self, address_index: AddressIndex) -> AddressInfo {
-        self.try_get_internal_address(address_index).unwrap()
     }
 }
 
@@ -803,13 +773,7 @@ impl Wallet {
     /// # Errors
     ///
     /// If writing to persistent storage fails.
-    pub fn reveal_next_address(
-        &mut self,
-        keychain: KeychainKind,
-    ) -> Result<AddressInfo, D::WriteError>
-    where
-        D: PersistBackend<ChangeSet>,
-    {
+    pub fn reveal_next_address(&mut self, keychain: KeychainKind) -> anyhow::Result<AddressInfo> {
         let keychain = self.map_keychain(keychain);
         let ((index, spk), index_changeset) = self.indexed_graph.index.reveal_next_spk(&keychain);
 
@@ -837,10 +801,7 @@ impl Wallet {
         &mut self,
         keychain: KeychainKind,
         index: u32,
-    ) -> Result<impl Iterator<Item = AddressInfo> + '_, D::WriteError>
-    where
-        D: PersistBackend<ChangeSet>,
-    {
+    ) -> anyhow::Result<impl Iterator<Item = AddressInfo> + '_> {
         let keychain = self.map_keychain(keychain);
         let (spk_iter, index_changeset) =
             self.indexed_graph.index.reveal_to_target(&keychain, index);
@@ -864,13 +825,7 @@ impl Wallet {
     /// # Errors
     ///
     /// If writing to persistent storage fails.
-    pub fn next_unused_address(
-        &mut self,
-        keychain: KeychainKind,
-    ) -> Result<AddressInfo, D::WriteError>
-    where
-        D: PersistBackend<ChangeSet>,
-    {
+    pub fn next_unused_address(&mut self, keychain: KeychainKind) -> anyhow::Result<AddressInfo> {
         let keychain = self.map_keychain(keychain);
         let ((index, spk), index_changeset) = self.indexed_graph.index.next_unused_spk(&keychain);
 
@@ -2646,7 +2601,7 @@ macro_rules! doctest_wallet {
     () => {{
         use $crate::bitcoin::{BlockHash, Transaction, absolute, TxOut, Network, hashes::Hash};
         use $crate::chain::{ConfirmationTime, BlockId};
-        use $crate::wallet::{AddressIndex, Wallet};
+        use $crate::{KeychainKind, wallet::Wallet};
         let descriptor = "tr([73c5da0a/86'/0'/0']tprv8fMn4hSKPRC1oaCPqxDb1JWtgkpeiQvZhsr8W2xuy3GEMkzoArcAWTfJxYb6Wj8XNNDWEjfYKK4wGQXh3ZUXhDF2NcnsALpWTeSwarJt7Vc/0/*)";
         let change_descriptor = "tr([73c5da0a/86'/0'/0']tprv8fMn4hSKPRC1oaCPqxDb1JWtgkpeiQvZhsr8W2xuy3GEMkzoArcAWTfJxYb6Wj8XNNDWEjfYKK4wGQXh3ZUXhDF2NcnsALpWTeSwarJt7Vc/1/*)";
 
@@ -2656,7 +2611,7 @@ macro_rules! doctest_wallet {
             Network::Regtest,
         )
         .unwrap();
-        let address = wallet.get_address(AddressIndex::New).address;
+        let address = wallet.peek_address(KeychainKind::External, 0).address;
         let tx = Transaction {
             version: transaction::Version::ONE,
             lock_time: absolute::LockTime::ZERO,

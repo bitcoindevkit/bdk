@@ -21,7 +21,6 @@ use bitcoin::Network;
 use miniscript::policy::Concrete;
 use miniscript::Descriptor;
 
-use bdk::wallet::AddressIndex::New;
 use bdk::{KeychainKind, Wallet};
 
 /// Miniscript policy is a high level abstraction of spending conditions. Defined in the
@@ -51,7 +50,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     println!(
         "First derived address from the descriptor: \n{}",
-        wallet.get_address(New)
+        wallet.next_unused_address(KeychainKind::External)?,
     );
 
     // BDK also has it's own `Policy` structure to represent the spending condition in a more
