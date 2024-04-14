@@ -2705,6 +2705,7 @@ fn test_next_unused_address() {
         "tb1q6yn66vajcctph75pvylgkksgpp6nq04ppwct9a"
     );
     assert_eq!(wallet.derivation_index(KeychainKind::External), Some(0));
+    // calling next_unused again gives same address
     assert_eq!(
         wallet
             .next_unused_address(KeychainKind::External)
@@ -2713,6 +2714,15 @@ fn test_next_unused_address() {
         "tb1q6yn66vajcctph75pvylgkksgpp6nq04ppwct9a"
     );
     assert_eq!(wallet.derivation_index(KeychainKind::External), Some(0));
+
+    // test mark used / unused
+    assert!(wallet.mark_used(KeychainKind::External, 0));
+    let next_unused_addr = wallet.next_unused_address(KeychainKind::External).unwrap();
+    assert_eq!(next_unused_addr.index, 1);
+
+    assert!(wallet.unmark_used(KeychainKind::External, 0));
+    let next_unused_addr = wallet.next_unused_address(KeychainKind::External).unwrap();
+    assert_eq!(next_unused_addr.index, 0);
 
     // use the above address
     receive_output_in_latest_block(&mut wallet, 25_000);
@@ -2725,6 +2735,9 @@ fn test_next_unused_address() {
         "tb1q4er7kxx6sssz3q7qp7zsqsdx4erceahhax77d7"
     );
     assert_eq!(wallet.derivation_index(KeychainKind::External), Some(1));
+
+    // trying to mark index 0 unused should return false
+    assert!(!wallet.unmark_used(KeychainKind::External, 0));
 }
 
 #[test]
@@ -2898,6 +2911,28 @@ fn test_get_address() {
         },
         "when there's no internal descriptor it should just use external"
     );
+}
+
+#[test]
+fn test_reveal_addresses() {
+    let desc = get_test_tr_single_sig_xprv();
+    let mut wallet = Wallet::new_no_persist(desc, None, Network::Signet).unwrap();
+    let keychain = KeychainKind::External;
+
+    let last_revealed_addr = wallet
+        .reveal_addresses_to(keychain, 9)
+        .unwrap()
+        .last()
+        .unwrap();
+    assert_eq!(wallet.derivation_index(keychain), Some(9));
+
+    let unused_addrs = wallet.list_unused_addresses(keychain).collect::<Vec<_>>();
+    assert_eq!(unused_addrs.len(), 10);
+    assert_eq!(unused_addrs.last().unwrap(), &last_revealed_addr);
+
+    // revealing to an already revealed index returns nothing
+    let mut already_revealed = wallet.reveal_addresses_to(keychain, 9).unwrap();
+    assert!(already_revealed.next().is_none());
 }
 
 #[test]
