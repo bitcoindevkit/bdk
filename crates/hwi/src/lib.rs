@@ -6,7 +6,6 @@
 //! # use bdk::bitcoin::Network;
 //! # use bdk::signer::SignerOrdering;
 //! # use bdk_hwi::HWISigner;
-//! # use bdk::wallet::AddressIndex::New;
 //! # use bdk::{KeychainKind, SignOptions, Wallet};
 //! # use hwi::HWIClient;
 //! # use std::sync::Arc;
