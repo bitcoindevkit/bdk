@@ -187,6 +187,43 @@ impl CheckPoint {
                 core::ops::Bound::Unbounded => true,
             })
     }
+
+    /// Inserts `block_id` at its height within the chain.
+    ///
+    /// The effect of `insert` depends on whether a height already exists. If it doesn't the
+    /// `block_id` we inserted and all pre-existing blocks higher than it will be re-inserted after
+    /// it. If the height already existed and has a conflicting block hash then it will be purged
+    /// along with all block followin it. The returned chain will have a tip of the `block_id`
+    /// passed in. Of course, if the `block_id` was already present then this just returns `self`.
+    #[must_use]
+    pub fn insert(self, block_id: BlockId) -> Self {
+        assert_ne!(block_id.height, 0, "cannot insert the genesis block");
+
+        let mut cp = self.clone();
+        let mut tail = vec![];
+        let base = loop {
+            if cp.height() == block_id.height {
+                if cp.hash() == block_id.hash {
+                    return self;
+                }
+                // if we have a conflict we just return the inserted block because the tail is by
+                // implication invalid.
+                tail = vec![];
+                break cp.prev().expect("can't be called on genesis block");
+            }
+
+            if cp.height() < block_id.height {
+                break cp;
+            }
+
+            tail.push(cp.block_id());
+            cp = cp.prev().expect("will break before genesis block");
+        };
+
+        base
+            .extend(core::iter::once(block_id).chain(tail.into_iter().rev()))
+            .expect("tail is in order")
+    }
 }
 
 /// Iterates over checkpoints backwards.
