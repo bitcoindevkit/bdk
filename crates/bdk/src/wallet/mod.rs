@@ -54,6 +54,7 @@ pub mod tx_builder;
 pub(crate) mod utils;
 
 pub mod error;
+
 pub use utils::IsDust;
 
 use coin_selection::DefaultCoinSelectionAlgorithm;
@@ -606,7 +607,7 @@ impl Wallet {
             .map_err(NewOrLoadError::Persist)?;
         match changeset {
             Some(changeset) => {
-                let wallet = Self::load_from_changeset(db, changeset).map_err(|e| match e {
+                let mut wallet = Self::load_from_changeset(db, changeset).map_err(|e| match e {
                     LoadError::Descriptor(e) => NewOrLoadError::Descriptor(e),
                     LoadError::Persist(e) => NewOrLoadError::Persist(e),
                     LoadError::NotInitialized => NewOrLoadError::NotInitialized,
@@ -636,35 +637,72 @@ impl Wallet {
                     });
                 }
 
-                let expected_descriptor = descriptor
+                let (expected_descriptor, expected_descriptor_keymap) = descriptor
                     .into_wallet_descriptor(&wallet.secp, network)
-                    .map_err(NewOrLoadError::Descriptor)?
-                    .0;
+                    .map_err(NewOrLoadError::Descriptor)?;
                 let wallet_descriptor = wallet.public_descriptor(KeychainKind::External).cloned();
-                if wallet_descriptor != Some(expected_descriptor) {
+                if wallet_descriptor != Some(expected_descriptor.clone()) {
                     return Err(NewOrLoadError::LoadedDescriptorDoesNotMatch {
                         got: wallet_descriptor,
                         keychain: KeychainKind::External,
+                    });
+                }
+                // if expected descriptor has private keys add them as new signers
+                if !expected_descriptor_keymap.is_empty() {
+                    let signer_container = SignersContainer::build(
+                        expected_descriptor_keymap,
+                        &expected_descriptor,
+                        &wallet.secp,
+                    );
+                    signer_container.signers().into_iter().for_each(|signer| {
+                        wallet.add_signer(
+                            KeychainKind::External,
+                            SignerOrdering::default(),
+                            signer.clone(),
+                        )
                     });
                 }
 
                 let expected_change_descriptor = if let Some(c) = change_descriptor {
                     Some(
                         c.into_wallet_descriptor(&wallet.secp, network)
-                            .map_err(NewOrLoadError::Descriptor)?
-                            .0,
+                            .map_err(NewOrLoadError::Descriptor)?,
                     )
                 } else {
                     None
                 };
                 let wallet_change_descriptor =
                     wallet.public_descriptor(KeychainKind::Internal).cloned();
-                if wallet_change_descriptor != expected_change_descriptor {
-                    return Err(NewOrLoadError::LoadedDescriptorDoesNotMatch {
-                        got: wallet_change_descriptor,
-                        keychain: KeychainKind::Internal,
-                    });
+
+                match (expected_change_descriptor, wallet_change_descriptor) {
+                    (Some((expected_descriptor, expected_keymap)), Some(wallet_descriptor))
+                        if wallet_descriptor == expected_descriptor =>
+                    {
+                        // if expected change descriptor has private keys add them as new signers
+                        if !expected_keymap.is_empty() {
+                            let signer_container = SignersContainer::build(
+                                expected_keymap,
+                                &expected_descriptor,
+                                &wallet.secp,
+                            );
+                            signer_container.signers().into_iter().for_each(|signer| {
+                                wallet.add_signer(
+                                    KeychainKind::Internal,
+                                    SignerOrdering::default(),
+                                    signer.clone(),
+                                )
+                            });
+                        }
+                    }
+                    (None, None) => (),
+                    (_, wallet_descriptor) => {
+                        return Err(NewOrLoadError::LoadedDescriptorDoesNotMatch {
+                            got: wallet_descriptor,
+                            keychain: KeychainKind::Internal,
+                        });
+                    }
                 }
+
                 Ok(wallet)
             }
             None => Self::new_with_genesis_hash(
