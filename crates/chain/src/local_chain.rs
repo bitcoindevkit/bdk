@@ -220,8 +220,7 @@ impl CheckPoint {
             cp = cp.prev().expect("will break before genesis block");
         };
 
-        base
-            .extend(core::iter::once(block_id).chain(tail.into_iter().rev()))
+        base.extend(core::iter::once(block_id).chain(tail.into_iter().rev()))
             .expect("tail is in order")
     }
 }
