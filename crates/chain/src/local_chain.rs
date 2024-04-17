@@ -364,13 +364,17 @@ impl LocalChain {
     ///
     /// [module-level documentation]: crate::local_chain
     pub fn apply_update(&mut self, update: CheckPoint) -> Result<ChangeSet, CannotConnectError> {
-        let changeset = merge_chains(self.tip.clone(), update.clone())?;
-        // `._check_index_is_consistent_with_tip` and `._check_changeset_is_applied` is called in
-        // `.apply_changeset`
-        self.apply_changeset(&changeset)
-            .map_err(|_| CannotConnectError {
-                try_include_height: 0,
-            })?;
+        let (changeset, can_replace) = merge_chains(self.tip.clone(), update.clone())?;
+        if can_replace {
+            self.tip = update;
+        } else {
+            // `._check_index_is_consistent_with_tip` and `._check_changeset_is_applied` is called in
+            // `.apply_changeset`
+            self.apply_changeset(&changeset)
+                .map_err(|_| CannotConnectError {
+                    try_include_height: 0,
+                })?;
+        }
         Ok(changeset)
     }
 
@@ -721,10 +725,14 @@ impl core::fmt::Display for ApplyHeaderError {
 #[cfg(feature = "std")]
 impl std::error::Error for ApplyHeaderError {}
 
+/// Applies `update_tip` onto `original_tip`.
+///
+/// On success, a tuple is returned `(changeset, can_replace)`. If `can_replace` is true, then the
+/// `update_tip` can replace the `original_tip`.
 fn merge_chains(
     original_tip: CheckPoint,
     update_tip: CheckPoint,
-) -> Result<ChangeSet, CannotConnectError> {
+) -> Result<(ChangeSet, bool), CannotConnectError> {
     let mut changeset = ChangeSet::default();
     let mut orig = original_tip.into_iter();
     let mut update = update_tip.into_iter();
@@ -735,6 +743,11 @@ fn merge_chains(
     let mut point_of_agreement_found = false;
     let mut prev_orig_was_invalidated = false;
     let mut potentially_invalidated_heights = vec![];
+
+    // Flag to set if heights are removed from original chain. If no heights are removed, and we
+    // have a matching node pointer between the two chains, we can conclude that the update tip can
+    // just replace the original tip.
+    let mut has_removed_heights = false;
 
     // To find the difference between the new chain and the original we iterate over both of them
     // from the tip backwards in tandem. We always dealing with the highest one from either chain
@@ -761,6 +774,8 @@ fn merge_chains(
                 prev_orig_was_invalidated = false;
                 prev_orig = curr_orig.take();
 
+                has_removed_heights = true;
+
                 // OPTIMIZATION: we have run out of update blocks so we don't need to continue
                 // iterating because there's no possibility of adding anything to changeset.
                 if u.is_none() {
@@ -786,7 +801,7 @@ fn merge_chains(
                     // OPTIMIZATION 2 -- if we have the same underlying pointer at this point, we
                     // can guarantee that no older blocks are introduced.
                     if Arc::as_ptr(&o.0) == Arc::as_ptr(&u.0) {
-                        return Ok(changeset);
+                        return Ok((changeset, !has_removed_heights));
                     }
                 } else {
                     // We have an invalidation height so we set the height to the updated hash and
@@ -820,5 +835,5 @@ fn merge_chains(
         }
     }
 
-    Ok(changeset)
+    Ok((changeset, false))
 }
