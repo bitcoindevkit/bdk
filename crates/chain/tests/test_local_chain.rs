@@ -672,9 +672,9 @@ fn local_chain_apply_header_connected_to() {
 
     let test_cases = [
         {
-            let header = header_from_prev_blockhash(h!("A"));
+            let header = header_from_prev_blockhash(h!("_"));
             let hash = header.block_hash();
-            let height = 2;
+            let height = 1;
             let connected_to = BlockId { height, hash };
             TestCase {
                 name: "connected_to_self_header_applied_to_self",
