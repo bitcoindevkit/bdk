@@ -107,7 +107,7 @@ pub struct Update {
     /// Update for the wallet's internal [`LocalChain`].
     ///
     /// [`LocalChain`]: local_chain::LocalChain
-    pub chain: Option<local_chain::Update>,
+    pub chain: Option<CheckPoint>,
 }
 
 /// The changes made to a wallet by applying an [`Update`].

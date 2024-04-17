@@ -3,7 +3,7 @@ use std::ops::{Bound, RangeBounds};
 use bdk_chain::{
     local_chain::{
         AlterCheckPointError, ApplyHeaderError, CannotConnectError, ChangeSet, CheckPoint,
-        LocalChain, MissingGenesisError, Update,
+        LocalChain, MissingGenesisError,
     },
     BlockId,
 };
@@ -17,7 +17,7 @@ mod common;
 struct TestLocalChain<'a> {
     name: &'static str,
     chain: LocalChain,
-    update: Update,
+    update: CheckPoint,
     exp: ExpectedResult<'a>,
 }
 

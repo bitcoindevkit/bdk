@@ -69,7 +69,6 @@ pub async fn test_update_tx_graph_without_keychain() -> anyhow::Result<()> {
         {
             let update_cps = sync_update
                 .local_chain
-                .tip
                 .iter()
                 .map(|cp| cp.block_id())
                 .collect::<BTreeSet<_>>();

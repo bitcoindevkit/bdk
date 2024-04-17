@@ -18,7 +18,7 @@
 
 use std::collections::BTreeMap;
 
-use bdk_chain::{local_chain, BlockId, ConfirmationTimeHeightAnchor, TxGraph};
+use bdk_chain::{local_chain::CheckPoint, BlockId, ConfirmationTimeHeightAnchor, TxGraph};
 use esplora_client::TxStatus;
 
 pub use esplora_client;
@@ -53,8 +53,8 @@ fn anchor_from_status(status: &TxStatus) -> Option<ConfirmationTimeHeightAnchor>
 
 /// Update returns from a full scan.
 pub struct FullScanUpdate<K> {
-    /// The update to apply to the receiving [`LocalChain`](local_chain::LocalChain).
-    pub local_chain: local_chain::Update,
+    /// The update to apply to the receiving [`LocalChain`](bdk_chain::local_chain::LocalChain).
+    pub local_chain: CheckPoint,
     /// The update to apply to the receiving [`TxGraph`].
     pub tx_graph: TxGraph<ConfirmationTimeHeightAnchor>,
     /// Last active indices for the corresponding keychains (`K`).
@@ -63,8 +63,8 @@ pub struct FullScanUpdate<K> {
 
 /// Update returned from a sync.
 pub struct SyncUpdate {
-    /// The update to apply to the receiving [`LocalChain`](local_chain::LocalChain).
-    pub local_chain: local_chain::Update,
+    /// The update to apply to the receiving [`LocalChain`](bdk_chain::local_chain::LocalChain).
+    pub local_chain: CheckPoint,
     /// The update to apply to the receiving [`TxGraph`].
     pub tx_graph: TxGraph<ConfirmationTimeHeightAnchor>,
 }

@@ -96,16 +96,6 @@ impl CheckPoint {
             .expect("must construct checkpoint")
     }
 
-    /// Convenience method to convert the [`CheckPoint`] into an [`Update`].
-    ///
-    /// For more information, refer to [`Update`].
-    pub fn into_update(self, introduce_older_blocks: bool) -> Update {
-        Update {
-            tip: self,
-            introduce_older_blocks,
-        }
-    }
-
     /// Puts another checkpoint onto the linked list representing the blockchain.
     ///
     /// Returns an `Err(self)` if the block you are pushing on is not at a greater height that the one you
@@ -251,31 +241,6 @@ impl IntoIterator for CheckPoint {
     }
 }
 
-/// Used to update [`LocalChain`].
-///
-/// This is used as input for [`LocalChain::apply_update`]. It contains the update's chain `tip` and
-/// a flag `introduce_older_blocks` which signals whether this update intends to introduce missing
-/// blocks to the original chain.
-///
-/// Block-by-block syncing mechanisms would typically create updates that builds upon the previous
-/// tip. In this case, `introduce_older_blocks` would be `false`.
-///
-/// Script-pubkey based syncing mechanisms may not introduce transactions in a chronological order
-/// so some updates require introducing older blocks (to anchor older transactions). For
-/// script-pubkey based syncing, `introduce_older_blocks` would typically be `true`.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Update {
-    /// The update chain's new tip.
-    pub tip: CheckPoint,
-
-    /// Whether the update allows for introducing older blocks.
-    ///
-    /// Refer to [struct-level documentation] for more.
-    ///
-    /// [struct-level documentation]: Update
-    pub introduce_older_blocks: bool,
-}
-
 /// This is a local implementation of [`ChainOracle`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct LocalChain {
@@ -390,23 +355,16 @@ impl LocalChain {
     /// the existing chain and invalidate the block after it (if it exists) by including a block at
     /// the same height but with a different hash to explicitly exclude it as a connection point.
     ///
-    /// Additionally, an empty chain can be updated with any chain, and a chain with a single block
-    /// can have it's block invalidated by an update chain with a block at the same height but
-    /// different hash.
+    /// Additionally, a chain with a single block can have it's block invalidated by an update
+    /// chain with a block at the same height but different hash.
     ///
     /// # Errors
     ///
     /// An error will occur if the update does not correctly connect with `self`.
     ///
-    /// Refer to [`Update`] for more about the update struct.
-    ///
     /// [module-level documentation]: crate::local_chain
-    pub fn apply_update(&mut self, update: Update) -> Result<ChangeSet, CannotConnectError> {
-        let changeset = merge_chains(
-            self.tip.clone(),
-            update.tip.clone(),
-            update.introduce_older_blocks,
-        )?;
+    pub fn apply_update(&mut self, update: CheckPoint) -> Result<ChangeSet, CannotConnectError> {
+        let changeset = merge_chains(self.tip.clone(), update.clone())?;
         // `._check_index_is_consistent_with_tip` and `._check_changeset_is_applied` is called in
         // `.apply_changeset`
         self.apply_changeset(&changeset)
@@ -464,11 +422,8 @@ impl LocalChain {
             conn => Some(conn),
         };
 
-        let update = Update {
-            tip: CheckPoint::from_block_ids([conn, prev, Some(this)].into_iter().flatten())
-                .expect("block ids must be in order"),
-            introduce_older_blocks: false,
-        };
+        let update = CheckPoint::from_block_ids([conn, prev, Some(this)].into_iter().flatten())
+            .expect("block ids must be in order");
 
         self.apply_update(update)
             .map_err(ApplyHeaderError::CannotConnect)
@@ -769,7 +724,6 @@ impl std::error::Error for ApplyHeaderError {}
 fn merge_chains(
     original_tip: CheckPoint,
     update_tip: CheckPoint,
-    introduce_older_blocks: bool,
 ) -> Result<ChangeSet, CannotConnectError> {
     let mut changeset = ChangeSet::default();
     let mut orig = original_tip.into_iter();
@@ -829,11 +783,9 @@ fn merge_chains(
                     }
                     point_of_agreement_found = true;
                     prev_orig_was_invalidated = false;
-                    // OPTIMIZATION 1 -- If we know that older blocks cannot be introduced without
-                    // invalidation, we can break after finding the point of agreement.
                     // OPTIMIZATION 2 -- if we have the same underlying pointer at this point, we
                     // can guarantee that no older blocks are introduced.
-                    if !introduce_older_blocks || Arc::as_ptr(&o.0) == Arc::as_ptr(&u.0) {
+                    if Arc::as_ptr(&o.0) == Arc::as_ptr(&u.0) {
                         return Ok(changeset);
                     }
                 } else {

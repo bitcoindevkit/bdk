@@ -6,7 +6,7 @@ use bdk_chain::collections::BTreeMap;
 use bdk_chain::Anchor;
 use bdk_chain::{
     bitcoin::{Amount, BlockHash, OutPoint, ScriptBuf, TxOut, Txid},
-    local_chain::{self, CheckPoint},
+    local_chain::CheckPoint,
     BlockId, ConfirmationTimeHeightAnchor, TxGraph,
 };
 use esplora_client::TxStatus;
@@ -47,7 +47,7 @@ pub trait EsploraExt {
     ///
     /// A `stop_gap` of 0 will be treated as a `stop_gap` of 1.
     ///
-    /// [`LocalChain::tip`]: local_chain::LocalChain::tip
+    /// [`LocalChain::tip`]: bdk_chain::local_chain::LocalChain::tip
     fn full_scan<K: Ord + Clone>(
         &self,
         local_tip: CheckPoint,
@@ -68,7 +68,7 @@ pub trait EsploraExt {
     /// If the scripts to sync are unknown, such as when restoring or importing a keychain that
     /// may include scripts that have been used, use [`full_scan`] with the keychain.
     ///
-    /// [`LocalChain::tip`]: local_chain::LocalChain::tip
+    /// [`LocalChain::tip`]: bdk_chain::local_chain::LocalChain::tip
     /// [`full_scan`]: EsploraExt::full_scan
     fn sync(
         &self,
@@ -178,7 +178,7 @@ fn chain_update<A: Anchor>(
     latest_blocks: &BTreeMap<u32, BlockHash>,
     local_tip: &CheckPoint,
     anchors: &BTreeSet<(A, Txid)>,
-) -> Result<local_chain::Update, Error> {
+) -> Result<CheckPoint, Error> {
     let mut point_of_agreement = None;
     let mut conflicts = vec![];
     for local_cp in local_tip.iter() {
@@ -223,10 +223,7 @@ fn chain_update<A: Anchor>(
         tip = tip.insert(BlockId { height, hash });
     }
 
-    Ok(local_chain::Update {
-        tip,
-        introduce_older_blocks: true,
-    })
+    Ok(tip)
 }
 
 /// This performs a full scan to get an update for the [`TxGraph`] and
@@ -752,7 +749,6 @@ mod test {
             )?;
 
             let update_blocks = chain_update
-                .tip
                 .iter()
                 .map(|cp| cp.block_id())
                 .collect::<BTreeSet<_>>();

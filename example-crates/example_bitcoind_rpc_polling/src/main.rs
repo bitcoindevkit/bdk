@@ -188,10 +188,7 @@ fn main() -> anyhow::Result<()> {
                 let mut db = db.lock().unwrap();
 
                 let chain_changeset = chain
-                    .apply_update(local_chain::Update {
-                        tip: emission.checkpoint,
-                        introduce_older_blocks: false,
-                    })
+                    .apply_update(emission.checkpoint)
                     .expect("must always apply as we receive blocks in order from emitter");
                 let graph_changeset = graph.apply_block_relevant(&emission.block, height);
                 db.stage((chain_changeset, graph_changeset));
@@ -301,12 +298,8 @@ fn main() -> anyhow::Result<()> {
                 let changeset = match emission {
                     Emission::Block(block_emission) => {
                         let height = block_emission.block_height();
-                        let chain_update = local_chain::Update {
-                            tip: block_emission.checkpoint,
-                            introduce_older_blocks: false,
-                        };
                         let chain_changeset = chain
-                            .apply_update(chain_update)
+                            .apply_update(block_emission.checkpoint)
                             .expect("must always apply as we receive blocks in order from emitter");
                         let graph_changeset =
                             graph.apply_block_relevant(&block_emission.block, height);
