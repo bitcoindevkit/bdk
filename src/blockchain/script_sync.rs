@@ -464,11 +464,10 @@ fn make_txs_consistent(txs: &[TransactionDetails]) -> Vec<&TransactionDetails> {
     }
 
     utxo_index
-        .into_iter()
-        .map(|(_, tx)| (tx.txid, tx))
+        .into_values()
+        .map(|tx| (tx.txid, tx))
         .collect::<HashMap<_, _>>()
-        .into_iter()
-        .map(|(_, tx)| tx)
+        .into_values()
         .chain(coinbase_txs)
         .collect()
 }
