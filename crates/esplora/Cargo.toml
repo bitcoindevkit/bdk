@@ -27,9 +27,10 @@ electrsd = { version= "0.27.1", features = ["bitcoind_25_0", "esplora_a33e97e1",
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }
 
 [features]
-default = ["std", "async-https", "blocking"]
+default = ["std", "async-https", "blocking-https-rustls"]
 std = ["bdk_chain/std"]
 async = ["async-trait", "futures", "esplora-client/async"]
 async-https = ["async", "esplora-client/async-https"]
 async-https-rustls = ["async", "esplora-client/async-https-rustls"]
 blocking = ["esplora-client/blocking"]
+blocking-https-rustls = ["esplora-client/blocking-https-rustls"]
