@@ -1,6 +1,6 @@
 #![allow(unused)]
 
-use bdk::{wallet::AddressIndex, KeychainKind, LocalOutput, Wallet};
+use bdk::{KeychainKind, LocalOutput, Wallet};
 use bdk_chain::indexed_tx_graph::Indexer;
 use bdk_chain::{BlockId, ConfirmationTime};
 use bitcoin::hashes::Hash;
@@ -20,7 +20,7 @@ pub fn get_funded_wallet_with_change(
     change: Option<&str>,
 ) -> (Wallet, bitcoin::Txid) {
     let mut wallet = Wallet::new_no_persist(descriptor, change, Network::Regtest).unwrap();
-    let change_address = wallet.get_address(AddressIndex::New).address;
+    let change_address = wallet.peek_address(KeychainKind::External, 0).address;
     let sendto_address = Address::from_str("bcrt1q3qtze4ys45tgdvguj66zrk4fu6hq3a3v9pfly5")
         .expect("address")
         .require_network(Network::Regtest)

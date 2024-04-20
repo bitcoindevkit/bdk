@@ -7,8 +7,8 @@ use std::{io::Write, str::FromStr};
 
 use bdk::{
     bitcoin::{Address, Network},
-    wallet::{AddressIndex, Update},
-    SignOptions, Wallet,
+    wallet::Update,
+    KeychainKind, SignOptions, Wallet,
 };
 use bdk_esplora::{esplora_client, EsploraExt};
 use bdk_file_store::Store;
@@ -26,7 +26,7 @@ fn main() -> Result<(), anyhow::Error> {
         Network::Testnet,
     )?;
 
-    let address = wallet.try_get_address(AddressIndex::New)?;
+    let address = wallet.next_unused_address(KeychainKind::External)?;
     println!("Generated Address: {}", address);
 
     let balance = wallet.get_balance();

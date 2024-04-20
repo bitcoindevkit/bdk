@@ -8,8 +8,8 @@ use std::str::FromStr;
 
 use bdk::bitcoin::Address;
 use bdk::wallet::Update;
-use bdk::SignOptions;
 use bdk::{bitcoin::Network, Wallet};
+use bdk::{KeychainKind, SignOptions};
 use bdk_electrum::{
     electrum_client::{self, ElectrumApi},
     ElectrumExt, ElectrumUpdate,
@@ -29,7 +29,7 @@ fn main() -> Result<(), anyhow::Error> {
         Network::Testnet,
     )?;
 
-    let address = wallet.try_get_address(bdk::wallet::AddressIndex::New)?;
+    let address = wallet.next_unused_address(KeychainKind::External)?;
     println!("Generated Address: {}", address);
 
     let balance = wallet.get_balance();

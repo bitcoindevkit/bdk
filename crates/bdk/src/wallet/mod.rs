@@ -178,28 +178,6 @@ impl
     }
 }
 
-/// The address index selection strategy to use to derived an address from the wallet's external
-/// descriptor. See [`Wallet::get_address`]. If you're unsure which one to use use `WalletIndex::New`.
-#[derive(Debug)]
-pub enum AddressIndex {
-    /// Return a new address after incrementing the current descriptor index.
-    New,
-    /// Return the address for the current descriptor index if it has not been used in a received
-    /// transaction. Otherwise return a new address as with [`AddressIndex::New`].
-    ///
-    /// Use with caution, if the wallet has not yet detected an address has been used it could
-    /// return an already used address. This function is primarily meant for situations where the
-    /// caller is untrusted; for example when deriving donation addresses on-demand for a public
-    /// web page.
-    LastUnused,
-    /// Return the address for a specific descriptor index. Does not change the current descriptor
-    /// index used by `AddressIndex::New` and `AddressIndex::LastUsed`.
-    ///
-    /// Use with caution, if an index is given that is less than the current descriptor index
-    /// then the returned address may have already been used.
-    Peek(u32),
-}
-
 /// A derived address and the index it was found at.
 /// For convenience this automatically derefs to `Address`
 #[derive(Debug, PartialEq, Eq)]
@@ -253,36 +231,6 @@ impl Wallet {
                 NewError::Descriptor(e) => e,
                 NewError::Persist(_) => unreachable!("mock-write must always succeed"),
             })
-    }
-}
-
-impl Wallet {
-    /// Infallibly return a derived address using the external descriptor, see [`AddressIndex`] for
-    /// available address index selection strategies. If none of the keys in the descriptor are derivable
-    /// (i.e. does not end with /*) then the same address will always be returned for any [`AddressIndex`].
-    ///
-    /// # Panics
-    ///
-    /// This panics when the caller requests for an address of derivation index greater than the
-    /// BIP32 max index.
-    pub fn get_address(&mut self, address_index: AddressIndex) -> AddressInfo {
-        self.try_get_address(address_index).unwrap()
-    }
-
-    /// Infallibly return a derived address using the internal (change) descriptor.
-    ///
-    /// If the wallet doesn't have an internal descriptor it will use the external descriptor.
-    ///
-    /// see [`AddressIndex`] for available address index selection strategies. If none of the keys
-    /// in the descriptor are derivable (i.e. does not end with /*) then the same address will always
-    /// be returned for any [`AddressIndex`].
-    ///
-    /// # Panics
-    ///
-    /// This panics when the caller requests for an address of derivation index greater than the
-    /// BIP32 max index.
-    pub fn get_internal_address(&mut self, address_index: AddressIndex) -> AddressInfo {
-        self.try_get_internal_address(address_index).unwrap()
     }
 }
 
@@ -670,102 +618,144 @@ impl Wallet {
         self.indexed_graph.index.keychains()
     }
 
-    /// Return a derived address using the external descriptor, see [`AddressIndex`] for
-    /// available address index selection strategies. If none of the keys in the descriptor are derivable
-    /// (i.e. does not end with /*) then the same address will always be returned for any [`AddressIndex`].
+    /// Peek an address of the given `keychain` at `index` without revealing it.
     ///
-    /// A `PersistBackend<ChangeSet>::WriteError` will result if unable to persist the new address
-    /// to the `PersistBackend`.
+    /// For non-wildcard descriptors this returns the same address at every provided index.
     ///
     /// # Panics
     ///
     /// This panics when the caller requests for an address of derivation index greater than the
-    /// BIP32 max index.
-    pub fn try_get_address(&mut self, address_index: AddressIndex) -> anyhow::Result<AddressInfo> {
-        self._get_address(KeychainKind::External, address_index)
-    }
-
-    /// Return a derived address using the internal (change) descriptor.
-    ///
-    /// If the wallet doesn't have an internal descriptor it will use the external descriptor.
-    ///
-    /// A `PersistBackend<ChangeSet>::WriteError` will result if unable to persist the new address
-    /// to the `PersistBackend`.
-    ///
-    /// see [`AddressIndex`] for available address index selection strategies. If none of the keys
-    /// in the descriptor are derivable (i.e. does not end with /*) then the same address will always
-    /// be returned for any [`AddressIndex`].
-    ///
-    /// # Panics
-    ///
-    /// This panics when the caller requests for an address of derivation index greater than the
-    /// BIP32 max index.
-    pub fn try_get_internal_address(
-        &mut self,
-        address_index: AddressIndex,
-    ) -> anyhow::Result<AddressInfo> {
-        self._get_address(KeychainKind::Internal, address_index)
-    }
-
-    /// Return a derived address using the specified `keychain` (external/internal).
-    ///
-    /// If `keychain` is [`KeychainKind::External`], external addresses will be derived (used for
-    /// receiving funds).
-    ///
-    /// If `keychain` is [`KeychainKind::Internal`], internal addresses will be derived (used for
-    /// creating change outputs). If the wallet does not have an internal keychain, it will use the
-    /// external keychain to derive change outputs.
-    ///
-    /// See [`AddressIndex`] for available address index selection strategies. If none of the keys
-    /// in the descriptor are derivable (i.e. does not end with /*) then the same address will
-    /// always be returned for any [`AddressIndex`].
-    ///
-    /// # Panics
-    ///
-    /// This panics when the caller requests for an address of derivation index greater than the
-    /// BIP32 max index.
-    fn _get_address(
-        &mut self,
-        keychain: KeychainKind,
-        address_index: AddressIndex,
-    ) -> anyhow::Result<AddressInfo> {
+    /// [BIP32](https://github.com/bitcoin/bips/blob/master/bip-0032.mediawiki) max index.
+    pub fn peek_address(&self, keychain: KeychainKind, mut index: u32) -> AddressInfo {
         let keychain = self.map_keychain(keychain);
-        let txout_index = &mut self.indexed_graph.index;
-        let (index, spk, changeset) = match address_index {
-            AddressIndex::New => {
-                let ((index, spk), index_changeset) = txout_index.reveal_next_spk(&keychain);
-                (index, spk.into(), Some(index_changeset))
-            }
-            AddressIndex::LastUnused => {
-                let ((index, spk), index_changeset) = txout_index.next_unused_spk(&keychain);
-                (index, spk.into(), Some(index_changeset))
-            }
-            AddressIndex::Peek(mut peek_index) => {
-                let mut spk_iter = txout_index.unbounded_spk_iter(&keychain);
-                if !spk_iter.descriptor().has_wildcard() {
-                    peek_index = 0;
-                }
-                let (index, spk) = spk_iter
-                    .nth(peek_index as usize)
-                    .expect("derivation index is out of bounds");
-                (index, spk, None)
-            }
-        };
-
-        if let Some(changeset) = changeset {
-            self.persist
-                .stage(ChangeSet::from(indexed_tx_graph::ChangeSet::from(
-                    changeset,
-                )));
-            self.persist.commit()?;
+        let mut spk_iter = self.indexed_graph.index.unbounded_spk_iter(&keychain);
+        if !spk_iter.descriptor().has_wildcard() {
+            index = 0;
         }
+        let (index, spk) = spk_iter
+            .nth(index as usize)
+            .expect("derivation index is out of bounds");
+
+        AddressInfo {
+            index,
+            address: Address::from_script(&spk, self.network).expect("must have address form"),
+            keychain,
+        }
+    }
+
+    /// Attempt to reveal the next address of the given `keychain`.
+    ///
+    /// This will increment the internal derivation index. If the keychain's descriptor doesn't
+    /// contain a wildcard or every address is already revealed up to the maximum derivation
+    /// index defined in [BIP32](https://github.com/bitcoin/bips/blob/master/bip-0032.mediawiki),
+    /// then returns the last revealed address.
+    ///
+    /// # Errors
+    ///
+    /// If writing to persistent storage fails.
+    pub fn reveal_next_address(&mut self, keychain: KeychainKind) -> anyhow::Result<AddressInfo> {
+        let keychain = self.map_keychain(keychain);
+        let ((index, spk), index_changeset) = self.indexed_graph.index.reveal_next_spk(&keychain);
+
+        self.persist
+            .stage_and_commit(indexed_tx_graph::ChangeSet::from(index_changeset).into())?;
 
         Ok(AddressInfo {
             index,
-            address: Address::from_script(&spk, self.network)
-                .expect("descriptor must have address form"),
+            address: Address::from_script(spk, self.network).expect("must have address form"),
             keychain,
         })
+    }
+
+    /// Reveal addresses up to and including the target `index` and return an iterator
+    /// of newly revealed addresses.
+    ///
+    /// If the target `index` is unreachable, we make a best effort to reveal up to the last
+    /// possible index. If all addresses up to the given `index` are already revealed, then
+    /// no new addresses are returned.
+    ///
+    /// # Errors
+    ///
+    /// If writing to persistent storage fails.
+    pub fn reveal_addresses_to(
+        &mut self,
+        keychain: KeychainKind,
+        index: u32,
+    ) -> anyhow::Result<impl Iterator<Item = AddressInfo> + '_> {
+        let keychain = self.map_keychain(keychain);
+        let (spk_iter, index_changeset) =
+            self.indexed_graph.index.reveal_to_target(&keychain, index);
+
+        self.persist
+            .stage_and_commit(indexed_tx_graph::ChangeSet::from(index_changeset).into())?;
+
+        Ok(spk_iter.map(move |(index, spk)| AddressInfo {
+            index,
+            address: Address::from_script(&spk, self.network).expect("must have address form"),
+            keychain,
+        }))
+    }
+
+    /// Get the next unused address for the given `keychain`, i.e. the address with the lowest
+    /// derivation index that hasn't been used.
+    ///
+    /// This will attempt to derive and reveal a new address if no newly revealed addresses
+    /// are available. See also [`reveal_next_address`](Self::reveal_next_address).
+    ///
+    /// # Errors
+    ///
+    /// If writing to persistent storage fails.
+    pub fn next_unused_address(&mut self, keychain: KeychainKind) -> anyhow::Result<AddressInfo> {
+        let keychain = self.map_keychain(keychain);
+        let ((index, spk), index_changeset) = self.indexed_graph.index.next_unused_spk(&keychain);
+
+        self.persist
+            .stage_and_commit(indexed_tx_graph::ChangeSet::from(index_changeset).into())?;
+
+        Ok(AddressInfo {
+            index,
+            address: Address::from_script(spk, self.network).expect("must have address form"),
+            keychain,
+        })
+    }
+
+    /// Marks an address used of the given `keychain` at `index`.
+    ///
+    /// Returns whether the given index was present and then removed from the unused set.
+    pub fn mark_used(&mut self, keychain: KeychainKind, index: u32) -> bool {
+        self.indexed_graph.index.mark_used(keychain, index)
+    }
+
+    /// Undoes the effect of [`mark_used`] and returns whether the `index` was inserted
+    /// back into the unused set.
+    ///
+    /// Since this is only a superficial marker, it will have no effect if the address at the given
+    /// `index` was actually used, i.e. the wallet has previously indexed a tx output for the
+    /// derived spk.
+    ///
+    /// [`mark_used`]: Self::mark_used
+    pub fn unmark_used(&mut self, keychain: KeychainKind, index: u32) -> bool {
+        self.indexed_graph.index.unmark_used(keychain, index)
+    }
+
+    /// List addresses that are revealed but unused.
+    ///
+    /// Note if the returned iterator is empty you can reveal more addresses
+    /// by using [`reveal_next_address`](Self::reveal_next_address) or
+    /// [`reveal_addresses_to`](Self::reveal_addresses_to).
+    pub fn list_unused_addresses(
+        &self,
+        keychain: KeychainKind,
+    ) -> impl DoubleEndedIterator<Item = AddressInfo> + '_ {
+        let keychain = self.map_keychain(keychain);
+        self.indexed_graph
+            .index
+            .unused_keychain_spks(&keychain)
+            .map(move |(index, spk)| AddressInfo {
+                index,
+                address: Address::from_script(spk, self.network).expect("must have address form"),
+                keychain,
+            })
     }
 
     /// Return whether or not a `script` is part of this wallet (either internal or external)
@@ -2491,7 +2481,7 @@ macro_rules! doctest_wallet {
     () => {{
         use $crate::bitcoin::{BlockHash, Transaction, absolute, TxOut, Network, hashes::Hash};
         use $crate::chain::{ConfirmationTime, BlockId};
-        use $crate::wallet::{AddressIndex, Wallet};
+        use $crate::{KeychainKind, wallet::Wallet};
         let descriptor = "tr([73c5da0a/86'/0'/0']tprv8fMn4hSKPRC1oaCPqxDb1JWtgkpeiQvZhsr8W2xuy3GEMkzoArcAWTfJxYb6Wj8XNNDWEjfYKK4wGQXh3ZUXhDF2NcnsALpWTeSwarJt7Vc/0/*)";
         let change_descriptor = "tr([73c5da0a/86'/0'/0']tprv8fMn4hSKPRC1oaCPqxDb1JWtgkpeiQvZhsr8W2xuy3GEMkzoArcAWTfJxYb6Wj8XNNDWEjfYKK4wGQXh3ZUXhDF2NcnsALpWTeSwarJt7Vc/1/*)";
 
@@ -2501,7 +2491,7 @@ macro_rules! doctest_wallet {
             Network::Regtest,
         )
         .unwrap();
-        let address = wallet.get_address(AddressIndex::New).address;
+        let address = wallet.peek_address(KeychainKind::External, 0).address;
         let tx = Transaction {
             version: transaction::Version::ONE,
             lock_time: absolute::LockTime::ZERO,

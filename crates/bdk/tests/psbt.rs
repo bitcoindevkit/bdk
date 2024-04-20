@@ -1,7 +1,5 @@
 use bdk::bitcoin::{Amount, FeeRate, Psbt, TxIn};
-use bdk::wallet::AddressIndex;
-use bdk::wallet::AddressIndex::New;
-use bdk::{psbt, SignOptions};
+use bdk::{psbt, KeychainKind, SignOptions};
 use core::str::FromStr;
 mod common;
 use common::*;
@@ -14,7 +12,7 @@ const PSBT_STR: &str = "cHNidP8BAKACAAAAAqsJSaCMWvfEm4IS9Bfi8Vqz9cM9zxU4IagTn4d6
 fn test_psbt_malformed_psbt_input_legacy() {
     let psbt_bip = Psbt::from_str(PSBT_STR).unwrap();
     let (mut wallet, _) = get_funded_wallet(get_test_wpkh());
-    let send_to = wallet.get_address(AddressIndex::New);
+    let send_to = wallet.peek_address(KeychainKind::External, 0);
     let mut builder = wallet.build_tx();
     builder.add_recipient(send_to.script_pubkey(), 10_000);
     let mut psbt = builder.finish().unwrap();
@@ -31,7 +29,7 @@ fn test_psbt_malformed_psbt_input_legacy() {
 fn test_psbt_malformed_psbt_input_segwit() {
     let psbt_bip = Psbt::from_str(PSBT_STR).unwrap();
     let (mut wallet, _) = get_funded_wallet(get_test_wpkh());
-    let send_to = wallet.get_address(AddressIndex::New);
+    let send_to = wallet.peek_address(KeychainKind::External, 0);
     let mut builder = wallet.build_tx();
     builder.add_recipient(send_to.script_pubkey(), 10_000);
     let mut psbt = builder.finish().unwrap();
@@ -47,7 +45,7 @@ fn test_psbt_malformed_psbt_input_segwit() {
 #[should_panic(expected = "InputIndexOutOfRange")]
 fn test_psbt_malformed_tx_input() {
     let (mut wallet, _) = get_funded_wallet(get_test_wpkh());
-    let send_to = wallet.get_address(AddressIndex::New);
+    let send_to = wallet.peek_address(KeychainKind::External, 0);
     let mut builder = wallet.build_tx();
     builder.add_recipient(send_to.script_pubkey(), 10_000);
     let mut psbt = builder.finish().unwrap();
@@ -63,7 +61,7 @@ fn test_psbt_malformed_tx_input() {
 fn test_psbt_sign_with_finalized() {
     let psbt_bip = Psbt::from_str(PSBT_STR).unwrap();
     let (mut wallet, _) = get_funded_wallet(get_test_wpkh());
-    let send_to = wallet.get_address(AddressIndex::New);
+    let send_to = wallet.peek_address(KeychainKind::External, 0);
     let mut builder = wallet.build_tx();
     builder.add_recipient(send_to.script_pubkey(), 10_000);
     let mut psbt = builder.finish().unwrap();
@@ -84,7 +82,7 @@ fn test_psbt_fee_rate_with_witness_utxo() {
     let expected_fee_rate = FeeRate::from_sat_per_kwu(310);
 
     let (mut wallet, _) = get_funded_wallet("wpkh(tprv8ZgxMBicQKsPd3EupYiPRhaMooHKUHJxNsTfYuScep13go8QFfHdtkG9nRkFGb7busX4isf6X9dURGCoKgitaApQ6MupRhZMcELAxTBRJgS/*)");
-    let addr = wallet.get_address(New);
+    let addr = wallet.peek_address(KeychainKind::External, 0);
     let mut builder = wallet.build_tx();
     builder.drain_to(addr.script_pubkey()).drain_wallet();
     builder.fee_rate(expected_fee_rate);
@@ -109,7 +107,7 @@ fn test_psbt_fee_rate_with_nonwitness_utxo() {
     let expected_fee_rate = FeeRate::from_sat_per_kwu(310);
 
     let (mut wallet, _) = get_funded_wallet("pkh(tprv8ZgxMBicQKsPd3EupYiPRhaMooHKUHJxNsTfYuScep13go8QFfHdtkG9nRkFGb7busX4isf6X9dURGCoKgitaApQ6MupRhZMcELAxTBRJgS/*)");
-    let addr = wallet.get_address(New);
+    let addr = wallet.peek_address(KeychainKind::External, 0);
     let mut builder = wallet.build_tx();
     builder.drain_to(addr.script_pubkey()).drain_wallet();
     builder.fee_rate(expected_fee_rate);
@@ -133,7 +131,7 @@ fn test_psbt_fee_rate_with_missing_txout() {
     let expected_fee_rate = FeeRate::from_sat_per_kwu(310);
 
     let (mut wpkh_wallet,  _) = get_funded_wallet("wpkh(tprv8ZgxMBicQKsPd3EupYiPRhaMooHKUHJxNsTfYuScep13go8QFfHdtkG9nRkFGb7busX4isf6X9dURGCoKgitaApQ6MupRhZMcELAxTBRJgS/*)");
-    let addr = wpkh_wallet.get_address(New);
+    let addr = wpkh_wallet.peek_address(KeychainKind::External, 0);
     let mut builder = wpkh_wallet.build_tx();
     builder.drain_to(addr.script_pubkey()).drain_wallet();
     builder.fee_rate(expected_fee_rate);
@@ -145,7 +143,7 @@ fn test_psbt_fee_rate_with_missing_txout() {
     assert!(wpkh_psbt.fee_rate().is_none());
 
     let (mut pkh_wallet,  _) = get_funded_wallet("pkh(tprv8ZgxMBicQKsPd3EupYiPRhaMooHKUHJxNsTfYuScep13go8QFfHdtkG9nRkFGb7busX4isf6X9dURGCoKgitaApQ6MupRhZMcELAxTBRJgS/*)");
-    let addr = pkh_wallet.get_address(New);
+    let addr = pkh_wallet.peek_address(KeychainKind::External, 0);
     let mut builder = pkh_wallet.build_tx();
     builder.drain_to(addr.script_pubkey()).drain_wallet();
     builder.fee_rate(expected_fee_rate);
@@ -174,7 +172,7 @@ fn test_psbt_multiple_internalkey_signers() {
 
     let (mut wallet, _) = get_funded_wallet(&desc);
     let to_spend = wallet.get_balance().total();
-    let send_to = wallet.get_address(AddressIndex::New);
+    let send_to = wallet.peek_address(KeychainKind::External, 0);
     let mut builder = wallet.build_tx();
     builder.drain_to(send_to.script_pubkey()).drain_wallet();
     let mut psbt = builder.finish().unwrap();
