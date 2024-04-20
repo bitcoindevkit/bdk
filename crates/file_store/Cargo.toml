@@ -11,6 +11,7 @@ authors = ["Bitcoin Dev Kit Developers"]
 readme = "README.md"
 
 [dependencies]
+anyhow = { version = "1", default-features = false }
 bdk_chain = { path = "../chain", version = "0.12.0", features = [ "serde", "miniscript" ] }
 bincode = { version = "1" }
 serde = { version = "1", features = ["derive"] }

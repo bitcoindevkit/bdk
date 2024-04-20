@@ -1,26 +1,32 @@
-use core::convert::Infallible;
-
 use crate::Append;
+use alloc::boxed::Box;
+use core::fmt;
 
-/// `Persist` wraps a [`PersistBackend`] (`B`) to create a convenient staging area for changes (`C`)
+/// `Persist` wraps a [`PersistBackend`] to create a convenient staging area for changes (`C`)
 /// before they are persisted.
 ///
 /// Not all changes to the in-memory representation needs to be written to disk right away, so
 /// [`Persist::stage`] can be used to *stage* changes first and then [`Persist::commit`] can be used
 /// to write changes to disk.
-#[derive(Debug)]
-pub struct Persist<B, C> {
-    backend: B,
+pub struct Persist<C> {
+    backend: Box<dyn PersistBackend<C> + Send + Sync>,
     stage: C,
 }
 
-impl<B, C> Persist<B, C>
+impl<C: fmt::Debug> fmt::Debug for Persist<C> {
+    fn fmt(&self, fmt: &mut core::fmt::Formatter<'_>) -> Result<(), core::fmt::Error> {
+        write!(fmt, "{:?}", self.stage)?;
+        Ok(())
+    }
+}
+
+impl<C> Persist<C>
 where
-    B: PersistBackend<C>,
     C: Default + Append,
 {
     /// Create a new [`Persist`] from [`PersistBackend`].
-    pub fn new(backend: B) -> Self {
+    pub fn new(backend: impl PersistBackend<C> + Send + Sync + 'static) -> Self {
+        let backend = Box::new(backend);
         Self {
             backend,
             stage: Default::default(),
@@ -46,7 +52,7 @@ where
     /// # Error
     ///
     /// Returns a backend-defined error if this fails.
-    pub fn commit(&mut self) -> Result<Option<C>, B::WriteError> {
+    pub fn commit(&mut self) -> anyhow::Result<Option<C>> {
         if self.stage.is_empty() {
             return Ok(None);
         }
@@ -63,7 +69,7 @@ where
     ///
     /// [`stage`]: Self::stage
     /// [`commit`]: Self::commit
-    pub fn stage_and_commit(&mut self, changeset: C) -> Result<Option<C>, B::WriteError> {
+    pub fn stage_and_commit(&mut self, changeset: C) -> anyhow::Result<Option<C>> {
         self.stage(changeset);
         self.commit()
     }
@@ -74,12 +80,6 @@ where
 /// `C` represents the changeset; a datatype that records changes made to in-memory data structures
 /// that are to be persisted, or retrieved from persistence.
 pub trait PersistBackend<C> {
-    /// The error the backend returns when it fails to write.
-    type WriteError: core::fmt::Debug;
-
-    /// The error the backend returns when it fails to load changesets `C`.
-    type LoadError: core::fmt::Debug;
-
     /// Writes a changeset to the persistence backend.
     ///
     /// It is up to the backend what it does with this. It could store every changeset in a list or
@@ -88,22 +88,18 @@ pub trait PersistBackend<C> {
     /// changesets had been applied sequentially.
     ///
     /// [`load_from_persistence`]: Self::load_from_persistence
-    fn write_changes(&mut self, changeset: &C) -> Result<(), Self::WriteError>;
+    fn write_changes(&mut self, changeset: &C) -> anyhow::Result<()>;
 
     /// Return the aggregate changeset `C` from persistence.
-    fn load_from_persistence(&mut self) -> Result<Option<C>, Self::LoadError>;
+    fn load_from_persistence(&mut self) -> anyhow::Result<Option<C>>;
 }
 
 impl<C> PersistBackend<C> for () {
-    type WriteError = Infallible;
-
-    type LoadError = Infallible;
-
-    fn write_changes(&mut self, _changeset: &C) -> Result<(), Self::WriteError> {
+    fn write_changes(&mut self, _changeset: &C) -> anyhow::Result<()> {
         Ok(())
     }
 
-    fn load_from_persistence(&mut self) -> Result<Option<C>, Self::LoadError> {
+    fn load_from_persistence(&mut self) -> anyhow::Result<Option<C>> {
         Ok(None)
     }
 }

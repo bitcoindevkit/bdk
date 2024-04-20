@@ -45,13 +45,12 @@ use core::cell::RefCell;
 use core::fmt;
 use core::marker::PhantomData;
 
-use bdk_chain::PersistBackend;
 use bitcoin::psbt::{self, Psbt};
 use bitcoin::script::PushBytes;
 use bitcoin::{absolute, FeeRate, OutPoint, ScriptBuf, Sequence, Transaction, Txid};
 
 use super::coin_selection::{CoinSelectionAlgorithm, DefaultCoinSelectionAlgorithm};
-use super::{ChangeSet, CreateTxError, Wallet};
+use super::{CreateTxError, Wallet};
 use crate::collections::{BTreeMap, HashSet};
 use crate::{KeychainKind, LocalOutput, Utxo, WeightedUtxo};
 
@@ -124,8 +123,8 @@ impl TxBuilderContext for BumpFee {}
 /// [`finish`]: Self::finish
 /// [`coin_selection`]: Self::coin_selection
 #[derive(Debug)]
-pub struct TxBuilder<'a, D, Cs, Ctx> {
-    pub(crate) wallet: Rc<RefCell<&'a mut Wallet<D>>>,
+pub struct TxBuilder<'a, Cs, Ctx> {
+    pub(crate) wallet: Rc<RefCell<&'a mut Wallet>>,
     pub(crate) params: TxParams,
     pub(crate) coin_selection: Cs,
     pub(crate) phantom: PhantomData<Ctx>,
@@ -176,7 +175,7 @@ impl Default for FeePolicy {
     }
 }
 
-impl<'a, D, Cs: Clone, Ctx> Clone for TxBuilder<'a, D, Cs, Ctx> {
+impl<'a, Cs: Clone, Ctx> Clone for TxBuilder<'a, Cs, Ctx> {
     fn clone(&self) -> Self {
         TxBuilder {
             wallet: self.wallet.clone(),
@@ -188,7 +187,7 @@ impl<'a, D, Cs: Clone, Ctx> Clone for TxBuilder<'a, D, Cs, Ctx> {
 }
 
 // methods supported by both contexts, for any CoinSelectionAlgorithm
-impl<'a, D, Cs, Ctx> TxBuilder<'a, D, Cs, Ctx> {
+impl<'a, Cs, Ctx> TxBuilder<'a, Cs, Ctx> {
     /// Set a custom fee rate.
     ///
     /// This method sets the mining fee paid by the transaction as a rate on its size.
@@ -560,7 +559,7 @@ impl<'a, D, Cs, Ctx> TxBuilder<'a, D, Cs, Ctx> {
     pub fn coin_selection<P: CoinSelectionAlgorithm>(
         self,
         coin_selection: P,
-    ) -> TxBuilder<'a, D, P, Ctx> {
+    ) -> TxBuilder<'a, P, Ctx> {
         TxBuilder {
             wallet: self.wallet,
             params: self.params,
@@ -615,16 +614,13 @@ impl<'a, D, Cs, Ctx> TxBuilder<'a, D, Cs, Ctx> {
     }
 }
 
-impl<'a, D, Cs: CoinSelectionAlgorithm, Ctx> TxBuilder<'a, D, Cs, Ctx> {
+impl<'a, Cs: CoinSelectionAlgorithm, Ctx> TxBuilder<'a, Cs, Ctx> {
     /// Finish building the transaction.
     ///
     /// Returns a new [`Psbt`] per [`BIP174`].
     ///
     /// [`BIP174`]: https://github.com/bitcoin/bips/blob/master/bip-0174.mediawiki
-    pub fn finish(self) -> Result<Psbt, CreateTxError<D::WriteError>>
-    where
-        D: PersistBackend<ChangeSet>,
-    {
+    pub fn finish(self) -> Result<Psbt, CreateTxError> {
         self.wallet
             .borrow_mut()
             .create_tx(self.coin_selection, self.params)
@@ -715,7 +711,7 @@ impl fmt::Display for AllowShrinkingError {
 #[cfg(feature = "std")]
 impl std::error::Error for AllowShrinkingError {}
 
-impl<'a, D, Cs: CoinSelectionAlgorithm> TxBuilder<'a, D, Cs, CreateTx> {
+impl<'a, Cs: CoinSelectionAlgorithm> TxBuilder<'a, Cs, CreateTx> {
     /// Replace the recipients already added with a new list
     pub fn set_recipients(&mut self, recipients: Vec<(ScriptBuf, u64)>) -> &mut Self {
         self.params.recipients = recipients;
@@ -793,7 +789,7 @@ impl<'a, D, Cs: CoinSelectionAlgorithm> TxBuilder<'a, D, Cs, CreateTx> {
 }
 
 // methods supported only by bump_fee
-impl<'a, D> TxBuilder<'a, D, DefaultCoinSelectionAlgorithm, BumpFee> {
+impl<'a> TxBuilder<'a, DefaultCoinSelectionAlgorithm, BumpFee> {
     /// Explicitly tells the wallet that it is allowed to reduce the amount of the output matching this
     /// `script_pubkey` in order to bump the transaction fee. Without specifying this the wallet
     /// will attempt to find a change output to shrink instead.
