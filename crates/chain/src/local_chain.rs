@@ -213,6 +213,46 @@ impl CheckPoint {
         base.extend(core::iter::once(block_id).chain(tail.into_iter().rev()))
             .expect("tail is in order")
     }
+
+    /// Apply `changeset` to the checkpoint.
+    fn apply_changeset(mut self, changeset: &ChangeSet) -> Result<CheckPoint, MissingGenesisError> {
+        if let Some(start_height) = changeset.keys().next().cloned() {
+            // changes after point of agreement
+            let mut extension = BTreeMap::default();
+            // point of agreement
+            let mut base: Option<CheckPoint> = None;
+
+            for cp in self.iter() {
+                if cp.height() >= start_height {
+                    extension.insert(cp.height(), cp.hash());
+                } else {
+                    base = Some(cp);
+                    break;
+                }
+            }
+
+            for (&height, &hash) in changeset {
+                match hash {
+                    Some(hash) => {
+                        extension.insert(height, hash);
+                    }
+                    None => {
+                        extension.remove(&height);
+                    }
+                };
+            }
+
+            let new_tip = match base {
+                Some(base) => base
+                    .extend(extension.into_iter().map(BlockId::from))
+                    .expect("extension is strictly greater than base"),
+                None => LocalChain::from_blocks(extension)?.tip(),
+            };
+            self = new_tip;
+        }
+
+        Ok(self)
+    }
 }
 
 /// Iterates over checkpoints backwards.
@@ -348,15 +388,12 @@ impl LocalChain {
 
     /// Applies the given `update` to the chain.
     ///
-    /// The method returns [`ChangeSet`] on success. This represents the applied changes to `self`.
+    /// The method returns [`ChangeSet`] on success. This represents the changes applied to `self`.
     ///
     /// There must be no ambiguity about which of the existing chain's blocks are still valid and
     /// which are now invalid. That is, the new chain must implicitly connect to a definite block in
     /// the existing chain and invalidate the block after it (if it exists) by including a block at
     /// the same height but with a different hash to explicitly exclude it as a connection point.
-    ///
-    /// Additionally, a chain with a single block can have it's block invalidated by an update
-    /// chain with a block at the same height but different hash.
     ///
     /// # Errors
     ///
@@ -364,16 +401,9 @@ impl LocalChain {
     ///
     /// [module-level documentation]: crate::local_chain
     pub fn apply_update(&mut self, update: CheckPoint) -> Result<ChangeSet, CannotConnectError> {
-        let (changeset, can_replace) = merge_chains(self.tip.clone(), update.clone())?;
-        if can_replace {
-            self.tip = update;
-        } else {
-            // `._check_changeset_is_applied` is called in `.apply_changeset`
-            self.apply_changeset(&changeset)
-                .map_err(|_| CannotConnectError {
-                    try_include_height: 0,
-                })?;
-        }
+        let (new_tip, changeset) = merge_chains(self.tip.clone(), update)?;
+        self.tip = new_tip;
+        self._check_changeset_is_applied(&changeset);
         Ok(changeset)
     }
 
@@ -465,43 +495,10 @@ impl LocalChain {
 
     /// Apply the given `changeset`.
     pub fn apply_changeset(&mut self, changeset: &ChangeSet) -> Result<(), MissingGenesisError> {
-        if let Some(start_height) = changeset.keys().next().cloned() {
-            // changes after point of agreement
-            let mut extension = BTreeMap::default();
-            // point of agreement
-            let mut base: Option<CheckPoint> = None;
-
-            for cp in self.iter_checkpoints() {
-                if cp.height() >= start_height {
-                    extension.insert(cp.height(), cp.hash());
-                } else {
-                    base = Some(cp);
-                    break;
-                }
-            }
-
-            for (&height, &hash) in changeset {
-                match hash {
-                    Some(hash) => {
-                        extension.insert(height, hash);
-                    }
-                    None => {
-                        extension.remove(&height);
-                    }
-                };
-            }
-
-            let new_tip = match base {
-                Some(base) => base
-                    .extend(extension.into_iter().map(BlockId::from))
-                    .expect("extension is strictly greater than base"),
-                None => LocalChain::from_blocks(extension)?.tip(),
-            };
-            self.tip = new_tip;
-
-            debug_assert!(self._check_changeset_is_applied(changeset));
-        }
-
+        let old_tip = self.tip.clone();
+        let new_tip = old_tip.apply_changeset(changeset)?;
+        self.tip = new_tip;
+        debug_assert!(self._check_changeset_is_applied(changeset));
         Ok(())
     }
 
@@ -731,10 +728,10 @@ impl std::error::Error for ApplyHeaderError {}
 fn merge_chains(
     original_tip: CheckPoint,
     update_tip: CheckPoint,
-) -> Result<(ChangeSet, bool), CannotConnectError> {
+) -> Result<(CheckPoint, ChangeSet), CannotConnectError> {
     let mut changeset = ChangeSet::default();
-    let mut orig = original_tip.into_iter();
-    let mut update = update_tip.into_iter();
+    let mut orig = original_tip.iter();
+    let mut update = update_tip.iter();
     let mut curr_orig = None;
     let mut curr_update = None;
     let mut prev_orig: Option<CheckPoint> = None;
@@ -743,10 +740,11 @@ fn merge_chains(
     let mut prev_orig_was_invalidated = false;
     let mut potentially_invalidated_heights = vec![];
 
-    // Flag to set if heights are removed from original chain. If no heights are removed, and we
-    // have a matching node pointer between the two chains, we can conclude that the update tip can
-    // just replace the original tip.
-    let mut has_removed_heights = false;
+    // If we can, we want to return the update tip as the new tip because this allows checkpoints
+    // in multiple locations to keep the same `Arc` pointers when they are being updated from each
+    // other using this function. We can do this as long as long as the update contains every
+    // block's height of the original chain.
+    let mut is_update_height_superset_of_original = true;
 
     // To find the difference between the new chain and the original we iterate over both of them
     // from the tip backwards in tandem. We always dealing with the highest one from either chain
@@ -773,7 +771,7 @@ fn merge_chains(
                 prev_orig_was_invalidated = false;
                 prev_orig = curr_orig.take();
 
-                has_removed_heights = true;
+                is_update_height_superset_of_original = false;
 
                 // OPTIMIZATION: we have run out of update blocks so we don't need to continue
                 // iterating because there's no possibility of adding anything to changeset.
@@ -800,7 +798,17 @@ fn merge_chains(
                     // OPTIMIZATION 2 -- if we have the same underlying pointer at this point, we
                     // can guarantee that no older blocks are introduced.
                     if Arc::as_ptr(&o.0) == Arc::as_ptr(&u.0) {
-                        return Ok((changeset, !has_removed_heights));
+                        if is_update_height_superset_of_original {
+                            return Ok((update_tip, changeset));
+                        } else {
+                            let new_tip =
+                                original_tip.apply_changeset(&changeset).map_err(|_| {
+                                    CannotConnectError {
+                                        try_include_height: 0,
+                                    }
+                                })?;
+                            return Ok((new_tip, changeset));
+                        }
                     }
                 } else {
                     // We have an invalidation height so we set the height to the updated hash and
@@ -834,5 +842,10 @@ fn merge_chains(
         }
     }
 
-    Ok((changeset, false))
+    let new_tip = original_tip
+        .apply_changeset(&changeset)
+        .map_err(|_| CannotConnectError {
+            try_include_height: 0,
+        })?;
+    Ok((new_tip, changeset))
 }
