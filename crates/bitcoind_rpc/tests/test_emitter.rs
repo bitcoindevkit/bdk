@@ -4,7 +4,7 @@ use bdk_bitcoind_rpc::Emitter;
 use bdk_chain::{
     bitcoin::{Address, Amount, Txid},
     keychain::Balance,
-    local_chain::{self, CheckPoint, LocalChain},
+    local_chain::{CheckPoint, LocalChain},
     Append, BlockId, IndexedTxGraph, SpkTxOutIndex,
 };
 use bdk_testenv::TestEnv;
@@ -47,10 +47,7 @@ pub fn test_sync_local_chain() -> anyhow::Result<()> {
         );
 
         assert_eq!(
-            local_chain.apply_update(local_chain::Update {
-                tip: emission.checkpoint,
-                introduce_older_blocks: false,
-            })?,
+            local_chain.apply_update(emission.checkpoint,)?,
             BTreeMap::from([(height, Some(hash))]),
             "chain update changeset is unexpected",
         );
@@ -95,10 +92,7 @@ pub fn test_sync_local_chain() -> anyhow::Result<()> {
         );
 
         assert_eq!(
-            local_chain.apply_update(local_chain::Update {
-                tip: emission.checkpoint,
-                introduce_older_blocks: false,
-            })?,
+            local_chain.apply_update(emission.checkpoint,)?,
             if exp_height == exp_hashes.len() - reorged_blocks.len() {
                 core::iter::once((height, Some(hash)))
                     .chain((height + 1..exp_hashes.len() as u32).map(|h| (h, None)))
@@ -168,10 +162,7 @@ fn test_into_tx_graph() -> anyhow::Result<()> {
 
     while let Some(emission) = emitter.next_block()? {
         let height = emission.block_height();
-        let _ = chain.apply_update(local_chain::Update {
-            tip: emission.checkpoint,
-            introduce_older_blocks: false,
-        })?;
+        let _ = chain.apply_update(emission.checkpoint)?;
         let indexed_additions = indexed_tx_graph.apply_block_relevant(&emission.block, height);
         assert!(indexed_additions.is_empty());
     }
@@ -232,10 +223,7 @@ fn test_into_tx_graph() -> anyhow::Result<()> {
     {
         let emission = emitter.next_block()?.expect("must get mined block");
         let height = emission.block_height();
-        let _ = chain.apply_update(local_chain::Update {
-            tip: emission.checkpoint,
-            introduce_older_blocks: false,
-        })?;
+        let _ = chain.apply_update(emission.checkpoint)?;
         let indexed_additions = indexed_tx_graph.apply_block_relevant(&emission.block, height);
         assert!(indexed_additions.graph.txs.is_empty());
         assert!(indexed_additions.graph.txouts.is_empty());
@@ -294,8 +282,7 @@ fn process_block(
     block: Block,
     block_height: u32,
 ) -> anyhow::Result<()> {
-    recv_chain
-        .apply_update(CheckPoint::from_header(&block.header, block_height).into_update(false))?;
+    recv_chain.apply_update(CheckPoint::from_header(&block.header, block_height))?;
     let _ = recv_graph.apply_block(block, block_height);
     Ok(())
 }

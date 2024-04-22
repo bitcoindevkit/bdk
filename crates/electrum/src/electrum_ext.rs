@@ -1,6 +1,6 @@
 use bdk_chain::{
     bitcoin::{OutPoint, ScriptBuf, Transaction, Txid},
-    local_chain::{self, CheckPoint},
+    local_chain::CheckPoint,
     tx_graph::{self, TxGraph},
     Anchor, BlockId, ConfirmationHeightAnchor, ConfirmationTimeHeightAnchor,
 };
@@ -124,7 +124,7 @@ impl RelevantTxids {
 #[derive(Debug)]
 pub struct ElectrumUpdate {
     /// Chain update
-    pub chain_update: local_chain::Update,
+    pub chain_update: CheckPoint,
     /// Transaction updates from electrum
     pub relevant_txids: RelevantTxids,
 }
@@ -232,10 +232,7 @@ impl<A: ElectrumApi> ElectrumExt for A {
                 continue; // reorg
             }
 
-            let chain_update = local_chain::Update {
-                tip,
-                introduce_older_blocks: true,
-            };
+            let chain_update = tip;
 
             let keychain_update = request_spks
                 .into_keys()

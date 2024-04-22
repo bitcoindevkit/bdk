@@ -3,7 +3,7 @@ use std::ops::{Bound, RangeBounds};
 use bdk_chain::{
     local_chain::{
         AlterCheckPointError, ApplyHeaderError, CannotConnectError, ChangeSet, CheckPoint,
-        LocalChain, MissingGenesisError, Update,
+        LocalChain, MissingGenesisError,
     },
     BlockId,
 };
@@ -17,7 +17,7 @@ mod common;
 struct TestLocalChain<'a> {
     name: &'static str,
     chain: LocalChain,
-    update: Update,
+    update: CheckPoint,
     exp: ExpectedResult<'a>,
 }
 
@@ -578,6 +578,77 @@ fn checkpoint_query() {
 }
 
 #[test]
+fn checkpoint_insert() {
+    struct TestCase<'a> {
+        /// The name of the test.
+        name: &'a str,
+        /// The original checkpoint chain to call [`CheckPoint::insert`] on.
+        chain: &'a [(u32, BlockHash)],
+        /// The `block_id` to insert.
+        to_insert: (u32, BlockHash),
+        /// The expected final checkpoint chain after calling [`CheckPoint::insert`].
+        exp_final_chain: &'a [(u32, BlockHash)],
+    }
+
+    let test_cases = [
+        TestCase {
+            name: "insert_above_tip",
+            chain: &[(1, h!("a")), (2, h!("b"))],
+            to_insert: (4, h!("d")),
+            exp_final_chain: &[(1, h!("a")), (2, h!("b")), (4, h!("d"))],
+        },
+        TestCase {
+            name: "insert_already_exists_expect_no_change",
+            chain: &[(1, h!("a")), (2, h!("b")), (3, h!("c"))],
+            to_insert: (2, h!("b")),
+            exp_final_chain: &[(1, h!("a")), (2, h!("b")), (3, h!("c"))],
+        },
+        TestCase {
+            name: "insert_in_middle",
+            chain: &[(2, h!("b")), (4, h!("d")), (5, h!("e"))],
+            to_insert: (3, h!("c")),
+            exp_final_chain: &[(2, h!("b")), (3, h!("c")), (4, h!("d")), (5, h!("e"))],
+        },
+        TestCase {
+            name: "replace_one",
+            chain: &[(3, h!("c")), (4, h!("d")), (5, h!("e"))],
+            to_insert: (5, h!("E")),
+            exp_final_chain: &[(3, h!("c")), (4, h!("d")), (5, h!("E"))],
+        },
+        TestCase {
+            name: "insert_conflict_should_evict",
+            chain: &[(3, h!("c")), (4, h!("d")), (5, h!("e")), (6, h!("f"))],
+            to_insert: (4, h!("D")),
+            exp_final_chain: &[(3, h!("c")), (4, h!("D"))],
+        },
+    ];
+
+    fn genesis_block() -> impl Iterator<Item = BlockId> {
+        core::iter::once((0, h!("_"))).map(BlockId::from)
+    }
+
+    for (i, t) in test_cases.into_iter().enumerate() {
+        println!("Running [{}] '{}'", i, t.name);
+
+        let chain = CheckPoint::from_block_ids(
+            genesis_block().chain(t.chain.iter().copied().map(BlockId::from)),
+        )
+        .expect("test formed incorrectly, must construct checkpoint chain");
+
+        let exp_final_chain = CheckPoint::from_block_ids(
+            genesis_block().chain(t.exp_final_chain.iter().copied().map(BlockId::from)),
+        )
+        .expect("test formed incorrectly, must construct checkpoint chain");
+
+        assert_eq!(
+            chain.insert(t.to_insert.into()),
+            exp_final_chain,
+            "unexpected final chain"
+        );
+    }
+}
+
+#[test]
 fn local_chain_apply_header_connected_to() {
     fn header_from_prev_blockhash(prev_blockhash: BlockHash) -> Header {
         Header {
@@ -601,9 +672,9 @@ fn local_chain_apply_header_connected_to() {
 
     let test_cases = [
         {
-            let header = header_from_prev_blockhash(h!("A"));
+            let header = header_from_prev_blockhash(h!("_"));
             let hash = header.block_hash();
-            let height = 2;
+            let height = 1;
             let connected_to = BlockId { height, hash };
             TestCase {
                 name: "connected_to_self_header_applied_to_self",
