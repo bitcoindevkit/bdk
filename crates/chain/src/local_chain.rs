@@ -368,8 +368,7 @@ impl LocalChain {
         if can_replace {
             self.tip = update;
         } else {
-            // `._check_index_is_consistent_with_tip` and `._check_changeset_is_applied` is called in
-            // `.apply_changeset`
+            // `._check_changeset_is_applied` is called in `.apply_changeset`
             self.apply_changeset(&changeset)
                 .map_err(|_| CannotConnectError {
                     try_include_height: 0,
