@@ -26,6 +26,7 @@ use bdk_chain::{
     local_chain::{
         self, ApplyHeaderError, CannotConnectError, CheckPoint, CheckPointIter, LocalChain,
     },
+    spk_client::{FullScanRequest, FullScanResult, SyncRequest, SyncResult},
     tx_graph::{CanonicalTx, TxGraph},
     Append, BlockId, ChainPosition, ConfirmationTime, ConfirmationTimeHeightAnchor, FullTxOut,
     IndexedTxGraph, Persist, PersistBackend,
@@ -108,6 +109,26 @@ pub struct Update {
     ///
     /// [`LocalChain`]: local_chain::LocalChain
     pub chain: Option<CheckPoint>,
+}
+
+impl From<FullScanResult<KeychainKind>> for Update {
+    fn from(value: FullScanResult<KeychainKind>) -> Self {
+        Self {
+            last_active_indices: value.last_active_indices,
+            graph: value.graph_update,
+            chain: Some(value.chain_update),
+        }
+    }
+}
+
+impl From<SyncResult> for Update {
+    fn from(value: SyncResult) -> Self {
+        Self {
+            last_active_indices: BTreeMap::new(),
+            graph: value.graph_update,
+            chain: Some(value.chain_update),
+        }
+    }
 }
 
 /// The changes made to a wallet by applying an [`Update`].
@@ -2262,7 +2283,8 @@ impl Wallet {
     /// transactions related to your wallet into it.
     ///
     /// [`commit`]: Self::commit
-    pub fn apply_update(&mut self, update: Update) -> Result<(), CannotConnectError> {
+    pub fn apply_update(&mut self, update: impl Into<Update>) -> Result<(), CannotConnectError> {
+        let update = update.into();
         let mut changeset = match update.chain {
             Some(chain_update) => ChangeSet::from(self.chain.apply_update(chain_update)?),
             None => ChangeSet::default(),
@@ -2384,6 +2406,31 @@ impl Wallet {
             .indexed_graph
             .batch_insert_relevant_unconfirmed(unconfirmed_txs);
         self.persist.stage(ChangeSet::from(indexed_graph_changeset));
+    }
+}
+
+/// Methods to construct sync/full-scan requests for spk-based chain sources.
+impl Wallet {
+    /// Create a partial [`SyncRequest`] for this wallet for all revealed spks.
+    ///
+    /// This is the first step when performing a spk-based wallet partial sync, the returned
+    /// [`SyncRequest`] collects all revealed script pubkeys from the wallet keychain needed to
+    /// start a blockchain sync with a spk based blockchain client.
+    pub fn start_sync_with_revealed_spks(&self) -> SyncRequest {
+        SyncRequest::from_chain_tip(self.chain.tip())
+            .populate_with_revealed_spks(&self.indexed_graph.index, ..)
+    }
+
+    /// Create a [`FullScanRequest] for this wallet.
+    ///
+    /// This is the first step when performing a spk-based wallet full scan, the returned
+    /// [`FullScanRequest] collects iterators for the wallet's keychain script pub keys needed to
+    /// start a blockchain full scan with a spk based blockchain client.
+    ///
+    /// This operation is generally only used when importing or restoring a previously used wallet
+    /// in which the list of used scripts is not known.
+    pub fn start_full_scan(&self) -> FullScanRequest<KeychainKind> {
+        FullScanRequest::from_keychain_txout_index(self.chain.tip(), &self.indexed_graph.index)
     }
 }
 
