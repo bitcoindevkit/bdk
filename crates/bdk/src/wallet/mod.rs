@@ -32,14 +32,14 @@ use bdk_chain::{
     IndexedTxGraph,
 };
 use bdk_persist::{Persist, PersistBackend};
-use bitcoin::constants::genesis_block;
 use bitcoin::secp256k1::{All, Secp256k1};
 use bitcoin::sighash::{EcdsaSighashType, TapSighashType};
 use bitcoin::{
     absolute, psbt, Address, Block, FeeRate, Network, OutPoint, Script, ScriptBuf, Sequence,
     Transaction, TxOut, Txid, Witness,
 };
-use bitcoin::{consensus::encode::serialize, transaction, Amount, BlockHash, Psbt};
+use bitcoin::{consensus::encode::serialize, transaction, BlockHash, Psbt};
+use bitcoin::{constants::genesis_block, Amount};
 use core::fmt;
 use core::ops::Deref;
 use descriptor::error::Error as DescriptorError;
@@ -950,7 +950,7 @@ impl Wallet {
     /// [`insert_txout`]: Self::insert_txout
     pub fn calculate_fee_rate(&self, tx: &Transaction) -> Result<FeeRate, CalculateFeeError> {
         self.calculate_fee(tx)
-            .map(|fee| bitcoin::Amount::from_sat(fee) / tx.weight())
+            .map(|fee| Amount::from_sat(fee) / tx.weight())
     }
 
     /// Compute the `tx`'s sent and received amounts (in satoshis).

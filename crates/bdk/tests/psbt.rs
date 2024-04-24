@@ -1,4 +1,4 @@
-use bdk::bitcoin::{Amount, FeeRate, Psbt, TxIn};
+use bdk::bitcoin::{FeeRate, Psbt, TxIn};
 use bdk::{psbt, KeychainKind, SignOptions};
 use core::str::FromStr;
 mod common;
@@ -201,7 +201,7 @@ fn test_psbt_multiple_internalkey_signers() {
     // the prevout we're spending
     let prevouts = &[TxOut {
         script_pubkey: send_to.script_pubkey(),
-        value: Amount::from_sat(to_spend),
+        value: to_spend,
     }];
     let prevouts = Prevouts::All(prevouts);
     let input_index = 0;

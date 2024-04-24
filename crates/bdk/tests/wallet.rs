@@ -200,7 +200,7 @@ fn test_get_funded_wallet_balance() {
     // The funded wallet contains a tx with a 76_000 sats input and two outputs, one spending 25_000
     // to a foreign address and one returning 50_000 back to the wallet as change. The remaining 1000
     // sats are the transaction fee.
-    assert_eq!(wallet.get_balance().confirmed, 50_000);
+    assert_eq!(wallet.get_balance().confirmed.to_sat(), 50_000);
 }
 
 #[test]
@@ -3582,10 +3582,10 @@ fn test_spend_coinbase() {
     assert_eq!(
         balance,
         Balance {
-            immature: 25_000,
-            trusted_pending: 0,
-            untrusted_pending: 0,
-            confirmed: 0
+            immature: Amount::from_sat(25_000),
+            trusted_pending: Amount::ZERO,
+            untrusted_pending: Amount::ZERO,
+            confirmed: Amount::ZERO
         }
     );
 
@@ -3596,7 +3596,7 @@ fn test_spend_coinbase() {
         .assume_checked();
     let mut builder = wallet.build_tx();
     builder
-        .add_recipient(addr.script_pubkey(), balance.immature / 2)
+        .add_recipient(addr.script_pubkey(), balance.immature.to_sat() / 2)
         .current_height(confirmation_height);
     assert!(matches!(
         builder.finish(),
@@ -3611,7 +3611,7 @@ fn test_spend_coinbase() {
     // Still unspendable...
     let mut builder = wallet.build_tx();
     builder
-        .add_recipient(addr.script_pubkey(), balance.immature / 2)
+        .add_recipient(addr.script_pubkey(), balance.immature.to_sat() / 2)
         .current_height(not_yet_mature_time);
     assert_matches!(
         builder.finish(),
@@ -3633,15 +3633,15 @@ fn test_spend_coinbase() {
     assert_eq!(
         balance,
         Balance {
-            immature: 0,
-            trusted_pending: 0,
-            untrusted_pending: 0,
-            confirmed: 25_000
+            immature: Amount::ZERO,
+            trusted_pending: Amount::ZERO,
+            untrusted_pending: Amount::ZERO,
+            confirmed: Amount::from_sat(25_000)
         }
     );
     let mut builder = wallet.build_tx();
     builder
-        .add_recipient(addr.script_pubkey(), balance.confirmed / 2)
+        .add_recipient(addr.script_pubkey(), balance.confirmed.to_sat() / 2)
         .current_height(maturity_time);
     builder.finish().unwrap();
 }

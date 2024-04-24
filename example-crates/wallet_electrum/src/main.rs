@@ -6,7 +6,7 @@ const BATCH_SIZE: usize = 5;
 use std::io::Write;
 use std::str::FromStr;
 
-use bdk::bitcoin::Address;
+use bdk::bitcoin::{Address, Amount};
 use bdk::wallet::Update;
 use bdk::{bitcoin::Network, Wallet};
 use bdk::{KeychainKind, SignOptions};
@@ -81,7 +81,8 @@ fn main() -> Result<(), anyhow::Error> {
     let balance = wallet.get_balance();
     println!("Wallet balance after syncing: {} sats", balance.total());
 
-    if balance.total() < SEND_AMOUNT {
+    // TODO: (@leonardo) Should we format here, or update on constant and TxBuilder::add_recipient() instead ?
+    if balance.total() < Amount::from_sat(SEND_AMOUNT) {
         println!(
             "Please send at least {} sats to the receiving address",
             SEND_AMOUNT

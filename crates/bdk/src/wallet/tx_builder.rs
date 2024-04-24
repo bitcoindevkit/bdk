@@ -718,6 +718,7 @@ impl<'a, Cs: CoinSelectionAlgorithm> TxBuilder<'a, Cs, CreateTx> {
         self
     }
 
+    // TODO: (@leonardo) Should this expect/use `bitcoin::Amount` instead ? Would it be a huge breaking change ?
     /// Add a recipient to the internal list
     pub fn add_recipient(&mut self, script_pubkey: ScriptBuf, amount: u64) -> &mut Self {
         self.params.recipients.push((script_pubkey, amount));

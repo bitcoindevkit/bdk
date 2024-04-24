@@ -270,6 +270,7 @@ impl<I: Clone + Ord> SpkTxOutIndex<I> {
         self.spk_indices.get(script)
     }
 
+    // TODO: (@leonardo) Should this also be updated to return `(bitcoin::Amount, bitcoin::Amount)` instead of (u64, u64)
     /// Computes the total value transfer effect `tx` has on the script pubkeys in `range`. Value is
     /// *sent* when a script pubkey in the `range` is on an input and *received* when it is on an
     /// output. For `sent` to be computed correctly, the output being spent must have already been

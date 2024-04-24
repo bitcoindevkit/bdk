@@ -1,7 +1,7 @@
 use std::{collections::BTreeSet, io::Write, str::FromStr};
 
 use bdk::{
-    bitcoin::{Address, Network, Script},
+    bitcoin::{Address, Amount, Network, Script},
     KeychainKind, SignOptions, Wallet,
 };
 use bdk_esplora::{esplora_client, EsploraAsyncExt};
@@ -81,7 +81,8 @@ async fn main() -> Result<(), anyhow::Error> {
     let balance = wallet.get_balance();
     println!("Wallet balance after syncing: {} sats", balance.total());
 
-    if balance.total() < SEND_AMOUNT {
+    // TODO: (@leonardo) Should we format here, or update on constant and TxBuilder::add_recipient() instead ?
+    if balance.total() < Amount::from_sat(SEND_AMOUNT) {
         println!(
             "Please send at least {} sats to the receiving address",
             SEND_AMOUNT
