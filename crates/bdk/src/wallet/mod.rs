@@ -28,8 +28,9 @@ use bdk_chain::{
     },
     tx_graph::{CanonicalTx, TxGraph},
     Append, BlockId, ChainPosition, ConfirmationTime, ConfirmationTimeHeightAnchor, FullTxOut,
-    IndexedTxGraph, Persist, PersistBackend,
+    IndexedTxGraph,
 };
+use bdk_persist::{Persist, PersistBackend};
 use bitcoin::constants::genesis_block;
 use bitcoin::secp256k1::{All, Secp256k1};
 use bitcoin::sighash::{EcdsaSighashType, TapSighashType};
@@ -1167,7 +1168,7 @@ impl Wallet {
     /// # use bdk::*;
     /// # use bdk::wallet::ChangeSet;
     /// # use bdk::wallet::error::CreateTxError;
-    /// # use bdk_chain::PersistBackend;
+    /// # use bdk_persist::PersistBackend;
     /// # use anyhow::Error;
     /// # let descriptor = "wpkh(tpubD6NzVbkrYhZ4Xferm7Pz4VnjdcDPFyjVu5K4iZXQ4pVN8Cks4pHVowTBXBKRhX64pkRyJZJN5xAKj4UDNnLPb5p2sSKXhewoYx5GbTdUFWq/*)";
     /// # let mut wallet = doctest_wallet!();
@@ -1549,7 +1550,7 @@ impl Wallet {
     /// # use bdk::*;
     /// # use bdk::wallet::ChangeSet;
     /// # use bdk::wallet::error::CreateTxError;
-    /// # use bdk_chain::PersistBackend;
+    /// # use bdk_persist::PersistBackend;
     /// # use anyhow::Error;
     /// # let descriptor = "wpkh(tpubD6NzVbkrYhZ4Xferm7Pz4VnjdcDPFyjVu5K4iZXQ4pVN8Cks4pHVowTBXBKRhX64pkRyJZJN5xAKj4UDNnLPb5p2sSKXhewoYx5GbTdUFWq/*)";
     /// # let mut wallet = doctest_wallet!();
@@ -1724,7 +1725,7 @@ impl Wallet {
     /// # use bdk::*;
     /// # use bdk::wallet::ChangeSet;
     /// # use bdk::wallet::error::CreateTxError;
-    /// # use bdk_chain::PersistBackend;
+    /// # use bdk_persist::PersistBackend;
     /// # let descriptor = "wpkh(tpubD6NzVbkrYhZ4Xferm7Pz4VnjdcDPFyjVu5K4iZXQ4pVN8Cks4pHVowTBXBKRhX64pkRyJZJN5xAKj4UDNnLPb5p2sSKXhewoYx5GbTdUFWq/*)";
     /// # let mut wallet = doctest_wallet!();
     /// # let to_address = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap().assume_checked();

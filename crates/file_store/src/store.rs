@@ -1,6 +1,7 @@
 use crate::{bincode_options, EntryIter, FileError, IterError};
 use anyhow::anyhow;
-use bdk_chain::{Append, PersistBackend};
+use bdk_chain::Append;
+use bdk_persist::PersistBackend;
 use bincode::Options;
 use std::{
     fmt::{self, Debug},
@@ -11,8 +12,6 @@ use std::{
 };
 
 /// Persists an append-only list of changesets (`C`) to a single file.
-///
-/// The changesets are the results of altering a tracker implementation (`T`).
 #[derive(Debug)]
 pub struct Store<C>
 where
@@ -152,7 +151,7 @@ where
     ///
     /// You should usually check the error. In many applications, it may make sense to do a full
     /// wallet scan with a stop-gap after getting an error, since it is likely that one of the
-    /// changesets it was unable to read changed the derivation indices of the tracker.
+    /// changesets was unable to read changes of the derivation indices of a keychain.
     ///
     /// **WARNING**: This method changes the write position of the underlying file. The next
     /// changeset will be written over the erroring entry (or the end of the file if none existed).
@@ -239,9 +238,6 @@ mod test {
         [98, 100, 107, 102, 115, 49, 49, 49, 49, 49, 49, 49];
 
     type TestChangeSet = BTreeSet<String>;
-
-    #[derive(Debug)]
-    struct TestTracker;
 
     /// Check behavior of [`Store::create_new`] and [`Store::open`].
     #[test]

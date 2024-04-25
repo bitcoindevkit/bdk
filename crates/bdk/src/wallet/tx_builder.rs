@@ -20,7 +20,7 @@
 //! # use bdk::wallet::ChangeSet;
 //! # use bdk::wallet::error::CreateTxError;
 //! # use bdk::wallet::tx_builder::CreateTx;
-//! # use bdk_chain::PersistBackend;
+//! # use bdk_persist::PersistBackend;
 //! # use anyhow::Error;
 //! # let to_address = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap().assume_checked();
 //! # let mut wallet = doctest_wallet!();
@@ -84,7 +84,7 @@ impl TxBuilderContext for BumpFee {}
 /// # use core::str::FromStr;
 /// # use bdk::wallet::ChangeSet;
 /// # use bdk::wallet::error::CreateTxError;
-/// # use bdk_chain::PersistBackend;
+/// # use bdk_persist::PersistBackend;
 /// # use anyhow::Error;
 /// # let mut wallet = doctest_wallet!();
 /// # let addr1 = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap().assume_checked();
@@ -758,7 +758,7 @@ impl<'a, Cs: CoinSelectionAlgorithm> TxBuilder<'a, Cs, CreateTx> {
     /// # use bdk::wallet::ChangeSet;
     /// # use bdk::wallet::error::CreateTxError;
     /// # use bdk::wallet::tx_builder::CreateTx;
-    /// # use bdk_chain::PersistBackend;
+    /// # use bdk_persist::PersistBackend;
     /// # use anyhow::Error;
     /// # let to_address =
     /// Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt")
