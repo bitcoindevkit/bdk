@@ -517,6 +517,46 @@ impl Wallet {
     }
 
     /// Load [`Wallet`] from the given persistence backend.
+    ///
+    /// Note that the descriptor secret keys are not persisted to the db; this means that after
+    /// calling this method the [`Wallet`] **won't** know the secret keys, and as such, won't be
+    /// able to sign transactions.
+    ///
+    /// If you wish to use the wallet to sign transactions, you need to add the secret keys
+    /// manually to the [`Wallet`]:
+    ///
+    /// ```rust,no_run
+    /// # use bdk::Wallet;
+    /// # use bdk::signer::{SignersContainer, SignerOrdering};
+    /// # use bdk::descriptor::Descriptor;
+    /// # use bitcoin::key::Secp256k1;
+    /// # use bdk::KeychainKind;
+    /// # use bdk_file_store::Store;
+    /// #
+    /// # fn main() -> Result<(), anyhow::Error> {
+    /// # let temp_dir = tempfile::tempdir().expect("must create tempdir");
+    /// # let file_path = temp_dir.path().join("store.db");
+    /// # let db: Store<bdk::wallet::ChangeSet> = Store::create_new(&[], &file_path).expect("must create db");
+    /// let secp = Secp256k1::new();
+    ///
+    /// let (external_descriptor, external_keymap) = Descriptor::parse_descriptor(&secp, "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/84'/1'/0'/0/*)").unwrap();
+    /// let (internal_descriptor, internal_keymap) = Descriptor::parse_descriptor(&secp, "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/84'/1'/0'/1/*)").unwrap();
+    ///
+    /// let external_signer_container = SignersContainer::build(external_keymap, &external_descriptor, &secp);
+    /// let internal_signer_container = SignersContainer::build(internal_keymap, &internal_descriptor, &secp);
+    ///
+    /// let mut wallet = Wallet::load(db)?;
+    ///
+    /// external_signer_container.signers().into_iter()
+    ///     .for_each(|s| wallet.add_signer(KeychainKind::External, SignerOrdering::default(), s.clone()));
+    /// internal_signer_container.signers().into_iter()
+    ///     .for_each(|s| wallet.add_signer(KeychainKind::Internal, SignerOrdering::default(), s.clone()));
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// Alternatively, you can call [`Wallet::new_or_load`], which will add the private keys of the
+    /// passed-in descriptors to the [`Wallet`].
     pub fn load(
         mut db: impl PersistBackend<ChangeSet> + Send + Sync + 'static,
     ) -> Result<Self, LoadError> {
