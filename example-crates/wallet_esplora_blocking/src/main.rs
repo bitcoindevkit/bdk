@@ -3,11 +3,10 @@ const SEND_AMOUNT: u64 = 1000;
 const STOP_GAP: usize = 5;
 const PARALLEL_REQUESTS: usize = 1;
 
-use std::{io::Write, str::FromStr};
+use std::{collections::BTreeSet, io::Write, str::FromStr};
 
 use bdk::{
     bitcoin::{Address, Network},
-    wallet::Update,
     KeychainKind, SignOptions, Wallet,
 };
 use bdk_esplora::{esplora_client, EsploraExt};
@@ -36,36 +35,22 @@ fn main() -> Result<(), anyhow::Error> {
     let client =
         esplora_client::Builder::new("https://blockstream.info/testnet/api").build_blocking();
 
-    let keychain_spks = wallet
-        .all_unbounded_spk_iters()
-        .into_iter()
-        .map(|(k, k_spks)| {
-            let mut once = Some(());
-            let mut stdout = std::io::stdout();
-            let k_spks = k_spks
-                .inspect(move |(spk_i, _)| match once.take() {
-                    Some(_) => print!("\nScanning keychain [{:?}]", k),
-                    None => print!(" {:<3}", spk_i),
-                })
-                .inspect(move |_| stdout.flush().expect("must flush"));
-            (k, k_spks)
-        })
-        .collect();
+    let request = wallet.start_full_scan().inspect_spks_for_all_keychains({
+        let mut once = BTreeSet::<KeychainKind>::new();
+        move |keychain, spk_i, _| {
+            match once.insert(keychain) {
+                true => print!("\nScanning keychain [{:?}]", keychain),
+                false => print!(" {:<3}", spk_i),
+            };
+            std::io::stdout().flush().expect("must flush")
+        }
+    });
 
-    let mut update = client.full_scan(
-        wallet.latest_checkpoint(),
-        keychain_spks,
-        STOP_GAP,
-        PARALLEL_REQUESTS,
-    )?;
+    let mut update = client.full_scan(request, STOP_GAP, PARALLEL_REQUESTS)?;
     let now = std::time::UNIX_EPOCH.elapsed().unwrap().as_secs();
-    let _ = update.tx_graph.update_last_seen_unconfirmed(now);
+    let _ = update.graph_update.update_last_seen_unconfirmed(now);
 
-    wallet.apply_update(Update {
-        last_active_indices: update.last_active_indices,
-        graph: update.tx_graph,
-        chain: Some(update.local_chain),
-    })?;
+    wallet.apply_update(update)?;
     wallet.commit()?;
     println!();
 
