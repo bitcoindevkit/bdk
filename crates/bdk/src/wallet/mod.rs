@@ -953,7 +953,7 @@ impl Wallet {
             .map(|fee| Amount::from_sat(fee) / tx.weight())
     }
 
-    /// Compute the `tx`'s sent and received amounts (in satoshis).
+    /// Compute the `tx`'s sent and received [`Amount`]s.
     ///
     /// This method returns a tuple `(sent, received)`. Sent is the sum of the txin amounts
     /// that spend from previous txouts tracked by this wallet. Received is the summation
@@ -978,7 +978,7 @@ impl Wallet {
     /// let tx = &psbt.clone().extract_tx().expect("tx");
     /// let (sent, received) = wallet.sent_and_received(tx);
     /// ```
-    pub fn sent_and_received(&self, tx: &Transaction) -> (u64, u64) {
+    pub fn sent_and_received(&self, tx: &Transaction) -> (Amount, Amount) {
         self.indexed_graph.index.sent_and_received(tx, ..)
     }
 

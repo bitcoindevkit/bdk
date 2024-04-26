@@ -5,7 +5,7 @@ use crate::{
     spk_iter::BIP32_MAX_INDEX,
     SpkIterator, SpkTxOutIndex,
 };
-use bitcoin::{OutPoint, Script, Transaction, TxOut, Txid};
+use bitcoin::{Amount, OutPoint, Script, SignedAmount, Transaction, TxOut, Txid};
 use core::{
     fmt::Debug,
     ops::{Bound, RangeBounds},
@@ -273,7 +273,11 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     /// *received* when it is on an output. For `sent` to be computed correctly, the output being
     /// spent must have already been scanned by the index. Calculating received just uses the
     /// [`Transaction`] outputs directly, so it will be correct even if it has not been scanned.
-    pub fn sent_and_received(&self, tx: &Transaction, range: impl RangeBounds<K>) -> (u64, u64) {
+    pub fn sent_and_received(
+        &self,
+        tx: &Transaction,
+        range: impl RangeBounds<K>,
+    ) -> (Amount, Amount) {
         self.inner
             .sent_and_received(tx, Self::map_to_inner_bounds(range))
     }
@@ -285,7 +289,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     /// This calls [`SpkTxOutIndex::net_value`] internally.
     ///
     /// [`sent_and_received`]: Self::sent_and_received
-    pub fn net_value(&self, tx: &Transaction, range: impl RangeBounds<K>) -> i64 {
+    pub fn net_value(&self, tx: &Transaction, range: impl RangeBounds<K>) -> SignedAmount {
         self.inner.net_value(tx, Self::map_to_inner_bounds(range))
     }
 }

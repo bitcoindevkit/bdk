@@ -1,5 +1,7 @@
 use bdk_chain::{indexed_tx_graph::Indexer, SpkTxOutIndex};
-use bitcoin::{absolute, transaction, Amount, OutPoint, ScriptBuf, Transaction, TxIn, TxOut};
+use bitcoin::{
+    absolute, transaction, Amount, OutPoint, ScriptBuf, SignedAmount, Transaction, TxIn, TxOut,
+};
 
 #[test]
 fn spk_txout_sent_and_received() {
@@ -20,14 +22,23 @@ fn spk_txout_sent_and_received() {
         }],
     };
 
-    assert_eq!(index.sent_and_received(&tx1, ..), (0, 42_000));
-    assert_eq!(index.sent_and_received(&tx1, ..1), (0, 42_000));
-    assert_eq!(index.sent_and_received(&tx1, 1..), (0, 0));
-    assert_eq!(index.net_value(&tx1, ..), 42_000);
+    assert_eq!(
+        index.sent_and_received(&tx1, ..),
+        (Amount::from_sat(0), Amount::from_sat(42_000))
+    );
+    assert_eq!(
+        index.sent_and_received(&tx1, ..1),
+        (Amount::from_sat(0), Amount::from_sat(42_000))
+    );
+    assert_eq!(
+        index.sent_and_received(&tx1, 1..),
+        (Amount::from_sat(0), Amount::from_sat(0))
+    );
+    assert_eq!(index.net_value(&tx1, ..), SignedAmount::from_sat(42_000));
     index.index_tx(&tx1);
     assert_eq!(
         index.sent_and_received(&tx1, ..),
-        (0, 42_000),
+        (Amount::from_sat(0), Amount::from_sat(42_000)),
         "shouldn't change after scanning"
     );
 
@@ -53,10 +64,19 @@ fn spk_txout_sent_and_received() {
         ],
     };
 
-    assert_eq!(index.sent_and_received(&tx2, ..), (42_000, 50_000));
-    assert_eq!(index.sent_and_received(&tx2, ..1), (42_000, 30_000));
-    assert_eq!(index.sent_and_received(&tx2, 1..), (0, 20_000));
-    assert_eq!(index.net_value(&tx2, ..), 8_000);
+    assert_eq!(
+        index.sent_and_received(&tx2, ..),
+        (Amount::from_sat(42_000), Amount::from_sat(50_000))
+    );
+    assert_eq!(
+        index.sent_and_received(&tx2, ..1),
+        (Amount::from_sat(42_000), Amount::from_sat(30_000))
+    );
+    assert_eq!(
+        index.sent_and_received(&tx2, 1..),
+        (Amount::from_sat(0), Amount::from_sat(20_000))
+    );
+    assert_eq!(index.net_value(&tx2, ..), SignedAmount::from_sat(8_000));
 }
 
 #[test]
