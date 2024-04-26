@@ -1,4 +1,4 @@
-use bdk::bitcoin::{FeeRate, Psbt, TxIn};
+use bdk::bitcoin::{Amount, FeeRate, Psbt, TxIn};
 use bdk::{psbt, KeychainKind, SignOptions};
 use core::str::FromStr;
 mod common;
@@ -14,7 +14,7 @@ fn test_psbt_malformed_psbt_input_legacy() {
     let (mut wallet, _) = get_funded_wallet(get_test_wpkh());
     let send_to = wallet.peek_address(KeychainKind::External, 0);
     let mut builder = wallet.build_tx();
-    builder.add_recipient(send_to.script_pubkey(), 10_000);
+    builder.add_recipient(send_to.script_pubkey(), Amount::from_sat(10_000));
     let mut psbt = builder.finish().unwrap();
     psbt.inputs.push(psbt_bip.inputs[0].clone());
     let options = SignOptions {
@@ -31,7 +31,7 @@ fn test_psbt_malformed_psbt_input_segwit() {
     let (mut wallet, _) = get_funded_wallet(get_test_wpkh());
     let send_to = wallet.peek_address(KeychainKind::External, 0);
     let mut builder = wallet.build_tx();
-    builder.add_recipient(send_to.script_pubkey(), 10_000);
+    builder.add_recipient(send_to.script_pubkey(), Amount::from_sat(10_000));
     let mut psbt = builder.finish().unwrap();
     psbt.inputs.push(psbt_bip.inputs[1].clone());
     let options = SignOptions {
@@ -47,7 +47,7 @@ fn test_psbt_malformed_tx_input() {
     let (mut wallet, _) = get_funded_wallet(get_test_wpkh());
     let send_to = wallet.peek_address(KeychainKind::External, 0);
     let mut builder = wallet.build_tx();
-    builder.add_recipient(send_to.script_pubkey(), 10_000);
+    builder.add_recipient(send_to.script_pubkey(), Amount::from_sat(10_000));
     let mut psbt = builder.finish().unwrap();
     psbt.unsigned_tx.input.push(TxIn::default());
     let options = SignOptions {
@@ -63,7 +63,7 @@ fn test_psbt_sign_with_finalized() {
     let (mut wallet, _) = get_funded_wallet(get_test_wpkh());
     let send_to = wallet.peek_address(KeychainKind::External, 0);
     let mut builder = wallet.build_tx();
-    builder.add_recipient(send_to.script_pubkey(), 10_000);
+    builder.add_recipient(send_to.script_pubkey(), Amount::from_sat(10_000));
     let mut psbt = builder.finish().unwrap();
 
     // add a finalized input

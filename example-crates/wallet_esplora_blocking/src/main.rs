@@ -1,5 +1,5 @@
 const DB_MAGIC: &str = "bdk_wallet_esplora_example";
-const SEND_AMOUNT: u64 = 1000;
+const SEND_AMOUNT: Amount = Amount::from_sat(1000);
 const STOP_GAP: usize = 5;
 const PARALLEL_REQUESTS: usize = 1;
 
@@ -57,8 +57,7 @@ fn main() -> Result<(), anyhow::Error> {
     let balance = wallet.get_balance();
     println!("Wallet balance after syncing: {} sats", balance.total());
 
-    // TODO: (@leonardo) Should we format here, or update on constant and TxBuilder::add_recipient() instead ?
-    if balance.total() < Amount::from_sat(SEND_AMOUNT) {
+    if balance.total() < SEND_AMOUNT {
         println!(
             "Please send at least {} sats to the receiving address",
             SEND_AMOUNT

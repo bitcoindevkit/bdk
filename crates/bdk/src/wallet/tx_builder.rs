@@ -29,7 +29,7 @@
 //!
 //! tx_builder
 //!     // Create a transaction with one output to `to_address` of 50_000 satoshi
-//!     .add_recipient(to_address.script_pubkey(), 50_000)
+//!     .add_recipient(to_address.script_pubkey(), Amount::from_sat(50_000))
 //!     // With a custom fee rate of 5.0 satoshi/vbyte
 //!     .fee_rate(FeeRate::from_sat_per_vb(5).expect("valid feerate"))
 //!     // Only spend non-change outputs
@@ -47,7 +47,7 @@ use core::marker::PhantomData;
 
 use bitcoin::psbt::{self, Psbt};
 use bitcoin::script::PushBytes;
-use bitcoin::{absolute, FeeRate, OutPoint, ScriptBuf, Sequence, Transaction, Txid};
+use bitcoin::{absolute, Amount, FeeRate, OutPoint, ScriptBuf, Sequence, Transaction, Txid};
 
 use super::coin_selection::{CoinSelectionAlgorithm, DefaultCoinSelectionAlgorithm};
 use super::{CreateTxError, Wallet};
@@ -94,8 +94,8 @@ impl TxBuilderContext for BumpFee {}
 ///     let mut builder = wallet.build_tx();
 ///     builder
 ///         .ordering(TxOrdering::Untouched)
-///         .add_recipient(addr1.script_pubkey(), 50_000)
-///         .add_recipient(addr2.script_pubkey(), 50_000);
+///         .add_recipient(addr1.script_pubkey(), Amount::from_sat(50_000))
+///         .add_recipient(addr2.script_pubkey(), Amount::from_sat(50_000));
 ///     builder.finish()?
 /// };
 ///
@@ -104,7 +104,7 @@ impl TxBuilderContext for BumpFee {}
 ///     let mut builder = wallet.build_tx();
 ///     builder.ordering(TxOrdering::Untouched);
 ///     for addr in &[addr1, addr2] {
-///         builder.add_recipient(addr.script_pubkey(), 50_000);
+///         builder.add_recipient(addr.script_pubkey(), Amount::from_sat(50_000));
 ///     }
 ///     builder.finish()?
 /// };
@@ -274,7 +274,7 @@ impl<'a, Cs, Ctx> TxBuilder<'a, Cs, Ctx> {
     ///
     /// let builder = wallet
     ///     .build_tx()
-    ///     .add_recipient(to_address.script_pubkey(), 50_000)
+    ///     .add_recipient(to_address.script_pubkey(), Amount::from_sat(50_000))
     ///     .policy_path(path, KeychainKind::External);
     ///
     /// # Ok::<(), anyhow::Error>(())
@@ -713,22 +713,26 @@ impl std::error::Error for AllowShrinkingError {}
 
 impl<'a, Cs: CoinSelectionAlgorithm> TxBuilder<'a, Cs, CreateTx> {
     /// Replace the recipients already added with a new list
-    pub fn set_recipients(&mut self, recipients: Vec<(ScriptBuf, u64)>) -> &mut Self {
-        self.params.recipients = recipients;
+    pub fn set_recipients(&mut self, recipients: Vec<(ScriptBuf, Amount)>) -> &mut Self {
+        self.params.recipients = recipients
+            .into_iter()
+            .map(|(script, amount)| (script, amount.to_sat()))
+            .collect();
         self
     }
 
-    // TODO: (@leonardo) Should this expect/use `bitcoin::Amount` instead ? Would it be a huge breaking change ?
     /// Add a recipient to the internal list
-    pub fn add_recipient(&mut self, script_pubkey: ScriptBuf, amount: u64) -> &mut Self {
-        self.params.recipients.push((script_pubkey, amount));
+    pub fn add_recipient(&mut self, script_pubkey: ScriptBuf, amount: Amount) -> &mut Self {
+        self.params
+            .recipients
+            .push((script_pubkey, amount.to_sat()));
         self
     }
 
     /// Add data as an output, using OP_RETURN
     pub fn add_data<T: AsRef<PushBytes>>(&mut self, data: &T) -> &mut Self {
         let script = ScriptBuf::new_op_return(data);
-        self.add_recipient(script, 0u64);
+        self.add_recipient(script, Amount::ZERO);
         self
     }
 

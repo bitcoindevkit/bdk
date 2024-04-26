@@ -1163,7 +1163,6 @@ impl<A: Anchor> TxGraph<A> {
         for res in self.try_filter_chain_unspents(chain, chain_tip, outpoints) {
             let (spk_i, txout) = res?;
 
-            // TODO: (@leonardo) Should these operations use `bitcoin::Amount::checked_add()` instead ?
             match &txout.chain_position {
                 ChainPosition::Confirmed(_) => {
                     if txout.is_confirmed_and_spendable(chain_tip.height) {

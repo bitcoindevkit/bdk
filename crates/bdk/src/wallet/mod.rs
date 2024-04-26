@@ -1197,7 +1197,7 @@ impl Wallet {
     /// let psbt = {
     ///    let mut builder =  wallet.build_tx();
     ///    builder
-    ///        .add_recipient(to_address.script_pubkey(), 50_000);
+    ///        .add_recipient(to_address.script_pubkey(), Amount::from_sat(50_000));
     ///    builder.finish()?
     /// };
     ///
@@ -1579,7 +1579,7 @@ impl Wallet {
     /// let mut psbt = {
     ///     let mut builder = wallet.build_tx();
     ///     builder
-    ///         .add_recipient(to_address.script_pubkey(), 50_000)
+    ///         .add_recipient(to_address.script_pubkey(), Amount::from_sat(50_000))
     ///         .enable_rbf();
     ///     builder.finish()?
     /// };
@@ -1752,7 +1752,7 @@ impl Wallet {
     /// # let to_address = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap().assume_checked();
     /// let mut psbt = {
     ///     let mut builder = wallet.build_tx();
-    ///     builder.add_recipient(to_address.script_pubkey(), 50_000);
+    ///     builder.add_recipient(to_address.script_pubkey(), Amount::from_sat(50_000));
     ///     builder.finish()?
     /// };
     /// let finalized = wallet.sign(&mut psbt, SignOptions::default())?;
