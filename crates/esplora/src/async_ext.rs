@@ -417,8 +417,7 @@ mod test {
         local_chain::LocalChain,
         BlockId,
     };
-    use bdk_testenv::TestEnv;
-    use electrsd::bitcoind::bitcoincore_rpc::RpcApi;
+    use bdk_testenv::{anyhow, bitcoincore_rpc::RpcApi, TestEnv};
     use esplora_client::Builder;
 
     use crate::async_ext::{chain_update, fetch_latest_blocks};

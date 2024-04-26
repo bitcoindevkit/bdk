@@ -1,7 +1,5 @@
 use bdk_chain::spk_client::{FullScanRequest, SyncRequest};
 use bdk_esplora::EsploraAsyncExt;
-use electrsd::bitcoind::anyhow;
-use electrsd::bitcoind::bitcoincore_rpc::RpcApi;
 use esplora_client::{self, Builder};
 use std::collections::{BTreeSet, HashSet};
 use std::str::FromStr;
@@ -9,7 +7,7 @@ use std::thread::sleep;
 use std::time::Duration;
 
 use bdk_chain::bitcoin::{Address, Amount, Txid};
-use bdk_testenv::TestEnv;
+use bdk_testenv::{anyhow, bitcoincore_rpc::RpcApi, TestEnv};
 
 #[tokio::test]
 pub async fn test_update_tx_graph_without_keychain() -> anyhow::Result<()> {

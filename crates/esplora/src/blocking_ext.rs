@@ -407,8 +407,7 @@ mod test {
     use bdk_chain::bitcoin::Txid;
     use bdk_chain::local_chain::LocalChain;
     use bdk_chain::BlockId;
-    use bdk_testenv::TestEnv;
-    use electrsd::bitcoind::bitcoincore_rpc::RpcApi;
+    use bdk_testenv::{anyhow, bitcoincore_rpc::RpcApi, TestEnv};
     use esplora_client::{BlockHash, Builder};
     use std::collections::{BTreeMap, BTreeSet};
     use std::time::Duration;
