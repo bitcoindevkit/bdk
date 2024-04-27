@@ -248,7 +248,7 @@ fn main() -> anyhow::Result<()> {
                         .map(|(k, i, spk)| (k.to_owned(), i, spk.to_owned()))
                         .collect::<Vec<_>>();
                     request = request.chain_spks(all_spks.into_iter().map(|(k, i, spk)| {
-                        eprintln!("scanning {}:{}", k, i);
+                        eprint!("scanning {}:{}", k, i);
                         // Flush early to ensure we print at every iteration.
                         let _ = io::stderr().flush();
                         spk
@@ -262,7 +262,7 @@ fn main() -> anyhow::Result<()> {
                         .collect::<Vec<_>>();
                     request =
                         request.chain_spks(unused_spks.into_iter().map(move |(k, i, spk)| {
-                            eprintln!(
+                            eprint!(
                                 "Checking if address {} {}:{} has been used",
                                 Address::from_script(&spk, args.network).unwrap(),
                                 k,
@@ -287,7 +287,7 @@ fn main() -> anyhow::Result<()> {
                         utxos
                             .into_iter()
                             .inspect(|utxo| {
-                                eprintln!(
+                                eprint!(
                                     "Checking if outpoint {} (value: {}) has been spent",
                                     utxo.outpoint, utxo.txout.value
                                 );
@@ -308,13 +308,38 @@ fn main() -> anyhow::Result<()> {
                         .map(|canonical_tx| canonical_tx.tx_node.txid)
                         .collect::<Vec<Txid>>();
                     request = request.chain_txids(unconfirmed_txids.into_iter().inspect(|txid| {
-                        eprintln!("Checking if {} is confirmed yet", txid);
+                        eprint!("Checking if {} is confirmed yet", txid);
                         // Flush early to ensure we print at every iteration.
                         let _ = io::stderr().flush();
                     }));
                 }
             }
 
+            let total_spks = request.spks.len();
+            let total_txids = request.txids.len();
+            let total_ops = request.outpoints.len();
+            request = request
+                .inspect_spks({
+                    let mut visited = 0;
+                    move |_| {
+                        visited += 1;
+                        eprintln!(" [ {:>6.2}% ]", (visited * 100) as f32 / total_spks as f32)
+                    }
+                })
+                .inspect_txids({
+                    let mut visited = 0;
+                    move |_| {
+                        visited += 1;
+                        eprintln!(" [ {:>6.2}% ]", (visited * 100) as f32 / total_txids as f32)
+                    }
+                })
+                .inspect_outpoints({
+                    let mut visited = 0;
+                    move |_| {
+                        visited += 1;
+                        eprintln!(" [ {:>6.2}% ]", (visited * 100) as f32 / total_ops as f32)
+                    }
+                });
             let mut update = client.sync(request, scan_options.parallel_requests)?;
 
             // Update last seen unconfirmed
