@@ -219,7 +219,7 @@ license, shall be dual licensed as above, without any additional terms or
 conditions.
 
 [`Wallet`]: https://docs.rs/bdk/1.0.0-alpha.7/bdk/wallet/struct.Wallet.html
-[`PersistBackend`]: https://docs.rs/bdk_chain/latest/bdk_chain/trait.PersistBackend.html
+[`PersistBackend`]: https://docs.rs/bdk_persist/latest/bdk_persist/trait.PersistBackend.html
 [`bdk_chain`]: https://docs.rs/bdk_chain/latest
 [`bdk_file_store`]: https://docs.rs/bdk_file_store/latest
 [`bdk_electrum`]: https://docs.rs/bdk_electrum/latest

@@ -13,6 +13,7 @@ readme = "README.md"
 [dependencies]
 anyhow = { version = "1", default-features = false }
 bdk_chain = { path = "../chain", version = "0.12.0", features = [ "serde", "miniscript" ] }
+bdk_persist = { path = "../persist", version = "0.1.0"}
 bincode = { version = "1" }
 serde = { version = "1", features = ["derive"] }
 

@@ -1,5 +1,6 @@
-use crate::Append;
+extern crate alloc;
 use alloc::boxed::Box;
+use bdk_chain::Append;
 use core::fmt;
 
 /// `Persist` wraps a [`PersistBackend`] to create a convenient staging area for changes (`C`)

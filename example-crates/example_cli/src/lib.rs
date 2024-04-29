@@ -19,9 +19,10 @@ use bdk_chain::{
         descriptor::{DescriptorSecretKey, KeyMap},
         Descriptor, DescriptorPublicKey,
     },
-    Anchor, Append, ChainOracle, DescriptorExt, FullTxOut, Persist, PersistBackend,
+    Anchor, Append, ChainOracle, DescriptorExt, FullTxOut,
 };
 pub use bdk_file_store;
+use bdk_persist::{Persist, PersistBackend};
 pub use clap;
 
 use clap::{Parser, Subcommand};

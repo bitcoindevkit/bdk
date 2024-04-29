@@ -28,7 +28,7 @@
 //! # use bitcoin::*;
 //! # use bdk::wallet::{self, ChangeSet, coin_selection::*, coin_selection};
 //! # use bdk::wallet::error::CreateTxError;
-//! # use bdk_chain::PersistBackend;
+//! # use bdk_persist::PersistBackend;
 //! # use bdk::*;
 //! # use bdk::wallet::coin_selection::decide_change;
 //! # use anyhow::Error;
