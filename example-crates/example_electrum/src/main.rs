@@ -13,7 +13,7 @@ use bdk_chain::{
 };
 use bdk_electrum::{
     electrum_client::{self, Client, ElectrumApi},
-    ElectrumExt, ElectrumUpdate,
+    ElectrumExt, ElectrumUpdate, TxCache,
 };
 use example_cli::{
     anyhow::{self, Context},
@@ -146,6 +146,7 @@ fn main() -> anyhow::Result<()> {
     };
 
     let client = electrum_cmd.electrum_args().client(args.network)?;
+    let mut tx_cache = TxCache::new();
 
     let response = match electrum_cmd.clone() {
         ElectrumCommands::Scan {
@@ -181,10 +182,10 @@ fn main() -> anyhow::Result<()> {
             };
 
             client
-                .full_scan::<_, ConfirmationHeightAnchor>(
+                .full_scan::<_>(
+                    &mut tx_cache,
                     tip,
                     keychain_spks,
-                    Some(graph.lock().unwrap().graph()),
                     stop_gap,
                     scan_options.batch_size,
                 )
@@ -281,10 +282,10 @@ fn main() -> anyhow::Result<()> {
             }
 
             let electrum_update = client
-                .sync::<ConfirmationHeightAnchor>(
+                .sync(
+                    &mut tx_cache,
                     chain.tip(),
                     spks,
-                    Some(graph.graph()),
                     txids,
                     outpoints,
                     scan_options.batch_size,

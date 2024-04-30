@@ -7,13 +7,13 @@ use std::io::Write;
 use std::str::FromStr;
 
 use bdk::bitcoin::Address;
-use bdk::chain::ConfirmationTimeHeightAnchor;
 use bdk::wallet::Update;
 use bdk::{bitcoin::Network, Wallet};
 use bdk::{KeychainKind, SignOptions};
+use bdk_electrum::TxCache;
 use bdk_electrum::{
     electrum_client::{self, ElectrumApi},
-    ElectrumExt, ElectrumUpdate,
+    ElectrumExt,
 };
 use bdk_file_store::Store;
 
@@ -38,6 +38,7 @@ fn main() -> Result<(), anyhow::Error> {
 
     print!("Syncing...");
     let client = electrum_client::Client::new("ssl://electrum.blockstream.info:60002")?;
+    let mut tx_cache = TxCache::new();
 
     let prev_tip = wallet.latest_checkpoint();
     let keychain_spks = wallet
@@ -56,29 +57,19 @@ fn main() -> Result<(), anyhow::Error> {
         })
         .collect();
 
-    let (
-        ElectrumUpdate {
-            chain_update,
-            mut graph_update,
-        },
-        keychain_update,
-    ) = client.full_scan::<_, ConfirmationTimeHeightAnchor>(
-        prev_tip,
-        keychain_spks,
-        Some(wallet.as_ref()),
-        STOP_GAP,
-        BATCH_SIZE,
-    )?;
+    let (update, keychain_update) =
+        client.full_scan(&mut tx_cache, prev_tip, keychain_spks, STOP_GAP, BATCH_SIZE)?;
+    let mut update = update.into_confirmation_time_update(&client)?;
 
     println!();
 
     let now = std::time::UNIX_EPOCH.elapsed().unwrap().as_secs();
-    let _ = graph_update.update_last_seen_unconfirmed(now);
+    let _ = update.graph_update.update_last_seen_unconfirmed(now);
 
     let wallet_update = Update {
         last_active_indices: keychain_update,
-        graph: graph_update,
-        chain: Some(chain_update),
+        graph: update.graph_update,
+        chain: Some(update.chain_update),
     };
     wallet.apply_update(wallet_update)?;
     wallet.commit()?;

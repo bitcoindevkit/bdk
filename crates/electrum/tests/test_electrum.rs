@@ -62,22 +62,21 @@ fn scan_detects_confirmed_tx() -> Result<()> {
 
     // Sync up to tip.
     env.wait_until_electrum_sees_block()?;
-    let ElectrumUpdate {
-        chain_update,
-        graph_update,
-    } = client.sync::<ConfirmationTimeHeightAnchor>(
-        recv_chain.tip(),
-        [spk_to_track],
-        Some(recv_graph.graph()),
-        None,
-        None,
-        5,
-    )?;
+    let update = client
+        .sync(
+            &mut Default::default(),
+            recv_chain.tip(),
+            [spk_to_track],
+            None,
+            None,
+            5,
+        )?
+        .into_confirmation_time_update(&client)?;
 
     let _ = recv_chain
-        .apply_update(chain_update)
+        .apply_update(update.chain_update)
         .map_err(|err| anyhow::anyhow!("LocalChain update error: {:?}", err))?;
-    let _ = recv_graph.apply_update(graph_update);
+    let _ = recv_graph.apply_update(update.graph_update);
 
     // Check to see if tx is confirmed.
     assert_eq!(
@@ -133,25 +132,24 @@ fn tx_can_become_unconfirmed_after_reorg() -> Result<()> {
 
     // Sync up to tip.
     env.wait_until_electrum_sees_block()?;
-    let ElectrumUpdate {
-        chain_update,
-        graph_update,
-    } = client.sync::<ConfirmationTimeHeightAnchor>(
-        recv_chain.tip(),
-        [spk_to_track.clone()],
-        Some(recv_graph.graph()),
-        None,
-        None,
-        5,
-    )?;
+    let update = client
+        .sync(
+            &mut Default::default(),
+            recv_chain.tip(),
+            [spk_to_track.clone()],
+            None,
+            None,
+            5,
+        )?
+        .into_confirmation_time_update(&client)?;
 
     let _ = recv_chain
-        .apply_update(chain_update)
+        .apply_update(update.chain_update)
         .map_err(|err| anyhow::anyhow!("LocalChain update error: {:?}", err))?;
-    let _ = recv_graph.apply_update(graph_update.clone());
+    let _ = recv_graph.apply_update(update.graph_update.clone());
 
     // Retain a snapshot of all anchors before reorg process.
-    let initial_anchors = graph_update.all_anchors();
+    let initial_anchors = update.graph_update.all_anchors();
 
     // Check if initial balance is correct.
     assert_eq!(
@@ -171,14 +169,16 @@ fn tx_can_become_unconfirmed_after_reorg() -> Result<()> {
         let ElectrumUpdate {
             chain_update,
             graph_update,
-        } = client.sync::<ConfirmationTimeHeightAnchor>(
-            recv_chain.tip(),
-            [spk_to_track.clone()],
-            Some(recv_graph.graph()),
-            None,
-            None,
-            5,
-        )?;
+        } = client
+            .sync(
+                &mut Default::default(),
+                recv_chain.tip(),
+                [spk_to_track.clone()],
+                None,
+                None,
+                5,
+            )?
+            .into_confirmation_time_update(&client)?;
 
         let _ = recv_chain
             .apply_update(chain_update)
