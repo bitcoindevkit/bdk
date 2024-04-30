@@ -516,12 +516,12 @@ impl<A: Clone + Ord> TxGraph<A> {
     /// Inserts the given transaction into [`TxGraph`].
     ///
     /// The [`ChangeSet`] returned will be empty if `tx` already exists.
-    pub fn insert_tx(&mut self, tx: Transaction) -> ChangeSet<A> {
+    pub fn insert_tx<T: Into<Arc<Transaction>>>(&mut self, tx: T) -> ChangeSet<A> {
+        let tx = tx.into();
         let mut update = Self::default();
-        update.txs.insert(
-            tx.txid(),
-            (TxNodeInternal::Whole(tx.into()), BTreeSet::new(), 0),
-        );
+        update
+            .txs
+            .insert(tx.txid(), (TxNodeInternal::Whole(tx), BTreeSet::new(), 0));
         self.apply_update(update)
     }
 
