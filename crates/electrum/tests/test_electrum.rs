@@ -2,9 +2,10 @@ use bdk_chain::{
     bitcoin::{hashes::Hash, Address, Amount, ScriptBuf, WScriptHash},
     keychain::Balance,
     local_chain::LocalChain,
+    spk_client::SyncRequest,
     ConfirmationTimeHeightAnchor, IndexedTxGraph, SpkTxOutIndex,
 };
-use bdk_electrum::{ElectrumExt, ElectrumUpdate};
+use bdk_electrum::{ElectrumExt, ElectrumResultExt};
 use bdk_testenv::{anyhow, anyhow::Result, bitcoincore_rpc::RpcApi, TestEnv};
 
 fn get_balance(
@@ -60,22 +61,18 @@ fn scan_detects_confirmed_tx() -> Result<()> {
 
     // Sync up to tip.
     env.wait_until_electrum_sees_block()?;
-    let ElectrumUpdate {
-        chain_update,
-        graph_update,
-    } = client.sync::<ConfirmationTimeHeightAnchor>(
-        recv_chain.tip(),
-        [spk_to_track],
-        Some(recv_graph.graph()),
-        None,
-        None,
-        5,
-    )?;
+    let update = client
+        .sync(
+            SyncRequest::from_chain_tip(recv_chain.tip())
+                .chain_spks(core::iter::once(spk_to_track)),
+            5,
+        )?
+        .try_into_confirmation_time_result(&client)?;
 
     let _ = recv_chain
-        .apply_update(chain_update)
+        .apply_update(update.chain_update)
         .map_err(|err| anyhow::anyhow!("LocalChain update error: {:?}", err))?;
-    let _ = recv_graph.apply_update(graph_update);
+    let _ = recv_graph.apply_update(update.graph_update);
 
     // Check to see if tx is confirmed.
     assert_eq!(
@@ -131,25 +128,20 @@ fn tx_can_become_unconfirmed_after_reorg() -> Result<()> {
 
     // Sync up to tip.
     env.wait_until_electrum_sees_block()?;
-    let ElectrumUpdate {
-        chain_update,
-        graph_update,
-    } = client.sync::<ConfirmationTimeHeightAnchor>(
-        recv_chain.tip(),
-        [spk_to_track.clone()],
-        Some(recv_graph.graph()),
-        None,
-        None,
-        5,
-    )?;
+    let update = client
+        .sync(
+            SyncRequest::from_chain_tip(recv_chain.tip()).chain_spks([spk_to_track.clone()]),
+            5,
+        )?
+        .try_into_confirmation_time_result(&client)?;
 
     let _ = recv_chain
-        .apply_update(chain_update)
+        .apply_update(update.chain_update)
         .map_err(|err| anyhow::anyhow!("LocalChain update error: {:?}", err))?;
-    let _ = recv_graph.apply_update(graph_update.clone());
+    let _ = recv_graph.apply_update(update.graph_update.clone());
 
     // Retain a snapshot of all anchors before reorg process.
-    let initial_anchors = graph_update.all_anchors();
+    let initial_anchors = update.graph_update.all_anchors();
 
     // Check if initial balance is correct.
     assert_eq!(
@@ -166,27 +158,22 @@ fn tx_can_become_unconfirmed_after_reorg() -> Result<()> {
         env.reorg_empty_blocks(depth)?;
 
         env.wait_until_electrum_sees_block()?;
-        let ElectrumUpdate {
-            chain_update,
-            graph_update,
-        } = client.sync::<ConfirmationTimeHeightAnchor>(
-            recv_chain.tip(),
-            [spk_to_track.clone()],
-            Some(recv_graph.graph()),
-            None,
-            None,
-            5,
-        )?;
+        let update = client
+            .sync(
+                SyncRequest::from_chain_tip(recv_chain.tip()).chain_spks([spk_to_track.clone()]),
+                5,
+            )?
+            .try_into_confirmation_time_result(&client)?;
 
         let _ = recv_chain
-            .apply_update(chain_update)
+            .apply_update(update.chain_update)
             .map_err(|err| anyhow::anyhow!("LocalChain update error: {:?}", err))?;
 
         // Check to see if a new anchor is added during current reorg.
-        if !initial_anchors.is_superset(graph_update.all_anchors()) {
+        if !initial_anchors.is_superset(update.graph_update.all_anchors()) {
             println!("New anchor added at reorg depth {}", depth);
         }
-        let _ = recv_graph.apply_update(graph_update);
+        let _ = recv_graph.apply_update(update.graph_update);
 
         assert_eq!(
             get_balance(&recv_chain, &recv_graph)?,

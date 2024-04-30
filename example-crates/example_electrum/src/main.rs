@@ -1,19 +1,20 @@
 use std::{
-    collections::BTreeMap,
     io::{self, Write},
     sync::Mutex,
 };
 
 use bdk_chain::{
-    bitcoin::{constants::genesis_block, Address, Network, OutPoint, Txid},
+    bitcoin::{constants::genesis_block, Address, Network, Txid},
+    collections::BTreeSet,
     indexed_tx_graph::{self, IndexedTxGraph},
     keychain,
     local_chain::{self, LocalChain},
+    spk_client::{FullScanRequest, SyncRequest},
     Append, ConfirmationHeightAnchor,
 };
 use bdk_electrum::{
     electrum_client::{self, Client, ElectrumApi},
-    ElectrumExt, ElectrumUpdate,
+    ElectrumExt,
 };
 use example_cli::{
     anyhow::{self, Context},
@@ -147,48 +148,55 @@ fn main() -> anyhow::Result<()> {
 
     let client = electrum_cmd.electrum_args().client(args.network)?;
 
-    let response = match electrum_cmd.clone() {
+    let (chain_update, mut graph_update, keychain_update) = match electrum_cmd.clone() {
         ElectrumCommands::Scan {
             stop_gap,
             scan_options,
             ..
         } => {
-            let (keychain_spks, tip) = {
+            let request = {
                 let graph = &*graph.lock().unwrap();
                 let chain = &*chain.lock().unwrap();
 
-                let keychain_spks = graph
-                    .index
-                    .all_unbounded_spk_iters()
-                    .into_iter()
-                    .map(|(keychain, iter)| {
-                        let mut first = true;
-                        let spk_iter = iter.inspect(move |(i, _)| {
-                            if first {
-                                eprint!("\nscanning {}: ", keychain);
-                                first = false;
+                FullScanRequest::from_chain_tip(chain.tip())
+                    .cache_graph_txs(graph.graph())
+                    .set_spks_for_keychain(
+                        Keychain::External,
+                        graph
+                            .index
+                            .unbounded_spk_iter(&Keychain::External)
+                            .into_iter()
+                            .flatten(),
+                    )
+                    .set_spks_for_keychain(
+                        Keychain::Internal,
+                        graph
+                            .index
+                            .unbounded_spk_iter(&Keychain::Internal)
+                            .into_iter()
+                            .flatten(),
+                    )
+                    .inspect_spks_for_all_keychains({
+                        let mut once = BTreeSet::new();
+                        move |k, spk_i, _| {
+                            if once.insert(k) {
+                                eprint!("\nScanning {}: ", k);
+                            } else {
+                                eprint!("{} ", spk_i);
                             }
-
-                            eprint!("{} ", i);
                             let _ = io::stdout().flush();
-                        });
-                        (keychain, spk_iter)
+                        }
                     })
-                    .collect::<BTreeMap<_, _>>();
-
-                let tip = chain.tip();
-                (keychain_spks, tip)
             };
 
-            client
-                .full_scan::<_, ConfirmationHeightAnchor>(
-                    tip,
-                    keychain_spks,
-                    Some(graph.lock().unwrap().graph()),
-                    stop_gap,
-                    scan_options.batch_size,
-                )
-                .context("scanning the blockchain")?
+            let res = client
+                .full_scan::<_>(request, stop_gap, scan_options.batch_size)
+                .context("scanning the blockchain")?;
+            (
+                res.chain_update,
+                res.graph_update,
+                Some(res.last_active_indices),
+            )
         }
         ElectrumCommands::Sync {
             mut unused_spks,
@@ -201,7 +209,6 @@ fn main() -> anyhow::Result<()> {
             // Get a short lock on the tracker to get the spks we're interested in
             let graph = graph.lock().unwrap();
             let chain = chain.lock().unwrap();
-            let chain_tip = chain.tip().block_id();
 
             if !(all_spks || unused_spks || utxos || unconfirmed) {
                 unused_spks = true;
@@ -211,18 +218,20 @@ fn main() -> anyhow::Result<()> {
                 unused_spks = false;
             }
 
-            let mut spks: Box<dyn Iterator<Item = bdk_chain::bitcoin::ScriptBuf>> =
-                Box::new(core::iter::empty());
+            let chain_tip = chain.tip();
+            let mut request =
+                SyncRequest::from_chain_tip(chain_tip.clone()).cache_graph_txs(graph.graph());
+
             if all_spks {
                 let all_spks = graph
                     .index
                     .revealed_spks(..)
                     .map(|(k, i, spk)| (k.to_owned(), i, spk.to_owned()))
                     .collect::<Vec<_>>();
-                spks = Box::new(spks.chain(all_spks.into_iter().map(|(k, i, spk)| {
-                    eprintln!("scanning {}:{}", k, i);
+                request = request.chain_spks(all_spks.into_iter().map(|(k, spk_i, spk)| {
+                    eprintln!("scanning {}: {}", k, spk_i);
                     spk
-                })));
+                }));
             }
             if unused_spks {
                 let unused_spks = graph
@@ -230,81 +239,60 @@ fn main() -> anyhow::Result<()> {
                     .unused_spks()
                     .map(|(k, i, spk)| (k, i, spk.to_owned()))
                     .collect::<Vec<_>>();
-                spks = Box::new(spks.chain(unused_spks.into_iter().map(|(k, i, spk)| {
-                    eprintln!(
-                        "Checking if address {} {}:{} has been used",
-                        Address::from_script(&spk, args.network).unwrap(),
-                        k,
-                        i,
-                    );
-                    spk
-                })));
+                request =
+                    request.chain_spks(unused_spks.into_iter().map(move |(k, spk_i, spk)| {
+                        eprintln!(
+                            "Checking if address {} {}:{} has been used",
+                            Address::from_script(&spk, args.network).unwrap(),
+                            k,
+                            spk_i,
+                        );
+                        spk
+                    }));
             }
-
-            let mut outpoints: Box<dyn Iterator<Item = OutPoint>> = Box::new(core::iter::empty());
 
             if utxos {
                 let init_outpoints = graph.index.outpoints();
 
                 let utxos = graph
                     .graph()
-                    .filter_chain_unspents(&*chain, chain_tip, init_outpoints)
+                    .filter_chain_unspents(&*chain, chain_tip.block_id(), init_outpoints)
                     .map(|(_, utxo)| utxo)
                     .collect::<Vec<_>>();
-
-                outpoints = Box::new(
-                    utxos
-                        .into_iter()
-                        .inspect(|utxo| {
-                            eprintln!(
-                                "Checking if outpoint {} (value: {}) has been spent",
-                                utxo.outpoint, utxo.txout.value
-                            );
-                        })
-                        .map(|utxo| utxo.outpoint),
-                );
+                request = request.chain_outpoints(utxos.into_iter().map(|utxo| {
+                    eprintln!(
+                        "Checking if outpoint {} (value: {}) has been spent",
+                        utxo.outpoint, utxo.txout.value
+                    );
+                    utxo.outpoint
+                }));
             };
-
-            let mut txids: Box<dyn Iterator<Item = Txid>> = Box::new(core::iter::empty());
 
             if unconfirmed {
                 let unconfirmed_txids = graph
                     .graph()
-                    .list_chain_txs(&*chain, chain_tip)
+                    .list_chain_txs(&*chain, chain_tip.block_id())
                     .filter(|canonical_tx| !canonical_tx.chain_position.is_confirmed())
                     .map(|canonical_tx| canonical_tx.tx_node.txid)
                     .collect::<Vec<Txid>>();
 
-                txids = Box::new(unconfirmed_txids.into_iter().inspect(|txid| {
-                    eprintln!("Checking if {} is confirmed yet", txid);
-                }));
+                request = request.chain_txids(
+                    unconfirmed_txids
+                        .into_iter()
+                        .inspect(|txid| eprintln!("Checking if {} is confirmed yet", txid)),
+                );
             }
 
-            let electrum_update = client
-                .sync::<ConfirmationHeightAnchor>(
-                    chain.tip(),
-                    spks,
-                    Some(graph.graph()),
-                    txids,
-                    outpoints,
-                    scan_options.batch_size,
-                )
+            let res = client
+                .sync(request, scan_options.batch_size)
                 .context("scanning the blockchain")?;
 
             // drop lock on graph and chain
             drop((graph, chain));
 
-            (electrum_update, BTreeMap::new())
+            (res.chain_update, res.graph_update, None)
         }
     };
-
-    let (
-        ElectrumUpdate {
-            chain_update,
-            mut graph_update,
-        },
-        keychain_update,
-    ) = response;
 
     let now = std::time::UNIX_EPOCH
         .elapsed()
@@ -316,26 +304,17 @@ fn main() -> anyhow::Result<()> {
         let mut chain = chain.lock().unwrap();
         let mut graph = graph.lock().unwrap();
 
-        let chain = chain.apply_update(chain_update)?;
+        let chain_changeset = chain.apply_update(chain_update)?;
 
-        let indexed_tx_graph = {
-            let mut changeset =
-                indexed_tx_graph::ChangeSet::<ConfirmationHeightAnchor, _>::default();
-            let (_, indexer) = graph.index.reveal_to_target_multi(&keychain_update);
-            changeset.append(indexed_tx_graph::ChangeSet {
-                indexer,
-                ..Default::default()
-            });
-            changeset.append(graph.apply_update(graph_update.map_anchors(|a| {
-                ConfirmationHeightAnchor {
-                    anchor_block: a.anchor_block,
-                    confirmation_height: a.confirmation_height,
-                }
-            })));
-            changeset
-        };
+        let mut indexed_tx_graph_changeset =
+            indexed_tx_graph::ChangeSet::<ConfirmationHeightAnchor, _>::default();
+        if let Some(keychain_update) = keychain_update {
+            let (_, keychain_changeset) = graph.index.reveal_to_target_multi(&keychain_update);
+            indexed_tx_graph_changeset.append(keychain_changeset.into());
+        }
+        indexed_tx_graph_changeset.append(graph.apply_update(graph_update));
 
-        (chain, indexed_tx_graph)
+        (chain_changeset, indexed_tx_graph_changeset)
     };
 
     let mut db = db.lock().unwrap();
