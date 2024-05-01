@@ -46,6 +46,8 @@ use descriptor::error::Error as DescriptorError;
 use miniscript::psbt::{PsbtExt, PsbtInputExt, PsbtInputSatisfier};
 
 use bdk_chain::tx_graph::CalculateFeeError;
+#[cfg(feature = "bitcoinconsensus")]
+use bdk_chain::tx_graph::VerifyTxError;
 
 pub mod coin_selection;
 pub mod export;
@@ -2407,6 +2409,45 @@ impl Wallet {
             .indexed_graph
             .batch_insert_relevant_unconfirmed(unconfirmed_txs);
         self.persist.stage(ChangeSet::from(indexed_graph_changeset));
+    }
+
+    /// Verify the given transaction is able to spend its inputs.
+    ///
+    /// This method uses [`rust-bitcoinconsensus`] to verify a [`Transaction`], guaranteeing
+    /// that if the method succeeds, the transaction meets consensus criteria as defined in
+    /// Bitcoin's `libbitcoinconsensus`.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # use bdk::SignOptions;
+    /// # use bdk::wallet::AddressIndex;
+    /// # let mut wallet = bdk::doctest_wallet!();
+    /// # let address = wallet.get_address(AddressIndex::New);
+    /// let mut builder = wallet.build_tx();
+    /// builder.add_recipient(address.script_pubkey(), 210_000);
+    /// let mut psbt = builder.finish().unwrap();
+    /// let _ = wallet.sign(&mut psbt, SignOptions::default()).unwrap();
+    /// let tx = psbt.extract_tx();
+    /// assert!(wallet.verify_tx(&tx).is_ok());
+    /// ```
+    ///
+    /// **Note** that validation by the Bitcoin network can ultimately fail in other ways,
+    /// for example if a timelock hasn't been met. Also, verifying that a transaction
+    /// can spend its inputs doesn't guarantee it will be accepted to mempools or propagated
+    /// by nodes on the peer-to-peer network.
+    ///
+    /// # Errors
+    ///
+    /// If the previous output isn't found for one or more `tx` inputs.
+    ///
+    /// If [`Script`] verification fails.
+    ///
+    /// [`rust-bitcoinconsensus`]: https://docs.rs/bitcoinconsensus/latest/bitcoinconsensus/
+    #[cfg(feature = "bitcoinconsensus")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "bitcoinconsensus")))]
+    pub fn verify_tx(&self, tx: &Transaction) -> Result<(), VerifyTxError> {
+        self.tx_graph().verify_tx(tx)
     }
 }
 

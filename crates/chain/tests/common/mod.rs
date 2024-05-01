@@ -20,6 +20,13 @@ macro_rules! h {
 }
 
 #[allow(unused_macros)]
+macro_rules! hex {
+    ($hex:expr) => {{
+        <Vec<u8> as bitcoin::hashes::hex::FromHex>::from_hex($hex)
+    }};
+}
+
+#[allow(unused_macros)]
 macro_rules! local_chain {
     [ $(($height:expr, $block_hash:expr)), * ] => {{
         #[allow(unused_mut)]

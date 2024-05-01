@@ -35,6 +35,7 @@ std = ["bitcoin/std", "miniscript/std", "bdk_chain/std"]
 compiler = ["miniscript/compiler"]
 all-keys = ["keys-bip39"]
 keys-bip39 = ["bip39"]
+bitcoinconsensus = ["bdk_chain/bitcoinconsensus"]
 
 # This feature is used to run `cargo check` in our CI targeting wasm. It's not recommended
 # for libraries to explicitly include the "getrandom/js" feature, so we only do it when
