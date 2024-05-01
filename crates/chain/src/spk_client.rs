@@ -316,9 +316,9 @@ impl<K: Ord + Clone> FullScanRequest<K> {
 /// Data returned from a spk-based blockchain client full scan.
 ///
 /// See also [`FullScanRequest`].
-pub struct FullScanResult<K> {
+pub struct FullScanResult<K, A = ConfirmationTimeHeightAnchor> {
     /// The update to apply to the receiving [`LocalChain`](crate::local_chain::LocalChain).
-    pub graph_update: TxGraph<ConfirmationTimeHeightAnchor>,
+    pub graph_update: TxGraph<A>,
     /// The update to apply to the receiving [`TxGraph`].
     pub chain_update: CheckPoint,
     /// Last active indices for the corresponding keychains (`K`).
