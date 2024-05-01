@@ -99,7 +99,7 @@ use miniscript::descriptor::{
     Descriptor, DescriptorMultiXKey, DescriptorPublicKey, DescriptorSecretKey, DescriptorXKey,
     InnerXKey, KeyMap, SinglePriv, SinglePubKey,
 };
-use miniscript::{Legacy, Segwitv0, SigType, Tap, ToPublicKey};
+use miniscript::{SigType, ToPublicKey};
 
 use super::utils::SecpCtx;
 use crate::descriptor::{DescriptorMeta, XKeyUtils};
@@ -481,7 +481,7 @@ impl InputSigner for SignerWrapper<PrivateKey> {
                     && sign_options.sign_with_tap_internal_key
                     && x_only_pubkey == psbt_internal_key
                 {
-                    let (hash, hash_ty) = Tap::sighash(psbt, input_index, None)?;
+                    let (hash, hash_ty) = compute_tap_sighash(psbt, input_index, None)?;
                     sign_psbt_schnorr(
                         &self.inner,
                         x_only_pubkey,
@@ -516,7 +516,7 @@ impl InputSigner for SignerWrapper<PrivateKey> {
                     .cloned()
                     .collect::<Vec<_>>();
                 for lh in leaf_hashes {
-                    let (hash, hash_ty) = Tap::sighash(psbt, input_index, Some(lh))?;
+                    let (hash, hash_ty) = compute_tap_sighash(psbt, input_index, Some(lh))?;
                     sign_psbt_schnorr(
                         &self.inner,
                         x_only_pubkey,
@@ -538,12 +538,12 @@ impl InputSigner for SignerWrapper<PrivateKey> {
 
         let (hash, hash_ty) = match self.ctx {
             SignerContext::Segwitv0 => {
-                let (h, t) = Segwitv0::sighash(psbt, input_index, ())?;
+                let (h, t) = compute_segwitv0_sighash(psbt, input_index)?;
                 let h = h.to_raw_hash();
                 (h, t)
             }
             SignerContext::Legacy => {
-                let (h, t) = Legacy::sighash(psbt, input_index, ())?;
+                let (h, t) = compute_legacy_sighash(psbt, input_index)?;
                 let h = h.to_raw_hash();
                 (h, t)
             }
@@ -853,198 +853,165 @@ impl Default for SignOptions {
     }
 }
 
-pub(crate) trait ComputeSighash {
-    type Extra;
-    type Sighash;
-    type SighashType;
-
-    fn sighash(
-        psbt: &Psbt,
-        input_index: usize,
-        extra: Self::Extra,
-    ) -> Result<(Self::Sighash, Self::SighashType), SignerError>;
-}
-
-impl ComputeSighash for Legacy {
-    type Extra = ();
-    type Sighash = sighash::LegacySighash;
-    type SighashType = EcdsaSighashType;
-
-    fn sighash(
-        psbt: &Psbt,
-        input_index: usize,
-        _extra: (),
-    ) -> Result<(Self::Sighash, Self::SighashType), SignerError> {
-        if input_index >= psbt.inputs.len() || input_index >= psbt.unsigned_tx.input.len() {
-            return Err(SignerError::InputIndexOutOfRange);
-        }
-
-        let psbt_input = &psbt.inputs[input_index];
-        let tx_input = &psbt.unsigned_tx.input[input_index];
-
-        let sighash = psbt_input
-            .sighash_type
-            .unwrap_or_else(|| EcdsaSighashType::All.into())
-            .ecdsa_hash_ty()
-            .map_err(|_| SignerError::InvalidSighash)?;
-        let script = match psbt_input.redeem_script {
-            Some(ref redeem_script) => redeem_script.clone(),
-            None => {
-                let non_witness_utxo = psbt_input
-                    .non_witness_utxo
-                    .as_ref()
-                    .ok_or(SignerError::MissingNonWitnessUtxo)?;
-                let prev_out = non_witness_utxo
-                    .output
-                    .get(tx_input.previous_output.vout as usize)
-                    .ok_or(SignerError::InvalidNonWitnessUtxo)?;
-
-                prev_out.script_pubkey.clone()
-            }
-        };
-
-        Ok((
-            sighash::SighashCache::new(&psbt.unsigned_tx).legacy_signature_hash(
-                input_index,
-                &script,
-                sighash.to_u32(),
-            )?,
-            sighash,
-        ))
+/// Computes the legacy sighash.
+fn compute_legacy_sighash(
+    psbt: &Psbt,
+    input_index: usize,
+) -> Result<(sighash::LegacySighash, EcdsaSighashType), SignerError> {
+    if input_index >= psbt.inputs.len() || input_index >= psbt.unsigned_tx.input.len() {
+        return Err(SignerError::InputIndexOutOfRange);
     }
-}
 
-impl ComputeSighash for Segwitv0 {
-    type Extra = ();
-    type Sighash = sighash::SegwitV0Sighash;
-    type SighashType = EcdsaSighashType;
+    let psbt_input = &psbt.inputs[input_index];
+    let tx_input = &psbt.unsigned_tx.input[input_index];
 
-    fn sighash(
-        psbt: &Psbt,
-        input_index: usize,
-        _extra: (),
-    ) -> Result<(Self::Sighash, Self::SighashType), SignerError> {
-        if input_index >= psbt.inputs.len() || input_index >= psbt.unsigned_tx.input.len() {
-            return Err(SignerError::InputIndexOutOfRange);
-        }
+    let sighash_type = psbt_input
+        .sighash_type
+        .unwrap_or_else(|| EcdsaSighashType::All.into())
+        .ecdsa_hash_ty()
+        .map_err(|_| SignerError::InvalidSighash)?;
 
-        let psbt_input = &psbt.inputs[input_index];
-        let tx_input = &psbt.unsigned_tx.input[input_index];
-
-        let sighash_type = psbt_input
-            .sighash_type
-            .unwrap_or_else(|| EcdsaSighashType::All.into())
-            .ecdsa_hash_ty()
-            .map_err(|_| SignerError::InvalidSighash)?;
-
-        // Always try first with the non-witness utxo
-        let utxo = if let Some(prev_tx) = &psbt_input.non_witness_utxo {
-            // Check the provided prev-tx
-            if prev_tx.compute_txid() != tx_input.previous_output.txid {
-                return Err(SignerError::InvalidNonWitnessUtxo);
-            }
-
-            // The output should be present, if it's missing the `non_witness_utxo` is invalid
-            prev_tx
+    let script = match psbt_input.redeem_script {
+        Some(ref redeem_script) => redeem_script.clone(),
+        None => {
+            let non_witness_utxo = psbt_input
+                .non_witness_utxo
+                .as_ref()
+                .ok_or(SignerError::MissingNonWitnessUtxo)?;
+            let prev_out = non_witness_utxo
                 .output
                 .get(tx_input.previous_output.vout as usize)
-                .ok_or(SignerError::InvalidNonWitnessUtxo)?
-        } else if let Some(witness_utxo) = &psbt_input.witness_utxo {
-            // Fallback to the witness_utxo. If we aren't allowed to use it, signing should fail
-            // before we get to this point
-            witness_utxo
-        } else {
-            // Nothing has been provided
-            return Err(SignerError::MissingNonWitnessUtxo);
-        };
-        let value = utxo.value;
+                .ok_or(SignerError::InvalidNonWitnessUtxo)?;
 
-        let mut sighasher = sighash::SighashCache::new(&psbt.unsigned_tx);
+            prev_out.script_pubkey.clone()
+        }
+    };
 
-        let sighash = match psbt_input.witness_script {
-            Some(ref witness_script) => {
-                sighasher.p2wsh_signature_hash(input_index, witness_script, value, sighash_type)?
-            }
-            None => {
-                if utxo.script_pubkey.is_p2wpkh() {
-                    sighasher.p2wpkh_signature_hash(
-                        input_index,
-                        &utxo.script_pubkey,
-                        value,
-                        sighash_type,
-                    )?
-                } else if psbt_input
-                    .redeem_script
-                    .as_ref()
-                    .map(|s| s.is_p2wpkh())
-                    .unwrap_or(false)
-                {
-                    let script_pubkey = psbt_input.redeem_script.as_ref().unwrap();
-                    sighasher.p2wpkh_signature_hash(
-                        input_index,
-                        script_pubkey,
-                        value,
-                        sighash_type,
-                    )?
-                } else {
-                    return Err(SignerError::MissingWitnessScript);
-                }
-            }
-        };
-        Ok((sighash, sighash_type))
-    }
+    Ok((
+        sighash::SighashCache::new(&psbt.unsigned_tx).legacy_signature_hash(
+            input_index,
+            &script,
+            sighash_type.to_u32(),
+        )?,
+        sighash_type,
+    ))
 }
 
-impl ComputeSighash for Tap {
-    type Extra = Option<taproot::TapLeafHash>;
-    type Sighash = TapSighash;
-    type SighashType = TapSighashType;
+/// Computes the segwitv0 sighash.
+fn compute_segwitv0_sighash(
+    psbt: &Psbt,
+    input_index: usize,
+) -> Result<(sighash::SegwitV0Sighash, EcdsaSighashType), SignerError> {
+    if input_index >= psbt.inputs.len() || input_index >= psbt.unsigned_tx.input.len() {
+        return Err(SignerError::InputIndexOutOfRange);
+    }
 
-    fn sighash(
-        psbt: &Psbt,
-        input_index: usize,
-        extra: Self::Extra,
-    ) -> Result<(Self::Sighash, TapSighashType), SignerError> {
-        if input_index >= psbt.inputs.len() || input_index >= psbt.unsigned_tx.input.len() {
-            return Err(SignerError::InputIndexOutOfRange);
+    let psbt_input = &psbt.inputs[input_index];
+    let tx_input = &psbt.unsigned_tx.input[input_index];
+
+    let sighash_type = psbt_input
+        .sighash_type
+        .unwrap_or_else(|| EcdsaSighashType::All.into())
+        .ecdsa_hash_ty()
+        .map_err(|_| SignerError::InvalidSighash)?;
+
+    // Always try first with the non-witness utxo
+    let utxo = if let Some(prev_tx) = &psbt_input.non_witness_utxo {
+        // Check the provided prev-tx
+        if prev_tx.compute_txid() != tx_input.previous_output.txid {
+            return Err(SignerError::InvalidNonWitnessUtxo);
         }
 
-        let psbt_input = &psbt.inputs[input_index];
+        // The output should be present, if it's missing the `non_witness_utxo` is invalid
+        prev_tx
+            .output
+            .get(tx_input.previous_output.vout as usize)
+            .ok_or(SignerError::InvalidNonWitnessUtxo)?
+    } else if let Some(witness_utxo) = &psbt_input.witness_utxo {
+        // Fallback to the witness_utxo. If we aren't allowed to use it, signing should fail
+        // before we get to this point
+        witness_utxo
+    } else {
+        // Nothing has been provided
+        return Err(SignerError::MissingNonWitnessUtxo);
+    };
+    let value = utxo.value;
 
-        let sighash_type = psbt_input
-            .sighash_type
-            .unwrap_or_else(|| TapSighashType::Default.into())
-            .taproot_hash_ty()
-            .map_err(|_| SignerError::InvalidSighash)?;
-        let witness_utxos = (0..psbt.inputs.len())
-            .map(|i| psbt.get_utxo_for(i))
-            .collect::<Vec<_>>();
-        let mut all_witness_utxos = vec![];
+    let mut sighasher = sighash::SighashCache::new(&psbt.unsigned_tx);
 
-        let mut cache = sighash::SighashCache::new(&psbt.unsigned_tx);
-        let is_anyone_can_pay = psbt::PsbtSighashType::from(sighash_type).to_u32() & 0x80 != 0;
-        let prevouts = if is_anyone_can_pay {
-            sighash::Prevouts::One(
-                input_index,
-                witness_utxos[input_index]
-                    .as_ref()
-                    .ok_or(SignerError::MissingWitnessUtxo)?,
-            )
-        } else if witness_utxos.iter().all(Option::is_some) {
-            all_witness_utxos.extend(witness_utxos.iter().filter_map(|x| x.as_ref()));
-            sighash::Prevouts::All(&all_witness_utxos)
-        } else {
-            return Err(SignerError::MissingWitnessUtxo);
-        };
+    let sighash = match psbt_input.witness_script {
+        Some(ref witness_script) => {
+            sighasher.p2wsh_signature_hash(input_index, witness_script, value, sighash_type)?
+        }
+        None => {
+            if utxo.script_pubkey.is_p2wpkh() {
+                sighasher.p2wpkh_signature_hash(
+                    input_index,
+                    &utxo.script_pubkey,
+                    value,
+                    sighash_type,
+                )?
+            } else if psbt_input
+                .redeem_script
+                .as_ref()
+                .map(|s| s.is_p2wpkh())
+                .unwrap_or(false)
+            {
+                let script_pubkey = psbt_input.redeem_script.as_ref().unwrap();
+                sighasher.p2wpkh_signature_hash(input_index, script_pubkey, value, sighash_type)?
+            } else {
+                return Err(SignerError::MissingWitnessScript);
+            }
+        }
+    };
+    Ok((sighash, sighash_type))
+}
 
-        // Assume no OP_CODESEPARATOR
-        let extra = extra.map(|leaf_hash| (leaf_hash, 0xFFFFFFFF));
-
-        Ok((
-            cache.taproot_signature_hash(input_index, &prevouts, None, extra, sighash_type)?,
-            sighash_type,
-        ))
+/// Computes the taproot sighash.
+fn compute_tap_sighash(
+    psbt: &Psbt,
+    input_index: usize,
+    extra: Option<taproot::TapLeafHash>,
+) -> Result<(sighash::TapSighash, TapSighashType), SignerError> {
+    if input_index >= psbt.inputs.len() || input_index >= psbt.unsigned_tx.input.len() {
+        return Err(SignerError::InputIndexOutOfRange);
     }
+
+    let psbt_input = &psbt.inputs[input_index];
+
+    let sighash_type = psbt_input
+        .sighash_type
+        .unwrap_or_else(|| TapSighashType::Default.into())
+        .taproot_hash_ty()
+        .map_err(|_| SignerError::InvalidSighash)?;
+    let witness_utxos = (0..psbt.inputs.len())
+        .map(|i| psbt.get_utxo_for(i))
+        .collect::<Vec<_>>();
+    let mut all_witness_utxos = vec![];
+
+    let mut cache = sighash::SighashCache::new(&psbt.unsigned_tx);
+    let is_anyone_can_pay = psbt::PsbtSighashType::from(sighash_type).to_u32() & 0x80 != 0;
+    let prevouts = if is_anyone_can_pay {
+        sighash::Prevouts::One(
+            input_index,
+            witness_utxos[input_index]
+                .as_ref()
+                .ok_or(SignerError::MissingWitnessUtxo)?,
+        )
+    } else if witness_utxos.iter().all(Option::is_some) {
+        all_witness_utxos.extend(witness_utxos.iter().filter_map(|x| x.as_ref()));
+        sighash::Prevouts::All(&all_witness_utxos)
+    } else {
+        return Err(SignerError::MissingWitnessUtxo);
+    };
+
+    // Assume no OP_CODESEPARATOR
+    let extra = extra.map(|leaf_hash| (leaf_hash, 0xFFFFFFFF));
+
+    Ok((
+        cache.taproot_signature_hash(input_index, &prevouts, None, extra, sighash_type)?,
+        sighash_type,
+    ))
 }
 
 impl PartialOrd for SignersContainerKey {
