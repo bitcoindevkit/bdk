@@ -1,8 +1,7 @@
-use std::{io::Write, str::FromStr};
+use std::{collections::BTreeSet, io::Write, str::FromStr};
 
 use bdk::{
-    bitcoin::{Address, Network},
-    wallet::Update,
+    bitcoin::{Address, Network, Script},
     KeychainKind, SignOptions, Wallet,
 };
 use bdk_esplora::{esplora_client, EsploraAsyncExt};
@@ -37,34 +36,44 @@ async fn main() -> Result<(), anyhow::Error> {
     let client =
         esplora_client::Builder::new("https://blockstream.info/testnet/api").build_async()?;
 
-    let prev_tip = wallet.latest_checkpoint();
-    let keychain_spks = wallet
-        .all_unbounded_spk_iters()
-        .into_iter()
-        .map(|(k, k_spks)| {
-            let mut once = Some(());
-            let mut stdout = std::io::stdout();
-            let k_spks = k_spks
-                .inspect(move |(spk_i, _)| match once.take() {
-                    Some(_) => print!("\nScanning keychain [{:?}]", k),
-                    None => print!(" {:<3}", spk_i),
-                })
-                .inspect(move |_| stdout.flush().expect("must flush"));
-            (k, k_spks)
+    fn generate_inspect(kind: KeychainKind) -> impl FnMut(u32, &Script) + Send + Sync + 'static {
+        let mut once = Some(());
+        let mut stdout = std::io::stdout();
+        move |spk_i, _| {
+            match once.take() {
+                Some(_) => print!("\nScanning keychain [{:?}]", kind),
+                None => print!(" {:<3}", spk_i),
+            };
+            stdout.flush().expect("must flush");
+        }
+    }
+    let request = wallet
+        .start_full_scan()
+        .inspect_spks_for_all_keychains({
+            let mut once = BTreeSet::<KeychainKind>::new();
+            move |keychain, spk_i, _| {
+                match once.insert(keychain) {
+                    true => print!("\nScanning keychain [{:?}]", keychain),
+                    false => print!(" {:<3}", spk_i),
+                }
+                std::io::stdout().flush().expect("must flush")
+            }
         })
-        .collect();
+        .inspect_spks_for_keychain(
+            KeychainKind::External,
+            generate_inspect(KeychainKind::External),
+        )
+        .inspect_spks_for_keychain(
+            KeychainKind::Internal,
+            generate_inspect(KeychainKind::Internal),
+        );
 
     let mut update = client
-        .full_scan(prev_tip, keychain_spks, STOP_GAP, PARALLEL_REQUESTS)
+        .full_scan(request, STOP_GAP, PARALLEL_REQUESTS)
         .await?;
     let now = std::time::UNIX_EPOCH.elapsed().unwrap().as_secs();
-    let _ = update.tx_graph.update_last_seen_unconfirmed(now);
+    let _ = update.graph_update.update_last_seen_unconfirmed(now);
 
-    let update = Update {
-        last_active_indices: update.last_active_indices,
-        graph: update.tx_graph,
-        chain: Some(update.local_chain),
-    };
     wallet.apply_update(update)?;
     wallet.commit()?;
     println!();

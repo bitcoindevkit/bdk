@@ -1,6 +1,7 @@
 use std::collections::BTreeSet;
 
 use async_trait::async_trait;
+use bdk_chain::spk_client::{FullScanRequest, FullScanResult, SyncRequest, SyncResult};
 use bdk_chain::Anchor;
 use bdk_chain::{
     bitcoin::{BlockHash, OutPoint, ScriptBuf, TxOut, Txid},
@@ -11,7 +12,7 @@ use bdk_chain::{
 use esplora_client::{Amount, TxStatus};
 use futures::{stream::FuturesOrdered, TryStreamExt};
 
-use crate::{anchor_from_status, FullScanUpdate, SyncUpdate};
+use crate::anchor_from_status;
 
 /// [`esplora_client::Error`]
 type Error = Box<esplora_client::Error>;
@@ -50,14 +51,10 @@ pub trait EsploraAsyncExt {
     /// [`LocalChain::tip`]: bdk_chain::local_chain::LocalChain::tip
     async fn full_scan<K: Ord + Clone + Send>(
         &self,
-        local_tip: CheckPoint,
-        keychain_spks: BTreeMap<
-            K,
-            impl IntoIterator<IntoIter = impl Iterator<Item = (u32, ScriptBuf)> + Send> + Send,
-        >,
+        request: FullScanRequest<K>,
         stop_gap: usize,
         parallel_requests: usize,
-    ) -> Result<FullScanUpdate<K>, Error>;
+    ) -> Result<FullScanResult<K>, Error>;
 
     /// Sync a set of scripts with the blockchain (via an Esplora client) for the data
     /// specified and return a [`TxGraph`].
@@ -75,12 +72,9 @@ pub trait EsploraAsyncExt {
     /// [`full_scan`]: EsploraAsyncExt::full_scan
     async fn sync(
         &self,
-        local_tip: CheckPoint,
-        misc_spks: impl IntoIterator<IntoIter = impl Iterator<Item = ScriptBuf> + Send> + Send,
-        txids: impl IntoIterator<IntoIter = impl Iterator<Item = Txid> + Send> + Send,
-        outpoints: impl IntoIterator<IntoIter = impl Iterator<Item = OutPoint> + Send> + Send,
+        request: SyncRequest,
         parallel_requests: usize,
-    ) -> Result<SyncUpdate, Error>;
+    ) -> Result<SyncResult, Error>;
 }
 
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
@@ -88,42 +82,56 @@ pub trait EsploraAsyncExt {
 impl EsploraAsyncExt for esplora_client::AsyncClient {
     async fn full_scan<K: Ord + Clone + Send>(
         &self,
-        local_tip: CheckPoint,
-        keychain_spks: BTreeMap<
-            K,
-            impl IntoIterator<IntoIter = impl Iterator<Item = (u32, ScriptBuf)> + Send> + Send,
-        >,
+        request: FullScanRequest<K>,
         stop_gap: usize,
         parallel_requests: usize,
-    ) -> Result<FullScanUpdate<K>, Error> {
+    ) -> Result<FullScanResult<K>, Error> {
         let latest_blocks = fetch_latest_blocks(self).await?;
-        let (tx_graph, last_active_indices) =
-            full_scan_for_index_and_graph(self, keychain_spks, stop_gap, parallel_requests).await?;
-        let local_chain =
-            chain_update(self, &latest_blocks, &local_tip, tx_graph.all_anchors()).await?;
-        Ok(FullScanUpdate {
-            local_chain,
-            tx_graph,
+        let (graph_update, last_active_indices) = full_scan_for_index_and_graph(
+            self,
+            request.spks_by_keychain,
+            stop_gap,
+            parallel_requests,
+        )
+        .await?;
+        let chain_update = chain_update(
+            self,
+            &latest_blocks,
+            &request.chain_tip,
+            graph_update.all_anchors(),
+        )
+        .await?;
+        Ok(FullScanResult {
+            chain_update,
+            graph_update,
             last_active_indices,
         })
     }
 
     async fn sync(
         &self,
-        local_tip: CheckPoint,
-        misc_spks: impl IntoIterator<IntoIter = impl Iterator<Item = ScriptBuf> + Send> + Send,
-        txids: impl IntoIterator<IntoIter = impl Iterator<Item = Txid> + Send> + Send,
-        outpoints: impl IntoIterator<IntoIter = impl Iterator<Item = OutPoint> + Send> + Send,
+        request: SyncRequest,
         parallel_requests: usize,
-    ) -> Result<SyncUpdate, Error> {
+    ) -> Result<SyncResult, Error> {
         let latest_blocks = fetch_latest_blocks(self).await?;
-        let tx_graph =
-            sync_for_index_and_graph(self, misc_spks, txids, outpoints, parallel_requests).await?;
-        let local_chain =
-            chain_update(self, &latest_blocks, &local_tip, tx_graph.all_anchors()).await?;
-        Ok(SyncUpdate {
-            tx_graph,
-            local_chain,
+        let graph_update = sync_for_index_and_graph(
+            self,
+            request.spks,
+            request.txids,
+            request.outpoints,
+            parallel_requests,
+        )
+        .await?;
+        let chain_update = chain_update(
+            self,
+            &latest_blocks,
+            &request.chain_tip,
+            graph_update.all_anchors(),
+        )
+        .await?;
+        Ok(SyncResult {
+            chain_update,
+            graph_update,
         })
     }
 }

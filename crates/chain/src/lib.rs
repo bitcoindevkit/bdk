@@ -49,6 +49,7 @@ pub use descriptor_ext::DescriptorExt;
 mod spk_iter;
 #[cfg(feature = "miniscript")]
 pub use spk_iter::*;
+pub mod spk_client;
 
 #[allow(unused_imports)]
 #[macro_use]
