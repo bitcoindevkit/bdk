@@ -3854,3 +3854,9 @@ fn test_tx_cancellation() {
         .unwrap();
     assert_eq!(change_derivation_4, (KeychainKind::Internal, 2));
 }
+
+#[test]
+fn test_thread_safety() {
+    fn thread_safe<T: Send + Sync>() {}
+    thread_safe::<Wallet>(); // compiles only if true
+}
