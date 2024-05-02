@@ -16,4 +16,7 @@ rust-version = "1.63"
 anyhow = { version = "1", default-features = false }
 bdk_chain = { path = "../chain", version = "0.13.0", default-features = false }
 
+[features]
+default = ["bdk_chain/std"]
+
 
