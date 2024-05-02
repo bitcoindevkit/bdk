@@ -260,6 +260,7 @@ mod test {
     }
 
     // The following dummy traits were created to test if SpkIterator is working properly.
+    #[allow(unused)]
     trait TestSendStatic: Send + 'static {
         fn test(&self) -> u32 {
             20

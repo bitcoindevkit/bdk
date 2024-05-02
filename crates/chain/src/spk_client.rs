@@ -255,6 +255,9 @@ impl<K: Ord + Clone> FullScanRequest<K> {
         spks: impl IntoIterator<IntoIter = impl Iterator<Item = (u32, ScriptBuf)> + Send + 'static>,
     ) -> Self {
         match self.spks_by_keychain.remove(&keychain) {
+            // clippy here suggests to remove `into_iter` from `spks.into_iter()`, but doing so
+            // results in a compilation error
+            #[allow(clippy::useless_conversion)]
             Some(keychain_spks) => self
                 .spks_by_keychain
                 .insert(keychain, Box::new(keychain_spks.chain(spks.into_iter()))),
