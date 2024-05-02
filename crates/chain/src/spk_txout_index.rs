@@ -229,7 +229,7 @@ impl<I: Clone + Ord> SpkTxOutIndex<I> {
     /// Here, "unused" means that after the script pubkey was stored in the index, the index has
     /// never scanned a transaction output with it.
     pub fn is_used(&self, index: &I) -> bool {
-        self.unused.get(index).is_none()
+        !self.unused.contains(index)
     }
 
     /// Marks the script pubkey at `index` as used even though it hasn't seen an output spending to it.

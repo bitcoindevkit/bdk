@@ -265,7 +265,7 @@ impl Iterator for CheckPointIter {
 
     fn next(&mut self) -> Option<Self::Item> {
         let current = self.current.clone()?;
-        self.current = current.prev.clone();
+        self.current.clone_from(&current.prev);
         Some(CheckPoint(current))
     }
 }
@@ -359,7 +359,7 @@ impl LocalChain {
     /// The [`BTreeMap`] enforces the height order. However, the caller must ensure the blocks are
     /// all of the same chain.
     pub fn from_blocks(blocks: BTreeMap<u32, BlockHash>) -> Result<Self, MissingGenesisError> {
-        if blocks.get(&0).is_none() {
+        if !blocks.contains_key(&0) {
             return Err(MissingGenesisError);
         }
 

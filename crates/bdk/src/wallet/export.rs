@@ -53,7 +53,8 @@
 //! # Ok::<_, Box<dyn std::error::Error>>(())
 //! ```
 
-use alloc::string::{String, ToString};
+use alloc::string::String;
+use core::fmt;
 use core::str::FromStr;
 use serde::{Deserialize, Serialize};
 
@@ -79,9 +80,9 @@ pub struct FullyNodedExport {
     pub label: String,
 }
 
-impl ToString for FullyNodedExport {
-    fn to_string(&self) -> String {
-        serde_json::to_string(self).unwrap()
+impl fmt::Display for FullyNodedExport {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", serde_json::to_string(self).unwrap())
     }
 }
 
@@ -213,6 +214,7 @@ impl FullyNodedExport {
 mod test {
     use core::str::FromStr;
 
+    use crate::std::string::ToString;
     use bdk_chain::{BlockId, ConfirmationTime};
     use bitcoin::hashes::Hash;
     use bitcoin::{transaction, BlockHash, Network, Transaction};
