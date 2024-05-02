@@ -1,6 +1,6 @@
 [package]
 name = "bdk_esplora"
-version = "0.11.0"
+version = "0.12.0"
 edition = "2021"
 homepage = "https://bitcoindevkit.org"
 repository = "https://github.com/bitcoindevkit/bdk"
@@ -12,7 +12,7 @@ readme = "README.md"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-bdk_chain = { path = "../chain", version = "0.12.0", default-features = false }
+bdk_chain = { path = "../chain", version = "0.13.0", default-features = false }
 esplora-client = { version = "0.7.0", default-features = false }
 async-trait = { version = "0.1.66", optional = true }
 futures = { version = "0.3.26", optional = true }

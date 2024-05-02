@@ -1,6 +1,6 @@
 [package]
 name = "bdk_bitcoind_rpc"
-version = "0.8.0"
+version = "0.9.0"
 edition = "2021"
 rust-version = "1.63"
 homepage = "https://bitcoindevkit.org"
@@ -16,7 +16,7 @@ readme = "README.md"
 # For no-std, remember to enable the bitcoin/no-std feature
 bitcoin = { version = "0.31", default-features = false }
 bitcoincore-rpc = { version = "0.18" }
-bdk_chain = { path = "../chain", version = "0.12", default-features = false }
+bdk_chain = { path = "../chain", version = "0.13", default-features = false }
 
 [dev-dependencies]
 bdk_testenv = { path = "../testenv", default_features = false }
