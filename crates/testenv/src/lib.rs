@@ -11,6 +11,11 @@ use bitcoincore_rpc::{
     bitcoincore_rpc_json::{GetBlockTemplateModes, GetBlockTemplateRules},
     RpcApi,
 };
+pub use electrsd;
+pub use electrsd::bitcoind;
+pub use electrsd::bitcoind::anyhow;
+pub use electrsd::bitcoind::bitcoincore_rpc;
+pub use electrsd::electrum_client;
 use electrsd::electrum_client::ElectrumApi;
 use std::time::Duration;
 
@@ -261,8 +266,7 @@ impl TestEnv {
 #[cfg(test)]
 mod test {
     use crate::TestEnv;
-    use anyhow::Result;
-    use bitcoincore_rpc::RpcApi;
+    use electrsd::bitcoind::{anyhow::Result, bitcoincore_rpc::RpcApi};
 
     /// This checks that reorgs initiated by `bitcoind` is detected by our `electrsd` instance.
     #[test]
