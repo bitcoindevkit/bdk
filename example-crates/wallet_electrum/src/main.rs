@@ -3,6 +3,7 @@ const SEND_AMOUNT: Amount = Amount::from_sat(5000);
 const STOP_GAP: usize = 50;
 const BATCH_SIZE: usize = 5;
 
+use std::io::Write;
 use std::str::FromStr;
 
 use bdk::bitcoin::{Address, Amount};
@@ -38,13 +39,19 @@ fn main() -> Result<(), anyhow::Error> {
     print!("Syncing...");
     let client = electrum_client::Client::new("ssl://electrum.blockstream.info:60002")?;
 
-    let request = wallet.start_full_scan().inspect_spks_for_all_keychains({
-        let mut once = HashSet::<KeychainKind>::new();
-        move |k, spk_i, _| match once.insert(k) {
-            true => print!("\nScanning keychain [{:?}]", k),
-            false => print!(" {:<3}", spk_i),
-        }
-    });
+    let request = wallet
+        .start_full_scan()
+        .inspect_spks_for_all_keychains({
+            let mut once = HashSet::<KeychainKind>::new();
+            move |k, spk_i, _| {
+                if once.insert(k) {
+                    print!("\nScanning keychain [{:?}]", k)
+                } else {
+                    print!(" {:<3}", spk_i)
+                }
+            }
+        })
+        .inspect_spks_for_all_keychains(|_, _, _| std::io::stdout().flush().expect("must flush"));
 
     let mut update = client
         .full_scan(request, STOP_GAP, BATCH_SIZE)?

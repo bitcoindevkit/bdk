@@ -180,11 +180,11 @@ fn main() -> anyhow::Result<()> {
                         let mut once = BTreeSet::new();
                         move |k, spk_i, _| {
                             if once.insert(k) {
-                                eprint!("\nScanning {}: ", k);
+                                eprint!("\nScanning {}: {} ", k, spk_i);
                             } else {
                                 eprint!("{} ", spk_i);
                             }
-                            let _ = io::stdout().flush();
+                            io::stdout().flush().expect("must flush");
                         }
                     })
             };
@@ -229,7 +229,7 @@ fn main() -> anyhow::Result<()> {
                     .map(|(k, i, spk)| (k.to_owned(), i, spk.to_owned()))
                     .collect::<Vec<_>>();
                 request = request.chain_spks(all_spks.into_iter().map(|(k, spk_i, spk)| {
-                    eprintln!("scanning {}: {}", k, spk_i);
+                    eprint!("Scanning {}: {}", k, spk_i);
                     spk
                 }));
             }
@@ -241,7 +241,7 @@ fn main() -> anyhow::Result<()> {
                     .collect::<Vec<_>>();
                 request =
                     request.chain_spks(unused_spks.into_iter().map(move |(k, spk_i, spk)| {
-                        eprintln!(
+                        eprint!(
                             "Checking if address {} {}:{} has been used",
                             Address::from_script(&spk, args.network).unwrap(),
                             k,
@@ -260,7 +260,7 @@ fn main() -> anyhow::Result<()> {
                     .map(|(_, utxo)| utxo)
                     .collect::<Vec<_>>();
                 request = request.chain_outpoints(utxos.into_iter().map(|utxo| {
-                    eprintln!(
+                    eprint!(
                         "Checking if outpoint {} (value: {}) has been spent",
                         utxo.outpoint, utxo.txout.value
                     );
@@ -279,9 +279,35 @@ fn main() -> anyhow::Result<()> {
                 request = request.chain_txids(
                     unconfirmed_txids
                         .into_iter()
-                        .inspect(|txid| eprintln!("Checking if {} is confirmed yet", txid)),
+                        .inspect(|txid| eprint!("Checking if {} is confirmed yet", txid)),
                 );
             }
+
+            let total_spks = request.spks.len();
+            let total_txids = request.txids.len();
+            let total_ops = request.outpoints.len();
+            request = request
+                .inspect_spks({
+                    let mut visited = 0;
+                    move |_| {
+                        visited += 1;
+                        eprintln!(" [ {:>6.2}% ]", (visited * 100) as f32 / total_spks as f32)
+                    }
+                })
+                .inspect_txids({
+                    let mut visited = 0;
+                    move |_| {
+                        visited += 1;
+                        eprintln!(" [ {:>6.2}% ]", (visited * 100) as f32 / total_txids as f32)
+                    }
+                })
+                .inspect_outpoints({
+                    let mut visited = 0;
+                    move |_| {
+                        visited += 1;
+                        eprintln!(" [ {:>6.2}% ]", (visited * 100) as f32 / total_ops as f32)
+                    }
+                });
 
             let res = client
                 .sync(request, scan_options.batch_size)
