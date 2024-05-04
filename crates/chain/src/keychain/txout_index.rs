@@ -49,23 +49,26 @@ impl<K: Ord> Append for ChangeSet<K> {
     ///
     /// For each `last_revealed` in the given [`ChangeSet`]:
     /// If the keychain already exists, increase the index when the other's index > self's index.
-    fn append(&mut self, mut other: Self) {
-        for (keychain, descriptor) in &mut self.keychains_added {
-            if let Some(other_descriptor) = other.keychains_added.remove(keychain) {
-                *descriptor = other_descriptor;
-            }
-        }
-
-        for (descriptor_id, index) in &mut self.last_revealed {
-            if let Some(other_index) = other.last_revealed.remove(descriptor_id) {
-                *index = other_index.max(*index);
-            }
-        }
-
+    fn append(&mut self, other: Self) {
         // We use `extend` instead of `BTreeMap::append` due to performance issues with `append`.
         // Refer to https://github.com/rust-lang/rust/issues/34666#issuecomment-675658420
         self.keychains_added.extend(other.keychains_added);
-        self.last_revealed.extend(other.last_revealed);
+
+        // for `last_revealed`, entries of `other` will take precedence ONLY if it is greater than
+        // what was originally in `self`.
+        for (desc_id, index) in other.last_revealed {
+            use crate::collections::btree_map::Entry;
+            match self.last_revealed.entry(desc_id) {
+                Entry::Vacant(entry) => {
+                    entry.insert(index);
+                }
+                Entry::Occupied(mut entry) => {
+                    if *entry.get() < index {
+                        entry.insert(index);
+                    }
+                }
+            }
+        }
     }
 
     /// Returns whether the changeset are empty.
