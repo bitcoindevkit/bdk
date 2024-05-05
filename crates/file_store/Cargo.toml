@@ -10,6 +10,9 @@ keywords = ["bitcoin", "persist", "persistence", "bdk", "file"]
 authors = ["Bitcoin Dev Kit Developers"]
 readme = "README.md"
 
+[lints]
+workspace = true
+
 [dependencies]
 bdk_chain = { path = "../chain", version = "0.17.0", features = [ "serde", "miniscript" ] }
 bincode = { version = "1" }

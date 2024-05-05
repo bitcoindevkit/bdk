@@ -9,6 +9,9 @@ description = "Fetch data from electrum in the form BDK accepts"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
 
+[lints]
+workspace = true
+
 [dependencies]
 bdk_chain = { path = "../chain", version = "0.17.0" }
 electrum-client = { version = "0.21", features = ["proxy"], default-features = false }
