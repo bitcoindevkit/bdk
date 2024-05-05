@@ -32,6 +32,7 @@ enum ExpectedResult<'a> {
     Err(CannotConnectError),
 }
 
+#[allow(clippy::print_stdout)]
 impl<'a> TestLocalChain<'a> {
     fn run(mut self) {
         println!("[TestLocalChain] test: {}", self.name);
