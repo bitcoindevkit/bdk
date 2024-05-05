@@ -26,7 +26,7 @@ pub trait PsbtUtils {
 
     /// The total transaction fee amount, sum of input amounts minus sum of output amounts, in sats.
     /// If the PSBT is missing a TxOut for an input returns None.
-    fn fee_amount(&self) -> Option<u64>;
+    fn fee_amount(&self) -> Option<Amount>;
 
     /// The transaction's fee rate. This value will only be accurate if calculated AFTER the
     /// `Psbt` is finalized and all witness/signature data is added to the
@@ -49,18 +49,13 @@ impl PsbtUtils for Psbt {
         }
     }
 
-    fn fee_amount(&self) -> Option<u64> {
+    fn fee_amount(&self) -> Option<Amount> {
         let tx = &self.unsigned_tx;
         let utxos: Option<Vec<TxOut>> = (0..tx.input.len()).map(|i| self.get_utxo_for(i)).collect();
 
         utxos.map(|inputs| {
-            let input_amount: u64 = inputs.iter().map(|i| i.value.to_sat()).sum();
-            let output_amount: u64 = self
-                .unsigned_tx
-                .output
-                .iter()
-                .map(|o| o.value.to_sat())
-                .sum();
+            let input_amount: Amount = inputs.iter().map(|i| i.value).sum();
+            let output_amount: Amount = self.unsigned_tx.output.iter().map(|o| o.value).sum();
             input_amount
                 .checked_sub(output_amount)
                 .expect("input amount must be greater than output amount")
@@ -70,6 +65,6 @@ impl PsbtUtils for Psbt {
     fn fee_rate(&self) -> Option<FeeRate> {
         let fee_amount = self.fee_amount();
         let weight = self.clone().extract_tx().ok()?.weight();
-        fee_amount.map(|fee| Amount::from_sat(fee) / weight)
+        fee_amount.map(|fee| fee / weight)
     }
 }

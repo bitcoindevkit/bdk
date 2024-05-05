@@ -95,7 +95,7 @@ use crate::{
 use alloc::collections::vec_deque::VecDeque;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use bitcoin::{Amount, OutPoint, Script, Transaction, TxOut, Txid};
+use bitcoin::{Amount, OutPoint, Script, SignedAmount, Transaction, TxOut, Txid};
 use core::fmt::{self, Formatter};
 use core::{
     convert::Infallible,
@@ -182,7 +182,7 @@ pub enum CalculateFeeError {
     /// Missing `TxOut` for one or more of the inputs of the tx
     MissingTxOut(Vec<OutPoint>),
     /// When the transaction is invalid according to the graph it has a negative fee
-    NegativeFee(i64),
+    NegativeFee(SignedAmount),
 }
 
 impl fmt::Display for CalculateFeeError {
@@ -196,7 +196,7 @@ impl fmt::Display for CalculateFeeError {
             CalculateFeeError::NegativeFee(fee) => write!(
                 f,
                 "transaction is invalid according to the graph and has negative fee: {}",
-                fee
+                fee.display_dynamic()
             ),
         }
     }
@@ -307,7 +307,7 @@ impl<A> TxGraph<A> {
         })
     }
 
-    /// Calculates the fee of a given transaction. Returns 0 if `tx` is a coinbase transaction.
+    /// Calculates the fee of a given transaction. Returns [`Amount::ZERO`] if `tx` is a coinbase transaction.
     /// Returns `OK(_)` if we have all the [`TxOut`]s being spent by `tx` in the graph (either as
     /// the full transactions or individual txouts).
     ///
@@ -318,20 +318,20 @@ impl<A> TxGraph<A> {
     /// Note `tx` does not have to be in the graph for this to work.
     ///
     /// [`insert_txout`]: Self::insert_txout
-    pub fn calculate_fee(&self, tx: &Transaction) -> Result<u64, CalculateFeeError> {
+    pub fn calculate_fee(&self, tx: &Transaction) -> Result<Amount, CalculateFeeError> {
         if tx.is_coinbase() {
-            return Ok(0);
+            return Ok(Amount::ZERO);
         }
 
         let (inputs_sum, missing_outputs) = tx.input.iter().fold(
-            (0_i64, Vec::new()),
+            (SignedAmount::ZERO, Vec::new()),
             |(mut sum, mut missing_outpoints), txin| match self.get_txout(txin.previous_output) {
                 None => {
                     missing_outpoints.push(txin.previous_output);
                     (sum, missing_outpoints)
                 }
                 Some(txout) => {
-                    sum += txout.value.to_sat() as i64;
+                    sum += txout.value.to_signed().expect("valid `SignedAmount`");
                     (sum, missing_outpoints)
                 }
             },
@@ -343,15 +343,12 @@ impl<A> TxGraph<A> {
         let outputs_sum = tx
             .output
             .iter()
-            .map(|txout| txout.value.to_sat() as i64)
-            .sum::<i64>();
+            .map(|txout| txout.value.to_signed().expect("valid `SignedAmount`"))
+            .sum::<SignedAmount>();
 
         let fee = inputs_sum - outputs_sum;
-        if fee < 0 {
-            Err(CalculateFeeError::NegativeFee(fee))
-        } else {
-            Ok(fee as u64)
-        }
+        fee.to_unsigned()
+            .map_err(|_| CalculateFeeError::NegativeFee(fee))
     }
 
     /// The transactions spending from this output.

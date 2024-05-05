@@ -977,7 +977,7 @@ impl Wallet {
         self.persist.stage(ChangeSet::from(additions));
     }
 
-    /// Calculates the fee of a given transaction. Returns 0 if `tx` is a coinbase transaction.
+    /// Calculates the fee of a given transaction. Returns [`Amount::ZERO`] if `tx` is a coinbase transaction.
     ///
     /// To calculate the fee for a [`Transaction`] with inputs not owned by this wallet you must
     /// manually insert the TxOut(s) into the tx graph using the [`insert_txout`] function.
@@ -1004,7 +1004,7 @@ impl Wallet {
     /// let fee = wallet.calculate_fee(tx).expect("fee");
     /// ```
     /// [`insert_txout`]: Self::insert_txout
-    pub fn calculate_fee(&self, tx: &Transaction) -> Result<u64, CalculateFeeError> {
+    pub fn calculate_fee(&self, tx: &Transaction) -> Result<Amount, CalculateFeeError> {
         self.indexed_graph.graph().calculate_fee(tx)
     }
 
@@ -1036,8 +1036,7 @@ impl Wallet {
     /// ```
     /// [`insert_txout`]: Self::insert_txout
     pub fn calculate_fee_rate(&self, tx: &Transaction) -> Result<FeeRate, CalculateFeeError> {
-        self.calculate_fee(tx)
-            .map(|fee| Amount::from_sat(fee) / tx.weight())
+        self.calculate_fee(tx).map(|fee| fee / tx.weight())
     }
 
     /// Compute the `tx`'s sent and received [`Amount`]s.
@@ -1465,7 +1464,7 @@ impl Wallet {
                 if let Some(previous_fee) = params.bumping_fee {
                     if fee < previous_fee.absolute {
                         return Err(CreateTxError::FeeTooLow {
-                            required: previous_fee.absolute,
+                            required: Amount::from_sat(previous_fee.absolute),
                         });
                     }
                 }
@@ -1498,9 +1497,8 @@ impl Wallet {
             return Err(CreateTxError::NoUtxosSelected);
         }
 
-        // we keep it as a float while we accumulate it, and only round it at the end
-        let mut outgoing: u64 = 0;
-        let mut received: u64 = 0;
+        let mut outgoing = Amount::ZERO;
+        let mut received = Amount::ZERO;
 
         let recipients = params.recipients.iter().map(|(r, v)| (r, *v));
 
@@ -1513,7 +1511,7 @@ impl Wallet {
             }
 
             if self.is_mine(script_pubkey) {
-                received += value;
+                received += Amount::from_sat(value);
             }
 
             let new_out = TxOut {
@@ -1523,7 +1521,7 @@ impl Wallet {
 
             tx.output.push(new_out);
 
-            outgoing += value;
+            outgoing += Amount::from_sat(value);
         }
 
         fee_amount += (fee_rate * tx.weight()).to_sat();
@@ -1565,7 +1563,7 @@ impl Wallet {
             required_utxos,
             optional_utxos,
             fee_rate,
-            outgoing + fee_amount,
+            outgoing.to_sat() + fee_amount,
             &drain_script,
         )?;
         fee_amount += coin_selection.fee_amount;
@@ -1613,7 +1611,7 @@ impl Wallet {
             } => fee_amount += remaining_amount,
             Change { amount, fee } => {
                 if self.is_mine(&drain_script) {
-                    received += amount;
+                    received += Amount::from_sat(*amount);
                 }
                 fee_amount += fee;
 
@@ -1797,7 +1795,7 @@ impl Wallet {
                 .collect(),
             utxos: original_utxos,
             bumping_fee: Some(tx_builder::PreviousFee {
-                absolute: fee,
+                absolute: fee.to_sat(),
                 rate: fee_rate,
             }),
             ..Default::default()
