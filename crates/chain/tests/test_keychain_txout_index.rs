@@ -694,3 +694,51 @@ fn insert_descriptor_no_change() {
         "inserting the same descriptor for keychain should return an empty changeset",
     );
 }
+
+#[test]
+fn applying_changesets_one_by_one_vs_aggregate_must_have_same_result() {
+    let desc = parse_descriptor(DESCRIPTORS[0]);
+    let changesets: &[ChangeSet<TestKeychain>] = &[
+        ChangeSet {
+            keychains_added: [(TestKeychain::Internal, desc.clone())].into(),
+            last_revealed: [].into(),
+        },
+        ChangeSet {
+            keychains_added: [(TestKeychain::External, desc.clone())].into(),
+            last_revealed: [(desc.descriptor_id(), 12)].into(),
+        },
+    ];
+
+    let mut indexer_a = KeychainTxOutIndex::<TestKeychain>::new(0);
+    for changeset in changesets {
+        indexer_a.apply_changeset(changeset.clone());
+    }
+
+    let mut indexer_b = KeychainTxOutIndex::<TestKeychain>::new(0);
+    let aggregate_changesets = changesets
+        .iter()
+        .cloned()
+        .reduce(|mut agg, cs| {
+            agg.append(cs);
+            agg
+        })
+        .expect("must aggregate changesets");
+    indexer_b.apply_changeset(aggregate_changesets);
+
+    assert_eq!(
+        indexer_a.keychains().collect::<Vec<_>>(),
+        indexer_b.keychains().collect::<Vec<_>>()
+    );
+    assert_eq!(
+        indexer_a.spk_at_index(TestKeychain::External, 0),
+        indexer_b.spk_at_index(TestKeychain::External, 0)
+    );
+    assert_eq!(
+        indexer_a.spk_at_index(TestKeychain::Internal, 0),
+        indexer_b.spk_at_index(TestKeychain::Internal, 0)
+    );
+    assert_eq!(
+        indexer_a.last_revealed_indices(),
+        indexer_b.last_revealed_indices()
+    );
+}
