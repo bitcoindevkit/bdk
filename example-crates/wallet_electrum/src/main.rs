@@ -1,12 +1,12 @@
 const DB_MAGIC: &str = "bdk_wallet_electrum_example";
-const SEND_AMOUNT: u64 = 5000;
+const SEND_AMOUNT: Amount = Amount::from_sat(5000);
 const STOP_GAP: usize = 50;
 const BATCH_SIZE: usize = 5;
 
 use std::io::Write;
 use std::str::FromStr;
 
-use bdk::bitcoin::Address;
+use bdk::bitcoin::{Address, Amount};
 use bdk::wallet::Update;
 use bdk::{bitcoin::Network, Wallet};
 use bdk::{KeychainKind, SignOptions};

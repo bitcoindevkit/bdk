@@ -1,12 +1,12 @@
 const DB_MAGIC: &str = "bdk_wallet_esplora_example";
-const SEND_AMOUNT: u64 = 1000;
+const SEND_AMOUNT: Amount = Amount::from_sat(1000);
 const STOP_GAP: usize = 5;
 const PARALLEL_REQUESTS: usize = 1;
 
 use std::{collections::BTreeSet, io::Write, str::FromStr};
 
 use bdk::{
-    bitcoin::{Address, Network},
+    bitcoin::{Address, Amount, Network},
     KeychainKind, SignOptions, Wallet,
 };
 use bdk_esplora::{esplora_client, EsploraExt};

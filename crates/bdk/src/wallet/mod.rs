@@ -32,14 +32,14 @@ use bdk_chain::{
     IndexedTxGraph,
 };
 use bdk_persist::{Persist, PersistBackend};
-use bitcoin::constants::genesis_block;
 use bitcoin::secp256k1::{All, Secp256k1};
 use bitcoin::sighash::{EcdsaSighashType, TapSighashType};
 use bitcoin::{
     absolute, psbt, Address, Block, FeeRate, Network, OutPoint, Script, ScriptBuf, Sequence,
     Transaction, TxOut, Txid, Witness,
 };
-use bitcoin::{consensus::encode::serialize, transaction, Amount, BlockHash, Psbt};
+use bitcoin::{consensus::encode::serialize, transaction, BlockHash, Psbt};
+use bitcoin::{constants::genesis_block, Amount};
 use core::fmt;
 use core::ops::Deref;
 use descriptor::error::Error as DescriptorError;
@@ -950,10 +950,10 @@ impl Wallet {
     /// [`insert_txout`]: Self::insert_txout
     pub fn calculate_fee_rate(&self, tx: &Transaction) -> Result<FeeRate, CalculateFeeError> {
         self.calculate_fee(tx)
-            .map(|fee| bitcoin::Amount::from_sat(fee) / tx.weight())
+            .map(|fee| Amount::from_sat(fee) / tx.weight())
     }
 
-    /// Compute the `tx`'s sent and received amounts (in satoshis).
+    /// Compute the `tx`'s sent and received [`Amount`]s.
     ///
     /// This method returns a tuple `(sent, received)`. Sent is the sum of the txin amounts
     /// that spend from previous txouts tracked by this wallet. Received is the summation
@@ -978,7 +978,7 @@ impl Wallet {
     /// let tx = &psbt.clone().extract_tx().expect("tx");
     /// let (sent, received) = wallet.sent_and_received(tx);
     /// ```
-    pub fn sent_and_received(&self, tx: &Transaction) -> (u64, u64) {
+    pub fn sent_and_received(&self, tx: &Transaction) -> (Amount, Amount) {
         self.indexed_graph.index.sent_and_received(tx, ..)
     }
 
@@ -1197,7 +1197,7 @@ impl Wallet {
     /// let psbt = {
     ///    let mut builder =  wallet.build_tx();
     ///    builder
-    ///        .add_recipient(to_address.script_pubkey(), 50_000);
+    ///        .add_recipient(to_address.script_pubkey(), Amount::from_sat(50_000));
     ///    builder.finish()?
     /// };
     ///
@@ -1579,7 +1579,7 @@ impl Wallet {
     /// let mut psbt = {
     ///     let mut builder = wallet.build_tx();
     ///     builder
-    ///         .add_recipient(to_address.script_pubkey(), 50_000)
+    ///         .add_recipient(to_address.script_pubkey(), Amount::from_sat(50_000))
     ///         .enable_rbf();
     ///     builder.finish()?
     /// };
@@ -1752,7 +1752,7 @@ impl Wallet {
     /// # let to_address = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap().assume_checked();
     /// let mut psbt = {
     ///     let mut builder = wallet.build_tx();
-    ///     builder.add_recipient(to_address.script_pubkey(), 50_000);
+    ///     builder.add_recipient(to_address.script_pubkey(), Amount::from_sat(50_000));
     ///     builder.finish()?
     /// };
     /// let finalized = wallet.sign(&mut psbt, SignOptions::default())?;

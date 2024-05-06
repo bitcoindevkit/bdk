@@ -506,11 +506,11 @@ where
             let chain = &*chain.lock().unwrap();
             fn print_balances<'a>(
                 title_str: &'a str,
-                items: impl IntoIterator<Item = (&'a str, u64)>,
+                items: impl IntoIterator<Item = (&'a str, Amount)>,
             ) {
                 println!("{}:", title_str);
                 for (name, amount) in items.into_iter() {
-                    println!("    {:<10} {:>12} sats", name, amount)
+                    println!("    {:<10} {:>12} sats", name, amount.to_sat())
                 }
             }
 

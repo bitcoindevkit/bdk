@@ -95,7 +95,7 @@ use crate::{
 use alloc::collections::vec_deque::VecDeque;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use bitcoin::{OutPoint, Script, Transaction, TxOut, Txid};
+use bitcoin::{Amount, OutPoint, Script, Transaction, TxOut, Txid};
 use core::fmt::{self, Formatter};
 use core::{
     convert::Infallible,
@@ -1155,10 +1155,10 @@ impl<A: Anchor> TxGraph<A> {
         outpoints: impl IntoIterator<Item = (OI, OutPoint)>,
         mut trust_predicate: impl FnMut(&OI, &Script) -> bool,
     ) -> Result<Balance, C::Error> {
-        let mut immature = 0;
-        let mut trusted_pending = 0;
-        let mut untrusted_pending = 0;
-        let mut confirmed = 0;
+        let mut immature = Amount::ZERO;
+        let mut trusted_pending = Amount::ZERO;
+        let mut untrusted_pending = Amount::ZERO;
+        let mut confirmed = Amount::ZERO;
 
         for res in self.try_filter_chain_unspents(chain, chain_tip, outpoints) {
             let (spk_i, txout) = res?;
@@ -1166,16 +1166,16 @@ impl<A: Anchor> TxGraph<A> {
             match &txout.chain_position {
                 ChainPosition::Confirmed(_) => {
                     if txout.is_confirmed_and_spendable(chain_tip.height) {
-                        confirmed += txout.txout.value.to_sat();
+                        confirmed += txout.txout.value;
                     } else if !txout.is_mature(chain_tip.height) {
-                        immature += txout.txout.value.to_sat();
+                        immature += txout.txout.value;
                     }
                 }
                 ChainPosition::Unconfirmed(_) => {
                     if trust_predicate(&spk_i, &txout.txout.script_pubkey) {
-                        trusted_pending += txout.txout.value.to_sat();
+                        trusted_pending += txout.txout.value;
                     } else {
-                        untrusted_pending += txout.txout.value.to_sat();
+                        untrusted_pending += txout.txout.value;
                     }
                 }
             }

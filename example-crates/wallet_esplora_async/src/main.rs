@@ -1,14 +1,14 @@
 use std::{collections::BTreeSet, io::Write, str::FromStr};
 
 use bdk::{
-    bitcoin::{Address, Network, Script},
+    bitcoin::{Address, Amount, Network, Script},
     KeychainKind, SignOptions, Wallet,
 };
 use bdk_esplora::{esplora_client, EsploraAsyncExt};
 use bdk_file_store::Store;
 
 const DB_MAGIC: &str = "bdk_wallet_esplora_async_example";
-const SEND_AMOUNT: u64 = 5000;
+const SEND_AMOUNT: Amount = Amount::from_sat(5000);
 const STOP_GAP: usize = 50;
 const PARALLEL_REQUESTS: usize = 5;
 

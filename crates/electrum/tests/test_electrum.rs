@@ -76,7 +76,7 @@ fn scan_detects_confirmed_tx() -> Result<()> {
     assert_eq!(
         get_balance(&recv_chain, &recv_graph)?,
         Balance {
-            confirmed: SEND_AMOUNT.to_sat(),
+            confirmed: SEND_AMOUNT,
             ..Balance::default()
         },
     );
@@ -145,7 +145,7 @@ fn tx_can_become_unconfirmed_after_reorg() -> Result<()> {
     assert_eq!(
         get_balance(&recv_chain, &recv_graph)?,
         Balance {
-            confirmed: SEND_AMOUNT.to_sat() * REORG_COUNT as u64,
+            confirmed: SEND_AMOUNT * REORG_COUNT as u64,
             ..Balance::default()
         },
         "initial balance must be correct",
@@ -176,8 +176,8 @@ fn tx_can_become_unconfirmed_after_reorg() -> Result<()> {
         assert_eq!(
             get_balance(&recv_chain, &recv_graph)?,
             Balance {
-                confirmed: SEND_AMOUNT.to_sat() * (REORG_COUNT - depth) as u64,
-                trusted_pending: SEND_AMOUNT.to_sat() * depth as u64,
+                confirmed: SEND_AMOUNT * (REORG_COUNT - depth) as u64,
+                trusted_pending: SEND_AMOUNT * depth as u64,
                 ..Balance::default()
             },
             "reorg_count: {}",

@@ -4,7 +4,7 @@ use crate::{
     collections::{hash_map::Entry, BTreeMap, BTreeSet, HashMap},
     indexed_tx_graph::Indexer,
 };
-use bitcoin::{OutPoint, Script, ScriptBuf, Transaction, TxOut, Txid};
+use bitcoin::{Amount, OutPoint, Script, ScriptBuf, SignedAmount, Transaction, TxOut, Txid};
 
 /// An index storing [`TxOut`]s that have a script pubkey that matches those in a list.
 ///
@@ -275,21 +275,25 @@ impl<I: Clone + Ord> SpkTxOutIndex<I> {
     /// output. For `sent` to be computed correctly, the output being spent must have already been
     /// scanned by the index. Calculating received just uses the [`Transaction`] outputs directly,
     /// so it will be correct even if it has not been scanned.
-    pub fn sent_and_received(&self, tx: &Transaction, range: impl RangeBounds<I>) -> (u64, u64) {
-        let mut sent = 0;
-        let mut received = 0;
+    pub fn sent_and_received(
+        &self,
+        tx: &Transaction,
+        range: impl RangeBounds<I>,
+    ) -> (Amount, Amount) {
+        let mut sent = Amount::ZERO;
+        let mut received = Amount::ZERO;
 
         for txin in &tx.input {
             if let Some((index, txout)) = self.txout(txin.previous_output) {
                 if range.contains(index) {
-                    sent += txout.value.to_sat();
+                    sent += txout.value;
                 }
             }
         }
         for txout in &tx.output {
             if let Some(index) = self.index_of_spk(&txout.script_pubkey) {
                 if range.contains(index) {
-                    received += txout.value.to_sat();
+                    received += txout.value;
                 }
             }
         }
@@ -301,9 +305,10 @@ impl<I: Clone + Ord> SpkTxOutIndex<I> {
     /// for calling [`sent_and_received`] and subtracting sent from received.
     ///
     /// [`sent_and_received`]: Self::sent_and_received
-    pub fn net_value(&self, tx: &Transaction, range: impl RangeBounds<I>) -> i64 {
+    pub fn net_value(&self, tx: &Transaction, range: impl RangeBounds<I>) -> SignedAmount {
         let (sent, received) = self.sent_and_received(tx, range);
-        received as i64 - sent as i64
+        received.to_signed().expect("valid `SignedAmount`")
+            - sent.to_signed().expect("valid `SignedAmount`")
     }
 
     /// Whether any of the inputs of this transaction spend a txout tracked or whether any output

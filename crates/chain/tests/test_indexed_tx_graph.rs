@@ -341,10 +341,10 @@ fn test_list_owned_txouts() {
         assert_eq!(
             balance,
             Balance {
-                immature: 70000,          // immature coinbase
-                trusted_pending: 25000,   // tx3 + tx5
-                untrusted_pending: 20000, // tx4
-                confirmed: 0              // Nothing is confirmed yet
+                immature: Amount::from_sat(70000),          // immature coinbase
+                trusted_pending: Amount::from_sat(25000),   // tx3 + tx5
+                untrusted_pending: Amount::from_sat(20000), // tx4
+                confirmed: Amount::ZERO                     // Nothing is confirmed yet
             }
         );
     }
@@ -376,10 +376,10 @@ fn test_list_owned_txouts() {
         assert_eq!(
             balance,
             Balance {
-                immature: 70000,          // immature coinbase
-                trusted_pending: 25000,   // tx3 + tx5
-                untrusted_pending: 20000, // tx4
-                confirmed: 0              // Nothing is confirmed yet
+                immature: Amount::from_sat(70000),          // immature coinbase
+                trusted_pending: Amount::from_sat(25000),   // tx3 + tx5
+                untrusted_pending: Amount::from_sat(20000), // tx4
+                confirmed: Amount::ZERO                     // Nothing is confirmed yet
             }
         );
     }
@@ -408,10 +408,10 @@ fn test_list_owned_txouts() {
         assert_eq!(
             balance,
             Balance {
-                immature: 70000,          // immature coinbase
-                trusted_pending: 15000,   // tx5
-                untrusted_pending: 20000, // tx4
-                confirmed: 10000          // tx3 got confirmed
+                immature: Amount::from_sat(70000),          // immature coinbase
+                trusted_pending: Amount::from_sat(15000),   // tx5
+                untrusted_pending: Amount::from_sat(20000), // tx4
+                confirmed: Amount::from_sat(10000)          // tx3 got confirmed
             }
         );
     }
@@ -439,10 +439,10 @@ fn test_list_owned_txouts() {
         assert_eq!(
             balance,
             Balance {
-                immature: 70000,          // immature coinbase
-                trusted_pending: 15000,   // tx5
-                untrusted_pending: 20000, // tx4
-                confirmed: 10000          // tx1 got matured
+                immature: Amount::from_sat(70000),          // immature coinbase
+                trusted_pending: Amount::from_sat(15000),   // tx5
+                untrusted_pending: Amount::from_sat(20000), // tx4
+                confirmed: Amount::from_sat(10000)          // tx1 got matured
             }
         );
     }
@@ -455,10 +455,10 @@ fn test_list_owned_txouts() {
         assert_eq!(
             balance,
             Balance {
-                immature: 0,              // coinbase matured
-                trusted_pending: 15000,   // tx5
-                untrusted_pending: 20000, // tx4
-                confirmed: 80000          // tx1 + tx3
+                immature: Amount::ZERO,                     // coinbase matured
+                trusted_pending: Amount::from_sat(15000),   // tx5
+                untrusted_pending: Amount::from_sat(20000), // tx4
+                confirmed: Amount::from_sat(80000)          // tx1 + tx3
             }
         );
     }
