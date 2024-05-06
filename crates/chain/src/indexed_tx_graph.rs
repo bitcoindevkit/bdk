@@ -4,7 +4,6 @@ use alloc::vec::Vec;
 use bitcoin::{Block, OutPoint, Transaction, TxOut, Txid};
 
 use crate::{
-    keychain,
     tx_graph::{self, TxGraph},
     Anchor, AnchorFromBlockPosition, Append, BlockId,
 };
@@ -321,8 +320,8 @@ impl<A, IA: Default> From<tx_graph::ChangeSet<A>> for ChangeSet<A, IA> {
 }
 
 #[cfg(feature = "miniscript")]
-impl<A, K> From<keychain::ChangeSet<K>> for ChangeSet<A, keychain::ChangeSet<K>> {
-    fn from(indexer: keychain::ChangeSet<K>) -> Self {
+impl<A, K> From<crate::keychain::ChangeSet<K>> for ChangeSet<A, crate::keychain::ChangeSet<K>> {
+    fn from(indexer: crate::keychain::ChangeSet<K>) -> Self {
         Self {
             graph: Default::default(),
             indexer,
