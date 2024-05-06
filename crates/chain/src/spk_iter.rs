@@ -258,18 +258,10 @@ mod test {
             None
         );
     }
+}
 
-    // The following dummy traits were created to test if SpkIterator is working properly.
-    #[allow(unused)]
-    trait TestSendStatic: Send + 'static {
-        fn test(&self) -> u32 {
-            20
-        }
-    }
-
-    impl TestSendStatic for SpkIterator<Descriptor<DescriptorPublicKey>> {
-        fn test(&self) -> u32 {
-            20
-        }
-    }
+#[test]
+fn spk_iterator_is_send_and_static() {
+    fn is_send_and_static<A: Send + 'static>() {}
+    is_send_and_static::<SpkIterator<Descriptor<DescriptorPublicKey>>>()
 }
