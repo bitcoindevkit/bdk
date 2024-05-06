@@ -18,5 +18,3 @@ electrum-client = { version = "0.19" }
 
 [dev-dependencies]
 bdk_testenv = { path = "../testenv", default-features = false }
-electrsd = { version= "0.27.1", features = ["bitcoind_25_0", "esplora_a33e97e1", "legacy"] }
-anyhow = "1"

@@ -7,7 +7,7 @@ use bdk_chain::{
     local_chain::{CheckPoint, LocalChain},
     Append, BlockId, IndexedTxGraph, SpkTxOutIndex,
 };
-use bdk_testenv::TestEnv;
+use bdk_testenv::{anyhow, TestEnv};
 use bitcoin::{hashes::Hash, Block, OutPoint, ScriptBuf, WScriptHash};
 use bitcoincore_rpc::RpcApi;
 

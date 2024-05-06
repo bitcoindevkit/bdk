@@ -20,7 +20,6 @@ bdk_chain = { path = "../chain", version = "0.13", default-features = false }
 
 [dev-dependencies]
 bdk_testenv = { path = "../testenv", default_features = false }
-anyhow = { version = "1" }
 
 [features]
 default = ["std"]

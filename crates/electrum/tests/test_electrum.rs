@@ -1,4 +1,3 @@
-use anyhow::Result;
 use bdk_chain::{
     bitcoin::{hashes::Hash, Address, Amount, ScriptBuf, WScriptHash},
     keychain::Balance,
@@ -6,8 +5,7 @@ use bdk_chain::{
     ConfirmationTimeHeightAnchor, IndexedTxGraph, SpkTxOutIndex,
 };
 use bdk_electrum::{ElectrumExt, ElectrumUpdate};
-use bdk_testenv::TestEnv;
-use electrsd::bitcoind::bitcoincore_rpc::RpcApi;
+use bdk_testenv::{anyhow, anyhow::Result, bitcoincore_rpc::RpcApi, TestEnv};
 
 fn get_balance(
     recv_chain: &LocalChain,
