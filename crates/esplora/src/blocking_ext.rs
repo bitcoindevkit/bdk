@@ -26,8 +26,8 @@ pub trait EsploraExt {
     /// Scan keychain scripts for transactions against Esplora, returning an update that can be
     /// applied to the receiving structures.
     ///
-    /// * `local_tip`: the previously seen tip from [`LocalChain::tip`].
-    /// * `keychain_spks`: keychains that we want to scan transactions for
+    /// - `request`: struct with data required to perform a spk-based blockchain client full scan,
+    ///              see [`FullScanRequest`]
     ///
     /// The full scan for each keychain stops after a gap of `stop_gap` script pubkeys with no
     /// associated transactions. `parallel_requests` specifies the max number of HTTP requests to
@@ -45,8 +45,6 @@ pub trait EsploraExt {
     /// and [Sparrow](https://www.sparrowwallet.com/docs/faq.html#ive-restored-my-wallet-but-some-of-my-funds-are-missing).
     ///
     /// A `stop_gap` of 0 will be treated as a `stop_gap` of 1.
-    ///
-    /// [`LocalChain::tip`]: bdk_chain::local_chain::LocalChain::tip
     fn full_scan<K: Ord + Clone>(
         &self,
         request: FullScanRequest<K>,
@@ -57,16 +55,12 @@ pub trait EsploraExt {
     /// Sync a set of scripts with the blockchain (via an Esplora client) for the data
     /// specified and return a [`TxGraph`].
     ///
-    /// * `local_tip`: the previously seen tip from [`LocalChain::tip`].
-    /// * `misc_spks`: scripts that we want to sync transactions for
-    /// * `txids`: transactions for which we want updated [`ConfirmationTimeHeightAnchor`]s
-    /// * `outpoints`: transactions associated with these outpoints (residing, spending) that we
-    ///     want to include in the update
+    /// - `request`: struct with data required to perform a spk-based blockchain client sync, see
+    ///              [`SyncRequest`]
     ///
     /// If the scripts to sync are unknown, such as when restoring or importing a keychain that
     /// may include scripts that have been used, use [`full_scan`] with the keychain.
     ///
-    /// [`LocalChain::tip`]: bdk_chain::local_chain::LocalChain::tip
     /// [`full_scan`]: EsploraExt::full_scan
     fn sync(&self, request: SyncRequest, parallel_requests: usize) -> Result<SyncResult, Error>;
 }
