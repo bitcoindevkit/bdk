@@ -7,7 +7,7 @@
 //! keychain where the range of possibly used scripts is not known. In this case it is necessary to
 //! scan all keychain scripts until a number (the "stop gap") of unused scripts is discovered. For a
 //! sync or full scan the user receives relevant blockchain data and output updates for
-//! [`bdk_chain`] including [`bdk_chain::TxGraph`], which includes `txid`s and full transactions.
+//! [`bdk_chain`].
 //!
 //! Refer to [`example_electrum`] for a complete example.
 //!

@@ -18,9 +18,8 @@ pub trait ElectrumExt {
     /// Full scan the keychain scripts specified with the blockchain (via an Electrum client) and
     /// returns updates for [`bdk_chain`] data structures.
     ///
-    /// - `prev_tip`: the most recent blockchain tip present locally
-    /// - `keychain_spks`: keychains that we want to scan transactions for
-    /// - `full_txs`: [`TxGraph`] that contains all previously known transactions
+    /// - `request`: struct with data required to perform a spk-based blockchain client full scan,
+    ///              see [`FullScanRequest`]
     ///
     /// The full scan for each keychain stops after a gap of `stop_gap` script pubkeys with no associated
     /// transactions. `batch_size` specifies the max number of script pubkeys to request for in a
@@ -35,12 +34,8 @@ pub trait ElectrumExt {
     /// Sync a set of scripts with the blockchain (via an Electrum client) for the data specified
     /// and returns updates for [`bdk_chain`] data structures.
     ///
-    /// - `prev_tip`: the most recent blockchain tip present locally
-    /// - `misc_spks`: an iterator of scripts we want to sync transactions for
-    /// - `full_txs`: [`TxGraph`] that contains all previously known transactions
-    /// - `txids`: transactions for which we want updated [`bdk_chain::Anchor`]s
-    /// - `outpoints`: transactions associated with these outpoints (residing, spending) that we
-    ///     want to include in the update
+    /// - `request`: struct with data required to perform a spk-based blockchain client sync,
+    ///              see [`SyncRequest`]
     ///
     /// `batch_size` specifies the max number of script pubkeys to request for in a single batch
     /// request.
@@ -450,7 +445,6 @@ fn populate_with_txids(
         };
 
         if graph_update.get_tx(txid).is_none() {
-            // TODO: We need to be able to insert an `Arc` of a transaction.
             let _ = graph_update.insert_tx(tx);
         }
         if let Some(anchor) = anchor {
