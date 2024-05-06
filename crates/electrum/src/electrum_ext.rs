@@ -147,7 +147,7 @@ impl<E: ElectrumApi> ElectrumExt for E {
         let full_scan_req = FullScanRequest::from_chain_tip(request.chain_tip.clone())
             .cache_txs(request.tx_cache)
             .set_spks_for_keychain((), request.spks.enumerate().map(|(i, spk)| (i as u32, spk)));
-        let full_scan_res = self.full_scan(full_scan_req, usize::MAX, batch_size)?;
+        let mut full_scan_res = self.full_scan(full_scan_req, usize::MAX, batch_size)?;
 
         let (tip, _) = construct_update_tip(self, request.chain_tip)?;
         let cps = tip
@@ -156,9 +156,20 @@ impl<E: ElectrumApi> ElectrumExt for E {
             .map(|cp| (cp.height(), cp))
             .collect::<BTreeMap<u32, CheckPoint>>();
 
-        let mut tx_graph = TxGraph::<ConfirmationHeightAnchor>::default();
-        populate_with_txids(self, &cps, &mut tx_cache, &mut tx_graph, request.txids)?;
-        populate_with_outpoints(self, &cps, &mut tx_cache, &mut tx_graph, request.outpoints)?;
+        populate_with_txids(
+            self,
+            &cps,
+            &mut tx_cache,
+            &mut full_scan_res.graph_update,
+            request.txids,
+        )?;
+        populate_with_outpoints(
+            self,
+            &cps,
+            &mut tx_cache,
+            &mut full_scan_res.graph_update,
+            request.outpoints,
+        )?;
 
         Ok(SyncResult {
             chain_update: full_scan_res.chain_update,
