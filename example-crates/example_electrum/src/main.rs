@@ -191,7 +191,8 @@ fn main() -> anyhow::Result<()> {
 
             let res = client
                 .full_scan::<_>(request, stop_gap, scan_options.batch_size)
-                .context("scanning the blockchain")?;
+                .context("scanning the blockchain")?
+                .with_confirmation_height_anchor();
             (
                 res.chain_update,
                 res.graph_update,
@@ -311,7 +312,8 @@ fn main() -> anyhow::Result<()> {
 
             let res = client
                 .sync(request, scan_options.batch_size)
-                .context("scanning the blockchain")?;
+                .context("scanning the blockchain")?
+                .with_confirmation_height_anchor();
 
             // drop lock on graph and chain
             drop((graph, chain));

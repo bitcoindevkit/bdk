@@ -10,7 +10,6 @@ use bdk::bitcoin::{Address, Amount};
 use bdk::chain::collections::HashSet;
 use bdk::{bitcoin::Network, Wallet};
 use bdk::{KeychainKind, SignOptions};
-use bdk_electrum::ElectrumResultExt;
 use bdk_electrum::{
     electrum_client::{self, ElectrumApi},
     ElectrumExt,
@@ -55,7 +54,7 @@ fn main() -> Result<(), anyhow::Error> {
 
     let mut update = client
         .full_scan(request, STOP_GAP, BATCH_SIZE)?
-        .try_into_confirmation_time_result(&client)?;
+        .with_confirmation_time_height_anchor(&client)?;
 
     let now = std::time::UNIX_EPOCH.elapsed().unwrap().as_secs();
     let _ = update.graph_update.update_last_seen_unconfirmed(now);

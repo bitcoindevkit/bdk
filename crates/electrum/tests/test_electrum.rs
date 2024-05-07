@@ -5,7 +5,7 @@ use bdk_chain::{
     spk_client::SyncRequest,
     ConfirmationTimeHeightAnchor, IndexedTxGraph, SpkTxOutIndex,
 };
-use bdk_electrum::{ElectrumExt, ElectrumResultExt};
+use bdk_electrum::ElectrumExt;
 use bdk_testenv::{anyhow, anyhow::Result, bitcoincore_rpc::RpcApi, TestEnv};
 
 fn get_balance(
@@ -67,7 +67,7 @@ fn scan_detects_confirmed_tx() -> Result<()> {
                 .chain_spks(core::iter::once(spk_to_track)),
             5,
         )?
-        .try_into_confirmation_time_result(&client)?;
+        .with_confirmation_time_height_anchor(&client)?;
 
     let _ = recv_chain
         .apply_update(update.chain_update)
@@ -133,7 +133,7 @@ fn tx_can_become_unconfirmed_after_reorg() -> Result<()> {
             SyncRequest::from_chain_tip(recv_chain.tip()).chain_spks([spk_to_track.clone()]),
             5,
         )?
-        .try_into_confirmation_time_result(&client)?;
+        .with_confirmation_time_height_anchor(&client)?;
 
     let _ = recv_chain
         .apply_update(update.chain_update)
@@ -163,7 +163,7 @@ fn tx_can_become_unconfirmed_after_reorg() -> Result<()> {
                 SyncRequest::from_chain_tip(recv_chain.tip()).chain_spks([spk_to_track.clone()]),
                 5,
             )?
-            .try_into_confirmation_time_result(&client)?;
+            .with_confirmation_time_height_anchor(&client)?;
 
         let _ = recv_chain
             .apply_update(update.chain_update)

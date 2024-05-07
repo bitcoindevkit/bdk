@@ -29,7 +29,7 @@ pub trait ElectrumExt {
         request: FullScanRequest<K>,
         stop_gap: usize,
         batch_size: usize,
-    ) -> Result<FullScanResult<K, ConfirmationHeightAnchor>, Error>;
+    ) -> Result<ElectrumFullScanResult<K>, Error>;
 
     /// Sync a set of scripts with the blockchain (via an Electrum client) for the data specified
     /// and returns updates for [`bdk_chain`] data structures.
@@ -44,11 +44,7 @@ pub trait ElectrumExt {
     /// may include scripts that have been used, use [`full_scan`] with the keychain.
     ///
     /// [`full_scan`]: ElectrumExt::full_scan
-    fn sync(
-        &self,
-        request: SyncRequest,
-        batch_size: usize,
-    ) -> Result<SyncResult<ConfirmationHeightAnchor>, Error>;
+    fn sync(&self, request: SyncRequest, batch_size: usize) -> Result<ElectrumSyncResult, Error>;
 }
 
 impl<E: ElectrumApi> ElectrumExt for E {
@@ -57,7 +53,7 @@ impl<E: ElectrumApi> ElectrumExt for E {
         mut request: FullScanRequest<K>,
         stop_gap: usize,
         batch_size: usize,
-    ) -> Result<FullScanResult<K, ConfirmationHeightAnchor>, Error> {
+    ) -> Result<ElectrumFullScanResult<K>, Error> {
         let mut request_spks = request.spks_by_keychain;
 
         // We keep track of already-scanned spks just in case a reorg happens and we need to do a
@@ -134,20 +130,18 @@ impl<E: ElectrumApi> ElectrumExt for E {
             };
         };
 
-        Ok(update)
+        Ok(ElectrumFullScanResult(update))
     }
 
-    fn sync(
-        &self,
-        request: SyncRequest,
-        batch_size: usize,
-    ) -> Result<SyncResult<ConfirmationHeightAnchor>, Error> {
+    fn sync(&self, request: SyncRequest, batch_size: usize) -> Result<ElectrumSyncResult, Error> {
         let mut tx_cache = request.tx_cache.clone();
 
         let full_scan_req = FullScanRequest::from_chain_tip(request.chain_tip.clone())
             .cache_txs(request.tx_cache)
             .set_spks_for_keychain((), request.spks.enumerate().map(|(i, spk)| (i as u32, spk)));
-        let mut full_scan_res = self.full_scan(full_scan_req, usize::MAX, batch_size)?;
+        let mut full_scan_res = self
+            .full_scan(full_scan_req, usize::MAX, batch_size)?
+            .with_confirmation_height_anchor();
 
         let (tip, _) = construct_update_tip(self, request.chain_tip)?;
         let cps = tip
@@ -171,53 +165,64 @@ impl<E: ElectrumApi> ElectrumExt for E {
             request.outpoints,
         )?;
 
-        Ok(SyncResult {
+        Ok(ElectrumSyncResult(SyncResult {
             chain_update: full_scan_res.chain_update,
             graph_update: full_scan_res.graph_update,
-        })
+        }))
     }
 }
 
-/// Trait that extends [`SyncResult`] and [`FullScanResult`] functionality.
+/// The result of [`ElectrumExt::full_scan`].
 ///
-/// Currently, only a single method exists that converts the update [`TxGraph`] to have an anchor
-/// type of [`ConfirmationTimeHeightAnchor`].
-pub trait ElectrumResultExt {
-    /// New result type with a [`TxGraph`] that contains the [`ConfirmationTimeHeightAnchor`].
-    type NewResult;
+/// This can be transformed into a [`FullScanResult`] with either [`ConfirmationHeightAnchor`] or
+/// [`ConfirmationTimeHeightAnchor`] anchor types.
+pub struct ElectrumFullScanResult<K>(FullScanResult<K, ConfirmationHeightAnchor>);
 
-    /// Convert result type to have an update [`TxGraph`]  that contains the [`ConfirmationTimeHeightAnchor`] .
-    fn try_into_confirmation_time_result(
+impl<K> ElectrumFullScanResult<K> {
+    /// Return [`FullScanResult`] with [`ConfirmationHeightAnchor`].
+    pub fn with_confirmation_height_anchor(self) -> FullScanResult<K, ConfirmationHeightAnchor> {
+        self.0
+    }
+
+    /// Return [`FullScanResult`] with [`ConfirmationTimeHeightAnchor`].
+    ///
+    /// This requires additional calls to the Electrum server.
+    pub fn with_confirmation_time_height_anchor(
         self,
         client: &impl ElectrumApi,
-    ) -> Result<Self::NewResult, Error>;
-}
-
-impl<K> ElectrumResultExt for FullScanResult<K, ConfirmationHeightAnchor> {
-    type NewResult = FullScanResult<K, ConfirmationTimeHeightAnchor>;
-
-    fn try_into_confirmation_time_result(
-        self,
-        client: &impl ElectrumApi,
-    ) -> Result<Self::NewResult, Error> {
-        Ok(FullScanResult::<K, ConfirmationTimeHeightAnchor> {
-            graph_update: try_into_confirmation_time_result(self.graph_update, client)?,
-            chain_update: self.chain_update,
-            last_active_indices: self.last_active_indices,
+    ) -> Result<FullScanResult<K, ConfirmationTimeHeightAnchor>, Error> {
+        let res = self.0;
+        Ok(FullScanResult {
+            graph_update: try_into_confirmation_time_result(res.graph_update, client)?,
+            chain_update: res.chain_update,
+            last_active_indices: res.last_active_indices,
         })
     }
 }
 
-impl ElectrumResultExt for SyncResult<ConfirmationHeightAnchor> {
-    type NewResult = SyncResult<ConfirmationTimeHeightAnchor>;
+/// The result of [`ElectrumExt::sync`].
+///
+/// This can be transformed into a [`SyncResult`] with either [`ConfirmationHeightAnchor`] or
+/// [`ConfirmationTimeHeightAnchor`] anchor types.
+pub struct ElectrumSyncResult(SyncResult<ConfirmationHeightAnchor>);
 
-    fn try_into_confirmation_time_result(
+impl ElectrumSyncResult {
+    /// Return [`SyncResult`] with [`ConfirmationHeightAnchor`].
+    pub fn with_confirmation_height_anchor(self) -> SyncResult<ConfirmationHeightAnchor> {
+        self.0
+    }
+
+    /// Return [`SyncResult`] with [`ConfirmationTimeHeightAnchor`].
+    ///
+    /// This requires additional calls to the Electrum server.
+    pub fn with_confirmation_time_height_anchor(
         self,
         client: &impl ElectrumApi,
-    ) -> Result<Self::NewResult, Error> {
+    ) -> Result<SyncResult<ConfirmationTimeHeightAnchor>, Error> {
+        let res = self.0;
         Ok(SyncResult {
-            graph_update: try_into_confirmation_time_result(self.graph_update, client)?,
-            chain_update: self.chain_update,
+            graph_update: try_into_confirmation_time_result(res.graph_update, client)?,
+            chain_update: res.chain_update,
         })
     }
 }
