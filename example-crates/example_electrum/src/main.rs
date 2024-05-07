@@ -190,7 +190,7 @@ fn main() -> anyhow::Result<()> {
             };
 
             let res = client
-                .full_scan::<_>(request, stop_gap, scan_options.batch_size)
+                .full_scan::<_>(request, stop_gap, scan_options.batch_size, false)
                 .context("scanning the blockchain")?
                 .with_confirmation_height_anchor();
             (
@@ -311,7 +311,7 @@ fn main() -> anyhow::Result<()> {
                 });
 
             let res = client
-                .sync(request, scan_options.batch_size)
+                .sync(request, scan_options.batch_size, false)
                 .context("scanning the blockchain")?
                 .with_confirmation_height_anchor();
 

@@ -20,15 +20,18 @@ pub trait ElectrumExt {
     ///
     /// - `request`: struct with data required to perform a spk-based blockchain client full scan,
     ///              see [`FullScanRequest`]
-    ///
-    /// The full scan for each keychain stops after a gap of `stop_gap` script pubkeys with no associated
-    /// transactions. `batch_size` specifies the max number of script pubkeys to request for in a
-    /// single batch request.
+    /// - `stop_gap`: the full scan for each keychain stops after a gap of script pubkeys with no
+    ///              associated transactions
+    /// - `batch_size`: specifies the max number of script pubkeys to request for in a single batch
+    ///              request
+    /// - `fetch_prev_txouts`: specifies whether or not we want previous `TxOut`s for fee
+    ///              calculation
     fn full_scan<K: Ord + Clone>(
         &self,
         request: FullScanRequest<K>,
         stop_gap: usize,
         batch_size: usize,
+        fetch_prev_txouts: bool,
     ) -> Result<ElectrumFullScanResult<K>, Error>;
 
     /// Sync a set of scripts with the blockchain (via an Electrum client) for the data specified
@@ -36,15 +39,21 @@ pub trait ElectrumExt {
     ///
     /// - `request`: struct with data required to perform a spk-based blockchain client sync,
     ///              see [`SyncRequest`]
-    ///
-    /// `batch_size` specifies the max number of script pubkeys to request for in a single batch
-    /// request.
+    /// - `batch_size`: specifies the max number of script pubkeys to request for in a single batch
+    ///              request
+    /// - `fetch_prev_txouts`: specifies whether or not we want previous `TxOut`s for fee
+    ///              calculation
     ///
     /// If the scripts to sync are unknown, such as when restoring or importing a keychain that
     /// may include scripts that have been used, use [`full_scan`] with the keychain.
     ///
     /// [`full_scan`]: ElectrumExt::full_scan
-    fn sync(&self, request: SyncRequest, batch_size: usize) -> Result<ElectrumSyncResult, Error>;
+    fn sync(
+        &self,
+        request: SyncRequest,
+        batch_size: usize,
+        fetch_prev_txouts: bool,
+    ) -> Result<ElectrumSyncResult, Error>;
 }
 
 impl<E: ElectrumApi> ElectrumExt for E {
@@ -53,6 +62,7 @@ impl<E: ElectrumApi> ElectrumExt for E {
         mut request: FullScanRequest<K>,
         stop_gap: usize,
         batch_size: usize,
+        fetch_prev_txouts: bool,
     ) -> Result<ElectrumFullScanResult<K>, Error> {
         let mut request_spks = request.spks_by_keychain;
 
@@ -110,6 +120,11 @@ impl<E: ElectrumApi> ElectrumExt for E {
                 continue; // reorg
             }
 
+            // Fetch previous `TxOut`s for fee calculation if flag is enabled.
+            if fetch_prev_txouts {
+                fetch_prev_txout(self, &mut request.tx_cache, &mut graph_update)?;
+            }
+
             let chain_update = tip;
 
             let keychain_update = request_spks
@@ -133,14 +148,19 @@ impl<E: ElectrumApi> ElectrumExt for E {
         Ok(ElectrumFullScanResult(update))
     }
 
-    fn sync(&self, request: SyncRequest, batch_size: usize) -> Result<ElectrumSyncResult, Error> {
+    fn sync(
+        &self,
+        request: SyncRequest,
+        batch_size: usize,
+        fetch_prev_txouts: bool,
+    ) -> Result<ElectrumSyncResult, Error> {
         let mut tx_cache = request.tx_cache.clone();
 
         let full_scan_req = FullScanRequest::from_chain_tip(request.chain_tip.clone())
             .cache_txs(request.tx_cache)
             .set_spks_for_keychain((), request.spks.enumerate().map(|(i, spk)| (i as u32, spk)));
         let mut full_scan_res = self
-            .full_scan(full_scan_req, usize::MAX, batch_size)?
+            .full_scan(full_scan_req, usize::MAX, batch_size, false)?
             .with_confirmation_height_anchor();
 
         let (tip, _) = construct_update_tip(self, request.chain_tip)?;
@@ -164,6 +184,11 @@ impl<E: ElectrumApi> ElectrumExt for E {
             &mut full_scan_res.graph_update,
             request.outpoints,
         )?;
+
+        // Fetch previous `TxOut`s for fee calculation if flag is enabled.
+        if fetch_prev_txouts {
+            fetch_prev_txout(self, &mut tx_cache, &mut full_scan_res.graph_update)?;
+        }
 
         Ok(ElectrumSyncResult(SyncResult {
             chain_update: full_scan_res.chain_update,
@@ -374,7 +399,7 @@ fn populate_with_outpoints(
     client: &impl ElectrumApi,
     cps: &BTreeMap<u32, CheckPoint>,
     tx_cache: &mut TxCache,
-    tx_graph: &mut TxGraph<ConfirmationHeightAnchor>,
+    graph_update: &mut TxGraph<ConfirmationHeightAnchor>,
     outpoints: impl IntoIterator<Item = OutPoint>,
 ) -> Result<(), Error> {
     for outpoint in outpoints {
@@ -399,18 +424,18 @@ fn populate_with_outpoints(
                     continue;
                 }
                 has_residing = true;
-                if tx_graph.get_tx(res.tx_hash).is_none() {
-                    let _ = tx_graph.insert_tx(tx.clone());
+                if graph_update.get_tx(res.tx_hash).is_none() {
+                    let _ = graph_update.insert_tx(tx.clone());
                 }
             } else {
                 if has_spending {
                     continue;
                 }
-                let res_tx = match tx_graph.get_tx(res.tx_hash) {
+                let res_tx = match graph_update.get_tx(res.tx_hash) {
                     Some(tx) => tx,
                     None => {
                         let res_tx = fetch_tx(client, tx_cache, res.tx_hash)?;
-                        let _ = tx_graph.insert_tx(Arc::clone(&res_tx));
+                        let _ = graph_update.insert_tx(Arc::clone(&res_tx));
                         res_tx
                     }
                 };
@@ -424,7 +449,7 @@ fn populate_with_outpoints(
             };
 
             if let Some(anchor) = determine_tx_anchor(cps, res.height, res.tx_hash) {
-                let _ = tx_graph.insert_anchor(res.tx_hash, anchor);
+                let _ = graph_update.insert_anchor(res.tx_hash, anchor);
             }
         }
     }
@@ -482,6 +507,27 @@ fn fetch_tx<C: ElectrumApi>(
             .insert(Arc::new(client.transaction_get(&txid)?))
             .clone(),
     })
+}
+
+// Helper function which fetches the `TxOut`s of our relevant transactions' previous transactions,
+// which we do not have by default. This data is needed to calculate the transaction fee.
+fn fetch_prev_txout<C: ElectrumApi>(
+    client: &C,
+    tx_cache: &mut TxCache,
+    graph_update: &mut TxGraph<ConfirmationHeightAnchor>,
+) -> Result<(), Error> {
+    let full_txs: Vec<Arc<Transaction>> =
+        graph_update.full_txs().map(|tx_node| tx_node.tx).collect();
+    for tx in full_txs {
+        for vin in &tx.input {
+            let outpoint = vin.previous_output;
+            let prev_tx = fetch_tx(client, tx_cache, outpoint.txid)?;
+            for txout in prev_tx.output.clone() {
+                let _ = graph_update.insert_txout(outpoint, txout);
+            }
+        }
+    }
+    Ok(())
 }
 
 fn populate_with_spks<I: Ord + Clone>(

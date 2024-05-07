@@ -66,6 +66,7 @@ fn scan_detects_confirmed_tx() -> Result<()> {
             SyncRequest::from_chain_tip(recv_chain.tip())
                 .chain_spks(core::iter::once(spk_to_track)),
             5,
+            true,
         )?
         .with_confirmation_time_height_anchor(&client)?;
 
@@ -82,6 +83,29 @@ fn scan_detects_confirmed_tx() -> Result<()> {
             ..Balance::default()
         },
     );
+
+    for tx in recv_graph.graph().full_txs() {
+        // Retrieve the calculated fee from `TxGraph`, which will panic if we do not have the
+        // floating txouts available from the transaction's previous outputs.
+        let fee = recv_graph
+            .graph()
+            .calculate_fee(&tx.tx)
+            .expect("fee must exist");
+
+        // Retrieve the fee in the transaction data from `bitcoind`.
+        let tx_fee = env
+            .bitcoind
+            .client
+            .get_transaction(&tx.txid, None)
+            .expect("Tx must exist")
+            .fee
+            .expect("Fee must exist")
+            .abs()
+            .to_sat() as u64;
+
+        // Check that the calculated fee matches the fee from the transaction data.
+        assert_eq!(fee, tx_fee);
+    }
 
     Ok(())
 }
@@ -132,6 +156,7 @@ fn tx_can_become_unconfirmed_after_reorg() -> Result<()> {
         .sync(
             SyncRequest::from_chain_tip(recv_chain.tip()).chain_spks([spk_to_track.clone()]),
             5,
+            false,
         )?
         .with_confirmation_time_height_anchor(&client)?;
 
@@ -162,6 +187,7 @@ fn tx_can_become_unconfirmed_after_reorg() -> Result<()> {
             .sync(
                 SyncRequest::from_chain_tip(recv_chain.tip()).chain_spks([spk_to_track.clone()]),
                 5,
+                false,
             )?
             .with_confirmation_time_height_anchor(&client)?;
 
