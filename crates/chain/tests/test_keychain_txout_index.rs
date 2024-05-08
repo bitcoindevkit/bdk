@@ -742,3 +742,38 @@ fn applying_changesets_one_by_one_vs_aggregate_must_have_same_result() {
         indexer_b.last_revealed_indices()
     );
 }
+
+// When the same descriptor is associated with various keychains,
+// index methods only return the highest keychain by Ord
+#[test]
+fn test_only_highest_ord_keychain_is_returned() {
+    let desc = parse_descriptor(DESCRIPTORS[0]);
+
+    let mut indexer = KeychainTxOutIndex::<TestKeychain>::new(0);
+    let _ = indexer.insert_descriptor(TestKeychain::Internal, desc.clone());
+    let _ = indexer.insert_descriptor(TestKeychain::External, desc);
+
+    // reveal_next_spk will work with either keychain
+    let spk0: ScriptBuf = indexer
+        .reveal_next_spk(&TestKeychain::External)
+        .unwrap()
+        .0
+         .1
+        .into();
+    let spk1: ScriptBuf = indexer
+        .reveal_next_spk(&TestKeychain::Internal)
+        .unwrap()
+        .0
+         .1
+        .into();
+
+    // index_of_spk will always return External
+    assert_eq!(
+        indexer.index_of_spk(&spk0),
+        Some((TestKeychain::External, 0))
+    );
+    assert_eq!(
+        indexer.index_of_spk(&spk1),
+        Some((TestKeychain::External, 1))
+    );
+}
