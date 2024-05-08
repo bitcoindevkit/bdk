@@ -160,19 +160,34 @@ const DEFAULT_LOOKAHEAD: u32 = 25;
 /// let new_spk_for_user = txout_index.reveal_next_spk(&MyKeychain::MyAppUser{ user_id: 42 });
 /// ```
 ///
-/// # Re-assigning descriptors
+/// # Non-recommend keychain to descriptor assignments
 ///
-/// Under the hood, the [`KeychainTxOutIndex`] uses a [`SpkTxOutIndex`] that keeps track of spks,
-/// indexed by descriptors. Users then assign or unassign keychains to those descriptors. It's
-/// important to note that descriptors, once added, never get removed from the [`SpkTxOutIndex`];
-/// this is useful in case a user unassigns a keychain from a descriptor and after some time
-/// assigns it again.
+/// A keychain (`K`) is used to identify a descriptor. However, the following keychain to descriptor
+/// arrangements result in behavior that is harder to reason about and is not recommended.
 ///
-/// Additionally, although a keychain can only be assigned to one descriptor, different keychains
-/// can be assigned to the same descriptor. When a method returns spks/outpoints that is associated
-/// with a descriptor, it may be associated with multiple keychain variants. The keychain variant
-/// with the higher rank will be returned. Rank is determined by the [`Ord`] implementation of the
-/// keychain type. Earlier keychain variants have higher rank.
+/// ## Multiple keychains identifying the same descriptor
+///
+/// Although a single keychain variant can only identify a single descriptor, multiple keychain
+/// variants can identify the same descriptor.
+///
+/// If multiple keychains identify the same descriptor:
+/// 1. Methods that take in a keychain (such as [`reveal_next_spk`]) will work normally when any
+/// keychain (that identifies that descriptor) is passed in.
+/// 2. Methods that return data which associates with a descriptor (such as [`outpoints`],
+/// [`txouts`], [`unused_spks`], etc.) the method will return the highest-ranked keychain variant
+/// that identifies the descriptor. Rank is determined by the [`Ord`] implementation of the keychain
+/// type.
+///
+/// This arrangement is not recommended since some methods will return a single keychain variant
+/// even though multiple keychain variants identify the same descriptor.
+///
+/// ## Reassigning the descriptor of a single keychain
+///
+/// Descriptors added to [`KeychainTxOutIndex`] are never removed. However, a keychain that
+/// identifies a descriptor can be reassigned to identify a different descriptor. This may result in
+/// a situation where a descriptor has no associated keychain(s), and relevant [`TxOut`]s,
+/// [`OutPoint`]s and [`Script`]s (of that descriptor) will not be return by [`KeychainTxOutIndex`].
+/// Therefore, reassigning the descriptor of a single keychain is not recommended.
 ///
 /// [`Ord`]: core::cmp::Ord
 /// [`SpkTxOutIndex`]: crate::spk_txout_index::SpkTxOutIndex
@@ -186,6 +201,9 @@ const DEFAULT_LOOKAHEAD: u32 = 25;
 /// [`new`]: KeychainTxOutIndex::new
 /// [`unbounded_spk_iter`]: KeychainTxOutIndex::unbounded_spk_iter
 /// [`all_unbounded_spk_iters`]: KeychainTxOutIndex::all_unbounded_spk_iters
+/// [`outpoints`]: KeychainTxOutIndex::outpoints
+/// [`txouts`]: KeychainTxOutIndex::txouts
+/// [`unused_spks`]: KeychainTxOutIndex::unused_spks
 #[derive(Clone, Debug)]
 pub struct KeychainTxOutIndex<K> {
     inner: SpkTxOutIndex<(DescriptorId, u32)>,
