@@ -1,3 +1,5 @@
+#![cfg(feature = "miniscript")]
+
 use rand::distributions::{Alphanumeric, DistString};
 use std::collections::HashMap;
 

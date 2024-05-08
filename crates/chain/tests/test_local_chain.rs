@@ -1,3 +1,5 @@
+#![cfg(feature = "miniscript")]
+
 use std::ops::{Bound, RangeBounds};
 
 use bdk_chain::{

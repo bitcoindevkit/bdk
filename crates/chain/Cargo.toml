@@ -26,6 +26,6 @@ rand = "0.8"
 proptest = "1.2.0"
 
 [features]
-default = ["std"]
+default = ["std", "miniscript"]
 std = ["bitcoin/std", "miniscript?/std"]
 serde = ["serde_crate", "bitcoin/serde", "miniscript?/serde"]
