@@ -68,15 +68,9 @@ This library should compile with any combination of features with Rust 1.63.0.
 To build with the MSRV you will need to pin dependencies as follows:
 
 ```shell
-# zip 0.6.3 has MSRV 1.64.0
-cargo update -p zip --precise "0.6.2"
-# time 0.3.21 has MSRV 1.65.0
+cargo update -p zstd-sys --precise "2.0.8+zstd.1.5.5"
 cargo update -p time --precise "0.3.20"
-# jobserver 0.1.27 has MSRV 1.66.0
-cargo update -p jobserver --precise "0.1.26"
-# home 0.5.9 has MSRV 1.70.0
 cargo update -p home --precise "0.5.5"
-# proptest 1.4.0 has MSRV 1.65.0
 cargo update -p proptest --precise "1.2.0"
 ```
 
