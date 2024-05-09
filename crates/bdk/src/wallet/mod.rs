@@ -54,6 +54,7 @@ pub mod tx_builder;
 pub(crate) mod utils;
 
 pub mod error;
+
 pub use utils::IsDust;
 
 use coin_selection::DefaultCoinSelectionAlgorithm;
@@ -305,6 +306,8 @@ pub enum LoadError {
     MissingNetwork,
     /// Data loaded from persistence is missing genesis hash.
     MissingGenesis,
+    /// Data loaded from persistence is missing descriptor.
+    MissingDescriptor,
 }
 
 impl fmt::Display for LoadError {
@@ -317,6 +320,7 @@ impl fmt::Display for LoadError {
             }
             LoadError::MissingNetwork => write!(f, "loaded data is missing network type"),
             LoadError::MissingGenesis => write!(f, "loaded data is missing genesis hash"),
+            LoadError::MissingDescriptor => write!(f, "loaded data is missing descriptor"),
         }
     }
 }
@@ -352,6 +356,13 @@ pub enum NewOrLoadError {
         /// The network type loaded from persistence.
         got: Option<Network>,
     },
+    /// The loaded desccriptor does not match what was provided.
+    LoadedDescriptorDoesNotMatch {
+        /// The descriptor loaded from persistence.
+        got: Option<ExtendedDescriptor>,
+        /// The keychain of the descriptor not matching
+        keychain: KeychainKind,
+    },
 }
 
 impl fmt::Display for NewOrLoadError {
@@ -371,6 +382,13 @@ impl fmt::Display for NewOrLoadError {
             }
             NewOrLoadError::LoadedNetworkDoesNotMatch { expected, got } => {
                 write!(f, "loaded network type is not {}, got {:?}", expected, got)
+            }
+            NewOrLoadError::LoadedDescriptorDoesNotMatch { got, keychain } => {
+                write!(
+                    f,
+                    "loaded descriptor is different from what was provided, got {:?} for keychain {:?}",
+                    got, keychain
+                )
             }
         }
     }
@@ -499,21 +517,57 @@ impl Wallet {
     }
 
     /// Load [`Wallet`] from the given persistence backend.
-    pub fn load<E: IntoWalletDescriptor>(
-        descriptor: E,
-        change_descriptor: Option<E>,
+    ///
+    /// Note that the descriptor secret keys are not persisted to the db; this means that after
+    /// calling this method the [`Wallet`] **won't** know the secret keys, and as such, won't be
+    /// able to sign transactions.
+    ///
+    /// If you wish to use the wallet to sign transactions, you need to add the secret keys
+    /// manually to the [`Wallet`]:
+    ///
+    /// ```rust,no_run
+    /// # use bdk::Wallet;
+    /// # use bdk::signer::{SignersContainer, SignerOrdering};
+    /// # use bdk::descriptor::Descriptor;
+    /// # use bitcoin::key::Secp256k1;
+    /// # use bdk::KeychainKind;
+    /// # use bdk_file_store::Store;
+    /// #
+    /// # fn main() -> Result<(), anyhow::Error> {
+    /// # let temp_dir = tempfile::tempdir().expect("must create tempdir");
+    /// # let file_path = temp_dir.path().join("store.db");
+    /// # let db: Store<bdk::wallet::ChangeSet> = Store::create_new(&[], &file_path).expect("must create db");
+    /// let secp = Secp256k1::new();
+    ///
+    /// let (external_descriptor, external_keymap) = Descriptor::parse_descriptor(&secp, "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/84'/1'/0'/0/*)").unwrap();
+    /// let (internal_descriptor, internal_keymap) = Descriptor::parse_descriptor(&secp, "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/84'/1'/0'/1/*)").unwrap();
+    ///
+    /// let external_signer_container = SignersContainer::build(external_keymap, &external_descriptor, &secp);
+    /// let internal_signer_container = SignersContainer::build(internal_keymap, &internal_descriptor, &secp);
+    ///
+    /// let mut wallet = Wallet::load(db)?;
+    ///
+    /// external_signer_container.signers().into_iter()
+    ///     .for_each(|s| wallet.add_signer(KeychainKind::External, SignerOrdering::default(), s.clone()));
+    /// internal_signer_container.signers().into_iter()
+    ///     .for_each(|s| wallet.add_signer(KeychainKind::Internal, SignerOrdering::default(), s.clone()));
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// Alternatively, you can call [`Wallet::new_or_load`], which will add the private keys of the
+    /// passed-in descriptors to the [`Wallet`].
+    pub fn load(
         mut db: impl PersistBackend<ChangeSet> + Send + Sync + 'static,
     ) -> Result<Self, LoadError> {
         let changeset = db
             .load_from_persistence()
             .map_err(LoadError::Persist)?
             .ok_or(LoadError::NotInitialized)?;
-        Self::load_from_changeset(descriptor, change_descriptor, db, changeset)
+        Self::load_from_changeset(db, changeset)
     }
 
-    fn load_from_changeset<E: IntoWalletDescriptor>(
-        descriptor: E,
-        change_descriptor: Option<E>,
+    fn load_from_changeset(
         db: impl PersistBackend<ChangeSet> + Send + Sync + 'static,
         changeset: ChangeSet,
     ) -> Result<Self, LoadError> {
@@ -522,10 +576,23 @@ impl Wallet {
         let chain =
             LocalChain::from_changeset(changeset.chain).map_err(|_| LoadError::MissingGenesis)?;
         let mut index = KeychainTxOutIndex::<KeychainKind>::default();
+        let descriptor = changeset
+            .indexed_tx_graph
+            .indexer
+            .keychains_added
+            .get(&KeychainKind::External)
+            .ok_or(LoadError::MissingDescriptor)?
+            .clone();
+        let change_descriptor = changeset
+            .indexed_tx_graph
+            .indexer
+            .keychains_added
+            .get(&KeychainKind::Internal)
+            .cloned();
 
         let (signers, change_signers) =
             create_signers(&mut index, &secp, descriptor, change_descriptor, network)
-                .map_err(LoadError::Descriptor)?;
+                .expect("Can't fail: we passed in valid descriptors, recovered from the changeset");
 
         let mut indexed_graph = IndexedTxGraph::new(index);
         indexed_graph.apply_changeset(changeset.indexed_tx_graph);
@@ -562,8 +629,8 @@ impl Wallet {
         )
     }
 
-    /// Either loads [`Wallet`] from persistence, or initializes it if it does not exist (with a
-    /// custom genesis hash).
+    /// Either loads [`Wallet`] from persistence, or initializes it if it does not exist, using the
+    /// provided descriptor, change descriptor, network, and custom genesis hash.
     ///
     /// This method will fail if the loaded [`Wallet`] has different parameters to those provided.
     /// This is like [`Wallet::new_or_load`] with an additional `genesis_hash` parameter. This is
@@ -580,25 +647,23 @@ impl Wallet {
             .map_err(NewOrLoadError::Persist)?;
         match changeset {
             Some(changeset) => {
-                let wallet =
-                    Self::load_from_changeset(descriptor, change_descriptor, db, changeset)
-                        .map_err(|e| match e {
-                            LoadError::Descriptor(e) => NewOrLoadError::Descriptor(e),
-                            LoadError::Persist(e) => NewOrLoadError::Persist(e),
-                            LoadError::NotInitialized => NewOrLoadError::NotInitialized,
-                            LoadError::MissingNetwork => {
-                                NewOrLoadError::LoadedNetworkDoesNotMatch {
-                                    expected: network,
-                                    got: None,
-                                }
-                            }
-                            LoadError::MissingGenesis => {
-                                NewOrLoadError::LoadedGenesisDoesNotMatch {
-                                    expected: genesis_hash,
-                                    got: None,
-                                }
-                            }
-                        })?;
+                let mut wallet = Self::load_from_changeset(db, changeset).map_err(|e| match e {
+                    LoadError::Descriptor(e) => NewOrLoadError::Descriptor(e),
+                    LoadError::Persist(e) => NewOrLoadError::Persist(e),
+                    LoadError::NotInitialized => NewOrLoadError::NotInitialized,
+                    LoadError::MissingNetwork => NewOrLoadError::LoadedNetworkDoesNotMatch {
+                        expected: network,
+                        got: None,
+                    },
+                    LoadError::MissingGenesis => NewOrLoadError::LoadedGenesisDoesNotMatch {
+                        expected: genesis_hash,
+                        got: None,
+                    },
+                    LoadError::MissingDescriptor => NewOrLoadError::LoadedDescriptorDoesNotMatch {
+                        got: None,
+                        keychain: KeychainKind::External,
+                    },
+                })?;
                 if wallet.network != network {
                     return Err(NewOrLoadError::LoadedNetworkDoesNotMatch {
                         expected: network,
@@ -611,6 +676,73 @@ impl Wallet {
                         got: Some(wallet.chain.genesis_hash()),
                     });
                 }
+
+                let (expected_descriptor, expected_descriptor_keymap) = descriptor
+                    .into_wallet_descriptor(&wallet.secp, network)
+                    .map_err(NewOrLoadError::Descriptor)?;
+                let wallet_descriptor = wallet.public_descriptor(KeychainKind::External).cloned();
+                if wallet_descriptor != Some(expected_descriptor.clone()) {
+                    return Err(NewOrLoadError::LoadedDescriptorDoesNotMatch {
+                        got: wallet_descriptor,
+                        keychain: KeychainKind::External,
+                    });
+                }
+                // if expected descriptor has private keys add them as new signers
+                if !expected_descriptor_keymap.is_empty() {
+                    let signer_container = SignersContainer::build(
+                        expected_descriptor_keymap,
+                        &expected_descriptor,
+                        &wallet.secp,
+                    );
+                    signer_container.signers().into_iter().for_each(|signer| {
+                        wallet.add_signer(
+                            KeychainKind::External,
+                            SignerOrdering::default(),
+                            signer.clone(),
+                        )
+                    });
+                }
+
+                let expected_change_descriptor = if let Some(c) = change_descriptor {
+                    Some(
+                        c.into_wallet_descriptor(&wallet.secp, network)
+                            .map_err(NewOrLoadError::Descriptor)?,
+                    )
+                } else {
+                    None
+                };
+                let wallet_change_descriptor =
+                    wallet.public_descriptor(KeychainKind::Internal).cloned();
+
+                match (expected_change_descriptor, wallet_change_descriptor) {
+                    (Some((expected_descriptor, expected_keymap)), Some(wallet_descriptor))
+                        if wallet_descriptor == expected_descriptor =>
+                    {
+                        // if expected change descriptor has private keys add them as new signers
+                        if !expected_keymap.is_empty() {
+                            let signer_container = SignersContainer::build(
+                                expected_keymap,
+                                &expected_descriptor,
+                                &wallet.secp,
+                            );
+                            signer_container.signers().into_iter().for_each(|signer| {
+                                wallet.add_signer(
+                                    KeychainKind::Internal,
+                                    SignerOrdering::default(),
+                                    signer.clone(),
+                                )
+                            });
+                        }
+                    }
+                    (None, None) => (),
+                    (_, wallet_descriptor) => {
+                        return Err(NewOrLoadError::LoadedDescriptorDoesNotMatch {
+                            got: wallet_descriptor,
+                            keychain: KeychainKind::Internal,
+                        });
+                    }
+                }
+
                 Ok(wallet)
             }
             None => Self::new_with_genesis_hash(
@@ -636,7 +768,7 @@ impl Wallet {
     }
 
     /// Iterator over all keychains in this wallet
-    pub fn keychains(&self) -> &BTreeMap<KeychainKind, ExtendedDescriptor> {
+    pub fn keychains(&self) -> impl Iterator<Item = (&KeychainKind, &ExtendedDescriptor)> {
         self.indexed_graph.index.keychains()
     }
 
@@ -650,7 +782,11 @@ impl Wallet {
     /// [BIP32](https://github.com/bitcoin/bips/blob/master/bip-0032.mediawiki) max index.
     pub fn peek_address(&self, keychain: KeychainKind, mut index: u32) -> AddressInfo {
         let keychain = self.map_keychain(keychain);
-        let mut spk_iter = self.indexed_graph.index.unbounded_spk_iter(&keychain);
+        let mut spk_iter = self
+            .indexed_graph
+            .index
+            .unbounded_spk_iter(&keychain)
+            .expect("Must exist (we called map_keychain)");
         if !spk_iter.descriptor().has_wildcard() {
             index = 0;
         }
@@ -677,7 +813,11 @@ impl Wallet {
     /// If writing to persistent storage fails.
     pub fn reveal_next_address(&mut self, keychain: KeychainKind) -> anyhow::Result<AddressInfo> {
         let keychain = self.map_keychain(keychain);
-        let ((index, spk), index_changeset) = self.indexed_graph.index.reveal_next_spk(&keychain);
+        let ((index, spk), index_changeset) = self
+            .indexed_graph
+            .index
+            .reveal_next_spk(&keychain)
+            .expect("Must exist (we called map_keychain)");
 
         self.persist
             .stage_and_commit(indexed_tx_graph::ChangeSet::from(index_changeset).into())?;
@@ -705,8 +845,11 @@ impl Wallet {
         index: u32,
     ) -> anyhow::Result<impl Iterator<Item = AddressInfo> + '_> {
         let keychain = self.map_keychain(keychain);
-        let (spk_iter, index_changeset) =
-            self.indexed_graph.index.reveal_to_target(&keychain, index);
+        let (spk_iter, index_changeset) = self
+            .indexed_graph
+            .index
+            .reveal_to_target(&keychain, index)
+            .expect("must exist (we called map_keychain)");
 
         self.persist
             .stage_and_commit(indexed_tx_graph::ChangeSet::from(index_changeset).into())?;
@@ -729,7 +872,11 @@ impl Wallet {
     /// If writing to persistent storage fails.
     pub fn next_unused_address(&mut self, keychain: KeychainKind) -> anyhow::Result<AddressInfo> {
         let keychain = self.map_keychain(keychain);
-        let ((index, spk), index_changeset) = self.indexed_graph.index.next_unused_spk(&keychain);
+        let ((index, spk), index_changeset) = self
+            .indexed_graph
+            .index
+            .next_unused_spk(&keychain)
+            .expect("must exist (we called map_keychain)");
 
         self.persist
             .stage_and_commit(indexed_tx_graph::ChangeSet::from(index_changeset).into())?;
@@ -799,7 +946,7 @@ impl Wallet {
             .filter_chain_unspents(
                 &self.chain,
                 self.chain.tip().block_id(),
-                self.indexed_graph.index.outpoints().iter().cloned(),
+                self.indexed_graph.index.outpoints(),
             )
             .map(|((k, i), full_txo)| new_local_utxo(k, i, full_txo))
     }
@@ -813,7 +960,7 @@ impl Wallet {
             .filter_chain_txouts(
                 &self.chain,
                 self.chain.tip().block_id(),
-                self.indexed_graph.index.outpoints().iter().cloned(),
+                self.indexed_graph.index.outpoints(),
             )
             .map(|((k, i), full_txo)| new_local_utxo(k, i, full_txo))
     }
@@ -851,7 +998,11 @@ impl Wallet {
         &self,
         keychain: KeychainKind,
     ) -> impl Iterator<Item = (u32, ScriptBuf)> + Clone {
-        self.indexed_graph.index.unbounded_spk_iter(&keychain)
+        let keychain = self.map_keychain(keychain);
+        self.indexed_graph
+            .index
+            .unbounded_spk_iter(&keychain)
+            .expect("Must exist (we called map_keychain)")
     }
 
     /// Returns the utxo owned by this wallet corresponding to `outpoint` if it exists in the
@@ -1133,7 +1284,7 @@ impl Wallet {
         self.indexed_graph.graph().balance(
             &self.chain,
             self.chain.tip().block_id(),
-            self.indexed_graph.index.outpoints().iter().cloned(),
+            self.indexed_graph.index.outpoints(),
             |&(k, _), _| k == KeychainKind::Internal,
         )
     }
@@ -1220,17 +1371,9 @@ impl Wallet {
         coin_selection: Cs,
         params: TxParams,
     ) -> Result<Psbt, CreateTxError> {
-        let external_descriptor = self
-            .indexed_graph
-            .index
-            .keychains()
-            .get(&KeychainKind::External)
-            .expect("must exist");
-        let internal_descriptor = self
-            .indexed_graph
-            .index
-            .keychains()
-            .get(&KeychainKind::Internal);
+        let keychains: BTreeMap<_, _> = self.indexed_graph.index.keychains().collect();
+        let external_descriptor = keychains.get(&KeychainKind::External).expect("must exist");
+        let internal_descriptor = keychains.get(&KeychainKind::Internal);
 
         let external_policy = external_descriptor
             .extract_policy(&self.signers, BuildSatisfaction::None, &self.secp)?
@@ -1464,8 +1607,11 @@ impl Wallet {
             Some(ref drain_recipient) => drain_recipient.clone(),
             None => {
                 let change_keychain = self.map_keychain(KeychainKind::Internal);
-                let ((index, spk), index_changeset) =
-                    self.indexed_graph.index.next_unused_spk(&change_keychain);
+                let ((index, spk), index_changeset) = self
+                    .indexed_graph
+                    .index
+                    .next_unused_spk(&change_keychain)
+                    .expect("Keychain exists (we called map_keychain)");
                 let spk = spk.into();
                 self.indexed_graph.index.mark_used(change_keychain, index);
                 self.persist
@@ -1825,7 +1971,11 @@ impl Wallet {
     ///
     /// This can be used to build a watch-only version of a wallet
     pub fn public_descriptor(&self, keychain: KeychainKind) -> Option<&ExtendedDescriptor> {
-        self.indexed_graph.index.keychains().get(&keychain)
+        self.indexed_graph
+            .index
+            .keychains()
+            .find(|(k, _)| *k == &keychain)
+            .map(|(_, d)| d)
     }
 
     /// Finalize a PSBT, i.e., for each input determine if sufficient data is available to pass
@@ -1876,17 +2026,9 @@ impl Wallet {
                 .get_utxo_for(n)
                 .and_then(|txout| self.get_descriptor_for_txout(&txout))
                 .or_else(|| {
-                    self.indexed_graph
-                        .index
-                        .keychains()
-                        .iter()
-                        .find_map(|(_, desc)| {
-                            desc.derive_from_psbt_input(
-                                psbt_input,
-                                psbt.get_utxo_for(n),
-                                &self.secp,
-                            )
-                        })
+                    self.indexed_graph.index.keychains().find_map(|(_, desc)| {
+                        desc.derive_from_psbt_input(psbt_input, psbt.get_utxo_for(n), &self.secp)
+                    })
                 });
 
             match desc {
@@ -1952,7 +2094,12 @@ impl Wallet {
 
     /// The index of the next address that you would get if you were to ask the wallet for a new address
     pub fn next_derivation_index(&self, keychain: KeychainKind) -> u32 {
-        self.indexed_graph.index.next_index(&keychain).0
+        let keychain = self.map_keychain(keychain);
+        self.indexed_graph
+            .index
+            .next_index(&keychain)
+            .expect("Keychain must exist (we called map_keychain)")
+            .0
     }
 
     /// Informs the wallet that you no longer intend to broadcast a tx that was built from it.
@@ -2119,7 +2266,6 @@ impl Wallet {
         if params.add_global_xpubs {
             let all_xpubs = self
                 .keychains()
-                .iter()
                 .flat_map(|(_, desc)| desc.get_extended_keys())
                 .collect::<Vec<_>>();
 
@@ -2496,13 +2642,13 @@ fn create_signers<E: IntoWalletDescriptor>(
 ) -> Result<(Arc<SignersContainer>, Arc<SignersContainer>), crate::descriptor::error::Error> {
     let (descriptor, keymap) = into_wallet_descriptor_checked(descriptor, secp, network)?;
     let signers = Arc::new(SignersContainer::build(keymap, &descriptor, secp));
-    index.add_keychain(KeychainKind::External, descriptor);
+    let _ = index.insert_descriptor(KeychainKind::External, descriptor);
 
     let change_signers = match change_descriptor {
         Some(descriptor) => {
             let (descriptor, keymap) = into_wallet_descriptor_checked(descriptor, secp, network)?;
             let signers = Arc::new(SignersContainer::build(keymap, &descriptor, secp));
-            index.add_keychain(KeychainKind::Internal, descriptor);
+            let _ = index.insert_descriptor(KeychainKind::Internal, descriptor);
             signers
         }
         None => Arc::new(SignersContainer::new()),

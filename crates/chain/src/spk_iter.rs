@@ -158,8 +158,8 @@ mod test {
         let (external_descriptor,_) = Descriptor::<DescriptorPublicKey>::parse_descriptor(&secp, "tr([73c5da0a/86'/0'/0']xprv9xgqHN7yz9MwCkxsBPN5qetuNdQSUttZNKw1dcYTV4mkaAFiBVGQziHs3NRSWMkCzvgjEe3n9xV8oYywvM8at9yRqyaZVz6TYYhX98VjsUk/0/*)").unwrap();
         let (internal_descriptor,_) = Descriptor::<DescriptorPublicKey>::parse_descriptor(&secp, "tr([73c5da0a/86'/0'/0']xprv9xgqHN7yz9MwCkxsBPN5qetuNdQSUttZNKw1dcYTV4mkaAFiBVGQziHs3NRSWMkCzvgjEe3n9xV8oYywvM8at9yRqyaZVz6TYYhX98VjsUk/1/*)").unwrap();
 
-        txout_index.add_keychain(TestKeychain::External, external_descriptor.clone());
-        txout_index.add_keychain(TestKeychain::Internal, internal_descriptor.clone());
+        let _ = txout_index.insert_descriptor(TestKeychain::External, external_descriptor.clone());
+        let _ = txout_index.insert_descriptor(TestKeychain::Internal, internal_descriptor.clone());
 
         (txout_index, external_descriptor, internal_descriptor)
     }
@@ -258,18 +258,10 @@ mod test {
             None
         );
     }
+}
 
-    // The following dummy traits were created to test if SpkIterator is working properly.
-    #[allow(unused)]
-    trait TestSendStatic: Send + 'static {
-        fn test(&self) -> u32 {
-            20
-        }
-    }
-
-    impl TestSendStatic for SpkIterator<Descriptor<DescriptorPublicKey>> {
-        fn test(&self) -> u32 {
-            20
-        }
-    }
+#[test]
+fn spk_iterator_is_send_and_static() {
+    fn is_send_and_static<A: Send + 'static>() {}
+    is_send_and_static::<SpkIterator<Descriptor<DescriptorPublicKey>>>()
 }

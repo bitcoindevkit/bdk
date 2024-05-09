@@ -1,3 +1,5 @@
+#![cfg(feature = "miniscript")]
+
 #[macro_use]
 mod common;
 

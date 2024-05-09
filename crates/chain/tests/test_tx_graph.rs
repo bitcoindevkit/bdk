@@ -1,3 +1,5 @@
+#![cfg(feature = "miniscript")]
+
 #[macro_use]
 mod common;
 use bdk_chain::tx_graph::CalculateFeeError;
