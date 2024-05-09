@@ -6,12 +6,12 @@ use bdk_chain::{
     ConfirmationTimeHeightAnchor, IndexedTxGraph, SpkTxOutIndex,
 };
 use bdk_electrum::ElectrumExt;
-use bdk_testenv::{anyhow, anyhow::Result, bitcoincore_rpc::RpcApi, TestEnv};
+use bdk_testenv::{anyhow, bitcoincore_rpc::RpcApi, TestEnv};
 
 fn get_balance(
     recv_chain: &LocalChain,
     recv_graph: &IndexedTxGraph<ConfirmationTimeHeightAnchor, SpkTxOutIndex<()>>,
-) -> Result<Balance> {
+) -> anyhow::Result<Balance> {
     let chain_tip = recv_chain.tip().block_id();
     let outpoints = recv_graph.index.outpoints().clone();
     let balance = recv_graph
@@ -27,7 +27,7 @@ fn get_balance(
 /// 3. Mine extra block to confirm sent tx.
 /// 4. Check [`Balance`] to ensure tx is confirmed.
 #[test]
-fn scan_detects_confirmed_tx() -> Result<()> {
+fn scan_detects_confirmed_tx() -> anyhow::Result<()> {
     const SEND_AMOUNT: Amount = Amount::from_sat(10_000);
 
     let env = TestEnv::new()?;
@@ -117,7 +117,7 @@ fn scan_detects_confirmed_tx() -> Result<()> {
 /// 3. Perform 8 separate reorgs on each block with a confirmed tx.
 /// 4. Check [`Balance`] after each reorg to ensure unconfirmed amount is correct.
 #[test]
-fn tx_can_become_unconfirmed_after_reorg() -> Result<()> {
+fn tx_can_become_unconfirmed_after_reorg() -> anyhow::Result<()> {
     const REORG_COUNT: usize = 8;
     const SEND_AMOUNT: Amount = Amount::from_sat(10_000);
 
