@@ -7,12 +7,12 @@ use std::io::Write;
 use std::str::FromStr;
 
 use bdk::bitcoin::{Address, Amount};
-use bdk::wallet::Update;
+use bdk::chain::collections::HashSet;
 use bdk::{bitcoin::Network, Wallet};
 use bdk::{KeychainKind, SignOptions};
 use bdk_electrum::{
     electrum_client::{self, ElectrumApi},
-    ElectrumExt, ElectrumUpdate,
+    ElectrumExt,
 };
 use bdk_file_store::Store;
 
@@ -38,44 +38,30 @@ fn main() -> Result<(), anyhow::Error> {
     print!("Syncing...");
     let client = electrum_client::Client::new("ssl://electrum.blockstream.info:60002")?;
 
-    let prev_tip = wallet.latest_checkpoint();
-    let keychain_spks = wallet
-        .all_unbounded_spk_iters()
-        .into_iter()
-        .map(|(k, k_spks)| {
-            let mut once = Some(());
-            let mut stdout = std::io::stdout();
-            let k_spks = k_spks
-                .inspect(move |(spk_i, _)| match once.take() {
-                    Some(_) => print!("\nScanning keychain [{:?}]", k),
-                    None => print!(" {:<3}", spk_i),
-                })
-                .inspect(move |_| stdout.flush().expect("must flush"));
-            (k, k_spks)
+    let request = wallet
+        .start_full_scan()
+        .inspect_spks_for_all_keychains({
+            let mut once = HashSet::<KeychainKind>::new();
+            move |k, spk_i, _| {
+                if once.insert(k) {
+                    print!("\nScanning keychain [{:?}]", k)
+                } else {
+                    print!(" {:<3}", spk_i)
+                }
+            }
         })
-        .collect();
+        .inspect_spks_for_all_keychains(|_, _, _| std::io::stdout().flush().expect("must flush"));
 
-    let (
-        ElectrumUpdate {
-            chain_update,
-            relevant_txids,
-        },
-        keychain_update,
-    ) = client.full_scan(prev_tip, keychain_spks, STOP_GAP, BATCH_SIZE)?;
+    let mut update = client
+        .full_scan(request, STOP_GAP, BATCH_SIZE, false)?
+        .with_confirmation_time_height_anchor(&client)?;
+
+    let now = std::time::UNIX_EPOCH.elapsed().unwrap().as_secs();
+    let _ = update.graph_update.update_last_seen_unconfirmed(now);
 
     println!();
 
-    let missing = relevant_txids.missing_full_txs(wallet.as_ref());
-    let mut graph_update = relevant_txids.into_confirmation_time_tx_graph(&client, missing)?;
-    let now = std::time::UNIX_EPOCH.elapsed().unwrap().as_secs();
-    let _ = graph_update.update_last_seen_unconfirmed(now);
-
-    let wallet_update = Update {
-        last_active_indices: keychain_update,
-        graph: graph_update,
-        chain: Some(chain_update),
-    };
-    wallet.apply_update(wallet_update)?;
+    wallet.apply_update(update)?;
     wallet.commit()?;
 
     let balance = wallet.get_balance();

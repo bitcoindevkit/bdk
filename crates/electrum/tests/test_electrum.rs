@@ -2,15 +2,16 @@ use bdk_chain::{
     bitcoin::{hashes::Hash, Address, Amount, ScriptBuf, WScriptHash},
     keychain::Balance,
     local_chain::LocalChain,
+    spk_client::SyncRequest,
     ConfirmationTimeHeightAnchor, IndexedTxGraph, SpkTxOutIndex,
 };
-use bdk_electrum::{ElectrumExt, ElectrumUpdate};
-use bdk_testenv::{anyhow, anyhow::Result, bitcoincore_rpc::RpcApi, TestEnv};
+use bdk_electrum::ElectrumExt;
+use bdk_testenv::{anyhow, bitcoincore_rpc::RpcApi, TestEnv};
 
 fn get_balance(
     recv_chain: &LocalChain,
     recv_graph: &IndexedTxGraph<ConfirmationTimeHeightAnchor, SpkTxOutIndex<()>>,
-) -> Result<Balance> {
+) -> anyhow::Result<Balance> {
     let chain_tip = recv_chain.tip().block_id();
     let outpoints = recv_graph.index.outpoints().clone();
     let balance = recv_graph
@@ -26,7 +27,7 @@ fn get_balance(
 /// 3. Mine extra block to confirm sent tx.
 /// 4. Check [`Balance`] to ensure tx is confirmed.
 #[test]
-fn scan_detects_confirmed_tx() -> Result<()> {
+fn scan_detects_confirmed_tx() -> anyhow::Result<()> {
     const SEND_AMOUNT: Amount = Amount::from_sat(10_000);
 
     let env = TestEnv::new()?;
@@ -60,17 +61,19 @@ fn scan_detects_confirmed_tx() -> Result<()> {
 
     // Sync up to tip.
     env.wait_until_electrum_sees_block()?;
-    let ElectrumUpdate {
-        chain_update,
-        relevant_txids,
-    } = client.sync(recv_chain.tip(), [spk_to_track], None, None, 5)?;
+    let update = client
+        .sync(
+            SyncRequest::from_chain_tip(recv_chain.tip())
+                .chain_spks(core::iter::once(spk_to_track)),
+            5,
+            true,
+        )?
+        .with_confirmation_time_height_anchor(&client)?;
 
-    let missing = relevant_txids.missing_full_txs(recv_graph.graph());
-    let graph_update = relevant_txids.into_confirmation_time_tx_graph(&client, missing)?;
     let _ = recv_chain
-        .apply_update(chain_update)
+        .apply_update(update.chain_update)
         .map_err(|err| anyhow::anyhow!("LocalChain update error: {:?}", err))?;
-    let _ = recv_graph.apply_update(graph_update);
+    let _ = recv_graph.apply_update(update.graph_update);
 
     // Check to see if tx is confirmed.
     assert_eq!(
@@ -80,6 +83,29 @@ fn scan_detects_confirmed_tx() -> Result<()> {
             ..Balance::default()
         },
     );
+
+    for tx in recv_graph.graph().full_txs() {
+        // Retrieve the calculated fee from `TxGraph`, which will panic if we do not have the
+        // floating txouts available from the transaction's previous outputs.
+        let fee = recv_graph
+            .graph()
+            .calculate_fee(&tx.tx)
+            .expect("fee must exist");
+
+        // Retrieve the fee in the transaction data from `bitcoind`.
+        let tx_fee = env
+            .bitcoind
+            .client
+            .get_transaction(&tx.txid, None)
+            .expect("Tx must exist")
+            .fee
+            .expect("Fee must exist")
+            .abs()
+            .to_sat() as u64;
+
+        // Check that the calculated fee matches the fee from the transaction data.
+        assert_eq!(fee, tx_fee);
+    }
 
     Ok(())
 }
@@ -91,7 +117,7 @@ fn scan_detects_confirmed_tx() -> Result<()> {
 /// 3. Perform 8 separate reorgs on each block with a confirmed tx.
 /// 4. Check [`Balance`] after each reorg to ensure unconfirmed amount is correct.
 #[test]
-fn tx_can_become_unconfirmed_after_reorg() -> Result<()> {
+fn tx_can_become_unconfirmed_after_reorg() -> anyhow::Result<()> {
     const REORG_COUNT: usize = 8;
     const SEND_AMOUNT: Amount = Amount::from_sat(10_000);
 
@@ -126,20 +152,21 @@ fn tx_can_become_unconfirmed_after_reorg() -> Result<()> {
 
     // Sync up to tip.
     env.wait_until_electrum_sees_block()?;
-    let ElectrumUpdate {
-        chain_update,
-        relevant_txids,
-    } = client.sync(recv_chain.tip(), [spk_to_track.clone()], None, None, 5)?;
+    let update = client
+        .sync(
+            SyncRequest::from_chain_tip(recv_chain.tip()).chain_spks([spk_to_track.clone()]),
+            5,
+            false,
+        )?
+        .with_confirmation_time_height_anchor(&client)?;
 
-    let missing = relevant_txids.missing_full_txs(recv_graph.graph());
-    let graph_update = relevant_txids.into_confirmation_time_tx_graph(&client, missing)?;
     let _ = recv_chain
-        .apply_update(chain_update)
+        .apply_update(update.chain_update)
         .map_err(|err| anyhow::anyhow!("LocalChain update error: {:?}", err))?;
-    let _ = recv_graph.apply_update(graph_update.clone());
+    let _ = recv_graph.apply_update(update.graph_update.clone());
 
     // Retain a snapshot of all anchors before reorg process.
-    let initial_anchors = graph_update.all_anchors();
+    let initial_anchors = update.graph_update.all_anchors();
 
     // Check if initial balance is correct.
     assert_eq!(
@@ -156,22 +183,23 @@ fn tx_can_become_unconfirmed_after_reorg() -> Result<()> {
         env.reorg_empty_blocks(depth)?;
 
         env.wait_until_electrum_sees_block()?;
-        let ElectrumUpdate {
-            chain_update,
-            relevant_txids,
-        } = client.sync(recv_chain.tip(), [spk_to_track.clone()], None, None, 5)?;
+        let update = client
+            .sync(
+                SyncRequest::from_chain_tip(recv_chain.tip()).chain_spks([spk_to_track.clone()]),
+                5,
+                false,
+            )?
+            .with_confirmation_time_height_anchor(&client)?;
 
-        let missing = relevant_txids.missing_full_txs(recv_graph.graph());
-        let graph_update = relevant_txids.into_confirmation_time_tx_graph(&client, missing)?;
         let _ = recv_chain
-            .apply_update(chain_update)
+            .apply_update(update.chain_update)
             .map_err(|err| anyhow::anyhow!("LocalChain update error: {:?}", err))?;
 
         // Check to see if a new anchor is added during current reorg.
-        if !initial_anchors.is_superset(graph_update.all_anchors()) {
+        if !initial_anchors.is_superset(update.graph_update.all_anchors()) {
             println!("New anchor added at reorg depth {}", depth);
         }
-        let _ = recv_graph.apply_update(graph_update);
+        let _ = recv_graph.apply_update(update.graph_update);
 
         assert_eq!(
             get_balance(&recv_chain, &recv_graph)?,
