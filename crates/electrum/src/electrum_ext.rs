@@ -395,6 +395,12 @@ fn determine_tx_anchor(
     }
 }
 
+/// Populate the `graph_update` with associated transactions/anchors of `outpoints`.
+///
+/// Transactions in which the outpoint resides, and transactions that spend from the outpoint are
+/// included. Anchors of the aforementioned transactions are included.
+///
+/// Checkpoints (in `cps`) are used to create anchors. The `tx_cache` is self-explanatory.
 fn populate_with_outpoints(
     client: &impl ElectrumApi,
     cps: &BTreeMap<u32, CheckPoint>,
@@ -403,42 +409,34 @@ fn populate_with_outpoints(
     outpoints: impl IntoIterator<Item = OutPoint>,
 ) -> Result<(), Error> {
     for outpoint in outpoints {
-        let txid = outpoint.txid;
-        let tx = client.transaction_get(&txid)?;
-        debug_assert_eq!(tx.txid(), txid);
-        let txout = match tx.output.get(outpoint.vout as usize) {
+        let op_txid = outpoint.txid;
+        let op_tx = fetch_tx(client, tx_cache, op_txid)?;
+        let op_txout = match op_tx.output.get(outpoint.vout as usize) {
             Some(txout) => txout,
             None => continue,
         };
+        debug_assert_eq!(op_tx.txid(), op_txid);
+
         // attempt to find the following transactions (alongside their chain positions), and
         // add to our sparsechain `update`:
         let mut has_residing = false; // tx in which the outpoint resides
         let mut has_spending = false; // tx that spends the outpoint
-        for res in client.script_get_history(&txout.script_pubkey)? {
+        for res in client.script_get_history(&op_txout.script_pubkey)? {
             if has_residing && has_spending {
                 break;
             }
 
-            if res.tx_hash == txid {
-                if has_residing {
-                    continue;
-                }
+            if !has_residing && res.tx_hash == op_txid {
                 has_residing = true;
-                if graph_update.get_tx(res.tx_hash).is_none() {
-                    let _ = graph_update.insert_tx(tx.clone());
+                let _ = graph_update.insert_tx(Arc::clone(&op_tx));
+                if let Some(anchor) = determine_tx_anchor(cps, res.height, res.tx_hash) {
+                    let _ = graph_update.insert_anchor(res.tx_hash, anchor);
                 }
-            } else {
-                if has_spending {
-                    continue;
-                }
-                let res_tx = match graph_update.get_tx(res.tx_hash) {
-                    Some(tx) => tx,
-                    None => {
-                        let res_tx = fetch_tx(client, tx_cache, res.tx_hash)?;
-                        let _ = graph_update.insert_tx(Arc::clone(&res_tx));
-                        res_tx
-                    }
-                };
+            }
+
+            if !has_spending && res.tx_hash != op_txid {
+                let res_tx = fetch_tx(client, tx_cache, res.tx_hash)?;
+                // we exclude txs/anchors that do not spend our specified outpoint(s)
                 has_spending = res_tx
                     .input
                     .iter()
@@ -446,16 +444,17 @@ fn populate_with_outpoints(
                 if !has_spending {
                     continue;
                 }
-            };
-
-            if let Some(anchor) = determine_tx_anchor(cps, res.height, res.tx_hash) {
-                let _ = graph_update.insert_anchor(res.tx_hash, anchor);
+                let _ = graph_update.insert_tx(Arc::clone(&res_tx));
+                if let Some(anchor) = determine_tx_anchor(cps, res.height, res.tx_hash) {
+                    let _ = graph_update.insert_anchor(res.tx_hash, anchor);
+                }
             }
         }
     }
     Ok(())
 }
 
+/// Populate the `graph_update` with transactions/anchors of the provided `txids`.
 fn populate_with_txids(
     client: &impl ElectrumApi,
     cps: &BTreeMap<u32, CheckPoint>,
@@ -476,6 +475,8 @@ fn populate_with_txids(
             .map(|txo| &txo.script_pubkey)
             .expect("tx must have an output");
 
+        // because of restrictions of the Electrum API, we have to use the `script_get_history`
+        // call to get confirmation status of our transaction
         let anchor = match client
             .script_get_history(spk)?
             .into_iter()
@@ -485,9 +486,7 @@ fn populate_with_txids(
             None => continue,
         };
 
-        if graph_update.get_tx(txid).is_none() {
-            let _ = graph_update.insert_tx(tx);
-        }
+        let _ = graph_update.insert_tx(tx);
         if let Some(anchor) = anchor {
             let _ = graph_update.insert_anchor(txid, anchor);
         }
@@ -495,6 +494,9 @@ fn populate_with_txids(
     Ok(())
 }
 
+/// Fetch transaction of given `txid`.
+///
+/// We maintain a `tx_cache` so that we won't need to fetch from Electrum with every call.
 fn fetch_tx<C: ElectrumApi>(
     client: &C,
     tx_cache: &mut TxCache,
@@ -530,6 +532,13 @@ fn fetch_prev_txout<C: ElectrumApi>(
     Ok(())
 }
 
+/// Populate the `graph_update` with transactions/anchors associated with the given `spks`.
+///
+/// Transactions that contains an output with requested spk, or spends form an output with
+/// requested spk will be added to `graph_update`. Anchors of the aforementioned transactions are
+/// also included.
+///
+/// Checkpoints (in `cps`) are used to create anchors. The `tx_cache` is self-explanatory.
 fn populate_with_spks<I: Ord + Clone>(
     client: &impl ElectrumApi,
     cps: &BTreeMap<u32, CheckPoint>,
