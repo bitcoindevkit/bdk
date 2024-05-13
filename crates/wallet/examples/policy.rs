@@ -9,14 +9,14 @@
 // You may not use this file except in accordance with one or both of these
 // licenses.
 
-extern crate bdk;
+extern crate bdk_wallet;
 use std::error::Error;
 
-use bdk::bitcoin::Network;
-use bdk::descriptor::{policy::BuildSatisfaction, ExtractPolicy, IntoWalletDescriptor};
-use bdk::wallet::signer::SignersContainer;
+use bdk_wallet::bitcoin::Network;
+use bdk_wallet::descriptor::{policy::BuildSatisfaction, ExtractPolicy, IntoWalletDescriptor};
+use bdk_wallet::wallet::signer::SignersContainer;
 
-/// This example describes the use of the BDK's [`bdk::descriptor::policy`] module.
+/// This example describes the use of the BDK's [`bdk_wallet::descriptor::policy`] module.
 ///
 /// Policy is higher abstraction representation of the wallet descriptor spending condition.
 /// This is useful to express complex miniscript spending conditions into more human readable form.
@@ -34,11 +34,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     let desc = "wsh(multi(2,tprv8ZgxMBicQKsPdpkqS7Eair4YxjcuuvDPNYmKX3sCniCf16tHEVrjjiSXEkFRnUH77yXc6ZcwHHcLNfjdi5qUvw3VDfgYiH5mNsj5izuiu2N/1/*,tpubD6NzVbkrYhZ4XHndKkuB8FifXm8r5FQHwrN6oZuWCz13qb93rtgKvD4PQsqC4HP4yhV3tA2fqr2RbY5mNXfM7RxXUoeABoDtsFUq2zJq6YK/1/*))";
 
     // Use the descriptor string to derive the full descriptor and a keymap.
-    // The wallet descriptor can be used to create a new bdk::wallet.
+    // The wallet descriptor can be used to create a new bdk_wallet::wallet.
     // While the `keymap` can be used to create a `SignerContainer`.
     //
     // The `SignerContainer` can sign for `PSBT`s.
-    // a bdk::wallet internally uses these to handle transaction signing.
+    // a bdk_wallet::wallet internally uses these to handle transaction signing.
     // But they can be used as independent tools also.
     let (wallet_desc, keymap) = desc.into_wallet_descriptor(&secp, Network::Testnet)?;
 

@@ -26,11 +26,11 @@
 //! ```
 //! # use std::str::FromStr;
 //! # use bitcoin::*;
-//! # use bdk::wallet::{self, ChangeSet, coin_selection::*, coin_selection};
-//! # use bdk::wallet::error::CreateTxError;
+//! # use bdk_wallet::wallet::{self, ChangeSet, coin_selection::*, coin_selection};
+//! # use bdk_wallet::wallet::error::CreateTxError;
 //! # use bdk_persist::PersistBackend;
-//! # use bdk::*;
-//! # use bdk::wallet::coin_selection::decide_change;
+//! # use bdk_wallet::*;
+//! # use bdk_wallet::wallet::coin_selection::decide_change;
 //! # use anyhow::Error;
 //! #[derive(Debug)]
 //! struct AlwaysSpendEverything;

@@ -423,7 +423,7 @@ macro_rules! apply_modifier {
 ///
 /// ```
 /// # use std::str::FromStr;
-/// let (my_descriptor, my_keys_map, networks) = bdk::descriptor!(sh(wsh(and_v(v:pk("cVt4o7BGAig1UXywgGSmARhxMdzP5qvQsxKkSsc1XEkw3tDTQFpy"),older(50)))))?;
+/// let (my_descriptor, my_keys_map, networks) = bdk_wallet::descriptor!(sh(wsh(and_v(v:pk("cVt4o7BGAig1UXywgGSmARhxMdzP5qvQsxKkSsc1XEkw3tDTQFpy"),older(50)))))?;
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 ///
@@ -444,7 +444,7 @@ macro_rules! apply_modifier {
 ///     bitcoin::PrivateKey::from_wif("cVt4o7BGAig1UXywgGSmARhxMdzP5qvQsxKkSsc1XEkw3tDTQFpy")?;
 /// let my_timelock = 50;
 ///
-/// let (descriptor_a, key_map_a, networks) = bdk::descriptor! {
+/// let (descriptor_a, key_map_a, networks) = bdk_wallet::descriptor! {
 ///     wsh (
 ///         thresh(2, pk(my_key_1), s:pk(my_key_2), s:n:d:v:older(my_timelock))
 ///     )
@@ -452,11 +452,12 @@ macro_rules! apply_modifier {
 ///
 /// #[rustfmt::skip]
 /// let b_items = vec![
-///     bdk::fragment!(pk(my_key_1))?,
-///     bdk::fragment!(s:pk(my_key_2))?,
-///     bdk::fragment!(s:n:d:v:older(my_timelock))?,
+///     bdk_wallet::fragment!(pk(my_key_1))?,
+///     bdk_wallet::fragment!(s:pk(my_key_2))?,
+///     bdk_wallet::fragment!(s:n:d:v:older(my_timelock))?,
 /// ];
-/// let (descriptor_b, mut key_map_b, networks) = bdk::descriptor!(wsh(thresh_vec(2, b_items)))?;
+/// let (descriptor_b, mut key_map_b, networks) =
+///     bdk_wallet::descriptor!(wsh(thresh_vec(2, b_items)))?;
 ///
 /// assert_eq!(descriptor_a, descriptor_b);
 /// assert_eq!(key_map_a.len(), key_map_b.len());
@@ -475,7 +476,7 @@ macro_rules! apply_modifier {
 /// let my_key_2 =
 ///     bitcoin::PrivateKey::from_wif("cVt4o7BGAig1UXywgGSmARhxMdzP5qvQsxKkSsc1XEkw3tDTQFpy")?;
 ///
-/// let (descriptor, key_map, networks) = bdk::descriptor! {
+/// let (descriptor, key_map, networks) = bdk_wallet::descriptor! {
 ///     wsh (
 ///         multi(2, my_key_1, my_key_2)
 ///     )
@@ -491,7 +492,7 @@ macro_rules! apply_modifier {
 /// let my_key =
 ///     bitcoin::PrivateKey::from_wif("cVt4o7BGAig1UXywgGSmARhxMdzP5qvQsxKkSsc1XEkw3tDTQFpy")?;
 ///
-/// let (descriptor, key_map, networks) = bdk::descriptor!(wpkh(my_key))?;
+/// let (descriptor, key_map, networks) = bdk_wallet::descriptor!(wpkh(my_key))?;
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 ///

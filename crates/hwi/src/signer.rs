@@ -1,12 +1,12 @@
-use bdk::bitcoin::bip32::Fingerprint;
-use bdk::bitcoin::secp256k1::{All, Secp256k1};
-use bdk::bitcoin::Psbt;
+use bdk_wallet::bitcoin::bip32::Fingerprint;
+use bdk_wallet::bitcoin::secp256k1::{All, Secp256k1};
+use bdk_wallet::bitcoin::Psbt;
 
 use hwi::error::Error;
 use hwi::types::{HWIChain, HWIDevice};
 use hwi::HWIClient;
 
-use bdk::signer::{SignerCommon, SignerError, SignerId, TransactionSigner};
+use bdk_wallet::signer::{SignerCommon, SignerError, SignerId, TransactionSigner};
 
 #[derive(Debug)]
 /// Custom signer for Hardware Wallets
@@ -38,7 +38,7 @@ impl TransactionSigner for HWISigner {
     fn sign_transaction(
         &self,
         psbt: &mut Psbt,
-        _sign_options: &bdk::SignOptions,
+        _sign_options: &bdk_wallet::SignOptions,
         _secp: &Secp256k1<All>,
     ) -> Result<(), SignerError> {
         psbt.combine(
@@ -61,9 +61,9 @@ impl TransactionSigner for HWISigner {
 //     fn test_hardware_signer() {
 //         use std::sync::Arc;
 //
-//         use bdk::tests::get_funded_wallet;
-//         use bdk::signer::SignerOrdering;
-//         use bdk::bitcoin::Network;
+//         use bdk_wallet::tests::get_funded_wallet;
+//         use bdk_wallet::signer::SignerOrdering;
+//         use bdk_wallet::bitcoin::Network;
 //         use crate::HWISigner;
 //         use hwi::HWIClient;
 //
@@ -78,12 +78,12 @@ impl TransactionSigner for HWISigner {
 //
 //         let (mut wallet, _) = get_funded_wallet(&descriptors.internal[0]);
 //         wallet.add_signer(
-//             bdk::KeychainKind::External,
+//             bdk_wallet::KeychainKind::External,
 //             SignerOrdering(200),
 //             Arc::new(custom_signer),
 //         );
 //
-//         let addr = wallet.get_address(bdk::wallet::AddressIndex::LastUnused);
+//         let addr = wallet.get_address(bdk_wallet::wallet::AddressIndex::LastUnused);
 //         let mut builder = wallet.build_tx();
 //         builder.drain_to(addr.script_pubkey()).drain_wallet();
 //         let (mut psbt, _) = builder.finish().unwrap();

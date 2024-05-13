@@ -8,11 +8,11 @@
   </p>
 
   <p>
-    <a href="https://crates.io/crates/bdk"><img alt="Crate Info" src="https://img.shields.io/crates/v/bdk.svg"/></a>
+    <a href="https://crates.io/crates/bdk_wallet"><img alt="Crate Info" src="https://img.shields.io/crates/v/bdk_wallet.svg"/></a>
     <a href="https://github.com/bitcoindevkit/bdk/blob/master/LICENSE"><img alt="MIT or Apache-2.0 Licensed" src="https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg"/></a>
     <a href="https://github.com/bitcoindevkit/bdk/actions?query=workflow%3ACI"><img alt="CI Status" src="https://github.com/bitcoindevkit/bdk/workflows/CI/badge.svg"></a>
     <a href="https://coveralls.io/github/bitcoindevkit/bdk?branch=master"><img src="https://coveralls.io/repos/github/bitcoindevkit/bdk/badge.svg?branch=master"/></a>
-    <a href="https://docs.rs/bdk"><img alt="API Docs" src="https://img.shields.io/badge/docs.rs-bdk-green"/></a>
+    <a href="https://docs.rs/bdk_wallet"><img alt="API Docs" src="https://img.shields.io/badge/docs.rs-bdk_wallet-green"/></a>
     <a href="https://blog.rust-lang.org/2022/08/11/Rust-1.63.0.html"><img alt="Rustc Version 1.63.0+" src="https://img.shields.io/badge/rustc-1.63.0%2B-lightgrey.svg"/></a>
     <a href="https://discord.gg/d7NkDKm"><img alt="Chat on Discord" src="https://img.shields.io/discord/753336465005608961?logo=discord"></a>
   </p>
@@ -20,13 +20,13 @@
   <h4>
     <a href="https://bitcoindevkit.org">Project Homepage</a>
     <span> | </span>
-    <a href="https://docs.rs/bdk">Documentation</a>
+    <a href="https://docs.rs/bdk_wallet">Documentation</a>
   </h4>
 </div>
 
-## `bdk`
+# BDK Wallet
 
-The `bdk` crate provides the [`Wallet`] type which is a simple, high-level
+The `bdk_wallet` crate provides the [`Wallet`] type which is a simple, high-level
 interface built from the low-level components of [`bdk_chain`]. `Wallet` is a good starting point
 for many simple applications as well as a good demonstration of how to use the other mechanisms to
 construct a wallet. It has two keychains (external and internal) which are defined by
@@ -36,7 +36,7 @@ can create and sign transactions.
 
 For details about the API of `Wallet` see the [module-level documentation][`Wallet`].
 
-### Blockchain data
+## Blockchain data
 
 In order to get blockchain data for `Wallet` to consume, you should configure a client from
 an available chain source. Typically you make a request to the chain source and get a response
@@ -55,7 +55,7 @@ that the `Wallet` can use to update its view of the chain.
 * [`example-crates/wallet_electrum`](https://github.com/bitcoindevkit/bdk/tree/master/example-crates/wallet_electrum)
 * [`example-crates/wallet_rpc`](https://github.com/bitcoindevkit/bdk/tree/master/example-crates/wallet_rpc)
 
-### Persistence
+## Persistence
 
 To persist the `Wallet` on disk, it must be constructed with a [`PersistBackend`] implementation.
 
@@ -67,7 +67,7 @@ To persist the `Wallet` on disk, it must be constructed with a [`PersistBackend`
 
 <!-- compile_fail because outpoint and txout are fake variables -->
 ```rust,compile_fail
-use bdk::{bitcoin::Network, wallet::{ChangeSet, Wallet}};
+use bdk_wallet::{bitcoin::Network, wallet::{ChangeSet, Wallet}};
 
 fn main() {
     // Create a new file `Store`.
@@ -85,13 +85,13 @@ fn main() {
 <!-- ### Sync the balance of a descriptor -->
 
 <!-- ```rust,no_run -->
-<!-- use bdk::Wallet; -->
-<!-- use bdk::blockchain::ElectrumBlockchain; -->
-<!-- use bdk::SyncOptions; -->
-<!-- use bdk::electrum_client::Client; -->
-<!-- use bdk::bitcoin::Network; -->
+<!-- use bdk_wallet::Wallet; -->
+<!-- use bdk_wallet::blockchain::ElectrumBlockchain; -->
+<!-- use bdk_wallet::SyncOptions; -->
+<!-- use bdk_wallet::electrum_client::Client; -->
+<!-- use bdk_wallet::bitcoin::Network; -->
 
-<!-- fn main() -> Result<(), bdk::Error> { -->
+<!-- fn main() -> Result<(), bdk_wallet::Error> { -->
 <!--     let blockchain = ElectrumBlockchain::from(Client::new("ssl://electrum.blockstream.info:60002")?); -->
 <!--     let wallet = Wallet::new( -->
 <!--         "wpkh([c258d2e4/84h/1h/0h]tpubDDYkZojQFQjht8Tm4jsS3iuEmKjTiEGjG6KnuFNKKJb5A6ZUCUZKdvLdSDWofKi4ToRCwb9poe1XdqfUnP4jaJjCB2Zwv11ZLgSbnZSNecE/0/*)", -->
@@ -109,11 +109,11 @@ fn main() {
 <!-- ### Generate a few addresses -->
 
 <!-- ```rust -->
-<!-- use bdk::Wallet; -->
-<!-- use bdk::wallet::AddressIndex::New; -->
-<!-- use bdk::bitcoin::Network; -->
+<!-- use bdk_wallet::Wallet; -->
+<!-- use bdk_wallet::wallet::AddressIndex::New; -->
+<!-- use bdk_wallet::bitcoin::Network; -->
 
-<!-- fn main() -> Result<(), bdk::Error> { -->
+<!-- fn main() -> Result<(), bdk_wallet::Error> { -->
 <!--     let wallet = Wallet::new_no_persist( -->
 <!--         "wpkh([c258d2e4/84h/1h/0h]tpubDDYkZojQFQjht8Tm4jsS3iuEmKjTiEGjG6KnuFNKKJb5A6ZUCUZKdvLdSDWofKi4ToRCwb9poe1XdqfUnP4jaJjCB2Zwv11ZLgSbnZSNecE/0/*)", -->
 <!--         Some("wpkh([c258d2e4/84h/1h/0h]tpubDDYkZojQFQjht8Tm4jsS3iuEmKjTiEGjG6KnuFNKKJb5A6ZUCUZKdvLdSDWofKi4ToRCwb9poe1XdqfUnP4jaJjCB2Zwv11ZLgSbnZSNecE/1/*)"), -->
@@ -131,17 +131,17 @@ fn main() {
 <!-- ### Create a transaction -->
 
 <!-- ```rust,no_run -->
-<!-- use bdk::{FeeRate, Wallet, SyncOptions}; -->
-<!-- use bdk::blockchain::ElectrumBlockchain; -->
+<!-- use bdk_wallet::{FeeRate, Wallet, SyncOptions}; -->
+<!-- use bdk_wallet::blockchain::ElectrumBlockchain; -->
 
-<!-- use bdk::electrum_client::Client; -->
-<!-- use bdk::wallet::AddressIndex::New; -->
+<!-- use bdk_wallet::electrum_client::Client; -->
+<!-- use bdk_wallet::wallet::AddressIndex::New; -->
 
 <!-- use bitcoin::base64; -->
-<!-- use bdk::bitcoin::consensus::serialize; -->
-<!-- use bdk::bitcoin::Network; -->
+<!-- use bdk_wallet::bitcoin::consensus::serialize; -->
+<!-- use bdk_wallet::bitcoin::Network; -->
 
-<!-- fn main() -> Result<(), bdk::Error> { -->
+<!-- fn main() -> Result<(), bdk_wallet::Error> { -->
 <!--     let blockchain = ElectrumBlockchain::from(Client::new("ssl://electrum.blockstream.info:60002")?); -->
 <!--     let wallet = Wallet::new_no_persist( -->
 <!--         "wpkh([c258d2e4/84h/1h/0h]tpubDDYkZojQFQjht8Tm4jsS3iuEmKjTiEGjG6KnuFNKKJb5A6ZUCUZKdvLdSDWofKi4ToRCwb9poe1XdqfUnP4jaJjCB2Zwv11ZLgSbnZSNecE/0/*)", -->
@@ -172,13 +172,13 @@ fn main() {
 <!-- ### Sign a transaction -->
 
 <!-- ```rust,no_run -->
-<!-- use bdk::{Wallet, SignOptions}; -->
+<!-- use bdk_wallet::{Wallet, SignOptions}; -->
 
 <!-- use bitcoin::base64; -->
-<!-- use bdk::bitcoin::consensus::deserialize; -->
-<!-- use bdk::bitcoin::Network; -->
+<!-- use bdk_wallet::bitcoin::consensus::deserialize; -->
+<!-- use bdk_wallet::bitcoin::Network; -->
 
-<!-- fn main() -> Result<(), bdk::Error> { -->
+<!-- fn main() -> Result<(), bdk_wallet::Error> { -->
 <!--     let wallet = Wallet::new_no_persist( -->
 <!--         "wpkh([c258d2e4/84h/1h/0h]tprv8griRPhA7342zfRyB6CqeKF8CJDXYu5pgnj1cjL1u2ngKcJha5jjTRimG82ABzJQ4MQe71CV54xfn25BbhCNfEGGJZnxvCDQCd6JkbvxW6h/0/*)", -->
 <!--         Some("wpkh([c258d2e4/84h/1h/0h]tprv8griRPhA7342zfRyB6CqeKF8CJDXYu5pgnj1cjL1u2ngKcJha5jjTRimG82ABzJQ4MQe71CV54xfn25BbhCNfEGGJZnxvCDQCd6JkbvxW6h/1/*)"), -->
@@ -202,7 +202,7 @@ fn main() {
 cargo test
 ```
 
-## License
+# License
 
 Licensed under either of
 
@@ -211,15 +211,15 @@ Licensed under either of
 
 at your option.
 
-### Contribution
+# Contribution
 
 Unless you explicitly state otherwise, any contribution intentionally
 submitted for inclusion in the work by you, as defined in the Apache-2.0
 license, shall be dual licensed as above, without any additional terms or
 conditions.
 
-[`Wallet`]: https://docs.rs/bdk/1.0.0-alpha.7/bdk/wallet/struct.Wallet.html
-[`PersistBackend`]: https://docs.rs/bdk_persist/latest/bdk_persist/trait.PersistBackend.html
+[`Wallet`]: https://docs.rs/bdk_wallet/latest/bdk_wallet/wallet/struct.Wallet.html
+[`PersistBackend`]: https://docs.rs/bdk_chain/latest/bdk_chain/trait.PersistBackend.html
 [`bdk_chain`]: https://docs.rs/bdk_chain/latest
 [`bdk_file_store`]: https://docs.rs/bdk_file_store/latest
 [`bdk_electrum`]: https://docs.rs/bdk_electrum/latest
