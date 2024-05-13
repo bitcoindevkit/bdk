@@ -94,13 +94,6 @@ pub enum CreateTxError {
     ChangePolicyDescriptor,
     /// There was an error with coin selection
     CoinSelection(coin_selection::Error),
-    /// Wallet's UTXO set is not enough to cover recipient's requested plus fee
-    InsufficientFunds {
-        /// Sats needed for some transaction
-        needed: u64,
-        /// Sats available for spending
-        available: u64,
-    },
     /// Cannot build a tx without recipients
     NoRecipients,
     /// Partially signed bitcoin transaction error
@@ -184,13 +177,6 @@ impl fmt::Display for CreateTxError {
                 )
             }
             CreateTxError::CoinSelection(e) => e.fmt(f),
-            CreateTxError::InsufficientFunds { needed, available } => {
-                write!(
-                    f,
-                    "Insufficient funds: {} sat available of {} sat needed",
-                    available, needed
-                )
-            }
             CreateTxError::NoRecipients => {
                 write!(f, "Cannot build tx without recipients")
             }
