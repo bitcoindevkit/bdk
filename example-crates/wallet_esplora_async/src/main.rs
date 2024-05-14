@@ -10,7 +10,7 @@ use bdk_sqlite::{rusqlite::Connection, Store};
 
 const SEND_AMOUNT: Amount = Amount::from_sat(5000);
 const STOP_GAP: usize = 50;
-const PARALLEL_REQUESTS: usize = 5;
+const PARALLEL_REQUESTS: usize = 3;
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {

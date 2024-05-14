@@ -1,9 +1,4 @@
-const DB_MAGIC: &str = "bdk_wallet_esplora_example";
-const SEND_AMOUNT: Amount = Amount::from_sat(1000);
-const STOP_GAP: usize = 5;
-const PARALLEL_REQUESTS: usize = 1;
-
-use std::{collections::BTreeSet, io::Write, str::FromStr};
+use std::{collections::BTreeMap, io::Write, str::FromStr};
 
 use bdk_esplora::{esplora_client, EsploraExt};
 use bdk_file_store::Store;
@@ -11,6 +6,11 @@ use bdk_wallet::{
     bitcoin::{Address, Amount, Network},
     KeychainKind, SignOptions, Wallet,
 };
+
+const DB_MAGIC: &str = "bdk_wallet_esplora_blocking_example";
+const SEND_AMOUNT: Amount = Amount::from_sat(5000);
+const STOP_GAP: usize = 50;
+const PARALLEL_REQUESTS: usize = 3;
 
 fn main() -> Result<(), anyhow::Error> {
     let db_path = std::env::temp_dir().join("bdk-esplora-example");
@@ -37,8 +37,7 @@ fn main() -> Result<(), anyhow::Error> {
     println!("Wallet balance before syncing: {} sats", balance.total());
 
     print!("Syncing...");
-    let client =
-        esplora_client::Builder::new("https://blockstream.info/testnet/api").build_blocking();
+    let client = esplora_client::Builder::new("https://mempool.space/testnet/api").build_blocking();
 
     let request = wallet.start_full_scan().inspect_spks_for_all_keychains({
         let mut once = BTreeSet::<KeychainKind>::new();
