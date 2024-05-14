@@ -1,9 +1,9 @@
-use std::{collections::BTreeMap, io::Write, str::FromStr};
+use std::{io::Write, str::FromStr};
 
 use bdk_esplora::{esplora_client, EsploraExt};
 use bdk_file_store::Store;
 use bdk_wallet::{
-    bitcoin::{Address, Amount, Network},
+    bitcoin::{Address, Amount, Network, Script},
     KeychainKind, SignOptions, Wallet,
 };
 
@@ -13,8 +13,8 @@ const STOP_GAP: usize = 50;
 const PARALLEL_REQUESTS: usize = 3;
 
 fn main() -> Result<(), anyhow::Error> {
-    let db_path = std::env::temp_dir().join("bdk-esplora-example");
-    let mut db =
+    let db_path = std::env::temp_dir().join("bdk-esplora-blocking-example");
+    let db =
         Store::<bdk_wallet::wallet::ChangeSet>::open_or_create_new(DB_MAGIC.as_bytes(), db_path)?;
     let external_descriptor = "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/84'/1'/0'/0/*)";
     let internal_descriptor = "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/84'/1'/0'/1/*)";
@@ -39,16 +39,27 @@ fn main() -> Result<(), anyhow::Error> {
     print!("Syncing...");
     let client = esplora_client::Builder::new("https://mempool.space/testnet/api").build_blocking();
 
-    let request = wallet.start_full_scan().inspect_spks_for_all_keychains({
-        let mut once = BTreeSet::<KeychainKind>::new();
-        move |keychain, spk_i, _| {
-            match once.insert(keychain) {
-                true => print!("\nScanning keychain [{:?}]", keychain),
-                false => print!(" {:<3}", spk_i),
+    fn generate_inspect(kind: KeychainKind) -> impl FnMut(u32, &Script) + Send + Sync + 'static {
+        let mut once = Some(());
+        let mut stdout = std::io::stdout();
+        move |spk_i, _| {
+            match once.take() {
+                Some(_) => print!("\nScanning keychain [{:?}]", kind),
+                None => print!(" {:<3}", spk_i),
             };
-            std::io::stdout().flush().expect("must flush")
+            stdout.flush().expect("must flush");
         }
-    });
+    }
+    let request = wallet
+        .start_full_scan()
+        .inspect_spks_for_keychain(
+            KeychainKind::External,
+            generate_inspect(KeychainKind::External),
+        )
+        .inspect_spks_for_keychain(
+            KeychainKind::Internal,
+            generate_inspect(KeychainKind::Internal),
+        );
 
     let mut update = client.full_scan(request, STOP_GAP, PARALLEL_REQUESTS)?;
     let now = std::time::UNIX_EPOCH.elapsed().unwrap().as_secs();

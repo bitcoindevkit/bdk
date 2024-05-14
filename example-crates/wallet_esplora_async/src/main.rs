@@ -1,4 +1,4 @@
-use std::{collections::BTreeSet, io::Write, str::FromStr};
+use std::{io::Write, str::FromStr};
 
 use bdk_esplora::{esplora_client, EsploraAsyncExt};
 use bdk_wallet::{
@@ -53,16 +53,6 @@ async fn main() -> Result<(), anyhow::Error> {
     }
     let request = wallet
         .start_full_scan()
-        .inspect_spks_for_all_keychains({
-            let mut once = BTreeSet::<KeychainKind>::new();
-            move |keychain, spk_i, _| {
-                match once.insert(keychain) {
-                    true => print!("\nScanning keychain [{:?}]", keychain),
-                    false => print!(" {:<3}", spk_i),
-                }
-                std::io::stdout().flush().expect("must flush")
-            }
-        })
         .inspect_spks_for_keychain(
             KeychainKind::External,
             generate_inspect(KeychainKind::External),
