@@ -34,8 +34,8 @@ async fn main() -> Result<(), anyhow::Error> {
     }
     println!("Generated Address: {}", address);
 
-    let balance = wallet.balance();
-    println!("Wallet balance before syncing: {} sats", balance.total());
+    let balance = wallet.get_balance();
+    println!("Wallet balance before syncing: {}", balance.total());
 
     print!("Syncing...");
     let client = esplora_client::Builder::new("http://signet.bitcoindevkit.net").build_async()?;
@@ -74,12 +74,12 @@ async fn main() -> Result<(), anyhow::Error> {
     }
     println!();
 
-    let balance = wallet.balance();
-    println!("Wallet balance after syncing: {} sats", balance.total());
+    let balance = wallet.get_balance();
+    println!("Wallet balance after syncing: {}", balance.total());
 
     if balance.total() < SEND_AMOUNT {
         println!(
-            "Please send at least {} sats to the receiving address",
+            "Please send at least {} to the receiving address",
             SEND_AMOUNT
         );
         std::process::exit(0);
