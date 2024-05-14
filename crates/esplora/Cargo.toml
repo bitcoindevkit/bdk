@@ -22,7 +22,7 @@ bitcoin = { version = "0.31.0", optional = true, default-features = false }
 miniscript = { version = "11.0.0", optional = true, default-features = false }
 
 [dev-dependencies]
-bdk_testenv = { path = "../testenv", default_features = false }
+bdk_testenv = { path = "../testenv", default-features = false }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }
 
 [features]

@@ -58,9 +58,6 @@ extern crate alloc;
 #[cfg(feature = "serde")]
 pub extern crate serde_crate as serde;
 
-#[cfg(feature = "bincode")]
-extern crate bincode;
-
 #[cfg(feature = "std")]
 #[macro_use]
 extern crate std;
