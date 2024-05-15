@@ -150,22 +150,19 @@ fn test_list_owned_txouts() {
 
     {
         // we need to scope here to take immutanble reference of the graph
-        for _ in 0..10 {
-            let ((_, script), _) = graph
-                .index
-                .reveal_next_spk(&"keychain_1".to_string())
-                .unwrap();
-            // TODO Assert indexes
-            trusted_spks.push(script.to_owned());
+        for exp_i in 0_u32..10 {
+            let (next_spk, _) = graph.index.reveal_next_spk(&"keychain_1".to_string());
+            let (spk_i, spk) = next_spk.expect("must exist");
+            assert_eq!(spk_i, exp_i);
+            trusted_spks.push(spk);
         }
     }
     {
-        for _ in 0..10 {
-            let ((_, script), _) = graph
-                .index
-                .reveal_next_spk(&"keychain_2".to_string())
-                .unwrap();
-            untrusted_spks.push(script.to_owned());
+        for exp_i in 0_u32..10 {
+            let (next_spk, _) = graph.index.reveal_next_spk(&"keychain_2".to_string());
+            let (spk_i, spk) = next_spk.expect("must exist");
+            assert_eq!(spk_i, exp_i);
+            untrusted_spks.push(spk);
         }
     }
 

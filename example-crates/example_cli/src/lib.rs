@@ -259,14 +259,9 @@ where
         Keychain::External
     };
 
-    let ((change_index, change_script), change_changeset) = graph
-        .index
-        .next_unused_spk(&internal_keychain)
-        .expect("Must exist");
+    let (change_next_spk, change_changeset) = graph.index.next_unused_spk(&internal_keychain);
+    let (change_index, change_script) = change_next_spk.expect("must have next spk");
     changeset.append(change_changeset);
-
-    // Clone to drop the immutable reference.
-    let change_script = change_script.into();
 
     let change_plan = bdk_tmp_plan::plan_satisfaction(
         &graph
@@ -474,15 +469,15 @@ where
                         _ => unreachable!("only these two variants exist in match arm"),
                     };
 
-                    let ((spk_i, spk), index_changeset) =
-                        spk_chooser(index, &Keychain::External).expect("Must exist");
+                    let (next_spk, index_changeset) = spk_chooser(index, &Keychain::External);
+                    let (spk_i, spk) = next_spk.expect("keychain must exist");
                     let db = &mut *db.lock().unwrap();
                     db.stage_and_commit(C::from((
                         local_chain::ChangeSet::default(),
                         indexed_tx_graph::ChangeSet::from(index_changeset),
                     )))?;
                     let addr =
-                        Address::from_script(spk, network).context("failed to derive address")?;
+                        Address::from_script(&spk, network).context("failed to derive address")?;
                     println!("[address @ {}] {}", spk_i, addr);
                     Ok(())
                 }

@@ -749,18 +749,14 @@ impl Wallet {
     /// If writing to persistent storage fails.
     pub fn reveal_next_address(&mut self, keychain: KeychainKind) -> anyhow::Result<AddressInfo> {
         let keychain = self.map_keychain(keychain);
-        let ((index, spk), index_changeset) = self
-            .indexed_graph
-            .index
-            .reveal_next_spk(&keychain)
-            .expect("Must exist (we called map_keychain)");
-
+        let (next_spk, index_changeset) = self.indexed_graph.index.reveal_next_spk(&keychain);
+        let (index, spk) = next_spk.expect("Must exist (we called map_keychain)");
         self.persist
             .stage_and_commit(indexed_tx_graph::ChangeSet::from(index_changeset).into())?;
 
         Ok(AddressInfo {
             index,
-            address: Address::from_script(spk, self.network).expect("must have address form"),
+            address: Address::from_script(&spk, self.network).expect("must have address form"),
             keychain,
         })
     }
@@ -781,11 +777,9 @@ impl Wallet {
         index: u32,
     ) -> anyhow::Result<impl Iterator<Item = AddressInfo> + '_> {
         let keychain = self.map_keychain(keychain);
-        let (spk_iter, index_changeset) = self
-            .indexed_graph
-            .index
-            .reveal_to_target(&keychain, index)
-            .expect("must exist (we called map_keychain)");
+        let (spk_iter, index_changeset) =
+            self.indexed_graph.index.reveal_to_target(&keychain, index);
+        let spk_iter = spk_iter.expect("Must exist (we called map_keychain)");
 
         self.persist
             .stage_and_commit(indexed_tx_graph::ChangeSet::from(index_changeset).into())?;
@@ -808,18 +802,15 @@ impl Wallet {
     /// If writing to persistent storage fails.
     pub fn next_unused_address(&mut self, keychain: KeychainKind) -> anyhow::Result<AddressInfo> {
         let keychain = self.map_keychain(keychain);
-        let ((index, spk), index_changeset) = self
-            .indexed_graph
-            .index
-            .next_unused_spk(&keychain)
-            .expect("must exist (we called map_keychain)");
+        let (next_spk, index_changeset) = self.indexed_graph.index.next_unused_spk(&keychain);
+        let (index, spk) = next_spk.expect("Must exist (we called map_keychain)");
 
         self.persist
             .stage_and_commit(indexed_tx_graph::ChangeSet::from(index_changeset).into())?;
 
         Ok(AddressInfo {
             index,
-            address: Address::from_script(spk, self.network).expect("must have address form"),
+            address: Address::from_script(&spk, self.network).expect("must have address form"),
             keychain,
         })
     }
@@ -974,7 +965,7 @@ impl Wallet {
     /// [`commit`]: Self::commit
     pub fn insert_txout(&mut self, outpoint: OutPoint, txout: TxOut) {
         let additions = self.indexed_graph.insert_txout(outpoint, txout);
-        self.persist.stage(ChangeSet::from(additions));
+        self.persist.stage(additions.into());
     }
 
     /// Calculates the fee of a given transaction. Returns 0 if `tx` is a coinbase transaction.
@@ -1542,17 +1533,11 @@ impl Wallet {
             Some(ref drain_recipient) => drain_recipient.clone(),
             None => {
                 let change_keychain = self.map_keychain(KeychainKind::Internal);
-                let ((index, spk), index_changeset) = self
-                    .indexed_graph
-                    .index
-                    .next_unused_spk(&change_keychain)
-                    .expect("Keychain exists (we called map_keychain)");
-                let spk = spk.into();
+                let (next_spk, index_changeset) =
+                    self.indexed_graph.index.next_unused_spk(&change_keychain);
+                let (index, spk) = next_spk.expect("Keychain exists (we called map_keychain)");
                 self.indexed_graph.index.mark_used(change_keychain, index);
-                self.persist
-                    .stage(ChangeSet::from(indexed_tx_graph::ChangeSet::from(
-                        index_changeset,
-                    )));
+                self.persist.stage(index_changeset.into());
                 self.persist.commit().map_err(CreateTxError::Persist)?;
                 spk
             }
@@ -2366,21 +2351,19 @@ impl Wallet {
     /// [`commit`]: Self::commit
     pub fn apply_update(&mut self, update: impl Into<Update>) -> Result<(), CannotConnectError> {
         let update = update.into();
-        let mut changeset = match update.chain {
-            Some(chain_update) => ChangeSet::from(self.chain.apply_update(chain_update)?),
-            None => ChangeSet::default(),
-        };
+        let mut changeset = ChangeSet::default();
 
-        let (_, index_changeset) = self
-            .indexed_graph
-            .index
-            .reveal_to_target_multi(&update.last_active_indices);
-        changeset.append(ChangeSet::from(indexed_tx_graph::ChangeSet::from(
-            index_changeset,
-        )));
-        changeset.append(ChangeSet::from(
-            self.indexed_graph.apply_update(update.graph),
-        ));
+        if let Some(chain_update) = update.chain {
+            changeset.append(self.chain.apply_update(chain_update)?.into());
+        }
+        changeset.append({
+            let (_, index_changeset) = self
+                .indexed_graph
+                .index
+                .reveal_to_target_multi(&update.last_active_indices);
+            index_changeset.into()
+        });
+        changeset.append(self.indexed_graph.apply_update(update.graph).into());
         self.persist.stage(changeset);
         Ok(())
     }
@@ -2486,7 +2469,7 @@ impl Wallet {
         let indexed_graph_changeset = self
             .indexed_graph
             .batch_insert_relevant_unconfirmed(unconfirmed_txs);
-        self.persist.stage(ChangeSet::from(indexed_graph_changeset));
+        self.persist.stage(indexed_graph_changeset.into());
     }
 }
 
