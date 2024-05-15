@@ -523,10 +523,10 @@ fn fetch_prev_txout<C: ElectrumApi>(
     for tx in full_txs {
         for vin in &tx.input {
             let outpoint = vin.previous_output;
+            let vout = outpoint.vout;
             let prev_tx = fetch_tx(client, tx_cache, outpoint.txid)?;
-            for txout in prev_tx.output.clone() {
-                let _ = graph_update.insert_txout(outpoint, txout);
-            }
+            let txout = prev_tx.output[vout as usize].clone();
+            let _ = graph_update.insert_txout(outpoint, txout);
         }
     }
     Ok(())
