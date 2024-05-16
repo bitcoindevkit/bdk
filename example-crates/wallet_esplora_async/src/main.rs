@@ -9,7 +9,7 @@ use bdk_wallet::{
 use bdk_sqlite::{rusqlite::Connection, Store};
 
 const SEND_AMOUNT: Amount = Amount::from_sat(5000);
-const STOP_GAP: usize = 50;
+const STOP_GAP: usize = 20;
 const PARALLEL_REQUESTS: usize = 3;
 
 #[tokio::main]

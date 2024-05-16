@@ -9,7 +9,7 @@ use bdk_wallet::{
 
 const DB_MAGIC: &str = "bdk_wallet_esplora_blocking_example";
 const SEND_AMOUNT: Amount = Amount::from_sat(5000);
-const STOP_GAP: usize = 50;
+const STOP_GAP: usize = 20;
 const PARALLEL_REQUESTS: usize = 3;
 
 fn main() -> Result<(), anyhow::Error> {

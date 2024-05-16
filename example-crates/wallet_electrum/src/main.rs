@@ -1,6 +1,6 @@
 const DB_MAGIC: &str = "bdk_wallet_electrum_example";
 const SEND_AMOUNT: Amount = Amount::from_sat(5000);
-const STOP_GAP: usize = 50;
+const STOP_GAP: usize = 20;
 const BATCH_SIZE: usize = 5;
 
 use anyhow::anyhow;
