@@ -44,7 +44,7 @@ fn main() -> Result<(), anyhow::Error> {
         let mut stdout = std::io::stdout();
         move |spk_i, _| {
             match once.take() {
-                Some(_) => print!("\nScanning keychain [{:?}]", kind),
+                Some(_) => print!("\nScanning keychain [{:?}] {:<3}", kind, spk_i),
                 None => print!(" {:<3}", spk_i),
             };
             stdout.flush().expect("must flush");

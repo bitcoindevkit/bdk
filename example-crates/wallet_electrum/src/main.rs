@@ -53,9 +53,9 @@ fn main() -> Result<(), anyhow::Error> {
         .start_full_scan()
         .inspect_spks_for_all_keychains({
             let mut once = HashSet::<KeychainKind>::new();
-            move |k, spk_i, _| {
-                if once.insert(k) {
-                    print!("\nScanning keychain [{:?}]", k)
+            move |kind, spk_i, _| {
+                if once.insert(kind) {
+                    print!("\nScanning keychain [{:?}] {:<3}", kind, spk_i)
                 } else {
                     print!(" {:<3}", spk_i)
                 }
