@@ -19,7 +19,6 @@
 //! # use bdk_wallet::*;
 //! # use bdk_wallet::wallet::ChangeSet;
 //! # use bdk_wallet::wallet::error::CreateTxError;
-//! # use bdk_wallet::wallet::tx_builder::CreateTx;
 //! # use bdk_persist::PersistBackend;
 //! # use anyhow::Error;
 //! # let to_address = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap().assume_checked();
@@ -43,30 +42,15 @@
 use alloc::{boxed::Box, rc::Rc, string::String, vec::Vec};
 use core::cell::RefCell;
 use core::fmt;
-use core::marker::PhantomData;
 
 use bitcoin::psbt::{self, Psbt};
 use bitcoin::script::PushBytes;
 use bitcoin::{absolute, Amount, FeeRate, OutPoint, ScriptBuf, Sequence, Transaction, Txid};
 
-use super::coin_selection::{CoinSelectionAlgorithm, DefaultCoinSelectionAlgorithm};
+use super::coin_selection::CoinSelectionAlgorithm;
 use super::{CreateTxError, Wallet};
 use crate::collections::{BTreeMap, HashSet};
 use crate::{KeychainKind, LocalOutput, Utxo, WeightedUtxo};
-
-/// Context in which the [`TxBuilder`] is valid
-pub trait TxBuilderContext: core::fmt::Debug + Default + Clone {}
-
-/// Marker type to indicate the [`TxBuilder`] is being used to create a new transaction (as opposed
-/// to bumping the fee of an existing one).
-#[derive(Debug, Default, Clone)]
-pub struct CreateTx;
-impl TxBuilderContext for CreateTx {}
-
-/// Marker type to indicate the [`TxBuilder`] is being used to bump the fee of an existing transaction.
-#[derive(Debug, Default, Clone)]
-pub struct BumpFee;
-impl TxBuilderContext for BumpFee {}
 
 /// A transaction builder
 ///
@@ -123,11 +107,10 @@ impl TxBuilderContext for BumpFee {}
 /// [`finish`]: Self::finish
 /// [`coin_selection`]: Self::coin_selection
 #[derive(Debug)]
-pub struct TxBuilder<'a, Cs, Ctx> {
+pub struct TxBuilder<'a, Cs> {
     pub(crate) wallet: Rc<RefCell<&'a mut Wallet>>,
     pub(crate) params: TxParams,
     pub(crate) coin_selection: Cs,
-    pub(crate) phantom: PhantomData<Ctx>,
 }
 
 /// The parameters for transaction creation sans coin selection algorithm.
@@ -175,19 +158,18 @@ impl Default for FeePolicy {
     }
 }
 
-impl<'a, Cs: Clone, Ctx> Clone for TxBuilder<'a, Cs, Ctx> {
+impl<'a, Cs: Clone> Clone for TxBuilder<'a, Cs> {
     fn clone(&self) -> Self {
         TxBuilder {
             wallet: self.wallet.clone(),
             params: self.params.clone(),
             coin_selection: self.coin_selection.clone(),
-            phantom: PhantomData,
         }
     }
 }
 
-// methods supported by both contexts, for any CoinSelectionAlgorithm
-impl<'a, Cs, Ctx> TxBuilder<'a, Cs, Ctx> {
+// Methods supported for any CoinSelectionAlgorithm.
+impl<'a, Cs> TxBuilder<'a, Cs> {
     /// Set a custom fee rate.
     ///
     /// This method sets the mining fee paid by the transaction as a rate on its size.
@@ -212,8 +194,8 @@ impl<'a, Cs, Ctx> TxBuilder<'a, Cs, Ctx> {
     /// Note that this is really a minimum absolute fee -- it's possible to
     /// overshoot it slightly since adding a change output to drain the remaining
     /// excess might not be viable.
-    pub fn fee_absolute(&mut self, fee_amount: u64) -> &mut Self {
-        self.params.fee_policy = Some(FeePolicy::FeeAmount(fee_amount));
+    pub fn fee_absolute(&mut self, fee_amount: Amount) -> &mut Self {
+        self.params.fee_policy = Some(FeePolicy::FeeAmount(fee_amount.to_sat()));
         self
     }
 
@@ -553,18 +535,14 @@ impl<'a, Cs, Ctx> TxBuilder<'a, Cs, Ctx> {
 
     /// Choose the coin selection algorithm
     ///
-    /// Overrides the [`DefaultCoinSelectionAlgorithm`].
+    /// Overrides the [`CoinSelectionAlgorithm`].
     ///
     /// Note that this function consumes the builder and returns it so it is usually best to put this as the first call on the builder.
-    pub fn coin_selection<P: CoinSelectionAlgorithm>(
-        self,
-        coin_selection: P,
-    ) -> TxBuilder<'a, P, Ctx> {
+    pub fn coin_selection<P: CoinSelectionAlgorithm>(self, coin_selection: P) -> TxBuilder<'a, P> {
         TxBuilder {
             wallet: self.wallet,
             params: self.params,
             coin_selection,
-            phantom: PhantomData,
         }
     }
 
@@ -612,9 +590,84 @@ impl<'a, Cs, Ctx> TxBuilder<'a, Cs, Ctx> {
         self.params.allow_dust = allow_dust;
         self
     }
+
+    /// Replace the recipients already added with a new list
+    pub fn set_recipients(&mut self, recipients: Vec<(ScriptBuf, Amount)>) -> &mut Self {
+        self.params.recipients = recipients
+            .into_iter()
+            .map(|(script, amount)| (script, amount.to_sat()))
+            .collect();
+        self
+    }
+
+    /// Add a recipient to the internal list
+    pub fn add_recipient(&mut self, script_pubkey: ScriptBuf, amount: Amount) -> &mut Self {
+        self.params
+            .recipients
+            .push((script_pubkey, amount.to_sat()));
+        self
+    }
+
+    /// Add data as an output, using OP_RETURN
+    pub fn add_data<T: AsRef<PushBytes>>(&mut self, data: &T) -> &mut Self {
+        let script = ScriptBuf::new_op_return(data);
+        self.add_recipient(script, Amount::ZERO);
+        self
+    }
+
+    /// Sets the address to *drain* excess coins to.
+    ///
+    /// Usually, when there are excess coins they are sent to a change address generated by the
+    /// wallet. This option replaces the usual change address with an arbitrary `script_pubkey` of
+    /// your choosing. Just as with a change output, if the drain output is not needed (the excess
+    /// coins are too small) it will not be included in the resulting transaction. The only
+    /// difference is that it is valid to use `drain_to` without setting any ordinary recipients
+    /// with [`add_recipient`] (but it is perfectly fine to add recipients as well).
+    ///
+    /// If you choose not to set any recipients, you should provide the utxos that the
+    /// transaction should spend via [`add_utxos`].
+    ///
+    /// # Example
+    ///
+    /// `drain_to` is very useful for draining all the coins in a wallet with [`drain_wallet`] to a
+    /// single address.
+    ///
+    /// ```
+    /// # use std::str::FromStr;
+    /// # use bitcoin::*;
+    /// # use bdk_wallet::*;
+    /// # use bdk_wallet::wallet::ChangeSet;
+    /// # use bdk_wallet::wallet::error::CreateTxError;
+    /// # use bdk_persist::PersistBackend;
+    /// # use anyhow::Error;
+    /// # let to_address =
+    /// Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt")
+    ///     .unwrap()
+    ///     .assume_checked();
+    /// # let mut wallet = doctest_wallet!();
+    /// let mut tx_builder = wallet.build_tx();
+    ///
+    /// tx_builder
+    ///     // Spend all outputs in this wallet.
+    ///     .drain_wallet()
+    ///     // Send the excess (which is all the coins minus the fee) to this address.
+    ///     .drain_to(to_address.script_pubkey())
+    ///     .fee_rate(FeeRate::from_sat_per_vb(5).expect("valid feerate"))
+    ///     .enable_rbf();
+    /// let psbt = tx_builder.finish()?;
+    /// # Ok::<(), anyhow::Error>(())
+    /// ```
+    ///
+    /// [`add_recipient`]: Self::add_recipient
+    /// [`add_utxos`]: Self::add_utxos
+    /// [`drain_wallet`]: Self::drain_wallet
+    pub fn drain_to(&mut self, script_pubkey: ScriptBuf) -> &mut Self {
+        self.params.drain_to = Some(script_pubkey);
+        self
+    }
 }
 
-impl<'a, Cs: CoinSelectionAlgorithm, Ctx> TxBuilder<'a, Cs, Ctx> {
+impl<'a, Cs: CoinSelectionAlgorithm> TxBuilder<'a, Cs> {
     /// Finish building the transaction.
     ///
     /// Returns a new [`Psbt`] per [`BIP174`].
@@ -688,142 +741,6 @@ impl fmt::Display for AddForeignUtxoError {
 
 #[cfg(feature = "std")]
 impl std::error::Error for AddForeignUtxoError {}
-
-#[derive(Debug)]
-/// Error returned from [`TxBuilder::allow_shrinking`]
-pub enum AllowShrinkingError {
-    /// Script/PubKey was not in the original transaction
-    MissingScriptPubKey(ScriptBuf),
-}
-
-impl fmt::Display for AllowShrinkingError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::MissingScriptPubKey(script_buf) => write!(
-                f,
-                "Script/PubKey was not in the original transaction: {}",
-                script_buf,
-            ),
-        }
-    }
-}
-
-#[cfg(feature = "std")]
-impl std::error::Error for AllowShrinkingError {}
-
-impl<'a, Cs: CoinSelectionAlgorithm> TxBuilder<'a, Cs, CreateTx> {
-    /// Replace the recipients already added with a new list
-    pub fn set_recipients(&mut self, recipients: Vec<(ScriptBuf, Amount)>) -> &mut Self {
-        self.params.recipients = recipients
-            .into_iter()
-            .map(|(script, amount)| (script, amount.to_sat()))
-            .collect();
-        self
-    }
-
-    /// Add a recipient to the internal list
-    pub fn add_recipient(&mut self, script_pubkey: ScriptBuf, amount: Amount) -> &mut Self {
-        self.params
-            .recipients
-            .push((script_pubkey, amount.to_sat()));
-        self
-    }
-
-    /// Add data as an output, using OP_RETURN
-    pub fn add_data<T: AsRef<PushBytes>>(&mut self, data: &T) -> &mut Self {
-        let script = ScriptBuf::new_op_return(data);
-        self.add_recipient(script, Amount::ZERO);
-        self
-    }
-
-    /// Sets the address to *drain* excess coins to.
-    ///
-    /// Usually, when there are excess coins they are sent to a change address generated by the
-    /// wallet. This option replaces the usual change address with an arbitrary `script_pubkey` of
-    /// your choosing. Just as with a change output, if the drain output is not needed (the excess
-    /// coins are too small) it will not be included in the resulting transaction. The only
-    /// difference is that it is valid to use `drain_to` without setting any ordinary recipients
-    /// with [`add_recipient`] (but it is perfectly fine to add recipients as well).
-    ///
-    /// If you choose not to set any recipients, you should either provide the utxos that the
-    /// transaction should spend via [`add_utxos`], or set [`drain_wallet`] to spend all of them.
-    ///
-    /// When bumping the fees of a transaction made with this option, you probably want to
-    /// use [`allow_shrinking`] to allow this output to be reduced to pay for the extra fees.
-    ///
-    /// # Example
-    ///
-    /// `drain_to` is very useful for draining all the coins in a wallet with [`drain_wallet`] to a
-    /// single address.
-    ///
-    /// ```
-    /// # use std::str::FromStr;
-    /// # use bitcoin::*;
-    /// # use bdk_wallet::*;
-    /// # use bdk_wallet::wallet::ChangeSet;
-    /// # use bdk_wallet::wallet::error::CreateTxError;
-    /// # use bdk_wallet::wallet::tx_builder::CreateTx;
-    /// # use bdk_persist::PersistBackend;
-    /// # use anyhow::Error;
-    /// # let to_address =
-    /// Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt")
-    ///     .unwrap()
-    ///     .assume_checked();
-    /// # let mut wallet = doctest_wallet!();
-    /// let mut tx_builder = wallet.build_tx();
-    ///
-    /// tx_builder
-    ///     // Spend all outputs in this wallet.
-    ///     .drain_wallet()
-    ///     // Send the excess (which is all the coins minus the fee) to this address.
-    ///     .drain_to(to_address.script_pubkey())
-    ///     .fee_rate(FeeRate::from_sat_per_vb(5).expect("valid feerate"))
-    ///     .enable_rbf();
-    /// let psbt = tx_builder.finish()?;
-    /// # Ok::<(), anyhow::Error>(())
-    /// ```
-    ///
-    /// [`allow_shrinking`]: Self::allow_shrinking
-    /// [`add_recipient`]: Self::add_recipient
-    /// [`add_utxos`]: Self::add_utxos
-    /// [`drain_wallet`]: Self::drain_wallet
-    pub fn drain_to(&mut self, script_pubkey: ScriptBuf) -> &mut Self {
-        self.params.drain_to = Some(script_pubkey);
-        self
-    }
-}
-
-// methods supported only by bump_fee
-impl<'a> TxBuilder<'a, DefaultCoinSelectionAlgorithm, BumpFee> {
-    /// Explicitly tells the wallet that it is allowed to reduce the amount of the output matching this
-    /// `script_pubkey` in order to bump the transaction fee. Without specifying this the wallet
-    /// will attempt to find a change output to shrink instead.
-    ///
-    /// **Note** that the output may shrink to below the dust limit and therefore be removed. If it is
-    /// preserved then it is currently not guaranteed to be in the same position as it was
-    /// originally.
-    ///
-    /// Returns an `Err` if `script_pubkey` can't be found among the recipients of the
-    /// transaction we are bumping.
-    pub fn allow_shrinking(
-        &mut self,
-        script_pubkey: ScriptBuf,
-    ) -> Result<&mut Self, AllowShrinkingError> {
-        match self
-            .params
-            .recipients
-            .iter()
-            .position(|(recipient_script, _)| *recipient_script == script_pubkey)
-        {
-            Some(position) => {
-                self.params.recipients.remove(position);
-                self.params.drain_to = Some(script_pubkey);
-                Ok(self)
-            }
-            None => Err(AllowShrinkingError::MissingScriptPubKey(script_pubkey)),
-        }
-    }
-}
 
 /// Ordering of the transaction's inputs and outputs
 #[derive(Default, Debug, Ord, PartialOrd, Eq, PartialEq, Hash, Clone, Copy)]
