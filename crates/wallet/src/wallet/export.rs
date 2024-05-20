@@ -214,7 +214,7 @@ mod test {
     use core::str::FromStr;
 
     use crate::std::string::ToString;
-    use bdk_chain::{BlockId, ConfirmationTime};
+    use bdk_chain::{BlockId, ConfirmationTimeHeightAnchor};
     use bitcoin::hashes::Hash;
     use bitcoin::{transaction, BlockHash, Network, Transaction};
 
@@ -229,21 +229,21 @@ mod test {
             version: transaction::Version::non_standard(0),
             lock_time: bitcoin::absolute::LockTime::ZERO,
         };
-        wallet
-            .insert_checkpoint(BlockId {
-                height: 5001,
-                hash: BlockHash::all_zeros(),
-            })
-            .unwrap();
-        wallet
-            .insert_tx(
-                transaction,
-                ConfirmationTime::Confirmed {
-                    height: 5000,
-                    time: 0,
-                },
-            )
-            .unwrap();
+        let txid = transaction.compute_txid();
+        let block_id = BlockId {
+            height: 5001,
+            hash: BlockHash::all_zeros(),
+        };
+        wallet.insert_checkpoint(block_id).unwrap();
+        wallet.insert_tx(transaction);
+        wallet.insert_anchor(
+            txid,
+            ConfirmationTimeHeightAnchor {
+                confirmation_height: 5000,
+                confirmation_time: 0,
+                anchor_block: block_id,
+            },
+        );
         wallet
     }
 

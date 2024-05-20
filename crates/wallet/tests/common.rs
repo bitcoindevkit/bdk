@@ -1,7 +1,7 @@
 #![allow(unused)]
 
 use bdk_chain::indexed_tx_graph::Indexer;
-use bdk_chain::{BlockId, ConfirmationTime};
+use bdk_chain::{BlockId, ConfirmationTime, ConfirmationTimeHeightAnchor};
 use bdk_wallet::{KeychainKind, LocalOutput, Wallet};
 use bitcoin::hashes::Hash;
 use bitcoin::{
@@ -77,24 +77,26 @@ pub fn get_funded_wallet_with_change(descriptor: &str, change: &str) -> (Wallet,
             hash: BlockHash::all_zeros(),
         })
         .unwrap();
-    wallet
-        .insert_tx(
-            tx0,
-            ConfirmationTime::Confirmed {
-                height: 1_000,
-                time: 100,
-            },
-        )
-        .unwrap();
-    wallet
-        .insert_tx(
-            tx1.clone(),
-            ConfirmationTime::Confirmed {
-                height: 2_000,
-                time: 200,
-            },
-        )
-        .unwrap();
+
+    wallet.insert_tx(tx0.clone());
+    insert_anchor_from_conf(
+        &mut wallet,
+        tx0.compute_txid(),
+        ConfirmationTime::Confirmed {
+            height: 1_000,
+            time: 100,
+        },
+    );
+
+    wallet.insert_tx(tx1.clone());
+    insert_anchor_from_conf(
+        &mut wallet,
+        tx1.compute_txid(),
+        ConfirmationTime::Confirmed {
+            height: 2_000,
+            time: 200,
+        },
+    );
 
     (wallet, tx1.compute_txid())
 }
@@ -191,4 +193,25 @@ pub fn feerate_unchecked(sat_vb: f64) -> FeeRate {
     // 1 sat_vb / 4wu_vb * 1000kwu_wu = 250 sat_kwu
     let sat_kwu = (sat_vb * 250.0).ceil() as u64;
     FeeRate::from_sat_per_kwu(sat_kwu)
+}
+
+/// Simulates confirming a tx with `txid` at the specified `position` by inserting an anchor
+/// at the lowest height in local chain that is greater or equal to `position`'s height,
+/// assuming the confirmation time matches `ConfirmationTime::Confirmed`.
+pub fn insert_anchor_from_conf(wallet: &mut Wallet, txid: Txid, position: ConfirmationTime) {
+    if let ConfirmationTime::Confirmed { height, time } = position {
+        // anchor tx to checkpoint with lowest height that is >= position's height
+        let anchor = wallet
+            .local_chain()
+            .range(height..)
+            .last()
+            .map(|anchor_cp| ConfirmationTimeHeightAnchor {
+                anchor_block: anchor_cp.block_id(),
+                confirmation_height: height,
+                confirmation_time: time,
+            })
+            .expect("confirmation height cannot be greater than tip");
+
+        wallet.insert_anchor(txid, anchor);
+    }
 }

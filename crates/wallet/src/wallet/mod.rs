@@ -284,35 +284,6 @@ impl fmt::Display for NewOrLoadError {
 #[cfg(feature = "std")]
 impl std::error::Error for NewOrLoadError {}
 
-/// An error that may occur when inserting a transaction into [`Wallet`].
-#[derive(Debug)]
-pub enum InsertTxError {
-    /// The error variant that occurs when the caller attempts to insert a transaction with a
-    /// confirmation height that is greater than the internal chain tip.
-    ConfirmationHeightCannotBeGreaterThanTip {
-        /// The internal chain's tip height.
-        tip_height: u32,
-        /// The introduced transaction's confirmation height.
-        tx_height: u32,
-    },
-}
-
-impl fmt::Display for InsertTxError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            InsertTxError::ConfirmationHeightCannotBeGreaterThanTip {
-                tip_height,
-                tx_height,
-            } => {
-                write!(f, "cannot insert tx with confirmation height ({}) higher than internal tip height ({})", tx_height, tip_height)
-            }
-        }
-    }
-}
-
-#[cfg(feature = "std")]
-impl std::error::Error for InsertTxError {}
-
 /// An error that may occur when applying a block to [`Wallet`].
 #[derive(Debug)]
 pub enum ApplyBlockError {
@@ -906,6 +877,23 @@ impl Wallet {
         self.stage.append(additions.into());
     }
 
+    /// Inserts an `anchor` for a transaction with the given `txid`.
+    ///
+    /// This stages the changes, you must persist them later.
+    pub fn insert_anchor(&mut self, txid: Txid, anchor: ConfirmationTimeHeightAnchor) {
+        let indexed_graph_changeset = self.indexed_graph.insert_anchor(txid, anchor);
+        self.stage.append(indexed_graph_changeset.into());
+    }
+
+    /// Inserts a unix timestamp of when a transaction is seen in the mempool.
+    ///
+    /// This is used for transaction conflict resolution where the transaction with the
+    /// later last-seen is prioritized. This stages the changes, you must persist them later.
+    pub fn insert_seen_at(&mut self, txid: Txid, seen_at: u64) {
+        let indexed_graph_changeset = self.indexed_graph.insert_seen_at(txid, seen_at);
+        self.stage.append(indexed_graph_changeset.into());
+    }
+
     /// Calculates the fee of a given transaction. Returns [`Amount::ZERO`] if `tx` is a coinbase transaction.
     ///
     /// To calculate the fee for a [`Transaction`] with inputs not owned by this wallet you must
@@ -1079,63 +1067,21 @@ impl Wallet {
     /// Add a transaction to the wallet's internal view of the chain. This stages the change,
     /// you must persist it later.
     ///
-    /// Returns whether anything changed with the transaction insertion (e.g. `false` if the
-    /// transaction was already inserted at the same position).
+    /// This method inserts the given `tx` and returns whether anything changed after insertion,
+    /// which will be false if the same transaction already exists in the wallet's transaction
+    /// graph. Any changes are staged but not committed.
     ///
-    /// A `tx` can be rejected if `position` has a height greater than the [`latest_checkpoint`].
-    /// Therefore you should use [`insert_checkpoint`] to insert new checkpoints before manually
-    /// inserting new transactions.
+    /// # Note
     ///
-    /// **WARNING**: If `position` is confirmed, we anchor the `tx` to the lowest checkpoint that
-    /// is >= the `position`'s height. The caller is responsible for ensuring the `tx` exists in our
-    /// local view of the best chain's history.
-    ///
-    /// You must persist the changes resulting from one or more calls to this method if you need
-    /// the inserted tx to be reloaded after closing the wallet.
-    ///
-    /// [`commit`]: Self::commit
-    /// [`latest_checkpoint`]: Self::latest_checkpoint
-    /// [`insert_checkpoint`]: Self::insert_checkpoint
-    pub fn insert_tx(
-        &mut self,
-        tx: Transaction,
-        position: ConfirmationTime,
-    ) -> Result<bool, InsertTxError> {
-        let (anchor, last_seen) = match position {
-            ConfirmationTime::Confirmed { height, time } => {
-                // anchor tx to checkpoint with lowest height that is >= position's height
-                let anchor = self
-                    .chain
-                    .range(height..)
-                    .last()
-                    .ok_or(InsertTxError::ConfirmationHeightCannotBeGreaterThanTip {
-                        tip_height: self.chain.tip().height(),
-                        tx_height: height,
-                    })
-                    .map(|anchor_cp| ConfirmationTimeHeightAnchor {
-                        anchor_block: anchor_cp.block_id(),
-                        confirmation_height: height,
-                        confirmation_time: time,
-                    })?;
-
-                (Some(anchor), None)
-            }
-            ConfirmationTime::Unconfirmed { last_seen } => (None, Some(last_seen)),
-        };
-
+    /// By default the inserted `tx` won't be considered "canonical" because it's not known
+    /// whether the transaction exists in the best chain. To know whether it exists, the tx
+    /// must be broadcast to the network and the wallet synced via a chain source.
+    pub fn insert_tx(&mut self, tx: Transaction) -> bool {
         let mut changeset = ChangeSet::default();
-        let txid = tx.compute_txid();
         changeset.append(self.indexed_graph.insert_tx(tx).into());
-        if let Some(anchor) = anchor {
-            changeset.append(self.indexed_graph.insert_anchor(txid, anchor).into());
-        }
-        if let Some(last_seen) = last_seen {
-            changeset.append(self.indexed_graph.insert_seen_at(txid, last_seen).into());
-        }
-
-        let changed = !changeset.is_empty();
+        let ret = !changeset.is_empty();
         self.stage.append(changeset);
-        Ok(changed)
+        ret
     }
 
     /// Iterate over the transactions in the wallet.
@@ -2540,7 +2486,7 @@ macro_rules! floating_rate {
 macro_rules! doctest_wallet {
     () => {{
         use $crate::bitcoin::{BlockHash, Transaction, absolute, TxOut, Network, hashes::Hash};
-        use $crate::chain::{ConfirmationTime, BlockId};
+        use $crate::chain::{ConfirmationTimeHeightAnchor, BlockId};
         use $crate::{KeychainKind, wallet::Wallet};
         let descriptor = "tr([73c5da0a/86'/0'/0']tprv8fMn4hSKPRC1oaCPqxDb1JWtgkpeiQvZhsr8W2xuy3GEMkzoArcAWTfJxYb6Wj8XNNDWEjfYKK4wGQXh3ZUXhDF2NcnsALpWTeSwarJt7Vc/0/*)";
         let change_descriptor = "tr([73c5da0a/86'/0'/0']tprv8fMn4hSKPRC1oaCPqxDb1JWtgkpeiQvZhsr8W2xuy3GEMkzoArcAWTfJxYb6Wj8XNNDWEjfYKK4wGQXh3ZUXhDF2NcnsALpWTeSwarJt7Vc/1/*)";
@@ -2561,11 +2507,19 @@ macro_rules! doctest_wallet {
                 script_pubkey: address.script_pubkey(),
             }],
         };
-        let _ = wallet.insert_checkpoint(BlockId { height: 1_000, hash: BlockHash::all_zeros() });
-        let _ = wallet.insert_tx(tx.clone(), ConfirmationTime::Confirmed {
-            height: 500,
-            time: 50_000
-        });
+        let txid = tx.txid();
+        let block = BlockId { height: 1_000, hash: BlockHash::all_zeros() };
+        let _ = wallet.insert_checkpoint(block);
+        let _ = wallet.insert_tx(tx);
+        wallet
+            .insert_anchor(
+                txid,
+                ConfirmationTimeHeightAnchor {
+                    confirmation_height: 500,
+                    confirmation_time: 50_000,
+                    anchor_block: block,
+                }
+            );
 
         wallet
     }}
