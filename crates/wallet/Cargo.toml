@@ -20,7 +20,7 @@ bitcoin = { version = "0.31.0", features = ["serde", "base64", "rand-std"], defa
 serde = { version = "^1.0", features = ["derive"] }
 serde_json = { version = "^1.0" }
 bdk_chain = { path = "../chain", version = "0.14.0", features = ["miniscript", "serde"], default-features = false }
-bdk_persist = { path = "../persist", version = "0.2.0" }
+bdk_persist = { path = "../persist", version = "0.2.0", features = ["miniscript", "serde"], default-features = false }
 
 # Optional dependencies
 bip39 = { version = "2.0", optional = true }
