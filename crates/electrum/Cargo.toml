@@ -13,7 +13,7 @@ readme = "README.md"
 
 [dependencies]
 bdk_chain = { path = "../chain", version = "0.15.0" }
-electrum-client = { version = "0.19" }
+electrum-client = { version = "0.20" }
 #rustls = { version = "=0.21.1", optional = true, features = ["dangerous_configuration"] }
 
 [dev-dependencies]

@@ -40,6 +40,7 @@ use crate::collections::{BTreeMap, HashSet, VecDeque};
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::cmp::max;
+use miniscript::miniscript::limits::{MAX_PUBKEYS_IN_CHECKSIGADD, MAX_PUBKEYS_PER_MULTISIG};
 
 use core::fmt;
 
@@ -48,12 +49,12 @@ use serde::{Serialize, Serializer};
 
 use bitcoin::bip32::Fingerprint;
 use bitcoin::hashes::{hash160, ripemd160, sha256};
-use bitcoin::{absolute, key::XOnlyPublicKey, PublicKey, Sequence};
+use bitcoin::{absolute, key::XOnlyPublicKey, relative, PublicKey, Sequence};
 
 use miniscript::descriptor::{
     DescriptorPublicKey, ShInner, SinglePub, SinglePubKey, SortedMultiVec, WshInner,
 };
-use miniscript::hash256;
+use miniscript::{hash256, Threshold};
 use miniscript::{
     Descriptor, Miniscript, Satisfier, ScriptContext, SigType, Terminal, ToPublicKey,
 };
@@ -137,7 +138,7 @@ pub enum SatisfiableItem {
     /// Relative timelock locktime
     RelativeTimelock {
         /// The timelock value
-        value: Sequence,
+        value: relative::LockTime,
     },
     /// Multi-signature public keys with threshold count
     Multisig {
@@ -586,30 +587,25 @@ impl Policy {
         Ok(Some(policy))
     }
 
-    fn make_multisig<Ctx: ScriptContext + 'static>(
-        keys: &[DescriptorPublicKey],
+    fn make_multi<Ctx: ScriptContext + 'static>(
+        threshold: &Threshold<DescriptorPublicKey, MAX_PUBKEYS_PER_MULTISIG>,
         signers: &SignersContainer,
         build_sat: BuildSatisfaction,
-        threshold: usize,
         sorted: bool,
         secp: &SecpCtx,
     ) -> Result<Option<Policy>, PolicyError> {
-        if threshold == 0 {
-            return Ok(None);
-        }
-
-        let parsed_keys = keys.iter().map(|k| PkOrF::from_key(k, secp)).collect();
+        let parsed_keys = threshold.iter().map(|k| PkOrF::from_key(k, secp)).collect();
 
         let mut contribution = Satisfaction::Partial {
-            n: keys.len(),
-            m: threshold,
+            n: threshold.n(),
+            m: threshold.k(),
             items: vec![],
             conditions: Default::default(),
             sorted: Some(sorted),
         };
         let mut satisfaction = contribution.clone();
 
-        for (index, key) in keys.iter().enumerate() {
+        for (index, key) in threshold.iter().enumerate() {
             if signers.find(signer_id(key, secp)).is_some() {
                 contribution.add(
                     &Satisfaction::Complete {
@@ -635,12 +631,63 @@ impl Policy {
 
         let mut policy: Policy = SatisfiableItem::Multisig {
             keys: parsed_keys,
-            threshold,
+            threshold: threshold.k(),
         }
         .into();
         policy.contribution = contribution;
         policy.satisfaction = satisfaction;
 
+        Ok(Some(policy))
+    }
+
+    fn make_multi_a<Ctx: ScriptContext + 'static>(
+        threshold: &Threshold<DescriptorPublicKey, MAX_PUBKEYS_IN_CHECKSIGADD>,
+        signers: &SignersContainer,
+        build_sat: BuildSatisfaction,
+        sorted: bool,
+        secp: &SecpCtx,
+    ) -> Result<Option<Policy>, PolicyError> {
+        let parsed_keys = threshold.iter().map(|k| PkOrF::from_key(k, secp)).collect();
+
+        let mut contribution = Satisfaction::Partial {
+            n: threshold.n(),
+            m: threshold.k(),
+            items: vec![],
+            conditions: Default::default(),
+            sorted: Some(sorted),
+        };
+        let mut satisfaction = contribution.clone();
+
+        for (index, key) in threshold.iter().enumerate() {
+            if signers.find(signer_id(key, secp)).is_some() {
+                contribution.add(
+                    &Satisfaction::Complete {
+                        condition: Default::default(),
+                    },
+                    index,
+                )?;
+            }
+            if let Some(psbt) = build_sat.psbt() {
+                if Ctx::find_signature(psbt, key, secp) {
+                    satisfaction.add(
+                        &Satisfaction::Complete {
+                            condition: Default::default(),
+                        },
+                        index,
+                    )?;
+                }
+            }
+        }
+        satisfaction.finalize();
+        contribution.finalize();
+
+        let mut policy: Policy = SatisfiableItem::Multisig {
+            keys: parsed_keys,
+            threshold: threshold.k(),
+        }
+        .into();
+        policy.contribution = contribution;
+        policy.satisfaction = satisfaction;
         Ok(Some(policy))
     }
 
@@ -725,7 +772,7 @@ impl Policy {
                 timelock: Some(*value),
             }),
             SatisfiableItem::RelativeTimelock { value } => Ok(Condition {
-                csv: Some(*value),
+                csv: Some((*value).into()),
                 timelock: None,
             }),
             _ => Ok(Condition::default()),
@@ -952,11 +999,14 @@ impl<Ctx: ScriptContext + 'static> ExtractPolicy for Miniscript<DescriptorPublic
                 Some(policy)
             }
             Terminal::Older(value) => {
-                let mut policy: Policy = SatisfiableItem::RelativeTimelock { value: *value }.into();
+                let mut policy: Policy = SatisfiableItem::RelativeTimelock {
+                    value: (*value).into(),
+                }
+                .into();
                 policy.contribution = Satisfaction::Complete {
                     condition: Condition {
                         timelock: None,
-                        csv: Some(*value),
+                        csv: Some((*value).into()),
                     },
                 };
                 if let BuildSatisfaction::PsbtTimelocks {
@@ -966,9 +1016,11 @@ impl<Ctx: ScriptContext + 'static> ExtractPolicy for Miniscript<DescriptorPublic
                 } = build_sat
                 {
                     let older = Older::new(Some(current_height), Some(input_max_height), false);
-                    let older_sat = Satisfier::<bitcoin::PublicKey>::check_older(&older, *value);
-                    let inputs_sat = psbt_inputs_sat(psbt)
-                        .all(|sat| Satisfier::<bitcoin::PublicKey>::check_older(&sat, *value));
+                    let older_sat =
+                        Satisfier::<bitcoin::PublicKey>::check_older(&older, (*value).into());
+                    let inputs_sat = psbt_inputs_sat(psbt).all(|sat| {
+                        Satisfier::<bitcoin::PublicKey>::check_older(&sat, (*value).into())
+                    });
                     if older_sat && inputs_sat {
                         policy.satisfaction = policy.contribution.clone();
                     }
@@ -986,8 +1038,11 @@ impl<Ctx: ScriptContext + 'static> ExtractPolicy for Miniscript<DescriptorPublic
             Terminal::Hash160(hash) => {
                 Some(SatisfiableItem::Hash160Preimage { hash: *hash }.into())
             }
-            Terminal::Multi(k, pks) | Terminal::MultiA(k, pks) => {
-                Policy::make_multisig::<Ctx>(pks, signers, build_sat, *k, false, secp)?
+            Terminal::Multi(threshold) => {
+                Policy::make_multi::<Ctx>(threshold, signers, build_sat, false, secp)?
+            }
+            Terminal::MultiA(threshold) => {
+                Policy::make_multi_a::<Ctx>(threshold, signers, build_sat, false, secp)?
             }
             // Identities
             Terminal::Alt(inner)
@@ -1016,8 +1071,9 @@ impl<Ctx: ScriptContext + 'static> ExtractPolicy for Miniscript<DescriptorPublic
                 a.extract_policy(signers, build_sat, secp)?,
                 b.extract_policy(signers, build_sat, secp)?,
             )?,
-            Terminal::Thresh(k, nodes) => {
-                let mut threshold = *k;
+            Terminal::Thresh(threshold) => {
+                let mut k = threshold.k();
+                let nodes = threshold.data();
                 let mapped: Vec<_> = nodes
                     .iter()
                     .map(|n| n.extract_policy(signers, build_sat, secp))
@@ -1027,13 +1083,13 @@ impl<Ctx: ScriptContext + 'static> ExtractPolicy for Miniscript<DescriptorPublic
                     .collect();
 
                 if mapped.len() < nodes.len() {
-                    threshold = match threshold.checked_sub(nodes.len() - mapped.len()) {
+                    k = match k.checked_sub(nodes.len() - mapped.len()) {
                         None => return Ok(None),
                         Some(x) => x,
                     };
                 }
 
-                Policy::make_thresh(mapped, threshold)?
+                Policy::make_thresh(mapped, k)?
             }
 
             // Unsupported
@@ -1087,13 +1143,10 @@ impl ExtractPolicy for Descriptor<DescriptorPublicKey> {
             build_sat: BuildSatisfaction,
             secp: &SecpCtx,
         ) -> Result<Option<Policy>, Error> {
-            Ok(Policy::make_multisig::<Ctx>(
-                keys.pks.as_ref(),
-                signers,
-                build_sat,
-                keys.k,
-                true,
-                secp,
+            let threshold = Threshold::new(keys.k(), keys.pks().to_vec())
+                .expect("valid threshold and pks collection");
+            Ok(Policy::make_multi::<Ctx>(
+                &threshold, signers, build_sat, true, secp,
             )?)
         }
 

@@ -229,7 +229,7 @@ impl IntoWalletDescriptor for DescriptorTemplateOut {
                 let pk = match pk {
                     DescriptorPublicKey::XPub(ref xpub) => {
                         let mut xpub = xpub.clone();
-                        xpub.xkey.network = self.network;
+                        xpub.xkey.network = self.network.into();
 
                         DescriptorPublicKey::XPub(xpub)
                     }
@@ -264,11 +264,11 @@ impl IntoWalletDescriptor for DescriptorTemplateOut {
             .map(|(mut k, mut v)| {
                 match (&mut k, &mut v) {
                     (DescriptorPublicKey::XPub(xpub), DescriptorSecretKey::XPrv(xprv)) => {
-                        xpub.xkey.network = network;
-                        xprv.xkey.network = network;
+                        xpub.xkey.network = network.into();
+                        xprv.xkey.network = network.into();
                     }
                     (_, DescriptorSecretKey::Single(key)) => {
-                        key.key.network = network;
+                        key.key.network = network.into();
                     }
                     _ => {}
                 }
@@ -606,8 +606,8 @@ mod test {
     use assert_matches::assert_matches;
     use bitcoin::hex::FromHex;
     use bitcoin::secp256k1::Secp256k1;
-    use bitcoin::ScriptBuf;
     use bitcoin::{bip32, Psbt};
+    use bitcoin::{NetworkKind, ScriptBuf};
 
     use super::*;
     use crate::psbt::PsbtUtils;
@@ -743,7 +743,7 @@ mod test {
             .unwrap();
 
         let mut xprv_testnet = xprv;
-        xprv_testnet.network = Network::Testnet;
+        xprv_testnet.network = NetworkKind::Test;
 
         let xpub_testnet = bip32::Xpub::from_priv(&secp, &xprv_testnet);
         let desc_pubkey = DescriptorPublicKey::XPub(DescriptorXKey {

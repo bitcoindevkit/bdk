@@ -310,7 +310,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                 Some(txout) => txout,
                 None => continue,
             };
-            debug_assert_eq!(op_tx.txid(), op_txid);
+            debug_assert_eq!(op_tx.compute_txid(), op_txid);
 
             // attempt to find the following transactions (alongside their chain positions), and
             // add to our sparsechain `update`:

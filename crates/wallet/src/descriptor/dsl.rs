@@ -703,10 +703,10 @@ macro_rules! fragment {
         $crate::keys::make_pkh($key, &secp)
     });
     ( after ( $value:expr ) ) => ({
-        $crate::impl_leaf_opcode_value!(After, $crate::miniscript::AbsLockTime::from_consensus($value))
+        $crate::impl_leaf_opcode_value!(After, $crate::miniscript::AbsLockTime::from_consensus($value).expect("valid `AbsLockTime`"))
     });
     ( older ( $value:expr ) ) => ({
-        $crate::impl_leaf_opcode_value!(Older, $crate::bitcoin::Sequence($value)) // TODO!!
+        $crate::impl_leaf_opcode_value!(Older, $crate::miniscript::RelLockTime::from_consensus($value).expect("valid `RelLockTime`")) // TODO!!
     });
     ( sha256 ( $hash:expr ) ) => ({
         $crate::impl_leaf_opcode_value!(Sha256, $hash)
@@ -757,7 +757,8 @@ macro_rules! fragment {
             (keys_acc, net_acc)
         });
 
-        $crate::impl_leaf_opcode_value_two!(Thresh, $thresh, items)
+        let thresh = $crate::miniscript::Threshold::new($thresh, items).expect("valid threshold and pks collection");
+        $crate::impl_leaf_opcode_value!(Thresh, thresh)
             .map(|(minisc, _, _)| (minisc, key_maps, valid_networks))
     });
     ( thresh ( $thresh:expr, $( $inner:tt )* ) ) => ({
@@ -769,7 +770,12 @@ macro_rules! fragment {
     ( multi_vec ( $thresh:expr, $keys:expr ) ) => ({
         let secp = $crate::bitcoin::secp256k1::Secp256k1::new();
 
-        $crate::keys::make_multi($thresh, $crate::miniscript::Terminal::Multi, $keys, &secp)
+        let fun = |k, pks| {
+            let thresh = $crate::miniscript::Threshold::new(k, pks).expect("valid threshold and pks collection");
+            $crate::miniscript::Terminal::Multi(thresh)
+        };
+
+        $crate::keys::make_multi($thresh, fun, $keys, &secp)
     });
     ( multi ( $thresh:expr $(, $key:expr )+ ) ) => ({
         $crate::group_multi_keys!( $( $key ),* )
@@ -778,7 +784,12 @@ macro_rules! fragment {
     ( multi_a_vec ( $thresh:expr, $keys:expr ) ) => ({
         let secp = $crate::bitcoin::secp256k1::Secp256k1::new();
 
-        $crate::keys::make_multi($thresh, $crate::miniscript::Terminal::MultiA, $keys, &secp)
+        let fun = |k, pks| {
+            let thresh = $crate::miniscript::Threshold::new(k, pks).expect("valid threshold and pks collection");
+            $crate::miniscript::Terminal::MultiA(thresh)
+        };
+
+        $crate::keys::make_multi($thresh, fun, $keys, &secp)
     });
     ( multi_a ( $thresh:expr $(, $key:expr )+ ) ) => ({
         $crate::group_multi_keys!( $( $key ),* )

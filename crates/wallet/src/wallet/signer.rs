@@ -91,7 +91,7 @@ use bitcoin::bip32::{ChildNumber, DerivationPath, Fingerprint, Xpriv};
 use bitcoin::hashes::hash160;
 use bitcoin::secp256k1::Message;
 use bitcoin::sighash::{EcdsaSighashType, TapSighash, TapSighashType};
-use bitcoin::{ecdsa, psbt, sighash, taproot};
+use bitcoin::{ecdsa, psbt, sighash, taproot, transaction};
 use bitcoin::{key::TapTweak, key::XOnlyPublicKey, secp256k1};
 use bitcoin::{PrivateKey, Psbt, PublicKey};
 
@@ -159,8 +159,12 @@ pub enum SignerError {
     NonStandardSighash,
     /// Invalid SIGHASH for the signing context in use
     InvalidSighash,
-    /// Error while computing the hash to sign
-    SighashError(sighash::Error),
+    /// Error while computing the hash to sign a P2WPKH input.
+    SighashP2wpkh(sighash::P2wpkhError),
+    /// Error while computing the hash to sign a Taproot input.
+    SighashTaproot(sighash::TaprootError),
+    /// Error while computing the hash, out of bounds access on the transaction inputs.
+    TxInputsIndexError(transaction::InputsIndexError),
     /// Miniscript PSBT error
     MiniscriptPsbt(MiniscriptPsbtError),
     /// To be used only by external libraries implementing [`InputSigner`] or
@@ -169,9 +173,21 @@ pub enum SignerError {
     External(String),
 }
 
-impl From<sighash::Error> for SignerError {
-    fn from(e: sighash::Error) -> Self {
-        SignerError::SighashError(e)
+impl From<transaction::InputsIndexError> for SignerError {
+    fn from(v: transaction::InputsIndexError) -> Self {
+        Self::TxInputsIndexError(v)
+    }
+}
+
+impl From<sighash::P2wpkhError> for SignerError {
+    fn from(e: sighash::P2wpkhError) -> Self {
+        Self::SighashP2wpkh(e)
+    }
+}
+
+impl From<sighash::TaprootError> for SignerError {
+    fn from(e: sighash::TaprootError) -> Self {
+        Self::SighashTaproot(e)
     }
 }
 
@@ -189,7 +205,9 @@ impl fmt::Display for SignerError {
             Self::MissingHdKeypath => write!(f, "Missing fingerprint and derivation path"),
             Self::NonStandardSighash => write!(f, "The psbt contains a non standard sighash"),
             Self::InvalidSighash => write!(f, "Invalid SIGHASH for the signing context in use"),
-            Self::SighashError(err) => write!(f, "Error while computing the hash to sign: {}", err),
+            Self::SighashP2wpkh(err) => write!(f, "Error while computing the hash to sign a P2WPKH input: {}", err),
+            Self::SighashTaproot(err) => write!(f, "Error while computing the hash to sign a Taproot input: {}", err),
+            Self::TxInputsIndexError(err) => write!(f, "Error while computing the hash, out of bounds access on the transaction inputs: {}", err),
             Self::MiniscriptPsbt(err) => write!(f, "Miniscript PSBT error: {}", err),
             Self::External(err) => write!(f, "{}", err),
         }
@@ -549,21 +567,24 @@ fn sign_psbt_ecdsa(
     secret_key: &secp256k1::SecretKey,
     pubkey: PublicKey,
     psbt_input: &mut psbt::Input,
-    hash: impl bitcoin::hashes::Hash + bitcoin::secp256k1::ThirtyTwoByteHash,
-    hash_ty: EcdsaSighashType,
+    hash: impl bitcoin::hashes::Hash<Bytes = [u8; 32]>,
+    sighash_type: EcdsaSighashType,
     secp: &SecpCtx,
     allow_grinding: bool,
 ) {
-    let msg = &Message::from(hash);
-    let sig = if allow_grinding {
+    let msg = &Message::from_digest(hash.to_byte_array());
+    let signature = if allow_grinding {
         secp.sign_ecdsa_low_r(msg, secret_key)
     } else {
         secp.sign_ecdsa(msg, secret_key)
     };
-    secp.verify_ecdsa(msg, &sig, &pubkey.inner)
+    secp.verify_ecdsa(msg, &signature, &pubkey.inner)
         .expect("invalid or corrupted ecdsa signature");
 
-    let final_signature = ecdsa::Signature { sig, hash_ty };
+    let final_signature = ecdsa::Signature {
+        signature,
+        sighash_type,
+    };
     psbt_input.partial_sigs.insert(pubkey, final_signature);
 }
 
@@ -574,7 +595,7 @@ fn sign_psbt_schnorr(
     leaf_hash: Option<taproot::TapLeafHash>,
     psbt_input: &mut psbt::Input,
     hash: TapSighash,
-    hash_ty: TapSighashType,
+    sighash_type: TapSighashType,
     secp: &SecpCtx,
 ) {
     let keypair = secp256k1::Keypair::from_seckey_slice(secp, secret_key.as_ref()).unwrap();
@@ -586,11 +607,14 @@ fn sign_psbt_schnorr(
     };
 
     let msg = &Message::from(hash);
-    let sig = secp.sign_schnorr(msg, &keypair);
-    secp.verify_schnorr(&sig, msg, &XOnlyPublicKey::from_keypair(&keypair).0)
+    let signature = secp.sign_schnorr(msg, &keypair);
+    secp.verify_schnorr(&signature, msg, &XOnlyPublicKey::from_keypair(&keypair).0)
         .expect("invalid or corrupted schnorr signature");
 
-    let final_signature = taproot::Signature { sig, hash_ty };
+    let final_signature = taproot::Signature {
+        signature,
+        sighash_type,
+    };
 
     if let Some(lh) = leaf_hash {
         psbt_input
@@ -933,7 +957,7 @@ impl ComputeSighash for Segwitv0 {
         // Always try first with the non-witness utxo
         let utxo = if let Some(prev_tx) = &psbt_input.non_witness_utxo {
             // Check the provided prev-tx
-            if prev_tx.txid() != tx_input.previous_output.txid {
+            if prev_tx.compute_txid() != tx_input.previous_output.txid {
                 return Err(SignerError::InvalidNonWitnessUtxo);
             }
 

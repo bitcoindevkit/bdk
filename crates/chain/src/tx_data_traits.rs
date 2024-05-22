@@ -43,7 +43,7 @@ use alloc::vec::Vec;
 /// let mut graph_a = TxGraph::<BlockId>::default();
 /// let _ = graph_a.insert_tx(tx.clone());
 /// graph_a.insert_anchor(
-///     tx.txid(),
+///     tx.compute_txid(),
 ///     BlockId {
 ///         height: 1,
 ///         hash: Hash::hash("first".as_bytes()),
@@ -58,7 +58,7 @@ use alloc::vec::Vec;
 /// let mut graph_b = TxGraph::<ConfirmationHeightAnchor>::default();
 /// let _ = graph_b.insert_tx(tx.clone());
 /// graph_b.insert_anchor(
-///     tx.txid(),
+///     tx.compute_txid(),
 ///     ConfirmationHeightAnchor {
 ///         anchor_block: BlockId {
 ///             height: 2,
@@ -76,7 +76,7 @@ use alloc::vec::Vec;
 /// let mut graph_c = TxGraph::<ConfirmationTimeHeightAnchor>::default();
 /// let _ = graph_c.insert_tx(tx.clone());
 /// graph_c.insert_anchor(
-///     tx.txid(),
+///     tx.compute_txid(),
 ///     ConfirmationTimeHeightAnchor {
 ///         anchor_block: BlockId {
 ///             height: 2,

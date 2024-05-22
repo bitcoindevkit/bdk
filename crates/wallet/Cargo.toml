@@ -15,8 +15,8 @@ rust-version = "1.63"
 [dependencies]
 anyhow = { version = "1", default-features = false }
 rand = "^0.8"
-miniscript = { version = "11.0.0", features = ["serde"], default-features = false }
-bitcoin = { version = "0.31.0", features = ["serde", "base64", "rand-std"], default-features = false }
+miniscript = { version = "12.0.0", features = ["serde"], default-features = false }
+bitcoin = { version = "0.32.0", features = ["serde", "base64", "rand-std"], default-features = false }
 serde = { version = "^1.0", features = ["derive"] }
 serde_json = { version = "^1.0" }
 bdk_chain = { path = "../chain", version = "0.15.0", features = ["miniscript", "serde"], default-features = false }

@@ -58,15 +58,15 @@ jobs:
       - name: Check bdk_chain
         working-directory: ./crates/chain
         # TODO "--target thumbv6m-none-eabi" should work but currently does not
-        run: cargo check --no-default-features --features bitcoin/no-std,miniscript/no-std,hashbrown
+        run: cargo check --no-default-features --features miniscript/no-std,hashbrown
       - name: Check bdk wallet
         working-directory: ./crates/wallet
         # TODO "--target thumbv6m-none-eabi" should work but currently does not
-        run: cargo check --no-default-features --features bitcoin/no-std,miniscript/no-std,bdk_chain/hashbrown
+        run: cargo check --no-default-features --features miniscript/no-std,bdk_chain/hashbrown
       - name: Check esplora
         working-directory: ./crates/esplora
         # TODO "--target thumbv6m-none-eabi" should work but currently does not
-        run: cargo check --no-default-features --features bitcoin/no-std,miniscript/no-std,bdk_chain/hashbrown
+        run: cargo check --no-default-features --features miniscript/no-std,bdk_chain/hashbrown
 
   check-wasm:
     name: Check WASM
@@ -92,10 +92,10 @@ jobs:
         uses: Swatinem/rust-cache@v2.2.1
       - name: Check bdk wallet
         working-directory: ./crates/wallet
-        run: cargo check --target wasm32-unknown-unknown --no-default-features --features bitcoin/no-std,miniscript/no-std,bdk_chain/hashbrown,dev-getrandom-wasm
+        run: cargo check --target wasm32-unknown-unknown --no-default-features --features miniscript/no-std,bdk_chain/hashbrown,dev-getrandom-wasm
       - name: Check esplora
         working-directory: ./crates/esplora
-        run: cargo check --target wasm32-unknown-unknown --no-default-features --features bitcoin/no-std,miniscript/no-std,bdk_chain/hashbrown,async
+        run: cargo check --target wasm32-unknown-unknown --no-default-features --features miniscript/no-std,bdk_chain/hashbrown,async
 
   fmt:
     name: Rust fmt

@@ -125,14 +125,14 @@ pub fn init_graph<'a, A: Anchor + Clone + 'a>(
                 .collect(),
         };
 
-        tx_ids.insert(tx_tmp.tx_name, tx.txid());
+        tx_ids.insert(tx_tmp.tx_name, tx.compute_txid());
         spk_index.scan(&tx);
         let _ = graph.insert_tx(tx.clone());
         for anchor in tx_tmp.anchors.iter() {
-            let _ = graph.insert_anchor(tx.txid(), anchor.clone());
+            let _ = graph.insert_anchor(tx.compute_txid(), anchor.clone());
         }
         if let Some(seen_at) = tx_tmp.last_seen {
-            let _ = graph.insert_seen_at(tx.txid(), seen_at);
+            let _ = graph.insert_seen_at(tx.compute_txid(), seen_at);
         }
     }
     (graph, spk_index, tx_ids)

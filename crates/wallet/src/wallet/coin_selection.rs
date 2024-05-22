@@ -316,7 +316,7 @@ pub fn decide_change(remaining_amount: u64, fee_rate: FeeRate, drain_script: &Sc
     let drain_val = remaining_amount.saturating_sub(change_fee);
 
     if drain_val.is_dust(drain_script) {
-        let dust_threshold = drain_script.dust_value().to_sat();
+        let dust_threshold = drain_script.minimal_non_dust().to_sat();
         Excess::NoChange {
             dust_threshold,
             change_fee,

@@ -46,7 +46,7 @@ pub fn get_funded_wallet_with_change(descriptor: &str, change: &str) -> (Wallet,
         lock_time: bitcoin::absolute::LockTime::ZERO,
         input: vec![TxIn {
             previous_output: OutPoint {
-                txid: tx0.txid(),
+                txid: tx0.compute_txid(),
                 vout: 0,
             },
             script_sig: Default::default(),
@@ -96,7 +96,7 @@ pub fn get_funded_wallet_with_change(descriptor: &str, change: &str) -> (Wallet,
         )
         .unwrap();
 
-    (wallet, tx1.txid())
+    (wallet, tx1.compute_txid())
 }
 
 /// Return a fake wallet that appears to be funded for testing.
