@@ -189,6 +189,7 @@ impl FullyNodedExport {
                 WshInner::SortedMulti(_) => Ok(()),
                 WshInner::Ms(ms) => check_ms(&ms.node),
             },
+            Descriptor::Tr(_) => Ok(()),
             _ => Err("The descriptor is not compatible with Bitcoin Core"),
         }
     }
@@ -308,6 +309,18 @@ mod test {
         let wallet = get_test_wallet(descriptor, Some(change_descriptor), Network::Testnet);
         let export = FullyNodedExport::export_wallet(&wallet, "Test Label", true).unwrap();
 
+        assert_eq!(export.descriptor(), descriptor);
+        assert_eq!(export.change_descriptor(), Some(change_descriptor.into()));
+        assert_eq!(export.blockheight, 5000);
+        assert_eq!(export.label, "Test Label");
+    }
+
+    #[test]
+    fn test_export_tr() {
+        let descriptor = "tr([73c5da0a/86'/0'/0']tprv8fMn4hSKPRC1oaCPqxDb1JWtgkpeiQvZhsr8W2xuy3GEMkzoArcAWTfJxYb6Wj8XNNDWEjfYKK4wGQXh3ZUXhDF2NcnsALpWTeSwarJt7Vc/0/*)";
+        let change_descriptor = "tr([73c5da0a/86'/0'/0']tprv8fMn4hSKPRC1oaCPqxDb1JWtgkpeiQvZhsr8W2xuy3GEMkzoArcAWTfJxYb6Wj8XNNDWEjfYKK4wGQXh3ZUXhDF2NcnsALpWTeSwarJt7Vc/1/*)";
+        let wallet = get_test_wallet(descriptor, Some(change_descriptor), Network::Testnet);
+        let export = FullyNodedExport::export_wallet(&wallet, "Test Label", true).unwrap();
         assert_eq!(export.descriptor(), descriptor);
         assert_eq!(export.change_descriptor(), Some(change_descriptor.into()));
         assert_eq!(export.blockheight, 5000);
