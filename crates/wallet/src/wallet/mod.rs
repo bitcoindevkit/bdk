@@ -59,7 +59,7 @@ pub use utils::IsDust;
 
 use coin_selection::DefaultCoinSelectionAlgorithm;
 use signer::{SignOptions, SignerOrdering, SignersContainer, TransactionSigner};
-use tx_builder::{BumpFee, CreateTx, FeePolicy, TxBuilder, TxParams};
+use tx_builder::{FeePolicy, TxBuilder, TxParams};
 use utils::{check_nsequence_rbf, After, Older, SecpCtx};
 
 use crate::descriptor::policy::BuildSatisfaction;
@@ -1293,12 +1293,11 @@ impl Wallet {
     /// ```
     ///
     /// [`TxBuilder`]: crate::TxBuilder
-    pub fn build_tx(&mut self) -> TxBuilder<'_, DefaultCoinSelectionAlgorithm, CreateTx> {
+    pub fn build_tx(&mut self) -> TxBuilder<'_, DefaultCoinSelectionAlgorithm> {
         TxBuilder {
             wallet: alloc::rc::Rc::new(core::cell::RefCell::new(self)),
             params: TxParams::default(),
             coin_selection: DefaultCoinSelectionAlgorithm::default(),
-            phantom: core::marker::PhantomData,
         }
     }
 
@@ -1684,7 +1683,7 @@ impl Wallet {
     pub fn build_fee_bump(
         &mut self,
         txid: Txid,
-    ) -> Result<TxBuilder<'_, DefaultCoinSelectionAlgorithm, BumpFee>, BuildFeeBumpError> {
+    ) -> Result<TxBuilder<'_, DefaultCoinSelectionAlgorithm>, BuildFeeBumpError> {
         let graph = self.indexed_graph.graph();
         let txout_index = &self.indexed_graph.index;
         let chain_tip = self.chain.tip().block_id();
@@ -1808,7 +1807,6 @@ impl Wallet {
             wallet: alloc::rc::Rc::new(core::cell::RefCell::new(self)),
             params,
             coin_selection: DefaultCoinSelectionAlgorithm::default(),
-            phantom: core::marker::PhantomData,
         })
     }
 

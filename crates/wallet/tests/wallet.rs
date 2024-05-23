@@ -779,7 +779,7 @@ fn test_create_tx_absolute_fee() {
     builder
         .drain_to(addr.script_pubkey())
         .drain_wallet()
-        .fee_absolute(100);
+        .fee_absolute(Amount::from_sat(100));
     let psbt = builder.finish().unwrap();
     let fee = check_fee!(wallet, psbt);
 
@@ -799,7 +799,7 @@ fn test_create_tx_absolute_zero_fee() {
     builder
         .drain_to(addr.script_pubkey())
         .drain_wallet()
-        .fee_absolute(0);
+        .fee_absolute(Amount::ZERO);
     let psbt = builder.finish().unwrap();
     let fee = check_fee!(wallet, psbt);
 
@@ -820,7 +820,7 @@ fn test_create_tx_absolute_high_fee() {
     builder
         .drain_to(addr.script_pubkey())
         .drain_wallet()
-        .fee_absolute(60_000);
+        .fee_absolute(Amount::from_sat(60_000));
     let _ = builder.finish().unwrap();
 }
 
@@ -1658,7 +1658,7 @@ fn test_bump_fee_low_abs() {
         .unwrap();
 
     let mut builder = wallet.build_fee_bump(txid).unwrap();
-    builder.fee_absolute(10);
+    builder.fee_absolute(Amount::from_sat(10));
     builder.finish().unwrap();
 }
 
@@ -1680,7 +1680,7 @@ fn test_bump_fee_zero_abs() {
         .unwrap();
 
     let mut builder = wallet.build_fee_bump(txid).unwrap();
-    builder.fee_absolute(0);
+    builder.fee_absolute(Amount::ZERO);
     builder.finish().unwrap();
 }
 
@@ -1742,7 +1742,7 @@ fn test_bump_fee_reduce_change() {
     assert_fee_rate!(psbt, fee.unwrap_or(0), feerate, @add_signature);
 
     let mut builder = wallet.build_fee_bump(txid).unwrap();
-    builder.fee_absolute(200);
+    builder.fee_absolute(Amount::from_sat(200));
     builder.enable_rbf();
     let psbt = builder.finish().unwrap();
     let sent_received =
@@ -1807,8 +1807,12 @@ fn test_bump_fee_reduce_single_recipient() {
     let mut builder = wallet.build_fee_bump(txid).unwrap();
     builder
         .fee_rate(feerate)
-        .allow_shrinking(addr.script_pubkey())
-        .unwrap();
+        // remove original tx drain_to address and amount
+        .set_recipients(Vec::new())
+        // set back original drain_to address
+        .drain_to(addr.script_pubkey())
+        // drain wallet output amount will be re-calculated with new fee rate
+        .drain_wallet();
     let psbt = builder.finish().unwrap();
     let sent_received =
         wallet.sent_and_received(&psbt.clone().extract_tx().expect("failed to extract tx"));
@@ -1849,9 +1853,13 @@ fn test_bump_fee_absolute_reduce_single_recipient() {
 
     let mut builder = wallet.build_fee_bump(txid).unwrap();
     builder
-        .allow_shrinking(addr.script_pubkey())
-        .unwrap()
-        .fee_absolute(300);
+        .fee_absolute(Amount::from_sat(300))
+        // remove original tx drain_to address and amount
+        .set_recipients(Vec::new())
+        // set back original drain_to address
+        .drain_to(addr.script_pubkey())
+        // drain wallet output amount will be re-calculated with new fee rate
+        .drain_wallet();
     let psbt = builder.finish().unwrap();
     let tx = &psbt.unsigned_tx;
     let sent_received = wallet.sent_and_received(tx);
@@ -1923,8 +1931,6 @@ fn test_bump_fee_drain_wallet() {
     let mut builder = wallet.build_fee_bump(txid).unwrap();
     builder
         .drain_wallet()
-        .allow_shrinking(addr.script_pubkey())
-        .unwrap()
         .fee_rate(FeeRate::from_sat_per_vb_unchecked(5));
     let psbt = builder.finish().unwrap();
     let sent_received = wallet.sent_and_received(&psbt.extract_tx().expect("failed to extract tx"));
@@ -1940,7 +1946,7 @@ fn test_bump_fee_remove_output_manually_selected_only() {
     // them, and make sure that `bump_fee` doesn't try to add more. This fails because we've
     // told the wallet it's not allowed to add more inputs AND it can't reduce the value of the
     // existing output. In other words, bump_fee + manually_selected_only is always an error
-    // unless you've also set "allow_shrinking" OR there is a change output.
+    // unless there is a change output.
     let init_tx = Transaction {
         version: transaction::Version::ONE,
         lock_time: absolute::LockTime::ZERO,
@@ -2092,7 +2098,7 @@ fn test_bump_fee_absolute_add_input() {
         .unwrap();
 
     let mut builder = wallet.build_fee_bump(txid).unwrap();
-    builder.fee_absolute(6_000);
+    builder.fee_absolute(Amount::from_sat(6_000));
     let psbt = builder.finish().unwrap();
     let sent_received =
         wallet.sent_and_received(&psbt.clone().extract_tx().expect("failed to extract tx"));
@@ -2157,8 +2163,8 @@ fn test_bump_fee_no_change_add_input_and_change() {
         .insert_tx(tx, ConfirmationTime::Unconfirmed { last_seen: 0 })
         .unwrap();
 
-    // now bump the fees without using `allow_shrinking`. the wallet should add an
-    // extra input and a change output, and leave the original output untouched
+    // Now bump the fees, the wallet should add an extra input and a change output, and leave
+    // the original output untouched.
     let mut builder = wallet.build_fee_bump(txid).unwrap();
     builder.fee_rate(FeeRate::from_sat_per_vb_unchecked(50));
     let psbt = builder.finish().unwrap();
@@ -2369,7 +2375,10 @@ fn test_bump_fee_absolute_force_add_input() {
     // the new fee_rate is low enough that just reducing the change would be fine, but we force
     // the addition of an extra input with `add_utxo()`
     let mut builder = wallet.build_fee_bump(txid).unwrap();
-    builder.add_utxo(incoming_op).unwrap().fee_absolute(250);
+    builder
+        .add_utxo(incoming_op)
+        .unwrap()
+        .fee_absolute(Amount::from_sat(250));
     let psbt = builder.finish().unwrap();
     let sent_received =
         wallet.sent_and_received(&psbt.clone().extract_tx().expect("failed to extract tx"));
@@ -2478,8 +2487,12 @@ fn test_bump_fee_unconfirmed_input() {
     let mut builder = wallet.build_fee_bump(txid).unwrap();
     builder
         .fee_rate(FeeRate::from_sat_per_vb_unchecked(15))
-        .allow_shrinking(addr.script_pubkey())
-        .unwrap();
+        // remove original tx drain_to address and amount
+        .set_recipients(Vec::new())
+        // set back original drain_to address
+        .drain_to(addr.script_pubkey())
+        // drain wallet output amount will be re-calculated with new fee rate
+        .drain_wallet();
     builder.finish().unwrap();
 }
 
