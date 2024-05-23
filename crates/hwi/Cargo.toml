@@ -9,5 +9,5 @@ license = "MIT OR Apache-2.0"
 readme = "README.md"
 
 [dependencies]
-bdk_wallet = { path = "../wallet" }
+bdk_wallet = { path = "../wallet", version = "1.0.0-alpha.12" }
 hwi = { version = "0.8.0", features = [ "miniscript"] }
