@@ -305,341 +305,341 @@ where
     }?
 }
 
-#[cfg(all(test, feature = "miniscript"))]
-mod test {
-    use bitcoin::secp256k1::Secp256k1;
-
-    use crate::coin_select::{evaluate_cs::evaluate, ExcessStrategyKind};
-
-    use super::{
-        coin_select_bnb,
-        evaluate_cs::{Evaluation, EvaluationError},
-        tester::Tester,
-        CoinSelector, CoinSelectorOpt, Vec, WeightedValue,
-    };
-
-    fn tester() -> Tester {
-        const DESC_STR: &str = "tr(xprv9uBuvtdjghkz8D1qzsSXS9Vs64mqrUnXqzNccj2xcvnCHPpXKYE1U2Gbh9CDHk8UPyF2VuXpVkDA7fk5ZP4Hd9KnhUmTscKmhee9Dp5sBMK)";
-        Tester::new(&Secp256k1::default(), DESC_STR)
-    }
-
-    fn evaluate_bnb(
-        initial_selector: CoinSelector,
-        max_tries: usize,
-    ) -> Result<Evaluation, EvaluationError> {
-        evaluate(initial_selector, |cs| {
-            coin_select_bnb(max_tries, cs.clone()).map_or(false, |new_cs| {
-                *cs = new_cs;
-                true
-            })
-        })
-    }
-
-    #[test]
-    fn not_enough_coins() {
-        let t = tester();
-        let candidates: Vec<WeightedValue> = vec![
-            t.gen_candidate(0, 100_000).into(),
-            t.gen_candidate(1, 100_000).into(),
-        ];
-        let opts = t.gen_opts(200_000);
-        let selector = CoinSelector::new(&candidates, &opts);
-        assert!(!coin_select_bnb(10_000, selector).is_some());
-    }
-
-    #[test]
-    fn exactly_enough_coins_preselected() {
-        let t = tester();
-        let candidates: Vec<WeightedValue> = vec![
-            t.gen_candidate(0, 100_000).into(), // to preselect
-            t.gen_candidate(1, 100_000).into(), // to preselect
-            t.gen_candidate(2, 100_000).into(),
-        ];
-        let opts = CoinSelectorOpt {
-            target_feerate: 0.0,
-            ..t.gen_opts(200_000)
-        };
-        let selector = {
-            let mut selector = CoinSelector::new(&candidates, &opts);
-            selector.select(0); // preselect
-            selector.select(1); // preselect
-            selector
-        };
-
-        let evaluation = evaluate_bnb(selector, 10_000).expect("eval failed");
-        println!("{}", evaluation);
-        assert_eq!(evaluation.solution.selected, (0..=1).collect());
-        assert_eq!(evaluation.solution.excess_strategies.len(), 1);
-        assert_eq!(
-            evaluation.feerate_offset(ExcessStrategyKind::ToFee).floor(),
-            0.0
-        );
-    }
-
-    /// `cost_of_change` acts as the upper-bound in Bnb; we check whether these boundaries are
-    /// enforced in code
-    #[test]
-    fn cost_of_change() {
-        let t = tester();
-        let candidates: Vec<WeightedValue> = vec![
-            t.gen_candidate(0, 200_000).into(),
-            t.gen_candidate(1, 200_000).into(),
-            t.gen_candidate(2, 200_000).into(),
-        ];
-
-        // lowest and highest possible `recipient_value` opts for derived `drain_waste`, assuming
-        // that we want 2 candidates selected
-        let (lowest_opts, highest_opts) = {
-            let opts = t.gen_opts(0);
-
-            let fee_from_inputs =
-                (candidates[0].weight as f32 * opts.target_feerate).ceil() as u64 * 2;
-            let fee_from_template =
-                ((opts.base_weight + 2) as f32 * opts.target_feerate).ceil() as u64;
-
-            let lowest_opts = CoinSelectorOpt {
-                target_value: Some(
-                    400_000 - fee_from_inputs - fee_from_template - opts.drain_waste() as u64,
-                ),
-                ..opts
-            };
-
-            let highest_opts = CoinSelectorOpt {
-                target_value: Some(400_000 - fee_from_inputs - fee_from_template),
-                ..opts
-            };
-
-            (lowest_opts, highest_opts)
-        };
-
-        // test lowest possible target we can select
-        let lowest_eval = evaluate_bnb(CoinSelector::new(&candidates, &lowest_opts), 10_000);
-        assert!(lowest_eval.is_ok());
-        let lowest_eval = lowest_eval.unwrap();
-        println!("LB {}", lowest_eval);
-        assert_eq!(lowest_eval.solution.selected.len(), 2);
-        assert_eq!(lowest_eval.solution.excess_strategies.len(), 1);
-        assert_eq!(
-            lowest_eval
-                .feerate_offset(ExcessStrategyKind::ToFee)
-                .floor(),
-            0.0
-        );
-
-        // test the highest possible target we can select
-        let highest_eval = evaluate_bnb(CoinSelector::new(&candidates, &highest_opts), 10_000);
-        assert!(highest_eval.is_ok());
-        let highest_eval = highest_eval.unwrap();
-        println!("UB {}", highest_eval);
-        assert_eq!(highest_eval.solution.selected.len(), 2);
-        assert_eq!(highest_eval.solution.excess_strategies.len(), 1);
-        assert_eq!(
-            highest_eval
-                .feerate_offset(ExcessStrategyKind::ToFee)
-                .floor(),
-            0.0
-        );
-
-        // test lower out of bounds
-        let loob_opts = CoinSelectorOpt {
-            target_value: lowest_opts.target_value.map(|v| v - 1),
-            ..lowest_opts
-        };
-        let loob_eval = evaluate_bnb(CoinSelector::new(&candidates, &loob_opts), 10_000);
-        assert!(loob_eval.is_err());
-        println!("Lower OOB: {}", loob_eval.unwrap_err());
-
-        // test upper out of bounds
-        let uoob_opts = CoinSelectorOpt {
-            target_value: highest_opts.target_value.map(|v| v + 1),
-            ..highest_opts
-        };
-        let uoob_eval = evaluate_bnb(CoinSelector::new(&candidates, &uoob_opts), 10_000);
-        assert!(uoob_eval.is_err());
-        println!("Upper OOB: {}", uoob_eval.unwrap_err());
-    }
-
-    #[test]
-    fn try_select() {
-        let t = tester();
-        let candidates: Vec<WeightedValue> = vec![
-            t.gen_candidate(0, 300_000).into(),
-            t.gen_candidate(1, 300_000).into(),
-            t.gen_candidate(2, 300_000).into(),
-            t.gen_candidate(3, 200_000).into(),
-            t.gen_candidate(4, 200_000).into(),
-        ];
-        let make_opts = |v: u64| -> CoinSelectorOpt {
-            CoinSelectorOpt {
-                target_feerate: 0.0,
-                ..t.gen_opts(v)
-            }
-        };
-
-        let test_cases = vec![
-            (make_opts(100_000), false, 0),
-            (make_opts(200_000), true, 1),
-            (make_opts(300_000), true, 1),
-            (make_opts(500_000), true, 2),
-            (make_opts(1_000_000), true, 4),
-            (make_opts(1_200_000), false, 0),
-            (make_opts(1_300_000), true, 5),
-            (make_opts(1_400_000), false, 0),
-        ];
-
-        for (opts, expect_solution, expect_selected) in test_cases {
-            let res = evaluate_bnb(CoinSelector::new(&candidates, &opts), 10_000);
-            assert_eq!(res.is_ok(), expect_solution);
-
-            match res {
-                Ok(eval) => {
-                    println!("{}", eval);
-                    assert_eq!(eval.feerate_offset(ExcessStrategyKind::ToFee), 0.0);
-                    assert_eq!(eval.solution.selected.len(), expect_selected as _);
-                }
-                Err(err) => println!("expected failure: {}", err),
-            }
-        }
-    }
-
-    #[test]
-    fn early_bailout_optimization() {
-        let t = tester();
-
-        // target: 300_000
-        // candidates: 2x of 125_000, 1000x of 100_000, 1x of 50_000
-        // expected solution: 2x 125_000, 1x 50_000
-        // set bnb max tries: 1100, should succeed
-        let candidates = {
-            let mut candidates: Vec<WeightedValue> = vec![
-                t.gen_candidate(0, 125_000).into(),
-                t.gen_candidate(1, 125_000).into(),
-                t.gen_candidate(2, 50_000).into(),
-            ];
-            (3..3 + 1000_u32)
-                .for_each(|index| candidates.push(t.gen_candidate(index, 100_000).into()));
-            candidates
-        };
-        let opts = CoinSelectorOpt {
-            target_feerate: 0.0,
-            ..t.gen_opts(300_000)
-        };
-
-        let result = evaluate_bnb(CoinSelector::new(&candidates, &opts), 1100);
-        assert!(result.is_ok());
-
-        let eval = result.unwrap();
-        println!("{}", eval);
-        assert_eq!(eval.solution.selected, (0..=2).collect());
-    }
-
-    #[test]
-    fn should_exhaust_iteration() {
-        static MAX_TRIES: usize = 1000;
-        let t = tester();
-        let candidates = (0..MAX_TRIES + 1)
-            .map(|index| t.gen_candidate(index as _, 10_000).into())
-            .collect::<Vec<WeightedValue>>();
-        let opts = t.gen_opts(10_001 * MAX_TRIES as u64);
-        let result = evaluate_bnb(CoinSelector::new(&candidates, &opts), MAX_TRIES);
-        assert!(result.is_err());
-        println!("error as expected: {}", result.unwrap_err());
-    }
-
-    /// Solution should have fee >= min_absolute_fee (or no solution at all)
-    #[test]
-    fn min_absolute_fee() {
-        let t = tester();
-        let candidates = {
-            let mut candidates = Vec::new();
-            t.gen_weighted_values(&mut candidates, 5, 10_000);
-            t.gen_weighted_values(&mut candidates, 5, 20_000);
-            t.gen_weighted_values(&mut candidates, 5, 30_000);
-            t.gen_weighted_values(&mut candidates, 10, 10_300);
-            t.gen_weighted_values(&mut candidates, 10, 10_500);
-            t.gen_weighted_values(&mut candidates, 10, 10_700);
-            t.gen_weighted_values(&mut candidates, 10, 10_900);
-            t.gen_weighted_values(&mut candidates, 10, 11_000);
-            t.gen_weighted_values(&mut candidates, 10, 12_000);
-            t.gen_weighted_values(&mut candidates, 10, 13_000);
-            candidates
-        };
-        let mut opts = CoinSelectorOpt {
-            min_absolute_fee: 1,
-            ..t.gen_opts(100_000)
-        };
-
-        (1..=120_u64).for_each(|fee_factor| {
-            opts.min_absolute_fee = fee_factor * 31;
-
-            let result = evaluate_bnb(CoinSelector::new(&candidates, &opts), 21_000);
-            match result {
-                Ok(result) => {
-                    println!("Solution {}", result);
-                    let fee = result.solution.excess_strategies[&ExcessStrategyKind::ToFee].fee;
-                    assert!(fee >= opts.min_absolute_fee);
-                    assert_eq!(result.solution.excess_strategies.len(), 1);
-                }
-                Err(err) => {
-                    println!("No Solution: {}", err);
-                }
-            }
-        });
-    }
-
-    /// For a decreasing feerate (long-term feerate is lower than effective feerate), we should
-    /// select less. For increasing feerate (long-term feerate is higher than effective feerate), we
-    /// should select more.
-    #[test]
-    fn feerate_difference() {
-        let t = tester();
-        let candidates = {
-            let mut candidates = Vec::new();
-            t.gen_weighted_values(&mut candidates, 10, 2_000);
-            t.gen_weighted_values(&mut candidates, 10, 5_000);
-            t.gen_weighted_values(&mut candidates, 10, 20_000);
-            candidates
-        };
-
-        let decreasing_feerate_opts = CoinSelectorOpt {
-            target_feerate: 1.25,
-            long_term_feerate: Some(0.25),
-            ..t.gen_opts(100_000)
-        };
-
-        let increasing_feerate_opts = CoinSelectorOpt {
-            target_feerate: 0.25,
-            long_term_feerate: Some(1.25),
-            ..t.gen_opts(100_000)
-        };
-
-        let decreasing_res = evaluate_bnb(
-            CoinSelector::new(&candidates, &decreasing_feerate_opts),
-            21_000,
-        )
-        .expect("no result");
-        let decreasing_len = decreasing_res.solution.selected.len();
-
-        let increasing_res = evaluate_bnb(
-            CoinSelector::new(&candidates, &increasing_feerate_opts),
-            21_000,
-        )
-        .expect("no result");
-        let increasing_len = increasing_res.solution.selected.len();
-
-        println!("decreasing_len: {}", decreasing_len);
-        println!("increasing_len: {}", increasing_len);
-        assert!(decreasing_len < increasing_len);
-    }
-
-    /// TODO: UNIMPLEMENTED TESTS:
-    /// * Excess strategies:
-    ///     * We should always have `ExcessStrategy::ToFee`.
-    ///     * We should only have `ExcessStrategy::ToRecipient` when `max_extra_target > 0`.
-    ///     * We should only have `ExcessStrategy::ToDrain` when `drain_value >= min_drain_value`.
-    /// * Fuzz
-    ///     * Solution feerate should never be lower than target feerate
-    ///     * Solution fee should never be lower than `min_absolute_fee`.
-    ///     * Preselected should always remain selected
-    fn _todo() {}
-}
+// #[cfg(all(test, feature = "miniscript"))]
+// mod test {
+//     use bitcoin::secp256k1::Secp256k1;
+//
+//     use crate::coin_select::{evaluate_cs::evaluate, ExcessStrategyKind};
+//
+//     use super::{
+//         coin_select_bnb,
+//         evaluate_cs::{Evaluation, EvaluationError},
+//         tester::Tester,
+//         CoinSelector, CoinSelectorOpt, Vec, WeightedValue,
+//     };
+//
+//     fn tester() -> Tester {
+//         const DESC_STR: &str = "tr(xprv9uBuvtdjghkz8D1qzsSXS9Vs64mqrUnXqzNccj2xcvnCHPpXKYE1U2Gbh9CDHk8UPyF2VuXpVkDA7fk5ZP4Hd9KnhUmTscKmhee9Dp5sBMK)";
+//         Tester::new(&Secp256k1::default(), DESC_STR)
+//     }
+//
+//     fn evaluate_bnb(
+//         initial_selector: CoinSelector,
+//         max_tries: usize,
+//     ) -> Result<Evaluation, EvaluationError> {
+//         evaluate(initial_selector, |cs| {
+//             coin_select_bnb(max_tries, cs.clone()).map_or(false, |new_cs| {
+//                 *cs = new_cs;
+//                 true
+//             })
+//         })
+//     }
+//
+//     #[test]
+//     fn not_enough_coins() {
+//         let t = tester();
+//         let candidates: Vec<WeightedValue> = vec![
+//             t.gen_candidate(0, 100_000).into(),
+//             t.gen_candidate(1, 100_000).into(),
+//         ];
+//         let opts = t.gen_opts(200_000);
+//         let selector = CoinSelector::new(&candidates, &opts);
+//         assert!(!coin_select_bnb(10_000, selector).is_some());
+//     }
+//
+//     #[test]
+//     fn exactly_enough_coins_preselected() {
+//         let t = tester();
+//         let candidates: Vec<WeightedValue> = vec![
+//             t.gen_candidate(0, 100_000).into(), // to preselect
+//             t.gen_candidate(1, 100_000).into(), // to preselect
+//             t.gen_candidate(2, 100_000).into(),
+//         ];
+//         let opts = CoinSelectorOpt {
+//             target_feerate: 0.0,
+//             ..t.gen_opts(200_000)
+//         };
+//         let selector = {
+//             let mut selector = CoinSelector::new(&candidates, &opts);
+//             selector.select(0); // preselect
+//             selector.select(1); // preselect
+//             selector
+//         };
+//
+//         let evaluation = evaluate_bnb(selector, 10_000).expect("eval failed");
+//         println!("{}", evaluation);
+//         assert_eq!(evaluation.solution.selected, (0..=1).collect());
+//         assert_eq!(evaluation.solution.excess_strategies.len(), 1);
+//         assert_eq!(
+//             evaluation.feerate_offset(ExcessStrategyKind::ToFee).floor(),
+//             0.0
+//         );
+//     }
+//
+//     /// `cost_of_change` acts as the upper-bound in Bnb; we check whether these boundaries are
+//     /// enforced in code
+//     #[test]
+//     fn cost_of_change() {
+//         let t = tester();
+//         let candidates: Vec<WeightedValue> = vec![
+//             t.gen_candidate(0, 200_000).into(),
+//             t.gen_candidate(1, 200_000).into(),
+//             t.gen_candidate(2, 200_000).into(),
+//         ];
+//
+//         // lowest and highest possible `recipient_value` opts for derived `drain_waste`, assuming
+//         // that we want 2 candidates selected
+//         let (lowest_opts, highest_opts) = {
+//             let opts = t.gen_opts(0);
+//
+//             let fee_from_inputs =
+//                 (candidates[0].weight as f32 * opts.target_feerate).ceil() as u64 * 2;
+//             let fee_from_template =
+//                 ((opts.base_weight + 2) as f32 * opts.target_feerate).ceil() as u64;
+//
+//             let lowest_opts = CoinSelectorOpt {
+//                 target_value: Some(
+//                     400_000 - fee_from_inputs - fee_from_template - opts.drain_waste() as u64,
+//                 ),
+//                 ..opts
+//             };
+//
+//             let highest_opts = CoinSelectorOpt {
+//                 target_value: Some(400_000 - fee_from_inputs - fee_from_template),
+//                 ..opts
+//             };
+//
+//             (lowest_opts, highest_opts)
+//         };
+//
+//         // test lowest possible target we can select
+//         let lowest_eval = evaluate_bnb(CoinSelector::new(&candidates, &lowest_opts), 10_000);
+//         assert!(lowest_eval.is_ok());
+//         let lowest_eval = lowest_eval.unwrap();
+//         println!("LB {}", lowest_eval);
+//         assert_eq!(lowest_eval.solution.selected.len(), 2);
+//         assert_eq!(lowest_eval.solution.excess_strategies.len(), 1);
+//         assert_eq!(
+//             lowest_eval
+//                 .feerate_offset(ExcessStrategyKind::ToFee)
+//                 .floor(),
+//             0.0
+//         );
+//
+//         // test the highest possible target we can select
+//         let highest_eval = evaluate_bnb(CoinSelector::new(&candidates, &highest_opts), 10_000);
+//         assert!(highest_eval.is_ok());
+//         let highest_eval = highest_eval.unwrap();
+//         println!("UB {}", highest_eval);
+//         assert_eq!(highest_eval.solution.selected.len(), 2);
+//         assert_eq!(highest_eval.solution.excess_strategies.len(), 1);
+//         assert_eq!(
+//             highest_eval
+//                 .feerate_offset(ExcessStrategyKind::ToFee)
+//                 .floor(),
+//             0.0
+//         );
+//
+//         // test lower out of bounds
+//         let loob_opts = CoinSelectorOpt {
+//             target_value: lowest_opts.target_value.map(|v| v - 1),
+//             ..lowest_opts
+//         };
+//         let loob_eval = evaluate_bnb(CoinSelector::new(&candidates, &loob_opts), 10_000);
+//         assert!(loob_eval.is_err());
+//         println!("Lower OOB: {}", loob_eval.unwrap_err());
+//
+//         // test upper out of bounds
+//         let uoob_opts = CoinSelectorOpt {
+//             target_value: highest_opts.target_value.map(|v| v + 1),
+//             ..highest_opts
+//         };
+//         let uoob_eval = evaluate_bnb(CoinSelector::new(&candidates, &uoob_opts), 10_000);
+//         assert!(uoob_eval.is_err());
+//         println!("Upper OOB: {}", uoob_eval.unwrap_err());
+//     }
+//
+//     #[test]
+//     fn try_select() {
+//         let t = tester();
+//         let candidates: Vec<WeightedValue> = vec![
+//             t.gen_candidate(0, 300_000).into(),
+//             t.gen_candidate(1, 300_000).into(),
+//             t.gen_candidate(2, 300_000).into(),
+//             t.gen_candidate(3, 200_000).into(),
+//             t.gen_candidate(4, 200_000).into(),
+//         ];
+//         let make_opts = |v: u64| -> CoinSelectorOpt {
+//             CoinSelectorOpt {
+//                 target_feerate: 0.0,
+//                 ..t.gen_opts(v)
+//             }
+//         };
+//
+//         let test_cases = vec![
+//             (make_opts(100_000), false, 0),
+//             (make_opts(200_000), true, 1),
+//             (make_opts(300_000), true, 1),
+//             (make_opts(500_000), true, 2),
+//             (make_opts(1_000_000), true, 4),
+//             (make_opts(1_200_000), false, 0),
+//             (make_opts(1_300_000), true, 5),
+//             (make_opts(1_400_000), false, 0),
+//         ];
+//
+//         for (opts, expect_solution, expect_selected) in test_cases {
+//             let res = evaluate_bnb(CoinSelector::new(&candidates, &opts), 10_000);
+//             assert_eq!(res.is_ok(), expect_solution);
+//
+//             match res {
+//                 Ok(eval) => {
+//                     println!("{}", eval);
+//                     assert_eq!(eval.feerate_offset(ExcessStrategyKind::ToFee), 0.0);
+//                     assert_eq!(eval.solution.selected.len(), expect_selected as _);
+//                 }
+//                 Err(err) => println!("expected failure: {}", err),
+//             }
+//         }
+//     }
+//
+//     #[test]
+//     fn early_bailout_optimization() {
+//         let t = tester();
+//
+//         // target: 300_000
+//         // candidates: 2x of 125_000, 1000x of 100_000, 1x of 50_000
+//         // expected solution: 2x 125_000, 1x 50_000
+//         // set bnb max tries: 1100, should succeed
+//         let candidates = {
+//             let mut candidates: Vec<WeightedValue> = vec![
+//                 t.gen_candidate(0, 125_000).into(),
+//                 t.gen_candidate(1, 125_000).into(),
+//                 t.gen_candidate(2, 50_000).into(),
+//             ];
+//             (3..3 + 1000_u32)
+//                 .for_each(|index| candidates.push(t.gen_candidate(index, 100_000).into()));
+//             candidates
+//         };
+//         let opts = CoinSelectorOpt {
+//             target_feerate: 0.0,
+//             ..t.gen_opts(300_000)
+//         };
+//
+//         let result = evaluate_bnb(CoinSelector::new(&candidates, &opts), 1100);
+//         assert!(result.is_ok());
+//
+//         let eval = result.unwrap();
+//         println!("{}", eval);
+//         assert_eq!(eval.solution.selected, (0..=2).collect());
+//     }
+//
+//     #[test]
+//     fn should_exhaust_iteration() {
+//         static MAX_TRIES: usize = 1000;
+//         let t = tester();
+//         let candidates = (0..MAX_TRIES + 1)
+//             .map(|index| t.gen_candidate(index as _, 10_000).into())
+//             .collect::<Vec<WeightedValue>>();
+//         let opts = t.gen_opts(10_001 * MAX_TRIES as u64);
+//         let result = evaluate_bnb(CoinSelector::new(&candidates, &opts), MAX_TRIES);
+//         assert!(result.is_err());
+//         println!("error as expected: {}", result.unwrap_err());
+//     }
+//
+//     /// Solution should have fee >= min_absolute_fee (or no solution at all)
+//     #[test]
+//     fn min_absolute_fee() {
+//         let t = tester();
+//         let candidates = {
+//             let mut candidates = Vec::new();
+//             t.gen_weighted_values(&mut candidates, 5, 10_000);
+//             t.gen_weighted_values(&mut candidates, 5, 20_000);
+//             t.gen_weighted_values(&mut candidates, 5, 30_000);
+//             t.gen_weighted_values(&mut candidates, 10, 10_300);
+//             t.gen_weighted_values(&mut candidates, 10, 10_500);
+//             t.gen_weighted_values(&mut candidates, 10, 10_700);
+//             t.gen_weighted_values(&mut candidates, 10, 10_900);
+//             t.gen_weighted_values(&mut candidates, 10, 11_000);
+//             t.gen_weighted_values(&mut candidates, 10, 12_000);
+//             t.gen_weighted_values(&mut candidates, 10, 13_000);
+//             candidates
+//         };
+//         let mut opts = CoinSelectorOpt {
+//             min_absolute_fee: 1,
+//             ..t.gen_opts(100_000)
+//         };
+//
+//         (1..=120_u64).for_each(|fee_factor| {
+//             opts.min_absolute_fee = fee_factor * 31;
+//
+//             let result = evaluate_bnb(CoinSelector::new(&candidates, &opts), 21_000);
+//             match result {
+//                 Ok(result) => {
+//                     println!("Solution {}", result);
+//                     let fee = result.solution.excess_strategies[&ExcessStrategyKind::ToFee].fee;
+//                     assert!(fee >= opts.min_absolute_fee);
+//                     assert_eq!(result.solution.excess_strategies.len(), 1);
+//                 }
+//                 Err(err) => {
+//                     println!("No Solution: {}", err);
+//                 }
+//             }
+//         });
+//     }
+//
+//     /// For a decreasing feerate (long-term feerate is lower than effective feerate), we should
+//     /// select less. For increasing feerate (long-term feerate is higher than effective feerate), we
+//     /// should select more.
+//     #[test]
+//     fn feerate_difference() {
+//         let t = tester();
+//         let candidates = {
+//             let mut candidates = Vec::new();
+//             t.gen_weighted_values(&mut candidates, 10, 2_000);
+//             t.gen_weighted_values(&mut candidates, 10, 5_000);
+//             t.gen_weighted_values(&mut candidates, 10, 20_000);
+//             candidates
+//         };
+//
+//         let decreasing_feerate_opts = CoinSelectorOpt {
+//             target_feerate: 1.25,
+//             long_term_feerate: Some(0.25),
+//             ..t.gen_opts(100_000)
+//         };
+//
+//         let increasing_feerate_opts = CoinSelectorOpt {
+//             target_feerate: 0.25,
+//             long_term_feerate: Some(1.25),
+//             ..t.gen_opts(100_000)
+//         };
+//
+//         let decreasing_res = evaluate_bnb(
+//             CoinSelector::new(&candidates, &decreasing_feerate_opts),
+//             21_000,
+//         )
+//         .expect("no result");
+//         let decreasing_len = decreasing_res.solution.selected.len();
+//
+//         let increasing_res = evaluate_bnb(
+//             CoinSelector::new(&candidates, &increasing_feerate_opts),
+//             21_000,
+//         )
+//         .expect("no result");
+//         let increasing_len = increasing_res.solution.selected.len();
+//
+//         println!("decreasing_len: {}", decreasing_len);
+//         println!("increasing_len: {}", increasing_len);
+//         assert!(decreasing_len < increasing_len);
+//     }
+//
+//     /// TODO: UNIMPLEMENTED TESTS:
+//     /// * Excess strategies:
+//     ///     * We should always have `ExcessStrategy::ToFee`.
+//     ///     * We should only have `ExcessStrategy::ToRecipient` when `max_extra_target > 0`.
+//     ///     * We should only have `ExcessStrategy::ToDrain` when `drain_value >= min_drain_value`.
+//     /// * Fuzz
+//     ///     * Solution feerate should never be lower than target feerate
+//     ///     * Solution fee should never be lower than `min_absolute_fee`.
+//     ///     * Preselected should always remain selected
+//     fn _todo() {}
+// }

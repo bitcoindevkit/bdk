@@ -17,6 +17,6 @@ anyhow = { version = "1", default-features = false }
 bdk_chain = { path = "../chain", version = "0.14.0", default-features = false }
 
 [features]
-default = ["bdk_chain/std"]
-
-
+default = ["bdk_chain/std", "miniscript"]
+serde = ["bdk_chain/serde"]
+miniscript = ["bdk_chain/miniscript"]

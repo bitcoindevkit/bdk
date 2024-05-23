@@ -10,15 +10,13 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v2
       - name: Set default toolchain
-        run: rustup default nightly-2022-12-14
+        run: rustup default nightly-2024-05-12
       - name: Set profile
         run: rustup set profile minimal
       - name: Update toolchain
         run: rustup update
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2.2.1
-      - name: Pin dependencies for MSRV
-        run: cargo update -p home --precise "0.5.5"
       - name: Build docs
         run: cargo doc --no-deps
         env:

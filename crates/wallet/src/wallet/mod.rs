@@ -22,7 +22,7 @@ use alloc::{
 pub use bdk_chain::keychain::Balance;
 use bdk_chain::{
     indexed_tx_graph,
-    keychain::{self, KeychainTxOutIndex},
+    keychain::KeychainTxOutIndex,
     local_chain::{
         self, ApplyHeaderError, CannotConnectError, CheckPoint, CheckPointIter, LocalChain,
     },
@@ -134,72 +134,7 @@ impl From<SyncResult> for Update {
 }
 
 /// The changes made to a wallet by applying an [`Update`].
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, Default)]
-pub struct ChangeSet {
-    /// Changes to the [`LocalChain`].
-    ///
-    /// [`LocalChain`]: local_chain::LocalChain
-    pub chain: local_chain::ChangeSet,
-
-    /// Changes to [`IndexedTxGraph`].
-    ///
-    /// [`IndexedTxGraph`]: bdk_chain::indexed_tx_graph::IndexedTxGraph
-    pub indexed_tx_graph: indexed_tx_graph::ChangeSet<
-        ConfirmationTimeHeightAnchor,
-        keychain::ChangeSet<KeychainKind>,
-    >,
-
-    /// Stores the network type of the wallet.
-    pub network: Option<Network>,
-}
-
-impl Append for ChangeSet {
-    fn append(&mut self, other: Self) {
-        Append::append(&mut self.chain, other.chain);
-        Append::append(&mut self.indexed_tx_graph, other.indexed_tx_graph);
-        if other.network.is_some() {
-            debug_assert!(
-                self.network.is_none() || self.network == other.network,
-                "network type must be consistent"
-            );
-            self.network = other.network;
-        }
-    }
-
-    fn is_empty(&self) -> bool {
-        self.chain.is_empty() && self.indexed_tx_graph.is_empty()
-    }
-}
-
-impl From<local_chain::ChangeSet> for ChangeSet {
-    fn from(chain: local_chain::ChangeSet) -> Self {
-        Self {
-            chain,
-            ..Default::default()
-        }
-    }
-}
-
-impl
-    From<
-        indexed_tx_graph::ChangeSet<
-            ConfirmationTimeHeightAnchor,
-            keychain::ChangeSet<KeychainKind>,
-        >,
-    > for ChangeSet
-{
-    fn from(
-        indexed_tx_graph: indexed_tx_graph::ChangeSet<
-            ConfirmationTimeHeightAnchor,
-            keychain::ChangeSet<KeychainKind>,
-        >,
-    ) -> Self {
-        Self {
-            indexed_tx_graph,
-            ..Default::default()
-        }
-    }
-}
+pub type ChangeSet = bdk_persist::CombinedChangeSet<KeychainKind, ConfirmationTimeHeightAnchor>;
 
 /// A derived address and the index it was found at.
 /// For convenience this automatically derefs to `Address`
@@ -531,12 +466,13 @@ impl Wallet {
     /// # use bdk_wallet::descriptor::Descriptor;
     /// # use bitcoin::key::Secp256k1;
     /// # use bdk_wallet::KeychainKind;
-    /// # use bdk_file_store::Store;
+    /// # use bdk_sqlite::{Store, rusqlite::Connection};
     /// #
     /// # fn main() -> Result<(), anyhow::Error> {
     /// # let temp_dir = tempfile::tempdir().expect("must create tempdir");
     /// # let file_path = temp_dir.path().join("store.db");
-    /// # let db: Store<bdk_wallet::wallet::ChangeSet> = Store::create_new(&[], &file_path).expect("must create db");
+    /// # let conn = Connection::open(file_path).expect("must open connection");
+    /// # let db = Store::new(conn).expect("must create db");
     /// let secp = Secp256k1::new();
     ///
     /// let (external_descriptor, external_keymap) = Descriptor::parse_descriptor(&secp, "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/84'/1'/0'/0/*)").unwrap();
