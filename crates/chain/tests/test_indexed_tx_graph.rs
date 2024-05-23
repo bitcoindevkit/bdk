@@ -116,8 +116,8 @@ fn insert_relevant_txs() {
 /// tx1: A Coinbase, sending 70000 sats to "trusted" address. [Block 0]
 /// tx2: A external Receive, sending 30000 sats to "untrusted" address. [Block 1]
 /// tx3: Internal Spend. Spends tx2 and returns change of 10000 to "trusted" address. [Block 2]
-/// tx4: Mempool tx, sending 20000 sats to "trusted" address.
-/// tx5: Mempool tx, sending 15000 sats to "untested" address.
+/// tx4: Mempool tx, sending 20000 sats to "untrusted" address.
+/// tx5: Mempool tx, sending 15000 sats to "trusted" address.
 /// tx6: Complete unrelated tx. [Block 3]
 ///
 /// Different transactions are added via `insert_relevant_txs`.
@@ -160,7 +160,7 @@ fn test_list_owned_txouts() {
     let mut untrusted_spks: Vec<ScriptBuf> = Vec::new();
 
     {
-        // we need to scope here to take immutanble reference of the graph
+        // we need to scope here to take immutable reference of the graph
         for _ in 0..10 {
             let ((_, script), _) = graph
                 .index
@@ -226,7 +226,7 @@ fn test_list_owned_txouts() {
         ..common::new_tx(0)
     };
 
-    // tx5 is spending tx3 and receiving change at trusted keychain, unconfirmed.
+    // tx5 is an external transaction receiving at trusted keychain, unconfirmed.
     let tx5 = Transaction {
         output: vec![TxOut {
             value: Amount::from_sat(15000),
@@ -239,7 +239,7 @@ fn test_list_owned_txouts() {
     let tx6 = common::new_tx(0);
 
     // Insert transactions into graph with respective anchors
-    // For unconfirmed txs we pass in `None`.
+    // Insert unconfirmed txs with a last_seen timestamp
 
     let _ =
         graph.batch_insert_relevant([&tx1, &tx2, &tx3, &tx6].iter().enumerate().map(|(i, tx)| {
@@ -290,9 +290,6 @@ fn test_list_owned_txouts() {
                 graph.index.outpoints().iter().cloned(),
                 |_, spk: &Script| trusted_spks.contains(&spk.to_owned()),
             );
-
-            assert_eq!(txouts.len(), 5);
-            assert_eq!(utxos.len(), 4);
 
             let confirmed_txouts_txid = txouts
                 .iter()
@@ -359,29 +356,25 @@ fn test_list_owned_txouts() {
             balance,
         ) = fetch(0, &graph);
 
+        // tx1 is a confirmed txout and is unspent
+        // tx4, tx5 are unconfirmed
         assert_eq!(confirmed_txouts_txid, [tx1.compute_txid()].into());
         assert_eq!(
             unconfirmed_txouts_txid,
-            [
-                tx2.compute_txid(),
-                tx3.compute_txid(),
-                tx4.compute_txid(),
-                tx5.compute_txid()
-            ]
-            .into()
+            [tx4.compute_txid(), tx5.compute_txid()].into()
         );
 
         assert_eq!(confirmed_utxos_txid, [tx1.compute_txid()].into());
         assert_eq!(
             unconfirmed_utxos_txid,
-            [tx3.compute_txid(), tx4.compute_txid(), tx5.compute_txid()].into()
+            [tx4.compute_txid(), tx5.compute_txid()].into()
         );
 
         assert_eq!(
             balance,
             Balance {
                 immature: Amount::from_sat(70000),          // immature coinbase
-                trusted_pending: Amount::from_sat(25000),   // tx3 + tx5
+                trusted_pending: Amount::from_sat(15000),   // tx5
                 untrusted_pending: Amount::from_sat(20000), // tx4
                 confirmed: Amount::ZERO                     // Nothing is confirmed yet
             }
@@ -405,23 +398,26 @@ fn test_list_owned_txouts() {
         );
         assert_eq!(
             unconfirmed_txouts_txid,
-            [tx3.compute_txid(), tx4.compute_txid(), tx5.compute_txid()].into()
+            [tx4.compute_txid(), tx5.compute_txid()].into()
         );
 
-        // tx2 doesn't get into confirmed utxos set
-        assert_eq!(confirmed_utxos_txid, [tx1.compute_txid()].into());
+        // tx2 gets into confirmed utxos set
+        assert_eq!(
+            confirmed_utxos_txid,
+            [tx1.compute_txid(), tx2.compute_txid()].into()
+        );
         assert_eq!(
             unconfirmed_utxos_txid,
-            [tx3.compute_txid(), tx4.compute_txid(), tx5.compute_txid()].into()
+            [tx4.compute_txid(), tx5.compute_txid()].into()
         );
 
         assert_eq!(
             balance,
             Balance {
                 immature: Amount::from_sat(70000),          // immature coinbase
-                trusted_pending: Amount::from_sat(25000),   // tx3 + tx5
+                trusted_pending: Amount::from_sat(15000),   // tx5
                 untrusted_pending: Amount::from_sat(20000), // tx4
-                confirmed: Amount::ZERO                     // Nothing is confirmed yet
+                confirmed: Amount::from_sat(30_000)         // tx2 got confirmed
             }
         );
     }
@@ -477,6 +473,7 @@ fn test_list_owned_txouts() {
             balance,
         ) = fetch(98, &graph);
 
+        // no change compared to block 2
         assert_eq!(
             confirmed_txouts_txid,
             [tx1.compute_txid(), tx2.compute_txid(), tx3.compute_txid()].into()
@@ -502,14 +499,14 @@ fn test_list_owned_txouts() {
                 immature: Amount::from_sat(70000),          // immature coinbase
                 trusted_pending: Amount::from_sat(15000),   // tx5
                 untrusted_pending: Amount::from_sat(20000), // tx4
-                confirmed: Amount::from_sat(10000)          // tx1 got matured
+                confirmed: Amount::from_sat(10000)          // tx3 is confirmed
             }
         );
     }
 
     // AT Block 99
     {
-        let (_, _, _, _, balance) = fetch(100, &graph);
+        let (_, _, _, _, balance) = fetch(99, &graph);
 
         // Coinbase maturity hits
         assert_eq!(

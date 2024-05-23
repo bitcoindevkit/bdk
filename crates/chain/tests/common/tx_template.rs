@@ -131,9 +131,7 @@ pub fn init_graph<'a, A: Anchor + Clone + 'a>(
         for anchor in tx_tmp.anchors.iter() {
             let _ = graph.insert_anchor(tx.compute_txid(), anchor.clone());
         }
-        if let Some(seen_at) = tx_tmp.last_seen {
-            let _ = graph.insert_seen_at(tx.compute_txid(), seen_at);
-        }
+        let _ = graph.insert_seen_at(tx.compute_txid(), tx_tmp.last_seen.unwrap_or(0));
     }
     (graph, spk_index, tx_ids)
 }

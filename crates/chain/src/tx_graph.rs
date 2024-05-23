@@ -110,7 +110,7 @@ use core::{
 #[derive(Clone, Debug, PartialEq)]
 pub struct TxGraph<A = ()> {
     // all transactions that the graph is aware of in format: `(tx_node, tx_anchors, tx_last_seen)`
-    txs: HashMap<Txid, (TxNodeInternal, BTreeSet<A>, u64)>,
+    txs: HashMap<Txid, (TxNodeInternal, BTreeSet<A>, Option<u64>)>,
     spends: BTreeMap<OutPoint, HashSet<Txid>>,
     anchors: BTreeSet<(A, Txid)>,
 
@@ -140,7 +140,7 @@ pub struct TxNode<'a, T, A> {
     /// The blocks that the transaction is "anchored" in.
     pub anchors: &'a BTreeSet<A>,
     /// The last-seen unix timestamp of the transaction as unconfirmed.
-    pub last_seen_unconfirmed: u64,
+    pub last_seen_unconfirmed: Option<u64>,
 }
 
 impl<'a, T, A> Deref for TxNode<'a, T, A> {
@@ -504,7 +504,7 @@ impl<A: Clone + Ord> TxGraph<A> {
             (
                 TxNodeInternal::Partial([(outpoint.vout, txout)].into()),
                 BTreeSet::new(),
-                0,
+                None,
             ),
         );
         self.apply_update(update)
@@ -518,7 +518,7 @@ impl<A: Clone + Ord> TxGraph<A> {
         let mut update = Self::default();
         update.txs.insert(
             tx.compute_txid(),
-            (TxNodeInternal::Whole(tx), BTreeSet::new(), 0),
+            (TxNodeInternal::Whole(tx), BTreeSet::new(), None),
         );
         self.apply_update(update)
     }
@@ -560,7 +560,7 @@ impl<A: Clone + Ord> TxGraph<A> {
     pub fn insert_seen_at(&mut self, txid: Txid, seen_at: u64) -> ChangeSet<A> {
         let mut update = Self::default();
         let (_, _, update_last_seen) = update.txs.entry(txid).or_default();
-        *update_last_seen = seen_at;
+        *update_last_seen = Some(seen_at);
         self.apply_update(update)
     }
 
@@ -669,7 +669,7 @@ impl<A: Clone + Ord> TxGraph<A> {
                 None => {
                     self.txs.insert(
                         txid,
-                        (TxNodeInternal::Whole(wrapped_tx), BTreeSet::new(), 0),
+                        (TxNodeInternal::Whole(wrapped_tx), BTreeSet::new(), None),
                     );
                 }
             }
@@ -696,8 +696,8 @@ impl<A: Clone + Ord> TxGraph<A> {
 
         for (txid, new_last_seen) in changeset.last_seen {
             let (_, _, last_seen) = self.txs.entry(txid).or_default();
-            if new_last_seen > *last_seen {
-                *last_seen = new_last_seen;
+            if Some(new_last_seen) > *last_seen {
+                *last_seen = Some(new_last_seen);
             }
         }
     }
@@ -710,10 +710,10 @@ impl<A: Clone + Ord> TxGraph<A> {
         let mut changeset = ChangeSet::<A>::default();
 
         for (&txid, (update_tx_node, _, update_last_seen)) in &update.txs {
-            let prev_last_seen: u64 = match (self.txs.get(&txid), update_tx_node) {
+            let prev_last_seen = match (self.txs.get(&txid), update_tx_node) {
                 (None, TxNodeInternal::Whole(update_tx)) => {
                     changeset.txs.insert(update_tx.clone());
-                    0
+                    None
                 }
                 (None, TxNodeInternal::Partial(update_txos)) => {
                     changeset.txouts.extend(
@@ -721,7 +721,7 @@ impl<A: Clone + Ord> TxGraph<A> {
                             .iter()
                             .map(|(&vout, txo)| (OutPoint::new(txid, vout), txo.clone())),
                     );
-                    0
+                    None
                 }
                 (Some((TxNodeInternal::Whole(_), _, last_seen)), _) => *last_seen,
                 (
@@ -746,7 +746,10 @@ impl<A: Clone + Ord> TxGraph<A> {
             };
 
             if *update_last_seen > prev_last_seen {
-                changeset.last_seen.insert(txid, *update_last_seen);
+                changeset.last_seen.insert(
+                    txid,
+                    update_last_seen.expect("checked is greater, so we must have a last_seen"),
+                );
             }
         }
 
@@ -797,6 +800,13 @@ impl<A: Anchor> TxGraph<A> {
                 _ => continue,
             }
         }
+
+        // If no anchors are in best chain and we don't have a last_seen, we can return
+        // early because by definition the tx doesn't have a chain position.
+        let last_seen = match last_seen {
+            Some(t) => *t,
+            None => return Ok(None),
+        };
 
         // The tx is not anchored to a block in the best chain, which means that it
         // might be in mempool, or it might have been dropped already.
@@ -884,7 +894,7 @@ impl<A: Anchor> TxGraph<A> {
                 if conflicting_tx.last_seen_unconfirmed > tx_last_seen {
                     return Ok(None);
                 }
-                if conflicting_tx.last_seen_unconfirmed == *last_seen
+                if conflicting_tx.last_seen_unconfirmed == Some(last_seen)
                     && conflicting_tx.as_ref().compute_txid() > tx.as_ref().compute_txid()
                 {
                     // Conflicting tx has priority if txid of conflicting tx > txid of original tx
@@ -893,7 +903,7 @@ impl<A: Anchor> TxGraph<A> {
             }
         }
 
-        Ok(Some(ChainPosition::Unconfirmed(*last_seen)))
+        Ok(Some(ChainPosition::Unconfirmed(last_seen)))
     }
 
     /// Get the position of the transaction in `chain` with tip `chain_tip`.

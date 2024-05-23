@@ -977,16 +977,6 @@ fn test_chain_spends() {
         }))
     );
 
-    // Even if unconfirmed tx has a last_seen of 0, it can still be part of a chain spend.
-    assert_eq!(
-        graph.get_chain_spend(
-            &local_chain,
-            tip.block_id(),
-            OutPoint::new(tx_0.compute_txid(), 1)
-        ),
-        Some((ChainPosition::Unconfirmed(0), tx_2.compute_txid())),
-    );
-
     // Mark the unconfirmed as seen and check correct ObservedAs status is returned.
     let _ = graph.insert_seen_at(tx_2.compute_txid(), 1234567);
 
@@ -1099,10 +1089,10 @@ fn update_last_seen_unconfirmed() {
     let txid = tx.compute_txid();
 
     // insert a new tx
-    // initially we have a last_seen of 0, and no anchors
+    // initially we have a last_seen of None and no anchors
     let _ = graph.insert_tx(tx);
     let tx = graph.full_txs().next().unwrap();
-    assert_eq!(tx.last_seen_unconfirmed, 0);
+    assert_eq!(tx.last_seen_unconfirmed, None);
     assert!(tx.anchors.is_empty());
 
     // higher timestamp should update last seen
@@ -1117,7 +1107,15 @@ fn update_last_seen_unconfirmed() {
     let _ = graph.insert_anchor(txid, ());
     let changeset = graph.update_last_seen_unconfirmed(4);
     assert!(changeset.is_empty());
-    assert_eq!(graph.full_txs().next().unwrap().last_seen_unconfirmed, 2);
+    assert_eq!(
+        graph
+            .full_txs()
+            .next()
+            .unwrap()
+            .last_seen_unconfirmed
+            .unwrap(),
+        2
+    );
 }
 
 #[test]
