@@ -14,14 +14,17 @@ ARGS:
     <CHANGE_DESCRIPTOR>    Wallet change descriptor [env: CHANGE_DESCRIPTOR=]
 
 OPTIONS:
-        --db-path <DB_PATH>
-            Where to store wallet data [env: BDK_DB_PATH=] [default: .bdk_wallet_rpc_example.db]
-
+    --change-descriptor <CHANGE_DESCRIPTOR>
+            Wallet change descriptor [env: CHANGE_DESCRIPTOR=] [default:
+            wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/84'/1'/0'/1/*)]
+    --descriptor <DESCRIPTOR>
+            Wallet descriptor [env: DESCRIPTOR=] [default:
+            wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/84'/0'/0'/1/*)]
     -h, --help
             Print help information
 
         --network <NETWORK>
-            Bitcoin network to connect to [env: BITCOIN_NETWORK=] [default: testnet]
+            Bitcoin network to connect to [env: BITCOIN_NETWORK=] [default: signet]
 
         --rpc-cookie <RPC_COOKIE>
             RPC auth cookie file [env: RPC_COOKIE=]
@@ -33,7 +36,7 @@ OPTIONS:
             RPC auth username [env: RPC_USER=]
 
         --start-height <START_HEIGHT>
-            Earliest block height to start sync from [env: START_HEIGHT=] [default: 481824]
+            Earliest block height to start sync from [env: START_HEIGHT=] [default: 100000]
 
         --url <URL>
             RPC URL [env: RPC_URL=] [default: 127.0.0.1:8332]

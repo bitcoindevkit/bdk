@@ -1,53 +1,41 @@
-const DB_MAGIC: &str = "bdk_wallet_electrum_example";
+use std::io::Write;
+use std::str::FromStr;
+
+use bdk_electrum::{electrum_client, BdkElectrumClient};
+use bdk_wallet::{
+    bitcoin::{Address, Amount, Network},
+    chain::collections::HashSet,
+    KeychainKind, SignOptions, Wallet,
+};
+
+use bdk_sqlite::{rusqlite::Connection, Store};
+
 const SEND_AMOUNT: Amount = Amount::from_sat(5000);
 const STOP_GAP: usize = 20;
 const BATCH_SIZE: usize = 5;
 
-use anyhow::anyhow;
-use std::io::Write;
-use std::str::FromStr;
-
-use bdk_electrum::electrum_client;
-use bdk_electrum::BdkElectrumClient;
-use bdk_file_store::Store;
-use bdk_wallet::bitcoin::{Address, Amount};
-use bdk_wallet::chain::collections::HashSet;
-use bdk_wallet::{bitcoin::Network, Wallet};
-use bdk_wallet::{KeychainKind, SignOptions};
-
 fn main() -> Result<(), anyhow::Error> {
-    let db_path = std::env::temp_dir().join("bdk-electrum-example");
-    let mut db =
-        Store::<bdk_wallet::wallet::ChangeSet>::open_or_create_new(DB_MAGIC.as_bytes(), db_path)?;
+    let conn = Connection::open_in_memory().expect("must open connection");
+    let mut db = Store::new(conn).expect("must create db");
+    let changeset = db.read()?;
     let external_descriptor = "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/84'/1'/0'/0/*)";
     let internal_descriptor = "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/84'/1'/0'/1/*)";
-    let changeset = db
-        .aggregate_changesets()
-        .map_err(|e| anyhow!("load changes error: {}", e))?;
+
     let mut wallet = Wallet::new_or_load(
         external_descriptor,
         internal_descriptor,
         changeset,
-        Network::Testnet,
+        Network::Signet,
     )?;
 
     let address = wallet.next_unused_address(KeychainKind::External);
-    if let Some(changeset) = wallet.take_staged() {
-        db.append_changeset(&changeset)?;
-    }
     println!("Generated Address: {}", address);
 
-    let balance = wallet.get_balance();
+    let balance = wallet.balance();
     println!("Wallet balance before syncing: {}", balance.total());
 
     print!("Syncing...");
-    let client = BdkElectrumClient::new(electrum_client::Client::new(
-        "ssl://electrum.blockstream.info:60002",
-    )?);
-
-    // Populate the electrum client's transaction cache so it doesn't redownload transaction we
-    // already have.
-    client.populate_tx_cache(&wallet);
+    let client = BdkElectrumClient::new(electrum_client::Client::new("ssl://mempool.space:60602")?);
 
     let request = wallet
         .start_full_scan()
@@ -73,11 +61,8 @@ fn main() -> Result<(), anyhow::Error> {
     println!();
 
     wallet.apply_update(update)?;
-    if let Some(changeset) = wallet.take_staged() {
-        db.append_changeset(&changeset)?;
-    }
 
-    let balance = wallet.get_balance();
+    let balance = wallet.balance();
     println!("Wallet balance after syncing: {}", balance.total());
 
     if balance.total() < SEND_AMOUNT {
@@ -89,7 +74,7 @@ fn main() -> Result<(), anyhow::Error> {
     }
 
     let faucet_address = Address::from_str("mkHS9ne12qx9pS9VojpwU5xtRd4T7X7ZUt")?
-        .require_network(Network::Testnet)?;
+        .require_network(Network::Signet)?;
 
     let mut tx_builder = wallet.build_tx();
     tx_builder
