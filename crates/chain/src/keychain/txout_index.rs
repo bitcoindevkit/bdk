@@ -506,9 +506,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
             if old_desc_id == desc_id {
                 return changeset;
             }
-            // we should remove old descriptor that is associated with this keychain as the index
-            // is designed to track one descriptor per keychain (however different keychains can
-            // share the same descriptor)
+            // remove keychain from reverse index
             let _is_keychain_removed = self
                 .keychains
                 .get_mut(&old_desc_id)
