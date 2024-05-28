@@ -219,12 +219,12 @@ pub struct KeychainTxOutIndex<K> {
     // a keychain, we return it with the highest-ranked keychain with it. We rank keychains by
     // `Ord`, therefore the keychain set is a `BTreeSet`. The earliest keychain variant (according
     // to `Ord`) has precedence.
-    descriptor_ids_to_keychains: HashMap<DescriptorId, BTreeSet<K>>,
+    keychains: HashMap<DescriptorId, BTreeSet<K>>,
     // descriptor_id -> descriptor map
     // This is a "monotone" map, meaning that its size keeps growing, i.e., we never delete
     // descriptors from it. This is useful for revealing spks for descriptors that don't have
     // keychains associated.
-    descriptor_ids_to_descriptors: BTreeMap<DescriptorId, Descriptor<DescriptorPublicKey>>,
+    descriptors: BTreeMap<DescriptorId, Descriptor<DescriptorPublicKey>>,
     // last revealed indexes
     last_revealed: BTreeMap<DescriptorId, u32>,
     // lookahead settings for each keychain
@@ -246,7 +246,7 @@ impl<K: Clone + Ord + Debug> Indexer for KeychainTxOutIndex<K> {
                 // We want to reveal spks for descriptors that aren't tracked by any keychain, and
                 // so we call reveal with descriptor_id
                 let desc = self
-                    .descriptor_ids_to_descriptors
+                    .descriptors
                     .get(&descriptor_id)
                     .cloned()
                     .expect("descriptors are added monotonically, scanned txout descriptor ids must have associated descriptors");
@@ -299,8 +299,8 @@ impl<K> KeychainTxOutIndex<K> {
         Self {
             inner: SpkTxOutIndex::default(),
             keychains_to_descriptor_ids: BTreeMap::new(),
-            descriptor_ids_to_keychains: HashMap::new(),
-            descriptor_ids_to_descriptors: BTreeMap::new(),
+            keychains: HashMap::new(),
+            descriptors: BTreeMap::new(),
             last_revealed: BTreeMap::new(),
             lookahead,
         }
@@ -311,7 +311,7 @@ impl<K> KeychainTxOutIndex<K> {
 impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     /// Get the highest-ranked keychain that is currently associated with the given `desc_id`.
     fn keychain_of_desc_id(&self, desc_id: &DescriptorId) -> Option<&K> {
-        let keychains = self.descriptor_ids_to_keychains.get(desc_id)?;
+        let keychains = self.keychains.get(desc_id)?;
         keychains.iter().next()
     }
 
@@ -473,7 +473,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     {
         self.keychains_to_descriptor_ids.iter().map(|(k, desc_id)| {
             let descriptor = self
-                .descriptor_ids_to_descriptors
+                .descriptors
                 .get(desc_id)
                 .expect("descriptor id cannot be associated with keychain without descriptor");
             (k, descriptor)
@@ -510,19 +510,18 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
             // is designed to track one descriptor per keychain (however different keychains can
             // share the same descriptor)
             let _is_keychain_removed = self
-                .descriptor_ids_to_keychains
+                .keychains
                 .get_mut(&old_desc_id)
                 .expect("we must have already inserted this descriptor")
                 .remove(&keychain);
             debug_assert!(_is_keychain_removed);
         }
 
-        self.descriptor_ids_to_keychains
+        self.keychains
             .entry(desc_id)
             .or_default()
             .insert(keychain.clone());
-        self.descriptor_ids_to_descriptors
-            .insert(desc_id, descriptor.clone());
+        self.descriptors.insert(desc_id, descriptor.clone());
         self.replenish_lookahead(&keychain, self.lookahead);
 
         changeset
@@ -537,7 +536,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
         self.keychains_to_descriptor_ids
             .get(keychain)
             .map(|desc_id| {
-                self.descriptor_ids_to_descriptors
+                self.descriptors
                     .get(desc_id)
                     .expect("descriptor id cannot be associated with keychain without descriptor")
             })
@@ -571,7 +570,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
         let descriptor_id = self.keychains_to_descriptor_ids.get(keychain).copied();
         if let Some(descriptor_id) = descriptor_id {
             let descriptor = self
-                .descriptor_ids_to_descriptors
+                .descriptors
                 .get(&descriptor_id)
                 .expect("descriptor id cannot be associated with keychain without descriptor");
 
@@ -606,7 +605,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     ) -> Option<SpkIterator<Descriptor<DescriptorPublicKey>>> {
         let desc_id = self.keychains_to_descriptor_ids.get(keychain)?;
         let desc = self
-            .descriptor_ids_to_descriptors
+            .descriptors
             .get(desc_id)
             .cloned()
             .expect("descriptor id cannot be associated with keychain without descriptor");
@@ -620,11 +619,10 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
         self.keychains_to_descriptor_ids
             .iter()
             .map(|(k, desc_id)| {
-                let desc = self
-                    .descriptor_ids_to_descriptors
-                    .get(desc_id)
-                    .cloned()
-                    .expect("descriptor id cannot be associated with keychain without descriptor");
+                let desc =
+                    self.descriptors.get(desc_id).cloned().expect(
+                        "descriptor id cannot be associated with keychain without descriptor",
+                    );
                 (k.clone(), SpkIterator::new(desc))
             })
             .collect()
@@ -712,7 +710,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     pub fn next_index(&self, keychain: &K) -> Option<(u32, bool)> {
         let descriptor_id = self.keychains_to_descriptor_ids.get(keychain)?;
         let descriptor = self
-            .descriptor_ids_to_descriptors
+            .descriptors
             .get(descriptor_id)
             .expect("descriptor id cannot be associated with keychain without descriptor");
         Some(self.next_index_with_descriptor(descriptor))
@@ -872,7 +870,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
             None => return (None, ChangeSet::default()),
         };
         let desc = self
-            .descriptor_ids_to_descriptors
+            .descriptors
             .get(descriptor_id)
             .cloned()
             .expect("descriptors are added monotonically, scanned txout descriptor ids must have associated descriptors");
@@ -901,7 +899,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
             }
         };
         let descriptor = self
-            .descriptor_ids_to_descriptors
+            .descriptors
             .get(&descriptor_id)
             .expect("descriptor id cannot be associated with keychain without descriptor");
         let (next_index, _) = self.next_index_with_descriptor(descriptor);
