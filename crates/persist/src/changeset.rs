@@ -52,6 +52,15 @@ impl<K: Ord, A: Anchor> Append for CombinedChangeSet<K, A> {
     }
 }
 
+impl<K, A> From<keychain::ChangeSet<K>> for CombinedChangeSet<K, A> {
+    fn from(keychain_changeset: keychain::ChangeSet<K>) -> Self {
+        Self {
+            indexed_tx_graph: keychain_changeset.into(),
+            ..Default::default()
+        }
+    }
+}
+
 impl<K, A> From<local_chain::ChangeSet> for CombinedChangeSet<K, A> {
     fn from(chain: local_chain::ChangeSet) -> Self {
         Self {
