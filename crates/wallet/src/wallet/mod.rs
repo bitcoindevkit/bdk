@@ -2499,7 +2499,6 @@ impl Wallet {
     /// start a blockchain sync with a spk based blockchain client.
     pub fn start_sync_with_revealed_spks(&self) -> SyncRequest {
         SyncRequest::from_chain_tip(self.chain.tip())
-            .cache_graph_txs(self.tx_graph())
             .populate_with_revealed_spks(&self.indexed_graph.index, ..)
     }
 
@@ -2513,7 +2512,6 @@ impl Wallet {
     /// in which the list of used scripts is not known.
     pub fn start_full_scan(&self) -> FullScanRequest<KeychainKind> {
         FullScanRequest::from_keychain_txout_index(self.chain.tip(), &self.indexed_graph.index)
-            .cache_graph_txs(self.tx_graph())
     }
 }
 

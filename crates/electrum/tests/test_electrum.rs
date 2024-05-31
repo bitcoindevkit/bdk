@@ -5,7 +5,7 @@ use bdk_chain::{
     spk_client::SyncRequest,
     ConfirmationTimeHeightAnchor, IndexedTxGraph, SpkTxOutIndex,
 };
-use bdk_electrum::ElectrumExt;
+use bdk_electrum::BdkElectrumClient;
 use bdk_testenv::{anyhow, bitcoincore_rpc::RpcApi, TestEnv};
 
 fn get_balance(
@@ -31,7 +31,8 @@ fn scan_detects_confirmed_tx() -> anyhow::Result<()> {
     const SEND_AMOUNT: Amount = Amount::from_sat(10_000);
 
     let env = TestEnv::new()?;
-    let client = electrum_client::Client::new(env.electrsd.electrum_url.as_str())?;
+    let electrum_client = electrum_client::Client::new(env.electrsd.electrum_url.as_str())?;
+    let client = BdkElectrumClient::new(electrum_client);
 
     // Setup addresses.
     let addr_to_mine = env
@@ -122,7 +123,8 @@ fn tx_can_become_unconfirmed_after_reorg() -> anyhow::Result<()> {
     const SEND_AMOUNT: Amount = Amount::from_sat(10_000);
 
     let env = TestEnv::new()?;
-    let client = electrum_client::Client::new(env.electrsd.electrum_url.as_str())?;
+    let electrum_client = electrum_client::Client::new(env.electrsd.electrum_url.as_str())?;
+    let client = BdkElectrumClient::new(electrum_client);
 
     // Setup addresses.
     let addr_to_mine = env

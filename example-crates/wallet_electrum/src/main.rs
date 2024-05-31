@@ -6,10 +6,8 @@ const BATCH_SIZE: usize = 5;
 use std::io::Write;
 use std::str::FromStr;
 
-use bdk_electrum::{
-    electrum_client::{self, ElectrumApi},
-    ElectrumExt,
-};
+use bdk_electrum::electrum_client::{self, ElectrumApi};
+use bdk_electrum::BdkElectrumClient;
 use bdk_file_store::Store;
 use bdk_wallet::bitcoin::{Address, Amount};
 use bdk_wallet::chain::collections::HashSet;
@@ -37,7 +35,13 @@ fn main() -> Result<(), anyhow::Error> {
     println!("Wallet balance before syncing: {} sats", balance.total());
 
     print!("Syncing...");
-    let client = electrum_client::Client::new("ssl://electrum.blockstream.info:60002")?;
+    let client = BdkElectrumClient::new(electrum_client::Client::new(
+        "ssl://electrum.blockstream.info:60002",
+    )?);
+
+    // Populate the electrum client's transaction cache so it doesn't redownload transaction we
+    // already have.
+    client.populate_tx_cache(&wallet);
 
     let request = wallet
         .start_full_scan()
@@ -89,7 +93,7 @@ fn main() -> Result<(), anyhow::Error> {
     assert!(finalized);
 
     let tx = psbt.extract_tx()?;
-    client.transaction_broadcast(&tx)?;
+    client.inner.transaction_broadcast(&tx)?;
     println!("Tx broadcasted! Txid: {}", tx.txid());
 
     Ok(())
