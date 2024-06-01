@@ -1216,7 +1216,7 @@ impl Wallet {
 
     /// Return the balance, separated into available, trusted-pending, untrusted-pending and immature
     /// values.
-    pub fn get_balance(&self) -> Balance {
+    pub fn balance(&self) -> Balance {
         self.indexed_graph.graph().balance(
             &self.chain,
             self.chain.tip().block_id(),
