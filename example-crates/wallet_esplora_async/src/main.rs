@@ -7,6 +7,7 @@ use bdk_wallet::{
 };
 
 use bdk_sqlite::{rusqlite::Connection, Store};
+use bdk_wallet::chain::persist::PersistBackend;
 
 const SEND_AMOUNT: Amount = Amount::from_sat(5000);
 const STOP_GAP: usize = 50;
@@ -16,18 +17,20 @@ const PARALLEL_REQUESTS: usize = 5;
 async fn main() -> Result<(), anyhow::Error> {
     let db_path = "bdk-esplora-async-example.sqlite";
     let conn = Connection::open(db_path)?;
-    let db = Store::new(conn)?;
+    let mut db = Store::new(conn)?;
     let external_descriptor = "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/84'/1'/0'/0/*)";
     let internal_descriptor = "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/84'/1'/0'/1/*)";
+    let changeset = db.load_changes()?;
 
     let mut wallet = Wallet::new_or_load(
         external_descriptor,
         internal_descriptor,
-        db,
+        changeset,
         Network::Signet,
     )?;
 
-    let address = wallet.next_unused_address(KeychainKind::External)?;
+    let address = wallet.next_unused_address(KeychainKind::External);
+    db.write_changes(&wallet.take_staged())?;
     println!("Generated Address: {}", address);
 
     let balance = wallet.balance();
@@ -75,7 +78,7 @@ async fn main() -> Result<(), anyhow::Error> {
     let _ = update.graph_update.update_last_seen_unconfirmed(now);
 
     wallet.apply_update(update)?;
-    wallet.commit()?;
+    db.write_changes(&wallet.take_staged())?;
     println!();
 
     let balance = wallet.balance();

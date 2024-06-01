@@ -18,7 +18,7 @@
 //! let first_device = devices.remove(0)?;
 //! let custom_signer = HWISigner::from_device(&first_device, Network::Testnet.into())?;
 //!
-//! # let mut wallet = Wallet::new_no_persist(
+//! # let mut wallet = Wallet::new(
 //! #     "",
 //! #     "",
 //! #     Network::Testnet,

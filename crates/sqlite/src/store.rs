@@ -12,10 +12,10 @@ use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
 use crate::Error;
+use bdk_chain::persist::{CombinedChangeSet, PersistBackend};
 use bdk_chain::{
     indexed_tx_graph, keychain, local_chain, tx_graph, Anchor, Append, DescriptorExt, DescriptorId,
 };
-use bdk_persist::CombinedChangeSet;
 
 /// Persists data in to a relational schema based [SQLite] database file.
 ///
@@ -57,21 +57,23 @@ where
     }
 }
 
-impl<K, A, C> bdk_persist::PersistBackend<C> for Store<K, A>
+impl<K, A> PersistBackend<CombinedChangeSet<K, A>> for Store<K, A>
 where
     K: Ord + for<'de> Deserialize<'de> + Serialize + Send,
     A: Anchor + for<'de> Deserialize<'de> + Serialize + Send,
-    C: Clone + From<CombinedChangeSet<K, A>> + Into<CombinedChangeSet<K, A>>,
 {
-    fn write_changes(&mut self, changeset: &C) -> anyhow::Result<()> {
-        self.write(&changeset.clone().into())
-            .map_err(|e| anyhow::anyhow!(e).context("unable to write changes to sqlite database"))
+    type WriteError = Error;
+    type LoadError = Error;
+
+    fn write_changes(
+        &mut self,
+        changeset: &CombinedChangeSet<K, A>,
+    ) -> Result<(), Self::WriteError> {
+        self.write(changeset)
     }
 
-    fn load_from_persistence(&mut self) -> anyhow::Result<Option<C>> {
+    fn load_changes(&mut self) -> Result<Option<CombinedChangeSet<K, A>>, Self::LoadError> {
         self.read()
-            .map(|c| c.map(Into::into))
-            .map_err(|e| anyhow::anyhow!(e).context("unable to read changes from sqlite database"))
     }
 }
 
@@ -561,11 +563,11 @@ mod test {
     use bdk_chain::bitcoin::Network::Testnet;
     use bdk_chain::bitcoin::{secp256k1, BlockHash, OutPoint};
     use bdk_chain::miniscript::Descriptor;
+    use bdk_chain::persist::{CombinedChangeSet, PersistBackend};
     use bdk_chain::{
         indexed_tx_graph, keychain, tx_graph, BlockId, ConfirmationHeightAnchor,
         ConfirmationTimeHeightAnchor, DescriptorExt,
     };
-    use bdk_persist::PersistBackend;
     use std::str::FromStr;
     use std::sync::Arc;
 
@@ -576,8 +578,7 @@ mod test {
     }
 
     #[test]
-    fn insert_and_load_aggregate_changesets_with_confirmation_time_height_anchor(
-    ) -> anyhow::Result<()> {
+    fn insert_and_load_aggregate_changesets_with_confirmation_time_height_anchor() {
         let (test_changesets, agg_test_changesets) =
             create_test_changesets(&|height, time, hash| ConfirmationTimeHeightAnchor {
                 confirmation_height: height,
@@ -593,15 +594,13 @@ mod test {
             store.write_changes(changeset).expect("write changeset");
         });
 
-        let agg_changeset = store.load_from_persistence().expect("aggregated changeset");
+        let agg_changeset = store.load_changes().expect("aggregated changeset");
 
         assert_eq!(agg_changeset, Some(agg_test_changesets));
-        Ok(())
     }
 
     #[test]
-    fn insert_and_load_aggregate_changesets_with_confirmation_height_anchor() -> anyhow::Result<()>
-    {
+    fn insert_and_load_aggregate_changesets_with_confirmation_height_anchor() {
         let (test_changesets, agg_test_changesets) =
             create_test_changesets(&|height, _time, hash| ConfirmationHeightAnchor {
                 confirmation_height: height,
@@ -616,14 +615,13 @@ mod test {
             store.write_changes(changeset).expect("write changeset");
         });
 
-        let agg_changeset = store.load_from_persistence().expect("aggregated changeset");
+        let agg_changeset = store.load_changes().expect("aggregated changeset");
 
         assert_eq!(agg_changeset, Some(agg_test_changesets));
-        Ok(())
     }
 
     #[test]
-    fn insert_and_load_aggregate_changesets_with_blockid_anchor() -> anyhow::Result<()> {
+    fn insert_and_load_aggregate_changesets_with_blockid_anchor() {
         let (test_changesets, agg_test_changesets) =
             create_test_changesets(&|height, _time, hash| BlockId { height, hash });
 
@@ -634,10 +632,9 @@ mod test {
             store.write_changes(changeset).expect("write changeset");
         });
 
-        let agg_changeset = store.load_from_persistence().expect("aggregated changeset");
+        let agg_changeset = store.load_changes().expect("aggregated changeset");
 
         assert_eq!(agg_changeset, Some(agg_test_changesets));
-        Ok(())
     }
 
     fn create_test_changesets<A: Anchor + Copy>(

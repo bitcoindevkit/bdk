@@ -4,6 +4,7 @@ use std::{
     sync::Mutex,
 };
 
+use bdk_chain::persist::PersistBackend;
 use bdk_chain::{
     bitcoin::{constants::genesis_block, Address, Network, Txid},
     indexed_tx_graph::{self, IndexedTxGraph},
@@ -361,7 +362,6 @@ fn main() -> anyhow::Result<()> {
 
     // We persist the changes
     let mut db = db.lock().unwrap();
-    db.stage((local_chain_changeset, indexed_tx_graph_changeset));
-    db.commit()?;
+    db.write_changes(&(local_chain_changeset, indexed_tx_graph_changeset))?;
     Ok(())
 }

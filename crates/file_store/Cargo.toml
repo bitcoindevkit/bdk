@@ -5,15 +5,13 @@ edition = "2021"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/bitcoindevkit/bdk"
 documentation = "https://docs.rs/bdk_file_store"
-description = "A simple append-only flat file implementation of Persist for Bitcoin Dev Kit."
+description = "A simple append-only flat file implementation of PersistBackend for Bitcoin Dev Kit."
 keywords = ["bitcoin", "persist", "persistence", "bdk", "file"]
 authors = ["Bitcoin Dev Kit Developers"]
 readme = "README.md"
 
 [dependencies]
-anyhow = { version = "1", default-features = false }
 bdk_chain = { path = "../chain", version = "0.15.0", features = [ "serde", "miniscript" ] }
-bdk_persist = { path = "../persist", version = "0.3.0"}
 bincode = { version = "1" }
 serde = { version = "1", features = ["derive"] }
 

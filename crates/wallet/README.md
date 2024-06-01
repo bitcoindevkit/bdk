@@ -57,11 +57,12 @@ that the `Wallet` can use to update its view of the chain.
 
 ## Persistence
 
-To persist the `Wallet` on disk, it must be constructed with a [`PersistBackend`] implementation.
+To persist `Wallet` state data on disk use an implementation of the [`PersistBackend`] trait.
 
 **Implementations**
 
 * [`bdk_file_store`]: A simple flat-file implementation of [`PersistBackend`].
+* [`bdk_sqlite`]: A simple sqlite implementation of [`PersistBackend`].
 
 **Example**
 
@@ -71,15 +72,16 @@ use bdk_wallet::{bitcoin::Network, wallet::{ChangeSet, Wallet}};
 
 fn main() {
     // Create a new file `Store`.
-    let db = bdk_file_store::Store::<ChangeSet>::open_or_create_new(b"magic_bytes", "path/to/my_wallet.db").expect("create store");
+    let mut db = bdk_file_store::Store::<ChangeSet>::open_or_create_new(b"magic_bytes", "path/to/my_wallet.db").expect("create store");
 
     let descriptor = "wpkh(tprv8ZgxMBicQKsPdcAqYBpzAFwU5yxBUo88ggoBqu1qPcHUfSbKK1sKMLmC7EAk438btHQrSdu3jGGQa6PA71nvH5nkDexhLteJqkM4dQmWF9g/84'/1'/0'/0/*)";
     let change_descriptor = "wpkh(tprv8ZgxMBicQKsPdcAqYBpzAFwU5yxBUo88ggoBqu1qPcHUfSbKK1sKMLmC7EAk438btHQrSdu3jGGQa6PA71nvH5nkDexhLteJqkM4dQmWF9g/84'/1'/0'/1/*)";
-    let mut wallet = Wallet::new_or_load(descriptor, change_descriptor, db, Network::Testnet).expect("create or load wallet");
+    let changeset = db.load_changes().expect("changeset loaded");
+    let mut wallet = Wallet::new_or_load(descriptor, change_descriptor, changeset, Network::Testnet).expect("create or load wallet");
 
     // Insert a single `TxOut` at `OutPoint` into the wallet.
     let _ = wallet.insert_txout(outpoint, txout);
-    wallet.commit().expect("must write to database");
+    wallet.commit_to(&mut db).expect("must commit changes to database");
 }
 ```
 
@@ -115,7 +117,7 @@ fn main() {
 <!-- use bdk_wallet::bitcoin::Network; -->
 
 <!-- fn main() -> Result<(), bdk_wallet::Error> { -->
-<!--     let wallet = Wallet::new_no_persist( -->
+<!--     let wallet = Wallet::new( -->
 <!--         "wpkh([c258d2e4/84h/1h/0h]tpubDDYkZojQFQjht8Tm4jsS3iuEmKjTiEGjG6KnuFNKKJb5A6ZUCUZKdvLdSDWofKi4ToRCwb9poe1XdqfUnP4jaJjCB2Zwv11ZLgSbnZSNecE/0/*)", -->
 <!--         Some("wpkh([c258d2e4/84h/1h/0h]tpubDDYkZojQFQjht8Tm4jsS3iuEmKjTiEGjG6KnuFNKKJb5A6ZUCUZKdvLdSDWofKi4ToRCwb9poe1XdqfUnP4jaJjCB2Zwv11ZLgSbnZSNecE/1/*)"), -->
 <!--         Network::Testnet, -->
@@ -144,7 +146,7 @@ fn main() {
 
 <!-- fn main() -> Result<(), bdk_wallet::Error> { -->
 <!--     let blockchain = ElectrumBlockchain::from(Client::new("ssl://electrum.blockstream.info:60002")?); -->
-<!--     let wallet = Wallet::new_no_persist( -->
+<!--     let wallet = Wallet::new( -->
 <!--         "wpkh([c258d2e4/84h/1h/0h]tpubDDYkZojQFQjht8Tm4jsS3iuEmKjTiEGjG6KnuFNKKJb5A6ZUCUZKdvLdSDWofKi4ToRCwb9poe1XdqfUnP4jaJjCB2Zwv11ZLgSbnZSNecE/0/*)", -->
 <!--         Some("wpkh([c258d2e4/84h/1h/0h]tpubDDYkZojQFQjht8Tm4jsS3iuEmKjTiEGjG6KnuFNKKJb5A6ZUCUZKdvLdSDWofKi4ToRCwb9poe1XdqfUnP4jaJjCB2Zwv11ZLgSbnZSNecE/1/*)"), -->
 <!--         Network::Testnet, -->
@@ -180,7 +182,7 @@ fn main() {
 <!-- use bdk_wallet::bitcoin::Network; -->
 
 <!-- fn main() -> Result<(), bdk_wallet::Error> { -->
-<!--     let wallet = Wallet::new_no_persist( -->
+<!--     let wallet = Wallet::new( -->
 <!--         "wpkh([c258d2e4/84h/1h/0h]tprv8griRPhA7342zfRyB6CqeKF8CJDXYu5pgnj1cjL1u2ngKcJha5jjTRimG82ABzJQ4MQe71CV54xfn25BbhCNfEGGJZnxvCDQCd6JkbvxW6h/0/*)", -->
 <!--         Some("wpkh([c258d2e4/84h/1h/0h]tprv8griRPhA7342zfRyB6CqeKF8CJDXYu5pgnj1cjL1u2ngKcJha5jjTRimG82ABzJQ4MQe71CV54xfn25BbhCNfEGGJZnxvCDQCd6JkbvxW6h/1/*)"), -->
 <!--         Network::Testnet, -->
@@ -220,9 +222,10 @@ license, shall be dual licensed as above, without any additional terms or
 conditions.
 
 [`Wallet`]: https://docs.rs/bdk_wallet/latest/bdk_wallet/wallet/struct.Wallet.html
-[`PersistBackend`]: https://docs.rs/bdk_chain/latest/bdk_chain/trait.PersistBackend.html
+[`PersistBackend`]: https://docs.rs/bdk_chain/latest/bdk_chain/persist/trait.PersistBackend.html
 [`bdk_chain`]: https://docs.rs/bdk_chain/latest
 [`bdk_file_store`]: https://docs.rs/bdk_file_store/latest
+[`bdk_sqlite`]: https://docs.rs/bdk_sqlite/latest
 [`bdk_electrum`]: https://docs.rs/bdk_electrum/latest
 [`bdk_esplora`]: https://docs.rs/bdk_esplora/latest
 [`bdk_bitcoind_rpc`]: https://docs.rs/bdk_bitcoind_rpc/latest

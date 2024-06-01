@@ -11,6 +11,7 @@ use bdk_bitcoind_rpc::{
     bitcoincore_rpc::{Auth, Client, RpcApi},
     Emitter,
 };
+use bdk_chain::persist::PersistBackend;
 use bdk_chain::{
     bitcoin::{constants::genesis_block, Block, Transaction},
     indexed_tx_graph, keychain,
@@ -137,8 +138,7 @@ fn main() -> anyhow::Result<()> {
         let genesis_hash = genesis_block(args.network).block_hash();
         let (chain, chain_changeset) = LocalChain::from_genesis_hash(genesis_hash);
         let mut db = db.lock().unwrap();
-        db.stage((chain_changeset, Default::default()));
-        db.commit()?;
+        db.write_changes(&(chain_changeset, Default::default()))?;
         chain
     } else {
         LocalChain::from_changeset(init_chain_changeset)?
@@ -191,12 +191,11 @@ fn main() -> anyhow::Result<()> {
                     .apply_update(emission.checkpoint)
                     .expect("must always apply as we receive blocks in order from emitter");
                 let graph_changeset = graph.apply_block_relevant(&emission.block, height);
-                db.stage((chain_changeset, graph_changeset));
+                db.write_changes(&(chain_changeset, graph_changeset))?;
 
                 // commit staged db changes in intervals
                 if last_db_commit.elapsed() >= DB_COMMIT_DELAY {
                     last_db_commit = Instant::now();
-                    db.commit()?;
                     println!(
                         "[{:>10}s] committed to db (took {}s)",
                         start.elapsed().as_secs_f32(),
@@ -232,8 +231,7 @@ fn main() -> anyhow::Result<()> {
             );
             {
                 let mut db = db.lock().unwrap();
-                db.stage((local_chain::ChangeSet::default(), graph_changeset));
-                db.commit()?; // commit one last time
+                db.write_changes(&(local_chain::ChangeSet::default(), graph_changeset))?;
             }
         }
         RpcCommands::Live { rpc_args } => {
@@ -317,11 +315,10 @@ fn main() -> anyhow::Result<()> {
                     }
                 };
 
-                db.stage(changeset);
+                db.write_changes(&changeset)?;
 
                 if last_db_commit.elapsed() >= DB_COMMIT_DELAY {
                     last_db_commit = Instant::now();
-                    db.commit()?;
                     println!(
                         "[{:>10}s] committed to db (took {}s)",
                         start.elapsed().as_secs_f32(),

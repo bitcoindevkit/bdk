@@ -16,7 +16,7 @@ use std::str::FromStr;
 /// to a foreign address and one returning 50_000 back to the wallet. The remaining 1000
 /// sats are the transaction fee.
 pub fn get_funded_wallet_with_change(descriptor: &str, change: &str) -> (Wallet, bitcoin::Txid) {
-    let mut wallet = Wallet::new_no_persist(descriptor, change, Network::Regtest).unwrap();
+    let mut wallet = Wallet::new(descriptor, change, Network::Regtest).unwrap();
     let receive_address = wallet.peek_address(KeychainKind::External, 0).address;
     let sendto_address = Address::from_str("bcrt1q3qtze4ys45tgdvguj66zrk4fu6hq3a3v9pfly5")
         .expect("address")

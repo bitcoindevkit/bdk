@@ -9,7 +9,6 @@ members = [
     "crates/esplora",
     "crates/bitcoind_rpc",
     "crates/hwi",
-    "crates/persist",
     "crates/testenv",
     "example-crates/example_cli",
     "example-crates/example_electrum",

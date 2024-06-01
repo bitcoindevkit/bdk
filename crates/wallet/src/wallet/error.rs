@@ -50,8 +50,6 @@ impl std::error::Error for MiniscriptPsbtError {}
 pub enum CreateTxError {
     /// There was a problem with the descriptors passed in
     Descriptor(DescriptorError),
-    /// We were unable to load wallet data from or write wallet data to the persistence backend
-    Persist(anyhow::Error),
     /// There was a problem while extracting and manipulating policies
     Policy(PolicyError),
     /// Spending policy is not compatible with this [`KeychainKind`]
@@ -114,13 +112,6 @@ impl fmt::Display for CreateTxError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Descriptor(e) => e.fmt(f),
-            Self::Persist(e) => {
-                write!(
-                    f,
-                    "failed to load wallet data from or write wallet data to persistence backend: {}",
-                    e
-                )
-            }
             Self::Policy(e) => e.fmt(f),
             CreateTxError::SpendingPolicyRequired(keychain_kind) => {
                 write!(f, "Spending policy required: {:?}", keychain_kind)
