@@ -227,7 +227,7 @@ fn main() -> anyhow::Result<()> {
                 let all_spks = graph
                     .index
                     .revealed_spks(..)
-                    .map(|(k, i, spk)| (k.to_owned(), i, spk.to_owned()))
+                    .map(|(k, i, spk)| (k.to_owned(), i, spk))
                     .collect::<Vec<_>>();
                 request = request.chain_spks(all_spks.into_iter().map(|(k, spk_i, spk)| {
                     eprint!("Scanning {}: {}", k, spk_i);
@@ -235,11 +235,7 @@ fn main() -> anyhow::Result<()> {
                 }));
             }
             if unused_spks {
-                let unused_spks = graph
-                    .index
-                    .unused_spks()
-                    .map(|(k, i, spk)| (k, i, spk.to_owned()))
-                    .collect::<Vec<_>>();
+                let unused_spks = graph.index.unused_spks().collect::<Vec<_>>();
                 request =
                     request.chain_spks(unused_spks.into_iter().map(move |(k, spk_i, spk)| {
                         eprint!(

@@ -174,8 +174,8 @@ impl<I: Clone + Ord> SpkTxOutIndex<I> {
     /// Returns the script that has been inserted at the `index`.
     ///
     /// If that index hasn't been inserted yet, it will return `None`.
-    pub fn spk_at_index(&self, index: &I) -> Option<&Script> {
-        self.spks.get(index).map(|s| s.as_script())
+    pub fn spk_at_index(&self, index: &I) -> Option<ScriptBuf> {
+        self.spks.get(index).cloned()
     }
 
     /// The script pubkeys that are being tracked by the index.
@@ -215,7 +215,10 @@ impl<I: Clone + Ord> SpkTxOutIndex<I> {
     /// let unused_change_spks =
     ///     txout_index.unused_spks((change_index, u32::MIN)..(change_index, u32::MAX));
     /// ```
-    pub fn unused_spks<R>(&self, range: R) -> impl DoubleEndedIterator<Item = (&I, &Script)> + Clone
+    pub fn unused_spks<R>(
+        &self,
+        range: R,
+    ) -> impl DoubleEndedIterator<Item = (&I, ScriptBuf)> + Clone
     where
         R: RangeBounds<I>,
     {

@@ -195,11 +195,10 @@ impl SyncRequest {
         index: &crate::keychain::KeychainTxOutIndex<K>,
         spk_range: impl RangeBounds<K>,
     ) -> Self {
-        use alloc::borrow::ToOwned;
         self.chain_spks(
             index
                 .revealed_spks(spk_range)
-                .map(|(_, _, spk)| spk.to_owned())
+                .map(|(_, _, spk)| spk)
                 .collect::<Vec<_>>(),
         )
     }

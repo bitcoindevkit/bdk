@@ -493,7 +493,7 @@ where
                         false => Keychain::External,
                     };
                     for (spk_i, spk) in index.revealed_keychain_spks(&target_keychain) {
-                        let address = Address::from_script(spk, network)
+                        let address = Address::from_script(&spk, network)
                             .expect("should always be able to derive address");
                         println!(
                             "{:?} {} used:{}",

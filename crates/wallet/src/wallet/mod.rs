@@ -849,7 +849,7 @@ impl Wallet {
             .unused_keychain_spks(&keychain)
             .map(move |(index, spk)| AddressInfo {
                 index,
-                address: Address::from_script(spk, self.network).expect("must have address form"),
+                address: Address::from_script(&spk, self.network).expect("must have address form"),
                 keychain,
             })
     }

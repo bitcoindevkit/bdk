@@ -370,7 +370,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     /// Return the script that exists under the given `keychain`'s `index`.
     ///
     /// This calls [`SpkTxOutIndex::spk_at_index`] internally.
-    pub fn spk_at_index(&self, keychain: K, index: u32) -> Option<&Script> {
+    pub fn spk_at_index(&self, keychain: K, index: u32) -> Option<ScriptBuf> {
         let descriptor_id = *self.keychains_to_descriptor_ids.get(&keychain)?;
         self.inner.spk_at_index(&(descriptor_id, index))
     }
@@ -630,7 +630,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     pub fn revealed_spks(
         &self,
         range: impl RangeBounds<K>,
-    ) -> impl DoubleEndedIterator<Item = (&K, u32, &Script)> + Clone {
+    ) -> impl DoubleEndedIterator<Item = (&K, u32, ScriptBuf)> + Clone {
         self.keychains_to_descriptor_ids
             .range(range)
             .flat_map(|(_, descriptor_id)| {
@@ -648,7 +648,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
                             self.keychain_of_desc_id(descriptor_id)
                                 .expect("must have keychain"),
                             *i,
-                            spk.as_script(),
+                            spk.as_script().to_owned(),
                         )
                     })
             })
@@ -658,13 +658,13 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     pub fn revealed_keychain_spks<'a>(
         &'a self,
         keychain: &'a K,
-    ) -> impl DoubleEndedIterator<Item = (u32, &Script)> + 'a {
+    ) -> impl DoubleEndedIterator<Item = (u32, ScriptBuf)> + 'a {
         self.revealed_spks(keychain..=keychain)
             .map(|(_, i, spk)| (i, spk))
     }
 
     /// Iterate over revealed, but unused, spks of all keychains.
-    pub fn unused_spks(&self) -> impl DoubleEndedIterator<Item = (K, u32, &Script)> + Clone {
+    pub fn unused_spks(&self) -> impl DoubleEndedIterator<Item = (K, u32, ScriptBuf)> + Clone + '_ {
         self.keychains_to_descriptor_ids
             .keys()
             .flat_map(|keychain| {
@@ -675,10 +675,10 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
 
     /// Iterate over revealed, but unused, spks of the given `keychain`.
     /// Returns an empty iterator if the provided keychain doesn't exist.
-    pub fn unused_keychain_spks(
-        &self,
+    pub fn unused_keychain_spks<'a>(
+        &'a self,
         keychain: &K,
-    ) -> impl DoubleEndedIterator<Item = (u32, &Script)> + Clone {
+    ) -> impl DoubleEndedIterator<Item = (u32, ScriptBuf)> + Clone + 'a {
         let desc_id = self
             .keychains_to_descriptor_ids
             .get(keychain)
@@ -909,8 +909,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
             let spk = self
                 .inner
                 .spk_at_index(&(descriptor_id, next_index))
-                .expect("script must already be stored")
-                .to_owned();
+                .expect("script must already be stored");
             (next_index, spk)
         });
         debug_assert_eq!(new_spks.next(), None, "must only reveal one spk");
@@ -931,10 +930,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     /// has used all scripts up to the derivation bounds, then the last derived script pubkey will
     /// be returned.
     pub fn next_unused_spk(&mut self, keychain: &K) -> (Option<(u32, ScriptBuf)>, ChangeSet<K>) {
-        let next_unused_spk = self
-            .unused_keychain_spks(keychain)
-            .next()
-            .map(|(i, spk)| (i, spk.to_owned()));
+        let next_unused_spk = self.unused_keychain_spks(keychain).next();
         if next_unused_spk.is_some() {
             (next_unused_spk, Default::default())
         } else {
