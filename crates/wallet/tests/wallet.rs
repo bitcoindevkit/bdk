@@ -4069,3 +4069,45 @@ fn test_thread_safety() {
     fn thread_safe<T: Send + Sync>() {}
     thread_safe::<Wallet>(); // compiles only if true
 }
+
+#[test]
+fn test_insert_tx_balance_and_utxos() {
+    // creating many txs has no effect on the wallet's available utxos
+    let (mut wallet, _) = get_funded_wallet(get_test_tr_single_sig_xprv());
+    let addr = Address::from_str("bcrt1qc6fweuf4xjvz4x3gx3t9e0fh4hvqyu2qw4wvxm")
+        .unwrap()
+        .assume_checked();
+
+    let unspent: Vec<_> = wallet.list_unspent().collect();
+    assert!(!unspent.is_empty());
+
+    let balance = wallet.balance().total();
+    let fee = Amount::from_sat(143);
+    let amt = balance - fee;
+
+    for _ in 0..3 {
+        let mut builder = wallet.build_tx();
+        builder.add_recipient(addr.script_pubkey(), amt);
+        let mut psbt = builder.finish().unwrap();
+        assert!(wallet.sign(&mut psbt, SignOptions::default()).unwrap());
+        let tx = psbt.extract_tx().unwrap();
+        let _ = wallet.insert_tx(tx);
+    }
+    assert_eq!(wallet.list_unspent().collect::<Vec<_>>(), unspent);
+    assert_eq!(wallet.balance().confirmed, balance);
+
+    // manually setting a tx last_seen will consume the wallet's available utxos
+    let addr = Address::from_str("bcrt1qfjg5lv3dvc9az8patec8fjddrs4aqtauadnagr")
+        .unwrap()
+        .assume_checked();
+    let mut builder = wallet.build_tx();
+    builder.add_recipient(addr.script_pubkey(), amt);
+    let mut psbt = builder.finish().unwrap();
+    assert!(wallet.sign(&mut psbt, SignOptions::default()).unwrap());
+    let tx = psbt.extract_tx().unwrap();
+    let txid = tx.compute_txid();
+    let _ = wallet.insert_tx(tx);
+    wallet.insert_seen_at(txid, 2);
+    assert!(wallet.list_unspent().next().is_none());
+    assert_eq!(wallet.balance().total().to_sat(), 0);
+}
