@@ -242,7 +242,7 @@ pub enum LoadError {
     /// Data loaded from persistence is missing genesis hash.
     MissingGenesis,
     /// Data loaded from persistence is missing descriptor.
-    MissingDescriptor,
+    MissingDescriptor(KeychainKind),
 }
 
 impl fmt::Display for LoadError {
@@ -255,7 +255,9 @@ impl fmt::Display for LoadError {
             }
             LoadError::MissingNetwork => write!(f, "loaded data is missing network type"),
             LoadError::MissingGenesis => write!(f, "loaded data is missing genesis hash"),
-            LoadError::MissingDescriptor => write!(f, "loaded data is missing descriptor"),
+            LoadError::MissingDescriptor(k) => {
+                write!(f, "loaded data is missing descriptor for keychain {k:?}")
+            }
         }
     }
 }
@@ -517,14 +519,14 @@ impl Wallet {
             .indexer
             .keychains_added
             .get(&KeychainKind::External)
-            .ok_or(LoadError::MissingDescriptor)?
+            .ok_or(LoadError::MissingDescriptor(KeychainKind::External))?
             .clone();
         let change_descriptor = changeset
             .indexed_tx_graph
             .indexer
             .keychains_added
             .get(&KeychainKind::Internal)
-            .ok_or(LoadError::MissingDescriptor)?
+            .ok_or(LoadError::MissingDescriptor(KeychainKind::Internal))?
             .clone();
 
         let (signers, change_signers) =
@@ -596,10 +598,12 @@ impl Wallet {
                         expected: genesis_hash,
                         got: None,
                     },
-                    LoadError::MissingDescriptor => NewOrLoadError::LoadedDescriptorDoesNotMatch {
-                        got: None,
-                        keychain: KeychainKind::External,
-                    },
+                    LoadError::MissingDescriptor(keychain) => {
+                        NewOrLoadError::LoadedDescriptorDoesNotMatch {
+                            got: None,
+                            keychain,
+                        }
+                    }
                 })?;
                 if wallet.network != network {
                     return Err(NewOrLoadError::LoadedNetworkDoesNotMatch {
