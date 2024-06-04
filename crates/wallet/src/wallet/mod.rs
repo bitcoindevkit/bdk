@@ -617,10 +617,10 @@ impl Wallet {
                 let (expected_descriptor, expected_descriptor_keymap) = descriptor
                     .into_wallet_descriptor(&wallet.secp, network)
                     .map_err(NewOrLoadError::Descriptor)?;
-                let wallet_descriptor = wallet.public_descriptor(KeychainKind::External).cloned();
-                if wallet_descriptor != Some(expected_descriptor.clone()) {
+                let wallet_descriptor = wallet.public_descriptor(KeychainKind::External);
+                if wallet_descriptor != &expected_descriptor {
                     return Err(NewOrLoadError::LoadedDescriptorDoesNotMatch {
-                        got: wallet_descriptor,
+                        got: Some(wallet_descriptor.clone()),
                         keychain: KeychainKind::External,
                     });
                 }
@@ -644,11 +644,10 @@ impl Wallet {
                     change_descriptor
                         .into_wallet_descriptor(&wallet.secp, network)
                         .map_err(NewOrLoadError::Descriptor)?;
-                let wallet_change_descriptor =
-                    wallet.public_descriptor(KeychainKind::Internal).cloned();
-                if wallet_change_descriptor != Some(expected_change_descriptor.clone()) {
+                let wallet_change_descriptor = wallet.public_descriptor(KeychainKind::Internal);
+                if wallet_change_descriptor != &expected_change_descriptor {
                     return Err(NewOrLoadError::LoadedDescriptorDoesNotMatch {
-                        got: wallet_change_descriptor,
+                        got: Some(wallet_change_descriptor.clone()),
                         keychain: KeychainKind::Internal,
                     });
                 }
@@ -1858,22 +1857,24 @@ impl Wallet {
             KeychainKind::Internal => &self.change_signers,
         };
 
-        match self.public_descriptor(keychain) {
-            Some(desc) => Ok(desc.extract_policy(signers, BuildSatisfaction::None, &self.secp)?),
-            None => Ok(None),
-        }
+        self.public_descriptor(keychain).extract_policy(
+            signers,
+            BuildSatisfaction::None,
+            &self.secp,
+        )
     }
 
     /// Return the "public" version of the wallet's descriptor, meaning a new descriptor that has
     /// the same structure but with every secret key removed
     ///
     /// This can be used to build a watch-only version of a wallet
-    pub fn public_descriptor(&self, keychain: KeychainKind) -> Option<&ExtendedDescriptor> {
+    pub fn public_descriptor(&self, keychain: KeychainKind) -> &ExtendedDescriptor {
         self.indexed_graph
             .index
             .keychains()
             .find(|(k, _)| *k == &keychain)
             .map(|(_, d)| d)
+            .expect("keychain must exist")
     }
 
     /// Finalize a PSBT, i.e., for each input determine if sufficient data is available to pass
@@ -1980,7 +1981,7 @@ impl Wallet {
 
     /// Returns the descriptor used to create addresses for a particular `keychain`.
     pub fn get_descriptor_for_keychain(&self, keychain: KeychainKind) -> &ExtendedDescriptor {
-        self.public_descriptor(keychain).expect("keychain exists")
+        self.public_descriptor(keychain)
     }
 
     /// The derivation index of this wallet. It will return `None` if it has not derived any addresses.

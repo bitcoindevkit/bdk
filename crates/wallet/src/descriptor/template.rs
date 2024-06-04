@@ -225,7 +225,7 @@ impl<K: IntoDescriptorKey<Tap>> DescriptorTemplate for P2TR<K> {
 /// )?;
 ///
 /// assert_eq!(wallet.next_unused_address(KeychainKind::External)?.to_string(), "mmogjc7HJEZkrLqyQYqJmxUqFaC7i4uf89");
-/// assert_eq!(wallet.public_descriptor(KeychainKind::External).unwrap().to_string(), "pkh([c55b303f/44'/1'/0']tpubDCuorCpzvYS2LCD75BR46KHE8GdDeg1wsAgNZeNr6DaB5gQK1o14uErKwKLuFmeemkQ6N2m3rNgvctdJLyr7nwu2yia7413Hhg8WWE44cgT/0/*)#5wrnv0xt");
+/// assert_eq!(wallet.public_descriptor(KeychainKind::External).to_string(), "pkh([c55b303f/44'/1'/0']tpubDCuorCpzvYS2LCD75BR46KHE8GdDeg1wsAgNZeNr6DaB5gQK1o14uErKwKLuFmeemkQ6N2m3rNgvctdJLyr7nwu2yia7413Hhg8WWE44cgT/0/*)#5wrnv0xt");
 /// # Ok::<_, Box<dyn std::error::Error>>(())
 /// ```
 pub struct Bip44<K: DerivableKey<Legacy>>(pub K, pub KeychainKind);
@@ -262,7 +262,7 @@ impl<K: DerivableKey<Legacy>> DescriptorTemplate for Bip44<K> {
 /// )?;
 ///
 /// assert_eq!(wallet.next_unused_address(KeychainKind::External)?.to_string(), "miNG7dJTzJqNbFS19svRdTCisC65dsubtR");
-/// assert_eq!(wallet.public_descriptor(KeychainKind::External).unwrap().to_string(), "pkh([c55b303f/44'/1'/0']tpubDDDzQ31JkZB7VxUr9bjvBivDdqoFLrDPyLWtLapArAi51ftfmCb2DPxwLQzX65iNcXz1DGaVvyvo6JQ6rTU73r2gqdEo8uov9QKRb7nKCSU/0/*)#cfhumdqz");
+/// assert_eq!(wallet.public_descriptor(KeychainKind::External).to_string(), "pkh([c55b303f/44'/1'/0']tpubDDDzQ31JkZB7VxUr9bjvBivDdqoFLrDPyLWtLapArAi51ftfmCb2DPxwLQzX65iNcXz1DGaVvyvo6JQ6rTU73r2gqdEo8uov9QKRb7nKCSU/0/*)#cfhumdqz");
 /// # Ok::<_, Box<dyn std::error::Error>>(())
 /// ```
 pub struct Bip44Public<K: DerivableKey<Legacy>>(pub K, pub bip32::Fingerprint, pub KeychainKind);
@@ -298,7 +298,7 @@ impl<K: DerivableKey<Legacy>> DescriptorTemplate for Bip44Public<K> {
 /// )?;
 ///
 /// assert_eq!(wallet.next_unused_address(KeychainKind::External)?.to_string(), "2N4zkWAoGdUv4NXhSsU8DvS5MB36T8nKHEB");
-/// assert_eq!(wallet.public_descriptor(KeychainKind::External).unwrap().to_string(), "sh(wpkh([c55b303f/49'/1'/0']tpubDDYr4kdnZgjjShzYNjZUZXUUtpXaofdkMaipyS8ThEh45qFmhT4hKYways7UXmg6V7het1QiFo9kf4kYUXyDvV4rHEyvSpys9pjCB3pukxi/0/*))#s9vxlc8e");
+/// assert_eq!(wallet.public_descriptor(KeychainKind::External).to_string(), "sh(wpkh([c55b303f/49'/1'/0']tpubDDYr4kdnZgjjShzYNjZUZXUUtpXaofdkMaipyS8ThEh45qFmhT4hKYways7UXmg6V7het1QiFo9kf4kYUXyDvV4rHEyvSpys9pjCB3pukxi/0/*))#s9vxlc8e");
 /// # Ok::<_, Box<dyn std::error::Error>>(())
 /// ```
 pub struct Bip49<K: DerivableKey<Segwitv0>>(pub K, pub KeychainKind);
@@ -335,7 +335,7 @@ impl<K: DerivableKey<Segwitv0>> DescriptorTemplate for Bip49<K> {
 /// )?;
 ///
 /// assert_eq!(wallet.next_unused_address(KeychainKind::External)?.to_string(), "2N3K4xbVAHoiTQSwxkZjWDfKoNC27pLkYnt");
-/// assert_eq!(wallet.public_descriptor(KeychainKind::External).unwrap().to_string(), "sh(wpkh([c55b303f/49'/1'/0']tpubDC49r947KGK52X5rBWS4BLs5m9SRY3pYHnvRrm7HcybZ3BfdEsGFyzCMzayi1u58eT82ZeyFZwH7DD6Q83E3fM9CpfMtmnTygnLfP59jL9L/0/*))#3tka9g0q");
+/// assert_eq!(wallet.public_descriptor(KeychainKind::External).to_string(), "sh(wpkh([c55b303f/49'/1'/0']tpubDC49r947KGK52X5rBWS4BLs5m9SRY3pYHnvRrm7HcybZ3BfdEsGFyzCMzayi1u58eT82ZeyFZwH7DD6Q83E3fM9CpfMtmnTygnLfP59jL9L/0/*))#3tka9g0q");
 /// # Ok::<_, Box<dyn std::error::Error>>(())
 /// ```
 pub struct Bip49Public<K: DerivableKey<Segwitv0>>(pub K, pub bip32::Fingerprint, pub KeychainKind);
@@ -371,7 +371,7 @@ impl<K: DerivableKey<Segwitv0>> DescriptorTemplate for Bip49Public<K> {
 /// )?;
 ///
 /// assert_eq!(wallet.next_unused_address(KeychainKind::External)?.to_string(), "tb1qhl85z42h7r4su5u37rvvw0gk8j2t3n9y7zsg4n");
-/// assert_eq!(wallet.public_descriptor(KeychainKind::External).unwrap().to_string(), "wpkh([c55b303f/84'/1'/0']tpubDDc5mum24DekpNw92t6fHGp8Gr2JjF9J7i4TZBtN6Vp8xpAULG5CFaKsfugWa5imhrQQUZKXe261asP5koDHo5bs3qNTmf3U3o4v9SaB8gg/0/*)#6kfecsmr");
+/// assert_eq!(wallet.public_descriptor(KeychainKind::External).to_string(), "wpkh([c55b303f/84'/1'/0']tpubDDc5mum24DekpNw92t6fHGp8Gr2JjF9J7i4TZBtN6Vp8xpAULG5CFaKsfugWa5imhrQQUZKXe261asP5koDHo5bs3qNTmf3U3o4v9SaB8gg/0/*)#6kfecsmr");
 /// # Ok::<_, Box<dyn std::error::Error>>(())
 /// ```
 pub struct Bip84<K: DerivableKey<Segwitv0>>(pub K, pub KeychainKind);
@@ -408,7 +408,7 @@ impl<K: DerivableKey<Segwitv0>> DescriptorTemplate for Bip84<K> {
 /// )?;
 ///
 /// assert_eq!(wallet.next_unused_address(KeychainKind::External)?.to_string(), "tb1qedg9fdlf8cnnqfd5mks6uz5w4kgpk2pr6y4qc7");
-/// assert_eq!(wallet.public_descriptor(KeychainKind::External).unwrap().to_string(), "wpkh([c55b303f/84'/1'/0']tpubDC2Qwo2TFsaNC4ju8nrUJ9mqVT3eSgdmy1yPqhgkjwmke3PRXutNGRYAUo6RCHTcVQaDR3ohNU9we59brGHuEKPvH1ags2nevW5opEE9Z5Q/0/*)#dhu402yv");
+/// assert_eq!(wallet.public_descriptor(KeychainKind::External).to_string(), "wpkh([c55b303f/84'/1'/0']tpubDC2Qwo2TFsaNC4ju8nrUJ9mqVT3eSgdmy1yPqhgkjwmke3PRXutNGRYAUo6RCHTcVQaDR3ohNU9we59brGHuEKPvH1ags2nevW5opEE9Z5Q/0/*)#dhu402yv");
 /// # Ok::<_, Box<dyn std::error::Error>>(())
 /// ```
 pub struct Bip84Public<K: DerivableKey<Segwitv0>>(pub K, pub bip32::Fingerprint, pub KeychainKind);
@@ -444,7 +444,7 @@ impl<K: DerivableKey<Segwitv0>> DescriptorTemplate for Bip84Public<K> {
 /// )?;
 ///
 /// assert_eq!(wallet.next_unused_address(KeychainKind::External)?.to_string(), "tb1p5unlj09djx8xsjwe97269kqtxqpwpu2epeskgqjfk4lnf69v4tnqpp35qu");
-/// assert_eq!(wallet.public_descriptor(KeychainKind::External).unwrap().to_string(), "tr([c55b303f/86'/1'/0']tpubDCiHofpEs47kx358bPdJmTZHmCDqQ8qw32upCSxHrSEdeeBs2T5Mq6QMB2ukeMqhNBiyhosBvJErteVhfURPGXPv3qLJPw5MVpHUewsbP2m/0/*)#dkgvr5hm");
+/// assert_eq!(wallet.public_descriptor(KeychainKind::External).to_string(), "tr([c55b303f/86'/1'/0']tpubDCiHofpEs47kx358bPdJmTZHmCDqQ8qw32upCSxHrSEdeeBs2T5Mq6QMB2ukeMqhNBiyhosBvJErteVhfURPGXPv3qLJPw5MVpHUewsbP2m/0/*)#dkgvr5hm");
 /// # Ok::<_, Box<dyn std::error::Error>>(())
 /// ```
 pub struct Bip86<K: DerivableKey<Tap>>(pub K, pub KeychainKind);
@@ -481,7 +481,7 @@ impl<K: DerivableKey<Tap>> DescriptorTemplate for Bip86<K> {
 /// )?;
 ///
 /// assert_eq!(wallet.next_unused_address(KeychainKind::External)?.to_string(), "tb1pwjp9f2k5n0xq73ecuu0c5njvgqr3vkh7yaylmpqvsuuaafymh0msvcmh37");
-/// assert_eq!(wallet.public_descriptor(KeychainKind::External).unwrap().to_string(), "tr([c55b303f/86'/1'/0']tpubDC2Qwo2TFsaNC4ju8nrUJ9mqVT3eSgdmy1yPqhgkjwmke3PRXutNGRYAUo6RCHTcVQaDR3ohNU9we59brGHuEKPvH1ags2nevW5opEE9Z5Q/0/*)#2p65srku");
+/// assert_eq!(wallet.public_descriptor(KeychainKind::External).to_string(), "tr([c55b303f/86'/1'/0']tpubDC2Qwo2TFsaNC4ju8nrUJ9mqVT3eSgdmy1yPqhgkjwmke3PRXutNGRYAUo6RCHTcVQaDR3ohNU9we59brGHuEKPvH1ags2nevW5opEE9Z5Q/0/*)#2p65srku");
 /// # Ok::<_, Box<dyn std::error::Error>>(())
 /// ```
 pub struct Bip86Public<K: DerivableKey<Tap>>(pub K, pub bip32::Fingerprint, pub KeychainKind);
