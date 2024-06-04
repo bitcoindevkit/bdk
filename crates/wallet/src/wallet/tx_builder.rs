@@ -186,10 +186,10 @@ impl<'a, Cs> TxBuilder<'a, Cs> {
     }
 
     /// Set an absolute fee
-    /// The fee_absolute method refers to the absolute transaction fee in satoshis (sats).
-    /// If anyone sets both the fee_absolute method and the fee_rate method,
-    /// the FeePolicy enum will be set by whichever method was called last,
-    /// as the FeeRate and FeeAmount are mutually exclusive.
+    /// The fee_absolute method refers to the absolute transaction fee in [`Amount`].
+    /// If anyone sets both the `fee_absolute` method and the `fee_rate` method,
+    /// the `FeePolicy` enum will be set by whichever method was called last,
+    /// as the [`FeeRate`] and `FeeAmount` are mutually exclusive.
     ///
     /// Note that this is really a minimum absolute fee -- it's possible to
     /// overshoot it slightly since adding a change output to drain the remaining

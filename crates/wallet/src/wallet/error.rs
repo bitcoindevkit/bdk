@@ -16,7 +16,7 @@ use crate::descriptor::DescriptorError;
 use crate::wallet::coin_selection;
 use crate::{descriptor, KeychainKind};
 use alloc::string::String;
-use bitcoin::{absolute, psbt, OutPoint, Sequence, Txid};
+use bitcoin::{absolute, psbt, Amount, OutPoint, Sequence, Txid};
 use core::fmt;
 
 /// Errors returned by miniscript when updating inconsistent PSBTs
@@ -78,8 +78,8 @@ pub enum CreateTxError {
     },
     /// When bumping a tx the absolute fee requested is lower than replaced tx absolute fee
     FeeTooLow {
-        /// Required fee absolute value (satoshi)
-        required: u64,
+        /// Required fee absolute value [`Amount`]
+        required: Amount,
     },
     /// When bumping a tx the fee rate requested is lower than required
     FeeRateTooLow {
@@ -160,7 +160,7 @@ impl fmt::Display for CreateTxError {
                 )
             }
             CreateTxError::FeeTooLow { required } => {
-                write!(f, "Fee to low: required {} sat", required)
+                write!(f, "Fee to low: required {}", required.display_dynamic())
             }
             CreateTxError::FeeRateTooLow { required } => {
                 write!(

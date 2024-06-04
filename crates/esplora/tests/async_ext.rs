@@ -92,7 +92,8 @@ pub async fn test_update_tx_graph_without_keychain() -> anyhow::Result<()> {
             .fee
             .expect("Fee must exist")
             .abs()
-            .to_sat() as u64;
+            .to_unsigned()
+            .expect("valid `Amount`");
 
         // Check that the calculated fee matches the fee from the transaction data.
         assert_eq!(fee, tx_fee);
