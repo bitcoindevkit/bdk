@@ -65,6 +65,13 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         Ok(tx)
     }
 
+    /// Broadcasts a transaction to the network.
+    ///
+    /// This is a re-export of [`ElectrumApi::transaction_broadcast`].
+    pub fn transaction_broadcast(&self, tx: &Transaction) -> Result<Txid, Error> {
+        self.inner.transaction_broadcast(tx)
+    }
+
     /// Full scan the keychain scripts specified with the blockchain (via an Electrum client) and
     /// returns updates for [`bdk_chain`] data structures.
     ///

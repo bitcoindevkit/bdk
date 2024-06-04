@@ -6,7 +6,7 @@ const BATCH_SIZE: usize = 5;
 use std::io::Write;
 use std::str::FromStr;
 
-use bdk_electrum::electrum_client::{self, ElectrumApi};
+use bdk_electrum::electrum_client;
 use bdk_electrum::BdkElectrumClient;
 use bdk_file_store::Store;
 use bdk_wallet::bitcoin::{Address, Amount};
@@ -93,7 +93,7 @@ fn main() -> Result<(), anyhow::Error> {
     assert!(finalized);
 
     let tx = psbt.extract_tx()?;
-    client.inner.transaction_broadcast(&tx)?;
+    client.transaction_broadcast(&tx)?;
     println!("Tx broadcasted! Txid: {}", tx.txid());
 
     Ok(())
