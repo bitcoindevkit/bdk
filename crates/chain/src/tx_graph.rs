@@ -981,10 +981,10 @@ impl<A: Anchor> TxGraph<A> {
     /// If the [`ChainOracle`] implementation (`chain`) fails, an error will be returned with the
     /// returned item.
     ///
-    /// If the [`ChainOracle`] is infallible, [`list_chain_txs`] can be used instead.
+    /// If the [`ChainOracle`] is infallible, [`list_canonical_txs`] can be used instead.
     ///
-    /// [`list_chain_txs`]: Self::list_chain_txs
-    pub fn try_list_chain_txs<'a, C: ChainOracle + 'a>(
+    /// [`list_canonical_txs`]: Self::list_canonical_txs
+    pub fn try_list_canonical_txs<'a, C: ChainOracle + 'a>(
         &'a self,
         chain: &'a C,
         chain_tip: BlockId,
@@ -1003,15 +1003,15 @@ impl<A: Anchor> TxGraph<A> {
 
     /// List graph transactions that are in `chain` with `chain_tip`.
     ///
-    /// This is the infallible version of [`try_list_chain_txs`].
+    /// This is the infallible version of [`try_list_canonical_txs`].
     ///
-    /// [`try_list_chain_txs`]: Self::try_list_chain_txs
-    pub fn list_chain_txs<'a, C: ChainOracle + 'a>(
+    /// [`try_list_canonical_txs`]: Self::try_list_canonical_txs
+    pub fn list_canonical_txs<'a, C: ChainOracle + 'a>(
         &'a self,
         chain: &'a C,
         chain_tip: BlockId,
     ) -> impl Iterator<Item = CanonicalTx<'a, Arc<Transaction>, A>> {
-        self.try_list_chain_txs(chain, chain_tip)
+        self.try_list_canonical_txs(chain, chain_tip)
             .map(|r| r.expect("oracle is infallible"))
     }
 

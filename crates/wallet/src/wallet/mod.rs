@@ -1091,7 +1091,7 @@ impl Wallet {
     {
         self.indexed_graph
             .graph()
-            .list_chain_txs(&self.chain, self.chain.tip().block_id())
+            .list_canonical_txs(&self.chain, self.chain.tip().block_id())
     }
 
     /// Return the balance, separated into available, trusted-pending, untrusted-pending and immature
