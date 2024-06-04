@@ -171,7 +171,7 @@ fn test_psbt_multiple_internalkey_signers() {
     let keypair = Keypair::from_secret_key(&secp, &prv.inner);
 
     let (mut wallet, _) = get_funded_wallet(&desc);
-    let to_spend = wallet.get_balance().total();
+    let to_spend = wallet.balance().total();
     let send_to = wallet.peek_address(KeychainKind::External, 0);
     let mut builder = wallet.build_tx();
     builder.drain_to(send_to.script_pubkey()).drain_wallet();

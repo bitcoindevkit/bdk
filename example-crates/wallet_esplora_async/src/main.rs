@@ -30,7 +30,7 @@ async fn main() -> Result<(), anyhow::Error> {
     let address = wallet.next_unused_address(KeychainKind::External)?;
     println!("Generated Address: {}", address);
 
-    let balance = wallet.get_balance();
+    let balance = wallet.balance();
     println!("Wallet balance before syncing: {} sats", balance.total());
 
     print!("Syncing...");
@@ -78,7 +78,7 @@ async fn main() -> Result<(), anyhow::Error> {
     wallet.commit()?;
     println!();
 
-    let balance = wallet.get_balance();
+    let balance = wallet.balance();
     println!("Wallet balance after syncing: {} sats", balance.total());
 
     if balance.total() < SEND_AMOUNT {
