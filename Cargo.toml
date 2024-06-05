@@ -25,3 +25,7 @@ members = [
 
 [workspace.package]
 authors = ["Bitcoin Dev Kit Developers"]
+
+[workspace.lints.clippy]
+print_stdout = "deny"
+print_stderr = "deny"
