@@ -777,3 +777,36 @@ fn test_only_highest_ord_keychain_is_returned() {
         Some((TestKeychain::External, 1))
     );
 }
+
+#[test]
+fn when_querying_over_a_range_of_keychains_the_utxos_should_show_up() {
+    let mut indexer = KeychainTxOutIndex::<usize>::new(0);
+    let mut tx = common::new_tx(0);
+
+    for (i, descriptor) in DESCRIPTORS.iter().enumerate() {
+        let descriptor = parse_descriptor(descriptor);
+        let _ = indexer.insert_descriptor(i, descriptor.clone());
+        indexer.reveal_next_spk(&i);
+        tx.output.push(TxOut {
+            script_pubkey: descriptor.at_derivation_index(0).unwrap().script_pubkey(),
+            value: Amount::from_sat(10_000),
+        });
+    }
+
+    let _ = indexer.index_tx(&tx);
+    assert_eq!(indexer.outpoints().count(), DESCRIPTORS.len());
+
+    assert_eq!(
+        indexer.revealed_spks(0..DESCRIPTORS.len()).count(),
+        DESCRIPTORS.len()
+    );
+    assert_eq!(indexer.revealed_spks(1..4).count(), 4 - 1);
+    assert_eq!(
+        indexer.net_value(&tx, 0..DESCRIPTORS.len()).to_sat(),
+        (10_000 * DESCRIPTORS.len()) as i64
+    );
+    assert_eq!(
+        indexer.net_value(&tx, 3..5).to_sat(),
+        (10_000 * (5 - 3)) as i64
+    );
+}
