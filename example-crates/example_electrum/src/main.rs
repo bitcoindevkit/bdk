@@ -14,7 +14,7 @@ use bdk_chain::{
 };
 use bdk_electrum::{
     electrum_client::{self, Client, ElectrumApi},
-    ElectrumExt,
+    BdkElectrumClient,
 };
 use example_cli::{
     anyhow::{self, Context},
@@ -146,7 +146,10 @@ fn main() -> anyhow::Result<()> {
         }
     };
 
-    let client = electrum_cmd.electrum_args().client(args.network)?;
+    let client = BdkElectrumClient::new(electrum_cmd.electrum_args().client(args.network)?);
+
+    // Tell the electrum client about the txs we've already got locally so it doesn't re-download them
+    client.populate_tx_cache(&*graph.lock().unwrap());
 
     let (chain_update, mut graph_update, keychain_update) = match electrum_cmd.clone() {
         ElectrumCommands::Scan {
@@ -159,7 +162,6 @@ fn main() -> anyhow::Result<()> {
                 let chain = &*chain.lock().unwrap();
 
                 FullScanRequest::from_chain_tip(chain.tip())
-                    .cache_graph_txs(graph.graph())
                     .set_spks_for_keychain(
                         Keychain::External,
                         graph
@@ -220,8 +222,7 @@ fn main() -> anyhow::Result<()> {
             }
 
             let chain_tip = chain.tip();
-            let mut request =
-                SyncRequest::from_chain_tip(chain_tip.clone()).cache_graph_txs(graph.graph());
+            let mut request = SyncRequest::from_chain_tip(chain_tip.clone());
 
             if all_spks {
                 let all_spks = graph

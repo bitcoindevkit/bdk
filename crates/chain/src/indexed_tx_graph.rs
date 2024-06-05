@@ -352,3 +352,9 @@ pub trait Indexer {
     /// Determines whether the transaction should be included in the index.
     fn is_tx_relevant(&self, tx: &Transaction) -> bool;
 }
+
+impl<A, I> AsRef<TxGraph<A>> for IndexedTxGraph<A, I> {
+    fn as_ref(&self) -> &TxGraph<A> {
+        &self.graph
+    }
+}
