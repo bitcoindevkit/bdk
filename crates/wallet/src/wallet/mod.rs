@@ -704,7 +704,7 @@ impl Wallet {
     }
 
     /// Iterator over all keychains in this wallet
-    pub fn keychains(&self) -> impl Iterator<Item = (&KeychainKind, &ExtendedDescriptor)> {
+    pub fn keychains(&self) -> impl Iterator<Item = (KeychainKind, &ExtendedDescriptor)> {
         self.indexed_graph.index.keychains()
     }
 
@@ -1893,7 +1893,7 @@ impl Wallet {
         self.indexed_graph
             .index
             .keychains()
-            .find(|(k, _)| *k == &keychain)
+            .find(|(k, _)| k == &keychain)
             .map(|(_, d)| d)
     }
 

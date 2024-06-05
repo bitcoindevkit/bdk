@@ -252,7 +252,7 @@ where
     let internal_keychain = if graph
         .index
         .keychains()
-        .any(|(k, _)| *k == Keychain::Internal)
+        .any(|(k, _)| k == Keychain::Internal)
     {
         Keychain::Internal
     } else {
@@ -267,7 +267,7 @@ where
         &graph
             .index
             .keychains()
-            .find(|(k, _)| *k == &internal_keychain)
+            .find(|(k, _)| k == &internal_keychain)
             .expect("must exist")
             .1
             .at_derivation_index(change_index)
@@ -286,7 +286,7 @@ where
         min_drain_value: graph
             .index
             .keychains()
-            .find(|(k, _)| *k == &internal_keychain)
+            .find(|(k, _)| k == &internal_keychain)
             .expect("must exist")
             .1
             .dust_value(),
@@ -431,7 +431,7 @@ pub fn planned_utxos<A: Anchor, O: ChainOracle, K: Clone + bdk_tmp_plan::CanDeri
             let desc = graph
                 .index
                 .keychains()
-                .find(|(keychain, _)| *keychain == &k)
+                .find(|(keychain, _)| keychain == &k)
                 .expect("keychain must exist")
                 .1
                 .at_derivation_index(i)

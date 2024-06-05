@@ -267,10 +267,7 @@ impl<K: Clone + Ord + Debug> Indexer for KeychainTxOutIndex<K> {
 
     fn initial_changeset(&self) -> Self::ChangeSet {
         ChangeSet {
-            keychains_added: self
-                .keychains()
-                .map(|(k, v)| (k.clone(), v.clone()))
-                .collect(),
+            keychains_added: self.keychains().map(|(k, v)| (k, v.clone())).collect(),
             last_revealed: self.last_revealed.clone(),
         }
     }
@@ -310,9 +307,9 @@ impl<K> KeychainTxOutIndex<K> {
 /// Methods that are *re-exposed* from the internal [`SpkTxOutIndex`].
 impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     /// Get the highest-ranked keychain that is currently associated with the given `desc_id`.
-    fn keychain_of_desc_id(&self, desc_id: &DescriptorId) -> Option<&K> {
+    fn keychain_of_desc_id(&self, desc_id: &DescriptorId) -> Option<K> {
         let keychains = self.keychains.get(desc_id)?;
-        keychains.iter().next()
+        keychains.iter().next().cloned()
     }
 
     /// Return a reference to the internal [`SpkTxOutIndex`].
@@ -330,7 +327,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
             .iter()
             .filter_map(|((desc_id, index), op)| {
                 let keychain = self.keychain_of_desc_id(desc_id)?;
-                Some(((keychain.clone(), *index), *op))
+                Some(((keychain, *index), *op))
             })
     }
 
@@ -338,7 +335,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     pub fn txouts(&self) -> impl DoubleEndedIterator<Item = (K, u32, OutPoint, &TxOut)> + '_ {
         self.inner.txouts().filter_map(|((desc_id, i), op, txo)| {
             let keychain = self.keychain_of_desc_id(desc_id)?;
-            Some((keychain.clone(), *i, op, txo))
+            Some((keychain, *i, op, txo))
         })
     }
 
@@ -351,7 +348,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
             .txouts_in_tx(txid)
             .filter_map(|((desc_id, i), op, txo)| {
                 let keychain = self.keychain_of_desc_id(desc_id)?;
-                Some((keychain.clone(), *i, op, txo))
+                Some((keychain, *i, op, txo))
             })
     }
 
@@ -364,7 +361,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     pub fn txout(&self, outpoint: OutPoint) -> Option<(K, u32, &TxOut)> {
         let ((descriptor_id, index), txo) = self.inner.txout(outpoint)?;
         let keychain = self.keychain_of_desc_id(descriptor_id)?;
-        Some((keychain.clone(), *index, txo))
+        Some((keychain, *index, txo))
     }
 
     /// Return the script that exists under the given `keychain`'s `index`.
@@ -381,7 +378,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     pub fn index_of_spk(&self, script: &Script) -> Option<(K, u32)> {
         let (desc_id, last_index) = self.inner.index_of_spk(script)?;
         let keychain = self.keychain_of_desc_id(desc_id)?;
-        Some((keychain.clone(), *last_index))
+        Some((keychain, *last_index))
     }
 
     /// Returns whether the spk under the `keychain`'s `index` has been used.
@@ -469,14 +466,14 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     /// Return the map of the keychain to descriptors.
     pub fn keychains(
         &self,
-    ) -> impl DoubleEndedIterator<Item = (&K, &Descriptor<DescriptorPublicKey>)> + ExactSizeIterator + '_
+    ) -> impl DoubleEndedIterator<Item = (K, &Descriptor<DescriptorPublicKey>)> + ExactSizeIterator + '_
     {
         self.keychains_to_descriptor_ids.iter().map(|(k, desc_id)| {
             let descriptor = self
                 .descriptors
                 .get(desc_id)
                 .expect("descriptor id cannot be associated with keychain without descriptor");
-            (k, descriptor)
+            (k.to_owned(), descriptor)
         })
     }
 
@@ -630,7 +627,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     pub fn revealed_spks(
         &self,
         range: impl RangeBounds<K>,
-    ) -> impl DoubleEndedIterator<Item = (&K, u32, ScriptBuf)> + Clone {
+    ) -> impl DoubleEndedIterator<Item = (K, u32, ScriptBuf)> + Clone + '_ {
         self.keychains_to_descriptor_ids
             .range(range)
             .flat_map(|(_, descriptor_id)| {
@@ -755,7 +752,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
             .iter()
             .filter_map(|(desc_id, index)| {
                 let keychain = self.keychain_of_desc_id(desc_id)?;
-                Some((keychain.clone(), *index))
+                Some((keychain, *index))
             })
             .collect()
     }
@@ -952,7 +949,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     pub fn keychain_outpoints_in_range<'a>(
         &'a self,
         range: impl RangeBounds<K> + 'a,
-    ) -> impl DoubleEndedIterator<Item = (&'a K, u32, OutPoint)> + 'a {
+    ) -> impl DoubleEndedIterator<Item = (K, u32, OutPoint)> + 'a {
         let bounds = self.map_to_inner_bounds(range);
         self.inner
             .outputs_in_range(bounds)
@@ -1024,7 +1021,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
             .into_iter()
             .filter_map(|(desc_id, index)| {
                 let keychain = self.keychain_of_desc_id(&desc_id)?;
-                Some((keychain.clone(), index))
+                Some((keychain, index))
             })
             .collect();
         let _ = self.reveal_to_target_multi(&last_revealed);

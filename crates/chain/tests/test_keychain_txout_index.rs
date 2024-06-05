@@ -106,8 +106,8 @@ fn test_apply_changeset_with_different_descriptors_to_same_keychain() {
     assert_eq!(
         txout_index.keychains().collect::<Vec<_>>(),
         vec![
-            (&TestKeychain::External, &external_descriptor),
-            (&TestKeychain::Internal, &internal_descriptor)
+            (TestKeychain::External, &external_descriptor),
+            (TestKeychain::Internal, &internal_descriptor)
         ]
     );
 
@@ -120,8 +120,8 @@ fn test_apply_changeset_with_different_descriptors_to_same_keychain() {
     assert_eq!(
         txout_index.keychains().collect::<Vec<_>>(),
         vec![
-            (&TestKeychain::External, &internal_descriptor),
-            (&TestKeychain::Internal, &internal_descriptor)
+            (TestKeychain::External, &internal_descriptor),
+            (TestKeychain::Internal, &internal_descriptor)
         ]
     );
 
@@ -134,8 +134,8 @@ fn test_apply_changeset_with_different_descriptors_to_same_keychain() {
     assert_eq!(
         txout_index.keychains().collect::<Vec<_>>(),
         vec![
-            (&TestKeychain::External, &internal_descriptor),
-            (&TestKeychain::Internal, &external_descriptor)
+            (TestKeychain::External, &internal_descriptor),
+            (TestKeychain::Internal, &external_descriptor)
         ]
     );
 }
@@ -333,8 +333,7 @@ fn test_lookahead() {
 fn test_scan_with_lookahead() {
     let external_descriptor = parse_descriptor(DESCRIPTORS[0]);
     let internal_descriptor = parse_descriptor(DESCRIPTORS[1]);
-    let mut txout_index =
-        init_txout_index(external_descriptor.clone(), internal_descriptor.clone(), 10);
+    let mut txout_index = init_txout_index(external_descriptor.clone(), internal_descriptor, 10);
 
     let spks: BTreeMap<u32, ScriptBuf> = [0, 10, 20, 30]
         .into_iter()
@@ -390,7 +389,7 @@ fn test_scan_with_lookahead() {
 fn test_wildcard_derivations() {
     let external_descriptor = parse_descriptor(DESCRIPTORS[0]);
     let internal_descriptor = parse_descriptor(DESCRIPTORS[1]);
-    let mut txout_index = init_txout_index(external_descriptor.clone(), internal_descriptor.clone(), 0);
+    let mut txout_index = init_txout_index(external_descriptor.clone(), internal_descriptor, 0);
     let external_spk_0 = external_descriptor.at_derivation_index(0).unwrap().script_pubkey();
     let external_spk_16 = external_descriptor.at_derivation_index(16).unwrap().script_pubkey();
     let external_spk_26 = external_descriptor.at_derivation_index(26).unwrap().script_pubkey();
@@ -637,7 +636,7 @@ fn index_txout_after_changing_descriptor_under_keychain() {
 
     // Introduce `desc_a` under keychain `()` and replace the descriptor.
     let _ = txout_index.insert_descriptor((), desc_a.clone());
-    let _ = txout_index.insert_descriptor((), desc_b.clone());
+    let _ = txout_index.insert_descriptor((), desc_b);
 
     // Loop through spks in intervals of `lookahead` to create outputs with. We should always be
     // able to index these outputs if `lookahead` is respected.
@@ -680,7 +679,7 @@ fn insert_descriptor_no_change() {
         },
     );
     assert_eq!(
-        txout_index.insert_descriptor((), desc.clone()),
+        txout_index.insert_descriptor((), desc),
         keychain::ChangeSet::default(),
         "inserting the same descriptor for keychain should return an empty changeset",
     );
