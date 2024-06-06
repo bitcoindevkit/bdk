@@ -74,7 +74,8 @@ fn main() {
     let db = bdk_file_store::Store::<ChangeSet>::open_or_create_new(b"magic_bytes", "path/to/my_wallet.db").expect("create store");
 
     let descriptor = "wpkh(tprv8ZgxMBicQKsPdcAqYBpzAFwU5yxBUo88ggoBqu1qPcHUfSbKK1sKMLmC7EAk438btHQrSdu3jGGQa6PA71nvH5nkDexhLteJqkM4dQmWF9g/84'/1'/0'/0/*)";
-    let mut wallet = Wallet::new_or_load(descriptor, None, db, Network::Testnet).expect("create or load wallet");
+    let change_descriptor = "wpkh(tprv8ZgxMBicQKsPdcAqYBpzAFwU5yxBUo88ggoBqu1qPcHUfSbKK1sKMLmC7EAk438btHQrSdu3jGGQa6PA71nvH5nkDexhLteJqkM4dQmWF9g/84'/1'/0'/1/*)";
+    let mut wallet = Wallet::new_or_load(descriptor, change_descriptor, db, Network::Testnet).expect("create or load wallet");
 
     // Insert a single `TxOut` at `OutPoint` into the wallet.
     let _ = wallet.insert_txout(outpoint, txout);

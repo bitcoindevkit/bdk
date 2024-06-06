@@ -67,8 +67,9 @@
 //!
 //! let custom_signer = CustomSigner::connect();
 //!
-//! let descriptor = "wpkh(tpubD6NzVbkrYhZ4Xferm7Pz4VnjdcDPFyjVu5K4iZXQ4pVN8Cks4pHVowTBXBKRhX64pkRyJZJN5xAKj4UDNnLPb5p2sSKXhewoYx5GbTdUFWq/*)";
-//! let mut wallet = Wallet::new_no_persist(descriptor, None, Network::Testnet)?;
+//! let descriptor = "wpkh(tpubD6NzVbkrYhZ4Xferm7Pz4VnjdcDPFyjVu5K4iZXQ4pVN8Cks4pHVowTBXBKRhX64pkRyJZJN5xAKj4UDNnLPb5p2sSKXhewoYx5GbTdUFWq/0/*)";
+//! let change_descriptor = "wpkh(tpubD6NzVbkrYhZ4Xferm7Pz4VnjdcDPFyjVu5K4iZXQ4pVN8Cks4pHVowTBXBKRhX64pkRyJZJN5xAKj4UDNnLPb5p2sSKXhewoYx5GbTdUFWq/1/*)";
+//! let mut wallet = Wallet::new_no_persist(descriptor, change_descriptor, Network::Testnet)?;
 //! wallet.add_signer(
 //!     KeychainKind::External,
 //!     SignerOrdering(200),

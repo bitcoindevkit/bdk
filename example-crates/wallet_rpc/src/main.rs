@@ -25,7 +25,7 @@ pub struct Args {
     pub descriptor: String,
     /// Wallet change descriptor
     #[clap(env = "CHANGE_DESCRIPTOR")]
-    pub change_descriptor: Option<String>,
+    pub change_descriptor: String,
     /// Earliest block height to start sync from
     #[clap(env = "START_HEIGHT", long, default_value = "481824")]
     pub start_height: u32,
@@ -88,7 +88,7 @@ fn main() -> anyhow::Result<()> {
     let start_load_wallet = Instant::now();
     let mut wallet = Wallet::new_or_load(
         &args.descriptor,
-        args.change_descriptor.as_ref(),
+        &args.change_descriptor,
         Store::<bdk_wallet::wallet::ChangeSet>::open_or_create_new(
             DB_MAGIC.as_bytes(),
             args.db_path,
