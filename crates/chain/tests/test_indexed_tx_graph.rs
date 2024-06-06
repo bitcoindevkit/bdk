@@ -34,7 +34,10 @@ fn insert_relevant_txs() {
     let mut graph = IndexedTxGraph::<ConfirmationHeightAnchor, KeychainTxOutIndex<()>>::new(
         KeychainTxOutIndex::new(10),
     );
-    let _ = graph.index.insert_descriptor((), descriptor.clone());
+    let _ = graph
+        .index
+        .insert_descriptor((), descriptor.clone())
+        .unwrap();
 
     let tx_a = Transaction {
         output: vec![

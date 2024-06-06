@@ -158,8 +158,12 @@ mod test {
         let (external_descriptor,_) = Descriptor::<DescriptorPublicKey>::parse_descriptor(&secp, "tr([73c5da0a/86'/0'/0']xprv9xgqHN7yz9MwCkxsBPN5qetuNdQSUttZNKw1dcYTV4mkaAFiBVGQziHs3NRSWMkCzvgjEe3n9xV8oYywvM8at9yRqyaZVz6TYYhX98VjsUk/0/*)").unwrap();
         let (internal_descriptor,_) = Descriptor::<DescriptorPublicKey>::parse_descriptor(&secp, "tr([73c5da0a/86'/0'/0']xprv9xgqHN7yz9MwCkxsBPN5qetuNdQSUttZNKw1dcYTV4mkaAFiBVGQziHs3NRSWMkCzvgjEe3n9xV8oYywvM8at9yRqyaZVz6TYYhX98VjsUk/1/*)").unwrap();
 
-        let _ = txout_index.insert_descriptor(TestKeychain::External, external_descriptor.clone());
-        let _ = txout_index.insert_descriptor(TestKeychain::Internal, internal_descriptor.clone());
+        let _ = txout_index
+            .insert_descriptor(TestKeychain::External, external_descriptor.clone())
+            .unwrap();
+        let _ = txout_index
+            .insert_descriptor(TestKeychain::Internal, internal_descriptor.clone())
+            .unwrap();
 
         (txout_index, external_descriptor, internal_descriptor)
     }

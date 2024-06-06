@@ -95,7 +95,8 @@ impl<K> Default for ChangeSet<K> {
     }
 }
 
-const DEFAULT_LOOKAHEAD: u32 = 25;
+/// The default lookahead for a [`KeychainTxOutIndex`]
+pub const DEFAULT_LOOKAHEAD: u32 = 25;
 
 /// [`KeychainTxOutIndex`] controls how script pubkeys are revealed for multiple keychains, and
 /// indexes [`TxOut`]s with them.
@@ -121,15 +122,17 @@ const DEFAULT_LOOKAHEAD: u32 = 25;
 /// above the last revealed index. These additionally-derived script pubkeys are called the
 /// lookahead.
 ///
-/// The [`KeychainTxOutIndex`] is constructed with the `lookahead` and cannot be altered. The
-/// default `lookahead` count is 1000. Use [`new`] to set a custom `lookahead`.
+/// The [`KeychainTxOutIndex`] is constructed with the `lookahead` and cannot be altered. See
+/// [`DEFAULT_LOOKAHEAD`] for the value used in the `Default` implementation. Use [`new`] to set a
+/// custom `lookahead`.
 ///
 /// # Unbounded script pubkey iterator
 ///
 /// For script-pubkey-based chain sources (such as Electrum/Esplora), an initial scan is best done
 /// by iterating though derived script pubkeys one by one and requesting transaction histories for
 /// each script pubkey. We will stop after x-number of script pubkeys have empty histories. An
-/// unbounded script pubkey iterator is useful to pass to such a chain source.
+/// unbounded script pubkey iterator is useful to pass to such a chain source because it doesn't
+/// require holding a reference to the index.
 ///
 /// Call [`unbounded_spk_iter`] to get an unbounded script pubkey iterator for a given keychain.
 /// Call [`all_unbounded_spk_iters`] to get unbounded script pubkey iterators for all keychains.
@@ -162,41 +165,13 @@ const DEFAULT_LOOKAHEAD: u32 = 25;
 /// # let (external_descriptor,_) = Descriptor::<DescriptorPublicKey>::parse_descriptor(&secp, "tr([73c5da0a/86'/0'/0']xprv9xgqHN7yz9MwCkxsBPN5qetuNdQSUttZNKw1dcYTV4mkaAFiBVGQziHs3NRSWMkCzvgjEe3n9xV8oYywvM8at9yRqyaZVz6TYYhX98VjsUk/0/*)").unwrap();
 /// # let (internal_descriptor,_) = Descriptor::<DescriptorPublicKey>::parse_descriptor(&secp, "tr([73c5da0a/86'/0'/0']xprv9xgqHN7yz9MwCkxsBPN5qetuNdQSUttZNKw1dcYTV4mkaAFiBVGQziHs3NRSWMkCzvgjEe3n9xV8oYywvM8at9yRqyaZVz6TYYhX98VjsUk/1/*)").unwrap();
 /// # let (descriptor_42, _) = Descriptor::<DescriptorPublicKey>::parse_descriptor(&secp, "tr([73c5da0a/86'/0'/0']xprv9xgqHN7yz9MwCkxsBPN5qetuNdQSUttZNKw1dcYTV4mkaAFiBVGQziHs3NRSWMkCzvgjEe3n9xV8oYywvM8at9yRqyaZVz6TYYhX98VjsUk/2/*)").unwrap();
-/// let _ = txout_index.insert_descriptor(MyKeychain::External, external_descriptor);
-/// let _ = txout_index.insert_descriptor(MyKeychain::Internal, internal_descriptor);
-/// let _ = txout_index.insert_descriptor(MyKeychain::MyAppUser { user_id: 42 }, descriptor_42);
+/// let _ = txout_index.insert_descriptor(MyKeychain::External, external_descriptor)?;
+/// let _ = txout_index.insert_descriptor(MyKeychain::Internal, internal_descriptor)?;
+/// let _ = txout_index.insert_descriptor(MyKeychain::MyAppUser { user_id: 42 }, descriptor_42)?;
 ///
 /// let new_spk_for_user = txout_index.reveal_next_spk(&MyKeychain::MyAppUser{ user_id: 42 });
+/// # Ok::<_, bdk_chain::keychain::InsertDescriptorError<_>>(())
 /// ```
-///
-/// # Non-recommend keychain to descriptor assignments
-///
-/// A keychain (`K`) is used to identify a descriptor. However, the following keychain to descriptor
-/// arrangements result in behavior that is harder to reason about and is not recommended.
-///
-/// ## Multiple keychains identifying the same descriptor
-///
-/// Although a single keychain variant can only identify a single descriptor, multiple keychain
-/// variants can identify the same descriptor.
-///
-/// If multiple keychains identify the same descriptor:
-/// 1. Methods that take in a keychain (such as [`reveal_next_spk`]) will work normally when any
-/// keychain (that identifies that descriptor) is passed in.
-/// 2. Methods that return data which associates with a descriptor (such as [`outpoints`],
-/// [`txouts`], [`unused_spks`], etc.) the method will return the highest-ranked keychain variant
-/// that identifies the descriptor. Rank is determined by the [`Ord`] implementation of the keychain
-/// type.
-///
-/// This arrangement is not recommended since some methods will return a single keychain variant
-/// even though multiple keychain variants identify the same descriptor.
-///
-/// ## Reassigning the descriptor of a single keychain
-///
-/// Descriptors added to [`KeychainTxOutIndex`] are never removed. However, a keychain that
-/// identifies a descriptor can be reassigned to identify a different descriptor. This may result in
-/// a situation where a descriptor has no associated keychain(s), and relevant [`TxOut`]s,
-/// [`OutPoint`]s and [`Script`]s (of that descriptor) will not be return by [`KeychainTxOutIndex`].
-/// Therefore, reassigning the descriptor of a single keychain is not recommended.
 ///
 /// [`Ord`]: core::cmp::Ord
 /// [`SpkTxOutIndex`]: crate::spk_txout_index::SpkTxOutIndex

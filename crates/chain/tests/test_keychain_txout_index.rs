@@ -34,8 +34,12 @@ fn init_txout_index(
 ) -> bdk_chain::keychain::KeychainTxOutIndex<TestKeychain> {
     let mut txout_index = bdk_chain::keychain::KeychainTxOutIndex::<TestKeychain>::new(lookahead);
 
-    let _ = txout_index.insert_descriptor(TestKeychain::External, external_descriptor);
-    let _ = txout_index.insert_descriptor(TestKeychain::Internal, internal_descriptor);
+    let _ = txout_index
+        .insert_descriptor(TestKeychain::External, external_descriptor)
+        .unwrap();
+    let _ = txout_index
+        .insert_descriptor(TestKeychain::Internal, internal_descriptor)
+        .unwrap();
 
     txout_index
 }
@@ -458,7 +462,9 @@ fn test_non_wildcard_derivations() {
         .unwrap()
         .script_pubkey();
 
-    let _ = txout_index.insert_descriptor(TestKeychain::External, no_wildcard_descriptor.clone());
+    let _ = txout_index
+        .insert_descriptor(TestKeychain::External, no_wildcard_descriptor.clone())
+        .unwrap();
 
     // given:
     // - `txout_index` with no stored scripts
@@ -702,7 +708,9 @@ fn applying_changesets_one_by_one_vs_aggregate_must_have_same_result() {
 fn assigning_same_descriptor_to_multiple_keychains_should_error() {
     let desc = parse_descriptor(DESCRIPTORS[0]);
     let mut indexer = KeychainTxOutIndex::<TestKeychain>::new(0);
-    let _ = indexer.insert_descriptor(TestKeychain::Internal, desc.clone());
+    let _ = indexer
+        .insert_descriptor(TestKeychain::Internal, desc.clone())
+        .unwrap();
     assert!(indexer
         .insert_descriptor(TestKeychain::External, desc)
         .is_err())
@@ -726,7 +734,7 @@ fn when_querying_over_a_range_of_keychains_the_utxos_should_show_up() {
 
     for (i, descriptor) in DESCRIPTORS.iter().enumerate() {
         let descriptor = parse_descriptor(descriptor);
-        let _ = indexer.insert_descriptor(i, descriptor.clone());
+        let _ = indexer.insert_descriptor(i, descriptor.clone()).unwrap();
         if i != 4 {
             // skip one in the middle to see if uncovers any bugs
             indexer.reveal_next_spk(&i);
