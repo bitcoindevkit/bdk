@@ -29,7 +29,7 @@ use bdk_chain::{
     spk_client::{FullScanRequest, FullScanResult, SyncRequest, SyncResult},
     tx_graph::{CanonicalTx, TxGraph},
     Append, BlockId, ChainPosition, ConfirmationTime, ConfirmationTimeHeightAnchor, FullTxOut,
-    IndexedTxGraph,
+    IndexSpk, IndexedTxGraph,
 };
 use bdk_persist::{Persist, PersistBackend};
 use bitcoin::secp256k1::{All, Secp256k1};
@@ -910,7 +910,7 @@ impl Wallet {
     /// script pubkeys the wallet is storing internally).
     pub fn all_unbounded_spk_iters(
         &self,
-    ) -> BTreeMap<KeychainKind, impl Iterator<Item = (u32, ScriptBuf)> + Clone> {
+    ) -> BTreeMap<KeychainKind, impl Iterator<Item = IndexSpk> + Clone> {
         self.indexed_graph.index.all_unbounded_spk_iters()
     }
 
@@ -922,7 +922,7 @@ impl Wallet {
     pub fn unbounded_spk_iter(
         &self,
         keychain: KeychainKind,
-    ) -> impl Iterator<Item = (u32, ScriptBuf)> + Clone {
+    ) -> impl Iterator<Item = IndexSpk> + Clone {
         self.indexed_graph
             .index
             .unbounded_spk_iter(&keychain)

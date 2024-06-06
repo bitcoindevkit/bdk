@@ -2,13 +2,13 @@ use std::collections::BTreeSet;
 
 use async_trait::async_trait;
 use bdk_chain::spk_client::{FullScanRequest, FullScanResult, SyncRequest, SyncResult};
-use bdk_chain::Anchor;
 use bdk_chain::{
     bitcoin::{BlockHash, OutPoint, ScriptBuf, TxOut, Txid},
     collections::BTreeMap,
     local_chain::CheckPoint,
     BlockId, ConfirmationTimeHeightAnchor, TxGraph,
 };
+use bdk_chain::{Anchor, IndexSpk};
 use esplora_client::{Amount, TxStatus};
 use futures::{stream::FuturesOrdered, TryStreamExt};
 
@@ -236,7 +236,7 @@ async fn full_scan_for_index_and_graph<K: Ord + Clone + Send>(
     client: &esplora_client::AsyncClient,
     keychain_spks: BTreeMap<
         K,
-        impl IntoIterator<IntoIter = impl Iterator<Item = (u32, ScriptBuf)> + Send> + Send,
+        impl IntoIterator<IntoIter = impl Iterator<Item = IndexSpk> + Send> + Send,
     >,
     stop_gap: usize,
     parallel_requests: usize,

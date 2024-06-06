@@ -4,12 +4,12 @@ use std::usize;
 
 use bdk_chain::collections::BTreeMap;
 use bdk_chain::spk_client::{FullScanRequest, FullScanResult, SyncRequest, SyncResult};
-use bdk_chain::Anchor;
 use bdk_chain::{
     bitcoin::{Amount, BlockHash, OutPoint, ScriptBuf, TxOut, Txid},
     local_chain::CheckPoint,
     BlockId, ConfirmationTimeHeightAnchor, TxGraph,
 };
+use bdk_chain::{Anchor, IndexSpk};
 use esplora_client::TxStatus;
 
 use crate::anchor_from_status;
@@ -217,7 +217,7 @@ fn chain_update<A: Anchor>(
 /// [`KeychainTxOutIndex`](bdk_chain::keychain::KeychainTxOutIndex).
 fn full_scan_for_index_and_graph_blocking<K: Ord + Clone>(
     client: &esplora_client::BlockingClient,
-    keychain_spks: BTreeMap<K, impl IntoIterator<Item = (u32, ScriptBuf)>>,
+    keychain_spks: BTreeMap<K, impl IntoIterator<Item = IndexSpk>>,
     stop_gap: usize,
     parallel_requests: usize,
 ) -> Result<(TxGraph<ConfirmationTimeHeightAnchor>, BTreeMap<K, u32>), Error> {

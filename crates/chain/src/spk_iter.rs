@@ -7,6 +7,9 @@ use core::{borrow::Borrow, ops::Bound, ops::RangeBounds};
 /// Maximum [BIP32](https://bips.xyz/32) derivation index.
 pub const BIP32_MAX_INDEX: u32 = (1 << 31) - 1;
 
+/// A tuple of keychain index and corresponding [`ScriptBuf`].
+pub type IndexSpk = (u32, ScriptBuf);
+
 /// An iterator for derived script pubkeys.
 ///
 /// [`SpkIterator`] is an implementation of the [`Iterator`] trait which possesses its own `next()`
@@ -97,7 +100,7 @@ impl<D> Iterator for SpkIterator<D>
 where
     D: Borrow<Descriptor<DescriptorPublicKey>>,
 {
-    type Item = (u32, ScriptBuf);
+    type Item = IndexSpk;
 
     fn next(&mut self) -> Option<Self::Item> {
         // For non-wildcard descriptors, we expect the first element to be Some((0, spk)), then None after.

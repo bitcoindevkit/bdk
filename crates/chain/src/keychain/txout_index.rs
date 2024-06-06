@@ -3,10 +3,10 @@ use crate::{
     indexed_tx_graph::Indexer,
     miniscript::{Descriptor, DescriptorPublicKey},
     spk_iter::BIP32_MAX_INDEX,
-    DescriptorExt, DescriptorId, SpkIterator, SpkTxOutIndex,
+    DescriptorExt, DescriptorId, IndexSpk, SpkIterator, SpkTxOutIndex,
 };
 use alloc::{borrow::ToOwned, vec::Vec};
-use bitcoin::{Amount, OutPoint, Script, ScriptBuf, SignedAmount, Transaction, TxOut, Txid};
+use bitcoin::{Amount, OutPoint, Script, SignedAmount, Transaction, TxOut, Txid};
 use core::{
     fmt::Debug,
     ops::{Bound, RangeBounds},
@@ -739,9 +739,9 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
         &mut self,
         keychain: &K,
         target_index: u32,
-    ) -> Option<(Vec<(u32, ScriptBuf)>, ChangeSet<K>)> {
+    ) -> Option<(Vec<IndexSpk>, ChangeSet<K>)> {
         let mut changeset = ChangeSet::default();
-        let mut spks: Vec<(u32, ScriptBuf)> = vec![];
+        let mut spks: Vec<IndexSpk> = vec![];
         while let Some((i, new)) = self.next_index(keychain) {
             if !new || i > target_index {
                 break;
