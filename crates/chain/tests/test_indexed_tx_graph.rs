@@ -10,7 +10,7 @@ use bdk_chain::{
     indexed_tx_graph::{self, IndexedTxGraph},
     keychain::{self, Balance, KeychainTxOutIndex},
     local_chain::LocalChain,
-    tx_graph, ChainPosition, ConfirmationHeightAnchor, DescriptorExt,
+    tx_graph, Append, ChainPosition, ConfirmationHeightAnchor, DescriptorExt,
 };
 use bitcoin::{
     secp256k1::Secp256k1, Amount, OutPoint, Script, ScriptBuf, Transaction, TxIn, TxOut,
@@ -140,8 +140,16 @@ fn test_list_owned_txouts() {
         KeychainTxOutIndex::new(10),
     );
 
-    let _ = graph.index.insert_descriptor("keychain_1".into(), desc_1);
-    let _ = graph.index.insert_descriptor("keychain_2".into(), desc_2);
+    assert!(!graph
+        .index
+        .insert_descriptor("keychain_1".into(), desc_1)
+        .unwrap()
+        .is_empty());
+    assert!(!graph
+        .index
+        .insert_descriptor("keychain_2".into(), desc_2)
+        .unwrap()
+        .is_empty());
 
     // Get trusted and untrusted addresses
 
@@ -257,18 +265,26 @@ fn test_list_owned_txouts() {
                 .unwrap_or_else(|| panic!("block must exist at {}", height));
             let txouts = graph
                 .graph()
-                .filter_chain_txouts(&local_chain, chain_tip, graph.index.outpoints())
+                .filter_chain_txouts(
+                    &local_chain,
+                    chain_tip,
+                    graph.index.outpoints().iter().cloned(),
+                )
                 .collect::<Vec<_>>();
 
             let utxos = graph
                 .graph()
-                .filter_chain_unspents(&local_chain, chain_tip, graph.index.outpoints())
+                .filter_chain_unspents(
+                    &local_chain,
+                    chain_tip,
+                    graph.index.outpoints().iter().cloned(),
+                )
                 .collect::<Vec<_>>();
 
             let balance = graph.graph().balance(
                 &local_chain,
                 chain_tip,
-                graph.index.outpoints(),
+                graph.index.outpoints().iter().cloned(),
                 |_, spk: &Script| trusted_spks.contains(&spk.to_owned()),
             );
 

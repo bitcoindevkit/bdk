@@ -228,9 +228,9 @@ fn main() -> anyhow::Result<()> {
                 let all_spks = graph
                     .index
                     .revealed_spks(..)
-                    .map(|(k, i, spk)| (k.to_owned(), i, spk.to_owned()))
+                    .map(|(index, spk)| (index.to_owned(), spk.to_owned()))
                     .collect::<Vec<_>>();
-                request = request.chain_spks(all_spks.into_iter().map(|(k, spk_i, spk)| {
+                request = request.chain_spks(all_spks.into_iter().map(|((k, spk_i), spk)| {
                     eprint!("Scanning {}: {}", k, spk_i);
                     spk
                 }));
@@ -239,10 +239,10 @@ fn main() -> anyhow::Result<()> {
                 let unused_spks = graph
                     .index
                     .unused_spks()
-                    .map(|(k, i, spk)| (k, i, spk.to_owned()))
+                    .map(|(index, spk)| (index.to_owned(), spk.to_owned()))
                     .collect::<Vec<_>>();
                 request =
-                    request.chain_spks(unused_spks.into_iter().map(move |(k, spk_i, spk)| {
+                    request.chain_spks(unused_spks.into_iter().map(move |((k, spk_i), spk)| {
                         eprint!(
                             "Checking if address {} {}:{} has been used",
                             Address::from_script(&spk, args.network).unwrap(),
@@ -258,7 +258,11 @@ fn main() -> anyhow::Result<()> {
 
                 let utxos = graph
                     .graph()
-                    .filter_chain_unspents(&*chain, chain_tip.block_id(), init_outpoints)
+                    .filter_chain_unspents(
+                        &*chain,
+                        chain_tip.block_id(),
+                        init_outpoints.iter().cloned(),
+                    )
                     .map(|(_, utxo)| utxo)
                     .collect::<Vec<_>>();
                 request = request.chain_outpoints(utxos.into_iter().map(|utxo| {
@@ -338,7 +342,7 @@ fn main() -> anyhow::Result<()> {
         let mut indexed_tx_graph_changeset =
             indexed_tx_graph::ChangeSet::<ConfirmationHeightAnchor, _>::default();
         if let Some(keychain_update) = keychain_update {
-            let (_, keychain_changeset) = graph.index.reveal_to_target_multi(&keychain_update);
+            let keychain_changeset = graph.index.reveal_to_target_multi(&keychain_update);
             indexed_tx_graph_changeset.append(keychain_changeset.into());
         }
         indexed_tx_graph_changeset.append(graph.apply_update(graph_update));

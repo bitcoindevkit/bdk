@@ -427,7 +427,7 @@ pub fn planned_utxos<A: Anchor, O: ChainOracle, K: Clone + bdk_tmp_plan::CanDeri
     let outpoints = graph.index.outpoints();
     graph
         .graph()
-        .try_filter_chain_unspents(chain, chain_tip, outpoints)
+        .try_filter_chain_unspents(chain, chain_tip, outpoints.iter().cloned())
         .filter_map(|r| -> Option<Result<PlannedUtxo<K, A>, _>> {
             let (k, i, full_txo) = match r {
                 Err(err) => return Some(Err(err)),
@@ -527,7 +527,7 @@ where
             let balance = graph.graph().try_balance(
                 chain,
                 chain.get_chain_tip()?,
-                graph.index.outpoints(),
+                graph.index.outpoints().iter().cloned(),
                 |(k, _), _| k == &Keychain::Internal,
             )?;
 
@@ -568,7 +568,7 @@ where
                 } => {
                     let txouts = graph
                         .graph()
-                        .try_filter_chain_txouts(chain, chain_tip, outpoints)
+                        .try_filter_chain_txouts(chain, chain_tip, outpoints.iter().cloned())
                         .filter(|r| match r {
                             Ok((_, full_txo)) => match (spent, unspent) {
                                 (true, false) => full_txo.spent_by.is_some(),

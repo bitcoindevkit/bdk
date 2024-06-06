@@ -52,7 +52,7 @@ impl<I> Default for SpkTxOutIndex<I> {
     }
 }
 
-impl<I: Clone + Ord> Indexer for SpkTxOutIndex<I> {
+impl<I: Clone + Ord + core::fmt::Debug> Indexer for SpkTxOutIndex<I> {
     type ChangeSet = ();
 
     fn index_txout(&mut self, outpoint: OutPoint, txout: &TxOut) -> Self::ChangeSet {
@@ -76,7 +76,7 @@ impl<I: Clone + Ord> Indexer for SpkTxOutIndex<I> {
     }
 }
 
-impl<I: Clone + Ord> SpkTxOutIndex<I> {
+impl<I: Clone + Ord + core::fmt::Debug> SpkTxOutIndex<I> {
     /// Scans a transaction's outputs for matching script pubkeys.
     ///
     /// Typically, this is used in two situations:

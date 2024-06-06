@@ -166,7 +166,7 @@ impl SyncRequest {
         self.chain_spks(
             index
                 .revealed_spks(spk_range)
-                .map(|(_, _, spk)| spk.to_owned())
+                .map(|(_, spk)| spk.to_owned())
                 .collect::<Vec<_>>(),
         )
     }

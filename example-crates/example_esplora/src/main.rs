@@ -204,7 +204,7 @@ fn main() -> anyhow::Result<()> {
             // addresses derived so we need to derive up to last active addresses the scan found
             // before adding the transactions.
             (chain.apply_update(update.chain_update)?, {
-                let (_, index_changeset) = graph
+                let index_changeset = graph
                     .index
                     .reveal_to_target_multi(&update.last_active_indices);
                 let mut indexed_tx_graph_changeset = graph.apply_update(update.graph_update);
@@ -245,7 +245,7 @@ fn main() -> anyhow::Result<()> {
                     let all_spks = graph
                         .index
                         .revealed_spks(..)
-                        .map(|(k, i, spk)| (k.to_owned(), i, spk.to_owned()))
+                        .map(|((k, i), spk)| (k.to_owned(), *i, spk.to_owned()))
                         .collect::<Vec<_>>();
                     request = request.chain_spks(all_spks.into_iter().map(|(k, i, spk)| {
                         eprint!("scanning {}:{}", k, i);
@@ -258,10 +258,10 @@ fn main() -> anyhow::Result<()> {
                     let unused_spks = graph
                         .index
                         .unused_spks()
-                        .map(|(k, i, spk)| (k, i, spk.to_owned()))
+                        .map(|(index, spk)| (index.to_owned(), spk.to_owned()))
                         .collect::<Vec<_>>();
                     request =
-                        request.chain_spks(unused_spks.into_iter().map(move |(k, i, spk)| {
+                        request.chain_spks(unused_spks.into_iter().map(move |((k, i), spk)| {
                             eprint!(
                                 "Checking if address {} {}:{} has been used",
                                 Address::from_script(&spk, args.network).unwrap(),
@@ -280,7 +280,11 @@ fn main() -> anyhow::Result<()> {
                     let init_outpoints = graph.index.outpoints();
                     let utxos = graph
                         .graph()
-                        .filter_chain_unspents(&*chain, local_tip.block_id(), init_outpoints)
+                        .filter_chain_unspents(
+                            &*chain,
+                            local_tip.block_id(),
+                            init_outpoints.iter().cloned(),
+                        )
                         .map(|(_, utxo)| utxo)
                         .collect::<Vec<_>>();
                     request = request.chain_outpoints(
