@@ -73,6 +73,8 @@ use crate::types::*;
 use crate::wallet::coin_selection::Excess::{Change, NoChange};
 use crate::wallet::error::{BuildFeeBumpError, CreateTxError, MiniscriptPsbtError};
 
+use self::coin_selection::Error;
+
 const COINBASE_MATURITY: u32 = 100;
 
 /// A Bitcoin wallet
@@ -1562,10 +1564,10 @@ impl Wallet {
                     change_fee,
                 } = excess
                 {
-                    return Err(CreateTxError::InsufficientFunds {
+                    return Err(CreateTxError::CoinSelection(Error::InsufficientFunds {
                         needed: *dust_threshold,
                         available: remaining_amount.saturating_sub(*change_fee),
-                    });
+                    }));
                 }
             } else {
                 return Err(CreateTxError::NoRecipients);
