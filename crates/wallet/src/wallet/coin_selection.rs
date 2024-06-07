@@ -52,11 +52,10 @@
 //!                 (&mut selected_amount, &mut additional_weight),
 //!                 |(selected_amount, additional_weight), weighted_utxo| {
 //!                     **selected_amount += weighted_utxo.utxo.txout().value.to_sat();
-//!                     **additional_weight += Weight::from_wu(
-//!                         (TxIn::default().segwit_weight().to_wu()
-//!                             + weighted_utxo.satisfaction_weight as u64)
-//!                             as u64,
-//!                     );
+//!                     **additional_weight += TxIn::default()
+//!                         .segwit_weight()
+//!                         .checked_add(weighted_utxo.satisfaction_weight)
+//!                         .expect("`Weight` addition should not cause an integer overflow");
 //!                     Some(weighted_utxo.utxo)
 //!                 },
 //!             )
@@ -344,10 +343,10 @@ fn select_sorted_utxos(
             |(selected_amount, fee_amount), (must_use, weighted_utxo)| {
                 if must_use || **selected_amount < target_amount + **fee_amount {
                     **fee_amount += (fee_rate
-                        * Weight::from_wu(
-                            TxIn::default().segwit_weight().to_wu()
-                                + weighted_utxo.satisfaction_weight as u64,
-                        ))
+                        * (TxIn::default()
+                            .segwit_weight()
+                            .checked_add(weighted_utxo.satisfaction_weight)
+                            .expect("`Weight` addition should not cause an integer overflow")))
                     .to_sat();
                     **selected_amount += weighted_utxo.utxo.txout().value.to_sat();
                     Some(weighted_utxo.utxo)
@@ -390,9 +389,10 @@ struct OutputGroup {
 impl OutputGroup {
     fn new(weighted_utxo: WeightedUtxo, fee_rate: FeeRate) -> Self {
         let fee = (fee_rate
-            * Weight::from_wu(
-                TxIn::default().segwit_weight().to_wu() + weighted_utxo.satisfaction_weight as u64,
-            ))
+            * (TxIn::default()
+                .segwit_weight()
+                .checked_add(weighted_utxo.satisfaction_weight)
+                .expect("`Weight` addition should not cause an integer overflow")))
         .to_sat();
         let effective_value = weighted_utxo.utxo.txout().value.to_sat() as i64 - fee as i64;
         OutputGroup {
@@ -774,7 +774,7 @@ mod test {
         ))
         .unwrap();
         WeightedUtxo {
-            satisfaction_weight: P2WPKH_SATISFACTION_SIZE,
+            satisfaction_weight: Weight::from_wu_usize(P2WPKH_SATISFACTION_SIZE),
             utxo: Utxo::Local(LocalOutput {
                 outpoint,
                 txout: TxOut {
@@ -834,7 +834,7 @@ mod test {
         let mut res = Vec::new();
         for i in 0..utxos_number {
             res.push(WeightedUtxo {
-                satisfaction_weight: P2WPKH_SATISFACTION_SIZE,
+                satisfaction_weight: Weight::from_wu_usize(P2WPKH_SATISFACTION_SIZE),
                 utxo: Utxo::Local(LocalOutput {
                     outpoint: OutPoint::from_str(&format!(
                         "ebd9813ecebc57ff8f30797de7c205e3c7498ca950ea4341ee51a685ff2fa30a:{}",
@@ -865,7 +865,7 @@ mod test {
     fn generate_same_value_utxos(utxos_value: u64, utxos_number: usize) -> Vec<WeightedUtxo> {
         (0..utxos_number)
             .map(|i| WeightedUtxo {
-                satisfaction_weight: P2WPKH_SATISFACTION_SIZE,
+                satisfaction_weight: Weight::from_wu_usize(P2WPKH_SATISFACTION_SIZE),
                 utxo: Utxo::Local(LocalOutput {
                     outpoint: OutPoint::from_str(&format!(
                         "ebd9813ecebc57ff8f30797de7c205e3c7498ca950ea4341ee51a685ff2fa30a:{}",
@@ -1512,7 +1512,7 @@ mod test {
     fn test_filter_duplicates() {
         fn utxo(txid: &str, value: u64) -> WeightedUtxo {
             WeightedUtxo {
-                satisfaction_weight: 0,
+                satisfaction_weight: Weight::ZERO,
                 utxo: Utxo::Local(LocalOutput {
                     outpoint: OutPoint::new(bitcoin::hashes::Hash::hash(txid.as_bytes()), 0),
                     txout: TxOut {
