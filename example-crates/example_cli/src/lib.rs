@@ -265,9 +265,6 @@ where
         .expect("Must exist");
     changeset.append(change_changeset);
 
-    // Clone to drop the immutable reference.
-    let change_script = change_script.into();
-
     let change_plan = bdk_tmp_plan::plan_satisfaction(
         &graph
             .index
@@ -481,8 +478,8 @@ where
                         local_chain::ChangeSet::default(),
                         indexed_tx_graph::ChangeSet::from(index_changeset),
                     )))?;
-                    let addr =
-                        Address::from_script(spk, network).context("failed to derive address")?;
+                    let addr = Address::from_script(spk.as_script(), network)
+                        .context("failed to derive address")?;
                     println!("[address @ {}] {}", spk_i, addr);
                     Ok(())
                 }

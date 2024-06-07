@@ -12,7 +12,7 @@
 
 #[cfg(feature = "miniscript")]
 mod txout_index;
-use bitcoin::Amount;
+use bitcoin::{Amount, ScriptBuf};
 #[cfg(feature = "miniscript")]
 pub use txout_index::*;
 
@@ -48,6 +48,11 @@ impl Balance {
         self.confirmed + self.trusted_pending + self.untrusted_pending + self.immature
     }
 }
+
+/// A tuple of keychain index and corresponding [`ScriptBuf`].
+pub type Indexed<T> = (u32, T);
+/// A tuple of keychain, index and the [`ScriptBuf`] derived at that location.
+pub type KeychainIndexed<K, T> = ((K, u32), T);
 
 impl core::fmt::Display for Balance {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {

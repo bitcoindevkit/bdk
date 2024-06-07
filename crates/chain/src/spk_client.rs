@@ -1,7 +1,8 @@
 //! Helper types for spk-based blockchain clients.
 
 use crate::{
-    collections::BTreeMap, local_chain::CheckPoint, ConfirmationTimeHeightAnchor, IndexSpk, TxGraph,
+    collections::BTreeMap, keychain::Indexed, local_chain::CheckPoint,
+    ConfirmationTimeHeightAnchor, TxGraph,
 };
 use alloc::{boxed::Box, vec::Vec};
 use bitcoin::{OutPoint, Script, ScriptBuf, Txid};
@@ -195,7 +196,7 @@ pub struct FullScanRequest<K> {
     /// [`LocalChain::tip`]: crate::local_chain::LocalChain::tip
     pub chain_tip: CheckPoint,
     /// Iterators of script pubkeys indexed by the keychain index.
-    pub spks_by_keychain: BTreeMap<K, Box<dyn Iterator<Item = IndexSpk> + Send>>,
+    pub spks_by_keychain: BTreeMap<K, Box<dyn Iterator<Item = Indexed<ScriptBuf>> + Send>>,
 }
 
 impl<K: Ord + Clone> FullScanRequest<K> {
@@ -238,7 +239,7 @@ impl<K: Ord + Clone> FullScanRequest<K> {
     pub fn set_spks_for_keychain(
         mut self,
         keychain: K,
-        spks: impl IntoIterator<IntoIter = impl Iterator<Item = IndexSpk> + Send + 'static>,
+        spks: impl IntoIterator<IntoIter = impl Iterator<Item = Indexed<ScriptBuf>> + Send + 'static>,
     ) -> Self {
         self.spks_by_keychain
             .insert(keychain, Box::new(spks.into_iter()));
@@ -252,7 +253,7 @@ impl<K: Ord + Clone> FullScanRequest<K> {
     pub fn chain_spks_for_keychain(
         mut self,
         keychain: K,
-        spks: impl IntoIterator<IntoIter = impl Iterator<Item = IndexSpk> + Send + 'static>,
+        spks: impl IntoIterator<IntoIter = impl Iterator<Item = Indexed<ScriptBuf>> + Send + 'static>,
     ) -> Self {
         match self.spks_by_keychain.remove(&keychain) {
             // clippy here suggests to remove `into_iter` from `spks.into_iter()`, but doing so

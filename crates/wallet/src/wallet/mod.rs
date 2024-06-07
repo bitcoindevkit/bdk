@@ -29,7 +29,7 @@ use bdk_chain::{
     spk_client::{FullScanRequest, FullScanResult, SyncRequest, SyncResult},
     tx_graph::{CanonicalTx, TxGraph},
     Append, BlockId, ChainPosition, ConfirmationTime, ConfirmationTimeHeightAnchor, FullTxOut,
-    IndexSpk, IndexedTxGraph,
+    Indexed, IndexedTxGraph,
 };
 use bdk_persist::{Persist, PersistBackend};
 use bitcoin::secp256k1::{All, Secp256k1};
@@ -752,7 +752,8 @@ impl Wallet {
 
         Ok(AddressInfo {
             index,
-            address: Address::from_script(spk, self.network).expect("must have address form"),
+            address: Address::from_script(spk.as_script(), self.network)
+                .expect("must have address form"),
             keychain,
         })
     }
@@ -809,7 +810,8 @@ impl Wallet {
 
         Ok(AddressInfo {
             index,
-            address: Address::from_script(spk, self.network).expect("must have address form"),
+            address: Address::from_script(spk.as_script(), self.network)
+                .expect("must have address form"),
             keychain,
         })
     }
@@ -910,7 +912,7 @@ impl Wallet {
     /// script pubkeys the wallet is storing internally).
     pub fn all_unbounded_spk_iters(
         &self,
-    ) -> BTreeMap<KeychainKind, impl Iterator<Item = IndexSpk> + Clone> {
+    ) -> BTreeMap<KeychainKind, impl Iterator<Item = Indexed<ScriptBuf>> + Clone> {
         self.indexed_graph.index.all_unbounded_spk_iters()
     }
 
@@ -922,7 +924,7 @@ impl Wallet {
     pub fn unbounded_spk_iter(
         &self,
         keychain: KeychainKind,
-    ) -> impl Iterator<Item = IndexSpk> + Clone {
+    ) -> impl Iterator<Item = Indexed<ScriptBuf>> + Clone {
         self.indexed_graph
             .index
             .unbounded_spk_iter(&keychain)
@@ -932,7 +934,7 @@ impl Wallet {
     /// Returns the utxo owned by this wallet corresponding to `outpoint` if it exists in the
     /// wallet's database.
     pub fn get_utxo(&self, op: OutPoint) -> Option<LocalOutput> {
-        let (&(keychain, index), _) = self.indexed_graph.index.txout(op)?;
+        let ((keychain, index), _) = self.indexed_graph.index.txout(op)?;
         self.indexed_graph
             .graph()
             .filter_chain_unspents(
@@ -1511,7 +1513,6 @@ impl Wallet {
                     .index
                     .next_unused_spk(&change_keychain)
                     .expect("keychain must exist");
-                let spk = spk.into();
                 self.indexed_graph.index.mark_used(change_keychain, index);
                 self.persist
                     .stage(ChangeSet::from(indexed_tx_graph::ChangeSet::from(

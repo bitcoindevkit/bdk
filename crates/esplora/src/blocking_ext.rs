@@ -9,7 +9,7 @@ use bdk_chain::{
     local_chain::CheckPoint,
     BlockId, ConfirmationTimeHeightAnchor, TxGraph,
 };
-use bdk_chain::{Anchor, IndexSpk};
+use bdk_chain::{Anchor, Indexed};
 use esplora_client::TxStatus;
 
 use crate::anchor_from_status;
@@ -217,7 +217,7 @@ fn chain_update<A: Anchor>(
 /// [`KeychainTxOutIndex`](bdk_chain::keychain::KeychainTxOutIndex).
 fn full_scan_for_index_and_graph_blocking<K: Ord + Clone>(
     client: &esplora_client::BlockingClient,
-    keychain_spks: BTreeMap<K, impl IntoIterator<Item = IndexSpk>>,
+    keychain_spks: BTreeMap<K, impl IntoIterator<Item = Indexed<ScriptBuf>>>,
     stop_gap: usize,
     parallel_requests: usize,
 ) -> Result<(TxGraph<ConfirmationTimeHeightAnchor>, BTreeMap<K, u32>), Error> {

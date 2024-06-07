@@ -3,7 +3,7 @@ use crate::{
     indexed_tx_graph::Indexer,
     miniscript::{Descriptor, DescriptorPublicKey},
     spk_iter::BIP32_MAX_INDEX,
-    DescriptorExt, DescriptorId, IndexSpk, SpkIterator, SpkTxOutIndex,
+    DescriptorExt, DescriptorId, SpkIterator, SpkTxOutIndex,
 };
 use alloc::{borrow::ToOwned, vec::Vec};
 use bitcoin::{Amount, OutPoint, Script, SignedAmount, Transaction, TxOut, Txid};
@@ -12,6 +12,7 @@ use core::{
     ops::{Bound, RangeBounds},
 };
 
+use super::*;
 use crate::Append;
 
 /// Represents updates to the derivation index of a [`KeychainTxOutIndex`].
@@ -140,7 +141,7 @@ pub const DEFAULT_LOOKAHEAD: u32 = 25;
 /// # Change sets
 ///
 /// Methods that can update the last revealed index or add keychains will return [`ChangeSet`] to report
-/// these changes. This can be persisted for future recovery.
+/// these changes. This should be persisted for future recovery.
 ///
 /// ## Synopsis
 ///
@@ -191,18 +192,18 @@ pub const DEFAULT_LOOKAHEAD: u32 = 25;
 #[derive(Clone, Debug)]
 pub struct KeychainTxOutIndex<K> {
     inner: SpkTxOutIndex<(K, u32)>,
-    // keychain -> (descriptor, descriptor id) map
+    /// keychain -> (descriptor id) map
     keychains_to_descriptor_ids: BTreeMap<K, DescriptorId>,
-    // descriptor id -> keychain map
+    /// descriptor id -> keychain map
     descriptor_ids_to_keychains: BTreeMap<DescriptorId, K>,
-    // descriptor_id -> descriptor map
-    // This is a "monotone" map, meaning that its size keeps growing, i.e., we never delete
-    // descriptors from it. This is useful for revealing spks for descriptors that don't have
-    // keychains associated.
+    /// descriptor_id -> descriptor map
+    /// This is a "monotone" map, meaning that its size keeps growing, i.e., we never delete
+    /// descriptors from it. This is useful for revealing spks for descriptors that don't have
+    /// keychains associated.
     descriptor_ids_to_descriptors: BTreeMap<DescriptorId, Descriptor<DescriptorPublicKey>>,
-    // last revealed indexes
+    /// last revealed indices for each descriptor.
     last_revealed: HashMap<DescriptorId, u32>,
-    // lookahead settings for each keychain
+    /// lookahead setting
     lookahead: u32,
 }
 
@@ -292,21 +293,28 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     }
 
     /// Get the set of indexed outpoints, corresponding to tracked keychains.
-    pub fn outpoints(&self) -> &BTreeSet<((K, u32), OutPoint)> {
+    pub fn outpoints(&self) -> &BTreeSet<KeychainIndexed<K, OutPoint>> {
         self.inner.outpoints()
     }
 
     /// Iterate over known txouts that spend to tracked script pubkeys.
-    pub fn txouts(&self) -> impl DoubleEndedIterator<Item = (&(K, u32), OutPoint, &TxOut)> + '_ {
-        self.inner.txouts()
+    pub fn txouts(
+        &self,
+    ) -> impl DoubleEndedIterator<Item = KeychainIndexed<K, (OutPoint, &TxOut)>> + ExactSizeIterator
+    {
+        self.inner
+            .txouts()
+            .map(|(index, op, txout)| (index.clone(), (op, txout)))
     }
 
     /// Finds all txouts on a transaction that has previously been scanned and indexed.
     pub fn txouts_in_tx(
         &self,
         txid: Txid,
-    ) -> impl DoubleEndedIterator<Item = (&(K, u32), OutPoint, &TxOut)> {
-        self.inner.txouts_in_tx(txid)
+    ) -> impl DoubleEndedIterator<Item = KeychainIndexed<K, (OutPoint, &TxOut)>> {
+        self.inner
+            .txouts_in_tx(txid)
+            .map(|(index, op, txout)| (index.clone(), (op, txout)))
     }
 
     /// Return the [`TxOut`] of `outpoint` if it has been indexed, and if it corresponds to a
@@ -315,8 +323,10 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     /// The associated keychain and keychain index of the txout's spk is also returned.
     ///
     /// This calls [`SpkTxOutIndex::txout`] internally.
-    pub fn txout(&self, outpoint: OutPoint) -> Option<(&(K, u32), &TxOut)> {
-        self.inner.txout(outpoint)
+    pub fn txout(&self, outpoint: OutPoint) -> Option<KeychainIndexed<K, &TxOut>> {
+        self.inner
+            .txout(outpoint)
+            .map(|(index, txout)| (index.clone(), txout))
     }
 
     /// Return the script that exists under the given `keychain`'s `index`.
@@ -420,12 +430,12 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
 
     /// Insert a descriptor with a keychain associated to it.
     ///
-    /// Adding a descriptor means you will be able to derive new script pubkeys under it
-    /// and the txout index will discover transaction outputs with those script pubkeys.
+    /// Adding a descriptor means you will be able to derive new script pubkeys under it and the
+    /// txout index will discover transaction outputs with those script pubkeys (once they've been
+    /// derived and added to the index).
     ///
-    /// keychain <-> descriptor is a one-to-one mapping -- in `--release` this method will ignore calls that try to
-    /// associate a keychain with the descriptor of another keychain or to re-assign the keychain to
-    /// new descriptor. If `debug_assertions` are enabled then it will panic.
+    /// keychain <-> descriptor is a one-to-one mapping that cannot be changed. Attempting to do so
+    /// will return a [`InsertDescriptorError<K>`].
     pub fn insert_descriptor(
         &mut self,
         keychain: K,
@@ -575,7 +585,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     pub fn revealed_spks(
         &self,
         range: impl RangeBounds<K>,
-    ) -> impl Iterator<Item = (&(K, u32), &Script)> {
+    ) -> impl Iterator<Item = KeychainIndexed<K, &Script>> {
         let start = range.start_bound();
         let end = range.end_bound();
         let mut iter_last_revealed = self
@@ -593,8 +603,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
         // iterate through the last_revealed for each keychain and the spks for each keychain in
         // tandem. This minimizes BTreeMap queries.
         core::iter::from_fn(move || loop {
-            let (path, spk) = iter_spks.next()?;
-            let (keychain, index) = path;
+            let ((keychain, index), spk) = iter_spks.next()?;
             // We need to find the last revealed that matches the current spk we are considering so
             // we skip ahead.
             while current_keychain?.0 < keychain {
@@ -603,7 +612,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
             let (current_keychain, last_revealed) = current_keychain?;
 
             if current_keychain == keychain && Some(*index) <= last_revealed {
-                break Some((path, spk.as_script()));
+                break Some(((keychain.clone(), *index), spk.as_script()));
             }
         })
     }
@@ -615,7 +624,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     pub fn revealed_keychain_spks<'a>(
         &'a self,
         keychain: &'a K,
-    ) -> impl DoubleEndedIterator<Item = (u32, &Script)> + 'a {
+    ) -> impl DoubleEndedIterator<Item = Indexed<&Script>> + 'a {
         let end = self
             .last_revealed_index(keychain)
             .map(|v| v + 1)
@@ -627,7 +636,9 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     }
 
     /// Iterate over revealed, but unused, spks of all keychains.
-    pub fn unused_spks(&self) -> impl DoubleEndedIterator<Item = ((K, u32), &Script)> + Clone {
+    pub fn unused_spks(
+        &self,
+    ) -> impl DoubleEndedIterator<Item = KeychainIndexed<K, &Script>> + Clone {
         self.keychains_to_descriptor_ids
             .keys()
             .flat_map(|keychain| {
@@ -641,7 +652,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     pub fn unused_keychain_spks(
         &self,
         keychain: &K,
-    ) -> impl DoubleEndedIterator<Item = (u32, &Script)> + Clone {
+    ) -> impl DoubleEndedIterator<Item = Indexed<&Script>> + Clone {
         let end = match self.keychains_to_descriptor_ids.get(keychain) {
             Some(did) => self.last_revealed.get(did).map(|v| *v + 1).unwrap_or(0),
             None => 0,
@@ -739,16 +750,16 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
         &mut self,
         keychain: &K,
         target_index: u32,
-    ) -> Option<(Vec<IndexSpk>, ChangeSet<K>)> {
+    ) -> Option<(Vec<Indexed<ScriptBuf>>, ChangeSet<K>)> {
         let mut changeset = ChangeSet::default();
-        let mut spks: Vec<IndexSpk> = vec![];
+        let mut spks: Vec<Indexed<ScriptBuf>> = vec![];
         while let Some((i, new)) = self.next_index(keychain) {
             if !new || i > target_index {
                 break;
             }
             match self.reveal_next_spk(keychain) {
                 Some(((i, spk), change)) => {
-                    spks.push((i, spk.to_owned()));
+                    spks.push((i, spk));
                     changeset.append(change);
                 }
                 None => break,
@@ -770,7 +781,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     ///  1. The descriptor has no wildcard and already has one script revealed.
     ///  2. The descriptor has already revealed scripts up to the numeric bound.
     ///  3. There is no descriptor associated with the given keychain.
-    pub fn reveal_next_spk(&mut self, keychain: &K) -> Option<((u32, &Script), ChangeSet<K>)> {
+    pub fn reveal_next_spk(&mut self, keychain: &K) -> Option<(Indexed<ScriptBuf>, ChangeSet<K>)> {
         let (next_index, new) = self.next_index(keychain)?;
         let mut changeset = ChangeSet::default();
 
@@ -790,7 +801,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
             .inner
             .spk_at_index(&(keychain.clone(), next_index))
             .expect("we just inserted it");
-        Some(((next_index, script), changeset))
+        Some(((next_index, script.into()), changeset))
     }
 
     /// Gets the next unused script pubkey in the keychain. I.e., the script pubkey with the lowest
@@ -802,20 +813,17 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     /// has used all scripts up to the derivation bounds, then the last derived script pubkey will be
     /// returned.
     ///
-    /// Returns None if the provided keychain doesn't exist.
-    pub fn next_unused_spk(&mut self, keychain: &K) -> Option<((u32, &Script), ChangeSet<K>)> {
-        let need_new = self.unused_keychain_spks(keychain).next().is_none();
-        // this rather strange branch is needed because of some lifetime issues
-        if need_new {
-            self.reveal_next_spk(keychain)
-        } else {
-            Some((
-                self.unused_keychain_spks(keychain)
-                    .next()
-                    .expect("we already know next exists"),
-                ChangeSet::default(),
-            ))
-        }
+    /// Returns `None` if there are no script pubkeys that have been used and no new script pubkey
+    /// could be revealed (see [`reveal_next_spk`] for when this happens).
+    ///
+    /// [`reveal_next_spk`]: Self::reveal_next_spk
+    pub fn next_unused_spk(&mut self, keychain: &K) -> Option<(Indexed<ScriptBuf>, ChangeSet<K>)> {
+        let next_unused = self
+            .unused_keychain_spks(keychain)
+            .next()
+            .map(|(i, spk)| ((i, spk.to_owned()), ChangeSet::default()));
+
+        next_unused.or_else(|| self.reveal_next_spk(keychain))
     }
 
     /// Iterate over all [`OutPoint`]s that have `TxOut`s with script pubkeys derived from
@@ -823,17 +831,19 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     pub fn keychain_outpoints<'a>(
         &'a self,
         keychain: &'a K,
-    ) -> impl DoubleEndedIterator<Item = (u32, OutPoint)> + 'a {
+    ) -> impl DoubleEndedIterator<Item = Indexed<OutPoint>> + 'a {
         self.keychain_outpoints_in_range(keychain..=keychain)
-            .map(|((_, i), op)| (*i, op))
+            .map(|((_, i), op)| (i, op))
     }
 
     /// Iterate over [`OutPoint`]s that have script pubkeys derived from keychains in `range`.
     pub fn keychain_outpoints_in_range<'a>(
         &'a self,
         range: impl RangeBounds<K> + 'a,
-    ) -> impl DoubleEndedIterator<Item = (&(K, u32), OutPoint)> + 'a {
-        self.inner.outputs_in_range(self.map_to_inner_bounds(range))
+    ) -> impl DoubleEndedIterator<Item = KeychainIndexed<K, OutPoint>> + 'a {
+        self.inner
+            .outputs_in_range(self.map_to_inner_bounds(range))
+            .map(|((k, i), op)| ((k.clone(), *i), op))
     }
 
     fn map_to_inner_bounds(&self, bound: impl RangeBounds<K>) -> impl RangeBounds<(K, u32)> {
