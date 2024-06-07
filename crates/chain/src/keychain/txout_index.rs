@@ -15,87 +15,6 @@ use core::{
 use super::*;
 use crate::Append;
 
-/// Represents updates to the derivation index of a [`KeychainTxOutIndex`].
-/// It maps each keychain `K` to a descriptor and its last revealed index.
-///
-/// It can be applied to [`KeychainTxOutIndex`] with [`apply_changeset`]. [`ChangeSet] are
-/// monotone in that they will never decrease the revealed derivation index.
-///
-/// [`KeychainTxOutIndex`]: crate::keychain::KeychainTxOutIndex
-/// [`apply_changeset`]: crate::keychain::KeychainTxOutIndex::apply_changeset
-#[derive(Clone, Debug, PartialEq)]
-#[cfg_attr(
-    feature = "serde",
-    derive(serde::Deserialize, serde::Serialize),
-    serde(
-        crate = "serde_crate",
-        bound(
-            deserialize = "K: Ord + serde::Deserialize<'de>",
-            serialize = "K: Ord + serde::Serialize"
-        )
-    )
-)]
-#[must_use]
-pub struct ChangeSet<K> {
-    /// Contains the keychains that have been added and their respective descriptor
-    pub keychains_added: BTreeMap<K, Descriptor<DescriptorPublicKey>>,
-    /// Contains for each descriptor_id the last revealed index of derivation
-    pub last_revealed: BTreeMap<DescriptorId, u32>,
-}
-
-impl<K: Ord> Append for ChangeSet<K> {
-    /// Append another [`ChangeSet`] into self.
-    ///
-    /// For each keychain in `keychains_added` in the given [`ChangeSet`]:
-    /// If the keychain already exist with a different descriptor, we overwrite the old descriptor.
-    ///
-    /// For each `last_revealed` in the given [`ChangeSet`]:
-    /// If the keychain already exists, increase the index when the other's index > self's index.
-    fn append(&mut self, other: Self) {
-        for (new_keychain, new_descriptor) in other.keychains_added {
-            if !self.keychains_added.contains_key(&new_keychain)
-                // FIXME: very inefficient
-                && self
-                    .keychains_added
-                    .values()
-                    .all(|descriptor| descriptor != &new_descriptor)
-            {
-                self.keychains_added.insert(new_keychain, new_descriptor);
-            }
-        }
-
-        // for `last_revealed`, entries of `other` will take precedence ONLY if it is greater than
-        // what was originally in `self`.
-        for (desc_id, index) in other.last_revealed {
-            use crate::collections::btree_map::Entry;
-            match self.last_revealed.entry(desc_id) {
-                Entry::Vacant(entry) => {
-                    entry.insert(index);
-                }
-                Entry::Occupied(mut entry) => {
-                    if *entry.get() < index {
-                        entry.insert(index);
-                    }
-                }
-            }
-        }
-    }
-
-    /// Returns whether the changeset are empty.
-    fn is_empty(&self) -> bool {
-        self.last_revealed.is_empty() && self.keychains_added.is_empty()
-    }
-}
-
-impl<K> Default for ChangeSet<K> {
-    fn default() -> Self {
-        Self {
-            last_revealed: BTreeMap::default(),
-            keychains_added: BTreeMap::default(),
-        }
-    }
-}
-
 /// The default lookahead for a [`KeychainTxOutIndex`]
 pub const DEFAULT_LOOKAHEAD: u32 = 25;
 
@@ -105,6 +24,10 @@ pub const DEFAULT_LOOKAHEAD: u32 = 25;
 /// A single keychain is a chain of script pubkeys derived from a single [`Descriptor`]. Keychains
 /// are identified using the `K` generic. Script pubkeys are identified by the keychain that they
 /// are derived from `K`, as well as the derivation index `u32`.
+///
+/// There is a strict 1-to-1 relationship between descriptors and keychains. Each keychain has one
+/// and only one descriptor and each descriptor has one and only one keychain. The
+/// [`insert_descriptor`] method will return an error if you try and violate this invariant.
 ///
 /// # Revealed script pubkeys
 ///
@@ -177,18 +100,19 @@ pub const DEFAULT_LOOKAHEAD: u32 = 25;
 /// [`Ord`]: core::cmp::Ord
 /// [`SpkTxOutIndex`]: crate::spk_txout_index::SpkTxOutIndex
 /// [`Descriptor`]: crate::miniscript::Descriptor
-/// [`reveal_to_target`]: KeychainTxOutIndex::reveal_to_target
-/// [`reveal_next_spk`]: KeychainTxOutIndex::reveal_next_spk
-/// [`revealed_keychain_spks`]: KeychainTxOutIndex::revealed_keychain_spks
-/// [`revealed_spks`]: KeychainTxOutIndex::revealed_spks
-/// [`index_tx`]: KeychainTxOutIndex::index_tx
-/// [`index_txout`]: KeychainTxOutIndex::index_txout
-/// [`new`]: KeychainTxOutIndex::new
-/// [`unbounded_spk_iter`]: KeychainTxOutIndex::unbounded_spk_iter
-/// [`all_unbounded_spk_iters`]: KeychainTxOutIndex::all_unbounded_spk_iters
-/// [`outpoints`]: KeychainTxOutIndex::outpoints
-/// [`txouts`]: KeychainTxOutIndex::txouts
-/// [`unused_spks`]: KeychainTxOutIndex::unused_spks
+/// [`reveal_to_target`]: Self::reveal_to_target
+/// [`reveal_next_spk`]: Self::reveal_next_spk
+/// [`revealed_keychain_spks`]: Self::revealed_keychain_spks
+/// [`revealed_spks`]: Self::revealed_spks
+/// [`index_tx`]: Self::index_tx
+/// [`index_txout`]: Self::index_txout
+/// [`new`]: Self::new
+/// [`unbounded_spk_iter`]: Self::unbounded_spk_iter
+/// [`all_unbounded_spk_iters`]: Self::all_unbounded_spk_iters
+/// [`outpoints`]: Self::outpoints
+/// [`txouts`]: Self::txouts
+/// [`unused_spks`]: Self::unused_spks
+/// [`insert_descriptor`]: Self::insert_descriptor
 #[derive(Clone, Debug)]
 pub struct KeychainTxOutIndex<K> {
     inner: SpkTxOutIndex<(K, u32)>,
@@ -879,19 +803,18 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
             .collect()
     }
 
-    /// Applies the derivation changeset to the [`KeychainTxOutIndex`], as specified in the
-    /// [`ChangeSet::append`] documentation:
-    /// - Extends the number of derived scripts per keychain
-    /// - Adds new descriptors introduced
-    /// - If a descriptor is introduced for a keychain that already had a descriptor, overwrites
-    /// the old descriptor
+    /// Applies the `ChangeSet<K>` to the [`KeychainTxOutIndex<K>`]
+    ///
+    /// Keychains added by the `keychains_added` field of `ChangeSet<K>` respect the one-to-one
+    /// keychain <-> descriptor invariant by silently ignoring attempts to violate it (but will
+    /// panic if `debug_assertions` are enabled).
     pub fn apply_changeset(&mut self, changeset: ChangeSet<K>) {
         let ChangeSet {
             keychains_added,
             last_revealed,
         } = changeset;
         for (keychain, descriptor) in keychains_added {
-            let _ = self.insert_descriptor(keychain, descriptor);
+            let _ignore_invariant_violation = self.insert_descriptor(keychain, descriptor);
         }
 
         for (&desc_id, &index) in &last_revealed {
@@ -951,3 +874,88 @@ impl<K: core::fmt::Debug> core::fmt::Display for InsertDescriptorError<K> {
 
 #[cfg(feature = "std")]
 impl<K: core::fmt::Debug> std::error::Error for InsertDescriptorError<K> {}
+
+/// Represents updates to the derivation index of a [`KeychainTxOutIndex`].
+/// It maps each keychain `K` to a descriptor and its last revealed index.
+///
+/// It can be applied to [`KeychainTxOutIndex`] with [`apply_changeset`].
+///
+/// The `last_revealed` field is monotone in that [`append`] will never decrease it.
+/// `keychains_added` is *not* monotone, once it is set any attempt to change it is subject to the
+/// same *one-to-one* keychain <-> descriptor mapping invariant as [`KeychainTxOutIndex`] itself.
+///
+/// [`KeychainTxOutIndex`]: crate::keychain::KeychainTxOutIndex
+/// [`apply_changeset`]: crate::keychain::KeychainTxOutIndex::apply_changeset
+/// [`append`]: Self::append
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Deserialize, serde::Serialize),
+    serde(
+        crate = "serde_crate",
+        bound(
+            deserialize = "K: Ord + serde::Deserialize<'de>",
+            serialize = "K: Ord + serde::Serialize"
+        )
+    )
+)]
+#[must_use]
+pub struct ChangeSet<K> {
+    /// Contains the keychains that have been added and their respective descriptor
+    pub keychains_added: BTreeMap<K, Descriptor<DescriptorPublicKey>>,
+    /// Contains for each descriptor_id the last revealed index of derivation
+    pub last_revealed: BTreeMap<DescriptorId, u32>,
+}
+
+impl<K: Ord> Append for ChangeSet<K> {
+    /// Merge another [`ChangeSet<K>`] into self.
+    ///
+    /// For the `keychains_added` field this method respects the invariants of
+    /// [`insert_descriptor`]. `last_revealed` always becomes the larger of the two.
+    ///
+    /// [`insert_descriptor`]: KeychainTxOutIndex::insert_descriptor
+    fn append(&mut self, other: Self) {
+        for (new_keychain, new_descriptor) in other.keychains_added {
+            // enforce 1-to-1 invariance
+            if !self.keychains_added.contains_key(&new_keychain)
+                // FIXME: very inefficient
+                && self
+                    .keychains_added
+                    .values()
+                    .all(|descriptor| descriptor != &new_descriptor)
+            {
+                self.keychains_added.insert(new_keychain, new_descriptor);
+            }
+        }
+
+        // for `last_revealed`, entries of `other` will take precedence ONLY if it is greater than
+        // what was originally in `self`.
+        for (desc_id, index) in other.last_revealed {
+            use crate::collections::btree_map::Entry;
+            match self.last_revealed.entry(desc_id) {
+                Entry::Vacant(entry) => {
+                    entry.insert(index);
+                }
+                Entry::Occupied(mut entry) => {
+                    if *entry.get() < index {
+                        entry.insert(index);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Returns whether the changeset are empty.
+    fn is_empty(&self) -> bool {
+        self.last_revealed.is_empty() && self.keychains_added.is_empty()
+    }
+}
+
+impl<K> Default for ChangeSet<K> {
+    fn default() -> Self {
+        Self {
+            last_revealed: BTreeMap::default(),
+            keychains_added: BTreeMap::default(),
+        }
+    }
+}
