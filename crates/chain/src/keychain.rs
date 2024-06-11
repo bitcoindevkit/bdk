@@ -49,9 +49,9 @@ impl Balance {
     }
 }
 
-/// A tuple of keychain index and corresponding [`ScriptBuf`].
+/// A tuple of keychain index and `T` representing the indexed value.
 pub type Indexed<T> = (u32, T);
-/// A tuple of keychain, index and the [`ScriptBuf`] derived at that location.
+/// A tuple of keychain `K`, derivation index (`u32`) and a `T` associated with them.
 pub type KeychainIndexed<K, T> = ((K, u32), T);
 
 impl core::fmt::Display for Balance {
