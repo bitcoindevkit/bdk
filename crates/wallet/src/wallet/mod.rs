@@ -40,6 +40,7 @@ use bitcoin::{
 use bitcoin::{consensus::encode::serialize, transaction, BlockHash, Psbt};
 use bitcoin::{constants::genesis_block, Amount};
 use core::fmt;
+use core::mem;
 use core::ops::Deref;
 use descriptor::error::Error as DescriptorError;
 use miniscript::psbt::{PsbtExt, PsbtInputExt, PsbtInputSatisfier};
@@ -1821,7 +1822,8 @@ impl Wallet {
 
     /// Finalize a PSBT, i.e., for each input determine if sufficient data is available to pass
     /// validation and construct the respective `scriptSig` or `scriptWitness`. Please refer to
-    /// [BIP174](https://github.com/bitcoin/bips/blob/master/bip-0174.mediawiki#Input_Finalizer)
+    /// [BIP174](https://github.com/bitcoin/bips/blob/master/bip-0174.mediawiki#Input_Finalizer),
+    /// and [BIP371](https://github.com/bitcoin/bips/blob/master/bip-0371.mediawiki)
     /// for further information.
     ///
     /// Returns `true` if the PSBT could be finalized, and `false` otherwise.
@@ -1884,20 +1886,17 @@ impl Wallet {
                         ),
                     ) {
                         Ok(_) => {
+                            // Set the UTXO fields, final script_sig and witness
+                            // and clear everything else.
+                            let original = mem::take(&mut psbt.inputs[n]);
                             let psbt_input = &mut psbt.inputs[n];
-                            psbt_input.final_script_sig = Some(tmp_input.script_sig);
-                            psbt_input.final_script_witness = Some(tmp_input.witness);
-                            if sign_options.remove_partial_sigs {
-                                psbt_input.partial_sigs.clear();
+                            psbt_input.non_witness_utxo = original.non_witness_utxo;
+                            psbt_input.witness_utxo = original.witness_utxo;
+                            if !tmp_input.script_sig.is_empty() {
+                                psbt_input.final_script_sig = Some(tmp_input.script_sig);
                             }
-                            if sign_options.remove_taproot_extras {
-                                // We just constructed the final witness, clear these fields.
-                                psbt_input.tap_key_sig = None;
-                                psbt_input.tap_script_sigs.clear();
-                                psbt_input.tap_scripts.clear();
-                                psbt_input.tap_key_origins.clear();
-                                psbt_input.tap_internal_key = None;
-                                psbt_input.tap_merkle_root = None;
+                            if !tmp_input.witness.is_empty() {
+                                psbt_input.final_script_witness = Some(tmp_input.witness);
                             }
                         }
                         Err(_) => finished = false,
@@ -1907,8 +1906,10 @@ impl Wallet {
             }
         }
 
-        if finished && sign_options.remove_taproot_extras {
+        // Clear derivation paths from outputs
+        if finished {
             for output in &mut psbt.outputs {
+                output.bip32_derivation.clear();
                 output.tap_key_origins.clear();
             }
         }
