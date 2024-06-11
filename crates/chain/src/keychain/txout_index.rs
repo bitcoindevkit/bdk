@@ -142,15 +142,15 @@ impl<K: Clone + Ord + Debug> Indexer for KeychainTxOutIndex<K> {
 
     fn index_txout(&mut self, outpoint: OutPoint, txout: &TxOut) -> Self::ChangeSet {
         let mut changeset = ChangeSet::default();
-        if let Some((keychain, index)) = self.inner.scan_txout(outpoint, txout) {
+        if let Some((keychain, index)) = self.inner.scan_txout(outpoint, txout).cloned() {
             let did = self
                 .keychains_to_descriptor_ids
-                .get(keychain)
+                .get(&keychain)
                 .expect("invariant");
-            if self.last_revealed.get(did) < Some(index) {
-                self.last_revealed.insert(*did, *index);
-                changeset.last_revealed.insert(*did, *index);
-                self.replenish_lookahead_did(*did);
+            if self.last_revealed.get(did) < Some(&index) {
+                self.last_revealed.insert(*did, index);
+                changeset.last_revealed.insert(*did, index);
+                self.replenish_lookahead(*did, &keychain, self.lookahead);
             }
         }
         changeset
@@ -376,7 +376,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
                 .insert(keychain.clone(), desc_id);
             self.descriptor_ids_to_keychains
                 .insert(desc_id, keychain.clone());
-            self.replenish_lookahead(&keychain, self.lookahead);
+            self.replenish_lookahead_keychain(&keychain, self.lookahead);
             changeset
                 .keychains_added
                 .insert(keychain.clone(), descriptor);
@@ -439,39 +439,42 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
                 .filter(|&index| index > 0);
 
             if let Some(temp_lookahead) = temp_lookahead {
-                self.replenish_lookahead(keychain, temp_lookahead);
+                self.replenish_lookahead_keychain(keychain, temp_lookahead);
             }
         }
     }
 
-    fn replenish_lookahead_did(&mut self, did: DescriptorId) {
+    fn replenish_lookahead_did(&mut self, did: DescriptorId, lookahead: u32) {
         if let Some(keychain) = self.descriptor_ids_to_keychains.get(&did).cloned() {
-            self.replenish_lookahead(&keychain, self.lookahead);
+            self.replenish_lookahead(did, &keychain, lookahead);
         }
     }
 
-    fn replenish_lookahead(&mut self, keychain: &K, lookahead: u32) {
+    fn replenish_lookahead_keychain(&mut self, keychain: &K, lookahead: u32) {
         if let Some(did) = self.keychains_to_descriptor_ids.get(keychain) {
-            let descriptor = self
-                .descriptor_ids_to_descriptors
-                .get(did)
-                .expect("invariant");
-            let next_store_index = self
+            self.replenish_lookahead(*did, keychain, lookahead);
+        }
+    }
+
+    fn replenish_lookahead(&mut self, did: DescriptorId, keychain: &K, lookahead: u32) {
+        let descriptor = self
+            .descriptor_ids_to_descriptors
+            .get(&did)
+            .expect("invariant");
+        let next_store_index = self
+            .inner
+            .all_spks()
+            .range(&(keychain.clone(), u32::MIN)..=&(keychain.clone(), u32::MAX))
+            .last()
+            .map_or(0, |((_, index), _)| *index + 1);
+        let next_reveal_index = self.last_revealed.get(&did).map_or(0, |v| *v + 1);
+        for (new_index, new_spk) in
+            SpkIterator::new_with_range(descriptor, next_store_index..next_reveal_index + lookahead)
+        {
+            let _inserted = self
                 .inner
-                .all_spks()
-                .range(&(keychain.clone(), u32::MIN)..=&(keychain.clone(), u32::MAX))
-                .last()
-                .map_or(0, |((_, index), _)| *index + 1);
-            let next_reveal_index = self.last_revealed.get(did).map_or(0, |v| *v + 1);
-            for (new_index, new_spk) in SpkIterator::new_with_range(
-                descriptor,
-                next_store_index..next_reveal_index + lookahead,
-            ) {
-                let _inserted = self
-                    .inner
-                    .insert_spk((keychain.clone(), new_index), new_spk);
-                debug_assert!(_inserted, "replenish lookahead: must not have existing spk: keychain={:?}, lookahead={}, next_store_index={}, next_reveal_index={}", keychain, lookahead, next_store_index, next_reveal_index);
-            }
+                .insert_spk((keychain.clone(), new_index), new_spk);
+            debug_assert!(_inserted, "replenish lookahead: must not have existing spk: keychain={:?}, lookahead={}, next_store_index={}, next_reveal_index={}", keychain, lookahead, next_store_index, next_reveal_index);
         }
     }
 
@@ -719,7 +722,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
             let _ = self.inner.insert_spk((keychain.clone(), next_index), spk);
             self.last_revealed.insert(*did, next_index);
             changeset.last_revealed.insert(*did, next_index);
-            self.replenish_lookahead(keychain, self.lookahead);
+            self.replenish_lookahead_keychain(keychain, self.lookahead);
         }
         let script = self
             .inner
@@ -823,7 +826,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
         }
 
         for did in last_revealed.keys() {
-            self.replenish_lookahead_did(*did);
+            self.replenish_lookahead_did(*did, self.lookahead);
         }
     }
 }
