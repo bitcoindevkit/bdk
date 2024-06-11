@@ -154,7 +154,7 @@ impl<K: Clone + Ord + Debug> Indexer for KeychainTxOutIndex<K> {
             if self.last_revealed.get(did) < Some(&index) {
                 self.last_revealed.insert(*did, index);
                 changeset.last_revealed.insert(*did, index);
-                self.replenish_lookahead(*did, &keychain, self.lookahead);
+                self.replenish_inner_index(*did, &keychain, self.lookahead);
             }
         }
         changeset
@@ -370,17 +370,17 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
         descriptor: Descriptor<DescriptorPublicKey>,
     ) -> Result<ChangeSet<K>, InsertDescriptorError<K>> {
         let mut changeset = ChangeSet::<K>::default();
-        let desc_id = descriptor.descriptor_id();
+        let did = descriptor.descriptor_id();
         if !self.keychains_to_descriptor_ids.contains_key(&keychain)
-            && !self.descriptor_ids_to_keychains.contains_key(&desc_id)
+            && !self.descriptor_ids_to_keychains.contains_key(&did)
         {
             self.descriptor_ids_to_descriptors
-                .insert(desc_id, descriptor.clone());
+                .insert(did, descriptor.clone());
             self.keychains_to_descriptor_ids
-                .insert(keychain.clone(), desc_id);
+                .insert(keychain.clone(), did);
             self.descriptor_ids_to_keychains
-                .insert(desc_id, keychain.clone());
-            self.replenish_lookahead_keychain(&keychain, self.lookahead);
+                .insert(did, keychain.clone());
+            self.replenish_inner_index(did, &keychain, self.lookahead);
             changeset
                 .keychains_added
                 .insert(keychain.clone(), descriptor);
@@ -390,7 +390,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
                     .descriptor_ids_to_descriptors
                     .get(existing_desc_id)
                     .expect("invariant");
-                if *existing_desc_id != desc_id {
+                if *existing_desc_id != did {
                     return Err(InsertDescriptorError::KeychainAlreadyAssigned {
                         existing_assignment: descriptor.clone(),
                         keychain,
@@ -398,10 +398,10 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
                 }
             }
 
-            if let Some(existing_keychain) = self.descriptor_ids_to_keychains.get(&desc_id) {
+            if let Some(existing_keychain) = self.descriptor_ids_to_keychains.get(&did) {
                 let descriptor = self
                     .descriptor_ids_to_descriptors
-                    .get(&desc_id)
+                    .get(&did)
                     .expect("invariant")
                     .clone();
 
@@ -443,24 +443,25 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
                 .filter(|&index| index > 0);
 
             if let Some(temp_lookahead) = temp_lookahead {
-                self.replenish_lookahead_keychain(keychain, temp_lookahead);
+                self.replenish_inner_index_keychain(keychain, temp_lookahead);
             }
         }
     }
 
-    fn replenish_lookahead_did(&mut self, did: DescriptorId, lookahead: u32) {
+    fn replenish_inner_index_did(&mut self, did: DescriptorId, lookahead: u32) {
         if let Some(keychain) = self.descriptor_ids_to_keychains.get(&did).cloned() {
-            self.replenish_lookahead(did, &keychain, lookahead);
+            self.replenish_inner_index(did, &keychain, lookahead);
         }
     }
 
-    fn replenish_lookahead_keychain(&mut self, keychain: &K, lookahead: u32) {
+    fn replenish_inner_index_keychain(&mut self, keychain: &K, lookahead: u32) {
         if let Some(did) = self.keychains_to_descriptor_ids.get(keychain) {
-            self.replenish_lookahead(*did, keychain, lookahead);
+            self.replenish_inner_index(*did, keychain, lookahead);
         }
     }
 
-    fn replenish_lookahead(&mut self, did: DescriptorId, keychain: &K, lookahead: u32) {
+    /// Syncs the state of the inner spk index after changes to a keychain
+    fn replenish_inner_index(&mut self, did: DescriptorId, keychain: &K, lookahead: u32) {
         let descriptor = self
             .descriptor_ids_to_descriptors
             .get(&did)
@@ -677,6 +678,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     /// pubkeys are revealed, then both of these will be empty.
     ///
     /// Returns None if the provided `keychain` doesn't exist.
+    #[must_use]
     pub fn reveal_to_target(
         &mut self,
         keychain: &K,
@@ -718,15 +720,9 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
 
         if new {
             let did = self.keychains_to_descriptor_ids.get(keychain)?;
-            let descriptor = self.descriptor_ids_to_descriptors.get(did)?;
-            let spk = descriptor
-                .at_derivation_index(next_index)
-                .expect("already checked index is not too high")
-                .script_pubkey();
-            let _ = self.inner.insert_spk((keychain.clone(), next_index), spk);
             self.last_revealed.insert(*did, next_index);
             changeset.last_revealed.insert(*did, next_index);
-            self.replenish_lookahead_keychain(keychain, self.lookahead);
+            self.replenish_inner_index(*did, keychain, self.lookahead);
         }
         let script = self
             .inner
@@ -830,7 +826,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
         }
 
         for did in last_revealed.keys() {
-            self.replenish_lookahead_did(*did, self.lookahead);
+            self.replenish_inner_index_did(*did, self.lookahead);
         }
     }
 }
@@ -964,5 +960,15 @@ impl<K> Default for ChangeSet<K> {
             last_revealed: BTreeMap::default(),
             keychains_added: BTreeMap::default(),
         }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+/// The keychain doesn't exist. Most likley hasn't been inserted with [`KeychainTxOutIndex::insert_descriptor`].
+pub struct NoSuchKeychain<K>(K);
+
+impl<K: Debug> core::fmt::Display for NoSuchKeychain<K> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "no such keychain {:?} exists", &self.0)
     }
 }
