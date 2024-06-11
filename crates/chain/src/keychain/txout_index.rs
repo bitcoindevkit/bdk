@@ -27,7 +27,11 @@ pub const DEFAULT_LOOKAHEAD: u32 = 25;
 ///
 /// There is a strict 1-to-1 relationship between descriptors and keychains. Each keychain has one
 /// and only one descriptor and each descriptor has one and only one keychain. The
-/// [`insert_descriptor`] method will return an error if you try and violate this invariant.
+/// [`insert_descriptor`] method will return an error if you try and violate this invariant. This
+/// rule is a proxy for a stronger rule: no two descriptors should produce the same script pubkey.
+/// Having two descriptors produce the same script pubkey should cause whichever keychain derives the
+/// script pubkey first to be the effective owner of it but you should not rely on this behaviour.
+/// ⚠ It is up you, the developer, not to violate this invariant.
 ///
 /// # Revealed script pubkeys
 ///
