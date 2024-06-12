@@ -123,12 +123,12 @@ pub struct KeychainTxOutIndex<K> {
     /// keychain -> (descriptor id) map
     keychains_to_descriptor_ids: BTreeMap<K, DescriptorId>,
     /// descriptor id -> keychain map
-    descriptor_ids_to_keychains: BTreeMap<DescriptorId, K>,
+    descriptor_ids_to_keychains: HashMap<DescriptorId, K>,
     /// descriptor_id -> descriptor map
     /// This is a "monotone" map, meaning that its size keeps growing, i.e., we never delete
     /// descriptors from it. This is useful for revealing spks for descriptors that don't have
     /// keychains associated.
-    descriptor_ids_to_descriptors: BTreeMap<DescriptorId, Descriptor<DescriptorPublicKey>>,
+    descriptor_ids_to_descriptors: HashMap<DescriptorId, Descriptor<DescriptorPublicKey>>,
     /// last revealed indices for each descriptor.
     last_revealed: HashMap<DescriptorId, u32>,
     /// lookahead setting
@@ -201,8 +201,8 @@ impl<K> KeychainTxOutIndex<K> {
     pub fn new(lookahead: u32) -> Self {
         Self {
             inner: SpkTxOutIndex::default(),
-            keychains_to_descriptor_ids: BTreeMap::new(),
-            descriptor_ids_to_descriptors: BTreeMap::new(),
+            keychains_to_descriptor_ids: Default::default(),
+            descriptor_ids_to_descriptors: Default::default(),
             descriptor_ids_to_keychains: Default::default(),
             last_revealed: Default::default(),
             lookahead,
