@@ -183,7 +183,7 @@ impl CheckPoint {
     /// The effect of `insert` depends on whether a height already exists. If it doesn't the
     /// `block_id` we inserted and all pre-existing blocks higher than it will be re-inserted after
     /// it. If the height already existed and has a conflicting block hash then it will be purged
-    /// along with all block followin it. The returned chain will have a tip of the `block_id`
+    /// along with all block following it. The returned chain will have a tip of the `block_id`
     /// passed in. Of course, if the `block_id` was already present then this just returns `self`.
     #[must_use]
     pub fn insert(self, block_id: BlockId) -> Self {
@@ -631,7 +631,7 @@ impl LocalChain {
 }
 
 /// An error which occurs when a [`LocalChain`] is constructed without a genesis checkpoint.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MissingGenesisError;
 
 impl core::fmt::Display for MissingGenesisError {
@@ -647,7 +647,7 @@ impl core::fmt::Display for MissingGenesisError {
 impl std::error::Error for MissingGenesisError {}
 
 /// Represents a failure when trying to insert/remove a checkpoint to/from [`LocalChain`].
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AlterCheckPointError {
     /// The checkpoint's height.
     pub height: u32,
@@ -678,7 +678,7 @@ impl core::fmt::Display for AlterCheckPointError {
 impl std::error::Error for AlterCheckPointError {}
 
 /// Occurs when an update does not have a common checkpoint with the original chain.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CannotConnectError {
     /// The suggested checkpoint to include to connect the two chains.
     pub try_include_height: u32,
@@ -698,7 +698,7 @@ impl core::fmt::Display for CannotConnectError {
 impl std::error::Error for CannotConnectError {}
 
 /// The error type for [`LocalChain::apply_header_connected_to`].
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ApplyHeaderError {
     /// Occurs when `connected_to` block conflicts with either the current block or previous block.
     InconsistentBlocks,
