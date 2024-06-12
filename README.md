@@ -72,6 +72,7 @@ cargo update -p zstd-sys --precise "2.0.8+zstd.1.5.5"
 cargo update -p time --precise "0.3.20"
 cargo update -p home --precise "0.5.5"
 cargo update -p proptest --precise "1.2.0"
+cargo update -p url --precise "2.5.0"
 ```
 
 ## License
