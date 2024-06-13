@@ -4,9 +4,9 @@ use crate::{
     collections::BTreeMap, keychain::Indexed, local_chain::CheckPoint,
     ConfirmationTimeHeightAnchor, TxGraph,
 };
-use alloc::{boxed::Box, vec::Vec};
+use alloc::boxed::Box;
 use bitcoin::{OutPoint, Script, ScriptBuf, Txid};
-use core::{fmt::Debug, marker::PhantomData, ops::RangeBounds};
+use core::marker::PhantomData;
 
 /// Data required to perform a spk-based blockchain client sync.
 ///
@@ -158,12 +158,13 @@ impl SyncRequest {
     /// This consumes the [`SyncRequest`] and returns the updated one.
     #[cfg(feature = "miniscript")]
     #[must_use]
-    pub fn populate_with_revealed_spks<K: Clone + Ord + Debug + Send + Sync>(
+    pub fn populate_with_revealed_spks<K: Clone + Ord + core::fmt::Debug + Send + Sync>(
         self,
         index: &crate::keychain::KeychainTxOutIndex<K>,
-        spk_range: impl RangeBounds<K>,
+        spk_range: impl core::ops::RangeBounds<K>,
     ) -> Self {
         use alloc::borrow::ToOwned;
+        use alloc::vec::Vec;
         self.chain_spks(
             index
                 .revealed_spks(spk_range)
@@ -223,7 +224,7 @@ impl<K: Ord + Clone> FullScanRequest<K> {
         index: &crate::keychain::KeychainTxOutIndex<K>,
     ) -> Self
     where
-        K: Debug,
+        K: core::fmt::Debug,
     {
         let mut req = Self::from_chain_tip(chain_tip);
         for (keychain, spks) in index.all_unbounded_spk_iters() {

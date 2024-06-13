@@ -4,18 +4,16 @@
 //! The [`CombinedChangeSet`] type encapsulates a combination of [`crate`] structures that are
 //! typically persisted together.
 
-use crate::{indexed_tx_graph, keychain, local_chain, Anchor, Append};
 #[cfg(feature = "async")]
 use alloc::boxed::Box;
 #[cfg(feature = "async")]
 use async_trait::async_trait;
-use bitcoin::Network;
 use core::convert::Infallible;
-use core::default::Default;
 use core::fmt::{Debug, Display};
 
 /// A changeset containing [`crate`] structures typically persisted together.
 #[derive(Debug, Clone, PartialEq)]
+#[cfg(feature = "miniscript")]
 #[cfg_attr(
     feature = "serde",
     derive(crate::serde::Deserialize, crate::serde::Serialize),
@@ -28,28 +26,30 @@ use core::fmt::{Debug, Display};
     )
 )]
 pub struct CombinedChangeSet<K, A> {
-    /// Changes to the [`LocalChain`](local_chain::LocalChain).
-    pub chain: local_chain::ChangeSet,
-    /// Changes to [`IndexedTxGraph`](indexed_tx_graph::IndexedTxGraph).
-    pub indexed_tx_graph: indexed_tx_graph::ChangeSet<A, keychain::ChangeSet<K>>,
+    /// Changes to the [`LocalChain`](crate::local_chain::LocalChain).
+    pub chain: crate::local_chain::ChangeSet,
+    /// Changes to [`IndexedTxGraph`](crate::indexed_tx_graph::IndexedTxGraph).
+    pub indexed_tx_graph: crate::indexed_tx_graph::ChangeSet<A, crate::keychain::ChangeSet<K>>,
     /// Stores the network type of the transaction data.
-    pub network: Option<Network>,
+    pub network: Option<bitcoin::Network>,
 }
 
-impl<K, A> Default for CombinedChangeSet<K, A> {
+#[cfg(feature = "miniscript")]
+impl<K, A> core::default::Default for CombinedChangeSet<K, A> {
     fn default() -> Self {
         Self {
-            chain: Default::default(),
-            indexed_tx_graph: Default::default(),
+            chain: core::default::Default::default(),
+            indexed_tx_graph: core::default::Default::default(),
             network: None,
         }
     }
 }
 
-impl<K: Ord, A: Anchor> Append for CombinedChangeSet<K, A> {
+#[cfg(feature = "miniscript")]
+impl<K: Ord, A: crate::Anchor> crate::Append for CombinedChangeSet<K, A> {
     fn append(&mut self, other: Self) {
-        Append::append(&mut self.chain, other.chain);
-        Append::append(&mut self.indexed_tx_graph, other.indexed_tx_graph);
+        crate::Append::append(&mut self.chain, other.chain);
+        crate::Append::append(&mut self.indexed_tx_graph, other.indexed_tx_graph);
         if other.network.is_some() {
             debug_assert!(
                 self.network.is_none() || self.network == other.network,
@@ -64,8 +64,9 @@ impl<K: Ord, A: Anchor> Append for CombinedChangeSet<K, A> {
     }
 }
 
-impl<K, A> From<local_chain::ChangeSet> for CombinedChangeSet<K, A> {
-    fn from(chain: local_chain::ChangeSet) -> Self {
+#[cfg(feature = "miniscript")]
+impl<K, A> From<crate::local_chain::ChangeSet> for CombinedChangeSet<K, A> {
+    fn from(chain: crate::local_chain::ChangeSet) -> Self {
         Self {
             chain,
             ..Default::default()
@@ -73,10 +74,13 @@ impl<K, A> From<local_chain::ChangeSet> for CombinedChangeSet<K, A> {
     }
 }
 
-impl<K, A> From<indexed_tx_graph::ChangeSet<A, keychain::ChangeSet<K>>>
+#[cfg(feature = "miniscript")]
+impl<K, A> From<crate::indexed_tx_graph::ChangeSet<A, crate::keychain::ChangeSet<K>>>
     for CombinedChangeSet<K, A>
 {
-    fn from(indexed_tx_graph: indexed_tx_graph::ChangeSet<A, keychain::ChangeSet<K>>) -> Self {
+    fn from(
+        indexed_tx_graph: crate::indexed_tx_graph::ChangeSet<A, crate::keychain::ChangeSet<K>>,
+    ) -> Self {
         Self {
             indexed_tx_graph,
             ..Default::default()
