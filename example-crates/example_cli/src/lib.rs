@@ -3,6 +3,7 @@ use anyhow::Context;
 use bdk_coin_select::{coin_select_bnb, CoinSelector, CoinSelectorOpt, WeightedValue};
 use bdk_file_store::Store;
 use serde::{de::DeserializeOwned, Serialize};
+use std::fmt::Debug;
 use std::{cmp::Reverse, collections::BTreeMap, path::PathBuf, sync::Mutex, time::Duration};
 
 use bdk_chain::{
@@ -22,9 +23,9 @@ use bdk_chain::{
     Anchor, Append, ChainOracle, DescriptorExt, FullTxOut,
 };
 pub use bdk_file_store;
-use bdk_persist::{Persist, PersistBackend};
 pub use clap;
 
+use bdk_chain::persist::PersistBackend;
 use clap::{Parser, Subcommand};
 
 pub type KeychainTxGraph<A> = IndexedTxGraph<A, KeychainTxOutIndex<Keychain>>;
@@ -446,7 +447,7 @@ pub fn planned_utxos<A: Anchor, O: ChainOracle, K: Clone + bdk_tmp_plan::CanDeri
 
 pub fn handle_commands<CS: clap::Subcommand, S: clap::Args, A: Anchor, O: ChainOracle, C>(
     graph: &Mutex<KeychainTxGraph<A>>,
-    db: &Mutex<Persist<C>>,
+    db: &Mutex<Store<C>>,
     chain: &Mutex<O>,
     keymap: &BTreeMap<DescriptorPublicKey, DescriptorSecretKey>,
     network: Network,
@@ -455,7 +456,14 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args, A: Anchor, O: ChainO
 ) -> anyhow::Result<()>
 where
     O::Error: std::error::Error + Send + Sync + 'static,
-    C: Default + Append + DeserializeOwned + Serialize + From<KeychainChangeSet<A>>,
+    C: Default
+        + Append
+        + DeserializeOwned
+        + Serialize
+        + From<KeychainChangeSet<A>>
+        + Send
+        + Sync
+        + Debug,
 {
     match cmd {
         Commands::ChainSpecific(_) => unreachable!("example code should handle this!"),
@@ -474,7 +482,7 @@ where
                     let ((spk_i, spk), index_changeset) =
                         spk_chooser(index, &Keychain::External).expect("Must exist");
                     let db = &mut *db.lock().unwrap();
-                    db.stage_and_commit(C::from((
+                    db.write_changes(&C::from((
                         local_chain::ChangeSet::default(),
                         indexed_tx_graph::ChangeSet::from(index_changeset),
                     )))?;
@@ -622,7 +630,7 @@ where
                     // If we're unable to persist this, then we don't want to broadcast.
                     {
                         let db = &mut *db.lock().unwrap();
-                        db.stage_and_commit(C::from((
+                        db.write_changes(&C::from((
                             local_chain::ChangeSet::default(),
                             indexed_tx_graph::ChangeSet::from(index_changeset),
                         )))?;
@@ -647,7 +655,7 @@ where
                     // We know the tx is at least unconfirmed now. Note if persisting here fails,
                     // it's not a big deal since we can always find it again form
                     // blockchain.
-                    db.lock().unwrap().stage_and_commit(C::from((
+                    db.lock().unwrap().write_changes(&C::from((
                         local_chain::ChangeSet::default(),
                         keychain_changeset,
                     )))?;
@@ -666,7 +674,10 @@ where
 }
 
 /// The initial state returned by [`init`].
-pub struct Init<CS: clap::Subcommand, S: clap::Args, C> {
+pub struct Init<CS: clap::Subcommand, S: clap::Args, C>
+where
+    C: Default + Append + Serialize + DeserializeOwned + Debug + Send + Sync + 'static,
+{
     /// Arguments parsed by the cli.
     pub args: Args<CS, S>,
     /// Descriptor keymap.
@@ -674,7 +685,7 @@ pub struct Init<CS: clap::Subcommand, S: clap::Args, C> {
     /// Keychain-txout index.
     pub index: KeychainTxOutIndex<Keychain>,
     /// Persistence backend.
-    pub db: Mutex<Persist<C>>,
+    pub db: Mutex<Store<C>>,
     /// Initial changeset.
     pub init_changeset: C,
 }
@@ -690,6 +701,7 @@ where
         + Append
         + Serialize
         + DeserializeOwned
+        + Debug
         + core::marker::Send
         + core::marker::Sync
         + 'static,
@@ -724,13 +736,13 @@ where
         Err(err) => return Err(anyhow::anyhow!("failed to init db backend: {:?}", err)),
     };
 
-    let init_changeset = db_backend.load_from_persistence()?.unwrap_or_default();
+    let init_changeset = db_backend.load_changes()?.unwrap_or_default();
 
     Ok(Init {
         args,
         keymap,
         index,
-        db: Mutex::new(Persist::new(db_backend)),
+        db: Mutex::new(db_backend),
         init_changeset,
     })
 }

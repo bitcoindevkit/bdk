@@ -1,7 +1,6 @@
 use crate::{bincode_options, EntryIter, FileError, IterError};
-use anyhow::anyhow;
+use bdk_chain::persist::PersistBackend;
 use bdk_chain::Append;
-use bdk_persist::PersistBackend;
 use bincode::Options;
 use std::{
     fmt::{self, Debug},
@@ -25,19 +24,21 @@ where
 impl<C> PersistBackend<C> for Store<C>
 where
     C: Append
+        + Debug
         + serde::Serialize
         + serde::de::DeserializeOwned
         + core::marker::Send
         + core::marker::Sync,
 {
-    fn write_changes(&mut self, changeset: &C) -> anyhow::Result<()> {
+    type WriteError = io::Error;
+    type LoadError = AggregateChangesetsError<C>;
+
+    fn write_changes(&mut self, changeset: &C) -> Result<(), Self::WriteError> {
         self.append_changeset(changeset)
-            .map_err(|e| anyhow!(e).context("failed to write changes to persistence backend"))
     }
 
-    fn load_from_persistence(&mut self) -> anyhow::Result<Option<C>> {
+    fn load_changes(&mut self) -> Result<Option<C>, Self::LoadError> {
         self.aggregate_changesets()
-            .map_err(|e| anyhow!(e.iter_error).context("error loading from persistence backend"))
     }
 }
 

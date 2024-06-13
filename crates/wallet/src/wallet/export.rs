@@ -29,7 +29,7 @@
 //! }"#;
 //!
 //! let import = FullyNodedExport::from_str(import)?;
-//! let wallet = Wallet::new_no_persist(
+//! let wallet = Wallet::new(
 //!     &import.descriptor(),
 //!     &import.change_descriptor().expect("change descriptor"),
 //!     Network::Testnet,
@@ -42,7 +42,7 @@
 //! # use bitcoin::*;
 //! # use bdk_wallet::wallet::export::*;
 //! # use bdk_wallet::*;
-//! let wallet = Wallet::new_no_persist(
+//! let wallet = Wallet::new(
 //!     "wpkh([c258d2e4/84h/1h/0h]tpubDD3ynpHgJQW8VvWRzQ5WFDCrs4jqVFGHB3vLC3r49XHJSqP8bHKdK4AriuUKLccK68zfzowx7YhmDN8SiSkgCDENUFx9qVw65YyqM78vyVe/0/*)",
 //!     "wpkh([c258d2e4/84h/1h/0h]tpubDD3ynpHgJQW8VvWRzQ5WFDCrs4jqVFGHB3vLC3r49XHJSqP8bHKdK4AriuUKLccK68zfzowx7YhmDN8SiSkgCDENUFx9qVw65YyqM78vyVe/1/*)",
 //!     Network::Testnet,
@@ -222,7 +222,7 @@ mod test {
     use crate::wallet::Wallet;
 
     fn get_test_wallet(descriptor: &str, change_descriptor: &str, network: Network) -> Wallet {
-        let mut wallet = Wallet::new_no_persist(descriptor, change_descriptor, network).unwrap();
+        let mut wallet = Wallet::new(descriptor, change_descriptor, network).unwrap();
         let transaction = Transaction {
             input: vec![],
             output: vec![],

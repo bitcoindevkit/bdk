@@ -50,6 +50,7 @@ pub use descriptor_ext::{DescriptorExt, DescriptorId};
 mod spk_iter;
 #[cfg(feature = "miniscript")]
 pub use spk_iter::*;
+pub mod persist;
 pub mod spk_client;
 
 #[allow(unused_imports)]

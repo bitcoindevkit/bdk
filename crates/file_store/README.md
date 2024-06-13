@@ -1,6 +1,6 @@
 # BDK File Store
 
-This is a simple append-only flat file implementation of [`PersistBackend`](bdk_persist::PersistBackend).
+This is a simple append-only flat file implementation of [`PersistBackend`](bdk_chain::persist::PersistBackend).
 
 The main structure is [`Store`] which works with any [`bdk_chain`] based changesets to persist data into a flat file.
 
