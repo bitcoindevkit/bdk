@@ -90,11 +90,10 @@ fn load_recovers_wallet() -> anyhow::Result<()> {
             wallet.reveal_next_address(KeychainKind::External);
 
             // persist new wallet changes
-            let staged_changeset = wallet.take_staged();
-            let db = &mut create_new(&file_path).expect("must create db");
-            db.write_changes(&staged_changeset)
+            let mut db = create_new(&file_path).expect("must create db");
+            wallet
+                .commit_to(&mut db)
                 .map_err(|e| anyhow!("write changes error: {}", e))?;
-
             wallet.spk_index().clone()
         };
 
@@ -158,9 +157,9 @@ fn new_or_load() -> anyhow::Result<()> {
         let wallet_keychains: BTreeMap<_, _> = {
             let wallet = &mut Wallet::new_or_load(desc, change_desc, None, Network::Testnet)
                 .expect("must init wallet");
-            let staged_changeset = wallet.take_staged();
             let mut db = new_or_load(&file_path).expect("must create db");
-            db.write_changes(&staged_changeset)
+            wallet
+                .commit_to(&mut db)
                 .map_err(|e| anyhow!("write changes error: {}", e))?;
             wallet.keychains().map(|(k, v)| (*k, v.clone())).collect()
         };

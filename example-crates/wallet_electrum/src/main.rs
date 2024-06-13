@@ -33,7 +33,7 @@ fn main() -> Result<(), anyhow::Error> {
     )?;
 
     let address = wallet.next_unused_address(KeychainKind::External);
-    db.write_changes(&wallet.take_staged())?;
+    wallet.commit_to(&mut db)?;
     println!("Generated Address: {}", address);
 
     let balance = wallet.balance();
@@ -72,7 +72,7 @@ fn main() -> Result<(), anyhow::Error> {
     println!();
 
     wallet.apply_update(update)?;
-    db.write_changes(&wallet.take_staged())?;
+    wallet.commit_to(&mut db)?;
 
     let balance = wallet.balance();
     println!("Wallet balance after syncing: {} sats", balance.total());

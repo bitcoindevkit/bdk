@@ -30,6 +30,7 @@ js-sys = "0.3"
 [features]
 default = ["std"]
 std = ["bitcoin/std", "miniscript/std", "bdk_chain/std"]
+async = ["bdk_chain/async"]
 compiler = ["miniscript/compiler"]
 all-keys = ["keys-bip39"]
 keys-bip39 = ["bip39"]

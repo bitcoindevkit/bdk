@@ -29,7 +29,7 @@ fn main() -> Result<(), anyhow::Error> {
     )?;
 
     let address = wallet.next_unused_address(KeychainKind::External);
-    db.write_changes(&wallet.take_staged())?;
+    wallet.commit_to(&mut db)?;
     println!("Generated Address: {}", address);
 
     let balance = wallet.balance();
@@ -55,7 +55,7 @@ fn main() -> Result<(), anyhow::Error> {
     let _ = update.graph_update.update_last_seen_unconfirmed(now);
 
     wallet.apply_update(update)?;
-    db.write_changes(&wallet.take_staged())?;
+    wallet.commit_to(&mut db)?;
     println!();
 
     let balance = wallet.balance();
