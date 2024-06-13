@@ -28,6 +28,7 @@ pub use chain_data::*;
 pub mod indexed_tx_graph;
 pub use indexed_tx_graph::IndexedTxGraph;
 pub mod keychain;
+pub use keychain::{Indexed, KeychainIndexed};
 pub mod local_chain;
 mod tx_data_traits;
 pub mod tx_graph;

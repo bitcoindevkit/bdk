@@ -265,9 +265,6 @@ where
         .expect("Must exist");
     changeset.append(change_changeset);
 
-    // Clone to drop the immutable reference.
-    let change_script = change_script.into();
-
     let change_plan = bdk_tmp_plan::plan_satisfaction(
         &graph
             .index
@@ -427,7 +424,7 @@ pub fn planned_utxos<A: Anchor, O: ChainOracle, K: Clone + bdk_tmp_plan::CanDeri
     let outpoints = graph.index.outpoints();
     graph
         .graph()
-        .try_filter_chain_unspents(chain, chain_tip, outpoints)
+        .try_filter_chain_unspents(chain, chain_tip, outpoints.iter().cloned())
         .filter_map(|r| -> Option<Result<PlannedUtxo<K, A>, _>> {
             let (k, i, full_txo) = match r {
                 Err(err) => return Some(Err(err)),
@@ -481,8 +478,8 @@ where
                         local_chain::ChangeSet::default(),
                         indexed_tx_graph::ChangeSet::from(index_changeset),
                     )))?;
-                    let addr =
-                        Address::from_script(spk, network).context("failed to derive address")?;
+                    let addr = Address::from_script(spk.as_script(), network)
+                        .context("failed to derive address")?;
                     println!("[address @ {}] {}", spk_i, addr);
                     Ok(())
                 }
@@ -527,7 +524,7 @@ where
             let balance = graph.graph().try_balance(
                 chain,
                 chain.get_chain_tip()?,
-                graph.index.outpoints(),
+                graph.index.outpoints().iter().cloned(),
                 |(k, _), _| k == &Keychain::Internal,
             )?;
 
@@ -568,7 +565,7 @@ where
                 } => {
                     let txouts = graph
                         .graph()
-                        .try_filter_chain_txouts(chain, chain_tip, outpoints)
+                        .try_filter_chain_txouts(chain, chain_tip, outpoints.iter().cloned())
                         .filter(|r| match r {
                             Ok((_, full_txo)) => match (spent, unspent) {
                                 (true, false) => full_txo.spent_by.is_some(),
@@ -709,7 +706,7 @@ where
     // them in the index here. However, the keymap is not stored in the database.
     let (descriptor, mut keymap) =
         Descriptor::<DescriptorPublicKey>::parse_descriptor(&secp, &args.descriptor)?;
-    let _ = index.insert_descriptor(Keychain::External, descriptor);
+    let _ = index.insert_descriptor(Keychain::External, descriptor)?;
 
     if let Some((internal_descriptor, internal_keymap)) = args
         .change_descriptor
@@ -718,7 +715,7 @@ where
         .transpose()?
     {
         keymap.extend(internal_keymap);
-        let _ = index.insert_descriptor(Keychain::Internal, internal_descriptor);
+        let _ = index.insert_descriptor(Keychain::Internal, internal_descriptor)?;
     }
 
     let mut db_backend = match Store::<C>::open_or_create_new(db_magic, &args.db_path) {

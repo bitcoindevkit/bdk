@@ -23,7 +23,6 @@ pub enum Error {
     HardenedDerivationXpub,
     /// The descriptor contains multipath keys
     MultiPath,
-
     /// Error thrown while working with [`keys`](crate::keys)
     Key(crate::keys::KeyError),
     /// Error while extracting and manipulating policies
