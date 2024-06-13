@@ -303,7 +303,7 @@ impl<K, A> Store<K, A> {
             let insert_tx_stmt = &mut db_transaction
                 .prepare_cached("INSERT INTO tx (txid, whole_tx) VALUES (:txid, :whole_tx) ON CONFLICT (txid) DO UPDATE SET whole_tx = :whole_tx WHERE txid = :txid")
                 .expect("insert or update tx whole_tx statement");
-            let txid = tx.txid().to_string();
+            let txid = tx.compute_txid().to_string();
             let whole_tx = serialize(&tx);
             insert_tx_stmt
                 .execute(named_params! {":txid": txid, ":whole_tx": whole_tx })
@@ -685,9 +685,9 @@ mod test {
         let tx2_hex = Vec::<u8>::from_hex("01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff0e0432e7494d010e062f503253482fffffffff0100f2052a010000002321038a7f6ef1c8ca0c588aa53fa860128077c9e6c11e6830f4d7ee4e763a56b7718fac00000000").unwrap();
         let tx2: Arc<Transaction> = Arc::new(deserialize(tx2_hex.as_slice()).unwrap());
 
-        let outpoint0_0 = OutPoint::new(tx0.txid(), 0);
+        let outpoint0_0 = OutPoint::new(tx0.compute_txid(), 0);
         let txout0_0 = tx0.output.first().unwrap().clone();
-        let outpoint1_0 = OutPoint::new(tx1.txid(), 0);
+        let outpoint1_0 = OutPoint::new(tx1.compute_txid(), 0);
         let txout1_0 = tx1.output.first().unwrap().clone();
 
         let anchor1 = anchor_fn(1, 1296667328, block_hash_1);
@@ -696,11 +696,11 @@ mod test {
         let tx_graph_changeset = tx_graph::ChangeSet::<A> {
             txs: [tx0.clone(), tx1.clone()].into(),
             txouts: [(outpoint0_0, txout0_0), (outpoint1_0, txout1_0)].into(),
-            anchors: [(anchor1, tx0.txid()), (anchor1, tx1.txid())].into(),
+            anchors: [(anchor1, tx0.compute_txid()), (anchor1, tx1.compute_txid())].into(),
             last_seen: [
-                (tx0.txid(), 1598918400),
-                (tx1.txid(), 1598919121),
-                (tx2.txid(), 1608919121),
+                (tx0.compute_txid(), 1598918400),
+                (tx1.compute_txid(), 1598919121),
+                (tx2.compute_txid(), 1608919121),
             ]
             .into(),
         };
@@ -730,7 +730,7 @@ mod test {
             txs: [tx2.clone()].into(),
             txouts: BTreeMap::default(),
             anchors: BTreeSet::default(),
-            last_seen: [(tx2.txid(), 1708919121)].into(),
+            last_seen: [(tx2.compute_txid(), 1708919121)].into(),
         };
 
         let graph_changeset2: indexed_tx_graph::ChangeSet<A, keychain::ChangeSet<Keychain>> =
@@ -749,7 +749,7 @@ mod test {
         let tx_graph_changeset3 = tx_graph::ChangeSet::<A> {
             txs: BTreeSet::default(),
             txouts: BTreeMap::default(),
-            anchors: [(anchor2, tx0.txid()), (anchor2, tx1.txid())].into(),
+            anchors: [(anchor2, tx0.compute_txid()), (anchor2, tx1.compute_txid())].into(),
             last_seen: BTreeMap::default(),
         };
 

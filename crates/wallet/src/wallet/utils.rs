@@ -10,7 +10,7 @@
 // licenses.
 
 use bitcoin::secp256k1::{All, Secp256k1};
-use bitcoin::{absolute, Script, Sequence};
+use bitcoin::{absolute, relative, Script, Sequence};
 
 use miniscript::{MiniscriptKey, Satisfier, ToPublicKey};
 
@@ -26,7 +26,7 @@ pub trait IsDust {
 
 impl IsDust for u64 {
     fn is_dust(&self, script: &Script) -> bool {
-        *self < script.dust_value().to_sat()
+        *self < script.minimal_non_dust().to_sat()
     }
 }
 
@@ -95,7 +95,7 @@ impl Older {
 }
 
 impl<Pk: MiniscriptKey + ToPublicKey> Satisfier<Pk> for Older {
-    fn check_older(&self, n: Sequence) -> bool {
+    fn check_older(&self, n: relative::LockTime) -> bool {
         if let Some(current_height) = self.current_height {
             // TODO: test >= / >
             current_height

@@ -583,7 +583,7 @@ mod test {
         use bitcoin::bip32::ChildNumber::{self, Hardened};
 
         let xprvkey = bitcoin::bip32::Xpriv::from_str("xprv9s21ZrQH143K2fpbqApQL69a4oKdGVnVN52R82Ft7d1pSqgKmajF62acJo3aMszZb6qQ22QsVECSFxvf9uyxFUvFYQMq3QbtwtRSMjLAhMf").unwrap();
-        assert_eq!(Network::Bitcoin, xprvkey.network);
+        assert!(xprvkey.network.is_mainnet());
         let xdesc = Bip44(xprvkey, KeychainKind::Internal)
             .build(Network::Bitcoin)
             .unwrap();
@@ -597,7 +597,7 @@ mod test {
         }
 
         let tprvkey = bitcoin::bip32::Xpriv::from_str("tprv8ZgxMBicQKsPcx5nBGsR63Pe8KnRUqmbJNENAfGftF3yuXoMMoVJJcYeUw5eVkm9WBPjWYt6HMWYJNesB5HaNVBaFc1M6dRjWSYnmewUMYy").unwrap();
-        assert_eq!(Network::Testnet, tprvkey.network);
+        assert!(!tprvkey.network.is_mainnet());
         let tdesc = Bip44(tprvkey, KeychainKind::Internal)
             .build(Network::Testnet)
             .unwrap();

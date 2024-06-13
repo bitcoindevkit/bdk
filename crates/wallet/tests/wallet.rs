@@ -45,7 +45,7 @@ fn receive_output(wallet: &mut Wallet, value: u64, height: ConfirmationTime) -> 
     wallet.insert_tx(tx.clone(), height).unwrap();
 
     OutPoint {
-        txid: tx.txid(),
+        txid: tx.compute_txid(),
         vout: 0,
     }
 }
@@ -1151,7 +1151,7 @@ fn test_create_tx_add_utxo() {
     builder
         .add_recipient(addr.script_pubkey(), Amount::from_sat(30_000))
         .add_utxo(OutPoint {
-            txid: small_output_tx.txid(),
+            txid: small_output_tx.compute_txid(),
             vout: 0,
         })
         .unwrap();
@@ -1202,7 +1202,7 @@ fn test_create_tx_manually_selected_insufficient() {
     builder
         .add_recipient(addr.script_pubkey(), Amount::from_sat(30_000))
         .add_utxo(OutPoint {
-            txid: small_output_tx.txid(),
+            txid: small_output_tx.compute_txid(),
             vout: 0,
         })
         .unwrap()
@@ -1306,8 +1306,6 @@ fn test_create_tx_policy_path_ignored_subtree_with_csv() {
 #[test]
 fn test_create_tx_global_xpubs_with_origin() {
     use bitcoin::bip32;
-    use bitcoin::hex::FromHex;
-
     let (mut wallet, _) = get_funded_wallet("wpkh([73756c7f/48'/0'/0'/2']tpubDCKxNyM3bLgbEX13Mcd8mYxbVg9ajDkWXMh29hMWBurKfVmBfWAM96QVP3zaUcN51HvkZ3ar4VwP82kC8JZhhux8vFQoJintSpVBwpFvyU3/0/*)");
     let addr = wallet.next_unused_address(KeychainKind::External).unwrap();
     let mut builder = wallet.build_tx();
@@ -1348,7 +1346,11 @@ fn test_add_foreign_utxo() {
     builder
         .add_recipient(addr.script_pubkey(), Amount::from_sat(60_000))
         .only_witness_utxo()
-        .add_foreign_utxo(utxo.outpoint, psbt_input, foreign_utxo_satisfaction)
+        .add_foreign_utxo(
+            utxo.outpoint,
+            psbt_input,
+            foreign_utxo_satisfaction.to_wu() as usize,
+        )
         .unwrap();
     let mut psbt = builder.finish().unwrap();
     wallet1.insert_txout(utxo.outpoint, utxo.txout);
@@ -1399,7 +1401,7 @@ fn test_add_foreign_utxo() {
 
 #[test]
 #[should_panic(
-    expected = "MissingTxOut([OutPoint { txid: 0x21d7fb1bceda00ab4069fc52d06baa13470803e9050edd16f5736e5d8c4925fd, vout: 0 }])"
+    expected = "MissingTxOut([OutPoint { txid: 21d7fb1bceda00ab4069fc52d06baa13470803e9050edd16f5736e5d8c4925fd, vout: 0 }])"
 )]
 fn test_calculate_fee_with_missing_foreign_utxo() {
     let (mut wallet1, _) = get_funded_wallet_wpkh();
@@ -1424,7 +1426,11 @@ fn test_calculate_fee_with_missing_foreign_utxo() {
     builder
         .add_recipient(addr.script_pubkey(), Amount::from_sat(60_000))
         .only_witness_utxo()
-        .add_foreign_utxo(utxo.outpoint, psbt_input, foreign_utxo_satisfaction)
+        .add_foreign_utxo(
+            utxo.outpoint,
+            psbt_input,
+            foreign_utxo_satisfaction.to_wu() as usize,
+        )
         .unwrap();
     let psbt = builder.finish().unwrap();
     let tx = psbt.extract_tx().expect("failed to extract tx");
@@ -1441,8 +1447,11 @@ fn test_add_foreign_utxo_invalid_psbt_input() {
         .unwrap();
 
     let mut builder = wallet.build_tx();
-    let result =
-        builder.add_foreign_utxo(outpoint, psbt::Input::default(), foreign_utxo_satisfaction);
+    let result = builder.add_foreign_utxo(
+        outpoint,
+        psbt::Input::default(),
+        foreign_utxo_satisfaction.to_wu() as usize,
+    );
     assert!(matches!(result, Err(AddForeignUtxoError::MissingUtxo)));
 }
 
@@ -1470,7 +1479,7 @@ fn test_add_foreign_utxo_where_outpoint_doesnt_match_psbt_input() {
                     non_witness_utxo: Some(tx1.as_ref().clone()),
                     ..Default::default()
                 },
-                satisfaction_weight
+                satisfaction_weight.to_wu() as usize
             )
             .is_err(),
         "should fail when outpoint doesn't match psbt_input"
@@ -1483,7 +1492,7 @@ fn test_add_foreign_utxo_where_outpoint_doesnt_match_psbt_input() {
                     non_witness_utxo: Some(tx2.as_ref().clone()),
                     ..Default::default()
                 },
-                satisfaction_weight
+                satisfaction_weight.to_wu() as usize
             )
             .is_ok(),
         "should be ok when outpoint does match psbt_input"
@@ -1515,7 +1524,11 @@ fn test_add_foreign_utxo_only_witness_utxo() {
             ..Default::default()
         };
         builder
-            .add_foreign_utxo(utxo2.outpoint, psbt_input, satisfaction_weight)
+            .add_foreign_utxo(
+                utxo2.outpoint,
+                psbt_input,
+                satisfaction_weight.to_wu() as usize,
+            )
             .unwrap();
         assert!(
             builder.finish().is_err(),
@@ -1531,7 +1544,11 @@ fn test_add_foreign_utxo_only_witness_utxo() {
         };
         builder
             .only_witness_utxo()
-            .add_foreign_utxo(utxo2.outpoint, psbt_input, satisfaction_weight)
+            .add_foreign_utxo(
+                utxo2.outpoint,
+                psbt_input,
+                satisfaction_weight.to_wu() as usize,
+            )
             .unwrap();
         assert!(
             builder.finish().is_ok(),
@@ -1547,7 +1564,11 @@ fn test_add_foreign_utxo_only_witness_utxo() {
             ..Default::default()
         };
         builder
-            .add_foreign_utxo(utxo2.outpoint, psbt_input, satisfaction_weight)
+            .add_foreign_utxo(
+                utxo2.outpoint,
+                psbt_input,
+                satisfaction_weight.to_wu() as usize,
+            )
             .unwrap();
         assert!(
             builder.finish().is_ok(),
@@ -1583,8 +1604,6 @@ fn test_create_tx_global_xpubs_origin_missing() {
 #[test]
 fn test_create_tx_global_xpubs_master_without_origin() {
     use bitcoin::bip32;
-    use bitcoin::hex::FromHex;
-
     let (mut wallet, _) = get_funded_wallet("wpkh(tpubD6NzVbkrYhZ4Y55A58Gv9RSNF5hy84b5AJqYy7sCcjFrkcLpPre8kmgfit6kY1Zs3BLgeypTDBZJM222guPpdz7Cup5yzaMu62u7mYGbwFL/0/*)");
     let addr = wallet.next_unused_address(KeychainKind::External).unwrap();
     let mut builder = wallet.build_tx();
@@ -1613,7 +1632,7 @@ fn test_bump_fee_irreplaceable_tx() {
     let psbt = builder.finish().unwrap();
 
     let tx = psbt.extract_tx().expect("failed to extract tx");
-    let txid = tx.txid();
+    let txid = tx.compute_txid();
     wallet
         .insert_tx(tx, ConfirmationTime::Unconfirmed { last_seen: 0 })
         .unwrap();
@@ -1630,7 +1649,7 @@ fn test_bump_fee_confirmed_tx() {
     let psbt = builder.finish().unwrap();
 
     let tx = psbt.extract_tx().expect("failed to extract tx");
-    let txid = tx.txid();
+    let txid = tx.compute_txid();
 
     wallet
         .insert_tx(
@@ -1657,7 +1676,7 @@ fn test_bump_fee_low_fee_rate() {
     let feerate = psbt.fee_rate().unwrap();
 
     let tx = psbt.extract_tx().expect("failed to extract tx");
-    let txid = tx.txid();
+    let txid = tx.compute_txid();
 
     wallet
         .insert_tx(tx, ConfirmationTime::Unconfirmed { last_seen: 0 })
@@ -1690,7 +1709,7 @@ fn test_bump_fee_low_abs() {
     let psbt = builder.finish().unwrap();
 
     let tx = psbt.extract_tx().expect("failed to extract tx");
-    let txid = tx.txid();
+    let txid = tx.compute_txid();
 
     wallet
         .insert_tx(tx, ConfirmationTime::Unconfirmed { last_seen: 0 })
@@ -1713,7 +1732,7 @@ fn test_bump_fee_zero_abs() {
     let psbt = builder.finish().unwrap();
 
     let tx = psbt.extract_tx().expect("failed to extract tx");
-    let txid = tx.txid();
+    let txid = tx.compute_txid();
     wallet
         .insert_tx(tx, ConfirmationTime::Unconfirmed { last_seen: 0 })
         .unwrap();
@@ -1739,7 +1758,7 @@ fn test_bump_fee_reduce_change() {
     let original_fee = check_fee!(wallet, psbt);
 
     let tx = psbt.extract_tx().expect("failed to extract tx");
-    let txid = tx.txid();
+    let txid = tx.compute_txid();
     wallet
         .insert_tx(tx, ConfirmationTime::Unconfirmed { last_seen: 0 })
         .unwrap();
@@ -1837,7 +1856,7 @@ fn test_bump_fee_reduce_single_recipient() {
     let tx = psbt.clone().extract_tx().expect("failed to extract tx");
     let original_sent_received = wallet.sent_and_received(&tx);
     let original_fee = check_fee!(wallet, psbt);
-    let txid = tx.txid();
+    let txid = tx.compute_txid();
     wallet
         .insert_tx(tx, ConfirmationTime::Unconfirmed { last_seen: 0 })
         .unwrap();
@@ -1885,7 +1904,7 @@ fn test_bump_fee_absolute_reduce_single_recipient() {
     let original_fee = check_fee!(wallet, psbt);
     let tx = psbt.extract_tx().expect("failed to extract tx");
     let original_sent_received = wallet.sent_and_received(&tx);
-    let txid = tx.txid();
+    let txid = tx.compute_txid();
     wallet
         .insert_tx(tx, ConfirmationTime::Unconfirmed { last_seen: 0 })
         .unwrap();
@@ -1949,7 +1968,7 @@ fn test_bump_fee_drain_wallet() {
     builder
         .drain_to(addr.script_pubkey())
         .add_utxo(OutPoint {
-            txid: tx.txid(),
+            txid: tx.compute_txid(),
             vout: 0,
         })
         .unwrap()
@@ -1959,7 +1978,7 @@ fn test_bump_fee_drain_wallet() {
     let tx = psbt.extract_tx().expect("failed to extract tx");
     let original_sent_received = wallet.sent_and_received(&tx);
 
-    let txid = tx.txid();
+    let txid = tx.compute_txid();
     wallet
         .insert_tx(tx, ConfirmationTime::Unconfirmed { last_seen: 0 })
         .unwrap();
@@ -2011,7 +2030,7 @@ fn test_bump_fee_remove_output_manually_selected_only() {
         )
         .unwrap();
     let outpoint = OutPoint {
-        txid: init_tx.txid(),
+        txid: init_tx.compute_txid(),
         vout: 0,
     };
     let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX")
@@ -2027,7 +2046,7 @@ fn test_bump_fee_remove_output_manually_selected_only() {
     let psbt = builder.finish().unwrap();
     let tx = psbt.extract_tx().expect("failed to extract tx");
     let original_sent_received = wallet.sent_and_received(&tx);
-    let txid = tx.txid();
+    let txid = tx.compute_txid();
     wallet
         .insert_tx(tx, ConfirmationTime::Unconfirmed { last_seen: 0 })
         .unwrap();
@@ -2074,7 +2093,7 @@ fn test_bump_fee_add_input() {
     let psbt = builder.finish().unwrap();
     let tx = psbt.extract_tx().expect("failed to extract tx");
     let original_details = wallet.sent_and_received(&tx);
-    let txid = tx.txid();
+    let txid = tx.compute_txid();
     wallet
         .insert_tx(tx, ConfirmationTime::Unconfirmed { last_seen: 0 })
         .unwrap();
@@ -2131,7 +2150,7 @@ fn test_bump_fee_absolute_add_input() {
     let psbt = builder.finish().unwrap();
     let tx = psbt.extract_tx().expect("failed to extract tx");
     let original_sent_received = wallet.sent_and_received(&tx);
-    let txid = tx.txid();
+    let txid = tx.compute_txid();
     wallet
         .insert_tx(tx, ConfirmationTime::Unconfirmed { last_seen: 0 })
         .unwrap();
@@ -2197,7 +2216,7 @@ fn test_bump_fee_no_change_add_input_and_change() {
     let original_fee = check_fee!(wallet, psbt);
 
     let tx = psbt.extract_tx().expect("failed to extract tx");
-    let txid = tx.txid();
+    let txid = tx.compute_txid();
     wallet
         .insert_tx(tx, ConfirmationTime::Unconfirmed { last_seen: 0 })
         .unwrap();
@@ -2267,7 +2286,7 @@ fn test_bump_fee_add_input_change_dust() {
     let original_tx_weight = tx.weight();
     assert_eq!(tx.input.len(), 1);
     assert_eq!(tx.output.len(), 2);
-    let txid = tx.txid();
+    let txid = tx.compute_txid();
     wallet
         .insert_tx(tx, ConfirmationTime::Unconfirmed { last_seen: 0 })
         .unwrap();
@@ -2335,7 +2354,7 @@ fn test_bump_fee_force_add_input() {
     let psbt = builder.finish().unwrap();
     let mut tx = psbt.extract_tx().expect("failed to extract tx");
     let original_sent_received = wallet.sent_and_received(&tx);
-    let txid = tx.txid();
+    let txid = tx.compute_txid();
     for txin in &mut tx.input {
         txin.witness.push([0x00; P2WPKH_FAKE_WITNESS_SIZE]); // fake signature
     }
@@ -2401,7 +2420,7 @@ fn test_bump_fee_absolute_force_add_input() {
     let psbt = builder.finish().unwrap();
     let mut tx = psbt.extract_tx().expect("failed to extract tx");
     let original_sent_received = wallet.sent_and_received(&tx);
-    let txid = tx.txid();
+    let txid = tx.compute_txid();
     // skip saving the new utxos, we know they can't be used anyways
     for txin in &mut tx.input {
         txin.witness.push([0x00; P2WPKH_FAKE_WITNESS_SIZE]); // fake signature
@@ -2481,7 +2500,7 @@ fn test_bump_fee_unconfirmed_inputs_only() {
         ConfirmationTime::Unconfirmed { last_seen: 0 },
     );
     let mut tx = psbt.extract_tx().expect("failed to extract tx");
-    let txid = tx.txid();
+    let txid = tx.compute_txid();
     for txin in &mut tx.input {
         txin.witness.push([0x00; P2WPKH_FAKE_WITNESS_SIZE]); // fake signature
     }
@@ -2514,7 +2533,7 @@ fn test_bump_fee_unconfirmed_input() {
         .enable_rbf();
     let psbt = builder.finish().unwrap();
     let mut tx = psbt.extract_tx().expect("failed to extract tx");
-    let txid = tx.txid();
+    let txid = tx.compute_txid();
     for txin in &mut tx.input {
         txin.witness.push([0x00; P2WPKH_FAKE_WITNESS_SIZE]); // fake signature
     }
@@ -3386,7 +3405,11 @@ fn test_taproot_foreign_utxo() {
     let mut builder = wallet1.build_tx();
     builder
         .add_recipient(addr.script_pubkey(), Amount::from_sat(60_000))
-        .add_foreign_utxo(utxo.outpoint, psbt_input, foreign_utxo_satisfaction)
+        .add_foreign_utxo(
+            utxo.outpoint,
+            psbt_input,
+            foreign_utxo_satisfaction.to_wu() as usize,
+        )
         .unwrap();
     let psbt = builder.finish().unwrap();
     let sent_received =
@@ -3890,7 +3913,10 @@ fn test_fee_rate_sign_no_grinding_high_r() {
             .unwrap();
         // We only have one key in the partial_sigs map, this is a trick to retrieve it
         let key = psbt.inputs[0].partial_sigs.keys().next().unwrap();
-        sig_len = psbt.inputs[0].partial_sigs[key].sig.serialize_der().len();
+        sig_len = psbt.inputs[0].partial_sigs[key]
+            .signature
+            .serialize_der()
+            .len();
     }
     // Actually finalizing the transaction...
     wallet
@@ -3936,7 +3962,10 @@ fn test_fee_rate_sign_grinding_low_r() {
         .unwrap();
 
     let key = psbt.inputs[0].partial_sigs.keys().next().unwrap();
-    let sig_len = psbt.inputs[0].partial_sigs[key].sig.serialize_der().len();
+    let sig_len = psbt.inputs[0].partial_sigs[key]
+        .signature
+        .serialize_der()
+        .len();
     assert_eq!(sig_len, 70);
     assert_fee_rate!(psbt, fee.unwrap_or(Amount::ZERO), fee_rate);
 }

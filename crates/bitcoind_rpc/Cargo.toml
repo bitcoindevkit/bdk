@@ -13,9 +13,8 @@ readme = "README.md"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-# For no-std, remember to enable the bitcoin/no-std feature
-bitcoin = { version = "0.31", default-features = false }
-bitcoincore-rpc = { version = "0.18" }
+bitcoin = { version = "0.32.0", default-features = false }
+bitcoincore-rpc = { version = "0.19.0" }
 bdk_chain = { path = "../chain", version = "0.15", default-features = false }
 
 [dev-dependencies]

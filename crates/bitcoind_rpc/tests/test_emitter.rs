@@ -197,7 +197,7 @@ fn test_into_tx_graph() -> anyhow::Result<()> {
                 .graph
                 .txs
                 .iter()
-                .map(|tx| tx.txid())
+                .map(|tx| tx.compute_txid())
                 .collect::<BTreeSet<Txid>>(),
             exp_txids,
             "changeset should have the 3 mempool transactions",
@@ -440,7 +440,7 @@ fn mempool_avoids_re_emission() -> anyhow::Result<()> {
     let emitted_txids = emitter
         .mempool()?
         .into_iter()
-        .map(|(tx, _)| tx.txid())
+        .map(|(tx, _)| tx.compute_txid())
         .collect::<BTreeSet<Txid>>();
     assert_eq!(
         emitted_txids, exp_txids,
@@ -509,7 +509,7 @@ fn mempool_re_emits_if_tx_introduction_height_not_reached() -> anyhow::Result<()
         emitter
             .mempool()?
             .into_iter()
-            .map(|(tx, _)| tx.txid())
+            .map(|(tx, _)| tx.compute_txid())
             .collect::<BTreeSet<_>>(),
         tx_introductions.iter().map(|&(_, txid)| txid).collect(),
         "first mempool emission should include all txs",
@@ -518,7 +518,7 @@ fn mempool_re_emits_if_tx_introduction_height_not_reached() -> anyhow::Result<()
         emitter
             .mempool()?
             .into_iter()
-            .map(|(tx, _)| tx.txid())
+            .map(|(tx, _)| tx.compute_txid())
             .collect::<BTreeSet<_>>(),
         tx_introductions.iter().map(|&(_, txid)| txid).collect(),
         "second mempool emission should still include all txs",
@@ -538,7 +538,7 @@ fn mempool_re_emits_if_tx_introduction_height_not_reached() -> anyhow::Result<()
             let emitted_txids = emitter
                 .mempool()?
                 .into_iter()
-                .map(|(tx, _)| tx.txid())
+                .map(|(tx, _)| tx.compute_txid())
                 .collect::<BTreeSet<_>>();
             assert_eq!(
                 emitted_txids, exp_txids,
@@ -596,7 +596,7 @@ fn mempool_during_reorg() -> anyhow::Result<()> {
         emitter
             .mempool()?
             .into_iter()
-            .map(|(tx, _)| tx.txid())
+            .map(|(tx, _)| tx.compute_txid())
             .collect::<BTreeSet<_>>(),
         env.rpc_client()
             .get_raw_mempool()?
@@ -633,7 +633,7 @@ fn mempool_during_reorg() -> anyhow::Result<()> {
             let mempool = emitter
                 .mempool()?
                 .into_iter()
-                .map(|(tx, _)| tx.txid())
+                .map(|(tx, _)| tx.compute_txid())
                 .collect::<BTreeSet<_>>();
             let exp_mempool = tx_introductions
                 .iter()
@@ -648,7 +648,7 @@ fn mempool_during_reorg() -> anyhow::Result<()> {
             let mempool = emitter
                 .mempool()?
                 .into_iter()
-                .map(|(tx, _)| tx.txid())
+                .map(|(tx, _)| tx.compute_txid())
                 .collect::<BTreeSet<_>>();
             let exp_mempool = tx_introductions
                 .iter()

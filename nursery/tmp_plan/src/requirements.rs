@@ -87,20 +87,28 @@ pub enum RequiredSignatures<Ak> {
 
 #[derive(Clone, Debug)]
 pub enum SigningError {
-    SigHashError(sighash::Error),
+    SigHashP2wpkh(sighash::P2wpkhError),
+    SigHashTaproot(sighash::TaprootError),
     DerivationError(bip32::Error),
 }
 
-impl From<sighash::Error> for SigningError {
-    fn from(e: sighash::Error) -> Self {
-        Self::SigHashError(e)
+impl From<sighash::TaprootError> for SigningError {
+    fn from(v: sighash::TaprootError) -> Self {
+        Self::SigHashTaproot(v)
+    }
+}
+
+impl From<sighash::P2wpkhError> for SigningError {
+    fn from(v: sighash::P2wpkhError) -> Self {
+        Self::SigHashP2wpkh(v)
     }
 }
 
 impl core::fmt::Display for SigningError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            SigningError::SigHashError(e) => e.fmt(f),
+            SigningError::SigHashP2wpkh(e) => e.fmt(f),
+            SigningError::SigHashTaproot(e) => e.fmt(f),
             SigningError::DerivationError(e) => e.fmt(f),
         }
     }
@@ -170,8 +178,8 @@ impl RequiredSignatures<DescriptorPublicKey> {
                 let sig = secp.sign_schnorr_no_aux_rand(&msg, &keypair);
 
                 let bitcoin_sig = taproot::Signature {
-                    sig,
-                    hash_ty: schnorr_sighashty,
+                    signature: sig,
+                    sighash_type: schnorr_sighashty,
                 };
 
                 auth_data
@@ -210,10 +218,10 @@ impl RequiredSignatures<DescriptorPublicKey> {
                         };
                         let keypair = Keypair::from_secret_key(&secp, &secret_key.clone());
                         let msg = Message::from_digest(sighash.to_byte_array());
-                        let sig = secp.sign_schnorr_no_aux_rand(&msg, &keypair);
+                        let signature = secp.sign_schnorr_no_aux_rand(&msg, &keypair);
                         let bitcoin_sig = taproot::Signature {
-                            sig,
-                            hash_ty: sighash_type,
+                            signature,
+                            sighash_type,
                         };
 
                         auth_data
