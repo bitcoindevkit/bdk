@@ -11,6 +11,8 @@ use async_trait::async_trait;
 use core::convert::Infallible;
 use core::fmt::{Debug, Display};
 
+use crate::Append;
+
 /// A changeset containing [`crate`] structures typically persisted together.
 #[derive(Debug, Clone, PartialEq)]
 #[cfg(feature = "miniscript")]
@@ -83,6 +85,19 @@ impl<K, A> From<crate::indexed_tx_graph::ChangeSet<A, crate::keychain::ChangeSet
     ) -> Self {
         Self {
             indexed_tx_graph,
+            ..Default::default()
+        }
+    }
+}
+
+#[cfg(feature = "miniscript")]
+impl<K, A> From<crate::keychain::ChangeSet<K>> for CombinedChangeSet<K, A> {
+    fn from(indexer: crate::keychain::ChangeSet<K>) -> Self {
+        Self {
+            indexed_tx_graph: crate::indexed_tx_graph::ChangeSet {
+                indexer,
+                ..Default::default()
+            },
             ..Default::default()
         }
     }
@@ -167,3 +182,98 @@ impl<C> PersistBackendAsync<C> for () {
         Ok(None)
     }
 }
+
+/// Extends a changeset so that it acts as a convenient staging area for any [`PersistBackend`].
+///
+/// Not all changes to the in-memory representation needs to be written to disk right away.
+/// [`Append::append`] can be used to *stage* changes first and then [`StageExt::commit_to`] can be
+/// used to write changes to disk.
+pub trait StageExt: Append + Default + Sized {
+    /// Commit the staged changes to the persistence `backend`.
+    ///
+    /// Changes that are committed (if any) are returned.
+    ///
+    /// # Error
+    ///
+    /// Returns a backend-defined error if this fails.
+    fn commit_to<B>(&mut self, backend: &mut B) -> Result<Option<Self>, B::WriteError>
+    where
+        B: PersistBackend<Self>,
+    {
+        // do not do anything if changeset is empty
+        if self.is_empty() {
+            return Ok(None);
+        }
+        backend.write_changes(&*self)?;
+        // only clear if changes are written successfully to backend
+        Ok(Some(core::mem::take(self)))
+    }
+
+    /// Stages a new `changeset` and commits it (alongside any other previously staged changes) to
+    /// the persistence `backend`.
+    ///
+    /// Convenience method for calling [`Append::append`] and then [`StageExt::commit_to`].
+    fn append_and_commit_to<B>(
+        &mut self,
+        changeset: Self,
+        backend: &mut B,
+    ) -> Result<Option<Self>, B::WriteError>
+    where
+        B: PersistBackend<Self>,
+    {
+        Append::append(self, changeset);
+        self.commit_to(backend)
+    }
+}
+
+impl<C: Append + Default> StageExt for C {}
+
+/// Extends a changeset so that it acts as a convenient staging area for any
+/// [`PersistBackendAsync`].
+///
+/// Not all changes to the in-memory representation needs to be written to disk right away.
+/// [`Append::append`] can be used to *stage* changes first and then [`StageExtAsync::commit_to`]
+/// can be used to write changes to disk.
+#[cfg(feature = "async")]
+#[async_trait]
+pub trait StageExtAsync: Append + Default + Sized + Send + Sync {
+    /// Commit the staged changes to the persistence `backend`.
+    ///
+    /// Changes that are committed (if any) are returned.
+    ///
+    /// # Error
+    ///
+    /// Returns a backend-defined error if this fails.
+    async fn commit_to<B>(&mut self, backend: &mut B) -> Result<Option<Self>, B::WriteError>
+    where
+        B: PersistBackendAsync<Self> + Send + Sync,
+    {
+        // do not do anything if changeset is empty
+        if self.is_empty() {
+            return Ok(None);
+        }
+        backend.write_changes(&*self).await?;
+        // only clear if changes are written successfully to backend
+        Ok(Some(core::mem::take(self)))
+    }
+
+    /// Stages a new `changeset` and commits it (alongside any other previously staged changes) to
+    /// the persistence `backend`.
+    ///
+    /// Convenience method for calling [`Append::append`] and then [`StageExtAsync::commit_to`].
+    async fn append_and_commit_to<B>(
+        &mut self,
+        changeset: Self,
+        backend: &mut B,
+    ) -> Result<Option<Self>, B::WriteError>
+    where
+        B: PersistBackendAsync<Self> + Send + Sync,
+    {
+        Append::append(self, changeset);
+        self.commit_to(backend).await
+    }
+}
+
+#[cfg(feature = "async")]
+#[async_trait]
+impl<C: Append + Default + Send + Sync> StageExtAsync for C {}
