@@ -587,61 +587,8 @@ impl Policy {
         Ok(Some(policy))
     }
 
-    fn make_multi<Ctx: ScriptContext + 'static>(
-        threshold: &Threshold<DescriptorPublicKey, MAX_PUBKEYS_PER_MULTISIG>,
-        signers: &SignersContainer,
-        build_sat: BuildSatisfaction,
-        sorted: bool,
-        secp: &SecpCtx,
-    ) -> Result<Option<Policy>, PolicyError> {
-        let parsed_keys = threshold.iter().map(|k| PkOrF::from_key(k, secp)).collect();
-
-        let mut contribution = Satisfaction::Partial {
-            n: threshold.n(),
-            m: threshold.k(),
-            items: vec![],
-            conditions: Default::default(),
-            sorted: Some(sorted),
-        };
-        let mut satisfaction = contribution.clone();
-
-        for (index, key) in threshold.iter().enumerate() {
-            if signers.find(signer_id(key, secp)).is_some() {
-                contribution.add(
-                    &Satisfaction::Complete {
-                        condition: Default::default(),
-                    },
-                    index,
-                )?;
-            }
-
-            if let Some(psbt) = build_sat.psbt() {
-                if Ctx::find_signature(psbt, key, secp) {
-                    satisfaction.add(
-                        &Satisfaction::Complete {
-                            condition: Default::default(),
-                        },
-                        index,
-                    )?;
-                }
-            }
-        }
-        satisfaction.finalize();
-        contribution.finalize();
-
-        let mut policy: Policy = SatisfiableItem::Multisig {
-            keys: parsed_keys,
-            threshold: threshold.k(),
-        }
-        .into();
-        policy.contribution = contribution;
-        policy.satisfaction = satisfaction;
-
-        Ok(Some(policy))
-    }
-
-    fn make_multi_a<Ctx: ScriptContext + 'static>(
-        threshold: &Threshold<DescriptorPublicKey, MAX_PUBKEYS_IN_CHECKSIGADD>,
+    fn make_multi<Ctx: ScriptContext + 'static, const MAX: usize>(
+        threshold: &Threshold<DescriptorPublicKey, MAX>,
         signers: &SignersContainer,
         build_sat: BuildSatisfaction,
         sorted: bool,
@@ -1038,12 +985,12 @@ impl<Ctx: ScriptContext + 'static> ExtractPolicy for Miniscript<DescriptorPublic
             Terminal::Hash160(hash) => {
                 Some(SatisfiableItem::Hash160Preimage { hash: *hash }.into())
             }
-            Terminal::Multi(threshold) => {
-                Policy::make_multi::<Ctx>(threshold, signers, build_sat, false, secp)?
-            }
-            Terminal::MultiA(threshold) => {
-                Policy::make_multi_a::<Ctx>(threshold, signers, build_sat, false, secp)?
-            }
+            Terminal::Multi(threshold) => Policy::make_multi::<Ctx, MAX_PUBKEYS_PER_MULTISIG>(
+                threshold, signers, build_sat, false, secp,
+            )?,
+            Terminal::MultiA(threshold) => Policy::make_multi::<Ctx, MAX_PUBKEYS_IN_CHECKSIGADD>(
+                threshold, signers, build_sat, false, secp,
+            )?,
             // Identities
             Terminal::Alt(inner)
             | Terminal::Swap(inner)
@@ -1145,7 +1092,7 @@ impl ExtractPolicy for Descriptor<DescriptorPublicKey> {
         ) -> Result<Option<Policy>, Error> {
             let threshold = Threshold::new(keys.k(), keys.pks().to_vec())
                 .expect("valid threshold and pks collection");
-            Ok(Policy::make_multi::<Ctx>(
+            Ok(Policy::make_multi::<Ctx, MAX_PUBKEYS_PER_MULTISIG>(
                 &threshold, signers, build_sat, true, secp,
             )?)
         }
