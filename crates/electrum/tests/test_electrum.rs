@@ -103,7 +103,7 @@ fn scan_detects_confirmed_tx() -> anyhow::Result<()> {
             .expect("Fee must exist")
             .abs()
             .to_unsigned()
-            .expect("valid `SignedAmount`");
+            .expect("valid `Amount`");
 
         // Check that the calculated fee matches the fee from the transaction data.
         assert_eq!(fee, tx_fee);
