@@ -1,8 +1,8 @@
 # BDK SQLite
 
-This is a simple [SQLite] relational database schema backed implementation of `PersistBackend`.
+This is a simple [SQLite] relational database client for persisting [`bdk_chain`] changesets.
 
 The main structure is `Store` which persists `CombinedChangeSet` data into a SQLite database file.
 
-<!-- [`PersistBackend`]: bdk_chain::persist::PersistBackend -->
+[`bdk_chain`]:https://docs.rs/bdk_chain/latest/bdk_chain/
 [SQLite]: https://www.sqlite.org/index.html

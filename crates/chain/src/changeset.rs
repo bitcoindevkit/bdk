@@ -1,9 +1,3 @@
-//! This module is home to the [`PersistBackend`] trait which defines the behavior of a data store
-//! required to persist changes made to BDK data structures.
-//!
-//! The [`CombinedChangeSet`] type encapsulates a combination of [`crate`] structures that are
-//! typically persisted together.
-
 /// A changeset containing [`crate`] structures typically persisted together.
 #[cfg(feature = "miniscript")]
 #[derive(Debug, Clone, PartialEq)]
