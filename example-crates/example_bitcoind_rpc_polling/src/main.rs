@@ -196,8 +196,8 @@ fn main() -> anyhow::Result<()> {
                 if last_db_commit.elapsed() >= DB_COMMIT_DELAY {
                     let db = &mut *db.lock().unwrap();
                     last_db_commit = Instant::now();
-                    if !db_stage.is_empty() {
-                        db.append_changeset(&core::mem::take(&mut db_stage))?;
+                    if let Some(changeset) = db_stage.take() {
+                        db.append_changeset(&changeset)?;
                     }
                     println!(
                         "[{:>10}s] committed to db (took {}s)",
@@ -235,8 +235,8 @@ fn main() -> anyhow::Result<()> {
             {
                 let db = &mut *db.lock().unwrap();
                 db_stage.append((local_chain::ChangeSet::default(), graph_changeset));
-                if !db_stage.is_empty() {
-                    db.append_changeset(&core::mem::take(&mut db_stage))?;
+                if let Some(changeset) = db_stage.take() {
+                    db.append_changeset(&changeset)?;
                 }
             }
         }
@@ -325,8 +325,8 @@ fn main() -> anyhow::Result<()> {
                 if last_db_commit.elapsed() >= DB_COMMIT_DELAY {
                     let db = &mut *db.lock().unwrap();
                     last_db_commit = Instant::now();
-                    if !db_stage.is_empty() {
-                        db.append_changeset(&core::mem::take(&mut db_stage))?;
+                    if let Some(changeset) = db_stage.take() {
+                        db.append_changeset(&changeset)?;
                     }
                     println!(
                         "[{:>10}s] committed to db (took {}s)",

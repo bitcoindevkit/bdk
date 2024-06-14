@@ -114,12 +114,21 @@ pub trait AnchorFromBlockPosition: Anchor {
 }
 
 /// Trait that makes an object appendable.
-pub trait Append {
+pub trait Append: Default {
     /// Append another object of the same type onto `self`.
     fn append(&mut self, other: Self);
 
     /// Returns whether the structure is considered empty.
     fn is_empty(&self) -> bool;
+
+    /// Take the value, replacing it with the default value.
+    fn take(&mut self) -> Option<Self> {
+        if self.is_empty() {
+            None
+        } else {
+            Some(core::mem::take(self))
+        }
+    }
 }
 
 impl<K: Ord, V> Append for BTreeMap<K, V> {

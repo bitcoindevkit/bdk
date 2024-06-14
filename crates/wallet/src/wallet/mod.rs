@@ -2291,11 +2291,7 @@ impl Wallet {
 
     /// Take the staged [`ChangeSet`] to be persisted now (if any).
     pub fn take_staged(&mut self) -> Option<ChangeSet> {
-        if self.stage.is_empty() {
-            None
-        } else {
-            Some(core::mem::take(&mut self.stage))
-        }
+        self.stage.take()
     }
 
     /// Get a reference to the inner [`TxGraph`].
