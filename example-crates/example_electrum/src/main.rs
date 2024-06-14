@@ -3,7 +3,6 @@ use std::{
     sync::Mutex,
 };
 
-use bdk_chain::persist::PersistBackend;
 use bdk_chain::{
     bitcoin::{constants::genesis_block, Address, Network, Txid},
     collections::BTreeSet,
@@ -352,6 +351,6 @@ fn main() -> anyhow::Result<()> {
     };
 
     let mut db = db.lock().unwrap();
-    db.write_changes(&db_changeset)?;
+    db.append_changeset(&db_changeset)?;
     Ok(())
 }

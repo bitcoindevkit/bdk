@@ -11,7 +11,6 @@ use bdk_bitcoind_rpc::{
     bitcoincore_rpc::{Auth, Client, RpcApi},
     Emitter,
 };
-use bdk_chain::persist::{PersistBackend, StageExt};
 use bdk_chain::{
     bitcoin::{constants::genesis_block, Block, Transaction},
     indexed_tx_graph, keychain,
@@ -138,7 +137,7 @@ fn main() -> anyhow::Result<()> {
         let genesis_hash = genesis_block(args.network).block_hash();
         let (chain, chain_changeset) = LocalChain::from_genesis_hash(genesis_hash);
         let mut db = db.lock().unwrap();
-        db.write_changes(&(chain_changeset, Default::default()))?;
+        db.append_changeset(&(chain_changeset, Default::default()))?;
         chain
     } else {
         LocalChain::from_changeset(init_chain_changeset)?
@@ -197,7 +196,9 @@ fn main() -> anyhow::Result<()> {
                 if last_db_commit.elapsed() >= DB_COMMIT_DELAY {
                     let db = &mut *db.lock().unwrap();
                     last_db_commit = Instant::now();
-                    db_stage.commit_to(db)?;
+                    if !db_stage.is_empty() {
+                        db.append_changeset(&core::mem::take(&mut db_stage))?;
+                    }
                     println!(
                         "[{:>10}s] committed to db (took {}s)",
                         start.elapsed().as_secs_f32(),
@@ -233,10 +234,10 @@ fn main() -> anyhow::Result<()> {
             );
             {
                 let db = &mut *db.lock().unwrap();
-                db_stage.append_and_commit_to(
-                    (local_chain::ChangeSet::default(), graph_changeset),
-                    db,
-                )?;
+                db_stage.append((local_chain::ChangeSet::default(), graph_changeset));
+                if !db_stage.is_empty() {
+                    db.append_changeset(&core::mem::take(&mut db_stage))?;
+                }
             }
         }
         RpcCommands::Live { rpc_args } => {
@@ -324,7 +325,9 @@ fn main() -> anyhow::Result<()> {
                 if last_db_commit.elapsed() >= DB_COMMIT_DELAY {
                     let db = &mut *db.lock().unwrap();
                     last_db_commit = Instant::now();
-                    db_stage.commit_to(db)?;
+                    if !db_stage.is_empty() {
+                        db.append_changeset(&core::mem::take(&mut db_stage))?;
+                    }
                     println!(
                         "[{:>10}s] committed to db (took {}s)",
                         start.elapsed().as_secs_f32(),

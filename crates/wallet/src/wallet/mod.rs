@@ -26,7 +26,6 @@ use bdk_chain::{
     local_chain::{
         self, ApplyHeaderError, CannotConnectError, CheckPoint, CheckPointIter, LocalChain,
     },
-    persist::{PersistBackend, StageExt},
     spk_client::{FullScanRequest, FullScanResult, SyncRequest, SyncResult},
     tx_graph::{CanonicalTx, TxGraph},
     Append, BlockId, ChainPosition, ConfirmationTime, ConfirmationTimeHeightAnchor, FullTxOut,
@@ -85,12 +84,12 @@ const COINBASE_MATURITY: u32 = 100;
 /// 1. output *descriptors* from which it can derive addresses.
 /// 2. [`signer`]s that can contribute signatures to addresses instantiated from the descriptors.
 ///
-/// The user is responsible for loading and writing wallet changes using an implementation of
-/// [`PersistBackend`]. See individual functions and example for instructions on when [`Wallet`]
-/// state needs to be persisted.
+/// The user is responsible for loading and writing wallet changes which are represented as
+/// [`ChangeSet`]s (see [`take_staged`]). Also see individual functions and example for instructions
+/// on when [`Wallet`] state needs to be persisted.
 ///
-/// [`PersistBackend`]: bdk_chain::persist::PersistBackend
 /// [`signer`]: crate::signer
+/// [`take_staged`]: Wallet::take_staged
 #[derive(Debug)]
 pub struct Wallet {
     signers: Arc<SignersContainer>,
@@ -141,8 +140,7 @@ impl From<SyncResult> for Update {
 }
 
 /// The changes made to a wallet by applying an [`Update`].
-pub type ChangeSet =
-    bdk_chain::persist::CombinedChangeSet<KeychainKind, ConfirmationTimeHeightAnchor>;
+pub type ChangeSet = bdk_chain::CombinedChangeSet<KeychainKind, ConfirmationTimeHeightAnchor>;
 
 /// A derived address and the index it was found at.
 /// For convenience this automatically derefs to `Address`
@@ -408,14 +406,13 @@ impl Wallet {
     /// # use bdk_wallet::descriptor::Descriptor;
     /// # use bitcoin::key::Secp256k1;
     /// # use bdk_wallet::KeychainKind;
-    /// # use bdk_sqlite::{Store, rusqlite::Connection};
+    /// use bdk_sqlite::{Store, rusqlite::Connection};
     /// #
     /// # fn main() -> Result<(), anyhow::Error> {
-    /// # use bdk_chain::persist::PersistBackend;
     /// # let temp_dir = tempfile::tempdir().expect("must create tempdir");
     /// # let file_path = temp_dir.path().join("store.db");
-    /// # let conn = Connection::open(file_path).expect("must open connection");
-    /// # let mut db = Store::new(conn).expect("must create db");
+    /// let conn = Connection::open(file_path).expect("must open connection");
+    /// let mut db = Store::new(conn).expect("must create db");
     /// let secp = Secp256k1::new();
     ///
     /// let (external_descriptor, external_keymap) = Descriptor::parse_descriptor(&secp, "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/84'/1'/0'/0/*)").unwrap();
@@ -423,7 +420,7 @@ impl Wallet {
     ///
     /// let external_signer_container = SignersContainer::build(external_keymap, &external_descriptor, &secp);
     /// let internal_signer_container = SignersContainer::build(internal_keymap, &internal_descriptor, &secp);
-    /// let changeset = db.load_changes()?.expect("there must be an existing changeset");
+    /// let changeset = db.read()?.expect("there must be an existing changeset");
     /// let mut wallet = Wallet::load_from_changeset(changeset)?;
     ///
     /// external_signer_container.signers().into_iter()
@@ -482,13 +479,12 @@ impl Wallet {
     /// This method will fail if the loaded [`ChangeSet`] has different parameters to those provided.
     ///
     /// ```rust,no_run
-    /// # use bdk_chain::persist::PersistBackend;
     /// # use bdk_wallet::Wallet;
-    /// # use bdk_sqlite::{Store, rusqlite::Connection};
+    /// use bdk_sqlite::{Store, rusqlite::Connection};
     /// # use bitcoin::Network::Testnet;
-    /// # let conn = Connection::open_in_memory().expect("must open connection");
+    /// let conn = Connection::open_in_memory().expect("must open connection");
     /// let mut db = Store::new(conn).expect("must create db");
-    /// let changeset = db.load_changes()?;
+    /// let changeset = db.read()?;
     ///
     /// let external_descriptor = "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/84'/1'/0'/0/*)";
     /// let internal_descriptor = "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/84'/1'/0'/1/*)";
@@ -666,16 +662,17 @@ impl Wallet {
     /// calls to this method before closing the wallet. For example:
     ///
     /// ```rust,no_run
-    /// # use bdk_chain::persist::PersistBackend;
     /// # use bdk_wallet::wallet::{Wallet, ChangeSet};
     /// # use bdk_wallet::KeychainKind;
-    /// # use bdk_sqlite::{Store, rusqlite::Connection};
-    /// # let conn = Connection::open_in_memory().expect("must open connection");
-    /// # let mut db = Store::new(conn).expect("must create store");
+    /// use bdk_sqlite::{rusqlite::Connection, Store};
+    /// let conn = Connection::open_in_memory().expect("must open connection");
+    /// let mut db = Store::new(conn).expect("must create store");
     /// # let changeset = ChangeSet::default();
     /// # let mut wallet = Wallet::load_from_changeset(changeset).expect("load wallet");
     /// let next_address = wallet.reveal_next_address(KeychainKind::External);
-    /// wallet.commit_to(&mut db)?;
+    /// if let Some(changeset) = wallet.take_staged() {
+    ///     db.write(&changeset)?;
+    /// }
     ///
     /// // Now it's safe to show the user their next address!
     /// println!("Next address: {}", next_address.address);
@@ -2283,44 +2280,22 @@ impl Wallet {
         Ok(())
     }
 
-    /// Commits all currently [`staged`](Wallet::staged) changes to the `persist_backend`.
-    ///
-    /// This returns whether anything was persisted.
-    ///
-    /// # Error
-    ///
-    /// Returns a backend-defined error if this fails.
-    pub fn commit_to<B>(&mut self, persist_backend: &mut B) -> Result<bool, B::WriteError>
-    where
-        B: PersistBackend<ChangeSet>,
-    {
-        let committed = StageExt::commit_to(&mut self.stage, persist_backend)?;
-        Ok(committed.is_some())
+    /// Get a reference of the staged [`ChangeSet`] that are yet to be committed (if any).
+    pub fn staged(&self) -> Option<&ChangeSet> {
+        if self.stage.is_empty() {
+            None
+        } else {
+            Some(&self.stage)
+        }
     }
 
-    /// Commits all currently [`staged`](Wallet::staged) changes to the async `persist_backend`.
-    ///
-    /// This returns whether anything was persisted.
-    ///
-    /// # Error
-    ///
-    /// Returns a backend-defined error if this fails.
-    #[cfg(feature = "async")]
-    pub async fn commit_to_async<B>(
-        &mut self,
-        persist_backend: &mut B,
-    ) -> Result<bool, B::WriteError>
-    where
-        B: bdk_chain::persist::PersistBackendAsync<ChangeSet> + Send + Sync,
-    {
-        let committed =
-            bdk_chain::persist::StageExtAsync::commit_to(&mut self.stage, persist_backend).await?;
-        Ok(committed.is_some())
-    }
-
-    /// Get the staged [`ChangeSet`] that is yet to be committed.
-    pub fn staged(&self) -> &ChangeSet {
-        &self.stage
+    /// Take the staged [`ChangeSet`] to be persisted now (if any).
+    pub fn take_staged(&mut self) -> Option<ChangeSet> {
+        if self.stage.is_empty() {
+            None
+        } else {
+            Some(core::mem::take(&mut self.stage))
+        }
     }
 
     /// Get a reference to the inner [`TxGraph`].

@@ -12,7 +12,6 @@ use bdk_electrum::BdkElectrumClient;
 use bdk_file_store::Store;
 use bdk_wallet::bitcoin::{Address, Amount};
 use bdk_wallet::chain::collections::HashSet;
-use bdk_wallet::chain::persist::PersistBackend;
 use bdk_wallet::{bitcoin::Network, Wallet};
 use bdk_wallet::{KeychainKind, SignOptions};
 
@@ -23,7 +22,7 @@ fn main() -> Result<(), anyhow::Error> {
     let external_descriptor = "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/84'/1'/0'/0/*)";
     let internal_descriptor = "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/84'/1'/0'/1/*)";
     let changeset = db
-        .load_changes()
+        .aggregate_changesets()
         .map_err(|e| anyhow!("load changes error: {}", e))?;
     let mut wallet = Wallet::new_or_load(
         external_descriptor,
@@ -33,7 +32,9 @@ fn main() -> Result<(), anyhow::Error> {
     )?;
 
     let address = wallet.next_unused_address(KeychainKind::External);
-    wallet.commit_to(&mut db)?;
+    if let Some(changeset) = wallet.take_staged() {
+        db.append_changeset(&changeset)?;
+    }
     println!("Generated Address: {}", address);
 
     let balance = wallet.balance();
@@ -72,7 +73,9 @@ fn main() -> Result<(), anyhow::Error> {
     println!();
 
     wallet.apply_update(update)?;
-    wallet.commit_to(&mut db)?;
+    if let Some(changeset) = wallet.take_staged() {
+        db.append_changeset(&changeset)?;
+    }
 
     let balance = wallet.balance();
     println!("Wallet balance after syncing: {} sats", balance.total());
