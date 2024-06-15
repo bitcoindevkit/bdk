@@ -1,5 +1,4 @@
 use crate::{bincode_options, EntryIter, FileError, IterError};
-use bdk_chain::persist::PersistBackend;
 use bdk_chain::Append;
 use bincode::Options;
 use std::{
@@ -19,27 +18,6 @@ where
     magic_len: usize,
     db_file: File,
     marker: PhantomData<C>,
-}
-
-impl<C> PersistBackend<C> for Store<C>
-where
-    C: Append
-        + Debug
-        + serde::Serialize
-        + serde::de::DeserializeOwned
-        + core::marker::Send
-        + core::marker::Sync,
-{
-    type WriteError = io::Error;
-    type LoadError = AggregateChangesetsError<C>;
-
-    fn write_changes(&mut self, changeset: &C) -> Result<(), Self::WriteError> {
-        self.append_changeset(changeset)
-    }
-
-    fn load_changes(&mut self) -> Result<Option<C>, Self::LoadError> {
-        self.aggregate_changesets()
-    }
 }
 
 impl<C> Store<C>
@@ -448,7 +426,7 @@ mod test {
                     acc
                 });
             // We write after a short read.
-            db.write_changes(&last_changeset)
+            db.append_changeset(&last_changeset)
                 .expect("last write must succeed");
             Append::append(&mut exp_aggregation, last_changeset.clone());
             drop(db);

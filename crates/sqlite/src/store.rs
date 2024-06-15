@@ -12,7 +12,7 @@ use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
 use crate::Error;
-use bdk_chain::persist::{CombinedChangeSet, PersistBackend};
+use bdk_chain::CombinedChangeSet;
 use bdk_chain::{
     indexed_tx_graph, keychain, local_chain, tx_graph, Anchor, Append, DescriptorExt, DescriptorId,
 };
@@ -54,26 +54,6 @@ where
     pub(crate) fn db_transaction(&mut self) -> Result<rusqlite::Transaction, Error> {
         let connection = self.conn.get_mut().expect("unlocked connection mutex");
         connection.transaction().map_err(Error::Sqlite)
-    }
-}
-
-impl<K, A> PersistBackend<CombinedChangeSet<K, A>> for Store<K, A>
-where
-    K: Ord + for<'de> Deserialize<'de> + Serialize + Send,
-    A: Anchor + for<'de> Deserialize<'de> + Serialize + Send,
-{
-    type WriteError = Error;
-    type LoadError = Error;
-
-    fn write_changes(
-        &mut self,
-        changeset: &CombinedChangeSet<K, A>,
-    ) -> Result<(), Self::WriteError> {
-        self.write(changeset)
-    }
-
-    fn load_changes(&mut self) -> Result<Option<CombinedChangeSet<K, A>>, Self::LoadError> {
-        self.read()
     }
 }
 
@@ -482,13 +462,14 @@ where
     }
 }
 
-/// Functions to read and write all [`ChangeSet`] data.
+/// Functions to read and write all [`CombinedChangeSet`] data.
 impl<K, A> Store<K, A>
 where
     K: Ord + for<'de> Deserialize<'de> + Serialize + Send,
     A: Anchor + for<'de> Deserialize<'de> + Serialize + Send,
 {
-    fn write(&mut self, changeset: &CombinedChangeSet<K, A>) -> Result<(), Error> {
+    /// Write the given `changeset` atomically.
+    pub fn write(&mut self, changeset: &CombinedChangeSet<K, A>) -> Result<(), Error> {
         // no need to write anything if changeset is empty
         if changeset.is_empty() {
             return Ok(());
@@ -513,7 +494,8 @@ where
         db_transaction.commit().map_err(Error::Sqlite)
     }
 
-    fn read(&mut self) -> Result<Option<CombinedChangeSet<K, A>>, Error> {
+    /// Read the entire database and return the aggregate [`CombinedChangeSet`].
+    pub fn read(&mut self) -> Result<Option<CombinedChangeSet<K, A>>, Error> {
         let db_transaction = self.db_transaction()?;
 
         let network = Self::select_network(&db_transaction)?;
@@ -563,7 +545,7 @@ mod test {
     use bdk_chain::bitcoin::Network::Testnet;
     use bdk_chain::bitcoin::{secp256k1, BlockHash, OutPoint};
     use bdk_chain::miniscript::Descriptor;
-    use bdk_chain::persist::{CombinedChangeSet, PersistBackend};
+    use bdk_chain::CombinedChangeSet;
     use bdk_chain::{
         indexed_tx_graph, keychain, tx_graph, BlockId, ConfirmationHeightAnchor,
         ConfirmationTimeHeightAnchor, DescriptorExt,
@@ -591,10 +573,10 @@ mod test {
             .expect("create new memory db store");
 
         test_changesets.iter().for_each(|changeset| {
-            store.write_changes(changeset).expect("write changeset");
+            store.write(changeset).expect("write changeset");
         });
 
-        let agg_changeset = store.load_changes().expect("aggregated changeset");
+        let agg_changeset = store.read().expect("aggregated changeset");
 
         assert_eq!(agg_changeset, Some(agg_test_changesets));
     }
@@ -612,10 +594,10 @@ mod test {
             .expect("create new memory db store");
 
         test_changesets.iter().for_each(|changeset| {
-            store.write_changes(changeset).expect("write changeset");
+            store.write(changeset).expect("write changeset");
         });
 
-        let agg_changeset = store.load_changes().expect("aggregated changeset");
+        let agg_changeset = store.read().expect("aggregated changeset");
 
         assert_eq!(agg_changeset, Some(agg_test_changesets));
     }
@@ -629,10 +611,10 @@ mod test {
         let mut store = Store::<Keychain, BlockId>::new(conn).expect("create new memory db store");
 
         test_changesets.iter().for_each(|changeset| {
-            store.write_changes(changeset).expect("write changeset");
+            store.write(changeset).expect("write changeset");
         });
 
-        let agg_changeset = store.load_changes().expect("aggregated changeset");
+        let agg_changeset = store.read().expect("aggregated changeset");
 
         assert_eq!(agg_changeset, Some(agg_test_changesets));
     }

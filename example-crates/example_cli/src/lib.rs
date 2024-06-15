@@ -25,7 +25,6 @@ use bdk_chain::{
 pub use bdk_file_store;
 pub use clap;
 
-use bdk_chain::persist::PersistBackend;
 use clap::{Parser, Subcommand};
 
 pub type KeychainTxGraph<A> = IndexedTxGraph<A, KeychainTxOutIndex<Keychain>>;
@@ -482,7 +481,7 @@ where
                     let ((spk_i, spk), index_changeset) =
                         spk_chooser(index, &Keychain::External).expect("Must exist");
                     let db = &mut *db.lock().unwrap();
-                    db.write_changes(&C::from((
+                    db.append_changeset(&C::from((
                         local_chain::ChangeSet::default(),
                         indexed_tx_graph::ChangeSet::from(index_changeset),
                     )))?;
@@ -630,7 +629,7 @@ where
                     // If we're unable to persist this, then we don't want to broadcast.
                     {
                         let db = &mut *db.lock().unwrap();
-                        db.write_changes(&C::from((
+                        db.append_changeset(&C::from((
                             local_chain::ChangeSet::default(),
                             indexed_tx_graph::ChangeSet::from(index_changeset),
                         )))?;
@@ -655,7 +654,7 @@ where
                     // We know the tx is at least unconfirmed now. Note if persisting here fails,
                     // it's not a big deal since we can always find it again form
                     // blockchain.
-                    db.lock().unwrap().write_changes(&C::from((
+                    db.lock().unwrap().append_changeset(&C::from((
                         local_chain::ChangeSet::default(),
                         keychain_changeset,
                     )))?;
@@ -736,7 +735,7 @@ where
         Err(err) => return Err(anyhow::anyhow!("failed to init db backend: {:?}", err)),
     };
 
-    let init_changeset = db_backend.load_changes()?.unwrap_or_default();
+    let init_changeset = db_backend.aggregate_changesets()?.unwrap_or_default();
 
     Ok(Init {
         args,

@@ -7,7 +7,6 @@ use std::{collections::BTreeSet, io::Write, str::FromStr};
 
 use bdk_esplora::{esplora_client, EsploraExt};
 use bdk_file_store::Store;
-use bdk_wallet::chain::persist::PersistBackend;
 use bdk_wallet::{
     bitcoin::{Address, Amount, Network},
     KeychainKind, SignOptions, Wallet,
@@ -19,7 +18,7 @@ fn main() -> Result<(), anyhow::Error> {
         Store::<bdk_wallet::wallet::ChangeSet>::open_or_create_new(DB_MAGIC.as_bytes(), db_path)?;
     let external_descriptor = "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/84'/1'/0'/0/*)";
     let internal_descriptor = "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/84'/1'/0'/1/*)";
-    let changeset = db.load_changes()?;
+    let changeset = db.aggregate_changesets()?;
 
     let mut wallet = Wallet::new_or_load(
         external_descriptor,
@@ -29,7 +28,9 @@ fn main() -> Result<(), anyhow::Error> {
     )?;
 
     let address = wallet.next_unused_address(KeychainKind::External);
-    wallet.commit_to(&mut db)?;
+    if let Some(changeset) = wallet.take_staged() {
+        db.append_changeset(&changeset)?;
+    }
     println!("Generated Address: {}", address);
 
     let balance = wallet.balance();
@@ -55,7 +56,9 @@ fn main() -> Result<(), anyhow::Error> {
     let _ = update.graph_update.update_last_seen_unconfirmed(now);
 
     wallet.apply_update(update)?;
-    wallet.commit_to(&mut db)?;
+    if let Some(changeset) = wallet.take_staged() {
+        db.append_changeset(&changeset)?;
+    }
     println!();
 
     let balance = wallet.balance();

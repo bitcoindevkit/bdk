@@ -3,7 +3,6 @@ use bdk_bitcoind_rpc::{
     Emitter,
 };
 use bdk_file_store::Store;
-use bdk_wallet::chain::persist::PersistBackend;
 use bdk_wallet::{
     bitcoin::{Block, Network, Transaction},
     wallet::Wallet,
@@ -91,7 +90,7 @@ fn main() -> anyhow::Result<()> {
         DB_MAGIC.as_bytes(),
         args.db_path,
     )?;
-    let changeset = db.load_changes()?;
+    let changeset = db.aggregate_changesets()?;
 
     let mut wallet = Wallet::new_or_load(
         &args.descriptor,
@@ -147,7 +146,9 @@ fn main() -> anyhow::Result<()> {
                 let connected_to = block_emission.connected_to();
                 let start_apply_block = Instant::now();
                 wallet.apply_block_connected_to(&block_emission.block, height, connected_to)?;
-                wallet.commit_to(&mut db)?;
+                if let Some(changeset) = wallet.take_staged() {
+                    db.append_changeset(&changeset)?;
+                }
                 let elapsed = start_apply_block.elapsed().as_secs_f32();
                 println!(
                     "Applied block {} at height {} in {}s",
@@ -157,7 +158,9 @@ fn main() -> anyhow::Result<()> {
             Emission::Mempool(mempool_emission) => {
                 let start_apply_mempool = Instant::now();
                 wallet.apply_unconfirmed_txs(mempool_emission.iter().map(|(tx, time)| (tx, *time)));
-                wallet.commit_to(&mut db)?;
+                if let Some(changeset) = wallet.take_staged() {
+                    db.append_changeset(&changeset)?;
+                }
                 println!(
                     "Applied unconfirmed transactions in {}s",
                     start_apply_mempool.elapsed().as_secs_f32()

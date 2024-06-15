@@ -1,11 +1,10 @@
-use anyhow::anyhow;
 use std::path::Path;
 use std::str::FromStr;
 
 use assert_matches::assert_matches;
 use bdk_chain::collections::BTreeMap;
 use bdk_chain::COINBASE_MATURITY;
-use bdk_chain::{persist::PersistBackend, BlockId, ConfirmationTime};
+use bdk_chain::{BlockId, ConfirmationTime};
 use bdk_sqlite::rusqlite::Connection;
 use bdk_wallet::descriptor::{calc_checksum, DescriptorError, IntoWalletDescriptor};
 use bdk_wallet::psbt::PsbtUtils;
@@ -13,7 +12,7 @@ use bdk_wallet::signer::{SignOptions, SignerError};
 use bdk_wallet::wallet::coin_selection::{self, LargestFirstCoinSelection};
 use bdk_wallet::wallet::error::CreateTxError;
 use bdk_wallet::wallet::tx_builder::AddForeignUtxoError;
-use bdk_wallet::wallet::{AddressInfo, Balance, NewError, Wallet};
+use bdk_wallet::wallet::{AddressInfo, Balance, ChangeSet, NewError, Wallet};
 use bdk_wallet::KeychainKind;
 use bitcoin::hashes::Hash;
 use bitcoin::key::Secp256k1;
@@ -72,11 +71,18 @@ const DB_MAGIC: &[u8] = &[0x21, 0x24, 0x48];
 
 #[test]
 fn load_recovers_wallet() -> anyhow::Result<()> {
-    fn run<B, FN, FR>(filename: &str, create_new: FN, recover: FR) -> anyhow::Result<()>
+    fn run<Db, New, Recover, Read, Write>(
+        filename: &str,
+        create_new: New,
+        recover: Recover,
+        read: Read,
+        write: Write,
+    ) -> anyhow::Result<()>
     where
-        B: PersistBackend<bdk_wallet::wallet::ChangeSet> + Send + Sync + 'static,
-        FN: Fn(&Path) -> anyhow::Result<B>,
-        FR: Fn(&Path) -> anyhow::Result<B>,
+        New: Fn(&Path) -> anyhow::Result<Db>,
+        Recover: Fn(&Path) -> anyhow::Result<Db>,
+        Read: Fn(&mut Db) -> anyhow::Result<Option<ChangeSet>>,
+        Write: Fn(&mut Db, &ChangeSet) -> anyhow::Result<()>,
     {
         let temp_dir = tempfile::tempdir().expect("must create tempdir");
         let file_path = temp_dir.path().join(filename);
@@ -91,9 +97,9 @@ fn load_recovers_wallet() -> anyhow::Result<()> {
 
             // persist new wallet changes
             let mut db = create_new(&file_path).expect("must create db");
-            wallet
-                .commit_to(&mut db)
-                .map_err(|e| anyhow!("write changes error: {}", e))?;
+            if let Some(changeset) = wallet.take_staged() {
+                write(&mut db, &changeset)?;
+            }
             wallet.spk_index().clone()
         };
 
@@ -101,10 +107,7 @@ fn load_recovers_wallet() -> anyhow::Result<()> {
         {
             // load persisted wallet changes
             let db = &mut recover(&file_path).expect("must recover db");
-            let changeset = db
-                .load_changes()
-                .expect("must recover wallet")
-                .expect("changeset");
+            let changeset = read(db).expect("must recover wallet").expect("changeset");
 
             let wallet = Wallet::load_from_changeset(changeset).expect("must recover wallet");
             assert_eq!(wallet.network(), Network::Testnet);
@@ -132,11 +135,15 @@ fn load_recovers_wallet() -> anyhow::Result<()> {
         "store.db",
         |path| Ok(bdk_file_store::Store::create_new(DB_MAGIC, path)?),
         |path| Ok(bdk_file_store::Store::open(DB_MAGIC, path)?),
+        |db| Ok(bdk_file_store::Store::aggregate_changesets(db)?),
+        |db, changeset| Ok(bdk_file_store::Store::append_changeset(db, changeset)?),
     )?;
     run(
         "store.sqlite",
         |path| Ok(bdk_sqlite::Store::new(Connection::open(path)?)?),
         |path| Ok(bdk_sqlite::Store::new(Connection::open(path)?)?),
+        |db| Ok(bdk_sqlite::Store::read(db)?),
+        |db, changeset| Ok(bdk_sqlite::Store::write(db, changeset)?),
     )?;
 
     Ok(())
@@ -144,10 +151,16 @@ fn load_recovers_wallet() -> anyhow::Result<()> {
 
 #[test]
 fn new_or_load() -> anyhow::Result<()> {
-    fn run<B, F>(filename: &str, new_or_load: F) -> anyhow::Result<()>
+    fn run<Db, NewOrRecover, Read, Write>(
+        filename: &str,
+        new_or_load: NewOrRecover,
+        read: Read,
+        write: Write,
+    ) -> anyhow::Result<()>
     where
-        B: PersistBackend<bdk_wallet::wallet::ChangeSet> + Send + Sync + 'static,
-        F: Fn(&Path) -> anyhow::Result<B>,
+        NewOrRecover: Fn(&Path) -> anyhow::Result<Db>,
+        Read: Fn(&mut Db) -> anyhow::Result<Option<ChangeSet>>,
+        Write: Fn(&mut Db, &ChangeSet) -> anyhow::Result<()>,
     {
         let temp_dir = tempfile::tempdir().expect("must create tempdir");
         let file_path = temp_dir.path().join(filename);
@@ -158,18 +171,16 @@ fn new_or_load() -> anyhow::Result<()> {
             let wallet = &mut Wallet::new_or_load(desc, change_desc, None, Network::Testnet)
                 .expect("must init wallet");
             let mut db = new_or_load(&file_path).expect("must create db");
-            wallet
-                .commit_to(&mut db)
-                .map_err(|e| anyhow!("write changes error: {}", e))?;
+            if let Some(changeset) = wallet.take_staged() {
+                write(&mut db, &changeset)?;
+            }
             wallet.keychains().map(|(k, v)| (*k, v.clone())).collect()
         };
 
         // wrong network
         {
             let mut db = new_or_load(&file_path).expect("must create db");
-            let changeset = db
-                .load_changes()
-                .map_err(|e| anyhow!("load changes error: {}", e))?;
+            let changeset = read(&mut db)?;
             let err = Wallet::new_or_load(desc, change_desc, changeset, Network::Bitcoin)
                 .expect_err("wrong network");
             assert!(
@@ -192,9 +203,7 @@ fn new_or_load() -> anyhow::Result<()> {
                 bitcoin::blockdata::constants::genesis_block(Network::Testnet).block_hash();
 
             let db = &mut new_or_load(&file_path).expect("must open db");
-            let changeset = db
-                .load_changes()
-                .map_err(|e| anyhow!("load changes error: {}", e))?;
+            let changeset = read(db)?;
             let err = Wallet::new_or_load_with_genesis_hash(
                 desc,
                 change_desc,
@@ -223,9 +232,7 @@ fn new_or_load() -> anyhow::Result<()> {
                 .0;
 
             let db = &mut new_or_load(&file_path).expect("must open db");
-            let changeset = db
-                .load_changes()
-                .map_err(|e| anyhow!("load changes error: {}", e))?;
+            let changeset = read(db)?;
             let err =
                 Wallet::new_or_load(exp_descriptor, exp_change_desc, changeset, Network::Testnet)
                     .expect_err("wrong external descriptor");
@@ -249,9 +256,7 @@ fn new_or_load() -> anyhow::Result<()> {
                 .0;
 
             let db = &mut new_or_load(&file_path).expect("must open db");
-            let changeset = db
-                .load_changes()
-                .map_err(|e| anyhow!("load changes error: {}", e))?;
+            let changeset = read(db)?;
             let err = Wallet::new_or_load(desc, exp_descriptor, changeset, Network::Testnet)
                 .expect_err("wrong internal descriptor");
             assert!(
@@ -268,9 +273,7 @@ fn new_or_load() -> anyhow::Result<()> {
         // all parameters match
         {
             let db = &mut new_or_load(&file_path).expect("must open db");
-            let changeset = db
-                .load_changes()
-                .map_err(|e| anyhow!("load changes error: {}", e))?;
+            let changeset = read(db)?;
             let wallet = Wallet::new_or_load(desc, change_desc, changeset, Network::Testnet)
                 .expect("must recover wallet");
             assert_eq!(wallet.network(), Network::Testnet);
@@ -282,12 +285,18 @@ fn new_or_load() -> anyhow::Result<()> {
         Ok(())
     }
 
-    run("store.db", |path| {
-        Ok(bdk_file_store::Store::open_or_create_new(DB_MAGIC, path)?)
-    })?;
-    run("store.sqlite", |path| {
-        Ok(bdk_sqlite::Store::new(Connection::open(path)?)?)
-    })?;
+    run(
+        "store.db",
+        |path| Ok(bdk_file_store::Store::open_or_create_new(DB_MAGIC, path)?),
+        |db| Ok(bdk_file_store::Store::aggregate_changesets(db)?),
+        |db, changeset| Ok(bdk_file_store::Store::append_changeset(db, changeset)?),
+    )?;
+    run(
+        "store.sqlite",
+        |path| Ok(bdk_sqlite::Store::new(Connection::open(path)?)?),
+        |db| Ok(bdk_sqlite::Store::read(db)?),
+        |db, changeset| Ok(bdk_sqlite::Store::write(db, changeset)?),
+    )?;
 
     Ok(())
 }
