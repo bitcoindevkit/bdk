@@ -13,7 +13,7 @@ readme = "README.md"
 
 [dependencies]
 bdk_chain = { path = "../chain", version = "0.17.0", default-features = false }
-esplora-client = { version = "0.8.0", default-features = false }
+esplora-client = { version = "0.9.0", default-features = false }
 async-trait = { version = "0.1.66", optional = true }
 futures = { version = "0.3.26", optional = true }
 
