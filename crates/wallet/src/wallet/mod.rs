@@ -39,6 +39,7 @@ use bitcoin::{
 };
 use bitcoin::{consensus::encode::serialize, transaction, BlockHash, Psbt};
 use bitcoin::{constants::genesis_block, Amount};
+use core::cmp::Ordering;
 use core::fmt;
 use core::ops::Deref;
 use descriptor::error::Error as DescriptorError;
@@ -342,6 +343,9 @@ impl fmt::Display for ApplyBlockError {
 
 #[cfg(feature = "std")]
 impl std::error::Error for ApplyBlockError {}
+
+/// A `CanonicalTx` managed by a `Wallet`.
+pub type WalletTx<'a> = CanonicalTx<'a, Arc<Transaction>, ConfirmationTimeHeightAnchor>;
 
 impl Wallet {
     /// Initialize an empty [`Wallet`].
@@ -1037,13 +1041,10 @@ impl Wallet {
     /// ```
     ///
     /// [`Anchor`]: bdk_chain::Anchor
-    pub fn get_tx(
-        &self,
-        txid: Txid,
-    ) -> Option<CanonicalTx<'_, Arc<Transaction>, ConfirmationTimeHeightAnchor>> {
+    pub fn get_tx(&self, txid: Txid) -> Option<WalletTx> {
         let graph = self.indexed_graph.graph();
 
-        Some(CanonicalTx {
+        Some(WalletTx {
             chain_position: graph.get_chain_position(
                 &self.chain,
                 self.chain.tip().block_id(),
@@ -1136,13 +1137,33 @@ impl Wallet {
     }
 
     /// Iterate over the transactions in the wallet.
-    pub fn transactions(
-        &self,
-    ) -> impl Iterator<Item = CanonicalTx<'_, Arc<Transaction>, ConfirmationTimeHeightAnchor>> + '_
-    {
+    pub fn transactions(&self) -> impl Iterator<Item = WalletTx> + '_ {
         self.indexed_graph
             .graph()
             .list_chain_txs(&self.chain, self.chain.tip().block_id())
+    }
+
+    /// Array of transactions in the wallet sorted with a comparator function.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// # use bdk_wallet::Wallet;
+    /// # use bdk_wallet::wallet::WalletTx;
+    /// # let changeset = Default::default();
+    /// # let mut wallet = Wallet::load_from_changeset(changeset)?;
+    /// // Transactions by chain position: first unconfirmed then descending by confirmed height.
+    /// let sorted_txs: Vec<WalletTx> =
+    ///     wallet.transactions_sort_by(|tx1, tx2| tx2.chain_position.cmp(&tx1.chain_position));
+    /// # Ok::<(), anyhow::Error>(())
+    /// ```
+    pub fn transactions_sort_by<F>(&self, compare: F) -> Vec<WalletTx>
+    where
+        F: FnMut(&WalletTx, &WalletTx) -> Ordering,
+    {
+        let mut txs: Vec<WalletTx> = self.transactions().collect();
+        txs.sort_unstable_by(compare);
+        txs
     }
 
     /// Return the balance, separated into available, trusted-pending, untrusted-pending and immature
@@ -1287,7 +1308,7 @@ impl Wallet {
         let version = match params.version {
             Some(tx_builder::Version(0)) => return Err(CreateTxError::Version0),
             Some(tx_builder::Version(1)) if requirements.csv.is_some() => {
-                return Err(CreateTxError::Version1Csv)
+                return Err(CreateTxError::Version1Csv);
             }
             Some(tx_builder::Version(x)) => x,
             None if requirements.csv.is_some() => 2,
@@ -1340,7 +1361,7 @@ impl Wallet {
                 return Err(CreateTxError::LockTime {
                     requested: x,
                     required: requirements.timelock.unwrap(),
-                })
+                });
             }
         };
 
@@ -1360,13 +1381,13 @@ impl Wallet {
 
             // RBF with a specific value but that value is too high
             (Some(tx_builder::RbfValue::Value(rbf)), _) if !rbf.is_rbf() => {
-                return Err(CreateTxError::RbfSequence)
+                return Err(CreateTxError::RbfSequence);
             }
             // RBF with a specific value requested, but the value is incompatible with CSV
             (Some(tx_builder::RbfValue::Value(rbf)), Some(csv))
                 if !check_nsequence_rbf(rbf, csv) =>
             {
-                return Err(CreateTxError::RbfSequenceCsv { rbf, csv })
+                return Err(CreateTxError::RbfSequenceCsv { rbf, csv });
             }
 
             // RBF enabled with the default value with CSV also enabled. CSV takes precedence

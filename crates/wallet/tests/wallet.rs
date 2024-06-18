@@ -12,7 +12,7 @@ use bdk_wallet::signer::{SignOptions, SignerError};
 use bdk_wallet::wallet::coin_selection::{self, LargestFirstCoinSelection};
 use bdk_wallet::wallet::error::CreateTxError;
 use bdk_wallet::wallet::tx_builder::AddForeignUtxoError;
-use bdk_wallet::wallet::{AddressInfo, Balance, ChangeSet, NewError, Wallet};
+use bdk_wallet::wallet::{AddressInfo, Balance, ChangeSet, NewError, Wallet, WalletTx};
 use bdk_wallet::KeychainKind;
 use bitcoin::hashes::Hash;
 use bitcoin::key::Secp256k1;
@@ -4078,4 +4078,19 @@ fn test_tx_cancellation() {
 fn test_thread_safety() {
     fn thread_safe<T: Send + Sync>() {}
     thread_safe::<Wallet>(); // compiles only if true
+}
+
+#[test]
+fn test_transactions_sort_by() {
+    let (mut wallet, _txid) = get_funded_wallet_wpkh();
+    receive_output(&mut wallet, 25_000, ConfirmationTime::unconfirmed(0));
+
+    // sort by chain position, unconfirmed then confirmed by descending block height
+    let sorted_txs: Vec<WalletTx> =
+        wallet.transactions_sort_by(|t1, t2| t2.chain_position.cmp(&t1.chain_position));
+    let conf_heights: Vec<Option<u32>> = sorted_txs
+        .iter()
+        .map(|tx| tx.chain_position.confirmation_height_upper_bound())
+        .collect();
+    assert_eq!([None, Some(2000), Some(1000)], conf_heights.as_slice());
 }
