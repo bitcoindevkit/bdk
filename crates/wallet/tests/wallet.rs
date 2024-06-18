@@ -13,7 +13,7 @@ use bdk_wallet::error::CreateTxError;
 use bdk_wallet::psbt::PsbtUtils;
 use bdk_wallet::signer::{SignOptions, SignerError};
 use bdk_wallet::tx_builder::AddForeignUtxoError;
-use bdk_wallet::{AddressInfo, Balance, ChangeSet, Wallet, WalletPersister};
+use bdk_wallet::{AddressInfo, Balance, ChangeSet, Wallet, WalletPersister, WalletTx};
 use bdk_wallet::{KeychainKind, LoadError, LoadMismatch, LoadWithPersistError};
 use bitcoin::constants::ChainHash;
 use bitcoin::hashes::Hash;
@@ -4202,4 +4202,19 @@ fn single_descriptor_wallet_can_create_tx_and_receive_change() {
         KeychainKind::External,
         "tx change should go to external keychain"
     );
+}
+
+#[test]
+fn test_transactions_sort_by() {
+    let (mut wallet, _txid) = get_funded_wallet_wpkh();
+    receive_output(&mut wallet, 25_000, ConfirmationTime::unconfirmed(0));
+
+    // sort by chain position, unconfirmed then confirmed by descending block height
+    let sorted_txs: Vec<WalletTx> =
+        wallet.transactions_sort_by(|t1, t2| t2.chain_position.cmp(&t1.chain_position));
+    let conf_heights: Vec<Option<u32>> = sorted_txs
+        .iter()
+        .map(|tx| tx.chain_position.confirmation_height_upper_bound())
+        .collect();
+    assert_eq!([None, Some(2000), Some(1000)], conf_heights.as_slice());
 }
