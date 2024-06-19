@@ -201,12 +201,14 @@ mod test {
     }
 
     #[test]
+    #[cfg(feature = "std")]
     fn test_shuffle_slice_empty_vec() {
         let mut test: Vec<u8> = vec![];
         shuffle_slice(&mut test, &mut thread_rng());
     }
 
     #[test]
+    #[cfg(feature = "std")]
     fn test_shuffle_slice_single_vec() {
         let mut test: Vec<u8> = vec![0];
         shuffle_slice(&mut test, &mut thread_rng());

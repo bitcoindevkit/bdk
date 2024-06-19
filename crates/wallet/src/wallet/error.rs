@@ -44,9 +44,9 @@ impl fmt::Display for MiniscriptPsbtError {
 impl std::error::Error for MiniscriptPsbtError {}
 
 #[derive(Debug)]
-/// Error returned from [`TxBuilder::finish_with_aux_rand`]
+/// Error returned from [`TxBuilder::finish`]
 ///
-/// [`TxBuilder::finish_with_aux_rand`]: crate::wallet::tx_builder::TxBuilder::finish_with_aux_rand
+/// [`TxBuilder::finish`]: crate::wallet::tx_builder::TxBuilder::finish
 pub enum CreateTxError {
     /// There was a problem with the descriptors passed in
     Descriptor(DescriptorError),

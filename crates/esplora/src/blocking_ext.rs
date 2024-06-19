@@ -1,6 +1,5 @@
 use std::collections::BTreeSet;
 use std::thread::JoinHandle;
-use std::usize;
 
 use bdk_chain::collections::BTreeMap;
 use bdk_chain::spk_client::{FullScanRequest, FullScanResult, SyncRequest, SyncResult};

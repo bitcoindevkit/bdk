@@ -20,7 +20,6 @@
 //! # use bdk_wallet::wallet::ChangeSet;
 //! # use bdk_wallet::wallet::error::CreateTxError;
 //! # use anyhow::Error;
-//! # use rand::thread_rng;
 //! # let to_address = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap().assume_checked();
 //! # let mut wallet = doctest_wallet!();
 //! // create a TxBuilder from a wallet
@@ -35,7 +34,7 @@
 //!     .do_not_spend_change()
 //!     // Turn on RBF signaling
 //!     .enable_rbf();
-//! let psbt = tx_builder.finish_with_aux_rand(&mut thread_rng())?;
+//! let psbt = tx_builder.finish()?;
 //! # Ok::<(), anyhow::Error>(())
 //! ```
 
@@ -57,7 +56,7 @@ use crate::{KeychainKind, LocalOutput, Utxo, WeightedUtxo};
 /// A transaction builder
 ///
 /// A `TxBuilder` is created by calling [`build_tx`] or [`build_fee_bump`] on a wallet. After
-/// assigning it, you set options on it until finally calling [`finish_with_aux_rand`] to consume the builder and
+/// assigning it, you set options on it until finally calling [`finish`] to consume the builder and
 /// generate the transaction.
 ///
 /// Each option setting method on `TxBuilder` takes and returns `&mut self` so you can chain calls
@@ -71,7 +70,6 @@ use crate::{KeychainKind, LocalOutput, Utxo, WeightedUtxo};
 /// # use bdk_wallet::wallet::ChangeSet;
 /// # use bdk_wallet::wallet::error::CreateTxError;
 /// # use anyhow::Error;
-/// # use rand::thread_rng;
 /// # let mut wallet = doctest_wallet!();
 /// # let addr1 = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap().assume_checked();
 /// # let addr2 = addr1.clone();
@@ -82,7 +80,7 @@ use crate::{KeychainKind, LocalOutput, Utxo, WeightedUtxo};
 ///         .ordering(TxOrdering::Untouched)
 ///         .add_recipient(addr1.script_pubkey(), Amount::from_sat(50_000))
 ///         .add_recipient(addr2.script_pubkey(), Amount::from_sat(50_000));
-///     builder.finish_with_aux_rand(&mut thread_rng())?
+///     builder.finish()?
 /// };
 ///
 /// // non-chaining
@@ -92,7 +90,7 @@ use crate::{KeychainKind, LocalOutput, Utxo, WeightedUtxo};
 ///     for addr in &[addr1, addr2] {
 ///         builder.add_recipient(addr.script_pubkey(), Amount::from_sat(50_000));
 ///     }
-///     builder.finish_with_aux_rand(&mut thread_rng())?
+///     builder.finish()?
 /// };
 ///
 /// assert_eq!(psbt1.unsigned_tx.output[..2], psbt2.unsigned_tx.output[..2]);
@@ -106,7 +104,7 @@ use crate::{KeychainKind, LocalOutput, Utxo, WeightedUtxo};
 ///
 /// [`build_tx`]: Wallet::build_tx
 /// [`build_fee_bump`]: Wallet::build_fee_bump
-/// [`finish_with_aux_rand`]: Self::finish_with_aux_rand
+/// [`finish`]: Self::finish
 /// [`coin_selection`]: Self::coin_selection
 #[derive(Debug)]
 pub struct TxBuilder<'a, Cs> {
@@ -358,11 +356,11 @@ impl<'a, Cs> TxBuilder<'a, Cs> {
     /// 2. The data in `non_witness_utxo` does not match what is in `outpoint`.
     ///
     /// Note unless you set [`only_witness_utxo`] any non-taproot `psbt_input` you pass to this
-    /// method must have `non_witness_utxo` set otherwise you will get an error when [`finish_with_aux_rand`]
+    /// method must have `non_witness_utxo` set otherwise you will get an error when [`finish`]
     /// is called.
     ///
     /// [`only_witness_utxo`]: Self::only_witness_utxo
-    /// [`finish_with_aux_rand`]: Self::finish_with_aux_rand
+    /// [`finish`]: Self::finish
     /// [`max_weight_to_satisfy`]: miniscript::Descriptor::max_weight_to_satisfy
     pub fn add_foreign_utxo(
         &mut self,
@@ -643,7 +641,6 @@ impl<'a, Cs> TxBuilder<'a, Cs> {
     /// # use bdk_wallet::wallet::ChangeSet;
     /// # use bdk_wallet::wallet::error::CreateTxError;
     /// # use anyhow::Error;
-    /// # use rand::thread_rng;
     /// # let to_address =
     /// Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt")
     ///     .unwrap()
@@ -658,7 +655,7 @@ impl<'a, Cs> TxBuilder<'a, Cs> {
     ///     .drain_to(to_address.script_pubkey())
     ///     .fee_rate(FeeRate::from_sat_per_vb(5).expect("valid feerate"))
     ///     .enable_rbf();
-    /// let psbt = tx_builder.finish_with_aux_rand(&mut thread_rng())?;
+    /// let psbt = tx_builder.finish()?;
     /// # Ok::<(), anyhow::Error>(())
     /// ```
     ///
@@ -673,6 +670,23 @@ impl<'a, Cs> TxBuilder<'a, Cs> {
 
 impl<'a, Cs: CoinSelectionAlgorithm> TxBuilder<'a, Cs> {
     /// Finish building the transaction.
+    ///
+    /// Uses the thread-local random number generator (rng).
+    ///
+    /// Returns a new [`Psbt`] per [`BIP174`].
+    ///
+    /// [`BIP174`]: https://github.com/bitcoin/bips/blob/master/bip-0174.mediawiki
+    ///
+    /// **WARNING**: To avoid change address reuse you must persist the changes resulting from one
+    /// or more calls to this method before closing the wallet. See [`Wallet::reveal_next_address`].
+    #[cfg(feature = "std")]
+    pub fn finish(self) -> Result<Psbt, CreateTxError> {
+        self.finish_with_aux_rand(&mut bitcoin::key::rand::thread_rng())
+    }
+
+    /// Finish building the transaction.
+    ///
+    /// Uses a provided random number generator (rng).
     ///
     /// Returns a new [`Psbt`] per [`BIP174`].
     ///
@@ -762,7 +776,17 @@ pub enum TxOrdering {
 }
 
 impl TxOrdering {
-    /// Sort transaction inputs and outputs by [`TxOrdering`] variant
+    /// Sort transaction inputs and outputs by [`TxOrdering`] variant.
+    ///
+    /// Uses the thread-local random number generator (rng).
+    #[cfg(feature = "std")]
+    pub fn sort_tx(self, tx: &mut Transaction) {
+        self.sort_tx_with_aux_rand(tx, &mut bitcoin::key::rand::thread_rng())
+    }
+
+    /// Sort transaction inputs and outputs by [`TxOrdering`] variant.
+    ///
+    /// Uses a provided random number generator (rng).
     pub fn sort_tx_with_aux_rand(self, tx: &mut Transaction, rng: &mut impl RngCore) {
         match self {
             TxOrdering::Untouched => {}
@@ -852,16 +876,14 @@ mod test {
     use bitcoin::consensus::deserialize;
     use bitcoin::hex::FromHex;
     use bitcoin::TxOut;
-    use rand::thread_rng;
 
     use super::*;
     #[test]
     fn test_output_ordering_untouched() {
         let original_tx = ordering_test_tx!();
         let mut tx = original_tx.clone();
-        let mut rng = thread_rng();
 
-        TxOrdering::Untouched.sort_tx_with_aux_rand(&mut tx, &mut rng);
+        TxOrdering::Untouched.sort_tx(&mut tx);
 
         assert_eq!(original_tx, tx);
     }
@@ -870,11 +892,10 @@ mod test {
     fn test_output_ordering_shuffle() {
         let original_tx = ordering_test_tx!();
         let mut tx = original_tx.clone();
-        let mut rng = thread_rng();
 
         (0..40)
             .find(|_| {
-                TxOrdering::Shuffle.sort_tx_with_aux_rand(&mut tx, &mut rng);
+                TxOrdering::Shuffle.sort_tx(&mut tx);
                 original_tx.input != tx.input
             })
             .expect("it should have moved the inputs at least once");
@@ -882,7 +903,7 @@ mod test {
         let mut tx = original_tx.clone();
         (0..40)
             .find(|_| {
-                TxOrdering::Shuffle.sort_tx_with_aux_rand(&mut tx, &mut rng);
+                TxOrdering::Shuffle.sort_tx(&mut tx);
                 original_tx.output != tx.output
             })
             .expect("it should have moved the outputs at least once");
@@ -894,9 +915,8 @@ mod test {
 
         let original_tx = ordering_test_tx!();
         let mut tx = original_tx;
-        let mut rng = thread_rng();
 
-        TxOrdering::Bip69Lexicographic.sort_tx_with_aux_rand(&mut tx, &mut rng);
+        TxOrdering::Bip69Lexicographic.sort_tx(&mut tx);
 
         assert_eq!(
             tx.input[0].previous_output,

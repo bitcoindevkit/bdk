@@ -31,8 +31,6 @@
 //! # use bdk_wallet::*;
 //! # use bdk_wallet::wallet::coin_selection::decide_change;
 //! # use anyhow::Error;
-//! # use rand::{thread_rng, RngCore};
-//!
 //! #[derive(Debug)]
 //! struct AlwaysSpendEverything;
 //!
@@ -94,7 +92,7 @@
 //! let psbt = {
 //!     let mut builder = wallet.build_tx().coin_selection(AlwaysSpendEverything);
 //!     builder.add_recipient(to_address.script_pubkey(), Amount::from_sat(50_000));
-//!     builder.finish_with_aux_rand(&mut thread_rng())?
+//!     builder.finish()?
 //! };
 //!
 //! // inspect, sign, broadcast, ...
