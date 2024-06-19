@@ -97,8 +97,9 @@ fn load_recovers_wallet() -> anyhow::Result<()> {
 
             // persist new wallet changes
             let mut db = create_new(&file_path).expect("must create db");
-            if let Some(changeset) = wallet.take_staged() {
-                write(&mut db, &changeset)?;
+            if let Some(changeset) = wallet.staged() {
+                write(&mut db, changeset)?;
+                wallet.take_staged();
             }
             wallet.spk_index().clone()
         };
@@ -171,8 +172,9 @@ fn new_or_load() -> anyhow::Result<()> {
             let wallet = &mut Wallet::new_or_load(desc, change_desc, None, Network::Testnet)
                 .expect("must init wallet");
             let mut db = new_or_load(&file_path).expect("must create db");
-            if let Some(changeset) = wallet.take_staged() {
-                write(&mut db, &changeset)?;
+            if let Some(changeset) = wallet.staged() {
+                write(&mut db, changeset)?;
+                wallet.take_staged();
             }
             wallet.keychains().map(|(k, v)| (*k, v.clone())).collect()
         };

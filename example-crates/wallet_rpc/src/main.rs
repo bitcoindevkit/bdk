@@ -146,8 +146,9 @@ fn main() -> anyhow::Result<()> {
                 let connected_to = block_emission.connected_to();
                 let start_apply_block = Instant::now();
                 wallet.apply_block_connected_to(&block_emission.block, height, connected_to)?;
-                if let Some(changeset) = wallet.take_staged() {
-                    db.append_changeset(&changeset)?;
+                if let Some(changeset) = wallet.staged() {
+                    db.append_changeset(changeset)?;
+                    wallet.take_staged();
                 }
                 let elapsed = start_apply_block.elapsed().as_secs_f32();
                 println!(
@@ -158,8 +159,9 @@ fn main() -> anyhow::Result<()> {
             Emission::Mempool(mempool_emission) => {
                 let start_apply_mempool = Instant::now();
                 wallet.apply_unconfirmed_txs(mempool_emission.iter().map(|(tx, time)| (tx, *time)));
-                if let Some(changeset) = wallet.take_staged() {
-                    db.append_changeset(&changeset)?;
+                if let Some(changeset) = wallet.staged() {
+                    db.append_changeset(changeset)?;
+                    wallet.take_staged();
                 }
                 println!(
                     "Applied unconfirmed transactions in {}s",

@@ -670,8 +670,11 @@ impl Wallet {
     /// # let changeset = ChangeSet::default();
     /// # let mut wallet = Wallet::load_from_changeset(changeset).expect("load wallet");
     /// let next_address = wallet.reveal_next_address(KeychainKind::External);
-    /// if let Some(changeset) = wallet.take_staged() {
+    /// if let Some(changeset) = wallet.staged() {
+    ///     // write staged wallet changes to db
     ///     db.write(&changeset)?;
+    ///     // remove staged changes from wallet
+    ///     wallet.take_staged();
     /// }
     ///
     /// // Now it's safe to show the user their next address!
