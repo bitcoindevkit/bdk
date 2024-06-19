@@ -633,8 +633,18 @@ pub trait GeneratableKey<Ctx: ScriptContext>: Sized {
         entropy: Self::Entropy,
     ) -> Result<GeneratedKey<Self, Ctx>, Self::Error>;
 
-    /// Generate a key given the options with a random entropy
-    fn generate(
+    /// Generate a key given the options with random entropy.
+    ///
+    /// Uses the thread-local random number generator.
+    #[cfg(feature = "std")]
+    fn generate(options: Self::Options) -> Result<GeneratedKey<Self, Ctx>, Self::Error> {
+        Self::generate_with_aux_rand(options, &mut bitcoin::key::rand::thread_rng())
+    }
+
+    /// Generate a key given the options with random entropy.
+    ///
+    /// Uses a provided random number generator (rng).
+    fn generate_with_aux_rand(
         options: Self::Options,
         rng: &mut (impl CryptoRng + RngCore),
     ) -> Result<GeneratedKey<Self, Ctx>, Self::Error> {
@@ -660,10 +670,20 @@ where
     }
 
     /// Generate a key with the default options and a random entropy
-    fn generate_default(
+    ///
+    /// Uses the thread-local random number generator.
+    #[cfg(feature = "std")]
+    fn generate_default() -> Result<GeneratedKey<Self, Ctx>, Self::Error> {
+        Self::generate_with_aux_rand(Default::default(), &mut bitcoin::key::rand::thread_rng())
+    }
+
+    /// Generate a key with the default options and a random entropy
+    ///
+    /// Uses a provided random number generator (rng).
+    fn generate_default_with_aux_rand(
         rng: &mut (impl CryptoRng + RngCore),
     ) -> Result<GeneratedKey<Self, Ctx>, Self::Error> {
-        Self::generate(Default::default(), rng)
+        Self::generate_with_aux_rand(Default::default(), rng)
     }
 }
 

@@ -11,7 +11,6 @@ use bdk_wallet::{
     bitcoin::{Address, Amount, Network},
     KeychainKind, SignOptions, Wallet,
 };
-use rand::thread_rng;
 
 fn main() -> Result<(), anyhow::Error> {
     let db_path = std::env::temp_dir().join("bdk-esplora-example");
@@ -81,7 +80,7 @@ fn main() -> Result<(), anyhow::Error> {
         .add_recipient(faucet_address.script_pubkey(), SEND_AMOUNT)
         .enable_rbf();
 
-    let mut psbt = tx_builder.finish_with_aux_rand(&mut thread_rng())?;
+    let mut psbt = tx_builder.finish()?;
     let finalized = wallet.sign(&mut psbt, SignOptions::default())?;
     assert!(finalized);
 

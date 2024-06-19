@@ -70,30 +70,28 @@ To persist `Wallet` state data use a data store crate that reads and writes [`bd
 ```rust,no_run
 use bdk_wallet::{bitcoin::Network, KeychainKind, wallet::{ChangeSet, Wallet}};
 
-fn main() {
-    // Open or create a new file store for wallet data.
-    let mut db =
-        bdk_file_store::Store::<ChangeSet>::open_or_create_new(b"magic_bytes", "/tmp/my_wallet.db")
-            .expect("create store");
+// Open or create a new file store for wallet data.
+let mut db =
+    bdk_file_store::Store::<ChangeSet>::open_or_create_new(b"magic_bytes", "/tmp/my_wallet.db")
+        .expect("create store");
 
-    // Create a wallet with initial wallet data read from the file store.
-    let descriptor = "wpkh(tprv8ZgxMBicQKsPdcAqYBpzAFwU5yxBUo88ggoBqu1qPcHUfSbKK1sKMLmC7EAk438btHQrSdu3jGGQa6PA71nvH5nkDexhLteJqkM4dQmWF9g/84'/1'/0'/0/*)";
-    let change_descriptor = "wpkh(tprv8ZgxMBicQKsPdcAqYBpzAFwU5yxBUo88ggoBqu1qPcHUfSbKK1sKMLmC7EAk438btHQrSdu3jGGQa6PA71nvH5nkDexhLteJqkM4dQmWF9g/84'/1'/0'/1/*)";
-    let changeset = db.aggregate_changesets().expect("changeset loaded");
-    let mut wallet =
-        Wallet::new_or_load(descriptor, change_descriptor, changeset, Network::Testnet)
-            .expect("create or load wallet");
+// Create a wallet with initial wallet data read from the file store.
+let descriptor = "wpkh(tprv8ZgxMBicQKsPdcAqYBpzAFwU5yxBUo88ggoBqu1qPcHUfSbKK1sKMLmC7EAk438btHQrSdu3jGGQa6PA71nvH5nkDexhLteJqkM4dQmWF9g/84'/1'/0'/0/*)";
+let change_descriptor = "wpkh(tprv8ZgxMBicQKsPdcAqYBpzAFwU5yxBUo88ggoBqu1qPcHUfSbKK1sKMLmC7EAk438btHQrSdu3jGGQa6PA71nvH5nkDexhLteJqkM4dQmWF9g/84'/1'/0'/1/*)";
+let changeset = db.aggregate_changesets().expect("changeset loaded");
+let mut wallet =
+    Wallet::new_or_load(descriptor, change_descriptor, changeset, Network::Testnet)
+        .expect("create or load wallet");
 
-    // Get a new address to receive bitcoin.
-    let receive_address = wallet.reveal_next_address(KeychainKind::External);
-    // Persist staged wallet data changes to the file store.
-    let staged_changeset = wallet.take_staged();
-    if let Some(changeset) = staged_changeset {
-        db.append_changeset(&changeset)
-            .expect("must commit changes to database");
-    }
-    println!("Your new receive address is: {}", receive_address.address);
+// Get a new address to receive bitcoin.
+let receive_address = wallet.reveal_next_address(KeychainKind::External);
+// Persist staged wallet data changes to the file store.
+let staged_changeset = wallet.take_staged();
+if let Some(changeset) = staged_changeset {
+    db.append_changeset(&changeset)
+        .expect("must commit changes to database");
 }
+println!("Your new receive address is: {}", receive_address.address);
 ```
 
 <!-- ### Sync the balance of a descriptor -->
@@ -154,7 +152,6 @@ fn main() {
 <!-- use bitcoin::base64; -->
 <!-- use bdk_wallet::bitcoin::consensus::serialize; -->
 <!-- use bdk_wallet::bitcoin::Network; -->
-<!-- use rand::thread_rng(); -->
 
 <!-- fn main() -> Result<(), bdk_wallet::Error> { -->
 <!--     let blockchain = ElectrumBlockchain::from(Client::new("ssl://electrum.blockstream.info:60002")?); -->
@@ -174,7 +171,7 @@ fn main() {
 <!--             .enable_rbf() -->
 <!--             .do_not_spend_change() -->
 <!--             .fee_rate(FeeRate::from_sat_per_vb(5.0)); -->
-<!--         builder.finish_with_aux_rand(&mut thread_rng())? -->
+<!--         builder.finish()? -->
 <!--     }; -->
 
 <!--     println!("Transaction details: {:#?}", details); -->

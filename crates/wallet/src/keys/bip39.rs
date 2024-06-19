@@ -158,8 +158,6 @@ mod test {
 
     use bip39::{Language, Mnemonic};
 
-    use rand::thread_rng;
-
     use crate::keys::{any_network, GeneratableKey, GeneratedKey};
 
     use super::WordCount;
@@ -218,12 +216,12 @@ mod test {
 
     #[test]
     fn test_keys_generate_bip39_random() {
-        let mut rng = thread_rng();
         let generated_mnemonic: GeneratedKey<_, miniscript::Segwitv0> =
-            Mnemonic::generate((WordCount::Words12, Language::English), &mut rng).unwrap();
+            Mnemonic::generate((WordCount::Words12, Language::English)).unwrap();
         assert_eq!(generated_mnemonic.valid_networks, any_network());
+
         let generated_mnemonic: GeneratedKey<_, miniscript::Segwitv0> =
-            Mnemonic::generate((WordCount::Words24, Language::English), &mut rng).unwrap();
+            Mnemonic::generate((WordCount::Words24, Language::English)).unwrap();
         assert_eq!(generated_mnemonic.valid_networks, any_network());
     }
 }

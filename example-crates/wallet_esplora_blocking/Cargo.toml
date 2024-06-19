@@ -11,4 +11,3 @@ bdk_wallet = { path = "../../crates/wallet" }
 bdk_esplora = { path = "../../crates/esplora", features = ["blocking"] }
 bdk_file_store = { path = "../../crates/file_store" }
 anyhow = "1"
-rand = "0.8.0"
