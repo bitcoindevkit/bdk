@@ -2781,36 +2781,6 @@ fn test_signing_only_one_of_multiple_inputs() {
 }
 
 #[test]
-fn test_remove_partial_sigs_after_finalize_sign_option() {
-    let (mut wallet, _) = get_funded_wallet("wpkh(tprv8ZgxMBicQKsPd3EupYiPRhaMooHKUHJxNsTfYuScep13go8QFfHdtkG9nRkFGb7busX4isf6X9dURGCoKgitaApQ6MupRhZMcELAxTBRJgS/*)");
-
-    for remove_partial_sigs in &[true, false] {
-        let addr = wallet.next_unused_address(KeychainKind::External);
-        let mut builder = wallet.build_tx();
-        builder.drain_to(addr.script_pubkey()).drain_wallet();
-        let mut psbt = builder.finish().unwrap();
-
-        assert!(wallet
-            .sign(
-                &mut psbt,
-                SignOptions {
-                    remove_partial_sigs: *remove_partial_sigs,
-                    ..Default::default()
-                },
-            )
-            .unwrap());
-
-        psbt.inputs.iter().for_each(|input| {
-            if *remove_partial_sigs {
-                assert!(input.partial_sigs.is_empty())
-            } else {
-                assert!(!input.partial_sigs.is_empty())
-            }
-        });
-    }
-}
-
-#[test]
 fn test_try_finalize_sign_option() {
     let (mut wallet, _) = get_funded_wallet("wpkh(tprv8ZgxMBicQKsPd3EupYiPRhaMooHKUHJxNsTfYuScep13go8QFfHdtkG9nRkFGb7busX4isf6X9dURGCoKgitaApQ6MupRhZMcELAxTBRJgS/*)");
 
@@ -2833,12 +2803,61 @@ fn test_try_finalize_sign_option() {
         psbt.inputs.iter().for_each(|input| {
             if *try_finalize {
                 assert!(finalized);
-                assert!(input.final_script_sig.is_some());
+                assert!(input.final_script_sig.is_none());
                 assert!(input.final_script_witness.is_some());
             } else {
                 assert!(!finalized);
                 assert!(input.final_script_sig.is_none());
                 assert!(input.final_script_witness.is_none());
+            }
+        });
+    }
+}
+
+#[test]
+fn test_taproot_try_finalize_sign_option() {
+    let (mut wallet, _) = get_funded_wallet(get_test_tr_with_taptree());
+
+    for try_finalize in &[true, false] {
+        let addr = wallet.next_unused_address(KeychainKind::External);
+        let mut builder = wallet.build_tx();
+        builder.drain_to(addr.script_pubkey()).drain_wallet();
+        let mut psbt = builder.finish().unwrap();
+
+        let finalized = wallet
+            .sign(
+                &mut psbt,
+                SignOptions {
+                    try_finalize: *try_finalize,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+
+        psbt.inputs.iter().for_each(|input| {
+            if *try_finalize {
+                assert!(finalized);
+                assert!(input.final_script_sig.is_none());
+                assert!(input.final_script_witness.is_some());
+                assert!(input.tap_key_sig.is_none());
+                assert!(input.tap_script_sigs.is_empty());
+                assert!(input.tap_scripts.is_empty());
+                assert!(input.tap_key_origins.is_empty());
+                assert!(input.tap_internal_key.is_none());
+                assert!(input.tap_merkle_root.is_none());
+            } else {
+                assert!(!finalized);
+                assert!(input.final_script_sig.is_none());
+                assert!(input.final_script_witness.is_none());
+            }
+        });
+        psbt.outputs.iter().for_each(|output| {
+            if *try_finalize {
+                assert!(finalized);
+                assert!(output.tap_key_origins.is_empty());
+            } else {
+                assert!(!finalized);
+                assert!(!output.tap_key_origins.is_empty());
             }
         });
     }
@@ -3162,32 +3181,6 @@ fn test_get_address_no_reuse() {
         let internal_addr = wallet.reveal_next_address(KeychainKind::Internal).address;
         assert!(used_set.insert(internal_addr));
     });
-}
-
-#[test]
-fn test_taproot_remove_tapfields_after_finalize_sign_option() {
-    let (mut wallet, _) = get_funded_wallet(get_test_tr_with_taptree());
-
-    let addr = wallet.next_unused_address(KeychainKind::External);
-    let mut builder = wallet.build_tx();
-    builder.drain_to(addr.script_pubkey()).drain_wallet();
-    let mut psbt = builder.finish().unwrap();
-    let finalized = wallet.sign(&mut psbt, SignOptions::default()).unwrap();
-    assert!(finalized);
-
-    // removes tap_* from inputs
-    for input in &psbt.inputs {
-        assert!(input.tap_key_sig.is_none());
-        assert!(input.tap_script_sigs.is_empty());
-        assert!(input.tap_scripts.is_empty());
-        assert!(input.tap_key_origins.is_empty());
-        assert!(input.tap_internal_key.is_none());
-        assert!(input.tap_merkle_root.is_none());
-    }
-    // removes key origins from outputs
-    for output in &psbt.outputs {
-        assert!(output.tap_key_origins.is_empty());
-    }
 }
 
 #[test]
@@ -3922,7 +3915,6 @@ fn test_fee_rate_sign_no_grinding_high_r() {
             .sign(
                 &mut psbt,
                 SignOptions {
-                    remove_partial_sigs: false,
                     try_finalize: false,
                     allow_grinding: false,
                     ..Default::default()
@@ -3941,7 +3933,6 @@ fn test_fee_rate_sign_no_grinding_high_r() {
         .sign(
             &mut psbt,
             SignOptions {
-                remove_partial_sigs: false,
                 allow_grinding: false,
                 ..Default::default()
             },
@@ -3972,7 +3963,7 @@ fn test_fee_rate_sign_grinding_low_r() {
         .sign(
             &mut psbt,
             SignOptions {
-                remove_partial_sigs: false,
+                try_finalize: false,
                 allow_grinding: true,
                 ..Default::default()
             },
