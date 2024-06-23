@@ -24,6 +24,8 @@ use bitcoin::{
     absolute, transaction, Address, Amount, BlockHash, FeeRate, Network, OutPoint, ScriptBuf,
     Sequence, Transaction, TxIn, TxOut, Txid, Weight,
 };
+use rand::rngs::StdRng;
+use rand::SeedableRng;
 
 mod common;
 use common::*;
@@ -907,14 +909,15 @@ fn test_create_tx_absolute_high_fee() {
 #[test]
 fn test_create_tx_add_change() {
     use bdk_wallet::wallet::tx_builder::TxOrdering;
-
+    let seed = [0; 32];
+    let mut rng: StdRng = SeedableRng::from_seed(seed);
     let (mut wallet, _) = get_funded_wallet_wpkh();
     let addr = wallet.next_unused_address(KeychainKind::External);
     let mut builder = wallet.build_tx();
     builder
         .add_recipient(addr.script_pubkey(), Amount::from_sat(25_000))
-        .ordering(TxOrdering::Untouched);
-    let psbt = builder.finish().unwrap();
+        .ordering(TxOrdering::Shuffle);
+    let psbt = builder.finish_with_aux_rand(&mut rng).unwrap();
     let fee = check_fee!(wallet, psbt);
 
     assert_eq!(psbt.unsigned_tx.output.len(), 2);

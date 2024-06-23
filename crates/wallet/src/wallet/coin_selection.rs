@@ -114,8 +114,9 @@ use bitcoin::{Script, Weight};
 
 use core::convert::TryInto;
 use core::fmt::{self, Formatter};
-use rand::seq::SliceRandom;
+use rand_core::RngCore;
 
+use super::utils::shuffle_slice;
 /// Default coin selection algorithm used by [`TxBuilder`](super::tx_builder::TxBuilder) if not
 /// overridden
 pub type DefaultCoinSelectionAlgorithm = BranchAndBoundCoinSelection;
@@ -516,27 +517,16 @@ impl CoinSelectionAlgorithm for BranchAndBoundCoinSelection {
             ));
         }
 
-        Ok(self
-            .bnb(
-                required_utxos.clone(),
-                optional_utxos.clone(),
-                curr_value,
-                curr_available_value,
-                target_amount,
-                cost_of_change,
-                drain_script,
-                fee_rate,
-            )
-            .unwrap_or_else(|_| {
-                self.single_random_draw(
-                    required_utxos,
-                    optional_utxos,
-                    curr_value,
-                    target_amount,
-                    drain_script,
-                    fee_rate,
-                )
-            }))
+        self.bnb(
+            required_utxos.clone(),
+            optional_utxos.clone(),
+            curr_value,
+            curr_available_value,
+            target_amount,
+            cost_of_change,
+            drain_script,
+            fee_rate,
+        )
     }
 }
 
@@ -663,40 +653,6 @@ impl BranchAndBoundCoinSelection {
         ))
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn single_random_draw(
-        &self,
-        required_utxos: Vec<OutputGroup>,
-        mut optional_utxos: Vec<OutputGroup>,
-        curr_value: i64,
-        target_amount: i64,
-        drain_script: &Script,
-        fee_rate: FeeRate,
-    ) -> CoinSelectionResult {
-        optional_utxos.shuffle(&mut rand::thread_rng());
-        let selected_utxos = optional_utxos.into_iter().fold(
-            (curr_value, vec![]),
-            |(mut amount, mut utxos), utxo| {
-                if amount >= target_amount {
-                    (amount, utxos)
-                } else {
-                    amount += utxo.effective_value;
-                    utxos.push(utxo);
-                    (amount, utxos)
-                }
-            },
-        );
-
-        // remaining_amount can't be negative as that would mean the
-        // selection wasn't successful
-        // target_amount = amount_needed + (fee_amount - vin_fees)
-        let remaining_amount = (selected_utxos.0 - target_amount) as u64;
-
-        let excess = decide_change(remaining_amount, fee_rate, drain_script);
-
-        BranchAndBoundCoinSelection::calculate_cs_result(selected_utxos.1, required_utxos, excess)
-    }
-
     fn calculate_cs_result(
         mut selected_utxos: Vec<OutputGroup>,
         mut required_utxos: Vec<OutputGroup>,
@@ -715,6 +671,58 @@ impl BranchAndBoundCoinSelection {
             excess,
         }
     }
+}
+
+// Pull UTXOs at random until we have enough to meet the target
+pub(crate) fn single_random_draw(
+    required_utxos: Vec<WeightedUtxo>,
+    optional_utxos: Vec<WeightedUtxo>,
+    target_amount: u64,
+    drain_script: &Script,
+    fee_rate: FeeRate,
+    rng: &mut impl RngCore,
+) -> CoinSelectionResult {
+    let target_amount = target_amount
+        .try_into()
+        .expect("Bitcoin amount to fit into i64");
+
+    let required_utxos: Vec<OutputGroup> = required_utxos
+        .into_iter()
+        .map(|u| OutputGroup::new(u, fee_rate))
+        .collect();
+
+    let mut optional_utxos: Vec<OutputGroup> = optional_utxos
+        .into_iter()
+        .map(|u| OutputGroup::new(u, fee_rate))
+        .collect();
+
+    let curr_value = required_utxos
+        .iter()
+        .fold(0, |acc, x| acc + x.effective_value);
+
+    shuffle_slice(&mut optional_utxos, rng);
+
+    let selected_utxos =
+        optional_utxos
+            .into_iter()
+            .fold((curr_value, vec![]), |(mut amount, mut utxos), utxo| {
+                if amount >= target_amount {
+                    (amount, utxos)
+                } else {
+                    amount += utxo.effective_value;
+                    utxos.push(utxo);
+                    (amount, utxos)
+                }
+            });
+
+    // remaining_amount can't be negative as that would mean the
+    // selection wasn't successful
+    // target_amount = amount_needed + (fee_amount - vin_fees)
+    let remaining_amount = (selected_utxos.0 - target_amount) as u64;
+
+    let excess = decide_change(remaining_amount, fee_rate, drain_script);
+
+    BranchAndBoundCoinSelection::calculate_cs_result(selected_utxos.1, required_utxos, excess)
 }
 
 /// Remove duplicate UTXOs.
@@ -740,6 +748,7 @@ where
 mod test {
     use assert_matches::assert_matches;
     use core::str::FromStr;
+    use rand::rngs::StdRng;
 
     use bdk_chain::ConfirmationTime;
     use bitcoin::{Amount, ScriptBuf, TxIn, TxOut};
@@ -748,8 +757,7 @@ mod test {
     use crate::types::*;
     use crate::wallet::coin_selection::filter_duplicates;
 
-    use rand::rngs::StdRng;
-    use rand::seq::SliceRandom;
+    use rand::prelude::SliceRandom;
     use rand::{Rng, RngCore, SeedableRng};
 
     // signature len (1WU) + signature and sighash (72WU)
@@ -1090,13 +1098,12 @@ mod test {
     }
 
     #[test]
+    #[ignore = "SRD fn was moved out of BnB"]
     fn test_bnb_coin_selection_success() {
         // In this case bnb won't find a suitable match and single random draw will
         // select three outputs
         let utxos = generate_same_value_utxos(100_000, 20);
-
         let drain_script = ScriptBuf::default();
-
         let target_amount = 250_000 + FEE_AMOUNT;
 
         let result = BranchAndBoundCoinSelection::default()
@@ -1136,6 +1143,7 @@ mod test {
     }
 
     #[test]
+    #[ignore = "no exact match for bnb, previously fell back to SRD"]
     fn test_bnb_coin_selection_optional_are_enough() {
         let utxos = get_test_utxos();
         let drain_script = ScriptBuf::default();
@@ -1154,6 +1162,26 @@ mod test {
         assert_eq!(result.selected.len(), 2);
         assert_eq!(result.selected_amount(), 300000);
         assert_eq!(result.fee_amount, 136);
+    }
+
+    #[test]
+    fn test_single_random_draw_function_success() {
+        let seed = [0; 32];
+        let mut rng: StdRng = SeedableRng::from_seed(seed);
+        let mut utxos = generate_random_utxos(&mut rng, 300);
+        let target_amount = sum_random_utxos(&mut rng, &mut utxos) + FEE_AMOUNT;
+        let fee_rate = FeeRate::from_sat_per_vb_unchecked(1);
+        let drain_script = ScriptBuf::default();
+        let result = single_random_draw(
+            vec![],
+            utxos,
+            target_amount,
+            &drain_script,
+            fee_rate,
+            &mut rng,
+        );
+        assert!(result.selected_amount() > target_amount);
+        assert_eq!(result.fee_amount, (result.selected.len() * 68) as u64);
     }
 
     #[test]
@@ -1408,34 +1436,6 @@ mod test {
                 .unwrap();
             assert_eq!(result.selected_amount(), target_amount as u64);
         }
-    }
-
-    #[test]
-    fn test_single_random_draw_function_success() {
-        let seed = [0; 32];
-        let mut rng: StdRng = SeedableRng::from_seed(seed);
-        let mut utxos = generate_random_utxos(&mut rng, 300);
-        let target_amount = sum_random_utxos(&mut rng, &mut utxos) + FEE_AMOUNT;
-
-        let fee_rate = FeeRate::from_sat_per_vb_unchecked(1);
-        let utxos: Vec<OutputGroup> = utxos
-            .into_iter()
-            .map(|u| OutputGroup::new(u, fee_rate))
-            .collect();
-
-        let drain_script = ScriptBuf::default();
-
-        let result = BranchAndBoundCoinSelection::default().single_random_draw(
-            vec![],
-            utxos,
-            0,
-            target_amount as i64,
-            &drain_script,
-            fee_rate,
-        );
-
-        assert!(result.selected_amount() > target_amount);
-        assert_eq!(result.fee_amount, (result.selected.len() * 68) as u64);
     }
 
     #[test]

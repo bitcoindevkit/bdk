@@ -45,8 +45,10 @@ use core::fmt;
 use bitcoin::psbt::{self, Psbt};
 use bitcoin::script::PushBytes;
 use bitcoin::{absolute, Amount, FeeRate, OutPoint, ScriptBuf, Sequence, Transaction, Txid};
+use rand_core::RngCore;
 
 use super::coin_selection::CoinSelectionAlgorithm;
+use super::utils::shuffle_slice;
 use super::{CreateTxError, Wallet};
 use crate::collections::{BTreeMap, HashSet};
 use crate::{KeychainKind, LocalOutput, Utxo, WeightedUtxo};
@@ -669,16 +671,33 @@ impl<'a, Cs> TxBuilder<'a, Cs> {
 impl<'a, Cs: CoinSelectionAlgorithm> TxBuilder<'a, Cs> {
     /// Finish building the transaction.
     ///
+    /// Uses the thread-local random number generator (rng).
+    ///
     /// Returns a new [`Psbt`] per [`BIP174`].
     ///
     /// [`BIP174`]: https://github.com/bitcoin/bips/blob/master/bip-0174.mediawiki
     ///
     /// **WARNING**: To avoid change address reuse you must persist the changes resulting from one
     /// or more calls to this method before closing the wallet. See [`Wallet::reveal_next_address`].
+    #[cfg(feature = "std")]
     pub fn finish(self) -> Result<Psbt, CreateTxError> {
+        self.finish_with_aux_rand(&mut bitcoin::key::rand::thread_rng())
+    }
+
+    /// Finish building the transaction.
+    ///
+    /// Uses a provided random number generator (rng).
+    ///
+    /// Returns a new [`Psbt`] per [`BIP174`].
+    ///
+    /// [`BIP174`]: https://github.com/bitcoin/bips/blob/master/bip-0174.mediawiki
+    ///
+    /// **WARNING**: To avoid change address reuse you must persist the changes resulting from one
+    /// or more calls to this method before closing the wallet. See [`Wallet::reveal_next_address`].
+    pub fn finish_with_aux_rand(self, rng: &mut impl RngCore) -> Result<Psbt, CreateTxError> {
         self.wallet
             .borrow_mut()
-            .create_tx(self.coin_selection, self.params)
+            .create_tx(self.coin_selection, self.params, rng)
     }
 }
 
@@ -757,15 +776,23 @@ pub enum TxOrdering {
 }
 
 impl TxOrdering {
-    /// Sort transaction inputs and outputs by [`TxOrdering`] variant
-    pub fn sort_tx(&self, tx: &mut Transaction) {
+    /// Sort transaction inputs and outputs by [`TxOrdering`] variant.
+    ///
+    /// Uses the thread-local random number generator (rng).
+    #[cfg(feature = "std")]
+    pub fn sort_tx(self, tx: &mut Transaction) {
+        self.sort_tx_with_aux_rand(tx, &mut bitcoin::key::rand::thread_rng())
+    }
+
+    /// Sort transaction inputs and outputs by [`TxOrdering`] variant.
+    ///
+    /// Uses a provided random number generator (rng).
+    pub fn sort_tx_with_aux_rand(self, tx: &mut Transaction, rng: &mut impl RngCore) {
         match self {
             TxOrdering::Untouched => {}
             TxOrdering::Shuffle => {
-                use rand::seq::SliceRandom;
-                let mut rng = rand::thread_rng();
-                tx.input.shuffle(&mut rng);
-                tx.output.shuffle(&mut rng);
+                shuffle_slice(&mut tx.input, rng);
+                shuffle_slice(&mut tx.output, rng);
             }
             TxOrdering::Bip69Lexicographic => {
                 tx.input.sort_unstable_by_key(|txin| {
@@ -851,12 +878,6 @@ mod test {
     use bitcoin::TxOut;
 
     use super::*;
-
-    #[test]
-    fn test_output_ordering_default_shuffle() {
-        assert_eq!(TxOrdering::default(), TxOrdering::Shuffle);
-    }
-
     #[test]
     fn test_output_ordering_untouched() {
         let original_tx = ordering_test_tx!();

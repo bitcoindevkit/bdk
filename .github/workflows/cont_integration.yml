@@ -92,7 +92,7 @@ jobs:
         uses: Swatinem/rust-cache@v2.2.1
       - name: Check bdk wallet
         working-directory: ./crates/wallet
-        run: cargo check --target wasm32-unknown-unknown --no-default-features --features miniscript/no-std,bdk_chain/hashbrown,dev-getrandom-wasm
+        run: cargo check --target wasm32-unknown-unknown --no-default-features --features miniscript/no-std,bdk_chain/hashbrown
       - name: Check esplora
         working-directory: ./crates/esplora
         run: cargo check --target wasm32-unknown-unknown --no-default-features --features miniscript/no-std,bdk_chain/hashbrown,async

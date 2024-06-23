@@ -13,9 +13,9 @@ edition = "2021"
 rust-version = "1.63"
 
 [dependencies]
-rand = "^0.8"
+rand_core = { version = "0.6.0" }
 miniscript = { version = "12.0.0", features = ["serde"], default-features = false }
-bitcoin = { version = "0.32.0", features = ["serde", "base64", "rand-std"], default-features = false }
+bitcoin = { version = "0.32.0", features = ["serde", "base64"], default-features = false }
 serde = { version = "^1.0", features = ["derive"] }
 serde_json = { version = "^1.0" }
 bdk_chain = { path = "../chain", version = "0.16.0", features = ["miniscript", "serde"], default-features = false }
@@ -23,21 +23,12 @@ bdk_chain = { path = "../chain", version = "0.16.0", features = ["miniscript", "
 # Optional dependencies
 bip39 = { version = "2.0", optional = true }
 
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-getrandom = "0.2"
-js-sys = "0.3"
-
 [features]
 default = ["std"]
-std = ["bitcoin/std", "miniscript/std", "bdk_chain/std"]
+std = ["bitcoin/std", "bitcoin/rand-std", "miniscript/std", "bdk_chain/std"]
 compiler = ["miniscript/compiler"]
 all-keys = ["keys-bip39"]
 keys-bip39 = ["bip39"]
-
-# This feature is used to run `cargo check` in our CI targeting wasm. It's not recommended
-# for libraries to explicitly include the "getrandom/js" feature, so we only do it when
-# necessary for running our CI. See: https://docs.rs/getrandom/0.2.8/getrandom/#webassembly-support
-dev-getrandom-wasm = ["getrandom/js"]
 
 [dev-dependencies]
 lazy_static = "1.4"
@@ -46,6 +37,7 @@ tempfile = "3"
 bdk_sqlite = { path = "../sqlite" }
 bdk_file_store = { path = "../file_store" }
 anyhow = "1"
+rand = "^0.8"
 
 [package.metadata.docs.rs]
 all-features = true
