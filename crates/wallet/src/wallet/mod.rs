@@ -877,23 +877,6 @@ impl Wallet {
         self.stage.append(additions.into());
     }
 
-    /// Inserts an `anchor` for a transaction with the given `txid`.
-    ///
-    /// This stages the changes, you must persist them later.
-    pub fn insert_anchor(&mut self, txid: Txid, anchor: ConfirmationTimeHeightAnchor) {
-        let indexed_graph_changeset = self.indexed_graph.insert_anchor(txid, anchor);
-        self.stage.append(indexed_graph_changeset.into());
-    }
-
-    /// Inserts a unix timestamp of when a transaction is seen in the mempool.
-    ///
-    /// This is used for transaction conflict resolution where the transaction with the
-    /// later last-seen is prioritized. This stages the changes, you must persist them later.
-    pub fn insert_seen_at(&mut self, txid: Txid, seen_at: u64) {
-        let indexed_graph_changeset = self.indexed_graph.insert_seen_at(txid, seen_at);
-        self.stage.append(indexed_graph_changeset.into());
-    }
-
     /// Calculates the fee of a given transaction. Returns [`Amount::ZERO`] if `tx` is a coinbase transaction.
     ///
     /// To calculate the fee for a [`Transaction`] with inputs not owned by this wallet you must
@@ -2486,8 +2469,9 @@ macro_rules! floating_rate {
 macro_rules! doctest_wallet {
     () => {{
         use $crate::bitcoin::{BlockHash, Transaction, absolute, TxOut, Network, hashes::Hash};
-        use $crate::chain::{ConfirmationTimeHeightAnchor, BlockId};
-        use $crate::{KeychainKind, wallet::Wallet};
+        use $crate::chain::{ConfirmationTimeHeightAnchor, BlockId, TxGraph};
+        use $crate::wallet::{Update, Wallet};
+        use $crate::KeychainKind;
         let descriptor = "tr([73c5da0a/86'/0'/0']tprv8fMn4hSKPRC1oaCPqxDb1JWtgkpeiQvZhsr8W2xuy3GEMkzoArcAWTfJxYb6Wj8XNNDWEjfYKK4wGQXh3ZUXhDF2NcnsALpWTeSwarJt7Vc/0/*)";
         let change_descriptor = "tr([73c5da0a/86'/0'/0']tprv8fMn4hSKPRC1oaCPqxDb1JWtgkpeiQvZhsr8W2xuy3GEMkzoArcAWTfJxYb6Wj8XNNDWEjfYKK4wGQXh3ZUXhDF2NcnsALpWTeSwarJt7Vc/1/*)";
 
@@ -2511,16 +2495,15 @@ macro_rules! doctest_wallet {
         let block = BlockId { height: 1_000, hash: BlockHash::all_zeros() };
         let _ = wallet.insert_checkpoint(block);
         let _ = wallet.insert_tx(tx);
-        wallet
-            .insert_anchor(
-                txid,
-                ConfirmationTimeHeightAnchor {
-                    confirmation_height: 500,
-                    confirmation_time: 50_000,
-                    anchor_block: block,
-                }
-            );
-
+        let anchor = ConfirmationTimeHeightAnchor {
+            confirmation_height: 500,
+            confirmation_time: 50_000,
+            anchor_block: block,
+        };
+        let mut graph = TxGraph::default();
+        let _ = graph.insert_anchor(txid, anchor);
+        let update = Update { graph, ..Default::default() };
+        wallet.apply_update(update).unwrap();
         wallet
     }}
 }

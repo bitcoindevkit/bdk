@@ -50,7 +50,7 @@ fn receive_output(wallet: &mut Wallet, value: u64, height: ConfirmationTime) -> 
             insert_anchor_from_conf(wallet, txid, height);
         }
         ConfirmationTime::Unconfirmed { last_seen } => {
-            wallet.insert_seen_at(txid, last_seen);
+            insert_seen_at(wallet, txid, last_seen);
         }
     }
 
@@ -66,6 +66,18 @@ fn receive_output_in_latest_block(wallet: &mut Wallet, value: u64) -> OutPoint {
         ConfirmationTime::Confirmed { height, time: 0 }
     };
     receive_output(wallet, value, anchor)
+}
+
+fn insert_seen_at(wallet: &mut Wallet, txid: Txid, seen_at: u64) {
+    use bdk_wallet::wallet::Update;
+    let mut graph = bdk_chain::TxGraph::default();
+    let _ = graph.insert_seen_at(txid, seen_at);
+    wallet
+        .apply_update(Update {
+            graph,
+            ..Default::default()
+        })
+        .unwrap();
 }
 
 // The satisfaction size of a P2WPKH is 112 WU =
@@ -1291,7 +1303,7 @@ fn test_create_tx_policy_path_no_csv() {
     };
     let txid = tx.compute_txid();
     wallet.insert_tx(tx);
-    wallet.insert_seen_at(txid, 0);
+    insert_seen_at(&mut wallet, txid, 0);
 
     let external_policy = wallet.policies(KeychainKind::External).unwrap().unwrap();
     let root_id = external_policy.id;
@@ -1683,7 +1695,7 @@ fn test_bump_fee_irreplaceable_tx() {
     let tx = psbt.extract_tx().expect("failed to extract tx");
     let txid = tx.compute_txid();
     wallet.insert_tx(tx);
-    wallet.insert_seen_at(txid, 0);
+    insert_seen_at(&mut wallet, txid, 0);
     wallet.build_fee_bump(txid).unwrap().finish().unwrap();
 }
 
@@ -1727,7 +1739,7 @@ fn test_bump_fee_low_fee_rate() {
     let txid = tx.compute_txid();
 
     wallet.insert_tx(tx);
-    wallet.insert_seen_at(txid, 0);
+    insert_seen_at(&mut wallet, txid, 0);
 
     let mut builder = wallet.build_fee_bump(txid).unwrap();
     builder.fee_rate(FeeRate::BROADCAST_MIN);
@@ -1759,7 +1771,7 @@ fn test_bump_fee_low_abs() {
     let txid = tx.compute_txid();
 
     wallet.insert_tx(tx);
-    wallet.insert_seen_at(txid, 0);
+    insert_seen_at(&mut wallet, txid, 0);
 
     let mut builder = wallet.build_fee_bump(txid).unwrap();
     builder.fee_absolute(Amount::from_sat(10));
@@ -1780,7 +1792,7 @@ fn test_bump_fee_zero_abs() {
     let tx = psbt.extract_tx().expect("failed to extract tx");
     let txid = tx.compute_txid();
     wallet.insert_tx(tx);
-    wallet.insert_seen_at(txid, 0);
+    insert_seen_at(&mut wallet, txid, 0);
 
     let mut builder = wallet.build_fee_bump(txid).unwrap();
     builder.fee_absolute(Amount::ZERO);
@@ -1805,7 +1817,7 @@ fn test_bump_fee_reduce_change() {
     let tx = psbt.extract_tx().expect("failed to extract tx");
     let txid = tx.compute_txid();
     wallet.insert_tx(tx);
-    wallet.insert_seen_at(txid, 0);
+    insert_seen_at(&mut wallet, txid, 0);
 
     let feerate = FeeRate::from_sat_per_kwu(625); // 2.5 sat/vb
     let mut builder = wallet.build_fee_bump(txid).unwrap();
@@ -1902,7 +1914,7 @@ fn test_bump_fee_reduce_single_recipient() {
     let original_fee = check_fee!(wallet, psbt);
     let txid = tx.compute_txid();
     wallet.insert_tx(tx);
-    wallet.insert_seen_at(txid, 0);
+    insert_seen_at(&mut wallet, txid, 0);
 
     let feerate = FeeRate::from_sat_per_kwu(625); // 2.5 sat/vb
     let mut builder = wallet.build_fee_bump(txid).unwrap();
@@ -1949,7 +1961,7 @@ fn test_bump_fee_absolute_reduce_single_recipient() {
     let original_sent_received = wallet.sent_and_received(&tx);
     let txid = tx.compute_txid();
     wallet.insert_tx(tx);
-    wallet.insert_seen_at(txid, 0);
+    insert_seen_at(&mut wallet, txid, 0);
 
     let mut builder = wallet.build_fee_bump(txid).unwrap();
     builder
@@ -2024,7 +2036,7 @@ fn test_bump_fee_drain_wallet() {
 
     let txid = tx.compute_txid();
     wallet.insert_tx(tx);
-    wallet.insert_seen_at(txid, 0);
+    insert_seen_at(&mut wallet, txid, 0);
     assert_eq!(original_sent_received.0, Amount::from_sat(25_000));
 
     // for the new feerate, it should be enough to reduce the output, but since we specify
@@ -2089,7 +2101,7 @@ fn test_bump_fee_remove_output_manually_selected_only() {
     let original_sent_received = wallet.sent_and_received(&tx);
     let txid = tx.compute_txid();
     wallet.insert_tx(tx);
-    wallet.insert_seen_at(txid, 0);
+    insert_seen_at(&mut wallet, txid, 0);
     assert_eq!(original_sent_received.0, Amount::from_sat(25_000));
 
     let mut builder = wallet.build_fee_bump(txid).unwrap();
@@ -2136,7 +2148,7 @@ fn test_bump_fee_add_input() {
     let original_details = wallet.sent_and_received(&tx);
     let txid = tx.compute_txid();
     wallet.insert_tx(tx);
-    wallet.insert_seen_at(txid, 0);
+    insert_seen_at(&mut wallet, txid, 0);
 
     let mut builder = wallet.build_fee_bump(txid).unwrap();
     builder.fee_rate(FeeRate::from_sat_per_vb_unchecked(50));
@@ -2192,7 +2204,7 @@ fn test_bump_fee_absolute_add_input() {
     let original_sent_received = wallet.sent_and_received(&tx);
     let txid = tx.compute_txid();
     wallet.insert_tx(tx);
-    wallet.insert_seen_at(txid, 0);
+    insert_seen_at(&mut wallet, txid, 0);
 
     let mut builder = wallet.build_fee_bump(txid).unwrap();
     builder.fee_absolute(Amount::from_sat(6_000));
@@ -2257,7 +2269,7 @@ fn test_bump_fee_no_change_add_input_and_change() {
     let tx = psbt.extract_tx().expect("failed to extract tx");
     let txid = tx.compute_txid();
     wallet.insert_tx(tx);
-    wallet.insert_seen_at(txid, 0);
+    insert_seen_at(&mut wallet, txid, 0);
 
     // Now bump the fees, the wallet should add an extra input and a change output, and leave
     // the original output untouched.
@@ -2326,7 +2338,7 @@ fn test_bump_fee_add_input_change_dust() {
     assert_eq!(tx.output.len(), 2);
     let txid = tx.compute_txid();
     wallet.insert_tx(tx);
-    wallet.insert_seen_at(txid, 0);
+    insert_seen_at(&mut wallet, txid, 0);
 
     let mut builder = wallet.build_fee_bump(txid).unwrap();
     // We set a fee high enough that during rbf we are forced to add
@@ -2396,7 +2408,7 @@ fn test_bump_fee_force_add_input() {
         txin.witness.push([0x00; P2WPKH_FAKE_WITNESS_SIZE]); // fake signature
     }
     wallet.insert_tx(tx.clone());
-    wallet.insert_seen_at(txid, 0);
+    insert_seen_at(&mut wallet, txid, 0);
     // the new fee_rate is low enough that just reducing the change would be fine, but we force
     // the addition of an extra input with `add_utxo()`
     let mut builder = wallet.build_fee_bump(txid).unwrap();
@@ -2462,7 +2474,7 @@ fn test_bump_fee_absolute_force_add_input() {
         txin.witness.push([0x00; P2WPKH_FAKE_WITNESS_SIZE]); // fake signature
     }
     wallet.insert_tx(tx.clone());
-    wallet.insert_seen_at(txid, 0);
+    insert_seen_at(&mut wallet, txid, 0);
 
     // the new fee_rate is low enough that just reducing the change would be fine, but we force
     // the addition of an extra input with `add_utxo()`
@@ -2540,7 +2552,7 @@ fn test_bump_fee_unconfirmed_inputs_only() {
         txin.witness.push([0x00; P2WPKH_FAKE_WITNESS_SIZE]); // fake signature
     }
     wallet.insert_tx(tx);
-    wallet.insert_seen_at(txid, 0);
+    insert_seen_at(&mut wallet, txid, 0);
     let mut builder = wallet.build_fee_bump(txid).unwrap();
     builder.fee_rate(FeeRate::from_sat_per_vb_unchecked(25));
     builder.finish().unwrap();
@@ -2572,7 +2584,7 @@ fn test_bump_fee_unconfirmed_input() {
         txin.witness.push([0x00; P2WPKH_FAKE_WITNESS_SIZE]); // fake signature
     }
     wallet.insert_tx(tx);
-    wallet.insert_seen_at(txid, 0);
+    insert_seen_at(&mut wallet, txid, 0);
 
     let mut builder = wallet.build_fee_bump(txid).unwrap();
     builder
@@ -4107,7 +4119,7 @@ fn test_insert_tx_balance_and_utxos() {
     let tx = psbt.extract_tx().unwrap();
     let txid = tx.compute_txid();
     let _ = wallet.insert_tx(tx);
-    wallet.insert_seen_at(txid, 2);
+    insert_seen_at(&mut wallet, txid, 2);
     assert!(wallet.list_unspent().next().is_none());
     assert_eq!(wallet.balance().total().to_sat(), 0);
 }

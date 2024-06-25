@@ -222,6 +222,8 @@ mod test {
     use crate::wallet::Wallet;
 
     fn get_test_wallet(descriptor: &str, change_descriptor: &str, network: Network) -> Wallet {
+        use crate::wallet::Update;
+        use bdk_chain::TxGraph;
         let mut wallet = Wallet::new(descriptor, change_descriptor, network).unwrap();
         let transaction = Transaction {
             input: vec![],
@@ -236,14 +238,19 @@ mod test {
         };
         wallet.insert_checkpoint(block_id).unwrap();
         wallet.insert_tx(transaction);
-        wallet.insert_anchor(
-            txid,
-            ConfirmationTimeHeightAnchor {
-                confirmation_height: 5000,
-                confirmation_time: 0,
-                anchor_block: block_id,
-            },
-        );
+        let anchor = ConfirmationTimeHeightAnchor {
+            confirmation_height: 5000,
+            confirmation_time: 0,
+            anchor_block: block_id,
+        };
+        let mut graph = TxGraph::default();
+        let _ = graph.insert_anchor(txid, anchor);
+        wallet
+            .apply_update(Update {
+                graph,
+                ..Default::default()
+            })
+            .unwrap();
         wallet
     }
 
