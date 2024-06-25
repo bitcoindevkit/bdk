@@ -13,7 +13,7 @@ use bitcoin::BlockHash;
 ///
 /// The key represents the block height, and the value either represents added a new [`CheckPoint`]
 /// (if [`Some`]), or removing a [`CheckPoint`] (if [`None`]).
-pub type ChangeSet = BTreeMap<u32, Option<BlockHash>>;
+pub type ChangeSet<B = BlockHash> = BTreeMap<u32, Option<B>>;
 
 /// A [`LocalChain`] checkpoint is used to find the agreement point between two chains and as a
 /// transaction anchor.
@@ -24,13 +24,15 @@ pub type ChangeSet = BTreeMap<u32, Option<BlockHash>>;
 /// cheaply clone a [`CheckPoint`] without copying the whole list and to view the entire chain
 /// without holding a lock on [`LocalChain`].
 #[derive(Debug, Clone)]
-pub struct CheckPoint(Arc<CPInner>);
+pub struct CheckPoint<B = BlockHash>(Arc<CPInner<B>>);
 
 /// The internal contents of [`CheckPoint`].
 #[derive(Debug, Clone)]
-struct CPInner {
-    /// Block id (hash and height).
-    block: BlockId,
+struct CPInner<B = BlockHash> {
+    /// Block height
+    height: u32,
+    /// Block data
+    block_data: B,
     /// Previous checkpoint (if any).
     prev: Option<Arc<CPInner>>,
 }
@@ -46,7 +48,13 @@ impl PartialEq for CheckPoint {
 impl CheckPoint {
     /// Construct a new base block at the front of a linked list.
     pub fn new(block: BlockId) -> Self {
-        Self(Arc::new(CPInner { block, prev: None }))
+        let height = block.height;
+        let block = block.hash;
+        Self(Arc::new(CPInner {
+            height,
+            block_data: block,
+            prev: None,
+        }))
     }
 
     /// Construct a checkpoint from a list of [`BlockId`]s in ascending height order.
@@ -103,7 +111,8 @@ impl CheckPoint {
     pub fn push(self, block: BlockId) -> Result<Self, Self> {
         if self.height() < block.height {
             Ok(Self(Arc::new(CPInner {
-                block,
+                height: block.height,
+                block_data: block.hash,
                 prev: Some(self.0),
             })))
         } else {
@@ -125,17 +134,20 @@ impl CheckPoint {
 
     /// Get the [`BlockId`] of the checkpoint.
     pub fn block_id(&self) -> BlockId {
-        self.0.block
+        BlockId {
+            height: self.0.height,
+            hash: self.0.block_data,
+        }
     }
 
     /// Get the height of the checkpoint.
     pub fn height(&self) -> u32 {
-        self.0.block.height
+        self.0.height
     }
 
     /// Get the block hash of the checkpoint.
     pub fn hash(&self) -> BlockHash {
-        self.0.block.hash
+        self.0.block_data
     }
 
     /// Get the previous checkpoint in the chain
@@ -282,9 +294,15 @@ impl IntoIterator for CheckPoint {
 }
 
 /// This is a local implementation of [`ChainOracle`].
-#[derive(Debug, Clone, PartialEq)]
-pub struct LocalChain {
-    tip: CheckPoint,
+#[derive(Debug, Clone)]
+pub struct LocalChain<B = BlockHash> {
+    tip: CheckPoint<B>,
+}
+
+impl PartialEq for LocalChain {
+    fn eq(&self, other: &Self) -> bool {
+        self.tip == other.tip
+    }
 }
 
 impl ChainOracle for LocalChain {
