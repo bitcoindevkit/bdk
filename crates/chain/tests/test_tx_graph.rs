@@ -1119,6 +1119,44 @@ fn update_last_seen_unconfirmed() {
 }
 
 #[test]
+fn transactions_inserted_into_tx_graph_are_not_canonical_until_they_have_an_anchor_in_best_chain() {
+    let txs = vec![new_tx(0), new_tx(1)];
+    let txids: Vec<Txid> = txs.iter().map(Transaction::compute_txid).collect();
+
+    // graph
+    let mut graph = TxGraph::<BlockId>::new(txs);
+    let full_txs: Vec<_> = graph.full_txs().collect();
+    assert_eq!(full_txs.len(), 2);
+
+    // chain
+    let blocks: BTreeMap<u32, BlockHash> = [(0, h!("g")), (1, h!("A")), (2, h!("B"))]
+        .into_iter()
+        .collect();
+    let chain = LocalChain::from_blocks(blocks).unwrap();
+    let canonical_txs: Vec<_> = graph
+        .list_canonical_txs(&chain, chain.tip().block_id())
+        .collect();
+    assert!(canonical_txs.is_empty());
+
+    // tx0 with seen_at should be returned by canonical txs
+    let _ = graph.insert_seen_at(txids[0], 2);
+    let mut canonical_txs = graph.list_canonical_txs(&chain, chain.tip().block_id());
+    assert_eq!(
+        canonical_txs.next().map(|tx| tx.tx_node.txid).unwrap(),
+        txids[0]
+    );
+    drop(canonical_txs);
+
+    // tx1 with anchor is also canonical
+    let _ = graph.insert_anchor(txids[1], block_id!(2, "B"));
+    let canonical_txids: Vec<_> = graph
+        .list_canonical_txs(&chain, chain.tip().block_id())
+        .map(|tx| tx.tx_node.txid)
+        .collect();
+    assert!(canonical_txids.contains(&txids[1]));
+}
+
+#[test]
 /// The `map_anchors` allow a caller to pass a function to reconstruct the [`TxGraph`] with any [`Anchor`],
 /// even though the function is non-deterministic.
 fn call_map_anchors_with_non_deterministic_anchor() {
