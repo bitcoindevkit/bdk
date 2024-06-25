@@ -776,8 +776,6 @@ pub enum TxOrdering {
     Shuffle,
     /// Unchanged
     Untouched,
-    /// BIP69 / Lexicographic
-    Bip69Lexicographic,
     /// Provide custom comparison functions for sorting
     Custom {
         /// Transaction inputs sort function
@@ -792,7 +790,6 @@ impl core::fmt::Debug for TxOrdering {
         match self {
             TxOrdering::Shuffle => write!(f, "Shuffle"),
             TxOrdering::Untouched => write!(f, "Untouched"),
-            TxOrdering::Bip69Lexicographic => write!(f, "Bip69Lexicographic"),
             TxOrdering::Custom { .. } => write!(f, "Custom"),
         }
     }
@@ -816,13 +813,6 @@ impl TxOrdering {
             TxOrdering::Shuffle => {
                 shuffle_slice(&mut tx.input, rng);
                 shuffle_slice(&mut tx.output, rng);
-            }
-            TxOrdering::Bip69Lexicographic => {
-                tx.input.sort_unstable_by_key(|txin| {
-                    (txin.previous_output.txid, txin.previous_output.vout)
-                });
-                tx.output
-                    .sort_unstable_by_key(|txout| (txout.value, txout.script_pubkey.clone()));
             }
             TxOrdering::Custom {
                 input_sort,
@@ -937,45 +927,6 @@ mod test {
                 original_tx.output != tx.output
             })
             .expect("it should have moved the outputs at least once");
-    }
-
-    #[test]
-    fn test_output_ordering_bip69() {
-        use core::str::FromStr;
-
-        let original_tx = ordering_test_tx!();
-        let mut tx = original_tx;
-
-        TxOrdering::Bip69Lexicographic.sort_tx(&mut tx);
-
-        assert_eq!(
-            tx.input[0].previous_output,
-            bitcoin::OutPoint::from_str(
-                "0e53ec5dfb2cb8a71fec32dc9a634a35b7e24799295ddd5278217822e0b31f57:5"
-            )
-            .unwrap()
-        );
-        assert_eq!(
-            tx.input[1].previous_output,
-            bitcoin::OutPoint::from_str(
-                "0f60fdd185542f2c6ea19030b0796051e7772b6026dd5ddccd7a2f93b73e6fc2:0"
-            )
-            .unwrap()
-        );
-        assert_eq!(
-            tx.input[2].previous_output,
-            bitcoin::OutPoint::from_str(
-                "0f60fdd185542f2c6ea19030b0796051e7772b6026dd5ddccd7a2f93b73e6fc2:1"
-            )
-            .unwrap()
-        );
-
-        assert_eq!(tx.output[0].value.to_sat(), 800);
-        assert_eq!(tx.output[1].script_pubkey, ScriptBuf::from(vec![0xAA]));
-        assert_eq!(
-            tx.output[2].script_pubkey,
-            ScriptBuf::from(vec![0xAA, 0xEE])
-        );
     }
 
     #[test]
