@@ -91,6 +91,9 @@ const COINBASE_MATURITY: u32 = 100;
 /// [`ChangeSet`]s (see [`take_staged`]). Also see individual functions and example for instructions
 /// on when [`Wallet`] state needs to be persisted.
 ///
+/// The `Wallet` descriptor (external) and change descriptor (internal) must not derive the same
+/// script pubkeys. See [`KeychainTxOutIndex::insert_descriptor()`] for more details.
+///
 /// [`signer`]: crate::signer
 /// [`take_staged`]: Wallet::take_staged
 #[derive(Debug)]
