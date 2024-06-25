@@ -258,6 +258,19 @@ impl<A> TxGraph<A> {
             })
     }
 
+    /// Iterate over graph transactions with no anchors or last-seen.
+    pub fn txs_with_no_anchor_or_last_seen(
+        &self,
+    ) -> impl Iterator<Item = TxNode<'_, Arc<Transaction>, A>> {
+        self.full_txs().filter_map(|tx| {
+            if tx.anchors.is_empty() && tx.last_seen_unconfirmed.is_none() {
+                Some(tx)
+            } else {
+                None
+            }
+        })
+    }
+
     /// Get a transaction by txid. This only returns `Some` for full transactions.
     ///
     /// Refer to [`get_txout`] for getting a specific [`TxOut`].

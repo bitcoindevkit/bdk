@@ -1127,6 +1127,8 @@ fn transactions_inserted_into_tx_graph_are_not_canonical_until_they_have_an_anch
     let mut graph = TxGraph::<BlockId>::new(txs);
     let full_txs: Vec<_> = graph.full_txs().collect();
     assert_eq!(full_txs.len(), 2);
+    let unseen_txs: Vec<_> = graph.txs_with_no_anchor_or_last_seen().collect();
+    assert_eq!(unseen_txs.len(), 2);
 
     // chain
     let blocks: BTreeMap<u32, BlockHash> = [(0, h!("g")), (1, h!("A")), (2, h!("B"))]
@@ -1154,6 +1156,7 @@ fn transactions_inserted_into_tx_graph_are_not_canonical_until_they_have_an_anch
         .map(|tx| tx.tx_node.txid)
         .collect();
     assert!(canonical_txids.contains(&txids[1]));
+    assert!(graph.txs_with_no_anchor_or_last_seen().next().is_none());
 }
 
 #[test]

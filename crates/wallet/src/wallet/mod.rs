@@ -27,7 +27,7 @@ use bdk_chain::{
         self, ApplyHeaderError, CannotConnectError, CheckPoint, CheckPointIter, LocalChain,
     },
     spk_client::{FullScanRequest, FullScanResult, SyncRequest, SyncResult},
-    tx_graph::{CanonicalTx, TxGraph},
+    tx_graph::{CanonicalTx, TxGraph, TxNode},
     Append, BlockId, ChainPosition, ConfirmationTime, ConfirmationTimeHeightAnchor, FullTxOut,
     Indexed, IndexedTxGraph,
 };
@@ -2248,6 +2248,14 @@ impl Wallet {
     /// Get a reference to the inner [`TxGraph`].
     pub fn tx_graph(&self) -> &TxGraph<ConfirmationTimeHeightAnchor> {
         self.indexed_graph.graph()
+    }
+
+    /// Iterate over transactions in the wallet that are unseen and unanchored likely
+    /// because they haven't been broadcast.
+    pub fn unbroadcast_transactions(
+        &self,
+    ) -> impl Iterator<Item = TxNode<'_, Arc<Transaction>, ConfirmationTimeHeightAnchor>> {
+        self.tx_graph().txs_with_no_anchor_or_last_seen()
     }
 
     /// Get a reference to the inner [`KeychainTxOutIndex`].
