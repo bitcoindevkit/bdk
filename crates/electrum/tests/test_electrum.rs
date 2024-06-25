@@ -61,14 +61,11 @@ fn scan_detects_confirmed_tx() -> anyhow::Result<()> {
 
     // Sync up to tip.
     env.wait_until_electrum_sees_block()?;
-    let update = client
-        .sync(
-            SyncRequest::from_chain_tip(recv_chain.tip())
-                .chain_spks(core::iter::once(spk_to_track)),
-            5,
-            true,
-        )?
-        .with_confirmation_time_height_anchor(&client)?;
+    let update = client.sync(
+        SyncRequest::from_chain_tip(recv_chain.tip()).chain_spks(core::iter::once(spk_to_track)),
+        5,
+        true,
+    )?;
 
     let _ = recv_chain
         .apply_update(update.chain_update)
@@ -154,13 +151,11 @@ fn tx_can_become_unconfirmed_after_reorg() -> anyhow::Result<()> {
 
     // Sync up to tip.
     env.wait_until_electrum_sees_block()?;
-    let update = client
-        .sync(
-            SyncRequest::from_chain_tip(recv_chain.tip()).chain_spks([spk_to_track.clone()]),
-            5,
-            false,
-        )?
-        .with_confirmation_time_height_anchor(&client)?;
+    let update = client.sync(
+        SyncRequest::from_chain_tip(recv_chain.tip()).chain_spks([spk_to_track.clone()]),
+        5,
+        false,
+    )?;
 
     let _ = recv_chain
         .apply_update(update.chain_update)
@@ -185,13 +180,11 @@ fn tx_can_become_unconfirmed_after_reorg() -> anyhow::Result<()> {
         env.reorg_empty_blocks(depth)?;
 
         env.wait_until_electrum_sees_block()?;
-        let update = client
-            .sync(
-                SyncRequest::from_chain_tip(recv_chain.tip()).chain_spks([spk_to_track.clone()]),
-                5,
-                false,
-            )?
-            .with_confirmation_time_height_anchor(&client)?;
+        let update = client.sync(
+            SyncRequest::from_chain_tip(recv_chain.tip()).chain_spks([spk_to_track.clone()]),
+            5,
+            false,
+        )?;
 
         let _ = recv_chain
             .apply_update(update.chain_update)

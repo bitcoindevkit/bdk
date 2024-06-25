@@ -193,8 +193,7 @@ fn main() -> anyhow::Result<()> {
 
             let res = client
                 .full_scan::<_>(request, stop_gap, scan_options.batch_size, false)
-                .context("scanning the blockchain")?
-                .with_confirmation_height_anchor();
+                .context("scanning the blockchain")?;
             (
                 res.chain_update,
                 res.graph_update,
@@ -317,8 +316,7 @@ fn main() -> anyhow::Result<()> {
 
             let res = client
                 .sync(request, scan_options.batch_size, false)
-                .context("scanning the blockchain")?
-                .with_confirmation_height_anchor();
+                .context("scanning the blockchain")?;
 
             // drop lock on graph and chain
             drop((graph, chain));
@@ -345,7 +343,12 @@ fn main() -> anyhow::Result<()> {
             let keychain_changeset = graph.index.reveal_to_target_multi(&keychain_update);
             indexed_tx_graph_changeset.merge(keychain_changeset.into());
         }
-        indexed_tx_graph_changeset.merge(graph.apply_update(graph_update));
+        indexed_tx_graph_changeset.merge(graph.apply_update(graph_update.map_anchors(|a| {
+            ConfirmationHeightAnchor {
+                confirmation_height: a.confirmation_height,
+                anchor_block: a.anchor_block,
+            }
+        })));
 
         (chain_changeset, indexed_tx_graph_changeset)
     };
