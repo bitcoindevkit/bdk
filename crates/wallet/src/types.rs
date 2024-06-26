@@ -13,7 +13,7 @@ use alloc::boxed::Box;
 use core::convert::AsRef;
 
 use bdk_chain::ConfirmationTime;
-use bitcoin::blockdata::transaction::{OutPoint, Sequence, TxOut};
+use bitcoin::transaction::{OutPoint, Sequence, TxOut};
 use bitcoin::{psbt, Weight};
 
 use serde::{Deserialize, Serialize};

@@ -18,11 +18,11 @@ use bdk_chain::{bitcoin, collections::*, miniscript};
 use bitcoin::{
     absolute,
     bip32::{DerivationPath, Fingerprint, KeySource},
-    blockdata::transaction::Sequence,
     ecdsa,
     hashes::{hash160, ripemd160, sha256},
     secp256k1::Secp256k1,
     taproot::{self, LeafVersion, TapLeafHash},
+    transaction::Sequence,
     ScriptBuf, TxIn, Witness, WitnessVersion,
 };
 use miniscript::{
