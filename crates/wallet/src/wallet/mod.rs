@@ -31,7 +31,6 @@ use bdk_chain::{
     Append, BlockId, ChainPosition, ConfirmationTime, ConfirmationTimeHeightAnchor, FullTxOut,
     Indexed, IndexedTxGraph,
 };
-use bitcoin::secp256k1::{All, Secp256k1};
 use bitcoin::sighash::{EcdsaSighashType, TapSighashType};
 use bitcoin::{
     absolute, psbt, Address, Block, FeeRate, Network, OutPoint, Script, ScriptBuf, Sequence,
@@ -39,6 +38,10 @@ use bitcoin::{
 };
 use bitcoin::{consensus::encode::serialize, transaction, BlockHash, Psbt};
 use bitcoin::{constants::genesis_block, Amount};
+use bitcoin::{
+    secp256k1::{All, Secp256k1},
+    Weight,
+};
 use core::fmt;
 use core::mem;
 use core::ops::Deref;
@@ -1662,8 +1665,7 @@ impl Wallet {
                         let satisfaction_weight = self
                             .get_descriptor_for_keychain(keychain)
                             .max_weight_to_satisfy()
-                            .unwrap()
-                            .to_wu() as usize;
+                            .unwrap();
                         WeightedUtxo {
                             utxo: Utxo::Local(LocalOutput {
                                 outpoint: txin.previous_output,
@@ -1677,8 +1679,9 @@ impl Wallet {
                         }
                     }
                     None => {
-                        let satisfaction_weight =
-                            serialize(&txin.script_sig).len() * 4 + serialize(&txin.witness).len();
+                        let satisfaction_weight = Weight::from_wu_usize(
+                            serialize(&txin.script_sig).len() * 4 + serialize(&txin.witness).len(),
+                        );
                         WeightedUtxo {
                             utxo: Utxo::Foreign {
                                 outpoint: txin.previous_output,
@@ -1987,7 +1990,7 @@ impl Wallet {
         descriptor.at_derivation_index(child).ok()
     }
 
-    fn get_available_utxos(&self) -> Vec<(LocalOutput, usize)> {
+    fn get_available_utxos(&self) -> Vec<(LocalOutput, Weight)> {
         self.list_unspent()
             .map(|utxo| {
                 let keychain = utxo.keychain;
@@ -1995,7 +1998,6 @@ impl Wallet {
                     self.get_descriptor_for_keychain(keychain)
                         .max_weight_to_satisfy()
                         .unwrap()
-                        .to_wu() as usize
                 })
             })
             .collect()

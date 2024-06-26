@@ -1387,11 +1387,7 @@ fn test_add_foreign_utxo() {
     builder
         .add_recipient(addr.script_pubkey(), Amount::from_sat(60_000))
         .only_witness_utxo()
-        .add_foreign_utxo(
-            utxo.outpoint,
-            psbt_input,
-            foreign_utxo_satisfaction.to_wu() as usize,
-        )
+        .add_foreign_utxo(utxo.outpoint, psbt_input, foreign_utxo_satisfaction)
         .unwrap();
     let mut psbt = builder.finish().unwrap();
     wallet1.insert_txout(utxo.outpoint, utxo.txout);
@@ -1467,11 +1463,7 @@ fn test_calculate_fee_with_missing_foreign_utxo() {
     builder
         .add_recipient(addr.script_pubkey(), Amount::from_sat(60_000))
         .only_witness_utxo()
-        .add_foreign_utxo(
-            utxo.outpoint,
-            psbt_input,
-            foreign_utxo_satisfaction.to_wu() as usize,
-        )
+        .add_foreign_utxo(utxo.outpoint, psbt_input, foreign_utxo_satisfaction)
         .unwrap();
     let psbt = builder.finish().unwrap();
     let tx = psbt.extract_tx().expect("failed to extract tx");
@@ -1488,11 +1480,8 @@ fn test_add_foreign_utxo_invalid_psbt_input() {
         .unwrap();
 
     let mut builder = wallet.build_tx();
-    let result = builder.add_foreign_utxo(
-        outpoint,
-        psbt::Input::default(),
-        foreign_utxo_satisfaction.to_wu() as usize,
-    );
+    let result =
+        builder.add_foreign_utxo(outpoint, psbt::Input::default(), foreign_utxo_satisfaction);
     assert!(matches!(result, Err(AddForeignUtxoError::MissingUtxo)));
 }
 
@@ -1520,7 +1509,7 @@ fn test_add_foreign_utxo_where_outpoint_doesnt_match_psbt_input() {
                     non_witness_utxo: Some(tx1.as_ref().clone()),
                     ..Default::default()
                 },
-                satisfaction_weight.to_wu() as usize
+                satisfaction_weight
             )
             .is_err(),
         "should fail when outpoint doesn't match psbt_input"
@@ -1533,7 +1522,7 @@ fn test_add_foreign_utxo_where_outpoint_doesnt_match_psbt_input() {
                     non_witness_utxo: Some(tx2.as_ref().clone()),
                     ..Default::default()
                 },
-                satisfaction_weight.to_wu() as usize
+                satisfaction_weight
             )
             .is_ok(),
         "should be ok when outpoint does match psbt_input"
@@ -1565,11 +1554,7 @@ fn test_add_foreign_utxo_only_witness_utxo() {
             ..Default::default()
         };
         builder
-            .add_foreign_utxo(
-                utxo2.outpoint,
-                psbt_input,
-                satisfaction_weight.to_wu() as usize,
-            )
+            .add_foreign_utxo(utxo2.outpoint, psbt_input, satisfaction_weight)
             .unwrap();
         assert!(
             builder.finish().is_err(),
@@ -1585,11 +1570,7 @@ fn test_add_foreign_utxo_only_witness_utxo() {
         };
         builder
             .only_witness_utxo()
-            .add_foreign_utxo(
-                utxo2.outpoint,
-                psbt_input,
-                satisfaction_weight.to_wu() as usize,
-            )
+            .add_foreign_utxo(utxo2.outpoint, psbt_input, satisfaction_weight)
             .unwrap();
         assert!(
             builder.finish().is_ok(),
@@ -1605,11 +1586,7 @@ fn test_add_foreign_utxo_only_witness_utxo() {
             ..Default::default()
         };
         builder
-            .add_foreign_utxo(
-                utxo2.outpoint,
-                psbt_input,
-                satisfaction_weight.to_wu() as usize,
-            )
+            .add_foreign_utxo(utxo2.outpoint, psbt_input, satisfaction_weight)
             .unwrap();
         assert!(
             builder.finish().is_ok(),
@@ -3420,11 +3397,7 @@ fn test_taproot_foreign_utxo() {
     let mut builder = wallet1.build_tx();
     builder
         .add_recipient(addr.script_pubkey(), Amount::from_sat(60_000))
-        .add_foreign_utxo(
-            utxo.outpoint,
-            psbt_input,
-            foreign_utxo_satisfaction.to_wu() as usize,
-        )
+        .add_foreign_utxo(utxo.outpoint, psbt_input, foreign_utxo_satisfaction)
         .unwrap();
     let psbt = builder.finish().unwrap();
     let sent_received =

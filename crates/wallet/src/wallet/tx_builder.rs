@@ -44,7 +44,9 @@ use core::fmt;
 
 use bitcoin::psbt::{self, Psbt};
 use bitcoin::script::PushBytes;
-use bitcoin::{absolute, Amount, FeeRate, OutPoint, ScriptBuf, Sequence, Transaction, Txid};
+use bitcoin::{
+    absolute, Amount, FeeRate, OutPoint, ScriptBuf, Sequence, Transaction, Txid, Weight,
+};
 use rand_core::RngCore;
 
 use super::coin_selection::CoinSelectionAlgorithm;
@@ -295,9 +297,7 @@ impl<'a, Cs> TxBuilder<'a, Cs> {
 
             for utxo in utxos {
                 let descriptor = wallet.get_descriptor_for_keychain(utxo.keychain);
-
-                let satisfaction_weight =
-                    descriptor.max_weight_to_satisfy().unwrap().to_wu() as usize;
+                let satisfaction_weight = descriptor.max_weight_to_satisfy().unwrap();
                 self.params.utxos.push(WeightedUtxo {
                     satisfaction_weight,
                     utxo: Utxo::Local(utxo),
@@ -366,7 +366,7 @@ impl<'a, Cs> TxBuilder<'a, Cs> {
         &mut self,
         outpoint: OutPoint,
         psbt_input: psbt::Input,
-        satisfaction_weight: usize,
+        satisfaction_weight: Weight,
     ) -> Result<&mut Self, AddForeignUtxoError> {
         self.add_foreign_utxo_with_sequence(
             outpoint,
@@ -381,7 +381,7 @@ impl<'a, Cs> TxBuilder<'a, Cs> {
         &mut self,
         outpoint: OutPoint,
         psbt_input: psbt::Input,
-        satisfaction_weight: usize,
+        satisfaction_weight: Weight,
         sequence: Sequence,
     ) -> Result<&mut Self, AddForeignUtxoError> {
         if psbt_input.witness_utxo.is_none() {
