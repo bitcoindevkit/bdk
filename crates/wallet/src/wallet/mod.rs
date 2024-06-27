@@ -55,6 +55,8 @@ use bdk_chain::tx_graph::CalculateFeeError;
 pub mod coin_selection;
 pub mod export;
 pub mod signer;
+#[cfg(any(test, feature = "test-util"))]
+pub mod test_util;
 pub mod tx_builder;
 pub(crate) mod utils;
 
