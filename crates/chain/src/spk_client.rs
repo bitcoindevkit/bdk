@@ -1,8 +1,7 @@
 //! Helper types for spk-based blockchain clients.
 
 use crate::{
-    collections::BTreeMap, keychain::Indexed, local_chain::CheckPoint,
-    ConfirmationTimeHeightAnchor, TxGraph,
+    collections::BTreeMap, local_chain::CheckPoint, ConfirmationTimeHeightAnchor, Indexed, TxGraph,
 };
 use alloc::boxed::Box;
 use bitcoin::{OutPoint, Script, ScriptBuf, Txid};
@@ -160,7 +159,7 @@ impl SyncRequest {
     #[must_use]
     pub fn populate_with_revealed_spks<K: Clone + Ord + core::fmt::Debug + Send + Sync>(
         self,
-        index: &crate::keychain::KeychainTxOutIndex<K>,
+        index: &crate::indexer::keychain_txout::KeychainTxOutIndex<K>,
         spk_range: impl core::ops::RangeBounds<K>,
     ) -> Self {
         use alloc::borrow::ToOwned;
@@ -216,12 +215,12 @@ impl<K: Ord + Clone> FullScanRequest<K> {
     /// [`KeychainTxOutIndex::all_unbounded_spk_iters`] and is used to populate the
     /// [`FullScanRequest`].
     ///
-    /// [`KeychainTxOutIndex::all_unbounded_spk_iters`]: crate::keychain::KeychainTxOutIndex::all_unbounded_spk_iters
+    /// [`KeychainTxOutIndex::all_unbounded_spk_iters`]: crate::indexer::keychain_txout::KeychainTxOutIndex::all_unbounded_spk_iters
     #[cfg(feature = "miniscript")]
     #[must_use]
     pub fn from_keychain_txout_index(
         chain_tip: CheckPoint,
-        index: &crate::keychain::KeychainTxOutIndex<K>,
+        index: &crate::indexer::keychain_txout::KeychainTxOutIndex<K>,
     ) -> Self
     where
         K: core::fmt::Debug,

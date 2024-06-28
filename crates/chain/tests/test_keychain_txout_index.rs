@@ -4,9 +4,8 @@
 mod common;
 use bdk_chain::{
     collections::BTreeMap,
-    indexed_tx_graph::Indexer,
-    keychain::{self, ChangeSet, KeychainTxOutIndex},
-    Append, DescriptorExt, DescriptorId,
+    indexer::keychain_txout::{ChangeSet, KeychainTxOutIndex},
+    Append, DescriptorExt, DescriptorId, Indexer,
 };
 
 use bitcoin::{secp256k1::Secp256k1, Amount, OutPoint, ScriptBuf, Transaction, TxOut};
@@ -31,8 +30,8 @@ fn init_txout_index(
     external_descriptor: Descriptor<DescriptorPublicKey>,
     internal_descriptor: Descriptor<DescriptorPublicKey>,
     lookahead: u32,
-) -> bdk_chain::keychain::KeychainTxOutIndex<TestKeychain> {
-    let mut txout_index = bdk_chain::keychain::KeychainTxOutIndex::<TestKeychain>::new(lookahead);
+) -> KeychainTxOutIndex<TestKeychain> {
+    let mut txout_index = KeychainTxOutIndex::<TestKeychain>::new(lookahead);
 
     let _ = txout_index
         .insert_descriptor(TestKeychain::External, external_descriptor)
@@ -146,8 +145,6 @@ fn when_apply_contradictory_changesets_they_are_ignored() {
 
 #[test]
 fn test_set_all_derivation_indices() {
-    use bdk_chain::indexed_tx_graph::Indexer;
-
     let external_descriptor = parse_descriptor(DESCRIPTORS[0]);
     let internal_descriptor = parse_descriptor(DESCRIPTORS[1]);
     let mut txout_index =
@@ -169,7 +166,7 @@ fn test_set_all_derivation_indices() {
     assert_eq!(txout_index.last_revealed_indices(), derive_to);
     assert_eq!(
         txout_index.reveal_to_target_multi(&derive_to),
-        keychain::ChangeSet::default(),
+        ChangeSet::default(),
         "no changes if we set to the same thing"
     );
     assert_eq!(txout_index.initial_changeset().last_revealed, last_revealed);
@@ -304,7 +301,7 @@ fn test_lookahead() {
             ],
             ..common::new_tx(external_index)
         };
-        assert_eq!(txout_index.index_tx(&tx), keychain::ChangeSet::default());
+        assert_eq!(txout_index.index_tx(&tx), ChangeSet::default());
         assert_eq!(
             txout_index.last_revealed_index(&TestKeychain::External),
             Some(last_external_index)
@@ -643,14 +640,14 @@ fn insert_descriptor_no_change() {
     let mut txout_index = KeychainTxOutIndex::<()>::default();
     assert_eq!(
         txout_index.insert_descriptor((), desc.clone()),
-        Ok(keychain::ChangeSet {
+        Ok(ChangeSet {
             keychains_added: [((), desc.clone())].into(),
             last_revealed: Default::default()
         }),
     );
     assert_eq!(
         txout_index.insert_descriptor((), desc.clone()),
-        Ok(keychain::ChangeSet::default()),
+        Ok(ChangeSet::default()),
         "inserting the same descriptor for keychain should return an empty changeset",
     );
 }

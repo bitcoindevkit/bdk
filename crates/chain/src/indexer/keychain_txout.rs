@@ -1,18 +1,19 @@
+//! [`KeychainTxOutIndex`] controls how script pubkeys are revealed for multiple keychains and
+//! indexes [`TxOut`]s with them.
+
 use crate::{
     collections::*,
-    indexed_tx_graph::Indexer,
     miniscript::{Descriptor, DescriptorPublicKey},
     spk_iter::BIP32_MAX_INDEX,
-    DescriptorExt, DescriptorId, SpkIterator, SpkTxOutIndex,
+    DescriptorExt, DescriptorId, Indexed, Indexer, KeychainIndexed, SpkIterator, SpkTxOutIndex,
 };
 use alloc::{borrow::ToOwned, vec::Vec};
-use bitcoin::{Amount, OutPoint, Script, SignedAmount, Transaction, TxOut, Txid};
+use bitcoin::{Amount, OutPoint, Script, ScriptBuf, SignedAmount, Transaction, TxOut, Txid};
 use core::{
     fmt::Debug,
     ops::{Bound, RangeBounds},
 };
 
-use super::*;
 use crate::Append;
 
 /// The default lookahead for a [`KeychainTxOutIndex`]
@@ -73,7 +74,7 @@ pub const DEFAULT_LOOKAHEAD: u32 = 25;
 /// ## Synopsis
 ///
 /// ```
-/// use bdk_chain::keychain::KeychainTxOutIndex;
+/// use bdk_chain::indexer::keychain_txout::KeychainTxOutIndex;
 /// # use bdk_chain::{ miniscript::{Descriptor, DescriptorPublicKey} };
 /// # use core::str::FromStr;
 ///
@@ -98,7 +99,7 @@ pub const DEFAULT_LOOKAHEAD: u32 = 25;
 /// let _ = txout_index.insert_descriptor(MyKeychain::MyAppUser { user_id: 42 }, descriptor_42)?;
 ///
 /// let new_spk_for_user = txout_index.reveal_next_spk(&MyKeychain::MyAppUser{ user_id: 42 });
-/// # Ok::<_, bdk_chain::keychain::InsertDescriptorError<_>>(())
+/// # Ok::<_, bdk_chain::indexer::keychain_txout::InsertDescriptorError<_>>(())
 /// ```
 ///
 /// [`Ord`]: core::cmp::Ord
@@ -859,8 +860,7 @@ impl<K: core::fmt::Debug> std::error::Error for InsertDescriptorError<K> {}
 /// `keychains_added` is *not* monotone, once it is set any attempt to change it is subject to the
 /// same *one-to-one* keychain <-> descriptor mapping invariant as [`KeychainTxOutIndex`] itself.
 ///
-/// [`KeychainTxOutIndex`]: crate::keychain::KeychainTxOutIndex
-/// [`apply_changeset`]: crate::keychain::KeychainTxOutIndex::apply_changeset
+/// [`apply_changeset`]: KeychainTxOutIndex::apply_changeset
 /// [`append`]: Self::append
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(

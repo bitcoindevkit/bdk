@@ -21,14 +21,15 @@
 #![warn(missing_docs)]
 
 pub use bitcoin;
-mod spk_txout_index;
-pub use spk_txout_index::*;
+mod balance;
+pub use balance::*;
 mod chain_data;
 pub use chain_data::*;
 pub mod indexed_tx_graph;
 pub use indexed_tx_graph::IndexedTxGraph;
-pub mod keychain;
-pub use keychain::{Indexed, KeychainIndexed};
+pub mod indexer;
+pub use indexer::spk_txout::*;
+pub use indexer::Indexer;
 pub mod local_chain;
 mod tx_data_traits;
 pub mod tx_graph;
@@ -98,3 +99,8 @@ pub mod collections {
 
 /// How many confirmations are needed f or a coinbase output to be spent.
 pub const COINBASE_MATURITY: u32 = 100;
+
+/// A tuple of keychain index and `T` representing the indexed value.
+pub type Indexed<T> = (u32, T);
+/// A tuple of keychain `K`, derivation index (`u32`) and a `T` associated with them.
+pub type KeychainIndexed<K, T> = ((K, u32), T);

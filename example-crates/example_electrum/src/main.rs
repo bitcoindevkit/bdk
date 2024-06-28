@@ -7,7 +7,7 @@ use bdk_chain::{
     bitcoin::{constants::genesis_block, Address, Network, Txid},
     collections::BTreeSet,
     indexed_tx_graph::{self, IndexedTxGraph},
-    keychain,
+    indexer::keychain_txout,
     local_chain::{self, LocalChain},
     spk_client::{FullScanRequest, SyncRequest},
     Append, ConfirmationHeightAnchor,
@@ -100,7 +100,7 @@ pub struct ScanOptions {
 
 type ChangeSet = (
     local_chain::ChangeSet,
-    indexed_tx_graph::ChangeSet<ConfirmationHeightAnchor, keychain::ChangeSet<Keychain>>,
+    indexed_tx_graph::ChangeSet<ConfirmationHeightAnchor, keychain_txout::ChangeSet<Keychain>>,
 );
 
 fn main() -> anyhow::Result<()> {
