@@ -352,6 +352,13 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     ///
     /// keychain <-> descriptor is a one-to-one mapping that cannot be changed. Attempting to do so
     /// will return a [`InsertDescriptorError<K>`].
+    ///
+    /// `[KeychainTxOutIndex]` will prevent you from inserting two descriptors which derive the same
+    /// script pubkey at index 0, but it's up to you to ensure that descriptors don't collide at
+    /// other indices. If they do nothing catastrophic happens at the `KeychainTxOutIndex` level
+    /// (one keychain just becomes the defacto owner of that spk arbitrarily) but this may have
+    /// subtle implications up the application stack like one UTXO being missing from one keychain
+    /// because it has been assigned to another which produces the same script pubkey.
     pub fn insert_descriptor(
         &mut self,
         keychain: K,

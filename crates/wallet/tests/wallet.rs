@@ -31,7 +31,16 @@ mod common;
 use common::*;
 
 fn receive_output(wallet: &mut Wallet, value: u64, height: ConfirmationTime) -> OutPoint {
-    let addr = wallet.next_unused_address(KeychainKind::External);
+    let addr = wallet.next_unused_address(KeychainKind::External).address;
+    receive_output_to_address(wallet, addr, value, height)
+}
+
+fn receive_output_to_address(
+    wallet: &mut Wallet,
+    addr: Address,
+    value: u64,
+    height: ConfirmationTime,
+) -> OutPoint {
     let tx = Transaction {
         version: transaction::Version::ONE,
         lock_time: absolute::LockTime::ZERO,
@@ -3967,6 +3976,44 @@ fn test_taproot_load_descriptor_duplicated_keys() {
         addr.to_string(),
         "bcrt1pvysh4nmh85ysrkpwtrr8q8gdadhgdejpy6f9v424a8v9htjxjhyqw9c5s5"
     );
+}
+
+/// In dev mode this test panics, but in release mode, or if the `debug_panic` in `TxOutIndex::replenish_inner_index`
+/// is commented out, there is no panic and the balance is calculated correctly. See issue [#1483]
+/// and PR [#1486] for discussion on mixing non-wildcard and wildcard descriptors.
+///
+/// [#1483]: https://github.com/bitcoindevkit/bdk/issues/1483
+/// [#1486]: https://github.com/bitcoindevkit/bdk/pull/1486
+#[test]
+#[should_panic(
+    expected = "replenish lookahead: must not have existing spk: keychain=Internal, lookahead=25, next_store_index=0, next_reveal_index=0"
+)]
+fn test_keychains_with_overlapping_spks() {
+    // this can happen if a non-wildcard descriptor keychain derives an spk that a
+    // wildcard descriptor keychain in the same wallet also derives.
+
+    // index 1 spk overlaps with non-wildcard change descriptor
+    let wildcard_keychain = "wpkh(tprv8ZgxMBicQKsPdDArR4xSAECuVxeX1jwwSXR4ApKbkYgZiziDc4LdBy2WvJeGDfUSE4UT4hHhbgEwbdq8ajjUHiKDegkwrNU6V55CxcxonVN/*)";
+    let non_wildcard_keychain = "wpkh(tprv8ZgxMBicQKsPdDArR4xSAECuVxeX1jwwSXR4ApKbkYgZiziDc4LdBy2WvJeGDfUSE4UT4hHhbgEwbdq8ajjUHiKDegkwrNU6V55CxcxonVN/1)";
+
+    let (mut wallet, _) = get_funded_wallet_with_change(wildcard_keychain, non_wildcard_keychain);
+    assert_eq!(wallet.balance().confirmed, Amount::from_sat(50000));
+
+    let addr = wallet
+        .reveal_addresses_to(KeychainKind::External, 1)
+        .last()
+        .unwrap()
+        .address;
+    let _outpoint = receive_output_to_address(
+        &mut wallet,
+        addr,
+        8000,
+        ConfirmationTime::Confirmed {
+            height: 2000,
+            time: 0,
+        },
+    );
+    assert_eq!(wallet.balance().confirmed, Amount::from_sat(58000));
 }
 
 #[test]
