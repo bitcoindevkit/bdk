@@ -201,8 +201,7 @@ fn new_or_load() -> anyhow::Result<()> {
         // wrong genesis hash
         {
             let exp_blockhash = BlockHash::all_zeros();
-            let got_blockhash =
-                bitcoin::blockdata::constants::genesis_block(Network::Testnet).block_hash();
+            let got_blockhash = bitcoin::constants::genesis_block(Network::Testnet).block_hash();
 
             let db = &mut new_or_load(&file_path).expect("must open db");
             let changeset = read(db)?;
