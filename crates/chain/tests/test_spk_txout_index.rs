@@ -1,4 +1,4 @@
-use bdk_chain::{indexed_tx_graph::Indexer, SpkTxOutIndex};
+use bdk_chain::{Indexer, SpkTxOutIndex};
 use bitcoin::{
     absolute, transaction, Amount, OutPoint, ScriptBuf, SignedAmount, Transaction, TxIn, TxOut,
 };

@@ -8,9 +8,10 @@ use std::{collections::BTreeSet, sync::Arc};
 use crate::common::DESCRIPTORS;
 use bdk_chain::{
     indexed_tx_graph::{self, IndexedTxGraph},
-    keychain::{self, Balance, KeychainTxOutIndex},
+    keychain_txout,
     local_chain::LocalChain,
-    tx_graph, Append, ChainPosition, ConfirmationHeightAnchor, DescriptorExt,
+    tx_graph, Append, Balance, ChainPosition, ConfirmationHeightAnchor, DescriptorExt,
+    KeychainTxOutIndex,
 };
 use bitcoin::{
     secp256k1::Secp256k1, Amount, OutPoint, Script, ScriptBuf, Transaction, TxIn, TxOut,
@@ -76,7 +77,7 @@ fn insert_relevant_txs() {
             txs: txs.iter().cloned().map(Arc::new).collect(),
             ..Default::default()
         },
-        indexer: keychain::ChangeSet {
+        indexer: keychain_txout::ChangeSet {
             last_revealed: [(descriptor.descriptor_id(), 9_u32)].into(),
             keychains_added: [].into(),
         },
@@ -90,7 +91,7 @@ fn insert_relevant_txs() {
     // The initial changeset will also contain info about the keychain we added
     let initial_changeset = indexed_tx_graph::ChangeSet {
         graph: changeset.graph,
-        indexer: keychain::ChangeSet {
+        indexer: keychain_txout::ChangeSet {
             last_revealed: changeset.indexer.last_revealed,
             keychains_added: [((), descriptor)].into(),
         },
