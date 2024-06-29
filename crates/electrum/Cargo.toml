@@ -9,12 +9,16 @@ description = "Fetch data from electrum in the form BDK accepts"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
 bdk_chain = { path = "../chain", version = "0.16.0" }
-electrum-client = { version = "0.20" }
-#rustls = { version = "=0.21.1", optional = true, features = ["dangerous_configuration"] }
+# TODO: Switch the lines below once https://github.com/bitcoindevkit/rust-electrum-client/pull/135 is merged and a new version is released
+electrum-client = { git = "https://github.com/thunderbiscuit/rust-electrum-client/", branch = "feature/rustls-ring", default-features = false }
+# electrum-client = { version = "0.21", default-features = false }
 
 [dev-dependencies]
 bdk_testenv = { path = "../testenv", default-features = false }
+
+[features]
+default = ["use-rustls"]
+use-rustls = ["electrum-client/proxy", "electrum-client/use-rustls"]
+use-rustls-ring = ["electrum-client/use-rustls-ring"]
