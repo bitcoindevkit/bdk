@@ -1,7 +1,6 @@
 #![allow(unused)]
 
-use bdk_chain::indexed_tx_graph::Indexer;
-use bdk_chain::{BlockId, ConfirmationTime};
+use bdk_chain::{BlockId, ConfirmationTime, Indexer};
 use bdk_wallet::{KeychainKind, LocalOutput, Wallet};
 use bitcoin::hashes::Hash;
 use bitcoin::{
