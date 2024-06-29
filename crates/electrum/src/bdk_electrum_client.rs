@@ -78,10 +78,10 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
     /// - `request`: struct with data required to perform a spk-based blockchain client full scan,
     ///              see [`FullScanRequest`]
     /// - `stop_gap`: the full scan for each keychain stops after a gap of script pubkeys with no
-    ///              associated transactions
+    ///               associated transactions
     /// - `batch_size`: specifies the max number of script pubkeys to request for in a single batch
-    ///              request
-    /// - `fetch_prev_txouts`: specifies whether or not we want previous `TxOut`s for fee
+    ///                 request
+    /// - `fetch_prev_txouts`: specifies whether we want previous `TxOut`s for fee calculation
     pub fn full_scan<K: Ord + Clone>(
         &self,
         request: FullScanRequest<K>,
@@ -177,9 +177,8 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
     /// - `request`: struct with data required to perform a spk-based blockchain client sync,
     ///              see [`SyncRequest`]
     /// - `batch_size`: specifies the max number of script pubkeys to request for in a single batch
-    ///              request
-    /// - `fetch_prev_txouts`: specifies whether or not we want previous `TxOut`s for fee
-    ///              calculation
+    ///                 request
+    /// - `fetch_prev_txouts`: specifies whether we want previous `TxOut`s for fee calculation
     ///
     /// If the scripts to sync are unknown, such as when restoring or importing a keychain that
     /// may include scripts that have been used, use [`full_scan`] with the keychain.
@@ -542,7 +541,7 @@ fn construct_update_tip(
     Ok((new_tip, agreement_height))
 }
 
-/// A [tx status] comprises of a concatenation of `tx_hash:height:`s. We transform a single one of
+/// A [tx status] consists of a concatenation of `tx_hash:height:`s. We transform a single one of
 /// these concatenations into a [`ConfirmationHeightAnchor`] if possible.
 ///
 /// We use the lowest possible checkpoint as the anchor block (from `cps`). If an anchor block

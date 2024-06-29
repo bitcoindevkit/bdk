@@ -199,7 +199,8 @@ impl AnchorFromBlockPosition for ConfirmationHeightAnchor {
 pub struct ConfirmationTimeHeightAnchor {
     /// The confirmation height of the transaction being anchored.
     pub confirmation_height: u32,
-    /// The confirmation time of the transaction being anchored.
+    /// The confirmation time of the transaction being anchored as claimed by the miner in the block
+    /// header.
     pub confirmation_time: u64,
     /// The anchor block.
     pub anchor_block: BlockId,
