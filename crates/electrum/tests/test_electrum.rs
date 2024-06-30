@@ -198,17 +198,14 @@ fn tx_can_become_unconfirmed_after_reorg() -> anyhow::Result<()> {
             .apply_update(update.chain_update)
             .map_err(|err| anyhow::anyhow!("LocalChain update error: {:?}", err))?;
 
-        // Check to see if a new anchor is added during current reorg.
-        if !initial_anchors.is_superset(update.graph_update.all_anchors()) {
-            println!("New anchor added at reorg depth {}", depth);
-        }
+        // Check that no new anchors are added during current reorg.
+        assert!(initial_anchors.is_superset(update.graph_update.all_anchors()));
         let _ = recv_graph.apply_update(update.graph_update);
 
         assert_eq!(
             get_balance(&recv_chain, &recv_graph)?,
             Balance {
                 confirmed: SEND_AMOUNT * (REORG_COUNT - depth) as u64,
-                trusted_pending: SEND_AMOUNT * depth as u64,
                 ..Balance::default()
             },
             "reorg_count: {}",

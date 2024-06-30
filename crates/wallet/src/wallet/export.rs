@@ -214,7 +214,7 @@ mod test {
     use core::str::FromStr;
 
     use crate::std::string::ToString;
-    use bdk_chain::{BlockId, ConfirmationTime};
+    use bdk_chain::{BlockId, ConfirmationTimeHeightAnchor};
     use bitcoin::hashes::Hash;
     use bitcoin::{transaction, BlockHash, Network, Transaction};
 
@@ -222,6 +222,8 @@ mod test {
     use crate::wallet::Wallet;
 
     fn get_test_wallet(descriptor: &str, change_descriptor: &str, network: Network) -> Wallet {
+        use crate::wallet::Update;
+        use bdk_chain::TxGraph;
         let mut wallet = Wallet::new(descriptor, change_descriptor, network).unwrap();
         let transaction = Transaction {
             input: vec![],
@@ -229,20 +231,25 @@ mod test {
             version: transaction::Version::non_standard(0),
             lock_time: bitcoin::absolute::LockTime::ZERO,
         };
+        let txid = transaction.compute_txid();
+        let block_id = BlockId {
+            height: 5001,
+            hash: BlockHash::all_zeros(),
+        };
+        wallet.insert_checkpoint(block_id).unwrap();
+        wallet.insert_tx(transaction);
+        let anchor = ConfirmationTimeHeightAnchor {
+            confirmation_height: 5000,
+            confirmation_time: 0,
+            anchor_block: block_id,
+        };
+        let mut graph = TxGraph::default();
+        let _ = graph.insert_anchor(txid, anchor);
         wallet
-            .insert_checkpoint(BlockId {
-                height: 5001,
-                hash: BlockHash::all_zeros(),
+            .apply_update(Update {
+                graph,
+                ..Default::default()
             })
-            .unwrap();
-        wallet
-            .insert_tx(
-                transaction,
-                ConfirmationTime::Confirmed {
-                    height: 5000,
-                    time: 0,
-                },
-            )
             .unwrap();
         wallet
     }

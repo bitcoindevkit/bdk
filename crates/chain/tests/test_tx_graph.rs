@@ -977,16 +977,6 @@ fn test_chain_spends() {
         }))
     );
 
-    // Even if unconfirmed tx has a last_seen of 0, it can still be part of a chain spend.
-    assert_eq!(
-        graph.get_chain_spend(
-            &local_chain,
-            tip.block_id(),
-            OutPoint::new(tx_0.compute_txid(), 1)
-        ),
-        Some((ChainPosition::Unconfirmed(0), tx_2.compute_txid())),
-    );
-
     // Mark the unconfirmed as seen and check correct ObservedAs status is returned.
     let _ = graph.insert_seen_at(tx_2.compute_txid(), 1234567);
 
@@ -1099,10 +1089,10 @@ fn update_last_seen_unconfirmed() {
     let txid = tx.compute_txid();
 
     // insert a new tx
-    // initially we have a last_seen of 0, and no anchors
+    // initially we have a last_seen of None and no anchors
     let _ = graph.insert_tx(tx);
     let tx = graph.full_txs().next().unwrap();
-    assert_eq!(tx.last_seen_unconfirmed, 0);
+    assert_eq!(tx.last_seen_unconfirmed, None);
     assert!(tx.anchors.is_empty());
 
     // higher timestamp should update last seen
@@ -1117,7 +1107,56 @@ fn update_last_seen_unconfirmed() {
     let _ = graph.insert_anchor(txid, ());
     let changeset = graph.update_last_seen_unconfirmed(4);
     assert!(changeset.is_empty());
-    assert_eq!(graph.full_txs().next().unwrap().last_seen_unconfirmed, 2);
+    assert_eq!(
+        graph
+            .full_txs()
+            .next()
+            .unwrap()
+            .last_seen_unconfirmed
+            .unwrap(),
+        2
+    );
+}
+
+#[test]
+fn transactions_inserted_into_tx_graph_are_not_canonical_until_they_have_an_anchor_in_best_chain() {
+    let txs = vec![new_tx(0), new_tx(1)];
+    let txids: Vec<Txid> = txs.iter().map(Transaction::compute_txid).collect();
+
+    // graph
+    let mut graph = TxGraph::<BlockId>::new(txs);
+    let full_txs: Vec<_> = graph.full_txs().collect();
+    assert_eq!(full_txs.len(), 2);
+    let unseen_txs: Vec<_> = graph.txs_with_no_anchor_or_last_seen().collect();
+    assert_eq!(unseen_txs.len(), 2);
+
+    // chain
+    let blocks: BTreeMap<u32, BlockHash> = [(0, h!("g")), (1, h!("A")), (2, h!("B"))]
+        .into_iter()
+        .collect();
+    let chain = LocalChain::from_blocks(blocks).unwrap();
+    let canonical_txs: Vec<_> = graph
+        .list_canonical_txs(&chain, chain.tip().block_id())
+        .collect();
+    assert!(canonical_txs.is_empty());
+
+    // tx0 with seen_at should be returned by canonical txs
+    let _ = graph.insert_seen_at(txids[0], 2);
+    let mut canonical_txs = graph.list_canonical_txs(&chain, chain.tip().block_id());
+    assert_eq!(
+        canonical_txs.next().map(|tx| tx.tx_node.txid).unwrap(),
+        txids[0]
+    );
+    drop(canonical_txs);
+
+    // tx1 with anchor is also canonical
+    let _ = graph.insert_anchor(txids[1], block_id!(2, "B"));
+    let canonical_txids: Vec<_> = graph
+        .list_canonical_txs(&chain, chain.tip().block_id())
+        .map(|tx| tx.tx_node.txid)
+        .collect();
+    assert!(canonical_txids.contains(&txids[1]));
+    assert!(graph.txs_with_no_anchor_or_last_seen().next().is_none());
 }
 
 #[test]

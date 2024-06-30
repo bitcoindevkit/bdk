@@ -15,7 +15,7 @@ struct Scenario<'a> {
     name: &'a str,
     /// Transaction templates
     tx_templates: &'a [TxTemplate<'a, BlockId>],
-    /// Names of txs that must exist in the output of `list_chain_txs`
+    /// Names of txs that must exist in the output of `list_canonical_txs`
     exp_chain_txs: HashSet<&'a str>,
     /// Outpoints that must exist in the output of `filter_chain_txouts`
     exp_chain_txouts: HashSet<(&'a str, u32)>,
@@ -27,7 +27,7 @@ struct Scenario<'a> {
 
 /// This test ensures that [`TxGraph`] will reliably filter out irrelevant transactions when
 /// presented with multiple conflicting transaction scenarios using the [`TxTemplate`] structure.
-/// This test also checks that [`TxGraph::list_chain_txs`], [`TxGraph::filter_chain_txouts`],
+/// This test also checks that [`TxGraph::list_canonical_txs`], [`TxGraph::filter_chain_txouts`],
 /// [`TxGraph::filter_chain_unspents`], and [`TxGraph::balance`] return correct data.
 #[test]
 fn test_tx_conflict_handling() {
@@ -597,7 +597,7 @@ fn test_tx_conflict_handling() {
         let (tx_graph, spk_index, exp_tx_ids) = init_graph(scenario.tx_templates.iter());
 
         let txs = tx_graph
-            .list_chain_txs(&local_chain, chain_tip)
+            .list_canonical_txs(&local_chain, chain_tip)
             .map(|tx| tx.tx_node.txid)
             .collect::<BTreeSet<_>>();
         let exp_txs = scenario
@@ -607,7 +607,7 @@ fn test_tx_conflict_handling() {
             .collect::<BTreeSet<_>>();
         assert_eq!(
             txs, exp_txs,
-            "\n[{}] 'list_chain_txs' failed",
+            "\n[{}] 'list_canonical_txs' failed",
             scenario.name
         );
 
