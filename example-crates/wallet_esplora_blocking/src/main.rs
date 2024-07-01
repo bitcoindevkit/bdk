@@ -28,8 +28,9 @@ fn main() -> Result<(), anyhow::Error> {
     )?;
 
     let address = wallet.next_unused_address(KeychainKind::External);
-    if let Some(changeset) = wallet.take_staged() {
-        db.append_changeset(&changeset)?;
+    if let Some(changeset) = wallet.staged() {
+        db.append_changeset(changeset)?;
+        wallet.take_staged();
     }
     println!("Generated Address: {}", address);
 
@@ -56,8 +57,9 @@ fn main() -> Result<(), anyhow::Error> {
     let _ = update.graph_update.update_last_seen_unconfirmed(now);
 
     wallet.apply_update(update)?;
-    if let Some(changeset) = wallet.take_staged() {
-        db.append_changeset(&changeset)?;
+    if let Some(changeset) = wallet.staged() {
+        db.append_changeset(changeset)?;
+        wallet.take_staged();
     }
     println!();
 
