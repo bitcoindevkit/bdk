@@ -2,7 +2,7 @@ use std::{
     path::PathBuf,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, Mutex,
+        Arc,
     },
     time::{Duration, Instant},
 };
@@ -12,10 +12,8 @@ use bdk_bitcoind_rpc::{
     Emitter,
 };
 use bdk_chain::{
-    bitcoin::{constants::genesis_block, Block, Transaction},
-    indexed_tx_graph, keychain,
-    local_chain::{self, LocalChain},
-    Append, ConfirmationTimeHeightAnchor, IndexedTxGraph,
+    bitcoin::{Block, Transaction},
+    local_chain, Append, CombinedChangeSet, ConfirmationTimeHeightAnchor,
 };
 use example_cli::{
     anyhow,
@@ -35,10 +33,8 @@ const MEMPOOL_EMIT_DELAY: Duration = Duration::from_secs(30);
 /// Delay for committing to persistence.
 const DB_COMMIT_DELAY: Duration = Duration::from_secs(60);
 
-type ChangeSet = (
-    local_chain::ChangeSet,
-    indexed_tx_graph::ChangeSet<ConfirmationTimeHeightAnchor, keychain::ChangeSet<Keychain>>,
-);
+/// ChangeSet
+type ChangeSet = CombinedChangeSet<Keychain, ConfirmationTimeHeightAnchor>;
 
 #[derive(Debug)]
 enum Emission {
@@ -110,52 +106,28 @@ enum RpcCommands {
 
 fn main() -> anyhow::Result<()> {
     let start = Instant::now();
+
     let example_cli::Init {
         args,
-        keymap,
-        index,
+        graph,
+        chain,
         db,
-        init_changeset,
-    } = example_cli::init::<RpcCommands, RpcArgs, ChangeSet>(DB_MAGIC, DB_PATH)?;
-    println!(
-        "[{:>10}s] loaded initial changeset from db",
-        start.elapsed().as_secs_f32()
-    );
-    let (init_chain_changeset, init_graph_changeset) = init_changeset;
-
-    let graph = Mutex::new({
-        let mut graph = IndexedTxGraph::new(index);
-        graph.apply_changeset(init_graph_changeset);
-        graph
-    });
-    println!(
-        "[{:>10}s] loaded indexed tx graph from changeset",
-        start.elapsed().as_secs_f32()
-    );
-
-    let chain = Mutex::new(if init_chain_changeset.is_empty() {
-        let genesis_hash = genesis_block(args.network).block_hash();
-        let (chain, chain_changeset) = LocalChain::from_genesis_hash(genesis_hash);
-        let mut db = db.lock().unwrap();
-        db.append_changeset(&(chain_changeset, Default::default()))?;
-        chain
-    } else {
-        LocalChain::from_changeset(init_chain_changeset)?
-    });
-    println!(
-        "[{:>10}s] loaded local chain from changeset",
-        start.elapsed().as_secs_f32()
-    );
+        network,
+    } = match example_cli::init_or_load::<RpcCommands, RpcArgs, ConfirmationTimeHeightAnchor>(
+        DB_MAGIC, DB_PATH,
+    )? {
+        Some(init) => init,
+        None => return Ok(()),
+    };
 
     let rpc_cmd = match args.command {
         example_cli::Commands::ChainSpecific(rpc_cmd) => rpc_cmd,
         general_cmd => {
             return example_cli::handle_commands(
                 &graph,
-                &db,
                 &chain,
-                &keymap,
-                args.network,
+                &db,
+                network,
                 |rpc_args, tx| {
                     let client = rpc_args.new_client()?;
                     client.send_raw_transaction(tx)?;
@@ -190,7 +162,11 @@ fn main() -> anyhow::Result<()> {
                     .apply_update(emission.checkpoint)
                     .expect("must always apply as we receive blocks in order from emitter");
                 let graph_changeset = graph.apply_block_relevant(&emission.block, height);
-                db_stage.append((chain_changeset, graph_changeset));
+                db_stage.append(ChangeSet {
+                    chain: chain_changeset,
+                    indexed_tx_graph: graph_changeset,
+                    ..Default::default()
+                });
 
                 // commit staged db changes in intervals
                 if last_db_commit.elapsed() >= DB_COMMIT_DELAY {
@@ -234,7 +210,10 @@ fn main() -> anyhow::Result<()> {
             );
             {
                 let db = &mut *db.lock().unwrap();
-                db_stage.append((local_chain::ChangeSet::default(), graph_changeset));
+                db_stage.append(ChangeSet {
+                    indexed_tx_graph: graph_changeset,
+                    ..Default::default()
+                });
                 if let Some(changeset) = db_stage.take() {
                     db.append_changeset(&changeset)?;
                 }
@@ -299,7 +278,7 @@ fn main() -> anyhow::Result<()> {
                 let mut graph = graph.lock().unwrap();
                 let mut chain = chain.lock().unwrap();
 
-                let changeset = match emission {
+                let (chain_changeset, graph_changeset) = match emission {
                     Emission::Block(block_emission) => {
                         let height = block_emission.block_height();
                         let chain_changeset = chain
@@ -320,7 +299,11 @@ fn main() -> anyhow::Result<()> {
                         continue;
                     }
                 };
-                db_stage.append(changeset);
+                db_stage.append(ChangeSet {
+                    chain: chain_changeset,
+                    indexed_tx_graph: graph_changeset,
+                    ..Default::default()
+                });
 
                 if last_db_commit.elapsed() >= DB_COMMIT_DELAY {
                     let db = &mut *db.lock().unwrap();
