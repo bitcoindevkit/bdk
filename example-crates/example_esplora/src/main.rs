@@ -10,7 +10,7 @@ use bdk_chain::{
     keychain,
     local_chain::{self, LocalChain},
     spk_client::{FullScanRequest, SyncRequest},
-    Append, ConfirmationTimeHeightAnchor,
+    Append, ConfirmationBlockTime,
 };
 
 use bdk_esplora::{esplora_client, EsploraExt};
@@ -26,7 +26,7 @@ const DB_PATH: &str = ".bdk_esplora_example.db";
 
 type ChangeSet = (
     local_chain::ChangeSet,
-    indexed_tx_graph::ChangeSet<ConfirmationTimeHeightAnchor, keychain::ChangeSet<Keychain>>,
+    indexed_tx_graph::ChangeSet<ConfirmationBlockTime, keychain::ChangeSet<Keychain>>,
 );
 
 #[derive(Subcommand, Debug, Clone)]

@@ -128,7 +128,7 @@ impl FullyNodedExport {
         let blockheight = if include_blockheight {
             wallet.transactions().next().map_or(0, |canonical_tx| {
                 match canonical_tx.chain_position {
-                    bdk_chain::ChainPosition::Confirmed(a) => a.confirmation_height,
+                    bdk_chain::ChainPosition::Confirmed(a) => a.block_id.height,
                     bdk_chain::ChainPosition::Unconfirmed(_) => 0,
                 }
             })
@@ -229,6 +229,12 @@ mod test {
             version: transaction::Version::non_standard(0),
             lock_time: bitcoin::absolute::LockTime::ZERO,
         };
+        wallet
+            .insert_checkpoint(BlockId {
+                height: 5000,
+                hash: BlockHash::all_zeros(),
+            })
+            .unwrap();
         wallet
             .insert_checkpoint(BlockId {
                 height: 5001,

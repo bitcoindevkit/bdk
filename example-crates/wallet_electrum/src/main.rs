@@ -63,9 +63,7 @@ fn main() -> Result<(), anyhow::Error> {
         })
         .inspect_spks_for_all_keychains(|_, _, _| std::io::stdout().flush().expect("must flush"));
 
-    let mut update = client
-        .full_scan(request, STOP_GAP, BATCH_SIZE, false)?
-        .with_confirmation_time_height_anchor(&client)?;
+    let mut update = client.full_scan(request, STOP_GAP, BATCH_SIZE, false)?;
 
     let now = std::time::UNIX_EPOCH.elapsed().unwrap().as_secs();
     let _ = update.graph_update.update_last_seen_unconfirmed(now);

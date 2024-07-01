@@ -6,7 +6,7 @@ use bdk_chain::spk_client::{FullScanRequest, FullScanResult, SyncRequest, SyncRe
 use bdk_chain::{
     bitcoin::{Amount, BlockHash, OutPoint, ScriptBuf, TxOut, Txid},
     local_chain::CheckPoint,
-    BlockId, ConfirmationTimeHeightAnchor, TxGraph,
+    BlockId, ConfirmationBlockTime, TxGraph,
 };
 use bdk_chain::{Anchor, Indexed};
 use esplora_client::TxStatus;
@@ -219,10 +219,10 @@ fn full_scan_for_index_and_graph_blocking<K: Ord + Clone>(
     keychain_spks: BTreeMap<K, impl IntoIterator<Item = Indexed<ScriptBuf>>>,
     stop_gap: usize,
     parallel_requests: usize,
-) -> Result<(TxGraph<ConfirmationTimeHeightAnchor>, BTreeMap<K, u32>), Error> {
+) -> Result<(TxGraph<ConfirmationBlockTime>, BTreeMap<K, u32>), Error> {
     type TxsOfSpkIndex = (u32, Vec<esplora_client::Tx>);
     let parallel_requests = Ord::max(parallel_requests, 1);
-    let mut tx_graph = TxGraph::<ConfirmationTimeHeightAnchor>::default();
+    let mut tx_graph = TxGraph::<ConfirmationBlockTime>::default();
     let mut last_active_indices = BTreeMap::<K, u32>::new();
 
     for (keychain, spks) in keychain_spks {
@@ -315,7 +315,7 @@ fn sync_for_index_and_graph_blocking(
     txids: impl IntoIterator<Item = Txid>,
     outpoints: impl IntoIterator<Item = OutPoint>,
     parallel_requests: usize,
-) -> Result<TxGraph<ConfirmationTimeHeightAnchor>, Error> {
+) -> Result<TxGraph<ConfirmationBlockTime>, Error> {
     let (mut tx_graph, _) = full_scan_for_index_and_graph_blocking(
         client,
         {

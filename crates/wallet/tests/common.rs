@@ -67,6 +67,12 @@ pub fn get_funded_wallet_with_change(descriptor: &str, change: &str) -> (Wallet,
 
     wallet
         .insert_checkpoint(BlockId {
+            height: 42,
+            hash: BlockHash::all_zeros(),
+        })
+        .unwrap();
+    wallet
+        .insert_checkpoint(BlockId {
             height: 1_000,
             hash: BlockHash::all_zeros(),
         })

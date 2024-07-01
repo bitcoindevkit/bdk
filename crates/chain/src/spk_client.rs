@@ -1,8 +1,8 @@
 //! Helper types for spk-based blockchain clients.
 
 use crate::{
-    collections::BTreeMap, keychain::Indexed, local_chain::CheckPoint,
-    ConfirmationTimeHeightAnchor, TxGraph,
+    collections::BTreeMap, keychain::Indexed, local_chain::CheckPoint, ConfirmationBlockTime,
+    TxGraph,
 };
 use alloc::boxed::Box;
 use bitcoin::{OutPoint, Script, ScriptBuf, Txid};
@@ -177,7 +177,7 @@ impl SyncRequest {
 /// Data returned from a spk-based blockchain client sync.
 ///
 /// See also [`SyncRequest`].
-pub struct SyncResult<A = ConfirmationTimeHeightAnchor> {
+pub struct SyncResult<A = ConfirmationBlockTime> {
     /// The update to apply to the receiving [`TxGraph`].
     pub graph_update: TxGraph<A>,
     /// The update to apply to the receiving [`LocalChain`](crate::local_chain::LocalChain).
@@ -318,7 +318,7 @@ impl<K: Ord + Clone> FullScanRequest<K> {
 /// Data returned from a spk-based blockchain client full scan.
 ///
 /// See also [`FullScanRequest`].
-pub struct FullScanResult<K, A = ConfirmationTimeHeightAnchor> {
+pub struct FullScanResult<K, A = ConfirmationBlockTime> {
     /// The update to apply to the receiving [`LocalChain`](crate::local_chain::LocalChain).
     pub graph_update: TxGraph<A>,
     /// The update to apply to the receiving [`TxGraph`].

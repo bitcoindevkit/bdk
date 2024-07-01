@@ -15,7 +15,7 @@ use bdk_chain::{
     bitcoin::{constants::genesis_block, Block, Transaction},
     indexed_tx_graph, keychain,
     local_chain::{self, LocalChain},
-    Append, ConfirmationTimeHeightAnchor, IndexedTxGraph,
+    Append, ConfirmationBlockTime, IndexedTxGraph,
 };
 use example_cli::{
     anyhow,
@@ -37,7 +37,7 @@ const DB_COMMIT_DELAY: Duration = Duration::from_secs(60);
 
 type ChangeSet = (
     local_chain::ChangeSet,
-    indexed_tx_graph::ChangeSet<ConfirmationTimeHeightAnchor, keychain::ChangeSet<Keychain>>,
+    indexed_tx_graph::ChangeSet<ConfirmationBlockTime, keychain::ChangeSet<Keychain>>,
 );
 
 #[derive(Debug)]
