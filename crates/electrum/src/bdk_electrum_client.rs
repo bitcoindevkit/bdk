@@ -4,7 +4,7 @@ use bdk_chain::{
     local_chain::CheckPoint,
     spk_client::{FullScanRequest, FullScanResult, SyncRequest, SyncResult},
     tx_graph::TxGraph,
-    Anchor, BlockId, ConfirmationTimeHeightAnchor,
+    Anchor, BlockId, ConfirmationBlockTime,
 };
 use electrum_client::{ElectrumApi, Error, HeaderNotification};
 use std::{
@@ -123,12 +123,12 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
     ) -> Result<FullScanResult<K>, Error> {
         let (tip, latest_blocks) =
             fetch_tip_and_latest_blocks(&self.inner, request.chain_tip.clone())?;
-        let mut graph_update = TxGraph::<ConfirmationTimeHeightAnchor>::default();
+        let mut graph_update = TxGraph::<ConfirmationBlockTime>::default();
         let mut last_active_indices = BTreeMap::<K, u32>::new();
 
-        for (keychain, keychain_spks) in request.spks_by_keychain {
+        for (keychain, spks) in request.spks_by_keychain {
             if let Some(last_active_index) =
-                self.populate_with_spks(&mut graph_update, keychain_spks, stop_gap, batch_size)?
+                self.populate_with_spks(&mut graph_update, spks, stop_gap, batch_size)?
             {
                 last_active_indices.insert(keychain, last_active_index);
             }
@@ -199,17 +199,15 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
     /// Transactions that contains an output with requested spk, or spends form an output with
     /// requested spk will be added to `graph_update`. Anchors of the aforementioned transactions are
     /// also included.
-    ///
-    /// Checkpoints (in `cps`) are used to create anchors. The `tx_cache` is self-explanatory.
-    fn populate_with_spks<I: Ord + Clone>(
+    fn populate_with_spks(
         &self,
-        graph_update: &mut TxGraph<ConfirmationTimeHeightAnchor>,
-        mut spks: impl Iterator<Item = (I, ScriptBuf)>,
+        graph_update: &mut TxGraph<ConfirmationBlockTime>,
+        mut spks: impl Iterator<Item = (u32, ScriptBuf)>,
         stop_gap: usize,
         batch_size: usize,
-    ) -> Result<Option<I>, Error> {
+    ) -> Result<Option<u32>, Error> {
         let mut unused_spk_count = 0_usize;
-        let mut last_active_index = Option::<I>::None;
+        let mut last_active_index = Option::<u32>::None;
 
         loop {
             let spks = (0..batch_size)
@@ -225,8 +223,8 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
 
             for ((spk_index, _spk), spk_history) in spks.into_iter().zip(spk_histories) {
                 if spk_history.is_empty() {
-                    unused_spk_count += 1;
-                    if unused_spk_count > stop_gap {
+                    unused_spk_count = unused_spk_count.saturating_add(1);
+                    if unused_spk_count >= stop_gap {
                         return Ok(last_active_index);
                     }
                     continue;
@@ -247,11 +245,9 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
     ///
     /// Transactions in which the outpoint resides, and transactions that spend from the outpoint are
     /// included. Anchors of the aforementioned transactions are included.
-    ///
-    /// Checkpoints (in `cps`) are used to create anchors. The `tx_cache` is self-explanatory.
     fn populate_with_outpoints(
         &self,
-        graph_update: &mut TxGraph<ConfirmationTimeHeightAnchor>,
+        graph_update: &mut TxGraph<ConfirmationBlockTime>,
         outpoints: impl IntoIterator<Item = OutPoint>,
     ) -> Result<(), Error> {
         for outpoint in outpoints {
@@ -299,7 +295,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
     /// Populate the `graph_update` with transactions/anchors of the provided `txids`.
     fn populate_with_txids(
         &self,
-        graph_update: &mut TxGraph<ConfirmationTimeHeightAnchor>,
+        graph_update: &mut TxGraph<ConfirmationBlockTime>,
         txids: impl IntoIterator<Item = Txid>,
     ) -> Result<(), Error> {
         for txid in txids {
@@ -335,7 +331,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
     // An anchor is inserted if the transaction is validated to be in a confirmed block.
     fn validate_merkle_for_anchor(
         &self,
-        graph_update: &mut TxGraph<ConfirmationTimeHeightAnchor>,
+        graph_update: &mut TxGraph<ConfirmationBlockTime>,
         txid: Txid,
         confirmation_height: i32,
     ) -> Result<(), Error> {
@@ -364,10 +360,9 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
             if is_confirmed_tx {
                 let _ = graph_update.insert_anchor(
                     txid,
-                    ConfirmationTimeHeightAnchor {
-                        confirmation_height: merkle_res.block_height as u32,
+                    ConfirmationBlockTime {
                         confirmation_time: header.time as u64,
-                        anchor_block: BlockId {
+                        block_id: BlockId {
                             height: merkle_res.block_height as u32,
                             hash: header.block_hash(),
                         },
@@ -382,7 +377,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
     // which we do not have by default. This data is needed to calculate the transaction fee.
     fn fetch_prev_txout(
         &self,
-        graph_update: &mut TxGraph<ConfirmationTimeHeightAnchor>,
+        graph_update: &mut TxGraph<ConfirmationBlockTime>,
     ) -> Result<(), Error> {
         let full_txs: Vec<Arc<Transaction>> =
             graph_update.full_txs().map(|tx_node| tx_node.tx).collect();
@@ -454,11 +449,13 @@ fn fetch_tip_and_latest_blocks(
     let agreement_height = agreement_cp.as_ref().map(CheckPoint::height);
 
     let new_tip = new_blocks
-        .clone()
-        .into_iter()
+        .iter()
         // Prune `new_blocks` to only include blocks that are actually new.
-        .filter(|(height, _)| Some(*height) > agreement_height)
-        .map(|(height, hash)| BlockId { height, hash })
+        .filter(|(height, _)| Some(*<&u32>::clone(height)) > agreement_height)
+        .map(|(height, hash)| BlockId {
+            height: *height,
+            hash: *hash,
+        })
         .fold(agreement_cp, |prev_cp, block| {
             Some(match prev_cp {
                 Some(cp) => cp.push(block).expect("must extend checkpoint"),
