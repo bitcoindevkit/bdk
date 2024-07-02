@@ -1,16 +1,20 @@
+use std::path::PathBuf;
+use std::sync::mpsc::sync_channel;
+use std::thread::spawn;
+use std::time::Instant;
+
+use clap::{self, Parser};
+
 use bdk_bitcoind_rpc::{
     bitcoincore_rpc::{Auth, Client, RpcApi},
     Emitter,
 };
-use bdk_file_store::Store;
 use bdk_wallet::{
     bitcoin::{Block, Network, Transaction},
     wallet::Wallet,
 };
-use clap::{self, Parser};
-use std::{path::PathBuf, sync::mpsc::sync_channel, thread::spawn, time::Instant};
 
-const DB_MAGIC: &str = "bdk-rpc-wallet-example";
+use bdk_sqlite::{rusqlite::Connection, Store};
 
 /// Bitcoind RPC example using `bdk_wallet::Wallet`.
 ///
@@ -21,24 +25,25 @@ const DB_MAGIC: &str = "bdk-rpc-wallet-example";
 #[clap(propagate_version = true)]
 pub struct Args {
     /// Wallet descriptor
-    #[clap(env = "DESCRIPTOR")]
+    #[clap(
+        env = "DESCRIPTOR",
+        long,
+        default_value = "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/84'/1'/0'/0/*)"
+    )]
     pub descriptor: String,
     /// Wallet change descriptor
-    #[clap(env = "CHANGE_DESCRIPTOR")]
+    #[clap(
+        env = "CHANGE_DESCRIPTOR",
+        long,
+        default_value = "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/84'/1'/0'/1/*)"
+    )]
     pub change_descriptor: String,
     /// Earliest block height to start sync from
-    #[clap(env = "START_HEIGHT", long, default_value = "481824")]
+    #[clap(env = "START_HEIGHT", long, default_value = "100000")]
     pub start_height: u32,
     /// Bitcoin network to connect to
-    #[clap(env = "BITCOIN_NETWORK", long, default_value = "testnet")]
+    #[clap(env = "BITCOIN_NETWORK", long, default_value = "signet")]
     pub network: Network,
-    /// Where to store wallet data
-    #[clap(
-        env = "BDK_DB_PATH",
-        long,
-        default_value = ".bdk_wallet_rpc_example.db"
-    )]
-    pub db_path: PathBuf,
 
     /// RPC URL
     #[clap(env = "RPC_URL", long, default_value = "127.0.0.1:8332")]
@@ -86,17 +91,17 @@ fn main() -> anyhow::Result<()> {
     );
 
     let start_load_wallet = Instant::now();
-    let mut db = Store::<bdk_wallet::wallet::ChangeSet>::open_or_create_new(
-        DB_MAGIC.as_bytes(),
-        args.db_path,
-    )?;
-    let changeset = db.aggregate_changesets()?;
+    let conn = Connection::open_in_memory().expect("must open connection");
+    let mut db = Store::new(conn).expect("must create db");
+    let changeset = db.read()?;
+    let external_descriptor = args.descriptor.as_str();
+    let internal_descriptor = args.change_descriptor.as_str();
 
     let mut wallet = Wallet::new_or_load(
-        &args.descriptor,
-        &args.change_descriptor,
+        external_descriptor,
+        internal_descriptor,
         changeset,
-        args.network,
+        Network::Signet,
     )?;
     println!(
         "Loaded wallet in {}s",
@@ -104,7 +109,7 @@ fn main() -> anyhow::Result<()> {
     );
 
     let balance = wallet.balance();
-    println!("Wallet balance before syncing: {} sats", balance.total());
+    println!("Wallet balance before syncing: {}", balance.total());
 
     let wallet_tip = wallet.latest_checkpoint();
     println!(
@@ -146,9 +151,6 @@ fn main() -> anyhow::Result<()> {
                 let connected_to = block_emission.connected_to();
                 let start_apply_block = Instant::now();
                 wallet.apply_block_connected_to(&block_emission.block, height, connected_to)?;
-                if let Some(changeset) = wallet.take_staged() {
-                    db.append_changeset(&changeset)?;
-                }
                 let elapsed = start_apply_block.elapsed().as_secs_f32();
                 println!(
                     "Applied block {} at height {} in {}s",
@@ -158,9 +160,6 @@ fn main() -> anyhow::Result<()> {
             Emission::Mempool(mempool_emission) => {
                 let start_apply_mempool = Instant::now();
                 wallet.apply_unconfirmed_txs(mempool_emission.iter().map(|(tx, time)| (tx, *time)));
-                if let Some(changeset) = wallet.take_staged() {
-                    db.append_changeset(&changeset)?;
-                }
                 println!(
                     "Applied unconfirmed transactions in {}s",
                     start_apply_mempool.elapsed().as_secs_f32()
@@ -181,7 +180,7 @@ fn main() -> anyhow::Result<()> {
         wallet_tip_end.height(),
         wallet_tip_end.hash()
     );
-    println!("Wallet balance is {} sats", balance.total());
+    println!("Wallet balance is {}", balance.total());
     println!(
         "Wallet has {} transactions and {} utxos",
         wallet.transactions().count(),
