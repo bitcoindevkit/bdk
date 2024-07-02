@@ -307,7 +307,7 @@ fn main() -> anyhow::Result<()> {
                     // `EsploraExt::update_tx_graph_without_keychain`.
                     let unconfirmed_txids = graph
                         .graph()
-                        .list_chain_txs(&*chain, local_tip.block_id())
+                        .list_canonical_txs(&*chain, local_tip.block_id())
                         .filter(|canonical_tx| !canonical_tx.chain_position.is_confirmed())
                         .map(|canonical_tx| canonical_tx.tx_node.txid)
                         .collect::<Vec<Txid>>();

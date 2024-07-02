@@ -392,7 +392,6 @@ fn tx_can_become_unconfirmed_after_reorg() -> anyhow::Result<()> {
             get_balance(&recv_chain, &recv_graph)?,
             Balance {
                 confirmed: SEND_AMOUNT * (ADDITIONAL_COUNT - reorg_count) as u64,
-                trusted_pending: SEND_AMOUNT * reorg_count as u64,
                 ..Balance::default()
             },
             "reorg_count: {}",
