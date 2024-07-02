@@ -12,7 +12,7 @@
 
 #[cfg(feature = "miniscript")]
 mod txout_index;
-use bitcoin::{Amount, ScriptBuf};
+use bitcoin::Amount;
 #[cfg(feature = "miniscript")]
 pub use txout_index::*;
 

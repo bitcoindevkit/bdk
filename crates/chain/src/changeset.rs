@@ -1,5 +1,4 @@
 /// A changeset containing [`crate`] structures typically persisted together.
-#[cfg(feature = "miniscript")]
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(
     feature = "serde",
@@ -21,7 +20,6 @@ pub struct CombinedChangeSet<K, A> {
     pub network: Option<bitcoin::Network>,
 }
 
-#[cfg(feature = "miniscript")]
 impl<K, A> core::default::Default for CombinedChangeSet<K, A> {
     fn default() -> Self {
         Self {
@@ -32,7 +30,6 @@ impl<K, A> core::default::Default for CombinedChangeSet<K, A> {
     }
 }
 
-#[cfg(feature = "miniscript")]
 impl<K: Ord, A: crate::Anchor> crate::Append for CombinedChangeSet<K, A> {
     fn append(&mut self, other: Self) {
         crate::Append::append(&mut self.chain, other.chain);
@@ -51,7 +48,6 @@ impl<K: Ord, A: crate::Anchor> crate::Append for CombinedChangeSet<K, A> {
     }
 }
 
-#[cfg(feature = "miniscript")]
 impl<K, A> From<crate::local_chain::ChangeSet> for CombinedChangeSet<K, A> {
     fn from(chain: crate::local_chain::ChangeSet) -> Self {
         Self {
@@ -61,7 +57,6 @@ impl<K, A> From<crate::local_chain::ChangeSet> for CombinedChangeSet<K, A> {
     }
 }
 
-#[cfg(feature = "miniscript")]
 impl<K, A> From<crate::indexed_tx_graph::ChangeSet<A, crate::keychain::ChangeSet<K>>>
     for CombinedChangeSet<K, A>
 {
@@ -75,7 +70,6 @@ impl<K, A> From<crate::indexed_tx_graph::ChangeSet<A, crate::keychain::ChangeSet
     }
 }
 
-#[cfg(feature = "miniscript")]
 impl<K, A> From<crate::keychain::ChangeSet<K>> for CombinedChangeSet<K, A> {
     fn from(indexer: crate::keychain::ChangeSet<K>) -> Self {
         Self {

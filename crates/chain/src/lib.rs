@@ -50,7 +50,9 @@ pub use descriptor_ext::{DescriptorExt, DescriptorId};
 mod spk_iter;
 #[cfg(feature = "miniscript")]
 pub use spk_iter::*;
+#[cfg(feature = "miniscript")]
 mod changeset;
+#[cfg(feature = "miniscript")]
 pub use changeset::*;
 pub mod spk_client;
 
