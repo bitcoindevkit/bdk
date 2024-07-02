@@ -4,14 +4,14 @@ use std::thread::JoinHandle;
 use bdk_chain::collections::BTreeMap;
 use bdk_chain::spk_client::{FullScanRequest, FullScanResult, SyncRequest, SyncResult};
 use bdk_chain::{
-    bitcoin::{Amount, BlockHash, OutPoint, ScriptBuf, TxOut, Txid},
+    bitcoin::{BlockHash, OutPoint, ScriptBuf, Txid},
     local_chain::CheckPoint,
     BlockId, ConfirmationBlockTime, TxGraph,
 };
 use bdk_chain::{Anchor, Indexed};
 use esplora_client::{OutputStatus, Tx, TxStatus};
 
-use crate::anchor_from_status;
+use crate::{insert_anchor_from_status, insert_prevouts};
 
 /// [`esplora_client::Error`]
 pub type Error = Box<esplora_client::Error>;
@@ -210,27 +210,8 @@ impl EsploraExt for esplora_client::BlockingClient {
                 }
                 for tx in txs {
                     let _ = tx_graph.insert_tx(tx.to_tx());
-                    if let Some(anchor) = anchor_from_status(&tx.status) {
-                        let _ = tx_graph.insert_anchor(tx.txid, anchor);
-                    }
-
-                    let previous_outputs = tx.vin.iter().filter_map(|vin| {
-                        let prevout = vin.prevout.as_ref()?;
-                        Some((
-                            OutPoint {
-                                txid: vin.txid,
-                                vout: vin.vout,
-                            },
-                            TxOut {
-                                script_pubkey: prevout.scriptpubkey.clone(),
-                                value: Amount::from_sat(prevout.value),
-                            },
-                        ))
-                    });
-
-                    for (outpoint, txout) in previous_outputs {
-                        let _ = tx_graph.insert_txout(outpoint, txout);
-                    }
+                    insert_anchor_from_status(&mut tx_graph, tx.txid, tx.status);
+                    insert_prevouts(&mut tx_graph, tx.vin);
                 }
             }
 
@@ -310,15 +291,12 @@ impl EsploraExt for esplora_client::BlockingClient {
                 let (txid, resp) = handle.join().expect("thread must not panic")?;
                 match resp {
                     EsploraResp::TxStatus(status) => {
-                        if let Some(anchor) = anchor_from_status(&status) {
-                            let _ = tx_graph.insert_anchor(txid, anchor);
-                        }
+                        insert_anchor_from_status(&mut tx_graph, txid, status);
                     }
                     EsploraResp::Tx(Some(tx_info)) => {
                         let _ = tx_graph.insert_tx(tx_info.to_tx());
-                        if let Some(anchor) = anchor_from_status(&tx_info.status) {
-                            let _ = tx_graph.insert_anchor(txid, anchor);
-                        }
+                        insert_anchor_from_status(&mut tx_graph, txid, tx_info.status);
+                        insert_prevouts(&mut tx_graph, tx_info.vin);
                     }
                     _ => continue,
                 }
@@ -373,9 +351,7 @@ impl EsploraExt for esplora_client::BlockingClient {
                         missing_txs.push(spend_txid);
                     }
                     if let Some(spend_status) = op_status.status {
-                        if let Some(spend_anchor) = anchor_from_status(&spend_status) {
-                            let _ = tx_graph.insert_anchor(spend_txid, spend_anchor);
-                        }
+                        insert_anchor_from_status(&mut tx_graph, spend_txid, spend_status);
                     }
                 }
             }

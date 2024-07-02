@@ -56,7 +56,8 @@
 //! [`ChainOracle`]: bdk_chain::ChainOracle
 //! [`example_esplora`]: https://github.com/bitcoindevkit/bdk/tree/master/example-crates/example_esplora
 
-use bdk_chain::{BlockId, ConfirmationBlockTime};
+use bdk_chain::bitcoin::{Amount, OutPoint, TxOut, Txid};
+use bdk_chain::{BlockId, ConfirmationBlockTime, TxGraph};
 use esplora_client::TxStatus;
 
 pub use esplora_client;
@@ -71,19 +72,42 @@ mod async_ext;
 #[cfg(feature = "async")]
 pub use async_ext::*;
 
-fn anchor_from_status(status: &TxStatus) -> Option<ConfirmationBlockTime> {
+fn insert_anchor_from_status(
+    tx_graph: &mut TxGraph<ConfirmationBlockTime>,
+    txid: Txid,
+    status: TxStatus,
+) {
     if let TxStatus {
         block_height: Some(height),
         block_hash: Some(hash),
         block_time: Some(time),
         ..
-    } = status.clone()
+    } = status
     {
-        Some(ConfirmationBlockTime {
+        let anchor = ConfirmationBlockTime {
             block_id: BlockId { height, hash },
             confirmation_time: time,
-        })
-    } else {
-        None
+        };
+        let _ = tx_graph.insert_anchor(txid, anchor);
+    }
+}
+
+/// Inserts floating txouts into `tx_graph` using [`Vin`](esplora_client::api::Vin)s returned by
+/// Esplora.
+fn insert_prevouts(
+    tx_graph: &mut TxGraph<ConfirmationBlockTime>,
+    esplora_inputs: impl IntoIterator<Item = esplora_client::api::Vin>,
+) {
+    let prevouts = esplora_inputs
+        .into_iter()
+        .filter_map(|vin| Some((vin.txid, vin.vout, vin.prevout?)));
+    for (prev_txid, prev_vout, prev_txout) in prevouts {
+        let _ = tx_graph.insert_txout(
+            OutPoint::new(prev_txid, prev_vout),
+            TxOut {
+                script_pubkey: prev_txout.scriptpubkey,
+                value: Amount::from_sat(prev_txout.value),
+            },
+        );
     }
 }
