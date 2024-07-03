@@ -204,7 +204,7 @@ impl std::error::Error for NewError {}
 ///
 /// Method [`load_no_priv`] and [`load`] may return this error.
 ///
-/// [`load_no_priv`]: Wallet::load_from_changeset
+/// [`load_no_priv`]: Wallet::load_no_priv
 /// [`load`]: Wallet::load
 #[derive(Debug)]
 pub enum LoadError {
@@ -379,7 +379,7 @@ impl Wallet {
     /// let external_signer_container = SignersContainer::build(external_keymap, &external_descriptor, &secp);
     /// let internal_signer_container = SignersContainer::build(internal_keymap, &internal_descriptor, &secp);
     /// let changeset = db.read()?.expect("there must be an existing changeset");
-    /// let mut wallet = Wallet::load_from_changeset(changeset)?;
+    /// let mut wallet = Wallet::load_no_priv(changeset)?;
     ///
     /// external_signer_container.signers().into_iter()
     ///     .for_each(|s| wallet.add_signer(KeychainKind::External, SignerOrdering::default(), s.clone()));
@@ -391,7 +391,7 @@ impl Wallet {
     ///
     /// Alternatively, you can call [`Wallet::load`], which will add the private keys of the
     /// passed-in descriptors to the [`Wallet`].
-    pub fn load_from_changeset(changeset: ChangeSet) -> Result<Self, LoadError> {
+    pub fn load_no_priv(changeset: ChangeSet) -> Result<Self, LoadError> {
         let secp = Secp256k1::new();
         let network = changeset.network.ok_or(LoadError::MissingNetwork)?;
         let chain =
@@ -462,7 +462,7 @@ impl Wallet {
         network: Network,
     ) -> Result<Self, LoadError> {
         let genesis_hash = genesis_block(network).block_hash();
-        let mut wallet = Self::load_from_changeset(changeset).map_err(|e| match e {
+        let mut wallet = Self::load_no_priv(changeset).map_err(|e| match e {
             LoadError::Descriptor(e) => LoadError::Descriptor(e),
             LoadError::MissingNetwork => LoadError::LoadedNetworkDoesNotMatch {
                 expected: network,
@@ -604,7 +604,7 @@ impl Wallet {
     /// let conn = Connection::open_in_memory().expect("must open connection");
     /// let mut db = Store::new(conn).expect("must create store");
     /// # let changeset = ChangeSet::default();
-    /// # let mut wallet = Wallet::load_from_changeset(changeset).expect("load wallet");
+    /// # let mut wallet = Wallet::load_no_priv(changeset).expect("load wallet");
     /// let next_address = wallet.reveal_next_address(KeychainKind::External);
     /// if let Some(changeset) = wallet.take_staged() {
     ///     db.write(&changeset)?;
