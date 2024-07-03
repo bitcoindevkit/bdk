@@ -91,13 +91,19 @@ fn main() -> anyhow::Result<()> {
         args.db_path,
     )?;
     let changeset = db.aggregate_changesets()?;
+    let mut wallet;
 
-    let mut wallet = Wallet::new_or_load(
-        &args.descriptor,
-        &args.change_descriptor,
-        changeset,
-        args.network,
-    )?;
+    if let Some(changeset) = changeset {
+        wallet = Wallet::load(
+            &args.descriptor,
+            &args.change_descriptor,
+            changeset,
+            Network::Testnet,
+        )?;
+    } else {
+        wallet = Wallet::new(&args.descriptor, &args.change_descriptor, Network::Testnet)?;
+    }
+
     println!(
         "Loaded wallet in {}s",
         start_load_wallet.elapsed().as_secs_f32()

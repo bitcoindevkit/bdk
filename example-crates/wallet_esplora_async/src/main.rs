@@ -19,14 +19,8 @@ async fn main() -> Result<(), anyhow::Error> {
     let mut db = Store::new(conn)?;
     let external_descriptor = "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/84'/1'/0'/0/*)";
     let internal_descriptor = "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/84'/1'/0'/1/*)";
-    let changeset = db.read()?;
 
-    let mut wallet = Wallet::new_or_load(
-        external_descriptor,
-        internal_descriptor,
-        changeset,
-        Network::Signet,
-    )?;
+    let mut wallet = Wallet::new(external_descriptor, internal_descriptor, Network::Signet)?;
 
     let address = wallet.next_unused_address(KeychainKind::External);
     if let Some(changeset) = wallet.take_staged() {

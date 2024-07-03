@@ -24,12 +24,18 @@ fn main() -> Result<(), anyhow::Error> {
     let changeset = db
         .aggregate_changesets()
         .map_err(|e| anyhow!("load changes error: {}", e))?;
-    let mut wallet = Wallet::new_or_load(
-        external_descriptor,
-        internal_descriptor,
-        changeset,
-        Network::Testnet,
-    )?;
+    let mut wallet;
+
+    if let Some(changeset) = changeset {
+        wallet = Wallet::load(
+            external_descriptor,
+            internal_descriptor,
+            changeset,
+            Network::Testnet,
+        )?;
+    } else {
+        wallet = Wallet::new(external_descriptor, internal_descriptor, Network::Testnet)?;
+    }
 
     let address = wallet.next_unused_address(KeychainKind::External);
     if let Some(changeset) = wallet.take_staged() {

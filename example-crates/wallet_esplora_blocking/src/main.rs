@@ -20,12 +20,17 @@ fn main() -> Result<(), anyhow::Error> {
     let internal_descriptor = "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/84'/1'/0'/1/*)";
     let changeset = db.aggregate_changesets()?;
 
-    let mut wallet = Wallet::new_or_load(
-        external_descriptor,
-        internal_descriptor,
-        changeset,
-        Network::Testnet,
-    )?;
+    let mut wallet;
+    if let Some(changeset) = changeset {
+        wallet = Wallet::load(
+            external_descriptor,
+            internal_descriptor,
+            changeset,
+            Network::Testnet,
+        )?;
+    } else {
+        wallet = Wallet::new(external_descriptor, internal_descriptor, Network::Testnet)?;
+    }
 
     let address = wallet.next_unused_address(KeychainKind::External);
     if let Some(changeset) = wallet.take_staged() {
