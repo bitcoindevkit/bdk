@@ -78,9 +78,9 @@ let mut db =
 // Create a wallet with initial wallet data read from the file store.
 let descriptor = "wpkh(tprv8ZgxMBicQKsPdcAqYBpzAFwU5yxBUo88ggoBqu1qPcHUfSbKK1sKMLmC7EAk438btHQrSdu3jGGQa6PA71nvH5nkDexhLteJqkM4dQmWF9g/84'/1'/0'/0/*)";
 let change_descriptor = "wpkh(tprv8ZgxMBicQKsPdcAqYBpzAFwU5yxBUo88ggoBqu1qPcHUfSbKK1sKMLmC7EAk438btHQrSdu3jGGQa6PA71nvH5nkDexhLteJqkM4dQmWF9g/84'/1'/0'/1/*)";
-let changeset = db.aggregate_changesets().expect("changeset loaded");
+let changeset = db.aggregate_changesets().expect("changeset loaded").expect("changeset");
 let mut wallet =
-    Wallet::new_or_load(descriptor, change_descriptor, changeset, Network::Testnet)
+    Wallet::load(descriptor, change_descriptor, changeset, Network::Testnet)
         .expect("create or load wallet");
 
 // Get a new address to receive bitcoin.
