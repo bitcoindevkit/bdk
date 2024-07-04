@@ -7,7 +7,7 @@ use bdk_chain::{
     collections::*,
     local_chain::LocalChain,
     tx_graph::{ChangeSet, TxGraph},
-    Anchor, Append, BlockId, ChainOracle, ChainPosition, ConfirmationHeightAnchor,
+    Anchor, BlockId, ChainOracle, ChainPosition, ConfirmationHeightAnchor, Merge,
 };
 use bitcoin::{
     absolute, hashes::Hash, transaction, Amount, BlockHash, OutPoint, ScriptBuf, SignedAmount,
@@ -1049,9 +1049,9 @@ fn test_chain_spends() {
         .is_none());
 }
 
-/// Ensure that `last_seen` values only increase during [`Append::append`].
+/// Ensure that `last_seen` values only increase during [`Merge::merge`].
 #[test]
-fn test_changeset_last_seen_append() {
+fn test_changeset_last_seen_merge() {
     let txid: Txid = h!("test txid");
 
     let test_cases: &[(Option<u64>, Option<u64>)] = &[
@@ -1074,7 +1074,7 @@ fn test_changeset_last_seen_append() {
         };
         assert!(!update.is_empty() || update_ls.is_none());
 
-        original.append(update);
+        original.merge(update);
         assert_eq!(
             &original.last_seen.get(&txid).cloned(),
             Ord::max(original_ls, update_ls),

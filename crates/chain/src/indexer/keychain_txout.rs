@@ -14,7 +14,7 @@ use core::{
     ops::{Bound, RangeBounds},
 };
 
-use crate::Append;
+use crate::Merge;
 
 /// The default lookahead for a [`KeychainTxOutIndex`]
 pub const DEFAULT_LOOKAHEAD: u32 = 25;
@@ -157,7 +157,7 @@ impl<K: Clone + Ord + Debug> Indexer for KeychainTxOutIndex<K> {
         let mut changeset = ChangeSet::<K>::default();
         let txid = tx.compute_txid();
         for (op, txout) in tx.output.iter().enumerate() {
-            changeset.append(self.index_txout(OutPoint::new(txid, op as u32), txout));
+            changeset.merge(self.index_txout(OutPoint::new(txid, op as u32), txout));
         }
         changeset
     }
@@ -632,7 +632,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
 
         for (keychain, &index) in keychains {
             if let Some((_, new_changeset)) = self.reveal_to_target(keychain, index) {
-                changeset.append(new_changeset);
+                changeset.merge(new_changeset);
             }
         }
 
@@ -666,7 +666,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
             match self.reveal_next_spk(keychain) {
                 Some(((i, spk), change)) => {
                     spks.push((i, spk));
-                    changeset.append(change);
+                    changeset.merge(change);
                 }
                 None => break,
             }
@@ -856,12 +856,12 @@ impl<K: core::fmt::Debug> std::error::Error for InsertDescriptorError<K> {}
 ///
 /// It can be applied to [`KeychainTxOutIndex`] with [`apply_changeset`].
 ///
-/// The `last_revealed` field is monotone in that [`append`] will never decrease it.
+/// The `last_revealed` field is monotone in that [`merge`] will never decrease it.
 /// `keychains_added` is *not* monotone, once it is set any attempt to change it is subject to the
 /// same *one-to-one* keychain <-> descriptor mapping invariant as [`KeychainTxOutIndex`] itself.
 ///
 /// [`apply_changeset`]: KeychainTxOutIndex::apply_changeset
-/// [`append`]: Self::append
+/// [`Merge`]: Self::merge
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(
     feature = "serde",
@@ -882,14 +882,14 @@ pub struct ChangeSet<K> {
     pub last_revealed: BTreeMap<DescriptorId, u32>,
 }
 
-impl<K: Ord> Append for ChangeSet<K> {
+impl<K: Ord> Merge for ChangeSet<K> {
     /// Merge another [`ChangeSet<K>`] into self.
     ///
     /// For the `keychains_added` field this method respects the invariants of
     /// [`insert_descriptor`]. `last_revealed` always becomes the larger of the two.
     ///
     /// [`insert_descriptor`]: KeychainTxOutIndex::insert_descriptor
-    fn append(&mut self, other: Self) {
+    fn merge(&mut self, other: Self) {
         for (new_keychain, new_descriptor) in other.keychains_added {
             // enforce 1-to-1 invariance
             if !self.keychains_added.contains_key(&new_keychain)

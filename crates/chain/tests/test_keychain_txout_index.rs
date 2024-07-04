@@ -5,7 +5,7 @@ mod common;
 use bdk_chain::{
     collections::BTreeMap,
     indexer::keychain_txout::{ChangeSet, KeychainTxOutIndex},
-    Append, DescriptorExt, DescriptorId, Indexer,
+    DescriptorExt, DescriptorId, Indexer, Merge,
 };
 
 use bitcoin::{secp256k1::Secp256k1, Amount, OutPoint, ScriptBuf, Transaction, TxOut};
@@ -51,13 +51,13 @@ fn spk_at_index(descriptor: &Descriptor<DescriptorPublicKey>, index: u32) -> Scr
 }
 
 // We create two empty changesets lhs and rhs, we then insert various descriptors with various
-// last_revealed, append rhs to lhs, and check that the result is consistent with these rules:
+// last_revealed, merge rhs to lhs, and check that the result is consistent with these rules:
 // - Existing index doesn't update if the new index in `other` is lower than `self`.
 // - Existing index updates if the new index in `other` is higher than `self`.
 // - Existing index is unchanged if keychain doesn't exist in `other`.
 // - New keychain gets added if the keychain is in `other` but not in `self`.
 #[test]
-fn append_changesets_check_last_revealed() {
+fn merge_changesets_check_last_revealed() {
     let secp = bitcoin::secp256k1::Secp256k1::signing_only();
     let descriptor_ids: Vec<_> = DESCRIPTORS
         .iter()
@@ -88,7 +88,7 @@ fn append_changesets_check_last_revealed() {
         keychains_added: BTreeMap::<(), _>::new(),
         last_revealed: rhs_di,
     };
-    lhs.append(rhs);
+    lhs.merge(rhs);
 
     // Existing index doesn't update if the new index in `other` is lower than `self`.
     assert_eq!(lhs.last_revealed.get(&descriptor_ids[0]), Some(&7));
@@ -677,7 +677,7 @@ fn applying_changesets_one_by_one_vs_aggregate_must_have_same_result() {
         .iter()
         .cloned()
         .reduce(|mut agg, cs| {
-            agg.append(cs);
+            agg.merge(cs);
             agg
         })
         .expect("must aggregate changesets");

@@ -10,7 +10,7 @@ use bdk_chain::{
     indexer::keychain_txout,
     local_chain::{self, LocalChain},
     spk_client::{FullScanRequest, SyncRequest},
-    Append, ConfirmationTimeHeightAnchor,
+    ConfirmationTimeHeightAnchor, Merge,
 };
 
 use bdk_esplora::{esplora_client, EsploraExt};
@@ -208,7 +208,7 @@ fn main() -> anyhow::Result<()> {
                     .index
                     .reveal_to_target_multi(&update.last_active_indices);
                 let mut indexed_tx_graph_changeset = graph.apply_update(update.graph_update);
-                indexed_tx_graph_changeset.append(index_changeset.into());
+                indexed_tx_graph_changeset.merge(index_changeset.into());
                 indexed_tx_graph_changeset
             })
         }

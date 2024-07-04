@@ -1,5 +1,5 @@
 use crate::{bincode_options, EntryIter, FileError, IterError};
-use bdk_chain::Append;
+use bdk_chain::Merge;
 use bincode::Options;
 use std::{
     fmt::{self, Debug},
@@ -22,7 +22,7 @@ where
 
 impl<C> Store<C>
 where
-    C: Append
+    C: Merge
         + serde::Serialize
         + serde::de::DeserializeOwned
         + core::marker::Send
@@ -147,7 +147,7 @@ where
                 }
             };
             match &mut changeset {
-                Some(changeset) => changeset.append(next_changeset),
+                Some(changeset) => changeset.merge(next_changeset),
                 changeset => *changeset = Some(next_changeset),
             }
         }
@@ -365,7 +365,7 @@ mod test {
                 assert_eq!(
                     err.changeset,
                     changesets.iter().cloned().reduce(|mut acc, cs| {
-                        Append::append(&mut acc, cs);
+                        Merge::merge(&mut acc, cs);
                         acc
                     }),
                     "should recover all changesets that are written in full",
@@ -386,7 +386,7 @@ mod test {
                         .cloned()
                         .chain(core::iter::once(last_changeset.clone()))
                         .reduce(|mut acc, cs| {
-                            Append::append(&mut acc, cs);
+                            Merge::merge(&mut acc, cs);
                             acc
                         }),
                     "should recover all changesets",
@@ -422,13 +422,13 @@ mod test {
                 .take(read_count)
                 .map(|r| r.expect("must read valid changeset"))
                 .fold(TestChangeSet::default(), |mut acc, v| {
-                    Append::append(&mut acc, v);
+                    Merge::merge(&mut acc, v);
                     acc
                 });
             // We write after a short read.
             db.append_changeset(&last_changeset)
                 .expect("last write must succeed");
-            Append::append(&mut exp_aggregation, last_changeset.clone());
+            Merge::merge(&mut exp_aggregation, last_changeset.clone());
             drop(db);
 
             // We open the file again and check whether aggregate changeset is expected.

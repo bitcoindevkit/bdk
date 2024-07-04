@@ -16,7 +16,7 @@ use bdk_chain::{
     indexed_tx_graph,
     indexer::keychain_txout,
     local_chain::{self, LocalChain},
-    Append, ConfirmationTimeHeightAnchor, IndexedTxGraph,
+    ConfirmationTimeHeightAnchor, IndexedTxGraph, Merge,
 };
 use example_cli::{
     anyhow,
@@ -191,7 +191,7 @@ fn main() -> anyhow::Result<()> {
                     .apply_update(emission.checkpoint)
                     .expect("must always apply as we receive blocks in order from emitter");
                 let graph_changeset = graph.apply_block_relevant(&emission.block, height);
-                db_stage.append((chain_changeset, graph_changeset));
+                db_stage.merge((chain_changeset, graph_changeset));
 
                 // commit staged db changes in intervals
                 if last_db_commit.elapsed() >= DB_COMMIT_DELAY {
@@ -235,7 +235,7 @@ fn main() -> anyhow::Result<()> {
             );
             {
                 let db = &mut *db.lock().unwrap();
-                db_stage.append((local_chain::ChangeSet::default(), graph_changeset));
+                db_stage.merge((local_chain::ChangeSet::default(), graph_changeset));
                 if let Some(changeset) = db_stage.take() {
                     db.append_changeset(&changeset)?;
                 }
@@ -321,7 +321,7 @@ fn main() -> anyhow::Result<()> {
                         continue;
                     }
                 };
-                db_stage.append(changeset);
+                db_stage.merge(changeset);
 
                 if last_db_commit.elapsed() >= DB_COMMIT_DELAY {
                     let db = &mut *db.lock().unwrap();

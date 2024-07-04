@@ -113,10 +113,10 @@ pub trait AnchorFromBlockPosition: Anchor {
     fn from_block_position(block: &bitcoin::Block, block_id: BlockId, tx_pos: usize) -> Self;
 }
 
-/// Trait that makes an object appendable.
-pub trait Append: Default {
-    /// Append another object of the same type onto `self`.
-    fn append(&mut self, other: Self);
+/// Trait that makes an object mergeable.
+pub trait Merge: Default {
+    /// Merge another object of the same type onto `self`.
+    fn merge(&mut self, other: Self);
 
     /// Returns whether the structure is considered empty.
     fn is_empty(&self) -> bool;
@@ -131,8 +131,8 @@ pub trait Append: Default {
     }
 }
 
-impl<K: Ord, V> Append for BTreeMap<K, V> {
-    fn append(&mut self, other: Self) {
+impl<K: Ord, V> Merge for BTreeMap<K, V> {
+    fn merge(&mut self, other: Self) {
         // We use `extend` instead of `BTreeMap::append` due to performance issues with `append`.
         // Refer to https://github.com/rust-lang/rust/issues/34666#issuecomment-675658420
         BTreeMap::extend(self, other)
@@ -143,8 +143,8 @@ impl<K: Ord, V> Append for BTreeMap<K, V> {
     }
 }
 
-impl<T: Ord> Append for BTreeSet<T> {
-    fn append(&mut self, other: Self) {
+impl<T: Ord> Merge for BTreeSet<T> {
+    fn merge(&mut self, other: Self) {
         // We use `extend` instead of `BTreeMap::append` due to performance issues with `append`.
         // Refer to https://github.com/rust-lang/rust/issues/34666#issuecomment-675658420
         BTreeSet::extend(self, other)
@@ -155,8 +155,8 @@ impl<T: Ord> Append for BTreeSet<T> {
     }
 }
 
-impl<T> Append for Vec<T> {
-    fn append(&mut self, mut other: Self) {
+impl<T> Merge for Vec<T> {
+    fn merge(&mut self, mut other: Self) {
         Vec::append(self, &mut other)
     }
 
@@ -165,30 +165,30 @@ impl<T> Append for Vec<T> {
     }
 }
 
-macro_rules! impl_append_for_tuple {
+macro_rules! impl_merge_for_tuple {
     ($($a:ident $b:tt)*) => {
-        impl<$($a),*> Append for ($($a,)*) where $($a: Append),* {
+        impl<$($a),*> Merge for ($($a,)*) where $($a: Merge),* {
 
-            fn append(&mut self, _other: Self) {
-                $(Append::append(&mut self.$b, _other.$b) );*
+            fn merge(&mut self, _other: Self) {
+                $(Merge::merge(&mut self.$b, _other.$b) );*
             }
 
             fn is_empty(&self) -> bool {
-                $(Append::is_empty(&self.$b) && )* true
+                $(Merge::is_empty(&self.$b) && )* true
             }
         }
     }
 }
 
-impl_append_for_tuple!();
-impl_append_for_tuple!(T0 0);
-impl_append_for_tuple!(T0 0 T1 1);
-impl_append_for_tuple!(T0 0 T1 1 T2 2);
-impl_append_for_tuple!(T0 0 T1 1 T2 2 T3 3);
-impl_append_for_tuple!(T0 0 T1 1 T2 2 T3 3 T4 4);
-impl_append_for_tuple!(T0 0 T1 1 T2 2 T3 3 T4 4 T5 5);
-impl_append_for_tuple!(T0 0 T1 1 T2 2 T3 3 T4 4 T5 5 T6 6);
-impl_append_for_tuple!(T0 0 T1 1 T2 2 T3 3 T4 4 T5 5 T6 6 T7 7);
-impl_append_for_tuple!(T0 0 T1 1 T2 2 T3 3 T4 4 T5 5 T6 6 T7 7 T8 8);
-impl_append_for_tuple!(T0 0 T1 1 T2 2 T3 3 T4 4 T5 5 T6 6 T7 7 T8 8 T9 9);
-impl_append_for_tuple!(T0 0 T1 1 T2 2 T3 3 T4 4 T5 5 T6 6 T7 7 T8 8 T9 9 T10 10);
+impl_merge_for_tuple!();
+impl_merge_for_tuple!(T0 0);
+impl_merge_for_tuple!(T0 0 T1 1);
+impl_merge_for_tuple!(T0 0 T1 1 T2 2);
+impl_merge_for_tuple!(T0 0 T1 1 T2 2 T3 3);
+impl_merge_for_tuple!(T0 0 T1 1 T2 2 T3 3 T4 4);
+impl_merge_for_tuple!(T0 0 T1 1 T2 2 T3 3 T4 4 T5 5);
+impl_merge_for_tuple!(T0 0 T1 1 T2 2 T3 3 T4 4 T5 5 T6 6);
+impl_merge_for_tuple!(T0 0 T1 1 T2 2 T3 3 T4 4 T5 5 T6 6 T7 7);
+impl_merge_for_tuple!(T0 0 T1 1 T2 2 T3 3 T4 4 T5 5 T6 6 T7 7 T8 8);
+impl_merge_for_tuple!(T0 0 T1 1 T2 2 T3 3 T4 4 T5 5 T6 6 T7 7 T8 8 T9 9);
+impl_merge_for_tuple!(T0 0 T1 1 T2 2 T3 3 T4 4 T5 5 T6 6 T7 7 T8 8 T9 9 T10 10);

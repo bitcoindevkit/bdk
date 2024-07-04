@@ -10,7 +10,7 @@ use bdk_chain::{
     indexed_tx_graph::{self, IndexedTxGraph},
     indexer::keychain_txout::KeychainTxOutIndex,
     local_chain::LocalChain,
-    tx_graph, Append, Balance, ChainPosition, ConfirmationHeightAnchor, DescriptorExt,
+    tx_graph, Balance, ChainPosition, ConfirmationHeightAnchor, DescriptorExt, Merge,
 };
 use bitcoin::{
     secp256k1::Secp256k1, Amount, OutPoint, Script, ScriptBuf, Transaction, TxIn, TxOut,

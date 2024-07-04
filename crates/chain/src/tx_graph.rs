@@ -69,7 +69,7 @@
 //! A [`TxGraph`] can also be updated with another [`TxGraph`] which merges them together.
 //!
 //! ```
-//! # use bdk_chain::{Append, BlockId};
+//! # use bdk_chain::{Merge, BlockId};
 //! # use bdk_chain::tx_graph::TxGraph;
 //! # use bdk_chain::example_utils::*;
 //! # use bitcoin::Transaction;
@@ -89,7 +89,7 @@
 //! [`insert_txout`]: TxGraph::insert_txout
 
 use crate::{
-    collections::*, Anchor, Append, Balance, BlockId, ChainOracle, ChainPosition, FullTxOut,
+    collections::*, Anchor, Balance, BlockId, ChainOracle, ChainPosition, FullTxOut, Merge,
 };
 use alloc::collections::vec_deque::VecDeque;
 use alloc::sync::Arc;
@@ -547,8 +547,8 @@ impl<A: Clone + Ord> TxGraph<A> {
     ) -> ChangeSet<A> {
         let mut changeset = ChangeSet::<A>::default();
         for (tx, seen_at) in txs {
-            changeset.append(self.insert_seen_at(tx.compute_txid(), seen_at));
-            changeset.append(self.insert_tx(tx));
+            changeset.merge(self.insert_seen_at(tx.compute_txid(), seen_at));
+            changeset.merge(self.insert_tx(tx));
         }
         changeset
     }
@@ -630,7 +630,7 @@ impl<A: Clone + Ord> TxGraph<A> {
             .collect();
 
         for txid in unanchored_txs {
-            changeset.append(self.insert_seen_at(txid, seen_at));
+            changeset.merge(self.insert_seen_at(txid, seen_at));
         }
         changeset
     }
@@ -1293,8 +1293,8 @@ impl<A> ChangeSet<A> {
     }
 }
 
-impl<A: Ord> Append for ChangeSet<A> {
-    fn append(&mut self, other: Self) {
+impl<A: Ord> Merge for ChangeSet<A> {
+    fn merge(&mut self, other: Self) {
         // We use `extend` instead of `BTreeMap::append` due to performance issues with `append`.
         // Refer to https://github.com/rust-lang/rust/issues/34666#issuecomment-675658420
         self.txs.extend(other.txs);

@@ -10,7 +10,7 @@ use bdk_chain::{
     indexer::keychain_txout,
     local_chain::{self, LocalChain},
     spk_client::{FullScanRequest, SyncRequest},
-    Append, ConfirmationHeightAnchor,
+    ConfirmationHeightAnchor, Merge,
 };
 use bdk_electrum::{
     electrum_client::{self, Client, ElectrumApi},
@@ -343,9 +343,9 @@ fn main() -> anyhow::Result<()> {
             indexed_tx_graph::ChangeSet::<ConfirmationHeightAnchor, _>::default();
         if let Some(keychain_update) = keychain_update {
             let keychain_changeset = graph.index.reveal_to_target_multi(&keychain_update);
-            indexed_tx_graph_changeset.append(keychain_changeset.into());
+            indexed_tx_graph_changeset.merge(keychain_changeset.into());
         }
-        indexed_tx_graph_changeset.append(graph.apply_update(graph_update));
+        indexed_tx_graph_changeset.merge(graph.apply_update(graph_update));
 
         (chain_changeset, indexed_tx_graph_changeset)
     };
