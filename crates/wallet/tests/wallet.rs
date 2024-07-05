@@ -1,3 +1,5 @@
+extern crate alloc;
+
 use std::path::Path;
 use std::str::FromStr;
 
@@ -985,13 +987,32 @@ fn test_create_tx_drain_to_dust_amount() {
 
 #[test]
 fn test_create_tx_ordering_respected() {
+    use alloc::sync::Arc;
+
     let (mut wallet, _) = get_funded_wallet_wpkh();
     let addr = wallet.next_unused_address(KeychainKind::External);
+
+    let bip69_txin_cmp = |tx_a: &TxIn, tx_b: &TxIn| {
+        let project_outpoint = |t: &TxIn| (t.previous_output.txid, t.previous_output.vout);
+        project_outpoint(tx_a).cmp(&project_outpoint(tx_b))
+    };
+
+    let bip69_txout_cmp = |tx_a: &TxOut, tx_b: &TxOut| {
+        let project_utxo = |t: &TxOut| (t.value, t.script_pubkey.clone());
+        project_utxo(tx_a).cmp(&project_utxo(tx_b))
+    };
+
+    let custom_bip69_ordering = bdk_wallet::wallet::tx_builder::TxOrdering::Custom {
+        input_sort: Arc::new(bip69_txin_cmp),
+        output_sort: Arc::new(bip69_txout_cmp),
+    };
+
     let mut builder = wallet.build_tx();
     builder
         .add_recipient(addr.script_pubkey(), Amount::from_sat(30_000))
         .add_recipient(addr.script_pubkey(), Amount::from_sat(10_000))
-        .ordering(bdk_wallet::wallet::tx_builder::TxOrdering::Bip69Lexicographic);
+        .ordering(custom_bip69_ordering);
+
     let psbt = builder.finish().unwrap();
     let fee = check_fee!(wallet, psbt);
 
