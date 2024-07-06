@@ -1,7 +1,7 @@
 use crate::{
     bitcoin::{secp256k1::Secp256k1, ScriptBuf},
-    keychain::Indexed,
     miniscript::{Descriptor, DescriptorPublicKey},
+    Indexed,
 };
 use core::{borrow::Borrow, ops::Bound, ops::RangeBounds};
 
@@ -137,7 +137,7 @@ where
 mod test {
     use crate::{
         bitcoin::secp256k1::Secp256k1,
-        keychain::KeychainTxOutIndex,
+        indexer::keychain_txout::KeychainTxOutIndex,
         miniscript::{Descriptor, DescriptorPublicKey},
         spk_iter::{SpkIterator, BIP32_MAX_INDEX},
     };

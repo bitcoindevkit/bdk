@@ -14,7 +14,7 @@ use bdk_chain::{
         transaction, Address, Amount, Network, Sequence, Transaction, TxIn, TxOut,
     },
     indexed_tx_graph::{self, IndexedTxGraph},
-    keychain::{self, KeychainTxOutIndex},
+    indexer::keychain_txout::{self, KeychainTxOutIndex},
     local_chain,
     miniscript::{
         descriptor::{DescriptorSecretKey, KeyMap},
@@ -30,7 +30,7 @@ use clap::{Parser, Subcommand};
 pub type KeychainTxGraph<A> = IndexedTxGraph<A, KeychainTxOutIndex<Keychain>>;
 pub type KeychainChangeSet<A> = (
     local_chain::ChangeSet,
-    indexed_tx_graph::ChangeSet<A, keychain::ChangeSet<Keychain>>,
+    indexed_tx_graph::ChangeSet<A, keychain_txout::ChangeSet<Keychain>>,
 );
 
 #[derive(Parser)]
@@ -191,7 +191,7 @@ impl core::fmt::Display for Keychain {
 }
 
 pub struct CreateTxChange {
-    pub index_changeset: keychain::ChangeSet<Keychain>,
+    pub index_changeset: keychain_txout::ChangeSet<Keychain>,
     pub change_keychain: Keychain,
     pub index: u32,
 }
@@ -207,7 +207,7 @@ pub fn create_tx<A: Anchor, O: ChainOracle>(
 where
     O::Error: std::error::Error + Send + Sync + 'static,
 {
-    let mut changeset = keychain::ChangeSet::default();
+    let mut changeset = keychain_txout::ChangeSet::default();
 
     let assets = bdk_tmp_plan::Assets {
         keys: keymap.iter().map(|(pk, _)| pk.clone()).collect(),

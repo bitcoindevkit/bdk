@@ -1,13 +1,12 @@
 #![allow(unused)]
-
-use bdk_chain::indexed_tx_graph::Indexer;
 use bdk_chain::{BlockId, ConfirmationTime, ConfirmationTimeHeightAnchor, TxGraph};
-use bdk_wallet::wallet::Update;
-use bdk_wallet::{KeychainKind, LocalOutput, Wallet};
-use bitcoin::hashes::Hash;
+use bdk_wallet::{
+    wallet::{Update, Wallet},
+    KeychainKind, LocalOutput,
+};
 use bitcoin::{
-    transaction, Address, Amount, BlockHash, FeeRate, Network, OutPoint, Transaction, TxIn, TxOut,
-    Txid,
+    hashes::Hash, transaction, Address, Amount, BlockHash, FeeRate, Network, OutPoint, Transaction,
+    TxIn, TxOut, Txid,
 };
 use std::str::FromStr;
 

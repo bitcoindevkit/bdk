@@ -14,7 +14,8 @@ use std::sync::{Arc, Mutex};
 use crate::Error;
 use bdk_chain::CombinedChangeSet;
 use bdk_chain::{
-    indexed_tx_graph, keychain, local_chain, tx_graph, Anchor, Append, DescriptorExt, DescriptorId,
+    indexed_tx_graph, indexer::keychain_txout, local_chain, tx_graph, Anchor, Append,
+    DescriptorExt, DescriptorId,
 };
 
 /// Persists data in to a relational schema based [SQLite] database file.
@@ -187,7 +188,7 @@ where
     /// If keychain exists only update last active index.
     fn insert_keychains(
         db_transaction: &rusqlite::Transaction,
-        tx_graph_changeset: &indexed_tx_graph::ChangeSet<A, keychain::ChangeSet<K>>,
+        tx_graph_changeset: &indexed_tx_graph::ChangeSet<A, keychain_txout::ChangeSet<K>>,
     ) -> Result<(), Error> {
         let keychain_changeset = &tx_graph_changeset.indexer;
         for (keychain, descriptor) in keychain_changeset.keychains_added.iter() {
@@ -206,7 +207,7 @@ where
     /// Update descriptor last revealed index.
     fn update_last_revealed(
         db_transaction: &rusqlite::Transaction,
-        tx_graph_changeset: &indexed_tx_graph::ChangeSet<A, keychain::ChangeSet<K>>,
+        tx_graph_changeset: &indexed_tx_graph::ChangeSet<A, keychain_txout::ChangeSet<K>>,
     ) -> Result<(), Error> {
         let keychain_changeset = &tx_graph_changeset.indexer;
         for (descriptor_id, last_revealed) in keychain_changeset.last_revealed.iter() {
@@ -279,7 +280,7 @@ impl<K, A> Store<K, A> {
     /// Error if trying to insert existing txid.
     fn insert_txs(
         db_transaction: &rusqlite::Transaction,
-        tx_graph_changeset: &indexed_tx_graph::ChangeSet<A, keychain::ChangeSet<K>>,
+        tx_graph_changeset: &indexed_tx_graph::ChangeSet<A, keychain_txout::ChangeSet<K>>,
     ) -> Result<(), Error> {
         for tx in tx_graph_changeset.graph.txs.iter() {
             let insert_tx_stmt = &mut db_transaction
@@ -343,7 +344,7 @@ impl<K, A> Store<K, A> {
     /// Error if trying to insert existing outpoint.
     fn insert_txouts(
         db_transaction: &rusqlite::Transaction,
-        tx_graph_changeset: &indexed_tx_graph::ChangeSet<A, keychain::ChangeSet<K>>,
+        tx_graph_changeset: &indexed_tx_graph::ChangeSet<A, keychain_txout::ChangeSet<K>>,
     ) -> Result<(), Error> {
         for txout in tx_graph_changeset.graph.txouts.iter() {
             let insert_txout_stmt = &mut db_transaction
@@ -393,7 +394,7 @@ impl<K, A> Store<K, A> {
     /// Update transaction last seen times.
     fn update_last_seen(
         db_transaction: &rusqlite::Transaction,
-        tx_graph_changeset: &indexed_tx_graph::ChangeSet<A, keychain::ChangeSet<K>>,
+        tx_graph_changeset: &indexed_tx_graph::ChangeSet<A, keychain_txout::ChangeSet<K>>,
     ) -> Result<(), Error> {
         for tx_last_seen in tx_graph_changeset.graph.last_seen.iter() {
             let insert_or_update_tx_stmt = &mut db_transaction
@@ -418,7 +419,7 @@ where
     /// Insert anchors.
     fn insert_anchors(
         db_transaction: &rusqlite::Transaction,
-        tx_graph_changeset: &indexed_tx_graph::ChangeSet<A, keychain::ChangeSet<K>>,
+        tx_graph_changeset: &indexed_tx_graph::ChangeSet<A, keychain_txout::ChangeSet<K>>,
     ) -> Result<(), Error> {
         // serde_json::to_string
         for anchor in tx_graph_changeset.graph.anchors.iter() {
@@ -514,12 +515,12 @@ where
             last_seen,
         };
 
-        let indexer: keychain::ChangeSet<K> = keychain::ChangeSet {
+        let indexer = keychain_txout::ChangeSet {
             keychains_added,
             last_revealed,
         };
 
-        let indexed_tx_graph: indexed_tx_graph::ChangeSet<A, keychain::ChangeSet<K>> =
+        let indexed_tx_graph: indexed_tx_graph::ChangeSet<A, keychain_txout::ChangeSet<K>> =
             indexed_tx_graph::ChangeSet { graph, indexer };
 
         if network.is_none() && chain.is_empty() && indexed_tx_graph.is_empty() {
@@ -547,7 +548,7 @@ mod test {
     use bdk_chain::miniscript::Descriptor;
     use bdk_chain::CombinedChangeSet;
     use bdk_chain::{
-        indexed_tx_graph, keychain, tx_graph, BlockId, ConfirmationHeightAnchor,
+        indexed_tx_graph, tx_graph, BlockId, ConfirmationHeightAnchor,
         ConfirmationTimeHeightAnchor, DescriptorExt,
     };
     use std::str::FromStr;
@@ -684,12 +685,12 @@ mod test {
             .into(),
         };
 
-        let keychain_changeset = keychain::ChangeSet {
+        let keychain_changeset = keychain_txout::ChangeSet {
             keychains_added: [(ext_keychain, ext_desc), (int_keychain, int_desc)].into(),
             last_revealed: [(ext_desc_id, 124), (int_desc_id, 421)].into(),
         };
 
-        let graph_changeset: indexed_tx_graph::ChangeSet<A, keychain::ChangeSet<Keychain>> =
+        let graph_changeset: indexed_tx_graph::ChangeSet<A, keychain_txout::ChangeSet<Keychain>> =
             indexed_tx_graph::ChangeSet {
                 graph: tx_graph_changeset,
                 indexer: keychain_changeset,
@@ -712,10 +713,10 @@ mod test {
             last_seen: [(tx2.compute_txid(), 1708919121)].into(),
         };
 
-        let graph_changeset2: indexed_tx_graph::ChangeSet<A, keychain::ChangeSet<Keychain>> =
+        let graph_changeset2: indexed_tx_graph::ChangeSet<A, keychain_txout::ChangeSet<Keychain>> =
             indexed_tx_graph::ChangeSet {
                 graph: tx_graph_changeset2,
-                indexer: keychain::ChangeSet::default(),
+                indexer: keychain_txout::ChangeSet::default(),
             };
 
         changesets.push(CombinedChangeSet {
@@ -732,10 +733,10 @@ mod test {
             last_seen: BTreeMap::default(),
         };
 
-        let graph_changeset3: indexed_tx_graph::ChangeSet<A, keychain::ChangeSet<Keychain>> =
+        let graph_changeset3: indexed_tx_graph::ChangeSet<A, keychain_txout::ChangeSet<Keychain>> =
             indexed_tx_graph::ChangeSet {
                 graph: tx_graph_changeset3,
-                indexer: keychain::ChangeSet::default(),
+                indexer: keychain_txout::ChangeSet::default(),
             };
 
         changesets.push(CombinedChangeSet {

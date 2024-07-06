@@ -7,7 +7,7 @@ use std::{
 use bdk_chain::{
     bitcoin::{constants::genesis_block, Address, Network, Txid},
     indexed_tx_graph::{self, IndexedTxGraph},
-    keychain,
+    indexer::keychain_txout,
     local_chain::{self, LocalChain},
     spk_client::{FullScanRequest, SyncRequest},
     Append, ConfirmationTimeHeightAnchor,
@@ -26,7 +26,7 @@ const DB_PATH: &str = ".bdk_esplora_example.db";
 
 type ChangeSet = (
     local_chain::ChangeSet,
-    indexed_tx_graph::ChangeSet<ConfirmationTimeHeightAnchor, keychain::ChangeSet<Keychain>>,
+    indexed_tx_graph::ChangeSet<ConfirmationTimeHeightAnchor, keychain_txout::ChangeSet<Keychain>>,
 );
 
 #[derive(Subcommand, Debug, Clone)]

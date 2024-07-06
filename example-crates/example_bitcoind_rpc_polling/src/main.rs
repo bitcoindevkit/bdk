@@ -13,7 +13,8 @@ use bdk_bitcoind_rpc::{
 };
 use bdk_chain::{
     bitcoin::{constants::genesis_block, Block, Transaction},
-    indexed_tx_graph, keychain,
+    indexed_tx_graph,
+    indexer::keychain_txout,
     local_chain::{self, LocalChain},
     Append, ConfirmationTimeHeightAnchor, IndexedTxGraph,
 };
@@ -37,7 +38,7 @@ const DB_COMMIT_DELAY: Duration = Duration::from_secs(60);
 
 type ChangeSet = (
     local_chain::ChangeSet,
-    indexed_tx_graph::ChangeSet<ConfirmationTimeHeightAnchor, keychain::ChangeSet<Keychain>>,
+    indexed_tx_graph::ChangeSet<ConfirmationTimeHeightAnchor, keychain_txout::ChangeSet<Keychain>>,
 );
 
 #[derive(Debug)]

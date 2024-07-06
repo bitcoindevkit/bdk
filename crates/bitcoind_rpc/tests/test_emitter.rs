@@ -3,9 +3,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use bdk_bitcoind_rpc::Emitter;
 use bdk_chain::{
     bitcoin::{Address, Amount, Txid},
-    keychain::Balance,
     local_chain::{CheckPoint, LocalChain},
-    Append, BlockId, IndexedTxGraph, SpkTxOutIndex,
+    Append, Balance, BlockId, IndexedTxGraph, SpkTxOutIndex,
 };
 use bdk_testenv::{anyhow, TestEnv};
 use bitcoin::{hashes::Hash, Block, OutPoint, ScriptBuf, WScriptHash};

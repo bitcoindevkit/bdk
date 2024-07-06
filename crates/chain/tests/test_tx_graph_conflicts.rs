@@ -5,7 +5,7 @@ mod common;
 
 use std::collections::{BTreeSet, HashSet};
 
-use bdk_chain::{keychain::Balance, BlockId};
+use bdk_chain::{Balance, BlockId};
 use bitcoin::{Amount, OutPoint, Script};
 use common::*;
 

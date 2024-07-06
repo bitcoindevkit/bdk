@@ -5,7 +5,7 @@ use bitcoin::{Block, OutPoint, Transaction, TxOut, Txid};
 
 use crate::{
     tx_graph::{self, TxGraph},
-    Anchor, AnchorFromBlockPosition, Append, BlockId,
+    Anchor, AnchorFromBlockPosition, Append, BlockId, Indexer,
 };
 
 /// The [`IndexedTxGraph`] combines a [`TxGraph`] and an [`Indexer`] implementation.
@@ -320,37 +320,15 @@ impl<A, IA: Default> From<tx_graph::ChangeSet<A>> for ChangeSet<A, IA> {
 }
 
 #[cfg(feature = "miniscript")]
-impl<A, K> From<crate::keychain::ChangeSet<K>> for ChangeSet<A, crate::keychain::ChangeSet<K>> {
-    fn from(indexer: crate::keychain::ChangeSet<K>) -> Self {
+impl<A, K> From<crate::indexer::keychain_txout::ChangeSet<K>>
+    for ChangeSet<A, crate::indexer::keychain_txout::ChangeSet<K>>
+{
+    fn from(indexer: crate::indexer::keychain_txout::ChangeSet<K>) -> Self {
         Self {
             graph: Default::default(),
             indexer,
         }
     }
-}
-
-/// Utilities for indexing transaction data.
-///
-/// Types which implement this trait can be used to construct an [`IndexedTxGraph`].
-/// This trait's methods should rarely be called directly.
-pub trait Indexer {
-    /// The resultant "changeset" when new transaction data is indexed.
-    type ChangeSet;
-
-    /// Scan and index the given `outpoint` and `txout`.
-    fn index_txout(&mut self, outpoint: OutPoint, txout: &TxOut) -> Self::ChangeSet;
-
-    /// Scans a transaction for relevant outpoints, which are stored and indexed internally.
-    fn index_tx(&mut self, tx: &Transaction) -> Self::ChangeSet;
-
-    /// Apply changeset to itself.
-    fn apply_changeset(&mut self, changeset: Self::ChangeSet);
-
-    /// Determines the [`ChangeSet`] between `self` and an empty [`Indexer`].
-    fn initial_changeset(&self) -> Self::ChangeSet;
-
-    /// Determines whether the transaction should be included in the index.
-    fn is_tx_relevant(&self, tx: &Transaction) -> bool;
 }
 
 impl<A, I> AsRef<TxGraph<A>> for IndexedTxGraph<A, I> {

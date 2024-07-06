@@ -16,7 +16,8 @@ pub struct CombinedChangeSet<K, A> {
     /// Changes to the [`LocalChain`](crate::local_chain::LocalChain).
     pub chain: crate::local_chain::ChangeSet,
     /// Changes to [`IndexedTxGraph`](crate::indexed_tx_graph::IndexedTxGraph).
-    pub indexed_tx_graph: crate::indexed_tx_graph::ChangeSet<A, crate::keychain::ChangeSet<K>>,
+    pub indexed_tx_graph:
+        crate::indexed_tx_graph::ChangeSet<A, crate::indexer::keychain_txout::ChangeSet<K>>,
     /// Stores the network type of the transaction data.
     pub network: Option<bitcoin::Network>,
 }
@@ -62,11 +63,14 @@ impl<K, A> From<crate::local_chain::ChangeSet> for CombinedChangeSet<K, A> {
 }
 
 #[cfg(feature = "miniscript")]
-impl<K, A> From<crate::indexed_tx_graph::ChangeSet<A, crate::keychain::ChangeSet<K>>>
+impl<K, A> From<crate::indexed_tx_graph::ChangeSet<A, crate::indexer::keychain_txout::ChangeSet<K>>>
     for CombinedChangeSet<K, A>
 {
     fn from(
-        indexed_tx_graph: crate::indexed_tx_graph::ChangeSet<A, crate::keychain::ChangeSet<K>>,
+        indexed_tx_graph: crate::indexed_tx_graph::ChangeSet<
+            A,
+            crate::indexer::keychain_txout::ChangeSet<K>,
+        >,
     ) -> Self {
         Self {
             indexed_tx_graph,
@@ -76,8 +80,8 @@ impl<K, A> From<crate::indexed_tx_graph::ChangeSet<A, crate::keychain::ChangeSet
 }
 
 #[cfg(feature = "miniscript")]
-impl<K, A> From<crate::keychain::ChangeSet<K>> for CombinedChangeSet<K, A> {
-    fn from(indexer: crate::keychain::ChangeSet<K>) -> Self {
+impl<K, A> From<crate::indexer::keychain_txout::ChangeSet<K>> for CombinedChangeSet<K, A> {
+    fn from(indexer: crate::indexer::keychain_txout::ChangeSet<K>) -> Self {
         Self {
             indexed_tx_graph: crate::indexed_tx_graph::ChangeSet {
                 indexer,

@@ -19,10 +19,10 @@ use alloc::{
     sync::Arc,
     vec::Vec,
 };
-pub use bdk_chain::keychain::Balance;
+pub use bdk_chain::Balance;
 use bdk_chain::{
     indexed_tx_graph,
-    keychain::KeychainTxOutIndex,
+    indexer::keychain_txout::KeychainTxOutIndex,
     local_chain::{
         self, ApplyHeaderError, CannotConnectError, CheckPoint, CheckPointIter, LocalChain,
     },
@@ -112,7 +112,7 @@ pub struct Wallet {
 
 /// An update to [`Wallet`].
 ///
-/// It updates [`bdk_chain::keychain::KeychainTxOutIndex`], [`bdk_chain::TxGraph`] and [`local_chain::LocalChain`] atomically.
+/// It updates [`KeychainTxOutIndex`], [`bdk_chain::TxGraph`] and [`local_chain::LocalChain`] atomically.
 #[derive(Debug, Clone, Default)]
 pub struct Update {
     /// Contains the last active derivation indices per keychain (`K`), which is used to update the
@@ -2451,7 +2451,7 @@ fn create_signers<E: IntoWalletDescriptor>(
     let _ = index
         .insert_descriptor(KeychainKind::Internal, descriptor)
         .map_err(|e| {
-            use bdk_chain::keychain::InsertDescriptorError;
+            use bdk_chain::indexer::keychain_txout::InsertDescriptorError;
             match e {
                 InsertDescriptorError::DescriptorAlreadyAssigned { .. } => {
                     crate::descriptor::error::Error::ExternalAndInternalAreTheSame
