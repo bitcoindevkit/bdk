@@ -151,7 +151,7 @@ fn load_recovers_wallet() -> anyhow::Result<()> {
             );
             let secp = Secp256k1::new();
             assert_eq!(
-                *wallet.get_descriptor_for_keychain(KeychainKind::External),
+                *wallet.public_descriptor(KeychainKind::External),
                 desc.into_wallet_descriptor(&secp, wallet.network())
                     .unwrap()
                     .0
@@ -1402,7 +1402,7 @@ fn test_add_foreign_utxo() {
         .assume_checked();
     let utxo = wallet2.list_unspent().next().expect("must take!");
     let foreign_utxo_satisfaction = wallet2
-        .get_descriptor_for_keychain(KeychainKind::External)
+        .public_descriptor(KeychainKind::External)
         .max_weight_to_satisfy()
         .unwrap();
 
@@ -1478,7 +1478,7 @@ fn test_calculate_fee_with_missing_foreign_utxo() {
         .assume_checked();
     let utxo = wallet2.list_unspent().next().expect("must take!");
     let foreign_utxo_satisfaction = wallet2
-        .get_descriptor_for_keychain(KeychainKind::External)
+        .public_descriptor(KeychainKind::External)
         .max_weight_to_satisfy()
         .unwrap();
 
@@ -1503,7 +1503,7 @@ fn test_add_foreign_utxo_invalid_psbt_input() {
     let (mut wallet, _) = get_funded_wallet_wpkh();
     let outpoint = wallet.list_unspent().next().expect("must exist").outpoint;
     let foreign_utxo_satisfaction = wallet
-        .get_descriptor_for_keychain(KeychainKind::External)
+        .public_descriptor(KeychainKind::External)
         .max_weight_to_satisfy()
         .unwrap();
 
@@ -1524,7 +1524,7 @@ fn test_add_foreign_utxo_where_outpoint_doesnt_match_psbt_input() {
     let tx2 = wallet2.get_tx(txid2).unwrap().tx_node.tx.clone();
 
     let satisfaction_weight = wallet2
-        .get_descriptor_for_keychain(KeychainKind::External)
+        .public_descriptor(KeychainKind::External)
         .max_weight_to_satisfy()
         .unwrap();
 
@@ -1568,7 +1568,7 @@ fn test_add_foreign_utxo_only_witness_utxo() {
     let utxo2 = wallet2.list_unspent().next().unwrap();
 
     let satisfaction_weight = wallet2
-        .get_descriptor_for_keychain(KeychainKind::External)
+        .public_descriptor(KeychainKind::External)
         .max_weight_to_satisfy()
         .unwrap();
 
@@ -3400,7 +3400,7 @@ fn test_taproot_foreign_utxo() {
     let utxo = wallet2.list_unspent().next().unwrap();
     let psbt_input = wallet2.get_psbt_input(utxo.clone(), None, false).unwrap();
     let foreign_utxo_satisfaction = wallet2
-        .get_descriptor_for_keychain(KeychainKind::External)
+        .public_descriptor(KeychainKind::External)
         .max_weight_to_satisfy()
         .unwrap();
 

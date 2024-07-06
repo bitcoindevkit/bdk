@@ -1595,7 +1595,7 @@ impl Wallet {
                 let weighted_utxo = match txout_index.index_of_spk(&txout.script_pubkey) {
                     Some(&(keychain, derivation_index)) => {
                         let satisfaction_weight = self
-                            .get_descriptor_for_keychain(keychain)
+                            .public_descriptor(keychain)
                             .max_weight_to_satisfy()
                             .unwrap();
                         WeightedUtxo {
@@ -1763,16 +1763,15 @@ impl Wallet {
         )
     }
 
-    /// Return the "public" version of the wallet's descriptor, meaning a new descriptor that has
-    /// the same structure but with every secret key removed
+    /// Returns the descriptor used to create addresses for a particular `keychain`.
+    /// It's the "public" version of the wallet's descriptor, meaning a new descriptor that has
+    /// the same structure but with the all secret keys replaced by their corresponding public key.
     ///
-    /// This can be used to build a watch-only version of a wallet
+    /// This can be used to build a watch-only version of a wallet.
     pub fn public_descriptor(&self, keychain: KeychainKind) -> &ExtendedDescriptor {
         self.indexed_graph
             .index
-            .keychains()
-            .find(|(k, _)| *k == &keychain)
-            .map(|(_, d)| d)
+            .get_descriptor(&keychain)
             .expect("keychain must exist")
     }
 
@@ -1878,11 +1877,6 @@ impl Wallet {
         &self.secp
     }
 
-    /// Returns the descriptor used to create addresses for a particular `keychain`.
-    pub fn get_descriptor_for_keychain(&self, keychain: KeychainKind) -> &ExtendedDescriptor {
-        self.public_descriptor(keychain)
-    }
-
     /// The derivation index of this wallet. It will return `None` if it has not derived any addresses.
     /// Otherwise, it will return the index of the highest address it has derived.
     pub fn derivation_index(&self, keychain: KeychainKind) -> Option<u32> {
@@ -1918,7 +1912,7 @@ impl Wallet {
             .indexed_graph
             .index
             .index_of_spk(&txout.script_pubkey)?;
-        let descriptor = self.get_descriptor_for_keychain(keychain);
+        let descriptor = self.public_descriptor(keychain);
         descriptor.at_derivation_index(child).ok()
     }
 
@@ -1927,7 +1921,7 @@ impl Wallet {
             .map(|utxo| {
                 let keychain = utxo.keychain;
                 (utxo, {
-                    self.get_descriptor_for_keychain(keychain)
+                    self.public_descriptor(keychain)
                         .max_weight_to_satisfy()
                         .unwrap()
                 })
@@ -2140,7 +2134,7 @@ impl Wallet {
             ..psbt::Input::default()
         };
 
-        let desc = self.get_descriptor_for_keychain(keychain);
+        let desc = self.public_descriptor(keychain);
         let derived_descriptor = desc
             .at_derivation_index(child)
             .expect("child can't be hardened");
@@ -2180,7 +2174,7 @@ impl Wallet {
             if let Some(&(keychain, child)) =
                 self.indexed_graph.index.index_of_spk(&out.script_pubkey)
             {
-                let desc = self.get_descriptor_for_keychain(keychain);
+                let desc = self.public_descriptor(keychain);
                 let desc = desc
                     .at_derivation_index(child)
                     .expect("child can't be hardened");
@@ -2200,9 +2194,9 @@ impl Wallet {
 
     /// Return the checksum of the public descriptor associated to `keychain`
     ///
-    /// Internally calls [`Self::get_descriptor_for_keychain`] to fetch the right descriptor
+    /// Internally calls [`Self::public_descriptor`] to fetch the right descriptor
     pub fn descriptor_checksum(&self, keychain: KeychainKind) -> String {
-        self.get_descriptor_for_keychain(keychain)
+        self.public_descriptor(keychain)
             .to_string()
             .split_once('#')
             .unwrap()

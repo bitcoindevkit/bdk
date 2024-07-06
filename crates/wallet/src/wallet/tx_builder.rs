@@ -296,7 +296,7 @@ impl<'a, Cs> TxBuilder<'a, Cs> {
                 .collect::<Result<Vec<_>, _>>()?;
 
             for utxo in utxos {
-                let descriptor = wallet.get_descriptor_for_keychain(utxo.keychain);
+                let descriptor = wallet.public_descriptor(utxo.keychain);
                 let satisfaction_weight = descriptor.max_weight_to_satisfy().unwrap();
                 self.params.utxos.push(WeightedUtxo {
                     satisfaction_weight,

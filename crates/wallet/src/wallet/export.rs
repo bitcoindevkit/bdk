@@ -116,7 +116,7 @@ impl FullyNodedExport {
         include_blockheight: bool,
     ) -> Result<Self, &'static str> {
         let descriptor = wallet
-            .get_descriptor_for_keychain(KeychainKind::External)
+            .public_descriptor(KeychainKind::External)
             .to_string_with_secret(
                 &wallet
                     .get_signers(KeychainKind::External)
@@ -144,7 +144,7 @@ impl FullyNodedExport {
 
         let change_descriptor = {
             let descriptor = wallet
-                .get_descriptor_for_keychain(KeychainKind::Internal)
+                .public_descriptor(KeychainKind::Internal)
                 .to_string_with_secret(
                     &wallet
                         .get_signers(KeychainKind::Internal)
