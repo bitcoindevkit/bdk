@@ -28,8 +28,8 @@ use bdk_chain::{
     },
     spk_client::{FullScanRequest, FullScanResult, SyncRequest, SyncResult},
     tx_graph::{CanonicalTx, TxGraph, TxNode},
-    Append, BlockId, ChainPosition, ConfirmationTime, ConfirmationTimeHeightAnchor, FullTxOut,
-    Indexed, IndexedTxGraph,
+    BlockId, ChainPosition, ConfirmationTime, ConfirmationTimeHeightAnchor, FullTxOut, Indexed,
+    IndexedTxGraph, Merge,
 };
 use bitcoin::sighash::{EcdsaSighashType, TapSighashType};
 use bitcoin::{
@@ -666,7 +666,7 @@ impl Wallet {
             .reveal_next_spk(&keychain)
             .expect("keychain must exist");
 
-        stage.append(indexed_tx_graph::ChangeSet::from(index_changeset).into());
+        stage.merge(indexed_tx_graph::ChangeSet::from(index_changeset).into());
 
         AddressInfo {
             index,
@@ -696,7 +696,7 @@ impl Wallet {
             .reveal_to_target(&keychain, index)
             .expect("keychain must exist");
 
-        self.stage.append(index_changeset.into());
+        self.stage.merge(index_changeset.into());
 
         spks.into_iter().map(move |(index, spk)| AddressInfo {
             index,
@@ -721,7 +721,7 @@ impl Wallet {
             .expect("keychain must exist");
 
         self.stage
-            .append(indexed_tx_graph::ChangeSet::from(index_changeset).into());
+            .merge(indexed_tx_graph::ChangeSet::from(index_changeset).into());
 
         AddressInfo {
             index,
@@ -880,7 +880,7 @@ impl Wallet {
     /// [`list_output`]: Self::list_output
     pub fn insert_txout(&mut self, outpoint: OutPoint, txout: TxOut) {
         let additions = self.indexed_graph.insert_txout(outpoint, txout);
-        self.stage.append(additions.into());
+        self.stage.merge(additions.into());
     }
 
     /// Calculates the fee of a given transaction. Returns [`Amount::ZERO`] if `tx` is a coinbase transaction.
@@ -1049,7 +1049,7 @@ impl Wallet {
     ) -> Result<bool, local_chain::AlterCheckPointError> {
         let changeset = self.chain.insert_block(block_id)?;
         let changed = !changeset.is_empty();
-        self.stage.append(changeset.into());
+        self.stage.merge(changeset.into());
         Ok(changed)
     }
 
@@ -1067,9 +1067,9 @@ impl Wallet {
     /// must be broadcast to the network and the wallet synced via a chain source.
     pub fn insert_tx(&mut self, tx: Transaction) -> bool {
         let mut changeset = ChangeSet::default();
-        changeset.append(self.indexed_graph.insert_tx(tx).into());
+        changeset.merge(self.indexed_graph.insert_tx(tx).into());
         let ret = !changeset.is_empty();
-        self.stage.append(changeset);
+        self.stage.merge(changeset);
         ret
     }
 
@@ -1394,7 +1394,7 @@ impl Wallet {
                     .next_unused_spk(&change_keychain)
                     .expect("keychain must exist");
                 self.indexed_graph.index.mark_used(change_keychain, index);
-                self.stage.append(index_changeset.into());
+                self.stage.merge(index_changeset.into());
                 spk
             }
         };
@@ -2230,9 +2230,9 @@ impl Wallet {
             .indexed_graph
             .index
             .reveal_to_target_multi(&update.last_active_indices);
-        changeset.append(index_changeset.into());
-        changeset.append(self.indexed_graph.apply_update(update.graph).into());
-        self.stage.append(changeset);
+        changeset.merge(index_changeset.into());
+        changeset.merge(self.indexed_graph.apply_update(update.graph).into());
+        self.stage.merge(changeset);
         Ok(())
     }
 
@@ -2317,17 +2317,17 @@ impl Wallet {
         connected_to: BlockId,
     ) -> Result<(), ApplyHeaderError> {
         let mut changeset = ChangeSet::default();
-        changeset.append(
+        changeset.merge(
             self.chain
                 .apply_header_connected_to(&block.header, height, connected_to)?
                 .into(),
         );
-        changeset.append(
+        changeset.merge(
             self.indexed_graph
                 .apply_block_relevant(block, height)
                 .into(),
         );
-        self.stage.append(changeset);
+        self.stage.merge(changeset);
         Ok(())
     }
 
@@ -2350,7 +2350,7 @@ impl Wallet {
         let indexed_graph_changeset = self
             .indexed_graph
             .batch_insert_relevant_unconfirmed(unconfirmed_txs);
-        self.stage.append(indexed_graph_changeset.into());
+        self.stage.merge(indexed_graph_changeset.into());
     }
 }
 

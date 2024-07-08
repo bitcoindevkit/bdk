@@ -14,8 +14,8 @@ use std::sync::{Arc, Mutex};
 use crate::Error;
 use bdk_chain::CombinedChangeSet;
 use bdk_chain::{
-    indexed_tx_graph, indexer::keychain_txout, local_chain, tx_graph, Anchor, Append,
-    DescriptorExt, DescriptorId,
+    indexed_tx_graph, indexer::keychain_txout, local_chain, tx_graph, Anchor, DescriptorExt,
+    DescriptorId, Merge,
 };
 
 /// Persists data in to a relational schema based [SQLite] database file.
@@ -538,7 +538,7 @@ where
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::store::Append;
+    use crate::store::Merge;
     use bdk_chain::bitcoin::consensus::encode::deserialize;
     use bdk_chain::bitcoin::constants::genesis_block;
     use bdk_chain::bitcoin::hashes::hex::FromHex;
@@ -750,7 +750,7 @@ mod test {
             changesets
                 .iter()
                 .fold(CombinedChangeSet::<Keychain, A>::default(), |mut i, cs| {
-                    i.append(cs.clone());
+                    i.merge(cs.clone());
                     i
                 });
 

@@ -4,7 +4,7 @@ use bdk_bitcoind_rpc::Emitter;
 use bdk_chain::{
     bitcoin::{Address, Amount, Txid},
     local_chain::{CheckPoint, LocalChain},
-    Append, Balance, BlockId, IndexedTxGraph, SpkTxOutIndex,
+    Balance, BlockId, IndexedTxGraph, Merge, SpkTxOutIndex,
 };
 use bdk_testenv::{anyhow, TestEnv};
 use bitcoin::{hashes::Hash, Block, OutPoint, ScriptBuf, WScriptHash};

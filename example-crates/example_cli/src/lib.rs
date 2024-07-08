@@ -20,7 +20,7 @@ use bdk_chain::{
         descriptor::{DescriptorSecretKey, KeyMap},
         Descriptor, DescriptorPublicKey,
     },
-    Anchor, Append, ChainOracle, DescriptorExt, FullTxOut,
+    Anchor, ChainOracle, DescriptorExt, FullTxOut, Merge,
 };
 pub use bdk_file_store;
 pub use clap;
@@ -263,7 +263,7 @@ where
         .index
         .next_unused_spk(&internal_keychain)
         .expect("Must exist");
-    changeset.append(change_changeset);
+    changeset.merge(change_changeset);
 
     let change_plan = bdk_tmp_plan::plan_satisfaction(
         &graph
@@ -456,7 +456,7 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args, A: Anchor, O: ChainO
 where
     O::Error: std::error::Error + Send + Sync + 'static,
     C: Default
-        + Append
+        + Merge
         + DeserializeOwned
         + Serialize
         + From<KeychainChangeSet<A>>
@@ -675,7 +675,7 @@ where
 /// The initial state returned by [`init`].
 pub struct Init<CS: clap::Subcommand, S: clap::Args, C>
 where
-    C: Default + Append + Serialize + DeserializeOwned + Debug + Send + Sync + 'static,
+    C: Default + Merge + Serialize + DeserializeOwned + Debug + Send + Sync + 'static,
 {
     /// Arguments parsed by the cli.
     pub args: Args<CS, S>,
@@ -697,7 +697,7 @@ pub fn init<CS: clap::Subcommand, S: clap::Args, C>(
 ) -> anyhow::Result<Init<CS, S, C>>
 where
     C: Default
-        + Append
+        + Merge
         + Serialize
         + DeserializeOwned
         + Debug

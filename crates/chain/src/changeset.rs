@@ -34,10 +34,10 @@ impl<K, A> core::default::Default for CombinedChangeSet<K, A> {
 }
 
 #[cfg(feature = "miniscript")]
-impl<K: Ord, A: crate::Anchor> crate::Append for CombinedChangeSet<K, A> {
-    fn append(&mut self, other: Self) {
-        crate::Append::append(&mut self.chain, other.chain);
-        crate::Append::append(&mut self.indexed_tx_graph, other.indexed_tx_graph);
+impl<K: Ord, A: crate::Anchor> crate::Merge for CombinedChangeSet<K, A> {
+    fn merge(&mut self, other: Self) {
+        crate::Merge::merge(&mut self.chain, other.chain);
+        crate::Merge::merge(&mut self.indexed_tx_graph, other.indexed_tx_graph);
         if other.network.is_some() {
             debug_assert!(
                 self.network.is_none() || self.network == other.network,
