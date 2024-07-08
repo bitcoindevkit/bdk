@@ -99,7 +99,7 @@ pub const DEFAULT_LOOKAHEAD: u32 = 25;
 /// let _ = txout_index.insert_descriptor(MyKeychain::Internal, internal_descriptor)?;
 /// let _ = txout_index.insert_descriptor(MyKeychain::MyAppUser { user_id: 42 }, descriptor_42)?;
 ///
-/// let new_spk_for_user = txout_index.reveal_next_spk(&MyKeychain::MyAppUser{ user_id: 42 });
+/// let new_spk_for_user = txout_index.reveal_next_spk(MyKeychain::MyAppUser{ user_id: 42 });
 /// # Ok::<_, bdk_chain::indexer::keychain_txout::InsertDescriptorError<_>>(())
 /// ```
 ///
@@ -335,11 +335,11 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     /// Return all keychains and their corresponding descriptors.
     pub fn keychains(
         &self,
-    ) -> impl DoubleEndedIterator<Item = (&K, &Descriptor<DescriptorPublicKey>)> + ExactSizeIterator + '_
+    ) -> impl DoubleEndedIterator<Item = (K, &Descriptor<DescriptorPublicKey>)> + ExactSizeIterator + '_
     {
         self.keychain_to_descriptor_id
             .iter()
-            .map(|(k, did)| (k, self.descriptors.get(did).expect("invariant")))
+            .map(|(k, did)| (k.clone(), self.descriptors.get(did).expect("invariant")))
     }
 
     /// Insert a descriptor with a keychain associated to it.
@@ -399,8 +399,8 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
 
     /// Gets the descriptor associated with the keychain. Returns `None` if the keychain doesn't
     /// have a descriptor associated with it.
-    pub fn get_descriptor(&self, keychain: &K) -> Option<&Descriptor<DescriptorPublicKey>> {
-        let did = self.keychain_to_descriptor_id.get(keychain)?;
+    pub fn get_descriptor(&self, keychain: K) -> Option<&Descriptor<DescriptorPublicKey>> {
+        let did = self.keychain_to_descriptor_id.get(&keychain)?;
         self.descriptors.get(did)
     }
 
@@ -416,8 +416,8 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     /// Store lookahead scripts until `target_index` (inclusive).
     ///
     /// This does not change the global `lookahead` setting.
-    pub fn lookahead_to_target(&mut self, keychain: &K, target_index: u32) {
-        if let Some((next_index, _)) = self.next_index(keychain) {
+    pub fn lookahead_to_target(&mut self, keychain: K, target_index: u32) {
+        if let Some((next_index, _)) = self.next_index(keychain.clone()) {
             let temp_lookahead = (target_index + 1)
                 .checked_sub(next_index)
                 .filter(|&index| index > 0);
@@ -434,9 +434,9 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
         }
     }
 
-    fn replenish_inner_index_keychain(&mut self, keychain: &K, lookahead: u32) {
-        if let Some(did) = self.keychain_to_descriptor_id.get(keychain) {
-            self.replenish_inner_index(*did, keychain, lookahead);
+    fn replenish_inner_index_keychain(&mut self, keychain: K, lookahead: u32) {
+        if let Some(did) = self.keychain_to_descriptor_id.get(&keychain) {
+            self.replenish_inner_index(*did, &keychain, lookahead);
         }
     }
 
@@ -464,7 +464,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     /// keychain doesn't exist
     pub fn unbounded_spk_iter(
         &self,
-        keychain: &K,
+        keychain: K,
     ) -> Option<SpkIterator<Descriptor<DescriptorPublicKey>>> {
         let descriptor = self.get_descriptor(keychain)?.clone();
         Some(SpkIterator::new(descriptor))
@@ -525,12 +525,12 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     ///
     /// This is a double ended iterator so you can easily reverse it to get an iterator where
     /// the script pubkeys that were most recently revealed are first.
-    pub fn revealed_keychain_spks<'a>(
-        &'a self,
-        keychain: &'a K,
-    ) -> impl DoubleEndedIterator<Item = Indexed<&Script>> + 'a {
+    pub fn revealed_keychain_spks(
+        &self,
+        keychain: K,
+    ) -> impl DoubleEndedIterator<Item = Indexed<&Script>> {
         let end = self
-            .last_revealed_index(keychain)
+            .last_revealed_index(keychain.clone())
             .map(|v| v + 1)
             .unwrap_or(0);
         self.inner
@@ -544,7 +544,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
         &self,
     ) -> impl DoubleEndedIterator<Item = KeychainIndexed<K, &Script>> + Clone {
         self.keychain_to_descriptor_id.keys().flat_map(|keychain| {
-            self.unused_keychain_spks(keychain)
+            self.unused_keychain_spks(keychain.clone())
                 .map(|(i, spk)| ((keychain.clone(), i), spk))
         })
     }
@@ -553,9 +553,9 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     /// Returns an empty iterator if the provided keychain doesn't exist.
     pub fn unused_keychain_spks(
         &self,
-        keychain: &K,
+        keychain: K,
     ) -> impl DoubleEndedIterator<Item = Indexed<&Script>> + Clone {
-        let end = match self.keychain_to_descriptor_id.get(keychain) {
+        let end = match self.keychain_to_descriptor_id.get(&keychain) {
             Some(did) => self.last_revealed.get(did).map(|v| *v + 1).unwrap_or(0),
             None => 0,
         };
@@ -577,8 +577,8 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     /// Not checking the second field of the tuple may result in address reuse.
     ///
     /// Returns None if the provided `keychain` doesn't exist.
-    pub fn next_index(&self, keychain: &K) -> Option<(u32, bool)> {
-        let did = self.keychain_to_descriptor_id.get(keychain)?;
+    pub fn next_index(&self, keychain: K) -> Option<(u32, bool)> {
+        let did = self.keychain_to_descriptor_id.get(&keychain)?;
         let last_index = self.last_revealed.get(did).cloned();
         let descriptor = self.descriptors.get(did).expect("invariant");
 
@@ -615,8 +615,8 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
 
     /// Get the last derivation index revealed for `keychain`. Returns None if the keychain doesn't
     /// exist, or if the keychain doesn't have any revealed scripts.
-    pub fn last_revealed_index(&self, keychain: &K) -> Option<u32> {
-        let descriptor_id = self.keychain_to_descriptor_id.get(keychain)?;
+    pub fn last_revealed_index(&self, keychain: K) -> Option<u32> {
+        let descriptor_id = self.keychain_to_descriptor_id.get(&keychain)?;
         self.last_revealed.get(descriptor_id).cloned()
     }
 
@@ -625,7 +625,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
         let mut changeset = ChangeSet::default();
 
         for (keychain, &index) in keychains {
-            if let Some((_, new_changeset)) = self.reveal_to_target(keychain, index) {
+            if let Some((_, new_changeset)) = self.reveal_to_target(keychain.clone(), index) {
                 changeset.merge(new_changeset);
             }
         }
@@ -648,16 +648,16 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     #[must_use]
     pub fn reveal_to_target(
         &mut self,
-        keychain: &K,
+        keychain: K,
         target_index: u32,
     ) -> Option<(Vec<Indexed<ScriptBuf>>, ChangeSet)> {
         let mut changeset = ChangeSet::default();
         let mut spks: Vec<Indexed<ScriptBuf>> = vec![];
-        while let Some((i, new)) = self.next_index(keychain) {
+        while let Some((i, new)) = self.next_index(keychain.clone()) {
             if !new || i > target_index {
                 break;
             }
-            match self.reveal_next_spk(keychain) {
+            match self.reveal_next_spk(keychain.clone()) {
                 Some(((i, spk), change)) => {
                     spks.push((i, spk));
                     changeset.merge(change);
@@ -686,10 +686,10 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
         let mut changeset = ChangeSet::default();
 
         if new {
-            let did = self.keychain_to_descriptor_id.get(keychain)?;
+            let did = self.keychain_to_descriptor_id.get(&keychain)?;
             self.last_revealed.insert(*did, next_index);
             changeset.last_revealed.insert(*did, next_index);
-            self.replenish_inner_index(*did, keychain, self.lookahead);
+            self.replenish_inner_index(*did, &keychain, self.lookahead);
         }
         let script = self
             .inner
@@ -711,9 +711,9 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     /// could be revealed (see [`reveal_next_spk`] for when this happens).
     ///
     /// [`reveal_next_spk`]: Self::reveal_next_spk
-    pub fn next_unused_spk(&mut self, keychain: &K) -> Option<(Indexed<ScriptBuf>, ChangeSet)> {
+    pub fn next_unused_spk(&mut self, keychain: K) -> Option<(Indexed<ScriptBuf>, ChangeSet)> {
         let next_unused = self
-            .unused_keychain_spks(keychain)
+            .unused_keychain_spks(keychain.clone())
             .next()
             .map(|(i, spk)| ((i, spk.to_owned()), ChangeSet::default()));
 
@@ -722,11 +722,11 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
 
     /// Iterate over all [`OutPoint`]s that have `TxOut`s with script pubkeys derived from
     /// `keychain`.
-    pub fn keychain_outpoints<'a>(
-        &'a self,
-        keychain: &'a K,
-    ) -> impl DoubleEndedIterator<Item = Indexed<OutPoint>> + 'a {
-        self.keychain_outpoints_in_range(keychain..=keychain)
+    pub fn keychain_outpoints(
+        &self,
+        keychain: K,
+    ) -> impl DoubleEndedIterator<Item = Indexed<OutPoint>> + '_ {
+        self.keychain_outpoints_in_range(keychain.clone()..=keychain)
             .map(|((_, i), op)| (i, op))
     }
 
@@ -757,7 +757,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
 
     /// Returns the highest derivation index of the `keychain` where [`KeychainTxOutIndex`] has
     /// found a [`TxOut`] with it's script pubkey.
-    pub fn last_used_index(&self, keychain: &K) -> Option<u32> {
+    pub fn last_used_index(&self, keychain: K) -> Option<u32> {
         self.keychain_outpoints(keychain).last().map(|(i, _)| i)
     }
 
@@ -767,7 +767,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
         self.keychain_to_descriptor_id
             .iter()
             .filter_map(|(keychain, _)| {
-                self.last_used_index(keychain)
+                self.last_used_index(keychain.clone())
                     .map(|index| (keychain.clone(), index))
             })
             .collect()

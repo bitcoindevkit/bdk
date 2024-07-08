@@ -166,7 +166,7 @@ fn main() -> anyhow::Result<()> {
                         Keychain::External,
                         graph
                             .index
-                            .unbounded_spk_iter(&Keychain::External)
+                            .unbounded_spk_iter(Keychain::External)
                             .into_iter()
                             .flatten(),
                     )
@@ -174,7 +174,7 @@ fn main() -> anyhow::Result<()> {
                         Keychain::Internal,
                         graph
                             .index
-                            .unbounded_spk_iter(&Keychain::Internal)
+                            .unbounded_spk_iter(Keychain::Internal)
                             .into_iter()
                             .flatten(),
                     )

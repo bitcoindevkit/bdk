@@ -542,7 +542,7 @@ impl Wallet {
     }
 
     /// Iterator over all keychains in this wallet
-    pub fn keychains(&self) -> impl Iterator<Item = (&KeychainKind, &ExtendedDescriptor)> {
+    pub fn keychains(&self) -> impl Iterator<Item = (KeychainKind, &ExtendedDescriptor)> {
         self.indexed_graph.index.keychains()
     }
 
@@ -558,7 +558,7 @@ impl Wallet {
         let mut spk_iter = self
             .indexed_graph
             .index
-            .unbounded_spk_iter(&keychain)
+            .unbounded_spk_iter(keychain)
             .expect("keychain must exist");
         if !spk_iter.descriptor().has_wildcard() {
             index = 0;
@@ -604,7 +604,7 @@ impl Wallet {
         let stage = &mut self.stage;
 
         let ((index, spk), index_changeset) = index
-            .reveal_next_spk(&keychain)
+            .reveal_next_spk(keychain)
             .expect("keychain must exist");
 
         stage.merge(index_changeset.into());
@@ -634,7 +634,7 @@ impl Wallet {
         let (spks, index_changeset) = self
             .indexed_graph
             .index
-            .reveal_to_target(&keychain, index)
+            .reveal_to_target(keychain, index)
             .expect("keychain must exist");
 
         self.stage.merge(index_changeset.into());
@@ -658,7 +658,7 @@ impl Wallet {
         let index = &mut self.indexed_graph.index;
 
         let ((index, spk), index_changeset) = index
-            .next_unused_spk(&keychain)
+            .next_unused_spk(keychain)
             .expect("keychain must exist");
 
         self.stage
@@ -702,7 +702,7 @@ impl Wallet {
     ) -> impl DoubleEndedIterator<Item = AddressInfo> + '_ {
         self.indexed_graph
             .index
-            .unused_keychain_spks(&keychain)
+            .unused_keychain_spks(keychain)
             .map(move |(index, spk)| AddressInfo {
                 index,
                 address: Address::from_script(spk, self.network).expect("must have address form"),
@@ -783,7 +783,7 @@ impl Wallet {
     ) -> impl Iterator<Item = Indexed<ScriptBuf>> + Clone {
         self.indexed_graph
             .index
-            .unbounded_spk_iter(&keychain)
+            .unbounded_spk_iter(keychain)
             .expect("keychain must exist")
     }
 
@@ -1354,7 +1354,7 @@ impl Wallet {
                 let ((index, spk), index_changeset) = self
                     .indexed_graph
                     .index
-                    .next_unused_spk(&change_keychain)
+                    .next_unused_spk(change_keychain)
                     .expect("keychain must exist");
                 self.indexed_graph.index.mark_used(change_keychain, index);
                 self.stage.merge(index_changeset.into());
@@ -1734,7 +1734,7 @@ impl Wallet {
     pub fn public_descriptor(&self, keychain: KeychainKind) -> &ExtendedDescriptor {
         self.indexed_graph
             .index
-            .get_descriptor(&keychain)
+            .get_descriptor(keychain)
             .expect("keychain must exist")
     }
 
@@ -1843,14 +1843,14 @@ impl Wallet {
     /// The derivation index of this wallet. It will return `None` if it has not derived any addresses.
     /// Otherwise, it will return the index of the highest address it has derived.
     pub fn derivation_index(&self, keychain: KeychainKind) -> Option<u32> {
-        self.indexed_graph.index.last_revealed_index(&keychain)
+        self.indexed_graph.index.last_revealed_index(keychain)
     }
 
     /// The index of the next address that you would get if you were to ask the wallet for a new address
     pub fn next_derivation_index(&self, keychain: KeychainKind) -> u32 {
         self.indexed_graph
             .index
-            .next_index(&keychain)
+            .next_index(keychain)
             .expect("keychain must exist")
             .0
     }

@@ -161,7 +161,7 @@ fn test_list_owned_txouts() {
         for _ in 0..10 {
             let ((_, script), _) = graph
                 .index
-                .reveal_next_spk(&"keychain_1".to_string())
+                .reveal_next_spk("keychain_1".to_string())
                 .unwrap();
             // TODO Assert indexes
             trusted_spks.push(script.to_owned());
@@ -171,7 +171,7 @@ fn test_list_owned_txouts() {
         for _ in 0..10 {
             let ((_, script), _) = graph
                 .index
-                .reveal_next_spk(&"keychain_2".to_string())
+                .reveal_next_spk("keychain_2".to_string())
                 .unwrap();
             untrusted_spks.push(script.to_owned());
         }
