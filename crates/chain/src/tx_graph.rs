@@ -94,7 +94,7 @@ use crate::{
 use alloc::collections::vec_deque::VecDeque;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use bitcoin::{Amount, OutPoint, Script, SignedAmount, Transaction, TxOut, Txid};
+use bitcoin::{Amount, OutPoint, ScriptBuf, SignedAmount, Transaction, TxOut, Txid};
 use core::fmt::{self, Formatter};
 use core::{
     convert::Infallible,
@@ -1163,7 +1163,7 @@ impl<A: Anchor> TxGraph<A> {
         chain: &C,
         chain_tip: BlockId,
         outpoints: impl IntoIterator<Item = (OI, OutPoint)>,
-        mut trust_predicate: impl FnMut(&OI, &Script) -> bool,
+        mut trust_predicate: impl FnMut(&OI, ScriptBuf) -> bool,
     ) -> Result<Balance, C::Error> {
         let mut immature = Amount::ZERO;
         let mut trusted_pending = Amount::ZERO;
@@ -1182,7 +1182,7 @@ impl<A: Anchor> TxGraph<A> {
                     }
                 }
                 ChainPosition::Unconfirmed(_) => {
-                    if trust_predicate(&spk_i, &txout.txout.script_pubkey) {
+                    if trust_predicate(&spk_i, txout.txout.script_pubkey) {
                         trusted_pending += txout.txout.value;
                     } else {
                         untrusted_pending += txout.txout.value;
@@ -1209,7 +1209,7 @@ impl<A: Anchor> TxGraph<A> {
         chain: &C,
         chain_tip: BlockId,
         outpoints: impl IntoIterator<Item = (OI, OutPoint)>,
-        trust_predicate: impl FnMut(&OI, &Script) -> bool,
+        trust_predicate: impl FnMut(&OI, ScriptBuf) -> bool,
     ) -> Balance {
         self.try_balance(chain, chain_tip, outpoints, trust_predicate)
             .expect("oracle is infallible")

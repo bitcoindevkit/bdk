@@ -12,9 +12,7 @@ use bdk_chain::{
     local_chain::LocalChain,
     tx_graph, Balance, ChainPosition, ConfirmationBlockTime, DescriptorExt,
 };
-use bitcoin::{
-    secp256k1::Secp256k1, Amount, OutPoint, Script, ScriptBuf, Transaction, TxIn, TxOut,
-};
+use bitcoin::{secp256k1::Secp256k1, Amount, OutPoint, ScriptBuf, Transaction, TxIn, TxOut};
 use miniscript::Descriptor;
 
 /// Ensure [`IndexedTxGraph::insert_relevant_txs`] can successfully index transactions NOT presented
@@ -284,7 +282,7 @@ fn test_list_owned_txouts() {
                 &local_chain,
                 chain_tip,
                 graph.index.outpoints().iter().cloned(),
-                |_, spk: &Script| trusted_spks.contains(&spk.to_owned()),
+                |_, spk: ScriptBuf| trusted_spks.contains(&spk),
             );
 
             let confirmed_txouts_txid = txouts

@@ -6,7 +6,7 @@ use crate::{
     collections::{hash_map::Entry, BTreeMap, BTreeSet, HashMap},
     Indexer,
 };
-use bitcoin::{Amount, OutPoint, Script, ScriptBuf, SignedAmount, Transaction, TxOut, Txid};
+use bitcoin::{Amount, OutPoint, ScriptBuf, SignedAmount, Transaction, TxOut, Txid};
 
 /// An index storing [`TxOut`]s that have a script pubkey that matches those in a list.
 ///
@@ -176,8 +176,8 @@ impl<I: Clone + Ord + core::fmt::Debug> SpkTxOutIndex<I> {
     /// Returns the script that has been inserted at the `index`.
     ///
     /// If that index hasn't been inserted yet, it will return `None`.
-    pub fn spk_at_index(&self, index: &I) -> Option<&Script> {
-        self.spks.get(index).map(|s| s.as_script())
+    pub fn spk_at_index(&self, index: &I) -> Option<ScriptBuf> {
+        self.spks.get(index).cloned()
     }
 
     /// The script pubkeys that are being tracked by the index.
@@ -217,7 +217,10 @@ impl<I: Clone + Ord + core::fmt::Debug> SpkTxOutIndex<I> {
     /// let unused_change_spks =
     ///     txout_index.unused_spks((change_index, u32::MIN)..(change_index, u32::MAX));
     /// ```
-    pub fn unused_spks<R>(&self, range: R) -> impl DoubleEndedIterator<Item = (&I, &Script)> + Clone
+    pub fn unused_spks<R>(
+        &self,
+        range: R,
+    ) -> impl DoubleEndedIterator<Item = (&I, ScriptBuf)> + Clone + '_
     where
         R: RangeBounds<I>,
     {
@@ -268,8 +271,8 @@ impl<I: Clone + Ord + core::fmt::Debug> SpkTxOutIndex<I> {
     }
 
     /// Returns the index associated with the script pubkey.
-    pub fn index_of_spk(&self, script: &Script) -> Option<&I> {
-        self.spk_indices.get(script)
+    pub fn index_of_spk(&self, script: ScriptBuf) -> Option<&I> {
+        self.spk_indices.get(script.as_script())
     }
 
     /// Computes the total value transfer effect `tx` has on the script pubkeys in `range`. Value is
@@ -293,7 +296,7 @@ impl<I: Clone + Ord + core::fmt::Debug> SpkTxOutIndex<I> {
             }
         }
         for txout in &tx.output {
-            if let Some(index) = self.index_of_spk(&txout.script_pubkey) {
+            if let Some(index) = self.index_of_spk(txout.script_pubkey.clone()) {
                 if range.contains(index) {
                     received += txout.value;
                 }

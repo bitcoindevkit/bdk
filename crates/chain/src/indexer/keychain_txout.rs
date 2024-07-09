@@ -9,7 +9,7 @@ use crate::{
     DescriptorExt, DescriptorId, Indexed, Indexer, KeychainIndexed, SpkIterator,
 };
 use alloc::{borrow::ToOwned, vec::Vec};
-use bitcoin::{Amount, OutPoint, Script, ScriptBuf, SignedAmount, Transaction, TxOut, Txid};
+use bitcoin::{Amount, OutPoint, ScriptBuf, SignedAmount, Transaction, TxOut, Txid};
 use core::{
     fmt::Debug,
     ops::{Bound, RangeBounds},
@@ -251,14 +251,14 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     /// Return the script that exists under the given `keychain`'s `index`.
     ///
     /// This calls [`SpkTxOutIndex::spk_at_index`] internally.
-    pub fn spk_at_index(&self, keychain: K, index: u32) -> Option<&Script> {
+    pub fn spk_at_index(&self, keychain: K, index: u32) -> Option<ScriptBuf> {
         self.inner.spk_at_index(&(keychain.clone(), index))
     }
 
     /// Returns the keychain and keychain index associated with the spk.
     ///
     /// This calls [`SpkTxOutIndex::index_of_spk`] internally.
-    pub fn index_of_spk(&self, script: &Script) -> Option<&(K, u32)> {
+    pub fn index_of_spk(&self, script: ScriptBuf) -> Option<&(K, u32)> {
         self.inner.index_of_spk(script)
     }
 
@@ -489,7 +489,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     pub fn revealed_spks(
         &self,
         range: impl RangeBounds<K>,
-    ) -> impl Iterator<Item = KeychainIndexed<K, &Script>> {
+    ) -> impl Iterator<Item = KeychainIndexed<K, ScriptBuf>> + '_ {
         let start = range.start_bound();
         let end = range.end_bound();
         let mut iter_last_revealed = self
@@ -516,7 +516,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
             let (current_keychain, last_revealed) = current_keychain?;
 
             if current_keychain == keychain && Some(*index) <= last_revealed {
-                break Some(((keychain.clone(), *index), spk.as_script()));
+                break Some(((keychain.clone(), *index), spk.clone()));
             }
         })
     }
@@ -528,7 +528,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     pub fn revealed_keychain_spks(
         &self,
         keychain: K,
-    ) -> impl DoubleEndedIterator<Item = Indexed<&Script>> {
+    ) -> impl DoubleEndedIterator<Item = Indexed<ScriptBuf>> + '_ {
         let end = self
             .last_revealed_index(keychain.clone())
             .map(|v| v + 1)
@@ -536,16 +536,16 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
         self.inner
             .all_spks()
             .range((keychain.clone(), 0)..(keychain.clone(), end))
-            .map(|((_, index), spk)| (*index, spk.as_script()))
+            .map(|((_, index), spk)| (*index, spk.clone()))
     }
 
     /// Iterate over revealed, but unused, spks of all keychains.
     pub fn unused_spks(
         &self,
-    ) -> impl DoubleEndedIterator<Item = KeychainIndexed<K, &Script>> + Clone {
+    ) -> impl DoubleEndedIterator<Item = KeychainIndexed<K, ScriptBuf>> + Clone + '_ {
         self.keychain_to_descriptor_id.keys().flat_map(|keychain| {
             self.unused_keychain_spks(keychain.clone())
-                .map(|(i, spk)| ((keychain.clone(), i), spk))
+                .map(|(i, spk)| ((keychain.clone(), i), spk.clone()))
         })
     }
 
@@ -554,7 +554,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     pub fn unused_keychain_spks(
         &self,
         keychain: K,
-    ) -> impl DoubleEndedIterator<Item = Indexed<&Script>> + Clone {
+    ) -> impl DoubleEndedIterator<Item = Indexed<ScriptBuf>> + Clone + '_ {
         let end = match self.keychain_to_descriptor_id.get(&keychain) {
             Some(did) => self.last_revealed.get(did).map(|v| *v + 1).unwrap_or(0),
             None => 0,
@@ -681,8 +681,8 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     ///  1. The descriptor has no wildcard and already has one script revealed.
     ///  2. The descriptor has already revealed scripts up to the numeric bound.
     ///  3. There is no descriptor associated with the given keychain.
-    pub fn reveal_next_spk(&mut self, keychain: &K) -> Option<(Indexed<ScriptBuf>, ChangeSet)> {
-        let (next_index, new) = self.next_index(keychain)?;
+    pub fn reveal_next_spk(&mut self, keychain: K) -> Option<(Indexed<ScriptBuf>, ChangeSet)> {
+        let (next_index, new) = self.next_index(keychain.clone())?;
         let mut changeset = ChangeSet::default();
 
         if new {
@@ -695,7 +695,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
             .inner
             .spk_at_index(&(keychain.clone(), next_index))
             .expect("we just inserted it");
-        Some(((next_index, script.into()), changeset))
+        Some(((next_index, script), changeset))
     }
 
     /// Gets the next unused script pubkey in the keychain. I.e., the script pubkey with the lowest
