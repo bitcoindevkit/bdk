@@ -1,5 +1,5 @@
 #![allow(unused)]
-use bdk_chain::{BlockId, ConfirmationTime, ConfirmationTimeHeightAnchor, TxGraph};
+use bdk_chain::{BlockId, ConfirmationBlockTime, ConfirmationTime, TxGraph};
 use bdk_wallet::{
     wallet::{Update, Wallet},
     KeychainKind, LocalOutput,
@@ -65,6 +65,12 @@ pub fn get_funded_wallet_with_change(descriptor: &str, change: &str) -> (Wallet,
         ],
     };
 
+    wallet
+        .insert_checkpoint(BlockId {
+            height: 42,
+            hash: BlockHash::all_zeros(),
+        })
+        .unwrap();
     wallet
         .insert_checkpoint(BlockId {
             height: 1_000,
@@ -205,9 +211,8 @@ pub fn insert_anchor_from_conf(wallet: &mut Wallet, txid: Txid, position: Confir
             .local_chain()
             .range(height..)
             .last()
-            .map(|anchor_cp| ConfirmationTimeHeightAnchor {
-                anchor_block: anchor_cp.block_id(),
-                confirmation_height: height,
+            .map(|anchor_cp| ConfirmationBlockTime {
+                block_id: anchor_cp.block_id(),
                 confirmation_time: time,
             })
             .expect("confirmation height cannot be greater than tip");

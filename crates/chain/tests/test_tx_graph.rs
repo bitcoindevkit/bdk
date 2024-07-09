@@ -7,7 +7,7 @@ use bdk_chain::{
     collections::*,
     local_chain::LocalChain,
     tx_graph::{ChangeSet, TxGraph},
-    Anchor, BlockId, ChainOracle, ChainPosition, ConfirmationHeightAnchor, Merge,
+    Anchor, BlockId, ChainOracle, ChainPosition, ConfirmationBlockTime, Merge,
 };
 use bitcoin::{
     absolute, hashes::Hash, transaction, Amount, BlockHash, OutPoint, ScriptBuf, SignedAmount,
@@ -935,7 +935,7 @@ fn test_chain_spends() {
         ..common::new_tx(0)
     };
 
-    let mut graph = TxGraph::<ConfirmationHeightAnchor>::default();
+    let mut graph = TxGraph::<ConfirmationBlockTime>::default();
 
     let _ = graph.insert_tx(tx_0.clone());
     let _ = graph.insert_tx(tx_1.clone());
@@ -944,9 +944,9 @@ fn test_chain_spends() {
     for (ht, tx) in [(95, &tx_0), (98, &tx_1)] {
         let _ = graph.insert_anchor(
             tx.compute_txid(),
-            ConfirmationHeightAnchor {
-                anchor_block: tip.block_id(),
-                confirmation_height: ht,
+            ConfirmationBlockTime {
+                block_id: tip.get(ht).unwrap().block_id(),
+                confirmation_time: 100,
             },
         );
     }
@@ -959,9 +959,12 @@ fn test_chain_spends() {
             OutPoint::new(tx_0.compute_txid(), 0)
         ),
         Some((
-            ChainPosition::Confirmed(&ConfirmationHeightAnchor {
-                anchor_block: tip.block_id(),
-                confirmation_height: 98
+            ChainPosition::Confirmed(&ConfirmationBlockTime {
+                block_id: BlockId {
+                    hash: tip.get(98).unwrap().hash(),
+                    height: 98,
+                },
+                confirmation_time: 100
             }),
             tx_1.compute_txid(),
         )),
@@ -971,9 +974,12 @@ fn test_chain_spends() {
     assert_eq!(
         graph.get_chain_position(&local_chain, tip.block_id(), tx_0.compute_txid()),
         // Some(ObservedAs::Confirmed(&local_chain.get_block(95).expect("block expected"))),
-        Some(ChainPosition::Confirmed(&ConfirmationHeightAnchor {
-            anchor_block: tip.block_id(),
-            confirmation_height: 95
+        Some(ChainPosition::Confirmed(&ConfirmationBlockTime {
+            block_id: BlockId {
+                hash: tip.get(95).unwrap().hash(),
+                height: 95,
+            },
+            confirmation_time: 100
         }))
     );
 

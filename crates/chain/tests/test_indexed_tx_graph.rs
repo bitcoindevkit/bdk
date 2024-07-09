@@ -10,7 +10,7 @@ use bdk_chain::{
     indexed_tx_graph::{self, IndexedTxGraph},
     indexer::keychain_txout::KeychainTxOutIndex,
     local_chain::LocalChain,
-    tx_graph, Balance, ChainPosition, ConfirmationHeightAnchor, DescriptorExt, Merge,
+    tx_graph, Balance, ChainPosition, ConfirmationBlockTime, DescriptorExt, Merge,
 };
 use bitcoin::{
     secp256k1::Secp256k1, Amount, OutPoint, Script, ScriptBuf, Transaction, TxIn, TxOut,
@@ -32,7 +32,7 @@ fn insert_relevant_txs() {
     let spk_0 = descriptor.at_derivation_index(0).unwrap().script_pubkey();
     let spk_1 = descriptor.at_derivation_index(9).unwrap().script_pubkey();
 
-    let mut graph = IndexedTxGraph::<ConfirmationHeightAnchor, KeychainTxOutIndex<()>>::new(
+    let mut graph = IndexedTxGraph::<ConfirmationBlockTime, KeychainTxOutIndex<()>>::new(
         KeychainTxOutIndex::new(10),
     );
     let _ = graph
@@ -140,7 +140,7 @@ fn test_list_owned_txouts() {
     let (desc_2, _) =
         Descriptor::parse_descriptor(&Secp256k1::signing_only(), common::DESCRIPTORS[3]).unwrap();
 
-    let mut graph = IndexedTxGraph::<ConfirmationHeightAnchor, KeychainTxOutIndex<String>>::new(
+    let mut graph = IndexedTxGraph::<ConfirmationBlockTime, KeychainTxOutIndex<String>>::new(
         KeychainTxOutIndex::new(10),
     );
 
@@ -250,9 +250,9 @@ fn test_list_owned_txouts() {
                 local_chain
                     .get(height)
                     .map(|cp| cp.block_id())
-                    .map(|anchor_block| ConfirmationHeightAnchor {
-                        anchor_block,
-                        confirmation_height: anchor_block.height,
+                    .map(|block_id| ConfirmationBlockTime {
+                        block_id,
+                        confirmation_time: 100,
                     }),
             )
         }));
@@ -261,8 +261,7 @@ fn test_list_owned_txouts() {
 
     // A helper lambda to extract and filter data from the graph.
     let fetch =
-        |height: u32,
-         graph: &IndexedTxGraph<ConfirmationHeightAnchor, KeychainTxOutIndex<String>>| {
+        |height: u32, graph: &IndexedTxGraph<ConfirmationBlockTime, KeychainTxOutIndex<String>>| {
             let chain_tip = local_chain
                 .get(height)
                 .map(|cp| cp.block_id())

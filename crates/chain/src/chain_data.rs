@@ -74,11 +74,11 @@ impl ConfirmationTime {
     }
 }
 
-impl From<ChainPosition<ConfirmationTimeHeightAnchor>> for ConfirmationTime {
-    fn from(observed_as: ChainPosition<ConfirmationTimeHeightAnchor>) -> Self {
+impl From<ChainPosition<ConfirmationBlockTime>> for ConfirmationTime {
+    fn from(observed_as: ChainPosition<ConfirmationBlockTime>) -> Self {
         match observed_as {
             ChainPosition::Confirmed(a) => Self::Confirmed {
-                height: a.confirmation_height,
+                height: a.block_id.height,
                 time: a.confirmation_time,
             },
             ChainPosition::Unconfirmed(last_seen) => Self::Unconfirmed { last_seen },
@@ -145,9 +145,7 @@ impl From<(&u32, &BlockHash)> for BlockId {
     }
 }
 
-/// An [`Anchor`] implementation that also records the exact confirmation height of the transaction.
-///
-/// Note that the confirmation block and the anchor block can be different here.
+/// An [`Anchor`] implementation that also records the exact confirmation time of the transaction.
 ///
 /// Refer to [`Anchor`] for more details.
 #[derive(Debug, Default, Clone, PartialEq, Eq, Copy, PartialOrd, Ord, core::hash::Hash)]
@@ -156,70 +154,27 @@ impl From<(&u32, &BlockHash)> for BlockId {
     derive(serde::Deserialize, serde::Serialize),
     serde(crate = "serde_crate")
 )]
-pub struct ConfirmationHeightAnchor {
-    /// The exact confirmation height of the transaction.
-    ///
-    /// It is assumed that this value is never larger than the height of the anchor block.
-    pub confirmation_height: u32,
+pub struct ConfirmationBlockTime {
     /// The anchor block.
-    pub anchor_block: BlockId,
-}
-
-impl Anchor for ConfirmationHeightAnchor {
-    fn anchor_block(&self) -> BlockId {
-        self.anchor_block
-    }
-
-    fn confirmation_height_upper_bound(&self) -> u32 {
-        self.confirmation_height
-    }
-}
-
-impl AnchorFromBlockPosition for ConfirmationHeightAnchor {
-    fn from_block_position(_block: &bitcoin::Block, block_id: BlockId, _tx_pos: usize) -> Self {
-        Self {
-            anchor_block: block_id,
-            confirmation_height: block_id.height,
-        }
-    }
-}
-
-/// An [`Anchor`] implementation that also records the exact confirmation time and height of the
-/// transaction.
-///
-/// Note that the confirmation block and the anchor block can be different here.
-///
-/// Refer to [`Anchor`] for more details.
-#[derive(Debug, Default, Clone, PartialEq, Eq, Copy, PartialOrd, Ord, core::hash::Hash)]
-#[cfg_attr(
-    feature = "serde",
-    derive(serde::Deserialize, serde::Serialize),
-    serde(crate = "serde_crate")
-)]
-pub struct ConfirmationTimeHeightAnchor {
-    /// The confirmation height of the transaction being anchored.
-    pub confirmation_height: u32,
+    pub block_id: BlockId,
     /// The confirmation time of the transaction being anchored.
     pub confirmation_time: u64,
-    /// The anchor block.
-    pub anchor_block: BlockId,
 }
 
-impl Anchor for ConfirmationTimeHeightAnchor {
+impl Anchor for ConfirmationBlockTime {
     fn anchor_block(&self) -> BlockId {
-        self.anchor_block
+        self.block_id
     }
 
     fn confirmation_height_upper_bound(&self) -> u32 {
-        self.confirmation_height
+        self.block_id.height
     }
 }
 
-impl AnchorFromBlockPosition for ConfirmationTimeHeightAnchor {
+impl AnchorFromBlockPosition for ConfirmationBlockTime {
     fn from_block_position(block: &bitcoin::Block, block_id: BlockId, _tx_pos: usize) -> Self {
         Self {
-            anchor_block: block_id,
-            confirmation_height: block_id.height,
+            block_id,
             confirmation_time: block.header.time as _,
         }
     }
@@ -305,19 +260,19 @@ mod test {
 
     #[test]
     fn chain_position_ord() {
-        let unconf1 = ChainPosition::<ConfirmationHeightAnchor>::Unconfirmed(10);
-        let unconf2 = ChainPosition::<ConfirmationHeightAnchor>::Unconfirmed(20);
-        let conf1 = ChainPosition::Confirmed(ConfirmationHeightAnchor {
-            confirmation_height: 9,
-            anchor_block: BlockId {
-                height: 20,
+        let unconf1 = ChainPosition::<ConfirmationBlockTime>::Unconfirmed(10);
+        let unconf2 = ChainPosition::<ConfirmationBlockTime>::Unconfirmed(20);
+        let conf1 = ChainPosition::Confirmed(ConfirmationBlockTime {
+            confirmation_time: 20,
+            block_id: BlockId {
+                height: 9,
                 ..Default::default()
             },
         });
-        let conf2 = ChainPosition::Confirmed(ConfirmationHeightAnchor {
-            confirmation_height: 12,
-            anchor_block: BlockId {
-                height: 15,
+        let conf2 = ChainPosition::Confirmed(ConfirmationBlockTime {
+            confirmation_time: 15,
+            block_id: BlockId {
+                height: 12,
                 ..Default::default()
             },
         });

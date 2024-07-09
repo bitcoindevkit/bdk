@@ -28,7 +28,7 @@ use bdk_chain::{
     },
     spk_client::{FullScanRequest, FullScanResult, SyncRequest, SyncResult},
     tx_graph::{CanonicalTx, TxGraph, TxNode},
-    BlockId, ChainPosition, ConfirmationTime, ConfirmationTimeHeightAnchor, FullTxOut, Indexed,
+    BlockId, ChainPosition, ConfirmationBlockTime, ConfirmationTime, FullTxOut, Indexed,
     IndexedTxGraph, Merge,
 };
 use bitcoin::sighash::{EcdsaSighashType, TapSighashType};
@@ -104,7 +104,7 @@ pub struct Wallet {
     signers: Arc<SignersContainer>,
     change_signers: Arc<SignersContainer>,
     chain: LocalChain,
-    indexed_graph: IndexedTxGraph<ConfirmationTimeHeightAnchor, KeychainTxOutIndex<KeychainKind>>,
+    indexed_graph: IndexedTxGraph<ConfirmationBlockTime, KeychainTxOutIndex<KeychainKind>>,
     stage: ChangeSet,
     network: Network,
     secp: SecpCtx,
@@ -120,7 +120,7 @@ pub struct Update {
     pub last_active_indices: BTreeMap<KeychainKind, u32>,
 
     /// Update for the wallet's internal [`TxGraph`].
-    pub graph: TxGraph<ConfirmationTimeHeightAnchor>,
+    pub graph: TxGraph<ConfirmationBlockTime>,
 
     /// Update for the wallet's internal [`LocalChain`].
     ///
@@ -149,7 +149,7 @@ impl From<SyncResult> for Update {
 }
 
 /// The changes made to a wallet by applying an [`Update`].
-pub type ChangeSet = bdk_chain::CombinedChangeSet<KeychainKind, ConfirmationTimeHeightAnchor>;
+pub type ChangeSet = bdk_chain::CombinedChangeSet<KeychainKind, ConfirmationBlockTime>;
 
 /// A derived address and the index it was found at.
 /// For convenience this automatically derefs to `Address`
@@ -1007,7 +1007,7 @@ impl Wallet {
     /// match canonical_tx.chain_position {
     ///     ChainPosition::Confirmed(anchor) => println!(
     ///         "tx is confirmed at height {}, we know this since {}:{} is in the best chain",
-    ///         anchor.confirmation_height, anchor.anchor_block.height, anchor.anchor_block.hash,
+    ///         anchor.block_id.height, anchor.block_id.height, anchor.block_id.hash,
     ///     ),
     ///     ChainPosition::Unconfirmed(last_seen) => println!(
     ///         "tx is last seen at {}, it is unconfirmed as it is not anchored in the best chain",
@@ -1020,7 +1020,7 @@ impl Wallet {
     pub fn get_tx(
         &self,
         txid: Txid,
-    ) -> Option<CanonicalTx<'_, Arc<Transaction>, ConfirmationTimeHeightAnchor>> {
+    ) -> Option<CanonicalTx<'_, Arc<Transaction>, ConfirmationBlockTime>> {
         let graph = self.indexed_graph.graph();
 
         Some(CanonicalTx {
@@ -1076,8 +1076,7 @@ impl Wallet {
     /// Iterate over the transactions in the wallet.
     pub fn transactions(
         &self,
-    ) -> impl Iterator<Item = CanonicalTx<'_, Arc<Transaction>, ConfirmationTimeHeightAnchor>> + '_
-    {
+    ) -> impl Iterator<Item = CanonicalTx<'_, Arc<Transaction>, ConfirmationBlockTime>> + '_ {
         self.indexed_graph
             .graph()
             .list_canonical_txs(&self.chain, self.chain.tip().block_id())
@@ -1807,7 +1806,7 @@ impl Wallet {
                 .graph()
                 .get_chain_position(&self.chain, chain_tip, input.previous_output.txid)
                 .map(|chain_position| match chain_position {
-                    ChainPosition::Confirmed(a) => a.confirmation_height,
+                    ChainPosition::Confirmed(a) => a.block_id.height,
                     ChainPosition::Unconfirmed(_) => u32::MAX,
                 });
             let current_height = sign_options
@@ -2245,7 +2244,7 @@ impl Wallet {
     }
 
     /// Get a reference to the inner [`TxGraph`].
-    pub fn tx_graph(&self) -> &TxGraph<ConfirmationTimeHeightAnchor> {
+    pub fn tx_graph(&self) -> &TxGraph<ConfirmationBlockTime> {
         self.indexed_graph.graph()
     }
 
@@ -2253,7 +2252,7 @@ impl Wallet {
     /// because they haven't been broadcast.
     pub fn unbroadcast_transactions(
         &self,
-    ) -> impl Iterator<Item = TxNode<'_, Arc<Transaction>, ConfirmationTimeHeightAnchor>> {
+    ) -> impl Iterator<Item = TxNode<'_, Arc<Transaction>, ConfirmationBlockTime>> {
         self.tx_graph().txs_with_no_anchor_or_last_seen()
     }
 
@@ -2373,8 +2372,8 @@ impl Wallet {
     }
 }
 
-impl AsRef<bdk_chain::tx_graph::TxGraph<ConfirmationTimeHeightAnchor>> for Wallet {
-    fn as_ref(&self) -> &bdk_chain::tx_graph::TxGraph<ConfirmationTimeHeightAnchor> {
+impl AsRef<bdk_chain::tx_graph::TxGraph<ConfirmationBlockTime>> for Wallet {
+    fn as_ref(&self) -> &bdk_chain::tx_graph::TxGraph<ConfirmationBlockTime> {
         self.indexed_graph.graph()
     }
 }
@@ -2413,7 +2412,7 @@ where
 fn new_local_utxo(
     keychain: KeychainKind,
     derivation_index: u32,
-    full_txo: FullTxOut<ConfirmationTimeHeightAnchor>,
+    full_txo: FullTxOut<ConfirmationBlockTime>,
 ) -> LocalOutput {
     LocalOutput {
         outpoint: full_txo.outpoint,
@@ -2476,7 +2475,7 @@ macro_rules! floating_rate {
 macro_rules! doctest_wallet {
     () => {{
         use $crate::bitcoin::{BlockHash, Transaction, absolute, TxOut, Network, hashes::Hash};
-        use $crate::chain::{ConfirmationTimeHeightAnchor, BlockId, TxGraph};
+        use $crate::chain::{ConfirmationBlockTime, BlockId, TxGraph};
         use $crate::wallet::{Update, Wallet};
         use $crate::KeychainKind;
         let descriptor = "tr([73c5da0a/86'/0'/0']tprv8fMn4hSKPRC1oaCPqxDb1JWtgkpeiQvZhsr8W2xuy3GEMkzoArcAWTfJxYb6Wj8XNNDWEjfYKK4wGQXh3ZUXhDF2NcnsALpWTeSwarJt7Vc/0/*)";
@@ -2499,13 +2498,13 @@ macro_rules! doctest_wallet {
             }],
         };
         let txid = tx.txid();
-        let block = BlockId { height: 1_000, hash: BlockHash::all_zeros() };
-        let _ = wallet.insert_checkpoint(block);
+        let block_id = BlockId { height: 500, hash: BlockHash::all_zeros() };
+        let _ = wallet.insert_checkpoint(block_id);
+        let _ = wallet.insert_checkpoint(BlockId { height: 1_000, hash: BlockHash::all_zeros() });
         let _ = wallet.insert_tx(tx);
-        let anchor = ConfirmationTimeHeightAnchor {
-            confirmation_height: 500,
+        let anchor = ConfirmationBlockTime {
             confirmation_time: 50_000,
-            anchor_block: block,
+            block_id,
         };
         let mut graph = TxGraph::default();
         let _ = graph.insert_anchor(txid, anchor);

@@ -547,10 +547,7 @@ mod test {
     use bdk_chain::bitcoin::{secp256k1, BlockHash, OutPoint};
     use bdk_chain::miniscript::Descriptor;
     use bdk_chain::CombinedChangeSet;
-    use bdk_chain::{
-        indexed_tx_graph, tx_graph, BlockId, ConfirmationHeightAnchor,
-        ConfirmationTimeHeightAnchor, DescriptorExt,
-    };
+    use bdk_chain::{indexed_tx_graph, tx_graph, BlockId, ConfirmationBlockTime, DescriptorExt};
     use std::str::FromStr;
     use std::sync::Arc;
 
@@ -561,37 +558,15 @@ mod test {
     }
 
     #[test]
-    fn insert_and_load_aggregate_changesets_with_confirmation_time_height_anchor() {
+    fn insert_and_load_aggregate_changesets_with_confirmation_block_time_anchor() {
         let (test_changesets, agg_test_changesets) =
-            create_test_changesets(&|height, time, hash| ConfirmationTimeHeightAnchor {
-                confirmation_height: height,
+            create_test_changesets(&|height, time, hash| ConfirmationBlockTime {
                 confirmation_time: time,
-                anchor_block: (height, hash).into(),
+                block_id: (height, hash).into(),
             });
 
         let conn = Connection::open_in_memory().expect("in memory connection");
-        let mut store = Store::<Keychain, ConfirmationTimeHeightAnchor>::new(conn)
-            .expect("create new memory db store");
-
-        test_changesets.iter().for_each(|changeset| {
-            store.write(changeset).expect("write changeset");
-        });
-
-        let agg_changeset = store.read().expect("aggregated changeset");
-
-        assert_eq!(agg_changeset, Some(agg_test_changesets));
-    }
-
-    #[test]
-    fn insert_and_load_aggregate_changesets_with_confirmation_height_anchor() {
-        let (test_changesets, agg_test_changesets) =
-            create_test_changesets(&|height, _time, hash| ConfirmationHeightAnchor {
-                confirmation_height: height,
-                anchor_block: (height, hash).into(),
-            });
-
-        let conn = Connection::open_in_memory().expect("in memory connection");
-        let mut store = Store::<Keychain, ConfirmationHeightAnchor>::new(conn)
+        let mut store = Store::<Keychain, ConfirmationBlockTime>::new(conn)
             .expect("create new memory db store");
 
         test_changesets.iter().for_each(|changeset| {
