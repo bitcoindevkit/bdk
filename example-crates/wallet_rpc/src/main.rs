@@ -92,12 +92,12 @@ fn main() -> anyhow::Result<()> {
     )?;
     let changeset = db.aggregate_changesets()?;
 
-    let mut wallet = Wallet::new_or_load(
-        &args.descriptor,
-        &args.change_descriptor,
-        changeset,
-        args.network,
-    )?;
+    let mut wallet = if let Some(changeset) = changeset {
+        Wallet::load_with_descriptors(&args.descriptor, &args.change_descriptor, changeset)?
+    } else {
+        Wallet::new(&args.descriptor, &args.change_descriptor, Network::Testnet)?
+    };
+
     println!(
         "Loaded wallet in {}s",
         start_load_wallet.elapsed().as_secs_f32()

@@ -141,7 +141,7 @@ fn load_recovers_wallet() -> anyhow::Result<()> {
             let db = &mut recover(&file_path).expect("must recover db");
             let changeset = read(db).expect("must recover wallet").expect("changeset");
 
-            let wallet = Wallet::load_from_changeset(changeset).expect("must recover wallet");
+            let wallet = Wallet::load(changeset).expect("must recover wallet");
             assert_eq!(wallet.network(), Network::Testnet);
             assert_eq!(
                 wallet.spk_index().keychains().collect::<Vec<_>>(),
@@ -182,15 +182,15 @@ fn load_recovers_wallet() -> anyhow::Result<()> {
 }
 
 #[test]
-fn new_or_load() -> anyhow::Result<()> {
-    fn run<Db, NewOrRecover, Read, Write>(
+fn new_and_load() -> anyhow::Result<()> {
+    fn run<Db, Recover, Read, Write>(
         filename: &str,
-        new_or_load: NewOrRecover,
+        load: Recover,
         read: Read,
         write: Write,
     ) -> anyhow::Result<()>
     where
-        NewOrRecover: Fn(&Path) -> anyhow::Result<Db>,
+        Recover: Fn(&Path) -> anyhow::Result<Db>,
         Read: Fn(&mut Db) -> anyhow::Result<Option<ChangeSet>>,
         Write: Fn(&mut Db, &ChangeSet) -> anyhow::Result<()>,
     {
@@ -198,61 +198,15 @@ fn new_or_load() -> anyhow::Result<()> {
         let file_path = temp_dir.path().join(filename);
         let (desc, change_desc) = get_test_wpkh_with_change_desc();
 
-        // init wallet when non-existent
+        // init wallet
         let wallet_keychains: BTreeMap<_, _> = {
-            let wallet = &mut Wallet::new_or_load(desc, change_desc, None, Network::Testnet)
-                .expect("must init wallet");
-            let mut db = new_or_load(&file_path).expect("must create db");
-            if let Some(changeset) = wallet.take_staged() {
-                write(&mut db, &changeset)?;
-            }
+            let wallet =
+                &mut Wallet::new(desc, change_desc, Network::Testnet).expect("must init wallet");
+            let changeset = wallet.take_staged().expect("must have changeset");
+            let db = &mut load(&file_path).expect("must open db");
+            write(db, &changeset)?;
             wallet.keychains().map(|(k, v)| (*k, v.clone())).collect()
         };
-
-        // wrong network
-        {
-            let mut db = new_or_load(&file_path).expect("must create db");
-            let changeset = read(&mut db)?;
-            let err = Wallet::new_or_load(desc, change_desc, changeset, Network::Bitcoin)
-                .expect_err("wrong network");
-            assert!(
-                matches!(
-                    err,
-                    bdk_wallet::wallet::NewOrLoadError::LoadedNetworkDoesNotMatch {
-                        got: Some(Network::Testnet),
-                        expected: Network::Bitcoin
-                    }
-                ),
-                "err: {}",
-                err,
-            );
-        }
-
-        // wrong genesis hash
-        {
-            let exp_blockhash = BlockHash::all_zeros();
-            let got_blockhash = bitcoin::constants::genesis_block(Network::Testnet).block_hash();
-
-            let db = &mut new_or_load(&file_path).expect("must open db");
-            let changeset = read(db)?;
-            let err = Wallet::new_or_load_with_genesis_hash(
-                desc,
-                change_desc,
-                changeset,
-                Network::Testnet,
-                exp_blockhash,
-            )
-            .expect_err("wrong genesis hash");
-            assert!(
-                matches!(
-                    err,
-                    bdk_wallet::wallet::NewOrLoadError::LoadedGenesisDoesNotMatch { got, expected }
-                    if got == Some(got_blockhash) && expected == exp_blockhash
-                ),
-                "err: {}",
-                err,
-            );
-        }
 
         // wrong external descriptor
         {
@@ -262,15 +216,14 @@ fn new_or_load() -> anyhow::Result<()> {
                 .unwrap()
                 .0;
 
-            let db = &mut new_or_load(&file_path).expect("must open db");
-            let changeset = read(db)?;
-            let err =
-                Wallet::new_or_load(exp_descriptor, exp_change_desc, changeset, Network::Testnet)
-                    .expect_err("wrong external descriptor");
+            let db = &mut load(&file_path).expect("must open db");
+            let changeset = read(db)?.expect("changeset must exist");
+            let err = Wallet::load_with_descriptors(exp_descriptor, exp_change_desc, changeset)
+                .expect_err("wrong external descriptor");
             assert!(
                 matches!(
                     err,
-                    bdk_wallet::wallet::NewOrLoadError::LoadedDescriptorDoesNotMatch { ref got, keychain }
+                    bdk_wallet::wallet::LoadError::LoadedDescriptorDoesNotMatch { ref got, keychain }
                     if got == &Some(got_descriptor) && keychain == KeychainKind::External
                 ),
                 "err: {}",
@@ -286,14 +239,14 @@ fn new_or_load() -> anyhow::Result<()> {
                 .unwrap()
                 .0;
 
-            let db = &mut new_or_load(&file_path).expect("must open db");
-            let changeset = read(db)?;
-            let err = Wallet::new_or_load(desc, exp_descriptor, changeset, Network::Testnet)
+            let db = &mut load(&file_path).expect("must open db");
+            let changeset = read(db)?.expect("changeset must exist");
+            let err = Wallet::load_with_descriptors(desc, exp_descriptor, changeset)
                 .expect_err("wrong internal descriptor");
             assert!(
                 matches!(
                     err,
-                    bdk_wallet::wallet::NewOrLoadError::LoadedDescriptorDoesNotMatch { ref got, keychain }
+                    bdk_wallet::wallet::LoadError::LoadedDescriptorDoesNotMatch { ref got, keychain }
                     if got == &Some(got_descriptor) && keychain == KeychainKind::Internal
                 ),
                 "err: {}",
@@ -303,9 +256,9 @@ fn new_or_load() -> anyhow::Result<()> {
 
         // all parameters match
         {
-            let db = &mut new_or_load(&file_path).expect("must open db");
-            let changeset = read(db)?;
-            let wallet = Wallet::new_or_load(desc, change_desc, changeset, Network::Testnet)
+            let db = &mut load(&file_path).expect("must open db");
+            let changeset = read(db)?.expect("changeset must exist");
+            let wallet = Wallet::load_with_descriptors(desc, change_desc, changeset)
                 .expect("must recover wallet");
             assert_eq!(wallet.network(), Network::Testnet);
             assert!(wallet
@@ -313,6 +266,23 @@ fn new_or_load() -> anyhow::Result<()> {
                 .map(|(k, v)| (*k, v.clone()))
                 .eq(wallet_keychains));
         }
+
+        // signers added
+        {
+            let db = &mut load(&file_path).expect("must open db");
+            let changeset = read(db)?.expect("changeset must exist");
+            let wallet = Wallet::load_with_descriptors(desc, change_desc, changeset)
+                .expect("must recover wallet");
+            assert_eq!(
+                wallet.get_signers(KeychainKind::External).signers().len(),
+                1
+            );
+            assert_eq!(
+                wallet.get_signers(KeychainKind::Internal).signers().len(),
+                1
+            );
+        }
+
         Ok(())
     }
 

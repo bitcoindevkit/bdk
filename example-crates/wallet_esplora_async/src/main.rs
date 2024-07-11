@@ -21,12 +21,11 @@ async fn main() -> Result<(), anyhow::Error> {
     let internal_descriptor = "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/84'/1'/0'/1/*)";
     let changeset = db.read()?;
 
-    let mut wallet = Wallet::new_or_load(
-        external_descriptor,
-        internal_descriptor,
-        changeset,
-        Network::Signet,
-    )?;
+    let mut wallet = if let Some(changeset) = changeset {
+        Wallet::load_with_descriptors(external_descriptor, internal_descriptor, changeset)?
+    } else {
+        Wallet::new(external_descriptor, internal_descriptor, Network::Testnet)?
+    };
 
     let address = wallet.next_unused_address(KeychainKind::External);
     if let Some(changeset) = wallet.take_staged() {

@@ -79,9 +79,11 @@ let mut db =
 let descriptor = "wpkh(tprv8ZgxMBicQKsPdcAqYBpzAFwU5yxBUo88ggoBqu1qPcHUfSbKK1sKMLmC7EAk438btHQrSdu3jGGQa6PA71nvH5nkDexhLteJqkM4dQmWF9g/84'/1'/0'/0/*)";
 let change_descriptor = "wpkh(tprv8ZgxMBicQKsPdcAqYBpzAFwU5yxBUo88ggoBqu1qPcHUfSbKK1sKMLmC7EAk438btHQrSdu3jGGQa6PA71nvH5nkDexhLteJqkM4dQmWF9g/84'/1'/0'/1/*)";
 let changeset = db.aggregate_changesets().expect("changeset loaded");
-let mut wallet =
-    Wallet::new_or_load(descriptor, change_descriptor, changeset, Network::Testnet)
-        .expect("create or load wallet");
+let mut wallet = if let Some(changeset) = changeset {
+    Wallet::load(changeset).expect("loaded wallet")
+} else {
+    Wallet::new(descriptor, change_descriptor, Network::Testnet).expect("created new wallet")
+};
 
 // Get a new address to receive bitcoin.
 let receive_address = wallet.reveal_next_address(KeychainKind::External);
