@@ -39,7 +39,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
 
     /// Inserts transactions into the transaction cache so that the client will not fetch these
     /// transactions.
-    pub fn populate_tx_cache<A>(&self, tx_graph: impl AsRef<TxGraph<A>>) {
+    pub fn populate_tx_cache<A, X>(&self, tx_graph: impl AsRef<TxGraph<A, X>>) {
         let txs = tx_graph
             .as_ref()
             .full_txs()

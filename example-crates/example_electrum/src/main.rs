@@ -6,11 +6,10 @@ use std::{
 use bdk_chain::{
     bitcoin::{constants::genesis_block, Address, Network, Txid},
     collections::BTreeSet,
-    indexed_tx_graph::{self, IndexedTxGraph},
     indexer::keychain_txout,
     local_chain::{self, LocalChain},
     spk_client::{FullScanRequest, SyncRequest},
-    ConfirmationBlockTime, Merge,
+    tx_graph, ConfirmationBlockTime, Merge, TxGraph,
 };
 use bdk_electrum::{
     electrum_client::{self, Client, ElectrumApi},
@@ -100,7 +99,7 @@ pub struct ScanOptions {
 
 type ChangeSet = (
     local_chain::ChangeSet,
-    indexed_tx_graph::ChangeSet<ConfirmationBlockTime, keychain_txout::ChangeSet<Keychain>>,
+    tx_graph::ChangeSet<ConfirmationBlockTime, keychain_txout::ChangeSet<Keychain>>,
 );
 
 fn main() -> anyhow::Result<()> {
@@ -115,7 +114,7 @@ fn main() -> anyhow::Result<()> {
     let (disk_local_chain, disk_tx_graph) = init_changeset;
 
     let graph = Mutex::new({
-        let mut graph = IndexedTxGraph::new(index);
+        let mut graph = TxGraph::new(index);
         graph.apply_changeset(disk_tx_graph);
         graph
     });
@@ -151,7 +150,7 @@ fn main() -> anyhow::Result<()> {
     // Tell the electrum client about the txs we've already got locally so it doesn't re-download them
     client.populate_tx_cache(&*graph.lock().unwrap());
 
-    let (chain_update, mut graph_update, keychain_update) = match electrum_cmd.clone() {
+    let (local_chain_changeset, tx_graph_changeset) = match electrum_cmd.clone() {
         ElectrumCommands::Scan {
             stop_gap,
             scan_options,
@@ -165,7 +164,7 @@ fn main() -> anyhow::Result<()> {
                     .set_spks_for_keychain(
                         Keychain::External,
                         graph
-                            .index
+                            .indexer
                             .unbounded_spk_iter(&Keychain::External)
                             .into_iter()
                             .flatten(),
@@ -173,7 +172,7 @@ fn main() -> anyhow::Result<()> {
                     .set_spks_for_keychain(
                         Keychain::Internal,
                         graph
-                            .index
+                            .indexer
                             .unbounded_spk_iter(&Keychain::Internal)
                             .into_iter()
                             .flatten(),
@@ -191,14 +190,29 @@ fn main() -> anyhow::Result<()> {
                     })
             };
 
-            let res = client
+            let mut update = client
                 .full_scan::<_>(request, stop_gap, scan_options.batch_size, false)
                 .context("scanning the blockchain")?;
-            (
-                res.chain_update,
-                res.graph_update,
-                Some(res.last_active_indices),
-            )
+
+            // We want to keep track of the latest time a transaction was seen unconfirmed.
+            let now = std::time::UNIX_EPOCH.elapsed().unwrap().as_secs();
+            let _ = update.graph_update.update_last_seen_unconfirmed(now);
+
+            let mut graph = graph.lock().expect("mutex must not be poisoned");
+            let mut chain = chain.lock().expect("mutex must not be poisoned");
+
+            // Because we did a stop gap based scan we are likely to have some updates to our
+            // deriviation indices. Usually before a scan you are on a fresh wallet with no
+            // addresses derived so we need to derive up to last active addresses the scan found
+            // before adding the transactions.
+            (chain.apply_update(update.chain_update)?, {
+                let index_changeset = graph
+                    .indexer
+                    .reveal_to_target_multi(&update.last_active_indices);
+                let mut tx_graph_changeset = graph.apply_update(update.graph_update);
+                tx_graph_changeset.merge(index_changeset.into());
+                tx_graph_changeset
+            })
         }
         ElectrumCommands::Sync {
             mut unused_spks,
@@ -208,147 +222,133 @@ fn main() -> anyhow::Result<()> {
             scan_options,
             ..
         } => {
-            // Get a short lock on the tracker to get the spks we're interested in
-            let graph = graph.lock().unwrap();
-            let chain = chain.lock().unwrap();
+            let local_tip = chain.lock().expect("mutex must not be poisoned").tip();
+            // Spks, outpoints and txids we want updates on will be accumulated here.
+            let mut request = SyncRequest::from_chain_tip(local_tip.clone());
 
-            if !(all_spks || unused_spks || utxos || unconfirmed) {
-                unused_spks = true;
-                unconfirmed = true;
-                utxos = true;
-            } else if all_spks {
-                unused_spks = false;
-            }
+            {
+                // Get a short lock on the tracker to get the spks we're interested in
+                let graph = graph.lock().unwrap();
+                let chain = chain.lock().unwrap();
 
-            let chain_tip = chain.tip();
-            let mut request = SyncRequest::from_chain_tip(chain_tip.clone());
+                if !(all_spks || unused_spks || utxos || unconfirmed) {
+                    unused_spks = true;
+                    unconfirmed = true;
+                    utxos = true;
+                } else if all_spks {
+                    unused_spks = false;
+                }
 
-            if all_spks {
-                let all_spks = graph
-                    .index
-                    .revealed_spks(..)
-                    .map(|(index, spk)| (index, spk.to_owned()))
-                    .collect::<Vec<_>>();
-                request = request.chain_spks(all_spks.into_iter().map(|((k, spk_i), spk)| {
-                    eprint!("Scanning {}: {}", k, spk_i);
-                    spk
-                }));
-            }
-            if unused_spks {
-                let unused_spks = graph
-                    .index
-                    .unused_spks()
-                    .map(|(index, spk)| (index, spk.to_owned()))
-                    .collect::<Vec<_>>();
-                request =
-                    request.chain_spks(unused_spks.into_iter().map(move |((k, spk_i), spk)| {
-                        eprint!(
-                            "Checking if address {} {}:{} has been used",
-                            Address::from_script(&spk, args.network).unwrap(),
-                            k,
-                            spk_i,
-                        );
+                let chain_tip = chain.tip();
+
+                if all_spks {
+                    let all_spks = graph
+                        .indexer
+                        .revealed_spks(..)
+                        .map(|(index, spk)| (index, spk.to_owned()))
+                        .collect::<Vec<_>>();
+                    request = request.chain_spks(all_spks.into_iter().map(|((k, spk_i), spk)| {
+                        eprint!("Scanning {}: {}", k, spk_i);
                         spk
                     }));
-            }
+                }
+                if unused_spks {
+                    let unused_spks = graph
+                        .indexer
+                        .unused_spks()
+                        .map(|(index, spk)| (index, spk.to_owned()))
+                        .collect::<Vec<_>>();
+                    request = request.chain_spks(unused_spks.into_iter().map(
+                        move |((k, spk_i), spk)| {
+                            eprint!(
+                                "Checking if address {} {}:{} has been used",
+                                Address::from_script(&spk, args.network).unwrap(),
+                                k,
+                                spk_i,
+                            );
+                            spk
+                        },
+                    ));
+                }
 
-            if utxos {
-                let init_outpoints = graph.index.outpoints();
+                if utxos {
+                    let init_outpoints = graph.indexer.outpoints();
 
-                let utxos = graph
-                    .graph()
-                    .filter_chain_unspents(
-                        &*chain,
-                        chain_tip.block_id(),
-                        init_outpoints.iter().cloned(),
-                    )
-                    .map(|(_, utxo)| utxo)
-                    .collect::<Vec<_>>();
-                request = request.chain_outpoints(utxos.into_iter().map(|utxo| {
-                    eprint!(
-                        "Checking if outpoint {} (value: {}) has been spent",
-                        utxo.outpoint, utxo.txout.value
+                    let utxos = graph
+                        .filter_chain_unspents(
+                            &*chain,
+                            chain_tip.block_id(),
+                            init_outpoints.iter().cloned(),
+                        )
+                        .map(|(_, utxo)| utxo)
+                        .collect::<Vec<_>>();
+                    request = request.chain_outpoints(utxos.into_iter().map(|utxo| {
+                        eprint!(
+                            "Checking if outpoint {} (value: {}) has been spent",
+                            utxo.outpoint, utxo.txout.value
+                        );
+                        utxo.outpoint
+                    }));
+                };
+
+                if unconfirmed {
+                    let unconfirmed_txids = graph
+                        .list_canonical_txs(&*chain, chain_tip.block_id())
+                        .filter(|canonical_tx| !canonical_tx.chain_position.is_confirmed())
+                        .map(|canonical_tx| canonical_tx.tx_node.txid)
+                        .collect::<Vec<Txid>>();
+
+                    request = request.chain_txids(
+                        unconfirmed_txids
+                            .into_iter()
+                            .inspect(|txid| eprint!("Checking if {} is confirmed yet", txid)),
                     );
-                    utxo.outpoint
-                }));
-            };
+                }
 
-            if unconfirmed {
-                let unconfirmed_txids = graph
-                    .graph()
-                    .list_canonical_txs(&*chain, chain_tip.block_id())
-                    .filter(|canonical_tx| !canonical_tx.chain_position.is_confirmed())
-                    .map(|canonical_tx| canonical_tx.tx_node.txid)
-                    .collect::<Vec<Txid>>();
-
-                request = request.chain_txids(
-                    unconfirmed_txids
-                        .into_iter()
-                        .inspect(|txid| eprint!("Checking if {} is confirmed yet", txid)),
-                );
+                let total_spks = request.spks.len();
+                let total_txids = request.txids.len();
+                let total_ops = request.outpoints.len();
+                request = request
+                    .inspect_spks({
+                        let mut visited = 0;
+                        move |_| {
+                            visited += 1;
+                            eprintln!(" [ {:>6.2}% ]", (visited * 100) as f32 / total_spks as f32)
+                        }
+                    })
+                    .inspect_txids({
+                        let mut visited = 0;
+                        move |_| {
+                            visited += 1;
+                            eprintln!(" [ {:>6.2}% ]", (visited * 100) as f32 / total_txids as f32)
+                        }
+                    })
+                    .inspect_outpoints({
+                        let mut visited = 0;
+                        move |_| {
+                            visited += 1;
+                            eprintln!(" [ {:>6.2}% ]", (visited * 100) as f32 / total_ops as f32)
+                        }
+                    });
             }
 
-            let total_spks = request.spks.len();
-            let total_txids = request.txids.len();
-            let total_ops = request.outpoints.len();
-            request = request
-                .inspect_spks({
-                    let mut visited = 0;
-                    move |_| {
-                        visited += 1;
-                        eprintln!(" [ {:>6.2}% ]", (visited * 100) as f32 / total_spks as f32)
-                    }
-                })
-                .inspect_txids({
-                    let mut visited = 0;
-                    move |_| {
-                        visited += 1;
-                        eprintln!(" [ {:>6.2}% ]", (visited * 100) as f32 / total_txids as f32)
-                    }
-                })
-                .inspect_outpoints({
-                    let mut visited = 0;
-                    move |_| {
-                        visited += 1;
-                        eprintln!(" [ {:>6.2}% ]", (visited * 100) as f32 / total_ops as f32)
-                    }
-                });
-
-            let res = client
+            let mut update = client
                 .sync(request, scan_options.batch_size, false)
                 .context("scanning the blockchain")?;
 
-            // drop lock on graph and chain
-            drop((graph, chain));
+            let now = std::time::UNIX_EPOCH.elapsed().unwrap().as_secs();
+            let _ = update.graph_update.update_last_seen_unconfirmed(now);
 
-            (res.chain_update, res.graph_update, None)
+            (
+                chain.lock().unwrap().apply_update(update.chain_update)?,
+                graph.lock().unwrap().apply_update(update.graph_update),
+            )
         }
     };
 
-    let now = std::time::UNIX_EPOCH
-        .elapsed()
-        .expect("must get time")
-        .as_secs();
-    let _ = graph_update.update_last_seen_unconfirmed(now);
-
-    let db_changeset = {
-        let mut chain = chain.lock().unwrap();
-        let mut graph = graph.lock().unwrap();
-
-        let chain_changeset = chain.apply_update(chain_update)?;
-
-        let mut indexed_tx_graph_changeset =
-            indexed_tx_graph::ChangeSet::<ConfirmationBlockTime, _>::default();
-        if let Some(keychain_update) = keychain_update {
-            let keychain_changeset = graph.index.reveal_to_target_multi(&keychain_update);
-            indexed_tx_graph_changeset.merge(keychain_changeset.into());
-        }
-        indexed_tx_graph_changeset.merge(graph.apply_update(graph_update));
-
-        (chain_changeset, indexed_tx_graph_changeset)
-    };
-
+    // We persist the changes
     let mut db = db.lock().unwrap();
-    db.append_changeset(&db_changeset)?;
+    db.append_changeset(&(local_chain_changeset, tx_graph_changeset))?;
+
     Ok(())
 }

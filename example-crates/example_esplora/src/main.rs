@@ -6,10 +6,10 @@ use std::{
 
 use bdk_chain::{
     bitcoin::{constants::genesis_block, Address, Network, Txid},
-    indexed_tx_graph::{self, IndexedTxGraph},
     indexer::keychain_txout,
     local_chain::{self, LocalChain},
     spk_client::{FullScanRequest, SyncRequest},
+    tx_graph::{self, TxGraph},
     ConfirmationBlockTime, Merge,
 };
 
@@ -26,7 +26,7 @@ const DB_PATH: &str = ".bdk_esplora_example.db";
 
 type ChangeSet = (
     local_chain::ChangeSet,
-    indexed_tx_graph::ChangeSet<ConfirmationBlockTime, keychain_txout::ChangeSet<Keychain>>,
+    tx_graph::ChangeSet<ConfirmationBlockTime, keychain_txout::ChangeSet<Keychain>>,
 );
 
 #[derive(Subcommand, Debug, Clone)]
@@ -111,14 +111,14 @@ fn main() -> anyhow::Result<()> {
 
     let genesis_hash = genesis_block(args.network).block_hash();
 
-    let (init_chain_changeset, init_indexed_tx_graph_changeset) = init_changeset;
+    let (init_chain_changeset, init_tx_graph_changeset) = init_changeset;
 
-    // Construct `IndexedTxGraph` and `LocalChain` with our initial changeset. They are wrapped in
+    // Construct `TxGraph` and `LocalChain` with our initial changeset. They are wrapped in
     // `Mutex` to display how they can be used in a multithreaded context. Technically the mutexes
     // aren't strictly needed here.
     let graph = Mutex::new({
-        let mut graph = IndexedTxGraph::new(index);
-        graph.apply_changeset(init_indexed_tx_graph_changeset);
+        let mut graph = TxGraph::new(index);
+        graph.apply_changeset(init_tx_graph_changeset);
         graph
     });
     let chain = Mutex::new({
@@ -151,7 +151,7 @@ fn main() -> anyhow::Result<()> {
     };
 
     let client = esplora_cmd.esplora_args().client(args.network)?;
-    // Prepare the `IndexedTxGraph` and `LocalChain` updates based on whether we are scanning or
+    // Prepare the `TxGraph` and `LocalChain` updates based on whether we are scanning or
     // syncing.
     //
     // Scanning: We are iterating through spks of all keychains and scanning for transactions for
@@ -162,7 +162,7 @@ fn main() -> anyhow::Result<()> {
     //
     // Syncing: We only check for specified spks, utxos and txids to update their confirmation
     //   status or fetch missing transactions.
-    let (local_chain_changeset, indexed_tx_graph_changeset) = match &esplora_cmd {
+    let (local_chain_changeset, tx_graph_changeset) = match &esplora_cmd {
         EsploraCommands::Scan {
             stop_gap,
             scan_options,
@@ -170,8 +170,8 @@ fn main() -> anyhow::Result<()> {
         } => {
             let request = {
                 let chain_tip = chain.lock().expect("mutex must not be poisoned").tip();
-                let indexed_graph = &*graph.lock().expect("mutex must not be poisoned");
-                FullScanRequest::from_keychain_txout_index(chain_tip, &indexed_graph.index)
+                let tx_graph = &*graph.lock().expect("mutex must not be poisoned");
+                FullScanRequest::from_keychain_txout_index(chain_tip, &tx_graph.indexer)
                     .inspect_spks_for_all_keychains({
                         let mut once = BTreeSet::<Keychain>::new();
                         move |keychain, spk_i, _| {
@@ -205,11 +205,11 @@ fn main() -> anyhow::Result<()> {
             // before adding the transactions.
             (chain.apply_update(update.chain_update)?, {
                 let index_changeset = graph
-                    .index
+                    .indexer
                     .reveal_to_target_multi(&update.last_active_indices);
-                let mut indexed_tx_graph_changeset = graph.apply_update(update.graph_update);
-                indexed_tx_graph_changeset.merge(index_changeset.into());
-                indexed_tx_graph_changeset
+                let mut tx_graph_changeset = graph.apply_update(update.graph_update);
+                tx_graph_changeset.merge(index_changeset.into());
+                tx_graph_changeset
             })
         }
         EsploraCommands::Sync {
@@ -238,12 +238,12 @@ fn main() -> anyhow::Result<()> {
             // Get a short lock on the structures to get spks, utxos, and txs that we are interested
             // in.
             {
-                let graph = graph.lock().unwrap();
+                let tx_graph = graph.lock().unwrap();
                 let chain = chain.lock().unwrap();
 
                 if *all_spks {
-                    let all_spks = graph
-                        .index
+                    let all_spks = tx_graph
+                        .indexer
                         .revealed_spks(..)
                         .map(|((k, i), spk)| (k, i, spk.to_owned()))
                         .collect::<Vec<_>>();
@@ -255,8 +255,8 @@ fn main() -> anyhow::Result<()> {
                     }));
                 }
                 if unused_spks {
-                    let unused_spks = graph
-                        .index
+                    let unused_spks = tx_graph
+                        .indexer
                         .unused_spks()
                         .map(|(index, spk)| (index, spk.to_owned()))
                         .collect::<Vec<_>>();
@@ -277,9 +277,8 @@ fn main() -> anyhow::Result<()> {
                     // We want to search for whether the UTXO is spent, and spent by which
                     // transaction. We provide the outpoint of the UTXO to
                     // `EsploraExt::update_tx_graph_without_keychain`.
-                    let init_outpoints = graph.index.outpoints();
-                    let utxos = graph
-                        .graph()
+                    let init_outpoints = tx_graph.indexer.outpoints();
+                    let utxos = tx_graph
                         .filter_chain_unspents(
                             &*chain,
                             local_tip.block_id(),
@@ -305,8 +304,7 @@ fn main() -> anyhow::Result<()> {
                     // We want to search for whether the unconfirmed transaction is now confirmed.
                     // We provide the unconfirmed txids to
                     // `EsploraExt::update_tx_graph_without_keychain`.
-                    let unconfirmed_txids = graph
-                        .graph()
+                    let unconfirmed_txids = tx_graph
                         .list_canonical_txs(&*chain, local_tip.block_id())
                         .filter(|canonical_tx| !canonical_tx.chain_position.is_confirmed())
                         .map(|canonical_tx| canonical_tx.tx_node.txid)
@@ -361,6 +359,6 @@ fn main() -> anyhow::Result<()> {
 
     // We persist the changes
     let mut db = db.lock().unwrap();
-    db.append_changeset(&(local_chain_changeset, indexed_tx_graph_changeset))?;
+    db.append_changeset(&(local_chain_changeset, tx_graph_changeset))?;
     Ok(())
 }
