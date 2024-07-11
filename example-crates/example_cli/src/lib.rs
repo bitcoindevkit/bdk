@@ -30,7 +30,7 @@ use clap::{Parser, Subcommand};
 pub type KeychainTxGraph<A> = IndexedTxGraph<A, KeychainTxOutIndex<Keychain>>;
 pub type KeychainChangeSet<A> = (
     local_chain::ChangeSet,
-    indexed_tx_graph::ChangeSet<A, keychain_txout::ChangeSet<Keychain>>,
+    indexed_tx_graph::ChangeSet<A, keychain_txout::ChangeSet>,
 );
 
 #[derive(Parser)]
@@ -191,7 +191,7 @@ impl core::fmt::Display for Keychain {
 }
 
 pub struct CreateTxChange {
-    pub index_changeset: keychain_txout::ChangeSet<Keychain>,
+    pub index_changeset: keychain_txout::ChangeSet,
     pub change_keychain: Keychain,
     pub index: u32,
 }

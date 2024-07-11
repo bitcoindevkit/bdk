@@ -38,7 +38,7 @@ const DB_COMMIT_DELAY: Duration = Duration::from_secs(60);
 
 type ChangeSet = (
     local_chain::ChangeSet,
-    indexed_tx_graph::ChangeSet<ConfirmationBlockTime, keychain_txout::ChangeSet<Keychain>>,
+    indexed_tx_graph::ChangeSet<ConfirmationBlockTime, keychain_txout::ChangeSet>,
 );
 
 #[derive(Debug)]

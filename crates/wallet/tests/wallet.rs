@@ -3,18 +3,17 @@ extern crate alloc;
 use std::path::Path;
 use std::str::FromStr;
 
+use anyhow::Context;
 use assert_matches::assert_matches;
-use bdk_chain::collections::BTreeMap;
-use bdk_chain::COINBASE_MATURITY;
 use bdk_chain::{BlockId, ConfirmationTime};
-use bdk_sqlite::rusqlite::Connection;
+use bdk_chain::{PersistWith, COINBASE_MATURITY};
 use bdk_wallet::descriptor::{calc_checksum, DescriptorError, IntoWalletDescriptor};
 use bdk_wallet::psbt::PsbtUtils;
 use bdk_wallet::signer::{SignOptions, SignerError};
 use bdk_wallet::wallet::coin_selection::{self, LargestFirstCoinSelection};
 use bdk_wallet::wallet::error::CreateTxError;
 use bdk_wallet::wallet::tx_builder::AddForeignUtxoError;
-use bdk_wallet::wallet::{AddressInfo, Balance, ChangeSet, NewError, Wallet};
+use bdk_wallet::wallet::{AddressInfo, Balance, CreateParams, LoadParams, Wallet};
 use bdk_wallet::KeychainKind;
 use bitcoin::hashes::Hash;
 use bitcoin::key::Secp256k1;
@@ -102,46 +101,44 @@ const P2WPKH_FAKE_WITNESS_SIZE: usize = 106;
 const DB_MAGIC: &[u8] = &[0x21, 0x24, 0x48];
 
 #[test]
-fn load_recovers_wallet() -> anyhow::Result<()> {
-    fn run<Db, New, Recover, Read, Write>(
+fn wallet_is_persisted() -> anyhow::Result<()> {
+    fn run<Db, CreateDb, OpenDb>(
         filename: &str,
-        create_new: New,
-        recover: Recover,
-        read: Read,
-        write: Write,
+        create_db: CreateDb,
+        open_db: OpenDb,
     ) -> anyhow::Result<()>
     where
-        New: Fn(&Path) -> anyhow::Result<Db>,
-        Recover: Fn(&Path) -> anyhow::Result<Db>,
-        Read: Fn(&mut Db) -> anyhow::Result<Option<ChangeSet>>,
-        Write: Fn(&mut Db, &ChangeSet) -> anyhow::Result<()>,
+        CreateDb: Fn(&Path) -> anyhow::Result<Db>,
+        OpenDb: Fn(&Path) -> anyhow::Result<Db>,
+        Wallet: PersistWith<Db, CreateParams = CreateParams, LoadParams = LoadParams>,
+        <Wallet as PersistWith<Db>>::CreateError: std::error::Error + Send + Sync + 'static,
+        <Wallet as PersistWith<Db>>::LoadError: std::error::Error + Send + Sync + 'static,
+        <Wallet as PersistWith<Db>>::PersistError: std::error::Error + Send + Sync + 'static,
     {
         let temp_dir = tempfile::tempdir().expect("must create tempdir");
         let file_path = temp_dir.path().join(filename);
-        let (desc, change_desc) = get_test_tr_single_sig_xprv_with_change_desc();
+        let (external_desc, internal_desc) = get_test_tr_single_sig_xprv_with_change_desc();
 
         // create new wallet
         let wallet_spk_index = {
-            let mut wallet =
-                Wallet::new(desc, change_desc, Network::Testnet).expect("must init wallet");
-
+            let mut db = create_db(&file_path)?;
+            let mut wallet = CreateParams::new(external_desc, internal_desc, Network::Testnet)?
+                .create_wallet(&mut db)?;
             wallet.reveal_next_address(KeychainKind::External);
 
             // persist new wallet changes
-            let mut db = create_new(&file_path).expect("must create db");
-            if let Some(changeset) = wallet.take_staged() {
-                write(&mut db, &changeset)?;
-            }
+            assert!(wallet.persist(&mut db)?, "must write");
             wallet.spk_index().clone()
         };
 
         // recover wallet
         {
-            // load persisted wallet changes
-            let db = &mut recover(&file_path).expect("must recover db");
-            let changeset = read(db).expect("must recover wallet").expect("changeset");
+            let mut db = open_db(&file_path).context("failed to recover db")?;
+            let wallet =
+                LoadParams::with_descriptors(external_desc, internal_desc, Network::Testnet)?
+                    .load_wallet(&mut db)?
+                    .expect("wallet must exist");
 
-            let wallet = Wallet::load_from_changeset(changeset).expect("must recover wallet");
             assert_eq!(wallet.network(), Network::Testnet);
             assert_eq!(
                 wallet.spk_index().keychains().collect::<Vec<_>>(),
@@ -154,7 +151,8 @@ fn load_recovers_wallet() -> anyhow::Result<()> {
             let secp = Secp256k1::new();
             assert_eq!(
                 *wallet.public_descriptor(KeychainKind::External),
-                desc.into_wallet_descriptor(&secp, wallet.network())
+                external_desc
+                    .into_wallet_descriptor(&secp, wallet.network())
                     .unwrap()
                     .0
             );
@@ -167,166 +165,11 @@ fn load_recovers_wallet() -> anyhow::Result<()> {
         "store.db",
         |path| Ok(bdk_file_store::Store::create_new(DB_MAGIC, path)?),
         |path| Ok(bdk_file_store::Store::open(DB_MAGIC, path)?),
-        |db| Ok(bdk_file_store::Store::aggregate_changesets(db)?),
-        |db, changeset| Ok(bdk_file_store::Store::append_changeset(db, changeset)?),
     )?;
-    run(
+    run::<bdk_chain::sqlite::Connection, _, _>(
         "store.sqlite",
-        |path| Ok(bdk_sqlite::Store::new(Connection::open(path)?)?),
-        |path| Ok(bdk_sqlite::Store::new(Connection::open(path)?)?),
-        |db| Ok(bdk_sqlite::Store::read(db)?),
-        |db, changeset| Ok(bdk_sqlite::Store::write(db, changeset)?),
-    )?;
-
-    Ok(())
-}
-
-#[test]
-fn new_or_load() -> anyhow::Result<()> {
-    fn run<Db, NewOrRecover, Read, Write>(
-        filename: &str,
-        new_or_load: NewOrRecover,
-        read: Read,
-        write: Write,
-    ) -> anyhow::Result<()>
-    where
-        NewOrRecover: Fn(&Path) -> anyhow::Result<Db>,
-        Read: Fn(&mut Db) -> anyhow::Result<Option<ChangeSet>>,
-        Write: Fn(&mut Db, &ChangeSet) -> anyhow::Result<()>,
-    {
-        let temp_dir = tempfile::tempdir().expect("must create tempdir");
-        let file_path = temp_dir.path().join(filename);
-        let (desc, change_desc) = get_test_wpkh_with_change_desc();
-
-        // init wallet when non-existent
-        let wallet_keychains: BTreeMap<_, _> = {
-            let wallet = &mut Wallet::new_or_load(desc, change_desc, None, Network::Testnet)
-                .expect("must init wallet");
-            let mut db = new_or_load(&file_path).expect("must create db");
-            if let Some(changeset) = wallet.take_staged() {
-                write(&mut db, &changeset)?;
-            }
-            wallet.keychains().map(|(k, v)| (*k, v.clone())).collect()
-        };
-
-        // wrong network
-        {
-            let mut db = new_or_load(&file_path).expect("must create db");
-            let changeset = read(&mut db)?;
-            let err = Wallet::new_or_load(desc, change_desc, changeset, Network::Bitcoin)
-                .expect_err("wrong network");
-            assert!(
-                matches!(
-                    err,
-                    bdk_wallet::wallet::NewOrLoadError::LoadedNetworkDoesNotMatch {
-                        got: Some(Network::Testnet),
-                        expected: Network::Bitcoin
-                    }
-                ),
-                "err: {}",
-                err,
-            );
-        }
-
-        // wrong genesis hash
-        {
-            let exp_blockhash = BlockHash::all_zeros();
-            let got_blockhash = bitcoin::constants::genesis_block(Network::Testnet).block_hash();
-
-            let db = &mut new_or_load(&file_path).expect("must open db");
-            let changeset = read(db)?;
-            let err = Wallet::new_or_load_with_genesis_hash(
-                desc,
-                change_desc,
-                changeset,
-                Network::Testnet,
-                exp_blockhash,
-            )
-            .expect_err("wrong genesis hash");
-            assert!(
-                matches!(
-                    err,
-                    bdk_wallet::wallet::NewOrLoadError::LoadedGenesisDoesNotMatch { got, expected }
-                    if got == Some(got_blockhash) && expected == exp_blockhash
-                ),
-                "err: {}",
-                err,
-            );
-        }
-
-        // wrong external descriptor
-        {
-            let (exp_descriptor, exp_change_desc) = get_test_tr_single_sig_xprv_with_change_desc();
-            let got_descriptor = desc
-                .into_wallet_descriptor(&Secp256k1::new(), Network::Testnet)
-                .unwrap()
-                .0;
-
-            let db = &mut new_or_load(&file_path).expect("must open db");
-            let changeset = read(db)?;
-            let err =
-                Wallet::new_or_load(exp_descriptor, exp_change_desc, changeset, Network::Testnet)
-                    .expect_err("wrong external descriptor");
-            assert!(
-                matches!(
-                    err,
-                    bdk_wallet::wallet::NewOrLoadError::LoadedDescriptorDoesNotMatch { ref got, keychain }
-                    if got == &Some(got_descriptor) && keychain == KeychainKind::External
-                ),
-                "err: {}",
-                err,
-            );
-        }
-
-        // wrong internal descriptor
-        {
-            let exp_descriptor = get_test_tr_single_sig();
-            let got_descriptor = change_desc
-                .into_wallet_descriptor(&Secp256k1::new(), Network::Testnet)
-                .unwrap()
-                .0;
-
-            let db = &mut new_or_load(&file_path).expect("must open db");
-            let changeset = read(db)?;
-            let err = Wallet::new_or_load(desc, exp_descriptor, changeset, Network::Testnet)
-                .expect_err("wrong internal descriptor");
-            assert!(
-                matches!(
-                    err,
-                    bdk_wallet::wallet::NewOrLoadError::LoadedDescriptorDoesNotMatch { ref got, keychain }
-                    if got == &Some(got_descriptor) && keychain == KeychainKind::Internal
-                ),
-                "err: {}",
-                err,
-            );
-        }
-
-        // all parameters match
-        {
-            let db = &mut new_or_load(&file_path).expect("must open db");
-            let changeset = read(db)?;
-            let wallet = Wallet::new_or_load(desc, change_desc, changeset, Network::Testnet)
-                .expect("must recover wallet");
-            assert_eq!(wallet.network(), Network::Testnet);
-            assert!(wallet
-                .keychains()
-                .map(|(k, v)| (*k, v.clone()))
-                .eq(wallet_keychains));
-        }
-        Ok(())
-    }
-
-    run(
-        "store.db",
-        |path| Ok(bdk_file_store::Store::open_or_create_new(DB_MAGIC, path)?),
-        |db| Ok(bdk_file_store::Store::aggregate_changesets(db)?),
-        |db, changeset| Ok(bdk_file_store::Store::append_changeset(db, changeset)?),
-    )?;
-    run(
-        "store.sqlite",
-        |path| Ok(bdk_sqlite::Store::new(Connection::open(path)?)?),
-        |db| Ok(bdk_sqlite::Store::read(db)?),
-        |db, changeset| Ok(bdk_sqlite::Store::write(db, changeset)?),
+        |path| Ok(bdk_chain::sqlite::Connection::open(path)?),
+        |path| Ok(bdk_chain::sqlite::Connection::open(path)?),
     )?;
 
     Ok(())
@@ -336,14 +179,11 @@ fn new_or_load() -> anyhow::Result<()> {
 fn test_error_external_and_internal_are_the_same() {
     // identical descriptors should fail to create wallet
     let desc = get_test_wpkh();
-    let err = Wallet::new(desc, desc, Network::Testnet);
+    let err = CreateParams::new(desc, desc, Network::Testnet)
+        .unwrap()
+        .create_wallet_no_persist();
     assert!(
-        matches!(
-            &err,
-            Err(NewError::Descriptor(
-                DescriptorError::ExternalAndInternalAreTheSame
-            ))
-        ),
+        matches!(&err, Err(DescriptorError::ExternalAndInternalAreTheSame)),
         "expected same descriptors error, got {:?}",
         err,
     );
@@ -351,14 +191,11 @@ fn test_error_external_and_internal_are_the_same() {
     // public + private of same descriptor should fail to create wallet
     let desc = "wpkh(tprv8ZgxMBicQKsPdcAqYBpzAFwU5yxBUo88ggoBqu1qPcHUfSbKK1sKMLmC7EAk438btHQrSdu3jGGQa6PA71nvH5nkDexhLteJqkM4dQmWF9g/84'/1'/0'/0/*)";
     let change_desc = "wpkh([3c31d632/84'/1'/0']tpubDCYwFkks2cg78N7eoYbBatsFEGje8vW8arSKW4rLwD1AU1s9KJMDRHE32JkvYERuiFjArrsH7qpWSpJATed5ShZbG9KsskA5Rmi6NSYgYN2/0/*)";
-    let err = Wallet::new(desc, change_desc, Network::Testnet);
+    let err = CreateParams::new(desc, change_desc, Network::Testnet)
+        .unwrap()
+        .create_wallet_no_persist();
     assert!(
-        matches!(
-            err,
-            Err(NewError::Descriptor(
-                DescriptorError::ExternalAndInternalAreTheSame
-            ))
-        ),
+        matches!(err, Err(DescriptorError::ExternalAndInternalAreTheSame)),
         "expected same descriptors error, got {:?}",
         err,
     );
@@ -1316,8 +1153,11 @@ fn test_create_tx_policy_path_required() {
 
 #[test]
 fn test_create_tx_policy_path_no_csv() {
-    let (desc, change_desc) = get_test_wpkh_with_change_desc();
-    let mut wallet = Wallet::new(desc, change_desc, Network::Regtest).expect("wallet");
+    let (descriptor, change_descriptor) = get_test_wpkh_with_change_desc();
+    let mut wallet = CreateParams::new(descriptor, change_descriptor, Network::Regtest)
+        .expect("must parse")
+        .create_wallet_no_persist()
+        .expect("wallet");
 
     let tx = Transaction {
         version: transaction::Version::non_standard(0),
@@ -2927,9 +2767,12 @@ fn test_sign_nonstandard_sighash() {
 
 #[test]
 fn test_unused_address() {
-    let desc = "wpkh(tpubEBr4i6yk5nf5DAaJpsi9N2pPYBeJ7fZ5Z9rmN4977iYLCGco1VyjB9tvvuvYtfZzjD5A8igzgw3HeWeeKFmanHYqksqZXYXGsw5zjnj7KM9/*)";
-    let change_desc = get_test_wpkh();
-    let mut wallet = Wallet::new(desc, change_desc, Network::Testnet).expect("wallet");
+    let descriptor = "wpkh(tpubEBr4i6yk5nf5DAaJpsi9N2pPYBeJ7fZ5Z9rmN4977iYLCGco1VyjB9tvvuvYtfZzjD5A8igzgw3HeWeeKFmanHYqksqZXYXGsw5zjnj7KM9/*)";
+    let change_descriptor = get_test_wpkh();
+    let mut wallet = CreateParams::new(descriptor, change_descriptor, Network::Testnet)
+        .expect("must parse descriptors")
+        .create_wallet_no_persist()
+        .expect("wallet");
 
     // `list_unused_addresses` should be empty if we haven't revealed any
     assert!(wallet
@@ -2956,8 +2799,11 @@ fn test_unused_address() {
 #[test]
 fn test_next_unused_address() {
     let descriptor = "wpkh(tpubEBr4i6yk5nf5DAaJpsi9N2pPYBeJ7fZ5Z9rmN4977iYLCGco1VyjB9tvvuvYtfZzjD5A8igzgw3HeWeeKFmanHYqksqZXYXGsw5zjnj7KM9/*)";
-    let change = get_test_wpkh();
-    let mut wallet = Wallet::new(descriptor, change, Network::Testnet).expect("wallet");
+    let change_descriptor = get_test_wpkh();
+    let mut wallet = CreateParams::new(descriptor, change_descriptor, Network::Testnet)
+        .expect("must parse descriptors")
+        .create_wallet_no_persist()
+        .expect("wallet");
     assert_eq!(wallet.derivation_index(KeychainKind::External), None);
 
     assert_eq!(
@@ -3002,9 +2848,12 @@ fn test_next_unused_address() {
 
 #[test]
 fn test_peek_address_at_index() {
-    let desc = "wpkh(tpubEBr4i6yk5nf5DAaJpsi9N2pPYBeJ7fZ5Z9rmN4977iYLCGco1VyjB9tvvuvYtfZzjD5A8igzgw3HeWeeKFmanHYqksqZXYXGsw5zjnj7KM9/*)";
-    let change_desc = get_test_wpkh();
-    let mut wallet = Wallet::new(desc, change_desc, Network::Testnet).unwrap();
+    let descriptor = "wpkh(tpubEBr4i6yk5nf5DAaJpsi9N2pPYBeJ7fZ5Z9rmN4977iYLCGco1VyjB9tvvuvYtfZzjD5A8igzgw3HeWeeKFmanHYqksqZXYXGsw5zjnj7KM9/*)";
+    let change_descriptor = get_test_wpkh();
+    let mut wallet = CreateParams::new(descriptor, change_descriptor, Network::Testnet)
+        .expect("must parse descriptors")
+        .create_wallet_no_persist()
+        .expect("wallet");
 
     assert_eq!(
         wallet.peek_address(KeychainKind::External, 1).to_string(),
@@ -3039,8 +2888,11 @@ fn test_peek_address_at_index() {
 
 #[test]
 fn test_peek_address_at_index_not_derivable() {
-    let wallet = Wallet::new("wpkh(tpubEBr4i6yk5nf5DAaJpsi9N2pPYBeJ7fZ5Z9rmN4977iYLCGco1VyjB9tvvuvYtfZzjD5A8igzgw3HeWeeKFmanHYqksqZXYXGsw5zjnj7KM9/1)",
-                                 get_test_wpkh(), Network::Testnet).unwrap();
+    let wallet = CreateParams::new(
+        "wpkh(tpubEBr4i6yk5nf5DAaJpsi9N2pPYBeJ7fZ5Z9rmN4977iYLCGco1VyjB9tvvuvYtfZzjD5A8igzgw3HeWeeKFmanHYqksqZXYXGsw5zjnj7KM9/1)",
+        get_test_wpkh(),
+        Network::Testnet,
+    ).unwrap().create_wallet_no_persist().unwrap();
 
     assert_eq!(
         wallet.peek_address(KeychainKind::External, 1).to_string(),
@@ -3060,8 +2912,11 @@ fn test_peek_address_at_index_not_derivable() {
 
 #[test]
 fn test_returns_index_and_address() {
-    let mut wallet = Wallet::new("wpkh(tpubEBr4i6yk5nf5DAaJpsi9N2pPYBeJ7fZ5Z9rmN4977iYLCGco1VyjB9tvvuvYtfZzjD5A8igzgw3HeWeeKFmanHYqksqZXYXGsw5zjnj7KM9/*)",
-                                 get_test_wpkh(), Network::Testnet).unwrap();
+    let mut wallet = CreateParams::new(
+        "wpkh(tpubEBr4i6yk5nf5DAaJpsi9N2pPYBeJ7fZ5Z9rmN4977iYLCGco1VyjB9tvvuvYtfZzjD5A8igzgw3HeWeeKFmanHYqksqZXYXGsw5zjnj7KM9/*)",
+        get_test_wpkh(),
+        Network::Testnet,
+    ).unwrap().create_wallet_no_persist().unwrap();
 
     // new index 0
     assert_eq!(
@@ -3127,11 +2982,13 @@ fn test_sending_to_bip350_bech32m_address() {
 fn test_get_address() {
     use bdk_wallet::descriptor::template::Bip84;
     let key = bitcoin::bip32::Xpriv::from_str("tprv8ZgxMBicQKsPcx5nBGsR63Pe8KnRUqmbJNENAfGftF3yuXoMMoVJJcYeUw5eVkm9WBPjWYt6HMWYJNesB5HaNVBaFc1M6dRjWSYnmewUMYy").unwrap();
-    let wallet = Wallet::new(
+    let wallet = CreateParams::new(
         Bip84(key, KeychainKind::External),
         Bip84(key, KeychainKind::Internal),
         Network::Regtest,
     )
+    .unwrap()
+    .create_wallet_no_persist()
     .unwrap();
 
     assert_eq!(
@@ -3160,7 +3017,10 @@ fn test_get_address() {
 #[test]
 fn test_reveal_addresses() {
     let (desc, change_desc) = get_test_tr_single_sig_xprv_with_change_desc();
-    let mut wallet = Wallet::new(desc, change_desc, Network::Signet).unwrap();
+    let mut wallet = CreateParams::new(desc, change_desc, Network::Signet)
+        .expect("must parse")
+        .create_wallet_no_persist()
+        .unwrap();
     let keychain = KeychainKind::External;
 
     let last_revealed_addr = wallet.reveal_addresses_to(keychain, 9).last().unwrap();
@@ -3181,11 +3041,13 @@ fn test_get_address_no_reuse() {
     use std::collections::HashSet;
 
     let key = bitcoin::bip32::Xpriv::from_str("tprv8ZgxMBicQKsPcx5nBGsR63Pe8KnRUqmbJNENAfGftF3yuXoMMoVJJcYeUw5eVkm9WBPjWYt6HMWYJNesB5HaNVBaFc1M6dRjWSYnmewUMYy").unwrap();
-    let mut wallet = Wallet::new(
+    let mut wallet = CreateParams::new(
         Bip84(key, KeychainKind::External),
         Bip84(key, KeychainKind::Internal),
         Network::Regtest,
     )
+    .unwrap()
+    .create_wallet_no_persist()
     .unwrap();
 
     let mut used_set = HashSet::new();
@@ -3655,11 +3517,13 @@ fn test_taproot_sign_derive_index_from_psbt() {
     let mut psbt = builder.finish().unwrap();
 
     // re-create the wallet with an empty db
-    let wallet_empty = Wallet::new(
+    let wallet_empty = CreateParams::new(
         get_test_tr_single_sig_xprv(),
         get_test_tr_single_sig(),
         Network::Regtest,
     )
+    .unwrap()
+    .create_wallet_no_persist()
     .unwrap();
 
     // signing with an empty db means that we will only look at the psbt to infer the
@@ -3760,7 +3624,10 @@ fn test_taproot_sign_non_default_sighash() {
 #[test]
 fn test_spend_coinbase() {
     let (desc, change_desc) = get_test_wpkh_with_change_desc();
-    let mut wallet = Wallet::new(desc, change_desc, Network::Regtest).unwrap();
+    let mut wallet = CreateParams::new(desc, change_desc, Network::Regtest)
+        .unwrap()
+        .create_wallet_no_persist()
+        .unwrap();
 
     let confirmation_height = 5;
     wallet
@@ -4014,6 +3881,7 @@ fn test_taproot_load_descriptor_duplicated_keys() {
 /// [#1483]: https://github.com/bitcoindevkit/bdk/issues/1483
 /// [#1486]: https://github.com/bitcoindevkit/bdk/pull/1486
 #[test]
+#[cfg(debug_assertions)]
 #[should_panic(
     expected = "replenish lookahead: must not have existing spk: keychain=Internal, lookahead=25, next_store_index=0, next_reveal_index=0"
 )]

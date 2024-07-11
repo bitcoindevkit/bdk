@@ -22,11 +22,11 @@ use example_cli::{
 };
 
 const DB_MAGIC: &[u8] = b"bdk_example_esplora";
-const DB_PATH: &str = ".bdk_esplora_example.db";
+const DB_PATH: &str = "bdk_example_esplora.db";
 
 type ChangeSet = (
     local_chain::ChangeSet,
-    indexed_tx_graph::ChangeSet<ConfirmationBlockTime, keychain_txout::ChangeSet<Keychain>>,
+    indexed_tx_graph::ChangeSet<ConfirmationBlockTime, keychain_txout::ChangeSet>,
 );
 
 #[derive(Subcommand, Debug, Clone)]
@@ -84,7 +84,7 @@ impl EsploraArgs {
             Network::Bitcoin => "https://blockstream.info/api",
             Network::Testnet => "https://blockstream.info/testnet/api",
             Network::Regtest => "http://localhost:3002",
-            Network::Signet => "https://mempool.space/signet/api",
+            Network::Signet => "http://signet.bitcoindevkit.net",
             _ => panic!("unsupported network"),
         });
 
@@ -96,7 +96,7 @@ impl EsploraArgs {
 #[derive(Parser, Debug, Clone, PartialEq)]
 pub struct ScanOptions {
     /// Max number of concurrent esplora server requests.
-    #[clap(long, default_value = "1")]
+    #[clap(long, default_value = "5")]
     pub parallel_requests: usize,
 }
 

@@ -2,7 +2,8 @@ use bdk_chain::{
     bitcoin::{hashes::Hash, Address, Amount, ScriptBuf, Txid, WScriptHash},
     local_chain::LocalChain,
     spk_client::{FullScanRequest, SyncRequest},
-    Balance, ConfirmationBlockTime, IndexedTxGraph, SpkTxOutIndex,
+    spk_txout::SpkTxOutIndex,
+    Balance, ConfirmationBlockTime, IndexedTxGraph,
 };
 use bdk_electrum::BdkElectrumClient;
 use bdk_testenv::{anyhow, bitcoincore_rpc::RpcApi, TestEnv};

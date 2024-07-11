@@ -4,16 +4,10 @@ use core::convert::Infallible;
 use core::ops::RangeBounds;
 
 use crate::collections::BTreeMap;
-use crate::{BlockId, ChainOracle};
+use crate::{BlockId, ChainOracle, Merge};
 use alloc::sync::Arc;
 use bitcoin::block::Header;
 use bitcoin::BlockHash;
-
-/// The [`ChangeSet`] represents changes to [`LocalChain`].
-///
-/// The key represents the block height, and the value either represents added a new [`CheckPoint`]
-/// (if [`Some`]), or removing a [`CheckPoint`] (if [`None`]).
-pub type ChangeSet = BTreeMap<u32, Option<BlockHash>>;
 
 /// A [`LocalChain`] checkpoint is used to find the agreement point between two chains and as a
 /// transaction anchor.
@@ -216,7 +210,7 @@ impl CheckPoint {
 
     /// Apply `changeset` to the checkpoint.
     fn apply_changeset(mut self, changeset: &ChangeSet) -> Result<CheckPoint, MissingGenesisError> {
-        if let Some(start_height) = changeset.keys().next().cloned() {
+        if let Some(start_height) = changeset.blocks.keys().next().cloned() {
             // changes after point of agreement
             let mut extension = BTreeMap::default();
             // point of agreement
@@ -231,7 +225,7 @@ impl CheckPoint {
                 }
             }
 
-            for (&height, &hash) in changeset {
+            for (&height, &hash) in &changeset.blocks {
                 match hash {
                     Some(hash) => {
                         extension.insert(height, hash);
@@ -331,7 +325,7 @@ impl LocalChain {
 
     /// Construct a [`LocalChain`] from an initial `changeset`.
     pub fn from_changeset(changeset: ChangeSet) -> Result<Self, MissingGenesisError> {
-        let genesis_entry = changeset.get(&0).copied().flatten();
+        let genesis_entry = changeset.blocks.get(&0).copied().flatten();
         let genesis_hash = match genesis_entry {
             Some(hash) => hash,
             None => return Err(MissingGenesisError),
@@ -521,12 +515,14 @@ impl LocalChain {
         }
 
         let mut changeset = ChangeSet::default();
-        changeset.insert(block_id.height, Some(block_id.hash));
+        changeset
+            .blocks
+            .insert(block_id.height, Some(block_id.hash));
         self.apply_changeset(&changeset)
             .map_err(|_| AlterCheckPointError {
                 height: 0,
                 original_hash: self.genesis_hash(),
-                update_hash: changeset.get(&0).cloned().flatten(),
+                update_hash: changeset.blocks.get(&0).cloned().flatten(),
             })?;
         Ok(changeset)
     }
@@ -548,7 +544,7 @@ impl LocalChain {
             if cp_id.height < block_id.height {
                 break;
             }
-            changeset.insert(cp_id.height, None);
+            changeset.blocks.insert(cp_id.height, None);
             if cp_id == block_id {
                 remove_from = Some(cp);
             }
@@ -569,13 +565,16 @@ impl LocalChain {
     /// Derives an initial [`ChangeSet`], meaning that it can be applied to an empty chain to
     /// recover the current chain.
     pub fn initial_changeset(&self) -> ChangeSet {
-        self.tip
-            .iter()
-            .map(|cp| {
-                let block_id = cp.block_id();
-                (block_id.height, Some(block_id.hash))
-            })
-            .collect()
+        ChangeSet {
+            blocks: self
+                .tip
+                .iter()
+                .map(|cp| {
+                    let block_id = cp.block_id();
+                    (block_id.height, Some(block_id.hash))
+                })
+                .collect(),
+        }
     }
 
     /// Iterate over checkpoints in descending height order.
@@ -587,7 +586,7 @@ impl LocalChain {
 
     fn _check_changeset_is_applied(&self, changeset: &ChangeSet) -> bool {
         let mut curr_cp = self.tip.clone();
-        for (height, exp_hash) in changeset.iter().rev() {
+        for (height, exp_hash) in changeset.blocks.iter().rev() {
             match curr_cp.get(*height) {
                 Some(query_cp) => {
                     if query_cp.height() != *height || Some(query_cp.hash()) != *exp_hash {
@@ -627,6 +626,135 @@ impl LocalChain {
         R: RangeBounds<u32>,
     {
         self.tip.range(range)
+    }
+}
+
+/// The [`ChangeSet`] represents changes to [`LocalChain`].
+#[derive(Debug, Default, Clone, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Deserialize, serde::Serialize),
+    serde(crate = "serde_crate")
+)]
+pub struct ChangeSet {
+    /// Changes to the [`LocalChain`] blocks.
+    ///
+    /// The key represents the block height, and the value either represents added a new [`CheckPoint`]
+    /// (if [`Some`]), or removing a [`CheckPoint`] (if [`None`]).
+    pub blocks: BTreeMap<u32, Option<BlockHash>>,
+}
+
+impl Merge for ChangeSet {
+    fn merge(&mut self, other: Self) {
+        Merge::merge(&mut self.blocks, other.blocks)
+    }
+
+    fn is_empty(&self) -> bool {
+        self.blocks.is_empty()
+    }
+}
+
+impl<B: IntoIterator<Item = (u32, Option<BlockHash>)>> From<B> for ChangeSet {
+    fn from(blocks: B) -> Self {
+        Self {
+            blocks: blocks.into_iter().collect(),
+        }
+    }
+}
+
+impl FromIterator<(u32, Option<BlockHash>)> for ChangeSet {
+    fn from_iter<T: IntoIterator<Item = (u32, Option<BlockHash>)>>(iter: T) -> Self {
+        Self {
+            blocks: iter.into_iter().collect(),
+        }
+    }
+}
+
+impl FromIterator<(u32, BlockHash)> for ChangeSet {
+    fn from_iter<T: IntoIterator<Item = (u32, BlockHash)>>(iter: T) -> Self {
+        Self {
+            blocks: iter
+                .into_iter()
+                .map(|(height, hash)| (height, Some(hash)))
+                .collect(),
+        }
+    }
+}
+
+#[cfg(feature = "sqlite")]
+impl ChangeSet {
+    /// Schema name for the changeset.
+    pub const SCHEMA_NAME: &'static str = "bdk_localchain";
+    /// Name of sqlite table that stores blocks of [`LocalChain`].
+    pub const BLOCKS_TABLE_NAME: &'static str = "bdk_blocks";
+
+    /// Initialize sqlite tables for persisting [`LocalChain`].
+    fn init_sqlite_tables(db_tx: &rusqlite::Transaction) -> rusqlite::Result<()> {
+        let schema_v0: &[&str] = &[
+            // blocks
+            &format!(
+                "CREATE TABLE {} ( \
+                block_height INTEGER PRIMARY KEY NOT NULL, \
+                block_hash TEXT NOT NULL \
+                ) STRICT",
+                Self::BLOCKS_TABLE_NAME,
+            ),
+        ];
+        crate::sqlite::migrate_schema(db_tx, Self::SCHEMA_NAME, &[schema_v0])
+    }
+
+    /// Construct a [`LocalChain`] from sqlite database.
+    pub fn from_sqlite(db_tx: &rusqlite::Transaction) -> rusqlite::Result<Self> {
+        Self::init_sqlite_tables(db_tx)?;
+        use crate::sqlite::Sql;
+
+        let mut changeset = Self::default();
+
+        let mut statement = db_tx.prepare(&format!(
+            "SELECT block_height, block_hash FROM {}",
+            Self::BLOCKS_TABLE_NAME,
+        ))?;
+        let row_iter = statement.query_map([], |row| {
+            Ok((
+                row.get::<_, u32>("block_height")?,
+                row.get::<_, Sql<BlockHash>>("block_hash")?,
+            ))
+        })?;
+        for row in row_iter {
+            let (height, Sql(hash)) = row?;
+            changeset.blocks.insert(height, Some(hash));
+        }
+
+        Ok(changeset)
+    }
+
+    /// Persist `changeset` to the sqlite database.
+    pub fn persist_to_sqlite(&self, db_tx: &rusqlite::Transaction) -> rusqlite::Result<()> {
+        Self::init_sqlite_tables(db_tx)?;
+        use crate::sqlite::Sql;
+        use rusqlite::named_params;
+
+        let mut replace_statement = db_tx.prepare_cached(&format!(
+            "REPLACE INTO {}(block_height, block_hash) VALUES(:block_height, :block_hash)",
+            Self::BLOCKS_TABLE_NAME,
+        ))?;
+        let mut delete_statement = db_tx.prepare_cached(&format!(
+            "DELETE FROM {} WHERE block_height=:block_height",
+            Self::BLOCKS_TABLE_NAME,
+        ))?;
+        for (&height, &hash) in &self.blocks {
+            match hash {
+                Some(hash) => replace_statement.execute(named_params! {
+                    ":block_height": height,
+                    ":block_hash": Sql(hash),
+                })?,
+                None => delete_statement.execute(named_params! {
+                    ":block_height": height,
+                })?,
+            };
+        }
+
+        Ok(())
     }
 }
 
@@ -761,7 +889,7 @@ fn merge_chains(
         match (curr_orig.as_ref(), curr_update.as_ref()) {
             // Update block that doesn't exist in the original chain
             (o, Some(u)) if Some(u.height()) > o.map(|o| o.height()) => {
-                changeset.insert(u.height(), Some(u.hash()));
+                changeset.blocks.insert(u.height(), Some(u.hash()));
                 prev_update = curr_update.take();
             }
             // Original block that isn't in the update
@@ -813,9 +941,9 @@ fn merge_chains(
                 } else {
                     // We have an invalidation height so we set the height to the updated hash and
                     // also purge all the original chain block hashes above this block.
-                    changeset.insert(u.height(), Some(u.hash()));
+                    changeset.blocks.insert(u.height(), Some(u.hash()));
                     for invalidated_height in potentially_invalidated_heights.drain(..) {
-                        changeset.insert(invalidated_height, None);
+                        changeset.blocks.insert(invalidated_height, None);
                     }
                     prev_orig_was_invalidated = true;
                 }

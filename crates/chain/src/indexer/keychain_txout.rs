@@ -5,7 +5,8 @@ use crate::{
     collections::*,
     miniscript::{Descriptor, DescriptorPublicKey},
     spk_iter::BIP32_MAX_INDEX,
-    DescriptorExt, DescriptorId, Indexed, Indexer, KeychainIndexed, SpkIterator, SpkTxOutIndex,
+    spk_txout::SpkTxOutIndex,
+    DescriptorExt, DescriptorId, Indexed, Indexer, KeychainIndexed, SpkIterator,
 };
 use alloc::{borrow::ToOwned, vec::Vec};
 use bitcoin::{Amount, OutPoint, Script, ScriptBuf, SignedAmount, Transaction, TxOut, Txid};
@@ -135,7 +136,7 @@ impl<K> Default for KeychainTxOutIndex<K> {
 }
 
 impl<K: Clone + Ord + Debug> Indexer for KeychainTxOutIndex<K> {
-    type ChangeSet = ChangeSet<K>;
+    type ChangeSet = ChangeSet;
 
     fn index_txout(&mut self, outpoint: OutPoint, txout: &TxOut) -> Self::ChangeSet {
         let mut changeset = ChangeSet::default();
@@ -154,7 +155,7 @@ impl<K: Clone + Ord + Debug> Indexer for KeychainTxOutIndex<K> {
     }
 
     fn index_tx(&mut self, tx: &bitcoin::Transaction) -> Self::ChangeSet {
-        let mut changeset = ChangeSet::<K>::default();
+        let mut changeset = ChangeSet::default();
         let txid = tx.compute_txid();
         for (op, txout) in tx.output.iter().enumerate() {
             changeset.merge(self.index_txout(OutPoint::new(txid, op as u32), txout));
@@ -164,10 +165,6 @@ impl<K: Clone + Ord + Debug> Indexer for KeychainTxOutIndex<K> {
 
     fn initial_changeset(&self) -> Self::ChangeSet {
         ChangeSet {
-            keychains_added: self
-                .keychains()
-                .map(|(k, v)| (k.clone(), v.clone()))
-                .collect(),
             last_revealed: self.last_revealed.clone().into_iter().collect(),
         }
     }
@@ -354,7 +351,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     /// keychain <-> descriptor is a one-to-one mapping that cannot be changed. Attempting to do so
     /// will return a [`InsertDescriptorError<K>`].
     ///
-    /// `[KeychainTxOutIndex]` will prevent you from inserting two descriptors which derive the same
+    /// [`KeychainTxOutIndex`] will prevent you from inserting two descriptors which derive the same
     /// script pubkey at index 0, but it's up to you to ensure that descriptors don't collide at
     /// other indices. If they do nothing catastrophic happens at the `KeychainTxOutIndex` level
     /// (one keychain just becomes the defacto owner of that spk arbitrarily) but this may have
@@ -364,8 +361,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
         &mut self,
         keychain: K,
         descriptor: Descriptor<DescriptorPublicKey>,
-    ) -> Result<ChangeSet<K>, InsertDescriptorError<K>> {
-        let mut changeset = ChangeSet::<K>::default();
+    ) -> Result<bool, InsertDescriptorError<K>> {
         let did = descriptor.descriptor_id();
         if !self.keychain_to_descriptor_id.contains_key(&keychain)
             && !self.descriptor_id_to_keychain.contains_key(&did)
@@ -374,33 +370,31 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
             self.keychain_to_descriptor_id.insert(keychain.clone(), did);
             self.descriptor_id_to_keychain.insert(did, keychain.clone());
             self.replenish_inner_index(did, &keychain, self.lookahead);
-            changeset
-                .keychains_added
-                .insert(keychain.clone(), descriptor);
-        } else {
-            if let Some(existing_desc_id) = self.keychain_to_descriptor_id.get(&keychain) {
-                let descriptor = self.descriptors.get(existing_desc_id).expect("invariant");
-                if *existing_desc_id != did {
-                    return Err(InsertDescriptorError::KeychainAlreadyAssigned {
-                        existing_assignment: descriptor.clone(),
-                        keychain,
-                    });
-                }
-            }
+            return Ok(true);
+        }
 
-            if let Some(existing_keychain) = self.descriptor_id_to_keychain.get(&did) {
-                let descriptor = self.descriptors.get(&did).expect("invariant").clone();
-
-                if *existing_keychain != keychain {
-                    return Err(InsertDescriptorError::DescriptorAlreadyAssigned {
-                        existing_assignment: existing_keychain.clone(),
-                        descriptor,
-                    });
-                }
+        if let Some(existing_desc_id) = self.keychain_to_descriptor_id.get(&keychain) {
+            let descriptor = self.descriptors.get(existing_desc_id).expect("invariant");
+            if *existing_desc_id != did {
+                return Err(InsertDescriptorError::KeychainAlreadyAssigned {
+                    existing_assignment: descriptor.clone(),
+                    keychain,
+                });
             }
         }
 
-        Ok(changeset)
+        if let Some(existing_keychain) = self.descriptor_id_to_keychain.get(&did) {
+            let descriptor = self.descriptors.get(&did).expect("invariant").clone();
+
+            if *existing_keychain != keychain {
+                return Err(InsertDescriptorError::DescriptorAlreadyAssigned {
+                    existing_assignment: existing_keychain.clone(),
+                    descriptor,
+                });
+            }
+        }
+
+        Ok(false)
     }
 
     /// Gets the descriptor associated with the keychain. Returns `None` if the keychain doesn't
@@ -627,7 +621,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     }
 
     /// Convenience method to call [`Self::reveal_to_target`] on multiple keychains.
-    pub fn reveal_to_target_multi(&mut self, keychains: &BTreeMap<K, u32>) -> ChangeSet<K> {
+    pub fn reveal_to_target_multi(&mut self, keychains: &BTreeMap<K, u32>) -> ChangeSet {
         let mut changeset = ChangeSet::default();
 
         for (keychain, &index) in keychains {
@@ -656,7 +650,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
         &mut self,
         keychain: &K,
         target_index: u32,
-    ) -> Option<(Vec<Indexed<ScriptBuf>>, ChangeSet<K>)> {
+    ) -> Option<(Vec<Indexed<ScriptBuf>>, ChangeSet)> {
         let mut changeset = ChangeSet::default();
         let mut spks: Vec<Indexed<ScriptBuf>> = vec![];
         while let Some((i, new)) = self.next_index(keychain) {
@@ -687,7 +681,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     ///  1. The descriptor has no wildcard and already has one script revealed.
     ///  2. The descriptor has already revealed scripts up to the numeric bound.
     ///  3. There is no descriptor associated with the given keychain.
-    pub fn reveal_next_spk(&mut self, keychain: &K) -> Option<(Indexed<ScriptBuf>, ChangeSet<K>)> {
+    pub fn reveal_next_spk(&mut self, keychain: &K) -> Option<(Indexed<ScriptBuf>, ChangeSet)> {
         let (next_index, new) = self.next_index(keychain)?;
         let mut changeset = ChangeSet::default();
 
@@ -717,7 +711,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     /// could be revealed (see [`reveal_next_spk`] for when this happens).
     ///
     /// [`reveal_next_spk`]: Self::reveal_next_spk
-    pub fn next_unused_spk(&mut self, keychain: &K) -> Option<(Indexed<ScriptBuf>, ChangeSet<K>)> {
+    pub fn next_unused_spk(&mut self, keychain: &K) -> Option<(Indexed<ScriptBuf>, ChangeSet)> {
         let next_unused = self
             .unused_keychain_spks(keychain)
             .next()
@@ -780,27 +774,80 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     }
 
     /// Applies the `ChangeSet<K>` to the [`KeychainTxOutIndex<K>`]
-    ///
-    /// Keychains added by the `keychains_added` field of `ChangeSet<K>` respect the one-to-one
-    /// keychain <-> descriptor invariant by silently ignoring attempts to violate it (but will
-    /// panic if `debug_assertions` are enabled).
-    pub fn apply_changeset(&mut self, changeset: ChangeSet<K>) {
-        let ChangeSet {
-            keychains_added,
-            last_revealed,
-        } = changeset;
-        for (keychain, descriptor) in keychains_added {
-            let _ignore_invariant_violation = self.insert_descriptor(keychain, descriptor);
-        }
-
-        for (&desc_id, &index) in &last_revealed {
+    pub fn apply_changeset(&mut self, changeset: ChangeSet) {
+        for (&desc_id, &index) in &changeset.last_revealed {
             let v = self.last_revealed.entry(desc_id).or_default();
             *v = index.max(*v);
+            self.replenish_inner_index_did(desc_id, self.lookahead);
+        }
+    }
+}
+
+#[cfg(feature = "sqlite")]
+impl ChangeSet {
+    /// Schema name for the changeset.
+    pub const SCHEMA_NAME: &'static str = "bdk_keychaintxout";
+    /// Name for table that stores last revealed indices per descriptor id.
+    pub const LAST_REVEALED_TABLE_NAME: &'static str = "bdk_descriptor_last_revealed";
+
+    /// Initialize sqlite tables for persisting [`KeychainTxOutIndex`].
+    fn init_sqlite_tables(db_tx: &rusqlite::Transaction) -> rusqlite::Result<()> {
+        let schema_v0: &[&str] = &[
+            // last revealed
+            &format!(
+                "CREATE TABLE {} ( \
+                descriptor_id TEXT PRIMARY KEY NOT NULL, \
+                last_revealed INTEGER NOT NULL \
+                ) STRICT",
+                Self::LAST_REVEALED_TABLE_NAME,
+            ),
+        ];
+        crate::sqlite::migrate_schema(db_tx, Self::SCHEMA_NAME, &[schema_v0])
+    }
+
+    /// Construct [`KeychainTxOutIndex`] from sqlite database and given parameters.
+    pub fn from_sqlite(db_tx: &rusqlite::Transaction) -> rusqlite::Result<Self> {
+        Self::init_sqlite_tables(db_tx)?;
+        use crate::sqlite::Sql;
+
+        let mut changeset = Self::default();
+
+        let mut statement = db_tx.prepare(&format!(
+            "SELECT descriptor_id, last_revealed FROM {}",
+            Self::LAST_REVEALED_TABLE_NAME,
+        ))?;
+        let row_iter = statement.query_map([], |row| {
+            Ok((
+                row.get::<_, Sql<DescriptorId>>("descriptor_id")?,
+                row.get::<_, u32>("last_revealed")?,
+            ))
+        })?;
+        for row in row_iter {
+            let (Sql(descriptor_id), last_revealed) = row?;
+            changeset.last_revealed.insert(descriptor_id, last_revealed);
         }
 
-        for did in last_revealed.keys() {
-            self.replenish_inner_index_did(*did, self.lookahead);
+        Ok(changeset)
+    }
+
+    /// Persist `changeset` to the sqlite database.
+    pub fn persist_to_sqlite(&self, db_tx: &rusqlite::Transaction) -> rusqlite::Result<()> {
+        Self::init_sqlite_tables(db_tx)?;
+        use crate::rusqlite::named_params;
+        use crate::sqlite::Sql;
+
+        let mut statement = db_tx.prepare_cached(&format!(
+            "REPLACE INTO {}(descriptor_id, last_revealed) VALUES(:descriptor_id, :last_revealed)",
+            Self::LAST_REVEALED_TABLE_NAME,
+        ))?;
+        for (&descriptor_id, &last_revealed) in &self.last_revealed {
+            statement.execute(named_params! {
+                ":descriptor_id": Sql(descriptor_id),
+                ":last_revealed": last_revealed,
+            })?;
         }
+
+        Ok(())
     }
 }
 
@@ -860,49 +907,24 @@ impl<K: core::fmt::Debug> std::error::Error for InsertDescriptorError<K> {}
 /// `keychains_added` is *not* monotone, once it is set any attempt to change it is subject to the
 /// same *one-to-one* keychain <-> descriptor mapping invariant as [`KeychainTxOutIndex`] itself.
 ///
-/// [`apply_changeset`]: KeychainTxOutIndex::apply_changeset
-/// [`Merge`]: Self::merge
-#[derive(Clone, Debug, PartialEq)]
+/// [`KeychainTxOutIndex`]: crate::keychain_txout::KeychainTxOutIndex
+/// [`apply_changeset`]: crate::keychain_txout::KeychainTxOutIndex::apply_changeset
+/// [`merge`]: Self::merge
+#[derive(Clone, Debug, Default, PartialEq)]
 #[cfg_attr(
     feature = "serde",
     derive(serde::Deserialize, serde::Serialize),
-    serde(
-        crate = "serde_crate",
-        bound(
-            deserialize = "K: Ord + serde::Deserialize<'de>",
-            serialize = "K: Ord + serde::Serialize"
-        )
-    )
+    serde(crate = "serde_crate")
 )]
 #[must_use]
-pub struct ChangeSet<K> {
-    /// Contains the keychains that have been added and their respective descriptor
-    pub keychains_added: BTreeMap<K, Descriptor<DescriptorPublicKey>>,
+pub struct ChangeSet {
     /// Contains for each descriptor_id the last revealed index of derivation
     pub last_revealed: BTreeMap<DescriptorId, u32>,
 }
 
-impl<K: Ord> Merge for ChangeSet<K> {
-    /// Merge another [`ChangeSet<K>`] into self.
-    ///
-    /// For the `keychains_added` field this method respects the invariants of
-    /// [`insert_descriptor`]. `last_revealed` always becomes the larger of the two.
-    ///
-    /// [`insert_descriptor`]: KeychainTxOutIndex::insert_descriptor
+impl Merge for ChangeSet {
+    /// Merge another [`ChangeSet`] into self.
     fn merge(&mut self, other: Self) {
-        for (new_keychain, new_descriptor) in other.keychains_added {
-            // enforce 1-to-1 invariance
-            if !self.keychains_added.contains_key(&new_keychain)
-                // FIXME: very inefficient
-                && self
-                    .keychains_added
-                    .values()
-                    .all(|descriptor| descriptor != &new_descriptor)
-            {
-                self.keychains_added.insert(new_keychain, new_descriptor);
-            }
-        }
-
         // for `last_revealed`, entries of `other` will take precedence ONLY if it is greater than
         // what was originally in `self`.
         for (desc_id, index) in other.last_revealed {
@@ -922,25 +944,6 @@ impl<K: Ord> Merge for ChangeSet<K> {
 
     /// Returns whether the changeset are empty.
     fn is_empty(&self) -> bool {
-        self.last_revealed.is_empty() && self.keychains_added.is_empty()
-    }
-}
-
-impl<K> Default for ChangeSet<K> {
-    fn default() -> Self {
-        Self {
-            last_revealed: BTreeMap::default(),
-            keychains_added: BTreeMap::default(),
-        }
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-/// The keychain doesn't exist. Most likley hasn't been inserted with [`KeychainTxOutIndex::insert_descriptor`].
-pub struct NoSuchKeychain<K>(K);
-
-impl<K: Debug> core::fmt::Display for NoSuchKeychain<K> {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "no such keychain {:?} exists", &self.0)
+        self.last_revealed.is_empty()
     }
 }

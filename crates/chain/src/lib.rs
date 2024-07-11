@@ -28,7 +28,7 @@ pub use chain_data::*;
 pub mod indexed_tx_graph;
 pub use indexed_tx_graph::IndexedTxGraph;
 pub mod indexer;
-pub use indexer::spk_txout::*;
+pub use indexer::spk_txout;
 pub use indexer::Indexer;
 pub mod local_chain;
 mod tx_data_traits;
@@ -37,6 +37,8 @@ pub use tx_data_traits::*;
 pub use tx_graph::TxGraph;
 mod chain_oracle;
 pub use chain_oracle::*;
+mod persist;
+pub use persist::*;
 
 #[doc(hidden)]
 pub mod example_utils;
@@ -51,8 +53,16 @@ pub use descriptor_ext::{DescriptorExt, DescriptorId};
 mod spk_iter;
 #[cfg(feature = "miniscript")]
 pub use spk_iter::*;
+#[cfg(feature = "miniscript")]
 mod changeset;
+#[cfg(feature = "miniscript")]
 pub use changeset::*;
+#[cfg(feature = "miniscript")]
+pub use indexer::keychain_txout;
+#[cfg(feature = "sqlite")]
+pub mod sqlite;
+#[cfg(feature = "sqlite")]
+pub use rusqlite;
 pub mod spk_client;
 
 #[allow(unused_imports)]

@@ -1,76 +1,55 @@
-use std::{collections::BTreeSet, io::Write, str::FromStr};
+use std::{collections::BTreeSet, io::Write};
 
+use anyhow::Ok;
 use bdk_esplora::{esplora_client, EsploraAsyncExt};
 use bdk_wallet::{
-    bitcoin::{Address, Amount, Network, Script},
-    KeychainKind, SignOptions, Wallet,
+    bitcoin::{Amount, Network},
+    rusqlite::Connection,
+    wallet::{CreateParams, LoadParams},
+    KeychainKind, SignOptions,
 };
 
-use bdk_sqlite::{rusqlite::Connection, Store};
-
 const SEND_AMOUNT: Amount = Amount::from_sat(5000);
-const STOP_GAP: usize = 50;
+const STOP_GAP: usize = 5;
 const PARALLEL_REQUESTS: usize = 5;
+
+const DB_PATH: &str = "bdk-example-esplora-async.sqlite";
+const NETWORK: Network = Network::Signet;
+const EXTERNAL_DESC: &str = "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/84'/1'/0'/0/*)";
+const INTERNAL_DESC: &str = "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/84'/1'/0'/1/*)";
+const ESPLORA_URL: &str = "http://signet.bitcoindevkit.net";
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
-    let db_path = "bdk-esplora-async-example.sqlite";
-    let conn = Connection::open(db_path)?;
-    let mut db = Store::new(conn)?;
-    let external_descriptor = "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/84'/1'/0'/0/*)";
-    let internal_descriptor = "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/84'/1'/0'/1/*)";
-    let changeset = db.read()?;
+    let mut conn = Connection::open(DB_PATH)?;
 
-    let mut wallet = Wallet::new_or_load(
-        external_descriptor,
-        internal_descriptor,
-        changeset,
-        Network::Signet,
-    )?;
+    let load_params = LoadParams::with_descriptors(EXTERNAL_DESC, INTERNAL_DESC, NETWORK)?;
+    let create_params = CreateParams::new(EXTERNAL_DESC, INTERNAL_DESC, NETWORK)?;
+    let mut wallet = match load_params.load_wallet(&mut conn)? {
+        Some(wallet) => wallet,
+        None => create_params.create_wallet(&mut conn)?,
+    };
 
     let address = wallet.next_unused_address(KeychainKind::External);
-    if let Some(changeset) = wallet.take_staged() {
-        db.write(&changeset)?;
-    }
-    println!("Generated Address: {}", address);
+    wallet.persist(&mut conn)?;
+    println!("Next unused address: ({}) {}", address.index, address);
 
     let balance = wallet.balance();
     println!("Wallet balance before syncing: {} sats", balance.total());
 
     print!("Syncing...");
-    let client = esplora_client::Builder::new("http://signet.bitcoindevkit.net").build_async()?;
+    let client = esplora_client::Builder::new(ESPLORA_URL).build_async()?;
 
-    fn generate_inspect(kind: KeychainKind) -> impl FnMut(u32, &Script) + Send + Sync + 'static {
-        let mut once = Some(());
-        let mut stdout = std::io::stdout();
-        move |spk_i, _| {
-            match once.take() {
-                Some(_) => print!("\nScanning keychain [{:?}]", kind),
-                None => print!(" {:<3}", spk_i),
-            };
-            stdout.flush().expect("must flush");
-        }
-    }
-    let request = wallet
-        .start_full_scan()
-        .inspect_spks_for_all_keychains({
-            let mut once = BTreeSet::<KeychainKind>::new();
-            move |keychain, spk_i, _| {
-                match once.insert(keychain) {
-                    true => print!("\nScanning keychain [{:?}]", keychain),
-                    false => print!(" {:<3}", spk_i),
-                }
-                std::io::stdout().flush().expect("must flush")
+    let request = wallet.start_full_scan().inspect_spks_for_all_keychains({
+        let mut once = BTreeSet::<KeychainKind>::new();
+        move |keychain, spk_i, _| {
+            if once.insert(keychain) {
+                print!("\nScanning keychain [{:?}] ", keychain);
             }
-        })
-        .inspect_spks_for_keychain(
-            KeychainKind::External,
-            generate_inspect(KeychainKind::External),
-        )
-        .inspect_spks_for_keychain(
-            KeychainKind::Internal,
-            generate_inspect(KeychainKind::Internal),
-        );
+            print!(" {:<3}", spk_i);
+            std::io::stdout().flush().expect("must flush")
+        }
+    });
 
     let mut update = client
         .full_scan(request, STOP_GAP, PARALLEL_REQUESTS)
@@ -79,9 +58,7 @@ async fn main() -> Result<(), anyhow::Error> {
     let _ = update.graph_update.update_last_seen_unconfirmed(now);
 
     wallet.apply_update(update)?;
-    if let Some(changeset) = wallet.take_staged() {
-        db.write(&changeset)?;
-    }
+    wallet.persist(&mut conn)?;
     println!();
 
     let balance = wallet.balance();
@@ -95,12 +72,9 @@ async fn main() -> Result<(), anyhow::Error> {
         std::process::exit(0);
     }
 
-    let faucet_address = Address::from_str("mkHS9ne12qx9pS9VojpwU5xtRd4T7X7ZUt")?
-        .require_network(Network::Signet)?;
-
     let mut tx_builder = wallet.build_tx();
     tx_builder
-        .add_recipient(faucet_address.script_pubkey(), SEND_AMOUNT)
+        .add_recipient(address.script_pubkey(), SEND_AMOUNT)
         .enable_rbf();
 
     let mut psbt = tx_builder.finish()?;

@@ -100,7 +100,7 @@ pub struct ScanOptions {
 
 type ChangeSet = (
     local_chain::ChangeSet,
-    indexed_tx_graph::ChangeSet<ConfirmationBlockTime, keychain_txout::ChangeSet<Keychain>>,
+    indexed_tx_graph::ChangeSet<ConfirmationBlockTime, keychain_txout::ChangeSet>,
 );
 
 fn main() -> anyhow::Result<()> {

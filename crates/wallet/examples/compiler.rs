@@ -21,7 +21,7 @@ use bitcoin::Network;
 use miniscript::policy::Concrete;
 use miniscript::Descriptor;
 
-use bdk_wallet::{KeychainKind, Wallet};
+use bdk_wallet::{CreateParams, KeychainKind};
 
 /// Miniscript policy is a high level abstraction of spending conditions. Defined in the
 /// rust-miniscript library here  https://docs.rs/miniscript/7.0.0/miniscript/policy/index.html
@@ -77,7 +77,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     );
 
     // Create a new wallet from descriptors
-    let mut wallet = Wallet::new(&descriptor, &internal_descriptor, Network::Regtest)?;
+    let mut wallet = CreateParams::new(&descriptor, &internal_descriptor, Network::Regtest)?
+        .create_wallet_no_persist()?;
 
     println!(
         "First derived address from the descriptor: \n{}",

@@ -36,12 +36,22 @@ pub use types::*;
 pub use wallet::signer;
 pub use wallet::signer::SignOptions;
 pub use wallet::tx_builder::TxBuilder;
+pub use wallet::ChangeSet;
+pub use wallet::CreateParams;
+pub use wallet::LoadParams;
+pub use wallet::PersistedWallet;
 pub use wallet::Wallet;
 
-/// Get the version of BDK at runtime
+/// Get the version of [`bdk_wallet`](crate) at runtime.
 pub fn version() -> &'static str {
     env!("CARGO_PKG_VERSION", "unknown")
 }
 
 pub use bdk_chain as chain;
 pub(crate) use bdk_chain::collections;
+#[cfg(feature = "sqlite")]
+pub use bdk_chain::rusqlite;
+#[cfg(feature = "sqlite")]
+pub use bdk_chain::sqlite;
+
+pub use chain::WalletChangeSet;
