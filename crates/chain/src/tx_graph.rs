@@ -184,6 +184,17 @@ enum TxNodeInternal {
     Partial(BTreeMap<u32, TxOut>),
 }
 
+impl TxNodeInternal {
+    fn iter_txouts(
+        txid: Txid,
+        partial: &BTreeMap<u32, TxOut>,
+    ) -> impl Iterator<Item = (OutPoint, &TxOut)> {
+        partial
+            .iter()
+            .map(move |(&vout, txout)| (OutPoint { txid, vout }, txout))
+    }
+}
+
 impl Default for TxNodeInternal {
     fn default() -> Self {
         Self::Partial(BTreeMap::new())
@@ -233,18 +244,17 @@ impl<A, X> TxGraph<A, X> {
     ///
     /// This includes txouts of both full transactions as well as floating transactions.
     pub fn all_txouts(&self) -> impl Iterator<Item = (OutPoint, &TxOut)> {
-        self.txs.iter().flat_map(|(txid, tx)| match tx {
+        self.txs.iter().flat_map(|(&txid, tx)| match tx {
             TxNodeInternal::Whole(tx) => tx
                 .as_ref()
                 .output
                 .iter()
                 .enumerate()
-                .map(|(vout, txout)| (OutPoint::new(*txid, vout as _), txout))
+                .map(|(vout, txout)| (OutPoint::new(txid, vout as _), txout))
                 .collect::<Vec<_>>(),
-            TxNodeInternal::Partial(txouts) => txouts
-                .iter()
-                .map(|(vout, txout)| (OutPoint::new(*txid, *vout as _), txout))
-                .collect::<Vec<_>>(),
+            TxNodeInternal::Partial(partial) => {
+                TxNodeInternal::iter_txouts(txid, partial).collect::<Vec<_>>()
+            }
         })
     }
 
@@ -255,13 +265,11 @@ impl<A, X> TxGraph<A, X> {
     pub fn floating_txouts(&self) -> impl Iterator<Item = (OutPoint, &TxOut)> {
         self.txs
             .iter()
-            .filter_map(|(txid, tx_node)| match tx_node {
+            .filter_map(|(&txid, tx_node)| match tx_node {
                 TxNodeInternal::Whole(_) => None,
-                TxNodeInternal::Partial(txouts) => Some(
-                    txouts
-                        .iter()
-                        .map(|(&vout, txout)| (OutPoint::new(*txid, vout), txout)),
-                ),
+                TxNodeInternal::Partial(partial) => {
+                    Some(TxNodeInternal::iter_txouts(txid, partial))
+                }
             })
             .flatten()
     }
@@ -806,8 +814,13 @@ impl<A: Clone + Ord, X: Indexer> TxGraph<A, X> {
     /// Extends this graph with another so that `self` becomes the union of the two sets of
     /// transactions.
     ///
+    /// `X` must be `()` for the `update` tx graph. If you want to update with a `TxGraph` that
+    /// happens to have an indexer first use [`swap_indexer`] to get rid of it.
+    ///
     /// The returned [`ChangeSet`] is the set difference between `update` and `self` (transactions that
     /// exist in `update` but not in `self`).
+    ///
+    /// [`swap_indexer`]: Self::swap_indexer
     pub fn apply_update(&mut self, update: TxGraph<A>) -> ChangeSet<A, X::ChangeSet> {
         let mut changeset = ChangeSet::default();
         for tx in update.full_txs() {
@@ -826,6 +839,48 @@ impl<A: Clone + Ord, X: Indexer> TxGraph<A, X> {
         }
 
         self.index_changeset(&mut changeset);
+        changeset
+    }
+
+    /// Changes the [`Indexer`] for a `TxGraph`. **This doesn't re-index the transactions in the
+    /// graph** for that call [`reindex`].
+    ///
+    /// Returns the new `TxGraph` and the old indexer.
+    ///
+    /// [`reindex`]: Self::reindex
+    pub fn swap_indexer<XNew>(self, indexer: XNew) -> (TxGraph<A, XNew>, X) {
+        (
+            TxGraph {
+                txs: self.txs,
+                spends: self.spends,
+                anchors: self.anchors,
+                rev_anchors: self.rev_anchors,
+                last_seen: self.last_seen,
+                empty_outspends: self.empty_outspends,
+                empty_anchors: self.empty_anchors,
+                indexer,
+            },
+            self.indexer,
+        )
+    }
+
+    /// Reindexs the transaction graph by calling the [`Indexer`] on every transaction.
+    ///
+    /// The returned changeset will only bne non-empty in the `indexer` field.
+    pub fn reindex(&mut self) -> ChangeSet<A, X::ChangeSet> {
+        let mut changeset = ChangeSet::<A, X::ChangeSet>::default();
+        for (txid, node) in &self.txs {
+            match node {
+                TxNodeInternal::Whole(tx) => {
+                    changeset.merge(self.indexer.index_tx(tx.as_ref()).into())
+                }
+                TxNodeInternal::Partial(txouts) => {
+                    for (op, txout) in TxNodeInternal::iter_txouts(*txid, txouts) {
+                        changeset.merge(self.indexer.index_txout(op, txout).into());
+                    }
+                }
+            };
+        }
         changeset
     }
 
