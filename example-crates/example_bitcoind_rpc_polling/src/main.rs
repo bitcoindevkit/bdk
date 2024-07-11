@@ -13,10 +13,10 @@ use bdk_bitcoind_rpc::{
 };
 use bdk_chain::{
     bitcoin::{constants::genesis_block, Block, Transaction},
-    indexed_tx_graph,
     indexer::keychain_txout,
     local_chain::{self, LocalChain},
-    ConfirmationBlockTime, IndexedTxGraph, Merge,
+    tx_graph::{self, TxGraph},
+    ConfirmationBlockTime, Merge,
 };
 use example_cli::{
     anyhow,
@@ -38,7 +38,7 @@ const DB_COMMIT_DELAY: Duration = Duration::from_secs(60);
 
 type ChangeSet = (
     local_chain::ChangeSet,
-    indexed_tx_graph::ChangeSet<ConfirmationBlockTime, keychain_txout::ChangeSet<Keychain>>,
+    tx_graph::ChangeSet<ConfirmationBlockTime, keychain_txout::ChangeSet<Keychain>>,
 );
 
 #[derive(Debug)]
@@ -125,12 +125,12 @@ fn main() -> anyhow::Result<()> {
     let (init_chain_changeset, init_graph_changeset) = init_changeset;
 
     let graph = Mutex::new({
-        let mut graph = IndexedTxGraph::new(index);
+        let mut graph = TxGraph::new(index);
         graph.apply_changeset(init_graph_changeset);
         graph
     });
     println!(
-        "[{:>10}s] loaded indexed tx graph from changeset",
+        "[{:>10}s] loaded tx graph from changeset",
         start.elapsed().as_secs_f32()
     );
 
@@ -212,10 +212,10 @@ fn main() -> anyhow::Result<()> {
                     last_print = Instant::now();
                     let synced_to = chain.tip();
                     let balance = {
-                        graph.graph().balance(
+                        graph.balance(
                             &*chain,
                             synced_to.block_id(),
-                            graph.index.outpoints().iter().cloned(),
+                            graph.indexer.outpoints().iter().cloned(),
                             |(k, _), _| k == &Keychain::Internal,
                         )
                     };
@@ -340,10 +340,10 @@ fn main() -> anyhow::Result<()> {
                     last_print = Some(Instant::now());
                     let synced_to = chain.tip();
                     let balance = {
-                        graph.graph().balance(
+                        graph.balance(
                             &*chain,
                             synced_to.block_id(),
-                            graph.index.outpoints().iter().cloned(),
+                            graph.indexer.outpoints().iter().cloned(),
                             |(k, _), _| k == &Keychain::Internal,
                         )
                     };

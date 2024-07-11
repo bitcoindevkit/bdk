@@ -7,17 +7,17 @@ use std::{collections::BTreeSet, sync::Arc};
 
 use crate::common::DESCRIPTORS;
 use bdk_chain::{
-    indexed_tx_graph::{self, IndexedTxGraph},
     indexer::keychain_txout::KeychainTxOutIndex,
     local_chain::LocalChain,
-    tx_graph, Balance, ChainPosition, ConfirmationBlockTime, DescriptorExt, Merge,
+    tx_graph::{self, TxGraph},
+    Balance, ChainPosition, ConfirmationBlockTime, DescriptorExt, Merge,
 };
 use bitcoin::{
     secp256k1::Secp256k1, Amount, OutPoint, Script, ScriptBuf, Transaction, TxIn, TxOut,
 };
 use miniscript::Descriptor;
 
-/// Ensure [`IndexedTxGraph::insert_relevant_txs`] can successfully index transactions NOT presented
+/// Ensure [`TxGraph::insert_relevant_txs`] can successfully index transactions NOT presented
 /// in topological order.
 ///
 /// Given 3 transactions (A, B, C), where A has 2 owned outputs. B and C spends an output each of A.
@@ -32,11 +32,10 @@ fn insert_relevant_txs() {
     let spk_0 = descriptor.at_derivation_index(0).unwrap().script_pubkey();
     let spk_1 = descriptor.at_derivation_index(9).unwrap().script_pubkey();
 
-    let mut graph = IndexedTxGraph::<ConfirmationBlockTime, KeychainTxOutIndex<()>>::new(
-        KeychainTxOutIndex::new(10),
-    );
+    let mut graph =
+        TxGraph::<ConfirmationBlockTime, KeychainTxOutIndex<()>>::new(KeychainTxOutIndex::new(10));
     let _ = graph
-        .index
+        .indexer
         .insert_descriptor((), descriptor.clone())
         .unwrap();
 
@@ -72,15 +71,13 @@ fn insert_relevant_txs() {
 
     let txs = [tx_c, tx_b, tx_a];
 
-    let changeset = indexed_tx_graph::ChangeSet {
-        graph: tx_graph::ChangeSet {
-            txs: txs.iter().cloned().map(Arc::new).collect(),
-            ..Default::default()
-        },
+    let changeset = tx_graph::ChangeSet {
+        txs: txs.iter().cloned().map(Arc::new).collect(),
         indexer: keychain_txout::ChangeSet {
             last_revealed: [(descriptor.descriptor_id(), 9_u32)].into(),
             keychains_added: [].into(),
         },
+        ..Default::default()
     };
 
     assert_eq!(
@@ -89,18 +86,19 @@ fn insert_relevant_txs() {
     );
 
     // The initial changeset will also contain info about the keychain we added
-    let initial_changeset = indexed_tx_graph::ChangeSet {
-        graph: changeset.graph,
+    let initial_changeset = tx_graph::ChangeSet {
+        txs: changeset.txs,
         indexer: keychain_txout::ChangeSet {
             last_revealed: changeset.indexer.last_revealed,
             keychains_added: [((), descriptor)].into(),
         },
+        ..Default::default()
     };
 
     assert_eq!(graph.initial_changeset(), initial_changeset);
 }
 
-/// Ensure consistency IndexedTxGraph list_* and balance methods. These methods lists
+/// Ensure consistency TxGraph list_* and balance methods. These methods lists
 /// relevant txouts and utxos from the information fetched from a ChainOracle (here a LocalChain).
 ///
 /// Test Setup:
@@ -133,24 +131,24 @@ fn test_list_owned_txouts() {
     let local_chain = LocalChain::from_blocks((0..150).map(|i| (i as u32, h!("random"))).collect())
         .expect("must have genesis hash");
 
-    // Initiate IndexedTxGraph
+    // Initiate TxGraph
 
     let (desc_1, _) =
         Descriptor::parse_descriptor(&Secp256k1::signing_only(), common::DESCRIPTORS[2]).unwrap();
     let (desc_2, _) =
         Descriptor::parse_descriptor(&Secp256k1::signing_only(), common::DESCRIPTORS[3]).unwrap();
 
-    let mut graph = IndexedTxGraph::<ConfirmationBlockTime, KeychainTxOutIndex<String>>::new(
+    let mut graph = TxGraph::<ConfirmationBlockTime, KeychainTxOutIndex<String>>::new(
         KeychainTxOutIndex::new(10),
     );
 
     assert!(!graph
-        .index
+        .indexer
         .insert_descriptor("keychain_1".into(), desc_1)
         .unwrap()
         .is_empty());
     assert!(!graph
-        .index
+        .indexer
         .insert_descriptor("keychain_2".into(), desc_2)
         .unwrap()
         .is_empty());
@@ -164,7 +162,7 @@ fn test_list_owned_txouts() {
         // we need to scope here to take immutable reference of the graph
         for _ in 0..10 {
             let ((_, script), _) = graph
-                .index
+                .indexer
                 .reveal_next_spk(&"keychain_1".to_string())
                 .unwrap();
             // TODO Assert indexes
@@ -174,7 +172,7 @@ fn test_list_owned_txouts() {
     {
         for _ in 0..10 {
             let ((_, script), _) = graph
-                .index
+                .indexer
                 .reveal_next_spk(&"keychain_2".to_string())
                 .unwrap();
             untrusted_spks.push(script.to_owned());
@@ -261,33 +259,31 @@ fn test_list_owned_txouts() {
 
     // A helper lambda to extract and filter data from the graph.
     let fetch =
-        |height: u32, graph: &IndexedTxGraph<ConfirmationBlockTime, KeychainTxOutIndex<String>>| {
+        |height: u32, graph: &TxGraph<ConfirmationBlockTime, KeychainTxOutIndex<String>>| {
             let chain_tip = local_chain
                 .get(height)
                 .map(|cp| cp.block_id())
                 .unwrap_or_else(|| panic!("block must exist at {}", height));
             let txouts = graph
-                .graph()
                 .filter_chain_txouts(
                     &local_chain,
                     chain_tip,
-                    graph.index.outpoints().iter().cloned(),
+                    graph.indexer.outpoints().iter().cloned(),
                 )
                 .collect::<Vec<_>>();
 
             let utxos = graph
-                .graph()
                 .filter_chain_unspents(
                     &local_chain,
                     chain_tip,
-                    graph.index.outpoints().iter().cloned(),
+                    graph.indexer.outpoints().iter().cloned(),
                 )
                 .collect::<Vec<_>>();
 
-            let balance = graph.graph().balance(
+            let balance = graph.balance(
                 &local_chain,
                 chain_tip,
-                graph.index.outpoints().iter().cloned(),
+                graph.indexer.outpoints().iter().cloned(),
                 |_, spk: &Script| trusted_spks.contains(&spk.to_owned()),
             );
 
@@ -443,6 +439,7 @@ fn test_list_owned_txouts() {
         );
 
         // tx3 also gets into confirmed utxo set
+        // but tx2 is no longer unspent because tx3 spent it
         assert_eq!(
             confirmed_utxos_txid,
             [tx1.compute_txid(), tx3.compute_txid()].into()
@@ -521,7 +518,7 @@ fn test_list_owned_txouts() {
     }
 }
 
-/// Given a `LocalChain`, `IndexedTxGraph`, and a `Transaction`, when we insert some anchor
+/// Given a `LocalChain`, `TxGraph`, and a `Transaction`, when we insert some anchor
 /// (possibly non-canonical) and/or a last-seen timestamp into the graph, we expect the
 /// result of `get_chain_position` in these cases:
 ///
@@ -545,7 +542,7 @@ fn test_get_chain_position() {
 
     // addr: bcrt1qc6fweuf4xjvz4x3gx3t9e0fh4hvqyu2qw4wvxm
     let spk = ScriptBuf::from_hex("0014c692ecf13534982a9a2834565cbd37add8027140").unwrap();
-    let mut graph = IndexedTxGraph::new({
+    let mut graph = TxGraph::new({
         let mut index = SpkTxOutIndex::default();
         let _ = index.insert_spk(0u32, spk.clone());
         index
@@ -557,12 +554,12 @@ fn test_get_chain_position() {
     let cp = CheckPoint::from_block_ids(blocks.clone()).unwrap();
     let chain = LocalChain::from_tip(cp).unwrap();
 
-    // The test will insert a transaction into the indexed tx graph
+    // The test will insert a transaction into the tx graph
     // along with any anchors and timestamps, then check the value
     // returned by `get_chain_position`.
     fn run(
         chain: &LocalChain,
-        graph: &mut IndexedTxGraph<BlockId, SpkTxOutIndex<u32>>,
+        graph: &mut TxGraph<BlockId, SpkTxOutIndex<u32>>,
         test: TestCase<BlockId>,
     ) {
         let TestCase {
@@ -584,9 +581,7 @@ fn test_get_chain_position() {
         }
 
         // check chain position
-        let res = graph
-            .graph()
-            .get_chain_position(chain, chain.tip().block_id(), txid);
+        let res = graph.get_chain_position(chain, chain.tip().block_id(), txid);
         assert_eq!(
             res.map(ChainPosition::cloned),
             exp_pos,

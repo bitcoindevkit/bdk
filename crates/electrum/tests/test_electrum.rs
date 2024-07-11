@@ -2,7 +2,7 @@ use bdk_chain::{
     bitcoin::{hashes::Hash, Address, Amount, ScriptBuf, Txid, WScriptHash},
     local_chain::LocalChain,
     spk_client::{FullScanRequest, SyncRequest},
-    Balance, ConfirmationBlockTime, IndexedTxGraph, SpkTxOutIndex,
+    Balance, ConfirmationBlockTime, SpkTxOutIndex, TxGraph,
 };
 use bdk_electrum::BdkElectrumClient;
 use bdk_testenv::{anyhow, bitcoincore_rpc::RpcApi, TestEnv};
@@ -11,13 +11,11 @@ use std::str::FromStr;
 
 fn get_balance(
     recv_chain: &LocalChain,
-    recv_graph: &IndexedTxGraph<ConfirmationBlockTime, SpkTxOutIndex<()>>,
+    recv_graph: &TxGraph<ConfirmationBlockTime, SpkTxOutIndex<()>>,
 ) -> anyhow::Result<Balance> {
     let chain_tip = recv_chain.tip().block_id();
-    let outpoints = recv_graph.index.outpoints().clone();
-    let balance = recv_graph
-        .graph()
-        .balance(recv_chain, chain_tip, outpoints, |_, _| true);
+    let outpoints = recv_graph.indexer.outpoints().clone();
+    let balance = recv_graph.balance(recv_chain, chain_tip, outpoints, |_, _| true);
     Ok(balance)
 }
 
@@ -262,7 +260,7 @@ fn scan_detects_confirmed_tx() -> anyhow::Result<()> {
 
     // Setup receiver.
     let (mut recv_chain, _) = LocalChain::from_genesis_hash(env.bitcoind.client.get_block_hash(0)?);
-    let mut recv_graph = IndexedTxGraph::<ConfirmationBlockTime, _>::new({
+    let mut recv_graph = TxGraph::<ConfirmationBlockTime, _>::new({
         let mut recv_index = SpkTxOutIndex::default();
         recv_index.insert_spk((), spk_to_track.clone());
         recv_index
@@ -299,13 +297,10 @@ fn scan_detects_confirmed_tx() -> anyhow::Result<()> {
         },
     );
 
-    for tx in recv_graph.graph().full_txs() {
+    for tx in recv_graph.full_txs() {
         // Retrieve the calculated fee from `TxGraph`, which will panic if we do not have the
         // floating txouts available from the transaction's previous outputs.
-        let fee = recv_graph
-            .graph()
-            .calculate_fee(&tx.tx)
-            .expect("fee must exist");
+        let fee = recv_graph.calculate_fee(&tx.tx).expect("fee must exist");
 
         // Retrieve the fee in the transaction data from `bitcoind`.
         let tx_fee = env
@@ -352,7 +347,7 @@ fn tx_can_become_unconfirmed_after_reorg() -> anyhow::Result<()> {
 
     // Setup receiver.
     let (mut recv_chain, _) = LocalChain::from_genesis_hash(env.bitcoind.client.get_block_hash(0)?);
-    let mut recv_graph = IndexedTxGraph::<ConfirmationBlockTime, _>::new({
+    let mut recv_graph = TxGraph::<ConfirmationBlockTime, _>::new({
         let mut recv_index = SpkTxOutIndex::default();
         recv_index.insert_spk((), spk_to_track.clone());
         recv_index

@@ -102,20 +102,16 @@ fn insert_txouts() {
             assert_eq!(
                 graph.insert_anchor(outpoint.txid, unconf_anchor),
                 ChangeSet {
-                    txs: [].into(),
-                    txouts: [].into(),
                     anchors: [(unconf_anchor, outpoint.txid)].into(),
-                    last_seen: [].into()
+                    ..Default::default()
                 }
             );
             // Mark them last seen at.
             assert_eq!(
                 graph.insert_seen_at(outpoint.txid, 1000000),
                 ChangeSet {
-                    txs: [].into(),
-                    txouts: [].into(),
-                    anchors: [].into(),
-                    last_seen: [(outpoint.txid, 1000000)].into()
+                    last_seen: [(outpoint.txid, 1000000)].into(),
+                    ..Default::default()
                 }
             );
         }
@@ -132,10 +128,8 @@ fn insert_txouts() {
         assert_eq!(
             graph.insert_anchor(update_txs.compute_txid(), conf_anchor),
             ChangeSet {
-                txs: [].into(),
-                txouts: [].into(),
                 anchors: [(conf_anchor, update_txs.compute_txid())].into(),
-                last_seen: [].into()
+                ..Default::default()
             }
         );
         graph
@@ -154,7 +148,8 @@ fn insert_txouts() {
                 (unconf_anchor, h!("tx2"))
             ]
             .into(),
-            last_seen: [(h!("tx2"), 1000000)].into()
+            last_seen: [(h!("tx2"), 1000000)].into(),
+            ..Default::default()
         }
     );
 
@@ -211,7 +206,8 @@ fn insert_txouts() {
                 (unconf_anchor, h!("tx2"))
             ]
             .into(),
-            last_seen: [(h!("tx2"), 1000000)].into()
+            last_seen: [(h!("tx2"), 1000000)].into(),
+            ..Default::default()
         }
     );
 }
@@ -662,7 +658,8 @@ fn test_walk_ancestors() {
         ..common::new_tx(0)
     };
 
-    let mut graph = TxGraph::<BlockId>::new([
+    let mut graph = TxGraph::<BlockId>::default();
+    let _ = graph.batch_insert_tx([
         tx_a0.clone(),
         tx_b0.clone(),
         tx_b1.clone(),
@@ -1130,7 +1127,8 @@ fn transactions_inserted_into_tx_graph_are_not_canonical_until_they_have_an_anch
     let txids: Vec<Txid> = txs.iter().map(Transaction::compute_txid).collect();
 
     // graph
-    let mut graph = TxGraph::<BlockId>::new(txs);
+    let mut graph = TxGraph::<BlockId>::default();
+    let _ = graph.batch_insert_tx(txs);
     let full_txs: Vec<_> = graph.full_txs().collect();
     assert_eq!(full_txs.len(), 2);
     let unseen_txs: Vec<_> = graph.txs_with_no_anchor_or_last_seen().collect();

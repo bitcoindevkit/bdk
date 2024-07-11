@@ -1,5 +1,6 @@
 pub use anyhow;
 use anyhow::Context;
+use bdk_chain::TxGraph;
 use bdk_coin_select::{coin_select_bnb, CoinSelector, CoinSelectorOpt, WeightedValue};
 use bdk_file_store::Store;
 use serde::{de::DeserializeOwned, Serialize};
@@ -13,24 +14,23 @@ use bdk_chain::{
         sighash::{Prevouts, SighashCache},
         transaction, Address, Amount, Network, Sequence, Transaction, TxIn, TxOut,
     },
-    indexed_tx_graph::{self, IndexedTxGraph},
     indexer::keychain_txout::{self, KeychainTxOutIndex},
     local_chain,
     miniscript::{
         descriptor::{DescriptorSecretKey, KeyMap},
         Descriptor, DescriptorPublicKey,
     },
-    Anchor, ChainOracle, DescriptorExt, FullTxOut, Merge,
+    tx_graph, Anchor, ChainOracle, DescriptorExt, FullTxOut, Merge,
 };
 pub use bdk_file_store;
 pub use clap;
 
 use clap::{Parser, Subcommand};
 
-pub type KeychainTxGraph<A> = IndexedTxGraph<A, KeychainTxOutIndex<Keychain>>;
+pub type KeychainTxGraph<A> = TxGraph<A, KeychainTxOutIndex<Keychain>>;
 pub type KeychainChangeSet<A> = (
     local_chain::ChangeSet,
-    indexed_tx_graph::ChangeSet<A, keychain_txout::ChangeSet<Keychain>>,
+    tx_graph::ChangeSet<A, keychain_txout::ChangeSet<Keychain>>,
 );
 
 #[derive(Parser)]
@@ -250,7 +250,7 @@ where
     }];
 
     let internal_keychain = if graph
-        .index
+        .indexer
         .keychains()
         .any(|(k, _)| *k == Keychain::Internal)
     {
@@ -260,14 +260,14 @@ where
     };
 
     let ((change_index, change_script), change_changeset) = graph
-        .index
+        .indexer
         .next_unused_spk(&internal_keychain)
         .expect("Must exist");
     changeset.merge(change_changeset);
 
     let change_plan = bdk_tmp_plan::plan_satisfaction(
         &graph
-            .index
+            .indexer
             .keychains()
             .find(|(k, _)| *k == &internal_keychain)
             .expect("must exist")
@@ -286,7 +286,7 @@ where
     let cs_opts = CoinSelectorOpt {
         target_feerate: 0.5,
         min_drain_value: graph
-            .index
+            .indexer
             .keychains()
             .find(|(k, _)| *k == &internal_keychain)
             .expect("must exist")
@@ -421,9 +421,8 @@ pub fn planned_utxos<A: Anchor, O: ChainOracle, K: Clone + bdk_tmp_plan::CanDeri
     assets: &bdk_tmp_plan::Assets<K>,
 ) -> Result<Vec<PlannedUtxo<K, A>>, O::Error> {
     let chain_tip = chain.get_chain_tip()?;
-    let outpoints = graph.index.outpoints();
+    let outpoints = graph.indexer.outpoints();
     graph
-        .graph()
         .try_filter_chain_unspents(chain, chain_tip, outpoints.iter().cloned())
         .filter_map(|r| -> Option<Result<PlannedUtxo<K, A>, _>> {
             let (k, i, full_txo) = match r {
@@ -431,7 +430,7 @@ pub fn planned_utxos<A: Anchor, O: ChainOracle, K: Clone + bdk_tmp_plan::CanDeri
                 Ok(((k, i), full_txo)) => (k, i, full_txo),
             };
             let desc = graph
-                .index
+                .indexer
                 .keychains()
                 .find(|(keychain, _)| *keychain == &k)
                 .expect("keychain must exist")
@@ -468,7 +467,7 @@ where
         Commands::ChainSpecific(_) => unreachable!("example code should handle this!"),
         Commands::Address { addr_cmd } => {
             let graph = &mut *graph.lock().unwrap();
-            let index = &mut graph.index;
+            let indexer = &mut graph.indexer;
 
             match addr_cmd {
                 AddressCmd::Next | AddressCmd::New => {
@@ -478,12 +477,12 @@ where
                         _ => unreachable!("only these two variants exist in match arm"),
                     };
 
-                    let ((spk_i, spk), index_changeset) =
-                        spk_chooser(index, &Keychain::External).expect("Must exist");
+                    let ((spk_i, spk), indexer_changeset) =
+                        spk_chooser(indexer, &Keychain::External).expect("Must exist");
                     let db = &mut *db.lock().unwrap();
                     db.append_changeset(&C::from((
                         local_chain::ChangeSet::default(),
-                        indexed_tx_graph::ChangeSet::from(index_changeset),
+                        tx_graph::ChangeSet::from(indexer_changeset),
                     )))?;
                     let addr = Address::from_script(spk.as_script(), network)
                         .context("failed to derive address")?;
@@ -491,7 +490,7 @@ where
                     Ok(())
                 }
                 AddressCmd::Index => {
-                    for (keychain, derivation_index) in index.last_revealed_indices() {
+                    for (keychain, derivation_index) in indexer.last_revealed_indices() {
                         println!("{:?}: {}", keychain, derivation_index);
                     }
                     Ok(())
@@ -501,14 +500,14 @@ where
                         true => Keychain::Internal,
                         false => Keychain::External,
                     };
-                    for (spk_i, spk) in index.revealed_keychain_spks(&target_keychain) {
+                    for (spk_i, spk) in indexer.revealed_keychain_spks(&target_keychain) {
                         let address = Address::from_script(spk, network)
                             .expect("should always be able to derive address");
                         println!(
                             "{:?} {} used:{}",
                             spk_i,
                             address,
-                            index.is_used(target_keychain, spk_i)
+                            indexer.is_used(target_keychain, spk_i)
                         );
                     }
                     Ok(())
@@ -528,10 +527,10 @@ where
                 }
             }
 
-            let balance = graph.graph().try_balance(
+            let balance = graph.try_balance(
                 chain,
                 chain.get_chain_tip()?,
-                graph.index.outpoints().iter().cloned(),
+                graph.indexer.outpoints().iter().cloned(),
                 |(k, _), _| k == &Keychain::Internal,
             )?;
 
@@ -561,7 +560,7 @@ where
             let graph = &*graph.lock().unwrap();
             let chain = &*chain.lock().unwrap();
             let chain_tip = chain.get_chain_tip()?;
-            let outpoints = graph.index.outpoints();
+            let outpoints = graph.indexer.outpoints();
 
             match txout_cmd {
                 TxOutCmd::List {
@@ -571,7 +570,6 @@ where
                     unconfirmed,
                 } => {
                     let txouts = graph
-                        .graph()
                         .try_filter_chain_txouts(chain, chain_tip, outpoints.iter().cloned())
                         .filter(|r| match r {
                             Ok((_, full_txo)) => match (spent, unspent) {
@@ -631,14 +629,14 @@ where
                         let db = &mut *db.lock().unwrap();
                         db.append_changeset(&C::from((
                             local_chain::ChangeSet::default(),
-                            indexed_tx_graph::ChangeSet::from(index_changeset),
+                            tx_graph::ChangeSet::from(index_changeset),
                         )))?;
                     }
 
                     // We don't want other callers/threads to use this address while we're using it
                     // but we also don't want to scan the tx we just created because it's not
                     // technically in the blockchain yet.
-                    graph.index.mark_used(change_keychain, index);
+                    graph.indexer.mark_used(change_keychain, index);
                     (tx, Some((change_keychain, index)))
                 } else {
                     (tx, None)
@@ -663,7 +661,7 @@ where
                 Err(e) => {
                     if let Some((keychain, index)) = change_index {
                         // We failed to broadcast, so allow our change address to be used in the future
-                        graph.lock().unwrap().index.unmark_used(keychain, index);
+                        graph.lock().unwrap().indexer.unmark_used(keychain, index);
                     }
                     Err(e)
                 }
