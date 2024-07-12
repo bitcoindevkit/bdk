@@ -1,12 +1,10 @@
 use bdk_wallet::bitcoin::bip32::Fingerprint;
 use bdk_wallet::bitcoin::secp256k1::{All, Secp256k1};
 use bdk_wallet::bitcoin::Psbt;
-
+use bdk_wallet::signer::{SignerCommon, SignerError, SignerId, TransactionSigner};
 use hwi::error::Error;
 use hwi::types::{HWIChain, HWIDevice};
 use hwi::HWIClient;
-
-use bdk_wallet::signer::{SignerCommon, SignerError, SignerId, TransactionSigner};
 
 #[derive(Debug)]
 /// Custom signer for Hardware Wallets
@@ -41,54 +39,87 @@ impl TransactionSigner for HWISigner {
         _sign_options: &bdk_wallet::SignOptions,
         _secp: &Secp256k1<All>,
     ) -> Result<(), SignerError> {
-        psbt.combine(
-            self.client
-                .sign_tx(psbt)
-                .map_err(|e| {
-                    SignerError::External(format!("While signing with hardware wallet: {}", e))
-                })?
-                .psbt,
-        )
-        .expect("Failed to combine HW signed psbt with passed PSBT");
+        let signed_psbt = self
+            .client
+            .sign_tx(psbt)
+            .map_err(|e| {
+                SignerError::External(format!("While signing with hardware wallet: {}", e))
+            })?
+            .psbt;
+
+        psbt.combine(signed_psbt).map_err(|e| {
+            SignerError::External(format!(
+                "Failed to combine HW signed PSBT with passed PSBT: {}",
+                e
+            ))
+        })?;
+
         Ok(())
     }
 }
 
-// TODO: re-enable this once we have the `get_funded_wallet` test util
-// #[cfg(test)]
-// mod tests {
-//     #[test]
-//     fn test_hardware_signer() {
-//         use std::sync::Arc;
-//
-//         use bdk_wallet::tests::get_funded_wallet;
-//         use bdk_wallet::signer::SignerOrdering;
-//         use bdk_wallet::bitcoin::Network;
-//         use crate::HWISigner;
-//         use hwi::HWIClient;
-//
-//         let mut devices = HWIClient::enumerate().unwrap();
-//         if devices.is_empty() {
-//             panic!("No devices found!");
-//         }
-//         let device = devices.remove(0).unwrap();
-//         let client = HWIClient::get_client(&device, true, Network::Regtest.into()).unwrap();
-//         let descriptors = client.get_descriptors::<String>(None).unwrap();
-//         let custom_signer = HWISigner::from_device(&device, Network::Regtest.into()).unwrap();
-//
-//         let (mut wallet, _) = get_funded_wallet(&descriptors.internal[0]);
-//         wallet.add_signer(
-//             bdk_wallet::KeychainKind::External,
-//             SignerOrdering(200),
-//             Arc::new(custom_signer),
-//         );
-//
-//         let addr = wallet.get_address(bdk_wallet::wallet::AddressIndex::LastUnused);
-//         let mut builder = wallet.build_tx();
-//         builder.drain_to(addr.script_pubkey()).drain_wallet();
-//         let (mut psbt, _) = builder.finish().unwrap();
-//
-//         let finalized = wallet.sign(&mut psbt, Default::default()).unwrap();
-//         assert!(finalized);
-//     }
-// }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bdk_wallet::bitcoin::Network;
+    use bdk_wallet::signer::SignerOrdering;
+    // use bdk_wallet::wallet::common::get_funded_wallet;
+
+    use bdk_wallet::wallet::test_util::get_funded_wallet;
+    // use bdk_wallet::wallet::AddressIndex;
+    use bdk_wallet::{wallet, KeychainKind};
+    use std::sync::Arc;
+
+    #[test]
+    fn test_hardware_signer() {
+        let mut devices = match HWIClient::enumerate() {
+            Ok(devices) => devices,
+            Err(e) => panic!("Failed to enumerate devices: {}", e),
+        };
+
+        if devices.is_empty() {
+            panic!("No devices found!");
+        }
+
+        let device = match devices.remove(0) {
+            Ok(device) => device,
+            Err(e) => panic!("Failed to remove device: {}", e),
+        };
+
+        let client = match HWIClient::get_client(&device, true, Network::Regtest.into()) {
+            Ok(client) => client,
+            Err(e) => panic!("Failed to get client: {}", e),
+        };
+
+        let descriptors = match client.get_descriptors::<String>(None) {
+            Ok(descriptors) => descriptors,
+            Err(e) => panic!("Failed to get descriptors: {}", e),
+        };
+
+        let custom_signer = match HWISigner::from_device(&device, Network::Regtest.into()) {
+            Ok(signer) => signer,
+            Err(e) => panic!("Failed to create HWISigner: {}", e),
+        };
+
+        let (mut wallet, _) = get_funded_wallet(&descriptors.internal[0]);
+
+        wallet.add_signer(
+            KeychainKind::External,
+            SignerOrdering(200),
+            Arc::new(custom_signer),
+        );
+
+        let addr = wallet
+            // ,(AddressIndex::LastUnused)
+            .peek_address(KeychainKind::External, 0);
+
+        let mut builder = wallet.build_tx();
+        builder.drain_to(addr.script_pubkey()).drain_wallet();
+        let mut psbt = builder.finish().expect("Failed to build transaction");
+
+        let finalized = wallet
+            .sign(&mut psbt, Default::default())
+            .expect("Failed to sign transaction");
+        assert!(finalized);
+    }
+}

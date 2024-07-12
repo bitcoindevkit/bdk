@@ -29,6 +29,7 @@ std = ["bitcoin/std", "bitcoin/rand-std", "miniscript/std", "bdk_chain/std"]
 compiler = ["miniscript/compiler"]
 all-keys = ["keys-bip39"]
 keys-bip39 = ["bip39"]
+test-util = []
 
 [dev-dependencies]
 lazy_static = "1.4"

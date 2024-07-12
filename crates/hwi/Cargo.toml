@@ -11,3 +11,6 @@ readme = "README.md"
 [dependencies]
 bdk_wallet = { path = "../wallet", version = "1.0.0-alpha.13" }
 hwi = { version = "0.9.0", features = [ "miniscript"] }
+
+[dev-dependencies]
+bdk_wallet = { path = "../wallet", version = "1.0.0-alpha.13", features = ["test-util"] }
