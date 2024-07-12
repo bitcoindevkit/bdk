@@ -67,7 +67,7 @@ mod tests {
 
     use bdk_wallet::wallet::test_util::get_funded_wallet;
     // use bdk_wallet::wallet::AddressIndex;
-    use bdk_wallet::{wallet, KeychainKind};
+    use bdk_wallet::KeychainKind;
     use std::sync::Arc;
 
     #[test]
