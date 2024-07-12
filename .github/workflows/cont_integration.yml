@@ -38,6 +38,18 @@ jobs:
           cargo update -p cc --precise "1.0.105"
       - name: Build
         run: cargo build ${{ matrix.features }}
+      # ==== hwi emulator setup ====
+      - name: Build simulator image
+        run: docker build -t hwi/ledger_emulator ./ci -f ci/Dockerfile.ledger
+      - name: Run simulator image
+        run: docker run --name simulator --network=host hwi/ledger_emulator &
+      - name: Install Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+      - name: Install python dependencies
+        run: pip install hwi==2.1.1 protobuf==3.20.1
+      # ==== End hwi emulator setup ====
       - name: Test
         run: cargo test ${{ matrix.features }}
 
