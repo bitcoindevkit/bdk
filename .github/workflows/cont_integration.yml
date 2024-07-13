@@ -49,6 +49,26 @@ jobs:
           python-version: '3.9'
       - name: Install python dependencies
         run: pip install hwi==2.1.1 protobuf==3.20.1 requests
+      - name: Patch openssl.cnf for ripemd160 support
+        run: |
+          cat << 'EOF' > /tmp/openssl.cnf
+          openssl_conf = openssl_init
+
+          [openssl_init]
+          providers = provider_sect
+
+          [provider_sect]
+          default = default_sect
+          legacy = legacy_sect
+
+          [default_sect]
+          activate = 1
+
+          [legacy_sect]
+          activate = 1
+          EOF
+      - name: Setup OPENSSL_CONF environment variable
+        run: echo "OPENSSL_CONF=/tmp/openssl.cnf" >> $GITHUB_ENV
       # ==== End hwi emulator setup ====
       - name: Test
         run: cargo test ${{ matrix.features }}
