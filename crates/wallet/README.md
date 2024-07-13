@@ -82,7 +82,7 @@ let changeset = db.aggregate_changesets().expect("changeset loaded");
 let mut wallet = if let Some(changeset) = changeset {
     Wallet::load(changeset).expect("loaded wallet")
 } else {
-    Wallet::new(descriptor, change_descriptor, Network::Testnet).expect("created new wallet")
+    Wallet::new(descriptor, Some(change_descriptor), Network::Testnet).expect("created new wallet")
 };
 
 // Get a new address to receive bitcoin.

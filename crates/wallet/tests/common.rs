@@ -15,7 +15,12 @@ use std::str::FromStr;
 /// The funded wallet contains a tx with a 76_000 sats input and two outputs, one spending 25_000
 /// to a foreign address and one returning 50_000 back to the wallet. The remaining 1000
 /// sats are the transaction fee.
-pub fn get_funded_wallet_with_change(descriptor: &str, change: &str) -> (Wallet, bitcoin::Txid) {
+///
+/// Note: no change descriptor is used internal (change) SPKs will be derived from the external descriptor.
+pub fn get_funded_wallet_with_change(
+    descriptor: &str,
+    change: Option<&str>,
+) -> (Wallet, bitcoin::Txid) {
     let mut wallet = Wallet::new(descriptor, change, Network::Regtest).unwrap();
     let receive_address = wallet.peek_address(KeychainKind::External, 0).address;
     let sendto_address = Address::from_str("bcrt1q3qtze4ys45tgdvguj66zrk4fu6hq3a3v9pfly5")
@@ -113,16 +118,13 @@ pub fn get_funded_wallet_with_change(descriptor: &str, change: &str) -> (Wallet,
 /// to a foreign address and one returning 50_000 back to the wallet. The remaining 1000
 /// sats are the transaction fee.
 ///
-/// Note: the change descriptor will have script type `p2wpkh`. If passing some other script type
-/// as argument, make sure you're ok with getting a wallet where the keychains have potentially
-/// different script types. Otherwise, use `get_funded_wallet_with_change`.
+/// Note: no change descriptor is used internal (change) SPKs will be derived from the external descriptor.
 pub fn get_funded_wallet(descriptor: &str) -> (Wallet, bitcoin::Txid) {
-    let change = get_test_wpkh_change();
-    get_funded_wallet_with_change(descriptor, change)
+    get_funded_wallet_with_change(descriptor, None)
 }
 
 pub fn get_funded_wallet_wpkh() -> (Wallet, bitcoin::Txid) {
-    get_funded_wallet_with_change(get_test_wpkh(), get_test_wpkh_change())
+    get_funded_wallet_with_change(get_test_wpkh(), None)
 }
 
 pub fn get_test_wpkh() -> &'static str {

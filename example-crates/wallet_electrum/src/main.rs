@@ -27,7 +27,11 @@ fn main() -> Result<(), anyhow::Error> {
     let mut wallet = if let Some(changeset) = changeset {
         Wallet::load_with_descriptors(external_descriptor, internal_descriptor, changeset)?
     } else {
-        Wallet::new(external_descriptor, internal_descriptor, Network::Testnet)?
+        Wallet::new(
+            external_descriptor,
+            Some(internal_descriptor),
+            Network::Testnet,
+        )?
     };
 
     let address = wallet.next_unused_address(KeychainKind::External);

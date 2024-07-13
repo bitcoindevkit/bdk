@@ -294,7 +294,7 @@ impl Wallet {
     /// automatically to the new [`Wallet`].
     pub fn new<E: IntoWalletDescriptor>(
         descriptor: E,
-        change_descriptor: E,
+        change_descriptor: Option<E>,
         network: Network,
     ) -> Result<Self, NewError> {
         let genesis_hash = genesis_block(network).block_hash();
@@ -307,7 +307,7 @@ impl Wallet {
     /// for syncing from alternative networks.
     pub fn new_with_genesis_hash<E: IntoWalletDescriptor>(
         descriptor: E,
-        change_descriptor: E,
+        change_descriptor: Option<E>,
         network: Network,
         genesis_hash: BlockHash,
     ) -> Result<Self, NewError> {
@@ -1013,7 +1013,7 @@ impl Wallet {
     /// # use bdk_wallet::bitcoin::Network;
     /// let descriptor = "wpkh(tprv8ZgxMBicQKsPe73PBRSmNbTfbcsZnwWhz5eVmhHpi31HW29Z7mc9B4cWGRQzopNUzZUT391DeDJxL2PefNunWyLgqCKRMDkU1s2s8bAfoSk/84'/1'/0'/0/*)";
     /// let change_descriptor = "wpkh(tprv8ZgxMBicQKsPe73PBRSmNbTfbcsZnwWhz5eVmhHpi31HW29Z7mc9B4cWGRQzopNUzZUT391DeDJxL2PefNunWyLgqCKRMDkU1s2s8bAfoSk/84'/1'/0'/1/*)";
-    /// let wallet = Wallet::new(descriptor, change_descriptor, Network::Testnet)?;
+    /// let wallet = Wallet::new(descriptor, Some(change_descriptor), Network::Testnet)?;
     /// for secret_key in wallet.get_signers(KeychainKind::External).signers().iter().filter_map(|s| s.descriptor_secret_key()) {
     ///     // secret_key: tprv8ZgxMBicQKsPe73PBRSmNbTfbcsZnwWhz5eVmhHpi31HW29Z7mc9B4cWGRQzopNUzZUT391DeDJxL2PefNunWyLgqCKRMDkU1s2s8bAfoSk/84'/0'/0'/0/*
     ///     println!("secret_key: {}", secret_key);
@@ -1072,13 +1072,9 @@ impl Wallet {
     ) -> Result<Psbt, CreateTxError> {
         let keychains: BTreeMap<_, _> = self.indexed_graph.index.keychains().collect();
         let external_descriptor = keychains.get(&KeychainKind::External).expect("must exist");
-        let internal_descriptor = keychains.get(&KeychainKind::Internal).expect("must exist");
 
         let external_policy = external_descriptor
             .extract_policy(&self.signers, BuildSatisfaction::None, &self.secp)?
-            .unwrap();
-        let internal_policy = internal_descriptor
-            .extract_policy(&self.change_signers, BuildSatisfaction::None, &self.secp)?
             .unwrap();
 
         // The policy allows spending external outputs, but it requires a policy path that hasn't been
@@ -1091,15 +1087,6 @@ impl Wallet {
                 KeychainKind::External,
             ));
         };
-        // Same for the internal_policy path
-        if params.change_policy != tx_builder::ChangeSpendPolicy::ChangeForbidden
-            && internal_policy.requires_path()
-            && params.internal_policy_path.is_none()
-        {
-            return Err(CreateTxError::SpendingPolicyRequired(
-                KeychainKind::Internal,
-            ));
-        };
 
         let external_requirements = external_policy.get_condition(
             params
@@ -1107,14 +1094,32 @@ impl Wallet {
                 .as_ref()
                 .unwrap_or(&BTreeMap::new()),
         )?;
-        let internal_requirements = internal_policy.get_condition(
-            params
-                .internal_policy_path
-                .as_ref()
-                .unwrap_or(&BTreeMap::new()),
-        )?;
+        let mut requirements = external_requirements;
 
-        let requirements = external_requirements.merge(&internal_requirements)?;
+        if let Some(internal_descriptor) = keychains.get(&KeychainKind::Internal) {
+            let internal_policy = internal_descriptor
+                .extract_policy(&self.change_signers, BuildSatisfaction::None, &self.secp)?
+                .unwrap();
+
+            // Same for the internal_policy path
+            if params.change_policy != tx_builder::ChangeSpendPolicy::ChangeForbidden
+                && internal_policy.requires_path()
+                && params.internal_policy_path.is_none()
+            {
+                return Err(CreateTxError::SpendingPolicyRequired(
+                    KeychainKind::Internal,
+                ));
+            };
+
+            let internal_requirements = internal_policy.get_condition(
+                params
+                    .internal_policy_path
+                    .as_ref()
+                    .unwrap_or(&BTreeMap::new()),
+            )?;
+
+            requirements = requirements.merge(&internal_requirements)?;
+        }
 
         let version = match params.version {
             Some(tx_builder::Version(0)) => return Err(CreateTxError::Version0),
@@ -1280,12 +1285,18 @@ impl Wallet {
         let drain_script = match params.drain_to {
             Some(ref drain_recipient) => drain_recipient.clone(),
             None => {
-                let change_keychain = KeychainKind::Internal;
+                let mut change_keychain = KeychainKind::Internal;
                 let ((index, spk), index_changeset) = self
                     .indexed_graph
                     .index
                     .next_unused_spk(&change_keychain)
-                    .expect("keychain must exist");
+                    .unwrap_or_else(|| {
+                        change_keychain = KeychainKind::External;
+                        self.indexed_graph
+                            .index
+                            .next_unused_spk(&change_keychain)
+                            .expect("")
+                    });
                 self.indexed_graph.index.mark_used(change_keychain, index);
                 self.stage.merge(index_changeset.into());
                 spk
@@ -1529,12 +1540,8 @@ impl Wallet {
         if tx.output.len() > 1 {
             let mut change_index = None;
             for (index, txout) in tx.output.iter().enumerate() {
-                let change_keychain = KeychainKind::Internal;
-                match txout_index.index_of_spk(&txout.script_pubkey) {
-                    Some((keychain, _)) if *keychain == change_keychain => {
-                        change_index = Some(index)
-                    }
-                    _ => {}
+                if self.is_mine(&txout.script_pubkey) {
+                    change_index = Some(index)
                 }
             }
 
@@ -2322,32 +2329,38 @@ fn create_signers<E: IntoWalletDescriptor>(
     index: &mut KeychainTxOutIndex<KeychainKind>,
     secp: &Secp256k1<All>,
     descriptor: E,
-    change_descriptor: E,
+    change_descriptor: Option<E>,
     network: Network,
 ) -> Result<(Arc<SignersContainer>, Arc<SignersContainer>), DescriptorError> {
     let descriptor = into_wallet_descriptor_checked(descriptor, secp, network)?;
-    let change_descriptor = into_wallet_descriptor_checked(change_descriptor, secp, network)?;
+    let change_descriptor = change_descriptor
+        .map(|cd| into_wallet_descriptor_checked(cd, secp, network))
+        .transpose()?;
     let (descriptor, keymap) = descriptor;
     let signers = Arc::new(SignersContainer::build(keymap, &descriptor, secp));
     let _ = index
         .insert_descriptor(KeychainKind::External, descriptor)
         .expect("this is the first descriptor we're inserting");
 
-    let (descriptor, keymap) = change_descriptor;
-    let change_signers = Arc::new(SignersContainer::build(keymap, &descriptor, secp));
-    let _ = index
-        .insert_descriptor(KeychainKind::Internal, descriptor)
-        .map_err(|e| {
-            use bdk_chain::indexer::keychain_txout::InsertDescriptorError;
-            match e {
-                InsertDescriptorError::DescriptorAlreadyAssigned { .. } => {
-                    crate::descriptor::error::Error::ExternalAndInternalAreTheSame
+    let change_signers = if let Some((descriptor, keymap)) = change_descriptor {
+        let change_signer = Arc::new(SignersContainer::build(keymap, &descriptor, secp));
+        let _ = index
+            .insert_descriptor(KeychainKind::Internal, descriptor)
+            .map_err(|e| {
+                use bdk_chain::indexer::keychain_txout::InsertDescriptorError;
+                match e {
+                    InsertDescriptorError::DescriptorAlreadyAssigned { .. } => {
+                        crate::descriptor::error::Error::ExternalAndInternalAreTheSame
+                    }
+                    InsertDescriptorError::KeychainAlreadyAssigned { .. } => {
+                        unreachable!("this is the first time we're assigning internal")
+                    }
                 }
-                InsertDescriptorError::KeychainAlreadyAssigned { .. } => {
-                    unreachable!("this is the first time we're assigning internal")
-                }
-            }
-        })?;
+            })?;
+        change_signer
+    } else {
+        Arc::new(SignersContainer::new())
+    };
 
     Ok((signers, change_signers))
 }
@@ -2377,7 +2390,7 @@ macro_rules! doctest_wallet {
 
         let mut wallet = Wallet::new(
             descriptor,
-            change_descriptor,
+            Some(change_descriptor),
             Network::Regtest,
         )
         .unwrap();

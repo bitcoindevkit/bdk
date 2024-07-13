@@ -95,7 +95,11 @@ fn main() -> anyhow::Result<()> {
     let mut wallet = if let Some(changeset) = changeset {
         Wallet::load_with_descriptors(&args.descriptor, &args.change_descriptor, changeset)?
     } else {
-        Wallet::new(&args.descriptor, &args.change_descriptor, Network::Testnet)?
+        Wallet::new(
+            &args.descriptor,
+            Some(&args.change_descriptor),
+            Network::Testnet,
+        )?
     };
 
     println!(

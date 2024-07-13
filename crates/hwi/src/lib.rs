@@ -20,7 +20,7 @@
 //!
 //! # let mut wallet = Wallet::new(
 //! #     "",
-//! #     "",
+//! #     Some(""),
 //! #     Network::Testnet,
 //! # )?;
 //! #
