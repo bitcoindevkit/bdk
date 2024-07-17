@@ -29,8 +29,7 @@ use bitcoin::{
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 
-mod common;
-use common::*;
+use bdk_wallet::wallet::test_util::*;
 
 fn receive_output(wallet: &mut Wallet, value: u64, height: ConfirmationTime) -> OutPoint {
     let addr = wallet.next_unused_address(KeychainKind::External).address;
