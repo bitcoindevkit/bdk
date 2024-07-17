@@ -34,7 +34,10 @@ impl<K, A> core::default::Default for CombinedChangeSet<K, A> {
 }
 
 #[cfg(feature = "miniscript")]
-impl<K: Ord, A: crate::Anchor> crate::Merge for CombinedChangeSet<K, A> {
+impl<K: Ord, A> crate::Merge for CombinedChangeSet<K, A>
+where
+    A: Ord + Clone,
+{
     fn merge(&mut self, other: Self) {
         crate::Merge::merge(&mut self.chain, other.chain);
         crate::Merge::merge(&mut self.indexed_tx_graph, other.indexed_tx_graph);

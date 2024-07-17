@@ -16,7 +16,7 @@
 //! [`TxGraph`]: bdk_chain::tx_graph::TxGraph
 //! [`example_esplora`]: https://github.com/bitcoindevkit/bdk/tree/master/example-crates/example_esplora
 
-use bdk_chain::{BlockId, ConfirmationBlockTime};
+use bdk_chain::{bitcoin::Txid, Anchor, BlockId, BlockTime};
 use esplora_client::TxStatus;
 
 pub use esplora_client;
@@ -31,7 +31,7 @@ mod async_ext;
 #[cfg(feature = "async")]
 pub use async_ext::*;
 
-fn anchor_from_status(status: &TxStatus) -> Option<ConfirmationBlockTime> {
+fn anchor_from_status(txid: Txid, status: &TxStatus) -> Option<(Anchor, BlockTime)> {
     if let TxStatus {
         block_height: Some(height),
         block_hash: Some(hash),
@@ -39,10 +39,10 @@ fn anchor_from_status(status: &TxStatus) -> Option<ConfirmationBlockTime> {
         ..
     } = status.clone()
     {
-        Some(ConfirmationBlockTime {
-            block_id: BlockId { height, hash },
-            confirmation_time: time,
-        })
+        Some((
+            (txid, BlockId { height, hash }),
+            BlockTime::new(time as u32),
+        ))
     } else {
         None
     }

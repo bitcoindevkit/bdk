@@ -2,7 +2,7 @@ use bdk_chain::{
     bitcoin::{hashes::Hash, Address, Amount, ScriptBuf, Txid, WScriptHash},
     local_chain::LocalChain,
     spk_client::{FullScanRequest, SyncRequest},
-    Balance, ConfirmationBlockTime, IndexedTxGraph, SpkTxOutIndex,
+    Balance, BlockTime, IndexedTxGraph, SpkTxOutIndex,
 };
 use bdk_electrum::BdkElectrumClient;
 use bdk_testenv::{anyhow, bitcoincore_rpc::RpcApi, TestEnv};
@@ -11,7 +11,7 @@ use std::str::FromStr;
 
 fn get_balance(
     recv_chain: &LocalChain,
-    recv_graph: &IndexedTxGraph<ConfirmationBlockTime, SpkTxOutIndex<()>>,
+    recv_graph: &IndexedTxGraph<BlockTime, SpkTxOutIndex<()>>,
 ) -> anyhow::Result<Balance> {
     let chain_tip = recv_chain.tip().block_id();
     let outpoints = recv_graph.index.outpoints().clone();
@@ -262,7 +262,7 @@ fn scan_detects_confirmed_tx() -> anyhow::Result<()> {
 
     // Setup receiver.
     let (mut recv_chain, _) = LocalChain::from_genesis_hash(env.bitcoind.client.get_block_hash(0)?);
-    let mut recv_graph = IndexedTxGraph::<ConfirmationBlockTime, _>::new({
+    let mut recv_graph = IndexedTxGraph::<BlockTime, _>::new({
         let mut recv_index = SpkTxOutIndex::default();
         recv_index.insert_spk((), spk_to_track.clone());
         recv_index
@@ -352,7 +352,7 @@ fn tx_can_become_unconfirmed_after_reorg() -> anyhow::Result<()> {
 
     // Setup receiver.
     let (mut recv_chain, _) = LocalChain::from_genesis_hash(env.bitcoind.client.get_block_hash(0)?);
-    let mut recv_graph = IndexedTxGraph::<ConfirmationBlockTime, _>::new({
+    let mut recv_graph = IndexedTxGraph::<BlockTime, _>::new({
         let mut recv_index = SpkTxOutIndex::default();
         recv_index.insert_spk((), spk_to_track.clone());
         recv_index
@@ -362,12 +362,13 @@ fn tx_can_become_unconfirmed_after_reorg() -> anyhow::Result<()> {
     env.mine_blocks(101, Some(addr_to_mine))?;
 
     // Create transactions that are tracked by our receiver.
-    let mut txids = vec![];
-    let mut hashes = vec![];
+    let mut txids_and_hashes = vec![];
     for _ in 0..REORG_COUNT {
-        txids.push(env.send(&addr_to_track, SEND_AMOUNT)?);
-        hashes.extend(env.mine_blocks(1, None)?);
+        let txid = env.send(&addr_to_track, SEND_AMOUNT)?;
+        let hash = env.mine_blocks(1, None)?[0];
+        txids_and_hashes.push((txid, hash));
     }
+    txids_and_hashes.sort();
 
     // Sync up to tip.
     env.wait_until_electrum_sees_block()?;
@@ -383,13 +384,16 @@ fn tx_can_become_unconfirmed_after_reorg() -> anyhow::Result<()> {
     let _ = recv_graph.apply_update(update.graph_update.clone());
 
     // Retain a snapshot of all anchors before reorg process.
-    let initial_anchors = update.graph_update.all_anchors();
+    let initial_anchors = update
+        .graph_update
+        .all_anchors()
+        .keys()
+        .collect::<BTreeSet<_>>();
     let anchors: Vec<_> = initial_anchors.iter().cloned().collect();
     assert_eq!(anchors.len(), REORG_COUNT);
     for i in 0..REORG_COUNT {
-        let (anchor, txid) = anchors[i];
-        assert_eq!(anchor.block_id.hash, hashes[i]);
-        assert_eq!(txid, txids[i]);
+        let (txid, blockid) = anchors[i];
+        assert_eq!(txids_and_hashes[i], (*txid, blockid.hash));
     }
 
     // Check if initial balance is correct.
@@ -418,7 +422,13 @@ fn tx_can_become_unconfirmed_after_reorg() -> anyhow::Result<()> {
             .map_err(|err| anyhow::anyhow!("LocalChain update error: {:?}", err))?;
 
         // Check that no new anchors are added during current reorg.
-        assert!(initial_anchors.is_superset(update.graph_update.all_anchors()));
+        assert!(initial_anchors.is_superset(
+            &update
+                .graph_update
+                .all_anchors()
+                .keys()
+                .collect::<BTreeSet<_>>()
+        ));
         let _ = recv_graph.apply_update(update.graph_update);
 
         assert_eq!(

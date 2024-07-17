@@ -10,10 +10,11 @@ use bdk_chain::{
     indexed_tx_graph::{self, IndexedTxGraph},
     indexer::keychain_txout::KeychainTxOutIndex,
     local_chain::LocalChain,
-    tx_graph, Balance, ChainPosition, ConfirmationBlockTime, DescriptorExt, Merge,
+    tx_graph, Balance, BlockTime, ChainPosition, DescriptorExt, Merge,
 };
 use bitcoin::{
-    secp256k1::Secp256k1, Amount, OutPoint, Script, ScriptBuf, Transaction, TxIn, TxOut,
+    hashes::Hash, secp256k1::Secp256k1, Amount, OutPoint, Script, ScriptBuf, Transaction, TxIn,
+    TxOut,
 };
 use miniscript::Descriptor;
 
@@ -32,9 +33,8 @@ fn insert_relevant_txs() {
     let spk_0 = descriptor.at_derivation_index(0).unwrap().script_pubkey();
     let spk_1 = descriptor.at_derivation_index(9).unwrap().script_pubkey();
 
-    let mut graph = IndexedTxGraph::<ConfirmationBlockTime, KeychainTxOutIndex<()>>::new(
-        KeychainTxOutIndex::new(10),
-    );
+    let mut graph =
+        IndexedTxGraph::<BlockTime, KeychainTxOutIndex<()>>::new(KeychainTxOutIndex::new(10));
     let _ = graph
         .index
         .insert_descriptor((), descriptor.clone())
@@ -140,9 +140,8 @@ fn test_list_owned_txouts() {
     let (desc_2, _) =
         Descriptor::parse_descriptor(&Secp256k1::signing_only(), common::DESCRIPTORS[3]).unwrap();
 
-    let mut graph = IndexedTxGraph::<ConfirmationBlockTime, KeychainTxOutIndex<String>>::new(
-        KeychainTxOutIndex::new(10),
-    );
+    let mut graph =
+        IndexedTxGraph::<BlockTime, KeychainTxOutIndex<String>>::new(KeychainTxOutIndex::new(10));
 
     assert!(!graph
         .index
@@ -250,99 +249,95 @@ fn test_list_owned_txouts() {
                 local_chain
                     .get(height)
                     .map(|cp| cp.block_id())
-                    .map(|block_id| ConfirmationBlockTime {
-                        block_id,
-                        confirmation_time: 100,
-                    }),
+                    .map(|block_id| ((tx.compute_txid(), block_id), BlockTime::new(100))),
             )
         }));
 
     let _ = graph.batch_insert_relevant_unconfirmed([&tx4, &tx5].iter().map(|tx| (*tx, 100)));
 
     // A helper lambda to extract and filter data from the graph.
-    let fetch =
-        |height: u32, graph: &IndexedTxGraph<ConfirmationBlockTime, KeychainTxOutIndex<String>>| {
-            let chain_tip = local_chain
-                .get(height)
-                .map(|cp| cp.block_id())
-                .unwrap_or_else(|| panic!("block must exist at {}", height));
-            let txouts = graph
-                .graph()
-                .filter_chain_txouts(
-                    &local_chain,
-                    chain_tip,
-                    graph.index.outpoints().iter().cloned(),
-                )
-                .collect::<Vec<_>>();
-
-            let utxos = graph
-                .graph()
-                .filter_chain_unspents(
-                    &local_chain,
-                    chain_tip,
-                    graph.index.outpoints().iter().cloned(),
-                )
-                .collect::<Vec<_>>();
-
-            let balance = graph.graph().balance(
+    let fetch = |height: u32, graph: &IndexedTxGraph<BlockTime, KeychainTxOutIndex<String>>| {
+        let chain_tip = local_chain
+            .get(height)
+            .map(|cp| cp.block_id())
+            .unwrap_or_else(|| panic!("block must exist at {}", height));
+        let txouts = graph
+            .graph()
+            .filter_chain_txouts(
                 &local_chain,
                 chain_tip,
                 graph.index.outpoints().iter().cloned(),
-                |_, spk: &Script| trusted_spks.contains(&spk.to_owned()),
-            );
-
-            let confirmed_txouts_txid = txouts
-                .iter()
-                .filter_map(|(_, full_txout)| {
-                    if matches!(full_txout.chain_position, ChainPosition::Confirmed(_)) {
-                        Some(full_txout.outpoint.txid)
-                    } else {
-                        None
-                    }
-                })
-                .collect::<BTreeSet<_>>();
-
-            let unconfirmed_txouts_txid = txouts
-                .iter()
-                .filter_map(|(_, full_txout)| {
-                    if matches!(full_txout.chain_position, ChainPosition::Unconfirmed(_)) {
-                        Some(full_txout.outpoint.txid)
-                    } else {
-                        None
-                    }
-                })
-                .collect::<BTreeSet<_>>();
-
-            let confirmed_utxos_txid = utxos
-                .iter()
-                .filter_map(|(_, full_txout)| {
-                    if matches!(full_txout.chain_position, ChainPosition::Confirmed(_)) {
-                        Some(full_txout.outpoint.txid)
-                    } else {
-                        None
-                    }
-                })
-                .collect::<BTreeSet<_>>();
-
-            let unconfirmed_utxos_txid = utxos
-                .iter()
-                .filter_map(|(_, full_txout)| {
-                    if matches!(full_txout.chain_position, ChainPosition::Unconfirmed(_)) {
-                        Some(full_txout.outpoint.txid)
-                    } else {
-                        None
-                    }
-                })
-                .collect::<BTreeSet<_>>();
-
-            (
-                confirmed_txouts_txid,
-                unconfirmed_txouts_txid,
-                confirmed_utxos_txid,
-                unconfirmed_utxos_txid,
-                balance,
             )
-        };
+            .collect::<Vec<_>>();
+
+        let utxos = graph
+            .graph()
+            .filter_chain_unspents(
+                &local_chain,
+                chain_tip,
+                graph.index.outpoints().iter().cloned(),
+            )
+            .collect::<Vec<_>>();
+
+        let balance = graph.graph().balance(
+            &local_chain,
+            chain_tip,
+            graph.index.outpoints().iter().cloned(),
+            |_, spk: &Script| trusted_spks.contains(&spk.to_owned()),
+        );
+
+        let confirmed_txouts_txid = txouts
+            .iter()
+            .filter_map(|(_, full_txout)| {
+                if matches!(full_txout.chain_position, ChainPosition::Confirmed(_, _)) {
+                    Some(full_txout.outpoint.txid)
+                } else {
+                    None
+                }
+            })
+            .collect::<BTreeSet<_>>();
+
+        let unconfirmed_txouts_txid = txouts
+            .iter()
+            .filter_map(|(_, full_txout)| {
+                if matches!(full_txout.chain_position, ChainPosition::Unconfirmed(_)) {
+                    Some(full_txout.outpoint.txid)
+                } else {
+                    None
+                }
+            })
+            .collect::<BTreeSet<_>>();
+
+        let confirmed_utxos_txid = utxos
+            .iter()
+            .filter_map(|(_, full_txout)| {
+                if matches!(full_txout.chain_position, ChainPosition::Confirmed(_, _)) {
+                    Some(full_txout.outpoint.txid)
+                } else {
+                    None
+                }
+            })
+            .collect::<BTreeSet<_>>();
+
+        let unconfirmed_utxos_txid = utxos
+            .iter()
+            .filter_map(|(_, full_txout)| {
+                if matches!(full_txout.chain_position, ChainPosition::Unconfirmed(_)) {
+                    Some(full_txout.outpoint.txid)
+                } else {
+                    None
+                }
+            })
+            .collect::<BTreeSet<_>>();
+
+        (
+            confirmed_txouts_txid,
+            unconfirmed_txouts_txid,
+            confirmed_utxos_txid,
+            unconfirmed_utxos_txid,
+            balance,
+        )
+    };
 
     // ----- TEST BLOCK -----
 
@@ -532,15 +527,14 @@ fn test_list_owned_txouts() {
 #[test]
 fn test_get_chain_position() {
     use bdk_chain::local_chain::CheckPoint;
-    use bdk_chain::BlockId;
-    use bdk_chain::SpkTxOutIndex;
+    use bdk_chain::{Anchor, SpkTxOutIndex};
 
     struct TestCase<A> {
         name: &'static str,
         tx: Transaction,
-        anchor: Option<A>,
+        anchor: Option<(Anchor, A)>,
         last_seen: Option<u64>,
-        exp_pos: Option<ChainPosition<A>>,
+        exp_pos: Option<ChainPosition<()>>,
     }
 
     // addr: bcrt1qc6fweuf4xjvz4x3gx3t9e0fh4hvqyu2qw4wvxm
@@ -552,9 +546,13 @@ fn test_get_chain_position() {
     });
 
     // Anchors to test
-    let blocks = vec![block_id!(0, "g"), block_id!(1, "A"), block_id!(2, "B")];
+    let anchors = vec![anchor!(0, "g"), anchor!(1, "A"), anchor!(2, "B")];
+    let blocks = anchors
+        .iter()
+        .map(|((_, blockid), _)| *blockid)
+        .collect::<Vec<_>>();
 
-    let cp = CheckPoint::from_block_ids(blocks.clone()).unwrap();
+    let cp = CheckPoint::from_block_ids(blocks).unwrap();
     let chain = LocalChain::from_tip(cp).unwrap();
 
     // The test will insert a transaction into the indexed tx graph
@@ -562,8 +560,8 @@ fn test_get_chain_position() {
     // returned by `get_chain_position`.
     fn run(
         chain: &LocalChain,
-        graph: &mut IndexedTxGraph<BlockId, SpkTxOutIndex<u32>>,
-        test: TestCase<BlockId>,
+        graph: &mut IndexedTxGraph<(), SpkTxOutIndex<u32>>,
+        test: TestCase<()>,
     ) {
         let TestCase {
             name,
@@ -576,8 +574,8 @@ fn test_get_chain_position() {
         // add data to graph
         let txid = tx.compute_txid();
         let _ = graph.insert_tx(tx);
-        if let Some(anchor) = anchor {
-            let _ = graph.insert_anchor(txid, anchor);
+        if let Some(((_, blockid), _anchor_meta)) = anchor {
+            let _ = graph.insert_anchor((txid, blockid), ());
         }
         if let Some(seen_at) = last_seen {
             let _ = graph.insert_seen_at(txid, seen_at);
@@ -587,11 +585,26 @@ fn test_get_chain_position() {
         let res = graph
             .graph()
             .get_chain_position(chain, chain.tip().block_id(), txid);
-        assert_eq!(
-            res.map(ChainPosition::cloned),
-            exp_pos,
-            "failed test case: {name}"
-        );
+        if let Some(chain_pos) = res {
+            match chain_pos {
+                // We do not have the proper txids when initializing anchors, so we compare against
+                // `BlockId` inside the anchor for confirmed transactions.
+                ChainPosition::Confirmed((_txid, blockid), _anchor_meta) => {
+                    if let ChainPosition::Confirmed((_, exp_block), _) = exp_pos.unwrap() {
+                        assert_eq!(blockid, exp_block, "failed test case: {name}");
+                    } else {
+                        panic!("failed test case: {name}");
+                    }
+                }
+                ChainPosition::Unconfirmed(last_seen) => {
+                    assert_eq!(
+                        ChainPosition::Unconfirmed(last_seen),
+                        exp_pos.unwrap(),
+                        "failed test case: {name}"
+                    )
+                }
+            };
+        }
     }
 
     [
@@ -630,9 +643,12 @@ fn test_get_chain_position() {
                 }],
                 ..common::new_tx(2)
             },
-            anchor: Some(blocks[1]),
+            anchor: Some(anchors[1]),
             last_seen: None,
-            exp_pos: Some(ChainPosition::Confirmed(blocks[1])),
+            exp_pos: {
+                let (anchor, anchor_meta) = anchors[1];
+                Some(ChainPosition::Confirmed(anchor, anchor_meta))
+            },
         },
         TestCase {
             name: "tx unknown anchor with last_seen - unconfirmed",
@@ -643,7 +659,7 @@ fn test_get_chain_position() {
                 }],
                 ..common::new_tx(3)
             },
-            anchor: Some(block_id!(2, "B'")),
+            anchor: Some(anchor!(2, "B'")),
             last_seen: Some(2),
             exp_pos: Some(ChainPosition::Unconfirmed(2)),
         },
@@ -656,7 +672,7 @@ fn test_get_chain_position() {
                 }],
                 ..common::new_tx(4)
             },
-            anchor: Some(block_id!(2, "B'")),
+            anchor: Some(anchor!(2, "B'")),
             last_seen: None,
             exp_pos: None,
         },

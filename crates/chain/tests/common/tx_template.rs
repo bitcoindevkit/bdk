@@ -16,12 +16,12 @@ use miniscript::Descriptor;
 /// avoid having to explicitly hash previous transactions to form previous outpoints of later
 /// transactions.
 #[derive(Clone, Copy, Default)]
-pub struct TxTemplate<'a, A> {
+pub struct TxTemplate<'a> {
     /// Uniquely identifies the transaction, before it can have a txid.
     pub tx_name: &'a str,
     pub inputs: &'a [TxInTemplate<'a>],
     pub outputs: &'a [TxOutTemplate],
-    pub anchors: &'a [A],
+    pub anchors: &'a [(Anchor, ())],
     pub last_seen: Option<u64>,
 }
 
@@ -51,12 +51,12 @@ impl TxOutTemplate {
 }
 
 #[allow(dead_code)]
-pub fn init_graph<'a, A: Anchor + Clone + 'a>(
-    tx_templates: impl IntoIterator<Item = &'a TxTemplate<'a, A>>,
-) -> (TxGraph<A>, SpkTxOutIndex<u32>, HashMap<&'a str, Txid>) {
+pub fn init_graph<'a>(
+    tx_templates: impl IntoIterator<Item = &'a TxTemplate<'a>>,
+) -> (TxGraph, SpkTxOutIndex<u32>, HashMap<&'a str, Txid>) {
     let (descriptor, _) =
         Descriptor::parse_descriptor(&Secp256k1::signing_only(), super::DESCRIPTORS[2]).unwrap();
-    let mut graph = TxGraph::<A>::default();
+    let mut graph = TxGraph::<()>::default();
     let mut spk_index = SpkTxOutIndex::default();
     (0..10).for_each(|index| {
         spk_index.insert_spk(
@@ -128,8 +128,8 @@ pub fn init_graph<'a, A: Anchor + Clone + 'a>(
         tx_ids.insert(tx_tmp.tx_name, tx.compute_txid());
         spk_index.scan(&tx);
         let _ = graph.insert_tx(tx.clone());
-        for anchor in tx_tmp.anchors.iter() {
-            let _ = graph.insert_anchor(tx.compute_txid(), anchor.clone());
+        for ((_, blockid), _) in tx_tmp.anchors.iter() {
+            let _ = graph.insert_anchor((tx.compute_txid(), *blockid), ());
         }
         let _ = graph.insert_seen_at(tx.compute_txid(), tx_tmp.last_seen.unwrap_or(0));
     }

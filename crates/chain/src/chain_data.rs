@@ -1,14 +1,12 @@
 use bitcoin::{hashes::Hash, BlockHash, OutPoint, TxOut, Txid};
 
-use crate::{Anchor, AnchorFromBlockPosition, COINBASE_MATURITY};
+use crate::{Anchor, BlockTime, COINBASE_MATURITY};
 
 /// Represents the observed position of some chain data.
-///
-/// The generic `A` should be a [`Anchor`] implementation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, core::hash::Hash)]
 pub enum ChainPosition<A> {
-    /// The chain data is seen as confirmed, and in anchored by `A`.
-    Confirmed(A),
+    /// The chain data is seen as confirmed, and in anchored by `Anchor`.
+    Confirmed(Anchor, A),
     /// The chain data is not confirmed and last seen in the mempool at this timestamp.
     Unconfirmed(u64),
 }
@@ -16,26 +14,16 @@ pub enum ChainPosition<A> {
 impl<A> ChainPosition<A> {
     /// Returns whether [`ChainPosition`] is confirmed or not.
     pub fn is_confirmed(&self) -> bool {
-        matches!(self, Self::Confirmed(_))
+        matches!(self, Self::Confirmed(_, _))
     }
 }
 
-impl<A: Clone> ChainPosition<&A> {
-    /// Maps a [`ChainPosition<&A>`] into a [`ChainPosition<A>`] by cloning the contents.
+impl<A: Clone> ChainPosition<A> {
+    /// Maps a [`ChainPosition`] into a [`ChainPosition`] by cloning the contents.
     pub fn cloned(self) -> ChainPosition<A> {
         match self {
-            ChainPosition::Confirmed(a) => ChainPosition::Confirmed(a.clone()),
+            ChainPosition::Confirmed(anchor, a) => ChainPosition::Confirmed(anchor, a),
             ChainPosition::Unconfirmed(last_seen) => ChainPosition::Unconfirmed(last_seen),
-        }
-    }
-}
-
-impl<A: Anchor> ChainPosition<A> {
-    /// Determines the upper bound of the confirmation height.
-    pub fn confirmation_height_upper_bound(&self) -> Option<u32> {
-        match self {
-            ChainPosition::Confirmed(a) => Some(a.confirmation_height_upper_bound()),
-            ChainPosition::Unconfirmed(_) => None,
         }
     }
 }
@@ -74,12 +62,12 @@ impl ConfirmationTime {
     }
 }
 
-impl From<ChainPosition<ConfirmationBlockTime>> for ConfirmationTime {
-    fn from(observed_as: ChainPosition<ConfirmationBlockTime>) -> Self {
+impl From<ChainPosition<BlockTime>> for ConfirmationTime {
+    fn from(observed_as: ChainPosition<BlockTime>) -> Self {
         match observed_as {
-            ChainPosition::Confirmed(a) => Self::Confirmed {
-                height: a.block_id.height,
-                time: a.confirmation_time,
+            ChainPosition::Confirmed((_txid, blockid), anchor_meta) => Self::Confirmed {
+                height: blockid.height,
+                time: *anchor_meta.as_ref() as u64,
             },
             ChainPosition::Unconfirmed(last_seen) => Self::Unconfirmed { last_seen },
         }
@@ -101,18 +89,6 @@ pub struct BlockId {
     pub height: u32,
     /// The hash of the block.
     pub hash: BlockHash,
-}
-
-impl Anchor for BlockId {
-    fn anchor_block(&self) -> Self {
-        *self
-    }
-}
-
-impl AnchorFromBlockPosition for BlockId {
-    fn from_block_position(_block: &bitcoin::Block, block_id: BlockId, _tx_pos: usize) -> Self {
-        block_id
-    }
 }
 
 impl Default for BlockId {
@@ -145,41 +121,6 @@ impl From<(&u32, &BlockHash)> for BlockId {
     }
 }
 
-/// An [`Anchor`] implementation that also records the exact confirmation time of the transaction.
-///
-/// Refer to [`Anchor`] for more details.
-#[derive(Debug, Default, Clone, PartialEq, Eq, Copy, PartialOrd, Ord, core::hash::Hash)]
-#[cfg_attr(
-    feature = "serde",
-    derive(serde::Deserialize, serde::Serialize),
-    serde(crate = "serde_crate")
-)]
-pub struct ConfirmationBlockTime {
-    /// The anchor block.
-    pub block_id: BlockId,
-    /// The confirmation time of the transaction being anchored.
-    pub confirmation_time: u64,
-}
-
-impl Anchor for ConfirmationBlockTime {
-    fn anchor_block(&self) -> BlockId {
-        self.block_id
-    }
-
-    fn confirmation_height_upper_bound(&self) -> u32 {
-        self.block_id.height
-    }
-}
-
-impl AnchorFromBlockPosition for ConfirmationBlockTime {
-    fn from_block_position(block: &bitcoin::Block, block_id: BlockId, _tx_pos: usize) -> Self {
-        Self {
-            block_id,
-            confirmation_time: block.header.time as _,
-        }
-    }
-}
-
 /// A `TxOut` with as much data as we can retrieve about it
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct FullTxOut<A> {
@@ -195,18 +136,12 @@ pub struct FullTxOut<A> {
     pub is_on_coinbase: bool,
 }
 
-impl<A: Anchor> FullTxOut<A> {
+impl<A> FullTxOut<A> {
     /// Whether the `txout` is considered mature.
-    ///
-    /// Depending on the implementation of [`confirmation_height_upper_bound`] in [`Anchor`], this
-    /// method may return false-negatives. In other words, interpreted confirmation count may be
-    /// less than the actual value.
-    ///
-    /// [`confirmation_height_upper_bound`]: Anchor::confirmation_height_upper_bound
     pub fn is_mature(&self, tip: u32) -> bool {
         if self.is_on_coinbase {
             let tx_height = match &self.chain_position {
-                ChainPosition::Confirmed(anchor) => anchor.confirmation_height_upper_bound(),
+                ChainPosition::Confirmed((_, blockid), _) => blockid.height,
                 ChainPosition::Unconfirmed(_) => {
                     debug_assert!(false, "coinbase tx can never be unconfirmed");
                     return false;
@@ -224,19 +159,13 @@ impl<A: Anchor> FullTxOut<A> {
     /// Whether the utxo is/was/will be spendable with chain `tip`.
     ///
     /// This method does not take into account the lock time.
-    ///
-    /// Depending on the implementation of [`confirmation_height_upper_bound`] in [`Anchor`], this
-    /// method may return false-negatives. In other words, interpreted confirmation count may be
-    /// less than the actual value.
-    ///
-    /// [`confirmation_height_upper_bound`]: Anchor::confirmation_height_upper_bound
     pub fn is_confirmed_and_spendable(&self, tip: u32) -> bool {
         if !self.is_mature(tip) {
             return false;
         }
 
         let confirmation_height = match &self.chain_position {
-            ChainPosition::Confirmed(anchor) => anchor.confirmation_height_upper_bound(),
+            ChainPosition::Confirmed((_, blockid), _) => blockid.height,
             ChainPosition::Unconfirmed(_) => return false,
         };
         if confirmation_height > tip {
@@ -244,8 +173,8 @@ impl<A: Anchor> FullTxOut<A> {
         }
 
         // if the spending tx is confirmed within tip height, the txout is no longer spendable
-        if let Some((ChainPosition::Confirmed(spending_anchor), _)) = &self.spent_by {
-            if spending_anchor.anchor_block().height <= tip {
+        if let Some((ChainPosition::Confirmed((_, spending_blockid), _), _)) = &self.spent_by {
+            if spending_blockid.height <= tip {
                 return false;
             }
         }
@@ -257,25 +186,32 @@ impl<A: Anchor> FullTxOut<A> {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::BlockTime;
 
     #[test]
     fn chain_position_ord() {
-        let unconf1 = ChainPosition::<ConfirmationBlockTime>::Unconfirmed(10);
-        let unconf2 = ChainPosition::<ConfirmationBlockTime>::Unconfirmed(20);
-        let conf1 = ChainPosition::Confirmed(ConfirmationBlockTime {
-            confirmation_time: 20,
-            block_id: BlockId {
-                height: 9,
-                ..Default::default()
-            },
-        });
-        let conf2 = ChainPosition::Confirmed(ConfirmationBlockTime {
-            confirmation_time: 15,
-            block_id: BlockId {
-                height: 12,
-                ..Default::default()
-            },
-        });
+        let unconf1 = ChainPosition::Unconfirmed(10);
+        let unconf2 = ChainPosition::Unconfirmed(20);
+        let conf1 = ChainPosition::Confirmed(
+            (
+                Txid::all_zeros(),
+                BlockId {
+                    height: 9,
+                    ..Default::default()
+                },
+            ),
+            BlockTime::new(20),
+        );
+        let conf2 = ChainPosition::Confirmed(
+            (
+                Txid::all_zeros(),
+                BlockId {
+                    height: 12,
+                    ..Default::default()
+                },
+            ),
+            BlockTime::new(15),
+        );
 
         assert!(unconf2 > unconf1, "higher last_seen means higher ord");
         assert!(unconf1 > conf1, "unconfirmed is higher ord than confirmed");
