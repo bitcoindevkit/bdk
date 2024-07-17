@@ -16,8 +16,8 @@
 //! ```no_run
 //! # use bdk_wallet::bitcoin::Network;
 //! # use bdk_wallet::signer::SignerOrdering;
-//! # use bdk_wallet::wallet::hardwaresigner::HWISigner;
-//! # use bdk_wallet::wallet::AddressIndex::New;
+//! # use bdk_wallet::hardwaresigner::HWISigner;
+//! # use bdk_wallet::AddressIndex::New;
 //! # use bdk_wallet::{CreateParams, KeychainKind, SignOptions};
 //! # use hwi::HWIClient;
 //! # use std::sync::Arc;

@@ -5,8 +5,7 @@ use bdk_esplora::{esplora_client, EsploraAsyncExt};
 use bdk_wallet::{
     bitcoin::{Amount, Network},
     rusqlite::Connection,
-    wallet::{CreateParams, LoadParams},
-    KeychainKind, SignOptions,
+    CreateParams, KeychainKind, LoadParams, SignOptions,
 };
 
 const SEND_AMOUNT: Amount = Amount::from_sat(5000);

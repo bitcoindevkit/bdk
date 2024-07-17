@@ -1,9 +1,6 @@
 #![allow(unused)]
 use bdk_chain::{BlockId, ConfirmationBlockTime, ConfirmationTime, TxGraph};
-use bdk_wallet::{
-    wallet::{CreateParams, Update, Wallet},
-    KeychainKind, LocalOutput,
-};
+use bdk_wallet::{CreateParams, KeychainKind, LocalOutput, Update, Wallet};
 use bitcoin::{
     hashes::Hash, transaction, Address, Amount, BlockHash, FeeRate, Network, OutPoint, Transaction,
     TxIn, TxOut, Txid,

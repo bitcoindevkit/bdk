@@ -1,11 +1,10 @@
 use std::{collections::BTreeSet, io::Write};
 
 use bdk_esplora::{esplora_client, EsploraExt};
-use bdk_file_store::Store;
 use bdk_wallet::{
     bitcoin::{Amount, Network},
-    wallet::{CreateParams, LoadParams},
-    KeychainKind, SignOptions,
+    file_store::Store,
+    CreateParams, KeychainKind, LoadParams, SignOptions,
 };
 
 const DB_MAGIC: &str = "bdk_wallet_esplora_example";
@@ -20,8 +19,7 @@ const INTERNAL_DESC: &str = "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7
 const ESPLORA_URL: &str = "http://signet.bitcoindevkit.net";
 
 fn main() -> Result<(), anyhow::Error> {
-    let mut db =
-        Store::<bdk_wallet::wallet::ChangeSet>::open_or_create_new(DB_MAGIC.as_bytes(), DB_PATH)?;
+    let mut db = Store::<bdk_wallet::ChangeSet>::open_or_create_new(DB_MAGIC.as_bytes(), DB_PATH)?;
 
     let load_params = LoadParams::with_descriptors(EXTERNAL_DESC, INTERNAL_DESC, NETWORK)?;
     let create_params = CreateParams::new(EXTERNAL_DESC, INTERNAL_DESC, NETWORK)?;

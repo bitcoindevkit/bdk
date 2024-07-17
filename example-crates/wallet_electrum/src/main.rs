@@ -1,11 +1,11 @@
-use bdk_wallet::wallet::CreateParams;
-use bdk_wallet::wallet::LoadParams;
+use bdk_wallet::file_store::Store;
+use bdk_wallet::CreateParams;
+use bdk_wallet::LoadParams;
 use std::io::Write;
 use std::str::FromStr;
 
 use bdk_electrum::electrum_client;
 use bdk_electrum::BdkElectrumClient;
-use bdk_file_store::Store;
 use bdk_wallet::bitcoin::Network;
 use bdk_wallet::bitcoin::{Address, Amount};
 use bdk_wallet::chain::collections::HashSet;
@@ -24,8 +24,7 @@ const ELECTRUM_URL: &str = "ssl://electrum.blockstream.info:60002";
 fn main() -> Result<(), anyhow::Error> {
     let db_path = "bdk-electrum-example.db";
 
-    let mut db =
-        Store::<bdk_wallet::wallet::ChangeSet>::open_or_create_new(DB_MAGIC.as_bytes(), db_path)?;
+    let mut db = Store::<bdk_wallet::ChangeSet>::open_or_create_new(DB_MAGIC.as_bytes(), db_path)?;
 
     let load_params = LoadParams::with_descriptors(EXTERNAL_DESC, INTERNAL_DESC, NETWORK)?;
     let create_params = CreateParams::new(EXTERNAL_DESC, INTERNAL_DESC, NETWORK)?;

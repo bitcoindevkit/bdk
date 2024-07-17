@@ -7,14 +7,14 @@ use anyhow::Context;
 use assert_matches::assert_matches;
 use bdk_chain::{BlockId, ConfirmationTime};
 use bdk_chain::{PersistWith, COINBASE_MATURITY};
+use bdk_wallet::coin_selection::{self, LargestFirstCoinSelection};
 use bdk_wallet::descriptor::{calc_checksum, DescriptorError, IntoWalletDescriptor};
+use bdk_wallet::error::CreateTxError;
 use bdk_wallet::psbt::PsbtUtils;
 use bdk_wallet::signer::{SignOptions, SignerError};
-use bdk_wallet::wallet::coin_selection::{self, LargestFirstCoinSelection};
-use bdk_wallet::wallet::error::CreateTxError;
-use bdk_wallet::wallet::tx_builder::AddForeignUtxoError;
-use bdk_wallet::wallet::{AddressInfo, Balance, CreateParams, LoadParams, Wallet};
+use bdk_wallet::tx_builder::AddForeignUtxoError;
 use bdk_wallet::KeychainKind;
+use bdk_wallet::{AddressInfo, Balance, CreateParams, LoadParams, Wallet};
 use bitcoin::hashes::Hash;
 use bitcoin::key::Secp256k1;
 use bitcoin::psbt;
@@ -79,7 +79,7 @@ fn receive_output_in_latest_block(wallet: &mut Wallet, value: u64) -> OutPoint {
 }
 
 fn insert_seen_at(wallet: &mut Wallet, txid: Txid, seen_at: u64) {
-    use bdk_wallet::wallet::Update;
+    use bdk_wallet::Update;
     let mut graph = bdk_chain::TxGraph::default();
     let _ = graph.insert_seen_at(txid, seen_at);
     wallet
@@ -774,7 +774,7 @@ fn test_create_tx_absolute_high_fee() {
 
 #[test]
 fn test_create_tx_add_change() {
-    use bdk_wallet::wallet::tx_builder::TxOrdering;
+    use bdk_wallet::tx_builder::TxOrdering;
     let seed = [0; 32];
     let mut rng: StdRng = SeedableRng::from_seed(seed);
     let (mut wallet, _) = get_funded_wallet_wpkh();
@@ -839,7 +839,7 @@ fn test_create_tx_ordering_respected() {
         project_utxo(tx_a).cmp(&project_utxo(tx_b))
     };
 
-    let custom_bip69_ordering = bdk_wallet::wallet::tx_builder::TxOrdering::Custom {
+    let custom_bip69_ordering = bdk_wallet::tx_builder::TxOrdering::Custom {
         input_sort: Arc::new(bip69_txin_cmp),
         output_sort: Arc::new(bip69_txout_cmp),
     };

@@ -52,13 +52,9 @@ pub use descriptor_ext::{DescriptorExt, DescriptorId};
 #[cfg(feature = "miniscript")]
 mod spk_iter;
 #[cfg(feature = "miniscript")]
-pub use spk_iter::*;
-#[cfg(feature = "miniscript")]
-mod changeset;
-#[cfg(feature = "miniscript")]
-pub use changeset::*;
-#[cfg(feature = "miniscript")]
 pub use indexer::keychain_txout;
+#[cfg(feature = "miniscript")]
+pub use spk_iter::*;
 #[cfg(feature = "sqlite")]
 pub mod sqlite;
 #[cfg(feature = "sqlite")]

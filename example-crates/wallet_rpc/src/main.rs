@@ -2,10 +2,10 @@ use bdk_bitcoind_rpc::{
     bitcoincore_rpc::{Auth, Client, RpcApi},
     Emitter,
 };
-use bdk_file_store::Store;
 use bdk_wallet::{
     bitcoin::{Block, Network, Transaction},
-    wallet::{CreateParams, LoadParams},
+    file_store::Store,
+    CreateParams, LoadParams,
 };
 use clap::{self, Parser};
 use std::{path::PathBuf, sync::mpsc::sync_channel, thread::spawn, time::Instant};
@@ -86,10 +86,8 @@ fn main() -> anyhow::Result<()> {
     );
 
     let start_load_wallet = Instant::now();
-    let mut db = Store::<bdk_wallet::wallet::ChangeSet>::open_or_create_new(
-        DB_MAGIC.as_bytes(),
-        args.db_path,
-    )?;
+    let mut db =
+        Store::<bdk_wallet::ChangeSet>::open_or_create_new(DB_MAGIC.as_bytes(), args.db_path)?;
 
     let load_params =
         LoadParams::with_descriptors(&args.descriptor, &args.change_descriptor, args.network)?;

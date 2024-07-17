@@ -55,11 +55,13 @@ use miniscript::{
 
 use bdk_chain::tx_graph::CalculateFeeError;
 
+mod changeset;
 pub mod coin_selection;
 pub mod export;
 mod params;
 pub mod signer;
 pub mod tx_builder;
+pub use changeset::*;
 pub use params::*;
 mod persisted;
 pub use persisted::*;
@@ -154,9 +156,6 @@ impl From<SyncResult> for Update {
         }
     }
 }
-
-/// The changes made to a wallet by applying an [`Update`].
-pub type ChangeSet = bdk_chain::WalletChangeSet;
 
 /// A derived address and the index it was found at.
 /// For convenience this automatically derefs to `Address`
@@ -1123,8 +1122,8 @@ impl Wallet {
     /// # use std::str::FromStr;
     /// # use bitcoin::*;
     /// # use bdk_wallet::*;
-    /// # use bdk_wallet::wallet::ChangeSet;
-    /// # use bdk_wallet::wallet::error::CreateTxError;
+    /// # use bdk_wallet::ChangeSet;
+    /// # use bdk_wallet::error::CreateTxError;
     /// # use anyhow::Error;
     /// # let descriptor = "wpkh(tpubD6NzVbkrYhZ4Xferm7Pz4VnjdcDPFyjVu5K4iZXQ4pVN8Cks4pHVowTBXBKRhX64pkRyJZJN5xAKj4UDNnLPb5p2sSKXhewoYx5GbTdUFWq/*)";
     /// # let mut wallet = doctest_wallet!();
@@ -1487,8 +1486,8 @@ impl Wallet {
     /// # use std::str::FromStr;
     /// # use bitcoin::*;
     /// # use bdk_wallet::*;
-    /// # use bdk_wallet::wallet::ChangeSet;
-    /// # use bdk_wallet::wallet::error::CreateTxError;
+    /// # use bdk_wallet::ChangeSet;
+    /// # use bdk_wallet::error::CreateTxError;
     /// # use anyhow::Error;
     /// # let descriptor = "wpkh(tpubD6NzVbkrYhZ4Xferm7Pz4VnjdcDPFyjVu5K4iZXQ4pVN8Cks4pHVowTBXBKRhX64pkRyJZJN5xAKj4UDNnLPb5p2sSKXhewoYx5GbTdUFWq/*)";
     /// # let mut wallet = doctest_wallet!();
@@ -1665,8 +1664,8 @@ impl Wallet {
     /// # use std::str::FromStr;
     /// # use bitcoin::*;
     /// # use bdk_wallet::*;
-    /// # use bdk_wallet::wallet::ChangeSet;
-    /// # use bdk_wallet::wallet::error::CreateTxError;
+    /// # use bdk_wallet::ChangeSet;
+    /// # use bdk_wallet::error::CreateTxError;
     /// # let descriptor = "wpkh(tpubD6NzVbkrYhZ4Xferm7Pz4VnjdcDPFyjVu5K4iZXQ4pVN8Cks4pHVowTBXBKRhX64pkRyJZJN5xAKj4UDNnLPb5p2sSKXhewoYx5GbTdUFWq/*)";
     /// # let mut wallet = doctest_wallet!();
     /// # let to_address = Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt").unwrap().assume_checked();
@@ -2453,8 +2452,7 @@ macro_rules! doctest_wallet {
     () => {{
         use $crate::bitcoin::{BlockHash, Transaction, absolute, TxOut, Network, hashes::Hash};
         use $crate::chain::{ConfirmationBlockTime, BlockId, TxGraph};
-        use $crate::wallet::{Update, CreateParams};
-        use $crate::KeychainKind;
+        use $crate::{Update, CreateParams, KeychainKind};
         let descriptor = "tr([73c5da0a/86'/0'/0']tprv8fMn4hSKPRC1oaCPqxDb1JWtgkpeiQvZhsr8W2xuy3GEMkzoArcAWTfJxYb6Wj8XNNDWEjfYKK4wGQXh3ZUXhDF2NcnsALpWTeSwarJt7Vc/0/*)";
         let change_descriptor = "tr([73c5da0a/86'/0'/0']tprv8fMn4hSKPRC1oaCPqxDb1JWtgkpeiQvZhsr8W2xuy3GEMkzoArcAWTfJxYb6Wj8XNNDWEjfYKK4wGQXh3ZUXhDF2NcnsALpWTeSwarJt7Vc/1/*)";
 

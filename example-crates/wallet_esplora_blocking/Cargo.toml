@@ -7,7 +7,6 @@ publish = false
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-bdk_wallet = { path = "../../crates/wallet" }
+bdk_wallet = { path = "../../crates/wallet", features = ["file_store"] }
 bdk_esplora = { path = "../../crates/esplora", features = ["blocking"] }
-bdk_file_store = { path = "../../crates/file_store" }
 anyhow = "1"

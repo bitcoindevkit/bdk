@@ -21,7 +21,7 @@
 //! ```
 //! # use std::sync::Arc;
 //! # use bdk_wallet::descriptor::*;
-//! # use bdk_wallet::wallet::signer::*;
+//! # use bdk_wallet::signer::*;
 //! # use bdk_wallet::bitcoin::secp256k1::Secp256k1;
 //! use bdk_wallet::descriptor::policy::BuildSatisfaction;
 //! let secp = Secp256k1::new();

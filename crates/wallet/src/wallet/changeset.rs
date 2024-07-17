@@ -1,34 +1,30 @@
-use crate::{ConfirmationBlockTime, Merge};
+use bdk_chain::{
+    indexed_tx_graph, keychain_txout, local_chain, tx_graph, ConfirmationBlockTime, Merge,
+};
+use miniscript::{Descriptor, DescriptorPublicKey};
 
 type IndexedTxGraphChangeSet =
-    crate::indexed_tx_graph::ChangeSet<ConfirmationBlockTime, crate::keychain_txout::ChangeSet>;
+    indexed_tx_graph::ChangeSet<ConfirmationBlockTime, keychain_txout::ChangeSet>;
 
-/// A changeset containing [`crate`] structures typically persisted together.
-#[derive(Default, Debug, Clone, PartialEq)]
-#[cfg_attr(
-    feature = "serde",
-    derive(crate::serde::Deserialize, crate::serde::Serialize),
-    serde(crate = "crate::serde")
-)]
-pub struct WalletChangeSet {
+/// A changeset for [`Wallet`](crate::Wallet).
+#[derive(Default, Debug, Clone, PartialEq, serde::Deserialize, serde::Serialize)]
+pub struct ChangeSet {
     /// Descriptor for recipient addresses.
-    pub descriptor: Option<miniscript::Descriptor<miniscript::DescriptorPublicKey>>,
+    pub descriptor: Option<Descriptor<DescriptorPublicKey>>,
     /// Descriptor for change addresses.
-    pub change_descriptor: Option<miniscript::Descriptor<miniscript::DescriptorPublicKey>>,
+    pub change_descriptor: Option<Descriptor<DescriptorPublicKey>>,
     /// Stores the network type of the transaction data.
     pub network: Option<bitcoin::Network>,
-    /// Changes to the [`LocalChain`](crate::local_chain::LocalChain).
-    pub local_chain: crate::local_chain::ChangeSet,
-    /// Changes to [`TxGraph`](crate::tx_graph::TxGraph).
-    pub tx_graph: crate::tx_graph::ChangeSet<crate::ConfirmationBlockTime>,
-    /// Changes to [`KeychainTxOutIndex`](crate::keychain_txout::KeychainTxOutIndex).
-    pub indexer: crate::keychain_txout::ChangeSet,
+    /// Changes to the [`LocalChain`](local_chain::LocalChain).
+    pub local_chain: local_chain::ChangeSet,
+    /// Changes to [`TxGraph`](tx_graph::TxGraph).
+    pub tx_graph: tx_graph::ChangeSet<ConfirmationBlockTime>,
+    /// Changes to [`KeychainTxOutIndex`](keychain_txout::KeychainTxOutIndex).
+    pub indexer: keychain_txout::ChangeSet,
 }
 
-impl Merge for WalletChangeSet {
-    /// Merge another [`WalletChangeSet`] into itself.
-    ///
-    /// The `keychains_added` field respects the invariants of... TODO: FINISH THIS!
+impl Merge for ChangeSet {
+    /// Merge another [`ChangeSet`] into itself.
     fn merge(&mut self, other: Self) {
         if other.descriptor.is_some() {
             debug_assert!(
@@ -52,9 +48,9 @@ impl Merge for WalletChangeSet {
             self.network = other.network;
         }
 
-        crate::Merge::merge(&mut self.local_chain, other.local_chain);
-        crate::Merge::merge(&mut self.tx_graph, other.tx_graph);
-        crate::Merge::merge(&mut self.indexer, other.indexer);
+        Merge::merge(&mut self.local_chain, other.local_chain);
+        Merge::merge(&mut self.tx_graph, other.tx_graph);
+        Merge::merge(&mut self.indexer, other.indexer);
     }
 
     fn is_empty(&self) -> bool {
@@ -68,14 +64,16 @@ impl Merge for WalletChangeSet {
 }
 
 #[cfg(feature = "sqlite")]
-impl WalletChangeSet {
+impl ChangeSet {
     /// Schema name for wallet.
     pub const WALLET_SCHEMA_NAME: &'static str = "bdk_wallet";
     /// Name of table to store wallet descriptors and network.
     pub const WALLET_TABLE_NAME: &'static str = "bdk_wallet";
 
     /// Initialize sqlite tables for wallet schema & table.
-    fn init_wallet_sqlite_tables(db_tx: &rusqlite::Transaction) -> rusqlite::Result<()> {
+    fn init_wallet_sqlite_tables(
+        db_tx: &chain::rusqlite::Transaction,
+    ) -> chain::rusqlite::Result<()> {
         let schema_v0: &[&str] = &[&format!(
             "CREATE TABLE {} ( \
                 id INTEGER PRIMARY KEY NOT NULL CHECK (id = 0), \
@@ -88,12 +86,12 @@ impl WalletChangeSet {
         crate::sqlite::migrate_schema(db_tx, Self::WALLET_SCHEMA_NAME, &[schema_v0])
     }
 
-    /// Recover a [`WalletChangeSet`] from sqlite database.
-    pub fn from_sqlite(db_tx: &rusqlite::Transaction) -> rusqlite::Result<Self> {
+    /// Recover a [`ChangeSet`] from sqlite database.
+    pub fn from_sqlite(db_tx: &chain::rusqlite::Transaction) -> chain::rusqlite::Result<Self> {
         Self::init_wallet_sqlite_tables(db_tx)?;
         use crate::sqlite::Sql;
+        use chain::rusqlite::OptionalExtension;
         use miniscript::{Descriptor, DescriptorPublicKey};
-        use rusqlite::OptionalExtension;
 
         let mut changeset = Self::default();
 
@@ -116,18 +114,21 @@ impl WalletChangeSet {
             changeset.network = Some(network);
         }
 
-        changeset.local_chain = crate::local_chain::ChangeSet::from_sqlite(db_tx)?;
-        changeset.tx_graph = crate::tx_graph::ChangeSet::<_>::from_sqlite(db_tx)?;
-        changeset.indexer = crate::indexer::keychain_txout::ChangeSet::from_sqlite(db_tx)?;
+        changeset.local_chain = local_chain::ChangeSet::from_sqlite(db_tx)?;
+        changeset.tx_graph = tx_graph::ChangeSet::<_>::from_sqlite(db_tx)?;
+        changeset.indexer = keychain_txout::ChangeSet::from_sqlite(db_tx)?;
 
         Ok(changeset)
     }
 
-    /// Persist [`WalletChangeSet`] to sqlite database.
-    pub fn persist_to_sqlite(&self, db_tx: &rusqlite::Transaction) -> rusqlite::Result<()> {
+    /// Persist [`ChangeSet`] to sqlite database.
+    pub fn persist_to_sqlite(
+        &self,
+        db_tx: &chain::rusqlite::Transaction,
+    ) -> chain::rusqlite::Result<()> {
         Self::init_wallet_sqlite_tables(db_tx)?;
-        use crate::sqlite::Sql;
-        use rusqlite::named_params;
+        use chain::rusqlite::named_params;
+        use chain::sqlite::Sql;
 
         let mut descriptor_statement = db_tx.prepare_cached(&format!(
             "INSERT INTO {}(id, descriptor) VALUES(:id, :descriptor) ON CONFLICT(id) DO UPDATE SET descriptor=:descriptor",
@@ -169,8 +170,8 @@ impl WalletChangeSet {
     }
 }
 
-impl From<crate::local_chain::ChangeSet> for WalletChangeSet {
-    fn from(chain: crate::local_chain::ChangeSet) -> Self {
+impl From<local_chain::ChangeSet> for ChangeSet {
+    fn from(chain: local_chain::ChangeSet) -> Self {
         Self {
             local_chain: chain,
             ..Default::default()
@@ -178,7 +179,7 @@ impl From<crate::local_chain::ChangeSet> for WalletChangeSet {
     }
 }
 
-impl From<IndexedTxGraphChangeSet> for WalletChangeSet {
+impl From<IndexedTxGraphChangeSet> for ChangeSet {
     fn from(indexed_tx_graph: IndexedTxGraphChangeSet) -> Self {
         Self {
             tx_graph: indexed_tx_graph.tx_graph,
@@ -188,8 +189,8 @@ impl From<IndexedTxGraphChangeSet> for WalletChangeSet {
     }
 }
 
-impl From<crate::tx_graph::ChangeSet<ConfirmationBlockTime>> for WalletChangeSet {
-    fn from(tx_graph: crate::tx_graph::ChangeSet<ConfirmationBlockTime>) -> Self {
+impl From<tx_graph::ChangeSet<ConfirmationBlockTime>> for ChangeSet {
+    fn from(tx_graph: tx_graph::ChangeSet<ConfirmationBlockTime>) -> Self {
         Self {
             tx_graph,
             ..Default::default()
@@ -197,8 +198,8 @@ impl From<crate::tx_graph::ChangeSet<ConfirmationBlockTime>> for WalletChangeSet
     }
 }
 
-impl From<crate::keychain_txout::ChangeSet> for WalletChangeSet {
-    fn from(indexer: crate::keychain_txout::ChangeSet) -> Self {
+impl From<keychain_txout::ChangeSet> for ChangeSet {
+    fn from(indexer: keychain_txout::ChangeSet) -> Self {
         Self {
             indexer,
             ..Default::default()

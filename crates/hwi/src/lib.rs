@@ -34,7 +34,7 @@
 //! # }
 //! ```
 //!
-//! [`TransactionSigner`]: bdk_wallet::wallet::signer::TransactionSigner
+//! [`TransactionSigner`]: bdk_wallet::signer::TransactionSigner
 
 mod signer;
 pub use signer::*;

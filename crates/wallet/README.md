@@ -57,7 +57,7 @@ that the `Wallet` can use to update its view of the chain.
 
 ## Persistence
 
-To persist `Wallet` state data use a data store crate that reads and writes [`bdk_chain::WalletChangeSet`].
+To persist `Wallet` state data use a data store crate that reads and writes [`ChangeSet`].
 
 **Implementations**
 
@@ -122,7 +122,7 @@ println!("Your new receive address is: {}", receive_address.address);
 
 <!-- ```rust -->
 <!-- use bdk_wallet::Wallet; -->
-<!-- use bdk_wallet::wallet::AddressIndex::New; -->
+<!-- use bdk_wallet::AddressIndex::New; -->
 <!-- use bdk_wallet::bitcoin::Network; -->
 
 <!-- fn main() -> Result<(), bdk_wallet::Error> { -->
@@ -147,7 +147,7 @@ println!("Your new receive address is: {}", receive_address.address);
 <!-- use bdk_wallet::blockchain::ElectrumBlockchain; -->
 
 <!-- use bdk_wallet::electrum_client::Client; -->
-<!-- use bdk_wallet::wallet::AddressIndex::New; -->
+<!-- use bdk_wallet::AddressIndex::New; -->
 
 <!-- use bitcoin::base64; -->
 <!-- use bdk_wallet::bitcoin::consensus::serialize; -->
