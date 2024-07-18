@@ -935,7 +935,7 @@ impl<Ctx: ScriptContext> IntoDescriptorKey<Ctx> for PrivateKey {
 }
 
 /// Errors thrown while working with [`keys`](crate::keys)
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum KeyError {
     /// The key cannot exist in the given script context
     InvalidScriptContext,

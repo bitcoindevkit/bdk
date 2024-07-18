@@ -184,7 +184,7 @@ impl fmt::Display for AddressInfo {
 }
 
 /// The error type when loading a [`Wallet`] from a [`ChangeSet`].
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum LoadError {
     /// There was a problem with the passed-in descriptor(s).
     Descriptor(crate::descriptor::DescriptorError),
@@ -216,7 +216,7 @@ impl fmt::Display for LoadError {
 impl std::error::Error for LoadError {}
 
 /// Represents a mismatch with what is loaded and what is expected from [`LoadParams`].
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum LoadMismatch {
     /// Network does not match.
     Network {
@@ -241,6 +241,18 @@ pub enum LoadMismatch {
         /// The expected descriptor.
         expected: ExtendedDescriptor,
     },
+}
+
+impl From<LoadMismatch> for LoadError {
+    fn from(mismatch: LoadMismatch) -> Self {
+        Self::Mismatch(mismatch)
+    }
+}
+
+impl<E> From<LoadMismatch> for LoadWithPersistError<E> {
+    fn from(mismatch: LoadMismatch) -> Self {
+        Self::InvalidChangeSet(LoadError::Mismatch(mismatch))
+    }
 }
 
 /// An error that may occur when applying a block to [`Wallet`].

@@ -13,8 +13,9 @@ use bdk_wallet::error::CreateTxError;
 use bdk_wallet::psbt::PsbtUtils;
 use bdk_wallet::signer::{SignOptions, SignerError};
 use bdk_wallet::tx_builder::AddForeignUtxoError;
-use bdk_wallet::KeychainKind;
 use bdk_wallet::{AddressInfo, Balance, CreateParams, LoadParams, Wallet};
+use bdk_wallet::{KeychainKind, LoadError, LoadMismatch, LoadWithPersistError};
+use bitcoin::constants::ChainHash;
 use bitcoin::hashes::Hash;
 use bitcoin::key::Secp256k1;
 use bitcoin::psbt;
@@ -169,6 +170,93 @@ fn wallet_is_persisted() -> anyhow::Result<()> {
         |path| Ok(bdk_file_store::Store::open(DB_MAGIC, path)?),
     )?;
     run::<bdk_chain::sqlite::Connection, _, _>(
+        "store.sqlite",
+        |path| Ok(bdk_chain::sqlite::Connection::open(path)?),
+        |path| Ok(bdk_chain::sqlite::Connection::open(path)?),
+    )?;
+
+    Ok(())
+}
+
+#[test]
+fn wallet_load_checks() -> anyhow::Result<()> {
+    fn run<Db, CreateDb, OpenDb, LoadDbError>(
+        filename: &str,
+        create_db: CreateDb,
+        open_db: OpenDb,
+    ) -> anyhow::Result<()>
+    where
+        CreateDb: Fn(&Path) -> anyhow::Result<Db>,
+        OpenDb: Fn(&Path) -> anyhow::Result<Db>,
+        Wallet: PersistWith<
+            Db,
+            CreateParams = CreateParams,
+            LoadParams = LoadParams,
+            LoadError = LoadWithPersistError<LoadDbError>,
+        >,
+        <Wallet as PersistWith<Db>>::CreateError: std::error::Error + Send + Sync + 'static,
+        <Wallet as PersistWith<Db>>::LoadError: std::error::Error + Send + Sync + 'static,
+        <Wallet as PersistWith<Db>>::PersistError: std::error::Error + Send + Sync + 'static,
+    {
+        let temp_dir = tempfile::tempdir().expect("must create tempdir");
+        let file_path = temp_dir.path().join(filename);
+        let network = Network::Testnet;
+        let (external_desc, internal_desc) = get_test_tr_single_sig_xprv_with_change_desc();
+
+        // create new wallet
+        let _ = Wallet::create(external_desc, internal_desc)
+            .network(network)
+            .create_wallet(&mut create_db(&file_path)?)?;
+
+        assert_matches!(
+            Wallet::load()
+                .network(Network::Regtest)
+                .load_wallet(&mut open_db(&file_path)?),
+            Err(LoadWithPersistError::InvalidChangeSet(LoadError::Mismatch(
+                LoadMismatch::Network {
+                    loaded: Network::Testnet,
+                    expected: Network::Regtest,
+                }
+            ))),
+            "unexpected network check result: Regtest (check) is not Testnet (loaded)",
+        );
+        assert_matches!(
+            Wallet::load()
+                .network(Network::Bitcoin)
+                .load_wallet(&mut open_db(&file_path)?),
+            Err(LoadWithPersistError::InvalidChangeSet(LoadError::Mismatch(
+                LoadMismatch::Network {
+                    loaded: Network::Testnet,
+                    expected: Network::Bitcoin,
+                }
+            ))),
+            "unexpected network check result: Bitcoin (check) is not Testnet (loaded)",
+        );
+        let mainnet_hash = BlockHash::from_byte_array(ChainHash::BITCOIN.to_bytes());
+        assert_matches!(
+            Wallet::load().genesis_hash(mainnet_hash).load_wallet(&mut open_db(&file_path)?),
+            Err(LoadWithPersistError::InvalidChangeSet(LoadError::Mismatch(LoadMismatch::Genesis { .. }))),
+            "unexpected genesis hash check result: mainnet hash (check) is not testnet hash (loaded)",
+        );
+        assert_matches!(
+            Wallet::load()
+                .descriptors(internal_desc, external_desc)
+                .load_wallet(&mut open_db(&file_path)?),
+            Err(LoadWithPersistError::InvalidChangeSet(LoadError::Mismatch(
+                LoadMismatch::Descriptor { .. }
+            ))),
+            "unexpected descriptors check result",
+        );
+
+        Ok(())
+    }
+
+    run(
+        "store.db",
+        |path| Ok(bdk_file_store::Store::create_new(DB_MAGIC, path)?),
+        |path| Ok(bdk_file_store::Store::open(DB_MAGIC, path)?),
+    )?;
+    run(
         "store.sqlite",
         |path| Ok(bdk_chain::sqlite::Connection::open(path)?),
         |path| Ok(bdk_chain::sqlite::Connection::open(path)?),

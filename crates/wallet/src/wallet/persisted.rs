@@ -138,7 +138,7 @@ impl chain::PersistWith<bdk_file_store::Store<crate::ChangeSet>> for Wallet {
 }
 
 /// Error type for [`PersistedWallet::load`].
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum LoadWithPersistError<E> {
     /// Error from persistence.
     Persist(E),

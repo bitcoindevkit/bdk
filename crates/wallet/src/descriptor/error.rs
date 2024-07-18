@@ -13,7 +13,7 @@
 use core::fmt;
 
 /// Errors related to the parsing and usage of descriptors
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Error {
     /// Invalid HD Key path, such as having a wildcard but a length != 1
     InvalidHdKeyPath,

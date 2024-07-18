@@ -57,6 +57,7 @@ pub trait PersistAsyncWith<Db>: Sized {
 }
 
 /// Represents a persisted `T`.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Persisted<T> {
     inner: T,
 }
