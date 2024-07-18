@@ -13,8 +13,8 @@ use std::str::FromStr;
 /// to a foreign address and one returning 50_000 back to the wallet. The remaining 1000
 /// sats are the transaction fee.
 pub fn get_funded_wallet_with_change(descriptor: &str, change: &str) -> (Wallet, bitcoin::Txid) {
-    let mut wallet = CreateParams::new(descriptor, change, Network::Regtest)
-        .expect("must parse descriptors")
+    let mut wallet = Wallet::create(descriptor.to_string(), change.to_string())
+        .network(Network::Regtest)
         .create_wallet_no_persist()
         .expect("descriptors must be valid");
 

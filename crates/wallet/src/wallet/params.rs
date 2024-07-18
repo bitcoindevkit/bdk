@@ -1,53 +1,58 @@
+use alloc::boxed::Box;
 use bdk_chain::{keychain_txout::DEFAULT_LOOKAHEAD, PersistAsyncWith, PersistWith};
 use bitcoin::{BlockHash, Network};
 use miniscript::descriptor::KeyMap;
 
 use crate::{
     descriptor::{DescriptorError, ExtendedDescriptor, IntoWalletDescriptor},
+    utils::SecpCtx,
     KeychainKind, Wallet,
 };
 
-use super::{utils::SecpCtx, ChangeSet, LoadError, PersistedWallet};
+use super::{ChangeSet, LoadError, PersistedWallet};
+
+/// This atrocity is to avoid having type parameters on [`CreateParams`] and [`LoadParams`].
+///
+/// The better option would be to do `Box<dyn IntoWalletDescriptor>`, but we cannot due to Rust's
+/// [object safety rules](https://doc.rust-lang.org/reference/items/traits.html#object-safety).
+type DescriptorToExtract = Box<
+    dyn FnOnce(&SecpCtx, Network) -> Result<(ExtendedDescriptor, KeyMap), DescriptorError>
+        + 'static,
+>;
+
+fn make_descriptor_to_extract<D>(descriptor: D) -> DescriptorToExtract
+where
+    D: IntoWalletDescriptor + 'static,
+{
+    Box::new(|secp, network| descriptor.into_wallet_descriptor(secp, network))
+}
 
 /// Parameters for [`Wallet::create`] or [`PersistedWallet::create`].
-#[derive(Debug, Clone)]
 #[must_use]
 pub struct CreateParams {
-    pub(crate) descriptor: ExtendedDescriptor,
+    pub(crate) descriptor: DescriptorToExtract,
     pub(crate) descriptor_keymap: KeyMap,
-    pub(crate) change_descriptor: ExtendedDescriptor,
+    pub(crate) change_descriptor: DescriptorToExtract,
     pub(crate) change_descriptor_keymap: KeyMap,
     pub(crate) network: Network,
     pub(crate) genesis_hash: Option<BlockHash>,
     pub(crate) lookahead: u32,
-    pub(crate) secp: SecpCtx,
 }
 
 impl CreateParams {
     /// Construct parameters with provided `descriptor`, `change_descriptor` and `network`.
     ///
     /// Default values: `genesis_hash` = `None`, `lookahead` = [`DEFAULT_LOOKAHEAD`]
-    pub fn new<E: IntoWalletDescriptor>(
-        descriptor: E,
-        change_descriptor: E,
-        network: Network,
-    ) -> Result<Self, DescriptorError> {
-        let secp = SecpCtx::default();
-
-        let (descriptor, descriptor_keymap) = descriptor.into_wallet_descriptor(&secp, network)?;
-        let (change_descriptor, change_descriptor_keymap) =
-            change_descriptor.into_wallet_descriptor(&secp, network)?;
-
-        Ok(Self {
-            descriptor,
-            descriptor_keymap,
-            change_descriptor,
-            change_descriptor_keymap,
-            network,
+    pub fn new<D: IntoWalletDescriptor + 'static>(descriptor: D, change_descriptor: D) -> Self {
+        Self {
+            descriptor: make_descriptor_to_extract(descriptor),
+            descriptor_keymap: KeyMap::default(),
+            change_descriptor: make_descriptor_to_extract(change_descriptor),
+            change_descriptor_keymap: KeyMap::default(),
+            network: Network::Bitcoin,
             genesis_hash: None,
             lookahead: DEFAULT_LOOKAHEAD,
-            secp,
-        })
+        }
     }
 
     /// Extend the given `keychain`'s `keymap`.
@@ -57,6 +62,12 @@ impl CreateParams {
             KeychainKind::Internal => &mut self.change_descriptor_keymap,
         }
         .extend(keymap);
+        self
+    }
+
+    /// Set `network`.
+    pub fn network(mut self, network: Network) -> Self {
+        self.network = network;
         self
     }
 
@@ -102,16 +113,14 @@ impl CreateParams {
 
 /// Parameters for [`Wallet::load`] or [`PersistedWallet::load`].
 #[must_use]
-#[derive(Debug, Clone)]
 pub struct LoadParams {
     pub(crate) descriptor_keymap: KeyMap,
     pub(crate) change_descriptor_keymap: KeyMap,
     pub(crate) lookahead: u32,
     pub(crate) check_network: Option<Network>,
     pub(crate) check_genesis_hash: Option<BlockHash>,
-    pub(crate) check_descriptor: Option<ExtendedDescriptor>,
-    pub(crate) check_change_descriptor: Option<ExtendedDescriptor>,
-    pub(crate) secp: SecpCtx,
+    pub(crate) check_descriptor: Option<DescriptorToExtract>,
+    pub(crate) check_change_descriptor: Option<DescriptorToExtract>,
 }
 
 impl LoadParams {
@@ -127,37 +136,7 @@ impl LoadParams {
             check_genesis_hash: None,
             check_descriptor: None,
             check_change_descriptor: None,
-            secp: SecpCtx::new(),
         }
-    }
-
-    /// Construct parameters with `network` check.
-    pub fn with_network(network: Network) -> Self {
-        Self {
-            check_network: Some(network),
-            ..Default::default()
-        }
-    }
-
-    /// Construct parameters with descriptor checks.
-    pub fn with_descriptors<E: IntoWalletDescriptor>(
-        descriptor: E,
-        change_descriptor: E,
-        network: Network,
-    ) -> Result<Self, DescriptorError> {
-        let mut params = Self::with_network(network);
-        let secp = &params.secp;
-
-        let (descriptor, descriptor_keymap) = descriptor.into_wallet_descriptor(secp, network)?;
-        params.check_descriptor = Some(descriptor);
-        params.descriptor_keymap = descriptor_keymap;
-
-        let (change_descriptor, change_descriptor_keymap) =
-            change_descriptor.into_wallet_descriptor(secp, network)?;
-        params.check_change_descriptor = Some(change_descriptor);
-        params.change_descriptor_keymap = change_descriptor_keymap;
-
-        Ok(params)
     }
 
     /// Extend the given `keychain`'s `keymap`.
@@ -167,6 +146,23 @@ impl LoadParams {
             KeychainKind::Internal => &mut self.change_descriptor_keymap,
         }
         .extend(keymap);
+        self
+    }
+
+    /// Checks that `descriptor` of `keychain` matches this, and extracts private keys (if
+    /// avaliable).
+    pub fn descriptors<D>(mut self, descriptor: D, change_descriptor: D) -> Self
+    where
+        D: IntoWalletDescriptor + 'static,
+    {
+        self.check_descriptor = Some(make_descriptor_to_extract(descriptor));
+        self.check_change_descriptor = Some(make_descriptor_to_extract(change_descriptor));
+        self
+    }
+
+    /// Check for `network`.
+    pub fn network(mut self, network: Network) -> Self {
+        self.check_network = Some(network);
         self
     }
 

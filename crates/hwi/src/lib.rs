@@ -7,7 +7,7 @@
 //! # use bdk_wallet::descriptor::Descriptor;
 //! # use bdk_wallet::signer::SignerOrdering;
 //! # use bdk_hwi::HWISigner;
-//! # use bdk_wallet::{KeychainKind, SignOptions};
+//! # use bdk_wallet::{KeychainKind, SignOptions, Wallet};
 //! # use hwi::HWIClient;
 //! # use std::sync::Arc;
 //! # use std::str::FromStr;
@@ -20,8 +20,7 @@
 //! let first_device = devices.remove(0)?;
 //! let custom_signer = HWISigner::from_device(&first_device, Network::Testnet.into())?;
 //!
-//! # let mut wallet = bdk_wallet::CreateParams::new("", "", Network::Testnet)?
-//! #   .create_wallet_no_persist()?;
+//! # let mut wallet = Wallet::create("", "").network(Network::Testnet).create_wallet_no_persist()?;
 //! #
 //! // Adding the hardware signer to the BDK wallet
 //! wallet.add_signer(

@@ -1,6 +1,5 @@
 use bdk_wallet::file_store::Store;
-use bdk_wallet::CreateParams;
-use bdk_wallet::LoadParams;
+use bdk_wallet::Wallet;
 use std::io::Write;
 use std::str::FromStr;
 
@@ -26,11 +25,15 @@ fn main() -> Result<(), anyhow::Error> {
 
     let mut db = Store::<bdk_wallet::ChangeSet>::open_or_create_new(DB_MAGIC.as_bytes(), db_path)?;
 
-    let load_params = LoadParams::with_descriptors(EXTERNAL_DESC, INTERNAL_DESC, NETWORK)?;
-    let create_params = CreateParams::new(EXTERNAL_DESC, INTERNAL_DESC, NETWORK)?;
-    let mut wallet = match load_params.load_wallet(&mut db)? {
+    let wallet_opt = Wallet::load()
+        .descriptors(EXTERNAL_DESC, INTERNAL_DESC)
+        .network(NETWORK)
+        .load_wallet(&mut db)?;
+    let mut wallet = match wallet_opt {
         Some(wallet) => wallet,
-        None => create_params.create_wallet(&mut db)?,
+        None => Wallet::create(EXTERNAL_DESC, INTERNAL_DESC)
+            .network(NETWORK)
+            .create_wallet(&mut db)?,
     };
 
     let address = wallet.next_unused_address(KeychainKind::External);

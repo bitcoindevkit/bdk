@@ -67,7 +67,7 @@ To persist `Wallet` state data use a data store crate that reads and writes [`Ch
 
 <!-- compile_fail because outpoint and txout are fake variables -->
 ```rust,no_run
-use bdk_wallet::{bitcoin::Network, CreateParams, LoadParams, KeychainKind, ChangeSet};
+use bdk_wallet::{bitcoin::Network, KeychainKind, ChangeSet, Wallet};
 
 // Open or create a new file store for wallet data.
 let mut db =
@@ -78,13 +78,17 @@ let mut db =
 let network = Network::Testnet;
 let descriptor = "wpkh(tprv8ZgxMBicQKsPdcAqYBpzAFwU5yxBUo88ggoBqu1qPcHUfSbKK1sKMLmC7EAk438btHQrSdu3jGGQa6PA71nvH5nkDexhLteJqkM4dQmWF9g/84'/1'/0'/0/*)";
 let change_descriptor = "wpkh(tprv8ZgxMBicQKsPdcAqYBpzAFwU5yxBUo88ggoBqu1qPcHUfSbKK1sKMLmC7EAk438btHQrSdu3jGGQa6PA71nvH5nkDexhLteJqkM4dQmWF9g/84'/1'/0'/1/*)";
-let load_params = LoadParams::with_descriptors(descriptor, change_descriptor, network)
-    .expect("must parse descriptors");
-let create_params = CreateParams::new(descriptor, change_descriptor, network)
-    .expect("must parse descriptors");
-let mut wallet = match load_params.load_wallet(&mut db).expect("wallet") {
+let wallet_opt = Wallet::load()
+    .descriptors(descriptor, change_descriptor)
+    .network(network)
+    .load_wallet(&mut db)
+    .expect("wallet");
+let mut wallet = match wallet_opt {
     Some(wallet) => wallet,
-    None => create_params.create_wallet(&mut db).expect("wallet"),
+    None => Wallet::create(descriptor, change_descriptor)
+        .network(network)
+        .create_wallet(&mut db)
+        .expect("wallet"),
 };
 
 // Get a new address to receive bitcoin.

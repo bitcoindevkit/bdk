@@ -5,7 +5,7 @@ use bdk_bitcoind_rpc::{
 use bdk_wallet::{
     bitcoin::{Block, Network, Transaction},
     file_store::Store,
-    CreateParams, LoadParams,
+    Wallet,
 };
 use clap::{self, Parser};
 use std::{path::PathBuf, sync::mpsc::sync_channel, thread::spawn, time::Instant};
@@ -88,13 +88,15 @@ fn main() -> anyhow::Result<()> {
     let start_load_wallet = Instant::now();
     let mut db =
         Store::<bdk_wallet::ChangeSet>::open_or_create_new(DB_MAGIC.as_bytes(), args.db_path)?;
-
-    let load_params =
-        LoadParams::with_descriptors(&args.descriptor, &args.change_descriptor, args.network)?;
-    let create_params = CreateParams::new(&args.descriptor, &args.change_descriptor, args.network)?;
-    let mut wallet = match load_params.load_wallet(&mut db)? {
+    let wallet_opt = Wallet::load()
+        .descriptors(args.descriptor.clone(), args.change_descriptor.clone())
+        .network(args.network)
+        .load_wallet(&mut db)?;
+    let mut wallet = match wallet_opt {
         Some(wallet) => wallet,
-        None => create_params.create_wallet(&mut db)?,
+        None => Wallet::create(args.descriptor, args.change_descriptor)
+            .network(args.network)
+            .create_wallet(&mut db)?,
     };
     println!(
         "Loaded wallet in {}s",

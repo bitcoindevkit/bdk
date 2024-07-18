@@ -112,6 +112,16 @@ impl IntoWalletDescriptor for &String {
     }
 }
 
+impl IntoWalletDescriptor for String {
+    fn into_wallet_descriptor(
+        self,
+        secp: &SecpCtx,
+        network: Network,
+    ) -> Result<(ExtendedDescriptor, KeyMap), DescriptorError> {
+        self.as_str().into_wallet_descriptor(secp, network)
+    }
+}
+
 impl IntoWalletDescriptor for ExtendedDescriptor {
     fn into_wallet_descriptor(
         self,

@@ -5,7 +5,7 @@ use bdk_esplora::{esplora_client, EsploraAsyncExt};
 use bdk_wallet::{
     bitcoin::{Amount, Network},
     rusqlite::Connection,
-    CreateParams, KeychainKind, LoadParams, SignOptions,
+    KeychainKind, SignOptions, Wallet,
 };
 
 const SEND_AMOUNT: Amount = Amount::from_sat(5000);
@@ -22,11 +22,15 @@ const ESPLORA_URL: &str = "http://signet.bitcoindevkit.net";
 async fn main() -> Result<(), anyhow::Error> {
     let mut conn = Connection::open(DB_PATH)?;
 
-    let load_params = LoadParams::with_descriptors(EXTERNAL_DESC, INTERNAL_DESC, NETWORK)?;
-    let create_params = CreateParams::new(EXTERNAL_DESC, INTERNAL_DESC, NETWORK)?;
-    let mut wallet = match load_params.load_wallet(&mut conn)? {
+    let wallet_opt = Wallet::load()
+        .descriptors(EXTERNAL_DESC, INTERNAL_DESC)
+        .network(NETWORK)
+        .load_wallet(&mut conn)?;
+    let mut wallet = match wallet_opt {
         Some(wallet) => wallet,
-        None => create_params.create_wallet(&mut conn)?,
+        None => Wallet::create(EXTERNAL_DESC, INTERNAL_DESC)
+            .network(NETWORK)
+            .create_wallet(&mut conn)?,
     };
 
     let address = wallet.next_unused_address(KeychainKind::External);
