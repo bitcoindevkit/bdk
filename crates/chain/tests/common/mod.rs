@@ -5,6 +5,22 @@ mod tx_template;
 pub use tx_template::*;
 
 #[allow(unused_macros)]
+macro_rules! anchor {
+    ($height:expr, $hash:literal) => {
+        (
+            (
+                bdk_chain::bitcoin::Txid::all_zeros(),
+                bdk_chain::BlockId {
+                    height: $height,
+                    hash: bitcoin::hashes::Hash::hash($hash.as_bytes()),
+                },
+            ),
+            (),
+        )
+    };
+}
+
+#[allow(unused_macros)]
 macro_rules! block_id {
     ($height:expr, $hash:literal) => {{
         bdk_chain::BlockId {

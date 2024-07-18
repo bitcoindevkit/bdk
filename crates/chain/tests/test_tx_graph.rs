@@ -7,7 +7,7 @@ use bdk_chain::{
     collections::*,
     local_chain::LocalChain,
     tx_graph::{ChangeSet, TxGraph},
-    Anchor, BlockId, ChainOracle, ChainPosition, ConfirmationBlockTime, Merge,
+    BlockId, BlockTime, ChainOracle, ChainPosition, Merge,
 };
 use bitcoin::{
     absolute, hashes::Hash, transaction, Amount, BlockHash, OutPoint, ScriptBuf, SignedAmount,
@@ -15,7 +15,6 @@ use bitcoin::{
 };
 use common::*;
 use core::iter;
-use rand::RngCore;
 use std::sync::Arc;
 use std::vec;
 
@@ -63,17 +62,14 @@ fn insert_txouts() {
     };
 
     // Conf anchor used to mark the full transaction as confirmed.
-    let conf_anchor = ChainPosition::Confirmed(BlockId {
+    let anchor_block = BlockId {
         height: 100,
         hash: h!("random blockhash"),
-    });
-
-    // Unconfirmed anchor to mark the partial transactions as unconfirmed
-    let unconf_anchor = ChainPosition::<BlockId>::Unconfirmed(1000000);
+    };
 
     // Make the original graph
     let mut graph = {
-        let mut graph = TxGraph::<ChainPosition<BlockId>>::default();
+        let mut graph = TxGraph::default();
         for (outpoint, txout) in &original_ops {
             assert_eq!(
                 graph.insert_txout(*outpoint, txout.clone()),
@@ -98,16 +94,6 @@ fn insert_txouts() {
                     ..Default::default()
                 }
             );
-            // Mark them unconfirmed.
-            assert_eq!(
-                graph.insert_anchor(outpoint.txid, unconf_anchor),
-                ChangeSet {
-                    txs: [].into(),
-                    txouts: [].into(),
-                    anchors: [(unconf_anchor, outpoint.txid)].into(),
-                    last_seen: [].into()
-                }
-            );
             // Mark them last seen at.
             assert_eq!(
                 graph.insert_seen_at(outpoint.txid, 1000000),
@@ -130,11 +116,18 @@ fn insert_txouts() {
 
         // Mark it as confirmed.
         assert_eq!(
-            graph.insert_anchor(update_txs.compute_txid(), conf_anchor),
+            graph.insert_anchor(
+                (update_txs.compute_txid(), anchor_block),
+                BlockTime::new(100)
+            ),
             ChangeSet {
                 txs: [].into(),
                 txouts: [].into(),
-                anchors: [(conf_anchor, update_txs.compute_txid())].into(),
+                anchors: [(
+                    (update_txs.compute_txid(), anchor_block),
+                    BlockTime::new(100)
+                )]
+                .into(),
                 last_seen: [].into()
             }
         );
@@ -149,10 +142,10 @@ fn insert_txouts() {
         ChangeSet {
             txs: [Arc::new(update_txs.clone())].into(),
             txouts: update_ops.clone().into(),
-            anchors: [
-                (conf_anchor, update_txs.compute_txid()),
-                (unconf_anchor, h!("tx2"))
-            ]
+            anchors: [(
+                (update_txs.compute_txid(), anchor_block),
+                BlockTime::new(100)
+            )]
             .into(),
             last_seen: [(h!("tx2"), 1000000)].into()
         }
@@ -206,10 +199,10 @@ fn insert_txouts() {
         ChangeSet {
             txs: [Arc::new(update_txs.clone())].into(),
             txouts: update_ops.into_iter().chain(original_ops).collect(),
-            anchors: [
-                (conf_anchor, update_txs.compute_txid()),
-                (unconf_anchor, h!("tx2"))
-            ]
+            anchors: [(
+                (update_txs.compute_txid(), anchor_block),
+                BlockTime::new(100)
+            )]
             .into(),
             last_seen: [(h!("tx2"), 1000000)].into()
         }
@@ -662,7 +655,7 @@ fn test_walk_ancestors() {
         ..common::new_tx(0)
     };
 
-    let mut graph = TxGraph::<BlockId>::new([
+    let mut graph = TxGraph::<BlockTime>::new([
         tx_a0.clone(),
         tx_b0.clone(),
         tx_b1.clone(),
@@ -677,7 +670,8 @@ fn test_walk_ancestors() {
     ]);
 
     [&tx_a0, &tx_b1].iter().for_each(|&tx| {
-        let changeset = graph.insert_anchor(tx.compute_txid(), tip.block_id());
+        let changeset =
+            graph.insert_anchor((tx.compute_txid(), tip.block_id()), BlockTime::new(100));
         assert!(!changeset.is_empty());
     });
 
@@ -695,8 +689,8 @@ fn test_walk_ancestors() {
         graph
             .walk_ancestors(tx_e0.clone(), |depth, tx| {
                 let tx_node = graph.get_tx_node(tx.compute_txid())?;
-                for block in tx_node.anchors {
-                    match local_chain.is_block_in_chain(block.anchor_block(), tip.block_id()) {
+                for (_, blockid) in tx_node.anchors.keys() {
+                    match local_chain.is_block_in_chain(*blockid, tip.block_id()) {
                         Ok(Some(true)) => return None,
                         _ => continue,
                     }
@@ -935,7 +929,7 @@ fn test_chain_spends() {
         ..common::new_tx(0)
     };
 
-    let mut graph = TxGraph::<ConfirmationBlockTime>::default();
+    let mut graph = TxGraph::default();
 
     let _ = graph.insert_tx(tx_0.clone());
     let _ = graph.insert_tx(tx_1.clone());
@@ -943,11 +937,8 @@ fn test_chain_spends() {
 
     for (ht, tx) in [(95, &tx_0), (98, &tx_1)] {
         let _ = graph.insert_anchor(
-            tx.compute_txid(),
-            ConfirmationBlockTime {
-                block_id: tip.get(ht).unwrap().block_id(),
-                confirmation_time: 100,
-            },
+            (tx.compute_txid(), tip.get(ht).unwrap().block_id()),
+            BlockTime::new(100),
         );
     }
 
@@ -959,28 +950,34 @@ fn test_chain_spends() {
             OutPoint::new(tx_0.compute_txid(), 0)
         ),
         Some((
-            ChainPosition::Confirmed(&ConfirmationBlockTime {
-                block_id: BlockId {
-                    hash: tip.get(98).unwrap().hash(),
-                    height: 98,
-                },
-                confirmation_time: 100
-            }),
+            ChainPosition::Confirmed(
+                (
+                    tx_1.compute_txid(),
+                    BlockId {
+                        hash: tip.get(98).unwrap().hash(),
+                        height: 98,
+                    }
+                ),
+                BlockTime::new(100)
+            ),
             tx_1.compute_txid(),
-        )),
+        ))
     );
 
     // Check if chain position is returned correctly.
     assert_eq!(
         graph.get_chain_position(&local_chain, tip.block_id(), tx_0.compute_txid()),
         // Some(ObservedAs::Confirmed(&local_chain.get_block(95).expect("block expected"))),
-        Some(ChainPosition::Confirmed(&ConfirmationBlockTime {
-            block_id: BlockId {
-                hash: tip.get(95).unwrap().hash(),
-                height: 95,
-            },
-            confirmation_time: 100
-        }))
+        Some(ChainPosition::Confirmed(
+            (
+                tx_0.compute_txid(),
+                BlockId {
+                    hash: tip.get(95).unwrap().hash(),
+                    height: 95,
+                }
+            ),
+            BlockTime::new(100)
+        ))
     );
 
     // Mark the unconfirmed as seen and check correct ObservedAs status is returned.
@@ -1090,7 +1087,7 @@ fn test_changeset_last_seen_merge() {
 
 #[test]
 fn update_last_seen_unconfirmed() {
-    let mut graph = TxGraph::<()>::default();
+    let mut graph = TxGraph::default();
     let tx = new_tx(0);
     let txid = tx.compute_txid();
 
@@ -1110,7 +1107,7 @@ fn update_last_seen_unconfirmed() {
     assert!(changeset.last_seen.is_empty());
 
     // once anchored, last seen is not updated
-    let _ = graph.insert_anchor(txid, ());
+    let _ = graph.insert_anchor((txid, BlockId::default()), BlockTime::new(100));
     let changeset = graph.update_last_seen_unconfirmed(4);
     assert!(changeset.is_empty());
     assert_eq!(
@@ -1130,7 +1127,7 @@ fn transactions_inserted_into_tx_graph_are_not_canonical_until_they_have_an_anch
     let txids: Vec<Txid> = txs.iter().map(Transaction::compute_txid).collect();
 
     // graph
-    let mut graph = TxGraph::<BlockId>::new(txs);
+    let mut graph = TxGraph::<BlockTime>::new(txs);
     let full_txs: Vec<_> = graph.full_txs().collect();
     assert_eq!(full_txs.len(), 2);
     let unseen_txs: Vec<_> = graph.txs_with_no_anchor_or_last_seen().collect();
@@ -1156,94 +1153,11 @@ fn transactions_inserted_into_tx_graph_are_not_canonical_until_they_have_an_anch
     drop(canonical_txs);
 
     // tx1 with anchor is also canonical
-    let _ = graph.insert_anchor(txids[1], block_id!(2, "B"));
+    let _ = graph.insert_anchor((txids[1], block_id!(2, "B")), BlockTime::new(100));
     let canonical_txids: Vec<_> = graph
         .list_canonical_txs(&chain, chain.tip().block_id())
         .map(|tx| tx.tx_node.txid)
         .collect();
     assert!(canonical_txids.contains(&txids[1]));
     assert!(graph.txs_with_no_anchor_or_last_seen().next().is_none());
-}
-
-#[test]
-/// The `map_anchors` allow a caller to pass a function to reconstruct the [`TxGraph`] with any [`Anchor`],
-/// even though the function is non-deterministic.
-fn call_map_anchors_with_non_deterministic_anchor() {
-    #[derive(Debug, Default, Clone, PartialEq, Eq, Copy, PartialOrd, Ord, core::hash::Hash)]
-    /// A non-deterministic anchor
-    pub struct NonDeterministicAnchor {
-        pub anchor_block: BlockId,
-        pub non_deterministic_field: u32,
-    }
-
-    let template = [
-        TxTemplate {
-            tx_name: "tx1",
-            inputs: &[TxInTemplate::Bogus],
-            outputs: &[TxOutTemplate::new(10000, Some(1))],
-            anchors: &[block_id!(1, "A")],
-            last_seen: None,
-        },
-        TxTemplate {
-            tx_name: "tx2",
-            inputs: &[TxInTemplate::PrevTx("tx1", 0)],
-            outputs: &[TxOutTemplate::new(20000, Some(2))],
-            anchors: &[block_id!(2, "B")],
-            ..Default::default()
-        },
-        TxTemplate {
-            tx_name: "tx3",
-            inputs: &[TxInTemplate::PrevTx("tx2", 0)],
-            outputs: &[TxOutTemplate::new(30000, Some(3))],
-            anchors: &[block_id!(3, "C"), block_id!(4, "D")],
-            ..Default::default()
-        },
-    ];
-    let (graph, _, _) = init_graph(&template);
-    let new_graph = graph.clone().map_anchors(|a| NonDeterministicAnchor {
-        anchor_block: a,
-        // A non-deterministic value
-        non_deterministic_field: rand::thread_rng().next_u32(),
-    });
-
-    // Check all the details in new_graph reconstruct as well
-
-    let mut full_txs_vec: Vec<_> = graph.full_txs().collect();
-    full_txs_vec.sort();
-    let mut new_txs_vec: Vec<_> = new_graph.full_txs().collect();
-    new_txs_vec.sort();
-    let mut new_txs = new_txs_vec.iter();
-
-    for tx_node in full_txs_vec.iter() {
-        let new_txnode = new_txs.next().unwrap();
-        assert_eq!(new_txnode.txid, tx_node.txid);
-        assert_eq!(new_txnode.tx, tx_node.tx);
-        assert_eq!(
-            new_txnode.last_seen_unconfirmed,
-            tx_node.last_seen_unconfirmed
-        );
-        assert_eq!(new_txnode.anchors.len(), tx_node.anchors.len());
-
-        let mut new_anchors: Vec<_> = new_txnode.anchors.iter().map(|a| a.anchor_block).collect();
-        new_anchors.sort();
-        let mut old_anchors: Vec<_> = tx_node.anchors.iter().copied().collect();
-        old_anchors.sort();
-        assert_eq!(new_anchors, old_anchors);
-    }
-    assert!(new_txs.next().is_none());
-
-    let new_graph_anchors: Vec<_> = new_graph
-        .all_anchors()
-        .iter()
-        .map(|i| i.0.anchor_block)
-        .collect();
-    assert_eq!(
-        new_graph_anchors,
-        vec![
-            block_id!(1, "A"),
-            block_id!(2, "B"),
-            block_id!(3, "C"),
-            block_id!(4, "D"),
-        ]
-    );
 }

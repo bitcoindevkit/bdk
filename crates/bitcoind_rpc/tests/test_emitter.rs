@@ -4,7 +4,7 @@ use bdk_bitcoind_rpc::Emitter;
 use bdk_chain::{
     bitcoin::{Address, Amount, Txid},
     local_chain::{CheckPoint, LocalChain},
-    Balance, BlockId, IndexedTxGraph, Merge, SpkTxOutIndex,
+    Balance, BlockId, BlockTime, IndexedTxGraph, Merge, SpkTxOutIndex,
 };
 use bdk_testenv::{anyhow, TestEnv};
 use bitcoin::{hashes::Hash, Block, OutPoint, ScriptBuf, WScriptHash};
@@ -149,7 +149,7 @@ fn test_into_tx_graph() -> anyhow::Result<()> {
     println!("mined blocks!");
 
     let (mut chain, _) = LocalChain::from_genesis_hash(env.rpc_client().get_block_hash(0)?);
-    let mut indexed_tx_graph = IndexedTxGraph::<BlockId, _>::new({
+    let mut indexed_tx_graph = IndexedTxGraph::new({
         let mut index = SpkTxOutIndex::<usize>::default();
         index.insert_spk(0, addr_0.script_pubkey());
         index.insert_spk(1, addr_1.script_pubkey());
@@ -206,17 +206,19 @@ fn test_into_tx_graph() -> anyhow::Result<()> {
 
     // mine a block that confirms the 3 txs
     let exp_block_hash = env.mine_blocks(1, None)?[0];
-    let exp_block_height = env.rpc_client().get_block_info(&exp_block_hash)?.height as u32;
+    let exp_block = env.rpc_client().get_block_info(&exp_block_hash)?;
+    let exp_block_height = exp_block.height as u32;
+    let exp_block_time = exp_block.time as u32;
     let exp_anchors = exp_txids
         .iter()
         .map({
-            let anchor = BlockId {
+            let blockid = BlockId {
                 height: exp_block_height,
                 hash: exp_block_hash,
             };
-            move |&txid| (anchor, txid)
+            move |&txid| ((txid, blockid), BlockTime::new(exp_block_time))
         })
-        .collect::<BTreeSet<_>>();
+        .collect::<BTreeMap<_, _>>();
 
     // must receive mined block which will confirm the transactions.
     {
@@ -277,7 +279,7 @@ fn ensure_block_emitted_after_reorg_is_at_reorg_height() -> anyhow::Result<()> {
 
 fn process_block(
     recv_chain: &mut LocalChain,
-    recv_graph: &mut IndexedTxGraph<BlockId, SpkTxOutIndex<()>>,
+    recv_graph: &mut IndexedTxGraph<BlockTime, SpkTxOutIndex<()>>,
     block: Block,
     block_height: u32,
 ) -> anyhow::Result<()> {
@@ -288,7 +290,7 @@ fn process_block(
 
 fn sync_from_emitter<C>(
     recv_chain: &mut LocalChain,
-    recv_graph: &mut IndexedTxGraph<BlockId, SpkTxOutIndex<()>>,
+    recv_graph: &mut IndexedTxGraph<BlockTime, SpkTxOutIndex<()>>,
     emitter: &mut Emitter<C>,
 ) -> anyhow::Result<()>
 where
@@ -303,7 +305,7 @@ where
 
 fn get_balance(
     recv_chain: &LocalChain,
-    recv_graph: &IndexedTxGraph<BlockId, SpkTxOutIndex<()>>,
+    recv_graph: &IndexedTxGraph<BlockTime, SpkTxOutIndex<()>>,
 ) -> anyhow::Result<Balance> {
     let chain_tip = recv_chain.tip().block_id();
     let outpoints = recv_graph.index.outpoints().clone();
@@ -341,7 +343,7 @@ fn tx_can_become_unconfirmed_after_reorg() -> anyhow::Result<()> {
 
     // setup receiver
     let (mut recv_chain, _) = LocalChain::from_genesis_hash(env.rpc_client().get_block_hash(0)?);
-    let mut recv_graph = IndexedTxGraph::<BlockId, _>::new({
+    let mut recv_graph = IndexedTxGraph::new({
         let mut recv_index = SpkTxOutIndex::default();
         recv_index.insert_spk((), spk_to_track.clone());
         recv_index

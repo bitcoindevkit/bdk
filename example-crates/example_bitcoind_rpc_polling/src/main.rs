@@ -16,7 +16,7 @@ use bdk_chain::{
     indexed_tx_graph,
     indexer::keychain_txout,
     local_chain::{self, LocalChain},
-    ConfirmationBlockTime, IndexedTxGraph, Merge,
+    BlockTime, IndexedTxGraph, Merge,
 };
 use example_cli::{
     anyhow,
@@ -38,7 +38,7 @@ const DB_COMMIT_DELAY: Duration = Duration::from_secs(60);
 
 type ChangeSet = (
     local_chain::ChangeSet,
-    indexed_tx_graph::ChangeSet<ConfirmationBlockTime, keychain_txout::ChangeSet<Keychain>>,
+    indexed_tx_graph::ChangeSet<BlockTime, keychain_txout::ChangeSet<Keychain>>,
 );
 
 #[derive(Debug)]

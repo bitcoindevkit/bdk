@@ -5,8 +5,8 @@ mod common;
 
 use std::collections::{BTreeSet, HashSet};
 
-use bdk_chain::{Balance, BlockId};
-use bitcoin::{Amount, OutPoint, Script};
+use bdk_chain::Balance;
+use bitcoin::{hashes::Hash, Amount, OutPoint, Script};
 use common::*;
 
 #[allow(dead_code)]
@@ -14,7 +14,7 @@ struct Scenario<'a> {
     /// Name of the test scenario
     name: &'a str,
     /// Transaction templates
-    tx_templates: &'a [TxTemplate<'a, BlockId>],
+    tx_templates: &'a [TxTemplate<'a>],
     /// Names of txs that must exist in the output of `list_canonical_txs`
     exp_chain_txs: HashSet<&'a str>,
     /// Outpoints that must exist in the output of `filter_chain_txouts`
@@ -57,7 +57,7 @@ fn test_tx_conflict_handling() {
                     tx_name: "confirmed_genesis",
                     inputs: &[TxInTemplate::Bogus],
                     outputs: &[TxOutTemplate::new(10000, Some(1))],
-                    anchors: &[block_id!(1, "B")],
+                    anchors: &[anchor!(1, "B")],
                     last_seen: None,
                 },
                 TxTemplate {
@@ -73,7 +73,7 @@ fn test_tx_conflict_handling() {
                     tx_name: "confirmed_conflict",
                     inputs: &[TxInTemplate::PrevTx("confirmed_genesis", 0)],
                     outputs: &[TxOutTemplate::new(20000, Some(3))],
-                    anchors: &[block_id!(4, "E")],
+                    anchors: &[anchor!(4, "E")],
                     ..Default::default()
                 },
             ],
@@ -93,7 +93,7 @@ fn test_tx_conflict_handling() {
                 TxTemplate {
                     tx_name: "tx1",
                     outputs: &[TxOutTemplate::new(40000, Some(0))],
-                    anchors: &[block_id!(1, "B")],
+                    anchors: &[anchor!(1, "B")],
                     last_seen: None,
                     ..Default::default()
                 },
@@ -130,7 +130,7 @@ fn test_tx_conflict_handling() {
                     tx_name: "tx1",
                     inputs: &[TxInTemplate::Bogus],
                     outputs: &[TxOutTemplate::new(10000, Some(0)), TxOutTemplate::new(10000, Some(1))],
-                    anchors: &[block_id!(1, "B")],
+                    anchors: &[anchor!(1, "B")],
                     last_seen: None,
                 },
                 TxTemplate {
@@ -165,7 +165,7 @@ fn test_tx_conflict_handling() {
                     tx_name: "tx1",
                     inputs: &[TxInTemplate::Bogus],
                     outputs: &[TxOutTemplate::new(10000, Some(0))],
-                    anchors: &[block_id!(1, "B")],
+                    anchors: &[anchor!(1, "B")],
                     last_seen: None,
                 },
                 TxTemplate {
@@ -207,7 +207,7 @@ fn test_tx_conflict_handling() {
                     tx_name: "tx1",
                     inputs: &[TxInTemplate::Bogus],
                     outputs: &[TxOutTemplate::new(10000, Some(0))],
-                    anchors: &[block_id!(1, "B")],
+                    anchors: &[anchor!(1, "B")],
                     last_seen: None,
                 },
                 TxTemplate {
@@ -221,7 +221,7 @@ fn test_tx_conflict_handling() {
                     tx_name: "tx_orphaned_conflict",
                     inputs: &[TxInTemplate::PrevTx("tx1", 0)],
                     outputs: &[TxOutTemplate::new(30000, Some(2))],
-                    anchors: &[block_id!(4, "Orphaned Block")],
+                    anchors: &[anchor!(4, "Orphaned Block")],
                     last_seen: Some(300),
                 },
             ],
@@ -242,7 +242,7 @@ fn test_tx_conflict_handling() {
                     tx_name: "tx1",
                     inputs: &[TxInTemplate::Bogus],
                     outputs: &[TxOutTemplate::new(10000, Some(0))],
-                    anchors: &[block_id!(1, "B")],
+                    anchors: &[anchor!(1, "B")],
                     last_seen: None,
                 },
                 TxTemplate {
@@ -256,7 +256,7 @@ fn test_tx_conflict_handling() {
                     tx_name: "tx_orphaned_conflict",
                     inputs: &[TxInTemplate::PrevTx("tx1", 0)],
                     outputs: &[TxOutTemplate::new(30000, Some(2))],
-                    anchors: &[block_id!(4, "Orphaned Block")],
+                    anchors: &[anchor!(4, "Orphaned Block")],
                     last_seen: Some(100),
                 },
             ],
@@ -277,7 +277,7 @@ fn test_tx_conflict_handling() {
                     tx_name: "tx1",
                     inputs: &[TxInTemplate::Bogus],
                     outputs: &[TxOutTemplate::new(10000, Some(0))],
-                    anchors: &[block_id!(1, "B")],
+                    anchors: &[anchor!(1, "B")],
                     last_seen: None,
                 },
                 TxTemplate {
@@ -305,7 +305,7 @@ fn test_tx_conflict_handling() {
                     tx_name: "tx_confirmed_conflict",
                     inputs: &[TxInTemplate::PrevTx("tx1", 0)],
                     outputs: &[TxOutTemplate::new(50000, Some(4))],
-                    anchors: &[block_id!(1, "B")],
+                    anchors: &[anchor!(1, "B")],
                     ..Default::default()
                 },
             ],
@@ -371,7 +371,7 @@ fn test_tx_conflict_handling() {
                     tx_name: "A",
                     inputs: &[TxInTemplate::Bogus],
                     outputs: &[TxOutTemplate::new(10000, Some(0))],
-                    anchors: &[block_id!(1, "B")],
+                    anchors: &[anchor!(1, "B")],
                     last_seen: None,
                 },
                 TxTemplate {
@@ -384,7 +384,7 @@ fn test_tx_conflict_handling() {
                     tx_name: "B'",
                     inputs: &[TxInTemplate::PrevTx("A", 0)],
                     outputs: &[TxOutTemplate::new(20000, Some(2))],
-                    anchors: &[block_id!(4, "E")],
+                    anchors: &[anchor!(4, "E")],
                     ..Default::default()
                 },
                 TxTemplate {
@@ -412,7 +412,7 @@ fn test_tx_conflict_handling() {
                     tx_name: "A",
                     inputs: &[TxInTemplate::Bogus],
                     outputs: &[TxOutTemplate::new(10000, Some(0))],
-                    anchors: &[block_id!(1, "B")],
+                    anchors: &[anchor!(1, "B")],
                     last_seen: None,
                 },
                 TxTemplate {
@@ -425,7 +425,7 @@ fn test_tx_conflict_handling() {
                     tx_name: "B'",
                     inputs: &[TxInTemplate::PrevTx("A", 0)],
                     outputs: &[TxOutTemplate::new(20000, Some(2))],
-                    anchors: &[block_id!(4, "E")],
+                    anchors: &[anchor!(4, "E")],
                     ..Default::default()
                 },
                 TxTemplate {
@@ -457,7 +457,7 @@ fn test_tx_conflict_handling() {
                     tx_name: "A",
                     inputs: &[TxInTemplate::Bogus],
                     outputs: &[TxOutTemplate::new(10000, Some(0))],
-                    anchors: &[block_id!(1, "B")],
+                    anchors: &[anchor!(1, "B")],
                     last_seen: None,
                 },
                 TxTemplate {
@@ -502,7 +502,7 @@ fn test_tx_conflict_handling() {
                     tx_name: "A",
                     inputs: &[TxInTemplate::Bogus],
                     outputs: &[TxOutTemplate::new(10000, Some(0))],
-                    anchors: &[block_id!(1, "B")],
+                    anchors: &[anchor!(1, "B")],
                     last_seen: None,
                 },
                 TxTemplate {
@@ -516,7 +516,7 @@ fn test_tx_conflict_handling() {
                     tx_name: "B'",
                     inputs: &[TxInTemplate::PrevTx("A", 0)],
                     outputs: &[TxOutTemplate::new(50000, Some(4))],
-                    anchors: &[block_id!(1, "B")],
+                    anchors: &[anchor!(1, "B")],
                     ..Default::default()
                 },
                 TxTemplate {
@@ -547,7 +547,7 @@ fn test_tx_conflict_handling() {
                     tx_name: "A",
                     inputs: &[TxInTemplate::Bogus],
                     outputs: &[TxOutTemplate::new(10000, Some(0))],
-                    anchors: &[block_id!(1, "B")],
+                    anchors: &[anchor!(1, "B")],
                     last_seen: None,
                 },
                 TxTemplate {
@@ -561,7 +561,7 @@ fn test_tx_conflict_handling() {
                     tx_name: "B'",
                     inputs: &[TxInTemplate::PrevTx("A", 0)],
                     outputs: &[TxOutTemplate::new(50000, Some(4))],
-                    anchors: &[block_id!(1, "B")],
+                    anchors: &[anchor!(1, "B")],
                     ..Default::default()
                 },
                 TxTemplate {

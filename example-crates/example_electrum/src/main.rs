@@ -10,7 +10,7 @@ use bdk_chain::{
     indexer::keychain_txout,
     local_chain::{self, LocalChain},
     spk_client::{FullScanRequest, SyncRequest},
-    ConfirmationBlockTime, Merge,
+    BlockTime, Merge,
 };
 use bdk_electrum::{
     electrum_client::{self, Client, ElectrumApi},
@@ -100,7 +100,7 @@ pub struct ScanOptions {
 
 type ChangeSet = (
     local_chain::ChangeSet,
-    indexed_tx_graph::ChangeSet<ConfirmationBlockTime, keychain_txout::ChangeSet<Keychain>>,
+    indexed_tx_graph::ChangeSet<BlockTime, keychain_txout::ChangeSet<Keychain>>,
 );
 
 fn main() -> anyhow::Result<()> {
@@ -337,8 +337,7 @@ fn main() -> anyhow::Result<()> {
 
         let chain_changeset = chain.apply_update(chain_update)?;
 
-        let mut indexed_tx_graph_changeset =
-            indexed_tx_graph::ChangeSet::<ConfirmationBlockTime, _>::default();
+        let mut indexed_tx_graph_changeset = indexed_tx_graph::ChangeSet::<BlockTime, _>::default();
         if let Some(keychain_update) = keychain_update {
             let keychain_changeset = graph.index.reveal_to_target_multi(&keychain_update);
             indexed_tx_graph_changeset.merge(keychain_changeset.into());

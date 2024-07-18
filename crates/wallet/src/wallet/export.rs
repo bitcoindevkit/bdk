@@ -128,7 +128,7 @@ impl FullyNodedExport {
         let blockheight = if include_blockheight {
             wallet.transactions().next().map_or(0, |canonical_tx| {
                 match canonical_tx.chain_position {
-                    bdk_chain::ChainPosition::Confirmed(a) => a.block_id.height,
+                    bdk_chain::ChainPosition::Confirmed((_, blockid), _) => blockid.height,
                     bdk_chain::ChainPosition::Unconfirmed(_) => 0,
                 }
             })
@@ -214,7 +214,7 @@ mod test {
     use core::str::FromStr;
 
     use crate::std::string::ToString;
-    use bdk_chain::{BlockId, ConfirmationBlockTime};
+    use bdk_chain::{BlockId, BlockTime};
     use bitcoin::hashes::Hash;
     use bitcoin::{transaction, BlockHash, Network, Transaction};
 
@@ -244,12 +244,9 @@ mod test {
             })
             .unwrap();
         wallet.insert_tx(transaction);
-        let anchor = ConfirmationBlockTime {
-            confirmation_time: 0,
-            block_id,
-        };
+        let (anchor, anchor_meta) = ((txid, block_id), BlockTime::new(0));
         let mut graph = TxGraph::default();
-        let _ = graph.insert_anchor(txid, anchor);
+        let _ = graph.insert_anchor(anchor, anchor_meta);
         wallet
             .apply_update(Update {
                 graph,

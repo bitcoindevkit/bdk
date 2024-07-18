@@ -5,7 +5,7 @@ use bitcoin::{Block, OutPoint, Transaction, TxOut, Txid};
 
 use crate::{
     tx_graph::{self, TxGraph},
-    Anchor, AnchorFromBlockPosition, BlockId, Indexer, Merge,
+    Anchor, AnchorMetaFromBlock, BlockId, Indexer, Merge,
 };
 
 /// The [`IndexedTxGraph`] combines a [`TxGraph`] and an [`Indexer`] implementation.
@@ -42,7 +42,10 @@ impl<A, I> IndexedTxGraph<A, I> {
     }
 }
 
-impl<A: Anchor, I: Indexer> IndexedTxGraph<A, I> {
+impl<A, I: Indexer> IndexedTxGraph<A, I>
+where
+    A: Ord + Clone,
+{
     /// Applies the [`ChangeSet`] to the [`IndexedTxGraph`].
     pub fn apply_changeset(&mut self, changeset: ChangeSet<A, I::ChangeSet>) {
         self.index.apply_changeset(changeset.indexer);
@@ -65,9 +68,10 @@ impl<A: Anchor, I: Indexer> IndexedTxGraph<A, I> {
     }
 }
 
-impl<A: Anchor, I: Indexer> IndexedTxGraph<A, I>
+impl<A, I: Indexer> IndexedTxGraph<A, I>
 where
     I::ChangeSet: Default + Merge,
+    A: Ord + Clone,
 {
     fn index_tx_graph_changeset(
         &mut self,
@@ -107,8 +111,8 @@ where
     }
 
     /// Insert an `anchor` for a given transaction.
-    pub fn insert_anchor(&mut self, txid: Txid, anchor: A) -> ChangeSet<A, I::ChangeSet> {
-        self.graph.insert_anchor(txid, anchor).into()
+    pub fn insert_anchor(&mut self, anchor: Anchor, anchor_meta: A) -> ChangeSet<A, I::ChangeSet> {
+        self.graph.insert_anchor(anchor, anchor_meta).into()
     }
 
     /// Insert a unix timestamp of when a transaction is seen in the mempool.
@@ -125,7 +129,7 @@ where
     /// transactions in `txs` will be ignored. `txs` do not need to be in topological order.
     pub fn batch_insert_relevant<'t>(
         &mut self,
-        txs: impl IntoIterator<Item = (&'t Transaction, impl IntoIterator<Item = A>)>,
+        txs: impl IntoIterator<Item = (&'t Transaction, impl IntoIterator<Item = (Anchor, A)>)>,
     ) -> ChangeSet<A, I::ChangeSet> {
         // The algorithm below allows for non-topologically ordered transactions by using two loops.
         // This is achieved by:
@@ -143,10 +147,9 @@ where
         let mut graph = tx_graph::ChangeSet::default();
         for (tx, anchors) in txs {
             if self.index.is_tx_relevant(tx) {
-                let txid = tx.compute_txid();
                 graph.merge(self.graph.insert_tx(tx.clone()));
-                for anchor in anchors {
-                    graph.merge(self.graph.insert_anchor(txid, anchor));
+                for (anchor, anchor_meta) in anchors {
+                    graph.merge(self.graph.insert_anchor(anchor, anchor_meta));
                 }
             }
         }
@@ -207,17 +210,17 @@ where
     }
 }
 
-/// Methods are available if the anchor (`A`) implements [`AnchorFromBlockPosition`].
-impl<A: Anchor, I: Indexer> IndexedTxGraph<A, I>
+/// Methods are available if the anchor metadata implements [`AnchorMetaFromBlock`].
+impl<A: AnchorMetaFromBlock, I: Indexer> IndexedTxGraph<A, I>
 where
     I::ChangeSet: Default + Merge,
-    A: AnchorFromBlockPosition,
+    A: AnchorMetaFromBlock + Ord + Clone,
 {
     /// Batch insert all transactions of the given `block` of `height`, filtering out those that are
     /// irrelevant.
     ///
     /// Each inserted transaction's anchor will be constructed from
-    /// [`AnchorFromBlockPosition::from_block_position`].
+    /// [`AnchorMetaFromBlock::from_block`].
     ///
     /// Relevancy is determined by the internal [`Indexer::is_tx_relevant`] implementation of `I`.
     /// Irrelevant transactions in `txs` will be ignored.
@@ -234,12 +237,12 @@ where
         for (tx_pos, tx) in block.txdata.iter().enumerate() {
             changeset.indexer.merge(self.index.index_tx(tx));
             if self.index.is_tx_relevant(tx) {
-                let txid = tx.compute_txid();
-                let anchor = A::from_block_position(block, block_id, tx_pos);
+                let anchor = (tx.compute_txid(), block_id);
+                let anchor_meta = A::from_block(block, block_id, tx_pos);
                 changeset.graph.merge(self.graph.insert_tx(tx.clone()));
                 changeset
                     .graph
-                    .merge(self.graph.insert_anchor(txid, anchor));
+                    .merge(self.graph.insert_anchor(anchor, anchor_meta));
             }
         }
         changeset
@@ -248,7 +251,7 @@ where
     /// Batch insert all transactions of the given `block` of `height`.
     ///
     /// Each inserted transaction's anchor will be constructed from
-    /// [`AnchorFromBlockPosition::from_block_position`].
+    /// [`AnchorMetaFromBlock::from_block`].
     ///
     /// To only insert relevant transactions, use [`apply_block_relevant`] instead.
     ///
@@ -260,8 +263,9 @@ where
         };
         let mut graph = tx_graph::ChangeSet::default();
         for (tx_pos, tx) in block.txdata.iter().enumerate() {
-            let anchor = A::from_block_position(&block, block_id, tx_pos);
-            graph.merge(self.graph.insert_anchor(tx.compute_txid(), anchor));
+            let anchor = (tx.compute_txid(), block_id);
+            let anchor_meta = A::from_block(&block, block_id, tx_pos);
+            graph.merge(self.graph.insert_anchor(anchor, anchor_meta));
             graph.merge(self.graph.insert_tx(tx.clone()));
         }
         let indexer = self.index_tx_graph_changeset(&graph);
@@ -299,7 +303,10 @@ impl<A, IA: Default> Default for ChangeSet<A, IA> {
     }
 }
 
-impl<A: Anchor, IA: Merge> Merge for ChangeSet<A, IA> {
+impl<A, IA: Merge> Merge for ChangeSet<A, IA>
+where
+    A: Ord + Clone,
+{
     fn merge(&mut self, other: Self) {
         self.graph.merge(other.graph);
         self.indexer.merge(other.indexer);

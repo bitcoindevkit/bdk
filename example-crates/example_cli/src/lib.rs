@@ -20,7 +20,7 @@ use bdk_chain::{
         descriptor::{DescriptorSecretKey, KeyMap},
         Descriptor, DescriptorPublicKey,
     },
-    Anchor, ChainOracle, DescriptorExt, FullTxOut, Merge,
+    ChainOracle, DescriptorExt, FullTxOut, Merge,
 };
 pub use bdk_file_store;
 pub use clap;
@@ -196,7 +196,7 @@ pub struct CreateTxChange {
     pub index: u32,
 }
 
-pub fn create_tx<A: Anchor, O: ChainOracle>(
+pub fn create_tx<A, O: ChainOracle>(
     graph: &mut KeychainTxGraph<A>,
     chain: &O,
     keymap: &BTreeMap<DescriptorPublicKey, DescriptorSecretKey>,
@@ -206,6 +206,7 @@ pub fn create_tx<A: Anchor, O: ChainOracle>(
 ) -> anyhow::Result<(Transaction, Option<CreateTxChange>)>
 where
     O::Error: std::error::Error + Send + Sync + 'static,
+    A: Ord + Clone,
 {
     let mut changeset = keychain_txout::ChangeSet::default();
 
@@ -415,7 +416,7 @@ where
 // Alias the elements of `Result` of `planned_utxos`
 pub type PlannedUtxo<K, A> = (bdk_tmp_plan::Plan<K>, FullTxOut<A>);
 
-pub fn planned_utxos<A: Anchor, O: ChainOracle, K: Clone + bdk_tmp_plan::CanDerive>(
+pub fn planned_utxos<A: Ord + Clone, O: ChainOracle, K: Clone + bdk_tmp_plan::CanDerive>(
     graph: &KeychainTxGraph<A>,
     chain: &O,
     assets: &bdk_tmp_plan::Assets<K>,
@@ -444,7 +445,7 @@ pub fn planned_utxos<A: Anchor, O: ChainOracle, K: Clone + bdk_tmp_plan::CanDeri
         .collect()
 }
 
-pub fn handle_commands<CS: clap::Subcommand, S: clap::Args, A: Anchor, O: ChainOracle, C>(
+pub fn handle_commands<CS: clap::Subcommand, S: clap::Args, A, O: ChainOracle, C>(
     graph: &Mutex<KeychainTxGraph<A>>,
     db: &Mutex<Store<C>>,
     chain: &Mutex<O>,
@@ -454,6 +455,7 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args, A: Anchor, O: ChainO
     cmd: Commands<CS, S>,
 ) -> anyhow::Result<()>
 where
+    A: Ord + Clone + Debug,
     O::Error: std::error::Error + Send + Sync + 'static,
     C: Default
         + Merge

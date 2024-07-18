@@ -2,94 +2,44 @@ use crate::collections::BTreeMap;
 use crate::collections::BTreeSet;
 use crate::BlockId;
 use alloc::vec::Vec;
+use bitcoin::Txid;
 
-/// Trait that "anchors" blockchain data to a specific block of height and hash.
-///
-/// If transaction A is anchored in block B, and block B is in the best chain, we can
-/// assume that transaction A is also confirmed in the best chain. This does not necessarily mean
-/// that transaction A is confirmed in block B. It could also mean transaction A is confirmed in a
-/// parent block of B.
-///
-/// Every [`Anchor`] implementation must contain a [`BlockId`] parameter, and must implement
-/// [`Ord`]. When implementing [`Ord`], the anchors' [`BlockId`]s should take precedence
-/// over other elements inside the [`Anchor`]s for comparison purposes, i.e., you should first
-/// compare the anchors' [`BlockId`]s and then care about the rest.
-///
-/// The example shows different types of anchors:
-/// ```
-/// # use bdk_chain::local_chain::LocalChain;
-/// # use bdk_chain::tx_graph::TxGraph;
-/// # use bdk_chain::BlockId;
-/// # use bdk_chain::ConfirmationBlockTime;
-/// # use bdk_chain::example_utils::*;
-/// # use bitcoin::hashes::Hash;
-/// // Initialize the local chain with two blocks.
-/// let chain = LocalChain::from_blocks(
-///     [
-///         (1, Hash::hash("first".as_bytes())),
-///         (2, Hash::hash("second".as_bytes())),
-///     ]
-///     .into_iter()
-///     .collect(),
-/// );
-///
-/// // Transaction to be inserted into `TxGraph`s with different anchor types.
-/// let tx = tx_from_hex(RAW_TX_1);
-///
-/// // Insert `tx` into a `TxGraph` that uses `BlockId` as the anchor type.
-/// // When a transaction is anchored with `BlockId`, the anchor block and the confirmation block of
-/// // the transaction is the same block.
-/// let mut graph_a = TxGraph::<BlockId>::default();
-/// let _ = graph_a.insert_tx(tx.clone());
-/// graph_a.insert_anchor(
-///     tx.compute_txid(),
-///     BlockId {
-///         height: 1,
-///         hash: Hash::hash("first".as_bytes()),
-///     },
-/// );
-///
-/// // Insert `tx` into a `TxGraph` that uses `ConfirmationBlockTime` as the anchor type.
-/// // This anchor records the anchor block and the confirmation time of the transaction. When a
-/// // transaction is anchored with `ConfirmationBlockTime`, the anchor block and confirmation block
-/// // of the transaction is the same block.
-/// let mut graph_c = TxGraph::<ConfirmationBlockTime>::default();
-/// let _ = graph_c.insert_tx(tx.clone());
-/// graph_c.insert_anchor(
-///     tx.compute_txid(),
-///     ConfirmationBlockTime {
-///         block_id: BlockId {
-///             height: 2,
-///             hash: Hash::hash("third".as_bytes()),
-///         },
-///         confirmation_time: 123,
-///     },
-/// );
-/// ```
-pub trait Anchor: core::fmt::Debug + Clone + Eq + PartialOrd + Ord + core::hash::Hash {
-    /// Returns the [`BlockId`] that the associated blockchain data is "anchored" in.
-    fn anchor_block(&self) -> BlockId;
+/// TODO: New [`Anchor`] docs
+pub type Anchor = (Txid, BlockId);
 
-    /// Get the upper bound of the chain data's confirmation height.
-    ///
-    /// The default definition gives a pessimistic answer. This can be overridden by the `Anchor`
-    /// implementation for a more accurate value.
-    fn confirmation_height_upper_bound(&self) -> u32 {
-        self.anchor_block().height
+/// TODO: [`BlockTime`] docs
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Deserialize, serde::Serialize),
+    serde(crate = "serde_crate",)
+)]
+pub struct BlockTime(u32);
+
+impl BlockTime {
+    /// TODO: new() docs
+    pub fn new(confirmation_time: u32) -> Self {
+        BlockTime(confirmation_time)
     }
 }
 
-impl<'a, A: Anchor> Anchor for &'a A {
-    fn anchor_block(&self) -> BlockId {
-        <A as Anchor>::anchor_block(self)
+impl AsRef<u32> for BlockTime {
+    fn as_ref(&self) -> &u32 {
+        &self.0
     }
 }
 
-/// An [`Anchor`] that can be constructed from a given block, block height and transaction position
-/// within the block.
-pub trait AnchorFromBlockPosition: Anchor {
-    /// Construct the anchor from a given `block`, block height and `tx_pos` within the block.
-    fn from_block_position(block: &bitcoin::Block, block_id: BlockId, tx_pos: usize) -> Self;
+impl AnchorMetaFromBlock for BlockTime {
+    fn from_block(block: &bitcoin::Block, _block_id: BlockId, _tx_pos: usize) -> Self {
+        BlockTime(block.header.time)
+    }
+}
+
+/// [`Anchor`] metadata that can be constructed from a given block, block height and transaction
+/// position within the block.
+pub trait AnchorMetaFromBlock {
+    /// Construct the anchor metadata from a given `block`, block height and `tx_pos` within the block.
+    fn from_block(cblock: &bitcoin::Block, block_id: BlockId, tx_pos: usize) -> Self;
 }
 
 /// Trait that makes an object mergeable.

@@ -1,4 +1,3 @@
-use std::collections::BTreeSet;
 use std::thread::JoinHandle;
 
 use bdk_chain::collections::BTreeMap;
@@ -6,7 +5,7 @@ use bdk_chain::spk_client::{FullScanRequest, FullScanResult, SyncRequest, SyncRe
 use bdk_chain::{
     bitcoin::{Amount, BlockHash, OutPoint, ScriptBuf, TxOut, Txid},
     local_chain::CheckPoint,
-    BlockId, ConfirmationBlockTime, TxGraph,
+    BlockId, BlockTime, TxGraph,
 };
 use bdk_chain::{Anchor, Indexed};
 use esplora_client::TxStatus;
@@ -159,11 +158,11 @@ fn fetch_block(
 ///
 /// We want to have a corresponding checkpoint per anchor height. However, checkpoints fetched
 /// should not surpass `latest_blocks`.
-fn chain_update<A: Anchor>(
+fn chain_update<A>(
     client: &esplora_client::BlockingClient,
     latest_blocks: &BTreeMap<u32, BlockHash>,
     local_tip: &CheckPoint,
-    anchors: &BTreeSet<(A, Txid)>,
+    anchors: &BTreeMap<Anchor, A>,
 ) -> Result<CheckPoint, Error> {
     let mut point_of_agreement = None;
     let mut conflicts = vec![];
@@ -173,7 +172,7 @@ fn chain_update<A: Anchor>(
             None => continue,
         };
         if remote_hash == local_cp.hash() {
-            point_of_agreement = Some(local_cp.clone());
+            point_of_agreement = Some(local_cp);
             break;
         } else {
             // it is not strictly necessary to include all the conflicted heights (we do need the
@@ -192,8 +191,8 @@ fn chain_update<A: Anchor>(
         .extend(conflicts.into_iter().rev())
         .expect("evicted are in order");
 
-    for anchor in anchors {
-        let height = anchor.0.anchor_block().height;
+    for (_txid, blockid) in anchors.keys() {
+        let height = blockid.height;
         if tip.get(height).is_none() {
             let hash = match fetch_block(client, latest_blocks, height)? {
                 Some(hash) => hash,
@@ -219,10 +218,10 @@ fn full_scan_for_index_and_graph_blocking<K: Ord + Clone>(
     keychain_spks: BTreeMap<K, impl IntoIterator<Item = Indexed<ScriptBuf>>>,
     stop_gap: usize,
     parallel_requests: usize,
-) -> Result<(TxGraph<ConfirmationBlockTime>, BTreeMap<K, u32>), Error> {
+) -> Result<(TxGraph<BlockTime>, BTreeMap<K, u32>), Error> {
     type TxsOfSpkIndex = (u32, Vec<esplora_client::Tx>);
     let parallel_requests = Ord::max(parallel_requests, 1);
-    let mut tx_graph = TxGraph::<ConfirmationBlockTime>::default();
+    let mut tx_graph = TxGraph::<BlockTime>::default();
     let mut last_active_indices = BTreeMap::<K, u32>::new();
 
     for (keychain, spks) in keychain_spks {
@@ -266,8 +265,8 @@ fn full_scan_for_index_and_graph_blocking<K: Ord + Clone>(
                 }
                 for tx in txs {
                     let _ = tx_graph.insert_tx(tx.to_tx());
-                    if let Some(anchor) = anchor_from_status(&tx.status) {
-                        let _ = tx_graph.insert_anchor(tx.txid, anchor);
+                    if let Some((anchor, anchor_meta)) = anchor_from_status(tx.txid, &tx.status) {
+                        let _ = tx_graph.insert_anchor(anchor, anchor_meta);
                     }
 
                     let previous_outputs = tx.vin.iter().filter_map(|vin| {
@@ -315,7 +314,7 @@ fn sync_for_index_and_graph_blocking(
     txids: impl IntoIterator<Item = Txid>,
     outpoints: impl IntoIterator<Item = OutPoint>,
     parallel_requests: usize,
-) -> Result<TxGraph<ConfirmationBlockTime>, Error> {
+) -> Result<TxGraph<BlockTime>, Error> {
     let (mut tx_graph, _) = full_scan_for_index_and_graph_blocking(
         client,
         {
@@ -358,8 +357,8 @@ fn sync_for_index_and_graph_blocking(
 
         for handle in handles {
             let (txid, status) = handle.join().expect("thread must not panic")?;
-            if let Some(anchor) = anchor_from_status(&status) {
-                let _ = tx_graph.insert_anchor(txid, anchor);
+            if let Some((anchor, anchor_meta)) = anchor_from_status(txid, &status) {
+                let _ = tx_graph.insert_anchor(anchor, anchor_meta);
             }
         }
     }
@@ -370,8 +369,8 @@ fn sync_for_index_and_graph_blocking(
                 let _ = tx_graph.insert_tx(tx);
             }
             let status = client.get_tx_status(&op.txid)?;
-            if let Some(anchor) = anchor_from_status(&status) {
-                let _ = tx_graph.insert_anchor(op.txid, anchor);
+            if let Some((anchor, anchor_meta)) = anchor_from_status(op.txid, &status) {
+                let _ = tx_graph.insert_anchor(anchor, anchor_meta);
             }
         }
 
@@ -382,8 +381,8 @@ fn sync_for_index_and_graph_blocking(
                         let _ = tx_graph.insert_tx(tx);
                     }
                     let status = client.get_tx_status(&txid)?;
-                    if let Some(anchor) = anchor_from_status(&status) {
-                        let _ = tx_graph.insert_anchor(txid, anchor);
+                    if let Some((anchor, anchor_meta)) = anchor_from_status(txid, &status) {
+                        let _ = tx_graph.insert_anchor(anchor, anchor_meta);
                     }
                 }
             }
@@ -396,10 +395,12 @@ fn sync_for_index_and_graph_blocking(
 #[cfg(test)]
 mod test {
     use crate::blocking_ext::{chain_update, fetch_latest_blocks};
-    use bdk_chain::bitcoin::hashes::Hash;
-    use bdk_chain::bitcoin::Txid;
-    use bdk_chain::local_chain::LocalChain;
-    use bdk_chain::BlockId;
+
+    use bdk_chain::{
+        bitcoin::{hashes::Hash, Txid},
+        local_chain::LocalChain,
+        BlockId, BlockTime,
+    };
     use bdk_testenv::{anyhow, bitcoincore_rpc::RpcApi, TestEnv};
     use esplora_client::{BlockHash, Builder};
     use std::collections::{BTreeMap, BTreeSet};
@@ -486,14 +487,17 @@ mod test {
                     .iter()
                     .map(|&height| -> anyhow::Result<_> {
                         Ok((
-                            BlockId {
-                                height,
-                                hash: env.bitcoind.client.get_block_hash(height as _)?,
-                            },
-                            Txid::all_zeros(),
+                            (
+                                Txid::all_zeros(),
+                                BlockId {
+                                    height,
+                                    hash: env.bitcoind.client.get_block_hash(height as _)?,
+                                },
+                            ),
+                            BlockTime::new(100),
                         ))
                     })
-                    .collect::<anyhow::Result<BTreeSet<_>>>()?;
+                    .collect::<anyhow::Result<BTreeMap<_, _>>>()?;
                 let update = chain_update(
                     &client,
                     &fetch_latest_blocks(&client)?,
@@ -523,11 +527,14 @@ mod test {
                     .iter()
                     .map(|&(height, txid)| -> anyhow::Result<_> {
                         Ok((
-                            BlockId {
-                                height,
-                                hash: env.bitcoind.client.get_block_hash(height as _)?,
-                            },
-                            txid,
+                            (
+                                txid,
+                                BlockId {
+                                    height,
+                                    hash: env.bitcoind.client.get_block_hash(height as _)?,
+                                },
+                            ),
+                            BlockTime::new(100),
                         ))
                     })
                     .collect::<anyhow::Result<_>>()?;
@@ -719,13 +726,13 @@ mod test {
                     let txid: Txid = bdk_chain::bitcoin::hashes::Hash::hash(
                         &format!("txid_at_height_{}", h).into_bytes(),
                     );
-                    let anchor = BlockId {
+                    let blockid = BlockId {
                         height: h,
                         hash: anchor_blockhash,
                     };
-                    (anchor, txid)
+                    ((txid, blockid), BlockTime::new(100))
                 })
-                .collect::<BTreeSet<_>>();
+                .collect::<BTreeMap<_, _>>();
             let chain_update = chain_update(
                 &client,
                 &fetch_latest_blocks(&client)?,

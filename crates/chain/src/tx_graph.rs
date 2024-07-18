@@ -109,9 +109,9 @@ use core::{
 #[derive(Clone, Debug, PartialEq)]
 pub struct TxGraph<A = ()> {
     // all transactions that the graph is aware of in format: `(tx_node, tx_anchors)`
-    txs: HashMap<Txid, (TxNodeInternal, BTreeSet<A>)>,
+    txs: HashMap<Txid, (TxNodeInternal, BTreeMap<Anchor, A>)>,
     spends: BTreeMap<OutPoint, HashSet<Txid>>,
-    anchors: BTreeSet<(A, Txid)>,
+    anchors: BTreeMap<Anchor, A>,
     last_seen: HashMap<Txid, u64>,
 
     // This atrocity exists so that `TxGraph::outspends()` can return a reference.
@@ -139,7 +139,7 @@ pub struct TxNode<'a, T, A> {
     /// A partial or full representation of the transaction.
     pub tx: T,
     /// The blocks that the transaction is "anchored" in.
-    pub anchors: &'a BTreeSet<A>,
+    pub anchors: &'a BTreeMap<Anchor, A>,
     /// The last-seen unix timestamp of the transaction as unconfirmed.
     pub last_seen_unconfirmed: Option<u64>,
 }
@@ -172,7 +172,7 @@ impl Default for TxNodeInternal {
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct CanonicalTx<'a, T, A> {
     /// How the transaction is observed as (confirmed or unconfirmed).
-    pub chain_position: ChainPosition<&'a A>,
+    pub chain_position: ChainPosition<A>,
     /// The transaction node (as part of the graph).
     pub tx_node: TxNode<'a, T, A>,
 }
@@ -469,7 +469,7 @@ impl<A> TxGraph<A> {
     }
 
     /// Get all transaction anchors known by [`TxGraph`].
-    pub fn all_anchors(&self) -> &BTreeSet<(A, Txid)> {
+    pub fn all_anchors(&self) -> &BTreeMap<Anchor, A> {
         &self.anchors
     }
 
@@ -480,19 +480,6 @@ impl<A> TxGraph<A> {
 }
 
 impl<A: Clone + Ord> TxGraph<A> {
-    /// Transform the [`TxGraph`] to have [`Anchor`]s of another type.
-    ///
-    /// This takes in a closure of signature `FnMut(A) -> A2` which is called for each [`Anchor`] to
-    /// transform it.
-    pub fn map_anchors<A2: Clone + Ord, F>(self, f: F) -> TxGraph<A2>
-    where
-        F: FnMut(A) -> A2,
-    {
-        let mut new_graph = TxGraph::<A2>::default();
-        new_graph.apply_changeset(self.initial_changeset().map_anchors(f));
-        new_graph
-    }
-
     /// Construct a new [`TxGraph`] from a list of transactions.
     pub fn new(txs: impl IntoIterator<Item = Transaction>) -> Self {
         let mut new = Self::default();
@@ -517,7 +504,7 @@ impl<A: Clone + Ord> TxGraph<A> {
             outpoint.txid,
             (
                 TxNodeInternal::Partial([(outpoint.vout, txout)].into()),
-                BTreeSet::new(),
+                BTreeMap::new(),
             ),
         );
         self.apply_update(update)
@@ -531,7 +518,7 @@ impl<A: Clone + Ord> TxGraph<A> {
         let mut update = Self::default();
         update.txs.insert(
             tx.compute_txid(),
-            (TxNodeInternal::Whole(tx), BTreeSet::new()),
+            (TxNodeInternal::Whole(tx), BTreeMap::new()),
         );
         self.apply_update(update)
     }
@@ -545,7 +532,7 @@ impl<A: Clone + Ord> TxGraph<A> {
         &mut self,
         txs: impl IntoIterator<Item = (Transaction, u64)>,
     ) -> ChangeSet<A> {
-        let mut changeset = ChangeSet::<A>::default();
+        let mut changeset = ChangeSet::default();
         for (tx, seen_at) in txs {
             changeset.merge(self.insert_seen_at(tx.compute_txid(), seen_at));
             changeset.merge(self.insert_tx(tx));
@@ -557,9 +544,9 @@ impl<A: Clone + Ord> TxGraph<A> {
     ///
     /// The [`ChangeSet`] returned will be empty if graph already knows that `txid` exists in
     /// `anchor`.
-    pub fn insert_anchor(&mut self, txid: Txid, anchor: A) -> ChangeSet<A> {
+    pub fn insert_anchor(&mut self, anchor: Anchor, anchor_meta: A) -> ChangeSet<A> {
         let mut update = Self::default();
-        update.anchors.insert((anchor, txid));
+        update.anchors.insert(anchor, anchor_meta);
         self.apply_update(update)
     }
 
@@ -680,7 +667,7 @@ impl<A: Clone + Ord> TxGraph<A> {
                 }
                 None => {
                     self.txs
-                        .insert(txid, (TxNodeInternal::Whole(wrapped_tx), BTreeSet::new()));
+                        .insert(txid, (TxNodeInternal::Whole(wrapped_tx), BTreeMap::new()));
                 }
             }
         }
@@ -696,10 +683,14 @@ impl<A: Clone + Ord> TxGraph<A> {
             }
         }
 
-        for (anchor, txid) in changeset.anchors {
-            if self.anchors.insert((anchor.clone(), txid)) {
+        for ((txid, blockid), anchor_meta) in changeset.anchors {
+            if self
+                .anchors
+                .insert((txid, blockid), anchor_meta.clone())
+                .is_none()
+            {
                 let (_, anchors) = self.txs.entry(txid).or_default();
-                anchors.insert(anchor);
+                anchors.insert((txid, blockid), anchor_meta);
             }
         }
 
@@ -716,7 +707,7 @@ impl<A: Clone + Ord> TxGraph<A> {
     /// The [`ChangeSet`] would be the set difference between `update` and `self` (transactions that
     /// exist in `update` but not in `self`).
     pub(crate) fn determine_changeset(&self, update: TxGraph<A>) -> ChangeSet<A> {
-        let mut changeset = ChangeSet::<A>::default();
+        let mut changeset = ChangeSet::default();
 
         for (&txid, (update_tx_node, _)) in &update.txs {
             match (self.txs.get(&txid), update_tx_node) {
@@ -755,13 +746,18 @@ impl<A: Clone + Ord> TxGraph<A> {
             }
         }
 
-        changeset.anchors = update.anchors.difference(&self.anchors).cloned().collect();
+        changeset.anchors = update
+            .anchors
+            .iter()
+            .filter(|(k, _)| !self.anchors.contains_key(k))
+            .map(|(k, v)| (*k, v.clone()))
+            .collect::<BTreeMap<_, _>>();
 
         changeset
     }
 }
 
-impl<A: Anchor> TxGraph<A> {
+impl<A: Clone> TxGraph<A> {
     /// Get the position of the transaction in `chain` with tip `chain_tip`.
     ///
     /// Chain data is fetched from `chain`, a [`ChainOracle`] implementation.
@@ -790,15 +786,17 @@ impl<A: Anchor> TxGraph<A> {
         chain: &C,
         chain_tip: BlockId,
         txid: Txid,
-    ) -> Result<Option<ChainPosition<&A>>, C::Error> {
+    ) -> Result<Option<ChainPosition<A>>, C::Error> {
         let (tx_node, anchors) = match self.txs.get(&txid) {
             Some(v) => v,
             None => return Ok(None),
         };
 
-        for anchor in anchors {
-            match chain.is_block_in_chain(anchor.anchor_block(), chain_tip)? {
-                Some(true) => return Ok(Some(ChainPosition::Confirmed(anchor))),
+        for (anchor, anchor_meta) in anchors {
+            match chain.is_block_in_chain(anchor.1, chain_tip)? {
+                Some(true) => {
+                    return Ok(Some(ChainPosition::Confirmed(*anchor, anchor_meta.clone())))
+                }
                 _ => continue,
             }
         }
@@ -841,8 +839,8 @@ impl<A: Anchor> TxGraph<A> {
                 let tx_node = self.get_tx_node(ancestor_tx.as_ref().compute_txid())?;
                 // We're filtering the ancestors to keep only the unconfirmed ones (= no anchors in
                 // the best chain)
-                for block in tx_node.anchors {
-                    match chain.is_block_in_chain(block.anchor_block(), chain_tip) {
+                for (_, block) in tx_node.anchors.keys() {
+                    match chain.is_block_in_chain(*block, chain_tip) {
                         Ok(Some(true)) => return None,
                         Err(e) => return Some(Err(e)),
                         _ => continue,
@@ -861,8 +859,8 @@ impl<A: Anchor> TxGraph<A> {
                 let tx_node = self.get_tx_node(descendant_txid)?;
                 // We're filtering the ancestors to keep only the unconfirmed ones (= no anchors in
                 // the best chain)
-                for block in tx_node.anchors {
-                    match chain.is_block_in_chain(block.anchor_block(), chain_tip) {
+                for (_, block) in tx_node.anchors.keys() {
+                    match chain.is_block_in_chain(*block, chain_tip) {
                         Ok(Some(true)) => return None,
                         Err(e) => return Some(Err(e)),
                         _ => continue,
@@ -888,8 +886,8 @@ impl<A: Anchor> TxGraph<A> {
             // If a conflicting tx is in the best chain, or has `last_seen` higher than this ancestor, then
             // this tx cannot exist in the best chain
             for conflicting_tx in conflicting_txs {
-                for block in conflicting_tx.anchors {
-                    if chain.is_block_in_chain(block.anchor_block(), chain_tip)? == Some(true) {
+                for (_, block) in conflicting_tx.anchors.keys() {
+                    if chain.is_block_in_chain(*block, chain_tip)? == Some(true) {
                         return Ok(None);
                     }
                 }
@@ -918,7 +916,7 @@ impl<A: Anchor> TxGraph<A> {
         chain: &C,
         chain_tip: BlockId,
         txid: Txid,
-    ) -> Option<ChainPosition<&A>> {
+    ) -> Option<ChainPosition<A>> {
         self.try_get_chain_position(chain, chain_tip, txid)
             .expect("error is infallible")
     }
@@ -940,7 +938,7 @@ impl<A: Anchor> TxGraph<A> {
         chain: &C,
         chain_tip: BlockId,
         outpoint: OutPoint,
-    ) -> Result<Option<(ChainPosition<&A>, Txid)>, C::Error> {
+    ) -> Result<Option<(ChainPosition<A>, Txid)>, C::Error> {
         if self
             .try_get_chain_position(chain, chain_tip, outpoint.txid)?
             .is_none()
@@ -968,7 +966,7 @@ impl<A: Anchor> TxGraph<A> {
         chain: &C,
         static_block: BlockId,
         outpoint: OutPoint,
-    ) -> Option<(ChainPosition<&A>, Txid)> {
+    ) -> Option<(ChainPosition<A>, Txid)> {
         self.try_get_chain_spend(chain, static_block, outpoint)
             .expect("error is infallible")
     }
@@ -1045,7 +1043,7 @@ impl<A: Anchor> TxGraph<A> {
         outpoints
             .into_iter()
             .map(
-                move |(spk_i, op)| -> Result<Option<(OI, FullTxOut<_>)>, C::Error> {
+                move |(spk_i, op)| -> Result<Option<(OI, FullTxOut<A>)>, C::Error> {
                     let tx_node = match self.get_tx_node(op.txid) {
                         Some(n) => n,
                         None => return Ok(None),
@@ -1058,13 +1056,11 @@ impl<A: Anchor> TxGraph<A> {
 
                     let chain_position =
                         match self.try_get_chain_position(chain, chain_tip, op.txid)? {
-                            Some(pos) => pos.cloned(),
+                            Some(pos) => pos,
                             None => return Ok(None),
                         };
 
-                    let spent_by = self
-                        .try_get_chain_spend(chain, chain_tip, op)?
-                        .map(|(a, txid)| (a.cloned(), txid));
+                    let spent_by = self.try_get_chain_spend(chain, chain_tip, op)?;
 
                     Ok(Some((
                         spk_i,
@@ -1174,7 +1170,7 @@ impl<A: Anchor> TxGraph<A> {
             let (spk_i, txout) = res?;
 
             match &txout.chain_position {
-                ChainPosition::Confirmed(_) => {
+                ChainPosition::Confirmed(_, _) => {
                     if txout.is_confirmed_and_spendable(chain_tip.height) {
                         confirmed += txout.txout.value;
                     } else if !txout.is_mature(chain_tip.height) {
@@ -1243,7 +1239,7 @@ pub struct ChangeSet<A = ()> {
     /// Added txouts.
     pub txouts: BTreeMap<OutPoint, TxOut>,
     /// Added anchors.
-    pub anchors: BTreeSet<(A, Txid)>,
+    pub anchors: BTreeMap<Anchor, A>,
     /// Added last-seen unix timestamps of transactions.
     pub last_seen: BTreeMap<Txid, u64>,
 }
@@ -1277,14 +1273,11 @@ impl<A> ChangeSet<A> {
     ///
     /// This is useful if you want to find which heights you need to fetch data about in order to
     /// confirm or exclude these anchors.
-    pub fn anchor_heights(&self) -> impl Iterator<Item = u32> + '_
-    where
-        A: Anchor,
-    {
+    pub fn anchor_heights(&self) -> impl Iterator<Item = u32> + '_ {
         let mut dedup = None;
         self.anchors
             .iter()
-            .map(|(a, _)| a.anchor_block().height)
+            .map(|((_, blockid), _)| blockid.height)
             .filter(move |height| {
                 let duplicate = dedup == Some(*height);
                 dedup = Some(*height);
@@ -1316,26 +1309,6 @@ impl<A: Ord> Merge for ChangeSet<A> {
             && self.txouts.is_empty()
             && self.anchors.is_empty()
             && self.last_seen.is_empty()
-    }
-}
-
-impl<A: Ord> ChangeSet<A> {
-    /// Transform the [`ChangeSet`] to have [`Anchor`]s of another type.
-    ///
-    /// This takes in a closure of signature `FnMut(A) -> A2` which is called for each [`Anchor`] to
-    /// transform it.
-    pub fn map_anchors<A2: Ord, F>(self, mut f: F) -> ChangeSet<A2>
-    where
-        F: FnMut(A) -> A2,
-    {
-        ChangeSet {
-            txs: self.txs,
-            txouts: self.txouts,
-            anchors: BTreeSet::<(A2, Txid)>::from_iter(
-                self.anchors.into_iter().map(|(a, txid)| (f(a), txid)),
-            ),
-            last_seen: self.last_seen,
-        }
     }
 }
 

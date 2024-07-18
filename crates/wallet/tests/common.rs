@@ -1,5 +1,5 @@
 #![allow(unused)]
-use bdk_chain::{BlockId, ConfirmationBlockTime, ConfirmationTime, TxGraph};
+use bdk_chain::{BlockId, BlockTime, ConfirmationTime, TxGraph};
 use bdk_wallet::{
     wallet::{Update, Wallet},
     KeychainKind, LocalOutput,
@@ -207,18 +207,15 @@ pub fn feerate_unchecked(sat_vb: f64) -> FeeRate {
 pub fn insert_anchor_from_conf(wallet: &mut Wallet, txid: Txid, position: ConfirmationTime) {
     if let ConfirmationTime::Confirmed { height, time } = position {
         // anchor tx to checkpoint with lowest height that is >= position's height
-        let anchor = wallet
+        let (anchor, anchor_meta) = wallet
             .local_chain()
             .range(height..)
             .last()
-            .map(|anchor_cp| ConfirmationBlockTime {
-                block_id: anchor_cp.block_id(),
-                confirmation_time: time,
-            })
+            .map(|anchor_cp| ((txid, anchor_cp.block_id()), BlockTime::new(time as u32)))
             .expect("confirmation height cannot be greater than tip");
 
         let mut graph = TxGraph::default();
-        let _ = graph.insert_anchor(txid, anchor);
+        let _ = graph.insert_anchor(anchor, anchor_meta);
         wallet
             .apply_update(Update {
                 graph,
