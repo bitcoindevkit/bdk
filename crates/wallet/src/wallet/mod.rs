@@ -42,6 +42,7 @@ use bitcoin::{
 use bitcoin::{consensus::encode::serialize, transaction, BlockHash, Psbt};
 use bitcoin::{constants::genesis_block, Amount};
 use bitcoin::{secp256k1::Secp256k1, Weight};
+use chain::Staged;
 use core::fmt;
 use core::mem;
 use core::ops::Deref;
@@ -117,6 +118,14 @@ pub struct Wallet {
     stage: ChangeSet,
     network: Network,
     secp: SecpCtx,
+}
+
+impl Staged for Wallet {
+    type ChangeSet = ChangeSet;
+
+    fn staged(&mut self) -> &mut Self::ChangeSet {
+        &mut self.stage
+    }
 }
 
 /// An update to [`Wallet`].

@@ -6,10 +6,21 @@ use core::{
 
 use alloc::boxed::Box;
 
+use crate::Merge;
+
+/// Represents a type that contains staged changes.
+pub trait Staged {
+    /// Type for staged changes.
+    type ChangeSet: Merge;
+
+    /// Get mutable reference of staged changes.
+    fn staged(&mut self) -> &mut Self::ChangeSet;
+}
+
 /// Trait that persists the type with `Db`.
 ///
 /// Methods of this trait should not be called directly.
-pub trait PersistWith<Db>: Sized {
+pub trait PersistWith<Db>: Staged + Sized {
     /// Parameters for [`PersistWith::create`].
     type CreateParams;
     /// Parameters for [`PersistWith::load`].
@@ -21,20 +32,23 @@ pub trait PersistWith<Db>: Sized {
     /// Error type of [`PersistWith::persist`].
     type PersistError;
 
-    /// Create the type and initialize the `Db`.
+    /// Initialize the `Db` and create `Self`.
     fn create(db: &mut Db, params: Self::CreateParams) -> Result<Self, Self::CreateError>;
 
-    /// Load the type from the `Db`.
+    /// Initialize the `Db` and load a previously-persisted `Self`.
     fn load(db: &mut Db, params: Self::LoadParams) -> Result<Option<Self>, Self::LoadError>;
 
-    /// Persist staged changes into `Db`.
-    fn persist(&mut self, db: &mut Db) -> Result<bool, Self::PersistError>;
+    /// Persist changes to the `Db`.
+    fn persist(
+        db: &mut Db,
+        changeset: &<Self as Staged>::ChangeSet,
+    ) -> Result<(), Self::PersistError>;
 }
 
 type FutureResult<'a, T, E> = Pin<Box<dyn Future<Output = Result<T, E>> + Send + 'a>>;
 
 /// Trait that persists the type with an async `Db`.
-pub trait PersistAsyncWith<Db>: Sized {
+pub trait PersistAsyncWith<Db>: Staged + Sized {
     /// Parameters for [`PersistAsyncWith::create`].
     type CreateParams;
     /// Parameters for [`PersistAsyncWith::load`].
@@ -46,14 +60,17 @@ pub trait PersistAsyncWith<Db>: Sized {
     /// Error type of [`PersistAsyncWith::persist`].
     type PersistError;
 
-    /// Create the type and initialize the `Db`.
+    /// Initialize the `Db` and create `Self`.
     fn create(db: &mut Db, params: Self::CreateParams) -> FutureResult<Self, Self::CreateError>;
 
-    /// Load the type from `Db`.
+    /// Initialize the `Db` and load a previously-persisted `Self`.
     fn load(db: &mut Db, params: Self::LoadParams) -> FutureResult<Option<Self>, Self::LoadError>;
 
-    /// Persist staged changes into `Db`.
-    fn persist<'a>(&'a mut self, db: &'a mut Db) -> FutureResult<'a, bool, Self::PersistError>;
+    /// Persist changes to the `Db`.
+    fn persist<'a>(
+        db: &'a mut Db,
+        changeset: &'a <Self as Staged>::ChangeSet,
+    ) -> FutureResult<'a, (), Self::PersistError>;
 }
 
 /// Represents a persisted `T`.
@@ -102,14 +119,24 @@ impl<T> Persisted<T> {
     }
 
     /// Persist staged changes of `T` into `Db`.
+    ///
+    /// If the database errors, the staged changes will not be cleared.
     pub fn persist<Db>(&mut self, db: &mut Db) -> Result<bool, T::PersistError>
     where
         T: PersistWith<Db>,
     {
-        self.inner.persist(db)
+        let stage = T::staged(&mut self.inner);
+        if stage.is_empty() {
+            return Ok(false);
+        }
+        T::persist(db, &*stage)?;
+        stage.take();
+        Ok(true)
     }
 
     /// Persist staged changes of `T` into an async `Db`.
+    ///
+    /// If the database errors, the staged changes will not be cleared.
     pub async fn persist_async<'a, Db>(
         &'a mut self,
         db: &'a mut Db,
@@ -117,7 +144,13 @@ impl<T> Persisted<T> {
     where
         T: PersistAsyncWith<Db>,
     {
-        self.inner.persist(db).await
+        let stage = T::staged(&mut self.inner);
+        if stage.is_empty() {
+            return Ok(false);
+        }
+        T::persist(db, &*stage).await?;
+        stage.take();
+        Ok(true)
     }
 }
 

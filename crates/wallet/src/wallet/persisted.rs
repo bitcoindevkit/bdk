@@ -41,14 +41,10 @@ impl<'c> chain::PersistWith<bdk_chain::sqlite::Transaction<'c>> for Wallet {
     }
 
     fn persist(
-        &mut self,
-        conn: &mut bdk_chain::sqlite::Transaction,
-    ) -> Result<bool, Self::PersistError> {
-        if let Some(changeset) = self.take_staged() {
-            changeset.persist_to_sqlite(conn)?;
-            return Ok(true);
-        }
-        Ok(false)
+        db: &mut bdk_chain::sqlite::Transaction<'c>,
+        changeset: &<Self as chain::Staged>::ChangeSet,
+    ) -> Result<(), Self::PersistError> {
+        changeset.persist_to_sqlite(db)
     }
 }
 
@@ -82,13 +78,12 @@ impl chain::PersistWith<bdk_chain::sqlite::Connection> for Wallet {
     }
 
     fn persist(
-        &mut self,
         db: &mut bdk_chain::sqlite::Connection,
-    ) -> Result<bool, Self::PersistError> {
-        let mut db_tx = db.transaction()?;
-        let has_changes = chain::PersistWith::persist(self, &mut db_tx)?;
-        db_tx.commit()?;
-        Ok(has_changes)
+        changeset: &<Self as chain::Staged>::ChangeSet,
+    ) -> Result<(), Self::PersistError> {
+        let db_tx = db.transaction()?;
+        changeset.persist_to_sqlite(&db_tx)?;
+        db_tx.commit()
     }
 }
 
@@ -126,14 +121,10 @@ impl chain::PersistWith<bdk_file_store::Store<crate::ChangeSet>> for Wallet {
     }
 
     fn persist(
-        &mut self,
         db: &mut bdk_file_store::Store<crate::ChangeSet>,
-    ) -> Result<bool, Self::PersistError> {
-        if let Some(changeset) = self.take_staged() {
-            db.append_changeset(&changeset)?;
-            return Ok(true);
-        }
-        Ok(false)
+        changeset: &<Self as chain::Staged>::ChangeSet,
+    ) -> Result<(), Self::PersistError> {
+        db.append_changeset(changeset)
     }
 }
 
