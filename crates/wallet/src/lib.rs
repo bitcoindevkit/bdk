@@ -32,10 +32,10 @@ mod types;
 mod wallet;
 
 pub(crate) use bdk_chain::collections;
-#[cfg(feature = "sqlite")]
+#[cfg(feature = "rusqlite")]
 pub use bdk_chain::rusqlite;
-#[cfg(feature = "sqlite")]
-pub use bdk_chain::sqlite;
+#[cfg(feature = "rusqlite")]
+pub use bdk_chain::rusqlite_impl;
 pub use descriptor::template;
 pub use descriptor::HdKeyPaths;
 pub use signer;

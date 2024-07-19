@@ -5,8 +5,8 @@ use crate::{descriptor::DescriptorError, Wallet};
 /// Represents a persisted wallet.
 pub type PersistedWallet = bdk_chain::Persisted<Wallet>;
 
-#[cfg(feature = "sqlite")]
-impl<'c> chain::PersistWith<bdk_chain::sqlite::Transaction<'c>> for Wallet {
+#[cfg(feature = "rusqlite")]
+impl<'c> chain::PersistWith<bdk_chain::rusqlite::Transaction<'c>> for Wallet {
     type CreateParams = crate::CreateParams;
     type LoadParams = crate::LoadParams;
 
@@ -15,7 +15,7 @@ impl<'c> chain::PersistWith<bdk_chain::sqlite::Transaction<'c>> for Wallet {
     type PersistError = bdk_chain::rusqlite::Error;
 
     fn create(
-        db: &mut bdk_chain::sqlite::Transaction<'c>,
+        db: &mut bdk_chain::rusqlite::Transaction<'c>,
         params: Self::CreateParams,
     ) -> Result<Self, Self::CreateError> {
         let mut wallet =
@@ -29,7 +29,7 @@ impl<'c> chain::PersistWith<bdk_chain::sqlite::Transaction<'c>> for Wallet {
     }
 
     fn load(
-        conn: &mut bdk_chain::sqlite::Transaction<'c>,
+        conn: &mut bdk_chain::rusqlite::Transaction<'c>,
         params: Self::LoadParams,
     ) -> Result<Option<Self>, Self::LoadError> {
         let changeset =
@@ -41,15 +41,15 @@ impl<'c> chain::PersistWith<bdk_chain::sqlite::Transaction<'c>> for Wallet {
     }
 
     fn persist(
-        db: &mut bdk_chain::sqlite::Transaction<'c>,
+        db: &mut bdk_chain::rusqlite::Transaction<'c>,
         changeset: &<Self as chain::Staged>::ChangeSet,
     ) -> Result<(), Self::PersistError> {
         changeset.persist_to_sqlite(db)
     }
 }
 
-#[cfg(feature = "sqlite")]
-impl chain::PersistWith<bdk_chain::sqlite::Connection> for Wallet {
+#[cfg(feature = "rusqlite")]
+impl chain::PersistWith<bdk_chain::rusqlite::Connection> for Wallet {
     type CreateParams = crate::CreateParams;
     type LoadParams = crate::LoadParams;
 
@@ -58,7 +58,7 @@ impl chain::PersistWith<bdk_chain::sqlite::Connection> for Wallet {
     type PersistError = bdk_chain::rusqlite::Error;
 
     fn create(
-        db: &mut bdk_chain::sqlite::Connection,
+        db: &mut bdk_chain::rusqlite::Connection,
         params: Self::CreateParams,
     ) -> Result<Self, Self::CreateError> {
         let mut db_tx = db.transaction().map_err(CreateWithPersistError::Persist)?;
@@ -68,7 +68,7 @@ impl chain::PersistWith<bdk_chain::sqlite::Connection> for Wallet {
     }
 
     fn load(
-        db: &mut bdk_chain::sqlite::Connection,
+        db: &mut bdk_chain::rusqlite::Connection,
         params: Self::LoadParams,
     ) -> Result<Option<Self>, Self::LoadError> {
         let mut db_tx = db.transaction().map_err(LoadWithPersistError::Persist)?;
@@ -78,7 +78,7 @@ impl chain::PersistWith<bdk_chain::sqlite::Connection> for Wallet {
     }
 
     fn persist(
-        db: &mut bdk_chain::sqlite::Connection,
+        db: &mut bdk_chain::rusqlite::Connection,
         changeset: &<Self as chain::Staged>::ChangeSet,
     ) -> Result<(), Self::PersistError> {
         let db_tx = db.transaction()?;

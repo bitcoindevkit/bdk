@@ -169,10 +169,10 @@ fn wallet_is_persisted() -> anyhow::Result<()> {
         |path| Ok(bdk_file_store::Store::create_new(DB_MAGIC, path)?),
         |path| Ok(bdk_file_store::Store::open(DB_MAGIC, path)?),
     )?;
-    run::<bdk_chain::sqlite::Connection, _, _>(
+    run::<bdk_chain::rusqlite::Connection, _, _>(
         "store.sqlite",
-        |path| Ok(bdk_chain::sqlite::Connection::open(path)?),
-        |path| Ok(bdk_chain::sqlite::Connection::open(path)?),
+        |path| Ok(bdk_chain::rusqlite::Connection::open(path)?),
+        |path| Ok(bdk_chain::rusqlite::Connection::open(path)?),
     )?;
 
     Ok(())
@@ -258,8 +258,8 @@ fn wallet_load_checks() -> anyhow::Result<()> {
     )?;
     run(
         "store.sqlite",
-        |path| Ok(bdk_chain::sqlite::Connection::open(path)?),
-        |path| Ok(bdk_chain::sqlite::Connection::open(path)?),
+        |path| Ok(bdk_chain::rusqlite::Connection::open(path)?),
+        |path| Ok(bdk_chain::rusqlite::Connection::open(path)?),
     )?;
 
     Ok(())

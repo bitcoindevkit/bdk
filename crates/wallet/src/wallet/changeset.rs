@@ -64,7 +64,7 @@ impl Merge for ChangeSet {
     }
 }
 
-#[cfg(feature = "sqlite")]
+#[cfg(feature = "rusqlite")]
 impl ChangeSet {
     /// Schema name for wallet.
     pub const WALLET_SCHEMA_NAME: &'static str = "bdk_wallet";
@@ -84,14 +84,14 @@ impl ChangeSet {
                 ) STRICT;",
             Self::WALLET_TABLE_NAME,
         )];
-        crate::sqlite::migrate_schema(db_tx, Self::WALLET_SCHEMA_NAME, &[schema_v0])
+        crate::rusqlite_impl::migrate_schema(db_tx, Self::WALLET_SCHEMA_NAME, &[schema_v0])
     }
 
     /// Recover a [`ChangeSet`] from sqlite database.
     pub fn from_sqlite(db_tx: &chain::rusqlite::Transaction) -> chain::rusqlite::Result<Self> {
         Self::init_wallet_sqlite_tables(db_tx)?;
-        use crate::sqlite::Sql;
         use chain::rusqlite::OptionalExtension;
+        use chain::Impl;
         use miniscript::{Descriptor, DescriptorPublicKey};
 
         let mut changeset = Self::default();
@@ -103,13 +103,13 @@ impl ChangeSet {
         let row = wallet_statement
             .query_row([], |row| {
                 Ok((
-                    row.get::<_, Sql<Descriptor<DescriptorPublicKey>>>("descriptor")?,
-                    row.get::<_, Sql<Descriptor<DescriptorPublicKey>>>("change_descriptor")?,
-                    row.get::<_, Sql<bitcoin::Network>>("network")?,
+                    row.get::<_, Impl<Descriptor<DescriptorPublicKey>>>("descriptor")?,
+                    row.get::<_, Impl<Descriptor<DescriptorPublicKey>>>("change_descriptor")?,
+                    row.get::<_, Impl<bitcoin::Network>>("network")?,
                 ))
             })
             .optional()?;
-        if let Some((Sql(desc), Sql(change_desc), Sql(network))) = row {
+        if let Some((Impl(desc), Impl(change_desc), Impl(network))) = row {
             changeset.descriptor = Some(desc);
             changeset.change_descriptor = Some(change_desc);
             changeset.network = Some(network);
@@ -129,7 +129,7 @@ impl ChangeSet {
     ) -> chain::rusqlite::Result<()> {
         Self::init_wallet_sqlite_tables(db_tx)?;
         use chain::rusqlite::named_params;
-        use chain::sqlite::Sql;
+        use chain::Impl;
 
         let mut descriptor_statement = db_tx.prepare_cached(&format!(
             "INSERT INTO {}(id, descriptor) VALUES(:id, :descriptor) ON CONFLICT(id) DO UPDATE SET descriptor=:descriptor",
@@ -138,7 +138,7 @@ impl ChangeSet {
         if let Some(descriptor) = &self.descriptor {
             descriptor_statement.execute(named_params! {
                 ":id": 0,
-                ":descriptor": Sql(descriptor.clone()),
+                ":descriptor": Impl(descriptor.clone()),
             })?;
         }
 
@@ -149,7 +149,7 @@ impl ChangeSet {
         if let Some(change_descriptor) = &self.change_descriptor {
             change_descriptor_statement.execute(named_params! {
                 ":id": 0,
-                ":change_descriptor": Sql(change_descriptor.clone()),
+                ":change_descriptor": Impl(change_descriptor.clone()),
             })?;
         }
 
@@ -160,7 +160,7 @@ impl ChangeSet {
         if let Some(network) = self.network {
             network_statement.execute(named_params! {
                 ":id": 0,
-                ":network": Sql(network),
+                ":network": Impl(network),
             })?;
         }
 

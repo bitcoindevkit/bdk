@@ -586,7 +586,7 @@ impl Wallet {
     ///
     /// ```rust,no_run
     /// # use bdk_wallet::{LoadParams, ChangeSet, KeychainKind};
-    /// use bdk_chain::sqlite::Connection;
+    /// use bdk_chain::rusqlite::Connection;
     /// let mut conn = Connection::open_in_memory().expect("must open connection");
     /// let mut wallet = LoadParams::new()
     ///     .load_wallet(&mut conn)
