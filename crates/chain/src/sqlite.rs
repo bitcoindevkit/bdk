@@ -1,6 +1,6 @@
 //! Module for stuff
 
-use core::{fmt::Debug, ops::Deref, str::FromStr};
+use core::{ops::Deref, str::FromStr};
 
 use alloc::{borrow::ToOwned, boxed::Box, string::ToString, vec::Vec};
 use bitcoin::consensus::{Decodable, Encodable};
@@ -14,105 +14,7 @@ use rusqlite::{
     ToSql,
 };
 
-use crate::{Anchor, Merge};
-
-/// Parameters for [`Persister`].
-pub trait PersistParams {
-    /// Data type that is loaded and written to the database.
-    type ChangeSet: Default + Merge;
-
-    /// Initialize SQL tables.
-    fn initialize_tables(&self, db_tx: &Transaction) -> rusqlite::Result<()>;
-
-    /// Load all data from tables.
-    fn load_changeset(&self, db_tx: &Transaction) -> rusqlite::Result<Option<Self::ChangeSet>>;
-
-    /// Write data into table(s).
-    fn write_changeset(
-        &self,
-        db_tx: &Transaction,
-        changeset: &Self::ChangeSet,
-    ) -> rusqlite::Result<()>;
-}
-
-// TODO: Use macros
-impl<A: PersistParams, B: PersistParams> PersistParams for (A, B) {
-    type ChangeSet = (A::ChangeSet, B::ChangeSet);
-
-    fn initialize_tables(&self, db_tx: &Transaction) -> rusqlite::Result<()> {
-        self.0.initialize_tables(db_tx)?;
-        self.1.initialize_tables(db_tx)?;
-        Ok(())
-    }
-
-    fn load_changeset(&self, db_tx: &Transaction) -> rusqlite::Result<Option<Self::ChangeSet>> {
-        let changeset = (
-            self.0.load_changeset(db_tx)?.unwrap_or_default(),
-            self.1.load_changeset(db_tx)?.unwrap_or_default(),
-        );
-        if changeset.is_empty() {
-            Ok(None)
-        } else {
-            Ok(Some(changeset))
-        }
-    }
-
-    fn write_changeset(
-        &self,
-        db_tx: &Transaction,
-        changeset: &Self::ChangeSet,
-    ) -> rusqlite::Result<()> {
-        self.0.write_changeset(db_tx, &changeset.0)?;
-        self.1.write_changeset(db_tx, &changeset.1)?;
-        Ok(())
-    }
-}
-
-/// Persists data in to a relational schema based [SQLite] database file.
-///
-/// The changesets loaded or stored represent changes to keychain and blockchain data.
-///
-/// [SQLite]: https://www.sqlite.org/index.html
-#[derive(Debug)]
-pub struct Persister<P> {
-    conn: rusqlite::Connection,
-    params: P,
-}
-
-impl<P: PersistParams> Persister<P> {
-    /// Persist changeset to the database connection.
-    pub fn persist(&mut self, changeset: &P::ChangeSet) -> rusqlite::Result<()> {
-        if !changeset.is_empty() {
-            let db_tx = self.conn.transaction()?;
-            self.params.write_changeset(&db_tx, changeset)?;
-            db_tx.commit()?;
-        }
-        Ok(())
-    }
-}
-
-/// Extends [`rusqlite::Connection`] to transform into a [`Persister`].
-pub trait ConnectionExt: Sized {
-    /// Transform into a [`Persister`].
-    fn into_persister<P: PersistParams>(
-        self,
-        params: P,
-    ) -> rusqlite::Result<(Persister<P>, Option<P::ChangeSet>)>;
-}
-
-impl ConnectionExt for rusqlite::Connection {
-    fn into_persister<P: PersistParams>(
-        mut self,
-        params: P,
-    ) -> rusqlite::Result<(Persister<P>, Option<P::ChangeSet>)> {
-        let db_tx = self.transaction()?;
-        params.initialize_tables(&db_tx)?;
-        let changeset = params.load_changeset(&db_tx)?;
-        db_tx.commit()?;
-        let persister = Persister { conn: self, params };
-        Ok((persister, changeset))
-    }
-}
+use crate::Anchor;
 
 /// Table name for schemas.
 pub const SCHEMAS_TABLE_NAME: &str = "bdk_schemas";
