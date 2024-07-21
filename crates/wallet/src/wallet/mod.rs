@@ -499,7 +499,7 @@ impl Wallet {
 
             if change_descriptor.descriptor_id() != exp_change_descriptor.descriptor_id() {
                 return Err(LoadError::Mismatch(LoadMismatch::Descriptor {
-                    keychain: KeychainKind::External,
+                    keychain: KeychainKind::Internal,
                     loaded: change_descriptor,
                     expected: exp_change_descriptor,
                 }));
