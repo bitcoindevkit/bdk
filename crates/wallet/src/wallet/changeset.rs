@@ -40,6 +40,7 @@ impl Merge for ChangeSet {
                     || self.change_descriptor == other.change_descriptor,
                 "change descriptor must never change"
             );
+            self.change_descriptor = other.change_descriptor;
         }
         if other.network.is_some() {
             debug_assert!(
