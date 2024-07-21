@@ -1,21 +1,4 @@
 #![doc = include_str!("../README.md")]
-
-//! # Primary Methods
-//!
-//! The two primary methods are [`EsploraExt::sync`] and [`EsploraExt::full_scan`].
-//!
-//! [`EsploraExt::sync`] is used to sync against a subset of wallet data. For example, transaction
-//! histories of revealed and unused script from the external (public) keychain and/or statuses of
-//! wallet-owned UTXOs and spending transactions from them. The policy of what to sync against can
-//! be customized.
-//!
-//! [`EsploraExt::full_scan`] is designed to be used when importing or restoring a keychain where
-//! the range of possibly used scripts is not known. In this case it is necessary to scan all
-//! keychain scripts until a number (the `stop_gap`) of unused scripts is discovered.
-//!
-//! For a sync or full scan, the user receives relevant blockchain data and output updates for
-//! [`bdk_chain`] .
-//!
 //! # Low-Level Methods
 //!
 //! [`EsploraExt::sync`] and [`EsploraExt::full_scan`] returns updates which are *complete* and can
