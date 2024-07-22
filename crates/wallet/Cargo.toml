@@ -1,7 +1,7 @@
 [package]
 name = "bdk_wallet"
 homepage = "https://bitcoindevkit.org"
-version = "1.0.0-alpha.13"
+version = "1.0.0-beta.1"
 repository = "https://github.com/bitcoindevkit/bdk"
 documentation = "https://docs.rs/bdk"
 description = "A modern, lightweight, descriptor-based wallet library"
@@ -18,8 +18,8 @@ miniscript = { version = "12.0.0", features = ["serde"], default-features = fals
 bitcoin = { version = "0.32.0", features = ["serde", "base64"], default-features = false }
 serde = { version = "^1.0", features = ["derive"] }
 serde_json = { version = "^1.0" }
-bdk_chain = { path = "../chain", version = "0.16.0", features = ["miniscript", "serde"], default-features = false }
-bdk_file_store = { path = "../file_store", version = "0.13.0", optional = true }
+bdk_chain = { path = "../chain", version = "0.17.0", features = ["miniscript", "serde"], default-features = false }
+bdk_file_store = { path = "../file_store", version = "0.14.0", optional = true }
 
 # Optional dependencies
 bip39 = { version = "2.0", optional = true }
