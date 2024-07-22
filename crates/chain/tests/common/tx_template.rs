@@ -3,7 +3,7 @@
 use rand::distributions::{Alphanumeric, DistString};
 use std::collections::HashMap;
 
-use bdk_chain::{tx_graph::TxGraph, Anchor, SpkTxOutIndex};
+use bdk_chain::{spk_txout::SpkTxOutIndex, tx_graph::TxGraph, Anchor};
 use bitcoin::{
     locktime::absolute::LockTime, secp256k1::Secp256k1, transaction, Amount, OutPoint, ScriptBuf,
     Sequence, Transaction, TxIn, TxOut, Txid, Witness,

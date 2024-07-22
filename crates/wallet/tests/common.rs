@@ -1,9 +1,6 @@
 #![allow(unused)]
 use bdk_chain::{BlockId, ConfirmationBlockTime, ConfirmationTime, TxGraph};
-use bdk_wallet::{
-    wallet::{Update, Wallet},
-    KeychainKind, LocalOutput,
-};
+use bdk_wallet::{CreateParams, KeychainKind, LocalOutput, Update, Wallet};
 use bitcoin::{
     hashes::Hash, transaction, Address, Amount, BlockHash, FeeRate, Network, OutPoint, Transaction,
     TxIn, TxOut, Txid,
@@ -16,7 +13,11 @@ use std::str::FromStr;
 /// to a foreign address and one returning 50_000 back to the wallet. The remaining 1000
 /// sats are the transaction fee.
 pub fn get_funded_wallet_with_change(descriptor: &str, change: &str) -> (Wallet, bitcoin::Txid) {
-    let mut wallet = Wallet::new(descriptor, change, Network::Regtest).unwrap();
+    let mut wallet = Wallet::create(descriptor.to_string(), change.to_string())
+        .network(Network::Regtest)
+        .create_wallet_no_persist()
+        .expect("descriptors must be valid");
+
     let receive_address = wallet.peek_address(KeychainKind::External, 0).address;
     let sendto_address = Address::from_str("bcrt1q3qtze4ys45tgdvguj66zrk4fu6hq3a3v9pfly5")
         .expect("address")

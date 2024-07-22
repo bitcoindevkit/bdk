@@ -4,7 +4,8 @@ use bdk_bitcoind_rpc::Emitter;
 use bdk_chain::{
     bitcoin::{Address, Amount, Txid},
     local_chain::{CheckPoint, LocalChain},
-    Balance, BlockId, IndexedTxGraph, Merge, SpkTxOutIndex,
+    spk_txout::SpkTxOutIndex,
+    Balance, BlockId, IndexedTxGraph, Merge,
 };
 use bdk_testenv::{anyhow, TestEnv};
 use bitcoin::{hashes::Hash, Block, OutPoint, ScriptBuf, WScriptHash};
@@ -47,7 +48,7 @@ pub fn test_sync_local_chain() -> anyhow::Result<()> {
 
         assert_eq!(
             local_chain.apply_update(emission.checkpoint,)?,
-            BTreeMap::from([(height, Some(hash))]),
+            [(height, Some(hash))].into(),
             "chain update changeset is unexpected",
         );
     }
@@ -93,11 +94,13 @@ pub fn test_sync_local_chain() -> anyhow::Result<()> {
         assert_eq!(
             local_chain.apply_update(emission.checkpoint,)?,
             if exp_height == exp_hashes.len() - reorged_blocks.len() {
-                core::iter::once((height, Some(hash)))
-                    .chain((height + 1..exp_hashes.len() as u32).map(|h| (h, None)))
-                    .collect::<bdk_chain::local_chain::ChangeSet>()
+                bdk_chain::local_chain::ChangeSet {
+                    blocks: core::iter::once((height, Some(hash)))
+                        .chain((height + 1..exp_hashes.len() as u32).map(|h| (h, None)))
+                        .collect(),
+                }
             } else {
-                BTreeMap::from([(height, Some(hash))])
+                [(height, Some(hash))].into()
             },
             "chain update changeset is unexpected",
         );
@@ -193,7 +196,7 @@ fn test_into_tx_graph() -> anyhow::Result<()> {
         let indexed_additions = indexed_tx_graph.batch_insert_unconfirmed(mempool_txs);
         assert_eq!(
             indexed_additions
-                .graph
+                .tx_graph
                 .txs
                 .iter()
                 .map(|tx| tx.compute_txid())
@@ -201,7 +204,7 @@ fn test_into_tx_graph() -> anyhow::Result<()> {
             exp_txids,
             "changeset should have the 3 mempool transactions",
         );
-        assert!(indexed_additions.graph.anchors.is_empty());
+        assert!(indexed_additions.tx_graph.anchors.is_empty());
     }
 
     // mine a block that confirms the 3 txs
@@ -224,9 +227,9 @@ fn test_into_tx_graph() -> anyhow::Result<()> {
         let height = emission.block_height();
         let _ = chain.apply_update(emission.checkpoint)?;
         let indexed_additions = indexed_tx_graph.apply_block_relevant(&emission.block, height);
-        assert!(indexed_additions.graph.txs.is_empty());
-        assert!(indexed_additions.graph.txouts.is_empty());
-        assert_eq!(indexed_additions.graph.anchors, exp_anchors);
+        assert!(indexed_additions.tx_graph.txs.is_empty());
+        assert!(indexed_additions.tx_graph.txouts.is_empty());
+        assert_eq!(indexed_additions.tx_graph.anchors, exp_anchors);
     }
 
     Ok(())

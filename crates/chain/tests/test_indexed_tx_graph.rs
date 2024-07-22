@@ -10,7 +10,7 @@ use bdk_chain::{
     indexed_tx_graph::{self, IndexedTxGraph},
     indexer::keychain_txout::KeychainTxOutIndex,
     local_chain::LocalChain,
-    tx_graph, Balance, ChainPosition, ConfirmationBlockTime, DescriptorExt, Merge,
+    tx_graph, Balance, ChainPosition, ConfirmationBlockTime, DescriptorExt,
 };
 use bitcoin::{
     secp256k1::Secp256k1, Amount, OutPoint, Script, ScriptBuf, Transaction, TxIn, TxOut,
@@ -73,13 +73,12 @@ fn insert_relevant_txs() {
     let txs = [tx_c, tx_b, tx_a];
 
     let changeset = indexed_tx_graph::ChangeSet {
-        graph: tx_graph::ChangeSet {
+        tx_graph: tx_graph::ChangeSet {
             txs: txs.iter().cloned().map(Arc::new).collect(),
             ..Default::default()
         },
         indexer: keychain_txout::ChangeSet {
             last_revealed: [(descriptor.descriptor_id(), 9_u32)].into(),
-            keychains_added: [].into(),
         },
     };
 
@@ -90,10 +89,9 @@ fn insert_relevant_txs() {
 
     // The initial changeset will also contain info about the keychain we added
     let initial_changeset = indexed_tx_graph::ChangeSet {
-        graph: changeset.graph,
+        tx_graph: changeset.tx_graph,
         indexer: keychain_txout::ChangeSet {
             last_revealed: changeset.indexer.last_revealed,
-            keychains_added: [((), descriptor)].into(),
         },
     };
 
@@ -144,16 +142,14 @@ fn test_list_owned_txouts() {
         KeychainTxOutIndex::new(10),
     );
 
-    assert!(!graph
+    assert!(graph
         .index
         .insert_descriptor("keychain_1".into(), desc_1)
-        .unwrap()
-        .is_empty());
-    assert!(!graph
+        .unwrap());
+    assert!(graph
         .index
         .insert_descriptor("keychain_2".into(), desc_2)
-        .unwrap()
-        .is_empty());
+        .unwrap());
 
     // Get trusted and untrusted addresses
 
@@ -532,8 +528,8 @@ fn test_list_owned_txouts() {
 #[test]
 fn test_get_chain_position() {
     use bdk_chain::local_chain::CheckPoint;
+    use bdk_chain::spk_txout::SpkTxOutIndex;
     use bdk_chain::BlockId;
-    use bdk_chain::SpkTxOutIndex;
 
     struct TestCase<A> {
         name: &'static str,

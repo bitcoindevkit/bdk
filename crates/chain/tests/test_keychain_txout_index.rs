@@ -81,11 +81,9 @@ fn merge_changesets_check_last_revealed() {
     lhs_di.insert(descriptor_ids[3], 4); // key doesn't exist in lhs
 
     let mut lhs = ChangeSet {
-        keychains_added: BTreeMap::<(), _>::new(),
         last_revealed: lhs_di,
     };
     let rhs = ChangeSet {
-        keychains_added: BTreeMap::<(), _>::new(),
         last_revealed: rhs_di,
     };
     lhs.merge(rhs);
@@ -98,49 +96,6 @@ fn merge_changesets_check_last_revealed() {
     assert_eq!(lhs.last_revealed.get(&descriptor_ids[2]), Some(&3));
     // New keychain gets added if the keychain is in `other` but not in `self`.
     assert_eq!(lhs.last_revealed.get(&descriptor_ids[3]), Some(&4));
-}
-
-#[test]
-fn when_apply_contradictory_changesets_they_are_ignored() {
-    let external_descriptor = parse_descriptor(DESCRIPTORS[0]);
-    let internal_descriptor = parse_descriptor(DESCRIPTORS[1]);
-    let mut txout_index =
-        init_txout_index(external_descriptor.clone(), internal_descriptor.clone(), 0);
-    assert_eq!(
-        txout_index.keychains().collect::<Vec<_>>(),
-        vec![
-            (&TestKeychain::External, &external_descriptor),
-            (&TestKeychain::Internal, &internal_descriptor)
-        ]
-    );
-
-    let changeset = ChangeSet {
-        keychains_added: [(TestKeychain::External, internal_descriptor.clone())].into(),
-        last_revealed: [].into(),
-    };
-    txout_index.apply_changeset(changeset);
-
-    assert_eq!(
-        txout_index.keychains().collect::<Vec<_>>(),
-        vec![
-            (&TestKeychain::External, &external_descriptor),
-            (&TestKeychain::Internal, &internal_descriptor)
-        ]
-    );
-
-    let changeset = ChangeSet {
-        keychains_added: [(TestKeychain::Internal, external_descriptor.clone())].into(),
-        last_revealed: [].into(),
-    };
-    txout_index.apply_changeset(changeset);
-
-    assert_eq!(
-        txout_index.keychains().collect::<Vec<_>>(),
-        vec![
-            (&TestKeychain::External, &external_descriptor),
-            (&TestKeychain::Internal, &internal_descriptor)
-        ]
-    );
 }
 
 #[test]
@@ -159,7 +114,6 @@ fn test_set_all_derivation_indices() {
     assert_eq!(
         txout_index.reveal_to_target_multi(&derive_to),
         ChangeSet {
-            keychains_added: BTreeMap::new(),
             last_revealed: last_revealed.clone()
         }
     );
@@ -633,46 +587,29 @@ fn lookahead_to_target() {
 }
 
 #[test]
-fn insert_descriptor_no_change() {
-    let secp = Secp256k1::signing_only();
-    let (desc, _) =
-        Descriptor::<DescriptorPublicKey>::parse_descriptor(&secp, DESCRIPTORS[0]).unwrap();
-    let mut txout_index = KeychainTxOutIndex::<()>::default();
-    assert_eq!(
-        txout_index.insert_descriptor((), desc.clone()),
-        Ok(ChangeSet {
-            keychains_added: [((), desc.clone())].into(),
-            last_revealed: Default::default()
-        }),
-    );
-    assert_eq!(
-        txout_index.insert_descriptor((), desc.clone()),
-        Ok(ChangeSet::default()),
-        "inserting the same descriptor for keychain should return an empty changeset",
-    );
-}
-
-#[test]
-#[cfg(not(debug_assertions))]
 fn applying_changesets_one_by_one_vs_aggregate_must_have_same_result() {
     let desc = parse_descriptor(DESCRIPTORS[0]);
-    let changesets: &[ChangeSet<TestKeychain>] = &[
+    let changesets: &[ChangeSet] = &[
         ChangeSet {
-            keychains_added: [(TestKeychain::Internal, desc.clone())].into(),
-            last_revealed: [].into(),
+            last_revealed: [(desc.descriptor_id(), 10)].into(),
         },
         ChangeSet {
-            keychains_added: [(TestKeychain::External, desc.clone())].into(),
             last_revealed: [(desc.descriptor_id(), 12)].into(),
         },
     ];
 
     let mut indexer_a = KeychainTxOutIndex::<TestKeychain>::new(0);
+    indexer_a
+        .insert_descriptor(TestKeychain::External, desc.clone())
+        .expect("must insert keychain");
     for changeset in changesets {
         indexer_a.apply_changeset(changeset.clone());
     }
 
     let mut indexer_b = KeychainTxOutIndex::<TestKeychain>::new(0);
+    indexer_b
+        .insert_descriptor(TestKeychain::External, desc.clone())
+        .expect("must insert keychain");
     let aggregate_changesets = changesets
         .iter()
         .cloned()

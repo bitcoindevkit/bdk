@@ -208,7 +208,7 @@ impl<I: Clone + Ord + core::fmt::Debug> SpkTxOutIndex<I> {
     /// # Example
     ///
     /// ```rust
-    /// # use bdk_chain::SpkTxOutIndex;
+    /// # use bdk_chain::spk_txout::SpkTxOutIndex;
     ///
     /// // imagine our spks are indexed like (keychain, derivation_index).
     /// let txout_index = SpkTxOutIndex::<(u32, u32)>::default();

@@ -20,6 +20,10 @@ serde_crate = { package = "serde", version = "1", optional = true, features = ["
 hashbrown = { version = "0.9.1", optional = true, features = ["serde"] }
 miniscript = { version = "12.0.0", optional = true, default-features = false }
 
+# Feature dependencies
+rusqlite_crate = { package = "rusqlite", version = "0.31.0", features = ["bundled"], optional = true }
+serde_json = {version = "1", optional = true }
+
 [dev-dependencies]
 rand = "0.8"
 proptest = "1.2.0"
@@ -28,3 +32,4 @@ proptest = "1.2.0"
 default = ["std", "miniscript"]
 std = ["bitcoin/std", "miniscript?/std"]
 serde = ["serde_crate", "bitcoin/serde", "miniscript?/serde"]
+rusqlite = ["std", "rusqlite_crate", "serde", "serde_json"]

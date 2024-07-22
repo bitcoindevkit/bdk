@@ -57,18 +57,17 @@ that the `Wallet` can use to update its view of the chain.
 
 ## Persistence
 
-To persist `Wallet` state data use a data store crate that reads and writes [`bdk_chain::CombinedChangeSet`].
+To persist `Wallet` state data use a data store crate that reads and writes [`ChangeSet`].
 
 **Implementations**
 
 * [`bdk_file_store`]: Stores wallet changes in a simple flat file.
-* [`bdk_sqlite`]: Stores wallet changes in a SQLite relational database file.
 
 **Example**
 
 <!-- compile_fail because outpoint and txout are fake variables -->
 ```rust,no_run
-use bdk_wallet::{bitcoin::Network, KeychainKind, wallet::{ChangeSet, Wallet}};
+use bdk_wallet::{bitcoin::Network, KeychainKind, ChangeSet, Wallet};
 
 // Open or create a new file store for wallet data.
 let mut db =
@@ -76,21 +75,26 @@ let mut db =
         .expect("create store");
 
 // Create a wallet with initial wallet data read from the file store.
+let network = Network::Testnet;
 let descriptor = "wpkh(tprv8ZgxMBicQKsPdcAqYBpzAFwU5yxBUo88ggoBqu1qPcHUfSbKK1sKMLmC7EAk438btHQrSdu3jGGQa6PA71nvH5nkDexhLteJqkM4dQmWF9g/84'/1'/0'/0/*)";
 let change_descriptor = "wpkh(tprv8ZgxMBicQKsPdcAqYBpzAFwU5yxBUo88ggoBqu1qPcHUfSbKK1sKMLmC7EAk438btHQrSdu3jGGQa6PA71nvH5nkDexhLteJqkM4dQmWF9g/84'/1'/0'/1/*)";
-let changeset = db.aggregate_changesets().expect("changeset loaded");
-let mut wallet =
-    Wallet::new_or_load(descriptor, change_descriptor, changeset, Network::Testnet)
-        .expect("create or load wallet");
+let wallet_opt = Wallet::load()
+    .descriptors(descriptor, change_descriptor)
+    .network(network)
+    .load_wallet(&mut db)
+    .expect("wallet");
+let mut wallet = match wallet_opt {
+    Some(wallet) => wallet,
+    None => Wallet::create(descriptor, change_descriptor)
+        .network(network)
+        .create_wallet(&mut db)
+        .expect("wallet"),
+};
 
 // Get a new address to receive bitcoin.
 let receive_address = wallet.reveal_next_address(KeychainKind::External);
 // Persist staged wallet data changes to the file store.
-let staged_changeset = wallet.take_staged();
-if let Some(changeset) = staged_changeset {
-    db.append_changeset(&changeset)
-        .expect("must commit changes to database");
-}
+wallet.persist(&mut db).expect("persist");
 println!("Your new receive address is: {}", receive_address.address);
 ```
 
@@ -122,7 +126,7 @@ println!("Your new receive address is: {}", receive_address.address);
 
 <!-- ```rust -->
 <!-- use bdk_wallet::Wallet; -->
-<!-- use bdk_wallet::wallet::AddressIndex::New; -->
+<!-- use bdk_wallet::AddressIndex::New; -->
 <!-- use bdk_wallet::bitcoin::Network; -->
 
 <!-- fn main() -> Result<(), bdk_wallet::Error> { -->
@@ -147,7 +151,7 @@ println!("Your new receive address is: {}", receive_address.address);
 <!-- use bdk_wallet::blockchain::ElectrumBlockchain; -->
 
 <!-- use bdk_wallet::electrum_client::Client; -->
-<!-- use bdk_wallet::wallet::AddressIndex::New; -->
+<!-- use bdk_wallet::AddressIndex::New; -->
 
 <!-- use bitcoin::base64; -->
 <!-- use bdk_wallet::bitcoin::consensus::serialize; -->
@@ -233,7 +237,6 @@ conditions.
 [`Wallet`]: https://docs.rs/bdk_wallet/latest/bdk_wallet/wallet/struct.Wallet.html
 [`bdk_chain`]: https://docs.rs/bdk_chain/latest
 [`bdk_file_store`]: https://docs.rs/bdk_file_store/latest
-[`bdk_sqlite`]: https://docs.rs/bdk_sqlite/latest
 [`bdk_electrum`]: https://docs.rs/bdk_electrum/latest
 [`bdk_esplora`]: https://docs.rs/bdk_esplora/latest
 [`bdk_bitcoind_rpc`]: https://docs.rs/bdk_bitcoind_rpc/latest

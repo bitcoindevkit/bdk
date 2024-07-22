@@ -19,6 +19,7 @@ bitcoin = { version = "0.32.0", features = ["serde", "base64"], default-features
 serde = { version = "^1.0", features = ["derive"] }
 serde_json = { version = "^1.0" }
 bdk_chain = { path = "../chain", version = "0.16.0", features = ["miniscript", "serde"], default-features = false }
+bdk_file_store = { path = "../file_store", version = "0.13.0", optional = true }
 
 # Optional dependencies
 bip39 = { version = "2.0", optional = true }
@@ -29,12 +30,15 @@ std = ["bitcoin/std", "bitcoin/rand-std", "miniscript/std", "bdk_chain/std"]
 compiler = ["miniscript/compiler"]
 all-keys = ["keys-bip39"]
 keys-bip39 = ["bip39"]
+rusqlite = ["bdk_chain/rusqlite"]
+file_store = ["bdk_file_store"]
 
 [dev-dependencies]
 lazy_static = "1.4"
 assert_matches = "1.5.0"
 tempfile = "3"
-bdk_sqlite = { path = "../sqlite" }
+bdk_chain = { path = "../chain", features = ["rusqlite"] }
+bdk_wallet = { path = ".", features = ["rusqlite", "file_store"] }
 bdk_file_store = { path = "../file_store" }
 anyhow = "1"
 rand = "^0.8"

@@ -14,7 +14,7 @@ use std::error::Error;
 
 use bdk_wallet::bitcoin::Network;
 use bdk_wallet::descriptor::{policy::BuildSatisfaction, ExtractPolicy, IntoWalletDescriptor};
-use bdk_wallet::wallet::signer::SignersContainer;
+use bdk_wallet::signer::SignersContainer;
 
 /// This example describes the use of the BDK's [`bdk_wallet::descriptor::policy`] module.
 ///
@@ -38,7 +38,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     // While the `keymap` can be used to create a `SignerContainer`.
     //
     // The `SignerContainer` can sign for `PSBT`s.
-    // a bdk_wallet::wallet internally uses these to handle transaction signing.
+    // a `bdk_wallet::Wallet` internally uses these to handle transaction signing.
     // But they can be used as independent tools also.
     let (wallet_desc, keymap) = desc.into_wallet_descriptor(&secp, Network::Testnet)?;
 

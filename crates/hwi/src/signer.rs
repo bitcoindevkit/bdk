@@ -83,7 +83,7 @@ impl TransactionSigner for HWISigner {
 //             Arc::new(custom_signer),
 //         );
 //
-//         let addr = wallet.get_address(bdk_wallet::wallet::AddressIndex::LastUnused);
+//         let addr = wallet.get_address(bdk_wallet::AddressIndex::LastUnused);
 //         let mut builder = wallet.build_tx();
 //         builder.drain_to(addr.script_pubkey()).drain_wallet();
 //         let (mut psbt, _) = builder.finish().unwrap();

@@ -20,7 +20,7 @@
 //! ```
 //! # use std::str::FromStr;
 //! # use bitcoin::*;
-//! # use bdk_wallet::wallet::export::*;
+//! # use bdk_wallet::export::*;
 //! # use bdk_wallet::*;
 //! let import = r#"{
 //!     "descriptor": "wpkh([c258d2e4\/84h\/1h\/0h]tpubDD3ynpHgJQW8VvWRzQ5WFDCrs4jqVFGHB3vLC3r49XHJSqP8bHKdK4AriuUKLccK68zfzowx7YhmDN8SiSkgCDENUFx9qVw65YyqM78vyVe\/0\/*)",
@@ -29,24 +29,26 @@
 //! }"#;
 //!
 //! let import = FullyNodedExport::from_str(import)?;
-//! let wallet = Wallet::new(
-//!     &import.descriptor(),
-//!     &import.change_descriptor().expect("change descriptor"),
-//!     Network::Testnet,
-//! )?;
+//! let wallet = Wallet::create(
+//!     import.descriptor(),
+//!     import.change_descriptor().expect("change descriptor"),
+//! )
+//! .network(Network::Testnet)
+//! .create_wallet_no_persist()?;
 //! # Ok::<_, Box<dyn std::error::Error>>(())
 //! ```
 //!
 //! ### Export a `Wallet`
 //! ```
 //! # use bitcoin::*;
-//! # use bdk_wallet::wallet::export::*;
+//! # use bdk_wallet::export::*;
 //! # use bdk_wallet::*;
-//! let wallet = Wallet::new(
+//! let wallet = Wallet::create(
 //!     "wpkh([c258d2e4/84h/1h/0h]tpubDD3ynpHgJQW8VvWRzQ5WFDCrs4jqVFGHB3vLC3r49XHJSqP8bHKdK4AriuUKLccK68zfzowx7YhmDN8SiSkgCDENUFx9qVw65YyqM78vyVe/0/*)",
 //!     "wpkh([c258d2e4/84h/1h/0h]tpubDD3ynpHgJQW8VvWRzQ5WFDCrs4jqVFGHB3vLC3r49XHJSqP8bHKdK4AriuUKLccK68zfzowx7YhmDN8SiSkgCDENUFx9qVw65YyqM78vyVe/1/*)",
-//!     Network::Testnet,
-//! )?;
+//! )
+//! .network(Network::Testnet)
+//! .create_wallet_no_persist()?;
 //! let export = FullyNodedExport::export_wallet(&wallet, "exported wallet", true).unwrap();
 //!
 //! println!("Exported: {}", export.to_string());
@@ -219,12 +221,15 @@ mod test {
     use bitcoin::{transaction, BlockHash, Network, Transaction};
 
     use super::*;
-    use crate::wallet::Wallet;
+    use crate::Wallet;
 
     fn get_test_wallet(descriptor: &str, change_descriptor: &str, network: Network) -> Wallet {
         use crate::wallet::Update;
         use bdk_chain::TxGraph;
-        let mut wallet = Wallet::new(descriptor, change_descriptor, network).unwrap();
+        let mut wallet = Wallet::create(descriptor.to_string(), change_descriptor.to_string())
+            .network(network)
+            .create_wallet_no_persist()
+            .expect("must create wallet");
         let transaction = Transaction {
             input: vec![],
             output: vec![],

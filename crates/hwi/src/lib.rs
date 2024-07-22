@@ -4,11 +4,13 @@
 //! used with hardware wallets.
 //! ```no_run
 //! # use bdk_wallet::bitcoin::Network;
+//! # use bdk_wallet::descriptor::Descriptor;
 //! # use bdk_wallet::signer::SignerOrdering;
 //! # use bdk_hwi::HWISigner;
 //! # use bdk_wallet::{KeychainKind, SignOptions, Wallet};
 //! # use hwi::HWIClient;
 //! # use std::sync::Arc;
+//! # use std::str::FromStr;
 //! #
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let mut devices = HWIClient::enumerate()?;
@@ -18,11 +20,7 @@
 //! let first_device = devices.remove(0)?;
 //! let custom_signer = HWISigner::from_device(&first_device, Network::Testnet.into())?;
 //!
-//! # let mut wallet = Wallet::new(
-//! #     "",
-//! #     "",
-//! #     Network::Testnet,
-//! # )?;
+//! # let mut wallet = Wallet::create("", "").network(Network::Testnet).create_wallet_no_persist()?;
 //! #
 //! // Adding the hardware signer to the BDK wallet
 //! wallet.add_signer(
@@ -35,7 +33,7 @@
 //! # }
 //! ```
 //!
-//! [`TransactionSigner`]: bdk_wallet::wallet::signer::TransactionSigner
+//! [`TransactionSigner`]: bdk_wallet::signer::TransactionSigner
 
 mod signer;
 pub use signer::*;

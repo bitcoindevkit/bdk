@@ -2,10 +2,10 @@ use bdk_bitcoind_rpc::{
     bitcoincore_rpc::{Auth, Client, RpcApi},
     Emitter,
 };
-use bdk_file_store::Store;
 use bdk_wallet::{
     bitcoin::{Block, Network, Transaction},
-    wallet::Wallet,
+    file_store::Store,
+    Wallet,
 };
 use clap::{self, Parser};
 use std::{path::PathBuf, sync::mpsc::sync_channel, thread::spawn, time::Instant};
@@ -86,18 +86,18 @@ fn main() -> anyhow::Result<()> {
     );
 
     let start_load_wallet = Instant::now();
-    let mut db = Store::<bdk_wallet::wallet::ChangeSet>::open_or_create_new(
-        DB_MAGIC.as_bytes(),
-        args.db_path,
-    )?;
-    let changeset = db.aggregate_changesets()?;
-
-    let mut wallet = Wallet::new_or_load(
-        &args.descriptor,
-        &args.change_descriptor,
-        changeset,
-        args.network,
-    )?;
+    let mut db =
+        Store::<bdk_wallet::ChangeSet>::open_or_create_new(DB_MAGIC.as_bytes(), args.db_path)?;
+    let wallet_opt = Wallet::load()
+        .descriptors(args.descriptor.clone(), args.change_descriptor.clone())
+        .network(args.network)
+        .load_wallet(&mut db)?;
+    let mut wallet = match wallet_opt {
+        Some(wallet) => wallet,
+        None => Wallet::create(args.descriptor, args.change_descriptor)
+            .network(args.network)
+            .create_wallet(&mut db)?,
+    };
     println!(
         "Loaded wallet in {}s",
         start_load_wallet.elapsed().as_secs_f32()
@@ -146,9 +146,7 @@ fn main() -> anyhow::Result<()> {
                 let connected_to = block_emission.connected_to();
                 let start_apply_block = Instant::now();
                 wallet.apply_block_connected_to(&block_emission.block, height, connected_to)?;
-                if let Some(changeset) = wallet.take_staged() {
-                    db.append_changeset(&changeset)?;
-                }
+                wallet.persist(&mut db)?;
                 let elapsed = start_apply_block.elapsed().as_secs_f32();
                 println!(
                     "Applied block {} at height {} in {}s",
@@ -158,9 +156,7 @@ fn main() -> anyhow::Result<()> {
             Emission::Mempool(mempool_emission) => {
                 let start_apply_mempool = Instant::now();
                 wallet.apply_unconfirmed_txs(mempool_emission.iter().map(|(tx, time)| (tx, *time)));
-                if let Some(changeset) = wallet.take_staged() {
-                    db.append_changeset(&changeset)?;
-                }
+                wallet.persist(&mut db)?;
                 println!(
                     "Applied unconfirmed transactions in {}s",
                     start_apply_mempool.elapsed().as_secs_f32()

@@ -1,52 +1,57 @@
-const DB_MAGIC: &str = "bdk_wallet_esplora_example";
-const SEND_AMOUNT: Amount = Amount::from_sat(1000);
-const STOP_GAP: usize = 5;
-const PARALLEL_REQUESTS: usize = 1;
-
-use std::{collections::BTreeSet, io::Write, str::FromStr};
+use std::{collections::BTreeSet, io::Write};
 
 use bdk_esplora::{esplora_client, EsploraExt};
-use bdk_file_store::Store;
 use bdk_wallet::{
-    bitcoin::{Address, Amount, Network},
+    bitcoin::{Amount, Network},
+    file_store::Store,
     KeychainKind, SignOptions, Wallet,
 };
 
-fn main() -> Result<(), anyhow::Error> {
-    let db_path = std::env::temp_dir().join("bdk-esplora-example");
-    let mut db =
-        Store::<bdk_wallet::wallet::ChangeSet>::open_or_create_new(DB_MAGIC.as_bytes(), db_path)?;
-    let external_descriptor = "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/84'/1'/0'/0/*)";
-    let internal_descriptor = "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/84'/1'/0'/1/*)";
-    let changeset = db.aggregate_changesets()?;
+const DB_MAGIC: &str = "bdk_wallet_esplora_example";
+const DB_PATH: &str = "bdk-example-esplora-blocking.db";
+const SEND_AMOUNT: Amount = Amount::from_sat(5000);
+const STOP_GAP: usize = 5;
+const PARALLEL_REQUESTS: usize = 5;
 
-    let mut wallet = Wallet::new_or_load(
-        external_descriptor,
-        internal_descriptor,
-        changeset,
-        Network::Testnet,
-    )?;
+const NETWORK: Network = Network::Signet;
+const EXTERNAL_DESC: &str = "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/84'/1'/0'/0/*)";
+const INTERNAL_DESC: &str = "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/84'/1'/0'/1/*)";
+const ESPLORA_URL: &str = "http://signet.bitcoindevkit.net";
+
+fn main() -> Result<(), anyhow::Error> {
+    let mut db = Store::<bdk_wallet::ChangeSet>::open_or_create_new(DB_MAGIC.as_bytes(), DB_PATH)?;
+
+    let wallet_opt = Wallet::load()
+        .descriptors(EXTERNAL_DESC, INTERNAL_DESC)
+        .network(NETWORK)
+        .load_wallet(&mut db)?;
+    let mut wallet = match wallet_opt {
+        Some(wallet) => wallet,
+        None => Wallet::create(EXTERNAL_DESC, INTERNAL_DESC)
+            .network(NETWORK)
+            .create_wallet(&mut db)?,
+    };
 
     let address = wallet.next_unused_address(KeychainKind::External);
-    if let Some(changeset) = wallet.take_staged() {
-        db.append_changeset(&changeset)?;
-    }
-    println!("Generated Address: {}", address);
+    wallet.persist(&mut db)?;
+    println!(
+        "Next unused address: ({}) {}",
+        address.index, address.address
+    );
 
     let balance = wallet.balance();
     println!("Wallet balance before syncing: {} sats", balance.total());
 
     print!("Syncing...");
-    let client =
-        esplora_client::Builder::new("https://blockstream.info/testnet/api").build_blocking();
+    let client = esplora_client::Builder::new(ESPLORA_URL).build_blocking();
 
     let request = wallet.start_full_scan().inspect_spks_for_all_keychains({
         let mut once = BTreeSet::<KeychainKind>::new();
         move |keychain, spk_i, _| {
-            match once.insert(keychain) {
-                true => print!("\nScanning keychain [{:?}]", keychain),
-                false => print!(" {:<3}", spk_i),
-            };
+            if once.insert(keychain) {
+                print!("\nScanning keychain [{:?}] ", keychain);
+            }
+            print!(" {:<3}", spk_i);
             std::io::stdout().flush().expect("must flush")
         }
     });
@@ -72,12 +77,9 @@ fn main() -> Result<(), anyhow::Error> {
         std::process::exit(0);
     }
 
-    let faucet_address = Address::from_str("mkHS9ne12qx9pS9VojpwU5xtRd4T7X7ZUt")?
-        .require_network(Network::Testnet)?;
-
     let mut tx_builder = wallet.build_tx();
     tx_builder
-        .add_recipient(faucet_address.script_pubkey(), SEND_AMOUNT)
+        .add_recipient(address.script_pubkey(), SEND_AMOUNT)
         .enable_rbf();
 
     let mut psbt = tx_builder.finish()?;
