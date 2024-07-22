@@ -252,7 +252,7 @@ where
     let internal_keychain = if graph
         .index
         .keychains()
-        .any(|(k, _)| *k == Keychain::Internal)
+        .any(|(k, _)| k == Keychain::Internal)
     {
         Keychain::Internal
     } else {
@@ -261,7 +261,7 @@ where
 
     let ((change_index, change_script), change_changeset) = graph
         .index
-        .next_unused_spk(&internal_keychain)
+        .next_unused_spk(internal_keychain)
         .expect("Must exist");
     changeset.merge(change_changeset);
 
@@ -269,7 +269,7 @@ where
         &graph
             .index
             .keychains()
-            .find(|(k, _)| *k == &internal_keychain)
+            .find(|(k, _)| *k == internal_keychain)
             .expect("must exist")
             .1
             .at_derivation_index(change_index)
@@ -288,7 +288,7 @@ where
         min_drain_value: graph
             .index
             .keychains()
-            .find(|(k, _)| *k == &internal_keychain)
+            .find(|(k, _)| *k == internal_keychain)
             .expect("must exist")
             .1
             .dust_value(),
@@ -433,7 +433,7 @@ pub fn planned_utxos<A: Anchor, O: ChainOracle, K: Clone + bdk_tmp_plan::CanDeri
             let desc = graph
                 .index
                 .keychains()
-                .find(|(keychain, _)| *keychain == &k)
+                .find(|(keychain, _)| *keychain == k)
                 .expect("keychain must exist")
                 .1
                 .at_derivation_index(i)
@@ -479,7 +479,7 @@ where
                     };
 
                     let ((spk_i, spk), index_changeset) =
-                        spk_chooser(index, &Keychain::External).expect("Must exist");
+                        spk_chooser(index, Keychain::External).expect("Must exist");
                     let db = &mut *db.lock().unwrap();
                     db.append_changeset(&C::from((
                         local_chain::ChangeSet::default(),
@@ -501,8 +501,8 @@ where
                         true => Keychain::Internal,
                         false => Keychain::External,
                     };
-                    for (spk_i, spk) in index.revealed_keychain_spks(&target_keychain) {
-                        let address = Address::from_script(spk, network)
+                    for (spk_i, spk) in index.revealed_keychain_spks(target_keychain) {
+                        let address = Address::from_script(spk.as_script(), network)
                             .expect("should always be able to derive address");
                         println!(
                             "{:?} {} used:{}",

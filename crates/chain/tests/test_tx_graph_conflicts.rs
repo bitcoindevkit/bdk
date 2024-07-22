@@ -6,7 +6,7 @@ mod common;
 use std::collections::{BTreeSet, HashSet};
 
 use bdk_chain::{Balance, BlockId};
-use bitcoin::{Amount, OutPoint, Script};
+use bitcoin::{Amount, OutPoint, ScriptBuf};
 use common::*;
 
 #[allow(dead_code)]
@@ -659,7 +659,7 @@ fn test_tx_conflict_handling() {
             &local_chain,
             chain_tip,
             spk_index.outpoints().iter().cloned(),
-            |_, spk: &Script| spk_index.index_of_spk(spk).is_some(),
+            |_, spk: ScriptBuf| spk_index.index_of_spk(spk).is_some(),
         );
         assert_eq!(
             balance, scenario.exp_balance,

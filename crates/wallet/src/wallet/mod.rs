@@ -36,8 +36,8 @@ use bdk_chain::{
 };
 use bitcoin::sighash::{EcdsaSighashType, TapSighashType};
 use bitcoin::{
-    absolute, psbt, Address, Block, FeeRate, Network, OutPoint, Script, ScriptBuf, Sequence,
-    Transaction, TxOut, Txid, Witness,
+    absolute, psbt, Address, Block, FeeRate, Network, OutPoint, ScriptBuf, Sequence, Transaction,
+    TxOut, Txid, Witness,
 };
 use bitcoin::{consensus::encode::serialize, transaction, BlockHash, Psbt};
 use bitcoin::{constants::genesis_block, Amount};
@@ -363,8 +363,8 @@ impl Wallet {
         ));
         let index = create_indexer(descriptor, change_descriptor, params.lookahead)?;
 
-        let descriptor = index.get_descriptor(&KeychainKind::External).cloned();
-        let change_descriptor = index.get_descriptor(&KeychainKind::Internal).cloned();
+        let descriptor = index.get_descriptor(KeychainKind::External).cloned();
+        let change_descriptor = index.get_descriptor(KeychainKind::Internal).cloned();
         let indexed_graph = IndexedTxGraph::new(index);
         let indexed_graph_changeset = indexed_graph.initial_changeset();
 
@@ -542,7 +542,7 @@ impl Wallet {
     }
 
     /// Iterator over all keychains in this wallet
-    pub fn keychains(&self) -> impl Iterator<Item = (&KeychainKind, &ExtendedDescriptor)> {
+    pub fn keychains(&self) -> impl Iterator<Item = (KeychainKind, &ExtendedDescriptor)> {
         self.indexed_graph.index.keychains()
     }
 
@@ -558,7 +558,7 @@ impl Wallet {
         let mut spk_iter = self
             .indexed_graph
             .index
-            .unbounded_spk_iter(&keychain)
+            .unbounded_spk_iter(keychain)
             .expect("keychain must exist");
         if !spk_iter.descriptor().has_wildcard() {
             index = 0;
@@ -604,7 +604,7 @@ impl Wallet {
         let stage = &mut self.stage;
 
         let ((index, spk), index_changeset) = index
-            .reveal_next_spk(&keychain)
+            .reveal_next_spk(keychain)
             .expect("keychain must exist");
 
         stage.merge(index_changeset.into());
@@ -634,7 +634,7 @@ impl Wallet {
         let (spks, index_changeset) = self
             .indexed_graph
             .index
-            .reveal_to_target(&keychain, index)
+            .reveal_to_target(keychain, index)
             .expect("keychain must exist");
 
         self.stage.merge(index_changeset.into());
@@ -658,7 +658,7 @@ impl Wallet {
         let index = &mut self.indexed_graph.index;
 
         let ((index, spk), index_changeset) = index
-            .next_unused_spk(&keychain)
+            .next_unused_spk(keychain)
             .expect("keychain must exist");
 
         self.stage
@@ -702,23 +702,24 @@ impl Wallet {
     ) -> impl DoubleEndedIterator<Item = AddressInfo> + '_ {
         self.indexed_graph
             .index
-            .unused_keychain_spks(&keychain)
+            .unused_keychain_spks(keychain)
             .map(move |(index, spk)| AddressInfo {
                 index,
-                address: Address::from_script(spk, self.network).expect("must have address form"),
+                address: Address::from_script(spk.as_script(), self.network)
+                    .expect("must have address form"),
                 keychain,
             })
     }
 
     /// Return whether or not a `script` is part of this wallet (either internal or external)
-    pub fn is_mine(&self, script: &Script) -> bool {
+    pub fn is_mine(&self, script: ScriptBuf) -> bool {
         self.indexed_graph.index.index_of_spk(script).is_some()
     }
 
     /// Finds how the wallet derived the script pubkey `spk`.
     ///
     /// Will only return `Some(_)` if the wallet has given out the spk.
-    pub fn derivation_of_spk(&self, spk: &Script) -> Option<(KeychainKind, u32)> {
+    pub fn derivation_of_spk(&self, spk: ScriptBuf) -> Option<(KeychainKind, u32)> {
         self.indexed_graph.index.index_of_spk(spk).cloned()
     }
 
@@ -783,7 +784,7 @@ impl Wallet {
     ) -> impl Iterator<Item = Indexed<ScriptBuf>> + Clone {
         self.indexed_graph
             .index
-            .unbounded_spk_iter(&keychain)
+            .unbounded_spk_iter(keychain)
             .expect("keychain must exist")
     }
 
@@ -1060,7 +1061,7 @@ impl Wallet {
         let descriptor = self
             .indexed_graph
             .index
-            .get_descriptor(&keychain)
+            .get_descriptor(keychain)
             .expect("keychain must exist");
         *wallet_signers = SignersContainer::build(keymap, descriptor, &self.secp);
     }
@@ -1327,7 +1328,7 @@ impl Wallet {
                 return Err(CreateTxError::OutputBelowDustLimit(index));
             }
 
-            if self.is_mine(script_pubkey) {
+            if self.is_mine(script_pubkey.clone()) {
                 received += Amount::from_sat(value);
             }
 
@@ -1354,7 +1355,7 @@ impl Wallet {
                 let ((index, spk), index_changeset) = self
                     .indexed_graph
                     .index
-                    .next_unused_spk(&change_keychain)
+                    .next_unused_spk(change_keychain)
                     .expect("keychain must exist");
                 self.indexed_graph.index.mark_used(change_keychain, index);
                 self.stage.merge(index_changeset.into());
@@ -1434,7 +1435,7 @@ impl Wallet {
                 remaining_amount, ..
             } => fee_amount += remaining_amount,
             Change { amount, fee } => {
-                if self.is_mine(&drain_script) {
+                if self.is_mine(drain_script.clone()) {
                     received += Amount::from_sat(*amount);
                 }
                 fee_amount += fee;
@@ -1555,7 +1556,7 @@ impl Wallet {
                     .cloned()
                     .into();
 
-                let weighted_utxo = match txout_index.index_of_spk(&txout.script_pubkey) {
+                let weighted_utxo = match txout_index.index_of_spk(txout.script_pubkey.clone()) {
                     Some(&(keychain, derivation_index)) => {
                         let satisfaction_weight = self
                             .public_descriptor(keychain)
@@ -1600,7 +1601,7 @@ impl Wallet {
             let mut change_index = None;
             for (index, txout) in tx.output.iter().enumerate() {
                 let change_keychain = KeychainKind::Internal;
-                match txout_index.index_of_spk(&txout.script_pubkey) {
+                match txout_index.index_of_spk(txout.script_pubkey.clone()) {
                     Some((keychain, _)) if *keychain == change_keychain => {
                         change_index = Some(index)
                     }
@@ -1734,7 +1735,7 @@ impl Wallet {
     pub fn public_descriptor(&self, keychain: KeychainKind) -> &ExtendedDescriptor {
         self.indexed_graph
             .index
-            .get_descriptor(&keychain)
+            .get_descriptor(keychain)
             .expect("keychain must exist")
     }
 
@@ -1843,14 +1844,14 @@ impl Wallet {
     /// The derivation index of this wallet. It will return `None` if it has not derived any addresses.
     /// Otherwise, it will return the index of the highest address it has derived.
     pub fn derivation_index(&self, keychain: KeychainKind) -> Option<u32> {
-        self.indexed_graph.index.last_revealed_index(&keychain)
+        self.indexed_graph.index.last_revealed_index(keychain)
     }
 
     /// The index of the next address that you would get if you were to ask the wallet for a new address
     pub fn next_derivation_index(&self, keychain: KeychainKind) -> u32 {
         self.indexed_graph
             .index
-            .next_index(&keychain)
+            .next_index(keychain)
             .expect("keychain must exist")
             .0
     }
@@ -1862,7 +1863,7 @@ impl Wallet {
     pub fn cancel_tx(&mut self, tx: &Transaction) {
         let txout_index = &mut self.indexed_graph.index;
         for txout in &tx.output {
-            if let Some((keychain, index)) = txout_index.index_of_spk(&txout.script_pubkey) {
+            if let Some((keychain, index)) = txout_index.index_of_spk(txout.script_pubkey.clone()) {
                 // NOTE: unmark_used will **not** make something unused if it has actually been used
                 // by a tx in the tracker. It only removes the superficial marking.
                 txout_index.unmark_used(*keychain, *index);
@@ -1874,7 +1875,7 @@ impl Wallet {
         let &(keychain, child) = self
             .indexed_graph
             .index
-            .index_of_spk(&txout.script_pubkey)?;
+            .index_of_spk(txout.script_pubkey.clone())?;
         let descriptor = self.public_descriptor(keychain);
         descriptor.at_derivation_index(child).ok()
     }
@@ -2089,7 +2090,7 @@ impl Wallet {
         let &(keychain, child) = self
             .indexed_graph
             .index
-            .index_of_spk(&utxo.txout.script_pubkey)
+            .index_of_spk(utxo.txout.script_pubkey)
             .ok_or(CreateTxError::UnknownUtxo)?;
 
         let mut psbt_input = psbt::Input {
@@ -2135,7 +2136,7 @@ impl Wallet {
         // Try to figure out the keychain and derivation for every input and output
         for (is_input, index, out) in utxos.into_iter() {
             if let Some(&(keychain, child)) =
-                self.indexed_graph.index.index_of_spk(&out.script_pubkey)
+                self.indexed_graph.index.index_of_spk(out.script_pubkey)
             {
                 let desc = self.public_descriptor(keychain);
                 let desc = desc

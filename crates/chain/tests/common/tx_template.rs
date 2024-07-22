@@ -119,7 +119,7 @@ pub fn init_graph<'a, A: Anchor + Clone + 'a>(
                     },
                     Some(index) => TxOut {
                         value: Amount::from_sat(output.value),
-                        script_pubkey: spk_index.spk_at_index(index).unwrap().to_owned(),
+                        script_pubkey: spk_index.spk_at_index(index).unwrap(),
                     },
                 })
                 .collect(),
