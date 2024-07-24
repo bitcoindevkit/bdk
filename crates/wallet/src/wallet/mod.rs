@@ -46,6 +46,8 @@ use chain::Staged;
 use core::fmt;
 use core::mem;
 use core::ops::Deref;
+#[cfg(feature = "labels")]
+use core::str::FromStr;
 use rand_core::RngCore;
 
 use descriptor::error::Error as DescriptorError;
@@ -296,6 +298,32 @@ impl fmt::Display for ApplyBlockError {
 
 #[cfg(feature = "std")]
 impl std::error::Error for ApplyBlockError {}
+
+#[cfg(feature = "labels")]
+/// The error type when importing [`Label`]s into a [`Wallet`].
+#[derive(Debug, PartialEq)]
+pub enum LabelError {
+    /// There was a problem with the [`Label::Input`] type.
+    Input(String),
+    /// There was a problem with the [`Label::Output`] type.
+    Output(String),
+    /// There was a problem with the [`Label::Address`] type.
+    Address(String),
+}
+
+#[cfg(feature = "labels")]
+impl fmt::Display for LabelError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            LabelError::Input(l) => write!(f, "input label error: {l}"),
+            LabelError::Output(l) => write!(f, "output label error: {l}"),
+            LabelError::Address(l) => write!(f, "address label error: {l}"),
+        }
+    }
+}
+
+#[cfg(all(feature = "std", feature = "labels"))]
+impl std::error::Error for LabelError {}
 
 impl Wallet {
     /// Build a new [`Wallet`].
@@ -1570,6 +1598,8 @@ impl Wallet {
                                 is_spent: true,
                                 derivation_index,
                                 confirmation_time,
+                                #[cfg(feature = "labels")]
+                                label: None,
                             }),
                             satisfaction_weight,
                         }
@@ -2310,6 +2340,67 @@ impl Wallet {
             .batch_insert_relevant_unconfirmed(unconfirmed_txs);
         self.stage.merge(indexed_graph_changeset.into());
     }
+
+    #[cfg(feature = "labels")]
+    /// Exports the labels of all the wallet's UTXOs.
+    ///
+    /// # Note
+    ///
+    /// The labels follow the [BIP 329](https://github.com/bitcoin/bips/blob/master/bip-0329.mediawiki)
+    /// export/import format.
+    pub fn export_labels(&self) -> Vec<Option<Label>> {
+        let labels = self.list_output().map(|utxo| utxo.label).collect();
+        labels
+    }
+
+    #[cfg(feature = "labels")]
+    /// Imports labels into a wallet
+    ///
+    /// # Note
+    ///
+    /// The labels follow the [BIP 329](https://github.com/bitcoin/bips/blob/master/bip-0329.mediawiki)
+    /// export/import format.
+    pub fn import_labels(&self, labels: Vec<Label>) -> Result<(), LabelError> {
+        labels.iter().try_for_each(|label| {
+            match label {
+                Label::Input(l) => {
+                    // parse the string into an OutPoint and then match
+                    let parts = l.split(':').collect::<Vec<_>>();
+                    if parts.len() != 2 {
+                        return Err(LabelError::Input(l.to_string()));
+                    } else {
+                        let outpoint = OutPoint::new(
+                            // TODO: deal with the Error types in expect
+                            Txid::from_str(parts[0]).expect("valid txid"),
+                            u32::from_str(parts[1]).expect("valid vout"),
+                        );
+                        let local_output = self.get_utxo(outpoint);
+                        if let Some(mut local_output) = local_output {
+                            local_output.label = Some(label.clone());
+                        };
+                    }
+                }
+                Label::Output(l) => {
+                    // parse the string into an OutPoint and then match
+                    let parts = l.split(':').collect::<Vec<_>>();
+                    if parts.len() != 2 {
+                        return Err(LabelError::Input(l.to_string()));
+                    } else {
+                        let outpoint = OutPoint::new(
+                            // TODO: deal with the Error types in expect
+                            Txid::from_str(parts[0]).expect("valid txid"),
+                            u32::from_str(parts[1]).expect("valid vout"),
+                        );
+                        let local_output = self.get_utxo(outpoint);
+                        if let Some(mut local_output) = local_output {
+                            local_output.label = Some(label.clone());
+                        };
+                    }
+                }
+            }
+            Ok(())
+        })
+    }
 }
 
 /// Methods to construct sync/full-scan requests for spk-based chain sources.
@@ -2386,6 +2477,8 @@ fn new_local_utxo(
         confirmation_time: full_txo.chain_position.into(),
         keychain,
         derivation_index,
+                                #[cfg(feature = "labels")]
+        label: None,
     }
 }
 
