@@ -43,7 +43,7 @@ fn poly_mod(mut c: u64, val: u64) -> u64 {
 }
 
 /// Compute the checksum bytes of a descriptor, excludes any existing checksum in the descriptor string from the calculation
-pub fn calc_checksum_bytes(mut desc: &str) -> Result<[u8; 8], DescriptorError> {
+fn calc_checksum_bytes(mut desc: &str) -> Result<[u8; 8], DescriptorError> {
     let mut c = 1;
     let mut cls = 0;
     let mut clscount = 0;
