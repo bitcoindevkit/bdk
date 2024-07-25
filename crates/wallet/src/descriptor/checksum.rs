@@ -17,82 +17,20 @@
 use crate::descriptor::DescriptorError;
 use alloc::string::String;
 
-const INPUT_CHARSET: &[u8] = b"0123456789()[],'/*abcdefgh@:$%{}IJKLMNOPQRSTUVWXYZ&+-.;<=>?!^_|~ijklmnopqrstuvwxyzABCDEFGH`#\"\\ ";
-const CHECKSUM_CHARSET: &[u8] = b"qpzry9x8gf2tvdw0s3jn54khce6mua7l";
-
-fn poly_mod(mut c: u64, val: u64) -> u64 {
-    let c0 = c >> 35;
-    c = ((c & 0x7ffffffff) << 5) ^ val;
-    if c0 & 1 > 0 {
-        c ^= 0xf5dee51989
-    };
-    if c0 & 2 > 0 {
-        c ^= 0xa9fdca3312
-    };
-    if c0 & 4 > 0 {
-        c ^= 0x1bab10e32d
-    };
-    if c0 & 8 > 0 {
-        c ^= 0x3706b1677a
-    };
-    if c0 & 16 > 0 {
-        c ^= 0x644d626ffd
-    };
-
-    c
-}
-
-/// Compute the checksum bytes of a descriptor, excludes any existing checksum in the descriptor string from the calculation
-fn calc_checksum_bytes(mut desc: &str) -> Result<[u8; 8], DescriptorError> {
-    let mut c = 1;
-    let mut cls = 0;
-    let mut clscount = 0;
-
-    let mut original_checksum = None;
-    if let Some(split) = desc.split_once('#') {
-        desc = split.0;
-        original_checksum = Some(split.1);
-    }
-
-    for ch in desc.as_bytes() {
-        let pos = INPUT_CHARSET
-            .iter()
-            .position(|b| b == ch)
-            .ok_or(DescriptorError::InvalidDescriptorCharacter(*ch))? as u64;
-        c = poly_mod(c, pos & 31);
-        cls = cls * 3 + (pos >> 5);
-        clscount += 1;
-        if clscount == 3 {
-            c = poly_mod(c, cls);
-            cls = 0;
-            clscount = 0;
-        }
-    }
-    if clscount > 0 {
-        c = poly_mod(c, cls);
-    }
-    (0..8).for_each(|_| c = poly_mod(c, 0));
-    c ^= 1;
-
-    let mut checksum = [0_u8; 8];
-    for j in 0..8 {
-        checksum[j] = CHECKSUM_CHARSET[((c >> (5 * (7 - j))) & 31) as usize];
-    }
-
-    // if input data already had a checksum, check calculated checksum against original checksum
-    if let Some(original_checksum) = original_checksum {
-        if original_checksum.as_bytes() != checksum {
-            return Err(DescriptorError::InvalidDescriptorChecksum);
-        }
-    }
-
-    Ok(checksum)
-}
+use miniscript::descriptor::checksum::desc_checksum;
 
 /// Compute the checksum of a descriptor, excludes any existing checksum in the descriptor string from the calculation
 pub fn calc_checksum(desc: &str) -> Result<String, DescriptorError> {
-    // unsafe is okay here as the checksum only uses bytes in `CHECKSUM_CHARSET`
-    calc_checksum_bytes(desc).map(|b| unsafe { String::from_utf8_unchecked(b.to_vec()) })
+    if let Some(split) = desc.split_once('#') {
+        let og_checksum = split.1;
+        let checksum = desc_checksum(split.0)?;
+        if og_checksum != checksum {
+            return Err(DescriptorError::InvalidDescriptorChecksum);
+        }
+        Ok(checksum)
+    } else {
+        Ok(desc_checksum(desc)?)
+    }
 }
 
 #[cfg(test)]
@@ -141,7 +79,7 @@ mod test {
 
         assert_matches!(
             calc_checksum(&invalid_desc),
-            Err(DescriptorError::InvalidDescriptorCharacter(invalid_char)) if invalid_char == sparkle_heart.as_bytes()[0]
+            Err(DescriptorError::Miniscript(miniscript::Error::BadDescriptor(e))) if e == format!("Invalid character in checksum: '{}'", sparkle_heart)
         );
     }
 }
