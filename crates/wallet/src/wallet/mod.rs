@@ -79,7 +79,7 @@ use utils::{check_nsequence_rbf, After, Older, SecpCtx};
 
 use crate::descriptor::policy::BuildSatisfaction;
 use crate::descriptor::{
-    self, calc_checksum, DerivedDescriptor, DescriptorMeta, ExtendedDescriptor, ExtractPolicy,
+    self, DerivedDescriptor, DescriptorMeta, ExtendedDescriptor, ExtractPolicy,
     IntoWalletDescriptor, Policy, XKeyUtils,
 };
 use crate::psbt::PsbtUtils;
@@ -2360,15 +2360,13 @@ where
         .into_wallet_descriptor(secp, network)?
         .0
         .to_string();
-    let mut wallet_name = calc_checksum(&descriptor[..descriptor.find('#').unwrap()])?;
+    let mut wallet_name = descriptor.split_once('#').unwrap().1.to_string();
     if let Some(change_descriptor) = change_descriptor {
         let change_descriptor = change_descriptor
             .into_wallet_descriptor(secp, network)?
             .0
             .to_string();
-        wallet_name.push_str(
-            calc_checksum(&change_descriptor[..change_descriptor.find('#').unwrap()])?.as_str(),
-        );
+        wallet_name.push_str(change_descriptor.split_once('#').unwrap().1);
     }
 
     Ok(wallet_name)
