@@ -19,7 +19,11 @@ const INTERNAL_DESC: &str = "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7
 const ESPLORA_URL: &str = "http://signet.bitcoindevkit.net";
 
 fn main() -> Result<(), anyhow::Error> {
-    let mut db = Store::<bdk_wallet::ChangeSet>::open_or_create_new(DB_MAGIC.as_bytes(), DB_PATH)?;
+    let mut db =
+        Store::<bdk_wallet::ChangeSet, bdk_wallet::VersionedChangeSet>::open_or_create_new(
+            DB_MAGIC.as_bytes(),
+            DB_PATH,
+        )?;
 
     let wallet_opt = Wallet::load()
         .descriptors(EXTERNAL_DESC, INTERNAL_DESC)
