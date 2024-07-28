@@ -11,18 +11,26 @@ use std::{
 
 /// Persists an append-only list of changesets (`C`) to a single file.
 #[derive(Debug)]
-pub struct Store<C>
+pub struct Store<C, V = C>
 where
     C: Sync + Send,
 {
     magic_len: usize,
     db_file: File,
-    marker: PhantomData<C>,
+    marker: PhantomData<(C, V)>,
 }
 
-impl<C> Store<C>
+impl<C, V> Store<C, V>
 where
-    C: Merge
+    C: Into<V>
+        + Merge
+        + Clone
+        + Default
+        + serde::de::DeserializeOwned
+        + core::marker::Send
+        + core::marker::Sync,
+    V: Into<C>
+        + Default
         + serde::Serialize
         + serde::de::DeserializeOwned
         + core::marker::Send
@@ -118,7 +126,7 @@ where
     /// **WARNING**: This method changes the write position in the underlying file. You should
     /// always iterate over all entries until `None` is returned if you want your next write to go
     /// at the end; otherwise, you will write over existing entries.
-    pub fn iter_changesets(&mut self) -> EntryIter<C> {
+    pub fn iter_changesets(&mut self) -> EntryIter<V> {
         EntryIter::new(self.magic_len as u64, &mut self.db_file)
     }
 
@@ -135,23 +143,32 @@ where
     /// **WARNING**: This method changes the write position of the underlying file. The next
     /// changeset will be written over the erroring entry (or the end of the file if none existed).
     pub fn aggregate_changesets(&mut self) -> Result<Option<C>, AggregateChangesetsError<C>> {
-        let mut changeset = Option::<C>::None;
-        for next_changeset in self.iter_changesets() {
-            let next_changeset = match next_changeset {
-                Ok(next_changeset) => next_changeset,
-                Err(iter_error) => {
-                    return Err(AggregateChangesetsError {
-                        changeset,
-                        iter_error,
-                    })
+        let changeset_aggregator =
+            |mut aggregated_changeset: Option<C>, next_changeset| match next_changeset {
+                Ok(next_changeset) => {
+                    match &mut aggregated_changeset {
+                        Some(aggregated_changeset) => aggregated_changeset.merge(next_changeset),
+                        aggregated_changeset => *aggregated_changeset = Some(next_changeset),
+                    }
+                    Ok(aggregated_changeset)
                 }
+                Err(iter_error) => Err(AggregateChangesetsError {
+                    changeset: aggregated_changeset,
+                    iter_error,
+                }),
             };
-            match &mut changeset {
-                Some(changeset) => changeset.merge(next_changeset),
-                changeset => *changeset = Some(next_changeset),
-            }
-        }
-        Ok(changeset)
+        // Prepare C changeset deserializer
+        let unversioned_parsed_changeset =
+            EntryIter::<C>::new(self.magic_len as u64, &mut self.db_file)
+                .try_fold(Option::<C>::None, changeset_aggregator);
+
+        // But try first versioned V changeset deserializer and if it fails, proceed with C
+        // unversioned deserializer
+        self.iter_changesets()
+            .try_fold(Option::<C>::None, |acc, x| {
+                changeset_aggregator(acc, x.map(|v| v.into()))
+            })
+            .or(unversioned_parsed_changeset)
     }
 
     /// Append a new changeset to the file and truncate the file to the end of the appended
@@ -166,7 +183,7 @@ where
         }
 
         bincode_options()
-            .serialize_into(&mut self.db_file, changeset)
+            .serialize_into(&mut self.db_file, &changeset.clone().into())
             .map_err(|e| match *e {
                 bincode::ErrorKind::Io(error) => error,
                 unexpected_err => panic!("unexpected bincode error: {}", unexpected_err),
