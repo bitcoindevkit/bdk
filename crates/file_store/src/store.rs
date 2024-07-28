@@ -235,6 +235,82 @@ mod test {
 
     type TestChangeSet = BTreeSet<String>;
 
+    #[derive(PartialEq, Debug, Default, Clone, serde::Deserialize, serde::Serialize)]
+    struct TestChangeSetV1 {
+        field_a: BTreeSet<String>,
+    }
+
+    impl Merge for TestChangeSetV1 {
+        fn merge(&mut self, other: Self) {
+            self.field_a.extend(other.field_a);
+        }
+
+        fn is_empty(&self) -> bool {
+            self.field_a.is_empty()
+        }
+    }
+
+    #[derive(Debug, Default, Clone, serde::Deserialize, serde::Serialize)]
+    struct TestChangeSetV2 {
+        field_a: BTreeSet<String>,
+        field_b: Option<BTreeSet<String>>,
+    }
+
+    impl Merge for TestChangeSetV2 {
+        fn merge(&mut self, other: Self) {
+            self.field_a.extend(other.field_a);
+            if let Some(ref mut field_b) = self.field_b {
+                if let Some(other_field_b) = other.field_b {
+                    field_b.extend(other_field_b)
+                }
+            }
+        }
+
+        fn is_empty(&self) -> bool {
+            if self.field_b.is_none() {
+                false
+            } else {
+                self.field_a.is_empty()
+            }
+        }
+    }
+
+    #[derive(serde::Serialize, serde::Deserialize)]
+    enum VersionedTestChangeSet {
+        V1(TestChangeSetV1),
+    }
+
+    impl Default for VersionedTestChangeSet {
+        fn default() -> Self {
+            VersionedTestChangeSet::V1(TestChangeSetV1::default())
+        }
+    }
+
+    impl From<VersionedTestChangeSet> for TestChangeSetV1 {
+        fn from(versioned_change_set: VersionedTestChangeSet) -> Self {
+            match versioned_change_set {
+                VersionedTestChangeSet::V1(changeset) => changeset,
+            }
+        }
+    }
+
+    impl From<TestChangeSetV1> for VersionedTestChangeSet {
+        fn from(test_change_set: TestChangeSetV1) -> Self {
+            VersionedTestChangeSet::V1(test_change_set)
+        }
+    }
+    impl From<VersionedTestChangeSet> for TestChangeSetV2 {
+        fn from(_: VersionedTestChangeSet) -> Self {
+            Self::default()
+        }
+    }
+
+    impl From<TestChangeSetV2> for VersionedTestChangeSet {
+        fn from(_: TestChangeSetV2) -> Self {
+            VersionedTestChangeSet::default()
+        }
+    }
+
     /// Check behavior of [`Store::create_new`] and [`Store::open`].
     #[test]
     fn construct_store() {
@@ -455,6 +531,129 @@ mod test {
                 .expect("must aggregate changesets")
                 .unwrap_or_default();
             assert_eq!(aggregation, exp_aggregation);
+        }
+    }
+
+    #[test]
+    fn serialize_with_version() {
+        let temp_dir = tempfile::tempdir().unwrap();
+
+        let changesets = (0..20)
+            .map(|n| TestChangeSetV1 {
+                field_a: BTreeSet::from([format!("{}", n)]),
+            })
+            .collect::<Vec<_>>();
+        let last_changeset = TestChangeSetV1 {
+            field_a: BTreeSet::from(["last".into()]),
+        };
+
+        for read_count in 0..changesets.len() {
+            let file_path = temp_dir.path().join(format!("{}.dat", read_count));
+            println!("Test file: {:?}", file_path);
+
+            // First, we create the file with all the versioned changesets!
+            let mut db = Store::<TestChangeSetV1, VersionedTestChangeSet>::create_new(
+                &TEST_MAGIC_BYTES,
+                &file_path,
+            )
+            .unwrap();
+            for changeset in &changesets {
+                db.append_changeset(changeset).unwrap();
+            }
+            drop(db);
+
+            // We re-open the file and read `read_count` number of versioned changesets.
+            let mut db = Store::<TestChangeSetV1, VersionedTestChangeSet>::open(
+                &TEST_MAGIC_BYTES,
+                &file_path,
+            )
+            .unwrap();
+            // Merge all versioned changesets in the aggregated correct changeset
+            let mut exp_aggregation = db
+                .iter_changesets()
+                .take(read_count)
+                .map(|r| r.expect("must read valid changeset"))
+                .fold(TestChangeSetV1::default(), |mut acc, v| {
+                    Merge::merge(&mut acc, v.into());
+                    acc
+                });
+            // We write after a short read.
+            db.append_changeset(&last_changeset)
+                .expect("last write must succeed");
+            Merge::merge(&mut exp_aggregation, last_changeset.clone());
+            drop(db);
+
+            // We open the file again, with a versioned serialization, and check whether aggregate changeset is expected.
+            let aggregation = Store::<TestChangeSetV1, VersionedTestChangeSet>::open(
+                &TEST_MAGIC_BYTES,
+                &file_path,
+            )
+            .unwrap()
+            .aggregate_changesets()
+            .expect("must aggregate changesets")
+            .unwrap_or_default();
+            assert_eq!(aggregation, exp_aggregation);
+        }
+    }
+
+    #[test]
+    fn serialize_with_version_2_deserialize_with_version_1_fails() {
+        let temp_dir = tempfile::tempdir().unwrap();
+
+        let changesets = (0..20)
+            .map(|n| TestChangeSetV2 {
+                field_a: BTreeSet::from([format!("{}", n)]),
+                field_b: None,
+            })
+            .collect::<Vec<_>>();
+        let last_changeset = TestChangeSetV2 {
+            field_a: BTreeSet::from(["last".into()]),
+            field_b: None,
+        };
+
+        for read_count in 0..changesets.len() {
+            let file_path = temp_dir.path().join(format!("{}.dat", read_count));
+            println!("Test file: {:?}", file_path);
+
+            // First, we create the file with all the versioned changesets!
+            let mut db = Store::<TestChangeSetV2, VersionedTestChangeSet>::create_new(
+                &TEST_MAGIC_BYTES,
+                &file_path,
+            )
+            .unwrap();
+            for changeset in &changesets {
+                db.append_changeset(changeset).unwrap();
+            }
+            drop(db);
+
+            // We re-open the file and read `read_count` number of versioned changesets.
+            let mut db = Store::<TestChangeSetV2, VersionedTestChangeSet>::open(
+                &TEST_MAGIC_BYTES,
+                &file_path,
+            )
+            .unwrap();
+            // Merge all versioned changesets in the aggregated correct changeset
+            let mut exp_aggregation = db
+                .iter_changesets()
+                .take(read_count)
+                .map(|r| r.expect("must read valid changeset"))
+                .fold(TestChangeSetV2::default(), |mut acc, v| {
+                    Merge::merge(&mut acc, v.into());
+                    acc
+                });
+            // We write after a short read.
+            db.append_changeset(&last_changeset)
+                .expect("last write must succeed");
+            Merge::merge(&mut exp_aggregation, last_changeset.clone());
+            drop(db);
+
+            // We open the file again without versioned serialization and check whether aggregate changeset still is the expected.
+            let aggregation = Store::<TestChangeSetV1>::open(&TEST_MAGIC_BYTES, &file_path)
+                .unwrap()
+                .aggregate_changesets()
+                .expect("must aggregate changesets")
+                .unwrap_or_default();
+            assert_ne!(aggregation.field_a, exp_aggregation.field_a);
         }
     }
 }
