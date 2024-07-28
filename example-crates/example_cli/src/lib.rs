@@ -61,6 +61,31 @@ pub struct ChangeSet {
     pub indexer: keychain_txout::ChangeSet,
 }
 
+#[derive(serde::Deserialize, serde::Serialize)]
+pub enum VersionedChangeSet {
+    V1(ChangeSet),
+}
+
+impl Default for VersionedChangeSet {
+    fn default() -> Self {
+        Self::V1(ChangeSet::default())
+    }
+}
+
+impl From<VersionedChangeSet> for ChangeSet {
+    fn from(versioned_change_set: VersionedChangeSet) -> Self {
+        match versioned_change_set {
+            VersionedChangeSet::V1(changeset) => changeset,
+        }
+    }
+}
+
+impl From<ChangeSet> for VersionedChangeSet {
+    fn from(changeset: ChangeSet) -> Self {
+        VersionedChangeSet::V1(changeset)
+    }
+}
+
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
 #[clap(propagate_version = true)]
@@ -450,7 +475,7 @@ pub fn planned_utxos<O: ChainOracle>(
 pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
     graph: &Mutex<KeychainTxGraph>,
     chain: &Mutex<LocalChain>,
-    db: &Mutex<Store<ChangeSet>>,
+    db: &Mutex<Store<ChangeSet, VersionedChangeSet>>,
     network: Network,
     broadcast: impl FnOnce(S, &Transaction) -> anyhow::Result<()>,
     cmd: Commands<CS, S>,
@@ -786,7 +811,7 @@ pub struct Init<CS: clap::Subcommand, S: clap::Args> {
     /// Local chain
     pub chain: Mutex<LocalChain>,
     /// Database
-    pub db: Mutex<Store<ChangeSet>>,
+    pub db: Mutex<Store<ChangeSet, VersionedChangeSet>>,
     /// Network
     pub network: Network,
 }
@@ -805,8 +830,8 @@ pub fn init_or_load<CS: clap::Subcommand, S: clap::Args>(
         Commands::Generate { network } => generate_bip86_helper(network).map(|_| None),
         // try load
         _ => {
-            let mut db =
-                Store::<ChangeSet>::open(db_magic, db_path).context("could not open file store")?;
+            let mut db = Store::<ChangeSet, VersionedChangeSet>::open(db_magic, db_path)
+                .context("could not open file store")?;
             let changeset = db.aggregate_changesets()?.expect("db must not be empty");
 
             let network = changeset.network.expect("changeset network");
@@ -882,7 +907,7 @@ where
             LocalChain::from_genesis_hash(constants::genesis_block(network).block_hash());
         changeset.network = Some(network);
         changeset.local_chain = chain_changeset;
-        let mut db = Store::<ChangeSet>::create_new(db_magic, db_path)?;
+        let mut db = Store::<ChangeSet, VersionedChangeSet>::create_new(db_magic, db_path)?;
         db.append_changeset(&changeset)?;
         println!("New database {db_path}");
     }
